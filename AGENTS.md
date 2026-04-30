@@ -2,7 +2,6 @@
 
 This is a Go/raylib dungeon crawler prototype. The runtime package is `internal/app`, with `main.go` only calling `app.Run()`.
 
-
 ## Commands
 
 - Test: `go test ./...`
@@ -69,5 +68,4 @@ This workspace is Windows-first. Prefer bash if it is installed, but do not bloc
 
 ## Caution
 
-- There is no Git repo metadata in this folder at the moment, so `git diff` will not work here.
 - Avoid broad refactors while tuning gameplay feel. Most requests are visual/combat iteration and should stay scoped.

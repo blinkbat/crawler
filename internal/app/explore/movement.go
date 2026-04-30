@@ -37,10 +37,10 @@ func Update(g *core.GameState, m core.GameMap) {
 
 func updateMenu(g *core.GameState, m core.GameMap) {
 	if rl.IsKeyPressed(rl.KeyUp) || rl.IsKeyPressed(rl.KeyW) {
-		g.MenuIndex = (g.MenuIndex + 1) % 2
+		g.MenuIndex = wrapMenuIndex(g.MenuIndex-1, 2)
 	}
 	if rl.IsKeyPressed(rl.KeyDown) || rl.IsKeyPressed(rl.KeyS) {
-		g.MenuIndex = (g.MenuIndex + 1) % 2
+		g.MenuIndex = wrapMenuIndex(g.MenuIndex+1, 2)
 	}
 	if rl.IsKeyPressed(rl.KeyR) {
 		restartGame(g, m)
@@ -58,6 +58,17 @@ func updateMenu(g *core.GameState, m core.GameMap) {
 			g.Quit = true
 		}
 	}
+}
+
+func wrapMenuIndex(index, count int) int {
+	if count <= 0 {
+		return 0
+	}
+	index %= count
+	if index < 0 {
+		index += count
+	}
+	return index
 }
 
 func restartGame(g *core.GameState, m core.GameMap) {

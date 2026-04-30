@@ -69,22 +69,6 @@ func livingPartyCount(party []core.PartyMember) int {
 	return count
 }
 
-func totalPartyHP(party []core.PartyMember) int {
-	total := 0
-	for _, member := range party {
-		total += member.HP
-	}
-	return total
-}
-
-func maxPartyHP(party []core.PartyMember) int {
-	total := 0
-	for _, member := range party {
-		total += member.MaxHP
-	}
-	return total
-}
-
 func PartyMemberAlive(party []core.PartyMember, index int) bool {
 	return index >= 0 && index < len(party) && party[index].HP > 0
 }

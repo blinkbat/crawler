@@ -90,18 +90,14 @@ func Update(g *core.GameState, dt float32) {
 		}
 	case core.BattleLost:
 		if confirmPressed() {
-			g.Player = core.NewPlayer(core.StartTileX, core.StartTileZ, core.StartFacing)
-			g.Party = core.NewParty()
-			g.Battle.EnemyIndex = -1
-			g.Battle.EnemyGroup = nil
-			g.Battle.CurrentParty = 0
-			g.Battle.ActionMode = core.ActionMenu
-			g.Battle.PendingSkill = core.SkillNone
-			g.Battle.PartyTarget = 0
-			g.Battle.Phase = core.BattleNone
-			setBattleMessage(g, "You catch your breath.")
+			recoverFromLoss(g)
 		}
 	}
+}
+
+func recoverFromLoss(g *core.GameState) {
+	core.ResetGameState(g)
+	setBattleMessage(g, "You catch your breath.")
 }
 
 func updatePlayerBattle(g *core.GameState) {

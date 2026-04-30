@@ -26,8 +26,10 @@ var DungeonLayout = []string{
 func NewGameMap(rows []string) GameMap {
 	height := len(rows)
 	width := 0
-	if height > 0 {
-		width = len(rows[0])
+	for _, row := range rows {
+		if len(row) > width {
+			width = len(row)
+		}
 	}
 	return GameMap{Width: width, Height: height, Rows: rows}
 }
@@ -68,7 +70,7 @@ func nearestOpenTile(m GameMap, wantX, wantZ int, occupied map[[2]int]bool) (int
 }
 
 func (m GameMap) WallAt(x, z int) bool {
-	if z < 0 || z >= m.Height || x < 0 || x >= m.Width {
+	if z < 0 || z >= m.Height || x < 0 || x >= len(m.Rows[z]) {
 		return true
 	}
 	return m.Rows[z][x] == '#'

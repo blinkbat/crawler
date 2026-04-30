@@ -31,6 +31,7 @@ type Animation struct {
 }
 
 type GameState struct {
+	Map       GameMap
 	Player    Player
 	Party     []PartyMember
 	Enemies   []Enemy

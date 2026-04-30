@@ -7,8 +7,11 @@ import (
 )
 
 func updateActionMenu(g *core.GameState) {
-	if upPressed() || downPressed() {
-		g.Battle.MenuIndex = (g.Battle.MenuIndex + 1) % 2
+	if upPressed() {
+		g.Battle.MenuIndex = wrapMenuIndex(g.Battle.MenuIndex-1, 2)
+	}
+	if downPressed() {
+		g.Battle.MenuIndex = wrapMenuIndex(g.Battle.MenuIndex+1, 2)
 	}
 	if backPressed() {
 		setBattleStatus(g, "Choose an action.")
@@ -125,14 +128,41 @@ func cycleBattleTarget(g *core.GameState, delta int) {
 }
 
 func cyclePartyTarget(g *core.GameState, delta int) {
-	if len(g.Party) == 0 {
+	living := livingPartyTargets(g.Party)
+	if len(living) == 0 {
 		return
 	}
-	g.Battle.PartyTarget = (g.Battle.PartyTarget + delta) % len(g.Party)
-	if g.Battle.PartyTarget < 0 {
-		g.Battle.PartyTarget += len(g.Party)
+	current := 0
+	for i, index := range living {
+		if index == g.Battle.PartyTarget {
+			current = i
+			break
+		}
 	}
+	next := wrapMenuIndex(current+delta, len(living))
+	g.Battle.PartyTarget = living[next]
 	setBattleStatus(g, fmt.Sprintf("Targeting %s.", g.Party[g.Battle.PartyTarget].Name))
+}
+
+func livingPartyTargets(party []core.PartyMember) []int {
+	living := make([]int, 0, len(party))
+	for i := range party {
+		if party[i].HP > 0 {
+			living = append(living, i)
+		}
+	}
+	return living
+}
+
+func wrapMenuIndex(index, count int) int {
+	if count <= 0 {
+		return 0
+	}
+	index %= count
+	if index < 0 {
+		index += count
+	}
+	return index
 }
 
 func validLivingEnemy(g *core.GameState, index int) bool {

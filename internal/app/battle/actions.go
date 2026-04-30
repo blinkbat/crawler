@@ -58,6 +58,10 @@ func usePrayer(g *core.GameState) {
 		setBattleStatus(g, "No ally selected.")
 		return
 	}
+	if g.Party[g.Battle.PartyTarget].HP <= 0 {
+		setBattleStatus(g, "Prayer cannot revive.")
+		return
+	}
 	actor.MP -= cost
 	target := &g.Party[g.Battle.PartyTarget]
 	heal := 10
