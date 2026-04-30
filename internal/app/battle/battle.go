@@ -3,7 +3,6 @@ package battle
 import (
 	"crawler/internal/app/core"
 	"crawler/internal/app/input"
-	"fmt"
 )
 
 func Start(g *core.GameState, enemyIndex int) {
@@ -19,11 +18,7 @@ func Start(g *core.GameState, enemyIndex int) {
 	g.Battle.Timer = 0
 	g.Battle.Splash = 1.15
 	g.Battle.Log = nil
-	if len(group) == 1 {
-		setBattleMessage(g, "A rat blocks the way.")
-	} else {
-		setBattleMessage(g, fmt.Sprintf("%d rats close in.", len(group)))
-	}
+	setBattleMessage(g, core.BattleEncounterMessage(*g))
 }
 
 func Update(g *core.GameState, dt float32) {
@@ -36,7 +31,7 @@ func Update(g *core.GameState, dt float32) {
 		g.Battle.Phase = core.BattleNone
 		return
 	}
-	if g.Battle.Phase != core.BattleWon && core.LivingPartyCount(g.Party) == 0 {
+	if g.Battle.Phase != core.BattleWon && g.Battle.Phase != core.BattleLost && core.LivingPartyCount(g.Party) == 0 {
 		loseBattle(g, "The party is driven back. Press Enter to recover.")
 		return
 	}
@@ -60,22 +55,14 @@ func Update(g *core.GameState, dt float32) {
 			winBattle(g, "The fire finishes them.")
 			return
 		}
-		hits := resolveRatAttacks(g)
+		hits := resolveEnemyAttacks(g)
 		if core.LivingPartyCount(g.Party) == 0 {
-			loseBattle(g, "The rats drive the party back. Press Enter to recover.")
+			loseBattle(g, core.BattleLossMessage(*g))
 			return
 		}
 		g.Battle.Phase = core.BattlePlayer
 		beginPartyTurn(g, core.FirstLivingPartyMember(g.Party))
-		if burns > 0 && hits > 1 {
-			setBattleMessage(g, fmt.Sprintf("Flames bite. %d rats snap at the party.", hits))
-		} else if burns > 0 && hits == 1 {
-			setBattleMessage(g, "Flames bite. A rat snaps at the party.")
-		} else if hits == 1 {
-			setBattleMessage(g, "A rat snaps at the party.")
-		} else {
-			setBattleMessage(g, fmt.Sprintf("%d rats snap at the party.", hits))
-		}
+		setBattleMessage(g, core.BattleEnemyAttackMessage(*g, hits, burns))
 	case core.BattleWon:
 		g.Battle.Timer -= dt
 		if g.Battle.Timer <= 0 && !battleDeathFadeActive(g) {

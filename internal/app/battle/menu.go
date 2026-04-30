@@ -107,16 +107,9 @@ func cycleBattleTarget(g *core.GameState, delta int) {
 	if len(living) == 0 {
 		return
 	}
-	current := 0
-	for i, index := range living {
-		if index == g.Battle.EnemyIndex {
-			current = i
-			break
-		}
-	}
-	next := core.WrapIndex(current+delta, len(living))
+	next := cycleTarget(g.Battle.EnemyIndex, living, delta)
 	g.Battle.EnemyIndex = living[next]
-	setBattleStatus(g, fmt.Sprintf("Targeting rat %d of %d.", next+1, len(living)))
+	setBattleStatus(g, core.BattleEnemyTargetStatus(*g, next+1, len(living)))
 }
 
 func cyclePartyTarget(g *core.GameState, delta int) {
@@ -124,14 +117,18 @@ func cyclePartyTarget(g *core.GameState, delta int) {
 	if len(living) == 0 {
 		return
 	}
-	current := 0
-	for i, index := range living {
-		if index == g.Battle.PartyTarget {
-			current = i
+	next := cycleTarget(g.Battle.PartyTarget, living, delta)
+	g.Battle.PartyTarget = living[next]
+	setBattleStatus(g, fmt.Sprintf("Targeting %s.", g.Party[g.Battle.PartyTarget].Name))
+}
+
+func cycleTarget(current int, targets []int, delta int) int {
+	currentSlot := 0
+	for i, target := range targets {
+		if target == current {
+			currentSlot = i
 			break
 		}
 	}
-	next := core.WrapIndex(current+delta, len(living))
-	g.Battle.PartyTarget = living[next]
-	setBattleStatus(g, fmt.Sprintf("Targeting %s.", g.Party[g.Battle.PartyTarget].Name))
+	return core.WrapIndex(currentSlot+delta, len(targets))
 }

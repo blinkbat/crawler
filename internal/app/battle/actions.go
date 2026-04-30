@@ -13,9 +13,10 @@ func useAttack(g *core.GameState) {
 	attacker := &g.Party[g.Battle.CurrentParty]
 	damage := attacker.Attack
 	attacker.AttackBump = core.BumpDuration
+	target := g.Enemies[g.Battle.EnemyIndex]
 	defeated := damageEnemy(g, g.Battle.EnemyIndex, damage)
 	if defeated {
-		setBattleMessage(g, fmt.Sprintf("%s drops a rat.", attacker.Name))
+		setBattleMessage(g, fmt.Sprintf("%s drops a %s.", attacker.Name, core.EnemySingularNoun(target)))
 	} else {
 		setBattleMessage(g, fmt.Sprintf("%s hits for %d.", attacker.Name, damage))
 	}
@@ -31,12 +32,13 @@ func useSwipe(g *core.GameState) {
 	}
 	actor.MP -= cost
 	actor.AttackBump = core.BumpDuration
+	effect := core.SkillEffectFor(core.SkillSwipe)
 	hits := 0
 	for _, index := range g.Battle.EnemyGroup {
 		if !core.EnemyAlive(g.Enemies, index) {
 			continue
 		}
-		damageEnemy(g, index, 3)
+		damageEnemy(g, index, effect.Damage)
 		hits++
 	}
 	if hits == 0 {
@@ -64,7 +66,7 @@ func usePrayer(g *core.GameState) {
 	}
 	actor.MP -= cost
 	target := &g.Party[g.Battle.PartyTarget]
-	heal := 10
+	heal := core.SkillEffectFor(core.SkillPrayer).Heal
 	target.HP += heal
 	if target.HP > target.MaxHP {
 		target.HP = target.MaxHP
@@ -88,7 +90,8 @@ func useSteal(g *core.GameState) {
 		finishPartyAction(g)
 		return
 	}
-	if core.GameRNG.Float64() < 0.7 {
+	effect := core.SkillEffectFor(core.SkillSteal)
+	if core.GameRNG.Float64() < effect.StealChance {
 		item := enemy.Item
 		enemy.Item = ""
 		setBattleMessage(g, fmt.Sprintf("%s steals %s.", actor.Name, item))
@@ -111,18 +114,20 @@ func useFirebolt(g *core.GameState) {
 	}
 	actor.MP -= cost
 	actor.AttackBump = core.BumpDuration
-	damage := 6
+	effect := core.SkillEffectFor(core.SkillFirebolt)
+	damage := effect.Damage
+	target := g.Enemies[g.Battle.EnemyIndex]
 	defeated := damageEnemy(g, g.Battle.EnemyIndex, damage)
 	enemy := &g.Enemies[g.Battle.EnemyIndex]
 	burned := false
-	if !defeated && enemy.BurnTurns <= 0 && core.GameRNG.Float64() < 0.82 {
-		enemy.BurnTurns = 3 + core.GameRNG.Intn(3)
+	if !defeated && enemy.BurnTurns <= 0 && core.GameRNG.Float64() < effect.BurnChance {
+		enemy.BurnTurns = effect.BurnDuration()
 		burned = true
 	}
 	if defeated {
-		setBattleMessage(g, fmt.Sprintf("%s's Firebolt drops the rat.", actor.Name))
+		setBattleMessage(g, fmt.Sprintf("%s's Firebolt drops the %s.", actor.Name, core.EnemySingularNoun(target)))
 	} else if burned {
-		setBattleMessage(g, fmt.Sprintf("%s scorches the rat for %d. Burning!", actor.Name, damage))
+		setBattleMessage(g, fmt.Sprintf("%s scorches the %s for %d. Burning!", actor.Name, core.EnemySingularNoun(target), damage))
 	} else if enemy.BurnTurns > 0 {
 		setBattleMessage(g, fmt.Sprintf("%s hits for %d. Burn is already active.", actor.Name, damage))
 	} else {
@@ -133,7 +138,7 @@ func useFirebolt(g *core.GameState) {
 
 func finishPartyAction(g *core.GameState) {
 	if core.LivingBattleCount(g) == 0 {
-		winBattle(g, "The last rat falls.")
+		winBattle(g, core.LastBattleEnemyFallsMessage(*g))
 		return
 	}
 	if next := core.NextLivingBattleEnemy(g); next >= 0 && !core.EnemyAlive(g.Enemies, g.Battle.EnemyIndex) {
@@ -144,7 +149,7 @@ func finishPartyAction(g *core.GameState) {
 		return
 	}
 	g.Battle.Phase = core.BattleEnemy
-	g.Battle.Timer = 0.45
+	g.Battle.Timer = core.EnemyTurnDelay
 	g.Battle.ActionMode = core.ActionMenu
 	g.Battle.PendingSkill = core.SkillNone
 }
@@ -173,7 +178,7 @@ func resolveBurns(g *core.GameState) int {
 			continue
 		}
 		g.Enemies[enemyIndex].BurnTurns--
-		damageEnemy(g, enemyIndex, 2)
+		damageEnemy(g, enemyIndex, core.BurnTickDamage)
 		hits++
 	}
 	if next := core.NextLivingBattleEnemy(g); next >= 0 && !core.EnemyAlive(g.Enemies, g.Battle.EnemyIndex) {
@@ -182,7 +187,7 @@ func resolveBurns(g *core.GameState) int {
 	return hits
 }
 
-func resolveRatAttacks(g *core.GameState) int {
+func resolveEnemyAttacks(g *core.GameState) int {
 	hits := 0
 	targetCursor := 0
 	for _, enemyIndex := range g.Battle.EnemyGroup {
@@ -198,7 +203,7 @@ func resolveRatAttacks(g *core.GameState) int {
 		}
 		g.Enemies[enemyIndex].AttackBump = core.BumpDuration
 		g.Party[target].DamageFlash = core.FlashDuration
-		g.Party[target].HP -= 2
+		g.Party[target].HP -= core.EnemyInfoFor(g.Enemies[enemyIndex]).AttackDamage
 		if g.Party[target].HP < 0 {
 			g.Party[target].HP = 0
 		}

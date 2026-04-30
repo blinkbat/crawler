@@ -19,9 +19,19 @@ type PartyClassDefinition struct {
 }
 
 type skillDefinition struct {
-	Skill int
-	Name  string
-	Cost  int
+	Skill  int
+	Name   string
+	Cost   int
+	Effect SkillEffect
+}
+
+type SkillEffect struct {
+	Damage       int
+	Heal         int
+	StealChance  float64
+	BurnChance   float64
+	BurnMinTurns int
+	BurnMaxTurns int
 }
 
 var partyClassDefinitions = []PartyClassDefinition{
@@ -32,10 +42,10 @@ var partyClassDefinitions = []PartyClassDefinition{
 }
 
 var skillDefinitions = []skillDefinition{
-	{Skill: SkillSwipe, Name: "Swipe", Cost: 3},
-	{Skill: SkillPrayer, Name: "Prayer", Cost: 5},
-	{Skill: SkillSteal, Name: "Steal", Cost: 0},
-	{Skill: SkillFirebolt, Name: "Firebolt", Cost: 6},
+	{Skill: SkillSwipe, Name: "Swipe", Cost: 3, Effect: SkillEffect{Damage: 3}},
+	{Skill: SkillPrayer, Name: "Prayer", Cost: 5, Effect: SkillEffect{Heal: 10}},
+	{Skill: SkillSteal, Name: "Steal", Cost: 0, Effect: SkillEffect{StealChance: 0.7}},
+	{Skill: SkillFirebolt, Name: "Firebolt", Cost: 6, Effect: SkillEffect{Damage: 6, BurnChance: 0.82, BurnMinTurns: 3, BurnMaxTurns: 5}},
 }
 
 func PartyClasses() []PartyClassDefinition {
@@ -81,4 +91,18 @@ func SkillCost(skill int) int {
 		return def.Cost
 	}
 	return 0
+}
+
+func SkillEffectFor(skill int) SkillEffect {
+	if def, ok := skillInfo(skill); ok {
+		return def.Effect
+	}
+	return SkillEffect{}
+}
+
+func (effect SkillEffect) BurnDuration() int {
+	if effect.BurnMaxTurns <= effect.BurnMinTurns {
+		return effect.BurnMinTurns
+	}
+	return effect.BurnMinTurns + GameRNG.Intn(effect.BurnMaxTurns-effect.BurnMinTurns+1)
 }

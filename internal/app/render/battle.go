@@ -15,20 +15,21 @@ func drawBattleOverlay(g core.GameState, assets Resources) {
 	drawRoundedRect(panelX, panelY, panelW, panelH, 0.07, rl.NewColor(9, 10, 12, 190))
 	drawRoundedRectLines(panelX, panelY, panelW, panelH, 0.07, rl.NewColor(210, 220, 230, 180))
 
-	enemyText := "Rat"
+	enemyText := core.BattleEnemyInfo(g).SingularName
 	enemyHP := 0
-	enemyMaxHP := core.RatMaxHP
+	enemyMaxHP := core.BattleEnemyInfo(g).MaxHP
 	aliveCount := core.LivingBattleCount(&g)
 	if g.Battle.EnemyIndex >= 0 && g.Battle.EnemyIndex < len(g.Enemies) {
 		e := g.Enemies[g.Battle.EnemyIndex]
-		enemyText = e.Name
+		enemyText = core.EnemyDisplayName(e)
 		enemyHP = e.HP
 		enemyMaxHP = e.MaxHP
 	}
+	groupName := core.BattleEnemyGroupName(g)
 	if len(g.Battle.EnemyGroup) > 1 && g.Battle.ActionMode == core.ActionEnemyTarget {
-		enemyText = fmt.Sprintf("Rat Pack  %d left  Target %d/%d HP:%d/%d", aliveCount, core.BattleTargetOrdinal(g), aliveCount, enemyHP, enemyMaxHP)
+		enemyText = fmt.Sprintf("%s  %d left  Target %d/%d HP:%d/%d", groupName, aliveCount, core.BattleTargetOrdinal(g), aliveCount, enemyHP, enemyMaxHP)
 	} else if len(g.Battle.EnemyGroup) > 1 {
-		enemyText = fmt.Sprintf("Rat Pack  %d left  HP:%d/%d", aliveCount, enemyHP, enemyMaxHP)
+		enemyText = fmt.Sprintf("%s  %d left  HP:%d/%d", groupName, aliveCount, enemyHP, enemyMaxHP)
 	} else {
 		enemyText = fmt.Sprintf("%s  HP:%d/%d", enemyText, enemyHP, enemyMaxHP)
 	}
@@ -121,10 +122,7 @@ func drawTargetTooltip(g core.GameState, assets Resources) {
 	if !enemy.Alive {
 		return
 	}
-	monsterType := enemy.MonsterType
-	if monsterType == "" {
-		monsterType = "Beast"
-	}
+	monsterType := core.EnemyMonsterType(enemy)
 	condition, conditionColor := enemyHealthStyle(enemy)
 	screenW := int32(rl.GetScreenWidth())
 	screenH := int32(rl.GetScreenHeight())
@@ -142,7 +140,7 @@ func drawTargetTooltip(g core.GameState, assets Resources) {
 	drawRoundedRect(panelX, panelY, panelW, panelH, 0.1, rl.NewColor(6, 10, 18, 176))
 	drawRoundedRectLines(panelX, panelY, panelW, panelH, 0.1, rl.NewColor(255, 222, 94, 205))
 	centerX := float32(panelX + panelW/2)
-	drawTextCentered(assets.hudFont, enemy.Name, centerX, float32(panelY+9), 23, rl.RayWhite)
+	drawTextCentered(assets.hudFont, core.EnemyDisplayName(enemy), centerX, float32(panelY+9), 23, rl.RayWhite)
 	drawTextCentered(assets.hudFont, monsterType, centerX, float32(panelY+38), 18, rl.NewColor(184, 215, 238, 255))
 	drawTextCentered(assets.hudFont, condition, centerX, float32(panelY+60), 18, conditionColor)
 }
@@ -167,10 +165,7 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 	if g.Battle.Splash <= 0 || g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(g.Enemies) {
 		return
 	}
-	text := fmt.Sprintf("%s Encounter!", g.Enemies[g.Battle.EnemyIndex].Name)
-	if len(g.Battle.EnemyGroup) > 1 {
-		text = fmt.Sprintf("Rat Pack x%d!", len(g.Battle.EnemyGroup))
-	}
+	text := core.BattleEncounterTitle(g)
 	size := float32(42)
 	spacing := float32(1.5)
 	textSize := rl.MeasureTextEx(assets.hudFont, text, size, spacing)

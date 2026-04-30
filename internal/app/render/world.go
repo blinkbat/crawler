@@ -99,7 +99,7 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 		if g.Party[i].HP > 0 {
 			memberDance = victoryDance
 		}
-		position := partySpritePosition(camera, i, g.Party[i].AttackBump, memberDance)
+		position := partySpritePosition(camera, i, g.Party[i].Class, g.Party[i].AttackBump, memberDance)
 		size := rl.NewVector2(0.38, 0.68)
 		tint := rl.White
 		if g.Party[i].HP <= 0 {
@@ -108,7 +108,7 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 			tint = rl.NewColor(255, 245, 204, 255)
 			size = rl.NewVector2(0.42, 0.72)
 		} else if memberDance > 0 {
-			_, _, _, scale := victoryDanceMotion(i, memberDance)
+			_, _, _, scale := victoryDanceMotion(g.Party[i].Class, memberDance)
 			size.X *= scale
 			size.Y *= scale
 		}
@@ -156,7 +156,7 @@ func DrawBattlePartyLabels(camera rl.Camera3D, g core.GameState, assets Resource
 		if member.HP > 0 {
 			memberDance = victoryDance
 		}
-		position := partySpritePosition(camera, i, member.AttackBump, memberDance)
+		position := partySpritePosition(camera, i, member.Class, member.AttackBump, memberDance)
 		screen := rl.GetWorldToScreen(rl.NewVector3(position.X, position.Y, position.Z), camera)
 		if screen.X < -80 || screen.X > float32(rl.GetScreenWidth())+80 || screen.Y < -80 || screen.Y > float32(rl.GetScreenHeight())+80 {
 			continue
@@ -173,7 +173,7 @@ func DrawBattlePartyLabels(camera rl.Camera3D, g core.GameState, assets Resource
 	}
 }
 
-func partySpritePosition(camera rl.Camera3D, index int, bump, victoryDance float32) rl.Vector3 {
+func partySpritePosition(camera rl.Camera3D, index int, class core.PartyClass, bump, victoryDance float32) rl.Vector3 {
 	forward := horizontalForward(camera)
 	right := rl.NewVector3(-forward.Z, 0, forward.X)
 	base := rl.NewVector3(
@@ -186,7 +186,7 @@ func partySpritePosition(camera rl.Camera3D, index int, bump, victoryDance float
 	if index == 1 || index == 2 {
 		depth = -0.04
 	}
-	danceSide, danceDepth, danceHeight, _ := victoryDanceMotion(index, victoryDance)
+	danceSide, danceDepth, danceHeight, _ := victoryDanceMotion(class, victoryDance)
 	bumpDepth := core.BumpOffset(bump, 0.22)
 	return rl.NewVector3(
 		base.X+right.X*(offset+danceSide)+forward.X*(depth+bumpDepth+danceDepth),
@@ -203,7 +203,7 @@ func victoryDanceElapsed(g core.GameState) float32 {
 	return core.VictoryDanceDuration - remaining
 }
 
-func victoryDanceMotion(index int, elapsed float32) (float32, float32, float32, float32) {
+func victoryDanceMotion(class core.PartyClass, elapsed float32) (float32, float32, float32, float32) {
 	if elapsed <= 0 {
 		return 0, 0, 0, 1
 	}
@@ -215,17 +215,17 @@ func victoryDanceMotion(index int, elapsed float32) (float32, float32, float32, 
 		return (wave(freq, phase) + 1) * 0.5
 	}
 
-	switch index {
-	case 0:
+	switch class {
+	case core.ClassWarrior:
 		height := bounce(1.55, 0) * 0.075
 		return wave(0.78, 0) * 0.02, wave(1.55, math.Pi/2) * 0.016, height, 1 + height*0.045
-	case 1:
+	case core.ClassCleric:
 		bob := wave(1.05, 0)
 		return wave(0.82, math.Pi/5) * 0.045, 0, (bob + 1) * 0.026, 1 + bob*0.012
-	case 2:
+	case core.ClassThief:
 		height := bounce(2.15, 0) * 0.045
 		return wave(1.95, 0) * 0.065, wave(1.35, math.Pi/2) * 0.024, height, 1 + height*0.12
-	case 3:
+	case core.ClassWizard:
 		floatBob := wave(0.72, math.Pi/3)
 		return wave(0.58, math.Pi/2) * 0.035, wave(0.7, 0) * 0.026, 0.055 + floatBob*0.026, 1 + floatBob*0.014
 	default:

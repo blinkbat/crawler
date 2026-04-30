@@ -55,5 +55,5 @@ func NewParty() []PartyMember {
 }
 
 func NewRat(tileX, tileZ int) Enemy {
-	return Enemy{TileX: tileX, TileZ: tileZ, HP: RatMaxHP, MaxHP: RatMaxHP, Alive: true, Name: "Feral Rat", MonsterType: "Beast", Item: "Morsel of Cheese"}
+	return NewEnemy(EnemyRat, tileX, tileZ)
 }

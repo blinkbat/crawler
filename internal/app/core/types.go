@@ -55,6 +55,7 @@ type PartyMember struct {
 }
 
 type Enemy struct {
+	Kind        EnemyKind
 	TileX       int
 	TileZ       int
 	HP          int

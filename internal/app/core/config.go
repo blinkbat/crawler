@@ -40,7 +40,6 @@ const (
 	SkillPrayer          = 2
 	SkillSteal           = 3
 	SkillFirebolt        = 4
-	RatMaxHP             = 10
 	North                = 0
 	East                 = 1
 	South                = 2

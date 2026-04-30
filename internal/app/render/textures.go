@@ -171,7 +171,7 @@ func makeRatPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-func makePartyPixels(w, h, classIndex int) []color.RGBA {
+func makePartyPixels(w, h int, class core.PartyClass) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	shadow := color.RGBA{R: 0, G: 0, B: 0, A: 78}
 	skin := color.RGBA{R: 219, G: 165, B: 124, A: 255}
@@ -182,8 +182,8 @@ func makePartyPixels(w, h, classIndex int) []color.RGBA {
 	fillRectPixels(pixels, w, h, 33, 57, 9, 12, boot)
 	fillEllipsePixels(pixels, w, h, 31, 38, 7, 7, skin)
 
-	switch classIndex {
-	case 0:
+	switch class {
+	case core.ClassWarrior:
 		armor := color.RGBA{R: 97, G: 113, B: 128, A: 255}
 		armorDark := color.RGBA{R: 55, G: 64, B: 78, A: 255}
 		red := color.RGBA{R: 157, G: 55, B: 63, A: 255}
@@ -197,7 +197,7 @@ func makePartyPixels(w, h, classIndex int) []color.RGBA {
 		fillEllipsePixels(pixels, w, h, 32, 24, 15, 14, armor)
 		fillEllipsePixels(pixels, w, h, 32, 29, 12, 7, hair)
 		drawLinePixels(pixels, w, h, 19, 25, 45, 25, adjust(armorDark, 10), 2)
-	case 1:
+	case core.ClassCleric:
 		robe := color.RGBA{R: 218, G: 219, B: 202, A: 255}
 		robeDark := color.RGBA{R: 151, G: 151, B: 139, A: 255}
 		gold := color.RGBA{R: 222, G: 184, B: 86, A: 255}
@@ -210,7 +210,7 @@ func makePartyPixels(w, h, classIndex int) []color.RGBA {
 		fillEllipsePixels(pixels, w, h, 32, 24, 15, 15, robeDark)
 		fillEllipsePixels(pixels, w, h, 32, 23, 13, 14, hood)
 		fillEllipsePixels(pixels, w, h, 32, 31, 8, 6, adjust(hood, -22))
-	case 2:
+	case core.ClassThief:
 		cloak := color.RGBA{R: 40, G: 109, B: 89, A: 255}
 		cloakDark := color.RGBA{R: 25, G: 56, B: 57, A: 255}
 		trim := color.RGBA{R: 92, G: 171, B: 128, A: 255}
@@ -223,7 +223,7 @@ func makePartyPixels(w, h, classIndex int) []color.RGBA {
 		fillEllipsePixels(pixels, w, h, 32, 24, 15, 15, hood)
 		fillTrianglePixels(pixels, w, h, 21, 22, 43, 22, 32, 39, hood)
 		fillEllipsePixels(pixels, w, h, 32, 30, 9, 5, adjust(hood, -18))
-	case 3:
+	case core.ClassWizard:
 		robe := color.RGBA{R: 64, G: 78, B: 155, A: 255}
 		robeDark := color.RGBA{R: 34, G: 43, B: 90, A: 255}
 		hat := color.RGBA{R: 86, G: 74, B: 172, A: 255}
@@ -247,12 +247,27 @@ func makePartyPixels(w, h, classIndex int) []color.RGBA {
 			if pixels[i].A == 0 {
 				continue
 			}
-			if hash2(x+classIndex*17, y)%9 == 0 {
+			if hash2(x+partyClassTextureSeed(class)*17, y)%9 == 0 {
 				pixels[i] = adjust(pixels[i], -10)
 			}
 		}
 	}
 	return pixels
+}
+
+func partyClassTextureSeed(class core.PartyClass) int {
+	switch class {
+	case core.ClassWarrior:
+		return 1
+	case core.ClassCleric:
+		return 2
+	case core.ClassThief:
+		return 3
+	case core.ClassWizard:
+		return 4
+	default:
+		return 0
+	}
 }
 
 func fillEllipsePixels(pixels []color.RGBA, w, h, cx, cy, rx, ry int, col color.RGBA) {

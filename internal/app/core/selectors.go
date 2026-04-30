@@ -1,7 +1,5 @@
 package core
 
-import "fmt"
-
 type TurnEntry struct {
 	Label string
 	Class PartyClass
@@ -82,7 +80,13 @@ func LivingBattleEnemyIndices(g *GameState) []int {
 }
 
 func LivingBattleCount(g *GameState) int {
-	return len(LivingBattleEnemyIndices(g))
+	count := 0
+	for _, index := range g.Battle.EnemyGroup {
+		if EnemyAlive(g.Enemies, index) {
+			count++
+		}
+	}
+	return count
 }
 
 func NextLivingBattleEnemy(g *GameState) int {
@@ -147,9 +151,5 @@ func appendEnemyTurn(turns *[]TurnEntry, g GameState, limit int) {
 	if count <= 0 {
 		return
 	}
-	label := "Rat"
-	if count > 1 {
-		label = fmt.Sprintf("Rats x%d", count)
-	}
-	*turns = append(*turns, TurnEntry{Label: label, Enemy: true})
+	*turns = append(*turns, TurnEntry{Label: BattleEnemyTurnLabel(g), Enemy: true})
 }

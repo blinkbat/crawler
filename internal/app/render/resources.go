@@ -30,7 +30,7 @@ func LoadResources() Resources {
 	rl.SetTextureWrap(ratTexture, rl.WrapClamp)
 	partyTexture := make(map[core.PartyClass]rl.Texture2D)
 	for _, def := range core.PartyClasses() {
-		texture := loadTexture(makePartyPixels(64, 80, int(def.Class)), 64, 80, rl.FilterPoint)
+		texture := loadTexture(makePartyPixels(64, 80, def.Class), 64, 80, rl.FilterPoint)
 		rl.SetTextureWrap(texture, rl.WrapClamp)
 		partyTexture[def.Class] = texture
 	}
