@@ -30,7 +30,7 @@ This workspace is Windows-first. Prefer bash if it is installed, but do not bloc
 - `internal/app/battle/actions.go`: Attack, Swipe, Prayer, Steal, Firebolt, burn ticks, damage resolution, rat attacks.
 - `internal/app/battle/helpers.go`: living-count helpers, party helpers, turn forecast generation.
 - `internal/app/render/`: raylib drawing, procedural assets, and HUD.
-- `internal/app/render/world.go`: camera, world drawing, enemy/party billboards, target chevron, battle formation positioning, skybox.
+- `internal/app/render/world.go`: camera, screen-filling sky background, world drawing, enemy/party billboards, target markers, battle formation positioning.
 - `internal/app/render/hud.go`: top-level HUD routing and exploration party totals.
 - `internal/app/render/battle.go`: battle panel, combat log, action menu, target tooltip, battle splash.
 - `internal/app/render/party.go`: bottom party stat cards and HP/MP bars.
@@ -44,7 +44,7 @@ This workspace is Windows-first. Prefer bash if it is installed, but do not bloc
 
 - Movement is tile-based with short animation. `W/S` step, `A/D` strafe, `Q/E` or arrows turn.
 - Right-click drag free-look snaps back on release.
-- Battles start when the player is adjacent to a live rat.
+- Battles start when the player is adjacent to a live rat; if needed, the player rotates to face it first.
 - Battle input:
   - Confirm: `Space`, `Enter`, or `Z`
   - Back: `Esc` or `X`

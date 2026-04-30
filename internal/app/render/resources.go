@@ -15,7 +15,6 @@ type Resources struct {
 	partyTexture [4]rl.Texture2D
 	wallModel    rl.Model
 	floorModel   rl.Model
-	skyModel     rl.Model
 	hudFont      rl.Font
 	hudFontOwned bool
 }
@@ -38,11 +37,9 @@ func LoadResources() Resources {
 
 	wallModel := rl.LoadModelFromMesh(rl.GenMeshCube(core.TileSize, core.WallHeight, core.TileSize))
 	floorModel := rl.LoadModelFromMesh(rl.GenMeshCube(core.TileSize, 0.06, core.TileSize))
-	skyModel := rl.LoadModelFromMesh(rl.GenMeshCube(1, 1, 1))
 
 	setModelTexture(&wallModel, wallTexture)
 	setModelTexture(&floorModel, floorTexture)
-	setModelTexture(&skyModel, skyTexture)
 
 	return Resources{
 		wallTexture:  wallTexture,
@@ -52,7 +49,6 @@ func LoadResources() Resources {
 		partyTexture: partyTexture,
 		wallModel:    wallModel,
 		floorModel:   floorModel,
-		skyModel:     skyModel,
 		hudFont:      hudFont,
 		hudFontOwned: hudFontOwned,
 	}
@@ -61,7 +57,6 @@ func LoadResources() Resources {
 func (r Resources) Unload() {
 	rl.UnloadModel(r.wallModel)
 	rl.UnloadModel(r.floorModel)
-	rl.UnloadModel(r.skyModel)
 	rl.UnloadTexture(r.wallTexture)
 	rl.UnloadTexture(r.floorTexture)
 	rl.UnloadTexture(r.skyTexture)

@@ -27,6 +27,12 @@ func Camera(p core.Player) rl.Camera3D {
 	)
 }
 
+func DrawSkyBackground(assets Resources) {
+	source := rl.NewRectangle(0, 0, float32(assets.skyTexture.Width), float32(assets.skyTexture.Height))
+	dest := rl.NewRectangle(0, 0, float32(rl.GetScreenWidth()), float32(rl.GetScreenHeight()))
+	rl.DrawTexturePro(assets.skyTexture, source, dest, rl.NewVector2(0, 0), 0, rl.White)
+}
+
 func DrawWorld(m core.GameMap, assets Resources) {
 	for z, row := range m.Rows {
 		for x, tile := range row {
@@ -54,7 +60,7 @@ func DrawEnemies(camera rl.Camera3D, g core.GameState, assets Resources) {
 			alpha := uint8(220 * core.ClampFloat64(float64(enemy.DeathFade/core.DeathFadeDuration), 0, 1))
 			tint = rl.NewColor(255, 255, 255, alpha)
 		}
-		if enemy.Alive && g.Battle.Phase != core.BattleNone && i == g.Battle.EnemyIndex {
+		if enemy.Alive && g.Battle.Phase != core.BattleNone && g.Battle.ActionMode == core.ActionEnemyTarget && i == g.Battle.EnemyIndex {
 			tint = rl.NewColor(255, 228, 190, 255)
 			drawTargetChevron(camera, position)
 		}
@@ -109,7 +115,25 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 			tint = core.FlashTint(tint, g.Party[i].DamageFlash)
 		}
 		rl.DrawBillboardRec(camera, assets.partyTexture[i], source, position, size, tint)
+		if g.Battle.Phase == core.BattlePlayer && g.Battle.ActionMode == core.ActionPartyTarget && i == g.Battle.PartyTarget && g.Party[i].HP > 0 {
+			drawFriendlyTargetMarker(camera, position)
+		}
 	}
+}
+
+func drawFriendlyTargetMarker(camera rl.Camera3D, position rl.Vector3) {
+	forward := horizontalForward(camera)
+	right := rl.NewVector3(-forward.Z, 0, forward.X)
+	center := rl.NewVector3(position.X, position.Y+0.62, position.Z)
+	left := rl.NewVector3(center.X-right.X*0.16, center.Y+0.11, center.Z-right.Z*0.16)
+	rightPt := rl.NewVector3(center.X+right.X*0.16, center.Y+0.11, center.Z+right.Z*0.16)
+	tip := rl.NewVector3(center.X, center.Y-0.1, center.Z)
+	color := rl.NewColor(118, 235, 136, 245)
+	rl.DisableBackfaceCulling()
+	rl.DrawTriangle3D(tip, rightPt, left, color)
+	rl.DrawTriangle3D(tip, left, rightPt, color)
+	rl.DrawCube(rl.NewVector3(center.X, center.Y-0.18, center.Z), 0.08, 0.02, 0.08, color)
+	rl.EnableBackfaceCulling()
 }
 
 func DrawBattlePartyLabels(camera rl.Camera3D, g core.GameState, assets Resources) {
@@ -178,30 +202,26 @@ func victoryDanceMotion(index int, elapsed float32) (float32, float32, float32, 
 	wave := func(freq, phase float64) float32 {
 		return float32(math.Sin(float64(elapsed)*math.Pi*2*freq + phase))
 	}
-	hop := func(freq, phase float64) float32 {
-		v := wave(freq, phase)
-		if v < 0 {
-			return -v
-		}
-		return v
+	bounce := func(freq, phase float64) float32 {
+		return (wave(freq, phase) + 1) * 0.5
 	}
 
 	switch index {
 	case 0:
-		height := hop(2.7, 0) * 0.16
-		return wave(1.35, 0) * 0.035, wave(2.7, math.Pi/2) * 0.025, height, 1 + height*0.1
+		height := bounce(1.55, 0) * 0.075
+		return wave(0.78, 0) * 0.02, wave(1.55, math.Pi/2) * 0.016, height, 1 + height*0.045
 	case 1:
-		bob := wave(1.7, 0)
-		return wave(1.2, math.Pi/5) * 0.075, 0, (bob + 1) * 0.045, 1 + bob*0.025
+		bob := wave(1.05, 0)
+		return wave(0.82, math.Pi/5) * 0.045, 0, (bob + 1) * 0.026, 1 + bob*0.012
 	case 2:
-		height := hop(4.3, 0) * 0.07
-		return wave(3.6, 0) * 0.13, wave(2.4, math.Pi/2) * 0.045, height, 1 + height*0.45
+		height := bounce(2.15, 0) * 0.045
+		return wave(1.95, 0) * 0.065, wave(1.35, math.Pi/2) * 0.024, height, 1 + height*0.12
 	case 3:
-		floatBob := wave(1.25, math.Pi/3)
-		return wave(0.9, math.Pi/2) * 0.055, wave(1.1, 0) * 0.045, 0.09 + floatBob*0.055, 1 + floatBob*0.03
+		floatBob := wave(0.72, math.Pi/3)
+		return wave(0.58, math.Pi/2) * 0.035, wave(0.7, 0) * 0.026, 0.055 + floatBob*0.026, 1 + floatBob*0.014
 	default:
-		height := hop(2, 0) * 0.08
-		return wave(1.5, 0) * 0.05, 0, height, 1
+		height := bounce(1.2, 0) * 0.045
+		return wave(1, 0) * 0.03, 0, height, 1
 	}
 }
 
@@ -273,17 +293,4 @@ func battleEnemySlot(g core.GameState, index int) (int, int) {
 		count++
 	}
 	return found, count
-}
-
-func DrawSkybox(assets Resources, position rl.Vector3) {
-	rl.DisableBackfaceCulling()
-	rl.DrawModelEx(
-		assets.skyModel,
-		position,
-		rl.NewVector3(0, 1, 0),
-		0,
-		rl.NewVector3(80, 80, 80),
-		rl.White,
-	)
-	rl.EnableBackfaceCulling()
 }

@@ -55,6 +55,15 @@ func drawPartyStatLabel(font rl.Font, member core.PartyMember, centerX, y float3
 	ih := int32(labelH)
 	drawRoundedRect(ix, iy, iw, ih, 0.1, bg)
 	drawRoundedRectLines(ix, iy, iw, ih, 0.1, border)
+	if selected {
+		drawRoundedRectLines(ix-2, iy-2, iw+4, ih+4, 0.11, rl.NewColor(118, 235, 136, 235))
+		rl.DrawTriangle(
+			rl.NewVector2(centerX, y-9),
+			rl.NewVector2(centerX-10, y+3),
+			rl.NewVector2(centerX+10, y+3),
+			rl.NewColor(118, 235, 136, 255),
+		)
+	}
 	drawTextCentered(font, member.Name, centerX, y+6, nameSize, nameCol)
 	drawResourceBar(font, x+10, y+34, labelW-20, 14, "HP", member.HP, member.MaxHP, rl.NewColor(205, 65, 72, 255), down)
 	drawResourceBar(font, x+10, y+54, labelW-20, 14, "MP", member.MP, member.MaxMP, rl.NewColor(70, 134, 218, 255), down)

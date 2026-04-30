@@ -109,6 +109,9 @@ func startStep(p *core.Player, g *core.GameState, m core.GameMap, strafe, forwar
 		return
 	}
 	if enemyIndex := liveEnemyAt(g.Enemies, targetX, targetZ); enemyIndex >= 0 {
+		if startTurnToTile(p, targetX, targetZ) {
+			return
+		}
 		battle.Start(g, enemyIndex)
 		return
 	}
@@ -128,12 +131,51 @@ func startStep(p *core.Player, g *core.GameState, m core.GameMap, strafe, forwar
 func startTurn(p *core.Player, delta int) {
 	nextFacing := core.NormalizeFacing(p.Facing + delta)
 	p.Facing = nextFacing
+	duration := core.TurnDuration * float32(core.AbsInt(delta))
+	if duration <= 0 {
+		duration = core.TurnDuration
+	}
 	p.Anim = core.Animation{
 		Kind:     core.AnimTurn,
-		Duration: core.TurnDuration,
+		Duration: duration,
 		FromYaw:  p.Yaw,
 		ToYaw:    p.Yaw + float32(delta)*math.Pi/2,
 	}
+}
+
+func startTurnToTile(p *core.Player, tileX, tileZ int) bool {
+	targetFacing, ok := facingForTile(p, tileX, tileZ)
+	if !ok {
+		return false
+	}
+	diff := core.NormalizeFacing(targetFacing - p.Facing)
+	switch diff {
+	case 0:
+		return false
+	case 1:
+		startTurn(p, 1)
+	case 2:
+		startTurn(p, 2)
+	case 3:
+		startTurn(p, -1)
+	}
+	return true
+}
+
+func facingForTile(p *core.Player, tileX, tileZ int) (int, bool) {
+	dx := tileX - p.TileX
+	dz := tileZ - p.TileZ
+	switch {
+	case dx > 0:
+		return core.East, true
+	case dx < 0:
+		return core.West, true
+	case dz > 0:
+		return core.South, true
+	case dz < 0:
+		return core.North, true
+	}
+	return p.Facing, false
 }
 
 func updateAnimation(p *core.Player, dt float32) {
@@ -188,6 +230,9 @@ func StartAdjacent(g *core.GameState) bool {
 	enemyIndex := adjacentEnemyIndex(g.Enemies, g.Player.TileX, g.Player.TileZ)
 	if enemyIndex < 0 {
 		return false
+	}
+	if startTurnToTile(&g.Player, g.Enemies[enemyIndex].TileX, g.Enemies[enemyIndex].TileZ) {
+		return true
 	}
 	battle.Start(g, enemyIndex)
 	return true

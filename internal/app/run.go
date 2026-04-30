@@ -9,7 +9,7 @@ import (
 )
 
 func Run() {
-	rl.SetConfigFlags(rl.FlagVsyncHint | rl.FlagWindowResizable)
+	rl.SetConfigFlags(rl.FlagVsyncHint | rl.FlagWindowUndecorated | rl.FlagWindowTopmost)
 	rl.InitWindow(core.ScreenWidth, core.ScreenHeight, "Crawler")
 	defer rl.CloseWindow()
 
@@ -27,9 +27,8 @@ func Run() {
 		camera := render.Camera(state.Player)
 
 		rl.BeginDrawing()
-		rl.ClearBackground(rl.NewColor(87, 172, 244, 255))
+		render.DrawSkyBackground(assets)
 		rl.BeginMode3D(camera)
-		render.DrawSkybox(assets, camera.Position)
 		render.DrawWorld(world, assets)
 		render.DrawEnemies(camera, state, assets)
 		render.DrawPartySprites(camera, state, assets)
@@ -41,6 +40,7 @@ func Run() {
 }
 
 func applyWindowedFullscreen() {
+	rl.ClearWindowState(rl.FlagFullscreenMode | rl.FlagBorderlessWindowedMode)
 	monitor := rl.GetCurrentMonitor()
 	position := rl.GetMonitorPosition(monitor)
 	width := rl.GetMonitorWidth(monitor)
@@ -48,7 +48,7 @@ func applyWindowedFullscreen() {
 	if width <= 0 || height <= 0 {
 		return
 	}
+	rl.SetWindowState(rl.FlagWindowUndecorated | rl.FlagWindowTopmost)
 	rl.SetWindowSize(width, height)
 	rl.SetWindowPosition(int(position.X), int(position.Y))
-	rl.SetWindowState(rl.FlagBorderlessWindowedMode)
 }

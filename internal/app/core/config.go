@@ -17,7 +17,7 @@ const (
 	BumpDuration         = 0.18
 	FlashDuration        = 0.16
 	DeathFadeDuration    = 0.55
-	VictoryDanceDuration = 1.65
+	VictoryDanceDuration = 3.0
 	MouseSense           = 0.0024
 	MaxLookYaw           = 0.78
 	MaxLookPitch         = 0.62

@@ -26,8 +26,10 @@ func drawBattleOverlay(g core.GameState, assets Resources) {
 		enemyHP = e.HP
 		enemyMaxHP = e.MaxHP
 	}
-	if len(g.Battle.EnemyGroup) > 1 {
+	if len(g.Battle.EnemyGroup) > 1 && g.Battle.ActionMode == core.ActionEnemyTarget {
 		enemyText = fmt.Sprintf("Rat Pack  %d left  Target %d/%d HP:%d/%d", aliveCount, battle.BattleTargetOrdinal(g), aliveCount, enemyHP, enemyMaxHP)
+	} else if len(g.Battle.EnemyGroup) > 1 {
+		enemyText = fmt.Sprintf("Rat Pack  %d left  HP:%d/%d", aliveCount, enemyHP, enemyMaxHP)
 	} else {
 		enemyText = fmt.Sprintf("%s  HP:%d/%d", enemyText, enemyHP, enemyMaxHP)
 	}
@@ -77,8 +79,12 @@ func drawBattleActionMenu(g core.GameState, assets Resources, x, y int32) {
 		drawHUDText(assets.hudFont, "A/D target  Z/Space/Enter", x, y+30, 16)
 		drawHUDText(assets.hudFont, "X/Esc back", x, y+52, 16)
 	case core.ActionPartyTarget:
-		drawHUDText(assets.hudFont, battle.SkillName(g.Battle.PendingSkill), x, y, 21)
-		drawHUDText(assets.hudFont, "A/D ally  Z/Space/Enter", x, y+30, 16)
+		targetName := "Ally"
+		if g.Battle.PartyTarget >= 0 && g.Battle.PartyTarget < len(g.Party) {
+			targetName = g.Party[g.Battle.PartyTarget].Name
+		}
+		drawHUDText(assets.hudFont, fmt.Sprintf("%s -> %s", battle.SkillName(g.Battle.PendingSkill), targetName), x, y, 21)
+		drawHUDText(assets.hudFont, "A/D choose ally  Z/Space/Enter", x, y+30, 16)
 		drawHUDText(assets.hudFont, "X/Esc back", x, y+52, 16)
 	default:
 		if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
@@ -109,7 +115,7 @@ func drawActionOption(font rl.Font, text string, x, y int32, selected bool) {
 }
 
 func drawTargetTooltip(g core.GameState, assets Resources) {
-	if g.Battle.Phase == core.BattleWon || g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(g.Enemies) {
+	if g.Battle.Phase == core.BattleWon || g.Battle.ActionMode != core.ActionEnemyTarget || g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(g.Enemies) {
 		return
 	}
 	enemy := g.Enemies[g.Battle.EnemyIndex]
