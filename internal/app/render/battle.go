@@ -1,7 +1,6 @@
 package render
 
 import (
-	"crawler/internal/app/battle"
 	"crawler/internal/app/core"
 	"fmt"
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -19,7 +18,7 @@ func drawBattleOverlay(g core.GameState, assets Resources) {
 	enemyText := "Rat"
 	enemyHP := 0
 	enemyMaxHP := core.RatMaxHP
-	aliveCount := battle.LivingBattleCount(&g)
+	aliveCount := core.LivingBattleCount(&g)
 	if g.Battle.EnemyIndex >= 0 && g.Battle.EnemyIndex < len(g.Enemies) {
 		e := g.Enemies[g.Battle.EnemyIndex]
 		enemyText = e.Name
@@ -27,7 +26,7 @@ func drawBattleOverlay(g core.GameState, assets Resources) {
 		enemyMaxHP = e.MaxHP
 	}
 	if len(g.Battle.EnemyGroup) > 1 && g.Battle.ActionMode == core.ActionEnemyTarget {
-		enemyText = fmt.Sprintf("Rat Pack  %d left  Target %d/%d HP:%d/%d", aliveCount, battle.BattleTargetOrdinal(g), aliveCount, enemyHP, enemyMaxHP)
+		enemyText = fmt.Sprintf("Rat Pack  %d left  Target %d/%d HP:%d/%d", aliveCount, core.BattleTargetOrdinal(g), aliveCount, enemyHP, enemyMaxHP)
 	} else if len(g.Battle.EnemyGroup) > 1 {
 		enemyText = fmt.Sprintf("Rat Pack  %d left  HP:%d/%d", aliveCount, enemyHP, enemyMaxHP)
 	} else {
@@ -35,7 +34,7 @@ func drawBattleOverlay(g core.GameState, assets Resources) {
 	}
 	drawHUDText(assets.hudFont, enemyText, panelX+18, panelY+14, 22)
 	activeName := "Party"
-	if battle.PartyMemberAlive(g.Party, g.Battle.CurrentParty) {
+	if core.PartyMemberAlive(g.Party, g.Battle.CurrentParty) {
 		activeName = g.Party[g.Battle.CurrentParty].Name
 	}
 	drawHUDText(assets.hudFont, fmt.Sprintf("Active: %s", activeName), panelX+18, panelY+42, 20)
@@ -73,7 +72,7 @@ func drawBattleActionMenu(g core.GameState, assets Resources, x, y int32) {
 	case core.ActionEnemyTarget:
 		action := "Attack"
 		if g.Battle.PendingSkill != core.SkillNone {
-			action = battle.SkillName(g.Battle.PendingSkill)
+			action = core.SkillName(g.Battle.PendingSkill)
 		}
 		drawHUDText(assets.hudFont, action, x, y, 21)
 		drawHUDText(assets.hudFont, "A/D target  Z/Space/Enter", x, y+30, 16)
@@ -83,16 +82,16 @@ func drawBattleActionMenu(g core.GameState, assets Resources, x, y int32) {
 		if g.Battle.PartyTarget >= 0 && g.Battle.PartyTarget < len(g.Party) {
 			targetName = g.Party[g.Battle.PartyTarget].Name
 		}
-		drawHUDText(assets.hudFont, fmt.Sprintf("%s -> %s", battle.SkillName(g.Battle.PendingSkill), targetName), x, y, 21)
+		drawHUDText(assets.hudFont, fmt.Sprintf("%s -> %s", core.SkillName(g.Battle.PendingSkill), targetName), x, y, 21)
 		drawHUDText(assets.hudFont, "A/D choose ally  Z/Space/Enter", x, y+30, 16)
 		drawHUDText(assets.hudFont, "X/Esc back", x, y+52, 16)
 	default:
 		if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
 			return
 		}
-		skill := battle.PartySkill(g.Party[g.Battle.CurrentParty].Name)
-		skillText := battle.SkillName(skill)
-		if cost := battle.SkillCost(skill); cost > 0 {
+		skill := core.PartySkill(g.Party[g.Battle.CurrentParty])
+		skillText := core.SkillName(skill)
+		if cost := core.SkillCost(skill); cost > 0 {
 			skillText = fmt.Sprintf("%s  %d MP", skillText, cost)
 		}
 		drawActionOption(assets.hudFont, "Attack", x, y, g.Battle.MenuIndex == 0)
@@ -126,7 +125,7 @@ func drawTargetTooltip(g core.GameState, assets Resources) {
 	if monsterType == "" {
 		monsterType = "Beast"
 	}
-	condition := enemyHealthText(enemy)
+	condition, conditionColor := enemyHealthStyle(enemy)
 	screenW := int32(rl.GetScreenWidth())
 	screenH := int32(rl.GetScreenHeight())
 	panelW := int32(310)
@@ -145,40 +144,22 @@ func drawTargetTooltip(g core.GameState, assets Resources) {
 	centerX := float32(panelX + panelW/2)
 	drawTextCentered(assets.hudFont, enemy.Name, centerX, float32(panelY+9), 23, rl.RayWhite)
 	drawTextCentered(assets.hudFont, monsterType, centerX, float32(panelY+38), 18, rl.NewColor(184, 215, 238, 255))
-	drawTextCentered(assets.hudFont, condition, centerX, float32(panelY+60), 18, enemyHealthColor(enemy))
+	drawTextCentered(assets.hudFont, condition, centerX, float32(panelY+60), 18, conditionColor)
 }
 
-func enemyHealthText(enemy core.Enemy) string {
-	if enemy.MaxHP <= 0 || enemy.HP >= enemy.MaxHP {
-		return "Unharmed"
-	}
-	percent := float64(enemy.HP) / float64(enemy.MaxHP)
-	switch {
-	case percent > 0.75:
-		return "Scuffed"
-	case percent > 0.5:
-		return "Injured"
-	case percent > 0.25:
-		return "Badly Wounded"
+func enemyHealthStyle(enemy core.Enemy) (string, color.RGBA) {
+	condition := core.EnemyConditionFor(enemy)
+	switch condition {
+	case core.EnemyScuffed:
+		return core.EnemyConditionLabel(condition), rl.NewColor(208, 226, 128, 255)
+	case core.EnemyInjured:
+		return core.EnemyConditionLabel(condition), rl.NewColor(246, 196, 91, 255)
+	case core.EnemyBadlyWounded:
+		return core.EnemyConditionLabel(condition), rl.NewColor(244, 126, 75, 255)
+	case core.EnemyNearDeath:
+		return core.EnemyConditionLabel(condition), rl.NewColor(255, 78, 88, 255)
 	default:
-		return "Near Death"
-	}
-}
-
-func enemyHealthColor(enemy core.Enemy) color.RGBA {
-	if enemy.MaxHP <= 0 || enemy.HP >= enemy.MaxHP {
-		return rl.NewColor(126, 231, 170, 255)
-	}
-	percent := float64(enemy.HP) / float64(enemy.MaxHP)
-	switch {
-	case percent > 0.75:
-		return rl.NewColor(208, 226, 128, 255)
-	case percent > 0.5:
-		return rl.NewColor(246, 196, 91, 255)
-	case percent > 0.25:
-		return rl.NewColor(244, 126, 75, 255)
-	default:
-		return rl.NewColor(255, 78, 88, 255)
+		return core.EnemyConditionLabel(condition), rl.NewColor(126, 231, 170, 255)
 	}
 }
 

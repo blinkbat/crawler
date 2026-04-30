@@ -12,7 +12,7 @@ type Resources struct {
 	floorTexture rl.Texture2D
 	skyTexture   rl.Texture2D
 	ratTexture   rl.Texture2D
-	partyTexture [4]rl.Texture2D
+	partyTexture map[core.PartyClass]rl.Texture2D
 	wallModel    rl.Model
 	floorModel   rl.Model
 	hudFont      rl.Font
@@ -28,10 +28,11 @@ func LoadResources() Resources {
 	rl.SetTextureWrap(skyTexture, rl.WrapClamp)
 	ratTexture := loadTexture(makeRatPixels(72, 96), 72, 96, rl.FilterPoint)
 	rl.SetTextureWrap(ratTexture, rl.WrapClamp)
-	var partyTexture [4]rl.Texture2D
-	for i := range partyTexture {
-		partyTexture[i] = loadTexture(makePartyPixels(64, 80, i), 64, 80, rl.FilterPoint)
-		rl.SetTextureWrap(partyTexture[i], rl.WrapClamp)
+	partyTexture := make(map[core.PartyClass]rl.Texture2D)
+	for _, def := range core.PartyClasses() {
+		texture := loadTexture(makePartyPixels(64, 80, int(def.Class)), 64, 80, rl.FilterPoint)
+		rl.SetTextureWrap(texture, rl.WrapClamp)
+		partyTexture[def.Class] = texture
 	}
 	hudFont, hudFontOwned := loadHUDFont()
 

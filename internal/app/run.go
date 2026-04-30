@@ -17,24 +17,23 @@ func Run() {
 	applyWindowedFullscreen()
 	rl.SetTargetFPS(120)
 
-	world := core.NewGameMap(core.DungeonLayout)
-	state := core.NewGameState(world)
+	state := core.NewGameState(core.NewGameMap(core.DungeonLayout))
 	assets := render.LoadResources()
 	defer assets.Unload()
 
 	for !rl.WindowShouldClose() && !state.Quit {
-		explore.Update(&state, world)
+		explore.Update(&state)
 		camera := render.Camera(state.Player)
 
 		rl.BeginDrawing()
 		rl.ClearBackground(rl.NewColor(87, 172, 244, 255))
 		render.DrawSkyBackground(assets)
 		rl.BeginMode3D(camera)
-		render.DrawWorld(world, assets)
+		render.DrawWorld(state.Map, assets)
 		render.DrawEnemies(camera, state, assets)
 		render.DrawPartySprites(camera, state, assets)
 		rl.EndMode3D()
-		render.DrawOverlay(world, state, assets)
+		render.DrawOverlay(state, assets)
 		render.DrawBattlePartyLabels(camera, state, assets)
 		rl.EndDrawing()
 	}

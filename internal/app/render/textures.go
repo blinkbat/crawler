@@ -99,7 +99,7 @@ func makeSkyPixels(w, h int) []color.RGBA {
 		t := float64(y) / float64(h-1)
 		t = t * t * (3 - 2*t)
 		for x := 0; x < w; x++ {
-			c := mix(top, horizon, t)
+			c := core.MixColor(top, horizon, t)
 			cover := 0.0
 			for _, cloud := range clouds {
 				dx := math.Abs(float64(x) - cloud.X)
@@ -112,7 +112,7 @@ func makeSkyPixels(w, h int) []color.RGBA {
 			}
 			if cover > 0 {
 				cover = math.Min(cover, 0.5)
-				c = mix(c, color.RGBA{R: 249, G: 252, B: 255, A: 255}, cover)
+				c = core.MixColor(c, color.RGBA{R: 249, G: 252, B: 255, A: 255}, cover)
 			}
 			pixels[y*w+x] = c
 		}
@@ -358,15 +358,5 @@ func adjust(c color.RGBA, delta int) color.RGBA {
 		G: core.ClampByte(int(c.G) + delta),
 		B: core.ClampByte(int(c.B) + delta),
 		A: c.A,
-	}
-}
-
-func mix(a, b color.RGBA, t float64) color.RGBA {
-	t = math.Max(0, math.Min(1, t))
-	return color.RGBA{
-		R: uint8(float64(a.R)*(1-t) + float64(b.R)*t),
-		G: uint8(float64(a.G)*(1-t) + float64(b.G)*t),
-		B: uint8(float64(a.B)*(1-t) + float64(b.B)*t),
-		A: uint8(float64(a.A)*(1-t) + float64(b.A)*t),
 	}
 }

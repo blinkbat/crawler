@@ -39,12 +39,19 @@ func ResetGameState(g *GameState) {
 }
 
 func NewParty() []PartyMember {
-	return []PartyMember{
-		{Name: "Warrior", HP: 28, MaxHP: 28, MP: 4, MaxMP: 4, Attack: 4},
-		{Name: "Cleric", HP: 24, MaxHP: 24, MP: 18, MaxMP: 18, Attack: 5},
-		{Name: "Thief", HP: 22, MaxHP: 22, MP: 8, MaxMP: 8, Attack: 3},
-		{Name: "Wizard", HP: 26, MaxHP: 26, MP: 24, MaxMP: 24, Attack: 4},
+	party := make([]PartyMember, 0, len(partyClassDefinitions))
+	for _, def := range partyClassDefinitions {
+		party = append(party, PartyMember{
+			Class:  def.Class,
+			Name:   def.Name,
+			HP:     def.MaxHP,
+			MaxHP:  def.MaxHP,
+			MP:     def.MaxMP,
+			MaxMP:  def.MaxMP,
+			Attack: def.Atk,
+		})
 	}
+	return party
 }
 
 func NewRat(tileX, tileZ int) Enemy {

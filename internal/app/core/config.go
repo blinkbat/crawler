@@ -35,8 +35,6 @@ const (
 	ActionMenu           = 0
 	ActionEnemyTarget    = 1
 	ActionPartyTarget    = 2
-	ActorParty           = 0
-	ActorEnemy           = 1
 	SkillNone            = 0
 	SkillSwipe           = 1
 	SkillPrayer          = 2

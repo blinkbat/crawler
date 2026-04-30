@@ -2,22 +2,22 @@ package battle
 
 import (
 	"crawler/internal/app/core"
+	"crawler/internal/app/input"
 	"fmt"
-	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 func updateActionMenu(g *core.GameState) {
-	if upPressed() {
-		g.Battle.MenuIndex = wrapMenuIndex(g.Battle.MenuIndex-1, 2)
+	if input.UpPressed() {
+		g.Battle.MenuIndex = core.WrapIndex(g.Battle.MenuIndex-1, 2)
 	}
-	if downPressed() {
-		g.Battle.MenuIndex = wrapMenuIndex(g.Battle.MenuIndex+1, 2)
+	if input.DownPressed() {
+		g.Battle.MenuIndex = core.WrapIndex(g.Battle.MenuIndex+1, 2)
 	}
-	if backPressed() {
+	if input.BackPressed() {
 		setBattleStatus(g, "Choose an action.")
 		return
 	}
-	if !confirmPressed() {
+	if !input.ConfirmPressed() {
 		return
 	}
 	if g.Battle.MenuIndex == 0 {
@@ -27,10 +27,10 @@ func updateActionMenu(g *core.GameState) {
 		return
 	}
 
-	skill := partySkill(g.Party[g.Battle.CurrentParty].Name)
-	cost := SkillCost(skill)
+	skill := core.PartySkill(g.Party[g.Battle.CurrentParty])
+	cost := core.SkillCost(skill)
 	if g.Party[g.Battle.CurrentParty].MP < cost {
-		setBattleStatus(g, fmt.Sprintf("%s needs %d MP.", SkillName(skill), cost))
+		setBattleStatus(g, fmt.Sprintf("%s needs %d MP.", core.SkillName(skill), cost))
 		return
 	}
 	g.Battle.PendingSkill = skill
@@ -43,26 +43,26 @@ func updateActionMenu(g *core.GameState) {
 		setBattleStatus(g, "Choose who receives Prayer.")
 	case core.SkillSteal, core.SkillFirebolt:
 		g.Battle.ActionMode = core.ActionEnemyTarget
-		setBattleStatus(g, fmt.Sprintf("Choose a target for %s.", SkillName(skill)))
+		setBattleStatus(g, fmt.Sprintf("Choose a target for %s.", core.SkillName(skill)))
 	default:
 		setBattleStatus(g, "No skill ready.")
 	}
 }
 
 func updateEnemyTargeting(g *core.GameState) {
-	if rl.IsKeyPressed(rl.KeyTab) || rl.IsKeyPressed(rl.KeyRight) || rl.IsKeyPressed(rl.KeyD) || rl.IsKeyPressed(rl.KeyDown) {
+	if input.TargetNextPressed() {
 		cycleBattleTarget(g, 1)
 	}
-	if rl.IsKeyPressed(rl.KeyLeft) || rl.IsKeyPressed(rl.KeyA) || rl.IsKeyPressed(rl.KeyUp) {
+	if input.TargetPreviousPressed() {
 		cycleBattleTarget(g, -1)
 	}
-	if backPressed() {
+	if input.BackPressed() {
 		g.Battle.ActionMode = core.ActionMenu
 		g.Battle.PendingSkill = core.SkillNone
 		setBattleStatus(g, "Choose an action.")
 		return
 	}
-	if !confirmPressed() {
+	if !input.ConfirmPressed() {
 		return
 	}
 	switch g.Battle.PendingSkill {
@@ -79,19 +79,19 @@ func updateEnemyTargeting(g *core.GameState) {
 }
 
 func updatePartyTargeting(g *core.GameState) {
-	if rl.IsKeyPressed(rl.KeyTab) || rl.IsKeyPressed(rl.KeyRight) || rl.IsKeyPressed(rl.KeyD) || rl.IsKeyPressed(rl.KeyDown) {
+	if input.TargetNextPressed() {
 		cyclePartyTarget(g, 1)
 	}
-	if rl.IsKeyPressed(rl.KeyLeft) || rl.IsKeyPressed(rl.KeyA) || rl.IsKeyPressed(rl.KeyUp) {
+	if input.TargetPreviousPressed() {
 		cyclePartyTarget(g, -1)
 	}
-	if backPressed() {
+	if input.BackPressed() {
 		g.Battle.ActionMode = core.ActionMenu
 		g.Battle.PendingSkill = core.SkillNone
 		setBattleStatus(g, "Choose an action.")
 		return
 	}
-	if !confirmPressed() {
+	if !input.ConfirmPressed() {
 		return
 	}
 	if g.Battle.PendingSkill == core.SkillPrayer {
@@ -103,12 +103,7 @@ func updatePartyTargeting(g *core.GameState) {
 }
 
 func cycleBattleTarget(g *core.GameState, delta int) {
-	living := make([]int, 0, len(g.Battle.EnemyGroup))
-	for _, index := range g.Battle.EnemyGroup {
-		if index >= 0 && index < len(g.Enemies) && g.Enemies[index].Alive {
-			living = append(living, index)
-		}
-	}
+	living := core.LivingBattleEnemyIndices(g)
 	if len(living) == 0 {
 		return
 	}
@@ -119,16 +114,13 @@ func cycleBattleTarget(g *core.GameState, delta int) {
 			break
 		}
 	}
-	next := (current + delta) % len(living)
-	if next < 0 {
-		next += len(living)
-	}
+	next := core.WrapIndex(current+delta, len(living))
 	g.Battle.EnemyIndex = living[next]
 	setBattleStatus(g, fmt.Sprintf("Targeting rat %d of %d.", next+1, len(living)))
 }
 
 func cyclePartyTarget(g *core.GameState, delta int) {
-	living := livingPartyTargets(g.Party)
+	living := core.LivingPartyTargets(g.Party)
 	if len(living) == 0 {
 		return
 	}
@@ -139,93 +131,7 @@ func cyclePartyTarget(g *core.GameState, delta int) {
 			break
 		}
 	}
-	next := wrapMenuIndex(current+delta, len(living))
+	next := core.WrapIndex(current+delta, len(living))
 	g.Battle.PartyTarget = living[next]
 	setBattleStatus(g, fmt.Sprintf("Targeting %s.", g.Party[g.Battle.PartyTarget].Name))
-}
-
-func livingPartyTargets(party []core.PartyMember) []int {
-	living := make([]int, 0, len(party))
-	for i := range party {
-		if party[i].HP > 0 {
-			living = append(living, i)
-		}
-	}
-	return living
-}
-
-func wrapMenuIndex(index, count int) int {
-	if count <= 0 {
-		return 0
-	}
-	index %= count
-	if index < 0 {
-		index += count
-	}
-	return index
-}
-
-func validLivingEnemy(g *core.GameState, index int) bool {
-	return index >= 0 && index < len(g.Enemies) && g.Enemies[index].Alive
-}
-
-func partySkill(className string) int {
-	switch className {
-	case "Warrior":
-		return core.SkillSwipe
-	case "Cleric":
-		return core.SkillPrayer
-	case "Thief":
-		return core.SkillSteal
-	case "Wizard":
-		return core.SkillFirebolt
-	}
-	return core.SkillNone
-}
-
-func PartySkill(className string) int {
-	return partySkill(className)
-}
-
-func SkillName(skill int) string {
-	switch skill {
-	case core.SkillSwipe:
-		return "Swipe"
-	case core.SkillPrayer:
-		return "Prayer"
-	case core.SkillSteal:
-		return "Steal"
-	case core.SkillFirebolt:
-		return "Firebolt"
-	}
-	return "Skill"
-}
-
-func SkillCost(skill int) int {
-	switch skill {
-	case core.SkillSwipe:
-		return 3
-	case core.SkillPrayer:
-		return 5
-	case core.SkillFirebolt:
-		return 6
-	default:
-		return 0
-	}
-}
-
-func confirmPressed() bool {
-	return rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeySpace) || rl.IsKeyPressed(rl.KeyZ)
-}
-
-func backPressed() bool {
-	return rl.IsKeyPressed(rl.KeyEscape) || rl.IsKeyPressed(rl.KeyX)
-}
-
-func upPressed() bool {
-	return rl.IsKeyPressed(rl.KeyUp) || rl.IsKeyPressed(rl.KeyW)
-}
-
-func downPressed() bool {
-	return rl.IsKeyPressed(rl.KeyDown) || rl.IsKeyPressed(rl.KeyS)
 }

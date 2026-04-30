@@ -50,7 +50,7 @@ func DrawEnemies(camera rl.Camera3D, g core.GameState, assets Resources) {
 	source := rl.NewRectangle(0, 0, float32(assets.ratTexture.Width), float32(assets.ratTexture.Height))
 	size := rl.NewVector2(0.82, 1.22)
 	for i, enemy := range g.Enemies {
-		deathFade := g.Battle.Phase != core.BattleNone && enemy.DeathFade > 0 && battleContainsEnemy(g.Battle, i)
+		deathFade := g.Battle.Phase != core.BattleNone && enemy.DeathFade > 0 && core.BattleContainsEnemy(g.Battle, i)
 		if !enemy.Alive && !deathFade {
 			continue
 		}
@@ -88,12 +88,13 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 	if g.Battle.Phase == core.BattleNone {
 		return
 	}
-	source := rl.NewRectangle(0, 0, float32(assets.partyTexture[0].Width), float32(assets.partyTexture[0].Height))
 	victoryDance := victoryDanceElapsed(g)
 	for i := range g.Party {
-		if i >= len(assets.partyTexture) {
-			break
+		texture, ok := partyTextureFor(assets, g.Party[i])
+		if !ok {
+			continue
 		}
+		source := rl.NewRectangle(0, 0, float32(texture.Width), float32(texture.Height))
 		memberDance := float32(0)
 		if g.Party[i].HP > 0 {
 			memberDance = victoryDance
@@ -114,11 +115,19 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 		if g.Party[i].DamageFlash > 0 {
 			tint = core.FlashTint(tint, g.Party[i].DamageFlash)
 		}
-		rl.DrawBillboardRec(camera, assets.partyTexture[i], source, position, size, tint)
+		rl.DrawBillboardRec(camera, texture, source, position, size, tint)
 		if g.Battle.Phase == core.BattlePlayer && g.Battle.ActionMode == core.ActionPartyTarget && i == g.Battle.PartyTarget && g.Party[i].HP > 0 {
 			drawFriendlyTargetMarker(camera, position)
 		}
 	}
+}
+
+func partyTextureFor(assets Resources, member core.PartyMember) (rl.Texture2D, bool) {
+	texture, ok := assets.partyTexture[member.Class]
+	if !ok || texture.ID == 0 {
+		return rl.Texture2D{}, false
+	}
+	return texture, true
 }
 
 func drawFriendlyTargetMarker(camera rl.Camera3D, position rl.Vector3) {
@@ -226,7 +235,7 @@ func victoryDanceMotion(index int, elapsed float32) (float32, float32, float32, 
 }
 
 func enemyDrawPosition(camera rl.Camera3D, g core.GameState, index int, enemy core.Enemy) rl.Vector3 {
-	if g.Battle.Phase == core.BattleNone || !battleContainsEnemy(g.Battle, index) {
+	if g.Battle.Phase == core.BattleNone || !core.BattleContainsEnemy(g.Battle, index) {
 		return rl.NewVector3(core.TileCenter(enemy.TileX), 0.68, core.TileCenter(enemy.TileZ))
 	}
 
@@ -263,15 +272,6 @@ func horizontalForward(camera rl.Camera3D) rl.Vector3 {
 		return rl.NewVector3(1, 0, 0)
 	}
 	return rl.NewVector3(x/length, 0, z/length)
-}
-
-func battleContainsEnemy(b core.Battle, index int) bool {
-	for _, enemyIndex := range b.EnemyGroup {
-		if enemyIndex == index {
-			return true
-		}
-	}
-	return false
 }
 
 func battleEnemySlot(g core.GameState, index int) (int, int) {

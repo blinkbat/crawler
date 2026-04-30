@@ -10,7 +10,7 @@ func FlashTint(base color.RGBA, timer float32) color.RGBA {
 		return base
 	}
 	strength := math.Min(0.86, float64(timer/FlashDuration)*0.86)
-	return mixColor(base, color.RGBA{R: 255, G: 255, B: 255, A: base.A}, strength)
+	return MixColor(base, color.RGBA{R: 255, G: 255, B: 255, A: base.A}, strength)
 }
 
 func BumpOffset(timer, distance float32) float32 {
@@ -89,6 +89,17 @@ func NormalizeFacing(facing int) int {
 	return facing
 }
 
+func WrapIndex(index, count int) int {
+	if count <= 0 {
+		return 0
+	}
+	index %= count
+	if index < 0 {
+		index += count
+	}
+	return index
+}
+
 func AbsInt(v int) int {
 	if v < 0 {
 		return -v
@@ -152,7 +163,7 @@ func ClampByte(v int) uint8 {
 	return uint8(v)
 }
 
-func mixColor(a, b color.RGBA, t float64) color.RGBA {
+func MixColor(a, b color.RGBA, t float64) color.RGBA {
 	t = math.Max(0, math.Min(1, t))
 	return color.RGBA{
 		R: uint8(float64(a.R)*(1-t) + float64(b.R)*t),

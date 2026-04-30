@@ -3,25 +3,26 @@ package explore
 import (
 	"crawler/internal/app/battle"
 	"crawler/internal/app/core"
+	"crawler/internal/app/input"
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"math"
 )
 
-func Update(g *core.GameState, m core.GameMap) {
+func Update(g *core.GameState) {
 	dt := rl.GetFrameTime()
 	if g.Battle.Phase != core.BattleNone {
 		battle.Update(g, dt)
 		return
 	}
 
-	if rl.IsKeyPressed(rl.KeyEscape) {
+	if input.PausePressed() {
 		g.MenuOpen = !g.MenuOpen
 		g.Player.LookYaw = 0
 		g.Player.LookPitch = 0
 		return
 	}
 	if g.MenuOpen {
-		updateMenu(g, m)
+		updateMenu(g)
 		return
 	}
 
@@ -29,50 +30,43 @@ func Update(g *core.GameState, m core.GameMap) {
 	if g.Player.Anim.Kind == core.AnimNone && StartAdjacent(g) {
 		return
 	}
-	updatePlayer(g, m)
+	updatePlayer(g)
 	if g.Battle.Phase == core.BattleNone && g.Player.Anim.Kind == core.AnimNone {
 		StartAdjacent(g)
 	}
 }
 
-func updateMenu(g *core.GameState, m core.GameMap) {
-	if rl.IsKeyPressed(rl.KeyUp) || rl.IsKeyPressed(rl.KeyW) {
-		g.MenuIndex = wrapMenuIndex(g.MenuIndex-1, 2)
-	}
-	if rl.IsKeyPressed(rl.KeyDown) || rl.IsKeyPressed(rl.KeyS) {
-		g.MenuIndex = wrapMenuIndex(g.MenuIndex+1, 2)
-	}
-	if rl.IsKeyPressed(rl.KeyR) {
-		restartGame(g, m)
+func updateMenu(g *core.GameState) {
+	if input.BackPressed() {
+		g.MenuOpen = false
 		return
 	}
-	if rl.IsKeyPressed(rl.KeyQ) {
+	if input.UpPressed() {
+		g.MenuIndex = core.WrapIndex(g.MenuIndex-1, 2)
+	}
+	if input.DownPressed() {
+		g.MenuIndex = core.WrapIndex(g.MenuIndex+1, 2)
+	}
+	if input.RestartPressed() {
+		restartGame(g)
+		return
+	}
+	if input.QuitPressed() {
 		g.Quit = true
 		return
 	}
-	if rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeySpace) {
+	if input.ConfirmPressed() {
 		switch g.MenuIndex {
 		case 0:
-			restartGame(g, m)
+			restartGame(g)
 		case 1:
 			g.Quit = true
 		}
 	}
 }
 
-func wrapMenuIndex(index, count int) int {
-	if count <= 0 {
-		return 0
-	}
-	index %= count
-	if index < 0 {
-		index += count
-	}
-	return index
-}
-
-func restartGame(g *core.GameState, m core.GameMap) {
-	*g = core.NewGameState(m)
+func restartGame(g *core.GameState) {
+	core.ResetGameState(g)
 }
 
 func updateFreeLook(p *core.Player) {
@@ -86,7 +80,7 @@ func updateFreeLook(p *core.Player) {
 	p.LookPitch = 0
 }
 
-func updatePlayer(g *core.GameState, m core.GameMap) {
+func updatePlayer(g *core.GameState) {
 	dt := rl.GetFrameTime()
 	p := &g.Player
 
@@ -96,34 +90,27 @@ func updatePlayer(g *core.GameState, m core.GameMap) {
 	}
 
 	switch {
-	case rl.IsKeyPressed(rl.KeyLeft) || rl.IsKeyPressed(rl.KeyQ):
+	case input.TurnLeftPressed():
 		startTurn(p, -1)
-	case rl.IsKeyPressed(rl.KeyRight) || rl.IsKeyPressed(rl.KeyE):
+	case input.TurnRightPressed():
 		startTurn(p, 1)
-	case rl.IsKeyPressed(rl.KeyW) || rl.IsKeyPressed(rl.KeyUp):
-		startStep(p, g, m, 0, 1)
-	case rl.IsKeyPressed(rl.KeyS) || rl.IsKeyPressed(rl.KeyDown):
-		startStep(p, g, m, 0, -1)
-	case rl.IsKeyPressed(rl.KeyA):
-		startStep(p, g, m, -1, 0)
-	case rl.IsKeyPressed(rl.KeyD):
-		startStep(p, g, m, 1, 0)
+	case input.StepForwardPressed():
+		startStep(p, g, 0, 1)
+	case input.StepBackPressed():
+		startStep(p, g, 0, -1)
+	case input.StrafeLeftPressed():
+		startStep(p, g, -1, 0)
+	case input.StrafeRightPressed():
+		startStep(p, g, 1, 0)
 	}
 }
 
-func startStep(p *core.Player, g *core.GameState, m core.GameMap, strafe, forward int) {
+func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	dx, dz := core.FacingVector(p.Facing)
 	rx, rz := core.FacingVector(core.NormalizeFacing(p.Facing + 1))
 	targetX := p.TileX + dx*forward + rx*strafe
 	targetZ := p.TileZ + dz*forward + rz*strafe
-	if m.WallAt(targetX, targetZ) {
-		return
-	}
-	if enemyIndex := liveEnemyAt(g.Enemies, targetX, targetZ); enemyIndex >= 0 {
-		if startTurnToTile(p, targetX, targetZ) {
-			return
-		}
-		battle.Start(g, enemyIndex)
+	if g.Map.WallAt(targetX, targetZ) {
 		return
 	}
 
@@ -214,15 +201,6 @@ func updateAnimation(p *core.Player, dt float32) {
 	}
 	p.Yaw = core.FacingYaw(p.Facing)
 	p.Anim = core.Animation{}
-}
-
-func liveEnemyAt(enemies []core.Enemy, tileX, tileZ int) int {
-	for i, e := range enemies {
-		if e.Alive && e.TileX == tileX && e.TileZ == tileZ {
-			return i
-		}
-	}
-	return -1
 }
 
 func adjacentEnemyIndex(enemies []core.Enemy, tileX, tileZ int) int {

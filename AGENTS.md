@@ -20,14 +20,18 @@ This workspace is Windows-first. Prefer bash if it is installed, but do not bloc
 - `internal/app/core/types.go`: shared structs for player, map state, battle state, enemies, and party members.
 - `internal/app/core/state.go`: initial game state, party members, and rat factory.
 - `internal/app/core/map.go`: dungeon layout, map queries, rat placement helpers.
+- `internal/app/core/party.go`: party class definitions and skill names/costs.
+- `internal/app/core/selectors.go`: read-only party/battle selectors and turn forecast generation.
+- `internal/app/core/condition.go`: enemy wound-state thresholds and labels.
 - `internal/app/core/util.go`: math, easing, direction, color, clamp, flash, and bump helpers.
+- `internal/app/input/`: shared key semantics for confirm/back/menu/targeting/exploration controls.
 - `internal/app/explore/`: non-battle game input and movement.
 - `internal/app/explore/movement.go`: pause menu input, tile movement, free-look snapback, step/turn animations, adjacent encounter checks.
 - `internal/app/battle/`: turn-based combat state machine and rules.
 - `internal/app/battle/battle.go`: battle lifecycle, phase transitions, battle log updates, transient combat effects.
-- `internal/app/battle/menu.go`: combat menu input, enemy/party target cycling, class skill metadata, confirm/back controls.
+- `internal/app/battle/menu.go`: combat menu input and enemy/party target cycling.
 - `internal/app/battle/actions.go`: Attack, Swipe, Prayer, Steal, Firebolt, burn ticks, damage resolution, rat attacks.
-- `internal/app/battle/helpers.go`: living-count helpers, party helpers, turn forecast generation.
+- `internal/app/battle/helpers.go`: battle encounter group selection.
 - `internal/app/render/`: raylib drawing, procedural assets, and HUD.
 - `internal/app/render/world.go`: camera, screen-filling sky background, world drawing, enemy/party billboards, target markers, battle formation positioning.
 - `internal/app/render/hud.go`: top-level HUD routing and exploration party totals.
@@ -63,7 +67,7 @@ This workspace is Windows-first. Prefer bash if it is installed, but do not bloc
 - Keep HUD surfaces rounded and slightly translucent; preserve readable borders and text shadows.
 - Use `setBattleMessage` for real combat log events. Use `setBattleStatus` for transient prompts like target selection.
 - Enemy death uses `deathFade`; do not immediately remove dead enemies from battle visuals if the fade is still active.
-- Target tooltip text is centered, with wound-state colors from `enemyHealthColor`.
+- Target tooltip text is centered, with wound-state labels from `core.EnemyConditionFor`.
 - Party stat cards are pinned near the screen bottom and horizontally follow the projected party sprite positions.
 
 ## Caution

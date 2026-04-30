@@ -42,6 +42,7 @@ type GameState struct {
 }
 
 type PartyMember struct {
+	Class PartyClass
 	Name  string
 	HP    int
 	MaxHP int

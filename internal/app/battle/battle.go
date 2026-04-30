@@ -2,6 +2,7 @@ package battle
 
 import (
 	"crawler/internal/app/core"
+	"crawler/internal/app/input"
 	"fmt"
 )
 
@@ -9,11 +10,11 @@ func Start(g *core.GameState, enemyIndex int) {
 	group := nearbyBattleGroup(g.Enemies, enemyIndex)
 	g.Battle.EnemyIndex = enemyIndex
 	g.Battle.EnemyGroup = group
-	g.Battle.CurrentParty = firstLivingPartyMember(g.Party)
+	g.Battle.CurrentParty = core.FirstLivingPartyMember(g.Party)
 	g.Battle.ActionMode = core.ActionMenu
 	g.Battle.MenuIndex = 0
 	g.Battle.PendingSkill = core.SkillNone
-	g.Battle.PartyTarget = firstLivingPartyMember(g.Party)
+	g.Battle.PartyTarget = core.FirstLivingPartyMember(g.Party)
 	g.Battle.Phase = core.BattlePlayer
 	g.Battle.Timer = 0
 	g.Battle.Splash = 1.15
@@ -31,13 +32,12 @@ func Update(g *core.GameState, dt float32) {
 		g.Battle.Phase = core.BattleNone
 		return
 	}
-	if LivingBattleCount(g) == 0 && g.Battle.Phase != core.BattleWon {
+	if core.LivingBattleCount(g) == 0 && g.Battle.Phase != core.BattleWon {
 		g.Battle.Phase = core.BattleNone
 		return
 	}
-	if g.Battle.Phase != core.BattleWon && livingPartyCount(g.Party) == 0 {
-		g.Battle.Phase = core.BattleLost
-		setBattleMessage(g, "The party is driven back. Press Enter to recover.")
+	if g.Battle.Phase != core.BattleWon && core.LivingPartyCount(g.Party) == 0 {
+		loseBattle(g, "The party is driven back. Press Enter to recover.")
 		return
 	}
 	if g.Battle.Splash > 0 {
@@ -56,20 +56,17 @@ func Update(g *core.GameState, dt float32) {
 			return
 		}
 		burns := resolveBurns(g)
-		if LivingBattleCount(g) == 0 {
-			g.Battle.Phase = core.BattleWon
-			g.Battle.Timer = core.VictoryDanceDuration
-			setBattleMessage(g, "The fire finishes them.")
+		if core.LivingBattleCount(g) == 0 {
+			winBattle(g, "The fire finishes them.")
 			return
 		}
 		hits := resolveRatAttacks(g)
-		if livingPartyCount(g.Party) == 0 {
-			g.Battle.Phase = core.BattleLost
-			setBattleMessage(g, "The rats drive the party back. Press Enter to recover.")
+		if core.LivingPartyCount(g.Party) == 0 {
+			loseBattle(g, "The rats drive the party back. Press Enter to recover.")
 			return
 		}
 		g.Battle.Phase = core.BattlePlayer
-		beginPartyTurn(g, firstLivingPartyMember(g.Party))
+		beginPartyTurn(g, core.FirstLivingPartyMember(g.Party))
 		if burns > 0 && hits > 1 {
 			setBattleMessage(g, fmt.Sprintf("Flames bite. %d rats snap at the party.", hits))
 		} else if burns > 0 && hits == 1 {
@@ -82,17 +79,37 @@ func Update(g *core.GameState, dt float32) {
 	case core.BattleWon:
 		g.Battle.Timer -= dt
 		if g.Battle.Timer <= 0 && !battleDeathFadeActive(g) {
-			g.Battle.EnemyIndex = -1
-			g.Battle.EnemyGroup = nil
-			g.Battle.PendingSkill = core.SkillNone
-			g.Battle.Phase = core.BattleNone
-			setBattleMessage(g, "The dungeon is quiet.")
+			leaveBattle(g, "The dungeon is quiet.")
 		}
 	case core.BattleLost:
-		if confirmPressed() {
+		if input.ConfirmPressed() {
 			recoverFromLoss(g)
 		}
 	}
+}
+
+func winBattle(g *core.GameState, message string) {
+	g.Battle.Phase = core.BattleWon
+	g.Battle.Timer = core.VictoryDanceDuration
+	g.Battle.ActionMode = core.ActionMenu
+	g.Battle.PendingSkill = core.SkillNone
+	setBattleMessage(g, message)
+}
+
+func loseBattle(g *core.GameState, message string) {
+	g.Battle.Phase = core.BattleLost
+	g.Battle.ActionMode = core.ActionMenu
+	g.Battle.PendingSkill = core.SkillNone
+	setBattleMessage(g, message)
+}
+
+func leaveBattle(g *core.GameState, message string) {
+	g.Battle.EnemyIndex = -1
+	g.Battle.EnemyGroup = nil
+	g.Battle.ActionMode = core.ActionMenu
+	g.Battle.PendingSkill = core.SkillNone
+	g.Battle.Phase = core.BattleNone
+	setBattleMessage(g, message)
 }
 
 func recoverFromLoss(g *core.GameState) {
@@ -101,16 +118,15 @@ func recoverFromLoss(g *core.GameState) {
 }
 
 func updatePlayerBattle(g *core.GameState) {
-	if !PartyMemberAlive(g.Party, g.Battle.CurrentParty) {
-		beginPartyTurn(g, firstLivingPartyMember(g.Party))
+	if !core.PartyMemberAlive(g.Party, g.Battle.CurrentParty) {
+		beginPartyTurn(g, core.FirstLivingPartyMember(g.Party))
 		if g.Battle.CurrentParty < 0 {
-			g.Battle.Phase = core.BattleLost
-			setBattleMessage(g, "The party is driven back. Press Enter to recover.")
+			loseBattle(g, "The party is driven back. Press Enter to recover.")
 			return
 		}
 	}
 	if g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(g.Enemies) || !g.Enemies[g.Battle.EnemyIndex].Alive {
-		if next := nextLivingBattleEnemy(g); next >= 0 {
+		if next := core.NextLivingBattleEnemy(g); next >= 0 {
 			g.Battle.EnemyIndex = next
 		}
 	}
@@ -133,7 +149,7 @@ func beginPartyTurn(g *core.GameState, partyIndex int) {
 	if partyIndex >= 0 && partyIndex < len(g.Party) {
 		g.Battle.PartyTarget = partyIndex
 	} else {
-		g.Battle.PartyTarget = firstLivingPartyMember(g.Party)
+		g.Battle.PartyTarget = core.FirstLivingPartyMember(g.Party)
 	}
 	if g.Battle.PartyTarget < 0 {
 		g.Battle.PartyTarget = 0

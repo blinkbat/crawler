@@ -6,7 +6,7 @@ import (
 )
 
 func useAttack(g *core.GameState) {
-	if !validLivingEnemy(g, g.Battle.EnemyIndex) {
+	if !core.EnemyAlive(g.Enemies, g.Battle.EnemyIndex) {
 		setBattleStatus(g, "No target.")
 		return
 	}
@@ -24,7 +24,7 @@ func useAttack(g *core.GameState) {
 
 func useSwipe(g *core.GameState) {
 	actor := &g.Party[g.Battle.CurrentParty]
-	cost := SkillCost(core.SkillSwipe)
+	cost := core.SkillCost(core.SkillSwipe)
 	if actor.MP < cost {
 		setBattleStatus(g, "Swipe needs more MP.")
 		return
@@ -33,7 +33,7 @@ func useSwipe(g *core.GameState) {
 	actor.AttackBump = core.BumpDuration
 	hits := 0
 	for _, index := range g.Battle.EnemyGroup {
-		if !validLivingEnemy(g, index) {
+		if !core.EnemyAlive(g.Enemies, index) {
 			continue
 		}
 		damageEnemy(g, index, 3)
@@ -42,14 +42,14 @@ func useSwipe(g *core.GameState) {
 	if hits == 0 {
 		setBattleMessage(g, "Swipe catches only air.")
 	} else {
-		setBattleMessage(g, fmt.Sprintf("Warrior swipes through %d foes.", hits))
+		setBattleMessage(g, fmt.Sprintf("%s swipes through %d foes.", actor.Name, hits))
 	}
 	finishPartyAction(g)
 }
 
 func usePrayer(g *core.GameState) {
 	actor := &g.Party[g.Battle.CurrentParty]
-	cost := SkillCost(core.SkillPrayer)
+	cost := core.SkillCost(core.SkillPrayer)
 	if actor.MP < cost {
 		setBattleStatus(g, "Prayer needs more MP.")
 		return
@@ -71,12 +71,12 @@ func usePrayer(g *core.GameState) {
 	}
 	actor.AttackBump = core.BumpDuration
 	target.DamageFlash = core.FlashDuration
-	setBattleMessage(g, fmt.Sprintf("Cleric prays over %s.", target.Name))
+	setBattleMessage(g, fmt.Sprintf("%s prays over %s.", actor.Name, target.Name))
 	finishPartyAction(g)
 }
 
 func useSteal(g *core.GameState) {
-	if !validLivingEnemy(g, g.Battle.EnemyIndex) {
+	if !core.EnemyAlive(g.Enemies, g.Battle.EnemyIndex) {
 		setBattleStatus(g, "No target.")
 		return
 	}
@@ -91,20 +91,20 @@ func useSteal(g *core.GameState) {
 	if core.GameRNG.Float64() < 0.7 {
 		item := enemy.Item
 		enemy.Item = ""
-		setBattleMessage(g, fmt.Sprintf("Thief steals %s.", item))
+		setBattleMessage(g, fmt.Sprintf("%s steals %s.", actor.Name, item))
 	} else {
-		setBattleMessage(g, "Thief fails to steal.")
+		setBattleMessage(g, fmt.Sprintf("%s fails to steal.", actor.Name))
 	}
 	finishPartyAction(g)
 }
 
 func useFirebolt(g *core.GameState) {
-	if !validLivingEnemy(g, g.Battle.EnemyIndex) {
+	if !core.EnemyAlive(g.Enemies, g.Battle.EnemyIndex) {
 		setBattleStatus(g, "No target.")
 		return
 	}
 	actor := &g.Party[g.Battle.CurrentParty]
-	cost := SkillCost(core.SkillFirebolt)
+	cost := core.SkillCost(core.SkillFirebolt)
 	if actor.MP < cost {
 		setBattleStatus(g, "Firebolt needs more MP.")
 		return
@@ -120,28 +120,26 @@ func useFirebolt(g *core.GameState) {
 		burned = true
 	}
 	if defeated {
-		setBattleMessage(g, "Wizard's Firebolt drops the rat.")
+		setBattleMessage(g, fmt.Sprintf("%s's Firebolt drops the rat.", actor.Name))
 	} else if burned {
-		setBattleMessage(g, fmt.Sprintf("Wizard scorches the rat for %d. Burning!", damage))
+		setBattleMessage(g, fmt.Sprintf("%s scorches the rat for %d. Burning!", actor.Name, damage))
 	} else if enemy.BurnTurns > 0 {
-		setBattleMessage(g, fmt.Sprintf("Wizard hits for %d. Burn is already active.", damage))
+		setBattleMessage(g, fmt.Sprintf("%s hits for %d. Burn is already active.", actor.Name, damage))
 	} else {
-		setBattleMessage(g, fmt.Sprintf("Wizard hits for %d.", damage))
+		setBattleMessage(g, fmt.Sprintf("%s hits for %d.", actor.Name, damage))
 	}
 	finishPartyAction(g)
 }
 
 func finishPartyAction(g *core.GameState) {
-	if LivingBattleCount(g) == 0 {
-		g.Battle.Phase = core.BattleWon
-		g.Battle.Timer = core.VictoryDanceDuration
-		setBattleMessage(g, "The last rat falls.")
+	if core.LivingBattleCount(g) == 0 {
+		winBattle(g, "The last rat falls.")
 		return
 	}
-	if next := nextLivingBattleEnemy(g); next >= 0 && !validLivingEnemy(g, g.Battle.EnemyIndex) {
+	if next := core.NextLivingBattleEnemy(g); next >= 0 && !core.EnemyAlive(g.Enemies, g.Battle.EnemyIndex) {
 		g.Battle.EnemyIndex = next
 	}
-	if next := nextLivingPartyMember(g.Party, g.Battle.CurrentParty+1); next >= 0 {
+	if next := core.NextLivingPartyMember(g.Party, g.Battle.CurrentParty+1); next >= 0 {
 		beginPartyTurn(g, next)
 		return
 	}
@@ -152,7 +150,7 @@ func finishPartyAction(g *core.GameState) {
 }
 
 func damageEnemy(g *core.GameState, enemyIndex, damage int) bool {
-	if !validLivingEnemy(g, enemyIndex) {
+	if !core.EnemyAlive(g.Enemies, enemyIndex) {
 		return false
 	}
 	enemy := &g.Enemies[enemyIndex]
@@ -171,14 +169,14 @@ func damageEnemy(g *core.GameState, enemyIndex, damage int) bool {
 func resolveBurns(g *core.GameState) int {
 	hits := 0
 	for _, enemyIndex := range g.Battle.EnemyGroup {
-		if !validLivingEnemy(g, enemyIndex) || g.Enemies[enemyIndex].BurnTurns <= 0 {
+		if !core.EnemyAlive(g.Enemies, enemyIndex) || g.Enemies[enemyIndex].BurnTurns <= 0 {
 			continue
 		}
 		g.Enemies[enemyIndex].BurnTurns--
 		damageEnemy(g, enemyIndex, 2)
 		hits++
 	}
-	if next := nextLivingBattleEnemy(g); next >= 0 && !validLivingEnemy(g, g.Battle.EnemyIndex) {
+	if next := core.NextLivingBattleEnemy(g); next >= 0 && !core.EnemyAlive(g.Enemies, g.Battle.EnemyIndex) {
 		g.Battle.EnemyIndex = next
 	}
 	return hits
@@ -188,12 +186,12 @@ func resolveRatAttacks(g *core.GameState) int {
 	hits := 0
 	targetCursor := 0
 	for _, enemyIndex := range g.Battle.EnemyGroup {
-		if enemyIndex < 0 || enemyIndex >= len(g.Enemies) || !g.Enemies[enemyIndex].Alive {
+		if !core.EnemyAlive(g.Enemies, enemyIndex) {
 			continue
 		}
-		target := nextLivingPartyMember(g.Party, targetCursor)
+		target := core.NextLivingPartyMember(g.Party, targetCursor)
 		if target < 0 {
-			target = firstLivingPartyMember(g.Party)
+			target = core.FirstLivingPartyMember(g.Party)
 		}
 		if target < 0 {
 			break
