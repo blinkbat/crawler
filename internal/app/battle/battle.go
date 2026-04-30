@@ -58,7 +58,7 @@ func Update(g *core.GameState, dt float32) {
 		burns := resolveBurns(g)
 		if LivingBattleCount(g) == 0 {
 			g.Battle.Phase = core.BattleWon
-			g.Battle.Timer = core.DeathFadeDuration
+			g.Battle.Timer = core.VictoryDanceDuration
 			setBattleMessage(g, "The fire finishes them.")
 			return
 		}

@@ -83,11 +83,16 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 		return
 	}
 	source := rl.NewRectangle(0, 0, float32(assets.partyTexture[0].Width), float32(assets.partyTexture[0].Height))
+	victoryDance := victoryDanceElapsed(g)
 	for i := range g.Party {
 		if i >= len(assets.partyTexture) {
 			break
 		}
-		position := partySpritePosition(camera, i, g.Party[i].AttackBump)
+		memberDance := float32(0)
+		if g.Party[i].HP > 0 {
+			memberDance = victoryDance
+		}
+		position := partySpritePosition(camera, i, g.Party[i].AttackBump, memberDance)
 		size := rl.NewVector2(0.38, 0.68)
 		tint := rl.White
 		if g.Party[i].HP <= 0 {
@@ -95,6 +100,10 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 		} else if g.Battle.Phase == core.BattlePlayer && i == g.Battle.CurrentParty {
 			tint = rl.NewColor(255, 245, 204, 255)
 			size = rl.NewVector2(0.42, 0.72)
+		} else if memberDance > 0 {
+			_, _, _, scale := victoryDanceMotion(i, memberDance)
+			size.X *= scale
+			size.Y *= scale
 		}
 		if g.Party[i].DamageFlash > 0 {
 			tint = core.FlashTint(tint, g.Party[i].DamageFlash)
@@ -108,8 +117,13 @@ func DrawBattlePartyLabels(camera rl.Camera3D, g core.GameState, assets Resource
 		return
 	}
 	labelY := float32(rl.GetScreenHeight()) - 86
+	victoryDance := victoryDanceElapsed(g)
 	for i, member := range g.Party {
-		position := partySpritePosition(camera, i, member.AttackBump)
+		memberDance := float32(0)
+		if member.HP > 0 {
+			memberDance = victoryDance
+		}
+		position := partySpritePosition(camera, i, member.AttackBump, memberDance)
 		screen := rl.GetWorldToScreen(rl.NewVector3(position.X, position.Y, position.Z), camera)
 		if screen.X < -80 || screen.X > float32(rl.GetScreenWidth())+80 || screen.Y < -80 || screen.Y > float32(rl.GetScreenHeight())+80 {
 			continue
@@ -126,7 +140,7 @@ func DrawBattlePartyLabels(camera rl.Camera3D, g core.GameState, assets Resource
 	}
 }
 
-func partySpritePosition(camera rl.Camera3D, index int, bump float32) rl.Vector3 {
+func partySpritePosition(camera rl.Camera3D, index int, bump, victoryDance float32) rl.Vector3 {
 	forward := horizontalForward(camera)
 	right := rl.NewVector3(-forward.Z, 0, forward.X)
 	base := rl.NewVector3(
@@ -139,11 +153,56 @@ func partySpritePosition(camera rl.Camera3D, index int, bump float32) rl.Vector3
 	if index == 1 || index == 2 {
 		depth = -0.04
 	}
+	danceSide, danceDepth, danceHeight, _ := victoryDanceMotion(index, victoryDance)
+	bumpDepth := core.BumpOffset(bump, 0.22)
 	return rl.NewVector3(
-		base.X+right.X*offset+forward.X*(depth+core.BumpOffset(bump, 0.22)),
-		base.Y,
-		base.Z+right.Z*offset+forward.Z*(depth+core.BumpOffset(bump, 0.22)),
+		base.X+right.X*(offset+danceSide)+forward.X*(depth+bumpDepth+danceDepth),
+		base.Y+danceHeight,
+		base.Z+right.Z*(offset+danceSide)+forward.Z*(depth+bumpDepth+danceDepth),
 	)
+}
+
+func victoryDanceElapsed(g core.GameState) float32 {
+	if g.Battle.Phase != core.BattleWon {
+		return 0
+	}
+	remaining := core.Clamp(g.Battle.Timer, 0, core.VictoryDanceDuration)
+	return core.VictoryDanceDuration - remaining
+}
+
+func victoryDanceMotion(index int, elapsed float32) (float32, float32, float32, float32) {
+	if elapsed <= 0 {
+		return 0, 0, 0, 1
+	}
+
+	wave := func(freq, phase float64) float32 {
+		return float32(math.Sin(float64(elapsed)*math.Pi*2*freq + phase))
+	}
+	hop := func(freq, phase float64) float32 {
+		v := wave(freq, phase)
+		if v < 0 {
+			return -v
+		}
+		return v
+	}
+
+	switch index {
+	case 0:
+		height := hop(2.7, 0) * 0.16
+		return wave(1.35, 0) * 0.035, wave(2.7, math.Pi/2) * 0.025, height, 1 + height*0.1
+	case 1:
+		bob := wave(1.7, 0)
+		return wave(1.2, math.Pi/5) * 0.075, 0, (bob + 1) * 0.045, 1 + bob*0.025
+	case 2:
+		height := hop(4.3, 0) * 0.07
+		return wave(3.6, 0) * 0.13, wave(2.4, math.Pi/2) * 0.045, height, 1 + height*0.45
+	case 3:
+		floatBob := wave(1.25, math.Pi/3)
+		return wave(0.9, math.Pi/2) * 0.055, wave(1.1, 0) * 0.045, 0.09 + floatBob*0.055, 1 + floatBob*0.03
+	default:
+		height := hop(2, 0) * 0.08
+		return wave(1.5, 0) * 0.05, 0, height, 1
+	}
 }
 
 func enemyDrawPosition(camera rl.Camera3D, g core.GameState, index int, enemy core.Enemy) rl.Vector3 {

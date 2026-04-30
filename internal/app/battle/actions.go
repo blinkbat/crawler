@@ -130,7 +130,7 @@ func useFirebolt(g *core.GameState) {
 func finishPartyAction(g *core.GameState) {
 	if LivingBattleCount(g) == 0 {
 		g.Battle.Phase = core.BattleWon
-		g.Battle.Timer = core.DeathFadeDuration
+		g.Battle.Timer = core.VictoryDanceDuration
 		setBattleMessage(g, "The last rat falls.")
 		return
 	}
