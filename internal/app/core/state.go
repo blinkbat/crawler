@@ -12,7 +12,7 @@ func NewPlayer(tileX, tileZ, facing int) Player {
 }
 
 func NewGameState(m GameMap) GameState {
-	return GameState{
+	g := GameState{
 		Map:     m,
 		Player:  NewPlayer(StartTileX, StartTileZ, StartFacing),
 		Party:   NewParty(),
@@ -25,15 +25,16 @@ func NewGameState(m GameMap) GameState {
 			PendingSkill: SkillNone,
 			PartyTarget:  0,
 			Phase:        BattleNone,
-			Message:      "The dungeon is quiet.",
+			Message:      "The field is quiet.",
 		},
 	}
+	return g
 }
 
 func ResetGameState(g *GameState) {
 	m := g.Map
 	if len(m.Rows) == 0 {
-		m = NewGameMap(DungeonLayout)
+		m = NewGameMap(FieldLayout)
 	}
 	*g = NewGameState(m)
 }

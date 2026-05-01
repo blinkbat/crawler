@@ -20,8 +20,8 @@ type Resources struct {
 }
 
 func LoadResources() Resources {
-	wallTexture := loadTexture(makeStoneBrickPixels(128, 128), 128, 128, rl.FilterPoint)
-	floorTexture := loadTexture(makeStoneFloorPixels(128, 128), 128, 128, rl.FilterPoint)
+	wallTexture := loadTexture(makeRockWallPixels(128, 128), 128, 128, rl.FilterPoint)
+	floorTexture := loadTexture(makeGrassPixels(128, 128), 128, 128, rl.FilterPoint)
 	skyTexture := loadTexture(makeSkyPixels(1024, 512), 1024, 512, rl.FilterTrilinear)
 	rl.GenTextureMipmaps(&skyTexture)
 	rl.SetTextureFilter(skyTexture, rl.FilterTrilinear)

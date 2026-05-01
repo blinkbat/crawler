@@ -1,6 +1,8 @@
 package render
 
 import (
+	"image/color"
+
 	"crawler/internal/app/core"
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -22,12 +24,9 @@ func drawMinimap(m core.GameMap, g core.GameState) {
 		for localX := int32(0); localX < viewCells; localX++ {
 			mapX := startX + int(localX)
 			mapZ := startZ + int(localZ)
-			col := rl.NewColor(18, 20, 24, 228)
+			col := rl.NewColor(8, 10, 12, 228)
 			if mapX >= 0 && mapX < m.Width && mapZ >= 0 && mapZ < m.Height {
-				col = rl.NewColor(38, 42, 48, 228)
-			}
-			if mapX >= 0 && mapX < m.Width && mapZ >= 0 && mapZ < m.Height && m.WallAt(mapX, mapZ) {
-				col = rl.NewColor(178, 92, 96, 228)
+				col = minimapTileColor(m.TileAt(mapX, mapZ))
 			}
 			rl.DrawRectangle(pad+localX*cell, pad+localZ*cell, cell-1, cell-1, col)
 		}
@@ -51,6 +50,17 @@ func drawMinimap(m core.GameMap, g core.GameState) {
 		rl.NewVector2(float32(pad+viewCells*cell/2), float32(pad+viewCells*cell/2)),
 		p.Facing,
 	)
+}
+
+func minimapTileColor(tile byte) color.RGBA {
+	switch tile {
+	case core.TileRock:
+		return rl.NewColor(112, 112, 106, 228)
+	case core.TileTree:
+		return rl.NewColor(42, 132, 56, 238)
+	default:
+		return rl.NewColor(60, 121, 54, 228)
+	}
 }
 
 func drawMinimapArrow(center rl.Vector2, facing int) {

@@ -4,6 +4,12 @@ import (
 	"math"
 )
 
+const (
+	TileFloor = '.'
+	TileRock  = '#'
+	TileTree  = 'T'
+)
+
 var DungeonLayout = []string{
 	"################",
 	"#..............#",
@@ -21,6 +27,39 @@ var DungeonLayout = []string{
 	"#.#.#......#...#",
 	"#...############",
 	"################",
+}
+
+var FieldLayout = buildFieldLayout(30, 22, [][2]int{
+	{5, 3}, {13, 3}, {22, 3},
+	{8, 6}, {18, 6}, {25, 6},
+	{4, 9}, {12, 10}, {21, 10},
+	{7, 14}, {16, 14}, {24, 15},
+	{11, 18}, {20, 18},
+})
+
+func buildFieldLayout(width, height int, trees [][2]int) []string {
+	rows := make([][]byte, height)
+	for z := 0; z < height; z++ {
+		rows[z] = make([]byte, width)
+		for x := 0; x < width; x++ {
+			tile := byte(TileFloor)
+			if x == 0 || z == 0 || x == width-1 || z == height-1 {
+				tile = TileRock
+			}
+			rows[z][x] = tile
+		}
+	}
+	for _, tree := range trees {
+		x, z := tree[0], tree[1]
+		if x > 0 && x < width-1 && z > 0 && z < height-1 {
+			rows[z][x] = TileTree
+		}
+	}
+	layout := make([]string, height)
+	for z := range rows {
+		layout[z] = string(rows[z])
+	}
+	return layout
 }
 
 func NewGameMap(rows []string) GameMap {
@@ -70,12 +109,25 @@ func nearestOpenTile(m GameMap, wantX, wantZ int, occupied map[[2]int]bool) (int
 }
 
 func (m GameMap) WallAt(x, z int) bool {
+	return m.BlockedAt(x, z)
+}
+
+func (m GameMap) TileAt(x, z int) byte {
 	if z < 0 || z >= m.Height || x < 0 || x >= len(m.Rows[z]) {
-		return true
+		return TileRock
 	}
-	return m.Rows[z][x] == '#'
+	return m.Rows[z][x]
+}
+
+func (m GameMap) BlockedAt(x, z int) bool {
+	switch m.TileAt(x, z) {
+	case TileRock, TileTree:
+		return true
+	default:
+		return false
+	}
 }
 
 func (m GameMap) FloorAt(x, z int) bool {
-	return !m.WallAt(x, z)
+	return !m.BlockedAt(x, z)
 }

@@ -17,7 +17,7 @@ func Run() {
 	applyWindowedFullscreen()
 	rl.SetTargetFPS(120)
 
-	state := core.NewGameState(core.NewGameMap(core.DungeonLayout))
+	state := core.NewGameState(core.NewGameMap(core.FieldLayout))
 	assets := render.LoadResources()
 	defer assets.Unload()
 

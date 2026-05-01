@@ -64,7 +64,7 @@ func Update(g *core.GameState, dt float32) {
 	case core.BattleWon:
 		g.Battle.Timer -= dt
 		if g.Battle.Timer <= 0 && !battleDeathFadeActive(g) {
-			leaveBattle(g, "The dungeon is quiet.")
+			leaveBattle(g, "The field is quiet.")
 		}
 	case core.BattleLost:
 		if input.ConfirmPressed() {

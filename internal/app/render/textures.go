@@ -7,37 +7,24 @@ import (
 	"crawler/internal/app/core"
 )
 
-func makeStoneBrickPixels(w, h int) []color.RGBA {
+func makeRockWallPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	brickW := 32
-	brickH := 16
-	mortar := 2
-	base := color.RGBA{R: 106, G: 112, B: 110, A: 255}
-	mortarColor := color.RGBA{R: 48, G: 51, B: 53, A: 255}
+	base := color.RGBA{R: 88, G: 92, B: 88, A: 255}
+	shadow := color.RGBA{R: 56, G: 60, B: 58, A: 255}
+	highlight := color.RGBA{R: 111, G: 116, B: 108, A: 255}
 
 	for y := 0; y < h; y++ {
-		row := y / brickH
-		offset := 0
-		if row%2 == 1 {
-			offset = brickW / 2
-		}
 		for x := 0; x < w; x++ {
-			localX := (x + offset) % brickW
-			localY := y % brickH
-			if localX < mortar || localY < mortar {
-				pixels[y*w+x] = jitter(mortarColor, x, y, 8)
-				continue
+			patch := hash2(x/32, y/32)%16 - 8
+			c := adjust(base, patch)
+			if hash2(x/48, y/40) < 72 {
+				c = core.MixColor(c, highlight, 0.08)
 			}
-
-			brickX := (x + offset) / brickW
-			variation := hash2(brickX, row)%28 - 14
-			edge := 0
-			if localX < mortar+3 || localY < mortar+3 || localX > brickW-mortar-4 || localY > brickH-mortar-4 {
-				edge = -15
+			if x%64 < 2 || y%48 < 2 {
+				c = core.MixColor(c, shadow, 0.2)
 			}
-			c := adjust(base, variation+edge+(hash2(x, y)%13)-6)
-			if hash2(brickX*17+localX/3, row*31+localY/3) < 5 {
-				c = adjust(c, -28)
+			if (x+y/2)%97 == 0 && hash2(x/8, y/8) < 26 {
+				c = core.MixColor(c, shadow, 0.35)
 			}
 			pixels[y*w+x] = c
 		}
@@ -45,32 +32,23 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-func makeStoneFloorPixels(w, h int) []color.RGBA {
+func makeGrassPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	slab := 32
-	grout := 2
-	base := color.RGBA{R: 76, G: 78, B: 80, A: 255}
-	groutColor := color.RGBA{R: 38, G: 40, B: 42, A: 255}
+	base := color.RGBA{R: 58, G: 135, B: 59, A: 255}
+	light := color.RGBA{R: 83, G: 157, B: 70, A: 255}
+	dark := color.RGBA{R: 43, G: 105, B: 49, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			localX := x % slab
-			localY := y % slab
-			if localX < grout || localY < grout {
-				pixels[y*w+x] = jitter(groutColor, x, y, 7)
-				continue
+			c := adjust(base, hash2(x/18, y/18)%12-6)
+			if hash2(x/32, y/28) < 96 {
+				c = core.MixColor(c, light, 0.08)
 			}
-
-			slabX := x / slab
-			slabY := y / slab
-			variation := hash2(slabX, slabY)%24 - 12
-			edge := 0
-			if localX < grout+3 || localY < grout+3 {
-				edge = -10
+			if hash2((x+11)/30, (y+5)/36) < 70 {
+				c = core.MixColor(c, dark, 0.07)
 			}
-			c := adjust(base, variation+edge+(hash2(x, y)%17)-8)
-			if hash2(slabX*11+localX/4, slabY*19+localY/4) < 4 {
-				c = adjust(c, -30)
+			if y%19 == 0 && x%11 == 0 && hash2(x, y) < 80 {
+				c = core.MixColor(c, light, 0.22)
 			}
 			pixels[y*w+x] = c
 		}
@@ -290,10 +268,6 @@ func hash2(x, y int) int {
 	n *= 1274126177
 	n ^= n >> 16
 	return int(n & 0xff)
-}
-
-func jitter(c color.RGBA, x, y, amount int) color.RGBA {
-	return adjust(c, hash2(x, y)%(amount*2+1)-amount)
 }
 
 func adjust(c color.RGBA, delta int) color.RGBA {

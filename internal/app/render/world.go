@@ -40,15 +40,47 @@ func DrawSkyBackground(assets Resources) {
 
 func DrawWorld(m core.GameMap, assets Resources) {
 	for z, row := range m.Rows {
-		for x, tile := range row {
+		for x := range row {
 			center := rl.NewVector3(core.TileCenter(x), 0, core.TileCenter(z))
-			if tile == '#' {
-				rl.DrawModel(assets.wallModel, rl.NewVector3(center.X, core.WallHeight/2, center.Z), 1, rl.White)
-				continue
+			tile := m.TileAt(x, z)
+			if tile != core.TileRock {
+				rl.DrawModel(assets.floorModel, rl.NewVector3(center.X, -0.03, center.Z), 1, rl.White)
 			}
-			rl.DrawModel(assets.floorModel, rl.NewVector3(center.X, -0.03, center.Z), 1, rl.White)
+			switch tile {
+			case core.TileRock:
+				rl.DrawModel(assets.wallModel, rl.NewVector3(center.X, core.WallHeight/2, center.Z), 1, rl.White)
+			case core.TileTree:
+				drawTreeBlocker(center)
+			}
 		}
 	}
+}
+
+func drawTreeBlocker(center rl.Vector3) {
+	trunk := rl.NewColor(112, 78, 45, 255)
+	trunkDark := rl.NewColor(62, 42, 28, 255)
+	barkLight := rl.NewColor(146, 102, 58, 255)
+	leaf := rl.NewColor(42, 130, 54, 255)
+	leafDark := rl.NewColor(22, 86, 41, 255)
+	leafLight := rl.NewColor(83, 161, 74, 255)
+	leafHighlight := rl.NewColor(124, 190, 92, 255)
+
+	base := rl.NewVector3(center.X, 0.02, center.Z)
+	top := rl.NewVector3(center.X, 1.42, center.Z)
+	rl.DrawCylinderEx(base, top, 0.18, 0.13, 8, trunk)
+
+	rl.DrawCube(rl.NewVector3(center.X-0.06, 0.48, center.Z-0.18), 0.045, 0.62, 0.035, barkLight)
+	rl.DrawCube(rl.NewVector3(center.X+0.07, 0.78, center.Z+0.17), 0.04, 0.54, 0.035, trunkDark)
+	rl.DrawCube(rl.NewVector3(center.X+0.16, 0.18, center.Z), 0.35, 0.08, 0.08, trunkDark)
+	rl.DrawCube(rl.NewVector3(center.X-0.18, 0.16, center.Z+0.08), 0.32, 0.07, 0.08, trunkDark)
+
+	rl.DrawSphereEx(rl.NewVector3(center.X, 1.62, center.Z), 0.72, 7, 9, leaf)
+	rl.DrawSphereEx(rl.NewVector3(center.X-0.38, 1.48, center.Z+0.16), 0.46, 6, 8, leafDark)
+	rl.DrawSphereEx(rl.NewVector3(center.X+0.36, 1.5, center.Z-0.12), 0.5, 6, 8, leaf)
+	rl.DrawSphereEx(rl.NewVector3(center.X-0.08, 1.98, center.Z-0.08), 0.48, 6, 8, leafLight)
+	rl.DrawSphereEx(rl.NewVector3(center.X+0.08, 1.18, center.Z+0.38), 0.38, 5, 7, leafDark)
+	rl.DrawSphereEx(rl.NewVector3(center.X-0.24, 1.82, center.Z-0.26), 0.12, 4, 5, leafHighlight)
+	rl.DrawSphereEx(rl.NewVector3(center.X+0.32, 1.7, center.Z+0.18), 0.1, 4, 5, leafHighlight)
 }
 
 func DrawEnemies(camera rl.Camera3D, g core.GameState, assets Resources) {

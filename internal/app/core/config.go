@@ -21,8 +21,8 @@ const (
 	MouseSense           = 0.0024
 	MaxLookYaw           = 0.78
 	MaxLookPitch         = 0.62
-	StartTileX           = 1
-	StartTileZ           = 1
+	StartTileX           = 14
+	StartTileZ           = 11
 	StartFacing          = East
 	AnimNone             = 0
 	AnimStep             = 1
