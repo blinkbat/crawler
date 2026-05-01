@@ -8,6 +8,11 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+type enemyVisual struct {
+	texture rl.Texture2D
+	size    rl.Vector2
+}
+
 func Camera(p core.Player) rl.Camera3D {
 	yaw := p.Yaw + p.LookYaw
 	pitch := p.LookPitch
@@ -47,9 +52,12 @@ func DrawWorld(m core.GameMap, assets Resources) {
 }
 
 func DrawEnemies(camera rl.Camera3D, g core.GameState, assets Resources) {
-	source := rl.NewRectangle(0, 0, float32(assets.ratTexture.Width), float32(assets.ratTexture.Height))
-	size := rl.NewVector2(0.82, 1.22)
 	for i, enemy := range g.Enemies {
+		visual, ok := enemyVisualFor(assets, enemy.Kind)
+		if !ok {
+			continue
+		}
+		source := rl.NewRectangle(0, 0, float32(visual.texture.Width), float32(visual.texture.Height))
 		deathFade := g.Battle.Phase != core.BattleNone && enemy.DeathFade > 0 && core.BattleContainsEnemy(g.Battle, i)
 		if !enemy.Alive && !deathFade {
 			continue
@@ -67,8 +75,16 @@ func DrawEnemies(camera rl.Camera3D, g core.GameState, assets Resources) {
 		if enemy.DamageFlash > 0 {
 			tint = core.FlashTint(tint, enemy.DamageFlash)
 		}
-		rl.DrawBillboardRec(camera, assets.ratTexture, source, position, size, tint)
+		rl.DrawBillboardRec(camera, visual.texture, source, position, visual.size, tint)
 	}
+}
+
+func enemyVisualFor(assets Resources, kind core.EnemyKind) (enemyVisual, bool) {
+	if visual, ok := assets.enemyVisuals[kind]; ok && visual.texture.ID != 0 {
+		return visual, true
+	}
+	visual, ok := assets.enemyVisuals[core.EnemyRat]
+	return visual, ok && visual.texture.ID != 0
 }
 
 func drawTargetChevron(camera rl.Camera3D, position rl.Vector3) {
@@ -207,31 +223,7 @@ func victoryDanceMotion(class core.PartyClass, elapsed float32) (float32, float3
 	if elapsed <= 0 {
 		return 0, 0, 0, 1
 	}
-
-	wave := func(freq, phase float64) float32 {
-		return float32(math.Sin(float64(elapsed)*math.Pi*2*freq + phase))
-	}
-	bounce := func(freq, phase float64) float32 {
-		return (wave(freq, phase) + 1) * 0.5
-	}
-
-	switch class {
-	case core.ClassWarrior:
-		height := bounce(1.55, 0) * 0.075
-		return wave(0.78, 0) * 0.02, wave(1.55, math.Pi/2) * 0.016, height, 1 + height*0.045
-	case core.ClassCleric:
-		bob := wave(1.05, 0)
-		return wave(0.82, math.Pi/5) * 0.045, 0, (bob + 1) * 0.026, 1 + bob*0.012
-	case core.ClassThief:
-		height := bounce(2.15, 0) * 0.045
-		return wave(1.95, 0) * 0.065, wave(1.35, math.Pi/2) * 0.024, height, 1 + height*0.12
-	case core.ClassWizard:
-		floatBob := wave(0.72, math.Pi/3)
-		return wave(0.58, math.Pi/2) * 0.035, wave(0.7, 0) * 0.026, 0.055 + floatBob*0.026, 1 + floatBob*0.014
-	default:
-		height := bounce(1.2, 0) * 0.045
-		return wave(1, 0) * 0.03, 0, height, 1
-	}
+	return partyClassPresentationFor(class).dance(elapsed)
 }
 
 func enemyDrawPosition(camera rl.Camera3D, g core.GameState, index int, enemy core.Enemy) rl.Vector3 {

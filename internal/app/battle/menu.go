@@ -28,24 +28,26 @@ func updateActionMenu(g *core.GameState) {
 	}
 
 	skill := core.PartySkill(g.Party[g.Battle.CurrentParty])
+	if skill == core.SkillNone {
+		setBattleStatus(g, "No skill ready.")
+		return
+	}
 	cost := core.SkillCost(skill)
 	if g.Party[g.Battle.CurrentParty].MP < cost {
 		setBattleStatus(g, fmt.Sprintf("%s needs %d MP.", core.SkillName(skill), cost))
 		return
 	}
 	g.Battle.PendingSkill = skill
-	switch skill {
-	case core.SkillSwipe:
-		useSwipe(g)
-	case core.SkillPrayer:
+	switch core.SkillTargetMode(skill) {
+	case core.ActionPartyTarget:
 		g.Battle.ActionMode = core.ActionPartyTarget
 		g.Battle.PartyTarget = g.Battle.CurrentParty
-		setBattleStatus(g, "Choose who receives Prayer.")
-	case core.SkillSteal, core.SkillFirebolt:
+		setBattleStatus(g, fmt.Sprintf("Choose who receives %s.", core.SkillName(skill)))
+	case core.ActionEnemyTarget:
 		g.Battle.ActionMode = core.ActionEnemyTarget
 		setBattleStatus(g, fmt.Sprintf("Choose a target for %s.", core.SkillName(skill)))
 	default:
-		setBattleStatus(g, "No skill ready.")
+		usePendingBattleAction(g)
 	}
 }
 
@@ -57,25 +59,14 @@ func updateEnemyTargeting(g *core.GameState) {
 		cycleBattleTarget(g, -1)
 	}
 	if input.BackPressed() {
-		g.Battle.ActionMode = core.ActionMenu
-		g.Battle.PendingSkill = core.SkillNone
+		resetBattleAction(g)
 		setBattleStatus(g, "Choose an action.")
 		return
 	}
 	if !input.ConfirmPressed() {
 		return
 	}
-	switch g.Battle.PendingSkill {
-	case core.SkillNone:
-		useAttack(g)
-	case core.SkillSteal:
-		useSteal(g)
-	case core.SkillFirebolt:
-		useFirebolt(g)
-	default:
-		g.Battle.ActionMode = core.ActionMenu
-		setBattleStatus(g, "That needs another target.")
-	}
+	usePendingBattleAction(g)
 }
 
 func updatePartyTargeting(g *core.GameState) {
@@ -86,20 +77,14 @@ func updatePartyTargeting(g *core.GameState) {
 		cyclePartyTarget(g, -1)
 	}
 	if input.BackPressed() {
-		g.Battle.ActionMode = core.ActionMenu
-		g.Battle.PendingSkill = core.SkillNone
+		resetBattleAction(g)
 		setBattleStatus(g, "Choose an action.")
 		return
 	}
 	if !input.ConfirmPressed() {
 		return
 	}
-	if g.Battle.PendingSkill == core.SkillPrayer {
-		usePrayer(g)
-		return
-	}
-	g.Battle.ActionMode = core.ActionMenu
-	setBattleStatus(g, "That targets enemies.")
+	usePendingBattleAction(g)
 }
 
 func cycleBattleTarget(g *core.GameState, delta int) {

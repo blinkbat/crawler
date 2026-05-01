@@ -95,23 +95,10 @@ func drawBattleActionMenu(g core.GameState, assets Resources, x, y int32) {
 		if cost := core.SkillCost(skill); cost > 0 {
 			skillText = fmt.Sprintf("%s  %d MP", skillText, cost)
 		}
-		drawActionOption(assets.hudFont, "Attack", x, y, g.Battle.MenuIndex == 0)
-		drawActionOption(assets.hudFont, skillText, x, y+28, g.Battle.MenuIndex == 1)
+		drawOption(assets.hudFont, "Attack", x, y, g.Battle.MenuIndex == 0, battleOptionStyle)
+		drawOption(assets.hudFont, skillText, x, y+28, g.Battle.MenuIndex == 1, battleOptionStyle)
 		drawHUDText(assets.hudFont, "W/S choose  Z/Space/Enter", x, y+58, 15)
 	}
-}
-
-func drawActionOption(font rl.Font, text string, x, y int32, selected bool) {
-	if selected {
-		drawRoundedRect(x-14, y-3, 210, 25, 0.28, rl.NewColor(72, 76, 110, 145))
-		rl.DrawTriangle(
-			rl.NewVector2(float32(x-4), float32(y+9)),
-			rl.NewVector2(float32(x-10), float32(y+3)),
-			rl.NewVector2(float32(x-10), float32(y+15)),
-			rl.NewColor(118, 235, 136, 255),
-		)
-	}
-	drawHUDText(font, text, x+4, y, 18)
 }
 
 func drawTargetTooltip(g core.GameState, assets Resources) {

@@ -19,10 +19,11 @@ type PartyClassDefinition struct {
 }
 
 type skillDefinition struct {
-	Skill  int
-	Name   string
-	Cost   int
-	Effect SkillEffect
+	Skill      int
+	Name       string
+	Cost       int
+	TargetMode int
+	Effect     SkillEffect
 }
 
 type SkillEffect struct {
@@ -42,10 +43,10 @@ var partyClassDefinitions = []PartyClassDefinition{
 }
 
 var skillDefinitions = []skillDefinition{
-	{Skill: SkillSwipe, Name: "Swipe", Cost: 3, Effect: SkillEffect{Damage: 3}},
-	{Skill: SkillPrayer, Name: "Prayer", Cost: 5, Effect: SkillEffect{Heal: 10}},
-	{Skill: SkillSteal, Name: "Steal", Cost: 0, Effect: SkillEffect{StealChance: 0.7}},
-	{Skill: SkillFirebolt, Name: "Firebolt", Cost: 6, Effect: SkillEffect{Damage: 6, BurnChance: 0.82, BurnMinTurns: 3, BurnMaxTurns: 5}},
+	{Skill: SkillSwipe, Name: "Swipe", Cost: 3, TargetMode: ActionMenu, Effect: SkillEffect{Damage: 3}},
+	{Skill: SkillPrayer, Name: "Prayer", Cost: 5, TargetMode: ActionPartyTarget, Effect: SkillEffect{Heal: 10}},
+	{Skill: SkillSteal, Name: "Steal", Cost: 0, TargetMode: ActionEnemyTarget, Effect: SkillEffect{StealChance: 0.7}},
+	{Skill: SkillFirebolt, Name: "Firebolt", Cost: 6, TargetMode: ActionEnemyTarget, Effect: SkillEffect{Damage: 6, BurnChance: 0.82, BurnMinTurns: 3, BurnMaxTurns: 5}},
 }
 
 func PartyClasses() []PartyClassDefinition {
@@ -91,6 +92,13 @@ func SkillCost(skill int) int {
 		return def.Cost
 	}
 	return 0
+}
+
+func SkillTargetMode(skill int) int {
+	if def, ok := skillInfo(skill); ok {
+		return def.TargetMode
+	}
+	return ActionMenu
 }
 
 func SkillEffectFor(skill int) SkillEffect {

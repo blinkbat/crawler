@@ -5,6 +5,27 @@ import (
 	"fmt"
 )
 
+var skillHandlers = map[int]func(*core.GameState){
+	core.SkillSwipe:    useSwipe,
+	core.SkillPrayer:   usePrayer,
+	core.SkillSteal:    useSteal,
+	core.SkillFirebolt: useFirebolt,
+}
+
+func usePendingBattleAction(g *core.GameState) {
+	if g.Battle.PendingSkill == core.SkillNone {
+		useAttack(g)
+		return
+	}
+	handler, ok := skillHandlers[g.Battle.PendingSkill]
+	if !ok {
+		resetBattleAction(g)
+		setBattleStatus(g, "No skill ready.")
+		return
+	}
+	handler(g)
+}
+
 func useAttack(g *core.GameState) {
 	if !core.EnemyAlive(g.Enemies, g.Battle.EnemyIndex) {
 		setBattleStatus(g, "No target.")
@@ -67,12 +88,8 @@ func usePrayer(g *core.GameState) {
 	actor.MP -= cost
 	target := &g.Party[g.Battle.PartyTarget]
 	heal := core.SkillEffectFor(core.SkillPrayer).Heal
-	target.HP += heal
-	if target.HP > target.MaxHP {
-		target.HP = target.MaxHP
-	}
 	actor.AttackBump = core.BumpDuration
-	target.DamageFlash = core.FlashDuration
+	healPartyMember(g, g.Battle.PartyTarget, heal)
 	setBattleMessage(g, fmt.Sprintf("%s prays over %s.", actor.Name, target.Name))
 	finishPartyAction(g)
 }
@@ -150,8 +167,7 @@ func finishPartyAction(g *core.GameState) {
 	}
 	g.Battle.Phase = core.BattleEnemy
 	g.Battle.Timer = core.EnemyTurnDelay
-	g.Battle.ActionMode = core.ActionMenu
-	g.Battle.PendingSkill = core.SkillNone
+	resetBattleAction(g)
 }
 
 func damageEnemy(g *core.GameState, enemyIndex, damage int) bool {
@@ -202,13 +218,42 @@ func resolveEnemyAttacks(g *core.GameState) int {
 			break
 		}
 		g.Enemies[enemyIndex].AttackBump = core.BumpDuration
-		g.Party[target].DamageFlash = core.FlashDuration
-		g.Party[target].HP -= core.EnemyInfoFor(g.Enemies[enemyIndex]).AttackDamage
-		if g.Party[target].HP < 0 {
-			g.Party[target].HP = 0
-		}
+		damagePartyMember(g, target, core.EnemyInfoFor(g.Enemies[enemyIndex]).AttackDamage)
 		targetCursor = target + 1
 		hits++
 	}
 	return hits
+}
+
+func healPartyMember(g *core.GameState, partyIndex, amount int) bool {
+	if partyIndex < 0 || partyIndex >= len(g.Party) || amount <= 0 {
+		return false
+	}
+	member := &g.Party[partyIndex]
+	if member.HP <= 0 {
+		return false
+	}
+	member.HP += amount
+	if member.HP > member.MaxHP {
+		member.HP = member.MaxHP
+	}
+	member.DamageFlash = core.FlashDuration
+	return true
+}
+
+func damagePartyMember(g *core.GameState, partyIndex, amount int) bool {
+	if partyIndex < 0 || partyIndex >= len(g.Party) || amount <= 0 {
+		return false
+	}
+	member := &g.Party[partyIndex]
+	if member.HP <= 0 {
+		return false
+	}
+	member.DamageFlash = core.FlashDuration
+	member.HP -= amount
+	if member.HP > 0 {
+		return false
+	}
+	member.HP = 0
+	return true
 }

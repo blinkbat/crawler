@@ -11,7 +11,7 @@ type Resources struct {
 	wallTexture  rl.Texture2D
 	floorTexture rl.Texture2D
 	skyTexture   rl.Texture2D
-	ratTexture   rl.Texture2D
+	enemyVisuals map[core.EnemyKind]enemyVisual
 	partyTexture map[core.PartyClass]rl.Texture2D
 	wallModel    rl.Model
 	floorModel   rl.Model
@@ -26,8 +26,7 @@ func LoadResources() Resources {
 	rl.GenTextureMipmaps(&skyTexture)
 	rl.SetTextureFilter(skyTexture, rl.FilterTrilinear)
 	rl.SetTextureWrap(skyTexture, rl.WrapClamp)
-	ratTexture := loadTexture(makeRatPixels(72, 96), 72, 96, rl.FilterPoint)
-	rl.SetTextureWrap(ratTexture, rl.WrapClamp)
+	enemyVisuals := loadEnemyVisuals()
 	partyTexture := make(map[core.PartyClass]rl.Texture2D)
 	for _, def := range core.PartyClasses() {
 		texture := loadTexture(makePartyPixels(64, 80, def.Class), 64, 80, rl.FilterPoint)
@@ -46,7 +45,7 @@ func LoadResources() Resources {
 		wallTexture:  wallTexture,
 		floorTexture: floorTexture,
 		skyTexture:   skyTexture,
-		ratTexture:   ratTexture,
+		enemyVisuals: enemyVisuals,
 		partyTexture: partyTexture,
 		wallModel:    wallModel,
 		floorModel:   floorModel,
@@ -61,12 +60,25 @@ func (r Resources) Unload() {
 	rl.UnloadTexture(r.wallTexture)
 	rl.UnloadTexture(r.floorTexture)
 	rl.UnloadTexture(r.skyTexture)
-	rl.UnloadTexture(r.ratTexture)
+	for _, visual := range r.enemyVisuals {
+		rl.UnloadTexture(visual.texture)
+	}
 	for _, texture := range r.partyTexture {
 		rl.UnloadTexture(texture)
 	}
 	if r.hudFontOwned {
 		rl.UnloadFont(r.hudFont)
+	}
+}
+
+func loadEnemyVisuals() map[core.EnemyKind]enemyVisual {
+	ratTexture := loadTexture(makeRatPixels(72, 96), 72, 96, rl.FilterPoint)
+	rl.SetTextureWrap(ratTexture, rl.WrapClamp)
+	return map[core.EnemyKind]enemyVisual{
+		core.EnemyRat: {
+			texture: ratTexture,
+			size:    rl.NewVector2(0.82, 1.22),
+		},
 	}
 }
 

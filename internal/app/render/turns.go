@@ -37,16 +37,5 @@ func turnEntryColor(turn core.TurnEntry) color.RGBA {
 	if turn.Enemy {
 		return rl.NewColor(245, 92, 82, 255)
 	}
-	switch turn.Class {
-	case core.ClassWarrior:
-		return rl.NewColor(235, 88, 78, 255)
-	case core.ClassCleric:
-		return rl.NewColor(244, 222, 138, 255)
-	case core.ClassThief:
-		return rl.NewColor(94, 214, 148, 255)
-	case core.ClassWizard:
-		return rl.NewColor(120, 152, 255, 255)
-	default:
-		return rl.RayWhite
-	}
+	return partyClassPresentationFor(turn.Class).turnColor
 }

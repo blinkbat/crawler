@@ -182,64 +182,8 @@ func makePartyPixels(w, h int, class core.PartyClass) []color.RGBA {
 	fillRectPixels(pixels, w, h, 33, 57, 9, 12, boot)
 	fillEllipsePixels(pixels, w, h, 31, 38, 7, 7, skin)
 
-	switch class {
-	case core.ClassWarrior:
-		armor := color.RGBA{R: 97, G: 113, B: 128, A: 255}
-		armorDark := color.RGBA{R: 55, G: 64, B: 78, A: 255}
-		red := color.RGBA{R: 157, G: 55, B: 63, A: 255}
-		hair := color.RGBA{R: 98, G: 58, B: 34, A: 255}
-		fillEllipsePixels(pixels, w, h, 20, 41, 8, 9, armorDark)
-		fillEllipsePixels(pixels, w, h, 44, 41, 8, 9, armorDark)
-		fillRectPixels(pixels, w, h, 18, 37, 29, 26, red)
-		fillEllipsePixels(pixels, w, h, 32, 39, 18, 12, armor)
-		fillRectPixels(pixels, w, h, 23, 46, 18, 17, armorDark)
-		drawLinePixels(pixels, w, h, 24, 47, 41, 47, adjust(armor, 42), 2)
-		fillEllipsePixels(pixels, w, h, 32, 24, 15, 14, armor)
-		fillEllipsePixels(pixels, w, h, 32, 29, 12, 7, hair)
-		drawLinePixels(pixels, w, h, 19, 25, 45, 25, adjust(armorDark, 10), 2)
-	case core.ClassCleric:
-		robe := color.RGBA{R: 218, G: 219, B: 202, A: 255}
-		robeDark := color.RGBA{R: 151, G: 151, B: 139, A: 255}
-		gold := color.RGBA{R: 222, G: 184, B: 86, A: 255}
-		hood := color.RGBA{R: 238, G: 234, B: 214, A: 255}
-		fillEllipsePixels(pixels, w, h, 32, 48, 19, 23, robeDark)
-		fillRectPixels(pixels, w, h, 17, 35, 30, 31, robe)
-		fillEllipsePixels(pixels, w, h, 32, 65, 15, 7, robe)
-		drawLinePixels(pixels, w, h, 32, 38, 32, 63, gold, 2)
-		drawLinePixels(pixels, w, h, 25, 48, 39, 48, gold, 2)
-		fillEllipsePixels(pixels, w, h, 32, 24, 15, 15, robeDark)
-		fillEllipsePixels(pixels, w, h, 32, 23, 13, 14, hood)
-		fillEllipsePixels(pixels, w, h, 32, 31, 8, 6, adjust(hood, -22))
-	case core.ClassThief:
-		cloak := color.RGBA{R: 40, G: 109, B: 89, A: 255}
-		cloakDark := color.RGBA{R: 25, G: 56, B: 57, A: 255}
-		trim := color.RGBA{R: 92, G: 171, B: 128, A: 255}
-		hood := color.RGBA{R: 31, G: 45, B: 52, A: 255}
-		fillEllipsePixels(pixels, w, h, 32, 50, 18, 23, cloakDark)
-		fillRectPixels(pixels, w, h, 18, 36, 28, 29, cloak)
-		fillTrianglePixels(pixels, w, h, 18, 35, 46, 35, 32, 68, cloak)
-		drawLinePixels(pixels, w, h, 25, 38, 20, 62, trim, 2)
-		drawLinePixels(pixels, w, h, 39, 38, 44, 62, trim, 2)
-		fillEllipsePixels(pixels, w, h, 32, 24, 15, 15, hood)
-		fillTrianglePixels(pixels, w, h, 21, 22, 43, 22, 32, 39, hood)
-		fillEllipsePixels(pixels, w, h, 32, 30, 9, 5, adjust(hood, -18))
-	case core.ClassWizard:
-		robe := color.RGBA{R: 64, G: 78, B: 155, A: 255}
-		robeDark := color.RGBA{R: 34, G: 43, B: 90, A: 255}
-		hat := color.RGBA{R: 86, G: 74, B: 172, A: 255}
-		trim := color.RGBA{R: 226, G: 196, B: 93, A: 255}
-		fillEllipsePixels(pixels, w, h, 32, 49, 18, 24, robeDark)
-		fillTrianglePixels(pixels, w, h, 16, 66, 48, 66, 32, 34, robe)
-		fillRectPixels(pixels, w, h, 20, 37, 24, 27, robe)
-		drawLinePixels(pixels, w, h, 22, 42, 42, 42, trim, 2)
-		drawLinePixels(pixels, w, h, 32, 42, 32, 63, trim, 2)
-		fillTrianglePixels(pixels, w, h, 22, 24, 42, 24, 34, 3, hat)
-		fillEllipsePixels(pixels, w, h, 32, 26, 17, 5, adjust(hat, -10))
-		drawLinePixels(pixels, w, h, 25, 24, 42, 24, trim, 1)
-	default:
-		fillRectPixels(pixels, w, h, 18, 36, 28, 30, color.RGBA{R: 110, G: 110, B: 120, A: 255})
-		fillEllipsePixels(pixels, w, h, 32, 24, 14, 14, color.RGBA{R: 90, G: 70, B: 55, A: 255})
-	}
+	presentation := partyClassPresentationFor(class)
+	presentation.drawPixels(pixels, w, h)
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
@@ -247,27 +191,12 @@ func makePartyPixels(w, h int, class core.PartyClass) []color.RGBA {
 			if pixels[i].A == 0 {
 				continue
 			}
-			if hash2(x+partyClassTextureSeed(class)*17, y)%9 == 0 {
+			if hash2(x+presentation.textureSeed*17, y)%9 == 0 {
 				pixels[i] = adjust(pixels[i], -10)
 			}
 		}
 	}
 	return pixels
-}
-
-func partyClassTextureSeed(class core.PartyClass) int {
-	switch class {
-	case core.ClassWarrior:
-		return 1
-	case core.ClassCleric:
-		return 2
-	case core.ClassThief:
-		return 3
-	case core.ClassWizard:
-		return 4
-	default:
-		return 0
-	}
 }
 
 func fillEllipsePixels(pixels []color.RGBA, w, h, cx, cy, rx, ry int, col color.RGBA) {

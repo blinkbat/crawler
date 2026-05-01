@@ -129,10 +129,6 @@ func Lerp(a, b, t float32) float32 {
 	return a + (b-a)*t
 }
 
-func LerpAngle(a, b, t float32) float32 {
-	return a + (b-a)*t
-}
-
 func Clamp(v, min, max float32) float32 {
 	if v < min {
 		return min

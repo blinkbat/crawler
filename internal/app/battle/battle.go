@@ -10,9 +10,7 @@ func Start(g *core.GameState, enemyIndex int) {
 	g.Battle.EnemyIndex = enemyIndex
 	g.Battle.EnemyGroup = group
 	g.Battle.CurrentParty = core.FirstLivingPartyMember(g.Party)
-	g.Battle.ActionMode = core.ActionMenu
-	g.Battle.MenuIndex = 0
-	g.Battle.PendingSkill = core.SkillNone
+	resetBattleAction(g)
 	g.Battle.PartyTarget = core.FirstLivingPartyMember(g.Party)
 	g.Battle.Phase = core.BattlePlayer
 	g.Battle.Timer = 0
@@ -78,23 +76,20 @@ func Update(g *core.GameState, dt float32) {
 func winBattle(g *core.GameState, message string) {
 	g.Battle.Phase = core.BattleWon
 	g.Battle.Timer = core.VictoryDanceDuration
-	g.Battle.ActionMode = core.ActionMenu
-	g.Battle.PendingSkill = core.SkillNone
+	resetBattleAction(g)
 	setBattleMessage(g, message)
 }
 
 func loseBattle(g *core.GameState, message string) {
 	g.Battle.Phase = core.BattleLost
-	g.Battle.ActionMode = core.ActionMenu
-	g.Battle.PendingSkill = core.SkillNone
+	resetBattleAction(g)
 	setBattleMessage(g, message)
 }
 
 func leaveBattle(g *core.GameState, message string) {
 	g.Battle.EnemyIndex = -1
 	g.Battle.EnemyGroup = nil
-	g.Battle.ActionMode = core.ActionMenu
-	g.Battle.PendingSkill = core.SkillNone
+	resetBattleAction(g)
 	g.Battle.Phase = core.BattleNone
 	setBattleMessage(g, message)
 }
@@ -130,9 +125,7 @@ func updatePlayerBattle(g *core.GameState) {
 
 func beginPartyTurn(g *core.GameState, partyIndex int) {
 	g.Battle.CurrentParty = partyIndex
-	g.Battle.ActionMode = core.ActionMenu
-	g.Battle.MenuIndex = 0
-	g.Battle.PendingSkill = core.SkillNone
+	resetBattleAction(g)
 	if partyIndex >= 0 && partyIndex < len(g.Party) {
 		g.Battle.PartyTarget = partyIndex
 	} else {
@@ -141,6 +134,12 @@ func beginPartyTurn(g *core.GameState, partyIndex int) {
 	if g.Battle.PartyTarget < 0 {
 		g.Battle.PartyTarget = 0
 	}
+}
+
+func resetBattleAction(g *core.GameState) {
+	g.Battle.ActionMode = core.ActionMenu
+	g.Battle.MenuIndex = 0
+	g.Battle.PendingSkill = core.SkillNone
 }
 
 func setBattleStatus(g *core.GameState, message string) {

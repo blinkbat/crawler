@@ -189,7 +189,7 @@ func updateAnimation(p *core.Player, dt float32) {
 		p.X = core.Lerp(p.Anim.FromX, p.Anim.ToX, eased)
 		p.Z = core.Lerp(p.Anim.FromZ, p.Anim.ToZ, eased)
 	case core.AnimTurn:
-		p.Yaw = core.LerpAngle(p.Anim.FromYaw, p.Anim.ToYaw, eased)
+		p.Yaw = core.Lerp(p.Anim.FromYaw, p.Anim.ToYaw, eased)
 	}
 
 	if p.Anim.Elapsed < p.Anim.Duration {
