@@ -6,7 +6,7 @@ import (
 )
 
 func Start(g *core.GameState, enemyIndex int) {
-	group := nearbyBattleGroup(g.Enemies, enemyIndex)
+	group := nearbyBattleGroup(g.Map, g.Enemies, enemyIndex)
 	g.Battle.EnemyIndex = enemyIndex
 	g.Battle.EnemyGroup = group
 	g.Battle.CurrentParty = core.FirstLivingPartyMember(g.Party)
@@ -64,7 +64,7 @@ func Update(g *core.GameState, dt float32) {
 	case core.BattleWon:
 		g.Battle.Timer -= dt
 		if g.Battle.Timer <= 0 && !battleDeathFadeActive(g) {
-			leaveBattle(g, "The field is quiet.")
+			leaveBattle(g, core.AreaByID(g.AreaID).QuietMessage)
 		}
 	case core.BattleLost:
 		if input.ConfirmPressed() {

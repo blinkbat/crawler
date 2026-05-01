@@ -35,6 +35,27 @@ func ApproachZero(v, amount float32) float32 {
 	return v
 }
 
+func Approach(v, target, amount float32) float32 {
+	if amount < 0 {
+		amount = -amount
+	}
+	if v < target {
+		v += amount
+		if v > target {
+			return target
+		}
+		return v
+	}
+	if v > target {
+		v -= amount
+		if v < target {
+			return target
+		}
+		return v
+	}
+	return target
+}
+
 func TileCenter(tile int) float32 {
 	return (float32(tile) + 0.5) * TileSize
 }

@@ -4,7 +4,7 @@ import (
 	"crawler/internal/app/core"
 )
 
-func nearbyBattleGroup(enemies []core.Enemy, trigger int) []int {
+func nearbyBattleGroup(m core.GameMap, enemies []core.Enemy, trigger int) []int {
 	if trigger < 0 || trigger >= len(enemies) || !enemies[trigger].Alive {
 		return nil
 	}
@@ -19,7 +19,7 @@ func nearbyBattleGroup(enemies []core.Enemy, trigger int) []int {
 			continue
 		}
 		dist := core.AbsInt(enemy.TileX-triggerEnemy.TileX) + core.AbsInt(enemy.TileZ-triggerEnemy.TileZ)
-		if dist <= 2 {
+		if dist <= 2 && battlePathClear(m, triggerEnemy.TileX, triggerEnemy.TileZ, enemy.TileX, enemy.TileZ) {
 			candidates = append(candidates, candidate{index: i, dist: dist})
 		}
 	}
@@ -37,4 +37,39 @@ func nearbyBattleGroup(enemies []core.Enemy, trigger int) []int {
 		group = append(group, candidates[i].index)
 	}
 	return group
+}
+
+func battlePathClear(m core.GameMap, fromX, fromZ, toX, toZ int) bool {
+	dx := toX - fromX
+	dz := toZ - fromZ
+	adx := core.AbsInt(dx)
+	adz := core.AbsInt(dz)
+	if adx+adz > 2 {
+		return false
+	}
+	if adx == 0 || adz == 0 {
+		return straightBattlePathClear(m, fromX, fromZ, toX, toZ)
+	}
+	return !m.BlockedAt(toX, fromZ) || !m.BlockedAt(fromX, toZ)
+}
+
+func straightBattlePathClear(m core.GameMap, fromX, fromZ, toX, toZ int) bool {
+	stepX := 0
+	if toX > fromX {
+		stepX = 1
+	} else if toX < fromX {
+		stepX = -1
+	}
+	stepZ := 0
+	if toZ > fromZ {
+		stepZ = 1
+	} else if toZ < fromZ {
+		stepZ = -1
+	}
+	for x, z := fromX+stepX, fromZ+stepZ; x != toX || z != toZ; x, z = x+stepX, z+stepZ {
+		if m.BlockedAt(x, z) {
+			return false
+		}
+	}
+	return true
 }

@@ -26,7 +26,7 @@ func Update(g *core.GameState) {
 		return
 	}
 
-	updateFreeLook(&g.Player)
+	updateFreeLook(&g.Player, dt)
 	if g.Player.Anim.Kind == core.AnimNone && StartAdjacent(g) {
 		return
 	}
@@ -69,15 +69,15 @@ func restartGame(g *core.GameState) {
 	core.ResetGameState(g)
 }
 
-func updateFreeLook(p *core.Player) {
+func updateFreeLook(p *core.Player, dt float32) {
 	if rl.IsMouseButtonDown(rl.MouseRightButton) {
 		mouse := rl.GetMouseDelta()
 		p.LookYaw = core.Clamp(p.LookYaw+mouse.X*core.MouseSense, -core.MaxLookYaw, core.MaxLookYaw)
 		p.LookPitch = core.Clamp(p.LookPitch-mouse.Y*core.MouseSense, -core.MaxLookPitch, core.MaxLookPitch)
 		return
 	}
-	p.LookYaw = 0
-	p.LookPitch = 0
+	p.LookYaw = core.Approach(p.LookYaw, 0, core.FreeLookReturnSpeed*dt)
+	p.LookPitch = core.Approach(p.LookPitch, 0, core.FreeLookReturnSpeed*dt)
 }
 
 func updatePlayer(g *core.GameState) {

@@ -9,6 +9,10 @@ import (
 )
 
 func drawTurnPanel(g core.GameState, assets Resources) {
+	turns := core.TurnForecast(g, 9)
+	if len(turns) == 0 {
+		return
+	}
 	x := int32(rl.GetScreenWidth() - 196)
 	y := int32(96)
 	w := int32(174)
@@ -16,7 +20,6 @@ func drawTurnPanel(g core.GameState, assets Resources) {
 	drawRoundedRect(x, y, w, h, 0.08, rl.NewColor(7, 12, 22, 175))
 	drawRoundedRectLines(x, y, w, h, 0.08, rl.NewColor(77, 208, 232, 180))
 	drawHUDText(assets.hudFont, "TURN", x+14, y+12, 22)
-	turns := core.TurnForecast(g, 9)
 	for i, turn := range turns {
 		rowY := y + 46 + int32(i)*25
 		col := turnEntryColor(turn)

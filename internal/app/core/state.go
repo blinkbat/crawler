@@ -11,12 +11,14 @@ func NewPlayer(tileX, tileZ, facing int) Player {
 	}
 }
 
-func NewGameState(m GameMap) GameState {
+func NewGameState(area AreaDefinition) GameState {
+	m := NewGameMap(area.Layout, area.Materials)
 	g := GameState{
 		Map:     m,
-		Player:  NewPlayer(StartTileX, StartTileZ, StartFacing),
+		AreaID:  area.ID,
+		Player:  NewPlayer(area.StartTileX, area.StartTileZ, area.StartFacing),
 		Party:   NewParty(),
-		Enemies: placeRats(m, [][2]int{{6, 1}, {7, 1}, {9, 7}, {10, 7}, {3, 13}, {4, 13}, {5, 13}}),
+		Enemies: placeEnemies(m, area.EnemySpawns, area.StartTileX, area.StartTileZ),
 		Battle: Battle{
 			EnemyIndex:   -1,
 			EnemyGroup:   nil,
@@ -25,18 +27,14 @@ func NewGameState(m GameMap) GameState {
 			PendingSkill: SkillNone,
 			PartyTarget:  0,
 			Phase:        BattleNone,
-			Message:      "The field is quiet.",
+			Message:      area.QuietMessage,
 		},
 	}
 	return g
 }
 
 func ResetGameState(g *GameState) {
-	m := g.Map
-	if len(m.Rows) == 0 {
-		m = NewGameMap(FieldLayout)
-	}
-	*g = NewGameState(m)
+	*g = NewGameState(AreaByID(g.AreaID))
 }
 
 func NewParty() []PartyMember {
@@ -53,8 +51,4 @@ func NewParty() []PartyMember {
 		})
 	}
 	return party
-}
-
-func NewRat(tileX, tileZ int) Enemy {
-	return NewEnemy(EnemyRat, tileX, tileZ)
 }

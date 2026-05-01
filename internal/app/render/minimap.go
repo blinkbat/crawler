@@ -26,7 +26,7 @@ func drawMinimap(m core.GameMap, g core.GameState) {
 			mapZ := startZ + int(localZ)
 			col := rl.NewColor(8, 10, 12, 228)
 			if mapX >= 0 && mapX < m.Width && mapZ >= 0 && mapZ < m.Height {
-				col = minimapTileColor(m.TileAt(mapX, mapZ))
+				col = minimapTileColor(m.Materials, m.TileAt(mapX, mapZ))
 			}
 			rl.DrawRectangle(pad+localX*cell, pad+localZ*cell, cell-1, cell-1, col)
 		}
@@ -52,13 +52,19 @@ func drawMinimap(m core.GameMap, g core.GameState) {
 	)
 }
 
-func minimapTileColor(tile byte) color.RGBA {
+func minimapTileColor(material core.MaterialSet, tile byte) color.RGBA {
 	switch tile {
 	case core.TileRock:
+		if material == core.MaterialDungeon {
+			return rl.NewColor(132, 132, 126, 228)
+		}
 		return rl.NewColor(112, 112, 106, 228)
 	case core.TileTree:
 		return rl.NewColor(42, 132, 56, 238)
 	default:
+		if material == core.MaterialDungeon {
+			return rl.NewColor(82, 84, 88, 228)
+		}
 		return rl.NewColor(60, 121, 54, 228)
 	}
 }

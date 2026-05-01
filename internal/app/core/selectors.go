@@ -114,7 +114,7 @@ func BattleTargetOrdinal(g GameState) int {
 
 func TurnForecast(g GameState, limit int) []TurnEntry {
 	turns := make([]TurnEntry, 0, limit)
-	if g.Battle.Phase == BattleNone || limit <= 0 {
+	if (g.Battle.Phase != BattlePlayer && g.Battle.Phase != BattleEnemy) || limit <= 0 {
 		return turns
 	}
 

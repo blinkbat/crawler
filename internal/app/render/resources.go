@@ -8,20 +8,26 @@ import (
 )
 
 type Resources struct {
-	wallTexture  rl.Texture2D
-	floorTexture rl.Texture2D
+	materials    map[core.MaterialSet]worldMaterialResources
 	skyTexture   rl.Texture2D
 	enemyVisuals map[core.EnemyKind]enemyVisual
 	partyTexture map[core.PartyClass]rl.Texture2D
-	wallModel    rl.Model
-	floorModel   rl.Model
 	hudFont      rl.Font
 	hudFontOwned bool
 }
 
+type worldMaterialResources struct {
+	wallTexture  rl.Texture2D
+	floorTexture rl.Texture2D
+	wallModel    rl.Model
+	floorModel   rl.Model
+}
+
 func LoadResources() Resources {
-	wallTexture := loadTexture(makeRockWallPixels(128, 128), 128, 128, rl.FilterPoint)
-	floorTexture := loadTexture(makeGrassPixels(128, 128), 128, 128, rl.FilterPoint)
+	materials := map[core.MaterialSet]worldMaterialResources{
+		core.MaterialDungeon: loadWorldMaterial(makeStoneBrickPixels(128, 128), makeStoneFloorPixels(128, 128)),
+		core.MaterialField:   loadWorldMaterial(makeRockWallPixels(128, 128), makeGrassPixels(128, 128)),
+	}
 	skyTexture := loadTexture(makeSkyPixels(1024, 512), 1024, 512, rl.FilterTrilinear)
 	rl.GenTextureMipmaps(&skyTexture)
 	rl.SetTextureFilter(skyTexture, rl.FilterTrilinear)
@@ -35,30 +41,23 @@ func LoadResources() Resources {
 	}
 	hudFont, hudFontOwned := loadHUDFont()
 
-	wallModel := rl.LoadModelFromMesh(rl.GenMeshCube(core.TileSize, core.WallHeight, core.TileSize))
-	floorModel := rl.LoadModelFromMesh(rl.GenMeshCube(core.TileSize, 0.06, core.TileSize))
-
-	setModelTexture(&wallModel, wallTexture)
-	setModelTexture(&floorModel, floorTexture)
-
 	return Resources{
-		wallTexture:  wallTexture,
-		floorTexture: floorTexture,
+		materials:    materials,
 		skyTexture:   skyTexture,
 		enemyVisuals: enemyVisuals,
 		partyTexture: partyTexture,
-		wallModel:    wallModel,
-		floorModel:   floorModel,
 		hudFont:      hudFont,
 		hudFontOwned: hudFontOwned,
 	}
 }
 
 func (r Resources) Unload() {
-	rl.UnloadModel(r.wallModel)
-	rl.UnloadModel(r.floorModel)
-	rl.UnloadTexture(r.wallTexture)
-	rl.UnloadTexture(r.floorTexture)
+	for _, material := range r.materials {
+		rl.UnloadModel(material.wallModel)
+		rl.UnloadModel(material.floorModel)
+		rl.UnloadTexture(material.wallTexture)
+		rl.UnloadTexture(material.floorTexture)
+	}
 	rl.UnloadTexture(r.skyTexture)
 	for _, visual := range r.enemyVisuals {
 		rl.UnloadTexture(visual.texture)
@@ -69,6 +68,28 @@ func (r Resources) Unload() {
 	if r.hudFontOwned {
 		rl.UnloadFont(r.hudFont)
 	}
+}
+
+func loadWorldMaterial(wallPixels, floorPixels []color.RGBA) worldMaterialResources {
+	wallTexture := loadTexture(wallPixels, 128, 128, rl.FilterPoint)
+	floorTexture := loadTexture(floorPixels, 128, 128, rl.FilterPoint)
+	wallModel := rl.LoadModelFromMesh(rl.GenMeshCube(core.TileSize, core.WallHeight, core.TileSize))
+	floorModel := rl.LoadModelFromMesh(rl.GenMeshCube(core.TileSize, 0.06, core.TileSize))
+	setModelTexture(&wallModel, wallTexture)
+	setModelTexture(&floorModel, floorTexture)
+	return worldMaterialResources{
+		wallTexture:  wallTexture,
+		floorTexture: floorTexture,
+		wallModel:    wallModel,
+		floorModel:   floorModel,
+	}
+}
+
+func (r Resources) worldMaterial(material core.MaterialSet) worldMaterialResources {
+	if resources, ok := r.materials[material]; ok {
+		return resources
+	}
+	return r.materials[core.MaterialField]
 }
 
 func loadEnemyVisuals() map[core.EnemyKind]enemyVisual {

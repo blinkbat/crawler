@@ -18,15 +18,16 @@ This workspace is Windows-first. Prefer bash if it is installed, but do not bloc
 - `internal/app/core/`: shared data and pure-ish helpers.
 - `internal/app/core/config.go`: global constants, direction/action enums, RNG.
 - `internal/app/core/types.go`: shared structs for player, map state, battle state, enemies, and party members.
-- `internal/app/core/state.go`: initial game state, party members, and rat factory.
-- `internal/app/core/map.go`: dungeon layout, map queries, rat placement helpers.
+- `internal/app/core/state.go`: initial game state and party members.
+- `internal/app/core/areas.go`: area definitions, start positions, material sets, encounter spawns, and quiet messages.
+- `internal/app/core/map.go`: area layouts, map queries, and enemy placement helpers.
 - `internal/app/core/party.go`: party class definitions and skill names/costs.
 - `internal/app/core/selectors.go`: read-only party/battle selectors and turn forecast generation.
 - `internal/app/core/condition.go`: enemy wound-state thresholds and labels.
 - `internal/app/core/util.go`: math, easing, direction, color, clamp, flash, and bump helpers.
 - `internal/app/input/`: shared key semantics for confirm/back/menu/targeting/exploration controls.
 - `internal/app/explore/`: non-battle game input and movement.
-- `internal/app/explore/movement.go`: pause menu input, tile movement, free-look snapback, step/turn animations, adjacent encounter checks.
+- `internal/app/explore/movement.go`: pause menu input, tile movement, smooth free-look return, step/turn animations, adjacent encounter checks.
 - `internal/app/battle/`: turn-based combat state machine and rules.
 - `internal/app/battle/battle.go`: battle lifecycle, phase transitions, battle log updates, transient combat effects.
 - `internal/app/battle/menu.go`: combat menu input and enemy/party target cycling.
@@ -40,13 +41,13 @@ This workspace is Windows-first. Prefer bash if it is installed, but do not bloc
 - `internal/app/render/turns.go`: color-coded turn order panel.
 - `internal/app/render/minimap.go`: auto-scrolling minimap and facing arrow.
 - `internal/app/render/menu.go`: pause menu.
-- `internal/app/render/resources.go`: procedural resource loading, font loading, HUD text helpers, rounded panel helpers.
-- `internal/app/render/textures.go`: procedural wall/floor/sky textures and rat/party sprite pixels.
+- `internal/app/render/resources.go`: procedural resource loading, area material models, font loading, HUD text helpers, rounded panel helpers.
+- `internal/app/render/textures.go`: procedural area wall/floor/sky textures and rat/party sprite pixels.
 
 ## Gameplay Notes
 
 - Movement is tile-based with short animation. `W/S` step, `A/D` strafe, `Q/E` or arrows turn.
-- Right-click drag free-look snaps back on release.
+- Right-click drag free-look recenters smoothly on release.
 - Battles start when the player is adjacent to a live rat; if needed, the player rotates to face it first.
 - Battle input:
   - Confirm: `Space`, `Enter`, or `Z`

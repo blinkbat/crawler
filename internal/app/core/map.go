@@ -62,7 +62,7 @@ func buildFieldLayout(width, height int, trees [][2]int) []string {
 	return layout
 }
 
-func NewGameMap(rows []string) GameMap {
+func NewGameMap(rows []string, materials MaterialSet) GameMap {
 	height := len(rows)
 	width := 0
 	for _, row := range rows {
@@ -70,19 +70,19 @@ func NewGameMap(rows []string) GameMap {
 			width = len(row)
 		}
 	}
-	return GameMap{Width: width, Height: height, Rows: rows}
+	return GameMap{Width: width, Height: height, Rows: rows, Materials: materials}
 }
 
-func placeRats(m GameMap, desired [][2]int) []Enemy {
-	enemies := make([]Enemy, 0, len(desired))
-	occupied := map[[2]int]bool{{StartTileX, StartTileZ}: true}
-	for _, pos := range desired {
-		x, z := nearestOpenTile(m, pos[0], pos[1], occupied)
+func placeEnemies(m GameMap, spawns []EnemySpawn, startX, startZ int) []Enemy {
+	enemies := make([]Enemy, 0, len(spawns))
+	occupied := map[[2]int]bool{{startX, startZ}: true}
+	for _, spawn := range spawns {
+		x, z := nearestOpenTile(m, spawn.TileX, spawn.TileZ, occupied)
 		if x < 0 {
 			continue
 		}
 		occupied[[2]int{x, z}] = true
-		enemies = append(enemies, NewRat(x, z))
+		enemies = append(enemies, NewEnemy(spawn.Kind, x, z))
 	}
 	return enemies
 }

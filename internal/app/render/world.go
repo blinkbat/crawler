@@ -39,16 +39,17 @@ func DrawSkyBackground(assets Resources) {
 }
 
 func DrawWorld(m core.GameMap, assets Resources) {
+	material := assets.worldMaterial(m.Materials)
 	for z, row := range m.Rows {
 		for x := range row {
 			center := rl.NewVector3(core.TileCenter(x), 0, core.TileCenter(z))
 			tile := m.TileAt(x, z)
 			if tile != core.TileRock {
-				rl.DrawModel(assets.floorModel, rl.NewVector3(center.X, -0.03, center.Z), 1, rl.White)
+				rl.DrawModel(material.floorModel, rl.NewVector3(center.X, -0.03, center.Z), 1, rl.White)
 			}
 			switch tile {
 			case core.TileRock:
-				rl.DrawModel(assets.wallModel, rl.NewVector3(center.X, core.WallHeight/2, center.Z), 1, rl.White)
+				rl.DrawModel(material.wallModel, rl.NewVector3(center.X, core.WallHeight/2, center.Z), 1, rl.White)
 			case core.TileTree:
 				drawTreeBlocker(center)
 			}

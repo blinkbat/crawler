@@ -1,9 +1,32 @@
 package core
 
 type GameMap struct {
-	Width  int
-	Height int
-	Rows   []string
+	Width     int
+	Height    int
+	Rows      []string
+	Materials MaterialSet
+}
+
+type AreaID int
+
+type MaterialSet int
+
+type EnemySpawn struct {
+	Kind  EnemyKind
+	TileX int
+	TileZ int
+}
+
+type AreaDefinition struct {
+	ID           AreaID
+	Name         string
+	Layout       []string
+	Materials    MaterialSet
+	StartTileX   int
+	StartTileZ   int
+	StartFacing  int
+	EnemySpawns  []EnemySpawn
+	QuietMessage string
 }
 
 type Player struct {
@@ -32,6 +55,7 @@ type Animation struct {
 
 type GameState struct {
 	Map       GameMap
+	AreaID    AreaID
 	Player    Player
 	Party     []PartyMember
 	Enemies   []Enemy
