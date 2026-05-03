@@ -34,7 +34,6 @@ func Run() {
 		render.DrawPartySprites(camera, state, assets)
 		rl.EndMode3D()
 		render.DrawOverlay(state, assets)
-		render.DrawBattlePartyLabels(camera, state, assets)
 		rl.EndDrawing()
 	}
 }

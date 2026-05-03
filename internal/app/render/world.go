@@ -194,34 +194,6 @@ func drawFriendlyTargetMarker(camera rl.Camera3D, position rl.Vector3) {
 	rl.EnableBackfaceCulling()
 }
 
-func DrawBattlePartyLabels(camera rl.Camera3D, g core.GameState, assets Resources) {
-	if g.MenuOpen || g.Battle.Phase == core.BattleNone {
-		return
-	}
-	labelY := float32(rl.GetScreenHeight()) - 86
-	victoryDance := victoryDanceElapsed(g)
-	for i, member := range g.Party {
-		memberDance := float32(0)
-		if member.HP > 0 {
-			memberDance = victoryDance
-		}
-		position := partySpritePosition(camera, i, member.Class, member.AttackBump, memberDance)
-		screen := rl.GetWorldToScreen(rl.NewVector3(position.X, position.Y, position.Z), camera)
-		if screen.X < -80 || screen.X > float32(rl.GetScreenWidth())+80 || screen.Y < -80 || screen.Y > float32(rl.GetScreenHeight())+80 {
-			continue
-		}
-		drawPartyStatLabel(
-			assets.hudFont,
-			member,
-			screen.X,
-			labelY,
-			g.Battle.Phase == core.BattlePlayer && i == g.Battle.CurrentParty && member.HP > 0,
-			g.Battle.Phase == core.BattlePlayer && g.Battle.ActionMode == core.ActionPartyTarget && i == g.Battle.PartyTarget,
-			member.HP <= 0,
-		)
-	}
-}
-
 func partySpritePosition(camera rl.Camera3D, index int, class core.PartyClass, bump, victoryDance float32) rl.Vector3 {
 	forward := horizontalForward(camera)
 	right := rl.NewVector3(-forward.Z, 0, forward.X)

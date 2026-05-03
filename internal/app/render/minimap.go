@@ -7,28 +7,40 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-func drawMinimap(m core.GameMap, g core.GameState) {
+func drawMinimap(m core.GameMap, g core.GameState, assets Resources) {
 	const (
 		cell      = int32(12)
 		viewCells = int32(13)
-		pad       = int32(12)
+		pad       = int32(20)
+		header    = int32(34)
 	)
 	p := g.Player
 	half := int(viewCells / 2)
 	startX := p.TileX - half
 	startZ := p.TileZ - half
-	panelSize := viewCells * cell
+	gridSize := viewCells * cell
+	panelW := gridSize + 16
+	panelH := gridSize + 16 + header
 
-	drawRoundedRect(pad-3, pad-3, panelSize+6, panelSize+6, 0.06, rl.NewColor(10, 10, 12, 165))
+	drawCard(pad, pad, panelW, panelH, surfacePrimary, borderSoft, borderStrong)
+	areaName := core.AreaByID(g.AreaID).Name
+	drawHeading(assets.hudFont, "AREA", pad+14, pad+10, borderStrong)
+	if areaName != "" {
+		drawTextWithShadow(assets.hudFont, areaName, float32(pad+74), float32(pad+10), 14, textMuted)
+	}
+
+	gridX := pad + 8
+	gridY := pad + 8 + header
+
 	for localZ := int32(0); localZ < viewCells; localZ++ {
 		for localX := int32(0); localX < viewCells; localX++ {
 			mapX := startX + int(localX)
 			mapZ := startZ + int(localZ)
-			col := rl.NewColor(8, 10, 12, 228)
+			col := rl.NewColor(8, 10, 14, 235)
 			if mapX >= 0 && mapX < m.Width && mapZ >= 0 && mapZ < m.Height {
 				col = minimapTileColor(m.Materials, m.TileAt(mapX, mapZ))
 			}
-			rl.DrawRectangle(pad+localX*cell, pad+localZ*cell, cell-1, cell-1, col)
+			rl.DrawRectangle(gridX+localX*cell, gridY+localZ*cell, cell-1, cell-1, col)
 		}
 	}
 
@@ -41,13 +53,14 @@ func drawMinimap(m core.GameMap, g core.GameState) {
 		if localX < 0 || localZ < 0 || localX >= int(viewCells) || localZ >= int(viewCells) {
 			continue
 		}
-		x := pad + int32(localX)*cell + cell/2
-		z := pad + int32(localZ)*cell + cell/2
-		rl.DrawCircle(x, z, 4, rl.NewColor(210, 66, 60, 255))
+		x := gridX + int32(localX)*cell + cell/2
+		z := gridY + int32(localZ)*cell + cell/2
+		rl.DrawCircle(x, z, 4, rl.NewColor(220, 76, 70, 255))
+		rl.DrawCircleLines(x, z, 5, rl.NewColor(255, 200, 200, 220))
 	}
 
 	drawMinimapArrow(
-		rl.NewVector2(float32(pad+viewCells*cell/2), float32(pad+viewCells*cell/2)),
+		rl.NewVector2(float32(gridX+gridSize/2), float32(gridY+gridSize/2)),
 		p.Facing,
 	)
 }
@@ -56,21 +69,21 @@ func minimapTileColor(material core.MaterialSet, tile byte) color.RGBA {
 	switch tile {
 	case core.TileRock:
 		if material == core.MaterialDungeon {
-			return rl.NewColor(132, 132, 126, 228)
+			return rl.NewColor(132, 132, 126, 235)
 		}
-		return rl.NewColor(112, 112, 106, 228)
+		return rl.NewColor(112, 112, 106, 235)
 	case core.TileTree:
-		return rl.NewColor(42, 132, 56, 238)
+		return rl.NewColor(42, 132, 56, 240)
 	default:
 		if material == core.MaterialDungeon {
-			return rl.NewColor(82, 84, 88, 228)
+			return rl.NewColor(82, 84, 88, 235)
 		}
-		return rl.NewColor(60, 121, 54, 228)
+		return rl.NewColor(60, 121, 54, 235)
 	}
 }
 
 func drawMinimapArrow(center rl.Vector2, facing int) {
-	const arrowSize = float32(6.6)
+	const arrowSize = float32(7)
 	var tip, left, right rl.Vector2
 	switch core.NormalizeFacing(facing) {
 	case core.North:
@@ -90,5 +103,5 @@ func drawMinimapArrow(center rl.Vector2, facing int) {
 		left = rl.NewVector2(center.X+arrowSize, center.Y+arrowSize)
 		right = rl.NewVector2(center.X+arrowSize, center.Y-arrowSize)
 	}
-	rl.DrawTriangle(tip, left, right, rl.NewColor(118, 235, 136, 255))
+	rl.DrawTriangle(tip, left, right, rl.NewColor(132, 240, 148, 255))
 }
