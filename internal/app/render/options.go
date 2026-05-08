@@ -50,5 +50,5 @@ func drawOption(font rl.Font, text string, x, y int32, selected bool, style opti
 			borderActive,
 		)
 	}
-	drawHUDText(font, text, x+style.textOffsetX, y, style.textSize)
+	drawHUDText(font, text, x+style.textOffsetX, y, style.textSize, textPrimary)
 }

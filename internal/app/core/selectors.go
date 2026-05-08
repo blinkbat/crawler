@@ -112,44 +112,61 @@ func BattleTargetOrdinal(g GameState) int {
 	return 1
 }
 
+// TurnForecast walks the scheduled queue from the current cursor and emits a
+// per-actor preview. Supports up to `limit` entries, looping into the next
+// round if the current one runs short. Each entry is one actor (a single
+// party member or a single enemy slot), since mixed initiative interleaves
+// them — there's no longer a "block of enemies" to collapse.
 func TurnForecast(g GameState, limit int) []TurnEntry {
 	turns := make([]TurnEntry, 0, limit)
-	if (g.Battle.Phase != BattlePlayer && g.Battle.Phase != BattleEnemy) || limit <= 0 {
+	phase := g.Battle.Phase
+	active := phase == BattlePlayer || phase == BattleAttackTiming || phase == BattleEnemyTiming
+	if !active || limit <= 0 || len(g.Battle.Queue) == 0 {
 		return turns
 	}
 
-	startParty := g.Battle.CurrentParty
-	if startParty < 0 {
-		startParty = 0
+	cursor := g.Battle.QueueCursor
+	if cursor < 0 {
+		cursor = 0
 	}
-	enemyFirst := g.Battle.Phase == BattleEnemy
-	for len(turns) < limit {
-		if enemyFirst {
-			appendEnemyTurn(&turns, g, limit)
-			enemyFirst = false
-			startParty = 0
+	// First pass: rest of this round.
+	for cursor < len(g.Battle.Queue) && len(turns) < limit {
+		if entry, ok := turnEntryFor(g, g.Battle.Queue[cursor]); ok {
+			turns = append(turns, entry)
 		}
-		for i := startParty; i < len(g.Party) && len(turns) < limit; i++ {
-			if g.Party[i].HP > 0 {
-				turns = append(turns, TurnEntry{Label: g.Party[i].Name, Class: g.Party[i].Class})
-			}
-		}
-		appendEnemyTurn(&turns, g, limit)
-		startParty = 0
-		if LivingPartyCount(g.Party) == 0 || LivingBattleCount(&g) == 0 {
+		cursor++
+	}
+	// If we still have room, fall through to the cached "next round"
+	// projection that was built when the current round started. Actors
+	// that have since died are skipped at render time by turnEntryFor.
+	for _, actor := range g.Battle.NextRoundQueue {
+		if len(turns) >= limit {
 			break
+		}
+		if entry, ok := turnEntryFor(g, actor); ok {
+			turns = append(turns, entry)
 		}
 	}
 	return turns
 }
 
-func appendEnemyTurn(turns *[]TurnEntry, g GameState, limit int) {
-	if len(*turns) >= limit {
-		return
+// turnEntryFor materializes one queue actor into a TurnEntry. Skips dead
+// actors (returns false). Used by TurnForecast.
+func turnEntryFor(g GameState, actor ActorRef) (TurnEntry, bool) {
+	if actor.IsParty {
+		if actor.Index < 0 || actor.Index >= len(g.Party) || g.Party[actor.Index].HP <= 0 {
+			return TurnEntry{}, false
+		}
+		p := g.Party[actor.Index]
+		return TurnEntry{Label: p.Name, Class: p.Class}, true
 	}
-	count := LivingBattleCount(&g)
-	if count <= 0 {
-		return
+	if actor.Index < 0 || actor.Index >= len(g.Battle.EnemyGroup) {
+		return TurnEntry{}, false
 	}
-	*turns = append(*turns, TurnEntry{Label: BattleEnemyTurnLabel(g), Enemy: true})
+	enemyIdx := g.Battle.EnemyGroup[actor.Index]
+	if !EnemyAlive(g.Enemies, enemyIdx) {
+		return TurnEntry{}, false
+	}
+	return TurnEntry{Label: EnemyInfoFor(g.Enemies[enemyIdx]).SingularName, Enemy: true}, true
 }
+

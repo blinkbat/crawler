@@ -10,19 +10,31 @@ import (
 
 func Update(g *core.GameState) {
 	dt := rl.GetFrameTime()
-	if g.Battle.Phase != core.BattleNone {
-		battle.Update(g, dt)
-		return
+	// Cap dt so a frame stall (window drag, debugger pause, slow load) can't
+	// fast-forward animations or overshoot tile-step targets in one tick.
+	// Matches the cap in battle.Update so the whole game has consistent
+	// minimum-effective tick rate.
+	if dt > 1.0/15.0 {
+		dt = 1.0 / 15.0
 	}
 
-	if input.PausePressed() {
-		g.MenuOpen = !g.MenuOpen
+	// The pause menu sits above the simulation: when it's open we route input
+	// through the menu instead of advancing battle / explore. Pause-key edges
+	// toggle the menu from either state, but during battle the toggle is
+	// gated on a non-timing phase so the player can't pause through a timing
+	// bar (which would skip the input window).
+	if g.MenuOpen {
+		updateMenu(g)
+		return
+	}
+	if input.PausePressed() && pauseAllowed(g) {
+		g.MenuOpen = true
 		g.Player.LookYaw = 0
 		g.Player.LookPitch = 0
 		return
 	}
-	if g.MenuOpen {
-		updateMenu(g)
+	if g.Battle.Phase != core.BattleNone {
+		battle.Update(g, dt)
 		return
 	}
 
@@ -34,6 +46,17 @@ func Update(g *core.GameState) {
 	if g.Battle.Phase == core.BattleNone && g.Player.Anim.Kind == core.AnimNone {
 		StartAdjacent(g)
 	}
+}
+
+// pauseAllowed reports whether the global pause menu can be opened right now.
+// In the field it's always allowed; during battle we forbid pausing while a
+// timing bar is active so the player can't sidestep the input window.
+func pauseAllowed(g *core.GameState) bool {
+	switch g.Battle.Phase {
+	case core.BattleAttackTiming, core.BattleEnemyTiming:
+		return false
+	}
+	return true
 }
 
 func updateMenu(g *core.GameState) {

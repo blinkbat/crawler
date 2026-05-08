@@ -12,11 +12,38 @@ import (
 
 // drawBattleHUD orchestrates the in-combat HUD. Each panel owns one screen
 // region (top-center roster, bottom-left log, bottom-center action, top-right
-// turn order) so they never compete for the same real estate.
+// turn order) so they never compete for the same real estate. During the
+// timing minigame the log and action panels yield their strip to the bar.
 func drawBattleHUD(g core.GameState, assets Resources) {
 	drawEnemyRoster(g, assets)
-	drawCombatLogPanel(g, assets)
-	drawActionMenuPanel(g, assets)
+	if !timingActive(g) {
+		drawCombatLogPanel(g, assets)
+		drawActionMenuPanel(g, assets)
+	}
+}
+
+// timingActive reports whether the timed-hit bar is currently the focus of
+// the HUD. Used to hide panels that share its strip.
+func timingActive(g core.GameState) bool {
+	return g.Battle.Phase == core.BattleAttackTiming || g.Battle.Phase == core.BattleEnemyTiming
+}
+
+// inPlayerTurn reports whether the current phase is "the player is acting" —
+// either the menu/target picker or the resolving timing bar. Visual indicators
+// for the active actor + chosen target should persist through the bar so the
+// player keeps their bearings, instead of flickering off the moment the bar
+// arms and back on when it resolves.
+func inPlayerTurn(g core.GameState) bool {
+	return g.Battle.Phase == core.BattlePlayer || g.Battle.Phase == core.BattleAttackTiming
+}
+
+// targetingAlly is true when the player is choosing a party member to act
+// on — either a heal-skill target or an item target. Used by the renderer
+// to gate the friendly selection marker so it appears in both modes
+// (audit-3 caught Item targeting silently dropping the marker because the
+// check was specific to ActionPartyTarget).
+func targetingAlly(g core.GameState) bool {
+	return g.Battle.ActionMode == core.ActionPartyTarget || g.Battle.ActionMode == core.ActionItemTarget
 }
 
 // drawEnemyRoster shows the active enemy group at the top of the screen.
@@ -48,7 +75,7 @@ func drawEnemyRoster(g core.GameState, assets Resources) {
 	header := rosterHeader(g)
 	drawHeading(assets.hudFont, header, x+20, y+14, borderEnemy)
 
-	targetable := g.Battle.ActionMode == core.ActionEnemyTarget && g.Battle.Phase == core.BattlePlayer
+	targetable := g.Battle.ActionMode == core.ActionEnemyTarget && inPlayerTurn(g)
 
 	for i, enemyIndex := range indices {
 		enemy := g.Enemies[enemyIndex]
@@ -195,7 +222,9 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 
 	screenW := int32(rl.GetScreenWidth())
 	w := int32(340)
-	h := int32(170)
+	// Taller panel — 4 action rows now (Attack/Skill/Defend/Item) and the
+	// item picker mode reuses this same panel for its list.
+	h := int32(280)
 	// Right of the combat log, above the party ribbon, left of the turn order
 	// (turn panel is 216 wide with a 22 right margin; leave a 20px gap).
 	const turnReserve = int32(258)
@@ -219,7 +248,6 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 		}
 		drawTextWithShadow(assets.hudFont, actionLabel, float32(contentX), float32(contentY), 24, textPrimary)
 		drawTextWithShadow(assets.hudFont, "Choose a target", float32(contentX), float32(contentY+34), 16, textLabel)
-		drawActionFootHint(assets.hudFont, x, y, w, h, "A/D target", "Z confirm", "X back")
 	case core.ActionPartyTarget:
 		targetName := "Ally"
 		if g.Battle.PartyTarget >= 0 && g.Battle.PartyTarget < len(g.Party) {
@@ -227,11 +255,43 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 		}
 		drawTextWithShadow(assets.hudFont, fmt.Sprintf("%s -> %s", core.SkillName(g.Battle.PendingSkill), targetName), float32(contentX), float32(contentY), 23, textPrimary)
 		drawTextWithShadow(assets.hudFont, "Choose an ally", float32(contentX), float32(contentY+34), 16, textLabel)
-		drawActionFootHint(assets.hudFont, x, y, w, h, "A/D choose", "Z confirm", "X back")
+	case core.ActionItemMenu:
+		drawTextWithShadow(assets.hudFont, "Items", float32(contentX), float32(contentY), 24, textPrimary)
+		drawItemMenuList(g, assets, contentX, contentY+34)
+	case core.ActionItemTarget:
+		itemName := core.ItemInfo(g.Battle.PendingItem).Name
+		targetName := "Ally"
+		if g.Battle.PartyTarget >= 0 && g.Battle.PartyTarget < len(g.Party) {
+			targetName = g.Party[g.Battle.PartyTarget].Name
+		}
+		drawTextWithShadow(assets.hudFont, fmt.Sprintf("%s -> %s", itemName, targetName), float32(contentX), float32(contentY), 22, textPrimary)
+		drawTextWithShadow(assets.hudFont, "Choose an ally", float32(contentX), float32(contentY+34), 16, textLabel)
 	default:
+		// Transient status line — populated by setBattleStatus to surface
+		// validation errors that aren't real combat-log events (e.g.
+		// "Swipe needs more MP."). Picker modes use their own hardcoded
+		// prompt so we only render this in the action menu itself.
+		if status := transientStatus(g); status != "" {
+			drawTextWithShadow(assets.hudFont, status, float32(contentX), float32(contentY), 15, classCol)
+			contentY += 26
+		}
 		drawActionMenuOptions(g, assets, contentX, contentY, member)
-		drawActionFootHint(assets.hudFont, x, y, w, h, "W/S choose", "Z confirm", "")
 	}
+}
+
+// transientStatus returns Battle.Message when it's a "status" string that
+// hasn't been logged yet (i.e. set via setBattleStatus, not setBattleMessage).
+// Returns "" when Message is empty or matches the most recent log entry, so
+// result/log messages don't render twice.
+func transientStatus(g core.GameState) string {
+	msg := g.Battle.Message
+	if msg == "" {
+		return ""
+	}
+	if n := len(g.Battle.Log); n > 0 && g.Battle.Log[n-1] == msg {
+		return ""
+	}
+	return msg
 }
 
 func drawActionMenuOptions(g core.GameState, assets Resources, x, y int32, member core.PartyMember) {
@@ -248,6 +308,47 @@ func drawActionMenuOptions(g core.GameState, assets Resources, x, y int32, membe
 		costLabel = fmt.Sprintf("%d MP", skillCost)
 	}
 	drawActionRow(assets.hudFont, x, y+rowSpacing, skillName, costLabel, g.Battle.MenuIndex == 1)
+	drawActionRow(assets.hudFont, x, y+rowSpacing*2, "Defend", "", g.Battle.MenuIndex == 2)
+	// Item row: shows total stack count as a hint so the player knows the
+	// menu has anything in it before opening the picker. Empty inventory
+	// renders the row dimmed by hint text rather than disabled, since the
+	// menu code already shows a "No items." status if you confirm on it.
+	itemSuffix := ""
+	if total := totalItemCount(g.Inventory); total > 0 {
+		itemSuffix = fmt.Sprintf("x%d", total)
+	}
+	drawActionRow(assets.hudFont, x, y+rowSpacing*3, "Item", itemSuffix, g.Battle.MenuIndex == 3)
+}
+
+// drawItemMenuList renders the inventory picker as a vertical list of
+// "Name x Count" rows with the highlighted entry tinted by the selection
+// border. Empty inventory falls through to a single "(no items)" hint row
+// so the panel doesn't look broken if the player gets here somehow.
+func drawItemMenuList(g core.GameState, assets Resources, x, y int32) {
+	rowSpacing := int32(28)
+	living := core.LiveStacks(g.Inventory)
+	if len(living) == 0 {
+		drawTextWithShadow(assets.hudFont, "(no items)", float32(x), float32(y), 16, textDim)
+		return
+	}
+	for i, slot := range living {
+		def := core.ItemInfo(slot.Kind)
+		label := def.Name
+		suffix := fmt.Sprintf("x%d", slot.Count)
+		drawActionRow(assets.hudFont, x, y+int32(i)*rowSpacing, label, suffix, g.Battle.ItemMenuIndex == i)
+	}
+}
+
+// totalItemCount sums all the inventory's stack counts. Used by the action
+// menu's "Item xN" hint label.
+func totalItemCount(inv []core.ItemStack) int {
+	n := 0
+	for _, s := range inv {
+		if s.Count > 0 {
+			n += s.Count
+		}
+	}
+	return n
 }
 
 func drawActionRow(font rl.Font, x, y int32, label, suffix string, selected bool) {
@@ -275,28 +376,6 @@ func drawActionRow(font rl.Font, x, y int32, label, suffix string, selected bool
 	}
 }
 
-func drawActionFootHint(font rl.Font, x, y, w, h int32, hints ...string) {
-	combined := ""
-	for _, hint := range hints {
-		if hint == "" {
-			continue
-		}
-		if combined != "" {
-			combined += "    "
-		}
-		combined += hint
-	}
-	if combined == "" {
-		return
-	}
-	size := float32(13)
-	measure := rl.MeasureTextEx(font, combined, size, 1)
-	hx := float32(x+w) - measure.X - 16
-	hy := float32(y+h) - measure.Y - 12
-	rl.DrawTextEx(font, combined, rl.NewVector2(hx+1, hy+1), size, 1, rl.NewColor(0, 0, 0, 200))
-	rl.DrawTextEx(font, combined, rl.NewVector2(hx, hy), size, 1, textHint)
-}
-
 func enemyHealthStyle(enemy core.Enemy) (string, color.RGBA) {
 	condition := core.EnemyConditionFor(enemy)
 	switch condition {
@@ -319,8 +398,7 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 	if g.Battle.Splash <= 0 || g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(g.Enemies) {
 		return
 	}
-	const splashTotal = float32(1.15)
-	progress := splashTotal - g.Battle.Splash
+	progress := core.BattleSplashDuration - g.Battle.Splash
 	if progress < 0 {
 		progress = 0
 	}

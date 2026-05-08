@@ -22,6 +22,4 @@ func drawMenuOverlay(g core.GameState, assets Resources) {
 
 	drawOption(assets.hudFont, "Restart", panelX+58, panelY+118, g.MenuIndex == 0, menuOptionStyle)
 	drawOption(assets.hudFont, "Quit", panelX+58, panelY+170, g.MenuIndex == 1, menuOptionStyle)
-
-	drawTextWithShadow(assets.hudFont, "Esc closes    -    W/S choose    -    Enter confirm", float32(panelX+34), float32(panelY+panelH-32), 14, textHint)
 }

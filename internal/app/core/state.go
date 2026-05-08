@@ -40,14 +40,15 @@ func ResetGameState(g *GameState) {
 func NewParty() []PartyMember {
 	party := make([]PartyMember, 0, len(partyClassDefinitions))
 	for _, def := range partyClassDefinitions {
+		maxHP := MaxHPFor(def.Stats)
 		party = append(party, PartyMember{
-			Class:  def.Class,
-			Name:   def.Name,
-			HP:     def.MaxHP,
-			MaxHP:  def.MaxHP,
-			MP:     def.MaxMP,
-			MaxMP:  def.MaxMP,
-			Attack: def.Atk,
+			Class: def.Class,
+			Name:  def.Name,
+			Stats: def.Stats,
+			HP:    maxHP,
+			MaxHP: maxHP,
+			MP:    def.MaxMP,
+			MaxMP: def.MaxMP,
 		})
 	}
 	return party

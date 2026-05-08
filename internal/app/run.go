@@ -27,12 +27,14 @@ func Run() {
 
 		rl.BeginDrawing()
 		rl.ClearBackground(rl.NewColor(87, 172, 244, 255))
-		render.DrawSkyBackground(assets)
+		render.DrawSkyBackground(assets, state.Map)
 		rl.BeginMode3D(camera)
-		render.DrawWorld(state.Map, assets)
+		render.DrawWorld(camera, state.Map, assets)
 		render.DrawEnemies(camera, state, assets)
 		render.DrawPartySprites(camera, state, assets)
 		rl.EndMode3D()
+		render.DrawDamagePopups(camera, state, assets)
+		render.DrawQualityPopup(camera, state, assets)
 		render.DrawOverlay(state, assets)
 		rl.EndDrawing()
 	}

@@ -12,7 +12,6 @@ import (
 // veil < log < primary; tints overlay primary for state.
 var (
 	surfacePrimary    = rl.NewColor(12, 16, 28, 222)
-	surfaceInner      = rl.NewColor(22, 28, 44, 200)
 	surfaceLog        = rl.NewColor(4, 6, 12, 148)
 	surfaceVeil       = rl.NewColor(0, 0, 0, 130)
 	surfaceActiveTint = rl.NewColor(58, 52, 96, 215)
@@ -191,12 +190,27 @@ func drawBar(font rl.Font, x, y, width, height float32, label string, value, max
 		valText = formatBarValue(value, maxValue)
 	}
 	if valText != "" {
+		// Value scales with bar height — taller bars get a bigger, more
+		// readable number. Bright by default; faded only when the member is
+		// muted (down). A double-offset drop shadow gives clean contrast
+		// against any fill color.
 		valSize := labelSize
+		if height > 20 {
+			valSize = labelSize + (height-20)*0.55
+		}
+		valColor := textPrimary
+		if muted {
+			valColor = textDim
+		} else {
+			_ = textCol
+		}
 		valMeasure := rl.MeasureTextEx(font, valText, valSize, 1)
 		valY := y + (float32(ih)-valMeasure.Y)/2 - 1
-		valX := x + width - valMeasure.X - 8
-		rl.DrawTextEx(font, valText, rl.NewVector2(valX+1, valY+1), valSize, 1, rl.NewColor(0, 0, 0, 180))
-		rl.DrawTextEx(font, valText, rl.NewVector2(valX, valY), valSize, 1, textCol)
+		valX := x + width - valMeasure.X - 10
+		shadow := rl.NewColor(0, 0, 0, 220)
+		rl.DrawTextEx(font, valText, rl.NewVector2(valX+2, valY+2), valSize, 1, shadow)
+		rl.DrawTextEx(font, valText, rl.NewVector2(valX+1, valY+1), valSize, 1, shadow)
+		rl.DrawTextEx(font, valText, rl.NewVector2(valX, valY), valSize, 1, valColor)
 	}
 }
 

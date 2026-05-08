@@ -6,12 +6,21 @@ import (
 	"fmt"
 )
 
+// Action menu row indices. Order matches the rendered list in render/battle.go.
+const (
+	actionRowAttack = 0
+	actionRowSkill  = 1
+	actionRowDefend = 2
+	actionRowItem   = 3
+	actionRowCount  = 4
+)
+
 func updateActionMenu(g *core.GameState) {
 	if input.UpPressed() {
-		g.Battle.MenuIndex = core.WrapIndex(g.Battle.MenuIndex-1, 2)
+		g.Battle.MenuIndex = core.WrapIndex(g.Battle.MenuIndex-1, actionRowCount)
 	}
 	if input.DownPressed() {
-		g.Battle.MenuIndex = core.WrapIndex(g.Battle.MenuIndex+1, 2)
+		g.Battle.MenuIndex = core.WrapIndex(g.Battle.MenuIndex+1, actionRowCount)
 	}
 	if input.BackPressed() {
 		setBattleStatus(g, "Choose an action.")
@@ -20,13 +29,34 @@ func updateActionMenu(g *core.GameState) {
 	if !input.ConfirmPressed() {
 		return
 	}
-	if g.Battle.MenuIndex == 0 {
+	switch g.Battle.MenuIndex {
+	case actionRowAttack:
 		g.Battle.PendingSkill = core.SkillNone
 		g.Battle.ActionMode = core.ActionEnemyTarget
 		setBattleStatus(g, "Choose a target.")
 		return
+	case actionRowDefend:
+		performDefend(g)
+		return
+	case actionRowItem:
+		if core.InventoryEmpty(g.Inventory) {
+			setBattleStatus(g, "No items.")
+			return
+		}
+		g.Battle.ActionMode = core.ActionItemMenu
+		g.Battle.ItemMenuIndex = 0
+		setBattleStatus(g, "Choose an item.")
+		return
+	case actionRowSkill:
+		performSkill(g)
+		return
 	}
+}
 
+// performSkill is the body of the "Skill" row's confirm — split out so the
+// action-menu switch reads as one row per case and actionRowSkill isn't a
+// silent fall-through.
+func performSkill(g *core.GameState) {
 	skill := core.PartySkill(g.Party[g.Battle.CurrentParty])
 	if skill == core.SkillNone {
 		setBattleStatus(g, "No skill ready.")
@@ -47,8 +77,119 @@ func updateActionMenu(g *core.GameState) {
 		g.Battle.ActionMode = core.ActionEnemyTarget
 		setBattleStatus(g, fmt.Sprintf("Choose a target for %s.", core.SkillName(skill)))
 	default:
-		usePendingBattleAction(g)
+		beginPendingAction(g)
 	}
+}
+
+// updateItemMenu drives the inventory picker. Up/Down cycles entries; Back
+// returns to the action menu; Confirm picks the highlighted item and moves
+// to ally-target selection. Items only heal allies for now, so target mode
+// is always party.
+func updateItemMenu(g *core.GameState) {
+	living := core.LiveStacks(g.Inventory)
+	count := len(living)
+	if count == 0 {
+		// Inventory ran dry between opening the menu and now — not actually
+		// reachable today (use is the only consumer), but defensively bail.
+		resetBattleAction(g)
+		setBattleStatus(g, "No items.")
+		return
+	}
+	if input.UpPressed() {
+		g.Battle.ItemMenuIndex = core.WrapIndex(g.Battle.ItemMenuIndex-1, count)
+	}
+	if input.DownPressed() {
+		g.Battle.ItemMenuIndex = core.WrapIndex(g.Battle.ItemMenuIndex+1, count)
+	}
+	if input.BackPressed() {
+		resetBattleAction(g)
+		setBattleStatus(g, "Choose an action.")
+		return
+	}
+	if !input.ConfirmPressed() {
+		return
+	}
+	if g.Battle.ItemMenuIndex < 0 || g.Battle.ItemMenuIndex >= count {
+		g.Battle.ItemMenuIndex = 0
+	}
+	picked := living[g.Battle.ItemMenuIndex].Kind
+	g.Battle.PendingItem = picked
+	g.Battle.ActionMode = core.ActionItemTarget
+	g.Battle.PartyTarget = g.Battle.CurrentParty
+	setBattleStatus(g, fmt.Sprintf("Use %s on whom?", core.ItemInfo(picked).Name))
+}
+
+// updateItemTarget picks the ally to receive the pending item. Mirrors
+// updatePartyTargeting but routes through applyItem.
+func updateItemTarget(g *core.GameState) {
+	if input.TargetNextPressed() {
+		cyclePartyTarget(g, 1)
+	}
+	if input.TargetPreviousPressed() {
+		cyclePartyTarget(g, -1)
+	}
+	if input.BackPressed() {
+		// Step back to the item picker, NOT all the way to the action menu —
+		// matches the pattern where target-back cancels the target selection
+		// rather than the whole action.
+		g.Battle.ActionMode = core.ActionItemMenu
+		setBattleStatus(g, "Choose an item.")
+		return
+	}
+	if !input.ConfirmPressed() {
+		return
+	}
+	applyItem(g)
+}
+
+// applyItem consumes the pending item, heals the targeted ally by the
+// item's HealAmount, and ends the actor's turn. The item action doesn't
+// run a timing minigame — the player already invested a turn and used a
+// finite resource, no need to extract a third demand on top.
+func applyItem(g *core.GameState) {
+	kind := g.Battle.PendingItem
+	target := g.Battle.PartyTarget
+	if kind == core.ItemNone {
+		resetBattleAction(g)
+		return
+	}
+	if target < 0 || target >= len(g.Party) || g.Party[target].HP <= 0 {
+		setBattleStatus(g, "Invalid target.")
+		return
+	}
+	// Try to consume from inventory first — bail without using the action's
+	// turn if the stack disappeared (defensive; shouldn't happen).
+	updated, ok := core.ConsumeItem(g.Inventory, kind)
+	if !ok {
+		setBattleStatus(g, "Item not in inventory.")
+		resetBattleAction(g)
+		return
+	}
+	g.Inventory = updated
+	def := core.ItemInfo(kind)
+	healed := healPartyMember(g, target, def.HealAmount)
+	actor := &g.Party[g.Battle.CurrentParty]
+	actor.AttackBump = core.BumpDuration
+	if healed && def.HealAmount > 0 {
+		setBattleMessage(g, fmt.Sprintf("%s eats %s (+%d HP).", g.Party[target].Name, def.Name, def.HealAmount))
+	} else {
+		setBattleMessage(g, fmt.Sprintf("%s uses %s.", actor.Name, def.Name))
+	}
+	g.Battle.PendingItem = core.ItemNone
+	finishPartyAction(g)
+}
+
+// performDefend marks the current member as defending and ends their turn.
+// No timing minigame — the boost is the whole reward, and showing a bar would
+// imply an opportunity for a better outcome that doesn't exist.
+func performDefend(g *core.GameState) {
+	if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
+		return
+	}
+	member := &g.Party[g.Battle.CurrentParty]
+	member.Defending = true
+	setBattleMessage(g, fmt.Sprintf("%s braces for impact.", member.Name))
+	finishPartyAction(g)
 }
 
 func updateEnemyTargeting(g *core.GameState) {
@@ -66,7 +207,7 @@ func updateEnemyTargeting(g *core.GameState) {
 	if !input.ConfirmPressed() {
 		return
 	}
-	usePendingBattleAction(g)
+	beginPendingAction(g)
 }
 
 func updatePartyTargeting(g *core.GameState) {
@@ -84,7 +225,7 @@ func updatePartyTargeting(g *core.GameState) {
 	if !input.ConfirmPressed() {
 		return
 	}
-	usePendingBattleAction(g)
+	beginPendingAction(g)
 }
 
 func cycleBattleTarget(g *core.GameState, delta int) {

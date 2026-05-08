@@ -6,6 +6,7 @@ type EnemyKind int
 
 const (
 	EnemyRat EnemyKind = iota
+	EnemyBat
 )
 
 type EnemyDefinition struct {
@@ -20,6 +21,10 @@ type EnemyDefinition struct {
 	Item               string
 	MaxHP              int
 	AttackDamage       int
+	// Speed is the implicit initiative value used to slot enemies into the
+	// mixed-initiative turn queue. Higher = acts earlier. Players have full
+	// stat blocks; enemies only need this one number for now.
+	Speed              int
 	AttackVerbSingular string
 	AttackVerbPlural   string
 }
@@ -36,9 +41,29 @@ var enemyDefinitions = []EnemyDefinition{
 		GroupName:          "Rat Pack",
 		Item:               "Morsel of Cheese",
 		MaxHP:              10,
-		AttackDamage:       2,
+		AttackDamage:       3,
+		Speed:              6,
 		AttackVerbSingular: "snaps",
 		AttackVerbPlural:   "snap",
+	},
+	{
+		Kind:               EnemyBat,
+		Name:               "Cave Bat",
+		MonsterType:        "Beast",
+		SingularName:       "Bat",
+		PluralName:         "Bats",
+		SingularNoun:       "bat",
+		PluralNoun:         "bats",
+		GroupName:          "Bat Swarm",
+		// Bat jerky heals more than rat cheese — see ItemHealAmount; the bat
+		// is also faster and harder to land hits on, so the loot is the
+		// payoff for fighting (or robbing) the trickier enemy.
+		Item:               "Bat Jerky",
+		MaxHP:              7,
+		AttackDamage:       2,
+		Speed:              9,
+		AttackVerbSingular: "bites",
+		AttackVerbPlural:   "bite",
 	},
 }
 
@@ -59,6 +84,7 @@ func EnemyInfo(kind EnemyKind) EnemyDefinition {
 		GroupName:          "Enemy Group",
 		MaxHP:              1,
 		AttackDamage:       1,
+		Speed:              5,
 		AttackVerbSingular: "strikes",
 		AttackVerbPlural:   "strike",
 	}

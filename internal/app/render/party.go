@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	partyCardW    = float32(176)
-	partyCardH    = float32(102)
+	partyCardW    = float32(184)
+	partyCardH    = float32(118)
 	partyCardGap  = float32(16)
 	ribbonBottom  = float32(20)
 	ribbonTopRoom = float32(0)
@@ -73,17 +73,19 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 	}
 
 	contentX := x + 16
-	contentW := partyCardW - 26
+	contentW := partyCardW - 28
 
-	drawTextWithShadow(font, member.Name, contentX, y+10, 20, nameCol)
+	drawTextWithShadow(font, member.Name, contentX, y+12, 21, nameCol)
 
 	if down {
-		drawTextWithShadow(font, "DOWN", x+partyCardW-58, y+12, 14, rl.NewColor(220, 102, 102, 235))
+		drawTextWithShadow(font, "DOWN", x+partyCardW-58, y+14, 14, rl.NewColor(220, 102, 102, 235))
+	} else if member.Defending {
+		drawTextWithShadow(font, "DEFENDING", x+partyCardW-94, y+14, 14, rl.NewColor(132, 196, 255, 240))
 	}
 
 	hpFill := hpFillColor(member.HP, member.MaxHP)
-	drawBar(font, contentX, y+42, contentW, 22, "HP", member.HP, member.MaxHP, hpFill, down)
-	drawBar(font, contentX, y+70, contentW, 22, "MP", member.MP, member.MaxMP, barMP, down)
+	drawBar(font, contentX, y+44, contentW, 30, "HP", member.HP, member.MaxHP, hpFill, down)
+	drawBar(font, contentX, y+80, contentW, 30, "MP", member.MP, member.MaxMP, barMP, down)
 }
 
 // DrawPartyRibbon renders the always-visible bottom party ribbon. Cards are
@@ -106,9 +108,9 @@ func DrawPartyRibbon(g core.GameState, assets Resources) {
 
 	activeIdx := -1
 	selectedIdx := -1
-	if g.Battle.Phase == core.BattlePlayer {
+	if inPlayerTurn(g) {
 		activeIdx = g.Battle.CurrentParty
-		if g.Battle.ActionMode == core.ActionPartyTarget {
+		if targetingAlly(g) {
 			selectedIdx = g.Battle.PartyTarget
 		}
 	}

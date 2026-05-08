@@ -74,6 +74,18 @@ func minimapTileColor(material core.MaterialSet, tile byte) color.RGBA {
 		return rl.NewColor(112, 112, 106, 235)
 	case core.TileTree:
 		return rl.NewColor(42, 132, 56, 240)
+	case core.TileTreeXL:
+		// Slightly darker / saturated than TileTree so the XL footprints stand
+		// out as the canopy "tent poles" the player navigates around.
+		return rl.NewColor(28, 102, 44, 240)
+	case core.TileRockLarge:
+		// Boulder tone matches the field's wall-rock palette so it reads as
+		// "this is hard cover, not foliage."
+		return rl.NewColor(120, 116, 108, 240)
+	case core.TileBushLarge:
+		// Lighter, yellower green than the trees so bushes don't get confused
+		// with canopy on the map.
+		return rl.NewColor(110, 168, 92, 240)
 	default:
 		if material == core.MaterialDungeon {
 			return rl.NewColor(82, 84, 88, 235)
