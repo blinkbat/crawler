@@ -4,24 +4,60 @@ import (
 	"math"
 )
 
+// Tile characters. Grouped by the layer that owns them. The .map on-disk
+// format uses these literal bytes; the editor's brush palettes paint them.
+
+// Walls layer.
 const (
-	TileFloor     = '.'
-	TileRock      = '#' // wall — no floor under, blocks movement
-	TileTree      = 'T' // regular tree, blocks
-	TileTreeXL    = 'X' // extra-large tree, blocks
-	TileRockLarge = 'O' // boulder on a floor tile, blocks
-	TileBushLarge = 'B' // dense bush on a floor tile, blocks
+	TileFloor = '.' // historical name; in the layered format this means "open"
+	TileRock  = '#' // wall blocker
 )
 
-func NewGameMap(rows []string, materials MaterialSet) GameMap {
-	height := len(rows)
+// Floor layer.
+const (
+	FloorAuto      = '.' // pick a variant by per-tile hash (back-compat default)
+	FloorGrass     = 'g'
+	FloorDirt      = 'd'
+	FloorDarkGrass = 'k'
+	FloorStone     = 's'
+)
+
+// Decor layer. '.' means "let the renderer's auto-scatter decide"; '_'
+// suppresses any auto decor; explicit chars force a specific small prop.
+const (
+	DecorAuto     = '.'
+	DecorEmpty    = '_'
+	DecorBush     = 'b'
+	DecorMushroom = 'm'
+	DecorPebble   = 'p'
+)
+
+// Props layer. Empty cell is '.'.
+const (
+	TileTree      = 'T' // regular tree, blocks
+	TileTreeXL    = 'X' // extra-large tree, blocks
+	TileRockLarge = 'O' // boulder, blocks
+	TileBushLarge = 'B' // dense bush, blocks
+)
+
+// NewGameMap composes a layered runtime map from four parallel grids.
+// Width/height are derived from the layers; callers should validate they
+// match before calling. Materials selects the texture/lighting set.
+func NewGameMap(walls, floor, decor, props []string, materials MaterialSet) GameMap {
+	height := len(walls)
 	width := 0
-	for _, row := range rows {
-		if len(row) > width {
-			width = len(row)
-		}
+	if height > 0 {
+		width = len(walls[0])
 	}
-	return GameMap{Width: width, Height: height, Rows: rows, Materials: materials}
+	return GameMap{
+		Width:     width,
+		Height:    height,
+		Walls:     walls,
+		Floor:     floor,
+		Decor:     decor,
+		Props:     props,
+		Materials: materials,
+	}
 }
 
 func placeEnemies(m GameMap, spawns []EnemySpawn, startX, startZ int) []Enemy {
@@ -59,26 +95,83 @@ func nearestOpenTile(m GameMap, wantX, wantZ int, occupied map[[2]int]bool) (int
 	return bestX, bestZ
 }
 
+// WallAt returns true if the cell holds a wall in the walls layer.
 func (m GameMap) WallAt(x, z int) bool {
-	return m.BlockedAt(x, z)
+	if !m.inBounds(x, z) {
+		return true
+	}
+	return m.Walls[z][x] == TileRock
 }
 
+// PropAt returns the prop character at the cell ('.' for empty).
+func (m GameMap) PropAt(x, z int) byte {
+	if !m.inBounds(x, z) {
+		return '.'
+	}
+	return m.Props[z][x]
+}
+
+// FloorVariantAt returns the floor character (auto / variant). Wall cells
+// still have a floor underneath conceptually — it's just not drawn.
+func (m GameMap) FloorVariantAt(x, z int) byte {
+	if !m.inBounds(x, z) {
+		return FloorAuto
+	}
+	return m.Floor[z][x]
+}
+
+// DecorAt returns the decor character (auto / explicit / force-empty).
+func (m GameMap) DecorAt(x, z int) byte {
+	if !m.inBounds(x, z) {
+		return DecorAuto
+	}
+	return m.Decor[z][x]
+}
+
+// TileAt returns a "compositing" character for code that just wants to
+// know what's most-significantly at a cell — walls win over props win
+// over open. Used by the minimap and any callers that haven't switched
+// to explicit per-layer queries yet.
 func (m GameMap) TileAt(x, z int) byte {
-	if z < 0 || z >= m.Height || x < 0 || x >= len(m.Rows[z]) {
+	if !m.inBounds(x, z) {
 		return TileRock
 	}
-	return m.Rows[z][x]
-}
-
-func (m GameMap) BlockedAt(x, z int) bool {
-	switch m.TileAt(x, z) {
-	case TileRock, TileTree, TileTreeXL, TileRockLarge, TileBushLarge:
-		return true
-	default:
-		return false
+	if m.Walls[z][x] == TileRock {
+		return TileRock
 	}
+	if p := m.Props[z][x]; isPropChar(p) {
+		return p
+	}
+	return TileFloor
 }
 
+// BlockedAt reports whether movement into this cell is impossible.
+// Either the walls layer has a wall, or the props layer holds a blocker.
+func (m GameMap) BlockedAt(x, z int) bool {
+	if !m.inBounds(x, z) {
+		return true
+	}
+	if m.Walls[z][x] == TileRock {
+		return true
+	}
+	return isPropChar(m.Props[z][x])
+}
+
+// FloorAt is the inverse of BlockedAt — true when the cell is walkable.
 func (m GameMap) FloorAt(x, z int) bool {
 	return !m.BlockedAt(x, z)
+}
+
+func (m GameMap) inBounds(x, z int) bool {
+	return z >= 0 && z < m.Height && x >= 0 && x < m.Width
+}
+
+// isPropChar returns true if c names a known blocking prop. Open-prop
+// cells use '.'; future props (chests, doors) get added here.
+func isPropChar(c byte) bool {
+	switch c {
+	case TileTree, TileTreeXL, TileRockLarge, TileBushLarge:
+		return true
+	}
+	return false
 }

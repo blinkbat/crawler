@@ -68,7 +68,12 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	return AreaDefinition{
 		Path:         path,
 		Name:         mf.Name,
-		Layout:       append([]string(nil), mf.Layout...),
+		Width:        mf.Width,
+		Height:       mf.Height,
+		Walls:        append([]string(nil), mf.Walls...),
+		Floor:        append([]string(nil), mf.Floor...),
+		Decor:        append([]string(nil), mf.Decor...),
+		Props:        append([]string(nil), mf.Props...),
 		Materials:    mat,
 		StartTileX:   mf.StartX,
 		StartTileZ:   mf.StartZ,
@@ -89,20 +94,19 @@ func MapFileFromArea(a AreaDefinition) mapfile.MapFile {
 			Z:    s.TileZ,
 		})
 	}
-	width := 0
-	if len(a.Layout) > 0 {
-		width = len(a.Layout[0])
-	}
 	return mapfile.MapFile{
 		Name:      a.Name,
 		Materials: MaterialName(a.Materials),
 		Quiet:     a.QuietMessage,
-		Width:     width,
-		Height:    len(a.Layout),
+		Width:     a.Width,
+		Height:    a.Height,
 		StartX:    a.StartTileX,
 		StartZ:    a.StartTileZ,
 		StartFace: FacingName(a.StartFacing),
-		Layout:    append([]string(nil), a.Layout...),
+		Walls:     append([]string(nil), a.Walls...),
+		Floor:     append([]string(nil), a.Floor...),
+		Decor:     append([]string(nil), a.Decor...),
+		Props:     append([]string(nil), a.Props...),
 		Enemies:   enemies,
 	}
 }

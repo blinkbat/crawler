@@ -37,14 +37,16 @@ func TestBundledMapsLoad(t *testing.T) {
 			if area.Materials != tc.wantMaterial {
 				t.Errorf("materials: got %v, want %v", area.Materials, tc.wantMaterial)
 			}
-			if len(area.Layout) == 0 || len(area.Layout[0]) == 0 {
+			if area.Width == 0 || area.Height == 0 {
 				t.Fatalf("empty layout")
 			}
-			h := len(area.Layout)
-			w := len(area.Layout[0])
-			if area.StartTileX < 0 || area.StartTileX >= w ||
-				area.StartTileZ < 0 || area.StartTileZ >= h {
-				t.Errorf("start (%d,%d) out of bounds for %dx%d", area.StartTileX, area.StartTileZ, w, h)
+			if len(area.Walls) != area.Height || len(area.Floor) != area.Height ||
+				len(area.Decor) != area.Height || len(area.Props) != area.Height {
+				t.Fatalf("layer row counts disagree with height %d", area.Height)
+			}
+			if area.StartTileX < 0 || area.StartTileX >= area.Width ||
+				area.StartTileZ < 0 || area.StartTileZ >= area.Height {
+				t.Errorf("start (%d,%d) out of bounds for %dx%d", area.StartTileX, area.StartTileZ, area.Width, area.Height)
 			}
 			if isStartBlocked(area) {
 				t.Errorf("start tile is a blocking tile — player would spawn inside geometry")
@@ -54,15 +56,17 @@ func TestBundledMapsLoad(t *testing.T) {
 }
 
 func isStartBlocked(a AreaDefinition) bool {
-	if a.StartTileZ < 0 || a.StartTileZ >= len(a.Layout) {
+	if a.StartTileZ < 0 || a.StartTileZ >= a.Height {
 		return true
 	}
-	row := a.Layout[a.StartTileZ]
-	if a.StartTileX < 0 || a.StartTileX >= len(row) {
+	if a.StartTileX < 0 || a.StartTileX >= a.Width {
 		return true
 	}
-	switch row[a.StartTileX] {
-	case TileRock, TileTree, TileTreeXL, TileRockLarge, TileBushLarge:
+	if a.Walls[a.StartTileZ][a.StartTileX] == TileRock {
+		return true
+	}
+	switch a.Props[a.StartTileZ][a.StartTileX] {
+	case TileTree, TileTreeXL, TileRockLarge, TileBushLarge:
 		return true
 	}
 	return false

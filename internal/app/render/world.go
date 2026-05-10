@@ -91,10 +91,8 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 	forward := horizontalForward(camera)
 
 	rl.BeginShaderMode(assets.lighting.shader)
-	for z, row := range m.Rows {
-		// Index loop avoids the UTF-8 decode that `range row` would do over
-		// the layout strings — they're ASCII but the runtime doesn't know that.
-		for x := 0; x < len(row); x++ {
+	for z := 0; z < m.Height; z++ {
+		for x := 0; x < m.Width; x++ {
 			cx := core.TileCenter(x)
 			cz := core.TileCenter(z)
 			dx := cx - camPos.X
@@ -102,48 +100,81 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 			if dx*forward.X+dz*forward.Z < behindCullSlack {
 				continue
 			}
-			tile := row[x]
 			center := rl.NewVector3(cx, 0, cz)
-			if tile == core.TileRock {
+			// Walls layer wins — solid blocker, no floor underneath.
+			if m.Walls[z][x] == core.TileRock {
 				drawTileCube(material.wallModel, cx, core.WallHeight/2, cz, tileYawDeg(x, z))
 				continue
 			}
-			// Floor under everything that isn't a wall. Pick a variant by
-			// hash if this material has alt floors (field's grass/dirt/dark).
-			drawFloorTile(material, x, z, cx, cz)
-			propYaw := propYawDeg(x, z)
-			switch tile {
-			case core.TileTree:
-				tree.draw(center, 1.0, propYaw)
-			case core.TileTreeXL:
-				tree.draw(center, 1.75, propYaw)
-			case core.TileRockLarge:
-				assets.rockProp.draw(center, 1.0, propYaw)
-			case core.TileBushLarge:
-				assets.bushProp.draw(center, 1.3, propYaw)
-			case core.TileFloor:
-				drawFloorDecoration(assets, x, z, cx, cz)
+			// Floor variant comes from the floor layer (auto = hash).
+			drawFloorTile(material, m.Floor[z][x], x, z, cx, cz)
+			// Decor: explicit char overrides auto-scatter; '_' suppresses.
+			drawDecor(assets, m.Decor[z][x], x, z, cx, cz)
+			// Props: render by char on the props layer.
+			if prop := m.Props[z][x]; prop != '.' {
+				propYaw := propYawDeg(x, z)
+				switch prop {
+				case core.TileTree:
+					tree.draw(center, 1.0, propYaw)
+				case core.TileTreeXL:
+					tree.draw(center, 1.75, propYaw)
+				case core.TileRockLarge:
+					assets.rockProp.draw(center, 1.0, propYaw)
+				case core.TileBushLarge:
+					assets.bushProp.draw(center, 1.3, propYaw)
+				}
 			}
 		}
 	}
 	rl.EndShaderMode()
 }
 
-// drawFloorTile picks a floor variant for the given tile and draws it. Tiles
-// without alt variants (dungeon) get the base floor.
-func drawFloorTile(material worldMaterialResources, x, z int, cx, cz float32) {
+// drawFloorTile picks a floor variant for the given tile and draws it.
+// `cell` is the floor-layer character: '.' = auto (hash decides), or one
+// of FloorGrass / FloorDirt / FloorDarkGrass / FloorStone for an explicit
+// variant. Materials without alt variants (dungeon) collapse to the base
+// floor regardless of cell value.
+func drawFloorTile(material worldMaterialResources, cell byte, x, z int, cx, cz float32) {
 	yaw := tileYawDeg(x, z)
 	if !material.hasFloorVariant {
 		drawTileCube(material.floorModel, cx, -0.03, cz, yaw)
 		return
 	}
-	switch floorVariantHash(x, z) {
-	case 1:
-		drawTileCube(material.floorDirtModel, cx, -0.03, cz, yaw)
-	case 2:
-		drawTileCube(material.floorDarkModel, cx, -0.03, cz, yaw)
-	default:
-		drawTileCube(material.floorModel, cx, -0.03, cz, yaw)
+	model := material.floorModel
+	switch cell {
+	case core.FloorDirt:
+		model = material.floorDirtModel
+	case core.FloorDarkGrass:
+		model = material.floorDarkModel
+	case core.FloorGrass, core.FloorStone:
+		model = material.floorModel
+	default: // FloorAuto / unrecognized — fall back to the existing hash.
+		switch floorVariantHash(x, z) {
+		case 1:
+			model = material.floorDirtModel
+		case 2:
+			model = material.floorDarkModel
+		}
+	}
+	drawTileCube(model, cx, -0.03, cz, yaw)
+}
+
+// drawDecor renders the floor-layer decoration for a tile. '.' falls through
+// to the existing auto-scatter (hash decides whether to draw and what);
+// '_' suppresses the auto-scatter entirely; explicit chars draw a specific
+// small prop centered on the tile.
+func drawDecor(assets Resources, cell byte, x, z int, cx, cz float32) {
+	switch cell {
+	case core.DecorEmpty:
+		return
+	case core.DecorAuto:
+		drawFloorDecoration(assets, x, z, cx, cz)
+	case core.DecorBush:
+		assets.bushProp.draw(rl.NewVector3(cx, 0, cz), 0.75, propYawDeg(x, z))
+	case core.DecorMushroom:
+		assets.mushroomProp.draw(rl.NewVector3(cx, 0, cz), 1.0, propYawDeg(x, z))
+	case core.DecorPebble:
+		drawPebbleCluster(assets, cx, cz, tileHash(x, z))
 	}
 }
 

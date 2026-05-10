@@ -10,13 +10,18 @@ import (
 
 // updateHotkeys handles keyboard shortcuts when no text field is focused.
 func updateHotkeys(s *State) {
-	for _, t := range toolEntries {
-		if rl.IsKeyPressed(t.hotkey) {
-			s.tool = t.tool
+	// 1..9 select a brush within the active layer's palette. Layers with
+	// fewer than 9 brushes simply ignore the higher numbers.
+	palette := layerBrushes[s.layer]
+	for i, b := range palette {
+		if rl.IsKeyPressed(b.Hotkey) {
+			s.brushIdx[s.layer] = i
 		}
 	}
+
 	ctrl := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
 	shift := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
+
 	switch {
 	case ctrl && shift && rl.IsKeyPressed(rl.KeyZ):
 		redoOne(s)
@@ -32,12 +37,21 @@ func updateHotkeys(s *State) {
 		newMap(s)
 	}
 
+	// Tab cycles to the next layer (Shift+Tab to the previous).
+	if !ctrl && rl.IsKeyPressed(rl.KeyTab) {
+		dir := 1
+		if shift {
+			dir = -1
+		}
+		s.layer = Layer((int(s.layer) + dir + layerCount) % layerCount)
+	}
+
 	// F5: launch a playtest of the current in-memory area without saving.
 	if rl.IsKeyPressed(rl.KeyF5) {
 		s.testRequested = true
 	}
 
-	// Brush size cycling. [ shrinks, ] grows. Steps in 1, 3, 5.
+	// Brush size cycling (only for grid layers — non-grid is always size 1).
 	if !ctrl && rl.IsKeyPressed(rl.KeyLeftBracket) {
 		s.brushSize = stepBrush(s.brushSize, -1)
 	}
@@ -45,24 +59,19 @@ func updateHotkeys(s *State) {
 		s.brushSize = stepBrush(s.brushSize, +1)
 	}
 
-	// Reset zoom + pan to the auto-fit default.
 	if !ctrl && rl.IsKeyPressed(rl.KeyHome) {
 		s.zoom = 1
 		s.panX, s.panY = 0, 0
 	}
 
-	// Cycle starting facing for the player-start tool with R. Gated to that
-	// tool so R doesn't silently rotate the start while the user thinks
-	// they're using a paint brush.
-	if !ctrl && s.tool == ToolPlayerStart && rl.IsKeyPressed(rl.KeyR) {
+	// Cycle starting facing for the player-start brush with R. Gated to
+	// that brush so R doesn't silently rotate the start while the user
+	// thinks they're in another layer.
+	if !ctrl && rl.IsKeyPressed(rl.KeyR) && s.layer == LayerEntities && s.activeBrush().Entity == entityPlayerStart {
 		s.area.StartFacing = core.NormalizeFacing(s.area.StartFacing + 1)
 		s.dirty = true
 	}
 
-	// Keyboard grid navigation: arrows move a logical cursor, space paints
-	// at it, backspace erases. Inactive (gridCursor == -1) until the user
-	// presses an arrow key for the first time, so mouse-driven workflows
-	// don't accidentally show a stray cursor.
 	updateGridCursor(s)
 }
 
@@ -86,11 +95,11 @@ func stepBrush(cur, dir int) int {
 }
 
 func updateGridCursor(s *State) {
-	if len(s.area.Layout) == 0 {
+	if s.area.Width == 0 || s.area.Height == 0 {
 		return
 	}
-	mw := len(s.area.Layout[0])
-	mh := len(s.area.Layout)
+	mw := s.area.Width
+	mh := s.area.Height
 	moved := false
 	if rl.IsKeyPressed(rl.KeyLeft) {
 		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
@@ -113,8 +122,6 @@ func updateGridCursor(s *State) {
 		moved = true
 	}
 	if moved && s.gridCursorX >= 0 {
-		// Mirror keyboard cursor into hover so the same "current cell" status
-		// shows for both input modes.
 		s.hoverX, s.hoverZ = s.gridCursorX, s.gridCursorZ
 	}
 	if s.gridCursorX < 0 {
@@ -130,16 +137,12 @@ func updateGridCursor(s *State) {
 	}
 }
 
-// activateCursor seeds the keyboard cursor to the player start the first
-// time the user reaches for the arrow keys. Subsequent calls are no-ops.
 func activateCursor(s *State, mw, mh int) (int, int) {
 	if s.gridCursorX >= 0 {
 		return s.gridCursorX, s.gridCursorZ
 	}
-	x := s.area.StartTileX
-	z := s.area.StartTileZ
-	x = clampInt(x, 0, mw-1)
-	z = clampInt(z, 0, mh-1)
+	x := clampInt(s.area.StartTileX, 0, mw-1)
+	z := clampInt(s.area.StartTileZ, 0, mh-1)
 	return x, z
 }
 
@@ -158,12 +161,9 @@ func clampInt(v, lo, hi int) int {
 func updateMouse(s *State) {
 	mp := rl.GetMousePosition()
 
-	// Track hover so other systems (coord readout, brush ghost) can reuse it.
 	hx, hz := s.cellAt(mp)
 	s.hoverX, s.hoverZ = hx, hz
 
-	// Mouse wheel zooms the grid plot. Centered on the current mouse cell
-	// so zooming feels anchored, not abstract.
 	if pointIn(mp, s.rect.grid) {
 		w := rl.GetMouseWheelMove()
 		if w != 0 {
@@ -171,7 +171,6 @@ func updateMouse(s *State) {
 		}
 	}
 
-	// Middle-button drag pans the grid plot.
 	if rl.IsMouseButtonPressed(rl.MouseMiddleButton) && pointIn(mp, s.rect.grid) {
 		s.panning = true
 	}
@@ -189,8 +188,12 @@ func updateMouse(s *State) {
 			handleTopbarButton(s, hit)
 			return
 		}
+		if hit := layerTabAt(s, mp); hit >= 0 {
+			s.layer = Layer(hit)
+			return
+		}
 		if hit := paletteToolAt(s, mp); hit >= 0 {
-			s.tool = toolEntries[hit].tool
+			s.brushIdx[s.layer] = hit
 			return
 		}
 		if handleMetadataClick(s, mp) {
@@ -219,49 +222,55 @@ func updateMouse(s *State) {
 	}
 }
 
-// startDrag picks a drag kind based on tool + cell contents + modifiers.
-// Tile brushes default to paint; Shift switches to rectangle. Placement
-// tools grab the entity under the cursor for drag-move when there is one.
-// Ctrl+click on a tile brush is flood fill (one-shot, not a drag).
+// startDrag picks a drag kind based on layer + cell contents + modifiers.
+// Grid-layer brushes default to paint; Shift switches to rectangle.
+// LayerEntities brushes grab the entity under the cursor for drag-move
+// when there is one. Ctrl+click on a grid layer is flood fill.
 func startDrag(s *State, x, z int, ctrl, shift bool) {
-	cur := toolEntries[s.tool]
-	tileBrush := cur.tileByte != 0
+	gridLayer := isGridLayer(s.layer)
 
-	if tileBrush && ctrl {
-		// Flood fill: replace the connected region of like-tiles starting
-		// at (x,z) with the brush's tile. Single shot — no drag.
+	if gridLayer && ctrl {
 		pushUndo(s)
-		floodFill(s, x, z, cur.tileByte)
+		floodFill(s, x, z, s.activeBrush().Char)
 		s.drag = dragNone
 		return
 	}
 
-	switch s.tool {
-	case ToolPlayerStart:
-		if s.area.StartTileX == x && s.area.StartTileZ == z {
-			s.drag = dragStart
-			return
+	if s.layer == LayerEntities {
+		brush := s.activeBrush()
+		switch brush.Entity {
+		case entityPlayerStart:
+			if s.area.StartTileX == x && s.area.StartTileZ == z {
+				s.drag = dragStart
+				return
+			}
+		case entitySpawnRat, entitySpawnBat:
+			if idx := spawnIndexAt(s.area.EnemySpawns, x, z); idx >= 0 {
+				s.drag = dragEnemy
+				s.dragSpawnIdx = idx
+				return
+			}
 		}
-	case ToolSpawnRat, ToolSpawnBat:
-		if idx := spawnIndexAt(s.area.EnemySpawns, x, z); idx >= 0 {
-			s.drag = dragEnemy
-			s.dragSpawnIdx = idx
-			return
-		}
+		// Fall through: click on empty cell places a fresh entity.
+		s.drag = dragPaint
+		s.dragSnapshotDone = false
+		s.lastPaintX, s.lastPaintZ = -1, -1
+		pushUndo(s)
+		s.dragSnapshotDone = true
+		applyTool(s, x, z)
+		s.lastPaintX, s.lastPaintZ = x, z
+		return
 	}
 
-	if tileBrush && shift {
+	if gridLayer && shift {
 		s.drag = dragRect
 		s.rectAnchorX, s.rectAnchorZ = x, z
 		return
 	}
 
-	// Default: regular paint stroke. snapshot lazily once the user actually
-	// changes a cell so a single down-up doesn't burn an undo entry.
 	s.drag = dragPaint
 	s.dragSnapshotDone = false
 	s.lastPaintX, s.lastPaintZ = -1, -1
-	// Apply once at the start so a single click paints (not just drag).
 	pushUndo(s)
 	s.dragSnapshotDone = true
 	applyToolBrushed(s, x, z)
@@ -276,23 +285,17 @@ func continueDrag(s *State, x, z int) {
 		}
 		applyToolBrushed(s, x, z)
 		s.lastPaintX, s.lastPaintZ = x, z
-	case dragStart:
-		// Move ghost handled in draw; commit on release. We could do live
-		// updates, but committing on release means undo is one snapshot,
-		// not 30 across the drag.
-	case dragEnemy:
-		// Same: ghost preview during drag, commit on release.
-	case dragRect:
-		// Preview rect rendered during drag; commit on release.
 	}
+	// dragStart / dragEnemy / dragRect are commit-on-release; the live
+	// preview lives in draw.go.
 }
 
 func finishDrag(s *State) {
 	switch s.drag {
 	case dragStart:
 		if s.hoverX >= 0 && (s.hoverX != s.area.StartTileX || s.hoverZ != s.area.StartTileZ) {
-			if isBlockingByte(s.area.Layout[s.hoverZ][s.hoverX]) {
-				s.flash("Player start must be on a floor tile")
+			if isBlockingCell(s.area, s.hoverX, s.hoverZ) {
+				s.flash("Player start must be on an open cell")
 			} else {
 				pushUndo(s)
 				s.area.StartTileX = s.hoverX
@@ -304,15 +307,13 @@ func finishDrag(s *State) {
 		if s.hoverX >= 0 && s.dragSpawnIdx >= 0 && s.dragSpawnIdx < len(s.area.EnemySpawns) {
 			sp := s.area.EnemySpawns[s.dragSpawnIdx]
 			if sp.TileX != s.hoverX || sp.TileZ != s.hoverZ {
-				if isBlockingByte(s.area.Layout[s.hoverZ][s.hoverX]) {
-					s.flash("Spawns must be on a floor tile")
+				if isBlockingCell(s.area, s.hoverX, s.hoverZ) {
+					s.flash("Spawns need an open cell")
 				} else if s.area.StartTileX == s.hoverX && s.area.StartTileZ == s.hoverZ {
 					s.flash("Cell holds the player start")
 				} else {
 					pushUndo(s)
-					// Drop any spawn already at the destination, then move.
 					s.area.EnemySpawns = removeSpawnAt(s.area.EnemySpawns, s.hoverX, s.hoverZ)
-					// removeSpawnAt may have shifted our index — find again.
 					idx := -1
 					for i, e := range s.area.EnemySpawns {
 						if e.TileX == sp.TileX && e.TileZ == sp.TileZ {
@@ -338,12 +339,12 @@ func finishDrag(s *State) {
 	s.dragSpawnIdx = -1
 }
 
-// applyToolBrushed runs the active tile brush over the brush-size square
-// centered on (x,z). For non-tile tools (start, spawn) the size collapses
-// to 1 since stamping multiple starts/spawns isn't meaningful.
+// applyToolBrushed runs the active brush over the brush-size square
+// centered on (x,z). Entity-layer brushes always collapse to a single
+// cell since stamping multiple starts/spawns isn't meaningful.
 func applyToolBrushed(s *State, x, z int) {
 	half := s.brushSize / 2
-	if !isTileBrush(s.tool) || s.brushSize <= 1 {
+	if !isGridLayer(s.layer) || s.brushSize <= 1 {
 		applyTool(s, x, z)
 		return
 	}
@@ -354,12 +355,8 @@ func applyToolBrushed(s *State, x, z int) {
 	}
 }
 
-func isTileBrush(t Tool) bool {
-	switch t {
-	case ToolFloor, ToolWall, ToolTree, ToolTreeXL, ToolBoulder, ToolBush:
-		return true
-	}
-	return false
+func isGridLayer(l Layer) bool {
+	return l != LayerEntities
 }
 
 func zoomBy(s *State, anchor rl.Vector2, factor float32) {
@@ -374,12 +371,11 @@ func zoomBy(s *State, anchor rl.Vector2, factor float32) {
 	if next == prev {
 		return
 	}
-	// Re-anchor pan so the cell under the cursor stays under the cursor.
 	if s.rect.cellPx > 0 {
 		dx := anchor.X - s.rect.gridX
 		dy := anchor.Y - s.rect.gridY
-		s.panX += dx*(1-next/prev)
-		s.panY += dy*(1-next/prev)
+		s.panX += dx * (1 - next/prev)
+		s.panY += dy * (1 - next/prev)
 	}
 	s.zoom = next
 }
@@ -398,7 +394,7 @@ func handleTopbarButton(s *State, name string) {
 	case "new":
 		newMap(s)
 	case "open":
-		openModal(s, modalOpen)
+		requestOpen(s)
 	case "save":
 		saveCurrent(s)
 	case "saveas":
@@ -410,10 +406,6 @@ func handleTopbarButton(s *State, name string) {
 	}
 }
 
-// updateTextInput appends typed chars to the focused field and handles
-// backspace / enter / escape. The field's storage is decided by the focus
-// enum. focusWidth and focusHeight accept digits only and commit a resize
-// on Enter.
 func updateTextInput(s *State) {
 	if s.focus == focusWidth || s.focus == focusHeight {
 		updateNumericInput(s)
@@ -428,8 +420,6 @@ func updateTextInput(s *State) {
 		if c == 0 {
 			break
 		}
-		// ASCII printable only — we don't render unicode glyphs anyway, and
-		// the .map format is expected to round-trip through plain text.
 		if c >= 32 && c < 127 && len(*target) < 96 {
 			*target += string(rune(c))
 			s.markDirty()
@@ -498,25 +488,18 @@ func commitNumericInput(s *State) {
 		v = 1
 	}
 	if v > 200 {
-		// Cap at 200 to avoid pathologically huge layouts that would chew
-		// through memory + render time. Plenty for an Etrian-style map.
 		v = 200
 	}
-	mw := len(s.area.Layout[0])
-	mh := len(s.area.Layout)
 	if s.focus == focusWidth {
-		resize(s, v, mh)
+		resize(s, v, s.area.Height)
 	} else if s.focus == focusHeight {
-		resize(s, mw, v)
+		resize(s, s.area.Width, v)
 	}
 	s.numericBuf = ""
 }
 
-// cycleFocus moves Tab focus through the metadata text fields in a stable
-// order (Name → Quiet → Width → Height → back to Name).
 func cycleFocus(s *State) {
 	if s.focus == focusFilename {
-		// Save As is its own one-field flow; Tab does nothing useful there.
 		return
 	}
 	switch s.focus {
@@ -535,8 +518,6 @@ func cycleFocus(s *State) {
 	}
 }
 
-// markDirty avoids flagging name/quiet edits when the focused field is the
-// modal filename — that one is for the save dialog, not in-place metadata.
 func (s *State) markDirty() {
 	if s.focus == focusFilename {
 		return
@@ -556,7 +537,6 @@ func activeTextTarget(s *State) *string {
 	return nil
 }
 
-// updateModal handles input in the open / save-as / confirm-exit dialogs.
 func updateModal(s *State) Action {
 	switch s.modal {
 	case modalOpen:
@@ -570,7 +550,6 @@ func updateModal(s *State) Action {
 }
 
 func updateOpenModal(s *State) Action {
-	// Inline-rename takes the keyboard while it's active.
 	if s.modalRenaming != "" {
 		return updateOpenRename(s)
 	}
@@ -593,8 +572,6 @@ func updateOpenModal(s *State) Action {
 	}
 
 	if rl.IsKeyPressed(rl.KeyR) {
-		// Begin inline rename of the highlighted file. Pre-populate with
-		// the current id so the user only edits what they want to change.
 		s.modalRenaming = core.MapIDFromPath(s.modalPaths[s.modalCursor])
 		return ActionNone
 	}
@@ -609,7 +586,6 @@ func updateOpenModal(s *State) Action {
 			return ActionNone
 		}
 		refreshOpenList(s)
-		// Move the cursor onto the duplicate so the next Enter opens it.
 		for i, p := range s.modalPaths {
 			if p == newPath {
 				s.modalCursor = i
@@ -669,9 +645,6 @@ func updateOpenRename(s *State) Action {
 			s.flash("Rename failed: " + err.Error())
 			return ActionNone
 		}
-		// If the renamed file is the one currently being edited, update its
-		// path so subsequent saves go to the new file rather than re-creating
-		// the old one.
 		if s.area.Path == oldPath {
 			s.area.Path = newPath
 		}
@@ -699,8 +672,6 @@ func updateOpenConfirmDelete(s *State) Action {
 			s.modalConfirmDelete = false
 			return ActionNone
 		}
-		// If we just deleted the file currently being edited, drop the path
-		// so the editor's next save prompts for a new name.
 		if s.area.Path == path {
 			s.area.Path = ""
 		}
@@ -723,9 +694,6 @@ func refreshOpenList(s *State) {
 }
 
 func updateSaveAsModal(s *State) Action {
-	// Overwrite confirmation has its own input set: Y proceeds, N or Esc
-	// returns to typing the filename. We branch first so a typed 'y' / 'n'
-	// during the prompt doesn't fall through to filename editing.
 	if s.awaitingOverwrite {
 		if rl.IsKeyPressed(rl.KeyY) {
 			s.awaitingOverwrite = false
@@ -750,16 +718,12 @@ func updateSaveAsModal(s *State) Action {
 		return ActionNone
 	}
 	updateTextInput(s)
-	// confirmModal closes the modal on success. Fire any pending deferred
-	// action (exit / new / open) on the same frame.
 	if s.modal == modalNone {
 		return runPendingAction(s)
 	}
 	return ActionNone
 }
 
-// updateConfirmDirtyModal handles the "save before destructive action?"
-// prompt. Reads s.pending to know which action to run on Discard / Save.
 func updateConfirmDirtyModal(s *State) Action {
 	if rl.IsKeyPressed(rl.KeyEscape) || rl.IsKeyPressed(rl.KeyC) {
 		s.modal = modalNone
@@ -790,9 +754,6 @@ func updateConfirmDirtyModal(s *State) Action {
 	return ActionNone
 }
 
-// runPendingAction performs whatever destructive action the dirty-prompt
-// was gating, clearing s.pending. Returns the Action the run loop should
-// see (ActionExitToTitle for exit, ActionNone for in-editor effects).
 func runPendingAction(s *State) Action {
 	p := s.pending
 	s.pending = pendingNone
@@ -817,9 +778,6 @@ func confirmModal(s *State) {
 		return
 	}
 	path := core.MapPath(name)
-	// Refuse to silently clobber an existing file unless it's the very file
-	// we already have open (a no-name-change save). Switch into Y/N prompt;
-	// the modal sticks around so the user can confirm or back out.
 	if path != s.area.Path && fileExists(path) {
 		s.awaitingOverwrite = true
 		s.focus = focusNone
@@ -828,8 +786,6 @@ func confirmModal(s *State) {
 	saveTo(s, name, path)
 }
 
-// confirmModalForce is the post-overwrite-prompt save: skips the existence
-// check (the user already said yes) and lands the file.
 func confirmModalForce(s *State) {
 	name := s.modalFilename
 	if name == "" {
@@ -856,7 +812,6 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-// pointIn is a tiny convenience so click-tests read like English.
 func pointIn(p rl.Vector2, r rl.Rectangle) bool {
 	return p.X >= r.X && p.Y >= r.Y && p.X < r.X+r.Width && p.Y < r.Y+r.Height
 }

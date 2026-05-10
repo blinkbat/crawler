@@ -1,9 +1,16 @@
 package core
 
+// GameMap is the runtime form of an area's geometry, stored as four
+// parallel ASCII grids (the editor's layers). All four are the same
+// dimensions; the per-cell character meanings live in core/map.go's
+// constant blocks.
 type GameMap struct {
 	Width     int
 	Height    int
-	Rows      []string
+	Walls     []string
+	Floor     []string
+	Decor     []string
+	Props     []string
 	Materials MaterialSet
 }
 
@@ -18,10 +25,20 @@ type EnemySpawn struct {
 // AreaDefinition is the runtime form of a map. Built from a mapfile.MapFile
 // via AreaFromMapFile (see areas.go). Path is the source disk location and
 // is empty for unsaved maps the editor is still working on.
+//
+// Geometry is layered: Walls / Floor / Decor / Props are four parallel
+// ASCII grids of the same dimensions. Width and Height are stored
+// explicitly so blank layers can be reconstructed without inferring
+// from any single grid (an empty .map gets all four blank).
 type AreaDefinition struct {
 	Path         string
 	Name         string
-	Layout       []string
+	Width        int
+	Height       int
+	Walls        []string
+	Floor        []string
+	Decor        []string
+	Props        []string
 	Materials    MaterialSet
 	StartTileX   int
 	StartTileZ   int

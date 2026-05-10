@@ -9,70 +9,139 @@ import (
 	"strings"
 )
 
-// applyTool runs the active tool against tile (x,z). For tile brushes this
-// paints the byte and clears any spawn / start that would now be inside a
-// blocking tile. For placement tools it moves the player start or adds an
-// enemy spawn to the cell.
+// applyTool runs the active layer's selected brush at (x,z). Behavior is
+// per-layer: grid layers set the layer's char; entity layer fires the
+// chosen placement tool. Painting a wall on an entity-occupied cell auto-
+// clears the entity; painting a prop on a wall is refused.
 func applyTool(s *State, x, z int) {
 	if !inBounds(s.area, x, z) {
 		return
 	}
-	cur := toolEntries[s.tool]
-	switch s.tool {
-	case ToolFloor, ToolWall, ToolTree, ToolTreeXL, ToolBoulder, ToolBush:
-		// Refuse to paint a blocking tile on top of the player start: the
-		// next game load would spawn the player inside a wall, and there's
-		// no good reason to allow it. Move the start first if you want this.
-		if isBlockingByte(cur.tileByte) && s.area.StartTileX == x && s.area.StartTileZ == z {
-			s.flash("Move the player start before walling its tile")
-			return
-		}
-		setTile(&s.area, x, z, cur.tileByte)
-		if isBlockingByte(cur.tileByte) {
-			s.area.EnemySpawns = removeSpawnAt(s.area.EnemySpawns, x, z)
-		}
-	case ToolPlayerStart:
-		if isBlockingByte(s.area.Layout[z][x]) {
-			s.flash("Player start must be on a floor tile")
-			return
-		}
-		s.area.StartTileX = x
-		s.area.StartTileZ = z
-	case ToolSpawnRat:
-		placeSpawn(s, x, z, core.EnemyRat)
-	case ToolSpawnBat:
-		placeSpawn(s, x, z, core.EnemyBat)
+	brush := s.activeBrush()
+	switch s.layer {
+	case LayerWalls:
+		applyWallBrush(s, x, z, brush.Char)
+	case LayerFloor:
+		setLayerCell(&s.area.Floor, x, z, brush.Char)
+	case LayerDecor:
+		applyDecorBrush(s, x, z, brush.Char)
+	case LayerProps:
+		applyPropBrush(s, x, z, brush.Char)
+	case LayerEntities:
+		applyEntityBrush(s, x, z, brush.Entity)
+		return // entity branch sets dirty itself when it lands
 	}
 	s.dirty = true
 }
 
-// eraseAt is the right-click action: removes any enemy spawn at the cell, or
-// failing that paints a floor tile.
-func eraseAt(s *State, x, z int) {
-	if !inBounds(s.area, x, z) {
+func applyWallBrush(s *State, x, z int, c byte) {
+	turningWall := c == core.TileRock
+	if turningWall && s.area.StartTileX == x && s.area.StartTileZ == z {
+		s.flash("Move the player start before walling its tile")
 		return
 	}
-	if removed := removeSpawnAt(s.area.EnemySpawns, x, z); len(removed) != len(s.area.EnemySpawns) {
-		s.area.EnemySpawns = removed
-		s.dirty = true
-		return
+	setLayerCell(&s.area.Walls, x, z, c)
+	if turningWall {
+		// Walls and props/decor/entities can't co-exist — wall wins.
+		setLayerCell(&s.area.Props, x, z, '.')
+		setLayerCell(&s.area.Decor, x, z, core.DecorAuto)
+		s.area.EnemySpawns = removeSpawnAt(s.area.EnemySpawns, x, z)
 	}
-	setTile(&s.area, x, z, core.TileFloor)
-	s.dirty = true
 }
 
-func placeSpawn(s *State, x, z int, kind core.EnemyKind) {
-	if isBlockingByte(s.area.Layout[z][x]) {
-		s.flash("Spawns must be on a floor tile")
+func applyDecorBrush(s *State, x, z int, c byte) {
+	if s.area.Walls[z][x] == core.TileRock {
+		s.flash("Decor needs an open cell")
+		return
+	}
+	if isPropChar(s.area.Props[z][x]) {
+		s.flash("Decor cell is occupied by a prop")
+		return
+	}
+	setLayerCell(&s.area.Decor, x, z, c)
+}
+
+func applyPropBrush(s *State, x, z int, c byte) {
+	if c == '.' {
+		setLayerCell(&s.area.Props, x, z, '.')
+		return
+	}
+	if s.area.Walls[z][x] == core.TileRock {
+		s.flash("Props need an open cell (remove the wall first)")
 		return
 	}
 	if s.area.StartTileX == x && s.area.StartTileZ == z {
 		s.flash("Cell holds the player start")
 		return
 	}
-	// Replace any existing spawn at this cell (regardless of kind).
+	setLayerCell(&s.area.Props, x, z, c)
+	// A prop occupies the floor square; auto-clear any decor on it.
+	setLayerCell(&s.area.Decor, x, z, core.DecorAuto)
+	// And remove an enemy that would now be inside the prop.
+	s.area.EnemySpawns = removeSpawnAt(s.area.EnemySpawns, x, z)
+}
+
+func applyEntityBrush(s *State, x, z int, kind entityKind) {
+	if s.area.Walls[z][x] == core.TileRock {
+		s.flash("Entities need an open cell")
+		return
+	}
+	if isPropChar(s.area.Props[z][x]) {
+		s.flash("Cell is occupied by a prop")
+		return
+	}
+	switch kind {
+	case entityPlayerStart:
+		s.area.StartTileX = x
+		s.area.StartTileZ = z
+		s.dirty = true
+	case entitySpawnRat:
+		placeSpawn(s, x, z, core.EnemyRat)
+	case entitySpawnBat:
+		placeSpawn(s, x, z, core.EnemyBat)
+	}
+}
+
+// eraseAt is the right-click action. Behavior is per-layer:
+//   - Walls / Props : reset cell to '.'
+//   - Floor         : reset to FloorAuto
+//   - Decor         : reset to DecorAuto
+//   - Entities      : remove enemy at this cell, or refuse on the start
+func eraseAt(s *State, x, z int) {
+	if !inBounds(s.area, x, z) {
+		return
+	}
+	switch s.layer {
+	case LayerWalls:
+		setLayerCell(&s.area.Walls, x, z, '.')
+	case LayerFloor:
+		setLayerCell(&s.area.Floor, x, z, core.FloorAuto)
+	case LayerDecor:
+		setLayerCell(&s.area.Decor, x, z, core.DecorAuto)
+	case LayerProps:
+		setLayerCell(&s.area.Props, x, z, '.')
+	case LayerEntities:
+		if s.area.StartTileX == x && s.area.StartTileZ == z {
+			s.flash("Player start can't be erased; place it elsewhere instead")
+			return
+		}
+		before := len(s.area.EnemySpawns)
+		s.area.EnemySpawns = removeSpawnAt(s.area.EnemySpawns, x, z)
+		if len(s.area.EnemySpawns) == before {
+			return
+		}
+	}
+	s.dirty = true
+}
+
+func placeSpawn(s *State, x, z int, kind core.EnemyKind) {
+	if s.area.StartTileX == x && s.area.StartTileZ == z {
+		s.flash("Cell holds the player start")
+		return
+	}
 	s.area.EnemySpawns = removeSpawnAt(s.area.EnemySpawns, x, z)
 	s.area.EnemySpawns = append(s.area.EnemySpawns, core.EnemySpawn{Kind: kind, TileX: x, TileZ: z})
+	s.dirty = true
 }
 
 func removeSpawnAt(spawns []core.EnemySpawn, x, z int) []core.EnemySpawn {
@@ -86,28 +155,35 @@ func removeSpawnAt(spawns []core.EnemySpawn, x, z int) []core.EnemySpawn {
 	return out
 }
 
-func setTile(a *core.AreaDefinition, x, z int, b byte) {
-	row := []byte(a.Layout[z])
+// setLayerCell mutates the byte at (x,z) inside one of the area's layer
+// grids. Layer slices are addressed by pointer so we can write through
+// without each caller threading a reference.
+func setLayerCell(layer *[]string, x, z int, b byte) {
+	row := []byte((*layer)[z])
 	row[x] = b
-	a.Layout[z] = string(row)
+	(*layer)[z] = string(row)
 }
 
 func inBounds(a core.AreaDefinition, x, z int) bool {
-	if z < 0 || z >= len(a.Layout) {
-		return false
-	}
-	if x < 0 || x >= len(a.Layout[z]) {
-		return false
-	}
-	return true
+	return z >= 0 && z < a.Height && x >= 0 && x < a.Width
 }
 
-func isBlockingByte(b byte) bool {
-	switch b {
-	case core.TileRock, core.TileTree, core.TileTreeXL, core.TileRockLarge, core.TileBushLarge:
+// isPropChar mirrors core's same-named check (kept private over there).
+// Used by the editor when deciding whether a cell is occupied for the
+// purposes of decor / entity placement constraints.
+func isPropChar(c byte) bool {
+	switch c {
+	case core.TileTree, core.TileTreeXL, core.TileRockLarge, core.TileBushLarge:
 		return true
 	}
 	return false
+}
+
+func isBlockingCell(a core.AreaDefinition, x, z int) bool {
+	if a.Walls[z][x] == core.TileRock {
+		return true
+	}
+	return isPropChar(a.Props[z][x])
 }
 
 // pushUndo snapshots the current area before a mutation. Any new mutation
@@ -148,32 +224,29 @@ func redoOne(s *State) {
 
 func cloneArea(a core.AreaDefinition) core.AreaDefinition {
 	out := a
-	out.Layout = append([]string(nil), a.Layout...)
+	out.Walls = append([]string(nil), a.Walls...)
+	out.Floor = append([]string(nil), a.Floor...)
+	out.Decor = append([]string(nil), a.Decor...)
+	out.Props = append([]string(nil), a.Props...)
 	out.EnemySpawns = append([]core.EnemySpawn(nil), a.EnemySpawns...)
 	return out
 }
 
-// resize grows or shrinks the layout to (w,h). New cells default to floor;
-// shrunk cells are dropped. Player start and enemy spawns outside the new
-// bounds are clamped (start) or removed (spawns).
+// resize grows or shrinks every layer to (w,h). New cells default to the
+// layer's blank value (walls border-only, others auto). Player start and
+// enemy spawns outside the new bounds are clamped (start) or removed
+// (spawns).
 func resize(s *State, w, h int) {
 	if w <= 0 || h <= 0 {
 		return
 	}
 	pushUndo(s)
-	rows := make([]string, h)
-	for z := 0; z < h; z++ {
-		buf := make([]byte, w)
-		for x := 0; x < w; x++ {
-			if z < len(s.area.Layout) && x < len(s.area.Layout[z]) {
-				buf[x] = s.area.Layout[z][x]
-			} else {
-				buf[x] = core.TileFloor
-			}
-		}
-		rows[z] = string(buf)
-	}
-	s.area.Layout = rows
+	s.area.Walls = resizeLayer(s.area.Walls, s.area.Width, s.area.Height, w, h, '.')
+	s.area.Floor = resizeLayer(s.area.Floor, s.area.Width, s.area.Height, w, h, core.FloorAuto)
+	s.area.Decor = resizeLayer(s.area.Decor, s.area.Width, s.area.Height, w, h, core.DecorAuto)
+	s.area.Props = resizeLayer(s.area.Props, s.area.Width, s.area.Height, w, h, '.')
+	s.area.Width = w
+	s.area.Height = h
 	if s.area.StartTileX >= w {
 		s.area.StartTileX = w - 1
 	}
@@ -190,10 +263,26 @@ func resize(s *State, w, h int) {
 	s.dirty = true
 }
 
+// resizeLayer copies an old WxH grid into a new W'xH' grid, padding the
+// extra cells with `fill`. Old cells outside the new bounds are dropped.
+func resizeLayer(old []string, oldW, oldH, newW, newH int, fill byte) []string {
+	rows := make([]string, newH)
+	for z := 0; z < newH; z++ {
+		buf := make([]byte, newW)
+		for x := 0; x < newW; x++ {
+			if z < oldH && z < len(old) && x < oldW && x < len(old[z]) {
+				buf[x] = old[z][x]
+			} else {
+				buf[x] = fill
+			}
+		}
+		rows[z] = string(buf)
+	}
+	return rows
+}
+
 // saveCurrent writes to the area's existing path. If the area has never been
-// saved (Path == ""), open the Save As modal so the user can name it. On a
-// successful save, surfaces any reachability warnings as flashes — a heads-
-// up that the saved map may be broken, but doesn't block the save itself.
+// saved (Path == ""), open the Save As modal so the user can name it.
 func saveCurrent(s *State) {
 	if s.area.Path == "" {
 		s.modalFilename = sanitizeFilename(s.area.Name)
@@ -213,7 +302,6 @@ func saveCurrent(s *State) {
 }
 
 // renameMapFile renames a .map file on disk. Used by the Open modal's R key.
-// Returns the new path on success.
 func renameMapFile(oldPath, newID string) (string, error) {
 	newID = sanitizeFilename(newID)
 	if newID == "" {
@@ -277,8 +365,6 @@ func newMap(s *State) {
 	performNewMap(s)
 }
 
-// requestOpen is the user-facing Open: dirty-gated like newMap, then opens
-// the picker.
 func requestOpen(s *State) {
 	if s.dirty {
 		s.pending = pendingOpen
@@ -288,18 +374,24 @@ func requestOpen(s *State) {
 	openModal(s, modalOpen)
 }
 
-// floodFill replaces the connected region of like-tiles around (x,z) with
-// b. 4-connected — diagonals stop the flood. No-op if (x,z) already holds b.
+// floodFill replaces the connected region of like-cells around (x,z) with
+// b, on the active layer's grid only. 4-connected. No-op if (x,z) already
+// holds b. For LayerEntities the operation is a no-op since entities
+// aren't grid-stored.
 func floodFill(s *State, x, z int, b byte) {
+	layer := activeGrid(s)
+	if layer == nil {
+		return
+	}
 	if !inBounds(s.area, x, z) {
 		return
 	}
-	target := s.area.Layout[z][x]
+	target := (*layer)[z][x]
 	if target == b {
 		return
 	}
-	rows := make([][]byte, len(s.area.Layout))
-	for i, r := range s.area.Layout {
+	rows := make([][]byte, len(*layer))
+	for i, r := range *layer {
 		rows[i] = []byte(r)
 	}
 	stack := [][2]int{{x, z}}
@@ -317,13 +409,13 @@ func floodFill(s *State, x, z int, b byte) {
 		stack = append(stack, [2]int{px + 1, pz}, [2]int{px - 1, pz}, [2]int{px, pz + 1}, [2]int{px, pz - 1})
 	}
 	for i, r := range rows {
-		s.area.Layout[i] = string(r)
+		(*layer)[i] = string(r)
 	}
-	if isBlockingByte(b) {
-		// Newly-walled cells eat any spawns that fell inside the flood.
+	// Wall flood that turns cells into '#' nukes any spawns that fell inside.
+	if s.layer == LayerWalls && b == core.TileRock {
 		filtered := s.area.EnemySpawns[:0:0]
 		for _, sp := range s.area.EnemySpawns {
-			if !isBlockingByte(s.area.Layout[sp.TileZ][sp.TileX]) {
+			if !isBlockingCell(s.area, sp.TileX, sp.TileZ) {
 				filtered = append(filtered, sp)
 			}
 		}
@@ -332,15 +424,14 @@ func floodFill(s *State, x, z int, b byte) {
 	s.dirty = true
 }
 
-// paintRect paints the brush's tile across the rectangle bounded by (x0,z0)
-// and (x1,z1). Spawns inside the rect are cleared if the brush is blocking.
-// Player start at the rect intersection is left in place — the user is more
-// likely to want to keep it where it is than to have it silently moved.
+// paintRect paints the active brush's cell value across the rectangle
+// bounded by (x0,z0) and (x1,z1) on the active layer. Player start at the
+// rect intersection is left in place.
 func paintRect(s *State, x0, z0, x1, z1 int) {
-	cur := toolEntries[s.tool]
-	if cur.tileByte == 0 {
+	if s.layer == LayerEntities {
 		return
 	}
+	brush := s.activeBrush()
 	if x0 > x1 {
 		x0, x1 = x1, x0
 	}
@@ -352,36 +443,45 @@ func paintRect(s *State, x0, z0, x1, z1 int) {
 			if !inBounds(s.area, x, z) {
 				continue
 			}
-			if isBlockingByte(cur.tileByte) && s.area.StartTileX == x && s.area.StartTileZ == z {
-				// Skip the start tile so the rect doesn't bury it.
+			if brush.Char == core.TileRock && s.area.StartTileX == x && s.area.StartTileZ == z {
 				continue
 			}
-			setTile(&s.area, x, z, cur.tileByte)
-			if isBlockingByte(cur.tileByte) {
-				s.area.EnemySpawns = removeSpawnAt(s.area.EnemySpawns, x, z)
-			}
+			applyTool(s, x, z)
 		}
 	}
-	s.dirty = true
+}
+
+// activeGrid returns a pointer to the layer slice the user is editing, or
+// nil for layers that don't have a grid (entities).
+func activeGrid(s *State) *[]string {
+	switch s.layer {
+	case LayerWalls:
+		return &s.area.Walls
+	case LayerFloor:
+		return &s.area.Floor
+	case LayerDecor:
+		return &s.area.Decor
+	case LayerProps:
+		return &s.area.Props
+	}
+	return nil
 }
 
 // reachabilityWarnings reports playability problems for the area. Empty
 // slice means no warnings. Used as a non-blocking check on save.
 func reachabilityWarnings(a core.AreaDefinition) []string {
 	var out []string
-	if a.StartTileZ < 0 || a.StartTileZ >= len(a.Layout) ||
-		a.StartTileX < 0 || a.StartTileX >= len(a.Layout[0]) {
+	if a.StartTileZ < 0 || a.StartTileZ >= a.Height ||
+		a.StartTileX < 0 || a.StartTileX >= a.Width {
 		return []string{"start position is out of bounds"}
 	}
-	if isBlockingByte(a.Layout[a.StartTileZ][a.StartTileX]) {
+	if isBlockingCell(a, a.StartTileX, a.StartTileZ) {
 		out = append(out, "start tile is blocked (player will spawn inside geometry)")
 	}
-	// Flood from the start over floor tiles. Any spawn whose tile is not
-	// reachable can never be encountered.
-	h := len(a.Layout)
-	w := len(a.Layout[0])
+	h := a.Height
+	w := a.Width
 	visited := make([]bool, w*h)
-	if !isBlockingByte(a.Layout[a.StartTileZ][a.StartTileX]) {
+	if !isBlockingCell(a, a.StartTileX, a.StartTileZ) {
 		stack := [][2]int{{a.StartTileX, a.StartTileZ}}
 		for len(stack) > 0 {
 			p := stack[len(stack)-1]
@@ -394,7 +494,7 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 			if visited[idx] {
 				continue
 			}
-			if isBlockingByte(a.Layout[pz][px]) {
+			if isBlockingCell(a, px, pz) {
 				continue
 			}
 			visited[idx] = true
@@ -417,8 +517,6 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 	return out
 }
 
-// performNewMap resets state to a fresh blank map. The dirty-check gate
-// happens in the input handler; this function is the unconditional reset.
 func performNewMap(s *State) {
 	s.area = blankArea(16, 16)
 	s.undo = nil
@@ -429,8 +527,6 @@ func performNewMap(s *State) {
 	s.flash("New map")
 }
 
-// mapStem returns the filename without directory or .map extension. Used to
-// pre-populate Save As from the current path.
 func mapStem(path string) string {
 	if path == "" {
 		return ""

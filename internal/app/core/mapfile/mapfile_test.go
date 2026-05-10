@@ -11,11 +11,26 @@ materials: dungeon
 quiet: It is quiet.
 size: 5x4
 start: 1 1 east
-layout:
+walls:
 #####
 #...#
-#.T.#
+#...#
 #####
+floor:
+.....
+.....
+.....
+.....
+decor:
+.....
+.....
+.....
+.....
+props:
+.....
+..T..
+.....
+.....
 enemies:
 rat 2 1
 bat 3 2
@@ -35,8 +50,21 @@ func TestParseSample(t *testing.T) {
 	if mf.StartX != 1 || mf.StartZ != 1 || mf.StartFace != "east" {
 		t.Fatalf("start mismatch: %+v", mf)
 	}
-	if len(mf.Layout) != 4 || mf.Layout[2] != "#.T.#" {
-		t.Fatalf("layout mismatch: %v", mf.Layout)
+	for name, rows := range map[string][]string{
+		"walls": mf.Walls,
+		"floor": mf.Floor,
+		"decor": mf.Decor,
+		"props": mf.Props,
+	} {
+		if len(rows) != 4 {
+			t.Fatalf("%s rows = %d, want 4", name, len(rows))
+		}
+	}
+	if mf.Walls[0] != "#####" || mf.Walls[1] != "#...#" {
+		t.Fatalf("walls mismatch: %v", mf.Walls)
+	}
+	if mf.Props[1] != "..T.." {
+		t.Fatalf("props mismatch: %v", mf.Props)
 	}
 	if len(mf.Enemies) != 2 || mf.Enemies[0].Kind != "rat" || mf.Enemies[1].Kind != "bat" {
 		t.Fatalf("enemies mismatch: %+v", mf.Enemies)
@@ -56,21 +84,37 @@ func TestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-parse: %v", err)
 	}
-	if mf2.Name != mf.Name || mf2.Width != mf.Width || mf2.Height != mf.Height ||
-		mf2.StartX != mf.StartX || mf2.StartFace != mf.StartFace ||
-		len(mf2.Layout) != len(mf.Layout) || len(mf2.Enemies) != len(mf.Enemies) {
-		t.Fatalf("round-trip mismatch:\n  before: %+v\n  after:  %+v", mf, mf2)
-	}
-	for i := range mf.Layout {
-		if mf.Layout[i] != mf2.Layout[i] {
-			t.Fatalf("row %d differs: %q vs %q", i, mf.Layout[i], mf2.Layout[i])
+	for i := 0; i < mf.Height; i++ {
+		if mf.Walls[i] != mf2.Walls[i] {
+			t.Errorf("walls row %d differs: %q vs %q", i, mf.Walls[i], mf2.Walls[i])
 		}
+		if mf.Floor[i] != mf2.Floor[i] {
+			t.Errorf("floor row %d differs: %q vs %q", i, mf.Floor[i], mf2.Floor[i])
+		}
+		if mf.Decor[i] != mf2.Decor[i] {
+			t.Errorf("decor row %d differs: %q vs %q", i, mf.Decor[i], mf2.Decor[i])
+		}
+		if mf.Props[i] != mf2.Props[i] {
+			t.Errorf("props row %d differs: %q vs %q", i, mf.Props[i], mf2.Props[i])
+		}
+	}
+	if len(mf.Enemies) != len(mf2.Enemies) {
+		t.Fatalf("enemy count: %d vs %d", len(mf.Enemies), len(mf2.Enemies))
 	}
 }
 
-func TestRejectMismatchedSize(t *testing.T) {
+func TestRejectMismatchedLayerSize(t *testing.T) {
 	bad := strings.Replace(sample, "size: 5x4", "size: 6x4", 1)
 	if _, err := Parse(strings.NewReader(bad)); err == nil {
 		t.Fatal("expected error for wrong width, got nil")
+	}
+}
+
+func TestRejectMissingLayer(t *testing.T) {
+	// Drop the props section — should fail validation since every layer
+	// is mandatory and same-sized.
+	withoutProps := strings.Replace(sample, "props:\n.....\n..T..\n.....\n.....\n", "", 1)
+	if _, err := Parse(strings.NewReader(withoutProps)); err == nil {
+		t.Fatal("expected error for missing props layer, got nil")
 	}
 }

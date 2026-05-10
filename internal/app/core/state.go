@@ -12,7 +12,7 @@ func NewPlayer(tileX, tileZ, facing int) Player {
 }
 
 func NewGameState(area AreaDefinition) GameState {
-	m := NewGameMap(area.Layout, area.Materials)
+	m := NewGameMap(area.Walls, area.Floor, area.Decor, area.Props, area.Materials)
 	g := GameState{
 		Map:     m,
 		Area:    area,

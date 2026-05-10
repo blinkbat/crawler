@@ -1,6 +1,7 @@
-// Package editor is the in-game map authoring tool. Paints tiles and walls,
-// drops the player start and enemy spawns, edits per-map metadata, and reads
-// / writes .map files via core/mapfile.
+// Package editor is the in-game map authoring tool. Maps are stored as
+// four parallel ASCII layers (walls / floor / decor / props) plus a list
+// of entities (player start + enemy spawns). The editor lets the user
+// select an active layer and paint into it with layer-specific brushes.
 package editor
 
 import (
@@ -20,41 +21,91 @@ const (
 	ActionTest
 )
 
-// Tool is the currently selected painting / placing mode. Tile brushes paint
-// a byte into the layout; placement tools (PlayerStart, SpawnRat, SpawnBat)
-// drop or move an entity.
-type Tool int
+// Layer names which of the area's four grids (or the entity list) the
+// editor is currently authoring. Active layer drives the palette, the
+// click action, and the visual emphasis on the grid.
+type Layer int
 
 const (
-	ToolFloor Tool = iota
-	ToolWall
-	ToolTree
-	ToolTreeXL
-	ToolBoulder
-	ToolBush
-	ToolPlayerStart
-	ToolSpawnRat
-	ToolSpawnBat
+	LayerWalls Layer = iota
+	LayerFloor
+	LayerDecor
+	LayerProps
+	LayerEntities
+
+	layerCount = 5
 )
 
-type toolEntry struct {
-	tool     Tool
-	label    string
-	hotkey   int32
-	tileByte byte
-	color    rl.Color
+// Brush is one entry in a layer's palette. For grid layers, char is the
+// byte written into that layer at the painted cell. For LayerEntities,
+// char is 0 and entity names which placement tool fires on click.
+type Brush struct {
+	Name   string
+	Char   byte
+	Entity entityKind
+	Hotkey int32
+	Color  rl.Color
 }
 
-var toolEntries = []toolEntry{
-	{ToolFloor, "Floor (.)", rl.KeyOne, core.TileFloor, rl.NewColor(180, 168, 140, 255)},
-	{ToolWall, "Wall (#)", rl.KeyTwo, core.TileRock, rl.NewColor(96, 96, 110, 255)},
-	{ToolTree, "Tree (T)", rl.KeyThree, core.TileTree, rl.NewColor(64, 140, 80, 255)},
-	{ToolTreeXL, "Tree XL (X)", rl.KeyFour, core.TileTreeXL, rl.NewColor(36, 96, 56, 255)},
-	{ToolBoulder, "Boulder (O)", rl.KeyFive, core.TileRockLarge, rl.NewColor(132, 110, 90, 255)},
-	{ToolBush, "Bush (B)", rl.KeySix, core.TileBushLarge, rl.NewColor(112, 142, 70, 255)},
-	{ToolPlayerStart, "Player Start", rl.KeySeven, 0, rl.NewColor(255, 220, 124, 255)},
-	{ToolSpawnRat, "Spawn Rat", rl.KeyEight, 0, rl.NewColor(220, 156, 96, 255)},
-	{ToolSpawnBat, "Spawn Bat", rl.KeyNine, 0, rl.NewColor(160, 130, 220, 255)},
+type entityKind int
+
+const (
+	entityNone entityKind = iota
+	entityPlayerStart
+	entitySpawnRat
+	entitySpawnBat
+)
+
+// layerBrushes is the per-layer palette table. Index into the active
+// layer's slice with State.brushIdx[layer]. Hotkeys 1–9 map directly to
+// indices 0–8 within the active layer.
+var layerBrushes = [layerCount][]Brush{
+	LayerWalls: {
+		{Name: "Wall (#)", Char: core.TileRock, Hotkey: rl.KeyOne, Color: rl.NewColor(96, 96, 110, 255)},
+		{Name: "Open (.)", Char: '.', Hotkey: rl.KeyTwo, Color: rl.NewColor(180, 168, 140, 255)},
+	},
+	LayerFloor: {
+		{Name: "Auto", Char: core.FloorAuto, Hotkey: rl.KeyOne, Color: rl.NewColor(160, 168, 140, 255)},
+		{Name: "Grass (g)", Char: core.FloorGrass, Hotkey: rl.KeyTwo, Color: rl.NewColor(120, 184, 110, 255)},
+		{Name: "Dirt (d)", Char: core.FloorDirt, Hotkey: rl.KeyThree, Color: rl.NewColor(168, 132, 92, 255)},
+		{Name: "Dark grass (k)", Char: core.FloorDarkGrass, Hotkey: rl.KeyFour, Color: rl.NewColor(72, 116, 70, 255)},
+		{Name: "Stone (s)", Char: core.FloorStone, Hotkey: rl.KeyFive, Color: rl.NewColor(150, 148, 142, 255)},
+	},
+	LayerDecor: {
+		{Name: "Auto", Char: core.DecorAuto, Hotkey: rl.KeyOne, Color: rl.NewColor(220, 224, 200, 255)},
+		{Name: "Force empty (_)", Char: core.DecorEmpty, Hotkey: rl.KeyTwo, Color: rl.NewColor(60, 64, 70, 255)},
+		{Name: "Bush (b)", Char: core.DecorBush, Hotkey: rl.KeyThree, Color: rl.NewColor(112, 142, 70, 255)},
+		{Name: "Mushroom (m)", Char: core.DecorMushroom, Hotkey: rl.KeyFour, Color: rl.NewColor(220, 100, 110, 255)},
+		{Name: "Pebble (p)", Char: core.DecorPebble, Hotkey: rl.KeyFive, Color: rl.NewColor(200, 192, 178, 255)},
+	},
+	LayerProps: {
+		{Name: "None (erase)", Char: '.', Hotkey: rl.KeyOne, Color: rl.NewColor(60, 64, 70, 255)},
+		{Name: "Tree (T)", Char: core.TileTree, Hotkey: rl.KeyTwo, Color: rl.NewColor(64, 140, 80, 255)},
+		{Name: "Tree XL (X)", Char: core.TileTreeXL, Hotkey: rl.KeyThree, Color: rl.NewColor(36, 96, 56, 255)},
+		{Name: "Boulder (O)", Char: core.TileRockLarge, Hotkey: rl.KeyFour, Color: rl.NewColor(132, 110, 90, 255)},
+		{Name: "Bush large (B)", Char: core.TileBushLarge, Hotkey: rl.KeyFive, Color: rl.NewColor(112, 142, 70, 255)},
+	},
+	LayerEntities: {
+		{Name: "Player Start", Entity: entityPlayerStart, Hotkey: rl.KeyOne, Color: rl.NewColor(255, 220, 124, 255)},
+		{Name: "Spawn Rat", Entity: entitySpawnRat, Hotkey: rl.KeyTwo, Color: rl.NewColor(220, 156, 96, 255)},
+		{Name: "Spawn Bat", Entity: entitySpawnBat, Hotkey: rl.KeyThree, Color: rl.NewColor(160, 130, 220, 255)},
+	},
+}
+
+func layerName(l Layer) string {
+	switch l {
+	case LayerWalls:
+		return "Walls"
+	case LayerFloor:
+		return "Floor"
+	case LayerDecor:
+		return "Decor"
+	case LayerProps:
+		return "Props"
+	case LayerEntities:
+		return "Entities"
+	}
+	return "?"
 }
 
 type focusField int
@@ -77,8 +128,6 @@ const (
 	modalConfirmDirty
 )
 
-// pendingAction names the action that the confirm-dirty prompt is gating on.
-// Lets the same modal cover Esc-to-title, New, and Open.
 type pendingAction int
 
 const (
@@ -88,9 +137,6 @@ const (
 	pendingOpen
 )
 
-// dragKind tracks what a left-button drag is doing on the grid. Set on
-// mouse-down based on modifiers + tool + cell contents; consumed each
-// frame the button is held; cleared on release.
 type dragKind int
 
 const (
@@ -101,7 +147,6 @@ const (
 	dragEnemy
 )
 
-// statusEntry is one line in the rolling status log shown over the grid.
 type statusEntry struct {
 	msg   string
 	timer float32
@@ -109,92 +154,68 @@ type statusEntry struct {
 
 const undoLimit = 50
 
-// State is the editor's mutable state across frames. Layout rectangles are
-// recomputed in layout() each frame from the current window size.
+// State is the editor's mutable state across frames.
 type State struct {
 	area core.AreaDefinition
-	tool Tool
 
-	focus focusField
-	// numericBuf is the pending typed-digits buffer for focusWidth /
-	// focusHeight. Held separately from area dimensions so partial typing
-	// (e.g. "3" en route to "30") doesn't immediately resize.
+	layer    Layer
+	brushIdx [layerCount]int
+
+	focus      focusField
 	numericBuf string
 
-	modal         modalKind
-	modalPaths    []string
-	modalCursor   int
-	modalFilename string
-	// modalRenaming is non-empty while the user is typing a new name for
-	// the highlighted entry in the Open modal (R key). Holds the buffer
-	// until they press Enter.
-	modalRenaming string
+	modal              modalKind
+	modalPaths         []string
+	modalCursor        int
+	modalFilename      string
+	modalRenaming      string
 	modalConfirmDelete bool
-	// pending is the destructive action the confirm-dirty modal will run
-	// when the user picks Save / Discard. Used to gate New, Open, and
-	// Esc-to-title behind a "save first?" prompt when dirty.
-	pending pendingAction
+	pending            pendingAction
 
 	undo  []core.AreaDefinition
 	redo  []core.AreaDefinition
 	dirty bool
 
-	// statusLog stacks the most recent flashes; oldest expire first via
-	// per-entry timers. Replaces the old single-line statusMsg.
 	statusLog []statusEntry
 
-	// brushSize is the side length of the square painted by tile brushes
-	// (1, 3, or 5). Centered on the hovered cell.
 	brushSize int
 
-	// drag tracks what a left-button stroke is doing this frame.
 	drag             dragKind
 	dragSnapshotDone bool
 	lastPaintX       int
 	lastPaintZ       int
 	rectAnchorX      int
 	rectAnchorZ      int
-	// dragSpawnIdx is the index into area.EnemySpawns being moved while
-	// drag == dragEnemy.
-	dragSpawnIdx int
+	dragSpawnIdx     int
 
-	// gridCursorX/Z is a logical keyboard cursor over the grid. -1 means
-	// the cursor is hidden (mouse-driven mode); set by arrow keys.
 	gridCursorX int
 	gridCursorZ int
+	hoverX      int
+	hoverZ      int
 
-	// hoverX/Z is the mouse-hovered cell, or (-1,-1) when off-grid.
-	hoverX int
-	hoverZ int
-
-	// zoom multiplies the auto-fit cell size; pan offsets the grid plot.
-	// Reset by R when no tool requires it (R is otherwise the rotate-start
-	// hotkey, which only fires under ToolPlayerStart).
 	zoom    float32
 	panX    float32
 	panY    float32
 	panning bool
 
-	exitRequested bool
-	testRequested bool
-	// awaitingOverwrite is set when Save As detected the typed filename
-	// already exists on disk. The modal shifts into a Y/N prompt before
-	// clobbering — Y proceeds, N/Esc returns to typing.
+	exitRequested     bool
+	testRequested     bool
 	awaitingOverwrite bool
 
 	rect layoutRect
 }
 
 type layoutRect struct {
-	topbar   rl.Rectangle
-	palette  rl.Rectangle
-	metadata rl.Rectangle
-	grid     rl.Rectangle
-	cellPx   float32
-	gridX    float32
-	gridY    float32
-	gridW    float32
-	gridH    float32
+	topbar     rl.Rectangle
+	layerTabs  rl.Rectangle
+	palette    rl.Rectangle
+	metadata   rl.Rectangle
+	grid       rl.Rectangle
+	cellPx     float32
+	gridX      float32
+	gridY      float32
+	gridW      float32
+	gridH      float32
 }
 
 // Area returns a copy of the area currently being edited. Used by the run
@@ -216,7 +237,7 @@ func NewFromArea(a core.AreaDefinition) State {
 func freshState(a core.AreaDefinition) State {
 	return State{
 		area:         a,
-		tool:         ToolWall,
+		layer:        LayerWalls,
 		brushSize:    1,
 		zoom:         1,
 		gridCursorX:  -1,
@@ -228,21 +249,32 @@ func freshState(a core.AreaDefinition) State {
 }
 
 func blankArea(w, h int) core.AreaDefinition {
-	rows := make([]string, h)
+	walls := make([]string, h)
+	floor := make([]string, h)
+	decor := make([]string, h)
+	props := make([]string, h)
 	for z := 0; z < h; z++ {
-		b := make([]byte, w)
+		wb := make([]byte, w)
 		for x := 0; x < w; x++ {
 			if x == 0 || z == 0 || x == w-1 || z == h-1 {
-				b[x] = core.TileRock
+				wb[x] = core.TileRock
 			} else {
-				b[x] = core.TileFloor
+				wb[x] = '.'
 			}
 		}
-		rows[z] = string(b)
+		walls[z] = string(wb)
+		floor[z] = blankRow(w, core.FloorAuto)
+		decor[z] = blankRow(w, core.DecorAuto)
+		props[z] = blankRow(w, '.')
 	}
 	return core.AreaDefinition{
 		Name:         "Untitled",
-		Layout:       rows,
+		Width:        w,
+		Height:       h,
+		Walls:        walls,
+		Floor:        floor,
+		Decor:        decor,
+		Props:        props,
 		Materials:    core.MaterialDungeon,
 		StartTileX:   1,
 		StartTileZ:   1,
@@ -251,8 +283,26 @@ func blankArea(w, h int) core.AreaDefinition {
 	}
 }
 
+func blankRow(width int, c byte) string {
+	b := make([]byte, width)
+	for i := range b {
+		b[i] = c
+	}
+	return string(b)
+}
+
+// activeBrush returns the currently selected brush in the active layer.
+func (s *State) activeBrush() Brush {
+	palette := layerBrushes[s.layer]
+	idx := s.brushIdx[s.layer]
+	if idx < 0 || idx >= len(palette) {
+		idx = 0
+	}
+	return palette[idx]
+}
+
 // Update advances the editor one frame. Returns the next action for the
-// run loop (ActionNone keeps editing; ActionExitToTitle / ActionTest pop).
+// run loop.
 func Update(s *State, dt float32) Action {
 	s.layout()
 
@@ -279,9 +329,6 @@ func Update(s *State, dt float32) Action {
 			for _, w := range warnings {
 				s.flash("Test: " + w)
 			}
-			// Don't drop into a guaranteed-broken playtest. The user can
-			// dismiss the warnings and press F5 again on a fixable issue,
-			// but the start-on-wall case will keep flagging.
 			if !canPlaytest(s.area) {
 				return ActionNone
 			}
@@ -305,22 +352,24 @@ func Update(s *State, dt float32) Action {
 
 // canPlaytest is the strict subset of reachability checks that MUST pass
 // before we'll drop into adventure mode — anything that would crash or
-// soft-lock the player on entry. Less stringent than reachabilityWarnings.
+// soft-lock the player on entry.
 func canPlaytest(a core.AreaDefinition) bool {
-	if a.StartTileZ < 0 || a.StartTileZ >= len(a.Layout) {
+	if a.StartTileZ < 0 || a.StartTileZ >= a.Height {
 		return false
 	}
-	if a.StartTileX < 0 || a.StartTileX >= len(a.Layout[0]) {
+	if a.StartTileX < 0 || a.StartTileX >= a.Width {
 		return false
 	}
-	if isBlockingByte(a.Layout[a.StartTileZ][a.StartTileX]) {
+	if a.Walls[a.StartTileZ][a.StartTileX] == core.TileRock {
+		return false
+	}
+	if isPropChar(a.Props[a.StartTileZ][a.StartTileX]) {
 		return false
 	}
 	return true
 }
 
-// flash pushes a transient message onto the rolling status log. Old
-// messages expire on their own timer; the log is capped at 4 entries.
+// flash pushes a transient message onto the rolling status log.
 func (s *State) flash(msg string) {
 	s.statusLog = append(s.statusLog, statusEntry{msg: msg, timer: 2.5})
 	if len(s.statusLog) > 4 {

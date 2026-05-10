@@ -1,7 +1,18 @@
 // Package mapfile is the on-disk representation of an explorable area. The
-// format is plain text — header lines, then a literal ASCII grid for the
-// layout, then a list of enemy spawns — chosen so a map diffs cleanly in git
-// and can be glanced at in any editor without parsing.
+// format is plain text, multi-section: header lines, then one ASCII grid
+// per editing layer (walls / floor / decor / props), then a list of enemy
+// spawns. Chosen so a map diffs cleanly in git, can be glanced at in any
+// editor without parsing, and gives the editor's layer system a 1:1
+// mapping with on-disk structure.
+//
+// Layer character conventions:
+//
+//	walls  : '.' open, '#' wall
+//	floor  : '.' auto-variant (per-tile hash), 'g' grass, 'd' dirt,
+//	         'k' dark grass, 's' stone
+//	decor  : '.' auto-scatter, '_' force-empty, 'b' bush, 'm' mushroom,
+//	         'p' pebble cluster
+//	props  : '.' empty, 'T' tree, 'X' tree XL, 'O' boulder, 'B' bush (large)
 package mapfile
 
 import (
@@ -15,8 +26,7 @@ import (
 	"strings"
 )
 
-// MapFile round-trips losslessly with Encode/Parse. Layout rows use the tile
-// chars defined in core/map.go (. # T X O B).
+// MapFile round-trips losslessly with Encode/Parse.
 type MapFile struct {
 	Name      string
 	Materials string
@@ -26,7 +36,10 @@ type MapFile struct {
 	StartX    int
 	StartZ    int
 	StartFace string
-	Layout    []string
+	Walls     []string
+	Floor     []string
+	Decor     []string
+	Props     []string
 	Enemies   []MapEnemy
 }
 
@@ -36,72 +49,49 @@ type MapEnemy struct {
 	Z    int
 }
 
+// layerSlot is the parser's notion of "which grid is the upcoming N rows
+// going into." Lets the section dispatch share one collection loop.
+type layerSlot int
+
+const (
+	slotNone layerSlot = iota
+	slotWalls
+	slotFloor
+	slotDecor
+	slotProps
+	slotEnemies
+)
+
 // Parse reads a .map file from r. Errors pinpoint the first malformed line.
 func Parse(r io.Reader) (MapFile, error) {
 	mf := MapFile{}
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
-	state := "header"
+	state := slotNone
 	lineNo := 0
 	for sc.Scan() {
 		lineNo++
-		raw := sc.Text()
-		// Tolerate CRLF (e.g. a .map opened and resaved in Notepad). Scanner
-		// strips \n but leaves \r; that would push layout rows one char wider
-		// than declared and fail validation with a confusing message.
-		raw = strings.TrimRight(raw, "\r")
-		switch state {
-		case "header":
+		raw := strings.TrimRight(sc.Text(), "\r")
+
+		// Section headers can appear at any point and switch state. Always
+		// check before treating a line as content.
+		if next, ok := sectionFor(raw); ok {
+			state = next
+			continue
+		}
+
+		if state == slotNone {
 			line := strings.TrimSpace(raw)
 			if line == "" {
 				continue
 			}
-			if line == "layout:" {
-				state = "layout"
-				continue
+			if err := parseHeaderLine(&mf, line, lineNo); err != nil {
+				return mf, err
 			}
-			if line == "enemies:" {
-				state = "enemies"
-				continue
-			}
-			key, val, ok := splitKV(line)
-			if !ok {
-				return mf, fmt.Errorf("line %d: expected 'key: value' or section header, got %q", lineNo, raw)
-			}
-			switch key {
-			case "name":
-				mf.Name = val
-			case "materials":
-				mf.Materials = val
-			case "quiet":
-				mf.Quiet = val
-			case "size":
-				w, h, err := parseSize(val)
-				if err != nil {
-					return mf, fmt.Errorf("line %d: %w", lineNo, err)
-				}
-				mf.Width, mf.Height = w, h
-			case "start":
-				x, z, face, err := parseStart(val)
-				if err != nil {
-					return mf, fmt.Errorf("line %d: %w", lineNo, err)
-				}
-				mf.StartX, mf.StartZ, mf.StartFace = x, z, face
-			default:
-				return mf, fmt.Errorf("line %d: unknown header key %q", lineNo, key)
-			}
-		case "layout":
-			if strings.TrimSpace(raw) == "enemies:" {
-				state = "enemies"
-				continue
-			}
-			if len(mf.Layout) >= mf.Height {
-				if strings.TrimSpace(raw) == "" {
-					continue
-				}
-			}
-			mf.Layout = append(mf.Layout, raw)
-		case "enemies":
+			continue
+		}
+
+		if state == slotEnemies {
 			line := strings.TrimSpace(raw)
 			if line == "" {
 				continue
@@ -119,7 +109,22 @@ func Parse(r io.Reader) (MapFile, error) {
 				return mf, fmt.Errorf("line %d: bad enemy z %q", lineNo, fields[2])
 			}
 			mf.Enemies = append(mf.Enemies, MapEnemy{Kind: fields[0], X: x, Z: z})
+			continue
 		}
+
+		// Layer grid line. Skip pure-whitespace lines once we've collected
+		// Height rows for this layer (handles the blank line that some
+		// editors auto-insert before the next section header).
+		target := layerSlice(&mf, state)
+		if target == nil {
+			continue
+		}
+		if len(*target) >= mf.Height {
+			if strings.TrimSpace(raw) == "" {
+				continue
+			}
+		}
+		*target = append(*target, raw)
 	}
 	if err := sc.Err(); err != nil {
 		return mf, err
@@ -130,16 +135,86 @@ func Parse(r io.Reader) (MapFile, error) {
 	return mf, nil
 }
 
+func sectionFor(raw string) (layerSlot, bool) {
+	switch strings.TrimSpace(raw) {
+	case "walls:":
+		return slotWalls, true
+	case "floor:":
+		return slotFloor, true
+	case "decor:":
+		return slotDecor, true
+	case "props:":
+		return slotProps, true
+	case "enemies:":
+		return slotEnemies, true
+	}
+	return slotNone, false
+}
+
+func layerSlice(mf *MapFile, slot layerSlot) *[]string {
+	switch slot {
+	case slotWalls:
+		return &mf.Walls
+	case slotFloor:
+		return &mf.Floor
+	case slotDecor:
+		return &mf.Decor
+	case slotProps:
+		return &mf.Props
+	}
+	return nil
+}
+
+func parseHeaderLine(mf *MapFile, line string, lineNo int) error {
+	key, val, ok := splitKV(line)
+	if !ok {
+		return fmt.Errorf("line %d: expected 'key: value' or section header, got %q", lineNo, line)
+	}
+	switch key {
+	case "name":
+		mf.Name = val
+	case "materials":
+		mf.Materials = val
+	case "quiet":
+		mf.Quiet = val
+	case "size":
+		w, h, err := parseSize(val)
+		if err != nil {
+			return fmt.Errorf("line %d: %w", lineNo, err)
+		}
+		mf.Width, mf.Height = w, h
+	case "start":
+		x, z, face, err := parseStart(val)
+		if err != nil {
+			return fmt.Errorf("line %d: %w", lineNo, err)
+		}
+		mf.StartX, mf.StartZ, mf.StartFace = x, z, face
+	default:
+		return fmt.Errorf("line %d: unknown header key %q", lineNo, key)
+	}
+	return nil
+}
+
 func (mf MapFile) validate() error {
 	if mf.Width <= 0 || mf.Height <= 0 {
 		return fmt.Errorf("size must be >0x0; got %dx%d", mf.Width, mf.Height)
 	}
-	if len(mf.Layout) != mf.Height {
-		return fmt.Errorf("layout has %d rows, size declares %d", len(mf.Layout), mf.Height)
-	}
-	for i, row := range mf.Layout {
-		if len(row) != mf.Width {
-			return fmt.Errorf("layout row %d has %d cols, size declares %d", i, len(row), mf.Width)
+	for _, layer := range []struct {
+		name string
+		rows []string
+	}{
+		{"walls", mf.Walls},
+		{"floor", mf.Floor},
+		{"decor", mf.Decor},
+		{"props", mf.Props},
+	} {
+		if len(layer.rows) != mf.Height {
+			return fmt.Errorf("%s layer has %d rows, size declares %d", layer.name, len(layer.rows), mf.Height)
+		}
+		for i, row := range layer.rows {
+			if len(row) != mf.Width {
+				return fmt.Errorf("%s layer row %d has %d cols, size declares %d", layer.name, i, len(row), mf.Width)
+			}
 		}
 	}
 	if mf.StartX < 0 || mf.StartX >= mf.Width || mf.StartZ < 0 || mf.StartZ >= mf.Height {
@@ -188,7 +263,8 @@ func parseStart(val string) (int, int, string, error) {
 	return x, z, face, nil
 }
 
-// Encode writes mf in the canonical .map format.
+// Encode writes mf in the canonical .map format. Layers are emitted in a
+// fixed order so encoded maps diff cleanly across edits.
 func (mf MapFile) Encode(w io.Writer) error {
 	bw := bufio.NewWriter(w)
 	fmt.Fprintf(bw, "name: %s\n", mf.Name)
@@ -196,9 +272,19 @@ func (mf MapFile) Encode(w io.Writer) error {
 	fmt.Fprintf(bw, "quiet: %s\n", mf.Quiet)
 	fmt.Fprintf(bw, "size: %dx%d\n", mf.Width, mf.Height)
 	fmt.Fprintf(bw, "start: %d %d %s\n", mf.StartX, mf.StartZ, mf.StartFace)
-	fmt.Fprintln(bw, "layout:")
-	for _, row := range mf.Layout {
-		fmt.Fprintln(bw, row)
+	for _, layer := range []struct {
+		name string
+		rows []string
+	}{
+		{"walls", mf.Walls},
+		{"floor", mf.Floor},
+		{"decor", mf.Decor},
+		{"props", mf.Props},
+	} {
+		fmt.Fprintf(bw, "%s:\n", layer.name)
+		for _, row := range layer.rows {
+			fmt.Fprintln(bw, row)
+		}
 	}
 	fmt.Fprintln(bw, "enemies:")
 	for _, e := range mf.Enemies {
@@ -250,4 +336,15 @@ func List(dir string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// BlankLayer returns a Width × Height grid filled with `c`. Editor uses it
+// to seed fresh layers when creating a new map or resizing an existing one.
+func BlankLayer(width, height int, c byte) []string {
+	rows := make([]string, height)
+	row := strings.Repeat(string(c), width)
+	for i := range rows {
+		rows[i] = row
+	}
+	return rows
 }
