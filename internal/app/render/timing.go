@@ -293,34 +293,18 @@ func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources
 // in the given SeqDir direction, centered at (cx, cy). `size` is the arrow's
 // half-extent along its axis, so the full icon spans 2*size.
 //
-// CRITICAL: each direction's triangles are wound CCW in screen-Y-down space.
-// The previous implementation had a Down arrow with reversed winding, which
-// got back-face culled to invisible on drivers that enable GL_CULL_FACE in
-// the 2D pipeline. We also bracket the whole call with backface-cull
-// disable/enable as belt-and-suspenders so winding bugs can't make any arrow
-// silently disappear.
+// raylib's rl.DrawTriangle is sensitive to winding: with the 2D pipeline's
+// GL_CULL_FACE enabled (which it is on at least some drivers), back-faces
+// silently render as nothing. The first take here had the head and both
+// stem triangles wound CW in screen-Y-down space and tried to compensate
+// with rl.DisableBackfaceCulling — which, on the user's machine, doesn't
+// take effect in time for the immediate-mode triangles. Result: blank
+// arrows during the pickpocket prompt. The fix is to wind every triangle
+// CCW in screen-Y-down (matches the working minimap arrow in minimap.go)
+// so visibility doesn't depend on the cull state at all.
 func drawArrow(cx, cy, size float32, dir int, col rl.Color) {
-	rl.DisableBackfaceCulling()
-	defer rl.EnableBackfaceCulling()
-
-	// Geometry: a chunky arrow built from a triangular head + a rectangular
-	// stem. We define it once for an "up" arrow then transform per direction
-	// by swapping x/y and negating components.
-	//
-	// Up-arrow local layout (origin at center, +y down in screen space):
-	//   tip:       (0, -size)
-	//   head L:    (-size*0.85, -size*0.05)
-	//   head R:    ( size*0.85, -size*0.05)
-	//   stem TL:   (-size*0.40, -size*0.05)
-	//   stem TR:   ( size*0.40, -size*0.05)
-	//   stem BL:   (-size*0.40,  size*0.85)
-	//   stem BR:   ( size*0.40,  size*0.85)
-	//
-	// We rotate this layout by 0/90/180/270° to face the right direction.
+	// axis points along the arrow's tip; perp is 90° clockwise from it.
 	axisX, axisY := arrowAxisVec(dir)
-	// `axisX/Y` is the unit vector pointing in the arrow's "tip" direction.
-	// `perpX/Y` is 90° clockwise from it, used as the local +x in screen
-	// (right-hand) terms — so head points +axis and head-width spans ±perp.
 	perpX, perpY := -axisY, axisX
 
 	tipX := cx + axisX*size
@@ -343,24 +327,26 @@ func drawArrow(cx, cy, size float32, dir int, col rl.Color) {
 	stemBRX := cx - axisX*size*0.85 + perpX*size*0.40
 	stemBRY := cy - axisY*size*0.85 + perpY*size*0.40
 
-	// Head: tip + two head corners (CCW in screen space).
+	// Head: tip → L → R is CCW in screen-Y-down (matches drawMinimapArrow).
 	rl.DrawTriangle(
 		rl.NewVector2(tipX, tipY),
-		rl.NewVector2(headRX, headRY),
 		rl.NewVector2(headLX, headLY),
+		rl.NewVector2(headRX, headRY),
 		col,
 	)
-	// Stem: rectangle as two triangles (each CCW in screen space).
+	// Stem rectangle as two CCW triangles in screen-Y-down. Visualizing
+	// the stem as TL/TR/BL/BR corners on a clock face (TL=11, TR=1,
+	// BR=5, BL=7), the CCW orderings are TL→BL→BR and TL→BR→TR.
 	rl.DrawTriangle(
 		rl.NewVector2(stemTLX, stemTLY),
-		rl.NewVector2(stemTRX, stemTRY),
-		rl.NewVector2(stemBRX, stemBRY),
-		col,
-	)
-	rl.DrawTriangle(
-		rl.NewVector2(stemTLX, stemTLY),
-		rl.NewVector2(stemBRX, stemBRY),
 		rl.NewVector2(stemBLX, stemBLY),
+		rl.NewVector2(stemBRX, stemBRY),
+		col,
+	)
+	rl.DrawTriangle(
+		rl.NewVector2(stemTLX, stemTLY),
+		rl.NewVector2(stemBRX, stemBRY),
+		rl.NewVector2(stemTRX, stemTRY),
 		col,
 	)
 }

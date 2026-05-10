@@ -88,20 +88,6 @@ func FacingYaw(facing int) float32 {
 	return 0
 }
 
-func FacingName(facing int) string {
-	switch NormalizeFacing(facing) {
-	case North:
-		return "N"
-	case East:
-		return "E"
-	case South:
-		return "S"
-	case West:
-		return "W"
-	}
-	return "?"
-}
-
 func NormalizeFacing(facing int) int {
 	facing %= 4
 	if facing < 0 {

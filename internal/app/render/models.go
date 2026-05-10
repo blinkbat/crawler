@@ -40,8 +40,7 @@ func partRotationAxis(p treePart) rl.Vector3 {
 }
 
 const (
-	treeMeshRoot = iota
-	treeMeshTrunk
+	treeMeshTrunk = iota
 	treeMeshCanopyLow
 	treeMeshCanopyHigh
 	treeMeshCanopySide
@@ -50,7 +49,6 @@ const (
 
 func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 	models := []rl.Model{
-		treeMeshRoot:         rl.LoadModelFromMesh(rl.GenMeshCylinder(0.32, 0.18, 10)),
 		treeMeshTrunk:        rl.LoadModelFromMesh(rl.GenMeshCylinder(0.18, 1.55, 12)),
 		treeMeshCanopyLow:    rl.LoadModelFromMesh(rl.GenMeshSphere(0.92, 12, 16)),
 		treeMeshCanopyHigh:   rl.LoadModelFromMesh(rl.GenMeshSphere(0.78, 12, 16)),
@@ -59,7 +57,7 @@ func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 	}
 	for i := range models {
 		tex := leafTex
-		if i == treeMeshRoot || i == treeMeshTrunk {
+		if i == treeMeshTrunk {
 			tex = barkTex
 		}
 		setModelTexture(&models[i], tex)
@@ -74,7 +72,6 @@ func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 	return treeModel{
 		models: models,
 		parts: []treePart{
-			{modelIdx: treeMeshRoot, offset: rl.NewVector3(0, 0.04, 0), scale: rl.NewVector3(1, 1, 1), tint: rl.White},
 			{modelIdx: treeMeshTrunk, offset: rl.NewVector3(0, 0.06, 0), scale: rl.NewVector3(1, 1, 1), tint: rl.White},
 			{modelIdx: treeMeshCanopyLow, offset: rl.NewVector3(0, 1.55, 0), scale: rl.NewVector3(1, 0.95, 1), tint: leafMid},
 			{modelIdx: treeMeshCanopyHigh, offset: rl.NewVector3(-0.05, 2.05, 0.05), scale: rl.NewVector3(1, 1, 1), tint: leafBase},
@@ -153,95 +150,75 @@ func (p propModel) unload() {
 	}
 }
 
-// Rock prop mesh indices. The "large rock" tile is now a crystal cluster —
-// a jagged base with multiple low-poly cones jutting out at varied angles.
-// Indexes are named so the parts list reads as a recipe instead of magic
-// numbers; the small-pebble drawer in world.go also pulls rockMeshBase
-// directly to recycle the base block as ground scatter.
+// Rock prop mesh indices. The boulder is built from two sizes of low-poly
+// faceted spheres — the low slice/ring counts give a jagged polygonal
+// silhouette that reads as a chunky stone rather than a smooth river
+// pebble. rockMeshBase still exists as models[0] because world.go's
+// drawPebbleCluster consumes it directly for ground scatter, but the
+// boulder itself no longer draws a cube base under the lumps (it looked
+// like a pedestal — see the parts list below).
 const (
-	rockMeshBase     = iota // wide low matrix block (the "rock the crystals grew on")
-	rockMeshCrystalA        // tall hex-faceted main spire
-	rockMeshCrystalB        // medium 6-sided crystal
-	rockMeshCrystalC        // shorter 5-sided crystal (irregular feel)
-	rockMeshCrystalD        // small 4-sided shard
-	rockMeshShard           // long thin elongated cube — a slab/blade crystal
+	rockMeshBase  = iota // flat cube — used by the pebble drawer, not the boulder
+	rockMeshLump         // medium faceted lump (5 rings × 6 slices)
+	rockMeshChunk        // small faceted chunk (4 rings × 5 slices)
 )
 
-// loadRockProp builds a quartz-cluster prop: a low rough base studded with
-// faceted cones at varied angles, sizes, and slice counts so each crystal
-// reads as a distinct mineral spike rather than a copy. Some crystals tilt
-// off-vertical via per-part rotation axes for a natural "growing in
-// different directions" look you'd see on a real geode. The whole thing
-// shares the rock wall texture so it ties to the field's matte-stone
-// palette; the cool tints shift each crystal toward purple/blue so the
-// cluster reads as crystalline and not just "another rock pile."
+// loadRockProp builds a chunky polygonal boulder: a flat base with two or
+// three faceted lumps fused on top at varied angles, all in close-grouped
+// stone greys. The intent is "weathered rock outcrop you'd see in a
+// fantasy field map" — low silhouette, jagged facets, no upward spires.
+// Slice/ring counts are kept low (4–6) so the lumps look polygonal rather
+// than billiard-ball smooth.
 func loadRockProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 	models := []rl.Model{
 		rockMeshBase: rl.LoadModelFromMesh(rl.GenMeshCube(1.10, 0.36, 0.95)),
-		// Cones: low slice counts make them faceted, which is what reads as
-		// a crystal facet. Heights and radii are picked so the silhouettes
-		// don't repeat each other.
-		rockMeshCrystalA: rl.LoadModelFromMesh(rl.GenMeshCone(0.18, 1.18, 6)),
-		rockMeshCrystalB: rl.LoadModelFromMesh(rl.GenMeshCone(0.15, 0.86, 6)),
-		rockMeshCrystalC: rl.LoadModelFromMesh(rl.GenMeshCone(0.13, 0.68, 5)),
-		rockMeshCrystalD: rl.LoadModelFromMesh(rl.GenMeshCone(0.10, 0.48, 4)),
-		// A square-section "blade" crystal — long thin cube. Tilted into the
-		// cluster so it reads as a fractured shard wedged in the matrix.
-		rockMeshShard: rl.LoadModelFromMesh(rl.GenMeshCube(0.16, 0.78, 0.16)),
+		// Sphere with low ring/slice count: each face is large enough to
+		// catch a distinct lighting value, which is what reads as "rock"
+		// vs "ball." 5×6 and 4×5 are the sweet spot — fewer looks like a
+		// die, more smooths into a pillow.
+		rockMeshLump:  rl.LoadModelFromMesh(rl.GenMeshSphere(0.55, 5, 6)),
+		rockMeshChunk: rl.LoadModelFromMesh(rl.GenMeshSphere(0.36, 4, 5)),
 	}
 	for i := range models {
 		setModelTexture(&models[i], rockTex)
 		attachShader(&models[i], shader)
 	}
 
-	// Crystal palette — cool purples and blues over the rock-warm base. Each
-	// crystal gets its own tint so the cluster looks like multiple species
-	// of mineral grew side by side.
-	matrixTint := rl.NewColor(174, 168, 158, 255)
-	mainTint := rl.NewColor(148, 130, 198, 255)   // amethyst
-	midTint := rl.NewColor(172, 156, 220, 255)    // pale violet
-	paleTint := rl.NewColor(204, 188, 230, 255)   // lavender
-	blueTint := rl.NewColor(150, 168, 224, 255)   // sky-quartz
-	bladeTint := rl.NewColor(210, 200, 226, 255)  // milky quartz blade
-	smallTint := rl.NewColor(220, 200, 232, 255)  // accent
+	// Stone palette — close-grouped pale greys with slight warm/cool
+	// variation so the parts read as one boulder broken at fault lines,
+	// not separate rocks stacked together. Lighter than the previous pass
+	// (which read as charcoal) so the boulder pops from the field's grass
+	// floor and the wall texture.
+	warm := rl.NewColor(214, 204, 188, 255)
+	cool := rl.NewColor(196, 198, 202, 255)
+	dark := rl.NewColor(176, 172, 164, 255)
+	light := rl.NewColor(232, 224, 210, 255)
 
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Matrix base: low chunky block under the crystals.
-			{modelIdx: rockMeshBase, offset: rl.NewVector3(0, 0.18, 0), scale: rl.NewVector3(1, 1, 1), rotation: 8, tint: matrixTint},
+			// Main mass: biggest lump, sitting directly on the ground.
+			// Squashed vertically (y scale 0.85) so the silhouette reads
+			// as a stout stone. Tilted on a (1,4,1) axis so facets don't
+			// align to world axes — looks naturally weathered.
+			{modelIdx: rockMeshLump, offset: rl.NewVector3(-0.10, 0.40, 0.05), scale: rl.NewVector3(1.25, 0.85, 1.20), rotation: 17, rotationAxis: rl.NewVector3(1, 4, 1), tint: warm},
 
-			// Main spire — tall, vertical, slightly off-center. The signature
-			// piece you see first.
-			{modelIdx: rockMeshCrystalA, offset: rl.NewVector3(-0.06, 0.30, 0.04), scale: rl.NewVector3(1, 1, 1), rotation: 20, tint: mainTint},
+			// Side mass fused into the main lump: smaller, rotated on a
+			// different tilted axis so its facets break the main lump's.
+			{modelIdx: rockMeshLump, offset: rl.NewVector3(0.38, 0.32, -0.22), scale: rl.NewVector3(1.0, 0.75, 1.10), rotation: -28, rotationAxis: rl.NewVector3(2, 5, 1), tint: cool},
 
-			// Mid crystal tilted toward +X using a non-Y axis. The axis
-			// (1, 6, 0) keeps it mostly upright but leans the tip toward +X
-			// for a "leaning into the wind" silhouette.
-			{modelIdx: rockMeshCrystalB, offset: rl.NewVector3(0.30, 0.30, -0.10), scale: rl.NewVector3(1, 1, 1), rotation: 18, rotationAxis: rl.NewVector3(1, 6, 0), tint: midTint},
+			// Top chunk: gives the boulder an asymmetric peak. Modest
+			// height keeps the silhouette earthbound — no spires.
+			{modelIdx: rockMeshChunk, offset: rl.NewVector3(-0.22, 0.62, 0.12), scale: rl.NewVector3(1.15, 0.7, 1.15), rotation: 41, rotationAxis: rl.NewVector3(1, 5, 0), tint: dark},
 
-			// Shorter crystal tilted toward -Z. Different lean direction
-			// from the previous crystal so the cluster doesn't look combed.
-			{modelIdx: rockMeshCrystalC, offset: rl.NewVector3(-0.32, 0.30, -0.20), scale: rl.NewVector3(1, 1, 1), rotation: -22, rotationAxis: rl.NewVector3(0, 5, 1), tint: paleTint},
+			// Back chip: breaks the silhouette on the +Z side so the
+			// boulder reads differently from each angle.
+			{modelIdx: rockMeshChunk, offset: rl.NewVector3(0.06, 0.26, 0.42), scale: rl.NewVector3(1.05, 0.75, 1.05), rotation: 11, rotationAxis: rl.NewVector3(0, 6, 1), tint: dark},
 
-			// Tilted blue crystal toward +Z+x for variety. Slightly stronger
-			// tilt so it reads as the "wild" crystal in the cluster.
-			{modelIdx: rockMeshCrystalC, offset: rl.NewVector3(0.20, 0.32, 0.28), scale: rl.NewVector3(0.95, 0.85, 0.95), rotation: 28, rotationAxis: rl.NewVector3(1, 4, 1), tint: blueTint},
-
-			// Long blade slab — thin elongated cube standing nearly vertical
-			// but rotated around an axis with a touch of X for an asymmetric
-			// fault-plane angle.
-			{modelIdx: rockMeshShard, offset: rl.NewVector3(0.04, 0.50, -0.30), scale: rl.NewVector3(1, 1, 1), rotation: 14, rotationAxis: rl.NewVector3(1, 8, 0), tint: bladeTint},
-
-			// Two smaller crystals at the base flanks — short, nearly
-			// upright, slightly canted. They fill in the silhouette so the
-			// cluster has visual density at every height.
-			{modelIdx: rockMeshCrystalD, offset: rl.NewVector3(-0.34, 0.30, 0.22), scale: rl.NewVector3(1, 1, 1), rotation: -10, tint: smallTint},
-			{modelIdx: rockMeshCrystalD, offset: rl.NewVector3(0.36, 0.30, 0.06), scale: rl.NewVector3(0.95, 0.92, 0.95), rotation: 36, rotationAxis: rl.NewVector3(0, 6, 1), tint: smallTint},
-
-			// Tiny accent crystal up high, leaning toward camera-ish. Adds a
-			// pointy peak above the main spire's shoulder.
-			{modelIdx: rockMeshCrystalD, offset: rl.NewVector3(0.10, 0.60, -0.04), scale: rl.NewVector3(0.7, 0.8, 0.7), rotation: 50, rotationAxis: rl.NewVector3(2, 5, 0), tint: paleTint},
+			// Broken-off pebble at the base flank — visual interest at
+			// ground level, makes the boulder feel weathered (eroded
+			// chunks settling at its foot) instead of freshly placed.
+			{modelIdx: rockMeshChunk, offset: rl.NewVector3(-0.52, 0.13, 0.08), scale: rl.NewVector3(0.65, 0.45, 0.65), rotation: 65, rotationAxis: rl.NewVector3(1, 3, 0), tint: light},
 		},
 	}
 }

@@ -15,7 +15,7 @@ func NewGameState(area AreaDefinition) GameState {
 	m := NewGameMap(area.Layout, area.Materials)
 	g := GameState{
 		Map:     m,
-		AreaID:  area.ID,
+		Area:    area,
 		Player:  NewPlayer(area.StartTileX, area.StartTileZ, area.StartFacing),
 		Party:   NewParty(),
 		Enemies: placeEnemies(m, area.EnemySpawns, area.StartTileX, area.StartTileZ),
@@ -34,7 +34,7 @@ func NewGameState(area AreaDefinition) GameState {
 }
 
 func ResetGameState(g *GameState) {
-	*g = NewGameState(AreaByID(g.AreaID))
+	*g = NewGameState(g.Area)
 }
 
 func NewParty() []PartyMember {

@@ -7,8 +7,6 @@ type GameMap struct {
 	Materials MaterialSet
 }
 
-type AreaID int
-
 type MaterialSet int
 
 type EnemySpawn struct {
@@ -17,8 +15,11 @@ type EnemySpawn struct {
 	TileZ int
 }
 
+// AreaDefinition is the runtime form of a map. Built from a mapfile.MapFile
+// via AreaFromMapFile (see areas.go). Path is the source disk location and
+// is empty for unsaved maps the editor is still working on.
 type AreaDefinition struct {
-	ID           AreaID
+	Path         string
 	Name         string
 	Layout       []string
 	Materials    MaterialSet
@@ -55,7 +56,7 @@ type Animation struct {
 
 type GameState struct {
 	Map       GameMap
-	AreaID    AreaID
+	Area      AreaDefinition
 	Player    Player
 	Party     []PartyMember
 	Enemies   []Enemy

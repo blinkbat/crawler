@@ -334,17 +334,16 @@ func drawTargetChevron(camera rl.Camera3D, position rl.Vector3) {
 // out from the tip's vertical axis. `phase` offsets the rotation so two
 // markers on screen at once don't lock-step.
 //
-// Backface culling is disabled around the draw because we don't fuss over
-// per-face winding — the pyramid's faces should render visible from any
-// camera angle, and culling-driven invisibility is the same class of bug
-// that broke the pickpocket arrows.
+// Each face gets its own shade so the pyramid reads as a 3D solid instead
+// of a flat silhouette: top cap brightest (it's the "lit from above" face),
+// side faces walk a brighter→dimmer→brighter→dimmer pattern around the
+// pyramid so the spin gives a "rotating shaded crystal" feel. All faces
+// are wound CCW-from-outside so backface culling stays on — without that
+// the back faces overdraw the front and z-fight produced flicker.
 func drawSelectorPyramid(tip rl.Vector3, height, baseRadius float32, col rl.Color, phase float32) {
-	rl.DisableBackfaceCulling()
-	defer rl.EnableBackfaceCulling()
-
 	t := rl.GetTime()
-	yaw := t*1.4 + float64(phase)
-	bob := float32(math.Sin(t*math.Pi*1.4)) * 0.04
+	yaw := t*0.9 + float64(phase) // gentler spin than before
+	bob := float32(math.Sin(t*math.Pi*1.2)) * 0.04
 
 	tipP := rl.NewVector3(tip.X, tip.Y+bob, tip.Z)
 	baseY := tip.Y + height + bob
@@ -359,16 +358,45 @@ func drawSelectorPyramid(tip rl.Vector3, height, baseRadius float32, col rl.Colo
 		)
 	}
 
-	// Four side faces sweep from the tip out to each adjacent pair of base
-	// corners. Order doesn't matter for visibility (cull is off) but we go
-	// CCW-from-outside so any future per-face shading would behave.
+	// Per-face shading. Sides walk light→mid→dim→mid as you go around the
+	// base, and the cap is the brightest face. The pattern rotates with the
+	// pyramid (since the corners are recomputed from yaw each frame), so a
+	// fixed camera sees a rotating shaded solid rather than a flat blob.
+	sideShades := [4]float32{1.05, 0.85, 0.65, 0.85}
 	for i := 0; i < 4; i++ {
 		j := (i + 1) % 4
-		rl.DrawTriangle3D(tipP, corners[i], corners[j], col)
+		// Side face viewed from outside: tip at bottom, c[i] upper-left,
+		// c[i+1] upper-right relative to that view. tip → c[i+1] → c[i]
+		// is CCW from outside (front face for OpenGL with +Y up).
+		rl.DrawTriangle3D(tipP, corners[j], corners[i], shadeColor(col, sideShades[i]))
 	}
-	// Top cap (the square base) — two triangles.
-	rl.DrawTriangle3D(corners[0], corners[2], corners[1], col)
-	rl.DrawTriangle3D(corners[0], corners[3], corners[2], col)
+	// Top cap (square base, normal +Y). Corners go CCW around +Y when
+	// listed 0,1,2,3 (cos/sin sweep), so 0→1→2 and 0→2→3 are CCW from
+	// above — front faces.
+	capCol := shadeColor(col, 1.18)
+	rl.DrawTriangle3D(corners[0], corners[1], corners[2], capCol)
+	rl.DrawTriangle3D(corners[0], corners[2], corners[3], capCol)
+}
+
+// shadeColor multiplies a color's RGB by factor (clamped 0..255) while
+// preserving alpha. Used to derive shaded variants of a base tint without
+// authoring a new color per face.
+func shadeColor(c rl.Color, factor float32) rl.Color {
+	clamp := func(v float32) uint8 {
+		if v < 0 {
+			return 0
+		}
+		if v > 255 {
+			return 255
+		}
+		return uint8(v)
+	}
+	return rl.NewColor(
+		clamp(float32(c.R)*factor),
+		clamp(float32(c.G)*factor),
+		clamp(float32(c.B)*factor),
+		c.A,
+	)
 }
 
 func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {

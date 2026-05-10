@@ -1,3 +1,7 @@
+# Auditing
+
+When auditing OR recapping, always, ALWAYS present findings in a FLAT, NUMBERED list for easy discussion.
+
 # Crawler Codebase Map
 
 This is a Go/raylib dungeon crawler prototype. The runtime package is `internal/app`, with `main.go` only calling `app.Run()`.

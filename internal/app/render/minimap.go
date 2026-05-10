@@ -23,7 +23,7 @@ func drawMinimap(m core.GameMap, g core.GameState, assets Resources) {
 	panelH := gridSize + 16 + header
 
 	drawCard(pad, pad, panelW, panelH, surfacePrimary, borderSoft, borderStrong)
-	areaName := core.AreaByID(g.AreaID).Name
+	areaName := g.Area.Name
 	drawHeading(assets.hudFont, "AREA", pad+14, pad+10, borderStrong)
 	if areaName != "" {
 		drawTextWithShadow(assets.hudFont, areaName, float32(pad+74), float32(pad+10), 14, textMuted)

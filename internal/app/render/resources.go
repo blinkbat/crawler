@@ -165,6 +165,10 @@ func loadWorldMaterial(wallPixels, floorPixels []color.RGBA, shader rl.Shader) w
 	}
 }
 
+// Font returns the HUD font, used by scenes outside the main render package
+// (title screen, editor) for consistent typography.
+func (r Resources) Font() rl.Font { return r.hudFont }
+
 func (r Resources) worldMaterial(material core.MaterialSet) worldMaterialResources {
 	if resources, ok := r.materials[material]; ok {
 		return resources
