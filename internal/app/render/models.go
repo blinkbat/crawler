@@ -2,6 +2,7 @@ package render
 
 import (
 	"image/color"
+	"math"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -37,6 +38,29 @@ func partRotationAxis(p treePart) rl.Vector3 {
 		return rl.NewVector3(0, 1, 0)
 	}
 	return p.rotationAxis
+}
+
+// isVerticalAxis reports whether a part rotates around the world-up axis
+// (either explicitly or via the zero-vector default). Used by the prop /
+// tree draw paths to decide whether the prop's overall yaw can be folded
+// into the part's own rotation by simple addition (only valid when the
+// two rotations share an axis).
+func isVerticalAxis(axis rl.Vector3) bool {
+	if axis.X == 0 && axis.Y == 0 && axis.Z == 0 {
+		return true
+	}
+	return axis.X == 0 && axis.Z == 0 && axis.Y != 0
+}
+
+// rotateOffsetY scales an offset and rotates it around the world-up axis
+// by `yawDeg` degrees. Used to reorient a prop's parts around its own
+// vertical centerline when the whole prop is yawed.
+func rotateOffsetY(offset rl.Vector3, scale, yawDeg float32) rl.Vector3 {
+	scaled := rl.NewVector3(offset.X*scale, offset.Y*scale, offset.Z*scale)
+	if yawDeg == 0 {
+		return scaled
+	}
+	return rl.Vector3RotateByAxisAngle(scaled, rl.NewVector3(0, 1, 0), yawDeg*float32(math.Pi)/180)
 }
 
 const (
@@ -83,18 +107,28 @@ func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 	}
 }
 
-func (t treeModel) draw(center rl.Vector3, scale float32) {
+// draw renders the tree at center, scaled, with `yaw` degrees of rotation
+// around the vertical axis through the tree's trunk. Yaw rotates each part's
+// offset around the prop center so the whole canopy/lump arrangement
+// reorients with the prop. Parts whose own rotationAxis is the default
+// vertical also have yaw added to their part.rotation so their geometry
+// (cylinders, etc.) spins in step. Tilted-axis parts can't compose cleanly
+// with yaw without matrix math, so they keep their tilted spin and only
+// the offset rotates — visually fine because most tilted parts in the
+// codebase are sphere-ish lumps that read symmetrically anyway.
+func (t treeModel) draw(center rl.Vector3, scale, yaw float32) {
 	if scale <= 0 {
 		scale = 1
 	}
 	for _, part := range t.parts {
-		position := rl.NewVector3(
-			center.X+part.offset.X*scale,
-			center.Y+part.offset.Y*scale,
-			center.Z+part.offset.Z*scale,
-		)
+		offset := rotateOffsetY(part.offset, scale, yaw)
+		position := rl.NewVector3(center.X+offset.X, center.Y+offset.Y, center.Z+offset.Z)
 		drawScale := rl.NewVector3(part.scale.X*scale, part.scale.Y*scale, part.scale.Z*scale)
-		rl.DrawModelEx(t.models[part.modelIdx], position, partRotationAxis(part), part.rotation, drawScale, part.tint)
+		rotation := part.rotation
+		if isVerticalAxis(part.rotationAxis) {
+			rotation += yaw
+		}
+		rl.DrawModelEx(t.models[part.modelIdx], position, partRotationAxis(part), rotation, drawScale, part.tint)
 	}
 }
 
@@ -113,18 +147,21 @@ type propModel struct {
 	parts  []treePart // reuse the same per-part record (modelIdx, offset, scale, tint)
 }
 
-func (p propModel) draw(center rl.Vector3, scale float32) {
+// draw renders the prop with a uniform scale and a yaw rotation around its
+// vertical axis. See treeModel.draw for the rationale on yaw composition.
+func (p propModel) draw(center rl.Vector3, scale, yaw float32) {
 	if scale <= 0 {
 		scale = 1
 	}
 	for _, part := range p.parts {
-		position := rl.NewVector3(
-			center.X+part.offset.X*scale,
-			center.Y+part.offset.Y*scale,
-			center.Z+part.offset.Z*scale,
-		)
+		offset := rotateOffsetY(part.offset, scale, yaw)
+		position := rl.NewVector3(center.X+offset.X, center.Y+offset.Y, center.Z+offset.Z)
 		drawScale := rl.NewVector3(part.scale.X*scale, part.scale.Y*scale, part.scale.Z*scale)
-		rl.DrawModelEx(p.models[part.modelIdx], position, partRotationAxis(part), part.rotation, drawScale, part.tint)
+		rotation := part.rotation
+		if isVerticalAxis(part.rotationAxis) {
+			rotation += yaw
+		}
+		rl.DrawModelEx(p.models[part.modelIdx], position, partRotationAxis(part), rotation, drawScale, part.tint)
 	}
 }
 
@@ -132,15 +169,19 @@ func (p propModel) draw(center rl.Vector3, scale float32) {
 // model's vertical extent independently from its footprint. Used by
 // scattered small-rock decorations to produce low, walkable-looking pebbles
 // from the same boulder mesh set.
-func (p propModel) drawXYZ(center rl.Vector3, scale rl.Vector3) {
+func (p propModel) drawXYZ(center rl.Vector3, scale rl.Vector3, yaw float32) {
 	for _, part := range p.parts {
-		position := rl.NewVector3(
-			center.X+part.offset.X*scale.X,
-			center.Y+part.offset.Y*scale.Y,
-			center.Z+part.offset.Z*scale.Z,
-		)
+		offset := rl.NewVector3(part.offset.X*scale.X, part.offset.Y*scale.Y, part.offset.Z*scale.Z)
+		if yaw != 0 {
+			offset = rl.Vector3RotateByAxisAngle(offset, rl.NewVector3(0, 1, 0), yaw*float32(math.Pi)/180)
+		}
+		position := rl.NewVector3(center.X+offset.X, center.Y+offset.Y, center.Z+offset.Z)
 		drawScale := rl.NewVector3(part.scale.X*scale.X, part.scale.Y*scale.Y, part.scale.Z*scale.Z)
-		rl.DrawModelEx(p.models[part.modelIdx], position, partRotationAxis(part), part.rotation, drawScale, part.tint)
+		rotation := part.rotation
+		if isVerticalAxis(part.rotationAxis) {
+			rotation += yaw
+		}
+		rl.DrawModelEx(p.models[part.modelIdx], position, partRotationAxis(part), rotation, drawScale, part.tint)
 	}
 }
 

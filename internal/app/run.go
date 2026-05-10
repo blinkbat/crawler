@@ -122,9 +122,9 @@ func updateEditorScene(state *appState, dt float32) {
 func drawAdventureScene(game core.GameState, assets render.Resources) {
 	camera := render.Camera(game.Player)
 	rl.ClearBackground(rl.NewColor(87, 172, 244, 255))
-	render.DrawSkyBackground(assets, game.Map)
+	render.DrawSkyBackground(assets, game)
 	rl.BeginMode3D(camera)
-	render.DrawWorld(camera, game.Map, assets)
+	render.DrawWorld(camera, game, assets)
 	render.DrawEnemies(camera, game, assets)
 	render.DrawPartySprites(camera, game, assets)
 	rl.EndMode3D()

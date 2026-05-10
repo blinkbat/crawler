@@ -139,6 +139,7 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 
 	p.TileX = targetX
 	p.TileZ = targetZ
+	g.StepCount++
 	p.Anim = core.Animation{
 		Kind:     core.AnimStep,
 		Duration: core.StepDuration,

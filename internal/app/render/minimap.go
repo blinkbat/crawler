@@ -1,6 +1,7 @@
 package render
 
 import (
+	"fmt"
 	"image/color"
 
 	"crawler/internal/app/core"
@@ -13,6 +14,7 @@ func drawMinimap(m core.GameMap, g core.GameState, assets Resources) {
 		viewCells = int32(13)
 		pad       = int32(20)
 		header    = int32(34)
+		footer    = int32(28) // time-of-day strip beneath the grid
 	)
 	p := g.Player
 	half := int(viewCells / 2)
@@ -20,7 +22,7 @@ func drawMinimap(m core.GameMap, g core.GameState, assets Resources) {
 	startZ := p.TileZ - half
 	gridSize := viewCells * cell
 	panelW := gridSize + 16
-	panelH := gridSize + 16 + header
+	panelH := gridSize + 16 + header + footer
 
 	drawCard(pad, pad, panelW, panelH, surfacePrimary, borderSoft, borderStrong)
 	areaName := g.Area.Name
@@ -31,6 +33,8 @@ func drawMinimap(m core.GameMap, g core.GameState, assets Resources) {
 
 	gridX := pad + 8
 	gridY := pad + 8 + header
+	footerY := gridY + gridSize + 6
+	drawMinimapTimeOfDay(assets.hudFont, g.StepCount, pad+14, footerY, panelW-28)
 
 	for localZ := int32(0); localZ < viewCells; localZ++ {
 		for localX := int32(0); localX < viewCells; localX++ {
@@ -92,6 +96,48 @@ func minimapTileColor(material core.MaterialSet, tile byte) color.RGBA {
 		}
 		return rl.NewColor(60, 121, 54, 235)
 	}
+}
+
+// drawMinimapTimeOfDay paints the day/night cycle indicator under the
+// minimap grid: phase name on the left, raw step counter on the right,
+// and a thin progress bar showing how far through the current phase the
+// player is. The cycle is 150 steps total (6 × 25), so the bar wraps
+// every full day.
+func drawMinimapTimeOfDay(font rl.Font, stepCount int, x, y, width int32) {
+	phase, progress := core.PhaseAtStep(stepCount)
+	name := core.PhaseName(phase)
+	// Line 1: "DAWN  step 12 / 150" (left-aligned phase, right-aligned counter).
+	drawTextWithShadow(font, name, float32(x), float32(y), 14, textPrimary)
+	counter := fmt.Sprintf("step %d / %d", stepCount%core.StepsPerCycle, core.StepsPerCycle)
+	measure := rl.MeasureTextEx(font, counter, 12, 1)
+	drawTextWithShadow(font, counter, float32(x)+float32(width)-measure.X, float32(y)+1, 12, textHint)
+	// Line 2: thin track, with the phase highlighted as a 1/6 segment that
+	// fills as the player walks through it.
+	trackY := y + 18
+	trackH := int32(4)
+	trackW := width
+	trackCol := rl.NewColor(8, 12, 22, 200)
+	rl.DrawRectangle(x, trackY, trackW, trackH, trackCol)
+	segW := trackW / int32(len(phaseColors))
+	// Past phases: solid color. Current phase: filled by progress.
+	for i := 0; i < int(phase); i++ {
+		rl.DrawRectangle(x+int32(i)*segW, trackY, segW-1, trackH, phaseColors[i])
+	}
+	curW := int32(float32(segW) * progress)
+	if curW > 0 {
+		rl.DrawRectangle(x+int32(phase)*segW, trackY, curW, trackH, phaseColors[phase])
+	}
+}
+
+// phaseColors mirrors the rough sky tint of each lighting phase so the HUD
+// strip itself reads as a tiny day at a glance.
+var phaseColors = [6]rl.Color{
+	rl.NewColor(232, 168, 152, 255), // dawn — rose
+	rl.NewColor(220, 224, 200, 255), // morning — pale gold
+	rl.NewColor(190, 220, 244, 255), // afternoon — sky
+	rl.NewColor(232, 152, 96, 255),  // dusk — orange
+	rl.NewColor(96, 110, 180, 255),  // evening — indigo
+	rl.NewColor(40, 56, 110, 255),   // midnight — deep blue
 }
 
 func drawMinimapArrow(center rl.Vector2, facing int) {

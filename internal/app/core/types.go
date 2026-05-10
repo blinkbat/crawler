@@ -57,6 +57,11 @@ type Animation struct {
 type GameState struct {
 	Map       GameMap
 	Area      AreaDefinition
+	// StepCount is the total number of player tile-steps taken in this
+	// session. Drives the day/night cycle: every 150 steps is one full
+	// loop through the six time-of-day phases. Incremented by the
+	// explore package when a step actually lands (not when blocked).
+	StepCount int
 	Player    Player
 	Party     []PartyMember
 	Enemies   []Enemy

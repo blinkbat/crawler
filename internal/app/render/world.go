@@ -32,7 +32,8 @@ func Camera(p core.Player) rl.Camera3D {
 	)
 }
 
-func DrawSkyBackground(assets Resources, m core.GameMap) {
+func DrawSkyBackground(assets Resources, g core.GameState) {
+	m := g.Map
 	texW := float32(assets.skyTexture.Width)
 	texH := float32(assets.skyTexture.Height)
 	screenW := float32(rl.GetScreenWidth())
@@ -58,9 +59,15 @@ func DrawSkyBackground(assets Resources, m core.GameMap) {
 	}
 	source := rl.NewRectangle(srcX, srcY, srcW, srcH)
 	dest := rl.NewRectangle(0, 0, screenW, screenH)
+	// Dungeon sky stays a fixed dim — the player isn't supposed to see
+	// open sky in there anyway, so the day/night cycle doesn't apply.
+	// Other materials sample the time profile so the backdrop tracks the
+	// same arc as the in-world lighting.
 	tint := rl.White
 	if m.Materials == core.MaterialDungeon {
 		tint = rl.NewColor(54, 56, 70, 255)
+	} else {
+		tint = skyColor(timeProfileAt(g.StepCount).SkyTint)
 	}
 	rl.DrawTexturePro(assets.skyTexture, source, dest, rl.NewVector2(0, 0), 0, tint)
 }
@@ -73,10 +80,11 @@ func DrawSkyBackground(assets Resources, m core.GameMap) {
 // visible against the fog's gentle tail (which clamps at 85% saturation).
 const behindCullSlack = float32(-2.5)
 
-func DrawWorld(camera rl.Camera3D, m core.GameMap, assets Resources) {
+func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
+	m := g.Map
 	material := assets.worldMaterial(m.Materials)
 	tree := assets.tree
-	profile := lightingFor(m.Materials)
+	profile := applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(g.StepCount))
 	assets.lighting.applyUniforms(camera, profile)
 
 	camPos := camera.Position
@@ -97,21 +105,22 @@ func DrawWorld(camera rl.Camera3D, m core.GameMap, assets Resources) {
 			tile := row[x]
 			center := rl.NewVector3(cx, 0, cz)
 			if tile == core.TileRock {
-				rl.DrawModel(material.wallModel, rl.NewVector3(cx, core.WallHeight/2, cz), 1, rl.White)
+				drawTileCube(material.wallModel, cx, core.WallHeight/2, cz, tileYawDeg(x, z))
 				continue
 			}
 			// Floor under everything that isn't a wall. Pick a variant by
 			// hash if this material has alt floors (field's grass/dirt/dark).
 			drawFloorTile(material, x, z, cx, cz)
+			propYaw := propYawDeg(x, z)
 			switch tile {
 			case core.TileTree:
-				tree.draw(center, 1.0)
+				tree.draw(center, 1.0, propYaw)
 			case core.TileTreeXL:
-				tree.draw(center, 1.75)
+				tree.draw(center, 1.75, propYaw)
 			case core.TileRockLarge:
-				assets.rockProp.draw(center, 1.0)
+				assets.rockProp.draw(center, 1.0, propYaw)
 			case core.TileBushLarge:
-				assets.bushProp.draw(center, 1.3)
+				assets.bushProp.draw(center, 1.3, propYaw)
 			case core.TileFloor:
 				drawFloorDecoration(assets, x, z, cx, cz)
 			}
@@ -123,19 +132,62 @@ func DrawWorld(camera rl.Camera3D, m core.GameMap, assets Resources) {
 // drawFloorTile picks a floor variant for the given tile and draws it. Tiles
 // without alt variants (dungeon) get the base floor.
 func drawFloorTile(material worldMaterialResources, x, z int, cx, cz float32) {
-	pos := rl.NewVector3(cx, -0.03, cz)
+	yaw := tileYawDeg(x, z)
 	if !material.hasFloorVariant {
-		rl.DrawModel(material.floorModel, pos, 1, rl.White)
+		drawTileCube(material.floorModel, cx, -0.03, cz, yaw)
 		return
 	}
 	switch floorVariantHash(x, z) {
 	case 1:
-		rl.DrawModel(material.floorDirtModel, pos, 1, rl.White)
+		drawTileCube(material.floorDirtModel, cx, -0.03, cz, yaw)
 	case 2:
-		rl.DrawModel(material.floorDarkModel, pos, 1, rl.White)
+		drawTileCube(material.floorDarkModel, cx, -0.03, cz, yaw)
 	default:
-		rl.DrawModel(material.floorModel, pos, 1, rl.White)
+		drawTileCube(material.floorModel, cx, -0.03, cz, yaw)
 	}
+}
+
+// drawTileCube draws a square-footprint cube model at (cx,cy,cz) with a yaw
+// rotation around its vertical axis. Used for floor and wall tiles so each
+// instance can spin its texture by 90° steps without changing the cube's
+// silhouette (the x and z extents are equal). Breaks up obvious tiling
+// patterns in the texture without needing per-tile mesh variants.
+func drawTileCube(model rl.Model, cx, cy, cz, yawDeg float32) {
+	rl.DrawModelEx(model,
+		rl.NewVector3(cx, cy, cz),
+		rl.NewVector3(0, 1, 0),
+		yawDeg,
+		rl.NewVector3(1, 1, 1),
+		rl.White)
+}
+
+// tileHash is the per-tile uint32 mixer used by orientation/variant
+// selectors. Stable for a given (x,z) so the same tile always reads the
+// same way between frames. xorshift-style mix with widely-spaced primes
+// to keep adjacent tiles uncorrelated.
+func tileHash(x, z int) uint32 {
+	h := uint32(x*374761393) ^ uint32(z*668265263)
+	h ^= h >> 16
+	h *= 2246822519
+	h ^= h >> 13
+	h *= 3266489917
+	h ^= h >> 16
+	return h
+}
+
+// tileYawDeg returns 0/90/180/270 for floor and wall tiles. Square-footprint
+// cubes look identical at any of those rotations; what changes is the
+// texture, which kills the visible tiling pattern from same-orientation
+// repeats.
+func tileYawDeg(x, z int) float32 {
+	return float32(tileHash(x, z)&0x03) * 90
+}
+
+// propYawDeg returns a per-tile yaw in 30° steps, in [0, 360). Stepped
+// rather than fully continuous so each prop reads as having a deliberate
+// facing instead of looking like jittered noise.
+func propYawDeg(x, z int) float32 {
+	return float32(((tileHash(x, z) >> 3) % 12) * 30)
 }
 
 // floorVariantHash picks 0 (grass) / 1 (dirt) / 2 (dark grass) for a given
@@ -182,17 +234,21 @@ func drawFloorDecoration(assets Resources, x, z int, cx, cz float32) {
 	offZ := float32(int8(h>>24)) / 230
 	pos := rl.NewVector3(cx+offX, 0, cz+offZ)
 
+	// Reuse the orientation hash so floor decorations also pick up a stable
+	// yaw — keeps clusters of small props from looking aligned when a few
+	// land in the same neighborhood.
+	decoYaw := float32(((h >> 12) % 12) * 30)
 	switch kind {
 	case 0, 1, 2, 3: // pebble cluster — see drawPebbleCluster comment
 		drawPebbleCluster(assets, cx, cz, h)
 	case 4: // small bush
-		assets.bushProp.draw(pos, 0.75)
+		assets.bushProp.draw(pos, 0.75, decoYaw)
 	case 5: // tiny mushroom
-		assets.mushroomProp.draw(pos, 0.65)
+		assets.mushroomProp.draw(pos, 0.65, decoYaw)
 	case 6: // small mushroom
-		assets.mushroomProp.draw(pos, 1.05)
+		assets.mushroomProp.draw(pos, 1.05, decoYaw)
 	case 7: // small bush variant
-		assets.bushProp.draw(pos, 0.6)
+		assets.bushProp.draw(pos, 0.6, decoYaw)
 	}
 }
 
