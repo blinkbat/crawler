@@ -12,29 +12,34 @@ func NewPlayer(tileX, tileZ, facing int) Player {
 }
 
 func NewGameState(area AreaDefinition) GameState {
-	m := NewGameMap(area.Walls, area.Floor, area.Decor, area.Props, area.Materials)
 	g := GameState{
-		Map:     m,
-		Area:    area,
-		Player:  NewPlayer(area.StartTileX, area.StartTileZ, area.StartFacing),
-		Party:   NewParty(),
-		Enemies: placeEnemies(m, area.EnemySpawns, area.StartTileX, area.StartTileZ),
+		Area:   area,
+		Player: NewPlayer(area.StartTileX, area.StartTileZ, area.StartFacing),
+		Party:  NewParty(),
+		Packs:  placePacks(area),
 		Battle: Battle{
-			EnemyIndex:   -1,
-			EnemyGroup:   nil,
-			CurrentParty: 0,
-			ActionMode:   ActionMenu,
-			PendingSkill: SkillNone,
-			PartyTarget:  0,
-			Phase:        BattleNone,
-			Message:      area.QuietMessage,
+			ActivePack:        -1,
+			EnemyIndex:        -1,
+			CurrentParty:      0,
+			ActionMode:        ActionMenu,
+			PendingSkill:      SkillNone,
+			PartyTarget:       0,
+			EnemyAttackCursor: -1,
+			Phase:             BattleNone,
+			Message:           area.QuietMessage,
 		},
 	}
 	return g
 }
 
+// ResetGameState rebuilds the world for the same area — used on loss recovery
+// (Press Enter after a wipe) and on the in-menu Restart action. Inventory is
+// preserved across the reset so stolen loot survives a recoverable wipe;
+// only the field/battle state is rewound. Use NewGameState for a full reset.
 func ResetGameState(g *GameState) {
+	saved := g.Inventory
 	*g = NewGameState(g.Area)
+	g.Inventory = saved
 }
 
 func NewParty() []PartyMember {

@@ -57,13 +57,20 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	if !ok {
 		return AreaDefinition{}, fmt.Errorf("unknown facing %q", mf.StartFace)
 	}
-	spawns := make([]EnemySpawn, 0, len(mf.Enemies))
-	for _, e := range mf.Enemies {
-		kind, ok := EnemyKindFromName(e.Kind)
-		if !ok {
-			return AreaDefinition{}, fmt.Errorf("unknown enemy kind %q", e.Kind)
+	spawns := make([]PackSpawn, 0, len(mf.Packs))
+	for _, p := range mf.Packs {
+		if len(p.Members) == 0 {
+			return AreaDefinition{}, fmt.Errorf("pack at (%d,%d) has no members", p.X, p.Z)
 		}
-		spawns = append(spawns, EnemySpawn{Kind: kind, TileX: e.X, TileZ: e.Z})
+		members := make([]EnemyKind, 0, len(p.Members))
+		for _, name := range p.Members {
+			kind, ok := EnemyKindFromName(name)
+			if !ok {
+				return AreaDefinition{}, fmt.Errorf("unknown enemy kind %q", name)
+			}
+			members = append(members, kind)
+		}
+		spawns = append(spawns, PackSpawn{TileX: p.X, TileZ: p.Z, Members: members})
 	}
 	return AreaDefinition{
 		Path:         path,
@@ -78,7 +85,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		StartTileX:   mf.StartX,
 		StartTileZ:   mf.StartZ,
 		StartFacing:  face,
-		EnemySpawns:  spawns,
+		PackSpawns:   spawns,
 		QuietMessage: mf.Quiet,
 	}, nil
 }
@@ -86,12 +93,16 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 // MapFileFromArea is the reverse converter — used by the editor to write the
 // current in-memory area back to disk.
 func MapFileFromArea(a AreaDefinition) mapfile.MapFile {
-	enemies := make([]mapfile.MapEnemy, 0, len(a.EnemySpawns))
-	for _, s := range a.EnemySpawns {
-		enemies = append(enemies, mapfile.MapEnemy{
-			Kind: EnemyKindName(s.Kind),
-			X:    s.TileX,
-			Z:    s.TileZ,
+	packs := make([]mapfile.MapPack, 0, len(a.PackSpawns))
+	for _, s := range a.PackSpawns {
+		names := make([]string, 0, len(s.Members))
+		for _, kind := range s.Members {
+			names = append(names, EnemyKindName(kind))
+		}
+		packs = append(packs, mapfile.MapPack{
+			Members: names,
+			X:       s.TileX,
+			Z:       s.TileZ,
 		})
 	}
 	return mapfile.MapFile{
@@ -107,7 +118,7 @@ func MapFileFromArea(a AreaDefinition) mapfile.MapFile {
 		Floor:     append([]string(nil), a.Floor...),
 		Decor:     append([]string(nil), a.Decor...),
 		Props:     append([]string(nil), a.Props...),
-		Enemies:   enemies,
+		Packs:     packs,
 	}
 }
 
@@ -169,6 +180,8 @@ func EnemyKindName(k EnemyKind) string {
 		return "rat"
 	case EnemyBat:
 		return "bat"
+	case EnemyDiseasedRat:
+		return "diseased_rat"
 	}
 	return "rat"
 }
@@ -179,6 +192,8 @@ func EnemyKindFromName(s string) (EnemyKind, bool) {
 		return EnemyRat, true
 	case "bat":
 		return EnemyBat, true
+	case "diseased_rat", "diseasedrat":
+		return EnemyDiseasedRat, true
 	}
 	return 0, false
 }

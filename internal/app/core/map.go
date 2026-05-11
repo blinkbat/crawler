@@ -9,7 +9,7 @@ import (
 
 // Walls layer.
 const (
-	TileFloor = '.' // historical name; in the layered format this means "open"
+	tileFloor = '.' // package-private: documents "open" without leaking an unused export
 	TileRock  = '#' // wall blocker
 )
 
@@ -40,49 +40,42 @@ const (
 	TileBushLarge = 'B' // dense bush, blocks
 )
 
-// NewGameMap composes a layered runtime map from four parallel grids.
-// Width/height are derived from the layers; callers should validate they
-// match before calling. Materials selects the texture/lighting set.
-func NewGameMap(walls, floor, decor, props []string, materials MaterialSet) GameMap {
-	height := len(walls)
-	width := 0
-	if height > 0 {
-		width = len(walls[0])
-	}
-	return GameMap{
-		Width:     width,
-		Height:    height,
-		Walls:     walls,
-		Floor:     floor,
-		Decor:     decor,
-		Props:     props,
-		Materials: materials,
-	}
-}
-
-func placeEnemies(m GameMap, spawns []EnemySpawn, startX, startZ int) []Enemy {
-	enemies := make([]Enemy, 0, len(spawns))
-	occupied := map[[2]int]bool{{startX, startZ}: true}
-	for _, spawn := range spawns {
-		x, z := nearestOpenTile(m, spawn.TileX, spawn.TileZ, occupied)
+// placePacks converts the area's pack-spawn placeholders into runtime
+// Packs, snapping each pack's tile to the nearest open square so the
+// author doesn't have to perfect placement against geometry. The player's
+// start tile is seeded as occupied so the snapping never lands on it.
+// Empty pack rosters are skipped — a pack with zero members has no field
+// representative to render or engage.
+func placePacks(a AreaDefinition) []Pack {
+	packs := make([]Pack, 0, len(a.PackSpawns))
+	occupied := map[[2]int]bool{{a.StartTileX, a.StartTileZ}: true}
+	for _, spawn := range a.PackSpawns {
+		if len(spawn.Members) == 0 {
+			continue
+		}
+		x, z := nearestOpenTile(a, spawn.TileX, spawn.TileZ, occupied)
 		if x < 0 {
 			continue
 		}
 		occupied[[2]int{x, z}] = true
-		enemies = append(enemies, NewEnemy(spawn.Kind, x, z))
+		members := make([]Enemy, 0, len(spawn.Members))
+		for _, kind := range spawn.Members {
+			members = append(members, NewEnemy(kind))
+		}
+		packs = append(packs, Pack{TileX: x, TileZ: z, Members: members})
 	}
-	return enemies
+	return packs
 }
 
-func nearestOpenTile(m GameMap, wantX, wantZ int, occupied map[[2]int]bool) (int, int) {
-	if m.FloorAt(wantX, wantZ) && !occupied[[2]int{wantX, wantZ}] {
+func nearestOpenTile(a AreaDefinition, wantX, wantZ int, occupied map[[2]int]bool) (int, int) {
+	if a.FloorAt(wantX, wantZ) && !occupied[[2]int{wantX, wantZ}] {
 		return wantX, wantZ
 	}
 	bestX, bestZ := -1, -1
 	bestDist := math.MaxInt
-	for z := 0; z < m.Height; z++ {
-		for x := 0; x < m.Width; x++ {
-			if !m.FloorAt(x, z) || occupied[[2]int{x, z}] {
+	for z := 0; z < a.Height; z++ {
+		for x := 0; x < a.Width; x++ {
+			if !a.FloorAt(x, z) || occupied[[2]int{x, z}] {
 				continue
 			}
 			dist := AbsInt(x-wantX) + AbsInt(z-wantZ)
@@ -95,80 +88,58 @@ func nearestOpenTile(m GameMap, wantX, wantZ int, occupied map[[2]int]bool) (int
 	return bestX, bestZ
 }
 
-// WallAt returns true if the cell holds a wall in the walls layer.
-func (m GameMap) WallAt(x, z int) bool {
-	if !m.inBounds(x, z) {
+// WallAt returns true if the cell holds a wall in the walls layer. Out-of-
+// bounds reads as a wall so callers don't have to range-check first.
+func (a AreaDefinition) WallAt(x, z int) bool {
+	if !a.InBounds(x, z) {
 		return true
 	}
-	return m.Walls[z][x] == TileRock
-}
-
-// PropAt returns the prop character at the cell ('.' for empty).
-func (m GameMap) PropAt(x, z int) byte {
-	if !m.inBounds(x, z) {
-		return '.'
-	}
-	return m.Props[z][x]
-}
-
-// FloorVariantAt returns the floor character (auto / variant). Wall cells
-// still have a floor underneath conceptually — it's just not drawn.
-func (m GameMap) FloorVariantAt(x, z int) byte {
-	if !m.inBounds(x, z) {
-		return FloorAuto
-	}
-	return m.Floor[z][x]
-}
-
-// DecorAt returns the decor character (auto / explicit / force-empty).
-func (m GameMap) DecorAt(x, z int) byte {
-	if !m.inBounds(x, z) {
-		return DecorAuto
-	}
-	return m.Decor[z][x]
+	return a.Walls[z][x] == TileRock
 }
 
 // TileAt returns a "compositing" character for code that just wants to
 // know what's most-significantly at a cell — walls win over props win
 // over open. Used by the minimap and any callers that haven't switched
 // to explicit per-layer queries yet.
-func (m GameMap) TileAt(x, z int) byte {
-	if !m.inBounds(x, z) {
+func (a AreaDefinition) TileAt(x, z int) byte {
+	if !a.InBounds(x, z) {
 		return TileRock
 	}
-	if m.Walls[z][x] == TileRock {
+	if a.Walls[z][x] == TileRock {
 		return TileRock
 	}
-	if p := m.Props[z][x]; isPropChar(p) {
+	if p := a.Props[z][x]; IsPropChar(p) {
 		return p
 	}
-	return TileFloor
+	return tileFloor
 }
 
 // BlockedAt reports whether movement into this cell is impossible.
 // Either the walls layer has a wall, or the props layer holds a blocker.
-func (m GameMap) BlockedAt(x, z int) bool {
-	if !m.inBounds(x, z) {
+func (a AreaDefinition) BlockedAt(x, z int) bool {
+	if !a.InBounds(x, z) {
 		return true
 	}
-	if m.Walls[z][x] == TileRock {
+	if a.Walls[z][x] == TileRock {
 		return true
 	}
-	return isPropChar(m.Props[z][x])
+	return IsPropChar(a.Props[z][x])
 }
 
 // FloorAt is the inverse of BlockedAt — true when the cell is walkable.
-func (m GameMap) FloorAt(x, z int) bool {
-	return !m.BlockedAt(x, z)
+func (a AreaDefinition) FloorAt(x, z int) bool {
+	return !a.BlockedAt(x, z)
 }
 
-func (m GameMap) inBounds(x, z int) bool {
-	return z >= 0 && z < m.Height && x >= 0 && x < m.Width
+// InBounds reports whether the (x, z) coordinate sits inside the area's
+// declared dimensions.
+func (a AreaDefinition) InBounds(x, z int) bool {
+	return z >= 0 && z < a.Height && x >= 0 && x < a.Width
 }
 
-// isPropChar returns true if c names a known blocking prop. Open-prop
+// IsPropChar returns true if c names a known blocking prop. Open-prop
 // cells use '.'; future props (chests, doors) get added here.
-func isPropChar(c byte) bool {
+func IsPropChar(c byte) bool {
 	switch c {
 	case TileTree, TileTreeXL, TileRockLarge, TileBushLarge:
 		return true

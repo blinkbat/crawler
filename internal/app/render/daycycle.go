@@ -28,13 +28,15 @@ type timeProfile struct {
 var timeProfiles = [6]timeProfile{
 	// Dawn — cool low light with a warm horizon. Sun is rising, so the
 	// directional component is dim and warm-tinted; ambient still carries
-	// the cool of night.
+	// the cool of night. Early dawn is intentionally a notch darker than
+	// the previous tuning so the transition out of midnight still reads
+	// as "barely-lit pre-sunrise" before brightening into morning.
 	{
-		SunColor:       rl.NewVector3(0.95, 0.62, 0.52),
-		AmbientColor:   rl.NewVector3(0.40, 0.36, 0.46),
-		FogColor:       rl.NewVector3(0.78, 0.62, 0.58),
-		ShadowStrength: 0.42,
-		SkyTint:        rl.NewVector3(1.05, 0.78, 0.72),
+		SunColor:       rl.NewVector3(0.72, 0.46, 0.40),
+		AmbientColor:   rl.NewVector3(0.28, 0.26, 0.36),
+		FogColor:       rl.NewVector3(0.58, 0.46, 0.46),
+		ShadowStrength: 0.52,
+		SkyTint:        rl.NewVector3(0.78, 0.58, 0.56),
 	},
 	// Morning — bright, slightly warm. Closest to a "default" daylight
 	// look; the area's base profile (which was tuned originally) shows

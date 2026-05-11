@@ -33,7 +33,7 @@ props:
 .....
 enemies:
 rat 2 1
-bat 3 2
+bat,rat 3 2
 `
 
 func TestParseSample(t *testing.T) {
@@ -66,8 +66,14 @@ func TestParseSample(t *testing.T) {
 	if mf.Props[1] != "..T.." {
 		t.Fatalf("props mismatch: %v", mf.Props)
 	}
-	if len(mf.Enemies) != 2 || mf.Enemies[0].Kind != "rat" || mf.Enemies[1].Kind != "bat" {
-		t.Fatalf("enemies mismatch: %+v", mf.Enemies)
+	if len(mf.Packs) != 2 {
+		t.Fatalf("pack count: %d, want 2 (%+v)", len(mf.Packs), mf.Packs)
+	}
+	if len(mf.Packs[0].Members) != 1 || mf.Packs[0].Members[0] != "rat" {
+		t.Fatalf("pack 0 mismatch: %+v", mf.Packs[0])
+	}
+	if len(mf.Packs[1].Members) != 2 || mf.Packs[1].Members[0] != "bat" || mf.Packs[1].Members[1] != "rat" {
+		t.Fatalf("pack 1 mismatch: %+v", mf.Packs[1])
 	}
 }
 
@@ -98,8 +104,19 @@ func TestRoundTrip(t *testing.T) {
 			t.Errorf("props row %d differs: %q vs %q", i, mf.Props[i], mf2.Props[i])
 		}
 	}
-	if len(mf.Enemies) != len(mf2.Enemies) {
-		t.Fatalf("enemy count: %d vs %d", len(mf.Enemies), len(mf2.Enemies))
+	if len(mf.Packs) != len(mf2.Packs) {
+		t.Fatalf("pack count: %d vs %d", len(mf.Packs), len(mf2.Packs))
+	}
+	for i := range mf.Packs {
+		a, b := mf.Packs[i], mf2.Packs[i]
+		if a.X != b.X || a.Z != b.Z || len(a.Members) != len(b.Members) {
+			t.Fatalf("pack %d shape differs: %+v vs %+v", i, a, b)
+		}
+		for j := range a.Members {
+			if a.Members[j] != b.Members[j] {
+				t.Fatalf("pack %d member %d differs: %q vs %q", i, j, a.Members[j], b.Members[j])
+			}
+		}
 	}
 }
 

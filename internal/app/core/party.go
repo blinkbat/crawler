@@ -14,7 +14,7 @@ type PartyClassDefinition struct {
 	Name  string
 	Stats Stats
 	MaxMP int
-	Skill int
+	Skill SkillID
 }
 
 // SkillKind tags how a skill scales off the actor's stats.
@@ -22,20 +22,21 @@ type PartyClassDefinition struct {
 //   Magic:   damage = INT + base
 //   Heal:    heal   = WIS + base
 //   Utility: no stat-scaled damage (Steal, Defend, etc.)
+type SkillKind int
+
 const (
-	SkillKindNone    = 0
-	SkillKindMelee   = 1
-	SkillKindMagic   = 2
-	SkillKindHeal    = 3
-	SkillKindUtility = 4
+	SkillKindMelee SkillKind = iota + 1
+	SkillKindMagic
+	SkillKindHeal
+	SkillKindUtility
 )
 
 type skillDefinition struct {
-	Skill      int
+	Skill      SkillID
 	Name       string
 	Cost       int
-	TargetMode int
-	Kind       int
+	TargetMode ActionMode
+	Kind       SkillKind
 	Effect     SkillEffect
 }
 
@@ -88,14 +89,14 @@ func partyClassInfo(class PartyClass) (PartyClassDefinition, bool) {
 	return PartyClassDefinition{}, false
 }
 
-func PartySkill(member PartyMember) int {
+func PartySkill(member PartyMember) SkillID {
 	if def, ok := partyClassInfo(member.Class); ok {
 		return def.Skill
 	}
 	return SkillNone
 }
 
-func skillInfo(skill int) (skillDefinition, bool) {
+func skillInfo(skill SkillID) (skillDefinition, bool) {
 	for _, def := range skillDefinitions {
 		if def.Skill == skill {
 			return def, true
@@ -104,48 +105,39 @@ func skillInfo(skill int) (skillDefinition, bool) {
 	return skillDefinition{}, false
 }
 
-func SkillName(skill int) string {
+func SkillName(skill SkillID) string {
 	if def, ok := skillInfo(skill); ok {
 		return def.Name
 	}
 	return "Skill"
 }
 
-func SkillCost(skill int) int {
+func SkillCost(skill SkillID) int {
 	if def, ok := skillInfo(skill); ok {
 		return def.Cost
 	}
 	return 0
 }
 
-func SkillTargetMode(skill int) int {
+func SkillTargetMode(skill SkillID) ActionMode {
 	if def, ok := skillInfo(skill); ok {
 		return def.TargetMode
 	}
 	return ActionMenu
 }
 
-func SkillEffectFor(skill int) SkillEffect {
+func SkillEffectFor(skill SkillID) SkillEffect {
 	if def, ok := skillInfo(skill); ok {
 		return def.Effect
 	}
 	return SkillEffect{}
 }
 
-// SkillKindOf returns the skill's Kind tag (Melee / Magic / Heal / Utility),
-// used by apply* functions to pick the right stat for damage/heal scaling.
-func SkillKindOf(skill int) int {
-	if def, ok := skillInfo(skill); ok {
-		return def.Kind
-	}
-	return SkillKindNone
-}
-
 // SkillDamage computes a skill's pre-quality damage from the actor's stats,
 // dispatching on the skill's Kind. Melee adds STR, Magic adds INT, anything
 // else returns just the skill base. Quality scaling (ScaleDamage) applies on
 // top at the call site.
-func SkillDamage(stats Stats, skill int) int {
+func SkillDamage(stats Stats, skill SkillID) int {
 	def, ok := skillInfo(skill)
 	if !ok {
 		return 0
@@ -163,7 +155,7 @@ func SkillDamage(stats Stats, skill int) int {
 // SkillHeal computes a skill's pre-quality heal from the actor's stats,
 // dispatching on Kind. Heal kind adds WIS; anything else returns just the
 // skill base. Quality scaling (ScaleHeal) applies on top at the call site.
-func SkillHeal(stats Stats, skill int) int {
+func SkillHeal(stats Stats, skill SkillID) int {
 	def, ok := skillInfo(skill)
 	if !ok {
 		return 0

@@ -7,11 +7,16 @@ import (
 	"crawler/internal/app/input"
 )
 
-func Start(g *core.GameState, enemyIndex int) {
-	group := nearbyBattleGroup(g.Map, g.Enemies, enemyIndex)
-	g.Battle.EnemyIndex = enemyIndex
-	g.Battle.EnemyGroup = group
+// Start engages the pack at packIndex. The entire pack roster becomes the
+// in-battle enemy list; no spatial clustering is involved.
+func Start(g *core.GameState, packIndex int) {
+	if packIndex < 0 || packIndex >= len(g.Packs) || !core.PackAlive(g.Packs[packIndex]) {
+		return
+	}
+	g.Battle.ActivePack = packIndex
+	g.Battle.EnemyIndex = core.NextLivingBattleEnemy(g)
 	g.Battle.PartyTarget = core.FirstLivingPartyMember(g.Party)
+	g.Battle.EnemyAttackCursor = -1
 	g.Battle.Splash = core.BattleSplashDuration
 	g.Battle.Log = nil
 	g.Battle.Timing = core.TimingState{}
@@ -32,12 +37,16 @@ func Update(g *core.GameState, dt float32) {
 	// can't fast-forward the timing bar past its window in one tick.
 	updateBattleEffects(g, dt)
 	tickQualityPopup(g, dt)
-	if g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(g.Enemies) {
-		g.Battle.Phase = core.BattleNone
+	// Early-exit paths route through leaveBattle so residual queue / timing
+	// / attacker state doesn't linger across frames. The message is empty so
+	// we don't overwrite the quiet-area message with a stale combat status.
+	members := core.BattleMembers(g)
+	if g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(members) {
+		leaveBattle(g, "")
 		return
 	}
 	if core.LivingBattleCount(g) == 0 && g.Battle.Phase != core.BattleWon {
-		g.Battle.Phase = core.BattleNone
+		leaveBattle(g, "")
 		return
 	}
 	if g.Battle.Phase != core.BattleWon && g.Battle.Phase != core.BattleLost && core.LivingPartyCount(g.Party) == 0 {
@@ -85,8 +94,9 @@ func beginNewRound(g *core.GameState) {
 		return
 	}
 	// Reset the per-round round-robin cursor for enemy attack targets so a
-	// fresh round starts attacking from party slot 0.
-	g.Battle.PartyTarget = -1
+	// fresh round starts attacking from party slot 0. PartyTarget is the
+	// player's heal/item ally selection and stays untouched here.
+	g.Battle.EnemyAttackCursor = -1
 	g.Battle.Queue = buildTurnQueue(g)
 	g.Battle.QueueCursor = 0
 	// Pre-bake the projection of the round AFTER this one so TurnForecast
@@ -100,15 +110,16 @@ func beginNewRound(g *core.GameState) {
 // SPD descending. Stable sort means tied speeds keep their original order
 // (party first, then enemies, in their slot order).
 func buildTurnQueue(g *core.GameState) []core.ActorRef {
-	queue := make([]core.ActorRef, 0, len(g.Party)+len(g.Battle.EnemyGroup))
+	members := core.BattleMembers(g)
+	queue := make([]core.ActorRef, 0, len(g.Party)+len(members))
 	for i, p := range g.Party {
 		if p.HP <= 0 {
 			continue
 		}
 		queue = append(queue, core.ActorRef{IsParty: true, Index: i})
 	}
-	for slot, enemyIdx := range g.Battle.EnemyGroup {
-		if !core.EnemyAlive(g.Enemies, enemyIdx) {
+	for slot, m := range members {
+		if !m.Alive {
 			continue
 		}
 		queue = append(queue, core.ActorRef{IsParty: false, Index: slot})
@@ -128,14 +139,11 @@ func actorSpeed(g *core.GameState, actor core.ActorRef) int {
 		}
 		return g.Party[actor.Index].Stats.SPD
 	}
-	if actor.Index < 0 || actor.Index >= len(g.Battle.EnemyGroup) {
+	m := core.BattleMemberAt(g, actor.Index)
+	if m == nil {
 		return 0
 	}
-	enemyIdx := g.Battle.EnemyGroup[actor.Index]
-	if enemyIdx < 0 || enemyIdx >= len(g.Enemies) {
-		return 0
-	}
-	return core.EnemyInfoFor(g.Enemies[enemyIdx]).Speed
+	return core.EnemyInfoFor(*m).Speed
 }
 
 // startActorTurn opens the turn of whatever actor sits at the queue cursor.
@@ -181,19 +189,23 @@ func isActorAlive(g *core.GameState, actor core.ActorRef) bool {
 	if actor.IsParty {
 		return actor.Index >= 0 && actor.Index < len(g.Party) && g.Party[actor.Index].HP > 0
 	}
-	if actor.Index < 0 || actor.Index >= len(g.Battle.EnemyGroup) {
-		return false
-	}
-	return core.EnemyAlive(g.Enemies, g.Battle.EnemyGroup[actor.Index])
+	return core.BattleEnemyAlive(g, actor.Index)
 }
 
 // finishActorTurn is the single hand-off used by every action's apply* path.
 // Replaces the old finishPartyAction (party→party / party→enemy phase flip).
 // Checks win/lose, fixes up EnemyIndex if the target died, advances the
 // queue cursor, and starts the next actor's turn.
+//
+// Poison tick runs HERE for party actors — right after their action lands,
+// before win/lose checks so a poison kill is honored if it drops the last
+// living member.
 func finishActorTurn(g *core.GameState) {
 	g.Battle.Timing = core.TimingState{}
 	g.Battle.TimingFlash = 0
+	if g.Battle.QueueCursor >= 0 && g.Battle.QueueCursor < len(g.Battle.Queue) {
+		tickPoisonAfterPartyTurn(g, g.Battle.Queue[g.Battle.QueueCursor])
+	}
 	if core.LivingBattleCount(g) == 0 {
 		winBattle(g, core.LastBattleEnemyFallsMessage(*g))
 		return
@@ -202,7 +214,7 @@ func finishActorTurn(g *core.GameState) {
 		loseBattle(g, core.BattleLossMessage(*g))
 		return
 	}
-	if !core.EnemyAlive(g.Enemies, g.Battle.EnemyIndex) {
+	if !core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
 		if next := core.NextLivingBattleEnemy(g); next >= 0 {
 			g.Battle.EnemyIndex = next
 		}
@@ -233,7 +245,7 @@ func beginPartyTurn(g *core.GameState, partyIndex int) {
 	if g.Battle.PartyTarget < 0 {
 		g.Battle.PartyTarget = 0
 	}
-	if !core.EnemyAlive(g.Enemies, g.Battle.EnemyIndex) {
+	if !core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
 		if next := core.NextLivingBattleEnemy(g); next >= 0 {
 			g.Battle.EnemyIndex = next
 		}
@@ -264,6 +276,23 @@ func updatePlayerBattle(g *core.GameState) {
 	}
 }
 
+// tickFlashHold drains the post-press flash timer. Returns true while the
+// flash is still on screen (caller bails this frame); when it hits zero,
+// fires onResolve and still returns true so the caller doesn't double-tick
+// the underlying bar in the same frame.
+func tickFlashHold(g *core.GameState, dt float32, onResolve func()) bool {
+	if g.Battle.TimingFlash <= 0 {
+		return false
+	}
+	g.Battle.TimingFlash -= dt
+	if g.Battle.TimingFlash > 0 {
+		return true
+	}
+	g.Battle.TimingFlash = 0
+	onResolve()
+	return true
+}
+
 // updateAttackTiming drives the player's attack/skill timing bar. The bar
 // resolves either when the player provides input (press for press-kind bars,
 // release for charge-kind bars) or when the cursor runs off the end. An
@@ -271,13 +300,7 @@ func updatePlayerBattle(g *core.GameState) {
 // the action lands; an auto-miss applies immediately so the turn doesn't
 // dwell on a non-event.
 func updateAttackTiming(g *core.GameState, dt float32) {
-	if g.Battle.TimingFlash > 0 {
-		g.Battle.TimingFlash -= dt
-		if g.Battle.TimingFlash > 0 {
-			return
-		}
-		g.Battle.TimingFlash = 0
-		applyPendingAction(g, g.Battle.Timing.Quality)
+	if tickFlashHold(g, dt, func() { applyPendingAction(g, g.Battle.Timing.Quality) }) {
 		return
 	}
 	if g.Battle.TimingIntro > 0 {
@@ -338,8 +361,7 @@ func updateAttackTiming(g *core.GameState, dt float32) {
 // --- Enemy turn ------------------------------------------------------------
 
 // beginEnemyAttack arms the defend bar against the queue-slot enemy. The
-// slot is an index into Battle.EnemyGroup (NOT g.Enemies); resolveEnemyAttacker
-// indirects through the group to get the actual Enemy.
+// slot is an index into the active pack's Members.
 func beginEnemyAttack(g *core.GameState, slot int) {
 	g.Battle.EnemyAttacker = slot
 	g.Battle.Timing = core.NewTimingState(core.DefendTimingDuration)
@@ -353,13 +375,7 @@ func beginEnemyAttack(g *core.GameState, slot int) {
 // an auto-miss (no press) resolves immediately. After resolution, advance
 // the round queue.
 func updateEnemyTiming(g *core.GameState, dt float32) {
-	if g.Battle.TimingFlash > 0 {
-		g.Battle.TimingFlash -= dt
-		if g.Battle.TimingFlash > 0 {
-			return
-		}
-		g.Battle.TimingFlash = 0
-		resolveAndFinishEnemyAttack(g)
+	if tickFlashHold(g, dt, func() { resolveAndFinishEnemyAttack(g) }) {
 		return
 	}
 	if g.Battle.TimingIntro > 0 {
@@ -385,11 +401,7 @@ func updateEnemyTiming(g *core.GameState, dt float32) {
 // resolveAndFinishEnemyAttack applies the current attacker's hit (scaled by
 // the resolved defend quality) and advances the round queue.
 func resolveAndFinishEnemyAttack(g *core.GameState) {
-	enemyIndex := -1
-	if g.Battle.EnemyAttacker >= 0 && g.Battle.EnemyAttacker < len(g.Battle.EnemyGroup) {
-		enemyIndex = g.Battle.EnemyGroup[g.Battle.EnemyAttacker]
-	}
-	resolveEnemyAttacker(g, enemyIndex, g.Battle.Timing.Quality)
+	resolveEnemyAttacker(g, g.Battle.EnemyAttacker, g.Battle.Timing.Quality)
 	g.Battle.Timing = core.TimingState{}
 	g.Battle.EnemyAttacker = -1
 
@@ -431,16 +443,34 @@ func loseBattle(g *core.GameState, message string) {
 }
 
 func leaveBattle(g *core.GameState, message string) {
+	clearBattleResidual(g)
+	g.Battle.Phase = core.BattleNone
+	if message != "" {
+		setBattleMessage(g, message)
+	}
+}
+
+// clearBattleResidual drops every transient battle field back to its zero
+// value. Used by leaveBattle and by Update's defensive early-exit so a
+// desynced encounter (e.g. EnemyIndex points at a culled enemy) leaves no
+// queue / timing-bar residue lingering for the next frame to inherit.
+// Defeated packs are dropped from the field here so the cleared slot
+// doesn't keep ghost-rendering an empty marker.
+func clearBattleResidual(g *core.GameState) {
+	if g.Battle.Phase == core.BattleWon && g.Battle.ActivePack >= 0 && g.Battle.ActivePack < len(g.Packs) {
+		g.Packs = append(g.Packs[:g.Battle.ActivePack], g.Packs[g.Battle.ActivePack+1:]...)
+	}
+	g.Battle.ActivePack = -1
 	g.Battle.EnemyIndex = -1
-	g.Battle.EnemyGroup = nil
 	g.Battle.Queue = nil
 	g.Battle.QueueCursor = 0
 	g.Battle.NextRoundQueue = nil
 	g.Battle.Timing = core.TimingState{}
 	g.Battle.TimingFlash = 0
+	g.Battle.TimingIntro = 0
+	g.Battle.EnemyAttacker = -1
+	g.Battle.EnemyAttackCursor = -1
 	resetBattleAction(g)
-	g.Battle.Phase = core.BattleNone
-	setBattleMessage(g, message)
 }
 
 func recoverFromLoss(g *core.GameState) {
@@ -479,17 +509,18 @@ func updateBattleEffects(g *core.GameState, dt float32) {
 		g.Party[i].AttackBump = core.ApproachZero(g.Party[i].AttackBump, dt)
 		g.Party[i].DamageFlash = core.ApproachZero(g.Party[i].DamageFlash, dt)
 	}
-	for i := range g.Enemies {
-		g.Enemies[i].AttackBump = core.ApproachZero(g.Enemies[i].AttackBump, dt)
-		g.Enemies[i].DamageFlash = core.ApproachZero(g.Enemies[i].DamageFlash, dt)
-		g.Enemies[i].DeathFade = core.ApproachZero(g.Enemies[i].DeathFade, dt)
-		g.Enemies[i].DamagePopupTimer = core.ApproachZero(g.Enemies[i].DamagePopupTimer, dt)
+	members := core.BattleMembers(g)
+	for i := range members {
+		members[i].AttackBump = core.ApproachZero(members[i].AttackBump, dt)
+		members[i].DamageFlash = core.ApproachZero(members[i].DamageFlash, dt)
+		members[i].DeathFade = core.ApproachZero(members[i].DeathFade, dt)
+		members[i].DamagePopupTimer = core.ApproachZero(members[i].DamagePopupTimer, dt)
 	}
 }
 
 func battleDeathFadeActive(g *core.GameState) bool {
-	for _, index := range g.Battle.EnemyGroup {
-		if index >= 0 && index < len(g.Enemies) && g.Enemies[index].DeathFade > 0 {
+	for _, m := range core.BattleMembers(g) {
+		if m.DeathFade > 0 {
 			return true
 		}
 	}

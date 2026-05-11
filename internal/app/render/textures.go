@@ -81,7 +81,7 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, color.RGBA{R: 244, G: 238, B: 226, A: 255}, math.Max(0, n)*0.32)
 			c = core.MixColor(c, color.RGBA{R: 30, G: 28, B: 24, A: 255}, math.Max(0, -n)*0.42)
 
-			edgeDist := minInt(localX-mortar, minInt(localY-mortar, minInt(brickW-mortar-1-localX, brickH-mortar-1-localY)))
+			edgeDist := core.MinInt(localX-mortar, core.MinInt(localY-mortar, core.MinInt(brickW-mortar-1-localX, brickH-mortar-1-localY)))
 			if edgeDist <= 2 {
 				c = core.MixColor(c, mortarColor, 0.45-float64(edgeDist)*0.12)
 			}
@@ -96,13 +96,6 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 		}
 	}
 	return pixels
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func makeGrassPixels(w, h int) []color.RGBA {
@@ -171,7 +164,7 @@ func makeStoneFloorPixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, highlight, math.Max(0, n)*0.32)
 			c = core.MixColor(c, color.RGBA{R: 24, G: 22, B: 20, A: 255}, math.Max(0, -n)*0.40)
 
-			edgeDist := minInt(localX-grout, minInt(localY-grout, minInt(slab-1-localX, slab-1-localY)))
+			edgeDist := core.MinInt(localX-grout, core.MinInt(localY-grout, core.MinInt(slab-1-localX, slab-1-localY)))
 			if edgeDist <= 3 {
 				c = core.MixColor(c, groutColor, 0.45-float64(edgeDist)*0.10)
 			}
@@ -339,10 +332,7 @@ func valueNoise(x, y float64) float64 {
 }
 
 func hashFloat(x, y int) float64 {
-	n := uint32(x)*uint32(73856093) ^ uint32(y)*uint32(19349663)
-	n = (n ^ (n >> 13)) * 1274126177
-	n ^= n >> 16
-	return float64(n&0xFFFF) / 65535.0
+	return float64(hashXY(x, y)&0xFFFF) / 65535.0
 }
 
 func makeSkyPixels(w, h int) []color.RGBA {
@@ -387,15 +377,60 @@ func makeSkyPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
+// ratPalette is the recolorable palette used by makeRatPixels. Body / ear /
+// tail tones differ between the plain rat and the diseased rat, but the
+// silhouette is shared.
+type ratPalette struct {
+	body, bodyDark, bodyLight color.RGBA
+	ear, tail                 color.RGBA
+	eye, nose                 color.RGBA
+	// Poison drip color: when non-zero alpha, makeRatPixels paints a few
+	// dripping poison drops under the snout. Used by the diseased rat so
+	// the field figure reads as "leaking something nasty."
+	poison color.RGBA
+}
+
+var defaultRatPalette = ratPalette{
+	body:      color.RGBA{R: 104, G: 107, B: 104, A: 255},
+	bodyDark:  color.RGBA{R: 68, G: 72, B: 72, A: 255},
+	bodyLight: color.RGBA{R: 138, G: 142, B: 136, A: 255},
+	ear:       color.RGBA{R: 172, G: 116, B: 122, A: 255},
+	tail:      color.RGBA{R: 178, G: 118, B: 125, A: 255},
+	eye:       color.RGBA{R: 10, G: 12, B: 12, A: 255},
+	nose:      color.RGBA{R: 232, G: 150, B: 162, A: 255},
+}
+
+// diseasedRatPalette swaps the rat to mottled sickly-green tones with a
+// jaundiced yellow eye and a fleshy nose. The poison field paints visible
+// drips under the snout.
+var diseasedRatPalette = ratPalette{
+	body:      color.RGBA{R: 86, G: 118, B: 64, A: 255},
+	bodyDark:  color.RGBA{R: 48, G: 76, B: 36, A: 255},
+	bodyLight: color.RGBA{R: 138, G: 168, B: 92, A: 255},
+	ear:       color.RGBA{R: 142, G: 118, B: 110, A: 255},
+	tail:      color.RGBA{R: 140, G: 116, B: 108, A: 255},
+	eye:       color.RGBA{R: 220, G: 200, B: 60, A: 255},
+	nose:      color.RGBA{R: 170, G: 116, B: 132, A: 255},
+	poison:    color.RGBA{R: 156, G: 220, B: 88, A: 255},
+}
+
 func makeRatPixels(w, h int) []color.RGBA {
+	return makeRatPixelsWithPalette(w, h, defaultRatPalette)
+}
+
+func makeDiseasedRatPixels(w, h int) []color.RGBA {
+	return makeRatPixelsWithPalette(w, h, diseasedRatPalette)
+}
+
+func makeRatPixelsWithPalette(w, h int, p ratPalette) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	body := color.RGBA{R: 104, G: 107, B: 104, A: 255}
-	bodyDark := color.RGBA{R: 68, G: 72, B: 72, A: 255}
-	bodyLight := color.RGBA{R: 138, G: 142, B: 136, A: 255}
-	ear := color.RGBA{R: 172, G: 116, B: 122, A: 255}
-	tail := color.RGBA{R: 178, G: 118, B: 125, A: 255}
-	eye := color.RGBA{R: 10, G: 12, B: 12, A: 255}
-	nose := color.RGBA{R: 232, G: 150, B: 162, A: 255}
+	body := p.body
+	bodyDark := p.bodyDark
+	bodyLight := p.bodyLight
+	ear := p.ear
+	tail := p.tail
+	eye := p.eye
+	nose := p.nose
 
 	fillEllipsePixels(pixels, w, h, 36, 87, 21, 4, color.RGBA{R: 0, G: 0, B: 0, A: 75})
 	drawLinePixels(pixels, w, h, 19, 72, 7, 62, tail, 3)
@@ -423,6 +458,20 @@ func makeRatPixels(w, h int) []color.RGBA {
 	drawLinePixels(pixels, w, h, 55, 38, 66, 34, bodyLight, 1)
 	drawLinePixels(pixels, w, h, 55, 39, 67, 40, bodyLight, 1)
 	drawLinePixels(pixels, w, h, 55, 40, 64, 47, bodyLight, 1)
+
+	// Poison drips: only on palettes with a non-zero poison color (the
+	// diseased rat). Three drops trailing down from the snout.
+	if p.poison.A != 0 {
+		poison := p.poison
+		poisonDark := adjust(poison, -28)
+		// Drip 1 — biggest, hanging from the nose.
+		fillEllipsePixels(pixels, w, h, 60, 42, 2, 3, poison)
+		fillEllipsePixels(pixels, w, h, 60, 45, 1, 1, poisonDark)
+		// Drip 2 — mid-size, slightly offset.
+		fillEllipsePixels(pixels, w, h, 56, 48, 2, 2, poison)
+		// Drip 3 — small puddle below.
+		fillEllipsePixels(pixels, w, h, 58, 52, 3, 1, poisonDark)
+	}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
@@ -631,11 +680,7 @@ func drawLinePixels(pixels []color.RGBA, w, h, x0, y0, x1, y1 int, col color.RGB
 }
 
 func hash2(x, y int) int {
-	n := uint32(x*73856093) ^ uint32(y*19349663)
-	n ^= n >> 13
-	n *= 1274126177
-	n ^= n >> 16
-	return int(n & 0xff)
+	return int(hashXY(x, y) & 0xff)
 }
 
 func jitter(c color.RGBA, x, y, amount int) color.RGBA {

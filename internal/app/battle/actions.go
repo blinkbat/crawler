@@ -26,11 +26,22 @@ type actionHandlers struct {
 	apply actionApply
 }
 
-var skillActionHandlers = map[int]actionHandlers{
+var skillActionHandlers = map[core.SkillID]actionHandlers{
 	core.SkillSwipe:    {setup: setupSwipe, apply: applySwipe},
 	core.SkillPrayer:   {setup: setupPrayer, apply: applyPrayer},
-	core.SkillSteal:    {setup: setupSteal, apply: applySteal},
+	core.SkillSteal:    {setup: setupTargetedEnemy, apply: applySteal},
 	core.SkillFirebolt: {setup: setupFirebolt, apply: applyFirebolt},
+}
+
+// setupTargetedEnemy is the shared "must have a live target" check used
+// by basic attack and Steal — both gate purely on whether g.Battle.EnemyIndex
+// still points at a living member of the active pack.
+func setupTargetedEnemy(g *core.GameState) bool {
+	if !core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
+		setBattleStatus(g, "No target.")
+		return false
+	}
+	return true
 }
 
 // beginPendingAction is invoked once the player has confirmed their target
@@ -70,13 +81,13 @@ func beginPendingAction(g *core.GameState) {
 
 // usesChargeMinigame is the per-skill switch that picks the charge timing
 // kind. Firebolt and Prayer are hold-and-release.
-func usesChargeMinigame(skill int) bool {
+func usesChargeMinigame(skill core.SkillID) bool {
 	return skill == core.SkillFirebolt || skill == core.SkillPrayer
 }
 
 // usesSequenceMinigame picks the pickpocket sequence kind. Steal needs a
 // thief-y rhythm input, not a single press.
-func usesSequenceMinigame(skill int) bool {
+func usesSequenceMinigame(skill core.SkillID) bool {
 	return skill == core.SkillSteal
 }
 
@@ -95,9 +106,9 @@ func applyPendingAction(g *core.GameState, quality int) {
 	}
 }
 
-func actionHandlerFor(skill int) (actionHandlers, bool) {
+func actionHandlerFor(skill core.SkillID) (actionHandlers, bool) {
 	if skill == core.SkillNone {
-		return actionHandlers{setup: setupAttack, apply: applyAttack}, true
+		return actionHandlers{setup: setupTargetedEnemy, apply: applyAttack}, true
 	}
 	handler, ok := skillActionHandlers[skill]
 	return handler, ok
@@ -106,13 +117,14 @@ func actionHandlerFor(skill int) (actionHandlers, bool) {
 // recordEnemyDamagePopup stamps a floating-number popup on the given enemy
 // so the renderer can draw the damage value above its sprite. Should be
 // called immediately after damageEnemy whenever a player action lands.
-func recordEnemyDamagePopup(g *core.GameState, enemyIndex, damage, quality int) {
-	if enemyIndex < 0 || enemyIndex >= len(g.Enemies) || damage <= 0 {
+func recordEnemyDamagePopup(g *core.GameState, slot, damage, quality int) {
+	enemy := core.BattleMemberAt(g, slot)
+	if enemy == nil || damage <= 0 {
 		return
 	}
-	g.Enemies[enemyIndex].DamagePopup = damage
-	g.Enemies[enemyIndex].DamagePopupQuality = quality
-	g.Enemies[enemyIndex].DamagePopupTimer = core.QualityResultDuration
+	enemy.DamagePopup = damage
+	enemy.DamagePopupQuality = quality
+	enemy.DamagePopupTimer = core.QualityResultDuration
 }
 
 // recordAttackQuality stores the quality + actor for the floating popup that
@@ -135,23 +147,15 @@ func recordBlockQuality(g *core.GameState, quality int, partyIndex int) {
 
 // --- Basic Attack ---
 
-func setupAttack(g *core.GameState) bool {
-	if !core.EnemyAlive(g.Enemies, g.Battle.EnemyIndex) {
-		setBattleStatus(g, "No target.")
-		return false
-	}
-	return true
-}
-
 func applyAttack(g *core.GameState, quality int) bool {
-	if !core.EnemyAlive(g.Enemies, g.Battle.EnemyIndex) {
+	if !core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
 		setBattleStatus(g, "No target.")
 		finishPartyAction(g)
 		return false
 	}
 	attacker := &g.Party[g.Battle.CurrentParty]
 	attacker.AttackBump = core.BumpDuration
-	target := g.Enemies[g.Battle.EnemyIndex]
+	target := *core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	// Basic Attack: STR + 0, scaled by timing quality.
 	damage := core.ScaleDamage(core.MeleeDamage(attacker.Stats, 0), quality)
 	defeated := damageEnemy(g, g.Battle.EnemyIndex, damage)
@@ -181,12 +185,12 @@ func applySwipe(g *core.GameState, quality int) bool {
 	// Kind is Melee so this resolves to STR + Effect.Damage.
 	damage := core.ScaleDamage(core.SkillDamage(actor.Stats, core.SkillSwipe), quality)
 	hits := 0
-	for _, index := range g.Battle.EnemyGroup {
-		if !core.EnemyAlive(g.Enemies, index) {
+	for slot, m := range core.BattleMembers(g) {
+		if !m.Alive {
 			continue
 		}
-		damageEnemy(g, index, damage)
-		recordEnemyDamagePopup(g, index, damage, quality)
+		damageEnemy(g, slot, damage)
+		recordEnemyDamagePopup(g, slot, damage, quality)
 		hits++
 	}
 	if hits == 0 {
@@ -236,23 +240,15 @@ func applyPrayer(g *core.GameState, quality int) bool {
 
 // --- Steal (Thief, base chance scales with quality) ---
 
-func setupSteal(g *core.GameState) bool {
-	if !core.EnemyAlive(g.Enemies, g.Battle.EnemyIndex) {
-		setBattleStatus(g, "No target.")
-		return false
-	}
-	return true
-}
-
 func applySteal(g *core.GameState, quality int) bool {
-	if !core.EnemyAlive(g.Enemies, g.Battle.EnemyIndex) {
+	if !core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
 		setBattleStatus(g, "No target.")
 		finishPartyAction(g)
 		return false
 	}
 	actor := &g.Party[g.Battle.CurrentParty]
 	actor.AttackBump = core.BumpDuration
-	enemy := &g.Enemies[g.Battle.EnemyIndex]
+	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	if enemy.Item == "" {
 		setBattleMessage(g, "There is nothing to steal.")
 		finishPartyAction(g)
@@ -287,7 +283,7 @@ func applySteal(g *core.GameState, quality int) bool {
 // --- Firebolt (Wizard, ramps damage and burn chance with quality) ---
 
 func setupFirebolt(g *core.GameState) bool {
-	if !core.EnemyAlive(g.Enemies, g.Battle.EnemyIndex) {
+	if !core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
 		setBattleStatus(g, "No target.")
 		return false
 	}
@@ -304,7 +300,7 @@ func setupFirebolt(g *core.GameState) bool {
 }
 
 func applyFirebolt(g *core.GameState, quality int) bool {
-	if !core.EnemyAlive(g.Enemies, g.Battle.EnemyIndex) {
+	if !core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
 		setBattleStatus(g, "No target.")
 		finishPartyAction(g)
 		return false
@@ -326,10 +322,10 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 	// Kind is Magic so this resolves to INT + Effect.Damage. We still pull
 	// Effect separately for the burn-chance roll below.
 	damage := core.ScaleDamage(core.SkillDamage(actor.Stats, core.SkillFirebolt), quality)
-	target := g.Enemies[g.Battle.EnemyIndex]
+	target := *core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	defeated := damageEnemy(g, g.Battle.EnemyIndex, damage)
 	recordEnemyDamagePopup(g, g.Battle.EnemyIndex, damage, quality)
-	enemy := &g.Enemies[g.Battle.EnemyIndex]
+	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	burned := false
 	if !defeated && enemy.BurnTurns <= 0 {
 		burnChance := effect.BurnChance * float64(core.TimingBonusMult(quality))
@@ -348,11 +344,11 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 
 // --- Damage / heal helpers (unchanged from previous behavior) ---
 
-func damageEnemy(g *core.GameState, enemyIndex, damage int) bool {
-	if !core.EnemyAlive(g.Enemies, enemyIndex) {
+func damageEnemy(g *core.GameState, slot, damage int) bool {
+	enemy := core.BattleMemberAt(g, slot)
+	if enemy == nil || !enemy.Alive {
 		return false
 	}
-	enemy := &g.Enemies[enemyIndex]
 	enemy.DamageFlash = core.FlashDuration
 	enemy.HP -= damage
 	if enemy.HP > 0 {
@@ -365,6 +361,33 @@ func damageEnemy(g *core.GameState, enemyIndex, damage int) bool {
 	return true
 }
 
+// tickPoisonAfterPartyTurn resolves the per-tick poison damage on a poisoned
+// party member, fired AFTER their action resolves. Mirrors the burn helper
+// but on the party side and with end-of-turn timing — the user still gets to
+// act before they bleed. Returns true if the poison reduced the actor's HP
+// to 0. Caller's downstream "lose battle" check picks up the kill, so this
+// helper doesn't need to short-circuit.
+func tickPoisonAfterPartyTurn(g *core.GameState, actor core.ActorRef) bool {
+	if !actor.IsParty {
+		return false
+	}
+	if actor.Index < 0 || actor.Index >= len(g.Party) {
+		return false
+	}
+	member := &g.Party[actor.Index]
+	if member.HP <= 0 || member.PoisonTurns <= 0 {
+		return false
+	}
+	member.PoisonTurns--
+	damagePartyMember(g, actor.Index, core.PoisonTickDamage)
+	if member.HP <= 0 {
+		setBattleMessage(g, fmt.Sprintf("%s succumbs to the poison.", member.Name))
+		return true
+	}
+	setBattleMessage(g, fmt.Sprintf("%s suffers %d from poison.", member.Name, core.PoisonTickDamage))
+	return false
+}
+
 // tickBurnAtTurnStart resolves the per-tick burn damage on a burning actor at
 // the start of their turn. Currently only enemies can burn, but the helper
 // takes an ActorRef so a future "party can be burned" effect can hook in
@@ -374,27 +397,20 @@ func tickBurnAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
 	if actor.IsParty {
 		return false
 	}
-	if actor.Index < 0 || actor.Index >= len(g.Battle.EnemyGroup) {
-		return false
-	}
-	enemyIdx := g.Battle.EnemyGroup[actor.Index]
-	if enemyIdx < 0 || enemyIdx >= len(g.Enemies) {
-		return false
-	}
-	enemy := &g.Enemies[enemyIdx]
-	if !enemy.Alive || enemy.BurnTurns <= 0 {
+	enemy := core.BattleMemberAt(g, actor.Index)
+	if enemy == nil || !enemy.Alive || enemy.BurnTurns <= 0 {
 		return false
 	}
 	enemy.BurnTurns--
-	damageEnemy(g, enemyIdx, core.BurnTickDamage)
+	damageEnemy(g, actor.Index, core.BurnTickDamage)
 	// Quality=Good gives the orange "fire" tint to the floating popup.
-	recordEnemyDamagePopup(g, enemyIdx, core.BurnTickDamage, core.TimingQualityGood)
+	recordEnemyDamagePopup(g, actor.Index, core.BurnTickDamage, core.TimingQualityGood)
 	def := core.EnemyInfoFor(*enemy)
 	if !enemy.Alive {
 		setBattleMessage(g, fmt.Sprintf("The %s succumbs to the flames.", def.SingularNoun))
 		// Repoint the player's targeting cursor if the burn killed the
 		// currently-selected enemy, so the next attack action has a valid one.
-		if next := core.NextLivingBattleEnemy(g); next >= 0 && !core.EnemyAlive(g.Enemies, g.Battle.EnemyIndex) {
+		if next := core.NextLivingBattleEnemy(g); next >= 0 && !core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
 			g.Battle.EnemyIndex = next
 		}
 		return true
@@ -495,16 +511,17 @@ func qualityTag(quality int) string {
 // resolveEnemyAttacker applies a single enemy's attack against a chosen party
 // member, scaled by the player's defend quality. Used by the BattleEnemyTiming
 // phase. Returns true if the hit landed (false if attacker was already dead).
-func resolveEnemyAttacker(g *core.GameState, enemyIndex int, defendQuality int) bool {
-	if enemyIndex < 0 || enemyIndex >= len(g.Enemies) || !g.Enemies[enemyIndex].Alive {
+func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
+	enemy := core.BattleMemberAt(g, slot)
+	if enemy == nil || !enemy.Alive {
 		return false
 	}
 	target := pickEnemyAttackTarget(g)
 	if target < 0 {
 		return false
 	}
-	g.Enemies[enemyIndex].AttackBump = core.BumpDuration
-	rawDamage := core.EnemyInfoFor(g.Enemies[enemyIndex]).AttackDamage
+	enemy.AttackBump = core.BumpDuration
+	rawDamage := core.EnemyInfoFor(*enemy).AttackDamage
 	damage := core.ScaleIncomingDamage(rawDamage, defendQuality)
 	if g.Party[target].Defending {
 		scaled := int(float32(damage) * core.DefendingDamageMult)
@@ -522,23 +539,40 @@ func resolveEnemyAttacker(g *core.GameState, enemyIndex int, defendQuality int) 
 		g.Party[target].AttackBump = core.BlockBumpDuration
 	}
 	recordBlockQuality(g, defendQuality, target)
-	setBattleMessage(g, enemyHitMessage(g.Enemies[enemyIndex], g.Party[target].Name, damage, defendQuality, g.Party[target].Defending))
+	def := core.EnemyInfoFor(*enemy)
+	setBattleMessage(g, enemyHitMessage(*enemy, g.Party[target].Name, damage, defendQuality, g.Party[target].Defending))
+	// Poison inflict: only on damaging hits from a poison-themed attacker
+	// against a target that's still alive and not already poisoned. The
+	// no-stack rule mirrors burn — re-poisoning a poisoned target on every
+	// bite would trivialize the duration roll.
+	if damage > 0 && def.PoisonChance > 0 && g.Party[target].HP > 0 && g.Party[target].PoisonTurns <= 0 {
+		if core.GameRNG.Float64() < def.PoisonChance {
+			g.Party[target].PoisonTurns = rollPoisonDuration()
+			setBattleMessage(g, fmt.Sprintf("%s is poisoned!", g.Party[target].Name))
+		}
+	}
 	return true
 }
 
+// rollPoisonDuration picks a fresh poison duration in [PoisonMinTurns,
+// PoisonMaxTurns]. Pulled out so a future poison source (item, trap, etc.)
+// can produce the same shape.
+func rollPoisonDuration() int {
+	span := core.PoisonMaxTurns - core.PoisonMinTurns
+	if span <= 0 {
+		return core.PoisonMinTurns
+	}
+	return core.PoisonMinTurns + core.GameRNG.Intn(span+1)
+}
+
 // pickEnemyAttackTarget cycles to the next living party member after the last
-// one targeted, mirroring the previous round-robin behavior.
+// one the enemy side targeted. Uses EnemyAttackCursor (separate from
+// PartyTarget) so the player's heal/item ally cycling doesn't shift who
+// enemies attack next.
 func pickEnemyAttackTarget(g *core.GameState) int {
-	cursor := g.Battle.PartyTarget + 1
-	if cursor < 0 {
-		cursor = 0
-	}
-	target := core.NextLivingPartyMember(g.Party, cursor)
-	if target < 0 {
-		target = core.FirstLivingPartyMember(g.Party)
-	}
+	target := core.WrapNextLivingPartyMember(g.Party, g.Battle.EnemyAttackCursor+1)
 	if target >= 0 {
-		g.Battle.PartyTarget = target
+		g.Battle.EnemyAttackCursor = target
 	}
 	return target
 }

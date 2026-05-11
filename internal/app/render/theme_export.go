@@ -51,22 +51,6 @@ func DrawCard(x, y, w, h int32, fill, outline, accent color.RGBA) {
 	drawCard(x, y, w, h, fill, outline, accent)
 }
 
-// DrawPanel fills a rounded rect at the standard corner radius.
-func DrawPanel(x, y, w, h int32, fill color.RGBA) {
-	drawPanel(x, y, w, h, fill)
-}
-
-// DrawSmallPanel fills a rounded rect at the small corner radius (used
-// for compact UI like text fields).
-func DrawSmallPanel(x, y, w, h int32, fill color.RGBA) {
-	drawSmallPanel(x, y, w, h, fill)
-}
-
-// DrawSmallPanelOutline outlines a rounded rect at the small corner radius.
-func DrawSmallPanelOutline(x, y, w, h int32, col color.RGBA) {
-	drawSmallPanelOutline(x, y, w, h, col)
-}
-
 // DrawHeading writes a small uppercase header with a colored underline tick.
 func DrawHeading(font rl.Font, text string, x, y int32, accent color.RGBA) {
 	drawHeading(font, text, x, y, accent)

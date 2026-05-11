@@ -27,7 +27,13 @@ func Update(g *core.GameState) {
 		updateMenu(g)
 		return
 	}
-	if input.PausePressed() && pauseAllowed(g) {
+	pause := input.PausePressed()
+	// Esc opens the menu only outside of battle — inside a battle Esc means
+	// "back / cancel target," and eating it here would break the action UI.
+	if !pause && g.Battle.Phase == core.BattleNone && input.PauseFromExplorePressed() {
+		pause = true
+	}
+	if pause && pauseAllowed(g) {
 		g.MenuOpen = true
 		g.Player.LookYaw = 0
 		g.Player.LookPitch = 0
@@ -39,12 +45,12 @@ func Update(g *core.GameState) {
 	}
 
 	updateFreeLook(&g.Player, dt)
-	if g.Player.Anim.Kind == core.AnimNone && StartAdjacent(g) {
+	if g.Player.Anim.Kind == core.AnimNone && startAdjacent(g) {
 		return
 	}
 	updatePlayer(g)
 	if g.Battle.Phase == core.BattleNone && g.Player.Anim.Kind == core.AnimNone {
-		StartAdjacent(g)
+		startAdjacent(g)
 	}
 }
 
@@ -117,9 +123,9 @@ func updatePlayer(g *core.GameState) {
 		startTurn(p, -1)
 	case input.TurnRightPressed():
 		startTurn(p, 1)
-	case input.StepForwardPressed():
+	case input.UpPressed():
 		startStep(p, g, 0, 1)
-	case input.StepBackPressed():
+	case input.DownPressed():
 		startStep(p, g, 0, -1)
 	case input.StrafeLeftPressed():
 		startStep(p, g, -1, 0)
@@ -133,7 +139,7 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	rx, rz := core.FacingVector(core.NormalizeFacing(p.Facing + 1))
 	targetX := p.TileX + dx*forward + rx*strafe
 	targetZ := p.TileZ + dz*forward + rz*strafe
-	if g.Map.WallAt(targetX, targetZ) {
+	if g.Area.BlockedAt(targetX, targetZ) {
 		return
 	}
 
@@ -227,26 +233,27 @@ func updateAnimation(p *core.Player, dt float32) {
 	p.Anim = core.Animation{}
 }
 
-func adjacentEnemyIndex(enemies []core.Enemy, tileX, tileZ int) int {
-	for i, e := range enemies {
-		if !e.Alive {
+func adjacentPackIndex(packs []core.Pack, tileX, tileZ int) int {
+	for i, p := range packs {
+		if !core.PackAlive(p) {
 			continue
 		}
-		if core.AbsInt(e.TileX-tileX)+core.AbsInt(e.TileZ-tileZ) == 1 {
+		if core.AbsInt(p.TileX-tileX)+core.AbsInt(p.TileZ-tileZ) == 1 {
 			return i
 		}
 	}
 	return -1
 }
 
-func StartAdjacent(g *core.GameState) bool {
-	enemyIndex := adjacentEnemyIndex(g.Enemies, g.Player.TileX, g.Player.TileZ)
-	if enemyIndex < 0 {
+func startAdjacent(g *core.GameState) bool {
+	packIndex := adjacentPackIndex(g.Packs, g.Player.TileX, g.Player.TileZ)
+	if packIndex < 0 {
 		return false
 	}
-	if startTurnToTile(&g.Player, g.Enemies[enemyIndex].TileX, g.Enemies[enemyIndex].TileZ) {
+	pack := g.Packs[packIndex]
+	if startTurnToTile(&g.Player, pack.TileX, pack.TileZ) {
 		return true
 	}
-	battle.Start(g, enemyIndex)
+	battle.Start(g, packIndex)
 	return true
 }

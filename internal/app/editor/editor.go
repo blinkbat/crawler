@@ -52,8 +52,13 @@ type entityKind int
 const (
 	entityNone entityKind = iota
 	entityPlayerStart
-	entitySpawnRat
-	entitySpawnBat
+	// entityAddRat/Bat/DiseasedRat append a member to the pack at the clicked
+	// tile, creating a fresh pack if none is there yet. Placing a Rat brush
+	// over an existing Rat-only pack makes it a 2-rat pack; mixing kinds
+	// builds mixed packs. Right-click clears the entire pack.
+	entityAddRat
+	entityAddBat
+	entityAddDiseasedRat
 )
 
 // layerBrushes is the per-layer palette table. Index into the active
@@ -87,8 +92,9 @@ var layerBrushes = [layerCount][]Brush{
 	},
 	LayerEntities: {
 		{Name: "Player Start", Entity: entityPlayerStart, Hotkey: rl.KeyOne, Color: rl.NewColor(255, 220, 124, 255)},
-		{Name: "Spawn Rat", Entity: entitySpawnRat, Hotkey: rl.KeyTwo, Color: rl.NewColor(220, 156, 96, 255)},
-		{Name: "Spawn Bat", Entity: entitySpawnBat, Hotkey: rl.KeyThree, Color: rl.NewColor(160, 130, 220, 255)},
+		{Name: "Add Rat", Entity: entityAddRat, Hotkey: rl.KeyTwo, Color: rl.NewColor(220, 156, 96, 255)},
+		{Name: "Add Bat", Entity: entityAddBat, Hotkey: rl.KeyThree, Color: rl.NewColor(160, 130, 220, 255)},
+		{Name: "Add Diseased Rat", Entity: entityAddDiseasedRat, Hotkey: rl.KeyFour, Color: rl.NewColor(140, 200, 90, 255)},
 	},
 }
 
@@ -144,7 +150,7 @@ const (
 	dragPaint
 	dragRect
 	dragStart
-	dragEnemy
+	dragPack
 )
 
 type statusEntry struct {
@@ -175,6 +181,10 @@ type State struct {
 	undo  []core.AreaDefinition
 	redo  []core.AreaDefinition
 	dirty bool
+	// baseline is a snapshot of the area as last loaded from / saved to disk.
+	// Used by undo/redo to detect "the working state now matches what's on
+	// disk" so the dirty marker can clear instead of latching forever.
+	baseline core.AreaDefinition
 
 	statusLog []statusEntry
 
@@ -186,7 +196,7 @@ type State struct {
 	lastPaintZ       int
 	rectAnchorX      int
 	rectAnchorZ      int
-	dragSpawnIdx     int
+	dragPackIdx      int
 
 	gridCursorX int
 	gridCursorZ int
@@ -201,6 +211,12 @@ type State struct {
 	exitRequested     bool
 	testRequested     bool
 	awaitingOverwrite bool
+
+	// previewPhase is the day/night phase the author wants to drop into
+	// when playtesting. Cycled with T; consumed by PreviewStepCount() to
+	// seed g.StepCount on F5 so the editor can author tile palettes that
+	// only read correctly at e.g. Dusk without playing a whole loop in.
+	previewPhase core.TimeOfDay
 
 	rect layoutRect
 }
@@ -224,6 +240,14 @@ func (s State) Area() core.AreaDefinition {
 	return cloneArea(s.area)
 }
 
+// PreviewStepCount returns the StepCount value that places the player at
+// the start of the editor's currently-selected preview phase. Used by the
+// run loop on F5 so the playtest opens in the same lighting the author
+// was previewing.
+func (s State) PreviewStepCount() int {
+	return int(s.previewPhase) * core.StepsPerPhase
+}
+
 // New starts the editor with a blank 16x16 map.
 func New() State {
 	return freshState(blankArea(16, 16))
@@ -237,6 +261,7 @@ func NewFromArea(a core.AreaDefinition) State {
 func freshState(a core.AreaDefinition) State {
 	return State{
 		area:         a,
+		baseline:     cloneArea(a),
 		layer:        LayerWalls,
 		brushSize:    1,
 		zoom:         1,
@@ -244,7 +269,7 @@ func freshState(a core.AreaDefinition) State {
 		gridCursorZ:  -1,
 		hoverX:       -1,
 		hoverZ:       -1,
-		dragSpawnIdx: -1,
+		dragPackIdx: -1,
 	}
 }
 
@@ -363,7 +388,7 @@ func canPlaytest(a core.AreaDefinition) bool {
 	if a.Walls[a.StartTileZ][a.StartTileX] == core.TileRock {
 		return false
 	}
-	if isPropChar(a.Props[a.StartTileZ][a.StartTileX]) {
+	if core.IsPropChar(a.Props[a.StartTileZ][a.StartTileX]) {
 		return false
 	}
 	return true

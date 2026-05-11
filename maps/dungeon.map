@@ -77,5 +77,5 @@ bat 7 1
 rat 9 7
 bat 10 7
 rat 3 13
-bat 4 13
-rat 5 13
+bat,diseased_rat 4 13
+diseased_rat 5 13

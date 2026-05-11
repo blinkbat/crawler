@@ -33,7 +33,7 @@ func Camera(p core.Player) rl.Camera3D {
 }
 
 func DrawSkyBackground(assets Resources, g core.GameState) {
-	m := g.Map
+	m := g.Area
 	texW := float32(assets.skyTexture.Width)
 	texH := float32(assets.skyTexture.Height)
 	screenW := float32(rl.GetScreenWidth())
@@ -81,7 +81,7 @@ func DrawSkyBackground(assets Resources, g core.GameState) {
 const behindCullSlack = float32(-2.5)
 
 func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
-	m := g.Map
+	m := g.Area
 	material := assets.worldMaterial(m.Materials)
 	tree := assets.tree
 	profile := applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(g.StepCount))
@@ -194,8 +194,9 @@ func drawTileCube(model rl.Model, cx, cy, cz, yawDeg float32) {
 
 // tileHash is the per-tile uint32 mixer used by orientation/variant
 // selectors. Stable for a given (x,z) so the same tile always reads the
-// same way between frames. xorshift-style mix with widely-spaced primes
-// to keep adjacent tiles uncorrelated.
+// same way between frames. Stronger avalanche than hashXY — three rounds
+// of xorshift+multiply with widely-spaced primes — for cases where
+// neighboring tiles need to feel independent.
 func tileHash(x, z int) uint32 {
 	h := uint32(x*374761393) ^ uint32(z*668265263)
 	h ^= h >> 16
@@ -204,6 +205,25 @@ func tileHash(x, z int) uint32 {
 	h *= 3266489917
 	h ^= h >> 16
 	return h
+}
+
+// hashXY is the cheaper per-tile hash used where tileHash's stronger
+// avalanche is overkill — texture-gen pixel jitter, region-bucketed
+// variant picks, etc. Same shape across all callers (textures.go,
+// floorVariantHash, drawFloorDecoration) so they sample one mixer.
+func hashXY(x, y int) uint32 {
+	return mix32(uint32(x*73856093) ^ uint32(y*19349663))
+}
+
+// mix32 finalizes a uint32 into a well-distributed bit pattern with one
+// round of xorshift + odd-prime multiply. Sufficient for visual variation
+// at our texture/tile scales; tileHash uses three rounds when stronger
+// avalanche is needed.
+func mix32(n uint32) uint32 {
+	n ^= n >> 13
+	n *= 1274126177
+	n ^= n >> 16
+	return n
 }
 
 // tileYawDeg returns 0/90/180/270 for floor and wall tiles. Square-footprint
@@ -227,10 +247,7 @@ func propYawDeg(x, z int) float32 {
 // byte samples drive dirt vs dark-grass selection so they don't perfectly
 // mask each other.
 func floorVariantHash(x, z int) int {
-	region := uint32((x/3)*73856093) ^ uint32((z/3)*19349663)
-	region ^= region >> 13
-	region *= 1274126177
-	region ^= region >> 16
+	region := hashXY(x/3, z/3)
 	switch {
 	case region&0xFF < 38: // ~15% dirt patches
 		return 1
@@ -247,10 +264,7 @@ func floorVariantHash(x, z int) int {
 // so the field reads as pebble-strewn ground. Props are passable (don't
 // update BlockedAt) and small rocks are squashed in Y so they look walkable.
 func drawFloorDecoration(assets Resources, x, z int, cx, cz float32) {
-	h := uint32(x*73856093) ^ uint32(z*19349663)
-	h ^= h >> 13
-	h *= 1274126177
-	h ^= h >> 16
+	h := hashXY(x, z)
 	chance := byte(h)
 	if chance > 42 { // ~16.5% rate
 		return
@@ -311,12 +325,8 @@ func drawPebbleCluster(assets Resources, cx, cz float32, tileHash uint32) {
 
 	for i := 0; i < count; i++ {
 		// Salt the tile hash with the pebble index so each member looks
-		// independent. xorshift-style mix, same shape as the other hashes
-		// in this file.
-		ih := tileHash ^ uint32(i+1)*2654435761
-		ih ^= ih >> 13
-		ih *= 1274126177
-		ih ^= ih >> 16
+		// independent. Same finalizer as the other render hashes (mix32).
+		ih := mix32(tileHash ^ uint32(i+1)*2654435761)
 
 		// Sub-tile offset in [-0.55, 0.55] — pebbles spread across the tile,
 		// not bunched at the center.
@@ -346,23 +356,52 @@ func drawPebbleCluster(assets Resources, cx, cz float32, tileHash uint32) {
 }
 
 func DrawEnemies(camera rl.Camera3D, g core.GameState, assets Resources) {
-	for i, enemy := range g.Enemies {
-		visual, ok := enemyVisualFor(assets, enemy.Kind)
+	if g.Battle.Phase == core.BattleNone {
+		drawFieldPacks(camera, g, assets)
+		return
+	}
+	drawBattlePack(camera, g, assets)
+}
+
+// drawFieldPacks renders one billboard per pack — the highest-tier member,
+// at the pack's authored tile. Empty/all-dead packs are skipped (they're
+// cleaned up by the battle-win path anyway).
+func drawFieldPacks(camera rl.Camera3D, g core.GameState, assets Resources) {
+	for _, pack := range g.Packs {
+		if !core.PackAlive(pack) {
+			continue
+		}
+		leader := core.PackLeader(pack)
+		visual, ok := enemyVisualFor(assets, leader.Kind)
 		if !ok {
 			continue
 		}
 		source := rl.NewRectangle(0, 0, float32(visual.texture.Width), float32(visual.texture.Height))
-		deathFade := g.Battle.Phase != core.BattleNone && enemy.DeathFade > 0 && core.BattleContainsEnemy(g.Battle, i)
-		if !enemy.Alive && !deathFade {
+		position := rl.NewVector3(core.TileCenter(pack.TileX), 0.68, core.TileCenter(pack.TileZ))
+		rl.DrawBillboardRec(camera, visual.texture, source, position, visual.size, rl.White)
+	}
+}
+
+// drawBattlePack renders every member of the active pack in battle
+// formation: living and recently-defeated (still fading) alike.
+func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
+	members := core.BattleMembers(&g)
+	for i, enemy := range members {
+		visual, ok := enemyVisualFor(assets, enemy.Kind)
+		if !ok {
 			continue
 		}
+		if !enemy.Alive && enemy.DeathFade <= 0 {
+			continue
+		}
+		source := rl.NewRectangle(0, 0, float32(visual.texture.Width), float32(visual.texture.Height))
 		position := enemyDrawPosition(camera, g, i, enemy)
 		tint := rl.White
 		if !enemy.Alive {
 			alpha := uint8(220 * core.ClampFloat64(float64(enemy.DeathFade/core.DeathFadeDuration), 0, 1))
 			tint = rl.NewColor(255, 255, 255, alpha)
 		}
-		if enemy.Alive && g.Battle.Phase != core.BattleNone && g.Battle.ActionMode == core.ActionEnemyTarget && i == g.Battle.EnemyIndex {
+		if enemy.Alive && g.Battle.ActionMode == core.ActionEnemyTarget && i == g.Battle.EnemyIndex {
 			tint = rl.NewColor(255, 228, 190, 255)
 			drawTargetChevron(camera, position)
 		}
@@ -380,17 +419,13 @@ func DrawEnemies(camera rl.Camera3D, g core.GameState, assets Resources) {
 	}
 }
 
-// isEnemyAttackerSlot reports whether the given absolute enemy index is the
-// one currently lunging at the party (during BattleEnemyTiming).
-func isEnemyAttackerSlot(g core.GameState, enemyIndex int) bool {
+// isEnemyAttackerSlot reports whether the given active-pack member slot
+// is the one currently lunging at the party (during BattleEnemyTiming).
+func isEnemyAttackerSlot(g core.GameState, slot int) bool {
 	if g.Battle.Phase != core.BattleEnemyTiming {
 		return false
 	}
-	slot := g.Battle.EnemyAttacker
-	if slot < 0 || slot >= len(g.Battle.EnemyGroup) {
-		return false
-	}
-	return g.Battle.EnemyGroup[slot] == enemyIndex
+	return g.Battle.EnemyAttacker == slot
 }
 
 // drawAttackerChevron paints the JRPG-style selector pyramid above the
@@ -574,14 +609,24 @@ func victoryDanceMotion(class core.PartyClass, elapsed float32) (float32, float3
 	return partyClassPresentationFor(class).dance(elapsed)
 }
 
-func enemyDrawPosition(camera rl.Camera3D, g core.GameState, index int, enemy core.Enemy) rl.Vector3 {
-	if g.Battle.Phase == core.BattleNone || !core.BattleContainsEnemy(g.Battle, index) {
-		return rl.NewVector3(core.TileCenter(enemy.TileX), 0.68, core.TileCenter(enemy.TileZ))
+// enemyDrawPosition returns the 3D position to render the given member of
+// the active pack at, given its slot in the battle formation.
+func enemyDrawPosition(camera rl.Camera3D, g core.GameState, slot int, enemy core.Enemy) rl.Vector3 {
+	if g.Battle.Phase == core.BattleNone || g.Battle.ActivePack < 0 {
+		// Fallback for any stray caller during a phase transition; use the
+		// active pack's tile if we still know it.
+		pack := rl.NewVector3(0, 0.68, 0)
+		if g.Battle.ActivePack >= 0 && g.Battle.ActivePack < len(g.Packs) {
+			p := g.Packs[g.Battle.ActivePack]
+			pack = rl.NewVector3(core.TileCenter(p.TileX), 0.68, core.TileCenter(p.TileZ))
+		}
+		return pack
 	}
 
-	slot, count := battleEnemySlot(g, index)
+	visibleSlot, count := battleEnemySlot(g, slot)
 	if count <= 0 {
-		return rl.NewVector3(core.TileCenter(enemy.TileX), 0.68, core.TileCenter(enemy.TileZ))
+		p := g.Packs[g.Battle.ActivePack]
+		return rl.NewVector3(core.TileCenter(p.TileX), 0.68, core.TileCenter(p.TileZ))
 	}
 	forward := horizontalForward(camera)
 	right := rl.NewVector3(-forward.Z, 0, forward.X)
@@ -591,9 +636,9 @@ func enemyDrawPosition(camera rl.Camera3D, g core.GameState, index int, enemy co
 		camera.Position.Z+forward.Z*2.55,
 	)
 	spacing := float32(1.12)
-	offset := (float32(slot) - float32(count-1)/2) * spacing
+	offset := (float32(visibleSlot) - float32(count-1)/2) * spacing
 	depth := float32(0)
-	if count == 3 && slot == 1 {
+	if count == 3 && visibleSlot == 1 {
 		depth = 0.22
 	}
 	bump := core.BumpOffset(enemy.AttackBump, 0.2)
@@ -614,22 +659,21 @@ func horizontalForward(camera rl.Camera3D) rl.Vector3 {
 	return rl.NewVector3(x/length, 0, z/length)
 }
 
-func battleEnemySlot(g core.GameState, index int) (int, int) {
-	slot := 0
+// battleEnemySlot maps a member slot to (visible slot, total visible
+// count) — visible meaning alive or still death-fading. Returns -1 for the
+// visible slot when the queried member isn't currently visible.
+func battleEnemySlot(g core.GameState, memberSlot int) (int, int) {
+	visible := 0
 	count := 0
 	found := -1
-	for _, enemyIndex := range g.Battle.EnemyGroup {
-		if enemyIndex < 0 || enemyIndex >= len(g.Enemies) {
+	for i, m := range core.BattleMembers(&g) {
+		if !m.Alive && m.DeathFade <= 0 {
 			continue
 		}
-		enemy := g.Enemies[enemyIndex]
-		if !enemy.Alive && enemy.DeathFade <= 0 {
-			continue
+		if i == memberSlot {
+			found = visible
 		}
-		if enemyIndex == index {
-			found = slot
-		}
-		slot++
+		visible++
 		count++
 	}
 	return found, count

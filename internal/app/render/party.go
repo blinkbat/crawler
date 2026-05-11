@@ -35,7 +35,7 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 		border = borderTarget
 		accent = borderTarget
 	case active:
-		bg = mixColor(surfacePrimary, surfaceActiveTint, 0.55)
+		bg = core.MixColor(surfacePrimary, surfaceActiveTint, 0.55)
 		border = borderActive
 	}
 
@@ -79,6 +79,12 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 
 	if down {
 		drawTextWithShadow(font, "DOWN", x+partyCardW-58, y+14, 14, rl.NewColor(220, 102, 102, 235))
+	} else if member.PoisonTurns > 0 {
+		// Poison takes priority over the Defending label since it's the
+		// shorter-lived, more actionable status (heal vs ride it out).
+		flicker := 0.65 + 0.35*pulse(2.6)
+		col := rl.NewColor(160, 220, 100, 240)
+		drawTextWithShadow(font, "POISONED", x+partyCardW-88, y+14, 14, fadeColor(col, flicker))
 	} else if member.Defending {
 		drawTextWithShadow(font, "DEFENDING", x+partyCardW-94, y+14, 14, rl.NewColor(132, 196, 255, 240))
 	}
@@ -149,17 +155,3 @@ func drawTextWithShadow(font rl.Font, text string, x, y, size float32, col color
 	rl.DrawTextEx(font, text, pos, size, 1, col)
 }
 
-func mixColor(a, b color.RGBA, t float32) color.RGBA {
-	if t < 0 {
-		t = 0
-	}
-	if t > 1 {
-		t = 1
-	}
-	return color.RGBA{
-		R: uint8(float32(a.R)*(1-t) + float32(b.R)*t),
-		G: uint8(float32(a.G)*(1-t) + float32(b.G)*t),
-		B: uint8(float32(a.B)*(1-t) + float32(b.B)*t),
-		A: uint8(float32(a.A)*(1-t) + float32(b.A)*t),
-	}
-}

@@ -359,35 +359,37 @@ func (t TimingState) Progress() float32 {
 }
 
 // TimingBonusMult is the offensive damage multiplier for an attack quality.
+// Multipliers live in config.go so balance tuning is centralized.
 func TimingBonusMult(quality int) float32 {
 	switch quality {
 	case TimingQualityNice:
-		return 1.25
+		return TimingMultNice
 	case TimingQualityGood:
-		return 1.5
+		return TimingMultGood
 	case TimingQualityGreat:
-		return 1.75
+		return TimingMultGreat
 	case TimingQualityExcellent:
-		return 2.0
+		return TimingMultExcellent
 	default:
-		return 1.0
+		return TimingMultMiss
 	}
 }
 
 // TimingDefenseMult is the incoming damage multiplier for a defend quality.
 // Lower is better; Excellent quarters incoming damage, Miss takes the full hit.
+// Multipliers live in config.go.
 func TimingDefenseMult(quality int) float32 {
 	switch quality {
 	case TimingQualityNice:
-		return 0.75
+		return TimingDefNice
 	case TimingQualityGood:
-		return 0.5
+		return TimingDefGood
 	case TimingQualityGreat:
-		return 0.35
+		return TimingDefGreat
 	case TimingQualityExcellent:
-		return 0.25
+		return TimingDefExcellent
 	default:
-		return 1.0
+		return TimingDefMiss
 	}
 }
 

@@ -5,6 +5,8 @@ import (
 	"image/color"
 	"math"
 
+	"crawler/internal/app/core"
+
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
@@ -81,10 +83,7 @@ func drawSmallPanelOutline(x, y, w, h int32, col color.RGBA) {
 }
 
 func fixedRoundnessFor(w, h int32, target float32) float32 {
-	minDim := float32(w)
-	if float32(h) < minDim {
-		minDim = float32(h)
-	}
+	minDim := float32(core.MinInt(int(w), int(h)))
 	if minDim <= 0 {
 		return 0
 	}
@@ -161,10 +160,8 @@ func drawBar(font rl.Font, x, y, width, height float32, label string, value, max
 	}
 	track := rl.NewColor(8, 12, 22, 200)
 	outline := borderDim
-	textCol := textMuted
 	if muted {
 		fill = rl.NewColor(96, 84, 92, 230)
-		textCol = textDim
 	}
 	ix, iy, iw, ih := int32(x), int32(y), int32(width), int32(height)
 	drawSmallPanel(ix, iy, iw, ih, track)
@@ -201,8 +198,6 @@ func drawBar(font rl.Font, x, y, width, height float32, label string, value, max
 		valColor := textPrimary
 		if muted {
 			valColor = textDim
-		} else {
-			_ = textCol
 		}
 		valMeasure := rl.MeasureTextEx(font, valText, valSize, 1)
 		valY := y + (float32(ih)-valMeasure.Y)/2 - 1

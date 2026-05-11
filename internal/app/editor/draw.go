@@ -165,8 +165,8 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 	if s.hoverX >= 0 {
 		coord = fmt.Sprintf("(%d, %d)", s.hoverX, s.hoverZ)
 	}
-	infoLabel := fmt.Sprintf("cell %s   layer %s   brush %dx%d   zoom %.0f%%",
-		coord, layerName(s.layer), s.brushSize, s.brushSize, s.zoom*100)
+	infoLabel := fmt.Sprintf("cell %s   layer %s   brush %dx%d   zoom %.0f%%   phase %s (T)",
+		coord, layerName(s.layer), s.brushSize, s.brushSize, s.zoom*100, core.PhaseName(s.previewPhase))
 	infoMeasure := rl.MeasureTextEx(font, infoLabel, 13, 1)
 	infoX := labelX - infoMeasure.X - 24
 	render.DrawTextWithShadow(font, infoLabel, infoX, (topbarH-infoMeasure.Y)/2, 13, theme.TextHint)
@@ -535,15 +535,15 @@ func drawTextField(font rl.Font, r rl.Rectangle, text string, focused bool) {
 	rl.DrawRectangleRec(r, bg)
 	rl.DrawRectangleLinesEx(r, 1, border)
 
-	render := text
+	display := text
 	if focused {
 		if math.Mod(rl.GetTime(), 1.0) > 0.5 {
-			render += "_"
+			display += "_"
 		} else {
-			render += " "
+			display += " "
 		}
 	}
-	rl.DrawTextEx(font, render, rl.NewVector2(r.X+8, r.Y+(r.Height-14)/2), 14, 1, rl.NewColor(230, 234, 244, 255))
+	rl.DrawTextEx(font, display, rl.NewVector2(r.X+8, r.Y+(r.Height-14)/2), 14, 1, rl.NewColor(230, 234, 244, 255))
 }
 
 func drawReadonlyValue(font rl.Font, r rl.Rectangle, text string) {
@@ -583,7 +583,7 @@ func drawGrid(s *State, font rl.Font) {
 			if d := s.area.Decor[z][x]; d != core.DecorAuto {
 				rl.DrawRectangleRec(insetRect(r, cell*0.28), fadeAlpha(decorColor(d), decorAlpha))
 			}
-			if p := s.area.Props[z][x]; isPropChar(p) {
+			if p := s.area.Props[z][x]; core.IsPropChar(p) {
 				rl.DrawCircle(int32(r.X+cell/2), int32(r.Y+cell/2), cell*0.36, fadeAlpha(propColor(p), propAlpha))
 			}
 		}
@@ -600,24 +600,45 @@ func drawGrid(s *State, font rl.Font) {
 		rl.DrawLineEx(rl.NewVector2(s.rect.gridX, py), rl.NewVector2(s.rect.gridX+s.rect.gridW, py), 1, gridLine)
 	}
 
-	// Enemy spawn markers.
-	for _, sp := range s.area.EnemySpawns {
+	// Pack markers. Each pack draws one circle tinted by the leader (the
+	// highest-tier member) plus a small "xN" badge when the pack has more
+	// than one member — matching the field-render contract that the player
+	// only sees the leader from afar.
+	for _, sp := range s.area.PackSpawns {
+		if len(sp.Members) == 0 {
+			continue
+		}
 		cx := s.rect.gridX + (float32(sp.TileX)+0.5)*cell
 		cy := s.rect.gridY + (float32(sp.TileZ)+0.5)*cell
+		leader := packSpawnLeaderKind(sp)
 		col := fadeAlpha(rl.NewColor(220, 156, 96, 255), entityAlpha)
-		if sp.Kind == core.EnemyBat {
+		if leader == core.EnemyBat {
 			col = fadeAlpha(rl.NewColor(160, 130, 220, 255), entityAlpha)
 		}
 		rl.DrawCircle(int32(cx), int32(cy), cell*0.32, col)
 		rl.DrawCircleLines(int32(cx), int32(cy), cell*0.32, fadeAlpha(rl.NewColor(0, 0, 0, 220), entityAlpha))
 		label := "R"
-		if sp.Kind == core.EnemyBat {
+		if leader == core.EnemyBat {
 			label = "B"
 		}
 		measure := rl.MeasureTextEx(font, label, cell*0.42, 1)
 		rl.DrawTextEx(font, label,
 			rl.NewVector2(cx-measure.X/2, cy-measure.Y/2),
 			cell*0.42, 1, fadeAlpha(rl.NewColor(0, 0, 0, 230), entityAlpha))
+		if len(sp.Members) > 1 {
+			badge := fmt.Sprintf("x%d", len(sp.Members))
+			bsize := cell * 0.28
+			bm := rl.MeasureTextEx(font, badge, bsize, 1)
+			bx := cx + cell*0.18
+			by := cy - cell*0.42
+			rl.DrawRectangleRounded(
+				rl.NewRectangle(bx-2, by-1, bm.X+6, bm.Y+2),
+				0.4, 4,
+				fadeAlpha(rl.NewColor(20, 20, 24, 230), entityAlpha))
+			rl.DrawTextEx(font, badge,
+				rl.NewVector2(bx+1, by),
+				bsize, 1, fadeAlpha(rl.NewColor(240, 240, 240, 255), entityAlpha))
+		}
 	}
 
 	// Player start marker.
@@ -675,7 +696,7 @@ func drawGrid(s *State, font rl.Font) {
 		gy := s.rect.gridY + (float32(s.hoverZ)+0.5)*cell
 		rl.DrawCircleLines(int32(gx), int32(gy), cell*0.36, rl.NewColor(255, 220, 124, 220))
 	}
-	if s.drag == dragEnemy && s.hoverX >= 0 && s.dragSpawnIdx >= 0 && s.dragSpawnIdx < len(s.area.EnemySpawns) {
+	if s.drag == dragPack && s.hoverX >= 0 && s.dragPackIdx >= 0 && s.dragPackIdx < len(s.area.PackSpawns) {
 		gx := s.rect.gridX + (float32(s.hoverX)+0.5)*cell
 		gy := s.rect.gridY + (float32(s.hoverZ)+0.5)*cell
 		rl.DrawCircleLines(int32(gx), int32(gy), cell*0.32, rl.NewColor(255, 255, 255, 220))
@@ -726,7 +747,7 @@ func brushPreviewColor(s *State) rl.Color {
 		}
 		return decorColor(b.Char)
 	case LayerProps:
-		if isPropChar(b.Char) {
+		if core.IsPropChar(b.Char) {
 			return propColor(b.Char)
 		}
 		return floorColor(core.FloorAuto)

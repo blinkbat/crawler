@@ -68,6 +68,20 @@ func drawTimingHeading(font rl.Font, text string, x, barW, y float32, baseCol rl
 	rl.DrawTextEx(font, text, rl.NewVector2(hx, hy), size, 1.5, col)
 }
 
+// applyTimingFlashCursor draws the bright halo around the frozen cursor
+// during the flash hold and returns the (width, color) overrides the
+// caller's final cursor draw should pick up. Shared by press and charge
+// bars — both handle flashing identically.
+func applyTimingFlashCursor(curX, y, barH, flashTimer float32, base rl.Color) (float32, rl.Color) {
+	const cursorW = float32(12)
+	flashCol := base
+	flashCol.A = 255
+	halo := flashCol
+	halo.A = uint8(180 * flashAlpha(flashTimer))
+	rl.DrawRectangle(int32(curX-cursorW*2), int32(y)-8, int32(cursorW*4), int32(barH)+16, halo)
+	return cursorW, flashCol
+}
+
 // drawPressBar is the original press-kind bar: nested quality zones inside
 // the acceptance window, sliding cursor, flash on press.
 func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
@@ -109,13 +123,7 @@ func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x
 	cursorW := float32(8)
 	cursorCol := rl.NewColor(248, 248, 252, 255)
 	if flashing {
-		cursorW = 12
-		flashCol := qualityColor(timing.Quality, isDefend)
-		flashCol.A = 255
-		cursorCol = flashCol
-		halo := flashCol
-		halo.A = uint8(180 * flashAlpha(g.Battle.TimingFlash))
-		rl.DrawRectangle(int32(curX-cursorW*2), int32(y)-8, int32(cursorW*4), int32(barH)+16, halo)
+		cursorW, cursorCol = applyTimingFlashCursor(curX, y, barH, g.Battle.TimingFlash, qualityColor(timing.Quality, isDefend))
 	}
 	rl.DrawRectangle(int32(curX-cursorW/2), int32(y)-6, int32(cursorW), int32(barH)+12, cursorCol)
 }
@@ -191,13 +199,7 @@ func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, 
 		rl.DrawRectangle(int32(curX-cursorW), int32(y)-6, int32(cursorW*2), int32(barH)+12, halo)
 	}
 	if flashing {
-		cursorW = 12
-		flashCol := qualityColor(timing.Quality, false)
-		flashCol.A = 255
-		cursorCol = flashCol
-		halo := flashCol
-		halo.A = uint8(180 * flashAlpha(g.Battle.TimingFlash))
-		rl.DrawRectangle(int32(curX-cursorW*2), int32(y)-8, int32(cursorW*4), int32(barH)+16, halo)
+		cursorW, cursorCol = applyTimingFlashCursor(curX, y, barH, g.Battle.TimingFlash, qualityColor(timing.Quality, false))
 	}
 	rl.DrawRectangle(int32(curX-cursorW/2), int32(y)-6, int32(cursorW), int32(barH)+12, cursorCol)
 }
@@ -368,26 +370,31 @@ func arrowAxisVec(dir int) (float32, float32) {
 	return 0, -1
 }
 
-// drawTimeRange paints a solid color stripe between two times (in seconds)
-// across the bar. Used by the charge bar to paint peak / decay / fill zones.
-func drawTimeRange(startSec, endSec float32, timing core.TimingState, barX, barY, barW, barH float32, col rl.Color) {
-	if timing.Duration <= 0 || endSec <= startSec {
-		return
-	}
-	startPct := startSec / timing.Duration
-	endPct := endSec / timing.Duration
+// drawBarSlice paints a stripe across the bar between two normalized
+// fractions. Clamps to [0,1] and skips zero-or-negative widths so callers
+// don't have to repeat the bookkeeping.
+func drawBarSlice(barX, barY, barW, barH, startPct, endPct float32, col rl.Color) {
 	if startPct < 0 {
 		startPct = 0
 	}
 	if endPct > 1 {
 		endPct = 1
 	}
-	zx := barX + startPct*barW
-	zw := (endPct - startPct) * barW
-	if zw <= 0 {
+	if endPct <= startPct {
 		return
 	}
+	zx := barX + startPct*barW
+	zw := (endPct - startPct) * barW
 	rl.DrawRectangle(int32(zx), int32(barY), int32(zw), int32(barH), col)
+}
+
+// drawTimeRange paints a solid color stripe between two times (in seconds)
+// across the bar. Used by the charge bar to paint peak / decay / fill zones.
+func drawTimeRange(startSec, endSec float32, timing core.TimingState, barX, barY, barW, barH float32, col rl.Color) {
+	if timing.Duration <= 0 || endSec <= startSec {
+		return
+	}
+	drawBarSlice(barX, barY, barW, barH, startSec/timing.Duration, endSec/timing.Duration, col)
 }
 
 // chargeFillEnd returns how far (in seconds along the bar) the orange
@@ -424,7 +431,7 @@ func drawChargeTick(timing core.TimingState, barX, barY, barW, barH float32, pct
 // quality bands without drawing any borders.
 func drawWindowZone(timing core.TimingState, barX, barY, barW, barH float32, ratio float32, col rl.Color) {
 	windowSize := timing.WindowEnd - timing.WindowStart
-	if windowSize <= 0 {
+	if windowSize <= 0 || timing.Duration <= 0 {
 		return
 	}
 	half := windowSize * ratio * 0.5
@@ -436,14 +443,7 @@ func drawWindowZone(timing core.TimingState, barX, barY, barW, barH float32, rat
 	if endSec > timing.WindowEnd {
 		endSec = timing.WindowEnd
 	}
-	startPct := startSec / timing.Duration
-	endPct := endSec / timing.Duration
-	zx := barX + startPct*barW
-	zw := (endPct - startPct) * barW
-	if zw <= 0 {
-		return
-	}
-	rl.DrawRectangle(int32(zx), int32(barY), int32(zw), int32(barH), col)
+	drawBarSlice(barX, barY, barW, barH, startSec/timing.Duration, endSec/timing.Duration, col)
 }
 
 // flashAlpha returns the [0,1] strength of the flash, peaking right after the
@@ -529,7 +529,7 @@ func DrawDamagePopups(camera rl.Camera3D, g core.GameState, assets Resources) {
 	if g.Battle.Phase == core.BattleNone {
 		return
 	}
-	for i, enemy := range g.Enemies {
+	for i, enemy := range core.BattleMembers(&g) {
 		if enemy.DamagePopupTimer <= 0 {
 			continue
 		}
@@ -537,7 +537,7 @@ func DrawDamagePopups(camera rl.Camera3D, g core.GameState, assets Resources) {
 		// duration (QualityResultDuration ~0.7s) outlasts DeathFade (~0.55s),
 		// so for the killing blow we want the number to keep floating after
 		// the body fades. enemyDrawPosition still returns a valid spot since
-		// the Enemy struct lives in g.Enemies until the next battle starts.
+		// the member's slot is stable for the lifetime of the active pack.
 		pos := enemyDrawPosition(camera, g, i, enemy)
 		pos.Y += 0.6
 		screenPos := rl.GetWorldToScreen(pos, camera)

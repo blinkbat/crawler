@@ -111,9 +111,11 @@ func updateEditorScene(state *appState, dt float32) {
 		// Build a runtime GameState from the in-memory area without
 		// touching disk. The editor's State stays intact so we land back
 		// on the same map (and the same dirty-marker) when the player
-		// quits the playtest.
+		// quits the playtest. StepCount is seeded from the editor's
+		// previewed phase so the playtest opens in that lighting.
 		area := state.editor.Area()
 		state.game = core.NewGameState(area)
+		state.game.StepCount = state.editor.PreviewStepCount()
 		state.scene = sceneAdventure
 		state.testFromEditor = true
 	}

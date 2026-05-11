@@ -12,12 +12,12 @@ func DrawOverlay(g core.GameState, assets Resources) {
 	if g.Battle.Phase != core.BattleNone {
 		drawBattleHUD(g, assets)
 		drawTurnPanel(g, assets)
-		drawMinimap(g.Map, g, assets)
+		drawMinimap(g.Area, g, assets)
 		DrawPartyRibbon(g, assets)
 		drawTimingBar(g, assets)
 		drawBattleSplash(g, assets)
 		return
 	}
-	drawMinimap(g.Map, g, assets)
+	drawMinimap(g.Area, g, assets)
 	DrawPartyRibbon(g, assets)
 }

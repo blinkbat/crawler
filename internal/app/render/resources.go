@@ -130,38 +130,40 @@ func (r Resources) Unload() {
 	}
 }
 
-// loadFloorModel builds a single tinted floor cube model with mipmapped
-// trilinear filtering. Used for the primary floor and the alt variants
-// (dirt / dark grass) on the field.
-func loadFloorModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
+// loadTiledTexture is the shared pipeline for "128x128 RGBA pixels →
+// mipmapped, trilinear-filtered, repeat-wrapped texture." Used by every
+// tile-class texture (walls, floor variants, prop diffuse), so the
+// filter/wrap settings stay identical across the world.
+func loadTiledTexture(pixels []color.RGBA) rl.Texture2D {
 	tex := loadTexture(pixels, 128, 128, rl.FilterBilinear)
 	rl.GenTextureMipmaps(&tex)
 	rl.SetTextureFilter(tex, rl.FilterTrilinear)
 	rl.SetTextureWrap(tex, rl.WrapRepeat)
-	model := rl.LoadModelFromMesh(rl.GenMeshCube(core.TileSize, 0.06, core.TileSize))
+	return tex
+}
+
+// loadTileModel builds one tile-sized cube model (TileSize × height ×
+// TileSize), textures it with the given pixels via loadTiledTexture, and
+// binds the lighting shader. Used for both wall cubes and floor cubes —
+// only the height differs.
+func loadTileModel(pixels []color.RGBA, height float32, shader rl.Shader) rl.Model {
+	tex := loadTiledTexture(pixels)
+	model := rl.LoadModelFromMesh(rl.GenMeshCube(core.TileSize, height, core.TileSize))
 	setModelTexture(&model, tex)
 	attachShader(&model, shader)
 	return model
 }
 
+// loadFloorModel is the alt-floor variant entry point (dirt / dark grass).
+// Floor cubes use a flat 0.06 height so the wall geometry overlaps cleanly.
+func loadFloorModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
+	return loadTileModel(pixels, 0.06, shader)
+}
+
 func loadWorldMaterial(wallPixels, floorPixels []color.RGBA, shader rl.Shader) worldMaterialResources {
-	wallTexture := loadTexture(wallPixels, 128, 128, rl.FilterBilinear)
-	rl.GenTextureMipmaps(&wallTexture)
-	rl.SetTextureFilter(wallTexture, rl.FilterTrilinear)
-	rl.SetTextureWrap(wallTexture, rl.WrapRepeat)
-	floorTexture := loadTexture(floorPixels, 128, 128, rl.FilterBilinear)
-	rl.GenTextureMipmaps(&floorTexture)
-	rl.SetTextureFilter(floorTexture, rl.FilterTrilinear)
-	rl.SetTextureWrap(floorTexture, rl.WrapRepeat)
-	wallModel := rl.LoadModelFromMesh(rl.GenMeshCube(core.TileSize, core.WallHeight, core.TileSize))
-	floorModel := rl.LoadModelFromMesh(rl.GenMeshCube(core.TileSize, 0.06, core.TileSize))
-	setModelTexture(&wallModel, wallTexture)
-	setModelTexture(&floorModel, floorTexture)
-	attachShader(&wallModel, shader)
-	attachShader(&floorModel, shader)
 	return worldMaterialResources{
-		wallModel:  wallModel,
-		floorModel: floorModel,
+		wallModel:  loadTileModel(wallPixels, core.WallHeight, shader),
+		floorModel: loadFloorModel(floorPixels, shader),
 	}
 }
 
@@ -190,6 +192,8 @@ func loadEnemyVisuals() map[core.EnemyKind]enemyVisual {
 	rl.SetTextureWrap(ratTexture, rl.WrapClamp)
 	batTexture := loadTexture(makeBatPixels(80, 88), 80, 88, rl.FilterPoint)
 	rl.SetTextureWrap(batTexture, rl.WrapClamp)
+	diseasedRatTexture := loadTexture(makeDiseasedRatPixels(72, 96), 72, 96, rl.FilterPoint)
+	rl.SetTextureWrap(diseasedRatTexture, rl.WrapClamp)
 	return map[core.EnemyKind]enemyVisual{
 		core.EnemyRat: {
 			texture: ratTexture,
@@ -202,6 +206,12 @@ func loadEnemyVisuals() map[core.EnemyKind]enemyVisual {
 			// the multi-enemy slot spacing in enemyDrawPosition (1.12) so
 			// adjacent bats in three-bat encounters don't merge silhouettes.
 			size: rl.NewVector2(0.98, 0.84),
+		},
+		core.EnemyDiseasedRat: {
+			texture: diseasedRatTexture,
+			// Slightly bulkier silhouette than a clean rat — sells the
+			// "meaner, bloated, sicker" read at a glance.
+			size: rl.NewVector2(0.92, 1.30),
 		},
 	}
 }
@@ -252,13 +262,6 @@ func systemFontCandidates() []string {
 			"/usr/share/fonts/noto/NotoSans-Regular.ttf",
 		}
 	}
-}
-
-func drawHUDText(font rl.Font, text string, x, y int32, size float32, col color.RGBA) {
-	pos := rl.NewVector2(float32(x), float32(y))
-	shadow := rl.NewVector2(float32(x)+2, float32(y)+2)
-	rl.DrawTextEx(font, text, shadow, size, 1, rl.NewColor(0, 0, 0, 190))
-	rl.DrawTextEx(font, text, pos, size, 1, col)
 }
 
 func setModelTexture(model *rl.Model, texture rl.Texture2D) {

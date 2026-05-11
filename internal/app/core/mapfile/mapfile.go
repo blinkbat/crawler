@@ -40,13 +40,16 @@ type MapFile struct {
 	Floor     []string
 	Decor     []string
 	Props     []string
-	Enemies   []MapEnemy
+	Packs     []MapPack
 }
 
-type MapEnemy struct {
-	Kind string
-	X    int
-	Z    int
+// MapPack is one authored pack at a tile. Members is a non-empty list of
+// enemy-kind names; on-disk format is "kind[,kind...] X Z" so a single-
+// member pack reads the same as the legacy "kind X Z" form.
+type MapPack struct {
+	Members []string
+	X       int
+	Z       int
 }
 
 // layerSlot is the parser's notion of "which grid is the upcoming N rows
@@ -98,23 +101,33 @@ func Parse(r io.Reader) (MapFile, error) {
 			}
 			fields := strings.Fields(line)
 			if len(fields) != 3 {
-				return mf, fmt.Errorf("line %d: expected '<kind> <x> <z>', got %q", lineNo, raw)
+				return mf, fmt.Errorf("line %d: expected '<kind[,kind...]> <x> <z>', got %q", lineNo, raw)
+			}
+			members := strings.Split(fields[0], ",")
+			for i, m := range members {
+				m = strings.TrimSpace(m)
+				if m == "" {
+					return mf, fmt.Errorf("line %d: empty pack member at position %d", lineNo, i)
+				}
+				members[i] = m
 			}
 			x, err := strconv.Atoi(fields[1])
 			if err != nil {
-				return mf, fmt.Errorf("line %d: bad enemy x %q", lineNo, fields[1])
+				return mf, fmt.Errorf("line %d: bad pack x %q", lineNo, fields[1])
 			}
 			z, err := strconv.Atoi(fields[2])
 			if err != nil {
-				return mf, fmt.Errorf("line %d: bad enemy z %q", lineNo, fields[2])
+				return mf, fmt.Errorf("line %d: bad pack z %q", lineNo, fields[2])
 			}
-			mf.Enemies = append(mf.Enemies, MapEnemy{Kind: fields[0], X: x, Z: z})
+			mf.Packs = append(mf.Packs, MapPack{Members: members, X: x, Z: z})
 			continue
 		}
 
-		// Layer grid line. Skip pure-whitespace lines once we've collected
-		// Height rows for this layer (handles the blank line that some
-		// editors auto-insert before the next section header).
+		// Layer grid line. Once Height rows are collected, blank lines are
+		// tolerated (some editors auto-insert one before the next section
+		// header) but a non-blank overflow row is a structural error — the
+		// validator would catch it later, but reporting it on the offending
+		// line gives a better diagnostic.
 		target := layerSlice(&mf, state)
 		if target == nil {
 			continue
@@ -123,6 +136,7 @@ func Parse(r io.Reader) (MapFile, error) {
 			if strings.TrimSpace(raw) == "" {
 				continue
 			}
+			return mf, fmt.Errorf("line %d: extra row past declared height %d", lineNo, mf.Height)
 		}
 		*target = append(*target, raw)
 	}
@@ -287,8 +301,11 @@ func (mf MapFile) Encode(w io.Writer) error {
 		}
 	}
 	fmt.Fprintln(bw, "enemies:")
-	for _, e := range mf.Enemies {
-		fmt.Fprintf(bw, "%s %d %d\n", e.Kind, e.X, e.Z)
+	for _, p := range mf.Packs {
+		// Single-member packs encode the same as the legacy "kind X Z" line
+		// so maps without grouped packs stay byte-identical across the
+		// format change.
+		fmt.Fprintf(bw, "%s %d %d\n", strings.Join(p.Members, ","), p.X, p.Z)
 	}
 	return bw.Flush()
 }

@@ -103,17 +103,6 @@ func ConsumeItem(inv []ItemStack, kind ItemKind) ([]ItemStack, bool) {
 	return inv, false
 }
 
-// InventoryEmpty is a convenience for the "Item" menu option's enabled
-// state: returns true when there are no usable items at all.
-func InventoryEmpty(inv []ItemStack) bool {
-	for _, s := range inv {
-		if s.Count > 0 {
-			return false
-		}
-	}
-	return true
-}
-
 // LiveStacks returns just the inventory entries with a positive count, so
 // the picker UI never shows a "0x …" zombie row. Both the input layer
 // (battle/menu.go) and the renderer (render/battle.go) call into this so
@@ -127,4 +116,17 @@ func LiveStacks(inv []ItemStack) []ItemStack {
 		}
 	}
 	return out
+}
+
+// InventoryEmpty is a convenience for the "Item" menu option's enabled
+// state: returns true when there are no usable items at all. Walks the
+// slice directly (cheaper than allocating via LiveStacks just to check
+// length) but shares the same "positive count wins" rule.
+func InventoryEmpty(inv []ItemStack) bool {
+	for _, s := range inv {
+		if s.Count > 0 {
+			return false
+		}
+	}
+	return true
 }

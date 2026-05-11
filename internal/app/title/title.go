@@ -21,16 +21,18 @@ const (
 )
 
 type State struct {
-	mode          int
+	mode          titleMode
 	cursor        int
 	mapPaths      []string
 	chosenMapPath string
 	loadError     string
 }
 
+type titleMode int
+
 const (
-	modeMain      = 0
-	modeMapPicker = 1
+	modeMain titleMode = iota
+	modeMapPicker
 )
 
 func New() State { return State{mode: modeMain} }
@@ -54,8 +56,21 @@ func Update(s *State) Action {
 	return ActionNone
 }
 
+// mainMenuItems is the single source of truth for the title menu's row
+// labels and order. updateMain wraps the cursor against len(items) and
+// drawMainMenu renders the same slice, so adding / reordering rows is a
+// one-line edit. Indices below in updateMain are the row meanings; keep
+// them aligned with mainMenuItems.
+var mainMenuItems = []string{"Adventure", "Editor", "Quit"}
+
+const (
+	mainRowAdventure = 0
+	mainRowEditor    = 1
+	mainRowQuit      = 2
+)
+
 func updateMain(s *State) Action {
-	const itemCount = 3
+	itemCount := len(mainMenuItems)
 	if input.UpPressed() {
 		s.cursor = core.WrapIndex(s.cursor-1, itemCount)
 	}
@@ -69,14 +84,14 @@ func updateMain(s *State) Action {
 	if input.ConfirmPressed() {
 		s.loadError = ""
 		switch s.cursor {
-		case 0:
+		case mainRowAdventure:
 			paths, _ := mapfile.List(core.MapsDir())
 			s.mapPaths = paths
 			s.cursor = 0
 			s.mode = modeMapPicker
-		case 1:
+		case mainRowEditor:
 			return ActionOpenEditor
-		case 2:
+		case mainRowQuit:
 			return ActionQuit
 		}
 	}
@@ -133,8 +148,7 @@ func Draw(s State, assets render.Resources) {
 }
 
 func drawMainMenu(s State, font rl.Font, theme render.Theme, screenW, screenH int32) {
-	items := []string{"Adventure", "Editor", "Quit"}
-	drawList(items, s.cursor, font, theme, screenW, screenH, "")
+	drawList(mainMenuItems, s.cursor, font, theme, screenW, screenH, "")
 	drawHint(font, theme, "Up/Down navigate   Enter select   Esc/Q quit", screenW, screenH)
 }
 

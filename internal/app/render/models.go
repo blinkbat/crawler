@@ -165,26 +165,6 @@ func (p propModel) draw(center rl.Vector3, scale, yaw float32) {
 	}
 }
 
-// drawXYZ renders the prop with a non-uniform scale so callers can squash a
-// model's vertical extent independently from its footprint. Used by
-// scattered small-rock decorations to produce low, walkable-looking pebbles
-// from the same boulder mesh set.
-func (p propModel) drawXYZ(center rl.Vector3, scale rl.Vector3, yaw float32) {
-	for _, part := range p.parts {
-		offset := rl.NewVector3(part.offset.X*scale.X, part.offset.Y*scale.Y, part.offset.Z*scale.Z)
-		if yaw != 0 {
-			offset = rl.Vector3RotateByAxisAngle(offset, rl.NewVector3(0, 1, 0), yaw*float32(math.Pi)/180)
-		}
-		position := rl.NewVector3(center.X+offset.X, center.Y+offset.Y, center.Z+offset.Z)
-		drawScale := rl.NewVector3(part.scale.X*scale.X, part.scale.Y*scale.Y, part.scale.Z*scale.Z)
-		rotation := part.rotation
-		if isVerticalAxis(part.rotationAxis) {
-			rotation += yaw
-		}
-		rl.DrawModelEx(p.models[part.modelIdx], position, partRotationAxis(part), rotation, drawScale, part.tint)
-	}
-}
-
 func (p propModel) unload() {
 	for i := range p.models {
 		rl.UnloadModel(p.models[i])

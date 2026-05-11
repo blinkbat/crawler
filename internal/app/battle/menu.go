@@ -6,21 +6,12 @@ import (
 	"fmt"
 )
 
-// Action menu row indices. Order matches the rendered list in render/battle.go.
-const (
-	actionRowAttack = 0
-	actionRowSkill  = 1
-	actionRowDefend = 2
-	actionRowItem   = 3
-	actionRowCount  = 4
-)
-
 func updateActionMenu(g *core.GameState) {
 	if input.UpPressed() {
-		g.Battle.MenuIndex = core.WrapIndex(g.Battle.MenuIndex-1, actionRowCount)
+		g.Battle.MenuIndex = core.WrapIndex(g.Battle.MenuIndex-1, core.ActionRowCount)
 	}
 	if input.DownPressed() {
-		g.Battle.MenuIndex = core.WrapIndex(g.Battle.MenuIndex+1, actionRowCount)
+		g.Battle.MenuIndex = core.WrapIndex(g.Battle.MenuIndex+1, core.ActionRowCount)
 	}
 	if input.BackPressed() {
 		setBattleStatus(g, "Choose an action.")
@@ -30,15 +21,15 @@ func updateActionMenu(g *core.GameState) {
 		return
 	}
 	switch g.Battle.MenuIndex {
-	case actionRowAttack:
+	case core.ActionRowAttack:
 		g.Battle.PendingSkill = core.SkillNone
 		g.Battle.ActionMode = core.ActionEnemyTarget
 		setBattleStatus(g, "Choose a target.")
 		return
-	case actionRowDefend:
+	case core.ActionRowDefend:
 		performDefend(g)
 		return
-	case actionRowItem:
+	case core.ActionRowItem:
 		if core.InventoryEmpty(g.Inventory) {
 			setBattleStatus(g, "No items.")
 			return
@@ -47,7 +38,7 @@ func updateActionMenu(g *core.GameState) {
 		g.Battle.ItemMenuIndex = 0
 		setBattleStatus(g, "Choose an item.")
 		return
-	case actionRowSkill:
+	case core.ActionRowSkill:
 		performSkill(g)
 		return
 	}

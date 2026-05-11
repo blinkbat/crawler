@@ -72,6 +72,13 @@ func updateHotkeys(s *State) {
 		s.dirty = true
 	}
 
+	// T cycles the day/night preview phase. Shows in the top bar and seeds
+	// StepCount on F5 so the playtest drops into that phase.
+	if !ctrl && rl.IsKeyPressed(rl.KeyT) {
+		s.previewPhase = core.TimeOfDay((int(s.previewPhase) + 1) % 6)
+		s.flash("Preview: " + core.PhaseName(s.previewPhase))
+	}
+
 	updateGridCursor(s)
 }
 
@@ -244,10 +251,12 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 				s.drag = dragStart
 				return
 			}
-		case entitySpawnRat, entitySpawnBat:
-			if idx := spawnIndexAt(s.area.EnemySpawns, x, z); idx >= 0 {
-				s.drag = dragEnemy
-				s.dragSpawnIdx = idx
+		case entityAddRat, entityAddBat:
+			// Click on an existing pack picks it up for drag-move; click on
+			// an empty tile falls through to "add a member" via applyTool.
+			if idx := packIndexAt(s.area.PackSpawns, x, z); idx >= 0 {
+				s.drag = dragPack
+				s.dragPackIdx = idx
 				return
 			}
 		}
@@ -286,7 +295,7 @@ func continueDrag(s *State, x, z int) {
 		applyToolBrushed(s, x, z)
 		s.lastPaintX, s.lastPaintZ = x, z
 	}
-	// dragStart / dragEnemy / dragRect are commit-on-release; the live
+	// dragStart / dragPack / dragRect are commit-on-release; the live
 	// preview lives in draw.go.
 }
 
@@ -294,7 +303,7 @@ func finishDrag(s *State) {
 	switch s.drag {
 	case dragStart:
 		if s.hoverX >= 0 && (s.hoverX != s.area.StartTileX || s.hoverZ != s.area.StartTileZ) {
-			if isBlockingCell(s.area, s.hoverX, s.hoverZ) {
+			if s.area.BlockedAt(s.hoverX, s.hoverZ) {
 				s.flash("Player start must be on an open cell")
 			} else {
 				pushUndo(s)
@@ -303,27 +312,26 @@ func finishDrag(s *State) {
 				s.dirty = true
 			}
 		}
-	case dragEnemy:
-		if s.hoverX >= 0 && s.dragSpawnIdx >= 0 && s.dragSpawnIdx < len(s.area.EnemySpawns) {
-			sp := s.area.EnemySpawns[s.dragSpawnIdx]
+	case dragPack:
+		if s.hoverX >= 0 && s.dragPackIdx >= 0 && s.dragPackIdx < len(s.area.PackSpawns) {
+			sp := s.area.PackSpawns[s.dragPackIdx]
 			if sp.TileX != s.hoverX || sp.TileZ != s.hoverZ {
-				if isBlockingCell(s.area, s.hoverX, s.hoverZ) {
-					s.flash("Spawns need an open cell")
+				if s.area.BlockedAt(s.hoverX, s.hoverZ) {
+					s.flash("Packs need an open cell")
 				} else if s.area.StartTileX == s.hoverX && s.area.StartTileZ == s.hoverZ {
 					s.flash("Cell holds the player start")
 				} else {
 					pushUndo(s)
-					s.area.EnemySpawns = removeSpawnAt(s.area.EnemySpawns, s.hoverX, s.hoverZ)
-					idx := -1
-					for i, e := range s.area.EnemySpawns {
-						if e.TileX == sp.TileX && e.TileZ == sp.TileZ {
-							idx = i
-							break
-						}
-					}
+					// Drop any pack that was already at the destination cell
+					// (dragging this one onto another replaces the existing).
+					// Then locate the dragged pack by its old coords and move
+					// it to the destination. The old-coords lookup works
+					// because addPackMember keeps at most one pack per cell.
+					s.area.PackSpawns = removePackAt(s.area.PackSpawns, s.hoverX, s.hoverZ)
+					idx := packIndexAt(s.area.PackSpawns, sp.TileX, sp.TileZ)
 					if idx >= 0 {
-						s.area.EnemySpawns[idx].TileX = s.hoverX
-						s.area.EnemySpawns[idx].TileZ = s.hoverZ
+						s.area.PackSpawns[idx].TileX = s.hoverX
+						s.area.PackSpawns[idx].TileZ = s.hoverZ
 					}
 					s.dirty = true
 				}
@@ -336,7 +344,7 @@ func finishDrag(s *State) {
 		}
 	}
 	s.drag = dragNone
-	s.dragSpawnIdx = -1
+	s.dragPackIdx = -1
 }
 
 // applyToolBrushed runs the active brush over the brush-size square
@@ -380,8 +388,8 @@ func zoomBy(s *State, anchor rl.Vector2, factor float32) {
 	s.zoom = next
 }
 
-func spawnIndexAt(spawns []core.EnemySpawn, x, z int) int {
-	for i, sp := range spawns {
+func packIndexAt(packs []core.PackSpawn, x, z int) int {
+	for i, sp := range packs {
 		if sp.TileX == x && sp.TileZ == z {
 			return i
 		}
@@ -406,6 +414,32 @@ func handleTopbarButton(s *State, name string) {
 	}
 }
 
+// pumpPrintableASCII drains queued printable-ASCII characters into target
+// (capped at maxLen) and consumes one backspace press. Used by both the
+// metadata text fields and the modal rename field — onChange fires once
+// per accepted character or backspace and may be nil when no caller-side
+// effect is needed.
+func pumpPrintableASCII(target *string, maxLen int, onChange func()) {
+	for {
+		c := rl.GetCharPressed()
+		if c == 0 {
+			break
+		}
+		if c >= 32 && c < 127 && len(*target) < maxLen {
+			*target += string(rune(c))
+			if onChange != nil {
+				onChange()
+			}
+		}
+	}
+	if rl.IsKeyPressed(rl.KeyBackspace) && len(*target) > 0 {
+		*target = (*target)[:len(*target)-1]
+		if onChange != nil {
+			onChange()
+		}
+	}
+}
+
 func updateTextInput(s *State) {
 	if s.focus == focusWidth || s.focus == focusHeight {
 		updateNumericInput(s)
@@ -415,20 +449,7 @@ func updateTextInput(s *State) {
 	if target == nil {
 		return
 	}
-	for {
-		c := rl.GetCharPressed()
-		if c == 0 {
-			break
-		}
-		if c >= 32 && c < 127 && len(*target) < 96 {
-			*target += string(rune(c))
-			s.markDirty()
-		}
-	}
-	if rl.IsKeyPressed(rl.KeyBackspace) && len(*target) > 0 {
-		*target = (*target)[:len(*target)-1]
-		s.markDirty()
-	}
+	pumpPrintableASCII(target, 96, s.markDirty)
 	if rl.IsKeyPressed(rl.KeyTab) {
 		cycleFocus(s)
 		return
@@ -611,6 +632,7 @@ func updateOpenModal(s *State) Action {
 			return ActionNone
 		}
 		s.area = area
+		s.baseline = cloneArea(area)
 		s.undo = nil
 		s.redo = nil
 		s.dirty = false
@@ -621,18 +643,7 @@ func updateOpenModal(s *State) Action {
 }
 
 func updateOpenRename(s *State) Action {
-	for {
-		c := rl.GetCharPressed()
-		if c == 0 {
-			break
-		}
-		if c >= 32 && c < 127 && len(s.modalRenaming) < 64 {
-			s.modalRenaming += string(rune(c))
-		}
-	}
-	if rl.IsKeyPressed(rl.KeyBackspace) && len(s.modalRenaming) > 0 {
-		s.modalRenaming = s.modalRenaming[:len(s.modalRenaming)-1]
-	}
+	pumpPrintableASCII(&s.modalRenaming, 64, nil)
 	if rl.IsKeyPressed(rl.KeyEscape) {
 		s.modalRenaming = ""
 		return ActionNone
@@ -747,6 +758,7 @@ func updateConfirmDirtyModal(s *State) Action {
 			s.pending = pendingNone
 			return ActionNone
 		}
+		s.baseline = cloneArea(s.area)
 		s.dirty = false
 		s.modal = modalNone
 		return runPendingAction(s)
@@ -801,6 +813,7 @@ func saveTo(s *State, name, path string) {
 		return
 	}
 	s.area.Path = path
+	s.baseline = cloneArea(s.area)
 	s.dirty = false
 	s.modal = modalNone
 	s.focus = focusNone

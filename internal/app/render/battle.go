@@ -46,15 +46,15 @@ func targetingAlly(g core.GameState) bool {
 	return g.Battle.ActionMode == core.ActionPartyTarget || g.Battle.ActionMode == core.ActionItemTarget
 }
 
-// drawEnemyRoster shows the active enemy group at the top of the screen.
+// drawEnemyRoster shows the active pack at the top of the screen.
 // Replaces the legacy floating target tooltip and the dense enemy info line
 // that used to sit atop the bottom panel.
 func drawEnemyRoster(g core.GameState, assets Resources) {
 	if g.Battle.Phase == core.BattleWon || g.Battle.Phase == core.BattleLost {
 		return
 	}
-	indices := visibleRosterIndices(g)
-	if len(indices) == 0 {
+	slots := visibleRosterSlots(g)
+	if len(slots) == 0 {
 		return
 	}
 
@@ -63,10 +63,10 @@ func drawEnemyRoster(g core.GameState, assets Resources) {
 	headerH := int32(56)
 	padBottom := int32(16)
 	w := int32(460)
-	if len(indices) <= 1 {
+	if len(slots) <= 1 {
 		w = 360
 	}
-	h := headerH + int32(len(indices))*rowH + padBottom
+	h := headerH + int32(len(slots))*rowH + padBottom
 	x := screenW/2 - w/2
 	y := int32(34)
 
@@ -76,25 +76,23 @@ func drawEnemyRoster(g core.GameState, assets Resources) {
 	drawHeading(assets.hudFont, header, x+20, y+14, borderEnemy)
 
 	targetable := g.Battle.ActionMode == core.ActionEnemyTarget && inPlayerTurn(g)
+	members := core.BattleMembers(&g)
 
-	for i, enemyIndex := range indices {
-		enemy := g.Enemies[enemyIndex]
+	for i, slot := range slots {
+		enemy := members[slot]
 		rowY := y + headerH + int32(i)*rowH
-		drawEnemyRosterRow(assets.hudFont, enemy, x+12, rowY, w-24, rowH-6, targetable && enemyIndex == g.Battle.EnemyIndex, !enemy.Alive)
+		drawEnemyRosterRow(assets.hudFont, enemy, x+12, rowY, w-24, rowH-6, targetable && slot == g.Battle.EnemyIndex, !enemy.Alive)
 	}
 }
 
-func visibleRosterIndices(g core.GameState) []int {
-	out := make([]int, 0, len(g.Battle.EnemyGroup))
-	for _, idx := range g.Battle.EnemyGroup {
-		if idx < 0 || idx >= len(g.Enemies) {
+func visibleRosterSlots(g core.GameState) []int {
+	members := core.BattleMembers(&g)
+	out := make([]int, 0, len(members))
+	for i, m := range members {
+		if !m.Alive && m.DeathFade <= 0 {
 			continue
 		}
-		enemy := g.Enemies[idx]
-		if !enemy.Alive && enemy.DeathFade <= 0 {
-			continue
-		}
-		out = append(out, idx)
+		out = append(out, i)
 	}
 	return out
 }
@@ -109,7 +107,7 @@ func drawEnemyRosterRow(font rl.Font, enemy core.Enemy, x, y, w, h int32, target
 		nameCol = textDim
 	}
 	if targeted {
-		bg = mixColor(bg, surfaceEnemyTint, 0.7)
+		bg = core.MixColor(bg, surfaceEnemyTint, 0.7)
 		border = borderEnemy
 	}
 	drawSmallPanel(x, y, w, h, bg)
@@ -137,8 +135,7 @@ func drawEnemyRosterRow(font rl.Font, enemy core.Enemy, x, y, w, h int32, target
 
 	condSize := float32(13)
 	condY := float32(y) + float32(h) - condSize - 7
-	rl.DrawTextEx(font, condition, rl.NewVector2(nameX+1, condY+1), condSize, 1, rl.NewColor(0, 0, 0, 200))
-	rl.DrawTextEx(font, condition, rl.NewVector2(nameX, condY), condSize, 1, condCol)
+	drawTextWithShadow(font, condition, nameX, condY, condSize, condCol)
 
 	// HP bar on the right, vertically centered.
 	barW := float32(160)
@@ -301,14 +298,14 @@ func drawActionMenuOptions(g core.GameState, assets Resources, x, y int32, membe
 
 	rowSpacing := int32(40)
 
-	drawActionRow(assets.hudFont, x, y, "Attack", "", g.Battle.MenuIndex == 0)
+	drawActionRow(assets.hudFont, x, y+int32(core.ActionRowAttack)*rowSpacing, "Attack", "", g.Battle.MenuIndex == core.ActionRowAttack)
 
 	costLabel := ""
 	if skillCost > 0 {
 		costLabel = fmt.Sprintf("%d MP", skillCost)
 	}
-	drawActionRow(assets.hudFont, x, y+rowSpacing, skillName, costLabel, g.Battle.MenuIndex == 1)
-	drawActionRow(assets.hudFont, x, y+rowSpacing*2, "Defend", "", g.Battle.MenuIndex == 2)
+	drawActionRow(assets.hudFont, x, y+int32(core.ActionRowSkill)*rowSpacing, skillName, costLabel, g.Battle.MenuIndex == core.ActionRowSkill)
+	drawActionRow(assets.hudFont, x, y+int32(core.ActionRowDefend)*rowSpacing, "Defend", "", g.Battle.MenuIndex == core.ActionRowDefend)
 	// Item row: shows total stack count as a hint so the player knows the
 	// menu has anything in it before opening the picker. Empty inventory
 	// renders the row dimmed by hint text rather than disabled, since the
@@ -317,7 +314,7 @@ func drawActionMenuOptions(g core.GameState, assets Resources, x, y int32, membe
 	if total := totalItemCount(g.Inventory); total > 0 {
 		itemSuffix = fmt.Sprintf("x%d", total)
 	}
-	drawActionRow(assets.hudFont, x, y+rowSpacing*3, "Item", itemSuffix, g.Battle.MenuIndex == 3)
+	drawActionRow(assets.hudFont, x, y+int32(core.ActionRowItem)*rowSpacing, "Item", itemSuffix, g.Battle.MenuIndex == core.ActionRowItem)
 }
 
 // drawItemMenuList renders the inventory picker as a vertical list of
@@ -395,7 +392,8 @@ func enemyHealthStyle(enemy core.Enemy) (string, color.RGBA) {
 // drawBattleSplash slams a banner with the encounter title at the top of the
 // screen during the opening of a battle. Slides + scales in for impact.
 func drawBattleSplash(g core.GameState, assets Resources) {
-	if g.Battle.Splash <= 0 || g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(g.Enemies) {
+	members := core.BattleMembers(&g)
+	if g.Battle.Splash <= 0 || g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(members) {
 		return
 	}
 	progress := core.BattleSplashDuration - g.Battle.Splash
@@ -471,7 +469,7 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 
 func rosterHeader(g core.GameState) string {
 	living := core.LivingBattleCount(&g)
-	total := len(g.Battle.EnemyGroup)
+	total := len(core.BattleMembers(&g))
 	if total <= 1 {
 		def := core.BattleEnemyInfo(g)
 		return strings.ToUpper(def.SingularName)
@@ -480,7 +478,7 @@ func rosterHeader(g core.GameState) string {
 }
 
 func splashSubtitle(g core.GameState) string {
-	count := len(g.Battle.EnemyGroup)
+	count := len(core.BattleMembers(&g))
 	if count <= 1 {
 		return "Hostile encounter"
 	}

@@ -14,7 +14,7 @@ import (
 // chosen placement tool. Painting a wall on an entity-occupied cell auto-
 // clears the entity; painting a prop on a wall is refused.
 func applyTool(s *State, x, z int) {
-	if !inBounds(s.area, x, z) {
+	if !s.area.InBounds(x, z) {
 		return
 	}
 	brush := s.activeBrush()
@@ -45,7 +45,7 @@ func applyWallBrush(s *State, x, z int, c byte) {
 		// Walls and props/decor/entities can't co-exist — wall wins.
 		setLayerCell(&s.area.Props, x, z, '.')
 		setLayerCell(&s.area.Decor, x, z, core.DecorAuto)
-		s.area.EnemySpawns = removeSpawnAt(s.area.EnemySpawns, x, z)
+		s.area.PackSpawns = removePackAt(s.area.PackSpawns, x, z)
 	}
 }
 
@@ -54,8 +54,12 @@ func applyDecorBrush(s *State, x, z int, c byte) {
 		s.flash("Decor needs an open cell")
 		return
 	}
-	if isPropChar(s.area.Props[z][x]) {
+	if core.IsPropChar(s.area.Props[z][x]) {
 		s.flash("Decor cell is occupied by a prop")
+		return
+	}
+	if s.area.StartTileX == x && s.area.StartTileZ == z {
+		s.flash("Cell holds the player start")
 		return
 	}
 	setLayerCell(&s.area.Decor, x, z, c)
@@ -77,8 +81,8 @@ func applyPropBrush(s *State, x, z int, c byte) {
 	setLayerCell(&s.area.Props, x, z, c)
 	// A prop occupies the floor square; auto-clear any decor on it.
 	setLayerCell(&s.area.Decor, x, z, core.DecorAuto)
-	// And remove an enemy that would now be inside the prop.
-	s.area.EnemySpawns = removeSpawnAt(s.area.EnemySpawns, x, z)
+	// And remove a pack that would now be inside the prop.
+	s.area.PackSpawns = removePackAt(s.area.PackSpawns, x, z)
 }
 
 func applyEntityBrush(s *State, x, z int, kind entityKind) {
@@ -86,7 +90,7 @@ func applyEntityBrush(s *State, x, z int, kind entityKind) {
 		s.flash("Entities need an open cell")
 		return
 	}
-	if isPropChar(s.area.Props[z][x]) {
+	if core.IsPropChar(s.area.Props[z][x]) {
 		s.flash("Cell is occupied by a prop")
 		return
 	}
@@ -95,10 +99,12 @@ func applyEntityBrush(s *State, x, z int, kind entityKind) {
 		s.area.StartTileX = x
 		s.area.StartTileZ = z
 		s.dirty = true
-	case entitySpawnRat:
-		placeSpawn(s, x, z, core.EnemyRat)
-	case entitySpawnBat:
-		placeSpawn(s, x, z, core.EnemyBat)
+	case entityAddRat:
+		addPackMember(s, x, z, core.EnemyRat)
+	case entityAddBat:
+		addPackMember(s, x, z, core.EnemyBat)
+	case entityAddDiseasedRat:
+		addPackMember(s, x, z, core.EnemyDiseasedRat)
 	}
 }
 
@@ -106,9 +112,9 @@ func applyEntityBrush(s *State, x, z int, kind entityKind) {
 //   - Walls / Props : reset cell to '.'
 //   - Floor         : reset to FloorAuto
 //   - Decor         : reset to DecorAuto
-//   - Entities      : remove enemy at this cell, or refuse on the start
+//   - Entities      : remove the pack at this cell, or refuse on the start
 func eraseAt(s *State, x, z int) {
-	if !inBounds(s.area, x, z) {
+	if !s.area.InBounds(x, z) {
 		return
 	}
 	switch s.layer {
@@ -125,32 +131,68 @@ func eraseAt(s *State, x, z int) {
 			s.flash("Player start can't be erased; place it elsewhere instead")
 			return
 		}
-		before := len(s.area.EnemySpawns)
-		s.area.EnemySpawns = removeSpawnAt(s.area.EnemySpawns, x, z)
-		if len(s.area.EnemySpawns) == before {
+		before := len(s.area.PackSpawns)
+		s.area.PackSpawns = removePackAt(s.area.PackSpawns, x, z)
+		if len(s.area.PackSpawns) == before {
 			return
 		}
 	}
 	s.dirty = true
 }
 
-func placeSpawn(s *State, x, z int, kind core.EnemyKind) {
+// addPackMember appends a member of `kind` to the pack at (x,z). If no pack
+// exists at the tile, creates a fresh pack with the single member.
+func addPackMember(s *State, x, z int, kind core.EnemyKind) {
 	if s.area.StartTileX == x && s.area.StartTileZ == z {
 		s.flash("Cell holds the player start")
 		return
 	}
-	s.area.EnemySpawns = removeSpawnAt(s.area.EnemySpawns, x, z)
-	s.area.EnemySpawns = append(s.area.EnemySpawns, core.EnemySpawn{Kind: kind, TileX: x, TileZ: z})
+	if idx := packIndexAt(s.area.PackSpawns, x, z); idx >= 0 {
+		s.area.PackSpawns[idx].Members = append(s.area.PackSpawns[idx].Members, kind)
+		s.dirty = true
+		return
+	}
+	s.area.PackSpawns = append(s.area.PackSpawns, core.PackSpawn{
+		TileX:   x,
+		TileZ:   z,
+		Members: []core.EnemyKind{kind},
+	})
 	s.dirty = true
 }
 
-func removeSpawnAt(spawns []core.EnemySpawn, x, z int) []core.EnemySpawn {
-	out := spawns[:0:0]
-	for _, sp := range spawns {
-		if sp.TileX == x && sp.TileZ == z {
-			continue
+func removePackAt(packs []core.PackSpawn, x, z int) []core.PackSpawn {
+	return filterPacks(packs, func(sp core.PackSpawn) bool {
+		return sp.TileX != x || sp.TileZ != z
+	})
+}
+
+// packSpawnLeaderKind picks the kind to render as a pack's field icon —
+// the highest-Tier member, ties broken by member order. Mirrors
+// core.PackLeader's rule so editor and runtime stay in sync.
+func packSpawnLeaderKind(sp core.PackSpawn) core.EnemyKind {
+	if len(sp.Members) == 0 {
+		return core.EnemyRat
+	}
+	leader := sp.Members[0]
+	bestTier := core.EnemyInfo(leader).Tier
+	for _, k := range sp.Members[1:] {
+		if t := core.EnemyInfo(k).Tier; t > bestTier {
+			bestTier = t
+			leader = k
 		}
-		out = append(out, sp)
+	}
+	return leader
+}
+
+// filterPacks returns a fresh slice containing only the packs for which
+// keep returns true. Allocates on first append (cap=0 base) so the input
+// slice isn't aliased.
+func filterPacks(packs []core.PackSpawn, keep func(core.PackSpawn) bool) []core.PackSpawn {
+	out := packs[:0:0]
+	for _, sp := range packs {
+		if keep(sp) {
+			out = append(out, sp)
+		}
 	}
 	return out
 }
@@ -164,27 +206,6 @@ func setLayerCell(layer *[]string, x, z int, b byte) {
 	(*layer)[z] = string(row)
 }
 
-func inBounds(a core.AreaDefinition, x, z int) bool {
-	return z >= 0 && z < a.Height && x >= 0 && x < a.Width
-}
-
-// isPropChar mirrors core's same-named check (kept private over there).
-// Used by the editor when deciding whether a cell is occupied for the
-// purposes of decor / entity placement constraints.
-func isPropChar(c byte) bool {
-	switch c {
-	case core.TileTree, core.TileTreeXL, core.TileRockLarge, core.TileBushLarge:
-		return true
-	}
-	return false
-}
-
-func isBlockingCell(a core.AreaDefinition, x, z int) bool {
-	if a.Walls[z][x] == core.TileRock {
-		return true
-	}
-	return isPropChar(a.Props[z][x])
-}
 
 // pushUndo snapshots the current area before a mutation. Any new mutation
 // invalidates the redo stack — standard text-editor undo semantics.
@@ -207,7 +228,10 @@ func undoOne(s *State) {
 	s.undo = s.undo[:len(s.undo)-1]
 	s.redo = append(s.redo, cloneArea(s.area))
 	s.area = last
-	s.dirty = true
+	// Stepping back to a snapshot that matches the on-disk baseline should
+	// drop the dirty marker — don't pester the user with the unsaved-changes
+	// modal if their working state is identical to what's on disk.
+	s.dirty = !areasEqual(s.area, s.baseline)
 }
 
 func redoOne(s *State) {
@@ -219,7 +243,51 @@ func redoOne(s *State) {
 	s.redo = s.redo[:len(s.redo)-1]
 	s.undo = append(s.undo, cloneArea(s.area))
 	s.area = last
-	s.dirty = true
+	s.dirty = !areasEqual(s.area, s.baseline)
+}
+
+// areasEqual returns true when two areas have identical content. Used by
+// undo/redo to detect "we're back at the on-disk baseline" so the dirty
+// marker can clear. Compares headers + per-layer rows + spawns in order.
+func areasEqual(a, b core.AreaDefinition) bool {
+	if a.Name != b.Name || a.Width != b.Width || a.Height != b.Height ||
+		a.Materials != b.Materials ||
+		a.StartTileX != b.StartTileX || a.StartTileZ != b.StartTileZ ||
+		a.StartFacing != b.StartFacing ||
+		a.QuietMessage != b.QuietMessage {
+		return false
+	}
+	if !rowsEqual(a.Walls, b.Walls) || !rowsEqual(a.Floor, b.Floor) ||
+		!rowsEqual(a.Decor, b.Decor) || !rowsEqual(a.Props, b.Props) {
+		return false
+	}
+	if len(a.PackSpawns) != len(b.PackSpawns) {
+		return false
+	}
+	for i := range a.PackSpawns {
+		pa, pb := a.PackSpawns[i], b.PackSpawns[i]
+		if pa.TileX != pb.TileX || pa.TileZ != pb.TileZ || len(pa.Members) != len(pb.Members) {
+			return false
+		}
+		for j := range pa.Members {
+			if pa.Members[j] != pb.Members[j] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func rowsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func cloneArea(a core.AreaDefinition) core.AreaDefinition {
@@ -228,7 +296,14 @@ func cloneArea(a core.AreaDefinition) core.AreaDefinition {
 	out.Floor = append([]string(nil), a.Floor...)
 	out.Decor = append([]string(nil), a.Decor...)
 	out.Props = append([]string(nil), a.Props...)
-	out.EnemySpawns = append([]core.EnemySpawn(nil), a.EnemySpawns...)
+	out.PackSpawns = make([]core.PackSpawn, len(a.PackSpawns))
+	for i, sp := range a.PackSpawns {
+		out.PackSpawns[i] = core.PackSpawn{
+			TileX:   sp.TileX,
+			TileZ:   sp.TileZ,
+			Members: append([]core.EnemyKind(nil), sp.Members...),
+		}
+	}
 	return out
 }
 
@@ -253,13 +328,9 @@ func resize(s *State, w, h int) {
 	if s.area.StartTileZ >= h {
 		s.area.StartTileZ = h - 1
 	}
-	filtered := s.area.EnemySpawns[:0:0]
-	for _, sp := range s.area.EnemySpawns {
-		if sp.TileX < w && sp.TileZ < h {
-			filtered = append(filtered, sp)
-		}
-	}
-	s.area.EnemySpawns = filtered
+	s.area.PackSpawns = filterPacks(s.area.PackSpawns, func(sp core.PackSpawn) bool {
+		return sp.TileX < w && sp.TileZ < h
+	})
 	s.dirty = true
 }
 
@@ -294,6 +365,7 @@ func saveCurrent(s *State) {
 		s.flash("Save failed: " + err.Error())
 		return
 	}
+	s.baseline = cloneArea(s.area)
 	s.dirty = false
 	s.flash("Saved " + core.MapIDFromPath(s.area.Path))
 	for _, w := range reachabilityWarnings(s.area) {
@@ -383,7 +455,7 @@ func floodFill(s *State, x, z int, b byte) {
 	if layer == nil {
 		return
 	}
-	if !inBounds(s.area, x, z) {
+	if !s.area.InBounds(x, z) {
 		return
 	}
 	target := (*layer)[z][x]
@@ -411,15 +483,11 @@ func floodFill(s *State, x, z int, b byte) {
 	for i, r := range rows {
 		(*layer)[i] = string(r)
 	}
-	// Wall flood that turns cells into '#' nukes any spawns that fell inside.
+	// Wall flood that turns cells into '#' nukes any packs that fell inside.
 	if s.layer == LayerWalls && b == core.TileRock {
-		filtered := s.area.EnemySpawns[:0:0]
-		for _, sp := range s.area.EnemySpawns {
-			if !isBlockingCell(s.area, sp.TileX, sp.TileZ) {
-				filtered = append(filtered, sp)
-			}
-		}
-		s.area.EnemySpawns = filtered
+		s.area.PackSpawns = filterPacks(s.area.PackSpawns, func(sp core.PackSpawn) bool {
+			return !s.area.BlockedAt(sp.TileX, sp.TileZ)
+		})
 	}
 	s.dirty = true
 }
@@ -440,7 +508,7 @@ func paintRect(s *State, x0, z0, x1, z1 int) {
 	}
 	for z := z0; z <= z1; z++ {
 		for x := x0; x <= x1; x++ {
-			if !inBounds(s.area, x, z) {
+			if !s.area.InBounds(x, z) {
 				continue
 			}
 			if brush.Char == core.TileRock && s.area.StartTileX == x && s.area.StartTileZ == z {
@@ -475,34 +543,36 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 		a.StartTileX < 0 || a.StartTileX >= a.Width {
 		return []string{"start position is out of bounds"}
 	}
-	if isBlockingCell(a, a.StartTileX, a.StartTileZ) {
-		out = append(out, "start tile is blocked (player will spawn inside geometry)")
+	// If the start tile itself is blocked, every enemy will *technically*
+	// register as unreachable — but the player would also spawn inside
+	// geometry, which is the louder problem. Surface that one warning and
+	// skip the count to avoid stacking noise on top of the root cause.
+	if a.BlockedAt(a.StartTileX, a.StartTileZ) {
+		return []string{"start tile is blocked (player will spawn inside geometry)"}
 	}
 	h := a.Height
 	w := a.Width
 	visited := make([]bool, w*h)
-	if !isBlockingCell(a, a.StartTileX, a.StartTileZ) {
-		stack := [][2]int{{a.StartTileX, a.StartTileZ}}
-		for len(stack) > 0 {
-			p := stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
-			px, pz := p[0], p[1]
-			if pz < 0 || pz >= h || px < 0 || px >= w {
-				continue
-			}
-			idx := pz*w + px
-			if visited[idx] {
-				continue
-			}
-			if isBlockingCell(a, px, pz) {
-				continue
-			}
-			visited[idx] = true
-			stack = append(stack, [2]int{px + 1, pz}, [2]int{px - 1, pz}, [2]int{px, pz + 1}, [2]int{px, pz - 1})
+	stack := [][2]int{{a.StartTileX, a.StartTileZ}}
+	for len(stack) > 0 {
+		p := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		px, pz := p[0], p[1]
+		if pz < 0 || pz >= h || px < 0 || px >= w {
+			continue
 		}
+		idx := pz*w + px
+		if visited[idx] {
+			continue
+		}
+		if a.BlockedAt(px, pz) {
+			continue
+		}
+		visited[idx] = true
+		stack = append(stack, [2]int{px + 1, pz}, [2]int{px - 1, pz}, [2]int{px, pz + 1}, [2]int{px, pz - 1})
 	}
 	unreachable := 0
-	for _, sp := range a.EnemySpawns {
+	for _, sp := range a.PackSpawns {
 		if sp.TileZ < 0 || sp.TileZ >= h || sp.TileX < 0 || sp.TileX >= w {
 			unreachable++
 			continue
@@ -512,7 +582,7 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 		}
 	}
 	if unreachable > 0 {
-		out = append(out, fmt.Sprintf("%d/%d enemies unreachable from start", unreachable, len(a.EnemySpawns)))
+		out = append(out, fmt.Sprintf("%d/%d packs unreachable from start", unreachable, len(a.PackSpawns)))
 	}
 	return out
 }

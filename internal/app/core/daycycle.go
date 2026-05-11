@@ -1,8 +1,8 @@
 package core
 
-// TimeOfDay names a phase in the day/night cycle. Six phases of 25 steps
-// each (StepsPerPhase) make up one full loop (StepsPerCycle = 150). The
-// order matches the natural progression of a day starting at dawn.
+// TimeOfDay names a phase in the day/night cycle. Six phases of StepsPerPhase
+// player tile-steps each (see config.go) make up one full loop. The order
+// matches the natural progression of a day starting at dawn.
 type TimeOfDay int
 
 const (
@@ -12,9 +12,6 @@ const (
 	Dusk
 	Evening
 	Midnight
-
-	StepsPerPhase = 25
-	StepsPerCycle = StepsPerPhase * 6
 )
 
 // PhaseAtStep returns the current phase and the intra-phase progress in

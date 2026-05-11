@@ -8,7 +8,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-func drawMinimap(m core.GameMap, g core.GameState, assets Resources) {
+func drawMinimap(m core.AreaDefinition, g core.GameState, assets Resources) {
 	const (
 		cell      = int32(12)
 		viewCells = int32(13)
@@ -48,12 +48,12 @@ func drawMinimap(m core.GameMap, g core.GameState, assets Resources) {
 		}
 	}
 
-	for _, enemy := range g.Enemies {
-		if !enemy.Alive {
+	for _, pack := range g.Packs {
+		if !core.PackAlive(pack) {
 			continue
 		}
-		localX := enemy.TileX - startX
-		localZ := enemy.TileZ - startZ
+		localX := pack.TileX - startX
+		localZ := pack.TileZ - startZ
 		if localX < 0 || localZ < 0 || localX >= int(viewCells) || localZ >= int(viewCells) {
 			continue
 		}

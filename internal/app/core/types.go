@@ -1,25 +1,16 @@
 package core
 
-// GameMap is the runtime form of an area's geometry, stored as four
-// parallel ASCII grids (the editor's layers). All four are the same
-// dimensions; the per-cell character meanings live in core/map.go's
-// constant blocks.
-type GameMap struct {
-	Width     int
-	Height    int
-	Walls     []string
-	Floor     []string
-	Decor     []string
-	Props     []string
-	Materials MaterialSet
-}
-
 type MaterialSet int
 
-type EnemySpawn struct {
-	Kind  EnemyKind
-	TileX int
-	TileZ int
+// PackSpawn is one authored pack on the map: a tile position and the roster
+// of enemy kinds that make up the pack. Single-member packs are the common
+// case and read back from the on-disk format the same as the old single-
+// enemy spawn line. The field renders one figure per pack (the highest-tier
+// member); the rest are revealed when the battle starts.
+type PackSpawn struct {
+	TileX   int
+	TileZ   int
+	Members []EnemyKind
 }
 
 // AreaDefinition is the runtime form of a map. Built from a mapfile.MapFile
@@ -43,7 +34,7 @@ type AreaDefinition struct {
 	StartTileX   int
 	StartTileZ   int
 	StartFacing  int
-	EnemySpawns  []EnemySpawn
+	PackSpawns   []PackSpawn
 	QuietMessage string
 }
 
@@ -60,7 +51,7 @@ type Player struct {
 }
 
 type Animation struct {
-	Kind     int
+	Kind     AnimKind
 	Elapsed  float32
 	Duration float32
 	FromX    float32
@@ -72,8 +63,7 @@ type Animation struct {
 }
 
 type GameState struct {
-	Map       GameMap
-	Area      AreaDefinition
+	Area AreaDefinition
 	// StepCount is the total number of player tile-steps taken in this
 	// session. Drives the day/night cycle: every 150 steps is one full
 	// loop through the six time-of-day phases. Incremented by the
@@ -81,7 +71,10 @@ type GameState struct {
 	StepCount int
 	Player    Player
 	Party     []PartyMember
-	Enemies   []Enemy
+	// Packs is the field roster — each pack occupies one tile and holds
+	// the enemies revealed if it's engaged. Only the highest-tier member
+	// of a pack is rendered on the field; the rest appear at battle start.
+	Packs     []Pack
 	Battle    Battle
 	MenuOpen  bool
 	MenuIndex int
@@ -89,6 +82,17 @@ type GameState struct {
 	// Stocked by Steal pickups and consumed by the in-battle Item action.
 	Inventory []ItemStack
 	Quit      bool
+}
+
+// Pack is one runtime enemy pack on the field. Members carries the per-
+// instance battle state for every enemy in the pack; their TileX/TileZ
+// fields aren't used while the pack is whole (the pack's tile is the
+// authority). When a battle is active and this is the engaged pack, the
+// renderer reshuffles members into battle formation by slot.
+type Pack struct {
+	TileX   int
+	TileZ   int
+	Members []Enemy
 }
 
 // Stats is the per-actor attribute block. Drives derived values (HP from VIT)
@@ -122,6 +126,12 @@ type PartyMember struct {
 	// enemy turns than a fast one — by design: tanks tend to be slow, and the
 	// SPD interaction makes Defend more valuable in their hands.
 	Defending bool
+
+	// PoisonTurns counts down each time the member's own turn resolves
+	// (immediately AFTER their action), dealing PoisonTickDamage per tick.
+	// Inflicted by the Diseased Rat's bite; cannot stack onto an already-
+	// poisoned member (mirrors the Burn rule for enemies).
+	PoisonTurns int
 }
 
 // MaxHPFor returns the derived MaxHP from a Stats block. Two HP per VIT keeps
@@ -159,15 +169,16 @@ func StealChance(s Stats, base float64) float64 {
 }
 
 type Enemy struct {
-	Kind        EnemyKind
-	TileX       int
-	TileZ       int
-	HP          int
-	MaxHP       int
-	Alive       bool
-	Name        string
-	MonsterType string
-	Item        string
+	Kind EnemyKind
+	HP   int
+	MaxHP int
+	Alive bool
+	// Item is the steal loot. Seeded from EnemyDefinition.Item at spawn time
+	// and cleared once stolen, so the same enemy can't be looted twice in
+	// one battle. Per-enemy overrides aren't currently authored anywhere —
+	// if/when the editor grows per-spawn loot, the Name + custom MaxHP
+	// fields can follow in the same pass.
+	Item string
 
 	AttackBump  float32
 	DamageFlash float32
@@ -183,27 +194,36 @@ type Enemy struct {
 }
 
 // ActorRef points at one slot in the turn queue. IsParty=true means Index is
-// an index into Party; IsParty=false means Index is a slot into Battle.EnemyGroup
-// (NOT into g.Enemies — the slot is the queue's position; you indirect through
-// EnemyGroup[Index] to get the actual Enemy).
+// an index into Party; IsParty=false means Index is a slot into the active
+// pack's Members (g.Packs[Battle.ActivePack].Members).
 type ActorRef struct {
 	IsParty bool
 	Index   int
 }
 
 type Battle struct {
+	// ActivePack is the index into g.Packs of the engaged pack. -1 = no
+	// battle in progress. The pack's Members slice is the in-battle enemy
+	// roster; EnemyIndex addresses members in that slice.
+	ActivePack   int
 	EnemyIndex   int
-	EnemyGroup   []int
 	CurrentParty int
-	ActionMode   int
+	ActionMode   ActionMode
 	MenuIndex    int
-	PendingSkill int
-	PartyTarget  int
-	Phase        int
-	Timer        float32
-	Splash       float32
-	Message      string
-	Log          []string
+	PendingSkill SkillID
+	// PartyTarget is the player's currently-highlighted ally (heal skills,
+	// item targets). Independent of the enemy attack cursor — cycling the
+	// player's ally selection no longer shifts who enemies hit next.
+	PartyTarget int
+	// EnemyAttackCursor is the round-robin pointer enemies advance through
+	// when picking who to swing at. Lives separately from PartyTarget so the
+	// player's ally cycling doesn't perturb enemy targeting.
+	EnemyAttackCursor int
+	Phase             BattlePhase
+	Timer             float32
+	Splash            float32
+	Message           string
+	Log               []string
 
 	// Mixed-initiative turn queue. Built once at the start of each round
 	// (sorted by SPD descending, ties broken by side then index), consumed
