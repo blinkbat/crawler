@@ -52,8 +52,63 @@ func TestBundledMapsLoad(t *testing.T) {
 			if isStartBlocked(area) {
 				t.Errorf("start tile is a blocking tile — player would spawn inside geometry")
 			}
+			// Every pack should be reachable from the player start after the
+			// runtime snap pass. A pack the player can't walk up to means the
+			// encounter never fires; catching this in CI is cheaper than
+			// noticing it in playtest.
+			if blocked := unreachablePacks(area); blocked > 0 {
+				t.Errorf("%d/%d packs unreachable from start after snap", blocked, len(area.PackSpawns))
+			}
 		})
 	}
+}
+
+// unreachablePacks runs the same reachability shape as the editor's
+// warning: BFS from the player start under BlockedAt, then count packs
+// whose snapped runtime position falls outside the visited set. Lives in
+// the test file so the runtime stays editor-agnostic.
+func unreachablePacks(a AreaDefinition) int {
+	if a.StartTileZ < 0 || a.StartTileZ >= a.Height ||
+		a.StartTileX < 0 || a.StartTileX >= a.Width {
+		return len(a.PackSpawns)
+	}
+	if a.BlockedAt(a.StartTileX, a.StartTileZ) {
+		return len(a.PackSpawns)
+	}
+	w := a.Width
+	h := a.Height
+	visited := make([]bool, w*h)
+	stack := [][2]int{{a.StartTileX, a.StartTileZ}}
+	for len(stack) > 0 {
+		p := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		x, z := p[0], p[1]
+		if z < 0 || z >= h || x < 0 || x >= w {
+			continue
+		}
+		idx := z*w + x
+		if visited[idx] || a.BlockedAt(x, z) {
+			continue
+		}
+		visited[idx] = true
+		stack = append(stack, [2]int{x + 1, z}, [2]int{x - 1, z}, [2]int{x, z + 1}, [2]int{x, z - 1})
+	}
+	blocked := 0
+	for _, snap := range SnappedSpawnPositions(a) {
+		if !snap.Placed() {
+			blocked++
+			continue
+		}
+		x, z := snap.TileX, snap.TileZ
+		if x < 0 || z < 0 || x >= w || z >= h {
+			blocked++
+			continue
+		}
+		if !visited[z*w+x] {
+			blocked++
+		}
+	}
+	return blocked
 }
 
 func isStartBlocked(a AreaDefinition) bool {

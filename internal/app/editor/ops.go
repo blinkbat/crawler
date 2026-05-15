@@ -43,7 +43,7 @@ func applyWallBrush(s *State, x, z int, c byte) {
 	setLayerCell(&s.area.Walls, x, z, c)
 	if turningWall {
 		// Walls and props/decor/entities can't co-exist — wall wins.
-		setLayerCell(&s.area.Props, x, z, '.')
+		setLayerCell(&s.area.Props, x, z, core.TilePropEmpty)
 		setLayerCell(&s.area.Decor, x, z, core.DecorAuto)
 		s.area.PackSpawns = removePackAt(s.area.PackSpawns, x, z)
 	}
@@ -66,8 +66,8 @@ func applyDecorBrush(s *State, x, z int, c byte) {
 }
 
 func applyPropBrush(s *State, x, z int, c byte) {
-	if c == '.' {
-		setLayerCell(&s.area.Props, x, z, '.')
+	if c == core.TilePropEmpty {
+		setLayerCell(&s.area.Props, x, z, core.TilePropEmpty)
 		return
 	}
 	if s.area.Walls[z][x] == core.TileRock {
@@ -119,13 +119,13 @@ func eraseAt(s *State, x, z int) {
 	}
 	switch s.layer {
 	case LayerWalls:
-		setLayerCell(&s.area.Walls, x, z, '.')
+		setLayerCell(&s.area.Walls, x, z, core.TileOpen)
 	case LayerFloor:
 		setLayerCell(&s.area.Floor, x, z, core.FloorAuto)
 	case LayerDecor:
 		setLayerCell(&s.area.Decor, x, z, core.DecorAuto)
 	case LayerProps:
-		setLayerCell(&s.area.Props, x, z, '.')
+		setLayerCell(&s.area.Props, x, z, core.TilePropEmpty)
 	case LayerEntities:
 		if s.area.StartTileX == x && s.area.StartTileZ == z {
 			s.flash("Player start can't be erased; place it elsewhere instead")
@@ -315,11 +315,22 @@ func resize(s *State, w, h int) {
 	if w <= 0 || h <= 0 {
 		return
 	}
+	// Match the typed-input clamp so the +/- buttons can't grow past the
+	// editor's hard ceiling either.
+	if w > core.MaxMapDimension {
+		w = core.MaxMapDimension
+	}
+	if h > core.MaxMapDimension {
+		h = core.MaxMapDimension
+	}
+	if w == s.area.Width && h == s.area.Height {
+		return
+	}
 	pushUndo(s)
-	s.area.Walls = resizeLayer(s.area.Walls, s.area.Width, s.area.Height, w, h, '.')
+	s.area.Walls = resizeLayer(s.area.Walls, s.area.Width, s.area.Height, w, h, core.TileOpen)
 	s.area.Floor = resizeLayer(s.area.Floor, s.area.Width, s.area.Height, w, h, core.FloorAuto)
 	s.area.Decor = resizeLayer(s.area.Decor, s.area.Width, s.area.Height, w, h, core.DecorAuto)
-	s.area.Props = resizeLayer(s.area.Props, s.area.Width, s.area.Height, w, h, '.')
+	s.area.Props = resizeLayer(s.area.Props, s.area.Width, s.area.Height, w, h, core.TilePropEmpty)
 	s.area.Width = w
 	s.area.Height = h
 	if s.area.StartTileX >= w {
@@ -361,7 +372,12 @@ func saveCurrent(s *State) {
 		s.focus = focusFilename
 		return
 	}
-	if err := mapfile.Save(s.area.Path, core.MapFileFromArea(s.area)); err != nil {
+	mf, err := core.MapFileFromArea(s.area)
+	if err != nil {
+		s.flash("Save failed: " + err.Error())
+		return
+	}
+	if err := mapfile.Save(s.area.Path, mf); err != nil {
 		s.flash("Save failed: " + err.Error())
 		return
 	}
@@ -571,18 +587,42 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 		visited[idx] = true
 		stack = append(stack, [2]int{px + 1, pz}, [2]int{px - 1, pz}, [2]int{px, pz + 1}, [2]int{px, pz - 1})
 	}
-	unreachable := 0
-	for _, sp := range a.PackSpawns {
-		if sp.TileZ < 0 || sp.TileZ >= h || sp.TileX < 0 || sp.TileX >= w {
-			unreachable++
-			continue
-		}
-		if !visited[sp.TileZ*w+sp.TileX] {
-			unreachable++
+	// Check reachability against the SNAPPED pack positions, not the
+	// authored ones — placePacks relocates pack tiles to the nearest open
+	// square at runtime, so a pack authored on a wall lands somewhere else
+	// in the actual game. Using snapped coords here means the warning
+	// matches what the player will encounter.
+	//
+	// Drops are now classified: a pack with zero members is the author's
+	// own omission ("empty"); a pack with members but no open tile is the
+	// map being too crowded ("no open tile"). Surfacing both separately
+	// gives the author a faster fix.
+	var unreachable, emptyRoster, noOpenTile int
+	for _, snap := range core.SnappedSpawnPositions(a) {
+		switch snap.Reason {
+		case core.SpawnSnapEmptyMembers:
+			emptyRoster++
+		case core.SpawnSnapNoOpenTile:
+			noOpenTile++
+		case core.SpawnSnapPlaced:
+			x, z := snap.TileX, snap.TileZ
+			if x < 0 || z < 0 || x >= w || z >= h {
+				unreachable++
+				continue
+			}
+			if !visited[z*w+x] {
+				unreachable++
+			}
 		}
 	}
 	if unreachable > 0 {
 		out = append(out, fmt.Sprintf("%d/%d packs unreachable from start", unreachable, len(a.PackSpawns)))
+	}
+	if emptyRoster > 0 {
+		out = append(out, fmt.Sprintf("%d/%d packs have no members", emptyRoster, len(a.PackSpawns)))
+	}
+	if noOpenTile > 0 {
+		out = append(out, fmt.Sprintf("%d/%d packs can't fit on the map", noOpenTile, len(a.PackSpawns)))
 	}
 	return out
 }

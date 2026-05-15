@@ -6,19 +6,16 @@ import (
 )
 
 // Tests use a deterministic RNG so press-window placement, sequence targets,
-// and burn rolls become reproducible. NewTimingState / NewSequenceState read
-// GameRNG, so we swap it for the duration of the test and restore on exit.
-func withSeededRNG(t *testing.T, seed int64, fn func()) {
+// and burn rolls become reproducible. The closure receives the seeded RNG;
+// callers pass it through to NewTimingState / NewSequenceState / AttackHits.
+func withSeededRNG(t *testing.T, seed int64, fn func(rng *rand.Rand)) {
 	t.Helper()
-	saved := GameRNG
-	GameRNG = rand.New(rand.NewSource(seed))
-	defer func() { GameRNG = saved }()
-	fn()
+	fn(rand.New(rand.NewSource(seed)))
 }
 
 func TestNewTimingState_ZeroDurationDefaults(t *testing.T) {
-	withSeededRNG(t, 1, func() {
-		s := NewTimingState(0)
+	withSeededRNG(t, 1, func(rng *rand.Rand) {
+		s := NewTimingState(rng, 0)
 		if s.Duration != AttackTimingDuration {
 			t.Fatalf("zero duration should default to AttackTimingDuration, got %v", s.Duration)
 		}
@@ -32,28 +29,28 @@ func TestNewTimingState_ZeroDurationDefaults(t *testing.T) {
 }
 
 func TestNewTimingState_WindowWithinBounds(t *testing.T) {
-	withSeededRNG(t, 42, func() {
+	withSeededRNG(t, 42, func(rng *rand.Rand) {
 		for i := 0; i < 50; i++ {
-			s := NewTimingState(2.0)
+			s := NewTimingState(rng, 2.0)
 			startPct := s.WindowStart / s.Duration
 			endPct := s.WindowEnd / s.Duration
-			if startPct < PressWindowMinStart-0.001 {
-				t.Fatalf("window opened before PressWindowMinStart: %v", startPct)
+			if startPct < PressWindow.MinStart-0.001 {
+				t.Fatalf("window opened before PressWindow.MinStart: %v", startPct)
 			}
-			if endPct > 0.961 {
+			if endPct > PressWindow.MaxEnd+0.001 {
 				t.Fatalf("window crossed tail: %v", endPct)
 			}
 			width := endPct - startPct
-			if width < PressWindowWidth-0.001 || width > PressWindowWidth+0.001 {
-				t.Fatalf("window width drifted from PressWindowWidth: %v", width)
+			if width < PressWindow.Width-0.001 || width > PressWindow.Width+0.001 {
+				t.Fatalf("window width drifted from PressWindow.Width: %v", width)
 			}
 		}
 	})
 }
 
 func TestPress_InWindowExcellentAtSweetSpot(t *testing.T) {
-	withSeededRNG(t, 7, func() {
-		s := NewTimingState(2.0)
+	withSeededRNG(t, 7, func(rng *rand.Rand) {
+		s := NewTimingState(rng, 2.0)
 		s.Elapsed = s.SweetSpot
 		if !s.Press() {
 			t.Fatalf("press at sweet spot should resolve the bar")
@@ -65,8 +62,8 @@ func TestPress_InWindowExcellentAtSweetSpot(t *testing.T) {
 }
 
 func TestPress_OutsideWindowIsMiss(t *testing.T) {
-	withSeededRNG(t, 7, func() {
-		s := NewTimingState(2.0)
+	withSeededRNG(t, 7, func(rng *rand.Rand) {
+		s := NewTimingState(rng, 2.0)
 		s.Elapsed = 0
 		s.Press()
 		if s.Quality != TimingQualityMiss {
@@ -76,8 +73,8 @@ func TestPress_OutsideWindowIsMiss(t *testing.T) {
 }
 
 func TestPress_OnlyResolvesOnce(t *testing.T) {
-	withSeededRNG(t, 7, func() {
-		s := NewTimingState(2.0)
+	withSeededRNG(t, 7, func(rng *rand.Rand) {
+		s := NewTimingState(rng, 2.0)
 		s.Elapsed = s.SweetSpot
 		if !s.Press() {
 			t.Fatalf("first press should resolve")
@@ -99,8 +96,8 @@ func TestPress_WrongKindNoOp(t *testing.T) {
 }
 
 func TestTick_PressAutoMissesAtTimeout(t *testing.T) {
-	withSeededRNG(t, 11, func() {
-		s := NewTimingState(1.0)
+	withSeededRNG(t, 11, func(rng *rand.Rand) {
+		s := NewTimingState(rng, 1.0)
 		s.Tick(2.0)
 		if !s.Resolved {
 			t.Fatalf("press bar should resolve after timeout")
@@ -176,8 +173,8 @@ func TestCharge_TimeoutWithoutHoldIsMiss(t *testing.T) {
 }
 
 func TestSequence_AllCorrectFastIsExcellent(t *testing.T) {
-	withSeededRNG(t, 99, func() {
-		s := NewSequenceState(2.0, 4)
+	withSeededRNG(t, 99, func(rng *rand.Rand) {
+		s := NewSequenceState(rng, 2.0, 4)
 		s.Elapsed = StealFastThreshold - 0.1
 		for _, dir := range s.SequenceTargets {
 			s.SequenceInput(dir)
@@ -192,8 +189,8 @@ func TestSequence_AllCorrectFastIsExcellent(t *testing.T) {
 }
 
 func TestSequence_OneWrongDropsOneGrade(t *testing.T) {
-	withSeededRNG(t, 99, func() {
-		s := NewSequenceState(2.0, 4)
+	withSeededRNG(t, 99, func(rng *rand.Rand) {
+		s := NewSequenceState(rng, 2.0, 4)
 		s.Elapsed = 0 // skip the fast-bonus path entirely
 		for i, dir := range s.SequenceTargets {
 			if i == 0 {
@@ -209,9 +206,9 @@ func TestSequence_OneWrongDropsOneGrade(t *testing.T) {
 }
 
 func TestSequence_TimeoutMarksPendingAsWrong(t *testing.T) {
-	withSeededRNG(t, 99, func() {
+	withSeededRNG(t, 99, func(rng *rand.Rand) {
 		// 1 correct + 3 pending == 3 dropped grades: Excellent - 3 = Nice.
-		s := NewSequenceState(2.0, 4)
+		s := NewSequenceState(rng, 2.0, 4)
 		s.SequenceInput(s.SequenceTargets[0])
 		s.Tick(3.0)
 		if !s.Resolved {
@@ -224,8 +221,8 @@ func TestSequence_TimeoutMarksPendingAsWrong(t *testing.T) {
 }
 
 func TestSequence_NoneCorrectIsMiss(t *testing.T) {
-	withSeededRNG(t, 99, func() {
-		s := NewSequenceState(2.0, 4)
+	withSeededRNG(t, 99, func(rng *rand.Rand) {
+		s := NewSequenceState(rng, 2.0, 4)
 		s.Tick(3.0)
 		if s.Quality != TimingQualityMiss {
 			t.Fatalf("0/4 correct should be Miss, got %v", s.Quality)
@@ -234,8 +231,8 @@ func TestSequence_NoneCorrectIsMiss(t *testing.T) {
 }
 
 func TestSequence_InputAfterResolveIsNoOp(t *testing.T) {
-	withSeededRNG(t, 99, func() {
-		s := NewSequenceState(2.0, 2)
+	withSeededRNG(t, 99, func(rng *rand.Rand) {
+		s := NewSequenceState(rng, 2.0, 2)
 		s.SequenceInput(s.SequenceTargets[0])
 		s.SequenceInput(s.SequenceTargets[1])
 		if !s.Resolved {
@@ -271,11 +268,11 @@ func TestTimingBonusMult_Table(t *testing.T) {
 		quality int
 		want    float32
 	}{
-		{TimingQualityMiss, TimingMultMiss},
-		{TimingQualityNice, TimingMultNice},
-		{TimingQualityGood, TimingMultGood},
-		{TimingQualityGreat, TimingMultGreat},
-		{TimingQualityExcellent, TimingMultExcellent},
+		{TimingQualityMiss, timingGrades[TimingQualityMiss].Atk},
+		{TimingQualityNice, timingGrades[TimingQualityNice].Atk},
+		{TimingQualityGood, timingGrades[TimingQualityGood].Atk},
+		{TimingQualityGreat, timingGrades[TimingQualityGreat].Atk},
+		{TimingQualityExcellent, timingGrades[TimingQualityExcellent].Atk},
 	}
 	for _, tc := range cases {
 		if got := TimingBonusMult(tc.quality); got != tc.want {
@@ -289,11 +286,11 @@ func TestTimingDefenseMult_Table(t *testing.T) {
 		quality int
 		want    float32
 	}{
-		{TimingQualityMiss, TimingDefMiss},
-		{TimingQualityNice, TimingDefNice},
-		{TimingQualityGood, TimingDefGood},
-		{TimingQualityGreat, TimingDefGreat},
-		{TimingQualityExcellent, TimingDefExcellent},
+		{TimingQualityMiss, timingGrades[TimingQualityMiss].Def},
+		{TimingQualityNice, timingGrades[TimingQualityNice].Def},
+		{TimingQualityGood, timingGrades[TimingQualityGood].Def},
+		{TimingQualityGreat, timingGrades[TimingQualityGreat].Def},
+		{TimingQualityExcellent, timingGrades[TimingQualityExcellent].Def},
 	}
 	for _, tc := range cases {
 		if got := TimingDefenseMult(tc.quality); got != tc.want {
@@ -348,4 +345,126 @@ func TestTimingQualityLabel_AllGrades(t *testing.T) {
 			t.Errorf("TimingQualityLabel(%v) = %q, want %q", q, got, want)
 		}
 	}
+}
+
+// TestPreviewQuality_MatchesResolve sweeps the bar's Elapsed across the full
+// duration in fine steps; at each step we compare PreviewQuality (the live
+// cursor read) against the grade the bar would actually score if Press()
+// fired right now. They must agree everywhere — otherwise the cursor color
+// lies about the player's pending grade. Guards against the resolve() /
+// PreviewQuality threshold drift the original code had as two duplicated
+// switch tables.
+func TestPreviewQuality_MatchesResolve(t *testing.T) {
+	withSeededRNG(t, 13, func(rng *rand.Rand) {
+		base := NewTimingState(rng, 2.0)
+		steps := 400
+		for i := 0; i <= steps; i++ {
+			elapsed := float32(i) / float32(steps) * base.Duration
+			preview := base
+			preview.Elapsed = elapsed
+			expected := preview.PreviewQuality()
+
+			scored := base
+			scored.Elapsed = elapsed
+			scored.Press()
+
+			if expected != scored.Quality {
+				t.Fatalf("at elapsed=%v: preview=%v but Press graded %v",
+					elapsed, expected, scored.Quality)
+			}
+		}
+	})
+}
+
+// TestHitStopFor_OnlyOnHighGrades pins the fast-path: Miss / Nice / Good get
+// no freeze (HitStopFor returns 0, so tickFlashHold fires onResolve the
+// moment flash hits zero). Great / Excellent each get their own pause so
+// the contrast between "fine hit" and "great hit" reads on impact.
+func TestHitStopFor_OnlyOnHighGrades(t *testing.T) {
+	cases := []struct {
+		quality int
+		want    float32
+	}{
+		{TimingQualityMiss, 0},
+		{TimingQualityNice, 0},
+		{TimingQualityGood, 0},
+		{TimingQualityGreat, HitStopGreat},
+		{TimingQualityExcellent, HitStopExcellent},
+	}
+	for _, tc := range cases {
+		if got := HitStopFor(tc.quality); got != tc.want {
+			t.Errorf("HitStopFor(%v) = %v, want %v", tc.quality, got, tc.want)
+		}
+	}
+	if HitStopExcellent <= HitStopGreat {
+		t.Fatalf("Excellent should freeze longer than Great (got %v vs %v)",
+			HitStopExcellent, HitStopGreat)
+	}
+}
+
+// TestAttackAccuracy_Curve checks the headline guarantees that the actual
+// party DEX spread depends on:
+//
+//   - low-DEX classes (DEX 2) on Miss timing land in the 0.55–0.70 band
+//   - Excellent timing always pushes accuracy to a clamped 1.0
+//   - any out-of-table quality (negative, unknown) falls back to base
+//   - accuracy stays inside [0, 1]
+func TestAttackAccuracy_Curve(t *testing.T) {
+	low := Stats{DEX: 2}
+	high := Stats{DEX: 6}
+
+	if got := AttackAccuracy(low, TimingQualityMiss); got < 0.55 || got > 0.70 {
+		t.Errorf("low-DEX Miss should sit ~0.63, got %v", got)
+	}
+	if got := AttackAccuracy(low, TimingQualityExcellent); got != 1.0 {
+		t.Errorf("low-DEX Excellent should clamp to 1.0, got %v", got)
+	}
+	if got := AttackAccuracy(high, TimingQualityExcellent); got != 1.0 {
+		t.Errorf("high-DEX Excellent should clamp to 1.0, got %v", got)
+	}
+	if got := AttackAccuracy(high, TimingQualityMiss); got <= AttackAccuracy(low, TimingQualityMiss) {
+		t.Errorf("higher DEX should out-accuracy lower DEX on the same grade")
+	}
+	if got := AttackAccuracy(low, -42); got != AttackAccuracy(low, TimingQualityMiss) {
+		t.Errorf("unknown quality should fall back to Miss baseline, got %v", got)
+	}
+}
+
+// TestAttackHits_StatisticsRoughlyMatch fires AttackHits many times against a
+// known seed and asserts the hit rate is close to AttackAccuracy. Not a
+// precise distribution check — just a sanity guard that the dice are
+// actually being rolled against the curve, not a constant.
+func TestAttackHits_StatisticsRoughlyMatch(t *testing.T) {
+	withSeededRNG(t, 2024, func(rng *rand.Rand) {
+		stats := Stats{DEX: 2}
+		quality := TimingQualityNice
+		expected := AttackAccuracy(stats, quality)
+		hits := 0
+		const trials = 4000
+		for i := 0; i < trials; i++ {
+			if AttackHits(rng, stats, quality) {
+				hits++
+			}
+		}
+		rate := float64(hits) / float64(trials)
+		if rate < expected-0.04 || rate > expected+0.04 {
+			t.Fatalf("hit rate %v drifted from expected %v over %d trials", rate, expected, trials)
+		}
+	})
+}
+
+// TestAttackHits_ExcellentNeverWhiffs locks the contract that any DEX +
+// Excellent timing combination always lands. The accuracy clamps to 1.0
+// past that point, so the RNG roll should never come back false.
+func TestAttackHits_ExcellentNeverWhiffs(t *testing.T) {
+	withSeededRNG(t, 9, func(rng *rand.Rand) {
+		for dex := 0; dex <= 10; dex++ {
+			stats := Stats{DEX: dex}
+			for i := 0; i < 200; i++ {
+				if !AttackHits(rng, stats, TimingQualityExcellent) {
+					t.Fatalf("Excellent should always hit (DEX=%d, trial=%d)", dex, i)
+				}
+			}
+		}
+	})
 }

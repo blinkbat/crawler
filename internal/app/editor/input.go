@@ -79,17 +79,23 @@ func updateHotkeys(s *State) {
 	// T cycles the day/night preview phase. Shows in the top bar and seeds
 	// StepCount on F5 so the playtest drops into that phase.
 	if !ctrl && rl.IsKeyPressed(rl.KeyT) {
-		s.previewPhase = core.TimeOfDay((int(s.previewPhase) + 1) % 6)
+		s.previewPhase = core.TimeOfDay((int(s.previewPhase) + 1) % core.TimeOfDayCount)
 		s.flash("Preview: " + core.PhaseName(s.previewPhase))
 	}
 
 	updateGridCursor(s)
 }
 
+// brushSizeSteps is the discrete set of brush widths cycled with [ / ].
+// Lifted out of stepBrush so a future tuning pass that wants a 7-cell brush
+// (or removes the 3-cell middle) edits one line. applyToolBrushed reads
+// brushSize / 2 as the radius — keep these odd so the brush is centered on
+// the cursor cell.
+var brushSizeSteps = []int{1, 3, 5}
+
 func stepBrush(cur, dir int) int {
-	steps := []int{1, 3, 5}
 	idx := 0
-	for i, v := range steps {
+	for i, v := range brushSizeSteps {
 		if v == cur {
 			idx = i
 			break
@@ -99,10 +105,10 @@ func stepBrush(cur, dir int) int {
 	if idx < 0 {
 		idx = 0
 	}
-	if idx >= len(steps) {
-		idx = len(steps) - 1
+	if idx >= len(brushSizeSteps) {
+		idx = len(brushSizeSteps) - 1
 	}
-	return steps[idx]
+	return brushSizeSteps[idx]
 }
 
 func updateGridCursor(s *State) {
@@ -512,8 +518,8 @@ func commitNumericInput(s *State) {
 	if v < 1 {
 		v = 1
 	}
-	if v > 200 {
-		v = 200
+	if v > core.MaxMapDimension {
+		v = core.MaxMapDimension
 	}
 	if s.focus == focusWidth {
 		resize(s, v, s.area.Height)
@@ -756,7 +762,14 @@ func updateConfirmDirtyModal(s *State) Action {
 			s.focus = focusFilename
 			return ActionNone
 		}
-		if err := mapfile.Save(s.area.Path, core.MapFileFromArea(s.area)); err != nil {
+		mf, err := core.MapFileFromArea(s.area)
+		if err != nil {
+			s.flash("Save failed: " + err.Error())
+			s.modal = modalNone
+			s.pending = pendingNone
+			return ActionNone
+		}
+		if err := mapfile.Save(s.area.Path, mf); err != nil {
 			s.flash("Save failed: " + err.Error())
 			s.modal = modalNone
 			s.pending = pendingNone
@@ -812,7 +825,12 @@ func confirmModalForce(s *State) {
 }
 
 func saveTo(s *State, name, path string) {
-	if err := mapfile.Save(path, core.MapFileFromArea(s.area)); err != nil {
+	mf, err := core.MapFileFromArea(s.area)
+	if err != nil {
+		s.flash("Save failed: " + err.Error())
+		return
+	}
+	if err := mapfile.Save(path, mf); err != nil {
 		s.flash("Save failed: " + err.Error())
 		return
 	}

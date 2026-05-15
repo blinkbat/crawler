@@ -41,12 +41,42 @@ var (
 	barMP      = rl.NewColor(96, 162, 232, 255)
 	barEnemyHP = rl.NewColor(216, 80, 76, 255)
 	barBurn    = rl.NewColor(248, 132, 64, 255)
+
+	// Billboard tints for the in-world combatant markers — the warm
+	// off-white the player's target reads as, and the slightly redder
+	// pulse the currently-attacking enemy reads as. Pulled out here so
+	// future palette passes don't have to chase NewColor literals across
+	// world.go's draw loop.
+	tintEnemyTargeted = rl.NewColor(255, 228, 190, 255)
+	tintEnemyAttacker = rl.NewColor(255, 196, 156, 255)
+
+	// Shadow tints for drop-shadowed text and overlay scrims. Pre-named so
+	// callers don't open-code rl.NewColor(0,0,0,…) with a drifting alpha.
+	// Strength runs Light (background hints) → Mid (HUD body) → Strong
+	// (large titles / debug pills) → Heavy (top-of-stack labels).
+	shadowLight  = rl.NewColor(0, 0, 0, 160)
+	shadowMid    = rl.NewColor(0, 0, 0, 180)
+	shadowStrong = rl.NewColor(0, 0, 0, 200)
+	shadowHeavy  = rl.NewColor(0, 0, 0, 220)
 )
 
 const (
 	cornerRadius      = float32(10)
 	smallCornerRadius = float32(6)
 	stripeWidth       = int32(3)
+
+	// Heading tick markers (drawHeading underline) have a minimum width so
+	// short headings still read as labelled. Bar value text inset is the
+	// constant pad on the right edge of drawBar.
+	headingTickMinWidth = int32(28)
+	barValuePadRight    = float32(10)
+	barLabelPadLeft     = float32(8)
+
+	// World-popup horizontal slack: how many pixels past the screen edges a
+	// 3D-to-2D projected popup can drift before we cull it. Larger than zero
+	// so a popup whose anchor moves slightly off-screen still fades cleanly
+	// instead of snapping to invisible mid-animation.
+	offscreenPopupSlack = float32(200)
 )
 
 // drawPanel fills a rounded rect at a fixed pixel corner radius.
@@ -179,8 +209,8 @@ func drawBar(font rl.Font, x, y, width, height float32, label string, value, max
 	}
 	labelMeasure := rl.MeasureTextEx(font, label, labelSize, 1)
 	labelY := y + (float32(ih)-labelMeasure.Y)/2 - 1
-	rl.DrawTextEx(font, label, rl.NewVector2(x+8, labelY+1), labelSize, 1, rl.NewColor(0, 0, 0, 180))
-	rl.DrawTextEx(font, label, rl.NewVector2(x+8, labelY), labelSize, 1, fadeColor(textLabel, 1))
+	rl.DrawTextEx(font, label, rl.NewVector2(x+barLabelPadLeft, labelY+1), labelSize, 1, shadowMid)
+	rl.DrawTextEx(font, label, rl.NewVector2(x+barLabelPadLeft, labelY), labelSize, 1, fadeColor(textLabel, 1))
 
 	valText := ""
 	if maxValue > 0 {
@@ -201,10 +231,9 @@ func drawBar(font rl.Font, x, y, width, height float32, label string, value, max
 		}
 		valMeasure := rl.MeasureTextEx(font, valText, valSize, 1)
 		valY := y + (float32(ih)-valMeasure.Y)/2 - 1
-		valX := x + width - valMeasure.X - 10
-		shadow := rl.NewColor(0, 0, 0, 220)
-		rl.DrawTextEx(font, valText, rl.NewVector2(valX+2, valY+2), valSize, 1, shadow)
-		rl.DrawTextEx(font, valText, rl.NewVector2(valX+1, valY+1), valSize, 1, shadow)
+		valX := x + width - valMeasure.X - barValuePadRight
+		rl.DrawTextEx(font, valText, rl.NewVector2(valX+2, valY+2), valSize, 1, shadowHeavy)
+		rl.DrawTextEx(font, valText, rl.NewVector2(valX+1, valY+1), valSize, 1, shadowHeavy)
 		rl.DrawTextEx(font, valText, rl.NewVector2(valX, valY), valSize, 1, valColor)
 	}
 }
@@ -213,18 +242,58 @@ func formatBarValue(value, maxValue int) string {
 	return fmt.Sprintf("%d/%d", value, maxValue)
 }
 
+// drawArrowMarker paints a small triangle chevron. The base sits at `center`
+// perpendicular to the direction; the apex is `center + (tipDx, tipDy)`.
+// Base width is 2*halfWidth. Used by HUD selection / target / active-actor
+// indicators where a tiny arrow reads better than a label — saves party,
+// battle, and item-target panels from each computing their own three
+// rl.Vector2 corners by hand.
+func drawArrowMarker(center rl.Vector2, tipDx, tipDy, halfWidth float32, col color.RGBA) {
+	tipLen := float32(math.Sqrt(float64(tipDx*tipDx + tipDy*tipDy)))
+	if tipLen == 0 {
+		return
+	}
+	px := -tipDy / tipLen * halfWidth
+	py := tipDx / tipLen * halfWidth
+	rl.DrawTriangle(
+		rl.NewVector2(center.X+tipDx, center.Y+tipDy),
+		rl.NewVector2(center.X-px, center.Y-py),
+		rl.NewVector2(center.X+px, center.Y+py),
+		col,
+	)
+}
+
+// drawTextWithShadow paints text twice: once offset by (1,1) at shadowStrong,
+// once at the requested color. The single +1 offset reads as a clean drop
+// shadow under most HUD sizes; callers that want a heavier shadow for large
+// titles (menu rows, debug pills) go through drawTextWithShadowStyle. Lives
+// here alongside the shadowLight/Mid/Strong/Heavy palette it consumes.
+func drawTextWithShadow(font rl.Font, text string, x, y, size float32, col color.RGBA) {
+	drawTextWithShadowStyle(font, text, x, y, size, col, shadowStrong, 1, 1)
+}
+
+// drawTextWithShadowStyle is the parametric form of drawTextWithShadow. shadowCol
+// picks the drop color (shadowLight/Mid/Strong/Heavy above); offX/offY pick the
+// drop offset in pixels. Use this when an ad-hoc shadow alpha or offset is
+// actually load-bearing (splash titles, menu rows); prefer the non-styled
+// drawTextWithShadow for everything else so HUD shadows stay consistent.
+func drawTextWithShadowStyle(font rl.Font, text string, x, y, size float32, col, shadowCol color.RGBA, offX, offY float32) {
+	rl.DrawTextEx(font, text, rl.NewVector2(x+offX, y+offY), size, 1, shadowCol)
+	rl.DrawTextEx(font, text, rl.NewVector2(x, y), size, 1, col)
+}
+
 // drawHeading writes a small uppercase header inside a panel, with a colored
 // underline tick to give it weight.
 func drawHeading(font rl.Font, text string, x, y int32, accent color.RGBA) {
-	size := float32(15)
-	spacing := float32(1.6)
+	size := float32(20)
+	spacing := float32(1.8)
 	pos := rl.NewVector2(float32(x), float32(y))
-	rl.DrawTextEx(font, text, rl.NewVector2(pos.X+1, pos.Y+1), size, spacing, rl.NewColor(0, 0, 0, 200))
+	rl.DrawTextEx(font, text, rl.NewVector2(pos.X+1, pos.Y+1), size, spacing, shadowStrong)
 	rl.DrawTextEx(font, text, pos, size, spacing, textLabel)
 	measure := rl.MeasureTextEx(font, text, size, spacing)
 	tickW := int32(measure.X)
-	if tickW < 22 {
-		tickW = 22
+	if tickW < headingTickMinWidth {
+		tickW = headingTickMinWidth
 	}
-	rl.DrawRectangle(x, y+int32(measure.Y)+4, tickW, 2, accent)
+	rl.DrawRectangle(x, y+int32(measure.Y)+5, tickW, 3, accent)
 }

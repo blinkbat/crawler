@@ -168,13 +168,10 @@ func TestPartySkill_MatchesClass(t *testing.T) {
 }
 
 func TestBurnDuration_WithinRange(t *testing.T) {
-	saved := GameRNG
-	GameRNG = rand.New(rand.NewSource(13))
-	defer func() { GameRNG = saved }()
-
+	rng := rand.New(rand.NewSource(13))
 	effect := SkillEffect{BurnMinTurns: 2, BurnMaxTurns: 3}
 	for i := 0; i < 50; i++ {
-		d := effect.BurnDuration()
+		d := effect.BurnDuration(rng)
 		if d < 2 || d > 3 {
 			t.Fatalf("BurnDuration out of range [2,3]: got %d", d)
 		}
@@ -182,9 +179,10 @@ func TestBurnDuration_WithinRange(t *testing.T) {
 }
 
 func TestBurnDuration_MaxEqualOrLessThanMin(t *testing.T) {
-	// Degenerate case: max <= min should always return min.
+	// Degenerate case: max <= min should always return min. RNG is never
+	// consulted on the inverted-range path, so a nil source is fine.
 	e := SkillEffect{BurnMinTurns: 4, BurnMaxTurns: 2}
-	if got := e.BurnDuration(); got != 4 {
+	if got := e.BurnDuration(nil); got != 4 {
 		t.Errorf("BurnDuration on inverted range = %d, want 4 (min)", got)
 	}
 }

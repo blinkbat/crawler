@@ -13,22 +13,28 @@ const (
 	MaterialField
 )
 
+// mapsDirName is the on-disk folder name where .map files live. Single
+// source so renames are a one-line edit; MapsDir resolves it to an
+// absolute or cwd-relative path at runtime.
+const mapsDirName = "maps"
+
 // MapsDir returns the directory where .map files live. It prefers a cwd-
 // relative `maps/` (so `go run` from the repo root works), then falls back
 // to a `maps/` directory next to the running executable (so a portable
 // copy of the binary works from any cwd). When neither exists yet (first
-// run), returns "maps" so the editor's first save creates it cwd-relative.
+// run), returns the cwd-relative form so the editor's first save creates
+// it cwd-relative.
 func MapsDir() string {
-	if dirExists("maps") {
-		return "maps"
+	if dirExists(mapsDirName) {
+		return mapsDirName
 	}
 	if exe, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), "maps")
+		candidate := filepath.Join(filepath.Dir(exe), mapsDirName)
 		if dirExists(candidate) {
 			return candidate
 		}
 	}
-	return "maps"
+	return mapsDirName
 }
 
 func dirExists(path string) bool {
@@ -91,13 +97,28 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 }
 
 // MapFileFromArea is the reverse converter — used by the editor to write the
-// current in-memory area back to disk.
-func MapFileFromArea(a AreaDefinition) mapfile.MapFile {
+// current in-memory area back to disk. Returns an error rather than silently
+// substituting a default name when an enum value falls outside the registry:
+// a corrupted material / facing / enemy kind in memory is far more useful as
+// a refused save than as a silent rewrite to "dungeon" / "east" / "rat".
+func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
+	matName, ok := MaterialName(a.Materials)
+	if !ok {
+		return mapfile.MapFile{}, fmt.Errorf("unknown material set %d", int(a.Materials))
+	}
+	faceName, ok := FacingName(a.StartFacing)
+	if !ok {
+		return mapfile.MapFile{}, fmt.Errorf("unknown start facing %d", a.StartFacing)
+	}
 	packs := make([]mapfile.MapPack, 0, len(a.PackSpawns))
 	for _, s := range a.PackSpawns {
 		names := make([]string, 0, len(s.Members))
 		for _, kind := range s.Members {
-			names = append(names, EnemyKindName(kind))
+			name, ok := EnemyKindName(kind)
+			if !ok {
+				return mapfile.MapFile{}, fmt.Errorf("unknown enemy kind %d in pack at (%d,%d)", int(kind), s.TileX, s.TileZ)
+			}
+			names = append(names, name)
 		}
 		packs = append(packs, mapfile.MapPack{
 			Members: names,
@@ -107,37 +128,60 @@ func MapFileFromArea(a AreaDefinition) mapfile.MapFile {
 	}
 	return mapfile.MapFile{
 		Name:      a.Name,
-		Materials: MaterialName(a.Materials),
+		Materials: matName,
 		Quiet:     a.QuietMessage,
 		Width:     a.Width,
 		Height:    a.Height,
 		StartX:    a.StartTileX,
 		StartZ:    a.StartTileZ,
-		StartFace: FacingName(a.StartFacing),
+		StartFace: faceName,
 		Walls:     append([]string(nil), a.Walls...),
 		Floor:     append([]string(nil), a.Floor...),
 		Decor:     append([]string(nil), a.Decor...),
 		Props:     append([]string(nil), a.Props...),
 		Packs:     packs,
-	}
+	}, nil
 }
 
-func MaterialName(m MaterialSet) string {
-	switch m {
-	case MaterialDungeon:
-		return "dungeon"
-	case MaterialField:
-		return "field"
+// --- Table-driven name <-> enum lookups ---
+//
+// Each registry is a single slice of (enum, primary-name, alias-names...)
+// tuples. The Name function looks up by enum; the FromName function looks
+// up by case-folded name (matching any primary or alias). Both directions
+// share the same source of truth, so adding a new enum value is a one-line
+// edit instead of a "find the three switch statements" hunt — and an
+// unknown value returns ok=false instead of silently coercing to the first
+// option (which used to rewrite save data on the save path).
+
+type materialNameEntry struct {
+	value MaterialSet
+	name  string
+}
+
+var materialNameTable = []materialNameEntry{
+	{MaterialDungeon, "dungeon"},
+	{MaterialField, "field"},
+}
+
+// MaterialName returns the canonical on-disk name for the material set,
+// plus ok=false when the value is out of range. Callers that write to
+// .map files should propagate the failure rather than silently committing
+// a wrong material name.
+func MaterialName(m MaterialSet) (string, bool) {
+	for _, e := range materialNameTable {
+		if e.value == m {
+			return e.name, true
+		}
 	}
-	return "dungeon"
+	return "", false
 }
 
 func materialFromName(s string) (MaterialSet, bool) {
-	switch strings.ToLower(s) {
-	case "dungeon":
-		return MaterialDungeon, true
-	case "field":
-		return MaterialField, true
+	low := strings.ToLower(s)
+	for _, e := range materialNameTable {
+		if e.name == low {
+			return e.value, true
+		}
 	}
 	return 0, false
 }
@@ -146,56 +190,86 @@ func materialFromName(s string) (MaterialSet, bool) {
 // stay associated with the right material in the UI.
 var MaterialOptions = []MaterialSet{MaterialDungeon, MaterialField}
 
-func FacingName(f int) string {
-	switch NormalizeFacing(f) {
-	case North:
-		return "north"
-	case East:
-		return "east"
-	case South:
-		return "south"
-	case West:
-		return "west"
+type facingNameEntry struct {
+	value int
+	name  string
+}
+
+var facingNameTable = []facingNameEntry{
+	{North, "north"},
+	{East, "east"},
+	{South, "south"},
+	{West, "west"},
+}
+
+// FacingName returns the canonical on-disk name for a facing. ok=false
+// only when normalization produces a value out of range, which can't
+// happen for the four legitimate enum values.
+func FacingName(f int) (string, bool) {
+	n := NormalizeFacing(f)
+	for _, e := range facingNameTable {
+		if e.value == n {
+			return e.name, true
+		}
 	}
-	return "east"
+	return "", false
 }
 
 func facingFromName(s string) (int, bool) {
-	switch strings.ToLower(s) {
-	case "north":
-		return North, true
-	case "east":
-		return East, true
-	case "south":
-		return South, true
-	case "west":
-		return West, true
+	low := strings.ToLower(s)
+	for _, e := range facingNameTable {
+		if e.name == low {
+			return e.value, true
+		}
 	}
 	return 0, false
 }
 
-func EnemyKindName(k EnemyKind) string {
-	switch k {
-	case EnemyRat:
-		return "rat"
-	case EnemyBat:
-		return "bat"
-	case EnemyDiseasedRat:
-		return "diseased_rat"
+type enemyKindNameEntry struct {
+	value   EnemyKind
+	name    string
+	aliases []string
+}
+
+var enemyKindNameTable = []enemyKindNameEntry{
+	{EnemyRat, "rat", nil},
+	{EnemyBat, "bat", nil},
+	// "diseasedrat" is accepted as a legacy alias for files saved before
+	// the underscore-separated form became canonical.
+	{EnemyDiseasedRat, "diseased_rat", []string{"diseasedrat"}},
+}
+
+// enemyKindByName flattens enemyKindNameTable into a single primary+alias
+// lookup so EnemyKindFromName doesn't double-loop. Keys are pre-lowercased
+// since callers always normalize.
+var enemyKindByName = buildEnemyKindByName()
+
+func buildEnemyKindByName() map[string]EnemyKind {
+	m := make(map[string]EnemyKind, len(enemyKindNameTable))
+	for _, e := range enemyKindNameTable {
+		m[e.name] = e.value
+		for _, alias := range e.aliases {
+			m[alias] = e.value
+		}
 	}
-	return "rat"
+	return m
+}
+
+// EnemyKindName returns the canonical on-disk name for the enemy kind,
+// plus ok=false on unknown values. MapFileFromArea propagates the failure
+// to caller — better to refuse a save than silently rewrite enemy types.
+func EnemyKindName(k EnemyKind) (string, bool) {
+	for _, e := range enemyKindNameTable {
+		if e.value == k {
+			return e.name, true
+		}
+	}
+	return "", false
 }
 
 func EnemyKindFromName(s string) (EnemyKind, bool) {
-	switch strings.ToLower(s) {
-	case "rat":
-		return EnemyRat, true
-	case "bat":
-		return EnemyBat, true
-	case "diseased_rat", "diseasedrat":
-		return EnemyDiseasedRat, true
-	}
-	return 0, false
+	kind, ok := enemyKindByName[strings.ToLower(s)]
+	return kind, ok
 }
 
 // MapPath returns the canonical save path for a map ID under MapsDir.

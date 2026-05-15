@@ -8,14 +8,13 @@ import (
 	"crawler/internal/app/core"
 )
 
-// withSeededRNG swaps GameRNG for the test and restores it on exit so the
-// Steal and Firebolt-burn rolls become reproducible.
-func withSeededRNG(t *testing.T, seed int64, fn func()) {
+// seedGameRNG replaces the GameState's RNG with a deterministic one so the
+// Steal and Firebolt-burn rolls become reproducible inside a test. The
+// previous global-swap pattern is gone: each test now owns its own RNG via
+// its own GameState.
+func seedGameRNG(t *testing.T, g *core.GameState, seed int64) {
 	t.Helper()
-	saved := core.GameRNG
-	core.GameRNG = rand.New(rand.NewSource(seed))
-	defer func() { core.GameRNG = saved }()
-	fn()
+	g.RNG = rand.New(rand.NewSource(seed))
 }
 
 // newTestState builds a minimal GameState with a 4-class party and one pack
@@ -151,33 +150,36 @@ func TestApplyPrayer_DoesNotReviveFallenAlly(t *testing.T) {
 }
 
 func TestApplyFirebolt_DamagesAndCanBurn(t *testing.T) {
-	withSeededRNG(t, 1, func() {
-		g := newTestState()
-		g.Battle.CurrentParty = 3 // Sol
-		startMP := g.Party[3].MP
-		startHP := g.Packs[0].Members[0].HP
-		if !setupFirebolt(g) {
-			t.Fatalf("setupFirebolt should succeed")
-		}
-		// MP is deducted in apply, not setup.
-		if g.Party[3].MP != startMP {
-			t.Fatalf("setupFirebolt should NOT debit MP, got %d (was %d)", g.Party[3].MP, startMP)
-		}
-		applyFirebolt(g, core.TimingQualityExcellent)
-		if g.Party[3].MP != startMP-core.SkillCost(core.SkillFirebolt) {
-			t.Fatalf("applyFirebolt should debit cost, got %d", g.Party[3].MP)
-		}
-		if g.Packs[0].Members[0].HP >= startHP {
-			t.Fatalf("rat should take Firebolt damage")
-		}
-	})
+	g := newTestState()
+	seedGameRNG(t, g, 1)
+	g.Battle.CurrentParty = 3 // Sol
+	startMP := g.Party[3].MP
+	startHP := g.Packs[0].Members[0].HP
+	if !setupFirebolt(g) {
+		t.Fatalf("setupFirebolt should succeed")
+	}
+	// MP is deducted in setup (uniform policy across all skills); apply
+	// only spends MP when called via the setup→apply chain in beginPendingAction.
+	if g.Party[3].MP != startMP-core.SkillCost(core.SkillFirebolt) {
+		t.Fatalf("setupFirebolt should debit cost, got %d (was %d)", g.Party[3].MP, startMP)
+	}
+	postSetupMP := g.Party[3].MP
+	applyFirebolt(g, core.TimingQualityExcellent)
+	if g.Party[3].MP != postSetupMP {
+		t.Fatalf("applyFirebolt should NOT debit additional MP, got %d (was %d)", g.Party[3].MP, postSetupMP)
+	}
+	if g.Packs[0].Members[0].HP >= startHP {
+		t.Fatalf("rat should take Firebolt damage")
+	}
 }
 
 func TestApplyFirebolt_TargetDiedBetweenConfirmAndApply(t *testing.T) {
 	g := newTestState()
 	g.Battle.CurrentParty = 3
 	// Pretend the bar resolved but the rat is already gone (e.g. another
-	// burn-tick killed it before this apply ran). MP must NOT be deducted.
+	// burn-tick killed it before this apply ran). apply doesn't deduct MP
+	// (setup did, in the live flow), so calling apply directly without
+	// setup leaves MP untouched.
 	g.Packs[0].Members[0].Alive = false
 	g.Packs[0].Members[0].HP = 0
 	g.Packs[0].Members[1].Alive = false
@@ -187,52 +189,50 @@ func TestApplyFirebolt_TargetDiedBetweenConfirmAndApply(t *testing.T) {
 		t.Fatalf("Firebolt on dead target should not land")
 	}
 	if g.Party[3].MP != startMP {
-		t.Fatalf("Firebolt MP should be preserved when target dies first, got %d", g.Party[3].MP)
+		t.Fatalf("Firebolt apply must not touch MP, got %d (was %d)", g.Party[3].MP, startMP)
 	}
 }
 
 func TestApplyFirebolt_DoesNotStackBurnOnAlreadyBurning(t *testing.T) {
-	withSeededRNG(t, 1, func() {
-		g := newTestState()
-		g.Battle.CurrentParty = 3
-		g.Packs[0].Members[0].BurnTurns = 2
-		preBurn := g.Packs[0].Members[0].BurnTurns
-		applyFirebolt(g, core.TimingQualityExcellent)
-		// HP drops, but BurnTurns shouldn't grow from a fresh roll —
-		// it can only decrement at turn start.
-		if g.Packs[0].Members[0].BurnTurns > preBurn {
-			t.Fatalf("burn shouldn't stack: was %d, now %d", preBurn, g.Packs[0].Members[0].BurnTurns)
-		}
-	})
+	g := newTestState()
+	seedGameRNG(t, g, 1)
+	g.Battle.CurrentParty = 3
+	g.Packs[0].Members[0].BurnTurns = 2
+	preBurn := g.Packs[0].Members[0].BurnTurns
+	applyFirebolt(g, core.TimingQualityExcellent)
+	// HP drops, but BurnTurns shouldn't grow from a fresh roll —
+	// it can only decrement at turn start.
+	if g.Packs[0].Members[0].BurnTurns > preBurn {
+		t.Fatalf("burn shouldn't stack: was %d, now %d", preBurn, g.Packs[0].Members[0].BurnTurns)
+	}
 }
 
 func TestApplySteal_LandsItemAndClearsLoot(t *testing.T) {
 	// Seed picks a roll that lands under the success chance. Verified by trying
 	// several seeds until landing on one that produces success — kept here so
 	// the test is deterministic without depending on fragile RNG internals.
-	withSeededRNG(t, 1, func() {
-		g := newTestState()
-		g.Battle.CurrentParty = 2 // Nyx (thief)
-		preItem := g.Packs[0].Members[0].Item
-		if preItem == "" {
-			t.Fatalf("expected rat to start with stealable item")
+	g := newTestState()
+	seedGameRNG(t, g, 1)
+	g.Battle.CurrentParty = 2 // Nyx (thief)
+	preItem := g.Packs[0].Members[0].Item
+	if preItem == "" {
+		t.Fatalf("expected rat to start with stealable item")
+	}
+	// DEX 6 + Excellent quality → very high chance; for seed=1 this lands.
+	applySteal(g, core.TimingQualityExcellent)
+	// On success Item is cleared; on failure the message says fail.
+	if g.Packs[0].Members[0].Item == "" {
+		if g.Inventory == nil || len(g.Inventory) == 0 {
+			t.Fatalf("success should add item to inventory")
 		}
-		// DEX 6 + Excellent quality → very high chance; for seed=1 this lands.
-		applySteal(g, core.TimingQualityExcellent)
-		// On success Item is cleared; on failure the message says fail.
-		if g.Packs[0].Members[0].Item == "" {
-			if g.Inventory == nil || len(g.Inventory) == 0 {
-				t.Fatalf("success should add item to inventory")
-			}
-			if !strings.Contains(g.Battle.Message, "steals") {
-				t.Fatalf("success should set steal message, got %q", g.Battle.Message)
-			}
-		} else {
-			if !strings.Contains(g.Battle.Message, "fails") {
-				t.Fatalf("failure should set fail message, got %q", g.Battle.Message)
-			}
+		if !strings.Contains(g.Battle.Message, "steals") {
+			t.Fatalf("success should set steal message, got %q", g.Battle.Message)
 		}
-	})
+	} else {
+		if !strings.Contains(g.Battle.Message, "fails") {
+			t.Fatalf("failure should set fail message, got %q", g.Battle.Message)
+		}
+	}
 }
 
 func TestApplySteal_EmptyEnemyMessages(t *testing.T) {
@@ -249,7 +249,7 @@ func TestApplySteal_EmptyEnemyMessages(t *testing.T) {
 
 func TestDamageEnemy_KillsAtZero(t *testing.T) {
 	g := newTestState()
-	defeated := damageEnemy(g, 0, 99)
+	defeated := damageEnemy(g, 0, 99, core.TimingQualityMiss)
 	if !defeated {
 		t.Fatalf("massive overkill should mark defeated")
 	}
@@ -266,7 +266,7 @@ func TestDamageEnemy_KillsAtZero(t *testing.T) {
 
 func TestDamageEnemy_FlashOnSurvivedHit(t *testing.T) {
 	g := newTestState()
-	defeated := damageEnemy(g, 0, 1)
+	defeated := damageEnemy(g, 0, 1, core.TimingQualityMiss)
 	if defeated {
 		t.Fatalf("1 damage should not kill a fresh rat")
 	}
@@ -403,21 +403,20 @@ func TestResolveEnemyAttacker_DiseasedRatCanInflictPoison(t *testing.T) {
 	// Try several seeds; with PoisonChance=0.60 most should land.
 	landed := false
 	for seed := int64(1); seed <= 5 && !landed; seed++ {
-		withSeededRNG(t, seed, func() {
-			g := newPoisonState()
-			resolveEnemyAttacker(g, 0, core.TimingQualityMiss)
-			// Find any poisoned party member.
-			for _, p := range g.Party {
-				if p.PoisonTurns > 0 {
-					landed = true
-					if p.PoisonTurns < core.PoisonMinTurns || p.PoisonTurns > core.PoisonMaxTurns {
-						t.Errorf("poison duration out of [%d, %d]: %d",
-							core.PoisonMinTurns, core.PoisonMaxTurns, p.PoisonTurns)
-					}
-					break
+		g := newPoisonState()
+		seedGameRNG(t, g, seed)
+		resolveEnemyAttacker(g, 0, core.TimingQualityMiss)
+		// Find any poisoned party member.
+		for _, p := range g.Party {
+			if p.PoisonTurns > 0 {
+				landed = true
+				if p.PoisonTurns < core.PoisonMinTurns || p.PoisonTurns > core.PoisonMaxTurns {
+					t.Errorf("poison duration out of [%d, %d]: %d",
+						core.PoisonMinTurns, core.PoisonMaxTurns, p.PoisonTurns)
 				}
+				break
 			}
-		})
+		}
 	}
 	if !landed {
 		t.Fatalf("expected at least one of 5 seeds to land poison from a 60%% chance")
@@ -425,33 +424,31 @@ func TestResolveEnemyAttacker_DiseasedRatCanInflictPoison(t *testing.T) {
 }
 
 func TestResolveEnemyAttacker_PlainRatNeverPoisons(t *testing.T) {
-	withSeededRNG(t, 1, func() {
-		g := newTestState()
-		for i := 0; i < 20; i++ {
-			resolveEnemyAttacker(g, 0, core.TimingQualityMiss)
-			if g.Party[0].PoisonTurns > 0 {
-				t.Fatalf("plain rat should not inflict poison")
-			}
-			// Reset HP so we don't drop the target below 0 mid-loop.
-			g.Party[0].HP = g.Party[0].MaxHP
+	g := newTestState()
+	seedGameRNG(t, g, 1)
+	for i := 0; i < 20; i++ {
+		resolveEnemyAttacker(g, 0, core.TimingQualityMiss)
+		if g.Party[0].PoisonTurns > 0 {
+			t.Fatalf("plain rat should not inflict poison")
 		}
-	})
+		// Reset HP so we don't drop the target below 0 mid-loop.
+		g.Party[0].HP = g.Party[0].MaxHP
+	}
 }
 
 func TestResolveEnemyAttacker_PoisonDoesNotStack(t *testing.T) {
-	withSeededRNG(t, 1, func() {
-		g := newPoisonState()
-		// Pre-poison the front-line target and remember the duration.
-		g.Party[0].PoisonTurns = 4
-		preDuration := g.Party[0].PoisonTurns
-		// Pin the attack to slot 0 specifically by forcing the cursor.
-		g.Battle.EnemyAttackCursor = -1
-		resolveEnemyAttacker(g, 0, core.TimingQualityMiss)
-		if g.Party[0].PoisonTurns != preDuration {
-			t.Fatalf("poison shouldn't stack onto an already-poisoned target: was %d, now %d",
-				preDuration, g.Party[0].PoisonTurns)
-		}
-	})
+	g := newPoisonState()
+	seedGameRNG(t, g, 1)
+	// Pre-poison the front-line target and remember the duration.
+	g.Party[0].PoisonTurns = 4
+	preDuration := g.Party[0].PoisonTurns
+	// Pin the attack to slot 0 specifically by forcing the cursor.
+	g.Battle.EnemyAttackCursor = -1
+	resolveEnemyAttacker(g, 0, core.TimingQualityMiss)
+	if g.Party[0].PoisonTurns != preDuration {
+		t.Fatalf("poison shouldn't stack onto an already-poisoned target: was %d, now %d",
+			preDuration, g.Party[0].PoisonTurns)
+	}
 }
 
 func TestTickPoisonAfterPartyTurn_TicksAndDecrements(t *testing.T) {
@@ -497,5 +494,94 @@ func TestTickPoisonAfterPartyTurn_EnemyActorIsNoOp(t *testing.T) {
 	g.Party[0].PoisonTurns = 3
 	if tickPoisonAfterPartyTurn(g, core.ActorRef{IsParty: false, Index: 0}) {
 		t.Fatalf("enemy actor should be a no-op for poison tick")
+	}
+}
+
+// --- Hit-stop chain (TimingFlash → HitStop → onResolve) -------------------
+//
+// These tests drive tickFlashHold directly to verify the two-phase decay:
+// the flash counts down first, then HitStop kicks in (only on high grades),
+// and only when both have drained does onResolve fire. The chain is the
+// single most load-bearing piece of the JUICE pass — if it ever fires
+// onResolve too early or twice, the damage popup/audio/apply step all
+// land at the wrong moment.
+
+func TestTickFlashHold_LowGradeFiresImmediatelyAtFlashZero(t *testing.T) {
+	g := newTestState()
+	g.Battle.Timing.Quality = core.TimingQualityGood
+	g.Battle.TimingFlash = core.TimingFlashDuration
+	resolved := 0
+	// First tick: drains flash but doesn't quite zero it.
+	if !tickFlashHold(g, core.TimingFlashDuration*0.5, func() { resolved++ }) {
+		t.Fatalf("flash still running, tickFlashHold should report busy")
+	}
+	if resolved != 0 {
+		t.Fatalf("Good grade with flash still active shouldn't fire onResolve")
+	}
+	// Second tick: drains the rest. No hit-stop for Good, so onResolve fires.
+	if !tickFlashHold(g, core.TimingFlashDuration, func() { resolved++ }) {
+		t.Fatalf("flash expiring tick should still report busy")
+	}
+	if resolved != 1 {
+		t.Fatalf("Good grade should onResolve when flash hits 0, got %d calls", resolved)
+	}
+	if g.Battle.HitStop != 0 {
+		t.Fatalf("Good grade should not arm HitStop, got %v", g.Battle.HitStop)
+	}
+}
+
+func TestTickFlashHold_ExcellentGradeChainsIntoHitStop(t *testing.T) {
+	g := newTestState()
+	g.Battle.Timing.Quality = core.TimingQualityExcellent
+	g.Battle.TimingFlash = core.TimingFlashDuration
+	resolved := 0
+	// Drain the flash entirely in one tick.
+	tickFlashHold(g, core.TimingFlashDuration*2, func() { resolved++ })
+	if resolved != 0 {
+		t.Fatalf("Excellent grade should NOT fire onResolve at flash zero — it should arm HitStop instead")
+	}
+	if g.Battle.HitStop <= 0 {
+		t.Fatalf("Excellent flash expiry should arm HitStop, got %v", g.Battle.HitStop)
+	}
+	if g.Battle.HitStop != core.HitStopExcellent {
+		t.Fatalf("HitStop should equal HitStopExcellent (%v), got %v", core.HitStopExcellent, g.Battle.HitStop)
+	}
+	// Drain the hit-stop. Now onResolve should fire.
+	tickFlashHold(g, core.HitStopExcellent*2, func() { resolved++ })
+	if resolved != 1 {
+		t.Fatalf("onResolve should fire exactly once after HitStop drains, got %d calls", resolved)
+	}
+	if g.Battle.HitStop != 0 {
+		t.Fatalf("HitStop should clamp at 0 after expiry, got %v", g.Battle.HitStop)
+	}
+}
+
+func TestTickFlashHold_GreatGradeUsesGreatHitStop(t *testing.T) {
+	g := newTestState()
+	g.Battle.Timing.Quality = core.TimingQualityGreat
+	g.Battle.TimingFlash = core.TimingFlashDuration
+	resolved := 0
+	tickFlashHold(g, core.TimingFlashDuration*2, func() { resolved++ })
+	if g.Battle.HitStop != core.HitStopGreat {
+		t.Fatalf("Great should arm HitStopGreat (%v), got %v", core.HitStopGreat, g.Battle.HitStop)
+	}
+	if resolved != 0 {
+		t.Fatalf("Great grade should defer onResolve until HitStop drains")
+	}
+	tickFlashHold(g, core.HitStopGreat*2, func() { resolved++ })
+	if resolved != 1 {
+		t.Fatalf("Great grade should onResolve exactly once after HitStop, got %d", resolved)
+	}
+}
+
+func TestTickFlashHold_NoFlashNoOp(t *testing.T) {
+	g := newTestState()
+	// No flash armed → returns false (caller should NOT bail).
+	called := false
+	if tickFlashHold(g, 0.1, func() { called = true }) {
+		t.Fatalf("idle tickFlashHold should report not-busy")
+	}
+	if called {
+		t.Fatalf("onResolve should not fire when there was nothing to drain")
 	}
 }

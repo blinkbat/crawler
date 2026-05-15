@@ -1,5 +1,7 @@
 package core
 
+import "math/rand"
+
 const (
 	TimingQualityMiss = iota
 	TimingQualityNice
@@ -80,18 +82,18 @@ type TimingState struct {
 // PressWindowMinStart, so they always get a moment of "approaching, not
 // yet" before a hit is possible. Width is fixed at PressWindowWidth and
 // the sweet spot sits in the center.
-func NewTimingState(duration float32) TimingState {
+func NewTimingState(rng *rand.Rand, duration float32) TimingState {
 	if duration <= 0 {
 		duration = AttackTimingDuration
 	}
-	span := PressWindowMaxStart - PressWindowMinStart
-	startPct := PressWindowMinStart + float32(GameRNG.Float64())*span
-	endPct := startPct + PressWindowWidth
-	if endPct > 0.96 {
+	span := PressWindow.MaxStart - PressWindow.MinStart
+	startPct := PressWindow.MinStart + float32(rng.Float64())*span
+	endPct := startPct + PressWindow.Width
+	if endPct > PressWindow.MaxEnd {
 		// Clamp so the window never bumps against the bar's tail. Slide it
 		// back so the full width fits.
-		endPct = 0.96
-		startPct = endPct - PressWindowWidth
+		endPct = PressWindow.MaxEnd
+		startPct = endPct - PressWindow.Width
 	}
 	sweet := (startPct + endPct) * 0.5
 	return TimingState{
@@ -125,7 +127,7 @@ func NewChargeState(duration float32) TimingState {
 // NewSequenceState builds a freshly-armed sequence-kind bar with `length`
 // random directional arrows. Player has `duration` seconds to tap them all
 // in order; pending/wrong slots drop the grade.
-func NewSequenceState(duration float32, length int) TimingState {
+func NewSequenceState(rng *rand.Rand, duration float32, length int) TimingState {
 	if duration <= 0 {
 		duration = StealTimingDuration
 	}
@@ -134,7 +136,7 @@ func NewSequenceState(duration float32, length int) TimingState {
 	}
 	targets := make([]int, length)
 	for i := range targets {
-		targets[i] = GameRNG.Intn(4)
+		targets[i] = rng.Intn(4)
 	}
 	return TimingState{
 		Kind:            TimingKindSequence,
@@ -330,17 +332,7 @@ func (t *TimingState) resolve(inWindow bool) {
 		t.Quality = TimingQualityNice
 		return
 	}
-	ratio := distance / windowSize
-	switch {
-	case ratio <= 0.05:
-		t.Quality = TimingQualityExcellent
-	case ratio <= 0.15:
-		t.Quality = TimingQualityGreat
-	case ratio <= 0.30:
-		t.Quality = TimingQualityGood
-	default:
-		t.Quality = TimingQualityNice
-	}
+	t.Quality = gradeFromRatio(distance / windowSize)
 }
 
 // Progress returns the current sweep position in [0, 1].
@@ -359,58 +351,108 @@ func (t TimingState) Progress() float32 {
 }
 
 // TimingBonusMult is the offensive damage multiplier for an attack quality.
-// Multipliers live in config.go so balance tuning is centralized.
+// Indexes into timingGrades (config.go); out-of-range qualities fall back
+// to the Miss multiplier (1.0×).
 func TimingBonusMult(quality int) float32 {
-	switch quality {
-	case TimingQualityNice:
-		return TimingMultNice
-	case TimingQualityGood:
-		return TimingMultGood
-	case TimingQualityGreat:
-		return TimingMultGreat
-	case TimingQualityExcellent:
-		return TimingMultExcellent
-	default:
-		return TimingMultMiss
+	if quality < 0 || quality >= len(timingGrades) {
+		return timingGrades[TimingQualityMiss].Atk
 	}
+	return timingGrades[quality].Atk
 }
 
 // TimingDefenseMult is the incoming damage multiplier for a defend quality.
-// Lower is better; Excellent quarters incoming damage, Miss takes the full hit.
-// Multipliers live in config.go.
+// Lower is better; Excellent quarters incoming damage, Miss takes the full
+// hit. Indexes into timingGrades (config.go); out-of-range qualities fall
+// back to the Miss multiplier (1.0×).
 func TimingDefenseMult(quality int) float32 {
-	switch quality {
-	case TimingQualityNice:
-		return TimingDefNice
-	case TimingQualityGood:
-		return TimingDefGood
-	case TimingQualityGreat:
-		return TimingDefGreat
-	case TimingQualityExcellent:
-		return TimingDefExcellent
-	default:
-		return TimingDefMiss
+	if quality < 0 || quality >= len(timingGrades) {
+		return timingGrades[TimingQualityMiss].Def
 	}
+	return timingGrades[quality].Def
 }
 
-// TimingQualityLabel returns the popup text for a quality grade.
-func TimingQualityLabel(quality int) string {
-	switch quality {
-	case TimingQualityNice:
-		return "Nice!"
-	case TimingQualityGood:
-		return "Good!"
-	case TimingQualityGreat:
-		return "Great!"
-	case TimingQualityExcellent:
-		return "Excellent!"
-	default:
-		return "Miss..."
+// pressGradeBands maps the sweet-spot-distance ratio (in units of the
+// acceptance window half-width) onto a grade. Single source of truth for
+// both resolve() and PreviewQuality so the cursor's live preview and the
+// actually-scored grade never desync. A balance pass that wants different
+// bands changes this table and both call sites follow.
+var pressGradeBands = []struct {
+	maxRatio float32
+	grade    int
+}{
+	{0.05, TimingQualityExcellent},
+	{0.15, TimingQualityGreat},
+	{0.30, TimingQualityGood},
+}
+
+// gradeFromRatio looks up the press-bar grade for a normalized
+// sweet-spot-distance ratio. Anything past the largest band falls
+// through to Nice (still inside the window) — the caller is responsible
+// for testing window membership first; a ratio passed in for an
+// out-of-window press still grades as a Miss by the caller's gate.
+func gradeFromRatio(ratio float32) int {
+	for _, b := range pressGradeBands {
+		if ratio <= b.maxRatio {
+			return b.grade
+		}
 	}
+	return TimingQualityNice
+}
+
+// PreviewQuality returns the grade a press-kind bar would score if the player
+// pressed right now. Used by the renderer to live-color the cursor so the
+// player sees their potential grade approaching — Excellent shimmers as they
+// near the sweet spot, slips to Great, then Good, etc. Returns Miss when the
+// cursor is outside the acceptance window (or the bar isn't a press kind).
+func (t TimingState) PreviewQuality() int {
+	if t.Kind != TimingKindPress {
+		return TimingQualityMiss
+	}
+	if t.Elapsed < t.WindowStart || t.Elapsed > t.WindowEnd {
+		return TimingQualityMiss
+	}
+	windowSize := t.WindowEnd - t.WindowStart
+	if windowSize <= 0 {
+		return TimingQualityNice
+	}
+	distance := t.Elapsed - t.SweetSpot
+	if distance < 0 {
+		distance = -distance
+	}
+	return gradeFromRatio(distance / windowSize)
+}
+
+// HitStopFor returns the freeze-frame duration after a graded press lands.
+// Misses / Nice / Good get no hit-stop — the action just flows. Great gets a
+// short punch, Excellent gets a longer one. Caller (battle/battle.go's
+// tickFlashHold) uses this to delay the apply step so the bar's flash hold
+// chains into a true world-pause before damage lands.
+func HitStopFor(quality int) float32 {
+	switch quality {
+	case TimingQualityExcellent:
+		return HitStopExcellent
+	case TimingQualityGreat:
+		return HitStopGreat
+	}
+	return 0
+}
+
+// TimingQualityLabel returns the popup text for a quality grade. Reads
+// from timingGrades (config.go); out-of-range values fall back to the
+// Miss label so a future grade addition is one table-row edit.
+func TimingQualityLabel(quality int) string {
+	if quality < 0 || quality >= len(timingGrades) {
+		return timingGrades[TimingQualityMiss].Label
+	}
+	return timingGrades[quality].Label
 }
 
 // ScaleDamage applies an attack quality's multiplier to a base damage amount.
-// Excellent always lands at least 1 point even on a 0 base.
+// On Excellent, the result is guaranteed strictly greater than the base
+// (base+1 if the multiplier would otherwise round down to <=base), so an
+// "Excellent" never reads as a non-improvement over a Miss. Other grades
+// can round to 0 on tiny bases — that's by design (a Nice on a 1-damage
+// swing shouldn't print "1 damage" same as a Miss).
 func ScaleDamage(base int, quality int) int {
 	scaled := int(float32(base) * TimingBonusMult(quality))
 	if quality == TimingQualityExcellent && scaled <= base {
@@ -432,7 +474,10 @@ func ScaleHeal(base int, quality int) int {
 }
 
 // ScaleIncomingDamage applies a defend quality's multiplier to incoming damage.
-// A defended hit cannot become heal — clamps at 0.
+// A defended hit cannot become heal — clamps at 0. Integer truncation means
+// a Great/Excellent block on a small hit (e.g. base 3 × 0.25 = 0.75 → 0) can
+// fully zero the damage; that's intentional, matches how a successful
+// timed block reads in-game ("0 damage" with the block flourish).
 func ScaleIncomingDamage(base int, quality int) int {
 	scaled := int(float32(base) * TimingDefenseMult(quality))
 	if scaled < 0 {

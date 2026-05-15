@@ -1,6 +1,7 @@
 package render
 
 import (
+	"log"
 	"math"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -115,6 +116,12 @@ type lightingShader struct {
 
 func loadLightingShader() lightingShader {
 	shader := rl.LoadShaderFromMemory(lightingVertexShader, lightingFragmentShader)
+	if shader.ID == 0 {
+		// Compile/link failure leaves shader.ID == 0; raylib's BeginShaderMode
+		// will silently no-op past that point, so the world draws unlit with
+		// no other warning. One-line startup log so we don't lose the signal.
+		log.Println("render: lighting shader failed to compile; rendering will fall back to raylib's default shader")
+	}
 	return lightingShader{
 		shader:            shader,
 		locViewPos:        rl.GetShaderLocation(shader, "viewPos"),

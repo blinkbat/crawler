@@ -13,47 +13,47 @@ func drawTurnPanel(g core.GameState, assets Resources) {
 	if len(turns) == 0 {
 		return
 	}
-	screenW := int32(rl.GetScreenWidth())
-	w := int32(216)
+	screenW, _ := screenSize()
+	w := int32(272)
 	x := screenW - w - 22
-	y := int32(96)
-	rowH := int32(32)
-	headerH := int32(50)
-	padBottom := int32(14)
+	y := int32(110)
+	rowH := int32(42)
+	headerH := int32(62)
+	padBottom := int32(16)
 	h := headerH + int32(len(turns))*rowH + padBottom
 
 	drawCard(x, y, w, h, surfacePrimary, borderSoft, borderStrong)
-	drawHeading(assets.hudFont, "TURN ORDER", x+18, y+14, borderStrong)
+	drawHeading(assets.hudFont, "TURN ORDER", x+22, y+18, borderStrong)
 
 	for i, turn := range turns {
 		rowY := y + headerH + int32(i)*rowH
 		col := turnEntryColor(turn)
 
-		rowX := x + 12
-		rowW := w - 24
-		rowInnerH := rowH - 6
+		rowX := x + 14
+		rowW := w - 28
+		rowInnerH := rowH - 8
 
 		if i == 0 {
 			tint := rl.NewColor(col.R, col.G, col.B, 86)
 			drawSmallPanel(rowX, rowY, rowW, rowInnerH, tint)
 			drawSmallPanelOutline(rowX, rowY, rowW, rowInnerH, rl.NewColor(col.R, col.G, col.B, 230))
-			cx := float32(rowX + 12)
+			cx := float32(rowX + 14)
 			cy := float32(rowY) + float32(rowInnerH)/2
 			rl.DrawTriangle(
-				rl.NewVector2(cx-3, cy-6),
-				rl.NewVector2(cx+5, cy),
-				rl.NewVector2(cx-3, cy+6),
+				rl.NewVector2(cx-4, cy-8),
+				rl.NewVector2(cx+6, cy),
+				rl.NewVector2(cx-4, cy+8),
 				col,
 			)
 		} else {
 			tint := rl.NewColor(col.R, col.G, col.B, 36)
 			drawSmallPanel(rowX, rowY, rowW, rowInnerH, tint)
-			rl.DrawRectangle(rowX+6, rowY+5, 3, rowInnerH-10, rl.NewColor(col.R, col.G, col.B, 210))
+			rl.DrawRectangle(rowX+8, rowY+6, 4, rowInnerH-12, rl.NewColor(col.R, col.G, col.B, 210))
 		}
 
-		labelX := rowX + 22
-		labelY := rowY + (rowInnerH-18)/2 - 1
-		drawTextWithShadow(assets.hudFont, turn.Label, float32(labelX), float32(labelY), 18, col)
+		labelX := rowX + 28
+		labelY := rowY + (rowInnerH-22)/2 - 1
+		drawTextWithShadow(assets.hudFont, turn.Label, float32(labelX), float32(labelY), 22, col)
 	}
 }
 

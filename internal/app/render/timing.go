@@ -2,11 +2,121 @@ package render
 
 import (
 	"fmt"
+	"math"
 
 	"crawler/internal/app/core"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
+
+// --- Bar juice helpers ----------------------------------------------------
+//
+// barShake, barThrob, and tickFreshness are the three reusable feedback
+// curves the press / charge / sequence bars all share. Each is keyed off
+// the bar's existing TimingFlash hold so the juice fades out as the flash
+// resolves — no extra state, no new timers, no per-frame plumbing.
+
+// blendTowardWhite mixes col with pure white by `whiteAmount` ∈ [0, 1].
+// At 0 the original color is returned untouched; at 1 the result is white.
+// Used to keep grade-tinted UI elements distinct from grade-tinted
+// backgrounds (most importantly the press cursor sitting on its own
+// preview zone — a pure-color cursor would visually disappear).
+func blendTowardWhite(col rl.Color, whiteAmount float32) rl.Color {
+	if whiteAmount < 0 {
+		whiteAmount = 0
+	}
+	if whiteAmount > 1 {
+		whiteAmount = 1
+	}
+	keep := 1 - whiteAmount
+	return rl.NewColor(
+		uint8(float32(col.R)*keep+255*whiteAmount),
+		uint8(float32(col.G)*keep+255*whiteAmount),
+		uint8(float32(col.B)*keep+255*whiteAmount),
+		col.A,
+	)
+}
+
+// barShake returns a horizontal pixel offset for the bar during a Miss
+// flash. Damped sinusoid: peaks right after the missed press, decays out
+// over the flash hold. Zero for any other grade so the bar only "rejects"
+// the player's input when they fully whiffed.
+func barShake(timing core.TimingState, flashTimer float32) float32 {
+	if timing.Quality != core.TimingQualityMiss || flashTimer <= 0 {
+		return 0
+	}
+	if core.TimingFlashDuration <= 0 {
+		return 0
+	}
+	age := 1 - flashTimer/core.TimingFlashDuration
+	if age < 0 {
+		age = 0
+	}
+	if age > 1 {
+		age = 1
+	}
+	amp := (1 - age) * 6.5
+	return float32(math.Sin(float64(age)*math.Pi*9)) * amp
+}
+
+// qualityVisuals is the render-side per-grade attribute table. Color and
+// throb intensity both vary by quality, and both used to live in parallel
+// switches — collapsed here so a balance / palette pass touches one row.
+// Indexed by core.TimingQualityMiss..Excellent.
+var qualityVisuals = [...]struct {
+	ThrobIntensity float32
+	AttackColor    rl.Color
+	DefendColor    rl.Color
+}{
+	core.TimingQualityMiss:      {ThrobIntensity: 0, AttackColor: rl.NewColor(220, 76, 76, 255), DefendColor: rl.NewColor(220, 76, 76, 255)},
+	core.TimingQualityNice:      {ThrobIntensity: 0.08, AttackColor: rl.NewColor(184, 96, 80, 255), DefendColor: rl.NewColor(56, 110, 184, 255)},
+	core.TimingQualityGood:      {ThrobIntensity: 0.12, AttackColor: rl.NewColor(232, 144, 80, 255), DefendColor: rl.NewColor(80, 152, 220, 255)},
+	core.TimingQualityGreat:     {ThrobIntensity: 0.16, AttackColor: rl.NewColor(255, 188, 88, 255), DefendColor: rl.NewColor(120, 200, 248, 255)},
+	core.TimingQualityExcellent: {ThrobIntensity: 0.22, AttackColor: rl.NewColor(255, 244, 144, 255), DefendColor: rl.NewColor(196, 240, 255, 255)},
+}
+
+// barThrob returns the height scale multiplier for a bar during a graded
+// flash. Higher grades pulse harder — visual confirmation that the player
+// hit *something*. Miss stays at 1.0 so the bar shakes instead (see
+// barShake). The bar's centerline stays fixed; the multiplier grows
+// height around it.
+func barThrob(timing core.TimingState, flashTimer float32) float32 {
+	if flashTimer <= 0 {
+		return 1
+	}
+	intensity := float32(0)
+	if timing.Quality >= 0 && timing.Quality < len(qualityVisuals) {
+		intensity = qualityVisuals[timing.Quality].ThrobIntensity
+	}
+	return 1 + intensity*flashAlpha(flashTimer)
+}
+
+// tickFreshness returns a [0, 1] strength for a charge bar's tick marker
+// based on how recently the cursor crossed it. The tick flashes brighter +
+// wider while fresh, then settles back to its baseline. tickFlashDuration
+// is local to this helper since it's the only caller.
+func tickFreshness(timing core.TimingState, tickPct float32) float32 {
+	const tickFlashDuration = float32(0.22)
+	tickTime := tickPct * timing.Duration
+	age := timing.Elapsed - tickTime
+	if age < 0 || age > tickFlashDuration {
+		return 0
+	}
+	return 1 - age/tickFlashDuration
+}
+
+// applyBarMotion shifts (x, y, h) by the throb/shake feedback so the bar's
+// body, window zones, and cursor stay in sync. Returns the adjusted
+// (xOffset, yOffset, scaledH). The caller adds xOffset/yOffset to its draw
+// positions and uses scaledH in place of barH.
+func applyBarMotion(timing core.TimingState, flashTimer, barH float32) (xOffset, yOffset, scaledH float32) {
+	shake := barShake(timing, flashTimer)
+	throb := barThrob(timing, flashTimer)
+	scaledH = barH * throb
+	yOffset = -(scaledH - barH) / 2
+	xOffset = shake
+	return
+}
 
 // drawTimingBar paints the active timed-hit bar above the party ribbon. The
 // bar dispatches by Kind: press-mode shows a sliding cursor over nested
@@ -36,7 +146,7 @@ func drawTimingBar(g core.GameState, assets Resources) {
 // timingBarLayout returns the bar's screen-space rectangle. Both kinds share
 // the same footprint so switching modes doesn't cause the strip to jump.
 func timingBarLayout() (x, y, barW, barH float32) {
-	screenW := float32(rl.GetScreenWidth())
+	screenW, _ := screenSizeF()
 	barH = 34
 	barW = screenW * 0.62
 	if barW < 380 {
@@ -45,7 +155,7 @@ func timingBarLayout() (x, y, barW, barH float32) {
 	if barW > screenW-32 {
 		barW = screenW - 32
 	}
-	x = (screenW - barW) / 2
+	x = centerXF(barW)
 	y = PartyRibbonTopY() - barH - 28
 	return
 }
@@ -64,7 +174,7 @@ func drawTimingHeading(font rl.Font, text string, x, barW, y float32, baseCol rl
 	measure := rl.MeasureTextEx(font, text, size, 1.5)
 	hx := x + (barW-measure.X)/2
 	hy := y - measure.Y - 6
-	rl.DrawTextEx(font, text, rl.NewVector2(hx+2, hy+2), size, 1.5, rl.NewColor(0, 0, 0, 200))
+	rl.DrawTextEx(font, text, rl.NewVector2(hx+2, hy+2), size, 1.5, shadowStrong)
 	rl.DrawTextEx(font, text, rl.NewVector2(hx, hy), size, 1.5, col)
 }
 
@@ -84,6 +194,15 @@ func applyTimingFlashCursor(curX, y, barH, flashTimer float32, base rl.Color) (f
 
 // drawPressBar is the original press-kind bar: nested quality zones inside
 // the acceptance window, sliding cursor, flash on press.
+//
+// Juice layers stacked on top of the base bar:
+//   - barThrob: bar height pulses on graded flashes (bigger on Excellent)
+//   - barShake: bar shudders horizontally on a Miss flash
+//   - cursor preview color: cursor tints to the grade you'd score right now
+//     while you're inside the acceptance window, so Excellent shimmers up to
+//     you before you commit
+//   - shockwave ring: Excellent flashes spawn an expanding ring from the
+//     frozen cursor position
 func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
 	isDefend := g.Battle.Phase == core.BattleEnemyTiming
 
@@ -93,7 +212,12 @@ func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x
 		heading = "DEFEND!"
 		baseCol = rl.NewColor(168, 220, 255, 240)
 	}
-	drawTimingHeading(assets.hudFont, heading, x, barW, y, baseCol, flashing, qualityColor(timing.Quality, isDefend))
+
+	xOff, yOff, drawnH := applyBarMotion(timing, g.Battle.TimingFlash, barH)
+	drawX := x + xOff
+	drawY := y + yOff
+
+	drawTimingHeading(assets.hudFont, heading, drawX, barW, drawY, baseCol, flashing, qualityColor(timing.Quality, isDefend))
 
 	// Track — solid dark fill, no border. During the flash hold the track
 	// fades to the quality color so the whole bar pulses with the result.
@@ -102,16 +226,16 @@ func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x
 		trackCol = qualityColor(timing.Quality, isDefend)
 		trackCol.A = uint8(220 * flashAlpha(g.Battle.TimingFlash))
 	}
-	rl.DrawRectangle(int32(x), int32(y), int32(barW), int32(barH), trackCol)
+	rl.DrawRectangle(int32(drawX), int32(drawY), int32(barW), int32(drawnH), trackCol)
 
 	// Quality zones inside the acceptance window — Nice (outermost) → Good →
 	// Great → Excellent (centered on the sweet spot). Each is a full-height
 	// solid color stripe; nesting communicates the grading without any lines.
 	if !flashing {
-		drawWindowZone(timing, x, y, barW, barH, 1.00, qualityColor(core.TimingQualityNice, isDefend))
-		drawWindowZone(timing, x, y, barW, barH, 0.60, qualityColor(core.TimingQualityGood, isDefend))
-		drawWindowZone(timing, x, y, barW, barH, 0.30, qualityColor(core.TimingQualityGreat, isDefend))
-		drawWindowZone(timing, x, y, barW, barH, 0.10, qualityColor(core.TimingQualityExcellent, isDefend))
+		drawWindowZone(timing, drawX, drawY, barW, drawnH, 1.00, qualityColor(core.TimingQualityNice, isDefend))
+		drawWindowZone(timing, drawX, drawY, barW, drawnH, 0.60, qualityColor(core.TimingQualityGood, isDefend))
+		drawWindowZone(timing, drawX, drawY, barW, drawnH, 0.30, qualityColor(core.TimingQualityGreat, isDefend))
+		drawWindowZone(timing, drawX, drawY, barW, drawnH, 0.10, qualityColor(core.TimingQualityExcellent, isDefend))
 	}
 
 	// Cursor — a fat vertical block sliding across the bar. Frozen at the
@@ -119,13 +243,39 @@ func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x
 	// During the intro pause (TimingIntro > 0) Tick isn't called, so
 	// Progress() naturally stays at 0 — no special-casing needed here.
 	curPct := timing.Progress()
-	curX := x + curPct*barW
+	curX := drawX + curPct*barW
 	cursorW := float32(8)
 	cursorCol := rl.NewColor(248, 248, 252, 255)
-	if flashing {
-		cursorW, cursorCol = applyTimingFlashCursor(curX, y, barH, g.Battle.TimingFlash, qualityColor(timing.Quality, isDefend))
+	// Live grade preview: while the cursor's inside the acceptance window
+	// and the player hasn't pressed yet, tint it toward the grade it would
+	// land. We blend 35% toward the grade color from white instead of
+	// taking the grade color pure — pure grade-color would let the cursor
+	// disappear when sitting *on top of* its own grade zone (both bright
+	// yellow at Excellent → invisible cursor). The blended tint keeps the
+	// cursor distinct from the zone behind it while still communicating
+	// "press NOW for X."
+	if !flashing && !timing.Resolved {
+		if preview := timing.PreviewQuality(); preview > core.TimingQualityMiss {
+			cursorCol = blendTowardWhite(qualityColor(preview, isDefend), 0.55)
+		}
 	}
-	rl.DrawRectangle(int32(curX-cursorW/2), int32(y)-6, int32(cursorW), int32(barH)+12, cursorCol)
+	if flashing {
+		cursorW, cursorCol = applyTimingFlashCursor(curX, drawY, drawnH, g.Battle.TimingFlash, qualityColor(timing.Quality, isDefend))
+	}
+	rl.DrawRectangle(int32(curX-cursorW/2), int32(drawY)-6, int32(cursorW), int32(drawnH)+12, cursorCol)
+
+	// Excellent shockwave — an expanding ring from the frozen cursor
+	// position during the flash hold. Only on Excellent so the moment
+	// reads as special; lesser grades stay quiet.
+	if flashing && timing.Quality == core.TimingQualityExcellent {
+		phase := 1 - flashAlpha(g.Battle.TimingFlash) // 0 fresh → 1 done
+		radius := 14 + phase*72
+		ringCol := qualityColor(core.TimingQualityExcellent, isDefend)
+		ringCol.A = uint8(220 * (1 - phase))
+		cy := drawY + drawnH*0.5
+		rl.DrawCircleLines(int32(curX), int32(cy), radius, ringCol)
+		rl.DrawCircleLines(int32(curX), int32(cy), radius+2, ringCol)
+	}
 }
 
 // drawChargeBar paints the charge-and-release bar. Layout from left to right:
@@ -146,7 +296,12 @@ func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, 
 			baseCol = rl.NewColor(255, 244, 144, 250)
 		}
 	}
-	drawTimingHeading(assets.hudFont, heading, x, barW, y, baseCol, flashing, qualityColor(timing.Quality, false))
+
+	xOff, yOff, drawnH := applyBarMotion(timing, g.Battle.TimingFlash, barH)
+	drawX := x + xOff
+	drawY := y + yOff
+
+	drawTimingHeading(assets.hudFont, heading, drawX, barW, drawY, baseCol, flashing, qualityColor(timing.Quality, false))
 
 	// Track — dark base fill.
 	trackCol := rl.NewColor(14, 16, 26, 230)
@@ -154,17 +309,17 @@ func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, 
 		trackCol = qualityColor(timing.Quality, false)
 		trackCol.A = uint8(220 * flashAlpha(g.Battle.TimingFlash))
 	}
-	rl.DrawRectangle(int32(x), int32(y), int32(barW), int32(barH), trackCol)
+	rl.DrawRectangle(int32(drawX), int32(drawY), int32(barW), int32(drawnH), trackCol)
 
 	if !flashing {
 		// Decay zone (dim warning) — drawn first so the peak overlays it.
 		decayStart := timing.WindowEnd
 		decayCol := rl.NewColor(184, 96, 80, 220)
-		drawTimeRange(decayStart, timing.Duration, timing, x, y, barW, barH, decayCol)
+		drawTimeRange(decayStart, timing.Duration, timing, drawX, drawY, barW, drawnH, decayCol)
 
 		// Peak window (release zone) — bright Excellent color.
 		peakCol := qualityColor(core.TimingQualityExcellent, false)
-		drawTimeRange(timing.WindowStart, timing.WindowEnd, timing, x, y, barW, barH, peakCol)
+		drawTimeRange(timing.WindowStart, timing.WindowEnd, timing, drawX, drawY, barW, drawnH, peakCol)
 
 		// Charging fill — snaps forward only when the cursor crosses a tick
 		// boundary, since the *grade* counts only fully-completed ticks.
@@ -175,19 +330,22 @@ func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, 
 			fillEnd := chargeFillEnd(timing)
 			if fillEnd > 0 {
 				chargeCol := rl.NewColor(232, 144, 80, 220)
-				drawTimeRange(0, fillEnd, timing, x, y, barW, barH, chargeCol)
+				drawTimeRange(0, fillEnd, timing, drawX, drawY, barW, drawnH, chargeCol)
 			}
 		}
 
 		// Tick markers — vertical separators between the three charge segments.
-		drawChargeTick(timing, x, y, barW, barH, core.ChargeTick1Pct)
-		drawChargeTick(timing, x, y, barW, barH, core.ChargeTick2Pct)
-		drawChargeTick(timing, x, y, barW, barH, core.ChargeTick3Pct)
+		// Each tick gets a freshness flash for ~220ms after the cursor crosses
+		// it, signalling "you just earned a grade tier" without changing the
+		// underlying line drawing.
+		drawChargeTickWithFlash(timing, drawX, drawY, barW, drawnH, core.ChargeTick1Pct)
+		drawChargeTickWithFlash(timing, drawX, drawY, barW, drawnH, core.ChargeTick2Pct)
+		drawChargeTickWithFlash(timing, drawX, drawY, barW, drawnH, core.ChargeTick3Pct)
 	}
 
 	// Cursor — slides with Elapsed, brightens when held.
 	curPct := timing.Progress()
-	curX := x + curPct*barW
+	curX := drawX + curPct*barW
 	cursorW := float32(8)
 	cursorCol := rl.NewColor(248, 248, 252, 220)
 	if timing.Pressed && !timing.Resolved {
@@ -196,12 +354,40 @@ func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, 
 		cursorCol = rl.NewColor(255, 244, 144, 255)
 		halo := cursorCol
 		halo.A = 90
-		rl.DrawRectangle(int32(curX-cursorW), int32(y)-6, int32(cursorW*2), int32(barH)+12, halo)
+		rl.DrawRectangle(int32(curX-cursorW), int32(drawY)-6, int32(cursorW*2), int32(drawnH)+12, halo)
 	}
 	if flashing {
-		cursorW, cursorCol = applyTimingFlashCursor(curX, y, barH, g.Battle.TimingFlash, qualityColor(timing.Quality, false))
+		cursorW, cursorCol = applyTimingFlashCursor(curX, drawY, drawnH, g.Battle.TimingFlash, qualityColor(timing.Quality, false))
 	}
-	rl.DrawRectangle(int32(curX-cursorW/2), int32(y)-6, int32(cursorW), int32(barH)+12, cursorCol)
+	rl.DrawRectangle(int32(curX-cursorW/2), int32(drawY)-6, int32(cursorW), int32(drawnH)+12, cursorCol)
+
+	// Excellent shockwave on release — same treatment as the press bar so
+	// charge-graded Excellents read with the same flourish.
+	if flashing && timing.Quality == core.TimingQualityExcellent {
+		phase := 1 - flashAlpha(g.Battle.TimingFlash)
+		radius := 14 + phase*72
+		ringCol := qualityColor(core.TimingQualityExcellent, false)
+		ringCol.A = uint8(220 * (1 - phase))
+		cy := drawY + drawnH*0.5
+		rl.DrawCircleLines(int32(curX), int32(cy), radius, ringCol)
+		rl.DrawCircleLines(int32(curX), int32(cy), radius+2, ringCol)
+	}
+}
+
+// drawChargeTickWithFlash paints a tick marker plus a freshness overlay so
+// the line briefly glows brighter and a touch wider in the ~220ms after
+// the cursor crosses it. Drives off tickFreshness — no extra state needed.
+func drawChargeTickWithFlash(timing core.TimingState, barX, barY, barW, barH float32, pct float32) {
+	drawChargeTick(timing, barX, barY, barW, barH, pct)
+	fresh := tickFreshness(timing, pct)
+	if fresh <= 0 {
+		return
+	}
+	tx := barX + pct*barW
+	col := qualityColor(core.TimingQualityExcellent, false)
+	col.A = uint8(220 * fresh)
+	width := 2 + fresh*4
+	rl.DrawRectangle(int32(tx-width/2), int32(barY)-5, int32(width), int32(barH)+10, col)
 }
 
 // drawSequenceBar paints the pickpocket prompt: a row of N arrows the player
@@ -212,7 +398,11 @@ func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, 
 func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
 	heading := "PICKPOCKET!"
 	baseCol := rl.NewColor(140, 232, 168, 240) // thief green
-	drawTimingHeading(assets.hudFont, heading, x, barW, y, baseCol, flashing, qualityColor(timing.Quality, false))
+
+	xOff, _, _ := applyBarMotion(timing, g.Battle.TimingFlash, barH)
+	drawX := x + xOff
+
+	drawTimingHeading(assets.hudFont, heading, drawX, barW, y, baseCol, flashing, qualityColor(timing.Quality, false))
 
 	count := len(timing.SequenceTargets)
 	if count == 0 {
@@ -223,6 +413,11 @@ func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources
 	// them, we can size them larger so they read as the focus of the prompt.
 	pad := float32(18)
 	available := barW - pad*2
+	if available <= 0 {
+		// Window too narrow to lay out arrows with any padding — bail rather
+		// than draw flipped-sign geometry.
+		return
+	}
 	slotWidth := available / float32(count)
 	arrowSize := slotWidth * 0.35
 	if arrowSize > barH*0.85 {
@@ -230,7 +425,7 @@ func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources
 	}
 
 	for i, dir := range timing.SequenceTargets {
-		cx := x + pad + slotWidth*(float32(i)+0.5)
+		cx := drawX + pad + slotWidth*(float32(i)+0.5)
 		cy := y + barH*0.5
 		state := timing.SequenceResults[i]
 
@@ -247,14 +442,26 @@ func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources
 			col.A = uint8(float32(col.A) * flashAlpha(g.Battle.TimingFlash))
 		}
 
+		// Per-slot pulse: the just-landed correct slot scales up briefly so
+		// each tap reads as a discrete win. Drives off SequencePulseTimer
+		// set by the battle update when SequenceInput resolves Correct.
+		slotSize := arrowSize
+		if g.Battle.SequencePulseIndex == i && g.Battle.SequencePulseTimer > 0 {
+			phase := g.Battle.SequencePulseTimer / core.SequencePulseDuration
+			if phase > 1 {
+				phase = 1
+			}
+			slotSize = arrowSize * (1 + 0.55*phase*phase)
+		}
+
 		// Drop shadow: same triangle drawn 3 px down-right in transparent
 		// black so the arrow stays readable over busy 3D backgrounds.
 		shadowAlpha := uint8(180)
 		if flashing {
 			shadowAlpha = uint8(float32(shadowAlpha) * flashAlpha(g.Battle.TimingFlash))
 		}
-		drawArrow(cx+3, cy+3, arrowSize, dir, rl.NewColor(0, 0, 0, shadowAlpha))
-		drawArrow(cx, cy, arrowSize, dir, col)
+		drawArrow(cx+3, cy+3, slotSize, dir, rl.NewColor(0, 0, 0, shadowAlpha))
+		drawArrow(cx, cy, slotSize, dir, col)
 
 		// Cursor underline below the next slot.
 		if !flashing && i == timing.SequenceCursor {
@@ -285,7 +492,7 @@ func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources
 		// Center-anchored shrink: the line stays centered as it retracts
 		// from both ends, matching how the arrows are centered in their slots.
 		visW := barW * remaining
-		stripX := x + (barW-visW)*0.5
+		stripX := drawX + (barW-visW)*0.5
 		rl.DrawRectangle(int32(stripX)+1, int32(stripY)+1, int32(visW), int32(stripH), rl.NewColor(0, 0, 0, 160))
 		rl.DrawRectangle(int32(stripX), int32(stripY), int32(visW), int32(stripH), stripCol)
 	}
@@ -483,7 +690,7 @@ func DrawQualityPopup(camera rl.Camera3D, g core.GameState, assets Resources) {
 	}
 	worldPos.Y += 0.6
 	screenPos := rl.GetWorldToScreen(worldPos, camera)
-	if screenPos.X < -200 || screenPos.X > float32(rl.GetScreenWidth())+200 {
+	if screenPos.X < -offscreenPopupSlack || screenPos.X > float32(rl.GetScreenWidth())+offscreenPopupSlack {
 		return
 	}
 
@@ -541,7 +748,7 @@ func DrawDamagePopups(camera rl.Camera3D, g core.GameState, assets Resources) {
 		pos := enemyDrawPosition(camera, g, i, enemy)
 		pos.Y += 0.6
 		screenPos := rl.GetWorldToScreen(pos, camera)
-		if screenPos.X < -200 || screenPos.X > float32(rl.GetScreenWidth())+200 {
+		if screenPos.X < -offscreenPopupSlack || screenPos.X > float32(rl.GetScreenWidth())+offscreenPopupSlack {
 			continue
 		}
 
@@ -603,29 +810,14 @@ func popupAnimation(t float32) (scale, rise float32, alpha uint8) {
 
 // qualityColor returns the bar/popup tint for a quality grade. Defend mode
 // shifts the palette toward cool blues so attack vs block reads at a glance.
+// Reads from qualityVisuals; out-of-range qualities fall through to the
+// Miss color (shared between attack and defend rows).
 func qualityColor(quality int, isDefend bool) rl.Color {
-	switch quality {
-	case core.TimingQualityExcellent:
-		if isDefend {
-			return rl.NewColor(196, 240, 255, 255)
-		}
-		return rl.NewColor(255, 244, 144, 255)
-	case core.TimingQualityGreat:
-		if isDefend {
-			return rl.NewColor(120, 200, 248, 255)
-		}
-		return rl.NewColor(255, 188, 88, 255)
-	case core.TimingQualityGood:
-		if isDefend {
-			return rl.NewColor(80, 152, 220, 255)
-		}
-		return rl.NewColor(232, 144, 80, 255)
-	case core.TimingQualityNice:
-		if isDefend {
-			return rl.NewColor(56, 110, 184, 255)
-		}
-		return rl.NewColor(184, 96, 80, 255)
-	default:
-		return rl.NewColor(220, 76, 76, 255)
+	if quality < 0 || quality >= len(qualityVisuals) {
+		return qualityVisuals[core.TimingQualityMiss].AttackColor
 	}
+	if isDefend {
+		return qualityVisuals[quality].DefendColor
+	}
+	return qualityVisuals[quality].AttackColor
 }

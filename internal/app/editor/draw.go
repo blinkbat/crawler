@@ -83,7 +83,7 @@ func Draw(s *State, assets render.Resources) {
 	font := assets.Font()
 	theme := assets.Theme()
 	s.layout()
-	rl.ClearBackground(rl.NewColor(20, 22, 30, 255))
+	rl.ClearBackground(bgWindow)
 	drawTopbar(s, font, theme)
 	drawLayerTabs(s, font, theme)
 	drawPalette(s, font, theme)
@@ -136,7 +136,7 @@ func topbarButtonAt(s *State, p rl.Vector2) string {
 
 func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 	rl.DrawRectangleRec(s.rect.topbar, theme.SurfacePrimary)
-	rl.DrawLineEx(rl.NewVector2(0, topbarH), rl.NewVector2(s.rect.topbar.Width, topbarH), 1, rl.NewColor(8, 10, 14, 255))
+	rl.DrawLineEx(rl.NewVector2(0, topbarH), rl.NewVector2(s.rect.topbar.Width, topbarH), 1, outlineHard)
 
 	x := float32(8)
 	for _, b := range topbarBtns {
@@ -184,15 +184,15 @@ func buttonWidth(label string) float32 {
 }
 
 func drawButton(font rl.Font, r rl.Rectangle, label string, active bool) {
-	bg := rl.NewColor(48, 54, 70, 255)
-	border := rl.NewColor(96, 108, 132, 255)
-	text := rl.NewColor(220, 230, 245, 255)
+	bg := bgButton
+	border := editorBorderMid
+	text := textBright
 	if active {
-		bg = rl.NewColor(72, 88, 130, 255)
-		border = rl.NewColor(180, 220, 244, 255)
+		bg = bgActive
+		border = editorBorderActive
 	}
 	if pointIn(rl.GetMousePosition(), r) {
-		bg = rl.NewColor(60, 70, 90, 255)
+		bg = bgRowHover
 	}
 	rl.DrawRectangleRec(r, bg)
 	rl.DrawRectangleLinesEx(r, 1, border)
@@ -226,19 +226,19 @@ func layerTabAt(s *State, p rl.Vector2) int {
 }
 
 func drawLayerTabs(s *State, font rl.Font, theme render.Theme) {
-	rl.DrawRectangleRec(s.rect.layerTabs, rl.NewColor(20, 22, 30, 255))
+	rl.DrawRectangleRec(s.rect.layerTabs, bgWindow)
 	for i := 0; i < layerCount; i++ {
 		r := layerTabRect(s, i)
 		active := Layer(i) == s.layer
-		bg := rl.NewColor(28, 32, 44, 255)
-		border := rl.NewColor(70, 80, 100, 255)
+		bg := bgPanel
+		border := editorBorderDim
 		text := theme.TextMuted
 		if active {
-			bg = rl.NewColor(72, 88, 130, 255)
-			border = rl.NewColor(180, 220, 244, 255)
+			bg = bgActive
+			border = editorBorderActive
 			text = theme.TextPrimary
 		} else if pointIn(rl.GetMousePosition(), r) {
-			bg = rl.NewColor(40, 46, 58, 255)
+			bg = bgEntryHover
 		}
 		// Inset the tab so consecutive tabs don't share a border.
 		inner := rl.NewRectangle(r.X+6, r.Y+3, r.Width-12, r.Height-6)
@@ -279,11 +279,11 @@ func paletteEntryRect(s *State, i int) rl.Rectangle {
 }
 
 func drawPalette(s *State, font rl.Font, theme render.Theme) {
-	rl.DrawRectangleRec(s.rect.palette, rl.NewColor(24, 28, 38, 255))
+	rl.DrawRectangleRec(s.rect.palette, bgPaletteCol)
 	rl.DrawLineEx(
 		rl.NewVector2(s.rect.palette.X+s.rect.palette.Width, s.rect.palette.Y),
 		rl.NewVector2(s.rect.palette.X+s.rect.palette.Width, s.rect.palette.Y+s.rect.palette.Height),
-		1, rl.NewColor(8, 10, 14, 255))
+		1, outlineHard)
 
 	render.DrawHeading(font, "BRUSHES", int32(s.rect.palette.X+12), int32(s.rect.palette.Y+8), theme.BorderStrong)
 
@@ -291,26 +291,26 @@ func drawPalette(s *State, font rl.Font, theme render.Theme) {
 	for i, b := range palette {
 		r := paletteEntryRect(s, i)
 		active := s.brushIdx[s.layer] == i
-		bg := rl.NewColor(36, 40, 52, 255)
+		bg := bgEntry
 		if active {
-			bg = rl.NewColor(72, 88, 130, 255)
+			bg = bgActive
 		}
 		if pointIn(rl.GetMousePosition(), r) {
-			bg = rl.NewColor(48, 56, 72, 255)
+			bg = bgButtonHover
 		}
 		rl.DrawRectangleRec(r, bg)
-		border := rl.NewColor(70, 80, 100, 255)
+		border := editorBorderDim
 		if active {
-			border = rl.NewColor(180, 220, 244, 255)
+			border = editorBorderActive
 		}
 		rl.DrawRectangleLinesEx(r, 1, border)
 
 		swatch := rl.NewRectangle(r.X+6, r.Y+6, 20, r.Height-12)
 		rl.DrawRectangleRec(swatch, b.Color)
-		rl.DrawRectangleLinesEx(swatch, 1, rl.NewColor(0, 0, 0, 200))
+		rl.DrawRectangleLinesEx(swatch, 1, swatchEdge)
 
 		txt := fmt.Sprintf("%d %s", i+1, b.Name)
-		rl.DrawTextEx(font, txt, rl.NewVector2(r.X+34, r.Y+(r.Height-14)/2), 14, 1, rl.NewColor(230, 234, 244, 255))
+		rl.DrawTextEx(font, txt, rl.NewVector2(r.X+34, r.Y+(r.Height-14)/2), 14, 1, textEntry)
 	}
 
 	hints := []string{
@@ -497,7 +497,12 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 	drawLabel(font, "Materials", mr.matLabel)
 	for i, br := range mr.matButtons {
 		active := s.area.Materials == core.MaterialOptions[i]
-		drawButton(font, br, core.MaterialName(core.MaterialOptions[i]), active)
+		// MaterialName is total over MaterialOptions (which is the registry's
+		// own enum list), so the ok=false branch is unreachable here — we
+		// fall back to an empty string rather than panicking inside the
+		// per-frame draw loop.
+		name, _ := core.MaterialName(core.MaterialOptions[i])
+		drawButton(font, br, name, active)
 	}
 
 	drawLabel(font, "Quiet message", mr.quietLabel)
@@ -597,7 +602,7 @@ func drawGrid(s *State, font rl.Font) {
 	}
 
 	// Grid lines.
-	gridLine := rl.NewColor(0, 0, 0, 80)
+	gridLine := gridLineCol
 	for x := 0; x <= s.area.Width; x++ {
 		px := s.rect.gridX + float32(x)*cell
 		rl.DrawLineEx(rl.NewVector2(px, s.rect.gridY), rl.NewVector2(px, s.rect.gridY+s.rect.gridH), 1, gridLine)
@@ -762,99 +767,53 @@ func brushPreviewColor(s *State) rl.Color {
 	return rl.NewColor(200, 200, 200, 255)
 }
 
-func wallColor() color.RGBA { return rl.NewColor(96, 96, 110, 255) }
+// tileColorByChar maps each grid layer's tile chars to swatch colors,
+// built once at init from layerBrushes (editor.go) so the palette UI and
+// the grid-cell preview can't drift on color. Adding a new tile char is
+// one row in layerBrushes — both the brush palette and the grid preview
+// pick it up. Unknown chars fall through to tileColorFallback.
+var tileColorByChar = buildTileColorMaps()
 
-func floorColor(c byte) color.RGBA {
-	switch c {
-	case core.FloorGrass:
-		return rl.NewColor(120, 184, 110, 255)
-	case core.FloorDirt:
-		return rl.NewColor(168, 132, 92, 255)
-	case core.FloorDarkGrass:
-		return rl.NewColor(72, 116, 70, 255)
-	case core.FloorStone:
-		return rl.NewColor(150, 148, 142, 255)
-	case core.FloorCobble:
-		return rl.NewColor(168, 156, 130, 255)
-	case core.FloorPlank:
-		return rl.NewColor(150, 102, 60, 255)
-	case core.FloorWater:
-		return rl.NewColor(86, 142, 196, 255)
-	case core.FloorSand:
-		return rl.NewColor(228, 206, 158, 255)
-	case core.FloorSnow:
-		return rl.NewColor(232, 240, 248, 255)
+func buildTileColorMaps() map[Layer]map[byte]rl.Color {
+	out := make(map[Layer]map[byte]rl.Color, len(layerBrushes))
+	for layer, brushes := range layerBrushes {
+		m := make(map[byte]rl.Color, len(brushes))
+		for _, b := range brushes {
+			if b.Char != 0 {
+				m[b.Char] = b.Color
+			}
+		}
+		out[Layer(layer)] = m
 	}
-	return rl.NewColor(160, 168, 140, 255)
+	return out
 }
 
-func decorColor(c byte) color.RGBA {
-	switch c {
-	case core.DecorEmpty:
-		return rl.NewColor(60, 64, 70, 255)
-	case core.DecorBush:
-		return rl.NewColor(112, 142, 70, 255)
-	case core.DecorMushroom:
-		return rl.NewColor(220, 100, 110, 255)
-	case core.DecorPebble:
-		return rl.NewColor(200, 192, 178, 255)
-	case core.DecorTallGrass:
-		return rl.NewColor(150, 196, 110, 255)
-	case core.DecorFlowers:
-		return rl.NewColor(236, 168, 196, 255)
-	case core.DecorClover:
-		return rl.NewColor(124, 186, 102, 255)
-	case core.DecorReeds:
-		return rl.NewColor(110, 132, 90, 255)
-	case core.DecorBones:
-		return rl.NewColor(228, 220, 198, 255)
-	case core.DecorScorch:
-		return rl.NewColor(44, 38, 36, 255)
-	case core.DecorBlood:
-		return rl.NewColor(124, 38, 36, 255)
-	case core.DecorCobweb:
-		return rl.NewColor(220, 222, 226, 255)
-	case core.DecorStump:
-		return rl.NewColor(132, 92, 56, 255)
-	case core.DecorLog:
-		return rl.NewColor(118, 84, 52, 255)
-	case core.DecorLeafPile:
-		return rl.NewColor(196, 142, 80, 255)
-	}
-	return rl.NewColor(160, 168, 140, 255)
+// tileColorFallback is the swatch color used when a layer holds a char
+// that isn't in the brush palette (corrupt save, future char dropped from
+// the palette). Floor/decor share a desaturated tan; props use neutral
+// grey to read as "unrecognized prop."
+var tileColorFallback = map[Layer]rl.Color{
+	LayerFloor: rl.NewColor(160, 168, 140, 255),
+	LayerDecor: rl.NewColor(160, 168, 140, 255),
+	LayerProps: rl.NewColor(200, 200, 200, 255),
 }
 
-func propColor(c byte) color.RGBA {
-	switch c {
-	case core.TileTree:
-		return rl.NewColor(64, 140, 80, 255)
-	case core.TileTreeXL:
-		return rl.NewColor(36, 96, 56, 255)
-	case core.TileRockLarge:
-		return rl.NewColor(132, 110, 90, 255)
-	case core.TileBushLarge:
-		return rl.NewColor(112, 142, 70, 255)
-	case core.TileCrate:
-		return rl.NewColor(178, 130, 78, 255)
-	case core.TileBarrel:
-		return rl.NewColor(166, 116, 70, 255)
-	case core.TileUrn:
-		return rl.NewColor(196, 122, 80, 255)
-	case core.TileStalagmite:
-		return rl.NewColor(216, 210, 196, 255)
-	case core.TilePillar:
-		return rl.NewColor(220, 214, 198, 255)
-	case core.TileBrokenPillar:
-		return rl.NewColor(196, 188, 170, 255)
-	case core.TileStatue:
-		return rl.NewColor(228, 222, 206, 255)
-	case core.TileObelisk:
-		return rl.NewColor(92, 96, 110, 255)
-	case core.TileFountain:
-		return rl.NewColor(100, 168, 222, 255)
+func tileColor(layer Layer, c byte) rl.Color {
+	if m, ok := tileColorByChar[layer]; ok {
+		if col, ok := m[c]; ok {
+			return col
+		}
+	}
+	if col, ok := tileColorFallback[layer]; ok {
+		return col
 	}
 	return rl.NewColor(200, 200, 200, 255)
 }
+
+func wallColor() color.RGBA { return tileColor(LayerWalls, core.TileRock) }
+func floorColor(c byte) color.RGBA { return tileColor(LayerFloor, c) }
+func decorColor(c byte) color.RGBA { return tileColor(LayerDecor, c) }
+func propColor(c byte) color.RGBA  { return tileColor(LayerProps, c) }
 
 // --- Status & modals -------------------------------------------------------
 
@@ -874,7 +833,7 @@ func drawStatus(s *State, font rl.Font, theme render.Theme) {
 		theme.SurfacePrimary, theme.BorderSoft, theme.BorderStrong)
 	for i, e := range s.statusLog {
 		y := r.Y + pad/2 + float32(i)*lineH
-		alpha := e.timer / 1.5
+		alpha := e.timer / statusLogLifetime
 		if alpha < 0 {
 			alpha = 0
 		}

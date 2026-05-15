@@ -7,10 +7,12 @@ import (
 // Tile characters. Grouped by the layer that owns them. The .map on-disk
 // format uses these literal bytes; the editor's brush palettes paint them.
 
-// Walls layer.
+// Walls layer. TileOpen marks an open cell; TileRock is a wall blocker.
+// Both exported so callers don't have to open-code '.' / '#' against the
+// walls grid.
 const (
-	tileFloor = '.' // package-private: documents "open" without leaking an unused export
-	TileRock  = '#' // wall blocker
+	TileOpen = '.' // open cell (walkable)
+	TileRock = '#' // wall blocker
 )
 
 // Floor layer. Walkable surfaces — never block. Material-keyed variants
@@ -58,8 +60,11 @@ const (
 	DecorLeafPile = 'L' // pile of fallen leaves
 )
 
-// Props layer. Empty cell is '.'. Every char listed here blocks movement.
+// Props layer. TilePropEmpty marks an open cell; every other char listed
+// here is a blocker. Mirrors FloorAuto / DecorAuto on the other layers so
+// callers don't open-code '.' for "no prop here."
 const (
+	TilePropEmpty = '.' // open cell, no prop
 	TileTree      = 'T' // regular tree, blocks
 	TileTreeXL    = 'X' // extra-large tree, blocks
 	TileRockLarge = 'O' // boulder, blocks
@@ -76,6 +81,38 @@ const (
 	TileFountain      = 'F' // low fountain with a central plume
 )
 
+// SpawnSnapReason tags why a SnappedSpawnPositions entry exists in the
+// shape it does. Replaces the older "{-1, -1}" sentinel which conflated
+// two distinct outcomes ("the author left this pack empty" and "the
+// snap search couldn't find an open tile near the authored position").
+// Callers that want to surface a useful diagnostic (the editor's
+// reachability warning) can now distinguish them.
+type SpawnSnapReason int
+
+const (
+	// SpawnSnapPlaced means the pack will be rendered at TileX/TileZ.
+	SpawnSnapPlaced SpawnSnapReason = iota
+	// SpawnSnapEmptyMembers means the authored spawn has no enemies; the
+	// runtime drops it, no field representative gets drawn.
+	SpawnSnapEmptyMembers
+	// SpawnSnapNoOpenTile means the nearest-open-tile search came up
+	// empty (every cell on the map is blocked or already taken).
+	SpawnSnapNoOpenTile
+)
+
+// SpawnSnap is the result of one PackSpawn's runtime placement pass.
+// Reason == SpawnSnapPlaced is the success case; everything else means
+// TileX/TileZ should be treated as undefined.
+type SpawnSnap struct {
+	TileX  int
+	TileZ  int
+	Reason SpawnSnapReason
+}
+
+// Placed reports whether this snap successfully positioned the pack —
+// callers that only care about the success case should branch on this.
+func (s SpawnSnap) Placed() bool { return s.Reason == SpawnSnapPlaced }
+
 // placePacks converts the area's pack-spawn placeholders into runtime
 // Packs, snapping each pack's tile to the nearest open square so the
 // author doesn't have to perfect placement against geometry. The player's
@@ -84,23 +121,48 @@ const (
 // representative to render or engage.
 func placePacks(a AreaDefinition) []Pack {
 	packs := make([]Pack, 0, len(a.PackSpawns))
-	occupied := map[[2]int]bool{{a.StartTileX, a.StartTileZ}: true}
-	for _, spawn := range a.PackSpawns {
-		if len(spawn.Members) == 0 {
+	for i, snap := range SnappedSpawnPositions(a) {
+		if !snap.Placed() {
 			continue
 		}
-		x, z := nearestOpenTile(a, spawn.TileX, spawn.TileZ, occupied)
-		if x < 0 {
-			continue
-		}
-		occupied[[2]int{x, z}] = true
+		spawn := a.PackSpawns[i]
 		members := make([]Enemy, 0, len(spawn.Members))
 		for _, kind := range spawn.Members {
 			members = append(members, NewEnemy(kind))
 		}
-		packs = append(packs, Pack{TileX: x, TileZ: z, Members: members})
+		packs = append(packs, Pack{TileX: snap.TileX, TileZ: snap.TileZ, Members: members})
 	}
 	return packs
+}
+
+// SnappedSpawnPositions returns, for each PackSpawn on `a`, the runtime
+// tile coords the pack will actually occupy after placePacks' snap pass.
+// Index in the output matches index in a.PackSpawns. A spawn that gets
+// dropped reports its Reason so callers (e.g. the editor's reachability
+// warning) can describe WHY a pack was dropped instead of treating
+// every drop as the same case.
+//
+// Exposed so the editor's reachability check can use the *snapped*
+// positions — otherwise an author who places a pack on a wall would see a
+// false "unreachable" warning even though the game will silently relocate
+// the pack at runtime, and vice versa.
+func SnappedSpawnPositions(a AreaDefinition) []SpawnSnap {
+	out := make([]SpawnSnap, 0, len(a.PackSpawns))
+	occupied := map[[2]int]bool{{a.StartTileX, a.StartTileZ}: true}
+	for _, spawn := range a.PackSpawns {
+		if len(spawn.Members) == 0 {
+			out = append(out, SpawnSnap{Reason: SpawnSnapEmptyMembers})
+			continue
+		}
+		x, z := nearestOpenTile(a, spawn.TileX, spawn.TileZ, occupied)
+		if x < 0 {
+			out = append(out, SpawnSnap{Reason: SpawnSnapNoOpenTile})
+			continue
+		}
+		occupied[[2]int{x, z}] = true
+		out = append(out, SpawnSnap{TileX: x, TileZ: z, Reason: SpawnSnapPlaced})
+	}
+	return out
 }
 
 func nearestOpenTile(a AreaDefinition, wantX, wantZ int, occupied map[[2]int]bool) (int, int) {
@@ -147,11 +209,15 @@ func (a AreaDefinition) TileAt(x, z int) byte {
 	if p := a.Props[z][x]; IsPropChar(p) {
 		return p
 	}
-	return tileFloor
+	return TileOpen
 }
 
 // BlockedAt reports whether movement into this cell is impossible.
 // Either the walls layer has a wall, or the props layer holds a blocker.
+// Out-of-bounds reads as blocked (matches WallAt's convention) so callers
+// don't have to range-check first — note this means FloorAt(OOB) is false,
+// not "the cell is open but past the map." A caller that needs to
+// distinguish "off-map" from "blocked-on-map" should InBounds() first.
 func (a AreaDefinition) BlockedAt(x, z int) bool {
 	if !a.InBounds(x, z) {
 		return true
@@ -183,4 +249,120 @@ func IsPropChar(c byte) bool {
 		return true
 	}
 	return false
+}
+
+// TileLayer enumerates the four authored grid layers. Used as a typed
+// parameter to TileLabel so callers can't pass a typo'd layer string
+// silently and get "?" back.
+type TileLayer int
+
+const (
+	TileLayerWalls TileLayer = iota
+	TileLayerFloor
+	TileLayerDecor
+	TileLayerProps
+)
+
+// TileLabel returns a short human-readable name for a tile char on the
+// given layer. Empty cells and "auto" sentinels return the empty string
+// so the debug overlay can skip them without an extra check at the call
+// site. Unknown chars return "?".
+func TileLabel(layer TileLayer, c byte) string {
+	switch layer {
+	case TileLayerWalls:
+		switch c {
+		case TileRock:
+			return "Wall"
+		case TileOpen:
+			return ""
+		}
+	case TileLayerFloor:
+		switch c {
+		case FloorAuto:
+			return ""
+		case FloorGrass:
+			return "Grass"
+		case FloorDirt:
+			return "Dirt"
+		case FloorDarkGrass:
+			return "Dark Grass"
+		case FloorStone:
+			return "Stone"
+		case FloorCobble:
+			return "Cobble"
+		case FloorPlank:
+			return "Planks"
+		case FloorWater:
+			return "Water"
+		case FloorSand:
+			return "Sand"
+		case FloorSnow:
+			return "Snow"
+		}
+	case TileLayerDecor:
+		switch c {
+		case DecorAuto, DecorEmpty:
+			return ""
+		case DecorBush:
+			return "Bush"
+		case DecorMushroom:
+			return "Mushroom"
+		case DecorPebble:
+			return "Pebble"
+		case DecorTallGrass:
+			return "Tall Grass"
+		case DecorFlowers:
+			return "Flowers"
+		case DecorClover:
+			return "Clover"
+		case DecorReeds:
+			return "Reeds"
+		case DecorBones:
+			return "Bones"
+		case DecorScorch:
+			return "Scorch"
+		case DecorBlood:
+			return "Blood"
+		case DecorCobweb:
+			return "Cobweb"
+		case DecorStump:
+			return "Stump"
+		case DecorLog:
+			return "Log"
+		case DecorLeafPile:
+			return "Leaf Pile"
+		}
+	case TileLayerProps:
+		switch c {
+		case TilePropEmpty:
+			return ""
+		case TileTree:
+			return "Tree"
+		case TileTreeXL:
+			return "Tree XL"
+		case TileRockLarge:
+			return "Boulder"
+		case TileBushLarge:
+			return "Large Bush"
+		case TileCrate:
+			return "Crate"
+		case TileBarrel:
+			return "Barrel"
+		case TileUrn:
+			return "Urn"
+		case TileStalagmite:
+			return "Stalagmite"
+		case TilePillar:
+			return "Pillar"
+		case TileBrokenPillar:
+			return "Broken Pillar"
+		case TileStatue:
+			return "Statue"
+		case TileObelisk:
+			return "Obelisk"
+		case TileFountain:
+			return "Fountain"
+		}
+	}
+	return "?"
 }

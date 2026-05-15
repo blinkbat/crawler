@@ -1,6 +1,7 @@
 package app
 
 import (
+	"crawler/internal/app/audio"
 	"crawler/internal/app/core"
 	"crawler/internal/app/editor"
 	"crawler/internal/app/explore"
@@ -31,13 +32,26 @@ type appState struct {
 }
 
 func Run() {
-	rl.SetConfigFlags(rl.FlagVsyncHint | rl.FlagWindowResizable)
-	rl.InitWindow(core.ScreenWidth, core.ScreenHeight, "Crawler")
+	// FlagWindowHighdpi: tells raylib to open the window at the monitor's
+	// physical pixel resolution rather than the OS logical-point scale.
+	// Keeps GetScreenWidth/Height and GetMonitorWidth/Height reporting in
+	// the same units (physical pixels) so HUD layout math stays consistent
+	// on 1.5×/2× Windows scaling — without this, HUD positions computed
+	// against the logical screen width misalign once the OS scales the
+	// window framebuffer up.
+	rl.SetConfigFlags(rl.FlagVsyncHint | rl.FlagWindowResizable | rl.FlagWindowHighdpi)
+	rl.InitWindow(core.InitialWindowWidth, core.InitialWindowHeight, "Crawler")
 	defer rl.CloseWindow()
 
 	rl.SetExitKey(rl.KeyNull)
 	applyWindowedFullscreen()
 	rl.SetTargetFPS(120)
+
+	// Procedural sound bank — short input/hit/heal/death cues, generated in
+	// code from sine sweeps and bell envelopes. Safe to call on systems with
+	// no audio device (Init becomes a no-op; Play stays silent).
+	audio.Init()
+	defer audio.Close()
 
 	assets := render.LoadResources()
 	defer assets.Unload()
@@ -132,6 +146,7 @@ func drawAdventureScene(game core.GameState, assets render.Resources) {
 	rl.EndMode3D()
 	render.DrawDamagePopups(camera, game, assets)
 	render.DrawQualityPopup(camera, game, assets)
+	render.DrawDebugOverlay(camera, game, assets)
 	render.DrawOverlay(game, assets)
 }
 

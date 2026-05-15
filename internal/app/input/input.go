@@ -117,20 +117,19 @@ func TargetPreviousPressed() bool {
 		padPressed(rl.GamepadButtonLeftFaceLeft) || padPressed(rl.GamepadButtonLeftTrigger1) || stickEdgeX(-1)
 }
 
-// PausePressed opens / closes the pause menu. P / gamepad Start are the
-// universal bindings. Esc also opens the menu, but the explore layer gates
-// it on "no active battle" so Esc keeps working as back / cancel-target
-// inside a battle (the gating lives in explore.pauseAllowed).
-func PausePressed() bool {
-	return rl.IsKeyPressed(rl.KeyP) || padPressed(rl.GamepadButtonMiddleRight) // Start
-}
-
-// PauseFromExplorePressed is the explore-only pause edge: Esc opens the menu
-// when the player is wandering, but in battle Esc is the back / cancel-target
-// edge and we must not eat it here. Kept separate from PausePressed so the
-// caller can decide which scope to use.
-func PauseFromExplorePressed() bool {
-	return rl.IsKeyPressed(rl.KeyEscape)
+// PausePressed reports the pause-menu edge. P and gamepad Start always
+// open the menu; Esc also opens it but only when inBattle is false — in
+// battle Esc is the "back / cancel target" edge and we must not eat it
+// here. The caller threads its own context (battle or no battle) so this
+// stays one function instead of two slightly-different probes.
+func PausePressed(inBattle bool) bool {
+	if rl.IsKeyPressed(rl.KeyP) || padPressed(rl.GamepadButtonMiddleRight) { // Start
+		return true
+	}
+	if !inBattle && rl.IsKeyPressed(rl.KeyEscape) {
+		return true
+	}
+	return false
 }
 
 func RestartPressed() bool {

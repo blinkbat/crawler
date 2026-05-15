@@ -20,7 +20,7 @@ func updateActionMenu(g *core.GameState) {
 	if !input.ConfirmPressed() {
 		return
 	}
-	switch g.Battle.MenuIndex {
+	switch core.ActionRow(g.Battle.MenuIndex) {
 	case core.ActionRowAttack:
 		g.Battle.PendingSkill = core.SkillNone
 		g.Battle.ActionMode = core.ActionEnemyTarget
@@ -239,6 +239,17 @@ func cyclePartyTarget(g *core.GameState, delta int) {
 	setBattleStatus(g, fmt.Sprintf("Targeting %s.", g.Party[g.Battle.PartyTarget].Name))
 }
 
+// cycleTarget returns the targets-slot the cursor should move to when the
+// player presses left/right on a target picker. `current` is expected to be
+// one of the values in `targets` — callers (cycleBattleTarget,
+// cyclePartyTarget) maintain that invariant by sourcing both the current
+// selection AND the living-target list from the same selectors.
+//
+// If `current` isn't found in `targets`, we fall back to "slot 0 + delta"
+// rather than erroring: it's an unreachable state today, but the silent
+// wrap from index 0 is at least predictable. If a future caller breaks
+// the invariant, the wrap will be visibly wrong in-game (selection
+// jumps to the front), which is louder than an internal panic.
 func cycleTarget(current int, targets []int, delta int) int {
 	currentSlot := 0
 	for i, target := range targets {

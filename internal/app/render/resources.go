@@ -58,63 +58,95 @@ type worldMaterialResources struct {
 	hasFloorVariant bool
 }
 
-func LoadResources() Resources {
-	lighting := loadLightingShader()
-	dungeonMat := loadWorldMaterial(makeStoneBrickPixels(128, 128), makeStoneFloorPixels(128, 128), lighting.shader)
-	fieldMat := loadWorldMaterial(makeRockWallPixels(128, 128), makeGrassPixels(128, 128), lighting.shader)
-	// Field gets two extra floor variants (dirt + dark grass), procedurally
-	// chosen per tile by hash for terrain variation. Built using the same
-	// path as the primary floor so they share filter / mipmap settings.
-	fieldMat.floorDirtModel = loadFloorModel(makeDirtPixels(128, 128), lighting.shader)
-	fieldMat.floorDarkModel = loadFloorModel(makeDarkGrassPixels(128, 128), lighting.shader)
-	fieldMat.hasFloorVariant = true
-	materials := map[core.MaterialSet]worldMaterialResources{
+// LoadResources builds every procedural texture/model/font/shader the
+// renderer needs. Staged cleanup: each handle is committed to `r` as it's
+// created, and a deferred recover() calls r.Unload() if construction
+// panics partway. That way a mid-load failure (texture upload OOM, prop
+// builder panic) doesn't leak the handles that DID make it onto the GPU.
+//
+// On success we re-panic after cleanup so the caller still sees the
+// failure — this isn't a graceful degradation, just a leak-safe abort.
+func LoadResources() (r Resources) {
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		if rec := recover(); rec != nil {
+			// Walk every field we managed to populate and unload it. r.Unload
+			// is tolerant of zero values: ranging nil maps is a no-op, and
+			// raylib's UnloadModel/UnloadTexture on a zero-ID handle skips
+			// cleanly (the underlying GL deleters guard on id == 0).
+			r.Unload()
+			panic(rec)
+		}
+	}()
+
+	r.lighting = loadLightingShader()
+
+	dungeonMat := loadWorldMaterial(makeStoneBrickPixels(128, 128), makeStoneFloorPixels(128, 128), r.lighting.shader)
+	fieldMat := loadWorldMaterial(makeRockWallPixels(128, 128), makeGrassPixels(128, 128), r.lighting.shader)
+	// Commit both base materials BEFORE building the variants so a panic in
+	// the variants doesn't leak the base wall/floor models.
+	r.materials = map[core.MaterialSet]worldMaterialResources{
 		core.MaterialDungeon: dungeonMat,
 		core.MaterialField:   fieldMat,
 	}
-	skyTexture := loadTexture(makeSkyPixels(1024, 512), 1024, 512, rl.FilterTrilinear)
-	rl.GenTextureMipmaps(&skyTexture)
-	rl.SetTextureFilter(skyTexture, rl.FilterTrilinear)
-	rl.SetTextureWrap(skyTexture, rl.WrapClamp)
-	enemyVisuals := loadEnemyVisuals()
-	partyTexture := make(map[core.PartyClass]rl.Texture2D)
+	// Field gets two extra floor variants (dirt + dark grass), procedurally
+	// chosen per tile by hash for terrain variation. Built using the same
+	// path as the primary floor so they share filter / mipmap settings.
+	fieldMat.floorDirtModel = loadFloorModel(makeDirtPixels(128, 128), r.lighting.shader)
+	fieldMat.floorDarkModel = loadFloorModel(makeDarkGrassPixels(128, 128), r.lighting.shader)
+	fieldMat.hasFloorVariant = true
+	r.materials[core.MaterialField] = fieldMat
+
+	r.skyTexture = loadTexture(makeSkyPixels(1024, 512), 1024, 512, rl.FilterTrilinear)
+	rl.GenTextureMipmaps(&r.skyTexture)
+	rl.SetTextureFilter(r.skyTexture, rl.FilterTrilinear)
+	rl.SetTextureWrap(r.skyTexture, rl.WrapClamp)
+
+	r.enemyVisuals = loadEnemyVisuals()
+
+	r.partyTexture = make(map[core.PartyClass]rl.Texture2D)
 	for _, def := range core.PartyClasses() {
 		texture := loadTexture(makePartyPixels(64, 80, def.Class), 64, 80, rl.FilterPoint)
 		rl.SetTextureWrap(texture, rl.WrapClamp)
-		partyTexture[def.Class] = texture
+		r.partyTexture[def.Class] = texture
 	}
-	hudFont, hudFontOwned := loadHUDFont()
 
-	barkTex := loadTexture(makeBarkPixels(64, 128), 64, 128, rl.FilterBilinear)
-	rl.SetTextureWrap(barkTex, rl.WrapRepeat)
-	leafTex := loadTexture(makeLeafPixels(96, 96), 96, 96, rl.FilterBilinear)
-	rl.SetTextureWrap(leafTex, rl.WrapRepeat)
-	tree := loadTreeModel(lighting.shader, barkTex, leafTex)
+	r.hudFont, r.hudFontOwned = loadHUDFont()
+
+	// Bark and leaf textures are authored at non-tile sizes (64×128 and 96×96)
+	// so they go through loadRepeatTexture; the rock-wall pixels live at
+	// the standard 128×128 tile size and use the mipmapped pipeline.
+	// These textures are about to be handed to loadTreeModel, which assumes
+	// ownership via the model. We don't commit them to r between create and
+	// hand-off (small leak window), but staged cleanup catches panics inside
+	// loadTreeModel itself via r.tree if it gets assigned.
+	barkTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
+	leafTex := loadRepeatTexture(makeLeafPixels(96, 96), 96, 96)
+	r.tree = loadTreeModel(r.lighting.shader, barkTex, leafTex)
 
 	// Field props get their own texture instances so the prop models own
 	// them outright (UnloadModel handles the texture). Sharing would either
 	// double-unload or require external ownership tracking.
-	rockTex := loadTexture(makeRockWallPixels(128, 128), 128, 128, rl.FilterBilinear)
-	rl.GenTextureMipmaps(&rockTex)
-	rl.SetTextureFilter(rockTex, rl.FilterTrilinear)
-	rl.SetTextureWrap(rockTex, rl.WrapRepeat)
-	bushTex := loadTexture(makeLeafPixels(96, 96), 96, 96, rl.FilterBilinear)
-	rl.SetTextureWrap(bushTex, rl.WrapRepeat)
+	rockTex := loadTiledTexture(makeRockWallPixels(128, 128))
+	bushTex := loadRepeatTexture(makeLeafPixels(96, 96), 96, 96)
 
-	rockProp := loadRockProp(lighting.shader, rockTex)
-	bushProp := loadBushProp(lighting.shader, bushTex)
-	mushroomProp := loadMushroomProp(lighting.shader)
+	r.rockProp = loadRockProp(r.lighting.shader, rockTex)
+	r.bushProp = loadBushProp(r.lighting.shader, bushTex)
+	r.mushroomProp = loadMushroomProp(r.lighting.shader)
 
 	// Universal floor variants — built once and shared across every material
 	// set so a cobblestone path through a dungeon and one across a field
-	// read identically.
-	specialFloors := map[byte]rl.Model{
-		core.FloorCobble: loadFloorModel(makeCobblePixels(128, 128), lighting.shader),
-		core.FloorPlank:  loadFloorModel(makePlankPixels(128, 128), lighting.shader),
-		core.FloorWater:  loadFloorModel(makeWaterPixels(128, 128), lighting.shader),
-		core.FloorSand:   loadFloorModel(makeSandPixels(128, 128), lighting.shader),
-		core.FloorSnow:   loadFloorModel(makeSnowPixels(128, 128), lighting.shader),
-	}
+	// read identically. Initialize the map first so a panic mid-way still
+	// unloads the variants that did land.
+	r.specialFloors = make(map[byte]rl.Model)
+	r.specialFloors[core.FloorCobble] = loadFloorModel(makeCobblePixels(128, 128), r.lighting.shader)
+	r.specialFloors[core.FloorPlank] = loadFloorModel(makePlankPixels(128, 128), r.lighting.shader)
+	r.specialFloors[core.FloorWater] = loadFloorModel(makeWaterPixels(128, 128), r.lighting.shader)
+	r.specialFloors[core.FloorSand] = loadFloorModel(makeSandPixels(128, 128), r.lighting.shader)
+	r.specialFloors[core.FloorSnow] = loadFloorModel(makeSnowPixels(128, 128), r.lighting.shader)
 
 	// Stone family textures for the new prop set. Each loader owns the
 	// texture handle outright via setModelTexture so unload-by-model is
@@ -127,11 +159,6 @@ func LoadResources() Resources {
 	// fresh texture instances per loader since each propModel owns its
 	// textures via setModelTexture and unloads them when the model unloads
 	// — sharing would double-unload.
-	//
-	// Bark is authored at 64x128 and leaf at 96x96 (matches the existing
-	// tree pipeline). loadTiledTexture is fixed to 128x128 so we call
-	// loadTexture directly here with the right dimensions, then opt into
-	// the same mipmap / repeat-wrap settings.
 	crateWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
 	barrelWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
 	stumpBarkTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
@@ -139,48 +166,34 @@ func LoadResources() Resources {
 	logMossTex := loadRepeatTexture(makeLeafPixels(96, 96), 96, 96)
 	leafPileTex := loadRepeatTexture(makeLeafPixels(96, 96), 96, 96)
 
-	propModels := map[byte]propModel{
-		core.TileCrate:        loadCrateProp(lighting.shader, crateWoodTex),
-		core.TileBarrel:       loadBarrelProp(lighting.shader, barrelWoodTex),
-		core.TileUrn:          loadUrnProp(lighting.shader, terracottaTex),
-		core.TileStalagmite:   loadStalagmiteProp(lighting.shader, marbleTex),
-		core.TilePillar:       loadPillarProp(lighting.shader, marbleTex),
-		core.TileBrokenPillar: loadBrokenPillarProp(lighting.shader, marbleTex),
-		core.TileStatue:       loadStatueProp(lighting.shader, marbleTex),
-		core.TileObelisk:      loadObeliskProp(lighting.shader, graniteTex),
-		core.TileFountain:     loadFountainProp(lighting.shader, marbleTex),
-	}
+	// Commit propModels incrementally so each prop is owned by r before
+	// the next one starts loading.
+	r.propModels = make(map[byte]propModel)
+	r.propModels[core.TileCrate] = loadCrateProp(r.lighting.shader, crateWoodTex)
+	r.propModels[core.TileBarrel] = loadBarrelProp(r.lighting.shader, barrelWoodTex)
+	r.propModels[core.TileUrn] = loadUrnProp(r.lighting.shader, terracottaTex)
+	r.propModels[core.TileStalagmite] = loadStalagmiteProp(r.lighting.shader, marbleTex)
+	r.propModels[core.TilePillar] = loadPillarProp(r.lighting.shader, marbleTex)
+	r.propModels[core.TileBrokenPillar] = loadBrokenPillarProp(r.lighting.shader, marbleTex)
+	r.propModels[core.TileStatue] = loadStatueProp(r.lighting.shader, marbleTex)
+	r.propModels[core.TileObelisk] = loadObeliskProp(r.lighting.shader, graniteTex)
+	r.propModels[core.TileFountain] = loadFountainProp(r.lighting.shader, marbleTex)
 
-	decorModels := map[byte]propModel{
-		core.DecorTallGrass: loadTallGrassProp(lighting.shader),
-		core.DecorFlowers:   loadFlowerProp(lighting.shader),
-		core.DecorClover:    loadCloverProp(lighting.shader),
-		core.DecorReeds:     loadReedProp(lighting.shader),
-		core.DecorBones:     loadBoneProp(lighting.shader),
-		core.DecorScorch:    loadScorchProp(lighting.shader),
-		core.DecorBlood:     loadBloodProp(lighting.shader),
-		core.DecorCobweb:    loadCobwebProp(lighting.shader),
-		core.DecorStump:     loadStumpProp(lighting.shader, stumpBarkTex),
-		core.DecorLog:       loadLogProp(lighting.shader, logBarkTex, logMossTex),
-		core.DecorLeafPile:  loadLeafPileProp(lighting.shader, leafPileTex),
-	}
+	r.decorModels = make(map[byte]propModel)
+	r.decorModels[core.DecorTallGrass] = loadTallGrassProp(r.lighting.shader)
+	r.decorModels[core.DecorFlowers] = loadFlowerProp(r.lighting.shader)
+	r.decorModels[core.DecorClover] = loadCloverProp(r.lighting.shader)
+	r.decorModels[core.DecorReeds] = loadReedProp(r.lighting.shader)
+	r.decorModels[core.DecorBones] = loadBoneProp(r.lighting.shader)
+	r.decorModels[core.DecorScorch] = loadScorchProp(r.lighting.shader)
+	r.decorModels[core.DecorBlood] = loadBloodProp(r.lighting.shader)
+	r.decorModels[core.DecorCobweb] = loadCobwebProp(r.lighting.shader)
+	r.decorModels[core.DecorStump] = loadStumpProp(r.lighting.shader, stumpBarkTex)
+	r.decorModels[core.DecorLog] = loadLogProp(r.lighting.shader, logBarkTex, logMossTex)
+	r.decorModels[core.DecorLeafPile] = loadLeafPileProp(r.lighting.shader, leafPileTex)
 
-	return Resources{
-		materials:     materials,
-		skyTexture:    skyTexture,
-		enemyVisuals:  enemyVisuals,
-		partyTexture:  partyTexture,
-		hudFont:       hudFont,
-		hudFontOwned:  hudFontOwned,
-		lighting:      lighting,
-		tree:          tree,
-		rockProp:      rockProp,
-		bushProp:      bushProp,
-		mushroomProp:  mushroomProp,
-		specialFloors: specialFloors,
-		decorModels:   decorModels,
-		propModels:    propModels,
-	}
+	committed = true
+	return r
 }
 
 

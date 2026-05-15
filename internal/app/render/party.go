@@ -54,22 +54,12 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 
 	if selected {
 		centerX := x + partyCardW/2
-		rl.DrawTriangle(
-			rl.NewVector2(centerX, y-10),
-			rl.NewVector2(centerX-10, y+2),
-			rl.NewVector2(centerX+10, y+2),
-			borderTarget,
-		)
+		drawArrowMarker(rl.NewVector2(centerX, y+2), 0, -12, 10, borderTarget)
 	}
 	if active && !down {
 		cx := x + partyCardW - 16
 		cy := y + 12
-		rl.DrawTriangle(
-			rl.NewVector2(cx-7, cy),
-			rl.NewVector2(cx+7, cy),
-			rl.NewVector2(cx, cy+10),
-			borderActive,
-		)
+		drawArrowMarker(rl.NewVector2(cx, cy), 0, 10, 7, borderActive)
 	}
 
 	contentX := x + 16
@@ -101,24 +91,20 @@ func DrawPartyRibbon(g core.GameState, assets Resources) {
 	if len(g.Party) == 0 {
 		return
 	}
-	screenW := float32(rl.GetScreenWidth())
-	screenH := float32(rl.GetScreenHeight())
+	_, screenH := screenSizeF()
 	count := float32(len(g.Party))
 
 	totalW := partyCardW*count + partyCardGap*(count-1)
-	startX := (screenW - totalW) / 2
+	startX := centerXF(totalW)
 	if startX < 16 {
 		startX = 16
 	}
 	y := screenH - partyCardH - ribbonBottom
 
-	activeIdx := -1
+	activeIdx := core.ActiveActorIndex(&g)
 	selectedIdx := -1
-	if inPlayerTurn(g) {
-		activeIdx = g.Battle.CurrentParty
-		if targetingAlly(g) {
-			selectedIdx = g.Battle.PartyTarget
-		}
+	if targetingAlly(g) {
+		selectedIdx = core.HighlightedAllyIndex(&g)
 	}
 
 	for i, member := range g.Party {
@@ -137,21 +123,12 @@ func DrawPartyRibbon(g core.GameState, assets Resources) {
 // PartyRibbonTopY reports the screen Y coordinate of the top of the party
 // ribbon, so other panels can stack cleanly above it.
 func PartyRibbonTopY() float32 {
-	return float32(rl.GetScreenHeight()) - partyCardH - ribbonBottom
+	_, h := screenSizeF()
+	return h - partyCardH - ribbonBottom
 }
 
 func drawTextCentered(font rl.Font, text string, centerX, y, size float32, col color.RGBA) {
 	measure := rl.MeasureTextEx(font, text, size, 1)
-	pos := rl.NewVector2(centerX-measure.X/2, y)
-	shadow := rl.NewVector2(pos.X+1, pos.Y+1)
-	rl.DrawTextEx(font, text, shadow, size, 1, rl.NewColor(0, 0, 0, 200))
-	rl.DrawTextEx(font, text, pos, size, 1, col)
-}
-
-func drawTextWithShadow(font rl.Font, text string, x, y, size float32, col color.RGBA) {
-	pos := rl.NewVector2(x, y)
-	shadow := rl.NewVector2(x+1, y+1)
-	rl.DrawTextEx(font, text, shadow, size, 1, rl.NewColor(0, 0, 0, 200))
-	rl.DrawTextEx(font, text, pos, size, 1, col)
+	drawTextWithShadow(font, text, centerX-measure.X/2, y, size, col)
 }
 

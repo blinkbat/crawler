@@ -41,13 +41,36 @@ type ItemStack struct {
 	Count int
 }
 
+// itemByKind / itemByName are the O(1) lookup maps for itemDefinitions,
+// built once at init. ItemInfo / ItemKindByName get called from per-frame
+// item picker render — the map matches the partyClassByID / skillByID
+// pattern in party.go.
+var (
+	itemByKind = buildItemByKind()
+	itemByName = buildItemByName()
+)
+
+func buildItemByKind() map[ItemKind]ItemDefinition {
+	m := make(map[ItemKind]ItemDefinition, len(itemDefinitions))
+	for _, def := range itemDefinitions {
+		m[def.Kind] = def
+	}
+	return m
+}
+
+func buildItemByName() map[string]ItemKind {
+	m := make(map[string]ItemKind, len(itemDefinitions))
+	for _, def := range itemDefinitions {
+		m[def.Name] = def.Kind
+	}
+	return m
+}
+
 // ItemInfo returns the definition for a kind, or a generic fallback for an
 // unknown kind so the UI doesn't crash on a future item not in the registry.
 func ItemInfo(kind ItemKind) ItemDefinition {
-	for _, def := range itemDefinitions {
-		if def.Kind == kind {
-			return def
-		}
+	if def, ok := itemByKind[kind]; ok {
+		return def
 	}
 	return ItemDefinition{Kind: kind, Name: "Unknown Item"}
 }
@@ -57,10 +80,8 @@ func ItemInfo(kind ItemKind) ItemDefinition {
 // item — caller decides what to do with that (drop the steal silently, log
 // a debug warning, etc.).
 func ItemKindByName(name string) ItemKind {
-	for _, def := range itemDefinitions {
-		if def.Name == name {
-			return def.Kind
-		}
+	if kind, ok := itemByName[name]; ok {
+		return kind
 	}
 	return ItemNone
 }

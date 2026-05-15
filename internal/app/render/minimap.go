@@ -90,6 +90,30 @@ func minimapTileColor(material core.MaterialSet, tile byte) color.RGBA {
 		// Lighter, yellower green than the trees so bushes don't get confused
 		// with canopy on the map.
 		return rl.NewColor(110, 168, 92, 240)
+	// Inhabited / ruined props share two minimap palettes: warm browns for
+	// wooden/clay things (crate / barrel / urn), and cool greys for stone
+	// (stalagmite / pillar / broken pillar / statue / obelisk / fountain).
+	// Same color family communicates "hard cover, same category" without
+	// asking the player to memorize a glyph per icon. Slight tone shifts
+	// inside each family let adjacent props still read as distinct.
+	case core.TileCrate:
+		return rl.NewColor(168, 122, 72, 240)
+	case core.TileBarrel:
+		return rl.NewColor(148, 100, 60, 240)
+	case core.TileUrn:
+		return rl.NewColor(186, 112, 72, 240)
+	case core.TileStalagmite:
+		return rl.NewColor(196, 188, 174, 240)
+	case core.TilePillar:
+		return rl.NewColor(214, 206, 188, 240)
+	case core.TileBrokenPillar:
+		return rl.NewColor(180, 172, 156, 240)
+	case core.TileStatue:
+		return rl.NewColor(228, 220, 204, 240)
+	case core.TileObelisk:
+		return rl.NewColor(86, 90, 104, 240)
+	case core.TileFountain:
+		return rl.NewColor(96, 158, 208, 240)
 	default:
 		if material == core.MaterialDungeon {
 			return rl.NewColor(82, 84, 88, 235)
@@ -111,14 +135,14 @@ func drawMinimapTimeOfDay(font rl.Font, stepCount int, x, y, width int32) {
 	counter := fmt.Sprintf("step %d / %d", stepCount%core.StepsPerCycle, core.StepsPerCycle)
 	measure := rl.MeasureTextEx(font, counter, 12, 1)
 	drawTextWithShadow(font, counter, float32(x)+float32(width)-measure.X, float32(y)+1, 12, textHint)
-	// Line 2: thin track, with the phase highlighted as a 1/6 segment that
+	// Line 2: thin track, with the phase highlighted as a 1/N segment that
 	// fills as the player walks through it.
 	trackY := y + 18
 	trackH := int32(4)
 	trackW := width
 	trackCol := rl.NewColor(8, 12, 22, 200)
 	rl.DrawRectangle(x, trackY, trackW, trackH, trackCol)
-	segW := trackW / int32(len(phaseColors))
+	segW := trackW / int32(core.TimeOfDayCount)
 	// Past phases: solid color. Current phase: filled by progress.
 	for i := 0; i < int(phase); i++ {
 		rl.DrawRectangle(x+int32(i)*segW, trackY, segW-1, trackH, phaseColors[i])
@@ -130,14 +154,15 @@ func drawMinimapTimeOfDay(font rl.Font, stepCount int, x, y, width int32) {
 }
 
 // phaseColors mirrors the rough sky tint of each lighting phase so the HUD
-// strip itself reads as a tiny day at a glance.
-var phaseColors = [6]rl.Color{
-	rl.NewColor(232, 168, 152, 255), // dawn — rose
-	rl.NewColor(220, 224, 200, 255), // morning — pale gold
-	rl.NewColor(190, 220, 244, 255), // afternoon — sky
-	rl.NewColor(232, 152, 96, 255),  // dusk — orange
-	rl.NewColor(96, 110, 180, 255),  // evening — indigo
-	rl.NewColor(40, 56, 110, 255),   // midnight — deep blue
+// strip itself reads as a tiny day at a glance. Indexed by TimeOfDay; size
+// is asserted at compile time against core.TimeOfDayCount via _phaseColorsLen.
+var phaseColors = [core.TimeOfDayCount]rl.Color{
+	core.Dawn:      rl.NewColor(232, 168, 152, 255), // dawn — rose
+	core.Morning:   rl.NewColor(220, 224, 200, 255), // morning — pale gold
+	core.Afternoon: rl.NewColor(190, 220, 244, 255), // afternoon — sky
+	core.Dusk:      rl.NewColor(232, 152, 96, 255),  // dusk — orange
+	core.Evening:   rl.NewColor(96, 110, 180, 255),  // evening — indigo
+	core.Midnight:  rl.NewColor(40, 56, 110, 255),   // midnight — deep blue
 }
 
 func drawMinimapArrow(center rl.Vector2, facing int) {

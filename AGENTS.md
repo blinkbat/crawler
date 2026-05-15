@@ -41,7 +41,6 @@ This workspace is Windows-first. Prefer bash if it is installed, but do not bloc
 - `internal/app/battle/battle.go`: battle lifecycle, phase transitions, mixed-initiative round queue, battle log updates, transient combat effects.
 - `internal/app/battle/menu.go`: combat menu input, action / item / target cycling.
 - `internal/app/battle/actions.go`: Attack, Swipe, Prayer, Steal, Firebolt, burn ticks, damage resolution, enemy attack target round-robin.
-- `internal/app/battle/helpers.go`: battle encounter group selection (Manhattan + diagonal LOS).
 - `internal/app/render/`: raylib drawing, procedural assets, and HUD.
 - `internal/app/render/world.go`: camera, screen-filling sky background, world drawing, enemy/party billboards, target markers, battle formation positioning.
 - `internal/app/render/hud.go`: top-level HUD routing and exploration party totals.
@@ -53,26 +52,34 @@ This workspace is Windows-first. Prefer bash if it is installed, but do not bloc
 - `internal/app/render/classes.go`: per-party-class presentation (turn color, victory dance motion).
 - `internal/app/render/daycycle.go`: time-of-day lighting profiles + interpolation, sky tinting.
 - `internal/app/render/lighting.go`: lighting shader load / uniforms / per-area profiles.
-- `internal/app/render/timing.go`: timed-hit bar rendering (press / charge / sequence bars, flash hold, quality popup).
+- `internal/app/render/timing.go`: timed-hit bar rendering (press / charge / sequence bars, flash hold, quality popup). `qualityVisuals` is the per-grade color + throb-intensity table.
 - `internal/app/render/resources.go`: procedural resource loading, area material models, font loading.
-- `internal/app/render/theme.go`: HUD color tokens, rounded panel helpers, shared text shadows.
+- `internal/app/render/theme.go`: HUD color tokens, rounded panel helpers, shared text shadows, `drawArrowMarker` / `drawTextWithShadow` helpers.
 - `internal/app/render/theme_export.go`: theme accessor for non-render packages (editor, title).
 - `internal/app/render/textures.go`: procedural area wall/floor/sky textures and rat/bat/party sprite pixels.
 - `internal/app/render/models.go`: procedural mesh construction for trees, boulders, bushes, and mushroom props.
+- `internal/app/render/layout.go`: `screenSize`/`screenSizeF`/`centerX`/`centerXF` helpers shared by every HUD panel.
+- `internal/app/render/debug.go` (build tag `debug` only): in-world tile labels and player-coord readout for the editor / debug build.
+- `internal/app/render/debug_release.go` (build tag `!debug`): no-op `DrawDebugOverlay` stub for release builds, plus `DebugBuildEnabled` constant the pause menu reads to label the inert toggle.
 - `internal/app/editor/`: in-game map authoring tool (Walls / Floor / Decor / Props / Entities layers).
 - `internal/app/title/`: launch screen — pick Adventure (map picker) / Editor / Quit.
+- `internal/app/audio/`: procedural sound bank. Synthesizes a handful of short cues (input hit / miss / great-grade, heal, enemy hit, enemy death) from sine sweeps and bell envelopes at startup — no audio files on disk. Init in `Run()` after `InitWindow`; Play is a fire-and-forget no-op on machines without a working audio device.
 
 ## Gameplay Notes
 
 - Movement is tile-based with short animation. `W/S` step, `A/D` strafe, `Q/E` or arrows turn. Walls and prop tiles (trees / boulders / large bushes) both block.
 - Right-click drag free-look recenters smoothly on release.
 - Pause menu: `P`, `Esc` (only outside battle, so Esc keeps working as "back / cancel target" in combat), or gamepad Start.
-- Battles start when the player is adjacent to a live enemy (rats or bats); if needed, the player rotates to face it first. The encounter pulls in any other enemies within Manhattan distance 2 that have a clear LOS.
+- Battles start when the player is adjacent to a live enemy pack; if needed, the player rotates to face it first. The engaged pack IS the encounter — packs are authored on the map (PackSpawns) and there's no spatial clustering at runtime.
 - Battle input:
   - Confirm: `Space`, `Enter`, or `Z`
   - Back: `Esc` or `X`
   - Target/menu movement: arrows, `W/S`, `A/D`, `Tab` where applicable
 - Mixed initiative: party + enemies are sorted by SPD into a single per-round queue. Burn ticks fire at the start of the burning actor's own turn; Poison ticks at the END of the poisoned actor's turn (after their action lands).
+- Basic-attack accuracy: `core.AttackAccuracy(stats, quality)` rolls per swing. DEX-driven baseline (0.55 + 0.04·DEX) plus a timing bonus (Miss=+0 → Excellent=+0.45), clamped to [0, 1]. Skills are NOT gated — they pay MP and shouldn't be double-jeopardied. Excellent timing functionally guarantees the hit for every class.
+- Timing-bar JUICE: graded flashes throb (height pulse, scaled by grade); Miss flashes shake horizontally. Cursor color-previews the live grade while inside the press window. Excellent flashes spawn an expanding shockwave ring. Charge ticks freshness-flash on crossing. Sequence arrows pulse on correct land. Hit-stop pauses the world for 100ms (Great) or 160ms (Excellent) between the bar flash and the action's apply step.
+- Tile-character reference for `.map` files lives in the top comment of `internal/app/core/mapfile/mapfile.go`. New tile types are added there + `internal/app/core/map.go`'s const blocks (and `TileLabel`'s per-`TileLayer` switch) + the editor's brush palette in `internal/app/editor/editor.go` (`layerBrushes` — drives both palette UI and grid-cell colors via `tileColorByChar`) + the renderer.
+- Per-grade balance tunables live in `internal/app/core/config.go`: the `timingGrades` table (label / atk mult / def mult / accuracy bonus per Miss..Excellent) is the single source of truth; render-side color + throb intensity live in `qualityVisuals` (render/timing.go); audio cue per grade lives in `gradeSounds` (battle/battle.go).
 - Enemies: `rat`, `bat`, `diseased_rat` (tier-3 rat variant, 60% chance to inflict Poison on a landed bite; carries no loot).
 - Status effects: Burn (enemy-side, from Firebolt — flat tick at start of turn, 2–3 turns) and Poison (party-side, from Diseased Rat — flat tick at END of turn, 3–5 turns). Neither stacks onto an already-affected target.
 - Party classes are intentionally named by class only: `Warrior`, `Cleric`, `Thief`, `Wizard`.

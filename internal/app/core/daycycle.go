@@ -14,6 +14,11 @@ const (
 	Midnight
 )
 
+// TimeOfDayCount is the wrap modulus for cycling through phases — matches the
+// pattern used by PauseMenuCount / ActionRowCount in config.go. Bump by adding
+// a TimeOfDay constant above this line; neither caller hard-codes "6" anywhere.
+const TimeOfDayCount = int(Midnight) + 1
+
 // PhaseAtStep returns the current phase and the intra-phase progress in
 // [0,1). progress=0 means the player just entered the phase; progress
 // approaches 1 right before the next phase starts. Used by the renderer

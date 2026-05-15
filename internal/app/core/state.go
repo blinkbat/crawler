@@ -1,5 +1,10 @@
 package core
 
+import (
+	"math/rand"
+	"time"
+)
+
 func NewPlayer(tileX, tileZ, facing int) Player {
 	return Player{
 		TileX:  tileX,
@@ -28,6 +33,10 @@ func NewGameState(area AreaDefinition) GameState {
 			Phase:             BattleNone,
 			Message:           area.QuietMessage,
 		},
+		// Wall-clock seed so consecutive playthroughs differ. A future
+		// "Restart with seed N" command would assign a deterministic
+		// Rand here instead.
+		RNG: rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	return g
 }

@@ -3,6 +3,7 @@ package battle
 import (
 	"sort"
 
+	"crawler/internal/app/audio"
 	"crawler/internal/app/core"
 	"crawler/internal/app/input"
 )
@@ -22,6 +23,9 @@ func Start(g *core.GameState, packIndex int) {
 	g.Battle.Timing = core.TimingState{}
 	g.Battle.TimingFlash = 0
 	g.Battle.TimingIntro = 0
+	g.Battle.HitStop = 0
+	g.Battle.SequencePulseTimer = 0
+	g.Battle.SequencePulseIndex = -1
 	g.Battle.EnemyAttacker = -1
 	g.Battle.LastQualityTimer = 0
 	g.Battle.Queue = nil
@@ -34,7 +38,28 @@ func Start(g *core.GameState, packIndex int) {
 
 func Update(g *core.GameState, dt float32) {
 	// dt is already clamped by explore.Update so a single hitched frame
-	// can't fast-forward the timing bar past its window in one tick.
+	// can't fast-forward the timing bar past its window in one tick. This
+	// clamp is what makes tickFlashHold safe: a huge dt could otherwise
+	// drain BOTH the flash timer AND the hit-stop in a single frame, but
+	// the worst the helper does is push onResolve back one frame — never
+	// drops or duplicates it. See tickFlashHold for the two-phase shape.
+	//
+	// Hit-stop freeze: while HitStop > 0, the world is paused (sprite bumps,
+	// popups, death fades, splash banner all hold). DamageFlash specifically
+	// stays at peak strength through the freeze — that's intentional, since
+	// the freeze IS the impact moment and the enemy reading "flashed white"
+	// reinforces it. The phase handler still runs so HitStop counts down via
+	// tickFlashHold; once it hits zero the apply step fires and normal
+	// updates resume next frame.
+	if g.Battle.HitStop > 0 {
+		switch g.Battle.Phase {
+		case core.BattleAttackTiming:
+			updateAttackTiming(g, dt)
+		case core.BattleEnemyTiming:
+			updateEnemyTiming(g, dt)
+		}
+		return
+	}
 	updateBattleEffects(g, dt)
 	tickQualityPopup(g, dt)
 	// Early-exit paths route through leaveBattle so residual queue / timing
@@ -203,6 +228,11 @@ func isActorAlive(g *core.GameState, actor core.ActorRef) bool {
 func finishActorTurn(g *core.GameState) {
 	g.Battle.Timing = core.TimingState{}
 	g.Battle.TimingFlash = 0
+	// HitStop is normally drained to zero by tickFlashHold before
+	// applyPendingAction fires, but clear it defensively here so an early-
+	// exit apply path (e.g. "No target." after the target died between
+	// confirm and apply) can't leak a stuck freeze across the next phase.
+	g.Battle.HitStop = 0
 	if g.Battle.QueueCursor >= 0 && g.Battle.QueueCursor < len(g.Battle.Queue) {
 		tickPoisonAfterPartyTurn(g, g.Battle.Queue[g.Battle.QueueCursor])
 	}
@@ -240,10 +270,16 @@ func beginPartyTurn(g *core.GameState, partyIndex int) {
 		g.Party[partyIndex].Defending = false
 		g.Battle.PartyTarget = partyIndex
 	} else {
+		// Reached only on an out-of-bounds partyIndex — the queue has handed us
+		// a bogus actor. Fall back to the first living member; if there's no
+		// living member to fall back to, route to BattleLost rather than
+		// silently clamping PartyTarget to 0 and opening the menu for a
+		// corpse.
 		g.Battle.PartyTarget = core.FirstLivingPartyMember(g.Party)
-	}
-	if g.Battle.PartyTarget < 0 {
-		g.Battle.PartyTarget = 0
+		if g.Battle.PartyTarget < 0 {
+			loseBattle(g, core.BattleLossMessage(*g))
+			return
+		}
 	}
 	if !core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
 		if next := core.NextLivingBattleEnemy(g); next >= 0 {
@@ -276,11 +312,30 @@ func updatePlayerBattle(g *core.GameState) {
 	}
 }
 
-// tickFlashHold drains the post-press flash timer. Returns true while the
-// flash is still on screen (caller bails this frame); when it hits zero,
-// fires onResolve and still returns true so the caller doesn't double-tick
-// the underlying bar in the same frame.
+// tickFlashHold drains the post-press flash timer and then, on high grades,
+// the hit-stop freeze that chains after it. Returns true while either
+// timer is still on screen (caller bails this frame); when both have
+// fully drained, fires onResolve and still returns true so the caller
+// doesn't double-tick the underlying bar in the same frame.
+//
+// Phase order on a Great/Excellent press:
+//
+//	1. TimingFlash counts down (bar pulses with quality color, cursor frozen)
+//	2. HitStop counts down (everything in the world freezes — see Update)
+//	3. onResolve fires (damage / heal applies, popup spawns)
+//
+// On a Miss / Nice / Good, phase 2 is skipped — HitStopFor returns 0 and
+// onResolve fires the moment the flash hits zero.
 func tickFlashHold(g *core.GameState, dt float32, onResolve func()) bool {
+	if g.Battle.HitStop > 0 {
+		g.Battle.HitStop -= dt
+		if g.Battle.HitStop > 0 {
+			return true
+		}
+		g.Battle.HitStop = 0
+		onResolve()
+		return true
+	}
 	if g.Battle.TimingFlash <= 0 {
 		return false
 	}
@@ -289,6 +344,10 @@ func tickFlashHold(g *core.GameState, dt float32, onResolve func()) bool {
 		return true
 	}
 	g.Battle.TimingFlash = 0
+	if stop := core.HitStopFor(g.Battle.Timing.Quality); stop > 0 {
+		g.Battle.HitStop = stop
+		return true
+	}
 	onResolve()
 	return true
 }
@@ -327,6 +386,7 @@ func updateAttackTiming(g *core.GameState, dt float32) {
 			g.Battle.Timing.Tick(dt)
 		}
 	case core.TimingKindSequence:
+		prevCursor := g.Battle.Timing.SequenceCursor
 		if !g.Battle.Timing.Resolved && input.ArrowUpPressed() {
 			g.Battle.Timing.SequenceInput(core.SeqDirUp)
 		} else if !g.Battle.Timing.Resolved && input.ArrowRightPressed() {
@@ -335,6 +395,14 @@ func updateAttackTiming(g *core.GameState, dt float32) {
 			g.Battle.Timing.SequenceInput(core.SeqDirDown)
 		} else if !g.Battle.Timing.Resolved && input.ArrowLeftPressed() {
 			g.Battle.Timing.SequenceInput(core.SeqDirLeft)
+		}
+		// Light up the pulse for the just-landed slot — only on Correct, so
+		// a wrong tap still draws the red result but doesn't bounce.
+		if g.Battle.Timing.SequenceCursor > prevCursor &&
+			prevCursor < len(g.Battle.Timing.SequenceResults) &&
+			g.Battle.Timing.SequenceResults[prevCursor] == core.SeqResultCorrect {
+			g.Battle.SequencePulseTimer = core.SequencePulseDuration
+			g.Battle.SequencePulseIndex = prevCursor
 		}
 		if !g.Battle.Timing.Resolved {
 			g.Battle.Timing.Tick(dt)
@@ -353,9 +421,32 @@ func updateAttackTiming(g *core.GameState, dt float32) {
 	}
 	if g.Battle.Timing.Pressed {
 		g.Battle.TimingFlash = core.TimingFlashDuration
+		audio.Play(soundForGrade(g.Battle.Timing.Quality))
 		return
 	}
+	audio.Play(audio.SoundInputMiss)
 	applyPendingAction(g, g.Battle.Timing.Quality)
+}
+
+// gradeSounds is the per-grade audio cue table. Battle-side equivalent of
+// render's qualityVisuals — kept in this package because audio doesn't
+// import core. Press, charge, and sequence bars all dispatch off this one
+// table so they sound the same on the same grade.
+var gradeSounds = [...]audio.Sound{
+	core.TimingQualityMiss:      audio.SoundInputMiss,
+	core.TimingQualityNice:      audio.SoundInputHit,
+	core.TimingQualityGood:      audio.SoundInputHit,
+	core.TimingQualityGreat:     audio.SoundInputGreat,
+	core.TimingQualityExcellent: audio.SoundInputGreat,
+}
+
+// soundForGrade picks the input cue for a freshly resolved timing grade.
+// Out-of-range qualities fall back to the Miss cue.
+func soundForGrade(q int) audio.Sound {
+	if q < 0 || q >= len(gradeSounds) {
+		return gradeSounds[core.TimingQualityMiss]
+	}
+	return gradeSounds[q]
 }
 
 // --- Enemy turn ------------------------------------------------------------
@@ -364,7 +455,7 @@ func updateAttackTiming(g *core.GameState, dt float32) {
 // slot is an index into the active pack's Members.
 func beginEnemyAttack(g *core.GameState, slot int) {
 	g.Battle.EnemyAttacker = slot
-	g.Battle.Timing = core.NewTimingState(core.DefendTimingDuration)
+	g.Battle.Timing = core.NewTimingState(g.Rand(), core.DefendTimingDuration)
 	g.Battle.TimingFlash = 0
 	g.Battle.TimingIntro = core.EnemyTurnIntro
 	g.Battle.Phase = core.BattleEnemyTiming
@@ -393,8 +484,10 @@ func updateEnemyTiming(g *core.GameState, dt float32) {
 	}
 	if g.Battle.Timing.Pressed {
 		g.Battle.TimingFlash = core.TimingFlashDuration
+		audio.Play(soundForGrade(g.Battle.Timing.Quality))
 		return
 	}
+	audio.Play(audio.SoundInputMiss)
 	resolveAndFinishEnemyAttack(g)
 }
 
@@ -468,6 +561,9 @@ func clearBattleResidual(g *core.GameState) {
 	g.Battle.Timing = core.TimingState{}
 	g.Battle.TimingFlash = 0
 	g.Battle.TimingIntro = 0
+	g.Battle.HitStop = 0
+	g.Battle.SequencePulseTimer = 0
+	g.Battle.SequencePulseIndex = -1
 	g.Battle.EnemyAttacker = -1
 	g.Battle.EnemyAttackCursor = -1
 	resetBattleAction(g)
@@ -490,6 +586,15 @@ func setBattleStatus(g *core.GameState, message string) {
 	g.Battle.Message = message
 }
 
+// setBattleMessage writes to the transient status line AND appends to the
+// rolling combat log when the message is non-empty and not an immediate
+// repeat of the previous line.
+//
+// Dedupe is intentionally one-step-behind only: we drop "X then X" but NOT
+// "X then Y then X" so the log preserves chronology. A future reader who's
+// tempted to turn this into a set-dedupe should know that alternating-actor
+// patterns ("Warrior hits / Rat bites / Warrior hits") reading the same
+// twice is correct — the player needs to see the sequence.
 func setBattleMessage(g *core.GameState, message string) {
 	g.Battle.Message = message
 	if message == "" {
@@ -499,8 +604,8 @@ func setBattleMessage(g *core.GameState, message string) {
 		return
 	}
 	g.Battle.Log = append(g.Battle.Log, message)
-	if len(g.Battle.Log) > 40 {
-		g.Battle.Log = g.Battle.Log[len(g.Battle.Log)-40:]
+	if len(g.Battle.Log) > core.BattleLogMaxLines {
+		g.Battle.Log = g.Battle.Log[len(g.Battle.Log)-core.BattleLogMaxLines:]
 	}
 }
 
@@ -515,6 +620,10 @@ func updateBattleEffects(g *core.GameState, dt float32) {
 		members[i].DamageFlash = core.ApproachZero(members[i].DamageFlash, dt)
 		members[i].DeathFade = core.ApproachZero(members[i].DeathFade, dt)
 		members[i].DamagePopupTimer = core.ApproachZero(members[i].DamagePopupTimer, dt)
+	}
+	g.Battle.SequencePulseTimer = core.ApproachZero(g.Battle.SequencePulseTimer, dt)
+	if g.Battle.SequencePulseTimer <= 0 {
+		g.Battle.SequencePulseIndex = -1
 	}
 }
 

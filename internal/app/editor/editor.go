@@ -102,7 +102,7 @@ var layerBrushes = [layerCount][]Brush{
 		{Name: "Leaf pile (L)", Char: core.DecorLeafPile, Color: rl.NewColor(196, 142, 80, 255)},
 	},
 	LayerProps: {
-		{Name: "None (erase)", Char: '.', Hotkey: rl.KeyOne, Color: rl.NewColor(60, 64, 70, 255)},
+		{Name: "None (erase)", Char: core.TilePropEmpty, Hotkey: rl.KeyOne, Color: rl.NewColor(60, 64, 70, 255)},
 		{Name: "Tree (T)", Char: core.TileTree, Hotkey: rl.KeyTwo, Color: rl.NewColor(64, 140, 80, 255)},
 		{Name: "Tree XL (X)", Char: core.TileTreeXL, Hotkey: rl.KeyThree, Color: rl.NewColor(36, 96, 56, 255)},
 		{Name: "Boulder (O)", Char: core.TileRockLarge, Hotkey: rl.KeyFour, Color: rl.NewColor(132, 110, 90, 255)},
@@ -311,13 +311,13 @@ func blankArea(w, h int) core.AreaDefinition {
 			if x == 0 || z == 0 || x == w-1 || z == h-1 {
 				wb[x] = core.TileRock
 			} else {
-				wb[x] = '.'
+				wb[x] = core.TileOpen
 			}
 		}
 		walls[z] = string(wb)
 		floor[z] = blankRow(w, core.FloorAuto)
 		decor[z] = blankRow(w, core.DecorAuto)
-		props[z] = blankRow(w, '.')
+		props[z] = blankRow(w, core.TilePropEmpty)
 	}
 	return core.AreaDefinition{
 		Name:         "Untitled",
@@ -421,11 +421,19 @@ func canPlaytest(a core.AreaDefinition) bool {
 	return true
 }
 
+// statusLogLifetime is the seed duration for a flash() entry's timer.
+// drawStatus normalizes alpha against this same value so a fresh entry
+// renders at alpha=1 and decays linearly to 0 across the lifetime.
+const statusLogLifetime = float32(2.5)
+
+// statusLogMaxEntries caps how many transient messages can stack at once.
+const statusLogMaxEntries = 4
+
 // flash pushes a transient message onto the rolling status log.
 func (s *State) flash(msg string) {
-	s.statusLog = append(s.statusLog, statusEntry{msg: msg, timer: 2.5})
-	if len(s.statusLog) > 4 {
-		s.statusLog = s.statusLog[len(s.statusLog)-4:]
+	s.statusLog = append(s.statusLog, statusEntry{msg: msg, timer: statusLogLifetime})
+	if len(s.statusLog) > statusLogMaxEntries {
+		s.statusLog = s.statusLog[len(s.statusLog)-statusLogMaxEntries:]
 	}
 }
 

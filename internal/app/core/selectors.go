@@ -133,6 +133,49 @@ func NextLivingBattleEnemy(g *GameState) int {
 	return -1
 }
 
+// SelectedEnemySlot returns the active pack slot the player's enemy cursor
+// is pointing at, or -1 when no battle is active or the slot is out of
+// range. Render-side targeting markers should query this instead of
+// reading g.Battle.EnemyIndex directly — keeps the "is the marker valid"
+// guard in one place so a future enemy-list compaction can't surprise a
+// renderer that didn't bounds-check.
+func SelectedEnemySlot(g *GameState) int {
+	members := BattleMembers(g)
+	if len(members) == 0 {
+		return -1
+	}
+	if g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(members) {
+		return -1
+	}
+	return g.Battle.EnemyIndex
+}
+
+// HighlightedAllyIndex returns the party index the player's ally cursor is
+// pointing at (heal-skill or item-target modes), or -1 when no ally is
+// currently being targeted or the slot is out of range. Counterpart to
+// SelectedEnemySlot for the friendly side of the marker logic.
+func HighlightedAllyIndex(g *GameState) int {
+	if g.Battle.PartyTarget < 0 || g.Battle.PartyTarget >= len(g.Party) {
+		return -1
+	}
+	return g.Battle.PartyTarget
+}
+
+// ActiveActorIndex returns the party index whose turn it currently is, or
+// -1 when no party member is acting (enemy turn, splash, post-battle).
+// Lets renderers light up the "your turn" highlight without re-deriving
+// the phase check at each call site.
+func ActiveActorIndex(g *GameState) int {
+	switch g.Battle.Phase {
+	case BattlePlayer, BattleAttackTiming:
+		if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
+			return -1
+		}
+		return g.Battle.CurrentParty
+	}
+	return -1
+}
+
 // PackLeaderSlot returns the slot of the pack's leader: the highest-Tier
 // member, ties broken by member order. Empty packs return 0 (callers
 // should range-check before drawing).

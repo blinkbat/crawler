@@ -36,8 +36,7 @@ func DrawSkyBackground(assets Resources, g core.GameState) {
 	m := g.Area
 	texW := float32(assets.skyTexture.Width)
 	texH := float32(assets.skyTexture.Height)
-	screenW := float32(rl.GetScreenWidth())
-	screenH := float32(rl.GetScreenHeight())
+	screenW, screenH := screenSizeF()
 	// Crop the source rect to the screen's aspect ratio so the sky doesn't
 	// stretch when the window isn't a 2:1 letterbox. The sky texture is 2:1
 	// (1024×512); on a typical 16:10 screen we sample a centered slice that
@@ -113,7 +112,7 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 			// Props: render by char on the props layer. Built-in cases
 			// (T/X/O/B) keep their per-char scale tuning here; everything
 			// else looks itself up in assets.propModels at scale 1.0.
-			if prop := m.Props[z][x]; prop != '.' {
+			if prop := m.Props[z][x]; prop != core.TilePropEmpty {
 				propYaw := propYawDeg(x, z)
 				switch prop {
 				case core.TileTree:
@@ -432,14 +431,14 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 			tint = rl.NewColor(255, 255, 255, alpha)
 		}
 		if enemy.Alive && g.Battle.ActionMode == core.ActionEnemyTarget && i == g.Battle.EnemyIndex {
-			tint = rl.NewColor(255, 228, 190, 255)
+			tint = tintEnemyTargeted
 			drawTargetChevron(camera, position)
 		}
 		// During BattleEnemyTiming, mark the currently-attacking enemy with a
 		// red chevron + warm tint so the player knows which foe is lunging at
 		// them — useful when 2-3 enemies share the screen and only one acts.
 		if enemy.Alive && isEnemyAttackerSlot(g, i) {
-			tint = rl.NewColor(255, 196, 156, 255)
+			tint = tintEnemyAttacker
 			drawAttackerChevron(camera, position)
 		}
 		if enemy.DamageFlash > 0 {

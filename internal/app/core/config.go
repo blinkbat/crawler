@@ -1,13 +1,14 @@
 package core
 
-import (
-	"math/rand"
-	"time"
-)
-
 const (
-	ScreenWidth  = 1180
-	ScreenHeight = 820
+	// InitialWindowWidth/Height seed rl.InitWindow at startup. The window is
+	// immediately resized to the monitor by applyWindowedFullscreen, so these
+	// are NOT the runtime screen dimensions — never use them for HUD layout
+	// (render code reads rl.GetScreenWidth/Height via screenSize() in the
+	// render package). They only matter for the brief instant between
+	// InitWindow and SetWindowSize.
+	InitialWindowWidth  = 1180
+	InitialWindowHeight = 820
 
 	TileSize             = 2.05
 	WallHeight           = 2.25
@@ -34,18 +35,18 @@ const (
 	AnimTurn
 )
 
-// BattlePhase is the top-level state of the battle FSM. Gaps in the value
-// space are historical — leave them so any persisted save (none today,
-// future-proofing) doesn't shift meaning.
+// BattlePhase is the top-level state of the battle FSM. Values are
+// internal-only (no save file format depends on the integers), so the
+// historical gaps are gone and the enum walks via iota.
 type BattlePhase int
 
 const (
-	BattleNone         BattlePhase = 0
-	BattlePlayer       BattlePhase = 1
-	BattleWon          BattlePhase = 3
-	BattleLost         BattlePhase = 4
-	BattleAttackTiming BattlePhase = 5
-	BattleEnemyTiming  BattlePhase = 6
+	BattleNone BattlePhase = iota
+	BattlePlayer
+	BattleWon
+	BattleLost
+	BattleAttackTiming
+	BattleEnemyTiming
 )
 
 // ActionMode is the sub-state of BattlePlayer — which input mode the action
@@ -60,16 +61,21 @@ const (
 	ActionItemTarget
 )
 
-// Action menu row indices. Owned here so both the battle input layer and the
-// renderer reference one source of truth; reordering the rows is a one-place
-// edit. ActionRowCount is the menu's wrap modulus.
+// ActionRow enumerates the in-battle action menu rows. The integer values
+// double as g.Battle.MenuIndex cursor positions; reordering this enum
+// reorders the menu. Typed so a free `int` can't accidentally stand in
+// where a row label is expected.
+type ActionRow int
+
 const (
-	ActionRowAttack = 0
-	ActionRowSkill  = 1
-	ActionRowDefend = 2
-	ActionRowItem   = 3
-	ActionRowCount  = 4
+	ActionRowAttack ActionRow = iota
+	ActionRowSkill
+	ActionRowDefend
+	ActionRowItem
 )
+
+// ActionRowCount is the wrap modulus for the action-menu cursor.
+const ActionRowCount = int(ActionRowItem) + 1
 
 const (
 	// BattleSplashDuration is how long the encounter banner sits on screen at
@@ -79,23 +85,33 @@ const (
 
 	AttackTimingDuration = float32(1.4)
 	DefendTimingDuration = float32(1.3)
-	// Press-window geometry, expressed as fractions of the bar's duration.
-	// At construction time the window's *position* is randomized within
-	// PressWindowMinStart..PressWindowMaxStart so two consecutive bars don't
-	// land in the same place — but it never starts before
-	// PressWindowMinStart, so the player can't get hit with a window that
-	// opens immediately. Width is fixed; the sweet spot sits in its center.
-	PressWindowMinStart   = float32(0.38)
-	PressWindowMaxStart   = float32(0.62)
-	PressWindowWidth      = float32(0.18)
+
 	TimingFlashDuration   = float32(0.32)
 	QualityResultDuration = float32(0.70)
+
+	// Hit-stop is the brief world-pause inserted between the timing flash and
+	// the action's apply step on Great/Excellent grades. The bar's already
+	// frozen at the press; this freezes EVERYTHING else (sprite bumps, popup
+	// floats, enemy bars) so the moment punctuates. Tuned short — under 200ms
+	// — to feel like a satisfying punch, not a stutter.
+	HitStopGreat     = float32(0.10)
+	HitStopExcellent = float32(0.16)
+
+	// Sequence arrow pulse: how long an arrow scales up after landing a
+	// correct tap. Slightly less than the flash duration so the pulse decays
+	// before the bar fades, keeping each tap visually punctuated.
+	SequencePulseDuration = float32(0.22)
 	EnemyTurnIntro        = float32(0.85)
 	// Charge bars get a longer pre-arm pause so the player has time to read
 	// the prompt. The bar arms early if the player presses/holds the input,
 	// see updateAttackTiming for the skip logic.
 	AttackTimingIntro = float32(0.35)
 	ChargeTimingIntro = float32(0.85)
+	// BlockBumpDuration is intentionally LONGER than BumpDuration (0.22 vs
+	// 0.18). The hit landing on an enemy gets its own DamageFlash + popup
+	// to read the impact; a successful block has none of that — the defender
+	// just doesn't lose much HP. The longer recoil sells the block visually
+	// when the damage number is "1" or "0."
 	BlockBumpDuration = float32(0.22)
 
 	// Charge minigame: hold the input through three ticks, then release at
@@ -126,6 +142,15 @@ const (
 	// is reduced even further.
 	DefendingDamageMult = float32(0.5)
 
+	// Basic-attack accuracy curve. AttackAccuracy in types.go computes the
+	// per-swing hit chance as:
+	//     AccuracyBaseline + AccuracyPerDEX*DEX + timingBonus
+	// then clamps to [0, 1]. timingBonus comes from timingGrades.AccuracyBonus
+	// below; this pair sets the DEX-driven floor (Warrior at DEX 2 hits
+	// 0.63 on a Miss timing, Thief at DEX 6 hits 0.79).
+	AccuracyBaseline = 0.55
+	AccuracyPerDEX   = 0.04
+
 	// BurnTickDamage is the per-turn damage applied to a burning actor at
 	// the start of their own turn. Flat so the strategic value of burn
 	// stays predictable across enemy HP scales.
@@ -143,32 +168,77 @@ const (
 	PoisonMinTurns = 3
 	PoisonMaxTurns = 5
 
+	// Skill / enemy proc chances. Lifted out of the per-entry registry
+	// literals (party.go skillDefinitions, enemies.go enemyDefinitions) so
+	// a balance pass touches one file. The registry still owns the
+	// per-entry binding; these constants are the values it cites.
+	StealBaseChance         = 0.40 // Thief: Steal base success before DEX/quality scaling.
+	FireboltBurnChance      = 0.45 // Wizard: Firebolt burn inflict before quality scaling.
+	DiseasedRatPoisonChance = 0.60 // Diseased Rat: per-bite poison inflict.
+
 	// Day/night cycle tuning. Six phases of StepsPerPhase player tile-steps
 	// make up one full loop (StepsPerCycle). Only landed exploration steps
 	// advance the cycle (battles don't tick it), so combat preserves the
 	// phase the player walked into.
 	StepsPerPhase = 25
-	StepsPerCycle = StepsPerPhase * 6
+	StepsPerCycle = StepsPerPhase * TimeOfDayCount
+
+	// BattleLogMaxLines caps the rolling combat log buffer so a long fight
+	// doesn't grow it unbounded. The renderer reads len(Log) to draw the
+	// last-N visible lines; this cap is the ceiling for any scrollback
+	// feature that might land later.
+	BattleLogMaxLines = 40
+
+	// MaxMapDimension caps editor map width/height. Used by both the typed
+	// numeric input and the +/- resize buttons so they share one ceiling.
+	MaxMapDimension = 200
 )
 
-// Damage / heal / defense multipliers for each timing-quality grade. Used
-// by TimingBonusMult / TimingDefenseMult in timing.go. Pulled out here so
-// balance tuning lives in one place; the timing module just dispatches.
-const (
-	TimingMultMiss      = float32(1.0)
-	TimingMultNice      = float32(1.25)
-	TimingMultGood      = float32(1.5)
-	TimingMultGreat     = float32(1.75)
-	TimingMultExcellent = float32(2.0)
+// PressWindow groups the press-bar window geometry. Values are fractions
+// of the bar's duration. At construction time the window's position is
+// randomized within [Min, Max] so two consecutive bars don't land in the
+// same place — but it never starts before Min so the player can't get hit
+// with a window that opens immediately. Width is fixed; MaxEnd clamps the
+// tail so a window can't run into the last sliver of the bar (slides back
+// to fit, see NewTimingState).
+var PressWindow = struct {
+	MinStart float32
+	MaxStart float32
+	Width    float32
+	MaxEnd   float32
+}{
+	MinStart: 0.38,
+	MaxStart: 0.62,
+	Width:    0.18,
+	MaxEnd:   0.96,
+}
 
-	// Defense multipliers are <1 (lower incoming damage); Excellent quarters
-	// the hit, Miss takes the full thing.
-	TimingDefMiss      = float32(1.0)
-	TimingDefNice      = float32(0.75)
-	TimingDefGood      = float32(0.5)
-	TimingDefGreat     = float32(0.35)
-	TimingDefExcellent = float32(0.25)
-)
+// timingGrades is the single per-grade attribute table for the timed-hit
+// minigame. Every core-side function that varies by TimingQuality reads
+// from this slice — Label, attack/defense multipliers, and the
+// accuracy-roll bonus all live in one row per grade so a balance pass
+// touches one place instead of four parallel switches.
+//
+// Render-side (color, throb intensity) and battle-side (audio cue) attrs
+// live in their own per-package tables (qualityVisuals in render/timing.go,
+// gradeSounds in battle/battle.go) — package layering keeps audio out of
+// core and rl.Color out of core, so we get one table per layer.
+//
+// Defense multipliers are <1 (lower incoming damage); attack multipliers
+// are >=1 (higher outgoing damage); the accuracy bonus is added to the
+// DEX-driven baseline and clamped at 1.0 (see AttackAccuracy).
+var timingGrades = []struct {
+	Label         string
+	Atk           float32
+	Def           float32
+	AccuracyBonus float64
+}{
+	TimingQualityMiss:      {Label: "Miss...", Atk: 1.0, Def: 1.0, AccuracyBonus: 0.0},
+	TimingQualityNice:      {Label: "Nice!", Atk: 1.25, Def: 0.75, AccuracyBonus: 0.10},
+	TimingQualityGood:      {Label: "Good!", Atk: 1.5, Def: 0.5, AccuracyBonus: 0.20},
+	TimingQualityGreat:     {Label: "Great!", Atk: 1.75, Def: 0.35, AccuracyBonus: 0.30},
+	TimingQualityExcellent: {Label: "Excellent!", Atk: 2.0, Def: 0.25, AccuracyBonus: 0.45},
+}
 
 // SkillID identifies a learned skill. Stored on Battle.PendingSkill and
 // used as the map key for action handlers.
@@ -189,4 +259,19 @@ const (
 	West  = 3
 )
 
-var GameRNG = rand.New(rand.NewSource(time.Now().UnixNano()))
+// PauseMenuItem enumerates the rows in the pause menu. The integer values
+// double as menu cursor positions (g.MenuIndex), so reordering this enum
+// reorders the menu. Single source of truth shared by explore (cursor
+// dispatch) and render (row drawing) — neither side reinvents the count.
+type PauseMenuItem int
+
+const (
+	PauseMenuRestart PauseMenuItem = iota
+	PauseMenuDebug
+	PauseMenuQuit
+)
+
+// PauseMenuCount is the wrap modulus for the pause menu cursor. Bump by
+// adding a PauseMenuItem enum constant above this line — neither caller
+// hard-codes "3" anywhere.
+const PauseMenuCount = int(PauseMenuQuit) + 1

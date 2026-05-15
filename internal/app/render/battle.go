@@ -58,43 +58,47 @@ func drawEnemyRoster(g core.GameState, assets Resources) {
 		return
 	}
 
-	screenW := int32(rl.GetScreenWidth())
-	rowH := int32(46)
-	headerH := int32(56)
-	padBottom := int32(16)
-	w := int32(460)
+	rowH := int32(60)
+	headerH := int32(70)
+	padBottom := int32(18)
+	w := int32(560)
 	if len(slots) <= 1 {
-		w = 360
+		w = 440
 	}
 	h := headerH + int32(len(slots))*rowH + padBottom
-	x := screenW/2 - w/2
+	x := centerX(w)
 	y := int32(34)
 
 	drawCard(x, y, w, h, surfacePrimary, borderSoft, borderEnemy)
 
 	header := rosterHeader(g)
-	drawHeading(assets.hudFont, header, x+20, y+14, borderEnemy)
+	drawHeading(assets.hudFont, header, x+22, y+18, borderEnemy)
 
 	targetable := g.Battle.ActionMode == core.ActionEnemyTarget && inPlayerTurn(g)
 	members := core.BattleMembers(&g)
+	selectedSlot := core.SelectedEnemySlot(&g)
 
 	for i, slot := range slots {
 		enemy := members[slot]
 		rowY := y + headerH + int32(i)*rowH
-		drawEnemyRosterRow(assets.hudFont, enemy, x+12, rowY, w-24, rowH-6, targetable && slot == g.Battle.EnemyIndex, !enemy.Alive)
+		drawEnemyRosterRow(assets.hudFont, enemy, x+14, rowY, w-28, rowH-8, targetable && slot == selectedSlot, !enemy.Alive)
 	}
 }
 
+// rosterSlotsBuf is a package-private reusable buffer for visibleRosterSlots
+// so the per-frame roster draw doesn't allocate a fresh slice every tick.
+// raylib's draw loop is single-threaded, so re-slicing this isn't racy.
+var rosterSlotsBuf = make([]int, 0, 16)
+
 func visibleRosterSlots(g core.GameState) []int {
-	members := core.BattleMembers(&g)
-	out := make([]int, 0, len(members))
-	for i, m := range members {
+	rosterSlotsBuf = rosterSlotsBuf[:0]
+	for i, m := range core.BattleMembers(&g) {
 		if !m.Alive && m.DeathFade <= 0 {
 			continue
 		}
-		out = append(out, i)
+		rosterSlotsBuf = append(rosterSlotsBuf, i)
 	}
-	return out
+	return rosterSlotsBuf
 }
 
 func drawEnemyRosterRow(font rl.Font, enemy core.Enemy, x, y, w, h int32, targeted, fading bool) {
@@ -113,47 +117,42 @@ func drawEnemyRosterRow(font rl.Font, enemy core.Enemy, x, y, w, h int32, target
 	drawSmallPanel(x, y, w, h, bg)
 	drawSmallPanelOutline(x, y, w, h, border)
 
-	leftPad := int32(18)
+	leftPad := int32(22)
 	if targeted {
-		leftPad = 26
-		bx := float32(x) + 6
+		leftPad = 32
+		bx := float32(x) + 8
 		cy := float32(y) + float32(h)/2
 		col := fadeColor(borderEnemy, 0.7+0.3*pulse(2.4))
-		rl.DrawTriangle(
-			rl.NewVector2(bx, cy-7),
-			rl.NewVector2(bx+10, cy),
-			rl.NewVector2(bx, cy+7),
-			col,
-		)
+		drawArrowMarker(rl.NewVector2(bx, cy), 12, 0, 9, col)
 	}
 
 	condition, condCol := enemyHealthStyle(enemy)
 
 	nameX := float32(x + leftPad)
 	displayName := core.EnemyDisplayName(enemy)
-	drawTextWithShadow(font, displayName, nameX, float32(y+7), 19, nameCol)
+	drawTextWithShadow(font, displayName, nameX, float32(y+10), 24, nameCol)
 
-	condSize := float32(13)
-	condY := float32(y) + float32(h) - condSize - 7
+	condSize := float32(16)
+	condY := float32(y) + float32(h) - condSize - 9
 	drawTextWithShadow(font, condition, nameX, condY, condSize, condCol)
 
 	// HP bar on the right, vertically centered.
-	barW := float32(160)
-	barH := float32(20)
-	barX := float32(x+w) - barW - 14
+	barW := float32(200)
+	barH := float32(28)
+	barX := float32(x+w) - barW - 16
 	barY := float32(y) + (float32(h)-barH)/2
 	drawBar(font, barX, barY, barW, barH, "HP", enemy.HP, enemy.MaxHP, barEnemyHP, fading)
 
 	// Burn indicator immediately left of HP bar.
 	if enemy.BurnTurns > 0 {
-		burnW := float32(26)
+		burnW := float32(34)
 		burnH := barH
-		burnX := barX - burnW - 8
+		burnX := barX - burnW - 10
 		burnY := barY
 		flicker := 0.55 + 0.45*pulse(3.4)
 		drawSmallPanel(int32(burnX), int32(burnY), int32(burnW), int32(burnH), fadeColor(barBurn, flicker))
 		drawSmallPanelOutline(int32(burnX), int32(burnY), int32(burnW), int32(burnH), rl.NewColor(255, 200, 120, 220))
-		drawTextCentered(font, fmt.Sprintf("%d", enemy.BurnTurns), burnX+burnW/2, burnY+1, 14, rl.RayWhite)
+		drawTextCentered(font, fmt.Sprintf("%d", enemy.BurnTurns), burnX+burnW/2, burnY+2, 18, rl.RayWhite)
 	}
 }
 
@@ -217,7 +216,7 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 		return
 	}
 
-	screenW := int32(rl.GetScreenWidth())
+	screenW, _ := screenSize()
 	w := int32(340)
 	// Taller panel — 4 action rows now (Attack/Skill/Defend/Item) and the
 	// item picker mode reuses this same panel for its list.
@@ -297,15 +296,16 @@ func drawActionMenuOptions(g core.GameState, assets Resources, x, y int32, membe
 	skillCost := core.SkillCost(skill)
 
 	rowSpacing := int32(40)
+	cursor := core.ActionRow(g.Battle.MenuIndex)
 
-	drawActionRow(assets.hudFont, x, y+int32(core.ActionRowAttack)*rowSpacing, "Attack", "", g.Battle.MenuIndex == core.ActionRowAttack)
+	drawActionRow(assets.hudFont, x, y+int32(core.ActionRowAttack)*rowSpacing, "Attack", "", cursor == core.ActionRowAttack)
 
 	costLabel := ""
 	if skillCost > 0 {
 		costLabel = fmt.Sprintf("%d MP", skillCost)
 	}
-	drawActionRow(assets.hudFont, x, y+int32(core.ActionRowSkill)*rowSpacing, skillName, costLabel, g.Battle.MenuIndex == core.ActionRowSkill)
-	drawActionRow(assets.hudFont, x, y+int32(core.ActionRowDefend)*rowSpacing, "Defend", "", g.Battle.MenuIndex == core.ActionRowDefend)
+	drawActionRow(assets.hudFont, x, y+int32(core.ActionRowSkill)*rowSpacing, skillName, costLabel, cursor == core.ActionRowSkill)
+	drawActionRow(assets.hudFont, x, y+int32(core.ActionRowDefend)*rowSpacing, "Defend", "", cursor == core.ActionRowDefend)
 	// Item row: shows total stack count as a hint so the player knows the
 	// menu has anything in it before opening the picker. Empty inventory
 	// renders the row dimmed by hint text rather than disabled, since the
@@ -314,7 +314,7 @@ func drawActionMenuOptions(g core.GameState, assets Resources, x, y int32, membe
 	if total := totalItemCount(g.Inventory); total > 0 {
 		itemSuffix = fmt.Sprintf("x%d", total)
 	}
-	drawActionRow(assets.hudFont, x, y+int32(core.ActionRowItem)*rowSpacing, "Item", itemSuffix, g.Battle.MenuIndex == core.ActionRowItem)
+	drawActionRow(assets.hudFont, x, y+int32(core.ActionRowItem)*rowSpacing, "Item", itemSuffix, cursor == core.ActionRowItem)
 }
 
 // drawItemMenuList renders the inventory picker as a vertical list of
@@ -441,8 +441,9 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 	bgW := contentW + padX*2
 	bgH := titleH + subMeasure.Y + gap + padY*2
 
-	cx := float32(rl.GetScreenWidth()) / 2
-	cy := float32(rl.GetScreenHeight())*0.42 + (1-intro)*-26
+	sw, sh := screenSizeF()
+	cx := sw / 2
+	cy := sh*0.42 + (1-intro)*-26
 
 	bgX := cx - bgW/2
 	bgY := cy - bgH/2
@@ -456,6 +457,9 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 
 	titleX := cx - titleW/2
 	titleY := bgY + padY
+	// Splash uses fade-driven shadow alphas (titleAlpha/subAlpha track the
+	// banner's overall opacity) so the shadow vanishes with the rest of the
+	// banner; that's why this isn't drawTextWithShadow.
 	rl.DrawTextEx(assets.hudFont, text, rl.NewVector2(titleX+3, titleY+3), titleSize*scale, spacing*scale, rl.NewColor(0, 0, 0, titleAlpha))
 	rl.DrawTextEx(assets.hudFont, text, rl.NewVector2(titleX, titleY), titleSize*scale, spacing*scale, rl.NewColor(248, 232, 198, titleAlpha))
 

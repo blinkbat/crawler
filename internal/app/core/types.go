@@ -1,5 +1,7 @@
 package core
 
+import "math/rand"
+
 type MaterialSet int
 
 // PackSpawn is one authored pack on the map: a tile position and the roster
@@ -78,10 +80,34 @@ type GameState struct {
 	Battle    Battle
 	MenuOpen  bool
 	MenuIndex int
+	// DebugOverlay shows in-world tile labels and a player-coord readout.
+	// Toggled from the pause menu. Off by default so a fresh session looks
+	// clean.
+	DebugOverlay bool
 	// Inventory is shared across the party — single global stack list.
 	// Stocked by Steal pickups and consumed by the in-battle Item action.
 	Inventory []ItemStack
 	Quit      bool
+	// RNG is the per-state random source for all gameplay rolls (accuracy,
+	// steal, burn duration, press-window placement, etc.). Per-state means
+	// two GameStates (e.g. a fresh playtest after an editor change) don't
+	// share a stream — and a future "Restart from seed N" can drop a
+	// deterministic Rand in here instead of seeding from the wall clock.
+	// Always non-nil after NewGameState; Rand() lazily initializes if a
+	// caller built a GameState by struct literal (tests).
+	RNG *rand.Rand
+}
+
+// Rand returns the GameState's RNG, lazily initializing it with a
+// wall-clock seed if a caller built the GameState by struct literal
+// (mostly tests). Production paths go through NewGameState which seeds
+// the RNG eagerly; this helper is the safety net for direct
+// construction.
+func (g *GameState) Rand() *rand.Rand {
+	if g.RNG == nil {
+		g.RNG = rand.New(rand.NewSource(rand.Int63()))
+	}
+	return g.RNG
 }
 
 // Pack is one runtime enemy pack on the field. Members carries the per-
@@ -155,6 +181,49 @@ func HealAmount(s Stats, base int) int {
 	return s.WIS + base
 }
 
+// AttackAccuracy returns the hit chance [0, 1] of a basic attack given the
+// attacker's stats and the timing grade they scored. DEX is the primary
+// driver: a deft thief connects almost every swing, a stumpy warrior whiffs
+// more often when their timing slips. Timing quality stacks on top — a Miss
+// timing leaves accuracy at the DEX baseline, an Excellent press functionally
+// guarantees the hit by pushing accuracy past 1.0 before the clamp.
+//
+// Tuning is keyed off the actual party DEX spread (Warrior/Cleric/Wizard at
+// DEX 2, Thief at DEX 6):
+//
+//	Warrior (DEX 2), Miss timing:      0.63 → ~37% whiff
+//	Warrior (DEX 2), Good timing:      0.83 → ~17% whiff
+//	Warrior (DEX 2), Excellent timing: 1.08 → always hit
+//	Thief   (DEX 6), Miss timing:      0.79 → ~21% whiff
+//	Thief   (DEX 6), Excellent timing: 1.24 → always hit
+//
+// Basic attacks are the only action gated by this; skills already pay MP
+// and shouldn't be doubly punished by a whiff.
+func AttackAccuracy(s Stats, quality int) float64 {
+	base := AccuracyBaseline + AccuracyPerDEX*float64(s.DEX)
+	bonus := 0.0
+	if quality >= 0 && quality < len(timingGrades) {
+		bonus = timingGrades[quality].AccuracyBonus
+	}
+	acc := base + bonus
+	if acc > 1.0 {
+		acc = 1.0
+	}
+	if acc < 0.0 {
+		acc = 0.0
+	}
+	return acc
+}
+
+// AttackHits rolls an accuracy check using AttackAccuracy against the given
+// RNG. Returns true when the swing lands. Callers should use this only for
+// basic attacks — skills already pay their own resource costs and rolling
+// miss on top would feel punishing. `rng` is the GameState's per-state
+// RNG (g.Rand()); tests pass their own seeded source for determinism.
+func AttackHits(rng *rand.Rand, s Stats, quality int) bool {
+	return rng.Float64() < AttackAccuracy(s, quality)
+}
+
 // StealChance scales the base steal chance by DEX: chance = base × (1 + DEX/20).
 // Capped at 1.0 so a high-DEX rogue can't ever exceed certainty.
 func StealChance(s Stats, base float64) float64 {
@@ -201,6 +270,26 @@ type ActorRef struct {
 	Index   int
 }
 
+// Battle owns every transient piece of state for an in-progress encounter.
+// The struct has grown a lot — the lifetimes of its fields are deliberate
+// and don't all reset on the same boundary, so it's worth knowing which
+// bucket each field falls into:
+//
+//   - Battle-lifetime (set by Start, cleared by leaveBattle): ActivePack,
+//     EnemyIndex, Log, Splash, Queue, NextRoundQueue.
+//   - Round-lifetime (rebuilt by beginNewRound): Queue, NextRoundQueue,
+//     EnemyAttackCursor, plus the QueueCursor that walks Queue.
+//   - Turn-lifetime (set per actor's turn): CurrentParty, ActionMode,
+//     MenuIndex, PendingSkill, PendingItem, ItemMenuIndex, PartyTarget,
+//     EnemyAttacker, plus all Timing* fields.
+//   - Animation-lifetime (visible-feedback timers — counted down in
+//     updateBattleEffects): TimingFlash, TimingIntro, LastQualityTimer,
+//     SequencePulseTimer.
+//   - Hit-stop (counted down in tickFlashHold, since it pauses every
+//     other animation ticker including updateBattleEffects): HitStop.
+//
+// finishActorTurn and leaveBattle are the two hand-offs; clearBattleResidual
+// is the canonical "reset everything transient" centerpiece.
 type Battle struct {
 	// ActivePack is the index into g.Packs of the engaged pack. -1 = no
 	// battle in progress. The pack's Members slice is the in-battle enemy
@@ -249,6 +338,19 @@ type Battle struct {
 	LastQualityTimer   float32
 	LastQualityIndex   int
 	LastQualityIsBlock bool
+
+	// HitStop is the post-flash freeze on Great/Excellent grades — see
+	// HitStopFor in core/timing.go. While >0, battle Update returns early
+	// and the bar's apply step is deferred. Pauses every transient ticker
+	// (popup, sprite bumps, damage flashes) so the moment punctuates.
+	HitStop float32
+
+	// SequencePulseTimer + Index drive the brief scale-up animation on the
+	// arrow that just landed correctly during the pickpocket sequence. The
+	// renderer reads these to single out one slot per tap. Index is -1
+	// when no pulse is in flight.
+	SequencePulseTimer float32
+	SequencePulseIndex int
 
 	// PendingItem is set when the player picks an item out of the inventory
 	// menu and is choosing the ally to use it on. Reset to ItemNone after

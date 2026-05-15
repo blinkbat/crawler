@@ -64,7 +64,8 @@ func rotateOffsetY(offset rl.Vector3, scale, yawDeg float32) rl.Vector3 {
 }
 
 const (
-	treeMeshTrunk = iota
+	treeMeshRoot = iota // wide squat cylinder at the base — reads as the trunk's root flare
+	treeMeshTrunk
 	treeMeshCanopyLow
 	treeMeshCanopyHigh
 	treeMeshCanopySide
@@ -73,6 +74,7 @@ const (
 
 func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 	models := []rl.Model{
+		treeMeshRoot:         rl.LoadModelFromMesh(rl.GenMeshCylinder(0.32, 0.18, 10)),
 		treeMeshTrunk:        rl.LoadModelFromMesh(rl.GenMeshCylinder(0.18, 1.55, 12)),
 		treeMeshCanopyLow:    rl.LoadModelFromMesh(rl.GenMeshSphere(0.92, 12, 16)),
 		treeMeshCanopyHigh:   rl.LoadModelFromMesh(rl.GenMeshSphere(0.78, 12, 16)),
@@ -81,7 +83,7 @@ func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 	}
 	for i := range models {
 		tex := leafTex
-		if i == treeMeshTrunk {
+		if i == treeMeshRoot || i == treeMeshTrunk {
 			tex = barkTex
 		}
 		setModelTexture(&models[i], tex)
@@ -96,6 +98,7 @@ func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 	return treeModel{
 		models: models,
 		parts: []treePart{
+			{modelIdx: treeMeshRoot, offset: rl.NewVector3(0, 0.04, 0), scale: rl.NewVector3(1, 1, 1), tint: rl.White},
 			{modelIdx: treeMeshTrunk, offset: rl.NewVector3(0, 0.06, 0), scale: rl.NewVector3(1, 1, 1), tint: rl.White},
 			{modelIdx: treeMeshCanopyLow, offset: rl.NewVector3(0, 1.55, 0), scale: rl.NewVector3(1, 0.95, 1), tint: leafMid},
 			{modelIdx: treeMeshCanopyHigh, offset: rl.NewVector3(-0.05, 2.05, 0.05), scale: rl.NewVector3(1, 1, 1), tint: leafBase},

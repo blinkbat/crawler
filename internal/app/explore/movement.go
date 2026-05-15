@@ -27,12 +27,7 @@ func Update(g *core.GameState) {
 		updateMenu(g)
 		return
 	}
-	pause := input.PausePressed()
-	// Esc opens the menu only outside of battle — inside a battle Esc means
-	// "back / cancel target," and eating it here would break the action UI.
-	if !pause && g.Battle.Phase == core.BattleNone && input.PauseFromExplorePressed() {
-		pause = true
-	}
+	pause := input.PausePressed(g.Battle.Phase != core.BattleNone)
 	if pause && pauseAllowed(g) {
 		g.MenuOpen = true
 		g.Player.LookYaw = 0
@@ -71,10 +66,10 @@ func updateMenu(g *core.GameState) {
 		return
 	}
 	if input.UpPressed() {
-		g.MenuIndex = core.WrapIndex(g.MenuIndex-1, 2)
+		g.MenuIndex = core.WrapIndex(g.MenuIndex-1, core.PauseMenuCount)
 	}
 	if input.DownPressed() {
-		g.MenuIndex = core.WrapIndex(g.MenuIndex+1, 2)
+		g.MenuIndex = core.WrapIndex(g.MenuIndex+1, core.PauseMenuCount)
 	}
 	if input.RestartPressed() {
 		restartGame(g)
@@ -85,10 +80,12 @@ func updateMenu(g *core.GameState) {
 		return
 	}
 	if input.ConfirmPressed() {
-		switch g.MenuIndex {
-		case 0:
+		switch core.PauseMenuItem(g.MenuIndex) {
+		case core.PauseMenuRestart:
 			restartGame(g)
-		case 1:
+		case core.PauseMenuDebug:
+			g.DebugOverlay = !g.DebugOverlay
+		case core.PauseMenuQuit:
 			g.Quit = true
 		}
 	}

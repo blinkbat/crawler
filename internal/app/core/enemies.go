@@ -89,18 +89,29 @@ var enemyDefinitions = []EnemyDefinition{
 		Tier:               3,
 		AttackVerbSingular: "bites",
 		AttackVerbPlural:   "bite",
-		// 60% chance to inflict Poison on a landed bite. Pairs with the
-		// rat's higher HP and damage to make a diseased pack the threat
-		// upgrade over a plain rat pack.
-		PoisonChance: 0.60,
+		// DiseasedRatPoisonChance per bite. Pairs with the rat's higher
+		// HP and damage to make a diseased pack the threat upgrade over a
+		// plain rat pack. Tuning value lives in config.go.
+		PoisonChance: DiseasedRatPoisonChance,
 	},
 }
 
-func EnemyInfo(kind EnemyKind) EnemyDefinition {
+// enemyByKind is the O(1) lookup map for enemyDefinitions, built once at
+// init. EnemyInfo is called per-frame from the renderer (roster, popups),
+// so the map matches the partyClassByID / skillByID pattern in party.go.
+var enemyByKind = buildEnemyByKind()
+
+func buildEnemyByKind() map[EnemyKind]EnemyDefinition {
+	m := make(map[EnemyKind]EnemyDefinition, len(enemyDefinitions))
 	for _, def := range enemyDefinitions {
-		if def.Kind == kind {
-			return def
-		}
+		m[def.Kind] = def
+	}
+	return m
+}
+
+func EnemyInfo(kind EnemyKind) EnemyDefinition {
+	if def, ok := enemyByKind[kind]; ok {
+		return def
 	}
 	return EnemyDefinition{
 		Kind:               kind,

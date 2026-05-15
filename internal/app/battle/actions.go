@@ -1,6 +1,7 @@
 package battle
 
 import (
+	"crawler/internal/app/audio"
 	"crawler/internal/app/core"
 	"crawler/internal/app/input"
 	"fmt"
@@ -44,6 +45,21 @@ func setupTargetedEnemy(g *core.GameState) bool {
 	return true
 }
 
+// ensureAliveTargetOrCancel is the apply-side counterpart of
+// setupTargetedEnemy. The setup gate runs before the timing minigame, but a
+// target can die between confirm and apply (e.g. a faster ally killed it on
+// the same round). Apply handlers call this first: if the target's gone, the
+// turn cancels cleanly with the same "No target." status that setup uses.
+// Returns true when the target is still alive and the apply can proceed.
+func ensureAliveTargetOrCancel(g *core.GameState) bool {
+	if core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
+		return true
+	}
+	setBattleStatus(g, "No target.")
+	finishPartyAction(g)
+	return false
+}
+
 // beginPendingAction is invoked once the player has confirmed their target
 // (or their no-target action). It validates / pays cost and, on success,
 // arms the timing bar.
@@ -59,36 +75,24 @@ func beginPendingAction(g *core.GameState) {
 		return
 	}
 	intro := core.AttackTimingIntro
-	switch {
-	case usesChargeMinigame(g.Battle.PendingSkill):
+	switch core.SkillMinigameFor(g.Battle.PendingSkill) {
+	case core.MinigameCharge:
 		g.Battle.Timing = core.NewChargeState(core.ChargeTimingDuration)
 		// Charge gets a longer pre-arm pause so the player has time to read
 		// the prompt; pressing/holding the input during the intro skips
 		// straight into the bar (handled in updateAttackTiming).
 		intro = core.ChargeTimingIntro
-	case usesSequenceMinigame(g.Battle.PendingSkill):
-		g.Battle.Timing = core.NewSequenceState(core.StealTimingDuration, core.StealSequenceLength)
+	case core.MinigameSequence:
+		g.Battle.Timing = core.NewSequenceState(g.Rand(), core.StealTimingDuration, core.StealSequenceLength)
 		// Clear analog-stick edge memory so a player whose stick happens to
 		// be tilted when the bar arms doesn't get a phantom input on frame 1.
 		input.ResetStickEdges()
 	default:
-		g.Battle.Timing = core.NewTimingState(core.AttackTimingDuration)
+		g.Battle.Timing = core.NewTimingState(g.Rand(), core.AttackTimingDuration)
 	}
 	g.Battle.TimingFlash = 0
 	g.Battle.TimingIntro = intro
 	g.Battle.Phase = core.BattleAttackTiming
-}
-
-// usesChargeMinigame is the per-skill switch that picks the charge timing
-// kind. Firebolt and Prayer are hold-and-release.
-func usesChargeMinigame(skill core.SkillID) bool {
-	return skill == core.SkillFirebolt || skill == core.SkillPrayer
-}
-
-// usesSequenceMinigame picks the pickpocket sequence kind. Steal needs a
-// thief-y rhythm input, not a single press.
-func usesSequenceMinigame(skill core.SkillID) bool {
-	return skill == core.SkillSteal
 }
 
 // applyPendingAction is invoked once the timing bar resolves. It runs the
@@ -102,7 +106,7 @@ func applyPendingAction(g *core.GameState, quality int) {
 		return
 	}
 	if landed := handler.apply(g, quality); landed {
-		recordAttackQuality(g, quality)
+		recordQuality(g, quality, g.Battle.CurrentParty, false)
 	}
 }
 
@@ -114,52 +118,57 @@ func actionHandlerFor(skill core.SkillID) (actionHandlers, bool) {
 	return handler, ok
 }
 
-// recordEnemyDamagePopup stamps a floating-number popup on the given enemy
-// so the renderer can draw the damage value above its sprite. Should be
-// called immediately after damageEnemy whenever a player action lands.
-func recordEnemyDamagePopup(g *core.GameState, slot, damage, quality int) {
-	enemy := core.BattleMemberAt(g, slot)
-	if enemy == nil || damage <= 0 {
-		return
-	}
-	enemy.DamagePopup = damage
-	enemy.DamagePopupQuality = quality
-	enemy.DamagePopupTimer = core.QualityResultDuration
-}
-
-// recordAttackQuality stores the quality + actor for the floating popup that
-// renders for QualityResultDuration after the bar resolves.
-func recordAttackQuality(g *core.GameState, quality int) {
-	g.Battle.LastQuality = quality
-	g.Battle.LastQualityTimer = core.QualityResultDuration
-	g.Battle.LastQualityIndex = g.Battle.CurrentParty
-	g.Battle.LastQualityIsBlock = false
-}
-
-// recordBlockQuality is the defend-side counterpart, used when an enemy
-// attack resolves and the player's defend timing produced a quality grade.
-func recordBlockQuality(g *core.GameState, quality int, partyIndex int) {
+// recordQuality stamps the floating quality popup over the given party slot
+// for QualityResultDuration. isBlock chooses the defend palette (and the
+// "BLOCK!" label override) over the attack palette. Single source of truth
+// for both attack-side and block-side quality popups so the field set never
+// drifts between callers.
+//
+// NB: Miss-grade popups DO get stamped here (the timing still graded the
+// player's input, even though no damage / no whiff message), and render
+// reads them back via TimingQualityLabel which returns "Miss..." for that
+// row. The popup over a whiffing actor saying "Miss..." is intentional —
+// it acknowledges the player's mechanical performance even when the
+// accuracy roll ate the swing.
+func recordQuality(g *core.GameState, quality, partyIndex int, isBlock bool) {
 	g.Battle.LastQuality = quality
 	g.Battle.LastQualityTimer = core.QualityResultDuration
 	g.Battle.LastQualityIndex = partyIndex
-	g.Battle.LastQualityIsBlock = true
+	g.Battle.LastQualityIsBlock = isBlock
 }
 
 // --- Basic Attack ---
 
 func applyAttack(g *core.GameState, quality int) bool {
-	if !core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
-		setBattleStatus(g, "No target.")
-		finishPartyAction(g)
+	if !ensureAliveTargetOrCancel(g) {
 		return false
 	}
 	attacker := &g.Party[g.Battle.CurrentParty]
+	// AttackBump fires unconditionally — the swing motion plays even on a
+	// whiff, which is how a high-quality miss should read ("you swung well,
+	// but the target moved"). If the whiff ever needs a different motion
+	// (e.g. an over-the-shoulder pass-through), gate this below the
+	// accuracy check.
 	attacker.AttackBump = core.BumpDuration
 	target := *core.BattleMemberAt(g, g.Battle.EnemyIndex)
+	// Accuracy roll: basic attack only. DEX + timing quality drive the hit
+	// chance; high-DEX classes and high grades push past 1.0 (clamped) so
+	// they essentially never whiff. The swing animation still plays and
+	// the timing popup still grades — the player's mechanical performance
+	// is acknowledged — but no damage lands when the roll fails.
+	if !core.AttackHits(g.Rand(), attacker.Stats, quality) {
+		// Whiff log keeps the quality prefix so the line reads consistently
+		// with hits ("Excellent! Warrior hits for 8." vs "Excellent! Warrior
+		// swings wide."). The popup over the actor still says "Excellent!"
+		// because the *timing* graded that way — accuracy is a separate roll
+		// layered on top.
+		setBattleMessage(g, fmt.Sprintf("%s%s swings wide.", qualityTag(quality), attacker.Name))
+		finishPartyAction(g)
+		return true
+	}
 	// Basic Attack: STR + 0, scaled by timing quality.
 	damage := core.ScaleDamage(core.MeleeDamage(attacker.Stats, 0), quality)
-	defeated := damageEnemy(g, g.Battle.EnemyIndex, damage)
-	recordEnemyDamagePopup(g, g.Battle.EnemyIndex, damage, quality)
+	defeated := damageEnemy(g, g.Battle.EnemyIndex, damage, quality)
 	setBattleMessage(g, attackResultMessage(attacker.Name, target, damage, quality, defeated))
 	finishPartyAction(g)
 	return true
@@ -189,8 +198,7 @@ func applySwipe(g *core.GameState, quality int) bool {
 		if !m.Alive {
 			continue
 		}
-		damageEnemy(g, slot, damage)
-		recordEnemyDamagePopup(g, slot, damage, quality)
+		damageEnemy(g, slot, damage, quality)
 		hits++
 	}
 	if hits == 0 {
@@ -241,9 +249,7 @@ func applyPrayer(g *core.GameState, quality int) bool {
 // --- Steal (Thief, base chance scales with quality) ---
 
 func applySteal(g *core.GameState, quality int) bool {
-	if !core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
-		setBattleStatus(g, "No target.")
-		finishPartyAction(g)
+	if !ensureAliveTargetOrCancel(g) {
 		return false
 	}
 	actor := &g.Party[g.Battle.CurrentParty]
@@ -263,7 +269,7 @@ func applySteal(g *core.GameState, quality int) bool {
 	if chance > 1 {
 		chance = 1
 	}
-	if core.GameRNG.Float64() < chance {
+	if g.Rand().Float64() < chance {
 		item := enemy.Item
 		enemy.Item = ""
 		// Drop the loot into shared inventory so the Item action can use it
@@ -293,29 +299,20 @@ func setupFirebolt(g *core.GameState) bool {
 		setBattleStatus(g, "Firebolt needs more MP.")
 		return false
 	}
-	// MP isn't deducted here. The cost is paid in apply() once the bar
-	// resolves AND the target is still valid, so a target dying between
-	// confirm and apply doesn't burn MP for nothing.
+	// MP deduction policy: every skill setup that returns true commits the
+	// MP cost here. Once the timing bar arms, the apply step is guaranteed
+	// to run (Miss flashes still call apply with quality=Miss), so we can't
+	// "back out" past this point — no refund path is needed. Keeps the
+	// cost-payment story uniform across Swipe / Prayer / Firebolt.
+	actor.MP -= cost
 	return true
 }
 
 func applyFirebolt(g *core.GameState, quality int) bool {
-	if !core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
-		setBattleStatus(g, "No target.")
-		finishPartyAction(g)
+	if !ensureAliveTargetOrCancel(g) {
 		return false
 	}
 	actor := &g.Party[g.Battle.CurrentParty]
-	cost := core.SkillCost(core.SkillFirebolt)
-	if actor.MP < cost {
-		// Defensive: setupFirebolt already checked MP, but if anything between
-		// then and now spent it (no current code path does, but keep the check
-		// honest) we bail without finishing — the action menu will repaint.
-		setBattleStatus(g, "Firebolt needs more MP.")
-		finishPartyAction(g)
-		return false
-	}
-	actor.MP -= cost
 	actor.AttackBump = core.BumpDuration
 	effect := core.SkillEffectFor(core.SkillFirebolt)
 	// Damage formula is dispatched by skill Kind in core.SkillDamage; Firebolt's
@@ -323,8 +320,7 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 	// Effect separately for the burn-chance roll below.
 	damage := core.ScaleDamage(core.SkillDamage(actor.Stats, core.SkillFirebolt), quality)
 	target := *core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	defeated := damageEnemy(g, g.Battle.EnemyIndex, damage)
-	recordEnemyDamagePopup(g, g.Battle.EnemyIndex, damage, quality)
+	defeated := damageEnemy(g, g.Battle.EnemyIndex, damage, quality)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	burned := false
 	if !defeated && enemy.BurnTurns <= 0 {
@@ -332,8 +328,8 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 		if burnChance > 1 {
 			burnChance = 1
 		}
-		if core.GameRNG.Float64() < burnChance {
-			enemy.BurnTurns = effect.BurnDuration()
+		if g.Rand().Float64() < burnChance {
+			enemy.BurnTurns = effect.BurnDuration(g.Rand())
 			burned = true
 		}
 	}
@@ -344,20 +340,40 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 
 // --- Damage / heal helpers (unchanged from previous behavior) ---
 
-func damageEnemy(g *core.GameState, slot, damage int) bool {
+// damageEnemy applies `damage` to the enemy at `slot`. quality drives the
+// floating damage popup color (and is set even on the killing blow so a
+// dying enemy still shows the number that took it down). Returns true if
+// the hit was fatal.
+//
+// quality is allowed to be TimingQualityMiss for non-action damage (burn
+// ticks pass TimingQualityGood for the orange popup tint; tests can pass
+// Miss when they don't care about the popup).
+func damageEnemy(g *core.GameState, slot, damage, quality int) bool {
 	enemy := core.BattleMemberAt(g, slot)
 	if enemy == nil || !enemy.Alive {
 		return false
 	}
 	enemy.DamageFlash = core.FlashDuration
 	enemy.HP -= damage
+	if damage > 0 {
+		enemy.DamagePopup = damage
+		enemy.DamagePopupQuality = quality
+		enemy.DamagePopupTimer = core.QualityResultDuration
+	}
 	if enemy.HP > 0 {
+		// Audible "thud" only on hits that actually scored. Zero-damage
+		// connections (e.g. Swipe with a 0 base) stay silent so the bar
+		// doesn't tick a sound on every empty swing.
+		if damage > 0 {
+			audio.Play(audio.SoundEnemyHit)
+		}
 		return false
 	}
 	enemy.HP = 0
 	enemy.Alive = false
 	enemy.BurnTurns = 0
 	enemy.DeathFade = core.DeathFadeDuration
+	audio.Play(audio.SoundEnemyDeath)
 	return true
 }
 
@@ -402,9 +418,9 @@ func tickBurnAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
 		return false
 	}
 	enemy.BurnTurns--
-	damageEnemy(g, actor.Index, core.BurnTickDamage)
-	// Quality=Good gives the orange "fire" tint to the floating popup.
-	recordEnemyDamagePopup(g, actor.Index, core.BurnTickDamage, core.TimingQualityGood)
+	// Quality=Good gives the orange "fire" tint to the popup that damageEnemy
+	// stamps on a damaging hit.
+	damageEnemy(g, actor.Index, core.BurnTickDamage, core.TimingQualityGood)
 	def := core.EnemyInfoFor(*enemy)
 	if !enemy.Alive {
 		setBattleMessage(g, fmt.Sprintf("The %s succumbs to the flames.", def.SingularNoun))
@@ -432,6 +448,7 @@ func healPartyMember(g *core.GameState, partyIndex, amount int) bool {
 		member.HP = member.MaxHP
 	}
 	member.DamageFlash = core.FlashDuration
+	audio.Play(audio.SoundHeal)
 	return true
 }
 
@@ -501,6 +518,13 @@ func fireboltMessage(name string, target core.Enemy, damage, quality int, defeat
 	}
 }
 
+// qualityTag returns the leading "Grade! " prefix prepended to battle-log
+// messages on a hit ("Excellent! Warrior hits for 8."). Miss and Nice
+// grades return "" — Miss is the whiff path which has its own "swings
+// wide" copy and shouldn't double up with a grade prefix, and Nice is the
+// "barely landed" grade where the unprefixed message reads as the baseline
+// outcome. This filter is *only* for log text; the floating popup over the
+// actor still shows the full label via TimingQualityLabel (see recordQuality).
 func qualityTag(quality int) string {
 	if quality == core.TimingQualityMiss || quality == core.TimingQualityNice {
 		return ""
@@ -538,7 +562,7 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 		// even though the damage number is small.
 		g.Party[target].AttackBump = core.BlockBumpDuration
 	}
-	recordBlockQuality(g, defendQuality, target)
+	recordQuality(g, defendQuality, target, true)
 	def := core.EnemyInfoFor(*enemy)
 	setBattleMessage(g, enemyHitMessage(*enemy, g.Party[target].Name, damage, defendQuality, g.Party[target].Defending))
 	// Poison inflict: only on damaging hits from a poison-themed attacker
@@ -546,23 +570,12 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	// no-stack rule mirrors burn — re-poisoning a poisoned target on every
 	// bite would trivialize the duration roll.
 	if damage > 0 && def.PoisonChance > 0 && g.Party[target].HP > 0 && g.Party[target].PoisonTurns <= 0 {
-		if core.GameRNG.Float64() < def.PoisonChance {
-			g.Party[target].PoisonTurns = rollPoisonDuration()
+		if g.Rand().Float64() < def.PoisonChance {
+			g.Party[target].PoisonTurns = core.DefaultPoisonEffect.RollDuration(g.Rand())
 			setBattleMessage(g, fmt.Sprintf("%s is poisoned!", g.Party[target].Name))
 		}
 	}
 	return true
-}
-
-// rollPoisonDuration picks a fresh poison duration in [PoisonMinTurns,
-// PoisonMaxTurns]. Pulled out so a future poison source (item, trap, etc.)
-// can produce the same shape.
-func rollPoisonDuration() int {
-	span := core.PoisonMaxTurns - core.PoisonMinTurns
-	if span <= 0 {
-		return core.PoisonMinTurns
-	}
-	return core.PoisonMinTurns + core.GameRNG.Intn(span+1)
 }
 
 // pickEnemyAttackTarget cycles to the next living party member after the last
