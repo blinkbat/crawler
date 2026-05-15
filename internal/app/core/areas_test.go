@@ -24,6 +24,7 @@ func TestBundledMapsLoad(t *testing.T) {
 	}{
 		{"dungeon", MaterialDungeon},
 		{"field", MaterialField},
+		{"forgotten_plaza", MaterialField},
 	}
 	for _, tc := range cases {
 		t.Run(tc.id, func(t *testing.T) {

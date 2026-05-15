@@ -13,31 +13,67 @@ const (
 	TileRock  = '#' // wall blocker
 )
 
-// Floor layer.
+// Floor layer. Walkable surfaces — never block. Material-keyed variants
+// (grass / dirt / dark grass / stone) read against the material's own
+// floor pixels; universal variants (path / planks / water / sand / snow)
+// load their own textures and apply in any material.
 const (
 	FloorAuto      = '.' // pick a variant by per-tile hash (back-compat default)
 	FloorGrass     = 'g'
 	FloorDirt      = 'd'
 	FloorDarkGrass = 'k'
 	FloorStone     = 's'
+	// Universal floor variants — render the same in any material set so an
+	// author can lay a stone path through a forest or a wooden plank floor
+	// across a cave. None of these block movement.
+	FloorCobble = 'c' // mortared cobblestone path
+	FloorPlank  = 'w' // wooden planks
+	FloorWater  = '~' // shallow water — walkable, just a different look
+	FloorSand   = 'n' // pale sand
+	FloorSnow   = 'i' // packed snow
 )
 
 // Decor layer. '.' means "let the renderer's auto-scatter decide"; '_'
 // suppresses any auto decor; explicit chars force a specific small prop.
+// Decor is purely cosmetic — it never blocks movement.
 const (
 	DecorAuto     = '.'
 	DecorEmpty    = '_'
 	DecorBush     = 'b'
 	DecorMushroom = 'm'
 	DecorPebble   = 'p'
+	// Soft-ground details: visual breakup for fields and plazas.
+	DecorTallGrass = ',' // upright blades of grass
+	DecorFlowers   = 'f' // mixed wildflowers
+	DecorClover    = 'v' // low clover patch
+	DecorReeds     = 'r' // tall reed cluster
+	// Atmospheric markers: tell a story about what happened on this tile.
+	DecorBones   = 'o' // skull + scattered bones
+	DecorScorch  = 'x' // black scorch ring
+	DecorBlood   = '!' // dried bloodstain
+	DecorCobweb  = '*' // corner cobweb
+	// Forest leftovers: dead wood that breaks up grass without blocking.
+	DecorStump    = 't' // weathered tree stump
+	DecorLog      = 'l' // mossy fallen log
+	DecorLeafPile = 'L' // pile of fallen leaves
 )
 
-// Props layer. Empty cell is '.'.
+// Props layer. Empty cell is '.'. Every char listed here blocks movement.
 const (
 	TileTree      = 'T' // regular tree, blocks
 	TileTreeXL    = 'X' // extra-large tree, blocks
 	TileRockLarge = 'O' // boulder, blocks
 	TileBushLarge = 'B' // dense bush, blocks
+	// Inhabited / ruined props: read as "someone lived here."
+	TileCrate         = 'C' // wooden crate
+	TileBarrel        = 'R' // banded barrel
+	TileUrn           = 'U' // belly-shouldered urn
+	TileStalagmite    = 'S' // cave stalagmite spire
+	TilePillar        = 'P' // intact stone pillar with capital
+	TileBrokenPillar  = 'I' // toppled / chest-high pillar stub
+	TileStatue        = 'M' // weathered humanoid statue
+	TileObelisk       = 'Q' // tall four-sided pyramid-capped obelisk
+	TileFountain      = 'F' // low fountain with a central plume
 )
 
 // placePacks converts the area's pack-spawn placeholders into runtime
@@ -141,7 +177,9 @@ func (a AreaDefinition) InBounds(x, z int) bool {
 // cells use '.'; future props (chests, doors) get added here.
 func IsPropChar(c byte) bool {
 	switch c {
-	case TileTree, TileTreeXL, TileRockLarge, TileBushLarge:
+	case TileTree, TileTreeXL, TileRockLarge, TileBushLarge,
+		TileCrate, TileBarrel, TileUrn, TileStalagmite,
+		TilePillar, TileBrokenPillar, TileStatue, TileObelisk, TileFountain:
 		return true
 	}
 	return false

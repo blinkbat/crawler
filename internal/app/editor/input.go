@@ -11,9 +11,13 @@ import (
 // updateHotkeys handles keyboard shortcuts when no text field is focused.
 func updateHotkeys(s *State) {
 	// 1..9 select a brush within the active layer's palette. Layers with
-	// fewer than 9 brushes simply ignore the higher numbers.
+	// fewer than 9 brushes simply ignore the higher numbers; brushes past
+	// index 8 leave Hotkey at 0 (no binding) and stay mouse-only.
 	palette := layerBrushes[s.layer]
 	for i, b := range palette {
+		if b.Hotkey == 0 {
+			continue
+		}
 		if rl.IsKeyPressed(b.Hotkey) {
 			s.brushIdx[s.layer] = i
 		}

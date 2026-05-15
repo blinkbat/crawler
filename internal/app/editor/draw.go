@@ -265,10 +265,17 @@ func paletteToolAt(s *State, p rl.Vector2) int {
 	return -1
 }
 
+// paletteRowStride is rowH + the vertical spacing between rows. Used for
+// both hit-testing (paletteEntryRect) and laying out the hint block below
+// the palette so they stay in sync.
+const (
+	paletteRowH      = float32(28)
+	paletteRowStride = paletteRowH + 3
+)
+
 func paletteEntryRect(s *State, i int) rl.Rectangle {
-	const rowH = float32(36)
-	y := s.rect.palette.Y + 12 + float32(i)*(rowH+4)
-	return rl.NewRectangle(s.rect.palette.X+8, y, s.rect.palette.Width-16, rowH)
+	y := s.rect.palette.Y + 12 + float32(i)*paletteRowStride
+	return rl.NewRectangle(s.rect.palette.X+8, y, s.rect.palette.Width-16, paletteRowH)
 }
 
 func drawPalette(s *State, font rl.Font, theme render.Theme) {
@@ -326,7 +333,7 @@ func drawPalette(s *State, font rl.Font, theme render.Theme) {
 		"R rotate start",
 		"Esc back",
 	}
-	y := s.rect.palette.Y + 16 + float32(len(palette))*40 + 12
+	y := s.rect.palette.Y + 16 + float32(len(palette))*paletteRowStride + 12
 	for _, h := range hints {
 		rl.DrawTextEx(font, h, rl.NewVector2(s.rect.palette.X+12, y), 11, 1, theme.TextHint)
 		y += 14
@@ -767,6 +774,16 @@ func floorColor(c byte) color.RGBA {
 		return rl.NewColor(72, 116, 70, 255)
 	case core.FloorStone:
 		return rl.NewColor(150, 148, 142, 255)
+	case core.FloorCobble:
+		return rl.NewColor(168, 156, 130, 255)
+	case core.FloorPlank:
+		return rl.NewColor(150, 102, 60, 255)
+	case core.FloorWater:
+		return rl.NewColor(86, 142, 196, 255)
+	case core.FloorSand:
+		return rl.NewColor(228, 206, 158, 255)
+	case core.FloorSnow:
+		return rl.NewColor(232, 240, 248, 255)
 	}
 	return rl.NewColor(160, 168, 140, 255)
 }
@@ -781,6 +798,28 @@ func decorColor(c byte) color.RGBA {
 		return rl.NewColor(220, 100, 110, 255)
 	case core.DecorPebble:
 		return rl.NewColor(200, 192, 178, 255)
+	case core.DecorTallGrass:
+		return rl.NewColor(150, 196, 110, 255)
+	case core.DecorFlowers:
+		return rl.NewColor(236, 168, 196, 255)
+	case core.DecorClover:
+		return rl.NewColor(124, 186, 102, 255)
+	case core.DecorReeds:
+		return rl.NewColor(110, 132, 90, 255)
+	case core.DecorBones:
+		return rl.NewColor(228, 220, 198, 255)
+	case core.DecorScorch:
+		return rl.NewColor(44, 38, 36, 255)
+	case core.DecorBlood:
+		return rl.NewColor(124, 38, 36, 255)
+	case core.DecorCobweb:
+		return rl.NewColor(220, 222, 226, 255)
+	case core.DecorStump:
+		return rl.NewColor(132, 92, 56, 255)
+	case core.DecorLog:
+		return rl.NewColor(118, 84, 52, 255)
+	case core.DecorLeafPile:
+		return rl.NewColor(196, 142, 80, 255)
 	}
 	return rl.NewColor(160, 168, 140, 255)
 }
@@ -795,6 +834,24 @@ func propColor(c byte) color.RGBA {
 		return rl.NewColor(132, 110, 90, 255)
 	case core.TileBushLarge:
 		return rl.NewColor(112, 142, 70, 255)
+	case core.TileCrate:
+		return rl.NewColor(178, 130, 78, 255)
+	case core.TileBarrel:
+		return rl.NewColor(166, 116, 70, 255)
+	case core.TileUrn:
+		return rl.NewColor(196, 122, 80, 255)
+	case core.TileStalagmite:
+		return rl.NewColor(216, 210, 196, 255)
+	case core.TilePillar:
+		return rl.NewColor(220, 214, 198, 255)
+	case core.TileBrokenPillar:
+		return rl.NewColor(196, 188, 170, 255)
+	case core.TileStatue:
+		return rl.NewColor(228, 222, 206, 255)
+	case core.TileObelisk:
+		return rl.NewColor(92, 96, 110, 255)
+	case core.TileFountain:
+		return rl.NewColor(100, 168, 222, 255)
 	}
 	return rl.NewColor(200, 200, 200, 255)
 }

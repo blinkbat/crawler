@@ -25,6 +25,24 @@ type Resources struct {
 	rockProp     propModel
 	bushProp     propModel
 	mushroomProp propModel
+
+	// Universal floor variants — keyed by their floor-layer char so the
+	// renderer can swap in a cobblestone, plank, water, sand or snow tile
+	// regardless of the area's material set. Built once on load and shared
+	// across materials.
+	specialFloors map[byte]rl.Model
+
+	// New decor models keyed by decor-layer char (tall grass, flowers,
+	// clover, reeds, bones, scorch, blood, cobweb, stump, log, leaf pile).
+	// world.go checks this map before falling back to the existing
+	// bush/mushroom/pebble auto-scatter cases.
+	decorModels map[byte]propModel
+
+	// New blocking props keyed by props-layer char (crate, barrel, urn,
+	// stalagmite, pillar, broken pillar, statue, obelisk, fountain). Same
+	// dispatch shape as decorModels — the renderer falls back to the
+	// existing tree/boulder/bush cases when a char isn't here.
+	propModels map[byte]propModel
 }
 
 type worldMaterialResources struct {
@@ -87,20 +105,84 @@ func LoadResources() Resources {
 	bushProp := loadBushProp(lighting.shader, bushTex)
 	mushroomProp := loadMushroomProp(lighting.shader)
 
+	// Universal floor variants — built once and shared across every material
+	// set so a cobblestone path through a dungeon and one across a field
+	// read identically.
+	specialFloors := map[byte]rl.Model{
+		core.FloorCobble: loadFloorModel(makeCobblePixels(128, 128), lighting.shader),
+		core.FloorPlank:  loadFloorModel(makePlankPixels(128, 128), lighting.shader),
+		core.FloorWater:  loadFloorModel(makeWaterPixels(128, 128), lighting.shader),
+		core.FloorSand:   loadFloorModel(makeSandPixels(128, 128), lighting.shader),
+		core.FloorSnow:   loadFloorModel(makeSnowPixels(128, 128), lighting.shader),
+	}
+
+	// Stone family textures for the new prop set. Each loader owns the
+	// texture handle outright via setModelTexture so unload-by-model is
+	// enough — no separate UnloadTexture call required here.
+	marbleTex := loadTiledTexture(makeMarblePixels(128, 128))
+	graniteTex := loadTiledTexture(makeGranitePixels(128, 128))
+	terracottaTex := loadTiledTexture(makeTerracottaPixels(128, 128))
+	// Crates and barrels reuse the bark wood-grain palette. Stumps and
+	// logs do too; leaf piles reuse the existing leaf texture. We mint
+	// fresh texture instances per loader since each propModel owns its
+	// textures via setModelTexture and unloads them when the model unloads
+	// — sharing would double-unload.
+	//
+	// Bark is authored at 64x128 and leaf at 96x96 (matches the existing
+	// tree pipeline). loadTiledTexture is fixed to 128x128 so we call
+	// loadTexture directly here with the right dimensions, then opt into
+	// the same mipmap / repeat-wrap settings.
+	crateWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
+	barrelWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
+	stumpBarkTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
+	logBarkTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
+	logMossTex := loadRepeatTexture(makeLeafPixels(96, 96), 96, 96)
+	leafPileTex := loadRepeatTexture(makeLeafPixels(96, 96), 96, 96)
+
+	propModels := map[byte]propModel{
+		core.TileCrate:        loadCrateProp(lighting.shader, crateWoodTex),
+		core.TileBarrel:       loadBarrelProp(lighting.shader, barrelWoodTex),
+		core.TileUrn:          loadUrnProp(lighting.shader, terracottaTex),
+		core.TileStalagmite:   loadStalagmiteProp(lighting.shader, marbleTex),
+		core.TilePillar:       loadPillarProp(lighting.shader, marbleTex),
+		core.TileBrokenPillar: loadBrokenPillarProp(lighting.shader, marbleTex),
+		core.TileStatue:       loadStatueProp(lighting.shader, marbleTex),
+		core.TileObelisk:      loadObeliskProp(lighting.shader, graniteTex),
+		core.TileFountain:     loadFountainProp(lighting.shader, marbleTex),
+	}
+
+	decorModels := map[byte]propModel{
+		core.DecorTallGrass: loadTallGrassProp(lighting.shader),
+		core.DecorFlowers:   loadFlowerProp(lighting.shader),
+		core.DecorClover:    loadCloverProp(lighting.shader),
+		core.DecorReeds:     loadReedProp(lighting.shader),
+		core.DecorBones:     loadBoneProp(lighting.shader),
+		core.DecorScorch:    loadScorchProp(lighting.shader),
+		core.DecorBlood:     loadBloodProp(lighting.shader),
+		core.DecorCobweb:    loadCobwebProp(lighting.shader),
+		core.DecorStump:     loadStumpProp(lighting.shader, stumpBarkTex),
+		core.DecorLog:       loadLogProp(lighting.shader, logBarkTex, logMossTex),
+		core.DecorLeafPile:  loadLeafPileProp(lighting.shader, leafPileTex),
+	}
+
 	return Resources{
-		materials:    materials,
-		skyTexture:   skyTexture,
-		enemyVisuals: enemyVisuals,
-		partyTexture: partyTexture,
-		hudFont:      hudFont,
-		hudFontOwned: hudFontOwned,
-		lighting:     lighting,
-		tree:         tree,
-		rockProp:     rockProp,
-		bushProp:     bushProp,
-		mushroomProp: mushroomProp,
+		materials:     materials,
+		skyTexture:    skyTexture,
+		enemyVisuals:  enemyVisuals,
+		partyTexture:  partyTexture,
+		hudFont:       hudFont,
+		hudFontOwned:  hudFontOwned,
+		lighting:      lighting,
+		tree:          tree,
+		rockProp:      rockProp,
+		bushProp:      bushProp,
+		mushroomProp:  mushroomProp,
+		specialFloors: specialFloors,
+		decorModels:   decorModels,
+		propModels:    propModels,
 	}
 }
+
 
 func (r Resources) Unload() {
 	// UnloadModel walks the model's materials and unloads each map's texture,
@@ -124,6 +206,15 @@ func (r Resources) Unload() {
 	r.rockProp.unload()
 	r.bushProp.unload()
 	r.mushroomProp.unload()
+	for _, model := range r.specialFloors {
+		rl.UnloadModel(model)
+	}
+	for _, p := range r.decorModels {
+		p.unload()
+	}
+	for _, p := range r.propModels {
+		p.unload()
+	}
 	r.lighting.unload()
 	if r.hudFontOwned {
 		rl.UnloadFont(r.hudFont)
@@ -138,6 +229,16 @@ func loadTiledTexture(pixels []color.RGBA) rl.Texture2D {
 	tex := loadTexture(pixels, 128, 128, rl.FilterBilinear)
 	rl.GenTextureMipmaps(&tex)
 	rl.SetTextureFilter(tex, rl.FilterTrilinear)
+	rl.SetTextureWrap(tex, rl.WrapRepeat)
+	return tex
+}
+
+// loadRepeatTexture is the sized variant of loadTiledTexture for textures
+// that aren't 128x128. Bark (64x128) and leaf (96x96) are the existing
+// callers — the function exists so each one doesn't repeat the bilinear-
+// filter + repeat-wrap boilerplate inline.
+func loadRepeatTexture(pixels []color.RGBA, width, height int) rl.Texture2D {
+	tex := loadTexture(pixels, width, height, rl.FilterBilinear)
 	rl.SetTextureWrap(tex, rl.WrapRepeat)
 	return tex
 }

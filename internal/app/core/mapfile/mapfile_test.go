@@ -18,18 +18,18 @@ walls:
 #####
 floor:
 .....
-.....
-.....
+.c~n.
+.wsi.
 .....
 decor:
 .....
-.....
-.....
+.,fv.
+.o*!.
 .....
 props:
 .....
 ..T..
-.....
+.CRU.
 .....
 enemies:
 rat 2 1
@@ -65,6 +65,15 @@ func TestParseSample(t *testing.T) {
 	}
 	if mf.Props[1] != "..T.." {
 		t.Fatalf("props mismatch: %v", mf.Props)
+	}
+	if mf.Props[2] != ".CRU." {
+		t.Fatalf("props row with new props mismatch: %v", mf.Props)
+	}
+	if mf.Floor[1] != ".c~n." {
+		t.Fatalf("floor row with new variants mismatch: %v", mf.Floor)
+	}
+	if mf.Decor[2] != ".o*!." {
+		t.Fatalf("decor row with new variants mismatch: %v", mf.Decor)
 	}
 	if len(mf.Packs) != 2 {
 		t.Fatalf("pack count: %d, want 2 (%+v)", len(mf.Packs), mf.Packs)
@@ -130,7 +139,7 @@ func TestRejectMismatchedLayerSize(t *testing.T) {
 func TestRejectMissingLayer(t *testing.T) {
 	// Drop the props section — should fail validation since every layer
 	// is mandatory and same-sized.
-	withoutProps := strings.Replace(sample, "props:\n.....\n..T..\n.....\n.....\n", "", 1)
+	withoutProps := strings.Replace(sample, "props:\n.....\n..T..\n.CRU.\n.....\n", "", 1)
 	if _, err := Parse(strings.NewReader(withoutProps)); err == nil {
 		t.Fatal("expected error for missing props layer, got nil")
 	}

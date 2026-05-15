@@ -107,10 +107,12 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 				continue
 			}
 			// Floor variant comes from the floor layer (auto = hash).
-			drawFloorTile(material, m.Floor[z][x], x, z, cx, cz)
+			drawFloorTile(material, assets, m.Floor[z][x], x, z, cx, cz)
 			// Decor: explicit char overrides auto-scatter; '_' suppresses.
 			drawDecor(assets, m.Decor[z][x], x, z, cx, cz)
-			// Props: render by char on the props layer.
+			// Props: render by char on the props layer. Built-in cases
+			// (T/X/O/B) keep their per-char scale tuning here; everything
+			// else looks itself up in assets.propModels at scale 1.0.
 			if prop := m.Props[z][x]; prop != '.' {
 				propYaw := propYawDeg(x, z)
 				switch prop {
@@ -122,6 +124,10 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 					assets.rockProp.draw(center, 1.0, propYaw)
 				case core.TileBushLarge:
 					assets.bushProp.draw(center, 1.3, propYaw)
+				default:
+					if pm, ok := assets.propModels[prop]; ok {
+						pm.draw(center, 1.0, propYaw)
+					}
 				}
 			}
 		}
@@ -130,12 +136,23 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 }
 
 // drawFloorTile picks a floor variant for the given tile and draws it.
-// `cell` is the floor-layer character: '.' = auto (hash decides), or one
-// of FloorGrass / FloorDirt / FloorDarkGrass / FloorStone for an explicit
-// variant. Materials without alt variants (dungeon) collapse to the base
-// floor regardless of cell value.
-func drawFloorTile(material worldMaterialResources, cell byte, x, z int, cx, cz float32) {
+// `cell` is the floor-layer character. Resolution order:
+//
+//  1. Universal floor variants (cobble, plank, water, sand, snow) live
+//     in assets.specialFloors and apply to any material set.
+//  2. Material-specific variants (dirt / dark grass on the field) come
+//     from the material's worldMaterialResources.
+//  3. Auto/unrecognized chars fall back to the per-tile hash for variant
+//     selection on materials that support it; otherwise the base floor.
+//
+// Universal variants render at the same y as the base floor so adjacent
+// tiles meet flush without visible seams.
+func drawFloorTile(material worldMaterialResources, assets Resources, cell byte, x, z int, cx, cz float32) {
 	yaw := tileYawDeg(x, z)
+	if special, ok := assets.specialFloors[cell]; ok {
+		drawTileCube(special, cx, -0.03, cz, yaw)
+		return
+	}
 	if !material.hasFloorVariant {
 		drawTileCube(material.floorModel, cx, -0.03, cz, yaw)
 		return
@@ -163,18 +180,31 @@ func drawFloorTile(material worldMaterialResources, cell byte, x, z int, cx, cz 
 // to the existing auto-scatter (hash decides whether to draw and what);
 // '_' suppresses the auto-scatter entirely; explicit chars draw a specific
 // small prop centered on the tile.
+//
+// The new decor set (tall grass, flowers, clover, reeds, bones, scorch,
+// blood, cobweb, stump, log, leaf pile) lives in assets.decorModels keyed
+// by char. The legacy bush / mushroom / pebble cases stay inline so their
+// per-call scales and the pebble-cluster scatter helper keep their hand
+// tuning.
 func drawDecor(assets Resources, cell byte, x, z int, cx, cz float32) {
 	switch cell {
 	case core.DecorEmpty:
 		return
 	case core.DecorAuto:
 		drawFloorDecoration(assets, x, z, cx, cz)
+		return
 	case core.DecorBush:
 		assets.bushProp.draw(rl.NewVector3(cx, 0, cz), 0.75, propYawDeg(x, z))
+		return
 	case core.DecorMushroom:
 		assets.mushroomProp.draw(rl.NewVector3(cx, 0, cz), 1.0, propYawDeg(x, z))
+		return
 	case core.DecorPebble:
 		drawPebbleCluster(assets, cx, cz, tileHash(x, z))
+		return
+	}
+	if dm, ok := assets.decorModels[cell]; ok {
+		dm.draw(rl.NewVector3(cx, 0, cz), 1.0, propYawDeg(x, z))
 	}
 }
 

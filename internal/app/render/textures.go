@@ -237,6 +237,246 @@ func makeDarkGrassPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
+// makeCobblePixels paints a mortared cobblestone path: irregular rounded
+// stones nudged into a quasi-grid by a hash, with mossy gaps between them
+// and subtle wet-spot highlights. Reads as "worn footpath laid by hand."
+func makeCobblePixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	mortar := color.RGBA{R: 60, G: 58, B: 50, A: 255}
+	moss := color.RGBA{R: 86, G: 116, B: 70, A: 255}
+	base := color.RGBA{R: 156, G: 152, B: 138, A: 255}
+	warm := color.RGBA{R: 184, G: 162, B: 132, A: 255}
+	cool := color.RGBA{R: 124, G: 132, B: 142, A: 255}
+	dark := color.RGBA{R: 90, G: 88, B: 82, A: 255}
+	light := color.RGBA{R: 218, G: 212, B: 198, A: 255}
+
+	const cell = 22
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			row := y / cell
+			offset := 0
+			if row%2 == 1 {
+				offset = cell / 2
+			}
+			cellX := (x + offset) / cell
+			cellY := row
+			localX := (x + offset) % cell
+			localY := y % cell
+
+			// Per-stone center jitter so the cobbles don't read as a uniform
+			// grid. Each stone's "center" walks a couple of pixels off the
+			// cell center and its radius wobbles too.
+			h0 := hash2(cellX*7, cellY*13)
+			cx := cell/2 + (h0%5 - 2)
+			cy := cell/2 + ((h0>>3)%5 - 2)
+			rx := float64(cell/2 - 2 - (h0>>6)%2)
+			ry := float64(cell/2 - 2 - (h0>>8)%2)
+			dx := float64(localX - cx)
+			dy := float64(localY - cy)
+			d := dx*dx/(rx*rx) + dy*dy/(ry*ry)
+
+			if d > 1.0 {
+				c := mortar
+				if hash2(x/2, y/2)%18 < 7 {
+					c = core.MixColor(c, moss, 0.55)
+				}
+				pixels[y*w+x] = jitter(c, x, y, 5)
+				continue
+			}
+
+			tone := hash2(cellX*11, cellY*17) % 100
+			c := base
+			if tone < 38 {
+				c = core.MixColor(c, warm, 0.30+float64(tone)/220.0)
+			} else if tone < 72 {
+				c = core.MixColor(c, cool, 0.22+float64(tone-38)/240.0)
+			}
+
+			// Per-pixel cobble shading: pretend each stone is a tiny dome —
+			// brighter near its center, darker at the rim. Cheap, gives the
+			// path a wet-rounded read.
+			lighting := 1.0 - d*0.75
+			if lighting > 0 {
+				c = core.MixColor(c, light, lighting*0.32)
+			}
+			if d > 0.78 {
+				c = core.MixColor(c, dark, (d-0.78)*1.6)
+			}
+
+			n := fbmNoise(float64(x)*1.4, float64(y)*1.4, 0.20, 4)
+			c = core.MixColor(c, light, math.Max(0, n)*0.20)
+			c = core.MixColor(c, dark, math.Max(0, -n)*0.30)
+
+			// Sparse darker pits in each stone — chips and weather marks.
+			if hash2(cellX*23+localX/3, cellY*29+localY/3)%88 < 3 {
+				c = adjust(c, -34)
+			}
+			pixels[y*w+x] = c
+		}
+	}
+	return pixels
+}
+
+// makePlankPixels paints a horizontal wooden plank floor: alternating wide
+// boards with darker gaps, with a grain noise across each board and a
+// scatter of darker knots. The board offset shifts by row group so the
+// gaps between boards stagger like a real laid floor.
+func makePlankPixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	const boardH = 22
+	const gap = 2
+	gapColor := color.RGBA{R: 28, G: 18, B: 10, A: 255}
+	base := color.RGBA{R: 138, G: 96, B: 58, A: 255}
+	warm := color.RGBA{R: 174, G: 124, B: 76, A: 255}
+	cool := color.RGBA{R: 108, G: 76, B: 46, A: 255}
+	grain := color.RGBA{R: 84, G: 54, B: 30, A: 255}
+	knot := color.RGBA{R: 56, G: 32, B: 16, A: 255}
+
+	for y := 0; y < h; y++ {
+		boardRow := y / boardH
+		localY := y % boardH
+		offset := (boardRow * 17) % 32
+		for x := 0; x < w; x++ {
+			localX := (x + offset) % 96
+			// Plank-to-plank gap (vertical seam). Each board on the row is
+			// 96 px wide so the seams don't line up between rows of boards.
+			if localX < gap || localY < gap {
+				pixels[y*w+x] = jitter(gapColor, x, y, 6)
+				continue
+			}
+			tone := hash2((x+offset)/96, boardRow*5) % 100
+			c := base
+			if tone < 38 {
+				c = core.MixColor(c, warm, 0.25+float64(tone)/240.0)
+			} else if tone < 72 {
+				c = core.MixColor(c, cool, 0.22+float64(tone-38)/240.0)
+			}
+			// Long horizontal grain: low-frequency stretch along x, higher
+			// frequency in y so it reads as wood fibers not stone veins.
+			n := fbmNoise(float64(x)*0.15, float64(y)*1.6, 0.20, 4)
+			c = core.MixColor(c, warm, math.Max(0, n)*0.35)
+			c = core.MixColor(c, grain, math.Max(0, -n)*0.55)
+
+			// Edge of the board: darken slightly so each plank reads as
+			// raised against its neighbor.
+			edge := core.MinInt(localY-gap, boardH-1-localY)
+			if edge <= 2 {
+				c = core.MixColor(c, gapColor, 0.30-float64(edge)*0.10)
+			}
+
+			// Knots: small disc darker spots, ~1 per board.
+			if hash2((x+offset)/8, y/3)%420 < 3 {
+				c = core.MixColor(c, knot, 0.70)
+			}
+			pixels[y*w+x] = c
+		}
+	}
+	return pixels
+}
+
+// makeWaterPixels paints shallow water: a banded blue gradient with rolling
+// FBM ripples and a few brighter highlight peaks. No animation — but the
+// gentle banded shimmer reads as still water catching ambient light. Sits
+// at the same Y as floor cubes (slightly recessed) so the player walks
+// through, not over.
+func makeWaterPixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	deep := color.RGBA{R: 32, G: 64, B: 96, A: 255}
+	mid := color.RGBA{R: 70, G: 124, B: 168, A: 255}
+	shine := color.RGBA{R: 200, G: 230, B: 244, A: 255}
+	sand := color.RGBA{R: 178, G: 158, B: 108, A: 255}
+	weed := color.RGBA{R: 52, G: 96, B: 72, A: 255}
+
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			n := fbmNoise(float64(x), float64(y), 0.04, 4)
+			band := math.Sin(float64(y)*0.08 + n*1.8)
+			c := core.MixColor(deep, mid, 0.45+band*0.35+n*0.20)
+
+			// Bright crests where the noise hits a peak.
+			peak := fbmNoise(float64(x)*1.3+311, float64(y)*1.3-91, 0.10, 3)
+			if peak > 0.55 {
+				c = core.MixColor(c, shine, (peak-0.55)*1.4)
+			}
+			// Hint of sandy bottom where the FBM dips deep — reads as water
+			// that you can almost see through.
+			if n < -0.45 {
+				c = core.MixColor(c, sand, (-n-0.45)*0.5)
+			}
+			// Rare strands of weed for life.
+			if hash2(x/2, y*3)%560 < 4 {
+				c = core.MixColor(c, weed, 0.45)
+			}
+			pixels[y*w+x] = c
+		}
+	}
+	return pixels
+}
+
+// makeSandPixels paints pale dune sand: warm cream base with finer noise
+// grain than the dirt texture and very sparse darker pebbles. Reads as
+// dry, sun-bleached sand rather than wet beach sand (which would want a
+// cooler tone).
+func makeSandPixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	base := color.RGBA{R: 228, G: 206, B: 158, A: 255}
+	warm := color.RGBA{R: 244, G: 226, B: 180, A: 255}
+	dark := color.RGBA{R: 184, G: 156, B: 108, A: 255}
+	pebble := color.RGBA{R: 134, G: 108, B: 80, A: 255}
+
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			// Two layered noise fields: low frequency for soft dune ripples,
+			// high frequency for individual grains.
+			grain := fbmNoise(float64(x)*1.8, float64(y)*1.8, 0.32, 3)
+			dune := fbmNoise(float64(x)+47, float64(y)-83, 0.018, 3)
+			c := base
+			c = core.MixColor(c, warm, math.Max(0, grain)*0.45)
+			c = core.MixColor(c, dark, math.Max(0, -grain)*0.30)
+			c = core.MixColor(c, warm, math.Max(0, dune)*0.18)
+			c = core.MixColor(c, dark, math.Max(0, -dune)*0.18)
+			// Per-pixel grain speckle.
+			if hash2(x, y)%5 == 0 {
+				c = adjust(c, hash2(x*3, y*3)%9-4)
+			}
+			if hash2(x*7, y*11)%520 < 2 {
+				c = core.MixColor(c, pebble, 0.55)
+			}
+			pixels[y*w+x] = c
+		}
+	}
+	return pixels
+}
+
+// makeSnowPixels paints packed snow: near-white with very faint blue
+// shadow noise and a sparkle of brighter specks. Looks washed-out under
+// neutral light by design — the day/night cycle's bluer phases tint it
+// into something atmospheric.
+func makeSnowPixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	base := color.RGBA{R: 232, G: 240, B: 248, A: 255}
+	shadow := color.RGBA{R: 168, G: 188, B: 218, A: 255}
+	deepShadow := color.RGBA{R: 132, G: 156, B: 192, A: 255}
+	sparkle := color.RGBA{R: 255, G: 255, B: 255, A: 255}
+
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			n := fbmNoise(float64(x), float64(y), 0.05, 4)
+			drift := fbmNoise(float64(x)+201, float64(y)+311, 0.015, 3)
+			c := base
+			c = core.MixColor(c, shadow, math.Max(0, -n)*0.22)
+			c = core.MixColor(c, deepShadow, math.Max(0, -drift)*0.18)
+			// Sparkle specks: very rare bright pixels read as light
+			// glinting off ice crystals.
+			if hash2(x*5, y*7)%900 < 3 {
+				c = core.MixColor(c, sparkle, 0.85)
+			}
+			pixels[y*w+x] = c
+		}
+	}
+	return pixels
+}
+
 func makeBarkPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	base := color.RGBA{R: 96, G: 64, B: 38, A: 255}
@@ -286,6 +526,93 @@ func makeLeafPixels(w, h int) []color.RGBA {
 			}
 			if hash2(x*5, y*5)%180 < 3 {
 				c = core.MixColor(c, deep, 0.55)
+			}
+			pixels[y*w+x] = c
+		}
+	}
+	return pixels
+}
+
+// makeMarblePixels paints pale veined marble for upright props — pillars,
+// the statue, stalagmites, fountain basins. Two veins worth of noise
+// woven through a creamy off-white base, with hairline dark cracks so the
+// stone reads as quarried rather than blank.
+func makeMarblePixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	base := color.RGBA{R: 228, G: 222, B: 208, A: 255}
+	warm := color.RGBA{R: 240, G: 230, B: 212, A: 255}
+	cool := color.RGBA{R: 196, G: 198, B: 204, A: 255}
+	vein := color.RGBA{R: 116, G: 110, B: 102, A: 255}
+	deep := color.RGBA{R: 76, G: 72, B: 66, A: 255}
+
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			n := fbmNoise(float64(x), float64(y), 0.04, 4)
+			m := fbmNoise(float64(x)+177, float64(y)-91, 0.10, 3)
+			c := base
+			c = core.MixColor(c, warm, math.Max(0, n)*0.35)
+			c = core.MixColor(c, cool, math.Max(0, -n)*0.30)
+
+			// Veins: pixel-thin streaks where two FBM samples cross zero.
+			vt := math.Abs(m + n*0.4)
+			if vt < 0.06 {
+				c = core.MixColor(c, vein, 0.45)
+			}
+			if vt < 0.02 {
+				c = core.MixColor(c, deep, 0.55)
+			}
+			pixels[y*w+x] = c
+		}
+	}
+	return pixels
+}
+
+// makeGranitePixels paints a dark, faintly speckled granite for the
+// obelisk. The mix is denser and cooler than the marble palette so an
+// obelisk reads as a different stone class against an adjacent pillar.
+func makeGranitePixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	base := color.RGBA{R: 60, G: 64, B: 76, A: 255}
+	light := color.RGBA{R: 112, G: 116, B: 132, A: 255}
+	dark := color.RGBA{R: 24, G: 26, B: 36, A: 255}
+	flake := color.RGBA{R: 188, G: 188, B: 200, A: 255}
+
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			n := fbmNoise(float64(x)*1.3, float64(y)*1.3, 0.18, 4)
+			c := base
+			c = core.MixColor(c, light, math.Max(0, n)*0.40)
+			c = core.MixColor(c, dark, math.Max(0, -n)*0.45)
+			// Mica flecks: rare bright pixels for sparkle.
+			if hash2(x*5, y*5)%420 < 3 {
+				c = core.MixColor(c, flake, 0.55)
+			}
+			pixels[y*w+x] = c
+		}
+	}
+	return pixels
+}
+
+// makeTerracottaPixels paints a warm clay sidewall for the urn. Light
+// horizontal banding (potter's wheel marks) plus subtle vertical
+// gradient so the surface reads as fired clay rather than painted plastic.
+func makeTerracottaPixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	base := color.RGBA{R: 188, G: 108, B: 70, A: 255}
+	light := color.RGBA{R: 220, G: 142, B: 96, A: 255}
+	dark := color.RGBA{R: 132, G: 70, B: 44, A: 255}
+	rim := color.RGBA{R: 96, G: 50, B: 30, A: 255}
+
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			n := fbmNoise(float64(x)*0.8, float64(y)*0.4, 0.14, 3)
+			band := math.Sin(float64(y)*0.45+n*1.2) * 0.5
+			c := base
+			c = core.MixColor(c, light, math.Max(0, band)*0.35+math.Max(0, n)*0.25)
+			c = core.MixColor(c, dark, math.Max(0, -band)*0.30+math.Max(0, -n)*0.25)
+			// Sparse darker pits and chips.
+			if hash2(x, y)%240 < 2 {
+				c = core.MixColor(c, rim, 0.55)
 			}
 			pixels[y*w+x] = c
 		}
