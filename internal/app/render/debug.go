@@ -1,5 +1,3 @@
-//go:build debug
-
 package render
 
 import (
@@ -11,16 +9,13 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// DebugBuildEnabled is true in debug builds; debug_release.go sets it to
-// false. The pause menu reads it to gate the Debug Overlay label.
-const DebugBuildEnabled = true
-
-// This file is compiled only with `go build -tags debug`. The release
-// build picks up debug_release.go's no-op DrawDebugOverlay stub instead,
-// so the tile-label sort/walk and the per-frame label-allocation buffer
-// never reach the shipped binary. The pause menu's "Debug overlay"
-// toggle still flips g.DebugOverlay either way — in release builds it's
-// just an inert flag.
+// The debug overlay used to be gated behind a `debug` build tag so its
+// tile-label sort/walk and per-frame label buffer wouldn't ship in release
+// — but `g.DebugOverlay` is false by default, and every line below is
+// inside an early-return guard against that flag, so the overhead in
+// release-with-overlay-off is zero. Making the overlay always-available
+// means the pause-menu toggle now does what the player expects in any
+// build, without forcing a `go build -tags debug` rebuild.
 
 // debugLabelRange is how many tiles around the player get labelled. 4 covers
 // the immediate "what am I standing next to" question without flooding the

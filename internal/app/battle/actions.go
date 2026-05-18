@@ -27,6 +27,14 @@ type actionHandlers struct {
 	apply actionApply
 }
 
+// skillActionHandlers is the player-castable skill registry. Skills
+// registered here are valid choices from the action menu and have a
+// setup/apply pair driving the timing minigame. Enemy-only skills
+// (SkillSleep is the current example) route through resolveEnemySpell
+// in battle.go and deliberately don't appear here — actionHandlerFor
+// returns ok=false for any unregistered skill, which beginPendingAction
+// surfaces as "No skill ready." A future "player learns Sleep" feature
+// adds a row here AND a Skill: SkillSleep reference in a party class.
 var skillActionHandlers = map[core.SkillID]actionHandlers{
 	core.SkillSwipe:    {setup: setupSwipe, apply: applySwipe},
 	core.SkillPrayer:   {setup: setupPrayer, apply: applyPrayer},
@@ -50,10 +58,26 @@ func setupTargetedEnemy(g *core.GameState) bool {
 // target can die between confirm and apply (e.g. a faster ally killed it on
 // the same round). Apply handlers call this first: if the target's gone, the
 // turn cancels cleanly with the same "No target." status that setup uses.
+//
+// `refundSkill` is the skill whose MP was committed in setup; pass
+// core.SkillNone for basic Attack / Steal (no MP cost). When the target
+// died between confirm and apply the action literally never happened, so
+// the MP is refunded to keep the cost-payment contract honest — a wasted
+// turn is enough penalty without also burning a cast.
+//
 // Returns true when the target is still alive and the apply can proceed.
-func ensureAliveTargetOrCancel(g *core.GameState) bool {
+func ensureAliveTargetOrCancel(g *core.GameState, refundSkill core.SkillID) bool {
 	if core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
 		return true
+	}
+	if refundSkill != core.SkillNone {
+		if cost := core.SkillCost(refundSkill); cost > 0 {
+			actor := &g.Party[g.Battle.CurrentParty]
+			actor.MP += cost
+			if actor.MP > actor.MaxMP {
+				actor.MP = actor.MaxMP
+			}
+		}
 	}
 	setBattleStatus(g, "No target.")
 	finishPartyAction(g)
@@ -79,9 +103,13 @@ func beginPendingAction(g *core.GameState) {
 	case core.MinigameCharge:
 		g.Battle.Timing = core.NewChargeState(core.ChargeTimingDuration)
 		// Charge gets a longer pre-arm pause so the player has time to read
-		// the prompt; pressing/holding the input during the intro skips
-		// straight into the bar (handled in updateAttackTiming).
+		// the prompt; pressing the input during the intro skips straight
+		// into the bar (handled in updateAttackTiming). ChargeNeedsRelease
+		// blocks the very same Enter the player used to confirm the
+		// target from being read as engaging the charge — they must
+		// release once first, then a fresh press engages.
 		intro = core.ChargeTimingIntro
+		g.Battle.ChargeNeedsRelease = true
 	case core.MinigameSequence:
 		g.Battle.Timing = core.NewSequenceState(g.Rand(), core.StealTimingDuration, core.StealSequenceLength)
 		// Clear analog-stick edge memory so a player whose stick happens to
@@ -140,7 +168,8 @@ func recordQuality(g *core.GameState, quality, partyIndex int, isBlock bool) {
 // --- Basic Attack ---
 
 func applyAttack(g *core.GameState, quality int) bool {
-	if !ensureAliveTargetOrCancel(g) {
+	// Basic attack has no MP cost; pass SkillNone so the refund branch is a no-op.
+	if !ensureAliveTargetOrCancel(g, core.SkillNone) {
 		return false
 	}
 	attacker := &g.Party[g.Battle.CurrentParty]
@@ -166,9 +195,11 @@ func applyAttack(g *core.GameState, quality int) bool {
 		finishPartyAction(g)
 		return true
 	}
-	// Basic Attack: STR + 0, scaled by timing quality.
+	// Basic Attack: STR + 0, scaled by timing quality. Physically tagged
+	// so the armor damp applies — basic attacks are the canonical phys
+	// swing against an armored foe (amoeba teaches the lesson).
 	damage := core.ScaleDamage(core.MeleeDamage(attacker.Stats, 0), quality)
-	defeated := damageEnemy(g, g.Battle.EnemyIndex, damage, quality)
+	defeated := damageEnemy(g, g.Battle.EnemyIndex, damage, quality, core.SkillTagPhys)
 	setBattleMessage(g, attackResultMessage(attacker.Name, target, damage, quality, defeated))
 	finishPartyAction(g)
 	return true
@@ -198,7 +229,7 @@ func applySwipe(g *core.GameState, quality int) bool {
 		if !m.Alive {
 			continue
 		}
-		damageEnemy(g, slot, damage, quality)
+		damageEnemy(g, slot, damage, quality, core.SkillTagFor(core.SkillSwipe))
 		hits++
 	}
 	if hits == 0 {
@@ -249,7 +280,8 @@ func applyPrayer(g *core.GameState, quality int) bool {
 // --- Steal (Thief, base chance scales with quality) ---
 
 func applySteal(g *core.GameState, quality int) bool {
-	if !ensureAliveTargetOrCancel(g) {
+	// Steal costs 0 MP; pass the skill anyway so a future cost shows up.
+	if !ensureAliveTargetOrCancel(g, core.SkillSteal) {
 		return false
 	}
 	actor := &g.Party[g.Battle.CurrentParty]
@@ -299,17 +331,19 @@ func setupFirebolt(g *core.GameState) bool {
 		setBattleStatus(g, "Firebolt needs more MP.")
 		return false
 	}
-	// MP deduction policy: every skill setup that returns true commits the
-	// MP cost here. Once the timing bar arms, the apply step is guaranteed
-	// to run (Miss flashes still call apply with quality=Miss), so we can't
-	// "back out" past this point — no refund path is needed. Keeps the
-	// cost-payment story uniform across Swipe / Prayer / Firebolt.
+	// MP deduction policy: skill setup commits the MP cost here. The apply
+	// step is normally guaranteed to run (Miss flashes still call apply
+	// with quality=Miss), so there's no "back out" path for whiffs. The
+	// one exception is target-death between confirm and apply — that path
+	// refunds MP through ensureAliveTargetOrCancel, since the cast literally
+	// never happened.
 	actor.MP -= cost
 	return true
 }
 
 func applyFirebolt(g *core.GameState, quality int) bool {
-	if !ensureAliveTargetOrCancel(g) {
+	// Firebolt's setup committed MP; refund it if the target died before apply.
+	if !ensureAliveTargetOrCancel(g, core.SkillFirebolt) {
 		return false
 	}
 	actor := &g.Party[g.Battle.CurrentParty]
@@ -320,7 +354,7 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 	// Effect separately for the burn-chance roll below.
 	damage := core.ScaleDamage(core.SkillDamage(actor.Stats, core.SkillFirebolt), quality)
 	target := *core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	defeated := damageEnemy(g, g.Battle.EnemyIndex, damage, quality)
+	defeated := damageEnemy(g, g.Battle.EnemyIndex, damage, quality, core.SkillTagFor(core.SkillFirebolt))
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	burned := false
 	if !defeated && enemy.BurnTurns <= 0 {
@@ -340,18 +374,31 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 
 // --- Damage / heal helpers (unchanged from previous behavior) ---
 
-// damageEnemy applies `damage` to the enemy at `slot`. quality drives the
-// floating damage popup color (and is set even on the killing blow so a
-// dying enemy still shows the number that took it down). Returns true if
-// the hit was fatal.
+// damageEnemy applies `rawDamage` to the enemy at `slot`, clipped by
+// the enemy's Armor when `tag == SkillTagPhys`. Magic / Heal / Buff
+// tags bypass armor entirely. quality drives the floating damage popup
+// color (set even on a killing blow so a dying enemy still shows the
+// number that took it down). Returns true if the hit was fatal.
 //
-// quality is allowed to be TimingQualityMiss for non-action damage (burn
-// ticks pass TimingQualityGood for the orange popup tint; tests can pass
-// Miss when they don't care about the popup).
-func damageEnemy(g *core.GameState, slot, damage, quality int) bool {
+// quality is allowed to be TimingQualityMiss for non-action damage
+// (burn ticks pass TimingQualityGood for the orange popup tint; tests
+// can pass Miss when they don't care about the popup).
+//
+// Any damage > 0 wakes a sleeping enemy by zeroing SleepTurns — same
+// "violence breaks the spell" rule as the party-side wake.
+func damageEnemy(g *core.GameState, slot, rawDamage, quality int, tag core.SkillTag) bool {
 	enemy := core.BattleMemberAt(g, slot)
 	if enemy == nil || !enemy.Alive {
 		return false
+	}
+	damage := core.ApplyArmor(rawDamage, tag, enemy.Armor)
+	// Clamp negative damage at 0 — every current caller (ScaleDamage,
+	// burn ticks with BurnTickDamage>0) already produces non-negative
+	// values, but enforcing the contract here keeps a future
+	// caller from accidentally healing enemies by passing a signed
+	// stat delta.
+	if damage < 0 {
+		damage = 0
 	}
 	enemy.DamageFlash = core.FlashDuration
 	enemy.HP -= damage
@@ -359,6 +406,11 @@ func damageEnemy(g *core.GameState, slot, damage, quality int) bool {
 		enemy.DamagePopup = damage
 		enemy.DamagePopupQuality = quality
 		enemy.DamagePopupTimer = core.QualityResultDuration
+		// Any incoming damage shakes the enemy out of sleep — even an
+		// armor-clamped 1, since the contract is "the hit landed."
+		if enemy.SleepTurns > 0 {
+			enemy.SleepTurns = 0
+		}
 	}
 	if enemy.HP > 0 {
 		// Audible "thud" only on hits that actually scored. Zero-damage
@@ -372,6 +424,7 @@ func damageEnemy(g *core.GameState, slot, damage, quality int) bool {
 	enemy.HP = 0
 	enemy.Alive = false
 	enemy.BurnTurns = 0
+	enemy.SleepTurns = 0
 	enemy.DeathFade = core.DeathFadeDuration
 	audio.Play(audio.SoundEnemyDeath)
 	return true
@@ -395,8 +448,13 @@ func tickPoisonAfterPartyTurn(g *core.GameState, actor core.ActorRef) bool {
 		return false
 	}
 	member.PoisonTurns--
-	damagePartyMember(g, actor.Index, core.PoisonTickDamage)
-	if member.HP <= 0 {
+	// damagePartyMember returns true on the fatal hit; use it as the
+	// authoritative kill signal so a future "save at 1 HP" mechanic in
+	// damagePartyMember can't desync from the message we emit here.
+	// Poison is venomous decay — magical in source, so armor doesn't
+	// damp it. Pass SkillTagMagic to bypass the armor clip.
+	killed := damagePartyMember(g, actor.Index, core.PoisonTickDamage, core.SkillTagMagic)
+	if killed {
 		setBattleMessage(g, fmt.Sprintf("%s succumbs to the poison.", member.Name))
 		return true
 	}
@@ -420,7 +478,9 @@ func tickBurnAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
 	enemy.BurnTurns--
 	// Quality=Good gives the orange "fire" tint to the popup that damageEnemy
 	// stamps on a damaging hit.
-	damageEnemy(g, actor.Index, core.BurnTickDamage, core.TimingQualityGood)
+	// Burn ticks are magical (the fire is the spell residue), so armor
+	// doesn't damp them — same rule as the original Firebolt impact.
+	damageEnemy(g, actor.Index, core.BurnTickDamage, core.TimingQualityGood, core.SkillTagMagic)
 	def := core.EnemyInfoFor(*enemy)
 	if !enemy.Alive {
 		setBattleMessage(g, fmt.Sprintf("The %s succumbs to the flames.", def.SingularNoun))
@@ -452,20 +512,31 @@ func healPartyMember(g *core.GameState, partyIndex, amount int) bool {
 	return true
 }
 
-func damagePartyMember(g *core.GameState, partyIndex, amount int) bool {
-	if partyIndex < 0 || partyIndex >= len(g.Party) || amount <= 0 {
+// damagePartyMember applies `rawAmount` to a party member, armor-clipped
+// when `tag == SkillTagPhys`. Magic / Heal / Buff and poison ticks
+// bypass armor entirely (poison is the only current non-phys source on
+// the party side). Any damage > 0 wakes the member from Sleep — same
+// "violence breaks the spell" rule as the enemy side. Returns true on
+// the fatal hit. partyIndex out-of-range or amount<=0 is a no-op.
+func damagePartyMember(g *core.GameState, partyIndex, rawAmount int, tag core.SkillTag) bool {
+	if partyIndex < 0 || partyIndex >= len(g.Party) || rawAmount <= 0 {
 		return false
 	}
 	member := &g.Party[partyIndex]
 	if member.HP <= 0 {
 		return false
 	}
+	amount := core.ApplyArmor(rawAmount, tag, member.Armor)
 	member.DamageFlash = core.FlashDuration
 	member.HP -= amount
+	if amount > 0 && member.SleepTurns > 0 {
+		member.SleepTurns = 0
+	}
 	if member.HP > 0 {
 		return false
 	}
 	member.HP = 0
+	member.SleepTurns = 0
 	return true
 }
 
@@ -556,7 +627,11 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 		}
 		damage = scaled
 	}
-	damagePartyMember(g, target, damage)
+	// Plain enemy melee is physically tagged so the party's Armor field
+	// (currently 0 for all members, future equipment) damps the bite.
+	// Spell-casting enemies (goblin mage) dispatch through their own
+	// resolver and pass SkillTagMagic where appropriate.
+	damagePartyMember(g, target, damage, core.SkillTagPhys)
 	if defendQuality > core.TimingQualityMiss {
 		// A successful block recoils the defender slightly so the impact reads
 		// even though the damage number is small.

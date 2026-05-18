@@ -14,11 +14,17 @@
 //	decor  : '.' auto-scatter, '_' force-empty, 'b' bush, 'm' mushroom,
 //	         'p' pebble cluster, ',' tall grass, 'f' wildflowers,
 //	         'v' clover, 'r' reeds, 'o' bones, 'x' scorch, '!' blood,
-//	         '*' cobweb, 't' stump, 'l' fallen log, 'L' leaf pile
+//	         '*' cobweb, 't' stump, 'l' fallen log, 'L' leaf pile,
+//	         'A' archway anchor (left), 'a' archway tail (right) — both
+//	         walkable; the arch spans 2 tiles along +X.
 //	props  : '.' empty, 'T' tree, 'X' tree XL, 'O' boulder,
 //	         'B' bush (large), 'C' crate, 'R' barrel, 'U' urn,
 //	         'S' stalagmite, 'P' pillar, 'I' broken pillar,
-//	         'M' statue, 'Q' obelisk, 'F' fountain
+//	         'M' statue, 'Q' obelisk, 'F' fountain,
+//	         'K' rock cairn (1 tile), 'J' rock formation anchor (top-left
+//	         of a 2×2 footprint), 'j' formation tail (the other 3 tiles
+//	         of the 2×2). All blocking; the anchor's mesh covers the
+//	         whole footprint and tails render nothing.
 package mapfile
 
 import (
@@ -46,7 +52,17 @@ type MapFile struct {
 	Floor     []string
 	Decor     []string
 	Props     []string
-	Packs     []MapPack
+	// Ceiling is the optional fifth grid. .map files written before the
+	// ceiling: section existed parse with Ceiling left empty, which the
+	// loader fills with a blank "no ceiling" layer so older maps stay
+	// compatible with no manual edit.
+	Ceiling []string
+	Packs   []MapPack
+	// Chests is the authored chest list. Each entry's Items field is a
+	// comma-separated list of item names ("Morsel of Cheese,Bat Jerky")
+	// matching ItemDefinition.Name. Empty list = an empty chest (renders
+	// open by default).
+	Chests []MapChest
 }
 
 // MapPack is one authored pack at a tile. Members is a non-empty list of
@@ -58,6 +74,23 @@ type MapPack struct {
 	Z       int
 }
 
+// MapChest is one authored chest at a tile. On-disk format mirrors
+// packs: "item[,item...] X Z" so the parser can share splitting logic.
+// An empty-loot chest writes as "(empty) X Z" — using the literal name
+// "(empty)" keeps the row well-formed (always 3 whitespace-separated
+// fields) without inventing a separate "no items" syntax.
+type MapChest struct {
+	Items []string
+	X     int
+	Z     int
+}
+
+// emptyChestToken is the single-field placeholder for a chest authored
+// with no items. Kept out of the item-name registry so it can never
+// shadow a real ItemDefinition.Name; the parser maps it back to an
+// empty Items slice and the encoder emits it when Items is empty.
+const emptyChestToken = "(empty)"
+
 // layerSlot is the parser's notion of "which grid is the upcoming N rows
 // going into." Lets the section dispatch share one collection loop.
 type layerSlot int
@@ -68,7 +101,9 @@ const (
 	slotFloor
 	slotDecor
 	slotProps
+	slotCeiling
 	slotEnemies
+	slotChests
 )
 
 // Parse reads a .map file from r. Errors pinpoint the first malformed line.
@@ -129,6 +164,48 @@ func Parse(r io.Reader) (MapFile, error) {
 			continue
 		}
 
+		if state == slotChests {
+			line := strings.TrimSpace(raw)
+			if line == "" {
+				continue
+			}
+			// Chest row: "itemname[,itemname...] X Z" or "(empty) X Z" for
+			// a no-loot chest. Item names use the canonical
+			// ItemDefinition.Name strings (e.g. "Morsel of Cheese") so the
+			// .map file is human-editable without an item-id lookup table
+			// in the head.
+			fields := strings.Fields(line)
+			if len(fields) < 3 {
+				return mf, fmt.Errorf("line %d: expected '<item[,item...]> <x> <z>' or '(empty) <x> <z>', got %q", lineNo, raw)
+			}
+			// Item list can contain whitespace inside individual names
+			// ("Morsel of Cheese"), so reassemble by taking the LAST two
+			// fields as X/Z and the rest as a single item-list token.
+			xField := fields[len(fields)-2]
+			zField := fields[len(fields)-1]
+			itemsToken := strings.Join(fields[:len(fields)-2], " ")
+			x, err := strconv.Atoi(xField)
+			if err != nil {
+				return mf, fmt.Errorf("line %d: bad chest x %q", lineNo, xField)
+			}
+			z, err := strconv.Atoi(zField)
+			if err != nil {
+				return mf, fmt.Errorf("line %d: bad chest z %q", lineNo, zField)
+			}
+			var items []string
+			if itemsToken != emptyChestToken {
+				for _, name := range strings.Split(itemsToken, ",") {
+					name = strings.TrimSpace(name)
+					if name == "" {
+						return mf, fmt.Errorf("line %d: empty chest item entry", lineNo)
+					}
+					items = append(items, name)
+				}
+			}
+			mf.Chests = append(mf.Chests, MapChest{Items: items, X: x, Z: z})
+			continue
+		}
+
 		// Layer grid line. Once Height rows are collected, blank lines are
 		// tolerated (some editors auto-insert one before the next section
 		// header) but a non-blank overflow row is a structural error — the
@@ -165,8 +242,12 @@ func sectionFor(raw string) (layerSlot, bool) {
 		return slotDecor, true
 	case "props:":
 		return slotProps, true
+	case "ceiling:":
+		return slotCeiling, true
 	case "enemies:":
 		return slotEnemies, true
+	case "chests:":
+		return slotChests, true
 	}
 	return slotNone, false
 }
@@ -181,6 +262,8 @@ func layerSlice(mf *MapFile, slot layerSlot) *[]string {
 		return &mf.Decor
 	case slotProps:
 		return &mf.Props
+	case slotCeiling:
+		return &mf.Ceiling
 	}
 	return nil
 }
@@ -215,7 +298,7 @@ func parseHeaderLine(mf *MapFile, line string, lineNo int) error {
 	return nil
 }
 
-func (mf MapFile) validate() error {
+func (mf *MapFile) validate() error {
 	if mf.Width <= 0 || mf.Height <= 0 {
 		return fmt.Errorf("size must be >0x0; got %dx%d", mf.Width, mf.Height)
 	}
@@ -237,8 +320,41 @@ func (mf MapFile) validate() error {
 			}
 		}
 	}
+	// Ceiling is optional for legacy .map files. Missing → fill with a
+	// blank "no ceiling" layer so downstream code (renderer, editor) can
+	// always index it like the other four. A partial ceiling layer (some
+	// rows missing) is treated as malformed because it almost certainly
+	// indicates an authoring mistake, not an older format.
+	switch len(mf.Ceiling) {
+	case 0:
+		mf.Ceiling = BlankLayer(mf.Width, mf.Height, '.')
+	case mf.Height:
+		for i, row := range mf.Ceiling {
+			if len(row) != mf.Width {
+				return fmt.Errorf("ceiling layer row %d has %d cols, size declares %d", i, len(row), mf.Width)
+			}
+		}
+	default:
+		return fmt.Errorf("ceiling layer has %d rows, size declares %d", len(mf.Ceiling), mf.Height)
+	}
 	if mf.StartX < 0 || mf.StartX >= mf.Width || mf.StartZ < 0 || mf.StartZ >= mf.Height {
 		return fmt.Errorf("start (%d,%d) outside map", mf.StartX, mf.StartZ)
+	}
+	// Pack and chest spawns are validated against bounds here rather
+	// than in the parser so a single-row malformed entry surfaces with
+	// the same "outside map" diagnostic as a malformed start. Without
+	// this guard, an authoring typo silently survives parse and the
+	// runtime placePacks / placeChests just skips the entry — a
+	// frustrating "where did my pack go?" debug.
+	for _, p := range mf.Packs {
+		if p.X < 0 || p.X >= mf.Width || p.Z < 0 || p.Z >= mf.Height {
+			return fmt.Errorf("pack at (%d,%d) outside map %dx%d", p.X, p.Z, mf.Width, mf.Height)
+		}
+	}
+	for _, c := range mf.Chests {
+		if c.X < 0 || c.X >= mf.Width || c.Z < 0 || c.Z >= mf.Height {
+			return fmt.Errorf("chest at (%d,%d) outside map %dx%d", c.X, c.Z, mf.Width, mf.Height)
+		}
 	}
 	return nil
 }
@@ -292,6 +408,10 @@ func (mf MapFile) Encode(w io.Writer) error {
 	fmt.Fprintf(bw, "quiet: %s\n", mf.Quiet)
 	fmt.Fprintf(bw, "size: %dx%d\n", mf.Width, mf.Height)
 	fmt.Fprintf(bw, "start: %d %d %s\n", mf.StartX, mf.StartZ, mf.StartFace)
+	ceiling := mf.Ceiling
+	if len(ceiling) == 0 {
+		ceiling = BlankLayer(mf.Width, mf.Height, '.')
+	}
 	for _, layer := range []struct {
 		name string
 		rows []string
@@ -300,6 +420,7 @@ func (mf MapFile) Encode(w io.Writer) error {
 		{"floor", mf.Floor},
 		{"decor", mf.Decor},
 		{"props", mf.Props},
+		{"ceiling", ceiling},
 	} {
 		fmt.Fprintf(bw, "%s:\n", layer.name)
 		for _, row := range layer.rows {
@@ -312,6 +433,14 @@ func (mf MapFile) Encode(w io.Writer) error {
 		// so maps without grouped packs stay byte-identical across the
 		// format change.
 		fmt.Fprintf(bw, "%s %d %d\n", strings.Join(p.Members, ","), p.X, p.Z)
+	}
+	fmt.Fprintln(bw, "chests:")
+	for _, c := range mf.Chests {
+		token := emptyChestToken
+		if len(c.Items) > 0 {
+			token = strings.Join(c.Items, ",")
+		}
+		fmt.Fprintf(bw, "%s %d %d\n", token, c.X, c.Z)
 	}
 	return bw.Flush()
 }
@@ -326,6 +455,10 @@ func Load(path string) (MapFile, error) {
 }
 
 func Save(path string, mf MapFile) error {
+	// 0o755 here is the same mode core.AssetDirMode uses for every
+	// auto-created asset folder. Not importing core to keep mapfile a
+	// leaf package — same value, manually kept in sync (only one place
+	// each).
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -333,8 +466,15 @@ func Save(path string, mf MapFile) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	return mf.Encode(f)
+	// Capture the close error too — a deferred f.Close() on the return path
+	// would swallow flush failures (network drive, quota, cross-device) and
+	// the editor's "Saved successfully" toast would lie. Prefer the encode
+	// error if both fire, since that's the root cause.
+	err = mf.Encode(f)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // List returns the .map files in dir, sorted alphabetically. Missing dir
@@ -358,6 +498,45 @@ func List(dir string) ([]string, error) {
 		out = append(out, filepath.Join(dir, e.Name()))
 	}
 	sort.Strings(out)
+	return out, nil
+}
+
+// ListByModTime returns the .map files in dir, newest-modified first.
+// Used by the editor's Open modal so the file the author was just working
+// on lands at the top of the list. Stat failures on individual entries
+// drop those entries from the result rather than killing the whole list.
+func ListByModTime(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	type entry struct {
+		path string
+		mod  int64
+	}
+	rows := make([]entry, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(strings.ToLower(e.Name()), ".map") {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		info, ierr := e.Info()
+		if ierr != nil {
+			continue
+		}
+		rows = append(rows, entry{path: path, mod: info.ModTime().UnixNano()})
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].mod > rows[j].mod })
+	out := make([]string, len(rows))
+	for i, r := range rows {
+		out[i] = r.path
+	}
 	return out, nil
 }
 

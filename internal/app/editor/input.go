@@ -3,7 +3,9 @@ package editor
 import (
 	"crawler/internal/app/core"
 	"crawler/internal/app/core/mapfile"
+	"crawler/internal/app/input"
 	"os"
+	"strconv"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -51,7 +53,28 @@ func updateHotkeys(s *State) {
 	}
 
 	// F5: launch a playtest of the current in-memory area without saving.
+	// Ctrl+F5: same, but temporarily set StartTileX/Z to the grid cursor
+	// (or hover) so the playtest drops you AT the cursor instead of the
+	// authored start. The author's saved StartTile is restored on return
+	// from the playtest. Lets you iterate on a far room without walking
+	// to it every test.
 	if rl.IsKeyPressed(rl.KeyF5) {
+		if ctrl {
+			tx, tz := -1, -1
+			if s.gridCursorX >= 0 {
+				tx, tz = s.gridCursorX, s.gridCursorZ
+			} else if s.hoverX >= 0 {
+				tx, tz = s.hoverX, s.hoverZ
+			}
+			if tx >= 0 && !s.area.BlockedAt(tx, tz) {
+				s.testStartOverrideX = tx
+				s.testStartOverrideZ = tz
+				s.testStartOverride = true
+				s.flash("Test-from-cursor at " + core.TileCoord(tx, tz))
+			} else {
+				s.flash("Cursor cell is blocked or unset; using authored start")
+			}
+		}
 		s.testRequested = true
 	}
 
@@ -261,12 +284,26 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 				s.drag = dragStart
 				return
 			}
-		case entityAddRat, entityAddBat:
-			// Click on an existing pack picks it up for drag-move; click on
-			// an empty tile falls through to "add a member" via applyTool.
+		case entityAddEnemy:
+			// Click on an existing pack picks it up for drag-move (drag to
+			// new tile) OR opens the pack editor modal (release on the
+			// same tile — see finishDrag's dragPack branch). Click on an
+			// empty tile falls through to "place a new pack with one
+			// member of this kind" via applyTool.
 			if idx := packIndexAt(s.area.PackSpawns, x, z); idx >= 0 {
 				s.drag = dragPack
 				s.dragPackIdx = idx
+				return
+			}
+		case entityPlaceChest:
+			// Click on an existing chest opens the chest-edit modal so
+			// the author can change the loot. Click on an empty tile
+			// falls through to applyTool which plants a new chest with
+			// the default starter loot.
+			if idx := chestSpawnIndexAt(s.area.ChestSpawns, x, z); idx >= 0 {
+				s.modal = modalChestEdit
+				s.modalChestIdx = idx
+				s.modalCursor = 0
 				return
 			}
 		}
@@ -315,6 +352,8 @@ func finishDrag(s *State) {
 		if s.hoverX >= 0 && (s.hoverX != s.area.StartTileX || s.hoverZ != s.area.StartTileZ) {
 			if s.area.BlockedAt(s.hoverX, s.hoverZ) {
 				s.flash("Player start must be on an open cell")
+			} else if chestSpawnIndexAt(s.area.ChestSpawns, s.hoverX, s.hoverZ) >= 0 {
+				s.flash("Player start can't share a tile with a chest")
 			} else {
 				pushUndo(s)
 				s.area.StartTileX = s.hoverX
@@ -330,6 +369,8 @@ func finishDrag(s *State) {
 					s.flash("Packs need an open cell")
 				} else if s.area.StartTileX == s.hoverX && s.area.StartTileZ == s.hoverZ {
 					s.flash("Cell holds the player start")
+				} else if chestSpawnIndexAt(s.area.ChestSpawns, s.hoverX, s.hoverZ) >= 0 {
+					s.flash("Cell holds a chest — clear it first")
 				} else {
 					pushUndo(s)
 					// Drop any pack that was already at the destination cell
@@ -345,6 +386,15 @@ func finishDrag(s *State) {
 					}
 					s.dirty = true
 				}
+			} else {
+				// Click without drag (release on the same tile we picked
+				// up) → open the inline pack editor instead of silently
+				// no-op'ing. Lets the author manage member list /
+				// reorder / remove without the awkward "use the diseased
+				// rat brush to add to a rat pack" workaround.
+				s.modal = modalPackEdit
+				s.modalPackIdx = s.dragPackIdx
+				s.modalCursor = 0
 			}
 		}
 	case dragRect:
@@ -419,27 +469,39 @@ func handleTopbarButton(s *State, name string) {
 		s.modalFilename = mapStem(s.area.Path)
 		s.modal = modalSaveAs
 		s.focus = focusFilename
+	case "sounds":
+		openSoundsModal(s)
 	case "back":
 		s.exitRequested = true
 	}
 }
 
-// pumpPrintableASCII drains queued printable-ASCII characters into target
-// (capped at maxLen) and consumes one backspace press. Used by both the
-// metadata text fields and the modal rename field — onChange fires once
-// per accepted character or backspace and may be nil when no caller-side
-// effect is needed.
-func pumpPrintableASCII(target *string, maxLen int, onChange func()) {
+// pumpPrintableASCII drains queued printable-ASCII characters into
+// target (capped at maxLen) and consumes one backspace press. The
+// accept predicate filters which runes land in the buffer — callers
+// pass nil for "any printable ASCII" or a custom filter for "no
+// space" (sound-name input), "digits only" (numeric resize), etc. so
+// one pump function backs every text-field flavor in the editor.
+// onChange fires once per accepted character or backspace and may be
+// nil when no caller-side effect is needed.
+func pumpPrintableASCII(target *string, maxLen int, accept func(rune) bool, onChange func()) {
 	for {
 		c := rl.GetCharPressed()
 		if c == 0 {
 			break
 		}
-		if c >= 32 && c < 127 && len(*target) < maxLen {
-			*target += string(rune(c))
-			if onChange != nil {
-				onChange()
-			}
+		if c < 32 || c >= 127 {
+			continue
+		}
+		if accept != nil && !accept(c) {
+			continue
+		}
+		if len(*target) >= maxLen {
+			continue
+		}
+		*target += string(rune(c))
+		if onChange != nil {
+			onChange()
 		}
 	}
 	if rl.IsKeyPressed(rl.KeyBackspace) && len(*target) > 0 {
@@ -450,6 +512,16 @@ func pumpPrintableASCII(target *string, maxLen int, onChange func()) {
 	}
 }
 
+// acceptPrintable is the default accept-rune filter for pumpPrintableASCII
+// — accepts every printable ASCII character. Use when the caller wants
+// the historical behavior of "any printable rune".
+func acceptPrintable(r rune) bool { return true }
+
+// acceptPrintableNoSpace excludes ASCII space so the sound-modal Name
+// field can coexist with Space-as-Preview. Other callers that want
+// space-free input (filenames, etc.) can reuse this.
+func acceptPrintableNoSpace(r rune) bool { return r != ' ' }
+
 func updateTextInput(s *State) {
 	if s.focus == focusWidth || s.focus == focusHeight {
 		updateNumericInput(s)
@@ -459,7 +531,7 @@ func updateTextInput(s *State) {
 	if target == nil {
 		return
 	}
-	pumpPrintableASCII(target, 96, s.markDirty)
+	pumpPrintableASCII(target, 96, acceptPrintable, s.markDirty)
 	if rl.IsKeyPressed(rl.KeyTab) {
 		cycleFocus(s)
 		return
@@ -569,13 +641,283 @@ func activeTextTarget(s *State) *string {
 }
 
 func updateModal(s *State) Action {
-	switch s.modal {
-	case modalOpen:
-		return updateOpenModal(s)
-	case modalSaveAs:
-		return updateSaveAsModal(s)
-	case modalConfirmDirty:
-		return updateConfirmDirtyModal(s)
+	if updater, ok := modalUpdaters[s.modal]; ok {
+		return updater(s)
+	}
+	return ActionNone
+}
+
+// modalUpdaters maps each modalKind to its input handler. Sibling of
+// modalDrawers in draw.go — adding a new modal touches both tables.
+var modalUpdaters = map[modalKind]func(*State) Action{
+	modalOpen:         updateOpenModal,
+	modalSaveAs:       updateSaveAsModal,
+	modalConfirmDirty: updateConfirmDirtyModal,
+	modalPackEdit:     updatePackEditModal,
+	modalChestEdit:    updateChestEditModal,
+	modalSounds:       updateSoundsModal,
+}
+
+// closeModal is the single seam every modal updater goes through to
+// dismiss its dialog. Clears the modal kind plus every modal-scoped
+// cursor / index field so a future modal can't read a stale value from
+// the prior one. Replaces ~18 hand-typed `s.modal = modalNone; s.modalXxxIdx
+// = -1` snippets that drifted per modal — the chest-edit updater was
+// missing a modalCursor reset under the previous shape.
+func closeModal(s *State) {
+	s.modal = modalNone
+	s.modalCursor = 0
+	s.modalPackIdx = -1
+	s.modalChestIdx = -1
+	s.modalConfirmDelete = false
+	s.modalRenaming = ""
+	soundDrag.sliderIdx = -1
+}
+
+// updatePackEditModal drives the inline pack editor: arrow keys / W-S
+// navigate the member list, X removes the highlighted member, J/K moves
+// it down/up in the list (J = "down arrow", K = "up arrow" mnemonic but
+// also matches Vim's J/K convention), R/B/D appends a new Rat/Bat/
+// Diseased rat. Esc/Enter close. If the pack disappears (e.g. user
+// removed the last member), the modal closes and the pack is dropped.
+func updatePackEditModal(s *State) Action {
+	if s.modalPackIdx < 0 || s.modalPackIdx >= len(s.area.PackSpawns) {
+		closeModal(s)
+		return ActionNone
+	}
+	pack := &s.area.PackSpawns[s.modalPackIdx]
+	memberCount := len(pack.Members)
+	if s.modalCursor >= memberCount {
+		s.modalCursor = memberCount - 1
+	}
+	if s.modalCursor < 0 {
+		s.modalCursor = 0
+	}
+
+	if input.ModalClosePressed() {
+		closeModal(s)
+		return ActionNone
+	}
+	if memberCount > 0 {
+		s.modalCursor = input.CursorUpDown(s.modalCursor, memberCount)
+		if rl.IsKeyPressed(rl.KeyX) {
+			pushUndo(s)
+			pack.Members = append(pack.Members[:s.modalCursor], pack.Members[s.modalCursor+1:]...)
+			s.dirty = true
+			if len(pack.Members) == 0 {
+				s.area.PackSpawns = append(s.area.PackSpawns[:s.modalPackIdx], s.area.PackSpawns[s.modalPackIdx+1:]...)
+				closeModal(s)
+				return ActionNone
+			}
+		}
+		// K = move highlighted member up; J = move down. Mirrors the
+		// natural arrow-up/down direction in the rendered list.
+		if rl.IsKeyPressed(rl.KeyK) && s.modalCursor > 0 {
+			pushUndo(s)
+			pack.Members[s.modalCursor-1], pack.Members[s.modalCursor] = pack.Members[s.modalCursor], pack.Members[s.modalCursor-1]
+			s.modalCursor--
+			s.dirty = true
+		}
+		if rl.IsKeyPressed(rl.KeyJ) && s.modalCursor < memberCount-1 {
+			pushUndo(s)
+			pack.Members[s.modalCursor+1], pack.Members[s.modalCursor] = pack.Members[s.modalCursor], pack.Members[s.modalCursor+1]
+			s.modalCursor++
+			s.dirty = true
+		}
+	}
+	// Add-kind shortcuts driven by the packAddRules table — adding a
+	// new enemy kind is one row in that slice instead of three hand-
+	// typed `if rl.IsKeyPressed(...)` blocks. The hint row in the modal
+	// reads its label out of the same table so display stays in sync.
+	for _, rule := range packAddRules {
+		if rl.IsKeyPressed(rule.Key) {
+			pushUndo(s)
+			pack.Members = append(pack.Members, rule.Kind)
+			s.modalCursor = len(pack.Members) - 1
+			s.dirty = true
+		}
+	}
+	return ActionNone
+}
+
+// Hint-row string constants for editor modal footers. Defined here next
+// to the modal updaters so the keybindings ("Esc close", "X remove",
+// "K/J move…") sit beside the actual rl.KeyEscape / rl.KeyX / rl.KeyK
+// handlers that listen for them. Drift between key handler and label is
+// the thing the constants are meant to prevent — longer hints are
+// composed from the shorter tokens so renaming a key ("Up/Down" →
+// "↑/↓") is a one-line edit.
+const (
+	hintSep          = "   "
+	hintEscClose     = "Esc close"
+	hintXRemove      = "X remove"
+	hintUpDownNav    = "Up/Down nav"
+	hintKJReorder    = "K/J move up/down"
+	hintPackEditNav  = hintUpDownNav + hintSep + hintXRemove + hintSep + hintKJReorder
+	hintChestEditNav = hintUpDownNav + hintSep + hintXRemove
+)
+
+// packAddRule binds a keyboard shortcut to the EnemyKind it adds in the
+// pack-edit modal. The slice is built at init from core.EnemyKinds() +
+// a positional hotkey pool — adding a new enemy is one row in core's
+// enemyDefinitions and the modal picks up the hotkey automatically.
+type packAddRule struct {
+	Key   int32
+	Kind  core.EnemyKind
+	Label string // appears in the modal's hint row, e.g. "R add Rat"
+}
+
+// packAddHotkeys is the positional pool: entry i in core.EnemyKinds()
+// gets pool[i]. Keys past pool length are 0 (no binding, mouse-only).
+// The existing keys are preserved in registry order (R, B, D, G, M, N)
+// so muscle memory survives the refactor.
+var packAddHotkeys = []int32{
+	rl.KeyR, rl.KeyB, rl.KeyD, rl.KeyG, rl.KeyM, rl.KeyN, rl.KeyV, rl.KeyZ,
+}
+
+// init asserts the add-rule hotkey pools cover the current registries.
+// The pack-edit and chest-edit modals are keyboard-only for "add a
+// kind" — an entry with Key=0 (rl.KeyNull) would silently be
+// unauthorable. Failing closed at startup is cheaper than shipping a
+// map editor where the new enemy / item is invisible to the author.
+func init() {
+	if got, max := len(core.EnemyKinds()), len(packAddHotkeys); got > max {
+		panic("editor: packAddHotkeys pool too small (" + strconv.Itoa(got) + " enemies, " + strconv.Itoa(max) + " keys)")
+	}
+	if got, max := len(core.AllItems()), len(chestAddHotkeys); got > max {
+		panic("editor: chestAddHotkeys pool too small (" + strconv.Itoa(got) + " items, " + strconv.Itoa(max) + " keys)")
+	}
+}
+
+var packAddRules = buildPackAddRules()
+
+func buildPackAddRules() []packAddRule {
+	defs := core.EnemyKinds()
+	out := make([]packAddRule, 0, len(defs))
+	for i, def := range defs {
+		key := int32(0)
+		if i < len(packAddHotkeys) {
+			key = packAddHotkeys[i]
+		}
+		out = append(out, packAddRule{
+			Key:   key,
+			Kind:  def.Kind,
+			Label: addRuleLabel(key, def.SingularName),
+		})
+	}
+	return out
+}
+
+// chestAddRule binds a keyboard shortcut to the ItemKind it appends in
+// the chest-edit modal. Built at init from core.AllItems() + the
+// positional hotkey pool below — same shape as packAddRules.
+type chestAddRule struct {
+	Key   int32
+	Kind  core.ItemKind
+	Label string
+}
+
+// chestAddHotkeys is the positional pool for the chest-edit modal.
+// Existing keys (C for Cheese, J for Jerky) preserved in registry
+// order. Extend as items are added; entries past pool length are
+// mouse-only.
+var chestAddHotkeys = []int32{
+	rl.KeyC, rl.KeyJ, rl.KeyP, rl.KeyU, rl.KeyW, rl.KeyQ,
+}
+
+var chestAddRules = buildChestAddRules()
+
+func buildChestAddRules() []chestAddRule {
+	defs := core.AllItems()
+	out := make([]chestAddRule, 0, len(defs))
+	for i, def := range defs {
+		key := int32(0)
+		if i < len(chestAddHotkeys) {
+			key = chestAddHotkeys[i]
+		}
+		out = append(out, chestAddRule{
+			Key:   key,
+			Kind:  def.Kind,
+			Label: addRuleLabel(key, shortItemLabel(def.Name)),
+		})
+	}
+	return out
+}
+
+// addRuleLabel formats a modal-footer hint row from a hotkey + a noun.
+// "R add Rat" when the entry has a hotkey; just "add Rat" when it
+// doesn't — better than "? add Rat" which suggested a missing label
+// before the init guard caught pool overflow. Used by both
+// buildPackAddRules and buildChestAddRules.
+func addRuleLabel(key int32, name string) string {
+	if key == 0 {
+		return "add " + name
+	}
+	return hotkeyChar(key) + " add " + name
+}
+
+// shortItemLabel returns the last whitespace-separated word of an item
+// Name. "Morsel of Cheese" → "Cheese", "Bat Jerky" → "Jerky" — keeps
+// the hint footer compact instead of "C add Morsel of Cheese."
+func shortItemLabel(name string) string {
+	for i := len(name) - 1; i >= 0; i-- {
+		if name[i] == ' ' {
+			return name[i+1:]
+		}
+	}
+	return name
+}
+
+// hotkeyChar converts an rl.KeyX constant to the printable char it
+// represents ('A'-'Z' for letter keys). Used by the rule-builder to
+// fill the "X add Y" label prefix automatically. Returns "?" for any
+// key outside the letter range — callers should only pass letter keys.
+func hotkeyChar(key int32) string {
+	if key >= rl.KeyA && key <= rl.KeyZ {
+		return string(rune(int32('A') + (key - rl.KeyA)))
+	}
+	return "?"
+}
+
+// updateChestEditModal drives the inline chest editor: arrow keys
+// navigate the item list, X removes the highlighted item. Item add
+// shortcuts come from chestAddRules so adding an authored item kind
+// to the editor is one row. Esc/Enter close. If every item gets
+// removed the chest stays — an empty chest is a valid authored shape
+// (e.g. flavor decoration) and the runtime renders it pre-looted.
+func updateChestEditModal(s *State) Action {
+	if s.modalChestIdx < 0 || s.modalChestIdx >= len(s.area.ChestSpawns) {
+		closeModal(s)
+		return ActionNone
+	}
+	chest := &s.area.ChestSpawns[s.modalChestIdx]
+	itemCount := len(chest.Items)
+	if s.modalCursor >= itemCount {
+		s.modalCursor = itemCount - 1
+	}
+	if s.modalCursor < 0 {
+		s.modalCursor = 0
+	}
+
+	if input.ModalClosePressed() {
+		closeModal(s)
+		return ActionNone
+	}
+	if itemCount > 0 {
+		s.modalCursor = input.CursorUpDown(s.modalCursor, itemCount)
+		if rl.IsKeyPressed(rl.KeyX) {
+			pushUndo(s)
+			chest.Items = append(chest.Items[:s.modalCursor], chest.Items[s.modalCursor+1:]...)
+			s.dirty = true
+		}
+	}
+	for _, rule := range chestAddRules {
+		if rl.IsKeyPressed(rule.Key) {
+			pushUndo(s)
+			chest.Items = append(chest.Items, rule.Kind)
+			s.modalCursor = len(chest.Items) - 1
+			s.dirty = true
+		}
 	}
 	return ActionNone
 }
@@ -595,12 +937,7 @@ func updateOpenModal(s *State) Action {
 	if len(s.modalPaths) == 0 {
 		return ActionNone
 	}
-	if rl.IsKeyPressed(rl.KeyUp) || rl.IsKeyPressed(rl.KeyW) {
-		s.modalCursor = core.WrapIndex(s.modalCursor-1, len(s.modalPaths))
-	}
-	if rl.IsKeyPressed(rl.KeyDown) {
-		s.modalCursor = core.WrapIndex(s.modalCursor+1, len(s.modalPaths))
-	}
+	s.modalCursor = input.CursorUpDown(s.modalCursor, len(s.modalPaths))
 
 	if rl.IsKeyPressed(rl.KeyR) {
 		s.modalRenaming = core.MapIDFromPath(s.modalPaths[s.modalCursor])
@@ -653,7 +990,7 @@ func updateOpenModal(s *State) Action {
 }
 
 func updateOpenRename(s *State) Action {
-	pumpPrintableASCII(&s.modalRenaming, 64, nil)
+	pumpPrintableASCII(&s.modalRenaming, 64, acceptPrintable, nil)
 	if rl.IsKeyPressed(rl.KeyEscape) {
 		s.modalRenaming = ""
 		return ActionNone
@@ -710,7 +1047,7 @@ func updateOpenConfirmDelete(s *State) Action {
 }
 
 func refreshOpenList(s *State) {
-	paths, _ := mapfile.List(core.MapsDir())
+	paths, _ := mapfile.ListByModTime(core.MapsDir())
 	s.modalPaths = paths
 }
 
@@ -801,7 +1138,11 @@ func confirmModal(s *State) {
 	if s.modal != modalSaveAs {
 		return
 	}
-	name := s.modalFilename
+	// Sanitize at commit so the disk filename is always known-good (lower
+	// ascii + _-) regardless of what the user typed. The Save As field's
+	// preview already shows this sanitized form, so the user has seen
+	// what's about to land.
+	name := sanitizeFilename(s.modalFilename)
 	if name == "" {
 		s.flash("Filename required")
 		return
@@ -816,7 +1157,7 @@ func confirmModal(s *State) {
 }
 
 func confirmModalForce(s *State) {
-	name := s.modalFilename
+	name := sanitizeFilename(s.modalFilename)
 	if name == "" {
 		s.flash("Filename required")
 		return

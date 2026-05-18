@@ -1,6 +1,10 @@
 package input
 
-import rl "github.com/gen2brain/raylib-go/raylib"
+import (
+	"crawler/internal/app/core"
+
+	rl "github.com/gen2brain/raylib-go/raylib"
+)
 
 // gamepadID is the controller slot we read. Raylib supports up to 4; we only
 // care about player one for now.
@@ -105,6 +109,56 @@ func UpPressed() bool {
 func DownPressed() bool {
 	return rl.IsKeyPressed(rl.KeyDown) || rl.IsKeyPressed(rl.KeyS) ||
 		padPressed(rl.GamepadButtonLeftFaceDown) || stickEdgeY(1)
+}
+
+// CursorUpDown applies UpPressed / DownPressed to a wrap-around cursor
+// inside [0, count). One-call replacement for the
+//
+//	if UpPressed()   { cursor = WrapIndex(cursor-1, n) }
+//	if DownPressed() { cursor = WrapIndex(cursor+1, n) }
+//
+// pattern that was repeated in title menus, pause-menu pickers, sound
+// modal columns, and editor pack/open modals. Safe for count <= 0
+// (returns cursor unchanged so callers don't need to guard).
+func CursorUpDown(cursor, count int) int {
+	if count <= 0 {
+		return cursor
+	}
+	if UpPressed() {
+		cursor = core.WrapIndex(cursor-1, count)
+	}
+	if DownPressed() {
+		cursor = core.WrapIndex(cursor+1, count)
+	}
+	return cursor
+}
+
+// ModalClosePressed is the edge-detect predicate for closing an editor
+// modal. Esc and Enter both dismiss — Esc is "cancel", Enter is "I'm
+// done editing" — and the two key handlers had drifted apart across
+// modal updaters until this consolidation. Mouse-only close paths still
+// go through their own button hit-tests; this is the keyboard rule.
+func ModalClosePressed() bool {
+	return rl.IsKeyPressed(rl.KeyEscape) || rl.IsKeyPressed(rl.KeyEnter)
+}
+
+// CursorLeftRight returns -1 on a Left edge, +1 on a Right edge, 0
+// otherwise. Mirrors CursorUpDown's shape so sliders and cue-cycle
+// pickers can share one Left/Right dispatch instead of inlining the
+// keyboard probe twice. Edge-only (IsKeyPressed) so a held key doesn't
+// stream values; callers do the value-adjust math.
+func CursorLeftRight() int {
+	left := rl.IsKeyPressed(rl.KeyLeft) || rl.IsKeyPressed(rl.KeyA) ||
+		padPressed(rl.GamepadButtonLeftFaceLeft) || stickEdgeX(-1)
+	right := rl.IsKeyPressed(rl.KeyRight) || rl.IsKeyPressed(rl.KeyD) ||
+		padPressed(rl.GamepadButtonLeftFaceRight) || stickEdgeX(1)
+	switch {
+	case right && !left:
+		return 1
+	case left && !right:
+		return -1
+	}
+	return 0
 }
 
 func TargetNextPressed() bool {

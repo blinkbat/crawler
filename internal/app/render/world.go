@@ -100,6 +100,17 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 				continue
 			}
 			center := rl.NewVector3(cx, 0, cz)
+			// Ceiling slab: thin textured cube at y = WallHeight,
+			// covering the tile from above. Drawn for every ceiling-
+			// flagged cell (including under-wall ones — the wall fills
+			// floor-to-ceiling, but the slab's bottom face caps the
+			// wall's top edge so adjacent open rooms don't see daylight
+			// peeking through). Uses the material's ceilingModel so the
+			// surface picks up the same lighting/time-of-day uniforms
+			// as walls and floors.
+			if m.CeilingAt(x, z) {
+				drawTileCube(material.ceilingModel, cx, core.WallHeight, cz, tileYawDeg(x, z))
+			}
 			// Walls layer wins — solid blocker, no floor underneath.
 			if m.Walls[z][x] == core.TileRock {
 				drawTileCube(material.wallModel, cx, core.WallHeight/2, cz, tileYawDeg(x, z))
@@ -110,8 +121,10 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 			// Decor: explicit char overrides auto-scatter; '_' suppresses.
 			drawDecor(assets, m.Decor[z][x], x, z, cx, cz)
 			// Props: render by char on the props layer. Built-in cases
-			// (T/X/O/B) keep their per-char scale tuning here; everything
-			// else looks itself up in assets.propModels at scale 1.0.
+			// (T/X/O/B) keep their per-char scale tuning here; multi-tile
+			// anchors fall through the footprint-driven branch; single-
+			// tile fallbacks look themselves up in assets.propModels at
+			// scale 1.0.
 			if prop := m.Props[z][x]; prop != core.TilePropEmpty {
 				propYaw := propYawDeg(x, z)
 				switch prop {
@@ -124,6 +137,18 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 				case core.TileBushLarge:
 					assets.bushProp.draw(center, 1.3, propYaw)
 				default:
+					// Multi-tile anchor: shift the model origin to the
+					// centroid of the footprint so the mesh covers every
+					// occupied tile. Footprint tails (e.g. TileRockFormationTail)
+					// have PropFootprint(tail) == nil AND aren't in
+					// propModels, so they render nothing — the anchor's
+					// mesh on the partner tile covers them.
+					if footprint := core.PropFootprint(prop); footprint != nil {
+						if pm, ok := assets.propModels[prop]; ok {
+							pm.draw(footprintAnchor(center, footprint), 1.0, propYaw)
+						}
+						break
+					}
 					if pm, ok := assets.propModels[prop]; ok {
 						pm.draw(center, 1.0, propYaw)
 					}
@@ -135,6 +160,17 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 }
 
 // drawFloorTile picks a floor variant for the given tile and draws it.
+// footprintAnchor returns the world position of the centroid of a
+// multi-tile footprint, given the anchor tile's center. Wraps
+// core.FootprintWorldOffset so the per-call-site addition + Vector3
+// construction lives in one place — both the props branch and the
+// decor branch of the world renderer would otherwise repeat the same
+// `center + (offX, 0, offZ)` arithmetic.
+func footprintAnchor(center rl.Vector3, footprint []core.MultiTileOffset) rl.Vector3 {
+	ox, oz := core.FootprintWorldOffset(footprint)
+	return rl.NewVector3(center.X+ox, center.Y, center.Z+oz)
+}
+
 // `cell` is the floor-layer character. Resolution order:
 //
 //  1. Universal floor variants (cobble, plank, water, sand, snow) live
@@ -200,6 +236,18 @@ func drawDecor(assets Resources, cell byte, x, z int, cx, cz float32) {
 		return
 	case core.DecorPebble:
 		drawPebbleCluster(assets, cx, cz, tileHash(x, z))
+		return
+	}
+	// Multi-tile decor anchor: shift the model origin to the centroid
+	// of the footprint so the mesh spans every occupied tile. Tail
+	// chars have DecorFootprint(tail) == nil AND aren't in decorModels,
+	// so they render nothing — the anchor on the partner tile covers
+	// them. Yaw is forced to 0 for multi-tile decor so the spanning
+	// orientation stays consistent with the footprint axis.
+	if footprint := core.DecorFootprint(cell); footprint != nil {
+		if dm, ok := assets.decorModels[cell]; ok {
+			dm.draw(footprintAnchor(rl.NewVector3(cx, 0, cz), footprint), 1.0, 0)
+		}
 		return
 	}
 	if dm, ok := assets.decorModels[cell]; ok {
@@ -365,8 +413,8 @@ func drawPebbleCluster(assets Resources, cx, cz float32, tileHash uint32) {
 		// Footprint and height vary independently. Heights are ~1/3 of
 		// footprint so the pebbles sit flat — see drawFloorDecoration's
 		// original comment about reading as walkable.
-		foot := 0.18 + float32((ih>>16)&0x07)*0.012  // 0.18 .. 0.27
-		hght := 0.07 + float32((ih>>20)&0x03)*0.012  // 0.07 .. 0.106
+		foot := 0.18 + float32((ih>>16)&0x07)*0.012   // 0.18 .. 0.27
+		hght := 0.07 + float32((ih>>20)&0x03)*0.012   // 0.07 .. 0.106
 		rot := float32((ih>>24)&0xff) * (360.0 / 256) // 0..360°
 		// Slight x/z asymmetry so each pebble's silhouette breaks alignment
 		// with its neighbors. Sourcing from a different hash bit keeps the
@@ -392,6 +440,12 @@ func DrawEnemies(camera rl.Camera3D, g core.GameState, assets Resources) {
 	drawBattlePack(camera, g, assets)
 }
 
+// enemyBillboardY is the y-anchor for every enemy/pack billboard. Half
+// of TileSize sits the billboard centered on the tile vertically so its
+// bottom edge meets the floor when the sprite size's Y is ~tile-height.
+// Named so the four call sites that used to inline 0.68 can't drift.
+const enemyBillboardY = float32(0.68)
+
 // drawFieldPacks renders one billboard per pack — the highest-tier member,
 // at the pack's authored tile. Empty/all-dead packs are skipped (they're
 // cleaned up by the battle-win path anyway).
@@ -405,9 +459,8 @@ func drawFieldPacks(camera rl.Camera3D, g core.GameState, assets Resources) {
 		if !ok {
 			continue
 		}
-		source := rl.NewRectangle(0, 0, float32(visual.texture.Width), float32(visual.texture.Height))
-		position := rl.NewVector3(core.TileCenter(pack.TileX), 0.68, core.TileCenter(pack.TileZ))
-		rl.DrawBillboardRec(camera, visual.texture, source, position, visual.size, rl.White)
+		position := tileWorldPos(pack.TileX, pack.TileZ, enemyBillboardY)
+		drawTextureBillboard(camera, visual.texture, position, visual.size, rl.White)
 	}
 }
 
@@ -423,14 +476,18 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 		if !enemy.Alive && enemy.DeathFade <= 0 {
 			continue
 		}
-		source := rl.NewRectangle(0, 0, float32(visual.texture.Width), float32(visual.texture.Height))
 		position := enemyDrawPosition(camera, g, i, enemy)
 		tint := rl.White
 		if !enemy.Alive {
 			alpha := uint8(220 * core.ClampFloat64(float64(enemy.DeathFade/core.DeathFadeDuration), 0, 1))
 			tint = rl.NewColor(255, 255, 255, alpha)
 		}
-		if enemy.Alive && g.Battle.ActionMode == core.ActionEnemyTarget && i == g.Battle.EnemyIndex {
+		// Yellow target chevron + tint render only while the player is
+		// in the enemy-target picker. targetingEnemy gates on
+		// Phase==BattlePlayer so the chevron drops the moment the
+		// timing bar arms — shared with the roster row's `targetable`
+		// flag so both yellow indicators behave identically.
+		if enemy.Alive && targetingEnemy(g) && i == g.Battle.EnemyIndex {
 			tint = tintEnemyTargeted
 			drawTargetChevron(camera, position)
 		}
@@ -444,7 +501,7 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 		if enemy.DamageFlash > 0 {
 			tint = core.FlashTint(tint, enemy.DamageFlash)
 		}
-		rl.DrawBillboardRec(camera, visual.texture, source, position, visual.size, tint)
+		drawTextureBillboard(camera, visual.texture, position, visual.size, tint)
 	}
 }
 
@@ -560,7 +617,6 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 		if !ok {
 			continue
 		}
-		source := rl.NewRectangle(0, 0, float32(texture.Width), float32(texture.Height))
 		memberDance := float32(0)
 		if g.Party[i].HP > 0 {
 			memberDance = victoryDance
@@ -581,8 +637,12 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 		if g.Party[i].DamageFlash > 0 {
 			tint = core.FlashTint(tint, g.Party[i].DamageFlash)
 		}
-		rl.DrawBillboardRec(camera, texture, source, position, size, tint)
-		if inPlayerTurn(g) && targetingAlly(g) && i == g.Battle.PartyTarget && g.Party[i].HP > 0 {
+		drawTextureBillboard(camera, texture, position, size, tint)
+		// Same gate as the enemy chevron: target marker only during the
+		// menu phase, NOT during the timing bar that follows the
+		// confirm. inPlayerTurn includes BattleAttackTiming and would
+		// linger the marker through the press.
+		if g.Battle.Phase == core.BattlePlayer && targetingAlly(g) && i == g.Battle.PartyTarget && g.Party[i].HP > 0 {
 			drawFriendlyTargetMarker(camera, position)
 		}
 	}
@@ -644,10 +704,10 @@ func enemyDrawPosition(camera rl.Camera3D, g core.GameState, slot int, enemy cor
 	if g.Battle.Phase == core.BattleNone || g.Battle.ActivePack < 0 {
 		// Fallback for any stray caller during a phase transition; use the
 		// active pack's tile if we still know it.
-		pack := rl.NewVector3(0, 0.68, 0)
+		pack := rl.NewVector3(0, enemyBillboardY, 0)
 		if g.Battle.ActivePack >= 0 && g.Battle.ActivePack < len(g.Packs) {
 			p := g.Packs[g.Battle.ActivePack]
-			pack = rl.NewVector3(core.TileCenter(p.TileX), 0.68, core.TileCenter(p.TileZ))
+			pack = tileWorldPos(p.TileX, p.TileZ, enemyBillboardY)
 		}
 		return pack
 	}
@@ -655,7 +715,7 @@ func enemyDrawPosition(camera rl.Camera3D, g core.GameState, slot int, enemy cor
 	visibleSlot, count := battleEnemySlot(g, slot)
 	if count <= 0 {
 		p := g.Packs[g.Battle.ActivePack]
-		return rl.NewVector3(core.TileCenter(p.TileX), 0.68, core.TileCenter(p.TileZ))
+		return tileWorldPos(p.TileX, p.TileZ, enemyBillboardY)
 	}
 	forward := horizontalForward(camera)
 	right := rl.NewVector3(-forward.Z, 0, forward.X)

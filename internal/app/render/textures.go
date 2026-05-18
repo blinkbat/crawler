@@ -655,7 +655,7 @@ func valueNoise(x, y float64) float64 {
 
 	x1 := c00 + u*(c10-c00)
 	x2 := c01 + u*(c11-c01)
-	return (x1 + v*(x2-x1)) * 2.0 - 1.0
+	return (x1+v*(x2-x1))*2.0 - 1.0
 }
 
 func hashFloat(x, y int) float64 {

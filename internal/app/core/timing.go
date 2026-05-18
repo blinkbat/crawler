@@ -11,9 +11,10 @@ const (
 )
 
 // TimingKind picks how the bar grades input.
-//   Press:    hit the input once during a window.
-//   Charge:   hold through three ticks, release at the peak.
-//   Sequence: tap a randomized run of directions in order before time's up.
+//
+//	Press:    hit the input once during a window.
+//	Charge:   hold through three ticks, release at the peak.
+//	Sequence: tap a randomized run of directions in order before time's up.
 const (
 	TimingKindPress    = 0
 	TimingKindCharge   = 1
@@ -44,16 +45,16 @@ const (
 //
 // Field semantics by kind:
 //
-//   Press:
-//     WindowStart..WindowEnd is the green acceptance window.
-//     SweetSpot is the centered "Excellent" tick.
-//     Pressed is true once the input fired.
+//	Press:
+//	  WindowStart..WindowEnd is the green acceptance window.
+//	  SweetSpot is the centered "Excellent" tick.
+//	  Pressed is true once the input fired.
 //
-//   Charge:
-//     WindowStart..WindowEnd is the peak release window (right after the 3rd
-//     tick lands). SweetSpot is the centered "Excellent" point inside it.
-//     Pressed is true once the player ever held the input.
-//     Released is true once they let go (or the bar timed out while held).
+//	Charge:
+//	  WindowStart..WindowEnd is the peak release window (right after the 3rd
+//	  tick lands). SweetSpot is the centered "Excellent" point inside it.
+//	  Pressed is true once the player ever held the input.
+//	  Released is true once they let go (or the bar timed out while held).
 type TimingState struct {
 	Kind        int
 	Active      bool

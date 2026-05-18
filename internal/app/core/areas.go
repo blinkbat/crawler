@@ -18,26 +18,45 @@ const (
 // absolute or cwd-relative path at runtime.
 const mapsDirName = "maps"
 
-// MapsDir returns the directory where .map files live. It prefers a cwd-
-// relative `maps/` (so `go run` from the repo root works), then falls back
-// to a `maps/` directory next to the running executable (so a portable
-// copy of the binary works from any cwd). When neither exists yet (first
-// run), returns the cwd-relative form so the editor's first save creates
-// it cwd-relative.
+// AssetDirMode is the os.MkdirAll mode used for every auto-created asset
+// directory (maps/, maps/sounds/, etc.). Centralized so a project-wide
+// permissions change is one edit instead of grep-and-replace.
+const AssetDirMode = 0o755
+
+// MapsDir returns the directory where .map files live. Thin wrapper
+// over ResolveAssetDir so the asset-folder lookup story is consistent
+// with maps/sounds/ and any future asset directory.
 func MapsDir() string {
-	if dirExists(mapsDirName) {
-		return mapsDirName
+	return ResolveAssetDir(mapsDirName)
+}
+
+// ResolveAssetDir resolves a relative asset folder name (e.g. "maps" or
+// "maps/sounds") to a usable on-disk path. Resolution order: prefer the
+// cwd-relative form (so `go run` from the repo root works) → fall back
+// to the same path next to the running executable (so a portable copy
+// of the binary works from any cwd) → fall back to the cwd-relative
+// form for the first-run case so the caller's first write creates it
+// where the user is.
+//
+// Used by core.MapsDir, audio.SoundsDir, and any future asset-folder
+// helper so the resolution machinery isn't duplicated per asset type.
+func ResolveAssetDir(rel string) string {
+	if DirExists(rel) {
+		return rel
 	}
 	if exe, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), mapsDirName)
-		if dirExists(candidate) {
+		candidate := filepath.Join(filepath.Dir(exe), rel)
+		if DirExists(candidate) {
 			return candidate
 		}
 	}
-	return mapsDirName
+	return rel
 }
 
-func dirExists(path string) bool {
+// DirExists is the canonical "is `path` an existing directory?" check.
+// Shared by the asset-dir resolvers so they don't each carry their own
+// private dirExists helper.
+func DirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
 }
@@ -63,6 +82,36 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	if !ok {
 		return AreaDefinition{}, fmt.Errorf("unknown facing %q", mf.StartFace)
 	}
+	// Dimensions and start position must be in-bounds before the rest of
+	// the runtime trusts them. Without this, a corrupt .map file (zero
+	// width, OOB start) reaches the renderer / WallAt / movement and
+	// panics on the first index. The editor's reachability check guards
+	// the F5 path; this guards Load-from-disk.
+	if mf.Width <= 0 || mf.Height <= 0 {
+		return AreaDefinition{}, fmt.Errorf("map dimensions must be positive (got %dx%d)", mf.Width, mf.Height)
+	}
+	layers := []struct {
+		name string
+		rows []string
+	}{
+		{"walls", mf.Walls},
+		{"floor", mf.Floor},
+		{"decor", mf.Decor},
+		{"props", mf.Props},
+	}
+	for _, layer := range layers {
+		if len(layer.rows) != mf.Height {
+			return AreaDefinition{}, fmt.Errorf("%s layer has %d rows, declared height %d", layer.name, len(layer.rows), mf.Height)
+		}
+		for i, row := range layer.rows {
+			if len(row) != mf.Width {
+				return AreaDefinition{}, fmt.Errorf("%s layer row %d has width %d, want %d", layer.name, i, len(row), mf.Width)
+			}
+		}
+	}
+	if mf.StartX < 0 || mf.StartX >= mf.Width || mf.StartZ < 0 || mf.StartZ >= mf.Height {
+		return AreaDefinition{}, fmt.Errorf("start position (%d,%d) is out of bounds for %dx%d", mf.StartX, mf.StartZ, mf.Width, mf.Height)
+	}
 	spawns := make([]PackSpawn, 0, len(mf.Packs))
 	for _, p := range mf.Packs {
 		if len(p.Members) == 0 {
@@ -78,6 +127,22 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		}
 		spawns = append(spawns, PackSpawn{TileX: p.X, TileZ: p.Z, Members: members})
 	}
+	chests := make([]ChestSpawn, 0, len(mf.Chests))
+	for _, c := range mf.Chests {
+		kinds := make([]ItemKind, 0, len(c.Items))
+		for _, name := range c.Items {
+			kind := ItemKindByName(name)
+			if kind == ItemNone {
+				return AreaDefinition{}, fmt.Errorf("unknown chest item %q at (%d,%d)", name, c.X, c.Z)
+			}
+			kinds = append(kinds, kind)
+		}
+		chests = append(chests, ChestSpawn{TileX: c.X, TileZ: c.Z, Items: kinds})
+	}
+	ceiling := mf.Ceiling
+	if len(ceiling) == 0 {
+		ceiling = mapfile.BlankLayer(mf.Width, mf.Height, TileCeilingOpen)
+	}
 	return AreaDefinition{
 		Path:         path,
 		Name:         mf.Name,
@@ -87,11 +152,13 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		Floor:        append([]string(nil), mf.Floor...),
 		Decor:        append([]string(nil), mf.Decor...),
 		Props:        append([]string(nil), mf.Props...),
+		Ceiling:      append([]string(nil), ceiling...),
 		Materials:    mat,
 		StartTileX:   mf.StartX,
 		StartTileZ:   mf.StartZ,
 		StartFacing:  face,
 		PackSpawns:   spawns,
+		ChestSpawns:  chests,
 		QuietMessage: mf.Quiet,
 	}, nil
 }
@@ -126,6 +193,22 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 			Z:       s.TileZ,
 		})
 	}
+	chests := make([]mapfile.MapChest, 0, len(a.ChestSpawns))
+	for _, c := range a.ChestSpawns {
+		names := make([]string, 0, len(c.Items))
+		for _, kind := range c.Items {
+			info := ItemInfo(kind)
+			if info.Name == "" || info.Name == "Unknown Item" {
+				return mapfile.MapFile{}, fmt.Errorf("unknown chest item kind %d at (%d,%d)", int(kind), c.TileX, c.TileZ)
+			}
+			names = append(names, info.Name)
+		}
+		chests = append(chests, mapfile.MapChest{Items: names, X: c.TileX, Z: c.TileZ})
+	}
+	ceiling := a.Ceiling
+	if len(ceiling) == 0 {
+		ceiling = mapfile.BlankLayer(a.Width, a.Height, TileCeilingOpen)
+	}
 	return mapfile.MapFile{
 		Name:      a.Name,
 		Materials: matName,
@@ -139,7 +222,9 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		Floor:     append([]string(nil), a.Floor...),
 		Decor:     append([]string(nil), a.Decor...),
 		Props:     append([]string(nil), a.Props...),
+		Ceiling:   append([]string(nil), ceiling...),
 		Packs:     packs,
+		Chests:    chests,
 	}, nil
 }
 
@@ -237,6 +322,9 @@ var enemyKindNameTable = []enemyKindNameEntry{
 	// "diseasedrat" is accepted as a legacy alias for files saved before
 	// the underscore-separated form became canonical.
 	{EnemyDiseasedRat, "diseased_rat", []string{"diseasedrat"}},
+	{EnemyGoblin, "goblin", nil},
+	{EnemyGoblinMage, "goblin_mage", []string{"goblinmage"}},
+	{EnemyAmoeba, "amoeba", nil},
 }
 
 // enemyKindByName flattens enemyKindNameTable into a single primary+alias
@@ -272,8 +360,42 @@ func EnemyKindFromName(s string) (EnemyKind, bool) {
 	return kind, ok
 }
 
+// SanitizeFilename normalizes a user-provided string into a safe on-disk
+// filename stem — lowercase ASCII letters, digits, underscore, hyphen
+// only. Spaces fold to underscore; everything else strips. If `fallback`
+// is non-empty it's returned when the input has nothing usable left;
+// otherwise the empty string comes back so the caller can refuse the
+// save. Shared by the editor's map-save flow and audio's user-sound
+// save so both apply the same character-class contract.
+func SanitizeFilename(name, fallback string) string {
+	out := strings.ToLower(strings.TrimSpace(name))
+	out = strings.ReplaceAll(out, " ", "_")
+	cleaned := make([]byte, 0, len(out))
+	for i := 0; i < len(out); i++ {
+		c := out[i]
+		switch {
+		case c >= 'a' && c <= 'z':
+			cleaned = append(cleaned, c)
+		case c >= '0' && c <= '9':
+			cleaned = append(cleaned, c)
+		case c == '_' || c == '-':
+			cleaned = append(cleaned, c)
+		}
+	}
+	if len(cleaned) == 0 {
+		return fallback
+	}
+	return string(cleaned)
+}
+
 // MapPath returns the canonical save path for a map ID under MapsDir.
+// Strips a trailing ".map" (case-insensitive) from the id before appending
+// the canonical ".map" extension — so a user typing "test.map" in the
+// Save As field writes to maps/test.map, not maps/test.map.map.
 func MapPath(id string) string {
+	if len(id) >= 4 && strings.EqualFold(id[len(id)-4:], ".map") {
+		id = id[:len(id)-4]
+	}
 	return filepath.Join(MapsDir(), id+".map")
 }
 

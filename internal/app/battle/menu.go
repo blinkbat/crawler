@@ -4,6 +4,7 @@ import (
 	"crawler/internal/app/core"
 	"crawler/internal/app/input"
 	"fmt"
+	"log"
 )
 
 func updateActionMenu(g *core.GameState) {
@@ -245,18 +246,24 @@ func cyclePartyTarget(g *core.GameState, delta int) {
 // cyclePartyTarget) maintain that invariant by sourcing both the current
 // selection AND the living-target list from the same selectors.
 //
-// If `current` isn't found in `targets`, we fall back to "slot 0 + delta"
-// rather than erroring: it's an unreachable state today, but the silent
-// wrap from index 0 is at least predictable. If a future caller breaks
-// the invariant, the wrap will be visibly wrong in-game (selection
-// jumps to the front), which is louder than an internal panic.
+// If `current` isn't found in `targets`, the wrap falls back to "slot 0 +
+// delta" so the game keeps running, but the invariant break is logged so
+// the regression surfaces to whoever is debugging. Previously this was a
+// silent fallback — if a future steal removes the targeted enemy mid-list
+// or a heal target dies between frames, the cursor would jump to the
+// front with no diagnostic trail.
 func cycleTarget(current int, targets []int, delta int) int {
 	currentSlot := 0
+	found := false
 	for i, target := range targets {
 		if target == current {
 			currentSlot = i
+			found = true
 			break
 		}
+	}
+	if !found {
+		log.Printf("battle.cycleTarget: current=%d not in targets=%v (selection invariant broken)", current, targets)
 	}
 	return core.WrapIndex(currentSlot+delta, len(targets))
 }

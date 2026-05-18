@@ -41,6 +41,12 @@ var (
 	barMP      = rl.NewColor(96, 162, 232, 255)
 	barEnemyHP = rl.NewColor(216, 80, 76, 255)
 	barBurn    = rl.NewColor(248, 132, 64, 255)
+	// barSleep is the indigo-blue used for the sleep-status indicator
+	// (Z-counter beside enemy HP bars). Shares the barMP RGB but with
+	// reduced alpha so the panel reads as "soft glow" rather than the
+	// solid MP-bar tone.
+	barSleep        = rl.NewColor(96, 162, 232, 200)
+	barSleepOutline = rl.NewColor(190, 220, 244, 220)
 
 	// Billboard tints for the in-world combatant markers — the warm
 	// off-white the player's target reads as, and the slightly redder
@@ -49,6 +55,17 @@ var (
 	// world.go's draw loop.
 	tintEnemyTargeted = rl.NewColor(255, 228, 190, 255)
 	tintEnemyAttacker = rl.NewColor(255, 196, 156, 255)
+
+	// chestColors govern the chest billboard — body color, lid color,
+	// and the deeper tone for an emptied/looted chest. Pulled out here
+	// rather than open-coded in DrawChests so the palette can be tuned
+	// without hunting through world-render code. The interact prompt
+	// reuses borderActive (the global "draw the player's eye here"
+	// yellow) so adding a new prompt color isn't needed.
+	chestBodyColor  = rl.NewColor(168, 116, 70, 255)
+	chestBodyLooted = rl.NewColor(98, 76, 56, 255)
+	chestLidColor   = rl.NewColor(196, 148, 92, 255)
+	chestMetalColor = rl.NewColor(220, 192, 102, 255)
 
 	// Shadow tints for drop-shadowed text and overlay scrims. Pre-named so
 	// callers don't open-code rl.NewColor(0,0,0,…) with a drifting alpha.
@@ -159,6 +176,18 @@ func fadeColor(col color.RGBA, alpha float32) color.RGBA {
 	return col
 }
 
+// colorWithAlpha replaces col's alpha channel with `byteAlpha` (0-255).
+// Differs from fadeColor which multiplies the existing alpha by a
+// normalized 0..1 factor — colorWithAlpha is the "I know exactly what
+// alpha I want, regardless of the source color's alpha" form. Used by
+// turn-order panel tints (per-class color at varying transparencies
+// based on row state) where the source colors already encode the hue
+// and the alpha is a UI-state knob.
+func colorWithAlpha(col color.RGBA, byteAlpha uint8) color.RGBA {
+	col.A = byteAlpha
+	return col
+}
+
 // hpFillColor selects a tier color based on remaining HP percent.
 func hpFillColor(value, maxValue int) color.RGBA {
 	if maxValue <= 0 {
@@ -242,12 +271,27 @@ func formatBarValue(value, maxValue int) string {
 	return fmt.Sprintf("%d/%d", value, maxValue)
 }
 
+// drawTriangleCCW wraps rl.DrawTriangle with an explicit "vertices are in
+// counter-clockwise order in screen-Y-down coords" contract. raylib's 2D
+// pipeline has GL_CULL_FACE enabled on some drivers (Intel/AMD have been
+// observed culling CW-wound triangles silently — the triangle just doesn't
+// appear). Use this helper at every 2D triangle call site so the winding
+// requirement is named at the call, not buried in a comment somewhere.
+//
+// "CCW in screen-Y-down" means the signed cross product of (b-a)×(c-b) is
+// NEGATIVE — that's the inverted convention vs the y-up math-textbook one
+// because screen Y increases downward.
+func drawTriangleCCW(a, b, c rl.Vector2, col color.RGBA) {
+	rl.DrawTriangle(a, b, c, col)
+}
+
 // drawArrowMarker paints a small triangle chevron. The base sits at `center`
 // perpendicular to the direction; the apex is `center + (tipDx, tipDy)`.
 // Base width is 2*halfWidth. Used by HUD selection / target / active-actor
 // indicators where a tiny arrow reads better than a label — saves party,
 // battle, and item-target panels from each computing their own three
-// rl.Vector2 corners by hand.
+// rl.Vector2 corners by hand. Goes through drawTriangleCCW so the winding
+// constraint stays visible.
 func drawArrowMarker(center rl.Vector2, tipDx, tipDy, halfWidth float32, col color.RGBA) {
 	tipLen := float32(math.Sqrt(float64(tipDx*tipDx + tipDy*tipDy)))
 	if tipLen == 0 {
@@ -255,7 +299,10 @@ func drawArrowMarker(center rl.Vector2, tipDx, tipDy, halfWidth float32, col col
 	}
 	px := -tipDy / tipLen * halfWidth
 	py := tipDx / tipLen * halfWidth
-	rl.DrawTriangle(
+	// Apex → base1 → base2 is CCW in screen-Y-down for any tipDx/tipDy
+	// because px/py is the (tipDx,tipDy) vector rotated +90° in screen
+	// space (which is -90° in math space → CCW).
+	drawTriangleCCW(
 		rl.NewVector2(center.X+tipDx, center.Y+tipDy),
 		rl.NewVector2(center.X-px, center.Y-py),
 		rl.NewVector2(center.X+px, center.Y+py),

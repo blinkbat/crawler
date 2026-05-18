@@ -15,6 +15,29 @@ type PackSpawn struct {
 	Members []EnemyKind
 }
 
+// ChestSpawn is one authored chest on the map: a tile position and the
+// loot the chest holds. The runtime form (Chest) carries an additional
+// Looted flag so re-opening an already-emptied chest is a cheap no-op
+// instead of regenerating the items.
+type ChestSpawn struct {
+	TileX int
+	TileZ int
+	Items []ItemKind
+}
+
+// Chest is one runtime chest on the field. Items is the stack-counted
+// loot the player can withdraw via the chest-open modal; Looted goes
+// true once every stack is drained (or Take All fires), at which point
+// the chest renders open and ignores further interactions. Chests block
+// movement onto their tile — the player walks up to an adjacent square
+// and opens with the Confirm key.
+type Chest struct {
+	TileX  int
+	TileZ  int
+	Items  []ItemStack
+	Looted bool
+}
+
 // AreaDefinition is the runtime form of a map. Built from a mapfile.MapFile
 // via AreaFromMapFile (see areas.go). Path is the source disk location and
 // is empty for unsaved maps the editor is still working on.
@@ -24,19 +47,28 @@ type PackSpawn struct {
 // explicitly so blank layers can be reconstructed without inferring
 // from any single grid (an empty .map gets all four blank).
 type AreaDefinition struct {
-	Path         string
-	Name         string
-	Width        int
-	Height       int
-	Walls        []string
-	Floor        []string
-	Decor        []string
-	Props        []string
-	Materials    MaterialSet
-	StartTileX   int
-	StartTileZ   int
-	StartFacing  int
-	PackSpawns   []PackSpawn
+	Path   string
+	Name   string
+	Width  int
+	Height int
+	Walls  []string
+	Floor  []string
+	Decor  []string
+	Props  []string
+	// Ceiling is the fifth geometry layer: same dimensions as Walls, but
+	// only TileCeilingSolid cells get an overhead slab rendered. Empty
+	// rows here are normalized into a blank layer at load time so older
+	// .map files (pre-ceiling) keep working without a re-save.
+	Ceiling     []string
+	Materials   MaterialSet
+	StartTileX  int
+	StartTileZ  int
+	StartFacing int
+	PackSpawns  []PackSpawn
+	// ChestSpawns is the authored chest list. Converted to runtime
+	// Chests in NewGameState; the field-render and interact paths read
+	// the runtime list, not this one.
+	ChestSpawns  []ChestSpawn
 	QuietMessage string
 }
 
@@ -87,7 +119,34 @@ type GameState struct {
 	// Inventory is shared across the party — single global stack list.
 	// Stocked by Steal pickups and consumed by the in-battle Item action.
 	Inventory []ItemStack
-	Quit      bool
+	// Chests is the runtime list of on-field chests. Built from
+	// AreaDefinition.ChestSpawns by NewGameState. Looted chests stay in
+	// the slice (so their open-lid sprite keeps rendering); the explore
+	// loop just refuses interaction on them.
+	Chests []Chest
+	// ChestOpen is the index into Chests of the currently-open chest, or
+	// -1 when no chest UI is showing. ChestMenuIndex is the cursor row
+	// inside the open chest (which item is highlighted). Both live in
+	// GameState (not a transient overlay slice) so the pause menu and
+	// the renderer can branch on "is a chest modal showing right now?"
+	// without reaching into explore.
+	ChestOpen      int
+	ChestMenuIndex int
+	// LevelUpOpen is true while the post-battle level-up modal is up.
+	// LevelUpMember is the index into Party of the member currently
+	// allocating stat points; the modal walks members in slice order
+	// and closes when no member has PendingLevelUps left. LevelUpStat
+	// is the row cursor inside the modal (a core.Stat). Same shape as
+	// the chest modal — explore.Update gates on LevelUpOpen above the
+	// pause/battle priorities so the player can't accidentally drift.
+	LevelUpOpen   bool
+	LevelUpMember int
+	LevelUpStat   Stat
+	// StatsScreenOpen is true while the read-only Party Stats overlay
+	// is showing (Party Stats pause-menu entry). Out-of-battle only —
+	// in battle the pause menu is suppressed.
+	StatsScreenOpen bool
+	Quit            bool
 	// RNG is the per-state random source for all gameplay rolls (accuracy,
 	// steal, burn duration, press-window placement, etc.). Per-state means
 	// two GameStates (e.g. a fresh playtest after an editor change) don't
@@ -141,6 +200,12 @@ type PartyMember struct {
 	MaxHP int // derived from Stats.VIT
 	MP    int
 	MaxMP int
+	// Armor lives outside Stats so it isn't a spendable level-up stat —
+	// it's defensive scaffolding for future equipment. Defaults to 0 for
+	// every party member at character creation; enemies set non-zero
+	// values in their EnemyDefinition (amoeba is the headline tanky
+	// foe). Clipped against phys-tagged incoming damage in ApplyArmor.
+	Armor int
 
 	AttackBump  float32
 	DamageFlash float32
@@ -158,6 +223,23 @@ type PartyMember struct {
 	// Inflicted by the Diseased Rat's bite; cannot stack onto an already-
 	// poisoned member (mirrors the Burn rule for enemies).
 	PoisonTurns int
+
+	// SleepTurns counts down at the start of the member's own turn (like
+	// Burn). While > 0, the turn skips entirely. Any incoming damage > 0
+	// wakes the sleeper and zeroes the counter. Doesn't stack onto an
+	// already-sleeping target. Inflicted by SkillSleep (goblin mage).
+	SleepTurns int
+
+	// Level and XP track per-character progression. XP is the running
+	// total toward the next level; XPForLevel(Level) is the threshold.
+	// PendingLevelUps queues completed level-ups whose stat points the
+	// player hasn't spent yet — populated by ApplyXP, drained by the
+	// level-up modal. Per-character (not pooled) so each member has
+	// their own pace; living members get the full encounter XP, dead
+	// members get nothing.
+	Level           int
+	XP              int
+	PendingLevelUps int
 }
 
 // MaxHPFor returns the derived MaxHP from a Stats block. Two HP per VIT keeps
@@ -238,8 +320,8 @@ func StealChance(s Stats, base float64) float64 {
 }
 
 type Enemy struct {
-	Kind EnemyKind
-	HP   int
+	Kind  EnemyKind
+	HP    int
 	MaxHP int
 	Alive bool
 	// Item is the steal loot. Seeded from EnemyDefinition.Item at spawn time
@@ -249,10 +331,22 @@ type Enemy struct {
 	// fields can follow in the same pass.
 	Item string
 
+	// Armor is the per-instance damage damp seeded from
+	// EnemyDefinition.Armor at NewEnemy time. Phys-tagged damage clips
+	// by this amount (floor 1); magic / heal / buff bypass entirely.
+	// Stored per-instance so a future "amoeba splits, halving its
+	// armor" mechanic can mutate it without changing the definition.
+	Armor int
+
 	AttackBump  float32
 	DamageFlash float32
 	DeathFade   float32
 	BurnTurns   int
+	// SleepTurns counts down at the start of the enemy's own turn (same
+	// shape as BurnTurns). Currently the goblin mage only inflicts
+	// sleep on the party, but the field exists so a future "Lullaby"
+	// party skill against enemies plugs into the same machinery.
+	SleepTurns int
 
 	// Floating damage popup state. Value is the number to show, Quality is
 	// the timing grade (drives color + the trailing "!" on Excellent), Timer
@@ -330,14 +424,30 @@ type Battle struct {
 	// bar visible for a beat after a press; TimingIntro is a pre-bar pause so
 	// the prompt reads. EnemyAttacker tracks the queue slot of an attacking
 	// enemy. LastQuality* drives the floating popup over the actor.
-	Timing             TimingState
-	TimingFlash        float32
-	TimingIntro        float32
+	Timing      TimingState
+	TimingFlash float32
+	TimingIntro float32
+	// ChargeNeedsRelease is set when a charge bar arms to gate the
+	// engage check until the player has RELEASED the confirm key from
+	// menu confirmation. Without it, the same Enter that confirmed the
+	// target would bleed into the bar's held-state check and engage
+	// the charge immediately. Cleared on first frame where
+	// AttackTimingHeld() is false after the bar arms; thereafter
+	// fresh presses engage the charge normally.
+	ChargeNeedsRelease bool
 	EnemyAttacker      int
 	LastQuality        int
 	LastQualityTimer   float32
 	LastQualityIndex   int
 	LastQualityIsBlock bool
+
+	// EnemyPendingSkill is the skill the currently-attacking enemy is
+	// casting this turn (goblin mage Firebolt / Sleep). SkillNone means
+	// "plain melee" — the existing defend-timing path runs. When set,
+	// updateEnemyTiming skips the defend bar and routes to
+	// resolveEnemySpell instead of resolveEnemyAttacker. Cleared on
+	// turn end by resolveAndFinishEnemyAttack.
+	EnemyPendingSkill SkillID
 
 	// HitStop is the post-flash freeze on Great/Excellent grades — see
 	// HitStopFor in core/timing.go. While >0, battle Update returns early

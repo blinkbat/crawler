@@ -10,7 +10,9 @@ import (
 // duplicated as raw rl.NewColor literals across draw.go.
 var (
 	// Panels and backgrounds — ascend in lightness from window backdrop to
-	// hover-highlighted entries.
+	// hover-highlighted entries. bgFieldInset is the deepest tone, used as
+	// the recessed background for editable text fields and the grid pane.
+	bgFieldInset  = rl.NewColor(14, 16, 22, 255)
 	bgWindow      = rl.NewColor(20, 22, 30, 255)
 	bgPaletteCol  = rl.NewColor(24, 28, 38, 255)
 	bgPanel       = rl.NewColor(28, 32, 44, 255)
@@ -24,17 +26,30 @@ var (
 	// Borders. dim is the resting state, active is the selection-outline
 	// color; outlineHard is the dark seam between panels. Prefixed with
 	// "editor" so they don't shadow theme.BorderDim / theme.BorderActive
-	// at call sites that consume both.
-	editorBorderDim    = rl.NewColor(70, 80, 100, 255)
-	editorBorderMid    = rl.NewColor(96, 108, 132, 255)
-	editorBorderActive = rl.NewColor(180, 220, 244, 255)
-	outlineHard        = rl.NewColor(8, 10, 14, 255)
+	// at call sites that consume both. editorBorderInactive sits between
+	// outlineHard and editorBorderDim — used for readonly-value frames.
+	editorBorderInactive = rl.NewColor(50, 58, 76, 255)
+	editorBorderDim      = rl.NewColor(70, 80, 100, 255)
+	editorBorderMid      = rl.NewColor(96, 108, 132, 255)
+	editorBorderActive   = rl.NewColor(180, 220, 244, 255)
+	outlineHard          = rl.NewColor(8, 10, 14, 255)
 
 	// Text colors specific to the editor; the shared HUD theme covers most
 	// strings, these handle the brighter entry text and the swatch outline.
 	textBright   = rl.NewColor(220, 230, 245, 255)
 	textEntry    = rl.NewColor(230, 234, 244, 255)
+	textReadonly = rl.NewColor(200, 210, 230, 255)
 	swatchEdge   = rl.NewColor(0, 0, 0, 200)
 	gridLineCol  = rl.NewColor(0, 0, 0, 80)
-	overlayShade = rl.NewColor(0, 0, 0, 185)
+
+	// Tile-color fallback palette. floorAutoColor is the warm tan used
+	// for unrecognized floor and decor tiles (and also the FloorAuto
+	// brush swatch in editor.go); editorFallbackColor is the neutral
+	// grey for unrecognized props and the "unknown char" last-resort;
+	// ceilingFallbackColor is the muted brown that mirrors the indoor
+	// ceiling slab tone for any non-palette ceiling char (corrupted
+	// save, future char dropped from the brush list).
+	floorAutoColor       = rl.NewColor(160, 168, 140, 255)
+	editorFallbackColor  = rl.NewColor(200, 200, 200, 255)
+	ceilingFallbackColor = rl.NewColor(110, 96, 80, 255)
 )

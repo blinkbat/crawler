@@ -201,6 +201,68 @@ func PackLeader(p Pack) Enemy {
 	return p.Members[PackLeaderSlot(p)]
 }
 
+// PackLeaderKindSlot is the EnemyKind-only variant of PackLeaderSlot.
+// Editor tooling works with []EnemyKind (pre-spawn pack specs) and can't
+// build a full []Enemy just to ask "which member draws as the field
+// icon?" — this keeps the highest-Tier-wins rule in one place.
+func PackLeaderKindSlot(kinds []EnemyKind) int {
+	bestSlot := 0
+	bestTier := -1
+	for i, k := range kinds {
+		t := EnemyInfo(k).Tier
+		if t > bestTier {
+			bestTier = t
+			bestSlot = i
+		}
+	}
+	return bestSlot
+}
+
+// PackLeaderKind returns the highest-Tier EnemyKind in the slice, or
+// EnemyRat when the slice is empty (matches the editor's fallback for an
+// empty pack spec). Ties are broken by member order.
+func PackLeaderKind(kinds []EnemyKind) EnemyKind {
+	if len(kinds) == 0 {
+		return EnemyRat
+	}
+	return kinds[PackLeaderKindSlot(kinds)]
+}
+
+// PackXPValue is the sum of XPValue across every member of a pack —
+// the loot pool every living member earns when this pack falls. Per-
+// character (not split), so a 3-rat pack pays 15 XP to each survivor.
+func PackXPValue(p Pack) int {
+	total := 0
+	for _, m := range p.Members {
+		total += EnemyInfo(m.Kind).XPValue
+	}
+	return total
+}
+
+// AwardBattleXP grants the active pack's PackXPValue to every living
+// party member and processes level-ups. Returns the per-member XP
+// amount and the indices of members who gained at least one level
+// (for log messages). Called from winBattle right after the kill is
+// confirmed but before the victory timer / level-up modal trigger.
+func AwardBattleXP(g *GameState) (perMember int, leveledIndices []int) {
+	if g.Battle.ActivePack < 0 || g.Battle.ActivePack >= len(g.Packs) {
+		return 0, nil
+	}
+	perMember = PackXPValue(g.Packs[g.Battle.ActivePack])
+	if perMember <= 0 {
+		return 0, nil
+	}
+	for i := range g.Party {
+		if g.Party[i].HP <= 0 {
+			continue
+		}
+		if AddXP(&g.Party[i], perMember) > 0 {
+			leveledIndices = append(leveledIndices, i)
+		}
+	}
+	return perMember, leveledIndices
+}
+
 // PackAlive reports whether any member of the pack is still alive.
 func PackAlive(p Pack) bool {
 	for _, m := range p.Members {
@@ -269,4 +331,3 @@ func turnEntryFor(g GameState, actor ActorRef) (TurnEntry, bool) {
 	}
 	return TurnEntry{Label: EnemyInfoFor(enemy).SingularName, Enemy: true}, true
 }
-

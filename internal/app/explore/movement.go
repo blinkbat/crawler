@@ -4,6 +4,7 @@ import (
 	"crawler/internal/app/battle"
 	"crawler/internal/app/core"
 	"crawler/internal/app/input"
+	"crawler/internal/app/render"
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"math"
 )
@@ -16,6 +17,35 @@ func Update(g *core.GameState) {
 	// minimum-effective tick rate.
 	if dt > 1.0/15.0 {
 		dt = 1.0 / 15.0
+	}
+
+	// The level-up modal sits above every other overlay — the player
+	// MUST allocate the points they just earned before drifting back
+	// into exploration (or a chest, or the pause menu). No Esc-out:
+	// PendingLevelUps reads as a debt the player owes the system.
+	if g.LevelUpOpen {
+		updateLevelUpModal(g)
+		return
+	}
+
+	// Read-only Party Stats overlay opens from the pause menu and
+	// closes with Esc/Back. No state mutation here — the screen is
+	// purely informational; we just gate input so movement / pause
+	// don't leak through.
+	if g.StatsScreenOpen {
+		if input.BackPressed() {
+			g.StatsScreenOpen = false
+		}
+		return
+	}
+
+	// The chest modal sits above movement but below the pause menu — Esc
+	// from inside a chest closes the chest, not the game. Handled first so
+	// the player can't drift around (or open the pause menu) while a chest
+	// dialog is showing on screen.
+	if g.ChestOpen >= 0 {
+		updateChestModal(g)
+		return
 	}
 
 	// The pause menu sits above the simulation: when it's open we route input
@@ -43,10 +73,33 @@ func Update(g *core.GameState) {
 	if g.Player.Anim.Kind == core.AnimNone && startAdjacent(g) {
 		return
 	}
+	// Confirm key opens an adjacent chest. Checked before movement so a
+	// "step forward + Enter" muscle-memory press doesn't double as a step
+	// in the chest's direction.
+	if g.Player.Anim.Kind == core.AnimNone && tryOpenAdjacentChest(g) {
+		return
+	}
 	updatePlayer(g)
 	if g.Battle.Phase == core.BattleNone && g.Player.Anim.Kind == core.AnimNone {
 		startAdjacent(g)
 	}
+}
+
+// tryOpenAdjacentChest is the Confirm-key interaction for chests. If
+// the player is one tile away from a non-looted chest, open its modal
+// and return true so the rest of the explore tick (free-look, movement)
+// skips this frame.
+func tryOpenAdjacentChest(g *core.GameState) bool {
+	if !input.ConfirmPressed() {
+		return false
+	}
+	idx := core.AdjacentInteractableChestIndex(g.Chests, g.Player.TileX, g.Player.TileZ)
+	if idx < 0 {
+		return false
+	}
+	g.ChestOpen = idx
+	g.ChestMenuIndex = 0
+	return true
 }
 
 // pauseAllowed reports whether the global pause menu can be opened right now.
@@ -83,8 +136,19 @@ func updateMenu(g *core.GameState) {
 		switch core.PauseMenuItem(g.MenuIndex) {
 		case core.PauseMenuRestart:
 			restartGame(g)
+		case core.PauseMenuStats:
+			// Drop the pause menu and raise the read-only stats overlay.
+			// Esc inside the stats screen closes it (handled at the
+			// top of explore.Update so the overlay shadows pause input
+			// the same way a chest does).
+			g.MenuOpen = false
+			g.StatsScreenOpen = true
 		case core.PauseMenuDebug:
 			g.DebugOverlay = !g.DebugOverlay
+		case core.PauseMenuDisplay:
+			render.ToggleDisplayMode()
+		case core.PauseMenuJukebox:
+			render.PlayJukebox()
 		case core.PauseMenuQuit:
 			g.Quit = true
 		}
@@ -137,6 +201,13 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	targetX := p.TileX + dx*forward + rx*strafe
 	targetZ := p.TileZ + dz*forward + rz*strafe
 	if g.Area.BlockedAt(targetX, targetZ) {
+		return
+	}
+	// Chests block the tile they sit on — even after being looted — so
+	// the open lid keeps its position and the player can't walk through
+	// the model. Handled here rather than in core.BlockedAt because the
+	// chest list is runtime state, not part of AreaDefinition.
+	if core.ChestIndexAt(g.Chests, targetX, targetZ) >= 0 {
 		return
 	}
 

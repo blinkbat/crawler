@@ -12,12 +12,15 @@ import (
 
 // drawBattleHUD orchestrates the in-combat HUD. Each panel owns one screen
 // region (top-center roster, bottom-left log, bottom-center action, top-right
-// turn order) so they never compete for the same real estate. During the
-// timing minigame the log and action panels yield their strip to the bar.
+// turn order) so they never compete for the same real estate. The combat
+// log is pinned bottom-left through every phase — including the timing
+// minigame — so the player can keep reading the last few events while
+// they press. The action menu yields to the bar (it has nothing useful
+// to show during press/charge anyway).
 func drawBattleHUD(g core.GameState, assets Resources) {
 	drawEnemyRoster(g, assets)
+	drawCombatLogPanel(g, assets)
 	if !timingActive(g) {
-		drawCombatLogPanel(g, assets)
 		drawActionMenuPanel(g, assets)
 	}
 }
@@ -35,6 +38,17 @@ func timingActive(g core.GameState) bool {
 // arms and back on when it resolves.
 func inPlayerTurn(g core.GameState) bool {
 	return g.Battle.Phase == core.BattlePlayer || g.Battle.Phase == core.BattleAttackTiming
+}
+
+// targetingEnemy reports whether the player is currently in the
+// "choose an enemy" target phase — Phase MUST be BattlePlayer (drops
+// the moment the timing bar arms) and ActionMode == ActionEnemyTarget.
+// Single source for the two render gates that overlay a "yellow cursor"
+// on the targeted enemy: the in-world chevron and the enemy-roster
+// row highlight. Keeping the predicate in one place prevents them
+// from drifting when the targeting rule changes.
+func targetingEnemy(g core.GameState) bool {
+	return g.Battle.Phase == core.BattlePlayer && g.Battle.ActionMode == core.ActionEnemyTarget
 }
 
 // targetingAlly is true when the player is choosing a party member to act
@@ -74,7 +88,12 @@ func drawEnemyRoster(g core.GameState, assets Resources) {
 	header := rosterHeader(g)
 	drawHeading(assets.hudFont, header, x+22, y+18, borderEnemy)
 
-	targetable := g.Battle.ActionMode == core.ActionEnemyTarget && inPlayerTurn(g)
+	// `targetable` controls the per-row yellow highlight in the enemy
+	// roster. Shares the targetingEnemy predicate with the in-world
+	// chevron so both yellow indicators turn on and off together —
+	// when the timing bar arms (Phase → BattleAttackTiming), both go
+	// dark, honouring "yellow cursor only when targeting."
+	targetable := targetingEnemy(g)
 	members := core.BattleMembers(&g)
 	selectedSlot := core.SelectedEnemySlot(&g)
 
@@ -154,6 +173,19 @@ func drawEnemyRosterRow(font rl.Font, enemy core.Enemy, x, y, w, h int32, target
 		drawSmallPanelOutline(int32(burnX), int32(burnY), int32(burnW), int32(burnH), rl.NewColor(255, 200, 120, 220))
 		drawTextCentered(font, fmt.Sprintf("%d", enemy.BurnTurns), burnX+burnW/2, burnY+2, 18, rl.RayWhite)
 	}
+	// Sleep indicator: same shape as burn but cooler tone + "Zz" label so
+	// the player can read "this foe's asleep, free hit." Positioned just
+	// above the burn slot when both fire — sleep + burn isn't likely but
+	// shouldn't visually collide.
+	if enemy.SleepTurns > 0 {
+		sleepW := float32(34)
+		sleepH := barH
+		sleepX := barX - sleepW - 10
+		sleepY := barY - sleepH - 4
+		drawSmallPanel(int32(sleepX), int32(sleepY), int32(sleepW), int32(sleepH), barSleep)
+		drawSmallPanelOutline(int32(sleepX), int32(sleepY), int32(sleepW), int32(sleepH), barSleepOutline)
+		drawTextCentered(font, fmt.Sprintf("Z%d", enemy.SleepTurns), sleepX+sleepW/2, sleepY+2, 18, rl.RayWhite)
+	}
 }
 
 func drawCombatLogPanel(g core.GameState, assets Resources) {
@@ -161,6 +193,27 @@ func drawCombatLogPanel(g core.GameState, assets Resources) {
 	h := int32(170)
 	x := int32(22)
 	y := int32(PartyRibbonTopY()) - h - 14
+
+	// When the timing bar is active, the bar and its prompt sit in the
+	// same strip the log occupies. Shrink the log's width to dodge the
+	// bar's left edge so the two coexist without overlap. `barX` from
+	// timingBarLayout IS the bar's left edge — pulling it directly
+	// keeps the log in sync if the bar's centering rule ever changes
+	// (a duplicate `(screenW - barW) / 2` recomputation would drift).
+	// 12px margin between the log's right edge and the bar.
+	if timingActive(g) {
+		barX, _, _, _ := timingBarLayout()
+		maxRight := int32(barX) - 12
+		if maxRight-x < w {
+			w = maxRight - x
+		}
+		// Cap at a minimum readable width — if the screen is so narrow
+		// the bar leaves no room, fall back to a tiny strip rather than
+		// drawing a negative-width card.
+		if w < 200 {
+			w = 200
+		}
+	}
 
 	drawCard(x, y, w, h, surfacePrimary, borderSoft, borderStrong)
 	drawHeading(assets.hudFont, "COMBAT LOG", x+20, y+14, borderStrong)
@@ -221,10 +274,11 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 	// Taller panel — 4 action rows now (Attack/Skill/Defend/Item) and the
 	// item picker mode reuses this same panel for its list.
 	h := int32(280)
-	// Right of the combat log, above the party ribbon, left of the turn order
-	// (turn panel is 216 wide with a 22 right margin; leave a 20px gap).
-	const turnReserve = int32(258)
-	x := screenW - w - turnReserve
+	// Right of the combat log, above the party ribbon, left of the turn
+	// order. Reserve the turn panel's full layout width (panel + its right
+	// margin) so the action panel always sits adjacent to it regardless of
+	// what the turn panel decides its own width is.
+	x := screenW - w - TurnPanelLayoutWidth()
 	y := int32(PartyRibbonTopY()) - h - 14
 
 	classCol := partyClassPresentationFor(member.Class).turnColor
@@ -352,16 +406,10 @@ func drawActionRow(font rl.Font, x, y int32, label, suffix string, selected bool
 	rowW := int32(284)
 	rowH := int32(32)
 	if selected {
-		drawSmallPanel(x-8, y-4, rowW, rowH, surfaceActiveTint)
-		drawSmallPanelOutline(x-8, y-4, rowW, rowH, borderActive)
+		DrawSelectedRowI(x-8, y-4, rowW, rowH)
 		cx := float32(x - 16)
 		cy := float32(y) + 12
-		rl.DrawTriangle(
-			rl.NewVector2(cx, cy-7),
-			rl.NewVector2(cx+8, cy),
-			rl.NewVector2(cx, cy+7),
-			borderActive,
-		)
+		drawArrowMarker(rl.NewVector2(cx, cy), 8, 0, 7, borderActive)
 	}
 	drawTextWithShadow(font, label, float32(x), float32(y), 21, textPrimary)
 	if suffix != "" {

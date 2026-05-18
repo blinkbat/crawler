@@ -6,8 +6,49 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
+
+// activeFootprint returns the multi-tile footprint of the active brush,
+// or nil if the current brush is single-tile. Props anchors check
+// core.PropFootprint; decor anchors check core.DecorFootprint. Used by
+// the hover preview and apply paths so authors see the footprint shape
+// before placement and don't have to drop tail tiles by hand.
+func activeFootprint(s *State) []core.MultiTileOffset {
+	b := s.activeBrush()
+	switch s.layer {
+	case LayerProps:
+		return core.PropFootprint(b.Char)
+	case LayerDecor:
+		return core.DecorFootprint(b.Char)
+	}
+	return nil
+}
+
+// footprintPlaceable reports whether the active brush's footprint fits
+// at the (anchor) cell — every footprint cell must be in-bounds, not a
+// wall, not occupied by another prop (for the props layer), and not the
+// player start. The hover preview tints red when this is false so the
+// author sees the click will be refused.
+func footprintPlaceable(s *State, x, z int, footprint []core.MultiTileOffset) bool {
+	for _, off := range footprint {
+		fx, fz := x+off.DX, z+off.DZ
+		if !s.area.InBounds(fx, fz) {
+			return false
+		}
+		if s.area.Walls[fz][fx] == core.TileRock {
+			return false
+		}
+		if s.area.StartTileX == fx && s.area.StartTileZ == fz {
+			return false
+		}
+		if s.layer == LayerDecor && core.IsPropChar(s.area.Props[fz][fx]) {
+			return false
+		}
+	}
+	return true
+}
 
 // applyTool runs the active layer's selected brush at (x,z). Behavior is
 // per-layer: grid layers set the layer's char; entity layer fires the
@@ -27,6 +68,8 @@ func applyTool(s *State, x, z int) {
 		applyDecorBrush(s, x, z, brush.Char)
 	case LayerProps:
 		applyPropBrush(s, x, z, brush.Char)
+	case LayerCeiling:
+		setLayerCell(&s.area.Ceiling, x, z, brush.Char)
 	case LayerEntities:
 		applyEntityBrush(s, x, z, brush.Entity)
 		return // entity branch sets dirty itself when it lands
@@ -46,10 +89,45 @@ func applyWallBrush(s *State, x, z int, c byte) {
 		setLayerCell(&s.area.Props, x, z, core.TilePropEmpty)
 		setLayerCell(&s.area.Decor, x, z, core.DecorAuto)
 		s.area.PackSpawns = removePackAt(s.area.PackSpawns, x, z)
+		s.area.ChestSpawns = removeChestSpawnAt(s.area.ChestSpawns, x, z)
 	}
 }
 
 func applyDecorBrush(s *State, x, z int, c byte) {
+	// Multi-tile decor anchor: validate the whole footprint fits and is
+	// authorable before committing any cell, then auto-paint the tail
+	// chars so the author doesn't have to drop them by hand.
+	if footprint := core.DecorFootprint(c); footprint != nil {
+		tail := core.DecorFootprintTail(c)
+		for _, off := range footprint {
+			fx, fz := x+off.DX, z+off.DZ
+			if !s.area.InBounds(fx, fz) {
+				s.flash("Footprint extends off the map")
+				return
+			}
+			if s.area.Walls[fz][fx] == core.TileRock {
+				s.flash("Footprint cell is a wall")
+				return
+			}
+			if core.IsPropChar(s.area.Props[fz][fx]) {
+				s.flash("Footprint cell holds a prop")
+				return
+			}
+			if s.area.StartTileX == fx && s.area.StartTileZ == fz {
+				s.flash("Footprint cell holds the player start")
+				return
+			}
+		}
+		for _, off := range footprint {
+			fx, fz := x+off.DX, z+off.DZ
+			ch := tail
+			if off.DX == 0 && off.DZ == 0 {
+				ch = c
+			}
+			setLayerCell(&s.area.Decor, fx, fz, ch)
+		}
+		return
+	}
 	if s.area.Walls[z][x] == core.TileRock {
 		s.flash("Decor needs an open cell")
 		return
@@ -70,6 +148,41 @@ func applyPropBrush(s *State, x, z int, c byte) {
 		setLayerCell(&s.area.Props, x, z, core.TilePropEmpty)
 		return
 	}
+	// Multi-tile prop anchor: validate the whole footprint fits and is
+	// free, then auto-paint the tail char into the other footprint cells
+	// so the author doesn't have to place each tile manually. If any
+	// footprint cell is blocked, refuse the placement entirely (no
+	// partial commits).
+	if footprint := core.PropFootprint(c); footprint != nil {
+		tail := core.PropFootprintTail(c)
+		for _, off := range footprint {
+			fx, fz := x+off.DX, z+off.DZ
+			if !s.area.InBounds(fx, fz) {
+				s.flash("Footprint extends off the map")
+				return
+			}
+			if s.area.Walls[fz][fx] == core.TileRock {
+				s.flash("Footprint cell is a wall")
+				return
+			}
+			if s.area.StartTileX == fx && s.area.StartTileZ == fz {
+				s.flash("Footprint cell holds the player start")
+				return
+			}
+		}
+		for _, off := range footprint {
+			fx, fz := x+off.DX, z+off.DZ
+			ch := tail
+			if off.DX == 0 && off.DZ == 0 {
+				ch = c
+			}
+			setLayerCell(&s.area.Props, fx, fz, ch)
+			setLayerCell(&s.area.Decor, fx, fz, core.DecorAuto)
+			s.area.PackSpawns = removePackAt(s.area.PackSpawns, fx, fz)
+			s.area.ChestSpawns = removeChestSpawnAt(s.area.ChestSpawns, fx, fz)
+		}
+		return
+	}
 	if s.area.Walls[z][x] == core.TileRock {
 		s.flash("Props need an open cell (remove the wall first)")
 		return
@@ -81,8 +194,9 @@ func applyPropBrush(s *State, x, z int, c byte) {
 	setLayerCell(&s.area.Props, x, z, c)
 	// A prop occupies the floor square; auto-clear any decor on it.
 	setLayerCell(&s.area.Decor, x, z, core.DecorAuto)
-	// And remove a pack that would now be inside the prop.
+	// And remove a pack / chest that would now be inside the prop.
 	s.area.PackSpawns = removePackAt(s.area.PackSpawns, x, z)
+	s.area.ChestSpawns = removeChestSpawnAt(s.area.ChestSpawns, x, z)
 }
 
 func applyEntityBrush(s *State, x, z int, kind entityKind) {
@@ -94,18 +208,94 @@ func applyEntityBrush(s *State, x, z int, kind entityKind) {
 		s.flash("Cell is occupied by a prop")
 		return
 	}
+	brush := s.activeBrush()
 	switch kind {
 	case entityPlayerStart:
 		s.area.StartTileX = x
 		s.area.StartTileZ = z
 		s.dirty = true
-	case entityAddRat:
-		addPackMember(s, x, z, core.EnemyRat)
-	case entityAddBat:
-		addPackMember(s, x, z, core.EnemyBat)
-	case entityAddDiseasedRat:
-		addPackMember(s, x, z, core.EnemyDiseasedRat)
+	case entityAddEnemy:
+		addPackMember(s, x, z, brush.EnemyKind)
+	case entityPlaceChest:
+		placeChestAt(s, x, z)
 	}
+}
+
+// placeChestAt drops a chest with the default starter loot at (x,z). If
+// a chest is already there, refuse (the author can right-click to clear
+// and replace). Chests can't share a tile with a pack — the in-game
+// interact prompt would race the pack's start-battle trigger.
+func placeChestAt(s *State, x, z int) {
+	if s.area.StartTileX == x && s.area.StartTileZ == z {
+		s.flash("Cell holds the player start")
+		return
+	}
+	if s.area.Walls[z][x] == core.TileRock {
+		s.flash("Chest needs an open cell (remove the wall first)")
+		return
+	}
+	if core.IsPropChar(s.area.Props[z][x]) {
+		s.flash("Cell already holds a prop — clear it first")
+		return
+	}
+	if packIndexAt(s.area.PackSpawns, x, z) >= 0 {
+		s.flash("Cell already holds a pack — clear it first")
+		return
+	}
+	if chestSpawnIndexAt(s.area.ChestSpawns, x, z) >= 0 {
+		s.flash("Cell already holds a chest")
+		return
+	}
+	s.area.ChestSpawns = append(s.area.ChestSpawns, core.ChestSpawn{
+		TileX: x,
+		TileZ: z,
+		Items: defaultChestItems(),
+	})
+	s.dirty = true
+}
+
+// defaultChestItems is the seed loot for a freshly-placed chest. Keeps
+// the brush a single-click placement — per-chest loot editing is a
+// future feature. Returns a fresh slice so the spawn entry doesn't
+// alias a package-level template.
+func defaultChestItems() []core.ItemKind {
+	return []core.ItemKind{core.ItemCheese, core.ItemBatJerky}
+}
+
+// chestSpawnIndexAt is the editor's counterpart to runtime ChestIndexAt
+// — searches the authored ChestSpawns slice rather than the runtime
+// Chests slice. Returns -1 when no chest is at the tile.
+func chestSpawnIndexAt(spawns []core.ChestSpawn, x, z int) int {
+	for i, sp := range spawns {
+		if sp.TileX == x && sp.TileZ == z {
+			return i
+		}
+	}
+	return -1
+}
+
+// removeChestSpawnAt drops the chest at (x, z) from spawns (if any),
+// returning a fresh slice. Thin wrapper around filterChests so the
+// "by predicate" filter pattern is the single source of truth, mirroring
+// removePackAt → filterPacks.
+func removeChestSpawnAt(spawns []core.ChestSpawn, x, z int) []core.ChestSpawn {
+	return filterChests(spawns, func(sp core.ChestSpawn) bool {
+		return sp.TileX != x || sp.TileZ != z
+	})
+}
+
+// filterChests returns a fresh slice of just the chests for which keep
+// returns true. Mirrors filterPacks so chest-spawn filtering uses the
+// same "allocate-fresh, reuse-backing-storage" contract — callers
+// can't accidentally hold a reference to the original slice's tail.
+func filterChests(spawns []core.ChestSpawn, keep func(core.ChestSpawn) bool) []core.ChestSpawn {
+	out := spawns[:0:0]
+	for _, sp := range spawns {
+		if keep(sp) {
+			out = append(out, sp)
+		}
+	}
+	return out
 }
 
 // eraseAt is the right-click action. Behavior is per-layer:
@@ -123,17 +313,25 @@ func eraseAt(s *State, x, z int) {
 	case LayerFloor:
 		setLayerCell(&s.area.Floor, x, z, core.FloorAuto)
 	case LayerDecor:
-		setLayerCell(&s.area.Decor, x, z, core.DecorAuto)
+		// Right-click on decor means "no scatter here" (DecorEmpty), not
+		// "auto-scatter" (DecorAuto). The Auto brush is the explicit "let
+		// the renderer pick" affordance; erase should suppress rather
+		// than reset-to-random.
+		setLayerCell(&s.area.Decor, x, z, core.DecorEmpty)
 	case LayerProps:
 		setLayerCell(&s.area.Props, x, z, core.TilePropEmpty)
+	case LayerCeiling:
+		setLayerCell(&s.area.Ceiling, x, z, core.TileCeilingOpen)
 	case LayerEntities:
 		if s.area.StartTileX == x && s.area.StartTileZ == z {
 			s.flash("Player start can't be erased; place it elsewhere instead")
 			return
 		}
-		before := len(s.area.PackSpawns)
+		packsBefore := len(s.area.PackSpawns)
 		s.area.PackSpawns = removePackAt(s.area.PackSpawns, x, z)
-		if len(s.area.PackSpawns) == before {
+		chestsBefore := len(s.area.ChestSpawns)
+		s.area.ChestSpawns = removeChestSpawnAt(s.area.ChestSpawns, x, z)
+		if len(s.area.PackSpawns) == packsBefore && len(s.area.ChestSpawns) == chestsBefore {
 			return
 		}
 	}
@@ -145,6 +343,10 @@ func eraseAt(s *State, x, z int) {
 func addPackMember(s *State, x, z int, kind core.EnemyKind) {
 	if s.area.StartTileX == x && s.area.StartTileZ == z {
 		s.flash("Cell holds the player start")
+		return
+	}
+	if chestSpawnIndexAt(s.area.ChestSpawns, x, z) >= 0 {
+		s.flash("Cell already holds a chest — clear it first")
 		return
 	}
 	if idx := packIndexAt(s.area.PackSpawns, x, z); idx >= 0 {
@@ -167,21 +369,10 @@ func removePackAt(packs []core.PackSpawn, x, z int) []core.PackSpawn {
 }
 
 // packSpawnLeaderKind picks the kind to render as a pack's field icon —
-// the highest-Tier member, ties broken by member order. Mirrors
-// core.PackLeader's rule so editor and runtime stay in sync.
+// the highest-Tier member, ties broken by member order. Delegates to
+// core.PackLeaderKind so editor and runtime share one leader rule.
 func packSpawnLeaderKind(sp core.PackSpawn) core.EnemyKind {
-	if len(sp.Members) == 0 {
-		return core.EnemyRat
-	}
-	leader := sp.Members[0]
-	bestTier := core.EnemyInfo(leader).Tier
-	for _, k := range sp.Members[1:] {
-		if t := core.EnemyInfo(k).Tier; t > bestTier {
-			bestTier = t
-			leader = k
-		}
-	}
-	return leader
+	return core.PackLeaderKind(sp.Members)
 }
 
 // filterPacks returns a fresh slice containing only the packs for which
@@ -199,22 +390,33 @@ func filterPacks(packs []core.PackSpawn, keep func(core.PackSpawn) bool) []core.
 
 // setLayerCell mutates the byte at (x,z) inside one of the area's layer
 // grids. Layer slices are addressed by pointer so we can write through
-// without each caller threading a reference.
+// without each caller threading a reference. Callers also flag
+// reachability dirty after a layer mutation so the badge refreshes —
+// the per-cell write itself doesn't know the State, so the flag flip is
+// at every applyTool/eraseAt/floodFill/paintRect site that follows.
 func setLayerCell(layer *[]string, x, z int, b byte) {
 	row := []byte((*layer)[z])
 	row[x] = b
 	(*layer)[z] = string(row)
 }
 
-
 // pushUndo snapshots the current area before a mutation. Any new mutation
 // invalidates the redo stack — standard text-editor undo semantics.
 // Capped at undoLimit to bound memory.
+//
+// On trim we copy into a fresh backing array rather than reslicing the
+// tail. Reslicing would advance the slice header but the original array
+// still pins the trimmed-off head snapshots in memory — each snapshot
+// holds multiple string-row slices plus PackSpawns, so over a long
+// editing session you can accumulate dozens of MB of unreachable-but-
+// uncollectable AreaDefinitions. The copy frees them for GC.
 func pushUndo(s *State) {
 	snap := cloneArea(s.area)
 	s.undo = append(s.undo, snap)
 	if len(s.undo) > undoLimit {
-		s.undo = s.undo[len(s.undo)-undoLimit:]
+		trimmed := make([]core.AreaDefinition, undoLimit)
+		copy(trimmed, s.undo[len(s.undo)-undoLimit:])
+		s.undo = trimmed
 	}
 	s.redo = nil
 }
@@ -257,8 +459,14 @@ func areasEqual(a, b core.AreaDefinition) bool {
 		a.QuietMessage != b.QuietMessage {
 		return false
 	}
+	// Every grid layer cloneArea copies must be compared here too — drift
+	// between the two would let undo's "back at baseline" check return true
+	// while real edits sit in the working state. Ceiling was the bug that
+	// triggered this audit; reorder additions so both functions iterate
+	// matching layer lists.
 	if !rowsEqual(a.Walls, b.Walls) || !rowsEqual(a.Floor, b.Floor) ||
-		!rowsEqual(a.Decor, b.Decor) || !rowsEqual(a.Props, b.Props) {
+		!rowsEqual(a.Decor, b.Decor) || !rowsEqual(a.Props, b.Props) ||
+		!rowsEqual(a.Ceiling, b.Ceiling) {
 		return false
 	}
 	if len(a.PackSpawns) != len(b.PackSpawns) {
@@ -271,6 +479,20 @@ func areasEqual(a, b core.AreaDefinition) bool {
 		}
 		for j := range pa.Members {
 			if pa.Members[j] != pb.Members[j] {
+				return false
+			}
+		}
+	}
+	if len(a.ChestSpawns) != len(b.ChestSpawns) {
+		return false
+	}
+	for i := range a.ChestSpawns {
+		ca, cb := a.ChestSpawns[i], b.ChestSpawns[i]
+		if ca.TileX != cb.TileX || ca.TileZ != cb.TileZ || len(ca.Items) != len(cb.Items) {
+			return false
+		}
+		for j := range ca.Items {
+			if ca.Items[j] != cb.Items[j] {
 				return false
 			}
 		}
@@ -296,12 +518,21 @@ func cloneArea(a core.AreaDefinition) core.AreaDefinition {
 	out.Floor = append([]string(nil), a.Floor...)
 	out.Decor = append([]string(nil), a.Decor...)
 	out.Props = append([]string(nil), a.Props...)
+	out.Ceiling = append([]string(nil), a.Ceiling...)
 	out.PackSpawns = make([]core.PackSpawn, len(a.PackSpawns))
 	for i, sp := range a.PackSpawns {
 		out.PackSpawns[i] = core.PackSpawn{
 			TileX:   sp.TileX,
 			TileZ:   sp.TileZ,
 			Members: append([]core.EnemyKind(nil), sp.Members...),
+		}
+	}
+	out.ChestSpawns = make([]core.ChestSpawn, len(a.ChestSpawns))
+	for i, sp := range a.ChestSpawns {
+		out.ChestSpawns[i] = core.ChestSpawn{
+			TileX: sp.TileX,
+			TileZ: sp.TileZ,
+			Items: append([]core.ItemKind(nil), sp.Items...),
 		}
 	}
 	return out
@@ -316,7 +547,16 @@ func resize(s *State, w, h int) {
 		return
 	}
 	// Match the typed-input clamp so the +/- buttons can't grow past the
-	// editor's hard ceiling either.
+	// editor's hard ceiling either, and floor at MinMapDimension so the
+	// border walls don't consume the whole playable interior.
+	if w < core.MinMapDimension {
+		s.flash("Map width too small (min " + strconv.Itoa(core.MinMapDimension) + ")")
+		w = core.MinMapDimension
+	}
+	if h < core.MinMapDimension {
+		s.flash("Map height too small (min " + strconv.Itoa(core.MinMapDimension) + ")")
+		h = core.MinMapDimension
+	}
 	if w > core.MaxMapDimension {
 		w = core.MaxMapDimension
 	}
@@ -331,6 +571,7 @@ func resize(s *State, w, h int) {
 	s.area.Floor = resizeLayer(s.area.Floor, s.area.Width, s.area.Height, w, h, core.FloorAuto)
 	s.area.Decor = resizeLayer(s.area.Decor, s.area.Width, s.area.Height, w, h, core.DecorAuto)
 	s.area.Props = resizeLayer(s.area.Props, s.area.Width, s.area.Height, w, h, core.TilePropEmpty)
+	s.area.Ceiling = resizeLayer(s.area.Ceiling, s.area.Width, s.area.Height, w, h, core.TileCeilingOpen)
 	s.area.Width = w
 	s.area.Height = h
 	if s.area.StartTileX >= w {
@@ -342,7 +583,17 @@ func resize(s *State, w, h int) {
 	s.area.PackSpawns = filterPacks(s.area.PackSpawns, func(sp core.PackSpawn) bool {
 		return sp.TileX < w && sp.TileZ < h
 	})
+	s.area.ChestSpawns = removeChestSpawnsOutside(s.area.ChestSpawns, w, h)
 	s.dirty = true
+}
+
+// removeChestSpawnsOutside drops chest entries whose tile sits past
+// the new bounds. Thin wrapper around filterChests so the resize path
+// reuses the same filter primitive as removeChestSpawnAt.
+func removeChestSpawnsOutside(spawns []core.ChestSpawn, w, h int) []core.ChestSpawn {
+	return filterChests(spawns, func(sp core.ChestSpawn) bool {
+		return sp.TileX < w && sp.TileZ < h
+	})
 }
 
 // resizeLayer copies an old WxH grid into a new W'xH' grid, padding the
@@ -437,7 +688,10 @@ func openModal(s *State, m modalKind) {
 	s.modalCursor = 0
 	switch m {
 	case modalOpen:
-		paths, _ := mapfile.List(core.MapsDir())
+		// Newest-first ordering: the file the author was last touching
+		// (whether they just saved it or pulled it down) is the most
+		// likely target of an Open, so it lands at the top of the list.
+		paths, _ := mapfile.ListByModTime(core.MapsDir())
 		s.modalPaths = paths
 	}
 }
@@ -536,7 +790,11 @@ func paintRect(s *State, x0, z0, x1, z1 int) {
 }
 
 // activeGrid returns a pointer to the layer slice the user is editing, or
-// nil for layers that don't have a grid (entities).
+// nil for layers that don't have a grid (entities). Must stay in sync
+// with the layer switches in applyTool and eraseAt — Ctrl+Click flood
+// fill reads through this helper and silently no-ops when a grid layer
+// is missed, which is exactly how LayerCeiling regressed before this
+// case was added.
 func activeGrid(s *State) *[]string {
 	switch s.layer {
 	case LayerWalls:
@@ -547,27 +805,45 @@ func activeGrid(s *State) *[]string {
 		return &s.area.Decor
 	case LayerProps:
 		return &s.area.Props
+	case LayerCeiling:
+		return &s.area.Ceiling
 	}
 	return nil
 }
 
 // reachabilityWarnings reports playability problems for the area. Empty
 // slice means no warnings. Used as a non-blocking check on save.
+//
+// The BFS treats both wall/prop blockers AND chest tiles as impassable,
+// matching the runtime's movement rules — chests block the tile they
+// sit on at runtime (explore.startStep refuses to step into a chest),
+// so a chest dropped in a chokepoint can sever the map. Without this
+// the editor's "all reachable" verdict could ship a map where the
+// player physically can't reach packs / chests beyond the chest.
 func reachabilityWarnings(a core.AreaDefinition) []string {
 	var out []string
 	if a.StartTileZ < 0 || a.StartTileZ >= a.Height ||
 		a.StartTileX < 0 || a.StartTileX >= a.Width {
 		return []string{"start position is out of bounds"}
 	}
-	// If the start tile itself is blocked, every enemy will *technically*
-	// register as unreachable — but the player would also spawn inside
-	// geometry, which is the louder problem. Surface that one warning and
-	// skip the count to avoid stacking noise on top of the root cause.
 	if a.BlockedAt(a.StartTileX, a.StartTileZ) {
 		return []string{"start tile is blocked (player will spawn inside geometry)"}
 	}
+	if chestSpawnIndexAt(a.ChestSpawns, a.StartTileX, a.StartTileZ) >= 0 {
+		return []string{"start tile holds a chest (the chest will be dropped at runtime)"}
+	}
 	h := a.Height
 	w := a.Width
+	// Pre-mark chest tiles as blocked so the BFS treats them like
+	// walls. The start tile is exempt above (we already refuse that
+	// configuration), so no risk of the BFS having nowhere to begin.
+	chestBlock := make([]bool, w*h)
+	for _, c := range a.ChestSpawns {
+		if c.TileX < 0 || c.TileX >= w || c.TileZ < 0 || c.TileZ >= h {
+			continue
+		}
+		chestBlock[c.TileZ*w+c.TileX] = true
+	}
 	visited := make([]bool, w*h)
 	stack := [][2]int{{a.StartTileX, a.StartTileZ}}
 	for len(stack) > 0 {
@@ -581,7 +857,7 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 		if visited[idx] {
 			continue
 		}
-		if a.BlockedAt(px, pz) {
+		if a.BlockedAt(px, pz) || chestBlock[idx] {
 			continue
 		}
 		visited[idx] = true
@@ -615,6 +891,31 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 			}
 		}
 	}
+	// Chests are reachable when AT LEAST ONE neighbour is in `visited` —
+	// the chest tile itself is marked blocked (#3), so we check the
+	// four-neighbour ring for an open approach instead. An "unreachable"
+	// chest is one the player can never walk up to and open.
+	var unreachableChests int
+	for _, c := range a.ChestSpawns {
+		if c.TileX < 0 || c.TileX >= w || c.TileZ < 0 || c.TileZ >= h {
+			unreachableChests++
+			continue
+		}
+		hasNeighbour := false
+		for _, d := range [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+			nx, nz := c.TileX+d[0], c.TileZ+d[1]
+			if nx < 0 || nx >= w || nz < 0 || nz >= h {
+				continue
+			}
+			if visited[nz*w+nx] {
+				hasNeighbour = true
+				break
+			}
+		}
+		if !hasNeighbour {
+			unreachableChests++
+		}
+	}
 	if unreachable > 0 {
 		out = append(out, fmt.Sprintf("%d/%d packs unreachable from start", unreachable, len(a.PackSpawns)))
 	}
@@ -623,6 +924,9 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 	}
 	if noOpenTile > 0 {
 		out = append(out, fmt.Sprintf("%d/%d packs can't fit on the map", noOpenTile, len(a.PackSpawns)))
+	}
+	if unreachableChests > 0 {
+		out = append(out, fmt.Sprintf("%d/%d chests unreachable from start", unreachableChests, len(a.ChestSpawns)))
 	}
 	return out
 }
@@ -645,23 +949,10 @@ func mapStem(path string) string {
 	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
+// sanitizeFilename is a thin wrapper over core.SanitizeFilename with
+// the editor's "untitled" fallback for all-strippable input — keeps the
+// editor's call sites short while the actual character-class contract
+// lives in core (shared with audio's user-sound saves).
 func sanitizeFilename(name string) string {
-	out := strings.ToLower(strings.TrimSpace(name))
-	out = strings.ReplaceAll(out, " ", "_")
-	cleaned := make([]byte, 0, len(out))
-	for i := 0; i < len(out); i++ {
-		c := out[i]
-		switch {
-		case c >= 'a' && c <= 'z':
-			cleaned = append(cleaned, c)
-		case c >= '0' && c <= '9':
-			cleaned = append(cleaned, c)
-		case c == '_' || c == '-':
-			cleaned = append(cleaned, c)
-		}
-	}
-	if len(cleaned) == 0 {
-		return "untitled"
-	}
-	return string(cleaned)
+	return core.SanitizeFilename(name, "untitled")
 }

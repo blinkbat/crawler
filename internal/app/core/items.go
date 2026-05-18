@@ -50,6 +50,26 @@ var (
 	itemByName = buildItemByName()
 )
 
+// reservedItemNames are tokens the .map chest parser uses as sentinels
+// ("(empty)" for a no-loot chest row). Any item with one of these names
+// would silently collide with the parser — panicking at init is far
+// less surprising than a future "Chest authored with one item but
+// loads with zero" bug after someone added an item named "(empty)".
+var reservedItemNames = map[string]struct{}{
+	"(empty)": {},
+}
+
+// Guard the item registry against names that collide with the chest
+// parser's sentinels. Runs as a package-init side effect so the test
+// suite catches a collision the moment a new ItemDefinition is added.
+func init() {
+	for _, def := range itemDefinitions {
+		if _, reserved := reservedItemNames[def.Name]; reserved {
+			panic("core/items: item name " + def.Name + " is reserved by the mapfile chest parser")
+		}
+	}
+}
+
 func buildItemByKind() map[ItemKind]ItemDefinition {
 	m := make(map[ItemKind]ItemDefinition, len(itemDefinitions))
 	for _, def := range itemDefinitions {
@@ -73,6 +93,17 @@ func ItemInfo(kind ItemKind) ItemDefinition {
 		return def
 	}
 	return ItemDefinition{Kind: kind, Name: "Unknown Item"}
+}
+
+// AllItems returns the item registry in declaration order. Used by the
+// editor's chest-edit modal to build its add-rules table at init —
+// adding a new item kind is one row in itemDefinitions and the modal
+// picks up a hotkey automatically. Returns a defensive copy so callers
+// can't mutate the registry.
+func AllItems() []ItemDefinition {
+	out := make([]ItemDefinition, len(itemDefinitions))
+	copy(out, itemDefinitions)
+	return out
 }
 
 // ItemKindByName looks up an item kind from the human-readable name used in

@@ -32,19 +32,19 @@ type appState struct {
 }
 
 func Run() {
-	// FlagWindowHighdpi: tells raylib to open the window at the monitor's
-	// physical pixel resolution rather than the OS logical-point scale.
-	// Keeps GetScreenWidth/Height and GetMonitorWidth/Height reporting in
-	// the same units (physical pixels) so HUD layout math stays consistent
-	// on 1.5×/2× Windows scaling — without this, HUD positions computed
-	// against the logical screen width misalign once the OS scales the
-	// window framebuffer up.
-	rl.SetConfigFlags(rl.FlagVsyncHint | rl.FlagWindowResizable | rl.FlagWindowHighdpi)
+	// Note: FlagWindowHighdpi was tried here to keep HUD layout math aligned
+	// on fractional-DPI displays, but in practice it caused a right/down
+	// drift on Windows 1.5× scaling because raylib's GetScreenWidth returns
+	// logical points while the framebuffer is scaled up — HUD coords landed
+	// in the wrong pixel band. The flag stays off until the layout code is
+	// audited to consistently use one of GetScreenWidth (logical) or
+	// GetRenderWidth (physical) end-to-end.
+	rl.SetConfigFlags(rl.FlagVsyncHint | rl.FlagWindowResizable)
 	rl.InitWindow(core.InitialWindowWidth, core.InitialWindowHeight, "Crawler")
 	defer rl.CloseWindow()
 
 	rl.SetExitKey(rl.KeyNull)
-	applyWindowedFullscreen()
+	render.SetDisplayMode(render.DisplayFullscreen)
 	rl.SetTargetFPS(120)
 
 	// Procedural sound bank — short input/hit/heal/death cues, generated in
@@ -128,6 +128,15 @@ func updateEditorScene(state *appState, dt float32) {
 		// quits the playtest. StepCount is seeded from the editor's
 		// previewed phase so the playtest opens in that lighting.
 		area := state.editor.Area()
+		// Ctrl+F5 test-from-cursor: temporarily override StartTile to
+		// the editor's grid cursor for this run only. The authored
+		// area on disk and in the editor's State keeps its original
+		// StartTile; we just point the runtime player there.
+		if x, z, ok := state.editor.TestStartOverride(); ok {
+			area.StartTileX = x
+			area.StartTileZ = z
+			state.editor.ClearTestStartOverride()
+		}
 		state.game = core.NewGameState(area)
 		state.game.StepCount = state.editor.PreviewStepCount()
 		state.scene = sceneAdventure
@@ -141,24 +150,16 @@ func drawAdventureScene(game core.GameState, assets render.Resources) {
 	render.DrawSkyBackground(assets, game)
 	rl.BeginMode3D(camera)
 	render.DrawWorld(camera, game, assets)
+	render.DrawChests(camera, game, assets)
 	render.DrawEnemies(camera, game, assets)
 	render.DrawPartySprites(camera, game, assets)
 	rl.EndMode3D()
+	render.DrawChestPrompt(camera, game, assets)
 	render.DrawDamagePopups(camera, game, assets)
 	render.DrawQualityPopup(camera, game, assets)
 	render.DrawDebugOverlay(camera, game, assets)
 	render.DrawOverlay(game, assets)
-}
-
-func applyWindowedFullscreen() {
-	monitor := rl.GetCurrentMonitor()
-	position := rl.GetMonitorPosition(monitor)
-	width := rl.GetMonitorWidth(monitor)
-	height := rl.GetMonitorHeight(monitor)
-	if width <= 0 || height <= 0 {
-		return
-	}
-	rl.SetWindowSize(width, height)
-	rl.SetWindowPosition(int(position.X), int(position.Y))
-	rl.SetWindowState(rl.FlagBorderlessWindowedMode)
+	render.DrawChestModal(game, assets)
+	render.DrawPartyStatsScreen(game, assets)
+	render.DrawLevelUpModal(game, assets)
 }

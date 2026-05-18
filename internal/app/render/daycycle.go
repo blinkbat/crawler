@@ -24,14 +24,17 @@ type timeProfile struct {
 	SkyTint rl.Vector3
 }
 
-// timeProfiles indexed by core.TimeOfDay.
-var timeProfiles = [6]timeProfile{
+// timeProfiles indexed by core.TimeOfDay. Sized via core.TimeOfDayCount so
+// the compiler enforces the parallel-array contract with the enum — adding
+// a phase to core.TimeOfDay forces a row added here too instead of a
+// silent OOB at runtime.
+var timeProfiles = [core.TimeOfDayCount]timeProfile{
 	// Dawn — cool low light with a warm horizon. Sun is rising, so the
 	// directional component is dim and warm-tinted; ambient still carries
 	// the cool of night. Early dawn is intentionally a notch darker than
 	// the previous tuning so the transition out of midnight still reads
 	// as "barely-lit pre-sunrise" before brightening into morning.
-	{
+	core.Dawn: {
 		SunColor:       rl.NewVector3(0.72, 0.46, 0.40),
 		AmbientColor:   rl.NewVector3(0.28, 0.26, 0.36),
 		FogColor:       rl.NewVector3(0.58, 0.46, 0.46),
@@ -41,7 +44,7 @@ var timeProfiles = [6]timeProfile{
 	// Morning — bright, slightly warm. Closest to a "default" daylight
 	// look; the area's base profile (which was tuned originally) shows
 	// through best here.
-	{
+	core.Morning: {
 		SunColor:       rl.NewVector3(1.05, 0.99, 0.86),
 		AmbientColor:   rl.NewVector3(0.46, 0.52, 0.62),
 		FogColor:       rl.NewVector3(0.74, 0.86, 0.96),
@@ -50,7 +53,7 @@ var timeProfiles = [6]timeProfile{
 	},
 	// Afternoon — peak brightness, slightly cooler than morning to give
 	// the day an arc instead of a flat plateau.
-	{
+	core.Afternoon: {
 		SunColor:       rl.NewVector3(1.10, 1.04, 0.92),
 		AmbientColor:   rl.NewVector3(0.52, 0.58, 0.68),
 		FogColor:       rl.NewVector3(0.80, 0.90, 0.98),
@@ -60,7 +63,7 @@ var timeProfiles = [6]timeProfile{
 	// Dusk — sun low, deep gold sky, long warm shadows. This is the
 	// most stylized phase; intentionally exaggerated so the player
 	// notices the transition.
-	{
+	core.Dusk: {
 		SunColor:       rl.NewVector3(1.20, 0.74, 0.40),
 		AmbientColor:   rl.NewVector3(0.46, 0.36, 0.32),
 		FogColor:       rl.NewVector3(0.72, 0.50, 0.38),
@@ -69,7 +72,7 @@ var timeProfiles = [6]timeProfile{
 	},
 	// Evening — indigo twilight. Sun has set; the only color is what
 	// the sky and lingering atmosphere bounce around.
-	{
+	core.Evening: {
 		SunColor:       rl.NewVector3(0.45, 0.46, 0.66),
 		AmbientColor:   rl.NewVector3(0.18, 0.22, 0.34),
 		FogColor:       rl.NewVector3(0.18, 0.22, 0.32),
@@ -78,7 +81,7 @@ var timeProfiles = [6]timeProfile{
 	},
 	// Midnight — moonlit blue. Very dark, but enough light to read by;
 	// shadowStrength is highest here so unlit surfaces really sink.
-	{
+	core.Midnight: {
 		SunColor:       rl.NewVector3(0.20, 0.24, 0.46),
 		AmbientColor:   rl.NewVector3(0.10, 0.13, 0.24),
 		FogColor:       rl.NewVector3(0.06, 0.08, 0.16),

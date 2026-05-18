@@ -37,6 +37,16 @@ func blendTowardWhite(col rl.Color, whiteAmount float32) rl.Color {
 	)
 }
 
+// Miss-flash bar-shake tunables. shakeAmplitudePx is the peak horizontal
+// offset right after a missed press; shakeCyclesPerFlash is how many
+// full sine cycles play over the flash hold (a higher number reads as
+// more "rejection" energy). Named so a balance pass touches one line
+// instead of two embedded magic numbers.
+const (
+	shakeAmplitudePx    = float32(6.5)
+	shakeCyclesPerFlash = float32(9)
+)
+
 // barShake returns a horizontal pixel offset for the bar during a Miss
 // flash. Damped sinusoid: peaks right after the missed press, decays out
 // over the flash hold. Zero for any other grade so the bar only "rejects"
@@ -55,8 +65,8 @@ func barShake(timing core.TimingState, flashTimer float32) float32 {
 	if age > 1 {
 		age = 1
 	}
-	amp := (1 - age) * 6.5
-	return float32(math.Sin(float64(age)*math.Pi*9)) * amp
+	amp := (1 - age) * shakeAmplitudePx
+	return float32(math.Sin(float64(age)*math.Pi*float64(shakeCyclesPerFlash))) * amp
 }
 
 // qualityVisuals is the render-side per-grade attribute table. Color and
@@ -289,7 +299,15 @@ func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x
 func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
 	heading := "CHARGE!"
 	baseCol := rl.NewColor(255, 184, 96, 240) // warm orange
-	if timing.Pressed {
+	// Intro-pause heading: while the player hasn't engaged yet (intro
+	// counter > 0), swap to the "Press to start" prompt in the hint
+	// tone so they see the bar is waiting on input rather than already
+	// running. Replaces the prior overlay-stamp from drawTimingBar
+	// that fought the orange CHARGE prompt for the same heading slot.
+	if !flashing && g.Battle.TimingIntro > 0 {
+		heading = "Press to start"
+		baseCol = textHint
+	} else if timing.Pressed {
 		// Past the peak start? Push the prompt toward "release now" feel.
 		if timing.Elapsed >= timing.WindowStart {
 			heading = "RELEASE!"
@@ -468,7 +486,7 @@ func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources
 			ux := cx - arrowSize*0.85
 			uw := arrowSize * 1.7
 			uy := cy + arrowSize + 8
-			rl.DrawRectangle(int32(ux)+2, int32(uy)+2, int32(uw), 4, rl.NewColor(0, 0, 0, 160))
+			rl.DrawRectangle(int32(ux)+2, int32(uy)+2, int32(uw), 4, shadowLight)
 			rl.DrawRectangle(int32(ux), int32(uy), int32(uw), 4, rl.NewColor(255, 244, 144, 245))
 		}
 	}
@@ -493,7 +511,7 @@ func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources
 		// from both ends, matching how the arrows are centered in their slots.
 		visW := barW * remaining
 		stripX := drawX + (barW-visW)*0.5
-		rl.DrawRectangle(int32(stripX)+1, int32(stripY)+1, int32(visW), int32(stripH), rl.NewColor(0, 0, 0, 160))
+		rl.DrawRectangle(int32(stripX)+1, int32(stripY)+1, int32(visW), int32(stripH), shadowLight)
 		rl.DrawRectangle(int32(stripX), int32(stripY), int32(visW), int32(stripH), stripCol)
 	}
 }
@@ -537,7 +555,7 @@ func drawArrow(cx, cy, size float32, dir int, col rl.Color) {
 	stemBRY := cy - axisY*size*0.85 + perpY*size*0.40
 
 	// Head: tip → L → R is CCW in screen-Y-down (matches drawMinimapArrow).
-	rl.DrawTriangle(
+	drawTriangleCCW(
 		rl.NewVector2(tipX, tipY),
 		rl.NewVector2(headLX, headLY),
 		rl.NewVector2(headRX, headRY),
@@ -546,13 +564,13 @@ func drawArrow(cx, cy, size float32, dir int, col rl.Color) {
 	// Stem rectangle as two CCW triangles in screen-Y-down. Visualizing
 	// the stem as TL/TR/BL/BR corners on a clock face (TL=11, TR=1,
 	// BR=5, BL=7), the CCW orderings are TL→BL→BR and TL→BR→TR.
-	rl.DrawTriangle(
+	drawTriangleCCW(
 		rl.NewVector2(stemTLX, stemTLY),
 		rl.NewVector2(stemBLX, stemBLY),
 		rl.NewVector2(stemBRX, stemBRY),
 		col,
 	)
-	rl.DrawTriangle(
+	drawTriangleCCW(
 		rl.NewVector2(stemTLX, stemTLY),
 		rl.NewVector2(stemBRX, stemBRY),
 		rl.NewVector2(stemTRX, stemTRY),

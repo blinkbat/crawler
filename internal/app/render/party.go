@@ -131,4 +131,3 @@ func drawTextCentered(font rl.Font, text string, centerX, y, size float32, col c
 	measure := rl.MeasureTextEx(font, text, size, 1)
 	drawTextWithShadow(font, text, centerX-measure.X/2, y, size, col)
 }
-

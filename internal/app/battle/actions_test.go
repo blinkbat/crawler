@@ -249,7 +249,7 @@ func TestApplySteal_EmptyEnemyMessages(t *testing.T) {
 
 func TestDamageEnemy_KillsAtZero(t *testing.T) {
 	g := newTestState()
-	defeated := damageEnemy(g, 0, 99, core.TimingQualityMiss)
+	defeated := damageEnemy(g, 0, 99, core.TimingQualityMiss, core.SkillTagPhys)
 	if !defeated {
 		t.Fatalf("massive overkill should mark defeated")
 	}
@@ -266,7 +266,7 @@ func TestDamageEnemy_KillsAtZero(t *testing.T) {
 
 func TestDamageEnemy_FlashOnSurvivedHit(t *testing.T) {
 	g := newTestState()
-	defeated := damageEnemy(g, 0, 1, core.TimingQualityMiss)
+	defeated := damageEnemy(g, 0, 1, core.TimingQualityMiss, core.SkillTagPhys)
 	if defeated {
 		t.Fatalf("1 damage should not kill a fresh rat")
 	}
@@ -296,13 +296,13 @@ func TestHealPartyMember_ClampsAtMaxAndRejectsCorpse(t *testing.T) {
 
 func TestDamagePartyMember_GuardsAndKills(t *testing.T) {
 	g := newTestState()
-	if damagePartyMember(g, -1, 5) {
+	if damagePartyMember(g, -1, 5, core.SkillTagPhys) {
 		t.Fatalf("out-of-bounds party damage should no-op")
 	}
-	if damagePartyMember(g, 0, 0) {
+	if damagePartyMember(g, 0, 0, core.SkillTagPhys) {
 		t.Fatalf("zero damage should no-op")
 	}
-	if damagePartyMember(g, 0, 999) != true {
+	if damagePartyMember(g, 0, 999, core.SkillTagPhys) != true {
 		t.Fatalf("lethal damage should report killed")
 	}
 	if g.Party[0].HP != 0 {

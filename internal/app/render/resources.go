@@ -9,12 +9,18 @@ import (
 )
 
 type Resources struct {
-	materials    map[core.MaterialSet]worldMaterialResources
-	skyTexture   rl.Texture2D
-	enemyVisuals map[core.EnemyKind]enemyVisual
-	partyTexture map[core.PartyClass]rl.Texture2D
-	hudFont      rl.Font
-	hudFontOwned bool
+	materials  map[core.MaterialSet]worldMaterialResources
+	skyTexture rl.Texture2D
+	// enemyVisuals is the kind→billboard lookup. Multiple kinds can
+	// alias the same texture (placeholder sprites for new monsters),
+	// so it does NOT own the underlying handles — Unload would
+	// double-free them. enemyTextures is the canonical owning list
+	// the renderer minted at load time; Unload walks that.
+	enemyVisuals  map[core.EnemyKind]enemyVisual
+	enemyTextures []rl.Texture2D
+	partyTexture  map[core.PartyClass]rl.Texture2D
+	hudFont       rl.Font
+	hudFontOwned  bool
 
 	lighting lightingShader
 	tree     treeModel
@@ -48,8 +54,9 @@ type Resources struct {
 type worldMaterialResources struct {
 	// Each model owns its own diffuse texture via its material. Unload via
 	// rl.UnloadModel only — don't keep separate texture handles.
-	wallModel  rl.Model
-	floorModel rl.Model
+	wallModel    rl.Model
+	floorModel   rl.Model
+	ceilingModel rl.Model // thin slab textured with the wall pixels, drawn over ceiling-flagged tiles
 	// Optional secondary floor variants for the field (dirt + dark grass).
 	// Picked per-tile by hash so the field reads as varied terrain instead
 	// of one uniform grass texture. Empty for the dungeon material.
@@ -105,7 +112,7 @@ func LoadResources() (r Resources) {
 	rl.SetTextureFilter(r.skyTexture, rl.FilterTrilinear)
 	rl.SetTextureWrap(r.skyTexture, rl.WrapClamp)
 
-	r.enemyVisuals = loadEnemyVisuals()
+	r.enemyVisuals, r.enemyTextures = loadEnemyVisuals()
 
 	r.partyTexture = make(map[core.PartyClass]rl.Texture2D)
 	for _, def := range core.PartyClasses() {
@@ -179,6 +186,13 @@ func LoadResources() (r Resources) {
 	r.propModels[core.TileObelisk] = loadObeliskProp(r.lighting.shader, graniteTex)
 	r.propModels[core.TileFountain] = loadFountainProp(r.lighting.shader, marbleTex)
 
+	// Larger rock formations. Each owns its own rock texture instance for
+	// the same single-ownership reason as the field props above.
+	cairnRockTex := loadTiledTexture(makeRockWallPixels(128, 128))
+	formationRockTex := loadTiledTexture(makeRockWallPixels(128, 128))
+	r.propModels[core.TileRockCairn] = loadRockCairnProp(r.lighting.shader, cairnRockTex)
+	r.propModels[core.TileRockFormation] = loadRockFormationProp(r.lighting.shader, formationRockTex)
+
 	r.decorModels = make(map[byte]propModel)
 	r.decorModels[core.DecorTallGrass] = loadTallGrassProp(r.lighting.shader)
 	r.decorModels[core.DecorFlowers] = loadFlowerProp(r.lighting.shader)
@@ -191,11 +205,13 @@ func LoadResources() (r Resources) {
 	r.decorModels[core.DecorStump] = loadStumpProp(r.lighting.shader, stumpBarkTex)
 	r.decorModels[core.DecorLog] = loadLogProp(r.lighting.shader, logBarkTex, logMossTex)
 	r.decorModels[core.DecorLeafPile] = loadLeafPileProp(r.lighting.shader, leafPileTex)
+	// Archway uses marble palette to match the existing pillars/statues.
+	archMarbleTex := loadTiledTexture(makeMarblePixels(128, 128))
+	r.decorModels[core.DecorArchway] = loadArchwayDecor(r.lighting.shader, archMarbleTex)
 
 	committed = true
 	return r
 }
-
 
 func (r Resources) Unload() {
 	// UnloadModel walks the model's materials and unloads each map's texture,
@@ -203,14 +219,19 @@ func (r Resources) Unload() {
 	for _, material := range r.materials {
 		rl.UnloadModel(material.wallModel)
 		rl.UnloadModel(material.floorModel)
+		rl.UnloadModel(material.ceilingModel)
 		if material.hasFloorVariant {
 			rl.UnloadModel(material.floorDirtModel)
 			rl.UnloadModel(material.floorDarkModel)
 		}
 	}
 	rl.UnloadTexture(r.skyTexture)
-	for _, visual := range r.enemyVisuals {
-		rl.UnloadTexture(visual.texture)
+	// Walk enemyTextures (the owning list), NOT enemyVisuals — the map
+	// aliases the same handle at multiple keys (placeholder sprites for
+	// the new monsters) and iterating it would double-free every shared
+	// texture at game exit.
+	for _, tex := range r.enemyTextures {
+		rl.UnloadTexture(tex)
 	}
 	for _, texture := range r.partyTexture {
 		rl.UnloadTexture(texture)
@@ -278,6 +299,11 @@ func loadWorldMaterial(wallPixels, floorPixels []color.RGBA, shader rl.Shader) w
 	return worldMaterialResources{
 		wallModel:  loadTileModel(wallPixels, core.WallHeight, shader),
 		floorModel: loadFloorModel(floorPixels, shader),
+		// Ceiling reuses the wall texture but at a thin (0.2) slab height
+		// so its bottom face shows beneath the player while the top sits
+		// just above WallHeight. Same shader so the lighting profile and
+		// time-of-day uniforms apply consistently with walls and floors.
+		ceilingModel: loadTileModel(wallPixels, 0.2, shader),
 	}
 }
 
@@ -301,14 +327,26 @@ func lightingFor(material core.MaterialSet) lightingProfile {
 	return fieldLighting
 }
 
-func loadEnemyVisuals() map[core.EnemyKind]enemyVisual {
+func loadEnemyVisuals() (map[core.EnemyKind]enemyVisual, []rl.Texture2D) {
 	ratTexture := loadTexture(makeRatPixels(72, 96), 72, 96, rl.FilterPoint)
 	rl.SetTextureWrap(ratTexture, rl.WrapClamp)
 	batTexture := loadTexture(makeBatPixels(80, 88), 80, 88, rl.FilterPoint)
 	rl.SetTextureWrap(batTexture, rl.WrapClamp)
 	diseasedRatTexture := loadTexture(makeDiseasedRatPixels(72, 96), 72, 96, rl.FilterPoint)
 	rl.SetTextureWrap(diseasedRatTexture, rl.WrapClamp)
-	return map[core.EnemyKind]enemyVisual{
+	owned := []rl.Texture2D{ratTexture, batTexture, diseasedRatTexture}
+	// Placeholder textures for the new monster set — the procedural
+	// pixel art for goblin / goblin mage / amoeba hasn't been authored
+	// yet, so reuse existing sprites with size/aspect tweaks so the
+	// silhouettes still read as distinct at distance:
+	//   goblin     — rat texture, taller and beefier
+	//   goblinMage — diseased-rat texture (the "bigger, scarier rat"
+	//                already reads as a tier-up); replace once a
+	//                dedicated mage sprite exists
+	//   amoeba     — bat texture, squat and wide (the bat's "spread"
+	//                silhouette doubles for a blob until a dedicated
+	//                amoeba sprite is authored)
+	visuals := map[core.EnemyKind]enemyVisual{
 		core.EnemyRat: {
 			texture: ratTexture,
 			size:    rl.NewVector2(0.82, 1.22),
@@ -327,7 +365,20 @@ func loadEnemyVisuals() map[core.EnemyKind]enemyVisual {
 			// "meaner, bloated, sicker" read at a glance.
 			size: rl.NewVector2(0.92, 1.30),
 		},
+		core.EnemyGoblin: {
+			texture: ratTexture,
+			size:    rl.NewVector2(1.0, 1.5),
+		},
+		core.EnemyGoblinMage: {
+			texture: diseasedRatTexture,
+			size:    rl.NewVector2(1.05, 1.55),
+		},
+		core.EnemyAmoeba: {
+			texture: batTexture,
+			size:    rl.NewVector2(1.1, 0.9),
+		},
 	}
+	return visuals, owned
 }
 
 func loadHUDFont() (rl.Font, bool) {

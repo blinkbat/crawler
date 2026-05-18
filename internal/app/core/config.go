@@ -2,11 +2,11 @@ package core
 
 const (
 	// InitialWindowWidth/Height seed rl.InitWindow at startup. The window is
-	// immediately resized to the monitor by applyWindowedFullscreen, so these
-	// are NOT the runtime screen dimensions — never use them for HUD layout
-	// (render code reads rl.GetScreenWidth/Height via screenSize() in the
-	// render package). They only matter for the brief instant between
-	// InitWindow and SetWindowSize.
+	// immediately resized to the monitor by render.SetDisplayMode(DisplayFullscreen),
+	// so these are NOT the runtime screen dimensions — never use them for
+	// HUD layout (render code reads rl.GetScreenWidth/Height via screenSize()
+	// in the render package). They also double as the default size the
+	// Windowed display mode snaps to on the first Fullscreen→Windowed toggle.
 	InitialWindowWidth  = 1180
 	InitialWindowHeight = 820
 
@@ -106,7 +106,14 @@ const (
 	// the prompt. The bar arms early if the player presses/holds the input,
 	// see updateAttackTiming for the skip logic.
 	AttackTimingIntro = float32(0.35)
-	ChargeTimingIntro = float32(0.85)
+	// ChargeTimingIntro is the auto-arm timeout for charge bars: the
+	// bar waits this long for the player to engage their input before
+	// arming on its own. Pressing/holding during the wait skips
+	// straight into the bar (see updateAttackTiming). 3s is the
+	// "wait for the player, but don't softlock if they're afk" sweet
+	// spot — long enough to read the prompt and breathe, short enough
+	// that a missed cue doesn't burn the whole turn.
+	ChargeTimingIntro = float32(3.0)
 	// BlockBumpDuration is intentionally LONGER than BumpDuration (0.22 vs
 	// 0.18). The hit landing on an enemy gets its own DamageFlash + popup
 	// to read the impact; a successful block has none of that — the defender
@@ -192,6 +199,11 @@ const (
 	// MaxMapDimension caps editor map width/height. Used by both the typed
 	// numeric input and the +/- resize buttons so they share one ceiling.
 	MaxMapDimension = 200
+
+	// MinMapDimension is the smallest playable map. Border walls take 2
+	// cells in each axis; 4×4 leaves a 2×2 interior — the tightest you
+	// can put a player start and one pack on without overlap.
+	MinMapDimension = 4
 )
 
 // PressWindow groups the press-bar window geometry. Values are fractions
@@ -250,6 +262,48 @@ const (
 	SkillPrayer
 	SkillSteal
 	SkillFirebolt
+	// SkillSleep is the goblin-mage's status-inflict cast — single
+	// target, puts a party member to sleep for SleepMin..SleepMaxTurns.
+	// Wakes on any incoming damage. Tagged Magic so it bypasses armor.
+	SkillSleep
+)
+
+// SkillTag classifies a skill for damage-type interactions (armor,
+// future elemental resists) and for HUD color-coding. Phys damage
+// clips against the target's Armor; Magic / Heal / Buff bypass it.
+// Independent of SkillKind: Kind controls the stat-scaling formula
+// (STR vs INT vs WIS), Tag controls the defensive interaction.
+type SkillTag int
+
+const (
+	SkillTagNone SkillTag = iota
+	SkillTagPhys
+	SkillTagMagic
+	SkillTagHeal
+	SkillTagBuff
+)
+
+// Sleep status duration bounds. Same shape as BurnMin/MaxTurns and
+// PoisonMin/MaxTurns — the SleepEffect roller picks uniform-random
+// value in [Min, Max] when the cast lands. Any incoming damage > 0
+// wakes the sleeper and clears their SleepTurns counter.
+const (
+	SleepMinTurns = 2
+	SleepMaxTurns = 5
+)
+
+// XP / level constants. Per-character XP and levels (one pool + one
+// counter per PartyMember) with a geometric per-level cost: each level
+// costs LevelXPBase × LevelXPRatio^(level-1) — 100, 200, 400, 800.
+// LevelStatPoints is the number of points the player allocates on each
+// level-up — small enough that one level is a noticeable bump, not a
+// respec. BaseLevel is the level every member starts at (1, not 0, so
+// the cost formula works out).
+const (
+	LevelXPBase     = 100
+	LevelXPRatio    = 2.0
+	LevelStatPoints = 3
+	BaseLevel       = 1
 )
 
 const (
@@ -267,7 +321,10 @@ type PauseMenuItem int
 
 const (
 	PauseMenuRestart PauseMenuItem = iota
+	PauseMenuStats
 	PauseMenuDebug
+	PauseMenuDisplay
+	PauseMenuJukebox
 	PauseMenuQuit
 )
 

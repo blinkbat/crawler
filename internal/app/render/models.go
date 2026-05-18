@@ -247,6 +247,114 @@ func loadRockProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 	}
 }
 
+// loadRockCairnProp builds a 1-tile stacked-stone cairn — three faceted
+// lumps fused on top of each other, taller than the squat boulder so the
+// silhouette reads as "built by hands" rather than "natural rock." Same
+// stone palette as the boulder so they sit comfortably together in the
+// plaza.
+func loadRockCairnProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
+	models := []rl.Model{
+		rl.LoadModelFromMesh(rl.GenMeshSphere(0.42, 5, 7)),
+		rl.LoadModelFromMesh(rl.GenMeshSphere(0.32, 5, 6)),
+		rl.LoadModelFromMesh(rl.GenMeshSphere(0.22, 4, 5)),
+	}
+	for i := range models {
+		setModelTexture(&models[i], rockTex)
+		attachShader(&models[i], shader)
+	}
+	warm := rl.NewColor(214, 204, 188, 255)
+	cool := rl.NewColor(196, 198, 202, 255)
+	dark := rl.NewColor(176, 172, 164, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.34, 0), scale: rl.NewVector3(1.1, 0.85, 1.1), rotation: 13, rotationAxis: rl.NewVector3(1, 4, 1), tint: warm},
+			{modelIdx: 1, offset: rl.NewVector3(0.04, 0.78, -0.06), scale: rl.NewVector3(1.0, 0.95, 1.0), rotation: -22, rotationAxis: rl.NewVector3(2, 5, 1), tint: cool},
+			{modelIdx: 2, offset: rl.NewVector3(-0.05, 1.10, 0.04), scale: rl.NewVector3(1.0, 0.95, 1.0), rotation: 38, rotationAxis: rl.NewVector3(1, 5, 0), tint: dark},
+		},
+	}
+}
+
+// loadRockFormationProp builds a 2×2 footprint rock formation — a knot of
+// several large lumps fused together to span four tiles. Offsets put the
+// model's origin at the CENTER of the 2×2 footprint, which means the
+// renderer draws this at (anchorX+0.5, anchorZ+0.5) tile-space (= one
+// TileSize east + south of the anchor's tile center). Lumps spread ~1.6
+// world units (~0.8 tile widths each direction) so the silhouette fills
+// the 2-tile span comfortably.
+func loadRockFormationProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
+	models := []rl.Model{
+		rl.LoadModelFromMesh(rl.GenMeshSphere(0.95, 6, 7)),
+		rl.LoadModelFromMesh(rl.GenMeshSphere(0.70, 5, 6)),
+		rl.LoadModelFromMesh(rl.GenMeshSphere(0.55, 5, 6)),
+		rl.LoadModelFromMesh(rl.GenMeshSphere(0.40, 4, 5)),
+	}
+	for i := range models {
+		setModelTexture(&models[i], rockTex)
+		attachShader(&models[i], shader)
+	}
+	warm := rl.NewColor(214, 204, 188, 255)
+	cool := rl.NewColor(196, 198, 202, 255)
+	dark := rl.NewColor(176, 172, 164, 255)
+	light := rl.NewColor(232, 224, 210, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			// Central mass — biggest lump anchoring the cluster.
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.75, 0), scale: rl.NewVector3(1.05, 0.95, 1.05), rotation: 17, rotationAxis: rl.NewVector3(1, 4, 1), tint: warm},
+			// NE shoulder pushing into the +X/+Z quadrant.
+			{modelIdx: 1, offset: rl.NewVector3(0.62, 0.55, 0.55), scale: rl.NewVector3(1.0, 0.85, 1.0), rotation: -28, rotationAxis: rl.NewVector3(2, 5, 1), tint: cool},
+			// SW chunk, lower profile.
+			{modelIdx: 2, offset: rl.NewVector3(-0.55, 0.42, -0.45), scale: rl.NewVector3(1.0, 0.8, 1.0), rotation: 41, rotationAxis: rl.NewVector3(1, 5, 0), tint: dark},
+			// NW protrusion.
+			{modelIdx: 2, offset: rl.NewVector3(-0.45, 0.50, 0.58), scale: rl.NewVector3(0.9, 0.75, 0.9), rotation: -52, rotationAxis: rl.NewVector3(0, 6, 1), tint: warm},
+			// SE buttress.
+			{modelIdx: 2, offset: rl.NewVector3(0.58, 0.46, -0.52), scale: rl.NewVector3(0.95, 0.8, 0.95), rotation: 11, rotationAxis: rl.NewVector3(1, 3, 0), tint: cool},
+			// Crown lump on top.
+			{modelIdx: 3, offset: rl.NewVector3(0.05, 1.18, -0.08), scale: rl.NewVector3(1.0, 0.85, 1.0), rotation: 65, rotationAxis: rl.NewVector3(1, 4, 0), tint: light},
+			// Cap accent — slight asymmetric peak.
+			{modelIdx: 3, offset: rl.NewVector3(-0.18, 1.32, 0.10), scale: rl.NewVector3(0.8, 0.75, 0.8), rotation: -25, rotationAxis: rl.NewVector3(2, 4, 1), tint: dark},
+		},
+	}
+}
+
+// loadArchwayDecor builds a stone archway whose footprint spans 1×2 tiles
+// along +X. Two vertical pillars sit at (−1, 0) and (+1, 0) relative to
+// the model origin (so the model origin lands BETWEEN the two tiles — the
+// renderer offsets by +0.5 tile east of the anchor). A keystone block
+// spans the top, completing the arch shape. Marble palette to match the
+// existing pillar/statue stonework.
+func loadArchwayDecor(shader rl.Shader, marbleTex rl.Texture2D) propModel {
+	models := []rl.Model{
+		rl.LoadModelFromMesh(rl.GenMeshCube(0.42, 2.10, 0.42)), // pillar shaft
+		rl.LoadModelFromMesh(rl.GenMeshCube(0.58, 0.20, 0.58)), // pillar capital
+		rl.LoadModelFromMesh(rl.GenMeshCube(2.20, 0.38, 0.46)), // arch keystone slab
+		rl.LoadModelFromMesh(rl.GenMeshCube(0.48, 0.18, 0.48)), // base plinth
+	}
+	for i := range models {
+		setModelTexture(&models[i], marbleTex)
+		attachShader(&models[i], shader)
+	}
+	stone := rl.NewColor(220, 214, 198, 255)
+	stoneCool := rl.NewColor(204, 196, 174, 255)
+	stoneDark := rl.NewColor(178, 170, 152, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			// Left pillar: plinth, shaft, capital — stacked at -1 tile X.
+			{modelIdx: 3, offset: rl.NewVector3(-1.00, 0.09, 0), scale: rl.NewVector3(1, 1, 1), tint: stoneDark},
+			{modelIdx: 0, offset: rl.NewVector3(-1.00, 1.20, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
+			{modelIdx: 1, offset: rl.NewVector3(-1.00, 2.35, 0), scale: rl.NewVector3(1, 1, 1), tint: stoneCool},
+			// Right pillar: mirror at +1 tile X.
+			{modelIdx: 3, offset: rl.NewVector3(1.00, 0.09, 0), scale: rl.NewVector3(1, 1, 1), tint: stoneDark},
+			{modelIdx: 0, offset: rl.NewVector3(1.00, 1.20, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
+			{modelIdx: 1, offset: rl.NewVector3(1.00, 2.35, 0), scale: rl.NewVector3(1, 1, 1), tint: stoneCool},
+			// Keystone slab spanning both pillars at the top.
+			{modelIdx: 2, offset: rl.NewVector3(0, 2.65, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
+		},
+	}
+}
+
 // loadBushProp builds a leaf-cluster bush (no trunk) from a few spheres.
 // Same leaf texture as the trees so the foliage palette stays consistent.
 // Scale 1.0 = "large" (blocks); ~0.5 reads as "small".
@@ -381,10 +489,10 @@ func loadBarrelProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 // Terracotta texture warms the clay tone.
 func loadUrnProp(shader rl.Shader, terracottaTex rl.Texture2D) propModel {
 	models := []rl.Model{
-		rl.LoadModelFromMesh(rl.GenMeshSphere(0.36, 10, 14)),       // belly
-		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.18, 0.20, 16)),   // neck
-		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.23, 0.05, 18)),   // rim flare
-		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.20, 0.06, 14)),   // foot
+		rl.LoadModelFromMesh(rl.GenMeshSphere(0.36, 10, 14)),     // belly
+		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.18, 0.20, 16)), // neck
+		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.23, 0.05, 18)), // rim flare
+		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.20, 0.06, 14)), // foot
 	}
 	for i := range models {
 		setModelTexture(&models[i], terracottaTex)
@@ -444,11 +552,11 @@ func loadStalagmiteProp(shader rl.Shader, stoneTex rl.Texture2D) propModel {
 // implies dust settled toward the bottom.
 func loadPillarProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 	models := []rl.Model{
-		rl.LoadModelFromMesh(rl.GenMeshCube(0.72, 0.18, 0.72)),      // plinth
-		rl.LoadModelFromMesh(rl.GenMeshCube(0.62, 0.10, 0.62)),      // base
-		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.26, 2.05, 18)),    // shaft
-		rl.LoadModelFromMesh(rl.GenMeshCube(0.62, 0.16, 0.62)),      // echinus
-		rl.LoadModelFromMesh(rl.GenMeshCube(0.74, 0.08, 0.74)),      // abacus
+		rl.LoadModelFromMesh(rl.GenMeshCube(0.72, 0.18, 0.72)),   // plinth
+		rl.LoadModelFromMesh(rl.GenMeshCube(0.62, 0.10, 0.62)),   // base
+		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.26, 2.05, 18)), // shaft
+		rl.LoadModelFromMesh(rl.GenMeshCube(0.62, 0.16, 0.62)),   // echinus
+		rl.LoadModelFromMesh(rl.GenMeshCube(0.74, 0.08, 0.74)),   // abacus
 	}
 	for i := range models {
 		setModelTexture(&models[i], marbleTex)
@@ -506,12 +614,12 @@ func loadBrokenPillarProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 // statue share a stone family.
 func loadStatueProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 	models := []rl.Model{
-		rl.LoadModelFromMesh(rl.GenMeshCube(0.92, 0.24, 0.92)),       // pedestal
-		rl.LoadModelFromMesh(rl.GenMeshCube(0.55, 0.14, 0.55)),       // statue base
-		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.20, 0.55, 14)),     // legs
-		rl.LoadModelFromMesh(rl.GenMeshCube(0.48, 0.62, 0.30)),       // torso
-		rl.LoadModelFromMesh(rl.GenMeshCube(0.66, 0.14, 0.34)),       // shoulders
-		rl.LoadModelFromMesh(rl.GenMeshSphere(0.18, 10, 12)),         // head
+		rl.LoadModelFromMesh(rl.GenMeshCube(0.92, 0.24, 0.92)),   // pedestal
+		rl.LoadModelFromMesh(rl.GenMeshCube(0.55, 0.14, 0.55)),   // statue base
+		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.20, 0.55, 14)), // legs
+		rl.LoadModelFromMesh(rl.GenMeshCube(0.48, 0.62, 0.30)),   // torso
+		rl.LoadModelFromMesh(rl.GenMeshCube(0.66, 0.14, 0.34)),   // shoulders
+		rl.LoadModelFromMesh(rl.GenMeshSphere(0.18, 10, 12)),     // head
 	}
 	for i := range models {
 		setModelTexture(&models[i], marbleTex)
@@ -540,10 +648,10 @@ func loadStatueProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 // statue: an obelisk should feel like a different stone class.
 func loadObeliskProp(shader rl.Shader, graniteTex rl.Texture2D) propModel {
 	models := []rl.Model{
-		rl.LoadModelFromMesh(rl.GenMeshCube(0.88, 0.14, 0.88)),       // base step
-		rl.LoadModelFromMesh(rl.GenMeshCube(0.56, 2.20, 0.56)),       // shaft
-		rl.LoadModelFromMesh(rl.GenMeshSphere(0.40, 4, 6)),           // pyramid cap (low-slice)
-		rl.LoadModelFromMesh(rl.GenMeshSphere(0.08, 6, 6)),           // apex
+		rl.LoadModelFromMesh(rl.GenMeshCube(0.88, 0.14, 0.88)), // base step
+		rl.LoadModelFromMesh(rl.GenMeshCube(0.56, 2.20, 0.56)), // shaft
+		rl.LoadModelFromMesh(rl.GenMeshSphere(0.40, 4, 6)),     // pyramid cap (low-slice)
+		rl.LoadModelFromMesh(rl.GenMeshSphere(0.08, 6, 6)),     // apex
 	}
 	for i := range models {
 		setModelTexture(&models[i], graniteTex)
@@ -572,11 +680,11 @@ func loadObeliskProp(shader rl.Shader, graniteTex rl.Texture2D) propModel {
 // default texture so the water tint reads cleanly.
 func loadFountainProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 	models := []rl.Model{
-		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.78, 0.42, 24)),     // outer basin
-		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.66, 0.06, 22)),     // water disc
-		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.12, 0.45, 12)),     // central spout
-		rl.LoadModelFromMesh(rl.GenMeshSphere(0.18, 10, 12)),         // splash bowl
-		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.82, 0.10, 24)),     // rim coping
+		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.78, 0.42, 24)), // outer basin
+		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.66, 0.06, 22)), // water disc
+		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.12, 0.45, 12)), // central spout
+		rl.LoadModelFromMesh(rl.GenMeshSphere(0.18, 10, 12)),     // splash bowl
+		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.82, 0.10, 24)), // rim coping
 	}
 	// Marble texture on all stone parts; water disc stays raylib-default so
 	// its tint stays unmuddied by stone grain.
@@ -904,4 +1012,3 @@ func loadLeafPileProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
 		},
 	}
 }
-

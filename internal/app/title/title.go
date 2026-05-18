@@ -56,43 +56,64 @@ func Update(s *State) Action {
 	return ActionNone
 }
 
-// mainMenuItems is the single source of truth for the title menu's row
-// labels and order. updateMain wraps the cursor against len(items) and
-// drawMainMenu renders the same slice, so adding / reordering rows is a
-// one-line edit. Indices below in updateMain are the row meanings; keep
-// them aligned with mainMenuItems.
-var mainMenuItems = []string{"Adventure", "Editor", "Quit"}
+// mainMenuRowDef binds a title-menu row to its label producer and its
+// confirm-press action. The order of mainMenuRows IS the draw order; the
+// row index is the cursor position. Mirrors render.pauseMenuRows so both
+// menus use the same "label + action" struct pattern instead of one being
+// iota+labels-slice and the other being struct-table.
+type mainMenuRowDef struct {
+	Label  func() string
+	Action func(s *State) Action
+}
 
-const (
-	mainRowAdventure = 0
-	mainRowEditor    = 1
-	mainRowQuit      = 2
-)
+var mainMenuRows = []mainMenuRowDef{
+	{
+		Label: func() string { return "Adventure" },
+		Action: func(s *State) Action {
+			paths, _ := mapfile.List(core.MapsDir())
+			s.mapPaths = paths
+			s.cursor = 0
+			s.mode = modeMapPicker
+			return ActionNone
+		},
+	},
+	{
+		Label:  func() string { return "Editor" },
+		Action: func(s *State) Action { return ActionOpenEditor },
+	},
+	{
+		Label: func() string { return render.DisplayMenuRowLabel() },
+		Action: func(s *State) Action {
+			render.ToggleDisplayMode()
+			return ActionNone
+		},
+	},
+	{
+		Label:  func() string { return "Quit" },
+		Action: func(s *State) Action { return ActionQuit },
+	},
+}
+
+// mainMenuLabels returns the title menu's row labels in draw order. Used
+// by drawMainMenu's drawList call and as the cursor's wrap modulus.
+func mainMenuLabels() []string {
+	labels := make([]string, len(mainMenuRows))
+	for i, row := range mainMenuRows {
+		labels[i] = row.Label()
+	}
+	return labels
+}
 
 func updateMain(s *State) Action {
-	itemCount := len(mainMenuItems)
-	if input.UpPressed() {
-		s.cursor = core.WrapIndex(s.cursor-1, itemCount)
-	}
-	if input.DownPressed() {
-		s.cursor = core.WrapIndex(s.cursor+1, itemCount)
-	}
+	s.cursor = input.CursorUpDown(s.cursor, len(mainMenuRows))
 	// Esc and Q both quit from the main menu — there's nowhere to back up to.
 	if input.QuitPressed() || input.BackPressed() {
 		return ActionQuit
 	}
 	if input.ConfirmPressed() {
 		s.loadError = ""
-		switch s.cursor {
-		case mainRowAdventure:
-			paths, _ := mapfile.List(core.MapsDir())
-			s.mapPaths = paths
-			s.cursor = 0
-			s.mode = modeMapPicker
-		case mainRowEditor:
-			return ActionOpenEditor
-		case mainRowQuit:
-			return ActionQuit
+		if s.cursor >= 0 && s.cursor < len(mainMenuRows) {
+			return mainMenuRows[s.cursor].Action(s)
 		}
 	}
 	return ActionNone
@@ -107,12 +128,7 @@ func updateMapPicker(s *State) Action {
 	if len(s.mapPaths) == 0 {
 		return ActionNone
 	}
-	if input.UpPressed() {
-		s.cursor = core.WrapIndex(s.cursor-1, len(s.mapPaths))
-	}
-	if input.DownPressed() {
-		s.cursor = core.WrapIndex(s.cursor+1, len(s.mapPaths))
-	}
+	s.cursor = input.CursorUpDown(s.cursor, len(s.mapPaths))
 	if input.ConfirmPressed() {
 		s.chosenMapPath = s.mapPaths[s.cursor]
 		return ActionStartAdventure
@@ -124,56 +140,59 @@ func Draw(s State, assets render.Resources) {
 	font := assets.Font()
 	theme := assets.Theme()
 	rl.ClearBackground(rl.NewColor(8, 12, 24, 255))
-	screenW := int32(rl.GetScreenWidth())
 	screenH := int32(rl.GetScreenHeight())
 
 	title := "CRAWLER"
 	titleSize := float32(72)
 	titleSpacing := float32(4)
 	tm := rl.MeasureTextEx(font, title, titleSize, titleSpacing)
-	titleX := float32(screenW)/2 - tm.X/2
+	titleX := render.CenterXF(tm.X)
 	titleY := float32(screenH) * 0.18
 	render.DrawTextWithShadow(font, title, titleX, titleY, titleSize, theme.TextPrimary)
 
 	switch s.mode {
 	case modeMain:
-		drawMainMenu(s, font, theme, screenW, screenH)
+		drawMainMenu(s, font, theme, screenH)
 	case modeMapPicker:
-		drawMapPicker(s, font, theme, screenW, screenH)
+		drawMapPicker(s, font, theme, screenH)
 	}
 
 	if s.loadError != "" {
-		drawError(font, theme, s.loadError, screenW, screenH)
+		drawError(font, theme, s.loadError, screenH)
 	}
 }
 
-func drawMainMenu(s State, font rl.Font, theme render.Theme, screenW, screenH int32) {
-	drawList(mainMenuItems, s.cursor, font, theme, screenW, screenH, "")
-	drawHint(font, theme, "Up/Down navigate   Enter select   Esc/Q quit", screenW, screenH)
+func drawMainMenu(s State, font rl.Font, theme render.Theme, screenH int32) {
+	drawList(mainMenuLabels(), s.cursor, font, theme, screenH, "")
+	drawHint(font, "Up/Down navigate   Enter select   Esc/Q quit", screenH)
 }
 
-func drawMapPicker(s State, font rl.Font, theme render.Theme, screenW, screenH int32) {
+func drawMapPicker(s State, font rl.Font, theme render.Theme, screenH int32) {
 	header := "Choose a map"
 	if len(s.mapPaths) == 0 {
 		items := []string{"(no maps in maps/ -- press Esc and try Editor first)"}
-		drawList(items, 0, font, theme, screenW, screenH, header)
-		drawHint(font, theme, "Esc to go back", screenW, screenH)
+		drawList(items, 0, font, theme, screenH, header)
+		drawHint(font, "Esc to go back", screenH)
 		return
 	}
 	items := make([]string, len(s.mapPaths))
 	for i, p := range s.mapPaths {
 		items[i] = core.MapIDFromPath(p)
 	}
-	drawList(items, s.cursor, font, theme, screenW, screenH, header)
-	drawHint(font, theme, "Up/Down navigate   Enter start   Esc back", screenW, screenH)
+	drawList(items, s.cursor, font, theme, screenH, header)
+	drawHint(font, "Up/Down navigate   Enter start   Esc back", screenH)
 }
 
-func drawList(items []string, cursor int, font rl.Font, theme render.Theme, screenW, screenH int32, header string) {
+// drawList paints a vertical column of menu items centered horizontally.
+// screenH controls the vertical anchor (items start at 42% of screen
+// height); horizontal centering is handled by render.CenterXF which
+// re-reads the screen width directly, so callers don't pass screenW.
+func drawList(items []string, cursor int, font rl.Font, theme render.Theme, screenH int32, header string) {
 	listY := float32(screenH) * 0.42
 	if header != "" {
 		sz := float32(20)
 		m := rl.MeasureTextEx(font, header, sz, 1.5)
-		render.DrawTextWithShadow(font, header, float32(screenW)/2-m.X/2, listY-52, sz, theme.TextLabel)
+		render.DrawTextWithShadow(font, header, render.CenterXF(m.X), listY-52, sz, theme.TextLabel)
 	}
 	for i, label := range items {
 		size := float32(28)
@@ -184,24 +203,19 @@ func drawList(items []string, cursor int, font rl.Font, theme render.Theme, scre
 			text = "> " + label
 		}
 		m := rl.MeasureTextEx(font, text, size, 1.5)
-		x := float32(screenW)/2 - m.X/2
 		y := listY + float32(i)*44
-		render.DrawTextWithShadow(font, text, x, y, size, col)
+		render.DrawTextWithShadow(font, text, render.CenterXF(m.X), y, size, col)
 	}
 }
 
-func drawHint(font rl.Font, theme render.Theme, text string, screenW, screenH int32) {
-	size := float32(14)
-	m := rl.MeasureTextEx(font, text, size, 1)
-	x := float32(screenW)/2 - m.X/2
-	y := float32(screenH) - 36
-	render.DrawTextWithShadow(font, text, x, y, size, theme.TextHint)
+func drawHint(font rl.Font, text string, screenH int32) {
+	cx := float32(rl.GetScreenWidth()) / 2
+	render.DrawFooterHint(font, text, cx, float32(screenH)-36, 14)
 }
 
-func drawError(font rl.Font, theme render.Theme, msg string, screenW, screenH int32) {
+func drawError(font rl.Font, theme render.Theme, msg string, screenH int32) {
 	size := float32(16)
 	m := rl.MeasureTextEx(font, msg, size, 1)
-	x := float32(screenW)/2 - m.X/2
 	y := float32(screenH) - 60
-	render.DrawTextWithShadow(font, msg, x, y, size, theme.BorderDanger)
+	render.DrawTextWithShadow(font, msg, render.CenterXF(m.X), y, size, theme.BorderDanger)
 }

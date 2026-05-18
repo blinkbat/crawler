@@ -69,57 +69,59 @@ func drawMinimap(m core.AreaDefinition, g core.GameState, assets Resources) {
 	)
 }
 
+// minimapPropColors keys every prop-layer char to its minimap swatch.
+// Map-driven instead of a switch so a missing entry stands out at code
+// review and the unknown-tile fallback path stays a single branch.
+// Must enumerate the same set as core.IsPropChar's switch in
+// internal/app/core/map.go — a future prop char goes in both lists.
+// Colors are deliberately distinct from the editor's tileColorByChar:
+// the minimap tone palette is tuned for the small-rendered case, not
+// for matching the editor swatch exactly.
+// init asserts every prop-tile char registered in core.PropTileChars
+// has a minimap color. Without this guard, adding a prop to core's
+// list silently fell back to the "unknown tile" tone on the minimap —
+// catching it at startup is far cheaper than noticing in playtest.
+func init() {
+	for _, c := range core.PropTileChars() {
+		if _, ok := minimapPropColors[c]; !ok {
+			panic("render/minimap: missing color for prop tile " + string(c))
+		}
+	}
+}
+
+var minimapPropColors = map[byte]rl.Color{
+	core.TileTree:              rl.NewColor(42, 132, 56, 240),
+	core.TileTreeXL:            rl.NewColor(28, 102, 44, 240),
+	core.TileRockLarge:         rl.NewColor(120, 116, 108, 240),
+	core.TileBushLarge:         rl.NewColor(110, 168, 92, 240),
+	core.TileCrate:             rl.NewColor(168, 122, 72, 240),
+	core.TileBarrel:            rl.NewColor(148, 100, 60, 240),
+	core.TileUrn:               rl.NewColor(186, 112, 72, 240),
+	core.TileStalagmite:        rl.NewColor(196, 188, 174, 240),
+	core.TilePillar:            rl.NewColor(214, 206, 188, 240),
+	core.TileBrokenPillar:      rl.NewColor(180, 172, 156, 240),
+	core.TileStatue:            rl.NewColor(228, 220, 204, 240),
+	core.TileObelisk:           rl.NewColor(86, 90, 104, 240),
+	core.TileFountain:          rl.NewColor(96, 158, 208, 240),
+	core.TileRockCairn:         rl.NewColor(150, 138, 116, 240),
+	core.TileRockFormation:     rl.NewColor(118, 102, 86, 240),
+	core.TileRockFormationTail: rl.NewColor(118, 102, 86, 240),
+}
+
 func minimapTileColor(material core.MaterialSet, tile byte) color.RGBA {
-	switch tile {
-	case core.TileRock:
+	if tile == core.TileRock {
 		if material == core.MaterialDungeon {
 			return rl.NewColor(132, 132, 126, 235)
 		}
 		return rl.NewColor(112, 112, 106, 235)
-	case core.TileTree:
-		return rl.NewColor(42, 132, 56, 240)
-	case core.TileTreeXL:
-		// Slightly darker / saturated than TileTree so the XL footprints stand
-		// out as the canopy "tent poles" the player navigates around.
-		return rl.NewColor(28, 102, 44, 240)
-	case core.TileRockLarge:
-		// Boulder tone matches the field's wall-rock palette so it reads as
-		// "this is hard cover, not foliage."
-		return rl.NewColor(120, 116, 108, 240)
-	case core.TileBushLarge:
-		// Lighter, yellower green than the trees so bushes don't get confused
-		// with canopy on the map.
-		return rl.NewColor(110, 168, 92, 240)
-	// Inhabited / ruined props share two minimap palettes: warm browns for
-	// wooden/clay things (crate / barrel / urn), and cool greys for stone
-	// (stalagmite / pillar / broken pillar / statue / obelisk / fountain).
-	// Same color family communicates "hard cover, same category" without
-	// asking the player to memorize a glyph per icon. Slight tone shifts
-	// inside each family let adjacent props still read as distinct.
-	case core.TileCrate:
-		return rl.NewColor(168, 122, 72, 240)
-	case core.TileBarrel:
-		return rl.NewColor(148, 100, 60, 240)
-	case core.TileUrn:
-		return rl.NewColor(186, 112, 72, 240)
-	case core.TileStalagmite:
-		return rl.NewColor(196, 188, 174, 240)
-	case core.TilePillar:
-		return rl.NewColor(214, 206, 188, 240)
-	case core.TileBrokenPillar:
-		return rl.NewColor(180, 172, 156, 240)
-	case core.TileStatue:
-		return rl.NewColor(228, 220, 204, 240)
-	case core.TileObelisk:
-		return rl.NewColor(86, 90, 104, 240)
-	case core.TileFountain:
-		return rl.NewColor(96, 158, 208, 240)
-	default:
-		if material == core.MaterialDungeon {
-			return rl.NewColor(82, 84, 88, 235)
-		}
-		return rl.NewColor(60, 121, 54, 235)
 	}
+	if col, ok := minimapPropColors[tile]; ok {
+		return col
+	}
+	if material == core.MaterialDungeon {
+		return rl.NewColor(82, 84, 88, 235)
+	}
+	return rl.NewColor(60, 121, 54, 235)
 }
 
 // drawMinimapTimeOfDay paints the day/night cycle indicator under the
@@ -186,5 +188,5 @@ func drawMinimapArrow(center rl.Vector2, facing int) {
 		left = rl.NewVector2(center.X+arrowSize, center.Y+arrowSize)
 		right = rl.NewVector2(center.X+arrowSize, center.Y-arrowSize)
 	}
-	rl.DrawTriangle(tip, left, right, rl.NewColor(132, 240, 148, 255))
+	drawTriangleCCW(tip, left, right, rl.NewColor(132, 240, 148, 255))
 }

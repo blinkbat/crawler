@@ -1,6 +1,7 @@
 package battle
 
 import (
+	"fmt"
 	"sort"
 
 	"crawler/internal/app/audio"
@@ -201,11 +202,48 @@ func startActorTurn(g *core.GameState) {
 		return
 	}
 
+	// Sleep skip — decrement the sleep counter at the start of the
+	// sleeping actor's own turn (same rhythm as burn) and forfeit
+	// their action this round. Damage during a future round wakes them
+	// early; here we only handle the "still asleep at turn start" path.
+	if asleep := tickSleepAtTurnStart(g, actor); asleep {
+		g.Battle.QueueCursor++
+		startActorTurn(g)
+		return
+	}
+
 	if actor.IsParty {
 		beginPartyTurn(g, actor.Index)
 	} else {
 		beginEnemyAttack(g, actor.Index)
 	}
+}
+
+// tickSleepAtTurnStart decrements SleepTurns and emits a "(Name) sleeps."
+// log line when the actor is still asleep at turn start. Returns true
+// when the actor must skip their input action this turn. Mirrors
+// tickBurnAtTurnStart's shape: counter ticks here, wake-on-damage lives
+// in the damage helpers, both rules pinned to the actor's own turn.
+func tickSleepAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
+	if actor.IsParty {
+		if actor.Index < 0 || actor.Index >= len(g.Party) {
+			return false
+		}
+		m := &g.Party[actor.Index]
+		if m.HP <= 0 || m.SleepTurns <= 0 {
+			return false
+		}
+		m.SleepTurns--
+		setBattleMessage(g, fmt.Sprintf("%s is asleep.", m.Name))
+		return true
+	}
+	enemy := core.BattleMemberAt(g, actor.Index)
+	if enemy == nil || !enemy.Alive || enemy.SleepTurns <= 0 {
+		return false
+	}
+	enemy.SleepTurns--
+	setBattleMessage(g, fmt.Sprintf("The %s is asleep.", core.EnemyInfoFor(*enemy).SingularNoun))
+	return true
 }
 
 // isActorAlive answers "is this queue actor still in the fight?" Used for
@@ -228,6 +266,13 @@ func isActorAlive(g *core.GameState, actor core.ActorRef) bool {
 func finishActorTurn(g *core.GameState) {
 	g.Battle.Timing = core.TimingState{}
 	g.Battle.TimingFlash = 0
+	// Canonical clear of ChargeNeedsRelease: any action that finished
+	// (player or enemy) flows through here, so this is the seam that
+	// guarantees the next turn starts with a fresh release-gate state.
+	// clearBattleResidual also zeros the field as a belt-and-suspenders
+	// catch for early-exit battle leaves; the inline clear inside
+	// updateAttackTiming is the runtime "key was released" path.
+	g.Battle.ChargeNeedsRelease = false
 	// HitStop is normally drained to zero by tickFlashHold before
 	// applyPendingAction fires, but clear it defensively here so an early-
 	// exit apply path (e.g. "No target." after the target died between
@@ -320,9 +365,9 @@ func updatePlayerBattle(g *core.GameState) {
 //
 // Phase order on a Great/Excellent press:
 //
-//	1. TimingFlash counts down (bar pulses with quality color, cursor frozen)
-//	2. HitStop counts down (everything in the world freezes — see Update)
-//	3. onResolve fires (damage / heal applies, popup spawns)
+//  1. TimingFlash counts down (bar pulses with quality color, cursor frozen)
+//  2. HitStop counts down (everything in the world freezes — see Update)
+//  3. onResolve fires (damage / heal applies, popup spawns)
 //
 // On a Miss / Nice / Good, phase 2 is skipped — HitStopFor returns 0 and
 // onResolve fires the moment the flash hits zero.
@@ -362,11 +407,24 @@ func updateAttackTiming(g *core.GameState, dt float32) {
 	if tickFlashHold(g, dt, func() { applyPendingAction(g, g.Battle.Timing.Quality) }) {
 		return
 	}
+	// Charge-bar release gate: while the confirm key carried over from
+	// menu confirmation is still held, suppress every engage path
+	// (intro-skip, Hold, Release). The intro counter still ticks so
+	// the 3s auto-arm isn't blocked, but a player who's stuck holding
+	// from menu-confirm can't accidentally drive the bar. Cleared the
+	// frame after AttackTimingHeld goes false.
+	if g.Battle.ChargeNeedsRelease && !input.AttackTimingHeld() {
+		g.Battle.ChargeNeedsRelease = false
+	}
+	engageReady := !g.Battle.ChargeNeedsRelease
 	if g.Battle.TimingIntro > 0 {
-		// Charge bars skip the intro the moment the player engages the input
-		// — that's the "starts if you hit the input" behavior. For other
-		// kinds the intro is short anyway and runs out on its own.
-		if g.Battle.Timing.Kind == core.TimingKindCharge && (input.AttackTimingHeld() || input.AttackTimingPressed()) {
+		// Charge bars skip the intro on a FRESH edge press AFTER the
+		// release gate has cleared. Without the edge-only rule, the
+		// same Enter the player used to confirm the target would bleed
+		// into the next frame's input check and instantly engage the
+		// charge — bar cursor would advance, player's natural release
+		// of the confirm key would resolve the bar at quality=Miss.
+		if g.Battle.Timing.Kind == core.TimingKindCharge && engageReady && input.AttackTimingPressed() {
 			g.Battle.TimingIntro = 0
 		} else {
 			g.Battle.TimingIntro -= dt
@@ -376,10 +434,14 @@ func updateAttackTiming(g *core.GameState, dt float32) {
 
 	switch g.Battle.Timing.Kind {
 	case core.TimingKindCharge:
-		if !g.Battle.Timing.Resolved && input.AttackTimingHeld() {
+		// Hold/Release also gated by engageReady. A player still
+		// holding the confirm key at the 3s auto-arm doesn't engage
+		// the bar — cursor ticks past Peak to Miss naturally. They
+		// must release-then-press to land a quality.
+		if engageReady && !g.Battle.Timing.Resolved && input.AttackTimingHeld() {
 			g.Battle.Timing.Hold()
 		}
-		if !g.Battle.Timing.Resolved && input.AttackTimingReleased() {
+		if engageReady && !g.Battle.Timing.Resolved && input.AttackTimingReleased() {
 			g.Battle.Timing.Release()
 		}
 		if !g.Battle.Timing.Resolved {
@@ -455,10 +517,45 @@ func soundForGrade(q int) audio.Sound {
 // slot is an index into the active pack's Members.
 func beginEnemyAttack(g *core.GameState, slot int) {
 	g.Battle.EnemyAttacker = slot
-	g.Battle.Timing = core.NewTimingState(g.Rand(), core.DefendTimingDuration)
 	g.Battle.TimingFlash = 0
 	g.Battle.TimingIntro = core.EnemyTurnIntro
 	g.Battle.Phase = core.BattleEnemyTiming
+	// Pick a skill for this turn — spellcasting enemies (goblin mage)
+	// may cast Firebolt / Sleep instead of plain melee. enemyAIPickSkill
+	// returns SkillNone for non-caster enemies; the field path runs the
+	// existing defend-timing flow against that bite. Spell casts skip
+	// the defend bar entirely (the player can't "block" Firebolt with
+	// timing yet — keeping the UX scope tight).
+	enemy := core.BattleMemberAt(g, slot)
+	g.Battle.EnemyPendingSkill = core.SkillNone
+	if enemy != nil {
+		g.Battle.EnemyPendingSkill = enemyAIPickSkill(g, *enemy)
+	}
+	if g.Battle.EnemyPendingSkill != core.SkillNone {
+		// Mark the Timing as already resolved so the defend bar never
+		// arms — the spell-cast intro elapses and resolveAndFinish
+		// routes through resolveEnemySpell.
+		g.Battle.Timing = core.TimingState{Resolved: true}
+		return
+	}
+	g.Battle.Timing = core.NewTimingState(g.Rand(), core.DefendTimingDuration)
+}
+
+// enemyAIPickSkill picks a skill for the enemy's current turn — or
+// SkillNone meaning "default to plain melee." Reads EnemyDefinition.
+// Skills and rolls against SkillCastChance: with probability p the
+// enemy picks uniformly from its skills, otherwise it melees. p == 0
+// (default) means "never casts" — non-caster enemies leave the field
+// blank and short-circuit out of this function.
+func enemyAIPickSkill(g *core.GameState, enemy core.Enemy) core.SkillID {
+	def := core.EnemyInfoFor(enemy)
+	if len(def.Skills) == 0 || def.SkillCastChance <= 0 {
+		return core.SkillNone
+	}
+	if g.Rand().Float64() >= def.SkillCastChance {
+		return core.SkillNone
+	}
+	return def.Skills[g.Rand().Intn(len(def.Skills))]
 }
 
 // updateEnemyTiming drives the player's defend bar against the currently
@@ -471,6 +568,13 @@ func updateEnemyTiming(g *core.GameState, dt float32) {
 	}
 	if g.Battle.TimingIntro > 0 {
 		g.Battle.TimingIntro -= dt
+		return
+	}
+	// Spell-cast path: no defend bar arms because beginEnemyAttack
+	// pre-resolved the Timing. Once the intro elapses, route directly
+	// to resolveAndFinishEnemyAttack — the spell apply happens there.
+	if g.Battle.EnemyPendingSkill != core.SkillNone {
+		resolveAndFinishEnemyAttack(g)
 		return
 	}
 	if !g.Battle.Timing.Resolved && input.DefendTimingPressed() {
@@ -492,11 +596,18 @@ func updateEnemyTiming(g *core.GameState, dt float32) {
 }
 
 // resolveAndFinishEnemyAttack applies the current attacker's hit (scaled by
-// the resolved defend quality) and advances the round queue.
+// the resolved defend quality) and advances the round queue. Branches on
+// EnemyPendingSkill — SkillNone for plain melee, anything else routes
+// through resolveEnemySpell with the picked cast.
 func resolveAndFinishEnemyAttack(g *core.GameState) {
-	resolveEnemyAttacker(g, g.Battle.EnemyAttacker, g.Battle.Timing.Quality)
+	if g.Battle.EnemyPendingSkill != core.SkillNone {
+		resolveEnemySpell(g, g.Battle.EnemyAttacker, g.Battle.EnemyPendingSkill)
+	} else {
+		resolveEnemyAttacker(g, g.Battle.EnemyAttacker, g.Battle.Timing.Quality)
+	}
 	g.Battle.Timing = core.TimingState{}
 	g.Battle.EnemyAttacker = -1
+	g.Battle.EnemyPendingSkill = core.SkillNone
 
 	if core.LivingPartyCount(g.Party) == 0 {
 		loseBattle(g, core.BattleLossMessage(*g))
@@ -504,6 +615,69 @@ func resolveAndFinishEnemyAttack(g *core.GameState) {
 	}
 	g.Battle.QueueCursor++
 	startActorTurn(g)
+}
+
+// resolveEnemySpell is the apply path for enemy-cast skills (goblin mage
+// Firebolt / Sleep). Picks a random living party target, plays the cast
+// sound, and dispatches on the skill: Firebolt deals magic damage (armor
+// bypassed); Sleep inflicts SleepTurns on the target. Unknown skills
+// fall through to a no-op log line so a future enemy author getting the
+// skill name wrong doesn't crash mid-encounter.
+func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
+	enemy := core.BattleMemberAt(g, slot)
+	if enemy == nil || !enemy.Alive {
+		return
+	}
+	target := pickEnemyAttackTarget(g)
+	if target < 0 {
+		return
+	}
+	enemy.AttackBump = core.BumpDuration
+	def := core.EnemyInfoFor(*enemy)
+	skillName := core.SkillName(skill)
+	effect := core.SkillEffectFor(skill)
+	switch skill {
+	case core.SkillFirebolt:
+		// Enemy spell-damage formula: SpellPower (per-kind magic
+		// stat) + the skill's own Effect.Damage base. SpellPower
+		// defaults to 0 so a non-caster enemy mis-routed here can't
+		// silently deal huge damage; the goblin mage sets a
+		// substantive value in its EnemyDefinition.
+		rawDamage := def.SpellPower + effect.Damage
+		killed := damagePartyMember(g, target, rawDamage, core.SkillTagMagic)
+		if killed {
+			setBattleMessage(g, fmt.Sprintf("The %s incinerates %s.", def.SingularNoun, g.Party[target].Name))
+		} else {
+			setBattleMessage(g, fmt.Sprintf("The %s casts %s — %s burns for %d.", def.SingularNoun, skillName, g.Party[target].Name, rawDamage))
+		}
+		audio.Play(audio.SoundInputGreat)
+	case core.SkillSleep:
+		m := &g.Party[target]
+		// Defense-in-depth: pickEnemyAttackTarget only returns living
+		// members today, but a future code path that lets a corpse
+		// through would silently land sleep on a dead body. Guard
+		// here so the rule "sleep needs a living target" lives at
+		// the apply seam, not just at the picker.
+		if m.HP <= 0 {
+			return
+		}
+		if m.SleepTurns > 0 {
+			setBattleMessage(g, fmt.Sprintf("The %s casts %s — %s is already asleep.", def.SingularNoun, skillName, m.Name))
+			return
+		}
+		duration := effect.SleepDuration(g.Rand())
+		if duration <= 0 {
+			duration = core.SleepMinTurns
+		}
+		m.SleepTurns = duration
+		setBattleMessage(g, fmt.Sprintf("The %s casts %s — %s falls asleep.", def.SingularNoun, skillName, m.Name))
+		audio.Play(audio.SoundInputHit)
+	default:
+		// #12: log the skill id so a future author who registers a
+		// new skill but forgets to add a case here at least sees the
+		// numeric culprit in the combat log instead of a silent fizzle.
+		setBattleMessage(g, fmt.Sprintf("The %s mutters something (unhandled skill %d).", def.SingularNoun, int(skill)))
+	}
 }
 
 // --- Win / lose / boilerplate ----------------------------------------------
@@ -525,6 +699,18 @@ func winBattle(g *core.GameState, message string) {
 	g.Battle.TimingFlash = 0
 	resetBattleAction(g)
 	setBattleMessage(g, message)
+	// XP award fires once, right after the kill is confirmed. Living
+	// members get the full pack value; dead members get nothing
+	// (incentive to keep your tank up). Level-ups queue stat points
+	// onto PendingLevelUps; the level-up modal opens on leaveBattle
+	// when those points are still unspent.
+	perMember, leveled := core.AwardBattleXP(g)
+	if perMember > 0 {
+		setBattleMessage(g, fmt.Sprintf("%s Party gains %d XP each.", message, perMember))
+		for _, idx := range leveled {
+			setBattleMessage(g, fmt.Sprintf("%s reaches level %d!", g.Party[idx].Name, g.Party[idx].Level))
+		}
+	}
 }
 
 func loseBattle(g *core.GameState, message string) {
@@ -540,6 +726,15 @@ func leaveBattle(g *core.GameState, message string) {
 	g.Battle.Phase = core.BattleNone
 	if message != "" {
 		setBattleMessage(g, message)
+	}
+	// If any party member walked away with unspent level-up points, raise
+	// the level-up modal so the player allocates them before drifting
+	// back to exploration. explore.Update routes through this flag
+	// above the pause/chest priorities.
+	if idx := core.FirstPendingLevelUp(g.Party); idx >= 0 {
+		g.LevelUpOpen = true
+		g.LevelUpMember = idx
+		g.LevelUpStat = core.StatSTR
 	}
 }
 
@@ -561,6 +756,7 @@ func clearBattleResidual(g *core.GameState) {
 	g.Battle.Timing = core.TimingState{}
 	g.Battle.TimingFlash = 0
 	g.Battle.TimingIntro = 0
+	g.Battle.ChargeNeedsRelease = false
 	g.Battle.HitStop = 0
 	g.Battle.SequencePulseTimer = 0
 	g.Battle.SequencePulseIndex = -1
@@ -571,7 +767,14 @@ func clearBattleResidual(g *core.GameState) {
 
 func recoverFromLoss(g *core.GameState) {
 	core.ResetGameState(g)
-	setBattleMessage(g, "You catch your breath.")
+	// Recovery toast is a transient status, not a combat-log event — using
+	// setBattleStatus keeps the fresh-run Log empty (the player isn't in
+	// battle anymore) while still surfacing the message on the field HUD.
+	// The Area's QuietMessage that ResetGameState seeded into Message is
+	// briefly replaced, which is the intended behavior — the toast tells
+	// the player what just happened, then any movement / encounter writes
+	// over it normally.
+	setBattleStatus(g, "You catch your breath.")
 }
 
 func resetBattleAction(g *core.GameState) {
@@ -582,6 +785,16 @@ func resetBattleAction(g *core.GameState) {
 	g.Battle.ItemMenuIndex = 0
 }
 
+// setBattleStatus writes to the transient prompt slot. The renderer's
+// transientStatus heuristic separates "status" from "log" by checking
+// Message != Log[-1] — so the order contract is: call setBattleStatus to
+// surface a prompt or validation error (before any action commits), then
+// call setBattleMessage when the action lands. Reversing the order works
+// today because a real action's message lands in both Message AND Log, so
+// the now-stale status from a prior setBattleStatus gets dedupe-suppressed
+// — but callers shouldn't rely on setBattleStatus AFTER setBattleMessage
+// in the same frame: the status would survive a frame instead of being
+// instantly shadowed by the action's log line.
 func setBattleStatus(g *core.GameState, message string) {
 	g.Battle.Message = message
 }

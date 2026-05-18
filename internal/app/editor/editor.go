@@ -1,7 +1,8 @@
 // Package editor is the in-game map authoring tool. Maps are stored as
-// four parallel ASCII layers (walls / floor / decor / props) plus a list
-// of entities (player start + enemy spawns). The editor lets the user
-// select an active layer and paint into it with layer-specific brushes.
+// five parallel ASCII layers (walls / floor / decor / props / ceiling)
+// plus a list of entities (player start, enemy spawns, chests). The
+// editor lets the user select an active layer and paint into it with
+// layer-specific brushes.
 package editor
 
 import (
@@ -31,20 +32,23 @@ const (
 	LayerFloor
 	LayerDecor
 	LayerProps
+	LayerCeiling
 	LayerEntities
 
-	layerCount = 5
+	layerCount = 6
 )
 
 // Brush is one entry in a layer's palette. For grid layers, char is the
 // byte written into that layer at the painted cell. For LayerEntities,
-// char is 0 and entity names which placement tool fires on click.
+// Entity names which placement tool fires on click; EnemyKind carries
+// the kind to add when Entity == entityAddEnemy.
 type Brush struct {
-	Name   string
-	Char   byte
-	Entity entityKind
-	Hotkey int32
-	Color  rl.Color
+	Name      string
+	Char      byte
+	Entity    entityKind
+	EnemyKind core.EnemyKind // only meaningful when Entity == entityAddEnemy
+	Hotkey    int32
+	Color     rl.Color
 }
 
 type entityKind int
@@ -52,13 +56,20 @@ type entityKind int
 const (
 	entityNone entityKind = iota
 	entityPlayerStart
-	// entityAddRat/Bat/DiseasedRat append a member to the pack at the clicked
-	// tile, creating a fresh pack if none is there yet. Placing a Rat brush
-	// over an existing Rat-only pack makes it a 2-rat pack; mixing kinds
-	// builds mixed packs. Right-click clears the entire pack.
-	entityAddRat
-	entityAddBat
-	entityAddDiseasedRat
+	// entityAddEnemy appends a member to the pack at the clicked tile,
+	// creating a fresh pack if none is there yet. The specific kind to
+	// add lives on Brush.EnemyKind so a single entityKind value handles
+	// every enemy in core.EnemyKinds() — adding a new enemy is one row
+	// in core/enemies.go's enemyDefinitions and the brush list +
+	// packAddRules pick it up automatically. Right-click clears the
+	// entire pack.
+	entityAddEnemy
+	// entityPlaceChest drops a chest at the clicked tile with the default
+	// starter loot (one of every defined item kind). Right-click clears
+	// the chest. Per-chest loot authoring is reserved for a future modal;
+	// the brush gets the chest on the map and that's enough to test the
+	// in-game open flow.
+	entityPlaceChest
 )
 
 // layerBrushes is the per-layer palette table. Index into the active
@@ -72,7 +83,7 @@ var layerBrushes = [layerCount][]Brush{
 		{Name: "Open (.)", Char: '.', Hotkey: rl.KeyTwo, Color: rl.NewColor(180, 168, 140, 255)},
 	},
 	LayerFloor: {
-		{Name: "Auto", Char: core.FloorAuto, Hotkey: rl.KeyOne, Color: rl.NewColor(160, 168, 140, 255)},
+		{Name: "Auto", Char: core.FloorAuto, Hotkey: rl.KeyOne, Color: floorAutoColor},
 		{Name: "Grass (g)", Char: core.FloorGrass, Hotkey: rl.KeyTwo, Color: rl.NewColor(120, 184, 110, 255)},
 		{Name: "Dirt (d)", Char: core.FloorDirt, Hotkey: rl.KeyThree, Color: rl.NewColor(168, 132, 92, 255)},
 		{Name: "Dark grass (k)", Char: core.FloorDarkGrass, Hotkey: rl.KeyFour, Color: rl.NewColor(72, 116, 70, 255)},
@@ -100,6 +111,8 @@ var layerBrushes = [layerCount][]Brush{
 		{Name: "Stump (t)", Char: core.DecorStump, Color: rl.NewColor(132, 92, 56, 255)},
 		{Name: "Log (l)", Char: core.DecorLog, Color: rl.NewColor(118, 84, 52, 255)},
 		{Name: "Leaf pile (L)", Char: core.DecorLeafPile, Color: rl.NewColor(196, 142, 80, 255)},
+		{Name: "Arch left (A)", Char: core.DecorArchway, Color: rl.NewColor(204, 196, 174, 255)},
+		{Name: "Arch right (a)", Char: core.DecorArchwayTail, Color: rl.NewColor(184, 176, 154, 255)},
 	},
 	LayerProps: {
 		{Name: "None (erase)", Char: core.TilePropEmpty, Hotkey: rl.KeyOne, Color: rl.NewColor(60, 64, 70, 255)},
@@ -116,13 +129,88 @@ var layerBrushes = [layerCount][]Brush{
 		{Name: "Statue (M)", Char: core.TileStatue, Color: rl.NewColor(228, 222, 206, 255)},
 		{Name: "Obelisk (Q)", Char: core.TileObelisk, Color: rl.NewColor(92, 96, 110, 255)},
 		{Name: "Fountain (F)", Char: core.TileFountain, Color: rl.NewColor(100, 168, 222, 255)},
+		{Name: "Rock cairn (K)", Char: core.TileRockCairn, Color: rl.NewColor(150, 138, 116, 255)},
+		{Name: "Rock formation (J)", Char: core.TileRockFormation, Color: rl.NewColor(118, 102, 86, 255)},
+		{Name: "Formation tail (j)", Char: core.TileRockFormationTail, Color: rl.NewColor(96, 84, 72, 255)},
 	},
-	LayerEntities: {
+	LayerCeiling: {
+		{Name: "Solid (#)", Char: core.TileCeilingSolid, Hotkey: rl.KeyOne, Color: rl.NewColor(110, 96, 80, 255)},
+		{Name: "Open (.)", Char: core.TileCeilingOpen, Hotkey: rl.KeyTwo, Color: rl.NewColor(86, 142, 196, 255)},
+	},
+	LayerEntities: buildEntityBrushes(),
+}
+
+// entityBrushHotkeys is the positional hotkey pool for enemy brushes on
+// LayerEntities. Slot 0 is reserved for Player Start (key 1); enemies
+// take slots 1..len-1 (keys 2..N). Past pool length, brushes get no
+// hotkey (mouse-only) — matching the convention on other layers.
+var entityBrushHotkeys = []int32{rl.KeyTwo, rl.KeyThree, rl.KeyFour, rl.KeyFive, rl.KeySix, rl.KeySeven, rl.KeyEight}
+
+// entityBrushColors is the per-enemy swatch tint. Falls back to a
+// neutral grey if a future kind isn't in the map — the swatch still
+// renders, just unstyled. Hand-tuned to keep adjacent foes visually
+// distinct on the grid.
+var entityBrushColors = map[core.EnemyKind]rl.Color{
+	core.EnemyRat:         rl.NewColor(220, 156, 96, 255),
+	core.EnemyBat:         rl.NewColor(160, 130, 220, 255),
+	core.EnemyDiseasedRat: rl.NewColor(140, 200, 90, 255),
+	core.EnemyGoblin:      rl.NewColor(132, 196, 110, 255),
+	core.EnemyGoblinMage:  rl.NewColor(220, 168, 244, 255),
+	core.EnemyAmoeba:      rl.NewColor(180, 200, 220, 255),
+}
+
+// init asserts entityBrushColors covers every enemy kind — without
+// this guard, a new EnemyKind added to core silently renders with the
+// neutral-grey fallback swatch and the author can't tell at a glance
+// which enemy the brush represents. Same pattern as the minimap
+// coverage check in render/minimap.go.
+func init() {
+	for _, def := range core.EnemyKinds() {
+		if _, ok := entityBrushColors[def.Kind]; !ok {
+			panic("editor: missing entityBrushColors entry for " + def.Name)
+		}
+	}
+}
+
+// buildEntityBrushes assembles the LayerEntities palette: Player Start,
+// one brush per registered EnemyKind, then Place Chest. Driven by
+// core.EnemyKinds() so adding a new enemy is one row in core's
+// enemyDefinitions — the editor brush picks it up automatically.
+// Hotkey 1 is Player Start; enemies take 2..N from entityBrushHotkeys;
+// Place Chest takes the next free hotkey.
+func buildEntityBrushes() []Brush {
+	brushes := []Brush{
 		{Name: "Player Start", Entity: entityPlayerStart, Hotkey: rl.KeyOne, Color: rl.NewColor(255, 220, 124, 255)},
-		{Name: "Add Rat", Entity: entityAddRat, Hotkey: rl.KeyTwo, Color: rl.NewColor(220, 156, 96, 255)},
-		{Name: "Add Bat", Entity: entityAddBat, Hotkey: rl.KeyThree, Color: rl.NewColor(160, 130, 220, 255)},
-		{Name: "Add Diseased Rat", Entity: entityAddDiseasedRat, Hotkey: rl.KeyFour, Color: rl.NewColor(140, 200, 90, 255)},
-	},
+	}
+	defs := core.EnemyKinds()
+	for i, def := range defs {
+		hk := int32(0)
+		if i < len(entityBrushHotkeys) {
+			hk = entityBrushHotkeys[i]
+		}
+		col, ok := entityBrushColors[def.Kind]
+		if !ok {
+			col = rl.NewColor(180, 180, 180, 255)
+		}
+		brushes = append(brushes, Brush{
+			Name:      "Add " + def.SingularName,
+			Entity:    entityAddEnemy,
+			EnemyKind: def.Kind,
+			Hotkey:    hk,
+			Color:     col,
+		})
+	}
+	chestHK := int32(0)
+	if slot := len(defs) + 1; slot-1 < len(entityBrushHotkeys) {
+		chestHK = entityBrushHotkeys[slot-1]
+	}
+	brushes = append(brushes, Brush{
+		Name:   "Place Chest",
+		Entity: entityPlaceChest,
+		Hotkey: chestHK,
+		Color:  rl.NewColor(232, 180, 92, 255),
+	})
+	return brushes
 }
 
 func layerName(l Layer) string {
@@ -135,6 +223,8 @@ func layerName(l Layer) string {
 		return "Decor"
 	case LayerProps:
 		return "Props"
+	case LayerCeiling:
+		return "Ceiling"
 	case LayerEntities:
 		return "Entities"
 	}
@@ -159,6 +249,24 @@ const (
 	modalOpen
 	modalSaveAs
 	modalConfirmDirty
+	// modalPackEdit displays the inline pack editor for a clicked pack
+	// on the Entities layer: list members with × to remove, ▲/▼ to
+	// reorder, and a + row to add new members. Anchored over the pack's
+	// tile. modalPackIdx holds the index into area.PackSpawns; if the
+	// pack gets dropped while the modal is open, the modal closes.
+	modalPackEdit
+	// modalChestEdit is the inline chest editor — analogous to
+	// modalPackEdit but for chests. Lists the chest's authored items
+	// with X to remove, ▲/▼ to reorder, and one-key shortcuts to append
+	// a new item kind from chestAddRules. Anchored over the chest's
+	// tile. modalChestIdx holds the area.ChestSpawns index; the modal
+	// closes if the chest gets dropped while open.
+	modalChestEdit
+	// modalSounds is the in-editor sound creator. Lets the author
+	// synthesize a cue from sliders (sweep params), preview it, save it
+	// to maps/sounds/<name>.wav, delete a saved cue, and assign a saved
+	// cue to any of the six built-in audio.Sound entries.
+	modalSounds
 )
 
 type pendingAction int
@@ -203,7 +311,26 @@ type State struct {
 	modalFilename      string
 	modalRenaming      string
 	modalConfirmDelete bool
-	pending            pendingAction
+	// modalPackIdx is the area.PackSpawns index currently being edited
+	// when modal == modalPackEdit. -1 outside the pack-edit flow.
+	modalPackIdx int
+	// modalChestIdx is the area.ChestSpawns index currently being
+	// edited when modal == modalChestEdit. -1 outside the chest-edit
+	// flow. Mirror of modalPackIdx.
+	modalChestIdx int
+	// Sound modal state. Lives on State so the slider positions and
+	// last-edited name survive open/close of the modal — closing
+	// shouldn't reset the user's tuning work.
+	soundParams    soundParamSet
+	soundName      string
+	soundCursor    int // row cursor inside the sound modal
+	soundLeftPanel int // 0 = synth params, 1 = saved-sound list, 2 = cue assignments
+	// soundSavedCache holds the result of audio.ListUserSounds() for
+	// the current Update→Draw frame so we don't ReadDir twice per frame
+	// while the modal is open. Refreshed by updateSoundsModal at the
+	// top of each frame; drawSoundsModal reads it back.
+	soundSavedCache []string
+	pending         pendingAction
 
 	undo  []core.AreaDefinition
 	redo  []core.AreaDefinition
@@ -239,6 +366,15 @@ type State struct {
 	testRequested     bool
 	awaitingOverwrite bool
 
+	// Ctrl+F5 "test from cursor" override: when testStartOverride is true,
+	// the run loop consumes testStartOverrideX/Z as the playtest's
+	// starting tile instead of area.StartTileX/Z. Reset by the run loop
+	// after it builds the GameState so the next test reverts to the
+	// authored start.
+	testStartOverride  bool
+	testStartOverrideX int
+	testStartOverrideZ int
+
 	// previewPhase is the day/night phase the author wants to drop into
 	// when playtesting. Cycled with T; consumed by PreviewStepCount() to
 	// seed g.StepCount on F5 so the editor can author tile palettes that
@@ -249,16 +385,16 @@ type State struct {
 }
 
 type layoutRect struct {
-	topbar     rl.Rectangle
-	layerTabs  rl.Rectangle
-	palette    rl.Rectangle
-	metadata   rl.Rectangle
-	grid       rl.Rectangle
-	cellPx     float32
-	gridX      float32
-	gridY      float32
-	gridW      float32
-	gridH      float32
+	topbar    rl.Rectangle
+	layerTabs rl.Rectangle
+	palette   rl.Rectangle
+	metadata  rl.Rectangle
+	grid      rl.Rectangle
+	cellPx    float32
+	gridX     float32
+	gridY     float32
+	gridW     float32
+	gridH     float32
 }
 
 // Area returns a copy of the area currently being edited. Used by the run
@@ -267,12 +403,37 @@ func (s State) Area() core.AreaDefinition {
 	return cloneArea(s.area)
 }
 
+// ReachabilityWarnings runs reachabilityWarnings against the current
+// area state and returns the result. The check is a single flood-fill
+// (a few hundred cells on a typical authored map) so we can afford to
+// compute it per-frame rather than caching across edits — the metadata
+// panel calls this once per draw to render the warnings badge.
+func (s *State) ReachabilityWarnings() []string {
+	return reachabilityWarnings(s.area)
+}
+
 // PreviewStepCount returns the StepCount value that places the player at
 // the start of the editor's currently-selected preview phase. Used by the
 // run loop on F5 so the playtest opens in the same lighting the author
 // was previewing.
 func (s State) PreviewStepCount() int {
 	return int(s.previewPhase) * core.StepsPerPhase
+}
+
+// TestStartOverride returns (x, z, true) when the editor's last
+// ActionTest came from a Ctrl+F5 "test-from-cursor" press, telling the
+// run loop to override the playtest's starting tile. Returns (_, _,
+// false) otherwise so the authored area.StartTile is honored. Consumed
+// by the run loop and reset by ClearTestStartOverride below.
+func (s State) TestStartOverride() (int, int, bool) {
+	return s.testStartOverrideX, s.testStartOverrideZ, s.testStartOverride
+}
+
+// ClearTestStartOverride drops the one-shot test-from-cursor override
+// after the run loop has consumed it. Subsequent F5 presses revert to
+// the authored start.
+func (s *State) ClearTestStartOverride() {
+	s.testStartOverride = false
 }
 
 // New starts the editor with a blank 16x16 map.
@@ -287,16 +448,18 @@ func NewFromArea(a core.AreaDefinition) State {
 
 func freshState(a core.AreaDefinition) State {
 	return State{
-		area:         a,
-		baseline:     cloneArea(a),
-		layer:        LayerWalls,
-		brushSize:    1,
-		zoom:         1,
-		gridCursorX:  -1,
-		gridCursorZ:  -1,
-		hoverX:       -1,
-		hoverZ:       -1,
-		dragPackIdx: -1,
+		area:          a,
+		baseline:      cloneArea(a),
+		layer:         LayerWalls,
+		brushSize:     1,
+		zoom:          1,
+		gridCursorX:   -1,
+		gridCursorZ:   -1,
+		hoverX:        -1,
+		hoverZ:        -1,
+		dragPackIdx:   -1,
+		modalPackIdx:  -1,
+		modalChestIdx: -1,
 	}
 }
 
@@ -305,6 +468,7 @@ func blankArea(w, h int) core.AreaDefinition {
 	floor := make([]string, h)
 	decor := make([]string, h)
 	props := make([]string, h)
+	ceiling := make([]string, h)
 	for z := 0; z < h; z++ {
 		wb := make([]byte, w)
 		for x := 0; x < w; x++ {
@@ -318,6 +482,7 @@ func blankArea(w, h int) core.AreaDefinition {
 		floor[z] = blankRow(w, core.FloorAuto)
 		decor[z] = blankRow(w, core.DecorAuto)
 		props[z] = blankRow(w, core.TilePropEmpty)
+		ceiling[z] = blankRow(w, core.TileCeilingOpen)
 	}
 	return core.AreaDefinition{
 		Name:         "Untitled",
@@ -327,6 +492,7 @@ func blankArea(w, h int) core.AreaDefinition {
 		Floor:        floor,
 		Decor:        decor,
 		Props:        props,
+		Ceiling:      ceiling,
 		Materials:    core.MaterialDungeon,
 		StartTileX:   1,
 		StartTileZ:   1,
@@ -418,6 +584,14 @@ func canPlaytest(a core.AreaDefinition) bool {
 	if core.IsPropChar(a.Props[a.StartTileZ][a.StartTileX]) {
 		return false
 	}
+	// A chest at the start tile gets silently dropped by core.placeChests
+	// at runtime — refuse the playtest so the author sees the data-loss
+	// problem instead of wondering where the chest went. Editor's
+	// placeChestAt already refuses this configuration; this catches
+	// legacy / hand-edited .map files.
+	if chestSpawnIndexAt(a.ChestSpawns, a.StartTileX, a.StartTileZ) >= 0 {
+		return false
+	}
 	return true
 }
 
@@ -429,8 +603,18 @@ const statusLogLifetime = float32(2.5)
 // statusLogMaxEntries caps how many transient messages can stack at once.
 const statusLogMaxEntries = 4
 
-// flash pushes a transient message onto the rolling status log.
+// flash pushes a transient message onto the rolling status log. If the
+// same message is already on the log (e.g. typing in the numeric resize
+// input below MinMapDimension fires a "too small" flash on every digit),
+// refresh its timer in place instead of stacking duplicate rows. Keeps
+// the log readable when the same validation error fires repeatedly.
 func (s *State) flash(msg string) {
+	for i, e := range s.statusLog {
+		if e.msg == msg {
+			s.statusLog[i].timer = statusLogLifetime
+			return
+		}
+	}
 	s.statusLog = append(s.statusLog, statusEntry{msg: msg, timer: statusLogLifetime})
 	if len(s.statusLog) > statusLogMaxEntries {
 		s.statusLog = s.statusLog[len(s.statusLog)-statusLogMaxEntries:]

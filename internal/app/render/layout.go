@@ -1,6 +1,8 @@
 package render
 
 import (
+	"crawler/internal/app/core"
+
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
@@ -30,4 +32,61 @@ func centerX(w int32) int32 {
 func centerXF(w float32) float32 {
 	sw, _ := screenSizeF()
 	return (sw - w) / 2
+}
+
+// CenterXF is the exported alias of centerXF for packages outside
+// render (title screen, top-level menus) that need the same centering
+// rule so fullscreen-resize behaviour stays consistent everywhere.
+// (The int32 variant was deleted as dead — re-add when a non-float
+// caller actually shows up.)
+func CenterXF(w float32) float32 { return centerXF(w) }
+
+// drawTextureBillboard renders the full texture as a camera-facing
+// billboard at `pos` with the given world-space `size` and tint. Wraps
+// the `rl.DrawBillboardRec(camera, tex, NewRectangle(0, 0, tex.W,
+// tex.H), pos, size, tint)` pattern that all three enemy / party /
+// pack billboard sites repeat. Source rect is always the full texture
+// — no atlas slicing — so abstracting the source-rect derivation here
+// removes a per-call texture-dimension read.
+func drawTextureBillboard(camera rl.Camera3D, tex rl.Texture2D, pos rl.Vector3, size rl.Vector2, tint rl.Color) {
+	source := rl.NewRectangle(0, 0, float32(tex.Width), float32(tex.Height))
+	rl.DrawBillboardRec(camera, tex, source, pos, size, tint)
+}
+
+// tileWorldPos returns the world-space center of a tile (x, z) at the
+// given vertical offset y. Wraps the `core.TileCenter(x), y, core.TileCenter(z)`
+// → `rl.NewVector3` pattern that the chest, enemy, party-billboard, and
+// pack renderers all repeat. Keeps tile→world projection math in one
+// place — if `core.TileCenter` ever changes (e.g. odd-coord offset),
+// every billboard tracks the new convention automatically.
+func tileWorldPos(x, z int, y float32) rl.Vector3 {
+	return rl.NewVector3(core.TileCenter(x), y, core.TileCenter(z))
+}
+
+// behindCamera reports whether `p` sits behind the camera's horizontal
+// forward direction. raylib's GetWorldToScreen returns a "mirrored"
+// positive XY for points behind the camera, which would otherwise draw
+// in-world prompts (chest hints, future NPC labels) on the player's
+// HUD as they walk past. Callers should skip the projection when this
+// returns true. Vertical (pitch) component is intentionally ignored —
+// the test is "is it in front of me" along the floor, not along the
+// look ray, since prompts hover above the floor by design.
+func behindCamera(camera rl.Camera3D, p rl.Vector3) bool {
+	forward := horizontalForward(camera)
+	dx := p.X - camera.Position.X
+	dz := p.Z - camera.Position.Z
+	return dx*forward.X+dz*forward.Z <= 0
+}
+
+// DrawFooterHint paints a centered hint string at the bottom of a
+// dialog. Three sites (sound modal, chest modal, title screen) drew
+// the same "measure + center-anchor + drop shadow" pattern with a
+// different size each; this helper keeps the centering + shadow rule
+// in one place. `cx` is the screen-space center X to anchor against
+// (`centerX(cardW) + cardW/2` for a centered card); `y` is the hint's
+// top y in screen space; `size` is the font size (modals use 13, the
+// title screen uses 14).
+func DrawFooterHint(font rl.Font, text string, cx, y, size float32) {
+	m := rl.MeasureTextEx(font, text, size, 1)
+	drawTextWithShadow(font, text, cx-m.X/2, y, size, textHint)
 }
