@@ -199,6 +199,33 @@ func LoadResources() (r Resources) {
 	r.propModels[core.TileRockCairn] = loadRockCairnProp(r.lighting.shader, cairnRockTex)
 	r.propModels[core.TileRockFormation] = loadRockFormationProp(r.lighting.shader, formationRockTex)
 
+	// Turn B outdoor batch — well/gravestone use the rock texture
+	// family; signpost/scarecrow use the bark wood-grain. Each prop
+	// owns its texture so propModel.unload() in Resources.Unload
+	// frees them.
+	wellRockTex := loadTiledTexture(makeRockWallPixels(128, 128))
+	graveRockTex := loadTiledTexture(makeRockWallPixels(128, 128))
+	signWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
+	scarecrowWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
+	r.propModels[core.TileWell] = loadWellProp(r.lighting.shader, wellRockTex)
+	r.propModels[core.TileGravestone] = loadGravestoneProp(r.lighting.shader, graveRockTex)
+	r.propModels[core.TileSignPost] = loadSignPostProp(r.lighting.shader, signWoodTex)
+	r.propModels[core.TileHayBale] = loadHayBaleProp(r.lighting.shader)
+	r.propModels[core.TileScarecrow] = loadScarecrowProp(r.lighting.shader, scarecrowWoodTex)
+
+	// Turn B dungeon-interior batch — bookshelf/table/bed share the
+	// wood texture family; brazier is shader-only metal; sarcophagus
+	// uses marble.
+	bookshelfWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
+	tableWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
+	bedWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
+	sarcoMarbleTex := loadTiledTexture(makeMarblePixels(128, 128))
+	r.propModels[core.TileBookshelf] = loadBookshelfProp(r.lighting.shader, bookshelfWoodTex)
+	r.propModels[core.TileTable] = loadTableProp(r.lighting.shader, tableWoodTex)
+	r.propModels[core.TileBed] = loadBedProp(r.lighting.shader, bedWoodTex)
+	r.propModels[core.TileBrazier] = loadBrazierProp(r.lighting.shader)
+	r.propModels[core.TileSarcophagus] = loadSarcophagusProp(r.lighting.shader, sarcoMarbleTex)
+
 	r.decorModels = make(map[byte]propModel)
 	r.decorModels[core.DecorTallGrass] = loadTallGrassProp(r.lighting.shader)
 	r.decorModels[core.DecorFlowers] = loadFlowerProp(r.lighting.shader)
@@ -215,6 +242,17 @@ func LoadResources() (r Resources) {
 	// Archway uses marble palette to match the existing pillars/statues.
 	archMarbleTex := loadTiledTexture(makeMarblePixels(128, 128))
 	r.decorModels[core.DecorArchway] = loadArchwayDecor(r.lighting.shader, archMarbleTex)
+
+	// Turn B atmospheric decor batch. Rug / candle / footprints /
+	// ash heap / puddle have no textures (procedural color only);
+	// rootCluster uses bark so it picks up the wood-grain shading.
+	rootBarkTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
+	r.decorModels[core.DecorRug] = loadRugProp(r.lighting.shader)
+	r.decorModels[core.DecorCandle] = loadCandleProp(r.lighting.shader)
+	r.decorModels[core.DecorBootprints] = loadBootprintsProp(r.lighting.shader)
+	r.decorModels[core.DecorAshHeap] = loadAshHeapProp(r.lighting.shader)
+	r.decorModels[core.DecorPuddle] = loadPuddleProp(r.lighting.shader)
+	r.decorModels[core.DecorRootCluster] = loadRootClusterProp(r.lighting.shader, rootBarkTex)
 
 	// Door prop — drawn at every g.Doors entry, rotated by authored
 	// facing. Owns its wood texture via setModelTexture; freed by

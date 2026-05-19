@@ -122,6 +122,12 @@ var layerBrushes = [layerCount][]Brush{
 		{Name: "Arch left (A)", Char: core.DecorArchway, Color: rl.NewColor(204, 196, 174, 255)},
 		{Name: "Arch right (a)", Char: core.DecorArchwayTail, Color: rl.NewColor(184, 176, 154, 255)},
 		{Name: "Lilypad (y)", Char: core.DecorLilypad, Color: rl.NewColor(96, 168, 100, 255)},
+		{Name: "Rug (u)", Char: core.DecorRug, Color: rl.NewColor(176, 84, 68, 255)},
+		{Name: "Candle (c)", Char: core.DecorCandle, Color: rl.NewColor(244, 220, 156, 255)},
+		{Name: "Boot prints (i)", Char: core.DecorBootprints, Color: rl.NewColor(90, 68, 44, 255)},
+		{Name: "Ash heap (h)", Char: core.DecorAshHeap, Color: rl.NewColor(132, 124, 116, 255)},
+		{Name: "Puddle (q)", Char: core.DecorPuddle, Color: rl.NewColor(108, 154, 188, 255)},
+		{Name: "Roots (k)", Char: core.DecorRootCluster, Color: rl.NewColor(92, 68, 44, 255)},
 	},
 	LayerProps: {
 		{Name: "None (erase)", Char: core.TilePropEmpty, Hotkey: rl.KeyOne, Color: rl.NewColor(60, 64, 70, 255)},
@@ -141,6 +147,18 @@ var layerBrushes = [layerCount][]Brush{
 		{Name: "Rock cairn (K)", Char: core.TileRockCairn, Color: rl.NewColor(150, 138, 116, 255)},
 		{Name: "Rock formation (J)", Char: core.TileRockFormation, Color: rl.NewColor(118, 102, 86, 255)},
 		{Name: "Formation tail (j)", Char: core.TileRockFormationTail, Color: rl.NewColor(96, 84, 72, 255)},
+		// Outdoor batch.
+		{Name: "Well (W)", Char: core.TileWell, Color: rl.NewColor(132, 138, 142, 255)},
+		{Name: "Gravestone (G)", Char: core.TileGravestone, Color: rl.NewColor(168, 162, 152, 255)},
+		{Name: "Sign post (N)", Char: core.TileSignPost, Color: rl.NewColor(160, 110, 64, 255)},
+		{Name: "Hay bale (H)", Char: core.TileHayBale, Color: rl.NewColor(216, 184, 110, 255)},
+		{Name: "Scarecrow (Y)", Char: core.TileScarecrow, Color: rl.NewColor(196, 162, 96, 255)},
+		// Dungeon interior batch.
+		{Name: "Bookshelf (V)", Char: core.TileBookshelf, Color: rl.NewColor(132, 90, 56, 255)},
+		{Name: "Table (E)", Char: core.TileTable, Color: rl.NewColor(160, 116, 72, 255)},
+		{Name: "Bed (D)", Char: core.TileBed, Color: rl.NewColor(176, 90, 96, 255)},
+		{Name: "Brazier (Z)", Char: core.TileBrazier, Color: rl.NewColor(220, 132, 64, 255)},
+		{Name: "Sarcophagus (A)", Char: core.TileSarcophagus, Color: rl.NewColor(200, 192, 174, 255)},
 	},
 	LayerCeiling: {
 		{Name: "Solid (#)", Char: core.TileCeilingSolid, Hotkey: rl.KeyOne, Color: rl.NewColor(110, 96, 80, 255)},
@@ -321,6 +339,12 @@ type State struct {
 
 	layer    Layer
 	brushIdx [layerCount]int
+	// paletteScroll is the per-layer vertical scroll offset (in pixels)
+	// applied to the brush entries. Adjusted by mouse-wheel when the
+	// pointer is over the palette. Clamped in drawPalette so the bottom
+	// entry never overshoots the visible area. Stored per-layer so
+	// switching tabs doesn't reset what was off-screen.
+	paletteScroll [layerCount]float32
 
 	focus      focusField
 	numericBuf string

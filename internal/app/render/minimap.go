@@ -115,6 +115,16 @@ var minimapPropColors = map[byte]rl.Color{
 	core.TileRockCairn:         rl.NewColor(150, 138, 116, 240),
 	core.TileRockFormation:     rl.NewColor(118, 102, 86, 240),
 	core.TileRockFormationTail: rl.NewColor(118, 102, 86, 240),
+	core.TileWell:              rl.NewColor(132, 138, 142, 240),
+	core.TileGravestone:        rl.NewColor(168, 162, 152, 240),
+	core.TileSignPost:          rl.NewColor(160, 110, 64, 240),
+	core.TileHayBale:           rl.NewColor(216, 184, 110, 240),
+	core.TileScarecrow:         rl.NewColor(196, 162, 96, 240),
+	core.TileBookshelf:         rl.NewColor(132, 90, 56, 240),
+	core.TileTable:             rl.NewColor(160, 116, 72, 240),
+	core.TileBed:               rl.NewColor(176, 90, 96, 240),
+	core.TileBrazier:           rl.NewColor(220, 132, 64, 240),
+	core.TileSarcophagus:       rl.NewColor(200, 192, 174, 240),
 }
 
 func minimapTileColor(material core.MaterialSet, tile byte) color.RGBA {

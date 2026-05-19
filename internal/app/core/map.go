@@ -95,6 +95,14 @@ const (
 	// painted on FloorWater / FloorDeepWater for the swamp aesthetic but
 	// works on any floor.
 	DecorLilypad = 'y'
+	// Atmospheric / interior dressings — none block. Authors can layer
+	// these on any walkable tile to add story / texture.
+	DecorRug         = 'u' // woven floor rug, warm tones
+	DecorCandle      = 'c' // stubby candle on a small puddle of wax
+	DecorBootprints  = 'i' // pair of stamped boot prints
+	DecorAshHeap     = 'h' // small heap of grey ash (smaller / cooler than scorch)
+	DecorPuddle      = 'q' // shallow water puddle
+	DecorRootCluster = 'k' // gnarled root stubs poking from the floor
 )
 
 // Props layer. TilePropEmpty marks an open cell; every other char listed
@@ -125,6 +133,22 @@ const (
 	TileRockCairn         = 'K' // tall stacked-stone cairn (1 tile, blocks)
 	TileRockFormation     = 'J' // 2×2 rock formation anchor (top-left)
 	TileRockFormationTail = 'j' // 2×2 rock formation footprint shadow
+	// Outdoor / field tileset — stoneworked + agricultural props. All
+	// single-tile blockers; the editor's brush palette and the
+	// renderer's propModels map pick them up via the canonical list +
+	// init-time coverage asserts.
+	TileWell        = 'W' // stone-ringed well (cross-layer with FloorDeepWater; layers dispatch independently)
+	TileGravestone  = 'G' // weathered tombstone
+	TileSignPost    = 'N' // wooden sign on a post
+	TileHayBale     = 'H' // round bound straw bale
+	TileScarecrow   = 'Y' // cross + sackcloth scarecrow
+	// Indoor / dungeon tileset — furniture and crypt props. All
+	// single-tile blockers, same registry pattern.
+	TileBookshelf   = 'V' // tall wooden shelf with books
+	TileTable       = 'E' // wooden table with legs
+	TileBed         = 'D' // wood-frame bed with bedding
+	TileBrazier     = 'Z' // metal brazier on a tripod with flame
+	TileSarcophagus = 'A' // stone sarcophagus with lid (cross-layer with DecorArchway)
 )
 
 // Doors are modeled as entities (like chests), not as a tile char on
@@ -483,6 +507,10 @@ var propTileCharList = []byte{
 	TileCrate, TileBarrel, TileUrn, TileStalagmite,
 	TilePillar, TileBrokenPillar, TileStatue, TileObelisk, TileFountain,
 	TileRockCairn, TileRockFormation, TileRockFormationTail,
+	// Outdoor batch.
+	TileWell, TileGravestone, TileSignPost, TileHayBale, TileScarecrow,
+	// Dungeon-interior batch.
+	TileBookshelf, TileTable, TileBed, TileBrazier, TileSarcophagus,
 }
 
 // propTileCharSet is the O(1) lookup for IsPropChar, built once at
@@ -527,6 +555,9 @@ var decorTileCharList = []byte{
 	DecorStump, DecorLog, DecorLeafPile,
 	DecorArchway, DecorArchwayTail,
 	DecorLilypad,
+	// Atmospheric batch — interior dressings, weather, foliage.
+	DecorRug, DecorCandle, DecorBootprints,
+	DecorAshHeap, DecorPuddle, DecorRootCluster,
 }
 
 // DecorTileChars returns the list of every renderable decor-layer char
@@ -623,6 +654,12 @@ var tileLabelTable = map[TileLayer]map[byte]string{
 		DecorArchway:     "Arch (left)",
 		DecorArchwayTail: "Arch (right)",
 		DecorLilypad:     "Lilypad",
+		DecorRug:         "Rug",
+		DecorCandle:      "Candle",
+		DecorBootprints:  "Boot Prints",
+		DecorAshHeap:     "Ash Heap",
+		DecorPuddle:      "Puddle",
+		DecorRootCluster: "Roots",
 	},
 	TileLayerProps: {
 		TilePropEmpty:    "",
@@ -642,6 +679,16 @@ var tileLabelTable = map[TileLayer]map[byte]string{
 		TileRockCairn:    "Rock Cairn",
 		TileRockFormation:     "Rock Formation (anchor)",
 		TileRockFormationTail: "Rock Formation (tail)",
+		TileWell:         "Well",
+		TileGravestone:   "Gravestone",
+		TileSignPost:     "Sign Post",
+		TileHayBale:      "Hay Bale",
+		TileScarecrow:    "Scarecrow",
+		TileBookshelf:    "Bookshelf",
+		TileTable:        "Table",
+		TileBed:          "Bed",
+		TileBrazier:      "Brazier",
+		TileSarcophagus:  "Sarcophagus",
 	},
 }
 

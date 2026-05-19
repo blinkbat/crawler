@@ -171,14 +171,56 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 		16, theme.TextMuted)
 
 	coord := "—"
+	hoverDesc := ""
 	if s.hoverX >= 0 {
 		coord = core.TileCoord(s.hoverX, s.hoverZ)
+		hoverDesc = hoverTileSummary(s.area, s.hoverX, s.hoverZ)
 	}
-	infoLabel := fmt.Sprintf("cell %s   layer %s   brush %dx%d   zoom %.0f%%   phase %s (T)   undo %d/%d",
-		coord, layerName(s.layer), s.brushSize, s.brushSize, s.zoom*100, core.PhaseName(s.previewPhase), len(s.undo), undoLimit)
+	infoLabel := fmt.Sprintf("cell %s   %s   layer %s   brush %dx%d   zoom %.0f%%   phase %s (T)   undo %d/%d",
+		coord, hoverDesc, layerName(s.layer), s.brushSize, s.brushSize, s.zoom*100, core.PhaseName(s.previewPhase), len(s.undo), undoLimit)
 	infoMeasure := rl.MeasureTextEx(font, infoLabel, 13, 1)
 	infoX := labelX - infoMeasure.X - 24
 	render.DrawTextWithShadow(font, infoLabel, infoX, (topbarH-infoMeasure.Y)/2, 13, theme.TextHint)
+}
+
+// hoverTileSummary returns a compact human label for what's painted on
+// the hovered tile across all four grid layers + entities. Empty layers
+// are omitted so a clean grass cell reads as just "grass" rather than
+// "wall=Open floor=Grass decor=— prop=—". Used in the topbar so the
+// author sees what they're about to overwrite without clicking.
+func hoverTileSummary(a core.AreaDefinition, x, z int) string {
+	if !a.InBounds(x, z) {
+		return ""
+	}
+	parts := make([]string, 0, 5)
+	if lbl := core.TileLabel(core.TileLayerWalls, a.Walls[z][x]); lbl != "" {
+		parts = append(parts, lbl)
+	}
+	if lbl := core.TileLabel(core.TileLayerFloor, a.Floor[z][x]); lbl != "" {
+		parts = append(parts, lbl)
+	}
+	if lbl := core.TileLabel(core.TileLayerDecor, a.Decor[z][x]); lbl != "" {
+		parts = append(parts, lbl)
+	}
+	if lbl := core.TileLabel(core.TileLayerProps, a.Props[z][x]); lbl != "" {
+		parts = append(parts, lbl)
+	}
+	if a.StartTileX == x && a.StartTileZ == z {
+		parts = append(parts, "Start")
+	}
+	if packIndexAt(a.PackSpawns, x, z) >= 0 {
+		parts = append(parts, "Pack")
+	}
+	if chestSpawnIndexAt(a.ChestSpawns, x, z) >= 0 {
+		parts = append(parts, "Chest")
+	}
+	if doorSpawnIndexAt(a.DoorSpawns, x, z) >= 0 {
+		parts = append(parts, "Door")
+	}
+	if len(parts) == 0 {
+		return "(empty)"
+	}
+	return strings.Join(parts, " / ")
 }
 
 func buttonWidth(label string) float32 {
@@ -280,11 +322,51 @@ func paletteToolAt(s *State, p rl.Vector2) int {
 const (
 	paletteRowH      = float32(28)
 	paletteRowStride = paletteRowH + 3
+	// headerReserve is the vertical space inside the palette panel
+	// reserved for the "BRUSHES" heading; entry / hint rendering sits
+	// below this band and the scissor clip below the heading uses it
+	// so scrolled content can't paint into the heading row.
+	headerReserve = float32(34)
 )
 
 func paletteEntryRect(s *State, i int) rl.Rectangle {
-	y := s.rect.palette.Y + 12 + float32(i)*paletteRowStride
+	y := s.rect.palette.Y + 12 + float32(i)*paletteRowStride - s.paletteScroll[s.layer]
 	return rl.NewRectangle(s.rect.palette.X+8, y, s.rect.palette.Width-16, paletteRowH)
+}
+
+// paletteContentHeight returns the pixel height required to render the
+// active layer's full brush list (including the top/bottom padding and
+// the hint footer). Used by ScrollPalette to clamp the scroll offset
+// so the last row stays visible.
+func paletteContentHeight(s *State) float32 {
+	palette := layerBrushes[s.layer]
+	return 12 + float32(len(palette))*paletteRowStride + 12 + float32(paletteHintLines)*14 + 16
+}
+
+// paletteHintLines is the count of one-line keyboard-hint rows
+// drawPalette emits beneath the brush entries. Kept as a const so
+// paletteContentHeight stays in sync if the hint list grows.
+const paletteHintLines = 18
+
+// ScrollPalette adjusts the active layer's palette scroll offset by
+// dy pixels (positive = scroll down / show later entries). Clamps to
+// [0, max] where max keeps the content end visible. Exposed for
+// updateMouse / hotkey wheel handlers in input.go.
+func ScrollPalette(s *State, dy float32) {
+	if s.rect.palette.Height <= 0 {
+		return
+	}
+	max := paletteContentHeight(s) - s.rect.palette.Height
+	if max < 0 {
+		max = 0
+	}
+	s.paletteScroll[s.layer] += dy
+	if s.paletteScroll[s.layer] < 0 {
+		s.paletteScroll[s.layer] = 0
+	}
+	if s.paletteScroll[s.layer] > max {
+		s.paletteScroll[s.layer] = max
+	}
 }
 
 func drawPalette(s *State, font rl.Font, theme render.Theme) {
@@ -296,9 +378,28 @@ func drawPalette(s *State, font rl.Font, theme render.Theme) {
 
 	render.DrawHeading(font, "BRUSHES", int32(s.rect.palette.X+12), int32(s.rect.palette.Y+8), theme.BorderStrong)
 
+	// Clamp scroll to current content bounds — entry count can change
+	// between frames (a brush table reload would be unusual, but the
+	// clamp keeps us honest about not scrolling past the last entry).
+	ScrollPalette(s, 0)
+
+	// Clip the palette region so off-screen entries (above and below)
+	// don't draw over the topbar/tabs or the grid panel. The clip lives
+	// for the duration of this call; the BeginScissorMode/End pair
+	// also catches the hint footer that follows the entries.
+	rl.BeginScissorMode(int32(s.rect.palette.X), int32(s.rect.palette.Y+headerReserve),
+		int32(s.rect.palette.Width), int32(s.rect.palette.Height-headerReserve))
+	defer rl.EndScissorMode()
+
 	palette := layerBrushes[s.layer]
 	for i, b := range palette {
 		r := paletteEntryRect(s, i)
+		// Skip entries entirely outside the visible band — cheap, and
+		// also avoids drawing brush hover highlights for entries the
+		// mouse can't actually reach.
+		if r.Y+r.Height < s.rect.palette.Y || r.Y > s.rect.palette.Y+s.rect.palette.Height {
+			continue
+		}
 		active := s.brushIdx[s.layer] == i
 		bg := bgEntry
 		if active {

@@ -209,6 +209,14 @@ func updateMouse(s *State) {
 		if w != 0 {
 			zoomBy(s, mp, 1+0.12*w)
 		}
+	} else if pointIn(mp, s.rect.palette) {
+		// Wheel over the palette scrolls the brush list. One notch
+		// moves about one and a half rows so the user can step
+		// through long palettes without dragging a scrollbar.
+		w := rl.GetMouseWheelMove()
+		if w != 0 {
+			ScrollPalette(s, -w*paletteRowStride*1.5)
+		}
 	}
 
 	if rl.IsMouseButtonPressed(rl.MouseMiddleButton) && pointIn(mp, s.rect.grid) {

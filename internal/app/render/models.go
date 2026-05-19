@@ -1092,3 +1092,449 @@ func loadLeafPileProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
 		},
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Outdoor / field tileset additions (Turn B).
+// All single-tile blockers. Each builder allocates its own model handles and
+// the propModel.unload() call in Resources.Unload frees them.
+// ---------------------------------------------------------------------------
+
+// loadWellProp builds a stone-ringed well: a fat short cylinder rim
+// with a dark water disc inset and a small pole/winch above. Reads as
+// "village well" silhouette from any angle. Uses the rock texture for
+// the ring so it blends with stone walls.
+func loadWellProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
+	rim := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.42, 0.40, 18))
+	water := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.34, 0.04, 16))
+	post := rl.LoadModelFromMesh(rl.GenMeshCube(0.06, 0.80, 0.06))
+	beam := rl.LoadModelFromMesh(rl.GenMeshCube(0.78, 0.06, 0.06))
+	bucket := rl.LoadModelFromMesh(rl.GenMeshCube(0.16, 0.16, 0.16))
+	models := []rl.Model{rim, water, post, beam, bucket}
+	setModelTexture(&models[0], rockTex)
+	for i := range models {
+		attachShader(&models[i], shader)
+	}
+	stone := rl.NewColor(170, 168, 156, 255)
+	stoneDark := rl.NewColor(110, 108, 100, 255)
+	waterCol := rl.NewColor(56, 96, 138, 255)
+	wood := rl.NewColor(110, 78, 50, 255)
+	woodDark := rl.NewColor(74, 52, 34, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.20, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.36, 0), scale: rl.NewVector3(1, 1, 1), tint: waterCol},
+			// Posts on each side hold up the winch beam.
+			{modelIdx: 2, offset: rl.NewVector3(-0.30, 0.80, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
+			{modelIdx: 2, offset: rl.NewVector3(0.30, 0.80, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
+			{modelIdx: 3, offset: rl.NewVector3(0, 1.20, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
+			// Bucket dangling on a rope (no rope geom — bucket alone).
+			{modelIdx: 4, offset: rl.NewVector3(0.18, 0.95, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
+			// Rim shading accent — dark base ring near the floor.
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.04, 0), scale: rl.NewVector3(1.02, 0.18, 1.02), tint: stoneDark},
+		},
+	}
+}
+
+// loadGravestoneProp builds a weathered tombstone: a thick flat slab
+// tilted slightly forward with a rounded top, plus a smaller mound at
+// the base to read as the grave proper. Cool grey palette so it
+// stands apart from the warmer well rim.
+func loadGravestoneProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
+	slab := rl.LoadModelFromMesh(rl.GenMeshCube(0.50, 0.85, 0.12))
+	cap := rl.LoadModelFromMesh(rl.GenMeshSphere(0.26, 8, 10))
+	mound := rl.LoadModelFromMesh(rl.GenMeshSphere(0.36, 8, 10))
+	models := []rl.Model{slab, cap, mound}
+	for i := range models {
+		setModelTexture(&models[i], rockTex)
+		attachShader(&models[i], shader)
+	}
+	stone := rl.NewColor(168, 162, 152, 255)
+	stoneDark := rl.NewColor(112, 108, 100, 255)
+	earth := rl.NewColor(86, 64, 48, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 2, offset: rl.NewVector3(0, 0.08, 0.18), scale: rl.NewVector3(1, 0.35, 1), tint: earth},
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.50, -0.10), scale: rl.NewVector3(1, 1, 1), rotation: 8, rotationAxis: rl.NewVector3(1, 0, 0), tint: stone},
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.90, -0.10), scale: rl.NewVector3(1, 0.55, 1), tint: stoneDark},
+		},
+	}
+}
+
+// loadSignPostProp builds a wooden sign: a tall thin post with a
+// horizontal plank near the top, slightly off-axis so it reads from
+// any angle.
+func loadSignPostProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
+	post := rl.LoadModelFromMesh(rl.GenMeshCube(0.08, 1.10, 0.08))
+	board := rl.LoadModelFromMesh(rl.GenMeshCube(0.66, 0.34, 0.06))
+	models := []rl.Model{post, board}
+	for i := range models {
+		setModelTexture(&models[i], woodTex)
+		attachShader(&models[i], shader)
+	}
+	wood := rl.NewColor(150, 102, 60, 255)
+	woodDark := rl.NewColor(96, 64, 40, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.55, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
+			{modelIdx: 1, offset: rl.NewVector3(0.18, 0.95, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
+			// Lighter front-face on the board so it reads as carved.
+			{modelIdx: 1, offset: rl.NewVector3(0.18, 0.95, 0.04), scale: rl.NewVector3(0.92, 0.85, 0.4), tint: wood},
+		},
+	}
+}
+
+// loadHayBaleProp builds a fat short cylinder of bound straw lying on
+// its side. Warm yellow tones with subtle darker bands for the binding.
+func loadHayBaleProp(shader rl.Shader) propModel {
+	bale := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.45, 0.70, 14))
+	band := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.47, 0.04, 14))
+	models := []rl.Model{bale, band}
+	for i := range models {
+		attachShader(&models[i], shader)
+	}
+	straw := rl.NewColor(216, 184, 110, 255)
+	strawDark := rl.NewColor(168, 132, 76, 255)
+	cord := rl.NewColor(118, 86, 52, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			// Lay the cylinder on its side: rotate 90° around X so its
+			// length runs along world Z.
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.45, 0), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: rl.NewVector3(1, 0, 0), tint: straw},
+			// Darker shading hint underneath.
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.45, 0), scale: rl.NewVector3(0.92, 0.98, 0.92), rotation: 90, rotationAxis: rl.NewVector3(1, 0, 0), tint: strawDark},
+			// Two binding rings around the bale.
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.45, -0.22), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: rl.NewVector3(1, 0, 0), tint: cord},
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.45, 0.22), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: rl.NewVector3(1, 0, 0), tint: cord},
+		},
+	}
+}
+
+// loadScarecrowProp builds a cross-frame scarecrow: a vertical pole, a
+// horizontal arm beam, a sackcloth head sphere, and an angular torso
+// blob suggesting layered shirt/straw stuffing.
+func loadScarecrowProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
+	pole := rl.LoadModelFromMesh(rl.GenMeshCube(0.08, 1.55, 0.08))
+	arm := rl.LoadModelFromMesh(rl.GenMeshCube(0.90, 0.07, 0.07))
+	head := rl.LoadModelFromMesh(rl.GenMeshSphere(0.16, 8, 10))
+	torso := rl.LoadModelFromMesh(rl.GenMeshCube(0.40, 0.50, 0.20))
+	hat := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.20, 0.16, 12))
+	models := []rl.Model{pole, arm, head, torso, hat}
+	for i := range models {
+		attachShader(&models[i], shader)
+	}
+	setModelTexture(&models[0], woodTex)
+	setModelTexture(&models[1], woodTex)
+	wood := rl.NewColor(110, 78, 50, 255)
+	sack := rl.NewColor(196, 162, 96, 255)
+	sackDark := rl.NewColor(140, 110, 64, 255)
+	hatCol := rl.NewColor(72, 52, 32, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.78, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
+			{modelIdx: 1, offset: rl.NewVector3(0, 1.15, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
+			{modelIdx: 3, offset: rl.NewVector3(0, 0.85, 0), scale: rl.NewVector3(1, 1, 1), tint: sack},
+			{modelIdx: 3, offset: rl.NewVector3(0, 0.85, 0), scale: rl.NewVector3(0.96, 0.7, 0.96), tint: sackDark},
+			{modelIdx: 2, offset: rl.NewVector3(0, 1.32, 0), scale: rl.NewVector3(1, 1, 1), tint: sack},
+			{modelIdx: 4, offset: rl.NewVector3(0, 1.50, 0), scale: rl.NewVector3(1, 1, 1), tint: hatCol},
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Dungeon-interior tileset additions (Turn B).
+// ---------------------------------------------------------------------------
+
+// loadBookshelfProp builds a tall thin shelf with three book-row bands.
+// Stone-grey backing with multicolored book bands so each shelf reads
+// distinctly.
+func loadBookshelfProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
+	frame := rl.LoadModelFromMesh(rl.GenMeshCube(0.78, 1.50, 0.30))
+	shelf := rl.LoadModelFromMesh(rl.GenMeshCube(0.82, 0.04, 0.34))
+	books := rl.LoadModelFromMesh(rl.GenMeshCube(0.66, 0.32, 0.20))
+	models := []rl.Model{frame, shelf, books}
+	for i := range models {
+		setModelTexture(&models[i], woodTex)
+		attachShader(&models[i], shader)
+	}
+	wood := rl.NewColor(112, 78, 48, 255)
+	woodDark := rl.NewColor(72, 52, 32, 255)
+	bookRed := rl.NewColor(160, 64, 60, 255)
+	bookBlue := rl.NewColor(64, 96, 156, 255)
+	bookGreen := rl.NewColor(96, 132, 80, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.75, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
+			// Three shelves with book rows perched on top of each.
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.30, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
+			{modelIdx: 2, offset: rl.NewVector3(0, 0.48, 0.04), scale: rl.NewVector3(1, 1, 1), tint: bookRed},
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.74, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
+			{modelIdx: 2, offset: rl.NewVector3(0, 0.92, 0.04), scale: rl.NewVector3(1, 1, 1), tint: bookBlue},
+			{modelIdx: 1, offset: rl.NewVector3(0, 1.18, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
+			{modelIdx: 2, offset: rl.NewVector3(0, 1.36, 0.04), scale: rl.NewVector3(1, 1, 1), tint: bookGreen},
+		},
+	}
+}
+
+// loadTableProp builds a wooden table: a flat rectangular top on four
+// shorter legs. Sized so the player reads it as "you could rest a mug
+// on this."
+func loadTableProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
+	top := rl.LoadModelFromMesh(rl.GenMeshCube(0.90, 0.10, 0.60))
+	leg := rl.LoadModelFromMesh(rl.GenMeshCube(0.10, 0.60, 0.10))
+	models := []rl.Model{top, leg}
+	for i := range models {
+		setModelTexture(&models[i], woodTex)
+		attachShader(&models[i], shader)
+	}
+	wood := rl.NewColor(160, 116, 72, 255)
+	woodDark := rl.NewColor(110, 78, 50, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.65, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
+			{modelIdx: 1, offset: rl.NewVector3(-0.35, 0.30, -0.22), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
+			{modelIdx: 1, offset: rl.NewVector3(0.35, 0.30, -0.22), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
+			{modelIdx: 1, offset: rl.NewVector3(-0.35, 0.30, 0.22), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
+			{modelIdx: 1, offset: rl.NewVector3(0.35, 0.30, 0.22), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
+		},
+	}
+}
+
+// loadBedProp builds a wood-frame bed with a pillow and bedding.
+// Single-tile but visibly bedlike from the side.
+func loadBedProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
+	frame := rl.LoadModelFromMesh(rl.GenMeshCube(0.84, 0.20, 0.50))
+	mattress := rl.LoadModelFromMesh(rl.GenMeshCube(0.78, 0.14, 0.46))
+	headboard := rl.LoadModelFromMesh(rl.GenMeshCube(0.84, 0.42, 0.06))
+	pillow := rl.LoadModelFromMesh(rl.GenMeshCube(0.30, 0.08, 0.36))
+	models := []rl.Model{frame, mattress, headboard, pillow}
+	setModelTexture(&models[0], woodTex)
+	setModelTexture(&models[2], woodTex)
+	for i := range models {
+		attachShader(&models[i], shader)
+	}
+	wood := rl.NewColor(112, 78, 50, 255)
+	bedding := rl.NewColor(176, 90, 96, 255)
+	beddingDark := rl.NewColor(132, 64, 70, 255)
+	pillowCol := rl.NewColor(232, 218, 196, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.10, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.28, 0), scale: rl.NewVector3(1, 1, 1), tint: bedding},
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.32, 0), scale: rl.NewVector3(0.94, 0.4, 0.94), tint: beddingDark},
+			{modelIdx: 2, offset: rl.NewVector3(0, 0.42, -0.28), scale: rl.NewVector3(1, 1, 1), tint: wood},
+			{modelIdx: 3, offset: rl.NewVector3(0, 0.38, -0.16), scale: rl.NewVector3(1, 1, 1), tint: pillowCol},
+		},
+	}
+}
+
+// loadBrazierProp builds a metal brazier on a tripod with a flame.
+// Three legs, an open bowl, and a flickery flame sphere/cone on top.
+func loadBrazierProp(shader rl.Shader) propModel {
+	leg := rl.LoadModelFromMesh(rl.GenMeshCube(0.06, 0.60, 0.06))
+	bowl := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.28, 0.18, 14))
+	flame := rl.LoadModelFromMesh(rl.GenMeshSphere(0.18, 8, 10))
+	tip := rl.LoadModelFromMesh(rl.GenMeshSphere(0.10, 6, 8))
+	models := []rl.Model{leg, bowl, flame, tip}
+	for i := range models {
+		attachShader(&models[i], shader)
+	}
+	iron := rl.NewColor(60, 56, 52, 255)
+	ironLight := rl.NewColor(98, 92, 84, 255)
+	fire := rl.NewColor(232, 132, 56, 255)
+	fireBright := rl.NewColor(252, 220, 132, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			// Three legs splayed out.
+			{modelIdx: 0, offset: rl.NewVector3(-0.18, 0.30, -0.10), scale: rl.NewVector3(1, 1, 1), rotation: 15, rotationAxis: rl.NewVector3(0, 0, 1), tint: iron},
+			{modelIdx: 0, offset: rl.NewVector3(0.18, 0.30, -0.10), scale: rl.NewVector3(1, 1, 1), rotation: -15, rotationAxis: rl.NewVector3(0, 0, 1), tint: iron},
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.30, 0.20), scale: rl.NewVector3(1, 1, 1), rotation: 15, rotationAxis: rl.NewVector3(1, 0, 0), tint: iron},
+			// Bowl rim.
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.66, 0), scale: rl.NewVector3(1, 1, 1), tint: iron},
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.72, 0), scale: rl.NewVector3(0.94, 0.2, 0.94), tint: ironLight},
+			// Flame stack — broad base, smaller bright tip.
+			{modelIdx: 2, offset: rl.NewVector3(0, 0.90, 0), scale: rl.NewVector3(1, 1.4, 1), tint: fire},
+			{modelIdx: 3, offset: rl.NewVector3(0, 1.10, 0), scale: rl.NewVector3(1, 1.6, 1), tint: fireBright},
+		},
+	}
+}
+
+// loadSarcophagusProp builds a stone sarcophagus: a heavy rectangular
+// base with a lid sitting flush on top. Authored as a single-tile prop
+// (cramped for a real burial chamber, but reads at this scale).
+func loadSarcophagusProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
+	base := rl.LoadModelFromMesh(rl.GenMeshCube(0.92, 0.46, 0.50))
+	lid := rl.LoadModelFromMesh(rl.GenMeshCube(0.96, 0.10, 0.54))
+	carving := rl.LoadModelFromMesh(rl.GenMeshCube(0.30, 0.36, 0.04))
+	models := []rl.Model{base, lid, carving}
+	for i := range models {
+		setModelTexture(&models[i], rockTex)
+		attachShader(&models[i], shader)
+	}
+	stone := rl.NewColor(200, 192, 174, 255)
+	stoneDark := rl.NewColor(140, 132, 116, 255)
+	carved := rl.NewColor(108, 96, 84, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.23, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.23, 0), scale: rl.NewVector3(0.96, 1.04, 0.96), tint: stoneDark},
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.51, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
+			// Faux carving on the lid (humanoid silhouette suggestion).
+			{modelIdx: 2, offset: rl.NewVector3(0, 0.40, 0.28), scale: rl.NewVector3(1, 1, 1), tint: carved},
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Decor additions (Turn B). All single-tile, non-blocking. Each builder
+// lives in decorModels and is dispatched by drawDecor's char switch.
+// ---------------------------------------------------------------------------
+
+// loadRugProp builds a flat woven rug: a thin wide cube laid flush
+// on the floor with a tasseled border. Pure decor — never blocks.
+func loadRugProp(shader rl.Shader) propModel {
+	pad := rl.LoadModelFromMesh(rl.GenMeshCube(0.78, 0.02, 0.58))
+	border := rl.LoadModelFromMesh(rl.GenMeshCube(0.84, 0.025, 0.64))
+	models := []rl.Model{pad, border}
+	for i := range models {
+		attachShader(&models[i], shader)
+	}
+	rug := rl.NewColor(176, 84, 68, 255)
+	rugDark := rl.NewColor(120, 56, 48, 255)
+	trim := rl.NewColor(232, 196, 124, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.012, 0), scale: rl.NewVector3(1, 1, 1), tint: trim},
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.020, 0), scale: rl.NewVector3(1, 1, 1), tint: rug},
+			// Inner darker stripe so the rug isn't a flat slab.
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.024, 0), scale: rl.NewVector3(0.6, 0.5, 0.6), tint: rugDark},
+		},
+	}
+}
+
+// loadCandleProp builds a stubby candle with a small flame tip,
+// sitting in a tiny pool of melted wax. Reads from any angle.
+func loadCandleProp(shader rl.Shader) propModel {
+	puddle := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.10, 0.02, 10))
+	candle := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.05, 0.16, 8))
+	flame := rl.LoadModelFromMesh(rl.GenMeshSphere(0.04, 6, 8))
+	tip := rl.LoadModelFromMesh(rl.GenMeshSphere(0.02, 6, 6))
+	models := []rl.Model{puddle, candle, flame, tip}
+	for i := range models {
+		attachShader(&models[i], shader)
+	}
+	wax := rl.NewColor(244, 220, 156, 255)
+	waxDark := rl.NewColor(196, 168, 108, 255)
+	fire := rl.NewColor(232, 144, 64, 255)
+	fireBright := rl.NewColor(252, 230, 148, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.008, 0), scale: rl.NewVector3(1, 1, 1), tint: waxDark},
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.10, 0), scale: rl.NewVector3(1, 1, 1), tint: wax},
+			{modelIdx: 2, offset: rl.NewVector3(0, 0.22, 0), scale: rl.NewVector3(1, 1.8, 1), tint: fire},
+			{modelIdx: 3, offset: rl.NewVector3(0, 0.28, 0), scale: rl.NewVector3(1, 2, 1), tint: fireBright},
+		},
+	}
+}
+
+// loadBootprintsProp builds two small flat impressions on the floor.
+// Each "print" is a tiny shallow cube; pair them in a forward-stride
+// layout to suggest someone walked past.
+func loadBootprintsProp(shader rl.Shader) propModel {
+	print := rl.LoadModelFromMesh(rl.GenMeshCube(0.10, 0.015, 0.18))
+	heel := rl.LoadModelFromMesh(rl.GenMeshCube(0.10, 0.015, 0.06))
+	models := []rl.Model{print, heel}
+	for i := range models {
+		attachShader(&models[i], shader)
+	}
+	mud := rl.NewColor(90, 68, 44, 255)
+	mudDark := rl.NewColor(60, 44, 28, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 0, offset: rl.NewVector3(-0.10, 0.008, -0.06), scale: rl.NewVector3(1, 1, 1), tint: mud},
+			{modelIdx: 1, offset: rl.NewVector3(-0.10, 0.008, -0.18), scale: rl.NewVector3(1, 1, 1), tint: mudDark},
+			{modelIdx: 0, offset: rl.NewVector3(0.10, 0.008, 0.08), scale: rl.NewVector3(1, 1, 1), tint: mud},
+			{modelIdx: 1, offset: rl.NewVector3(0.10, 0.008, -0.04), scale: rl.NewVector3(1, 1, 1), tint: mudDark},
+		},
+	}
+}
+
+// loadAshHeapProp builds a small cool-grey ash mound. Distinct from
+// DecorScorch (a flat black ring) — the heap has volume so it reads as
+// "campfire site remnant" rather than "burn mark."
+func loadAshHeapProp(shader rl.Shader) propModel {
+	heap := rl.LoadModelFromMesh(rl.GenMeshSphere(0.16, 8, 8))
+	dust := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.22, 0.02, 12))
+	models := []rl.Model{heap, dust}
+	for i := range models {
+		attachShader(&models[i], shader)
+	}
+	ash := rl.NewColor(132, 124, 116, 255)
+	ashDark := rl.NewColor(80, 72, 64, 255)
+	dustTone := rl.NewColor(160, 150, 138, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.008, 0), scale: rl.NewVector3(1, 1, 1), tint: dustTone},
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.06, 0), scale: rl.NewVector3(1, 0.45, 1), tint: ash},
+			{modelIdx: 0, offset: rl.NewVector3(0.04, 0.04, -0.04), scale: rl.NewVector3(1, 0.3, 1), tint: ashDark},
+		},
+	}
+}
+
+// loadPuddleProp builds a shallow water puddle: an irregular flat
+// cylinder with a brighter rim suggesting wet stone reflection.
+func loadPuddleProp(shader rl.Shader) propModel {
+	disc := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.26, 0.015, 14))
+	highlight := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.18, 0.02, 12))
+	models := []rl.Model{disc, highlight}
+	for i := range models {
+		attachShader(&models[i], shader)
+	}
+	water := rl.NewColor(108, 154, 188, 255)
+	waterBright := rl.NewColor(180, 214, 232, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.006, 0), scale: rl.NewVector3(1, 1, 1), tint: water},
+			{modelIdx: 1, offset: rl.NewVector3(-0.04, 0.012, -0.04), scale: rl.NewVector3(1, 1, 1), tint: waterBright},
+		},
+	}
+}
+
+// loadRootClusterProp builds gnarled roots poking from the floor: a
+// few low arches of brown cylinders at varied tilts. Reads as
+// "something grew through the floor here" without blocking.
+func loadRootClusterProp(shader rl.Shader, barkTex rl.Texture2D) propModel {
+	arch := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.04, 0.30, 8))
+	knob := rl.LoadModelFromMesh(rl.GenMeshSphere(0.05, 6, 8))
+	models := []rl.Model{arch, knob}
+	for i := range models {
+		setModelTexture(&models[i], barkTex)
+		attachShader(&models[i], shader)
+	}
+	rootCol := rl.NewColor(92, 68, 44, 255)
+	rootDark := rl.NewColor(60, 44, 30, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 0, offset: rl.NewVector3(0.06, 0.04, 0.04), scale: rl.NewVector3(1, 1, 1), rotation: 70, rotationAxis: rl.NewVector3(1, 0, 1), tint: rootCol},
+			{modelIdx: 0, offset: rl.NewVector3(-0.08, 0.04, -0.02), scale: rl.NewVector3(1, 1, 1), rotation: 60, rotationAxis: rl.NewVector3(1, 0, -1), tint: rootDark},
+			{modelIdx: 0, offset: rl.NewVector3(0.04, 0.04, -0.10), scale: rl.NewVector3(1, 0.85, 1), rotation: 80, rotationAxis: rl.NewVector3(0, 0, 1), tint: rootCol},
+			{modelIdx: 1, offset: rl.NewVector3(0.12, 0.05, 0.04), scale: rl.NewVector3(1, 1, 1), tint: rootDark},
+			{modelIdx: 1, offset: rl.NewVector3(-0.08, 0.06, -0.10), scale: rl.NewVector3(1, 1, 1), tint: rootCol},
+		},
+	}
+}
