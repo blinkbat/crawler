@@ -49,6 +49,11 @@ type Resources struct {
 	// dispatch shape as decorModels — the renderer falls back to the
 	// existing tree/boulder/bush cases when a char isn't here.
 	propModels map[byte]propModel
+
+	// doorProp is the area-transition doorframe drawn at every g.Doors
+	// entry. One shared model — rotated per-door by the authored
+	// facing so the opening points the right way.
+	doorProp propModel
 }
 
 type worldMaterialResources struct {
@@ -211,8 +216,90 @@ func LoadResources() (r Resources) {
 	archMarbleTex := loadTiledTexture(makeMarblePixels(128, 128))
 	r.decorModels[core.DecorArchway] = loadArchwayDecor(r.lighting.shader, archMarbleTex)
 
+	// Door prop — drawn at every g.Doors entry, rotated by authored
+	// facing. Owns its wood texture via setModelTexture; freed by
+	// doorProp.unload() in Resources.Unload below.
+	doorWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
+	r.doorProp = loadDoorProp(r.lighting.shader, doorWoodTex)
+
+	assertDecorCoverage(r.decorModels)
+	assertPropCoverage(r.propModels)
+
 	committed = true
 	return r
+}
+
+// inlineDecorChars enumerates the decor-layer chars rendered through
+// dedicated propModel fields on Resources (bushProp, mushroomProp) or
+// a specialized helper (drawPebbleCluster) instead of the
+// decorModels map. They are NOT a desync risk — adding one would
+// require editing world.go's drawDecor switch — so the coverage assert
+// subtracts them from the expected set.
+var inlineDecorChars = map[byte]struct{}{
+	core.DecorBush:     {},
+	core.DecorMushroom: {},
+	core.DecorPebble:   {},
+}
+
+// assertDecorCoverage panics if any char in core.DecorTileChars is
+// missing from decorModels AND not inline-handled. Mirrors the shape
+// of render/minimap.go's init: catches "added a const, forgot to
+// register a model" at boot instead of as a silent no-op in drawDecor.
+func assertDecorCoverage(models map[byte]propModel) {
+	for _, c := range core.DecorTileChars() {
+		if _, ok := models[c]; ok {
+			continue
+		}
+		if _, ok := inlineDecorChars[c]; ok {
+			continue
+		}
+		panic("render: decor char '" + string(c) + "' has no decorModels entry and is not inline-handled — register a loadXxxProp in NewResources or add to inlineDecorChars")
+	}
+}
+
+// inlinePropChars enumerates prop-layer chars rendered through
+// dedicated fields/helpers on Resources (tree, rockProp, bushProp)
+// instead of the propModels map. Mirrors inlineDecorChars.
+var inlinePropChars = map[byte]struct{}{
+	core.TileTree:      {},
+	core.TileTreeXL:    {},
+	core.TileRockLarge: {},
+	core.TileBushLarge: {},
+}
+
+// assertPropCoverage is the props-layer analogue of
+// assertDecorCoverage. PropTileChars enumerates every blocking prop
+// char; each must either be in propModels or be inline-handled by
+// world.go's drawWorld switch.
+func assertPropCoverage(models map[byte]propModel) {
+	for _, c := range core.PropTileChars() {
+		if _, ok := models[c]; ok {
+			continue
+		}
+		if _, ok := inlinePropChars[c]; ok {
+			continue
+		}
+		// Multi-tile-prop tails (e.g. TileRockFormationTail) deliberately
+		// have no propModels entry — the anchor on the partner tile draws
+		// the spanning mesh. PropFootprintTail catches them.
+		if isFootprintTail(c) {
+			continue
+		}
+		panic("render: prop char '" + string(c) + "' has no propModels entry and is not inline-handled — register a loadXxxProp in NewResources or add to inlinePropChars")
+	}
+}
+
+// isFootprintTail reports whether c is a tail char for a multi-tile
+// prop anchor. Tails render nothing; the anchor's mesh covers them.
+// Walks the known anchor set instead of a hand-maintained tail list
+// so adding a future multi-tile prop only touches PropFootprint.
+func isFootprintTail(c byte) bool {
+	for _, anchor := range core.PropTileChars() {
+		if core.PropFootprintTail(anchor) == c {
+			return true
+		}
+	}
+	return false
 }
 
 func (r Resources) Unload() {
@@ -242,6 +329,7 @@ func (r Resources) Unload() {
 	r.rockProp.unload()
 	r.bushProp.unload()
 	r.mushroomProp.unload()
+	r.doorProp.unload()
 	for _, model := range r.specialFloors {
 		rl.UnloadModel(model)
 	}
@@ -329,25 +417,29 @@ func lightingFor(material core.MaterialSet) lightingProfile {
 	return fieldLighting
 }
 
+// loadEnemySprite is the per-enemy texture-creation helper. Mints a
+// point-filtered, clamped sprite texture from the given pixel slice and
+// appends it to `owned` so Resources.Unload can free it at shutdown.
+// Centralizes the "create + filter + clamp + register for cleanup"
+// boilerplate that every new enemy texture used to repeat — adding a
+// new sprite is now one line instead of three, and forgetting to
+// register the texture for cleanup is impossible.
+func loadEnemySprite(pixels []color.RGBA, w, h int, owned *[]rl.Texture2D) rl.Texture2D {
+	tex := loadTexture(pixels, w, h, rl.FilterPoint)
+	rl.SetTextureWrap(tex, rl.WrapClamp)
+	*owned = append(*owned, tex)
+	return tex
+}
+
 func loadEnemyVisuals() (map[core.EnemyKind]enemyVisual, []rl.Texture2D) {
-	ratTexture := loadTexture(makeRatPixels(72, 96), 72, 96, rl.FilterPoint)
-	rl.SetTextureWrap(ratTexture, rl.WrapClamp)
-	batTexture := loadTexture(makeBatPixels(80, 88), 80, 88, rl.FilterPoint)
-	rl.SetTextureWrap(batTexture, rl.WrapClamp)
-	diseasedRatTexture := loadTexture(makeDiseasedRatPixels(72, 96), 72, 96, rl.FilterPoint)
-	rl.SetTextureWrap(diseasedRatTexture, rl.WrapClamp)
-	goblinTexture := loadTexture(makeGoblinPixels(72, 112), 72, 112, rl.FilterPoint)
-	rl.SetTextureWrap(goblinTexture, rl.WrapClamp)
-	goblinMageTexture := loadTexture(makeGoblinMagePixels(72, 112), 72, 112, rl.FilterPoint)
-	rl.SetTextureWrap(goblinMageTexture, rl.WrapClamp)
-	amoebaTexture := loadTexture(makeAmoebaPixels(96, 80), 96, 80, rl.FilterPoint)
-	rl.SetTextureWrap(amoebaTexture, rl.WrapClamp)
-	mantrapTexture := loadTexture(makeVenusMantrapPixels(88, 128), 88, 128, rl.FilterPoint)
-	rl.SetTextureWrap(mantrapTexture, rl.WrapClamp)
-	owned := []rl.Texture2D{
-		ratTexture, batTexture, diseasedRatTexture,
-		goblinTexture, goblinMageTexture, amoebaTexture, mantrapTexture,
-	}
+	var owned []rl.Texture2D
+	ratTexture := loadEnemySprite(makeRatPixels(72, 96), 72, 96, &owned)
+	batTexture := loadEnemySprite(makeBatPixels(80, 88), 80, 88, &owned)
+	diseasedRatTexture := loadEnemySprite(makeDiseasedRatPixels(72, 96), 72, 96, &owned)
+	goblinTexture := loadEnemySprite(makeGoblinPixels(72, 112), 72, 112, &owned)
+	goblinMageTexture := loadEnemySprite(makeGoblinMagePixels(72, 112), 72, 112, &owned)
+	amoebaTexture := loadEnemySprite(makeAmoebaPixels(96, 80), 96, 80, &owned)
+	mantrapTexture := loadEnemySprite(makeVenusMantrapPixels(88, 128), 88, 128, &owned)
 	visuals := map[core.EnemyKind]enemyVisual{
 		core.EnemyRat: {
 			texture: ratTexture,
@@ -391,6 +483,16 @@ func loadEnemyVisuals() (map[core.EnemyKind]enemyVisual, []rl.Texture2D) {
 			// is the showpiece, so the sprite needs the vertical room.
 			size: rl.NewVector2(1.20, 1.80),
 		},
+	}
+	// Coverage assert: every EnemyKind registered in core must have a
+	// visual entry here. Without this, a new enemy silently rendered as
+	// a rat via enemyVisualFor's fallback. Mirrors the editor's
+	// entityBrushColors init check.
+	for _, def := range core.EnemyKinds() {
+		v, ok := visuals[def.Kind]
+		if !ok || v.texture.ID == 0 {
+			panic("render: missing enemyVisuals entry for " + def.Name + " — author a sprite and register it in loadEnemyVisuals")
+		}
 	}
 	return visuals, owned
 }

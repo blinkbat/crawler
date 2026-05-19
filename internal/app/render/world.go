@@ -421,11 +421,11 @@ func drawPebbleCluster(assets Resources, cx, cz float32, tileHash uint32) {
 		// asymmetry uncorrelated to size.
 		stretch := 0.85 + float32((ih>>4)&0x07)*0.04 // 0.85 .. 1.13
 
-		// Y placement: the underlying cube is 0.42 tall (rockMeshBase in
-		// models.go) and propModel's base part offsets it half its height to
-		// clear the ground. We draw the mesh directly, not via the prop, so
-		// we replicate that math: 0.42/2 = 0.21 → scaled by hght.
-		pos := rl.NewVector3(cx+ox, 0.21*hght, cz+oz)
+		// Y placement: the underlying cube is RockMeshBaseHeight tall and
+		// propModel's base part offsets it half its height to clear the
+		// ground. We draw the mesh directly, not via the prop, so we
+		// replicate that math: RockMeshBaseHalfHeight * hght.
+		pos := rl.NewVector3(cx+ox, RockMeshBaseHalfHeight*hght, cz+oz)
 		scale := rl.NewVector3(foot, hght, foot*stretch)
 		tint := tints[(ih>>28)&0x03]
 		rl.DrawModelEx(baseModel, pos, rotationAxis, rot, scale, tint)
@@ -445,6 +445,17 @@ func DrawEnemies(camera rl.Camera3D, g core.GameState, assets Resources) {
 // bottom edge meets the floor when the sprite size's Y is ~tile-height.
 // Named so the four call sites that used to inline 0.68 can't drift.
 const enemyBillboardY = float32(0.68)
+
+// Party billboard sizes. partyBillboardSize is the idle silhouette; the
+// active actor bumps up to partyBillboardSizeActive for a soft "your
+// turn" emphasis. Named so the size and the active-state highlight
+// stay tunable in one place instead of grepping across world.go,
+// timing.go (which reads partyBillboardSize indirectly through
+// partySpritePosition's y-anchor), and any future minimap badge.
+var (
+	partyBillboardSize       = rl.NewVector2(0.38, 0.68)
+	partyBillboardSizeActive = rl.NewVector2(0.42, 0.72)
+)
 
 // drawFieldPacks renders one billboard per pack — the highest-tier member,
 // at the pack's authored tile. Empty/all-dead packs are skipped (they're
@@ -514,12 +525,68 @@ func isEnemyAttackerSlot(g core.GameState, slot int) bool {
 	return g.Battle.EnemyAttacker == slot
 }
 
+// markerStyle bundles every parameter that distinguishes one selector
+// pyramid from another: where to anchor its tip relative to the unit's
+// billboard, its silhouette (height + base radius), tint, and rotation
+// phase offset (so two markers on screen at once don't lock-step). One
+// row per gameplay role keeps the three call sites visually consistent
+// — change "the enemy attacker marker is too tall" in one place.
+type markerStyle struct {
+	tipYOffset float32
+	height     float32
+	baseRadius float32
+	color      rl.Color
+	phase      float32
+}
+
+var (
+	// markerEnemyAttacker tags the enemy currently lunging at the party
+	// (BattleEnemyTiming phase). Red, slightly larger than the target
+	// marker, phase-offset so a same-frame target+attacker pair don't
+	// spin in lockstep.
+	markerEnemyAttacker = markerStyle{
+		tipYOffset: 0.80,
+		height:     0.42,
+		baseRadius: 0.18,
+		color:      rl.NewColor(255, 96, 96, 245),
+		phase:      0.6,
+	}
+	// markerEnemyTarget is the player's currently-selected enemy.
+	// Yellow — paired with the in-roster row highlight via
+	// targetingEnemy().
+	markerEnemyTarget = markerStyle{
+		tipYOffset: 0.74,
+		height:     0.38,
+		baseRadius: 0.16,
+		color:      rl.NewColor(255, 222, 94, 245),
+		phase:      0.0,
+	}
+	// markerFriendlyTarget is the player's currently-selected ally
+	// (heal / item targeting). Green, smallest of the three since it
+	// sits on a smaller party billboard.
+	markerFriendlyTarget = markerStyle{
+		tipYOffset: 0.42,
+		height:     0.34,
+		baseRadius: 0.14,
+		color:      rl.NewColor(118, 235, 136, 245),
+		phase:      0.3,
+	}
+)
+
+// drawMarker is the single entry point for every selector-pyramid call
+// site. `unitPos` is the unit's billboard center; the helper anchors
+// the pyramid tip according to the style's tipYOffset and forwards the
+// rest to drawSelectorPyramid.
+func drawMarker(unitPos rl.Vector3, style markerStyle) {
+	tip := rl.NewVector3(unitPos.X, unitPos.Y+style.tipYOffset, unitPos.Z)
+	drawSelectorPyramid(tip, style.height, style.baseRadius, style.color, style.phase)
+}
+
 // drawAttackerChevron paints the JRPG-style selector pyramid above the
 // lunging enemy, tip pointing down at them. Red so it reads as "this one's
 // about to swing at you" — the player-target marker is yellow.
 func drawAttackerChevron(camera rl.Camera3D, position rl.Vector3) {
-	tip := rl.NewVector3(position.X, position.Y+0.80, position.Z)
-	drawSelectorPyramid(tip, 0.42, 0.18, rl.NewColor(255, 96, 96, 245), 0.6)
+	drawMarker(position, markerEnemyAttacker)
 }
 
 func enemyVisualFor(assets Resources, kind core.EnemyKind) (enemyVisual, bool) {
@@ -531,8 +598,7 @@ func enemyVisualFor(assets Resources, kind core.EnemyKind) (enemyVisual, bool) {
 }
 
 func drawTargetChevron(camera rl.Camera3D, position rl.Vector3) {
-	tip := rl.NewVector3(position.X, position.Y+0.74, position.Z)
-	drawSelectorPyramid(tip, 0.38, 0.16, rl.NewColor(255, 222, 94, 245), 0.0)
+	drawMarker(position, markerEnemyTarget)
 }
 
 // drawSelectorPyramid renders the JRPG-classic floating cursor: a square-
@@ -628,13 +694,13 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 			memberDance = victoryDance
 		}
 		position := partySpritePosition(camera, i, g.Party[i].Class, g.Party[i].AttackBump, memberDance)
-		size := rl.NewVector2(0.38, 0.68)
+		size := partyBillboardSize
 		tint := rl.White
 		if g.Party[i].HP <= 0 {
 			tint = rl.NewColor(110, 110, 120, 190)
 		} else if inPlayerTurn(g) && i == g.Battle.CurrentParty {
 			tint = rl.NewColor(255, 245, 204, 255)
-			size = rl.NewVector2(0.42, 0.72)
+			size = partyBillboardSizeActive
 		} else if memberDance > 0 {
 			_, _, _, scale := victoryDanceMotion(g.Party[i].Class, memberDance)
 			size.X *= scale
@@ -663,8 +729,7 @@ func partyTextureFor(assets Resources, member core.PartyMember) (rl.Texture2D, b
 }
 
 func drawFriendlyTargetMarker(camera rl.Camera3D, position rl.Vector3) {
-	tip := rl.NewVector3(position.X, position.Y+0.42, position.Z)
-	drawSelectorPyramid(tip, 0.34, 0.14, rl.NewColor(118, 235, 136, 245), 0.3)
+	drawMarker(position, markerFriendlyTarget)
 }
 
 func partySpritePosition(camera rl.Camera3D, index int, class core.PartyClass, bump, victoryDance float32) rl.Vector3 {

@@ -101,3 +101,5 @@ bat,diseased_rat 4 13
 diseased_rat 5 13
 amoeba 1 13
 chests:
+doors:
+from_swamp swamp to_dungeon 2 1 east

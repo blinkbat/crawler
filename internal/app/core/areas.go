@@ -139,6 +139,33 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		}
 		chests = append(chests, ChestSpawn{TileX: c.X, TileZ: c.Z, Items: kinds})
 	}
+	// Doors round-trip. SelfMapToken expands to the area's own map id
+	// here so the runtime never sees the placeholder. The map id is
+	// MapIDFromPath(path) — for an unsaved editor area (empty Path)
+	// we leave TargetMap as "self" since there's no canonical id yet.
+	localMapID := ""
+	if path != "" {
+		localMapID = MapIDFromPath(path)
+	}
+	doors := make([]DoorSpawn, 0, len(mf.Doors))
+	for _, d := range mf.Doors {
+		facing, ok := facingFromName(d.Facing)
+		if !ok {
+			return AreaDefinition{}, fmt.Errorf("door %q has bad facing %q", d.Name, d.Facing)
+		}
+		target := d.TargetMap
+		if target == mapfile.SelfMapToken && localMapID != "" {
+			target = localMapID
+		}
+		doors = append(doors, DoorSpawn{
+			TileX:      d.X,
+			TileZ:      d.Z,
+			Name:       d.Name,
+			TargetMap:  target,
+			TargetDoor: d.TargetDoor,
+			Facing:     facing,
+		})
+	}
 	ceiling := mf.Ceiling
 	if len(ceiling) == 0 {
 		ceiling = mapfile.BlankLayer(mf.Width, mf.Height, TileCeilingOpen)
@@ -159,6 +186,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		StartFacing:  face,
 		PackSpawns:   spawns,
 		ChestSpawns:  chests,
+		DoorSpawns:   doors,
 		QuietMessage: mf.Quiet,
 	}, nil
 }
@@ -205,6 +233,32 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		}
 		chests = append(chests, mapfile.MapChest{Items: names, X: c.TileX, Z: c.TileZ})
 	}
+	localMapID := ""
+	if a.Path != "" {
+		localMapID = MapIDFromPath(a.Path)
+	}
+	doors := make([]mapfile.MapDoor, 0, len(a.DoorSpawns))
+	for _, d := range a.DoorSpawns {
+		faceName, ok := FacingName(d.Facing)
+		if !ok {
+			return mapfile.MapFile{}, fmt.Errorf("door %q has bad facing %d", d.Name, d.Facing)
+		}
+		// Encode same-map portals back to SelfMapToken so a moved/renamed
+		// map keeps its internal links intact. Cross-map targets stay as
+		// their explicit map id.
+		target := d.TargetMap
+		if localMapID != "" && target == localMapID {
+			target = mapfile.SelfMapToken
+		}
+		doors = append(doors, mapfile.MapDoor{
+			Name:       d.Name,
+			TargetMap:  target,
+			TargetDoor: d.TargetDoor,
+			X:          d.TileX,
+			Z:          d.TileZ,
+			Facing:     faceName,
+		})
+	}
 	ceiling := a.Ceiling
 	if len(ceiling) == 0 {
 		ceiling = mapfile.BlankLayer(a.Width, a.Height, TileCeilingOpen)
@@ -225,6 +279,7 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		Ceiling:   append([]string(nil), ceiling...),
 		Packs:     packs,
 		Chests:    chests,
+		Doors:     doors,
 	}, nil
 }
 

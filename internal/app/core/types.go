@@ -25,6 +25,43 @@ type ChestSpawn struct {
 	Items []ItemKind
 }
 
+// DoorSpawn is one authored door on the map: a tile position, the
+// door's identifier (unique within this map), the destination map id
+// + door name to step into, and the post-transition facing the player
+// should adopt. Same shape as the on-disk MapDoor — mapfile->core
+// resolves SelfMapToken to the local map name at load time so the
+// runtime never sees the placeholder.
+type DoorSpawn struct {
+	TileX      int
+	TileZ      int
+	Name       string
+	TargetMap  string
+	TargetDoor string
+	Facing     int
+}
+
+// Door is one runtime door on the field. Built from AreaDefinition.
+// DoorSpawns by NewGameState (placeDoors). Doors block neither movement
+// nor vision: stepping onto a door's tile fires the area transition,
+// resolved by the explore loop against the door's TargetMap + TargetDoor.
+type Door struct {
+	TileX      int
+	TileZ      int
+	Name       string
+	TargetMap  string
+	TargetDoor string
+	Facing     int
+}
+
+// AreaTransition is the queued "swap to this area next frame" request
+// the explore movement loop hands off to the run loop when the player
+// steps onto a door. Empty TargetMap is the zero / "no transition"
+// marker — the run loop only swaps when TargetMap != "".
+type AreaTransition struct {
+	TargetMap  string
+	TargetDoor string
+}
+
 // Chest is one runtime chest on the field. Items is the stack-counted
 // loot the player can withdraw via the chest-open modal; Looted goes
 // true once every stack is drained (or Take All fires), at which point
@@ -68,7 +105,11 @@ type AreaDefinition struct {
 	// ChestSpawns is the authored chest list. Converted to runtime
 	// Chests in NewGameState; the field-render and interact paths read
 	// the runtime list, not this one.
-	ChestSpawns  []ChestSpawn
+	ChestSpawns []ChestSpawn
+	// DoorSpawns is the authored door list. Converted to runtime
+	// g.Doors in NewGameState; the explore movement loop reads the
+	// runtime list to detect "stepped onto a door tile" transitions.
+	DoorSpawns   []DoorSpawn
 	QuietMessage string
 }
 
@@ -124,6 +165,16 @@ type GameState struct {
 	// the slice (so their open-lid sprite keeps rendering); the explore
 	// loop just refuses interaction on them.
 	Chests []Chest
+	// Doors is the runtime list of area-transition doors on the field.
+	// Built from AreaDefinition.DoorSpawns by NewGameState. The explore
+	// movement loop checks this slice on every step-land to detect
+	// "stepped onto a door" and fire the transition.
+	Doors []Door
+	// PendingTransition is set by the explore movement loop when the
+	// player steps onto a door tile. The run loop consumes this on the
+	// frame after movement settles to swap in the new GameState. Empty
+	// TargetMap means "no transition queued."
+	PendingTransition AreaTransition
 	// ChestOpen is the index into Chests of the currently-open chest, or
 	// -1 when no chest UI is showing. ChestMenuIndex is the cursor row
 	// inside the open chest (which item is highlighted). Both live in

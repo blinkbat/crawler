@@ -70,6 +70,13 @@ const (
 	// the brush gets the chest on the map and that's enough to test the
 	// in-game open flow.
 	entityPlaceChest
+	// entityPlaceDoor drops an area-transition door at the clicked tile
+	// with a placeholder name and "self" target. The clicked tile must
+	// have an open walls/props cell — doors live on walkable floor.
+	// Per-door authoring (rename, set target_map / target_door / facing)
+	// happens in the modalDoorEdit modal opened by clicking an existing
+	// door. Right-click clears the door.
+	entityPlaceDoor
 )
 
 // layerBrushes is the per-layer palette table. Index into the active
@@ -212,6 +219,16 @@ func buildEntityBrushes() []Brush {
 		Entity: entityPlaceChest,
 		Hotkey: chestHK,
 		Color:  rl.NewColor(232, 180, 92, 255),
+	})
+	doorHK := int32(0)
+	if slot := len(defs) + 2; slot-1 < len(entityBrushHotkeys) {
+		doorHK = entityBrushHotkeys[slot-1]
+	}
+	brushes = append(brushes, Brush{
+		Name:   "Place Door",
+		Entity: entityPlaceDoor,
+		Hotkey: doorHK,
+		Color:  rl.NewColor(176, 132, 86, 255),
 	})
 	return brushes
 }

@@ -46,6 +46,7 @@ func NewGameState(area AreaDefinition) GameState {
 		Party:     NewParty(),
 		Packs:     placePacks(area),
 		Chests:    placeChests(area),
+		Doors:     placeDoors(area),
 		ChestOpen: -1,
 		Battle: Battle{
 			ActivePack:        -1,
@@ -64,6 +65,60 @@ func NewGameState(area AreaDefinition) GameState {
 		RNG: rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	return g
+}
+
+// placeDoors converts the area's authored door list into runtime
+// Doors. Out-of-bounds doors are dropped defensively (the mapfile
+// validator should have caught them on load) and doors with no name
+// are skipped — runtime resolution by name would be ambiguous.
+// Same-tile doors are allowed; the player only triggers the first
+// match found, but authoring two doors on one tile is a pattern the
+// editor should refuse (warned but not enforced here so the runtime
+// stays robust to legacy maps).
+func placeDoors(a AreaDefinition) []Door {
+	if len(a.DoorSpawns) == 0 {
+		return nil
+	}
+	out := make([]Door, 0, len(a.DoorSpawns))
+	for _, sp := range a.DoorSpawns {
+		if !a.InBounds(sp.TileX, sp.TileZ) || sp.Name == "" {
+			continue
+		}
+		out = append(out, Door{
+			TileX:      sp.TileX,
+			TileZ:      sp.TileZ,
+			Name:       sp.Name,
+			TargetMap:  sp.TargetMap,
+			TargetDoor: sp.TargetDoor,
+			Facing:     sp.Facing,
+		})
+	}
+	return out
+}
+
+// DoorIndexAt returns the index of the door at the given tile, or -1
+// when no door is there. Mirrors ChestIndexAt. Used by the explore
+// movement loop on every step-land to detect "stepped onto a door."
+func DoorIndexAt(doors []Door, x, z int) int {
+	for i, d := range doors {
+		if d.TileX == x && d.TileZ == z {
+			return i
+		}
+	}
+	return -1
+}
+
+// DoorByName returns the door with the given name from the slice, or
+// nil if not found. Used at transition resolution: the destination
+// area's door list is searched for the named match so the player
+// respawns at the right tile.
+func DoorByName(doors []Door, name string) *Door {
+	for i := range doors {
+		if doors[i].Name == name {
+			return &doors[i]
+		}
+	}
+	return nil
 }
 
 // placeChests converts the area's authored chest list into runtime

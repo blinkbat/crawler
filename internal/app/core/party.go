@@ -57,6 +57,15 @@ type skillDefinition struct {
 	Tag      SkillTag
 	Minigame SkillMinigame
 	Effect   SkillEffect
+	// PlayerCastable is true when this skill is a valid choice from a
+	// party member's action menu. Enemy-only skills (Sleep, Ingest)
+	// set this false so the action menu can't accidentally surface them
+	// and an init-time assert can verify every player class's Skill
+	// field points at a castable entry. SkillFor / PartySkill route
+	// through this so a future "player learns Sleep" feature is one
+	// field flip plus a handler registration, not a "find every
+	// gatekeep switch" hunt.
+	PlayerCastable bool
 }
 
 type SkillEffect struct {
@@ -71,6 +80,12 @@ type SkillEffect struct {
 	// short-circuit without touching the RNG.
 	SleepMinTurns int
 	SleepMaxTurns int
+	// AppliesIngest is true when a successful apply pulls the target out
+	// of combat (Ingested status) until the caster dies. The mantrap's
+	// signature. Carried as a registry flag so the apply path doesn't
+	// have to branch on the SkillID itself — same shape as the Sleep /
+	// Burn min/max fields above.
+	AppliesIngest bool
 }
 
 // Party stats post-difficulty pass. Numbers are deliberately tighter than
@@ -111,22 +126,44 @@ func buildPartyClassByID() map[PartyClass]PartyClassDefinition {
 // and Firebolt's burn-chance pulled down so a single Excellent doesn't
 // auto-burn every cast.
 var skillDefinitions = []skillDefinition{
-	{Skill: SkillSwipe, Name: "Swipe", Cost: 2, TargetMode: ActionMenu, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigamePress, Effect: SkillEffect{Damage: 0}},
-	{Skill: SkillPrayer, Name: "Prayer", Cost: 4, TargetMode: ActionPartyTarget, Kind: SkillKindHeal, Tag: SkillTagHeal, Minigame: MinigameCharge, Effect: SkillEffect{Heal: 1}},
-	{Skill: SkillSteal, Name: "Steal", Cost: 0, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigameSequence, Effect: SkillEffect{StealChance: StealBaseChance}},
-	{Skill: SkillFirebolt, Name: "Firebolt", Cost: 5, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 1, BurnChance: FireboltBurnChance, BurnMinTurns: 2, BurnMaxTurns: 3}},
+	{Skill: SkillSwipe, Name: "Swipe", Cost: 2, TargetMode: ActionMenu, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigamePress, Effect: SkillEffect{Damage: 0}, PlayerCastable: true},
+	{Skill: SkillPrayer, Name: "Prayer", Cost: 4, TargetMode: ActionPartyTarget, Kind: SkillKindHeal, Tag: SkillTagHeal, Minigame: MinigameCharge, Effect: SkillEffect{Heal: 1}, PlayerCastable: true},
+	{Skill: SkillSteal, Name: "Steal", Cost: 0, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigameSequence, Effect: SkillEffect{StealChance: StealBaseChance}, PlayerCastable: true},
+	{Skill: SkillFirebolt, Name: "Firebolt", Cost: 5, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 1, BurnChance: FireboltBurnChance, BurnMinTurns: 2, BurnMaxTurns: 3}, PlayerCastable: true},
 	// Sleep is the goblin-mage's signature. Magic-tagged so armor doesn't
 	// gate the proc; press-minigame so the cast resolves quickly. Damage
 	// is 0 — the only effect is the status. The mage doesn't pay MP
 	// (enemies don't have an MP pool); a future caster class learning
-	// Sleep can set the Cost field.
+	// Sleep can set the Cost field AND flip PlayerCastable.
 	{Skill: SkillSleep, Name: "Sleep", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{SleepMinTurns: SleepMinTurns, SleepMaxTurns: SleepMaxTurns}},
 	// Ingest mirrors Sleep's shape: enemy-only, Magic-tagged, single
-	// party target, no damage. The status itself (Ingested) is tracked
-	// per party member with the swallower's pack-slot pinned on
-	// IngestedBy — releasing the prey is keyed off that slot when the
-	// mantrap dies.
-	{Skill: SkillIngest, Name: "Ingest", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{}},
+	// party target. AppliesIngest carries the "removed from combat until
+	// the caster dies" behaviour so the apply path can stay registry-
+	// driven instead of branching on the SkillID itself.
+	{Skill: SkillIngest, Name: "Ingest", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{AppliesIngest: true}},
+}
+
+// SkillPlayerCastable reports whether the skill can appear in a party
+// member's action menu. Enemy-only skills (Sleep, Ingest) return false.
+// Unknown skill IDs return false too — a future-typo'd registration is
+// kept OUT of the menu, not silently surfaced.
+func SkillPlayerCastable(s SkillID) bool {
+	def, ok := skillInfo(s)
+	return ok && def.PlayerCastable
+}
+
+// PlayerCastableSkills returns every skill flagged PlayerCastable, in
+// registry declaration order. Used by battle's init() to assert each
+// one has a handler registered, and reusable for any future "what
+// skills can I learn?" UI that needs the canonical list.
+func PlayerCastableSkills() []SkillID {
+	out := make([]SkillID, 0, len(skillDefinitions))
+	for _, def := range skillDefinitions {
+		if def.PlayerCastable {
+			out = append(out, def.Skill)
+		}
+	}
+	return out
 }
 
 // skillByID is the O(1) lookup table for skillDefinitions. Built once at

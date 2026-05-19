@@ -127,6 +127,12 @@ const (
 	TileRockFormationTail = 'j' // 2×2 rock formation footprint shadow
 )
 
+// Doors are modeled as entities (like chests), not as a tile char on
+// any layer. The renderer reads g.Doors and draws a doorframe billboard
+// at each door's tile; movement checks "is there a door under my new
+// position?" on step landing. The tile underneath stays a regular
+// walkable floor — no grid-layer character is needed.
+
 // SpawnSnapReason tags why a SnappedSpawnPositions entry exists in the
 // shape it does. Replaces the older "{-1, -1}" sentinel which conflated
 // two distinct outcomes ("the author left this pack empty" and "the
@@ -508,6 +514,58 @@ func IsPropChar(c byte) bool {
 	return ok
 }
 
+// decorTileCharList is the canonical list of every explicit decor-layer
+// char that has a renderable model. '.' (auto-scatter) and '_' (force-
+// empty) are deliberately excluded — they're sentinels handled by the
+// renderer's dispatch, not entries in decorModels. The renderer asserts
+// at init that every entry here has a registered model; the editor
+// derives its brush palette from layerBrushes which mirrors this set.
+var decorTileCharList = []byte{
+	DecorBush, DecorMushroom, DecorPebble,
+	DecorTallGrass, DecorFlowers, DecorClover, DecorReeds,
+	DecorBones, DecorScorch, DecorBlood, DecorCobweb,
+	DecorStump, DecorLog, DecorLeafPile,
+	DecorArchway, DecorArchwayTail,
+	DecorLilypad,
+}
+
+// DecorTileChars returns the list of every renderable decor-layer char
+// as a defensive copy. Used by the renderer's init to assert coverage
+// of decorModels — adding a DecorXxx const without a loader panics at
+// startup instead of silently no-op'ing in drawDecor.
+func DecorTileChars() []byte {
+	out := make([]byte, len(decorTileCharList))
+	copy(out, decorTileCharList)
+	return out
+}
+
+// BlockingFloorChars returns every floor-layer char that BlockedAt
+// reports true for. Today that's just FloorDeepWater; the slice exists
+// so callers (minimap color coverage, debug overlays) don't have to
+// open-code the set and a future blocker (lava, void) is one append.
+func BlockingFloorChars() []byte {
+	return []byte{FloorDeepWater}
+}
+
+// floorTileCharList enumerates every floor-layer char with a defined
+// visual (universal variants + material-keyed variants). Excludes the
+// sentinel FloorAuto. Adding a new floor char here automatically
+// extends TileLabel coverage (via the label table below) and feeds
+// any future "list all floor types" UI.
+var floorTileCharList = []byte{
+	FloorGrass, FloorDirt, FloorDarkGrass, FloorStone,
+	FloorCobble, FloorPlank, FloorWater, FloorDeepWater,
+	FloorSand, FloorSnow,
+}
+
+// FloorTileChars returns the canonical list of named floor-layer
+// chars as a defensive copy. Mirrors PropTileChars / DecorTileChars.
+func FloorTileChars() []byte {
+	out := make([]byte, len(floorTileCharList))
+	copy(out, floorTileCharList)
+	return out
+}
+
 // TileLayer enumerates the four authored grid layers. Used as a typed
 // parameter to TileLabel so callers can't pass a typo'd layer string
 // silently and get "?" back.
@@ -520,120 +578,109 @@ const (
 	TileLayerProps
 )
 
+// tileLabelTable is the per-(layer, char) human label registry that
+// powers TileLabel. Sentinels (empty/auto chars) map to "" so the
+// debug overlay can skip them without an extra branch at the call
+// site. The init() block below asserts that every char in the
+// canonical FloorTileChars / DecorTileChars / PropTileChars / walls /
+// ceiling sets has an entry — adding a new tile const without a
+// label now panics at startup instead of returning "?" silently.
+var tileLabelTable = map[TileLayer]map[byte]string{
+	TileLayerWalls: {
+		TileOpen: "",
+		TileRock: "Wall",
+	},
+	TileLayerFloor: {
+		FloorAuto:      "",
+		FloorGrass:     "Grass",
+		FloorDirt:      "Dirt",
+		FloorDarkGrass: "Dark Grass",
+		FloorStone:     "Stone",
+		FloorCobble:    "Cobble",
+		FloorPlank:     "Planks",
+		FloorWater:     "Water",
+		FloorDeepWater: "Deep Water",
+		FloorSand:      "Sand",
+		FloorSnow:      "Snow",
+	},
+	TileLayerDecor: {
+		DecorAuto:        "",
+		DecorEmpty:       "",
+		DecorBush:        "Bush",
+		DecorMushroom:    "Mushroom",
+		DecorPebble:      "Pebble",
+		DecorTallGrass:   "Tall Grass",
+		DecorFlowers:     "Flowers",
+		DecorClover:      "Clover",
+		DecorReeds:       "Reeds",
+		DecorBones:       "Bones",
+		DecorScorch:      "Scorch",
+		DecorBlood:       "Blood",
+		DecorCobweb:      "Cobweb",
+		DecorStump:       "Stump",
+		DecorLog:         "Log",
+		DecorLeafPile:    "Leaf Pile",
+		DecorArchway:     "Arch (left)",
+		DecorArchwayTail: "Arch (right)",
+		DecorLilypad:     "Lilypad",
+	},
+	TileLayerProps: {
+		TilePropEmpty:    "",
+		TileTree:         "Tree",
+		TileTreeXL:       "Tree XL",
+		TileRockLarge:    "Boulder",
+		TileBushLarge:    "Large Bush",
+		TileCrate:        "Crate",
+		TileBarrel:       "Barrel",
+		TileUrn:          "Urn",
+		TileStalagmite:   "Stalagmite",
+		TilePillar:       "Pillar",
+		TileBrokenPillar: "Broken Pillar",
+		TileStatue:       "Statue",
+		TileObelisk:      "Obelisk",
+		TileFountain:     "Fountain",
+		TileRockCairn:    "Rock Cairn",
+		TileRockFormation:     "Rock Formation (anchor)",
+		TileRockFormationTail: "Rock Formation (tail)",
+	},
+}
+
+// init asserts every authored tile char has a TileLabel entry. The
+// walks below mirror the existing minimap-color and entityBrushColors
+// inits — adding a new floor/decor/prop const without a label panics
+// at startup instead of returning "?" from a debug overlay later.
+func init() {
+	floorLabels := tileLabelTable[TileLayerFloor]
+	for _, c := range floorTileCharList {
+		if _, ok := floorLabels[c]; !ok {
+			panic("core: floor char '" + string(c) + "' missing from tileLabelTable[TileLayerFloor]")
+		}
+	}
+	decorLabels := tileLabelTable[TileLayerDecor]
+	for _, c := range decorTileCharList {
+		if _, ok := decorLabels[c]; !ok {
+			panic("core: decor char '" + string(c) + "' missing from tileLabelTable[TileLayerDecor]")
+		}
+	}
+	propLabels := tileLabelTable[TileLayerProps]
+	for _, c := range propTileCharList {
+		if _, ok := propLabels[c]; !ok {
+			panic("core: prop char '" + string(c) + "' missing from tileLabelTable[TileLayerProps]")
+		}
+	}
+}
+
 // TileLabel returns a short human-readable name for a tile char on the
 // given layer. Empty cells and "auto" sentinels return the empty string
 // so the debug overlay can skip them without an extra check at the call
-// site. Unknown chars return "?".
+// site. Unknown chars return "?". Table-driven from tileLabelTable so
+// adding a new tile is one row, not three switches.
 func TileLabel(layer TileLayer, c byte) string {
-	switch layer {
-	case TileLayerWalls:
-		switch c {
-		case TileRock:
-			return "Wall"
-		case TileOpen:
-			return ""
-		}
-	case TileLayerFloor:
-		switch c {
-		case FloorAuto:
-			return ""
-		case FloorGrass:
-			return "Grass"
-		case FloorDirt:
-			return "Dirt"
-		case FloorDarkGrass:
-			return "Dark Grass"
-		case FloorStone:
-			return "Stone"
-		case FloorCobble:
-			return "Cobble"
-		case FloorPlank:
-			return "Planks"
-		case FloorWater:
-			return "Water"
-		case FloorDeepWater:
-			return "Deep Water"
-		case FloorSand:
-			return "Sand"
-		case FloorSnow:
-			return "Snow"
-		}
-	case TileLayerDecor:
-		switch c {
-		case DecorAuto, DecorEmpty:
-			return ""
-		case DecorBush:
-			return "Bush"
-		case DecorMushroom:
-			return "Mushroom"
-		case DecorPebble:
-			return "Pebble"
-		case DecorTallGrass:
-			return "Tall Grass"
-		case DecorFlowers:
-			return "Flowers"
-		case DecorClover:
-			return "Clover"
-		case DecorReeds:
-			return "Reeds"
-		case DecorBones:
-			return "Bones"
-		case DecorScorch:
-			return "Scorch"
-		case DecorBlood:
-			return "Blood"
-		case DecorCobweb:
-			return "Cobweb"
-		case DecorStump:
-			return "Stump"
-		case DecorLog:
-			return "Log"
-		case DecorLeafPile:
-			return "Leaf Pile"
-		case DecorArchway:
-			return "Arch (left)"
-		case DecorArchwayTail:
-			return "Arch (right)"
-		case DecorLilypad:
-			return "Lilypad"
-		}
-	case TileLayerProps:
-		switch c {
-		case TilePropEmpty:
-			return ""
-		case TileTree:
-			return "Tree"
-		case TileTreeXL:
-			return "Tree XL"
-		case TileRockLarge:
-			return "Boulder"
-		case TileBushLarge:
-			return "Large Bush"
-		case TileCrate:
-			return "Crate"
-		case TileBarrel:
-			return "Barrel"
-		case TileUrn:
-			return "Urn"
-		case TileStalagmite:
-			return "Stalagmite"
-		case TilePillar:
-			return "Pillar"
-		case TileBrokenPillar:
-			return "Broken Pillar"
-		case TileStatue:
-			return "Statue"
-		case TileObelisk:
-			return "Obelisk"
-		case TileFountain:
-			return "Fountain"
-		case TileRockCairn:
-			return "Rock Cairn"
-		case TileRockFormation:
-			return "Rock Formation (anchor)"
-		case TileRockFormationTail:
-			return "Rock Formation (tail)"
+	if labels, ok := tileLabelTable[layer]; ok {
+		if label, ok := labels[c]; ok {
+			return label
 		}
 	}
 	return "?"
 }
+

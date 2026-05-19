@@ -85,6 +85,17 @@ var qualityVisuals = [...]struct {
 	core.TimingQualityExcellent: {ThrobIntensity: 0.22, AttackColor: rl.NewColor(255, 244, 144, 255), DefendColor: rl.NewColor(196, 240, 255, 255)},
 }
 
+// init asserts qualityVisuals covers every timing grade. Pairs with
+// the analogous init() in core/config.go (timingGrades) and battle.go
+// (gradeSounds) so the three parallel tables stay in sync. The fixed-
+// size array form means a missing row produces a zero-valued entry,
+// not a length mismatch — so the assert pivots on TimingQualityCount.
+func init() {
+	if len(qualityVisuals) != int(core.TimingQualityCount) {
+		panic("render/timing: qualityVisuals length must match core.TimingQualityCount")
+	}
+}
+
 // barThrob returns the height scale multiplier for a bar during a graded
 // flash. Higher grades pulse harder — visual confirmation that the player
 // hit *something*. Miss stays at 1.0 so the bar shakes instead (see

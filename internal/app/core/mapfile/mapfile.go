@@ -64,6 +64,14 @@ type MapFile struct {
 	// matching ItemDefinition.Name. Empty list = an empty chest (renders
 	// open by default).
 	Chests []MapChest
+	// Doors is the authored door list. Each door names itself, names
+	// its destination map + matching-door name (or "self" for same-map
+	// portals), and records the tile + post-transition facing. The
+	// runtime resolves doors at step-on time: load destination map,
+	// look up the named door, spawn the player at its tile with its
+	// facing. Bidirectional pairs are author-authored (both ends
+	// reference each other); the engine doesn't infer pairs.
+	Doors []MapDoor
 }
 
 // MapPack is one authored pack at a tile. Members is a non-empty list of
@@ -92,6 +100,32 @@ type MapChest struct {
 // empty Items slice and the encoder emits it when Items is empty.
 const emptyChestToken = "(empty)"
 
+// MapDoor is one authored door at a tile. On-disk format:
+//
+//	<name> <target_map> <target_door> <X> <Z> <facing>
+//
+// Name is this door's identifier (must be unique within the map);
+// TargetMap is the destination map id (the bare name, e.g. "dungeon"
+// for dungeon.map) or the literal "self" for same-map portals;
+// TargetDoor is the matching door's Name in the destination; Facing
+// is the post-transition direction the player faces and is one of
+// north/east/south/west.
+type MapDoor struct {
+	Name       string
+	TargetMap  string
+	TargetDoor string
+	X          int
+	Z          int
+	Facing     string
+}
+
+// SelfMapToken is the placeholder TargetMap value for same-map
+// portals — keeps the row well-formed (always 6 whitespace-separated
+// fields) without leaving an ambiguous empty column. The parser
+// rewrites it to the map's own name at load time, so runtime door
+// resolution doesn't need a special case.
+const SelfMapToken = "self"
+
 // layerSlot is the parser's notion of "which grid is the upcoming N rows
 // going into." Lets the section dispatch share one collection loop.
 type layerSlot int
@@ -105,6 +139,7 @@ const (
 	slotCeiling
 	slotEnemies
 	slotChests
+	slotDoors
 )
 
 // Parse reads a .map file from r. Errors pinpoint the first malformed line.
@@ -162,6 +197,40 @@ func Parse(r io.Reader) (MapFile, error) {
 				return mf, fmt.Errorf("line %d: bad pack z %q", lineNo, fields[2])
 			}
 			mf.Packs = append(mf.Packs, MapPack{Members: members, X: x, Z: z})
+			continue
+		}
+
+		if state == slotDoors {
+			line := strings.TrimSpace(raw)
+			if line == "" {
+				continue
+			}
+			fields := strings.Fields(line)
+			if len(fields) != 6 {
+				return mf, fmt.Errorf("line %d: expected '<name> <target_map> <target_door> <x> <z> <facing>', got %q", lineNo, raw)
+			}
+			x, err := strconv.Atoi(fields[3])
+			if err != nil {
+				return mf, fmt.Errorf("line %d: bad door x %q", lineNo, fields[3])
+			}
+			z, err := strconv.Atoi(fields[4])
+			if err != nil {
+				return mf, fmt.Errorf("line %d: bad door z %q", lineNo, fields[4])
+			}
+			face := strings.ToLower(fields[5])
+			switch face {
+			case "north", "east", "south", "west":
+			default:
+				return mf, fmt.Errorf("line %d: door facing must be north/east/south/west, got %q", lineNo, fields[5])
+			}
+			mf.Doors = append(mf.Doors, MapDoor{
+				Name:       fields[0],
+				TargetMap:  fields[1],
+				TargetDoor: fields[2],
+				X:          x,
+				Z:          z,
+				Facing:     face,
+			})
 			continue
 		}
 
@@ -249,6 +318,8 @@ func sectionFor(raw string) (layerSlot, bool) {
 		return slotEnemies, true
 	case "chests:":
 		return slotChests, true
+	case "doors:":
+		return slotDoors, true
 	}
 	return slotNone, false
 }
@@ -357,6 +428,27 @@ func (mf *MapFile) validate() error {
 			return fmt.Errorf("chest at (%d,%d) outside map %dx%d", c.X, c.Z, mf.Width, mf.Height)
 		}
 	}
+	// Doors: validate bounds, non-empty name, non-empty target. Same
+	// philosophy as packs / chests — a hand-edit typo surfaces here
+	// instead of producing a silent "step on door, nothing happens"
+	// runtime mystery. Duplicate names within the same map are also
+	// rejected since runtime resolution by name would be ambiguous.
+	seenNames := make(map[string]struct{}, len(mf.Doors))
+	for _, d := range mf.Doors {
+		if d.X < 0 || d.X >= mf.Width || d.Z < 0 || d.Z >= mf.Height {
+			return fmt.Errorf("door %q at (%d,%d) outside map %dx%d", d.Name, d.X, d.Z, mf.Width, mf.Height)
+		}
+		if d.Name == "" {
+			return fmt.Errorf("door at (%d,%d) has empty name", d.X, d.Z)
+		}
+		if d.TargetMap == "" || d.TargetDoor == "" {
+			return fmt.Errorf("door %q at (%d,%d) missing target_map/target_door", d.Name, d.X, d.Z)
+		}
+		if _, dup := seenNames[d.Name]; dup {
+			return fmt.Errorf("duplicate door name %q in map", d.Name)
+		}
+		seenNames[d.Name] = struct{}{}
+	}
 	return nil
 }
 
@@ -442,6 +534,16 @@ func (mf MapFile) Encode(w io.Writer) error {
 			token = strings.Join(c.Items, ",")
 		}
 		fmt.Fprintf(bw, "%s %d %d\n", token, c.X, c.Z)
+	}
+	// doors: section is appended only when present. Older .map files
+	// without any doors stay byte-identical across the format change —
+	// the parser treats a missing section as zero-doors. Same rule as
+	// the pre-ceiling-section backwards compatibility above.
+	if len(mf.Doors) > 0 {
+		fmt.Fprintln(bw, "doors:")
+		for _, d := range mf.Doors {
+			fmt.Fprintf(bw, "%s %s %s %d %d %s\n", d.Name, d.TargetMap, d.TargetDoor, d.X, d.Z, d.Facing)
+		}
 	}
 	return bw.Flush()
 }

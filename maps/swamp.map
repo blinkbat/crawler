@@ -84,3 +84,5 @@ mantrap 17 4
 mantrap,goblin 17 10
 chests:
 Bat Jerky,Bat Jerky 18 7
+doors:
+to_dungeon dungeon from_swamp 2 7 west

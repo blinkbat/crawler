@@ -252,6 +252,18 @@ var timingGrades = []struct {
 	TimingQualityExcellent: {Label: "Excellent!", Atk: 2.0, Def: 0.25, AccuracyBonus: 0.45},
 }
 
+// init asserts timingGrades covers every TimingQualityXxx grade. The
+// other two parallel tables (qualityVisuals in render, gradeSounds in
+// battle) carry their own length-check inits against TimingQualityCount.
+// Adding a new grade is now: extend the iota in timing.go, add a row
+// here, add a row in qualityVisuals, add a row in gradeSounds — any
+// one missing panics at startup.
+func init() {
+	if len(timingGrades) != int(TimingQualityCount) {
+		panic("core: timingGrades length must match TimingQualityCount — add a row when extending the grade enum")
+	}
+}
+
 // SkillID identifies a learned skill. Stored on Battle.PendingSkill and
 // used as the map key for action handlers.
 type SkillID int

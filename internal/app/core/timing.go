@@ -8,6 +8,13 @@ const (
 	TimingQualityGood
 	TimingQualityGreat
 	TimingQualityExcellent
+	// TimingQualityCount is the number of timing grades. Used by the
+	// three parallel grade tables (timingGrades in config.go,
+	// qualityVisuals in render/timing.go, gradeSounds in
+	// battle/battle.go) to assert length parity at init — adding a new
+	// grade requires extending all three or a startup panic catches the
+	// drift.
+	TimingQualityCount
 )
 
 // TimingKind picks how the bar grades input.

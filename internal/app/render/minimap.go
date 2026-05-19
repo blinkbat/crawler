@@ -78,13 +78,22 @@ func drawMinimap(m core.AreaDefinition, g core.GameState, assets Resources) {
 // the minimap tone palette is tuned for the small-rendered case, not
 // for matching the editor swatch exactly.
 // init asserts every prop-tile char registered in core.PropTileChars
-// has a minimap color. Without this guard, adding a prop to core's
-// list silently fell back to the "unknown tile" tone on the minimap —
+// has a minimap color, AND that every blocking-floor char (currently
+// FloorDeepWater; future lava etc.) has a dedicated case in
+// minimapTileColor's switch. Without these guards, a new blocker tile
+// silently fell back to the "unknown tile" tone on the minimap —
 // catching it at startup is far cheaper than noticing in playtest.
 func init() {
 	for _, c := range core.PropTileChars() {
 		if _, ok := minimapPropColors[c]; !ok {
 			panic("render/minimap: missing color for prop tile " + string(c))
+		}
+	}
+	for _, c := range core.BlockingFloorChars() {
+		col := minimapTileColor(core.MaterialField, c)
+		fallback := minimapTileColor(core.MaterialField, core.TileOpen)
+		if col == fallback {
+			panic("render/minimap: blocking floor tile '" + string(c) + "' falls through to the open-tile color — add an explicit case in minimapTileColor")
 		}
 	}
 }

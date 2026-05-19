@@ -187,6 +187,20 @@ const (
 	rockMeshChunk        // small faceted chunk (4 rings × 5 slices)
 )
 
+// RockMeshBaseHeight is the Y dimension passed to GenMeshCube for the
+// rockMeshBase model (line below). Exported so drawPebbleCluster in
+// world.go can compute its y-anchor as RockMeshBaseHeight/2 * hght —
+// "lift the cube half its scaled height so it sits flat on the
+// ground" — without baking the literal twice. Changing the cube's
+// mesh height now requires editing this constant only.
+const RockMeshBaseHeight = float32(0.36)
+
+// RockMeshBaseHalfHeight is the y-anchor scale used by ground-scatter
+// draws of rockMeshBase. drawPebbleCluster multiplies it by the
+// pebble's per-instance height scale (`hght`) so the cube's bottom
+// face lands flush with the floor regardless of the height jitter.
+const RockMeshBaseHalfHeight = RockMeshBaseHeight / 2
+
 // loadRockProp builds a chunky polygonal boulder: a flat base with two or
 // three faceted lumps fused on top at varied angles, all in close-grouped
 // stone greys. The intent is "weathered rock outcrop you'd see in a
@@ -195,7 +209,7 @@ const (
 // than billiard-ball smooth.
 func loadRockProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 	models := []rl.Model{
-		rockMeshBase: rl.LoadModelFromMesh(rl.GenMeshCube(1.10, 0.36, 0.95)),
+		rockMeshBase: rl.LoadModelFromMesh(rl.GenMeshCube(1.10, RockMeshBaseHeight, 0.95)),
 		// Sphere with low ring/slice count: each face is large enough to
 		// catch a distinct lighting value, which is what reads as "rock"
 		// vs "ball." 5×6 and 4×5 are the sweet spot — fewer looks like a
@@ -984,6 +998,44 @@ func loadLogProp(shader rl.Shader, barkTex, leafTex rl.Texture2D) propModel {
 			// Moss patches squashed on top of the trunk.
 			{modelIdx: 2, offset: rl.NewVector3(0.05, 0.34, 0.18), scale: rl.NewVector3(0.85, 0.40, 0.85), tint: mossTint},
 			{modelIdx: 2, offset: rl.NewVector3(-0.04, 0.34, -0.22), scale: rl.NewVector3(0.70, 0.35, 0.70), tint: mossTint},
+		},
+	}
+}
+
+// loadDoorProp builds an area-transition door frame: two vertical
+// wooden posts, a lintel across the top, and a darker rectangular
+// "doorway" panel between them. The tile underneath stays walkable —
+// stepping onto it triggers the transition in the explore loop. The
+// frame is centered on the tile and faces along world Z by default;
+// the renderer rotates it by the door's authored facing so the player
+// always sees the opening from the side they approach.
+func loadDoorProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
+	post := rl.LoadModelFromMesh(rl.GenMeshCube(0.10, 1.40, 0.10))
+	lintel := rl.LoadModelFromMesh(rl.GenMeshCube(0.80, 0.12, 0.10))
+	panel := rl.LoadModelFromMesh(rl.GenMeshCube(0.60, 1.20, 0.04))
+	keystone := rl.LoadModelFromMesh(rl.GenMeshCube(0.18, 0.18, 0.14))
+	models := []rl.Model{post, lintel, panel, keystone}
+	for i := range models {
+		setModelTexture(&models[i], woodTex)
+		attachShader(&models[i], shader)
+	}
+	wood := rl.NewColor(150, 102, 60, 255)
+	woodDark := rl.NewColor(96, 64, 40, 255)
+	doorPanel := rl.NewColor(68, 44, 28, 255)
+	brass := rl.NewColor(220, 184, 96, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			// Two posts flanking a doorway.
+			{modelIdx: 0, offset: rl.NewVector3(-0.35, 0.70, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
+			{modelIdx: 0, offset: rl.NewVector3(0.35, 0.70, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
+			// Lintel across the top — slightly wider than the post spread.
+			{modelIdx: 1, offset: rl.NewVector3(0, 1.44, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
+			// Recessed dark panel between the posts (the "door" itself).
+			{modelIdx: 2, offset: rl.NewVector3(0, 0.65, 0), scale: rl.NewVector3(1, 1, 1), tint: doorPanel},
+			// Brass keystone / knob accent so the door reads from
+			// distance.
+			{modelIdx: 3, offset: rl.NewVector3(0, 1.50, 0), scale: rl.NewVector3(1, 1, 1), tint: brass},
 		},
 	}
 }

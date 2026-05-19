@@ -3,6 +3,7 @@ package app
 import (
 	"crawler/internal/app/audio"
 	"crawler/internal/app/core"
+	"crawler/internal/app/core/mapfile"
 	"crawler/internal/app/editor"
 	"crawler/internal/app/explore"
 	"crawler/internal/app/render"
@@ -104,6 +105,17 @@ func updateTitleScene(state *appState) {
 
 func updateAdventureScene(state *appState) {
 	explore.Update(&state.game)
+	if state.game.PendingTransition.TargetMap != "" {
+		if err := applyAreaTransition(&state.game); err != nil {
+			// Transition resolution failed — clear the request, surface
+			// the error in the quiet message slot so the player sees a
+			// clue, and otherwise drop the player off where they were.
+			// Common cause: target map file missing, or the named door
+			// doesn't exist in the destination.
+			state.game.Battle.Message = "Door failed: " + err.Error()
+		}
+		state.game.PendingTransition = core.AreaTransition{}
+	}
 	if state.game.Quit {
 		state.game.Quit = false
 		if state.testFromEditor {
@@ -114,6 +126,81 @@ func updateAdventureScene(state *appState) {
 		state.scene = sceneTitle
 		state.title = title.New()
 	}
+}
+
+// applyAreaTransition loads the destination map and rebuilds the
+// GameState so the player exits through the matching door. Inventory,
+// party (HP/MP/levels/status), and StepCount are preserved across the
+// transition — only the world (area, packs, chests, doors) is
+// swapped. Battle / chest / modal state is dropped, since any of
+// those flags would dangle pointers into the old area.
+func applyAreaTransition(g *core.GameState) error {
+	target := g.PendingTransition.TargetMap
+	doorName := g.PendingTransition.TargetDoor
+	if target == "" || doorName == "" {
+		return nil
+	}
+	// Same-map portals don't reload from disk — the current area
+	// already holds the destination door. Skipping the load avoids
+	// resetting Packs / Chests for an in-map teleport.
+	currentID := core.MapIDFromPath(g.Area.Path)
+	if target == currentID || target == mapfile.SelfMapToken {
+		dest := core.DoorByName(g.Doors, doorName)
+		if dest == nil {
+			return errDoorNotFound(target, doorName)
+		}
+		x, z := doorExitTile(g.Area, g.Doors, *dest)
+		g.Player = core.NewPlayer(x, z, dest.Facing)
+		return nil
+	}
+	area, err := core.LoadArea(core.MapPath(target))
+	if err != nil {
+		return err
+	}
+	next := core.NewGameState(area)
+	// Carry forward the things that belong to the party, not the world.
+	next.Party = g.Party
+	next.Inventory = g.Inventory
+	next.StepCount = g.StepCount
+	next.RNG = g.RNG
+	next.DebugOverlay = g.DebugOverlay
+	dest := core.DoorByName(next.Doors, doorName)
+	if dest == nil {
+		return errDoorNotFound(target, doorName)
+	}
+	x, z := doorExitTile(next.Area, next.Doors, *dest)
+	next.Player = core.NewPlayer(x, z, dest.Facing)
+	*g = next
+	return nil
+}
+
+// doorExitTile picks the tile the player materializes onto when
+// stepping through a door. Prefer the tile one step in the door's
+// facing direction (so the destination door is behind them and they
+// don't immediately re-trigger). Fall back to the door tile itself
+// when the preferred exit is blocked or holds another door — better
+// to risk a same-frame re-trigger than to drop the player onto a
+// wall.
+func doorExitTile(area core.AreaDefinition, doors []core.Door, dest core.Door) (int, int) {
+	dx, dz := core.FacingVector(dest.Facing)
+	fx, fz := dest.TileX+dx, dest.TileZ+dz
+	if area.InBounds(fx, fz) && !area.BlockedAt(fx, fz) && core.DoorIndexAt(doors, fx, fz) < 0 {
+		return fx, fz
+	}
+	return dest.TileX, dest.TileZ
+}
+
+type errDoorMiss struct {
+	mapID    string
+	doorName string
+}
+
+func (e errDoorMiss) Error() string {
+	return "no door named '" + e.doorName + "' in map '" + e.mapID + "'"
+}
+
+func errDoorNotFound(mapID, doorName string) error {
+	return errDoorMiss{mapID: mapID, doorName: doorName}
 }
 
 func updateEditorScene(state *appState, dt float32) {
@@ -151,6 +238,7 @@ func drawAdventureScene(game core.GameState, assets render.Resources) {
 	rl.BeginMode3D(camera)
 	render.DrawWorld(camera, game, assets)
 	render.DrawChests(camera, game, assets)
+	render.DrawDoors(camera, game, assets)
 	render.DrawEnemies(camera, game, assets)
 	render.DrawPartySprites(camera, game, assets)
 	rl.EndMode3D()

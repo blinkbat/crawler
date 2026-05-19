@@ -507,6 +507,15 @@ var gradeSounds = [...]audio.Sound{
 	core.TimingQualityExcellent: audio.SoundInputGreat,
 }
 
+// init asserts gradeSounds covers every timing grade. Pairs with the
+// equivalent inits on core's timingGrades and render's qualityVisuals
+// so all three parallel tables track TimingQualityCount.
+func init() {
+	if len(gradeSounds) != int(core.TimingQualityCount) {
+		panic("battle: gradeSounds length must match core.TimingQualityCount")
+	}
+}
+
 // soundForGrade picks the input cue for a freshly resolved timing grade.
 // Out-of-range qualities fall back to the Miss cue.
 func soundForGrade(q int) audio.Sound {

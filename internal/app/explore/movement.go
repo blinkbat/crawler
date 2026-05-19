@@ -175,7 +175,7 @@ func updatePlayer(g *core.GameState) {
 	p := &g.Player
 
 	if p.Anim.Kind != core.AnimNone {
-		updateAnimation(p, dt)
+		updateAnimation(g, dt)
 		return
 	}
 
@@ -274,13 +274,16 @@ func facingForTile(p *core.Player, tileX, tileZ int) (int, bool) {
 	return p.Facing, false
 }
 
-func updateAnimation(p *core.Player, dt float32) {
+func updateAnimation(g *core.GameState, dt float32) {
+	p := &g.Player
 	p.Anim.Elapsed += dt
 	t := p.Anim.Elapsed / p.Anim.Duration
 	if t >= 1 {
 		t = 1
 	}
 	eased := core.Smoothstep(t)
+
+	finishedKind := p.Anim.Kind
 
 	switch p.Anim.Kind {
 	case core.AnimStep:
@@ -299,6 +302,35 @@ func updateAnimation(p *core.Player, dt float32) {
 	}
 	p.Yaw = core.FacingYaw(p.Facing)
 	p.Anim = core.Animation{}
+
+	// Door trigger: stepping onto a door tile queues an area
+	// transition for the run loop to consume on the next frame. We
+	// only fire on AnimStep completion (not turns) so spinning in
+	// place on top of a door doesn't loop-transition. The run loop
+	// checks g.PendingTransition.TargetMap != "" and swaps.
+	if finishedKind == core.AnimStep {
+		tryQueueDoorTransition(g)
+	}
+}
+
+// tryQueueDoorTransition checks whether the player just stepped onto
+// a door tile and, if so, populates g.PendingTransition for the run
+// loop to consume. Doors with an empty TargetMap (defensive — the
+// validator rejects these on load, but a hand-built editor state
+// could slip one through) are ignored.
+func tryQueueDoorTransition(g *core.GameState) {
+	idx := core.DoorIndexAt(g.Doors, g.Player.TileX, g.Player.TileZ)
+	if idx < 0 {
+		return
+	}
+	door := g.Doors[idx]
+	if door.TargetMap == "" || door.TargetDoor == "" {
+		return
+	}
+	g.PendingTransition = core.AreaTransition{
+		TargetMap:  door.TargetMap,
+		TargetDoor: door.TargetDoor,
+	}
 }
 
 func adjacentPackIndex(packs []core.Pack, tileX, tileZ int) int {

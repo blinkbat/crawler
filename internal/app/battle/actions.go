@@ -30,16 +30,40 @@ type actionHandlers struct {
 // skillActionHandlers is the player-castable skill registry. Skills
 // registered here are valid choices from the action menu and have a
 // setup/apply pair driving the timing minigame. Enemy-only skills
-// (SkillSleep is the current example) route through resolveEnemySpell
-// in battle.go and deliberately don't appear here — actionHandlerFor
-// returns ok=false for any unregistered skill, which beginPendingAction
-// surfaces as "No skill ready." A future "player learns Sleep" feature
-// adds a row here AND a Skill: SkillSleep reference in a party class.
+// (SkillSleep, SkillIngest) route through resolveEnemySpell in battle.go
+// and deliberately don't appear here — actionHandlerFor returns ok=false
+// for any unregistered skill, which beginPendingAction surfaces as "No
+// skill ready." A future "player learns Sleep" feature flips
+// PlayerCastable on the skill registry, adds a row here, and the init()
+// below auto-verifies the wiring.
 var skillActionHandlers = map[core.SkillID]actionHandlers{
 	core.SkillSwipe:    {setup: setupSwipe, apply: applySwipe},
 	core.SkillPrayer:   {setup: setupPrayer, apply: applyPrayer},
 	core.SkillSteal:    {setup: setupTargetedEnemy, apply: applySteal},
 	core.SkillFirebolt: {setup: setupFirebolt, apply: applyFirebolt},
+}
+
+// init asserts the two halves of the player-castable contract stay in
+// sync: every party class's Skill must be PlayerCastable AND have an
+// entry in skillActionHandlers, and every PlayerCastable skill in the
+// registry must have a handler. Without this, a future class that
+// pointed at an enemy-only skill (or a registry author who forgot to
+// register a handler) would only surface at playtest as "No skill
+// ready." — a vague runtime error far from the cause.
+func init() {
+	for _, def := range core.PartyClasses() {
+		if !core.SkillPlayerCastable(def.Skill) {
+			panic("battle: class " + def.Name + " skill is not PlayerCastable — flip the flag in core/party.go skillDefinitions")
+		}
+		if _, ok := skillActionHandlers[def.Skill]; !ok {
+			panic("battle: class " + def.Name + " skill has no skillActionHandlers entry — register a setup/apply pair")
+		}
+	}
+	for _, s := range core.PlayerCastableSkills() {
+		if _, ok := skillActionHandlers[s]; !ok {
+			panic("battle: PlayerCastable skill " + core.SkillName(s) + " has no skillActionHandlers entry")
+		}
+	}
 }
 
 // setupTargetedEnemy is the shared "must have a live target" check used

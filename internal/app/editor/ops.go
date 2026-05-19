@@ -90,6 +90,7 @@ func applyWallBrush(s *State, x, z int, c byte) {
 		setLayerCell(&s.area.Decor, x, z, core.DecorAuto)
 		s.area.PackSpawns = removePackAt(s.area.PackSpawns, x, z)
 		s.area.ChestSpawns = removeChestSpawnAt(s.area.ChestSpawns, x, z)
+		s.area.DoorSpawns = removeDoorAt(s.area.DoorSpawns, x, z)
 	}
 }
 
@@ -180,6 +181,7 @@ func applyPropBrush(s *State, x, z int, c byte) {
 			setLayerCell(&s.area.Decor, fx, fz, core.DecorAuto)
 			s.area.PackSpawns = removePackAt(s.area.PackSpawns, fx, fz)
 			s.area.ChestSpawns = removeChestSpawnAt(s.area.ChestSpawns, fx, fz)
+			s.area.DoorSpawns = removeDoorAt(s.area.DoorSpawns, fx, fz)
 		}
 		return
 	}
@@ -194,9 +196,10 @@ func applyPropBrush(s *State, x, z int, c byte) {
 	setLayerCell(&s.area.Props, x, z, c)
 	// A prop occupies the floor square; auto-clear any decor on it.
 	setLayerCell(&s.area.Decor, x, z, core.DecorAuto)
-	// And remove a pack / chest that would now be inside the prop.
+	// And remove a pack / chest / door that would now be inside the prop.
 	s.area.PackSpawns = removePackAt(s.area.PackSpawns, x, z)
 	s.area.ChestSpawns = removeChestSpawnAt(s.area.ChestSpawns, x, z)
+	s.area.DoorSpawns = removeDoorAt(s.area.DoorSpawns, x, z)
 }
 
 func applyEntityBrush(s *State, x, z int, kind entityKind) {
@@ -227,7 +230,96 @@ func applyEntityBrush(s *State, x, z int, kind entityKind) {
 		addPackMember(s, x, z, brush.EnemyKind)
 	case entityPlaceChest:
 		placeChestAt(s, x, z)
+	case entityPlaceDoor:
+		placeDoorAt(s, x, z)
 	}
+}
+
+// placeDoorAt drops a door at (x,z) with a placeholder name and a
+// "self" target. The author renames it / sets the target in the
+// modalDoorEdit modal opened by clicking the door. Like chests, doors
+// can't share a tile with a pack (the runtime would race the
+// transition trigger and the encounter start).
+func placeDoorAt(s *State, x, z int) {
+	if s.area.StartTileX == x && s.area.StartTileZ == z {
+		s.flash("Cell holds the player start")
+		return
+	}
+	if s.area.Walls[z][x] == core.TileRock {
+		s.flash("Door needs an open cell (remove the wall first)")
+		return
+	}
+	if core.IsPropChar(s.area.Props[z][x]) {
+		s.flash("Cell already holds a prop — clear it first")
+		return
+	}
+	if s.area.Floor[z][x] == core.FloorDeepWater {
+		s.flash("Door can't sit on deep water")
+		return
+	}
+	if packIndexAt(s.area.PackSpawns, x, z) >= 0 {
+		s.flash("Cell already holds a pack — clear it first")
+		return
+	}
+	if chestSpawnIndexAt(s.area.ChestSpawns, x, z) >= 0 {
+		s.flash("Cell already holds a chest — clear it first")
+		return
+	}
+	if doorSpawnIndexAt(s.area.DoorSpawns, x, z) >= 0 {
+		s.flash("Cell already holds a door")
+		return
+	}
+	name := nextDoorName(s.area.DoorSpawns)
+	s.area.DoorSpawns = append(s.area.DoorSpawns, core.DoorSpawn{
+		TileX:      x,
+		TileZ:      z,
+		Name:       name,
+		TargetMap:  "self",
+		TargetDoor: name,
+		Facing:     s.area.StartFacing,
+	})
+	s.dirty = true
+}
+
+// doorSpawnIndexAt returns the index of the door at (x, z), or -1
+// when none. Mirrors chestSpawnIndexAt.
+func doorSpawnIndexAt(spawns []core.DoorSpawn, x, z int) int {
+	for i, sp := range spawns {
+		if sp.TileX == x && sp.TileZ == z {
+			return i
+		}
+	}
+	return -1
+}
+
+// nextDoorName picks an unused placeholder name for a freshly-placed
+// door. "door_1", "door_2", … — the author renames in the modal. The
+// name needs to be unique within the map so runtime resolution by
+// name is unambiguous.
+func nextDoorName(spawns []core.DoorSpawn) string {
+	taken := make(map[string]struct{}, len(spawns))
+	for _, sp := range spawns {
+		taken[sp.Name] = struct{}{}
+	}
+	for i := 1; ; i++ {
+		name := fmt.Sprintf("door_%d", i)
+		if _, dup := taken[name]; !dup {
+			return name
+		}
+	}
+}
+
+// removeDoorAt drops the door at (x, z) from spawns (if any),
+// returning a fresh slice. Used by the entity-brush right-click clear.
+func removeDoorAt(spawns []core.DoorSpawn, x, z int) []core.DoorSpawn {
+	out := make([]core.DoorSpawn, 0, len(spawns))
+	for _, sp := range spawns {
+		if sp.TileX == x && sp.TileZ == z {
+			continue
+		}
+		out = append(out, sp)
+	}
+	return out
 }
 
 // placeChestAt drops a chest with the default starter loot at (x,z). If
@@ -348,7 +440,9 @@ func eraseAt(s *State, x, z int) {
 		s.area.PackSpawns = removePackAt(s.area.PackSpawns, x, z)
 		chestsBefore := len(s.area.ChestSpawns)
 		s.area.ChestSpawns = removeChestSpawnAt(s.area.ChestSpawns, x, z)
-		if len(s.area.PackSpawns) == packsBefore && len(s.area.ChestSpawns) == chestsBefore {
+		doorsBefore := len(s.area.DoorSpawns)
+		s.area.DoorSpawns = removeDoorAt(s.area.DoorSpawns, x, z)
+		if len(s.area.PackSpawns) == packsBefore && len(s.area.ChestSpawns) == chestsBefore && len(s.area.DoorSpawns) == doorsBefore {
 			return
 		}
 	}
@@ -514,6 +608,15 @@ func areasEqual(a, b core.AreaDefinition) bool {
 			}
 		}
 	}
+	if len(a.DoorSpawns) != len(b.DoorSpawns) {
+		return false
+	}
+	for i := range a.DoorSpawns {
+		da, db := a.DoorSpawns[i], b.DoorSpawns[i]
+		if da != db {
+			return false
+		}
+	}
 	return true
 }
 
@@ -552,6 +655,7 @@ func cloneArea(a core.AreaDefinition) core.AreaDefinition {
 			Items: append([]core.ItemKind(nil), sp.Items...),
 		}
 	}
+	out.DoorSpawns = append([]core.DoorSpawn(nil), a.DoorSpawns...)
 	return out
 }
 

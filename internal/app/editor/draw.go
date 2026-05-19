@@ -796,6 +796,30 @@ func drawGrid(s *State, font rl.Font) {
 			1, fadeAlpha(rl.NewColor(0, 0, 0, 220), entityAlpha))
 	}
 
+	// Door markers — a tall thin rectangle in the warm wood tone, with a
+	// small arrowhead indicating the post-transition facing so the
+	// author can verify pairing at a glance. Distinct silhouette from
+	// chests (door = tall + arrow, chest = small square + lid).
+	for _, d := range s.area.DoorSpawns {
+		gx := s.rect.gridX + float32(d.TileX)*cell
+		gy := s.rect.gridY + float32(d.TileZ)*cell
+		insetX := cell * 0.30
+		insetY := cell * 0.12
+		rl.DrawRectangleRec(
+			rl.NewRectangle(gx+insetX, gy+insetY, cell-2*insetX, cell-2*insetY),
+			fadeAlpha(rl.NewColor(176, 132, 86, 255), entityAlpha))
+		rl.DrawRectangleLinesEx(
+			rl.NewRectangle(gx+insetX, gy+insetY, cell-2*insetX, cell-2*insetY),
+			1, fadeAlpha(rl.NewColor(20, 14, 0, 220), entityAlpha))
+		// Facing arrow inside the door rectangle.
+		cx := gx + cell*0.5
+		cy := gy + cell*0.5
+		dx, dz := core.FacingVector(d.Facing)
+		tipX := cx + float32(dx)*cell*0.28
+		tipY := cy + float32(dz)*cell*0.28
+		rl.DrawLineEx(rl.NewVector2(cx, cy), rl.NewVector2(tipX, tipY), 2, fadeAlpha(rl.NewColor(40, 24, 12, 255), entityAlpha))
+	}
+
 	// Player start marker.
 	sx := s.rect.gridX + (float32(s.area.StartTileX)+0.5)*cell
 	sy := s.rect.gridY + (float32(s.area.StartTileZ)+0.5)*cell
