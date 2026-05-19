@@ -378,14 +378,15 @@ func makePlankPixels(w, h int) []color.RGBA {
 // FBM ripples and a few brighter highlight peaks. No animation — but the
 // gentle banded shimmer reads as still water catching ambient light. Sits
 // at the same Y as floor cubes (slightly recessed) so the player walks
-// through, not over.
+// through, not over. Palette is intentionally light/airy so the tile
+// reads as wadeable next to the darker FloorDeepWater variant.
 func makeWaterPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	deep := color.RGBA{R: 32, G: 64, B: 96, A: 255}
-	mid := color.RGBA{R: 70, G: 124, B: 168, A: 255}
-	shine := color.RGBA{R: 200, G: 230, B: 244, A: 255}
-	sand := color.RGBA{R: 178, G: 158, B: 108, A: 255}
-	weed := color.RGBA{R: 52, G: 96, B: 72, A: 255}
+	deep := color.RGBA{R: 96, G: 158, B: 196, A: 255}
+	mid := color.RGBA{R: 140, G: 198, B: 226, A: 255}
+	shine := color.RGBA{R: 232, G: 246, B: 252, A: 255}
+	sand := color.RGBA{R: 210, G: 188, B: 138, A: 255}
+	weed := color.RGBA{R: 80, G: 140, B: 96, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
@@ -406,6 +407,37 @@ func makeWaterPixels(w, h int) []color.RGBA {
 			// Rare strands of weed for life.
 			if hash2(x/2, y*3)%560 < 4 {
 				c = core.MixColor(c, weed, 0.45)
+			}
+			pixels[y*w+x] = c
+		}
+	}
+	return pixels
+}
+
+// makeDeepWaterPixels paints the blocking deep-water variant: same banded
+// shimmer shape as makeWaterPixels but a noticeably darker, cooler palette
+// and no sandy bottom hint (the floor below isn't visible at depth). The
+// contrast against shallow water is the visual cue that this tile can't
+// be waded into — see FloorDeepWater in core/map.go.
+func makeDeepWaterPixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	deep := color.RGBA{R: 14, G: 30, B: 58, A: 255}
+	mid := color.RGBA{R: 32, G: 64, B: 104, A: 255}
+	shine := color.RGBA{R: 120, G: 156, B: 196, A: 255}
+	weed := color.RGBA{R: 36, G: 70, B: 56, A: 255}
+
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			n := fbmNoise(float64(x), float64(y), 0.04, 4)
+			band := math.Sin(float64(y)*0.08 + n*1.8)
+			c := core.MixColor(deep, mid, 0.45+band*0.35+n*0.20)
+
+			peak := fbmNoise(float64(x)*1.3+311, float64(y)*1.3-91, 0.10, 3)
+			if peak > 0.62 {
+				c = core.MixColor(c, shine, (peak-0.62)*0.9)
+			}
+			if hash2(x/2, y*3)%620 < 3 {
+				c = core.MixColor(c, weed, 0.40)
 			}
 			pixels[y*w+x] = c
 		}
@@ -879,6 +911,335 @@ func makeBatPixels(w, h int) []color.RGBA {
 
 	// Subtle per-pixel darkening across the whole sprite for the same
 	// pixel-art texture feel as the rat.
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			i := y*w + x
+			if pixels[i].A == 0 {
+				continue
+			}
+			if hash2(x, y)%9 == 0 {
+				pixels[i] = adjust(pixels[i], -10)
+			}
+		}
+	}
+	return pixels
+}
+
+// makeGoblinPixels paints a stocky humanoid goblin: pot-bellied green body,
+// loincloth, club gripped in one hand, two pointed ears and yellow eyes.
+// Sized for 72×112 in loadEnemyVisuals so the silhouette reads as "taller
+// than a rat, shorter than a goblin mage."
+func makeGoblinPixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	skin := color.RGBA{R: 108, G: 156, B: 80, A: 255}
+	skinDark := color.RGBA{R: 72, G: 116, B: 56, A: 255}
+	skinLight := color.RGBA{R: 138, G: 184, B: 102, A: 255}
+	cloth := color.RGBA{R: 132, G: 86, B: 58, A: 255}
+	clothDark := color.RGBA{R: 92, G: 60, B: 42, A: 255}
+	wood := color.RGBA{R: 118, G: 84, B: 52, A: 255}
+	woodDark := color.RGBA{R: 80, G: 56, B: 36, A: 255}
+	eye := color.RGBA{R: 232, G: 196, B: 80, A: 255}
+	pupil := color.RGBA{R: 18, G: 16, B: 12, A: 255}
+	tooth := color.RGBA{R: 232, G: 224, B: 200, A: 255}
+
+	cx := w / 2
+
+	// Ground shadow.
+	fillEllipsePixels(pixels, w, h, cx, h-6, 22, 4, color.RGBA{R: 0, G: 0, B: 0, A: 80})
+
+	// Legs — two stubby pillars.
+	fillRectPixels(pixels, w, h, cx-12, 78, 8, 22, skinDark)
+	fillRectPixels(pixels, w, h, cx+4, 78, 8, 22, skinDark)
+	// Feet — wide flat oval pads.
+	fillEllipsePixels(pixels, w, h, cx-8, 100, 7, 3, clothDark)
+	fillEllipsePixels(pixels, w, h, cx+8, 100, 7, 3, clothDark)
+
+	// Loincloth.
+	fillRectPixels(pixels, w, h, cx-14, 72, 28, 14, cloth)
+	fillTrianglePixels(pixels, w, h, cx-14, 86, cx-4, 86, cx-10, 94, cloth)
+	fillTrianglePixels(pixels, w, h, cx+14, 86, cx+4, 86, cx+10, 94, cloth)
+	fillRectPixels(pixels, w, h, cx-14, 72, 28, 3, clothDark)
+
+	// Body — pot belly. Bigger lower ellipse + smaller chest above.
+	fillEllipsePixels(pixels, w, h, cx, 64, 19, 14, skin)
+	fillEllipsePixels(pixels, w, h, cx-4, 60, 14, 8, skinLight)
+	fillEllipsePixels(pixels, w, h, cx, 70, 18, 8, skinDark)
+
+	// Arms — left hangs free, right grips the club.
+	fillEllipsePixels(pixels, w, h, cx-22, 60, 5, 14, skin)
+	fillEllipsePixels(pixels, w, h, cx-22, 74, 4, 4, skin) // hand
+	fillEllipsePixels(pixels, w, h, cx+22, 56, 5, 12, skin)
+	fillEllipsePixels(pixels, w, h, cx+22, 68, 4, 4, skin) // grip hand
+
+	// Club — diagonal along the right side. Shaft + knob.
+	drawLinePixels(pixels, w, h, cx+22, 68, cx+30, 30, wood, 4)
+	fillEllipsePixels(pixels, w, h, cx+30, 28, 6, 7, wood)
+	fillEllipsePixels(pixels, w, h, cx+28, 26, 2, 2, woodDark) // shading peg
+	fillEllipsePixels(pixels, w, h, cx+32, 30, 2, 2, woodDark)
+
+	// Head — wider than tall, blunt jaw.
+	fillEllipsePixels(pixels, w, h, cx, 40, 14, 13, skin)
+	fillEllipsePixels(pixels, w, h, cx-3, 36, 10, 7, skinLight)
+	// Ears — pointed cones jutting outward.
+	fillTrianglePixels(pixels, w, h, cx-14, 38, cx-22, 32, cx-12, 42, skin)
+	fillTrianglePixels(pixels, w, h, cx+14, 38, cx+22, 32, cx+12, 42, skin)
+	fillTrianglePixels(pixels, w, h, cx-14, 38, cx-19, 34, cx-12, 42, skinDark)
+	fillTrianglePixels(pixels, w, h, cx+14, 38, cx+19, 34, cx+12, 42, skinDark)
+	// Eyes — yellow with dark pupils.
+	fillEllipsePixels(pixels, w, h, cx-5, 39, 3, 2, eye)
+	fillEllipsePixels(pixels, w, h, cx+5, 39, 3, 2, eye)
+	fillEllipsePixels(pixels, w, h, cx-5, 39, 1, 1, pupil)
+	fillEllipsePixels(pixels, w, h, cx+5, 39, 1, 1, pupil)
+	// Nose — small dark bump.
+	fillEllipsePixels(pixels, w, h, cx, 44, 2, 2, skinDark)
+	// Mouth with one fang.
+	drawLinePixels(pixels, w, h, cx-4, 49, cx+4, 49, skinDark, 1)
+	fillTrianglePixels(pixels, w, h, cx-2, 49, cx, 53, cx+1, 49, tooth)
+
+	// Per-pixel texture dither to match the rat/bat surface feel.
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			i := y*w + x
+			if pixels[i].A == 0 {
+				continue
+			}
+			if hash2(x, y)%8 == 0 {
+				pixels[i] = adjust(pixels[i], -10)
+			}
+		}
+	}
+	return pixels
+}
+
+// makeGoblinMagePixels paints a robed goblin caster: hooded purple robe,
+// glowing staff, sharper greener face peeking out from the hood. Same
+// body class as the goblin but the robe + staff sell "magic user."
+func makeGoblinMagePixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	skin := color.RGBA{R: 96, G: 148, B: 76, A: 255}
+	skinDark := color.RGBA{R: 60, G: 102, B: 48, A: 255}
+	robe := color.RGBA{R: 96, G: 70, B: 138, A: 255}
+	robeDark := color.RGBA{R: 60, G: 44, B: 96, A: 255}
+	robeLight := color.RGBA{R: 142, G: 112, B: 180, A: 255}
+	gold := color.RGBA{R: 226, G: 192, B: 96, A: 255}
+	staffWood := color.RGBA{R: 110, G: 78, B: 50, A: 255}
+	staffDark := color.RGBA{R: 72, G: 52, B: 36, A: 255}
+	gem := color.RGBA{R: 196, G: 136, B: 232, A: 255}
+	gemBright := color.RGBA{R: 248, G: 220, B: 252, A: 255}
+	eye := color.RGBA{R: 240, G: 232, B: 152, A: 255}
+	pupil := color.RGBA{R: 14, G: 14, B: 12, A: 255}
+
+	cx := w / 2
+
+	fillEllipsePixels(pixels, w, h, cx, h-6, 24, 4, color.RGBA{R: 0, G: 0, B: 0, A: 80})
+
+	// Robe — broad triangular skirt from shoulders to feet.
+	fillTrianglePixels(pixels, w, h, cx-26, 102, cx+26, 102, cx, 44, robe)
+	fillTrianglePixels(pixels, w, h, cx-22, 100, cx+22, 100, cx, 52, robeDark)
+	fillRectPixels(pixels, w, h, cx-26, 100, 52, 4, robeDark)
+	// Gold trim along the bottom hem.
+	fillRectPixels(pixels, w, h, cx-26, 96, 52, 2, gold)
+
+	// Sleeves drooping at sides.
+	fillTrianglePixels(pixels, w, h, cx-20, 60, cx-28, 84, cx-10, 80, robe)
+	fillTrianglePixels(pixels, w, h, cx+20, 60, cx+28, 84, cx+10, 80, robe)
+	fillTrianglePixels(pixels, w, h, cx-20, 62, cx-26, 80, cx-12, 78, robeLight)
+	fillTrianglePixels(pixels, w, h, cx+20, 62, cx+26, 80, cx+12, 78, robeLight)
+	// Hands poking out of the sleeves.
+	fillEllipsePixels(pixels, w, h, cx-22, 84, 4, 4, skin)
+	fillEllipsePixels(pixels, w, h, cx+22, 84, 4, 4, skin)
+
+	// Staff — diagonal across the right side, gem floating at the top.
+	drawLinePixels(pixels, w, h, cx+22, 84, cx+30, 22, staffWood, 3)
+	drawLinePixels(pixels, w, h, cx+22, 84, cx+30, 22, staffDark, 1)
+	fillEllipsePixels(pixels, w, h, cx+30, 20, 5, 6, gem)
+	fillEllipsePixels(pixels, w, h, cx+30, 19, 2, 2, gemBright)
+	// Faint glow ring.
+	fillEllipsePixels(pixels, w, h, cx+30, 20, 8, 9, color.RGBA{R: 196, G: 136, B: 232, A: 40})
+
+	// Hood — covers the head, leaving only a small face hole. Dark robe-
+	// color outer shell with a lighter inner shadow.
+	fillTrianglePixels(pixels, w, h, cx-14, 60, cx+14, 60, cx, 28, robe)
+	fillEllipsePixels(pixels, w, h, cx, 46, 14, 12, robeDark)
+	// Face peek — small ellipse of skin inside the hood.
+	fillEllipsePixels(pixels, w, h, cx, 46, 8, 7, skin)
+	fillEllipsePixels(pixels, w, h, cx-2, 44, 5, 4, color.RGBA{R: 128, G: 178, B: 96, A: 255})
+
+	// Glowing yellow eyes deep in the hood.
+	fillEllipsePixels(pixels, w, h, cx-3, 46, 2, 2, eye)
+	fillEllipsePixels(pixels, w, h, cx+3, 46, 2, 2, eye)
+	fillEllipsePixels(pixels, w, h, cx-3, 46, 1, 1, pupil)
+	fillEllipsePixels(pixels, w, h, cx+3, 46, 1, 1, pupil)
+	// Nose tip + thin mouth.
+	fillEllipsePixels(pixels, w, h, cx, 50, 1, 1, skinDark)
+	drawLinePixels(pixels, w, h, cx-3, 53, cx+3, 53, skinDark, 1)
+
+	// Hood gold rim.
+	drawLinePixels(pixels, w, h, cx-14, 58, cx+14, 58, gold, 1)
+
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			i := y*w + x
+			if pixels[i].A == 0 {
+				continue
+			}
+			if hash2(x, y)%9 == 0 {
+				pixels[i] = adjust(pixels[i], -10)
+			}
+		}
+	}
+	return pixels
+}
+
+// makeAmoebaPixels paints a squat translucent-looking blob: an outer
+// gel-edge halo, a brighter inner core, a darker nucleus, and a few
+// floating specks suggesting absorbed mineral grit. Reads as a tank
+// (squashed silhouette, dense core) rather than as a jellyfish.
+func makeAmoebaPixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	outer := color.RGBA{R: 152, G: 178, B: 200, A: 180}
+	mid := color.RGBA{R: 170, G: 196, B: 216, A: 220}
+	core := color.RGBA{R: 196, G: 218, B: 232, A: 240}
+	nucleus := color.RGBA{R: 86, G: 102, B: 124, A: 240}
+	nucleusDark := color.RGBA{R: 54, G: 68, B: 92, A: 240}
+	highlight := color.RGBA{R: 240, G: 248, B: 252, A: 230}
+	grit := color.RGBA{R: 100, G: 92, B: 82, A: 240}
+
+	cx := w / 2
+	cy := h / 2
+
+	// Ground shadow.
+	fillEllipsePixels(pixels, w, h, cx, h-8, 28, 5, color.RGBA{R: 0, G: 0, B: 0, A: 95})
+
+	// Gel halo — three nested squashed ellipses.
+	fillEllipsePixels(pixels, w, h, cx, cy+4, 36, 22, outer)
+	fillEllipsePixels(pixels, w, h, cx-2, cy+3, 30, 18, mid)
+	fillEllipsePixels(pixels, w, h, cx-3, cy+2, 22, 14, core)
+
+	// A few amoeba pseudopod bulges — small ellipses pushing out the
+	// silhouette.
+	fillEllipsePixels(pixels, w, h, cx-30, cy+8, 6, 4, mid)
+	fillEllipsePixels(pixels, w, h, cx+28, cy-4, 7, 5, mid)
+	fillEllipsePixels(pixels, w, h, cx+12, cy+14, 6, 4, mid)
+
+	// Nucleus — dense darker center with one bright specular dot.
+	fillEllipsePixels(pixels, w, h, cx-2, cy+2, 9, 7, nucleus)
+	fillEllipsePixels(pixels, w, h, cx-4, cy, 4, 3, nucleusDark)
+	fillEllipsePixels(pixels, w, h, cx-6, cy-2, 2, 1, highlight)
+
+	// Floating grit — single-pixel dark specks inside the gel.
+	fillRectPixels(pixels, w, h, cx+8, cy-2, 1, 1, grit)
+	fillRectPixels(pixels, w, h, cx-12, cy+8, 1, 1, grit)
+	fillRectPixels(pixels, w, h, cx+14, cy+8, 1, 1, grit)
+	fillRectPixels(pixels, w, h, cx-18, cy-6, 1, 1, grit)
+	fillRectPixels(pixels, w, h, cx+20, cy+4, 1, 1, grit)
+
+	// Top-edge specular highlight — a thin curved bright strip so the
+	// blob reads as wet.
+	for ox := -16; ox <= 16; ox++ {
+		x := cx - 2 + ox
+		y := cy - 14 + int(math.Abs(float64(ox))/4)
+		if x >= 0 && x < w && y >= 0 && y < h {
+			pixels[y*w+x] = highlight
+		}
+	}
+
+	// Subtle dither (slightly less than other sprites — the amoeba reads
+	// smoother than a hairy rat).
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			i := y*w + x
+			if pixels[i].A == 0 {
+				continue
+			}
+			if hash2(x, y)%12 == 0 {
+				pixels[i] = adjust(pixels[i], -8)
+			}
+		}
+	}
+	return pixels
+}
+
+// makeVenusMantrapPixels paints a Venus-flytrap-on-a-stem: a thick green
+// stalk rising from a leafy base, two pink toothed jaws flaring open at
+// the top, and the dim suggestion of a tongue / interior. The silhouette
+// is intentionally top-heavy so the "this thing could eat you" read is
+// instant — Ingest is its signature, and the sprite needs to sell it.
+func makeVenusMantrapPixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	stem := color.RGBA{R: 86, G: 132, B: 70, A: 255}
+	stemDark := color.RGBA{R: 60, G: 96, B: 50, A: 255}
+	stemLight := color.RGBA{R: 116, G: 168, B: 90, A: 255}
+	leaf := color.RGBA{R: 70, G: 116, B: 60, A: 255}
+	leafDark := color.RGBA{R: 48, G: 86, B: 44, A: 255}
+	jawOuter := color.RGBA{R: 112, G: 168, B: 92, A: 255}
+	jawInner := color.RGBA{R: 196, G: 90, B: 124, A: 255}
+	jawDeep := color.RGBA{R: 132, G: 44, B: 70, A: 255}
+	maw := color.RGBA{R: 60, G: 18, B: 30, A: 255}
+	tooth := color.RGBA{R: 252, G: 246, B: 230, A: 255}
+	eye := color.RGBA{R: 252, G: 220, B: 88, A: 255}
+	pupil := color.RGBA{R: 14, G: 12, B: 10, A: 255}
+
+	cx := w / 2
+
+	// Ground shadow.
+	fillEllipsePixels(pixels, w, h, cx, h-6, 26, 4, color.RGBA{R: 0, G: 0, B: 0, A: 90})
+
+	// Leafy base — three overlapping flat ellipses fanning out at floor level.
+	fillEllipsePixels(pixels, w, h, cx, h-12, 26, 9, leafDark)
+	fillEllipsePixels(pixels, w, h, cx-12, h-14, 14, 7, leaf)
+	fillEllipsePixels(pixels, w, h, cx+12, h-14, 14, 7, leaf)
+	fillEllipsePixels(pixels, w, h, cx, h-18, 10, 5, stemLight)
+
+	// Stem — thick vertical stalk with a small bend.
+	drawLinePixels(pixels, w, h, cx, h-20, cx-4, 60, stem, 9)
+	drawLinePixels(pixels, w, h, cx, h-20, cx-4, 60, stemDark, 3)
+	// Two small leaf nodes coming off the stem.
+	fillEllipsePixels(pixels, w, h, cx-10, 80, 6, 3, leaf)
+	fillEllipsePixels(pixels, w, h, cx+8, 70, 5, 3, leaf)
+	drawLinePixels(pixels, w, h, cx-4, 82, cx-14, 80, stem, 2)
+	drawLinePixels(pixels, w, h, cx-2, 72, cx+10, 70, stem, 2)
+
+	// Bulbous trap base — the green cup the jaws hinge from.
+	fillEllipsePixels(pixels, w, h, cx-4, 56, 12, 7, jawOuter)
+	fillEllipsePixels(pixels, w, h, cx-4, 58, 10, 5, stemDark)
+
+	// Upper jaw — broad open clamshell pointing up-left, hinged at the cup.
+	upperApex := [2]int{cx - 20, 26}
+	upperHinge := [2]int{cx - 4, 52}
+	upperFront := [2]int{cx + 4, 38}
+	fillTrianglePixels(pixels, w, h, upperApex[0], upperApex[1], upperHinge[0], upperHinge[1], upperFront[0], upperFront[1], jawOuter)
+	// Inner pink lining.
+	fillTrianglePixels(pixels, w, h, upperApex[0]+3, upperApex[1]+5, upperHinge[0]+1, upperHinge[1]-2, upperFront[0]-2, upperFront[1]-2, jawInner)
+	// Deep red mouth shadow.
+	fillTrianglePixels(pixels, w, h, upperApex[0]+8, upperApex[1]+10, upperHinge[0]+3, upperHinge[1]-4, upperFront[0]-4, upperFront[1]-4, jawDeep)
+
+	// Lower jaw — mirror, opening down-right.
+	lowerApex := [2]int{cx + 22, 30}
+	lowerHinge := [2]int{cx - 2, 52}
+	lowerFront := [2]int{cx - 6, 42}
+	fillTrianglePixels(pixels, w, h, lowerApex[0], lowerApex[1], lowerHinge[0], lowerHinge[1], lowerFront[0], lowerFront[1], jawOuter)
+	fillTrianglePixels(pixels, w, h, lowerApex[0]-3, lowerApex[1]+4, lowerHinge[0]-1, lowerHinge[1]-2, lowerFront[0]+2, lowerFront[1]-2, jawInner)
+
+	// Throat / maw — dark hole behind the jaws.
+	fillEllipsePixels(pixels, w, h, cx-2, 44, 6, 7, maw)
+
+	// Teeth — small white triangles along the outer edges of both jaws.
+	for i := 0; i < 5; i++ {
+		t := float64(i+1) / 6.0
+		ux := upperApex[0] + int(float64(upperFront[0]-upperApex[0])*t)
+		uy := upperApex[1] + int(float64(upperFront[1]-upperApex[1])*t)
+		fillTrianglePixels(pixels, w, h, ux, uy, ux+2, uy+4, ux-2, uy+4, tooth)
+		lx := lowerApex[0] + int(float64(lowerFront[0]-lowerApex[0])*t)
+		ly := lowerApex[1] + int(float64(lowerFront[1]-lowerApex[1])*t)
+		fillTrianglePixels(pixels, w, h, lx, ly, lx-2, ly-4, lx+2, ly-4, tooth)
+	}
+
+	// One predatory yellow eye nestled at the back of the maw.
+	fillEllipsePixels(pixels, w, h, cx-2, 46, 3, 3, eye)
+	fillEllipsePixels(pixels, w, h, cx-2, 46, 1, 1, pupil)
+
+	// Per-pixel dither to match the rest of the bestiary.
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			i := y*w + x

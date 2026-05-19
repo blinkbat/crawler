@@ -115,6 +115,9 @@ func minimapTileColor(material core.MaterialSet, tile byte) color.RGBA {
 		}
 		return rl.NewColor(112, 112, 106, 235)
 	}
+	if tile == core.FloorDeepWater {
+		return rl.NewColor(28, 60, 104, 235)
+	}
 	if col, ok := minimapPropColors[tile]; ok {
 		return col
 	}

@@ -20,6 +20,121 @@ func PartyMemberAlive(party []PartyMember, index int) bool {
 	return index >= 0 && index < len(party) && party[index].HP > 0
 }
 
+// PartyMemberAvailable reports whether the member at index can act / be
+// targeted this turn — alive AND not currently ingested by a mantrap.
+// Ingested members are alive (their HP is preserved while inside the
+// plant) but they're functionally out of the fight, so every "is this
+// slot a valid actor / target?" predicate routes through this helper
+// rather than the bare HP>0 check.
+func PartyMemberAvailable(party []PartyMember, index int) bool {
+	if !PartyMemberAlive(party, index) {
+		return false
+	}
+	return !party[index].Ingested
+}
+
+// ActivePartyCount counts party members who can still act this turn —
+// alive AND not ingested. Drives the loss check: when the count falls to
+// zero, the encounter ends (a party that's all ingested has nobody to
+// continue the fight, same effect as a wipe).
+func ActivePartyCount(party []PartyMember) int {
+	count := 0
+	for i := range party {
+		if PartyMemberAvailable(party, i) {
+			count++
+		}
+	}
+	return count
+}
+
+// WrapNextAvailablePartyMember walks the party forward from `start`,
+// wrapping to index 0 once it falls off the end, and returns the first
+// available (alive + not ingested) slot. Returns -1 when nobody is
+// available. Used by the enemy attack cursor so a swallowed prey
+// doesn't get bitten on top of the lockout.
+func WrapNextAvailablePartyMember(party []PartyMember, start int) int {
+	if len(party) == 0 {
+		return -1
+	}
+	start = WrapIndex(start, len(party))
+	for offset := 0; offset < len(party); offset++ {
+		i := WrapIndex(start+offset, len(party))
+		if PartyMemberAvailable(party, i) {
+			return i
+		}
+	}
+	return -1
+}
+
+// AvailablePartyTargets returns the indices of every member who can be
+// chosen as a heal/item target this turn. Mirrors LivingPartyTargets
+// but excludes ingested members; both target cyclers (heal skill, item
+// use) route through this so a Cleric can't waste a Prayer trying to
+// reach the prey inside a mantrap.
+func AvailablePartyTargets(party []PartyMember) []int {
+	targets := make([]int, 0, len(party))
+	for i := range party {
+		if PartyMemberAvailable(party, i) {
+			targets = append(targets, i)
+		}
+	}
+	return targets
+}
+
+// FirstAvailablePartyMember is the alive-and-not-ingested companion to
+// FirstLivingPartyMember. Used as the fallback when an enemy spell needs
+// a usable target (Ingest, Sleep) but the picker's preferred index was
+// already out of reach.
+func FirstAvailablePartyMember(party []PartyMember) int {
+	for i := range party {
+		if PartyMemberAvailable(party, i) {
+			return i
+		}
+	}
+	return -1
+}
+
+// MantrapHasPrey reports whether any party member is currently being
+// digested by the active-pack member at `slot`. Used by the mantrap AI
+// to gate SkillIngest — a plant with prey can't snatch another.
+func MantrapHasPrey(party []PartyMember, slot int) bool {
+	for _, m := range party {
+		if m.Ingested && m.IngestedBy == slot {
+			return true
+		}
+	}
+	return false
+}
+
+// ReleaseIngestedBy frees every party member currently held by the
+// active-pack slot. Called from damageEnemy on the killing blow and
+// from clearBattleResidual on any battle exit. Returns the indices of
+// the members that were freed so the caller can log "X breaks free."
+func ReleaseIngestedBy(party []PartyMember, slot int) []int {
+	var freed []int
+	for i := range party {
+		if party[i].Ingested && party[i].IngestedBy == slot {
+			party[i].Ingested = false
+			party[i].IngestedBy = 0
+			freed = append(freed, i)
+		}
+	}
+	return freed
+}
+
+// ReleaseAllIngested frees every ingested party member regardless of
+// swallower. Called on battle exit so a desynced encounter (forced
+// recovery, F5 playtest restart) doesn't leak the lockout into the
+// next session.
+func ReleaseAllIngested(party []PartyMember) {
+	for i := range party {
+		if party[i].Ingested {
+			party[i].Ingested = false
+			party[i].IngestedBy = 0
+		}
+	}
+}
+
 func FirstLivingPartyMember(party []PartyMember) int {
 	return NextLivingPartyMember(party, 0)
 }

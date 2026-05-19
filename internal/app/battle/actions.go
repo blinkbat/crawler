@@ -427,6 +427,12 @@ func damageEnemy(g *core.GameState, slot, rawDamage, quality int, tag core.Skill
 	enemy.SleepTurns = 0
 	enemy.DeathFade = core.DeathFadeDuration
 	audio.Play(audio.SoundEnemyDeath)
+	// If this enemy was holding party members ingested, release them now
+	// so they re-enter the turn queue on the next round. Logged per-member
+	// since freeing a prisoner is meaningful information for the player.
+	for _, idx := range core.ReleaseIngestedBy(g.Party, slot) {
+		setBattleMessage(g, fmt.Sprintf("%s tumbles free.", g.Party[idx].Name))
+	}
 	return true
 }
 
@@ -503,6 +509,13 @@ func healPartyMember(g *core.GameState, partyIndex, amount int) bool {
 	if member.HP <= 0 {
 		return false
 	}
+	// Sealed inside a mantrap — heal can't reach. Targeting cyclers
+	// (AvailablePartyTargets) already prevent the player from picking
+	// an ingested ally; this guards apply-time edge cases (item used
+	// via a future macro, etc.).
+	if member.Ingested {
+		return false
+	}
 	member.HP += amount
 	if member.HP > member.MaxHP {
 		member.HP = member.MaxHP
@@ -524,6 +537,13 @@ func damagePartyMember(g *core.GameState, partyIndex, rawAmount int, tag core.Sk
 	}
 	member := &g.Party[partyIndex]
 	if member.HP <= 0 {
+		return false
+	}
+	// Ingested prey is sealed off — no damage reaches them while inside
+	// the mantrap. Defense in depth: pickEnemyAttackTarget already routes
+	// around ingested members, but any future damage source that picked
+	// by index would otherwise bypass the lockout.
+	if member.Ingested {
 		return false
 	}
 	amount := core.ApplyArmor(rawAmount, tag, member.Armor)
@@ -658,7 +678,7 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 // PartyTarget) so the player's heal/item ally cycling doesn't shift who
 // enemies attack next.
 func pickEnemyAttackTarget(g *core.GameState) int {
-	target := core.WrapNextLivingPartyMember(g.Party, g.Battle.EnemyAttackCursor+1)
+	target := core.WrapNextAvailablePartyMember(g.Party, g.Battle.EnemyAttackCursor+1)
 	if target >= 0 {
 		g.Battle.EnemyAttackCursor = target
 	}

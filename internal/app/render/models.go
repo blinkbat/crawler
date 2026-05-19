@@ -988,6 +988,34 @@ func loadLogProp(shader rl.Shader, barkTex, leafTex rl.Texture2D) propModel {
 	}
 }
 
+// loadLilypadProp builds a flat floating lilypad: a thin wide disc for
+// the pad, a smaller offset disc to suggest a partner leaf, and a tiny
+// pink bloom at the center. Pure decor — sits just above floor level so
+// it reads as floating on water without z-fighting the floor tile.
+func loadLilypadProp(shader rl.Shader) propModel {
+	pad := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.42, 0.015, 16))
+	smallPad := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.22, 0.015, 14))
+	bloom := rl.LoadModelFromMesh(rl.GenMeshSphere(0.06, 8, 8))
+	bud := rl.LoadModelFromMesh(rl.GenMeshSphere(0.035, 6, 8))
+	models := []rl.Model{pad, smallPad, bloom, bud}
+	for i := range models {
+		attachShader(&models[i], shader)
+	}
+	leaf := rl.NewColor(72, 138, 78, 255)
+	leafDark := rl.NewColor(54, 108, 60, 255)
+	flower := rl.NewColor(244, 180, 210, 255)
+	flowerCore := rl.NewColor(252, 240, 168, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 0, offset: rl.NewVector3(0.04, 0.005, 0.02), scale: rl.NewVector3(1, 1, 1), tint: leaf},
+			{modelIdx: 1, offset: rl.NewVector3(-0.22, 0.008, -0.18), scale: rl.NewVector3(1, 1, 1), tint: leafDark},
+			{modelIdx: 2, offset: rl.NewVector3(0.04, 0.032, 0.02), scale: rl.NewVector3(1, 1, 1), tint: flower},
+			{modelIdx: 3, offset: rl.NewVector3(0.04, 0.052, 0.02), scale: rl.NewVector3(1, 1, 1), tint: flowerCore},
+		},
+	}
+}
+
 // loadLeafPileProp builds a low pile of fallen leaves: a flat fat
 // cylinder for the main heap with two smaller domes sitting on top for
 // volume. The leaf texture from the tree model carries the leaf vein

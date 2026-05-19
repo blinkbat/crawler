@@ -37,10 +37,12 @@ const (
 	TileCeilingSolid = '#' // solid ceiling slab at wall height
 )
 
-// Floor layer. Walkable surfaces — never block. Material-keyed variants
-// (grass / dirt / dark grass / stone) read against the material's own
-// floor pixels; universal variants (path / planks / water / sand / snow)
-// load their own textures and apply in any material.
+// Floor layer. Walkable surfaces — material-keyed variants (grass / dirt /
+// dark grass / stone) read against the material's own floor pixels;
+// universal variants (path / planks / water / sand / snow) load their own
+// textures and apply in any material. FloorDeepWater is the sole blocking
+// floor tile: it renders flat (you can see across it) but BlockedAt
+// reports it as impassable, modeling water too deep to wade through.
 const (
 	FloorAuto      = '.' // pick a variant by per-tile hash (back-compat default)
 	FloorGrass     = 'g'
@@ -49,12 +51,13 @@ const (
 	FloorStone     = 's'
 	// Universal floor variants — render the same in any material set so an
 	// author can lay a stone path through a forest or a wooden plank floor
-	// across a cave. None of these block movement.
-	FloorCobble = 'c' // mortared cobblestone path
-	FloorPlank  = 'w' // wooden planks
-	FloorWater  = '~' // shallow water — walkable, just a different look
-	FloorSand   = 'n' // pale sand
-	FloorSnow   = 'i' // packed snow
+	// across a cave. None of these block movement EXCEPT FloorDeepWater.
+	FloorCobble    = 'c' // mortared cobblestone path
+	FloorPlank     = 'w' // wooden planks
+	FloorWater     = '~' // shallow water — walkable, just a different look
+	FloorDeepWater = 'W' // deep water — blocks movement, vision passes over
+	FloorSand      = 'n' // pale sand
+	FloorSnow      = 'i' // packed snow
 )
 
 // Decor layer. '.' means "let the renderer's auto-scatter decide"; '_'
@@ -87,6 +90,11 @@ const (
 	// passes overhead — both tiles stay walkable.
 	DecorArchway     = 'A' // archway anchor (left tile)
 	DecorArchwayTail = 'a' // archway tail   (right tile)
+	// DecorLilypad is the swamp dressing for water tiles — a flat floating
+	// pad with a small bloom. Pure decor (does not block); intended to be
+	// painted on FloorWater / FloorDeepWater for the swamp aesthetic but
+	// works on any floor.
+	DecorLilypad = 'y'
 )
 
 // Props layer. TilePropEmpty marks an open cell; every other char listed
@@ -254,8 +262,8 @@ func (a AreaDefinition) CeilingAt(x, z int) bool {
 
 // TileAt returns a "compositing" character for code that just wants to
 // know what's most-significantly at a cell — walls win over props win
-// over open. Used by the minimap and any callers that haven't switched
-// to explicit per-layer queries yet.
+// over deep water win over open. Used by the minimap and any callers
+// that haven't switched to explicit per-layer queries yet.
 func (a AreaDefinition) TileAt(x, z int) byte {
 	if !a.InBounds(x, z) {
 		return TileRock
@@ -265,6 +273,9 @@ func (a AreaDefinition) TileAt(x, z int) byte {
 	}
 	if p := a.Props[z][x]; IsPropChar(p) {
 		return p
+	}
+	if a.Floor[z][x] == FloorDeepWater {
+		return FloorDeepWater
 	}
 	return TileOpen
 }
@@ -288,7 +299,10 @@ func (a AreaDefinition) BlockedAt(x, z int) bool {
 	if a.Walls[z][x] == TileRock {
 		return true
 	}
-	return IsPropChar(a.Props[z][x])
+	if IsPropChar(a.Props[z][x]) {
+		return true
+	}
+	return a.Floor[z][x] == FloorDeepWater
 }
 
 // ChestTakeAllRow is the synthetic row index that sits one past the
@@ -537,6 +551,8 @@ func TileLabel(layer TileLayer, c byte) string {
 			return "Planks"
 		case FloorWater:
 			return "Water"
+		case FloorDeepWater:
+			return "Deep Water"
 		case FloorSand:
 			return "Sand"
 		case FloorSnow:
@@ -578,6 +594,8 @@ func TileLabel(layer TileLayer, c byte) string {
 			return "Arch (left)"
 		case DecorArchwayTail:
 			return "Arch (right)"
+		case DecorLilypad:
+			return "Lilypad"
 		}
 	case TileLayerProps:
 		switch c {

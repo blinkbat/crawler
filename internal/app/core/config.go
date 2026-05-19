@@ -266,6 +266,14 @@ const (
 	// target, puts a party member to sleep for SleepMin..SleepMaxTurns.
 	// Wakes on any incoming damage. Tagged Magic so it bypasses armor.
 	SkillSleep
+	// SkillIngest is the Venus Mantrap's signature swallow — single
+	// target, removes the party member from combat (skipped in the turn
+	// queue, untargetable by friend or foe) until the mantrap that
+	// swallowed them is defeated. Each mantrap holds at most one
+	// prisoner; a mantrap with prey can still bite-attack but won't
+	// ingest a second target. Tagged Magic so the cast itself bypasses
+	// armor (it doesn't deal damage anyway).
+	SkillIngest
 )
 
 // SkillTag classifies a skill for damage-type interactions (armor,

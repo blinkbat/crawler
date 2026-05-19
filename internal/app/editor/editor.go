@@ -90,7 +90,8 @@ var layerBrushes = [layerCount][]Brush{
 		{Name: "Stone (s)", Char: core.FloorStone, Hotkey: rl.KeyFive, Color: rl.NewColor(150, 148, 142, 255)},
 		{Name: "Cobble (c)", Char: core.FloorCobble, Hotkey: rl.KeySix, Color: rl.NewColor(168, 156, 130, 255)},
 		{Name: "Planks (w)", Char: core.FloorPlank, Hotkey: rl.KeySeven, Color: rl.NewColor(150, 102, 60, 255)},
-		{Name: "Water (~)", Char: core.FloorWater, Hotkey: rl.KeyEight, Color: rl.NewColor(86, 142, 196, 255)},
+		{Name: "Water (~)", Char: core.FloorWater, Hotkey: rl.KeyEight, Color: rl.NewColor(150, 204, 232, 255)},
+		{Name: "Deep water (W)", Char: core.FloorDeepWater, Color: rl.NewColor(30, 60, 102, 255)},
 		{Name: "Sand (n)", Char: core.FloorSand, Hotkey: rl.KeyNine, Color: rl.NewColor(228, 206, 158, 255)},
 		{Name: "Snow (i)", Char: core.FloorSnow, Color: rl.NewColor(232, 240, 248, 255)},
 	},
@@ -113,6 +114,7 @@ var layerBrushes = [layerCount][]Brush{
 		{Name: "Leaf pile (L)", Char: core.DecorLeafPile, Color: rl.NewColor(196, 142, 80, 255)},
 		{Name: "Arch left (A)", Char: core.DecorArchway, Color: rl.NewColor(204, 196, 174, 255)},
 		{Name: "Arch right (a)", Char: core.DecorArchwayTail, Color: rl.NewColor(184, 176, 154, 255)},
+		{Name: "Lilypad (y)", Char: core.DecorLilypad, Color: rl.NewColor(96, 168, 100, 255)},
 	},
 	LayerProps: {
 		{Name: "None (erase)", Char: core.TilePropEmpty, Hotkey: rl.KeyOne, Color: rl.NewColor(60, 64, 70, 255)},
@@ -157,6 +159,7 @@ var entityBrushColors = map[core.EnemyKind]rl.Color{
 	core.EnemyGoblin:      rl.NewColor(132, 196, 110, 255),
 	core.EnemyGoblinMage:  rl.NewColor(220, 168, 244, 255),
 	core.EnemyAmoeba:      rl.NewColor(180, 200, 220, 255),
+	core.EnemyVenusMantrap: rl.NewColor(220, 124, 158, 255),
 }
 
 // init asserts entityBrushColors covers every enemy kind — without
@@ -578,10 +581,11 @@ func canPlaytest(a core.AreaDefinition) bool {
 	if a.StartTileX < 0 || a.StartTileX >= a.Width {
 		return false
 	}
-	if a.Walls[a.StartTileZ][a.StartTileX] == core.TileRock {
-		return false
-	}
-	if core.IsPropChar(a.Props[a.StartTileZ][a.StartTileX]) {
+	// BlockedAt covers walls, blocking props, AND deep water — any of
+	// those at the start tile would soft-lock the player on spawn.
+	// Routes through one helper so a future blocker (e.g. lava) lands
+	// the playtest check automatically.
+	if a.BlockedAt(a.StartTileX, a.StartTileZ) {
 		return false
 	}
 	// A chest at the start tile gets silently dropped by core.placeChests

@@ -152,6 +152,7 @@ func LoadResources() (r Resources) {
 	r.specialFloors[core.FloorCobble] = loadFloorModel(makeCobblePixels(128, 128), r.lighting.shader)
 	r.specialFloors[core.FloorPlank] = loadFloorModel(makePlankPixels(128, 128), r.lighting.shader)
 	r.specialFloors[core.FloorWater] = loadFloorModel(makeWaterPixels(128, 128), r.lighting.shader)
+	r.specialFloors[core.FloorDeepWater] = loadFloorModel(makeDeepWaterPixels(128, 128), r.lighting.shader)
 	r.specialFloors[core.FloorSand] = loadFloorModel(makeSandPixels(128, 128), r.lighting.shader)
 	r.specialFloors[core.FloorSnow] = loadFloorModel(makeSnowPixels(128, 128), r.lighting.shader)
 
@@ -205,6 +206,7 @@ func LoadResources() (r Resources) {
 	r.decorModels[core.DecorStump] = loadStumpProp(r.lighting.shader, stumpBarkTex)
 	r.decorModels[core.DecorLog] = loadLogProp(r.lighting.shader, logBarkTex, logMossTex)
 	r.decorModels[core.DecorLeafPile] = loadLeafPileProp(r.lighting.shader, leafPileTex)
+	r.decorModels[core.DecorLilypad] = loadLilypadProp(r.lighting.shader)
 	// Archway uses marble palette to match the existing pillars/statues.
 	archMarbleTex := loadTiledTexture(makeMarblePixels(128, 128))
 	r.decorModels[core.DecorArchway] = loadArchwayDecor(r.lighting.shader, archMarbleTex)
@@ -334,18 +336,18 @@ func loadEnemyVisuals() (map[core.EnemyKind]enemyVisual, []rl.Texture2D) {
 	rl.SetTextureWrap(batTexture, rl.WrapClamp)
 	diseasedRatTexture := loadTexture(makeDiseasedRatPixels(72, 96), 72, 96, rl.FilterPoint)
 	rl.SetTextureWrap(diseasedRatTexture, rl.WrapClamp)
-	owned := []rl.Texture2D{ratTexture, batTexture, diseasedRatTexture}
-	// Placeholder textures for the new monster set — the procedural
-	// pixel art for goblin / goblin mage / amoeba hasn't been authored
-	// yet, so reuse existing sprites with size/aspect tweaks so the
-	// silhouettes still read as distinct at distance:
-	//   goblin     — rat texture, taller and beefier
-	//   goblinMage — diseased-rat texture (the "bigger, scarier rat"
-	//                already reads as a tier-up); replace once a
-	//                dedicated mage sprite exists
-	//   amoeba     — bat texture, squat and wide (the bat's "spread"
-	//                silhouette doubles for a blob until a dedicated
-	//                amoeba sprite is authored)
+	goblinTexture := loadTexture(makeGoblinPixels(72, 112), 72, 112, rl.FilterPoint)
+	rl.SetTextureWrap(goblinTexture, rl.WrapClamp)
+	goblinMageTexture := loadTexture(makeGoblinMagePixels(72, 112), 72, 112, rl.FilterPoint)
+	rl.SetTextureWrap(goblinMageTexture, rl.WrapClamp)
+	amoebaTexture := loadTexture(makeAmoebaPixels(96, 80), 96, 80, rl.FilterPoint)
+	rl.SetTextureWrap(amoebaTexture, rl.WrapClamp)
+	mantrapTexture := loadTexture(makeVenusMantrapPixels(88, 128), 88, 128, rl.FilterPoint)
+	rl.SetTextureWrap(mantrapTexture, rl.WrapClamp)
+	owned := []rl.Texture2D{
+		ratTexture, batTexture, diseasedRatTexture,
+		goblinTexture, goblinMageTexture, amoebaTexture, mantrapTexture,
+	}
 	visuals := map[core.EnemyKind]enemyVisual{
 		core.EnemyRat: {
 			texture: ratTexture,
@@ -366,16 +368,28 @@ func loadEnemyVisuals() (map[core.EnemyKind]enemyVisual, []rl.Texture2D) {
 			size: rl.NewVector2(0.92, 1.30),
 		},
 		core.EnemyGoblin: {
-			texture: ratTexture,
-			size:    rl.NewVector2(1.0, 1.5),
+			texture: goblinTexture,
+			// Stockier, taller than a rat — humanoid frame with a club.
+			size: rl.NewVector2(1.05, 1.55),
 		},
 		core.EnemyGoblinMage: {
-			texture: diseasedRatTexture,
-			size:    rl.NewVector2(1.05, 1.55),
+			texture: goblinMageTexture,
+			// Robed silhouette is slightly slimmer than the goblin but the
+			// staff bumps the read up another half-tile so the caster looks
+			// the part.
+			size: rl.NewVector2(1.10, 1.65),
 		},
 		core.EnemyAmoeba: {
-			texture: batTexture,
-			size:    rl.NewVector2(1.1, 0.9),
+			texture: amoebaTexture,
+			// Squat and wide — the blob is closer to a wet pancake than a
+			// pillar. Width nudged up so it visually fills the tile.
+			size: rl.NewVector2(1.20, 0.95),
+		},
+		core.EnemyVenusMantrap: {
+			texture: mantrapTexture,
+			// Taller than the goblin family — the open trap-jaw silhouette
+			// is the showpiece, so the sprite needs the vertical room.
+			size: rl.NewVector2(1.20, 1.80),
 		},
 	}
 	return visuals, owned

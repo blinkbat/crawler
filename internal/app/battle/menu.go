@@ -231,7 +231,7 @@ func cycleBattleTarget(g *core.GameState, delta int) {
 }
 
 func cyclePartyTarget(g *core.GameState, delta int) {
-	living := core.LivingPartyTargets(g.Party)
+	living := core.AvailablePartyTargets(g.Party)
 	if len(living) == 0 {
 		return
 	}

@@ -10,13 +10,14 @@
 //	walls  : '.' open, '#' wall
 //	floor  : '.' auto-variant (per-tile hash), 'g' grass, 'd' dirt,
 //	         'k' dark grass, 's' stone, 'c' cobblestone path, 'w' planks,
-//	         '~' shallow water, 'n' sand, 'i' snow
+//	         '~' shallow water, 'W' deep water (blocks), 'n' sand, 'i' snow
 //	decor  : '.' auto-scatter, '_' force-empty, 'b' bush, 'm' mushroom,
 //	         'p' pebble cluster, ',' tall grass, 'f' wildflowers,
 //	         'v' clover, 'r' reeds, 'o' bones, 'x' scorch, '!' blood,
 //	         '*' cobweb, 't' stump, 'l' fallen log, 'L' leaf pile,
 //	         'A' archway anchor (left), 'a' archway tail (right) — both
-//	         walkable; the arch spans 2 tiles along +X.
+//	         walkable; the arch spans 2 tiles along +X, 'y' lilypad
+//	         (swamp dressing — pure decor, never blocks).
 //	props  : '.' empty, 'T' tree, 'X' tree XL, 'O' boulder,
 //	         'B' bush (large), 'C' crate, 'R' barrel, 'U' urn,
 //	         'S' stalagmite, 'P' pillar, 'I' broken pillar,

@@ -121,6 +121,12 @@ var skillDefinitions = []skillDefinition{
 	// (enemies don't have an MP pool); a future caster class learning
 	// Sleep can set the Cost field.
 	{Skill: SkillSleep, Name: "Sleep", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{SleepMinTurns: SleepMinTurns, SleepMaxTurns: SleepMaxTurns}},
+	// Ingest mirrors Sleep's shape: enemy-only, Magic-tagged, single
+	// party target, no damage. The status itself (Ingested) is tracked
+	// per party member with the swallower's pack-slot pinned on
+	// IngestedBy — releasing the prey is keyed off that slot when the
+	// mantrap dies.
+	{Skill: SkillIngest, Name: "Ingest", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{}},
 }
 
 // skillByID is the O(1) lookup table for skillDefinitions. Built once at

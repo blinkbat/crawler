@@ -613,6 +613,12 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 	}
 	victoryDance := victoryDanceElapsed(g)
 	for i := range g.Party {
+		// Ingested members are tucked away inside a mantrap — don't
+		// draw their billboard on the field. The status badge on the
+		// party card is the player's "where did they go?" signal.
+		if g.Party[i].Ingested {
+			continue
+		}
 		texture, ok := partyTextureFor(assets, g.Party[i])
 		if !ok {
 			continue

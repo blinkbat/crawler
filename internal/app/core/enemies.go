@@ -11,6 +11,7 @@ const (
 	EnemyGoblin
 	EnemyGoblinMage
 	EnemyAmoeba
+	EnemyVenusMantrap
 )
 
 type EnemyDefinition struct {
@@ -169,6 +170,33 @@ var enemyDefinitions = []EnemyDefinition{
 		Skills:          []SkillID{SkillFirebolt, SkillSleep},
 		SkillCastChance: 0.5,
 		SpellPower:      6,
+	},
+	{
+		Kind:         EnemyVenusMantrap,
+		Name:         "Venus Mantrap",
+		SingularName: "Mantrap",
+		PluralName:   "Mantraps",
+		SingularNoun: "mantrap",
+		PluralNoun:   "mantraps",
+		GroupName:    "Mantrap Grove",
+		Item:         "",
+		// Slow, tanky, two-trick lurker: a heavy bite when the party gets
+		// close, plus the signature Ingest that pulls a member out of the
+		// fight until the plant is killed. The bite alone is mid-tier;
+		// Ingest is what makes the encounter scary — losing your healer
+		// for the rest of the battle changes the whole math.
+		MaxHP:              22,
+		AttackDamage:       5,
+		Speed:              3,
+		Tier:               4,
+		XPValue:            22,
+		AttackVerbSingular: "snaps at",
+		AttackVerbPlural:   "snap at",
+		Skills:             []SkillID{SkillIngest},
+		// Bias toward melee — Ingest's lockout is so disruptive that
+		// rolling it every other turn would feel oppressive. About one in
+		// three turns the mantrap reaches for prey; the rest it bites.
+		SkillCastChance: 0.35,
 	},
 	{
 		Kind:         EnemyAmoeba,

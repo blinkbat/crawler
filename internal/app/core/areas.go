@@ -325,6 +325,7 @@ var enemyKindNameTable = []enemyKindNameEntry{
 	{EnemyGoblin, "goblin", nil},
 	{EnemyGoblinMage, "goblin_mage", []string{"goblinmage"}},
 	{EnemyAmoeba, "amoeba", nil},
+	{EnemyVenusMantrap, "venus_mantrap", []string{"mantrap", "venusmantrap"}},
 }
 
 // enemyKindByName flattens enemyKindNameTable into a single primary+alias

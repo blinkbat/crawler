@@ -69,6 +69,15 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 
 	if down {
 		drawTextWithShadow(font, "DOWN", x+partyCardW-58, y+14, 14, rl.NewColor(220, 102, 102, 235))
+	} else if member.Ingested {
+		// Ingested takes priority over Poison / Defending: it's the
+		// most actionable status (kill the mantrap to free them) and
+		// the most disruptive (the prey can't act at all). Flicker
+		// matches Poison's pulse so the row reads as "something is
+		// wrong" at a glance.
+		flicker := 0.65 + 0.35*pulse(2.6)
+		col := rl.NewColor(200, 132, 220, 240)
+		drawTextWithShadow(font, "INGESTED", x+partyCardW-88, y+14, 14, fadeColor(col, flicker))
 	} else if member.PoisonTurns > 0 {
 		// Poison takes priority over the Defending label since it's the
 		// shorter-lived, more actionable status (heal vs ride it out).
@@ -109,12 +118,20 @@ func DrawPartyRibbon(g core.GameState, assets Resources) {
 
 	for i, member := range g.Party {
 		x := startX + (partyCardW+partyCardGap)*float32(i)
+		// Active / selected glow only paints on a member who can act
+		// AND be targeted this turn — i.e. not ingested. The turn queue
+		// already skips ingested actors and the targeting cyclers route
+		// through AvailablePartyTargets, so neither indicator should
+		// land on an ingested member organically; this gates defensively
+		// in case a stale PartyTarget gets left pointing at someone the
+		// mantrap swallowed mid-action.
+		available := core.PartyMemberAvailable(g.Party, i)
 		drawPartyCard(
 			assets.hudFont,
 			member,
 			x, y,
-			i == activeIdx && member.HP > 0,
-			i == selectedIdx && member.HP > 0,
+			i == activeIdx && available,
+			i == selectedIdx && available,
 			member.HP <= 0,
 		)
 	}

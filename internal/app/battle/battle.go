@@ -75,7 +75,7 @@ func Update(g *core.GameState, dt float32) {
 		leaveBattle(g, "")
 		return
 	}
-	if g.Battle.Phase != core.BattleWon && g.Battle.Phase != core.BattleLost && core.LivingPartyCount(g.Party) == 0 {
+	if g.Battle.Phase != core.BattleWon && g.Battle.Phase != core.BattleLost && core.ActivePartyCount(g.Party) == 0 {
 		loseBattle(g, "The party is driven back. Press Enter to recover.")
 		return
 	}
@@ -115,7 +115,7 @@ func beginNewRound(g *core.GameState) {
 		winBattle(g, core.LastBattleEnemyFallsMessage(*g))
 		return
 	}
-	if core.LivingPartyCount(g.Party) == 0 {
+	if core.ActivePartyCount(g.Party) == 0 {
 		loseBattle(g, core.BattleLossMessage(*g))
 		return
 	}
@@ -134,12 +134,15 @@ func beginNewRound(g *core.GameState) {
 
 // buildTurnQueue assembles all living actors into a single list, sorted by
 // SPD descending. Stable sort means tied speeds keep their original order
-// (party first, then enemies, in their slot order).
+// (party first, then enemies, in their slot order). Ingested party members
+// are skipped — they re-enter the queue on the round AFTER their swallower
+// dies (the release flips Ingested off, the next beginNewRound picks them
+// up).
 func buildTurnQueue(g *core.GameState) []core.ActorRef {
 	members := core.BattleMembers(g)
 	queue := make([]core.ActorRef, 0, len(g.Party)+len(members))
 	for i, p := range g.Party {
-		if p.HP <= 0 {
+		if p.HP <= 0 || p.Ingested {
 			continue
 		}
 		queue = append(queue, core.ActorRef{IsParty: true, Index: i})
@@ -247,10 +250,12 @@ func tickSleepAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
 }
 
 // isActorAlive answers "is this queue actor still in the fight?" Used for
-// skipping dead entries in the round queue.
+// skipping dead entries in the round queue. For party slots this means
+// "alive AND not currently ingested" — a member swallowed mid-round
+// must skip their queued turn until the mantrap dies.
 func isActorAlive(g *core.GameState, actor core.ActorRef) bool {
 	if actor.IsParty {
-		return actor.Index >= 0 && actor.Index < len(g.Party) && g.Party[actor.Index].HP > 0
+		return core.PartyMemberAvailable(g.Party, actor.Index)
 	}
 	return core.BattleEnemyAlive(g, actor.Index)
 }
@@ -285,7 +290,7 @@ func finishActorTurn(g *core.GameState) {
 		winBattle(g, core.LastBattleEnemyFallsMessage(*g))
 		return
 	}
-	if core.LivingPartyCount(g.Party) == 0 {
+	if core.ActivePartyCount(g.Party) == 0 {
 		loseBattle(g, core.BattleLossMessage(*g))
 		return
 	}
@@ -529,7 +534,7 @@ func beginEnemyAttack(g *core.GameState, slot int) {
 	enemy := core.BattleMemberAt(g, slot)
 	g.Battle.EnemyPendingSkill = core.SkillNone
 	if enemy != nil {
-		g.Battle.EnemyPendingSkill = enemyAIPickSkill(g, *enemy)
+		g.Battle.EnemyPendingSkill = enemyAIPickSkill(g, *enemy, slot)
 	}
 	if g.Battle.EnemyPendingSkill != core.SkillNone {
 		// Mark the Timing as already resolved so the defend bar never
@@ -547,15 +552,59 @@ func beginEnemyAttack(g *core.GameState, slot int) {
 // enemy picks uniformly from its skills, otherwise it melees. p == 0
 // (default) means "never casts" — non-caster enemies leave the field
 // blank and short-circuit out of this function.
-func enemyAIPickSkill(g *core.GameState, enemy core.Enemy) core.SkillID {
+//
+// `slot` is the active-pack index of the casting enemy; used to filter
+// out skills that can't fire from this specific instance (Ingest by a
+// mantrap that already has prey, etc.). The filter happens BEFORE the
+// SkillCastChance roll so a mantrap that can't ingest doesn't waste its
+// cast slot on a dead-end skill — it bites instead.
+func enemyAIPickSkill(g *core.GameState, enemy core.Enemy, slot int) core.SkillID {
 	def := core.EnemyInfoFor(enemy)
 	if len(def.Skills) == 0 || def.SkillCastChance <= 0 {
+		return core.SkillNone
+	}
+	// Filter-before-roll order is intentional: an empty usable list
+	// short-circuits to melee WITHOUT consuming a "cast" outcome, but
+	// a non-empty usable list rolls SkillCastChance normally. A mantrap
+	// that's already digesting prey filters Ingest out → usable is empty
+	// → bites. A mantrap with prey AND a second skill in the list (future
+	// caster expansion) would keep the second skill in play. Reversing
+	// the order would mean a no-prey-target mantrap "rolls a cast" and
+	// then has nothing to cast — wasting the chance check and feeling
+	// like the AI flinched.
+	usable := usableEnemySkills(g, def.Skills, slot)
+	if len(usable) == 0 {
 		return core.SkillNone
 	}
 	if g.Rand().Float64() >= def.SkillCastChance {
 		return core.SkillNone
 	}
-	return def.Skills[g.Rand().Intn(len(def.Skills))]
+	return usable[g.Rand().Intn(len(usable))]
+}
+
+// usableEnemySkills filters an enemy's authored Skills list down to the
+// ones whose preconditions are satisfied right now — keyed off the
+// casting slot so per-instance state (e.g. "this mantrap already holds
+// prey") gates correctly. Skills without per-instance gates (Firebolt,
+// Sleep) always pass through.
+func usableEnemySkills(g *core.GameState, skills []core.SkillID, slot int) []core.SkillID {
+	out := make([]core.SkillID, 0, len(skills))
+	for _, s := range skills {
+		switch s {
+		case core.SkillIngest:
+			// Mantrap can't ingest while already holding someone, and
+			// it can't ingest if no party member is available to be
+			// targeted (everyone is dead or already in another mantrap).
+			if core.MantrapHasPrey(g.Party, slot) {
+				continue
+			}
+			if core.FirstAvailablePartyMember(g.Party) < 0 {
+				continue
+			}
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 // updateEnemyTiming drives the player's defend bar against the currently
@@ -609,7 +658,7 @@ func resolveAndFinishEnemyAttack(g *core.GameState) {
 	g.Battle.EnemyAttacker = -1
 	g.Battle.EnemyPendingSkill = core.SkillNone
 
-	if core.LivingPartyCount(g.Party) == 0 {
+	if core.ActivePartyCount(g.Party) == 0 {
 		loseBattle(g, core.BattleLossMessage(*g))
 		return
 	}
@@ -651,6 +700,40 @@ func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
 			setBattleMessage(g, fmt.Sprintf("The %s casts %s — %s burns for %d.", def.SingularNoun, skillName, g.Party[target].Name, rawDamage))
 		}
 		audio.Play(audio.SoundInputGreat)
+	case core.SkillIngest:
+		// Defensive re-check: enemyAIPickSkill won't route here without an
+		// available target, but the world can shift between turns (e.g. a
+		// fast ally killed the only viable target). Cancel cleanly with a
+		// log line so the combat log doesn't go silent on the cast.
+		picked := target
+		if !core.PartyMemberAvailable(g.Party, picked) {
+			picked = core.FirstAvailablePartyMember(g.Party)
+		}
+		if picked < 0 {
+			setBattleMessage(g, fmt.Sprintf("The %s lunges, but finds no one to seize.", def.SingularNoun))
+			return
+		}
+		m := &g.Party[picked]
+		m.Ingested = true
+		m.IngestedBy = slot
+		// Status fields cleared vs. preserved on ingestion is a
+		// deliberate-feel choice, not housekeeping:
+		//
+		//   - SleepTurns: cleared. Getting swallowed is violent enough
+		//     to wake the sleeper (same "violence breaks the spell"
+		//     rule as the damage-wake path); also avoids the absurd
+		//     state of "asleep inside a mantrap, also asleep otherwise."
+		//   - Defending: cleared. The brace was for an incoming hit
+		//     they'll never receive; the buff has nothing to apply to.
+		//   - PoisonTurns: PRESERVED. Ingest shouldn't be a free escape
+		//     from a status the player got hit with earlier. The counter
+		//     pauses passively (the ingested member's turn is skipped,
+		//     so tickPoisonAfterPartyTurn never fires for them) and
+		//     resumes ticking on their first turn after release.
+		m.SleepTurns = 0
+		m.Defending = false
+		setBattleMessage(g, fmt.Sprintf("The %s engulfs %s!", def.SingularNoun, m.Name))
+		audio.Play(audio.SoundEnemyHit)
 	case core.SkillSleep:
 		m := &g.Party[target]
 		// Defense-in-depth: pickEnemyAttackTarget only returns living
@@ -745,6 +828,11 @@ func leaveBattle(g *core.GameState, message string) {
 // Defeated packs are dropped from the field here so the cleared slot
 // doesn't keep ghost-rendering an empty marker.
 func clearBattleResidual(g *core.GameState) {
+	// Release any party members still ingested at battle exit so the
+	// "out of action" lockout doesn't bleed into the next encounter.
+	// damageEnemy already releases on the killing blow; this catches
+	// every other exit (loss recovery, early-exit defensive path).
+	core.ReleaseAllIngested(g.Party)
 	if g.Battle.Phase == core.BattleWon && g.Battle.ActivePack >= 0 && g.Battle.ActivePack < len(g.Packs) {
 		g.Packs = append(g.Packs[:g.Battle.ActivePack], g.Packs[g.Battle.ActivePack+1:]...)
 	}

@@ -230,6 +230,17 @@ type PartyMember struct {
 	// already-sleeping target. Inflicted by SkillSleep (goblin mage).
 	SleepTurns int
 
+	// Ingested is true while a Venus Mantrap has the member swallowed.
+	// While set: the member is removed from the turn queue, can't be
+	// targeted by friend or foe, and can't be damaged (the prey is
+	// effectively invulnerable inside the plant — see actions.go's
+	// damagePartyMember / healPartyMember short-circuits). IngestedBy
+	// is the active-pack slot of the mantrap currently holding them;
+	// the prey is released when that slot's enemy dies or the battle
+	// ends. Inflicted by SkillIngest.
+	Ingested   bool
+	IngestedBy int
+
 	// Level and XP track per-character progression. XP is the running
 	// total toward the next level; XPForLevel(Level) is the threshold.
 	// PendingLevelUps queues completed level-ups whose stat points the

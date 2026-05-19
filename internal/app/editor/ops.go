@@ -211,6 +211,15 @@ func applyEntityBrush(s *State, x, z int, kind entityKind) {
 	brush := s.activeBrush()
 	switch kind {
 	case entityPlayerStart:
+		// Player start has the strictest tile rule: no walls, no props,
+		// no deep water — anything that would soft-lock the player on
+		// spawn. Packs and chests are tolerant of water (packs snap to
+		// the nearest walkable tile, chests interact from adjacent), so
+		// the floor-blocker rejection lives only on this branch.
+		if s.area.Floor[z][x] == core.FloorDeepWater {
+			s.flash("Player start can't sit on deep water")
+			return
+		}
 		s.area.StartTileX = x
 		s.area.StartTileZ = z
 		s.dirty = true
@@ -236,6 +245,14 @@ func placeChestAt(s *State, x, z int) {
 	}
 	if core.IsPropChar(s.area.Props[z][x]) {
 		s.flash("Cell already holds a prop — clear it first")
+		return
+	}
+	// Deep water blocks movement onto the tile, so a chest there would
+	// render floating with no way to step onto it (the player can still
+	// interact from an adjacent walkable tile, but the visual reads as
+	// a bug). Refuse rather than ship the surprise.
+	if s.area.Floor[z][x] == core.FloorDeepWater {
+		s.flash("Chest can't sit on deep water")
 		return
 	}
 	if packIndexAt(s.area.PackSpawns, x, z) >= 0 {
