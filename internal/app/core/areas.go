@@ -330,6 +330,18 @@ func materialFromName(s string) (MaterialSet, bool) {
 // stay associated with the right material in the UI.
 var MaterialOptions = []MaterialSet{MaterialDungeon, MaterialField}
 
+// MaterialIsIndoor reports whether the material set represents an
+// enclosed interior (stone walls, ceiling slabs by default) vs. an
+// outdoor biome. Today only Dungeon answers true — but several
+// renderers (minimap tone, world/wall pass, resource fallbacks)
+// branch on `material == MaterialDungeon` open-coded, so a third
+// material would need them all updated independently. Routing
+// through this predicate now means a future cave/crypt material is
+// one row, not a grep.
+func MaterialIsIndoor(m MaterialSet) bool {
+	return m == MaterialDungeon
+}
+
 type facingNameEntry struct {
 	value int
 	name  string
@@ -340,6 +352,33 @@ var facingNameTable = []facingNameEntry{
 	{East, "east"},
 	{South, "south"},
 	{West, "west"},
+}
+
+// FacingShortLabels returns the single-letter UI labels for the four
+// facings, indexed by core.North/East/South/West. Centralized so the
+// editor's metadata panel and door-edit modal don't each carry their
+// own []string{"N", "E", "S", "W"} literal — a future renaming
+// (localisation, glyph swap) is one edit instead of a grep.
+var FacingShortLabels = [4]string{
+	North: "N",
+	East:  "E",
+	South: "S",
+	West:  "W",
+}
+
+// FacingShortLabel returns the single-letter label for a facing value,
+// normalising out-of-range inputs first. Convenience wrapper for
+// callers that don't want to assume the int is already in [0, 4).
+func FacingShortLabel(f int) string {
+	return FacingShortLabels[NormalizeFacing(f)]
+}
+
+// IsFacingName reports whether s names one of the four canonical
+// facings (case-insensitive). Predicate counterpart to facingFromName
+// for callers that only need a yes/no answer.
+func IsFacingName(s string) bool {
+	_, ok := facingFromName(s)
+	return ok
 }
 
 // FacingName returns the canonical on-disk name for a facing. ok=false

@@ -257,15 +257,15 @@ func placeDoorAt(s *State, x, z int) {
 		s.flash("Door can't sit on deep water")
 		return
 	}
-	if packIndexAt(s.area.PackSpawns, x, z) >= 0 {
+	if core.PackSpawnIndexAt(s.area.PackSpawns, x, z) >= 0 {
 		s.flash("Cell already holds a pack — clear it first")
 		return
 	}
-	if chestSpawnIndexAt(s.area.ChestSpawns, x, z) >= 0 {
+	if core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z) >= 0 {
 		s.flash("Cell already holds a chest — clear it first")
 		return
 	}
-	if doorSpawnIndexAt(s.area.DoorSpawns, x, z) >= 0 {
+	if core.DoorSpawnIndexAt(s.area.DoorSpawns, x, z) >= 0 {
 		s.flash("Cell already holds a door")
 		return
 	}
@@ -279,17 +279,6 @@ func placeDoorAt(s *State, x, z int) {
 		Facing:     s.area.StartFacing,
 	})
 	s.dirty = true
-}
-
-// doorSpawnIndexAt returns the index of the door at (x, z), or -1
-// when none. Mirrors chestSpawnIndexAt.
-func doorSpawnIndexAt(spawns []core.DoorSpawn, x, z int) int {
-	for i, sp := range spawns {
-		if sp.TileX == x && sp.TileZ == z {
-			return i
-		}
-	}
-	return -1
 }
 
 // nextDoorName picks an unused placeholder name for a freshly-placed
@@ -309,15 +298,24 @@ func nextDoorName(spawns []core.DoorSpawn) string {
 	}
 }
 
-// removeDoorAt drops the door at (x, z) from spawns (if any),
-// returning a fresh slice. Used by the entity-brush right-click clear.
+// removeDoorAt drops the door at (x, z) from spawns (if any). Thin
+// wrapper around filterDoors so the chest / pack / door deletion paths
+// all share one "allocate-fresh, predicate-driven filter" idiom.
 func removeDoorAt(spawns []core.DoorSpawn, x, z int) []core.DoorSpawn {
-	out := make([]core.DoorSpawn, 0, len(spawns))
+	return filterDoors(spawns, func(sp core.DoorSpawn) bool {
+		return sp.TileX != x || sp.TileZ != z
+	})
+}
+
+// filterDoors returns a fresh slice of just the doors for which keep
+// returns true. Mirrors filterPacks / filterChests so the three
+// spawn-filter sites read as one family.
+func filterDoors(spawns []core.DoorSpawn, keep func(core.DoorSpawn) bool) []core.DoorSpawn {
+	out := spawns[:0:0]
 	for _, sp := range spawns {
-		if sp.TileX == x && sp.TileZ == z {
-			continue
+		if keep(sp) {
+			out = append(out, sp)
 		}
-		out = append(out, sp)
 	}
 	return out
 }
@@ -347,11 +345,11 @@ func placeChestAt(s *State, x, z int) {
 		s.flash("Chest can't sit on deep water")
 		return
 	}
-	if packIndexAt(s.area.PackSpawns, x, z) >= 0 {
+	if core.PackSpawnIndexAt(s.area.PackSpawns, x, z) >= 0 {
 		s.flash("Cell already holds a pack — clear it first")
 		return
 	}
-	if chestSpawnIndexAt(s.area.ChestSpawns, x, z) >= 0 {
+	if core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z) >= 0 {
 		s.flash("Cell already holds a chest")
 		return
 	}
@@ -369,18 +367,6 @@ func placeChestAt(s *State, x, z int) {
 // alias a package-level template.
 func defaultChestItems() []core.ItemKind {
 	return []core.ItemKind{core.ItemCheese, core.ItemBatJerky}
-}
-
-// chestSpawnIndexAt is the editor's counterpart to runtime ChestIndexAt
-// — searches the authored ChestSpawns slice rather than the runtime
-// Chests slice. Returns -1 when no chest is at the tile.
-func chestSpawnIndexAt(spawns []core.ChestSpawn, x, z int) int {
-	for i, sp := range spawns {
-		if sp.TileX == x && sp.TileZ == z {
-			return i
-		}
-	}
-	return -1
 }
 
 // removeChestSpawnAt drops the chest at (x, z) from spawns (if any),
@@ -456,11 +442,11 @@ func addPackMember(s *State, x, z int, kind core.EnemyKind) {
 		s.flash("Cell holds the player start")
 		return
 	}
-	if chestSpawnIndexAt(s.area.ChestSpawns, x, z) >= 0 {
+	if core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z) >= 0 {
 		s.flash("Cell already holds a chest — clear it first")
 		return
 	}
-	if idx := packIndexAt(s.area.PackSpawns, x, z); idx >= 0 {
+	if idx := core.PackSpawnIndexAt(s.area.PackSpawns, x, z); idx >= 0 {
 		s.area.PackSpawns[idx].Members = append(s.area.PackSpawns[idx].Members, kind)
 		s.dirty = true
 		return
@@ -705,7 +691,17 @@ func resize(s *State, w, h int) {
 		return sp.TileX < w && sp.TileZ < h
 	})
 	s.area.ChestSpawns = removeChestSpawnsOutside(s.area.ChestSpawns, w, h)
+	s.area.DoorSpawns = removeDoorSpawnsOutside(s.area.DoorSpawns, w, h)
 	s.dirty = true
+}
+
+// removeDoorSpawnsOutside drops door entries whose tile sits past the
+// new bounds after a shrink. Routes through filterDoors so the resize
+// + per-tile-delete paths share one filter primitive.
+func removeDoorSpawnsOutside(spawns []core.DoorSpawn, w, h int) []core.DoorSpawn {
+	return filterDoors(spawns, func(sp core.DoorSpawn) bool {
+		return sp.TileX < w && sp.TileZ < h
+	})
 }
 
 // removeChestSpawnsOutside drops chest entries whose tile sits past
@@ -853,27 +849,22 @@ func floodFill(s *State, x, z int, b byte) {
 	if target == b {
 		return
 	}
-	rows := make([][]byte, len(*layer))
-	for i, r := range *layer {
-		rows[i] = []byte(r)
-	}
-	stack := [][2]int{{x, z}}
-	for len(stack) > 0 {
-		p := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		px, pz := p[0], p[1]
-		if pz < 0 || pz >= len(rows) || px < 0 || px >= len(rows[pz]) {
-			continue
+	rewriteLayerRows(layer, func(rows [][]byte) {
+		stack := [][2]int{{x, z}}
+		for len(stack) > 0 {
+			p := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			px, pz := p[0], p[1]
+			if pz < 0 || pz >= len(rows) || px < 0 || px >= len(rows[pz]) {
+				continue
+			}
+			if rows[pz][px] != target {
+				continue
+			}
+			rows[pz][px] = b
+			stack = append(stack, [2]int{px + 1, pz}, [2]int{px - 1, pz}, [2]int{px, pz + 1}, [2]int{px, pz - 1})
 		}
-		if rows[pz][px] != target {
-			continue
-		}
-		rows[pz][px] = b
-		stack = append(stack, [2]int{px + 1, pz}, [2]int{px - 1, pz}, [2]int{px, pz + 1}, [2]int{px, pz - 1})
-	}
-	for i, r := range rows {
-		(*layer)[i] = string(r)
-	}
+	})
 	// Wall flood that turns cells into '#' nukes any packs that fell inside.
 	if s.layer == LayerWalls && b == core.TileRock {
 		s.area.PackSpawns = filterPacks(s.area.PackSpawns, func(sp core.PackSpawn) bool {
@@ -881,6 +872,86 @@ func floodFill(s *State, x, z int, b byte) {
 		})
 	}
 	s.dirty = true
+}
+
+// rewriteLayerRows clones the layer's row strings into a mutable
+// [][]byte, calls visit on every (x, z) cell, and writes the result
+// back. Shared by floodFill / paintRect / fillEntireLayer / anything
+// else that needs the "build fresh byte rows then commit" idiom — the
+// rows allocation is one alloc per call instead of one per layer
+// helper.
+func rewriteLayerRows(layer *[]string, visit func(rows [][]byte)) {
+	rows := make([][]byte, len(*layer))
+	for i, r := range *layer {
+		rows[i] = []byte(r)
+	}
+	visit(rows)
+	for i, r := range rows {
+		(*layer)[i] = string(r)
+	}
+}
+
+// fillEntireLayer overwrites every cell on the active grid layer with
+// the active brush's character. Entity layer is skipped (would have no
+// meaningful "fill"). Player start stays in place even when walls are
+// being painted across the whole map — same exemption as paintRect's
+// per-cell rule. Pushes a single undo so the action reverts atomically.
+func fillEntireLayer(s *State) {
+	if s.layer == LayerEntities {
+		s.flash("Fill all not supported on Entities layer")
+		return
+	}
+	layer := activeGrid(s)
+	if layer == nil {
+		return
+	}
+	brush := s.activeBrush()
+	pushUndo(s)
+	rewriteLayerRows(layer, func(rows [][]byte) {
+		for z := 0; z < s.area.Height && z < len(rows); z++ {
+			for x := 0; x < s.area.Width && x < len(rows[z]); x++ {
+				if brush.Char == core.TileRock && s.area.StartTileX == x && s.area.StartTileZ == z {
+					continue
+				}
+				rows[z][x] = brush.Char
+			}
+		}
+	})
+	// Painting walls everywhere takes packs/chests/doors that fell inside
+	// out of play. Same cleanup applyWallBrush does per-cell.
+	if s.layer == LayerWalls && brush.Char == core.TileRock {
+		s.area.PackSpawns = filterPacks(s.area.PackSpawns, func(sp core.PackSpawn) bool {
+			return !s.area.BlockedAt(sp.TileX, sp.TileZ)
+		})
+		s.area.ChestSpawns = filterChests(s.area.ChestSpawns, func(sp core.ChestSpawn) bool {
+			return !s.area.BlockedAt(sp.TileX, sp.TileZ)
+		})
+		s.area.DoorSpawns = filterDoors(s.area.DoorSpawns, func(sp core.DoorSpawn) bool {
+			return !s.area.BlockedAt(sp.TileX, sp.TileZ)
+		})
+	}
+	s.dirty = true
+	s.flash("Filled " + layerName(s.layer))
+}
+
+// centerViewOnTile recenters the editor view so (tx, tz) sits in the
+// middle of the grid pane. Used by G "center on start" — handy when a
+// pan has drifted the view away from the player spawn on a large map.
+// Zoom is left untouched.
+func centerViewOnTile(s *State, tx, tz int) {
+	if s.rect.cellPx <= 0 {
+		return
+	}
+	cell := s.rect.cellPx
+	// Target world-pixel coord of the centred tile, in the same frame
+	// the layout uses (s.rect.gridX/Y already include panX/panY).
+	want := s.rect.grid.X + s.rect.grid.Width/2
+	wantY := s.rect.grid.Y + s.rect.grid.Height/2
+	have := s.rect.gridX + (float32(tx)+0.5)*cell
+	haveY := s.rect.gridY + (float32(tz)+0.5)*cell
+	s.panX += want - have
+	s.panY += wantY - haveY
+	s.flash("Centered on " + core.TileCoord(tx, tz))
 }
 
 // paintRect paints the active brush's cell value across the rectangle
@@ -950,7 +1021,7 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 	if a.BlockedAt(a.StartTileX, a.StartTileZ) {
 		return []string{"start tile is blocked (player will spawn inside geometry)"}
 	}
-	if chestSpawnIndexAt(a.ChestSpawns, a.StartTileX, a.StartTileZ) >= 0 {
+	if core.ChestSpawnIndexAt(a.ChestSpawns, a.StartTileX, a.StartTileZ) >= 0 {
 		return []string{"start tile holds a chest (the chest will be dropped at runtime)"}
 	}
 	h := a.Height
@@ -1049,7 +1120,94 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 	if unreachableChests > 0 {
 		out = append(out, fmt.Sprintf("%d/%d chests unreachable from start", unreachableChests, len(a.ChestSpawns)))
 	}
+	// Door checks (cheap / local — pairing across maps lives in
+	// crossMapDoorWarnings since loading other .map files every frame
+	// would burn CPU on a 60 Hz metadata draw). Local issues caught
+	// here: door with no destination, door unreachable from start.
+	var doorsNoTarget, doorsUnreachable int
+	for _, d := range a.DoorSpawns {
+		if !d.HasTarget() {
+			doorsNoTarget++
+		}
+		if d.TileX < 0 || d.TileX >= w || d.TileZ < 0 || d.TileZ >= h {
+			doorsUnreachable++
+			continue
+		}
+		if !visited[d.TileZ*w+d.TileX] {
+			doorsUnreachable++
+		}
+	}
+	if doorsNoTarget > 0 {
+		out = append(out, fmt.Sprintf("%d/%d doors missing target (target_map / target_door blank)", doorsNoTarget, len(a.DoorSpawns)))
+	}
+	if doorsUnreachable > 0 {
+		out = append(out, fmt.Sprintf("%d/%d doors unreachable from start", doorsUnreachable, len(a.DoorSpawns)))
+	}
 	return out
+}
+
+// crossMapDoorWarnings validates each door's TargetMap / TargetDoor by
+// loading the referenced map file from disk and looking up the named
+// door. Expensive (file I/O per unique target map) so it's NOT called
+// from the per-frame ReachabilityWarnings — invoked only at playtest
+// gating (canPlaytest path) and a future "Validate Doors" topbar
+// button. Returns one warning per dangling reference; same-map
+// portals (TargetMap == "self" or the local map id) are checked
+// against the in-memory area directly.
+func crossMapDoorWarnings(a core.AreaDefinition) []string {
+	if len(a.DoorSpawns) == 0 {
+		return nil
+	}
+	localMapID := ""
+	if a.Path != "" {
+		localMapID = core.MapIDFromPath(a.Path)
+	}
+	// Cache loaded destination maps by id so multiple doors pointing
+	// at the same target each only trigger one disk read.
+	loaded := make(map[string]core.AreaDefinition)
+	var out []string
+	for _, d := range a.DoorSpawns {
+		if !d.HasTarget() {
+			continue // already flagged by reachabilityWarnings
+		}
+		// Same-map portal: just verify the named door exists locally.
+		if d.TargetMap == "self" || d.TargetMap == localMapID {
+			if !mapHasDoor(a.DoorSpawns, d.TargetDoor) {
+				out = append(out, fmt.Sprintf("door %q targets self/%s — no matching door in this map", d.Name, d.TargetDoor))
+			}
+			continue
+		}
+		dest, ok := loaded[d.TargetMap]
+		if !ok {
+			loadedArea, err := core.LoadArea(core.MapPath(d.TargetMap))
+			if err != nil {
+				out = append(out, fmt.Sprintf("door %q target map %q can't be loaded: %v", d.Name, d.TargetMap, err))
+				loaded[d.TargetMap] = core.AreaDefinition{} // negative cache
+				continue
+			}
+			loaded[d.TargetMap] = loadedArea
+			dest = loadedArea
+		}
+		if dest.Width == 0 {
+			continue // failed-load negative cache hit
+		}
+		if !mapHasDoor(dest.DoorSpawns, d.TargetDoor) {
+			out = append(out, fmt.Sprintf("door %q targets %s/%s — destination map has no door by that name", d.Name, d.TargetMap, d.TargetDoor))
+		}
+	}
+	return out
+}
+
+// mapHasDoor reports whether the given spawn list contains a door
+// named `name`. Linear scan (door counts are tiny, ~10/map) so a
+// map keyed by name isn't worth the allocation per check.
+func mapHasDoor(spawns []core.DoorSpawn, name string) bool {
+	for _, d := range spawns {
+		if d.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func performNewMap(s *State) {

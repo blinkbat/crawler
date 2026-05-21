@@ -249,7 +249,7 @@ func TestApplySteal_EmptyEnemyMessages(t *testing.T) {
 
 func TestDamageEnemy_KillsAtZero(t *testing.T) {
 	g := newTestState()
-	defeated := damageEnemy(g, 0, 99, core.TimingQualityMiss, core.SkillTagPhys)
+	_, defeated := damageEnemy(g, 0, 99, core.TimingQualityMiss, core.SkillTagPhys)
 	if !defeated {
 		t.Fatalf("massive overkill should mark defeated")
 	}
@@ -266,9 +266,12 @@ func TestDamageEnemy_KillsAtZero(t *testing.T) {
 
 func TestDamageEnemy_FlashOnSurvivedHit(t *testing.T) {
 	g := newTestState()
-	defeated := damageEnemy(g, 0, 1, core.TimingQualityMiss, core.SkillTagPhys)
+	dealt, defeated := damageEnemy(g, 0, 1, core.TimingQualityMiss, core.SkillTagPhys)
 	if defeated {
 		t.Fatalf("1 damage should not kill a fresh rat")
+	}
+	if dealt != 1 {
+		t.Fatalf("expected 1 dealt damage (rat has no armor), got %d", dealt)
 	}
 	if g.Packs[0].Members[0].DamageFlash <= 0 {
 		t.Fatalf("flash should be set on survivable hit")
@@ -294,15 +297,52 @@ func TestHealPartyMember_ClampsAtMaxAndRejectsCorpse(t *testing.T) {
 	}
 }
 
+// TestDamageEnemy_AmoebaArmor regression-checks the amoeba's flagship
+// "phys whiffs to 1, magic shreds" contract. The pre-fix bug: armor
+// math was correct but the combat-log message reported the pre-armor
+// damage figure, making armor look broken from the player's
+// perspective. The fix routes the post-armor `dealt` value out to the
+// caller; this test pins both the math AND the return value.
+func TestDamageEnemy_AmoebaArmor(t *testing.T) {
+	g := newTestState()
+	// Replace the first enemy in the pack with an amoeba so we hit
+	// the armored case without rewiring placePacks.
+	g.Packs[0].Members[0] = core.NewEnemy(core.EnemyAmoeba)
+	amoebaHP := g.Packs[0].Members[0].HP
+	// Phys hit of 12 vs armor 8 → 4 dealt.
+	dealt, defeated := damageEnemy(g, 0, 12, core.TimingQualityExcellent, core.SkillTagPhys)
+	if dealt != 4 {
+		t.Fatalf("phys 12 vs armor 8 should deal 4, got %d", dealt)
+	}
+	if defeated {
+		t.Fatalf("amoeba shouldn't die from a 4-damage hit at full HP")
+	}
+	if g.Packs[0].Members[0].HP != amoebaHP-4 {
+		t.Fatalf("amoeba HP should drop by post-armor amount; got %d (was %d)", g.Packs[0].Members[0].HP, amoebaHP)
+	}
+	// Magic hit of 12 vs armor 8 → 12 dealt (armor bypassed).
+	g.Packs[0].Members[0] = core.NewEnemy(core.EnemyAmoeba)
+	dealt, _ = damageEnemy(g, 0, 12, core.TimingQualityExcellent, core.SkillTagMagic)
+	if dealt != 12 {
+		t.Fatalf("magic 12 should bypass armor and deal 12, got %d", dealt)
+	}
+	// Phys 1 vs armor 8 → floor-1 contract.
+	g.Packs[0].Members[0] = core.NewEnemy(core.EnemyAmoeba)
+	dealt, _ = damageEnemy(g, 0, 1, core.TimingQualityMiss, core.SkillTagPhys)
+	if dealt != 1 {
+		t.Fatalf("phys 1 vs armor 8 should still deal 1 (armor is damp, not immunity), got %d", dealt)
+	}
+}
+
 func TestDamagePartyMember_GuardsAndKills(t *testing.T) {
 	g := newTestState()
-	if damagePartyMember(g, -1, 5, core.SkillTagPhys) {
+	if _, killed := damagePartyMember(g, -1, 5, core.SkillTagPhys); killed {
 		t.Fatalf("out-of-bounds party damage should no-op")
 	}
-	if damagePartyMember(g, 0, 0, core.SkillTagPhys) {
+	if _, killed := damagePartyMember(g, 0, 0, core.SkillTagPhys); killed {
 		t.Fatalf("zero damage should no-op")
 	}
-	if damagePartyMember(g, 0, 999, core.SkillTagPhys) != true {
+	if _, killed := damagePartyMember(g, 0, 999, core.SkillTagPhys); !killed {
 		t.Fatalf("lethal damage should report killed")
 	}
 	if g.Party[0].HP != 0 {

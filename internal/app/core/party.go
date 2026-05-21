@@ -503,3 +503,40 @@ func (p PoisonEffect) RollDuration(rng *rand.Rand) int {
 	}
 	return p.MinTurns + rng.Intn(span+1)
 }
+
+// TickPoisonStep applies one tick of poison damage to every poisoned,
+// alive party member and decrements their counter. Called after each
+// successful exploration step so a fight-inflicted poison doesn't stick
+// indefinitely while the player walks around; mirrors the in-battle tick
+// (tickPoisonAfterPartyTurn) but without combat-log lines since there's
+// no battle context out here. PoisonTurns hitting 0 clears the status;
+// HP hitting 0 leaves the member downed at 0 (the next battle picks them
+// up via the existing alive checks).
+//
+// Returns the number of members hit this step — callers can use it to
+// emit a HUD nudge ("Poison stings!") without re-walking the party.
+func TickPoisonStep(g *GameState) int {
+	ticks := 0
+	for i := range g.Party {
+		m := &g.Party[i]
+		if m.HP <= 0 || m.PoisonTurns <= 0 {
+			continue
+		}
+		m.PoisonTurns--
+		// Poison is magical decay — bypass armor (matches the in-battle
+		// tick path which passes SkillTagMagic).
+		m.HP -= PoisonTickDamage
+		if m.HP < 0 {
+			m.HP = 0
+		}
+		m.DamageFlash = FlashDuration
+		if m.HP == 0 {
+			// Same wake-on-violence rule the battle damage path uses; a
+			// poisoned sleeper waking only to find they died isn't worse
+			// than dying asleep, but it keeps state consistent.
+			m.SleepTurns = 0
+		}
+		ticks++
+	}
+	return ticks
+}

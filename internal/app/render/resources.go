@@ -267,17 +267,26 @@ func LoadResources() (r Resources) {
 	return r
 }
 
-// inlineDecorChars enumerates the decor-layer chars rendered through
-// dedicated propModel fields on Resources (bushProp, mushroomProp) or
-// a specialized helper (drawPebbleCluster) instead of the
-// decorModels map. They are NOT a desync risk — adding one would
-// require editing world.go's drawDecor switch — so the coverage assert
-// subtracts them from the expected set.
-var inlineDecorChars = map[byte]struct{}{
-	core.DecorBush:     {},
-	core.DecorMushroom: {},
-	core.DecorPebble:   {},
+// inlineDecorRenderer is the per-tile drawing closure for a decor
+// char rendered through a specialized path (dedicated propModel field
+// on Resources, hand-tuned scatter helper) rather than the generic
+// decorModels map. Same dispatch signature as the generic map keeps
+// world.go's drawDecor uniform.
+type inlineDecorRenderer func(assets Resources, x, z int, cx, cz float32)
+
+// inlineDecorHandlers is the SINGLE source of truth for inline decor
+// dispatch — both world.go's drawDecor and assertDecorCoverage read
+// from it. Adding a new inline-rendered decor char is one map entry
+// plus one helper function; the coverage assert and the renderer both
+// pick it up without further edits. Replaces the older parallel
+// inlineDecorChars set + open-coded switch in world.go that could
+// drift silently.
+var inlineDecorHandlers = map[byte]inlineDecorRenderer{
+	core.DecorBush:     drawDecorBush,
+	core.DecorMushroom: drawDecorMushroom,
+	core.DecorPebble:   drawDecorPebble,
 }
+
 
 // assertDecorCoverage panics if any char in core.DecorTileChars is
 // missing from decorModels AND not inline-handled. Mirrors the shape
@@ -288,33 +297,61 @@ func assertDecorCoverage(models map[byte]propModel) {
 		if _, ok := models[c]; ok {
 			continue
 		}
-		if _, ok := inlineDecorChars[c]; ok {
+		if _, ok := inlineDecorHandlers[c]; ok {
 			continue
 		}
-		panic("render: decor char '" + string(c) + "' has no decorModels entry and is not inline-handled — register a loadXxxProp in NewResources or add to inlineDecorChars")
+		// Multi-tile-decor tails (e.g. DecorArchwayTail) deliberately
+		// have no decorModels entry — the anchor on the partner tile
+		// draws the spanning mesh. DecorFootprintTail catches them.
+		if isDecorFootprintTail(c) {
+			continue
+		}
+		panic("render: decor char '" + string(c) + "' has no decorModels entry and is not inline-handled — register a loadXxxProp in NewResources or add to inlineDecorHandlers")
 	}
 }
 
-// inlinePropChars enumerates prop-layer chars rendered through
-// dedicated fields/helpers on Resources (tree, rockProp, bushProp)
-// instead of the propModels map. Mirrors inlineDecorChars.
-var inlinePropChars = map[byte]struct{}{
-	core.TileTree:      {},
-	core.TileTreeXL:    {},
-	core.TileRockLarge: {},
-	core.TileBushLarge: {},
+// isDecorFootprintTail mirrors isFootprintTail for the decor layer:
+// reports whether c is the tail char for a multi-tile decor anchor.
+// Tails render nothing; the anchor's mesh covers them.
+func isDecorFootprintTail(c byte) bool {
+	for _, anchor := range core.DecorTileChars() {
+		if core.DecorFootprintTail(anchor) == c {
+			return true
+		}
+	}
+	return false
+}
+
+// inlinePropRenderer is the per-tile drawing closure for a prop char
+// rendered through a specialized path. Same shape as
+// inlineDecorRenderer but tied to the props-layer dispatch — props
+// pre-compute `propYawDeg` once per tile, so the handler takes it
+// pre-resolved.
+type inlinePropRenderer func(assets Resources, center rl.Vector3, propYaw float32)
+
+// inlinePropHandlers is the SINGLE source of truth for inline prop
+// dispatch — both world.go's drawWorld switch and assertPropCoverage
+// read from it. Tree / TreeXL share a tree model with different
+// scales; the rest are single-prop wrappers around dedicated
+// Resources fields. Adding a new inline-rendered prop is one map
+// entry plus one helper function.
+var inlinePropHandlers = map[byte]inlinePropRenderer{
+	core.TileTree:      drawPropTree,
+	core.TileTreeXL:    drawPropTreeXL,
+	core.TileRockLarge: drawPropRockLarge,
+	core.TileBushLarge: drawPropBushLarge,
 }
 
 // assertPropCoverage is the props-layer analogue of
 // assertDecorCoverage. PropTileChars enumerates every blocking prop
 // char; each must either be in propModels or be inline-handled by
-// world.go's drawWorld switch.
+// inlinePropHandlers.
 func assertPropCoverage(models map[byte]propModel) {
 	for _, c := range core.PropTileChars() {
 		if _, ok := models[c]; ok {
 			continue
 		}
-		if _, ok := inlinePropChars[c]; ok {
+		if _, ok := inlinePropHandlers[c]; ok {
 			continue
 		}
 		// Multi-tile-prop tails (e.g. TileRockFormationTail) deliberately
@@ -449,7 +486,7 @@ func (r Resources) worldMaterial(material core.MaterialSet) worldMaterialResourc
 // lightingFor picks the per-area lighting profile. Profiles are package-level
 // constants in lighting.go — this just routes by material.
 func lightingFor(material core.MaterialSet) lightingProfile {
-	if material == core.MaterialDungeon {
+	if core.MaterialIsIndoor(material) {
 		return dungeonLighting
 	}
 	return fieldLighting

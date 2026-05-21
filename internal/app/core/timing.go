@@ -75,6 +75,16 @@ type TimingState struct {
 	SweetSpot   float32
 	Quality     int
 
+	// Window2Start / Window2End / SweetSpot2 are the optional SECOND press
+	// acceptance window for multi-zone press bars (e.g. Swipe — two hit
+	// zones across the same sweep). Window2End == 0 means "single-window
+	// press bar", which is the default for NewTimingState. NewDoublePressState
+	// is the constructor that populates these. Charge / sequence bars
+	// ignore them.
+	Window2Start float32
+	Window2End   float32
+	SweetSpot2   float32
+
 	// Sequence-kind state (unused for press/charge). Targets is the random
 	// run of directions; Cursor points at the next slot to fill; Results is
 	// parallel to Targets and holds Pending / Correct / Wrong per slot.
@@ -94,30 +104,150 @@ func NewTimingState(rng *rand.Rand, duration float32) TimingState {
 	if duration <= 0 {
 		duration = AttackTimingDuration
 	}
-	span := PressWindow.MaxStart - PressWindow.MinStart
-	startPct := PressWindow.MinStart + float32(rng.Float64())*span
-	endPct := startPct + PressWindow.Width
-	if endPct > PressWindow.MaxEnd {
-		// Clamp so the window never bumps against the bar's tail. Slide it
-		// back so the full width fits.
-		endPct = PressWindow.MaxEnd
-		startPct = endPct - PressWindow.Width
-	}
-	sweet := (startPct + endPct) * 0.5
+	start, end, sweet := randomizedPressWindow(rng, PressWindow.MinStart, PressWindow.MaxStart, PressWindow.Width, PressWindow.MaxEnd)
 	return TimingState{
 		Kind:        TimingKindPress,
 		Active:      true,
 		Duration:    duration,
-		WindowStart: startPct * duration,
-		WindowEnd:   endPct * duration,
+		WindowStart: start * duration,
+		WindowEnd:   end * duration,
 		SweetSpot:   sweet * duration,
 	}
+}
+
+// NewDoublePressState builds a press-kind bar with TWO acceptance windows
+// — one in each half of the sweep. Used by skills like Swipe where the
+// player sees two distinct hit zones and presses inside either one. Each
+// window grades independently (full Miss → Excellent ladder) so picking
+// the closer zone never penalizes the player.
+//
+// Window 1 randomizes inside DoublePressWindow.Window1, window 2 inside
+// DoublePressWindow.Window2 — never overlapping, with a guaranteed gap
+// between them so the player reads "two zones" instead of "wide zone".
+func NewDoublePressState(rng *rand.Rand, duration float32) TimingState {
+	if duration <= 0 {
+		duration = AttackTimingDuration
+	}
+	w1Start, w1End, w1Sweet := randomizedPressWindow(rng, DoublePressWindow.Window1MinStart, DoublePressWindow.Window1MaxStart, DoublePressWindow.Width, DoublePressWindow.Window1MaxEnd)
+	w2Start, w2End, w2Sweet := randomizedPressWindow(rng, DoublePressWindow.Window2MinStart, DoublePressWindow.Window2MaxStart, DoublePressWindow.Width, DoublePressWindow.Window2MaxEnd)
+	return TimingState{
+		Kind:         TimingKindPress,
+		Active:       true,
+		Duration:     duration,
+		WindowStart:  w1Start * duration,
+		WindowEnd:    w1End * duration,
+		SweetSpot:    w1Sweet * duration,
+		Window2Start: w2Start * duration,
+		Window2End:   w2End * duration,
+		SweetSpot2:   w2Sweet * duration,
+	}
+}
+
+// randomizedPressWindow returns (start, end, sweet) fractions for a press
+// window placed inside [minStart, maxStart] with the fixed `width`. If the
+// roll would push the window past `maxEnd` it slides back so the full
+// width still fits. Shared by NewTimingState and NewDoublePressState so
+// the slide-to-fit rule lives in one place.
+func randomizedPressWindow(rng *rand.Rand, minStart, maxStart, width, maxEnd float32) (start, end, sweet float32) {
+	span := maxStart - minStart
+	if span < 0 {
+		span = 0
+	}
+	start = minStart + float32(rng.Float64())*span
+	end = start + width
+	if end > maxEnd {
+		end = maxEnd
+		start = end - width
+	}
+	sweet = (start + end) * 0.5
+	return
+}
+
+// chargeSegments is the piecewise-linear curve mapping a charge bar's
+// elapsed-time fraction [0, 1] to its visual cursor fraction [0, 1].
+// Each row is the (visual, elapsed) breakpoint at the end of a segment;
+// the cursor interpolates linearly between adjacent rows. Visual slope
+// (visual_span / elapsed_span) strictly increases through the three
+// tick segments and into the peak — that's the cursor accelerating with
+// every notch the player picks up.
+//
+// Tick lines and peak band sit at constant visual quarters (0.25 / 0.50
+// / 0.75 / 0.85 — see ChargeTickNPct in config.go); the *elapsed* values
+// here are what stretch and squeeze the cursor's speed across them.
+// Touch one row and both render and grade follow.
+var chargeSegments = [...]struct {
+	Visual, Elapsed float32
+}{
+	{0.00, 0.00},
+	{ChargeTick1Pct, 0.45},  // segment 0 — slow lead-in (slope ≈ 0.56)
+	{ChargeTick2Pct, 0.70},  // segment 1 — speeds up (slope ≈ 1.00)
+	{ChargeTick3Pct, 0.88},  // segment 2 — faster yet (slope ≈ 1.39)
+	{ChargePeakEnd, 0.94},   // segment 3 — peak window (slope ≈ 1.67)
+	{1.00, 1.00},            // segment 4 — decay, past the player's reach
+}
+
+// ChargeCursorProgress maps a charge bar's elapsed time to its visual
+// cursor position [0, 1]. Non-linear via chargeSegments — the cursor
+// accelerates through each segment. Single source of truth for both
+// rendering (cursor X, tick line / peak / decay band positions) and
+// grading (resolveCharge compares visual progress to the visual tick
+// constants).
+func ChargeCursorProgress(elapsed, duration float32) float32 {
+	if duration <= 0 || elapsed <= 0 {
+		return 0
+	}
+	t := elapsed / duration
+	if t >= 1 {
+		return 1
+	}
+	for i := 1; i < len(chargeSegments); i++ {
+		cur := chargeSegments[i]
+		if t <= cur.Elapsed {
+			prev := chargeSegments[i-1]
+			span := cur.Elapsed - prev.Elapsed
+			if span <= 0 {
+				return cur.Visual
+			}
+			frac := (t - prev.Elapsed) / span
+			return prev.Visual + frac*(cur.Visual-prev.Visual)
+		}
+	}
+	return 1
+}
+
+// ChargeElapsedForVisual is the inverse of ChargeCursorProgress: given a
+// target visual cursor position [0, 1], returns the elapsed time at which
+// the cursor reaches that visual position. Render code uses this to ask
+// "when did the cursor cross this tick" without re-solving the curve.
+func ChargeElapsedForVisual(visual, duration float32) float32 {
+	if duration <= 0 || visual <= 0 {
+		return 0
+	}
+	if visual >= 1 {
+		return duration
+	}
+	for i := 1; i < len(chargeSegments); i++ {
+		cur := chargeSegments[i]
+		if visual <= cur.Visual {
+			prev := chargeSegments[i-1]
+			span := cur.Visual - prev.Visual
+			if span <= 0 {
+				return cur.Elapsed * duration
+			}
+			frac := (visual - prev.Visual) / span
+			return (prev.Elapsed + frac*(cur.Elapsed-prev.Elapsed)) * duration
+		}
+	}
+	return duration
 }
 
 // NewChargeState builds a freshly-armed charge-kind bar. The bar runs for
 // `duration` seconds; three tick markers land before the peak window opens
 // at ChargePeakStart and closes at ChargePeakEnd. The sweet spot is centered
-// in the peak window.
+// in the peak window. WindowStart/End/SweetSpot are stored as elapsed times
+// (inverted through chargeSegments) so callers reading TimingState.Elapsed
+// against them — e.g., the renderer's "RELEASE!" heading flip — keep their
+// linear-elapsed comparisons honest under the non-linear cursor curve.
 func NewChargeState(duration float32) TimingState {
 	if duration <= 0 {
 		duration = ChargeTimingDuration
@@ -126,9 +256,9 @@ func NewChargeState(duration float32) TimingState {
 		Kind:        TimingKindCharge,
 		Active:      true,
 		Duration:    duration,
-		WindowStart: ChargePeakStart * duration,
-		WindowEnd:   ChargePeakEnd * duration,
-		SweetSpot:   (ChargePeakStart + ChargePeakEnd) * 0.5 * duration,
+		WindowStart: ChargeElapsedForVisual(ChargePeakStart, duration),
+		WindowEnd:   ChargeElapsedForVisual(ChargePeakEnd, duration),
+		SweetSpot:   ChargeElapsedForVisual((ChargePeakStart+ChargePeakEnd)*0.5, duration),
 	}
 }
 
@@ -181,12 +311,20 @@ func (t *TimingState) Tick(dt float32) {
 		// Time's up — pending slots count as wrong, grade what we have.
 		t.resolveSequence()
 	default:
-		t.resolve(false)
+		// Press bar timed out without a press — auto-Miss, regardless of
+		// how many windows the bar carried.
+		t.Resolved = true
+		t.Quality = TimingQualityMiss
 	}
 }
 
 // Press records a press-kind input. Returns true if this press resolved the
 // bar. For charge-kind bars, use Hold/Release instead.
+//
+// For multi-zone press bars (Window2End > 0), the press grades against
+// whichever acceptance window the cursor is currently in — Miss if it's
+// outside both. Each window has its own sweet spot and gradient bands;
+// the player isn't penalized for aiming at the closer zone.
 func (t *TimingState) Press() bool {
 	if !t.Active || t.Resolved || t.Pressed {
 		return false
@@ -195,9 +333,29 @@ func (t *TimingState) Press() bool {
 		return false
 	}
 	t.Pressed = true
-	inWindow := t.Elapsed >= t.WindowStart && t.Elapsed <= t.WindowEnd
-	t.resolve(inWindow)
+	if start, end, sweet, ok := t.activePressWindow(); ok {
+		t.resolveInWindow(start, end, sweet)
+	} else {
+		t.Resolved = true
+		t.Quality = TimingQualityMiss
+	}
 	return true
+}
+
+// activePressWindow returns the (start, end, sweet) of the press window
+// the cursor is currently inside, with ok=false if neither window
+// contains the cursor. For single-zone bars, only the primary window is
+// considered; for double-zone bars, both are checked in left-to-right
+// order so a window that happened to overlap (shouldn't, per config
+// guards) still grades against the first one the cursor entered.
+func (t TimingState) activePressWindow() (start, end, sweet float32, ok bool) {
+	if t.Elapsed >= t.WindowStart && t.Elapsed <= t.WindowEnd {
+		return t.WindowStart, t.WindowEnd, t.SweetSpot, true
+	}
+	if t.Window2End > 0 && t.Elapsed >= t.Window2Start && t.Elapsed <= t.Window2End {
+		return t.Window2Start, t.Window2End, t.SweetSpot2, true
+	}
+	return 0, 0, 0, false
 }
 
 // Hold marks the charge bar as engaged. Idempotent — sets Pressed=true on
@@ -280,40 +438,44 @@ func (t *TimingState) resolveSequence() {
 }
 
 // resolveCharge grades a charge release by counting how many tick markers
-// the player crossed PAST before letting go. Each tick is a discrete grade
-// jump, so a release that lands one frame before the third tick scores the
-// same as one that lands halfway between the second and third. The peak
-// window (3 ticks completed) is split into Great vs Excellent based on
-// closeness to the sweet spot. Past the peak window the release decays
-// straight to Miss — over-charging isn't rewarded.
+// the cursor crossed (visually) before the player let go. Each tick is a
+// discrete grade jump, so a release that lands one frame before the third
+// tick scores the same as one that lands halfway between the second and
+// third. The peak window (3 ticks completed) is split into Great vs
+// Excellent based on closeness to the sweet spot. Past the peak window
+// the release decays straight to Miss — over-charging isn't rewarded.
 //
-// Grade dispatch:
+// Grading reads the cursor's *visual* position (via ChargeCursorProgress),
+// not raw Elapsed, so the non-linear acceleration curve drives both what
+// the player sees and what they're scored against — no drift between the
+// cursor crossing a tick line on screen and the bar awarding that tick.
 //
-//	0 ticks crossed (Elapsed < tick1):           Miss
-//	1 tick crossed  (tick1 <= Elapsed < tick2):  Nice
-//	2 ticks crossed (tick2 <= Elapsed < tick3):  Good
-//	3 ticks crossed in peak window:              Great or Excellent
-//	past peak window:                            Miss
+// Grade dispatch (p = cursor visual progress):
+//
+//	0 ticks crossed (p < ChargeTick1Pct):                          Miss
+//	1 tick crossed  (ChargeTick1Pct <= p < ChargeTick2Pct):        Nice
+//	2 ticks crossed (ChargeTick2Pct <= p < ChargeTick3Pct):        Good
+//	3 ticks crossed in peak window (p <= ChargePeakEnd):           Great or Excellent
+//	past peak window:                                              Miss
 func (t *TimingState) resolveCharge() {
 	t.Resolved = true
-	tick1 := ChargeTick1Pct * t.Duration
-	tick2 := ChargeTick2Pct * t.Duration
-	tick3 := ChargeTick3Pct * t.Duration
+	p := ChargeCursorProgress(t.Elapsed, t.Duration)
 
 	switch {
-	case t.Elapsed < tick1:
+	case p < ChargeTick1Pct:
 		t.Quality = TimingQualityMiss
-	case t.Elapsed < tick2:
+	case p < ChargeTick2Pct:
 		t.Quality = TimingQualityNice
-	case t.Elapsed < tick3:
+	case p < ChargeTick3Pct:
 		t.Quality = TimingQualityGood
-	case t.Elapsed <= t.WindowEnd:
+	case p <= ChargePeakEnd:
 		// In the peak window — split Great vs Excellent on sweet-spot proximity.
-		distance := t.Elapsed - t.SweetSpot
+		sweet := (ChargePeakStart + ChargePeakEnd) * 0.5
+		distance := p - sweet
 		if distance < 0 {
 			distance = -distance
 		}
-		windowSize := t.WindowEnd - t.WindowStart
+		windowSize := ChargePeakEnd - ChargePeakStart
 		if windowSize <= 0 || distance/windowSize <= 0.30 {
 			t.Quality = TimingQualityExcellent
 		} else {
@@ -325,17 +487,19 @@ func (t *TimingState) resolveCharge() {
 	}
 }
 
-func (t *TimingState) resolve(inWindow bool) {
+// resolveInWindow grades a press against an explicit (start, end, sweet)
+// window. Distance from the sweet spot, normalized by the window's
+// half-width, picks a grade off pressGradeBands. Callers must verify the
+// cursor is inside the window first — an out-of-window press should be
+// resolved as Miss by the caller, not by passing a zero-width window
+// (that path quietly returns Nice).
+func (t *TimingState) resolveInWindow(start, end, sweet float32) {
 	t.Resolved = true
-	if !inWindow {
-		t.Quality = TimingQualityMiss
-		return
-	}
-	distance := t.Elapsed - t.SweetSpot
+	distance := t.Elapsed - sweet
 	if distance < 0 {
 		distance = -distance
 	}
-	windowSize := t.WindowEnd - t.WindowStart
+	windowSize := end - start
 	if windowSize <= 0 {
 		t.Quality = TimingQualityNice
 		return
@@ -343,10 +507,15 @@ func (t *TimingState) resolve(inWindow bool) {
 	t.Quality = gradeFromRatio(distance / windowSize)
 }
 
-// Progress returns the current sweep position in [0, 1].
+// Progress returns the current sweep position in [0, 1]. For charge bars
+// this runs through ChargeCursorProgress so the cursor accelerates with
+// each notch; for press / sequence bars it's a straight Elapsed/Duration.
 func (t TimingState) Progress() float32 {
 	if t.Duration <= 0 {
 		return 0
+	}
+	if t.Kind == TimingKindCharge {
+		return ChargeCursorProgress(t.Elapsed, t.Duration)
 	}
 	p := t.Elapsed / t.Duration
 	if p < 0 {
@@ -411,19 +580,22 @@ func gradeFromRatio(ratio float32) int {
 // pressed right now. Used by the renderer to live-color the cursor so the
 // player sees their potential grade approaching — Excellent shimmers as they
 // near the sweet spot, slips to Great, then Good, etc. Returns Miss when the
-// cursor is outside the acceptance window (or the bar isn't a press kind).
+// cursor is outside every acceptance window (or the bar isn't a press kind).
+// Routes through activePressWindow so single-zone and double-zone bars share
+// one grading path.
 func (t TimingState) PreviewQuality() int {
 	if t.Kind != TimingKindPress {
 		return TimingQualityMiss
 	}
-	if t.Elapsed < t.WindowStart || t.Elapsed > t.WindowEnd {
+	start, end, sweet, ok := t.activePressWindow()
+	if !ok {
 		return TimingQualityMiss
 	}
-	windowSize := t.WindowEnd - t.WindowStart
+	windowSize := end - start
 	if windowSize <= 0 {
 		return TimingQualityNice
 	}
-	distance := t.Elapsed - t.SweetSpot
+	distance := t.Elapsed - sweet
 	if distance < 0 {
 		distance = -distance
 	}

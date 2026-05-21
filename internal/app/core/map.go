@@ -397,6 +397,98 @@ func AdjacentInteractableChestIndex(chests []Chest, x, z int) int {
 	return idx
 }
 
+// PackSpawnIndexAt returns the index of the pack spawn at the given
+// tile, or -1 when none. Authored-list mirror of the in-pack ChestIndexAt
+// helper; the editor's hover summary uses it and a future "tile
+// inspector" anywhere else can reuse it.
+func PackSpawnIndexAt(spawns []PackSpawn, x, z int) int {
+	for i, sp := range spawns {
+		if sp.TileX == x && sp.TileZ == z {
+			return i
+		}
+	}
+	return -1
+}
+
+// ChestSpawnIndexAt returns the index of the chest spawn at the given
+// tile, or -1 when none. Authored-list counterpart to runtime
+// ChestIndexAt.
+func ChestSpawnIndexAt(spawns []ChestSpawn, x, z int) int {
+	for i, sp := range spawns {
+		if sp.TileX == x && sp.TileZ == z {
+			return i
+		}
+	}
+	return -1
+}
+
+// DoorSpawnIndexAt returns the index of the door spawn at the given
+// tile, or -1 when none. Authored-list counterpart to runtime
+// DoorIndexAt.
+func DoorSpawnIndexAt(spawns []DoorSpawn, x, z int) int {
+	for i, sp := range spawns {
+		if sp.TileX == x && sp.TileZ == z {
+			return i
+		}
+	}
+	return -1
+}
+
+// AreaTileSummary returns a compact human-readable description of
+// what's painted on the (x, z) tile across every layer + every
+// entity list. Empty layers are omitted so a clean grass cell reads
+// as just "Grass" rather than "Open / Grass / — / —". Returns
+// "(empty)" only when the cell holds nothing. Returns "" for an
+// out-of-bounds tile.
+//
+// Used by the editor's hover-tile readout and reusable by any future
+// in-game tile inspector / debug overlay. Moved out of the editor
+// package so the per-layer label + entity walk lives in one place.
+func AreaTileSummary(a AreaDefinition, x, z int) string {
+	if !a.InBounds(x, z) {
+		return ""
+	}
+	parts := make([]string, 0, 8)
+	if lbl := TileLabel(TileLayerWalls, a.Walls[z][x]); lbl != "" {
+		parts = append(parts, lbl)
+	}
+	if lbl := TileLabel(TileLayerFloor, a.Floor[z][x]); lbl != "" {
+		parts = append(parts, lbl)
+	}
+	if lbl := TileLabel(TileLayerDecor, a.Decor[z][x]); lbl != "" {
+		parts = append(parts, lbl)
+	}
+	if lbl := TileLabel(TileLayerProps, a.Props[z][x]); lbl != "" {
+		parts = append(parts, lbl)
+	}
+	if a.StartTileX == x && a.StartTileZ == z {
+		parts = append(parts, "Start")
+	}
+	if PackSpawnIndexAt(a.PackSpawns, x, z) >= 0 {
+		parts = append(parts, "Pack")
+	}
+	if ChestSpawnIndexAt(a.ChestSpawns, x, z) >= 0 {
+		parts = append(parts, "Chest")
+	}
+	if DoorSpawnIndexAt(a.DoorSpawns, x, z) >= 0 {
+		parts = append(parts, "Door")
+	}
+	if len(parts) == 0 {
+		return "(empty)"
+	}
+	return joinSummary(parts)
+}
+
+// joinSummary concatenates AreaTileSummary parts with " / " — pulled
+// out so core/map.go doesn't pull in "strings" just for one call.
+func joinSummary(parts []string) string {
+	out := parts[0]
+	for _, p := range parts[1:] {
+		out += " / " + p
+	}
+	return out
+}
+
 // FloorAt is the inverse of BlockedAt — true when the cell is walkable.
 func (a AreaDefinition) FloorAt(x, z int) bool {
 	return !a.BlockedAt(x, z)
@@ -597,9 +689,14 @@ func FloorTileChars() []byte {
 	return out
 }
 
-// TileLayer enumerates the four authored grid layers. Used as a typed
-// parameter to TileLabel so callers can't pass a typo'd layer string
-// silently and get "?" back.
+// TileLayer enumerates the four authored grid layers that carry a
+// tile char (walls / floor / decor / props). The editor's `Layer`
+// enum adds Ceiling and Entities on top: Ceiling has its own grid
+// but reuses '.' / '#' from the walls registry rather than declaring
+// new chars (so TileLabel's per-layer dispatch doesn't add a row for
+// it), and Entities aren't tile chars at all — they live in the
+// spawn slices. If a future surface needs to walk all SIX of the
+// editor's layers, it should keep that asymmetry in mind.
 type TileLayer int
 
 const (
@@ -696,6 +793,15 @@ var tileLabelTable = map[TileLayer]map[byte]string{
 // walks below mirror the existing minimap-color and entityBrushColors
 // inits — adding a new floor/decor/prop const without a label panics
 // at startup instead of returning "?" from a debug overlay later.
+//
+// Additionally, asserts that any byte appearing on multiple grid
+// layers is registered as an INTENDED cross-layer overlap in
+// crossLayerCharOverlaps. The per-layer dispatch in
+// world.go / map.go / TileLabel makes overlaps safe today, but the
+// editor's hoverTileSummary and any future "what's at this tile?"
+// surface would render two different labels for the same char. An
+// unregistered collision panics at startup so the author has to
+// confirm the overlap is deliberate.
 func init() {
 	floorLabels := tileLabelTable[TileLayerFloor]
 	for _, c := range floorTileCharList {
@@ -714,6 +820,93 @@ func init() {
 		if _, ok := propLabels[c]; !ok {
 			panic("core: prop char '" + string(c) + "' missing from tileLabelTable[TileLayerProps]")
 		}
+	}
+	assertNoUnregisteredCrossLayerOverlaps()
+}
+
+// crossLayerOverlap pairs the two layers that share a byte AND the
+// label each layer assigns to it. Both are recorded so a future
+// reader can see WHY the overlap is intentional ("water on floor and
+// a well prop happen to spell the same char").
+type crossLayerOverlap struct {
+	A, B   TileLayer
+	Char   byte
+	NameA  string
+	NameB  string
+	Reason string
+}
+
+// crossLayerCharOverlaps is the registry of deliberately-shared byte
+// values across grid layers. Each pair was vetted at the time of
+// authoring: per-layer dispatch keeps the overlap safe AND no surface
+// reads "what's at this tile?" without specifying the layer (the
+// editor's hoverTileSummary walks every layer separately and labels
+// them with the layer name, so two labels for the same char are fine).
+// A new overlap must register here or the init assert below panics.
+var crossLayerCharOverlaps = []crossLayerOverlap{
+	{
+		A: TileLayerFloor, B: TileLayerProps, Char: 'W',
+		NameA: "FloorDeepWater", NameB: "TileWell",
+		Reason: "deep-water floor tile and the village well prop happen to share the 'W' mnemonic; layers are dispatched independently.",
+	},
+	{
+		A: TileLayerDecor, B: TileLayerProps, Char: 'A',
+		NameA: "DecorArchway", NameB: "TileSarcophagus",
+		Reason: "archway-anchor decor and stone sarcophagus prop share the 'A' mnemonic.",
+	},
+	{
+		A: TileLayerDecor, B: TileLayerProps, Char: 'L',
+		NameA: "DecorLeafPile", NameB: "TileTable",
+		Reason: "leaf-pile decor and dungeon table prop share the 'L' mnemonic (L for Leaf and L for table-Leg).",
+	},
+	{
+		A: TileLayerDecor, B: TileLayerFloor, Char: 'c',
+		NameA: "DecorCandle", NameB: "FloorCobble",
+		Reason: "candle decor and cobblestone floor tile share the 'c' mnemonic.",
+	},
+	{
+		A: TileLayerDecor, B: TileLayerFloor, Char: 'i',
+		NameA: "DecorBootprints", NameB: "FloorSnow",
+		Reason: "bootprint decor and snow floor tile share the 'i' mnemonic — bootprints on snow happens to be a natural pairing.",
+	},
+	{
+		A: TileLayerDecor, B: TileLayerFloor, Char: 'k',
+		NameA: "DecorRootCluster", NameB: "FloorDarkGrass",
+		Reason: "root-cluster decor and dark-grass floor share the 'k' mnemonic.",
+	},
+}
+
+// assertNoUnregisteredCrossLayerOverlaps walks every (layer, char)
+// pair in tileLabelTable and pairs them up by char. Any char appearing
+// on >1 layer that isn't covered by crossLayerCharOverlaps panics.
+// Sentinel chars ('.' / '_' / '#') are skipped — those are shared by
+// design across layers (e.g. '.' means "open" everywhere).
+func assertNoUnregisteredCrossLayerOverlaps() {
+	sentinels := map[byte]struct{}{
+		'.': {}, '_': {}, '#': {},
+	}
+	// chars[c] -> list of layers where it's a registered tile.
+	chars := make(map[byte][]TileLayer)
+	for layer, labels := range tileLabelTable {
+		for c := range labels {
+			if _, sentinel := sentinels[c]; sentinel {
+				continue
+			}
+			chars[c] = append(chars[c], layer)
+		}
+	}
+	registered := make(map[byte]struct{}, len(crossLayerCharOverlaps))
+	for _, o := range crossLayerCharOverlaps {
+		registered[o.Char] = struct{}{}
+	}
+	for c, layers := range chars {
+		if len(layers) < 2 {
+			continue
+		}
+		if _, ok := registered[c]; ok {
+			continue
+		}
+		panic("core: cross-layer char '" + string(c) + "' is shared by multiple layers but not registered in crossLayerCharOverlaps — add an entry documenting why this is deliberate")
 	}
 }
 

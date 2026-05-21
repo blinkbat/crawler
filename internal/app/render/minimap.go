@@ -41,7 +41,7 @@ func drawMinimap(m core.AreaDefinition, g core.GameState, assets Resources) {
 			mapX := startX + int(localX)
 			mapZ := startZ + int(localZ)
 			col := rl.NewColor(8, 10, 14, 235)
-			if mapX >= 0 && mapX < m.Width && mapZ >= 0 && mapZ < m.Height {
+			if m.InBounds(mapX, mapZ) {
 				col = minimapTileColor(m.Materials, m.TileAt(mapX, mapZ))
 			}
 			rl.DrawRectangle(gridX+localX*cell, gridY+localZ*cell, cell-1, cell-1, col)
@@ -59,8 +59,8 @@ func drawMinimap(m core.AreaDefinition, g core.GameState, assets Resources) {
 		}
 		x := gridX + int32(localX)*cell + cell/2
 		z := gridY + int32(localZ)*cell + cell/2
-		rl.DrawCircle(x, z, 4, rl.NewColor(220, 76, 70, 255))
-		rl.DrawCircleLines(x, z, 5, rl.NewColor(255, 200, 200, 220))
+		rl.DrawCircle(x, z, 4, mapPackMarkerColor)
+		rl.DrawCircleLines(x, z, 5, mapPackMarkerOutline)
 	}
 
 	drawMinimapArrow(
@@ -128,8 +128,9 @@ var minimapPropColors = map[byte]rl.Color{
 }
 
 func minimapTileColor(material core.MaterialSet, tile byte) color.RGBA {
+	indoor := core.MaterialIsIndoor(material)
 	if tile == core.TileRock {
-		if material == core.MaterialDungeon {
+		if indoor {
 			return rl.NewColor(132, 132, 126, 235)
 		}
 		return rl.NewColor(112, 112, 106, 235)
@@ -140,7 +141,7 @@ func minimapTileColor(material core.MaterialSet, tile byte) color.RGBA {
 	if col, ok := minimapPropColors[tile]; ok {
 		return col
 	}
-	if material == core.MaterialDungeon {
+	if indoor {
 		return rl.NewColor(82, 84, 88, 235)
 	}
 	return rl.NewColor(60, 121, 54, 235)
@@ -189,26 +190,79 @@ var phaseColors = [core.TimeOfDayCount]rl.Color{
 	core.Midnight:  rl.NewColor(40, 56, 110, 255),   // midnight — deep blue
 }
 
-func drawMinimapArrow(center rl.Vector2, facing int) {
-	const arrowSize = float32(7)
+// playerArrowColor is the shared green tint used wherever the player's
+// facing is drawn on a 2D map surface (corner minimap + panels Map
+// tab). Named so palette changes touch one literal.
+var playerArrowColor = rl.NewColor(132, 240, 148, 255)
+
+// 2D map surface marker palette — shared by the corner minimap and
+// the panels Map tab so a future tuning pass adjusts both surfaces in
+// one edit. Pack markers are red (danger), chest markers are gold
+// (loot), door markers are warm wood (passage). The Looted chest
+// variant dims the gold so a played-through dungeon reads at a
+// glance.
+// mapPackMarkerColor / mapChestMarkerColor / mapDoorMarkerColor /
+// mapChestLootedColor / mapPackMarkerOutline now alias the theme's
+// marker palette so the minimap and the editor canvas can never drift
+// on entity tone. The fog values stay local — they're a minimap-only
+// concept.
+var (
+	mapPackMarkerColor    = markerPack
+	mapPackMarkerOutline  = markerPackEdge
+	mapChestMarkerColor   = markerChest
+	mapChestLootedColor   = markerChestDim
+	mapDoorMarkerColor    = markerDoor
+	mapUnexploredFogColor = color.RGBA{R: 14, G: 18, B: 28, A: 255}
+	mapUnexploredFogMix   = 0.78
+)
+
+// tileColorWithFog returns the on-screen color for a tile at (visited
+// state). Wraps minimapTileColor so callers don't have to interleave
+// the visited check with the layer lookup — the panels Map tab and
+// any future fog-aware minimap pass go through the same helper.
+// `tile` is the compositing char from AreaDefinition.TileAt; alpha
+// is preserved from the unfogged base.
+func tileColorWithFog(material core.MaterialSet, tile byte, visited bool) color.RGBA {
+	base := minimapTileColor(material, tile)
+	if visited {
+		return base
+	}
+	fog := mapUnexploredFogColor
+	fog.A = base.A
+	return core.MixColor(base, fog, mapUnexploredFogMix)
+}
+
+// drawFacingArrow paints a triangle at `center` pointing in `facing`.
+// `forward` is the half-depth (tip distance from center along facing)
+// AND the half-depth behind center for the base; `sideways` is the
+// base's half-width perpendicular to facing. Equilateral triangle when
+// forward == sideways; longer / thinner spear when sideways < forward.
+// Shared by the minimap's player arrow and the panels Map-tab arrow so
+// a future palette / shape tweak applies to both.
+func drawFacingArrow(center rl.Vector2, forward, sideways float32, facing int, col rl.Color) {
 	var tip, left, right rl.Vector2
 	switch core.NormalizeFacing(facing) {
 	case core.North:
-		tip = rl.NewVector2(center.X, center.Y-arrowSize)
-		left = rl.NewVector2(center.X-arrowSize, center.Y+arrowSize)
-		right = rl.NewVector2(center.X+arrowSize, center.Y+arrowSize)
+		tip = rl.NewVector2(center.X, center.Y-forward)
+		left = rl.NewVector2(center.X-sideways, center.Y+forward)
+		right = rl.NewVector2(center.X+sideways, center.Y+forward)
 	case core.East:
-		tip = rl.NewVector2(center.X+arrowSize, center.Y)
-		left = rl.NewVector2(center.X-arrowSize, center.Y-arrowSize)
-		right = rl.NewVector2(center.X-arrowSize, center.Y+arrowSize)
+		tip = rl.NewVector2(center.X+forward, center.Y)
+		left = rl.NewVector2(center.X-forward, center.Y-sideways)
+		right = rl.NewVector2(center.X-forward, center.Y+sideways)
 	case core.South:
-		tip = rl.NewVector2(center.X, center.Y+arrowSize)
-		left = rl.NewVector2(center.X+arrowSize, center.Y-arrowSize)
-		right = rl.NewVector2(center.X-arrowSize, center.Y-arrowSize)
+		tip = rl.NewVector2(center.X, center.Y+forward)
+		left = rl.NewVector2(center.X+sideways, center.Y-forward)
+		right = rl.NewVector2(center.X-sideways, center.Y-forward)
 	case core.West:
-		tip = rl.NewVector2(center.X-arrowSize, center.Y)
-		left = rl.NewVector2(center.X+arrowSize, center.Y+arrowSize)
-		right = rl.NewVector2(center.X+arrowSize, center.Y-arrowSize)
+		tip = rl.NewVector2(center.X-forward, center.Y)
+		left = rl.NewVector2(center.X+forward, center.Y+sideways)
+		right = rl.NewVector2(center.X+forward, center.Y-sideways)
 	}
-	drawTriangleCCW(tip, left, right, rl.NewColor(132, 240, 148, 255))
+	drawTriangleCCW(tip, left, right, col)
+}
+
+func drawMinimapArrow(center rl.Vector2, facing int) {
+	// Equilateral so the corner minimap reads as a chunky compass.
+	drawFacingArrow(center, 7, 7, facing, playerArrowColor)
 }

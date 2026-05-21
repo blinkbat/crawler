@@ -40,6 +40,13 @@ func NewGameState(area AreaDefinition) GameState {
 	// to the nearest valid cell so downstream Walls[Z][X] reads don't panic.
 	startX := clampStartCoord(area.StartTileX, area.Width)
 	startZ := clampStartCoord(area.StartTileZ, area.Height)
+	visited := make([][]bool, area.Height)
+	for z := range visited {
+		visited[z] = make([]bool, area.Width)
+	}
+	if area.InBounds(startX, startZ) {
+		visited[startZ][startX] = true
+	}
 	g := GameState{
 		Area:      area,
 		Player:    NewPlayer(startX, startZ, area.StartFacing),
@@ -47,6 +54,7 @@ func NewGameState(area AreaDefinition) GameState {
 		Packs:     placePacks(area),
 		Chests:    placeChests(area),
 		Doors:     placeDoors(area),
+		Visited:   visited,
 		ChestOpen: -1,
 		Battle: Battle{
 			ActivePack:        -1,

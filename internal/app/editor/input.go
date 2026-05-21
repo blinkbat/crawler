@@ -12,25 +12,53 @@ import (
 
 // updateHotkeys handles keyboard shortcuts when no text field is focused.
 func updateHotkeys(s *State) {
-	// 1..9 select a brush within the active layer's palette. Layers with
-	// fewer than 9 brushes simply ignore the higher numbers; brushes past
-	// index 8 leave Hotkey at 0 (no binding) and stay mouse-only.
-	palette := layerBrushes[s.layer]
-	for i, b := range palette {
-		if b.Hotkey == 0 {
-			continue
-		}
-		if rl.IsKeyPressed(b.Hotkey) {
-			s.brushIdx[s.layer] = i
+	ctrl := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
+	shift := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
+	alt := rl.IsKeyDown(rl.KeyLeftAlt) || rl.IsKeyDown(rl.KeyRightAlt)
+
+	// Alt+1..6 jumps directly to a layer — saves Tab-cycling when the
+	// author knows which layer they want. Number row only; the keypad
+	// equivalents aren't bound to keep the binding compact.
+	if alt {
+		layerKeys := []int32{rl.KeyOne, rl.KeyTwo, rl.KeyThree, rl.KeyFour, rl.KeyFive, rl.KeySix}
+		for i, k := range layerKeys {
+			if rl.IsKeyPressed(k) {
+				s.layer = Layer(i)
+				return
+			}
 		}
 	}
 
-	ctrl := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
-	shift := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
+	// 1..9 select a brush within the active layer's palette. Shift+1..9
+	// picks brushes 9..17 in the same layer so the second row of long
+	// palettes (props, decor) is keyboard-reachable without scrolling.
+	// Brushes past index 17 stay mouse-only.
+	palette := layerBrushes[s.layer]
+	if !ctrl && !alt {
+		offset := 0
+		if shift {
+			offset = 9
+		}
+		numKeys := []int32{rl.KeyOne, rl.KeyTwo, rl.KeyThree, rl.KeyFour, rl.KeyFive, rl.KeySix, rl.KeySeven, rl.KeyEight, rl.KeyNine}
+		for i, k := range numKeys {
+			idx := i + offset
+			if idx >= len(palette) {
+				break
+			}
+			if rl.IsKeyPressed(k) {
+				s.brushIdx[s.layer] = idx
+			}
+		}
+	}
 
 	switch {
 	case ctrl && shift && rl.IsKeyPressed(rl.KeyZ):
 		redoOne(s)
+	case ctrl && shift && rl.IsKeyPressed(rl.KeyF):
+		// Ctrl+Shift+F: fill the entire active grid layer with the
+		// active brush. Quick way to lay a base material (e.g. all
+		// stone floor) or wipe a layer back to a sentinel.
+		fillEntireLayer(s)
 	case ctrl && rl.IsKeyPressed(rl.KeyZ):
 		undoOne(s)
 	case ctrl && rl.IsKeyPressed(rl.KeyY):
@@ -41,6 +69,14 @@ func updateHotkeys(s *State) {
 		requestOpen(s)
 	case ctrl && rl.IsKeyPressed(rl.KeyN):
 		newMap(s)
+	}
+
+	// G centers the view on the player start so authors can jump back
+	// after panning into a far corner. Skip when on the entity layer's
+	// player-start brush (G isn't currently consumed there but reserving
+	// for future brush-specific hotkeys).
+	if !ctrl && !alt && rl.IsKeyPressed(rl.KeyG) {
+		centerViewOnTile(s, s.area.StartTileX, s.area.StartTileZ)
 	}
 
 	// Tab cycles to the next layer (Shift+Tab to the previous).
@@ -143,22 +179,22 @@ func updateGridCursor(s *State) {
 	moved := false
 	if rl.IsKeyPressed(rl.KeyLeft) {
 		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
-		s.gridCursorX = clampInt(s.gridCursorX-1, 0, mw-1)
+		s.gridCursorX = core.ClampInt(s.gridCursorX-1, 0, mw-1)
 		moved = true
 	}
 	if rl.IsKeyPressed(rl.KeyRight) {
 		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
-		s.gridCursorX = clampInt(s.gridCursorX+1, 0, mw-1)
+		s.gridCursorX = core.ClampInt(s.gridCursorX+1, 0, mw-1)
 		moved = true
 	}
 	if rl.IsKeyPressed(rl.KeyUp) {
 		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
-		s.gridCursorZ = clampInt(s.gridCursorZ-1, 0, mh-1)
+		s.gridCursorZ = core.ClampInt(s.gridCursorZ-1, 0, mh-1)
 		moved = true
 	}
 	if rl.IsKeyPressed(rl.KeyDown) {
 		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
-		s.gridCursorZ = clampInt(s.gridCursorZ+1, 0, mh-1)
+		s.gridCursorZ = core.ClampInt(s.gridCursorZ+1, 0, mh-1)
 		moved = true
 	}
 	if moved && s.gridCursorX >= 0 {
@@ -181,19 +217,9 @@ func activateCursor(s *State, mw, mh int) (int, int) {
 	if s.gridCursorX >= 0 {
 		return s.gridCursorX, s.gridCursorZ
 	}
-	x := clampInt(s.area.StartTileX, 0, mw-1)
-	z := clampInt(s.area.StartTileZ, 0, mh-1)
+	x := core.ClampInt(s.area.StartTileX, 0, mw-1)
+	z := core.ClampInt(s.area.StartTileZ, 0, mh-1)
 	return x, z
-}
-
-func clampInt(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
 }
 
 // updateMouse processes top-bar / palette / metadata clicks and grid
@@ -298,7 +324,7 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 			// same tile — see finishDrag's dragPack branch). Click on an
 			// empty tile falls through to "place a new pack with one
 			// member of this kind" via applyTool.
-			if idx := packIndexAt(s.area.PackSpawns, x, z); idx >= 0 {
+			if idx := core.PackSpawnIndexAt(s.area.PackSpawns, x, z); idx >= 0 {
 				s.drag = dragPack
 				s.dragPackIdx = idx
 				return
@@ -308,10 +334,20 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 			// the author can change the loot. Click on an empty tile
 			// falls through to applyTool which plants a new chest with
 			// the default starter loot.
-			if idx := chestSpawnIndexAt(s.area.ChestSpawns, x, z); idx >= 0 {
+			if idx := core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z); idx >= 0 {
 				s.modal = modalChestEdit
 				s.modalChestIdx = idx
 				s.modalCursor = 0
+				return
+			}
+		case entityPlaceDoor:
+			// Click on an existing door opens the door-edit modal so
+			// the author can set its target_map / target_door / facing
+			// without having to hand-edit the .map. Click on an empty
+			// tile falls through to applyTool which plants a fresh
+			// placeholder door.
+			if idx := core.DoorSpawnIndexAt(s.area.DoorSpawns, x, z); idx >= 0 {
+				openDoorEditModal(s, idx)
 				return
 			}
 		}
@@ -360,7 +396,7 @@ func finishDrag(s *State) {
 		if s.hoverX >= 0 && (s.hoverX != s.area.StartTileX || s.hoverZ != s.area.StartTileZ) {
 			if s.area.BlockedAt(s.hoverX, s.hoverZ) {
 				s.flash("Player start must be on an open cell")
-			} else if chestSpawnIndexAt(s.area.ChestSpawns, s.hoverX, s.hoverZ) >= 0 {
+			} else if core.ChestSpawnIndexAt(s.area.ChestSpawns, s.hoverX, s.hoverZ) >= 0 {
 				s.flash("Player start can't share a tile with a chest")
 			} else {
 				pushUndo(s)
@@ -377,7 +413,7 @@ func finishDrag(s *State) {
 					s.flash("Packs need an open cell")
 				} else if s.area.StartTileX == s.hoverX && s.area.StartTileZ == s.hoverZ {
 					s.flash("Cell holds the player start")
-				} else if chestSpawnIndexAt(s.area.ChestSpawns, s.hoverX, s.hoverZ) >= 0 {
+				} else if core.ChestSpawnIndexAt(s.area.ChestSpawns, s.hoverX, s.hoverZ) >= 0 {
 					s.flash("Cell holds a chest — clear it first")
 				} else {
 					pushUndo(s)
@@ -387,7 +423,7 @@ func finishDrag(s *State) {
 					// it to the destination. The old-coords lookup works
 					// because addPackMember keeps at most one pack per cell.
 					s.area.PackSpawns = removePackAt(s.area.PackSpawns, s.hoverX, s.hoverZ)
-					idx := packIndexAt(s.area.PackSpawns, sp.TileX, sp.TileZ)
+					idx := core.PackSpawnIndexAt(s.area.PackSpawns, sp.TileX, sp.TileZ)
 					if idx >= 0 {
 						s.area.PackSpawns[idx].TileX = s.hoverX
 						s.area.PackSpawns[idx].TileZ = s.hoverZ
@@ -456,15 +492,6 @@ func zoomBy(s *State, anchor rl.Vector2, factor float32) {
 	s.zoom = next
 }
 
-func packIndexAt(packs []core.PackSpawn, x, z int) int {
-	for i, sp := range packs {
-		if sp.TileX == x && sp.TileZ == z {
-			return i
-		}
-	}
-	return -1
-}
-
 func handleTopbarButton(s *State, name string) {
 	switch name {
 	case "new":
@@ -479,9 +506,21 @@ func handleTopbarButton(s *State, name string) {
 		s.focus = focusFilename
 	case "sounds":
 		openSoundsModal(s)
+	case "validate":
+		openValidateModal(s)
 	case "back":
 		s.exitRequested = true
 	}
+}
+
+// openValidateModal snapshots the current reachability and cross-map
+// door warnings into the modal so the user can read the full list at
+// once instead of the 4-row metadata-panel cap.
+func openValidateModal(s *State) {
+	rows := append([]string{}, reachabilityWarnings(s.area)...)
+	rows = append(rows, crossMapDoorWarnings(s.area)...)
+	s.modalValidateRows = rows
+	s.modal = modalValidate
 }
 
 // pumpPrintableASCII drains queued printable-ASCII characters into
@@ -664,6 +703,8 @@ var modalUpdaters = map[modalKind]func(*State) Action{
 	modalPackEdit:     updatePackEditModal,
 	modalChestEdit:    updateChestEditModal,
 	modalSounds:       updateSoundsModal,
+	modalDoorEdit:     updateDoorEditModal,
+	modalValidate:     updateValidateModal,
 }
 
 // closeModal is the single seam every modal updater goes through to
@@ -677,9 +718,183 @@ func closeModal(s *State) {
 	s.modalCursor = 0
 	s.modalPackIdx = -1
 	s.modalChestIdx = -1
+	s.modalDoorIdx = -1
+	s.modalValidateRows = nil
 	s.modalConfirmDelete = false
 	s.modalRenaming = ""
 	soundDrag.sliderIdx = -1
+	// Door-edit text focus survives outside the modal in pumpPrintableASCII's
+	// flow, so explicitly drop it here too.
+	if s.focus == focusDoorName || s.focus == focusDoorTargetMap || s.focus == focusDoorTargetDoor {
+		s.focus = focusNone
+	}
+}
+
+// openDoorEditModal opens the per-door editor for spawn index idx and
+// parks focus on the Name field. Mirrors the pack / chest path.
+func openDoorEditModal(s *State, idx int) {
+	if idx < 0 || idx >= len(s.area.DoorSpawns) {
+		return
+	}
+	s.modal = modalDoorEdit
+	s.modalDoorIdx = idx
+	s.modalCursor = 0
+	s.focus = focusDoorName
+}
+
+// updateDoorEditModal drives the door-edit modal: three text fields (Name,
+// TargetMap, TargetDoor) plus four facing buttons. Tab cycles fields, the
+// individual fields accept printable ASCII via pumpPrintableASCII, the
+// arrow keys (when no field is focused) move between facing buttons and
+// Space confirms. Esc closes; X deletes the door entirely.
+func updateDoorEditModal(s *State) Action {
+	if s.modalDoorIdx < 0 || s.modalDoorIdx >= len(s.area.DoorSpawns) {
+		closeModal(s)
+		return ActionNone
+	}
+	door := &s.area.DoorSpawns[s.modalDoorIdx]
+
+	// Mouse handling — clicking a field focuses it; clicking a facing
+	// button sets the facing; clicking Delete drops the door.
+	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
+		mp := rl.GetMousePosition()
+		hit := doorEditHitTest(s, mp)
+		switch hit.kind {
+		case doorHitName:
+			s.focus = focusDoorName
+			return ActionNone
+		case doorHitTargetMap:
+			s.focus = focusDoorTargetMap
+			return ActionNone
+		case doorHitTargetDoor:
+			s.focus = focusDoorTargetDoor
+			return ActionNone
+		case doorHitFacing:
+			pushUndo(s)
+			door.Facing = hit.facing
+			s.dirty = true
+			s.focus = focusNone
+			return ActionNone
+		case doorHitDelete:
+			pushUndo(s)
+			s.area.DoorSpawns = append(s.area.DoorSpawns[:s.modalDoorIdx], s.area.DoorSpawns[s.modalDoorIdx+1:]...)
+			s.dirty = true
+			closeModal(s)
+			return ActionNone
+		case doorHitClose:
+			closeModal(s)
+			return ActionNone
+		case doorHitOutside:
+			// Click outside the card commits and closes — matches pack /
+			// chest modals that just need Esc.
+		}
+	}
+
+	// Keyboard: while a text field is focused, route every keystroke into
+	// its buffer via pumpPrintableASCII. Tab cycles to the next field;
+	// Enter confirms current field; Esc closes.
+	switch s.focus {
+	case focusDoorName, focusDoorTargetMap, focusDoorTargetDoor:
+		target := doorEditTextTarget(s)
+		if target != nil {
+			before := *target
+			pumpPrintableASCII(target, 96, acceptPrintable, nil)
+			if *target != before {
+				s.dirty = true
+			}
+		}
+		if rl.IsKeyPressed(rl.KeyTab) {
+			cycleDoorFocus(s)
+			return ActionNone
+		}
+		if rl.IsKeyPressed(rl.KeyEnter) {
+			s.focus = focusNone
+			return ActionNone
+		}
+		if rl.IsKeyPressed(rl.KeyEscape) {
+			closeModal(s)
+			return ActionNone
+		}
+		return ActionNone
+	}
+
+	// No text field focused — keyboard shortcuts for facing + delete.
+	if rl.IsKeyPressed(rl.KeyEscape) || rl.IsKeyPressed(rl.KeyEnter) {
+		closeModal(s)
+		return ActionNone
+	}
+	if rl.IsKeyPressed(rl.KeyTab) {
+		s.focus = focusDoorName
+		return ActionNone
+	}
+	if rl.IsKeyPressed(rl.KeyX) {
+		pushUndo(s)
+		s.area.DoorSpawns = append(s.area.DoorSpawns[:s.modalDoorIdx], s.area.DoorSpawns[s.modalDoorIdx+1:]...)
+		s.dirty = true
+		closeModal(s)
+		return ActionNone
+	}
+	// N / E / S / W set facing directly. Updates only run while the
+	// modal is open and updateHotkeys's global Ctrl+S Save handler
+	// doesn't fire during modals, so the 'S' binding is free here.
+	facingKeys := []struct {
+		key    int32
+		facing int
+	}{
+		{rl.KeyN, core.North},
+		{rl.KeyE, core.East},
+		{rl.KeyS, core.South},
+		{rl.KeyW, core.West},
+	}
+	for _, fk := range facingKeys {
+		if rl.IsKeyPressed(fk.key) {
+			pushUndo(s)
+			door.Facing = fk.facing
+			s.dirty = true
+			return ActionNone
+		}
+	}
+	return ActionNone
+}
+
+// doorEditTextTarget returns the address of whichever DoorSpawn string
+// field the current focus targets. Mirrors activeTextTarget in shape.
+func doorEditTextTarget(s *State) *string {
+	if s.modalDoorIdx < 0 || s.modalDoorIdx >= len(s.area.DoorSpawns) {
+		return nil
+	}
+	d := &s.area.DoorSpawns[s.modalDoorIdx]
+	switch s.focus {
+	case focusDoorName:
+		return &d.Name
+	case focusDoorTargetMap:
+		return &d.TargetMap
+	case focusDoorTargetDoor:
+		return &d.TargetDoor
+	}
+	return nil
+}
+
+func cycleDoorFocus(s *State) {
+	switch s.focus {
+	case focusDoorName:
+		s.focus = focusDoorTargetMap
+	case focusDoorTargetMap:
+		s.focus = focusDoorTargetDoor
+	case focusDoorTargetDoor:
+		s.focus = focusDoorName
+	}
+}
+
+// updateValidateModal: any key closes; it's a read-only viewer.
+func updateValidateModal(s *State) Action {
+	if rl.IsKeyPressed(rl.KeyEscape) || rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeySpace) {
+		closeModal(s)
+	}
+	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
+		closeModal(s)
+	}
+	return ActionNone
 }
 
 // updatePackEditModal drives the inline pack editor: arrow keys / W-S

@@ -7,6 +7,7 @@ package editor
 
 import (
 	"crawler/internal/app/core"
+	"crawler/internal/app/render"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -208,7 +209,7 @@ func init() {
 // Place Chest takes the next free hotkey.
 func buildEntityBrushes() []Brush {
 	brushes := []Brush{
-		{Name: "Player Start", Entity: entityPlayerStart, Hotkey: rl.KeyOne, Color: rl.NewColor(255, 220, 124, 255)},
+		{Name: "Player Start", Entity: entityPlayerStart, Hotkey: rl.KeyOne, Color: render.MarkerStart},
 	}
 	defs := core.EnemyKinds()
 	for i, def := range defs {
@@ -236,7 +237,7 @@ func buildEntityBrushes() []Brush {
 		Name:   "Place Chest",
 		Entity: entityPlaceChest,
 		Hotkey: chestHK,
-		Color:  rl.NewColor(232, 180, 92, 255),
+		Color:  render.MarkerChest,
 	})
 	doorHK := int32(0)
 	if slot := len(defs) + 2; slot-1 < len(entityBrushHotkeys) {
@@ -246,7 +247,7 @@ func buildEntityBrushes() []Brush {
 		Name:   "Place Door",
 		Entity: entityPlaceDoor,
 		Hotkey: doorHK,
-		Color:  rl.NewColor(176, 132, 86, 255),
+		Color:  render.MarkerDoor,
 	})
 	return brushes
 }
@@ -278,6 +279,12 @@ const (
 	focusFilename
 	focusWidth
 	focusHeight
+	// Door-edit text-field foci. Switch with Tab inside modalDoorEdit;
+	// updateTextInput dispatches the keystrokes onto the right field of
+	// the active DoorSpawn via activeTextTarget.
+	focusDoorName
+	focusDoorTargetMap
+	focusDoorTargetDoor
 )
 
 type modalKind int
@@ -305,6 +312,19 @@ const (
 	// to maps/sounds/<name>.wav, delete a saved cue, and assign a saved
 	// cue to any of the six built-in audio.Sound entries.
 	modalSounds
+	// modalDoorEdit is the inline door editor opened by clicking an
+	// existing door on the Entities layer. Lets the author rename the
+	// door, set its target_map / target_door (cross-map links), pick
+	// the post-transition facing, and delete it. Without this modal,
+	// doors are effectively unusable for cross-map travel — placement
+	// only stamps a "door_N" placeholder with target=self.
+	modalDoorEdit
+	// modalValidate is the cross-map door / reachability report modal
+	// opened from the topbar Validate button. Read-only summary of
+	// every reachabilityWarning and crossMapDoorWarning the current
+	// area carries — same data the metadata badge surfaces, but
+	// uncapped so the author can see the full list at once.
+	modalValidate
 )
 
 type pendingAction int
@@ -362,6 +382,13 @@ type State struct {
 	// edited when modal == modalChestEdit. -1 outside the chest-edit
 	// flow. Mirror of modalPackIdx.
 	modalChestIdx int
+	// modalDoorIdx is the area.DoorSpawns index being edited when
+	// modal == modalDoorEdit. -1 outside the flow.
+	modalDoorIdx int
+	// modalValidateRows is the snapshot of warnings shown in
+	// modalValidate. Captured at open time so the read-only display
+	// doesn't reflow while the user is reading it.
+	modalValidateRows []string
 	// Sound modal state. Lives on State so the slider positions and
 	// last-edited name survive open/close of the modal — closing
 	// shouldn't reset the user's tuning work.
@@ -504,6 +531,7 @@ func freshState(a core.AreaDefinition) State {
 		dragPackIdx:   -1,
 		modalPackIdx:  -1,
 		modalChestIdx: -1,
+		modalDoorIdx:  -1,
 	}
 }
 
@@ -595,6 +623,16 @@ func Update(s *State, dt float32) Action {
 				return ActionNone
 			}
 		}
+		// Cross-map door validation runs once at the F5 gate (loads
+		// every referenced .map from disk, so per-frame would be
+		// expensive). Surfaces dangling target_map / target_door
+		// references that the per-frame check can't catch. Doesn't
+		// block the playtest — the runtime tolerates broken doors
+		// (the transition fails with a quiet error) — just informs
+		// the author so they can fix before shipping.
+		for _, w := range crossMapDoorWarnings(s.area) {
+			s.flash("Doors: " + w)
+		}
 		return ActionTest
 	}
 
@@ -634,7 +672,7 @@ func canPlaytest(a core.AreaDefinition) bool {
 	// problem instead of wondering where the chest went. Editor's
 	// placeChestAt already refuses this configuration; this catches
 	// legacy / hand-edited .map files.
-	if chestSpawnIndexAt(a.ChestSpawns, a.StartTileX, a.StartTileZ) >= 0 {
+	if core.ChestSpawnIndexAt(a.ChestSpawns, a.StartTileX, a.StartTileZ) >= 0 {
 		return false
 	}
 	return true

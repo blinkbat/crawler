@@ -24,6 +24,17 @@ type Theme struct {
 	TextLabel         rl.Color
 	TextDim           rl.Color
 	TextHint          rl.Color
+	// Entity-marker colors shared by the editor canvas and the in-game
+	// minimap. Both surfaces draw the same notion of "this tile holds
+	// a chest / door / start / pack" so the colors live in the theme
+	// rather than as private literals on each side.
+	MarkerStart    rl.Color
+	MarkerChest    rl.Color
+	MarkerChestDim rl.Color
+	MarkerDoor     rl.Color
+	MarkerPack     rl.Color
+	MarkerPackEdge rl.Color
+	MarkerOutline  rl.Color
 }
 
 // Theme returns the HUD's color palette. The values mirror the package-
@@ -44,8 +55,30 @@ func (r Resources) Theme() Theme {
 		TextLabel:         textLabel,
 		TextDim:           textDim,
 		TextHint:          textHint,
+		MarkerStart:       markerStart,
+		MarkerChest:       markerChest,
+		MarkerChestDim:    markerChestDim,
+		MarkerDoor:        markerDoor,
+		MarkerPack:        markerPack,
+		MarkerPackEdge:    markerPackEdge,
+		MarkerOutline:     markerOutline,
 	}
 }
+
+// Exported entity-marker color vars. Mirror the package-private theme
+// vars so non-Resources callers (the editor's init-time brush palette)
+// can read them without first constructing a Resources. Initialized in
+// theme.go's var block, so editor init (which runs after render init,
+// since editor imports render) sees the populated values.
+var (
+	MarkerStart    = markerStart
+	MarkerChest    = markerChest
+	MarkerChestDim = markerChestDim
+	MarkerDoor     = markerDoor
+	MarkerPack     = markerPack
+	MarkerPackEdge = markerPackEdge
+	MarkerOutline  = markerOutline
+)
 
 // DrawCard fills + outlines a rounded panel with the standard corner radius
 // and adds the left accent stripe. Public alias for drawCard.

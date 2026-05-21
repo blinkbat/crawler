@@ -119,6 +119,14 @@ type MapDoor struct {
 	Facing     string
 }
 
+// hasTarget mirrors core.DoorSpawn.HasTarget — both predicates ask
+// "does this door name a destination it can actually resolve?". core
+// can't be imported here (cycle), so the rule is duplicated, but the
+// shape stays in sync.
+func (d MapDoor) hasTarget() bool {
+	return d.TargetMap != "" && d.TargetDoor != ""
+}
+
 // SelfMapToken is the placeholder TargetMap value for same-map
 // portals — keeps the row well-formed (always 6 whitespace-separated
 // fields) without leaving an ambiguous empty column. The parser
@@ -188,13 +196,13 @@ func Parse(r io.Reader) (MapFile, error) {
 				}
 				members[i] = m
 			}
-			x, err := strconv.Atoi(fields[1])
+			x, err := parseIntField(fields[1], "pack x", lineNo)
 			if err != nil {
-				return mf, fmt.Errorf("line %d: bad pack x %q", lineNo, fields[1])
+				return mf, err
 			}
-			z, err := strconv.Atoi(fields[2])
+			z, err := parseIntField(fields[2], "pack z", lineNo)
 			if err != nil {
-				return mf, fmt.Errorf("line %d: bad pack z %q", lineNo, fields[2])
+				return mf, err
 			}
 			mf.Packs = append(mf.Packs, MapPack{Members: members, X: x, Z: z})
 			continue
@@ -209,18 +217,16 @@ func Parse(r io.Reader) (MapFile, error) {
 			if len(fields) != 6 {
 				return mf, fmt.Errorf("line %d: expected '<name> <target_map> <target_door> <x> <z> <facing>', got %q", lineNo, raw)
 			}
-			x, err := strconv.Atoi(fields[3])
+			x, err := parseIntField(fields[3], "door x", lineNo)
 			if err != nil {
-				return mf, fmt.Errorf("line %d: bad door x %q", lineNo, fields[3])
+				return mf, err
 			}
-			z, err := strconv.Atoi(fields[4])
+			z, err := parseIntField(fields[4], "door z", lineNo)
 			if err != nil {
-				return mf, fmt.Errorf("line %d: bad door z %q", lineNo, fields[4])
+				return mf, err
 			}
 			face := strings.ToLower(fields[5])
-			switch face {
-			case "north", "east", "south", "west":
-			default:
+			if !isFacingName(face) {
 				return mf, fmt.Errorf("line %d: door facing must be north/east/south/west, got %q", lineNo, fields[5])
 			}
 			mf.Doors = append(mf.Doors, MapDoor{
@@ -254,13 +260,13 @@ func Parse(r io.Reader) (MapFile, error) {
 			xField := fields[len(fields)-2]
 			zField := fields[len(fields)-1]
 			itemsToken := strings.Join(fields[:len(fields)-2], " ")
-			x, err := strconv.Atoi(xField)
+			x, err := parseIntField(xField, "chest x", lineNo)
 			if err != nil {
-				return mf, fmt.Errorf("line %d: bad chest x %q", lineNo, xField)
+				return mf, err
 			}
-			z, err := strconv.Atoi(zField)
+			z, err := parseIntField(zField, "chest z", lineNo)
 			if err != nil {
-				return mf, fmt.Errorf("line %d: bad chest z %q", lineNo, zField)
+				return mf, err
 			}
 			var items []string
 			if itemsToken != emptyChestToken {
@@ -441,7 +447,7 @@ func (mf *MapFile) validate() error {
 		if d.Name == "" {
 			return fmt.Errorf("door at (%d,%d) has empty name", d.X, d.Z)
 		}
-		if d.TargetMap == "" || d.TargetDoor == "" {
+		if !d.hasTarget() {
 			return fmt.Errorf("door %q at (%d,%d) missing target_map/target_door", d.Name, d.X, d.Z)
 		}
 		if _, dup := seenNames[d.Name]; dup {
@@ -484,12 +490,37 @@ func parseStart(val string) (int, int, string, error) {
 		return 0, 0, "", fmt.Errorf("start coordinates must be integers, got %q", val)
 	}
 	face := strings.ToLower(fields[2])
-	switch face {
-	case "north", "east", "south", "west":
-	default:
+	if !isFacingName(face) {
 		return 0, 0, "", fmt.Errorf("start facing must be north/east/south/west, got %q", fields[2])
 	}
 	return x, z, face, nil
+}
+
+// isFacingName reports whether s is one of the four canonical facing
+// strings. The core package owns the canonical registry but importing
+// it from here would create a cycle (core imports mapfile via
+// AreaFromMapFile), so the four-name allowlist is duplicated locally —
+// both validation call sites within this file now route through this
+// one helper instead of inlining the switch.
+func isFacingName(s string) bool {
+	switch s {
+	case "north", "east", "south", "west":
+		return true
+	}
+	return false
+}
+
+// parseIntField parses a numeric field with the canonical "line N:
+// bad <name> %q" error wrap that every row decoder (packs, doors,
+// chests, dimensions, start coords) used to inline. Six near-
+// identical `strconv.Atoi` + `fmt.Errorf("line %d: bad %s %q", ...)`
+// blocks collapse into one helper.
+func parseIntField(s, name string, lineNo int) (int, error) {
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, fmt.Errorf("line %d: bad %s %q", lineNo, name, s)
+	}
+	return v, nil
 }
 
 // Encode writes mf in the canonical .map format. Layers are emitted in a

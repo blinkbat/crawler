@@ -1,6 +1,8 @@
 package editor
 
 import (
+	"crawler/internal/app/render"
+
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
@@ -39,8 +41,14 @@ var (
 	textBright   = rl.NewColor(220, 230, 245, 255)
 	textEntry    = rl.NewColor(230, 234, 244, 255)
 	textReadonly = rl.NewColor(200, 210, 230, 255)
-	swatchEdge   = rl.NewColor(0, 0, 0, 200)
-	gridLineCol  = rl.NewColor(0, 0, 0, 80)
+	swatchEdge     = rl.NewColor(0, 0, 0, 200)
+	gridLineCol    = rl.NewColor(0, 0, 0, 80)
+	gridLineMajor  = rl.NewColor(0, 0, 0, 160)
+	// entityMarkerOutline is the dark ring drawn around pack / chest /
+	// start markers on the editor canvas. Aliases render.MarkerOutline
+	// so the editor canvas and the minimap can never drift on the
+	// silhouette tone — both share one constant via the render theme.
+	entityMarkerOutline = render.MarkerOutline
 
 	// Tile-color fallback palette. floorAutoColor is the warm tan used
 	// for unrecognized floor and decor tiles (and also the FloorAuto

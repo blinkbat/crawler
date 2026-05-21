@@ -23,8 +23,7 @@ const (
 // size. Cell pixel size is the auto-fit size scaled by s.zoom; pan offsets
 // nudge the plot off-center so users can drag around large maps.
 func (s *State) layout() {
-	w := float32(rl.GetScreenWidth())
-	h := float32(rl.GetScreenHeight())
+	w, h := render.ScreenSizeF()
 
 	s.rect.topbar = rl.NewRectangle(0, 0, w, topbarH)
 	// Layer tabs sit at the top of the palette column.
@@ -109,6 +108,112 @@ var modalDrawers = map[modalKind]func(*State, rl.Font, render.Theme){
 	modalPackEdit:     drawPackEditModal,
 	modalChestEdit:    drawChestEditModal,
 	modalSounds:       drawSoundsModal,
+	modalDoorEdit:     drawDoorEditModal,
+	modalValidate:     drawValidateModal,
+}
+
+// doorEditHitTarget enumerates the clickable regions of the door edit
+// modal. Mirrors the soundLayout hit-test shape but inline as an enum
+// because the door modal only has a handful of stable targets.
+type doorEditHitTarget int
+
+const (
+	doorHitOutside doorEditHitTarget = iota
+	doorHitName
+	doorHitTargetMap
+	doorHitTargetDoor
+	doorHitFacing
+	doorHitDelete
+	doorHitClose
+)
+
+// doorEditHit pairs the hit kind with optional payload (the facing value
+// when kind == doorHitFacing).
+type doorEditHit struct {
+	kind   doorEditHitTarget
+	facing int
+}
+
+// doorEditLayout returns the rectangles for every clickable region of
+// the door edit modal so update and draw stay in sync. Pure function of
+// screen size + position.
+type doorEditLayout struct {
+	card       rl.Rectangle
+	nameField  rl.Rectangle
+	mapField   rl.Rectangle
+	doorField  rl.Rectangle
+	facing     [4]rl.Rectangle
+	deleteBtn  rl.Rectangle
+	closeBtn   rl.Rectangle
+}
+
+func doorEditLayoutFor() doorEditLayout {
+	w, h := render.ScreenSizeF()
+	pw := float32(480)
+	ph := float32(360)
+	r := rl.NewRectangle((w-pw)/2, (h-ph)/2, pw, ph)
+	x := r.X + 16
+	fw := r.Width - 32
+	y := r.Y + 56
+	fieldH := float32(28)
+	rowGap := float32(48)
+	nameField := rl.NewRectangle(x, y, fw, fieldH)
+	y += rowGap
+	mapField := rl.NewRectangle(x, y, fw, fieldH)
+	y += rowGap
+	doorField := rl.NewRectangle(x, y, fw, fieldH)
+	y += rowGap + 6
+	// Facing row: four equal-width buttons.
+	bw := (fw - 18) / 4
+	var facing [4]rl.Rectangle
+	for i := 0; i < 4; i++ {
+		facing[i] = rl.NewRectangle(x+float32(i)*(bw+6), y, bw, fieldH)
+	}
+	y = r.Y + r.Height - 44
+	deleteBtn := rl.NewRectangle(x, y, 110, 30)
+	closeBtn := rl.NewRectangle(r.X+r.Width-110-16, y, 110, 30)
+	return doorEditLayout{
+		card:      r,
+		nameField: nameField,
+		mapField:  mapField,
+		doorField: doorField,
+		facing:    facing,
+		deleteBtn: deleteBtn,
+		closeBtn:  closeBtn,
+	}
+}
+
+// doorEditHitTest reports which region the mouse position p falls in.
+// Used by updateDoorEditModal; doorHitOutside is the default so the
+// caller can branch on it explicitly.
+func doorEditHitTest(s *State, p rl.Vector2) doorEditHit {
+	l := doorEditLayoutFor()
+	if !pointIn(p, l.card) {
+		return doorEditHit{kind: doorHitOutside}
+	}
+	if pointIn(p, l.nameField) {
+		return doorEditHit{kind: doorHitName}
+	}
+	if pointIn(p, l.mapField) {
+		return doorEditHit{kind: doorHitTargetMap}
+	}
+	if pointIn(p, l.doorField) {
+		return doorEditHit{kind: doorHitTargetDoor}
+	}
+	for i, fr := range l.facing {
+		if pointIn(p, fr) {
+			return doorEditHit{kind: doorHitFacing, facing: i}
+		}
+	}
+	if pointIn(p, l.deleteBtn) {
+		return doorEditHit{kind: doorHitDelete}
+	}
+	if pointIn(p, l.closeBtn) {
+		return doorEditHit{kind: doorHitClose}
+	}
+	// Click inside card but not on a clickable region — treat as a no-op
+	// so a stray click inside the card doesn't dismiss the modal.
+	return doorEditHit{kind: doorHitOutside}
 }
 
 // --- Top bar ---------------------------------------------------------------
@@ -124,6 +229,7 @@ var topbarBtns = []topbarBtn{
 	{"save", "Save"},
 	{"saveas", "Save As"},
 	{"sounds", "Sounds"},
+	{"validate", "Validate"},
 	{"back", "Back"},
 }
 
@@ -174,7 +280,7 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 	hoverDesc := ""
 	if s.hoverX >= 0 {
 		coord = core.TileCoord(s.hoverX, s.hoverZ)
-		hoverDesc = hoverTileSummary(s.area, s.hoverX, s.hoverZ)
+		hoverDesc = core.AreaTileSummary(s.area, s.hoverX, s.hoverZ)
 	}
 	infoLabel := fmt.Sprintf("cell %s   %s   layer %s   brush %dx%d   zoom %.0f%%   phase %s (T)   undo %d/%d",
 		coord, hoverDesc, layerName(s.layer), s.brushSize, s.brushSize, s.zoom*100, core.PhaseName(s.previewPhase), len(s.undo), undoLimit)
@@ -183,55 +289,20 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 	render.DrawTextWithShadow(font, infoLabel, infoX, (topbarH-infoMeasure.Y)/2, 13, theme.TextHint)
 }
 
-// hoverTileSummary returns a compact human label for what's painted on
-// the hovered tile across all four grid layers + entities. Empty layers
-// are omitted so a clean grass cell reads as just "grass" rather than
-// "wall=Open floor=Grass decor=— prop=—". Used in the topbar so the
-// author sees what they're about to overwrite without clicking.
-func hoverTileSummary(a core.AreaDefinition, x, z int) string {
-	if !a.InBounds(x, z) {
-		return ""
-	}
-	parts := make([]string, 0, 5)
-	if lbl := core.TileLabel(core.TileLayerWalls, a.Walls[z][x]); lbl != "" {
-		parts = append(parts, lbl)
-	}
-	if lbl := core.TileLabel(core.TileLayerFloor, a.Floor[z][x]); lbl != "" {
-		parts = append(parts, lbl)
-	}
-	if lbl := core.TileLabel(core.TileLayerDecor, a.Decor[z][x]); lbl != "" {
-		parts = append(parts, lbl)
-	}
-	if lbl := core.TileLabel(core.TileLayerProps, a.Props[z][x]); lbl != "" {
-		parts = append(parts, lbl)
-	}
-	if a.StartTileX == x && a.StartTileZ == z {
-		parts = append(parts, "Start")
-	}
-	if packIndexAt(a.PackSpawns, x, z) >= 0 {
-		parts = append(parts, "Pack")
-	}
-	if chestSpawnIndexAt(a.ChestSpawns, x, z) >= 0 {
-		parts = append(parts, "Chest")
-	}
-	if doorSpawnIndexAt(a.DoorSpawns, x, z) >= 0 {
-		parts = append(parts, "Door")
-	}
-	if len(parts) == 0 {
-		return "(empty)"
-	}
-	return strings.Join(parts, " / ")
+// topbarBtnWidths overrides the default 64-px topbar button width for
+// labels that need extra space. Adding a wider button is a one-row
+// edit; missing entries fall through to the default.
+var topbarBtnWidths = map[string]float32{
+	"Save As":  80,
+	"Validate": 80,
+	"Back":     60,
 }
 
 func buttonWidth(label string) float32 {
-	switch label {
-	case "Save As":
-		return 80
-	case "Back":
-		return 60
-	default:
-		return 64
+	if w, ok := topbarBtnWidths[label]; ok {
+		return w
 	}
+	return 64
 }
 
 func drawButton(font rl.Font, r rl.Rectangle, label string, active bool) {
@@ -329,6 +400,38 @@ const (
 	headerReserve = float32(34)
 )
 
+// paletteHints is the keyboard-shortcut cheat sheet rendered below
+// the brush list. Promoted from a hand-counted const + open-coded
+// slice literal to a single source of truth: paletteContentHeight
+// computes scroll bounds from len(paletteHints), so adding or
+// removing a hint can never drift from the layout math.
+var paletteHints = []string{
+	"L-drag: paint",
+	"R-click: erase",
+	"Shift+drag: rect",
+	"Ctrl+click: fill region",
+	"Ctrl+Shift+F: fill all",
+	"Tab: next layer",
+	"Alt+1..6: jump layer",
+	"1..9 / Shift+1..9: brush",
+	"[ ] brush size",
+	"arrows: cursor",
+	"space: paint, bksp: erase",
+	"G: center on start",
+	"wheel: zoom",
+	"mid-drag: pan",
+	"home: reset view",
+	"Ctrl+S save",
+	"Ctrl+O open",
+	"Ctrl+Z undo / Y redo",
+	"Ctrl+N new",
+	"F5 playtest",
+	"Ctrl+F5: test here",
+	"T cycle phase",
+	"R rotate start",
+	"Esc back",
+}
+
 func paletteEntryRect(s *State, i int) rl.Rectangle {
 	y := s.rect.palette.Y + 12 + float32(i)*paletteRowStride - s.paletteScroll[s.layer]
 	return rl.NewRectangle(s.rect.palette.X+8, y, s.rect.palette.Width-16, paletteRowH)
@@ -337,16 +440,13 @@ func paletteEntryRect(s *State, i int) rl.Rectangle {
 // paletteContentHeight returns the pixel height required to render the
 // active layer's full brush list (including the top/bottom padding and
 // the hint footer). Used by ScrollPalette to clamp the scroll offset
-// so the last row stays visible.
+// so the last row stays visible. Reads len(paletteHints) directly so
+// adding a shortcut row updates both the rendered list AND the
+// scroll bound in one edit.
 func paletteContentHeight(s *State) float32 {
 	palette := layerBrushes[s.layer]
-	return 12 + float32(len(palette))*paletteRowStride + 12 + float32(paletteHintLines)*14 + 16
+	return 12 + float32(len(palette))*paletteRowStride + 12 + float32(len(paletteHints))*14 + 16
 }
-
-// paletteHintLines is the count of one-line keyboard-hint rows
-// drawPalette emits beneath the brush entries. Kept as a const so
-// paletteContentHeight stays in sync if the hint list grows.
-const paletteHintLines = 18
 
 // ScrollPalette adjusts the active layer's palette scroll offset by
 // dy pixels (positive = scroll down / show later entries). Clamps to
@@ -435,28 +535,8 @@ func drawPalette(s *State, font rl.Font, theme render.Theme) {
 		rl.DrawTextEx(font, txt, rl.NewVector2(r.X+34, r.Y+(r.Height-14)/2), 14, 1, nameCol)
 	}
 
-	hints := []string{
-		"L-drag: paint",
-		"R-click: erase",
-		"Shift+drag: rect",
-		"Ctrl+click: fill",
-		"Tab: next layer",
-		"[ ] brush size",
-		"arrows: cursor",
-		"space: paint",
-		"wheel: zoom",
-		"mid-drag: pan",
-		"home: reset view",
-		"Ctrl+S save",
-		"Ctrl+O open",
-		"Ctrl+Z undo / Y redo",
-		"Ctrl+N new",
-		"F5 playtest",
-		"R rotate start",
-		"Esc back",
-	}
 	y := s.rect.palette.Y + 16 + float32(len(palette))*paletteRowStride + 12
-	for _, h := range hints {
+	for _, h := range paletteHints {
 		rl.DrawTextEx(font, h, rl.NewVector2(s.rect.palette.X+12, y), 11, 1, theme.TextHint)
 		y += 14
 	}
@@ -524,6 +604,12 @@ type metaRect struct {
 	startLabel, startInfo                rl.Rectangle
 	facingLabel                          rl.Rectangle
 	facingButtons                        []rl.Rectangle
+	pathLabel, pathValue                 rl.Rectangle
+	// reachLabel + reachArea bound the clickable reachability badge.
+	// reachArea covers the badge fill region (not just the label) so
+	// the metadata click handler can route any click in that zone to
+	// the Validate modal. drawMetadata renders inside reachArea.
+	reachLabel, reachArea rl.Rectangle
 }
 
 func metadataRects(s *State) metaRect {
@@ -575,6 +661,18 @@ func metadataRects(s *State) metaRect {
 	for i := 0; i < 4; i++ {
 		r.facingButtons[i] = rl.NewRectangle(x+float32(i)*(fbw+6), y, fbw, 26)
 	}
+	// On-disk path readout rows. Spacing matches the per-row stride
+	// the rest of the metadata panel uses (60px from facing baseline
+	// to path label) so the badge below stays at its visual anchor.
+	y = r.facingLabel.Y + 60
+	r.pathLabel = rl.NewRectangle(x, y, w, 14)
+	r.pathValue = rl.NewRectangle(x, y+18, w, 26)
+	// Reachability badge. Label sits 56 px below pathLabel; the
+	// clickable badge region extends past the label to cover the
+	// "OK" / warning panel that follows underneath.
+	reachY := y + 56
+	r.reachLabel = rl.NewRectangle(x, reachY, w, 14)
+	r.reachArea = rl.NewRectangle(x, reachY, w, 120)
 	return r
 }
 
@@ -583,6 +681,15 @@ func handleMetadataClick(s *State, p rl.Vector2) bool {
 		return false
 	}
 	mr := metadataRects(s)
+	// Reachability badge: clicking anywhere on the label + warning
+	// list region opens the full validate modal. Keep this BEFORE the
+	// field-focus checks so a click on the badge reliably opens
+	// validate even if the badge happens to overlap a future field
+	// added below.
+	if pointIn(p, mr.reachArea) {
+		openValidateModal(s)
+		return true
+	}
 	if pointIn(p, mr.nameField) {
 		s.focus = focusName
 		return true
@@ -656,7 +763,7 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 	rl.DrawLineEx(
 		rl.NewVector2(s.rect.metadata.X, s.rect.metadata.Y),
 		rl.NewVector2(s.rect.metadata.X, s.rect.metadata.Y+s.rect.metadata.Height),
-		1, rl.NewColor(8, 10, 14, 255))
+		1, outlineHard)
 
 	render.DrawHeading(font, "MAP", int32(s.rect.metadata.X+12), int32(s.rect.metadata.Y+8), theme.BorderStrong)
 
@@ -699,35 +806,28 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 	drawReadonlyValue(font, mr.startInfo, core.TileCoord(s.area.StartTileX, s.area.StartTileZ))
 
 	drawLabel(font, "Facing (R cycles)", mr.facingLabel)
-	labels := []string{"N", "E", "S", "W"}
 	for i, br := range mr.facingButtons {
-		drawButton(font, br, labels[i], s.area.StartFacing == i)
+		drawButton(font, br, core.FacingShortLabels[i], s.area.StartFacing == i)
 	}
 
 	// Path readout — readonly. Anchored below the facing row so it doesn't
 	// reshuffle the rest of the panel. Shows "(unsaved)" before the first
-	// save, or the relative on-disk path once known. Useful when juggling
-	// multiple maps in the same session.
-	pathY := mr.facingLabel.Y + 60
-	pathLabel := rl.NewRectangle(mr.facingLabel.X, pathY, mr.facingLabel.Width, 14)
-	pathValue := rl.NewRectangle(mr.facingLabel.X, pathY+18, mr.facingLabel.Width, 26)
-	drawLabel(font, "On-disk path", pathLabel)
+	// save, or the relative on-disk path once known.
+	drawLabel(font, "On-disk path", mr.pathLabel)
 	pathText := s.area.Path
 	if pathText == "" {
 		pathText = "(unsaved)"
 	}
-	drawReadonlyValue(font, pathValue, pathText)
+	drawReadonlyValue(font, mr.pathValue, pathText)
 
 	// Reachability warnings badge: latches red whenever the area would
 	// fail a save-time reachability check (unreachable packs, empty
 	// rosters, packs that don't fit). Updates per-frame so the badge
 	// reflects the current edit without waiting for a save.
 	warnings := s.ReachabilityWarnings()
-	badgeY := pathY + 56
-	badgeLabel := rl.NewRectangle(mr.facingLabel.X, badgeY, mr.facingLabel.Width, 14)
-	drawLabel(font, "Reachability", badgeLabel)
+	drawLabel(font, "Reachability (click to validate)", mr.reachLabel)
 	if len(warnings) == 0 {
-		badgeValue := rl.NewRectangle(mr.facingLabel.X, badgeY+18, mr.facingLabel.Width, 26)
+		badgeValue := rl.NewRectangle(mr.reachArea.X, mr.reachArea.Y+18, mr.reachArea.Width, 26)
 		rl.DrawRectangleRec(badgeValue, rl.NewColor(14, 22, 18, 255))
 		rl.DrawRectangleLinesEx(badgeValue, 1, rl.NewColor(70, 130, 100, 255))
 		rl.DrawTextEx(font, "OK", rl.NewVector2(badgeValue.X+8, badgeValue.Y+(badgeValue.Height-14)/2), 14, 1, rl.NewColor(150, 220, 180, 255))
@@ -740,7 +840,7 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 			rows = rows[:4] // cap so we don't reflow the panel
 		}
 		h := float32(8 + 18*len(rows))
-		box := rl.NewRectangle(mr.facingLabel.X, badgeY+18, mr.facingLabel.Width, h)
+		box := rl.NewRectangle(mr.reachArea.X, mr.reachArea.Y+18, mr.reachArea.Width, h)
 		rl.DrawRectangleRec(box, rl.NewColor(38, 16, 18, 255))
 		rl.DrawRectangleLinesEx(box, 1, rl.NewColor(180, 80, 80, 255))
 		for i, w := range rows {
@@ -830,21 +930,61 @@ func drawGrid(s *State, font rl.Font) {
 		}
 	}
 
-	// Grid lines.
-	gridLine := gridLineCol
+	// Grid lines. Every 5 cells draws a slightly darker line (gridLineMajor)
+	// so the author can eyeball coordinates at a glance — matches the
+	// "tick every 5" convention common in tile editors.
 	for x := 0; x <= s.area.Width; x++ {
 		px := s.rect.gridX + float32(x)*cell
-		rl.DrawLineEx(rl.NewVector2(px, s.rect.gridY), rl.NewVector2(px, s.rect.gridY+s.rect.gridH), 1, gridLine)
+		col := gridLineCol
+		if x%5 == 0 {
+			col = gridLineMajor
+		}
+		rl.DrawLineEx(rl.NewVector2(px, s.rect.gridY), rl.NewVector2(px, s.rect.gridY+s.rect.gridH), 1, col)
 	}
 	for z := 0; z <= s.area.Height; z++ {
 		py := s.rect.gridY + float32(z)*cell
-		rl.DrawLineEx(rl.NewVector2(s.rect.gridX, py), rl.NewVector2(s.rect.gridX+s.rect.gridW, py), 1, gridLine)
+		col := gridLineCol
+		if z%5 == 0 {
+			col = gridLineMajor
+		}
+		rl.DrawLineEx(rl.NewVector2(s.rect.gridX, py), rl.NewVector2(s.rect.gridX+s.rect.gridW, py), 1, col)
 	}
 
-	// Pack markers. Each pack draws one circle tinted by the leader (the
-	// highest-tier member) plus a small "xN" badge when the pack has more
-	// than one member — matching the field-render contract that the player
-	// only sees the leader from afar.
+	// Axis tick labels every 5 cells. Only at zoom levels where cells are
+	// big enough to comfortably fit a 10pt digit — at very small zooms the
+	// labels would overlap and read as visual noise.
+	if cell >= 18 {
+		tickCol := rl.NewColor(220, 224, 232, 180)
+		// Top axis: column numbers.
+		for x := 0; x <= s.area.Width; x += 5 {
+			label := fmt.Sprintf("%d", x)
+			m := rl.MeasureTextEx(font, label, 10, 1)
+			px := s.rect.gridX + float32(x)*cell - m.X/2
+			py := s.rect.gridY - m.Y - 2
+			if py < s.rect.grid.Y+2 {
+				continue
+			}
+			rl.DrawTextEx(font, label, rl.NewVector2(px, py), 10, 1, tickCol)
+		}
+		// Left axis: row numbers.
+		for z := 0; z <= s.area.Height; z += 5 {
+			label := fmt.Sprintf("%d", z)
+			m := rl.MeasureTextEx(font, label, 10, 1)
+			px := s.rect.gridX - m.X - 4
+			py := s.rect.gridY + float32(z)*cell - m.Y/2
+			if px < s.rect.grid.X+2 {
+				continue
+			}
+			rl.DrawTextEx(font, label, rl.NewVector2(px, py), 10, 1, tickCol)
+		}
+	}
+
+	// Pack markers. Each pack draws one circle tinted by the leader's
+	// brush color (from entityBrushColors so editor swatch and field marker
+	// match) plus an initial letter from the leader's SingularName so the
+	// author can tell Rat from Goblin from Mantrap at a glance. The "xN"
+	// badge shows the pack size — matching the field-render contract that
+	// the player only sees the leader from afar.
 	for _, sp := range s.area.PackSpawns {
 		if len(sp.Members) == 0 {
 			continue
@@ -852,20 +992,14 @@ func drawGrid(s *State, font rl.Font) {
 		cx := s.rect.gridX + (float32(sp.TileX)+0.5)*cell
 		cy := s.rect.gridY + (float32(sp.TileZ)+0.5)*cell
 		leader := packSpawnLeaderKind(sp)
-		col := fadeAlpha(rl.NewColor(220, 156, 96, 255), entityAlpha)
-		if leader == core.EnemyBat {
-			col = fadeAlpha(rl.NewColor(160, 130, 220, 255), entityAlpha)
-		}
+		col := fadeAlpha(packMarkerColor(leader), entityAlpha)
 		rl.DrawCircle(int32(cx), int32(cy), cell*0.32, col)
-		rl.DrawCircleLines(int32(cx), int32(cy), cell*0.32, fadeAlpha(rl.NewColor(0, 0, 0, 220), entityAlpha))
-		label := "R"
-		if leader == core.EnemyBat {
-			label = "B"
-		}
+		rl.DrawCircleLines(int32(cx), int32(cy), cell*0.32, fadeAlpha(entityMarkerOutline, entityAlpha))
+		label := packMarkerInitial(leader)
 		measure := rl.MeasureTextEx(font, label, cell*0.42, 1)
 		rl.DrawTextEx(font, label,
 			rl.NewVector2(cx-measure.X/2, cy-measure.Y/2),
-			cell*0.42, 1, fadeAlpha(rl.NewColor(0, 0, 0, 230), entityAlpha))
+			cell*0.42, 1, fadeAlpha(entityMarkerOutline, entityAlpha))
 		if len(sp.Members) > 1 {
 			badge := fmt.Sprintf("x%d", len(sp.Members))
 			bsize := cell * 0.28
@@ -891,10 +1025,10 @@ func drawGrid(s *State, font rl.Font) {
 		inset := cell * 0.25
 		rl.DrawRectangleRec(
 			rl.NewRectangle(gx+inset, gy+inset, cell-2*inset, cell-2*inset),
-			fadeAlpha(rl.NewColor(232, 180, 92, 255), entityAlpha))
+			fadeAlpha(render.MarkerChest, entityAlpha))
 		rl.DrawRectangleLinesEx(
 			rl.NewRectangle(gx+inset, gy+inset, cell-2*inset, cell-2*inset),
-			1, fadeAlpha(rl.NewColor(0, 0, 0, 220), entityAlpha))
+			1, fadeAlpha(entityMarkerOutline, entityAlpha))
 	}
 
 	// Door markers — a tall thin rectangle in the warm wood tone, with a
@@ -908,10 +1042,10 @@ func drawGrid(s *State, font rl.Font) {
 		insetY := cell * 0.12
 		rl.DrawRectangleRec(
 			rl.NewRectangle(gx+insetX, gy+insetY, cell-2*insetX, cell-2*insetY),
-			fadeAlpha(rl.NewColor(176, 132, 86, 255), entityAlpha))
+			fadeAlpha(render.MarkerDoor, entityAlpha))
 		rl.DrawRectangleLinesEx(
 			rl.NewRectangle(gx+insetX, gy+insetY, cell-2*insetX, cell-2*insetY),
-			1, fadeAlpha(rl.NewColor(20, 14, 0, 220), entityAlpha))
+			1, fadeAlpha(entityMarkerOutline, entityAlpha))
 		// Facing arrow inside the door rectangle.
 		cx := gx + cell*0.5
 		cy := gy + cell*0.5
@@ -924,9 +1058,9 @@ func drawGrid(s *State, font rl.Font) {
 	// Player start marker.
 	sx := s.rect.gridX + (float32(s.area.StartTileX)+0.5)*cell
 	sy := s.rect.gridY + (float32(s.area.StartTileZ)+0.5)*cell
-	startCol := fadeAlpha(rl.NewColor(255, 220, 124, 255), entityAlpha)
+	startCol := fadeAlpha(render.MarkerStart, entityAlpha)
 	rl.DrawCircle(int32(sx), int32(sy), cell*0.36, startCol)
-	rl.DrawCircleLines(int32(sx), int32(sy), cell*0.36, fadeAlpha(rl.NewColor(0, 0, 0, 220), entityAlpha))
+	rl.DrawCircleLines(int32(sx), int32(sy), cell*0.36, fadeAlpha(entityMarkerOutline, entityAlpha))
 	dx, dz := core.FacingVector(s.area.StartFacing)
 	tx := sx + float32(dx)*cell*0.42
 	ty := sy + float32(dz)*cell*0.42
@@ -998,13 +1132,179 @@ func drawGrid(s *State, font rl.Font) {
 	if s.drag == dragStart && s.hoverX >= 0 {
 		gx := s.rect.gridX + (float32(s.hoverX)+0.5)*cell
 		gy := s.rect.gridY + (float32(s.hoverZ)+0.5)*cell
-		rl.DrawCircleLines(int32(gx), int32(gy), cell*0.36, rl.NewColor(255, 220, 124, 220))
+		ghost := render.MarkerStart
+		ghost.A = 220
+		rl.DrawCircleLines(int32(gx), int32(gy), cell*0.36, ghost)
 	}
 	if s.drag == dragPack && s.hoverX >= 0 && s.dragPackIdx >= 0 && s.dragPackIdx < len(s.area.PackSpawns) {
 		gx := s.rect.gridX + (float32(s.hoverX)+0.5)*cell
 		gy := s.rect.gridY + (float32(s.hoverZ)+0.5)*cell
 		rl.DrawCircleLines(int32(gx), int32(gy), cell*0.32, rl.NewColor(255, 255, 255, 220))
 	}
+
+	// Rich hover tooltip: when the cursor is over a tile that holds a
+	// pack / chest / door / start, render a small card near the mouse
+	// listing what's inside. Layer labels alone (in the topbar) don't
+	// say which enemies are in a pack or which items in a chest — that
+	// information was modal-only before this card.
+	if s.hoverX >= 0 && s.drag == dragNone {
+		drawHoverTooltip(s, font)
+	}
+}
+
+// drawHoverTooltip paints a small panel near the mouse with the entity
+// contents at (hoverX, hoverZ). No-op when the tile is empty so cursor
+// noise doesn't follow the mouse across blank floor.
+func drawHoverTooltip(s *State, font rl.Font) {
+	x, z := s.hoverX, s.hoverZ
+	lines := tooltipLinesFor(s, x, z)
+	if len(lines) == 0 {
+		return
+	}
+	const padding = float32(6)
+	const lineH = float32(14)
+	width := float32(0)
+	for _, l := range lines {
+		m := rl.MeasureTextEx(font, l, 11, 1)
+		if m.X > width {
+			width = m.X
+		}
+	}
+	w := width + padding*2
+	h := float32(len(lines))*lineH + padding*2
+	mp := rl.GetMousePosition()
+	tx := mp.X + 14
+	ty := mp.Y + 14
+	if tx+w > s.rect.grid.X+s.rect.grid.Width {
+		tx = mp.X - w - 8
+	}
+	if ty+h > s.rect.grid.Y+s.rect.grid.Height {
+		ty = mp.Y - h - 8
+	}
+	r := rl.NewRectangle(tx, ty, w, h)
+	bg := rl.NewColor(18, 22, 30, 230)
+	rl.DrawRectangleRec(r, bg)
+	rl.DrawRectangleLinesEx(r, 1, editorBorderActive)
+	for i, l := range lines {
+		col := rl.NewColor(220, 224, 234, 255)
+		if i == 0 {
+			col = rl.NewColor(255, 220, 124, 255)
+		}
+		rl.DrawTextEx(font, l,
+			rl.NewVector2(r.X+padding, r.Y+padding+float32(i)*lineH),
+			11, 1, col)
+	}
+}
+
+// tooltipLinesFor builds the hover tooltip body for tile (x, z). Returns
+// nil when nothing interesting sits there — the caller short-circuits in
+// that case.
+func tooltipLinesFor(s *State, x, z int) []string {
+	if !s.area.InBounds(x, z) {
+		return nil
+	}
+	var out []string
+	out = append(out, core.TileCoord(x, z))
+	if s.area.StartTileX == x && s.area.StartTileZ == z {
+		face, _ := core.FacingName(s.area.StartFacing)
+		out = append(out, "Player start (facing "+face+")")
+	}
+	if idx := core.PackSpawnIndexAt(s.area.PackSpawns, x, z); idx >= 0 {
+		sp := s.area.PackSpawns[idx]
+		if len(sp.Members) == 0 {
+			out = append(out, "Pack: (empty)")
+		} else {
+			counts := map[core.EnemyKind]int{}
+			order := []core.EnemyKind{}
+			for _, k := range sp.Members {
+				if _, ok := counts[k]; !ok {
+					order = append(order, k)
+				}
+				counts[k]++
+			}
+			out = append(out, fmt.Sprintf("Pack (%d):", len(sp.Members)))
+			for _, k := range order {
+				name, ok := core.EnemyKindName(k)
+				if !ok {
+					name = "?"
+				}
+				if counts[k] > 1 {
+					out = append(out, fmt.Sprintf("  %dx %s", counts[k], name))
+				} else {
+					out = append(out, "  "+name)
+				}
+			}
+		}
+	}
+	if idx := core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z); idx >= 0 {
+		ch := s.area.ChestSpawns[idx]
+		if len(ch.Items) == 0 {
+			out = append(out, "Chest: (empty)")
+		} else {
+			out = append(out, fmt.Sprintf("Chest (%d):", len(ch.Items)))
+			counts := map[core.ItemKind]int{}
+			order := []core.ItemKind{}
+			for _, k := range ch.Items {
+				if _, ok := counts[k]; !ok {
+					order = append(order, k)
+				}
+				counts[k]++
+			}
+			for _, k := range order {
+				info := core.ItemInfo(k)
+				if counts[k] > 1 {
+					out = append(out, fmt.Sprintf("  %dx %s", counts[k], info.Name))
+				} else {
+					out = append(out, "  "+info.Name)
+				}
+			}
+		}
+	}
+	if idx := core.DoorSpawnIndexAt(s.area.DoorSpawns, x, z); idx >= 0 {
+		d := s.area.DoorSpawns[idx]
+		face, _ := core.FacingName(d.Facing)
+		out = append(out, "Door: "+d.Name)
+		tgt := d.TargetMap
+		if tgt == "" {
+			tgt = "(no target)"
+		}
+		out = append(out, "  → "+tgt+"/"+d.TargetDoor)
+		out = append(out, "  facing "+face)
+	}
+	// If nothing more than the coord line is present, skip the tooltip —
+	// noise on blank floor.
+	if len(out) <= 1 {
+		return nil
+	}
+	return out
+}
+
+// packMarkerColor returns the grid color used for a pack's marker on
+// the canvas — leader's entityBrushColors entry if known, else the
+// neutral grey fallback. Keeps the editor swatch column and the
+// in-grid marker color in lockstep.
+func packMarkerColor(kind core.EnemyKind) rl.Color {
+	if col, ok := entityBrushColors[kind]; ok {
+		return col
+	}
+	return rl.NewColor(180, 180, 180, 255)
+}
+
+// packMarkerInitial returns the single uppercase letter drawn at the
+// center of a pack's marker. Sources from EnemyKindName so it stays in
+// sync with the canonical short name. Strips a "diseased_" / "venus_"
+// prefix when picking the letter so "Diseased Rat" reads as "D" rather
+// than colliding with a future "Demon."
+func packMarkerInitial(kind core.EnemyKind) string {
+	name, ok := core.EnemyKindName(kind)
+	if !ok || len(name) == 0 {
+		return "?"
+	}
+	c := name[0]
+	if c >= 'a' && c <= 'z' {
+		c = c - 'a' + 'A'
+	}
+	return string(c)
 }
 
 // layerAlpha returns the per-layer rendering opacity given the active
@@ -1181,8 +1481,7 @@ func drawStatus(s *State, font rl.Font, theme render.Theme) {
 }
 
 func drawModalVeil(theme render.Theme) {
-	w := int32(rl.GetScreenWidth())
-	h := int32(rl.GetScreenHeight())
+	w, h := render.ScreenSize()
 	rl.DrawRectangle(0, 0, w, h, theme.SurfaceVeil)
 }
 
@@ -1201,8 +1500,7 @@ func joinHintLabels(labels []string, trail ...string) string {
 }
 
 func drawModalCard(theme render.Theme, pw, ph float32, accent rl.Color) rl.Rectangle {
-	w := float32(rl.GetScreenWidth())
-	h := float32(rl.GetScreenHeight())
+	w, h := render.ScreenSizeF()
 	r := rl.NewRectangle((w-pw)/2, (h-ph)/2, pw, ph)
 	render.DrawCard(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height),
 		theme.SurfacePrimary, theme.BorderSoft, accent)
@@ -1287,8 +1585,7 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 }
 
 func saveAsFieldRect(s *State) rl.Rectangle {
-	w := float32(rl.GetScreenWidth())
-	h := float32(rl.GetScreenHeight())
+	w, h := render.ScreenSizeF()
 	pw := float32(420)
 	ph := float32(160)
 	r := rl.NewRectangle((w-pw)/2, (h-ph)/2, pw, ph)
@@ -1434,6 +1731,84 @@ func drawChestEditModal(s *State, font rl.Font, theme render.Theme) {
 	}
 	rl.DrawTextEx(font, joinHintLabels(addLabels, hintEscClose),
 		rl.NewVector2(r.X+16, r.Y+r.Height-24), 12, 1, theme.TextHint)
+}
+
+// drawDoorEditModal renders the per-door editor. Mirrors the save-as
+// modal's text-field plumbing but with three fields instead of one,
+// plus a facing-buttons row and a delete affordance.
+func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
+	if s.modalDoorIdx < 0 || s.modalDoorIdx >= len(s.area.DoorSpawns) {
+		return
+	}
+	door := s.area.DoorSpawns[s.modalDoorIdx]
+	l := doorEditLayoutFor()
+	drawModalVeil(theme)
+	render.DrawCard(int32(l.card.X), int32(l.card.Y), int32(l.card.Width), int32(l.card.Height),
+		theme.SurfacePrimary, theme.BorderSoft, theme.BorderActive)
+	header := "DOOR AT " + core.TileCoord(door.TileX, door.TileZ)
+	render.DrawHeading(font, header, int32(l.card.X+16), int32(l.card.Y+12), theme.BorderActive)
+
+	// Name field.
+	drawLabel(font, "Name (unique on this map)",
+		rl.NewRectangle(l.nameField.X, l.nameField.Y-16, l.nameField.Width, 14))
+	drawTextField(font, l.nameField, door.Name, s.focus == focusDoorName)
+
+	// Target map field.
+	drawLabel(font, "Target map (bare id, or 'self')",
+		rl.NewRectangle(l.mapField.X, l.mapField.Y-16, l.mapField.Width, 14))
+	drawTextField(font, l.mapField, door.TargetMap, s.focus == focusDoorTargetMap)
+
+	// Target door field.
+	drawLabel(font, "Target door (Name on destination map)",
+		rl.NewRectangle(l.doorField.X, l.doorField.Y-16, l.doorField.Width, 14))
+	drawTextField(font, l.doorField, door.TargetDoor, s.focus == focusDoorTargetDoor)
+
+	// Facing row.
+	drawLabel(font, "Facing on exit (player walks out heading this way)",
+		rl.NewRectangle(l.facing[0].X, l.facing[0].Y-16, l.facing[3].X+l.facing[3].Width-l.facing[0].X, 14))
+	for i, fr := range l.facing {
+		drawButton(font, fr, core.FacingShortLabels[i], door.Facing == i)
+	}
+
+	// Delete + Close buttons.
+	drawButton(font, l.deleteBtn, "Delete door (X)", false)
+	drawButton(font, l.closeBtn, "Done (Esc)", false)
+
+	// Footer hint string mirrors the other modals' tiny hint row.
+	hint := "Tab cycle fields   N/E/S/W set facing   X delete   Esc / Enter done"
+	rl.DrawTextEx(font, hint,
+		rl.NewVector2(l.card.X+16, l.card.Y+l.card.Height-72),
+		11, 1, theme.TextHint)
+}
+
+// drawValidateModal renders the full reachability + cross-map door
+// warning list captured at modal-open time. Read-only viewer; any
+// keystroke dismisses.
+func drawValidateModal(s *State, font rl.Font, theme render.Theme) {
+	rows := s.modalValidateRows
+	pw := float32(560)
+	ph := float32(56 + float32(len(rows))*22 + 56)
+	if ph < 160 {
+		ph = 160
+	}
+	_, sh := render.ScreenSizeF()
+	if ph > sh-40 {
+		ph = sh - 40
+	}
+	r := drawModalHeader(font, theme, pw, ph, "VALIDATE MAP", theme.BorderActive)
+	if len(rows) == 0 {
+		rl.DrawTextEx(font, "All checks pass.",
+			rl.NewVector2(r.X+16, r.Y+50), 16, 1, theme.BorderStrong)
+	} else {
+		y := r.Y + 50
+		for _, line := range rows {
+			rl.DrawTextEx(font, "! "+line,
+				rl.NewVector2(r.X+16, y), 13, 1, theme.BorderDanger)
+			y += 22
+		}
+	}
+	rl.DrawTextEx(font, "Esc / Enter / click   close",
+		rl.NewVector2(r.X+16, r.Y+r.Height-26), 12, 1, theme.TextHint)
 }
 
 func drawConfirmDirtyModal(s *State, font rl.Font, theme render.Theme) {

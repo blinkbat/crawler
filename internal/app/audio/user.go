@@ -157,15 +157,18 @@ func SynthSweep(duration, startHz, endHz, volume, attack, release float64) []int
 	return wavsynth.SynthSweep(duration, startHz, endHz, volume, attack, release)
 }
 
+// previewRingSize bounds the in-flight preview clips. Sized at 4 because
+// previews are short (<1s) and the UI naturally caps how fast a user can
+// fire them; we just need enough slots that consecutive previews don't
+// cut each other off mid-play.
+const previewRingSize = 4
+
 // previewRing is a small ring buffer of rl.Sound handles used by
 // PreviewPCM and PreviewFile. Each new preview overwrites the oldest
 // slot, unloading the prior buffer first — without this the editor's
-// sound-creator would leak an rl.Sound on every Preview press. Sized at
-// 4 because previews are short (<1s) and the UI naturally caps how
-// fast a user can fire them; we just need enough slots that consecutive
-// previews don't cut each other off mid-play.
+// sound-creator would leak an rl.Sound on every Preview press.
 var (
-	previewRing   [4]rl.Sound
+	previewRing   [previewRingSize]rl.Sound
 	previewCursor int
 )
 

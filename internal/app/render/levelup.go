@@ -22,16 +22,10 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 	m := g.Party[g.LevelUpMember]
 
 	font := assets.Font()
-	screenW, screenH := screenSize()
-	cardW := int32(420)
-	cardH := int32(380)
-	cardX := centerX(cardW)
-	cardY := screenH/2 - cardH/2
-
-	rl.DrawRectangle(0, 0, screenW, screenH, surfaceVeil)
-	drawCard(cardX, cardY, cardW, cardH, surfacePrimary, borderSoft, borderActive)
 	header := fmt.Sprintf("LEVEL UP — %s", m.Name)
-	drawHeading(font, header, cardX+18, cardY+14, borderActive)
+	card := drawModalScaffold(font, overlayCardWidthMedium, overlayCardHeightSmall, header)
+	cardX, cardY := int32(card.X), int32(card.Y)
+	cardW, cardH := int32(card.Width), int32(card.Height)
 
 	// Sub-header: level + remaining points.
 	sub := fmt.Sprintf("Level %d — %d points to spend", m.Level, m.PendingLevelUps)
@@ -69,51 +63,7 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 		float32(cardX+cardW/2), float32(cardY+cardH-22), 13)
 }
 
-// DrawPartyStatsScreen paints the pause-menu's Party Stats overlay —
-// all four members side by side with Class / Level / HP / MP / Stats /
-// Armor / XP / next-XP. Read-only; Esc closes (handled by explore).
-func DrawPartyStatsScreen(g core.GameState, assets Resources) {
-	if !g.StatsScreenOpen {
-		return
-	}
-	font := assets.Font()
-	screenW, screenH := screenSize()
-	cardW := int32(680)
-	cardH := int32(380)
-	cardX := centerX(cardW)
-	cardY := screenH/2 - cardH/2
-
-	rl.DrawRectangle(0, 0, screenW, screenH, surfaceVeil)
-	drawCard(cardX, cardY, cardW, cardH, surfacePrimary, borderSoft, borderActive)
-	drawHeading(font, "PARTY STATS", cardX+18, cardY+14, borderActive)
-
-	colW := (cardW - 36) / int32(len(g.Party))
-	if colW < 1 {
-		colW = 1
-	}
-	for i, m := range g.Party {
-		colX := cardX + 18 + int32(i)*colW
-		y := cardY + 50
-		drawTextWithShadow(font, m.Name, float32(colX), float32(y), 18, textPrimary)
-		y += 22
-		drawTextWithShadow(font, fmt.Sprintf("Lv %d", m.Level), float32(colX), float32(y), 14, textMuted)
-		y += 18
-		drawTextWithShadow(font, fmt.Sprintf("HP %d/%d", m.HP, m.MaxHP), float32(colX), float32(y), 14, textMuted)
-		y += 16
-		drawTextWithShadow(font, fmt.Sprintf("MP %d/%d", m.MP, m.MaxMP), float32(colX), float32(y), 14, textMuted)
-		y += 22
-		for s := core.Stat(0); s < core.StatCount; s++ {
-			line := fmt.Sprintf("%s %d", core.StatLabel(s), core.StatValue(m.Stats, s))
-			drawTextWithShadow(font, line, float32(colX), float32(y), 13, textMuted)
-			y += 14
-		}
-		y += 6
-		drawTextWithShadow(font, fmt.Sprintf("ARM %d", m.Armor), float32(colX), float32(y), 13, textMuted)
-		y += 18
-		nextXP := core.XPForLevel(m.Level)
-		drawTextWithShadow(font, fmt.Sprintf("XP %d/%d", m.XP, nextXP), float32(colX), float32(y), 13, textHint)
-	}
-
-	DrawFooterHint(font, "Esc close",
-		float32(cardX+cardW/2), float32(cardY+cardH-22), 13)
-}
+// (DrawPartyStatsScreen was retired in favor of the panels overlay's
+// Stats tab — DrawPanelsOverlay handles the multi-tab dashboard,
+// including the same per-member Stats / Level / HP / MP / XP layout
+// plus Equipment / Items / Skills / Map.)

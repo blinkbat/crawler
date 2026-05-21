@@ -113,18 +113,14 @@ func DrawChestModal(g core.GameState, assets Resources) {
 	stacks := core.LiveStacks(chest.Items)
 
 	font := assets.Font()
-	screenW, screenH := screenSize()
-	cardW := int32(360)
 	cardH := int32(96 + 30*(int32(len(stacks))+1))
 	if cardH < 180 {
 		cardH = 180
 	}
-	cardX := centerX(cardW)
-	cardY := screenH/2 - cardH/2
-
-	rl.DrawRectangle(0, 0, screenW, screenH, surfaceVeil)
-	drawCard(cardX, cardY, cardW, cardH, surfacePrimary, borderSoft, borderActive)
-	drawHeading(font, "TREASURE", cardX+18, cardY+14, borderActive)
+	card := drawModalScaffold(font, overlayCardWidthSmall, cardH, "TREASURE")
+	cardX, cardY := int32(card.X), int32(card.Y)
+	cardW := int32(card.Width)
+	cardH = int32(card.Height)
 
 	rowY := cardY + 56
 	rowH := int32(28)

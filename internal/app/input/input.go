@@ -176,6 +176,13 @@ func TargetPreviousPressed() bool {
 // battle Esc is the "back / cancel target" edge and we must not eat it
 // here. The caller threads its own context (battle or no battle) so this
 // stays one function instead of two slightly-different probes.
+//
+// Controller mapping note: GamepadButtonMiddleRight is the "small
+// start" button — Options on PS5 / Start on Xbox / Menu on Switch.
+// The "big start" middle button (PS5 touchpad click / Xbox guide /
+// closest raylib exposes is GamepadButtonMiddle) is bound by
+// PanelsTogglePressed below for the game panels overlay so the two
+// reads don't fight over the same input.
 func PausePressed(inBattle bool) bool {
 	if rl.IsKeyPressed(rl.KeyP) || padPressed(rl.GamepadButtonMiddleRight) { // Start
 		return true
@@ -184,6 +191,23 @@ func PausePressed(inBattle bool) bool {
 		return true
 	}
 	return false
+}
+
+// PanelsTogglePressed is the edge to open or close the game panels
+// overlay (stats / equipment / items / skills / zoomable map). Bound
+// to keyboard 'I' (Inventory mnemonic) and to the gamepad's middle
+// button — on a DualSense that's the PS button, on Xbox it's the
+// guide button, and it's the closest raylib exposes to the PS5
+// touchpad click. The "small start" Options button stays mapped to
+// PausePressed; the two overlays are mutually exclusive in the
+// explore-loop gate.
+//
+// Both opening and closing go through this same edge — pressing the
+// same button toggles the overlay off, mirroring how phone status
+// bars work. BackPressed (Esc / B / Circle) also closes the overlay
+// from inside it.
+func PanelsTogglePressed() bool {
+	return rl.IsKeyPressed(rl.KeyI) || padPressed(rl.GamepadButtonMiddle)
 }
 
 func RestartPressed() bool {

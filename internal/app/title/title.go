@@ -140,7 +140,7 @@ func Draw(s State, assets render.Resources) {
 	font := assets.Font()
 	theme := assets.Theme()
 	rl.ClearBackground(rl.NewColor(8, 12, 24, 255))
-	screenH := int32(rl.GetScreenHeight())
+	_, screenH := render.ScreenSize()
 
 	title := "CRAWLER"
 	titleSize := float32(72)
@@ -209,8 +209,8 @@ func drawList(items []string, cursor int, font rl.Font, theme render.Theme, scre
 }
 
 func drawHint(font rl.Font, text string, screenH int32) {
-	cx := float32(rl.GetScreenWidth()) / 2
-	render.DrawFooterHint(font, text, cx, float32(screenH)-36, 14)
+	sw, _ := render.ScreenSizeF()
+	render.DrawFooterHint(font, text, sw/2, float32(screenH)-36, 14)
 }
 
 func drawError(font rl.Font, theme render.Theme, msg string, screenH int32) {

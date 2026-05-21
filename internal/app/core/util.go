@@ -128,6 +128,20 @@ func MaxInt(a, b int) int {
 	return b
 }
 
+// ClampInt is the int counterpart to Clamp — keeps v inside [lo, hi].
+// Lifted into core so the editor's grid-cursor and any future int-range
+// clamp can share one implementation instead of every package open-coding
+// a 5-line min/max chain.
+func ClampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
 func Smoothstep(t float32) float32 {
 	return t * t * (3 - 2*t)
 }

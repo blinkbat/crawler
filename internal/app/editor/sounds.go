@@ -161,8 +161,7 @@ type soundLayout struct {
 // of inputs — both Update and Draw call this so they agree on
 // hit-test geometry.
 func computeSoundLayout(savedSounds []string) soundLayout {
-	sw := float32(rl.GetScreenWidth())
-	sh := float32(rl.GetScreenHeight())
+	sw, sh := render.ScreenSizeF()
 	card := rl.NewRectangle((sw-soundModalW)/2, (sh-soundModalH)/2, soundModalW, soundModalH)
 	colW := (card.Width - 32 - 2*soundColGap) / 3
 	colY := card.Y + 56

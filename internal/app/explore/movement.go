@@ -28,14 +28,18 @@ func Update(g *core.GameState) {
 		return
 	}
 
-	// Read-only Party Stats overlay opens from the pause menu and
-	// closes with Esc/Back. No state mutation here — the screen is
-	// purely informational; we just gate input so movement / pause
-	// don't leak through.
-	if g.StatsScreenOpen {
-		if input.BackPressed() {
-			g.StatsScreenOpen = false
-		}
+
+	// Game panels overlay (Stats / Equipment / Items / Skills / Map)
+	// gates above chest / pause / battle so the player can't drift
+	// the world while flipping through inventory. Out-of-battle only —
+	// the toggle below refuses to open during combat to keep the
+	// timing-bar window honest.
+	if g.PanelsOpen {
+		updatePanels(g)
+		return
+	}
+	if input.PanelsTogglePressed() && !g.Battle.Active() {
+		openPanels(g)
 		return
 	}
 
@@ -57,14 +61,14 @@ func Update(g *core.GameState) {
 		updateMenu(g)
 		return
 	}
-	pause := input.PausePressed(g.Battle.Phase != core.BattleNone)
+	pause := input.PausePressed(g.Battle.Active())
 	if pause && pauseAllowed(g) {
 		g.MenuOpen = true
 		g.Player.LookYaw = 0
 		g.Player.LookPitch = 0
 		return
 	}
-	if g.Battle.Phase != core.BattleNone {
+	if g.Battle.Active() {
 		battle.Update(g, dt)
 		return
 	}
@@ -80,7 +84,7 @@ func Update(g *core.GameState) {
 		return
 	}
 	updatePlayer(g)
-	if g.Battle.Phase == core.BattleNone && g.Player.Anim.Kind == core.AnimNone {
+	if !g.Battle.Active() && g.Player.Anim.Kind == core.AnimNone {
 		startAdjacent(g)
 	}
 }
@@ -137,12 +141,13 @@ func updateMenu(g *core.GameState) {
 		case core.PauseMenuRestart:
 			restartGame(g)
 		case core.PauseMenuStats:
-			// Drop the pause menu and raise the read-only stats overlay.
-			// Esc inside the stats screen closes it (handled at the
-			// top of explore.Update so the overlay shadows pause input
-			// the same way a chest does).
+			// Drop the pause menu and open the panels overlay on the
+			// Stats tab — that surface is the richer multi-tab
+			// dashboard (Stats / Equipment / Items / Skills / Map),
+			// of which the legacy compact view was a subset.
 			g.MenuOpen = false
-			g.StatsScreenOpen = true
+			openPanels(g)
+			g.PanelsTab = core.PanelTabStats
 		case core.PauseMenuDebug:
 			g.DebugOverlay = !g.DebugOverlay
 		case core.PauseMenuDisplay:
@@ -214,6 +219,20 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	p.TileX = targetX
 	p.TileZ = targetZ
 	g.StepCount++
+	// Out-of-battle poison tick: a fight-inflicted poison kept ticking
+	// counters down on every party turn during battle but had no hook in
+	// exploration, so the status would stick forever after a fight ended.
+	// Hooking the tick here lines it up with the player's most natural
+	// "unit of time outside combat" — one tile traversed.
+	core.TickPoisonStep(g)
+	// Fog-of-war reveal: every successful step marks the destination
+	// tile visited so the Map panel can paint unexplored cells dimmer.
+	// The Visited grid is allocated for the full Area dimensions in
+	// NewGameState; bounds-check defensively in case a future editor
+	// path produces a state that pre-dates the grid.
+	if g.Area.InBounds(targetX, targetZ) && targetZ < len(g.Visited) && targetX < len(g.Visited[targetZ]) {
+		g.Visited[targetZ][targetX] = true
+	}
 	p.Anim = core.Animation{
 		Kind:     core.AnimStep,
 		Duration: core.StepDuration,
@@ -324,7 +343,7 @@ func tryQueueDoorTransition(g *core.GameState) {
 		return
 	}
 	door := g.Doors[idx]
-	if door.TargetMap == "" || door.TargetDoor == "" {
+	if !door.HasTarget() {
 		return
 	}
 	g.PendingTransition = core.AreaTransition{

@@ -115,10 +115,12 @@ func barThrob(timing core.TimingState, flashTimer float32) float32 {
 // tickFreshness returns a [0, 1] strength for a charge bar's tick marker
 // based on how recently the cursor crossed it. The tick flashes brighter +
 // wider while fresh, then settles back to its baseline. tickFlashDuration
-// is local to this helper since it's the only caller.
+// is local to this helper since it's the only caller. tickPct is the
+// tick's *visual* position on the bar — we invert through the cursor
+// curve to find the elapsed time the cursor actually reached it.
 func tickFreshness(timing core.TimingState, tickPct float32) float32 {
 	const tickFlashDuration = float32(0.22)
-	tickTime := tickPct * timing.Duration
+	tickTime := core.ChargeElapsedForVisual(tickPct, timing.Duration)
 	age := timing.Elapsed - tickTime
 	if age < 0 || age > tickFlashDuration {
 		return 0
@@ -252,11 +254,13 @@ func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x
 	// Quality zones inside the acceptance window — Nice (outermost) → Good →
 	// Great → Excellent (centered on the sweet spot). Each is a full-height
 	// solid color stripe; nesting communicates the grading without any lines.
+	// Two-zone press bars (Swipe) paint the nested bands for both windows so
+	// each hit zone reads with its own gradient.
 	if !flashing {
-		drawWindowZone(timing, drawX, drawY, barW, drawnH, 1.00, qualityColor(core.TimingQualityNice, isDefend))
-		drawWindowZone(timing, drawX, drawY, barW, drawnH, 0.60, qualityColor(core.TimingQualityGood, isDefend))
-		drawWindowZone(timing, drawX, drawY, barW, drawnH, 0.30, qualityColor(core.TimingQualityGreat, isDefend))
-		drawWindowZone(timing, drawX, drawY, barW, drawnH, 0.10, qualityColor(core.TimingQualityExcellent, isDefend))
+		drawPressWindowZones(timing.WindowStart, timing.WindowEnd, timing.SweetSpot, timing.Duration, drawX, drawY, barW, drawnH, isDefend)
+		if timing.Window2End > 0 {
+			drawPressWindowZones(timing.Window2Start, timing.Window2End, timing.SweetSpot2, timing.Duration, drawX, drawY, barW, drawnH, isDefend)
+		}
 	}
 
 	// Cursor — a fat vertical block sliding across the bar. Frozen at the
@@ -341,14 +345,18 @@ func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, 
 	rl.DrawRectangle(int32(drawX), int32(drawY), int32(barW), int32(drawnH), trackCol)
 
 	if !flashing {
+		// Bar layout below works in visual-fraction space directly, since
+		// tick lines and peak band sit at constant bar positions
+		// (ChargeTickNPct / ChargePeakStart / ChargePeakEnd). The cursor
+		// is the only thing that moves non-linearly across them.
+
 		// Decay zone (dim warning) — drawn first so the peak overlays it.
-		decayStart := timing.WindowEnd
 		decayCol := rl.NewColor(184, 96, 80, 220)
-		drawTimeRange(decayStart, timing.Duration, timing, drawX, drawY, barW, drawnH, decayCol)
+		drawBarSlice(drawX, drawY, barW, drawnH, core.ChargePeakEnd, 1.0, decayCol)
 
 		// Peak window (release zone) — bright Excellent color.
 		peakCol := qualityColor(core.TimingQualityExcellent, false)
-		drawTimeRange(timing.WindowStart, timing.WindowEnd, timing, drawX, drawY, barW, drawnH, peakCol)
+		drawBarSlice(drawX, drawY, barW, drawnH, core.ChargePeakStart, core.ChargePeakEnd, peakCol)
 
 		// Charging fill — snaps forward only when the cursor crosses a tick
 		// boundary, since the *grade* counts only fully-completed ticks.
@@ -359,7 +367,7 @@ func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, 
 			fillEnd := chargeFillEnd(timing)
 			if fillEnd > 0 {
 				chargeCol := rl.NewColor(232, 144, 80, 220)
-				drawTimeRange(0, fillEnd, timing, drawX, drawY, barW, drawnH, chargeCol)
+				drawBarSlice(drawX, drawY, barW, drawnH, 0, fillEnd, chargeCol)
 			}
 		}
 
@@ -624,31 +632,22 @@ func drawBarSlice(barX, barY, barW, barH, startPct, endPct float32, col rl.Color
 	rl.DrawRectangle(int32(zx), int32(barY), int32(zw), int32(barH), col)
 }
 
-// drawTimeRange paints a solid color stripe between two times (in seconds)
-// across the bar. Used by the charge bar to paint peak / decay / fill zones.
-func drawTimeRange(startSec, endSec float32, timing core.TimingState, barX, barY, barW, barH float32, col rl.Color) {
-	if timing.Duration <= 0 || endSec <= startSec {
-		return
-	}
-	drawBarSlice(barX, barY, barW, barH, startSec/timing.Duration, endSec/timing.Duration, col)
-}
-
-// chargeFillEnd returns how far (in seconds along the bar) the orange
-// charging fill should extend, snapped to the last fully-passed tick. This
-// matches resolveCharge's discrete grading: a release between tick N and
-// tick N+1 scores N ticks, so the visual should also read as "N ticks
-// filled" rather than telegraphing partial progress.
+// chargeFillEnd returns how far (as a visual bar fraction in [0, 1]) the
+// orange charging fill should extend, snapped to the last fully-passed
+// tick. This matches resolveCharge's discrete grading: a release between
+// tick N and tick N+1 scores N ticks, so the visual should also read as
+// "N ticks filled" rather than telegraphing partial progress. Pulls
+// cursor visual progress so the fill snap fires the same instant the
+// cursor crosses the tick line on screen.
 func chargeFillEnd(timing core.TimingState) float32 {
-	tick1 := core.ChargeTick1Pct * timing.Duration
-	tick2 := core.ChargeTick2Pct * timing.Duration
-	tick3 := core.ChargeTick3Pct * timing.Duration
+	p := core.ChargeCursorProgress(timing.Elapsed, timing.Duration)
 	switch {
-	case timing.Elapsed >= tick3:
-		return tick3
-	case timing.Elapsed >= tick2:
-		return tick2
-	case timing.Elapsed >= tick1:
-		return tick1
+	case p >= core.ChargeTick3Pct:
+		return core.ChargeTick3Pct
+	case p >= core.ChargeTick2Pct:
+		return core.ChargeTick2Pct
+	case p >= core.ChargeTick1Pct:
+		return core.ChargeTick1Pct
 	default:
 		return 0
 	}
@@ -662,24 +661,38 @@ func drawChargeTick(timing core.TimingState, barX, barY, barW, barH float32, pct
 	rl.DrawRectangle(int32(tx-1), int32(barY)-3, 2, int32(barH)+6, tickCol)
 }
 
-// drawWindowZone paints a solid color stripe centered on the sweet spot,
-// scaled to a fraction of the acceptance window's full width. Used to nest
-// quality bands without drawing any borders.
-func drawWindowZone(timing core.TimingState, barX, barY, barW, barH float32, ratio float32, col rl.Color) {
-	windowSize := timing.WindowEnd - timing.WindowStart
-	if windowSize <= 0 || timing.Duration <= 0 {
+// drawWindowZone paints a solid color stripe centered on `sweet`, scaled
+// to a fraction of the acceptance window's (`end` - `start`) width. Used
+// to nest quality bands without drawing any borders. Takes the window
+// scalars explicitly so callers can paint either the primary or the
+// secondary window of a two-zone press bar through the same helper.
+func drawWindowZone(start, end, sweet, duration, barX, barY, barW, barH, ratio float32, col rl.Color) {
+	windowSize := end - start
+	if windowSize <= 0 || duration <= 0 {
 		return
 	}
 	half := windowSize * ratio * 0.5
-	startSec := timing.SweetSpot - half
-	endSec := timing.SweetSpot + half
-	if startSec < timing.WindowStart {
-		startSec = timing.WindowStart
+	startSec := sweet - half
+	endSec := sweet + half
+	if startSec < start {
+		startSec = start
 	}
-	if endSec > timing.WindowEnd {
-		endSec = timing.WindowEnd
+	if endSec > end {
+		endSec = end
 	}
-	drawBarSlice(barX, barY, barW, barH, startSec/timing.Duration, endSec/timing.Duration, col)
+	drawBarSlice(barX, barY, barW, barH, startSec/duration, endSec/duration, col)
+}
+
+// drawPressWindowZones paints the full Nice → Good → Great → Excellent
+// nested-band stack for one acceptance window of a press bar. Called once
+// per window so single-zone and double-zone (Swipe) press bars share the
+// same gradient look without the caller having to repeat four lines per
+// window.
+func drawPressWindowZones(start, end, sweet, duration, barX, barY, barW, barH float32, isDefend bool) {
+	drawWindowZone(start, end, sweet, duration, barX, barY, barW, barH, 1.00, qualityColor(core.TimingQualityNice, isDefend))
+	drawWindowZone(start, end, sweet, duration, barX, barY, barW, barH, 0.60, qualityColor(core.TimingQualityGood, isDefend))
+	drawWindowZone(start, end, sweet, duration, barX, barY, barW, barH, 0.30, qualityColor(core.TimingQualityGreat, isDefend))
+	drawWindowZone(start, end, sweet, duration, barX, barY, barW, barH, 0.10, qualityColor(core.TimingQualityExcellent, isDefend))
 }
 
 // flashAlpha returns the [0,1] strength of the flash, peaking right after the
@@ -706,7 +719,7 @@ func DrawQualityPopup(camera rl.Camera3D, g core.GameState, assets Resources) {
 	if g.Battle.LastQualityTimer <= 0 {
 		return
 	}
-	if g.Battle.Phase == core.BattleNone {
+	if !g.Battle.Active() {
 		return
 	}
 
@@ -719,7 +732,8 @@ func DrawQualityPopup(camera rl.Camera3D, g core.GameState, assets Resources) {
 	}
 	worldPos.Y += 0.6
 	screenPos := rl.GetWorldToScreen(worldPos, camera)
-	if screenPos.X < -offscreenPopupSlack || screenPos.X > float32(rl.GetScreenWidth())+offscreenPopupSlack {
+	sw, _ := screenSizeF()
+	if screenPos.X < -offscreenPopupSlack || screenPos.X > sw+offscreenPopupSlack {
 		return
 	}
 
@@ -762,7 +776,7 @@ func qualityPopupAnchor(camera rl.Camera3D, g core.GameState) (rl.Vector3, bool)
 // reads as the same orange as the player's quality popup); an Excellent hit
 // gets a trailing "!" so the big damage spike reads at a glance.
 func DrawDamagePopups(camera rl.Camera3D, g core.GameState, assets Resources) {
-	if g.Battle.Phase == core.BattleNone {
+	if !g.Battle.Active() {
 		return
 	}
 	for i, enemy := range core.BattleMembers(&g) {
@@ -777,7 +791,8 @@ func DrawDamagePopups(camera rl.Camera3D, g core.GameState, assets Resources) {
 		pos := enemyDrawPosition(camera, g, i, enemy)
 		pos.Y += 0.6
 		screenPos := rl.GetWorldToScreen(pos, camera)
-		if screenPos.X < -offscreenPopupSlack || screenPos.X > float32(rl.GetScreenWidth())+offscreenPopupSlack {
+		sw, _ := screenSizeF()
+		if screenPos.X < -offscreenPopupSlack || screenPos.X > sw+offscreenPopupSlack {
 			continue
 		}
 

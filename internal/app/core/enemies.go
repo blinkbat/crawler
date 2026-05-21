@@ -192,11 +192,18 @@ var enemyDefinitions = []EnemyDefinition{
 		XPValue:            22,
 		AttackVerbSingular: "snaps at",
 		AttackVerbPlural:   "snap at",
-		Skills:             []SkillID{SkillIngest},
-		// Bias toward melee — Ingest's lockout is so disruptive that
-		// rolling it every other turn would feel oppressive. About one in
-		// three turns the mantrap reaches for prey; the rest it bites.
-		SkillCastChance: 0.35,
+		Skills: []SkillID{SkillIngest},
+		// Always reach for prey when no prey is held — that's the
+		// mantrap's threat identity. Once it has someone, the
+		// usableEnemySkills filter strips Ingest from the cast list
+		// (each plant holds at most one prey) so the usable set is
+		// empty and the mantrap falls through to plain melee bites
+		// against the rest of the party. Result: round 1 → ingest,
+		// later rounds → bite, kill the plant to free the prisoner.
+		// An earlier 0.35 roll-to-cast made the mantrap bite ~2/3 of
+		// the time even when starving, which read as "doesn't
+		// prioritize ingest."
+		SkillCastChance: 1.0,
 	},
 	{
 		Kind:         EnemyAmoeba,
@@ -254,6 +261,15 @@ func EnemyKinds() []EnemyDefinition {
 	out := make([]EnemyDefinition, len(enemyDefinitions))
 	copy(out, enemyDefinitions)
 	return out
+}
+
+// TheEnemy returns the article-prefixed singular form of an enemy ("The
+// rat", "The goblin mage"). Combat log lines repeated "The " + def.
+// SingularNoun a dozen times — centralising here means a future enemy
+// that wants a different article ("An Amoeba" / a proper-named boss)
+// is one method, not a grep across battle.go and actions.go.
+func TheEnemy(def EnemyDefinition) string {
+	return "The " + def.SingularNoun
 }
 
 func EnemyInfo(kind EnemyKind) EnemyDefinition {

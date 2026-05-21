@@ -56,6 +56,20 @@ var (
 	tintEnemyTargeted = rl.NewColor(255, 228, 190, 255)
 	tintEnemyAttacker = rl.NewColor(255, 196, 156, 255)
 
+	// Editor + minimap entity-marker colors. Centralised here so the
+	// in-grid markers (editor's draw.go), the on-disk-list swatches
+	// (editor's brush palette), and the minimap dots all share one
+	// source of truth — moving the door tone or chest tone is now one
+	// edit instead of three NewColor literals. Exported via theme.go
+	// as theme.MarkerXxx fields for external scenes.
+	markerStart      = rl.NewColor(255, 220, 124, 255)
+	markerChest      = rl.NewColor(232, 180, 92, 255)
+	markerChestDim   = rl.NewColor(160, 132, 78, 255)
+	markerDoor       = rl.NewColor(176, 132, 86, 255)
+	markerPack       = rl.NewColor(220, 76, 70, 255)
+	markerPackEdge   = rl.NewColor(255, 200, 200, 220)
+	markerOutline    = rl.NewColor(0, 0, 0, 220)
+
 	// chestColors govern the chest billboard — body color, lid color,
 	// and the deeper tone for an emptied/looted chest. Pulled out here
 	// rather than open-coded in DrawChests so the palette can be tuned
@@ -94,7 +108,68 @@ const (
 	// so a popup whose anchor moves slightly off-screen still fades cleanly
 	// instead of snapping to invisible mid-animation.
 	offscreenPopupSlack = float32(200)
+
+	// Overlay (modal card) dimensions. Each modal surface used to
+	// hard-code its own cardW / cardH literals; centralizing them keeps
+	// a future "shrink all modals on small screens" pass in one edit.
+	// The dimensions are sized to the modal's CONTENT — a chest with
+	// fewer items renders shorter via cardH expansion at the call site,
+	// but the WIDTH stays standardized.
+	overlayCardWidthSmall  = int32(360) // chest modal (item list)
+	overlayCardWidthMedium = int32(420) // level-up modal
+	overlayCardWidthLarge  = int32(680) // party stats overlay
+	overlayCardWidthHuge   = int32(820) // game panels overlay
+
+	overlayCardHeightSmall  = int32(380) // level-up / party stats
+	overlayCardHeightLarge  = int32(520) // game panels overlay
+	overlayCardMarginScreen = int32(40)  // minimum margin between card and screen edges
+
+	// Panels-overlay tab strip geometry. Shared by the panels surface
+	// only today — moved here so future tab-strip surfaces (a future
+	// equipment swap modal, a settings panel) can reuse the heights.
+	overlayTabHeight  = int32(34)
+	overlayTabPadding = int32(12)
+
+	// overlayFooterReserve is the vertical band at the bottom of every
+	// overlay card reserved for the "Esc close / L1 R1 tabs" hint
+	// footer rendered by DrawFooterHint. Body rect = card minus this
+	// band minus the heading band at the top.
+	overlayFooterReserve = int32(28)
+	overlayHeaderReserve = int32(40)
 )
+
+// drawModalScaffold paints the shared screen-veil + centered card +
+// heading band for every modal overlay (chest, level-up, party stats,
+// panels). Returns the card rect so the caller can lay out its body
+// inside without redoing the centering math. Pass an empty heading
+// to skip the header band — the caller still gets the right card
+// rect.
+//
+// The three older overlays (chest / levelup / party stats) used to
+// open-code rl.DrawRectangle(0,0,…,surfaceVeil) + drawCard + drawHeading
+// each in slightly different orders. This helper plus the
+// overlayCardWidth* / overlayCardHeight* constants in this file are
+// the seam where future "shrink for small screens" or "fade-in"
+// behaviour lands once.
+func drawModalScaffold(font rl.Font, cardW, cardH int32, heading string) rl.Rectangle {
+	screenW, screenH := screenSize()
+	// Soft clamp so a tiny window doesn't push the card off-screen.
+	if cardW > screenW-overlayCardMarginScreen {
+		cardW = screenW - overlayCardMarginScreen
+	}
+	if cardH > screenH-overlayCardMarginScreen {
+		cardH = screenH - overlayCardMarginScreen
+	}
+	cardX := centerX(cardW)
+	cardY := screenH/2 - cardH/2
+
+	rl.DrawRectangle(0, 0, screenW, screenH, surfaceVeil)
+	drawCard(cardX, cardY, cardW, cardH, surfacePrimary, borderSoft, borderActive)
+	if heading != "" {
+		drawHeading(font, heading, cardX+18, cardY+14, borderActive)
+	}
+	return rl.NewRectangle(float32(cardX), float32(cardY), float32(cardW), float32(cardH))
+}
 
 // drawPanel fills a rounded rect at a fixed pixel corner radius.
 func drawPanel(x, y, w, h int32, fill color.RGBA) {

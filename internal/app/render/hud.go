@@ -9,7 +9,7 @@ func DrawOverlay(g core.GameState, assets Resources) {
 		drawMenuOverlay(g, assets)
 		return
 	}
-	if g.Battle.Phase != core.BattleNone {
+	if g.Battle.Active() {
 		drawBattleHUD(g, assets)
 		drawTurnPanel(g, assets)
 		drawMinimap(g.Area, g, assets)

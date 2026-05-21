@@ -121,21 +121,25 @@ func TestCharge_ReleaseAtSweetSpotIsExcellent(t *testing.T) {
 }
 
 func TestCharge_GradeDispatch(t *testing.T) {
+	// ChargeTickNPct / ChargePeakEnd are visual positions on the bar; we
+	// pick a target cursor visual position per case and invert through
+	// ChargeElapsedForVisual to set Elapsed. This keeps the test
+	// expressed in the same coordinate system as the rendered bar.
 	cases := []struct {
-		name    string
-		elapsed float32
-		want    int
+		name   string
+		visual float32
+		want   int
 	}{
 		{"before tick1", ChargeTick1Pct - 0.01, TimingQualityMiss},
 		{"between tick1 and tick2", (ChargeTick1Pct + ChargeTick2Pct) / 2, TimingQualityNice},
 		{"between tick2 and tick3", (ChargeTick2Pct + ChargeTick3Pct) / 2, TimingQualityGood},
-		{"past peak window", 0.95, TimingQualityMiss},
+		{"past peak window", ChargePeakEnd + 0.05, TimingQualityMiss},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := NewChargeState(2.0)
 			s.Hold()
-			s.Elapsed = tc.elapsed * s.Duration
+			s.Elapsed = ChargeElapsedForVisual(tc.visual, s.Duration)
 			s.Release()
 			if s.Quality != tc.want {
 				t.Fatalf("got quality %v, want %v", s.Quality, tc.want)

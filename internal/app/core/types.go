@@ -40,17 +40,50 @@ type DoorSpawn struct {
 	Facing     int
 }
 
+// HasTarget reports whether this door names a destination it can
+// actually resolve. An empty TargetMap or TargetDoor means the door
+// was authored but never finished — every "should this door fire?"
+// predicate (runtime trigger, editor validator, parse-time check)
+// goes through here so the rule lives in one place.
+func (d DoorSpawn) HasTarget() bool {
+	return d.TargetMap != "" && d.TargetDoor != ""
+}
+
 // Door is one runtime door on the field. Built from AreaDefinition.
 // DoorSpawns by NewGameState (placeDoors). Doors block neither movement
 // nor vision: stepping onto a door's tile fires the area transition,
 // resolved by the explore loop against the door's TargetMap + TargetDoor.
 type Door struct {
-	TileX      int
-	TileZ      int
-	Name       string
-	TargetMap  string
+	TileX int
+	TileZ int
+	Name  string
+	// TargetMap names the destination map id (the bare name, e.g.
+	// "dungeon" for dungeon.map). The literal "self" placeholder is
+	// resolved to the local map id by AreaFromMapFile.
+	TargetMap string
+	// TargetDoor is the destination door's Name. Resolution lookup
+	// is DoorByName(destination.Doors, TargetDoor).
 	TargetDoor string
-	Facing     int
+	// Facing has two related uses, both honored by doorExitTile in
+	// run.go:
+	//   1. The player's post-transition look direction — the camera
+	//      yaw is set from this when they emerge.
+	//   2. The offset vector for the exit tile: the player is placed
+	//      one step in this direction from the door tile, so the
+	//      destination door sits behind them and they don't
+	//      immediately re-trigger the transition.
+	// Both readings collapse to the same value: "which way is the
+	// player facing when they walk out of this doorway." Authors
+	// should set it accordingly; the engine doesn't infer either
+	// reading separately.
+	Facing int
+}
+
+// HasTarget reports whether this runtime door names a resolvable
+// destination. Sibling of DoorSpawn.HasTarget — same rule applied to
+// the runtime list.
+func (d Door) HasTarget() bool {
+	return d.TargetMap != "" && d.TargetDoor != ""
 }
 
 // AreaTransition is the queued "swap to this area next frame" request
@@ -60,6 +93,39 @@ type Door struct {
 type AreaTransition struct {
 	TargetMap  string
 	TargetDoor string
+}
+
+// PanelTab indexes the game-panels overlay tabs. Order is the on-screen
+// left-to-right tab order; switching tabs cycles through this enum with
+// the L1/R1 shoulders or arrow keys. Adding a new tab is one enum row
+// + one row in render/panels.go's drawer table.
+type PanelTab int
+
+const (
+	PanelTabStats PanelTab = iota
+	PanelTabEquipment
+	PanelTabItems
+	PanelTabSkills
+	PanelTabMap
+	PanelTabCount
+)
+
+// PanelTabLabel returns the short human label for a tab — used for the
+// tab strip header in the overlay.
+func PanelTabLabel(t PanelTab) string {
+	switch t {
+	case PanelTabStats:
+		return "Stats"
+	case PanelTabEquipment:
+		return "Equipment"
+	case PanelTabItems:
+		return "Items"
+	case PanelTabSkills:
+		return "Skills"
+	case PanelTabMap:
+		return "Map"
+	}
+	return "?"
 }
 
 // Chest is one runtime chest on the field. Items is the stack-counted
@@ -193,10 +259,29 @@ type GameState struct {
 	LevelUpOpen   bool
 	LevelUpMember int
 	LevelUpStat   Stat
-	// StatsScreenOpen is true while the read-only Party Stats overlay
-	// is showing (Party Stats pause-menu entry). Out-of-battle only —
-	// in battle the pause menu is suppressed.
-	StatsScreenOpen bool
+	// PanelsOpen is true while the game panels overlay is up (Stats /
+	// Equipment / Items / Skills / Map tabs). Triggered by the "big
+	// start" button — gamepad middle / keyboard I — and gated above
+	// the pause-menu / battle priorities in explore.Update so the
+	// overlay can't co-exist with combat input. PanelsTab is the
+	// currently-shown tab; PanelsRowCursor is the per-tab vertical
+	// cursor — its semantic is "selected row within the active tab,"
+	// so it indexes a party member on Stats/Equipment/Skills, an
+	// inventory stack on Items, and is unused on Map (the Map tab
+	// uses PanelsMapZoom instead). Resets to 0 on every tab switch
+	// so each tab opens at the top.
+	PanelsOpen      bool
+	PanelsTab       PanelTab
+	PanelsRowCursor int
+	// PanelsMapZoom is the cells-on-screen value for the Map tab. Saved
+	// separately from PanelsScroll so cycling between tabs preserves
+	// each tab's cursor state. Initialized lazily on first Map view.
+	PanelsMapZoom int
+	// Visited tracks which tiles the player has stepped on for the
+	// fog-of-war reveal in the Map panel. Width matches Area.Width;
+	// indexed as Visited[z][x]. Built by NewGameState (start tile pre-
+	// marked) and updated on every successful step in explore.
+	Visited [][]bool
 	Quit            bool
 	// RNG is the per-state random source for all gameplay rolls (accuracy,
 	// steal, burn duration, press-window placement, etc.). Per-state means
@@ -530,4 +615,22 @@ type Battle struct {
 	// which inventory row is highlighted — is ItemMenuIndex.
 	PendingItem   ItemKind
 	ItemMenuIndex int
+}
+
+// Active reports whether a battle is currently in progress (any phase
+// other than BattleNone). Single source for the "are we in combat?"
+// predicate so explore / render / HUD gates don't drift on what counts
+// as active — a future "BattleWon shouldn't count for input gating"
+// tweak is one method, not a grep.
+func (b Battle) Active() bool {
+	return b.Phase != BattleNone
+}
+
+// ClearTiming drops the timing-bar minigame state and its flash hold
+// back to zero. Used by every seam that ends a turn / battle so the
+// next phase opens with a clean bar. Promoted to a method so the
+// "drop Timing and TimingFlash together" rule lives in one spot.
+func (b *Battle) ClearTiming() {
+	b.Timing = TimingState{}
+	b.TimingFlash = 0
 }

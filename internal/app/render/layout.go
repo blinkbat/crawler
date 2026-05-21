@@ -41,6 +41,14 @@ func centerXF(w float32) float32 {
 // caller actually shows up.)
 func CenterXF(w float32) float32 { return centerXF(w) }
 
+// ScreenSize / ScreenSizeF are the exported counterparts of the
+// package-private screenSize helpers. External scenes (editor,
+// title) used to inline `float32(rl.GetScreenWidth())` at every
+// frame-layout site; routing through these keeps one window-size
+// reader and matches the centerXF / CenterXF split.
+func ScreenSize() (w, h int32)    { return screenSize() }
+func ScreenSizeF() (w, h float32) { return screenSizeF() }
+
 // drawTextureBillboard renders the full texture as a camera-facing
 // billboard at `pos` with the given world-space `size` and tint. Wraps
 // the `rl.DrawBillboardRec(camera, tex, NewRectangle(0, 0, tex.W,

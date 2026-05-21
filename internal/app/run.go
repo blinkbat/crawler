@@ -134,10 +134,21 @@ func updateAdventureScene(state *appState) {
 // transition — only the world (area, packs, chests, doors) is
 // swapped. Battle / chest / modal state is dropped, since any of
 // those flags would dangle pointers into the old area.
+//
+// Fog-of-war contract: the destination's Visited grid is allocated
+// fresh by NewGameState (with only the destination's start tile pre-
+// marked) and the SOURCE map's Visited is discarded. Returning to a
+// previously-explored map re-fogs it. Intentional per-area-is-its-
+// own-discovery feel; if cross-area persistence is wanted later, swap
+// to a session-level `map[mapID][][]bool` and copy in/out here.
 func applyAreaTransition(g *core.GameState) error {
 	target := g.PendingTransition.TargetMap
 	doorName := g.PendingTransition.TargetDoor
 	if target == "" || doorName == "" {
+		// Same shape as Door.HasTarget — the predicate is identical, but
+		// the runtime queues the transition before resolving to a Door,
+		// so we read the raw PendingTransition fields here. Empty either
+		// = no transition queued.
 		return nil
 	}
 	// Same-map portals don't reload from disk — the current area
@@ -248,6 +259,6 @@ func drawAdventureScene(game core.GameState, assets render.Resources) {
 	render.DrawDebugOverlay(camera, game, assets)
 	render.DrawOverlay(game, assets)
 	render.DrawChestModal(game, assets)
-	render.DrawPartyStatsScreen(game, assets)
 	render.DrawLevelUpModal(game, assets)
+	render.DrawPanelsOverlay(game, assets)
 }

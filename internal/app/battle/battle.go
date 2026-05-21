@@ -21,8 +21,7 @@ func Start(g *core.GameState, packIndex int) {
 	g.Battle.EnemyAttackCursor = -1
 	g.Battle.Splash = core.BattleSplashDuration
 	g.Battle.Log = nil
-	g.Battle.Timing = core.TimingState{}
-	g.Battle.TimingFlash = 0
+	g.Battle.ClearTiming()
 	g.Battle.TimingIntro = 0
 	g.Battle.HitStop = 0
 	g.Battle.SequencePulseTimer = 0
@@ -245,7 +244,7 @@ func tickSleepAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
 		return false
 	}
 	enemy.SleepTurns--
-	setBattleMessage(g, fmt.Sprintf("The %s is asleep.", core.EnemyInfoFor(*enemy).SingularNoun))
+	setBattleMessage(g, fmt.Sprintf("%s is asleep.", core.TheEnemy(core.EnemyInfoFor(*enemy))))
 	return true
 }
 
@@ -269,8 +268,7 @@ func isActorAlive(g *core.GameState, actor core.ActorRef) bool {
 // before win/lose checks so a poison kill is honored if it drops the last
 // living member.
 func finishActorTurn(g *core.GameState) {
-	g.Battle.Timing = core.TimingState{}
-	g.Battle.TimingFlash = 0
+	g.Battle.ClearTiming()
 	// Canonical clear of ChargeNeedsRelease: any action that finished
 	// (player or enemy) flows through here, so this is the seam that
 	// guarantees the next turn starts with a fresh release-gate state.
@@ -310,8 +308,7 @@ func finishActorTurn(g *core.GameState) {
 // round-trip — through the rest of the round and back).
 func beginPartyTurn(g *core.GameState, partyIndex int) {
 	g.Battle.Phase = core.BattlePlayer
-	g.Battle.Timing = core.TimingState{}
-	g.Battle.TimingFlash = 0
+	g.Battle.ClearTiming()
 	g.Battle.TimingIntro = 0
 	g.Battle.EnemyAttacker = -1
 	g.Battle.CurrentParty = partyIndex
@@ -663,7 +660,7 @@ func resolveAndFinishEnemyAttack(g *core.GameState) {
 	} else {
 		resolveEnemyAttacker(g, g.Battle.EnemyAttacker, g.Battle.Timing.Quality)
 	}
-	g.Battle.Timing = core.TimingState{}
+	g.Battle.ClearTiming()
 	g.Battle.EnemyAttacker = -1
 	g.Battle.EnemyPendingSkill = core.SkillNone
 
@@ -702,11 +699,11 @@ func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
 		// silently deal huge damage; the goblin mage sets a
 		// substantive value in its EnemyDefinition.
 		rawDamage := def.SpellPower + effect.Damage
-		killed := damagePartyMember(g, target, rawDamage, core.SkillTagMagic)
+		dealt, killed := damagePartyMember(g, target, rawDamage, core.SkillTagMagic)
 		if killed {
-			setBattleMessage(g, fmt.Sprintf("The %s incinerates %s.", def.SingularNoun, g.Party[target].Name))
+			setBattleMessage(g, fmt.Sprintf("%s incinerates %s.", core.TheEnemy(def), g.Party[target].Name))
 		} else {
-			setBattleMessage(g, fmt.Sprintf("The %s casts %s — %s burns for %d.", def.SingularNoun, skillName, g.Party[target].Name, rawDamage))
+			setBattleMessage(g, fmt.Sprintf("%s casts %s — %s burns for %d.", core.TheEnemy(def), skillName, g.Party[target].Name, dealt))
 		}
 		audio.Play(audio.SoundInputGreat)
 	case core.SkillIngest:
@@ -719,7 +716,7 @@ func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
 			picked = core.FirstAvailablePartyMember(g.Party)
 		}
 		if picked < 0 {
-			setBattleMessage(g, fmt.Sprintf("The %s lunges, but finds no one to seize.", def.SingularNoun))
+			setBattleMessage(g, fmt.Sprintf("%s lunges, but finds no one to seize.", core.TheEnemy(def)))
 			return
 		}
 		m := &g.Party[picked]
@@ -741,7 +738,7 @@ func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
 		//     resumes ticking on their first turn after release.
 		m.SleepTurns = 0
 		m.Defending = false
-		setBattleMessage(g, fmt.Sprintf("The %s engulfs %s!", def.SingularNoun, m.Name))
+		setBattleMessage(g, fmt.Sprintf("%s engulfs %s!", core.TheEnemy(def), m.Name))
 		audio.Play(audio.SoundEnemyHit)
 	case core.SkillSleep:
 		m := &g.Party[target]
@@ -754,7 +751,7 @@ func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
 			return
 		}
 		if m.SleepTurns > 0 {
-			setBattleMessage(g, fmt.Sprintf("The %s casts %s — %s is already asleep.", def.SingularNoun, skillName, m.Name))
+			setBattleMessage(g, fmt.Sprintf("%s casts %s — %s is already asleep.", core.TheEnemy(def), skillName, m.Name))
 			return
 		}
 		duration := effect.SleepDuration(g.Rand())
@@ -762,13 +759,13 @@ func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
 			duration = core.SleepMinTurns
 		}
 		m.SleepTurns = duration
-		setBattleMessage(g, fmt.Sprintf("The %s casts %s — %s falls asleep.", def.SingularNoun, skillName, m.Name))
+		setBattleMessage(g, fmt.Sprintf("%s casts %s — %s falls asleep.", core.TheEnemy(def), skillName, m.Name))
 		audio.Play(audio.SoundInputHit)
 	default:
 		// #12: log the skill id so a future author who registers a
 		// new skill but forgets to add a case here at least sees the
 		// numeric culprit in the combat log instead of a silent fizzle.
-		setBattleMessage(g, fmt.Sprintf("The %s mutters something (unhandled skill %d).", def.SingularNoun, int(skill)))
+		setBattleMessage(g, fmt.Sprintf("%s mutters something (unhandled skill %d).", core.TheEnemy(def), int(skill)))
 	}
 }
 
@@ -787,8 +784,7 @@ func tickQualityPopup(g *core.GameState, dt float32) {
 func winBattle(g *core.GameState, message string) {
 	g.Battle.Phase = core.BattleWon
 	g.Battle.Timer = core.VictoryDanceDuration
-	g.Battle.Timing = core.TimingState{}
-	g.Battle.TimingFlash = 0
+	g.Battle.ClearTiming()
 	resetBattleAction(g)
 	setBattleMessage(g, message)
 	// XP award fires once, right after the kill is confirmed. Living
@@ -807,8 +803,7 @@ func winBattle(g *core.GameState, message string) {
 
 func loseBattle(g *core.GameState, message string) {
 	g.Battle.Phase = core.BattleLost
-	g.Battle.Timing = core.TimingState{}
-	g.Battle.TimingFlash = 0
+	g.Battle.ClearTiming()
 	resetBattleAction(g)
 	setBattleMessage(g, message)
 }
@@ -850,8 +845,7 @@ func clearBattleResidual(g *core.GameState) {
 	g.Battle.Queue = nil
 	g.Battle.QueueCursor = 0
 	g.Battle.NextRoundQueue = nil
-	g.Battle.Timing = core.TimingState{}
-	g.Battle.TimingFlash = 0
+	g.Battle.ClearTiming()
 	g.Battle.TimingIntro = 0
 	g.Battle.ChargeNeedsRelease = false
 	g.Battle.HitStop = 0

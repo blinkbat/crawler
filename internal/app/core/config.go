@@ -122,17 +122,23 @@ const (
 	BlockBumpDuration = float32(0.22)
 
 	// Charge minigame: hold the input through three ticks, then release at
-	// the peak. Tick markers land at 30% / 56% / 78% of the bar; the peak
-	// window runs 78%..86% (an 8% sweet spot — tighter than the previous
-	// 12%). Past 86% the bar runs into a brief decay zone before timing out
-	// at 100%. Charge grading now snaps to "fully filled tick count" — see
-	// resolveCharge for the discrete grade dispatch.
+	// the peak. ChargeTickNPct / ChargePeakStart / ChargePeakEnd are
+	// VISUAL positions on the bar — tick lines are evenly spaced at
+	// quarters, with a 10%-wide peak band tucked in after the third tick.
+	//
+	// The cursor's elapsed→visual mapping is non-linear (see
+	// chargeSegments in timing.go). Each tick segment runs at a strictly
+	// faster slope than the previous one, so the cursor visibly
+	// accelerates with every notch it crosses — start slow, fast by the
+	// peak. resolveCharge grades off the cursor's visual position; the
+	// segment table is the single source of truth for both render and
+	// grade so they can't drift.
 	ChargeTimingDuration = float32(1.8)
-	ChargeTick1Pct       = float32(0.30)
-	ChargeTick2Pct       = float32(0.56)
-	ChargeTick3Pct       = float32(0.78)
-	ChargePeakStart      = float32(0.78)
-	ChargePeakEnd        = float32(0.86)
+	ChargeTick1Pct       = float32(0.25)
+	ChargeTick2Pct       = float32(0.50)
+	ChargeTick3Pct       = float32(0.75)
+	ChargePeakStart      = float32(0.75)
+	ChargePeakEnd        = float32(0.85)
 
 	// Pickpocket sequence minigame: tap a randomized run of N directions in
 	// order before time runs out. Each correct tap holds the grade; each
@@ -223,6 +229,29 @@ var PressWindow = struct {
 	MaxStart: 0.62,
 	Width:    0.18,
 	MaxEnd:   0.96,
+}
+
+// DoublePressWindow geometry for two-zone press bars (Swipe). One window
+// in each half of the sweep, each randomized in its own range; both share
+// the same fixed Width. Window1's MaxEnd is pulled back well clear of
+// Window2's MinStart so the two zones always render as visually distinct
+// hit zones — never butted up against each other into a single wide blob.
+var DoublePressWindow = struct {
+	Window1MinStart float32
+	Window1MaxStart float32
+	Window1MaxEnd   float32
+	Window2MinStart float32
+	Window2MaxStart float32
+	Window2MaxEnd   float32
+	Width           float32
+}{
+	Window1MinStart: 0.18,
+	Window1MaxStart: 0.30,
+	Window1MaxEnd:   0.46,
+	Window2MinStart: 0.56,
+	Window2MaxStart: 0.70,
+	Window2MaxEnd:   0.92,
+	Width:           0.16,
 }
 
 // timingGrades is the single per-grade attribute table for the timed-hit

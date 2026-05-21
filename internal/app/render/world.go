@@ -63,7 +63,7 @@ func DrawSkyBackground(assets Resources, g core.GameState) {
 	// Other materials sample the time profile so the backdrop tracks the
 	// same arc as the in-world lighting.
 	tint := rl.White
-	if m.Materials == core.MaterialDungeon {
+	if core.MaterialIsIndoor(m.Materials) {
 		tint = rl.NewColor(54, 56, 70, 255)
 	} else {
 		tint = skyColor(timeProfileAt(g.StepCount).SkyTint)
@@ -82,7 +82,6 @@ const behindCullSlack = float32(-2.5)
 func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 	m := g.Area
 	material := assets.worldMaterial(m.Materials)
-	tree := assets.tree
 	profile := applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(g.StepCount))
 	assets.lighting.applyUniforms(camera, profile)
 
@@ -127,31 +126,21 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 			// scale 1.0.
 			if prop := m.Props[z][x]; prop != core.TilePropEmpty {
 				propYaw := propYawDeg(x, z)
-				switch prop {
-				case core.TileTree:
-					tree.draw(center, 1.0, propYaw)
-				case core.TileTreeXL:
-					tree.draw(center, 1.75, propYaw)
-				case core.TileRockLarge:
-					assets.rockProp.draw(center, 1.0, propYaw)
-				case core.TileBushLarge:
-					assets.bushProp.draw(center, 1.3, propYaw)
-				default:
+				if handler, ok := inlinePropHandlers[prop]; ok {
+					handler(assets, center, propYaw)
+				} else if footprint := core.PropFootprint(prop); footprint != nil {
 					// Multi-tile anchor: shift the model origin to the
-					// centroid of the footprint so the mesh covers every
-					// occupied tile. Footprint tails (e.g. TileRockFormationTail)
-					// have PropFootprint(tail) == nil AND aren't in
-					// propModels, so they render nothing — the anchor's
-					// mesh on the partner tile covers them.
-					if footprint := core.PropFootprint(prop); footprint != nil {
-						if pm, ok := assets.propModels[prop]; ok {
-							pm.draw(footprintAnchor(center, footprint), 1.0, propYaw)
-						}
-						break
-					}
+					// centroid of the footprint so the mesh covers
+					// every occupied tile. Footprint tails (e.g.
+					// TileRockFormationTail) have PropFootprint(tail)
+					// == nil AND aren't in propModels, so they render
+					// nothing — the anchor's mesh on the partner tile
+					// covers them.
 					if pm, ok := assets.propModels[prop]; ok {
-						pm.draw(center, 1.0, propYaw)
+						pm.draw(footprintAnchor(center, footprint), 1.0, propYaw)
 					}
+				} else if pm, ok := assets.propModels[prop]; ok {
+					pm.draw(center, 1.0, propYaw)
 				}
 			}
 		}
@@ -228,14 +217,13 @@ func drawDecor(assets Resources, cell byte, x, z int, cx, cz float32) {
 	case core.DecorAuto:
 		drawFloorDecoration(assets, x, z, cx, cz)
 		return
-	case core.DecorBush:
-		assets.bushProp.draw(rl.NewVector3(cx, 0, cz), 0.75, propYawDeg(x, z))
-		return
-	case core.DecorMushroom:
-		assets.mushroomProp.draw(rl.NewVector3(cx, 0, cz), 1.0, propYawDeg(x, z))
-		return
-	case core.DecorPebble:
-		drawPebbleCluster(assets, cx, cz, tileHash(x, z))
+	}
+	// Inline-handled decor (bush / mushroom / pebble) dispatches
+	// through the inlineDecorHandlers registry in resources.go — the
+	// single source of truth that the coverage assert also reads from,
+	// so adding a new specialized renderer only touches one map.
+	if handler, ok := inlineDecorHandlers[cell]; ok {
+		handler(assets, x, z, cx, cz)
 		return
 	}
 	// Multi-tile decor anchor: shift the model origin to the centroid
@@ -253,6 +241,45 @@ func drawDecor(assets Resources, cell byte, x, z int, cx, cz float32) {
 	if dm, ok := assets.decorModels[cell]; ok {
 		dm.draw(rl.NewVector3(cx, 0, cz), 1.0, propYawDeg(x, z))
 	}
+}
+
+// drawPropTree / drawPropTreeXL / drawPropRockLarge / drawPropBushLarge
+// are the inline-prop implementations registered in
+// inlinePropHandlers. Tree and TreeXL share assets.tree at different
+// scales; the other two wrap dedicated propModel fields. Pre-resolved
+// propYaw is passed in by the caller so all four handlers stay
+// uniform.
+func drawPropTree(assets Resources, center rl.Vector3, propYaw float32) {
+	assets.tree.draw(center, 1.0, propYaw)
+}
+
+func drawPropTreeXL(assets Resources, center rl.Vector3, propYaw float32) {
+	assets.tree.draw(center, 1.75, propYaw)
+}
+
+func drawPropRockLarge(assets Resources, center rl.Vector3, propYaw float32) {
+	assets.rockProp.draw(center, 1.0, propYaw)
+}
+
+func drawPropBushLarge(assets Resources, center rl.Vector3, propYaw float32) {
+	assets.bushProp.draw(center, 1.3, propYaw)
+}
+
+// drawDecorBush / drawDecorMushroom / drawDecorPebble are the
+// inline-decor implementations registered in inlineDecorHandlers.
+// Each one is a thin wrapper around the dedicated propModel field /
+// scatter helper on Resources so the dispatch signature stays uniform
+// across every handler.
+func drawDecorBush(assets Resources, x, z int, cx, cz float32) {
+	assets.bushProp.draw(rl.NewVector3(cx, 0, cz), 0.75, propYawDeg(x, z))
+}
+
+func drawDecorMushroom(assets Resources, x, z int, cx, cz float32) {
+	assets.mushroomProp.draw(rl.NewVector3(cx, 0, cz), 1.0, propYawDeg(x, z))
+}
+
+func drawDecorPebble(assets Resources, x, z int, cx, cz float32) {
+	drawPebbleCluster(assets, cx, cz, tileHash(x, z))
 }
 
 // drawTileCube draws a square-footprint cube model at (cx,cy,cz) with a yaw
@@ -502,12 +529,12 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 			tint = tintEnemyTargeted
 			drawTargetChevron(camera, position)
 		}
-		// During BattleEnemyTiming, mark the currently-attacking enemy with a
-		// red chevron + warm tint so the player knows which foe is lunging at
-		// them — useful when 2-3 enemies share the screen and only one acts.
+		// During BattleEnemyTiming the warm tint on the attacker carries
+		// the "this one is swinging" read; the red pyramid moved over to
+		// the targeted party member (drawEnemyAttackTargetMarker) so the
+		// player sees "they're hitting ME" instead of "they're acting."
 		if enemy.Alive && isEnemyAttackerSlot(g, i) {
 			tint = tintEnemyAttacker
-			drawAttackerChevron(camera, position)
 		}
 		if enemy.DamageFlash > 0 {
 			tint = core.FlashTint(tint, enemy.DamageFlash)
@@ -525,6 +552,38 @@ func isEnemyAttackerSlot(g core.GameState, slot int) bool {
 	return g.Battle.EnemyAttacker == slot
 }
 
+// enemyAttackTargets returns the party-member indices the currently
+// lunging enemy will hit when the defend bar resolves. Drives the red
+// "incoming hit" marker above threatened heads during BattleEnemyTiming.
+// Every current enemy action (plain melee, Firebolt, Sleep, Ingest) is
+// single-target and routes through pickEnemyAttackTarget, which peeks
+// non-mutating via WrapNextAvailablePartyMember(EnemyAttackCursor+1).
+// Returning a slice (not a lone int) leaves room for AoE enemy skills
+// to extend the marker without touching the render call site.
+func enemyAttackTargets(g core.GameState) []int {
+	if g.Battle.Phase != core.BattleEnemyTiming {
+		return nil
+	}
+	target := core.WrapNextAvailablePartyMember(g.Party, g.Battle.EnemyAttackCursor+1)
+	if target < 0 {
+		return nil
+	}
+	return []int{target}
+}
+
+// slotInIntList is a tiny linear-scan membership check for the small
+// per-frame slices returned by enemyAttackTargets — pulling in slices.Contains
+// would mean a new stdlib import for one cold call. Stays inline at the
+// caller's risk profile (≤ party-size N).
+func slotInIntList(slot int, list []int) bool {
+	for _, v := range list {
+		if v == slot {
+			return true
+		}
+	}
+	return false
+}
+
 // markerStyle bundles every parameter that distinguishes one selector
 // pyramid from another: where to anchor its tip relative to the unit's
 // billboard, its silhouette (height + base radius), tint, and rotation
@@ -540,17 +599,6 @@ type markerStyle struct {
 }
 
 var (
-	// markerEnemyAttacker tags the enemy currently lunging at the party
-	// (BattleEnemyTiming phase). Red, slightly larger than the target
-	// marker, phase-offset so a same-frame target+attacker pair don't
-	// spin in lockstep.
-	markerEnemyAttacker = markerStyle{
-		tipYOffset: 0.80,
-		height:     0.42,
-		baseRadius: 0.18,
-		color:      rl.NewColor(255, 96, 96, 245),
-		phase:      0.6,
-	}
 	// markerEnemyTarget is the player's currently-selected enemy.
 	// Yellow — paired with the in-roster row highlight via
 	// targetingEnemy().
@@ -562,14 +610,26 @@ var (
 		phase:      0.0,
 	}
 	// markerFriendlyTarget is the player's currently-selected ally
-	// (heal / item targeting). Green, smallest of the three since it
-	// sits on a smaller party billboard.
+	// (heal / item targeting). Green, smaller than the enemy markers
+	// since party billboards sit closer to the camera.
 	markerFriendlyTarget = markerStyle{
-		tipYOffset: 0.42,
-		height:     0.34,
-		baseRadius: 0.14,
+		tipYOffset: 0.36,
+		height:     0.24,
+		baseRadius: 0.10,
 		color:      rl.NewColor(118, 235, 136, 245),
 		phase:      0.3,
+	}
+	// markerEnemyAttackTarget tags the party member(s) the lunging enemy
+	// is about to hit — drawn above the threatened head while the defend
+	// bar is up (BattleEnemyTiming). Sized to match markerFriendlyTarget:
+	// both sit on party billboards, which are close to the camera and
+	// would otherwise overpower the screen at the enemy-marker scale.
+	markerEnemyAttackTarget = markerStyle{
+		tipYOffset: 0.36,
+		height:     0.24,
+		baseRadius: 0.10,
+		color:      rl.NewColor(255, 96, 96, 245),
+		phase:      0.9,
 	}
 )
 
@@ -580,13 +640,6 @@ var (
 func drawMarker(unitPos rl.Vector3, style markerStyle) {
 	tip := rl.NewVector3(unitPos.X, unitPos.Y+style.tipYOffset, unitPos.Z)
 	drawSelectorPyramid(tip, style.height, style.baseRadius, style.color, style.phase)
-}
-
-// drawAttackerChevron paints the JRPG-style selector pyramid above the
-// lunging enemy, tip pointing down at them. Red so it reads as "this one's
-// about to swing at you" — the player-target marker is yellow.
-func drawAttackerChevron(camera rl.Camera3D, position rl.Vector3) {
-	drawMarker(position, markerEnemyAttacker)
 }
 
 func enemyVisualFor(assets Resources, kind core.EnemyKind) (enemyVisual, bool) {
@@ -678,6 +731,7 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 		return
 	}
 	victoryDance := victoryDanceElapsed(g)
+	incomingTargets := enemyAttackTargets(g)
 	for i := range g.Party {
 		// Ingested members are tucked away inside a mantrap — don't
 		// draw their billboard on the field. The status badge on the
@@ -717,6 +771,12 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 		if g.Battle.Phase == core.BattlePlayer && targetingAlly(g) && i == g.Battle.PartyTarget && g.Party[i].HP > 0 {
 			drawFriendlyTargetMarker(camera, position)
 		}
+		// Red "incoming hit" marker above every party member the lunging
+		// enemy is about to strike. Phase gating lives in
+		// enemyAttackTargets — it returns nil outside BattleEnemyTiming.
+		if g.Party[i].HP > 0 && slotInIntList(i, incomingTargets) {
+			drawEnemyAttackTargetMarker(camera, position)
+		}
 	}
 }
 
@@ -730,6 +790,10 @@ func partyTextureFor(assets Resources, member core.PartyMember) (rl.Texture2D, b
 
 func drawFriendlyTargetMarker(camera rl.Camera3D, position rl.Vector3) {
 	drawMarker(position, markerFriendlyTarget)
+}
+
+func drawEnemyAttackTargetMarker(camera rl.Camera3D, position rl.Vector3) {
+	drawMarker(position, markerEnemyAttackTarget)
 }
 
 func partySpritePosition(camera rl.Camera3D, index int, class core.PartyClass, bump, victoryDance float32) rl.Vector3 {
