@@ -185,6 +185,7 @@ type ModalKind int
 const (
 	ModalNone ModalKind = iota
 	ModalPauseMenu
+	ModalDebugMenu
 	ModalChest
 	ModalPanels
 	ModalLevelUp
@@ -207,6 +208,8 @@ func ActiveModal(g *GameState) ModalKind {
 		return ModalPanels
 	case g.ChestOpen >= 0:
 		return ModalChest
+	case g.DebugMenuOpen:
+		return ModalDebugMenu
 	case g.MenuOpen:
 		return ModalPauseMenu
 	}

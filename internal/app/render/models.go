@@ -29,6 +29,14 @@ type treePart struct {
 	// toward +X while still mostly pointing up.
 	rotationAxis rl.Vector3
 	tint         color.RGBA
+	// sway is the per-part wind-displacement factor (0..1). Default 0
+	// means the part is rigid — used for stems / trunks / statue
+	// bases that should stay planted. Upper foliage parts of
+	// tall-grass, flowers, bushes, reeds, ferns, and clover set
+	// sway >= 1 so they ride the global wind animation. propModel.draw
+	// adds a time-based horizontal offset proportional to this value
+	// so foliage breathes while statues stay still.
+	sway float32
 }
 
 // partRotationAxis is an internal helper: returns the axis a part rotates
@@ -99,15 +107,15 @@ func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 		attachShader(&models[i], shader)
 	}
 
-	// Muted leaf palette — sage / olive family with dim cream
-	// highlights, so the canopy reads as painted foliage at
-	// dawn / dusk light without glaring. Pulled back from the
-	// vivid spring-green pass.
-	leafBase := color.RGBA{R: 138, G: 178, B: 116, A: 255}
-	leafMid := color.RGBA{R: 116, G: 160, B: 108, A: 255}
-	leafDeep := color.RGBA{R: 82, G: 132, B: 92, A: 255}
-	leafGold := color.RGBA{R: 196, G: 198, B: 142, A: 255}
-	leafBloom := color.RGBA{R: 198, G: 212, B: 168, A: 255}
+	// Pastel-but-saturated canopy — soft spring green with cream
+	// and lemon-gold accents, matched to the leaf texture's
+	// bumped chroma so the puffy dome reads lush against the
+	// blue sky.
+	leafBase := color.RGBA{R: 146, G: 204, B: 114, A: 255}
+	leafMid := color.RGBA{R: 124, G: 188, B: 106, A: 255}
+	leafDeep := color.RGBA{R: 98, G: 160, B: 96, A: 255}
+	leafGold := color.RGBA{R: 230, G: 220, B: 142, A: 255}
+	leafBloom := color.RGBA{R: 212, G: 232, B: 160, A: 255}
 
 	return treeModel{
 		models: models,
@@ -218,6 +226,34 @@ func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32
 		}
 	}
 
+	// Per-tile tree species pick. ~10 % of trees render with a soft
+	// painted-pink "blossom" canopy, ~10 % with a warm autumn
+	// rust-gold canopy, the rest stay in the muted green family.
+	// All three families come from the same leaf texture so we get
+	// variety without authoring extra atlases — only the tint
+	// changes through speciesCanopyTint below.
+	speciesRoll := byte(mix >> 20)
+	species := treeSpeciesGreen
+	switch {
+	case speciesRoll < 26:
+		species = treeSpeciesBlossom
+	case speciesRoll < 52:
+		species = treeSpeciesAutumn
+	}
+
+	// Canopy sway — gentle wind animation. Each tree gets a unique
+	// phase offset from its seed so a stand of trees breathes
+	// asynchronously instead of stamping the same rocking motion
+	// across the grid. Amplitude stays small (~0.05 world units)
+	// so the silhouette reads as "leaves drifting in a breeze" not
+	// "the tree is about to fall." Trunks are NOT swayed — only
+	// the foliage rides the wind, the way Wind Waker trees do.
+	swayTime := float32(rl.GetTime())
+	swayPhase := frac(byte(mix>>22)) * 6.283185
+	swayX := float32(math.Sin(float64(swayTime*0.85+swayPhase))) * 0.05
+	swayZ := float32(math.Sin(float64(swayTime*0.72+swayPhase+1.3))) * 0.04
+	swayY := float32(math.Sin(float64(swayTime*1.05+swayPhase*0.7))) * 0.025
+
 	for i, part := range t.parts {
 		if i == dropIdx {
 			continue
@@ -247,7 +283,23 @@ func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32
 
 		offX := part.offset.X + nudgeX
 		offZ := part.offset.Z + nudgeZ
-		offset := rotateOffsetY(rl.NewVector3(offX, yOffset, offZ), overall, yaw)
+		// Canopy lumps lean in the wind; higher lumps lean more
+		// than lower lumps (canopyLean scales the sway by the
+		// part's Y offset relative to a reference height) so the
+		// crown drifts further than the under-canopy mass — the
+		// "tree breathing in a breeze" feel rather than the whole
+		// silhouette sliding sideways. Trunk and root are skipped.
+		offsetY := yOffset
+		if isCanopy {
+			lean := part.offset.Y / 3.0
+			if lean > 1.4 {
+				lean = 1.4
+			}
+			offX += swayX * lean
+			offZ += swayZ * lean
+			offsetY += swayY * lean
+		}
+		offset := rotateOffsetY(rl.NewVector3(offX, offsetY, offZ), overall, yaw)
 		position := rl.NewVector3(center.X+offset.X, center.Y+offset.Y, center.Z+offset.Z)
 		drawScale := rl.NewVector3(part.scale.X*sx*overall, part.scale.Y*sy*trunkYScale*overall, part.scale.Z*sz*overall)
 		rotation := part.rotation
@@ -256,10 +308,64 @@ func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32
 		}
 		tint := part.tint
 		if isCanopy {
-			tint = jitterTint(part.tint, mix>>uint(7+i*4), 14)
+			// Pick the species palette first (green / blossom /
+			// autumn), then apply the standard ±14 per-channel
+			// jitter on top so lumps within one tree still walk
+			// in tone but the family colour is preserved.
+			tint = jitterTint(speciesCanopyTint(part.tint, species), mix>>uint(7+i*4), 14)
 		}
 		rl.DrawModelEx(t.models[part.modelIdx], position, partRotationAxis(part), rotation, drawScale, tint)
 	}
+}
+
+// treeSpecies labels a per-tile painted-canopy palette. The seed bit
+// pick in drawVaried rolls one of three options so a forest reads as
+// mixed-species rather than a monoculture.
+type treeSpecies int
+
+const (
+	treeSpeciesGreen treeSpecies = iota
+	treeSpeciesBlossom
+	treeSpeciesAutumn
+)
+
+// speciesCanopyTint returns the per-species painted-canopy colour for
+// a given authored leaf tint. Green leaves pass through unchanged
+// (the muted forest palette); blossom remaps to a soft painted-pink
+// family; autumn remaps to a warm rust-gold family. Brightness of the
+// original tint is broadly preserved so highlight lumps stay
+// highlight-bright and shadow lumps stay shadow-deep, just hue-shifted.
+func speciesCanopyTint(orig color.RGBA, species treeSpecies) color.RGBA {
+	if species == treeSpeciesGreen {
+		return orig
+	}
+	// Brightness key — average of the green channel (which carries
+	// most of the original leaf-luminance) with a touch of R for
+	// the highlight lumps.
+	key := (int(orig.G)*2 + int(orig.R)) / 3
+	switch species {
+	case treeSpeciesBlossom:
+		// Soft painted blossom — rose pink. Cream-leaning highlights,
+		// rosier midtones, dusky maroon shadows. R lifted slightly,
+		// G dropped, B nudged toward warm.
+		return color.RGBA{
+			R: core.ClampByte(key + 56),
+			G: core.ClampByte(key - 22),
+			B: core.ClampByte(key + 4),
+			A: orig.A,
+		}
+	case treeSpeciesAutumn:
+		// Warm rust-gold — autumn-foliage palette. R bumped, G
+		// pulled toward amber, B dropped so the canopy reads as
+		// burnt orange against the muted green field.
+		return color.RGBA{
+			R: core.ClampByte(key + 52),
+			G: core.ClampByte(key - 6),
+			B: core.ClampByte(key - 40),
+			A: orig.A,
+		}
+	}
+	return orig
 }
 
 // jitterTint shifts an RGBA's R/G/B channels by up to ±amp using bytes
@@ -295,13 +401,33 @@ type propModel struct {
 
 // draw renders the prop with a uniform scale and a yaw rotation around its
 // vertical axis. See treeModel.draw for the rationale on yaw composition.
+//
+// Parts that carry a non-zero `sway` get a small time-based horizontal
+// offset added to their position so foliage props breathe in the wind
+// while rigid props (statues, pillars, crates) stay planted. Phase is
+// hashed from the prop's world position so a row of grass clumps
+// doesn't ripple in lockstep — adjacent tiles drift independently.
 func (p propModel) draw(center rl.Vector3, scale, yaw float32) {
 	if scale <= 0 {
 		scale = 1
 	}
+	swayTime := float32(rl.GetTime())
+	// Position-derived phase: hash the rounded tile coords so each
+	// prop tile lands on a different point in the sway cycle.
+	posPhase := float32(math.Mod(float64(center.X)*0.73+float64(center.Z)*1.31, 6.283185))
+	swayX := float32(math.Sin(float64(swayTime*1.10+posPhase))) * 0.035
+	swayZ := float32(math.Sin(float64(swayTime*0.95+posPhase+1.4))) * 0.030
 	for _, part := range p.parts {
 		offset := rotateOffsetY(part.offset, scale, yaw)
 		position := rl.NewVector3(center.X+offset.X, center.Y+offset.Y, center.Z+offset.Z)
+		if part.sway > 0 {
+			// Lean scales with Y so taller parts of a clump drift
+			// further than the base — natural "grass bending in
+			// the wind" shape.
+			lean := part.sway * (0.4 + part.offset.Y*1.5)
+			position.X += swayX * lean
+			position.Z += swayZ * lean
+		}
 		drawScale := rl.NewVector3(part.scale.X*scale, part.scale.Y*scale, part.scale.Z*scale)
 		rotation := part.rotation
 		if isVerticalAxis(part.rotationAxis) {
@@ -527,27 +653,31 @@ func loadBushProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
 	for i := range models {
 		attachShader(&models[i], shader)
 	}
-	leafBase := color.RGBA{R: 134, G: 174, B: 116, A: 255}
-	leafDeep := color.RGBA{R: 92, G: 142, B: 100, A: 255}
-	leafGold := color.RGBA{R: 196, G: 208, B: 156, A: 255}
-	bloomYellow := color.RGBA{R: 220, G: 198, B: 122, A: 255}
-	bloomWhite := color.RGBA{R: 222, G: 218, B: 206, A: 255}
-	bloomPink := color.RGBA{R: 212, G: 160, B: 180, A: 255}
+	// Pastel-but-saturated bush — spring-green leaf lumps with
+	// soft colourful blooms.
+	leafBase := color.RGBA{R: 142, G: 200, B: 112, A: 255}
+	leafDeep := color.RGBA{R: 102, G: 164, B: 100, A: 255}
+	leafGold := color.RGBA{R: 224, G: 230, B: 152, A: 255}
+	bloomYellow := color.RGBA{R: 242, G: 216, B: 122, A: 255}
+	bloomWhite := color.RGBA{R: 244, G: 240, B: 226, A: 255}
+	bloomPink := color.RGBA{R: 238, G: 176, B: 198, A: 255}
 	return propModel{
 		models: models,
 		parts: []treePart{
 			// Three overlapping leaf lumps — a dominant base with
 			// two side lumps for the painterly "cluster of round
-			// bunches" silhouette.
-			{modelIdx: 0, offset: rl.NewVector3(0, 0.52, 0), scale: rl.NewVector3(1, 0.92, 1), tint: leafBase},
-			{modelIdx: 1, offset: rl.NewVector3(0.34, 0.68, 0.20), scale: rl.NewVector3(1, 1, 1), tint: leafDeep},
-			{modelIdx: 1, offset: rl.NewVector3(-0.32, 0.64, -0.18), scale: rl.NewVector3(1, 1, 1), tint: leafGold},
+			// bunches" silhouette. Sway is modest so the bush
+			// breathes without losing its rooted feel.
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.52, 0), scale: rl.NewVector3(1, 0.92, 1), tint: leafBase, sway: 0.55},
+			{modelIdx: 1, offset: rl.NewVector3(0.34, 0.68, 0.20), scale: rl.NewVector3(1, 1, 1), tint: leafDeep, sway: 0.65},
+			{modelIdx: 1, offset: rl.NewVector3(-0.32, 0.64, -0.18), scale: rl.NewVector3(1, 1, 1), tint: leafGold, sway: 0.65},
 			// Wildflower blooms dotted across the upper hemisphere
 			// of the bush. Three colours so the patch reads as
-			// mixed wildflowers, not a costume bouquet.
-			{modelIdx: 2, offset: rl.NewVector3(0.08, 0.96, 0.10), scale: rl.NewVector3(1, 1, 1), tint: bloomYellow},
-			{modelIdx: 2, offset: rl.NewVector3(-0.22, 0.84, 0.04), scale: rl.NewVector3(1, 1, 1), tint: bloomWhite},
-			{modelIdx: 2, offset: rl.NewVector3(0.20, 0.88, -0.18), scale: rl.NewVector3(1, 1, 1), tint: bloomPink},
+			// mixed wildflowers, not a costume bouquet. Blooms
+			// sway slightly more than the leaves below them.
+			{modelIdx: 2, offset: rl.NewVector3(0.08, 0.96, 0.10), scale: rl.NewVector3(1, 1, 1), tint: bloomYellow, sway: 0.85},
+			{modelIdx: 2, offset: rl.NewVector3(-0.22, 0.84, 0.04), scale: rl.NewVector3(1, 1, 1), tint: bloomWhite, sway: 0.85},
+			{modelIdx: 2, offset: rl.NewVector3(0.20, 0.88, -0.18), scale: rl.NewVector3(1, 1, 1), tint: bloomPink, sway: 0.85},
 		},
 	}
 }
@@ -595,6 +725,105 @@ func loadMushroomProp(shader rl.Shader) propModel {
 	}
 }
 
+// loadChestBodyProp builds the wooden chest body with painted metal
+// hardware: four vertical corner straps, two horizontal hoop bands
+// (top + bottom), a lockplate centred on the front face, and a small
+// jewel pip at the centre of the lockplate. Bark texture for the
+// wood; raylib's default material on the metal parts so the tint
+// reads as cast bronze rather than wood-grain.
+//
+// Designed to read as a Wind-Waker treasure chest at any approach
+// angle — the corner straps and hoop bands sell the "ironbound
+// wooden box" silhouette; the lockplate + jewel sells "this is
+// loot, come open me." Dimensions roughly match the prior raw-cube
+// chest so the existing prompt anchor / shadow radius / collision
+// don't need to retune.
+func loadChestBodyProp(shader rl.Shader, barkTex rl.Texture2D) propModel {
+	wood := rl.LoadModelFromMesh(rl.GenMeshCube(0.62, 0.46, 0.50))
+	setModelTexture(&wood, barkTex)
+	strap := rl.LoadModelFromMesh(rl.GenMeshCube(0.06, 0.48, 0.06))
+	hoop := rl.LoadModelFromMesh(rl.GenMeshCube(0.66, 0.06, 0.54))
+	lockplate := rl.LoadModelFromMesh(rl.GenMeshCube(0.20, 0.22, 0.04))
+	jewel := rl.LoadModelFromMesh(rl.GenMeshSphere(0.045, 8, 10))
+	models := []rl.Model{wood, strap, hoop, lockplate, jewel}
+	for i := range models {
+		attachShader(&models[i], shader)
+	}
+	woodTint := chestBodyColor
+	// Muted brass / bronze for the iron banding — pulled into the
+	// same warm metal family without flaring against the muted
+	// wood beneath.
+	metalDark := rl.NewColor(140, 108, 64, 255)
+	metalBright := rl.NewColor(182, 148, 86, 255)
+	jewelTint := rl.NewColor(198, 92, 80, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			// Wood body — sits at y = bodyHeight/2 so its base
+			// flushes against the floor.
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.23, 0), scale: rl.NewVector3(1, 1, 1), tint: woodTint},
+			// Four vertical corner straps at the body's vertical
+			// edges. Slightly proud of the wood so they read as
+			// raised ironwork.
+			{modelIdx: 1, offset: rl.NewVector3(0.31, 0.24, 0.26), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
+			{modelIdx: 1, offset: rl.NewVector3(-0.31, 0.24, 0.26), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
+			{modelIdx: 1, offset: rl.NewVector3(0.31, 0.24, -0.26), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
+			{modelIdx: 1, offset: rl.NewVector3(-0.31, 0.24, -0.26), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
+			// Bottom + top hoop bands hugging the body's
+			// horizontal edges. The top hoop catches the lid
+			// seam visually.
+			{modelIdx: 2, offset: rl.NewVector3(0, 0.05, 0), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
+			{modelIdx: 2, offset: rl.NewVector3(0, 0.43, 0), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
+			// Front-face lockplate — bright brass, sits just
+			// proud of the wood so it reads as a mounted plate.
+			{modelIdx: 3, offset: rl.NewVector3(0, 0.28, 0.27), scale: rl.NewVector3(1, 1, 1), tint: metalBright},
+			// Lock jewel — small bright pip on the lockplate.
+			// The "treasure inside" cue.
+			{modelIdx: 4, offset: rl.NewVector3(0, 0.30, 0.30), scale: rl.NewVector3(1, 1, 1), tint: jewelTint},
+		},
+	}
+}
+
+// loadChestLidProp builds the wooden chest lid with painted metal
+// hardware: four corner caps, a single bottom hoop where the lid
+// meets the body, and the lid wood itself (slightly wider than the
+// body so the lip overshoots the corner straps).
+//
+// Drawn separately from the body so the looted-chest path can lift
+// the lid straight up + tilt it backward without disturbing the
+// body's pose. Centre is at the lid's vertical midpoint (y = lid
+// half-height) so the caller positions it by passing the body top
+// as the centre Y.
+func loadChestLidProp(shader rl.Shader, barkTex rl.Texture2D) propModel {
+	wood := rl.LoadModelFromMesh(rl.GenMeshCube(0.68, 0.18, 0.56))
+	setModelTexture(&wood, barkTex)
+	cornerCap := rl.LoadModelFromMesh(rl.GenMeshCube(0.10, 0.20, 0.10))
+	hoop := rl.LoadModelFromMesh(rl.GenMeshCube(0.70, 0.05, 0.58))
+	models := []rl.Model{wood, cornerCap, hoop}
+	for i := range models {
+		attachShader(&models[i], shader)
+	}
+	woodTint := chestLidColor
+	metalDark := rl.NewColor(140, 108, 64, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			// Wood lid — centred so passing the body-top Y as
+			// the position centres the lid on the seam.
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.09, 0), scale: rl.NewVector3(1, 1, 1), tint: woodTint},
+			// Four corner caps at the lid's vertical edges.
+			{modelIdx: 1, offset: rl.NewVector3(0.31, 0.10, 0.25), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
+			{modelIdx: 1, offset: rl.NewVector3(-0.31, 0.10, 0.25), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
+			{modelIdx: 1, offset: rl.NewVector3(0.31, 0.10, -0.25), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
+			{modelIdx: 1, offset: rl.NewVector3(-0.31, 0.10, -0.25), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
+			// Bottom hoop band — hugs the lid's bottom edge,
+			// catches the body's top hoop visually so the two
+			// pieces read as ringed together.
+			{modelIdx: 2, offset: rl.NewVector3(0, 0.025, 0), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
+		},
+	}
+}
+
 // --- Inhabited / ruined props ---------------------------------------------
 //
 // The next nine loaders cover the "this place wasn't always empty" set:
@@ -621,9 +850,12 @@ func loadCrateProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 		setModelTexture(&models[i], woodTex)
 		attachShader(&models[i], shader)
 	}
-	wood := rl.NewColor(178, 130, 78, 255)
-	band := rl.NewColor(82, 56, 32, 255)
-	corner := rl.NewColor(64, 44, 28, 255)
+	// Pastel crate wood — soft pecan matching the bark texture,
+	// with warm-brown banding (not near-black) so the crate reads
+	// gently even in the spooky dungeon lighting.
+	wood := rl.NewColor(184, 144, 102, 255)
+	band := rl.NewColor(124, 92, 60, 255)
+	corner := rl.NewColor(104, 76, 50, 255)
 	return propModel{
 		models: models,
 		parts: []treePart{
@@ -658,8 +890,8 @@ func loadBarrelProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 		setModelTexture(&models[i], woodTex)
 		attachShader(&models[i], shader)
 	}
-	wood := rl.NewColor(166, 116, 70, 255)
-	hoop := rl.NewColor(58, 42, 28, 255)
+	wood := rl.NewColor(192, 150, 104, 255)
+	hoop := rl.NewColor(110, 80, 52, 255)
 	return propModel{
 		models: models,
 		parts: []treePart{
@@ -917,18 +1149,19 @@ func loadTallGrassProp(shader rl.Shader) propModel {
 	blade := rl.LoadModelFromMesh(rl.GenMeshCube(0.04, 0.34, 0.04))
 	attachShader(&blade, shader)
 	models := []rl.Model{blade}
-	light := rl.NewColor(170, 212, 116, 255)
-	mid := rl.NewColor(122, 184, 96, 255)
-	deep := rl.NewColor(86, 142, 78, 255)
-	gold := rl.NewColor(220, 220, 132, 255)
+	// Muted grass-blade tints to match the new ground palette.
+	light := rl.NewColor(148, 184, 112, 255)
+	mid := rl.NewColor(112, 158, 96, 255)
+	deep := rl.NewColor(80, 124, 78, 255)
+	gold := rl.NewColor(196, 196, 134, 255)
 	return propModel{
 		models: models,
 		parts: []treePart{
-			{modelIdx: 0, offset: rl.NewVector3(0, 0.17, 0), scale: rl.NewVector3(1, 1, 1), rotation: 6, rotationAxis: rl.NewVector3(0, 0, 1), tint: light},
-			{modelIdx: 0, offset: rl.NewVector3(0.14, 0.16, 0.08), scale: rl.NewVector3(1, 0.92, 1), rotation: -10, rotationAxis: rl.NewVector3(1, 0, 0), tint: mid},
-			{modelIdx: 0, offset: rl.NewVector3(-0.12, 0.15, 0.10), scale: rl.NewVector3(1, 0.86, 1), rotation: 14, rotationAxis: rl.NewVector3(1, 0, 1), tint: deep},
-			{modelIdx: 0, offset: rl.NewVector3(0.08, 0.18, -0.14), scale: rl.NewVector3(1, 1.05, 1), rotation: -16, rotationAxis: rl.NewVector3(0, 0, 1), tint: mid},
-			{modelIdx: 0, offset: rl.NewVector3(-0.10, 0.16, -0.06), scale: rl.NewVector3(1, 0.95, 1), rotation: 22, rotationAxis: rl.NewVector3(1, 0, 0), tint: gold},
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.17, 0), scale: rl.NewVector3(1, 1, 1), rotation: 6, rotationAxis: rl.NewVector3(0, 0, 1), tint: light, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(0.14, 0.16, 0.08), scale: rl.NewVector3(1, 0.92, 1), rotation: -10, rotationAxis: rl.NewVector3(1, 0, 0), tint: mid, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(-0.12, 0.15, 0.10), scale: rl.NewVector3(1, 0.86, 1), rotation: 14, rotationAxis: rl.NewVector3(1, 0, 1), tint: deep, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(0.08, 0.18, -0.14), scale: rl.NewVector3(1, 1.05, 1), rotation: -16, rotationAxis: rl.NewVector3(0, 0, 1), tint: mid, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(-0.10, 0.16, -0.06), scale: rl.NewVector3(1, 0.95, 1), rotation: 22, rotationAxis: rl.NewVector3(1, 0, 0), tint: gold, sway: 1.0},
 		},
 	}
 }
@@ -967,26 +1200,29 @@ func loadFlowerProp(shader rl.Shader) propModel {
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Bloom 1 — yellow.
-			{modelIdx: 0, offset: rl.NewVector3(0.10, 0.12, 0.06), scale: rl.NewVector3(1, 1, 1), tint: stemTint},
-			{modelIdx: 1, offset: rl.NewVector3(0.10, 0.23, 0.06), scale: rl.NewVector3(1, 1, 1), rotation: 12, tint: yellowPetal},
-			{modelIdx: 2, offset: rl.NewVector3(0.10, 0.26, 0.06), scale: rl.NewVector3(1, 1, 1), tint: yellow},
-			{modelIdx: 3, offset: rl.NewVector3(0.10, 0.295, 0.06), scale: rl.NewVector3(1, 1, 1), tint: pistilGold},
+			// Bloom 1 — yellow. Stems take a light sway, blooms +
+			// petals take a heavier one so the flower head nods in
+			// the wind above an only-slightly-bending stalk. Ground
+			// leaves stay rigid.
+			{modelIdx: 0, offset: rl.NewVector3(0.10, 0.12, 0.06), scale: rl.NewVector3(1, 1, 1), tint: stemTint, sway: 0.6},
+			{modelIdx: 1, offset: rl.NewVector3(0.10, 0.23, 0.06), scale: rl.NewVector3(1, 1, 1), rotation: 12, tint: yellowPetal, sway: 1.0},
+			{modelIdx: 2, offset: rl.NewVector3(0.10, 0.26, 0.06), scale: rl.NewVector3(1, 1, 1), tint: yellow, sway: 1.0},
+			{modelIdx: 3, offset: rl.NewVector3(0.10, 0.295, 0.06), scale: rl.NewVector3(1, 1, 1), tint: pistilGold, sway: 1.0},
 			// Bloom 2 — pink.
-			{modelIdx: 0, offset: rl.NewVector3(-0.09, 0.12, 0.13), scale: rl.NewVector3(1, 1.05, 1), tint: stemTint},
-			{modelIdx: 1, offset: rl.NewVector3(-0.09, 0.24, 0.13), scale: rl.NewVector3(1, 1, 1), rotation: -22, tint: pinkPetal},
-			{modelIdx: 2, offset: rl.NewVector3(-0.09, 0.27, 0.13), scale: rl.NewVector3(1, 1, 1), tint: pink},
-			{modelIdx: 3, offset: rl.NewVector3(-0.09, 0.305, 0.13), scale: rl.NewVector3(1, 1, 1), tint: pistilGold},
+			{modelIdx: 0, offset: rl.NewVector3(-0.09, 0.12, 0.13), scale: rl.NewVector3(1, 1.05, 1), tint: stemTint, sway: 0.6},
+			{modelIdx: 1, offset: rl.NewVector3(-0.09, 0.24, 0.13), scale: rl.NewVector3(1, 1, 1), rotation: -22, tint: pinkPetal, sway: 1.0},
+			{modelIdx: 2, offset: rl.NewVector3(-0.09, 0.27, 0.13), scale: rl.NewVector3(1, 1, 1), tint: pink, sway: 1.0},
+			{modelIdx: 3, offset: rl.NewVector3(-0.09, 0.305, 0.13), scale: rl.NewVector3(1, 1, 1), tint: pistilGold, sway: 1.0},
 			// Bloom 3 — white.
-			{modelIdx: 0, offset: rl.NewVector3(0.04, 0.11, -0.14), scale: rl.NewVector3(1, 0.95, 1), tint: stemTint},
-			{modelIdx: 1, offset: rl.NewVector3(0.04, 0.22, -0.14), scale: rl.NewVector3(1, 1, 1), rotation: 35, tint: whitePetal},
-			{modelIdx: 2, offset: rl.NewVector3(0.04, 0.25, -0.14), scale: rl.NewVector3(1, 1, 1), tint: white},
-			{modelIdx: 3, offset: rl.NewVector3(0.04, 0.285, -0.14), scale: rl.NewVector3(1, 1, 1), tint: pistilGold},
+			{modelIdx: 0, offset: rl.NewVector3(0.04, 0.11, -0.14), scale: rl.NewVector3(1, 0.95, 1), tint: stemTint, sway: 0.6},
+			{modelIdx: 1, offset: rl.NewVector3(0.04, 0.22, -0.14), scale: rl.NewVector3(1, 1, 1), rotation: 35, tint: whitePetal, sway: 1.0},
+			{modelIdx: 2, offset: rl.NewVector3(0.04, 0.25, -0.14), scale: rl.NewVector3(1, 1, 1), tint: white, sway: 1.0},
+			{modelIdx: 3, offset: rl.NewVector3(0.04, 0.285, -0.14), scale: rl.NewVector3(1, 1, 1), tint: pistilGold, sway: 1.0},
 			// Bloom 4 — lilac.
-			{modelIdx: 0, offset: rl.NewVector3(-0.14, 0.12, -0.04), scale: rl.NewVector3(1, 1, 1), tint: stemTint},
-			{modelIdx: 1, offset: rl.NewVector3(-0.14, 0.23, -0.04), scale: rl.NewVector3(1, 1, 1), rotation: 8, tint: lilacPetal},
-			{modelIdx: 2, offset: rl.NewVector3(-0.14, 0.26, -0.04), scale: rl.NewVector3(1, 1, 1), tint: lilac},
-			{modelIdx: 3, offset: rl.NewVector3(-0.14, 0.295, -0.04), scale: rl.NewVector3(1, 1, 1), tint: pistilGold},
+			{modelIdx: 0, offset: rl.NewVector3(-0.14, 0.12, -0.04), scale: rl.NewVector3(1, 1, 1), tint: stemTint, sway: 0.6},
+			{modelIdx: 1, offset: rl.NewVector3(-0.14, 0.23, -0.04), scale: rl.NewVector3(1, 1, 1), rotation: 8, tint: lilacPetal, sway: 1.0},
+			{modelIdx: 2, offset: rl.NewVector3(-0.14, 0.26, -0.04), scale: rl.NewVector3(1, 1, 1), tint: lilac, sway: 1.0},
+			{modelIdx: 3, offset: rl.NewVector3(-0.14, 0.295, -0.04), scale: rl.NewVector3(1, 1, 1), tint: pistilGold, sway: 1.0},
 			// Ground leaves — three of them now, rotated so the
 			// patch reads as a deliberate clump.
 			{modelIdx: 4, offset: rl.NewVector3(0.02, 0.012, 0.01), scale: rl.NewVector3(1.4, 1, 1.4), rotation: 20, tint: leafTint},
@@ -1159,8 +1395,9 @@ func loadStumpProp(shader rl.Shader, barkTex rl.Texture2D) propModel {
 	for i := range models {
 		attachShader(&models[i], shader)
 	}
-	bark := rl.NewColor(132, 92, 56, 255)
-	rings := rl.NewColor(184, 142, 92, 255)
+	// Pastel pecan stump with pale-cream cut-face rings.
+	bark := rl.NewColor(172, 132, 96, 255)
+	rings := rl.NewColor(214, 184, 144, 255)
 	return propModel{
 		models: models,
 		parts: []treePart{
@@ -1184,9 +1421,10 @@ func loadLogProp(shader rl.Shader, barkTex, leafTex rl.Texture2D) propModel {
 	for i := range models {
 		attachShader(&models[i], shader)
 	}
-	bark := rl.NewColor(118, 84, 52, 255)
-	cut := rl.NewColor(168, 130, 84, 255)
-	mossTint := rl.NewColor(118, 162, 108, 255)
+	// Pastel pecan log with pale cut faces + soft mint moss.
+	bark := rl.NewColor(170, 130, 94, 255)
+	cut := rl.NewColor(210, 178, 138, 255)
+	mossTint := rl.NewColor(156, 192, 140, 255)
 	return propModel{
 		models: models,
 		parts: []treePart{
@@ -1214,18 +1452,31 @@ func loadLogProp(shader rl.Shader, barkTex, leafTex rl.Texture2D) propModel {
 // always sees the opening from the side they approach.
 func loadDoorProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	post := rl.LoadModelFromMesh(rl.GenMeshCube(0.10, 1.40, 0.10))
-	lintel := rl.LoadModelFromMesh(rl.GenMeshCube(0.80, 0.12, 0.10))
+	lintel := rl.LoadModelFromMesh(rl.GenMeshCube(0.84, 0.14, 0.12))
 	panel := rl.LoadModelFromMesh(rl.GenMeshCube(0.60, 1.20, 0.04))
-	keystone := rl.LoadModelFromMesh(rl.GenMeshCube(0.18, 0.18, 0.14))
-	models := []rl.Model{post, lintel, panel, keystone}
-	for i := range models {
+	plank := rl.LoadModelFromMesh(rl.GenMeshCube(0.56, 0.04, 0.05))
+	keystone := rl.LoadModelFromMesh(rl.GenMeshCube(0.20, 0.20, 0.16))
+	stud := rl.LoadModelFromMesh(rl.GenMeshSphere(0.028, 8, 10))
+	hinge := rl.LoadModelFromMesh(rl.GenMeshCube(0.10, 0.06, 0.07))
+	knob := rl.LoadModelFromMesh(rl.GenMeshSphere(0.045, 10, 12))
+	threshold := rl.LoadModelFromMesh(rl.GenMeshCube(0.80, 0.06, 0.18))
+	models := []rl.Model{post, lintel, panel, plank, keystone, stud, hinge, knob, threshold}
+	// Wood-textured parts: posts, lintel, panel, plank ridges, keystone, threshold.
+	for _, i := range []int{0, 1, 2, 3, 4, 8} {
 		setModelTexture(&models[i], woodTex)
+	}
+	for i := range models {
 		attachShader(&models[i], shader)
 	}
-	wood := rl.NewColor(150, 102, 60, 255)
-	woodDark := rl.NewColor(96, 64, 40, 255)
-	doorPanel := rl.NewColor(68, 44, 28, 255)
-	brass := rl.NewColor(220, 184, 96, 255)
+	// Muted wood family — matches the bark / crate / stump palette
+	// so the door sits in the same painted material world as the
+	// trees around it.
+	wood := rl.NewColor(118, 84, 56, 255)
+	woodDark := rl.NewColor(84, 60, 42, 255)
+	doorPanel := rl.NewColor(98, 70, 50, 255)
+	plankDark := rl.NewColor(70, 48, 32, 255)
+	brass := rl.NewColor(178, 142, 78, 255)
+	brassBright := rl.NewColor(206, 168, 96, 255)
 	return propModel{
 		models: models,
 		parts: []treePart{
@@ -1234,11 +1485,31 @@ func loadDoorProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 			{modelIdx: 0, offset: rl.NewVector3(0.35, 0.70, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
 			// Lintel across the top — slightly wider than the post spread.
 			{modelIdx: 1, offset: rl.NewVector3(0, 1.44, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
-			// Recessed dark panel between the posts (the "door" itself).
+			// Threshold stone at the base — reads as the worn
+			// step you walk over on the way through.
+			{modelIdx: 8, offset: rl.NewVector3(0, 0.03, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
+			// Recessed plank-faced door panel between the posts.
 			{modelIdx: 2, offset: rl.NewVector3(0, 0.65, 0), scale: rl.NewVector3(1, 1, 1), tint: doorPanel},
-			// Brass keystone / knob accent so the door reads from
-			// distance.
-			{modelIdx: 3, offset: rl.NewVector3(0, 1.50, 0), scale: rl.NewVector3(1, 1, 1), tint: brass},
+			// Horizontal plank ridges across the door panel —
+			// reads as boarded construction instead of a slab.
+			{modelIdx: 3, offset: rl.NewVector3(0, 0.32, 0.025), scale: rl.NewVector3(1, 1, 1), tint: plankDark},
+			{modelIdx: 3, offset: rl.NewVector3(0, 0.66, 0.025), scale: rl.NewVector3(1, 1, 1), tint: plankDark},
+			{modelIdx: 3, offset: rl.NewVector3(0, 1.00, 0.025), scale: rl.NewVector3(1, 1, 1), tint: plankDark},
+			// Brass corner studs on the panel — four small domes
+			// catching the gilt highlight.
+			{modelIdx: 5, offset: rl.NewVector3(-0.24, 0.16, 0.045), scale: rl.NewVector3(1, 1, 1), tint: brassBright},
+			{modelIdx: 5, offset: rl.NewVector3(0.24, 0.16, 0.045), scale: rl.NewVector3(1, 1, 1), tint: brassBright},
+			{modelIdx: 5, offset: rl.NewVector3(-0.24, 1.14, 0.045), scale: rl.NewVector3(1, 1, 1), tint: brassBright},
+			{modelIdx: 5, offset: rl.NewVector3(0.24, 1.14, 0.045), scale: rl.NewVector3(1, 1, 1), tint: brassBright},
+			// Two iron hinges flanking the left edge of the panel.
+			{modelIdx: 6, offset: rl.NewVector3(-0.30, 0.32, 0.045), scale: rl.NewVector3(1, 1, 1), tint: brass},
+			{modelIdx: 6, offset: rl.NewVector3(-0.30, 0.98, 0.045), scale: rl.NewVector3(1, 1, 1), tint: brass},
+			// Brass doorknob on the right side, mid-height — the
+			// "this is interactive" cue.
+			{modelIdx: 7, offset: rl.NewVector3(0.20, 0.62, 0.07), scale: rl.NewVector3(1, 1, 1), tint: brassBright},
+			// Keystone / lintel crown — slightly forward of the
+			// lintel for sculpted relief.
+			{modelIdx: 4, offset: rl.NewVector3(0, 1.52, 0.02), scale: rl.NewVector3(1, 1, 1), tint: brass},
 		},
 	}
 }
@@ -1546,13 +1817,18 @@ func loadBrazierProp(shader rl.Shader) propModel {
 	flame := rl.LoadModelFromMesh(rl.GenMeshSphere(0.18, 8, 10))
 	tip := rl.LoadModelFromMesh(rl.GenMeshSphere(0.10, 6, 8))
 	models := []rl.Model{leg, bowl, flame, tip}
-	for i := range models {
-		attachShader(&models[i], shader)
-	}
+	// Iron stand (legs + bowl) is lit by the world shader. The
+	// flame + tip are LEFT on raylib's default material shader so
+	// they render emissive — full fire colour, unaffected by the
+	// near-black dungeon ambient — and read as the glowing source
+	// the torch point light pours out of. (Same default-shader
+	// trick the ground-shadow disc uses to stay unlit.)
+	attachShader(&models[0], shader)
+	attachShader(&models[1], shader)
 	iron := rl.NewColor(60, 56, 52, 255)
 	ironLight := rl.NewColor(98, 92, 84, 255)
-	fire := rl.NewColor(232, 132, 56, 255)
-	fireBright := rl.NewColor(252, 220, 132, 255)
+	fire := rl.NewColor(248, 150, 64, 255)
+	fireBright := rl.NewColor(255, 230, 150, 255)
 	return propModel{
 		models: models,
 		parts: []treePart{

@@ -276,6 +276,15 @@ func QuitPressed() bool {
 	return rl.IsKeyPressed(rl.KeyQ) || padPressed(rl.GamepadButtonMiddleLeft) // Select / Share
 }
 
+// DebugFleePressed is the edge that abandons an active battle when the
+// debug "Easy Battle Quit" toggle is on. Bound to Backspace plus the
+// gamepad Select/Share button — kept off the action-menu's confirm /
+// back / arrow keys so it can't fire by accident during normal play
+// (and it's gated on the toggle at the call site regardless).
+func DebugFleePressed() bool {
+	return rl.IsKeyPressed(rl.KeyBackspace) || padPressed(rl.GamepadButtonMiddleLeft) // Select / Share
+}
+
 func TurnLeftPressed() bool {
 	return rl.IsKeyPressed(rl.KeyLeft) || rl.IsKeyPressed(rl.KeyQ) ||
 		padPressed(rl.GamepadButtonLeftTrigger1) // LB

@@ -41,81 +41,85 @@ var timeProfiles = [core.TimeOfDayCount]timeProfile{
 	// the previous tuning so the transition out of midnight still reads
 	// as "barely-lit pre-sunrise" before brightening into morning.
 	core.Dawn: {
-		SunColor:     rl.NewVector3(0.92, 0.52, 0.38),
-		AmbientColor: rl.NewVector3(0.32, 0.28, 0.36),
-		FogColor:     rl.NewVector3(0.78, 0.52, 0.46),
-		// Sunrise tint pushed hard pink-orange so the horizon reads
-		// as a sunrise instead of "muddy pre-morning." Interpolation
-		// toward Morning's white tint still gives a smooth crossover;
-		// the dramatic boundary is what sells the time-of-day arc.
+		// Sunrise — softer than the prior "hot pink-orange" pass.
+		// The sky tint now stays in 0..1 so it tints the texture
+		// rather than over-brightening it.
+		SunColor:       rl.NewVector3(0.78, 0.50, 0.40),
+		AmbientColor:   rl.NewVector3(0.30, 0.28, 0.34),
+		FogColor:       rl.NewVector3(0.68, 0.50, 0.46),
 		ShadowStrength: 0.48,
-		SkyTint:        rl.NewVector3(1.18, 0.72, 0.58),
-		// Stars linger faintly at dawn — fading through to 0 as
-		// timeProfileAt blends toward Morning, then stay invisible
-		// across the daylight phases. Bumped from 0.18 so the last
-		// constellations are still visible at the brightest dawn
-		// frame, not pinned just under threshold.
+		SkyTint:        rl.NewVector3(0.96, 0.72, 0.62),
+		// Last constellations still visible at brightest dawn.
 		StarAlpha: 0.32,
 	},
-	// Morning — bright, slightly warm. Closest to a "default" daylight
-	// look; the area's base profile (which was tuned originally) shows
-	// through best here.
+	// Morning — gentle warm daylight. Sun multipliers pulled below
+	// 1.0 so the directional light no longer brightens textures past
+	// their base — the world reads "painted dawn-after" rather than
+	// "high-noon-stage-light." Ambient kept warm enough to lift
+	// shadows without going neutral grey.
+	// Morning — relaxing pastel daylight. The textures are already
+	// pastel-bright, so the sun + ambient sum is kept near 1.0:
+	// the directional light SHADES the pastel base rather than
+	// pushing it past white. Any higher and the meadow sears.
 	core.Morning: {
-		SunColor:       rl.NewVector3(1.05, 0.99, 0.86),
-		AmbientColor:   rl.NewVector3(0.46, 0.52, 0.62),
-		FogColor:       rl.NewVector3(0.74, 0.86, 0.96),
-		ShadowStrength: 0.30,
-		SkyTint:        rl.NewVector3(1.00, 1.00, 1.00),
+		SunColor:       rl.NewVector3(0.66, 0.64, 0.57),
+		AmbientColor:   rl.NewVector3(0.40, 0.44, 0.52),
+		FogColor:       rl.NewVector3(0.84, 0.88, 0.92),
+		ShadowStrength: 0.26,
+		SkyTint:        rl.NewVector3(0.84, 0.86, 0.90),
 		StarAlpha:      0,
 	},
-	// Afternoon — peak brightness, slightly cooler than morning to give
-	// the day an arc instead of a flat plateau.
+	// Afternoon — peak relaxing-day. A touch brighter and cooler
+	// than morning so the day has an arc, but the sun+ambient sum
+	// still lands close to 1.0 to keep the pastel field from
+	// blowing out at the brightest point.
 	core.Afternoon: {
-		SunColor:       rl.NewVector3(1.10, 1.04, 0.92),
-		AmbientColor:   rl.NewVector3(0.52, 0.58, 0.68),
-		FogColor:       rl.NewVector3(0.80, 0.90, 0.98),
-		ShadowStrength: 0.28,
-		SkyTint:        rl.NewVector3(1.05, 1.08, 1.10),
+		SunColor:       rl.NewVector3(0.70, 0.68, 0.60),
+		AmbientColor:   rl.NewVector3(0.42, 0.46, 0.54),
+		FogColor:       rl.NewVector3(0.86, 0.90, 0.94),
+		ShadowStrength: 0.24,
+		SkyTint:        rl.NewVector3(0.88, 0.90, 0.94),
 		StarAlpha:      0,
 	},
 	// Dusk — sun low, deep gold sky, long warm shadows. This is the
 	// most stylized phase; intentionally exaggerated so the player
 	// notices the transition.
 	core.Dusk: {
-		// Sunset: pushed deep gold + a touch of magenta-red so the
-		// horizon reads as a proper sunset, not a faded afternoon.
-		// Components above 1 brighten R; G stays warm but lower; B
-		// kept low to keep the sky from going neutral. Strong shadow
-		// strength accentuates the long-shadow feel.
-		SunColor:       rl.NewVector3(1.32, 0.68, 0.34),
-		AmbientColor:   rl.NewVector3(0.42, 0.32, 0.32),
-		FogColor:       rl.NewVector3(0.78, 0.46, 0.36),
+		// Sunset — gold + warm red, but no longer pushed past 1.0.
+		// The sky still reads "proper sunset" via the colour
+		// ratios (warm R, lower G, dim B) without over-brightening
+		// any single channel.
+		SunColor:       rl.NewVector3(0.94, 0.62, 0.38),
+		AmbientColor:   rl.NewVector3(0.38, 0.30, 0.32),
+		FogColor:       rl.NewVector3(0.70, 0.46, 0.38),
 		ShadowStrength: 0.50,
-		SkyTint:        rl.NewVector3(1.28, 0.58, 0.34),
-		// Stars start to peek toward late dusk — bumped from 0.04 so
-		// the layer is actually perceptible at the Dusk→Evening
-		// crossover, where the sky is already darkening enough for
-		// the pinpoints to read.
-		StarAlpha: 0.12,
+		SkyTint:        rl.NewVector3(0.94, 0.56, 0.36),
+		// Stars start to peek toward late dusk.
+		StarAlpha: 0.14,
 	},
-	// Evening — indigo twilight. Sun has set; the only color is what
-	// the sky and lingering atmosphere bounce around.
+	// Evening — properly spooky indigo twilight. Light drops
+	// hard and goes cool-blue so the meadow's pastel warmth
+	// becomes uneasy and shadowed. Shadow strength is high so
+	// unlit surfaces sink into deep blue dusk.
 	core.Evening: {
-		SunColor:       rl.NewVector3(0.45, 0.46, 0.66),
-		AmbientColor:   rl.NewVector3(0.18, 0.22, 0.34),
-		FogColor:       rl.NewVector3(0.18, 0.22, 0.32),
-		ShadowStrength: 0.55,
-		SkyTint:        rl.NewVector3(0.36, 0.40, 0.62),
-		StarAlpha:      0.55,
+		SunColor:       rl.NewVector3(0.32, 0.34, 0.52),
+		AmbientColor:   rl.NewVector3(0.14, 0.18, 0.28),
+		FogColor:       rl.NewVector3(0.14, 0.18, 0.28),
+		ShadowStrength: 0.68,
+		SkyTint:        rl.NewVector3(0.28, 0.32, 0.52),
+		StarAlpha:      0.62,
 	},
-	// Midnight — moonlit blue. Very dark, but enough light to read by;
-	// shadowStrength is highest here so unlit surfaces really sink.
+	// Midnight — deep moonlit gloom. Cold cyan moonlight at low
+	// intensity, near-black ambient, fog drops to a smothering
+	// indigo so far props vanish into the night. The pastel
+	// daytime palette of the textures recedes; the player feels
+	// like they shouldn't be out here.
 	core.Midnight: {
-		SunColor:       rl.NewVector3(0.20, 0.24, 0.46),
-		AmbientColor:   rl.NewVector3(0.10, 0.13, 0.24),
-		FogColor:       rl.NewVector3(0.06, 0.08, 0.16),
-		ShadowStrength: 0.65,
-		SkyTint:        rl.NewVector3(0.14, 0.18, 0.34),
+		SunColor:       rl.NewVector3(0.16, 0.22, 0.40),
+		AmbientColor:   rl.NewVector3(0.06, 0.10, 0.18),
+		FogColor:       rl.NewVector3(0.04, 0.06, 0.12),
+		ShadowStrength: 0.78,
+		SkyTint:        rl.NewVector3(0.10, 0.14, 0.26),
 		StarAlpha:      1.0,
 	},
 }
@@ -158,14 +162,46 @@ func skyColor(tint rl.Vector3) rl.Color {
 // profile, returning the runtime profile passed to the lighting shader.
 // Fog density and specular strength come from the area; everything else
 // comes from the time of day.
-func applyTimeOfDay(base lightingProfile, t timeProfile) lightingProfile {
+//
+// Indoor / dungeon areas (identified by their dense base fog) get
+// their daytime lighting crushed into a permanent gloomy palette —
+// the dungeon should feel spooky whether it's morning or midnight
+// outside. We pull SunColor and AmbientColor toward a cool dim
+// torchlight family that reads as "underground, no sky," and lean
+// ShadowStrength heavier so unlit surfaces sink into the dark.
+// Outdoor field areas (light fog) pass through unchanged so the
+// pastel meadow + day/night arc still works above ground.
+func applyTimeOfDay(base lightingProfile, t timeProfile, enclosed bool) lightingProfile {
+	sun := t.SunColor
+	ambient := t.AmbientColor
+	fog := t.FogColor
+	shadow := t.ShadowStrength
+	// Spooky-dungeon override applies ONLY to actually enclosed
+	// areas — dungeon material set (dense fog) AND a real ceiling
+	// overhead. A forest authored on the dungeon palette (stone
+	// walls, but open sky / no ceiling) is NOT enclosed, so it
+	// keeps the normal day-cycle lighting instead of being crushed
+	// to torchlit gloom. This is the fix for "forest dawn way
+	// darker than field dawn."
+	if base.FogDensity > 0.06 && enclosed {
+		// Dark, but navigable. The directional sun is a low cool
+		// fill so walls read as silhouettes; ambient is dim but
+		// not pitch-black, so a dungeon with no torches is still
+		// playable. Brazier torch point lights add warm pools on
+		// top. Fog stays deep so anything past a torch's reach
+		// recedes into the dark.
+		sun = rl.NewVector3(0.13, 0.14, 0.18)
+		ambient = rl.NewVector3(0.12, 0.13, 0.17)
+		fog = rl.NewVector3(0.03, 0.04, 0.06)
+		shadow = 0.80
+	}
 	return lightingProfile{
-		SunColor:         t.SunColor,
-		AmbientColor:     t.AmbientColor,
-		FogColor:         t.FogColor,
+		SunColor:         sun,
+		AmbientColor:     ambient,
+		FogColor:         fog,
 		FogDensity:       base.FogDensity,
 		SpecularStrength: base.SpecularStrength,
-		ShadowStrength:   t.ShadowStrength,
+		ShadowStrength:   shadow,
 	}
 }
 

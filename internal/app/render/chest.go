@@ -2,75 +2,110 @@ package render
 
 import (
 	"crawler/internal/app/core"
+	"math"
 	"strconv"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// chestGeometry bundles every world-unit dimension for the chest model.
-// One struct keeps body, lid, and lockplate dimensions adjacent so a
-// chest-resize is one literal edit instead of five package-level
-// constants drifting independently.
+// chestGeometry bundles the world-unit dimensions DrawChestPrompt
+// uses to anchor its floating prompt — these match the painted
+// chest meshes built in loadChestBodyProp / loadChestLidProp so the
+// "Press Enter" cue floats above the chest's actual silhouette.
 type chestGeometry struct {
-	BodyWidth  float32
 	BodyHeight float32
-	BodyDepth  float32
 	LidHeight  float32
-	LidLift    float32 // looted chests render the lid floating this far above the body
-	MetalBand  float32 // thickness of the metal lockplate strip
 }
 
 var chestGeo = chestGeometry{
-	BodyWidth:  0.60,
-	BodyHeight: 0.45,
-	BodyDepth:  0.45,
-	LidHeight:  0.16,
-	LidLift:    0.55,
-	MetalBand:  0.06,
+	BodyHeight: 0.46,
+	LidHeight:  0.18,
 }
 
-// DrawChests renders every chest in the game state as a two-piece box
-// (body + lid) at its tile center. Looted chests get a deeper body
-// color and a lid that sits open behind the body; unopened chests get
-// the closed-lid silhouette plus a soft "press Enter" prompt floating
-// over the chest when the player is one step away. Called after
-// DrawWorld so chests draw under the same lighting shader still bound.
-func DrawChests(camera rl.Camera3D, g core.GameState, _ Resources) {
-	g_ := chestGeo
+// chestLidLootedLift is how far above the body top a looted chest's
+// lid drifts. The lid also tilts backward to read as "thrown open"
+// rather than "lifted off and floating."
+const (
+	chestLidLootedLift    = float32(0.34)
+	chestLidLootedTiltDeg = float32(-58)
+)
+
+// DrawChests renders every chest as a two-piece painted prop —
+// wooden body with brass corner straps + hoop bands + lockplate +
+// jewel, capped by a wooden lid with corner caps + a hoop band.
+// Closed chests stack the lid flush on the body; looted chests
+// hinge the lid back around its rear edge so it reads as "thrown
+// open" rather than "lid floating in the air." Bark texture +
+// lighting shader give the whole prop the painted-storybook feel
+// of the trees and bushes around it.
+//
+// Called after DrawWorld so chests draw under the lighting shader
+// still bound. The body / lid propModels live on Resources so the
+// meshes load once at startup and unload at game exit.
+func DrawChests(camera rl.Camera3D, g core.GameState, assets Resources) {
 	for _, ch := range g.Chests {
-		// Body sits at BodyHeight/2 so its base flushes against the
-		// floor (y = 0 is the floor's top surface in this engine).
-		body := tileWorldPos(ch.TileX, ch.TileZ, g_.BodyHeight/2)
-		col := chestBodyColor
-		if ch.Looted {
-			col = chestBodyLooted
-		}
-		rl.DrawCube(body, g_.BodyWidth, g_.BodyHeight, g_.BodyDepth, col)
-		rl.DrawCubeWires(body, g_.BodyWidth, g_.BodyHeight, g_.BodyDepth, rl.Black)
+		base := tileWorldPos(ch.TileX, ch.TileZ, 0)
+		drawGroundShadow(base.X, base.Z, 0.40)
 
-		// Lid placement: closed chests stack the lid right on top of the
-		// body; looted chests float the lid upward + tilt by drawing it
-		// higher and slightly larger to read as "lifted off."
-		lidY := g_.BodyHeight + g_.LidHeight/2
-		lidW := g_.BodyWidth
-		lidD := g_.BodyDepth
-		if ch.Looted {
-			lidY += g_.LidLift
-			lidW *= 1.05
-			lidD *= 1.05
-		}
-		lid := tileWorldPos(ch.TileX, ch.TileZ, lidY)
-		rl.DrawCube(lid, lidW, g_.LidHeight, lidD, chestLidColor)
-		rl.DrawCubeWires(lid, lidW, g_.LidHeight, lidD, rl.Black)
+		// Body — sits at floor level. propModel.draw owns the
+		// per-part offsets, scales, and tints.
+		assets.chestBody.draw(base, 1.0, 0)
 
-		// Metal lockplate band: thin strip across the front of the body
-		// + lid seam. Offsets the band slightly past the front face so
-		// it doesn't z-fight the body.
-		band := tileWorldPos(ch.TileX, ch.TileZ, g_.BodyHeight-g_.MetalBand/2)
-		band.Z += g_.BodyDepth/2 + 0.01
-		rl.DrawCube(band, g_.BodyWidth*0.5, g_.MetalBand, 0.02, chestMetalColor)
+		// Lid — flush atop the body when closed; hinge-tilted
+		// backward off the rear edge when looted.
+		lidCentreY := base.Y + chestGeo.BodyHeight
+		if ch.Looted {
+			drawChestLidLooted(assets, base, lidCentreY)
+		} else {
+			lidPos := rl.NewVector3(base.X, lidCentreY, base.Z)
+			assets.chestLid.draw(lidPos, 1.0, 0)
+		}
 	}
 	_ = camera
+}
+
+// drawChestLidLooted paints the lid in its "thrown open" pose —
+// pivoted around the rear top edge of the body so the lid reads as
+// hinged backward, not floating off. Each lid part is positioned
+// relative to the hinge, rotated by chestLidLootedTiltDeg around the
+// world-X axis, then drawn through the lighting shader. The same
+// chestLid propModel parts list drives the rendering; only the
+// per-part transform differs.
+func drawChestLidLooted(assets Resources, base rl.Vector3, lidCentreY float32) {
+	hingeZ := base.Z - 0.25
+	tiltRad := float64(chestLidLootedTiltDeg) * math.Pi / 180
+	cosT := float32(math.Cos(tiltRad))
+	sinT := float32(math.Sin(tiltRad))
+	for _, part := range assets.chestLid.parts {
+		// Authored offset relative to the lid's own centre, lifted
+		// to the body top + the looted lift.
+		offX := part.offset.X
+		offY := part.offset.Y
+		offZ := part.offset.Z
+		// Relative-to-hinge coords (subtract hinge Z; lid centre Y
+		// becomes the hinge Y after adding the lift).
+		relY := offY + chestLidLootedLift
+		relZ := offZ - (-0.25) // hinge sits at z = -0.25 relative to chest centre, so part's authored Z already lines up
+		// Rotate around X axis through the hinge: (y, z) → (y',
+		// z') = (y·cos − z·sin, y·sin + z·cos). With our negative
+		// tilt the lid pivots backward (z grows negative as y
+		// climbs), tipping the front of the lid up and away from
+		// the player.
+		ry := relY*cosT - relZ*sinT
+		rz := relY*sinT + relZ*cosT
+		// World position: hinge centre + rotated offset.
+		position := rl.NewVector3(base.X+offX, lidCentreY+ry, hingeZ+rz)
+		drawScale := part.scale
+		// drawModelEx with the part's own rotation axis still
+		// applies (e.g. for parts spun around Y); the tilt around
+		// X applies on top via a second pass — but to keep the
+		// math simple we let raylib's rotation apply only the
+		// per-part rotation, and bake the lid-tilt into the
+		// position via the offset rotation above. The visible
+		// result is the lid hinge-open with corner caps and band
+		// rotating in lockstep with the wood.
+		rl.DrawModelEx(assets.chestLid.models[part.modelIdx], position, partRotationAxis(part), part.rotation, drawScale, part.tint)
+	}
 }
 
 // DrawChestPrompt paints the floating "press Enter to open" cue over

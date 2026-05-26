@@ -37,6 +37,11 @@ type Resources struct {
 	rockProp     propModel
 	bushProp     propModel
 	mushroomProp propModel
+	// chestBody / chestLid are the painted-wood chest pieces. Drawn
+	// in DrawChests as two parts so the looted-chest path can lift
+	// the lid straight up + tilt back without re-posing the body.
+	chestBody propModel
+	chestLid  propModel
 
 	// Universal floor variants — keyed by their floor-layer char so the
 	// renderer can swap in a cobblestone, plank, water, sand or snow tile
@@ -178,6 +183,27 @@ func LoadResources() (r Resources) {
 	r.rockProp = loadRockProp(r.lighting.shader, rockTex)
 	r.bushProp = loadBushProp(r.lighting.shader, bushTex)
 	r.mushroomProp = loadMushroomProp(r.lighting.shader)
+	// Chest props share the bark texture family but mint two
+	// distinct atlas instances so each model owns its texture
+	// outright (setModelTexture → unload-with-model contract).
+	chestBodyWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
+	chestLidWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
+	r.chestBody = loadChestBodyProp(r.lighting.shader, chestBodyWoodTex)
+	r.chestLid = loadChestLidProp(r.lighting.shader, chestLidWoodTex)
+
+	// Soft ground-shadow disc — a flat plane textured with the
+	// radial-gradient shadow sprite, drawn UNLIT (default material
+	// shader) so the lighting pass never touches it. Stored as a
+	// package singleton (groundShadowModel) because drawGroundShadow
+	// is called from many free-function prop draws.
+	groundShadowModel = loadGroundShadowModel()
+	groundShadowReady = true
+
+	// Wall-torch flame blob — a small unlit emissive sphere (default
+	// material shader, like the ground-shadow disc) tinted to fire
+	// colours and animated per-frame by drawWallTorch.
+	torchFlameModel = rl.LoadModelFromMesh(rl.GenMeshSphere(1, 8, 10))
+	torchFlameReady = true
 
 	// Universal floor variants — built once and shared across every material
 	// set so a cobblestone path through a dungeon and one across a field
@@ -403,7 +429,7 @@ func isDecorFootprintTail(c byte) bool {
 // pre-resolved. `x, z` are the tile coords so handlers can seed
 // per-tile shape variance (canopy fullness, scale jitter, tint walk)
 // from `tileHash(x, z)` without rederiving coordinates from `center`.
-type inlinePropRenderer func(assets Resources, x, z int, center rl.Vector3, propYaw float32)
+type inlinePropRenderer func(assets Resources, m core.AreaDefinition, x, z int, center rl.Vector3, propYaw float32)
 
 // inlinePropHandlers is the SINGLE source of truth for inline prop
 // dispatch — both world.go's drawWorld switch and assertPropCoverage
@@ -422,6 +448,10 @@ var inlinePropHandlers = map[byte]inlinePropRenderer{
 	core.TileTreeTwin:  drawPropTreeTwin,
 	core.TileRockLarge: drawPropRockLarge,
 	core.TileBushLarge: drawPropBushLarge,
+	// Wall torch — needs the area to find the adjacent wall, which
+	// the inline signature now carries. drawWallTorch ignores the
+	// propYaw (it derives its own facing from the wall).
+	core.TileTorch: drawWallTorch,
 }
 
 // inlinePropTable is the [256]inlinePropRenderer index built once from
@@ -505,6 +535,16 @@ func (r Resources) Unload() {
 	r.rockProp.unload()
 	r.bushProp.unload()
 	r.mushroomProp.unload()
+	r.chestBody.unload()
+	r.chestLid.unload()
+	if groundShadowReady {
+		rl.UnloadModel(groundShadowModel)
+		groundShadowReady = false
+	}
+	if torchFlameReady {
+		rl.UnloadModel(torchFlameModel)
+		torchFlameReady = false
+	}
 	r.doorProp.unload()
 	for _, model := range r.specialFloors {
 		rl.UnloadModel(model)
@@ -560,6 +600,23 @@ func loadTileModel(pixels []color.RGBA, height float32, shader rl.Shader) rl.Mod
 // Floor cubes use a flat 0.06 height so the wall geometry overlaps cleanly.
 func loadFloorModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
 	return loadTileModel(pixels, 0.06, shader)
+}
+
+// loadGroundShadowModel builds the soft contact-shadow plane: a 1×1
+// XZ quad textured with the radial-gradient shadow sprite. The
+// texture is clamped (the gradient is fully transparent at the
+// disc edge anyway) and bilinear-filtered so the falloff stays
+// smooth when the disc is scaled up under a big prop. NO lighting
+// shader is attached — the model keeps raylib's default material
+// shader so DrawModelEx renders it unlit even when the world's
+// lighting shader is the active BeginShaderMode shader, leaving the
+// shadow a flat dark wash with the texture's own alpha gradient.
+func loadGroundShadowModel() rl.Model {
+	tex := loadTexture(makeSoftShadowPixels(64), 64, 64, rl.FilterBilinear)
+	rl.SetTextureWrap(tex, rl.WrapClamp)
+	model := rl.LoadModelFromMesh(rl.GenMeshPlane(1, 1, 1, 1))
+	setModelTexture(&model, tex)
+	return model
 }
 
 func loadWorldMaterial(wallPixels, floorPixels []color.RGBA, shader rl.Shader) worldMaterialResources {

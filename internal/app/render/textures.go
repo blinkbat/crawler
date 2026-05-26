@@ -7,18 +7,49 @@ import (
 	"crawler/internal/app/core"
 )
 
+// makeSoftShadowPixels builds the radial-gradient sprite used for
+// every prop's ground shadow: a dark cool-grey disc whose alpha
+// falls from a soft maximum at the centre to fully transparent at
+// the disc edge, with the texture's corners fully clear. Painted
+// onto a flat ground plane (see loadGroundShadowModel) it reads as
+// a soft contact shadow — round, gradient-faded, genuinely
+// translucent — instead of the old hard flat square.
+//
+// The falloff is (1-d)^1.6: nearly flat-dark across the inner
+// half, then a gentle feathered edge. Max alpha is deliberately
+// modest so the shadow grounds the prop without reading as a black
+// hole punched in the floor.
+func makeSoftShadowPixels(size int) []color.RGBA {
+	pixels := make([]color.RGBA, size*size)
+	center := float64(size-1) / 2
+	maxR := float64(size) / 2
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			dx := (float64(x) - center) / maxR
+			dy := (float64(y) - center) / maxR
+			d := math.Sqrt(dx*dx + dy*dy)
+			a := 0.0
+			if d < 1.0 {
+				a = math.Pow(1.0-d, 1.6)
+			}
+			pixels[y*size+x] = color.RGBA{R: 22, G: 24, B: 30, A: uint8(a * 135)}
+		}
+	}
+	return pixels
+}
+
 func makeRockWallPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Calm stone palette — neutral grey with the faintest warm
-	// drift, painted highlights kept dim enough that the wall
-	// sits quietly behind props rather than competing for the
-	// eye. Moss tones muted to a sage so the green doesn't
-	// shout against the foliage.
-	base := color.RGBA{R: 116, G: 114, B: 108, A: 255}
-	shadow := color.RGBA{R: 64, G: 64, B: 62, A: 255}
-	highlight := color.RGBA{R: 160, G: 156, B: 144, A: 255}
-	moss := color.RGBA{R: 92, G: 124, B: 86, A: 255}
-	mossDeep := color.RGBA{R: 66, G: 96, B: 64, A: 255}
+	// Pastel cream-stone wall — warm cliff face catching the
+	// daytime sky, like Outset Island's limestone bluffs. The
+	// darker / dungeon side gets its mood from the lighting
+	// profile (cool ambient + heavy shadowStrength) rather than
+	// from the texture going grey.
+	base := color.RGBA{R: 188, G: 178, B: 160, A: 255}
+	shadow := color.RGBA{R: 120, G: 112, B: 102, A: 255}
+	highlight := color.RGBA{R: 226, G: 218, B: 198, A: 255}
+	moss := color.RGBA{R: 158, G: 192, B: 148, A: 255}
+	mossDeep := color.RGBA{R: 124, G: 168, B: 124, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
@@ -74,12 +105,17 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 	brickW := 32
 	brickH := 16
 	mortar := 2
-	base := color.RGBA{R: 118, G: 120, B: 118, A: 255}
-	warm := color.RGBA{R: 156, G: 138, B: 110, A: 255}
-	cool := color.RGBA{R: 86, G: 96, B: 110, A: 255}
-	mortarColor := color.RGBA{R: 32, G: 32, B: 36, A: 255}
-	mortarLight := color.RGBA{R: 78, G: 76, B: 70, A: 255}
-	moss := color.RGBA{R: 68, G: 96, B: 64, A: 255}
+	// Pastel cream-stone brick — same painted family as the
+	// outdoor rock wall so a dungeon and an outdoor cliff read
+	// as the same world. The dungeon's eerie mood comes from the
+	// LIGHTING override (dim cool ambient + heavy shadow), not
+	// from cold stone colour.
+	base := color.RGBA{R: 178, G: 170, B: 154, A: 255}
+	warm := color.RGBA{R: 208, G: 184, B: 144, A: 255}
+	cool := color.RGBA{R: 152, G: 158, B: 168, A: 255}
+	mortarColor := color.RGBA{R: 74, G: 68, B: 60, A: 255}
+	mortarLight := color.RGBA{R: 118, G: 110, B: 96, A: 255}
+	moss := color.RGBA{R: 148, G: 184, B: 132, A: 255}
 
 	for y := 0; y < h; y++ {
 		row := y / brickH
@@ -109,7 +145,9 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 			}
 
 			n := fbmNoise(float64(x)*1.4, float64(y)*1.4, 0.16, 4)
-			c = core.MixColor(c, color.RGBA{R: 244, G: 238, B: 226, A: 255}, math.Max(0, n)*0.32)
+			// Muted highlight (cream → soft stone-white) so the
+			// brick crests don't flare against the muted base.
+			c = core.MixColor(c, color.RGBA{R: 188, G: 184, B: 172, A: 255}, math.Max(0, n)*0.30)
 			c = core.MixColor(c, color.RGBA{R: 30, G: 28, B: 24, A: 255}, math.Max(0, -n)*0.42)
 
 			edgeDist := core.MinInt(localX-mortar, core.MinInt(localY-mortar, core.MinInt(brickW-mortar-1-localX, brickH-mortar-1-localY)))
@@ -131,61 +169,48 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 
 func makeGrassPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Muted painted palette — softer than the prior pass. Greens
-	// pulled toward olive/sage so the field reads as gentle
-	// pastoral rather than vibrant cartoon; bloom colours dialled
-	// back from saturated pop tones to softer painted petals.
-	base := color.RGBA{R: 86, G: 138, B: 88, A: 255}
-	light := color.RGBA{R: 142, G: 178, B: 108, A: 255}
-	dark := color.RGBA{R: 52, G: 96, B: 64, A: 255}
-	dirt := color.RGBA{R: 114, G: 94, B: 68, A: 255}
-	bloomYellow := color.RGBA{R: 214, G: 196, B: 118, A: 255}
-	bloomWhite := color.RGBA{R: 224, G: 220, B: 206, A: 255}
-	bloomPink := color.RGBA{R: 210, G: 158, B: 176, A: 255}
-	bloomLilac := color.RGBA{R: 174, G: 158, B: 198, A: 255}
-	bloomRed := color.RGBA{R: 194, G: 102, B: 96, A: 255}
+	// Pastel meadow — soft mint base with painted tonal patches.
+	// Low-poly philosophy: the texture is a calm wash, NOT a busy
+	// noise field. Bloom flowers are scattered very sparsely
+	// (1 in ~520) so the discrete flower props carry the floral
+	// detail and the floor reads as smooth painted ground from
+	// the player's POV. One broad noise band paints big patches;
+	// no fine-grain brushstrokes, no per-pixel hash speckle.
+	// Pastel but with the chroma pushed back up — soft yet
+	// colourful spring green, not washed grey-green. Lightness
+	// stays high; saturation comes back by widening the gap
+	// between the green channel and the red/blue.
+	base := color.RGBA{R: 132, G: 196, B: 102, A: 255}
+	light := color.RGBA{R: 186, G: 224, B: 134, A: 255}
+	dark := color.RGBA{R: 98, G: 162, B: 92, A: 255}
+	dirt := color.RGBA{R: 184, G: 150, B: 100, A: 255}
+	bloomYellow := color.RGBA{R: 244, G: 218, B: 120, A: 255}
+	bloomWhite := color.RGBA{R: 244, G: 240, B: 224, A: 255}
+	bloomPink := color.RGBA{R: 238, G: 174, B: 196, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			// Two-octave painted brushstroke noise: a broad
-			// low-frequency band paints big tonal patches; a
-			// finer band layered over it sells "blades clumping
-			// in handful-sized tufts."
-			broad := fbmNoise(float64(x), float64(y), 0.022, 3)
-			brush := fbmNoise(float64(x)*1.3+311, float64(y)*1.3-77, 0.07, 4)
-			n := broad*0.55 + brush*0.45
-			// Dirt patch noise — large lazy patches where the
-			// grass thins. Lower frequency than before so dirt
-			// reads as a deliberate clearing rather than speckle.
-			m := fbmNoise(float64(x)+512, float64(y)-271, 0.016, 3)
+			broad := fbmNoise(float64(x), float64(y), 0.020, 3)
 			c := base
-			c = core.MixColor(c, light, math.Max(0, n)*0.78)
-			c = core.MixColor(c, dark, math.Max(0, -n)*0.55)
-			if m > 0.46 {
-				c = core.MixColor(c, dirt, (m-0.46)*0.95)
+			c = core.MixColor(c, light, math.Max(0, broad)*0.55)
+			c = core.MixColor(c, dark, math.Max(0, -broad)*0.40)
+			// Optional dirt scuff — lazy large patches.
+			m := fbmNoise(float64(x)+512, float64(y)-271, 0.014, 2)
+			if m > 0.50 {
+				c = core.MixColor(c, dirt, (m-0.50)*0.65)
 			}
-			// Painted highlight kissed onto crest patches —
-			// reads as sunlight catching the tips of a grass
-			// clump.
-			if broad > 0.18 && brush > 0.32 {
-				c = core.MixColor(c, light, 0.22)
-			}
-			// Bloom scatter — denser than before (1 in ~110 vs
-			// 1 in 320) and mixed across five painted tones so
-			// the field reads as a meadow, not a mowed lawn.
+			// Very sparse bloom scatter — the prop-painted
+			// flowers carry the floral detail; the texture
+			// just hints at "a few wildflowers in the grass."
 			seed := hashByteXY(x*7, y*11)
-			if seed%110 < 3 {
-				switch seed % 5 {
+			if seed%520 < 3 {
+				switch seed % 3 {
 				case 0:
-					c = core.MixColor(c, bloomYellow, 0.78)
+					c = core.MixColor(c, bloomYellow, 0.70)
 				case 1:
-					c = core.MixColor(c, bloomWhite, 0.72)
+					c = core.MixColor(c, bloomWhite, 0.62)
 				case 2:
-					c = core.MixColor(c, bloomPink, 0.74)
-				case 3:
-					c = core.MixColor(c, bloomLilac, 0.72)
-				case 4:
-					c = core.MixColor(c, bloomRed, 0.70)
+					c = core.MixColor(c, bloomPink, 0.66)
 				}
 			}
 			pixels[y*w+x] = c
@@ -198,11 +223,14 @@ func makeStoneFloorPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	slab := 32
 	grout := 2
-	base := color.RGBA{R: 92, G: 92, B: 96, A: 255}
-	warm := color.RGBA{R: 130, G: 116, B: 96, A: 255}
-	cold := color.RGBA{R: 64, G: 76, B: 96, A: 255}
-	groutColor := color.RGBA{R: 26, G: 26, B: 30, A: 255}
-	highlight := color.RGBA{R: 212, G: 208, B: 198, A: 255}
+	// Pastel cream-slab floor — same painted family as the brick
+	// wall. Dungeon mood comes from the lighting override, not
+	// from cold stone colour.
+	base := color.RGBA{R: 176, G: 172, B: 166, A: 255}
+	warm := color.RGBA{R: 206, G: 188, B: 156, A: 255}
+	cold := color.RGBA{R: 158, G: 166, B: 176, A: 255}
+	groutColor := color.RGBA{R: 96, G: 92, B: 86, A: 255}
+	highlight := color.RGBA{R: 224, G: 218, B: 204, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
@@ -246,11 +274,14 @@ func makeStoneFloorPixels(w, h int) []color.RGBA {
 // dirt feels lived-in rather than scorched.
 func makeDirtPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	base := color.RGBA{R: 122, G: 92, B: 66, A: 255}
-	light := color.RGBA{R: 168, G: 132, B: 92, A: 255}
-	dark := color.RGBA{R: 82, G: 58, B: 42, A: 255}
-	pebble := color.RGBA{R: 148, G: 140, B: 126, A: 255}
-	sprout := color.RGBA{R: 108, G: 148, B: 90, A: 255}
+	// Pastel earth — warm peach-tan rather than dark muddy brown.
+	// The dirt now reads as soft "sun-warmed path" beside the
+	// pastel grass.
+	base := color.RGBA{R: 184, G: 152, B: 116, A: 255}
+	light := color.RGBA{R: 218, G: 190, B: 148, A: 255}
+	dark := color.RGBA{R: 142, G: 110, B: 82, A: 255}
+	pebble := color.RGBA{R: 196, G: 188, B: 170, A: 255}
+	sprout := color.RGBA{R: 168, G: 198, B: 132, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
@@ -280,50 +311,43 @@ func makeDirtPixels(w, h int) []color.RGBA {
 
 // makeDarkGrassPixels paints a deeper-green grass texture for shaded patches
 // of the field. Same painterly two-octave brushwork as makeGrassPixels but
-// with a muted forest-green palette and damp moss highlights so the variant
-// reads as "shaded glade" without competing with the lit grass for brightness.
+// with a pastel forest-mint palette so a shaded glade still reads gentle
+// and storybook rather than damp / dim. The variant difference is HUE
+// (mint-green vs the lit grass's spring-green) more than VALUE — the day
+// cycle handles darkness, the textures stay pastel.
 func makeDarkGrassPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	base := color.RGBA{R: 58, G: 100, B: 72, A: 255}
-	light := color.RGBA{R: 108, G: 150, B: 100, A: 255}
-	dark := color.RGBA{R: 30, G: 66, B: 48, A: 255}
-	moss := color.RGBA{R: 84, G: 128, B: 108, A: 255}
-	bloomBlue := color.RGBA{R: 132, G: 158, B: 198, A: 255}
-	bloomWhite := color.RGBA{R: 212, G: 218, B: 220, A: 255}
-	bloomMagenta := color.RGBA{R: 190, G: 132, B: 174, A: 255}
+	base := color.RGBA{R: 96, G: 162, B: 116, A: 255}
+	light := color.RGBA{R: 150, G: 200, B: 138, A: 255}
+	dark := color.RGBA{R: 64, G: 124, B: 92, A: 255}
+	moss := color.RGBA{R: 120, G: 184, B: 152, A: 255}
+	bloomBlue := color.RGBA{R: 158, G: 196, B: 234, A: 255}
+	bloomWhite := color.RGBA{R: 234, G: 238, B: 230, A: 255}
+	bloomMagenta := color.RGBA{R: 216, G: 166, B: 208, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			broad := fbmNoise(float64(x)+411, float64(y)+97, 0.022, 3)
-			brush := fbmNoise(float64(x)*1.3+219, float64(y)*1.3-37, 0.07, 4)
-			n := broad*0.55 + brush*0.45
-			m := fbmNoise(float64(x)-227, float64(y)+311, 0.016, 3)
+			broad := fbmNoise(float64(x)+411, float64(y)+97, 0.020, 3)
+			m := fbmNoise(float64(x)-227, float64(y)+311, 0.014, 2)
 			c := base
-			c = core.MixColor(c, light, math.Max(0, n)*0.72)
-			c = core.MixColor(c, dark, math.Max(0, -n)*0.55)
-			if m > 0.42 {
-				c = core.MixColor(c, moss, (m-0.42)*0.78)
-			}
-			if broad > 0.16 && brush > 0.32 {
-				c = core.MixColor(c, light, 0.22)
+			c = core.MixColor(c, light, math.Max(0, broad)*0.55)
+			c = core.MixColor(c, dark, math.Max(0, -broad)*0.40)
+			if m > 0.46 {
+				c = core.MixColor(c, moss, (m-0.46)*0.60)
 			}
 			seed := hashByteXY(x*5, y*9)
-			if seed%140 < 3 {
+			if seed%520 < 3 {
 				switch seed % 3 {
 				case 0:
-					c = core.MixColor(c, bloomBlue, 0.74)
+					c = core.MixColor(c, bloomBlue, 0.62)
 				case 1:
-					c = core.MixColor(c, bloomWhite, 0.70)
+					c = core.MixColor(c, bloomWhite, 0.58)
 				case 2:
-					c = core.MixColor(c, bloomMagenta, 0.72)
+					c = core.MixColor(c, bloomMagenta, 0.60)
 				}
 			}
-			if hashByteXY(x*3, y*3)%9 == 0 {
-				bx, by := x%4, y%4
-				if (bx == 1 && by == 0) || (bx == 3 && by == 2) {
-					c = core.MixColor(c, light, 0.30)
-				}
-			}
+			// Per-pixel scatter dropped — too busy for the
+			// low-poly soft look we're going for.
 			pixels[y*w+x] = c
 		}
 	}
@@ -335,13 +359,18 @@ func makeDarkGrassPixels(w, h int) []color.RGBA {
 // and subtle wet-spot highlights. Reads as "worn footpath laid by hand."
 func makeCobblePixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	mortar := color.RGBA{R: 60, G: 58, B: 50, A: 255}
-	moss := color.RGBA{R: 86, G: 116, B: 70, A: 255}
-	base := color.RGBA{R: 156, G: 152, B: 138, A: 255}
-	warm := color.RGBA{R: 184, G: 162, B: 132, A: 255}
-	cool := color.RGBA{R: 124, G: 132, B: 142, A: 255}
-	dark := color.RGBA{R: 90, G: 88, B: 82, A: 255}
-	light := color.RGBA{R: 218, G: 212, B: 198, A: 255}
+	// Pastel cobblestone path — soft cream stones over a warm
+	// mortar grout. Lifted into the same pastel-cream family
+	// as the rock wall so a cobble path through a dungeon
+	// (under the spooky lighting override) and one across a
+	// field both share the same painted base.
+	mortar := color.RGBA{R: 124, G: 116, B: 102, A: 255}
+	moss := color.RGBA{R: 148, G: 184, B: 132, A: 255}
+	base := color.RGBA{R: 192, G: 186, B: 168, A: 255}
+	warm := color.RGBA{R: 218, G: 198, B: 162, A: 255}
+	cool := color.RGBA{R: 178, G: 184, B: 188, A: 255}
+	dark := color.RGBA{R: 140, G: 134, B: 122, A: 255}
+	light := color.RGBA{R: 230, G: 222, B: 200, A: 255}
 
 	const cell = 22
 	for y := 0; y < h; y++ {
@@ -418,12 +447,15 @@ func makePlankPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	const boardH = 22
 	const gap = 2
-	gapColor := color.RGBA{R: 28, G: 18, B: 10, A: 255}
-	base := color.RGBA{R: 138, G: 96, B: 58, A: 255}
-	warm := color.RGBA{R: 174, G: 124, B: 76, A: 255}
-	cool := color.RGBA{R: 108, G: 76, B: 46, A: 255}
-	grain := color.RGBA{R: 84, G: 54, B: 30, A: 255}
-	knot := color.RGBA{R: 56, G: 32, B: 16, A: 255}
+	gapColor := color.RGBA{R: 96, G: 70, B: 48, A: 255}
+	// Pastel honey-wood plank floor — soft warm timber matching
+	// the pastel bark family. Knots / grain kept subtle for the
+	// low-poly soft look.
+	base := color.RGBA{R: 186, G: 146, B: 102, A: 255}
+	warm := color.RGBA{R: 212, G: 176, B: 128, A: 255}
+	cool := color.RGBA{R: 162, G: 122, B: 84, A: 255}
+	grain := color.RGBA{R: 138, G: 102, B: 68, A: 255}
+	knot := color.RGBA{R: 112, G: 80, B: 52, A: 255}
 
 	for y := 0; y < h; y++ {
 		boardRow := y / boardH
@@ -475,11 +507,14 @@ func makePlankPixels(w, h int) []color.RGBA {
 // reads as wadeable next to the darker FloorDeepWater variant.
 func makeWaterPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	deep := color.RGBA{R: 96, G: 158, B: 196, A: 255}
-	mid := color.RGBA{R: 140, G: 198, B: 226, A: 255}
-	shine := color.RGBA{R: 232, G: 246, B: 252, A: 255}
-	sand := color.RGBA{R: 210, G: 188, B: 138, A: 255}
-	weed := color.RGBA{R: 80, G: 140, B: 96, A: 255}
+	// Pastel painted water — soft but clearly aqua, the gentle
+	// pond in a sunlit meadow. Chroma bumped so the water reads
+	// blue-green rather than pale grey-blue.
+	deep := color.RGBA{R: 96, G: 168, B: 192, A: 255}
+	mid := color.RGBA{R: 150, G: 204, B: 214, A: 255}
+	shine := color.RGBA{R: 220, G: 238, B: 232, A: 255}
+	sand := color.RGBA{R: 214, G: 190, B: 144, A: 255}
+	weed := color.RGBA{R: 108, G: 170, B: 110, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
@@ -514,10 +549,14 @@ func makeWaterPixels(w, h int) []color.RGBA {
 // be waded into — see FloorDeepWater in core/map.go.
 func makeDeepWaterPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	deep := color.RGBA{R: 14, G: 30, B: 58, A: 255}
-	mid := color.RGBA{R: 32, G: 64, B: 104, A: 255}
-	shine := color.RGBA{R: 120, G: 156, B: 196, A: 255}
-	weed := color.RGBA{R: 36, G: 70, B: 56, A: 255}
+	// Pastel deep water — soft teal that's clearly deeper / cooler
+	// than the wadeable shallow water but still painted-pastel
+	// rather than near-black navy. The "you can't enter" read
+	// comes from the colder, more saturated tone vs shallow.
+	deep := color.RGBA{R: 92, G: 138, B: 160, A: 255}
+	mid := color.RGBA{R: 124, G: 168, B: 184, A: 255}
+	shine := color.RGBA{R: 196, G: 220, B: 222, A: 255}
+	weed := color.RGBA{R: 96, G: 148, B: 120, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
@@ -544,28 +583,25 @@ func makeDeepWaterPixels(w, h int) []color.RGBA {
 // cooler tone).
 func makeSandPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	base := color.RGBA{R: 228, G: 206, B: 158, A: 255}
-	warm := color.RGBA{R: 244, G: 226, B: 180, A: 255}
-	dark := color.RGBA{R: 184, G: 156, B: 108, A: 255}
-	pebble := color.RGBA{R: 134, G: 108, B: 80, A: 255}
+	// Pastel dune sand — soft warm cream. Low-poly soft pass:
+	// dropped the per-pixel grain speckle, kept only the gentle
+	// dune-roll noise so the sand reads as a smooth painted
+	// surface rather than a gritty stipple.
+	base := color.RGBA{R: 224, G: 206, B: 168, A: 255}
+	warm := color.RGBA{R: 240, G: 224, B: 188, A: 255}
+	dark := color.RGBA{R: 196, G: 174, B: 134, A: 255}
+	pebble := color.RGBA{R: 176, G: 156, B: 128, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			// Two layered noise fields: low frequency for soft dune ripples,
-			// high frequency for individual grains.
-			grain := fbmNoise(float64(x)*1.8, float64(y)*1.8, 0.32, 3)
 			dune := fbmNoise(float64(x)+47, float64(y)-83, 0.018, 3)
 			c := base
-			c = core.MixColor(c, warm, math.Max(0, grain)*0.45)
-			c = core.MixColor(c, dark, math.Max(0, -grain)*0.30)
-			c = core.MixColor(c, warm, math.Max(0, dune)*0.18)
-			c = core.MixColor(c, dark, math.Max(0, -dune)*0.18)
-			// Per-pixel grain speckle.
-			if hashByteXY(x, y)%5 == 0 {
-				c = adjust(c, hashByteXY(x*3, y*3)%9-4)
-			}
-			if hashByteXY(x*7, y*11)%520 < 2 {
-				c = core.MixColor(c, pebble, 0.55)
+			c = core.MixColor(c, warm, math.Max(0, dune)*0.40)
+			c = core.MixColor(c, dark, math.Max(0, -dune)*0.32)
+			// Very sparse pebble — a single soft fleck here and
+			// there for character.
+			if hashByteXY(x*7, y*11)%680 < 2 {
+				c = core.MixColor(c, pebble, 0.45)
 			}
 			pixels[y*w+x] = c
 		}
@@ -604,13 +640,14 @@ func makeSnowPixels(w, h int) []color.RGBA {
 
 func makeBarkPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Muted bark — warm chestnut base but pulled away from the
-	// honey-orange of the prior pass so the trunk reads as
-	// painted wood rather than freshly oiled lumber.
-	base := color.RGBA{R: 110, G: 82, B: 58, A: 255}
-	deep := color.RGBA{R: 60, G: 42, B: 30, A: 255}
-	light := color.RGBA{R: 158, G: 126, B: 92, A: 255}
-	moss := color.RGBA{R: 98, G: 130, B: 92, A: 255}
+	// Pastel bark — warm pecan in the lit zones, soft umber in
+	// the creases. Reads as a sun-warm trunk in a meadow rather
+	// than the prior near-black umber that looked like a burnt
+	// log when the lighting fell off.
+	base := color.RGBA{R: 168, G: 130, B: 96, A: 255}
+	deep := color.RGBA{R: 104, G: 76, B: 56, A: 255}
+	light := color.RGBA{R: 214, G: 184, B: 142, A: 255}
+	moss := color.RGBA{R: 154, G: 188, B: 138, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
@@ -644,16 +681,14 @@ func makeBarkPixels(w, h int) []color.RGBA {
 
 func makeLeafPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Muted leaf palette — sage / olive base with dimmer
-	// highlights so the canopy reads as painted foliage rather
-	// than the bright cartoon-vivid pass before. Hotspots kept
-	// but pulled into a softer cream so they suggest sun
-	// without glaring.
-	base := color.RGBA{R: 108, G: 156, B: 100, A: 255}
-	light := color.RGBA{R: 162, G: 194, B: 128, A: 255}
-	deep := color.RGBA{R: 58, G: 104, B: 68, A: 255}
-	gold := color.RGBA{R: 198, G: 198, B: 130, A: 255}
-	hotspot := color.RGBA{R: 196, G: 206, B: 158, A: 255}
+	// Pastel canopy leaves — soft but saturated spring green with
+	// cream sun-dapples and lemon-gold accents. Chroma pushed
+	// back up from the washed pass so the canopy reads as lush.
+	base := color.RGBA{R: 142, G: 204, B: 110, A: 255}
+	light := color.RGBA{R: 200, G: 232, B: 144, A: 255}
+	deep := color.RGBA{R: 96, G: 160, B: 96, A: 255}
+	gold := color.RGBA{R: 238, G: 224, B: 138, A: 255}
+	hotspot := color.RGBA{R: 236, G: 244, B: 180, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
@@ -688,9 +723,11 @@ func makeLeafPixels(w, h int) []color.RGBA {
 // stone reads as quarried rather than blank.
 func makeMarblePixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	base := color.RGBA{R: 228, G: 222, B: 208, A: 255}
-	warm := color.RGBA{R: 240, G: 230, B: 212, A: 255}
-	cool := color.RGBA{R: 196, G: 198, B: 204, A: 255}
+	// Muted marble — softer cream-grey base so pillars and the
+	// statue don't flare against the muted floor / wall palette.
+	base := color.RGBA{R: 206, G: 200, B: 188, A: 255}
+	warm := color.RGBA{R: 216, G: 208, B: 192, A: 255}
+	cool := color.RGBA{R: 180, G: 182, B: 188, A: 255}
 	vein := color.RGBA{R: 116, G: 110, B: 102, A: 255}
 	deep := color.RGBA{R: 76, G: 72, B: 66, A: 255}
 
@@ -747,10 +784,11 @@ func makeGranitePixels(w, h int) []color.RGBA {
 // gradient so the surface reads as fired clay rather than painted plastic.
 func makeTerracottaPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	base := color.RGBA{R: 188, G: 108, B: 70, A: 255}
-	light := color.RGBA{R: 220, G: 142, B: 96, A: 255}
-	dark := color.RGBA{R: 132, G: 70, B: 44, A: 255}
-	rim := color.RGBA{R: 96, G: 50, B: 30, A: 255}
+	// Pastel terracotta — soft warm clay / apricot.
+	base := color.RGBA{R: 212, G: 150, B: 116, A: 255}
+	light := color.RGBA{R: 234, G: 184, B: 148, A: 255}
+	dark := color.RGBA{R: 170, G: 110, B: 82, A: 255}
+	rim := color.RGBA{R: 138, G: 88, B: 64, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
@@ -813,8 +851,12 @@ func hashFloat(x, y int) float64 {
 
 func makeSkyPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	top := color.RGBA{R: 64, G: 150, B: 238, A: 255}
-	horizon := color.RGBA{R: 190, G: 229, B: 255, A: 255}
+	// Pastel painted sky — soft baby-blue at the zenith, warm
+	// peach-cream at the horizon. The classic Wind-Waker
+	// daytime gradient that says "calm afternoon on the open
+	// water" rather than dramatic HDR sky.
+	top := color.RGBA{R: 132, G: 188, B: 230, A: 255}
+	horizon := color.RGBA{R: 248, G: 222, B: 198, A: 255}
 	clouds := []struct {
 		X  float64
 		y  float64
@@ -827,6 +869,9 @@ func makeSkyPixels(w, h int) []color.RGBA {
 		{812, 192, 210, 48},
 		{980, 132, 130, 32},
 	}
+	// Cloud tint pulled off pure white so the painted clouds
+	// don't glare against the muted sky.
+	cloudCol := color.RGBA{R: 232, G: 234, B: 232, A: 255}
 
 	for y := 0; y < h; y++ {
 		t := float64(y) / float64(h-1)
@@ -845,7 +890,7 @@ func makeSkyPixels(w, h int) []color.RGBA {
 			}
 			if cover > 0 {
 				cover = math.Min(cover, 0.5)
-				c = core.MixColor(c, color.RGBA{R: 249, G: 252, B: 255, A: 255}, cover)
+				c = core.MixColor(c, cloudCol, cover)
 			}
 			pixels[y*w+x] = c
 		}

@@ -9,6 +9,10 @@ func DrawOverlay(g core.GameState, assets Resources) {
 		drawMenuOverlay(g, assets)
 		return
 	}
+	if g.DebugMenuOpen {
+		drawDebugMenuOverlay(g, assets)
+		return
+	}
 	if g.Battle.Active() {
 		// Compute the turn forecast once per frame; TurnPanelBottomY
 		// (called from the combat log) and drawTurnPanel both read

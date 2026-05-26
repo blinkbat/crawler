@@ -186,6 +186,7 @@ var layerBrushes = [layerCount][]Brush{
 		{Name: "Table (E)", Char: core.TileTable, Color: rl.NewColor(160, 116, 72, 255)},
 		{Name: "Bed (D)", Char: core.TileBed, Color: rl.NewColor(176, 90, 96, 255)},
 		{Name: "Brazier (Z)", Char: core.TileBrazier, Color: rl.NewColor(220, 132, 64, 255)},
+		{Name: "Wall Torch (z)", Char: core.TileTorch, Color: rl.NewColor(240, 168, 96, 255)},
 		{Name: "Sarcophagus (A)", Char: core.TileSarcophagus, Color: rl.NewColor(200, 192, 174, 255)},
 	},
 	LayerCeiling: {

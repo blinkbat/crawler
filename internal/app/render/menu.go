@@ -27,11 +27,79 @@ var pauseMenuRows = []pauseMenuRow{
 	{Item: core.PauseMenuQuit, Label: func(core.GameState) string { return "Quit" }},
 }
 
+// debugRowLabel reflects the two-stage Debug row: off → "enable", on →
+// "open the tools submenu." The ▸ marks that confirming descends into a
+// submenu rather than toggling in place.
 func debugRowLabel(g core.GameState) string {
 	if g.DebugOverlay {
-		return "Debug Overlay: On"
+		return "Debug Menu ▸"
 	}
-	return "Debug Overlay: Off"
+	return "Debug Mode: Off"
+}
+
+// debugMenuRow binds a DebugMenuItem to its label producer — same shape
+// as pauseMenuRow so the submenu reuses drawMenuRow / row-stride layout
+// without inventing a second renderer.
+type debugMenuRow struct {
+	Item  core.DebugMenuItem
+	Label func(g core.GameState) string
+}
+
+var debugMenuRows = []debugMenuRow{
+	{Item: core.DebugMenuEnemies, Label: func(g core.GameState) string {
+		return "Enemies: " + onOff(!g.EnemiesDisabled)
+	}},
+	{Item: core.DebugMenuAdvanceTime, Label: func(g core.GameState) string {
+		phase, _ := core.PhaseAtStep(g.StepCount)
+		return "Advance Time (" + core.PhaseName(phase) + ")"
+	}},
+	{Item: core.DebugMenuEasyQuit, Label: func(g core.GameState) string {
+		if g.EasyBattleQuit {
+			return "Easy Battle Quit: On (Bksp)"
+		}
+		return "Easy Battle Quit: Off"
+	}},
+	{Item: core.DebugMenuDisable, Label: func(core.GameState) string { return "Disable Debug Mode" }},
+	{Item: core.DebugMenuClose, Label: func(core.GameState) string { return "Close" }},
+}
+
+func onOff(b bool) string {
+	if b {
+		return "On"
+	}
+	return "Off"
+}
+
+// drawDebugMenuOverlay paints the debug submenu using the same card +
+// row layout as the pause menu, titled "DEBUG". Panel height tracks the
+// debug row count so adding a toggle resizes the card automatically.
+func drawDebugMenuOverlay(g core.GameState, assets Resources) {
+	screenW, screenH := screenSize()
+	panelW := pauseMenuPanelW
+	stride := pauseMenuRowH + pauseMenuRowGap
+	panelH := pauseMenuHeaderH + stride*int32(len(debugMenuRows)) + pauseMenuFootH
+	panelX := centerX(panelW)
+	panelY := screenH/2 - panelH/2
+
+	rl.DrawRectangle(0, 0, screenW, screenH, surfaceVeil)
+	drawCard(panelX, panelY, panelW, panelH, surfacePrimary, borderSoft, borderSoft)
+	drawCardFiligree(panelX, panelY, panelW, panelH, giltDim)
+
+	titleMeasure := rl.MeasureTextEx(assets.hudFont, "DEBUG", FontTitle, FontSpacingTitle)
+	titleX := float32(panelX) + float32(panelW)/2 - titleMeasure.X/2
+	titleY := float32(panelY + 24)
+	drawTextWithShadowStyle(assets.hudFont, "DEBUG", titleX, titleY,
+		FontTitle, FontSpacingTitle, textPrimary, shadowStrong, 1, 1)
+	flCY := titleY + titleMeasure.Y/2
+	drawFleuron(titleX-22, flCY, 5, giltDim)
+	drawFleuron(titleX+titleMeasure.X+22, flCY, 5, giltDim)
+
+	rowY := pauseMenuHeaderH
+	rowX := panelX + pauseMenuRowInsetX
+	for _, row := range debugMenuRows {
+		drawMenuRow(assets.hudFont, row.Label(g), rowX, panelY+rowY, g.DebugMenuIndex == int(row.Item))
+		rowY += stride
+	}
 }
 
 // Pause menu layout. Panel is centered on screen; rows stack at a fixed

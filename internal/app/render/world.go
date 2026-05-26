@@ -2,6 +2,7 @@ package render
 
 import (
 	"math"
+	"sort"
 
 	"crawler/internal/app/core"
 
@@ -154,9 +155,15 @@ const behindCullSlack = float32(-2.5)
 func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 	m := g.Area
 	material := assets.worldMaterial(m.Materials)
-	profile := applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(g.StepCount))
+	profile := applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(g.StepCount), areaIsEnclosed(m))
 	cacheLightingProfile(profile)
 	assets.lighting.applyUniforms(camera, profile)
+	// Torch point lights — collect the brazier props nearest the
+	// camera, flicker them, and upload before the geometry pass so
+	// walls / floors / props pick up the warm pools of light. Must
+	// run after applyUniforms (same shader) and before the tile
+	// loop's BeginShaderMode draws.
+	assets.lighting.uploadTorches(collectTorches(m, camera))
 
 	camPos := camera.Position
 	forward := horizontalForward(camera)
@@ -203,7 +210,7 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 			if prop := m.Props[z][x]; prop != core.TilePropEmpty {
 				propYaw := propYawDeg(x, z)
 				if handler := inlinePropTable[prop]; handler != nil {
-					handler(assets, x, z, center, propYaw)
+					handler(assets, m, x, z, center, propYaw)
 				} else if footprint := core.PropFootprint(prop); footprint != nil {
 					// Multi-tile anchor: shift the model origin to the
 					// centroid of the footprint so the mesh covers
@@ -213,9 +220,16 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 					// nothing — the anchor's mesh on the partner tile
 					// covers them.
 					if pm := &assets.propModelTable[prop]; len(pm.parts) > 0 {
-						pm.draw(footprintAnchor(center, footprint), 1.0, propYaw)
+						anchor := footprintAnchor(center, footprint)
+						if r := propShadowRadius[prop]; r > 0 {
+							drawGroundShadow(anchor.X, anchor.Z, r)
+						}
+						pm.draw(anchor, 1.0, propYaw)
 					}
 				} else if pm := &assets.propModelTable[prop]; len(pm.parts) > 0 {
+					if r := propShadowRadius[prop]; r > 0 {
+						drawGroundShadow(center.X, center.Z, r)
+					}
 					pm.draw(center, 1.0, propYaw)
 				}
 			}
@@ -347,7 +361,11 @@ var treePropScales = map[byte]float32{
 // no longer reads as a stamped grid.
 func drawPropTreeScaled(char byte) inlinePropRenderer {
 	scale := treePropScales[char]
-	return func(assets Resources, x, z int, center rl.Vector3, propYaw float32) {
+	return func(assets Resources, _ core.AreaDefinition, x, z int, center rl.Vector3, propYaw float32) {
+		// Tree shadow scales with the tree's overall scale, plus
+		// a touch of slack so the painted disc sits a little wider
+		// than the trunk's projected footprint.
+		drawGroundShadow(center.X, center.Z, 0.34*scale+0.10)
 		assets.tree.drawVaried(center, scale, propYaw, tileHash(x, z))
 	}
 }
@@ -358,15 +376,15 @@ func drawPropTreeScaled(char byte) inlinePropRenderer {
 // younger one beside it" rather than a mirrored pair. Yaw is staggered
 // and each gets its own variance seed. Pure visual variant — both
 // reuse assets.tree.
-func drawPropTreeTwin(assets Resources, x, z int, center rl.Vector3, propYaw float32) {
+func drawPropTreeTwin(assets Resources, _ core.AreaDefinition, x, z int, center rl.Vector3, propYaw float32) {
 	const offset = 0.32
 	const scaleBig = 0.82
 	const scaleSmall = 0.58
 	seed := tileHash(x, z)
 	left := rl.NewVector3(center.X-offset, center.Y, center.Z-offset)
 	right := rl.NewVector3(center.X+offset, center.Y, center.Z+offset)
-	// Flip which side gets the bigger tree based on a hash bit so a
-	// row of twin tiles doesn't all bias the same way.
+	drawGroundShadow(left.X, left.Z, 0.34*scaleBig+0.08)
+	drawGroundShadow(right.X, right.Z, 0.34*scaleSmall+0.08)
 	if seed&1 == 0 {
 		assets.tree.drawVaried(left, scaleBig, propYaw, seed)
 		assets.tree.drawVaried(right, scaleSmall, propYaw+1.1, seed^0x9E3779B9)
@@ -376,12 +394,332 @@ func drawPropTreeTwin(assets Resources, x, z int, center rl.Vector3, propYaw flo
 	}
 }
 
-func drawPropRockLarge(assets Resources, _, _ int, center rl.Vector3, propYaw float32) {
+func drawPropRockLarge(assets Resources, _ core.AreaDefinition, _, _ int, center rl.Vector3, propYaw float32) {
+	drawGroundShadow(center.X, center.Z, 0.42)
 	assets.rockProp.draw(center, 1.0, propYaw)
 }
 
-func drawPropBushLarge(assets Resources, _, _ int, center rl.Vector3, propYaw float32) {
+func drawPropBushLarge(assets Resources, _ core.AreaDefinition, _, _ int, center rl.Vector3, propYaw float32) {
+	drawGroundShadow(center.X, center.Z, 0.48)
 	assets.bushProp.draw(center, 1.3, propYaw)
+}
+
+// drawWallTorch is the inline handler for TileTorch. It auto-orients
+// the torch to the adjacent wall (facing away from it into the room),
+// draws an unlit iron bracket + sconce on the wall, and an animated
+// emissive flame made of a few jittering fire-tinted spheres. The
+// point light itself is added by collectTorches; this is purely the
+// visible fixture + flame. Non-blocking: the floor tile stays clear.
+func drawWallTorch(assets Resources, m core.AreaDefinition, x, z int, center rl.Vector3, _ float32) {
+	fx, fz := wallTorchFacing(m, x, z)
+	// Mount point: against the wall behind the torch, up at sconce
+	// height. The torch faces (fx,fz) into the room, so the wall is
+	// in the opposite direction.
+	const mount = 0.40
+	const sconceY = 1.30
+	wallX := center.X - fx*mount
+	wallZ := center.Z - fz*mount
+
+	// Iron bracket — a small dark cube flush on the wall, plus a
+	// short arm reaching out toward the room holding the sconce.
+	// Drawn lit (immediate mode under the world shader); the torch's
+	// own light pool keeps it visible.
+	bracket := rl.NewVector3(wallX, sconceY-0.12, wallZ)
+	rl.DrawCube(bracket, 0.10, 0.22, 0.10, torchIron)
+	armX := wallX + fx*0.10
+	armZ := wallZ + fz*0.10
+	rl.DrawCube(rl.NewVector3(armX, sconceY, armZ), 0.08, 0.06, 0.08, torchIron)
+	// Sconce cup at the arm tip.
+	cupX := wallX + fx*0.16
+	cupZ := wallZ + fz*0.16
+	rl.DrawCube(rl.NewVector3(cupX, sconceY+0.04, cupZ), 0.16, 0.08, 0.16, torchIronLight)
+
+	// Animated flame — three emissive blobs above the cup, each
+	// bobbing on its own time offset so the flame flickers and
+	// dances. Drawn via the unlit flame model (default shader) so
+	// they glow regardless of the near-black dungeon ambient.
+	if !torchFlameReady {
+		return
+	}
+	t := float32(rl.GetTime())
+	phase := float32(tileHash(x, z)&0xFFFF) / 65535.0 * 6.2831853
+	flameBaseX := cupX
+	flameBaseZ := cupZ
+	for i := 0; i < 3; i++ {
+		fp := phase + float32(i)*2.1
+		bob := float32(math.Sin(float64(t*7.0+fp))) * 0.04
+		swayA := float32(math.Sin(float64(t*5.3+fp*1.4))) * 0.05
+		// Higher blobs are smaller and lean more — a teardrop
+		// flame shape that wavers.
+		y := sconceY + 0.12 + float32(i)*0.10 + bob
+		lean := float32(i) * 0.04
+		px := flameBaseX + fx*lean + swayA*fz
+		pz := flameBaseZ + fz*lean - swayA*fx
+		size := (0.18 - float32(i)*0.04) * (1 + 0.12*float32(math.Sin(float64(t*11.0+fp))))
+		tint := torchFlameTints[i]
+		rl.DrawModelEx(torchFlameModel, rl.NewVector3(px, y, pz),
+			rl.NewVector3(0, 1, 0), 0, rl.NewVector3(size, size*1.4, size), tint)
+	}
+}
+
+// wallTorchFacing returns the unit (x,z) direction the torch faces —
+// away from the first adjacent wall found, checked N→E→S→W. Falls
+// back to facing south (toward the camera's usual approach) when the
+// tile has no adjacent wall (a torch placed in the open).
+func wallTorchFacing(m core.AreaDefinition, x, z int) (float32, float32) {
+	switch {
+	case m.WallAt(x, z-1):
+		return 0, 1 // wall north → face south
+	case m.WallAt(x+1, z):
+		return -1, 0 // wall east → face west
+	case m.WallAt(x, z+1):
+		return 0, -1 // wall south → face north
+	case m.WallAt(x-1, z):
+		return 1, 0 // wall west → face east
+	}
+	return 0, 1
+}
+
+// groundShadowModel is the soft radial-gradient disc painted under
+// every prop. A flat XZ plane textured with makeSoftShadowPixels'
+// dark-centre / transparent-edge sprite, drawn UNLIT (it keeps the
+// default material shader, so the lighting pass bound around the
+// world draw never touches it) and alpha-blended over the floor.
+// Set once by NewResources; drawGroundShadow reads it as a package
+// singleton because shadows are painted from many free-function
+// call sites (tree handlers, the prop branch, DrawChests) that don't
+// thread Resources through. groundShadowReady guards the pre-init
+// window so an early draw is a no-op rather than a crash.
+var (
+	groundShadowModel rl.Model
+	groundShadowReady bool
+)
+
+// propShadowRadius is the per-prop ground-shadow half-extent (world
+// units). drawWorld's prop branch looks each prop up here and paints
+// a soft dark disc at the prop's base before drawing the prop itself —
+// the Wind-Waker grounding signature so every painted prop reads as
+// planted in the floor instead of floating on the lighting gradient.
+// Inline-handled props (trees, big bushes, big rocks, small mushrooms,
+// small bushes) paint their own shadows directly inside their
+// handlers; only the table-dispatched props live here.
+//
+// Sizes are roughly the prop's projected footprint plus a touch of
+// slack so the painted disc reads slightly wider than the silhouette.
+// 2x2 footprint props (rock formation) get a wider radius matched to
+// their multi-tile span.
+var propShadowRadius = map[byte]float32{
+	core.TileCrate:             0.42,
+	core.TileBarrel:            0.36,
+	core.TileUrn:               0.28,
+	core.TileStalagmite:        0.30,
+	core.TilePillar:            0.34,
+	core.TileBrokenPillar:      0.34,
+	core.TileStatue:            0.42,
+	core.TileObelisk:           0.34,
+	core.TileFountain:          0.50,
+	core.TileRockCairn:         0.36,
+	core.TileRockFormation:     0.95,
+	core.TileRockFormationTail: 0,
+	core.TileWell:              0.42,
+	core.TileGravestone:        0.28,
+	core.TileSignPost:          0.18,
+	core.TileHayBale:           0.40,
+	core.TileScarecrow:         0.26,
+	core.TileBookshelf:         0.36,
+	core.TileTable:             0.42,
+	core.TileBed:               0.46,
+	core.TileBrazier:           0.32,
+	core.TileSarcophagus:       0.50,
+}
+
+// enclosureCache memoizes the last area's enclosure result so the
+// ceiling-coverage scan runs once per area, not once per frame.
+var enclosureCache struct {
+	name     string
+	width    int
+	height   int
+	enclosed bool
+	primed   bool
+}
+
+// areaIsEnclosed reports whether the area is a roofed interior —
+// used to gate the spooky-dungeon lighting override. An outdoor
+// area (field, or a forest authored on the dungeon palette) has no
+// ceiling layer and reads as open-sky; a real dungeon has ceiling
+// slabs over most of its tiles. Threshold is 30 % coverage so a
+// dungeon with a few open-air courtyard tiles still counts as
+// enclosed, while a forest with zero ceilings never does.
+func areaIsEnclosed(m core.AreaDefinition) bool {
+	if enclosureCache.primed && enclosureCache.name == m.Name &&
+		enclosureCache.width == m.Width && enclosureCache.height == m.Height {
+		return enclosureCache.enclosed
+	}
+	covered, total := 0, 0
+	for z := 0; z < m.Height; z++ {
+		for x := 0; x < m.Width; x++ {
+			if !m.InBounds(x, z) {
+				continue
+			}
+			total++
+			if m.CeilingAt(x, z) {
+				covered++
+			}
+		}
+	}
+	enclosed := total > 0 && float64(covered)/float64(total) > 0.30
+	enclosureCache.name = m.Name
+	enclosureCache.width = m.Width
+	enclosureCache.height = m.Height
+	enclosureCache.enclosed = enclosed
+	enclosureCache.primed = true
+	return enclosed
+}
+
+// Wall-torch fixture + flame palette. Iron tones are lit by the
+// world shader; the flame tints are applied to the unlit
+// torchFlameModel so they glow. Three flame tints (hot core →
+// mid → tip) layer the bobbing blobs into a teardrop fire.
+var (
+	torchIron      = rl.NewColor(54, 50, 46, 255)
+	torchIronLight = rl.NewColor(92, 84, 76, 255)
+	torchFlameTints = [3]rl.Color{
+		rl.NewColor(255, 226, 150, 255), // hot core — pale gold
+		rl.NewColor(252, 162, 70, 255),  // mid — orange
+		rl.NewColor(228, 110, 52, 255),  // tip — deep ember
+	}
+)
+
+// torchFlameModel is the unlit emissive sphere used for wall-torch
+// flame blobs. Default material shader (like groundShadowModel) so
+// it renders at full tint colour, glowing against the near-black
+// dungeon. Set by NewResources.
+var (
+	torchFlameModel rl.Model
+	torchFlameReady bool
+)
+
+// torchFlameHeight is the world Y at which a brazier's torch point
+// light sits — up at the fire bowl, not the floor, so the light
+// pool radiates outward and down across the surrounding tiles.
+const torchFlameHeight = float32(1.05)
+
+// torchBaseColor is the warm flame tint at full brightness, before
+// per-torch flicker. Deliberately bright (R well over 1) so a
+// torch-lit wall reads as a strong warm-orange pool against the
+// dim dungeon while the space between torches falls into shadow.
+var torchBaseColor = rl.NewVector3(2.3, 1.35, 0.7)
+
+type torchCandidate struct {
+	pos    rl.Vector3
+	dist   float32
+	hash   uint32
+	bright float32 // brightness multiplier — braziers > wall torches
+}
+
+// torchCandidateBuf / torchResultBuf are reused across frames so the
+// per-frame brazier scan + torch build don't allocate.
+var (
+	torchCandidateBuf []torchCandidate
+	torchResultBuf    []torchLight
+)
+
+// collectTorches scans the area's props for brazier tiles, keeps the
+// maxTorches nearest the camera, and returns them as flickering torch
+// point lights for the lighting shader. Braziers beyond the cap are
+// dropped — they'd be fog-swallowed in the dark anyway. Flicker is a
+// per-torch pair of desynced sines seeded from the tile hash so
+// neighbouring torches wobble independently instead of pulsing in
+// lockstep. Returns an empty slice on areas with no braziers (every
+// field map), so the shader's torch loop contributes nothing.
+func collectTorches(m core.AreaDefinition, camera rl.Camera3D) []torchLight {
+	torchCandidateBuf = torchCandidateBuf[:0]
+	for z := 0; z < m.Height; z++ {
+		for x := 0; x < m.Width; x++ {
+			prop := m.Props[z][x]
+			isBrazier := prop == core.TileBrazier
+			isTorch := prop == core.TileTorch
+			if !isBrazier && !isTorch {
+				continue
+			}
+			cx := core.TileCenter(x)
+			cz := core.TileCenter(z)
+			var pos rl.Vector3
+			bright := float32(0.85) // wall torch — dimmer
+			if isBrazier {
+				// Floor brazier: flame at the bowl, brighter pool.
+				pos = rl.NewVector3(cx, torchFlameHeight, cz)
+				bright = 1.45
+			} else {
+				// Wall torch: light originates at the sconce, offset
+				// toward the wall + up at flame height.
+				fx, fz := wallTorchFacing(m, x, z)
+				pos = rl.NewVector3(cx-fx*0.30, 1.42, cz-fz*0.30)
+			}
+			dx := cx - camera.Position.X
+			dz := cz - camera.Position.Z
+			torchCandidateBuf = append(torchCandidateBuf, torchCandidate{
+				pos:    pos,
+				dist:   dx*dx + dz*dz,
+				hash:   tileHash(x, z),
+				bright: bright,
+			})
+		}
+	}
+	torchResultBuf = torchResultBuf[:0]
+	if len(torchCandidateBuf) == 0 {
+		return torchResultBuf
+	}
+	// Only sort when there are more braziers than slots — most
+	// dungeons have a handful, so the common path skips the sort.
+	if len(torchCandidateBuf) > maxTorches {
+		sort.Slice(torchCandidateBuf, func(a, b int) bool {
+			return torchCandidateBuf[a].dist < torchCandidateBuf[b].dist
+		})
+	}
+	n := len(torchCandidateBuf)
+	if n > maxTorches {
+		n = maxTorches
+	}
+	t := float32(rl.GetTime())
+	for i := 0; i < n; i++ {
+		c := torchCandidateBuf[i]
+		phase := float32(c.hash&0xFFFF) / 65535.0 * 6.2831853
+		// Organic flicker in ~0.72..1.0 from two desynced sines.
+		flick := 0.86 +
+			0.09*float32(math.Sin(float64(t*9.3+phase))) +
+			0.05*float32(math.Sin(float64(t*17.1+phase*1.7)))
+		mag := flick * c.bright
+		torchResultBuf = append(torchResultBuf, torchLight{
+			Pos: c.pos,
+			Color: rl.NewVector3(
+				torchBaseColor.X*mag,
+				torchBaseColor.Y*mag,
+				torchBaseColor.Z*mag,
+			),
+		})
+	}
+	return torchResultBuf
+}
+
+// drawGroundShadow paints a soft radial-gradient disc on the floor —
+// the Wind-Waker grounding signature that anchors a tree / bush /
+// rock / statue / chest to the ground. The disc is the shared
+// groundShadowModel plane (dark centre fading to transparent at the
+// rim) scaled to `radius` and laid just above the floor at y=0.02 so
+// it composites over the floor texture without z-fighting. `radius`
+// is the half-extent in world units (a tile is 1.0 across).
+func drawGroundShadow(cx, cz, radius float32) {
+	if !groundShadowReady || radius <= 0 {
+		return
+	}
+	rl.DrawModelEx(
+		groundShadowModel,
+		rl.NewVector3(cx, 0.02, cz),
+		rl.NewVector3(0, 1, 0), 0,
+		rl.NewVector3(radius*2, 1, radius*2),
+		rl.White,
+	)
 }
 
 // drawDecorBush / drawDecorMushroom / drawDecorPebble are the
@@ -390,10 +728,12 @@ func drawPropBushLarge(assets Resources, _, _ int, center rl.Vector3, propYaw fl
 // scatter helper on Resources so the dispatch signature stays uniform
 // across every handler.
 func drawDecorBush(assets Resources, x, z int, cx, cz float32) {
+	drawGroundShadow(cx, cz, 0.36)
 	assets.bushProp.draw(rl.NewVector3(cx, 0, cz), 0.75, propYawDeg(x, z))
 }
 
 func drawDecorMushroom(assets Resources, x, z int, cx, cz float32) {
+	drawGroundShadow(cx, cz, 0.20)
 	assets.mushroomProp.draw(rl.NewVector3(cx, 0, cz), 1.0, propYawDeg(x, z))
 }
 
@@ -580,6 +920,12 @@ func drawPebbleCluster(assets Resources, cx, cz float32, tileHash uint32) {
 
 func DrawEnemies(camera rl.Camera3D, g core.GameState, assets Resources) {
 	if g.Battle.Phase == core.BattleNone {
+		// Debug enemies-off hides field packs entirely. A battle in
+		// progress still draws (you'd only toggle mid-explore), but on
+		// the field the packs vanish so the map can be walked clean.
+		if g.EnemiesDisabled {
+			return
+		}
 		drawFieldPacks(camera, g, assets)
 		return
 	}

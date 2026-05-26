@@ -44,6 +44,9 @@ func Update(g *core.GameState) {
 	case core.ModalChest:
 		updateChestModal(g)
 		return
+	case core.ModalDebugMenu:
+		updateDebugMenu(g)
+		return
 	case core.ModalPauseMenu:
 		updateMenu(g)
 		return
@@ -151,7 +154,14 @@ func updateMenu(g *core.GameState) {
 			openPanels(g)
 			g.PanelsTab = core.PanelTabStats
 		case core.PauseMenuDebug:
-			g.DebugOverlay = !g.DebugOverlay
+			// First confirm enables debug mode; once on, the row opens the
+			// debug submenu (which holds the enemy / time / easy-quit
+			// toggles and the off-switch). "Tools only when debug is on."
+			if g.DebugOverlay {
+				openDebugMenu(g)
+			} else {
+				g.DebugOverlay = true
+			}
 		case core.PauseMenuDisplay:
 			render.ToggleDisplayMode()
 		case core.PauseMenuJukebox:
@@ -159,6 +169,46 @@ func updateMenu(g *core.GameState) {
 		case core.PauseMenuQuit:
 			g.Quit = true
 		}
+	}
+}
+
+// openDebugMenu swaps the pause menu for the debug submenu. Reachable
+// only while debug mode (DebugOverlay) is on — the pause-menu Debug row
+// gates the call.
+func openDebugMenu(g *core.GameState) {
+	g.MenuOpen = false
+	g.DebugMenuOpen = true
+	g.DebugMenuIndex = 0
+}
+
+// updateDebugMenu drives the debug submenu: enemy on/off, advance the
+// time-of-day phase, easy-battle-quit toggle, and the debug-mode
+// off-switch. Back closes straight to explore (not back to the pause
+// menu) — the debug menu is a leaf, not a pause sub-page.
+func updateDebugMenu(g *core.GameState) {
+	if input.BackPressed() {
+		g.DebugMenuOpen = false
+		return
+	}
+	g.DebugMenuIndex = input.CursorUpDown(g.DebugMenuIndex, core.DebugMenuCount)
+	if !input.ConfirmPressed() {
+		return
+	}
+	switch core.DebugMenuItem(g.DebugMenuIndex) {
+	case core.DebugMenuEnemies:
+		g.EnemiesDisabled = !g.EnemiesDisabled
+	case core.DebugMenuAdvanceTime:
+		// One phase forward. StepCount drives the day/night cycle, so
+		// bumping it by a full phase advances the lighting without
+		// teleporting the player or disturbing encounter pacing.
+		g.StepCount += core.StepsPerPhase
+	case core.DebugMenuEasyQuit:
+		g.EasyBattleQuit = !g.EasyBattleQuit
+	case core.DebugMenuDisable:
+		g.DebugOverlay = false
+		g.DebugMenuOpen = false
+	case core.DebugMenuClose:
+		g.DebugMenuOpen = false
 	}
 }
 
@@ -212,7 +262,7 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	// swallowed by the generic blocker rule. Pack-AI rolls happen on
 	// a successful step, so we run them only when this branch DOESN'T
 	// fire.
-	if idx := core.PackIndexAtTile(g.Packs, targetX, targetZ); idx >= 0 {
+	if idx := core.PackIndexAtTile(g.Packs, targetX, targetZ); idx >= 0 && !g.EnemiesDisabled {
 		if startTurnToTile(p, targetX, targetZ) {
 			return
 		}
@@ -392,6 +442,11 @@ func tryQueueDoorTransition(g *core.GameState) {
 // pack X/Z is snapped to the engagement tile so the battle splash
 // doesn't show the pack mid-step.
 func tickPackAI(g *core.GameState) int {
+	// Debug enemies-off: packs neither wander nor engage. Bail before
+	// planning so a disabled pack can't chase or step onto the player.
+	if g.EnemiesDisabled {
+		return -1
+	}
 	plans := core.PlanPackSteps(g)
 	engaged := -1
 	for _, plan := range plans {

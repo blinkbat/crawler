@@ -15,6 +15,18 @@ This is a Go/raylib dungeon crawler prototype. The runtime package is `internal/
 
 This workspace is Windows-first. Prefer bash if it is installed, but do not block on it; PowerShell is the default shell here.
 
+### Smoke-checking changes — DO NOT `go run`
+
+**`go run .` actually opens the game window on the user's screen.** It is not a headless smoke test. Running it during the user's working hours pops a real window over whatever they're doing and is genuinely disruptive.
+
+For verifying that a change builds and links cleanly:
+
+- Use `go build ./...` (or the named build above) — that exercises compile + link without launching anything.
+- Run `go test -count=1 ./...` and `go vet ./...` for correctness.
+- For UI / rendering changes, REPORT the change and let the user open the binary themselves. Do not "just check it boots." Describe what should be visible and stop.
+
+Only run the game when the user has explicitly asked you to (e.g. "launch it", "run it", "show me"). Even then, prefer the `run` skill which goes through the project-aware launcher.
+
 ## File Layout
 
 - `main.go`: tiny entrypoint; calls `app.Run()`.

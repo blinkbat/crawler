@@ -177,6 +177,7 @@ var minimapPropColors = map[byte]rl.Color{
 	core.TileTable:             rl.NewColor(160, 116, 72, 240),
 	core.TileBed:               rl.NewColor(176, 90, 96, 240),
 	core.TileBrazier:           rl.NewColor(220, 132, 64, 240),
+	core.TileTorch:             rl.NewColor(240, 168, 96, 240),
 	core.TileSarcophagus:       rl.NewColor(200, 192, 174, 240),
 }
 

@@ -537,3 +537,24 @@ const (
 // adding a PauseMenuItem enum constant above this line — neither caller
 // hard-codes "3" anywhere.
 const PauseMenuCount = int(PauseMenuQuit) + 1
+
+// DebugMenuItem enumerates the rows in the debug submenu (reachable only
+// while DebugOverlay / "debug mode" is on). Like PauseMenuItem, the integer
+// values double as the cursor position (g.DebugMenuIndex), so reordering
+// this enum reorders the menu and adding a row is a single appended const.
+type DebugMenuItem int
+
+const (
+	DebugMenuEnemies DebugMenuItem = iota
+	DebugMenuAdvanceTime
+	DebugMenuEasyQuit
+	// DebugMenuDisable turns debug mode off (clears DebugOverlay) and
+	// closes the submenu. It's the only off-switch, since DebugOverlay
+	// doubles as the gate that makes this submenu reachable at all.
+	DebugMenuDisable
+	DebugMenuClose
+)
+
+// DebugMenuCount is the wrap modulus for the debug submenu cursor. Bump by
+// adding a DebugMenuItem constant above this line.
+const DebugMenuCount = int(DebugMenuClose) + 1

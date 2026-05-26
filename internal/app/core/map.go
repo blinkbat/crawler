@@ -157,8 +157,15 @@ const (
 	TileBookshelf   = 'V' // tall wooden shelf with books
 	TileTable       = 'E' // wooden table with legs
 	TileBed         = 'D' // wood-frame bed with bedding
-	TileBrazier     = 'Z' // metal brazier on a tripod with flame
+	TileBrazier     = 'Z' // metal brazier on a tripod with flame (floor, BLOCKS, bright light)
 	TileSarcophagus = 'A' // stone sarcophagus with lid (cross-layer with DecorArchway)
+	// TileTorch is a wall-mounted torch — NON-blocking (sits on the
+	// wall, leaves the floor clear) so it can line dungeon corridors
+	// freely. The renderer auto-orients it to face away from the
+	// adjacent wall and gives it an animated particle flame + a
+	// (dimmer-than-brazier) point light. Place it on a floor tile
+	// next to a wall.
+	TileTorch = 'z' // wall torch (non-blocking, animated flame, dim light)
 )
 
 // Doors are modeled as entities (like chests), not as a tile char on
@@ -353,10 +360,19 @@ func (a AreaDefinition) BlockedAt(x, z int) bool {
 	if a.Walls[z][x] == TileRock {
 		return true
 	}
-	if IsPropChar(a.Props[z][x]) {
+	if IsPropChar(a.Props[z][x]) && !PropIsNonBlocking(a.Props[z][x]) {
 		return true
 	}
 	return a.Floor[z][x] == FloorDeepWater
+}
+
+// PropIsNonBlocking reports whether a prop char, despite being a valid
+// prop (IsPropChar true), should NOT block movement. Wall-mounted
+// torches sit on the wall and leave the floor clear, so the player
+// (and packs) can walk through their tile — letting torches line a
+// corridor without sealing it. Every other prop blocks.
+func PropIsNonBlocking(c byte) bool {
+	return c == TileTorch
 }
 
 // EnterOpts parameterizes CanEnterTile. The zero value forbids door
@@ -690,6 +706,9 @@ var propTileCharList = []byte{
 	TileWell, TileGravestone, TileSignPost, TileHayBale, TileScarecrow,
 	// Dungeon-interior batch.
 	TileBookshelf, TileTable, TileBed, TileBrazier, TileSarcophagus,
+	// Wall torch — a prop char for rendering/editor/registry, but
+	// exempted from blocking in BlockedAt (it mounts on the wall).
+	TileTorch,
 }
 
 // propTileCharSet is the O(1) lookup for IsPropChar, built once at
@@ -876,6 +895,7 @@ var tileLabelTable = map[TileLayer]map[byte]string{
 		TileBed:               "Bed",
 		TileBrazier:           "Brazier",
 		TileSarcophagus:       "Sarcophagus",
+		TileTorch:             "Wall Torch",
 	},
 }
 

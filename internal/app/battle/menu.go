@@ -8,6 +8,12 @@ import (
 )
 
 func updateActionMenu(g *core.GameState) {
+	// Debug easy-quit: bail out of the fight entirely. Only live when the
+	// debug toggle is on, so normal play has no flee shortcut here.
+	if g.EasyBattleQuit && input.DebugFleePressed() {
+		fleeBattle(g)
+		return
+	}
 	if input.UpPressed() {
 		g.Battle.MenuIndex = core.WrapIndex(g.Battle.MenuIndex-1, core.ActionRowCount)
 	}

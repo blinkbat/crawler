@@ -186,6 +186,15 @@ uniform float fogDensity;
 uniform float specularStrength;
 uniform float shadowStrength;
 
+// Torch point lights. Unused slots carry a zero color so the loop
+// always runs MAX_TORCHES iterations (a fixed bound 330 likes) with
+// disabled torches contributing nothing — no int-count uniform
+// needed. torchRange is the shared world-unit reach of every torch.
+#define MAX_TORCHES 12
+uniform vec3 torchPos[MAX_TORCHES];
+uniform vec3 torchColor[MAX_TORCHES];
+uniform float torchRange;
+
 out vec4 finalColor;
 
 void main() {
@@ -234,6 +243,27 @@ void main() {
 
     vec3 lit = base * (hemi + diffuse) * ao + sunColor * spec + rimLight;
 
+    // Torch point lights — warm pools of light in the dark dungeon.
+    // Each torch is a range-limited point light with a quadratic
+    // soft-edge falloff; a wrapped N·L term lets floors and walls
+    // near the torch base catch light even at grazing angles. The
+    // accumulated torch contribution multiplies the surface base
+    // colour (so a torch lights the texture, it doesn't just add a
+    // flat orange wash) and is added on top of the ambient/sun lit
+    // value computed above.
+    vec3 torchAccum = vec3(0.0);
+    for (int i = 0; i < MAX_TORCHES; i++) {
+        vec3 toL = torchPos[i] - fragPosition;
+        float d = length(toL);
+        vec3 Ld = toL / max(d, 0.001);
+        float ndl = max(dot(N, Ld), 0.0);
+        float wrapNdl = ndl * 0.65 + 0.35;
+        float atten = clamp(1.0 - d / torchRange, 0.0, 1.0);
+        atten *= atten;
+        torchAccum += torchColor[i] * wrapNdl * atten;
+    }
+    lit += base * torchAccum;
+
     // Exponential height-aware fog. The ceiling preserves 15% of
     // the lit tint at maximum distance so silhouettes don't fade
     // to invisibility. {{FOG_CEILING}} is substituted at shader-
@@ -259,7 +289,36 @@ type lightingShader struct {
 	locFogDensity     int32
 	locSpecStrength   int32
 	locShadowStrength int32
+	locTorchPos       int32
+	locTorchColor     int32
+	locTorchRange     int32
 }
+
+// maxTorches mirrors MAX_TORCHES in the fragment shader — the fixed
+// upper bound on simultaneously-lit torches. The Go side picks the
+// closest N braziers to the camera and disables the rest by zeroing
+// their colour.
+const maxTorches = 12
+
+// torchRangeWorld is the world-unit reach of every torch's light
+// pool, shared by all torches via the torchRange uniform. ~7 units ≈
+// 3.5 tiles, so a torch lights its own room without bleeding far
+// down a corridor — keeps the dungeon dark between torches.
+const torchRangeWorld = float32(9.0)
+
+// torchLight is one active torch's world position + (already
+// flickered) RGB colour, handed to uploadTorches.
+type torchLight struct {
+	Pos   rl.Vector3
+	Color rl.Vector3
+}
+
+// Reused flat upload buffers so the per-frame torch upload doesn't
+// allocate. Indexed as [i*3 + channel].
+var (
+	torchPosBuf   [maxTorches * 3]float32
+	torchColorBuf [maxTorches * 3]float32
+)
 
 func loadLightingShader() lightingShader {
 	shader := rl.LoadShaderFromMemory(lightingVertexShader, resolveShaderFogCeiling(lightingFragmentShader))
@@ -279,7 +338,38 @@ func loadLightingShader() lightingShader {
 		locFogDensity:     rl.GetShaderLocation(shader, "fogDensity"),
 		locSpecStrength:   rl.GetShaderLocation(shader, "specularStrength"),
 		locShadowStrength: rl.GetShaderLocation(shader, "shadowStrength"),
+		locTorchPos:       rl.GetShaderLocation(shader, "torchPos"),
+		locTorchColor:     rl.GetShaderLocation(shader, "torchColor"),
+		locTorchRange:     rl.GetShaderLocation(shader, "torchRange"),
 	}
+}
+
+// uploadTorches pushes the active torch point lights to the shader.
+// Every slot is written each frame: active torches get their world
+// position + flickered colour, the remaining slots are zeroed so
+// their loop iteration contributes nothing. Call once per frame
+// before drawing the world geometry that should be torch-lit.
+func (l lightingShader) uploadTorches(torches []torchLight) {
+	if l.shader.ID == 0 {
+		return
+	}
+	for i := 0; i < maxTorches; i++ {
+		if i < len(torches) {
+			torchPosBuf[i*3] = torches[i].Pos.X
+			torchPosBuf[i*3+1] = torches[i].Pos.Y
+			torchPosBuf[i*3+2] = torches[i].Pos.Z
+			torchColorBuf[i*3] = torches[i].Color.X
+			torchColorBuf[i*3+1] = torches[i].Color.Y
+			torchColorBuf[i*3+2] = torches[i].Color.Z
+		} else {
+			torchPosBuf[i*3], torchPosBuf[i*3+1], torchPosBuf[i*3+2] = 0, 0, 0
+			torchColorBuf[i*3], torchColorBuf[i*3+1], torchColorBuf[i*3+2] = 0, 0, 0
+		}
+	}
+	rl.SetShaderValueV(l.shader, l.locTorchPos, torchPosBuf[:], rl.ShaderUniformVec3, maxTorches)
+	rl.SetShaderValueV(l.shader, l.locTorchColor, torchColorBuf[:], rl.ShaderUniformVec3, maxTorches)
+	uniformFloatBuf[0] = torchRangeWorld
+	rl.SetShaderValue(l.shader, l.locTorchRange, uniformFloatBuf[:], rl.ShaderUniformFloat)
 }
 
 func (l lightingShader) unload() {
@@ -335,19 +425,28 @@ type lightingProfile struct {
 // fresh struct every frame. Both areas reuse the same shader.
 var (
 	dungeonLighting = lightingProfile{
+		// Most fields here are overridden by applyTimeOfDay at
+		// render time; only FogDensity and SpecularStrength
+		// survive. Specular dimmed so dungeon stone doesn't
+		// catch hot highlights.
 		SunColor:         rl.NewVector3(0.95, 0.86, 0.72),
 		AmbientColor:     rl.NewVector3(0.22, 0.24, 0.30),
 		FogColor:         rl.NewVector3(0.06, 0.07, 0.09),
 		FogDensity:       0.085,
-		SpecularStrength: 0.22,
+		SpecularStrength: 0.12,
 		ShadowStrength:   0.45,
 	}
 	fieldLighting = lightingProfile{
+		// Field fog density bumped from 0.018 → 0.026 so distant
+		// trees / walls fade into atmospheric haze the way they
+		// do in painted storybook spreads, instead of all sitting
+		// in sharp focus. Specular dropped so leaves and grass
+		// don't shimmer.
 		SunColor:         rl.NewVector3(1.05, 0.99, 0.86),
 		AmbientColor:     rl.NewVector3(0.46, 0.52, 0.62),
 		FogColor:         rl.NewVector3(0.74, 0.86, 0.96),
-		FogDensity:       0.018,
-		SpecularStrength: 0.10,
+		FogDensity:       0.026,
+		SpecularStrength: 0.05,
 		ShadowStrength:   0.30,
 	}
 )

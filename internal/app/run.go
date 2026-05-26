@@ -189,6 +189,8 @@ func applyAreaTransition(g *core.GameState) error {
 	next.StepCount = g.StepCount
 	next.RNG = g.RNG
 	next.DebugOverlay = g.DebugOverlay
+	next.EnemiesDisabled = g.EnemiesDisabled
+	next.EasyBattleQuit = g.EasyBattleQuit
 	dest := core.DoorByName(next.Doors, doorName)
 	if dest == nil {
 		return errDoorNotFound(target, doorName)

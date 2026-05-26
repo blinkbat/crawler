@@ -244,8 +244,22 @@ type GameState struct {
 	MenuIndex int
 	// DebugOverlay shows in-world tile labels and a player-coord readout.
 	// Toggled from the pause menu. Off by default so a fresh session looks
-	// clean.
+	// clean. It also doubles as the "debug mode" master gate: the Debug
+	// submenu (and its toggles below) is only reachable while this is on.
 	DebugOverlay bool
+	// DebugMenuOpen is true while the debug submenu is showing. Reachable
+	// only when DebugOverlay (debug mode) is on; opened from the pause
+	// menu's Debug row. DebugMenuIndex is its row cursor.
+	DebugMenuOpen  bool
+	DebugMenuIndex int
+	// EnemiesDisabled (debug) removes field packs from play: they stop
+	// rendering and neither the step-into nor the wander AI can start a
+	// battle. Lets the player walk a map freely to inspect it.
+	EnemiesDisabled bool
+	// EasyBattleQuit (debug) lets the player abandon an active battle
+	// instantly from the action menu (drops the engaged pack and returns
+	// to explore). Off by default so normal play can't trivially flee.
+	EasyBattleQuit bool
 	// Inventory is shared across the party — single global stack list.
 	// Stocked by Steal pickups and consumed by the in-battle Item action.
 	Inventory []ItemStack

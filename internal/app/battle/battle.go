@@ -862,6 +862,17 @@ func loseBattle(g *core.GameState, message string) {
 	setBattleMessage(g, message)
 }
 
+// fleeBattle is the debug "Easy Battle Quit" exit: drop the engaged pack
+// from the field (so the player doesn't immediately re-trigger it) and
+// return to explore. No XP, no win/loss — purely a way to bail out of a
+// fight while testing. Gated on g.EasyBattleQuit at the call site.
+func fleeBattle(g *core.GameState) {
+	if g.Battle.ActivePack >= 0 && g.Battle.ActivePack < len(g.Packs) {
+		g.Packs = append(g.Packs[:g.Battle.ActivePack], g.Packs[g.Battle.ActivePack+1:]...)
+	}
+	leaveBattle(g, g.Area.QuietMessage)
+}
+
 func leaveBattle(g *core.GameState, message string) {
 	clearBattleResidual(g)
 	g.Battle.Phase = core.BattleNone
