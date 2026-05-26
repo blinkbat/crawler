@@ -9,28 +9,59 @@ import (
 
 func makeRockWallPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	base := color.RGBA{R: 96, G: 100, B: 94, A: 255}
-	shadow := color.RGBA{R: 44, G: 48, B: 46, A: 255}
-	highlight := color.RGBA{R: 138, G: 140, B: 128, A: 255}
-	moss := color.RGBA{R: 70, G: 102, B: 68, A: 255}
+	// Calm stone palette — neutral grey with the faintest warm
+	// drift, painted highlights kept dim enough that the wall
+	// sits quietly behind props rather than competing for the
+	// eye. Moss tones muted to a sage so the green doesn't
+	// shout against the foliage.
+	base := color.RGBA{R: 116, G: 114, B: 108, A: 255}
+	shadow := color.RGBA{R: 64, G: 64, B: 62, A: 255}
+	highlight := color.RGBA{R: 160, G: 156, B: 144, A: 255}
+	moss := color.RGBA{R: 92, G: 124, B: 86, A: 255}
+	mossDeep := color.RGBA{R: 66, G: 96, B: 64, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			n := fbmNoise(float64(x), float64(y), 0.038, 4)
+			// Two-octave painted noise — low-frequency band
+			// paints big tonal patches like worn weathering, the
+			// fine band carries the rocky grain on top.
+			broad := fbmNoise(float64(x), float64(y), 0.012, 3)
+			fine := fbmNoise(float64(x)*1.4+97, float64(y)*1.4-211, 0.046, 4)
+			n := broad*0.55 + fine*0.45
 			c := base
-			c = core.MixColor(c, highlight, math.Max(0, n)*0.55)
+			c = core.MixColor(c, highlight, math.Max(0, n)*0.72)
 			c = core.MixColor(c, shadow, math.Max(0, -n)*0.55)
 
-			cellX, cellY := x/24, y/24
-			cellOffset := hashByteXY(cellX, cellY) % 6
-			if (x+cellOffset)%24 < 2 || (y+cellOffset)%24 < 2 {
-				c = core.MixColor(c, shadow, 0.55)
+			// Painted crack scatter — sparser than the prior
+			// hash-grid lines, drawn as small soft pits.
+			pit := hashByteXY(x/3, y/3)
+			if pit%64 == 0 {
+				c = core.MixColor(c, shadow, 0.38)
 			}
-			if hashByteXY(x/4, y/4)%23 == 0 {
-				c = core.MixColor(c, shadow, 0.45)
+			// Block divisions: instead of a hard 24-px hash
+			// grid, paint a soft seam ONLY where the broad
+			// noise is at a low — gives the feeling of cracks
+			// running along the rock's natural folds rather
+			// than a tiled grid.
+			cellX, cellY := x/28, y/28
+			seam := hashByteXY(cellX, cellY) % 6
+			if ((x+seam)%28 == 0 || (y+seam)%28 == 0) && broad < 0.05 {
+				c = core.MixColor(c, shadow, 0.42)
 			}
-			if y > h*4/7 && hashByteXY(x/3, y/2)%14 < 3 {
-				c = core.MixColor(c, moss, 0.40)
+			// Moss creeps up the bottom third of the wall in
+			// painterly patches — clusters of bright moss with
+			// deeper shadows in the gaps so the moss reads as
+			// three-dimensional growth, not a flat green wash.
+			if y > h*9/16 {
+				dy := float64(y-h*9/16) / float64(h)
+				mossNoise := fbmNoise(float64(x)+13, float64(y)*0.7+71, 0.05, 3)
+				strength := math.Max(0, mossNoise+dy*0.5-0.18)
+				if strength > 0 {
+					c = core.MixColor(c, moss, strength*0.65)
+					if mossNoise > 0.35 {
+						c = core.MixColor(c, mossDeep, (mossNoise-0.35)*0.4)
+					}
+				}
 			}
 			pixels[y*w+x] = c
 		}
@@ -100,30 +131,62 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 
 func makeGrassPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	base := color.RGBA{R: 64, G: 132, B: 60, A: 255}
-	light := color.RGBA{R: 122, G: 178, B: 88, A: 255}
-	dark := color.RGBA{R: 36, G: 90, B: 44, A: 255}
-	dirt := color.RGBA{R: 102, G: 82, B: 56, A: 255}
-	bloom := color.RGBA{R: 232, G: 220, B: 110, A: 255}
+	// Muted painted palette — softer than the prior pass. Greens
+	// pulled toward olive/sage so the field reads as gentle
+	// pastoral rather than vibrant cartoon; bloom colours dialled
+	// back from saturated pop tones to softer painted petals.
+	base := color.RGBA{R: 86, G: 138, B: 88, A: 255}
+	light := color.RGBA{R: 142, G: 178, B: 108, A: 255}
+	dark := color.RGBA{R: 52, G: 96, B: 64, A: 255}
+	dirt := color.RGBA{R: 114, G: 94, B: 68, A: 255}
+	bloomYellow := color.RGBA{R: 214, G: 196, B: 118, A: 255}
+	bloomWhite := color.RGBA{R: 224, G: 220, B: 206, A: 255}
+	bloomPink := color.RGBA{R: 210, G: 158, B: 176, A: 255}
+	bloomLilac := color.RGBA{R: 174, G: 158, B: 198, A: 255}
+	bloomRed := color.RGBA{R: 194, G: 102, B: 96, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			n := fbmNoise(float64(x), float64(y), 0.075, 4)
-			m := fbmNoise(float64(x)+512, float64(y)-271, 0.022, 3)
+			// Two-octave painted brushstroke noise: a broad
+			// low-frequency band paints big tonal patches; a
+			// finer band layered over it sells "blades clumping
+			// in handful-sized tufts."
+			broad := fbmNoise(float64(x), float64(y), 0.022, 3)
+			brush := fbmNoise(float64(x)*1.3+311, float64(y)*1.3-77, 0.07, 4)
+			n := broad*0.55 + brush*0.45
+			// Dirt patch noise — large lazy patches where the
+			// grass thins. Lower frequency than before so dirt
+			// reads as a deliberate clearing rather than speckle.
+			m := fbmNoise(float64(x)+512, float64(y)-271, 0.016, 3)
 			c := base
-			c = core.MixColor(c, light, math.Max(0, n)*0.65)
+			c = core.MixColor(c, light, math.Max(0, n)*0.78)
 			c = core.MixColor(c, dark, math.Max(0, -n)*0.55)
-			if m > 0.42 {
-				c = core.MixColor(c, dirt, (m-0.42)*0.85)
+			if m > 0.46 {
+				c = core.MixColor(c, dirt, (m-0.46)*0.95)
 			}
-			if hashByteXY(x/2, y/2)%9 == 0 {
-				bx, by := x%4, y%4
-				if (bx == 0 && by == 0) || (bx == 2 && by == 1) {
-					c = core.MixColor(c, light, 0.4)
+			// Painted highlight kissed onto crest patches —
+			// reads as sunlight catching the tips of a grass
+			// clump.
+			if broad > 0.18 && brush > 0.32 {
+				c = core.MixColor(c, light, 0.22)
+			}
+			// Bloom scatter — denser than before (1 in ~110 vs
+			// 1 in 320) and mixed across five painted tones so
+			// the field reads as a meadow, not a mowed lawn.
+			seed := hashByteXY(x*7, y*11)
+			if seed%110 < 3 {
+				switch seed % 5 {
+				case 0:
+					c = core.MixColor(c, bloomYellow, 0.78)
+				case 1:
+					c = core.MixColor(c, bloomWhite, 0.72)
+				case 2:
+					c = core.MixColor(c, bloomPink, 0.74)
+				case 3:
+					c = core.MixColor(c, bloomLilac, 0.72)
+				case 4:
+					c = core.MixColor(c, bloomRed, 0.70)
 				}
-			}
-			if hashByteXY(x*7, y*11)%320 < 3 {
-				c = core.MixColor(c, bloom, 0.7)
 			}
 			pixels[y*w+x] = c
 		}
@@ -177,27 +240,37 @@ func makeStoneFloorPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeDirtPixels paints a brown earth texture for dirt patches mixed into the
-// field's grass. Same FBM-noise spine as grass, but warmer base / lower
-// chroma so it reads as bare earth.
+// makeDirtPixels paints a warm earth texture for dirt patches mixed into
+// the field's grass. Painted-brushstroke noise (matching grass) plus
+// scattered pebbles and the occasional sprout of returning green so the
+// dirt feels lived-in rather than scorched.
 func makeDirtPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	base := color.RGBA{R: 116, G: 86, B: 56, A: 255}
-	light := color.RGBA{R: 162, G: 124, B: 80, A: 255}
-	dark := color.RGBA{R: 76, G: 54, B: 36, A: 255}
-	pebble := color.RGBA{R: 140, G: 130, B: 116, A: 255}
+	base := color.RGBA{R: 122, G: 92, B: 66, A: 255}
+	light := color.RGBA{R: 168, G: 132, B: 92, A: 255}
+	dark := color.RGBA{R: 82, G: 58, B: 42, A: 255}
+	pebble := color.RGBA{R: 148, G: 140, B: 126, A: 255}
+	sprout := color.RGBA{R: 108, G: 148, B: 90, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			n := fbmNoise(float64(x)+91, float64(y)-203, 0.078, 4)
+			broad := fbmNoise(float64(x)+91, float64(y)-203, 0.024, 3)
+			brush := fbmNoise(float64(x)*1.3+47, float64(y)*1.3+131, 0.078, 4)
+			n := broad*0.5 + brush*0.5
 			c := base
-			c = core.MixColor(c, light, math.Max(0, n)*0.55)
+			c = core.MixColor(c, light, math.Max(0, n)*0.70)
 			c = core.MixColor(c, dark, math.Max(0, -n)*0.55)
-			if hashByteXY(x*5, y*5)%160 < 3 {
-				c = core.MixColor(c, dark, 0.6)
+			if broad > 0.18 && brush > 0.28 {
+				c = core.MixColor(c, light, 0.18)
 			}
-			if hashByteXY(x*7, y*11)%280 < 2 {
-				c = core.MixColor(c, pebble, 0.7)
+			seed := hashByteXY(x*7, y*11)
+			if seed%180 < 3 {
+				c = core.MixColor(c, pebble, 0.72)
+			} else if seed%420 < 2 {
+				// Rare sprout of returning grass — single
+				// bright-green speck so the dirt isn't a dead
+				// monoculture.
+				c = core.MixColor(c, sprout, 0.65)
 			}
 			pixels[y*w+x] = c
 		}
@@ -206,24 +279,44 @@ func makeDirtPixels(w, h int) []color.RGBA {
 }
 
 // makeDarkGrassPixels paints a deeper-green grass texture for shaded patches
-// of the field. Slightly higher contrast than the regular grass and a cooler
-// hue so the variation reads as "in-shadow / damp" rather than just "darker".
+// of the field. Same painterly two-octave brushwork as makeGrassPixels but
+// with a muted forest-green palette and damp moss highlights so the variant
+// reads as "shaded glade" without competing with the lit grass for brightness.
 func makeDarkGrassPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	base := color.RGBA{R: 38, G: 92, B: 50, A: 255}
-	light := color.RGBA{R: 84, G: 138, B: 70, A: 255}
-	dark := color.RGBA{R: 18, G: 56, B: 32, A: 255}
-	moss := color.RGBA{R: 70, G: 124, B: 92, A: 255}
+	base := color.RGBA{R: 58, G: 100, B: 72, A: 255}
+	light := color.RGBA{R: 108, G: 150, B: 100, A: 255}
+	dark := color.RGBA{R: 30, G: 66, B: 48, A: 255}
+	moss := color.RGBA{R: 84, G: 128, B: 108, A: 255}
+	bloomBlue := color.RGBA{R: 132, G: 158, B: 198, A: 255}
+	bloomWhite := color.RGBA{R: 212, G: 218, B: 220, A: 255}
+	bloomMagenta := color.RGBA{R: 190, G: 132, B: 174, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			n := fbmNoise(float64(x)+411, float64(y)+97, 0.072, 4)
-			m := fbmNoise(float64(x)-227, float64(y)+311, 0.022, 3)
+			broad := fbmNoise(float64(x)+411, float64(y)+97, 0.022, 3)
+			brush := fbmNoise(float64(x)*1.3+219, float64(y)*1.3-37, 0.07, 4)
+			n := broad*0.55 + brush*0.45
+			m := fbmNoise(float64(x)-227, float64(y)+311, 0.016, 3)
 			c := base
-			c = core.MixColor(c, light, math.Max(0, n)*0.55)
+			c = core.MixColor(c, light, math.Max(0, n)*0.72)
 			c = core.MixColor(c, dark, math.Max(0, -n)*0.55)
-			if m > 0.45 {
-				c = core.MixColor(c, moss, (m-0.45)*0.6)
+			if m > 0.42 {
+				c = core.MixColor(c, moss, (m-0.42)*0.78)
+			}
+			if broad > 0.16 && brush > 0.32 {
+				c = core.MixColor(c, light, 0.22)
+			}
+			seed := hashByteXY(x*5, y*9)
+			if seed%140 < 3 {
+				switch seed % 3 {
+				case 0:
+					c = core.MixColor(c, bloomBlue, 0.74)
+				case 1:
+					c = core.MixColor(c, bloomWhite, 0.70)
+				case 2:
+					c = core.MixColor(c, bloomMagenta, 0.72)
+				}
 			}
 			if hashByteXY(x*3, y*3)%9 == 0 {
 				bx, by := x%4, y%4
@@ -511,27 +604,37 @@ func makeSnowPixels(w, h int) []color.RGBA {
 
 func makeBarkPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	base := color.RGBA{R: 96, G: 64, B: 38, A: 255}
-	deep := color.RGBA{R: 46, G: 30, B: 18, A: 255}
-	light := color.RGBA{R: 152, G: 110, B: 70, A: 255}
-	moss := color.RGBA{R: 80, G: 110, B: 70, A: 255}
+	// Muted bark — warm chestnut base but pulled away from the
+	// honey-orange of the prior pass so the trunk reads as
+	// painted wood rather than freshly oiled lumber.
+	base := color.RGBA{R: 110, G: 82, B: 58, A: 255}
+	deep := color.RGBA{R: 60, G: 42, B: 30, A: 255}
+	light := color.RGBA{R: 158, G: 126, B: 92, A: 255}
+	moss := color.RGBA{R: 98, G: 130, B: 92, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			ridge := math.Sin(float64(x)*0.45 + fbmNoise(float64(x), float64(y), 0.05, 3)*4.5)
+			// Sinuous ridge wave — same trick as before but the
+			// noise warp is gentler so the ridges flow as
+			// painted brush-strokes, not jagged sawteeth.
+			ridge := math.Sin(float64(x)*0.40 + fbmNoise(float64(x), float64(y), 0.04, 3)*3.2)
 			ridge = math.Abs(ridge)
 			n := fbmNoise(float64(x)*0.9, float64(y)*0.4, 0.22, 4)
 			c := base
-			c = core.MixColor(c, light, math.Max(0, ridge-0.45)*1.4)
-			c = core.MixColor(c, deep, math.Max(0, 0.4-ridge)*0.8)
-			c = core.MixColor(c, light, math.Max(0, n)*0.25)
+			c = core.MixColor(c, light, math.Max(0, ridge-0.42)*1.5)
+			c = core.MixColor(c, deep, math.Max(0, 0.38-ridge)*0.7)
+			c = core.MixColor(c, light, math.Max(0, n)*0.32)
 			c = core.MixColor(c, deep, math.Max(0, -n)*0.40)
 
-			if hashByteXY(x/2, y/2)%160 < 3 {
-				c = core.MixColor(c, deep, 0.7)
+			// Sparser pit + denser moss patches — moss looks
+			// vertical (creeping up the trunk's shaded side)
+			// rather than randomly speckled.
+			if hashByteXY(x/3, y/3)%180 < 2 {
+				c = core.MixColor(c, deep, 0.65)
 			}
-			if hashByteXY(x*3, y/4)%240 < 2 {
-				c = core.MixColor(c, moss, 0.55)
+			mossNoise := fbmNoise(float64(x)*1.4+71, float64(y)*0.5+213, 0.10, 3)
+			if mossNoise > 0.28 {
+				c = core.MixColor(c, moss, (mossNoise-0.28)*0.55)
 			}
 			pixels[y*w+x] = c
 		}
@@ -541,23 +644,37 @@ func makeBarkPixels(w, h int) []color.RGBA {
 
 func makeLeafPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	base := color.RGBA{R: 86, G: 152, B: 90, A: 255}
-	light := color.RGBA{R: 158, G: 208, B: 124, A: 255}
-	deep := color.RGBA{R: 38, G: 86, B: 50, A: 255}
-	gold := color.RGBA{R: 218, G: 220, B: 130, A: 255}
+	// Muted leaf palette — sage / olive base with dimmer
+	// highlights so the canopy reads as painted foliage rather
+	// than the bright cartoon-vivid pass before. Hotspots kept
+	// but pulled into a softer cream so they suggest sun
+	// without glaring.
+	base := color.RGBA{R: 108, G: 156, B: 100, A: 255}
+	light := color.RGBA{R: 162, G: 194, B: 128, A: 255}
+	deep := color.RGBA{R: 58, G: 104, B: 68, A: 255}
+	gold := color.RGBA{R: 198, G: 198, B: 130, A: 255}
+	hotspot := color.RGBA{R: 196, G: 206, B: 158, A: 255}
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			n := fbmNoise(float64(x)*1.2, float64(y)*1.2, 0.16, 4)
+			// Two-octave painted noise — clumpy patches plus a
+			// finer brushstroke so the foliage feels hand-
+			// painted across a sphere mesh.
+			broad := fbmNoise(float64(x)*0.7, float64(y)*0.7, 0.06, 3)
+			fine := fbmNoise(float64(x)*1.2, float64(y)*1.2, 0.18, 4)
+			n := broad*0.55 + fine*0.45
 			m := fbmNoise(float64(x)+183, float64(y)-77, 0.05, 3)
 			c := base
-			c = core.MixColor(c, light, math.Max(0, n)*0.7)
-			c = core.MixColor(c, deep, math.Max(0, -n)*0.65)
-			if m > 0.55 {
-				c = core.MixColor(c, gold, (m-0.55)*0.6)
+			c = core.MixColor(c, light, math.Max(0, n)*0.80)
+			c = core.MixColor(c, deep, math.Max(0, -n)*0.55)
+			if m > 0.50 {
+				c = core.MixColor(c, gold, (m-0.50)*0.70)
 			}
-			if hashByteXY(x*5, y*5)%180 < 3 {
-				c = core.MixColor(c, deep, 0.55)
+			// Sunlit hotspots — small bright kisses where the
+			// broad and fine noise crests align. Like sunlight
+			// finding a gap in the canopy.
+			if broad > 0.32 && fine > 0.38 {
+				c = core.MixColor(c, hotspot, 0.25)
 			}
 			pixels[y*w+x] = c
 		}

@@ -203,14 +203,28 @@ void main() {
     float upDot = N.y * 0.5 + 0.5;
     vec3 hemi = mix(ambientColor * 0.65, ambientColor, upDot);
 
-    // Wrap-around for slightly softer shading
+    // Gentle painted shading — soft smoothstep banding that
+    // still suggests the storybook cel feel, but at a much
+    // lower mix so the surface stays close to the original
+    // continuous wrap-diffuse. Anything stronger pushes the
+    // brightness range too wide for comfortable viewing.
     float wrap = clamp((dot(N, L) + 0.25) / 1.25, 0.0, 1.0);
-    vec3 diffuse = sunColor * mix(NdotL, wrap, 0.35);
+    float toon = smoothstep(0.18, 0.55, wrap) * 0.50
+               + smoothstep(0.55, 0.85, wrap) * 0.50;
+    float shade = mix(wrap, toon, 0.35);
+    vec3 diffuse = sunColor * mix(NdotL, shade, 0.35);
 
     float spec = 0.0;
     if (specularStrength > 0.001 && NdotL > 0.0) {
         spec = pow(max(dot(N, H), 0.0), 26.0) * specularStrength;
     }
+
+    // Rim light — kept as a hint of the painted-edge feel but
+    // pulled WAY back from the prior pass. At 0.16 it reads as a
+    // gentle painted edge on silhouettes rather than a hot halo.
+    float rim = pow(1.0 - max(dot(N, V), 0.0), 2.6);
+    rim *= smoothstep(-0.1, 0.5, dot(N, L));
+    vec3 rimLight = sunColor * rim * 0.16;
 
     // Pseudo-AO: darken slightly where surface points away from sun. With
     // cast shadows gone this is the only thing that gives shaded areas
@@ -218,7 +232,7 @@ void main() {
     // surfaces get."
     float ao = mix(1.0 - shadowStrength, 1.0, smoothstep(-0.1, 0.6, dot(N, L)));
 
-    vec3 lit = base * (hemi + diffuse) * ao + sunColor * spec;
+    vec3 lit = base * (hemi + diffuse) * ao + sunColor * spec + rimLight;
 
     // Exponential height-aware fog. The ceiling preserves 15% of
     // the lit tint at maximum distance so silhouettes don't fade

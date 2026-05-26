@@ -77,15 +77,18 @@ const (
 func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 	models := []rl.Model{
 		treeMeshRoot: rl.LoadModelFromMesh(rl.GenMeshCylinder(0.32, 0.18, 10)),
-		// Trunk lengthened from 1.55 → 2.55 so the silhouette reads as
-		// a grown tree rather than a stubby shrub. Canopy offsets below
-		// were lifted to match (canopy lumps sit on top of the trunk,
-		// not floating mid-trunk).
-		treeMeshTrunk:        rl.LoadModelFromMesh(rl.GenMeshCylinder(0.18, 2.55, 12)),
-		treeMeshCanopyLow:    rl.LoadModelFromMesh(rl.GenMeshSphere(0.92, 12, 16)),
-		treeMeshCanopyHigh:   rl.LoadModelFromMesh(rl.GenMeshSphere(0.78, 12, 16)),
-		treeMeshCanopySide:   rl.LoadModelFromMesh(rl.GenMeshSphere(0.55, 10, 14)),
-		treeMeshCanopyAccent: rl.LoadModelFromMesh(rl.GenMeshSphere(0.38, 10, 12)),
+		// Trunk lengthened from 1.55 → 2.55 so the silhouette reads
+		// as a grown tree rather than a stubby shrub.
+		treeMeshTrunk: rl.LoadModelFromMesh(rl.GenMeshCylinder(0.18, 2.55, 12)),
+		// Canopy lumps enlarged from the prior 0.92/0.78/0.55/0.38
+		// pass — pushes the silhouette toward a Wind-Waker storybook
+		// "puff" dome. The Low lump is now the dominant base mass;
+		// High sits over it as a brighter crown; Side lumps spread
+		// laterally; Accent gives the gilt highlights.
+		treeMeshCanopyLow:    rl.LoadModelFromMesh(rl.GenMeshSphere(1.18, 14, 18)),
+		treeMeshCanopyHigh:   rl.LoadModelFromMesh(rl.GenMeshSphere(0.96, 14, 18)),
+		treeMeshCanopySide:   rl.LoadModelFromMesh(rl.GenMeshSphere(0.68, 12, 16)),
+		treeMeshCanopyAccent: rl.LoadModelFromMesh(rl.GenMeshSphere(0.46, 10, 14)),
 	}
 	for i := range models {
 		tex := leafTex
@@ -96,28 +99,37 @@ func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 		attachShader(&models[i], shader)
 	}
 
-	leafBase := color.RGBA{R: 196, G: 226, B: 198, A: 255}
-	leafMid := color.RGBA{R: 168, G: 212, B: 168, A: 255}
-	leafDeep := color.RGBA{R: 132, G: 182, B: 138, A: 255}
-	leafGold := color.RGBA{R: 222, G: 232, B: 174, A: 255}
+	// Muted leaf palette — sage / olive family with dim cream
+	// highlights, so the canopy reads as painted foliage at
+	// dawn / dusk light without glaring. Pulled back from the
+	// vivid spring-green pass.
+	leafBase := color.RGBA{R: 138, G: 178, B: 116, A: 255}
+	leafMid := color.RGBA{R: 116, G: 160, B: 108, A: 255}
+	leafDeep := color.RGBA{R: 82, G: 132, B: 92, A: 255}
+	leafGold := color.RGBA{R: 196, G: 198, B: 142, A: 255}
+	leafBloom := color.RGBA{R: 198, G: 212, B: 168, A: 255}
 
-	// Trunk parts list — note the legacy treeMeshRoot flare is NOT
-	// listed. It read as a wooden donut sitting on the ground around
-	// every trunk and was distracting; the trunk cylinder sits on the
-	// ground on its own now. The root mesh stays in `models` so the
-	// model handle isn't orphaned (Unload still walks every entry) and
-	// so prop authors who want a flared base later can re-add a part
-	// referencing treeMeshRoot without changing the loader.
 	return treeModel{
 		models: models,
 		parts: []treePart{
 			{modelIdx: treeMeshTrunk, offset: rl.NewVector3(0, 0.06, 0), scale: rl.NewVector3(1, 1, 1), tint: rl.White},
+			// Dominant low canopy — broad mass anchoring the dome.
 			{modelIdx: treeMeshCanopyLow, offset: rl.NewVector3(0, 2.55, 0), scale: rl.NewVector3(1, 0.95, 1), tint: leafMid},
-			{modelIdx: treeMeshCanopyHigh, offset: rl.NewVector3(-0.05, 3.05, 0.05), scale: rl.NewVector3(1, 1, 1), tint: leafBase},
-			{modelIdx: treeMeshCanopySide, offset: rl.NewVector3(0.42, 2.78, 0.16), scale: rl.NewVector3(1, 1, 1), tint: leafDeep},
-			{modelIdx: treeMeshCanopySide, offset: rl.NewVector3(-0.38, 2.62, -0.14), scale: rl.NewVector3(1, 1, 1), tint: leafMid},
-			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(0.22, 3.32, -0.18), scale: rl.NewVector3(1, 1, 1), tint: leafGold},
-			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(-0.18, 3.18, 0.22), scale: rl.NewVector3(1, 1, 1), tint: leafBase},
+			// Crown — slightly offset upward, brighter, catches the
+			// sky tint.
+			{modelIdx: treeMeshCanopyHigh, offset: rl.NewVector3(-0.05, 3.20, 0.05), scale: rl.NewVector3(1, 1, 1), tint: leafBase},
+			// Side lumps spreading wide — the painterly puff
+			// shoulders.
+			{modelIdx: treeMeshCanopySide, offset: rl.NewVector3(0.55, 2.90, 0.18), scale: rl.NewVector3(1, 1, 1), tint: leafDeep},
+			{modelIdx: treeMeshCanopySide, offset: rl.NewVector3(-0.50, 2.72, -0.18), scale: rl.NewVector3(1, 1, 1), tint: leafMid},
+			// Top bloom — bright cream lump kissing the very top.
+			// This is the Wind Waker "sunlight catches the crown"
+			// signature highlight.
+			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(0.08, 3.62, -0.06), scale: rl.NewVector3(1, 0.9, 1), tint: leafBloom},
+			// Two gold accents scattered around the canopy as
+			// sun-dappled gilt highlights.
+			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(0.30, 3.40, -0.22), scale: rl.NewVector3(1, 1, 1), tint: leafGold},
+			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(-0.26, 3.26, 0.28), scale: rl.NewVector3(1, 1, 1), tint: leafGold},
 		},
 	}
 }
@@ -500,50 +512,85 @@ func loadArchwayDecor(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 	}
 }
 
-// loadBushProp builds a leaf-cluster bush (no trunk) from a few spheres.
-// Same leaf texture as the trees so the foliage palette stays consistent.
-// Scale 1.0 = "large" (blocks); ~0.5 reads as "small".
+// loadBushProp builds a leaf-cluster bush with tiny flower blooms
+// dotted across the top. Leaves share the tree's leaf texture; bloom
+// spheres use the default white material tinted with the flower
+// palette so the bush reads as a small, lively shrub catching
+// wildflowers. Scale 1.0 = "large" (blocks); ~0.5 = "small."
 func loadBushProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
-	models := []rl.Model{
-		rl.LoadModelFromMesh(rl.GenMeshSphere(0.55, 10, 14)),
-		rl.LoadModelFromMesh(rl.GenMeshSphere(0.40, 10, 12)),
-	}
+	leafLump := rl.LoadModelFromMesh(rl.GenMeshSphere(0.62, 12, 16))
+	leafLumpSm := rl.LoadModelFromMesh(rl.GenMeshSphere(0.46, 10, 14))
+	bloom := rl.LoadModelFromMesh(rl.GenMeshSphere(0.085, 8, 10))
+	models := []rl.Model{leafLump, leafLumpSm, bloom}
+	setModelTexture(&models[0], leafTex)
+	setModelTexture(&models[1], leafTex)
 	for i := range models {
-		setModelTexture(&models[i], leafTex)
 		attachShader(&models[i], shader)
 	}
-	leafBase := color.RGBA{R: 168, G: 212, B: 168, A: 255}
-	leafDeep := color.RGBA{R: 122, G: 178, B: 130, A: 255}
-	leafGold := color.RGBA{R: 218, G: 232, B: 170, A: 255}
+	leafBase := color.RGBA{R: 134, G: 174, B: 116, A: 255}
+	leafDeep := color.RGBA{R: 92, G: 142, B: 100, A: 255}
+	leafGold := color.RGBA{R: 196, G: 208, B: 156, A: 255}
+	bloomYellow := color.RGBA{R: 220, G: 198, B: 122, A: 255}
+	bloomWhite := color.RGBA{R: 222, G: 218, B: 206, A: 255}
+	bloomPink := color.RGBA{R: 212, G: 160, B: 180, A: 255}
 	return propModel{
 		models: models,
 		parts: []treePart{
-			{modelIdx: 0, offset: rl.NewVector3(0, 0.45, 0), scale: rl.NewVector3(1, 0.92, 1), tint: leafBase},
-			{modelIdx: 1, offset: rl.NewVector3(0.30, 0.62, 0.18), scale: rl.NewVector3(1, 1, 1), tint: leafDeep},
-			{modelIdx: 1, offset: rl.NewVector3(-0.28, 0.58, -0.16), scale: rl.NewVector3(1, 1, 1), tint: leafGold},
+			// Three overlapping leaf lumps — a dominant base with
+			// two side lumps for the painterly "cluster of round
+			// bunches" silhouette.
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.52, 0), scale: rl.NewVector3(1, 0.92, 1), tint: leafBase},
+			{modelIdx: 1, offset: rl.NewVector3(0.34, 0.68, 0.20), scale: rl.NewVector3(1, 1, 1), tint: leafDeep},
+			{modelIdx: 1, offset: rl.NewVector3(-0.32, 0.64, -0.18), scale: rl.NewVector3(1, 1, 1), tint: leafGold},
+			// Wildflower blooms dotted across the upper hemisphere
+			// of the bush. Three colours so the patch reads as
+			// mixed wildflowers, not a costume bouquet.
+			{modelIdx: 2, offset: rl.NewVector3(0.08, 0.96, 0.10), scale: rl.NewVector3(1, 1, 1), tint: bloomYellow},
+			{modelIdx: 2, offset: rl.NewVector3(-0.22, 0.84, 0.04), scale: rl.NewVector3(1, 1, 1), tint: bloomWhite},
+			{modelIdx: 2, offset: rl.NewVector3(0.20, 0.88, -0.18), scale: rl.NewVector3(1, 1, 1), tint: bloomPink},
 		},
 	}
 }
 
-// loadMushroomProp builds a tiny mushroom (cylinder stem + sphere cap). Each
-// part relies on raylib's default white material texture and is colored by
-// its tint, so we don't need to author a mushroom-specific texture. Scale 1.0
-// reads as "small mushroom"; ~0.6 reads as "tiny mushroom".
+// loadMushroomProp builds a small mushroom trio: one prominent storybook
+// toadstool (red cap + paper-white spots) plus two smaller companion
+// caps in pale cream and apricot so the patch reads as a forest-floor
+// fairy-ring rather than a single solitary fungus. All parts ride on
+// raylib's default white material and rely on tint colour.
 func loadMushroomProp(shader rl.Shader) propModel {
-	models := []rl.Model{
-		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.05, 0.16, 8)),
-		rl.LoadModelFromMesh(rl.GenMeshSphere(0.13, 8, 10)),
-	}
+	stem := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.05, 0.16, 8))
+	capDome := rl.LoadModelFromMesh(rl.GenMeshSphere(0.15, 10, 12))
+	spot := rl.LoadModelFromMesh(rl.GenMeshSphere(0.028, 6, 8))
+	smallStem := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.03, 0.10, 8))
+	smallCap := rl.LoadModelFromMesh(rl.GenMeshSphere(0.085, 8, 10))
+	models := []rl.Model{stem, capDome, spot, smallStem, smallCap}
 	for i := range models {
 		attachShader(&models[i], shader)
 	}
-	stem := color.RGBA{R: 240, G: 230, B: 210, A: 255}
-	cap := color.RGBA{R: 188, G: 56, B: 56, A: 255}
+	stemTint := color.RGBA{R: 224, G: 218, B: 200, A: 255}
+	stemDarker := color.RGBA{R: 200, G: 192, B: 172, A: 255}
+	capRed := color.RGBA{R: 188, G: 92, B: 86, A: 255}
+	capCream := color.RGBA{R: 218, G: 198, B: 160, A: 255}
+	capApricot := color.RGBA{R: 210, G: 162, B: 132, A: 255}
+	spotWhite := color.RGBA{R: 228, G: 224, B: 212, A: 255}
 	return propModel{
 		models: models,
 		parts: []treePart{
-			{modelIdx: 0, offset: rl.NewVector3(0, 0.02, 0), scale: rl.NewVector3(1, 1, 1), tint: stem},
-			{modelIdx: 1, offset: rl.NewVector3(0, 0.18, 0), scale: rl.NewVector3(1, 0.78, 1), tint: cap},
+			// Main toadstool — tall stem, domed red cap, four
+			// painted-white spots scattered across the cap's
+			// upper hemisphere.
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.02, 0), scale: rl.NewVector3(1, 1, 1), tint: stemTint},
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.18, 0), scale: rl.NewVector3(1, 0.72, 1), tint: capRed},
+			{modelIdx: 2, offset: rl.NewVector3(0.05, 0.245, 0.02), scale: rl.NewVector3(1, 1, 1), tint: spotWhite},
+			{modelIdx: 2, offset: rl.NewVector3(-0.04, 0.24, 0.05), scale: rl.NewVector3(1, 1, 1), tint: spotWhite},
+			{modelIdx: 2, offset: rl.NewVector3(0.02, 0.255, -0.06), scale: rl.NewVector3(1, 1, 1), tint: spotWhite},
+			{modelIdx: 2, offset: rl.NewVector3(-0.06, 0.23, -0.03), scale: rl.NewVector3(1, 1, 1), tint: spotWhite},
+			// Companion 1 — small cream cap nestled to the side.
+			{modelIdx: 3, offset: rl.NewVector3(0.18, 0.01, 0.12), scale: rl.NewVector3(1, 1, 1), tint: stemDarker},
+			{modelIdx: 4, offset: rl.NewVector3(0.18, 0.11, 0.12), scale: rl.NewVector3(1, 0.74, 1), tint: capCream},
+			// Companion 2 — apricot cap on the other side.
+			{modelIdx: 3, offset: rl.NewVector3(-0.16, 0.01, -0.14), scale: rl.NewVector3(0.95, 0.95, 0.95), tint: stemDarker},
+			{modelIdx: 4, offset: rl.NewVector3(-0.16, 0.10, -0.14), scale: rl.NewVector3(0.92, 0.72, 0.92), tint: capApricot},
 		},
 	}
 }
@@ -886,40 +933,65 @@ func loadTallGrassProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadFlowerProp builds a small mixed-flower clump: four thin stems with
-// small colored sphere blooms. The bloom colors stay in a tight warm
-// palette (yellow, pink, white, lilac) so the patch reads as wildflowers
-// rather than a costume jewelry display.
+// loadFlowerProp builds a wildflower clump: four stems each carrying a
+// bigger painted bloom over a wider petal halo, with a yellow pistil
+// pip on top. Three ground leaves anchor the cluster. The bloom palette
+// (sun-yellow, rose-pink, paper-white, lilac) stays in a tight warm
+// range so the patch reads as Wind-Waker wildflowers rather than a
+// costume jewelry case.
 func loadFlowerProp(shader rl.Shader) propModel {
-	stem := rl.LoadModelFromMesh(rl.GenMeshCube(0.022, 0.20, 0.022))
-	bloom := rl.LoadModelFromMesh(rl.GenMeshSphere(0.055, 8, 10))
-	leaf := rl.LoadModelFromMesh(rl.GenMeshCube(0.05, 0.02, 0.05))
-	models := []rl.Model{stem, bloom, leaf}
+	stem := rl.LoadModelFromMesh(rl.GenMeshCube(0.026, 0.24, 0.026))
+	// Petal halo — flattened disc that sits under the bloom. Cube
+	// scaled flat reads as the painted "open palm" of petals.
+	petal := rl.LoadModelFromMesh(rl.GenMeshCube(0.12, 0.018, 0.12))
+	bloom := rl.LoadModelFromMesh(rl.GenMeshSphere(0.075, 10, 12))
+	// Pistil — tiny gold pip on top of each bloom catching the
+	// "sunkissed" highlight.
+	pistil := rl.LoadModelFromMesh(rl.GenMeshSphere(0.022, 6, 8))
+	leaf := rl.LoadModelFromMesh(rl.GenMeshCube(0.055, 0.022, 0.075))
+	models := []rl.Model{stem, petal, bloom, pistil, leaf}
 	for i := range models {
 		attachShader(&models[i], shader)
 	}
-	stemTint := rl.NewColor(80, 138, 78, 255)
-	leafTint := rl.NewColor(96, 152, 86, 255)
-	yellow := rl.NewColor(244, 222, 110, 255)
-	pink := rl.NewColor(236, 142, 168, 255)
-	white := rl.NewColor(250, 248, 240, 255)
-	lilac := rl.NewColor(198, 156, 220, 255)
+	stemTint := rl.NewColor(98, 138, 88, 255)
+	leafTint := rl.NewColor(118, 158, 100, 255)
+	yellow := rl.NewColor(214, 196, 116, 255)
+	yellowPetal := rl.NewColor(224, 208, 144, 255)
+	pink := rl.NewColor(208, 152, 174, 255)
+	pinkPetal := rl.NewColor(220, 184, 198, 255)
+	white := rl.NewColor(228, 224, 214, 255)
+	whitePetal := rl.NewColor(228, 220, 206, 255)
+	lilac := rl.NewColor(180, 152, 200, 255)
+	lilacPetal := rl.NewColor(198, 178, 214, 255)
+	pistilGold := rl.NewColor(220, 208, 156, 255)
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Four stems with their blooms at the top. Stem and bloom share
-			// the same xz offset so they line up.
-			{modelIdx: 0, offset: rl.NewVector3(0.10, 0.10, 0.06), scale: rl.NewVector3(1, 1, 1), tint: stemTint},
-			{modelIdx: 1, offset: rl.NewVector3(0.10, 0.22, 0.06), scale: rl.NewVector3(1, 1, 1), tint: yellow},
-			{modelIdx: 0, offset: rl.NewVector3(-0.08, 0.10, 0.12), scale: rl.NewVector3(1, 1.05, 1), tint: stemTint},
-			{modelIdx: 1, offset: rl.NewVector3(-0.08, 0.23, 0.12), scale: rl.NewVector3(1, 1, 1), tint: pink},
-			{modelIdx: 0, offset: rl.NewVector3(0.04, 0.10, -0.14), scale: rl.NewVector3(1, 0.95, 1), tint: stemTint},
-			{modelIdx: 1, offset: rl.NewVector3(0.04, 0.22, -0.14), scale: rl.NewVector3(1, 1, 1), tint: white},
-			{modelIdx: 0, offset: rl.NewVector3(-0.14, 0.10, -0.04), scale: rl.NewVector3(1, 1, 1), tint: stemTint},
-			{modelIdx: 1, offset: rl.NewVector3(-0.14, 0.22, -0.04), scale: rl.NewVector3(1, 1, 1), tint: lilac},
-			// Two ground leaves to anchor the clump visually.
-			{modelIdx: 2, offset: rl.NewVector3(0.02, 0.01, 0.01), scale: rl.NewVector3(1.2, 1, 1.2), tint: leafTint},
-			{modelIdx: 2, offset: rl.NewVector3(-0.06, 0.01, -0.08), scale: rl.NewVector3(1.0, 1, 1.4), tint: leafTint},
+			// Bloom 1 — yellow.
+			{modelIdx: 0, offset: rl.NewVector3(0.10, 0.12, 0.06), scale: rl.NewVector3(1, 1, 1), tint: stemTint},
+			{modelIdx: 1, offset: rl.NewVector3(0.10, 0.23, 0.06), scale: rl.NewVector3(1, 1, 1), rotation: 12, tint: yellowPetal},
+			{modelIdx: 2, offset: rl.NewVector3(0.10, 0.26, 0.06), scale: rl.NewVector3(1, 1, 1), tint: yellow},
+			{modelIdx: 3, offset: rl.NewVector3(0.10, 0.295, 0.06), scale: rl.NewVector3(1, 1, 1), tint: pistilGold},
+			// Bloom 2 — pink.
+			{modelIdx: 0, offset: rl.NewVector3(-0.09, 0.12, 0.13), scale: rl.NewVector3(1, 1.05, 1), tint: stemTint},
+			{modelIdx: 1, offset: rl.NewVector3(-0.09, 0.24, 0.13), scale: rl.NewVector3(1, 1, 1), rotation: -22, tint: pinkPetal},
+			{modelIdx: 2, offset: rl.NewVector3(-0.09, 0.27, 0.13), scale: rl.NewVector3(1, 1, 1), tint: pink},
+			{modelIdx: 3, offset: rl.NewVector3(-0.09, 0.305, 0.13), scale: rl.NewVector3(1, 1, 1), tint: pistilGold},
+			// Bloom 3 — white.
+			{modelIdx: 0, offset: rl.NewVector3(0.04, 0.11, -0.14), scale: rl.NewVector3(1, 0.95, 1), tint: stemTint},
+			{modelIdx: 1, offset: rl.NewVector3(0.04, 0.22, -0.14), scale: rl.NewVector3(1, 1, 1), rotation: 35, tint: whitePetal},
+			{modelIdx: 2, offset: rl.NewVector3(0.04, 0.25, -0.14), scale: rl.NewVector3(1, 1, 1), tint: white},
+			{modelIdx: 3, offset: rl.NewVector3(0.04, 0.285, -0.14), scale: rl.NewVector3(1, 1, 1), tint: pistilGold},
+			// Bloom 4 — lilac.
+			{modelIdx: 0, offset: rl.NewVector3(-0.14, 0.12, -0.04), scale: rl.NewVector3(1, 1, 1), tint: stemTint},
+			{modelIdx: 1, offset: rl.NewVector3(-0.14, 0.23, -0.04), scale: rl.NewVector3(1, 1, 1), rotation: 8, tint: lilacPetal},
+			{modelIdx: 2, offset: rl.NewVector3(-0.14, 0.26, -0.04), scale: rl.NewVector3(1, 1, 1), tint: lilac},
+			{modelIdx: 3, offset: rl.NewVector3(-0.14, 0.295, -0.04), scale: rl.NewVector3(1, 1, 1), tint: pistilGold},
+			// Ground leaves — three of them now, rotated so the
+			// patch reads as a deliberate clump.
+			{modelIdx: 4, offset: rl.NewVector3(0.02, 0.012, 0.01), scale: rl.NewVector3(1.4, 1, 1.4), rotation: 20, tint: leafTint},
+			{modelIdx: 4, offset: rl.NewVector3(-0.06, 0.012, -0.08), scale: rl.NewVector3(1.2, 1, 1.6), rotation: -45, tint: leafTint},
+			{modelIdx: 4, offset: rl.NewVector3(0.10, 0.012, -0.12), scale: rl.NewVector3(1.1, 1, 1.4), rotation: 60, tint: leafTint},
 		},
 	}
 }
