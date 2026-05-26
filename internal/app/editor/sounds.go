@@ -16,12 +16,16 @@ import (
 // soundParamSliders below. Defaults match a generic short input blip so
 // the modal opens with something audible on first preview.
 type soundParamSet struct {
-	Duration float64 // seconds, [0.03, 0.40]
-	StartHz  float64 // Hz, [100, 1600]
-	EndHz    float64 // Hz, [100, 1600]
-	Volume   float64 // [0, 0.6]
-	Attack   float64 // seconds, [0, 0.05]
-	Release  float64 // seconds, [0, 0.30]
+	Duration     float64 // seconds, [0.03, 0.40]
+	StartHz      float64 // Hz, [100, 1600]
+	EndHz        float64 // Hz, [100, 1600]
+	Volume       float64 // [0, 0.6]
+	Attack       float64 // seconds, [0, 0.05]
+	Release      float64 // seconds, [0, 0.30]
+	Wave         int     // 0..3 — index into audio.WaveX (Sine/Square/Triangle/Saw)
+	Noise        float64 // [0, 1] — noise mix amount
+	VibratoHz    float64 // [0, 15] — vibrato wobble rate
+	VibratoDepth float64 // [0, 0.5] — vibrato swing depth as a fraction of base Hz
 }
 
 // soundParamSliderInfo describes one row in the sound modal's slider
@@ -35,7 +39,8 @@ type soundParamSliderInfo struct {
 	Step   float64
 	Get    func(*soundParamSet) float64
 	Set    func(*soundParamSet, float64)
-	Format string // fmt verb / suffix
+	Format string                // fmt verb / suffix — used when Display is nil
+	Display func(float64) string // optional custom value renderer (Wave row's "Sine"/"Square"/...)
 }
 
 var soundParamSliders = []soundParamSliderInfo{
@@ -69,19 +74,64 @@ var soundParamSliders = []soundParamSliderInfo{
 		Get: func(p *soundParamSet) float64 { return p.Release },
 		Set: func(p *soundParamSet, v float64) { p.Release = v },
 	},
+	{
+		// Wave shape — discrete 4-option toggle dressed up as a
+		// slider. Step=1 + Min/Max=0..3 means Left/Right cycles
+		// through the WaveX values one at a time, and the mouse-
+		// drag mapping rounds to the nearest integer. Display
+		// returns the human label so the readout shows "Sine"
+		// instead of "0".
+		Label: "Wave", Min: 0, Max: 3, Step: 1, Format: "%.0f",
+		Get: func(p *soundParamSet) float64 { return float64(p.Wave) },
+		Set: func(p *soundParamSet, v float64) {
+			i := int(v + 0.5)
+			if i < 0 {
+				i = 0
+			}
+			if i > 3 {
+				i = 3
+			}
+			p.Wave = i
+		},
+		Display: func(v float64) string {
+			return audio.WaveShapeName(audio.WaveShape(int(v + 0.5)))
+		},
+	},
+	{
+		Label: "Noise", Min: 0.0, Max: 1.0, Step: 0.05, Format: "%.2f",
+		Get: func(p *soundParamSet) float64 { return p.Noise },
+		Set: func(p *soundParamSet, v float64) { p.Noise = v },
+	},
+	{
+		Label: "Vibrato Hz", Min: 0.0, Max: 15.0, Step: 0.5, Format: "%.1f Hz",
+		Get: func(p *soundParamSet) float64 { return p.VibratoHz },
+		Set: func(p *soundParamSet, v float64) { p.VibratoHz = v },
+	},
+	{
+		Label: "Vibrato Depth", Min: 0.0, Max: 0.5, Step: 0.02, Format: "%.2f",
+		Get: func(p *soundParamSet) float64 { return p.VibratoDepth },
+		Set: func(p *soundParamSet, v float64) { p.VibratoDepth = v },
+	},
 }
 
 // soundParamDefaults seeds the modal with a sane starter cue — a short
 // rising blip at modest volume. Audible on first preview so the author
-// gets feedback without first tuning anything.
+// gets feedback without first tuning anything. All 10 fields are listed
+// explicitly so a future enum reordering (e.g., WaveSine moving off
+// iota 0) doesn't silently shift the default timbre — the literal
+// expresses intent.
 func soundParamDefaults() soundParamSet {
 	return soundParamSet{
-		Duration: 0.10,
-		StartHz:  440,
-		EndHz:    660,
-		Volume:   0.22,
-		Attack:   0.005,
-		Release:  0.04,
+		Duration:     0.10,
+		StartHz:      440,
+		EndHz:        660,
+		Volume:       0.22,
+		Attack:       0.005,
+		Release:      0.04,
+		Wave:         int(audio.WaveSine),
+		Noise:        0,
+		VibratoHz:    0,
+		VibratoDepth: 0,
 	}
 }
 
@@ -251,7 +301,7 @@ func openSoundsModal(s *State) {
 // secondary path (Tab between columns, arrows for fine adjustment, Esc
 // to close).
 func updateSoundsModal(s *State) Action {
-	if rl.IsKeyPressed(rl.KeyEscape) {
+	if editorCancelPressed() {
 		s.modal = modalNone
 		soundDrag.sliderIdx = -1
 		return ActionNone
@@ -315,7 +365,7 @@ func updateSoundsModal(s *State) Action {
 	}
 
 	// Keyboard fallbacks.
-	if rl.IsKeyPressed(rl.KeyTab) {
+	if editorTabPressed() {
 		s.soundLeftPanel = (s.soundLeftPanel + 1) % 3
 		s.soundCursor = 0
 		return ActionNone
@@ -437,13 +487,13 @@ func updateSoundsParamsKeys(s *State) {
 		if rl.IsKeyPressed(rl.KeySpace) {
 			previewSoundParams(s.soundParams)
 		}
-		if rl.IsKeyPressed(rl.KeyEnter) {
+		if editorCommitPressed() {
 			saveCurrentSound(s)
 		}
 	}
 	// On the Name row: keystrokes feed into the name buffer (handled by
 	// updateSoundsModal); Enter saves.
-	if s.soundCursor == soundNameCursorIdx() && rl.IsKeyPressed(rl.KeyEnter) {
+	if s.soundCursor == soundNameCursorIdx() && editorCommitPressed() {
 		saveCurrentSound(s)
 	}
 }
@@ -456,7 +506,7 @@ func updateSoundsListKeys(s *State, names []string) {
 		s.soundCursor = len(names) - 1
 	}
 	s.soundCursor = input.CursorUpDown(s.soundCursor, len(names))
-	if rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeySpace) {
+	if editorCommitPressed() || rl.IsKeyPressed(rl.KeySpace) {
 		audio.PreviewFile(names[s.soundCursor])
 	}
 	if rl.IsKeyPressed(rl.KeyX) {
@@ -482,7 +532,7 @@ func updateSoundsAssignKeys(s *State) {
 	if delta := input.CursorLeftRight(); delta != 0 {
 		cycleCueAssignment(s, cue, delta)
 	}
-	if rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeySpace) {
+	if editorCommitPressed() || rl.IsKeyPressed(rl.KeySpace) {
 		audio.Play(cue)
 	}
 }
@@ -520,7 +570,8 @@ func cycleCueAssignment(s *State, cue audio.Sound, delta int) {
 // so the saved-sounds list isn't polluted and a user who saves a real
 // cue named "preview" doesn't clash.
 func previewSoundParams(p soundParamSet) {
-	pcm := audio.SynthSweep(p.Duration, p.StartHz, p.EndHz, p.Volume, p.Attack, p.Release)
+	pcm := audio.SynthShape(p.Duration, p.StartHz, p.EndHz, p.Volume, p.Attack, p.Release,
+		audio.WaveShape(p.Wave), p.Noise, p.VibratoHz, p.VibratoDepth)
 	audio.PreviewPCM(pcm)
 }
 
@@ -534,8 +585,10 @@ func saveCurrentSound(s *State) {
 		s.flash("Sound name required")
 		return
 	}
-	pcm := audio.SynthSweep(s.soundParams.Duration, s.soundParams.StartHz, s.soundParams.EndHz,
-		s.soundParams.Volume, s.soundParams.Attack, s.soundParams.Release)
+	pcm := audio.SynthShape(s.soundParams.Duration, s.soundParams.StartHz, s.soundParams.EndHz,
+		s.soundParams.Volume, s.soundParams.Attack, s.soundParams.Release,
+		audio.WaveShape(s.soundParams.Wave), s.soundParams.Noise,
+		s.soundParams.VibratoHz, s.soundParams.VibratoDepth)
 	saved, err := audio.SaveUserSound(s.soundName, pcm)
 	if err != nil {
 		s.flash("Save failed: " + err.Error())
@@ -569,7 +622,7 @@ func drawSoundsModal(s *State, font rl.Font, theme render.Theme) {
 	drawSoundsListCol(s, font, theme, &l, savedSounds)
 	drawSoundsAssignCol(s, font, theme, &l)
 
-	hint := "Click sliders to drag   Click Play/Save/×/← →   Tab cycle column   Esc close"
+	hint := "Click sliders to drag   Click Play/Save/X/Prev/Next   Tab cycle column   Esc close"
 	rl.DrawTextEx(font, hint,
 		rl.NewVector2(l.card.X+18, l.card.Y+l.card.Height-26),
 		soundFontHint, 1, theme.TextHint)
@@ -628,8 +681,16 @@ func drawSoundsSlider(font rl.Font, theme render.Theme, x, y, w float32, info so
 		thumbCol = theme.BorderActive
 	}
 	rl.DrawCircle(int32(thumbX), int32(thumbY), 7, thumbCol)
-	// Numeric readout to the right of the track.
-	val := fmt.Sprintf(info.Format, info.Get(&p))
+	// Numeric readout to the right of the track. Display callback
+	// overrides the fmt.Sprintf path for rows that render a label
+	// instead of a number (the Wave row's "Sine"/"Square"/etc.).
+	value := info.Get(&p)
+	var val string
+	if info.Display != nil {
+		val = info.Display(value)
+	} else {
+		val = fmt.Sprintf(info.Format, value)
+	}
 	rl.DrawTextEx(font, val,
 		rl.NewVector2(x+w-78, y),
 		soundFontBody, 1, col)
@@ -652,8 +713,8 @@ func drawSoundsListCol(s *State, font rl.Font, theme render.Theme, l *soundLayou
 		}
 		render.DrawTextWithShadow(font, name,
 			r.Row.X+8, r.Row.Y+6, soundFontBody, theme.TextMuted)
-		drawButton(font, r.Play, "▶", false)
-		drawButton(font, r.Delete, "×", false)
+		drawButton(font, r.Play, ">", false)
+		drawButton(font, r.Delete, "X", false)
 	}
 }
 
@@ -675,7 +736,7 @@ func drawSoundsAssignCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 		rl.DrawTextEx(font, assignedLabel,
 			rl.NewVector2(r.Row.X+8, r.Row.Y+24),
 			soundFontHint, 1, theme.TextHint)
-		drawButton(font, r.Play, "▶", false)
+		drawButton(font, r.Play, ">", false)
 		drawButton(font, r.CycleLeft, "<", false)
 		drawButton(font, r.CycleRight, ">", false)
 	}

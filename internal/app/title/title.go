@@ -143,6 +143,9 @@ func Draw(s State, assets render.Resources) {
 	_, screenH := render.ScreenSize()
 
 	title := "CRAWLER"
+	// Game-name splash — the documented exception to the five-size
+	// standard (see UI_STANDARDS.md). One-off, single-screen,
+	// rendered exactly once at game launch.
 	titleSize := float32(72)
 	titleSpacing := float32(4)
 	tm := rl.MeasureTextEx(font, title, titleSize, titleSpacing)
@@ -190,19 +193,19 @@ func drawMapPicker(s State, font rl.Font, theme render.Theme, screenH int32) {
 func drawList(items []string, cursor int, font rl.Font, theme render.Theme, screenH int32, header string) {
 	listY := float32(screenH) * 0.42
 	if header != "" {
-		sz := float32(20)
-		m := rl.MeasureTextEx(font, header, sz, 1.5)
+		sz := render.FontBody
+		m := rl.MeasureTextEx(font, header, sz, 1)
 		render.DrawTextWithShadow(font, header, render.CenterXF(m.X), listY-52, sz, theme.TextLabel)
 	}
 	for i, label := range items {
-		size := float32(28)
+		size := render.FontHeading
 		col := theme.TextMuted
 		text := label
 		if i == cursor {
 			col = theme.BorderActive
 			text = "> " + label
 		}
-		m := rl.MeasureTextEx(font, text, size, 1.5)
+		m := rl.MeasureTextEx(font, text, size, render.FontSpacingHeading)
 		y := listY + float32(i)*44
 		render.DrawTextWithShadow(font, text, render.CenterXF(m.X), y, size, col)
 	}
@@ -210,11 +213,11 @@ func drawList(items []string, cursor int, font rl.Font, theme render.Theme, scre
 
 func drawHint(font rl.Font, text string, screenH int32) {
 	sw, _ := render.ScreenSizeF()
-	render.DrawFooterHint(font, text, sw/2, float32(screenH)-36, 14)
+	render.DrawFooterHint(font, text, sw/2, float32(screenH)-36, render.FontSmall)
 }
 
 func drawError(font rl.Font, theme render.Theme, msg string, screenH int32) {
-	size := float32(16)
+	size := render.FontSmall
 	m := rl.MeasureTextEx(font, msg, size, 1)
 	y := float32(screenH) - 60
 	render.DrawTextWithShadow(font, msg, render.CenterXF(m.X), y, size, theme.BorderDanger)

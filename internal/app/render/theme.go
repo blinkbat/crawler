@@ -1,46 +1,121 @@
 package render
 
 import (
-	"fmt"
 	"image/color"
 	"math"
+	"strconv"
 
 	"crawler/internal/app/core"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Shared HUD palette. Surfaces ascend in opacity/depth:
-// veil < log < primary; tints overlay primary for state.
+// The Library palette. See UI_STANDARDS.md for the full rationale and
+// the rule "no new rl.NewColor literals for any surface that already
+// has a token." Every persistent HUD pane is dark glass framed in
+// hardwood; every selection highlight is gilt.
+//
+// Two parallel naming families exist for historical reasons:
+//   - The UI_STANDARDS.md tokens (`glassDeep` / `woodMid` /
+//     `inkPrimary` / etc.) are the canonical names — use these in
+//     new code.
+//   - Older semantic aliases (`surfacePrimary` / `borderSoft` /
+//     `textPrimary` / etc., grouped below) resolve to the same
+//     RGB values but predate the library aesthetic doc. They're
+//     treated as first-class — neither set is "deprecated" —
+//     because the codebase reads cleanly with either, and a full
+//     rename would touch 200+ call sites without changing pixels.
+//     New uses are fine either way; pick the name that reads best
+//     in context (e.g. `textPrimary` for body copy, `inkPrimary`
+//     when the parchment metaphor is load-bearing).
 var (
-	surfacePrimary    = rl.NewColor(12, 16, 28, 222)
-	surfaceLog        = rl.NewColor(4, 6, 12, 148)
-	surfaceVeil       = rl.NewColor(0, 0, 0, 130)
-	surfaceActiveTint = rl.NewColor(58, 52, 96, 215)
-	surfaceTargetTint = rl.NewColor(30, 64, 70, 215)
-	surfaceDownTint   = rl.NewColor(28, 22, 28, 165)
-	surfaceEnemyTint  = rl.NewColor(54, 28, 32, 205)
+	// ----- Glass surfaces (panel fills) -----
+	// Alphas dropped ~15-20% from prior pass — the panes now read as
+	// genuinely translucent glass that the world tints through, rather
+	// than near-opaque tinted rectangles. Text legibility is preserved
+	// by the FontSmall / FontBody shadow pass and the dim outer wood
+	// frame; the body of the pane is the layer we soften.
+	glassDeep   = rl.NewColor(14, 12, 18, 170)
+	glassMid    = rl.NewColor(22, 18, 24, 160)
+	glassWarm   = rl.NewColor(28, 22, 16, 170)
+	glassDanger = rl.NewColor(36, 16, 18, 170)
+	veil        = rl.NewColor(0, 0, 0, 140)
 
-	borderDim    = rl.NewColor(98, 124, 158, 95)
-	borderSoft   = rl.NewColor(122, 158, 196, 160)
-	borderStrong = rl.NewColor(170, 220, 244, 220)
-	borderActive = rl.NewColor(255, 220, 124, 235)
-	borderTarget = rl.NewColor(118, 235, 136, 235)
-	borderEnemy  = rl.NewColor(255, 144, 96, 230)
-	borderDanger = rl.NewColor(244, 90, 90, 235)
+	// ----- Wood frames -----
+	woodDark   = rl.NewColor(48, 30, 18, 255)
+	woodMid    = rl.NewColor(96, 62, 36, 255)
+	woodLight  = rl.NewColor(150, 104, 64, 255)
+	woodAccent = rl.NewColor(184, 140, 92, 255)
 
-	textPrimary = rl.NewColor(244, 248, 252, 255)
-	textMuted   = rl.NewColor(190, 204, 224, 240)
-	textLabel   = rl.NewColor(146, 174, 204, 235)
-	textDim     = rl.NewColor(118, 134, 158, 220)
-	textHint    = rl.NewColor(138, 160, 188, 220)
+	// ----- Gilt accents (selection / focus) -----
+	giltDim    = rl.NewColor(160, 124, 64, 255)
+	giltBright = rl.NewColor(232, 196, 112, 255)
+	giltGlow   = rl.NewColor(255, 232, 168, 210)
 
-	barHPHigh  = rl.NewColor(108, 220, 132, 255)
-	barHPMid   = rl.NewColor(232, 188, 88, 255)
-	barHPLow   = rl.NewColor(236, 90, 90, 255)
-	barMP      = rl.NewColor(96, 162, 232, 255)
-	barEnemyHP = rl.NewColor(216, 80, 76, 255)
-	barBurn    = rl.NewColor(248, 132, 64, 255)
+	// ----- Parchment ink (text) -----
+	inkPrimary = rl.NewColor(232, 222, 196, 255)
+	inkMuted   = rl.NewColor(184, 172, 144, 240)
+	inkDim     = rl.NewColor(132, 122, 100, 220)
+	inkAccent  = rl.NewColor(232, 196, 112, 255)
+
+	// ----- Semantic aliases of the library palette (use freely) -----
+	// These names predate the wood/glass/gilt nomenclature but resolve
+	// to the same RGB values — pick whichever reads best in context.
+	surfacePrimary    = glassDeep
+	surfaceLog        = glassMid
+	surfaceVeil       = veil
+	surfaceActiveTint = glassWarm
+	surfaceTargetTint = rl.NewColor(20, 38, 32, 200) // faint emerald glass for friendly target
+	surfaceDownTint   = rl.NewColor(28, 22, 28, 160) // unchanged — "knocked down" reads gray
+	surfaceEnemyTint  = glassDanger
+
+	// Border aliases — used by drawCard as the OUTERMOST frame
+	// stroke. Default panels use woodDark (deepest band); active /
+	// danger panels swap in a saturated tint so the focused surface
+	// reads first.
+	borderDim    = rl.NewColor(60, 48, 36, 130) // dim hardwood, for disabled panels
+	borderSoft   = woodDark                     // default outer stroke
+	borderStrong = woodAccent                   // heading underline accent
+	borderActive = giltBright                   // active actor panel frame
+	borderTarget = rl.NewColor(118, 200, 132, 235)
+	borderEnemy  = rl.NewColor(212, 120, 80, 235)
+	borderDanger = rl.NewColor(220, 88, 88, 235)
+
+	textPrimary = inkPrimary
+	textMuted   = inkMuted
+	textLabel   = inkAccent
+	textDim     = inkDim
+	textHint    = inkDim
+
+	barHPHigh  = rl.NewColor(116, 200, 132, 255)
+	barHPMid   = rl.NewColor(224, 184, 88, 255)
+	barHPLow   = rl.NewColor(220, 88, 88, 255)
+	barMP      = rl.NewColor(104, 152, 224, 255)
+	barEnemyHP = rl.NewColor(204, 76, 76, 255)
+	barBurn    = rl.NewColor(240, 144, 72, 255)
+	barTrack   = rl.NewColor(10, 8, 14, 220)
+
+	// ----- Per-status accents (UI_STANDARDS.md "Per-status accents") -----
+	// Indexed by core.PartyStatusKind via partyStatusVisuals below; the
+	// raw tokens are exported here so non-party surfaces (enemy pills,
+	// future field-status overlays) can pull the same hue without
+	// re-typing the RGBs.
+	statusPoison    = rl.NewColor(148, 200, 96, 240)
+	statusBurn      = rl.NewColor(240, 144, 72, 240)
+	statusSleep     = rl.NewColor(132, 196, 232, 240)
+	statusStun      = rl.NewColor(232, 220, 120, 240)
+	statusBound     = rl.NewColor(180, 140, 220, 240)
+	statusConfused  = rl.NewColor(220, 188, 96, 240)
+	statusIngested  = rl.NewColor(200, 132, 220, 240)
+	statusDefending = rl.NewColor(132, 196, 255, 240)
+	statusDown      = rl.NewColor(220, 102, 102, 235)
+	// Outline tints paired with the fills above for the enemy-pill
+	// silhouette. Lighter / more saturated than the fill so the pill
+	// reads as a "glow with a hard rim" against the panel.
+	statusBurnOutline   = rl.NewColor(255, 200, 120, 220)
+	statusSleepOutline  = barSleepOutline
+	statusPoisonOutline = rl.NewColor(180, 232, 132, 220)
+	statusStunOutline   = rl.NewColor(248, 232, 160, 230)
 	// barSleep is the indigo-blue used for the sleep-status indicator
 	// (Z-counter beside enemy HP bars). Shares the barMP RGB but with
 	// reduced alpha so the panel reads as "soft glow" rather than the
@@ -62,13 +137,13 @@ var (
 	// source of truth — moving the door tone or chest tone is now one
 	// edit instead of three NewColor literals. Exported via theme.go
 	// as theme.MarkerXxx fields for external scenes.
-	markerStart      = rl.NewColor(255, 220, 124, 255)
-	markerChest      = rl.NewColor(232, 180, 92, 255)
-	markerChestDim   = rl.NewColor(160, 132, 78, 255)
-	markerDoor       = rl.NewColor(176, 132, 86, 255)
-	markerPack       = rl.NewColor(220, 76, 70, 255)
-	markerPackEdge   = rl.NewColor(255, 200, 200, 220)
-	markerOutline    = rl.NewColor(0, 0, 0, 220)
+	markerStart    = rl.NewColor(255, 220, 124, 255)
+	markerChest    = rl.NewColor(232, 180, 92, 255)
+	markerChestDim = rl.NewColor(160, 132, 78, 255)
+	markerDoor     = rl.NewColor(176, 132, 86, 255)
+	markerPack     = rl.NewColor(220, 76, 70, 255)
+	markerPackEdge = rl.NewColor(255, 200, 200, 220)
+	markerOutline  = rl.NewColor(0, 0, 0, 220)
 
 	// chestColors govern the chest billboard — body color, lid color,
 	// and the deeper tone for an emptied/looted chest. Pulled out here
@@ -92,9 +167,52 @@ var (
 )
 
 const (
-	cornerRadius      = float32(10)
-	smallCornerRadius = float32(6)
+	// hudEdgePad is the canonical distance every always-on HUD panel
+	// keeps from the screen edges. Pulled into theme so the minimap,
+	// turn panel, combat log, action menu, and party ribbon all
+	// honour the same margin without each one picking its own.
+	// 16 reads "comfortable margin" at 1080p without wasting too much
+	// real estate on smaller windows.
+	hudEdgePad = int32(16)
+	// hudColumnGap is the vertical spacing between stacked HUD
+	// panels in the left/right column (minimap → turn panel →
+	// combat log). Smaller than hudEdgePad so adjacent panels feel
+	// grouped rather than scattered.
+	hudColumnGap = int32(10)
+
+	// Corner radii. Smaller than the previous pass (10/6 → 4/3) so the
+	// frame reads as a hardwood mitre joint rather than a modern UI
+	// rounded tile. See UI_STANDARDS.md "Panel" section.
+	cornerRadius      = float32(4)
+	smallCornerRadius = float32(3)
 	stripeWidth       = int32(3)
+
+	// Font sizes — the FIVE permitted text sizes across the whole HUD,
+	// editor, and modal surface. See UI_STANDARDS.md "Type" section.
+	// Anything else is a bug. Picked as even divisions of the 64 pt
+	// atlas bake so every size renders sharp without subpixel sludge.
+	FontTiny    = float32(13)
+	FontSmall   = float32(16)
+	FontBody    = float32(20)
+	FontHeading = float32(26)
+	FontTitle   = float32(36)
+
+	// Letter spacing per size. Wider tracking on titles to sell the
+	// "engraved on hardwood" feel. Use these via the
+	// drawTextWithShadowStyle path; drawTextWithShadow defaults to 1.
+	FontSpacingTiny    = float32(1)
+	FontSpacingSmall   = float32(1)
+	FontSpacingBody    = float32(1)
+	FontSpacingHeading = float32(2)
+	FontSpacingTitle   = float32(3)
+
+	// woodFrameOuter / woodFrameInner are the stroke widths of the
+	// outer dark band and the inner highlight pinstripe inside the
+	// wood-panel border. Tuned so the frame reads at 1080p without
+	// dominating; modest panels still feel substantial.
+	woodFrameOuter = int32(2)
+	woodFrameBand  = int32(3)
+	woodFrameInner = int32(1)
 
 	// Heading tick markers (drawHeading underline) have a minimum width so
 	// short headings still read as labelled. Bar value text inset is the
@@ -225,13 +343,144 @@ func drawAccentStripe(panelX, panelY, panelH int32, col color.RGBA) {
 	rl.DrawRectangle(panelX+5, panelY+8, stripeWidth, panelH-16, col)
 }
 
-// drawCard fills + outlines a panel and adds the left accent stripe.
+// drawCard renders a wood-framed glass pane — the library aesthetic
+// every panel-shaped surface uses. Owns the four-layer composition
+// from UI_STANDARDS.md "Panel": outer woodDark stroke, woodMid band,
+// woodLight inner highlight, glass tint body. The `accent` parameter
+// is preserved as the optional left-spine stripe (for class-tinted
+// active actor panels, etc.); pass a zero-alpha color to skip.
+//
+// `fill` should be one of the glass tokens (glassDeep / glassMid /
+// glassWarm / glassDanger). `outline` is used as the OUTERMOST
+// stroke; callers can pass `woodDark` for the standard frame or
+// borderActive / borderDanger to tint the frame for state. The
+// woodMid band + woodLight highlight are always painted between
+// the outline and the glass body — the structural feel of the
+// frame doesn't degrade for state changes.
 func drawCard(x, y, w, h int32, fill, outline, accent color.RGBA) {
-	drawPanel(x, y, w, h, fill)
-	drawPanelOutline(x, y, w, h, outline)
+	if w <= 0 || h <= 0 {
+		return
+	}
+	// 1. Outer wood-dark stroke (the frame's edge).
+	rect := rl.NewRectangle(float32(x), float32(y), float32(w), float32(h))
+	rl.DrawRectangleRounded(rect, fixedRoundnessFor(w, h, cornerRadius), 8, outline)
+	// 2. Wood-mid band — inset by the outer stroke width.
+	band := woodFrameOuter
+	bandRect := rl.NewRectangle(float32(x+band), float32(y+band), float32(w-2*band), float32(h-2*band))
+	rl.DrawRectangleRounded(bandRect, fixedRoundnessFor(w-2*band, h-2*band, cornerRadius-1), 8, woodMid)
+	// 3. Wood-light inner highlight — thin pinstripe just outside the glass.
+	frame := woodFrameOuter + woodFrameBand
+	innerRect := rl.NewRectangle(float32(x+frame), float32(y+frame), float32(w-2*frame), float32(h-2*frame))
+	rl.DrawRectangleRounded(innerRect, fixedRoundnessFor(w-2*frame, h-2*frame, cornerRadius-2), 8, woodLight)
+	// 4. Glass body — the actual content surface.
+	innerFrame := frame + woodFrameInner
+	bodyRect := rl.NewRectangle(float32(x+innerFrame), float32(y+innerFrame), float32(w-2*innerFrame), float32(h-2*innerFrame))
+	rl.DrawRectangleRounded(bodyRect, fixedRoundnessFor(w-2*innerFrame, h-2*innerFrame, cornerRadius-3), 8, fill)
+	// 5. Optional left accent spine (class color on the active actor
+	// card, the gilt cursor mark on a list, etc).
 	if accent.A > 0 {
 		drawAccentStripe(x, y, h, accent)
 	}
+}
+
+// ListRowState enumerates the visual states a single row in a panel
+// list can take. UI_STANDARDS.md "Row" defines what each state
+// renders — Rest is bare, Hover gilds the spine + promotes text,
+// Selected pulses + underlines + uses inkAccent, Disabled mutes
+// every layer.
+type ListRowState int
+
+const (
+	ListRowRest ListRowState = iota
+	ListRowHover
+	ListRowSelected
+	ListRowDisabled
+)
+
+// drawListRow paints the panel-row chrome for one of the four
+// canonical row states. Single source of truth for "what does a
+// list row look like?" — owners pass the row rect, the helper
+// handles the inset fill, gilt spine, underline, and inset
+// padding. Returns the text rect (panel rect minus the spine
+// width + a small padding) so the caller can paint the row's
+// content without recomputing the inset.
+//
+// Owners draw row text via drawTextWithShadow at FontBody (or
+// FontSmall for dense lists). Active actor's spine is animated by
+// the caller via fadeColor + the standard pulse frequency.
+func drawListRow(rect rl.Rectangle, state ListRowState) rl.Rectangle {
+	if rect.Width <= 0 || rect.Height <= 0 {
+		return rect
+	}
+	// Inset glass plate, slightly darker than the panel body.
+	body := glassMid
+	if state == ListRowSelected {
+		body = glassWarm
+	}
+	if state == ListRowDisabled {
+		body = rl.NewColor(18, 14, 18, 130)
+	}
+	drawSmallPanel(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), body)
+
+	// Gilt left spine on Hover / Selected.
+	spineW := int32(3)
+	switch state {
+	case ListRowHover:
+		rl.DrawRectangle(int32(rect.X)+4, int32(rect.Y)+5, spineW, int32(rect.Height)-10, giltDim)
+	case ListRowSelected:
+		rl.DrawRectangle(int32(rect.X)+4, int32(rect.Y)+5, spineW, int32(rect.Height)-10, giltBright)
+		// Underline along the bottom edge — sells the "current row
+		// in a ledger" feel.
+		rl.DrawRectangle(int32(rect.X)+8, int32(rect.Y)+int32(rect.Height)-3, int32(rect.Width)-16, 1, giltDim)
+	}
+
+	// Text rect: padded past the spine on the left, breathing room
+	// on the right.
+	textPadL := float32(14)
+	textPadR := float32(8)
+	textRect := rl.NewRectangle(rect.X+textPadL, rect.Y+4, rect.Width-textPadL-textPadR, rect.Height-8)
+	return textRect
+}
+
+// drawPanelHeading paints a FontHeading title with the standard
+// wood-accent tick mark underline. Replaces the older drawHeading
+// helper (kept as an alias below). Use this for every persistent
+// HUD panel title and every modal heading.
+//
+// `accent` is the underline color — pass woodAccent for resting
+// panels, borderActive for the focused / active panel, borderDanger
+// for danger modals, etc. Header text is always inkPrimary.
+func drawPanelHeading(font rl.Font, text string, x, y float32, accent color.RGBA) {
+	drawTextWithShadowStyle(font, text, x, y, FontHeading, FontSpacingHeading, inkPrimary, shadowStrong, 1, 1)
+	measure := measurePanelHeading(font, text)
+	tickW := int32(measure.X)
+	if tickW < headingTickMinWidth {
+		tickW = headingTickMinWidth
+	}
+	rl.DrawRectangle(int32(x), int32(y+measure.Y+2), tickW, 2, accent)
+}
+
+// panelHeadingMeasureCache memoizes rl.MeasureTextEx for panel-heading
+// strings. drawPanelHeading runs every frame for every visible HUD
+// panel ("COMBAT LOG", "TURN ORDER", "AREA", "PAUSED", the action-
+// menu header, etc.). All callers use FontHeading + FontSpacingHeading
+// so the cache is keyed solely on the text and the font texture ID.
+var panelHeadingMeasureCache = make(map[string]rl.Vector2, 16)
+var panelHeadingMeasureCacheFontID uint32
+
+func measurePanelHeading(font rl.Font, text string) rl.Vector2 {
+	if font.Texture.ID != panelHeadingMeasureCacheFontID {
+		for k := range panelHeadingMeasureCache {
+			delete(panelHeadingMeasureCache, k)
+		}
+		panelHeadingMeasureCacheFontID = font.Texture.ID
+	}
+	if v, ok := panelHeadingMeasureCache[text]; ok {
+		return v
+	}
+	v := rl.MeasureTextEx(font, text, FontHeading, FontSpacingHeading)
+	panelHeadingMeasureCache[text] = v
+	return v
 }
 
 // pulse oscillates 0..1 at the given frequency in Hz.
@@ -279,6 +528,66 @@ func hpFillColor(value, maxValue int) color.RGBA {
 	}
 }
 
+// barTrackColor is the dim glass tint behind every HP/MP bar. Hoisted
+// from drawBar's body so the per-call construction of the same color
+// literal lives once at package scope, matching the pattern used by
+// minimapOutOfBoundsColor and panelsMapOutOfBoundsColor.
+var barTrackColor = rl.NewColor(8, 12, 22, 200)
+
+// barLabelMeasureCache memoizes rl.MeasureTextEx for short, constant
+// bar labels like "HP" and "MP". drawBar runs ~16 times per frame
+// across the party ribbon and enemy roster; the label measurement
+// is a cgo round-trip that returns the same value every time for a
+// given (font.Texture.ID, label) pair. Cleared whenever the active
+// font changes (font reload after a setting flip, etc.) via
+// resetBarLabelMeasureCache from the font-swap path.
+var barLabelMeasureCache = make(map[string]rl.Vector2, 8)
+
+// barLabelMeasureCacheFontID tracks the font the cache was built
+// against. raylib's rl.Font carries a Texture2D ID; if it shifts,
+// the cached pixel widths are stale and the map is cleared.
+var barLabelMeasureCacheFontID uint32
+
+func measureBarLabel(font rl.Font, label string) rl.Vector2 {
+	if font.Texture.ID != barLabelMeasureCacheFontID {
+		for k := range barLabelMeasureCache {
+			delete(barLabelMeasureCache, k)
+		}
+		barLabelMeasureCacheFontID = font.Texture.ID
+	}
+	if v, ok := barLabelMeasureCache[label]; ok {
+		return v
+	}
+	v := rl.MeasureTextEx(font, label, FontTiny, 1)
+	barLabelMeasureCache[label] = v
+	return v
+}
+
+// barValueMeasureCache memoizes rl.MeasureTextEx for value strings
+// like "10/20" rendered to the right of each HP/MP bar. drawBar
+// produces ~14 of these per frame (party HP+MP + enemy roster); the
+// string changes only on HP/MP mutation, not 60 Hz, so caching by
+// the value text catches a long run of frames where it's stable.
+// The cache grows by one entry per unique value pair seen — small,
+// since most bars hover at a handful of common HP/MP pairs.
+var barValueMeasureCache = make(map[string]rl.Vector2, 32)
+var barValueMeasureCacheFontID uint32
+
+func measureBarValue(font rl.Font, valText string) rl.Vector2 {
+	if font.Texture.ID != barValueMeasureCacheFontID {
+		for k := range barValueMeasureCache {
+			delete(barValueMeasureCache, k)
+		}
+		barValueMeasureCacheFontID = font.Texture.ID
+	}
+	if v, ok := barValueMeasureCache[valText]; ok {
+		return v
+	}
+	v := rl.MeasureTextEx(font, valText, FontSmall, 1)
+	barValueMeasureCache[valText] = v
+	return v
+}
+
 // drawBar renders a track + filled portion + thin outline, all rounded.
 // label is drawn as a small uppercase tag at the bar's left, value text on right.
 func drawBar(font rl.Font, x, y, width, height float32, label string, value, maxValue int, fill color.RGBA, muted bool) {
@@ -292,7 +601,7 @@ func drawBar(font rl.Font, x, y, width, height float32, label string, value, max
 	if pct > 1 {
 		pct = 1
 	}
-	track := rl.NewColor(8, 12, 22, 200)
+	track := barTrackColor
 	outline := borderDim
 	if muted {
 		fill = rl.NewColor(96, 84, 92, 230)
@@ -307,33 +616,41 @@ func drawBar(font rl.Font, x, y, width, height float32, label string, value, max
 	}
 	drawSmallPanelOutline(ix, iy, iw, ih, outline)
 
-	labelSize := float32(13)
-	if height < 18 {
-		labelSize = 12
+	// Bar labels (HP / MP / etc.) — always FontTiny per UI_STANDARDS.md
+	// (the bar IS small, the value text is what reads at a glance).
+	// Cream-bright color + heavy shadow so the tag pops on any fill.
+	labelSize := FontTiny
+	labelColor := inkPrimary
+	if muted {
+		labelColor = textDim
 	}
-	labelMeasure := rl.MeasureTextEx(font, label, labelSize, 1)
+	// labelSize stays FontTiny throughout; the measurement is keyed on
+	// it inside measureBarLabel for cgo-call avoidance.
+	labelMeasure := measureBarLabel(font, label)
 	labelY := y + (float32(ih)-labelMeasure.Y)/2 - 1
-	rl.DrawTextEx(font, label, rl.NewVector2(x+barLabelPadLeft, labelY+1), labelSize, 1, shadowMid)
-	rl.DrawTextEx(font, label, rl.NewVector2(x+barLabelPadLeft, labelY), labelSize, 1, fadeColor(textLabel, 1))
+	labelX := x + barLabelPadLeft
+	rl.DrawTextEx(font, label, rl.NewVector2(labelX+2, labelY+2), labelSize, 1, shadowHeavy)
+	rl.DrawTextEx(font, label, rl.NewVector2(labelX+1, labelY+1), labelSize, 1, shadowHeavy)
+	rl.DrawTextEx(font, label, rl.NewVector2(labelX, labelY), labelSize, 1, labelColor)
 
 	valText := ""
 	if maxValue > 0 {
 		valText = formatBarValue(value, maxValue)
 	}
 	if valText != "" {
-		// Value scales with bar height — taller bars get a bigger, more
-		// readable number. Bright by default; faded only when the member is
-		// muted (down). A double-offset drop shadow gives clean contrast
-		// against any fill color.
-		valSize := labelSize
-		if height > 20 {
-			valSize = labelSize + (height-20)*0.55
-		}
+		// Value text is always FontSmall per UI_STANDARDS.md — the
+		// number is the bar's readable content and stays consistent
+		// regardless of bar height. Bright by default; faded only
+		// when muted. Double-offset drop shadow for contrast on
+		// any fill.
+		valSize := FontSmall
 		valColor := textPrimary
 		if muted {
 			valColor = textDim
 		}
-		valMeasure := rl.MeasureTextEx(font, valText, valSize, 1)
+		// Value text size is locked at FontSmall inside measureBarValue;
+		// valSize stays in scope below for the draw calls.
+		valMeasure := measureBarValue(font, valText)
 		valY := y + (float32(ih)-valMeasure.Y)/2 - 1
 		valX := x + width - valMeasure.X - barValuePadRight
 		rl.DrawTextEx(font, valText, rl.NewVector2(valX+2, valY+2), valSize, 1, shadowHeavy)
@@ -343,7 +660,12 @@ func drawBar(font rl.Font, x, y, width, height float32, label string, value, max
 }
 
 func formatBarValue(value, maxValue int) string {
-	return fmt.Sprintf("%d/%d", value, maxValue)
+	// Direct strconv concat avoids the fmt formatter machinery on a
+	// path that runs once per visible bar per frame (HP + MP on every
+	// party card, plus enemy roster bars). "%d/%d" via fmt.Sprintf
+	// allocates ~3× the bytes of the result; this routes to the
+	// minimal strconv.Itoa + concat.
+	return strconv.Itoa(value) + "/" + strconv.Itoa(maxValue)
 }
 
 // drawTriangleCCW wraps rl.DrawTriangle with an explicit "vertices are in
@@ -391,31 +713,27 @@ func drawArrowMarker(center rl.Vector2, tipDx, tipDy, halfWidth float32, col col
 // titles (menu rows, debug pills) go through drawTextWithShadowStyle. Lives
 // here alongside the shadowLight/Mid/Strong/Heavy palette it consumes.
 func drawTextWithShadow(font rl.Font, text string, x, y, size float32, col color.RGBA) {
-	drawTextWithShadowStyle(font, text, x, y, size, col, shadowStrong, 1, 1)
+	drawTextWithShadowStyle(font, text, x, y, size, 1, col, shadowStrong, 1, 1)
 }
 
-// drawTextWithShadowStyle is the parametric form of drawTextWithShadow. shadowCol
-// picks the drop color (shadowLight/Mid/Strong/Heavy above); offX/offY pick the
-// drop offset in pixels. Use this when an ad-hoc shadow alpha or offset is
-// actually load-bearing (splash titles, menu rows); prefer the non-styled
-// drawTextWithShadow for everything else so HUD shadows stay consistent.
-func drawTextWithShadowStyle(font rl.Font, text string, x, y, size float32, col, shadowCol color.RGBA, offX, offY float32) {
-	rl.DrawTextEx(font, text, rl.NewVector2(x+offX, y+offY), size, 1, shadowCol)
-	rl.DrawTextEx(font, text, rl.NewVector2(x, y), size, 1, col)
+// drawTextWithShadowStyle is the parametric form of drawTextWithShadow.
+// shadowCol picks the drop color (shadowLight/Mid/Strong/Heavy above);
+// offX/offY pick the drop offset in pixels; `spacing` is the letter
+// spacing passed through to rl.DrawTextEx. Use this when an ad-hoc
+// shadow alpha, offset, or letter spacing is actually load-bearing
+// (splash titles, menu rows, the debug overlay's 1.2 spacing); prefer
+// the non-styled drawTextWithShadow for everything else so HUD shadows
+// stay consistent.
+func drawTextWithShadowStyle(font rl.Font, text string, x, y, size, spacing float32, col, shadowCol color.RGBA, offX, offY float32) {
+	rl.DrawTextEx(font, text, rl.NewVector2(x+offX, y+offY), size, spacing, shadowCol)
+	rl.DrawTextEx(font, text, rl.NewVector2(x, y), size, spacing, col)
 }
 
-// drawHeading writes a small uppercase header inside a panel, with a colored
-// underline tick to give it weight.
+// drawHeading is the legacy panel-heading helper. Routes through
+// drawPanelHeading so the heading size is the standardized FontHeading
+// across every call site — the old hand-tuned 20pt is gone. Kept as
+// an alias because dozens of call sites pass int32 coords; over time
+// they should adopt drawPanelHeading directly.
 func drawHeading(font rl.Font, text string, x, y int32, accent color.RGBA) {
-	size := float32(20)
-	spacing := float32(1.8)
-	pos := rl.NewVector2(float32(x), float32(y))
-	rl.DrawTextEx(font, text, rl.NewVector2(pos.X+1, pos.Y+1), size, spacing, shadowStrong)
-	rl.DrawTextEx(font, text, pos, size, spacing, textLabel)
-	measure := rl.MeasureTextEx(font, text, size, spacing)
-	tickW := int32(measure.X)
-	if tickW < headingTickMinWidth {
-		tickW = headingTickMinWidth
-	}
-	rl.DrawRectangle(x, y+int32(measure.Y)+5, tickW, 3, accent)
+	drawPanelHeading(font, text, float32(x), float32(y), accent)
 }

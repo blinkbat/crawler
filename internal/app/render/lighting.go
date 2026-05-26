@@ -1,11 +1,25 @@
 package render
 
 import (
+	"fmt"
 	"log"
 	"math"
+	"strings"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
+
+// fogCeilingToken is the placeholder string both fragment shaders
+// carry where they would otherwise inline the `0.85` clamp ceiling.
+// resolveShaderFogCeiling substitutes the Go fogCeiling constant in
+// before LoadShaderFromMemory, so the GLSL source has the literal
+// value once it reaches the compiler. Keeps the ceiling tuned from
+// one place — see fogCeiling in distancefog.go.
+const fogCeilingToken = "{{FOG_CEILING}}"
+
+func resolveShaderFogCeiling(src string) string {
+	return strings.ReplaceAll(src, fogCeilingToken, fmt.Sprintf("%.4f", fogCeiling))
+}
 
 const lightingVertexShader = `#version 330
 
@@ -31,6 +45,120 @@ void main() {
     gl_Position = mvp * vec4(vertexPosition, 1.0);
 }
 `
+
+// billboardFogVertexShader is the shared vertex shader for the
+// distance-fogged billboard pass. Same shape as the lighting
+// vertex shader, but without the normal pipe — raylib's billboard
+// draw doesn't supply vertex normals so the lighting shader's
+// `normalize(matNormal * vertexNormal)` would feed garbage into
+// the fragment's lighting math. We only need fragPosition (to
+// compute distance to camera) and fragTexCoord (to sample the
+// sprite atlas).
+const billboardFogVertexShader = `#version 330
+
+in vec3 vertexPosition;
+in vec2 vertexTexCoord;
+in vec4 vertexColor;
+
+uniform mat4 mvp;
+uniform mat4 matModel;
+
+out vec2 fragTexCoord;
+out vec4 fragColor;
+out vec3 fragPosition;
+
+void main() {
+    fragTexCoord = vertexTexCoord;
+    fragColor = vertexColor;
+    fragPosition = vec3(matModel * vec4(vertexPosition, 1.0));
+    gl_Position = mvp * vec4(vertexPosition, 1.0);
+}
+`
+
+// billboardFogFragmentShader is the minimal billboard pass: sample
+// the texture, mix toward fogColor by the same exponential fog
+// curve the world shader uses, output. No directional lighting —
+// billboards face the camera so a single-direction sun would just
+// flatten them anyway; the world shader does its lighting compute
+// for mesh geometry, and this leaves billboards as colored sprite
+// silhouettes that nevertheless fade into the fog like everything
+// else around them.
+//
+// {{FOG_CEILING}} is substituted at shader-load time from the Go
+// `fogCeiling` constant via resolveShaderFogCeiling, so the
+// ceiling lives in exactly one place across Go + both shaders.
+const billboardFogFragmentShader = `#version 330
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+in vec3 fragPosition;
+
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+
+uniform vec3 viewPos;
+uniform vec3 fogColor;
+uniform float fogDensity;
+
+out vec4 finalColor;
+
+void main() {
+    vec4 texel = texture(texture0, fragTexCoord);
+    vec3 base = texel.rgb * fragColor.rgb * colDiffuse.rgb;
+    float dist = length(viewPos - fragPosition);
+    float fog = 1.0 - exp(-fogDensity * dist);
+    fog = clamp(fog, 0.0, {{FOG_CEILING}});
+    vec3 lit = mix(base, fogColor, fog);
+    finalColor = vec4(lit, texel.a * fragColor.a * colDiffuse.a);
+}
+`
+
+type billboardFogShaderPipe struct {
+	shader        rl.Shader
+	locViewPos    int32
+	locFogColor   int32
+	locFogDensity int32
+}
+
+func loadBillboardFogShader() billboardFogShaderPipe {
+	shader := rl.LoadShaderFromMemory(billboardFogVertexShader, resolveShaderFogCeiling(billboardFogFragmentShader))
+	if shader.ID == 0 {
+		log.Println("render: billboard fog shader failed to compile; billboards will not fog out at distance")
+	}
+	return billboardFogShaderPipe{
+		shader:        shader,
+		locViewPos:    rl.GetShaderLocation(shader, "viewPos"),
+		locFogColor:   rl.GetShaderLocation(shader, "fogColor"),
+		locFogDensity: rl.GetShaderLocation(shader, "fogDensity"),
+	}
+}
+
+func (s billboardFogShaderPipe) unload() {
+	if s.shader.ID != 0 {
+		rl.UnloadShader(s.shader)
+	}
+}
+
+// uniformVec3Buf / uniformFloatBuf are reused across every shader-
+// uniform upload so the per-frame applyUniforms paths don't allocate
+// fresh []float32{...} slice literals for each Vec3 / Float. Renderer
+// is single-threaded; one shared scratch per shape is safe.
+var (
+	uniformVec3Buf  [3]float32
+	uniformFloatBuf [1]float32
+)
+
+func (s billboardFogShaderPipe) applyUniforms(camera rl.Camera3D, profile lightingProfile) {
+	if s.shader.ID == 0 {
+		return
+	}
+	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = camera.Position.X, camera.Position.Y, camera.Position.Z
+	rl.SetShaderValue(s.shader, s.locViewPos, uniformVec3Buf[:], rl.ShaderUniformVec3)
+	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = profile.FogColor.X, profile.FogColor.Y, profile.FogColor.Z
+	rl.SetShaderValue(s.shader, s.locFogColor, uniformVec3Buf[:], rl.ShaderUniformVec3)
+	uniformFloatBuf[0] = profile.FogDensity
+	rl.SetShaderValue(s.shader, s.locFogDensity, uniformFloatBuf[:], rl.ShaderUniformFloat)
+}
 
 // Cast shadows used to live here as a separate depth pass + PCF lookup. They
 // were removed because the multi-pass setup was fragile against raylib's
@@ -92,10 +220,15 @@ void main() {
 
     vec3 lit = base * (hemi + diffuse) * ao + sunColor * spec;
 
-    // Exponential height-aware fog
+    // Exponential height-aware fog. The ceiling preserves 15% of
+    // the lit tint at maximum distance so silhouettes don't fade
+    // to invisibility. {{FOG_CEILING}} is substituted at shader-
+    // load time from the Go fogCeiling constant — see
+    // resolveShaderFogCeiling above. ONE source of truth across Go
+    // + both shaders.
     float dist = length(viewPos - fragPosition);
     float fog = 1.0 - exp(-fogDensity * dist);
-    fog = clamp(fog, 0.0, 0.85);
+    fog = clamp(fog, 0.0, {{FOG_CEILING}});
     lit = mix(lit, fogColor, fog);
 
     finalColor = vec4(lit, texel.a * fragColor.a * colDiffuse.a);
@@ -115,7 +248,7 @@ type lightingShader struct {
 }
 
 func loadLightingShader() lightingShader {
-	shader := rl.LoadShaderFromMemory(lightingVertexShader, lightingFragmentShader)
+	shader := rl.LoadShaderFromMemory(lightingVertexShader, resolveShaderFogCeiling(lightingFragmentShader))
 	if shader.ID == 0 {
 		// Compile/link failure leaves shader.ID == 0; raylib's BeginShaderMode
 		// will silently no-op past that point, so the world draws unlit with
@@ -157,14 +290,22 @@ func (l lightingShader) applyUniforms(camera rl.Camera3D, ambient lightingProfil
 	if l.shader.ID == 0 {
 		return
 	}
-	rl.SetShaderValue(l.shader, l.locViewPos, []float32{camera.Position.X, camera.Position.Y, camera.Position.Z}, rl.ShaderUniformVec3)
-	rl.SetShaderValue(l.shader, l.locSunDirection, []float32{sunDir.X, sunDir.Y, sunDir.Z}, rl.ShaderUniformVec3)
-	rl.SetShaderValue(l.shader, l.locSunColor, []float32{ambient.SunColor.X, ambient.SunColor.Y, ambient.SunColor.Z}, rl.ShaderUniformVec3)
-	rl.SetShaderValue(l.shader, l.locAmbientColor, []float32{ambient.AmbientColor.X, ambient.AmbientColor.Y, ambient.AmbientColor.Z}, rl.ShaderUniformVec3)
-	rl.SetShaderValue(l.shader, l.locFogColor, []float32{ambient.FogColor.X, ambient.FogColor.Y, ambient.FogColor.Z}, rl.ShaderUniformVec3)
-	rl.SetShaderValue(l.shader, l.locFogDensity, []float32{ambient.FogDensity}, rl.ShaderUniformFloat)
-	rl.SetShaderValue(l.shader, l.locSpecStrength, []float32{ambient.SpecularStrength}, rl.ShaderUniformFloat)
-	rl.SetShaderValue(l.shader, l.locShadowStrength, []float32{ambient.ShadowStrength}, rl.ShaderUniformFloat)
+	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = camera.Position.X, camera.Position.Y, camera.Position.Z
+	rl.SetShaderValue(l.shader, l.locViewPos, uniformVec3Buf[:], rl.ShaderUniformVec3)
+	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = sunDir.X, sunDir.Y, sunDir.Z
+	rl.SetShaderValue(l.shader, l.locSunDirection, uniformVec3Buf[:], rl.ShaderUniformVec3)
+	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = ambient.SunColor.X, ambient.SunColor.Y, ambient.SunColor.Z
+	rl.SetShaderValue(l.shader, l.locSunColor, uniformVec3Buf[:], rl.ShaderUniformVec3)
+	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = ambient.AmbientColor.X, ambient.AmbientColor.Y, ambient.AmbientColor.Z
+	rl.SetShaderValue(l.shader, l.locAmbientColor, uniformVec3Buf[:], rl.ShaderUniformVec3)
+	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = ambient.FogColor.X, ambient.FogColor.Y, ambient.FogColor.Z
+	rl.SetShaderValue(l.shader, l.locFogColor, uniformVec3Buf[:], rl.ShaderUniformVec3)
+	uniformFloatBuf[0] = ambient.FogDensity
+	rl.SetShaderValue(l.shader, l.locFogDensity, uniformFloatBuf[:], rl.ShaderUniformFloat)
+	uniformFloatBuf[0] = ambient.SpecularStrength
+	rl.SetShaderValue(l.shader, l.locSpecStrength, uniformFloatBuf[:], rl.ShaderUniformFloat)
+	uniformFloatBuf[0] = ambient.ShadowStrength
+	rl.SetShaderValue(l.shader, l.locShadowStrength, uniformFloatBuf[:], rl.ShaderUniformFloat)
 }
 
 type lightingProfile struct {

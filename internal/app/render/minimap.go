@@ -1,34 +1,94 @@
 package render
 
 import (
-	"fmt"
 	"image/color"
+	"strconv"
 
 	"crawler/internal/app/core"
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+// stepCounterCache memoizes the formatted "step N / Total" string so
+// the HUD doesn't rebuild it every frame when nothing's changed. The
+// counter only advances when the player takes a tile-step (rare —
+// once every few hundred frames), but the minimap painted it through
+// fmt.Sprintf 60 Hz. Stash the last step and result.
+var stepCounterCache struct {
+	step    int
+	text    string
+	primed  bool
+	maxStep int
+}
+
+func stepCounterText(modStep int) string {
+	if stepCounterCache.primed &&
+		stepCounterCache.step == modStep &&
+		stepCounterCache.maxStep == core.StepsPerCycle {
+		return stepCounterCache.text
+	}
+	stepCounterCache.text = "step " + strconv.Itoa(modStep) + " / " + strconv.Itoa(core.StepsPerCycle)
+	stepCounterCache.step = modStep
+	stepCounterCache.maxStep = core.StepsPerCycle
+	stepCounterCache.primed = true
+	return stepCounterCache.text
+}
+
+// minimapOutOfBoundsColor is the dim background tone drawn for the
+// 13x13 minimap window's cells that fall outside the area's bounds.
+// Hoisted from inside the per-tile loop so the value is named once
+// and the per-tile path is a plain copy.
+var minimapOutOfBoundsColor = rl.NewColor(8, 10, 14, 235)
+
+// Minimap geometry. Width / height pre-computed so MinimapWidth /
+// MinimapBottomY (below) can be called by sibling HUD panels — the
+// turn-order column docks directly under the minimap on the left
+// edge using these values instead of duplicating the literals.
+//
+// minimapHeader is now the area-name strip (no "AREA" tick label —
+// just the name in soft type) plus a touch of top breathing room.
+// Footer is the time-of-day phase bar beneath the grid.
+const (
+	minimapCell      = int32(12)
+	minimapViewCells = int32(13)
+	minimapHeader    = int32(26)
+	minimapFooter    = int32(28) // time-of-day strip beneath the grid
+	minimapPanelW    = minimapViewCells*minimapCell + 16
+	minimapPanelH    = minimapViewCells*minimapCell + 16 + minimapHeader + minimapFooter
+)
+
+// MinimapWidth is the on-screen width of the corner minimap card.
+// Used by the turn-order / combat-log panels (which sit beneath the
+// minimap on the same left edge) so they can match its width
+// without baking in a literal.
+func MinimapWidth() int32 { return minimapPanelW }
+
+// MinimapBottomY returns the Y screen coordinate of the bottom edge
+// of the minimap card. The turn-order panel anchors here plus a
+// hudColumnGap so the two read as a single stacked column.
+func MinimapBottomY() int32 { return hudEdgePad + minimapPanelH }
+
 func drawMinimap(m core.AreaDefinition, g core.GameState, assets Resources) {
-	const (
-		cell      = int32(12)
-		viewCells = int32(13)
-		pad       = int32(20)
-		header    = int32(34)
-		footer    = int32(28) // time-of-day strip beneath the grid
-	)
+	cell := minimapCell
+	viewCells := minimapViewCells
+	pad := hudEdgePad
+	header := minimapHeader
 	p := g.Player
 	half := int(viewCells / 2)
 	startX := p.TileX - half
 	startZ := p.TileZ - half
 	gridSize := viewCells * cell
-	panelW := gridSize + 16
-	panelH := gridSize + 16 + header + footer
+	panelW := minimapPanelW
+	panelH := minimapPanelH
 
-	drawCard(pad, pad, panelW, panelH, surfacePrimary, borderSoft, borderStrong)
+	drawCard(pad, pad, panelW, panelH, surfacePrimary, borderSoft, borderSoft)
 	areaName := g.Area.Name
-	drawHeading(assets.hudFont, "AREA", pad+14, pad+10, borderStrong)
 	if areaName != "" {
-		drawTextWithShadow(assets.hudFont, areaName, float32(pad+74), float32(pad+10), 14, textMuted)
+		// Area name reads as the panel's natural label — no "AREA"
+		// tick. Centered above the grid so it doesn't crowd the
+		// upper-left wood mitre.
+		nameMeasure := rl.MeasureTextEx(assets.hudFont, areaName, FontSmall, 1)
+		nameX := float32(pad) + (float32(panelW)-nameMeasure.X)/2
+		drawTextWithShadow(assets.hudFont, areaName, nameX, float32(pad+6), FontSmall, textMuted)
 	}
 
 	gridX := pad + 8
@@ -40,7 +100,7 @@ func drawMinimap(m core.AreaDefinition, g core.GameState, assets Resources) {
 		for localX := int32(0); localX < viewCells; localX++ {
 			mapX := startX + int(localX)
 			mapZ := startZ + int(localZ)
-			col := rl.NewColor(8, 10, 14, 235)
+			col := minimapOutOfBoundsColor
 			if m.InBounds(mapX, mapZ) {
 				col = minimapTileColor(m.Materials, m.TileAt(mapX, mapZ))
 			}
@@ -48,20 +108,10 @@ func drawMinimap(m core.AreaDefinition, g core.GameState, assets Resources) {
 		}
 	}
 
-	for _, pack := range g.Packs {
-		if !core.PackAlive(pack) {
-			continue
-		}
-		localX := pack.TileX - startX
-		localZ := pack.TileZ - startZ
-		if localX < 0 || localZ < 0 || localX >= int(viewCells) || localZ >= int(viewCells) {
-			continue
-		}
-		x := gridX + int32(localX)*cell + cell/2
-		z := gridY + int32(localZ)*cell + cell/2
-		rl.DrawCircle(x, z, 4, mapPackMarkerColor)
-		rl.DrawCircleLines(x, z, 5, mapPackMarkerOutline)
-	}
+	// Pack markers intentionally omitted from the corner minimap too:
+	// matches the Map panel's fog-of-war rule (terrain only, enemies
+	// stay off the map). The world view is the only place to see who's
+	// around.
 
 	drawMinimapArrow(
 		rl.NewVector2(float32(gridX+gridSize/2), float32(gridY+gridSize/2)),
@@ -101,6 +151,9 @@ func init() {
 var minimapPropColors = map[byte]rl.Color{
 	core.TileTree:              rl.NewColor(42, 132, 56, 240),
 	core.TileTreeXL:            rl.NewColor(28, 102, 44, 240),
+	core.TileTreeTall:          rl.NewColor(36, 118, 50, 240),
+	core.TileTreeTwin:          rl.NewColor(40, 124, 58, 240),
+	core.TileTreeYoung:         rl.NewColor(96, 168, 88, 240),
 	core.TileRockLarge:         rl.NewColor(120, 116, 108, 240),
 	core.TileBushLarge:         rl.NewColor(110, 168, 92, 240),
 	core.TileCrate:             rl.NewColor(168, 122, 72, 240),
@@ -156,10 +209,10 @@ func drawMinimapTimeOfDay(font rl.Font, stepCount int, x, y, width int32) {
 	phase, progress := core.PhaseAtStep(stepCount)
 	name := core.PhaseName(phase)
 	// Line 1: "DAWN  step 12 / 150" (left-aligned phase, right-aligned counter).
-	drawTextWithShadow(font, name, float32(x), float32(y), 14, textPrimary)
-	counter := fmt.Sprintf("step %d / %d", stepCount%core.StepsPerCycle, core.StepsPerCycle)
-	measure := rl.MeasureTextEx(font, counter, 12, 1)
-	drawTextWithShadow(font, counter, float32(x)+float32(width)-measure.X, float32(y)+1, 12, textHint)
+	drawTextWithShadow(font, name, float32(x), float32(y), FontSmall, textPrimary)
+	counter := stepCounterText(stepCount % core.StepsPerCycle)
+	measure := rl.MeasureTextEx(font, counter, FontTiny, 1)
+	drawTextWithShadow(font, counter, float32(x)+float32(width)-measure.X, float32(y)+1, FontTiny, textHint)
 	// Line 2: thin track, with the phase highlighted as a 1/N segment that
 	// fills as the player walks through it.
 	trackY := y + 18

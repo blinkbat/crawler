@@ -11,6 +11,11 @@ import (
 type Resources struct {
 	materials  map[core.MaterialSet]worldMaterialResources
 	skyTexture rl.Texture2D
+	// starTexture is a transparent overlay sampled by DrawSkyBackground
+	// on top of skyTexture. Alpha varies with the time-of-day curve
+	// (timeProfile.StarAlpha), so the layer fades in through evening,
+	// peaks at midnight, and washes out through dawn.
+	starTexture rl.Texture2D
 	// enemyVisuals is the kind→billboard lookup. Multiple kinds can
 	// alias the same texture (placeholder sprites for new monsters),
 	// so it does NOT own the underlying handles — Unload would
@@ -22,8 +27,9 @@ type Resources struct {
 	hudFont       rl.Font
 	hudFontOwned  bool
 
-	lighting lightingShader
-	tree     treeModel
+	lighting     lightingShader
+	billboardFog billboardFogShaderPipe
+	tree         treeModel
 
 	// Field-only props. Boulders / bushes / mushrooms are scattered as
 	// blockers (large) or procedural decorations (small/tiny) when the
@@ -40,15 +46,30 @@ type Resources struct {
 
 	// New decor models keyed by decor-layer char (tall grass, flowers,
 	// clover, reeds, bones, scorch, blood, cobweb, stump, log, leaf pile).
-	// world.go checks this map before falling back to the existing
-	// bush/mushroom/pebble auto-scatter cases.
+	// Authoring + Unload iteration uses the map; the per-tile-per-frame
+	// renderer reads decorModelTable below for array-indexed dispatch.
 	decorModels map[byte]propModel
+	// decorModelTable is the [256]propModel mirror of decorModels,
+	// held by pointer so passing Resources by value (drawDecor,
+	// DrawWorld, ...) stays cheap — we'd otherwise copy ~12KB of
+	// table per call. The world-draw hot path reads it once per
+	// tile per frame; an array index is cheaper than the map hash.
+	// "Registered" check is len(parts) > 0 — every load* helper builds
+	// at least one part, so an empty slice means "not registered for
+	// this char." The map stays as the authored source and as the
+	// Unload iteration target so freeing handles is map-safe.
+	decorModelTable *[256]propModel
 
 	// New blocking props keyed by props-layer char (crate, barrel, urn,
 	// stalagmite, pillar, broken pillar, statue, obelisk, fountain). Same
 	// dispatch shape as decorModels — the renderer falls back to the
 	// existing tree/boulder/bush cases when a char isn't here.
 	propModels map[byte]propModel
+	// propModelTable is the [256]propModel mirror of propModels, by
+	// pointer for the same Resources-pass-by-value reason as
+	// decorModelTable. Indexed dispatch on the hot path; map remains
+	// for authoring and Unload.
+	propModelTable *[256]propModel
 
 	// doorProp is the area-transition doorframe drawn at every g.Doors
 	// entry. One shared model — rotated per-door by the authored
@@ -95,6 +116,7 @@ func LoadResources() (r Resources) {
 	}()
 
 	r.lighting = loadLightingShader()
+	r.billboardFog = loadBillboardFogShader()
 
 	dungeonMat := loadWorldMaterial(makeStoneBrickPixels(128, 128), makeStoneFloorPixels(128, 128), r.lighting.shader)
 	fieldMat := loadWorldMaterial(makeRockWallPixels(128, 128), makeGrassPixels(128, 128), r.lighting.shader)
@@ -116,6 +138,14 @@ func LoadResources() (r Resources) {
 	rl.GenTextureMipmaps(&r.skyTexture)
 	rl.SetTextureFilter(r.skyTexture, rl.FilterTrilinear)
 	rl.SetTextureWrap(r.skyTexture, rl.WrapClamp)
+
+	// Star overlay: same dimensions as the sky so source-rect math
+	// in DrawSkyBackground works on either texture without a per-call
+	// branch. Point filter (no mipmaps, no trilinear) keeps the
+	// pinpoint stars from blurring into wide smudges at small dest
+	// scales — a star is a 1- or 2-pixel highlight by design.
+	r.starTexture = loadTexture(makeStarPixels(1024, 512), 1024, 512, rl.FilterPoint)
+	rl.SetTextureWrap(r.starTexture, rl.WrapClamp)
 
 	r.enemyVisuals, r.enemyTextures = loadEnemyVisuals()
 
@@ -160,6 +190,15 @@ func LoadResources() (r Resources) {
 	r.specialFloors[core.FloorDeepWater] = loadFloorModel(makeDeepWaterPixels(128, 128), r.lighting.shader)
 	r.specialFloors[core.FloorSand] = loadFloorModel(makeSandPixels(128, 128), r.lighting.shader)
 	r.specialFloors[core.FloorSnow] = loadFloorModel(makeSnowPixels(128, 128), r.lighting.shader)
+	// Grass / dirt / dark grass / stone are also universal — without these,
+	// painting "Grass" or "Stone" inside a dungeon-material map silently
+	// reuses the material's base floorModel and looks identical to default,
+	// because the per-material variant switch in drawFloorTile only kicks
+	// in when hasFloorVariant is true (field-only).
+	r.specialFloors[core.FloorGrass] = loadFloorModel(makeGrassPixels(128, 128), r.lighting.shader)
+	r.specialFloors[core.FloorDirt] = loadFloorModel(makeDirtPixels(128, 128), r.lighting.shader)
+	r.specialFloors[core.FloorDarkGrass] = loadFloorModel(makeDarkGrassPixels(128, 128), r.lighting.shader)
+	r.specialFloors[core.FloorStone] = loadFloorModel(makeStoneFloorPixels(128, 128), r.lighting.shader)
 
 	// Stone family textures for the new prop set. Each loader owns the
 	// texture handle outright via setModelTexture so unload-by-model is
@@ -263,8 +302,28 @@ func LoadResources() (r Resources) {
 	assertDecorCoverage(r.decorModels)
 	assertPropCoverage(r.propModels)
 
+	// Flatten the maps into [256]propModel tables so the per-tile draw
+	// path is an array index instead of a map hash. Built once after
+	// the maps are fully populated; the maps remain authoritative for
+	// Unload + assertion paths.
+	r.decorModelTable = flattenModelTable(r.decorModels)
+	r.propModelTable = flattenModelTable(r.propModels)
+
 	committed = true
 	return r
+}
+
+// flattenModelTable copies every (char, propModel) pair from the
+// authored map into a heap-allocated [256]propModel and returns a
+// pointer to it. Callers store the pointer on Resources so passing
+// Resources by value remains cheap; the underlying array doesn't move
+// after this returns.
+func flattenModelTable(src map[byte]propModel) *[256]propModel {
+	t := new([256]propModel)
+	for c, pm := range src {
+		t[c] = pm
+	}
+	return t
 }
 
 // inlineDecorRenderer is the per-tile drawing closure for a decor
@@ -275,9 +334,9 @@ func LoadResources() (r Resources) {
 type inlineDecorRenderer func(assets Resources, x, z int, cx, cz float32)
 
 // inlineDecorHandlers is the SINGLE source of truth for inline decor
-// dispatch — both world.go's drawDecor and assertDecorCoverage read
-// from it. Adding a new inline-rendered decor char is one map entry
-// plus one helper function; the coverage assert and the renderer both
+// dispatch — assertDecorCoverage reads from it. Adding a new inline-
+// rendered decor char is one map entry plus one helper function; the
+// coverage assert and the renderer (via inlineDecorTable below) both
 // pick it up without further edits. Replaces the older parallel
 // inlineDecorChars set + open-coded switch in world.go that could
 // drift silently.
@@ -287,6 +346,21 @@ var inlineDecorHandlers = map[byte]inlineDecorRenderer{
 	core.DecorPebble:   drawDecorPebble,
 }
 
+// inlineDecorTable is the [256]inlineDecorRenderer mirror of
+// inlineDecorHandlers, indexed by the decor-layer char. The world-draw
+// hot path probes one cell per tile per frame; at 64x64 maps that's
+// 4096 lookups, so array index beats map hash. The map stays as the
+// authored source of truth; this table is a generated mirror so adding
+// a handler is still a single-place edit.
+var inlineDecorTable = buildInlineDecorTable()
+
+func buildInlineDecorTable() [256]inlineDecorRenderer {
+	var t [256]inlineDecorRenderer
+	for c, fn := range inlineDecorHandlers {
+		t[c] = fn
+	}
+	return t
+}
 
 // assertDecorCoverage panics if any char in core.DecorTileChars is
 // missing from decorModels AND not inline-handled. Mirrors the shape
@@ -326,8 +400,10 @@ func isDecorFootprintTail(c byte) bool {
 // rendered through a specialized path. Same shape as
 // inlineDecorRenderer but tied to the props-layer dispatch — props
 // pre-compute `propYawDeg` once per tile, so the handler takes it
-// pre-resolved.
-type inlinePropRenderer func(assets Resources, center rl.Vector3, propYaw float32)
+// pre-resolved. `x, z` are the tile coords so handlers can seed
+// per-tile shape variance (canopy fullness, scale jitter, tint walk)
+// from `tileHash(x, z)` without rederiving coordinates from `center`.
+type inlinePropRenderer func(assets Resources, x, z int, center rl.Vector3, propYaw float32)
 
 // inlinePropHandlers is the SINGLE source of truth for inline prop
 // dispatch — both world.go's drawWorld switch and assertPropCoverage
@@ -336,10 +412,34 @@ type inlinePropRenderer func(assets Resources, center rl.Vector3, propYaw float3
 // Resources fields. Adding a new inline-rendered prop is one map
 // entry plus one helper function.
 var inlinePropHandlers = map[byte]inlinePropRenderer{
-	core.TileTree:      drawPropTree,
-	core.TileTreeXL:    drawPropTreeXL,
+	// The four scaled-tree variants share one closure factory keyed
+	// by char (treePropScales table). drawPropTreeTwin stays separate
+	// because it draws two instances per tile with offsets.
+	core.TileTree:      drawPropTreeScaled(core.TileTree),
+	core.TileTreeXL:    drawPropTreeScaled(core.TileTreeXL),
+	core.TileTreeTall:  drawPropTreeScaled(core.TileTreeTall),
+	core.TileTreeYoung: drawPropTreeScaled(core.TileTreeYoung),
+	core.TileTreeTwin:  drawPropTreeTwin,
 	core.TileRockLarge: drawPropRockLarge,
 	core.TileBushLarge: drawPropBushLarge,
+}
+
+// inlinePropTable is the [256]inlinePropRenderer index built once from
+// inlinePropHandlers above. The world-draw hot path looks up tens of
+// thousands of tiles per frame on a large map; array indexing skips
+// the map hash + bounds check the map lookup needed. Nil entries
+// mean "not an inline-handled prop" — caller falls through to the
+// footprint / propModels paths as before. The map stays as the
+// authored source of truth (assertPropCoverage reads it); the table
+// is a generated mirror.
+var inlinePropTable = buildInlinePropTable()
+
+func buildInlinePropTable() [256]inlinePropRenderer {
+	var t [256]inlinePropRenderer
+	for c, fn := range inlinePropHandlers {
+		t[c] = fn
+	}
+	return t
 }
 
 // assertPropCoverage is the props-layer analogue of
@@ -390,6 +490,7 @@ func (r Resources) Unload() {
 		}
 	}
 	rl.UnloadTexture(r.skyTexture)
+	rl.UnloadTexture(r.starTexture)
 	// Walk enemyTextures (the owning list), NOT enemyVisuals — the map
 	// aliases the same handle at multiple keys (placeholder sprites for
 	// the new monsters) and iterating it would double-free every shared
@@ -415,6 +516,7 @@ func (r Resources) Unload() {
 		p.unload()
 	}
 	r.lighting.unload()
+	r.billboardFog.unload()
 	if r.hudFontOwned {
 		rl.UnloadFont(r.hudFont)
 	}
@@ -515,6 +617,16 @@ func loadEnemyVisuals() (map[core.EnemyKind]enemyVisual, []rl.Texture2D) {
 	goblinMageTexture := loadEnemySprite(makeGoblinMagePixels(72, 112), 72, 112, &owned)
 	amoebaTexture := loadEnemySprite(makeAmoebaPixels(96, 80), 96, 80, &owned)
 	mantrapTexture := loadEnemySprite(makeVenusMantrapPixels(88, 128), 88, 128, &owned)
+	// Roster-expansion sprites. Dimensions sized to each kind's
+	// silhouette role: spider is wide+short, golem is the biggest
+	// (tier-5 anchor), wisp is narrow+tall (floating), bat/necro/
+	// skeleton are humanoid-ish at ~72×112.
+	caveSpiderTexture := loadEnemySprite(makeCaveSpiderPixels(88, 72), 88, 72, &owned)
+	vampireBatTexture := loadEnemySprite(makeVampireBatPixels(96, 88), 96, 88, &owned)
+	wispTexture := loadEnemySprite(makeWispPixels(56, 72), 56, 72, &owned)
+	stoneGolemTexture := loadEnemySprite(makeStoneGolemPixels(96, 120), 96, 120, &owned)
+	necromancerTexture := loadEnemySprite(makeNecromancerPixels(72, 112), 72, 112, &owned)
+	skeletonTexture := loadEnemySprite(makeSkeletonPixels(72, 112), 72, 112, &owned)
 	visuals := map[core.EnemyKind]enemyVisual{
 		core.EnemyRat: {
 			texture: ratTexture,
@@ -558,6 +670,46 @@ func loadEnemyVisuals() (map[core.EnemyKind]enemyVisual, []rl.Texture2D) {
 			// is the showpiece, so the sprite needs the vertical room.
 			size: rl.NewVector2(1.20, 1.80),
 		},
+		// Roster expansion — each new kind now has a dedicated sprite
+		// painted in makeXxxPixels (textures.go). Sizes tuned to each
+		// silhouette's identity rather than copying a placeholder
+		// alias's ratio.
+		core.EnemyCaveSpider: {
+			texture: caveSpiderTexture,
+			// Wide + low — the abdomen-front silhouette reads as
+			// "ground-skittering ambusher" at any zoom.
+			size: rl.NewVector2(1.10, 0.95),
+		},
+		core.EnemyVampireBat: {
+			texture: vampireBatTexture,
+			// Slightly larger than the cave bat so the wingspan
+			// reads as the upgraded variant at a glance.
+			size: rl.NewVector2(1.12, 1.00),
+		},
+		core.EnemyWisp: {
+			texture: wispTexture,
+			// Narrow + tall — sells the floating-orb identity and
+			// distinguishes the silhouette from the goblin family.
+			size: rl.NewVector2(0.65, 0.92),
+		},
+		core.EnemyStoneGolem: {
+			texture: stoneGolemTexture,
+			// Biggest in the roster — anchors a pack and reads as
+			// a tier-5 threat across the arena.
+			size: rl.NewVector2(1.55, 1.95),
+		},
+		core.EnemyNecromancer: {
+			texture: necromancerTexture,
+			// Tall robed silhouette — distinct from the goblin mage
+			// (stouter robe + bone-staff vs orb-staff).
+			size: rl.NewVector2(1.05, 1.70),
+		},
+		core.EnemySkeleton: {
+			texture: skeletonTexture,
+			// Tier-2 grunt — sized to match the goblin family so
+			// mixed packs read as a unified front line.
+			size: rl.NewVector2(0.95, 1.50),
+		},
 	}
 	// Coverage assert: every EnemyKind registered in core must have a
 	// visual entry here. Without this, a new enemy silently rendered as
@@ -572,6 +724,55 @@ func loadEnemyVisuals() (map[core.EnemyKind]enemyVisual, []rl.Texture2D) {
 	return visuals, owned
 }
 
+// hudFontCodepoints is the rune set baked into the HUD font atlas.
+// LoadFontEx(path, size, nil) only loads the default ASCII range
+// (32..126); anything outside that — arrows, triangles, ×, °, ±, é —
+// renders as a missing-glyph box that reads on screen as "?". We
+// pre-enumerate every non-ASCII rune the codebase actually uses
+// (turn-order arrows, pack-edit ▲/▼/×, action-row ▶, stat ±, etc.)
+// plus standard ASCII so the atlas covers everything the renderer
+// might pass at runtime.
+//
+// Adding a new symbol to the HUD requires extending this list — the
+// font atlas is built once at LoadResources, so missing entries
+// silently fall back to "?".
+var hudFontCodepoints = buildHUDFontCodepoints()
+
+func buildHUDFontCodepoints() []rune {
+	runes := make([]rune, 0, 128)
+	// Standard printable ASCII (space through tilde).
+	for r := rune(32); r <= 126; r++ {
+		runes = append(runes, r)
+	}
+	// Extras used across HUD, editor, and combat surfaces. Source for
+	// each: enumerated from the codebase's non-ASCII runes; comment
+	// describes where it appears so future readers can extend with
+	// confidence.
+	runes = append(runes,
+		'°', // degrees — debug overlay, facing readouts
+		'±', // stat deltas (level-up modal, future tuning UI)
+		'×', // pack-size badge ("×4"), pack-edit remove button
+		'é', // foreign names ("Mêlée" if ever added; here for cushion)
+		'–', // en-dash (modal headers / range "1–10")
+		'—', // em-dash (long-form labels)
+		'…', // ellipsis (truncated names / "loading…")
+		'←', // editor pan / movement hints
+		'↑', // turn-order / list cursor
+		'→', // action arrows ("Attack → Rat")
+		'↓', // turn-order / list cursor
+		'↔', // bidirectional links (door pair)
+		'∈', // set membership (future stat / skill notation)
+		'−', // unicode minus (distinct from ASCII hyphen)
+		'≈', // approximate (timing-grade hints)
+		'≤', // less-than-or-equal (thresholds)
+		'▲', // pack-edit reorder up, list arrows
+		'▶', // action-row submenu indicator
+		'▼', // pack-edit reorder down, list arrows
+		'●', // bullet / active marker
+	)
+	return runes
+}
+
 func loadHUDFont() (rl.Font, bool) {
 	// Try a per-OS list of well-known system font paths. First valid hit wins.
 	// Fallback is raylib's bitmap default font, which has different metrics —
@@ -580,7 +781,11 @@ func loadHUDFont() (rl.Font, bool) {
 		if _, err := os.Stat(path); err != nil {
 			continue
 		}
-		font := rl.LoadFontEx(path, 32, nil)
+		// 64 pt bake: the five UI_STANDARDS.md sizes (13/16/20/26/36)
+		// all downsample from this without subpixel mush. The previous
+		// 32 pt bake was sharp at Body (20) but slightly soft at
+		// Heading (26) and noticeably blurry at Title (36).
+		font := rl.LoadFontEx(path, 64, hudFontCodepoints)
 		if rl.IsFontValid(font) {
 			rl.SetTextureFilter(font.Texture, rl.FilterBilinear)
 			return font, true
@@ -589,33 +794,40 @@ func loadHUDFont() (rl.Font, bool) {
 	return rl.GetFontDefault(), false
 }
 
-// systemFontCandidates returns the per-OS preferred-font paths in priority
-// order. Picks "UI sans-serif" fonts for the body of the HUD on each platform.
+// systemFontCandidates returns the per-OS preferred-font paths in
+// priority order. The Library aesthetic (see UI_STANDARDS.md "Type")
+// uses a refined SERIF face — Constantia is the first choice on
+// Windows because it was specifically designed for body copy at
+// small sizes; the rest of the chain falls back to other readable
+// serifs and finally to the platform's default sans if none exist.
+// LoadFontEx is called with a 64 pt bake so the five standard sizes
+// (Tiny/Small/Body/Heading/Title) all render sharp.
 func systemFontCandidates() []string {
 	switch runtime.GOOS {
 	case "windows":
 		return []string{
-			`C:\Windows\Fonts\seguisb.ttf`,
-			`C:\Windows\Fonts\segoeui.ttf`,
-			`C:\Windows\Fonts\bahnschrift.ttf`,
-			`C:\Windows\Fonts\consola.ttf`,
+			`C:\Windows\Fonts\constan.ttf`,  // Constantia — refined serif, the headline choice
+			`C:\Windows\Fonts\cambria.ttc`,  // Cambria — second-best serif
+			`C:\Windows\Fonts\georgia.ttf`,  // Georgia — classic web serif fallback
+			`C:\Windows\Fonts\pala.ttf`,     // Palatino Linotype — older alternate
+			`C:\Windows\Fonts\seguisb.ttf`,  // Segoe UI Semibold — final sans fallback
 		}
 	case "darwin":
 		return []string{
+			"/System/Library/Fonts/Supplemental/Georgia.ttf",
+			"/Library/Fonts/Georgia.ttf",
+			"/System/Library/Fonts/Supplemental/Palatino.ttc",
+			"/System/Library/Fonts/Times.ttc",
 			"/System/Library/Fonts/SFNS.ttf",
-			"/System/Library/Fonts/SFNSDisplay.ttf",
-			"/System/Library/Fonts/Helvetica.ttc",
-			"/Library/Fonts/Arial.ttf",
 		}
 	default: // linux / *bsd / others — try the most common distro paths.
 		return []string{
-			"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-			"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-			"/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
-			"/usr/share/fonts/TTF/DejaVuSans.ttf",
-			"/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-			"/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-			"/usr/share/fonts/noto/NotoSans-Regular.ttf",
+			"/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+			"/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
+			"/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+			"/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf",
+			"/usr/share/fonts/noto/NotoSerif-Regular.ttf",
+			"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", // final sans fallback
 		}
 	}
 }

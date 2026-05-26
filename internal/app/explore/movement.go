@@ -19,47 +19,49 @@ func Update(g *core.GameState) {
 		dt = 1.0 / 15.0
 	}
 
-	// The level-up modal sits above every other overlay — the player
-	// MUST allocate the points they just earned before drifting back
-	// into exploration (or a chest, or the pause menu). No Esc-out:
-	// PendingLevelUps reads as a debt the player owes the system.
-	if g.LevelUpOpen {
+	// Modal priority — single source of truth lives in core.ActiveModal
+	// so any future scene that needs the same "what overlay is on top?"
+	// answer reads from one helper instead of replicating the if-chain.
+	// Each modal has its own updater here; the order of update calls
+	// is determined entirely by ActiveModal's enum ladder.
+	//
+	// Notes per modal:
+	//   - LevelUp: no Esc-out (PendingLevelUps reads as a debt the
+	//     player owes the system).
+	//   - Panels: out-of-battle only; the open path further down
+	//     refuses to open during combat to keep the timing-bar window
+	//     honest.
+	//   - Chest: Esc inside a chest closes the chest, not the game.
+	//   - PauseMenu: routes input through the menu; pause-key edges
+	//     toggle the menu from either state.
+	switch core.ActiveModal(g) {
+	case core.ModalLevelUp:
 		updateLevelUpModal(g)
 		return
-	}
-
-
-	// Game panels overlay (Stats / Equipment / Items / Skills / Map)
-	// gates above chest / pause / battle so the player can't drift
-	// the world while flipping through inventory. Out-of-battle only —
-	// the toggle below refuses to open during combat to keep the
-	// timing-bar window honest.
-	if g.PanelsOpen {
+	case core.ModalPanels:
 		updatePanels(g)
 		return
-	}
-	if input.PanelsTogglePressed() && !g.Battle.Active() {
-		openPanels(g)
-		return
-	}
-
-	// The chest modal sits above movement but below the pause menu — Esc
-	// from inside a chest closes the chest, not the game. Handled first so
-	// the player can't drift around (or open the pause menu) while a chest
-	// dialog is showing on screen.
-	if g.ChestOpen >= 0 {
+	case core.ModalChest:
 		updateChestModal(g)
 		return
-	}
-
-	// The pause menu sits above the simulation: when it's open we route input
-	// through the menu instead of advancing battle / explore. Pause-key edges
-	// toggle the menu from either state, but during battle the toggle is
-	// gated on a non-timing phase so the player can't pause through a timing
-	// bar (which would skip the input window).
-	if g.MenuOpen {
+	case core.ModalPauseMenu:
 		updateMenu(g)
 		return
+	}
+
+	// Panels-open shortcut. Sits between the modal dispatch and the
+	// pause-key check so the player can press I / middle-button to
+	// jump into the overlay without first toggling pause off.
+	if !g.Battle.Active() {
+		if input.PanelsTogglePressed() {
+			openPanels(g)
+			return
+		}
+		if tab, ok := input.PanelTabShortcutPressed(); ok {
+			openPanels(g)
+			g.PanelsTab = tab
+			return
+		}
 	}
 	pause := input.PausePressed(g.Battle.Active())
 	if pause && pauseAllowed(g) {
@@ -74,19 +76,19 @@ func Update(g *core.GameState) {
 	}
 
 	updateFreeLook(&g.Player, dt)
-	if g.Player.Anim.Kind == core.AnimNone && startAdjacent(g) {
-		return
-	}
+	// Tick pack animations every explore frame so an in-flight step
+	// (armed when the AI applied a move) eases tile-to-tile alongside
+	// the player's own animation. Independent of whether the player
+	// is mid-step, so a wandering pack still moves while the player
+	// stands still.
+	core.TickPackAnimations(g, dt)
 	// Confirm key opens an adjacent chest. Checked before movement so a
 	// "step forward + Enter" muscle-memory press doesn't double as a step
 	// in the chest's direction.
 	if g.Player.Anim.Kind == core.AnimNone && tryOpenAdjacentChest(g) {
 		return
 	}
-	updatePlayer(g)
-	if !g.Battle.Active() && g.Player.Anim.Kind == core.AnimNone {
-		startAdjacent(g)
-	}
+	updatePlayer(g, dt)
 }
 
 // tryOpenAdjacentChest is the Confirm-key interaction for chests. If
@@ -175,8 +177,7 @@ func updateFreeLook(p *core.Player, dt float32) {
 	p.LookPitch = core.Approach(p.LookPitch, 0, core.FreeLookReturnSpeed*dt)
 }
 
-func updatePlayer(g *core.GameState) {
-	dt := rl.GetFrameTime()
+func updatePlayer(g *core.GameState, dt float32) {
 	p := &g.Player
 
 	if p.Anim.Kind != core.AnimNone {
@@ -205,14 +206,29 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	rx, rz := core.FacingVector(core.NormalizeFacing(p.Facing + 1))
 	targetX := p.TileX + dx*forward + rx*strafe
 	targetZ := p.TileZ + dz*forward + rz*strafe
-	if g.Area.BlockedAt(targetX, targetZ) {
+	// Step-into-pack starts a battle WITHOUT applying the move: the
+	// player stays on the current tile and the battle splash takes
+	// over. Checked BEFORE CanEnterTile so the engagement signal isn't
+	// swallowed by the generic blocker rule. Pack-AI rolls happen on
+	// a successful step, so we run them only when this branch DOESN'T
+	// fire.
+	if idx := core.PackIndexAtTile(g.Packs, targetX, targetZ); idx >= 0 {
+		if startTurnToTile(p, targetX, targetZ) {
+			return
+		}
+		// Snap the engaging pack to its tile so the battle splash
+		// doesn't show it mid-step. Mirrors the AI-side engagement
+		// snap inside tickPackAI.
+		core.SnapPackToTile(&g.Packs[idx])
+		battle.Start(g, idx)
 		return
 	}
-	// Chests block the tile they sit on — even after being looted — so
-	// the open lid keeps its position and the player can't walk through
-	// the model. Handled here rather than in core.BlockedAt because the
-	// chest list is runtime state, not part of AreaDefinition.
-	if core.ChestIndexAt(g.Chests, targetX, targetZ) >= 0 {
+	// Everything else (walls, props, deep water, chests, other packs)
+	// goes through CanEnterTile so the rule lives in one place.
+	// AllowDoorTile=true because the player stepping onto a door fires
+	// a transition; the engagement branch above already consumed the
+	// pack-tile case, so we don't need OccupiedPacks here.
+	if !core.CanEnterTile(g, targetX, targetZ, core.EnterOpts{AllowDoorTile: true}) {
 		return
 	}
 
@@ -225,13 +241,24 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	// Hooking the tick here lines it up with the player's most natural
 	// "unit of time outside combat" — one tile traversed.
 	core.TickPoisonStep(g)
-	// Fog-of-war reveal: every successful step marks the destination
-	// tile visited so the Map panel can paint unexplored cells dimmer.
-	// The Visited grid is allocated for the full Area dimensions in
-	// NewGameState; bounds-check defensively in case a future editor
-	// path produces a state that pre-dates the grid.
-	if g.Area.InBounds(targetX, targetZ) && targetZ < len(g.Visited) && targetX < len(g.Visited[targetZ]) {
-		g.Visited[targetZ][targetX] = true
+	// Fog-of-war reveal: every step paints the 3×3 window centered on
+	// the player onto Visited, so the map shows the immediate vicinity
+	// even when the player only ever brushed past a tile. Radius is a
+	// fixed game-design constant (one tile of sight) — when we ever
+	// want torchlight / vision modifiers, they pipe a different radius
+	// into RevealRadius here instead of a second reveal pass.
+	core.RevealRadius(g, targetX, targetZ, core.SightRadius)
+	// Junkyard-dog AI tick: each alive pack rolls (independently) on
+	// every successful player step. If a pack lands on the player,
+	// initiate the battle and snap the player's VISUAL coords to the
+	// new tile center so the splash doesn't show them mid-animation
+	// frozen at the previous tile. The step animation is skipped on
+	// engagement — battle takes the camera over immediately anyway.
+	if engagedPack := tickPackAI(g); engagedPack >= 0 {
+		p.X = core.TileCenter(targetX)
+		p.Z = core.TileCenter(targetZ)
+		battle.Start(g, engagedPack)
+		return
 	}
 	p.Anim = core.Animation{
 		Kind:     core.AnimStep,
@@ -352,27 +379,42 @@ func tryQueueDoorTransition(g *core.GameState) {
 	}
 }
 
-func adjacentPackIndex(packs []core.Pack, tileX, tileZ int) int {
-	for i, p := range packs {
-		if !core.PackAlive(p) {
+// tickPackAI advances every alive pack one step under the
+// junkyard-dog rules in core.PlanPackSteps. Returns the index of a
+// pack that walked onto the player's tile (battle should start with
+// that pack), or -1 if no engagement happened this tick. Packs that
+// chose to move have their tile AND animation updated; non-movers
+// leave g.Packs alone so a paused pack just stays put.
+//
+// Engagement-on-AI-step is a hard win for the pack — there's no
+// "turn to face" pre-amble like the player-side step-into path,
+// because the pack chose the contact, not the player. The visual
+// pack X/Z is snapped to the engagement tile so the battle splash
+// doesn't show the pack mid-step.
+func tickPackAI(g *core.GameState) int {
+	plans := core.PlanPackSteps(g)
+	engaged := -1
+	for _, plan := range plans {
+		if !plan.Moved {
 			continue
 		}
-		if core.AbsInt(p.TileX-tileX)+core.AbsInt(p.TileZ-tileZ) == 1 {
-			return i
+		if plan.PackIdx < 0 || plan.PackIdx >= len(g.Packs) {
+			continue
+		}
+		p := &g.Packs[plan.PackIdx]
+		// Arm the visual animation BEFORE updating TileX/TileZ so
+		// StartPackStep captures the current pack.X/Z as the "from"
+		// (they still match the previous tile's center). The tile
+		// update below jumps the logical position so collision /
+		// AI planning on subsequent packs in this same tick see the
+		// new occupancy via PlanPackSteps' own reservation.
+		core.StartPackStep(p, plan.NextX, plan.NextZ)
+		p.TileX = plan.NextX
+		p.TileZ = plan.NextZ
+		if plan.EngagePlayer && engaged < 0 {
+			engaged = plan.PackIdx
+			core.SnapPackToTile(p)
 		}
 	}
-	return -1
-}
-
-func startAdjacent(g *core.GameState) bool {
-	packIndex := adjacentPackIndex(g.Packs, g.Player.TileX, g.Player.TileZ)
-	if packIndex < 0 {
-		return false
-	}
-	pack := g.Packs[packIndex]
-	if startTurnToTile(&g.Player, pack.TileX, pack.TileZ) {
-		return true
-	}
-	battle.Start(g, packIndex)
-	return true
+	return engaged
 }

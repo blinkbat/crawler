@@ -178,12 +178,28 @@ func TestBurnDuration_WithinRange(t *testing.T) {
 	}
 }
 
-func TestBurnDuration_MaxEqualOrLessThanMin(t *testing.T) {
-	// Degenerate case: max <= min should always return min. RNG is never
-	// consulted on the inverted-range path, so a nil source is fine.
+func TestBurnDuration_InvertedReturnsZero(t *testing.T) {
+	// Degenerate case: max < min returns 0 (no burn). This matches the
+	// shared rollDuration semantics used by every other duration helper
+	// (Sleep / Stun / Bind / Confuse / Poison) — the contract is "fail
+	// open as no status" so a non-burn skill that picks up the
+	// SkillEffect by accident can't roll a phantom DoT. Earlier the
+	// test asserted "return min" on the inverted path, which made
+	// BurnDuration the only helper with that behaviour; consolidating
+	// onto rollDuration aligned the contract.
 	e := SkillEffect{BurnMinTurns: 4, BurnMaxTurns: 2}
-	if got := e.BurnDuration(nil); got != 4 {
-		t.Errorf("BurnDuration on inverted range = %d, want 4 (min)", got)
+	if got := e.BurnDuration(nil); got != 0 {
+		t.Errorf("BurnDuration on inverted range = %d, want 0", got)
+	}
+}
+
+func TestBurnDuration_DegenerateMinZero(t *testing.T) {
+	// min <= 0 also returns 0. Matches the shared rollDuration rule
+	// — a non-burn skill picking up the effect won't accidentally
+	// roll a status from a zero-base.
+	e := SkillEffect{BurnMinTurns: 0, BurnMaxTurns: 0}
+	if got := e.BurnDuration(nil); got != 0 {
+		t.Errorf("BurnDuration on zero range = %d, want 0", got)
 	}
 }
 

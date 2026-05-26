@@ -96,10 +96,13 @@ props:
 .....XXX............XXXX......
 ..............................
 enemies:
-rat 6 1
-diseased_rat 7 1
-bat 9 7
-rat 10 7
-bat 3 13
-rat,diseased_rat 4 13
-bat 5 13
+rat,rat 6 1
+diseased_rat,rat 7 1
+vampire_bat,bat 9 7
+rat,bat,rat 10 7
+wisp 3 13
+rat,diseased_rat,rat 4 13
+goblin,vampire_bat 5 13
+wisp,wisp 22 4
+cave_spider,rat 25 17
+vampire_bat,vampire_bat 18 14

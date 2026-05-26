@@ -4,17 +4,63 @@ import (
 	"crawler/internal/app/core"
 	"crawler/internal/app/core/mapfile"
 	"crawler/internal/app/input"
+	"crawler/internal/app/render"
 	"os"
 	"strconv"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+// editorCommitPressed / editorCancelPressed / editorTabPressed name the
+// editor-side keyboard conventions used by every modal updater. The
+// editor's bindings diverge from explore.Update's `input.ConfirmPressed`
+// (Z / Space / Enter / gamepad A) on purpose: modal text fields use
+// Tab to cycle focus and Enter (alone) to commit, so the Z / Space
+// confirm chord would collide with typing letters into a Name field.
+// Editor modals therefore route through these helpers instead of the
+// shared `input` package — every binding decision lives in one place
+// rather than at 25 inline `rl.IsKeyPressed(...)` sites.
+func editorCommitPressed() bool {
+	return rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeyKpEnter)
+}
+
+func editorCancelPressed() bool {
+	return rl.IsKeyPressed(rl.KeyEscape)
+}
+
+func editorTabPressed() bool {
+	return rl.IsKeyPressed(rl.KeyTab)
+}
+
 // updateHotkeys handles keyboard shortcuts when no text field is focused.
 func updateHotkeys(s *State) {
 	ctrl := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
 	shift := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
 	alt := rl.IsKeyDown(rl.KeyLeftAlt) || rl.IsKeyDown(rl.KeyRightAlt)
+
+	// ALT tap-toggles the per-tile glyph overlay in the grid. The
+	// detection is "key released without a chord" so it never fights
+	// Alt+1..6 (layer jump) or any future Alt+key binding: if ANY key
+	// is pressed during the Alt hold we mark altChordUsed and the
+	// release fires no toggle. Edge press of Alt resets the flag.
+	altPressed := rl.IsKeyPressed(rl.KeyLeftAlt) || rl.IsKeyPressed(rl.KeyRightAlt)
+	altReleased := rl.IsKeyReleased(rl.KeyLeftAlt) || rl.IsKeyReleased(rl.KeyRightAlt)
+	if altPressed {
+		s.altChordUsed = false
+	}
+	if alt && rl.GetKeyPressed() != 0 {
+		// GetKeyPressed pops queued key-press events; non-zero means a
+		// key was pressed THIS frame while Alt was held, so the user
+		// intended a chord, not a tap-toggle. Drain the queue so a
+		// later updater isn't surprised by an empty buffer (no other
+		// caller in the editor reads from this queue today).
+		s.altChordUsed = true
+		for rl.GetKeyPressed() != 0 {
+		}
+	}
+	if altReleased && !s.altChordUsed {
+		s.hideTileGlyphs = !s.hideTileGlyphs
+	}
 
 	// Alt+1..6 jumps directly to a layer — saves Tab-cycling when the
 	// author knows which layer they want. Number row only; the keypad
@@ -80,7 +126,7 @@ func updateHotkeys(s *State) {
 	}
 
 	// Tab cycles to the next layer (Shift+Tab to the previous).
-	if !ctrl && rl.IsKeyPressed(rl.KeyTab) {
+	if !ctrl && editorTabPressed() {
 		dir := 1
 		if shift {
 			dir = -1
@@ -179,22 +225,22 @@ func updateGridCursor(s *State) {
 	moved := false
 	if rl.IsKeyPressed(rl.KeyLeft) {
 		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
-		s.gridCursorX = core.ClampInt(s.gridCursorX-1, 0, mw-1)
+		s.gridCursorX = core.Clamp(s.gridCursorX-1, 0, mw-1)
 		moved = true
 	}
 	if rl.IsKeyPressed(rl.KeyRight) {
 		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
-		s.gridCursorX = core.ClampInt(s.gridCursorX+1, 0, mw-1)
+		s.gridCursorX = core.Clamp(s.gridCursorX+1, 0, mw-1)
 		moved = true
 	}
 	if rl.IsKeyPressed(rl.KeyUp) {
 		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
-		s.gridCursorZ = core.ClampInt(s.gridCursorZ-1, 0, mh-1)
+		s.gridCursorZ = core.Clamp(s.gridCursorZ-1, 0, mh-1)
 		moved = true
 	}
 	if rl.IsKeyPressed(rl.KeyDown) {
 		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
-		s.gridCursorZ = core.ClampInt(s.gridCursorZ+1, 0, mh-1)
+		s.gridCursorZ = core.Clamp(s.gridCursorZ+1, 0, mh-1)
 		moved = true
 	}
 	if moved && s.gridCursorX >= 0 {
@@ -217,8 +263,8 @@ func activateCursor(s *State, mw, mh int) (int, int) {
 	if s.gridCursorX >= 0 {
 		return s.gridCursorX, s.gridCursorZ
 	}
-	x := core.ClampInt(s.area.StartTileX, 0, mw-1)
-	z := core.ClampInt(s.area.StartTileZ, 0, mh-1)
+	x := core.Clamp(s.area.StartTileX, 0, mw-1)
+	z := core.Clamp(s.area.StartTileZ, 0, mh-1)
 	return x, z
 }
 
@@ -229,6 +275,12 @@ func updateMouse(s *State) {
 
 	hx, hz := s.cellAt(mp)
 	s.hoverX, s.hoverZ = hx, hz
+
+	// Context menu absorbs all mouse / keyboard input while open so a
+	// stray click on the grid behind the menu doesn't double-act.
+	if updateContextMenu(s) {
+		return
+	}
 
 	if pointIn(mp, s.rect.grid) {
 		w := rl.GetMouseWheelMove()
@@ -242,6 +294,14 @@ func updateMouse(s *State) {
 		w := rl.GetMouseWheelMove()
 		if w != 0 {
 			ScrollPalette(s, -w*paletteRowStride*1.5)
+		}
+	} else if pointIn(mp, s.rect.metadata) {
+		// Wheel over the right-hand MAP panel scrolls its content.
+		// One notch moves ~one row of fields so a short window can
+		// still reach the reachability badge at the bottom.
+		w := rl.GetMouseWheelMove()
+		if w != 0 {
+			ScrollMetadata(s, -w*42)
 		}
 	}
 
@@ -258,8 +318,8 @@ func updateMouse(s *State) {
 	}
 
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
-		if hit := topbarButtonAt(s, mp); hit != "" {
-			handleTopbarButton(s, hit)
+		if hit := topbarButtonAt(s, mp); hit >= 0 {
+			topbarBtns[hit].action(s)
 			return
 		}
 		if hit := layerTabAt(s, mp); hit >= 0 {
@@ -286,6 +346,17 @@ func updateMouse(s *State) {
 			continueDrag(s, hx, hz)
 		}
 		if rl.IsMouseButtonPressed(rl.MouseRightButton) {
+			// On the Entities layer, right-click opens the context menu
+			// over the tile so the author can Edit / Delete / move-start
+			// without having to switch brushes. Empty entity cells fall
+			// through to the legacy erase (no-op on empties) so right-
+			// click stays a recoverable action either way.
+			if s.layer == LayerEntities {
+				if items := contextItemsAt(s, hx, hz); len(items) > 0 {
+					openContextMenu(s, mp.X, mp.Y, hx, hz)
+					return
+				}
+			}
 			pushUndo(s)
 			eraseAt(s, hx, hz)
 		}
@@ -492,25 +563,15 @@ func zoomBy(s *State, anchor rl.Vector2, factor float32) {
 	s.zoom = next
 }
 
-func handleTopbarButton(s *State, name string) {
-	switch name {
-	case "new":
-		newMap(s)
-	case "open":
-		requestOpen(s)
-	case "save":
-		saveCurrent(s)
-	case "saveas":
-		s.modalFilename = mapStem(s.area.Path)
-		s.modal = modalSaveAs
-		s.focus = focusFilename
-	case "sounds":
-		openSoundsModal(s)
-	case "validate":
-		openValidateModal(s)
-	case "back":
-		s.exitRequested = true
-	}
+// openSaveAsModal pops the Save As dialog seeded with the current
+// map's file stem (or empty for an unsaved area). Extracted so the
+// topbar table-driven dispatch can point at a function pointer
+// instead of inlining the three-line set up — single seam for any
+// future "Save As" entry points (Ctrl+Shift+S, command palette, ...).
+func openSaveAsModal(s *State) {
+	s.modalFilename = mapStem(s.area.Path)
+	s.modal = modalSaveAs
+	s.focus = focusFilename
 }
 
 // openValidateModal snapshots the current reachability and cross-map
@@ -523,6 +584,53 @@ func openValidateModal(s *State) {
 	s.modal = modalValidate
 }
 
+// textFieldConfig declares the rune-budget and accept-filter for a
+// single focusable text field. The Editor used to call
+// pumpPrintableASCII directly with bespoke (maxLen, accept, onChange)
+// triples at every site, which made "is this field's config the
+// canonical one or a typo?" a 5-file grep. This table is the single
+// source of truth — adding a new focusField is one row here plus a
+// case in activeTextTarget.
+type textFieldConfig struct {
+	MaxLen int
+	Accept func(rune) bool
+}
+
+// textFieldConfigs maps each focusField to its rune-budget +
+// acceptance rule. Foci NOT in this table (focusNone, focusWidth /
+// Height — those are numeric inputs handled by updateNumericInput,
+// not pumpPrintableASCII) reuse the default below via
+// configForFocus.
+var textFieldConfigs = map[focusField]textFieldConfig{
+	focusName:            {96, acceptPrintable},
+	focusQuiet:           {96, acceptPrintable},
+	focusFilename:        {96, acceptPrintable},
+	focusDoorName:        {96, acceptPrintable},
+	focusDoorTargetMap:   {96, acceptPrintable},
+	focusDoorTargetDoor:  {96, acceptPrintable},
+	focusCustomEnemyName: {24, acceptPrintable},
+}
+
+func configForFocus(f focusField) textFieldConfig {
+	if cfg, ok := textFieldConfigs[f]; ok {
+		return cfg
+	}
+	// Defensive default: a 96-char permissive field. Used by future
+	// text foci that get wired up before someone remembers to add a
+	// row; pump still bounds the buffer so the failure mode is bounded.
+	return textFieldConfig{MaxLen: 96, Accept: acceptPrintable}
+}
+
+// pumpFocusField pumps printable runes into `target` using the
+// config registered for the current s.focus. Replaces the bespoke
+// pumpPrintableASCII calls that used to pick (maxLen, accept) per
+// site — callers say "this is the active text target, route input
+// at the rate the table says."
+func pumpFocusField(s *State, target *string) {
+	cfg := configForFocus(s.focus)
+	pumpPrintableASCII(target, cfg.MaxLen, cfg.Accept, s.markDirty)
+}
+
 // pumpPrintableASCII drains queued printable-ASCII characters into
 // target (capped at maxLen) and consumes one backspace press. The
 // accept predicate filters which runes land in the buffer — callers
@@ -531,6 +639,12 @@ func openValidateModal(s *State) {
 // one pump function backs every text-field flavor in the editor.
 // onChange fires once per accepted character or backspace and may be
 // nil when no caller-side effect is needed.
+//
+// Prefer pumpFocusField for s.focus-keyed inputs — that path looks
+// up the per-field rate from textFieldConfigs so the config table
+// stays the single source of truth. Direct callers (the sound-name
+// modal, the open-modal rename buffer) carry their own configs
+// because their target isn't focus-keyed.
 func pumpPrintableASCII(target *string, maxLen int, accept func(rune) bool, onChange func()) {
 	for {
 		c := rl.GetCharPressed()
@@ -570,7 +684,8 @@ func acceptPrintable(r rune) bool { return true }
 func acceptPrintableNoSpace(r rune) bool { return r != ' ' }
 
 func updateTextInput(s *State) {
-	if s.focus == focusWidth || s.focus == focusHeight {
+	if s.focus == focusWidth || s.focus == focusHeight ||
+		s.focus == focusNewWidth || s.focus == focusNewHeight {
 		updateNumericInput(s)
 		return
 	}
@@ -578,19 +693,19 @@ func updateTextInput(s *State) {
 	if target == nil {
 		return
 	}
-	pumpPrintableASCII(target, 96, acceptPrintable, s.markDirty)
-	if rl.IsKeyPressed(rl.KeyTab) {
+	pumpFocusField(s, target)
+	if editorTabPressed() {
 		cycleFocus(s)
 		return
 	}
-	if rl.IsKeyPressed(rl.KeyEnter) {
+	if editorCommitPressed() {
 		if s.focus == focusFilename {
 			confirmModal(s)
 			return
 		}
 		s.focus = focusNone
 	}
-	if rl.IsKeyPressed(rl.KeyEscape) {
+	if editorCancelPressed() {
 		if s.focus == focusFilename {
 			s.modal = modalNone
 		}
@@ -611,16 +726,16 @@ func updateNumericInput(s *State) {
 	if rl.IsKeyPressed(rl.KeyBackspace) && len(s.numericBuf) > 0 {
 		s.numericBuf = s.numericBuf[:len(s.numericBuf)-1]
 	}
-	if rl.IsKeyPressed(rl.KeyTab) {
+	if editorTabPressed() {
 		commitNumericInput(s)
 		cycleFocus(s)
 		return
 	}
-	if rl.IsKeyPressed(rl.KeyEnter) {
+	if editorCommitPressed() {
 		commitNumericInput(s)
 		s.focus = focusNone
 	}
-	if rl.IsKeyPressed(rl.KeyEscape) {
+	if editorCancelPressed() {
 		s.numericBuf = ""
 		s.focus = focusNone
 	}
@@ -634,16 +749,19 @@ func commitNumericInput(s *State) {
 	for _, c := range s.numericBuf {
 		v = v*10 + int(c-'0')
 	}
-	if v < 1 {
-		v = 1
-	}
-	if v > core.MaxMapDimension {
-		v = core.MaxMapDimension
-	}
-	if s.focus == focusWidth {
+	// Floor at MinMapDimension (not 1) so the metadata field can't
+	// produce a 2-wide map that `resize` would then re-clamp anyway.
+	// One clamp helper used everywhere — see core.ClampMapDimension.
+	v = core.ClampMapDimension(v)
+	switch s.focus {
+	case focusWidth:
 		resize(s, v, s.area.Height)
-	} else if s.focus == focusHeight {
+	case focusHeight:
 		resize(s, s.area.Width, v)
+	case focusNewWidth:
+		s.modalNewWidth = v
+	case focusNewHeight:
+		s.modalNewHeight = v
 	}
 	s.numericBuf = ""
 }
@@ -663,6 +781,14 @@ func cycleFocus(s *State) {
 		s.numericBuf = ""
 	case focusHeight:
 		s.focus = focusName
+	case focusNewWidth:
+		// Stay within the new-map dialog — its only other text field is
+		// the height. modalNew has no Name / Quiet fields to cycle to.
+		s.focus = focusNewHeight
+		s.numericBuf = ""
+	case focusNewHeight:
+		s.focus = focusNewWidth
+		s.numericBuf = ""
 	default:
 		s.focus = focusName
 	}
@@ -688,24 +814,60 @@ func activeTextTarget(s *State) *string {
 }
 
 func updateModal(s *State) Action {
-	if updater, ok := modalUpdaters[s.modal]; ok {
-		return updater(s)
+	// validateModalState runs every frame BEFORE the modal's own
+	// updater. If the entity referenced by the modal (pack / chest /
+	// door / custom enemy) has been deleted from the underlying
+	// slice — for example by an ops path elsewhere, or by an undo
+	// that reverted past the modal's open frame — close the modal
+	// and clear any cursor so the next frame doesn't dereference a
+	// stale index. Same defense the modal draw paths used to need
+	// inline; centralizing it here means the draw/update pair can
+	// trust their indices.
+	validateModalState(s)
+	if h, ok := modalHandlers[s.modal]; ok && h.update != nil {
+		return h.update(s)
 	}
 	return ActionNone
 }
 
-// modalUpdaters maps each modalKind to its input handler. Sibling of
-// modalDrawers in draw.go — adding a new modal touches both tables.
-var modalUpdaters = map[modalKind]func(*State) Action{
-	modalOpen:         updateOpenModal,
-	modalSaveAs:       updateSaveAsModal,
-	modalConfirmDirty: updateConfirmDirtyModal,
-	modalPackEdit:     updatePackEditModal,
-	modalChestEdit:    updateChestEditModal,
-	modalSounds:       updateSoundsModal,
-	modalDoorEdit:     updateDoorEditModal,
-	modalValidate:     updateValidateModal,
+// validateModalState closes the active modal when its referenced
+// entity has gone out of bounds. Single source of truth for the
+// "is this modal still pointing at something real?" rule — added
+// rows live alongside each modal's open path so a future modal
+// that holds an index plugs into the same check.
+func validateModalState(s *State) {
+	switch s.modal {
+	case modalPackEdit:
+		if s.modalPackIdx < 0 || s.modalPackIdx >= len(s.area.PackSpawns) {
+			closeModal(s)
+		}
+	case modalChestEdit:
+		if s.modalChestIdx < 0 || s.modalChestIdx >= len(s.area.ChestSpawns) {
+			closeModal(s)
+		}
+	case modalDoorEdit:
+		if s.modalDoorIdx < 0 || s.modalDoorIdx >= len(s.area.DoorSpawns) {
+			closeModal(s)
+		}
+	case modalCustomEnemies:
+		// Clamp the custom-enemy cursor to the slice instead of
+		// closing — the modal lists every def and the cursor is
+		// internal navigation, not a hard reference to a single
+		// row that has to exist.
+		if n := len(s.area.CustomEnemies); n == 0 {
+			s.modalCustomIdx = 0
+		} else if s.modalCustomIdx < 0 {
+			s.modalCustomIdx = 0
+		} else if s.modalCustomIdx >= n {
+			s.modalCustomIdx = n - 1
+		}
+	}
 }
+
+// modalUpdaters used to be a sibling of modalDrawers — both kept the
+// same modalKind keyed entries in lockstep across two files. They're
+// now folded into modalHandlers (draw.go) so adding a modal is one
+// row in one place.
 
 // closeModal is the single seam every modal updater goes through to
 // dismiss its dialog. Clears the modal kind plus every modal-scoped
@@ -719,14 +881,20 @@ func closeModal(s *State) {
 	s.modalPackIdx = -1
 	s.modalChestIdx = -1
 	s.modalDoorIdx = -1
+	s.modalCustomIdx = -1
 	s.modalValidateRows = nil
 	s.modalConfirmDelete = false
 	s.modalRenaming = ""
 	soundDrag.sliderIdx = -1
 	// Door-edit text focus survives outside the modal in pumpPrintableASCII's
-	// flow, so explicitly drop it here too.
-	if s.focus == focusDoorName || s.focus == focusDoorTargetMap || s.focus == focusDoorTargetDoor {
+	// flow, so explicitly drop it here too. The new-map dialog's numeric
+	// foci and the custom-enemy name field are similarly modal-scoped —
+	// they must not carry over.
+	if s.focus == focusDoorName || s.focus == focusDoorTargetMap || s.focus == focusDoorTargetDoor ||
+		s.focus == focusNewWidth || s.focus == focusNewHeight ||
+		s.focus == focusCustomEnemyName {
 		s.focus = focusNone
+		s.numericBuf = ""
 	}
 }
 
@@ -797,21 +965,24 @@ func updateDoorEditModal(s *State) Action {
 	case focusDoorName, focusDoorTargetMap, focusDoorTargetDoor:
 		target := doorEditTextTarget(s)
 		if target != nil {
-			before := *target
-			pumpPrintableASCII(target, 96, acceptPrintable, nil)
-			if *target != before {
-				s.dirty = true
-			}
+			// Route through pumpFocusField so the door fields read
+			// their rune-budget from textFieldConfigs (96 today) —
+			// keeps the door modal in sync with the editor-chrome
+			// fields without a second copy of the cap. The pump's
+			// onChange is s.markDirty, which sets s.dirty=true
+			// outside the filename-focus exception, so no second
+			// dirty guard is needed here.
+			pumpFocusField(s, target)
 		}
-		if rl.IsKeyPressed(rl.KeyTab) {
+		if editorTabPressed() {
 			cycleDoorFocus(s)
 			return ActionNone
 		}
-		if rl.IsKeyPressed(rl.KeyEnter) {
+		if editorCommitPressed() {
 			s.focus = focusNone
 			return ActionNone
 		}
-		if rl.IsKeyPressed(rl.KeyEscape) {
+		if editorCancelPressed() {
 			closeModal(s)
 			return ActionNone
 		}
@@ -819,11 +990,11 @@ func updateDoorEditModal(s *State) Action {
 	}
 
 	// No text field focused — keyboard shortcuts for facing + delete.
-	if rl.IsKeyPressed(rl.KeyEscape) || rl.IsKeyPressed(rl.KeyEnter) {
+	if editorCancelPressed() || editorCommitPressed() {
 		closeModal(s)
 		return ActionNone
 	}
-	if rl.IsKeyPressed(rl.KeyTab) {
+	if editorTabPressed() {
 		s.focus = focusDoorName
 		return ActionNone
 	}
@@ -888,7 +1059,7 @@ func cycleDoorFocus(s *State) {
 
 // updateValidateModal: any key closes; it's a read-only viewer.
 func updateValidateModal(s *State) Action {
-	if rl.IsKeyPressed(rl.KeyEscape) || rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeySpace) {
+	if editorCancelPressed() || editorCommitPressed() || rl.IsKeyPressed(rl.KeySpace) {
 		closeModal(s)
 	}
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
@@ -910,22 +1081,13 @@ func updatePackEditModal(s *State) Action {
 	}
 	pack := &s.area.PackSpawns[s.modalPackIdx]
 	memberCount := len(pack.Members)
-	if s.modalCursor >= memberCount {
-		s.modalCursor = memberCount - 1
-	}
-	if s.modalCursor < 0 {
-		s.modalCursor = 0
-	}
-
-	if input.ModalClosePressed() {
-		closeModal(s)
+	if !updateEntityListCursor(s, memberCount) {
 		return ActionNone
 	}
 	if memberCount > 0 {
-		s.modalCursor = input.CursorUpDown(s.modalCursor, memberCount)
 		if rl.IsKeyPressed(rl.KeyX) {
 			pushUndo(s)
-			pack.Members = append(pack.Members[:s.modalCursor], pack.Members[s.modalCursor+1:]...)
+			core.RemovePackMember(pack, s.modalCursor)
 			s.dirty = true
 			if len(pack.Members) == 0 {
 				s.area.PackSpawns = append(s.area.PackSpawns[:s.modalPackIdx], s.area.PackSpawns[s.modalPackIdx+1:]...)
@@ -937,13 +1099,13 @@ func updatePackEditModal(s *State) Action {
 		// natural arrow-up/down direction in the rendered list.
 		if rl.IsKeyPressed(rl.KeyK) && s.modalCursor > 0 {
 			pushUndo(s)
-			pack.Members[s.modalCursor-1], pack.Members[s.modalCursor] = pack.Members[s.modalCursor], pack.Members[s.modalCursor-1]
+			core.SwapPackMembers(pack, s.modalCursor-1, s.modalCursor)
 			s.modalCursor--
 			s.dirty = true
 		}
 		if rl.IsKeyPressed(rl.KeyJ) && s.modalCursor < memberCount-1 {
 			pushUndo(s)
-			pack.Members[s.modalCursor+1], pack.Members[s.modalCursor] = pack.Members[s.modalCursor], pack.Members[s.modalCursor+1]
+			core.SwapPackMembers(pack, s.modalCursor+1, s.modalCursor)
 			s.modalCursor++
 			s.dirty = true
 		}
@@ -955,12 +1117,57 @@ func updatePackEditModal(s *State) Action {
 	for _, rule := range packAddRules {
 		if rl.IsKeyPressed(rule.Key) {
 			pushUndo(s)
-			pack.Members = append(pack.Members, rule.Kind)
+			core.AppendBuiltinPackMember(pack, rule.Kind)
 			s.modalCursor = len(pack.Members) - 1
 			s.dirty = true
 		}
 	}
+	if rl.IsKeyPressed(rl.KeyC) {
+		if def, ok := selectedCustomEnemyForPack(s); ok {
+			pushUndo(s)
+			core.AppendCustomPackMember(pack, def)
+			s.modalCursor = len(pack.Members) - 1
+			s.dirty = true
+		} else {
+			s.flash("No custom enemies defined")
+		}
+	}
 	return ActionNone
+}
+
+func updateEntityListCursor(s *State, count int) bool {
+	if s.modalCursor >= count {
+		s.modalCursor = count - 1
+	}
+	if s.modalCursor < 0 {
+		s.modalCursor = 0
+	}
+	if input.ModalClosePressed() {
+		closeModal(s)
+		return false
+	}
+	if count > 0 {
+		s.modalCursor = input.CursorUpDown(s.modalCursor, count)
+	}
+	return true
+}
+
+func removeModalListItem[T any](items []T, idx int) []T {
+	if idx < 0 || idx >= len(items) {
+		return items
+	}
+	return append(items[:idx], items[idx+1:]...)
+}
+
+func selectedCustomEnemyForPack(s *State) (core.CustomEnemyDef, bool) {
+	if len(s.area.CustomEnemies) == 0 {
+		return core.CustomEnemyDef{}, false
+	}
+	idx := s.modalCustomIdx
+	if idx < 0 || idx >= len(s.area.CustomEnemies) {
+		idx = 0
+	}
+	return s.area.CustomEnemies[idx], true
 }
 
 // Hint-row string constants for editor modal footers. Defined here next
@@ -992,10 +1199,19 @@ type packAddRule struct {
 
 // packAddHotkeys is the positional pool: entry i in core.EnemyKinds()
 // gets pool[i]. Keys past pool length are 0 (no binding, mouse-only).
-// The existing keys are preserved in registry order (R, B, D, G, M, N)
-// so muscle memory survives the refactor.
+// The existing keys are preserved in registry order so muscle memory
+// survives the refactor. Roster expansion (Cave Spider, Vampire Bat,
+// Wisp, Stone Golem, Necromancer, Skeleton) added six more slots —
+// chose distinct letters that don't collide with editor-level
+// hotkeys (Ctrl+S/O/N/Z/Y, G center-view, F5 test, Tab cycle).
 var packAddHotkeys = []int32{
 	rl.KeyR, rl.KeyB, rl.KeyD, rl.KeyG, rl.KeyM, rl.KeyN, rl.KeyV, rl.KeyZ,
+	rl.KeyP, // P → Cave Spider (its silhouette + the "P for prey-trapper" cue)
+	rl.KeyF, // F → Vampire Bat (fang)
+	rl.KeyW, // W → Will-o'-Wisp
+	rl.KeyK, // K → Stone Golem (stoneKind)
+	rl.KeyX, // X → Necromancer (skull-X)
+	rl.KeyJ, // J → Skeleton (Joints)
 }
 
 // init asserts the add-rule hotkey pools cover the current registries.
@@ -1115,22 +1331,13 @@ func updateChestEditModal(s *State) Action {
 	}
 	chest := &s.area.ChestSpawns[s.modalChestIdx]
 	itemCount := len(chest.Items)
-	if s.modalCursor >= itemCount {
-		s.modalCursor = itemCount - 1
-	}
-	if s.modalCursor < 0 {
-		s.modalCursor = 0
-	}
-
-	if input.ModalClosePressed() {
-		closeModal(s)
+	if !updateEntityListCursor(s, itemCount) {
 		return ActionNone
 	}
 	if itemCount > 0 {
-		s.modalCursor = input.CursorUpDown(s.modalCursor, itemCount)
 		if rl.IsKeyPressed(rl.KeyX) {
 			pushUndo(s)
-			chest.Items = append(chest.Items[:s.modalCursor], chest.Items[s.modalCursor+1:]...)
+			chest.Items = removeModalListItem(chest.Items, s.modalCursor)
 			s.dirty = true
 		}
 	}
@@ -1153,7 +1360,7 @@ func updateOpenModal(s *State) Action {
 		return updateOpenConfirmDelete(s)
 	}
 
-	if rl.IsKeyPressed(rl.KeyEscape) {
+	if editorCancelPressed() {
 		s.modal = modalNone
 		return ActionNone
 	}
@@ -1187,7 +1394,7 @@ func updateOpenModal(s *State) Action {
 		return ActionNone
 	}
 
-	if rl.IsKeyPressed(rl.KeyEnter) {
+	if editorCommitPressed() {
 		path := s.modalPaths[s.modalCursor]
 		mf, err := mapfile.Load(path)
 		if err != nil {
@@ -1202,7 +1409,7 @@ func updateOpenModal(s *State) Action {
 			return ActionNone
 		}
 		s.area = area
-		s.baseline = cloneArea(area)
+		s.baseline = core.CloneArea(area)
 		s.undo = nil
 		s.redo = nil
 		s.dirty = false
@@ -1214,11 +1421,11 @@ func updateOpenModal(s *State) Action {
 
 func updateOpenRename(s *State) Action {
 	pumpPrintableASCII(&s.modalRenaming, 64, acceptPrintable, nil)
-	if rl.IsKeyPressed(rl.KeyEscape) {
+	if editorCancelPressed() {
 		s.modalRenaming = ""
 		return ActionNone
 	}
-	if rl.IsKeyPressed(rl.KeyEnter) {
+	if editorCommitPressed() {
 		oldPath := s.modalPaths[s.modalCursor]
 		newPath, err := renameMapFile(oldPath, s.modalRenaming)
 		s.modalRenaming = ""
@@ -1242,7 +1449,7 @@ func updateOpenRename(s *State) Action {
 }
 
 func updateOpenConfirmDelete(s *State) Action {
-	if rl.IsKeyPressed(rl.KeyEscape) || rl.IsKeyPressed(rl.KeyN) {
+	if editorCancelPressed() || rl.IsKeyPressed(rl.KeyN) {
 		s.modalConfirmDelete = false
 		return ActionNone
 	}
@@ -1284,7 +1491,7 @@ func updateSaveAsModal(s *State) Action {
 			}
 			return ActionNone
 		}
-		if rl.IsKeyPressed(rl.KeyN) || rl.IsKeyPressed(rl.KeyEscape) {
+		if rl.IsKeyPressed(rl.KeyN) || editorCancelPressed() {
 			s.awaitingOverwrite = false
 			s.focus = focusFilename
 			return ActionNone
@@ -1292,7 +1499,7 @@ func updateSaveAsModal(s *State) Action {
 		return ActionNone
 	}
 
-	if rl.IsKeyPressed(rl.KeyEscape) {
+	if editorCancelPressed() {
 		s.modal = modalNone
 		s.focus = focusNone
 		s.pending = pendingNone
@@ -1305,8 +1512,36 @@ func updateSaveAsModal(s *State) Action {
 	return ActionNone
 }
 
+// updateEscMenuModal handles input for the editor's pause-style menu.
+//   - Esc / C: close menu, resume editing.
+//   - D: toggle display mode (fullscreen ↔ windowed). Menu stays open
+//     so the author can verify the swap before continuing.
+//   - E: exit to title. Routes through modalConfirmDirty when the
+//     area has unsaved edits so save/discard/cancel still works —
+//     same flow the old "Esc = exit" path used.
+func updateEscMenuModal(s *State) Action {
+	if editorCancelPressed() || rl.IsKeyPressed(rl.KeyC) {
+		s.modal = modalNone
+		return ActionNone
+	}
+	if rl.IsKeyPressed(rl.KeyD) {
+		render.ToggleDisplayMode()
+		return ActionNone
+	}
+	if rl.IsKeyPressed(rl.KeyE) {
+		s.modal = modalNone
+		if s.dirty {
+			s.pending = pendingExitToTitle
+			s.modal = modalConfirmDirty
+			return ActionNone
+		}
+		return ActionExitToTitle
+	}
+	return ActionNone
+}
+
 func updateConfirmDirtyModal(s *State) Action {
-	if rl.IsKeyPressed(rl.KeyEscape) || rl.IsKeyPressed(rl.KeyC) {
+	if editorCancelPressed() || rl.IsKeyPressed(rl.KeyC) {
 		s.modal = modalNone
 		s.pending = pendingNone
 		return ActionNone
@@ -1335,7 +1570,7 @@ func updateConfirmDirtyModal(s *State) Action {
 			s.pending = pendingNone
 			return ActionNone
 		}
-		s.baseline = cloneArea(s.area)
+		s.baseline = core.CloneArea(s.area)
 		s.dirty = false
 		s.modal = modalNone
 		return runPendingAction(s)
@@ -1350,7 +1585,7 @@ func runPendingAction(s *State) Action {
 	case pendingExitToTitle:
 		return ActionExitToTitle
 	case pendingNew:
-		performNewMap(s)
+		openNewMapModal(s)
 	case pendingOpen:
 		openModal(s, modalOpen)
 	}
@@ -1399,7 +1634,7 @@ func saveTo(s *State, name, path string) {
 		return
 	}
 	s.area.Path = path
-	s.baseline = cloneArea(s.area)
+	s.baseline = core.CloneArea(s.area)
 	s.dirty = false
 	s.modal = modalNone
 	s.focus = focusNone

@@ -97,7 +97,7 @@ func DrawHeading(font rl.Font, text string, x, y int32, accent color.RGBA) {
 // Centralized here so modal authors don't reach for DrawTextWithShadow at
 // an ad-hoc size and drift the visual tier.
 func DrawSubHeading(font rl.Font, text string, x, y float32, accent color.RGBA) {
-	drawTextWithShadow(font, text, x, y, 18, accent)
+	drawTextWithShadow(font, text, x, y, FontBody, accent)
 }
 
 // DrawTextWithShadow draws text with a dark drop shadow.
@@ -105,14 +105,22 @@ func DrawTextWithShadow(font rl.Font, text string, x, y, size float32, col color
 	drawTextWithShadow(font, text, x, y, size, col)
 }
 
-// DrawSelectedRow paints the standard "cursor is on this row" highlight:
-// the active-tint fill plus the active-color outline. Used by modal
-// row lists (sound editor, future pickers) so the selection style stays
-// consistent with the pause menu without duplicating the two-call
-// fill + outline block at every call site.
+// DrawSelectedRow paints the standard "cursor is on this row"
+// highlight per UI_STANDARDS.md "Row > Selected": warm glass fill,
+// gilt left spine (3 px), and a thin gilt-dim underline along the
+// bottom edge. Replaces the older blue-purple "active-tint" fill
+// so every list-style surface speaks the library aesthetic.
+//
+// Used by modal pickers (chest, level-up, sound editor) and any
+// non-`drawListRow` cursor highlight. New code should prefer
+// drawListRow directly for the full per-state ladder.
 func DrawSelectedRow(r rl.Rectangle) {
-	rl.DrawRectangleRec(r, surfaceActiveTint)
-	rl.DrawRectangleLinesEx(r, 1, borderActive)
+	rl.DrawRectangleRec(r, glassWarm)
+	// Gilt left spine — 3 px, vertically inset 5 px top/bottom so it
+	// reads as a marker rather than the entire left edge.
+	rl.DrawRectangle(int32(r.X)+4, int32(r.Y)+5, 3, int32(r.Height)-10, giltBright)
+	// Underline along the bottom edge.
+	rl.DrawRectangle(int32(r.X)+8, int32(r.Y+r.Height)-3, int32(r.Width)-16, 1, giltDim)
 }
 
 // DrawSelectedRowI is the int32-coords variant of DrawSelectedRow for
@@ -122,6 +130,9 @@ func DrawSelectedRow(r rl.Rectangle) {
 // rect-fill-i takes int32 directly, and converting at every call site
 // added noise without changing the surface/border combo we want shared.
 func DrawSelectedRowI(x, y, w, h int32) {
-	drawSmallPanel(x, y, w, h, surfaceActiveTint)
-	drawSmallPanelOutline(x, y, w, h, borderActive)
+	drawSmallPanel(x, y, w, h, glassWarm)
+	// Gilt left spine + bottom underline (matches DrawSelectedRow's
+	// library-aesthetic selection style).
+	rl.DrawRectangle(x+4, y+5, 3, h-10, giltBright)
+	rl.DrawRectangle(x+8, y+h-3, w-16, 1, giltDim)
 }

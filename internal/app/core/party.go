@@ -16,8 +16,21 @@ type PartyClassDefinition struct {
 	Name  string
 	Stats Stats
 	MaxMP int
-	Skill SkillID
+	// Skills is the per-class learned list. Index 0 is the class's
+	// signature skill — shown in the action menu's Skill row by
+	// default. Indices 1+ are the universal pool (PowerStrike, Focus)
+	// every class learns; the in-battle Tab key cycles which one the
+	// Skill row casts. Always length SkillsPerClass; init asserts the
+	// shape stays consistent.
+	Skills [SkillsPerClass]SkillID
 }
+
+// SkillsPerClass is the slot count each party class learns. Fixed at
+// 3 for now ("3 skills per char, we will refine later" per the
+// design call) — bumping this requires extending every class def's
+// Skills array and isn't a behavior the menu copes with dynamically
+// yet, so it's a const rather than a configurable.
+const SkillsPerClass = 3
 
 // SkillKind tags how a skill scales off the actor's stats.
 //
@@ -46,11 +59,17 @@ const (
 )
 
 type skillDefinition struct {
-	Skill      SkillID
-	Name       string
-	Cost       int
-	TargetMode ActionMode
-	Kind       SkillKind
+	Skill SkillID
+	Name  string
+	// Description is the one-line UX blurb shown in the panels overlay
+	// Skills tab. Lives on the registry so adding a new skill is one
+	// row instead of "registry + a switch case in panels.go". Empty
+	// for enemy-only skills (Sleep / Ingest) — the panels tab only
+	// renders player-castable skills.
+	Description string
+	Cost        int
+	TargetMode  ActionMode
+	Kind        SkillKind
 	// Tag classifies the skill for armor / future resist math and for
 	// HUD color-coding. See SkillTag. Phys hits target.Armor; Magic /
 	// Heal / Buff bypass.
@@ -66,6 +85,22 @@ type skillDefinition struct {
 	// field flip plus a handler registration, not a "find every
 	// gatekeep switch" hunt.
 	PlayerCastable bool
+	// EnemyCastable flags skills the enemy AI's resolveEnemySpell
+	// dispatcher knows how to fire. The editor's custom-enemy modal
+	// reads this via EnemyCastableSkills to filter the skill picker
+	// so authors don't accidentally assign a player-only skill to an
+	// enemy that would silently never fire it. Adding a new enemy
+	// skill is: flip this flag + add a case to resolveEnemySpell.
+	EnemyCastable bool
+	// PerBattleCastLimit caps how many times any one caster can fire
+	// this skill in a single battle. 0 (default) means "uncapped" —
+	// every existing skill leaves it zero so the behaviour is
+	// opt-in. The Necromancer's SkillRaiseBones is the headline user
+	// (capped at NecromancerRaiseLimit). The cap is checked against
+	// Enemy.SkillCastCount[skill] in usableEnemySkills before the AI
+	// even considers the skill; once spent, the skill drops out of
+	// the AI's pick list for the rest of the encounter.
+	PerBattleCastLimit int
 }
 
 type SkillEffect struct {
@@ -86,6 +121,48 @@ type SkillEffect struct {
 	// have to branch on the SkillID itself — same shape as the Sleep /
 	// Burn min/max fields above.
 	AppliesIngest bool
+	// StunChance is the per-apply probability that the skill inflicts
+	// Stun on the target (skip-next-turn, doesn't break on damage like
+	// Sleep does). Zero means "this skill doesn't stun" — apply path
+	// can short-circuit without touching the RNG. StunMin/Max bound
+	// the rolled duration in turns.
+	StunChance   float64
+	StunMinTurns int
+	StunMaxTurns int
+	// PoisonChance / Min / Max are the party-side equivalent. Lets a
+	// player-cast skill (Thief's Venom Strike) inflict the Poison DoT
+	// on an enemy target — symmetric with the existing Burn /
+	// Sleep / Stun fields. Zero chance short-circuits the apply.
+	PoisonChance   float64
+	PoisonMinTurns int
+	PoisonMaxTurns int
+	// BindChance / Min / Max gate Bound apply on the target. Bound
+	// halves SPD and refuses Ingest until cleared; the Cave Spider's
+	// SkillWeb is the headline applier. Same fail-open shape as the
+	// other status fields — zero chance short-circuits.
+	BindChance   float64
+	BindMinTurns int
+	BindMaxTurns int
+	// ConfuseChance / Min / Max gate the Confused apply. Confused
+	// rolls per-action retarget (random friend or foe) when the
+	// member acts. WIS-resistible at apply time so a high-WIS
+	// Cleric is harder to confuse than a low-WIS Warrior.
+	ConfuseChance   float64
+	ConfuseMinTurns int
+	ConfuseMaxTurns int
+	// AppliesAOEParty flags a skill whose damage hits EVERY living
+	// party member instead of a single target. Stone Golem's
+	// Stoneslam is the first user; the apply path reads this flag
+	// and loops damage across living slots with per-target armor
+	// applied. Damage = Effect.Damage + actor.SpellPower.
+	AppliesAOEParty bool
+	// AppliesSummonSkeleton flags a skill that inserts a fresh
+	// Skeleton into the caster's pack mid-battle. The Necromancer
+	// is the headline user; the apply path constructs an Enemy via
+	// NewEnemy(EnemySkeleton) and queue-inserts it. Carrier flag
+	// rather than a hard-coded SkillID branch so future raises
+	// (Raise Zombie, Raise Ghoul) can reuse the apply.
+	AppliesSummonSkeleton bool
 }
 
 // Party stats post-difficulty pass. Numbers are deliberately tighter than
@@ -99,24 +176,20 @@ type SkillEffect struct {
 // slice silently reshuffles party formation and tie-broken initiative; if
 // you need to add a class, append rather than insert.
 var partyClassDefinitions = []PartyClassDefinition{
-	{Class: ClassWarrior, Name: "Warrior", Stats: Stats{STR: 6, DEX: 2, INT: 1, WIS: 1, VIT: 5, SPD: 3}, MaxMP: 2, Skill: SkillSwipe},
-	{Class: ClassCleric, Name: "Cleric", Stats: Stats{STR: 2, DEX: 2, INT: 2, WIS: 6, VIT: 4, SPD: 4}, MaxMP: 7, Skill: SkillPrayer},
-	{Class: ClassThief, Name: "Thief", Stats: Stats{STR: 3, DEX: 6, INT: 2, WIS: 1, VIT: 4, SPD: 6}, MaxMP: 3, Skill: SkillSteal},
-	{Class: ClassWizard, Name: "Wizard", Stats: Stats{STR: 1, DEX: 2, INT: 6, WIS: 2, VIT: 4, SPD: 4}, MaxMP: 8, Skill: SkillFirebolt},
+	{Class: ClassWarrior, Name: "Warrior", Stats: Stats{STR: 6, DEX: 2, INT: 1, WIS: 1, VIT: 5, SPD: 3}, MaxMP: 4,
+		Skills: [SkillsPerClass]SkillID{SkillSwipe, SkillCrushingBlow, SkillWhirlwind}},
+	{Class: ClassCleric, Name: "Cleric", Stats: Stats{STR: 2, DEX: 2, INT: 2, WIS: 6, VIT: 4, SPD: 4}, MaxMP: 9,
+		Skills: [SkillsPerClass]SkillID{SkillPrayer, SkillMassMend, SkillSmite}},
+	{Class: ClassThief, Name: "Thief", Stats: Stats{STR: 3, DEX: 6, INT: 2, WIS: 1, VIT: 4, SPD: 6}, MaxMP: 5,
+		Skills: [SkillsPerClass]SkillID{SkillSteal, SkillBackstab, SkillVenomStrike}},
+	{Class: ClassWizard, Name: "Wizard", Stats: Stats{STR: 1, DEX: 2, INT: 6, WIS: 2, VIT: 4, SPD: 4}, MaxMP: 10,
+		Skills: [SkillsPerClass]SkillID{SkillFirebolt, SkillFrostLance, SkillArcBolt}},
 }
 
 // partyClassByID is the O(1) lookup for partyClassDefinitions. Built once
 // at init for the same reason as skillByID — partyClassInfo is called per
 // frame from selectors and per-party-member render code.
-var partyClassByID = buildPartyClassByID()
-
-func buildPartyClassByID() map[PartyClass]PartyClassDefinition {
-	m := make(map[PartyClass]PartyClassDefinition, len(partyClassDefinitions))
-	for _, def := range partyClassDefinitions {
-		m[def.Class] = def
-	}
-	return m
-}
+var partyClassByID = BuildRegistry(partyClassDefinitions, func(d PartyClassDefinition) PartyClass { return d.Class })
 
 // Skill registry. Effect.Damage / Effect.Heal are flat baselines that the
 // stat-scaled formulas add on top (see types.go's MeleeDamage etc.). Tuned
@@ -126,21 +199,90 @@ func buildPartyClassByID() map[PartyClass]PartyClassDefinition {
 // and Firebolt's burn-chance pulled down so a single Excellent doesn't
 // auto-burn every cast.
 var skillDefinitions = []skillDefinition{
-	{Skill: SkillSwipe, Name: "Swipe", Cost: 2, TargetMode: ActionMenu, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigamePress, Effect: SkillEffect{Damage: 0}, PlayerCastable: true},
-	{Skill: SkillPrayer, Name: "Prayer", Cost: 4, TargetMode: ActionPartyTarget, Kind: SkillKindHeal, Tag: SkillTagHeal, Minigame: MinigameCharge, Effect: SkillEffect{Heal: 1}, PlayerCastable: true},
-	{Skill: SkillSteal, Name: "Steal", Cost: 0, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigameSequence, Effect: SkillEffect{StealChance: StealBaseChance}, PlayerCastable: true},
-	{Skill: SkillFirebolt, Name: "Firebolt", Cost: 5, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 1, BurnChance: FireboltBurnChance, BurnMinTurns: 2, BurnMaxTurns: 3}, PlayerCastable: true},
+	{Skill: SkillSwipe, Name: "Swipe", Description: "STR-scaled cleave through every living enemy in the pack.", Cost: 2, TargetMode: ActionMenu, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigamePress, Effect: SkillEffect{Damage: 0}, PlayerCastable: true},
+	{Skill: SkillPrayer, Name: "Prayer", Description: "WIS-scaled single-ally heal. Charge bar — release at peak.", Cost: 4, TargetMode: ActionPartyTarget, Kind: SkillKindHeal, Tag: SkillTagHeal, Minigame: MinigameCharge, Effect: SkillEffect{Heal: 1}, PlayerCastable: true},
+	{Skill: SkillSteal, Name: "Steal", Description: "Pickpocket the target. DEX + timing drive the chance.", Cost: 0, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigameSequence, Effect: SkillEffect{StealChance: StealBaseChance}, PlayerCastable: true},
+	{Skill: SkillFirebolt, Name: "Firebolt", Description: "INT-scaled magic damage. Chance to inflict Burn.", Cost: 5, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 1, BurnChance: FireboltBurnChance, BurnMinTurns: 2, BurnMaxTurns: 3}, PlayerCastable: true, EnemyCastable: true},
+	// Crushing Blow (Warrior): charge-up single-target physical hit.
+	// +4 base on top of STR, 3 MP. On Great/Excellent timing rolls
+	// CrushingBlowStunChance for the Stun proc — heavy-hit fantasy
+	// that pays off in lockout when the player nails the charge.
+	{Skill: SkillCrushingBlow, Name: "Crushing Blow", Description: "STR-scaled heavy hit. Charge. Stun proc on Great+.", Cost: 3, TargetMode: ActionEnemyTarget, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 4, StunChance: CrushingBlowStunChance, StunMinTurns: StunMinTurns, StunMaxTurns: StunMaxTurns}, PlayerCastable: true},
+	// Whirlwind (Warrior): charge-up AoE physical. +2 base per target,
+	// 4 MP. Damage scales hard with quality — a Miss whiffs across
+	// every enemy for chip damage, an Excellent reaps everyone. The
+	// cost is the charge wind-up risk: spinning up in a tight room
+	// can leave the warrior exposed if an enemy beats them on SPD.
+	{Skill: SkillWhirlwind, Name: "Whirlwind", Description: "STR-scaled AoE cleave. Charge — quality scales hard.", Cost: 4, TargetMode: ActionMenu, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 2}, PlayerCastable: true},
+	// Mass Mend (Cleric): charge-up AoE heal. +1 base + WIS per ally,
+	// 6 MP. Smaller per-target than Prayer but covers the whole alive
+	// party — the cleric's answer to a Whirlwind / multi-poison turn
+	// that left everyone wounded at once.
+	{Skill: SkillMassMend, Name: "Mass Mend", Description: "WIS-scaled heal across the whole alive party. Charge.", Cost: 6, TargetMode: ActionMenu, Kind: SkillKindHeal, Tag: SkillTagHeal, Minigame: MinigameCharge, Effect: SkillEffect{Heal: 1}, PlayerCastable: true},
+	// Smite (Cleric): press-tap single-target magic damage. +2 base +
+	// WIS, 3 MP. Lets the cleric chip enemies when nobody needs a
+	// heal — press minigame keeps it fast so it doesn't compete with
+	// Prayer's charge for screen time.
+	{Skill: SkillSmite, Name: "Smite", Description: "WIS-scaled magic damage. Press tap, no burn.", Cost: 3, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{Damage: 2}, PlayerCastable: true},
+	// Backstab (Thief): charge-up single-target physical hit. +2 base
+	// + STR, 3 MP. Damage DOUBLES on Excellent timing (timing-gated
+	// crit) — the thief's signature "land the hit perfectly or it's
+	// just a poke." The crit multiplier lives in applyBackstab since
+	// it's quality-conditional and SkillEffect doesn't carry a
+	// generic crit field.
+	{Skill: SkillBackstab, Name: "Backstab", Description: "STR-scaled phys hit. Damage doubles on Excellent.", Cost: 3, TargetMode: ActionEnemyTarget, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 2}, PlayerCastable: true},
+	// Venom Strike (Thief): sequence-minigame single-target physical
+	// + Poison apply. +1 base + STR per hit, 3 MP. Pairs with Steal's
+	// sequence rhythm — the thief's two skills share a "rhythm-game"
+	// identity. Poison-apply chance scales with quality so a clean
+	// sequence reliably lands the DoT.
+	{Skill: SkillVenomStrike, Name: "Venom Strike", Description: "STR-scaled phys hit. Sequence — applies Poison.", Cost: 3, TargetMode: ActionEnemyTarget, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigameSequence, Effect: SkillEffect{Damage: 1, PoisonChance: VenomStrikePoisonChance, PoisonMinTurns: PoisonMinTurns, PoisonMaxTurns: PoisonMaxTurns}, PlayerCastable: true},
+	// Frost Lance (Wizard): charge-up single-target magic. +2 base +
+	// INT, 5 MP. On Great/Excellent timing applies a 1-turn Stun —
+	// lower base damage than Firebolt but reliable lockout instead
+	// of the burn-chance lottery. Different tactical role.
+	{Skill: SkillFrostLance, Name: "Frost Lance", Description: "INT-scaled magic damage. Reliable Stun on Great+.", Cost: 5, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 2, StunChance: FrostLanceStunChance, StunMinTurns: 1, StunMaxTurns: 1}, PlayerCastable: true},
+	// Arc Bolt (Wizard): sequence-minigame AoE magic. +1 base + INT
+	// per target, 6 MP. Each correct tap in the sequence reads as a
+	// new bolt arcing to the next enemy; on apply, all living enemies
+	// take quality-scaled damage. Magic-tagged so amoebas don't
+	// shrug it off. Pricier than Firebolt because it hits everyone.
+	{Skill: SkillArcBolt, Name: "Arc Bolt", Description: "INT-scaled magic AoE. Sequence — arcs to every enemy.", Cost: 6, TargetMode: ActionMenu, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameSequence, Effect: SkillEffect{Damage: 1}, PlayerCastable: true},
 	// Sleep is the goblin-mage's signature. Magic-tagged so armor doesn't
 	// gate the proc; press-minigame so the cast resolves quickly. Damage
 	// is 0 — the only effect is the status. The mage doesn't pay MP
 	// (enemies don't have an MP pool); a future caster class learning
 	// Sleep can set the Cost field AND flip PlayerCastable.
-	{Skill: SkillSleep, Name: "Sleep", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{SleepMinTurns: SleepMinTurns, SleepMaxTurns: SleepMaxTurns}},
+	{Skill: SkillSleep, Name: "Sleep", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{SleepMinTurns: SleepMinTurns, SleepMaxTurns: SleepMaxTurns}, EnemyCastable: true},
 	// Ingest mirrors Sleep's shape: enemy-only, Magic-tagged, single
 	// party target. AppliesIngest carries the "removed from combat until
 	// the caster dies" behaviour so the apply path can stay registry-
 	// driven instead of branching on the SkillID itself.
-	{Skill: SkillIngest, Name: "Ingest", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{AppliesIngest: true}},
+	{Skill: SkillIngest, Name: "Ingest", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{AppliesIngest: true}, EnemyCastable: true},
+	// Web (Cave Spider): enemy-only, Magic-tagged, single party target.
+	// Applies the Bound status — halves the member's effective SPD and
+	// blocks Ingest until cleared. Duration carried in BindMin/Max
+	// (3-turn fixed today); a future enchant or party skill can reuse
+	// the field without touching the apply path.
+	{Skill: SkillWeb, Name: "Web", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{BindChance: 1.0, BindMinTurns: SpiderWebBoundMinTurns, BindMaxTurns: SpiderWebBoundMaxTurns}, EnemyCastable: true},
+	// Confuse (Will-o'-Wisp): enemy-only, Magic-tagged, single party
+	// target. Applies the Confused status — per-action retarget roll
+	// when the afflicted member acts. WIS resists on the apply roll
+	// so a high-WIS Cleric is sturdier against it; duration is fixed
+	// in ConfuseMin/Max.
+	{Skill: SkillConfuse, Name: "Confuse", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{ConfuseChance: 1.0, ConfuseMinTurns: WispConfuseMinTurns, ConfuseMaxTurns: WispConfuseMaxTurns}, EnemyCastable: true},
+	// Stoneslam (Stone Golem): enemy-only, Phys-tagged, AoE. Damage
+	// hits every living party member; per-target armor applies
+	// because the tag is Phys. The slap value comes from caster
+	// SpellPower + Effect.Damage scaled by quality at apply time.
+	{Skill: SkillStoneslam, Name: "Stoneslam", Cost: 0, TargetMode: ActionMenu, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigamePress, Effect: SkillEffect{Damage: 2, AppliesAOEParty: true}, EnemyCastable: true},
+	// Raise Bones (Necromancer): enemy-only, Magic-tagged, no target
+	// (the summon lands in the caster's own pack). Capped at
+	// NecromancerRaiseLimit casts per battle via PerBattleCastLimit
+	// — the AI's usableEnemySkills check drops the skill from the
+	// pick list once the cap is hit, so no apply-time gate is
+	// needed.
+	{Skill: SkillRaiseBones, Name: "Raise Bones", Cost: 0, TargetMode: ActionMenu, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{AppliesSummonSkeleton: true}, EnemyCastable: true, PerBattleCastLimit: NecromancerRaiseLimit},
 }
 
 // SkillPlayerCastable reports whether the skill can appear in a party
@@ -170,15 +312,7 @@ func PlayerCastableSkills() []SkillID {
 // init so per-frame skillInfo calls don't linear-walk the registry. The
 // registry slice is still the source of truth (controls iteration order
 // when the editor lists skills, etc.); the map is just a read cache.
-var skillByID = buildSkillByID()
-
-func buildSkillByID() map[SkillID]skillDefinition {
-	m := make(map[SkillID]skillDefinition, len(skillDefinitions))
-	for _, def := range skillDefinitions {
-		m[def.Skill] = def
-	}
-	return m
-}
+var skillByID = BuildRegistry(skillDefinitions, func(d skillDefinition) SkillID { return d.Skill })
 
 func PartyClasses() []PartyClassDefinition {
 	defs := make([]PartyClassDefinition, len(partyClassDefinitions))
@@ -191,11 +325,35 @@ func partyClassInfo(class PartyClass) (PartyClassDefinition, bool) {
 	return def, ok
 }
 
+// PartySkill returns the skill the action menu's Skill row currently
+// casts for this member. With multiple skills per class (SkillsPerClass)
+// the result depends on member.SkillCursor; the in-battle Tab key
+// cycles that index. Out-of-range cursors clamp to 0 so a corrupted
+// save can't crash the action menu.
 func PartySkill(member PartyMember) SkillID {
-	if def, ok := partyClassInfo(member.Class); ok {
-		return def.Skill
+	def, ok := partyClassInfo(member.Class)
+	if !ok {
+		return SkillNone
 	}
-	return SkillNone
+	idx := member.SkillCursor
+	if idx < 0 || idx >= len(def.Skills) {
+		idx = 0
+	}
+	return def.Skills[idx]
+}
+
+// PartySkills returns the full learned skill array for a member.
+// Used by the panels overlay's Skills tab, the battle skill submenu,
+// and the cycle logic. Returns the fixed-size array (not a slice) so
+// per-frame callers don't allocate — previously this minted a fresh
+// slice every frame. Callers iterate with `for i, s := range arr`.
+// Unknown class returns a zero array; range yields SkillsPerClass
+// SkillNone values which callers already filter.
+func PartySkills(member PartyMember) [SkillsPerClass]SkillID {
+	if def, ok := partyClassInfo(member.Class); ok {
+		return def.Skills
+	}
+	return [SkillsPerClass]SkillID{}
 }
 
 func skillInfo(skill SkillID) (skillDefinition, bool) {
@@ -220,9 +378,34 @@ func SkillName(skill SkillID) string {
 	return "Skill"
 }
 
+// SkillDescription returns the panels-overlay blurb for a skill. Pure
+// UX text — empty for skills without an authored description (enemy-
+// only skills, future skills missing a row). Sourced from the skill
+// registry's Description field so adding a skill is one row.
+func SkillDescription(skill SkillID) string {
+	if def, ok := skillInfo(skill); ok {
+		return def.Description
+	}
+	return ""
+}
+
 func SkillCost(skill SkillID) int {
 	if def, ok := skillInfo(skill); ok {
 		return def.Cost
+	}
+	return 0
+}
+
+// SkillCastLimitFor returns the registry's PerBattleCastLimit for a
+// skill — 0 means "uncapped." The battle AI's usableEnemySkills
+// filter reads this to drop a skill from the cast set once an enemy
+// has spent it PerBattleCastLimit times in the encounter (tracked on
+// Enemy.SkillCastCount). Wraps the lookup so callers don't have to
+// import skillInfo and so the "unknown skill → 0" fail-open lives
+// in one place.
+func SkillCastLimitFor(skill SkillID) int {
+	if def, ok := skillInfo(skill); ok {
+		return def.PerBattleCastLimit
 	}
 	return 0
 }
@@ -276,11 +459,46 @@ func SkillHeal(stats Stats, skill SkillID) int {
 	}
 }
 
-func (effect SkillEffect) BurnDuration(rng *rand.Rand) int {
-	if effect.BurnMaxTurns <= effect.BurnMinTurns {
-		return effect.BurnMinTurns
+// SumStatPending totals the staged per-stat allocations the level-up
+// modal carries. Both the explore-side input handler (used to gate
+// "is there budget for another stat point?") and the render-side
+// drawing (used to display "staged N / N") used to inline the same
+// 5-line sum. One helper means a future "skip slots flagged as
+// locked" rule lands in one place.
+func SumStatPending(p [StatCount]int) int {
+	n := 0
+	for _, v := range p {
+		n += v
 	}
-	return effect.BurnMinTurns + rng.Intn(effect.BurnMaxTurns-effect.BurnMinTurns+1)
+	return n
+}
+
+// rollDuration is the shared "uniform draw on [min, max] with
+// fail-open" generator behind every status-duration helper on
+// SkillEffect (Burn / Sleep / Stun / Poison). Degenerate bounds —
+// min <= 0 or max < min — return 0 so a non-status skill that picks
+// up the SkillEffect by accident doesn't roll a phantom DoT. Single
+// helper means four near-identical 8-liners collapse to one body;
+// each public method is now a thin wrapper that names its fields.
+func rollDuration(rng *rand.Rand, min, max int) int {
+	if min <= 0 || max < min {
+		return 0
+	}
+	span := max - min
+	if span <= 0 {
+		return min
+	}
+	return min + rng.Intn(span+1)
+}
+
+// BurnDuration rolls a uniform burn duration in [Min, Max]. Routes
+// through rollDuration so every status-duration helper on SkillEffect
+// shares one body — earlier this method open-coded the rng math with
+// a slightly different degenerate-bounds rule (`<=` instead of `<`),
+// which let an inverted Min/Max return Min where the other helpers
+// returned 0. Now consistent with Sleep/Stun/Bind/Confuse/Poison.
+func (effect SkillEffect) BurnDuration(rng *rand.Rand) int {
+	return rollDuration(rng, effect.BurnMinTurns, effect.BurnMaxTurns)
 }
 
 // SleepDuration rolls a uniform sleep duration in [Min, Max] inclusive.
@@ -288,14 +506,37 @@ func (effect SkillEffect) BurnDuration(rng *rand.Rand) int {
 // skill that picks up the SkillEffect by accident doesn't randomly
 // inflict a one-turn coma.
 func (effect SkillEffect) SleepDuration(rng *rand.Rand) int {
-	if effect.SleepMinTurns <= 0 || effect.SleepMaxTurns < effect.SleepMinTurns {
-		return 0
-	}
-	span := effect.SleepMaxTurns - effect.SleepMinTurns
-	if span <= 0 {
-		return effect.SleepMinTurns
-	}
-	return effect.SleepMinTurns + rng.Intn(span+1)
+	return rollDuration(rng, effect.SleepMinTurns, effect.SleepMaxTurns)
+}
+
+// StunDuration rolls a uniform stun duration in [Min, Max] inclusive.
+// Same fail-open shape as SleepDuration — degenerate bounds return 0
+// so a non-stun skill picking up the SkillEffect by accident doesn't
+// stun anyone.
+func (effect SkillEffect) StunDuration(rng *rand.Rand) int {
+	return rollDuration(rng, effect.StunMinTurns, effect.StunMaxTurns)
+}
+
+// BindDuration rolls a uniform bind duration in [Min, Max]. Same
+// fail-open shape as SleepDuration — degenerate bounds return 0.
+// Used by handleEnemyWeb to land the Cave Spider's Bound status.
+func (effect SkillEffect) BindDuration(rng *rand.Rand) int {
+	return rollDuration(rng, effect.BindMinTurns, effect.BindMaxTurns)
+}
+
+// ConfuseDuration rolls a uniform confuse duration in [Min, Max].
+// Same fail-open shape as the rest — degenerate bounds return 0.
+// Used by handleEnemyConfuse for the Will-o'-Wisp's Confused status.
+func (effect SkillEffect) ConfuseDuration(rng *rand.Rand) int {
+	return rollDuration(rng, effect.ConfuseMinTurns, effect.ConfuseMaxTurns)
+}
+
+// PoisonDuration rolls a uniform poison duration in [Min, Max].
+// Mirrors BurnDuration / SleepDuration / StunDuration — degenerate
+// bounds return 0 so a non-poison skill picking up the effect by
+// accident doesn't poison anyone. Used by applyVenomStrike.
+func (effect SkillEffect) PoisonDuration(rng *rand.Rand) int {
+	return rollDuration(rng, effect.PoisonMinTurns, effect.PoisonMaxTurns)
 }
 
 // SkillTagFor returns the SkillTag of a skill — used by the damage path
@@ -365,16 +606,24 @@ func AddXP(m *PartyMember, amount int) int {
 		}
 		m.XP -= need
 		m.Level++
-		m.PendingLevelUps++
+		// Each level grants LevelStatPoints stat points (default 3)
+		// to spend in the level-up modal PLUS LevelSkillPoints skill
+		// points (default 1) that drop into the member's SkillPoints
+		// pool. Skill points are spent later from the Skills panel's
+		// tree UI; the level-up modal handles stat points only.
+		m.PendingLevelUps += LevelStatPoints
+		m.SkillPoints += LevelSkillPoints
 		levels++
 	}
 	return levels
 }
 
-// FirstPendingLevelUp returns the index of the first party member with
-// unspent level-up points, or -1 when nobody has any. The modal walks
-// members in slice order — closing the modal on member N's last point
-// advances to N+1 by calling this again.
+// FirstPendingLevelUp returns the index of the first party member
+// with unspent stat points, or -1 when nobody has any. The level-up
+// modal walks members in slice order — closing the modal on member
+// N's last point advances to N+1 via another call. SkillPoints live
+// outside this gate (they're spent at the player's leisure from the
+// Skills panel, so the modal doesn't block on them).
 func FirstPendingLevelUp(party []PartyMember) int {
 	for i := range party {
 		if party[i].PendingLevelUps > 0 {
@@ -382,6 +631,107 @@ func FirstPendingLevelUp(party []PartyMember) int {
 		}
 	}
 	return -1
+}
+
+// HasUnspentPoints reports whether a party member has any allocation
+// debt: unspent stat points (PendingLevelUps) OR unspent skill
+// points (SkillPoints). The party card's "+" badge, the Tome's
+// Character tab "Spend N" hint, and any future "press X to allocate"
+// prompt all gate on this single predicate so the UI signals stay
+// consistent. Keep ANY two-counter contract changes here (e.g. if
+// a future "free respec" path zeroes stats without touching skill
+// points, the badge logic doesn't need to be hunted down).
+func HasUnspentPoints(m PartyMember) bool {
+	return m.PendingLevelUps > 0 || m.SkillPoints > 0
+}
+
+// PartyStatusKind tags the single highest-priority status a party
+// member is currently afflicted by. Two render surfaces (the party
+// card status label in render/party.go and the Tome's Stats badge
+// in render/panels.go) used to walk the priority ladder inline,
+// each with its own switch — and they drifted (the party card
+// missed Sleep/Stun/Bound/Confused entirely; the Tome badge missed
+// Stun/Bound/Confused). One enum + one resolver here is now the
+// single source of truth.
+type PartyStatusKind int
+
+const (
+	PartyStatusNone PartyStatusKind = iota
+	PartyStatusDown
+	PartyStatusIngested
+	PartyStatusBound
+	PartyStatusConfused
+	PartyStatusStunned
+	PartyStatusAsleep
+	PartyStatusPoisoned
+	PartyStatusDefending
+	// PartyStatusCount is the length-assert sentinel for any render-side
+	// table indexed by PartyStatusKind. New status kinds slot in above
+	// this row; the assert at the registry's init catches a missed table
+	// row at startup rather than silently rendering with a zero fill.
+	PartyStatusCount
+)
+
+// PartyStatus picks the single highest-priority active status for a
+// member. Priority ordering is what surfaces to the player when
+// multiple statuses stack — Down beats everything (the rest don't
+// matter when the member is at 0 HP), Ingested beats the rest (it's
+// the most disruptive — the member can't act and can't be hit by
+// friends or foes), then the disabling DoT/lockout statuses
+// (Bound/Confused/Stunned/Asleep) in descending "how much it hurts
+// the player's plan" order, then Poisoned (DoT but actionable),
+// then Defending (lowest priority — it's a positive status the
+// player chose).
+//
+// Returns PartyStatusNone if the member has no surfaced status.
+// The `turns` return is the remaining counter for any counted
+// status, or 0 for boolean statuses (Down / Ingested / Defending).
+func PartyStatus(m PartyMember) (kind PartyStatusKind, turns int) {
+	switch {
+	case m.HP <= 0:
+		return PartyStatusDown, 0
+	case m.Ingested:
+		return PartyStatusIngested, 0
+	case m.BoundTurns > 0:
+		return PartyStatusBound, m.BoundTurns
+	case m.ConfusedTurns > 0:
+		return PartyStatusConfused, m.ConfusedTurns
+	case m.StunTurns > 0:
+		return PartyStatusStunned, m.StunTurns
+	case m.SleepTurns > 0:
+		return PartyStatusAsleep, m.SleepTurns
+	case m.PoisonTurns > 0:
+		return PartyStatusPoisoned, m.PoisonTurns
+	case m.Defending:
+		return PartyStatusDefending, 0
+	}
+	return PartyStatusNone, 0
+}
+
+// PartyStatusLabel returns the short uppercase label rendered for a
+// given status kind. Pair with PartyStatus(m) to drive a render
+// surface — never branch on the kind enum yourself at the call
+// site; that's how the two surfaces drifted before this helper.
+func PartyStatusLabel(kind PartyStatusKind) string {
+	switch kind {
+	case PartyStatusDown:
+		return "DOWN"
+	case PartyStatusIngested:
+		return "INGESTED"
+	case PartyStatusBound:
+		return "BOUND"
+	case PartyStatusConfused:
+		return "CONFUSED"
+	case PartyStatusStunned:
+		return "STUNNED"
+	case PartyStatusAsleep:
+		return "ASLEEP"
+	case PartyStatusPoisoned:
+		return "POISONED"
+	case PartyStatusDefending:
+		return "DEFENDING"
+	}
+	return ""
 }
 
 // Stat enumerates the six spendable level-up stats in display order.
@@ -420,9 +770,84 @@ var statTable = []statSpec{
 	StatSPD: {Label: "SPD", Get: func(s Stats) int { return s.SPD }, Add: func(s *Stats) { s.SPD++ }},
 }
 
+// statSetters is the absolute-write half of statTable. Kept separate
+// (rather than fattening statSpec) because every existing reader uses
+// only Get/Add and adding Set to statSpec would touch every entry
+// without need.
+var statSetters = []func(*Stats, int){
+	StatSTR: func(s *Stats, v int) { s.STR = v },
+	StatDEX: func(s *Stats, v int) { s.DEX = v },
+	StatINT: func(s *Stats, v int) { s.INT = v },
+	StatWIS: func(s *Stats, v int) { s.WIS = v },
+	StatVIT: func(s *Stats, v int) { s.VIT = v },
+	StatSPD: func(s *Stats, v int) { s.SPD = v },
+}
+
+// AdjustStat applies delta to the named stat, clamping at zero. Used
+// by the custom-enemy editor's +/- buttons. Single seam so a future
+// per-stat range cap or "you can't drop VIT below 1 or the HP math
+// explodes" guard lands in one place.
+func AdjustStat(s *Stats, st Stat, delta int) {
+	if st < 0 || int(st) >= len(statTable) || s == nil {
+		return
+	}
+	v := statTable[st].Get(*s) + delta
+	if v < 0 {
+		v = 0
+	}
+	statSetters[st](s, v)
+}
+
+// statDescriptions is the per-stat one-liner the level-up modal
+// renders. Lives next to statTable so a new Stat enum value's
+// description lands in the same place as its label / Get / Add.
+var statDescriptions = []string{
+	StatSTR: "Melee damage",
+	StatDEX: "Hit chance and Steal precision",
+	StatINT: "Magic damage",
+	StatWIS: "Heal amount",
+	StatVIT: "Max HP (+2 per point)",
+	StatSPD: "Turn order priority",
+}
+
+// StatDescription returns the level-up modal blurb for the named
+// stat. Out-of-range values return "" so a future enum addition
+// missing a description doesn't panic the modal renderer.
+func StatDescription(s Stat) string {
+	if s < 0 || int(s) >= len(statDescriptions) {
+		return ""
+	}
+	return statDescriptions[s]
+}
+
+// CommitLevelUp applies the staged stat-point spend on a member by
+// calling SpendStatPoint the right number of times. Returns true if
+// at least one point landed so the caller can decide whether to
+// advance to the next pending member. Skill points are NOT spent
+// here — they accrue on the member at level-up time and are spent
+// from the Skills panel's tree UI via SpendSkillTier.
+func CommitLevelUp(m *PartyMember, pendingStats [StatCount]int) bool {
+	if m == nil {
+		return false
+	}
+	any := false
+	for i := 0; i < int(StatCount); i++ {
+		for k := 0; k < pendingStats[i]; k++ {
+			if !SpendStatPoint(m, Stat(i)) {
+				break
+			}
+			any = true
+		}
+	}
+	return any
+}
+
 func init() {
 	if len(statTable) != int(StatCount) {
 		panic("core: statTable length must match StatCount — add a row when adding a Stat enum value")
+	}
+	if len(statDescriptions) != int(StatCount) {
+		panic("core: statDescriptions length must match StatCount — add a row when adding a Stat enum value")
 	}
 }
 
@@ -507,11 +932,25 @@ func (p PoisonEffect) RollDuration(rng *rand.Rand) int {
 // TickPoisonStep applies one tick of poison damage to every poisoned,
 // alive party member and decrements their counter. Called after each
 // successful exploration step so a fight-inflicted poison doesn't stick
-// indefinitely while the player walks around; mirrors the in-battle tick
-// (tickPoisonAfterPartyTurn) but without combat-log lines since there's
-// no battle context out here. PoisonTurns hitting 0 clears the status;
-// HP hitting 0 leaves the member downed at 0 (the next battle picks them
-// up via the existing alive checks).
+// indefinitely while the player walks around.
+//
+// There are three poison-tick code paths total — each fires in a
+// distinct context, and the divergence is intentional:
+//
+//   - TickPoisonStep (this function) — out-of-battle, fires on every
+//     player tile-step. No combat log; no battle context to write to.
+//   - battle.tickPoisonAfterPartyTurn — in-battle, fires at the end
+//     of a poisoned member's own turn (the "user still gets to act
+//     before bleeding" beat). Emits combat-log lines.
+//   - battle.tickPoisonForIngestedParty — in-battle, fires at the
+//     start of each new round for poisoned members who are ingested
+//     by a mantrap (i.e. skipped from the per-turn queue). Without
+//     this third path, ingest would silently pause the poison DoT.
+//
+// All three drain PoisonTurns, deal PoisonTickDamage, and bypass
+// armor (poison is magical decay). A future "rebalance poison
+// damage" or "Poison ticks for VIT% instead of flat" change must
+// touch all three — there is no single seam to swap.
 //
 // Returns the number of members hit this step — callers can use it to
 // emit a HUD nudge ("Poison stings!") without re-walking the party.

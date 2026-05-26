@@ -1,9 +1,31 @@
 package core
 
 import (
+	"cmp"
 	"image/color"
 	"math"
 )
+
+// BuildRegistry collapses the four "build O(1) lookup map from a
+// definition slice" helpers (partyClassByID, skillByID, enemyByKind,
+// itemByKind) into one generic builder. The registry slice stays the
+// source of truth (iteration order matters for the editor's listings
+// and for stable test fixtures); the map is just a read cache for
+// per-frame ItemInfo / EnemyInfo / SkillInfo lookups.
+//
+// New registries pass the slice plus a key extractor:
+//
+//	var skillByID = BuildRegistry(skillDefinitions, func(d skillDefinition) SkillID { return d.Skill })
+//
+// Additional validation (e.g. enemies.go's [0, 1] probability gate)
+// lives in a sibling init() block — keeping the builder shape clean.
+func BuildRegistry[K comparable, V any](defs []V, key func(V) K) map[K]V {
+	m := make(map[K]V, len(defs))
+	for _, def := range defs {
+		m[key(def)] = def
+	}
+	return m
+}
 
 func FlashTint(base color.RGBA, timer float32) color.RGBA {
 	if timer <= 0 {
@@ -18,6 +40,26 @@ func BumpOffset(timer, distance float32) float32 {
 		return 0
 	}
 	t := 1 - timer/BumpDuration
+	if t < 0 {
+		t = 0
+	}
+	if t > 1 {
+		t = 1
+	}
+	return float32(math.Sin(float64(t)*math.Pi)) * distance
+}
+
+// KnockbackOffset returns the per-frame world-units offset for a
+// receiver's hit-recoil. Same sine-curve shape as BumpOffset but
+// scaled by HitKnockbackDuration so the recoil plays its own
+// timing. Distance is the peak displacement at the curve's apex.
+// Used by the renderer to push the hit sprite AWAY from its
+// attacker — sign of the application is the caller's choice.
+func KnockbackOffset(timer, distance float32) float32 {
+	if timer <= 0 {
+		return 0
+	}
+	t := 1 - timer/HitKnockbackDuration
 	if t < 0 {
 		t = 0
 	}
@@ -60,32 +102,29 @@ func TileCenter(tile int) float32 {
 	return (float32(tile) + 0.5) * TileSize
 }
 
+// facingTable carries the per-direction unit vector + camera yaw used
+// by FacingVector / FacingYaw. Indexed by NormalizeFacing(facing) so
+// the two helpers below stay in lockstep — earlier passes had two
+// parallel switch statements on the same enum that could drift when a
+// new direction was added. One row per direction; the helpers are
+// one-line lookups.
+var facingTable = [4]struct {
+	DX, DZ int
+	Yaw    float32
+}{
+	North: {DX: 0, DZ: -1, Yaw: -math.Pi / 2},
+	East:  {DX: 1, DZ: 0, Yaw: 0},
+	South: {DX: 0, DZ: 1, Yaw: math.Pi / 2},
+	West:  {DX: -1, DZ: 0, Yaw: math.Pi},
+}
+
 func FacingVector(facing int) (int, int) {
-	switch NormalizeFacing(facing) {
-	case North:
-		return 0, -1
-	case East:
-		return 1, 0
-	case South:
-		return 0, 1
-	case West:
-		return -1, 0
-	}
-	return 0, 0
+	row := facingTable[NormalizeFacing(facing)]
+	return row.DX, row.DZ
 }
 
 func FacingYaw(facing int) float32 {
-	switch NormalizeFacing(facing) {
-	case North:
-		return -math.Pi / 2
-	case East:
-		return 0
-	case South:
-		return math.Pi / 2
-	case West:
-		return math.Pi
-	}
-	return 0
+	return facingTable[NormalizeFacing(facing)].Yaw
 }
 
 func NormalizeFacing(facing int) int {
@@ -128,18 +167,34 @@ func MaxInt(a, b int) int {
 	return b
 }
 
-// ClampInt is the int counterpart to Clamp — keeps v inside [lo, hi].
-// Lifted into core so the editor's grid-cursor and any future int-range
-// clamp can share one implementation instead of every package open-coding
-// a 5-line min/max chain.
-func ClampInt(v, lo, hi int) int {
-	if v < lo {
-		return lo
+
+// Sign returns -1, 0, or 1 depending on the sign of v. Sits next to
+// AbsInt / MinInt / MaxInt so callers find it in one place — the pack
+// AI's chase step picks a direction with this, and any future spatial
+// helper that needs a step vector should too.
+func Sign(v int) int {
+	switch {
+	case v > 0:
+		return 1
+	case v < 0:
+		return -1
+	default:
+		return 0
 	}
-	if v > hi {
-		return hi
+}
+
+// ChebyshevDistance returns the king-move distance between two tiles —
+// the max of the per-axis absolute deltas. Used by leash / chase /
+// AoE radius checks where diagonal-equivalent steps should count the
+// same as cardinal ones. Manhattan callers stay on `AbsInt(a-b) +
+// AbsInt(c-d)` since that's a different shape (diamond vs square).
+func ChebyshevDistance(ax, az, bx, bz int) int {
+	dx := AbsInt(ax - bx)
+	dz := AbsInt(az - bz)
+	if dx > dz {
+		return dx
 	}
-	return v
+	return dz
 }
 
 func Smoothstep(t float32) float32 {
@@ -150,17 +205,13 @@ func Lerp(a, b, t float32) float32 {
 	return a + (b-a)*t
 }
 
-func Clamp(v, min, max float32) float32 {
-	if v < min {
-		return min
-	}
-	if v > max {
-		return max
-	}
-	return v
-}
-
-func ClampFloat64(v, min, max float64) float64 {
+// Clamp keeps v inside [min, max] for any cmp.Ordered type. Replaces
+// the three typed variants (Clamp float32, ClampInt int, ClampFloat64
+// float64) that used to live here with one generic. ClampByte and
+// ClampMapDimension intentionally remain — they're not "keep v in a
+// caller-supplied range" clamps but type-converting / fixed-bound
+// clippers, which the generic can't model cleanly.
+func Clamp[T cmp.Ordered](v, min, max T) T {
 	if v < min {
 		return min
 	}

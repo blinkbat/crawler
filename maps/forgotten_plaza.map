@@ -99,10 +99,14 @@ ceiling:
 ......................
 ......................
 enemies:
-rat 5 5
-bat 16 5
-rat,diseased_rat 5 13
-bat,rat 15 13
+goblin,rat 5 5
+vampire_bat,bat,bat 16 5
+diseased_rat,diseased_rat 5 13
+necromancer 15 13
+stone_golem 11 9
+wisp 9 2
+cave_spider,cave_spider 17 10
+skeleton,skeleton,vampire_bat 3 9
 chests:
 Morsel of Cheese,Bat Jerky 8 2
 Bat Jerky,Bat Jerky 13 9

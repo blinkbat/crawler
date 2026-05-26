@@ -8,63 +8,113 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// turnPanelW is the on-screen width of the turn-order panel, and
-// turnPanelRightMargin is the gap between the panel's right edge and the
-// screen edge. Exposed via TurnPanelLayoutWidth so the action panel (which
-// reserves the right side of the screen for the turn panel) can derive
-// its own width from one source instead of duplicating the literal.
+// turnPanelW is the on-screen width of the turn-order panel. Sized
+// to match the minimap that sits above it on the left edge so the
+// HUD reads as a stacked column. Compact rows + smaller text keep
+// the panel from dominating the left third now that it's anchored
+// to the corner.
 const (
-	turnPanelW           = int32(272)
-	turnPanelRightMargin = int32(22)
+	turnPanelW = int32(220)
 )
 
-// TurnPanelLayoutWidth returns the total horizontal space the turn-order
-// panel occupies (panel + right margin), so adjacent HUD panels can lay
-// themselves out without hardcoding the figure.
-func TurnPanelLayoutWidth() int32 {
-	return turnPanelW + turnPanelRightMargin
+// turnForecastBuf is reused across frames so the per-frame forecast
+// doesn't allocate. CacheTurnForecastForFrame populates it once at the
+// top of the battle HUD pass; TurnPanelBottomY and drawTurnPanel then
+// read the same slice, eliminating the duplicate TurnForecast call
+// (combat-log layout used to invoke it via TurnPanelBottomY, and the
+// turn panel itself reinvoked it on the very next line).
+var turnForecastBuf = make([]core.TurnEntry, 0, 7)
+
+// CacheTurnForecastForFrame computes the turn forecast once and stores
+// it for downstream HUD consumers. Called from DrawOverlay's battle
+// branch before either drawBattleHUD or drawTurnPanel runs.
+func CacheTurnForecastForFrame(g *core.GameState) {
+	turnForecastBuf = core.TurnForecastInto(g, turnForecastBuf, 7)
+}
+
+// turnPanelTopPad / turnPanelBottomPad bracket the rows inside the
+// panel. The old header band ("TURN ORDER" + underline) was dropped —
+// the class-tinted rows already name themselves; the title was just
+// tautological chrome.
+const (
+	turnPanelTopPad    = int32(12)
+	turnPanelBottomPad = int32(10)
+)
+
+// TurnPanelBottomY returns the Y screen coordinate of the bottom
+// edge of the turn-order panel — used by the combat-log panel that
+// docks below it on the same left edge. Returns the minimap bottom
+// when the queue is empty (no panel painted, so combat log slots up).
+func TurnPanelBottomY(g core.GameState) int32 {
+	turns := turnForecastBuf
+	if len(turns) == 0 {
+		return MinimapBottomY()
+	}
+	rowH := int32(28)
+	h := turnPanelTopPad + int32(len(turns))*rowH + turnPanelBottomPad
+	return MinimapBottomY() + hudColumnGap + h
 }
 
 func drawTurnPanel(g core.GameState, assets Resources) {
-	turns := core.TurnForecast(g, 9)
+	turns := turnForecastBuf
 	if len(turns) == 0 {
 		return
 	}
-	screenW, _ := screenSize()
 	w := turnPanelW
-	x := screenW - w - turnPanelRightMargin
-	y := int32(110)
-	rowH := int32(42)
-	headerH := int32(62)
-	padBottom := int32(16)
-	h := headerH + int32(len(turns))*rowH + padBottom
+	x := hudEdgePad
+	y := MinimapBottomY() + hudColumnGap
+	rowH := int32(28)
+	h := turnPanelTopPad + int32(len(turns))*rowH + turnPanelBottomPad
 
-	drawCard(x, y, w, h, surfacePrimary, borderSoft, borderStrong)
-	drawHeading(assets.hudFont, "TURN ORDER", x+22, y+18, borderStrong)
+	drawCard(x, y, w, h, surfacePrimary, borderSoft, borderSoft)
 
 	for i, turn := range turns {
-		rowY := y + headerH + int32(i)*rowH
+		rowY := y + turnPanelTopPad + int32(i)*rowH
 		col := turnEntryColor(turn)
 
-		rowX := x + 14
-		rowW := w - 28
-		rowInnerH := rowH - 8
+		rowX := x + 10
+		rowW := w - 20
+		rowInnerH := rowH - 4
 
 		if i == 0 {
-			drawSmallPanel(rowX, rowY, rowW, rowInnerH, colorWithAlpha(col, 86))
-			drawSmallPanelOutline(rowX, rowY, rowW, rowInnerH, colorWithAlpha(col, 230))
-			cx := float32(rowX + 14)
+			drawSmallPanel(rowX, rowY, rowW, rowInnerH, colorWithAlpha(col, 96))
+			drawSmallPanelOutline(rowX, rowY, rowW, rowInnerH, colorWithAlpha(col, 235))
+			cx := float32(rowX + 10)
 			cy := float32(rowY) + float32(rowInnerH)/2
-			drawArrowMarker(rl.NewVector2(cx-4, cy), 10, 0, 8, col)
+			drawArrowMarker(rl.NewVector2(cx-2, cy), 8, 0, 6, col)
 		} else {
-			drawSmallPanel(rowX, rowY, rowW, rowInnerH, colorWithAlpha(col, 36))
-			rl.DrawRectangle(rowX+8, rowY+6, 4, rowInnerH-12, colorWithAlpha(col, 210))
+			rl.DrawRectangle(rowX+6, rowY+4, 3, rowInnerH-8, colorWithAlpha(col, 220))
 		}
 
-		labelX := rowX + 28
-		labelY := rowY + (rowInnerH-22)/2 - 1
-		drawTextWithShadow(assets.hudFont, turn.Label, float32(labelX), float32(labelY), 22, col)
+		labelX := rowX + 22
+		labelSize := FontSmall
+		labelMeasure := measureTurnLabel(assets.hudFont, turn.Label)
+		labelY := float32(rowY) + (float32(rowInnerH)-labelMeasure.Y)/2 - 1
+		drawTextWithShadow(assets.hudFont, turn.Label, float32(labelX), labelY, labelSize, col)
 	}
+}
+
+// turnLabelMeasureCache memoizes rl.MeasureTextEx for the small set of
+// turn-row labels (party names + enemy SingularName strings). The
+// panel paints up to 7 rows every battle frame; without this cache
+// each row costs a cgo round-trip even though the labels only change
+// when an actor enters or leaves the queue.
+var turnLabelMeasureCache = make(map[string]rl.Vector2, 16)
+var turnLabelMeasureCacheFontID uint32
+
+func measureTurnLabel(font rl.Font, label string) rl.Vector2 {
+	if font.Texture.ID != turnLabelMeasureCacheFontID {
+		for k := range turnLabelMeasureCache {
+			delete(turnLabelMeasureCache, k)
+		}
+		turnLabelMeasureCacheFontID = font.Texture.ID
+	}
+	if v, ok := turnLabelMeasureCache[label]; ok {
+		return v
+	}
+	v := rl.MeasureTextEx(font, label, FontSmall, 1)
+	turnLabelMeasureCache[label] = v
+	return v
 }
 
 func turnEntryColor(turn core.TurnEntry) color.RGBA {

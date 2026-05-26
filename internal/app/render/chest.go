@@ -2,7 +2,7 @@ package render
 
 import (
 	"crawler/internal/app/core"
-	"fmt"
+	"strconv"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -113,21 +113,25 @@ func DrawChestModal(g core.GameState, assets Resources) {
 	stacks := core.LiveStacks(chest.Items)
 
 	font := assets.Font()
-	cardH := int32(96 + 30*(int32(len(stacks))+1))
-	if cardH < 180 {
-		cardH = 180
+	rowH := int32(34)
+	// Header dropped — the chest model still sits behind the veil and
+	// the player walked up to it to open this; titling the modal
+	// "TREASURE" was tautological. Card height now budgets for rows +
+	// Take All + footer only.
+	cardH := int32(48 + rowH*(int32(len(stacks))+1) + 32)
+	if cardH < 200 {
+		cardH = 200
 	}
-	card := drawModalScaffold(font, overlayCardWidthSmall, cardH, "TREASURE")
+	card := drawModalScaffold(font, overlayCardWidthSmall, cardH, "")
 	cardX, cardY := int32(card.X), int32(card.Y)
 	cardW := int32(card.Width)
 	cardH = int32(card.Height)
 
-	rowY := cardY + 56
-	rowH := int32(28)
-	rowX := cardX + 18
-	rowW := cardW - 36
+	rowY := cardY + 28
+	rowX := cardX + 20
+	rowW := cardW - 40
 	if len(stacks) == 0 {
-		drawTextWithShadow(font, "(empty)", float32(rowX), float32(rowY), 18, textMuted)
+		drawTextWithShadow(font, "(empty)", float32(rowX), float32(rowY), FontBody, textMuted)
 		rowY += rowH
 	}
 	rowRect := func(y int32) rl.Rectangle {
@@ -142,8 +146,8 @@ func DrawChestModal(g core.GameState, assets Resources) {
 		if focused {
 			col = textPrimary
 		}
-		label := fmt.Sprintf("%s  x%d", core.ItemInfo(st.Kind).Name, st.Count)
-		drawTextWithShadow(font, label, float32(rowX), float32(rowY), 18, col)
+		label := core.ItemInfo(st.Kind).Name + "  x" + strconv.Itoa(st.Count)
+		drawTextWithShadow(font, label, float32(rowX), float32(rowY), FontBody, col)
 		rowY += rowH
 	}
 	// "Take All" row sits below the items. Always present even when the
@@ -159,8 +163,8 @@ func DrawChestModal(g core.GameState, assets Resources) {
 		if focused {
 			col = textPrimary
 		}
-		drawTextWithShadow(font, "Take All", float32(rowX), float32(rowY), 18, col)
+		drawTextWithShadow(font, "Take All", float32(rowX), float32(rowY), FontBody, col)
 	}
-	DrawFooterHint(font, "Up/Down move   Enter take   Esc close",
-		float32(cardX+cardW/2), float32(cardY+cardH-22), 13)
+	DrawFooterHint(font, "Up/Down move   Z take   X close",
+		float32(cardX+cardW/2), float32(cardY+cardH-22), FontTiny)
 }

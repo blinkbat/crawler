@@ -86,6 +86,124 @@ func behindCamera(camera rl.Camera3D, p rl.Vector3) bool {
 	return dx*forward.X+dz*forward.Z <= 0
 }
 
+// wrapTextLines greedily packs words from `text` into lines no
+// wider than `maxW` at the given font + size. Words that exceed
+// `maxW` on their own (long IDs, paths, numeric readouts) are
+// character-broken into multiple pieces so the panel never has
+// to render text past its right edge. Used by drawCombatLogPanel
+// and anywhere else a fixed-width text surface needs to soft-
+// break sentences.
+func wrapTextLines(font rl.Font, text string, size, maxW float32) []string {
+	if text == "" {
+		return nil
+	}
+	// strings.Fields collapses runs of whitespace and trims leading /
+	// trailing space — combat-log lines build via fmt.Sprintf so they
+	// don't carry stray indentation, but the trim guards against a
+	// future emitter that does.
+	words := splitWords(text)
+	if len(words) == 0 {
+		return []string{text}
+	}
+	var out []string
+	cur := ""
+	flushCur := func() {
+		if cur != "" {
+			out = append(out, cur)
+			cur = ""
+		}
+	}
+	for _, w := range words {
+		candidate := w
+		if cur != "" {
+			candidate = cur + " " + w
+		}
+		m := rl.MeasureTextEx(font, candidate, size, 1)
+		if m.X <= maxW {
+			cur = candidate
+			continue
+		}
+		// Candidate doesn't fit. Flush the current line first so the
+		// new word starts on its own row.
+		flushCur()
+		// If the word itself is narrower than maxW, just start a new
+		// line with it. Otherwise the word ALONE is wider than the
+		// panel — break it character-wise so no line overflows.
+		wMeasure := rl.MeasureTextEx(font, w, size, 1)
+		if wMeasure.X <= maxW {
+			cur = w
+			continue
+		}
+		pieces := breakWideWord(font, w, size, maxW)
+		// All but the last piece become standalone lines; the last
+		// becomes the new "cur" so a following short word can append.
+		for i, piece := range pieces {
+			if i == len(pieces)-1 {
+				cur = piece
+			} else {
+				out = append(out, piece)
+			}
+		}
+	}
+	flushCur()
+	return out
+}
+
+// breakWideWord splits a single word into character-aligned chunks
+// each no wider than maxW. Used as the fallback when wrapTextLines
+// gets a single token that's wider than the wrap target. Greedy
+// from the left: builds runes one at a time, measuring after each,
+// and snaps a chunk when the next rune would push past the limit.
+// Always returns at least one piece; if maxW is so tight that even
+// a single rune overflows, individual runes are emitted on their
+// own lines (still better than letting the original word overflow).
+func breakWideWord(font rl.Font, word string, size, maxW float32) []string {
+	if word == "" {
+		return nil
+	}
+	var out []string
+	cur := make([]rune, 0, len(word))
+	for _, r := range word {
+		candidate := string(append(cur, r))
+		m := rl.MeasureTextEx(font, candidate, size, 1)
+		if m.X <= maxW || len(cur) == 0 {
+			cur = append(cur, r)
+			continue
+		}
+		out = append(out, string(cur))
+		cur = cur[:0]
+		cur = append(cur, r)
+	}
+	if len(cur) > 0 {
+		out = append(out, string(cur))
+	}
+	return out
+}
+
+// splitWords is a strings.Fields equivalent without the import — keeps
+// this file dependency-light. Treats runs of space / tab / newline as
+// a single separator.
+func splitWords(s string) []string {
+	var out []string
+	cur := make([]byte, 0, len(s))
+	flush := func() {
+		if len(cur) > 0 {
+			out = append(out, string(cur))
+			cur = cur[:0]
+		}
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			flush()
+			continue
+		}
+		cur = append(cur, c)
+	}
+	flush()
+	return out
+}
+
 // DrawFooterHint paints a centered hint string at the bottom of a
 // dialog. Three sites (sound modal, chest modal, title screen) drew
 // the same "measure + center-anchor + drop shadow" pattern with a

@@ -79,9 +79,14 @@ ceiling:
 ....................
 ....................
 enemies:
-rat 5 8
-mantrap 17 4
-mantrap,goblin 17 10
+venus_mantrap,amoeba 5 8
+venus_mantrap,wisp 17 4
+venus_mantrap,goblin_mage 17 10
+amoeba,diseased_rat 8 11
+diseased_rat,vampire_bat,bat 2 2
+wisp,wisp 11 6
+cave_spider,venus_mantrap 13 2
+vampire_bat,wisp 6 11
 chests:
 Bat Jerky,Bat Jerky 18 7
 doors:

@@ -38,12 +38,12 @@ var (
 
 	// Text colors specific to the editor; the shared HUD theme covers most
 	// strings, these handle the brighter entry text and the swatch outline.
-	textBright   = rl.NewColor(220, 230, 245, 255)
-	textEntry    = rl.NewColor(230, 234, 244, 255)
-	textReadonly = rl.NewColor(200, 210, 230, 255)
-	swatchEdge     = rl.NewColor(0, 0, 0, 200)
-	gridLineCol    = rl.NewColor(0, 0, 0, 80)
-	gridLineMajor  = rl.NewColor(0, 0, 0, 160)
+	textBright    = rl.NewColor(220, 230, 245, 255)
+	textEntry     = rl.NewColor(230, 234, 244, 255)
+	textReadonly  = rl.NewColor(200, 210, 230, 255)
+	swatchEdge    = rl.NewColor(0, 0, 0, 200)
+	gridLineCol   = rl.NewColor(0, 0, 0, 80)
+	gridLineMajor = rl.NewColor(0, 0, 0, 160)
 	// entityMarkerOutline is the dark ring drawn around pack / chest /
 	// start markers on the editor canvas. Aliases render.MarkerOutline
 	// so the editor canvas and the minimap can never drift on the
@@ -60,4 +60,10 @@ var (
 	floorAutoColor       = rl.NewColor(160, 168, 140, 255)
 	editorFallbackColor  = rl.NewColor(200, 200, 200, 255)
 	ceilingFallbackColor = rl.NewColor(110, 96, 80, 255)
+	// clearBrushColor is the muted dark-grey swatch used by every
+	// "this brush sets the cell to its empty sentinel" entry (decor
+	// Force-empty, props None/erase, entities Clear). Three brushes
+	// used to declare rl.NewColor(60, 64, 70, 255) inline; centralized
+	// here so a tweak is one edit.
+	clearBrushColor = rl.NewColor(60, 64, 70, 255)
 )

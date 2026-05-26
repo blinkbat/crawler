@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"math"
+	"math/rand"
 )
 
 // SampleRate is the procedural-audio bank's working sample rate. 22050 is
@@ -36,27 +37,118 @@ func ClampToInt16(sample float64) int16 {
 	return int16(sample * 32767)
 }
 
-// SynthSweep builds a sine-wave note that linearly sweeps between two
-// frequencies. The envelope is a simple ADSR with the attack and release
-// args; the sustain is whatever's left after attack and release fit inside
-// the total duration. Volume is multiplied into the sample before
-// clamping, so 0.2 lands around -14 dBFS — quiet enough for a UI cue.
-func SynthSweep(duration, startHz, endHz, volume, attack, release float64) []int16 {
+// WaveShape selects the oscillator timbre for SynthShape. Sine is the
+// round/pure default; Square is harsh/8-bit; Triangle is gentler than
+// square but brighter than sine; Saw is buzzy/aggressive. Different
+// shapes share the same fundamental frequency but emit very different
+// harmonic content, which is the biggest single lever for "cool
+// noise" variety in the sound editor.
+type WaveShape int
+
+const (
+	WaveSine WaveShape = iota
+	WaveSquare
+	WaveTriangle
+	WaveSaw
+	waveShapeCount
+)
+
+// WaveShapeName returns a human label for a WaveShape value — used
+// by the sound-editor row that exposes the shape picker.
+func WaveShapeName(w WaveShape) string {
+	switch w {
+	case WaveSquare:
+		return "Square"
+	case WaveTriangle:
+		return "Triangle"
+	case WaveSaw:
+		return "Saw"
+	default:
+		return "Sine"
+	}
+}
+
+// SynthShape is the rich procedural sweep primitive. Generalises
+// SynthSweep with:
+//
+//   - Selectable oscillator (sine / square / triangle / saw).
+//   - Optional noise mix: blends in white-noise samples for grit /
+//     wind / static textures. 0 = pure tone, 1 = pure noise.
+//   - Optional vibrato: sinusoidal frequency modulation. vibHz sets
+//     the wobble rate, vibDepth is the fraction of the base
+//     frequency the wobble swings through (0..0.5 reads as natural
+//     vibrato; higher gets sci-fi).
+//
+// All extras default to "off" — a zero-everything call to SynthShape
+// produces the same output as SynthSweep with sine + no noise + no
+// vibrato. SynthSweep itself is now a thin wrapper.
+func SynthShape(duration, startHz, endHz, volume, attack, release float64,
+	wave WaveShape, noiseMix, vibHz, vibDepth float64) []int16 {
+
 	samples := int(duration * SampleRate)
 	if samples <= 0 {
 		samples = 1
 	}
+	if noiseMix < 0 {
+		noiseMix = 0
+	}
+	if noiseMix > 1 {
+		noiseMix = 1
+	}
+	if vibDepth < 0 {
+		vibDepth = 0
+	}
 	pcm := make([]int16, samples)
 	phase := 0.0
+	vibPhase := 0.0
+	// Deterministic noise seed so two consecutive previews of the
+	// same params produce identical waveforms — important for the
+	// editor's "did my slider change anything?" feedback loop.
+	noiseRng := rand.New(rand.NewSource(0xC0FFEE_BABE))
 	for i := 0; i < samples; i++ {
 		t := float64(i) / float64(samples)
 		freq := startHz + (endHz-startHz)*t
-		// Integrate frequency over time so the wave stays continuous even
-		// as the freq sweeps — otherwise the phase jumps and you hear
-		// clicks at the sample boundaries.
+		// Vibrato — sinusoidal FM. Phase-integrated like the main
+		// oscillator so the wobble doesn't click at sample edges.
+		if vibHz > 0 && vibDepth > 0 {
+			vibPhase += 2 * math.Pi * vibHz / float64(SampleRate)
+			freq += freq * vibDepth * math.Sin(vibPhase)
+		}
 		phase += 2 * math.Pi * freq / float64(SampleRate)
-		sample := math.Sin(phase)
-		// ADSR envelope.
+		// Oscillator. Phase is unbounded, so we wrap to [0, 2π) for
+		// the shaped waves that read the position rather than the
+		// running sine.
+		var tone float64
+		switch wave {
+		case WaveSquare:
+			if math.Sin(phase) >= 0 {
+				tone = 1.0
+			} else {
+				tone = -1.0
+			}
+		case WaveTriangle:
+			p := math.Mod(phase, 2*math.Pi)
+			if p < 0 {
+				p += 2 * math.Pi
+			}
+			tone = 1.0 - 2.0*math.Abs(p-math.Pi)/math.Pi
+		case WaveSaw:
+			p := math.Mod(phase, 2*math.Pi)
+			if p < 0 {
+				p += 2 * math.Pi
+			}
+			tone = (p - math.Pi) / math.Pi
+		default:
+			tone = math.Sin(phase)
+		}
+		// Noise mix — crossfade between tone and noise. At 1.0 the
+		// tone disappears, leaving pure white noise (still
+		// envelope-shaped). At 0.0 the noise contributes nothing.
+		if noiseMix > 0 {
+			noise := noiseRng.Float64()*2 - 1
+			tone = tone*(1-noiseMix) + noise*noiseMix
+		}
+		// ADSR envelope (same as the original SynthSweep).
 		secs := float64(i) / float64(SampleRate)
 		env := 1.0
 		switch {
@@ -68,9 +160,17 @@ func SynthSweep(duration, startHz, endHz, volume, attack, release float64) []int
 				env = 0
 			}
 		}
-		pcm[i] = ClampToInt16(sample * env * volume)
+		pcm[i] = ClampToInt16(tone * env * volume)
 	}
 	return pcm
+}
+
+// SynthSweep is the backward-compat wrapper: sine wave, no noise,
+// no vibrato. Existing callers (the procedural soundCues defaults,
+// older tests) still drive this and get exactly the same output as
+// before SynthShape landed.
+func SynthSweep(duration, startHz, endHz, volume, attack, release float64) []int16 {
+	return SynthShape(duration, startHz, endHz, volume, attack, release, WaveSine, 0, 0, 0)
 }
 
 // SynthChord sums several sine waves at the given frequencies into one
@@ -94,6 +194,77 @@ func SynthChord(duration float64, freqs []float64, volume float64) []int16 {
 		// Bell envelope: sin(pi*t) — zero at both ends, peaks at t=0.5.
 		env := math.Sin(math.Pi * t)
 		pcm[i] = ClampToInt16(sum * env * volume)
+	}
+	return pcm
+}
+
+// SynthClick generates a short percussive transient — a pitched sine
+// body that drops in frequency over the note's lifetime, blended with
+// a white-noise burst for the "click" texture, under a hard-attack +
+// exponential-decay envelope. The shape covers both "tick" (high
+// pitchHz, large noise mix) and "thud" (low pitchHz, mostly sine)
+// without needing two separate generators.
+//
+// Arguments:
+//
+//	duration   total seconds (typical 0.02 – 0.08 — past ~0.1 the
+//	           ear stops parsing it as a transient)
+//	pitchHz    fundamental of the pitched body at note start
+//	pitchDrop  fraction of pitchHz to slide DOWN linearly over the
+//	           note's life. 0 = no slide; 0.7 = ends at 0.3 * pitchHz.
+//	           Larger values produce the "kick drum" pitch-pop.
+//	noise      [0, 1] mix of white noise added to the sine
+//	volume     peak scale [0, 1]
+//
+// The noise generator is seeded with a fixed value so the same call
+// produces the same waveform every run — important for the bank's
+// procedural defaults, which the user expects to sound identical
+// across sessions. Callers that want variation should sum two clicks
+// with different params rather than re-seed.
+func SynthClick(duration, pitchHz, pitchDrop, noise, volume float64) []int16 {
+	samples := int(duration * SampleRate)
+	if samples <= 0 {
+		samples = 1
+	}
+	pcm := make([]int16, samples)
+	// Fixed seed: every call produces the same waveform. The bank
+	// expects deterministic procedural defaults so the "Sounds" modal
+	// preview matches what plays in battle.
+	rng := rand.New(rand.NewSource(1))
+	phase := 0.0
+	// Hard attack: first attackSamples ramps from 0 → 1, then exponential
+	// decay across the rest. 2ms attack keeps the transient crisp without
+	// the click-at-zero artifact a pure-square envelope would produce.
+	attackSamples := int(math.Round(0.002 * float64(SampleRate)))
+	if attackSamples < 1 {
+		attackSamples = 1
+	}
+	if attackSamples > samples {
+		attackSamples = samples
+	}
+	// Decay constant tuned so the envelope reaches ~3% by note end —
+	// past that the residual is below the noise floor for a short cue.
+	decayK := -3.5
+	for i := 0; i < samples; i++ {
+		t := float64(i) / float64(samples)
+		freq := pitchHz * (1 - pitchDrop*t)
+		if freq < 0 {
+			freq = 0
+		}
+		phase += 2 * math.Pi * freq / float64(SampleRate)
+		sine := math.Sin(phase)
+		// White noise in [-1, 1]; rand.Float64() is [0, 1).
+		n := rng.Float64()*2 - 1
+		sample := sine*(1-noise) + n*noise
+		var env float64
+		if i < attackSamples {
+			env = float64(i) / float64(attackSamples)
+		} else {
+			// Exponential decay anchored at the end of the attack ramp.
+			td := float64(i-attackSamples) / float64(samples-attackSamples)
+			env = math.Exp(decayK * td)
+		}
+		pcm[i] = ClampToInt16(sample * env * volume)
 	}
 	return pcm
 }

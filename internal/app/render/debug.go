@@ -57,8 +57,7 @@ func DrawDebugOverlay(camera rl.Camera3D, g core.GameState, assets Resources) {
 	debugHeadingCol := rl.NewColor(186, 240, 186, 245)
 	for i, line := range header {
 		x, y := float32(14), float32(12+i*22)
-		rl.DrawTextEx(assets.hudFont, line, rl.NewVector2(x+1, y+1), 22, 1.2, shadowHeavy)
-		rl.DrawTextEx(assets.hudFont, line, rl.NewVector2(x, y), 22, 1.2, debugHeadingCol)
+		drawTextWithShadowStyle(assets.hudFont, line, x, y, FontBody, FontSpacingBody, debugHeadingCol, shadowHeavy, 1, 1)
 	}
 
 	// Pre-compute forward so we can cheaply drop tiles behind the camera.
@@ -154,7 +153,7 @@ func drawDebugLabel(font rl.Font, text string, x, y float32) {
 	if text == "" {
 		return
 	}
-	const size = float32(15)
+	const size = FontSmall
 	const spacing = float32(1)
 	measure := rl.MeasureTextEx(font, text, size, spacing)
 	rx := x - measure.X/2

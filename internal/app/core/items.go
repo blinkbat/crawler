@@ -46,7 +46,7 @@ type ItemStack struct {
 // item picker render — the map matches the partyClassByID / skillByID
 // pattern in party.go.
 var (
-	itemByKind = buildItemByKind()
+	itemByKind = BuildRegistry(itemDefinitions, func(d ItemDefinition) ItemKind { return d.Kind })
 	itemByName = buildItemByName()
 )
 
@@ -70,14 +70,9 @@ func init() {
 	}
 }
 
-func buildItemByKind() map[ItemKind]ItemDefinition {
-	m := make(map[ItemKind]ItemDefinition, len(itemDefinitions))
-	for _, def := range itemDefinitions {
-		m[def.Kind] = def
-	}
-	return m
-}
-
+// buildItemByName stays a one-off because it stores ItemKind (a small
+// value) under string keys, not the full ItemDefinition — BuildRegistry
+// assumes key→def, this is key→key-of-def.
 func buildItemByName() map[string]ItemKind {
 	m := make(map[string]ItemKind, len(itemDefinitions))
 	for _, def := range itemDefinitions {

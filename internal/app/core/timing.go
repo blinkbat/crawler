@@ -62,6 +62,25 @@ const (
 //	  tick lands). SweetSpot is the centered "Excellent" point inside it.
 //	  Pressed is true once the player ever held the input.
 //	  Released is true once they let go (or the bar timed out while held).
+// TallyWindow is one accept zone in a multi-press tally bar. Hit
+// marks the zone as already consumed so a player can't repeatedly
+// press inside the same window for free hits — only the first press
+// inside an unconsumed window scores. Sweet is the in-window peak
+// position used by the renderer to highlight the bullseye; tally
+// mode doesn't grade per-window (every hit counts equally) but the
+// visual still nudges the player toward the centre. FlashTimer is
+// the per-window feedback hold — set to TallyHitFlashDuration on
+// the press that lands the hit, decays each Tick, drives the
+// render-side "this window just got hit" pulse so the player gets
+// visual confirmation without waiting for the bar to resolve.
+type TallyWindow struct {
+	Start      float32
+	End        float32
+	Sweet      float32
+	Hit        bool
+	FlashTimer float32
+}
+
 type TimingState struct {
 	Kind        int
 	Active      bool
@@ -75,15 +94,22 @@ type TimingState struct {
 	SweetSpot   float32
 	Quality     int
 
-	// Window2Start / Window2End / SweetSpot2 are the optional SECOND press
-	// acceptance window for multi-zone press bars (e.g. Swipe — two hit
-	// zones across the same sweep). Window2End == 0 means "single-window
-	// press bar", which is the default for NewTimingState. NewDoublePressState
-	// is the constructor that populates these. Charge / sequence bars
-	// ignore them.
-	Window2Start float32
-	Window2End   float32
-	SweetSpot2   float32
+	// Multi-press tally mode. When Windows is non-nil, the bar treats
+	// each press as a per-window hit: a press inside an unconsumed
+	// accept window increments Hits and marks that window consumed
+	// (without resolving the bar). A press inside the late "commit"
+	// zone (CommitStart..Duration) resolves the bar early with the
+	// current tally. Bar timeout also resolves with the tally. Quality
+	// maps from Hits at resolve time; for an N-window bar, 0 hits =
+	// Miss, partial = Good, all-windows-cleared = Excellent. Callers
+	// that want per-hit damage scaling read Hits directly.
+	//
+	// Windows are placed in time order (Start ascending) and never
+	// overlap each other or the commit zone — see NewMultiPressState
+	// for the geometry rule.
+	Windows     []TallyWindow
+	Hits        int
+	CommitStart float32
 
 	// Sequence-kind state (unused for press/charge). Targets is the random
 	// run of directions; Cursor points at the next slot to fill; Results is
@@ -91,6 +117,12 @@ type TimingState struct {
 	SequenceTargets []int
 	SequenceResults []int
 	SequenceCursor  int
+}
+
+// IsTallyMode reports whether this is a multi-press tally bar. Render
+// and apply paths gate per-window draws + per-hit damage on this.
+func (t TimingState) IsTallyMode() bool {
+	return t.Kind == TimingKindPress && len(t.Windows) > 0
 }
 
 // NewTimingState builds a freshly-armed press-kind bar. The bar sweeps for
@@ -115,39 +147,79 @@ func NewTimingState(rng *rand.Rand, duration float32) TimingState {
 	}
 }
 
-// NewDoublePressState builds a press-kind bar with TWO acceptance windows
-// — one in each half of the sweep. Used by skills like Swipe where the
-// player sees two distinct hit zones and presses inside either one. Each
-// window grades independently (full Miss → Excellent ladder) so picking
-// the closer zone never penalizes the player.
+// NewMultiPressState builds a tally-mode press bar with `count`
+// acceptance windows + a late commit zone. Each press inside an
+// unconsumed accept window scores one hit; pressing inside the
+// commit zone (or letting the bar elapse) resolves with the
+// current tally. Used by Swipe and any other multi-hit skill where
+// the player should be able to chain presses across the bar
+// instead of resolving on the first input.
 //
-// Window 1 randomizes inside DoublePressWindow.Window1, window 2 inside
-// DoublePressWindow.Window2 — never overlapping, with a guaranteed gap
-// between them so the player reads "two zones" instead of "wide zone".
-func NewDoublePressState(rng *rand.Rand, duration float32) TimingState {
+// Windows are spaced evenly across the sweep so the player sees a
+// rhythmic row of "hit zones" rather than a single wide blob. The
+// commit zone sits in the final 15% of the duration so the late
+// portion of the bar reliably ends the tally — pressing there
+// fires the attack with whatever hits landed so far.
+//
+// count <= 0 falls back to a single accept window so a caller can't
+// accidentally arm a never-resolvable bar.
+func NewMultiPressState(rng *rand.Rand, duration float32, count int) TimingState {
 	if duration <= 0 {
 		duration = AttackTimingDuration
 	}
-	w1Start, w1End, w1Sweet := randomizedPressWindow(rng, DoublePressWindow.Window1MinStart, DoublePressWindow.Window1MaxStart, DoublePressWindow.Width, DoublePressWindow.Window1MaxEnd)
-	w2Start, w2End, w2Sweet := randomizedPressWindow(rng, DoublePressWindow.Window2MinStart, DoublePressWindow.Window2MaxStart, DoublePressWindow.Width, DoublePressWindow.Window2MaxEnd)
+	if count < 1 {
+		count = 1
+	}
+	commitZoneFrac := MultiPressWindow.CommitZoneFrac
+	commitStart := 1.0 - commitZoneFrac
+	// Accept windows are distributed across [leadIn, commitStart -
+	// small gap]. Each window is winWidth wide; gaps between windows
+	// are computed from the remaining span so all N windows fit even
+	// at higher counts. Geometry config lives in MultiPressWindow
+	// (config.go) so a balance pass touches one file.
+	leadIn := MultiPressWindow.LeadInFrac
+	winWidth := MultiPressWindow.WindowWidthFrac
+	span := commitStart - leadIn - 0.02 // small breathing-room gap before commit
+	if span < winWidth {
+		span = winWidth
+	}
+	windows := make([]TallyWindow, count)
+	// stride is the distance between window CENTERS; place the
+	// centers so the row fills [leadIn + winWidth/2, leadIn + span - winWidth/2].
+	usable := span - winWidth
+	for i := 0; i < count; i++ {
+		var center float32
+		if count == 1 {
+			center = leadIn + span*0.5
+		} else {
+			center = leadIn + winWidth*0.5 + usable*(float32(i)/float32(count-1))
+		}
+		// Jitter the center slightly so two consecutive bars don't
+		// have identical zone placement, but only within a tiny
+		// range so the rhythm reads as predictable.
+		jitter := (float32(rng.Float64())*2 - 1) * (winWidth * 0.20)
+		center += jitter
+		start := center - winWidth*0.5
+		end := center + winWidth*0.5
+		windows[i] = TallyWindow{
+			Start: start * duration,
+			End:   end * duration,
+			Sweet: center * duration,
+		}
+	}
 	return TimingState{
-		Kind:         TimingKindPress,
-		Active:       true,
-		Duration:     duration,
-		WindowStart:  w1Start * duration,
-		WindowEnd:    w1End * duration,
-		SweetSpot:    w1Sweet * duration,
-		Window2Start: w2Start * duration,
-		Window2End:   w2End * duration,
-		SweetSpot2:   w2Sweet * duration,
+		Kind:        TimingKindPress,
+		Active:      true,
+		Duration:    duration,
+		Windows:     windows,
+		CommitStart: commitStart * duration,
 	}
 }
 
 // randomizedPressWindow returns (start, end, sweet) fractions for a press
 // window placed inside [minStart, maxStart] with the fixed `width`. If the
 // roll would push the window past `maxEnd` it slides back so the full
-// width still fits. Shared by NewTimingState and NewDoublePressState so
-// the slide-to-fit rule lives in one place.
+// width still fits. Used by NewTimingState's single-window placement.
 func randomizedPressWindow(rng *rand.Rand, minStart, maxStart, width, maxEnd float32) (start, end, sweet float32) {
 	span := maxStart - minStart
 	if span < 0 {
@@ -179,11 +251,11 @@ var chargeSegments = [...]struct {
 	Visual, Elapsed float32
 }{
 	{0.00, 0.00},
-	{ChargeTick1Pct, 0.45},  // segment 0 — slow lead-in (slope ≈ 0.56)
-	{ChargeTick2Pct, 0.70},  // segment 1 — speeds up (slope ≈ 1.00)
-	{ChargeTick3Pct, 0.88},  // segment 2 — faster yet (slope ≈ 1.39)
-	{ChargePeakEnd, 0.94},   // segment 3 — peak window (slope ≈ 1.67)
-	{1.00, 1.00},            // segment 4 — decay, past the player's reach
+	{ChargeTick1Pct, 0.45}, // segment 0 — slow lead-in (slope ≈ 0.56)
+	{ChargeTick2Pct, 0.70}, // segment 1 — speeds up (slope ≈ 1.00)
+	{ChargeTick3Pct, 0.88}, // segment 2 — faster yet (slope ≈ 1.39)
+	{ChargePeakEnd, 0.94},  // segment 3 — peak window (slope ≈ 1.67)
+	{1.00, 1.00},           // segment 4 — decay, past the player's reach
 }
 
 // ChargeCursorProgress maps a charge bar's elapsed time to its visual
@@ -293,6 +365,20 @@ func (t *TimingState) Tick(dt float32) {
 		return
 	}
 	t.Elapsed += dt
+	// Per-window flash decay on tally bars. The render reads
+	// FlashTimer to drive a brief brightening on each freshly-hit
+	// window; tick it down here so the feedback decays even while
+	// the bar continues sweeping toward more accept zones.
+	if t.IsTallyMode() {
+		for i := range t.Windows {
+			if t.Windows[i].FlashTimer > 0 {
+				t.Windows[i].FlashTimer -= dt
+				if t.Windows[i].FlashTimer < 0 {
+					t.Windows[i].FlashTimer = 0
+				}
+			}
+		}
+	}
 	if t.Elapsed < t.Duration {
 		return
 	}
@@ -311,25 +397,43 @@ func (t *TimingState) Tick(dt float32) {
 		// Time's up — pending slots count as wrong, grade what we have.
 		t.resolveSequence()
 	default:
-		// Press bar timed out without a press — auto-Miss, regardless of
-		// how many windows the bar carried.
-		t.Resolved = true
-		t.Quality = TimingQualityMiss
+		// Press bar timed out. Tally-mode bars resolve with the
+		// hits they accumulated (could be partial); single-window
+		// bars auto-Miss for failure to press.
+		if t.IsTallyMode() {
+			t.resolveTally()
+		} else {
+			t.Resolved = true
+			t.Quality = TimingQualityMiss
+		}
 	}
 }
 
-// Press records a press-kind input. Returns true if this press resolved the
-// bar. For charge-kind bars, use Hold/Release instead.
+// Press records a press-kind input. Returns true if this press
+// resolved the bar.
 //
-// For multi-zone press bars (Window2End > 0), the press grades against
-// whichever acceptance window the cursor is currently in — Miss if it's
-// outside both. Each window has its own sweet spot and gradient bands;
-// the player isn't penalized for aiming at the closer zone.
+// Single-window bars resolve on the first press: in-window grades
+// against the gradient bands; out-of-window stamps a Miss.
+//
+// Tally-mode bars (Windows non-nil) accumulate hits without
+// resolving — each press inside an unconsumed accept window
+// increments Hits and marks the window consumed. Pressing inside
+// the late commit zone (>= CommitStart) resolves with the current
+// tally; pressing outside any window or zone is a no-op (the bar
+// continues sweeping). The bar also resolves on Tick timeout.
+//
+// For charge-kind bars, use Hold/Release instead.
 func (t *TimingState) Press() bool {
-	if !t.Active || t.Resolved || t.Pressed {
+	if !t.Active || t.Resolved {
 		return false
 	}
 	if t.Kind != TimingKindPress {
+		return false
+	}
+	if t.IsTallyMode() {
+		return t.pressTally()
+	}
+	if t.Pressed {
 		return false
 	}
 	t.Pressed = true
@@ -342,18 +446,68 @@ func (t *TimingState) Press() bool {
 	return true
 }
 
-// activePressWindow returns the (start, end, sweet) of the press window
-// the cursor is currently inside, with ok=false if neither window
-// contains the cursor. For single-zone bars, only the primary window is
-// considered; for double-zone bars, both are checked in left-to-right
-// order so a window that happened to overlap (shouldn't, per config
-// guards) still grades against the first one the cursor entered.
+// pressTally handles one input on a multi-press tally bar. Each
+// press inside an unconsumed accept window adds a hit; pressing in
+// the commit zone resolves the bar with whatever's tallied; any
+// press outside both zones is a silent no-op (no penalty — the
+// rhythm-game vibe is "tap to the beat," not "punish off-beat").
+func (t *TimingState) pressTally() bool {
+	// Commit-zone press: end the bar early with the current tally.
+	if t.Elapsed >= t.CommitStart {
+		t.resolveTally()
+		return true
+	}
+	// Accept-window press: consume the window the cursor is in.
+	for i := range t.Windows {
+		w := &t.Windows[i]
+		if w.Hit {
+			continue
+		}
+		if t.Elapsed >= w.Start && t.Elapsed <= w.End {
+			w.Hit = true
+			w.FlashTimer = TallyHitFlashDuration
+			t.Hits++
+			// All windows landed? Resolve immediately — there's
+			// nothing else to score; making the player wait would
+			// just feel like dead time.
+			if t.Hits >= len(t.Windows) {
+				t.resolveTally()
+				return true
+			}
+			return false
+		}
+	}
+	// Press outside any window AND before commit — no-op. Player
+	// can keep tapping; the bar continues.
+	return false
+}
+
+// resolveTally finalises a multi-press bar. Quality maps from Hits:
+// zero = Miss, partial = Good (got some), all-windows = Excellent
+// (perfect run). Most apply paths also read Hits directly so the
+// per-hit damage scaling lands without depending on Quality.
+func (t *TimingState) resolveTally() {
+	t.Resolved = true
+	t.Pressed = t.Hits > 0
+	switch {
+	case t.Hits == 0:
+		t.Quality = TimingQualityMiss
+	case t.Hits >= len(t.Windows):
+		t.Quality = TimingQualityExcellent
+	case t.Hits >= len(t.Windows)-1:
+		t.Quality = TimingQualityGreat
+	default:
+		t.Quality = TimingQualityGood
+	}
+}
+
+// activePressWindow returns the (start, end, sweet) of the single
+// acceptance window the cursor is currently inside, with ok=false
+// if the cursor is outside it. Single-window bars only — multi-
+// window tally bars route through pressTally and never call this.
 func (t TimingState) activePressWindow() (start, end, sweet float32, ok bool) {
 	if t.Elapsed >= t.WindowStart && t.Elapsed <= t.WindowEnd {
 		return t.WindowStart, t.WindowEnd, t.SweetSpot, true
-	}
-	if t.Window2End > 0 && t.Elapsed >= t.Window2Start && t.Elapsed <= t.Window2End {
-		return t.Window2Start, t.Window2End, t.SweetSpot2, true
 	}
 	return 0, 0, 0, false
 }

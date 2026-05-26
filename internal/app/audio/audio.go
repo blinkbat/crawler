@@ -31,7 +31,10 @@
 package audio
 
 import (
+	"crawler/internal/app/audio/userconfig"
 	"crawler/internal/app/audio/wavsynth"
+	"fmt"
+	"os"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -50,31 +53,75 @@ const (
 	soundCount
 )
 
-// soundMeta is the single per-Sound metadata table — display label
-// (shown in UI like the pause-menu jukebox) and canonical slug (used as
-// the key in maps/sounds/assignments.txt). Both forms derive from this
-// one table so adding a new Sound enum entry requires editing one row
-// instead of keeping two parallel tables in lockstep.
-var soundMeta = [soundCount]struct {
+// soundCue is one row in the bank: display label (used in UI), the
+// canonical slug (used as BOTH the key in maps/sounds/assignments.txt
+// AND the on-disk filename stem for the default .wav), and the
+// procedural-PCM seeder. One table, three uses — adding a new cue is
+// one row and the bank, UI, file seeder, and action map all pick it up.
+//
+// Why a single table: previous shape kept `soundMeta` (Display +
+// Canonical) and `defaultBankPCM()` (Sound → PCM) parallel, with the
+// "same-canonical-name → default file" link implicit. Pulling the
+// PCM onto the same row makes the link explicit and removes the
+// "which file plays for which cue?" guesswork — see loadBank.
+type soundCue struct {
 	Display   string
 	Canonical string
-}{
-	SoundInputHit:   {"Input Hit", "input_hit"},
-	SoundInputGreat: {"Input Great", "input_great"},
-	SoundInputMiss:  {"Input Miss", "input_miss"},
-	SoundHeal:       {"Heal", "heal"},
-	SoundEnemyHit:   {"Enemy Hit", "enemy_hit"},
-	SoundEnemyDeath: {"Enemy Death", "enemy_death"},
+	PCM       func() []int16
+}
+
+var soundCues = [soundCount]soundCue{
+	// Bright UI tick — high pitch, large noise mix, very short.
+	SoundInputHit: {Display: "Input Hit", Canonical: "input_hit",
+		PCM: func() []int16 { return wavsynth.SynthClick(0.025, 1800, 0.5, 0.6, 0.22) }},
+	// Rare reward — keeps tonality so Excellent stands apart from a
+	// regular Nice. Stacked harmonics under a quick bell envelope.
+	SoundInputGreat: {Display: "Input Great", Canonical: "input_great",
+		PCM: func() []int16 { return wavsynth.SynthChord(0.10, []float64{660, 990, 1320}, 0.20) }},
+	// Low dull thud — failure registers as weight, not absence.
+	SoundInputMiss: {Display: "Input Miss", Canonical: "input_miss",
+		PCM: func() []int16 { return wavsynth.SynthClick(0.045, 220, 0.7, 0.25, 0.20) }},
+	// Tonal two-note chime — melodic shape IS the cue's identity, so
+	// it breaks the percussive theme on purpose.
+	SoundHeal: {Display: "Heal", Canonical: "heal",
+		PCM: func() []int16 { return wavsynth.SynthChime(0.09, 520, 780, 0.18) }},
+	// Tight mid-pitch thwack — moderate noise for impact crunch.
+	SoundEnemyHit: {Display: "Enemy Hit", Canonical: "enemy_hit",
+		PCM: func() []int16 { return wavsynth.SynthClick(0.035, 380, 0.6, 0.4, 0.24) }},
+	// Heavier deep kick-drum thud with longer tail.
+	SoundEnemyDeath: {Display: "Enemy Death", Canonical: "enemy_death",
+		PCM: func() []int16 { return wavsynth.SynthClick(0.12, 140, 0.85, 0.2, 0.22) }},
+}
+
+// soundCues is an array of length soundCount, so a missing row reads
+// as the zero value (empty Display / Canonical / nil PCM) instead of
+// failing to compile. Verify every row is populated at init —
+// otherwise a future Sound enum addition without a corresponding
+// soundCues entry would silently ship as a no-op cue. Mirrors the
+// convention AGENTS.md notes for timingGrades / statTable /
+// partyStatusVisuals.
+func init() {
+	if len(soundCues) != int(soundCount) {
+		panic(fmt.Sprintf("audio: soundCues length %d != soundCount %d", len(soundCues), soundCount))
+	}
+	for i, row := range soundCues {
+		if row.Canonical == "" {
+			panic(fmt.Sprintf("audio: soundCues[%d] has empty Canonical — add a row for the new Sound enum value", i))
+		}
+		if row.PCM == nil {
+			panic(fmt.Sprintf("audio: soundCues[%d] (%s) has nil PCM — procedural fallback won't render", i, row.Canonical))
+		}
+	}
 }
 
 // SoundName returns the display label for a sound. Out-of-range values
 // fall back to "Unknown" so a future enum addition that's missed in
-// soundMeta still renders without a panic.
+// soundCues still renders without a panic.
 func SoundName(s Sound) string {
 	if s < 0 || s >= soundCount {
 		return "Unknown"
 	}
-	return soundMeta[s].Display
+	return soundCues[s].Display
 }
 
 // SoundCount is the number of cues in the bank. Used by callers that
@@ -162,32 +209,92 @@ func Play(id Sound) {
 	rl.PlaySound(bank[id])
 }
 
-// loadBank synthesizes every sound. Each entry has its own envelope and
-// frequency shape so the cues read distinctly without overlapping.
+// loadBank is the one path that builds the bank from the on-disk
+// state: files + the action map (assignments.txt). Steps:
+//
+//  1. Ensure every cue's default .wav exists in maps/sounds/. Missing
+//     files get written from soundCues[cue].PCM(). Existing files are
+//     never clobbered — user edits via the editor's Sounds modal
+//     persist across launches.
+//  2. Ensure assignments.txt has an entry for every cue. Missing
+//     entries default to the cue's canonical name (so cue input_hit
+//     maps to input_hit.wav by default). The action map is then
+//     authoritative: every bank slot reads from assignments[slug].
+//  3. Load each cue's rl.Sound from its assigned file.
+//
+// Why this shape: the previous arrangement kept the procedural PCM,
+// the disk seeder, and the assignments overlay as three separate
+// concepts with implicit "same-canonical-name" fallbacks weaving
+// between them. Now there are exactly two pieces of state — files
+// and the action map — and both are on disk and user-editable.
+//
+// In-memory fallback: if a cue's assigned file can't be read at
+// runtime (race, permissions, manual mid-process delete), the cue
+// falls back to its freshly-synthesized PCM so Play(cue) never
+// silently breaks even when the filesystem misbehaves.
 func loadBank() {
-	// Input hit: short ascending blip — 540 Hz up to 760 Hz over 70 ms,
-	// soft attack, fast release. Subtle, "click" feel.
-	bank[SoundInputHit] = pcmToSound(wavsynth.SynthSweep(0.07, 540, 760, 0.20, 0.005, 0.04))
+	ensureBankOnDisk()
+	assigns := userconfig.LoadAssignments()
+	for cue := Sound(0); cue < soundCount; cue++ {
+		slug := soundCues[cue].Canonical
+		if slug == "" {
+			continue
+		}
+		fileName := assigns[slug]
+		if fileName == "" {
+			fileName = slug
+		}
+		bank[cue] = loadCueFromDisk(fileName, soundCues[cue].PCM)
+	}
+}
 
-	// Input great: brighter and a touch longer — sweeps up to 1.3 kHz with
-	// a bell envelope so it rings. Higher volume so Excellents announce
-	// themselves a hair louder than a regular Nice.
-	bank[SoundInputGreat] = pcmToSound(wavsynth.SynthChord(0.14, []float64{660, 990, 1320}, 0.22))
+// ensureBankOnDisk writes any missing default .wav files and adds an
+// entry to assignments.txt for any cue whose slug isn't already
+// listed. After this call, every cue has both a file on disk and a
+// row in the action map — no implicit "default" anywhere. Errors
+// (read-only filesystem, no permission) are swallowed because the
+// in-memory PCM fallback in loadCueFromDisk still covers playback.
+func ensureBankOnDisk() {
+	assigns := userconfig.LoadAssignments()
+	assignsChanged := false
+	for cue := Sound(0); cue < soundCount; cue++ {
+		cueRow := soundCues[cue]
+		if cueRow.Canonical == "" || cueRow.PCM == nil {
+			continue
+		}
+		// File: write the default if no .wav lives at the canonical
+		// name yet. Existing user-edited content is preserved.
+		path := UserSoundPath(cueRow.Canonical)
+		if _, err := os.Stat(path); err != nil {
+			_, _ = userconfig.WriteWAV(cueRow.Canonical, cueRow.PCM())
+		}
+		// Action map: backfill the entry if assignments.txt is missing
+		// this cue. Same-name default means cue's slug → cue's slug.
+		if _, ok := assigns[cueRow.Canonical]; !ok {
+			assigns[cueRow.Canonical] = cueRow.Canonical
+			assignsChanged = true
+		}
+	}
+	if assignsChanged {
+		_ = userconfig.SaveAssignments(assigns)
+	}
+}
 
-	// Input miss: low, downward sweep — 200 Hz dropping to 130 Hz over
-	// 130 ms. Reads as "deflated" without being annoying.
-	bank[SoundInputMiss] = pcmToSound(wavsynth.SynthSweep(0.13, 200, 130, 0.18, 0.005, 0.07))
-
-	// Heal: two-note chime, 520 Hz then 780 Hz, total ~180 ms. Each note
-	// gets its own bell envelope so the seam between them is audible.
-	bank[SoundHeal] = pcmToSound(wavsynth.SynthChime(0.09, 520, 780, 0.18))
-
-	// Enemy hit: tiny thud — 220 Hz, 50 ms, sharp attack. Pure punctuation.
-	bank[SoundEnemyHit] = pcmToSound(wavsynth.SynthSweep(0.05, 220, 180, 0.22, 0.001, 0.02))
-
-	// Enemy death: descending sweep — 380 Hz down to 90 Hz over 280 ms,
-	// long release tail. Reads as "fading out."
-	bank[SoundEnemyDeath] = pcmToSound(wavsynth.SynthSweep(0.28, 380, 90, 0.20, 0.004, 0.14))
+// loadCueFromDisk reads the named .wav into a fresh rl.Sound. If the
+// file isn't readable (deleted between ensureBankOnDisk and now,
+// permission revoked mid-run), it rebuilds from the supplied PCM
+// closure so Play(cue) doesn't go silent on transient filesystem
+// errors. pcmFn nil-checks because the soundCues table holds the
+// PCM closure per cue and a future malformed entry shouldn't crash
+// the bank.
+func loadCueFromDisk(name string, pcmFn func() []int16) rl.Sound {
+	if data, err := os.ReadFile(UserSoundPath(name)); err == nil {
+		return bytesToSound(data)
+	}
+	if pcmFn == nil {
+		return rl.Sound{}
+	}
+	return pcmToSound(pcmFn())
 }
 
 // pcmToSound builds a 16-bit mono PCM buffer into an rl.Sound via the

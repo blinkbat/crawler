@@ -16,15 +16,24 @@ const gamepadID = int32(0)
 // noise from worn sticks doesn't generate phantom presses.
 const stickEdgeThreshold = float32(0.55)
 
-// Per-direction "was past threshold last sample?" memory for analog-stick
-// edge detection. Updated by the stick* helpers each time an Arrow* / target-
-// cycle / nav input is queried.
-var (
-	prevStickUp    bool
-	prevStickDown  bool
-	prevStickLeft  bool
-	prevStickRight bool
+// stickEdgeKey identifies one of the four analog-stick directions for
+// the edge-detection memory.
+type stickEdgeKey int
+
+const (
+	stickEdgeUp stickEdgeKey = iota
+	stickEdgeDown
+	stickEdgeLeft
+	stickEdgeRight
 )
+
+// prevStickEdges holds the "was past threshold last sample?" bit for
+// each direction. Replaces the four parallel globals (prevStickUp /
+// Down / Left / Right) that earlier passes carried — same shape, one
+// table. stickEdgeY / stickEdgeX index into this by direction so a
+// future fifth axis (right stick? trigger?) lands as one new key
+// instead of two parallel globals + a new helper.
+var prevStickEdges [4]bool
 
 // gamepadConnected reports whether a gamepad is plugged in. All controller
 // reads short-circuit to false when there's no pad — keyboard-only play
@@ -49,42 +58,37 @@ func padReleased(button int32) bool {
 	return gamepadConnected() && rl.IsGamepadButtonReleased(gamepadID, button)
 }
 
-// stickEdgeY returns true on the frame the left stick crosses past the
-// up/down threshold. dir = -1 for up, +1 for down. Updates prev state so the
-// stick must return below threshold before the next edge can fire.
-func stickEdgeY(dir int) bool {
+// stickAxisEdge returns true on the frame the analog axis crosses past
+// the threshold in `dir` (`-1` = negative direction, `+1` = positive).
+// Updates prev state so the stick must return below threshold before
+// the next edge can fire. Generic over the per-direction memory slot
+// so stickEdgeY (left stick Y) and stickEdgeX (left stick X) share
+// one body instead of inlining four near-identical branches.
+func stickAxisEdge(axis int32, dir int, negKey, posKey stickEdgeKey) bool {
 	if !gamepadConnected() {
 		return false
 	}
-	v := rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisLeftY)
+	v := rl.GetGamepadAxisMovement(gamepadID, axis)
 	if dir < 0 {
-		nowUp := v <= -stickEdgeThreshold
-		edge := nowUp && !prevStickUp
-		prevStickUp = nowUp
+		now := v <= -stickEdgeThreshold
+		edge := now && !prevStickEdges[negKey]
+		prevStickEdges[negKey] = now
 		return edge
 	}
-	nowDown := v >= stickEdgeThreshold
-	edge := nowDown && !prevStickDown
-	prevStickDown = nowDown
+	now := v >= stickEdgeThreshold
+	edge := now && !prevStickEdges[posKey]
+	prevStickEdges[posKey] = now
 	return edge
 }
 
-// stickEdgeX is the horizontal counterpart. dir = -1 for left, +1 for right.
+// stickEdgeY / stickEdgeX are thin wrappers naming the left-stick axes.
+// dir = -1 for up/left, +1 for down/right.
+func stickEdgeY(dir int) bool {
+	return stickAxisEdge(rl.GamepadAxisLeftY, dir, stickEdgeUp, stickEdgeDown)
+}
+
 func stickEdgeX(dir int) bool {
-	if !gamepadConnected() {
-		return false
-	}
-	v := rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisLeftX)
-	if dir < 0 {
-		nowLeft := v <= -stickEdgeThreshold
-		edge := nowLeft && !prevStickLeft
-		prevStickLeft = nowLeft
-		return edge
-	}
-	nowRight := v >= stickEdgeThreshold
-	edge := nowRight && !prevStickRight
-	prevStickRight = nowRight
-	return edge
+	return stickAxisEdge(rl.GamepadAxisLeftX, dir, stickEdgeLeft, stickEdgeRight)
 }
 
 // --- High-level semantic actions ---------------------------------------------
@@ -166,6 +170,15 @@ func TargetNextPressed() bool {
 		padPressed(rl.GamepadButtonLeftFaceRight) || padPressed(rl.GamepadButtonRightTrigger1) || stickEdgeX(1)
 }
 
+// NextTabPressed reports a pure Tab-key edge — used by the action
+// menu's "cycle the Skill row's active skill" handler. Kept distinct
+// from TargetNextPressed so the cycle key doesn't double up with the
+// arrow-key + analog-stick navigation that's already wired to the
+// up/down row cursor.
+func NextTabPressed() bool {
+	return rl.IsKeyPressed(rl.KeyTab) || padPressed(rl.GamepadButtonRightFaceRight)
+}
+
 func TargetPreviousPressed() bool {
 	return rl.IsKeyPressed(rl.KeyLeft) || rl.IsKeyPressed(rl.KeyA) || rl.IsKeyPressed(rl.KeyUp) ||
 		padPressed(rl.GamepadButtonLeftFaceLeft) || padPressed(rl.GamepadButtonLeftTrigger1) || stickEdgeX(-1)
@@ -195,23 +208,68 @@ func PausePressed(inBattle bool) bool {
 
 // PanelsTogglePressed is the edge to open or close the game panels
 // overlay (stats / equipment / items / skills / zoomable map). Bound
-// to keyboard 'I' (Inventory mnemonic) and to the gamepad's middle
-// button — on a DualSense that's the PS button, on Xbox it's the
-// guide button, and it's the closest raylib exposes to the PS5
-// touchpad click. The "small start" Options button stays mapped to
-// PausePressed; the two overlays are mutually exclusive in the
-// explore-loop gate.
+// to the gamepad's Triangle / Y button (the JRPG-standard "menu"
+// face button) plus the middle button — on a DualSense the latter
+// is the PS button, on Xbox it's the guide button, the closest
+// raylib exposes to the PS5 touchpad click. Triangle is the headline
+// binding; the middle-button binding is retained for muscle memory.
+// The "small start" Options button stays mapped to PausePressed; the
+// two overlays are mutually exclusive in the explore-loop gate.
 //
 // Both opening and closing go through this same edge — pressing the
 // same button toggles the overlay off, mirroring how phone status
 // bars work. BackPressed (Esc / B / Circle) also closes the overlay
 // from inside it.
+//
+// Keyboard does NOT toggle this way — the per-tab shortcuts
+// (PanelTabShortcutPressed) own E/C/K/M/I, so the keyboard player
+// jumps directly to a named tab rather than opening "wherever I
+// was last." Pressing the same shortcut key again closes the
+// overlay (handled in explore/panels.go), preserving the toggle
+// feel without burning a sixth key on "open to last tab."
 func PanelsTogglePressed() bool {
-	return rl.IsKeyPressed(rl.KeyI) || padPressed(rl.GamepadButtonMiddle)
+	return padPressed(rl.GamepadButtonMiddle) ||
+		padPressed(rl.GamepadButtonRightFaceUp) // Triangle / Y
 }
 
+// PanelTabShortcutPressed reports a per-tab keyboard shortcut for the
+// game panels overlay. Returns the target tab and true on a fresh
+// edge, or zero+false when no shortcut fired this frame. The letters
+// match the on-screen mnemonics:
+//
+//	C → Stats     (Character)
+//	E → Equipment
+//	I → Items     (Inventory)
+//	K → Skills    (note the K in "skills")
+//	M → Map
+//
+// Used by both the explore-loop "open panels to this tab" path and
+// the in-panels "switch to this tab (or close if already on it)"
+// path, so the same key behaves consistently across open / closed
+// states.
+func PanelTabShortcutPressed() (core.PanelTab, bool) {
+	switch {
+	case rl.IsKeyPressed(rl.KeyC):
+		return core.PanelTabStats, true
+	case rl.IsKeyPressed(rl.KeyE):
+		return core.PanelTabEquipment, true
+	case rl.IsKeyPressed(rl.KeyI):
+		return core.PanelTabItems, true
+	case rl.IsKeyPressed(rl.KeyK):
+		return core.PanelTabSkills, true
+	case rl.IsKeyPressed(rl.KeyM):
+		return core.PanelTabMap, true
+	}
+	return 0, false
+}
+
+// RestartPressed reports the pause-menu "restart run" edge. Triangle/Y
+// used to be bound here too, but Triangle was reassigned to the game
+// panels overlay (see PanelsTogglePressed) so the menu-restart key is
+// now keyboard R only — the pause menu still exposes Restart as a
+// confirm-able row for the controller path.
 func RestartPressed() bool {
-	return rl.IsKeyPressed(rl.KeyR) || padPressed(rl.GamepadButtonRightFaceUp) // Y / Triangle
+	return rl.IsKeyPressed(rl.KeyR)
 }
 
 func QuitPressed() bool {
@@ -305,16 +363,13 @@ func ArrowRightPressed() bool {
 // and re-tilt to register a fresh edge.
 func ResetStickEdges() {
 	if !gamepadConnected() {
-		prevStickUp = false
-		prevStickDown = false
-		prevStickLeft = false
-		prevStickRight = false
+		prevStickEdges = [4]bool{}
 		return
 	}
 	yv := rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisLeftY)
 	xv := rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisLeftX)
-	prevStickUp = yv <= -stickEdgeThreshold
-	prevStickDown = yv >= stickEdgeThreshold
-	prevStickLeft = xv <= -stickEdgeThreshold
-	prevStickRight = xv >= stickEdgeThreshold
+	prevStickEdges[stickEdgeUp] = yv <= -stickEdgeThreshold
+	prevStickEdges[stickEdgeDown] = yv >= stickEdgeThreshold
+	prevStickEdges[stickEdgeLeft] = xv <= -stickEdgeThreshold
+	prevStickEdges[stickEdgeRight] = xv >= stickEdgeThreshold
 }

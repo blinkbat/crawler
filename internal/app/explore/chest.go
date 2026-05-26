@@ -4,8 +4,6 @@ import (
 	"crawler/internal/app/audio"
 	"crawler/internal/app/core"
 	"crawler/internal/app/input"
-
-	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 // updateChestModal runs the chest-open dialog. Esc closes; Up/Down picks
@@ -19,7 +17,7 @@ func updateChestModal(g *core.GameState) {
 	}
 	chest := &g.Chests[g.ChestOpen]
 
-	if input.BackPressed() || rl.IsKeyPressed(rl.KeyEscape) {
+	if input.BackPressed() {
 		closeChest(g, chest)
 		return
 	}

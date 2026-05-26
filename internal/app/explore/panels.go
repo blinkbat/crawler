@@ -51,6 +51,18 @@ func updatePanels(g *core.GameState) {
 		closePanels(g)
 		return
 	}
+	// Direct-tab keyboard shortcuts (C / E / I / K / M). Pressing the
+	// shortcut for the tab you're already on closes the overlay so
+	// the same key gesture that opens "Items" also clears "Items"
+	// — keeps the mnemonic keys feeling like real toggles.
+	if tab, ok := input.PanelTabShortcutPressed(); ok {
+		if tab == g.PanelsTab {
+			closePanels(g)
+		} else {
+			setPanelTab(g, tab)
+		}
+		return
+	}
 	// L1 / R1 + Tab + Left/Right cycle tabs. Use TargetPrevious /
 	// TargetNext rather than ArrowLeft / ArrowRight because the
 	// shoulders read more naturally as "page back / forward" on a
@@ -64,10 +76,29 @@ func updatePanels(g *core.GameState) {
 		return
 	}
 	switch g.PanelsTab {
-	case core.PanelTabStats, core.PanelTabEquipment, core.PanelTabSkills:
-		// These tabs are read-only displays. Up/Down scroll the
-		// party member cursor where it's meaningful; Confirm /
-		// Back are handled above.
+	case core.PanelTabCharacter:
+		// Character tab: Up/Down moves the party-member cursor;
+		// Confirm on a member with unspent stat points opens the
+		// level-up modal targeting that member. The modal closes
+		// the panels overlay automatically (its own input loop
+		// takes over). The "+" badge on the party-card name is
+		// the player's hint that allocation is available.
+		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, len(g.Party))
+		if input.ConfirmPressed() && g.PanelsRowCursor >= 0 && g.PanelsRowCursor < len(g.Party) {
+			m := g.Party[g.PanelsRowCursor]
+			if m.PendingLevelUps > 0 {
+				closePanels(g)
+				g.LevelUpOpen = true
+				g.LevelUpMember = g.PanelsRowCursor
+				g.LevelUpRowCursor = 0
+				g.LevelUpPending = [core.StatCount]int{}
+			}
+		}
+	case core.PanelTabEquipment, core.PanelTabSkills:
+		// These tabs are read-only displays today. Up/Down scrolls
+		// the party-member cursor; Confirm / Back are handled
+		// above. (Skills tab confirm will open the tier-purchase
+		// flow once the tree UI lands.)
 		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, len(g.Party))
 	case core.PanelTabItems:
 		count := len(core.LiveStacks(g.Inventory))

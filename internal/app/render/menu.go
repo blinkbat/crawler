@@ -37,14 +37,17 @@ func debugRowLabel(g core.GameState) string {
 // Pause menu layout. Panel is centered on screen; rows stack at a fixed
 // stride below a header band. inner row width is derived from the panel
 // width so the highlight rectangle resizes with the panel automatically.
+//
+// pauseMenuHeaderH shrank when the redundant "PAUSED" tick was dropped —
+// the centred "MENU" title (FontTitle) is the only header now.
 const (
 	pauseMenuPanelW      = int32(420)
-	pauseMenuHeaderH     = int32(118) // top of panel → first row baseline
-	pauseMenuRowH        = int32(40)  // selection-highlight rect height
-	pauseMenuRowGap      = int32(12)  // gap between rows (stride = rowH + rowGap)
-	pauseMenuFootH       = int32(18)  // bottom pad below last row
-	pauseMenuRowInsetX   = int32(58)  // distance from panel left edge to row label x
-	pauseMenuRowRightPad = int32(46)  // distance from row right edge to panel right edge
+	pauseMenuHeaderH     = int32(90)
+	pauseMenuRowH        = int32(40)
+	pauseMenuRowGap      = int32(12)
+	pauseMenuFootH       = int32(20)
+	pauseMenuRowInsetX   = int32(58)
+	pauseMenuRowRightPad = int32(46)
 )
 
 func pauseMenuPanelH() int32 {
@@ -68,10 +71,15 @@ func drawMenuOverlay(g core.GameState, assets Resources) {
 	panelY := screenH/2 - panelH/2
 
 	rl.DrawRectangle(0, 0, screenW, screenH, surfaceVeil)
-	drawCard(panelX, panelY, panelW, panelH, surfacePrimary, borderSoft, borderStrong)
+	drawCard(panelX, panelY, panelW, panelH, surfacePrimary, borderSoft, borderSoft)
 
-	drawHeading(assets.hudFont, "PAUSED", panelX+34, panelY+24, borderStrong)
-	drawTextWithShadow(assets.hudFont, "MENU", float32(panelX+34), float32(panelY+50), 34, textPrimary)
+	// One title only — "MENU" centred near the top of the card. The
+	// previous "PAUSED" tick above it was redundant: the veil + the
+	// menu itself IS the paused signal.
+	titleMeasure := rl.MeasureTextEx(assets.hudFont, "MENU", FontTitle, FontSpacingTitle)
+	titleX := float32(panelX) + float32(panelW)/2 - titleMeasure.X/2
+	drawTextWithShadowStyle(assets.hudFont, "MENU", titleX, float32(panelY+24),
+		FontTitle, FontSpacingTitle, textPrimary, shadowStrong, 1, 1)
 
 	stride := pauseMenuRowH + pauseMenuRowGap
 	rowY := pauseMenuHeaderH
@@ -82,15 +90,20 @@ func drawMenuOverlay(g core.GameState, assets Resources) {
 	}
 }
 
-// drawMenuRow paints one entry in the pause menu: a selection panel +
-// arrow marker when active, then the label. Heavier shadow (+2,+2) than the
-// in-game HUD's drawTextWithShadow because the menu text sits over an unbusy
-// veil at a larger size and reads better with weight.
+// drawMenuRow paints one entry in the pause menu: the canonical
+// gilt-spine + underline selection panel from DrawSelectedRowI when
+// active, then the label. Heavier shadow (+2,+2) than the in-game
+// HUD's drawTextWithShadow because the menu text sits over an
+// unbusy veil at a larger size and reads better with weight.
+//
+// Earlier passes added an arrow marker beside the spine; removed
+// because the spine + gilt underline already names the selection
+// per UI_STANDARDS.md "Row > Selected." The arrow was the OLD
+// selection cue and visually competed with the new spine when
+// both were painted.
 func drawMenuRow(font rl.Font, text string, x, y int32, selected bool) {
 	if selected {
 		DrawSelectedRowI(x-18, y-6, pauseMenuRowInnerW(), pauseMenuRowH)
-		centerY := y - 6 + pauseMenuRowH/2
-		drawArrowMarker(rl.NewVector2(float32(x-16), float32(centerY)), 9, 0, 9, borderActive)
 	}
-	drawTextWithShadowStyle(font, text, float32(x+12), float32(y), 26, textPrimary, shadowMid, 2, 2)
+	drawTextWithShadowStyle(font, text, float32(x+12), float32(y), FontHeading, FontSpacingHeading, textPrimary, shadowMid, 2, 2)
 }

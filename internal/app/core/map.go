@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"math"
+	"slices"
 )
 
 // TileCoord formats a (x, z) tile coordinate as a human-readable string
@@ -112,6 +113,15 @@ const (
 	TilePropEmpty = '.' // open cell, no prop
 	TileTree      = 'T' // regular tree, blocks
 	TileTreeXL    = 'X' // extra-large tree, blocks
+	// Tree shape variants — all 1-tile, all blocking. Designed to
+	// break up the visual monotony of long forest stretches without
+	// adding new content rules (same blocking, same minimap color
+	// family). The renderer reuses assets.tree at different scales
+	// and offsets via drawPropTreeTall / drawPropTreeTwin /
+	// drawPropTreeYoung in render/world.go.
+	TileTreeTall  = '|' // tall narrow pine, slimmer + taller than Tree
+	TileTreeTwin  = '@' // two trees crammed into one tile, offset
+	TileTreeYoung = '/' // young / smaller tree, scrubby thicket
 	TileRockLarge = 'O' // boulder, blocks
 	TileBushLarge = 'B' // dense bush, blocks
 	// Inhabited / ruined props: read as "someone lived here."
@@ -137,11 +147,11 @@ const (
 	// single-tile blockers; the editor's brush palette and the
 	// renderer's propModels map pick them up via the canonical list +
 	// init-time coverage asserts.
-	TileWell        = 'W' // stone-ringed well (cross-layer with FloorDeepWater; layers dispatch independently)
-	TileGravestone  = 'G' // weathered tombstone
-	TileSignPost    = 'N' // wooden sign on a post
-	TileHayBale     = 'H' // round bound straw bale
-	TileScarecrow   = 'Y' // cross + sackcloth scarecrow
+	TileWell       = 'W' // stone-ringed well (cross-layer with FloorDeepWater; layers dispatch independently)
+	TileGravestone = 'G' // weathered tombstone
+	TileSignPost   = 'N' // wooden sign on a post
+	TileHayBale    = 'H' // round bound straw bale
+	TileScarecrow  = 'Y' // cross + sackcloth scarecrow
 	// Indoor / dungeon tileset — furniture and crypt props. All
 	// single-tile blockers, same registry pattern.
 	TileBookshelf   = 'V' // tall wooden shelf with books
@@ -203,10 +213,24 @@ func placePacks(a AreaDefinition) []Pack {
 		}
 		spawn := a.PackSpawns[i]
 		members := make([]Enemy, 0, len(spawn.Members))
-		for _, kind := range spawn.Members {
-			members = append(members, NewEnemy(kind))
+		for _, member := range spawn.Members {
+			if name := member.CustomName; name != "" {
+				if def, ok := CustomEnemyByName(a.CustomEnemies, name); ok {
+					members = append(members, def.Instantiate())
+					continue
+				}
+			}
+			members = append(members, NewEnemy(member.Kind))
 		}
-		packs = append(packs, Pack{TileX: snap.TileX, TileZ: snap.TileZ, Members: members})
+		packs = append(packs, Pack{
+			TileX:   snap.TileX,
+			TileZ:   snap.TileZ,
+			HomeX:   snap.TileX,
+			HomeZ:   snap.TileZ,
+			X:       TileCenter(snap.TileX),
+			Z:       TileCenter(snap.TileZ),
+			Members: members,
+		})
 	}
 	return packs
 }
@@ -335,6 +359,70 @@ func (a AreaDefinition) BlockedAt(x, z int) bool {
 	return a.Floor[z][x] == FloorDeepWater
 }
 
+// EnterOpts parameterizes CanEnterTile. The zero value forbids door
+// stepping, the player tile, and any pack-occupied tile — i.e. the
+// strictest set of runtime blockers a pack faces during wandering.
+// Callers flip the booleans for their context:
+//   - Player step: AllowDoorTile=true (steps onto doors trigger area
+//     transitions), AllowPlayerTile is meaningless (the player isn't
+//     on the destination tile yet anyway), OccupiedPacks=nil (the
+//     pack-collision rule is owned by the caller, which has the
+//     separate "step into pack → engage" branch).
+//   - Pack chase: AllowPlayerTile=true (the chase tile IS the player —
+//     that's the engagement signal), AllowDoorTile=false, supply
+//     OccupiedPacks to skip squares held by other packs.
+//   - Pack wander: AllowPlayerTile=false (a passive wander shouldn't
+//     accidentally engage), AllowDoorTile=false, OccupiedPacks set.
+//
+// PlayerTileX/Z is only consulted when OccupiedPacks is non-nil OR
+// AllowPlayerTile is set — saves callers from having to fish out the
+// player's tile when their context doesn't care.
+type EnterOpts struct {
+	AllowDoorTile   bool
+	AllowPlayerTile bool
+	PlayerTileX     int
+	PlayerTileZ     int
+	OccupiedPacks   map[[2]int]bool
+}
+
+// CanEnterTile is the single-source-of-truth predicate for "can an
+// actor legally step onto (tx, tz) right now." Composes the area's
+// static BlockedAt (walls, props, deep water) with the runtime
+// blockers (chests, doors, packs, player). Centralizes a rule that
+// used to live in both packai.go and explore/movement.go's startStep —
+// future balance tweaks (packs-block-player, packs-walk-through-doors,
+// chests-don't-block-packs) are a one-line flip of EnterOpts at the
+// call site instead of forking the predicate.
+func CanEnterTile(g *GameState, tx, tz int, opts EnterOpts) bool {
+	if g == nil || !g.Area.InBounds(tx, tz) {
+		return false
+	}
+	if g.Area.BlockedAt(tx, tz) {
+		return false
+	}
+	if ChestIndexAt(g.Chests, tx, tz) >= 0 {
+		return false
+	}
+	if !opts.AllowDoorTile && DoorIndexAt(g.Doors, tx, tz) >= 0 {
+		return false
+	}
+	// PlayerTileX/Z is only meaningful when the caller actually declared
+	// a player position — either by setting AllowPlayerTile (pack-chase
+	// "the player IS the destination" case) or by passing OccupiedPacks
+	// (any pack-AI path that needs to avoid stepping onto the player).
+	// Without this gate the zero-default PlayerTileX/Z=(0,0) would falsely
+	// block every caller's step toward tile (0, 0).
+	if opts.AllowPlayerTile || opts.OccupiedPacks != nil {
+		if tx == opts.PlayerTileX && tz == opts.PlayerTileZ {
+			return opts.AllowPlayerTile
+		}
+	}
+	if opts.OccupiedPacks != nil && opts.OccupiedPacks[[2]int{tx, tz}] {
+		return false
+	}
+	return true
+}
+
 // ChestTakeAllRow is the synthetic row index that sits one past the
 // last live-stack row in the chest-open modal — selecting it drains
 // every remaining stack. Both the input loop (explore/chest.go) and
@@ -361,13 +449,11 @@ func MarkChestLootedIfEmpty(c *Chest) {
 // ChestIndexAt returns the index of the chest on the given tile, or -1
 // when no chest is there. Linear scan; chest counts per map are tiny
 // (<10 typical) so a map keyed by [2]int isn't worth the allocation.
+// DoorIndexAt and PackIndexAtTile follow the same pattern via
+// slices.IndexFunc — three linear "find spawn at tile" lookups sharing
+// the stdlib idiom.
 func ChestIndexAt(chests []Chest, x, z int) int {
-	for i, c := range chests {
-		if c.TileX == x && c.TileZ == z {
-			return i
-		}
-	}
-	return -1
+	return slices.IndexFunc(chests, func(c Chest) bool { return c.TileX == x && c.TileZ == z })
 }
 
 // AdjacentChestIndex returns the index of a chest the player can reach
@@ -595,7 +681,8 @@ func DecorFootprintTail(anchor byte) byte {
 // mutate the slice — use the PropTileChars() accessor for read-only
 // access, which returns a defensive copy.
 var propTileCharList = []byte{
-	TileTree, TileTreeXL, TileRockLarge, TileBushLarge,
+	TileTree, TileTreeXL, TileTreeTall, TileTreeTwin, TileTreeYoung,
+	TileRockLarge, TileBushLarge,
 	TileCrate, TileBarrel, TileUrn, TileStalagmite,
 	TilePillar, TileBrokenPillar, TileStatue, TileObelisk, TileFountain,
 	TileRockCairn, TileRockFormation, TileRockFormationTail,
@@ -759,33 +846,36 @@ var tileLabelTable = map[TileLayer]map[byte]string{
 		DecorRootCluster: "Roots",
 	},
 	TileLayerProps: {
-		TilePropEmpty:    "",
-		TileTree:         "Tree",
-		TileTreeXL:       "Tree XL",
-		TileRockLarge:    "Boulder",
-		TileBushLarge:    "Large Bush",
-		TileCrate:        "Crate",
-		TileBarrel:       "Barrel",
-		TileUrn:          "Urn",
-		TileStalagmite:   "Stalagmite",
-		TilePillar:       "Pillar",
-		TileBrokenPillar: "Broken Pillar",
-		TileStatue:       "Statue",
-		TileObelisk:      "Obelisk",
-		TileFountain:     "Fountain",
-		TileRockCairn:    "Rock Cairn",
+		TilePropEmpty:         "",
+		TileTree:              "Tree",
+		TileTreeXL:            "Tree XL",
+		TileTreeTall:          "Tall Tree",
+		TileTreeTwin:          "Twin Trees",
+		TileTreeYoung:         "Young Tree",
+		TileRockLarge:         "Boulder",
+		TileBushLarge:         "Large Bush",
+		TileCrate:             "Crate",
+		TileBarrel:            "Barrel",
+		TileUrn:               "Urn",
+		TileStalagmite:        "Stalagmite",
+		TilePillar:            "Pillar",
+		TileBrokenPillar:      "Broken Pillar",
+		TileStatue:            "Statue",
+		TileObelisk:           "Obelisk",
+		TileFountain:          "Fountain",
+		TileRockCairn:         "Rock Cairn",
 		TileRockFormation:     "Rock Formation (anchor)",
 		TileRockFormationTail: "Rock Formation (tail)",
-		TileWell:         "Well",
-		TileGravestone:   "Gravestone",
-		TileSignPost:     "Sign Post",
-		TileHayBale:      "Hay Bale",
-		TileScarecrow:    "Scarecrow",
-		TileBookshelf:    "Bookshelf",
-		TileTable:        "Table",
-		TileBed:          "Bed",
-		TileBrazier:      "Brazier",
-		TileSarcophagus:  "Sarcophagus",
+		TileWell:              "Well",
+		TileGravestone:        "Gravestone",
+		TileSignPost:          "Sign Post",
+		TileHayBale:           "Hay Bale",
+		TileScarecrow:         "Scarecrow",
+		TileBookshelf:         "Bookshelf",
+		TileTable:             "Table",
+		TileBed:               "Bed",
+		TileBrazier:           "Brazier",
+		TileSarcophagus:       "Sarcophagus",
 	},
 }
 
@@ -923,4 +1013,3 @@ func TileLabel(layer TileLayer, c byte) string {
 	}
 	return "?"
 }
-

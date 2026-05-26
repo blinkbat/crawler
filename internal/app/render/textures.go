@@ -22,14 +22,14 @@ func makeRockWallPixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, shadow, math.Max(0, -n)*0.55)
 
 			cellX, cellY := x/24, y/24
-			cellOffset := hash2(cellX, cellY) % 6
+			cellOffset := hashByteXY(cellX, cellY) % 6
 			if (x+cellOffset)%24 < 2 || (y+cellOffset)%24 < 2 {
 				c = core.MixColor(c, shadow, 0.55)
 			}
-			if hash2(x/4, y/4)%23 == 0 {
+			if hashByteXY(x/4, y/4)%23 == 0 {
 				c = core.MixColor(c, shadow, 0.45)
 			}
-			if y > h*4/7 && hash2(x/3, y/2)%14 < 3 {
+			if y > h*4/7 && hashByteXY(x/3, y/2)%14 < 3 {
 				c = core.MixColor(c, moss, 0.40)
 			}
 			pixels[y*w+x] = c
@@ -60,8 +60,8 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 			localX := (x + offset) % brickW
 			localY := y % brickH
 			if localX < mortar || localY < mortar {
-				c := core.MixColor(mortarColor, mortarLight, float64(hash2(x, y)%64)/200.0)
-				if hash2(x/2, y) < 20 {
+				c := core.MixColor(mortarColor, mortarLight, float64(hashByteXY(x, y)%64)/200.0)
+				if hashByteXY(x/2, y) < 20 {
 					c = core.MixColor(c, moss, 0.18)
 				}
 				pixels[y*w+x] = c
@@ -69,7 +69,7 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 			}
 
 			brickX := (x + offset) / brickW
-			tone := hash2(brickX*7, row*13) % 100
+			tone := hashByteXY(brickX*7, row*13) % 100
 			c := base
 			if tone < 32 {
 				c = core.MixColor(c, warm, 0.25+float64(tone)/200.0)
@@ -86,10 +86,10 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 				c = core.MixColor(c, mortarColor, 0.45-float64(edgeDist)*0.12)
 			}
 
-			if hash2(brickX*17+localX/3, row*31+localY/3)%80 < 4 {
+			if hashByteXY(brickX*17+localX/3, row*31+localY/3)%80 < 4 {
 				c = adjust(c, -36)
 			}
-			if (localY > brickH-4) && hash2(x, y)%18 < 5 {
+			if (localY > brickH-4) && hashByteXY(x, y)%18 < 5 {
 				c = core.MixColor(c, moss, 0.32)
 			}
 			pixels[y*w+x] = c
@@ -116,13 +116,13 @@ func makeGrassPixels(w, h int) []color.RGBA {
 			if m > 0.42 {
 				c = core.MixColor(c, dirt, (m-0.42)*0.85)
 			}
-			if hash2(x/2, y/2)%9 == 0 {
+			if hashByteXY(x/2, y/2)%9 == 0 {
 				bx, by := x%4, y%4
 				if (bx == 0 && by == 0) || (bx == 2 && by == 1) {
 					c = core.MixColor(c, light, 0.4)
 				}
 			}
-			if hash2(x*7, y*11)%320 < 3 {
+			if hashByteXY(x*7, y*11)%320 < 3 {
 				c = core.MixColor(c, bloom, 0.7)
 			}
 			pixels[y*w+x] = c
@@ -152,7 +152,7 @@ func makeStoneFloorPixels(w, h int) []color.RGBA {
 
 			slabX := x / slab
 			slabY := y / slab
-			tone := hash2(slabX*5, slabY*7) % 100
+			tone := hashByteXY(slabX*5, slabY*7) % 100
 			c := base
 			if tone < 38 {
 				c = core.MixColor(c, warm, 0.18+float64(tone)/240.0)
@@ -168,7 +168,7 @@ func makeStoneFloorPixels(w, h int) []color.RGBA {
 			if edgeDist <= 3 {
 				c = core.MixColor(c, groutColor, 0.45-float64(edgeDist)*0.10)
 			}
-			if hash2(slabX*11+localX/4, slabY*19+localY/4)%72 < 3 {
+			if hashByteXY(slabX*11+localX/4, slabY*19+localY/4)%72 < 3 {
 				c = adjust(c, -32)
 			}
 			pixels[y*w+x] = c
@@ -193,10 +193,10 @@ func makeDirtPixels(w, h int) []color.RGBA {
 			c := base
 			c = core.MixColor(c, light, math.Max(0, n)*0.55)
 			c = core.MixColor(c, dark, math.Max(0, -n)*0.55)
-			if hash2(x*5, y*5)%160 < 3 {
+			if hashByteXY(x*5, y*5)%160 < 3 {
 				c = core.MixColor(c, dark, 0.6)
 			}
-			if hash2(x*7, y*11)%280 < 2 {
+			if hashByteXY(x*7, y*11)%280 < 2 {
 				c = core.MixColor(c, pebble, 0.7)
 			}
 			pixels[y*w+x] = c
@@ -225,7 +225,7 @@ func makeDarkGrassPixels(w, h int) []color.RGBA {
 			if m > 0.45 {
 				c = core.MixColor(c, moss, (m-0.45)*0.6)
 			}
-			if hash2(x*3, y*3)%9 == 0 {
+			if hashByteXY(x*3, y*3)%9 == 0 {
 				bx, by := x%4, y%4
 				if (bx == 1 && by == 0) || (bx == 3 && by == 2) {
 					c = core.MixColor(c, light, 0.30)
@@ -266,7 +266,7 @@ func makeCobblePixels(w, h int) []color.RGBA {
 			// Per-stone center jitter so the cobbles don't read as a uniform
 			// grid. Each stone's "center" walks a couple of pixels off the
 			// cell center and its radius wobbles too.
-			h0 := hash2(cellX*7, cellY*13)
+			h0 := hashByteXY(cellX*7, cellY*13)
 			cx := cell/2 + (h0%5 - 2)
 			cy := cell/2 + ((h0>>3)%5 - 2)
 			rx := float64(cell/2 - 2 - (h0>>6)%2)
@@ -277,14 +277,14 @@ func makeCobblePixels(w, h int) []color.RGBA {
 
 			if d > 1.0 {
 				c := mortar
-				if hash2(x/2, y/2)%18 < 7 {
+				if hashByteXY(x/2, y/2)%18 < 7 {
 					c = core.MixColor(c, moss, 0.55)
 				}
 				pixels[y*w+x] = jitter(c, x, y, 5)
 				continue
 			}
 
-			tone := hash2(cellX*11, cellY*17) % 100
+			tone := hashByteXY(cellX*11, cellY*17) % 100
 			c := base
 			if tone < 38 {
 				c = core.MixColor(c, warm, 0.30+float64(tone)/220.0)
@@ -308,7 +308,7 @@ func makeCobblePixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, dark, math.Max(0, -n)*0.30)
 
 			// Sparse darker pits in each stone — chips and weather marks.
-			if hash2(cellX*23+localX/3, cellY*29+localY/3)%88 < 3 {
+			if hashByteXY(cellX*23+localX/3, cellY*29+localY/3)%88 < 3 {
 				c = adjust(c, -34)
 			}
 			pixels[y*w+x] = c
@@ -344,7 +344,7 @@ func makePlankPixels(w, h int) []color.RGBA {
 				pixels[y*w+x] = jitter(gapColor, x, y, 6)
 				continue
 			}
-			tone := hash2((x+offset)/96, boardRow*5) % 100
+			tone := hashByteXY((x+offset)/96, boardRow*5) % 100
 			c := base
 			if tone < 38 {
 				c = core.MixColor(c, warm, 0.25+float64(tone)/240.0)
@@ -365,7 +365,7 @@ func makePlankPixels(w, h int) []color.RGBA {
 			}
 
 			// Knots: small disc darker spots, ~1 per board.
-			if hash2((x+offset)/8, y/3)%420 < 3 {
+			if hashByteXY((x+offset)/8, y/3)%420 < 3 {
 				c = core.MixColor(c, knot, 0.70)
 			}
 			pixels[y*w+x] = c
@@ -405,7 +405,7 @@ func makeWaterPixels(w, h int) []color.RGBA {
 				c = core.MixColor(c, sand, (-n-0.45)*0.5)
 			}
 			// Rare strands of weed for life.
-			if hash2(x/2, y*3)%560 < 4 {
+			if hashByteXY(x/2, y*3)%560 < 4 {
 				c = core.MixColor(c, weed, 0.45)
 			}
 			pixels[y*w+x] = c
@@ -436,7 +436,7 @@ func makeDeepWaterPixels(w, h int) []color.RGBA {
 			if peak > 0.62 {
 				c = core.MixColor(c, shine, (peak-0.62)*0.9)
 			}
-			if hash2(x/2, y*3)%620 < 3 {
+			if hashByteXY(x/2, y*3)%620 < 3 {
 				c = core.MixColor(c, weed, 0.40)
 			}
 			pixels[y*w+x] = c
@@ -468,10 +468,10 @@ func makeSandPixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, warm, math.Max(0, dune)*0.18)
 			c = core.MixColor(c, dark, math.Max(0, -dune)*0.18)
 			// Per-pixel grain speckle.
-			if hash2(x, y)%5 == 0 {
-				c = adjust(c, hash2(x*3, y*3)%9-4)
+			if hashByteXY(x, y)%5 == 0 {
+				c = adjust(c, hashByteXY(x*3, y*3)%9-4)
 			}
-			if hash2(x*7, y*11)%520 < 2 {
+			if hashByteXY(x*7, y*11)%520 < 2 {
 				c = core.MixColor(c, pebble, 0.55)
 			}
 			pixels[y*w+x] = c
@@ -500,7 +500,7 @@ func makeSnowPixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, deepShadow, math.Max(0, -drift)*0.18)
 			// Sparkle specks: very rare bright pixels read as light
 			// glinting off ice crystals.
-			if hash2(x*5, y*7)%900 < 3 {
+			if hashByteXY(x*5, y*7)%900 < 3 {
 				c = core.MixColor(c, sparkle, 0.85)
 			}
 			pixels[y*w+x] = c
@@ -527,10 +527,10 @@ func makeBarkPixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, light, math.Max(0, n)*0.25)
 			c = core.MixColor(c, deep, math.Max(0, -n)*0.40)
 
-			if hash2(x/2, y/2)%160 < 3 {
+			if hashByteXY(x/2, y/2)%160 < 3 {
 				c = core.MixColor(c, deep, 0.7)
 			}
-			if hash2(x*3, y/4)%240 < 2 {
+			if hashByteXY(x*3, y/4)%240 < 2 {
 				c = core.MixColor(c, moss, 0.55)
 			}
 			pixels[y*w+x] = c
@@ -556,7 +556,7 @@ func makeLeafPixels(w, h int) []color.RGBA {
 			if m > 0.55 {
 				c = core.MixColor(c, gold, (m-0.55)*0.6)
 			}
-			if hash2(x*5, y*5)%180 < 3 {
+			if hashByteXY(x*5, y*5)%180 < 3 {
 				c = core.MixColor(c, deep, 0.55)
 			}
 			pixels[y*w+x] = c
@@ -616,7 +616,7 @@ func makeGranitePixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, light, math.Max(0, n)*0.40)
 			c = core.MixColor(c, dark, math.Max(0, -n)*0.45)
 			// Mica flecks: rare bright pixels for sparkle.
-			if hash2(x*5, y*5)%420 < 3 {
+			if hashByteXY(x*5, y*5)%420 < 3 {
 				c = core.MixColor(c, flake, 0.55)
 			}
 			pixels[y*w+x] = c
@@ -643,7 +643,7 @@ func makeTerracottaPixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, light, math.Max(0, band)*0.35+math.Max(0, n)*0.25)
 			c = core.MixColor(c, dark, math.Max(0, -band)*0.30+math.Max(0, -n)*0.25)
 			// Sparse darker pits and chips.
-			if hash2(x, y)%240 < 2 {
+			if hashByteXY(x, y)%240 < 2 {
 				c = core.MixColor(c, rim, 0.55)
 			}
 			pixels[y*w+x] = c
@@ -731,6 +731,151 @@ func makeSkyPixels(w, h int) []color.RGBA {
 				c = core.MixColor(c, color.RGBA{R: 249, G: 252, B: 255, A: 255}, cover)
 			}
 			pixels[y*w+x] = c
+		}
+	}
+	return pixels
+}
+
+// makeStarPixels builds the transparent star-field overlay sampled by
+// DrawSkyBackground at night. The texture is mostly RGBA(0,0,0,0); a
+// sparse scatter of single bright pixels (with a 4-neighbor halo at
+// lower alpha) reads as pinpoint stars when drawn at screen scale.
+// Star density tapers from the top of the texture down toward the
+// horizon — stars near the horizon are washed out by atmospheric
+// scattering even at midnight, so the bottom 30% of the texture stays
+// nearly empty. A handful of "bright" stars get a slightly larger
+// halo + warm-white tint so the field doesn't read as a uniform
+// noise field. Star colors walk between cool white, pale blue, and
+// warm yellow — the standard star-temperature trio — so a careful
+// look at the field reveals subtle variety.
+//
+// The randomness is hash-driven (hashFloat) rather than rand.* so the
+// star map is stable across runs and platforms — a player who looks
+// up at midnight tonight sees the same constellation tomorrow.
+func makeStarPixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	transparent := color.RGBA{R: 0, G: 0, B: 0, A: 0}
+	for i := range pixels {
+		pixels[i] = transparent
+	}
+
+	// Star palette: cool white (most common), pale blue (hot stars),
+	// warm yellow (cooler stars). Pulled by a separate hash byte so
+	// color and brightness are independent.
+	coolWhite := color.RGBA{R: 240, G: 244, B: 252, A: 255}
+	paleBlue := color.RGBA{R: 198, G: 218, B: 252, A: 255}
+	warmYellow := color.RGBA{R: 252, G: 234, B: 192, A: 255}
+	colorFor := func(b int) color.RGBA {
+		switch {
+		case b < 24:
+			return paleBlue
+		case b < 56:
+			return warmYellow
+		default:
+			return coolWhite
+		}
+	}
+	setPx := func(x, y int, c color.RGBA) {
+		if x < 0 || x >= w || y < 0 || y >= h {
+			return
+		}
+		// Overwrite, not blend — stars don't overlap meaningfully at
+		// this density and "max over" would otherwise dim a bright
+		// star sitting on top of a dim one's halo.
+		pixels[y*w+x] = c
+	}
+
+	// Density falloff: the upper sky (low y) is the densest; the
+	// horizon (high y) is nearly clear. A quadratic taper sells the
+	// effect without being a hard cutoff. Total star count is roughly
+	// w*h*baseProb*avg(densityAt) — at the current 0.0035 base, ~1024×512
+	// gives ~700 stars before halos, sparse enough to read as a real
+	// night sky rather than a noise field. The previous 0.008 pass
+	// produced a cluttered patch even at midnight; halving the rate
+	// AND adding per-star opacity variance below gives the layer
+	// breathing room.
+	const baseProb = 0.0035
+	densityAt := func(y int) float64 {
+		t := float64(y) / float64(h-1)
+		// 1 at the top, tapering to ~0.05 at the bottom.
+		falloff := 1.0 - t*t*1.05
+		if falloff < 0.05 {
+			falloff = 0.05
+		}
+		return falloff
+	}
+
+	// Per-star brightness curve: most stars are faint, a few are
+	// medium, a handful are bright. Mapped from the brightness byte
+	// (0..255) to a core alpha so the eye reads a starfield with
+	// depth rather than a flat dot pattern. Curve buckets:
+	//
+	//   < 160 (63%)  → core alpha 70   (dim, barely visible)
+	//   < 220 (24%)  → core alpha 130  (medium, the bulk of the field)
+	//   < 248 (11%)  → core alpha 200  (bright)
+	//        else (3%) → core alpha 255  (the brightest pinpoints)
+	//
+	// Halo + sparkle alphas scale off the core so a dim star has a
+	// dim halo and the brightest stars get the strongest glow.
+	coreAlphaFor := func(b int) uint8 {
+		switch {
+		case b < 160:
+			return 70
+		case b < 220:
+			return 130
+		case b < 248:
+			return 200
+		default:
+			return 255
+		}
+	}
+
+	for y := 0; y < h; y++ {
+		dens := densityAt(y)
+		thresh := uint16(baseProb * dens * 65535)
+		for x := 0; x < w; x++ {
+			// hashXY already multiplies by 73856093 / 19349663 — don't
+			// pre-multiply at the call site or the inner math overflows
+			// before mix32 sees it and the distribution skews.
+			h0 := uint16(hashXY(x, y))
+			if h0 >= thresh {
+				continue
+			}
+			// Secondary hash drives brightness + color + halo. Offset
+			// by a constant pair so it's decorrelated from h0.
+			h1 := hashXY(x+91317, y+58271)
+			brightness := int(h1 & 0xFF)
+			coreAlpha := coreAlphaFor(brightness)
+			col := colorFor(brightness)
+			col.A = coreAlpha
+
+			// Core pixel.
+			setPx(x, y, col)
+
+			// Halo + sparkle only on the brighter half of the
+			// brightness curve — dim stars stay as a single pixel so
+			// the field has breathing room. Halo alpha is ~55% of the
+			// core, sparkle is ~30%, so brightness propagates from
+			// pinpoint outward.
+			if coreAlpha >= 130 {
+				haloRoll := int((h1 >> 8) & 0xFF)
+				if haloRoll < 140 { // ~55% of the brighter stars
+					halo := col
+					halo.A = uint8(int(coreAlpha) * 55 / 100)
+					setPx(x-1, y, halo)
+					setPx(x+1, y, halo)
+					setPx(x, y-1, halo)
+					setPx(x, y+1, halo)
+				}
+				if coreAlpha == 255 && haloRoll < 80 { // sparkle on the brightest, ~30% of those
+					sparkle := col
+					sparkle.A = uint8(int(coreAlpha) * 30 / 100)
+					setPx(x-1, y-1, sparkle)
+					setPx(x+1, y-1, sparkle)
+					setPx(x-1, y+1, sparkle)
+					setPx(x+1, y+1, sparkle)
+				}
+			}
 		}
 	}
 	return pixels
@@ -838,7 +983,7 @@ func makeRatPixelsWithPalette(w, h int, p ratPalette) []color.RGBA {
 			if pixels[i].A == 0 {
 				continue
 			}
-			if hash2(x, y)%7 == 0 {
+			if hashByteXY(x, y)%7 == 0 {
 				pixels[i] = adjust(pixels[i], -12)
 			}
 		}
@@ -917,7 +1062,7 @@ func makeBatPixels(w, h int) []color.RGBA {
 			if pixels[i].A == 0 {
 				continue
 			}
-			if hash2(x, y)%9 == 0 {
+			if hashByteXY(x, y)%9 == 0 {
 				pixels[i] = adjust(pixels[i], -10)
 			}
 		}
@@ -1003,7 +1148,7 @@ func makeGoblinPixels(w, h int) []color.RGBA {
 			if pixels[i].A == 0 {
 				continue
 			}
-			if hash2(x, y)%8 == 0 {
+			if hashByteXY(x, y)%8 == 0 {
 				pixels[i] = adjust(pixels[i], -10)
 			}
 		}
@@ -1083,7 +1228,7 @@ func makeGoblinMagePixels(w, h int) []color.RGBA {
 			if pixels[i].A == 0 {
 				continue
 			}
-			if hash2(x, y)%9 == 0 {
+			if hashByteXY(x, y)%9 == 0 {
 				pixels[i] = adjust(pixels[i], -10)
 			}
 		}
@@ -1152,7 +1297,7 @@ func makeAmoebaPixels(w, h int) []color.RGBA {
 			if pixels[i].A == 0 {
 				continue
 			}
-			if hash2(x, y)%12 == 0 {
+			if hashByteXY(x, y)%12 == 0 {
 				pixels[i] = adjust(pixels[i], -8)
 			}
 		}
@@ -1246,8 +1391,594 @@ func makeVenusMantrapPixels(w, h int) []color.RGBA {
 			if pixels[i].A == 0 {
 				continue
 			}
-			if hash2(x, y)%9 == 0 {
+			if hashByteXY(x, y)%9 == 0 {
 				pixels[i] = adjust(pixels[i], -10)
+			}
+		}
+	}
+	return pixels
+}
+
+// makeCaveSpiderPixels paints the cave spider: a low-slung
+// arachnid with a bulbous purple abdomen, a smaller cephalothorax up
+// front, eight legs splayed out in jointed pairs, six red eyes
+// clustered between the mandibles, and downward-pointing fangs.
+// Sized wide and short (88×72) so the silhouette reads "thing on the
+// ground" instead of "tall humanoid." Designed as a tier-3 ambusher
+// — menacing eye cluster + visible fangs > pure cute round body.
+func makeCaveSpiderPixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	bodyDark := color.RGBA{R: 44, G: 28, B: 60, A: 255}
+	body := color.RGBA{R: 76, G: 50, B: 102, A: 255}
+	bodyLight := color.RGBA{R: 116, G: 80, B: 148, A: 255}
+	legDark := color.RGBA{R: 30, G: 18, B: 42, A: 255}
+	leg := color.RGBA{R: 60, G: 42, B: 86, A: 255}
+	fang := color.RGBA{R: 240, G: 226, B: 200, A: 255}
+	eye := color.RGBA{R: 232, G: 48, B: 56, A: 255}
+	eyeGlow := color.RGBA{R: 255, G: 128, B: 132, A: 255}
+
+	cx := w / 2
+
+	// Ground shadow — wider than tall, fits the squat silhouette.
+	fillEllipsePixels(pixels, w, h, cx, h-4, 30, 4, color.RGBA{R: 0, G: 0, B: 0, A: 110})
+
+	// Eight legs in four jointed pairs, fanning out from the
+	// cephalothorax. Each leg is a two-segment poly-line: shoulder
+	// up + out, then knee down to a foot near the floor. Outer
+	// legs reach further than inner ones so the silhouette feels
+	// spread, not stacked.
+	legY := h - 18 // shoulder anchor for all legs
+	footY := h - 8
+	// Back-left pair.
+	drawLinePixels(pixels, w, h, cx-8, legY, cx-26, 24, legDark, 3)
+	drawLinePixels(pixels, w, h, cx-26, 24, cx-34, footY, legDark, 3)
+	drawLinePixels(pixels, w, h, cx-8, legY, cx-26, 24, leg, 1)
+	drawLinePixels(pixels, w, h, cx-6, legY+2, cx-20, 32, legDark, 3)
+	drawLinePixels(pixels, w, h, cx-20, 32, cx-26, footY, legDark, 3)
+	drawLinePixels(pixels, w, h, cx-6, legY+2, cx-20, 32, leg, 1)
+	// Front-left pair.
+	drawLinePixels(pixels, w, h, cx-4, legY+4, cx-16, 38, legDark, 3)
+	drawLinePixels(pixels, w, h, cx-16, 38, cx-20, footY, legDark, 3)
+	drawLinePixels(pixels, w, h, cx-2, legY+6, cx-12, 44, legDark, 3)
+	drawLinePixels(pixels, w, h, cx-12, 44, cx-14, footY, legDark, 3)
+	// Back-right pair (mirror).
+	drawLinePixels(pixels, w, h, cx+8, legY, cx+26, 24, legDark, 3)
+	drawLinePixels(pixels, w, h, cx+26, 24, cx+34, footY, legDark, 3)
+	drawLinePixels(pixels, w, h, cx+8, legY, cx+26, 24, leg, 1)
+	drawLinePixels(pixels, w, h, cx+6, legY+2, cx+20, 32, legDark, 3)
+	drawLinePixels(pixels, w, h, cx+20, 32, cx+26, footY, legDark, 3)
+	drawLinePixels(pixels, w, h, cx+6, legY+2, cx+20, 32, leg, 1)
+	// Front-right pair.
+	drawLinePixels(pixels, w, h, cx+4, legY+4, cx+16, 38, legDark, 3)
+	drawLinePixels(pixels, w, h, cx+16, 38, cx+20, footY, legDark, 3)
+	drawLinePixels(pixels, w, h, cx+2, legY+6, cx+12, 44, legDark, 3)
+	drawLinePixels(pixels, w, h, cx+12, 44, cx+14, footY, legDark, 3)
+
+	// Abdomen — big bulbous oval at the back (lower / further from
+	// viewer). Two-tone shading so the bulb reads as 3D.
+	fillEllipsePixels(pixels, w, h, cx, h-22, 24, 16, bodyDark)
+	fillEllipsePixels(pixels, w, h, cx, h-24, 22, 14, body)
+	fillEllipsePixels(pixels, w, h, cx-4, h-28, 12, 6, bodyLight)
+	// Faint marking on the abdomen — a pale crescent.
+	fillEllipsePixels(pixels, w, h, cx+2, h-22, 8, 3, bodyLight)
+
+	// Cephalothorax — smaller round front body (upper / closer).
+	fillEllipsePixels(pixels, w, h, cx, h-38, 14, 10, bodyDark)
+	fillEllipsePixels(pixels, w, h, cx, h-40, 12, 8, body)
+	fillEllipsePixels(pixels, w, h, cx-2, h-42, 8, 4, bodyLight)
+
+	// Six red eyes — two rows of three (3+3 pattern). Outer eyes
+	// slightly smaller for depth. Glow halo behind each.
+	for _, e := range [][3]int{
+		{cx - 6, h - 41, 2}, {cx, h - 41, 2}, {cx + 6, h - 41, 2},
+		{cx - 4, h - 37, 1}, {cx, h - 37, 1}, {cx + 4, h - 37, 1},
+	} {
+		fillEllipsePixels(pixels, w, h, e[0], e[1], e[2]+1, e[2]+1, eyeGlow)
+		fillEllipsePixels(pixels, w, h, e[0], e[1], e[2], e[2], eye)
+	}
+
+	// Mandibles / fangs — two small triangles hanging from the
+	// cephalothorax's front edge.
+	fillTrianglePixels(pixels, w, h, cx-5, h-32, cx-2, h-32, cx-3, h-28, fang)
+	fillTrianglePixels(pixels, w, h, cx+5, h-32, cx+2, h-32, cx+3, h-28, fang)
+
+	// Per-pixel dither — match the bestiary's surface feel.
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			i := y*w + x
+			if pixels[i].A == 0 {
+				continue
+			}
+			if hashByteXY(x, y)%9 == 0 {
+				pixels[i] = adjust(pixels[i], -12)
+			}
+		}
+	}
+	return pixels
+}
+
+// makeVampireBatPixels paints the vampire bat: larger than the cave
+// bat, deeper crimson-black wings, glowing red eyes, prominent
+// fangs, and a small blood-drip at the mouth that sells the
+// lifesteal identity. Wing silhouette mirrors the cave bat so the
+// player recognizes the upgrade at a glance — same silhouette
+// family, more menacing color story.
+func makeVampireBatPixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	body := color.RGBA{R: 52, G: 20, B: 28, A: 255}
+	bodyDark := color.RGBA{R: 28, G: 8, B: 16, A: 255}
+	bodyLight := color.RGBA{R: 96, G: 36, B: 50, A: 255}
+	wingMembrane := color.RGBA{R: 76, G: 24, B: 36, A: 255}
+	wingDark := color.RGBA{R: 36, G: 12, B: 20, A: 255}
+	wingBone := color.RGBA{R: 24, G: 8, B: 14, A: 255}
+	eye := color.RGBA{R: 248, G: 36, B: 48, A: 255}
+	eyeGlow := color.RGBA{R: 255, G: 140, B: 140, A: 255}
+	fang := color.RGBA{R: 240, G: 226, B: 200, A: 255}
+	blood := color.RGBA{R: 196, G: 32, B: 44, A: 255}
+
+	cx := w / 2
+
+	// Ground shadow — wider for the wingspan.
+	fillEllipsePixels(pixels, w, h, cx, h-4, 34, 4, color.RGBA{R: 0, G: 0, B: 0, A: 100})
+
+	// Wing membranes — broad triangles fanning out from the body.
+	// Left wing.
+	fillTrianglePixels(pixels, w, h, cx-2, 36, cx-44, 28, cx-30, 60, wingMembrane)
+	fillTrianglePixels(pixels, w, h, cx-2, 36, cx-30, 60, cx-12, 56, wingMembrane)
+	// Inner-membrane shading — darker patch nearer to the body.
+	fillTrianglePixels(pixels, w, h, cx-2, 40, cx-26, 44, cx-12, 56, wingDark)
+	// Wing-finger bones — three diverging dark lines per wing.
+	drawLinePixels(pixels, w, h, cx-4, 38, cx-44, 28, wingBone, 2)
+	drawLinePixels(pixels, w, h, cx-4, 38, cx-36, 50, wingBone, 2)
+	drawLinePixels(pixels, w, h, cx-4, 38, cx-26, 58, wingBone, 2)
+	// Right wing (mirror).
+	fillTrianglePixels(pixels, w, h, cx+2, 36, cx+44, 28, cx+30, 60, wingMembrane)
+	fillTrianglePixels(pixels, w, h, cx+2, 36, cx+30, 60, cx+12, 56, wingMembrane)
+	fillTrianglePixels(pixels, w, h, cx+2, 40, cx+26, 44, cx+12, 56, wingDark)
+	drawLinePixels(pixels, w, h, cx+4, 38, cx+44, 28, wingBone, 2)
+	drawLinePixels(pixels, w, h, cx+4, 38, cx+36, 50, wingBone, 2)
+	drawLinePixels(pixels, w, h, cx+4, 38, cx+26, 58, wingBone, 2)
+
+	// Tiny claws at the wingtips.
+	fillTrianglePixels(pixels, w, h, cx-44, 26, cx-46, 22, cx-40, 28, wingBone)
+	fillTrianglePixels(pixels, w, h, cx+44, 26, cx+46, 22, cx+40, 28, wingBone)
+
+	// Body — fuzzy oval torso, darker at the bottom.
+	fillEllipsePixels(pixels, w, h, cx, 46, 12, 14, bodyDark)
+	fillEllipsePixels(pixels, w, h, cx, 44, 10, 12, body)
+	fillEllipsePixels(pixels, w, h, cx-2, 40, 7, 6, bodyLight)
+
+	// Feet — tiny claws hanging beneath the body.
+	fillTrianglePixels(pixels, w, h, cx-6, 60, cx-3, 64, cx-3, 60, wingBone)
+	fillTrianglePixels(pixels, w, h, cx+6, 60, cx+3, 64, cx+3, 60, wingBone)
+
+	// Head — round, slightly tilted forward.
+	fillEllipsePixels(pixels, w, h, cx, 32, 11, 10, bodyDark)
+	fillEllipsePixels(pixels, w, h, cx, 30, 9, 8, body)
+
+	// Ears — two pointed cones jutting up.
+	fillTrianglePixels(pixels, w, h, cx-7, 24, cx-3, 16, cx-2, 26, bodyDark)
+	fillTrianglePixels(pixels, w, h, cx+7, 24, cx+3, 16, cx+2, 26, bodyDark)
+	fillTrianglePixels(pixels, w, h, cx-6, 24, cx-3, 18, cx-3, 26, body)
+	fillTrianglePixels(pixels, w, h, cx+6, 24, cx+3, 18, cx+3, 26, body)
+
+	// Eyes — BIG glowing red, the headline detail.
+	fillEllipsePixels(pixels, w, h, cx-4, 30, 3, 3, eyeGlow)
+	fillEllipsePixels(pixels, w, h, cx+4, 30, 3, 3, eyeGlow)
+	fillEllipsePixels(pixels, w, h, cx-4, 30, 2, 2, eye)
+	fillEllipsePixels(pixels, w, h, cx+4, 30, 2, 2, eye)
+
+	// Fangs — two pointed white teeth below the mouth.
+	fillTrianglePixels(pixels, w, h, cx-3, 36, cx-1, 36, cx-2, 41, fang)
+	fillTrianglePixels(pixels, w, h, cx+3, 36, cx+1, 36, cx+2, 41, fang)
+
+	// Blood drip — a small bead trailing from one fang. Pure ID
+	// flavor; reads at any zoom because of the saturated red.
+	fillEllipsePixels(pixels, w, h, cx-2, 44, 1, 2, blood)
+
+	// Per-pixel dither.
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			i := y*w + x
+			if pixels[i].A == 0 {
+				continue
+			}
+			if hashByteXY(x, y)%9 == 0 {
+				pixels[i] = adjust(pixels[i], -10)
+			}
+		}
+	}
+	return pixels
+}
+
+// makeWispPixels paints the will-o'-wisp: a floating ghostly orb of
+// cold cyan-white light with concentric halo rings dimming outward,
+// trailing wispy tendrils below. No solid body — the sprite is all
+// glow + atmosphere. Sized narrow + tall (56×72) so it reads as
+// "drifting light" rather than "creature with a body."
+func makeWispPixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	core1 := color.RGBA{R: 246, G: 252, B: 255, A: 255} // brightest center
+	core2 := color.RGBA{R: 188, G: 226, B: 252, A: 255} // inner halo
+	core3 := color.RGBA{R: 124, G: 184, B: 232, A: 255} // mid halo
+	mist1 := color.RGBA{R: 88, G: 144, B: 208, A: 220}  // outer mist
+	mist2 := color.RGBA{R: 56, G: 108, B: 176, A: 160}  // wispy edge
+	tendril := color.RGBA{R: 96, G: 156, B: 220, A: 200}
+	tendrilDim := color.RGBA{R: 60, G: 116, B: 180, A: 140}
+	eye := color.RGBA{R: 14, G: 22, B: 40, A: 255}
+
+	cx := w / 2
+	cy := h/2 - 8 // float anchor above the center for the orb body
+
+	// Soft ground shadow — small + diffuse since the wisp floats.
+	fillEllipsePixels(pixels, w, h, cx, h-4, 14, 3, color.RGBA{R: 0, G: 0, B: 0, A: 60})
+
+	// Outer mist clouds — irregular tendrils trailing downward
+	// like a ghostly flame. Three drifting blobs at different y
+	// offsets so the silhouette looks alive rather than symmetric.
+	fillEllipsePixels(pixels, w, h, cx-3, cy+14, 7, 9, mist2)
+	fillEllipsePixels(pixels, w, h, cx+4, cy+18, 5, 7, mist2)
+	fillEllipsePixels(pixels, w, h, cx, cy+22, 4, 6, tendrilDim)
+	fillEllipsePixels(pixels, w, h, cx-2, cy+28, 3, 5, tendrilDim)
+
+	// Halo layers — concentric rings around the core, each
+	// progressively brighter and smaller. Painted big-to-small so
+	// the inner layers overwrite the outer ones.
+	fillEllipsePixels(pixels, w, h, cx, cy, 16, 18, mist1)
+	fillEllipsePixels(pixels, w, h, cx, cy, 13, 14, mist2)
+	fillEllipsePixels(pixels, w, h, cx, cy, 10, 11, core3)
+	fillEllipsePixels(pixels, w, h, cx, cy, 7, 8, core2)
+	fillEllipsePixels(pixels, w, h, cx, cy-1, 4, 5, core1)
+
+	// Two tiny dark "eye" pinpricks inside the bright core so the
+	// wisp reads as faintly malevolent rather than a benign light.
+	fillEllipsePixels(pixels, w, h, cx-2, cy-1, 1, 1, eye)
+	fillEllipsePixels(pixels, w, h, cx+2, cy-1, 1, 1, eye)
+
+	// Side-trailing wisps — two small curling arcs out the sides.
+	drawLinePixels(pixels, w, h, cx-10, cy+4, cx-16, cy+12, tendril, 2)
+	drawLinePixels(pixels, w, h, cx+10, cy+4, cx+16, cy+12, tendril, 2)
+	drawLinePixels(pixels, w, h, cx-16, cy+12, cx-14, cy+18, tendrilDim, 2)
+	drawLinePixels(pixels, w, h, cx+16, cy+12, cx+14, cy+18, tendrilDim, 2)
+
+	// No dither pass — the wisp's silhouette is intentionally
+	// smooth gradient. A dither here would make the glow look
+	// noisy instead of ethereal.
+	return pixels
+}
+
+// makeStoneGolemPixels paints the stone golem: a blocky humanoid
+// hewn from weathered stone, with a horizontal glowing eye slit,
+// broad square shoulders, heavy arms hanging at its sides, and
+// cracked-stone detailing throughout. Sized big (96×120) — the
+// golem is the biggest silhouette in the bestiary so it visually
+// anchors a pack. Designed for the "active armor wall" identity:
+// blocky enough to read as a stone construct, glowing eye sells
+// "animated" rather than statuary.
+func makeStoneGolemPixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	stone := color.RGBA{R: 132, G: 124, B: 110, A: 255}
+	stoneDark := color.RGBA{R: 88, G: 82, B: 72, A: 255}
+	stoneShadow := color.RGBA{R: 60, G: 56, B: 50, A: 255}
+	stoneLight := color.RGBA{R: 172, G: 162, B: 144, A: 255}
+	moss := color.RGBA{R: 92, G: 124, B: 68, A: 255}
+	crack := color.RGBA{R: 32, G: 28, B: 24, A: 255}
+	eyeGlow := color.RGBA{R: 248, G: 216, B: 112, A: 255}
+	eyeBright := color.RGBA{R: 252, G: 244, B: 200, A: 255}
+
+	cx := w / 2
+
+	// Ground shadow — wide for the bulk.
+	fillEllipsePixels(pixels, w, h, cx, h-4, 36, 5, color.RGBA{R: 0, G: 0, B: 0, A: 120})
+
+	// Legs — two thick stone pillars. Slightly tapered at the
+	// ankle so the silhouette doesn't read as a perfect cube.
+	fillRectPixels(pixels, w, h, cx-22, 86, 16, 28, stoneDark)
+	fillRectPixels(pixels, w, h, cx+6, 86, 16, 28, stoneDark)
+	fillRectPixels(pixels, w, h, cx-22, 86, 16, 22, stone)
+	fillRectPixels(pixels, w, h, cx+6, 86, 16, 22, stone)
+	// Leg highlights — left edge of each pillar catches light.
+	fillRectPixels(pixels, w, h, cx-22, 86, 3, 22, stoneLight)
+	fillRectPixels(pixels, w, h, cx+6, 86, 3, 22, stoneLight)
+	// Feet — wide flat slabs.
+	fillRectPixels(pixels, w, h, cx-26, 110, 22, 6, stoneShadow)
+	fillRectPixels(pixels, w, h, cx+4, 110, 22, 6, stoneShadow)
+
+	// Hip / waist block — slightly narrower than the torso.
+	fillRectPixels(pixels, w, h, cx-22, 76, 44, 14, stoneDark)
+	fillRectPixels(pixels, w, h, cx-22, 76, 44, 10, stone)
+	fillRectPixels(pixels, w, h, cx-22, 76, 6, 10, stoneLight)
+
+	// Torso — broad rectangular slab.
+	fillRectPixels(pixels, w, h, cx-26, 42, 52, 36, stoneDark)
+	fillRectPixels(pixels, w, h, cx-26, 42, 52, 30, stone)
+	fillRectPixels(pixels, w, h, cx-26, 42, 8, 30, stoneLight)
+	// Chest cracks — three jagged dark lines telegraphing damage.
+	drawLinePixels(pixels, w, h, cx-12, 48, cx-4, 60, crack, 1)
+	drawLinePixels(pixels, w, h, cx-4, 60, cx+2, 70, crack, 1)
+	drawLinePixels(pixels, w, h, cx+8, 50, cx+14, 64, crack, 1)
+	drawLinePixels(pixels, w, h, cx-18, 64, cx-10, 74, crack, 1)
+
+	// Arms — big square blocks hanging at the sides, slightly
+	// raised at the shoulder to suggest a fighter's stance.
+	// Left arm.
+	fillRectPixels(pixels, w, h, cx-40, 42, 14, 38, stoneDark)
+	fillRectPixels(pixels, w, h, cx-40, 42, 14, 32, stone)
+	fillRectPixels(pixels, w, h, cx-40, 42, 4, 32, stoneLight)
+	// Left fist — bigger block at the end.
+	fillRectPixels(pixels, w, h, cx-42, 78, 18, 12, stoneDark)
+	fillRectPixels(pixels, w, h, cx-42, 78, 18, 10, stone)
+	// Right arm.
+	fillRectPixels(pixels, w, h, cx+26, 42, 14, 38, stoneDark)
+	fillRectPixels(pixels, w, h, cx+26, 42, 14, 32, stone)
+	fillRectPixels(pixels, w, h, cx+26, 42, 4, 32, stoneLight)
+	// Right fist.
+	fillRectPixels(pixels, w, h, cx+24, 78, 18, 12, stoneDark)
+	fillRectPixels(pixels, w, h, cx+24, 78, 18, 10, stone)
+
+	// Head — square block at the top, slightly recessed shoulders.
+	fillRectPixels(pixels, w, h, cx-16, 14, 32, 28, stoneDark)
+	fillRectPixels(pixels, w, h, cx-16, 14, 32, 24, stone)
+	fillRectPixels(pixels, w, h, cx-16, 14, 5, 24, stoneLight)
+	// Head crack — single horizontal damage line.
+	drawLinePixels(pixels, w, h, cx-10, 22, cx+4, 26, crack, 1)
+	// Glowing eye slit — horizontal bright bar across the head.
+	fillRectPixels(pixels, w, h, cx-12, 26, 24, 4, crack)
+	fillRectPixels(pixels, w, h, cx-10, 27, 20, 2, eyeGlow)
+	fillRectPixels(pixels, w, h, cx-4, 27, 8, 2, eyeBright)
+
+	// Moss patches — small green specks on the shoulders and feet
+	// to sell "ancient" rather than "freshly carved."
+	fillEllipsePixels(pixels, w, h, cx-22, 46, 4, 2, moss)
+	fillEllipsePixels(pixels, w, h, cx+22, 46, 4, 2, moss)
+	fillEllipsePixels(pixels, w, h, cx-18, 112, 4, 1, moss)
+	fillEllipsePixels(pixels, w, h, cx+18, 112, 4, 1, moss)
+
+	// Heavy stone-grain dither — denser than the soft-creature
+	// sprites so the surface reads as actual rock, not skin.
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			i := y*w + x
+			if pixels[i].A == 0 {
+				continue
+			}
+			if hashByteXY(x, y)%5 == 0 {
+				pixels[i] = adjust(pixels[i], -14)
+			}
+		}
+	}
+	return pixels
+}
+
+// makeNecromancerPixels paints the necromancer: a tall hooded
+// figure in deep indigo robes, pale skull face peeking out from
+// the shadow of the hood with glowing green sockets, a bone staff
+// topped with a small skull held to one side, and bony fingers
+// gripping the shaft. Sized tall + narrow (72×112) so the
+// silhouette reads as a robed humanoid distinct from the goblin
+// mage's stout pose.
+func makeNecromancerPixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	robe := color.RGBA{R: 38, G: 36, B: 68, A: 255}
+	robeDark := color.RGBA{R: 20, G: 20, B: 44, A: 255}
+	robeLight := color.RGBA{R: 64, G: 60, B: 100, A: 255}
+	hoodShadow := color.RGBA{R: 8, G: 8, B: 18, A: 255}
+	skull := color.RGBA{R: 224, G: 218, B: 196, A: 255}
+	skullDark := color.RGBA{R: 168, G: 160, B: 132, A: 255}
+	eyeSocket := color.RGBA{R: 12, G: 20, B: 14, A: 255}
+	eyeGlow := color.RGBA{R: 124, G: 240, B: 132, A: 255}
+	eyeBright := color.RGBA{R: 220, G: 252, B: 192, A: 255}
+	staff := color.RGBA{R: 196, G: 184, B: 152, A: 255}
+	staffDark := color.RGBA{R: 132, G: 122, B: 96, A: 255}
+	bone := color.RGBA{R: 218, G: 210, B: 184, A: 255}
+	trim := color.RGBA{R: 132, G: 96, B: 168, A: 255} // purple hem
+
+	cx := w / 2
+
+	// Ground shadow — long and thin under a robed figure.
+	fillEllipsePixels(pixels, w, h, cx, h-4, 22, 4, color.RGBA{R: 0, G: 0, B: 0, A: 110})
+
+	// Robe skirt — wide triangle from shoulders to feet, dark
+	// underneath, lighter on the left edge to suggest folds.
+	fillTrianglePixels(pixels, w, h, cx-26, h-6, cx+26, h-6, cx, 34, robeDark)
+	fillTrianglePixels(pixels, w, h, cx-22, h-8, cx+22, h-8, cx, 38, robe)
+	// Left fold highlight.
+	fillTrianglePixels(pixels, w, h, cx-22, h-8, cx-14, h-8, cx-6, 40, robeLight)
+	// Hem — purple trim along the bottom edge of the robe.
+	fillRectPixels(pixels, w, h, cx-26, h-10, 52, 3, trim)
+
+	// Torso — narrower above the skirt where the body sits.
+	fillRectPixels(pixels, w, h, cx-14, 50, 28, 24, robe)
+	fillRectPixels(pixels, w, h, cx-14, 50, 28, 4, robeDark)
+	// Robe sash crossing the chest.
+	drawLinePixels(pixels, w, h, cx-14, 58, cx+14, 64, trim, 2)
+
+	// Sleeves — flaring out at the shoulders, narrowing toward
+	// the wrists. Left arm visible holding the staff.
+	// Left sleeve.
+	fillTrianglePixels(pixels, w, h, cx-14, 50, cx-22, 72, cx-12, 76, robe)
+	fillTrianglePixels(pixels, w, h, cx-14, 50, cx-22, 72, cx-18, 60, robeDark)
+	// Right sleeve.
+	fillTrianglePixels(pixels, w, h, cx+14, 50, cx+22, 72, cx+12, 76, robe)
+	fillTrianglePixels(pixels, w, h, cx+14, 50, cx+18, 60, cx+22, 72, robeLight)
+
+	// Hood — dark cone framing the face. Wide at the shoulders,
+	// peaked above the head.
+	fillTrianglePixels(pixels, w, h, cx-18, 48, cx+18, 48, cx, 10, robeDark)
+	fillTrianglePixels(pixels, w, h, cx-14, 46, cx+14, 46, cx, 14, robe)
+	// Inner hood shadow — deep black wells the face peeks out of.
+	fillEllipsePixels(pixels, w, h, cx, 32, 10, 13, hoodShadow)
+
+	// Skull face — bone-pale oval inside the hood shadow.
+	fillEllipsePixels(pixels, w, h, cx, 30, 8, 10, skull)
+	fillEllipsePixels(pixels, w, h, cx-1, 28, 6, 6, skullDark)
+	// Eye sockets — two black hollows with glowing green pupils.
+	fillEllipsePixels(pixels, w, h, cx-3, 30, 2, 3, eyeSocket)
+	fillEllipsePixels(pixels, w, h, cx+3, 30, 2, 3, eyeSocket)
+	fillEllipsePixels(pixels, w, h, cx-3, 30, 1, 1, eyeBright)
+	fillEllipsePixels(pixels, w, h, cx+3, 30, 1, 1, eyeBright)
+	// Outer eye glow — a faint green halo bleeds through the
+	// hood shadow.
+	fillEllipsePixels(pixels, w, h, cx-3, 30, 3, 3, color.RGBA{R: eyeGlow.R, G: eyeGlow.G, B: eyeGlow.B, A: 90})
+	fillEllipsePixels(pixels, w, h, cx+3, 30, 3, 3, color.RGBA{R: eyeGlow.R, G: eyeGlow.G, B: eyeGlow.B, A: 90})
+	// Nasal cavity — small triangle below the eyes.
+	fillTrianglePixels(pixels, w, h, cx-1, 34, cx+1, 34, cx, 37, eyeSocket)
+	// Tooth line — five small dark notches at the jaw.
+	for i := 0; i < 5; i++ {
+		px := cx - 4 + i*2
+		fillRectPixels(pixels, w, h, px, 38, 1, 2, eyeSocket)
+	}
+
+	// Staff — diagonal shaft from the left hand reaching above
+	// the head. Bone-colored shaft, skull topper.
+	drawLinePixels(pixels, w, h, cx-22, 78, cx-32, 16, staffDark, 4)
+	drawLinePixels(pixels, w, h, cx-22, 78, cx-32, 16, staff, 2)
+	// Skull topper.
+	fillEllipsePixels(pixels, w, h, cx-32, 14, 5, 6, bone)
+	fillEllipsePixels(pixels, w, h, cx-33, 14, 2, 2, eyeSocket)
+	fillEllipsePixels(pixels, w, h, cx-31, 14, 2, 2, eyeSocket)
+	// Bony hand gripping the shaft.
+	fillEllipsePixels(pixels, w, h, cx-22, 76, 4, 4, skull)
+	fillEllipsePixels(pixels, w, h, cx-22, 76, 3, 3, skullDark)
+
+	// Per-pixel dither.
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			i := y*w + x
+			if pixels[i].A == 0 {
+				continue
+			}
+			if hashByteXY(x, y)%9 == 0 {
+				pixels[i] = adjust(pixels[i], -12)
+			}
+		}
+	}
+	return pixels
+}
+
+// makeSkeletonPixels paints the skeleton grunt: a stripped-down
+// humanoid frame with a skull head (hollow eye sockets glowing
+// dim red), visible ribcage, bony arms with claw-fingers, and
+// femur/tibia legs. Sized as a regular humanoid (72×112) — same
+// proportions as the goblin so packs read as a mixed front line.
+// Designed for the "expendable raised summon" identity: clearly
+// undead, clearly cheap, paired naturally with the Necromancer.
+func makeSkeletonPixels(w, h int) []color.RGBA {
+	pixels := make([]color.RGBA, w*h)
+	bone := color.RGBA{R: 224, G: 218, B: 196, A: 255}
+	boneDark := color.RGBA{R: 168, G: 160, B: 132, A: 255}
+	boneLight := color.RGBA{R: 244, G: 240, B: 216, A: 255}
+	socket := color.RGBA{R: 16, G: 10, B: 12, A: 255}
+	eyeGlow := color.RGBA{R: 232, G: 96, B: 88, A: 255}
+	eyeBright := color.RGBA{R: 255, G: 196, B: 180, A: 255}
+	rust := color.RGBA{R: 108, G: 60, B: 36, A: 255}
+	rustDark := color.RGBA{R: 72, G: 38, B: 22, A: 255}
+
+	cx := w / 2
+
+	// Ground shadow.
+	fillEllipsePixels(pixels, w, h, cx, h-4, 18, 3, color.RGBA{R: 0, G: 0, B: 0, A: 110})
+
+	// Femurs.
+	drawLinePixels(pixels, w, h, cx-7, 76, cx-10, h-12, boneDark, 4)
+	drawLinePixels(pixels, w, h, cx+7, 76, cx+10, h-12, boneDark, 4)
+	drawLinePixels(pixels, w, h, cx-7, 76, cx-10, h-12, bone, 2)
+	drawLinePixels(pixels, w, h, cx+7, 76, cx+10, h-12, bone, 2)
+	// Knee joints — small dark bumps.
+	fillEllipsePixels(pixels, w, h, cx-9, 92, 3, 2, boneDark)
+	fillEllipsePixels(pixels, w, h, cx+9, 92, 3, 2, boneDark)
+	// Tibias.
+	drawLinePixels(pixels, w, h, cx-10, 92, cx-12, h-8, boneDark, 3)
+	drawLinePixels(pixels, w, h, cx+10, 92, cx+12, h-8, boneDark, 3)
+	drawLinePixels(pixels, w, h, cx-10, 92, cx-12, h-8, bone, 1)
+	drawLinePixels(pixels, w, h, cx+10, 92, cx+12, h-8, bone, 1)
+	// Feet — wide flat ovals.
+	fillEllipsePixels(pixels, w, h, cx-13, h-6, 5, 2, boneDark)
+	fillEllipsePixels(pixels, w, h, cx+13, h-6, 5, 2, boneDark)
+
+	// Pelvis — flared boomerang shape with central socket.
+	fillTrianglePixels(pixels, w, h, cx-12, 70, cx+12, 70, cx, 80, boneDark)
+	fillTrianglePixels(pixels, w, h, cx-10, 70, cx+10, 70, cx, 77, bone)
+	fillEllipsePixels(pixels, w, h, cx, 75, 3, 3, socket)
+
+	// Spine — vertical chain of small dark bone segments.
+	for sy := 44; sy < 70; sy += 4 {
+		fillEllipsePixels(pixels, w, h, cx, sy, 2, 2, boneDark)
+		fillEllipsePixels(pixels, w, h, cx, sy-1, 1, 1, bone)
+	}
+
+	// Rib cage — five curved ribs per side, arching from the
+	// spine. Drawn as small ellipses connected by darker shadow.
+	for i, sy := range []int{46, 50, 54, 58, 62} {
+		span := 12 - i // outer ribs reach further than inner
+		fillEllipsePixels(pixels, w, h, cx-span/2, sy, span/2+1, 2, boneDark)
+		fillEllipsePixels(pixels, w, h, cx+span/2, sy, span/2+1, 2, boneDark)
+		fillEllipsePixels(pixels, w, h, cx-span/2, sy, span/2, 1, bone)
+		fillEllipsePixels(pixels, w, h, cx+span/2, sy, span/2, 1, bone)
+	}
+	// Sternum — vertical bone strip along the centerline.
+	fillRectPixels(pixels, w, h, cx-1, 46, 2, 16, boneLight)
+
+	// Clavicle / shoulder bones — horizontal bar above the ribs.
+	drawLinePixels(pixels, w, h, cx-14, 42, cx+14, 42, boneDark, 2)
+	drawLinePixels(pixels, w, h, cx-14, 42, cx+14, 42, bone, 1)
+	// Shoulder joints.
+	fillEllipsePixels(pixels, w, h, cx-14, 42, 3, 3, boneDark)
+	fillEllipsePixels(pixels, w, h, cx+14, 42, 3, 3, boneDark)
+
+	// Arms — humerus + radius/ulna with claw hands. Slightly
+	// outstretched stance.
+	// Left arm.
+	drawLinePixels(pixels, w, h, cx-14, 44, cx-22, 64, boneDark, 3)
+	drawLinePixels(pixels, w, h, cx-14, 44, cx-22, 64, bone, 1)
+	fillEllipsePixels(pixels, w, h, cx-22, 64, 2, 2, boneDark) // elbow
+	drawLinePixels(pixels, w, h, cx-22, 64, cx-26, 82, boneDark, 3)
+	drawLinePixels(pixels, w, h, cx-22, 64, cx-26, 82, bone, 1)
+	// Left claw hand — three finger lines fanning out.
+	drawLinePixels(pixels, w, h, cx-26, 82, cx-30, 88, bone, 1)
+	drawLinePixels(pixels, w, h, cx-26, 82, cx-26, 90, bone, 1)
+	drawLinePixels(pixels, w, h, cx-26, 82, cx-22, 88, bone, 1)
+	// Right arm — mirror, holds a small rusty cleaver.
+	drawLinePixels(pixels, w, h, cx+14, 44, cx+22, 64, boneDark, 3)
+	drawLinePixels(pixels, w, h, cx+14, 44, cx+22, 64, bone, 1)
+	fillEllipsePixels(pixels, w, h, cx+22, 64, 2, 2, boneDark)
+	drawLinePixels(pixels, w, h, cx+22, 64, cx+26, 82, boneDark, 3)
+	drawLinePixels(pixels, w, h, cx+22, 64, cx+26, 82, bone, 1)
+	// Rusty cleaver — small triangle blade jutting from the right hand.
+	fillTrianglePixels(pixels, w, h, cx+26, 82, cx+34, 76, cx+32, 90, rust)
+	fillTrianglePixels(pixels, w, h, cx+26, 82, cx+32, 80, cx+30, 88, rustDark)
+
+	// Skull — slightly wider than tall, with a recessed jaw.
+	fillEllipsePixels(pixels, w, h, cx, 28, 12, 13, boneDark)
+	fillEllipsePixels(pixels, w, h, cx, 26, 10, 11, bone)
+	fillEllipsePixels(pixels, w, h, cx-1, 22, 7, 5, boneLight)
+	// Eye sockets — two deep hollows with glowing red.
+	fillEllipsePixels(pixels, w, h, cx-4, 28, 3, 3, socket)
+	fillEllipsePixels(pixels, w, h, cx+4, 28, 3, 3, socket)
+	fillEllipsePixels(pixels, w, h, cx-4, 28, 1, 1, eyeBright)
+	fillEllipsePixels(pixels, w, h, cx+4, 28, 1, 1, eyeBright)
+	fillEllipsePixels(pixels, w, h, cx-4, 28, 2, 2, color.RGBA{R: eyeGlow.R, G: eyeGlow.G, B: eyeGlow.B, A: 110})
+	fillEllipsePixels(pixels, w, h, cx+4, 28, 2, 2, color.RGBA{R: eyeGlow.R, G: eyeGlow.G, B: eyeGlow.B, A: 110})
+	// Nasal cavity.
+	fillTrianglePixels(pixels, w, h, cx-1, 33, cx+1, 33, cx, 36, socket)
+	// Tooth line — alternating notches at the jaw.
+	for i := 0; i < 6; i++ {
+		px := cx - 5 + i*2
+		fillRectPixels(pixels, w, h, px, 37, 1, 3, socket)
+	}
+	// Jaw crack — a single damage line across the lower skull.
+	drawLinePixels(pixels, w, h, cx-6, 35, cx+2, 37, socket, 1)
+
+	// Per-pixel dither — denser than the soft creatures so bone
+	// reads as a brittle, pitted surface.
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			i := y*w + x
+			if pixels[i].A == 0 {
+				continue
+			}
+			if hashByteXY(x, y)%7 == 0 {
+				pixels[i] = adjust(pixels[i], -12)
 			}
 		}
 	}
@@ -1274,7 +2005,7 @@ func makePartyPixels(w, h int, class core.PartyClass) []color.RGBA {
 			if pixels[i].A == 0 {
 				continue
 			}
-			if hash2(x+presentation.textureSeed*17, y)%9 == 0 {
+			if hashByteXY(x+presentation.textureSeed*17, y)%9 == 0 {
 				pixels[i] = adjust(pixels[i], -10)
 			}
 		}
@@ -1367,12 +2098,16 @@ func drawLinePixels(pixels []color.RGBA, w, h, x0, y0, x1, y1 int, col color.RGB
 	}
 }
 
-func hash2(x, y int) int {
+// hashByteXY is hashXY masked to a byte, suitable for "% N" style
+// bucketing in pixel-painting loops. Lives next to its callers so the
+// per-byte intent is local; deeper hash callers (world.go's tile-yaw /
+// floor-variant selectors) use hashXY directly with their own masks.
+func hashByteXY(x, y int) int {
 	return int(hashXY(x, y) & 0xff)
 }
 
 func jitter(c color.RGBA, x, y, amount int) color.RGBA {
-	return adjust(c, hash2(x, y)%(amount*2+1)-amount)
+	return adjust(c, hashByteXY(x, y)%(amount*2+1)-amount)
 }
 
 func adjust(c color.RGBA, delta int) color.RGBA {

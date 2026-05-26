@@ -18,7 +18,8 @@
 //	         'A' archway anchor (left), 'a' archway tail (right) — both
 //	         walkable; the arch spans 2 tiles along +X, 'y' lilypad
 //	         (swamp dressing — pure decor, never blocks).
-//	props  : '.' empty, 'T' tree, 'X' tree XL, 'O' boulder,
+//	props  : '.' empty, 'T' tree, 'X' tree XL, '|' tall tree,
+//	         '@' twin trees, '/' young tree, 'O' boulder,
 //	         'B' bush (large), 'C' crate, 'R' barrel, 'U' urn,
 //	         'S' stalagmite, 'P' pillar, 'I' broken pillar,
 //	         'M' statue, 'Q' obelisk, 'F' fountain,
@@ -64,6 +65,11 @@ type MapFile struct {
 	// matching ItemDefinition.Name. Empty list = an empty chest (renders
 	// open by default).
 	Chests []MapChest
+	// CustomEnemies is the author-defined enemy template list. Optional;
+	// older .map files without a `custom_enemies:` section parse with an
+	// empty slice and round-trip back to disk without one. New maps that
+	// define custom enemies emit the section after `doors:`.
+	CustomEnemies []MapCustomEnemy
 	// Doors is the authored door list. Each door names itself, names
 	// its destination map + matching-door name (or "self" for same-map
 	// portals), and records the tile + post-transition facing. The
@@ -119,12 +125,16 @@ type MapDoor struct {
 	Facing     string
 }
 
-// hasTarget mirrors core.DoorSpawn.HasTarget — both predicates ask
-// "does this door name a destination it can actually resolve?". core
-// can't be imported here (cycle), so the rule is duplicated, but the
-// shape stays in sync.
-func (d MapDoor) hasTarget() bool {
-	return d.TargetMap != "" && d.TargetDoor != ""
+// DoorTargetComplete reports whether a door names both halves of a
+// destination. Core door types route through this too so parse-time and
+// runtime checks cannot drift.
+func DoorTargetComplete(targetMap, targetDoor string) bool {
+	return targetMap != "" && targetDoor != ""
+}
+
+// HasTarget reports whether this authored door names a complete destination.
+func (d MapDoor) HasTarget() bool {
+	return DoorTargetComplete(d.TargetMap, d.TargetDoor)
 }
 
 // SelfMapToken is the placeholder TargetMap value for same-map
@@ -133,6 +143,63 @@ func (d MapDoor) hasTarget() bool {
 // rewrites it to the map's own name at load time, so runtime door
 // resolution doesn't need a special case.
 const SelfMapToken = "self"
+
+const (
+	FacingNorthName = "north"
+	FacingEastName  = "east"
+	FacingSouthName = "south"
+	FacingWestName  = "west"
+)
+
+// FacingNames is the canonical on-disk order for facing strings.
+var FacingNames = [...]string{
+	FacingNorthName,
+	FacingEastName,
+	FacingSouthName,
+	FacingWestName,
+}
+
+// Ext is the canonical on-disk extension for map files. Lives in
+// mapfile (the I/O package) so core can't import it as a string
+// literal anywhere — `core.MapPath`, the editor's Save As preview,
+// and List/ListByModTime all reference this constant so a future
+// rename to ".mapv2" is a one-line change.
+const Ext = ".map"
+
+// MapCustomEnemy is one author-defined enemy template in the on-disk
+// format. Fields are positional whitespace-separated on a single line:
+//
+//	<name> <base_kind> <hp> <mp> <str> <dex> <int> <wis> <vit> <spd> <armor> <xp> <tier> <dmg> <sklch> <spwr> <skills>
+//
+// Skills is `-` for none or a comma-separated list of skill names
+// ("firebolt,sleep"). BaseKind is the on-disk enemy name ("rat",
+// "goblin_mage") whose sprite + flavor strings the custom enemy
+// reuses. Loader resolves both name registries via the core package.
+type MapCustomEnemy struct {
+	Name            string
+	BaseKind        string
+	HP              int
+	MP              int
+	STR             int
+	DEX             int
+	INT             int
+	WIS             int
+	VIT             int
+	SPD             int
+	Armor           int
+	XPValue         int
+	Tier            int
+	AttackDamage    int
+	SkillCastChance float64
+	SpellPower      int
+	Skills          []string
+}
+
+// customEnemyNoSkillsToken is the single-field placeholder for a
+// custom enemy with no skills. Mirrors emptyChestToken — keeps the
+// row well-formed at 17 whitespace-separated fields without inventing
+// an empty-column syntax.
+const customEnemyNoSkillsToken = "-"
 
 // layerSlot is the parser's notion of "which grid is the upcoming N rows
 // going into." Lets the section dispatch share one collection loop.
@@ -148,6 +215,7 @@ const (
 	slotEnemies
 	slotChests
 	slotDoors
+	slotCustomEnemies
 )
 
 // Parse reads a .map file from r. Errors pinpoint the first malformed line.
@@ -168,11 +236,19 @@ func Parse(r io.Reader) (MapFile, error) {
 			continue
 		}
 
+		// Blank lines are universally skipped — every section parser
+		// used to open with the same trim+blank dance. Lifted here so
+		// "did I remember to skip blanks?" is no longer a per-section
+		// concern. NOT skipping `#`-prefixed lines because the wall
+		// glyph IS `#` — a comment convention would collide with
+		// content. If a comment syntax becomes needed later, pick a
+		// prefix that can't appear at column 0 of any layer row.
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+
 		if state == slotNone {
-			line := strings.TrimSpace(raw)
-			if line == "" {
-				continue
-			}
 			if err := parseHeaderLine(&mf, line, lineNo); err != nil {
 				return mf, err
 			}
@@ -180,10 +256,6 @@ func Parse(r io.Reader) (MapFile, error) {
 		}
 
 		if state == slotEnemies {
-			line := strings.TrimSpace(raw)
-			if line == "" {
-				continue
-			}
 			fields := strings.Fields(line)
 			if len(fields) != 3 {
 				return mf, fmt.Errorf("line %d: expected '<kind[,kind...]> <x> <z>', got %q", lineNo, raw)
@@ -209,10 +281,6 @@ func Parse(r io.Reader) (MapFile, error) {
 		}
 
 		if state == slotDoors {
-			line := strings.TrimSpace(raw)
-			if line == "" {
-				continue
-			}
 			fields := strings.Fields(line)
 			if len(fields) != 6 {
 				return mf, fmt.Errorf("line %d: expected '<name> <target_map> <target_door> <x> <z> <facing>', got %q", lineNo, raw)
@@ -226,7 +294,7 @@ func Parse(r io.Reader) (MapFile, error) {
 				return mf, err
 			}
 			face := strings.ToLower(fields[5])
-			if !isFacingName(face) {
+			if !IsFacingName(face) {
 				return mf, fmt.Errorf("line %d: door facing must be north/east/south/west, got %q", lineNo, fields[5])
 			}
 			mf.Doors = append(mf.Doors, MapDoor{
@@ -241,10 +309,6 @@ func Parse(r io.Reader) (MapFile, error) {
 		}
 
 		if state == slotChests {
-			line := strings.TrimSpace(raw)
-			if line == "" {
-				continue
-			}
 			// Chest row: "itemname[,itemname...] X Z" or "(empty) X Z" for
 			// a no-loot chest. Item names use the canonical
 			// ItemDefinition.Name strings (e.g. "Morsel of Cheese") so the
@@ -279,6 +343,15 @@ func Parse(r io.Reader) (MapFile, error) {
 				}
 			}
 			mf.Chests = append(mf.Chests, MapChest{Items: items, X: x, Z: z})
+			continue
+		}
+
+		if state == slotCustomEnemies {
+			ce, err := parseCustomEnemyLine(line, lineNo)
+			if err != nil {
+				return mf, err
+			}
+			mf.CustomEnemies = append(mf.CustomEnemies, ce)
 			continue
 		}
 
@@ -326,6 +399,8 @@ func sectionFor(raw string) (layerSlot, bool) {
 		return slotChests, true
 	case "doors:":
 		return slotDoors, true
+	case "custom_enemies:":
+		return slotCustomEnemies, true
 	}
 	return slotNone, false
 }
@@ -447,7 +522,7 @@ func (mf *MapFile) validate() error {
 		if d.Name == "" {
 			return fmt.Errorf("door at (%d,%d) has empty name", d.X, d.Z)
 		}
-		if !d.hasTarget() {
+		if !d.HasTarget() {
 			return fmt.Errorf("door %q at (%d,%d) missing target_map/target_door", d.Name, d.X, d.Z)
 		}
 		if _, dup := seenNames[d.Name]; dup {
@@ -490,22 +565,19 @@ func parseStart(val string) (int, int, string, error) {
 		return 0, 0, "", fmt.Errorf("start coordinates must be integers, got %q", val)
 	}
 	face := strings.ToLower(fields[2])
-	if !isFacingName(face) {
+	if !IsFacingName(face) {
 		return 0, 0, "", fmt.Errorf("start facing must be north/east/south/west, got %q", fields[2])
 	}
 	return x, z, face, nil
 }
 
-// isFacingName reports whether s is one of the four canonical facing
-// strings. The core package owns the canonical registry but importing
-// it from here would create a cycle (core imports mapfile via
-// AreaFromMapFile), so the four-name allowlist is duplicated locally —
-// both validation call sites within this file now route through this
-// one helper instead of inlining the switch.
-func isFacingName(s string) bool {
-	switch s {
-	case "north", "east", "south", "west":
-		return true
+// IsFacingName reports whether s is one of the four canonical facing
+// strings.
+func IsFacingName(s string) bool {
+	for _, name := range FacingNames {
+		if s == name {
+			return true
+		}
 	}
 	return false
 }
@@ -521,6 +593,67 @@ func parseIntField(s, name string, lineNo int) (int, error) {
 		return 0, fmt.Errorf("line %d: bad %s %q", lineNo, name, s)
 	}
 	return v, nil
+}
+
+// customEnemyFieldCount is the positional column count for a custom-
+// enemy row. Bumping the schema (adding a new stat column) is a single
+// edit here plus a matching parse/encode pair.
+const customEnemyFieldCount = 17
+
+// parseCustomEnemyLine decodes a single positional row from the
+// `custom_enemies:` section. Field order documented on MapCustomEnemy.
+// Returns the wrap-style "line N: bad <field> %q" error every row
+// decoder uses so the error report stays uniform.
+func parseCustomEnemyLine(line string, lineNo int) (MapCustomEnemy, error) {
+	fields := strings.Fields(line)
+	if len(fields) != customEnemyFieldCount {
+		return MapCustomEnemy{}, fmt.Errorf("line %d: custom enemy expects %d fields, got %d", lineNo, customEnemyFieldCount, len(fields))
+	}
+	ce := MapCustomEnemy{
+		Name:     fields[0],
+		BaseKind: fields[1],
+	}
+	intFields := []struct {
+		dst  *int
+		raw  string
+		name string
+	}{
+		{&ce.HP, fields[2], "hp"},
+		{&ce.MP, fields[3], "mp"},
+		{&ce.STR, fields[4], "str"},
+		{&ce.DEX, fields[5], "dex"},
+		{&ce.INT, fields[6], "int"},
+		{&ce.WIS, fields[7], "wis"},
+		{&ce.VIT, fields[8], "vit"},
+		{&ce.SPD, fields[9], "spd"},
+		{&ce.Armor, fields[10], "armor"},
+		{&ce.XPValue, fields[11], "xp"},
+		{&ce.Tier, fields[12], "tier"},
+		{&ce.AttackDamage, fields[13], "dmg"},
+		{&ce.SpellPower, fields[15], "spwr"},
+	}
+	for _, f := range intFields {
+		v, err := parseIntField(f.raw, "custom enemy "+f.name, lineNo)
+		if err != nil {
+			return MapCustomEnemy{}, err
+		}
+		*f.dst = v
+	}
+	chance, err := strconv.ParseFloat(fields[14], 64)
+	if err != nil {
+		return MapCustomEnemy{}, fmt.Errorf("line %d: bad custom enemy sklch %q", lineNo, fields[14])
+	}
+	ce.SkillCastChance = chance
+	if fields[16] != customEnemyNoSkillsToken {
+		for _, name := range strings.Split(fields[16], ",") {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				return MapCustomEnemy{}, fmt.Errorf("line %d: empty custom enemy skill entry", lineNo)
+			}
+			ce.Skills = append(ce.Skills, name)
+		}
+	}
+	return ce, nil
 }
 
 // Encode writes mf in the canonical .map format. Layers are emitted in a
@@ -573,7 +706,41 @@ func (mf MapFile) Encode(w io.Writer) error {
 	if len(mf.Doors) > 0 {
 		fmt.Fprintln(bw, "doors:")
 		for _, d := range mf.Doors {
+			// Refuse to write a half-populated door (one of
+			// TargetMap/TargetDoor set, the other empty). The
+			// encoder would emit a 5-field row that the parser
+			// rejects on the next load — fail here at the save
+			// boundary with a useful message so the editor can
+			// surface the broken authoring before it's committed
+			// to disk. MapDoor.HasTarget encodes the "both set"
+			// rule, and an unauthored door (both empty) is also
+			// legal — only the asymmetric case is rejected.
+			haveMap := d.TargetMap != ""
+			haveDoor := d.TargetDoor != ""
+			if haveMap != haveDoor {
+				return fmt.Errorf("door %q has asymmetric target (map=%q, door=%q); both must be set or both empty", d.Name, d.TargetMap, d.TargetDoor)
+			}
 			fmt.Fprintf(bw, "%s %s %s %d %d %s\n", d.Name, d.TargetMap, d.TargetDoor, d.X, d.Z, d.Facing)
+		}
+	}
+	// custom_enemies: emits only when present so older maps stay
+	// byte-identical. Order documented on MapCustomEnemy and matches
+	// parseCustomEnemyLine's positional decode.
+	if len(mf.CustomEnemies) > 0 {
+		fmt.Fprintln(bw, "custom_enemies:")
+		for _, ce := range mf.CustomEnemies {
+			skills := customEnemyNoSkillsToken
+			if len(ce.Skills) > 0 {
+				skills = strings.Join(ce.Skills, ",")
+			}
+			fmt.Fprintf(bw, "%s %s %d %d %d %d %d %d %d %d %d %d %d %d %g %d %s\n",
+				ce.Name, ce.BaseKind,
+				ce.HP, ce.MP,
+				ce.STR, ce.DEX, ce.INT, ce.WIS, ce.VIT, ce.SPD,
+				ce.Armor, ce.XPValue, ce.Tier, ce.AttackDamage,
+				ce.SkillCastChance, ce.SpellPower,
+				skills,
+			)
 		}
 	}
 	return bw.Flush()
@@ -626,7 +793,7 @@ func List(dir string) ([]string, error) {
 		if e.IsDir() {
 			continue
 		}
-		if !strings.HasSuffix(strings.ToLower(e.Name()), ".map") {
+		if !strings.HasSuffix(strings.ToLower(e.Name()), Ext) {
 			continue
 		}
 		out = append(out, filepath.Join(dir, e.Name()))
@@ -656,7 +823,7 @@ func ListByModTime(dir string) ([]string, error) {
 		if e.IsDir() {
 			continue
 		}
-		if !strings.HasSuffix(strings.ToLower(e.Name()), ".map") {
+		if !strings.HasSuffix(strings.ToLower(e.Name()), Ext) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())

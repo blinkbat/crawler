@@ -21,14 +21,12 @@ import (
 // as forwarding wrappers so the editor and other callers don't have
 // to know about the userconfig split.
 
-// SoundsDir is the legacy alias for userconfig.SoundsDir, kept for
-// callers that already imported audio. New callers should prefer the
-// userconfig path directly.
-func SoundsDir() string { return userconfig.SoundsDir() }
-
 // UserSoundPath, ListUserSounds, SaveUserSound, DeleteUserSound are
-// kept as the audio-package surface for backwards compatibility — they
-// forward to userconfig's equivalents.
+// kept as the audio-package surface for the editor's sound-modal
+// callers, which already import this package for raylib-bound APIs
+// (Play, PreviewPCM, etc.) and would otherwise need a second import
+// just for the path/list/save/delete helpers. They forward to
+// userconfig's equivalents — pure pass-through, no extra logic.
 func UserSoundPath(name string) string { return userconfig.SoundPath(name) }
 func ListUserSounds() []string         { return userconfig.ListSounds() }
 func SaveUserSound(name string, pcm []int16) (string, error) {
@@ -37,30 +35,30 @@ func SaveUserSound(name string, pcm []int16) (string, error) {
 func DeleteUserSound(name string) error { return userconfig.DeleteSound(name) }
 
 // soundIDByName maps the canonical slug ("input_hit") to its Sound enum
-// value. Derived from soundMeta at init so adding a new Sound enum entry
-// (with its row in soundMeta) automatically picks up here too — no
-// parallel table to keep in lockstep.
+// value. Derived from soundCues at init so adding a new Sound enum
+// entry automatically picks up here too — no parallel table to keep
+// in lockstep.
 var soundIDByName = buildSoundIDByName()
 
 func buildSoundIDByName() map[string]Sound {
-	m := make(map[string]Sound, len(soundMeta))
-	for i, meta := range soundMeta {
-		if meta.Canonical == "" {
+	m := make(map[string]Sound, len(soundCues))
+	for i, cue := range soundCues {
+		if cue.Canonical == "" {
 			continue
 		}
-		m[meta.Canonical] = Sound(i)
+		m[cue.Canonical] = Sound(i)
 	}
 	return m
 }
 
 // SoundCanonicalName returns the assignments-file key for a built-in
-// cue. Reads directly from soundMeta — the canonical slug for
+// cue. Reads directly from soundCues — the canonical slug for
 // SoundInputHit is "input_hit", etc. Out-of-range values return "".
 func SoundCanonicalName(s Sound) string {
 	if s < 0 || s >= soundCount {
 		return ""
 	}
-	return soundMeta[s].Canonical
+	return soundCues[s].Canonical
 }
 
 // AssignUserSound points the built-in `cue` at the named user .wav so
@@ -113,7 +111,7 @@ func CurrentAssignment(cue Sound) string {
 //
 // Returns a list of canonical cue slugs whose assignment FAILED to load
 // — caller can surface these so the editor knows which assignments
-// silently fell back to the previous bank entry. Empty slice = all
+// fall back to their procedural defaults. Empty slice = all
 // assignments succeeded.
 //
 // If the audio device isn't ready (Init never ran or failed), this
@@ -124,29 +122,36 @@ func ReloadUserAssignments() (failed []string, err error) {
 		return nil, nil
 	}
 	assigns := userconfig.LoadAssignments()
-	for cueName, userName := range assigns {
-		cue, ok := soundIDByName[cueName]
-		if !ok {
-			failed = append(failed, cueName)
+	for cue := Sound(0); cue < soundCount; cue++ {
+		cueRow := soundCues[cue]
+		if cueRow.Canonical == "" {
 			continue
 		}
-		path := UserSoundPath(userName)
-		data, ierr := os.ReadFile(path)
-		if ierr != nil {
-			// Track the failure so the caller can flash a warning; the
-			// cue keeps its current bank entry (procedural default or
-			// the previous successful user assignment).
-			failed = append(failed, cueName)
-			continue
+		userName := assigns[cueRow.Canonical]
+		assigned := userName != ""
+		if userName == "" {
+			userName = cueRow.Canonical
 		}
-		// Replace the slot. UnloadSound on the old entry first so its
-		// raylib-side buffer doesn't leak; bytesToSound creates a fresh
-		// handle from the file bytes.
-		newSound := bytesToSound(data)
+		newSound := rl.Sound{}
+		if data, ierr := os.ReadFile(UserSoundPath(userName)); ierr == nil {
+			newSound = bytesToSound(data)
+		} else {
+			if assigned {
+				failed = append(failed, cueRow.Canonical)
+			}
+			if cueRow.PCM != nil {
+				newSound = pcmToSound(cueRow.PCM())
+			}
+		}
 		if bank[cue].Stream.Buffer != nil {
 			rl.UnloadSound(bank[cue])
 		}
 		bank[cue] = newSound
+	}
+	for cueName := range assigns {
+		if _, ok := soundIDByName[cueName]; !ok {
+			failed = append(failed, cueName)
+		}
 	}
 	return failed, nil
 }
@@ -155,6 +160,30 @@ func ReloadUserAssignments() (failed []string, err error) {
 // without importing wavsynth directly. Pure passthrough.
 func SynthSweep(duration, startHz, endHz, volume, attack, release float64) []int16 {
 	return wavsynth.SynthSweep(duration, startHz, endHz, volume, attack, release)
+}
+
+// WaveShape and the four WaveX constants are re-exported so the
+// sound editor doesn't have to import wavsynth alongside audio just
+// to name a value type. SynthShape is the rich-knob variant of
+// SynthSweep — wave shape, noise mix, vibrato — fed by the
+// editor's expanded slider list.
+type WaveShape = wavsynth.WaveShape
+
+const (
+	WaveSine     = wavsynth.WaveSine
+	WaveSquare   = wavsynth.WaveSquare
+	WaveTriangle = wavsynth.WaveTriangle
+	WaveSaw      = wavsynth.WaveSaw
+)
+
+func WaveShapeName(w WaveShape) string { return wavsynth.WaveShapeName(w) }
+
+// SynthShape exposes the rich procedural sweep primitive to non-
+// wavsynth callers. Forwards verbatim.
+func SynthShape(duration, startHz, endHz, volume, attack, release float64,
+	wave WaveShape, noiseMix, vibHz, vibDepth float64) []int16 {
+	return wavsynth.SynthShape(duration, startHz, endHz, volume, attack, release,
+		wave, noiseMix, vibHz, vibDepth)
 }
 
 // previewRingSize bounds the in-flight preview clips. Sized at 4 because

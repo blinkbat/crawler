@@ -1,0 +1,8 @@
+# Cue assignments: <cue_name>=<user_sound_name>
+# Removing a line reverts the cue to its procedural default.
+enemy_death=enemy_death
+enemy_hit=enemy_hit
+heal=heal
+input_great=input_great
+input_hit=input_hit
+input_miss=input_miss

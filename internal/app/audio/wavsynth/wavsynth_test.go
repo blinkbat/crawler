@@ -149,3 +149,87 @@ func TestSynthChime_TotalIsTwoNotes(t *testing.T) {
 			len(pcm), want, perNote)
 	}
 }
+
+// TestSynthShape_SineMatchesSynthSweep asserts that SynthShape with
+// the default flags (WaveSine, no noise, no vibrato) produces
+// byte-identical output to the legacy SynthSweep wrapper. SynthSweep
+// is implemented as a thin call into SynthShape, so any drift means
+// the wrapper layer added a bug.
+func TestSynthShape_SineMatchesSynthSweep(t *testing.T) {
+	duration, startHz, endHz, vol, atk, rel := 0.08, 440.0, 880.0, 0.20, 0.01, 0.04
+	a := SynthSweep(duration, startHz, endHz, vol, atk, rel)
+	b := SynthShape(duration, startHz, endHz, vol, atk, rel, WaveSine, 0, 0, 0)
+	if len(a) != len(b) {
+		t.Fatalf("length drift: SynthSweep=%d, SynthShape(sine)=%d", len(a), len(b))
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			t.Fatalf("sample %d differs: SynthSweep=%d, SynthShape(sine)=%d", i, a[i], b[i])
+		}
+	}
+}
+
+// TestSynthShape_SquareValuesAreBinary asserts that the square wave
+// path emits only two amplitude poles (modulo the ADSR envelope and
+// clipping). Picks samples from the middle of the bar so the
+// attack/release ramps don't dilute the check.
+func TestSynthShape_SquareValuesAreBinary(t *testing.T) {
+	pcm := SynthShape(0.10, 440, 440, 0.5, 0, 0, WaveSquare, 0, 0, 0)
+	if len(pcm) == 0 {
+		t.Fatal("empty PCM")
+	}
+	// Constant freq + no attack/release + square wave should yield
+	// samples that are exactly ±(0.5 * 32767) = ±16383 (after the
+	// ClampToInt16 floor takes care of the math).
+	wantPos := ClampToInt16(0.5)
+	wantNeg := ClampToInt16(-0.5)
+	for i, s := range pcm {
+		if s != wantPos && s != wantNeg {
+			t.Fatalf("sample %d = %d, expected ±%d for square wave", i, s, wantPos)
+		}
+	}
+}
+
+// TestSynthShape_NoiseProducesVariance asserts the noise-mix path
+// actually shifts the output away from the tonal baseline. Pure
+// sine at constant frequency repeats every sample-period; layering
+// noise should make consecutive samples differ across the wave's
+// natural period.
+func TestSynthShape_NoiseProducesVariance(t *testing.T) {
+	tone := SynthShape(0.05, 440, 440, 0.4, 0, 0, WaveSine, 0, 0, 0)
+	noisy := SynthShape(0.05, 440, 440, 0.4, 0, 0, WaveSine, 1.0, 0, 0)
+	if len(tone) != len(noisy) {
+		t.Fatalf("length mismatch: tone=%d, noisy=%d", len(tone), len(noisy))
+	}
+	diffs := 0
+	for i := range tone {
+		if tone[i] != noisy[i] {
+			diffs++
+		}
+	}
+	if diffs < len(tone)/2 {
+		t.Fatalf("expected noise to perturb majority of samples, got %d diffs of %d", diffs, len(tone))
+	}
+}
+
+// TestSynthShape_VibratoModulatesFrequency asserts that turning
+// vibrato on produces output that differs from the non-vibrato
+// baseline at the same base frequency. Vibrato is a phase-
+// integrated FM, so even at low depths a few samples in the bar
+// should differ.
+func TestSynthShape_VibratoModulatesFrequency(t *testing.T) {
+	plain := SynthShape(0.10, 440, 440, 0.3, 0, 0, WaveSine, 0, 0, 0)
+	vibrato := SynthShape(0.10, 440, 440, 0.3, 0, 0, WaveSine, 0, 8, 0.10)
+	if len(plain) != len(vibrato) {
+		t.Fatalf("length mismatch: plain=%d, vibrato=%d", len(plain), len(vibrato))
+	}
+	diffs := 0
+	for i := range plain {
+		if plain[i] != vibrato[i] {
+			diffs++
+		}
+	}
+	if diffs == 0 {
+		t.Fatalf("vibrato should perturb output but plain and vibrato PCM matched sample-for-sample")
+	}
+}

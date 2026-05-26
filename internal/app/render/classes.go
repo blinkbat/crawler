@@ -41,16 +41,26 @@ var partyClassPresentations = map[core.PartyClass]partyClassPresentation{
 	},
 }
 
+// init asserts every core.PartyClass has a partyClassPresentations
+// entry — mirrors the panic-at-init pattern AGENTS.md documents for
+// the skill handler / tile label / prop coverage tables. Adding a
+// PartyClass without registering its presentation now panics at
+// startup instead of silently rendering a default sprite with the
+// wrong turn color.
+func init() {
+	for _, def := range core.PartyClasses() {
+		if _, ok := partyClassPresentations[def.Class]; !ok {
+			panic("render: party class " + def.Name + " is missing a partyClassPresentations entry")
+		}
+	}
+}
+
 func partyClassPresentationFor(class core.PartyClass) partyClassPresentation {
-	if presentation, ok := partyClassPresentations[class]; ok {
-		return presentation
+	presentation, ok := partyClassPresentations[class]
+	if !ok {
+		panic("render: partyClassPresentationFor called with unregistered class — init guard should have caught this at startup")
 	}
-	return partyClassPresentation{
-		turnColor:   color.RGBA{R: 245, G: 245, B: 245, A: 255},
-		textureSeed: 0,
-		drawPixels:  drawDefaultPartyPixels,
-		dance:       defaultVictoryDance,
-	}
+	return presentation
 }
 
 func drawWarriorPartyPixels(pixels []color.RGBA, w, h int) {
@@ -114,11 +124,6 @@ func drawWizardPartyPixels(pixels []color.RGBA, w, h int) {
 	drawLinePixels(pixels, w, h, 25, 24, 42, 24, trim, 1)
 }
 
-func drawDefaultPartyPixels(pixels []color.RGBA, w, h int) {
-	fillRectPixels(pixels, w, h, 18, 36, 28, 30, color.RGBA{R: 110, G: 110, B: 120, A: 255})
-	fillEllipsePixels(pixels, w, h, 32, 24, 14, 14, color.RGBA{R: 90, G: 70, B: 55, A: 255})
-}
-
 func warriorVictoryDance(elapsed float32) (float32, float32, float32, float32) {
 	height := danceBounce(elapsed, 1.55, 0) * 0.075
 	return danceWave(elapsed, 0.78, 0) * 0.02, danceWave(elapsed, 1.55, math.Pi/2) * 0.016, height, 1 + height*0.045
@@ -137,11 +142,6 @@ func thiefVictoryDance(elapsed float32) (float32, float32, float32, float32) {
 func wizardVictoryDance(elapsed float32) (float32, float32, float32, float32) {
 	floatBob := danceWave(elapsed, 0.72, math.Pi/3)
 	return danceWave(elapsed, 0.58, math.Pi/2) * 0.035, danceWave(elapsed, 0.7, 0) * 0.026, 0.055 + floatBob*0.026, 1 + floatBob*0.014
-}
-
-func defaultVictoryDance(elapsed float32) (float32, float32, float32, float32) {
-	height := danceBounce(elapsed, 1.2, 0) * 0.045
-	return danceWave(elapsed, 1, 0) * 0.03, 0, height, 1
 }
 
 func danceWave(elapsed float32, freq, phase float64) float32 {

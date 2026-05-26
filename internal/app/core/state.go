@@ -2,6 +2,7 @@ package core
 
 import (
 	"math/rand"
+	"slices"
 	"time"
 )
 
@@ -44,6 +45,11 @@ func NewGameState(area AreaDefinition) GameState {
 	for z := range visited {
 		visited[z] = make([]bool, area.Width)
 	}
+	// Seed the start tile's 3×3 fog-of-war window so the player
+	// doesn't spawn standing in a single-tile pinhole — the map
+	// should reflect what they'd "see" from their starting position.
+	// RevealRadius needs a *GameState so we build the grid first,
+	// reveal after the struct's assembled.
 	if area.InBounds(startX, startZ) {
 		visited[startZ][startX] = true
 	}
@@ -72,6 +78,7 @@ func NewGameState(area AreaDefinition) GameState {
 		// Rand here instead.
 		RNG: rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
+	RevealRadius(&g, startX, startZ, SightRadius)
 	return g
 }
 
@@ -108,12 +115,7 @@ func placeDoors(a AreaDefinition) []Door {
 // when no door is there. Mirrors ChestIndexAt. Used by the explore
 // movement loop on every step-land to detect "stepped onto a door."
 func DoorIndexAt(doors []Door, x, z int) int {
-	for i, d := range doors {
-		if d.TileX == x && d.TileZ == z {
-			return i
-		}
-	}
-	return -1
+	return slices.IndexFunc(doors, func(d Door) bool { return d.TileX == x && d.TileZ == z })
 }
 
 // DoorByName returns the door with the given name from the slice, or
@@ -161,13 +163,34 @@ func placeChests(a AreaDefinition) []Chest {
 }
 
 // ResetGameState rebuilds the world for the same area — used on loss recovery
-// (Press Enter after a wipe) and on the in-menu Restart action. Inventory is
-// preserved across the reset so stolen loot survives a recoverable wipe;
-// only the field/battle state is rewound. Use NewGameState for a full reset.
+// (Press Enter after a wipe) and on the in-menu Restart action. Inventory and
+// party progression are preserved, while battle statuses and HP/MP are reset
+// so recovery cannot strand the player with an already-defeated party. Use
+// NewGameState for a full reset.
 func ResetGameState(g *GameState) {
-	saved := g.Inventory
+	savedInventory := g.Inventory
+	savedParty := resetPartyForFieldRecovery(g.Party)
 	*g = NewGameState(g.Area)
-	g.Inventory = saved
+	g.Inventory = savedInventory
+	g.Party = savedParty
+}
+
+func resetPartyForFieldRecovery(party []PartyMember) []PartyMember {
+	out := make([]PartyMember, len(party))
+	copy(out, party)
+	for i := range out {
+		out[i].HP = out[i].MaxHP
+		out[i].MP = out[i].MaxMP
+		out[i].AttackBump = 0
+		out[i].DamageFlash = 0
+		out[i].Defending = false
+		out[i].PoisonTurns = 0
+		out[i].SleepTurns = 0
+		out[i].StunTurns = 0
+		out[i].Ingested = false
+		out[i].IngestedBy = -1
+	}
+	return out
 }
 
 func NewParty() []PartyMember {

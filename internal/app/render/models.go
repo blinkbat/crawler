@@ -4,6 +4,8 @@ import (
 	"image/color"
 	"math"
 
+	"crawler/internal/app/core"
+
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
@@ -74,8 +76,12 @@ const (
 
 func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 	models := []rl.Model{
-		treeMeshRoot:         rl.LoadModelFromMesh(rl.GenMeshCylinder(0.32, 0.18, 10)),
-		treeMeshTrunk:        rl.LoadModelFromMesh(rl.GenMeshCylinder(0.18, 1.55, 12)),
+		treeMeshRoot: rl.LoadModelFromMesh(rl.GenMeshCylinder(0.32, 0.18, 10)),
+		// Trunk lengthened from 1.55 → 2.55 so the silhouette reads as
+		// a grown tree rather than a stubby shrub. Canopy offsets below
+		// were lifted to match (canopy lumps sit on top of the trunk,
+		// not floating mid-trunk).
+		treeMeshTrunk:        rl.LoadModelFromMesh(rl.GenMeshCylinder(0.18, 2.55, 12)),
 		treeMeshCanopyLow:    rl.LoadModelFromMesh(rl.GenMeshSphere(0.92, 12, 16)),
 		treeMeshCanopyHigh:   rl.LoadModelFromMesh(rl.GenMeshSphere(0.78, 12, 16)),
 		treeMeshCanopySide:   rl.LoadModelFromMesh(rl.GenMeshSphere(0.55, 10, 14)),
@@ -95,17 +101,23 @@ func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 	leafDeep := color.RGBA{R: 132, G: 182, B: 138, A: 255}
 	leafGold := color.RGBA{R: 222, G: 232, B: 174, A: 255}
 
+	// Trunk parts list — note the legacy treeMeshRoot flare is NOT
+	// listed. It read as a wooden donut sitting on the ground around
+	// every trunk and was distracting; the trunk cylinder sits on the
+	// ground on its own now. The root mesh stays in `models` so the
+	// model handle isn't orphaned (Unload still walks every entry) and
+	// so prop authors who want a flared base later can re-add a part
+	// referencing treeMeshRoot without changing the loader.
 	return treeModel{
 		models: models,
 		parts: []treePart{
-			{modelIdx: treeMeshRoot, offset: rl.NewVector3(0, 0.04, 0), scale: rl.NewVector3(1, 1, 1), tint: rl.White},
 			{modelIdx: treeMeshTrunk, offset: rl.NewVector3(0, 0.06, 0), scale: rl.NewVector3(1, 1, 1), tint: rl.White},
-			{modelIdx: treeMeshCanopyLow, offset: rl.NewVector3(0, 1.55, 0), scale: rl.NewVector3(1, 0.95, 1), tint: leafMid},
-			{modelIdx: treeMeshCanopyHigh, offset: rl.NewVector3(-0.05, 2.05, 0.05), scale: rl.NewVector3(1, 1, 1), tint: leafBase},
-			{modelIdx: treeMeshCanopySide, offset: rl.NewVector3(0.42, 1.78, 0.16), scale: rl.NewVector3(1, 1, 1), tint: leafDeep},
-			{modelIdx: treeMeshCanopySide, offset: rl.NewVector3(-0.38, 1.62, -0.14), scale: rl.NewVector3(1, 1, 1), tint: leafMid},
-			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(0.22, 2.32, -0.18), scale: rl.NewVector3(1, 1, 1), tint: leafGold},
-			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(-0.18, 2.18, 0.22), scale: rl.NewVector3(1, 1, 1), tint: leafBase},
+			{modelIdx: treeMeshCanopyLow, offset: rl.NewVector3(0, 2.55, 0), scale: rl.NewVector3(1, 0.95, 1), tint: leafMid},
+			{modelIdx: treeMeshCanopyHigh, offset: rl.NewVector3(-0.05, 3.05, 0.05), scale: rl.NewVector3(1, 1, 1), tint: leafBase},
+			{modelIdx: treeMeshCanopySide, offset: rl.NewVector3(0.42, 2.78, 0.16), scale: rl.NewVector3(1, 1, 1), tint: leafDeep},
+			{modelIdx: treeMeshCanopySide, offset: rl.NewVector3(-0.38, 2.62, -0.14), scale: rl.NewVector3(1, 1, 1), tint: leafMid},
+			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(0.22, 3.32, -0.18), scale: rl.NewVector3(1, 1, 1), tint: leafGold},
+			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(-0.18, 3.18, 0.22), scale: rl.NewVector3(1, 1, 1), tint: leafBase},
 		},
 	}
 }
@@ -132,6 +144,125 @@ func (t treeModel) draw(center rl.Vector3, scale, yaw float32) {
 			rotation += yaw
 		}
 		rl.DrawModelEx(t.models[part.modelIdx], position, partRotationAxis(part), rotation, drawScale, part.tint)
+	}
+}
+
+// drawVaried renders the tree with per-tile shape variance seeded from
+// `seed` so a grove of identical-char tiles no longer stamps the same
+// silhouette across the field. Variance is bounded so the difference
+// reads as "this tree grew a little differently" — not "this is a
+// different species" — and stays inside the tile footprint:
+//
+//   - Overall scale walks ±10% off `scale`.
+//   - Canopy parts get an independent per-part scale jitter (±14% per
+//     axis) plus a small horizontal nudge so foliage lumps sit in
+//     different relative positions tree-to-tree.
+//   - Each canopy lump's tint walks ±14 in R/G/B (alpha preserved) so
+//     leaf color shifts per tile without authoring extra materials.
+//   - One side-canopy lump is dropped at random (~25%) so some trees
+//     read fuller and others sparser.
+//   - Trunk parts ride the overall scale jitter only — kept plumb so
+//     they read as varied, not broken.
+//
+// seed==0 still produces deterministic output, so callers that don't
+// care about per-tile variance can pass 0 and get a stable tree. The
+// legacy treeModel.draw is preserved for menu/title/preview call sites
+// that aren't tile-positioned.
+func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32) {
+	if scale <= 0 {
+		scale = 1
+	}
+	// Mix once so per-byte slices below are decorrelated even when
+	// neighboring tiles' seeds differ by only a few bits.
+	mix := seed*2654435761 ^ 0xC2B2AE3D
+	mix ^= mix >> 16
+	mix *= 0x85EBCA6B
+	mix ^= mix >> 13
+	frac := func(b byte) float32 { return (float32(int(b)) - 128) / 128 }
+
+	overall := scale * (1 + frac(byte(mix))*0.10)
+	// Height-only stretch: independent of overall scale so some trees
+	// read as noticeably taller / shorter than their neighbors even
+	// when the trunk girth is similar. Range ±28% — wide enough to be
+	// readable from the player's POV but bounded so a stretched canopy
+	// doesn't punch through the ceiling on indoor maps.
+	heightStretch := 1 + frac(byte(mix>>4))*0.28
+
+	// Drop one side-canopy lump ~25% of the time. dropIdx == -1 means
+	// "draw everything." Walks parts to locate side canopies so this
+	// rule survives part-list reshuffles in loadTreeModel.
+	dropIdx := -1
+	if byte(mix>>8) < 64 {
+		nthSide := int(byte(mix>>16)) % 2
+		seen := 0
+		for i, part := range t.parts {
+			if part.modelIdx == treeMeshCanopySide {
+				if seen == nthSide {
+					dropIdx = i
+					break
+				}
+				seen++
+			}
+		}
+	}
+
+	for i, part := range t.parts {
+		if i == dropIdx {
+			continue
+		}
+		isCanopy := part.modelIdx != treeMeshRoot && part.modelIdx != treeMeshTrunk
+
+		var sx, sy, sz float32 = 1, 1, 1
+		var nudgeX, nudgeZ float32
+		if isCanopy {
+			sx = 1 + frac(byte(mix>>uint(3+i*3)))*0.14
+			sy = 1 + frac(byte(mix>>uint(5+i*5)))*0.14
+			sz = 1 + frac(byte(mix>>uint(7+i*7)))*0.14
+			nudgeX = frac(byte(mix>>uint(11+i*11))) * 0.20
+			nudgeZ = frac(byte(mix>>uint(13+i*13))) * 0.20
+		}
+
+		// Height stretch lifts canopy parts proportionally to their
+		// authored Y offset so the foliage rides on top of the
+		// stretched trunk, and stretches the trunk mesh itself so the
+		// bark cylinder fills the gap. Trunk Y scale and canopy lift
+		// use the same factor so they grow / shrink in lockstep.
+		yOffset := part.offset.Y * heightStretch
+		trunkYScale := float32(1.0)
+		if part.modelIdx == treeMeshTrunk {
+			trunkYScale = heightStretch
+		}
+
+		offX := part.offset.X + nudgeX
+		offZ := part.offset.Z + nudgeZ
+		offset := rotateOffsetY(rl.NewVector3(offX, yOffset, offZ), overall, yaw)
+		position := rl.NewVector3(center.X+offset.X, center.Y+offset.Y, center.Z+offset.Z)
+		drawScale := rl.NewVector3(part.scale.X*sx*overall, part.scale.Y*sy*trunkYScale*overall, part.scale.Z*sz*overall)
+		rotation := part.rotation
+		if isVerticalAxis(part.rotationAxis) {
+			rotation += yaw
+		}
+		tint := part.tint
+		if isCanopy {
+			tint = jitterTint(part.tint, mix>>uint(7+i*4), 14)
+		}
+		rl.DrawModelEx(t.models[part.modelIdx], position, partRotationAxis(part), rotation, drawScale, tint)
+	}
+}
+
+// jitterTint shifts an RGBA's R/G/B channels by up to ±amp using bytes
+// pulled from `bits`. Alpha is preserved. Channel clamping goes through
+// core.ClampByte so the [0, 255] rule lives in one place.
+func jitterTint(c color.RGBA, bits uint32, amp int) color.RGBA {
+	shift := func(v byte, b byte) byte {
+		delta := int(b)%(2*amp+1) - amp
+		return core.ClampByte(int(v) + delta)
+	}
+	return color.RGBA{
+		R: shift(c.R, byte(bits)),
+		G: shift(c.G, byte(bits>>8)),
+		B: shift(c.B, byte(bits>>16)),
+		A: c.A,
 	}
 }
 

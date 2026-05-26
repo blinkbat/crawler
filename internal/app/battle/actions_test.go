@@ -546,6 +546,46 @@ func TestTickPoisonAfterPartyTurn_EnemyActorIsNoOp(t *testing.T) {
 // onResolve too early or twice, the damage popup/audio/apply step all
 // land at the wrong moment.
 
+func TestResolveAndFinishEnemyAttack_TicksEnemyPoison(t *testing.T) {
+	g := newTestState()
+	g.Battle.Queue = []core.ActorRef{{IsParty: false, Index: 0}}
+	g.Battle.QueueCursor = 0
+	g.Battle.EnemyAttacker = 0
+	g.Battle.Timing.Quality = core.TimingQualityExcellent
+	g.Packs[0].Members[0].PoisonTurns = 2
+	startHP := g.Packs[0].Members[0].HP
+
+	resolveAndFinishEnemyAttack(g)
+
+	if got := g.Packs[0].Members[0].PoisonTurns; got != 1 {
+		t.Fatalf("enemy poison should tick after enemy action; got %d", got)
+	}
+	if got := g.Packs[0].Members[0].HP; got != startHP-core.PoisonTickDamage {
+		t.Fatalf("enemy poison should deal %d; HP was %d now %d", core.PoisonTickDamage, startHP, got)
+	}
+}
+
+func TestResolveAndFinishEnemyAttack_PoisonKillWinsBattle(t *testing.T) {
+	g := newTestState()
+	g.Packs[0].Members = []core.Enemy{core.NewEnemy(core.EnemyRat)}
+	g.Battle.Queue = []core.ActorRef{{IsParty: false, Index: 0}}
+	g.Battle.QueueCursor = 0
+	g.Battle.EnemyIndex = 0
+	g.Battle.EnemyAttacker = 0
+	g.Battle.Timing.Quality = core.TimingQualityExcellent
+	g.Packs[0].Members[0].HP = core.PoisonTickDamage
+	g.Packs[0].Members[0].PoisonTurns = 1
+
+	resolveAndFinishEnemyAttack(g)
+
+	if g.Battle.Phase != core.BattleWon {
+		t.Fatalf("poison killing the last enemy should win battle, phase=%v message=%q", g.Battle.Phase, g.Battle.Message)
+	}
+	if g.Packs[0].Members[0].Alive {
+		t.Fatalf("enemy should be dead after poison tick")
+	}
+}
+
 func TestTickFlashHold_LowGradeFiresImmediatelyAtFlashZero(t *testing.T) {
 	g := newTestState()
 	g.Battle.Timing.Quality = core.TimingQualityGood

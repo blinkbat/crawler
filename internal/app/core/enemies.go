@@ -12,6 +12,18 @@ const (
 	EnemyGoblinMage
 	EnemyAmoeba
 	EnemyVenusMantrap
+	// Roster expansion: five new kinds bringing the bestiary to 12.
+	// CaveSpider / VampireBat / Wisp / StoneGolem / Necromancer
+	// each introduce a mechanic the existing roster doesn't cover
+	// (Bound status, lifesteal, Confused status, AoE phys casts, and
+	// mid-fight summons respectively). Skeleton is the Necromancer's
+	// summon target — a tier-2 grunt that exists only via raises.
+	EnemyCaveSpider
+	EnemyVampireBat
+	EnemyWisp
+	EnemyStoneGolem
+	EnemyNecromancer
+	EnemySkeleton
 )
 
 type EnemyDefinition struct {
@@ -66,6 +78,14 @@ type EnemyDefinition struct {
 	// future enemy with INT-equivalent magic damage sets this so the
 	// physical AttackDamage stays separate from the spell scaling.
 	SpellPower int
+	// LifestealPercent is the 0..1 fraction of phys-damage-dealt that
+	// the enemy heals on its OWN basic attack. The Vampire Bat is the
+	// headline user; other kinds leave this at zero. Applied on the
+	// post-armor damage value so the heal scales with what actually
+	// landed, not the rolled raw — armor-shrugged 1-damage hits still
+	// pass the floor through to the heal in proportion. Heal caps at
+	// MaxHP so a sustained drain doesn't overcap.
+	LifestealPercent float64
 }
 
 var enemyDefinitions = []EnemyDefinition{
@@ -192,7 +212,7 @@ var enemyDefinitions = []EnemyDefinition{
 		XPValue:            22,
 		AttackVerbSingular: "snaps at",
 		AttackVerbPlural:   "snap at",
-		Skills: []SkillID{SkillIngest},
+		Skills:             []SkillID{SkillIngest},
 		// Always reach for prey when no prey is held — that's the
 		// mantrap's threat identity. Once it has someone, the
 		// usableEnemySkills filter strips Ingest from the cast list
@@ -204,6 +224,150 @@ var enemyDefinitions = []EnemyDefinition{
 		// the time even when starving, which read as "doesn't
 		// prioritize ingest."
 		SkillCastChance: 1.0,
+	},
+	{
+		Kind:               EnemyCaveSpider,
+		Name:               "Cave Spider",
+		SingularName:       "Cave Spider",
+		PluralName:         "Cave Spiders",
+		SingularNoun:       "cave spider",
+		PluralNoun:         "cave spiders",
+		GroupName:          "Spider Nest",
+		Item:               "",
+		MaxHP:              11,
+		AttackDamage:       3,
+		Speed:              7,
+		Tier:               3,
+		XPValue:            13,
+		AttackVerbSingular: "bites",
+		AttackVerbPlural:   "bite",
+		// SkillWeb is the tempo-control skill — applies Bound (half-SPD,
+		// can't be ingested while bound) for SpiderWebBoundTurns turns.
+		// SkillCastChance is meaningful so the spider doesn't always web;
+		// plain bites pad the rounds in between to keep cast pressure
+		// from feeling spammy.
+		Skills:          []SkillID{SkillWeb},
+		SkillCastChance: SpiderWebCastChance,
+	},
+	{
+		Kind:               EnemyVampireBat,
+		Name:               "Vampire Bat",
+		SingularName:       "Vampire Bat",
+		PluralName:         "Vampire Bats",
+		SingularNoun:       "vampire bat",
+		PluralNoun:         "vampire bats",
+		GroupName:          "Vampire Swarm",
+		Item:               "Bat Jerky",
+		MaxHP:              13,
+		AttackDamage:       4,
+		Speed:              8,
+		Tier:               4,
+		XPValue:            18,
+		AttackVerbSingular: "drains",
+		AttackVerbPlural:   "drain",
+		// Lifesteal is the bat's defining trick — every successful bite
+		// heals the bat for VampireBatLifesteal × damage-after-armor.
+		// Reused tag SkillTagPhys (the bite is physical); no Skills are
+		// listed because the lifesteal rides on plain melee, not a cast.
+		LifestealPercent: VampireBatLifesteal,
+	},
+	{
+		Kind:         EnemyWisp,
+		Name:         "Will-o'-Wisp",
+		SingularName: "Wisp",
+		PluralName:   "Wisps",
+		SingularNoun: "wisp",
+		PluralNoun:   "wisps",
+		GroupName:    "Wisp Cluster",
+		Item:         "",
+		// Fragile but fast — high SPD lets it go before the party can
+		// reliably burst it down, and its bite is just a placeholder
+		// melee (the SkillConfuse cast is the real threat).
+		MaxHP:              6,
+		AttackDamage:       1,
+		Speed:              9,
+		Tier:               3,
+		XPValue:            16,
+		AttackVerbSingular: "flickers at",
+		AttackVerbPlural:   "flicker at",
+		Skills:             []SkillID{SkillConfuse},
+		SkillCastChance:    WispConfuseCastChance,
+	},
+	{
+		Kind:         EnemyStoneGolem,
+		Name:         "Stone Golem",
+		SingularName: "Golem",
+		PluralName:   "Golems",
+		SingularNoun: "golem",
+		PluralNoun:   "golems",
+		GroupName:    "Golem Pair",
+		Item:         "",
+		// Tier-5 elite. Beefy HP, very high armor, slow as the amoeba.
+		// Stoneslam is an AoE phys cast hitting every living party slot —
+		// armor on the player side clips it, so a Defending Warrior eats
+		// it well but the Wizard takes the full slap. Identifies as the
+		// "active aggressor armor wall" complement to the Amoeba's
+		// passive shrug-everything stance.
+		MaxHP:              80,
+		AttackDamage:       7,
+		Speed:              1,
+		Tier:               5,
+		Armor:              14,
+		XPValue:            40,
+		AttackVerbSingular: "smashes",
+		AttackVerbPlural:   "smash",
+		Skills:             []SkillID{SkillStoneslam},
+		SkillCastChance:    StoneGolemSlamCastChance,
+		SpellPower:         4,
+	},
+	{
+		Kind:         EnemyNecromancer,
+		Name:         "Necromancer",
+		SingularName: "Necromancer",
+		PluralName:   "Necromancers",
+		SingularNoun: "necromancer",
+		PluralNoun:   "necromancers",
+		GroupName:    "Crypt Coven",
+		Item:         "",
+		// Tier-5 boss. Mid HP — squishy enough that focusing it ends the
+		// summoning loop, but enough armor of position (always at the
+		// back of a pack) that "kill the necro first" is a real choice.
+		// Two skills: Firebolt for chip damage and RaiseBones for the
+		// signature add-summon. The cap on raises lives on the skill
+		// definition (PerBattleCastLimit) so future capped casters
+		// reuse the field without an enemy-specific counter.
+		MaxHP:              26,
+		AttackDamage:       3,
+		Speed:              4,
+		Tier:               5,
+		XPValue:            36,
+		AttackVerbSingular: "incants at",
+		AttackVerbPlural:   "incant at",
+		Skills:             []SkillID{SkillRaiseBones, SkillFirebolt},
+		SkillCastChance:    NecromancerCastChance,
+		SpellPower:         5,
+	},
+	{
+		Kind:         EnemySkeleton,
+		Name:         "Skeleton",
+		SingularName: "Skeleton",
+		PluralName:   "Skeletons",
+		SingularNoun: "skeleton",
+		PluralNoun:   "skeletons",
+		GroupName:    "Bone Mob",
+		Item:         "",
+		// Tier-2 grunt that exists only as a Necromancer raise (no
+		// PackSpawn authoring path drops them directly today, though
+		// authors can if they want a free skeleton). Stats are lean —
+		// they're meant to be cleared in one or two hits but burn the
+		// player's actions doing it. No skills.
+		MaxHP:              10,
+		AttackDamage:       3,
+		Speed:              4,
+		Tier:               2,
+		XPValue:            6,
+		AttackVerbSingular: "rakes",
+		AttackVerbPlural:   "rake",
 	},
 	{
 		Kind:         EnemyAmoeba,
@@ -231,25 +395,23 @@ var enemyDefinitions = []EnemyDefinition{
 // enemyByKind is the O(1) lookup map for enemyDefinitions, built once at
 // init. EnemyInfo is called per-frame from the renderer (roster, popups),
 // so the map matches the partyClassByID / skillByID pattern in party.go.
-var enemyByKind = buildEnemyByKind()
+var enemyByKind = BuildRegistry(enemyDefinitions, func(d EnemyDefinition) EnemyKind { return d.Kind })
 
-func buildEnemyByKind() map[EnemyKind]EnemyDefinition {
-	m := make(map[EnemyKind]EnemyDefinition, len(enemyDefinitions))
+// Probability fields ride a [0, 1] contract — values past 1 roll
+// "always" which is usually a typo (a designer meant 0.5 and wrote 5).
+// Negative values would invert the gate silently. Panic at init so the
+// bad data never reaches the gameplay loop. Used to be inline in the
+// registry builder; lifted to a sibling init() block when the builder
+// folded into the generic BuildRegistry helper.
+func init() {
 	for _, def := range enemyDefinitions {
-		// Probability fields ride a [0, 1] contract — values past 1
-		// roll "always" which is usually a typo (a designer meant
-		// 0.5 and wrote 5). Negative values would invert the gate
-		// silently. Panic at init so the bad data never reaches the
-		// gameplay loop.
 		if def.SkillCastChance < 0 || def.SkillCastChance > 1 {
 			panic("core/enemies: " + def.Name + " SkillCastChance must be in [0, 1]")
 		}
 		if def.PoisonChance < 0 || def.PoisonChance > 1 {
 			panic("core/enemies: " + def.Name + " PoisonChance must be in [0, 1]")
 		}
-		m[def.Kind] = def
 	}
-	return m
 }
 
 // EnemyKinds returns the enemy registry in declaration order. Used by
@@ -298,8 +460,15 @@ func EnemyInfo(kind EnemyKind) EnemyDefinition {
 // strings about the live enemy.
 func EnemyInfoFor(enemy Enemy) EnemyDefinition {
 	def := EnemyInfo(enemy.Kind)
+	if enemy.HasDefinitionOverride {
+		def = enemy.DefinitionOverride
+		def.Kind = enemy.Kind
+	}
 	if enemy.MaxHP > 0 {
 		def.MaxHP = enemy.MaxHP
+	}
+	if enemy.Armor != def.Armor {
+		def.Armor = enemy.Armor
 	}
 	return def
 }
@@ -313,6 +482,14 @@ func NewEnemy(kind EnemyKind) Enemy {
 		Alive: true,
 		Item:  def.Item,
 		Armor: def.Armor,
+		// SkillCastCount stays nil here — Go's nil-map read returns
+		// zero, so usableEnemySkills's `enemy.SkillCastCount[s]`
+		// lookup is safe before any cast. The first cast that needs
+		// to record a count lazily allocates via the nil-guard in
+		// handleEnemyRaiseBones. Matches the zero-value convention
+		// every other status counter on this struct uses (BurnTurns,
+		// SleepTurns, etc.) — eager allocation would single out one
+		// field without buying behaviour.
 	}
 }
 

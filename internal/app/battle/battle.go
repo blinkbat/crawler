@@ -20,7 +20,10 @@ func Start(g *core.GameState, packIndex int) {
 	g.Battle.PartyTarget = core.FirstLivingPartyMember(g.Party)
 	g.Battle.EnemyAttackCursor = -1
 	g.Battle.Splash = core.BattleSplashDuration
-	g.Battle.Log = nil
+	// Preallocate to the cap so the 15-30+ setBattleMessage appends per
+	// fight don't trigger slice growth. setBattleMessage trims to
+	// BattleLogMaxLines on overflow, so cap is the steady-state ceiling.
+	g.Battle.Log = make([]string, 0, core.BattleLogMaxLines)
 	g.Battle.ClearTiming()
 	g.Battle.TimingIntro = 0
 	g.Battle.HitStop = 0
@@ -106,16 +109,48 @@ func Update(g *core.GameState, dt float32) {
 
 // --- Mixed-initiative scheduler --------------------------------------------
 
+// checkEnemyWipeout fires the standard "last enemy down" win path if no
+// enemies remain in the active pack. Returns true when it transitioned
+// the battle; callers should `return` immediately to short-circuit the
+// rest of their frame. Pulls the LivingBattleCount + winBattle +
+// LastBattleEnemyFallsMessage triple into one seam so a future "victory
+// fanfare delay" or "XP-award timing" change lands once. Specific
+// flavor messages (e.g. "The fire finishes them." on a burn-kill) still
+// inline `winBattle` directly — this helper is for the canonical case.
+func checkEnemyWipeout(g *core.GameState) bool {
+	if core.LivingBattleCount(g) == 0 {
+		winBattle(g, core.LastBattleEnemyFallsMessage(*g))
+		return true
+	}
+	return false
+}
+
+// checkPartyWipeout fires the standard "no available party member" loss
+// path. Available = alive AND not ingested, so a fully-swallowed party
+// counts as a wipe even though their HP is preserved. Returns true when
+// it transitioned the battle; callers should `return` immediately.
+func checkPartyWipeout(g *core.GameState) bool {
+	if core.ActivePartyCount(g.Party) == 0 {
+		loseBattle(g, core.BattleLossMessage(*g))
+		return true
+	}
+	return false
+}
+
 // beginNewRound rebuilds the SPD-sorted turn queue and starts the first
 // actor's turn. Burn ticks are NOT applied here — they fire per-actor when
 // the burning character's turn comes up (see startActorTurn).
 func beginNewRound(g *core.GameState) {
-	if core.LivingBattleCount(g) == 0 {
-		winBattle(g, core.LastBattleEnemyFallsMessage(*g))
+	if checkEnemyWipeout(g) {
 		return
 	}
-	if core.ActivePartyCount(g.Party) == 0 {
-		loseBattle(g, core.BattleLossMessage(*g))
+	// Poison on ingested members ticks here instead of at end-of-turn —
+	// they're skipped from the queue (buildTurnQueue), so a per-round
+	// drain at the round boundary is the closest analog to the normal
+	// end-of-turn cadence. Fire BEFORE the loss gate so a poison kill on
+	// the last available member still routes through ActivePartyCount.
+	tickPoisonForIngestedParty(g)
+	if checkPartyWipeout(g) {
 		return
 	}
 	// Reset the per-round round-robin cursor for enemy attack targets so a
@@ -159,13 +194,24 @@ func buildTurnQueue(g *core.GameState) []core.ActorRef {
 }
 
 // actorSpeed returns the SPD of the actor. Party uses Stats.SPD; enemies use
-// the implicit per-kind Speed from EnemyDefinition.
+// the implicit per-kind Speed from EnemyDefinition. Bound party members
+// have their effective SPD halved (rounded down, floor 1) for the
+// turn-queue sort — Bound's signature is "you still act, but the world
+// gets ahead of you." Enemy-side Bound is not currently inflicted (no
+// player skill applies it yet), so the path is party-only today.
 func actorSpeed(g *core.GameState, actor core.ActorRef) int {
 	if actor.IsParty {
-		if actor.Index < 0 || actor.Index >= len(g.Party) {
+		if !actor.ValidPartyIndex(g.Party) {
 			return 0
 		}
-		return g.Party[actor.Index].Stats.SPD
+		spd := g.Party[actor.Index].Stats.SPD
+		if g.Party[actor.Index].BoundTurns > 0 {
+			spd /= 2
+			if spd < 1 {
+				spd = 1
+			}
+		}
+		return spd
 	}
 	m := core.BattleMemberAt(g, actor.Index)
 	if m == nil {
@@ -204,11 +250,19 @@ func startActorTurn(g *core.GameState) {
 		return
 	}
 
-	// Sleep skip — decrement the sleep counter at the start of the
-	// sleeping actor's own turn (same rhythm as burn) and forfeit
-	// their action this round. Damage during a future round wakes them
-	// early; here we only handle the "still asleep at turn start" path.
+	// Sleep / Stun skip — both statuses cost the actor their turn,
+	// both tick at the start of their own turn, both fall through the
+	// same advance-and-restart path. Sleep clears on damage (handled
+	// in the damage helpers); Stun doesn't — the lockout runs its
+	// rolled duration regardless of damage in between. Sleep ticks
+	// first so a target that's both sleeping and stunned reads as
+	// "asleep" in the log.
 	if asleep := tickSleepAtTurnStart(g, actor); asleep {
+		g.Battle.QueueCursor++
+		startActorTurn(g)
+		return
+	}
+	if stunned := tickStunAtTurnStart(g, actor); stunned {
 		g.Battle.QueueCursor++
 		startActorTurn(g)
 		return
@@ -228,7 +282,7 @@ func startActorTurn(g *core.GameState) {
 // in the damage helpers, both rules pinned to the actor's own turn.
 func tickSleepAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
 	if actor.IsParty {
-		if actor.Index < 0 || actor.Index >= len(g.Party) {
+		if !actor.ValidPartyIndex(g.Party) {
 			return false
 		}
 		m := &g.Party[actor.Index]
@@ -245,6 +299,35 @@ func tickSleepAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
 	}
 	enemy.SleepTurns--
 	setBattleMessage(g, fmt.Sprintf("%s is asleep.", core.TheEnemy(core.EnemyInfoFor(*enemy))))
+	return true
+}
+
+// tickStunAtTurnStart decrements StunTurns and emits a "(Name) is
+// stunned." log line when the actor still owes a stunned turn at
+// their own turn start. Same shape as tickSleepAtTurnStart; the
+// difference is no wake-on-damage path — Stun's only out is the
+// counter running down naturally.
+func tickStunAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
+	if actor.IsParty {
+		// Players can't currently be stunned (no enemy skill inflicts
+		// it yet), but the symmetry keeps the helper future-proof.
+		if !actor.ValidPartyIndex(g.Party) {
+			return false
+		}
+		m := &g.Party[actor.Index]
+		if m.HP <= 0 || m.StunTurns <= 0 {
+			return false
+		}
+		m.StunTurns--
+		setBattleMessage(g, fmt.Sprintf("%s is stunned.", m.Name))
+		return true
+	}
+	enemy := core.BattleMemberAt(g, actor.Index)
+	if enemy == nil || !enemy.Alive || enemy.StunTurns <= 0 {
+		return false
+	}
+	enemy.StunTurns--
+	setBattleMessage(g, fmt.Sprintf("%s is stunned.", core.TheEnemy(core.EnemyInfoFor(*enemy))))
 	return true
 }
 
@@ -282,14 +365,24 @@ func finishActorTurn(g *core.GameState) {
 	// confirm and apply) can't leak a stuck freeze across the next phase.
 	g.Battle.HitStop = 0
 	if g.Battle.QueueCursor >= 0 && g.Battle.QueueCursor < len(g.Battle.Queue) {
+		// Party side ticks party poison; enemy side ticks enemy poison.
+		// Both run at end-of-actor-turn so the actor still gets their
+		// action in before the DoT lands. Each helper short-circuits
+		// on the wrong actor kind so dispatching is fine here.
 		tickPoisonAfterPartyTurn(g, g.Battle.Queue[g.Battle.QueueCursor])
+		tickPoisonAfterEnemyTurn(g, g.Battle.Queue[g.Battle.QueueCursor])
+		// Bound + Confused tick alongside Poison — every party-side
+		// status counter ticks at the END of the bound/confused
+		// member's own turn so they get one full action under the
+		// status before the counter decrements. Mirrors the Poison
+		// shape; same actor-kind dispatch.
+		tickBoundAfterPartyTurn(g, g.Battle.Queue[g.Battle.QueueCursor])
+		tickConfusedAfterPartyTurn(g, g.Battle.Queue[g.Battle.QueueCursor])
 	}
-	if core.LivingBattleCount(g) == 0 {
-		winBattle(g, core.LastBattleEnemyFallsMessage(*g))
+	if checkEnemyWipeout(g) {
 		return
 	}
-	if core.ActivePartyCount(g.Party) == 0 {
-		loseBattle(g, core.BattleLossMessage(*g))
+	if checkPartyWipeout(g) {
 		return
 	}
 	if !core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
@@ -354,6 +447,8 @@ func updatePlayerBattle(g *core.GameState) {
 		updateItemMenu(g)
 	case core.ActionItemTarget:
 		updateItemTarget(g)
+	case core.ActionSkillMenu:
+		updateSkillMenu(g)
 	default:
 		updateActionMenu(g)
 	}
@@ -594,8 +689,20 @@ func enemyAIPickSkill(g *core.GameState, enemy core.Enemy, slot int) core.SkillI
 // prey") gates correctly. Skills without per-instance gates (Firebolt,
 // Sleep) always pass through.
 func usableEnemySkills(g *core.GameState, skills []core.SkillID, slot int) []core.SkillID {
+	enemy := core.BattleMemberAt(g, slot)
 	out := make([]core.SkillID, 0, len(skills))
 	for _, s := range skills {
+		// Per-battle cast limit gate: drop the skill once the caster
+		// has used it PerBattleCastLimit times. Reads through the
+		// registry rather than hardcoding the SkillID so future
+		// capped skills (boss ultimates) plug in for free. A nil
+		// SkillCastCount map reads as zero on lookup, so uncapped
+		// callers don't pay the lazy-init cost.
+		if limit := core.SkillCastLimitFor(s); limit > 0 && enemy != nil {
+			if enemy.SkillCastCount[s] >= limit {
+				continue
+			}
+		}
 		switch s {
 		case core.SkillIngest:
 			// Mantrap can't ingest while already holding someone, and
@@ -663,110 +770,57 @@ func resolveAndFinishEnemyAttack(g *core.GameState) {
 	g.Battle.ClearTiming()
 	g.Battle.EnemyAttacker = -1
 	g.Battle.EnemyPendingSkill = core.SkillNone
-
-	if core.ActivePartyCount(g.Party) == 0 {
-		loseBattle(g, core.BattleLossMessage(*g))
-		return
-	}
-	g.Battle.QueueCursor++
-	startActorTurn(g)
+	finishActorTurn(g)
 }
 
 // resolveEnemySpell is the apply path for enemy-cast skills (goblin mage
-// Firebolt / Sleep). Picks a random living party target, plays the cast
-// sound, and dispatches on the skill: Firebolt deals magic damage (armor
-// bypassed); Sleep inflicts SleepTurns on the target. Unknown skills
-// fall through to a no-op log line so a future enemy author getting the
-// skill name wrong doesn't crash mid-encounter.
+// Firebolt / Sleep, mantrap Ingest). Resolves the common context
+// (caster, target, definition, skill name, effect) and dispatches to
+// the per-skill handler registered in enemySpellHandlers. The init
+// guard in actions.go asserts every EnemyCastable skill has a handler
+// here and vice-versa, so the dispatch can't silently fizzle.
 func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
 	enemy := core.BattleMemberAt(g, slot)
 	if enemy == nil || !enemy.Alive {
 		return
 	}
-	target := pickEnemyAttackTarget(g)
-	if target < 0 {
-		return
+	effect := core.SkillEffectFor(skill)
+	// Skills that don't need a single party target (AoE phys like
+	// Stoneslam, summons like Raise Bones) MUST bypass the
+	// pickEnemyAttackTarget gate — otherwise an encounter where
+	// every party member is ingested by mantraps would deadlock
+	// (no living-and-available target → return → no cast → the
+	// necromancer can never summon to break the stalemate). For
+	// single-target casts (Firebolt, Sleep, Ingest, Web, Confuse)
+	// the gate stands: those genuinely have nothing to do without
+	// a target.
+	target := -1
+	if !effect.AppliesAOEParty && !effect.AppliesSummonSkeleton {
+		target = pickEnemyAttackTarget(g)
+		if target < 0 {
+			return
+		}
 	}
 	enemy.AttackBump = core.BumpDuration
 	def := core.EnemyInfoFor(*enemy)
-	skillName := core.SkillName(skill)
-	effect := core.SkillEffectFor(skill)
-	switch skill {
-	case core.SkillFirebolt:
-		// Enemy spell-damage formula: SpellPower (per-kind magic
-		// stat) + the skill's own Effect.Damage base. SpellPower
-		// defaults to 0 so a non-caster enemy mis-routed here can't
-		// silently deal huge damage; the goblin mage sets a
-		// substantive value in its EnemyDefinition.
-		rawDamage := def.SpellPower + effect.Damage
-		dealt, killed := damagePartyMember(g, target, rawDamage, core.SkillTagMagic)
-		if killed {
-			setBattleMessage(g, fmt.Sprintf("%s incinerates %s.", core.TheEnemy(def), g.Party[target].Name))
-		} else {
-			setBattleMessage(g, fmt.Sprintf("%s casts %s — %s burns for %d.", core.TheEnemy(def), skillName, g.Party[target].Name, dealt))
-		}
-		audio.Play(audio.SoundInputGreat)
-	case core.SkillIngest:
-		// Defensive re-check: enemyAIPickSkill won't route here without an
-		// available target, but the world can shift between turns (e.g. a
-		// fast ally killed the only viable target). Cancel cleanly with a
-		// log line so the combat log doesn't go silent on the cast.
-		picked := target
-		if !core.PartyMemberAvailable(g.Party, picked) {
-			picked = core.FirstAvailablePartyMember(g.Party)
-		}
-		if picked < 0 {
-			setBattleMessage(g, fmt.Sprintf("%s lunges, but finds no one to seize.", core.TheEnemy(def)))
-			return
-		}
-		m := &g.Party[picked]
-		m.Ingested = true
-		m.IngestedBy = slot
-		// Status fields cleared vs. preserved on ingestion is a
-		// deliberate-feel choice, not housekeeping:
-		//
-		//   - SleepTurns: cleared. Getting swallowed is violent enough
-		//     to wake the sleeper (same "violence breaks the spell"
-		//     rule as the damage-wake path); also avoids the absurd
-		//     state of "asleep inside a mantrap, also asleep otherwise."
-		//   - Defending: cleared. The brace was for an incoming hit
-		//     they'll never receive; the buff has nothing to apply to.
-		//   - PoisonTurns: PRESERVED. Ingest shouldn't be a free escape
-		//     from a status the player got hit with earlier. The counter
-		//     pauses passively (the ingested member's turn is skipped,
-		//     so tickPoisonAfterPartyTurn never fires for them) and
-		//     resumes ticking on their first turn after release.
-		m.SleepTurns = 0
-		m.Defending = false
-		setBattleMessage(g, fmt.Sprintf("%s engulfs %s!", core.TheEnemy(def), m.Name))
-		audio.Play(audio.SoundEnemyHit)
-	case core.SkillSleep:
-		m := &g.Party[target]
-		// Defense-in-depth: pickEnemyAttackTarget only returns living
-		// members today, but a future code path that lets a corpse
-		// through would silently land sleep on a dead body. Guard
-		// here so the rule "sleep needs a living target" lives at
-		// the apply seam, not just at the picker.
-		if m.HP <= 0 {
-			return
-		}
-		if m.SleepTurns > 0 {
-			setBattleMessage(g, fmt.Sprintf("%s casts %s — %s is already asleep.", core.TheEnemy(def), skillName, m.Name))
-			return
-		}
-		duration := effect.SleepDuration(g.Rand())
-		if duration <= 0 {
-			duration = core.SleepMinTurns
-		}
-		m.SleepTurns = duration
-		setBattleMessage(g, fmt.Sprintf("%s casts %s — %s falls asleep.", core.TheEnemy(def), skillName, m.Name))
-		audio.Play(audio.SoundInputHit)
-	default:
-		// #12: log the skill id so a future author who registers a
-		// new skill but forgets to add a case here at least sees the
-		// numeric culprit in the combat log instead of a silent fizzle.
-		setBattleMessage(g, fmt.Sprintf("%s mutters something (unhandled skill %d).", core.TheEnemy(def), int(skill)))
+	ctx := enemySpellCtx{
+		g:         g,
+		slot:      slot,
+		target:    target,
+		enemy:     enemy,
+		def:       def,
+		skillName: core.SkillName(skill),
+		effect:    effect,
 	}
+	handler, ok := enemySpellHandlers[skill]
+	if !ok {
+		// Unreachable: init guard panics on missing handlers. Keep
+		// the log line as defense-in-depth so a future hot-reload /
+		// runtime registration path doesn't go silent.
+		setBattleMessage(g, fmt.Sprintf("%s mutters something (unhandled skill %d).", core.TheEnemy(def), int(skill)))
+		return
+	}
+	handler(ctx)
 }
 
 // --- Win / lose / boilerplate ----------------------------------------------
@@ -814,15 +868,13 @@ func leaveBattle(g *core.GameState, message string) {
 	if message != "" {
 		setBattleMessage(g, message)
 	}
-	// If any party member walked away with unspent level-up points, raise
-	// the level-up modal so the player allocates them before drifting
-	// back to exploration. explore.Update routes through this flag
-	// above the pause/chest priorities.
-	if idx := core.FirstPendingLevelUp(g.Party); idx >= 0 {
-		g.LevelUpOpen = true
-		g.LevelUpMember = idx
-		g.LevelUpStat = core.StatSTR
-	}
+	// Pending level-ups are no longer force-opened post-battle — the
+	// auto-modal interrupted the explore flow and locked the player into
+	// committing stats before they could even walk away. PendingLevelUps
+	// + PendingSkillPoints now sit on the member; the party-card "+"
+	// indicator surfaces that there's a level to allocate, and the
+	// player spends them when ready via the Tome menu (Character tab
+	// for stats, Skills tab for the skill tree).
 }
 
 // clearBattleResidual drops every transient battle field back to its zero
@@ -837,6 +889,18 @@ func clearBattleResidual(g *core.GameState) {
 	// damageEnemy already releases on the killing blow; this catches
 	// every other exit (loss recovery, early-exit defensive path).
 	core.ReleaseAllIngested(g.Party)
+	// Drop any queued VFX intents — a stale "spawn ember on enemy 2"
+	// would otherwise materialise in the wrong scene on the next
+	// render. Also signal the render layer to clear its particle
+	// pool, since formation-relative particles spawned during the
+	// fight have world positions that were captured camera-relative
+	// (in front of the battle camera at fixed offsets) — after
+	// battle exit, the explore camera moves freely and those
+	// positions are now at random world locations. Without the
+	// reset, the player sees a ~1s "ghost burst" floating in mid-
+	// air on every battle exit.
+	g.VFXQueue = g.VFXQueue[:0]
+	core.RequestVFXReset(g)
 	if g.Battle.Phase == core.BattleWon && g.Battle.ActivePack >= 0 && g.Battle.ActivePack < len(g.Packs) {
 		g.Packs = append(g.Packs[:g.Battle.ActivePack], g.Packs[g.Battle.ActivePack+1:]...)
 	}
@@ -917,11 +981,13 @@ func updateBattleEffects(g *core.GameState, dt float32) {
 	for i := range g.Party {
 		g.Party[i].AttackBump = core.ApproachZero(g.Party[i].AttackBump, dt)
 		g.Party[i].DamageFlash = core.ApproachZero(g.Party[i].DamageFlash, dt)
+		g.Party[i].HitKnockback = core.ApproachZero(g.Party[i].HitKnockback, dt)
 	}
 	members := core.BattleMembers(g)
 	for i := range members {
 		members[i].AttackBump = core.ApproachZero(members[i].AttackBump, dt)
 		members[i].DamageFlash = core.ApproachZero(members[i].DamageFlash, dt)
+		members[i].HitKnockback = core.ApproachZero(members[i].HitKnockback, dt)
 		members[i].DeathFade = core.ApproachZero(members[i].DeathFade, dt)
 		members[i].DamagePopupTimer = core.ApproachZero(members[i].DamagePopupTimer, dt)
 	}

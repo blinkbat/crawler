@@ -1,12 +1,24 @@
 package render
 
 import (
-	"fmt"
 	"math"
+	"strconv"
 
 	"crawler/internal/app/core"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
+)
+
+// Per-bar heading text. Lifted to module-level constants so the press /
+// charge / sequence draw paths read from one source instead of inlining
+// the string at each draw call site (the press bar also flips between
+// STRIKE / DEFEND depending on whose timing phase is active). Any future
+// "translate the bar text" pass lands here once.
+const (
+	timingHeadingStrike     = "STRIKE!"
+	timingHeadingDefend     = "DEFEND!"
+	timingHeadingCharge     = "CHARGE!"
+	timingHeadingPickpocket = "PICKPOCKET!"
 )
 
 // --- Bar juice helpers ----------------------------------------------------
@@ -188,17 +200,47 @@ func timingBarLayout() (x, y, barW, barH float32) {
 // the result. (Distinct from theme.go's drawHeading which is a generic panel
 // header.)
 func drawTimingHeading(font rl.Font, text string, x, barW, y float32, baseCol rl.Color, flashing bool, flashCol rl.Color) {
-	size := float32(28)
+	size := FontHeading
 	col := baseCol
 	if flashing {
 		col = flashCol
 		size = 34
 	}
-	measure := rl.MeasureTextEx(font, text, size, 1.5)
+	measure := measureTimingHeading(font, text, size)
 	hx := x + (barW-measure.X)/2
 	hy := y - measure.Y - 6
 	rl.DrawTextEx(font, text, rl.NewVector2(hx+2, hy+2), size, 1.5, shadowStrong)
 	rl.DrawTextEx(font, text, rl.NewVector2(hx, hy), size, 1.5, col)
+}
+
+// timingHeadingMeasureCache memoizes drawTimingHeading's MeasureTextEx
+// per (text, size) pair. The bar lives for ~3 s of frames and the
+// text doesn't change once the bar is armed; only the size flips
+// between FontHeading and 34 during the flash hold. Two cache slots
+// cover the steady state, with a small fallback map for the rare
+// case of a fresh heading text.
+var timingHeadingMeasureCache = make(map[timingHeadingMeasureKey]rl.Vector2, 8)
+var timingHeadingMeasureCacheFontID uint32
+
+type timingHeadingMeasureKey struct {
+	text string
+	size float32
+}
+
+func measureTimingHeading(font rl.Font, text string, size float32) rl.Vector2 {
+	if font.Texture.ID != timingHeadingMeasureCacheFontID {
+		for k := range timingHeadingMeasureCache {
+			delete(timingHeadingMeasureCache, k)
+		}
+		timingHeadingMeasureCacheFontID = font.Texture.ID
+	}
+	key := timingHeadingMeasureKey{text: text, size: size}
+	if v, ok := timingHeadingMeasureCache[key]; ok {
+		return v
+	}
+	v := rl.MeasureTextEx(font, text, size, 1.5)
+	timingHeadingMeasureCache[key] = v
+	return v
 }
 
 // applyTimingFlashCursor draws the bright halo around the frozen cursor
@@ -229,10 +271,10 @@ func applyTimingFlashCursor(curX, y, barH, flashTimer float32, base rl.Color) (f
 func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
 	isDefend := g.Battle.Phase == core.BattleEnemyTiming
 
-	heading := "STRIKE!"
+	heading := timingHeadingStrike
 	baseCol := rl.NewColor(255, 232, 168, 240)
 	if isDefend {
-		heading = "DEFEND!"
+		heading = timingHeadingDefend
 		baseCol = rl.NewColor(168, 220, 255, 240)
 	}
 
@@ -256,11 +298,20 @@ func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x
 	// solid color stripe; nesting communicates the grading without any lines.
 	// Two-zone press bars (Swipe) paint the nested bands for both windows so
 	// each hit zone reads with its own gradient.
-	if !flashing {
+	if timing.IsTallyMode() {
+		// Tally bars always render their per-window pips, even
+		// during the resolution flash. Without this, the final
+		// hit's FlashTimer is set but never seen — pressing the
+		// last accept window auto-resolves the bar (Hits == count),
+		// which flips `flashing` true on the next frame and the
+		// player loses the per-window confirmation pop the earlier
+		// hits got. Drawing under the flash also gives the
+		// resolution moment a richer texture: the bar-wide quality
+		// wash sits behind, the individual windows still telegraph
+		// what landed.
+		drawTallyBar(timing, drawX, drawY, barW, drawnH, isDefend)
+	} else if !flashing {
 		drawPressWindowZones(timing.WindowStart, timing.WindowEnd, timing.SweetSpot, timing.Duration, drawX, drawY, barW, drawnH, isDefend)
-		if timing.Window2End > 0 {
-			drawPressWindowZones(timing.Window2Start, timing.Window2End, timing.SweetSpot2, timing.Duration, drawX, drawY, barW, drawnH, isDefend)
-		}
 	}
 
 	// Cursor — a fat vertical block sliding across the bar. Frozen at the
@@ -312,7 +363,7 @@ func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x
 // The cursor sweeps regardless of hold state — Elapsed counts up always — so
 // the player sees how close they are to the peak window even before pressing.
 func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
-	heading := "CHARGE!"
+	heading := timingHeadingCharge
 	baseCol := rl.NewColor(255, 184, 96, 240) // warm orange
 	// Intro-pause heading: while the player hasn't engaged yet (intro
 	// counter > 0), swap to the "Press to start" prompt in the hint
@@ -433,7 +484,7 @@ func drawChargeTickWithFlash(timing core.TimingState, barX, barY, barW, barH flo
 // background. A thin line under the arrows dwindles left-to-right to
 // communicate the timer.
 func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
-	heading := "PICKPOCKET!"
+	heading := timingHeadingPickpocket
 	baseCol := rl.NewColor(140, 232, 168, 240) // thief green
 
 	xOff, _, _ := applyBarMotion(timing, g.Battle.TimingFlash, barH)
@@ -695,6 +746,110 @@ func drawPressWindowZones(start, end, sweet, duration, barX, barY, barW, barH fl
 	drawWindowZone(start, end, sweet, duration, barX, barY, barW, barH, 0.10, qualityColor(core.TimingQualityExcellent, isDefend))
 }
 
+// drawTallyBar paints the multi-press tally layout: one flat hit-zone
+// stripe per accept window (filled solid for unhit, dimmed checker
+// for already-consumed) + a late "COMMIT" zone painted in orange at
+// the bar's tail. The number of stripes communicates "how many hits
+// are possible"; the dimming communicates "you've already got this
+// one." A small tally counter overlay would be nice on top but is
+// left to the caller's HUD layer — drawing it inside the world's
+// 3D pass would require re-projecting screen coords.
+// tallyConsumedAttack / tallyConsumedDefend are the dimmed "this
+// window's already been hit" tints used by the multi-press tally bar.
+// Derived once from the attack / defend "Good"-grade colors at init
+// rather than rebuilt every frame inside drawTallyBar — the inputs
+// (qualityVisuals row colors) are constants.
+var (
+	tallyConsumedAttack = makeTallyConsumedColor(false)
+	tallyConsumedDefend = makeTallyConsumedColor(true)
+)
+
+func makeTallyConsumedColor(isDefend bool) rl.Color {
+	c := qualityColor(core.TimingQualityGood, isDefend)
+	return rl.NewColor(c.R/3, c.G/3, c.B/3, 200)
+}
+
+func drawTallyBar(t core.TimingState, barX, barY, barW, barH float32, isDefend bool) {
+	if t.Duration <= 0 {
+		return
+	}
+	hitCol := qualityColor(core.TimingQualityGood, isDefend)
+	excellentCol := qualityColor(core.TimingQualityExcellent, isDefend)
+	consumedCol := tallyConsumedAttack
+	if isDefend {
+		consumedCol = tallyConsumedDefend
+	}
+	cursorElapsed := t.Elapsed
+	// Indexed access (not range-by-value) so a future per-frame
+	// render-state addition on TallyWindow (e.g., a screen-space
+	// pulse anchor) can be mutated through &t.Windows[i] without
+	// a copy-and-write-back dance. Today the loop is read-only;
+	// the indexed form documents the intent.
+	for i := range t.Windows {
+		w := &t.Windows[i]
+		startX := barX + (w.Start/t.Duration)*barW
+		width := ((w.End - w.Start) / t.Duration) * barW
+		// Pick the window's base color based on state:
+		// - Just-hit (FlashTimer > 0): bright "Excellent" tint that
+		//   fades back to consumed as the timer drains. This is the
+		//   per-press feedback flash the player wanted.
+		// - Already hit (no flash): dim consumed color.
+		// - Unhit + cursor inside: pulse alpha-bright so the player
+		//   sees "press NOW" while the cursor is in-zone.
+		// - Unhit + cursor outside: resting hit color.
+		var col rl.Color
+		switch {
+		case w.Hit && w.FlashTimer > 0:
+			flashT := w.FlashTimer / core.TallyHitFlashDuration
+			if flashT > 1 {
+				flashT = 1
+			}
+			col = core.MixColor(consumedCol, excellentCol, float64(flashT))
+		case w.Hit:
+			col = consumedCol
+		case cursorElapsed >= w.Start && cursorElapsed <= w.End:
+			// Live-preview throb — the cursor is currently inside
+			// this window; pulse the alpha so the player reads
+			// "tap to score." pulse() returns 0..1 sinusoidally.
+			throb := 0.75 + 0.25*pulse(2.4)
+			col = fadeColor(blendTowardWhite(hitCol, 0.45), throb)
+		default:
+			col = hitCol
+		}
+		rl.DrawRectangle(int32(startX), int32(barY), int32(width), int32(barH), col)
+		// Sweet-spot pip — a brighter notch in the centre of each
+		// unhit window so the eye reads "tap the bright dot."
+		if !w.Hit {
+			pipX := barX + (w.Sweet/t.Duration)*barW
+			pipW := width * 0.18
+			pip := blendTowardWhite(hitCol, 0.60)
+			rl.DrawRectangle(int32(pipX-pipW*0.5), int32(barY), int32(pipW), int32(barH), pip)
+		}
+	}
+	// Commit zone — orange tail. Pressing here ends the bar with
+	// whatever tally you've got. Visible from CommitStart through
+	// the end of the duration so the player sees their "exit" gate
+	// approaching as the bar nears its end.
+	if t.CommitStart < t.Duration {
+		commitX := barX + (t.CommitStart/t.Duration)*barW
+		commitW := barX + barW - commitX
+		commitCol := rl.NewColor(255, 168, 96, 200)
+		// If the cursor's inside the commit zone, throb it too —
+		// matches the unhit-window preview so the player sees the
+		// "exit gate is live" without reading a separate visual
+		// vocabulary.
+		if cursorElapsed >= t.CommitStart {
+			throb := 0.78 + 0.22*pulse(2.6)
+			commitCol = fadeColor(commitCol, throb)
+		}
+		rl.DrawRectangle(int32(commitX), int32(barY), int32(commitW), int32(barH), commitCol)
+	}
+}
+
+// (lerpRGBA removed — callers route through core.MixColor with a
+// float64(t) cast. rl.Color is a type alias of color.RGBA so the
+// signatures unify cleanly.)
+
 // flashAlpha returns the [0,1] strength of the flash, peaking right after the
 // press and decaying as the hold timer counts down. Squared falloff so it
 // stays bright at first and fades fast at the end.
@@ -744,10 +899,11 @@ func DrawQualityPopup(camera rl.Camera3D, g core.GameState, assets Resources) {
 	col := qualityColor(g.Battle.LastQuality, g.Battle.LastQualityIsBlock)
 	col.A = alpha
 
-	baseSize := float32(34)
-	if g.Battle.LastQuality == core.TimingQualityExcellent {
-		baseSize = 42
-	}
+	// Quality popup uses FontTitle; an Excellent landing keeps the
+	// same size but the post-scale `scale` factor (driven by the
+	// throb curve) gives Excellent extra visual punch via geometry
+	// rather than a hand-baked larger size literal.
+	baseSize := FontTitle
 	size := baseSize * scale
 	measure := rl.MeasureTextEx(assets.hudFont, label, size, 1.5)
 	x := screenPos.X - measure.X/2
@@ -767,7 +923,7 @@ func qualityPopupAnchor(camera rl.Camera3D, g core.GameState) (rl.Vector3, bool)
 	if idx < 0 || idx >= len(g.Party) {
 		return rl.Vector3{}, false
 	}
-	pos := partySpritePosition(camera, idx, g.Party[idx].Class, 0, 0)
+	pos := partySpritePosition(camera, idx, g.Party[idx].Class, 0, 0, 0)
 	return rl.NewVector3(pos.X, pos.Y, pos.Z), true
 }
 
@@ -803,10 +959,11 @@ func DrawDamagePopups(camera rl.Camera3D, g core.GameState, assets Resources) {
 		col := qualityColor(enemy.DamagePopupQuality, false)
 		col.A = alpha
 
-		baseSize := float32(30)
-		if enemy.DamagePopupQuality == core.TimingQualityExcellent {
-			baseSize = 38
-		}
+		// Damage popup uses FontHeading at the base size; Excellent
+		// gets a stronger throb via the `scale` factor rather than
+		// a separate larger size literal (so all popup text stays
+		// on the standardized size scale).
+		baseSize := FontHeading
 		size := baseSize * scale
 		measure := rl.MeasureTextEx(assets.hudFont, label, size, 1.2)
 		x := screenPos.X - measure.X/2
@@ -818,13 +975,33 @@ func DrawDamagePopups(camera rl.Camera3D, g core.GameState, assets Resources) {
 	}
 }
 
-// damagePopupLabel formats the damage value, appending "!" on an Excellent.
+// damagePopupLabel formats the damage value, appending "!" on an
+// Excellent. The single-digit and small two-digit cases dominate
+// normal play; pre-format 0..199 × {plain, excellent} so the per-
+// frame popup paint is a slice index rather than a fmt.Sprintf alloc.
+// Anything past the cache window falls back to strconv concat —
+// still cheaper than fmt.Sprintf.
 func damagePopupLabel(damage, quality int) string {
-	if quality == core.TimingQualityExcellent {
-		return fmt.Sprintf("%d!", damage)
+	if damage >= 0 && damage < len(damagePopupLabelCache) {
+		if quality == core.TimingQualityExcellent {
+			return damagePopupLabelCache[damage].excellent
+		}
+		return damagePopupLabelCache[damage].plain
 	}
-	return fmt.Sprintf("%d", damage)
+	if quality == core.TimingQualityExcellent {
+		return strconv.Itoa(damage) + "!"
+	}
+	return strconv.Itoa(damage)
 }
+
+var damagePopupLabelCache = func() [200]struct{ plain, excellent string } {
+	var out [200]struct{ plain, excellent string }
+	for i := range out {
+		out[i].plain = strconv.Itoa(i)
+		out[i].excellent = out[i].plain + "!"
+	}
+	return out
+}()
 
 // popupAnimation returns the scale/rise/alpha for a popup whose remaining
 // life ratio is t (1.0 = just spawned, 0.0 = expired). Punches in with a

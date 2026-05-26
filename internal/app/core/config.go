@@ -17,6 +17,18 @@ const (
 	TurnDuration         = 0.14
 	BumpDuration         = 0.18
 	FlashDuration        = 0.16
+	// HitKnockbackDuration is how long the receiver's recoil offset
+	// lasts after taking damage. A touch longer than BumpDuration so
+	// the impact reads as "the hit shoved them" — the attacker has
+	// already pulled their swing back by the time the receiver
+	// finishes flinching. Magnitude is governed by HitKnockbackDist
+	// + the BumpOffset sine curve, same shape as the lunge bump.
+	HitKnockbackDuration = float32(0.24)
+	// HitKnockbackDist is the peak world-units displacement during
+	// the recoil. Smaller than BumpOffset's lunge distance (0.20-
+	// 0.22) so the receiver doesn't moonwalk halfway across the
+	// arena on every hit — just a clear "they felt that" shove.
+	HitKnockbackDist = float32(0.14)
 	DeathFadeDuration    = 0.55
 	VictoryDanceDuration = 3.0
 	MouseSense           = 0.0024
@@ -59,6 +71,12 @@ const (
 	ActionPartyTarget
 	ActionItemMenu
 	ActionItemTarget
+	// ActionSkillMenu is the skill-selection submenu — opens when the
+	// player picks the "Skill" row, lets them choose which of the
+	// class's 3 learned skills to cast. Confirming a row in this menu
+	// arms the chosen skill and transitions into its target mode
+	// (party / enemy / no-target) the same way performSkill used to.
+	ActionSkillMenu
 )
 
 // ActionRow enumerates the in-battle action menu rows. The integer values
@@ -70,14 +88,40 @@ type ActionRow int
 const (
 	ActionRowAttack ActionRow = iota
 	ActionRowSkill
-	ActionRowDefend
 	ActionRowItem
+	ActionRowDefend
 )
 
 // ActionRowCount is the wrap modulus for the action-menu cursor.
-const ActionRowCount = int(ActionRowItem) + 1
+const ActionRowCount = int(ActionRowDefend) + 1
 
 const (
+	// SightRadius is the Chebyshev fog-of-war reveal radius around
+	// the player. 1 = the 3×3 window centered on the player tile is
+	// marked Visited on every successful step. The Map panel reads
+	// Visited to fade unexplored tiles and hide entity markers there.
+	SightRadius = 1
+
+	// --- Pack AI (junkyard-dog leash) -------------------------------------
+	//
+	// Packs wander when the player steps. They never leave their leash
+	// (Chebyshev distance from Pack.HomeX/HomeZ ≤ PackLeashRadius), they
+	// don't move every step (only PackStepChance of the time, rolled per
+	// pack independently), and they pick a direction by a simple rule:
+	// if the player is inside the leash radius, step closer; otherwise
+	// pick a random cardinal that stays inside the leash.
+	//
+	//   PackLeashRadius  — Chebyshev radius around the spawn tile.
+	//   PackStepChance   — 0..1 chance to even attempt a move per player
+	//                      step. Lower = sleepier dogs.
+	//   PackChaseRadius  — Chebyshev distance at which a pack abandons
+	//                      wander for the "lazy chase" branch. Smaller
+	//                      than PackLeashRadius so far-away wanderers
+	//                      stay random until the player draws close.
+	PackLeashRadius = 4
+	PackStepChance  = 0.35
+	PackChaseRadius = 3
+
 	// BattleSplashDuration is how long the encounter banner sits on screen at
 	// the start of a battle. The battle code seeds Battle.Splash with this and
 	// the renderer uses it for ease-in/ease-out math, so they stay in sync.
@@ -87,6 +131,11 @@ const (
 	DefendTimingDuration = float32(1.3)
 
 	TimingFlashDuration   = float32(0.32)
+	// TallyHitFlashDuration is the per-window feedback hold on a
+	// multi-press tally bar. Shorter than TimingFlashDuration so
+	// each hit in a rapid-fire sequence reads as a distinct pop
+	// instead of running together into one long bloom.
+	TallyHitFlashDuration = float32(0.18)
 	QualityResultDuration = float32(0.70)
 
 	// Hit-stop is the brief world-pause inserted between the timing flash and
@@ -176,18 +225,42 @@ const (
 	// faster than they can heal it back without dedicated cleansing.
 	PoisonTickDamage = 1
 
-	// PoisonMinTurns / PoisonMaxTurns bound the duration rolled when a
-	// Diseased Rat's bite inflicts Poison. Range inclusive at both ends.
-	PoisonMinTurns = 3
-	PoisonMaxTurns = 5
+	// Status duration bounds. Every (Poison / Sleep / Stun / Bind /
+	// Confuse / Burn) status rolls a uniform duration in
+	// [Min, Max] inclusive when it lands. Co-located so a balance
+	// pass touches one block — earlier passes had Poison here,
+	// Sleep + Stun in their own blocks lower in the file, and the
+	// new Bound / Confuse in the roster-expansion section, which
+	// made "how long does X last?" a three-place search.
+	PoisonMinTurns         = 3
+	PoisonMaxTurns         = 5
+	SleepMinTurns          = 2
+	SleepMaxTurns          = 5
+	StunMinTurns           = 1
+	StunMaxTurns           = 2
+	SpiderWebBoundMinTurns = 3
+	SpiderWebBoundMaxTurns = 3
+	WispConfuseMinTurns    = 2
+	WispConfuseMaxTurns    = 2
+	// (Burn min/max travel on SkillEffect.Burn fields per skill —
+	// no global default since only the Wizard's Firebolt sets it
+	// today, and the registry value is the canonical source.)
 
 	// Skill / enemy proc chances. Lifted out of the per-entry registry
 	// literals (party.go skillDefinitions, enemies.go enemyDefinitions) so
 	// a balance pass touches one file. The registry still owns the
 	// per-entry binding; these constants are the values it cites.
-	StealBaseChance         = 0.40 // Thief: Steal base success before DEX/quality scaling.
-	FireboltBurnChance      = 0.45 // Wizard: Firebolt burn inflict before quality scaling.
-	DiseasedRatPoisonChance = 0.60 // Diseased Rat: per-bite poison inflict.
+	StealBaseChance          = 0.40 // Thief: Steal base success before DEX/quality scaling.
+	FireboltBurnChance       = 0.45 // Wizard: Firebolt burn inflict before quality scaling.
+	DiseasedRatPoisonChance  = 0.60 // Diseased Rat: per-bite poison inflict.
+	SpiderWebCastChance      = 0.45 // Cave Spider: roll-to-Web vs plain bite per turn.
+	VampireBatLifesteal      = 0.60 // Vampire Bat: fraction of post-armor damage healed back per bite.
+	WispConfuseCastChance    = 0.50 // Wisp: roll-to-Confuse vs flicker-bite per turn.
+	WispConfuseRetargetRoll  = 0.50 // Wisp: per-action chance a Confused member retargets randomly.
+	WispConfuseResistDivisor = 6    // Wisp: WIS / (WIS + this) is the per-cast resist roll; bigger = easier to resist.
+	StoneGolemSlamCastChance = 0.40 // Stone Golem: roll-to-Stoneslam vs single-target smash per turn.
+	NecromancerCastChance    = 0.55 // Necromancer: combined roll into Raise / Firebolt vs incant-melee.
+	NecromancerRaiseLimit    = 2    // Necromancer: hard cap on RaiseBones casts per battle.
 
 	// Day/night cycle tuning. Six phases of StepsPerPhase player tile-steps
 	// make up one full loop (StepsPerCycle). Only landed exploration steps
@@ -210,6 +283,23 @@ const (
 	// cells in each axis; 4×4 leaves a 2×2 interior — the tightest you
 	// can put a player start and one pack on without overlap.
 	MinMapDimension = 4
+	// DefaultNewMapDimension is the seed width / height the editor's
+	// "New" modal arms with. Shared so the title-screen editor.New()
+	// path and the in-editor New modal can't drift apart on what a
+	// "fresh map" looks like.
+	DefaultNewMapDimension = 16
+
+	// LevelUpApplyRowIndex is the cursor slot of the "Apply changes"
+	// row in the level-up modal — sits one past the last stat row
+	// (StatSTR..StatSPD). LevelUpRowCount is the total row count
+	// (StatCount stat rows + 1 Apply row). Owned by core so the input
+	// handler in explore/levelup.go and the renderer in
+	// render/levelup.go share one truth; the modal's "row 6 is Apply"
+	// rule used to live as a private constant in explore and a magic
+	// `int(core.StatCount)` literal in render, which drifted twice
+	// during the skill-point row's removal.
+	LevelUpApplyRowIndex = int(StatCount)
+	LevelUpRowCount      = int(StatCount) + 1
 )
 
 // PressWindow groups the press-bar window geometry. Values are fractions
@@ -231,27 +321,23 @@ var PressWindow = struct {
 	MaxEnd:   0.96,
 }
 
-// DoublePressWindow geometry for two-zone press bars (Swipe). One window
-// in each half of the sweep, each randomized in its own range; both share
-// the same fixed Width. Window1's MaxEnd is pulled back well clear of
-// Window2's MinStart so the two zones always render as visually distinct
-// hit zones — never butted up against each other into a single wide blob.
-var DoublePressWindow = struct {
-	Window1MinStart float32
-	Window1MaxStart float32
-	Window1MaxEnd   float32
-	Window2MinStart float32
-	Window2MaxStart float32
-	Window2MaxEnd   float32
-	Width           float32
+// MultiPressWindow is the per-fraction geometry config for tally-mode
+// press bars (Swipe today, future N-hit skills). Layout is
+// derived from the hit count rather than a fixed zone block:
+// LeadInFrac is where the first window opens, WindowWidthFrac is
+// each accept zone's width, CommitZoneFrac is the late "press
+// here to end" tail. NewMultiPressState reads these values and
+// distributes `count` windows evenly across the gap between the
+// lead-in and the commit zone. Sibling of PressWindow above so a
+// balance pass on either bar lands in one file.
+var MultiPressWindow = struct {
+	LeadInFrac      float32
+	WindowWidthFrac float32
+	CommitZoneFrac  float32
 }{
-	Window1MinStart: 0.18,
-	Window1MaxStart: 0.30,
-	Window1MaxEnd:   0.46,
-	Window2MinStart: 0.56,
-	Window2MaxStart: 0.70,
-	Window2MaxEnd:   0.92,
-	Width:           0.16,
+	LeadInFrac:      0.20,
+	WindowWidthFrac: 0.08,
+	CommitZoneFrac:  0.15,
 }
 
 // timingGrades is the single per-grade attribute table for the timed-hit
@@ -303,6 +389,26 @@ const (
 	SkillPrayer
 	SkillSteal
 	SkillFirebolt
+	// Class-thematic skills. Each class learns its signature (above)
+	// plus two unique entries here; in-battle Tab cycles SkillCursor
+	// across all three. See skillDefinitions for handler-shaping
+	// notes and skillActionHandlers for the setup/apply registrations.
+	//
+	// Warrior: Crushing Blow (charge phys, stun proc), Whirlwind
+	// (charge AoE phys).
+	SkillCrushingBlow
+	SkillWhirlwind
+	// Cleric: Mass Mend (charge AoE heal), Smite (press magic damage).
+	SkillMassMend
+	SkillSmite
+	// Thief: Backstab (charge phys, double damage on Excellent),
+	// Venom Strike (sequence phys + Poison apply).
+	SkillBackstab
+	SkillVenomStrike
+	// Wizard: Frost Lance (charge magic, stun on Great+), Arc Bolt
+	// (sequence multi-target magic).
+	SkillFrostLance
+	SkillArcBolt
 	// SkillSleep is the goblin-mage's status-inflict cast — single
 	// target, puts a party member to sleep for SleepMin..SleepMaxTurns.
 	// Wakes on any incoming damage. Tagged Magic so it bypasses armor.
@@ -315,6 +421,27 @@ const (
 	// ingest a second target. Tagged Magic so the cast itself bypasses
 	// armor (it doesn't deal damage anyway).
 	SkillIngest
+	// SkillWeb is the Cave Spider's tempo-control cast — applies the
+	// Bound status (half-SPD, can't be ingested while bound) for
+	// SpiderWebBoundTurns turns. Tagged Magic so the apply bypasses
+	// armor; no damage component.
+	SkillWeb
+	// SkillConfuse is the Will-o'-Wisp's status cast — applies the
+	// Confused status (a 50/50 retarget roll on the afflicted
+	// member's next two turns, friend or foe at random). Tagged
+	// Magic, no damage component, WIS-resistible at apply time.
+	SkillConfuse
+	// SkillStoneslam is the Stone Golem's AoE phys cast — hits every
+	// living party member for STR + SpellPower scaled by quality.
+	// Phys-tagged so the player's Armor / Defending applies; the
+	// Wizard takes the full slap, the Warrior eats it well.
+	SkillStoneslam
+	// SkillRaiseBones is the Necromancer's signature add-summon —
+	// inserts one Skeleton into the active pack mid-battle. Capped
+	// per battle via the skill definition's PerBattleCastLimit field
+	// (not a per-cast counter on the enemy). Tagged Magic; no
+	// targeting (the summon lands in the necromancer's own pack).
+	SkillRaiseBones
 )
 
 // SkillTag classifies a skill for damage-type interactions (armor,
@@ -332,13 +459,36 @@ const (
 	SkillTagBuff
 )
 
-// Sleep status duration bounds. Same shape as BurnMin/MaxTurns and
-// PoisonMin/MaxTurns — the SleepEffect roller picks uniform-random
-// value in [Min, Max] when the cast lands. Any incoming damage > 0
-// wakes the sleeper and clears their SleepTurns counter.
+// Stun-related cast chances. The Sleep/Stun duration constants moved
+// up to the "Status duration bounds" block earlier in this file so
+// every status-duration tunable sits together; only the proc-chance
+// gates remain here. Stun is the "skip your next turn" status:
+// unlike Sleep, it does NOT clear on incoming damage — the target
+// is locked for the full rolled duration. Tuned short (1–2 turns)
+// because it's strictly upside for the player; the proc gate
+// (quality) controls frequency, not the duration. PowerStrikeStunChance
+// is the conditional roll fired inside applyPowerStrike on
+// Great/Excellent grades.
 const (
-	SleepMinTurns = 2
-	SleepMaxTurns = 5
+	// PowerStrikeStunChance is the retired prototype skill's stun
+	// gate. Kept as a constant in case external balance tools refer
+	// to it by name; new content should reference the per-class
+	// chances below.
+	PowerStrikeStunChance = 0.40
+	// CrushingBlowStunChance gates the Warrior's signature heavy hit.
+	// Higher than PowerStrike's prototype rate because the cost (3 MP)
+	// and damage (+4 base) are both more aggressive — a Great-or-better
+	// landing should reliably lock the target down.
+	CrushingBlowStunChance = 0.50
+	// FrostLanceStunChance gates the Wizard's freeze. ALWAYS lands on
+	// Great/Excellent (1.0 base) but the apply handler still goes
+	// through the same probability seam so a future "magic resist"
+	// stat can plug in at one place.
+	FrostLanceStunChance = 1.0
+	// VenomStrikePoisonChance gates the Thief's Poison apply. Tuned
+	// high so a clean sequence reliably lands the DoT; a Miss timing
+	// scales it down through the standard TimingBonusMult curve.
+	VenomStrikePoisonChance = 0.75
 )
 
 // XP / level constants. Per-character XP and levels (one pool + one
@@ -352,7 +502,13 @@ const (
 	LevelXPBase     = 100
 	LevelXPRatio    = 2.0
 	LevelStatPoints = 3
-	BaseLevel       = 1
+	// LevelSkillPoints is the number of skill points granted per
+	// level-up. Land on PartyMember.SkillPoints; the player spends
+	// them later from the Skills panel's tree UI via SpendSkillTier.
+	// Default 1 — each level reliably unlocks one tier somewhere in
+	// the tree, with no pressure to spend it immediately.
+	LevelSkillPoints = 1
+	BaseLevel        = 1
 )
 
 const (

@@ -89,17 +89,19 @@ ceiling:
 ################
 ################
 enemies:
-rat 6 1
-bat 7 1
-goblin 9 3
-rat 9 7
-bat 10 7
-goblin,goblin_mage 12 1
-amoeba 14 9
-rat 3 13
-bat,diseased_rat 4 13
-diseased_rat 5 13
-amoeba 1 13
+diseased_rat,bat 6 1
+vampire_bat,goblin 7 1
+goblin,skeleton 9 3
+stone_golem 9 7
+necromancer,skeleton 10 7
+goblin_mage,goblin,goblin 12 1
+cave_spider,goblin_mage 14 9
+diseased_rat,diseased_rat,bat 3 13
+cave_spider,goblin 4 13
+vampire_bat,vampire_bat 5 13
+amoeba,goblin_mage 1 13
+wisp 11 1
+cave_spider,cave_spider 8 9
 chests:
 doors:
 from_swamp swamp to_dungeon 2 1 east

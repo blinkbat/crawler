@@ -8,6 +8,7 @@ package editor
 import (
 	"crawler/internal/app/core"
 	"crawler/internal/app/render"
+	"fmt"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -56,6 +57,12 @@ type entityKind int
 
 const (
 	entityNone entityKind = iota
+	// entityClear erases any pack member, chest, or door at the clicked
+	// tile (the player start is anchored and not cleared by this brush).
+	// Mirrors right-click on the Entities layer but exposes the action
+	// as a first-class brush so authors can stay in left-click mode
+	// when they're doing a series of removals.
+	entityClear
 	entityPlayerStart
 	// entityAddEnemy appends a member to the pack at the clicked tile,
 	// creating a fresh pack if none is there yet. The specific kind to
@@ -85,6 +92,23 @@ const (
 // indices 0–8 within the active layer; brushes past index 8 keep
 // Hotkey: 0 (no keyboard binding — mouse-only) since we ran out of
 // 1–9 keys on the palette.
+// paletteLabels mirrors layerBrushes with the pre-formatted display
+// label ("1 Wall (#)", "2 Open (.)", ...) for each entry. Built once
+// at package init so the palette draw loop doesn't fmt.Sprintf the
+// same N strings every frame — palette content is static between
+// layer-table edits, so caching them here is safe.
+var paletteLabels [layerCount][]string
+
+func init() {
+	for layer, brushes := range layerBrushes {
+		labels := make([]string, len(brushes))
+		for i, b := range brushes {
+			labels[i] = fmt.Sprintf("%d %s", i+1, b.Name)
+		}
+		paletteLabels[layer] = labels
+	}
+}
+
 var layerBrushes = [layerCount][]Brush{
 	LayerWalls: {
 		{Name: "Wall (#)", Char: core.TileRock, Hotkey: rl.KeyOne, Color: rl.NewColor(96, 96, 110, 255)},
@@ -105,7 +129,7 @@ var layerBrushes = [layerCount][]Brush{
 	},
 	LayerDecor: {
 		{Name: "Auto", Char: core.DecorAuto, Hotkey: rl.KeyOne, Color: rl.NewColor(220, 224, 200, 255)},
-		{Name: "Force empty (_)", Char: core.DecorEmpty, Hotkey: rl.KeyTwo, Color: rl.NewColor(60, 64, 70, 255)},
+		{Name: "Force empty (_)", Char: core.DecorEmpty, Hotkey: rl.KeyTwo, Color: clearBrushColor},
 		{Name: "Bush (b)", Char: core.DecorBush, Hotkey: rl.KeyThree, Color: rl.NewColor(112, 142, 70, 255)},
 		{Name: "Mushroom (m)", Char: core.DecorMushroom, Hotkey: rl.KeyFour, Color: rl.NewColor(220, 100, 110, 255)},
 		{Name: "Pebble (p)", Char: core.DecorPebble, Hotkey: rl.KeyFive, Color: rl.NewColor(200, 192, 178, 255)},
@@ -131,9 +155,12 @@ var layerBrushes = [layerCount][]Brush{
 		{Name: "Roots (k)", Char: core.DecorRootCluster, Color: rl.NewColor(92, 68, 44, 255)},
 	},
 	LayerProps: {
-		{Name: "None (erase)", Char: core.TilePropEmpty, Hotkey: rl.KeyOne, Color: rl.NewColor(60, 64, 70, 255)},
+		{Name: "None (erase)", Char: core.TilePropEmpty, Hotkey: rl.KeyOne, Color: clearBrushColor},
 		{Name: "Tree (T)", Char: core.TileTree, Hotkey: rl.KeyTwo, Color: rl.NewColor(64, 140, 80, 255)},
 		{Name: "Tree XL (X)", Char: core.TileTreeXL, Hotkey: rl.KeyThree, Color: rl.NewColor(36, 96, 56, 255)},
+		{Name: "Tall Tree (|)", Char: core.TileTreeTall, Color: rl.NewColor(52, 118, 64, 255)},
+		{Name: "Twin Trees (@)", Char: core.TileTreeTwin, Color: rl.NewColor(58, 130, 72, 255)},
+		{Name: "Young Tree (/)", Char: core.TileTreeYoung, Color: rl.NewColor(96, 168, 102, 255)},
 		{Name: "Boulder (O)", Char: core.TileRockLarge, Hotkey: rl.KeyFour, Color: rl.NewColor(132, 110, 90, 255)},
 		{Name: "Bush large (B)", Char: core.TileBushLarge, Hotkey: rl.KeyFive, Color: rl.NewColor(112, 142, 70, 255)},
 		{Name: "Crate (C)", Char: core.TileCrate, Hotkey: rl.KeySix, Color: rl.NewColor(178, 130, 78, 255)},
@@ -169,23 +196,32 @@ var layerBrushes = [layerCount][]Brush{
 }
 
 // entityBrushHotkeys is the positional hotkey pool for enemy brushes on
-// LayerEntities. Slot 0 is reserved for Player Start (key 1); enemies
-// take slots 1..len-1 (keys 2..N). Past pool length, brushes get no
-// hotkey (mouse-only) — matching the convention on other layers.
-var entityBrushHotkeys = []int32{rl.KeyTwo, rl.KeyThree, rl.KeyFour, rl.KeyFive, rl.KeySix, rl.KeySeven, rl.KeyEight}
+// LayerEntities. Keys 1 and 2 are reserved for the Clear and Player
+// Start brushes respectively; enemies take Key3..KeyN. Past pool
+// length, brushes get no hotkey (mouse-only) — matching the convention
+// on other layers.
+var entityBrushHotkeys = []int32{rl.KeyThree, rl.KeyFour, rl.KeyFive, rl.KeySix, rl.KeySeven, rl.KeyEight, rl.KeyNine}
 
 // entityBrushColors is the per-enemy swatch tint. Falls back to a
 // neutral grey if a future kind isn't in the map — the swatch still
 // renders, just unstyled. Hand-tuned to keep adjacent foes visually
 // distinct on the grid.
 var entityBrushColors = map[core.EnemyKind]rl.Color{
-	core.EnemyRat:         rl.NewColor(220, 156, 96, 255),
-	core.EnemyBat:         rl.NewColor(160, 130, 220, 255),
-	core.EnemyDiseasedRat: rl.NewColor(140, 200, 90, 255),
-	core.EnemyGoblin:      rl.NewColor(132, 196, 110, 255),
-	core.EnemyGoblinMage:  rl.NewColor(220, 168, 244, 255),
-	core.EnemyAmoeba:      rl.NewColor(180, 200, 220, 255),
+	core.EnemyRat:          rl.NewColor(220, 156, 96, 255),
+	core.EnemyBat:          rl.NewColor(160, 130, 220, 255),
+	core.EnemyDiseasedRat:  rl.NewColor(140, 200, 90, 255),
+	core.EnemyGoblin:       rl.NewColor(132, 196, 110, 255),
+	core.EnemyGoblinMage:   rl.NewColor(220, 168, 244, 255),
+	core.EnemyAmoeba:       rl.NewColor(180, 200, 220, 255),
 	core.EnemyVenusMantrap: rl.NewColor(220, 124, 158, 255),
+	// Roster expansion. Distinct hues so the editor swatch doesn't
+	// blur with the existing set at a glance.
+	core.EnemyCaveSpider:  rl.NewColor(96, 60, 110, 255),   // deep purple — webby/venomous
+	core.EnemyVampireBat:  rl.NewColor(200, 70, 80, 255),   // crimson — blood drain identity
+	core.EnemyWisp:        rl.NewColor(180, 220, 255, 255), // cold ghostly blue
+	core.EnemyStoneGolem:  rl.NewColor(120, 116, 108, 255), // weathered stone
+	core.EnemyNecromancer: rl.NewColor(76, 84, 130, 255),   // robed shadow indigo
+	core.EnemySkeleton:    rl.NewColor(230, 226, 198, 255), // pale bone
 }
 
 // init asserts entityBrushColors covers every enemy kind — without
@@ -209,7 +245,8 @@ func init() {
 // Place Chest takes the next free hotkey.
 func buildEntityBrushes() []Brush {
 	brushes := []Brush{
-		{Name: "Player Start", Entity: entityPlayerStart, Hotkey: rl.KeyOne, Color: render.MarkerStart},
+		{Name: "Clear", Entity: entityClear, Hotkey: rl.KeyOne, Color: clearBrushColor},
+		{Name: "Player Start", Entity: entityPlayerStart, Hotkey: rl.KeyTwo, Color: render.MarkerStart},
 	}
 	defs := core.EnemyKinds()
 	for i, def := range defs {
@@ -279,6 +316,15 @@ const (
 	focusFilename
 	focusWidth
 	focusHeight
+	// New-map dialog text fields. Switch with Tab inside modalNew; the
+	// committed width / height live on State.modalNewWidth/Height (not
+	// the area, since the area hasn't been replaced yet at edit time).
+	focusNewWidth
+	focusNewHeight
+	// focusCustomEnemyName is the rename text field on the custom-
+	// enemy edit form (modalCustomEnemies). Routes through the same
+	// pumpPrintableASCII helper the door-name and area-name fields use.
+	focusCustomEnemyName
 	// Door-edit text-field foci. Switch with Tab inside modalDoorEdit;
 	// updateTextInput dispatches the keystrokes onto the right field of
 	// the active DoorSpawn via activeTextTarget.
@@ -325,6 +371,31 @@ const (
 	// area carries — same data the metadata badge surfaces, but
 	// uncapped so the author can see the full list at once.
 	modalValidate
+	// modalNew is the "New map" setup dialog. Lets the author pick a
+	// starting width / height and the default floor tile that fills the
+	// blank interior before the area is replaced. Opens from Ctrl+N /
+	// the topbar New button (after a confirmDirty bounce if the current
+	// area has unsaved edits).
+	modalNew
+	// modalCustomEnemies is the per-map custom-enemy authoring modal.
+	// CRUD for AreaDefinition.CustomEnemies: pick a base sprite, set stats,
+	// toggle skills, then add them to authored packs from the pack modal.
+	modalCustomEnemies
+	// modalEscMenu is the pause-style menu opened by pressing Esc on
+	// the editor canvas. Bridges the gap between "Esc = exit to title"
+	// (jarring on fullscreen, especially when the author wants to
+	// drop to Windowed without quitting) and the runtime's pause menu
+	// in adventure mode. Offers Display toggle, Continue, and Exit
+	// (which still bounces through modalConfirmDirty if the area has
+	// unsaved edits).
+	modalEscMenu
+	// modalCount is the count sentinel for the modalKind enum — used by
+	// the modalHandlers init assert in draw.go to walk every legal
+	// value and confirm the dispatch table is complete. Keep this row
+	// at the END of the enum so iota arithmetic is "count = last + 1."
+	// Not a dispatchable modal — modalHandlers must NOT have a row
+	// for it.
+	modalCount
 )
 
 type pendingAction int
@@ -365,6 +436,12 @@ type State struct {
 	// entry never overshoots the visible area. Stored per-layer so
 	// switching tabs doesn't reset what was off-screen.
 	paletteScroll [layerCount]float32
+	// metadataScroll is the vertical scroll offset (in pixels) applied
+	// to the right-hand MAP panel so its full layout (name, materials,
+	// quiet message, dimensions, start, facing, path, reachability) can
+	// be reached on shorter windows. Adjusted by mouse-wheel when the
+	// pointer is over the metadata panel and clamped by ScrollMetadata.
+	metadataScroll float32
 
 	focus      focusField
 	numericBuf string
@@ -385,6 +462,17 @@ type State struct {
 	// modalDoorIdx is the area.DoorSpawns index being edited when
 	// modal == modalDoorEdit. -1 outside the flow.
 	modalDoorIdx int
+	// New-map dialog state. modalNewWidth / modalNewHeight hold the
+	// in-progress dimensions (text-input commits write here, not the
+	// area); modalNewFloor is the chosen default floor char that
+	// blankArea will fill the interior with on confirm.
+	modalNewWidth  int
+	modalNewHeight int
+	modalNewFloor  byte
+	// modalCustomIdx is the AreaDefinition.CustomEnemies index of the
+	// currently selected entry in the custom-enemies modal. -1 means
+	// no selection (the form shows a "pick one" placeholder).
+	modalCustomIdx int
 	// modalValidateRows is the snapshot of warnings shown in
 	// modalValidate. Captured at open time so the read-only display
 	// doesn't reflow while the user is reading it.
@@ -437,6 +525,17 @@ type State struct {
 	testRequested     bool
 	awaitingOverwrite bool
 
+	// hideTileGlyphs toggles the per-tile char overlay in the grid.
+	// Default false → overlay is ON, since most authors want to see
+	// what's where. ALT (tapped on release with no other key pressed
+	// during the hold) flips it so the author can hide the glyphs to
+	// inspect raw cell color or take a clean screenshot. altChordUsed
+	// tracks whether ALT+something was pressed during the current Alt
+	// hold; if so we suppress the toggle on release so Alt+1..6 (layer
+	// jump) doesn't double-trigger the overlay flip.
+	hideTileGlyphs bool
+	altChordUsed   bool
+
 	// Ctrl+F5 "test from cursor" override: when testStartOverride is true,
 	// the run loop consumes testStartOverrideX/Z as the playtest's
 	// starting tile instead of area.StartTileX/Z. Reset by the run loop
@@ -451,6 +550,12 @@ type State struct {
 	// seed g.StepCount on F5 so the editor can author tile palettes that
 	// only read correctly at e.g. Dusk without playing a whole loop in.
 	previewPhase core.TimeOfDay
+
+	// contextMenu holds the in-flight right-click menu state. When open,
+	// updateContextMenu absorbs the frame's clicks until the user picks
+	// a row, clicks outside, or presses Esc — see context.go for the
+	// row-build / dispatcher pair.
+	contextMenu contextMenuState
 
 	rect layoutRect
 }
@@ -468,10 +573,34 @@ type layoutRect struct {
 	gridH     float32
 }
 
+// tileCorner returns the screen-space top-left corner of grid tile
+// (tx, tz) under the current zoom/pan. The single source of truth for
+// the "tile coord → screen" math: any future change to centering,
+// zoom anchoring, or panel layout updates this one helper instead of
+// rewriting 20+ open-coded `s.rect.gridX + float32(tx)*cell` sites.
+func (r layoutRect) tileCorner(tx, tz int) (float32, float32) {
+	return r.gridX + float32(tx)*r.cellPx, r.gridY + float32(tz)*r.cellPx
+}
+
+// tileCenter is tileCorner shifted by half a cell — gives the
+// pixel-space center of a tile, which is what marker glyphs / arrows /
+// pack badges anchor on.
+func (r layoutRect) tileCenter(tx, tz int) (float32, float32) {
+	return r.gridX + (float32(tx)+0.5)*r.cellPx, r.gridY + (float32(tz)+0.5)*r.cellPx
+}
+
+// tileRect returns a screen-space rl.Rectangle covering a single
+// tile. Convenience wrapper around tileCorner for the common
+// "DrawRectangleRec" pattern.
+func (r layoutRect) tileRect(tx, tz int) rl.Rectangle {
+	x, y := r.tileCorner(tx, tz)
+	return rl.NewRectangle(x, y, r.cellPx, r.cellPx)
+}
+
 // Area returns a copy of the area currently being edited. Used by the run
 // loop's F5 playtest path to spin up a GameState from in-memory edits.
 func (s State) Area() core.AreaDefinition {
-	return cloneArea(s.area)
+	return core.CloneArea(s.area)
 }
 
 // ReachabilityWarnings runs reachabilityWarnings against the current
@@ -507,9 +636,14 @@ func (s *State) ClearTestStartOverride() {
 	s.testStartOverride = false
 }
 
-// New starts the editor with a blank 16x16 map.
+// New starts the editor with a blank default-sized map filled with
+// FloorAuto. Used by the run loop's "open the editor from the title
+// screen" path; the in-editor New flow goes through modalNew so the
+// author can pick the size and default floor up-front. Size routes
+// through core.DefaultNewMapDimension so both entry points stay in
+// lockstep on what a fresh map looks like.
 func New() State {
-	return freshState(blankArea(16, 16))
+	return freshState(blankArea(core.DefaultNewMapDimension, core.DefaultNewMapDimension, core.FloorAuto))
 }
 
 // NewFromArea opens the editor on an already-loaded area.
@@ -519,23 +653,24 @@ func NewFromArea(a core.AreaDefinition) State {
 
 func freshState(a core.AreaDefinition) State {
 	return State{
-		area:          a,
-		baseline:      cloneArea(a),
-		layer:         LayerWalls,
-		brushSize:     1,
-		zoom:          1,
-		gridCursorX:   -1,
-		gridCursorZ:   -1,
-		hoverX:        -1,
-		hoverZ:        -1,
-		dragPackIdx:   -1,
-		modalPackIdx:  -1,
-		modalChestIdx: -1,
-		modalDoorIdx:  -1,
+		area:           a,
+		baseline:       core.CloneArea(a),
+		layer:          LayerWalls,
+		brushSize:      1,
+		zoom:           1,
+		gridCursorX:    -1,
+		gridCursorZ:    -1,
+		hoverX:         -1,
+		hoverZ:         -1,
+		dragPackIdx:    -1,
+		modalPackIdx:   -1,
+		modalChestIdx:  -1,
+		modalDoorIdx:   -1,
+		modalCustomIdx: -1,
 	}
 }
 
-func blankArea(w, h int) core.AreaDefinition {
+func blankArea(w, h int, floorChar byte) core.AreaDefinition {
 	walls := make([]string, h)
 	floor := make([]string, h)
 	decor := make([]string, h)
@@ -551,7 +686,7 @@ func blankArea(w, h int) core.AreaDefinition {
 			}
 		}
 		walls[z] = string(wb)
-		floor[z] = blankRow(w, core.FloorAuto)
+		floor[z] = blankRow(w, floorChar)
 		decor[z] = blankRow(w, core.DecorAuto)
 		props[z] = blankRow(w, core.TilePropEmpty)
 		ceiling[z] = blankRow(w, core.TileCeilingOpen)
@@ -605,6 +740,12 @@ func Update(s *State, dt float32) Action {
 	if s.focus != focusNone {
 		updateTextInput(s)
 		if rl.IsMouseButtonPressed(rl.MouseLeftButton) && !pointIn(rl.GetMousePosition(), s.activeFieldRect()) {
+			// Click-outside-defocus needs to run the same finalization
+			// the Enter/Tab paths do — the custom-enemy name field
+			// can't drop focus on a duplicate without resolving the
+			// name uniqueness, otherwise two defs share a mapfile
+			// row key and the saver silently keeps only one.
+			finalizeFocusedField(s)
 			s.focus = focusNone
 		}
 		return ActionNone
@@ -636,9 +777,18 @@ func Update(s *State, dt float32) Action {
 		return ActionTest
 	}
 
-	exit := s.exitRequested || rl.IsKeyPressed(rl.KeyEscape)
-	s.exitRequested = false
-	if exit {
+	// Esc no longer exits the editor directly — it opens the editor
+	// pause menu (modalEscMenu) where the author can choose to flip
+	// display mode, continue, or actually exit. The exitRequested
+	// path (set by topbar button or other in-code triggers) still
+	// fires the dirty-bounce-then-exit flow so external callers
+	// don't have to know about the menu detour.
+	if editorCancelPressed() {
+		openModal(s, modalEscMenu)
+		return ActionNone
+	}
+	if s.exitRequested {
+		s.exitRequested = false
 		if s.dirty {
 			s.pending = pendingExitToTitle
 			s.modal = modalConfirmDirty
@@ -652,30 +802,12 @@ func Update(s *State, dt float32) Action {
 
 // canPlaytest is the strict subset of reachability checks that MUST pass
 // before we'll drop into adventure mode — anything that would crash or
-// soft-lock the player on entry.
+// soft-lock the player on entry. Delegates to startTileBlocker so the
+// playtest gate and the reachability warnings stay perfectly in sync;
+// a future blocker (e.g. lava) added to BlockedAt lands both paths via
+// one edit.
 func canPlaytest(a core.AreaDefinition) bool {
-	if a.StartTileZ < 0 || a.StartTileZ >= a.Height {
-		return false
-	}
-	if a.StartTileX < 0 || a.StartTileX >= a.Width {
-		return false
-	}
-	// BlockedAt covers walls, blocking props, AND deep water — any of
-	// those at the start tile would soft-lock the player on spawn.
-	// Routes through one helper so a future blocker (e.g. lava) lands
-	// the playtest check automatically.
-	if a.BlockedAt(a.StartTileX, a.StartTileZ) {
-		return false
-	}
-	// A chest at the start tile gets silently dropped by core.placeChests
-	// at runtime — refuse the playtest so the author sees the data-loss
-	// problem instead of wondering where the chest went. Editor's
-	// placeChestAt already refuses this configuration; this catches
-	// legacy / hand-edited .map files.
-	if core.ChestSpawnIndexAt(a.ChestSpawns, a.StartTileX, a.StartTileZ) >= 0 {
-		return false
-	}
-	return true
+	return startTileBlocker(a) == ""
 }
 
 // statusLogLifetime is the seed duration for a flash() entry's timer.

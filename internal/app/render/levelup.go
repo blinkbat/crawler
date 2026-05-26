@@ -2,16 +2,17 @@ package render
 
 import (
 	"crawler/internal/app/core"
-	"fmt"
+	"strconv"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// DrawLevelUpModal paints the post-battle stat-spend dialog. Shows the
-// current member's name, level, remaining points, and the six spendable
-// stats with current values. Selected row is highlighted via
-// DrawSelectedRow so the visual style matches every other in-game list
-// modal. Rendered after the world / HUD so it sits on top.
+// DrawLevelUpModal paints the post-battle stat-spend dialog. Each
+// stat row shows label + description + the running "current → new"
+// preview that reflects the player's staged pending picks. A skill-
+// point row sits below the stats; a final Apply row commits the
+// staged changes. Nothing actually lands on the member's stat block
+// until Apply is confirmed.
 func DrawLevelUpModal(g core.GameState, assets Resources) {
 	if !g.LevelUpOpen {
 		return
@@ -22,23 +23,76 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 	m := g.Party[g.LevelUpMember]
 
 	font := assets.Font()
-	header := fmt.Sprintf("LEVEL UP — %s", m.Name)
-	card := drawModalScaffold(font, overlayCardWidthMedium, overlayCardHeightSmall, header)
+	header := "LEVEL UP — " + m.Name
+	card := drawModalScaffold(font, overlayCardWidthLarge, overlayCardHeightLarge, header)
 	cardX, cardY := int32(card.X), int32(card.Y)
 	cardW, cardH := int32(card.Width), int32(card.Height)
 
-	// Sub-header: level + remaining points.
-	sub := fmt.Sprintf("Level %d — %d points to spend", m.Level, m.PendingLevelUps)
-	drawTextWithShadow(font, sub, float32(cardX+18), float32(cardY+44), 16, textMuted)
+	// Sub-header: a single bright readout of the stat-point budget,
+	// with the skill-point reminder dimmed to a second line so the
+	// primary action (spend stats) stays the loudest signal.
+	staged := core.SumStatPending(g.LevelUpPending)
+	statRemaining := m.PendingLevelUps - staged
+	primary := "Stat points: " + strconv.Itoa(statRemaining) + " remaining"
+	if staged > 0 {
+		primary += "   ·   " + strconv.Itoa(staged) + " staged"
+	}
+	drawTextWithShadow(font, primary, float32(cardX+22), float32(cardY+46), FontBody, textPrimary)
+	if m.SkillPoints > 0 {
+		secondary := strconv.Itoa(m.SkillPoints) + " skill pt" + pluralS(m.SkillPoints) + " banked — spend in the Skills tab"
+		drawTextWithShadow(font, secondary, float32(cardX+22), float32(cardY+72), FontTiny, inkAccent)
+	}
 
-	// Stat rows.
-	rowY := cardY + 80
-	rowH := int32(36)
+	// Stat rows. Each row is taller (52px) so the label, description,
+	// and preview don't collide at smaller widths. Layout per row:
+	//   left: LABEL (FontBody)
+	//   left + indent: description (FontTiny, dim)
+	//   right: current → new (FontBody, bright when staged)
+	rowY := cardY + 102
+	rowH := int32(52)
 	rowX := cardX + 24
 	rowW := cardW - 48
 	for s := core.Stat(0); s < core.StatCount; s++ {
-		focused := s == g.LevelUpStat
-		rect := rl.NewRectangle(float32(rowX-6), float32(rowY-4), float32(rowW+12), float32(rowH))
+		focused := g.LevelUpRowCursor == int(s)
+		rect := rl.NewRectangle(float32(rowX-6), float32(rowY-4), float32(rowW+12), float32(rowH-6))
+		if focused {
+			DrawSelectedRow(rect)
+		} else {
+			drawSmallPanel(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), fadeColor(glassDeep, 0.45))
+		}
+		col := textMuted
+		if focused {
+			col = textPrimary
+		}
+		label := core.StatLabel(s)
+		cur := core.StatValue(m.Stats, s)
+		pending := g.LevelUpPending[s]
+
+		drawTextWithShadow(font, label, float32(rowX+4), float32(rowY+2), FontBody, col)
+		if desc := core.StatDescription(s); desc != "" {
+			drawTextWithShadow(font, desc, float32(rowX+58), float32(rowY+26), FontTiny, textHint)
+		}
+
+		var preview string
+		previewCol := col
+		if pending > 0 {
+			preview = strconv.Itoa(cur) + "  →  " + strconv.Itoa(cur+pending) + "   (+" + strconv.Itoa(pending) + ")"
+			previewCol = inkAccent
+		} else {
+			preview = strconv.Itoa(cur)
+		}
+		rm := rl.MeasureTextEx(font, preview, FontBody, 1)
+		drawTextWithShadow(font, preview, float32(rowX)+float32(rowW)-rm.X-10, float32(rowY+2), FontBody, previewCol)
+		rowY += rowH
+	}
+
+	// Apply button row. Tinted warm to read as a commit action.
+	{
+		rowY += 6
+		focused := g.LevelUpRowCursor == core.LevelUpApplyRowIndex
+		rect := rl.NewRectangle(float32(rowX-6), float32(rowY-4), float32(rowW+12), float32(rowH-6))
+		applyBG := core.MixColor(glassDeep, glassWarm, 0.45)
+		drawSmallPanel(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), applyBG)
 		if focused {
 			DrawSelectedRow(rect)
 		}
@@ -46,22 +100,30 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 		if focused {
 			col = textPrimary
 		}
-		left := core.StatLabel(s)
-		right := fmt.Sprintf("%d", core.StatValue(m.Stats, s))
-		drawTextWithShadow(font, left, float32(rowX), float32(rowY), 20, col)
-		rm := rl.MeasureTextEx(font, right, 20, 1)
-		drawTextWithShadow(font, right, float32(rowX)+float32(rowW)-rm.X-6, float32(rowY), 20, col)
-		rowY += rowH
+		label := "Apply changes"
+		if statRemaining > 0 {
+			label = "Apply changes — " + strconv.Itoa(statRemaining) + " unspent"
+		}
+		drawTextWithShadow(font, label, float32(rowX+4), float32(rowY+10), FontBody, col)
 	}
 
-	// VIT spend note: callers should know levels of VIT immediately raise
-	// MaxHP + heal the difference, so a fresh level-up isn't a slow grind
-	// back to full.
-	note := "VIT raises MaxHP and heals the difference."
-	drawTextWithShadow(font, note, float32(cardX+18), float32(cardY+cardH-50), 12, textHint)
-	DrawFooterHint(font, "Up/Down pick   Enter spend",
-		float32(cardX+cardW/2), float32(cardY+cardH-22), 13)
+	// VIT note removed — the per-stat description column already
+	// surfaces "Max HP (+2 per point)" on the VIT row itself.
+	DrawFooterHint(font, "Up/Down pick   Z stage   X undo   Enter apply",
+		float32(cardX+cardW/2), float32(cardY+cardH-22), FontTiny)
 }
+
+// pluralS returns "" or "s" for short pluralisation. Local to the
+// modal since both call sites here use the bare suffix variant.
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// levelUpStagedTotal retired — core.SumStatPending is the single seam
+// shared with explore.updateLevelUpModal.
 
 // (DrawPartyStatsScreen was retired in favor of the panels overlay's
 // Stats tab — DrawPanelsOverlay handles the multi-tab dashboard,

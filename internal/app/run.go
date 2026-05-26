@@ -76,7 +76,7 @@ func Run() {
 		case sceneTitle:
 			title.Draw(state.title, assets)
 		case sceneAdventure:
-			drawAdventureScene(state.game, assets)
+			drawAdventureScene(&state.game, assets)
 		case sceneEditor:
 			editor.Draw(&state.editor, assets)
 		}
@@ -123,9 +123,23 @@ func updateAdventureScene(state *appState) {
 			state.scene = sceneEditor
 			return
 		}
-		state.scene = sceneTitle
-		state.title = title.New()
+		returnToTitleScene(state)
 	}
+}
+
+// returnToTitleScene resets the active scene to the title menu and
+// rebuilds a fresh title.State. Both the adventure-quit path and the
+// editor's ExitToTitle path land here so the "back to title" rule
+// (scene flag + title re-init) lives in one place rather than being
+// duplicated across two scene updaters.
+func returnToTitleScene(state *appState) {
+	state.scene = sceneTitle
+	state.title = title.New()
+	// Drop any lingering render-side particles — the title scene
+	// doesn't draw the adventure pipeline, so the pool would freeze
+	// mid-animation and thaw onto the next adventure entry at stale
+	// world positions.
+	render.ResetParticles()
 }
 
 // applyAreaTransition loads the destination map and rebuilds the
@@ -182,6 +196,11 @@ func applyAreaTransition(g *core.GameState) error {
 	x, z := doorExitTile(next.Area, next.Doors, *dest)
 	next.Player = core.NewPlayer(x, z, dest.Facing)
 	*g = next
+	// Signal the render layer to drop any lingering particles —
+	// formation-relative VFX from a fight that ended just before
+	// the door step would otherwise drift through the new area's
+	// camera view.
+	core.RequestVFXReset(g)
 	return nil
 }
 
@@ -217,8 +236,7 @@ func errDoorNotFound(mapID, doorName string) error {
 func updateEditorScene(state *appState, dt float32) {
 	switch editor.Update(&state.editor, dt) {
 	case editor.ActionExitToTitle:
-		state.scene = sceneTitle
-		state.title = title.New()
+		returnToTitleScene(state)
 	case editor.ActionTest:
 		// Build a runtime GameState from the in-memory area without
 		// touching disk. The editor's State stays intact so we land back
@@ -242,23 +260,29 @@ func updateEditorScene(state *appState, dt float32) {
 	}
 }
 
-func drawAdventureScene(game core.GameState, assets render.Resources) {
-	camera := render.Camera(game.Player)
+func drawAdventureScene(game *core.GameState, assets render.Resources) {
+	camera := render.Camera(*game)
 	rl.ClearBackground(rl.NewColor(87, 172, 244, 255))
-	render.DrawSkyBackground(assets, game)
+	render.DrawSkyBackground(assets, *game)
 	rl.BeginMode3D(camera)
-	render.DrawWorld(camera, game, assets)
-	render.DrawChests(camera, game, assets)
-	render.DrawDoors(camera, game, assets)
-	render.DrawEnemies(camera, game, assets)
-	render.DrawPartySprites(camera, game, assets)
+	render.DrawWorld(camera, *game, assets)
+	render.DrawChests(camera, *game, assets)
+	render.DrawDoors(camera, *game, assets)
+	render.DrawEnemies(camera, *game, assets)
+	render.DrawPartySprites(camera, *game, assets)
+	// VFX inside the 3D pass so billboard particles depth-sort with
+	// the rest of the scene. TickAndDrawVFX drains GameState.VFXQueue
+	// (mutating g), advances the render-side pool by raylib's frame
+	// dt, and emits draws for every live particle. Kept after the
+	// party draw so impact sparks paint over the sprite, not under.
+	render.TickAndDrawVFX(camera, game)
 	rl.EndMode3D()
-	render.DrawChestPrompt(camera, game, assets)
-	render.DrawDamagePopups(camera, game, assets)
-	render.DrawQualityPopup(camera, game, assets)
-	render.DrawDebugOverlay(camera, game, assets)
-	render.DrawOverlay(game, assets)
-	render.DrawChestModal(game, assets)
-	render.DrawLevelUpModal(game, assets)
-	render.DrawPanelsOverlay(game, assets)
+	render.DrawChestPrompt(camera, *game, assets)
+	render.DrawDamagePopups(camera, *game, assets)
+	render.DrawQualityPopup(camera, *game, assets)
+	render.DrawDebugOverlay(camera, *game, assets)
+	render.DrawOverlay(*game, assets)
+	render.DrawChestModal(*game, assets)
+	render.DrawLevelUpModal(*game, assets)
+	render.DrawPanelsOverlay(*game, assets)
 }

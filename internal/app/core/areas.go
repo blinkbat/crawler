@@ -38,8 +38,9 @@ func MapsDir() string {
 // form for the first-run case so the caller's first write creates it
 // where the user is.
 //
-// Used by core.MapsDir, audio.SoundsDir, and any future asset-folder
-// helper so the resolution machinery isn't duplicated per asset type.
+// Used by core.MapsDir, audio/userconfig.SoundsDir, and any future
+// asset-folder helper so the resolution machinery isn't duplicated
+// per asset type.
 func ResolveAssetDir(rel string) string {
 	if DirExists(rel) {
 		return rel
@@ -112,18 +113,30 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	if mf.StartX < 0 || mf.StartX >= mf.Width || mf.StartZ < 0 || mf.StartZ >= mf.Height {
 		return AreaDefinition{}, fmt.Errorf("start position (%d,%d) is out of bounds for %dx%d", mf.StartX, mf.StartZ, mf.Width, mf.Height)
 	}
+	customs := make([]CustomEnemyDef, 0, len(mf.CustomEnemies))
+	for _, ce := range mf.CustomEnemies {
+		def, err := CustomEnemyDefFromMap(ce)
+		if err != nil {
+			return AreaDefinition{}, err
+		}
+		customs = append(customs, def)
+	}
 	spawns := make([]PackSpawn, 0, len(mf.Packs))
 	for _, p := range mf.Packs {
 		if len(p.Members) == 0 {
 			return AreaDefinition{}, fmt.Errorf("pack at (%d,%d) has no members", p.X, p.Z)
 		}
-		members := make([]EnemyKind, 0, len(p.Members))
+		members := make([]PackMemberRef, 0, len(p.Members))
 		for _, name := range p.Members {
-			kind, ok := EnemyKindFromName(name)
-			if !ok {
-				return AreaDefinition{}, fmt.Errorf("unknown enemy kind %q", name)
+			if kind, ok := EnemyKindFromName(name); ok {
+				members = append(members, BuiltinPackMember(kind))
+				continue
 			}
-			members = append(members, kind)
+			def, ok := CustomEnemyByName(customs, name)
+			if !ok {
+				return AreaDefinition{}, fmt.Errorf("unknown enemy kind or custom enemy %q", name)
+			}
+			members = append(members, CustomPackMember(def))
 		}
 		spawns = append(spawns, PackSpawn{TileX: p.X, TileZ: p.Z, Members: members})
 	}
@@ -171,23 +184,24 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		ceiling = mapfile.BlankLayer(mf.Width, mf.Height, TileCeilingOpen)
 	}
 	return AreaDefinition{
-		Path:         path,
-		Name:         mf.Name,
-		Width:        mf.Width,
-		Height:       mf.Height,
-		Walls:        append([]string(nil), mf.Walls...),
-		Floor:        append([]string(nil), mf.Floor...),
-		Decor:        append([]string(nil), mf.Decor...),
-		Props:        append([]string(nil), mf.Props...),
-		Ceiling:      append([]string(nil), ceiling...),
-		Materials:    mat,
-		StartTileX:   mf.StartX,
-		StartTileZ:   mf.StartZ,
-		StartFacing:  face,
-		PackSpawns:   spawns,
-		ChestSpawns:  chests,
-		DoorSpawns:   doors,
-		QuietMessage: mf.Quiet,
+		Path:          path,
+		Name:          mf.Name,
+		Width:         mf.Width,
+		Height:        mf.Height,
+		Walls:         append([]string(nil), mf.Walls...),
+		Floor:         append([]string(nil), mf.Floor...),
+		Decor:         append([]string(nil), mf.Decor...),
+		Props:         append([]string(nil), mf.Props...),
+		Ceiling:       append([]string(nil), ceiling...),
+		Materials:     mat,
+		StartTileX:    mf.StartX,
+		StartTileZ:    mf.StartZ,
+		StartFacing:   face,
+		PackSpawns:    spawns,
+		ChestSpawns:   chests,
+		DoorSpawns:    doors,
+		CustomEnemies: customs,
+		QuietMessage:  mf.Quiet,
 	}, nil
 }
 
@@ -208,10 +222,21 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 	packs := make([]mapfile.MapPack, 0, len(a.PackSpawns))
 	for _, s := range a.PackSpawns {
 		names := make([]string, 0, len(s.Members))
-		for _, kind := range s.Members {
-			name, ok := EnemyKindName(kind)
+		for _, member := range s.Members {
+			if customName := member.CustomName; customName != "" {
+				safeName := SanitizeCustomEnemyName(customName)
+				if safeName == "" {
+					return mapfile.MapFile{}, fmt.Errorf("custom enemy member at (%d,%d) has empty name after sanitize", s.TileX, s.TileZ)
+				}
+				if _, ok := CustomEnemyByName(a.CustomEnemies, safeName); !ok {
+					return mapfile.MapFile{}, fmt.Errorf("unknown custom enemy %q in pack at (%d,%d)", customName, s.TileX, s.TileZ)
+				}
+				names = append(names, safeName)
+				continue
+			}
+			name, ok := EnemyKindName(member.Kind)
 			if !ok {
-				return mapfile.MapFile{}, fmt.Errorf("unknown enemy kind %d in pack at (%d,%d)", int(kind), s.TileX, s.TileZ)
+				return mapfile.MapFile{}, fmt.Errorf("unknown enemy kind %d in pack at (%d,%d)", int(member.Kind), s.TileX, s.TileZ)
 			}
 			names = append(names, name)
 		}
@@ -263,23 +288,32 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 	if len(ceiling) == 0 {
 		ceiling = mapfile.BlankLayer(a.Width, a.Height, TileCeilingOpen)
 	}
+	customs := make([]mapfile.MapCustomEnemy, 0, len(a.CustomEnemies))
+	for _, ce := range a.CustomEnemies {
+		mapCE, err := MapCustomEnemyFromDef(ce)
+		if err != nil {
+			return mapfile.MapFile{}, err
+		}
+		customs = append(customs, mapCE)
+	}
 	return mapfile.MapFile{
-		Name:      a.Name,
-		Materials: matName,
-		Quiet:     a.QuietMessage,
-		Width:     a.Width,
-		Height:    a.Height,
-		StartX:    a.StartTileX,
-		StartZ:    a.StartTileZ,
-		StartFace: faceName,
-		Walls:     append([]string(nil), a.Walls...),
-		Floor:     append([]string(nil), a.Floor...),
-		Decor:     append([]string(nil), a.Decor...),
-		Props:     append([]string(nil), a.Props...),
-		Ceiling:   append([]string(nil), ceiling...),
-		Packs:     packs,
-		Chests:    chests,
-		Doors:     doors,
+		Name:          a.Name,
+		Materials:     matName,
+		Quiet:         a.QuietMessage,
+		Width:         a.Width,
+		Height:        a.Height,
+		StartX:        a.StartTileX,
+		StartZ:        a.StartTileZ,
+		StartFace:     faceName,
+		Walls:         append([]string(nil), a.Walls...),
+		Floor:         append([]string(nil), a.Floor...),
+		Decor:         append([]string(nil), a.Decor...),
+		Props:         append([]string(nil), a.Props...),
+		Ceiling:       append([]string(nil), ceiling...),
+		Packs:         packs,
+		Chests:        chests,
+		Doors:         doors,
+		CustomEnemies: customs,
 	}, nil
 }
 
@@ -348,10 +382,10 @@ type facingNameEntry struct {
 }
 
 var facingNameTable = []facingNameEntry{
-	{North, "north"},
-	{East, "east"},
-	{South, "south"},
-	{West, "west"},
+	{North, mapfile.FacingNorthName},
+	{East, mapfile.FacingEastName},
+	{South, mapfile.FacingSouthName},
+	{West, mapfile.FacingWestName},
 }
 
 // FacingShortLabels returns the single-letter UI labels for the four
@@ -420,6 +454,15 @@ var enemyKindNameTable = []enemyKindNameEntry{
 	{EnemyGoblinMage, "goblin_mage", []string{"goblinmage"}},
 	{EnemyAmoeba, "amoeba", nil},
 	{EnemyVenusMantrap, "venus_mantrap", []string{"mantrap", "venusmantrap"}},
+	// Roster expansion. Canonical names use the snake_case convention
+	// the parser already enforces; aliases cover the no-underscore form
+	// for hand-edited maps.
+	{EnemyCaveSpider, "cave_spider", []string{"spider", "cavespider"}},
+	{EnemyVampireBat, "vampire_bat", []string{"vampirebat"}},
+	{EnemyWisp, "wisp", []string{"will_o_wisp", "willowisp"}},
+	{EnemyStoneGolem, "stone_golem", []string{"golem", "stonegolem"}},
+	{EnemyNecromancer, "necromancer", []string{"necro"}},
+	{EnemySkeleton, "skeleton", nil},
 }
 
 // enemyKindByName flattens enemyKindNameTable into a single primary+alias
@@ -484,14 +527,14 @@ func SanitizeFilename(name, fallback string) string {
 }
 
 // MapPath returns the canonical save path for a map ID under MapsDir.
-// Strips a trailing ".map" (case-insensitive) from the id before appending
-// the canonical ".map" extension — so a user typing "test.map" in the
-// Save As field writes to maps/test.map, not maps/test.map.map.
+// Strips a trailing extension (case-insensitive) from the id before
+// reappending mapfile.Ext — so a user typing "test.map" in the Save
+// As field writes to maps/test.map, not maps/test.map.map.
 func MapPath(id string) string {
-	if len(id) >= 4 && strings.EqualFold(id[len(id)-4:], ".map") {
-		id = id[:len(id)-4]
+	if n := len(mapfile.Ext); len(id) >= n && strings.EqualFold(id[len(id)-n:], mapfile.Ext) {
+		id = id[:len(id)-n]
 	}
-	return filepath.Join(MapsDir(), id+".map")
+	return filepath.Join(MapsDir(), id+mapfile.Ext)
 }
 
 // MapIDFromPath strips the directory and .map extension off a map path.

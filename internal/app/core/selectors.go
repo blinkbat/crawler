@@ -6,14 +6,80 @@ type TurnEntry struct {
 	Enemy bool
 }
 
-func LivingPartyCount(party []PartyMember) int {
-	count := 0
-	for _, member := range party {
-		if member.HP > 0 {
-			count++
+// --- Generic walking primitives ----------------------------------------
+//
+// Five small helpers fold the eight party walkers + three battle-enemy
+// walkers that used to inline the same loop shape with different
+// predicates. The public functions below (LivingPartyCount,
+// FirstLivingPartyMember, WrapNextAvailablePartyMember, etc.) all
+// resolve through these so a future "filter by class / status" needs
+// one new predicate + one new wrapper, not another hand-rolled loop.
+
+// indicesWhere returns the indices of every element matching `pred`.
+func indicesWhere[T any](slice []T, pred func(T) bool) []int {
+	out := make([]int, 0, len(slice))
+	for i, v := range slice {
+		if pred(v) {
+			out = append(out, i)
 		}
 	}
-	return count
+	return out
+}
+
+// countWhere returns the number of elements matching `pred`.
+func countWhere[T any](slice []T, pred func(T) bool) int {
+	n := 0
+	for _, v := range slice {
+		if pred(v) {
+			n++
+		}
+	}
+	return n
+}
+
+// nextWhere returns the first index ≥ start where pred is true, or -1.
+// Clamps start to 0 for negative inputs so a fresh "find the first
+// matching slot" caller can pass -1 / 0 interchangeably.
+func nextWhere[T any](slice []T, start int, pred func(T) bool) int {
+	if start < 0 {
+		start = 0
+	}
+	for i := start; i < len(slice); i++ {
+		if pred(slice[i]) {
+			return i
+		}
+	}
+	return -1
+}
+
+// wrapNextWhere walks forward from `start`, wrapping to index 0 once
+// it falls off the end, and returns the first matching index. Returns
+// -1 only when no element matches.
+func wrapNextWhere[T any](slice []T, start int, pred func(T) bool) int {
+	if len(slice) == 0 {
+		return -1
+	}
+	start = WrapIndex(start, len(slice))
+	for offset := 0; offset < len(slice); offset++ {
+		i := WrapIndex(start+offset, len(slice))
+		if pred(slice[i]) {
+			return i
+		}
+	}
+	return -1
+}
+
+// partyAlive / partyAvailable / enemyAlive are the canonical predicates
+// the walkers feed through indicesWhere / countWhere / nextWhere /
+// wrapNextWhere. Lifting them out keeps the "alive AND not ingested"
+// definition in one spot — earlier passes inlined the `HP > 0 &&
+// !Ingested` check at every call site.
+func partyAlive(m PartyMember) bool     { return m.HP > 0 }
+func partyAvailable(m PartyMember) bool { return m.HP > 0 && !m.Ingested }
+func enemyAlive(e Enemy) bool           { return e.Alive }
+
+func LivingPartyCount(party []PartyMember) int {
+	return countWhere(party, partyAlive)
 }
 
 func PartyMemberAlive(party []PartyMember, index int) bool {
@@ -38,13 +104,7 @@ func PartyMemberAvailable(party []PartyMember, index int) bool {
 // zero, the encounter ends (a party that's all ingested has nobody to
 // continue the fight, same effect as a wipe).
 func ActivePartyCount(party []PartyMember) int {
-	count := 0
-	for i := range party {
-		if PartyMemberAvailable(party, i) {
-			count++
-		}
-	}
-	return count
+	return countWhere(party, partyAvailable)
 }
 
 // WrapNextAvailablePartyMember walks the party forward from `start`,
@@ -53,17 +113,7 @@ func ActivePartyCount(party []PartyMember) int {
 // available. Used by the enemy attack cursor so a swallowed prey
 // doesn't get bitten on top of the lockout.
 func WrapNextAvailablePartyMember(party []PartyMember, start int) int {
-	if len(party) == 0 {
-		return -1
-	}
-	start = WrapIndex(start, len(party))
-	for offset := 0; offset < len(party); offset++ {
-		i := WrapIndex(start+offset, len(party))
-		if PartyMemberAvailable(party, i) {
-			return i
-		}
-	}
-	return -1
+	return wrapNextWhere(party, start, partyAvailable)
 }
 
 // AvailablePartyTargets returns the indices of every member who can be
@@ -72,13 +122,7 @@ func WrapNextAvailablePartyMember(party []PartyMember, start int) int {
 // use) route through this so a Cleric can't waste a Prayer trying to
 // reach the prey inside a mantrap.
 func AvailablePartyTargets(party []PartyMember) []int {
-	targets := make([]int, 0, len(party))
-	for i := range party {
-		if PartyMemberAvailable(party, i) {
-			targets = append(targets, i)
-		}
-	}
-	return targets
+	return indicesWhere(party, partyAvailable)
 }
 
 // FirstAvailablePartyMember is the alive-and-not-ingested companion to
@@ -86,12 +130,7 @@ func AvailablePartyTargets(party []PartyMember) []int {
 // a usable target (Ingest, Sleep) but the picker's preferred index was
 // already out of reach.
 func FirstAvailablePartyMember(party []PartyMember) int {
-	for i := range party {
-		if PartyMemberAvailable(party, i) {
-			return i
-		}
-	}
-	return -1
+	return nextWhere(party, 0, partyAvailable)
 }
 
 // MantrapHasPrey reports whether any party member is currently being
@@ -115,7 +154,7 @@ func ReleaseIngestedBy(party []PartyMember, slot int) []int {
 	for i := range party {
 		if party[i].Ingested && party[i].IngestedBy == slot {
 			party[i].Ingested = false
-			party[i].IngestedBy = 0
+			party[i].IngestedBy = -1
 			freed = append(freed, i)
 		}
 	}
@@ -130,25 +169,56 @@ func ReleaseAllIngested(party []PartyMember) {
 	for i := range party {
 		if party[i].Ingested {
 			party[i].Ingested = false
-			party[i].IngestedBy = 0
+			party[i].IngestedBy = -1
 		}
 	}
+}
+
+// ModalKind tags the active full-screen modal in the exploration
+// scene. Listed in priority order — higher values "win" over lower
+// when multiple flags are set, mirroring the explore.Update gate
+// sequence. ActiveModal is the single source of truth for "what
+// modal is on top right now?" so a future caller (editor return
+// path, scripted-event modal, etc.) doesn't re-derive the order.
+type ModalKind int
+
+const (
+	ModalNone ModalKind = iota
+	ModalPauseMenu
+	ModalChest
+	ModalPanels
+	ModalLevelUp
+)
+
+// ActiveModal returns the highest-priority modal currently open in
+// the exploration scene, or ModalNone if movement / battle should
+// process input. Mirrors the priority ladder in explore.Update:
+// level-up > panels > chest > pause > simulation. The battle phase
+// is NOT modeled here — it's a separate scene-level mode, not a
+// modal overlay.
+func ActiveModal(g *GameState) ModalKind {
+	if g == nil {
+		return ModalNone
+	}
+	switch {
+	case g.LevelUpOpen:
+		return ModalLevelUp
+	case g.PanelsOpen:
+		return ModalPanels
+	case g.ChestOpen >= 0:
+		return ModalChest
+	case g.MenuOpen:
+		return ModalPauseMenu
+	}
+	return ModalNone
 }
 
 func FirstLivingPartyMember(party []PartyMember) int {
-	return NextLivingPartyMember(party, 0)
+	return nextWhere(party, 0, partyAlive)
 }
 
 func NextLivingPartyMember(party []PartyMember, start int) int {
-	if start < 0 {
-		start = 0
-	}
-	for i := start; i < len(party); i++ {
-		if party[i].HP > 0 {
-			return i
-		}
-	}
-	return -1
+	return nextWhere(party, start, partyAlive)
 }
 
 // WrapNextLivingPartyMember walks the party forward from `start`, wrapping to
@@ -156,27 +226,11 @@ func NextLivingPartyMember(party []PartyMember, start int) int {
 // Used by the enemy round-robin attack cursor so the wrap behavior lives in
 // one helper instead of being implicit in callers.
 func WrapNextLivingPartyMember(party []PartyMember, start int) int {
-	if len(party) == 0 {
-		return -1
-	}
-	start = WrapIndex(start, len(party))
-	for offset := 0; offset < len(party); offset++ {
-		i := WrapIndex(start+offset, len(party))
-		if party[i].HP > 0 {
-			return i
-		}
-	}
-	return -1
+	return wrapNextWhere(party, start, partyAlive)
 }
 
 func LivingPartyTargets(party []PartyMember) []int {
-	living := make([]int, 0, len(party))
-	for i := range party {
-		if party[i].HP > 0 {
-			living = append(living, i)
-		}
-	}
-	return living
+	return indicesWhere(party, partyAlive)
 }
 
 // EnemyAlive checks whether the slot in the given slice is in-bounds and
@@ -219,33 +273,15 @@ func BattleEnemyAlive(g *GameState, slot int) bool {
 // LivingBattleEnemyIndices returns the slot indices of every alive member
 // in the active pack — used by the player's target cycler.
 func LivingBattleEnemyIndices(g *GameState) []int {
-	members := BattleMembers(g)
-	living := make([]int, 0, len(members))
-	for i, m := range members {
-		if m.Alive {
-			living = append(living, i)
-		}
-	}
-	return living
+	return indicesWhere(BattleMembers(g), enemyAlive)
 }
 
 func LivingBattleCount(g *GameState) int {
-	count := 0
-	for _, m := range BattleMembers(g) {
-		if m.Alive {
-			count++
-		}
-	}
-	return count
+	return countWhere(BattleMembers(g), enemyAlive)
 }
 
 func NextLivingBattleEnemy(g *GameState) int {
-	for i, m := range BattleMembers(g) {
-		if m.Alive {
-			return i
-		}
-	}
-	return -1
+	return nextWhere(BattleMembers(g), 0, enemyAlive)
 }
 
 // SelectedEnemySlot returns the active pack slot the player's enemy cursor
@@ -298,7 +334,7 @@ func PackLeaderSlot(p Pack) int {
 	bestSlot := 0
 	bestTier := -1
 	for i, m := range p.Members {
-		t := EnemyInfo(m.Kind).Tier
+		t := EnemyInfoFor(m).Tier
 		if t > bestTier {
 			bestTier = t
 			bestSlot = i
@@ -316,40 +352,13 @@ func PackLeader(p Pack) Enemy {
 	return p.Members[PackLeaderSlot(p)]
 }
 
-// PackLeaderKindSlot is the EnemyKind-only variant of PackLeaderSlot.
-// Editor tooling works with []EnemyKind (pre-spawn pack specs) and can't
-// build a full []Enemy just to ask "which member draws as the field
-// icon?" — this keeps the highest-Tier-wins rule in one place.
-func PackLeaderKindSlot(kinds []EnemyKind) int {
-	bestSlot := 0
-	bestTier := -1
-	for i, k := range kinds {
-		t := EnemyInfo(k).Tier
-		if t > bestTier {
-			bestTier = t
-			bestSlot = i
-		}
-	}
-	return bestSlot
-}
-
-// PackLeaderKind returns the highest-Tier EnemyKind in the slice, or
-// EnemyRat when the slice is empty (matches the editor's fallback for an
-// empty pack spec). Ties are broken by member order.
-func PackLeaderKind(kinds []EnemyKind) EnemyKind {
-	if len(kinds) == 0 {
-		return EnemyRat
-	}
-	return kinds[PackLeaderKindSlot(kinds)]
-}
-
 // PackXPValue is the sum of XPValue across every member of a pack —
 // the loot pool every living member earns when this pack falls. Per-
 // character (not split), so a 3-rat pack pays 15 XP to each survivor.
 func PackXPValue(p Pack) int {
 	total := 0
 	for _, m := range p.Members {
-		total += EnemyInfo(m.Kind).XPValue
+		total += EnemyInfoFor(m).XPValue
 	}
 	return total
 }
@@ -393,12 +402,29 @@ func PackAlive(p Pack) bool {
 // round if the current one runs short. Each entry is one actor (a single
 // party member or a single enemy slot), since mixed initiative interleaves
 // them — there's no longer a "block of enemies" to collapse.
-func TurnForecast(g GameState, limit int) []TurnEntry {
-	turns := make([]TurnEntry, 0, limit)
+//
+// Thin wrapper around TurnForecastInto for callers that don't have a
+// reusable buffer (tests, ad-hoc inspection). Render-side callers that
+// run every frame should pass a persistent buffer through Into.
+func TurnForecast(g *GameState, limit int) []TurnEntry {
+	return TurnForecastInto(g, nil, limit)
+}
+
+// TurnForecastInto is the buffer-reuse variant of TurnForecast. When
+// `into` has enough cap, it's truncated to length 0 and re-used; the
+// returned slice shares its backing array. Lets the per-frame render
+// caller keep a 7-entry buffer alive across frames so the forecast
+// doesn't allocate on every panel draw during battle.
+func TurnForecastInto(g *GameState, into []TurnEntry, limit int) []TurnEntry {
+	if cap(into) < limit {
+		into = make([]TurnEntry, 0, limit)
+	} else {
+		into = into[:0]
+	}
 	phase := g.Battle.Phase
 	active := phase == BattlePlayer || phase == BattleAttackTiming || phase == BattleEnemyTiming
 	if !active || limit <= 0 || len(g.Battle.Queue) == 0 {
-		return turns
+		return into
 	}
 
 	cursor := g.Battle.QueueCursor
@@ -406,9 +432,9 @@ func TurnForecast(g GameState, limit int) []TurnEntry {
 		cursor = 0
 	}
 	// First pass: rest of this round.
-	for cursor < len(g.Battle.Queue) && len(turns) < limit {
+	for cursor < len(g.Battle.Queue) && len(into) < limit {
 		if entry, ok := turnEntryFor(g, g.Battle.Queue[cursor]); ok {
-			turns = append(turns, entry)
+			into = append(into, entry)
 		}
 		cursor++
 	}
@@ -416,27 +442,27 @@ func TurnForecast(g GameState, limit int) []TurnEntry {
 	// projection that was built when the current round started. Actors
 	// that have since died are skipped at render time by turnEntryFor.
 	for _, actor := range g.Battle.NextRoundQueue {
-		if len(turns) >= limit {
+		if len(into) >= limit {
 			break
 		}
 		if entry, ok := turnEntryFor(g, actor); ok {
-			turns = append(turns, entry)
+			into = append(into, entry)
 		}
 	}
-	return turns
+	return into
 }
 
 // turnEntryFor materializes one queue actor into a TurnEntry. Skips dead
 // actors (returns false). Used by TurnForecast.
-func turnEntryFor(g GameState, actor ActorRef) (TurnEntry, bool) {
+func turnEntryFor(g *GameState, actor ActorRef) (TurnEntry, bool) {
 	if actor.IsParty {
-		if actor.Index < 0 || actor.Index >= len(g.Party) || g.Party[actor.Index].HP <= 0 {
+		if !actor.ValidPartyIndex(g.Party) || g.Party[actor.Index].HP <= 0 {
 			return TurnEntry{}, false
 		}
 		p := g.Party[actor.Index]
 		return TurnEntry{Label: p.Name, Class: p.Class}, true
 	}
-	members := BattleMembers(&g)
+	members := BattleMembers(g)
 	if actor.Index < 0 || actor.Index >= len(members) {
 		return TurnEntry{}, false
 	}

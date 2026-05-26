@@ -40,25 +40,75 @@ func updateActionMenu(g *core.GameState) {
 		setBattleStatus(g, "Choose an item.")
 		return
 	case core.ActionRowSkill:
-		performSkill(g)
+		openSkillMenu(g)
 		return
 	}
 }
 
-// performSkill is the body of the "Skill" row's confirm — split out so the
-// action-menu switch reads as one row per case and actionRowSkill isn't a
-// silent fall-through.
-func performSkill(g *core.GameState) {
-	skill := core.PartySkill(g.Party[g.Battle.CurrentParty])
+// openSkillMenu transitions the action menu into the skill-picker
+// submenu. Seeds the cursor from the member's persisted SkillCursor so
+// the submenu opens on their last-used skill instead of always jumping
+// back to slot 0.
+func openSkillMenu(g *core.GameState) {
+	if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
+		return
+	}
+	idx := g.Party[g.Battle.CurrentParty].SkillCursor
+	if idx < 0 || idx >= core.SkillsPerClass {
+		idx = 0
+	}
+	g.Battle.SkillMenuIndex = idx
+	g.Battle.ActionMode = core.ActionSkillMenu
+	setBattleStatus(g, "Choose a skill.")
+}
+
+// updateSkillMenu drives the skill-picker submenu. Up/Down cycles the
+// learned-skill list; Back returns to the action menu; Confirm arms
+// the chosen skill and transitions into its target mode (or arms the
+// timing bar directly when the skill is self-cast / AoE).
+func updateSkillMenu(g *core.GameState) {
+	if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
+		resetBattleAction(g)
+		return
+	}
+	skills := core.PartySkills(g.Party[g.Battle.CurrentParty])
+	if len(skills) == 0 {
+		resetBattleAction(g)
+		setBattleStatus(g, "No skill ready.")
+		return
+	}
+	if input.UpPressed() {
+		g.Battle.SkillMenuIndex = core.WrapIndex(g.Battle.SkillMenuIndex-1, len(skills))
+	}
+	if input.DownPressed() {
+		g.Battle.SkillMenuIndex = core.WrapIndex(g.Battle.SkillMenuIndex+1, len(skills))
+	}
+	if input.BackPressed() {
+		resetBattleAction(g)
+		setBattleStatus(g, "Choose an action.")
+		return
+	}
+	if !input.ConfirmPressed() {
+		return
+	}
+	if g.Battle.SkillMenuIndex < 0 || g.Battle.SkillMenuIndex >= len(skills) {
+		g.Battle.SkillMenuIndex = 0
+	}
+	skill := skills[g.Battle.SkillMenuIndex]
 	if skill == core.SkillNone {
 		setBattleStatus(g, "No skill ready.")
 		return
 	}
-	cost := core.SkillCost(skill)
-	if g.Party[g.Battle.CurrentParty].MP < cost {
-		setBattleStatus(g, fmt.Sprintf("%s needs %d MP.", core.SkillName(skill), cost))
+	// MP gate routed through the shared canAffordSkill predicate so
+	// the rule matches chargeMP's deduct-time check. Two separate
+	// inlines of `actor.MP < cost` previously made a "potion of
+	// free cast" or "VIT-raises-MP-cap" feature a two-place edit.
+	if !canAffordSkill(g.Party[g.Battle.CurrentParty], skill) {
+		setBattleStatus(g, fmt.Sprintf("%s needs %d MP.", core.SkillName(skill), core.SkillCost(skill)))
 		return
 	}
+	// Persist the choice so next turn's submenu opens on this skill.
+	g.Party[g.Battle.CurrentParty].SkillCursor = g.Battle.SkillMenuIndex
 	g.Battle.PendingSkill = skill
 	switch core.SkillTargetMode(skill) {
 	case core.ActionPartyTarget:

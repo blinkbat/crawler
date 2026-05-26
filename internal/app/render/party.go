@@ -1,17 +1,170 @@
 package render
 
 import (
-	"crawler/internal/app/core"
+	"fmt"
 	"image/color"
+
+	"crawler/internal/app/core"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
+
+// partyStatusVisuals is the canonical per-status visual table. Indexed
+// by core.PartyStatusKind so render surfaces (party card label, Tome
+// Stats badge, panels overlay, etc.) read the color + flicker from a
+// single registry instead of each switching on the enum by hand.
+// Length-asserted at init against core.PartyStatusCount so a future
+// status kind without a row trips the program at startup, not silently
+// in a draw call.
+//
+// Color tokens come from UI_STANDARDS.md "Per-status accents"; the
+// flicker bit marks "something is wrong" statuses (Ingested / DoTs /
+// lockouts) so the bad news pulses, off for static states (Down /
+// Defending / None).
+var partyStatusVisuals = [core.PartyStatusCount]struct {
+	Col     rl.Color
+	Flicker bool
+}{
+	core.PartyStatusNone:      {rl.NewColor(220, 220, 220, 220), false},
+	core.PartyStatusDown:      {statusDown, false},
+	core.PartyStatusIngested:  {statusIngested, true},
+	core.PartyStatusBound:     {statusBound, true},
+	core.PartyStatusConfused:  {statusConfused, true},
+	core.PartyStatusStunned:   {statusStun, true},
+	core.PartyStatusAsleep:    {statusSleep, true},
+	core.PartyStatusPoisoned:  {statusPoison, true},
+	core.PartyStatusDefending: {statusDefending, false},
+}
+
+func init() {
+	if len(partyStatusVisuals) != int(core.PartyStatusCount) {
+		panic(fmt.Sprintf("partyStatusVisuals length %d != PartyStatusCount %d", len(partyStatusVisuals), core.PartyStatusCount))
+	}
+}
+
+// partyStatusVisual returns the per-status text color and a flicker
+// flag for the party card / panels Stats badge. Thin wrapper over the
+// partyStatusVisuals table so callers don't dereference the array
+// directly. Out-of-range kinds (only possible if a caller forges a
+// PartyStatusKind value outside the enum) fall back to the None row.
+func partyStatusVisual(kind core.PartyStatusKind) (col rl.Color, flicker bool) {
+	if kind < 0 || int(kind) >= len(partyStatusVisuals) {
+		v := partyStatusVisuals[core.PartyStatusNone]
+		return v.Col, v.Flicker
+	}
+	v := partyStatusVisuals[kind]
+	return v.Col, v.Flicker
+}
+
+// partyStatusTurnLabelCache pre-formats every "<LABEL> N" combination
+// that the party card row can show — one entry per (kind, turns) pair
+// in the small turn-count range that covers realistic durations. The
+// card paints this label once per frame per afflicted member; without
+// the cache the path runs fmt.Sprintf each time.
+var partyStatusTurnLabelCache = func() [core.PartyStatusCount][partyStatusTurnLabelCacheSize]string {
+	var out [core.PartyStatusCount][partyStatusTurnLabelCacheSize]string
+	for k := core.PartyStatusKind(0); k < core.PartyStatusCount; k++ {
+		base := core.PartyStatusLabel(k)
+		for n := 0; n < partyStatusTurnLabelCacheSize; n++ {
+			out[k][n] = fmt.Sprintf("%s %d", base, n)
+		}
+	}
+	return out
+}()
+
+const partyStatusTurnLabelCacheSize = 20
+
+// partyStatusTurnLabel returns "<LABEL>" for boolean statuses (turns == 0)
+// or "<LABEL> N" for counted statuses. Reads the precomputed table for
+// the common turn range; falls back to fmt.Sprintf only when turns
+// exceed the cached window.
+func partyStatusTurnLabel(kind core.PartyStatusKind, turns int) string {
+	base := core.PartyStatusLabel(kind)
+	if turns <= 0 {
+		return base
+	}
+	if int(kind) >= 0 && int(kind) < int(core.PartyStatusCount) && turns < partyStatusTurnLabelCacheSize {
+		return partyStatusTurnLabelCache[kind][turns]
+	}
+	return fmt.Sprintf("%s %d", base, turns)
+}
+
+// partyStatusLabelMeasureCache memoizes MeasureTextEx for the small set
+// of party-status label strings produced by partyStatusTurnLabel. Each
+// card with an active status would otherwise re-measure the same label
+// every frame.
+var partyStatusLabelMeasureCache = make(map[string]rl.Vector2, 32)
+var partyStatusLabelMeasureCacheFontID uint32
+
+func measurePartyStatusLabel(font rl.Font, label string) rl.Vector2 {
+	if font.Texture.ID != partyStatusLabelMeasureCacheFontID {
+		for k := range partyStatusLabelMeasureCache {
+			delete(partyStatusLabelMeasureCache, k)
+		}
+		partyStatusLabelMeasureCacheFontID = font.Texture.ID
+	}
+	if v, ok := partyStatusLabelMeasureCache[label]; ok {
+		return v
+	}
+	v := rl.MeasureTextEx(font, label, FontTiny, 1)
+	partyStatusLabelMeasureCache[label] = v
+	return v
+}
+
+// partyNamePlusCache memoizes per-member name decorations so the
+// always-visible party ribbon doesn't rebuild "Name +" string concats
+// or re-measure "Name " widths every frame. Keyed by raw member name;
+// the cache stays small (one entry per active class) and only grows
+// when a fresh name appears.
+var partyNamePlusCache = struct {
+	plusLabel  map[string]string
+	nameSpaceW map[string]rl.Vector2
+	fontID     uint32
+}{
+	plusLabel:  make(map[string]string, 8),
+	nameSpaceW: make(map[string]rl.Vector2, 8),
+}
+
+// partyNamePlusBadge returns "<Name> +" with the concatenated string
+// cached per name so the ribbon's hot path is a map lookup instead of
+// a fresh string concat.
+func partyNamePlusBadge(name string) string {
+	if v, ok := partyNamePlusCache.plusLabel[name]; ok {
+		return v
+	}
+	v := name + " +"
+	partyNamePlusCache.plusLabel[name] = v
+	return v
+}
+
+// measurePartyNameWithSpace returns rl.MeasureTextEx for "<Name> " at
+// FontBody. Width is invariant for a given (name, font) pair and the
+// "+" overlay reads it every frame the member has unspent points.
+func measurePartyNameWithSpace(font rl.Font, name string) rl.Vector2 {
+	if font.Texture.ID != partyNamePlusCache.fontID {
+		for k := range partyNamePlusCache.nameSpaceW {
+			delete(partyNamePlusCache.nameSpaceW, k)
+		}
+		partyNamePlusCache.fontID = font.Texture.ID
+	}
+	if v, ok := partyNamePlusCache.nameSpaceW[name]; ok {
+		return v
+	}
+	v := rl.MeasureTextEx(font, name+" ", FontBody, 1)
+	partyNamePlusCache.nameSpaceW[name] = v
+	return v
+}
 
 const (
 	partyCardW    = float32(184)
 	partyCardH    = float32(118)
 	partyCardGap  = float32(16)
-	ribbonBottom  = float32(20)
+	// ribbonBottom is the bottom-edge margin for the party ribbon.
+	// Routed through hudEdgePad so the bottom margin matches the
+	// minimap's top margin (and every other HUD panel's edge
+	// distance). Earlier passes used 20 which was four pixels off
+	// the rest of the HUD's edge convention.
+	ribbonBottom  = float32(hudEdgePad)
 	ribbonTopRoom = float32(0)
 )
 
@@ -65,27 +218,45 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 	contentX := x + 16
 	contentW := partyCardW - 28
 
-	drawTextWithShadow(font, member.Name, contentX, y+12, 21, nameCol)
+	// Append a soft "+" badge to the name when the member has
+	// unspent stat OR skill points. Tinted yellow to draw the eye
+	// to the Tome menu — that's where the player goes to allocate.
+	// Routes through core.HasUnspentPoints so a future contract
+	// change (free respec, refund-on-death, etc.) updates the
+	// badge automatically.
+	hasPoints := core.HasUnspentPoints(member)
+	nameText := member.Name
+	if hasPoints {
+		nameText = partyNamePlusBadge(member.Name)
+	}
+	drawTextWithShadow(font, nameText, contentX, y+12, FontBody, nameCol)
+	if hasPoints && !down {
+		// Re-paint just the "+" in the level-up accent color so the
+		// signal pops even when the name itself is in textPrimary.
+		// Width of "name " (no plus) only changes when the name does,
+		// so route through the per-member measurement cache.
+		nameMeasure := measurePartyNameWithSpace(font, member.Name)
+		plusX := contentX + nameMeasure.X
+		drawTextWithShadow(font, "+", plusX, y+12, FontBody, inkAccent)
+	}
 
-	if down {
-		drawTextWithShadow(font, "DOWN", x+partyCardW-58, y+14, 14, rl.NewColor(220, 102, 102, 235))
-	} else if member.Ingested {
-		// Ingested takes priority over Poison / Defending: it's the
-		// most actionable status (kill the mantrap to free them) and
-		// the most disruptive (the prey can't act at all). Flicker
-		// matches Poison's pulse so the row reads as "something is
-		// wrong" at a glance.
-		flicker := 0.65 + 0.35*pulse(2.6)
-		col := rl.NewColor(200, 132, 220, 240)
-		drawTextWithShadow(font, "INGESTED", x+partyCardW-88, y+14, 14, fadeColor(col, flicker))
-	} else if member.PoisonTurns > 0 {
-		// Poison takes priority over the Defending label since it's the
-		// shorter-lived, more actionable status (heal vs ride it out).
-		flicker := 0.65 + 0.35*pulse(2.6)
-		col := rl.NewColor(160, 220, 100, 240)
-		drawTextWithShadow(font, "POISONED", x+partyCardW-88, y+14, 14, fadeColor(col, flicker))
-	} else if member.Defending {
-		drawTextWithShadow(font, "DEFENDING", x+partyCardW-94, y+14, 14, rl.NewColor(132, 196, 255, 240))
+	// Status label: walks the canonical PartyStatus priority ladder so
+	// the card never disagrees with the Tome's Stats-tab badge. Both
+	// surfaces resolve through core.PartyStatus; only the per-status
+	// COLOR and flicker live render-side (those are visual choices
+	// the core layer shouldn't carry).
+	kind, turns := core.PartyStatus(member)
+	if kind != core.PartyStatusNone {
+		label := partyStatusTurnLabel(kind, turns)
+		col, flicker := partyStatusVisual(kind)
+		labelSize := FontTiny
+		measure := measurePartyStatusLabel(font, label)
+		labelX := x + partyCardW - measure.X - 12
+		labelCol := col
+		if flicker {
+			labelCol = fadeColor(col, 0.65+0.35*pulse(2.6))
+		}
+		drawTextWithShadow(font, label, labelX, y+14, labelSize, labelCol)
 	}
 
 	hpFill := hpFillColor(member.HP, member.MaxHP)

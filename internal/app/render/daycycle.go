@@ -22,6 +22,12 @@ type timeProfile struct {
 	// below 1 darken. Used by DrawSkyBackground so the backdrop tracks
 	// the same arc as in-world lighting.
 	SkyTint rl.Vector3
+	// StarAlpha is the 0..1 visibility of the star overlay drawn on
+	// top of the sky. 0 hides the layer (daylight phases); 1 paints
+	// it at full transparency-mapped strength (midnight). Interpolated
+	// across the phase boundary like the other fields so the field
+	// fades in / out smoothly instead of popping per-step.
+	StarAlpha float32
 }
 
 // timeProfiles indexed by core.TimeOfDay. Sized via core.TimeOfDayCount so
@@ -35,11 +41,21 @@ var timeProfiles = [core.TimeOfDayCount]timeProfile{
 	// the previous tuning so the transition out of midnight still reads
 	// as "barely-lit pre-sunrise" before brightening into morning.
 	core.Dawn: {
-		SunColor:       rl.NewVector3(0.72, 0.46, 0.40),
-		AmbientColor:   rl.NewVector3(0.28, 0.26, 0.36),
-		FogColor:       rl.NewVector3(0.58, 0.46, 0.46),
-		ShadowStrength: 0.52,
-		SkyTint:        rl.NewVector3(0.78, 0.58, 0.56),
+		SunColor:     rl.NewVector3(0.92, 0.52, 0.38),
+		AmbientColor: rl.NewVector3(0.32, 0.28, 0.36),
+		FogColor:     rl.NewVector3(0.78, 0.52, 0.46),
+		// Sunrise tint pushed hard pink-orange so the horizon reads
+		// as a sunrise instead of "muddy pre-morning." Interpolation
+		// toward Morning's white tint still gives a smooth crossover;
+		// the dramatic boundary is what sells the time-of-day arc.
+		ShadowStrength: 0.48,
+		SkyTint:        rl.NewVector3(1.18, 0.72, 0.58),
+		// Stars linger faintly at dawn — fading through to 0 as
+		// timeProfileAt blends toward Morning, then stay invisible
+		// across the daylight phases. Bumped from 0.18 so the last
+		// constellations are still visible at the brightest dawn
+		// frame, not pinned just under threshold.
+		StarAlpha: 0.32,
 	},
 	// Morning — bright, slightly warm. Closest to a "default" daylight
 	// look; the area's base profile (which was tuned originally) shows
@@ -50,6 +66,7 @@ var timeProfiles = [core.TimeOfDayCount]timeProfile{
 		FogColor:       rl.NewVector3(0.74, 0.86, 0.96),
 		ShadowStrength: 0.30,
 		SkyTint:        rl.NewVector3(1.00, 1.00, 1.00),
+		StarAlpha:      0,
 	},
 	// Afternoon — peak brightness, slightly cooler than morning to give
 	// the day an arc instead of a flat plateau.
@@ -59,16 +76,27 @@ var timeProfiles = [core.TimeOfDayCount]timeProfile{
 		FogColor:       rl.NewVector3(0.80, 0.90, 0.98),
 		ShadowStrength: 0.28,
 		SkyTint:        rl.NewVector3(1.05, 1.08, 1.10),
+		StarAlpha:      0,
 	},
 	// Dusk — sun low, deep gold sky, long warm shadows. This is the
 	// most stylized phase; intentionally exaggerated so the player
 	// notices the transition.
 	core.Dusk: {
-		SunColor:       rl.NewVector3(1.20, 0.74, 0.40),
-		AmbientColor:   rl.NewVector3(0.46, 0.36, 0.32),
-		FogColor:       rl.NewVector3(0.72, 0.50, 0.38),
-		ShadowStrength: 0.46,
-		SkyTint:        rl.NewVector3(1.10, 0.66, 0.42),
+		// Sunset: pushed deep gold + a touch of magenta-red so the
+		// horizon reads as a proper sunset, not a faded afternoon.
+		// Components above 1 brighten R; G stays warm but lower; B
+		// kept low to keep the sky from going neutral. Strong shadow
+		// strength accentuates the long-shadow feel.
+		SunColor:       rl.NewVector3(1.32, 0.68, 0.34),
+		AmbientColor:   rl.NewVector3(0.42, 0.32, 0.32),
+		FogColor:       rl.NewVector3(0.78, 0.46, 0.36),
+		ShadowStrength: 0.50,
+		SkyTint:        rl.NewVector3(1.28, 0.58, 0.34),
+		// Stars start to peek toward late dusk — bumped from 0.04 so
+		// the layer is actually perceptible at the Dusk→Evening
+		// crossover, where the sky is already darkening enough for
+		// the pinpoints to read.
+		StarAlpha: 0.12,
 	},
 	// Evening — indigo twilight. Sun has set; the only color is what
 	// the sky and lingering atmosphere bounce around.
@@ -78,6 +106,7 @@ var timeProfiles = [core.TimeOfDayCount]timeProfile{
 		FogColor:       rl.NewVector3(0.18, 0.22, 0.32),
 		ShadowStrength: 0.55,
 		SkyTint:        rl.NewVector3(0.36, 0.40, 0.62),
+		StarAlpha:      0.55,
 	},
 	// Midnight — moonlit blue. Very dark, but enough light to read by;
 	// shadowStrength is highest here so unlit surfaces really sink.
@@ -87,6 +116,7 @@ var timeProfiles = [core.TimeOfDayCount]timeProfile{
 		FogColor:       rl.NewVector3(0.06, 0.08, 0.16),
 		ShadowStrength: 0.65,
 		SkyTint:        rl.NewVector3(0.14, 0.18, 0.34),
+		StarAlpha:      1.0,
 	},
 }
 
@@ -103,6 +133,7 @@ func timeProfileAt(steps int) timeProfile {
 		FogColor:       lerpVec3(cur.FogColor, next.FogColor, p),
 		ShadowStrength: cur.ShadowStrength + (next.ShadowStrength-cur.ShadowStrength)*p,
 		SkyTint:        lerpVec3(cur.SkyTint, next.SkyTint, p),
+		StarAlpha:      cur.StarAlpha + (next.StarAlpha-cur.StarAlpha)*p,
 	}
 }
 
