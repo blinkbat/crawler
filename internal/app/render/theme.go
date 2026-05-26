@@ -283,10 +283,107 @@ func drawModalScaffold(font rl.Font, cardW, cardH int32, heading string) rl.Rect
 
 	rl.DrawRectangle(0, 0, screenW, screenH, surfaceVeil)
 	drawCard(cardX, cardY, cardW, cardH, surfacePrimary, borderSoft, borderActive)
+	drawCardFiligree(cardX, cardY, cardW, cardH, giltDim)
 	if heading != "" {
-		drawHeading(font, heading, cardX+18, cardY+14, borderActive)
+		drawHeading(font, heading, cardX+28, cardY+14, borderActive)
 	}
 	return rl.NewRectangle(float32(cardX), float32(cardY), float32(cardW), float32(cardH))
+}
+
+// drawCardFiligree paints small L-shaped gilt brackets at the four
+// corners of a wood-framed card — the iconic illuminated-manuscript
+// flourish AD&D-era PC RPGs used to dress dialog boxes. Each bracket
+// is two short strokes meeting at the inner corner of the wood
+// frame's glass body; combined with a tiny diamond pip at the centre
+// of the stroke meeting, the corner reads as a finished spellbook
+// bezel rather than a flat rounded rectangle. Skipped on panes too
+// small to receive the ornament cleanly (< 80×80) so the corner
+// minimap / turn panel stay simple.
+func drawCardFiligree(x, y, w, h int32, col color.RGBA) {
+	if w < 80 || h < 80 {
+		return
+	}
+	// Inset into the glass body — past the woodFrame outer/band/inner
+	// triple so the bracket reads as ornament floating inside the
+	// pane, not a fight with the bevel.
+	inset := int32(woodFrameOuter + woodFrameBand + woodFrameInner + 5)
+	arm := int32(14)
+	thick := int32(2)
+	// Top-left, top-right, bottom-left, bottom-right brackets.
+	corners := [4][2]int32{
+		{x + inset, y + inset},
+		{x + w - inset, y + inset},
+		{x + inset, y + h - inset},
+		{x + w - inset, y + h - inset},
+	}
+	for i, c := range corners {
+		// "Outward" direction depends on which corner: top-left's
+		// arms go right+down, top-right's go left+down, etc. ±1
+		// vectors per corner pre-baked.
+		dx := int32(1)
+		dy := int32(1)
+		if i == 1 || i == 3 {
+			dx = -1
+		}
+		if i == 2 || i == 3 {
+			dy = -1
+		}
+		// Horizontal arm.
+		hx := c[0]
+		if dx < 0 {
+			hx = c[0] - arm
+		}
+		rl.DrawRectangle(hx, c[1], arm, thick, col)
+		// Vertical arm.
+		vy := c[1]
+		if dy < 0 {
+			vy = c[1] - arm
+		}
+		rl.DrawRectangle(c[0], vy, thick, arm, col)
+		// Diamond pip where the arms meet — a 4×4 rotated square
+		// drawn as two stacked triangles. Catches a bit of gilt at
+		// the joint so the bracket reads as cast metal, not a CAD
+		// line.
+		drawDiamondPip(float32(c[0])+float32(dx)*1, float32(c[1])+float32(dy)*1, 3, col)
+	}
+}
+
+// drawDiamondPip paints a small filled diamond centered on (cx, cy)
+// with half-extent r. Used at filigree corner joints and as the
+// fleuron sigil flanking the pause-menu title.
+func drawDiamondPip(cx, cy, r float32, col color.RGBA) {
+	top := rl.NewVector2(cx, cy-r)
+	right := rl.NewVector2(cx+r, cy)
+	bottom := rl.NewVector2(cx, cy+r)
+	left := rl.NewVector2(cx-r, cy)
+	drawTriangleCCW(top, left, right, col)
+	drawTriangleCCW(right, left, bottom, col)
+}
+
+// drawFleuron paints a stylised diamond-with-flank fleuron — the
+// little gilt sigil 90s PC RPGs used to flank menu titles ("✦ MENU ✦").
+// Made of a centre diamond plus two side teardrops drawn as
+// triangles. Sized by `r` (the diamond's half-extent); the flanking
+// teardrops scale to ~0.8 r so the whole motif fits within a 6r
+// horizontal band.
+func drawFleuron(cx, cy, r float32, col color.RGBA) {
+	// Centre diamond.
+	drawDiamondPip(cx, cy, r, col)
+	// Left + right teardrop triangles, pointing outward from the
+	// diamond's E/W vertices. drawTriangleCCW winding is the same
+	// CCW-in-screen-Y-down convention used elsewhere.
+	flankR := r * 0.85
+	flankOffset := r + 2
+	// Left teardrop.
+	leftTip := rl.NewVector2(cx-flankOffset-flankR, cy)
+	leftTop := rl.NewVector2(cx-flankOffset, cy-flankR*0.55)
+	leftBot := rl.NewVector2(cx-flankOffset, cy+flankR*0.55)
+	drawTriangleCCW(leftTip, leftBot, leftTop, col)
+	// Right teardrop.
+	rightTip := rl.NewVector2(cx+flankOffset+flankR, cy)
+	rightTop := rl.NewVector2(cx+flankOffset, cy-flankR*0.55)
+	rightBot := rl.NewVector2(cx+flankOffset, cy+flankR*0.55)
+	drawTriangleCCW(rightTip, rightTop, rightBot, col)
 }
 
 // drawPanel fills a rounded rect at a fixed pixel corner radius.
@@ -615,6 +712,21 @@ func drawBar(font rl.Font, x, y, width, height float32, label string, value, max
 		}
 	}
 	drawSmallPanelOutline(ix, iy, iw, ih, outline)
+
+	// Tape-measure ticks — three thin notches at the 25/50/75 %
+	// marks inside the bar. Adds the "ledger column" feel without
+	// fighting the fill colour: ticks paint as a soft inked line
+	// across the FULL height (not just over the empty track), so a
+	// half-full bar reads as the fill swallowing the notches.
+	// Skipped on tiny bars (< 80 px) so compact UI surfaces don't
+	// look busy.
+	if iw >= 80 && ih >= 12 && !muted {
+		tickCol := fadeColor(woodAccent, 0.55)
+		for _, t := range [3]float32{0.25, 0.5, 0.75} {
+			tx := ix + 1 + int32(float32(iw-2)*t)
+			rl.DrawRectangle(tx, iy+2, 1, ih-4, tickCol)
+		}
+	}
 
 	// Bar labels (HP / MP / etc.) — always FontTiny per UI_STANDARDS.md
 	// (the bar IS small, the value text is what reads at a glance).

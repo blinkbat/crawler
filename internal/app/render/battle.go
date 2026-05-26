@@ -266,6 +266,25 @@ func drawEnemyStatusPill(font rl.Font, x, y, w, h float32, fill, outline rl.Colo
 // with the coupling implicit.
 const combatLogTextPad = int32(10)
 
+// drawCombatLogSpine paints the binding-edge ornament along the left
+// inside of the combat log pane: a thin wood-accent stripe with three
+// small gilt pips at the quarter / half / three-quarter marks. Reads
+// as a scribe's ledger spine — the dressing that ties the rolling
+// text to the rest of the wood-and-glass HUD.
+func drawCombatLogSpine(panelX, panelY, panelH int32) {
+	const inset = int32(10)
+	stripeX := panelX + inset
+	stripeY := panelY + 10
+	stripeH := panelH - 20
+	rl.DrawRectangle(stripeX, stripeY, 2, stripeH, fadeColor(woodAccent, 0.65))
+	// Three gilt pips along the stripe — anchors at 25 / 50 / 75 %
+	// so the spine reads as a bound ledger rather than a plain rule.
+	for _, t := range [3]float32{0.25, 0.5, 0.75} {
+		py := float32(stripeY) + float32(stripeH)*t
+		drawDiamondPip(float32(stripeX)+1, py, 2.5, giltDim)
+	}
+}
+
 // combatLogVisualLine is the wrapped+styled product of one source log
 // line. Lifted to package scope so the persistent cache can hold it
 // across frames.
@@ -308,14 +327,21 @@ func drawCombatLogPanel(g core.GameState, assets Resources) {
 	}
 
 	drawCard(x, y, w, h, surfacePrimary, borderSoft, borderSoft)
+	// Ledger spine — a thin wood-accent stripe down the left inside
+	// edge, dotted with three small pips. Reads as the bound-edge of
+	// a scribe's ledger, anchoring the rolling text against the
+	// world bleed-through.
+	drawCombatLogSpine(x, y, h)
 
 	// Without the header band the inner content fills the full pane
 	// minus a small symmetric inset. Wood frame eats ~6 px on each
-	// edge; an extra 8 px keeps text off the bevel.
+	// edge; an extra 8 px keeps text off the bevel; the spine on the
+	// left adds another 6 px so the first column of text doesn't
+	// collide with it.
 	innerInset := int32(14)
-	innerX := x + innerInset
+	innerX := x + innerInset + 6
 	innerY := y + innerInset
-	innerW := w - 2*innerInset
+	innerW := w - 2*innerInset - 6
 	innerH := h - 2*innerInset
 
 	lines := g.Battle.Log
@@ -740,6 +766,19 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 	if subtitle != "" {
 		subX := cx - subMeasure.X/2
 		subY := titleY + titleH + gap
+		// Gilt rule with a centred fleuron between the encounter
+		// title and the subtitle — the chapter-divider flourish
+		// 90s D&D PC RPGs used between an event banner and its
+		// body line. Width = 60 % of the subtitle for taste; alpha
+		// rides the splash's overall fade so it disappears with
+		// the rest of the banner.
+		ruleW := subMeasure.X * 0.6
+		ruleY := subY - 4
+		ruleAlpha := uint8(float32(giltDim.A) * overall)
+		ruleCol := rl.NewColor(giltDim.R, giltDim.G, giltDim.B, ruleAlpha)
+		rl.DrawRectangle(int32(cx-ruleW/2), int32(ruleY), int32(ruleW/2-8), 1, ruleCol)
+		rl.DrawRectangle(int32(cx+8), int32(ruleY), int32(ruleW/2-8), 1, ruleCol)
+		drawFleuron(cx, ruleY, 3, rl.NewColor(giltBright.R, giltBright.G, giltBright.B, uint8(float32(giltBright.A)*overall)))
 		rl.DrawTextEx(assets.hudFont, subtitle, rl.NewVector2(subX+1, subY+1), subSize, 1, rl.NewColor(0, 0, 0, subAlpha))
 		rl.DrawTextEx(assets.hudFont, subtitle, rl.NewVector2(subX, subY), subSize, 1, rl.NewColor(borderEnemy.R, borderEnemy.G, borderEnemy.B, subAlpha))
 	}

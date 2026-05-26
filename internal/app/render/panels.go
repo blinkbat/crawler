@@ -174,7 +174,15 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 	if !highlight {
 		nameCol = textMuted
 	}
-	drawTextWithShadow(font, m.Name, innerX, y, FontBody, nameCol)
+	// Class sigil flanks the name — same iconography as the party
+	// ribbon's card, but at a slightly larger radius so it reads
+	// as a banner crest in this fuller pane.
+	glyphR := float32(9)
+	glyphCX := innerX + glyphR
+	glyphCY := y + FontBody/2
+	drawClassGlyph(glyphCX, glyphCY, glyphR, m.Class, classCol)
+	nameOffset := glyphR*2 + 10
+	drawTextWithShadow(font, m.Name, innerX+nameOffset, y, FontBody, nameCol)
 	y += 26
 
 	// PartyMember.Name doubles as the class label in this build, so the

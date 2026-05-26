@@ -218,6 +218,19 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 	contentX := x + 16
 	contentW := partyCardW - 28
 
+	// Class glyph immediately left of the name — the small gilt
+	// sigil 90s D&D box-art used as a class shorthand. Drawn in the
+	// class accent so it harmonises with the card's left stripe.
+	glyphR := float32(8)
+	glyphCX := contentX + glyphR
+	glyphCY := y + 12 + FontBody/2
+	glyphCol := classCol
+	if down {
+		glyphCol = fadeColor(classCol, 0.45)
+	}
+	drawClassGlyph(glyphCX, glyphCY, glyphR, member.Class, glyphCol)
+	nameX := contentX + glyphR*2 + 8
+
 	// Append a soft "+" badge to the name when the member has
 	// unspent stat OR skill points. Tinted yellow to draw the eye
 	// to the Tome menu — that's where the player goes to allocate.
@@ -229,14 +242,14 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 	if hasPoints {
 		nameText = partyNamePlusBadge(member.Name)
 	}
-	drawTextWithShadow(font, nameText, contentX, y+12, FontBody, nameCol)
+	drawTextWithShadow(font, nameText, nameX, y+12, FontBody, nameCol)
 	if hasPoints && !down {
 		// Re-paint just the "+" in the level-up accent color so the
 		// signal pops even when the name itself is in textPrimary.
 		// Width of "name " (no plus) only changes when the name does,
 		// so route through the per-member measurement cache.
 		nameMeasure := measurePartyNameWithSpace(font, member.Name)
-		plusX := contentX + nameMeasure.X
+		plusX := nameX + nameMeasure.X
 		drawTextWithShadow(font, "+", plusX, y+12, FontBody, inkAccent)
 	}
 

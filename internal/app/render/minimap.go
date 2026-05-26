@@ -229,6 +229,13 @@ func drawMinimapTimeOfDay(font rl.Font, stepCount int, x, y, width int32) {
 	if curW > 0 {
 		rl.DrawRectangle(x+int32(phase)*segW, trackY, curW, trackH, phaseColors[phase])
 	}
+	// Tiny gilt cursor riding the current phase — a 3-px diamond
+	// pip parked above the bar at the exact progress position, like
+	// a sextant's needle on a brass scale. Reads as "the time of day
+	// is here" at a glance, more legible than the colour wash alone.
+	cursorX := float32(x+int32(phase)*segW) + float32(segW)*progress
+	cursorY := float32(trackY) + float32(trackH)/2 - 5
+	drawDiamondPip(cursorX, cursorY, 3, giltBright)
 }
 
 // phaseColors mirrors the rough sky tint of each lighting phase so the HUD

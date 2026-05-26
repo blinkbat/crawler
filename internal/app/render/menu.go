@@ -72,14 +72,23 @@ func drawMenuOverlay(g core.GameState, assets Resources) {
 
 	rl.DrawRectangle(0, 0, screenW, screenH, surfaceVeil)
 	drawCard(panelX, panelY, panelW, panelH, surfacePrimary, borderSoft, borderSoft)
+	drawCardFiligree(panelX, panelY, panelW, panelH, giltDim)
 
 	// One title only — "MENU" centred near the top of the card. The
 	// previous "PAUSED" tick above it was redundant: the veil + the
-	// menu itself IS the paused signal.
+	// menu itself IS the paused signal. Flanking gilt fleurons sell
+	// the 90s grimoire feel: ◆──── MENU ────◆
 	titleMeasure := rl.MeasureTextEx(assets.hudFont, "MENU", FontTitle, FontSpacingTitle)
 	titleX := float32(panelX) + float32(panelW)/2 - titleMeasure.X/2
-	drawTextWithShadowStyle(assets.hudFont, "MENU", titleX, float32(panelY+24),
+	titleY := float32(panelY + 24)
+	drawTextWithShadowStyle(assets.hudFont, "MENU", titleX, titleY,
 		FontTitle, FontSpacingTitle, textPrimary, shadowStrong, 1, 1)
+	// Fleurons sit centred on the title's vertical midline, ~18 px
+	// outside each text edge.
+	flCY := titleY + titleMeasure.Y/2
+	flR := float32(5)
+	drawFleuron(titleX-22, flCY, flR, giltDim)
+	drawFleuron(titleX+titleMeasure.X+22, flCY, flR, giltDim)
 
 	stride := pauseMenuRowH + pauseMenuRowGap
 	rowY := pauseMenuHeaderH

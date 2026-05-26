@@ -5,6 +5,8 @@ import (
 	"math"
 
 	"crawler/internal/app/core"
+
+	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 type partyClassPresentation struct {
@@ -61,6 +63,113 @@ func partyClassPresentationFor(class core.PartyClass) partyClassPresentation {
 		panic("render: partyClassPresentationFor called with unregistered class — init guard should have caught this at startup")
 	}
 	return presentation
+}
+
+// drawClassGlyph paints a small sigil identifying a party-class — the
+// kind of pictograph 90s D&D box art used to flank a character name.
+// Glyphs are geometric (no per-class texture asset) so they render
+// crisp at any DPI:
+//
+//   - Warrior: crossed swords (an X of two narrow rotated bars)
+//   - Cleric:  Greek cross (centred + symbol)
+//   - Thief:   downward dagger silhouette (long shaft + crossguard)
+//   - Wizard:  five-pointed star sigil
+//
+// (cx, cy) is the glyph centre; `r` is the glyph's half-extent.
+// `col` is the ink colour — callers typically pass the class accent
+// tint so the sigil reads as the class's own emblem.
+func drawClassGlyph(cx, cy, r float32, class core.PartyClass, col color.RGBA) {
+	switch class {
+	case core.ClassWarrior:
+		drawClassGlyphWarrior(cx, cy, r, col)
+	case core.ClassCleric:
+		drawClassGlyphCleric(cx, cy, r, col)
+	case core.ClassThief:
+		drawClassGlyphThief(cx, cy, r, col)
+	case core.ClassWizard:
+		drawClassGlyphWizard(cx, cy, r, col)
+	}
+}
+
+// crossed swords — two thick bars rotated ±45°, drawn as two
+// parallelograms via triangle pairs so the result is a solid X
+// without depending on raylib's rotated-rectangle helper (which
+// doesn't expose a fill+rotate primitive in this binding version).
+func drawClassGlyphWarrior(cx, cy, r float32, col color.RGBA) {
+	const halfThick = float32(1.4)
+	// Bar one: top-left ↔ bottom-right.
+	a := rl.NewVector2(cx-r-halfThick, cy-r+halfThick)
+	b := rl.NewVector2(cx-r+halfThick, cy-r-halfThick)
+	c := rl.NewVector2(cx+r+halfThick, cy+r-halfThick)
+	d := rl.NewVector2(cx+r-halfThick, cy+r+halfThick)
+	drawTriangleCCW(a, d, c, col)
+	drawTriangleCCW(a, c, b, col)
+	// Bar two: top-right ↔ bottom-left.
+	e := rl.NewVector2(cx+r-halfThick, cy-r-halfThick)
+	f := rl.NewVector2(cx+r+halfThick, cy-r+halfThick)
+	g := rl.NewVector2(cx-r-halfThick, cy+r+halfThick)
+	h := rl.NewVector2(cx-r+halfThick, cy+r-halfThick)
+	drawTriangleCCW(e, h, g, col)
+	drawTriangleCCW(e, g, f, col)
+}
+
+// cleric — Greek cross with slightly chunky arms; reads as the
+// "+" sigil at any size down to ~12 px.
+func drawClassGlyphCleric(cx, cy, r float32, col color.RGBA) {
+	arm := r * 0.35
+	rl.DrawRectangle(int32(cx-arm), int32(cy-r), int32(arm*2), int32(r*2), col)
+	rl.DrawRectangle(int32(cx-r), int32(cy-arm), int32(r*2), int32(arm*2), col)
+}
+
+// thief — vertical dagger silhouette: short crossguard + tapered
+// blade pointed downward. Tapering done via a triangle so the tip
+// reads sharper than a plain rectangle.
+func drawClassGlyphThief(cx, cy, r float32, col color.RGBA) {
+	// Crossguard (horizontal bar near the top).
+	guardW := r * 1.4
+	guardH := float32(2)
+	rl.DrawRectangle(int32(cx-guardW/2), int32(cy-r*0.65), int32(guardW), int32(guardH), col)
+	// Blade — narrow rectangle plus a tip triangle.
+	bladeHalfW := float32(1.6)
+	bladeTop := cy - r*0.65 + guardH
+	bladeBottom := cy + r*0.55
+	rl.DrawRectangle(int32(cx-bladeHalfW), int32(bladeTop), int32(bladeHalfW*2), int32(bladeBottom-bladeTop), col)
+	tip := rl.NewVector2(cx, cy+r)
+	left := rl.NewVector2(cx-bladeHalfW, bladeBottom)
+	right := rl.NewVector2(cx+bladeHalfW, bladeBottom)
+	drawTriangleCCW(tip, right, left, col)
+	// Pommel knob at the top of the hilt.
+	rl.DrawRectangle(int32(cx-bladeHalfW), int32(cy-r), int32(bladeHalfW*2), int32(2), col)
+}
+
+// wizard — five-pointed star drawn as ten triangles fanned around
+// the centre. Each pair of triangles fills one "ray" of the star;
+// the arrangement is the classic pentagram with the top point up.
+func drawClassGlyphWizard(cx, cy, r float32, col color.RGBA) {
+	const points = 5
+	outer := r
+	inner := r * 0.42
+	angleStart := -math.Pi / 2 // start at top
+	verts := make([]rl.Vector2, points*2)
+	for i := 0; i < points*2; i++ {
+		angle := angleStart + float64(i)*math.Pi/float64(points)
+		radius := outer
+		if i%2 == 1 {
+			radius = inner
+		}
+		verts[i] = rl.NewVector2(
+			cx+float32(math.Cos(angle))*radius,
+			cy+float32(math.Sin(angle))*radius,
+		)
+	}
+	centre := rl.NewVector2(cx, cy)
+	for i := 0; i < len(verts); i++ {
+		next := (i + 1) % len(verts)
+		// drawTriangleCCW expects CCW vertices in screen-Y-down;
+		// (centre, v[i+1], v[i]) is the correct winding for a fan
+		// around the centre in this convention.
+		drawTriangleCCW(centre, verts[next], verts[i], col)
+	}
 }
 
 func drawWarriorPartyPixels(pixels []color.RGBA, w, h int) {

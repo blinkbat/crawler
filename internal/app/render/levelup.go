@@ -104,7 +104,17 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 		if statRemaining > 0 {
 			label = "Apply changes — " + strconv.Itoa(statRemaining) + " unspent"
 		}
-		drawTextWithShadow(font, label, float32(rowX+4), float32(rowY+10), FontBody, col)
+		// Fleuron sits on each side of the Apply row label — the
+		// "this is the commit gate" cue. Drawn in gilt so the
+		// player's eye lands on it even when the row isn't
+		// focused.
+		labelW := rl.MeasureTextEx(font, label, FontBody, 1).X
+		labelX := float32(rowX + 4)
+		labelY := float32(rowY + 10)
+		drawTextWithShadow(font, label, labelX, labelY, FontBody, col)
+		flCY := labelY + FontBody/2
+		drawFleuron(labelX-16, flCY, 4, giltDim)
+		drawFleuron(labelX+labelW+16, flCY, 4, giltDim)
 	}
 
 	// VIT note removed — the per-stat description column already
