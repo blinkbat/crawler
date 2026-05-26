@@ -121,11 +121,14 @@ func visibleRosterSlots(g core.GameState) []int {
 }
 
 func drawEnemyRosterRow(font rl.Font, enemy core.Enemy, x, y, w, h int32, targeted, fading bool) {
-	bg := rl.NewColor(20, 14, 22, 200)
+	// Roster row tints follow the glass-token family — translucent
+	// glass over the (also translucent) outer card body, so the
+	// world hints through.
+	bg := rl.NewColor(20, 14, 22, 130)
 	border := rl.NewColor(96, 60, 64, 140)
 	nameCol := textPrimary
 	if fading {
-		bg = rl.NewColor(28, 20, 24, 130)
+		bg = rl.NewColor(28, 20, 24, 95)
 		border = borderDim
 		nameCol = textDim
 	}
@@ -133,7 +136,7 @@ func drawEnemyRosterRow(font rl.Font, enemy core.Enemy, x, y, w, h int32, target
 		bg = core.MixColor(bg, surfaceEnemyTint, 0.7)
 		border = borderEnemy
 	}
-	drawSmallPanel(x, y, w, h, bg)
+	drawGlassPane(x, y, w, h, bg)
 	drawSmallPanelOutline(x, y, w, h, border)
 
 	leftPad := int32(22)
@@ -562,24 +565,128 @@ func transientStatus(g core.GameState) string {
 func drawActionMenuOptions(g core.GameState, assets Resources, x, y int32, member core.PartyMember) {
 	rowSpacing := int32(40)
 	cursor := core.ActionRow(g.Battle.MenuIndex)
-
-	drawActionRow(assets.hudFont, x, y+int32(core.ActionRowAttack)*rowSpacing, "Attack", "", cursor == core.ActionRowAttack)
-	// Skill row used to surface the currently-cursored skill name + cost
-	// inline. With the new skill-picker submenu, the row label is just
-	// "Skill ▶" — the submenu shows the three skills and their costs so
-	// the action menu stays compact.
+	// Push labels right so each row has a small icon column on the
+	// left — the action-sigil that names what the row does without
+	// reading the text.
+	labelX := x + 26
+	drawActionMenuRow(assets.hudFont, core.ActionRowAttack, x, labelX, y+int32(core.ActionRowAttack)*rowSpacing, "Attack", "", cursor == core.ActionRowAttack)
 	_ = member
-	drawActionRow(assets.hudFont, x, y+int32(core.ActionRowSkill)*rowSpacing, "Skill", ">", cursor == core.ActionRowSkill)
-	// Item row: shows total stack count as a hint so the player knows the
-	// menu has anything in it before opening the picker. Empty inventory
-	// renders the row dimmed by hint text rather than disabled, since the
-	// menu code already shows a "No items." status if you confirm on it.
+	drawActionMenuRow(assets.hudFont, core.ActionRowSkill, x, labelX, y+int32(core.ActionRowSkill)*rowSpacing, "Skill", ">", cursor == core.ActionRowSkill)
 	itemSuffix := ">"
 	if total := totalItemCount(g.Inventory); total > 0 {
 		itemSuffix = "x" + strconv.Itoa(total) + "  >"
 	}
-	drawActionRow(assets.hudFont, x, y+int32(core.ActionRowItem)*rowSpacing, "Item", itemSuffix, cursor == core.ActionRowItem)
-	drawActionRow(assets.hudFont, x, y+int32(core.ActionRowDefend)*rowSpacing, "Defend", "", cursor == core.ActionRowDefend)
+	drawActionMenuRow(assets.hudFont, core.ActionRowItem, x, labelX, y+int32(core.ActionRowItem)*rowSpacing, "Item", itemSuffix, cursor == core.ActionRowItem)
+	drawActionMenuRow(assets.hudFont, core.ActionRowDefend, x, labelX, y+int32(core.ActionRowDefend)*rowSpacing, "Defend", "", cursor == core.ActionRowDefend)
+}
+
+// drawActionMenuRow wraps drawActionRow with an action-specific icon
+// painted in a small left-side column. The icon picks the
+// corresponding sigil — crossed blades (Attack), starburst (Skill),
+// potion flask (Item), tower shield (Defend). Icon glyphs are
+// procedural (no asset dependency) so they read crisp at any DPI.
+func drawActionMenuRow(font rl.Font, row core.ActionRow, iconX, labelX, y int32, label, suffix string, selected bool) {
+	iconCol := giltDim
+	if selected {
+		iconCol = giltBright
+	}
+	iconCX := float32(iconX) + 10
+	iconCY := float32(y) + 14
+	drawActionIcon(row, iconCX, iconCY, 9, iconCol)
+	drawActionRow(font, labelX, y, label, suffix, selected)
+}
+
+// drawActionIcon dispatches to the per-action sigil drawer. Each
+// glyph is sized by `r` (its half-extent) and tinted by `col` so the
+// selection state propagates without duplicating the switch.
+func drawActionIcon(row core.ActionRow, cx, cy, r float32, col rl.Color) {
+	switch row {
+	case core.ActionRowAttack:
+		// Crossed swords — reuse the warrior class glyph at a
+		// smaller radius. Reads as "strike" without any text.
+		drawClassGlyphWarrior(cx, cy, r, col)
+	case core.ActionRowSkill:
+		drawActionIconSkill(cx, cy, r, col)
+	case core.ActionRowItem:
+		drawActionIconItem(cx, cy, r, col)
+	case core.ActionRowDefend:
+		drawActionIconDefend(cx, cy, r, col)
+	}
+}
+
+// drawActionIconSkill paints a four-rayed starburst with a bright
+// inner pip — the "arcane spark" sigil for the Skill action.
+func drawActionIconSkill(cx, cy, r float32, col rl.Color) {
+	// Four cardinal rays — thin diamond shards from centre.
+	rayHalf := r * 0.22
+	// Vertical ray.
+	drawTriangleCCW(rl.NewVector2(cx, cy-r), rl.NewVector2(cx-rayHalf, cy), rl.NewVector2(cx+rayHalf, cy), col)
+	drawTriangleCCW(rl.NewVector2(cx, cy+r), rl.NewVector2(cx+rayHalf, cy), rl.NewVector2(cx-rayHalf, cy), col)
+	// Horizontal ray.
+	drawTriangleCCW(rl.NewVector2(cx-r, cy), rl.NewVector2(cx, cy+rayHalf), rl.NewVector2(cx, cy-rayHalf), col)
+	drawTriangleCCW(rl.NewVector2(cx+r, cy), rl.NewVector2(cx, cy-rayHalf), rl.NewVector2(cx, cy+rayHalf), col)
+	// Diagonal short rays — fainter, in the same colour but smaller.
+	const sqrt2Inv = float32(0.7071)
+	dr := r * 0.55
+	for _, sign := range [4][2]float32{{1, 1}, {1, -1}, {-1, 1}, {-1, -1}} {
+		dx := sign[0] * sqrt2Inv * dr
+		dy := sign[1] * sqrt2Inv * dr
+		drawDiamondPip(cx+dx, cy+dy, 1.5, col)
+	}
+	rl.DrawCircleV(rl.NewVector2(cx, cy), r*0.22, giltBright)
+}
+
+// drawActionIconItem paints a small apothecary-flask silhouette: a
+// rectangular body, a tapered neck, and a stopper cap. Reads as
+// "consumable" without needing a label.
+func drawActionIconItem(cx, cy, r float32, col rl.Color) {
+	// Stopper at top.
+	stopperHalfW := r * 0.32
+	rl.DrawRectangle(int32(cx-stopperHalfW), int32(cy-r), int32(stopperHalfW*2), int32(2), col)
+	// Neck — narrower than the body, sitting under the stopper.
+	neckHalfW := r * 0.22
+	neckTop := cy - r + 2
+	neckBottom := cy - r*0.45
+	rl.DrawRectangle(int32(cx-neckHalfW), int32(neckTop), int32(neckHalfW*2), int32(neckBottom-neckTop), col)
+	// Body — wider rounded rectangle (drawn as a square + caps via
+	// triangles for the shoulders so the flask reads bulbous).
+	bodyHalfW := r * 0.65
+	bodyTop := neckBottom
+	bodyBottom := cy + r*0.85
+	rl.DrawRectangle(int32(cx-bodyHalfW), int32(bodyTop+3), int32(bodyHalfW*2), int32(bodyBottom-bodyTop-3), col)
+	// Shoulders — two triangles smoothing the neck-to-body
+	// transition.
+	drawTriangleCCW(rl.NewVector2(cx-bodyHalfW, bodyTop+3), rl.NewVector2(cx-neckHalfW, bodyTop), rl.NewVector2(cx-neckHalfW, bodyTop+3), col)
+	drawTriangleCCW(rl.NewVector2(cx+bodyHalfW, bodyTop+3), rl.NewVector2(cx+neckHalfW, bodyTop+3), rl.NewVector2(cx+neckHalfW, bodyTop), col)
+	// Liquid line — a small bright cap inside the flask so it
+	// reads as "potion" not "empty bottle."
+	rl.DrawRectangle(int32(cx-bodyHalfW+2), int32(bodyBottom-r*0.35), int32(bodyHalfW*2-4), 2, giltBright)
+}
+
+// drawActionIconDefend paints a small tower-shield silhouette: a
+// kite shape with a thicker top and a tapered point, plus a centre
+// boss. Distinct from the equipment-slot heater so the action menu
+// and the equipment screen don't read as the same sigil.
+func drawActionIconDefend(cx, cy, r float32, col rl.Color) {
+	// Slightly taller than the equipment heater. Top edge curves
+	// inward via two small notches; the body tapers to a tip.
+	topW := r * 1.2
+	topH := r * 0.5
+	// Top rectangle with notched corners (small triangle bites on
+	// each top corner so the shield reads as "decorated").
+	rl.DrawRectangle(int32(cx-topW/2), int32(cy-r), int32(topW), int32(topH), col)
+	// Body taper.
+	tip := rl.NewVector2(cx, cy+r*0.95)
+	left := rl.NewVector2(cx-topW/2, cy-r+topH)
+	right := rl.NewVector2(cx+topW/2, cy-r+topH)
+	drawTriangleCCW(tip, right, left, col)
+	// Vertical band running down the centre of the shield — gives
+	// the silhouette structure beyond a plain heater.
+	bandHalfW := r * 0.10
+	rl.DrawRectangle(int32(cx-bandHalfW), int32(cy-r+topH-1), int32(bandHalfW*2), int32(r*1.05), fadeColor(col, 0.6))
+	// Centre boss + bright pip.
+	rl.DrawCircleV(rl.NewVector2(cx, cy-r*0.05), r*0.26, fadeColor(col, 0.6))
+	rl.DrawCircleV(rl.NewVector2(cx, cy-r*0.05), r*0.12, giltBright)
 }
 
 // drawSkillMenuList renders the skill submenu — one row per learned

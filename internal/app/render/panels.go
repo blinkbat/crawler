@@ -70,7 +70,7 @@ func DrawPanelsOverlay(g core.GameState, assets Resources) {
 			bg = core.MixColor(glassMid, glassWarm, 0.65)
 			txt = textPrimary
 		}
-		drawSmallPanel(tx, tabRowY, tabW, tabH, bg)
+		drawGlassPane(tx, tabRowY, tabW, tabH, bg)
 		if active {
 			// Gilt underline strip at the bottom of the active tab —
 			// the same "you're here" mark the list rows use, scaled
@@ -163,7 +163,7 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 	if highlight {
 		cardBG = core.MixColor(glassMid, glassWarm, 0.55)
 	}
-	drawSmallPanel(int32(col.X), int32(col.Y), int32(col.Width), int32(col.Height), cardBG)
+	drawGlassPane(int32(col.X), int32(col.Y), int32(col.Width), int32(col.Height), cardBG)
 	rl.DrawRectangle(int32(col.X), int32(col.Y)+6, 3, int32(col.Height)-12, classCol)
 
 	innerX := col.X + 14
@@ -217,10 +217,13 @@ func drawPanelsStats(g core.GameState, assets Resources, body rl.Rectangle) {
 		innerW := colW - 28
 
 		// Stat grid: 3 rows × 2 columns. Each cell paints
-		// "LBL  value" with the label muted and value bright so
-		// the eye scans the numbers, not the labels.
+		// "[icon] LBL  value" with the icon in soft gilt to the
+		// left of the label, the label muted, and the value
+		// bright so the eye scans the numbers without losing the
+		// sigil row anchor.
 		statColW := innerW / 2
 		rowH := float32(22)
+		statIconCol := fadeColor(woodAccent, 0.9)
 		for s := core.Stat(0); s < core.StatCount; s++ {
 			row := int(s) / 2
 			col := int(s) % 2
@@ -228,7 +231,8 @@ func drawPanelsStats(g core.GameState, assets Resources, body rl.Rectangle) {
 			cellY := contentY + float32(row)*rowH
 			label := core.StatLabel(s)
 			value := strconv.Itoa(core.StatValue(m.Stats, s))
-			drawTextWithShadow(font, label, cellX, cellY, FontSmall, textMuted)
+			drawStatIcon(s, cellX+7, cellY+9, 7, statIconCol)
+			drawTextWithShadow(font, label, cellX+18, cellY, FontSmall, textMuted)
 			// Value right-aligned within the cell so the column
 			// of numbers lines up no matter the label width.
 			vm := rl.MeasureTextEx(font, value, FontSmall, 1)
@@ -318,7 +322,7 @@ func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) 
 			rowY := contentY + float32(slotIdx)*slotRowH
 			// Slot bezel: very faint inset so the three rows
 			// read as a stack without competing with the card.
-			drawSmallPanel(int32(innerX), int32(rowY), int32(innerW), int32(slotRowH-8), fadeColor(glassDeep, 0.55))
+			drawGlassPane(int32(innerX), int32(rowY), int32(innerW), int32(slotRowH-8), fadeColor(glassDeep, 0.55))
 
 			// Slot sigil — small pictograph beside the label. The
 			// equipment system isn't authored yet so the sigil
@@ -459,7 +463,7 @@ func drawPanelsItems(g core.GameState, assets Resources, body rl.Rectangle) {
 		info := core.ItemInfo(stack.Kind)
 		highlight := i == cursor
 		if highlight {
-			drawSmallPanel(int32(listRect.X), int32(y), int32(listRect.Width), int32(rowH-4),
+			drawGlassPane(int32(listRect.X), int32(y), int32(listRect.Width), int32(rowH-4),
 				core.MixColor(glassMid, glassWarm, 0.6))
 			rl.DrawRectangle(int32(listRect.X)+2, int32(y)+4, 3, int32(rowH-12), giltBright)
 		}
@@ -476,7 +480,7 @@ func drawPanelsItems(g core.GameState, assets Resources, body rl.Rectangle) {
 
 	// Detail card: name, type/effect summary, count owned, description
 	// stub. Reads as the ledger's "current entry" pane.
-	drawSmallPanel(int32(detailRect.X), int32(detailRect.Y), int32(detailRect.Width), int32(detailRect.Height), glassMid)
+	drawGlassPane(int32(detailRect.X), int32(detailRect.Y), int32(detailRect.Width), int32(detailRect.Height), glassMid)
 	if cursor < len(stacks) {
 		stack := stacks[cursor]
 		info := core.ItemInfo(stack.Kind)
@@ -592,7 +596,7 @@ func drawPanelsSkills(g core.GameState, assets Resources, body rl.Rectangle) {
 			if armed {
 				rowBG = core.MixColor(rowBG, glassWarm, 0.65)
 			}
-			drawSmallPanel(int32(innerX), int32(rowY), int32(innerW), int32(rowH-8), rowBG)
+			drawGlassPane(int32(innerX), int32(rowY), int32(innerW), int32(rowH-8), rowBG)
 			if armed {
 				rl.DrawRectangle(int32(innerX)+2, int32(rowY)+4, 3, int32(rowH-16), giltBright)
 			}

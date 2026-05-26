@@ -30,16 +30,20 @@ import (
 //     when the parchment metaphor is load-bearing).
 var (
 	// ----- Glass surfaces (panel fills) -----
-	// Alphas dropped ~15-20% from prior pass — the panes now read as
-	// genuinely translucent glass that the world tints through, rather
-	// than near-opaque tinted rectangles. Text legibility is preserved
-	// by the FontSmall / FontBody shadow pass and the dim outer wood
-	// frame; the body of the pane is the layer we soften.
-	glassDeep   = rl.NewColor(14, 12, 18, 170)
-	glassMid    = rl.NewColor(22, 18, 24, 160)
-	glassWarm   = rl.NewColor(28, 22, 16, 170)
-	glassDanger = rl.NewColor(36, 16, 18, 170)
-	veil        = rl.NewColor(0, 0, 0, 140)
+	// Two-layer composition: drawCard paints `glassBaseWash` (a
+	// dark wash that anchors the pane as dark glass) first, then
+	// the glass tint over it. Both layers are translucent — the
+	// world composes through both. Cumulative effective opacity is
+	// roughly 1 - (1-wash)(1-tint), which lands the pane near
+	// 60-70 % apparent opacity at the alphas below: dark enough to
+	// read as glass, translucent enough that the world hints
+	// through.
+	glassBaseWash = rl.NewColor(8, 6, 10, 115)
+	glassDeep     = rl.NewColor(14, 12, 18, 130)
+	glassMid      = rl.NewColor(22, 18, 24, 105)
+	glassWarm     = rl.NewColor(28, 22, 16, 145)
+	glassDanger   = rl.NewColor(36, 16, 18, 135)
+	veil          = rl.NewColor(0, 0, 0, 130)
 
 	// ----- Wood frames -----
 	woodDark   = rl.NewColor(48, 30, 18, 255)
@@ -65,8 +69,8 @@ var (
 	surfaceLog        = glassMid
 	surfaceVeil       = veil
 	surfaceActiveTint = glassWarm
-	surfaceTargetTint = rl.NewColor(20, 38, 32, 200) // faint emerald glass for friendly target
-	surfaceDownTint   = rl.NewColor(28, 22, 28, 160) // unchanged — "knocked down" reads gray
+	surfaceTargetTint = rl.NewColor(20, 38, 32, 140) // faint emerald glass for friendly target
+	surfaceDownTint   = rl.NewColor(28, 22, 28, 115) // knocked down — dim grey wash
 	surfaceEnemyTint  = glassDanger
 
 	// Border aliases — used by drawCard as the OUTERMOST frame
@@ -93,7 +97,7 @@ var (
 	barMP      = rl.NewColor(104, 152, 224, 255)
 	barEnemyHP = rl.NewColor(204, 76, 76, 255)
 	barBurn    = rl.NewColor(240, 144, 72, 255)
-	barTrack   = rl.NewColor(10, 8, 14, 220)
+	barTrack   = rl.NewColor(10, 8, 14, 140)
 
 	// ----- Per-status accents (UI_STANDARDS.md "Per-status accents") -----
 	// Indexed by core.PartyStatusKind via partyStatusVisuals below; the
@@ -365,6 +369,170 @@ func drawCardFiligree(x, y, w, h int32, col color.RGBA) {
 	}
 }
 
+// drawStatIcon dispatches to the per-stat sigil drawer. One small
+// glyph per Stat enum value, used on the level-up modal's stat rows
+// and the panels overlay's Stats tab so each row reads at a glance
+// without needing to lean on the 3-letter label.
+func drawStatIcon(s core.Stat, cx, cy, r float32, col color.RGBA) {
+	switch s {
+	case core.StatSTR:
+		drawStatIconSTR(cx, cy, r, col)
+	case core.StatDEX:
+		drawStatIconDEX(cx, cy, r, col)
+	case core.StatINT:
+		drawStatIconINT(cx, cy, r, col)
+	case core.StatWIS:
+		drawStatIconWIS(cx, cy, r, col)
+	case core.StatVIT:
+		drawStatIconVIT(cx, cy, r, col)
+	case core.StatSPD:
+		drawStatIconSPD(cx, cy, r, col)
+	}
+}
+
+// STR — short-shafted hammer: rectangular head on top, narrow
+// handle hanging below, with a thin gilt band where head meets
+// handle. The "strength of arms" sigil.
+func drawStatIconSTR(cx, cy, r float32, col color.RGBA) {
+	headHalfW := r * 0.85
+	headH := r * 0.55
+	rl.DrawRectangle(int32(cx-headHalfW), int32(cy-r), int32(headHalfW*2), int32(headH), col)
+	// Head face band — a brighter inner stripe along the bottom of
+	// the head reads as a steel rim against the haft.
+	rl.DrawRectangle(int32(cx-headHalfW), int32(cy-r+headH-2), int32(headHalfW*2), 1, giltBright)
+	// Haft running down from the head.
+	haftHalfW := r * 0.16
+	rl.DrawRectangle(int32(cx-haftHalfW), int32(cy-r+headH), int32(haftHalfW*2), int32(r*1.35), col)
+	// Pommel knob at the haft's foot.
+	rl.DrawCircleV(rl.NewVector2(cx, cy+r*0.45), haftHalfW*1.4, fadeColor(col, 0.85))
+}
+
+// DEX — arrow pointing up-right: tip triangle, shaft rectangle,
+// fletching V at the tail. The classic "agility / precision" sigil.
+func drawStatIconDEX(cx, cy, r float32, col color.RGBA) {
+	const sqrt2Inv = float32(0.7071)
+	// Arrow axis points NE. Direction unit vector + perpendicular.
+	ax, ay := sqrt2Inv, -sqrt2Inv
+	px, py := sqrt2Inv, sqrt2Inv
+	// Tip triangle.
+	tip := rl.NewVector2(cx+ax*r, cy+ay*r)
+	tipBaseW := r * 0.45
+	tipBack := rl.NewVector2(cx+ax*r*0.55, cy+ay*r*0.55)
+	tipL := rl.NewVector2(tipBack.X+px*tipBaseW, tipBack.Y+py*tipBaseW)
+	tipR := rl.NewVector2(tipBack.X-px*tipBaseW, tipBack.Y-py*tipBaseW)
+	drawTriangleCCW(tip, tipR, tipL, col)
+	// Shaft.
+	shaftHalfW := r * 0.12
+	for t := float32(-r * 0.85); t < r*0.55; t += 1 {
+		px2 := cx + ax*t
+		py2 := cy + ay*t
+		// Tiny disc per sample — produces a rotated rectangle look
+		// without depending on a rotated-rect primitive. Cheap
+		// enough at r ~ 10 (samples ~25).
+		rl.DrawCircleV(rl.NewVector2(px2, py2), shaftHalfW, col)
+	}
+	// Fletching V at the tail — two short diagonal strokes.
+	tail := rl.NewVector2(cx-ax*r, cy-ay*r)
+	fl1 := rl.NewVector2(tail.X+px*r*0.45, tail.Y+py*r*0.45)
+	fl2 := rl.NewVector2(tail.X-px*r*0.45, tail.Y-py*r*0.45)
+	drawTriangleCCW(tail, fl1, rl.NewVector2(tail.X+ax*r*0.35, tail.Y+ay*r*0.35), col)
+	drawTriangleCCW(tail, rl.NewVector2(tail.X+ax*r*0.35, tail.Y+ay*r*0.35), fl2, col)
+}
+
+// INT — open book: two rectangular leaves meeting at a centre
+// spine, with a small bookmark hanging off the side. The "lore /
+// arcane study" sigil.
+func drawStatIconINT(cx, cy, r float32, col color.RGBA) {
+	pageHalfW := r * 0.7
+	pageH := r * 1.3
+	// Spine in centre.
+	rl.DrawRectangle(int32(cx)-1, int32(cy-pageH/2), 2, int32(pageH), fadeColor(col, 0.7))
+	// Left page (slight tilt via two triangles for the top-edge
+	// curl, but flat-rect body for legibility).
+	rl.DrawRectangle(int32(cx-pageHalfW), int32(cy-pageH/2), int32(pageHalfW)-1, int32(pageH), col)
+	// Right page.
+	rl.DrawRectangle(int32(cx)+1, int32(cy-pageH/2), int32(pageHalfW)-1, int32(pageH), col)
+	// Page-line hatching — two thin horizontal pencil marks on
+	// each page so the book reads as written-in, not blank.
+	hatch := fadeColor(col, 0.4)
+	rl.DrawRectangle(int32(cx-pageHalfW+2), int32(cy-pageH/4), int32(pageHalfW-4), 1, hatch)
+	rl.DrawRectangle(int32(cx-pageHalfW+2), int32(cy+1), int32(pageHalfW-4), 1, hatch)
+	rl.DrawRectangle(int32(cx+3), int32(cy-pageH/4), int32(pageHalfW-4), 1, hatch)
+	rl.DrawRectangle(int32(cx+3), int32(cy+1), int32(pageHalfW-4), 1, hatch)
+	// Bookmark — a thin gilt ribbon hanging off the right page.
+	bmHalfW := float32(1)
+	rl.DrawRectangle(int32(cx+pageHalfW*0.55), int32(cy-pageH/2), int32(bmHalfW*2), int32(pageH+3), giltBright)
+}
+
+// WIS — eye with iris: lens-shaped outline + centre pupil + bright
+// catchlight. The "perception / divine sight" sigil.
+func drawStatIconWIS(cx, cy, r float32, col color.RGBA) {
+	// Lens: two triangles meeting along the horizontal axis make
+	// a diamond, then we round it visually with a smaller circle
+	// sitting inside.
+	lensHalfW := r * 0.95
+	lensHalfH := r * 0.55
+	// Top half — triangle from left point through top arc to right
+	// point. Approximate the arc with a single triangle (eye reads
+	// at small size).
+	left := rl.NewVector2(cx-lensHalfW, cy)
+	right := rl.NewVector2(cx+lensHalfW, cy)
+	top := rl.NewVector2(cx, cy-lensHalfH)
+	bot := rl.NewVector2(cx, cy+lensHalfH)
+	drawTriangleCCW(left, top, right, col)
+	drawTriangleCCW(left, right, bot, col)
+	// Iris — filled inner disc.
+	rl.DrawCircleV(rl.NewVector2(cx, cy), lensHalfH*0.7, fadeColor(col, 0.55))
+	// Pupil — dark centre dot.
+	rl.DrawCircleV(rl.NewVector2(cx, cy), lensHalfH*0.3, fadeColor(col, 0.25))
+	// Catchlight — bright pip slightly off-centre, like the gleam
+	// in a painted portrait.
+	rl.DrawCircleV(rl.NewVector2(cx-lensHalfH*0.18, cy-lensHalfH*0.18), 1.4, giltBright)
+}
+
+// VIT — heart shape: two lobes (filled discs) up top, a V-point at
+// the bottom (triangle), with a bright inner pip. The "vitality"
+// sigil.
+func drawStatIconVIT(cx, cy, r float32, col color.RGBA) {
+	lobeR := r * 0.42
+	lobeY := cy - r*0.2
+	lobeOffset := lobeR * 0.85
+	rl.DrawCircleV(rl.NewVector2(cx-lobeOffset, lobeY), lobeR, col)
+	rl.DrawCircleV(rl.NewVector2(cx+lobeOffset, lobeY), lobeR, col)
+	// V-point — triangle from each lobe's outer edge down to the
+	// chin.
+	leftAnchor := rl.NewVector2(cx-lobeOffset-lobeR*0.85, lobeY+lobeR*0.25)
+	rightAnchor := rl.NewVector2(cx+lobeOffset+lobeR*0.85, lobeY+lobeR*0.25)
+	chin := rl.NewVector2(cx, cy+r*0.95)
+	drawTriangleCCW(leftAnchor, chin, rightAnchor, col)
+	// Inner highlight — bright pip slightly above centre for the
+	// "alive and beating" feel.
+	rl.DrawCircleV(rl.NewVector2(cx-lobeOffset*0.4, lobeY-lobeR*0.2), 1.4, giltBright)
+}
+
+// SPD — lightning bolt: a zigzag polygon drawn as a strip of
+// triangles. Reads as "speed / initiative" without needing a label.
+func drawStatIconSPD(cx, cy, r float32, col color.RGBA) {
+	// Define the bolt as a closed 6-vertex polygon, then triangle-
+	// fan from the first vertex. Vertices walk top-down across the
+	// zigzag.
+	verts := []rl.Vector2{
+		{X: cx - r*0.05, Y: cy - r},          // top spike
+		{X: cx + r*0.5, Y: cy - r*0.1},       // upper right notch
+		{X: cx + r*0.05, Y: cy - r*0.1},      // inner step
+		{X: cx + r*0.4, Y: cy + r},           // bottom spike
+		{X: cx - r*0.5, Y: cy + r*0.1},       // lower left notch
+		{X: cx - r*0.05, Y: cy + r*0.1},      // inner step
+	}
+	// Fan: (v0, v1, v2), (v0, v2, v3), (v0, v3, v4), (v0, v4, v5).
+	for i := 1; i < len(verts)-1; i++ {
+		drawTriangleCCW(verts[0], verts[i+1], verts[i], col)
+	}
+	// Bright inner highlight along the bolt's mid-axis — a tiny
+	// gilt pip at the kink so the bolt has a "live" centre.
+	rl.DrawCircleV(rl.NewVector2(cx, cy), 1.4, giltBright)
+}
+
 // drawDiamondPip paints a small filled diamond centered on (cx, cy)
 // with half-extent r. Used at filigree corner joints and as the
 // fleuron sigil flanking the pause-menu title.
@@ -491,26 +659,47 @@ func drawCard(x, y, w, h int32, fill, outline, accent color.RGBA) {
 	if w <= 0 || h <= 0 {
 		return
 	}
-	// 1. Outer wood-dark stroke (the frame's edge).
+	// Outer wood-framed card composition:
+	//   1. Translucent glass body filling the whole pane (via
+	//      drawGlassPane — the shared dark-wash + tint pair every
+	//      translucent surface in the HUD uses).
+	//   2. Three concentric hardwood frame strokes painted ON TOP
+	//      as outlines, so the body underneath stays glass.
+	drawGlassPane(x, y, w, h, fill)
 	rect := rl.NewRectangle(float32(x), float32(y), float32(w), float32(h))
-	rl.DrawRectangleRounded(rect, fixedRoundnessFor(w, h, cornerRadius), 8, outline)
-	// 2. Wood-mid band — inset by the outer stroke width.
-	band := woodFrameOuter
-	bandRect := rl.NewRectangle(float32(x+band), float32(y+band), float32(w-2*band), float32(h-2*band))
-	rl.DrawRectangleRounded(bandRect, fixedRoundnessFor(w-2*band, h-2*band, cornerRadius-1), 8, woodMid)
-	// 3. Wood-light inner highlight — thin pinstripe just outside the glass.
-	frame := woodFrameOuter + woodFrameBand
-	innerRect := rl.NewRectangle(float32(x+frame), float32(y+frame), float32(w-2*frame), float32(h-2*frame))
-	rl.DrawRectangleRounded(innerRect, fixedRoundnessFor(w-2*frame, h-2*frame, cornerRadius-2), 8, woodLight)
-	// 4. Glass body — the actual content surface.
-	innerFrame := frame + woodFrameInner
-	bodyRect := rl.NewRectangle(float32(x+innerFrame), float32(y+innerFrame), float32(w-2*innerFrame), float32(h-2*innerFrame))
-	rl.DrawRectangleRounded(bodyRect, fixedRoundnessFor(w-2*innerFrame, h-2*innerFrame, cornerRadius-3), 8, fill)
-	// 5. Optional left accent spine (class color on the active actor
-	// card, the gilt cursor mark on a list, etc).
+	roundness := fixedRoundnessFor(w, h, cornerRadius)
+	frameThick := float32(woodFrameOuter + woodFrameBand + woodFrameInner)
+	rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, frameThick, woodLight)
+	rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, float32(woodFrameOuter+woodFrameBand), woodMid)
+	rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, float32(woodFrameOuter), outline)
 	if accent.A > 0 {
 		drawAccentStripe(x, y, h, accent)
 	}
+}
+
+// drawGlassPane paints the canonical translucent glass body — a dark
+// `glassBaseWash` underlay plus the family `fill` tint on top — with
+// no wood frame. Use this for nested sub-panels inside a card (member
+// cards, equipment slot bezels, skill rows, items detail card, tab
+// tiles) so every translucent surface in the UI composites the same
+// way against the world content behind it.
+//
+// drawCard internally calls this for its body. Callers that need a
+// framed pane reach for drawCard; callers that need a frame-less
+// translucent body (sub-panes inside a card) reach for this directly.
+// drawSmallPanel — single-layer opaque-ish fill — stays the right
+// choice for actual small chrome (status pills, chips, gilt rails).
+func drawGlassPane(x, y, w, h int32, fill color.RGBA) {
+	if w <= 0 || h <= 0 {
+		return
+	}
+	rect := rl.NewRectangle(float32(x), float32(y), float32(w), float32(h))
+	// cornerRadius (4) for big card bodies; small sub-panes still
+	// look round at this radius and the unified curvature makes
+	// nested panes harmonise with their parent's frame.
+	roundness := fixedRoundnessFor(w, h, cornerRadius)
+	rl.DrawRectangleRounded(rect, roundness, 8, glassBaseWash)
+	rl.DrawRectangleRounded(rect, roundness, 8, fill)
 }
 
 // ListRowState enumerates the visual states a single row in a panel
@@ -550,7 +739,7 @@ func drawListRow(rect rl.Rectangle, state ListRowState) rl.Rectangle {
 	if state == ListRowDisabled {
 		body = rl.NewColor(18, 14, 18, 130)
 	}
-	drawSmallPanel(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), body)
+	drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), body)
 
 	// Gilt left spine on Hover / Selected.
 	spineW := int32(3)
@@ -662,7 +851,7 @@ func hpFillColor(value, maxValue int) color.RGBA {
 // from drawBar's body so the per-call construction of the same color
 // literal lives once at package scope, matching the pattern used by
 // minimapOutOfBoundsColor and panelsMapOutOfBoundsColor.
-var barTrackColor = rl.NewColor(8, 12, 22, 200)
+var barTrackColor = rl.NewColor(8, 12, 22, 140)
 
 // barLabelMeasureCache memoizes rl.MeasureTextEx for short, constant
 // bar labels like "HP" and "MP". drawBar runs ~16 times per frame

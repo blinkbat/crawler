@@ -77,7 +77,7 @@ func drawTurnPanel(g core.GameState, assets Resources) {
 		rowInnerH := rowH - 4
 
 		if i == 0 {
-			drawSmallPanel(rowX, rowY, rowW, rowInnerH, colorWithAlpha(col, 96))
+			drawGlassPane(rowX, rowY, rowW, rowInnerH, colorWithAlpha(col, 96))
 			drawSmallPanelOutline(rowX, rowY, rowW, rowInnerH, colorWithAlpha(col, 235))
 			cx := float32(rowX + 10)
 			cy := float32(rowY) + float32(rowInnerH)/2

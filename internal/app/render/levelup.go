@@ -58,7 +58,7 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 		if focused {
 			DrawSelectedRow(rect)
 		} else {
-			drawSmallPanel(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), fadeColor(glassDeep, 0.45))
+			drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), fadeColor(glassDeep, 0.45))
 		}
 		col := textMuted
 		if focused {
@@ -68,9 +68,17 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 		cur := core.StatValue(m.Stats, s)
 		pending := g.LevelUpPending[s]
 
-		drawTextWithShadow(font, label, float32(rowX+4), float32(rowY+2), FontBody, col)
+		// Stat sigil — small icon in the left gutter of the row.
+		// Brightens on focus so the focused row reads as "lit"
+		// without leaning entirely on the gilt selection chrome.
+		iconCol := fadeColor(woodAccent, 0.85)
+		if focused {
+			iconCol = giltBright
+		}
+		drawStatIcon(s, float32(rowX)+14, float32(rowY)+18, 10, iconCol)
+		drawTextWithShadow(font, label, float32(rowX+34), float32(rowY+2), FontBody, col)
 		if desc := core.StatDescription(s); desc != "" {
-			drawTextWithShadow(font, desc, float32(rowX+58), float32(rowY+26), FontTiny, textHint)
+			drawTextWithShadow(font, desc, float32(rowX+86), float32(rowY+26), FontTiny, textHint)
 		}
 
 		var preview string
@@ -92,7 +100,7 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 		focused := g.LevelUpRowCursor == core.LevelUpApplyRowIndex
 		rect := rl.NewRectangle(float32(rowX-6), float32(rowY-4), float32(rowW+12), float32(rowH-6))
 		applyBG := core.MixColor(glassDeep, glassWarm, 0.45)
-		drawSmallPanel(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), applyBG)
+		drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), applyBG)
 		if focused {
 			DrawSelectedRow(rect)
 		}

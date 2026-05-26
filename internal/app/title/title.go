@@ -140,7 +140,7 @@ func Draw(s State, assets render.Resources) {
 	font := assets.Font()
 	theme := assets.Theme()
 	rl.ClearBackground(rl.NewColor(8, 12, 24, 255))
-	_, screenH := render.ScreenSize()
+	screenW, screenH := render.ScreenSize()
 
 	title := "CRAWLER"
 	// Game-name splash — the documented exception to the five-size
@@ -152,6 +152,15 @@ func Draw(s State, assets render.Resources) {
 	titleX := render.CenterXF(tm.X)
 	titleY := float32(screenH) * 0.18
 	render.DrawTextWithShadow(font, title, titleX, titleY, titleSize, theme.TextPrimary)
+
+	// Gilt rule beneath the title, flanked by fleurons — the heraldic
+	// banner divider 90s D&D box art used between a game title and
+	// its menu. Width = title width + 24 px slack so the ornament
+	// frames the wordmark.
+	ruleY := titleY + tm.Y + 14
+	ruleW := tm.X + 48
+	ruleX := float32(screenW)/2 - ruleW/2
+	render.DrawTitleRule(ruleX, ruleY, ruleW)
 
 	switch s.mode {
 	case modeMain:
@@ -190,6 +199,11 @@ func drawMapPicker(s State, font rl.Font, theme render.Theme, screenH int32) {
 // screenH controls the vertical anchor (items start at 42% of screen
 // height); horizontal centering is handled by render.CenterXF which
 // re-reads the screen width directly, so callers don't pass screenW.
+//
+// Active row gets the full heraldic treatment: text in inkAccent
+// flanked by gilt fleurons on each side, like a banner herald
+// announcing the selected option. Inactive rows render plain in
+// muted text so the cursor pops without a hard chevron.
 func drawList(items []string, cursor int, font rl.Font, theme render.Theme, screenH int32, header string) {
 	listY := float32(screenH) * 0.42
 	if header != "" {
@@ -200,14 +214,19 @@ func drawList(items []string, cursor int, font rl.Font, theme render.Theme, scre
 	for i, label := range items {
 		size := render.FontHeading
 		col := theme.TextMuted
-		text := label
-		if i == cursor {
+		active := i == cursor
+		if active {
 			col = theme.BorderActive
-			text = "> " + label
 		}
-		m := rl.MeasureTextEx(font, text, size, render.FontSpacingHeading)
+		m := rl.MeasureTextEx(font, label, size, render.FontSpacingHeading)
 		y := listY + float32(i)*44
-		render.DrawTextWithShadow(font, text, render.CenterXF(m.X), y, size, col)
+		x := render.CenterXF(m.X)
+		render.DrawTextWithShadow(font, label, x, y, size, col)
+		if active {
+			flCY := y + m.Y/2
+			render.DrawFleuron(x-22, flCY, 5, theme.BorderActive)
+			render.DrawFleuron(x+m.X+22, flCY, 5, theme.BorderActive)
+		}
 	}
 }
 

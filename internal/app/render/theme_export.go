@@ -115,7 +115,7 @@ func DrawTextWithShadow(font rl.Font, text string, x, y, size float32, col color
 // non-`drawListRow` cursor highlight. New code should prefer
 // drawListRow directly for the full per-state ladder.
 func DrawSelectedRow(r rl.Rectangle) {
-	rl.DrawRectangleRec(r, glassWarm)
+	drawGlassPane(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height), glassWarm)
 	// Gilt left spine — 3 px, vertically inset 5 px top/bottom so it
 	// reads as a marker rather than the entire left edge. Termini
 	// pips at each end of the spine give it the "illuminated
@@ -143,8 +143,40 @@ func DrawSelectedRow(r rl.Rectangle) {
 // only because raylib's rect-fill takes a float Rectangle while its
 // rect-fill-i takes int32 directly, and converting at every call site
 // added noise without changing the surface/border combo we want shared.
+// DrawFleuron is the exported wrapper around the package-private
+// drawFleuron — the four-direction gilt sigil used as ornamental
+// punctuation (menu titles, banner dividers, commit-row marks).
+// Title screen and other non-render packages reach for it through
+// this seam.
+func DrawFleuron(cx, cy, r float32, col rl.Color) {
+	drawFleuron(cx, cy, r, col)
+}
+
+// DrawTitleRule paints a heraldic banner divider — a gilt rule with a
+// centred fleuron and flanking fleurons at each terminus. The
+// "ornamental punctuation under the game title" 90s D&D box art used
+// between the wordmark and the menu list. Width `w` covers the entire
+// rule from end-fleuron centre to end-fleuron centre; the line itself
+// is broken in three to make room for the centre and end fleurons.
+func DrawTitleRule(x, y, w float32) {
+	endFlR := float32(5)
+	midFlR := float32(4)
+	cx := x + w/2
+	// Inset the line from the end fleurons so they read as caps
+	// rather than as pips on a continuous line.
+	leftStart := x + endFlR + 4
+	rightEnd := x + w - endFlR - 4
+	midLeftEnd := cx - midFlR - 6
+	midRightStart := cx + midFlR + 6
+	rl.DrawRectangle(int32(leftStart), int32(y), int32(midLeftEnd-leftStart), 1, giltDim)
+	rl.DrawRectangle(int32(midRightStart), int32(y), int32(rightEnd-midRightStart), 1, giltDim)
+	drawFleuron(x+endFlR, y, endFlR, giltDim)
+	drawFleuron(x+w-endFlR, y, endFlR, giltDim)
+	drawFleuron(cx, y, midFlR, giltBright)
+}
+
 func DrawSelectedRowI(x, y, w, h int32) {
-	drawSmallPanel(x, y, w, h, glassWarm)
+	drawGlassPane(x, y, w, h, glassWarm)
 	spineX := x + 4
 	spineTop := y + 5
 	spineH := h - 10
