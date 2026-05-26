@@ -267,22 +267,29 @@ func drawEnemyStatusPill(font rl.Font, x, y, w, h float32, fill, outline rl.Colo
 const combatLogTextPad = int32(10)
 
 // drawCombatLogSpine paints the binding-edge ornament along the left
-// inside of the combat log pane: a thin wood-accent stripe with three
-// small gilt pips at the quarter / half / three-quarter marks. Reads
-// as a scribe's ledger spine — the dressing that ties the rolling
-// text to the rest of the wood-and-glass HUD.
+// inside of the combat log pane: a thin wood-accent stripe terminated
+// by gilt fleurons at both ends with a middle diamond pip flanked by
+// horizontal "binding ties". Reads as a scribe's ledger spine — the
+// dressing that ties the rolling text to the rest of the
+// wood-and-glass HUD.
 func drawCombatLogSpine(panelX, panelY, panelH int32) {
 	const inset = int32(10)
 	stripeX := panelX + inset
-	stripeY := panelY + 10
-	stripeH := panelH - 20
-	rl.DrawRectangle(stripeX, stripeY, 2, stripeH, fadeColor(woodAccent, 0.65))
-	// Three gilt pips along the stripe — anchors at 25 / 50 / 75 %
-	// so the spine reads as a bound ledger rather than a plain rule.
-	for _, t := range [3]float32{0.25, 0.5, 0.75} {
-		py := float32(stripeY) + float32(stripeH)*t
-		drawDiamondPip(float32(stripeX)+1, py, 2.5, giltDim)
-	}
+	stripeY := panelY + 18
+	stripeH := panelH - 36
+	rl.DrawRectangle(stripeX, stripeY, 2, stripeH, fadeColor(woodAccent, 0.75))
+	centreX := float32(stripeX) + 1
+	// Top + bottom fleurons mark the spine's termini — the
+	// chapter-divider sigils anchoring the ledger.
+	drawFleuron(centreX, float32(stripeY)-2, 3, giltDim)
+	drawFleuron(centreX, float32(stripeY+stripeH)+2, 3, giltDim)
+	// Mid-stripe diamond pip flanked by short horizontal binding
+	// ties — reads as a leather thong wrapping the spine.
+	midY := float32(stripeY) + float32(stripeH)*0.5
+	drawDiamondPip(centreX, midY, 2.5, giltDim)
+	tieCol := fadeColor(woodAccent, 0.45)
+	rl.DrawRectangle(stripeX-4, int32(midY), 4, 1, tieCol)
+	rl.DrawRectangle(stripeX+2, int32(midY), 4, 1, tieCol)
 }
 
 // combatLogVisualLine is the wrapped+styled product of one source log

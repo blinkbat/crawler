@@ -320,18 +320,103 @@ func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) 
 			// read as a stack without competing with the card.
 			drawSmallPanel(int32(innerX), int32(rowY), int32(innerW), int32(slotRowH-8), fadeColor(glassDeep, 0.55))
 
-			drawTextWithShadow(font, label, innerX+8, rowY+4, FontTiny, textMuted)
+			// Slot sigil — small pictograph beside the label. The
+			// equipment system isn't authored yet so the sigil
+			// renders dim; once an item slots in, a future pass
+			// can swap the colour to the item rarity tone.
+			iconCol := fadeColor(woodAccent, 0.7)
+			filled := slotIdx == 1 && m.Armor > 0
+			if filled {
+				iconCol = giltBright
+			}
+			iconCX := innerX + 14
+			iconCY := rowY + 18
+			switch slotIdx {
+			case 0:
+				drawSlotIconSword(iconCX, iconCY, 9, iconCol)
+			case 1:
+				drawSlotIconShield(iconCX, iconCY, 9, iconCol)
+			case 2:
+				drawSlotIconRing(iconCX, iconCY, 8, iconCol)
+			}
+
+			labelX := innerX + 32
+			drawTextWithShadow(font, label, labelX, rowY+4, FontTiny, textMuted)
 			value := "—"
 			valCol := textDim
-			if slotIdx == 1 && m.Armor > 0 {
+			if filled {
 				value = "Armor +" + strconv.Itoa(m.Armor)
 				valCol = textPrimary
 			}
-			drawTextWithShadow(font, value, innerX+8, rowY+18, FontSmall, valCol)
+			drawTextWithShadow(font, value, labelX, rowY+18, FontSmall, valCol)
 		}
 	}
 	footer := "Equipment system pending — values shown reflect the base armor stat only."
 	drawTextWithShadow(font, footer, body.X, body.Y+body.Height-16, FontTiny, textHint)
+}
+
+// drawSlotIconSword paints a small upright longsword sigil for the
+// Weapon equipment slot. Built from a vertical blade (tapered tip
+// triangle + body rectangle + centre fuller stripe), a horizontal
+// crossguard, and a round pommel. Sized by `r` (the icon's
+// half-height).
+func drawSlotIconSword(cx, cy, r float32, col rl.Color) {
+	bladeHalfW := r * 0.18
+	if bladeHalfW < 1.5 {
+		bladeHalfW = 1.5
+	}
+	pommelY := cy - r + 1
+	rl.DrawCircleV(rl.NewVector2(cx, pommelY), bladeHalfW*1.4, col)
+	guardY := cy - r*0.55
+	guardHalfW := r * 0.75
+	rl.DrawRectangle(int32(cx-guardHalfW), int32(guardY), int32(guardHalfW*2), 2, col)
+	rl.DrawRectangle(int32(cx-guardHalfW), int32(guardY), 2, 3, col)
+	rl.DrawRectangle(int32(cx+guardHalfW-2), int32(guardY), 2, 3, col)
+	bladeTop := guardY + 2
+	bladeBottom := cy + r*0.62
+	rl.DrawRectangle(int32(cx-bladeHalfW), int32(bladeTop), int32(bladeHalfW*2), int32(bladeBottom-bladeTop), col)
+	fuller := fadeColor(col, 0.5)
+	rl.DrawRectangle(int32(cx), int32(bladeTop+2), 1, int32(bladeBottom-bladeTop-4), fuller)
+	tip := rl.NewVector2(cx, cy+r)
+	left := rl.NewVector2(cx-bladeHalfW, bladeBottom)
+	right := rl.NewVector2(cx+bladeHalfW, bladeBottom)
+	drawTriangleCCW(tip, right, left, col)
+}
+
+// drawSlotIconShield paints a small heater-shield sigil for the
+// Armor equipment slot. Built from a top rectangle (shoulders) + a
+// bottom triangle (point) + a centre boss (gilt highlight disc).
+// Sized by `r` (the icon's half-height).
+func drawSlotIconShield(cx, cy, r float32, col rl.Color) {
+	topW := r * 1.4
+	topH := r * 0.7
+	// Shoulders.
+	rl.DrawRectangle(int32(cx-topW/2), int32(cy-r), int32(topW), int32(topH), col)
+	// Tapered point: triangle from the bottom corners of the
+	// shoulders down to a single tip.
+	tip := rl.NewVector2(cx, cy+r)
+	left := rl.NewVector2(cx-topW/2, cy-r+topH)
+	right := rl.NewVector2(cx+topW/2, cy-r+topH)
+	drawTriangleCCW(tip, right, left, col)
+	// Centre boss — small inner disc + bright pip.
+	rl.DrawCircleV(rl.NewVector2(cx, cy-r*0.05), r*0.32, fadeColor(col, 0.55))
+	rl.DrawCircleV(rl.NewVector2(cx, cy-r*0.05), r*0.16, giltBright)
+}
+
+// drawSlotIconRing paints a small ring sigil with a gem cap for the
+// Accessory equipment slot. Built from an annulus (outer circle
+// minus inner circle) and a tiny gem dot at the top. Sized by `r`
+// (the ring's outer radius).
+func drawSlotIconRing(cx, cy, r float32, col rl.Color) {
+	// Annulus via outer disc + inner punch-out using the slot's
+	// background tone. The background here is the slot bezel
+	// (fadeColor(glassDeep, 0.55)); approximate with a slightly
+	// darker pure-glass disc so the ring reads hollow at small
+	// sizes.
+	rl.DrawCircleV(rl.NewVector2(cx, cy+1), r, col)
+	rl.DrawCircleV(rl.NewVector2(cx, cy+1), r*0.55, fadeColor(glassDeep, 0.8))
+	// Gem dot at top of the ring band — bright gilt highlight.
+	rl.DrawCircleV(rl.NewVector2(cx, cy+1-r*0.85), r*0.32, giltBright)
 }
 
 // drawPanelsItems renders the Items tab as a clean ledger: a scrollable
@@ -641,9 +726,76 @@ func drawPanelsMap(g core.GameState, assets Resources, body rl.Rectangle) {
 	pcy := mapY + (float32(plz)+0.5)*cellPx
 	drawPanelsMapArrow(pcx, pcy, cellPx, g.Player.Facing)
 
+	// Compass rose in the upper-right corner — the centerpiece D&D
+	// cartography ornament. Sized small enough not to dominate but
+	// large enough to read as 8-point.
+	drawCompassRose(body.X+body.Width-46, body.Y+10, 28, font)
+
 	// Map footer — area name + zoom indicator.
 	footer := panelsMapFooterText(g.Area.Name, zoom)
 	drawTextWithShadow(font, footer, body.X, body.Y+body.Height-18, FontTiny, textHint)
+}
+
+// drawCompassRose paints an 8-point compass rose at (cx, cy) within
+// a diameter `d`. Long N/E/S/W points + short diagonal points + a
+// gilt centre disc + a wood-tone outer ring + a tiny "N" letter at
+// the north tip. The classic D&D treasure-map crest.
+func drawCompassRose(cx, cy float32, d float32, font rl.Font) {
+	outerR := d / 2
+	innerR := outerR * 0.35
+	// Outer wood ring — a circle with a slightly-inset glass
+	// background so the rose sits inside its own medallion.
+	rl.DrawCircleV(rl.NewVector2(cx, cy), outerR+1, woodDark)
+	rl.DrawCircleV(rl.NewVector2(cx, cy), outerR, glassDeep)
+	rl.DrawCircleLines(int32(cx), int32(cy), outerR, woodAccent)
+
+	// Four long cardinal points (N E S W). Each is a kite drawn as
+	// two triangles from the centre to the tip.
+	cardinals := [4]struct {
+		ax, ay, px, py float32
+	}{
+		{ax: 0, ay: -1, px: 1, py: 0}, // N
+		{ax: 1, ay: 0, px: 0, py: 1},  // E
+		{ax: 0, ay: 1, px: -1, py: 0}, // S
+		{ax: -1, ay: 0, px: 0, py: -1}, // W
+	}
+	pointHalfW := outerR * 0.18
+	for i, c := range cardinals {
+		tip := rl.NewVector2(cx+c.ax*outerR*0.95, cy+c.ay*outerR*0.95)
+		leftBase := rl.NewVector2(cx+c.px*pointHalfW, cy+c.py*pointHalfW)
+		rightBase := rl.NewVector2(cx-c.px*pointHalfW, cy-c.py*pointHalfW)
+		col := giltDim
+		if i == 0 {
+			// North gets the bright point — the heraldic convention.
+			col = giltBright
+		}
+		drawTriangleCCW(rl.NewVector2(cx, cy), tip, leftBase, col)
+		drawTriangleCCW(rl.NewVector2(cx, cy), rightBase, tip, col)
+	}
+	// Four short diagonal points (NE SE SW NW), in soft wood tone.
+	const sqrt2Inv = float32(0.7071)
+	diags := [4]struct{ ax, ay, px, py float32 }{
+		{ax: sqrt2Inv, ay: -sqrt2Inv, px: sqrt2Inv, py: sqrt2Inv},
+		{ax: sqrt2Inv, ay: sqrt2Inv, px: -sqrt2Inv, py: sqrt2Inv},
+		{ax: -sqrt2Inv, ay: sqrt2Inv, px: -sqrt2Inv, py: -sqrt2Inv},
+		{ax: -sqrt2Inv, ay: -sqrt2Inv, px: sqrt2Inv, py: -sqrt2Inv},
+	}
+	diagHalfW := outerR * 0.12
+	diagReach := outerR * 0.65
+	for _, c := range diags {
+		tip := rl.NewVector2(cx+c.ax*diagReach, cy+c.ay*diagReach)
+		leftBase := rl.NewVector2(cx+c.px*diagHalfW, cy+c.py*diagHalfW)
+		rightBase := rl.NewVector2(cx-c.px*diagHalfW, cy-c.py*diagHalfW)
+		drawTriangleCCW(rl.NewVector2(cx, cy), tip, leftBase, woodAccent)
+		drawTriangleCCW(rl.NewVector2(cx, cy), rightBase, tip, woodAccent)
+	}
+	// Centre disc + bright pip.
+	rl.DrawCircleV(rl.NewVector2(cx, cy), innerR, woodAccent)
+	rl.DrawCircleV(rl.NewVector2(cx, cy), innerR*0.5, giltBright)
+	// "N" letter just above the north point.
+	nLetter := "N"
+	nm := rl.MeasureTextEx(font, nLetter, FontTiny, 1)
+	drawTextWithShadow(font, nLetter, cx-nm.X/2, cy-outerR-nm.Y-2, FontTiny, inkAccent)
 }
 
 // panelsMapZoomDefaultFallback is the safety value when GameState was

@@ -290,36 +290,36 @@ func drawModalScaffold(font rl.Font, cardW, cardH int32, heading string) rl.Rect
 	return rl.NewRectangle(float32(cardX), float32(cardY), float32(cardW), float32(cardH))
 }
 
-// drawCardFiligree paints small L-shaped gilt brackets at the four
-// corners of a wood-framed card — the iconic illuminated-manuscript
-// flourish AD&D-era PC RPGs used to dress dialog boxes. Each bracket
-// is two short strokes meeting at the inner corner of the wood
-// frame's glass body; combined with a tiny diamond pip at the centre
-// of the stroke meeting, the corner reads as a finished spellbook
-// bezel rather than a flat rounded rectangle. Skipped on panes too
-// small to receive the ornament cleanly (< 80×80) so the corner
-// minimap / turn panel stay simple.
+// drawCardFiligree paints multi-stroke gilt corner brackets on a
+// wood-framed card — the illuminated-manuscript bezel 90s AD&D PC
+// RPGs used to dress dialog boxes. Each corner gets:
+//
+//   - outer L bracket (14 px arms, 2 px thick)
+//   - inner secondary L bracket (8 px arms, 1 px thick, ~4 px inset)
+//     in a softer gilt tone so it reads as a parallel cast line
+//   - joint diamond pip (3 px) at the meeting point of the outer arms
+//   - tip diamond pips (2 px) at the far ends of the outer arms
+//   - centre highlight pip inside the joint diamond (1 px in bright
+//     gilt) — the cast-metal speculum
+//
+// Skipped on panes too small to receive the ornament cleanly
+// (< 80×80) so the corner minimap / turn panel stay simple.
 func drawCardFiligree(x, y, w, h int32, col color.RGBA) {
 	if w < 80 || h < 80 {
 		return
 	}
-	// Inset into the glass body — past the woodFrame outer/band/inner
-	// triple so the bracket reads as ornament floating inside the
-	// pane, not a fight with the bevel.
 	inset := int32(woodFrameOuter + woodFrameBand + woodFrameInner + 5)
-	arm := int32(14)
-	thick := int32(2)
-	// Top-left, top-right, bottom-left, bottom-right brackets.
+	outerArm := int32(14)
+	innerArm := int32(8)
+	innerInset := int32(4)
 	corners := [4][2]int32{
 		{x + inset, y + inset},
 		{x + w - inset, y + inset},
 		{x + inset, y + h - inset},
 		{x + w - inset, y + h - inset},
 	}
+	softGilt := fadeColor(col, 0.55)
 	for i, c := range corners {
-		// "Outward" direction depends on which corner: top-left's
-		// arms go right+down, top-right's go left+down, etc. ±1
-		// vectors per corner pre-baked.
 		dx := int32(1)
 		dy := int32(1)
 		if i == 1 || i == 3 {
@@ -328,23 +328,40 @@ func drawCardFiligree(x, y, w, h int32, col color.RGBA) {
 		if i == 2 || i == 3 {
 			dy = -1
 		}
-		// Horizontal arm.
-		hx := c[0]
+		// Outer L — 14 px arms, 2 px thick.
+		outerHX := c[0]
 		if dx < 0 {
-			hx = c[0] - arm
+			outerHX = c[0] - outerArm
 		}
-		rl.DrawRectangle(hx, c[1], arm, thick, col)
-		// Vertical arm.
-		vy := c[1]
+		rl.DrawRectangle(outerHX, c[1], outerArm, 2, col)
+		outerVY := c[1]
 		if dy < 0 {
-			vy = c[1] - arm
+			outerVY = c[1] - outerArm
 		}
-		rl.DrawRectangle(c[0], vy, thick, arm, col)
-		// Diamond pip where the arms meet — a 4×4 rotated square
-		// drawn as two stacked triangles. Catches a bit of gilt at
-		// the joint so the bracket reads as cast metal, not a CAD
-		// line.
-		drawDiamondPip(float32(c[0])+float32(dx)*1, float32(c[1])+float32(dy)*1, 3, col)
+		rl.DrawRectangle(c[0], outerVY, 2, outerArm, col)
+		// Inner L — shorter and thinner, offset diagonally inward
+		// from the outer bracket. Reads as the second cast line
+		// of a Gothic frame.
+		innerOriginX := c[0] + dx*innerInset
+		innerOriginY := c[1] + dy*innerInset
+		innerHX := innerOriginX
+		if dx < 0 {
+			innerHX = innerOriginX - innerArm
+		}
+		rl.DrawRectangle(innerHX, innerOriginY, innerArm, 1, softGilt)
+		innerVY := innerOriginY
+		if dy < 0 {
+			innerVY = innerOriginY - innerArm
+		}
+		rl.DrawRectangle(innerOriginX, innerVY, 1, innerArm, softGilt)
+		// Joint pip + bright speculum inside it.
+		jointX := float32(c[0]) + float32(dx)*1
+		jointY := float32(c[1]) + float32(dy)*1
+		drawDiamondPip(jointX, jointY, 3, col)
+		drawDiamondPip(jointX, jointY, 1, giltBright)
+		// Tip pips at the far ends of the outer arms.
+		drawDiamondPip(float32(c[0]+dx*outerArm), float32(c[1]), 1.5, col)
+		drawDiamondPip(float32(c[0]), float32(c[1]+dy*outerArm), 1.5, col)
 	}
 }
 
@@ -360,30 +377,46 @@ func drawDiamondPip(cx, cy, r float32, col color.RGBA) {
 	drawTriangleCCW(right, left, bottom, col)
 }
 
-// drawFleuron paints a stylised diamond-with-flank fleuron — the
-// little gilt sigil 90s PC RPGs used to flank menu titles ("✦ MENU ✦").
-// Made of a centre diamond plus two side teardrops drawn as
-// triangles. Sized by `r` (the diamond's half-extent); the flanking
-// teardrops scale to ~0.8 r so the whole motif fits within a 6r
-// horizontal band.
+// drawFleuron paints a four-direction gilt fleuron — a centre
+// diamond flanked by teardrop leaves on all four compass points, with
+// a bright inner pip at the heart. The classic "chapter divider"
+// sigil illuminated manuscripts and 90s PC RPGs used as ornamental
+// punctuation. Sized by `r` (the centre diamond's half-extent);
+// flanking leaves scale to ~0.85 r so the whole motif fits in a
+// roughly 6r square.
+//
+// The bright inner pip uses giltBright regardless of the caller's
+// requested colour so the centre catches a highlight against a
+// duller bracket tone — gives the fleuron a tiny "cast metal"
+// reflection instead of reading as a flat silhouette.
 func drawFleuron(cx, cy, r float32, col color.RGBA) {
-	// Centre diamond.
 	drawDiamondPip(cx, cy, r, col)
-	// Left + right teardrop triangles, pointing outward from the
-	// diamond's E/W vertices. drawTriangleCCW winding is the same
-	// CCW-in-screen-Y-down convention used elsewhere.
-	flankR := r * 0.85
-	flankOffset := r + 2
-	// Left teardrop.
-	leftTip := rl.NewVector2(cx-flankOffset-flankR, cy)
-	leftTop := rl.NewVector2(cx-flankOffset, cy-flankR*0.55)
-	leftBot := rl.NewVector2(cx-flankOffset, cy+flankR*0.55)
-	drawTriangleCCW(leftTip, leftBot, leftTop, col)
-	// Right teardrop.
-	rightTip := rl.NewVector2(cx+flankOffset+flankR, cy)
-	rightTop := rl.NewVector2(cx+flankOffset, cy-flankR*0.55)
-	rightBot := rl.NewVector2(cx+flankOffset, cy+flankR*0.55)
-	drawTriangleCCW(rightTip, rightTop, rightBot, col)
+	leafR := r * 0.85
+	leafOffset := r + 2
+	// East leaf.
+	eTip := rl.NewVector2(cx+leafOffset+leafR, cy)
+	eTop := rl.NewVector2(cx+leafOffset, cy-leafR*0.55)
+	eBot := rl.NewVector2(cx+leafOffset, cy+leafR*0.55)
+	drawTriangleCCW(eTip, eTop, eBot, col)
+	// West leaf.
+	wTip := rl.NewVector2(cx-leafOffset-leafR, cy)
+	wTop := rl.NewVector2(cx-leafOffset, cy-leafR*0.55)
+	wBot := rl.NewVector2(cx-leafOffset, cy+leafR*0.55)
+	drawTriangleCCW(wTip, wBot, wTop, col)
+	// North leaf.
+	nTip := rl.NewVector2(cx, cy-leafOffset-leafR)
+	nLeft := rl.NewVector2(cx-leafR*0.55, cy-leafOffset)
+	nRight := rl.NewVector2(cx+leafR*0.55, cy-leafOffset)
+	drawTriangleCCW(nTip, nLeft, nRight, col)
+	// South leaf.
+	sTip := rl.NewVector2(cx, cy+leafOffset+leafR)
+	sLeft := rl.NewVector2(cx-leafR*0.55, cy+leafOffset)
+	sRight := rl.NewVector2(cx+leafR*0.55, cy+leafOffset)
+	drawTriangleCCW(sTip, sRight, sLeft, col)
+	// Bright speculum at the heart of the diamond.
+	if r >= 3 {
+		drawDiamondPip(cx, cy, r*0.35, giltBright)
+	}
 }
 
 // drawPanel fills a rounded rect at a fixed pixel corner radius.
@@ -713,18 +746,38 @@ func drawBar(font rl.Font, x, y, width, height float32, label string, value, max
 	}
 	drawSmallPanelOutline(ix, iy, iw, ih, outline)
 
-	// Tape-measure ticks — three thin notches at the 25/50/75 %
-	// marks inside the bar. Adds the "ledger column" feel without
-	// fighting the fill colour: ticks paint as a soft inked line
-	// across the FULL height (not just over the empty track), so a
-	// half-full bar reads as the fill swallowing the notches.
-	// Skipped on tiny bars (< 80 px) so compact UI surfaces don't
-	// look busy.
+	// Tape-measure ticks — small triangular notches biting in from
+	// the top and bottom edges of the bar at the 25/50/75 % marks.
+	// The 50 % mark gets a deeper notch (the cardinal index on a
+	// brass scale); the 25 / 75 marks are shorter (secondary
+	// graduations). Notches read as cast-metal cutouts against
+	// both the fill and the empty track because they're triangles
+	// pointing inward in a wood-accent tone, distinct from both
+	// glass and any HP/MP tint. Skipped on tiny bars (<80 px wide
+	// or <12 px tall) so compact UI surfaces don't look busy.
 	if iw >= 80 && ih >= 12 && !muted {
-		tickCol := fadeColor(woodAccent, 0.55)
-		for _, t := range [3]float32{0.25, 0.5, 0.75} {
-			tx := ix + 1 + int32(float32(iw-2)*t)
-			rl.DrawRectangle(tx, iy+2, 1, ih-4, tickCol)
+		tickCol := fadeColor(woodAccent, 0.85)
+		ticks := [3]struct {
+			t     float32
+			depth float32
+			width float32
+		}{
+			{t: 0.25, depth: 2.5, width: 3},
+			{t: 0.5, depth: 4, width: 4},
+			{t: 0.75, depth: 2.5, width: 3},
+		}
+		for _, tk := range ticks {
+			tx := float32(ix) + 1 + float32(iw-2)*tk.t
+			// Top notch — triangle pointing DOWN into the bar.
+			topApex := rl.NewVector2(tx, float32(iy)+tk.depth)
+			topL := rl.NewVector2(tx-tk.width/2, float32(iy))
+			topR := rl.NewVector2(tx+tk.width/2, float32(iy))
+			drawTriangleCCW(topL, topApex, topR, tickCol)
+			// Bottom notch — triangle pointing UP into the bar.
+			botApex := rl.NewVector2(tx, float32(iy+ih)-tk.depth)
+			botL := rl.NewVector2(tx-tk.width/2, float32(iy+ih))
+			botR := rl.NewVector2(tx+tk.width/2, float32(iy+ih))
+			drawTriangleCCW(botL, botR, botApex, tickCol)
 		}
 	}
 

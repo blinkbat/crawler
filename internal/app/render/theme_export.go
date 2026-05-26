@@ -117,10 +117,24 @@ func DrawTextWithShadow(font rl.Font, text string, x, y, size float32, col color
 func DrawSelectedRow(r rl.Rectangle) {
 	rl.DrawRectangleRec(r, glassWarm)
 	// Gilt left spine — 3 px, vertically inset 5 px top/bottom so it
-	// reads as a marker rather than the entire left edge.
-	rl.DrawRectangle(int32(r.X)+4, int32(r.Y)+5, 3, int32(r.Height)-10, giltBright)
-	// Underline along the bottom edge.
-	rl.DrawRectangle(int32(r.X)+8, int32(r.Y+r.Height)-3, int32(r.Width)-16, 1, giltDim)
+	// reads as a marker rather than the entire left edge. Termini
+	// pips at each end of the spine give it the "illuminated
+	// manuscript marker bead" feel rather than a bare strip.
+	spineX := int32(r.X) + 4
+	spineTop := int32(r.Y) + 5
+	spineH := int32(r.Height) - 10
+	rl.DrawRectangle(spineX, spineTop, 3, spineH, giltBright)
+	pipX := float32(spineX) + 1
+	drawDiamondPip(pipX, float32(spineTop)-1, 2.5, giltBright)
+	drawDiamondPip(pipX, float32(spineTop+spineH)+1, 2.5, giltBright)
+	// Underline along the bottom edge, capped by tiny pips so the
+	// underline doesn't read as a bare line.
+	underY := int32(r.Y+r.Height) - 3
+	underX := int32(r.X) + 12
+	underW := int32(r.Width) - 24
+	rl.DrawRectangle(underX, underY, underW, 1, giltDim)
+	drawDiamondPip(float32(underX), float32(underY), 1.5, giltDim)
+	drawDiamondPip(float32(underX+underW), float32(underY), 1.5, giltDim)
 }
 
 // DrawSelectedRowI is the int32-coords variant of DrawSelectedRow for
@@ -131,8 +145,17 @@ func DrawSelectedRow(r rl.Rectangle) {
 // added noise without changing the surface/border combo we want shared.
 func DrawSelectedRowI(x, y, w, h int32) {
 	drawSmallPanel(x, y, w, h, glassWarm)
-	// Gilt left spine + bottom underline (matches DrawSelectedRow's
-	// library-aesthetic selection style).
-	rl.DrawRectangle(x+4, y+5, 3, h-10, giltBright)
-	rl.DrawRectangle(x+8, y+h-3, w-16, 1, giltDim)
+	spineX := x + 4
+	spineTop := y + 5
+	spineH := h - 10
+	rl.DrawRectangle(spineX, spineTop, 3, spineH, giltBright)
+	pipX := float32(spineX) + 1
+	drawDiamondPip(pipX, float32(spineTop)-1, 2.5, giltBright)
+	drawDiamondPip(pipX, float32(spineTop+spineH)+1, 2.5, giltBright)
+	underY := y + h - 3
+	underX := x + 12
+	underW := w - 24
+	rl.DrawRectangle(underX, underY, underW, 1, giltDim)
+	drawDiamondPip(float32(underX), float32(underY), 1.5, giltDim)
+	drawDiamondPip(float32(underX+underW), float32(underY), 1.5, giltDim)
 }
