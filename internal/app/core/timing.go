@@ -35,6 +35,10 @@ const (
 	SeqDirRight = 1
 	SeqDirDown  = 2
 	SeqDirLeft  = 3
+	// SeqDirCount is the number of directions — the range NewSequenceState
+	// draws random targets from. Named so the random draw can't drift out
+	// of lockstep with the four SeqDir* codes above.
+	SeqDirCount = 4
 )
 
 // Per-slot result for the sequence minigame. SequenceResults is a slice
@@ -346,7 +350,7 @@ func NewSequenceState(rng *rand.Rand, duration float32, length int) TimingState 
 	}
 	targets := make([]int, length)
 	for i := range targets {
-		targets[i] = rng.Intn(4)
+		targets[i] = rng.Intn(SeqDirCount)
 	}
 	return TimingState{
 		Kind:            TimingKindSequence,

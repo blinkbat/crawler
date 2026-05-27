@@ -124,11 +124,11 @@ func drawEnemyRosterRow(font rl.Font, enemy core.Enemy, x, y, w, h int32, target
 	// Roster row tints follow the glass-token family — translucent
 	// glass over the (also translucent) outer card body, so the
 	// world hints through.
-	bg := rl.NewColor(20, 14, 22, 130)
-	border := rl.NewColor(96, 60, 64, 140)
+	bg := surfaceRosterRow
+	border := borderRosterRow
 	nameCol := textPrimary
 	if fading {
-		bg = rl.NewColor(28, 20, 24, 95)
+		bg = surfaceRosterRowFaded
 		border = borderDim
 		nameCol = textDim
 	}
@@ -626,7 +626,6 @@ func drawActionIconSkill(cx, cy, r float32, col rl.Color) {
 	drawTriangleCCW(rl.NewVector2(cx-r, cy), rl.NewVector2(cx, cy+rayHalf), rl.NewVector2(cx, cy-rayHalf), col)
 	drawTriangleCCW(rl.NewVector2(cx+r, cy), rl.NewVector2(cx, cy-rayHalf), rl.NewVector2(cx, cy+rayHalf), col)
 	// Diagonal short rays — fainter, in the same colour but smaller.
-	const sqrt2Inv = float32(0.7071)
 	dr := r * 0.55
 	for _, sign := range [4][2]float32{{1, 1}, {1, -1}, {-1, 1}, {-1, -1}} {
 		dx := sign[0] * sqrt2Inv * dr
@@ -784,20 +783,30 @@ func measureActionRowSuffix(font rl.Font, suffix string) rl.Vector2 {
 	return v
 }
 
+// enemyConditionColors is the wound-state tint for the enemy roster's
+// condition label, indexed by core.EnemyCondition. A table (not a switch)
+// so a newly-added condition surfaces as a zero-alpha (invisible) entry
+// that the init assert below catches, rather than silently inheriting the
+// default green.
+var enemyConditionColors = [core.EnemyConditionCount]color.RGBA{
+	core.EnemyUnharmed:     rl.NewColor(126, 231, 170, 255),
+	core.EnemyScuffed:      rl.NewColor(208, 226, 128, 255),
+	core.EnemyInjured:      rl.NewColor(246, 196, 91, 255),
+	core.EnemyBadlyWounded: rl.NewColor(244, 126, 75, 255),
+	core.EnemyNearDeath:    rl.NewColor(255, 78, 88, 255),
+}
+
+func init() {
+	for c, col := range enemyConditionColors {
+		if col.A == 0 {
+			panic(fmt.Sprintf("render: enemyConditionColors missing entry for condition %d", c))
+		}
+	}
+}
+
 func enemyHealthStyle(enemy core.Enemy) (string, color.RGBA) {
 	condition := core.EnemyConditionFor(enemy)
-	switch condition {
-	case core.EnemyScuffed:
-		return core.EnemyConditionLabel(condition), rl.NewColor(208, 226, 128, 255)
-	case core.EnemyInjured:
-		return core.EnemyConditionLabel(condition), rl.NewColor(246, 196, 91, 255)
-	case core.EnemyBadlyWounded:
-		return core.EnemyConditionLabel(condition), rl.NewColor(244, 126, 75, 255)
-	case core.EnemyNearDeath:
-		return core.EnemyConditionLabel(condition), rl.NewColor(255, 78, 88, 255)
-	default:
-		return core.EnemyConditionLabel(condition), rl.NewColor(126, 231, 170, 255)
-	}
+	return core.EnemyConditionLabel(condition), enemyConditionColors[condition]
 }
 
 // drawBattleSplash slams a banner with the encounter title at the top of the
@@ -822,7 +831,7 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 	intro := easeOutBack(enterT)
 	overall := exitT
 
-	text := core.BattleEncounterTitle(g)
+	text := core.BattleEncounterTitle(&g)
 	subtitle := splashSubtitle(g)
 	// Battle splash uses FontTitle for the encounter name and
 	// FontBody for the subtitle — per UI_STANDARDS.md "Type" the
@@ -903,7 +912,7 @@ func splashSubtitle(g core.GameState) string {
 	if count <= 1 {
 		return "Hostile encounter"
 	}
-	def := core.BattleEnemyInfo(g)
+	def := core.BattleEnemyInfo(&g)
 	return fmt.Sprintf("%d %s closing in", count, def.PluralNoun)
 }
 

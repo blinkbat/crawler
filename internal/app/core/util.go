@@ -108,7 +108,7 @@ func TileCenter(tile int) float32 {
 // parallel switch statements on the same enum that could drift when a
 // new direction was added. One row per direction; the helpers are
 // one-line lookups.
-var facingTable = [4]struct {
+var facingTable = [FacingCount]struct {
 	DX, DZ int
 	Yaw    float32
 }{
@@ -128,9 +128,9 @@ func FacingYaw(facing int) float32 {
 }
 
 func NormalizeFacing(facing int) int {
-	facing %= 4
+	facing %= FacingCount
 	if facing < 0 {
-		facing += 4
+		facing += FacingCount
 	}
 	return facing
 }

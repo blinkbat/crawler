@@ -10,6 +10,12 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+// sqrt2Inv is 1/√2 — the unit-diagonal component shared by every glyph
+// drawn on a 45° axis (DEX arrow, warrior cross-swords, skill icons, the
+// compass rose). One package-level const instead of a per-function local
+// in four draw helpers.
+const sqrt2Inv = float32(0.7071)
+
 // The Library palette. See UI_STANDARDS.md for the full rationale and
 // the rule "no new rl.NewColor literals for any surface that already
 // has a token." Every persistent HUD pane is dark glass framed in
@@ -72,6 +78,14 @@ var (
 	surfaceTargetTint = rl.NewColor(20, 38, 32, 140) // faint emerald glass for friendly target
 	surfaceDownTint   = rl.NewColor(28, 22, 28, 115) // knocked down — dim grey wash
 	surfaceEnemyTint  = glassDanger
+
+	// Enemy-roster row tints (drawEnemyRosterRow): the live row's glass
+	// fill + warm border, and the dimmed pair used while a defeated enemy
+	// fades out. Named here so the row chrome shares the palette's source
+	// of truth instead of carrying its own NewColor literals.
+	surfaceRosterRow      = rl.NewColor(20, 14, 22, 130)
+	borderRosterRow       = rl.NewColor(96, 60, 64, 140)
+	surfaceRosterRowFaded = rl.NewColor(28, 20, 24, 95)
 
 	// Border aliases — used by drawCard as the OUTERMOST frame
 	// stroke. Default panels use woodDark (deepest band); active /
@@ -410,7 +424,6 @@ func drawStatIconSTR(cx, cy, r float32, col color.RGBA) {
 // DEX — arrow pointing up-right: tip triangle, shaft rectangle,
 // fletching V at the tail. The classic "agility / precision" sigil.
 func drawStatIconDEX(cx, cy, r float32, col color.RGBA) {
-	const sqrt2Inv = float32(0.7071)
 	// Arrow axis points NE. Direction unit vector + perpendicular.
 	ax, ay := sqrt2Inv, -sqrt2Inv
 	px, py := sqrt2Inv, sqrt2Inv
@@ -585,6 +598,15 @@ func drawFleuron(cx, cy, r float32, col color.RGBA) {
 	if r >= 3 {
 		drawDiamondPip(cx, cy, r*0.35, giltBright)
 	}
+}
+
+// drawFleuronsFlanking paints a gilt fleuron `gap` px outside each end of
+// a centered label — the ◆ label ◆ motif shared by the menu titles and
+// the level-up Apply gate. leftX is the label's left edge, w its measured
+// width, cy the vertical midline.
+func drawFleuronsFlanking(leftX, w, gap, cy, r float32, col color.RGBA) {
+	drawFleuron(leftX-gap, cy, r, col)
+	drawFleuron(leftX+w+gap, cy, r, col)
 }
 
 // drawPanel fills a rounded rect at a fixed pixel corner radius.

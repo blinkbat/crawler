@@ -516,6 +516,12 @@ const (
 	East  = 1
 	South = 2
 	West  = 3
+	// FacingCount is the number of cardinal facings — the wrap modulus for
+	// NormalizeFacing and the size of facingTable. Named so the bare `4`
+	// doesn't recur at each rotation site. (Facing is still a bare int
+	// rather than a typed enum: Player.Facing and the +1 turn arithmetic
+	// thread raw ints through too many call sites to retype safely here.)
+	FacingCount = 4
 )
 
 // PauseMenuItem enumerates the rows in the pause menu. The integer values

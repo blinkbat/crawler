@@ -66,4 +66,27 @@ var (
 	// used to declare rl.NewColor(60, 64, 70, 255) inline; centralized
 	// here so a tweak is one edit.
 	clearBrushColor = rl.NewColor(60, 64, 70, 255)
+
+	// Label tint for drawLabel — the muted blue-grey field captions. Sole
+	// label color; named so it lives with the rest of the editor chrome
+	// instead of inline in draw.go.
+	editorLabelColor = rl.NewColor(138, 160, 188, 220)
+
+	// Semantic ok/warn pairs. The reachability metadata badge uses the
+	// muted pair; the placement-footprint ghost uses the brighter pair
+	// (it's a transient overlay that must pop against the map). Two pairs,
+	// not one, because the two surfaces are tuned to different saturations
+	// on purpose — naming them keeps the green/red intent explicit.
+	editorReachOK   = rl.NewColor(70, 130, 100, 255)
+	editorReachWarn = rl.NewColor(180, 80, 80, 255)
+	editorPlaceOK   = rl.NewColor(120, 240, 140, 255)
+	editorPlaceWarn = rl.NewColor(240, 110, 110, 255)
 )
+
+// withAlpha returns c with its alpha overridden — lets a base palette
+// color be reused at different opacities (e.g. the placement ghost's
+// bright outline vs. its faint fill) without a second NewColor literal.
+func withAlpha(c rl.Color, a uint8) rl.Color {
+	c.A = a
+	return c
+}

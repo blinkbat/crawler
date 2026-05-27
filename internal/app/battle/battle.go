@@ -35,7 +35,7 @@ func Start(g *core.GameState, packIndex int) {
 	g.Battle.QueueCursor = 0
 	g.Battle.NextRoundQueue = nil
 	resetBattleAction(g)
-	setBattleMessage(g, core.BattleEncounterMessage(*g))
+	setBattleMessage(g, core.BattleEncounterMessage(g))
 	beginNewRound(g)
 }
 
@@ -119,7 +119,7 @@ func Update(g *core.GameState, dt float32) {
 // inline `winBattle` directly — this helper is for the canonical case.
 func checkEnemyWipeout(g *core.GameState) bool {
 	if core.LivingBattleCount(g) == 0 {
-		winBattle(g, core.LastBattleEnemyFallsMessage(*g))
+		winBattle(g, core.LastBattleEnemyFallsMessage(g))
 		return true
 	}
 	return false
@@ -131,7 +131,7 @@ func checkEnemyWipeout(g *core.GameState) bool {
 // it transitioned the battle; callers should `return` immediately.
 func checkPartyWipeout(g *core.GameState) bool {
 	if core.ActivePartyCount(g.Party) == 0 {
-		loseBattle(g, core.BattleLossMessage(*g))
+		loseBattle(g, core.BattleLossMessage(g))
 		return true
 	}
 	return false
@@ -417,7 +417,7 @@ func beginPartyTurn(g *core.GameState, partyIndex int) {
 		// corpse.
 		g.Battle.PartyTarget = core.FirstLivingPartyMember(g.Party)
 		if g.Battle.PartyTarget < 0 {
-			loseBattle(g, core.BattleLossMessage(*g))
+			loseBattle(g, core.BattleLossMessage(g))
 			return
 		}
 	}

@@ -14,12 +14,7 @@ func updateActionMenu(g *core.GameState) {
 		fleeBattle(g)
 		return
 	}
-	if input.UpPressed() {
-		g.Battle.MenuIndex = core.WrapIndex(g.Battle.MenuIndex-1, core.ActionRowCount)
-	}
-	if input.DownPressed() {
-		g.Battle.MenuIndex = core.WrapIndex(g.Battle.MenuIndex+1, core.ActionRowCount)
-	}
+	g.Battle.MenuIndex = input.CursorUpDown(g.Battle.MenuIndex, core.ActionRowCount)
 	if input.BackPressed() {
 		setBattleStatus(g, "Choose an action.")
 		return
@@ -83,12 +78,7 @@ func updateSkillMenu(g *core.GameState) {
 		setBattleStatus(g, "No skill ready.")
 		return
 	}
-	if input.UpPressed() {
-		g.Battle.SkillMenuIndex = core.WrapIndex(g.Battle.SkillMenuIndex-1, len(skills))
-	}
-	if input.DownPressed() {
-		g.Battle.SkillMenuIndex = core.WrapIndex(g.Battle.SkillMenuIndex+1, len(skills))
-	}
+	g.Battle.SkillMenuIndex = input.CursorUpDown(g.Battle.SkillMenuIndex, len(skills))
 	if input.BackPressed() {
 		resetBattleAction(g)
 		setBattleStatus(g, "Choose an action.")
@@ -143,12 +133,7 @@ func updateItemMenu(g *core.GameState) {
 		setBattleStatus(g, "No items.")
 		return
 	}
-	if input.UpPressed() {
-		g.Battle.ItemMenuIndex = core.WrapIndex(g.Battle.ItemMenuIndex-1, count)
-	}
-	if input.DownPressed() {
-		g.Battle.ItemMenuIndex = core.WrapIndex(g.Battle.ItemMenuIndex+1, count)
-	}
+	g.Battle.ItemMenuIndex = input.CursorUpDown(g.Battle.ItemMenuIndex, count)
 	if input.BackPressed() {
 		resetBattleAction(g)
 		setBattleStatus(g, "Choose an action.")
@@ -283,7 +268,7 @@ func cycleBattleTarget(g *core.GameState, delta int) {
 	}
 	next := cycleTarget(g.Battle.EnemyIndex, living, delta)
 	g.Battle.EnemyIndex = living[next]
-	setBattleStatus(g, core.BattleEnemyTargetStatus(*g, next+1, len(living)))
+	setBattleStatus(g, core.BattleEnemyTargetStatus(g, next+1, len(living)))
 }
 
 func cyclePartyTarget(g *core.GameState, delta int) {

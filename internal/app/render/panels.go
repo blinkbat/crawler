@@ -216,13 +216,13 @@ func drawPanelsStats(g core.GameState, assets Resources, body rl.Rectangle) {
 		innerX := cols[i].X + 14
 		innerW := colW - 28
 
-		// Stat grid: 3 rows × 2 columns. Each cell paints
-		// "[icon] LBL  value" with the icon in soft gilt to the
-		// left of the label, the label muted, and the value
-		// bright so the eye scans the numbers without losing the
-		// sigil row anchor.
+		// Stat grid: 2 columns, ceil(StatCount/2) rows. Each cell paints
+		// "[icon] LBL  value" with the icon in soft gilt to the left of
+		// the label, the label muted, and the value bright so the eye
+		// scans the numbers without losing the sigil row anchor.
 		statColW := innerW / 2
 		rowH := float32(22)
+		statRows := (core.StatCount + 1) / 2
 		statIconCol := fadeColor(woodAccent, 0.9)
 		for s := core.Stat(0); s < core.StatCount; s++ {
 			row := int(s) / 2
@@ -238,7 +238,7 @@ func drawPanelsStats(g core.GameState, assets Resources, body rl.Rectangle) {
 			vm := rl.MeasureTextEx(font, value, FontSmall, 1)
 			drawTextWithShadow(font, value, cellX+statColW-vm.X-12, cellY, FontSmall, textPrimary)
 		}
-		contentY += 3 * rowH
+		contentY += float32(statRows) * rowH
 
 		// Armor + XP secondary row, slightly muted so they
 		// don't compete with the stat grid above.
@@ -777,7 +777,6 @@ func drawCompassRose(cx, cy float32, d float32, font rl.Font) {
 		drawTriangleCCW(rl.NewVector2(cx, cy), rightBase, tip, col)
 	}
 	// Four short diagonal points (NE SE SW NW), in soft wood tone.
-	const sqrt2Inv = float32(0.7071)
 	diags := [4]struct{ ax, ay, px, py float32 }{
 		{ax: sqrt2Inv, ay: -sqrt2Inv, px: sqrt2Inv, py: sqrt2Inv},
 		{ax: sqrt2Inv, ay: sqrt2Inv, px: -sqrt2Inv, py: sqrt2Inv},

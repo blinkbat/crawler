@@ -257,6 +257,25 @@ func applyTimingFlashCursor(curX, y, barH, flashTimer float32, base rl.Color) (f
 	return cursorW, flashCol
 }
 
+// timingTrackColor is the dark base fill behind every timing bar (press
+// and charge). Named so a palette pass touches one line instead of the
+// per-function literals it replaced.
+var timingTrackColor = rl.NewColor(14, 16, 26, 230)
+
+// drawExcellentShockwave paints the expanding ring that pops from the
+// frozen cursor on an Excellent timing resolution, fading as the flash
+// hold (flashTimer) drains. Shared verbatim by the press and charge bars
+// so the flourish reads identically; isDefend picks the grade hue.
+func drawExcellentShockwave(curX, drawY, drawnH, flashTimer float32, isDefend bool) {
+	phase := 1 - flashAlpha(flashTimer) // 0 fresh → 1 done
+	radius := 14 + phase*72
+	ringCol := qualityColor(core.TimingQualityExcellent, isDefend)
+	ringCol.A = uint8(220 * (1 - phase))
+	cy := drawY + drawnH*0.5
+	rl.DrawCircleLines(int32(curX), int32(cy), radius, ringCol)
+	rl.DrawCircleLines(int32(curX), int32(cy), radius+2, ringCol)
+}
+
 // drawPressBar is the original press-kind bar: nested quality zones inside
 // the acceptance window, sliding cursor, flash on press.
 //
@@ -286,7 +305,7 @@ func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x
 
 	// Track — solid dark fill, no border. During the flash hold the track
 	// fades to the quality color so the whole bar pulses with the result.
-	trackCol := rl.NewColor(14, 16, 26, 230)
+	trackCol := timingTrackColor
 	if flashing {
 		trackCol = qualityColor(timing.Quality, isDefend)
 		trackCol.A = uint8(220 * flashAlpha(g.Battle.TimingFlash))
@@ -344,13 +363,7 @@ func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x
 	// position during the flash hold. Only on Excellent so the moment
 	// reads as special; lesser grades stay quiet.
 	if flashing && timing.Quality == core.TimingQualityExcellent {
-		phase := 1 - flashAlpha(g.Battle.TimingFlash) // 0 fresh → 1 done
-		radius := 14 + phase*72
-		ringCol := qualityColor(core.TimingQualityExcellent, isDefend)
-		ringCol.A = uint8(220 * (1 - phase))
-		cy := drawY + drawnH*0.5
-		rl.DrawCircleLines(int32(curX), int32(cy), radius, ringCol)
-		rl.DrawCircleLines(int32(curX), int32(cy), radius+2, ringCol)
+		drawExcellentShockwave(curX, drawY, drawnH, g.Battle.TimingFlash, isDefend)
 	}
 }
 
@@ -388,7 +401,7 @@ func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, 
 	drawTimingHeading(assets.hudFont, heading, drawX, barW, drawY, baseCol, flashing, qualityColor(timing.Quality, false))
 
 	// Track — dark base fill.
-	trackCol := rl.NewColor(14, 16, 26, 230)
+	trackCol := timingTrackColor
 	if flashing {
 		trackCol = qualityColor(timing.Quality, false)
 		trackCol.A = uint8(220 * flashAlpha(g.Battle.TimingFlash))
@@ -452,13 +465,7 @@ func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, 
 	// Excellent shockwave on release — same treatment as the press bar so
 	// charge-graded Excellents read with the same flourish.
 	if flashing && timing.Quality == core.TimingQualityExcellent {
-		phase := 1 - flashAlpha(g.Battle.TimingFlash)
-		radius := 14 + phase*72
-		ringCol := qualityColor(core.TimingQualityExcellent, false)
-		ringCol.A = uint8(220 * (1 - phase))
-		cy := drawY + drawnH*0.5
-		rl.DrawCircleLines(int32(curX), int32(cy), radius, ringCol)
-		rl.DrawCircleLines(int32(curX), int32(cy), radius+2, ringCol)
+		drawExcellentShockwave(curX, drawY, drawnH, g.Battle.TimingFlash, false)
 	}
 }
 

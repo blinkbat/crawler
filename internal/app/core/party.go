@@ -919,14 +919,12 @@ var DefaultPoisonEffect = PoisonEffect{
 }
 
 // RollDuration picks a random duration in [MinTurns, MaxTurns] inclusive.
-// Returns MinTurns when the range is degenerate, matching BurnDuration's
-// behavior so both DoT rollers fail open instead of panicking on bad data.
+// Routes through rollDuration so it shares the one degenerate-bounds
+// contract with the SkillEffect DoT rollers (Burn/Sleep/Stun/Bind/Confuse)
+// — previously it open-coded the math with the OLD `span <= 0 → MinTurns`
+// rule, which diverged from rollDuration's `min <= 0 || max < min → 0`.
 func (p PoisonEffect) RollDuration(rng *rand.Rand) int {
-	span := p.MaxTurns - p.MinTurns
-	if span <= 0 {
-		return p.MinTurns
-	}
-	return p.MinTurns + rng.Intn(span+1)
+	return rollDuration(rng, p.MinTurns, p.MaxTurns)
 }
 
 // TickPoisonStep applies one tick of poison damage to every poisoned,

@@ -8,6 +8,9 @@ const (
 	EnemyInjured
 	EnemyBadlyWounded
 	EnemyNearDeath
+	// EnemyConditionCount sizes the parallel color table in the render
+	// layer (enemyConditionColors). Bump by adding a condition above.
+	EnemyConditionCount = int(EnemyNearDeath) + 1
 )
 
 func EnemyConditionFor(enemy Enemy) EnemyCondition {

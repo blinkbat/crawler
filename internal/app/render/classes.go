@@ -99,7 +99,6 @@ func drawClassGlyph(cx, cy, r float32, class core.PartyClass, col color.RGBA) {
 // they catch the eye as cast-metal highlights against the duller
 // blade body.
 func drawClassGlyphWarrior(cx, cy, r float32, col color.RGBA) {
-	const sqrt2Inv = float32(0.7071)
 	highlight := giltBright
 
 	// Each sword has: pommel (top-end), crossguard, tapered blade.

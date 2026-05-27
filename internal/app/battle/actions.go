@@ -358,15 +358,23 @@ func handleEnemyRaiseBones(ctx enemySpellCtx) {
 	// insertion needed (an earlier pass appended to NextRoundQueue
 	// here, but the rebuild discarded the append, making the line
 	// dead code).
-	// Stamp the per-battle cast counter so usableEnemySkills sees
-	// this raise the next time the AI considers RaiseBones.
-	// SkillCastCount is now eagerly initialized by NewEnemy, but
-	// keep the nil guard as defense-in-depth against custom-enemy
-	// paths or tests that construct an Enemy via struct literal.
-	if ctx.enemy.SkillCastCount == nil {
-		ctx.enemy.SkillCastCount = map[core.SkillID]int{}
+	//
+	// Re-fetch the caster AFTER the append. pack.Members is allocated at
+	// exact capacity (placePacks: make([]Enemy, 0, len)), so appending a
+	// skeleton always reallocates the backing array — ctx.enemy now
+	// dangles at the old array. Stamping the cast counter through ctx.enemy
+	// would land on the orphaned copy, leaving the live necromancer's
+	// SkillCastCount nil so usableEnemySkills never sees the cap and it
+	// summons every eligible turn. BattleMemberAt re-derives the live
+	// pointer by slot. (NewEnemy leaves SkillCastCount nil by design —
+	// nil-map reads return zero — so the guard below still allocates it.)
+	caster := core.BattleMemberAt(g, ctx.slot)
+	if caster != nil {
+		if caster.SkillCastCount == nil {
+			caster.SkillCastCount = map[core.SkillID]int{}
+		}
+		caster.SkillCastCount[core.SkillRaiseBones]++
 	}
-	ctx.enemy.SkillCastCount[core.SkillRaiseBones]++
 	setBattleMessage(g, fmt.Sprintf("%s incants — a skeleton claws up from the ground!", core.TheEnemy(ctx.def)))
 	audio.Play(audio.SoundInputHit)
 }
@@ -513,6 +521,26 @@ func ensureAliveTargetOrCancel(g *core.GameState, refundSkill core.SkillID) bool
 	return false
 }
 
+// beginSingleTargetSkill is the shared head of every single-enemy-target
+// damaging skill (Firebolt / CrushingBlow / Smite / Backstab / VenomStrike
+// / FrostLance): the refund-on-dead-target gate, actor lookup, attack-bump,
+// raw-damage roll, and a pre-hit snapshot of the target (the message
+// builders want the foe's name/state from BEFORE it possibly dies). Returns
+// ok=false when the cast was cancelled — ensureAliveTargetOrCancel already
+// refunded MP and ended the turn, so callers just `return false`. The
+// returned rawDamage is the pre-armor figure; callers may still mutate it
+// (crit doublers) before handing it to damageEnemy.
+func beginSingleTargetSkill(g *core.GameState, skill core.SkillID, quality int) (actor *core.PartyMember, target core.Enemy, rawDamage int, ok bool) {
+	if !ensureAliveTargetOrCancel(g, skill) {
+		return nil, core.Enemy{}, 0, false
+	}
+	actor = &g.Party[g.Battle.CurrentParty]
+	actor.AttackBump = core.BumpDuration
+	rawDamage = scaleSkillDamage(actor, skill, quality)
+	target = *core.BattleMemberAt(g, g.Battle.EnemyIndex)
+	return actor, target, rawDamage, true
+}
+
 // beginPendingAction is invoked once the player has confirmed their target
 // (or their no-target action). It validates / pays cost and, on success,
 // arms the timing bar.
@@ -606,14 +634,7 @@ func maybeConfuseRetarget(g *core.GameState) {
 	}
 	switch g.Battle.ActionMode {
 	case core.ActionEnemyTarget:
-		// Build a list of living enemy slots and pick uniformly.
-		slots := make([]int, 0, len(core.BattleMembers(g)))
-		for slot, m := range core.BattleMembers(g) {
-			if !m.Alive {
-				continue
-			}
-			slots = append(slots, slot)
-		}
+		slots := core.LivingBattleEnemyIndices(g)
 		if len(slots) == 0 {
 			return
 		}
@@ -623,13 +644,7 @@ func maybeConfuseRetarget(g *core.GameState) {
 			setBattleStatus(g, fmt.Sprintf("%s is confused — wrong target!", g.Party[actor].Name))
 		}
 	case core.ActionPartyTarget:
-		slots := make([]int, 0, len(g.Party))
-		for i, p := range g.Party {
-			if p.HP <= 0 || p.Ingested {
-				continue
-			}
-			slots = append(slots, i)
-		}
+		slots := core.AvailablePartyTargets(g.Party)
 		if len(slots) == 0 {
 			return
 		}
@@ -924,18 +939,14 @@ func setupFirebolt(g *core.GameState) bool {
 }
 
 func applyFirebolt(g *core.GameState, quality int) bool {
-	// Firebolt's setup committed MP; refund it if the target died before apply.
-	if !ensureAliveTargetOrCancel(g, core.SkillFirebolt) {
+	// Firebolt's setup committed MP; the shared head refunds it if the
+	// target died before apply.
+	actor, target, rawDamage, ok := beginSingleTargetSkill(g, core.SkillFirebolt, quality)
+	if !ok {
 		return false
 	}
-	actor := &g.Party[g.Battle.CurrentParty]
-	actor.AttackBump = core.BumpDuration
+	// Effect is pulled separately for the burn-chance roll below.
 	effect := core.EffectiveSkillEffect(actor, core.SkillFirebolt)
-	// Damage formula is dispatched by skill Kind in core.SkillDamage; Firebolt's
-	// Kind is Magic so this resolves to INT + Effect.Damage. We still pull
-	// Effect separately for the burn-chance roll below.
-	rawDamage := scaleSkillDamage(actor, core.SkillFirebolt, quality)
-	target := *core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	// Firebolt is Magic-tagged so dealt == rawDamage in practice;
 	// using the return keeps the log honest if a future Tag change
 	// brings armor back into play.
@@ -955,13 +966,11 @@ func setupCrushingBlow(g *core.GameState) bool {
 }
 
 func applyCrushingBlow(g *core.GameState, quality int) bool {
-	if !ensureAliveTargetOrCancel(g, core.SkillCrushingBlow) {
+	actor, target, rawDamage, ok := beginSingleTargetSkill(g, core.SkillCrushingBlow, quality)
+	if !ok {
 		return false
 	}
-	actor := &g.Party[g.Battle.CurrentParty]
-	actor.AttackBump = core.BumpDuration
 	effect := core.EffectiveSkillEffect(actor, core.SkillCrushingBlow)
-	rawDamage := scaleSkillDamage(actor, core.SkillCrushingBlow, quality)
 	// Crushing Blow T3 ("Excellent crits") doubles damage on a
 	// landed Excellent timing roll. CritDoubleOnExcellent is the
 	// tier-only mod the apply path consults — bool flag so future
@@ -969,7 +978,6 @@ func applyCrushingBlow(g *core.GameState, quality int) bool {
 	if quality == core.TimingQualityExcellent && core.SkillTierMod(actor, core.SkillCrushingBlow).CritDoubleOnExcellent {
 		rawDamage *= 2
 	}
-	target := *core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillCrushingBlow))
 	core.EnqueueEnemyVFX(g, core.VFXSlash, g.Battle.EnemyIndex)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
@@ -1054,14 +1062,11 @@ func setupSmite(g *core.GameState) bool {
 }
 
 func applySmite(g *core.GameState, quality int) bool {
-	if !ensureAliveTargetOrCancel(g, core.SkillSmite) {
+	actor, target, rawDamage, ok := beginSingleTargetSkill(g, core.SkillSmite, quality)
+	if !ok {
 		return false
 	}
-	actor := &g.Party[g.Battle.CurrentParty]
-	actor.AttackBump = core.BumpDuration
 	effect := core.EffectiveSkillEffect(actor, core.SkillSmite)
-	rawDamage := scaleSkillDamage(actor, core.SkillSmite, quality)
-	target := *core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillSmite))
 	core.EnqueueEnemyVFX(g, core.VFXSmite, g.Battle.EnemyIndex)
 	// Smite T3 ("+25% stun") gives the base-stun-less skill a stun
@@ -1082,12 +1087,10 @@ func setupBackstab(g *core.GameState) bool {
 }
 
 func applyBackstab(g *core.GameState, quality int) bool {
-	if !ensureAliveTargetOrCancel(g, core.SkillBackstab) {
+	actor, target, rawDamage, ok := beginSingleTargetSkill(g, core.SkillBackstab, quality)
+	if !ok {
 		return false
 	}
-	actor := &g.Party[g.Battle.CurrentParty]
-	actor.AttackBump = core.BumpDuration
-	rawDamage := scaleSkillDamage(actor, core.SkillBackstab, quality)
 	// Timing-gated crit: an Excellent landing doubles the post-scaling
 	// damage before armor. Phys-tagged, so amoebas still chew most of
 	// it; the doubling is the thief's reward for nailing the charge.
@@ -1100,7 +1103,6 @@ func applyBackstab(g *core.GameState, quality int) bool {
 			rawDamage *= 2
 		}
 	}
-	target := *core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillBackstab))
 	core.EnqueueEnemyVFX(g, core.VFXSlash, g.Battle.EnemyIndex)
 	setBattleMessage(g, backstabMessage(actor.Name, target, damage, quality, defeated, crit))
@@ -1115,14 +1117,11 @@ func setupVenomStrike(g *core.GameState) bool {
 }
 
 func applyVenomStrike(g *core.GameState, quality int) bool {
-	if !ensureAliveTargetOrCancel(g, core.SkillVenomStrike) {
+	actor, target, rawDamage, ok := beginSingleTargetSkill(g, core.SkillVenomStrike, quality)
+	if !ok {
 		return false
 	}
-	actor := &g.Party[g.Battle.CurrentParty]
-	actor.AttackBump = core.BumpDuration
 	effect := core.EffectiveSkillEffect(actor, core.SkillVenomStrike)
-	rawDamage := scaleSkillDamage(actor, core.SkillVenomStrike, quality)
-	target := *core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillVenomStrike))
 	core.EnqueueEnemyVFX(g, core.VFXVenom, g.Battle.EnemyIndex)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
@@ -1139,14 +1138,11 @@ func setupFrostLance(g *core.GameState) bool {
 }
 
 func applyFrostLance(g *core.GameState, quality int) bool {
-	if !ensureAliveTargetOrCancel(g, core.SkillFrostLance) {
+	actor, target, rawDamage, ok := beginSingleTargetSkill(g, core.SkillFrostLance, quality)
+	if !ok {
 		return false
 	}
-	actor := &g.Party[g.Battle.CurrentParty]
-	actor.AttackBump = core.BumpDuration
 	effect := core.EffectiveSkillEffect(actor, core.SkillFrostLance)
-	rawDamage := scaleSkillDamage(actor, core.SkillFrostLance, quality)
-	target := *core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillFrostLance))
 	core.EnqueueEnemyVFX(g, core.VFXFrost, g.Battle.EnemyIndex)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
@@ -1530,12 +1526,12 @@ func damagePartyMember(g *core.GameState, partyIndex, rawAmount int, tag core.Sk
 // actor types lives in one place so it's reviewable rather than
 // scattered across multiple kill sites.
 //
-// Enemy side clears Burn + Sleep + Poison. Party side currently
-// clears only Sleep because party members can't yet carry Burn
-// (no enemy skill applies it) and Poison persists post-death only
-// as a render hint (the member is at HP=0 already). When/if a
-// player-applicable burn lands, add it here in lockstep with the
-// enemy side.
+// Enemy side clears Burn + Sleep + Poison + Stun. Party side clears the
+// statuses a member can actually carry into death today: Sleep (goblin
+// mage), Bound (cave spider web), and Confused (will-o'-wisp). Poison is
+// intentionally left so the corpse keeps its poison render hint while it
+// fades; Burn has no player-applicable source yet. Add new timed statuses
+// to whichever side can carry them so they can't linger on a corpse.
 func clearEnemyStatusesOnDeath(enemy *core.Enemy) {
 	enemy.BurnTurns = 0
 	enemy.SleepTurns = 0
@@ -1545,11 +1541,8 @@ func clearEnemyStatusesOnDeath(enemy *core.Enemy) {
 
 func clearPartyStatusesOnDeath(member *core.PartyMember) {
 	member.SleepTurns = 0
-	// PoisonTurns / BoundTurns / ConfusedTurns / StunTurns / Burn
-	// would belong here too if the player became applicable to any
-	// of them; today only Sleep was inflicted pre-death (e.g. via
-	// the goblin mage), and clearing it lets the corpse fade
-	// without the "Z" pill flicker on top.
+	member.BoundTurns = 0
+	member.ConfusedTurns = 0
 }
 
 // finishPartyAction is the apply* hand-off — kept as a thin wrapper so the

@@ -501,8 +501,11 @@ func EnemySingularNoun(enemy Enemy) string {
 	return EnemyInfoFor(enemy).SingularNoun
 }
 
-func BattleEnemyInfo(g GameState) EnemyDefinition {
-	members := BattleMembers(&g)
+// These battle-string builders take *GameState like the rest of the
+// selectors in this package — taking GameState by value copied the whole
+// struct (slices, maps, party) on every per-frame HUD-string call.
+func BattleEnemyInfo(g *GameState) EnemyDefinition {
+	members := BattleMembers(g)
 	if g.Battle.EnemyIndex >= 0 && g.Battle.EnemyIndex < len(members) {
 		return EnemyInfoFor(members[g.Battle.EnemyIndex])
 	}
@@ -512,17 +515,17 @@ func BattleEnemyInfo(g GameState) EnemyDefinition {
 	return EnemyInfo(EnemyRat)
 }
 
-func BattleEnemyGroupName(g GameState) string {
+func BattleEnemyGroupName(g *GameState) string {
 	return BattleEnemyInfo(g).GroupName
 }
 
-func BattleEnemyTargetStatus(g GameState, ordinal, total int) string {
+func BattleEnemyTargetStatus(g *GameState, ordinal, total int) string {
 	def := BattleEnemyInfo(g)
 	return fmt.Sprintf("Targeting %s %d of %d.", def.SingularNoun, ordinal, total)
 }
 
-func BattleEncounterMessage(g GameState) string {
-	count := LivingBattleCount(&g)
+func BattleEncounterMessage(g *GameState) string {
+	count := LivingBattleCount(g)
 	def := BattleEnemyInfo(g)
 	if count <= 1 {
 		return fmt.Sprintf("A %s blocks the way.", def.SingularNoun)
@@ -530,8 +533,8 @@ func BattleEncounterMessage(g GameState) string {
 	return fmt.Sprintf("%d %s close in.", count, def.PluralNoun)
 }
 
-func BattleEncounterTitle(g GameState) string {
-	count := len(BattleMembers(&g))
+func BattleEncounterTitle(g *GameState) string {
+	count := len(BattleMembers(g))
 	def := BattleEnemyInfo(g)
 	if count <= 1 {
 		return fmt.Sprintf("%s Encounter!", def.Name)
@@ -539,12 +542,12 @@ func BattleEncounterTitle(g GameState) string {
 	return fmt.Sprintf("%s x%d!", def.GroupName, count)
 }
 
-func LastBattleEnemyFallsMessage(g GameState) string {
+func LastBattleEnemyFallsMessage(g *GameState) string {
 	return fmt.Sprintf("The last %s falls.", BattleEnemyInfo(g).SingularNoun)
 }
 
-func BattleLossMessage(g GameState) string {
-	count := LivingBattleCount(&g)
+func BattleLossMessage(g *GameState) string {
+	count := LivingBattleCount(g)
 	def := BattleEnemyInfo(g)
 	if count <= 1 {
 		return fmt.Sprintf("The %s drives the party back. Press Enter to recover.", def.SingularNoun)

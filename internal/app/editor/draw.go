@@ -969,7 +969,7 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 	if len(warnings) == 0 {
 		badgeValue := rl.NewRectangle(mr.reachArea.X, mr.reachArea.Y+22, mr.reachArea.Width, 30)
 		rl.DrawRectangleRec(badgeValue, rl.NewColor(14, 22, 18, 255))
-		rl.DrawRectangleLinesEx(badgeValue, 1, rl.NewColor(70, 130, 100, 255))
+		rl.DrawRectangleLinesEx(badgeValue, 1, editorReachOK)
 		rl.DrawTextEx(font, "OK", rl.NewVector2(badgeValue.X+8, badgeValue.Y+(badgeValue.Height-16)/2), 16, 1, rl.NewColor(150, 220, 180, 255))
 	} else {
 		// Stack one row per warning so the author can read them all
@@ -982,7 +982,7 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 		h := float32(10 + 22*len(rows))
 		box := rl.NewRectangle(mr.reachArea.X, mr.reachArea.Y+22, mr.reachArea.Width, h)
 		rl.DrawRectangleRec(box, rl.NewColor(38, 16, 18, 255))
-		rl.DrawRectangleLinesEx(box, 1, rl.NewColor(180, 80, 80, 255))
+		rl.DrawRectangleLinesEx(box, 1, editorReachWarn)
 		for i, w := range rows {
 			rl.DrawTextEx(font, "! "+w,
 				rl.NewVector2(box.X+6, box.Y+5+float32(i)*22),
@@ -997,7 +997,7 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 }
 
 func drawLabel(font rl.Font, text string, r rl.Rectangle) {
-	rl.DrawTextEx(font, text, rl.NewVector2(r.X, r.Y), 14, 1, rl.NewColor(138, 160, 188, 220))
+	rl.DrawTextEx(font, text, rl.NewVector2(r.X, r.Y), 14, 1, editorLabelColor)
 }
 
 func drawTextField(font rl.Font, r rl.Rectangle, text string, focused bool) {
@@ -1271,11 +1271,11 @@ func drawGrid(s *State, font rl.Font) {
 		// and never lands on a half-painted footprint.
 		if fp := activeFootprint(s); fp != nil {
 			ok := footprintPlaceable(s, hoverPx, hoverPz, fp)
-			outline := rl.NewColor(120, 240, 140, 220)
-			fill := rl.NewColor(120, 240, 140, 60)
+			outline := withAlpha(editorPlaceOK, 220)
+			fill := withAlpha(editorPlaceOK, 60)
 			if !ok {
-				outline = rl.NewColor(240, 110, 110, 230)
-				fill = rl.NewColor(240, 110, 110, 80)
+				outline = withAlpha(editorPlaceWarn, 230)
+				fill = withAlpha(editorPlaceWarn, 80)
 			}
 			for _, off := range fp {
 				fx, fz := hoverPx+off.DX, hoverPz+off.DZ

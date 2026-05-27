@@ -134,7 +134,12 @@ func LoadResources() (r Resources) {
 	// Field gets two extra floor variants (dirt + dark grass), procedurally
 	// chosen per tile by hash for terrain variation. Built using the same
 	// path as the primary floor so they share filter / mipmap settings.
+	// Commit after EACH variant load so a panic in the second one leaves
+	// the first in r.materials for the recover-path Unload to free. (Unload
+	// frees the variant handles unconditionally, so the variant-less commit
+	// at line ~130 wouldn't have freed a half-built pair on its own.)
 	fieldMat.floorDirtModel = loadFloorModel(makeDirtPixels(128, 128), r.lighting.shader)
+	r.materials[core.MaterialField] = fieldMat
 	fieldMat.floorDarkModel = loadFloorModel(makeDarkGrassPixels(128, 128), r.lighting.shader)
 	fieldMat.hasFloorVariant = true
 	r.materials[core.MaterialField] = fieldMat
@@ -514,10 +519,12 @@ func (r Resources) Unload() {
 		rl.UnloadModel(material.wallModel)
 		rl.UnloadModel(material.floorModel)
 		rl.UnloadModel(material.ceilingModel)
-		if material.hasFloorVariant {
-			rl.UnloadModel(material.floorDirtModel)
-			rl.UnloadModel(material.floorDarkModel)
-		}
+		// Unconditional, NOT gated on hasFloorVariant: UnloadModel on a
+		// zero-ID handle skips cleanly, and decoupling cleanup from the
+		// draw-path flag means a partial init (one variant built, the
+		// second panicking) still frees the model that did load.
+		rl.UnloadModel(material.floorDirtModel)
+		rl.UnloadModel(material.floorDarkModel)
 	}
 	rl.UnloadTexture(r.skyTexture)
 	rl.UnloadTexture(r.starTexture)

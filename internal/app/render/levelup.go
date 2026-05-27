@@ -39,7 +39,7 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 	}
 	drawTextWithShadow(font, primary, float32(cardX+22), float32(cardY+46), FontBody, textPrimary)
 	if m.SkillPoints > 0 {
-		secondary := strconv.Itoa(m.SkillPoints) + " skill pt" + pluralS(m.SkillPoints) + " banked — spend in the Skills tab"
+		secondary := strconv.Itoa(m.SkillPoints) + " skill pt" + plural(m.SkillPoints) + " banked — spend in the Skills tab"
 		drawTextWithShadow(font, secondary, float32(cardX+22), float32(cardY+72), FontTiny, inkAccent)
 	}
 
@@ -121,23 +121,13 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 		labelY := float32(rowY + 10)
 		drawTextWithShadow(font, label, labelX, labelY, FontBody, col)
 		flCY := labelY + FontBody/2
-		drawFleuron(labelX-16, flCY, 4, giltDim)
-		drawFleuron(labelX+labelW+16, flCY, 4, giltDim)
+		drawFleuronsFlanking(labelX, labelW, 16, flCY, 4, giltDim)
 	}
 
 	// VIT note removed — the per-stat description column already
 	// surfaces "Max HP (+2 per point)" on the VIT row itself.
 	DrawFooterHint(font, "Up/Down pick   Z stage   X undo   Enter apply",
 		float32(cardX+cardW/2), float32(cardY+cardH-22), FontTiny)
-}
-
-// pluralS returns "" or "s" for short pluralisation. Local to the
-// modal since both call sites here use the bare suffix variant.
-func pluralS(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
 }
 
 // levelUpStagedTotal retired — core.SumStatPending is the single seam

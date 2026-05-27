@@ -70,36 +70,12 @@ func onOff(b bool) string {
 	return "Off"
 }
 
-// drawDebugMenuOverlay paints the debug submenu using the same card +
-// row layout as the pause menu, titled "DEBUG". Panel height tracks the
-// debug row count so adding a toggle resizes the card automatically.
+// drawDebugMenuOverlay paints the debug submenu via the shared menu-card
+// chrome, titled "DEBUG". The card height tracks the debug row count.
 func drawDebugMenuOverlay(g core.GameState, assets Resources) {
-	screenW, screenH := screenSize()
-	panelW := pauseMenuPanelW
-	stride := pauseMenuRowH + pauseMenuRowGap
-	panelH := pauseMenuHeaderH + stride*int32(len(debugMenuRows)) + pauseMenuFootH
-	panelX := centerX(panelW)
-	panelY := screenH/2 - panelH/2
-
-	rl.DrawRectangle(0, 0, screenW, screenH, surfaceVeil)
-	drawCard(panelX, panelY, panelW, panelH, surfacePrimary, borderSoft, borderSoft)
-	drawCardFiligree(panelX, panelY, panelW, panelH, giltDim)
-
-	titleMeasure := rl.MeasureTextEx(assets.hudFont, "DEBUG", FontTitle, FontSpacingTitle)
-	titleX := float32(panelX) + float32(panelW)/2 - titleMeasure.X/2
-	titleY := float32(panelY + 24)
-	drawTextWithShadowStyle(assets.hudFont, "DEBUG", titleX, titleY,
-		FontTitle, FontSpacingTitle, textPrimary, shadowStrong, 1, 1)
-	flCY := titleY + titleMeasure.Y/2
-	drawFleuron(titleX-22, flCY, 5, giltDim)
-	drawFleuron(titleX+titleMeasure.X+22, flCY, 5, giltDim)
-
-	rowY := pauseMenuHeaderH
-	rowX := panelX + pauseMenuRowInsetX
-	for _, row := range debugMenuRows {
-		drawMenuRow(assets.hudFont, row.Label(g), rowX, panelY+rowY, g.DebugMenuIndex == int(row.Item))
-		rowY += stride
-	}
+	drawTitledMenuCard(assets, "DEBUG", len(debugMenuRows),
+		func(i int) string { return debugMenuRows[i].Label(g) },
+		func(i int) bool { return g.DebugMenuIndex == int(debugMenuRows[i].Item) })
 }
 
 // Pause menu layout. Panel is centered on screen; rows stack at a fixed
@@ -118,11 +94,6 @@ const (
 	pauseMenuRowRightPad = int32(46)
 )
 
-func pauseMenuPanelH() int32 {
-	stride := pauseMenuRowH + pauseMenuRowGap
-	return pauseMenuHeaderH + stride*int32(len(pauseMenuRows)) + pauseMenuFootH
-}
-
 // pauseMenuRowInnerW is the highlight-rectangle width, derived from the
 // panel width minus the symmetric left/right gutters. Was previously a
 // hardcoded 316; this expression keeps the rectangle aligned if the panel
@@ -131,10 +102,17 @@ func pauseMenuRowInnerW() int32 {
 	return pauseMenuPanelW - pauseMenuRowInsetX - pauseMenuRowRightPad
 }
 
-func drawMenuOverlay(g core.GameState, assets Resources) {
+// drawTitledMenuCard paints the shared pause/debug menu chrome: the veil,
+// the gilt-framed card sized to rowCount, the centred FontTitle title with
+// flanking fleurons, and each row via drawMenuRow. selected reports whether
+// a given row index is the cursor. Returns nothing — the pause and debug
+// overlays differ only in title string, row labels, and the cursor field,
+// which this captures via the closures.
+func drawTitledMenuCard(assets Resources, title string, rowCount int, label func(i int) string, selected func(i int) bool) {
 	screenW, screenH := screenSize()
 	panelW := pauseMenuPanelW
-	panelH := pauseMenuPanelH()
+	stride := pauseMenuRowH + pauseMenuRowGap
+	panelH := pauseMenuHeaderH + stride*int32(rowCount) + pauseMenuFootH
 	panelX := centerX(panelW)
 	panelY := screenH/2 - panelH/2
 
@@ -142,29 +120,29 @@ func drawMenuOverlay(g core.GameState, assets Resources) {
 	drawCard(panelX, panelY, panelW, panelH, surfacePrimary, borderSoft, borderSoft)
 	drawCardFiligree(panelX, panelY, panelW, panelH, giltDim)
 
-	// One title only — "MENU" centred near the top of the card. The
-	// previous "PAUSED" tick above it was redundant: the veil + the
-	// menu itself IS the paused signal. Flanking gilt fleurons sell
-	// the 90s grimoire feel: ◆──── MENU ────◆
-	titleMeasure := rl.MeasureTextEx(assets.hudFont, "MENU", FontTitle, FontSpacingTitle)
+	// Centred title near the top of the card with flanking gilt fleurons
+	// on the title's vertical midline (~22px outside each text edge) — the
+	// 90s grimoire feel: ◆──── TITLE ────◆.
+	titleMeasure := rl.MeasureTextEx(assets.hudFont, title, FontTitle, FontSpacingTitle)
 	titleX := float32(panelX) + float32(panelW)/2 - titleMeasure.X/2
 	titleY := float32(panelY + 24)
-	drawTextWithShadowStyle(assets.hudFont, "MENU", titleX, titleY,
+	drawTextWithShadowStyle(assets.hudFont, title, titleX, titleY,
 		FontTitle, FontSpacingTitle, textPrimary, shadowStrong, 1, 1)
-	// Fleurons sit centred on the title's vertical midline, ~18 px
-	// outside each text edge.
 	flCY := titleY + titleMeasure.Y/2
-	flR := float32(5)
-	drawFleuron(titleX-22, flCY, flR, giltDim)
-	drawFleuron(titleX+titleMeasure.X+22, flCY, flR, giltDim)
+	drawFleuronsFlanking(titleX, titleMeasure.X, 22, flCY, 5, giltDim)
 
-	stride := pauseMenuRowH + pauseMenuRowGap
 	rowY := pauseMenuHeaderH
 	rowX := panelX + pauseMenuRowInsetX
-	for _, row := range pauseMenuRows {
-		drawMenuRow(assets.hudFont, row.Label(g), rowX, panelY+rowY, g.MenuIndex == int(row.Item))
+	for i := 0; i < rowCount; i++ {
+		drawMenuRow(assets.hudFont, label(i), rowX, panelY+rowY, selected(i))
 		rowY += stride
 	}
+}
+
+func drawMenuOverlay(g core.GameState, assets Resources) {
+	drawTitledMenuCard(assets, "MENU", len(pauseMenuRows),
+		func(i int) string { return pauseMenuRows[i].Label(g) },
+		func(i int) bool { return g.MenuIndex == int(pauseMenuRows[i].Item) })
 }
 
 // drawMenuRow paints one entry in the pause menu: the canonical

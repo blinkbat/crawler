@@ -151,6 +151,11 @@ func Init() {
 	}
 	rl.InitAudioDevice()
 	if !rl.IsAudioDeviceReady() {
+		// The device backend was opened by InitAudioDevice even though it
+		// didn't come up usable. ready stays false so Close() (guarded on
+		// ready) will never run, so shut the half-open device down here or
+		// it leaks for the process lifetime.
+		rl.CloseAudioDevice()
 		return
 	}
 	defer func() {

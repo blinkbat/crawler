@@ -219,8 +219,7 @@ func drawMinimapTimeOfDay(font rl.Font, stepCount int, x, y, width int32) {
 	trackY := y + 18
 	trackH := int32(4)
 	trackW := width
-	trackCol := rl.NewColor(8, 12, 22, 140)
-	rl.DrawRectangle(x, trackY, trackW, trackH, trackCol)
+	rl.DrawRectangle(x, trackY, trackW, trackH, barTrackColor)
 	segW := trackW / int32(core.TimeOfDayCount)
 	// Past phases: solid color. Current phase: filled by progress.
 	for i := 0; i < int(phase); i++ {

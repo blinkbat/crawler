@@ -475,6 +475,12 @@ func updateCustomEnemiesModal(s *State) Action {
 			return ActionNone
 		}
 		if pointIn(mp, l.deleteBtn) {
+			// Finalize first: if the name field was mid-edit, def.Name holds
+			// the uncommitted text while pack-member refs are still keyed on
+			// the last-finalized name. Finalizing sanitizes/uniquifies and
+			// rewrites refs to def.Name, so the deletedName we read below
+			// matches what removeCustomEnemyReferences must clear.
+			finalizeFocusedField(s)
 			deletedName := def.Name
 			s.area.CustomEnemies = append(s.area.CustomEnemies[:s.modalCustomIdx], s.area.CustomEnemies[s.modalCustomIdx+1:]...)
 			removeCustomEnemyReferences(s, deletedName)
