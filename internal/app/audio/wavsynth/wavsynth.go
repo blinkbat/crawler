@@ -295,24 +295,35 @@ func SynthChime(noteDuration, firstHz, secondHz, volume float64) []int16 {
 	return pcm
 }
 
+// WAV format constants — every WAV this package writes is mono, 16-bit
+// PCM. Named so the header fields below derive from one place instead of
+// repeating bare 1 / 2 / 16 literals whose relationship (blockAlign =
+// channels × bytesPerSample, byteRate = rate × blockAlign) was implicit.
+const (
+	wavChannels       = 1
+	wavBitsPerSample  = 16
+	wavBytesPerSample = wavBitsPerSample / 8
+	wavBlockAlign     = wavChannels * wavBytesPerSample
+)
+
 // BuildWAV writes a canonical 16-bit mono PCM WAV file into a byte slice.
 // Format: RIFF header → fmt subchunk (PCM=1, mono, rate, byterate,
 // blockalign, bitspersample) → data subchunk. Hand-off into raylib's
 // LoadWaveFromMemory.
 func BuildWAV(pcm []int16, rate int) []byte {
-	dataSize := len(pcm) * 2
+	dataSize := len(pcm) * wavBytesPerSample
 	var buf bytes.Buffer
 	buf.WriteString("RIFF")
 	_ = binary.Write(&buf, binary.LittleEndian, uint32(36+dataSize))
 	buf.WriteString("WAVE")
 	buf.WriteString("fmt ")
-	_ = binary.Write(&buf, binary.LittleEndian, uint32(16))     // fmt chunk size
-	_ = binary.Write(&buf, binary.LittleEndian, uint16(1))      // PCM
-	_ = binary.Write(&buf, binary.LittleEndian, uint16(1))      // channels — mono
-	_ = binary.Write(&buf, binary.LittleEndian, uint32(rate))   // sample rate
-	_ = binary.Write(&buf, binary.LittleEndian, uint32(rate*2)) // byte rate (rate * channels * bytesPerSample)
-	_ = binary.Write(&buf, binary.LittleEndian, uint16(2))      // block align
-	_ = binary.Write(&buf, binary.LittleEndian, uint16(16))     // bits per sample
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(16))                  // fmt chunk size
+	_ = binary.Write(&buf, binary.LittleEndian, uint16(1))                   // PCM
+	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavChannels))         // channels — mono
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(rate))                // sample rate
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(rate*wavBlockAlign))  // byte rate (rate × blockAlign)
+	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavBlockAlign))       // block align
+	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavBitsPerSample))    // bits per sample
 	buf.WriteString("data")
 	_ = binary.Write(&buf, binary.LittleEndian, uint32(dataSize))
 	_ = binary.Write(&buf, binary.LittleEndian, pcm)

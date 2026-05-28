@@ -54,14 +54,15 @@ func NewGameState(area AreaDefinition) GameState {
 		visited[startZ][startX] = true
 	}
 	g := GameState{
-		Area:      area,
-		Player:    NewPlayer(startX, startZ, area.StartFacing),
-		Party:     NewParty(),
-		Packs:     placePacks(area),
-		Chests:    placeChests(area),
-		Doors:     placeDoors(area),
-		Visited:   visited,
-		ChestOpen: -1,
+		Area:       area,
+		Player:     NewPlayer(startX, startZ, area.StartFacing),
+		Party:      NewParty(),
+		Packs:      placePacks(area),
+		Chests:     placeChests(area),
+		Doors:      placeDoors(area),
+		Visited:    visited,
+		ChestOpen:  -1,
+		DoorPrompt: -1,
 		Battle: Battle{
 			ActivePack:        -1,
 			EnemyIndex:        -1,
@@ -106,6 +107,7 @@ func placeDoors(a AreaDefinition) []Door {
 			TargetMap:  sp.TargetMap,
 			TargetDoor: sp.TargetDoor,
 			Facing:     sp.Facing,
+			Style:      sp.Style,
 		})
 	}
 	return out

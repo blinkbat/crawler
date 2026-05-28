@@ -176,18 +176,5 @@ func DrawTitleRule(x, y, w float32) {
 }
 
 func DrawSelectedRowI(x, y, w, h int32) {
-	drawGlassPane(x, y, w, h, glassWarm)
-	spineX := x + 4
-	spineTop := y + 5
-	spineH := h - 10
-	rl.DrawRectangle(spineX, spineTop, 3, spineH, giltBright)
-	pipX := float32(spineX) + 1
-	drawDiamondPip(pipX, float32(spineTop)-1, 2.5, giltBright)
-	drawDiamondPip(pipX, float32(spineTop+spineH)+1, 2.5, giltBright)
-	underY := y + h - 3
-	underX := x + 12
-	underW := w - 24
-	rl.DrawRectangle(underX, underY, underW, 1, giltDim)
-	drawDiamondPip(float32(underX), float32(underY), 1.5, giltDim)
-	drawDiamondPip(float32(underX+underW), float32(underY), 1.5, giltDim)
+	DrawSelectedRow(rl.NewRectangle(float32(x), float32(y), float32(w), float32(h)))
 }

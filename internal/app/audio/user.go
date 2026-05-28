@@ -132,21 +132,13 @@ func ReloadUserAssignments() (failed []string, err error) {
 		if userName == "" {
 			userName = cueRow.Canonical
 		}
-		newSound := rl.Sound{}
-		if data, ierr := os.ReadFile(UserSoundPath(userName)); ierr == nil {
-			newSound = bytesToSound(data)
-		} else {
-			if assigned {
-				failed = append(failed, cueRow.Canonical)
-			}
-			if cueRow.PCM != nil {
-				newSound = pcmToSound(cueRow.PCM())
-			}
+		newSound, fromFile := readOrSynthSound(userName, cueRow.PCM)
+		if !fromFile && assigned {
+			// An explicitly-assigned file failed to load (the synth
+			// fallback covered playback, but the player should know).
+			failed = append(failed, cueRow.Canonical)
 		}
-		if bank[cue].Stream.Buffer != nil {
-			rl.UnloadSound(bank[cue])
-		}
-		bank[cue] = newSound
+		replaceSound(&bank[cue], newSound)
 	}
 	for cueName := range assigns {
 		if _, ok := soundIDByName[cueName]; !ok {
@@ -229,14 +221,11 @@ func PreviewFile(name string) {
 
 func playThroughRing(wavBytes []byte) {
 	snd := bytesToSound(wavBytes)
-	// Unload the slot we're about to overwrite — its raylib buffer was
-	// allocated by a prior preview and would leak otherwise.
-	if previewRing[previewCursor].Stream.Buffer != nil {
-		rl.UnloadSound(previewRing[previewCursor])
-	}
-	previewRing[previewCursor] = snd
+	// replaceSound unloads the slot we're about to overwrite — its raylib
+	// buffer was allocated by a prior preview and would leak otherwise.
+	replaceSound(&previewRing[previewCursor], snd)
 	rl.PlaySound(snd)
-	previewCursor = (previewCursor + 1) % len(previewRing)
+	previewCursor = (previewCursor + 1) % previewRingSize
 }
 
 // unloadPreviewRing releases every preview slot. Called by Close so the

@@ -186,6 +186,7 @@ const (
 	ModalNone ModalKind = iota
 	ModalPauseMenu
 	ModalDebugMenu
+	ModalDoorPrompt
 	ModalChest
 	ModalPanels
 	ModalLevelUp
@@ -201,13 +202,22 @@ func ActiveModal(g *GameState) ModalKind {
 	if g == nil {
 		return ModalNone
 	}
+	// ChestOpen / DoorPrompt are index-or-(-1) sentinels. Bound them
+	// against their backing slice (not just `>= 0`) so a GameState built
+	// by struct literal — where these zero-value to 0 — can't render a
+	// phantom chest/door modal for an index that doesn't exist. With the
+	// slice-length bound, a zero-value index only triggers when there's
+	// actually an entry at that index, and an out-of-range sentinel is
+	// inert. Production still goes through NewGameState (which sets -1).
 	switch {
 	case g.LevelUpOpen:
 		return ModalLevelUp
 	case g.PanelsOpen:
 		return ModalPanels
-	case g.ChestOpen >= 0:
+	case g.ChestOpen >= 0 && g.ChestOpen < len(g.Chests):
 		return ModalChest
+	case g.DoorPrompt >= 0 && g.DoorPrompt < len(g.Doors):
+		return ModalDoorPrompt
 	case g.DebugMenuOpen:
 		return ModalDebugMenu
 	case g.MenuOpen:
@@ -330,20 +340,27 @@ func ActiveActorIndex(g *GameState) int {
 	return -1
 }
 
-// PackLeaderSlot returns the slot of the pack's leader: the highest-Tier
-// member, ties broken by member order. Empty packs return 0 (callers
-// should range-check before drawing).
-func PackLeaderSlot(p Pack) int {
+// leaderSlot returns the index of the highest-tier element among n items,
+// ties broken by lowest index. Shared by PackLeaderSlot (runtime Pack) and
+// PackSpawnLeaderSlot (authored PackSpawn) so the "leader = beefiest member"
+// rule lives in one place.
+func leaderSlot(n int, tierAt func(int) int) int {
 	bestSlot := 0
 	bestTier := -1
-	for i, m := range p.Members {
-		t := EnemyInfoFor(m).Tier
-		if t > bestTier {
+	for i := 0; i < n; i++ {
+		if t := tierAt(i); t > bestTier {
 			bestTier = t
 			bestSlot = i
 		}
 	}
 	return bestSlot
+}
+
+// PackLeaderSlot returns the slot of the pack's leader: the highest-Tier
+// member, ties broken by member order. Empty packs return 0 (callers
+// should range-check before drawing).
+func PackLeaderSlot(p Pack) int {
+	return leaderSlot(len(p.Members), func(i int) int { return EnemyInfoFor(p.Members[i]).Tier })
 }
 
 // PackLeader returns the highest-Tier member of the pack, or a zero

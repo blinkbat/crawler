@@ -44,17 +44,17 @@ func updateLevelUpModal(g *core.GameState) {
 	m := &g.Party[g.LevelUpMember]
 	if input.ConfirmPressed() {
 		switch {
-		case g.LevelUpRowCursor < int(core.StatCount):
+		case isStatRow(g.LevelUpRowCursor):
 			// Stat row: stage one more point if the budget allows.
 			if core.SumStatPending(g.LevelUpPending) < m.PendingLevelUps {
 				g.LevelUpPending[g.LevelUpRowCursor]++
 				audio.Play(audio.SoundInputHit)
 			}
 		case g.LevelUpRowCursor == core.LevelUpApplyRowIndex:
-			// Apply commits staged picks. Resets pendings even if the
-			// caller staged nothing (so a re-open starts fresh).
+			// Apply commits staged picks. advanceLevelUpMember resets the
+			// staged pendings (so a re-open starts fresh) whether it moves
+			// to the next member or closes.
 			core.CommitLevelUp(m, g.LevelUpPending)
-			g.LevelUpPending = [core.StatCount]int{}
 			advanceLevelUpMember(g)
 		}
 	}
@@ -66,30 +66,47 @@ func updateLevelUpModal(g *core.GameState) {
 	// new keys (replaces the old Backspace handler that didn't match
 	// the rest of the HUD's Z/X conventions).
 	if input.BackPressed() {
-		if g.LevelUpRowCursor < int(core.StatCount) && g.LevelUpPending[g.LevelUpRowCursor] > 0 {
+		if isStatRow(g.LevelUpRowCursor) && g.LevelUpPending[g.LevelUpRowCursor] > 0 {
 			g.LevelUpPending[g.LevelUpRowCursor]--
 		} else {
-			g.LevelUpPending = [core.StatCount]int{}
-			g.LevelUpOpen = false
-			g.LevelUpRowCursor = 0
+			closeLevelUp(g)
 		}
 	}
 }
 
+// isStatRow reports whether the level-up cursor sits on a stat row, as
+// opposed to the Apply row one past the last stat (LevelUpApplyRowIndex).
+func isStatRow(cursor int) bool {
+	return cursor < int(core.StatCount)
+}
+
+// openLevelUpFor opens (or re-focuses) the stat-spend modal on a specific
+// party member, clearing any staged allocations. Single seam for the
+// four LevelUp* field writes the panels overlay and advanceLevelUpMember
+// used to inline.
+func openLevelUpFor(g *core.GameState, member int) {
+	g.LevelUpOpen = true
+	g.LevelUpMember = member
+	g.LevelUpRowCursor = 0
+	g.LevelUpPending = [core.StatCount]int{}
+}
+
+// closeLevelUp dismisses the modal and clears its staged state.
+func closeLevelUp(g *core.GameState) {
+	g.LevelUpOpen = false
+	g.LevelUpRowCursor = 0
+	g.LevelUpPending = [core.StatCount]int{}
+}
+
 // advanceLevelUpMember moves the modal to the next party member with
-// unspent stat points, or closes the modal when no member has any.
-// Resets the cursor to the first stat row so each member starts at
-// the top of the list. Also clears the staged-pending state so the
-// new member starts with a clean ledger.
+// unspent stat points, or closes the modal when no member has any. Each
+// transition clears the staged-pending state so the new member (or a
+// future re-open) starts with a clean ledger.
 func advanceLevelUpMember(g *core.GameState) {
 	next := core.FirstPendingLevelUp(g.Party)
 	if next < 0 {
-		g.LevelUpOpen = false
-		g.LevelUpRowCursor = 0
-		g.LevelUpPending = [core.StatCount]int{}
+		closeLevelUp(g)
 		return
 	}
-	g.LevelUpMember = next
-	g.LevelUpRowCursor = 0
-	g.LevelUpPending = [core.StatCount]int{}
+	openLevelUpFor(g, next)
 }

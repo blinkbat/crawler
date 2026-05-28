@@ -88,10 +88,7 @@ func updatePanels(g *core.GameState) {
 			m := g.Party[g.PanelsRowCursor]
 			if m.PendingLevelUps > 0 {
 				closePanels(g)
-				g.LevelUpOpen = true
-				g.LevelUpMember = g.PanelsRowCursor
-				g.LevelUpRowCursor = 0
-				g.LevelUpPending = [core.StatCount]int{}
+				openLevelUpFor(g, g.PanelsRowCursor)
 			}
 		}
 	case core.PanelTabEquipment, core.PanelTabSkills:
@@ -104,9 +101,10 @@ func updatePanels(g *core.GameState) {
 		count := len(core.LiveStacks(g.Inventory))
 		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, count)
 	case core.PanelTabMap:
-		// Up/Down zooms the map (matching the wheel-zoom in the
-		// editor). One press is one zoom step; the bounds are
-		// soft-clamped so holding the key doesn't run off the rails.
+		// Up/Down zooms the map by one cells-on-screen step per press;
+		// the bounds (panelsMapZoomMin/Max) are soft-clamped so holding
+		// the key doesn't run off the rails. (This is its own zoom model
+		// in cells-on-screen, distinct from the editor's float scale.)
 		if input.UpPressed() {
 			g.PanelsMapZoom -= 2
 		}

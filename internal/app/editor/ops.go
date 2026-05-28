@@ -74,6 +74,8 @@ func applyTool(s *State, x, z int) {
 	case LayerEntities:
 		applyEntityBrush(s, x, z, brush.Entity)
 		return // entity branch sets dirty itself when it lands
+	default:
+		panic("editor: applyTool missing case for layer — add it here, in eraseAt, and in activeGrid")
 	}
 	s.dirty = true
 }
@@ -282,9 +284,26 @@ func placeDoorAt(s *State, x, z int) {
 		Name:       name,
 		TargetMap:  "self",
 		TargetDoor: name,
-		Facing:     s.area.StartFacing,
+		// Default the facing to point away from an adjacent wall (the
+		// door "affixes" to that wall, opening into the room). Falls back
+		// to the map's start facing when the cell has no neighbouring
+		// wall. The author can still override it in the door modal.
+		Facing: doorFacingForCell(&s.area, x, z),
+		Style:  core.DoorStyleBuilding,
 	})
 	s.dirty = true
+}
+
+// doorFacingForCell picks a sensible default facing for a door placed at
+// (x, z): away from the first adjacent wall found, so the door reads as
+// set into that wall. Falls back to the map's StartFacing when the cell
+// has no neighbouring wall. The wall-scan rule itself lives in
+// core.FacingAwayFromAdjacentWall (shared with wall-torch orientation).
+func doorFacingForCell(a *core.AreaDefinition, x, z int) int {
+	if f, ok := core.FacingAwayFromAdjacentWall(*a, x, z); ok {
+		return f
+	}
+	return a.StartFacing
 }
 
 // nextDoorName picks an unused placeholder name for a freshly-placed
@@ -304,13 +323,29 @@ func nextDoorName(spawns []core.DoorSpawn) string {
 	}
 }
 
-// removeDoorAt drops the door at (x, z) from spawns (if any). One of
-// three "remove spawn at tile" deletions (the pack / chest / door
-// trio) — each is a one-line slices.DeleteFunc call now.
-func removeDoorAt(spawns []core.DoorSpawn, x, z int) []core.DoorSpawn {
-	return slices.DeleteFunc(spawns, func(sp core.DoorSpawn) bool {
-		return sp.TileX == x && sp.TileZ == z
+// removeSpawnsAt drops every spawn sitting on (x, z), generic over the
+// pack / chest / door spawn types via core.TileXZ. removeDoorAt /
+// removeChestSpawnAt / removePackAt are thin wrappers so a future fourth
+// spawn category doesn't need another hand-typed DeleteFunc closure.
+func removeSpawnsAt[T core.TileXZ](spawns []T, x, z int) []T {
+	return slices.DeleteFunc(spawns, func(sp T) bool {
+		tx, tz := sp.Tile()
+		return tx == x && tz == z
 	})
+}
+
+// removeSpawnsWhere drops every spawn whose tile satisfies pred — the
+// shape the "outside new bounds after a shrink" and "now sitting on a
+// blocked tile after a fill" cleanups share.
+func removeSpawnsWhere[T core.TileXZ](spawns []T, pred func(x, z int) bool) []T {
+	return slices.DeleteFunc(spawns, func(sp T) bool {
+		return pred(sp.Tile())
+	})
+}
+
+// removeDoorAt drops the door at (x, z) from spawns (if any).
+func removeDoorAt(spawns []core.DoorSpawn, x, z int) []core.DoorSpawn {
+	return removeSpawnsAt(spawns, x, z)
 }
 
 // placeChestAt drops a chest with the default starter loot at (x,z). If
@@ -363,12 +398,8 @@ func defaultChestItems() []core.ItemKind {
 }
 
 // removeChestSpawnAt drops the chest at (x, z) from spawns (if any).
-// One of three "remove spawn at tile" deletions (the pack / chest /
-// door trio) — each is a one-line slices.DeleteFunc call now.
 func removeChestSpawnAt(spawns []core.ChestSpawn, x, z int) []core.ChestSpawn {
-	return slices.DeleteFunc(spawns, func(sp core.ChestSpawn) bool {
-		return sp.TileX == x && sp.TileZ == z
-	})
+	return removeSpawnsAt(spawns, x, z)
 }
 
 // eraseAt is the right-click action. Behavior is per-layer:
@@ -399,6 +430,8 @@ func eraseAt(s *State, x, z int) {
 		if !clearEntitiesAt(s, x, z) {
 			return
 		}
+	default:
+		panic("editor: eraseAt missing case for layer — add it here, in applyTool, and in activeGrid")
 	}
 	s.dirty = true
 }
@@ -460,9 +493,7 @@ func removeAllEntitiesAt(a *core.AreaDefinition, x, z int) {
 }
 
 func removePackAt(packs []core.PackSpawn, x, z int) []core.PackSpawn {
-	return slices.DeleteFunc(packs, func(sp core.PackSpawn) bool {
-		return sp.TileX == x && sp.TileZ == z
-	})
+	return removeSpawnsAt(packs, x, z)
 }
 
 // packSpawnLeaderKind picks the kind to render as a pack's field icon —
@@ -582,17 +613,13 @@ func resize(s *State, w, h int) {
 // removeDoorSpawnsOutside drops door entries whose tile sits past the
 // new bounds after a shrink. Mirrors removeChestSpawnsOutside.
 func removeDoorSpawnsOutside(spawns []core.DoorSpawn, w, h int) []core.DoorSpawn {
-	return slices.DeleteFunc(spawns, func(sp core.DoorSpawn) bool {
-		return sp.TileX >= w || sp.TileZ >= h
-	})
+	return removeSpawnsWhere(spawns, func(x, z int) bool { return x >= w || z >= h })
 }
 
 // removeChestSpawnsOutside drops chest entries whose tile sits past
 // the new bounds.
 func removeChestSpawnsOutside(spawns []core.ChestSpawn, w, h int) []core.ChestSpawn {
-	return slices.DeleteFunc(spawns, func(sp core.ChestSpawn) bool {
-		return sp.TileX >= w || sp.TileZ >= h
-	})
+	return removeSpawnsWhere(spawns, func(x, z int) bool { return x >= w || z >= h })
 }
 
 // resizeLayer copies an old WxH grid into a new W'xH' grid, padding the
@@ -670,7 +697,7 @@ func duplicateMapFile(srcPath string) (string, error) {
 			if readErr != nil {
 				return "", readErr
 			}
-			if err := os.WriteFile(path, data, 0o644); err != nil {
+			if err := os.WriteFile(path, data, core.AssetFileMode); err != nil {
 				return "", err
 			}
 			return path, nil
@@ -762,9 +789,7 @@ func floodFill(s *State, x, z int, b byte) {
 	})
 	// Wall flood that turns cells into '#' nukes any packs that fell inside.
 	if s.layer == LayerWalls && b == core.TileRock {
-		s.area.PackSpawns = slices.DeleteFunc(s.area.PackSpawns, func(sp core.PackSpawn) bool {
-			return s.area.BlockedAt(sp.TileX, sp.TileZ)
-		})
+		s.area.PackSpawns = removeSpawnsWhere(s.area.PackSpawns, func(x, z int) bool { return s.area.BlockedAt(x, z) })
 	}
 	s.dirty = true
 }
@@ -813,19 +838,13 @@ func fillEntireLayer(s *State) {
 		}
 	})
 	// Painting walls everywhere takes packs/chests/doors that fell inside
-	// out of play. Same cleanup applyWallBrush does per-cell. Three
-	// near-identical DeleteFunc calls — the slice types don't share an
-	// interface for TileX/TileZ, so we type one closure per spawn slice.
+	// out of play. Same cleanup applyWallBrush does per-cell, routed
+	// through the shared removeSpawnsWhere over core.TileXZ.
 	if s.layer == LayerWalls && brush.Char == core.TileRock {
-		s.area.PackSpawns = slices.DeleteFunc(s.area.PackSpawns, func(sp core.PackSpawn) bool {
-			return s.area.BlockedAt(sp.TileX, sp.TileZ)
-		})
-		s.area.ChestSpawns = slices.DeleteFunc(s.area.ChestSpawns, func(sp core.ChestSpawn) bool {
-			return s.area.BlockedAt(sp.TileX, sp.TileZ)
-		})
-		s.area.DoorSpawns = slices.DeleteFunc(s.area.DoorSpawns, func(sp core.DoorSpawn) bool {
-			return s.area.BlockedAt(sp.TileX, sp.TileZ)
-		})
+		blocked := func(x, z int) bool { return s.area.BlockedAt(x, z) }
+		s.area.PackSpawns = removeSpawnsWhere(s.area.PackSpawns, blocked)
+		s.area.ChestSpawns = removeSpawnsWhere(s.area.ChestSpawns, blocked)
+		s.area.DoorSpawns = removeSpawnsWhere(s.area.DoorSpawns, blocked)
 	}
 	s.dirty = true
 	s.flash("Filled " + layerName(s.layer))
@@ -894,8 +913,15 @@ func activeGrid(s *State) *[]string {
 		return &s.area.Props
 	case LayerCeiling:
 		return &s.area.Ceiling
+	case LayerEntities:
+		// Entities have no grid slice — nil is the legitimate "not a grid
+		// layer" answer flood-fill checks for. Distinguished from an
+		// unhandled NEW layer (the default panic) so the regression that
+		// silently dropped LayerCeiling here can't recur.
+		return nil
+	default:
+		panic("editor: activeGrid missing case for layer — add it here, in applyTool, and in eraseAt")
 	}
-	return nil
 }
 
 // startTileBlocker checks the three "the player can't even spawn"

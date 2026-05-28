@@ -285,21 +285,39 @@ func ensureBankOnDisk() {
 	}
 }
 
-// loadCueFromDisk reads the named .wav into a fresh rl.Sound. If the
-// file isn't readable (deleted between ensureBankOnDisk and now,
-// permission revoked mid-run), it rebuilds from the supplied PCM
-// closure so Play(cue) doesn't go silent on transient filesystem
-// errors. pcmFn nil-checks because the soundCues table holds the
-// PCM closure per cue and a future malformed entry shouldn't crash
-// the bank.
-func loadCueFromDisk(name string, pcmFn func() []int16) rl.Sound {
+// readOrSynthSound resolves one cue's rl.Sound: it reads the named .wav
+// from disk and, failing that (deleted mid-run, permission revoked),
+// rebuilds from the supplied PCM closure so Play(cue) never goes silent
+// on transient filesystem errors. fromFile reports which branch ran so
+// callers that need to flag "assigned file missing" (ReloadUserAssignments)
+// can. pcmFn nil-checks because a future malformed soundCues entry
+// shouldn't crash the bank. Single source for the disk-or-synth rule
+// shared by loadBank (via loadCueFromDisk) and the assignments reload.
+func readOrSynthSound(name string, pcmFn func() []int16) (snd rl.Sound, fromFile bool) {
 	if data, err := os.ReadFile(UserSoundPath(name)); err == nil {
-		return bytesToSound(data)
+		return bytesToSound(data), true
 	}
 	if pcmFn == nil {
-		return rl.Sound{}
+		return rl.Sound{}, false
 	}
-	return pcmToSound(pcmFn())
+	return pcmToSound(pcmFn()), false
+}
+
+// loadCueFromDisk is the discard-the-flag form used by loadBank.
+func loadCueFromDisk(name string, pcmFn func() []int16) rl.Sound {
+	snd, _ := readOrSynthSound(name, pcmFn)
+	return snd
+}
+
+// replaceSound swaps the sound at *slot for next, unloading the old
+// buffer first (guarded against the zero-value Sound) so a reassignment
+// can't leak raylib's C-side audio buffer. Shared by the bank reload and
+// the preview ring, which each open-coded the guard-then-unload dance.
+func replaceSound(slot *rl.Sound, next rl.Sound) {
+	if slot.Stream.Buffer != nil {
+		rl.UnloadSound(*slot)
+	}
+	*slot = next
 }
 
 // pcmToSound builds a 16-bit mono PCM buffer into an rl.Sound via the

@@ -178,35 +178,29 @@ func drawEnemyRosterRow(font rl.Font, enemy core.Enemy, x, y, w, h int32, target
 	pillW := float32(34)
 	pillH := barH
 	pillX := barX - pillW - 10
+	// Slot-stacked status pills. Walking a slice (rather than four
+	// unrolled if-blocks) is what lets a future fifth status land as a
+	// single appended row without re-tuning any per-pill geometry, as
+	// the comment above promises.
+	pills := []struct {
+		turns   int
+		fill    rl.Color
+		outline rl.Color
+		prefix  string
+	}{
+		{enemy.BurnTurns, fadeColor(statusBurn, 0.55+0.45*pulse(3.4)), statusBurnOutline, ""},
+		{enemy.SleepTurns, barSleep, statusSleepOutline, "Z"},
+		{enemy.PoisonTurns, fadeColor(statusPoison, 0.6+0.4*pulse(3.0)), statusPoisonOutline, "P"},
+		{enemy.StunTurns, statusStun, statusStunOutline, "S"},
+	}
 	slot := 0
-	if enemy.BurnTurns > 0 {
-		pillY := barY - float32(slot)*(pillH+4)
-		flicker := 0.55 + 0.45*pulse(3.4)
-		drawEnemyStatusPill(font, pillX, pillY, pillW, pillH,
-			fadeColor(statusBurn, flicker), statusBurnOutline,
-			statusTurnsLabel("", enemy.BurnTurns))
-		slot++
-	}
-	if enemy.SleepTurns > 0 {
+	for _, p := range pills {
+		if p.turns <= 0 {
+			continue
+		}
 		pillY := barY - float32(slot)*(pillH+4)
 		drawEnemyStatusPill(font, pillX, pillY, pillW, pillH,
-			barSleep, statusSleepOutline,
-			statusTurnsLabel("Z", enemy.SleepTurns))
-		slot++
-	}
-	if enemy.PoisonTurns > 0 {
-		pillY := barY - float32(slot)*(pillH+4)
-		flicker := 0.6 + 0.4*pulse(3.0)
-		drawEnemyStatusPill(font, pillX, pillY, pillW, pillH,
-			fadeColor(statusPoison, flicker), statusPoisonOutline,
-			statusTurnsLabel("P", enemy.PoisonTurns))
-		slot++
-	}
-	if enemy.StunTurns > 0 {
-		pillY := barY - float32(slot)*(pillH+4)
-		drawEnemyStatusPill(font, pillX, pillY, pillW, pillH,
-			statusStun, statusStunOutline,
-			statusTurnsLabel("S", enemy.StunTurns))
+			p.fill, p.outline, statusTurnsLabel(p.prefix, p.turns))
 		slot++
 	}
 }
@@ -876,7 +870,7 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 	subAlpha := uint8(220 * overall)
 
 	drawPanel(int32(bgX), int32(bgY), int32(bgW), int32(bgH), rl.NewColor(8, 10, 16, bgAlpha))
-	drawPanelOutline(int32(bgX), int32(bgY), int32(bgW), int32(bgH), rl.NewColor(borderEnemy.R, borderEnemy.G, borderEnemy.B, uint8(float32(borderEnemy.A)*overall)))
+	drawPanelOutline(int32(bgX), int32(bgY), int32(bgW), int32(bgH), fadeColor(borderEnemy, overall))
 
 	titleX := cx - titleW/2
 	titleY := bgY + padY
@@ -897,11 +891,10 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 		// the rest of the banner.
 		ruleW := subMeasure.X * 0.6
 		ruleY := subY - 4
-		ruleAlpha := uint8(float32(giltDim.A) * overall)
-		ruleCol := rl.NewColor(giltDim.R, giltDim.G, giltDim.B, ruleAlpha)
+		ruleCol := fadeColor(giltDim, overall)
 		rl.DrawRectangle(int32(cx-ruleW/2), int32(ruleY), int32(ruleW/2-8), 1, ruleCol)
 		rl.DrawRectangle(int32(cx+8), int32(ruleY), int32(ruleW/2-8), 1, ruleCol)
-		drawFleuron(cx, ruleY, 3, rl.NewColor(giltBright.R, giltBright.G, giltBright.B, uint8(float32(giltBright.A)*overall)))
+		drawFleuron(cx, ruleY, 3, fadeColor(giltBright, overall))
 		rl.DrawTextEx(assets.hudFont, subtitle, rl.NewVector2(subX+1, subY+1), subSize, 1, rl.NewColor(0, 0, 0, subAlpha))
 		rl.DrawTextEx(assets.hudFont, subtitle, rl.NewVector2(subX, subY), subSize, 1, rl.NewColor(borderEnemy.R, borderEnemy.G, borderEnemy.B, subAlpha))
 	}

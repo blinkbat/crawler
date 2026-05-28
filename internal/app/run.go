@@ -46,7 +46,7 @@ func Run() {
 
 	rl.SetExitKey(rl.KeyNull)
 	render.SetDisplayMode(render.DisplayFullscreen)
-	rl.SetTargetFPS(120)
+	rl.SetTargetFPS(core.TargetFPS)
 
 	// Procedural sound bank — short input/hit/heal/death cues, generated in
 	// code from sine sweeps and bell envelopes. Safe to call on systems with
@@ -69,6 +69,8 @@ func Run() {
 			updateAdventureScene(&state)
 		case sceneEditor:
 			updateEditorScene(&state, dt)
+		default:
+			panic("run: unhandled scene in update dispatch — add it to both scene switches")
 		}
 
 		rl.BeginDrawing()
@@ -79,6 +81,8 @@ func Run() {
 			drawAdventureScene(&state.game, assets)
 		case sceneEditor:
 			editor.Draw(&state.editor, assets)
+		default:
+			panic("run: unhandled scene in draw dispatch — add it to both scene switches")
 		}
 		rl.EndDrawing()
 	}
@@ -287,4 +291,5 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	render.DrawChestModal(*game, assets)
 	render.DrawLevelUpModal(*game, assets)
 	render.DrawPanelsOverlay(*game, assets)
+	render.DrawDoorPrompt(*game, assets)
 }

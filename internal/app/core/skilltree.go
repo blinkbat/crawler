@@ -324,14 +324,7 @@ func SkillDamageFor(m *PartyMember, s SkillID) int {
 		return 0
 	}
 	effect := EffectiveSkillEffect(m, s)
-	switch def.Kind {
-	case SkillKindMelee:
-		return MeleeDamage(m.Stats, effect.Damage)
-	case SkillKindMagic:
-		return MagicDamage(m.Stats, effect.Damage)
-	default:
-		return effect.Damage
-	}
+	return scaleDamageByKind(def.Kind, m.Stats, effect.Damage)
 }
 
 // SkillHealFor mirrors SkillDamageFor for healing skills — Heal kind
@@ -346,12 +339,7 @@ func SkillHealFor(m *PartyMember, s SkillID) int {
 		return 0
 	}
 	effect := EffectiveSkillEffect(m, s)
-	switch def.Kind {
-	case SkillKindHeal:
-		return HealAmount(m.Stats, effect.Heal)
-	default:
-		return effect.Heal
-	}
+	return scaleHealByKind(def.Kind, m.Stats, effect.Heal)
 }
 
 // SkillTierMod returns the combined delta of every purchased tier

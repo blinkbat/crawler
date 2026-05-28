@@ -110,7 +110,6 @@ var (
 	barHPLow   = rl.NewColor(220, 88, 88, 255)
 	barMP      = rl.NewColor(104, 152, 224, 255)
 	barEnemyHP = rl.NewColor(204, 76, 76, 255)
-	barBurn    = rl.NewColor(240, 144, 72, 255)
 	barTrack   = rl.NewColor(10, 8, 14, 140)
 
 	// ----- Per-status accents (UI_STANDARDS.md "Per-status accents") -----
@@ -140,6 +139,20 @@ var (
 	// solid MP-bar tone.
 	barSleep        = rl.NewColor(96, 162, 232, 200)
 	barSleepOutline = rl.NewColor(190, 220, 244, 220)
+
+	// Turn-order panel: the danger red an enemy row reads as. Named so
+	// it isn't a bare literal buried in turnEntryColor's getter.
+	turnEnemyColor = rl.NewColor(245, 100, 92, 255)
+
+	// Timing-bar accent tokens. The bright cursor white, the "held /
+	// RELEASE" gold, and the sequence-bar pass/fail greens & reds used
+	// to recur as bare NewColor literals at drifting alphas across the
+	// press / charge / sequence draws. Defined once at full alpha; the
+	// few sites that want a softer alpha wrap these in colorWithAlpha.
+	timingCursorColor = rl.NewColor(248, 248, 252, 255)
+	timingHeldColor   = rl.NewColor(255, 244, 144, 255)
+	seqOkColor        = rl.NewColor(140, 232, 168, 255)
+	seqFailColor      = rl.NewColor(228, 96, 96, 255)
 
 	// Billboard tints for the in-world combatant markers — the warm
 	// off-white the player's target reads as, and the slightly redder

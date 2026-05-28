@@ -152,27 +152,41 @@ func updateItemMenu(g *core.GameState) {
 	setBattleStatus(g, fmt.Sprintf("Use %s on whom?", core.ItemInfo(picked).Name))
 }
 
+// updateTargetPicker is the shared input loop for every target-selection
+// mode: Next/Previous cycle the cursor via cycleFn, Back runs onBack (and
+// stops), Confirm runs onConfirm. updateEnemyTargeting /
+// updatePartyTargeting / updateItemTarget used to repeat this exact block,
+// differing only in which cycle / back / confirm closures they bound.
+func updateTargetPicker(cycleFn func(int), onBack, onConfirm func()) {
+	if input.TargetNextPressed() {
+		cycleFn(1)
+	}
+	if input.TargetPreviousPressed() {
+		cycleFn(-1)
+	}
+	if input.BackPressed() {
+		onBack()
+		return
+	}
+	if input.ConfirmPressed() {
+		onConfirm()
+	}
+}
+
 // updateItemTarget picks the ally to receive the pending item. Mirrors
 // updatePartyTargeting but routes through applyItem.
 func updateItemTarget(g *core.GameState) {
-	if input.TargetNextPressed() {
-		cyclePartyTarget(g, 1)
-	}
-	if input.TargetPreviousPressed() {
-		cyclePartyTarget(g, -1)
-	}
-	if input.BackPressed() {
-		// Step back to the item picker, NOT all the way to the action menu —
-		// matches the pattern where target-back cancels the target selection
-		// rather than the whole action.
-		g.Battle.ActionMode = core.ActionItemMenu
-		setBattleStatus(g, "Choose an item.")
-		return
-	}
-	if !input.ConfirmPressed() {
-		return
-	}
-	applyItem(g)
+	updateTargetPicker(
+		func(d int) { cyclePartyTarget(g, d) },
+		func() {
+			// Step back to the item picker, NOT all the way to the action
+			// menu — target-back cancels the target selection, not the
+			// whole action.
+			g.Battle.ActionMode = core.ActionItemMenu
+			setBattleStatus(g, "Choose an item.")
+		},
+		func() { applyItem(g) },
+	)
 }
 
 // applyItem consumes the pending item, heals the targeted ally by the
@@ -226,39 +240,27 @@ func performDefend(g *core.GameState) {
 }
 
 func updateEnemyTargeting(g *core.GameState) {
-	if input.TargetNextPressed() {
-		cycleBattleTarget(g, 1)
-	}
-	if input.TargetPreviousPressed() {
-		cycleBattleTarget(g, -1)
-	}
-	if input.BackPressed() {
-		resetBattleAction(g)
-		setBattleStatus(g, "Choose an action.")
-		return
-	}
-	if !input.ConfirmPressed() {
-		return
-	}
-	beginPendingAction(g)
+	updateTargetPicker(
+		func(d int) { cycleBattleTarget(g, d) },
+		func() { cancelTargetToActionMenu(g) },
+		func() { beginPendingAction(g) },
+	)
 }
 
 func updatePartyTargeting(g *core.GameState) {
-	if input.TargetNextPressed() {
-		cyclePartyTarget(g, 1)
-	}
-	if input.TargetPreviousPressed() {
-		cyclePartyTarget(g, -1)
-	}
-	if input.BackPressed() {
-		resetBattleAction(g)
-		setBattleStatus(g, "Choose an action.")
-		return
-	}
-	if !input.ConfirmPressed() {
-		return
-	}
-	beginPendingAction(g)
+	updateTargetPicker(
+		func(d int) { cyclePartyTarget(g, d) },
+		func() { cancelTargetToActionMenu(g) },
+		func() { beginPendingAction(g) },
+	)
+}
+
+// cancelTargetToActionMenu is the shared Back handler for the
+// enemy/party target pickers — drop the pending action and return to the
+// action menu prompt.
+func cancelTargetToActionMenu(g *core.GameState) {
+	resetBattleAction(g)
+	setBattleStatus(g, "Choose an action.")
 }
 
 func cycleBattleTarget(g *core.GameState, delta int) {

@@ -26,7 +26,7 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 	header := "LEVEL UP — " + m.Name
 	card := drawModalScaffold(font, overlayCardWidthLarge, overlayCardHeightLarge, header)
 	cardX, cardY := int32(card.X), int32(card.Y)
-	cardW, cardH := int32(card.Width), int32(card.Height)
+	cardW := int32(card.Width)
 
 	// Sub-header: a single bright readout of the stat-point budget,
 	// with the skill-point reminder dimmed to a second line so the
@@ -126,8 +126,7 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 
 	// VIT note removed — the per-stat description column already
 	// surfaces "Max HP (+2 per point)" on the VIT row itself.
-	DrawFooterHint(font, "Up/Down pick   Z stage   X undo   Enter apply",
-		float32(cardX+cardW/2), float32(cardY+cardH-22), FontTiny)
+	drawModalFooter(font, card, "Up/Down pick   Z stage   X undo   Enter apply")
 }
 
 // levelUpStagedTotal retired — core.SumStatPending is the single seam

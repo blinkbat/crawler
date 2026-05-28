@@ -40,6 +40,15 @@ const (
 	layerCount = 6
 )
 
+// numberRowKeys is the top-row 1..9 key codes. Package-level so the
+// brush-select hotkeys (1..9 / Shift+1..9, all nine) and the Alt+1..6
+// layer jump (first layerCount) don't rebuild the slice every input
+// frame. The first six double as the per-layer jump keys.
+var numberRowKeys = [9]int32{
+	rl.KeyOne, rl.KeyTwo, rl.KeyThree, rl.KeyFour, rl.KeyFive,
+	rl.KeySix, rl.KeySeven, rl.KeyEight, rl.KeyNine,
+}
+
 // Brush is one entry in a layer's palette. For grid layers, char is the
 // byte written into that layer at the painted cell. For LayerEntities,
 // Entity names which placement tool fires on click; EnemyKind carries

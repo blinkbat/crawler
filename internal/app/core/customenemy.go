@@ -166,14 +166,6 @@ func (d CustomEnemyDef) Instantiate() Enemy {
 	}
 }
 
-// LookupEnemyStats returns the effective definition for an Enemy instance.
-// The area argument is retained for older call sites; custom enemies now carry
-// their override on the Enemy itself.
-func LookupEnemyStats(area AreaDefinition, enemy Enemy) EnemyDefinition {
-	_ = area
-	return EnemyInfoFor(enemy)
-}
-
 // CustomEnemyByName looks up a def by exact or sanitized name. Supporting the
 // sanitized form keeps mapfile pack references stable even if an editor path
 // normalized whitespace before writing.
@@ -269,16 +261,7 @@ func PackMemberVisualKind(a AreaDefinition, sp PackSpawn, idx int) EnemyKind {
 // PackSpawnLeaderSlot returns the highest-tier member slot for an authored
 // pack, resolving custom enemy tiers as well as built-in tiers.
 func PackSpawnLeaderSlot(a AreaDefinition, sp PackSpawn) int {
-	bestSlot := 0
-	bestTier := -1
-	for i := range sp.Members {
-		t := PackMemberDefinition(a, sp, i).Tier
-		if t > bestTier {
-			bestTier = t
-			bestSlot = i
-		}
-	}
-	return bestSlot
+	return leaderSlot(len(sp.Members), func(i int) int { return PackMemberDefinition(a, sp, i).Tier })
 }
 
 // PackSpawnLeaderKind returns the visual base kind for the authored pack's

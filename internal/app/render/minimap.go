@@ -261,14 +261,13 @@ var playerArrowColor = rl.NewColor(132, 240, 148, 255)
 // (loot), door markers are warm wood (passage). The Looted chest
 // variant dims the gold so a played-through dungeon reads at a
 // glance.
-// mapPackMarkerColor / mapChestMarkerColor / mapDoorMarkerColor /
-// mapChestLootedColor / mapPackMarkerOutline now alias the theme's
-// marker palette so the minimap and the editor canvas can never drift
-// on entity tone. The fog values stay local — they're a minimap-only
-// concept.
+// mapChestMarkerColor / mapDoorMarkerColor / mapChestLootedColor now
+// alias the theme's marker palette so the minimap and the editor canvas
+// can never drift on entity tone. The fog values stay local — they're a
+// minimap-only concept. (Pack markers are intentionally omitted from
+// both the minimap and the panels Map tab, so no pack-marker aliases
+// live here.)
 var (
-	mapPackMarkerColor    = markerPack
-	mapPackMarkerOutline  = markerPackEdge
 	mapChestMarkerColor   = markerChest
 	mapChestLootedColor   = markerChestDim
 	mapDoorMarkerColor    = markerDoor

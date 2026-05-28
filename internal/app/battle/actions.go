@@ -993,18 +993,27 @@ func setupWhirlwind(g *core.GameState) bool {
 	return chargeMP(g, core.SkillWhirlwind, "Whirlwind")
 }
 
-func applyWhirlwind(g *core.GameState, quality int) bool {
+// applyAoESkill is the shared body for the charge/sequence AoE damage
+// skills (Whirlwind, Arc Bolt): bump the actor, quality-scale the
+// damage, hit every living enemy, and log the "landed on N" or "caught
+// only air" line. The two handlers used to be byte-for-byte identical
+// apart from the skill id and the two verbs.
+func applyAoESkill(g *core.GameState, skill core.SkillID, skillNoun, hitVerb, emptyVerb string, quality int) bool {
 	actor := &g.Party[g.Battle.CurrentParty]
 	actor.AttackBump = core.BumpDuration
-	damage := scaleSkillDamage(actor, core.SkillWhirlwind, quality)
-	hits := applyAoEDamage(g, core.SkillWhirlwind, damage, quality)
+	damage := scaleSkillDamage(actor, skill, quality)
+	hits := applyAoEDamage(g, skill, damage, quality)
 	if hits == 0 {
-		setBattleMessage(g, aoeEmptyMessage("Whirlwind", "catches only air"))
+		setBattleMessage(g, aoeEmptyMessage(skillNoun, emptyVerb))
 	} else {
-		setBattleMessage(g, aoeSkillMessage(actor.Name, "Whirlwind", "hits", hits, damage, quality))
+		setBattleMessage(g, aoeSkillMessage(actor.Name, skillNoun, hitVerb, hits, damage, quality))
 	}
 	finishPartyAction(g)
 	return true
+}
+
+func applyWhirlwind(g *core.GameState, quality int) bool {
+	return applyAoESkill(g, core.SkillWhirlwind, "Whirlwind", "hits", "catches only air", quality)
 }
 
 // --- Mass Mend (Cleric, charge AoE heal) ---
@@ -1166,17 +1175,7 @@ func setupArcBolt(g *core.GameState) bool {
 }
 
 func applyArcBolt(g *core.GameState, quality int) bool {
-	actor := &g.Party[g.Battle.CurrentParty]
-	actor.AttackBump = core.BumpDuration
-	damage := scaleSkillDamage(actor, core.SkillArcBolt, quality)
-	hits := applyAoEDamage(g, core.SkillArcBolt, damage, quality)
-	if hits == 0 {
-		setBattleMessage(g, aoeEmptyMessage("Arc Bolt", "dissipates with no target"))
-	} else {
-		setBattleMessage(g, aoeSkillMessage(actor.Name, "Arc Bolt", "arcs across", hits, damage, quality))
-	}
-	finishPartyAction(g)
-	return true
+	return applyAoESkill(g, core.SkillArcBolt, "Arc Bolt", "arcs across", "dissipates with no target", quality)
 }
 
 // --- Damage / heal helpers (unchanged from previous behavior) ---
@@ -1301,13 +1300,22 @@ func tickPoisonAfterPartyTurn(g *core.GameState, actor core.ActorRef) bool {
 	if member.HP <= 0 || member.PoisonTurns <= 0 {
 		return false
 	}
+	return applyPartyPoisonTick(g, actor.Index)
+}
+
+// applyPartyPoisonTick decrements one party member's Poison counter,
+// deals PoisonTickDamage (Magic-tagged so armor doesn't damp the DoT),
+// and logs the suffers / succumbs line. Returns true on the fatal tick.
+// Shared by the end-of-turn tick and the ingested-member round tick,
+// which used to inline this damage-and-message body verbatim. Callers
+// guard HP/PoisonTurns before calling.
+func applyPartyPoisonTick(g *core.GameState, index int) bool {
+	member := &g.Party[index]
 	member.PoisonTurns--
 	// damagePartyMember returns true on the fatal hit; use it as the
 	// authoritative kill signal so a future "save at 1 HP" mechanic in
 	// damagePartyMember can't desync from the message we emit here.
-	// Poison is venomous decay — magical in source, so armor doesn't
-	// damp it. Pass SkillTagMagic to bypass the armor clip.
-	dealt, killed := damagePartyMember(g, actor.Index, core.PoisonTickDamage, core.SkillTagMagic)
+	dealt, killed := damagePartyMember(g, index, core.PoisonTickDamage, core.SkillTagMagic)
 	if killed {
 		setBattleMessage(g, fmt.Sprintf("%s succumbs to the poison.", member.Name))
 		return true
@@ -1329,13 +1337,7 @@ func tickPoisonForIngestedParty(g *core.GameState) {
 		if !m.Ingested || m.HP <= 0 || m.PoisonTurns <= 0 {
 			continue
 		}
-		m.PoisonTurns--
-		dealt, killed := damagePartyMember(g, i, core.PoisonTickDamage, core.SkillTagMagic)
-		if killed {
-			setBattleMessage(g, fmt.Sprintf("%s succumbs to the poison.", m.Name))
-			continue
-		}
-		setBattleMessage(g, fmt.Sprintf("%s suffers %d from poison.", m.Name, dealt))
+		applyPartyPoisonTick(g, i)
 	}
 }
 
@@ -1594,75 +1596,77 @@ func fireboltMessage(name string, target core.Enemy, damage, quality int, defeat
 	}
 }
 
-// crushingBlowMessage formats the combat-log line for a Crushing Blow
-// apply. Mirrors fireboltMessage's shape — defeated / stunned / plain
-// hit each get distinct copy so the log reads as the proc that fired.
-func crushingBlowMessage(name string, target core.Enemy, damage, quality int, defeated, stunned bool) string {
-	tag := qualityTag(quality)
+// procMessageArms holds the three combat-log copy variants a
+// single-target damaging skill picks between: the defeated kill line,
+// the status-proc landing line, and the plain hit. Format strings use
+// explicit argument indices over the fixed arg tuple
+// (tag=%[1]s, name=%[2]s, noun=%[3]s, damage=%[4]d) so an arm can omit
+// whichever verbs it doesn't need without a "too many args" error.
+type procMessageArms struct{ defeated, proc, plain string }
+
+// procSkillMessage selects and formats the right arm. Collapses the five
+// near-identical 3-arm switch helpers (Crushing Blow / Smite / Backstab /
+// Venom Strike / Frost Lance) into one; each skill now supplies only its
+// copy via a procMessageArms table. A future "battle-log color codes"
+// pass lands here once instead of five times. (fireboltMessage keeps its
+// own 4-arm form — it has an extra "already burning" line.)
+func procSkillMessage(arms procMessageArms, name string, target core.Enemy, damage, quality int, defeated, proc bool) string {
+	f := arms.plain
 	switch {
 	case defeated:
-		return fmt.Sprintf("%s%s shatters the %s with a Crushing Blow.", tag, name, core.EnemySingularNoun(target))
-	case stunned:
-		return fmt.Sprintf("%s%s crushes the %s for %d. Stunned!", tag, name, core.EnemySingularNoun(target), damage)
-	default:
-		return fmt.Sprintf("%s%s Crushing Blows for %d.", tag, name, damage)
+		f = arms.defeated
+	case proc:
+		f = arms.proc
 	}
+	return fmt.Sprintf(f, qualityTag(quality), name, core.EnemySingularNoun(target), damage)
 }
 
-// smiteMessage / backstabMessage / venomStrikeMessage / frostLanceMessage
-// are the per-skill message helpers for the single-target damaging
-// skills. They mirror fireboltMessage / crushingBlowMessage's shape: a
-// 3-arm switch that paints the defeated kill line, the status-proc
-// landing line, or the plain hit. Each apply handler used to inline
-// these switches by hand; pulling them here makes a future
-// "battle-log color codes" pass land in one file instead of five.
+var (
+	crushingBlowArms = procMessageArms{
+		defeated: "%[1]s%[2]s shatters the %[3]s with a Crushing Blow.",
+		proc:     "%[1]s%[2]s crushes the %[3]s for %[4]d. Stunned!",
+		plain:    "%[1]s%[2]s Crushing Blows for %[4]d.",
+	}
+	smiteArms = procMessageArms{
+		defeated: "%[1]s%[2]s smites the %[3]s down.",
+		proc:     "%[1]s%[2]s smites for %[4]d. Stunned!",
+		plain:    "%[1]s%[2]s smites for %[4]d.",
+	}
+	backstabArms = procMessageArms{
+		defeated: "%[1]s%[2]s's Backstab fells the %[3]s.",
+		proc:     "%[1]s%[2]s lands a clean Backstab for %[4]d!",
+		plain:    "%[1]s%[2]s stabs for %[4]d.",
+	}
+	venomStrikeArms = procMessageArms{
+		defeated: "%[1]s%[2]s's Venom Strike fells the %[3]s.",
+		proc:     "%[1]s%[2]s envenoms the %[3]s for %[4]d. Poisoned!",
+		plain:    "%[1]s%[2]s stings for %[4]d.",
+	}
+	frostLanceArms = procMessageArms{
+		defeated: "%[1]s%[2]s's Frost Lance shatters the %[3]s.",
+		proc:     "%[1]s%[2]s freezes the %[3]s for %[4]d. Frozen!",
+		plain:    "%[1]s%[2]s lances for %[4]d.",
+	}
+)
+
+func crushingBlowMessage(name string, target core.Enemy, damage, quality int, defeated, stunned bool) string {
+	return procSkillMessage(crushingBlowArms, name, target, damage, quality, defeated, stunned)
+}
 
 func smiteMessage(name string, target core.Enemy, damage, quality int, defeated, stunned bool) string {
-	tag := qualityTag(quality)
-	switch {
-	case defeated:
-		return fmt.Sprintf("%s%s smites the %s down.", tag, name, core.EnemySingularNoun(target))
-	case stunned:
-		return fmt.Sprintf("%s%s smites for %d. Stunned!", tag, name, damage)
-	default:
-		return fmt.Sprintf("%s%s smites for %d.", tag, name, damage)
-	}
+	return procSkillMessage(smiteArms, name, target, damage, quality, defeated, stunned)
 }
 
 func backstabMessage(name string, target core.Enemy, damage, quality int, defeated, crit bool) string {
-	tag := qualityTag(quality)
-	switch {
-	case defeated:
-		return fmt.Sprintf("%s%s's Backstab fells the %s.", tag, name, core.EnemySingularNoun(target))
-	case crit:
-		return fmt.Sprintf("%s%s lands a clean Backstab for %d!", tag, name, damage)
-	default:
-		return fmt.Sprintf("%s%s stabs for %d.", tag, name, damage)
-	}
+	return procSkillMessage(backstabArms, name, target, damage, quality, defeated, crit)
 }
 
 func venomStrikeMessage(name string, target core.Enemy, damage, quality int, defeated, poisoned bool) string {
-	tag := qualityTag(quality)
-	switch {
-	case defeated:
-		return fmt.Sprintf("%s%s's Venom Strike fells the %s.", tag, name, core.EnemySingularNoun(target))
-	case poisoned:
-		return fmt.Sprintf("%s%s envenoms the %s for %d. Poisoned!", tag, name, core.EnemySingularNoun(target), damage)
-	default:
-		return fmt.Sprintf("%s%s stings for %d.", tag, name, damage)
-	}
+	return procSkillMessage(venomStrikeArms, name, target, damage, quality, defeated, poisoned)
 }
 
 func frostLanceMessage(name string, target core.Enemy, damage, quality int, defeated, stunned bool) string {
-	tag := qualityTag(quality)
-	switch {
-	case defeated:
-		return fmt.Sprintf("%s%s's Frost Lance shatters the %s.", tag, name, core.EnemySingularNoun(target))
-	case stunned:
-		return fmt.Sprintf("%s%s freezes the %s for %d. Frozen!", tag, name, core.EnemySingularNoun(target), damage)
-	default:
-		return fmt.Sprintf("%s%s lances for %d.", tag, name, damage)
-	}
+	return procSkillMessage(frostLanceArms, name, target, damage, quality, defeated, stunned)
 }
 
 // aoeSkillMessage / aoeEmptyMessage format the canonical AoE log

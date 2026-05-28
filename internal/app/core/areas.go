@@ -18,10 +18,15 @@ const (
 // absolute or cwd-relative path at runtime.
 const mapsDirName = "maps"
 
-// AssetDirMode is the os.MkdirAll mode used for every auto-created asset
-// directory (maps/, maps/sounds/, etc.). Centralized so a project-wide
-// permissions change is one edit instead of grep-and-replace.
-const AssetDirMode = 0o755
+// AssetDirMode / AssetFileMode are the os mode bits for every auto-created
+// asset directory (maps/, maps/sounds/, …) and asset file write (.map
+// files, user .wav sounds, assignments.txt). They alias the canonical
+// definitions in the leaf mapfile package so the I/O layer can use them
+// without importing core; a project-wide permissions change is one edit.
+const (
+	AssetDirMode  = mapfile.AssetDirMode
+	AssetFileMode = mapfile.AssetFileMode
+)
 
 // MapsDir returns the directory where .map files live. Thin wrapper
 // over ResolveAssetDir so the asset-folder lookup story is consistent
@@ -177,6 +182,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 			TargetMap:  target,
 			TargetDoor: d.TargetDoor,
 			Facing:     facing,
+			Style:      doorStyleFromName(d.Style),
 		})
 	}
 	ceiling := mf.Ceiling
@@ -282,6 +288,7 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 			X:          d.TileX,
 			Z:          d.TileZ,
 			Facing:     faceName,
+			Style:      DoorStyleName(d.Style),
 		})
 	}
 	ceiling := a.Ceiling
@@ -393,7 +400,7 @@ var facingNameTable = []facingNameEntry{
 // editor's metadata panel and door-edit modal don't each carry their
 // own []string{"N", "E", "S", "W"} literal — a future renaming
 // (localisation, glyph swap) is one edit instead of a grep.
-var FacingShortLabels = [4]string{
+var FacingShortLabels = [FacingCount]string{
 	North: "N",
 	East:  "E",
 	South: "S",
@@ -436,6 +443,64 @@ func facingFromName(s string) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// FacingAwayFromAdjacentWall scans the four cardinal neighbours of
+// (x, z) in N→E→S→W order and returns the facing pointing AWAY from the
+// first wall found — the direction something mounted on that wall (a wall
+// torch, a door set into it) should face into the room. found=false when
+// the cell has no adjacent wall, so each caller picks its own fallback.
+// Single source for the rule shared by the renderer's wall-torch
+// orientation and the editor's door auto-facing.
+func FacingAwayFromAdjacentWall(m AreaDefinition, x, z int) (facing int, found bool) {
+	switch {
+	case m.WallAt(x, z-1):
+		return South, true // wall north → face south, into the room
+	case m.WallAt(x+1, z):
+		return West, true
+	case m.WallAt(x, z+1):
+		return North, true
+	case m.WallAt(x-1, z):
+		return East, true
+	}
+	return 0, false
+}
+
+// DoorStyleLabels are the editor button labels for the door styles,
+// indexed by DoorStyle. Centralized so the door-edit modal doesn't carry
+// its own literal list.
+var DoorStyleLabels = [DoorStyleCount]string{
+	DoorStyleBuilding: "Building",
+	DoorStyleCave:     "Cave",
+	DoorStyleField:    "Field",
+}
+
+// DoorStyleName maps a DoorStyle to its canonical on-disk string. An
+// out-of-range style (shouldn't happen) falls back to building so a
+// corrupt value still round-trips to a valid row.
+func DoorStyleName(s DoorStyle) string {
+	switch s {
+	case DoorStyleCave:
+		return mapfile.DoorStyleCaveName
+	case DoorStyleField:
+		return mapfile.DoorStyleFieldName
+	default:
+		return mapfile.DoorStyleBuildingName
+	}
+}
+
+// doorStyleFromName maps an on-disk style string to a DoorStyle. Empty or
+// unrecognized resolves to building (the parser already validates names,
+// so this is the load-time default for a missing column).
+func doorStyleFromName(s string) DoorStyle {
+	switch strings.ToLower(s) {
+	case mapfile.DoorStyleCaveName:
+		return DoorStyleCave
+	case mapfile.DoorStyleFieldName:
+		return DoorStyleField
+	default:
+		return DoorStyleBuilding
+	}
 }
 
 type enemyKindNameEntry struct {

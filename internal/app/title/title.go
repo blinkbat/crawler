@@ -106,7 +106,9 @@ func mainMenuLabels() []string {
 
 func updateMain(s *State) Action {
 	s.cursor = input.CursorUpDown(s.cursor, len(mainMenuRows))
-	// Esc and Q both quit from the main menu — there's nowhere to back up to.
+	// Quit (Q / Select) or Back (Esc / X / Circle) both exit from the main
+	// menu — there's nowhere to back up to, so "cancel" and "quit" collapse
+	// to the same action here.
 	if input.QuitPressed() || input.BackPressed() {
 		return ActionQuit
 	}

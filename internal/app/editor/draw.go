@@ -158,15 +158,17 @@ const (
 	doorHitTargetMap
 	doorHitTargetDoor
 	doorHitFacing
+	doorHitStyle
 	doorHitDelete
 	doorHitClose
 )
 
 // doorEditHit pairs the hit kind with optional payload (the facing value
-// when kind == doorHitFacing).
+// when kind == doorHitFacing, the style value when kind == doorHitStyle).
 type doorEditHit struct {
 	kind   doorEditHitTarget
 	facing int
+	style  core.DoorStyle
 }
 
 // doorEditLayout returns the rectangles for every clickable region of
@@ -178,6 +180,7 @@ type doorEditLayout struct {
 	mapField  rl.Rectangle
 	doorField rl.Rectangle
 	facing    [4]rl.Rectangle
+	style     [core.DoorStyleCount]rl.Rectangle
 	deleteBtn rl.Rectangle
 	closeBtn  rl.Rectangle
 }
@@ -185,7 +188,7 @@ type doorEditLayout struct {
 func doorEditLayoutFor() doorEditLayout {
 	w, h := render.ScreenSizeF()
 	pw := float32(480)
-	ph := float32(360)
+	ph := float32(424)
 	r := rl.NewRectangle((w-pw)/2, (h-ph)/2, pw, ph)
 	x := r.X + 16
 	fw := r.Width - 32
@@ -204,6 +207,14 @@ func doorEditLayoutFor() doorEditLayout {
 	for i := 0; i < 4; i++ {
 		facing[i] = rl.NewRectangle(x+float32(i)*(bw+6), y, bw, fieldH)
 	}
+	y += rowGap
+	// Style row: one button per DoorStyle.
+	styleN := int(core.DoorStyleCount)
+	sbw := (fw - float32(styleN-1)*6) / float32(styleN)
+	var style [core.DoorStyleCount]rl.Rectangle
+	for i := 0; i < styleN; i++ {
+		style[i] = rl.NewRectangle(x+float32(i)*(sbw+6), y, sbw, fieldH)
+	}
 	y = r.Y + r.Height - 44
 	deleteBtn := rl.NewRectangle(x, y, 110, 30)
 	closeBtn := rl.NewRectangle(r.X+r.Width-110-16, y, 110, 30)
@@ -213,6 +224,7 @@ func doorEditLayoutFor() doorEditLayout {
 		mapField:  mapField,
 		doorField: doorField,
 		facing:    facing,
+		style:     style,
 		deleteBtn: deleteBtn,
 		closeBtn:  closeBtn,
 	}
@@ -238,6 +250,11 @@ func doorEditHitTest(s *State, p rl.Vector2) doorEditHit {
 	for i, fr := range l.facing {
 		if pointIn(p, fr) {
 			return doorEditHit{kind: doorHitFacing, facing: i}
+		}
+	}
+	for i, sr := range l.style {
+		if pointIn(p, sr) {
+			return doorEditHit{kind: doorHitStyle, style: core.DoorStyle(i)}
 		}
 	}
 	if pointIn(p, l.deleteBtn) {
@@ -1989,10 +2006,18 @@ func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawTextField(font, l.doorField, door.TargetDoor, s.focus == focusDoorTargetDoor)
 
 	// Facing row.
-	drawLabel(font, "Facing on exit (player walks out heading this way)",
+	drawLabel(font, "Facing / wall to affix to (player walks out this way)",
 		rl.NewRectangle(l.facing[0].X, l.facing[0].Y-16, l.facing[3].X+l.facing[3].Width-l.facing[0].X, 14))
 	for i, fr := range l.facing {
 		drawButton(font, fr, core.FacingShortLabels[i], door.Facing == i)
+	}
+
+	// Style row.
+	lastStyle := l.style[core.DoorStyleCount-1]
+	drawLabel(font, "Style (visual fixture)",
+		rl.NewRectangle(l.style[0].X, l.style[0].Y-16, lastStyle.X+lastStyle.Width-l.style[0].X, 14))
+	for i, sr := range l.style {
+		drawButton(font, sr, core.DoorStyleLabels[i], door.Style == core.DoorStyle(i))
 	}
 
 	// Delete + Close buttons.
@@ -2000,7 +2025,7 @@ func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawButton(font, l.closeBtn, "Done (Esc)", false)
 
 	// Footer hint string mirrors the other modals' tiny hint row.
-	hint := "Tab cycle fields   N/E/S/W set facing   X delete   Esc / Enter done"
+	hint := "Tab cycle fields   N/E/S/W facing   1/2/3 style   X delete   Esc done"
 	rl.DrawTextEx(font, hint,
 		rl.NewVector2(l.card.X+16, l.card.Y+l.card.Height-72),
 		11, 1, theme.TextHint)

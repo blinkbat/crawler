@@ -1,6 +1,7 @@
 package core
 
 import (
+	"crawler/internal/app/core/mapfile"
 	"fmt"
 	"math"
 	"slices"
@@ -34,8 +35,8 @@ const (
 // quad at wall height, turning that tile into roofed interior space —
 // the visual cue for "you are inside a dungeon room."
 const (
-	TileCeilingOpen  = '.' // no ceiling — sky shows through
-	TileCeilingSolid = '#' // solid ceiling slab at wall height
+	TileCeilingOpen  = mapfile.CeilingOpenChar  // '.' no ceiling — sky shows through
+	TileCeilingSolid = mapfile.CeilingSolidChar // '#' solid ceiling slab at wall height
 )
 
 // Floor layer. Walkable surfaces — material-keyed variants (grass / dirt /
@@ -499,41 +500,37 @@ func AdjacentInteractableChestIndex(chests []Chest, x, z int) int {
 	return idx
 }
 
+// SpawnIndexAt is the shared "find the authored spawn on this tile" scan,
+// generic over any TileXZ spawn type. Matches the slices.IndexFunc idiom
+// the runtime ChestIndexAt / DoorIndexAt helpers use, so all the tile
+// lookups share one shape.
+func SpawnIndexAt[T TileXZ](spawns []T, x, z int) int {
+	return slices.IndexFunc(spawns, func(s T) bool {
+		tx, tz := s.Tile()
+		return tx == x && tz == z
+	})
+}
+
 // PackSpawnIndexAt returns the index of the pack spawn at the given
 // tile, or -1 when none. Authored-list mirror of the in-pack ChestIndexAt
 // helper; the editor's hover summary uses it and a future "tile
 // inspector" anywhere else can reuse it.
 func PackSpawnIndexAt(spawns []PackSpawn, x, z int) int {
-	for i, sp := range spawns {
-		if sp.TileX == x && sp.TileZ == z {
-			return i
-		}
-	}
-	return -1
+	return SpawnIndexAt(spawns, x, z)
 }
 
 // ChestSpawnIndexAt returns the index of the chest spawn at the given
 // tile, or -1 when none. Authored-list counterpart to runtime
 // ChestIndexAt.
 func ChestSpawnIndexAt(spawns []ChestSpawn, x, z int) int {
-	for i, sp := range spawns {
-		if sp.TileX == x && sp.TileZ == z {
-			return i
-		}
-	}
-	return -1
+	return SpawnIndexAt(spawns, x, z)
 }
 
 // DoorSpawnIndexAt returns the index of the door spawn at the given
 // tile, or -1 when none. Authored-list counterpart to runtime
 // DoorIndexAt.
 func DoorSpawnIndexAt(spawns []DoorSpawn, x, z int) int {
-	for i, sp := range spawns {
-		if sp.TileX == x && sp.TileZ == z {
-			return i
-		}
-	}
-	return -1
+	return SpawnIndexAt(spawns, x, z)
 }
 
 // AreaTileSummary returns a compact human-readable description of
@@ -992,8 +989,12 @@ var crossLayerCharOverlaps = []crossLayerOverlap{
 // Sentinel chars ('.' / '_' / '#') are skipped — those are shared by
 // design across layers (e.g. '.' means "open" everywhere).
 func assertNoUnregisteredCrossLayerOverlaps() {
+	// Built from the named sentinel constants so a sentinel rename can't
+	// silently desync this skip-set from the chars it's meant to cover:
+	// TileOpen ('.') = open everywhere, DecorEmpty ('_') = suppress decor,
+	// TileRock ('#') = solid in walls/ceiling.
 	sentinels := map[byte]struct{}{
-		'.': {}, '_': {}, '#': {},
+		TileOpen: {}, DecorEmpty: {}, TileRock: {},
 	}
 	// chars[c] -> list of layers where it's a registered tile.
 	chars := make(map[byte][]TileLayer)

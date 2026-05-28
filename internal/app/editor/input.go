@@ -66,9 +66,8 @@ func updateHotkeys(s *State) {
 	// author knows which layer they want. Number row only; the keypad
 	// equivalents aren't bound to keep the binding compact.
 	if alt {
-		layerKeys := []int32{rl.KeyOne, rl.KeyTwo, rl.KeyThree, rl.KeyFour, rl.KeyFive, rl.KeySix}
-		for i, k := range layerKeys {
-			if rl.IsKeyPressed(k) {
+		for i := 0; i < layerCount; i++ {
+			if rl.IsKeyPressed(numberRowKeys[i]) {
 				s.layer = Layer(i)
 				return
 			}
@@ -85,8 +84,7 @@ func updateHotkeys(s *State) {
 		if shift {
 			offset = 9
 		}
-		numKeys := []int32{rl.KeyOne, rl.KeyTwo, rl.KeyThree, rl.KeyFour, rl.KeyFive, rl.KeySix, rl.KeySeven, rl.KeyEight, rl.KeyNine}
-		for i, k := range numKeys {
+		for i, k := range numberRowKeys {
 			idx := i + offset
 			if idx >= len(palette) {
 				break
@@ -943,11 +941,14 @@ func updateDoorEditModal(s *State) Action {
 			s.dirty = true
 			s.focus = focusNone
 			return ActionNone
-		case doorHitDelete:
+		case doorHitStyle:
 			pushUndo(s)
-			s.area.DoorSpawns = append(s.area.DoorSpawns[:s.modalDoorIdx], s.area.DoorSpawns[s.modalDoorIdx+1:]...)
+			door.Style = hit.style
 			s.dirty = true
-			closeModal(s)
+			s.focus = focusNone
+			return ActionNone
+		case doorHitDelete:
+			deleteDoorAt(s, s.modalDoorIdx)
 			return ActionNone
 		case doorHitClose:
 			closeModal(s)
@@ -999,25 +1000,13 @@ func updateDoorEditModal(s *State) Action {
 		return ActionNone
 	}
 	if rl.IsKeyPressed(rl.KeyX) {
-		pushUndo(s)
-		s.area.DoorSpawns = append(s.area.DoorSpawns[:s.modalDoorIdx], s.area.DoorSpawns[s.modalDoorIdx+1:]...)
-		s.dirty = true
-		closeModal(s)
+		deleteDoorAt(s, s.modalDoorIdx)
 		return ActionNone
 	}
 	// N / E / S / W set facing directly. Updates only run while the
 	// modal is open and updateHotkeys's global Ctrl+S Save handler
 	// doesn't fire during modals, so the 'S' binding is free here.
-	facingKeys := []struct {
-		key    int32
-		facing int
-	}{
-		{rl.KeyN, core.North},
-		{rl.KeyE, core.East},
-		{rl.KeyS, core.South},
-		{rl.KeyW, core.West},
-	}
-	for _, fk := range facingKeys {
+	for _, fk := range doorFacingKeys {
 		if rl.IsKeyPressed(fk.key) {
 			pushUndo(s)
 			door.Facing = fk.facing
@@ -1025,7 +1014,52 @@ func updateDoorEditModal(s *State) Action {
 			return ActionNone
 		}
 	}
+	// 1 / 2 / 3 set the door style (building / cave / field). Number-row
+	// keys don't collide with the facing letters or the save shortcut.
+	for _, sk := range doorStyleKeys {
+		if rl.IsKeyPressed(sk.key) {
+			pushUndo(s)
+			door.Style = sk.style
+			s.dirty = true
+			return ActionNone
+		}
+	}
 	return ActionNone
+}
+
+// doorFacingKeys / doorStyleKeys are the door-edit modal's direct-set
+// hotkey tables (N/E/S/W → facing, 1/2/3 → style). Package-level so the
+// per-frame modal updater doesn't rebuild the slices every call.
+var doorFacingKeys = []struct {
+	key    int32
+	facing int
+}{
+	{rl.KeyN, core.North},
+	{rl.KeyE, core.East},
+	{rl.KeyS, core.South},
+	{rl.KeyW, core.West},
+}
+
+var doorStyleKeys = []struct {
+	key   int32
+	style core.DoorStyle
+}{
+	{rl.KeyOne, core.DoorStyleBuilding},
+	{rl.KeyTwo, core.DoorStyleCave},
+	{rl.KeyThree, core.DoorStyleField},
+}
+
+// deleteDoorAt removes the door spawn at idx (pushing undo, marking
+// dirty, and closing the modal). Shared by the door modal's click-Delete
+// button and its X-key shortcut, which open-coded the same append-splice.
+func deleteDoorAt(s *State, idx int) {
+	if idx < 0 || idx >= len(s.area.DoorSpawns) {
+		return
+	}
+	pushUndo(s)
+	s.area.DoorSpawns = append(s.area.DoorSpawns[:idx], s.area.DoorSpawns[idx+1:]...)
+	s.dirty = true
+	closeModal(s)
 }
 
 // doorEditTextTarget returns the address of whichever DoorSpawn string

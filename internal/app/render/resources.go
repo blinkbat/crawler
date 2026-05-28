@@ -76,10 +76,10 @@ type Resources struct {
 	// for authoring and Unload.
 	propModelTable *[256]propModel
 
-	// doorProp is the area-transition doorframe drawn at every g.Doors
-	// entry. One shared model — rotated per-door by the authored
-	// facing so the opening points the right way.
-	doorProp propModel
+	// doorProps holds one model per core.DoorStyle (building / cave /
+	// field). DrawDoors indexes by the door's Style and rotates the chosen
+	// model by the authored facing so the opening points the right way.
+	doorProps [core.DoorStyleCount]propModel
 }
 
 type worldMaterialResources struct {
@@ -324,11 +324,14 @@ func LoadResources() (r Resources) {
 	r.decorModels[core.DecorPuddle] = loadPuddleProp(r.lighting.shader)
 	r.decorModels[core.DecorRootCluster] = loadRootClusterProp(r.lighting.shader, rootBarkTex)
 
-	// Door prop — drawn at every g.Doors entry, rotated by authored
-	// facing. Owns its wood texture via setModelTexture; freed by
-	// doorProp.unload() in Resources.Unload below.
+	// Door props — one model per style, drawn at every g.Doors entry and
+	// rotated by authored facing. Each owns its texture via setModelTexture;
+	// freed by the doorProps unload loop in Resources.Unload below.
 	doorWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
-	r.doorProp = loadDoorProp(r.lighting.shader, doorWoodTex)
+	doorStoneTex := loadRepeatTexture(makeRockWallPixels(64, 64), 64, 64)
+	r.doorProps[core.DoorStyleBuilding] = loadDoorProp(r.lighting.shader, doorWoodTex)
+	r.doorProps[core.DoorStyleCave] = loadCaveDoorProp(r.lighting.shader, doorStoneTex)
+	r.doorProps[core.DoorStyleField] = loadFieldDoorProp(r.lighting.shader, doorWoodTex)
 
 	assertDecorCoverage(r.decorModels)
 	assertPropCoverage(r.propModels)
@@ -552,7 +555,9 @@ func (r Resources) Unload() {
 		rl.UnloadModel(torchFlameModel)
 		torchFlameReady = false
 	}
-	r.doorProp.unload()
+	for i := range r.doorProps {
+		r.doorProps[i].unload()
+	}
 	for _, model := range r.specialFloors {
 		rl.UnloadModel(model)
 	}

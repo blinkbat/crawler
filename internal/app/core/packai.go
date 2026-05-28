@@ -27,9 +27,9 @@ func PackStepIntoPlayer(tx, tz, px, pz int) bool {
 // FacingVector so the AI and the player-step code can't disagree on
 // what "south" means — a future facing-convention change is one switch
 // edit, not a manual table reshuffle.
-func cardinalSteps() [4][2]int {
-	var out [4][2]int
-	for i := 0; i < 4; i++ {
+func cardinalSteps() [FacingCount][2]int {
+	var out [FacingCount][2]int
+	for i := 0; i < FacingCount; i++ {
 		dx, dz := FacingVector(i)
 		out[i] = [2]int{dx, dz}
 	}

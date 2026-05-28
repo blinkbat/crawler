@@ -42,6 +42,22 @@ type ChestSpawn struct {
 // should adopt. Same shape as the on-disk MapDoor — mapfile->core
 // resolves SelfMapToken to the local map name at load time so the
 // runtime never sees the placeholder.
+// DoorStyle picks the visual fixture a door renders as. The destination /
+// transition behavior is identical across styles — this is purely how the
+// doorway looks so an author can match a door to its surroundings (a
+// timber frame in a town, a stone arch in a cave, a freestanding gateway
+// in the open field).
+type DoorStyle int
+
+const (
+	DoorStyleBuilding DoorStyle = iota // timber-framed door (the original)
+	DoorStyleCave                      // rough stone archway
+	DoorStyleField                     // open gateway / trail arch
+	// DoorStyleCount is the wrap modulus for cycling styles in the editor
+	// and the size of the per-style model table in the renderer.
+	DoorStyleCount
+)
+
 type DoorSpawn struct {
 	TileX      int
 	TileZ      int
@@ -49,6 +65,7 @@ type DoorSpawn struct {
 	TargetMap  string
 	TargetDoor string
 	Facing     int
+	Style      DoorStyle
 }
 
 // HasTarget reports whether this door names a destination it can
@@ -59,6 +76,19 @@ type DoorSpawn struct {
 func (d DoorSpawn) HasTarget() bool {
 	return mapfile.DoorTargetComplete(d.TargetMap, d.TargetDoor)
 }
+
+// TileXZ is implemented by the authored spawn types (PackSpawn /
+// ChestSpawn / DoorSpawn), all of which carry a TileX/TileZ position.
+// Generic "find / remove the spawn on this tile" helpers in core and the
+// editor range over it instead of re-typing the coordinate read per
+// spawn slice.
+type TileXZ interface {
+	Tile() (int, int)
+}
+
+func (s PackSpawn) Tile() (int, int)  { return s.TileX, s.TileZ }
+func (s ChestSpawn) Tile() (int, int) { return s.TileX, s.TileZ }
+func (s DoorSpawn) Tile() (int, int)  { return s.TileX, s.TileZ }
 
 // Door is one runtime door on the field. Built from AreaDefinition.
 // DoorSpawns by NewGameState (placeDoors). Doors block neither movement
@@ -88,6 +118,9 @@ type Door struct {
 	// should set it accordingly; the engine doesn't infer either
 	// reading separately.
 	Facing int
+	// Style is the visual fixture (timber / cave / field). Render-only;
+	// the transition behavior is identical across styles.
+	Style DoorStyle
 }
 
 // HasTarget reports whether this runtime door names a resolvable
@@ -229,8 +262,8 @@ type Animation struct {
 type GameState struct {
 	Area AreaDefinition
 	// StepCount is the total number of player tile-steps taken in this
-	// session. Drives the day/night cycle: every 150 steps is one full
-	// loop through the six time-of-day phases. Incremented by the
+	// session. Drives the day/night cycle: every StepsPerCycle steps is
+	// one full loop through the six time-of-day phases. Incremented by the
 	// explore package when a step actually lands (not when blocked).
 	StepCount int
 	Player    Player
@@ -273,10 +306,16 @@ type GameState struct {
 	// movement loop checks this slice on every step-land to detect
 	// "stepped onto a door" and fire the transition.
 	Doors []Door
-	// PendingTransition is set by the explore movement loop when the
-	// player steps onto a door tile. The run loop consumes this on the
-	// frame after movement settles to swap in the new GameState. Empty
-	// TargetMap means "no transition queued."
+	// DoorPrompt is the index into Doors of the door the player just
+	// stepped onto and is being asked to confirm, or -1 when no prompt is
+	// showing. Stepping onto a door opens this confirm modal instead of
+	// transitioning immediately; confirming sets PendingTransition, and
+	// cancelling clears it (the player stays on the tile and can walk off).
+	DoorPrompt int
+	// PendingTransition is set when the player confirms the door prompt.
+	// The run loop consumes this on the frame after movement settles to
+	// swap in the new GameState. Empty TargetMap means "no transition
+	// queued."
 	PendingTransition AreaTransition
 	// ChestOpen is the index into Chests of the currently-open chest, or
 	// -1 when no chest UI is showing. ChestMenuIndex is the cursor row
@@ -541,10 +580,14 @@ type PartyMember struct {
 	SkillCursor int
 }
 
-// MaxHPFor returns the derived MaxHP from a Stats block. Two HP per VIT keeps
-// the numbers small and readable on the party-card bars.
+// HPPerVIT is the MaxHP granted per point of VIT. Kept small so the
+// numbers stay readable on the party-card bars. Single source of truth
+// for both MaxHPFor and the VIT stat description shown in the level-up UI.
+const HPPerVIT = 2
+
+// MaxHPFor returns the derived MaxHP from a Stats block.
 func MaxHPFor(s Stats) int {
-	return s.VIT * 2
+	return s.VIT * HPPerVIT
 }
 
 // MeleeDamage = STR + skill base. Used for Attack, Swipe, etc.

@@ -108,14 +108,16 @@ const emptyChestToken = "(empty)"
 
 // MapDoor is one authored door at a tile. On-disk format:
 //
-//	<name> <target_map> <target_door> <X> <Z> <facing>
+//	<name> <target_map> <target_door> <X> <Z> <facing> [style]
 //
 // Name is this door's identifier (must be unique within the map);
 // TargetMap is the destination map id (the bare name, e.g. "dungeon"
 // for dungeon.map) or the literal "self" for same-map portals;
 // TargetDoor is the matching door's Name in the destination; Facing
 // is the post-transition direction the player faces and is one of
-// north/east/south/west.
+// north/east/south/west. Style is the optional visual fixture
+// (building/cave/field); when absent it defaults to building so
+// older 6-field door rows keep loading unchanged.
 type MapDoor struct {
 	Name       string
 	TargetMap  string
@@ -123,6 +125,7 @@ type MapDoor struct {
 	X          int
 	Z          int
 	Facing     string
+	Style      string
 }
 
 // DoorTargetComplete reports whether a door names both halves of a
@@ -159,12 +162,60 @@ var FacingNames = [...]string{
 	FacingWestName,
 }
 
+const (
+	DoorStyleBuildingName = "building"
+	DoorStyleCaveName     = "cave"
+	DoorStyleFieldName    = "field"
+)
+
+// DoorStyleNames is the canonical on-disk order for door-style strings,
+// matching core.DoorStyleBuilding/Cave/Field. DoorStyleBuildingName is
+// index 0 so an absent style column resolves to it.
+var DoorStyleNames = [...]string{
+	DoorStyleBuildingName,
+	DoorStyleCaveName,
+	DoorStyleFieldName,
+}
+
+// IsDoorStyleName reports whether s names one of the canonical door
+// styles (case-insensitive).
+func IsDoorStyleName(s string) bool {
+	low := strings.ToLower(s)
+	for _, name := range DoorStyleNames {
+		if name == low {
+			return true
+		}
+	}
+	return false
+}
+
 // Ext is the canonical on-disk extension for map files. Lives in
 // mapfile (the I/O package) so core can't import it as a string
 // literal anywhere — `core.MapPath`, the editor's Save As preview,
 // and List/ListByModTime all reference this constant so a future
 // rename to ".mapv2" is a one-line change.
 const Ext = ".map"
+
+// Ceiling-layer sentinel chars in the on-disk format. CeilingOpenChar
+// ('.') means "no ceiling — sky shows through"; CeilingSolidChar ('#')
+// is a solid slab. Defined here (the I/O package) so the blank-ceiling
+// seeding for older files spells "open" once; core.TileCeilingOpen /
+// TileCeilingSolid alias these so the convention can't drift across the
+// package boundary.
+const (
+	CeilingOpenChar  = '.'
+	CeilingSolidChar = '#'
+)
+
+// AssetDirMode / AssetFileMode are the os mode bits for auto-created
+// asset directories and files. Defined in this leaf I/O package so Save
+// (and other writers) can use them without importing core; core's
+// AssetDirMode / AssetFileMode alias these (core imports mapfile, not
+// the reverse), so a permissions change is one edit.
+const (
+	AssetDirMode  = 0o755
+	AssetFileMode = 0o644
+)
 
 // MapCustomEnemy is one author-defined enemy template in the on-disk
 // format. Fields are positional whitespace-separated on a single line:
@@ -282,8 +333,11 @@ func Parse(r io.Reader) (MapFile, error) {
 
 		if state == slotDoors {
 			fields := strings.Fields(line)
-			if len(fields) != 6 {
-				return mf, fmt.Errorf("line %d: expected '<name> <target_map> <target_door> <x> <z> <facing>', got %q", lineNo, raw)
+			// 6 fields = legacy row (style defaults to building); 7 = style
+			// column present. Keeping both shapes valid means older maps load
+			// untouched and only pick up a style column when re-saved.
+			if len(fields) != 6 && len(fields) != 7 {
+				return mf, fmt.Errorf("line %d: expected '<name> <target_map> <target_door> <x> <z> <facing> [style]', got %q", lineNo, raw)
 			}
 			x, err := parseIntField(fields[3], "door x", lineNo)
 			if err != nil {
@@ -297,6 +351,13 @@ func Parse(r io.Reader) (MapFile, error) {
 			if !IsFacingName(face) {
 				return mf, fmt.Errorf("line %d: door facing must be north/east/south/west, got %q", lineNo, fields[5])
 			}
+			style := DoorStyleBuildingName
+			if len(fields) == 7 {
+				style = strings.ToLower(fields[6])
+				if !IsDoorStyleName(style) {
+					return mf, fmt.Errorf("line %d: door style must be building/cave/field, got %q", lineNo, fields[6])
+				}
+			}
 			mf.Doors = append(mf.Doors, MapDoor{
 				Name:       fields[0],
 				TargetMap:  fields[1],
@@ -304,6 +365,7 @@ func Parse(r io.Reader) (MapFile, error) {
 				X:          x,
 				Z:          z,
 				Facing:     face,
+				Style:      style,
 			})
 			continue
 		}
@@ -480,7 +542,7 @@ func (mf *MapFile) validate() error {
 	// indicates an authoring mistake, not an older format.
 	switch len(mf.Ceiling) {
 	case 0:
-		mf.Ceiling = BlankLayer(mf.Width, mf.Height, '.')
+		mf.Ceiling = BlankLayer(mf.Width, mf.Height, CeilingOpenChar)
 	case mf.Height:
 		for i, row := range mf.Ceiling {
 			if len(row) != mf.Width {
@@ -667,7 +729,7 @@ func (mf MapFile) Encode(w io.Writer) error {
 	fmt.Fprintf(bw, "start: %d %d %s\n", mf.StartX, mf.StartZ, mf.StartFace)
 	ceiling := mf.Ceiling
 	if len(ceiling) == 0 {
-		ceiling = BlankLayer(mf.Width, mf.Height, '.')
+		ceiling = BlankLayer(mf.Width, mf.Height, CeilingOpenChar)
 	}
 	for _, layer := range []struct {
 		name string
@@ -720,7 +782,11 @@ func (mf MapFile) Encode(w io.Writer) error {
 			if haveMap != haveDoor {
 				return fmt.Errorf("door %q has asymmetric target (map=%q, door=%q); both must be set or both empty", d.Name, d.TargetMap, d.TargetDoor)
 			}
-			fmt.Fprintf(bw, "%s %s %s %d %d %s\n", d.Name, d.TargetMap, d.TargetDoor, d.X, d.Z, d.Facing)
+			style := d.Style
+			if style == "" {
+				style = DoorStyleBuildingName
+			}
+			fmt.Fprintf(bw, "%s %s %s %d %d %s %s\n", d.Name, d.TargetMap, d.TargetDoor, d.X, d.Z, d.Facing, style)
 		}
 	}
 	// custom_enemies: emits only when present so older maps stay
@@ -756,11 +822,7 @@ func Load(path string) (MapFile, error) {
 }
 
 func Save(path string, mf MapFile) error {
-	// 0o755 here is the same mode core.AssetDirMode uses for every
-	// auto-created asset folder. Not importing core to keep mapfile a
-	// leaf package — same value, manually kept in sync (only one place
-	// each).
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), AssetDirMode); err != nil {
 		return err
 	}
 	f, err := os.Create(path)

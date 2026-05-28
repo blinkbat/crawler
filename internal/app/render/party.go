@@ -165,7 +165,6 @@ const (
 	// distance). Earlier passes used 20 which was four pixels off
 	// the rest of the HUD's edge convention.
 	ribbonBottom  = float32(hudEdgePad)
-	ribbonTopRoom = float32(0)
 )
 
 // drawPartyCard renders a single party member card. The class accent stripe

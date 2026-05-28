@@ -10,14 +10,12 @@ import (
 )
 
 func Update(g *core.GameState) {
-	dt := rl.GetFrameTime()
 	// Cap dt so a frame stall (window drag, debugger pause, slow load) can't
 	// fast-forward animations or overshoot tile-step targets in one tick.
-	// Matches the cap in battle.Update so the whole game has consistent
-	// minimum-effective tick rate.
-	if dt > 1.0/15.0 {
-		dt = 1.0 / 15.0
-	}
+	// explore.Update is the single owner of this clamp — battle.Update
+	// trusts the dt it's handed here is already clamped (see core.MaxFrameStep
+	// / ClampFrameTime), so the whole game shares one minimum tick rate.
+	dt := core.ClampFrameTime(rl.GetFrameTime())
 
 	// Modal priority — single source of truth lives in core.ActiveModal
 	// so any future scene that needs the same "what overlay is on top?"
@@ -43,6 +41,9 @@ func Update(g *core.GameState) {
 		return
 	case core.ModalChest:
 		updateChestModal(g)
+		return
+	case core.ModalDoorPrompt:
+		updateDoorPrompt(g)
 		return
 	case core.ModalDebugMenu:
 		updateDebugMenu(g)
@@ -409,23 +410,44 @@ func updateAnimation(g *core.GameState, dt float32) {
 	}
 }
 
-// tryQueueDoorTransition checks whether the player just stepped onto
-// a door tile and, if so, populates g.PendingTransition for the run
-// loop to consume. Doors with an empty TargetMap (defensive — the
-// validator rejects these on load, but a hand-built editor state
-// could slip one through) are ignored.
+// tryQueueDoorTransition checks whether the player just stepped onto a
+// door tile and, if so, opens the confirm prompt (g.DoorPrompt) rather
+// than transitioning immediately — the player chooses to enter or cancel.
+// Doors with an empty TargetMap (defensive — the validator rejects these
+// on load, but a hand-built editor state could slip one through) are
+// ignored.
 func tryQueueDoorTransition(g *core.GameState) {
 	idx := core.DoorIndexAt(g.Doors, g.Player.TileX, g.Player.TileZ)
 	if idx < 0 {
 		return
 	}
-	door := g.Doors[idx]
-	if !door.HasTarget() {
+	if !g.Doors[idx].HasTarget() {
 		return
 	}
-	g.PendingTransition = core.AreaTransition{
-		TargetMap:  door.TargetMap,
-		TargetDoor: door.TargetDoor,
+	g.DoorPrompt = idx
+}
+
+// updateDoorPrompt drives the "Enter <area>? / Cancel" confirm modal that
+// opens when the player steps onto a door. Confirm queues the transition
+// for the run loop; Back/cancel just closes the prompt and leaves the
+// player standing on the door tile (they can walk off — the prompt only
+// re-opens on a fresh step onto a door, not while standing still).
+func updateDoorPrompt(g *core.GameState) {
+	if g.DoorPrompt < 0 || g.DoorPrompt >= len(g.Doors) {
+		g.DoorPrompt = -1
+		return
+	}
+	if input.BackPressed() {
+		g.DoorPrompt = -1
+		return
+	}
+	if input.ConfirmPressed() {
+		door := g.Doors[g.DoorPrompt]
+		g.DoorPrompt = -1
+		g.PendingTransition = core.AreaTransition{
+			TargetMap:  door.TargetMap,
+			TargetDoor: door.TargetDoor,
+		}
 	}
 }
 

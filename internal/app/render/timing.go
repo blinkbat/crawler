@@ -340,7 +340,7 @@ func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x
 	curPct := timing.Progress()
 	curX := drawX + curPct*barW
 	cursorW := float32(8)
-	cursorCol := rl.NewColor(248, 248, 252, 255)
+	cursorCol := timingCursorColor
 	// Live grade preview: while the cursor's inside the acceptance window
 	// and the player hasn't pressed yet, tint it toward the grade it would
 	// land. We blend 35% toward the grade color from white instead of
@@ -390,7 +390,7 @@ func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, 
 		// Past the peak start? Push the prompt toward "release now" feel.
 		if timing.Elapsed >= timing.WindowStart {
 			heading = "RELEASE!"
-			baseCol = rl.NewColor(255, 244, 144, 250)
+			baseCol = colorWithAlpha(timingHeldColor, 250)
 		}
 	}
 
@@ -448,11 +448,11 @@ func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, 
 	curPct := timing.Progress()
 	curX := drawX + curPct*barW
 	cursorW := float32(8)
-	cursorCol := rl.NewColor(248, 248, 252, 220)
+	cursorCol := colorWithAlpha(timingCursorColor, 220)
 	if timing.Pressed && !timing.Resolved {
 		// Held: punchy cursor with a small halo so the engaged state reads.
 		cursorW = 10
-		cursorCol = rl.NewColor(255, 244, 144, 255)
+		cursorCol = timingHeldColor
 		halo := cursorCol
 		halo.A = 90
 		rl.DrawRectangle(int32(curX-cursorW), int32(drawY)-6, int32(cursorW*2), int32(drawnH)+12, halo)
@@ -492,7 +492,7 @@ func drawChargeTickWithFlash(timing core.TimingState, barX, barY, barW, barH flo
 // communicate the timer.
 func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
 	heading := timingHeadingPickpocket
-	baseCol := rl.NewColor(140, 232, 168, 240) // thief green
+	baseCol := colorWithAlpha(seqOkColor, 240) // thief green
 
 	xOff, _, _ := applyBarMotion(timing, g.Battle.TimingFlash, barH)
 	drawX := x + xOff
@@ -527,11 +527,11 @@ func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources
 		var col rl.Color
 		switch state {
 		case core.SeqResultCorrect:
-			col = rl.NewColor(140, 232, 168, 255) // green
+			col = seqOkColor // green
 		case core.SeqResultWrong:
-			col = rl.NewColor(228, 96, 96, 255) // red
+			col = seqFailColor // red
 		default:
-			col = rl.NewColor(248, 248, 252, 245) // pending bright white
+			col = colorWithAlpha(timingCursorColor, 245) // pending bright white
 		}
 		if flashing {
 			col.A = uint8(float32(col.A) * flashAlpha(g.Battle.TimingFlash))
@@ -564,7 +564,7 @@ func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources
 			uw := arrowSize * 1.7
 			uy := cy + arrowSize + 8
 			rl.DrawRectangle(int32(ux)+2, int32(uy)+2, int32(uw), 4, shadowLight)
-			rl.DrawRectangle(int32(ux), int32(uy), int32(uw), 4, rl.NewColor(255, 244, 144, 245))
+			rl.DrawRectangle(int32(ux), int32(uy), int32(uw), 4, colorWithAlpha(timingHeldColor, 245))
 		}
 	}
 

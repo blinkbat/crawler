@@ -1514,6 +1514,104 @@ func loadDoorProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	}
 }
 
+// loadCaveDoorProp builds a rough stone archway: two chunky rock jambs,
+// a thick stone lintel slab, a few irregular boulders stacked at the
+// jamb feet, and a dark recessed opening — reads as a mouth hewn / fallen
+// into the rock rather than a built timber frame. Same footprint and
+// facing convention as loadDoorProp so it drops into the door table.
+func loadCaveDoorProp(shader rl.Shader, stoneTex rl.Texture2D) propModel {
+	jamb := rl.LoadModelFromMesh(rl.GenMeshCube(0.22, 1.45, 0.22))
+	lintel := rl.LoadModelFromMesh(rl.GenMeshCube(0.96, 0.26, 0.26))
+	opening := rl.LoadModelFromMesh(rl.GenMeshCube(0.56, 1.20, 0.06))
+	boulder := rl.LoadModelFromMesh(rl.GenMeshSphere(0.18, 8, 8))
+	threshold := rl.LoadModelFromMesh(rl.GenMeshCube(0.86, 0.08, 0.24))
+	models := []rl.Model{jamb, lintel, opening, boulder, threshold}
+	// Stone-textured parts: jambs, lintel, boulders, threshold (not the
+	// dark opening, which is a flat unlit-looking void).
+	for _, i := range []int{0, 1, 3, 4} {
+		setModelTexture(&models[i], stoneTex)
+	}
+	for i := range models {
+		attachShader(&models[i], shader)
+	}
+	stone := rl.NewColor(150, 146, 138, 255)
+	stoneDark := rl.NewColor(112, 108, 102, 255)
+	stoneShade := rl.NewColor(96, 92, 88, 255)
+	mouth := rl.NewColor(28, 26, 30, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			// Two rough jambs, splayed slightly out at the top by tint
+			// banding (the boulders below sell the lean visually).
+			{modelIdx: 0, offset: rl.NewVector3(-0.37, 0.72, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
+			{modelIdx: 0, offset: rl.NewVector3(0.37, 0.72, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
+			// Heavy lintel slab bridging the jambs.
+			{modelIdx: 1, offset: rl.NewVector3(0, 1.46, 0), scale: rl.NewVector3(1, 1, 1), tint: stoneDark},
+			// Worn stone threshold underfoot.
+			{modelIdx: 4, offset: rl.NewVector3(0, 0.04, 0), scale: rl.NewVector3(1, 1, 1), tint: stoneShade},
+			// Dark recessed opening between the jambs.
+			{modelIdx: 2, offset: rl.NewVector3(0, 0.64, 0), scale: rl.NewVector3(1, 1, 1), tint: mouth},
+			// Tumbled boulders clustered at the jamb feet — breaks the
+			// clean rectangle so it reads as natural rock.
+			{modelIdx: 3, offset: rl.NewVector3(-0.42, 0.16, 0.10), scale: rl.NewVector3(1, 0.9, 1), tint: stoneDark},
+			{modelIdx: 3, offset: rl.NewVector3(-0.30, 0.12, -0.12), scale: rl.NewVector3(0.7, 0.7, 0.7), tint: stoneShade},
+			{modelIdx: 3, offset: rl.NewVector3(0.44, 0.18, -0.08), scale: rl.NewVector3(1.1, 0.95, 1.1), tint: stoneDark},
+			{modelIdx: 3, offset: rl.NewVector3(0.32, 0.12, 0.12), scale: rl.NewVector3(0.65, 0.65, 0.65), tint: stoneShade},
+			// A capstone boulder perched on the lintel.
+			{modelIdx: 3, offset: rl.NewVector3(0.08, 1.66, 0), scale: rl.NewVector3(1.2, 0.8, 1.0), tint: stone},
+		},
+	}
+}
+
+// loadFieldDoorProp builds an open trail gateway: two slender leaning
+// posts, a light crossbeam, no solid door panel (you can see "through"
+// it), with a small hanging sign plank and a couple of grass tufts at
+// the base — reads as a way-marker between open areas rather than a
+// sealed door. Same footprint + facing convention as loadDoorProp.
+func loadFieldDoorProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
+	post := rl.LoadModelFromMesh(rl.GenMeshCube(0.09, 1.30, 0.09))
+	beam := rl.LoadModelFromMesh(rl.GenMeshCube(0.92, 0.10, 0.10))
+	brace := rl.LoadModelFromMesh(rl.GenMeshCube(0.40, 0.06, 0.06))
+	sign := rl.LoadModelFromMesh(rl.GenMeshCube(0.34, 0.20, 0.04))
+	cap := rl.LoadModelFromMesh(rl.GenMeshSphere(0.06, 8, 8))
+	tuft := rl.LoadModelFromMesh(rl.GenMeshCube(0.10, 0.18, 0.10))
+	models := []rl.Model{post, beam, brace, sign, cap, tuft}
+	// Wood-textured: posts, beam, brace, sign.
+	for _, i := range []int{0, 1, 2, 3} {
+		setModelTexture(&models[i], woodTex)
+	}
+	for i := range models {
+		attachShader(&models[i], shader)
+	}
+	wood := rl.NewColor(150, 112, 72, 255)
+	woodDark := rl.NewColor(112, 82, 52, 255)
+	signWood := rl.NewColor(168, 132, 90, 255)
+	capTint := rl.NewColor(96, 70, 46, 255)
+	grass := rl.NewColor(120, 168, 92, 255)
+	grassDark := rl.NewColor(96, 142, 78, 255)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			// Two leaning posts (slight outward splay via offset).
+			{modelIdx: 0, offset: rl.NewVector3(-0.40, 0.65, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
+			{modelIdx: 0, offset: rl.NewVector3(0.40, 0.65, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
+			// Crossbeam across the top — the open lintel.
+			{modelIdx: 1, offset: rl.NewVector3(0, 1.28, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
+			// Short diagonal-feel braces under each beam end.
+			{modelIdx: 2, offset: rl.NewVector3(-0.26, 1.16, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
+			{modelIdx: 2, offset: rl.NewVector3(0.26, 1.16, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
+			// Post caps.
+			{modelIdx: 4, offset: rl.NewVector3(-0.40, 1.32, 0), scale: rl.NewVector3(1, 1, 1), tint: capTint},
+			{modelIdx: 4, offset: rl.NewVector3(0.40, 1.32, 0), scale: rl.NewVector3(1, 1, 1), tint: capTint},
+			// Hanging trail sign under the beam center.
+			{modelIdx: 3, offset: rl.NewVector3(0, 1.04, 0.02), scale: rl.NewVector3(1, 1, 1), tint: signWood},
+			// Grass tufts at the post feet so it sits in the meadow.
+			{modelIdx: 5, offset: rl.NewVector3(-0.44, 0.09, 0.06), scale: rl.NewVector3(1, 1, 1), tint: grass},
+			{modelIdx: 5, offset: rl.NewVector3(0.46, 0.09, -0.05), scale: rl.NewVector3(0.8, 0.8, 0.8), tint: grassDark},
+		},
+	}
+}
+
 // loadLilypadProp builds a flat floating lilypad: a thin wide disc for
 // the pad, a smaller offset disc to suggest a partner leaf, and a tiny
 // pink bloom at the center. Pure decor — sits just above floor level so

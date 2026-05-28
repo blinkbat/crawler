@@ -160,7 +160,6 @@ func DrawChestModal(g core.GameState, assets Resources) {
 	card := drawModalScaffold(font, overlayCardWidthSmall, cardH, "")
 	cardX, cardY := int32(card.X), int32(card.Y)
 	cardW := int32(card.Width)
-	cardH = int32(card.Height)
 
 	rowY := cardY + 28
 	rowX := cardX + 20
@@ -200,6 +199,5 @@ func DrawChestModal(g core.GameState, assets Resources) {
 		}
 		drawTextWithShadow(font, "Take All", float32(rowX), float32(rowY), FontBody, col)
 	}
-	DrawFooterHint(font, "Up/Down move   Z take   X close",
-		float32(cardX+cardW/2), float32(cardY+cardH-22), FontTiny)
+	drawModalFooter(font, card, "Up/Down move   Z take   X close")
 }

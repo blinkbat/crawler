@@ -90,7 +90,7 @@ func WriteWAV(name string, pcm []int16) (string, error) {
 	}
 	wav := wavsynth.BuildWAV(pcm, wavsynth.SampleRate)
 	path := filepath.Join(dir, clean+".wav")
-	if err := os.WriteFile(path, wav, 0o644); err != nil {
+	if err := os.WriteFile(path, wav, core.AssetFileMode); err != nil {
 		return clean, err
 	}
 	return clean, nil
@@ -166,5 +166,5 @@ func SaveAssignments(assigns map[string]string) error {
 	for _, cue := range cues {
 		fmt.Fprintf(&b, "%s=%s\n", cue, assigns[cue])
 	}
-	return os.WriteFile(filepath.Join(dir, AssignmentFile), []byte(b.String()), 0o644)
+	return os.WriteFile(filepath.Join(dir, AssignmentFile), []byte(b.String()), core.AssetFileMode)
 }

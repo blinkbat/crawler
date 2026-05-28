@@ -10,6 +10,18 @@ const (
 	InitialWindowWidth  = 1180
 	InitialWindowHeight = 820
 
+	// TargetFPS is the render frame cap fed to rl.SetTargetFPS at boot.
+	// Co-located with the window-size seeds so all startup tuning lives
+	// in one place rather than as a bare literal in run.go.
+	TargetFPS = 120
+
+	// MaxFrameStep clamps the per-frame delta time the update loops act
+	// on, so a stall (alt-tab, breakpoint, GC pause) can't teleport the
+	// player through a wall or fast-forward animations. Both explore.Update
+	// and battle.Update pass their dt through ClampFrameTime. 1/15s = a
+	// 15 FPS floor on simulation stepping.
+	MaxFrameStep = float32(1.0 / 15.0)
+
 	TileSize             = 2.05
 	WallHeight           = 2.25
 	EyeHeight            = 1.32
@@ -171,8 +183,8 @@ const (
 	BlockBumpDuration = float32(0.22)
 
 	// Charge minigame: hold the input through three ticks, then release at
-	// the peak. ChargeTickNPct / ChargePeakStart / ChargePeakEnd are
-	// VISUAL positions on the bar — tick lines are evenly spaced at
+	// the peak. ChargeTick1Pct..ChargeTick3Pct / ChargePeakStart / ChargePeakEnd
+	// are VISUAL positions on the bar — tick lines are evenly spaced at
 	// quarters, with a 10%-wide peak band tucked in after the third tick.
 	//
 	// The cursor's elapsed→visual mapping is non-linear (see
@@ -466,15 +478,8 @@ const (
 // unlike Sleep, it does NOT clear on incoming damage — the target
 // is locked for the full rolled duration. Tuned short (1–2 turns)
 // because it's strictly upside for the player; the proc gate
-// (quality) controls frequency, not the duration. PowerStrikeStunChance
-// is the conditional roll fired inside applyPowerStrike on
-// Great/Excellent grades.
+// (quality) controls frequency, not the duration.
 const (
-	// PowerStrikeStunChance is the retired prototype skill's stun
-	// gate. Kept as a constant in case external balance tools refer
-	// to it by name; new content should reference the per-class
-	// chances below.
-	PowerStrikeStunChance = 0.40
 	// CrushingBlowStunChance gates the Warrior's signature heavy hit.
 	// Higher than PowerStrike's prototype rate because the cost (3 MP)
 	// and damage (+4 base) are both more aggressive — a Great-or-better

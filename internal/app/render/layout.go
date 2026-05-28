@@ -37,8 +37,8 @@ func centerXF(w float32) float32 {
 // CenterXF is the exported alias of centerXF for packages outside
 // render (title screen, top-level menus) that need the same centering
 // rule so fullscreen-resize behaviour stays consistent everywhere.
-// (The int32 variant was deleted as dead — re-add when a non-float
-// caller actually shows up.)
+// (Only the float form is exported — render-internal callers that work
+// in pixel-snapped int32 layouts use the package-private centerX.)
 func CenterXF(w float32) float32 { return centerXF(w) }
 
 // ScreenSize / ScreenSizeF are the exported counterparts of the
@@ -215,4 +215,17 @@ func splitWords(s string) []string {
 func DrawFooterHint(font rl.Font, text string, cx, y, size float32) {
 	m := rl.MeasureTextEx(font, text, size, 1)
 	drawTextWithShadow(font, text, cx-m.X/2, y, size, textHint)
+}
+
+// modalFooterTextOffset is the gap from a modal card's bottom edge up to
+// the footer-hint baseline. Sits inside overlayFooterReserve (the
+// reserved band) with a few pixels below for descenders. Named so the
+// chest / level-up / panels overlays don't each repeat the bare -22.
+const modalFooterTextOffset = float32(22)
+
+// drawModalFooter centers a footer hint inside the reserved footer band
+// of a modal card. Single seam for the card-center + bottom-offset math
+// the chest, level-up, and panels overlays used to repeat verbatim.
+func drawModalFooter(font rl.Font, card rl.Rectangle, text string) {
+	DrawFooterHint(font, text, card.X+card.Width/2, card.Y+card.Height-modalFooterTextOffset, FontTiny)
 }

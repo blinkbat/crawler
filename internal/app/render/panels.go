@@ -102,8 +102,7 @@ func DrawPanelsOverlay(g core.GameState, assets Resources) {
 		drawPanelsMap(g, assets, bodyRect)
 	}
 
-	DrawFooterHint(font, "L1/R1 tabs   Left/Right pick member   X close",
-		float32(cardX+cardW/2), float32(cardY+cardH-22), FontTiny)
+	drawModalFooter(font, card, "L1/R1 tabs   Left/Right pick member   X close")
 }
 
 // tabLabelMeasureCache memoizes panel-tab label measurements. Tab labels

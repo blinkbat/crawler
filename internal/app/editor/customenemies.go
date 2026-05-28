@@ -64,17 +64,33 @@ type customStatSpec struct {
 	id    customStatID
 	label string
 	step  int // for SkillChance, this is the step ×100 (0.05 → 5)
+	// field returns the address of the int stat this row edits. nil for
+	// csSkillChance — the lone float field, handled specially by the
+	// value formatter and the adjuster. Having the accessor on the spec
+	// lets customStatValueString / adjustCustomStat be table walks rather
+	// than two parallel switches that drift when a column is added.
+	field func(*core.CustomEnemyDef) *int
 }
 
 var customStatSpecs = []customStatSpec{
-	{csHP, "HP", 1},
-	{csMP, "MP", 1},
-	{csAttack, "Attack", 1},
-	{csArmor, "Armor", 1},
-	{csXP, "XP", 1},
-	{csTier, "Tier", 1},
-	{csSpellPower, "SpellPwr", 1},
-	{csSkillChance, "SkillCh%", 5},
+	{csHP, "HP", 1, func(d *core.CustomEnemyDef) *int { return &d.HP }},
+	{csMP, "MP", 1, func(d *core.CustomEnemyDef) *int { return &d.MP }},
+	{csAttack, "Attack", 1, func(d *core.CustomEnemyDef) *int { return &d.AttackDamage }},
+	{csArmor, "Armor", 1, func(d *core.CustomEnemyDef) *int { return &d.Armor }},
+	{csXP, "XP", 1, func(d *core.CustomEnemyDef) *int { return &d.XPValue }},
+	{csTier, "Tier", 1, func(d *core.CustomEnemyDef) *int { return &d.Tier }},
+	{csSpellPower, "SpellPwr", 1, func(d *core.CustomEnemyDef) *int { return &d.SpellPower }},
+	{csSkillChance, "SkillCh%", 5, nil},
+}
+
+// customStatSpecFor returns the spec row for a stat id.
+func customStatSpecFor(id customStatID) (customStatSpec, bool) {
+	for _, spec := range customStatSpecs {
+		if spec.id == id {
+			return spec, true
+		}
+	}
+	return customStatSpec{}, false
 }
 
 const (
@@ -291,23 +307,11 @@ func drawCustomEnemiesModal(s *State, font rl.Font, theme render.Theme) {
 // readonly value cell. SkillCastChance renders as a percent; everything
 // else as a plain integer.
 func customStatValueString(def *core.CustomEnemyDef, id customStatID) string {
-	switch id {
-	case csHP:
-		return fmt.Sprintf("%d", def.HP)
-	case csMP:
-		return fmt.Sprintf("%d", def.MP)
-	case csAttack:
-		return fmt.Sprintf("%d", def.AttackDamage)
-	case csArmor:
-		return fmt.Sprintf("%d", def.Armor)
-	case csXP:
-		return fmt.Sprintf("%d", def.XPValue)
-	case csTier:
-		return fmt.Sprintf("%d", def.Tier)
-	case csSpellPower:
-		return fmt.Sprintf("%d", def.SpellPower)
-	case csSkillChance:
+	if id == csSkillChance {
 		return fmt.Sprintf("%d%%", int(def.SkillCastChance*100+0.5))
+	}
+	if spec, ok := customStatSpecFor(id); ok && spec.field != nil {
+		return fmt.Sprintf("%d", *spec.field(def))
 	}
 	return "?"
 }
@@ -317,34 +321,15 @@ func customStatValueString(def *core.CustomEnemyDef, id customStatID) string {
 // (5 → 0.05). Clamps non-negative on the int fields; SkillChance to
 // [0, 1].
 func adjustCustomStat(def *core.CustomEnemyDef, id customStatID, delta int) {
-	bump := func(v *int, d int) {
-		*v += d
+	if id == csSkillChance {
+		def.SkillCastChance = core.Clamp(def.SkillCastChance+float64(delta)/100, 0, 1)
+		return
+	}
+	if spec, ok := customStatSpecFor(id); ok && spec.field != nil {
+		v := spec.field(def)
+		*v += delta
 		if *v < 0 {
 			*v = 0
-		}
-	}
-	switch id {
-	case csHP:
-		bump(&def.HP, delta)
-	case csMP:
-		bump(&def.MP, delta)
-	case csAttack:
-		bump(&def.AttackDamage, delta)
-	case csArmor:
-		bump(&def.Armor, delta)
-	case csXP:
-		bump(&def.XPValue, delta)
-	case csTier:
-		bump(&def.Tier, delta)
-	case csSpellPower:
-		bump(&def.SpellPower, delta)
-	case csSkillChance:
-		def.SkillCastChance += float64(delta) / 100
-		if def.SkillCastChance < 0 {
-			def.SkillCastChance = 0
-		}
-		if def.SkillCastChance > 1 {
-			def.SkillCastChance = 1
 		}
 	}
 }

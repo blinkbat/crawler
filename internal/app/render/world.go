@@ -451,11 +451,11 @@ func drawWallTorch(assets Resources, m core.AreaDefinition, x, z int, center rl.
 		swayA := float32(math.Sin(float64(t*5.3+fp*1.4))) * 0.05
 		// Higher blobs are smaller and lean more — a teardrop
 		// flame shape that wavers.
-		y := sconceY + 0.12 + float32(i)*0.10 + bob
-		lean := float32(i) * 0.04
+		y := sconceY + 0.09 + float32(i)*0.07 + bob
+		lean := float32(i) * 0.03
 		px := flameBaseX + fx*lean + swayA*fz
 		pz := flameBaseZ + fz*lean - swayA*fx
-		size := (0.18 - float32(i)*0.04) * (1 + 0.12*float32(math.Sin(float64(t*11.0+fp))))
+		size := (0.11 - float32(i)*0.025) * (1 + 0.12*float32(math.Sin(float64(t*11.0+fp))))
 		tint := torchFlameTints[i]
 		rl.DrawModelEx(torchFlameModel, rl.NewVector3(px, y, pz),
 			rl.NewVector3(0, 1, 0), 0, rl.NewVector3(size, size*1.4, size), tint)
@@ -467,17 +467,11 @@ func drawWallTorch(assets Resources, m core.AreaDefinition, x, z int, center rl.
 // back to facing south (toward the camera's usual approach) when the
 // tile has no adjacent wall (a torch placed in the open).
 func wallTorchFacing(m core.AreaDefinition, x, z int) (float32, float32) {
-	switch {
-	case m.WallAt(x, z-1):
-		return 0, 1 // wall north → face south
-	case m.WallAt(x+1, z):
-		return -1, 0 // wall east → face west
-	case m.WallAt(x, z+1):
-		return 0, -1 // wall south → face north
-	case m.WallAt(x-1, z):
-		return 1, 0 // wall west → face east
+	if f, ok := core.FacingAwayFromAdjacentWall(m, x, z); ok {
+		dx, dz := core.FacingVector(f)
+		return float32(dx), float32(dz)
 	}
-	return 0, 1
+	return 0, 1 // no adjacent wall → face south (toward the usual approach)
 }
 
 // groundShadowModel is the soft radial-gradient disc painted under

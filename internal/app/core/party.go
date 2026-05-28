@@ -1,6 +1,9 @@
 package core
 
-import "math/rand"
+import (
+	"fmt"
+	"math/rand"
+)
 
 type PartyClass int
 
@@ -424,39 +427,51 @@ func SkillEffectFor(skill SkillID) SkillEffect {
 	return SkillEffect{}
 }
 
+// scaleDamageByKind applies the per-kind stat-scaling rule to a skill's
+// base damage: Melee adds STR, Magic adds INT, anything else passes the
+// base through. Shared by SkillDamage (base effect) and SkillDamageFor
+// (tier-augmented effect) so the dispatch lives in one place.
+func scaleDamageByKind(kind SkillKind, stats Stats, base int) int {
+	switch kind {
+	case SkillKindMelee:
+		return MeleeDamage(stats, base)
+	case SkillKindMagic:
+		return MagicDamage(stats, base)
+	default:
+		return base
+	}
+}
+
+// scaleHealByKind applies the per-kind stat-scaling rule to a skill's base
+// heal: Heal kind adds WIS, anything else passes the base through. Shared
+// by SkillHeal and SkillHealFor.
+func scaleHealByKind(kind SkillKind, stats Stats, base int) int {
+	if kind == SkillKindHeal {
+		return HealAmount(stats, base)
+	}
+	return base
+}
+
 // SkillDamage computes a skill's pre-quality damage from the actor's stats,
-// dispatching on the skill's Kind. Melee adds STR, Magic adds INT, anything
-// else returns just the skill base. Quality scaling (ScaleDamage) applies on
+// dispatching on the skill's Kind. Quality scaling (ScaleDamage) applies on
 // top at the call site.
 func SkillDamage(stats Stats, skill SkillID) int {
 	def, ok := skillInfo(skill)
 	if !ok {
 		return 0
 	}
-	switch def.Kind {
-	case SkillKindMelee:
-		return MeleeDamage(stats, def.Effect.Damage)
-	case SkillKindMagic:
-		return MagicDamage(stats, def.Effect.Damage)
-	default:
-		return def.Effect.Damage
-	}
+	return scaleDamageByKind(def.Kind, stats, def.Effect.Damage)
 }
 
 // SkillHeal computes a skill's pre-quality heal from the actor's stats,
-// dispatching on Kind. Heal kind adds WIS; anything else returns just the
-// skill base. Quality scaling (ScaleHeal) applies on top at the call site.
+// dispatching on Kind. Quality scaling (ScaleHeal) applies on top at the
+// call site.
 func SkillHeal(stats Stats, skill SkillID) int {
 	def, ok := skillInfo(skill)
 	if !ok {
 		return 0
 	}
-	switch def.Kind {
-	case SkillKindHeal:
-		return HealAmount(stats, def.Effect.Heal)
-	default:
-		return def.Effect.Heal
-	}
+	return scaleHealByKind(def.Kind, stats, def.Effect.Heal)
 }
 
 // SumStatPending totals the staged per-stat allocations the level-up
@@ -806,7 +821,7 @@ var statDescriptions = []string{
 	StatDEX: "Hit chance and Steal precision",
 	StatINT: "Magic damage",
 	StatWIS: "Heal amount",
-	StatVIT: "Max HP (+2 per point)",
+	StatVIT: fmt.Sprintf("Max HP (+%d per point)", HPPerVIT),
 	StatSPD: "Turn order priority",
 }
 
@@ -848,6 +863,9 @@ func init() {
 	}
 	if len(statDescriptions) != int(StatCount) {
 		panic("core: statDescriptions length must match StatCount — add a row when adding a Stat enum value")
+	}
+	if len(statSetters) != int(StatCount) {
+		panic("core: statSetters length must match StatCount — add a row when adding a Stat enum value")
 	}
 }
 

@@ -131,10 +131,10 @@ func (t TimingState) IsTallyMode() bool {
 
 // NewTimingState builds a freshly-armed press-kind bar. The bar sweeps for
 // the given duration. Window position is randomized each time the bar arms
-// (in [PressWindowMinStart, PressWindowMaxStart] of bar duration) so the
+// (in [PressWindow.MinStart, PressWindow.MaxStart] of bar duration) so the
 // player can't muscle-memory the press point — but it never opens before
-// PressWindowMinStart, so they always get a moment of "approaching, not
-// yet" before a hit is possible. Width is fixed at PressWindowWidth and
+// PressWindow.MinStart, so they always get a moment of "approaching, not
+// yet" before a hit is possible. Width is fixed at PressWindow.Width and
 // the sweet spot sits in the center.
 func NewTimingState(rng *rand.Rand, duration float32) TimingState {
 	if duration <= 0 {
@@ -248,7 +248,7 @@ func randomizedPressWindow(rng *rand.Rand, minStart, maxStart, width, maxEnd flo
 // every notch the player picks up.
 //
 // Tick lines and peak band sit at constant visual quarters (0.25 / 0.50
-// / 0.75 / 0.85 — see ChargeTickNPct in config.go); the *elapsed* values
+// / 0.75 / 0.85 — see ChargeTick1Pct..ChargeTick3Pct in config.go); the *elapsed* values
 // here are what stretch and squeeze the cursor's speed across them.
 // Touch one row and both render and grade follow.
 var chargeSegments = [...]struct {

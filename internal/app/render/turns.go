@@ -119,7 +119,7 @@ func measureTurnLabel(font rl.Font, label string) rl.Vector2 {
 
 func turnEntryColor(turn core.TurnEntry) color.RGBA {
 	if turn.Enemy {
-		return rl.NewColor(245, 100, 92, 255)
+		return turnEnemyColor
 	}
 	return partyClassPresentationFor(turn.Class).turnColor
 }
