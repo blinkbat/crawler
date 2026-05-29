@@ -8,7 +8,6 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-
 // panelsMapFooterCache memoizes the "AreaName   zoom: N cells   ..."
 // footer string drawn on the Map tab. Both inputs change only on
 // user action (open the overlay, change zoom, transition area), so
@@ -391,6 +390,23 @@ func LastEquipPanelLayout() equipPanelLayout { return lastEquipLayout }
 // describe the layout the player sees.
 func ResetEquipPanelLayout() { lastEquipLayout = equipPanelLayout{} }
 
+// EquipPanelInventoryVisibleCount returns how many inventory tiles the
+// Equipment strip actually painted last frame (after overflow
+// truncation). The keyboard/controller cursor clamps to this so it
+// never focuses an off-screen tile.
+func EquipPanelInventoryVisibleCount() int { return len(lastEquipLayout.InventoryRects) }
+
+// EquipPanelInventoryEntryKind returns the ItemKind of the visible
+// inventory tile at index i (ok=false when out of range). Reads the
+// same per-frame entry list the strip drew, so a controller "lift"
+// targets exactly the tile the player sees.
+func EquipPanelInventoryEntryKind(i int) (core.ItemKind, bool) {
+	if i < 0 || i >= len(lastEquipLayout.InventoryEntries) {
+		return core.ItemNone, false
+	}
+	return lastEquipLayout.InventoryEntries[i].Kind, true
+}
+
 // EquipPanelSlotHit returns (partyIndex, slot, true) if `pt` is inside
 // any slot rect, else (-1, 0, false). Mouse hit test for the input
 // layer.
@@ -595,14 +611,65 @@ func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) 
 			stripRegion.Y+6, FontTiny, inkAccent)
 	}
 
-	// Drag overlay — paints the held item as a tooltip near the
-	// mouse so the player sees what they're carrying.
-	if g.EquipDrag.Source != core.EquipDragSourceNone {
-		drawEquipDragGhost(g, font)
+	// Keyboard/controller focus outline — drawn only when the cursor
+	// (not the mouse) is driving the panel. Brighter + thicker than the
+	// drag's compatible-slot outline so "where am I" reads distinctly
+	// from "where can this land."
+	focusRect, focusValid := equipFocusRect(g)
+	if focusValid {
+		rl.DrawRectangleLinesEx(focusRect, 2.5, giltBright)
 	}
 
-	footer := "Drag items between the strip and the slots. Drop on inventory to unequip."
+	// Drag overlay — paints the held item as a tooltip. Anchored to the
+	// focused cell when the cursor is driving, else trailing the mouse.
+	if g.EquipDrag.Source != core.EquipDragSourceNone {
+		drawEquipDragGhost(g, font, equipGhostAnchor(focusRect, focusValid, body))
+	}
+
+	footer := "Mouse: drag between strip and slots.  Pad/keys: move cursor, Confirm lifts/places, Back cancels.  Drop on the strip to unequip."
 	drawTextWithShadow(font, footer, body.X, body.Y+body.Height-16, FontTiny, textHint)
+}
+
+// equipFocusRect returns the rectangle of the keyboard/controller focus
+// cell (ok=false when the cursor is inactive or the cached layout
+// doesn't yet describe the focused cell). Reads the same per-frame hit
+// rects the mouse path uses so the outline lands exactly on the painted
+// cell.
+func equipFocusRect(g core.GameState) (rl.Rectangle, bool) {
+	if !g.EquipCursorActive {
+		return rl.Rectangle{}, false
+	}
+	if g.EquipCursor.OnInventory {
+		i := g.EquipCursor.InvTile
+		if i >= 0 && i < len(lastEquipLayout.InventoryRects) {
+			return lastEquipLayout.InventoryRects[i], true
+		}
+		return rl.Rectangle{}, false
+	}
+	si := g.EquipCursor.Member*int(core.EquipSlotCount) + int(g.EquipCursor.Slot)
+	if si >= 0 && si < len(lastEquipLayout.SlotRects) {
+		return lastEquipLayout.SlotRects[si], true
+	}
+	return rl.Rectangle{}, false
+}
+
+// equipGhostAnchor returns the top-left for the held-item ghost. When
+// the cursor owns the panel it floats just above the focused cell
+// (flipping below / clamping left if that would spill out of the body);
+// otherwise it trails the mouse like a classic drag tooltip.
+func equipGhostAnchor(focus rl.Rectangle, focusValid bool, body rl.Rectangle) rl.Vector2 {
+	if focusValid {
+		pos := rl.NewVector2(focus.X+focus.Width-equipDragGhostW, focus.Y-equipDragGhostH-6)
+		if pos.Y < body.Y {
+			pos.Y = focus.Y + focus.Height + 6
+		}
+		if pos.X < body.X {
+			pos.X = focus.X
+		}
+		return pos
+	}
+	m := rl.GetMousePosition()
+	return rl.NewVector2(m.X+10, m.Y+4)
 }
 
 // equippableInventoryEntries filters g.Inventory down to items whose
@@ -656,13 +723,13 @@ func equipBonusSummary(def core.ItemDefinition) string {
 	return out
 }
 
-// drawEquipDragGhost paints the held item as a translucent tile at
-// the mouse position. Painted last so it floats above the rest of
-// the panel.
-func drawEquipDragGhost(g core.GameState, font rl.Font) {
-	mouse := rl.GetMousePosition()
+// drawEquipDragGhost paints the held item as a translucent tile at the
+// given top-left position. Painted last so it floats above the rest of
+// the panel. `pos` is the mouse (drag) or the focused cell (cursor),
+// resolved by equipGhostAnchor.
+func drawEquipDragGhost(g core.GameState, font rl.Font, pos rl.Vector2) {
 	def := core.ItemInfo(g.EquipDrag.Kind)
-	rect := rl.NewRectangle(mouse.X+10, mouse.Y+4, equipDragGhostW, equipDragGhostH)
+	rect := rl.NewRectangle(pos.X, pos.Y, equipDragGhostW, equipDragGhostH)
 	drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), fadeColor(glassWarm, 0.95))
 	rl.DrawRectangleLinesEx(rect, 1.5, giltBright)
 	slotIconForKind(def.Slot)(rect.X+14, rect.Y+rect.Height/2, 9, giltBright)
@@ -1079,9 +1146,9 @@ func drawCompassRose(cx, cy float32, d float32, font rl.Font) {
 	cardinals := [4]struct {
 		ax, ay, px, py float32
 	}{
-		{ax: 0, ay: -1, px: 1, py: 0}, // N
-		{ax: 1, ay: 0, px: 0, py: 1},  // E
-		{ax: 0, ay: 1, px: -1, py: 0}, // S
+		{ax: 0, ay: -1, px: 1, py: 0},  // N
+		{ax: 1, ay: 0, px: 0, py: 1},   // E
+		{ax: 0, ay: 1, px: -1, py: 0},  // S
 		{ax: -1, ay: 0, px: 0, py: -1}, // W
 	}
 	pointHalfW := outerR * 0.18

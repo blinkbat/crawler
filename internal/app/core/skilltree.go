@@ -9,7 +9,7 @@ package core
 //
 // Design contract: each tier is ONE numeric/bool delta applied to a
 // SkillEffect field that already exists (Damage, BurnChance, etc.) or
-// a tier-only field below (AOECapBonus, HealBonus, CleansesPoison,
+// a tier-only field below (AOECapBonus, HealBonus,
 // StealBonusDamage). Keeping the delta surface small means the apply
 // path in battle/actions.go is:
 //
@@ -48,7 +48,7 @@ type SkillTierUpgrade struct {
 type SkillEffectDelta struct {
 	Damage         int
 	Heal           int
-	HealBonus      int     // extra heal applied to the apply path's heal amount
+	HealBonus      int // extra heal applied to the apply path's heal amount
 	StealChance    float64
 	BurnChance     float64
 	BurnMinTurns   int
@@ -69,13 +69,6 @@ type SkillEffectDelta struct {
 	// enemy when the pack has 4+") plugs in without touching the
 	// per-skill apply code.
 	AOECapBonus int
-	// CleansesPoison / Sleep are bool flags set by upgrade tiers
-	// that ADD a cleanse to a heal skill. Prayer T3 sets both —
-	// the apply path zeroes the target's status counters AFTER
-	// applying the heal so the player sees the heal pop even if
-	// the status would have otherwise ticked.
-	CleansesPoison bool
-	CleansesSleep  bool
 	// StealBonusDamage is the STR-multiplier damage dealt on a
 	// successful steal (Thief Steal T3). 0 = the steal stays a
 	// pure utility cast.
@@ -113,12 +106,12 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	SkillPrayer: {
 		{Tier: 1, Label: "+3 heal", Description: "+3 base heal on the target.", Cost: 1, Effect: SkillEffectDelta{HealBonus: 3}},
 		{Tier: 2, Label: "+3 heal", Description: "Another +3 heal. Tank-grade recovery in one cast.", Cost: 1, Effect: SkillEffectDelta{HealBonus: 3}},
-		{Tier: 3, Label: "Cleanses", Description: "Also clears Poison and Sleep from the target.", Cost: 1, Effect: SkillEffectDelta{CleansesPoison: true, CleansesSleep: true}},
+		{Tier: 3, Label: "+3 heal", Description: "A third +3 heal — Prayer alone can top off a tank.", Cost: 1, Effect: SkillEffectDelta{HealBonus: 3}},
 	},
 	SkillMassMend: {
 		{Tier: 1, Label: "+2 heal", Description: "+2 base heal across every alive party member.", Cost: 1, Effect: SkillEffectDelta{HealBonus: 2}},
 		{Tier: 2, Label: "+2 heal", Description: "Another +2 heal across the whole party.", Cost: 1, Effect: SkillEffectDelta{HealBonus: 2}},
-		{Tier: 3, Label: "Cleanses Poison", Description: "Also clears Poison from every member it heals.", Cost: 1, Effect: SkillEffectDelta{CleansesPoison: true}},
+		{Tier: 3, Label: "+2 heal", Description: "A third +2 heal — full-party sustain in one cast.", Cost: 1, Effect: SkillEffectDelta{HealBonus: 2}},
 	},
 	SkillSmite: {
 		{Tier: 1, Label: "+2 damage", Description: "+2 base damage on the press tap.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
@@ -349,10 +342,10 @@ func SkillHealFor(m *PartyMember, s SkillID) int {
 
 // SkillTierMod returns the combined delta of every purchased tier
 // for the bool/integer "extension" fields that don't live in the
-// base SkillEffect — AOECapBonus, CleansesPoison/Sleep,
-// StealBonusDamage, CritDoubleOnExcellent. The apply path reads
-// these alongside the SkillEffect to decide tier-only behaviors
-// (extra AoE targets, status cleanses, crit doubles).
+// base SkillEffect — AOECapBonus, StealBonusDamage,
+// CritDoubleOnExcellent. The apply path reads these alongside the
+// SkillEffect to decide tier-only behaviors (extra AoE targets,
+// crit doubles).
 func SkillTierMod(m *PartyMember, s SkillID) SkillEffectDelta {
 	var mod SkillEffectDelta
 	if m == nil {
@@ -366,12 +359,6 @@ func SkillTierMod(m *PartyMember, s SkillID) SkillEffectDelta {
 		}
 		d := up.Effect
 		mod.AOECapBonus += d.AOECapBonus
-		if d.CleansesPoison {
-			mod.CleansesPoison = true
-		}
-		if d.CleansesSleep {
-			mod.CleansesSleep = true
-		}
 		mod.StealBonusDamage += d.StealBonusDamage
 		if d.CritDoubleOnExcellent {
 			mod.CritDoubleOnExcellent = true

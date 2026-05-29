@@ -120,7 +120,7 @@ var (
 	statusBurn      = rl.NewColor(240, 144, 72, 240)
 	statusSleep     = rl.NewColor(132, 196, 232, 240)
 	statusStun      = rl.NewColor(232, 220, 120, 240)
-	statusBound     = rl.NewColor(180, 140, 220, 240)
+	statusWebbed    = rl.NewColor(180, 140, 220, 240)
 	statusConfused  = rl.NewColor(220, 188, 96, 240)
 	statusIngested  = rl.NewColor(200, 132, 220, 240)
 	statusDefending = rl.NewColor(132, 196, 255, 240)
@@ -549,12 +549,12 @@ func drawStatIconSPD(cx, cy, r float32, col color.RGBA) {
 	// fan from the first vertex. Vertices walk top-down across the
 	// zigzag.
 	verts := []rl.Vector2{
-		{X: cx - r*0.05, Y: cy - r},          // top spike
-		{X: cx + r*0.5, Y: cy - r*0.1},       // upper right notch
-		{X: cx + r*0.05, Y: cy - r*0.1},      // inner step
-		{X: cx + r*0.4, Y: cy + r},           // bottom spike
-		{X: cx - r*0.5, Y: cy + r*0.1},       // lower left notch
-		{X: cx - r*0.05, Y: cy + r*0.1},      // inner step
+		{X: cx - r*0.05, Y: cy - r},     // top spike
+		{X: cx + r*0.5, Y: cy - r*0.1},  // upper right notch
+		{X: cx + r*0.05, Y: cy - r*0.1}, // inner step
+		{X: cx + r*0.4, Y: cy + r},      // bottom spike
+		{X: cx - r*0.5, Y: cy + r*0.1},  // lower left notch
+		{X: cx - r*0.05, Y: cy + r*0.1}, // inner step
 	}
 	// Fan: (v0, v1, v2), (v0, v2, v3), (v0, v3, v4), (v0, v4, v5).
 	for i := 1; i < len(verts)-1; i++ {

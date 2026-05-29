@@ -22,13 +22,13 @@ const (
 	// 15 FPS floor on simulation stepping.
 	MaxFrameStep = float32(1.0 / 15.0)
 
-	TileSize             = 2.05
-	WallHeight           = 2.25
-	EyeHeight            = 1.32
-	StepDuration         = 0.18
-	TurnDuration         = 0.14
-	BumpDuration         = 0.18
-	FlashDuration        = 0.16
+	TileSize      = 2.05
+	WallHeight    = 2.25
+	EyeHeight     = 1.32
+	StepDuration  = 0.18
+	TurnDuration  = 0.14
+	BumpDuration  = 0.18
+	FlashDuration = 0.16
 	// HitKnockbackDuration is how long the receiver's recoil offset
 	// lasts after taking damage. A touch longer than BumpDuration so
 	// the impact reads as "the hit shoved them" — the attacker has
@@ -40,13 +40,19 @@ const (
 	// the recoil. Smaller than BumpOffset's lunge distance (0.20-
 	// 0.22) so the receiver doesn't moonwalk halfway across the
 	// arena on every hit — just a clear "they felt that" shove.
-	HitKnockbackDist = float32(0.14)
+	HitKnockbackDist     = float32(0.14)
 	DeathFadeDuration    = 0.55
 	VictoryDanceDuration = 3.0
 	MouseSense           = 0.0024
-	MaxLookYaw           = 0.78
-	MaxLookPitch         = 0.62
-	FreeLookReturnSpeed  = 3.4
+	// StickLookSense scales right-stick free-look. Unlike MouseSense
+	// (applied per raw mouse-delta) this is dt-scaled in updateFreeLook
+	// since an analog stick is a sustained hold — the unit is roughly
+	// "radians per second at full tilt." Tuned so a full push reaches
+	// the yaw clamp in ~0.35s, matching the mouse path's feel.
+	StickLookSense      = 2.2
+	MaxLookYaw          = 0.78
+	MaxLookPitch        = 0.62
+	FreeLookReturnSpeed = 3.4
 )
 
 // AnimKind tags Player.Anim so the renderer/updater can dispatch by kind
@@ -143,7 +149,7 @@ const (
 	AttackTimingDuration = float32(1.4)
 	DefendTimingDuration = float32(1.3)
 
-	TimingFlashDuration   = float32(0.32)
+	TimingFlashDuration = float32(0.32)
 	// TallyHitFlashDuration is the per-window feedback hold on a
 	// multi-press tally bar. Shorter than TimingFlashDuration so
 	// each hit in a rapid-fire sequence reads as a distinct pop
@@ -249,7 +255,7 @@ const (
 	CritMultiplier = 2
 
 	// StatusShortenDivisor controls how much WIS shaves off the rolled
-	// duration of an enemy-applied status (Sleep / Poison / Bound /
+	// duration of an enemy-applied status (Sleep / Poison / Webbed /
 	// Confuse). Each StatusShortenDivisor points of WIS removes one
 	// turn from the roll. Floor is 1 — high WIS shortens but doesn't
 	// outright skip. Cleric (WIS 6) loses 2 turns; everyone else (WIS
@@ -287,23 +293,23 @@ const (
 	// faster than they can heal it back without dedicated cleansing.
 	PoisonTickDamage = 1
 
-	// Status duration bounds. Every (Poison / Sleep / Stun / Bind /
+	// Status duration bounds. Every (Poison / Sleep / Stun / Webbed /
 	// Confuse / Burn) status rolls a uniform duration in
 	// [Min, Max] inclusive when it lands. Co-located so a balance
 	// pass touches one block — earlier passes had Poison here,
 	// Sleep + Stun in their own blocks lower in the file, and the
-	// new Bound / Confuse in the roster-expansion section, which
+	// new Webbed / Confuse in the roster-expansion section, which
 	// made "how long does X last?" a three-place search.
-	PoisonMinTurns         = 3
-	PoisonMaxTurns         = 5
-	SleepMinTurns          = 2
-	SleepMaxTurns          = 5
-	StunMinTurns           = 1
-	StunMaxTurns           = 2
-	SpiderWebBoundMinTurns = 3
-	SpiderWebBoundMaxTurns = 3
-	WispConfuseMinTurns    = 2
-	WispConfuseMaxTurns    = 2
+	PoisonMinTurns       = 3
+	PoisonMaxTurns       = 5
+	SleepMinTurns        = 2
+	SleepMaxTurns        = 5
+	StunMinTurns         = 1
+	StunMaxTurns         = 2
+	SpiderWebbedMinTurns = 3
+	SpiderWebbedMaxTurns = 3
+	WispConfuseMinTurns  = 2
+	WispConfuseMaxTurns  = 2
 	// (Burn min/max travel on SkillEffect.Burn fields per skill —
 	// no global default since only the Wizard's Firebolt sets it
 	// today, and the registry value is the canonical source.)
@@ -318,8 +324,8 @@ const (
 	GoblinMageCastChance     = 0.50 // Goblin Mage: per-turn roll into Firebolt / Sleep vs plain melee.
 	SpiderWebCastChance      = 0.45 // Cave Spider: roll-to-Web vs plain bite per turn.
 	VampireBatLifesteal      = 0.60 // Vampire Bat: fraction of post-armor damage healed back per bite.
-	WispConfuseCastChance   = 0.50 // Wisp: roll-to-Confuse vs flicker-bite per turn.
-	WispConfuseRetargetRoll = 0.50 // Wisp: per-action chance a Confused member retargets randomly.
+	WispConfuseCastChance    = 0.50 // Wisp: roll-to-Confuse vs flicker-bite per turn.
+	WispConfuseRetargetRoll  = 0.50 // Wisp: per-action chance a Confused member retargets randomly.
 	StoneGolemSlamCastChance = 0.40 // Stone Golem: roll-to-Stoneslam vs single-target smash per turn.
 	NecromancerCastChance    = 0.55 // Necromancer: combined roll into Raise / Firebolt vs incant-melee.
 	NecromancerRaiseLimit    = 2    // Necromancer: hard cap on RaiseBones casts per battle.
@@ -485,8 +491,8 @@ const (
 	// armor (it doesn't deal damage anyway).
 	SkillIngest
 	// SkillWeb is the Cave Spider's tempo-control cast — applies the
-	// Bound status (half-SPD, can't be ingested while bound) for
-	// SpiderWebBoundTurns turns. Tagged Magic so the apply bypasses
+	// Webbed status (half-SPD, can't be ingested while webbed) for
+	// SpiderWebbedTurns turns. Tagged Magic so the apply bypasses
 	// armor; no damage component.
 	SkillWeb
 	// SkillConfuse is the Will-o'-Wisp's status cast — applies the

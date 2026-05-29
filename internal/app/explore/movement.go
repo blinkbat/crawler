@@ -225,10 +225,21 @@ func restartGame(g *core.GameState) {
 }
 
 func updateFreeLook(p *core.Player, dt float32) {
+	// Mouse right-drag takes priority while held — relative motion, not
+	// dt-scaled (one mouse delta = one yaw nudge).
 	if rl.IsMouseButtonDown(rl.MouseRightButton) {
 		mouse := rl.GetMouseDelta()
 		p.LookYaw = core.Clamp(p.LookYaw+mouse.X*core.MouseSense, -core.MaxLookYaw, core.MaxLookYaw)
 		p.LookPitch = core.Clamp(p.LookPitch-mouse.Y*core.MouseSense, -core.MaxLookPitch, core.MaxLookPitch)
+		return
+	}
+	// Right analog stick free-look — an analog hold, so dt-scaled by
+	// StickLookSense. Mirrors the mouse axes (right = +yaw, up = +pitch)
+	// and shares the same clamps + recenter-on-release so the two feel
+	// identical.
+	if sx, sy := input.LookStick(); sx != 0 || sy != 0 {
+		p.LookYaw = core.Clamp(p.LookYaw+sx*core.StickLookSense*dt, -core.MaxLookYaw, core.MaxLookYaw)
+		p.LookPitch = core.Clamp(p.LookPitch-sy*core.StickLookSense*dt, -core.MaxLookPitch, core.MaxLookPitch)
 		return
 	}
 	p.LookYaw = core.Approach(p.LookYaw, 0, core.FreeLookReturnSpeed*dt)

@@ -28,7 +28,7 @@ var partyStatusVisuals = [core.PartyStatusCount]struct {
 	core.PartyStatusNone:      {rl.NewColor(220, 220, 220, 220), false},
 	core.PartyStatusDown:      {statusDown, false},
 	core.PartyStatusIngested:  {statusIngested, true},
-	core.PartyStatusBound:     {statusBound, true},
+	core.PartyStatusWebbed:    {statusWebbed, true},
 	core.PartyStatusConfused:  {statusConfused, true},
 	core.PartyStatusStunned:   {statusStun, true},
 	core.PartyStatusAsleep:    {statusSleep, true},
@@ -156,15 +156,15 @@ func measurePartyNameWithSpace(font rl.Font, name string) rl.Vector2 {
 }
 
 const (
-	partyCardW    = float32(184)
-	partyCardH    = float32(118)
-	partyCardGap  = float32(16)
+	partyCardW   = float32(184)
+	partyCardH   = float32(118)
+	partyCardGap = float32(16)
 	// ribbonBottom is the bottom-edge margin for the party ribbon.
 	// Routed through hudEdgePad so the bottom margin matches the
 	// minimap's top margin (and every other HUD panel's edge
 	// distance). Earlier passes used 20 which was four pixels off
 	// the rest of the HUD's edge convention.
-	ribbonBottom  = float32(hudEdgePad)
+	ribbonBottom = float32(hudEdgePad)
 )
 
 // drawPartyCard renders a single party member card. The class accent stripe

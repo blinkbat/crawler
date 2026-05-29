@@ -399,6 +399,16 @@ type GameState struct {
 	// EquipDragSourceNone") means no drag — the panel renders resting
 	// state. ClearEquipDrag resets it on drop / overlay close.
 	EquipDrag EquipDragState
+	// EquipCursor is the keyboard/controller focus cell on the
+	// Equipment tab (a member's slot, or an inventory-strip tile).
+	// EquipCursorActive is true while the d-pad / stick — not the
+	// mouse — owns the panel: it flips on directional / Confirm input
+	// and back off when the mouse moves, so drag-and-drop and the
+	// cursor coexist without fighting. Render reads both to paint the
+	// focus outline and anchor the held-item ghost. Reset via
+	// core.ResetEquipCursor on overlay open / tab switch.
+	EquipCursor       EquipCursorState
+	EquipCursorActive bool
 	// PanelsMapZoom is the cells-on-screen value for the Map tab. Saved
 	// separately from PanelsScroll so cycling between tabs preserves
 	// each tab's cursor state. Initialized lazily on first Map view.
@@ -582,13 +592,13 @@ type PartyMember struct {
 	Ingested   bool
 	IngestedBy int
 
-	// BoundTurns counts the Cave Spider's web. While > 0 the member's
+	// WebbedTurns counts the Cave Spider's web. While > 0 the member's
 	// effective SPD is halved (via EffectiveSPD) and Ingest refuses
-	// to land on them. Ticks at the END of the bound member's own
-	// turn (like Poison). Inflicted by SkillWeb; cleared by a future
-	// cleanse path. Does not stack — re-applying replaces the
+	// to land on them. Ticks at the END of the webbed member's own
+	// turn (like Poison). Inflicted by SkillWeb; expires when the
+	// counter ticks to 0. Does not stack — re-applying replaces the
 	// counter only if the incoming duration is higher.
-	BoundTurns int
+	WebbedTurns int
 
 	// ConfusedTurns counts the Will-o'-Wisp's mind-twist. While > 0,
 	// the member's chosen action has WispConfuseRetargetRoll chance

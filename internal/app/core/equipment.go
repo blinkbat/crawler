@@ -174,3 +174,26 @@ func NewInventoryDrag(kind ItemKind, inventoryIndex int) EquipDragState {
 func ClearEquipDrag(g *GameState) {
 	g.EquipDrag = EquipDragState{}
 }
+
+// EquipCursorState is the keyboard/controller focus on the Equipment
+// tab — the cell the player highlights with the d-pad / stick when the
+// mouse isn't driving. OnInventory toggles the focus between a
+// member's equip slot (Member + Slot) and the shared inventory strip
+// (InvTile). It mirrors the mouse hit-test surface so a Confirm "lifts"
+// or "places" g.EquipDrag through the exact same drop rules a
+// drag-and-drop release uses.
+type EquipCursorState struct {
+	OnInventory bool
+	Member      int
+	Slot        EquipSlotIndex
+	InvTile     int
+}
+
+// ResetEquipCursor parks the Equipment-tab focus at the first member's
+// first slot and marks the cursor inactive — the mouse owns the panel
+// until a directional / Confirm input wakes the cursor. Called on
+// overlay open and on switching INTO the Equipment tab.
+func ResetEquipCursor(g *GameState) {
+	g.EquipCursor = EquipCursorState{}
+	g.EquipCursorActive = false
+}

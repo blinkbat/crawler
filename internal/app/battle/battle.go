@@ -270,18 +270,18 @@ func buildTurnQueue(g *core.GameState) []core.ActorRef {
 
 // actorSpeed returns the SPD of the actor. Both sides read Stats.SPD
 // now that enemies carry a full Stats block (legacy EnemyDefinition.Speed
-// was retired in favour of symmetry). Bound party members have their
+// was retired in favour of symmetry). Webbed party members have their
 // effective SPD halved (rounded down, floor 1) for the turn-queue
-// sort — Bound's signature is "you still act, but the world gets ahead
-// of you." Enemy-side Bound is not currently inflicted (no player
-// skill applies it yet), so the bound branch is party-only today.
+// sort — Webbed's signature is "you still act, but the world gets ahead
+// of you." Enemy-side Webbed is not currently inflicted (no player
+// skill applies it yet), so the webbed branch is party-only today.
 func actorSpeed(g *core.GameState, actor core.ActorRef) int {
 	if actor.IsParty {
 		if !actor.ValidPartyIndex(g.Party) {
 			return 0
 		}
 		spd := core.EffectiveStats(g.Party[actor.Index]).SPD
-		if g.Party[actor.Index].BoundTurns > 0 {
+		if g.Party[actor.Index].WebbedTurns > 0 {
 			spd /= 2
 			if spd < 1 {
 				spd = 1
@@ -451,12 +451,12 @@ func finishActorTurn(g *core.GameState) {
 		// on the wrong actor kind so dispatching is fine here.
 		tickPoisonAfterPartyTurn(g, g.Battle.Queue[g.Battle.QueueCursor])
 		tickPoisonAfterEnemyTurn(g, g.Battle.Queue[g.Battle.QueueCursor])
-		// Bound + Confused tick alongside Poison — every party-side
-		// status counter ticks at the END of the bound/confused
+		// Webbed + Confused tick alongside Poison — every party-side
+		// status counter ticks at the END of the webbed/confused
 		// member's own turn so they get one full action under the
 		// status before the counter decrements. Mirrors the Poison
 		// shape; same actor-kind dispatch.
-		tickBoundAfterPartyTurn(g, g.Battle.Queue[g.Battle.QueueCursor])
+		tickWebbedAfterPartyTurn(g, g.Battle.Queue[g.Battle.QueueCursor])
 		tickConfusedAfterPartyTurn(g, g.Battle.Queue[g.Battle.QueueCursor])
 	}
 	if checkEnemyWipeout(g) {

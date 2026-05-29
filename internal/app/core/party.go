@@ -140,7 +140,7 @@ type SkillEffect struct {
 	PoisonChance   float64
 	PoisonMinTurns int
 	PoisonMaxTurns int
-	// BindChance / Min / Max gate Bound apply on the target. Bound
+	// BindChance / Min / Max gate Webbed apply on the target. Webbed
 	// halves SPD and refuses Ingest until cleared; the Cave Spider's
 	// SkillWeb is the headline applier. Same fail-open shape as the
 	// other status fields — zero chance short-circuits.
@@ -264,11 +264,11 @@ var skillDefinitions = []skillDefinition{
 	// driven instead of branching on the SkillID itself.
 	{Skill: SkillIngest, Name: "Ingest", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{AppliesIngest: true}, EnemyCastable: true},
 	// Web (Cave Spider): enemy-only, Magic-tagged, single party target.
-	// Applies the Bound status — halves the member's effective SPD and
+	// Applies the Webbed status — halves the member's effective SPD and
 	// blocks Ingest until cleared. Duration carried in BindMin/Max
 	// (3-turn fixed today); a future enchant or party skill can reuse
 	// the field without touching the apply path.
-	{Skill: SkillWeb, Name: "Web", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{BindChance: 1.0, BindMinTurns: SpiderWebBoundMinTurns, BindMaxTurns: SpiderWebBoundMaxTurns}, EnemyCastable: true},
+	{Skill: SkillWeb, Name: "Web", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{BindChance: 1.0, BindMinTurns: SpiderWebbedMinTurns, BindMaxTurns: SpiderWebbedMaxTurns}, EnemyCastable: true},
 	// Confuse (Will-o'-Wisp): enemy-only, Magic-tagged, single party
 	// target. Applies the Confused status — per-action retarget roll
 	// when the afflicted member acts. WIS resists on the apply roll
@@ -786,7 +786,7 @@ const (
 	PartyStatusNone PartyStatusKind = iota
 	PartyStatusDown
 	PartyStatusIngested
-	PartyStatusBound
+	PartyStatusWebbed
 	PartyStatusConfused
 	PartyStatusStunned
 	PartyStatusAsleep
@@ -819,8 +819,8 @@ func PartyStatus(m PartyMember) (kind PartyStatusKind, turns int) {
 		return PartyStatusDown, 0
 	case m.Ingested:
 		return PartyStatusIngested, 0
-	case m.BoundTurns > 0:
-		return PartyStatusBound, m.BoundTurns
+	case m.WebbedTurns > 0:
+		return PartyStatusWebbed, m.WebbedTurns
 	case m.ConfusedTurns > 0:
 		return PartyStatusConfused, m.ConfusedTurns
 	case m.StunTurns > 0:
@@ -845,8 +845,8 @@ func PartyStatusLabel(kind PartyStatusKind) string {
 		return "DOWN"
 	case PartyStatusIngested:
 		return "INGESTED"
-	case PartyStatusBound:
-		return "BOUND"
+	case PartyStatusWebbed:
+		return "WEBBED"
 	case PartyStatusConfused:
 		return "CONFUSED"
 	case PartyStatusStunned:

@@ -75,7 +75,7 @@ Match the status priority ladder in `core.PartyStatus`. All semi-glow:
 - **`statusBurn`** — `rgb(240, 144, 72)`
 - **`statusSleep`** — `rgb(132, 196, 232)`
 - **`statusStun`** — `rgb(232, 220, 120)`
-- **`statusBound`** — `rgb(180, 140, 220)`
+- **`statusWebbed`** — `rgb(180, 140, 220)`
 - **`statusConfused`** — `rgb(220, 188, 96)`
 - **`statusIngested`** — `rgb(200, 132, 220)`
 - **`statusDefending`** — `rgb(132, 196, 255)`
@@ -199,16 +199,28 @@ Owners call `drawBar(font, x, y, w, h, label, value, max, fill, muted)`.
 
 ## Behaviour standards
 
-### Input convention (already locked)
-- **Confirm**: keyboard `Z` / `Space` / `Enter`, gamepad `A`
-  (Xbox) / `Cross` (PS).
-- **Back**: keyboard `X` / `Esc`, gamepad `B` / `Circle`.
-- **Cycle prev/next list / target**: shoulder buttons or
-  `Q`/`E` on keyboard.
-- **Open Tome (panels)**: `I` / middle gamepad button.
+### Input convention — gamepad-first (locked)
+This is a **gamepad-first game**: the controller is the primary input;
+keyboard/mouse are secondary. Every surface you add MUST be fully
+operable by controller alone — nothing reachable only by mouse or by an
+unbound key. All reads route through the `input` package; never inline
+`rl.IsKeyPressed` / `rl.IsGamepadButton*` / `rl.GetMouse*` at a call
+site.
 
-Never invent a new keybinding for a new modal — route through
-`input.ConfirmPressed` / `input.BackPressed` / `input.CursorUpDown`.
+- **Confirm**: gamepad `A` / `Cross`; keyboard `Z` / `Space` / `Enter`.
+- **Back / cancel**: gamepad `B` / `Circle`; keyboard `X` / `Esc`.
+- **Navigate**: D-pad / left stick (keyboard arrows / `WASD`).
+- **Open Tome (panels)**: `Y` / `Triangle` or the middle button;
+  keyboard `I` (or the per-tab letters `C`/`E`/`I`/`K`/`M`).
+- **Page tabs / cycle prev-next target**: `L1`/`L2` back, `R1`/`R2`
+  forward (keyboard `Tab` / `Shift+Tab` for tabs; arrows for targets).
+- **Pause**: `Start` / `Options` (keyboard `P` / `Esc`).
+- **Free-look**: right stick, or right-mouse drag.
+- `Square` / `X` and `L3` / `R3` are intentionally unbound.
+
+Never invent a new keybinding or button combo for a new surface — route
+through `input.ConfirmPressed` / `input.BackPressed` / `input.CursorUpDown`
+(add a predicate in `input/input.go` if the gesture is genuinely new).
 
 ### Modal scaffolding
 Every modal calls `drawModalScaffold(font, w, h, heading)`:

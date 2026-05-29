@@ -2,6 +2,7 @@ package explore
 
 import (
 	"crawler/internal/app/core"
+	"crawler/internal/app/input"
 	"crawler/internal/app/render"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -157,4 +158,155 @@ func findInventoryIndex(inv []core.ItemStack, kind core.ItemKind) int {
 		}
 	}
 	return -1
+}
+
+// updateEquipmentTab routes one frame of Equipment-tab input. The tab
+// supports BOTH mouse drag-and-drop AND a keyboard/controller cursor;
+// g.EquipCursorActive tracks which device last drove the panel so the
+// two never fight. Mouse motion / clicks hand control to the drag path;
+// a directional or Confirm edge wakes the cursor. The member-column
+// highlight (PanelsRowCursor) tracks the cursor's member so the shared
+// card header lights up the focused column.
+func updateEquipmentTab(g *core.GameState) {
+	// Read the cursor edges ONCE this frame — UpPressed / DownPressed /
+	// CursorLeftRight touch the analog-stick edge memory, so calling
+	// them twice would consume the edge and drop the second read.
+	up := input.UpPressed()
+	down := input.DownPressed()
+	lr := input.CursorLeftRight()
+	confirm := input.ConfirmPressed()
+
+	// Device arbitration. Mouse movement or a held click hands control
+	// to the drag path; any cursor edge wakes the keyboard/controller
+	// cursor.
+	if md := rl.GetMouseDelta(); md.X != 0 || md.Y != 0 || rl.IsMouseButtonDown(rl.MouseLeftButton) {
+		g.EquipCursorActive = false
+	}
+	if up || down || lr != 0 || confirm {
+		g.EquipCursorActive = true
+	}
+
+	if g.EquipCursorActive {
+		updateEquipCursorNav(g, up, down, lr, confirm)
+	} else {
+		updateEquipmentDrag(g)
+	}
+
+	// Keep the member-column highlight on the cursor's member so the
+	// shared card header brightens the focused column.
+	if g.EquipCursor.Member >= 0 && g.EquipCursor.Member < len(g.Party) {
+		g.PanelsRowCursor = g.EquipCursor.Member
+	}
+}
+
+// updateEquipCursorNav moves the Equipment-tab focus cell and resolves
+// a Confirm. Members are columns (Left/Right) and equip slots are rows
+// (Up/Down); pressing Down past the last slot drops the focus into the
+// inventory strip, and Up from the strip returns to the slot column.
+// The edges are passed in (already read once by updateEquipmentTab) to
+// avoid double-consuming the analog-stick edge memory.
+func updateEquipCursorNav(g *core.GameState, up, down bool, lr int, confirm bool) {
+	if len(g.Party) == 0 {
+		return
+	}
+	cur := &g.EquipCursor
+	if cur.Member < 0 {
+		cur.Member = 0
+	}
+	if cur.Member >= len(g.Party) {
+		cur.Member = len(g.Party) - 1
+	}
+	invCount := render.EquipPanelInventoryVisibleCount()
+
+	if cur.OnInventory {
+		// Strip focus: Left/Right walk tiles; Up returns to the slot
+		// column at the bottom slot of the current member.
+		if lr != 0 && invCount > 0 {
+			cur.InvTile = core.WrapIndex(cur.InvTile+lr, invCount)
+		}
+		if up {
+			cur.OnInventory = false
+			cur.Slot = core.EquipSlotCount - 1
+		}
+	} else {
+		// Slot focus: Left/Right change member column; Up/Down move
+		// slot rows; Down past the last slot drops into the strip.
+		if lr != 0 {
+			cur.Member = core.WrapIndex(cur.Member+lr, len(g.Party))
+		}
+		if up && cur.Slot > 0 {
+			cur.Slot--
+		}
+		if down {
+			if int(cur.Slot) < int(core.EquipSlotCount)-1 {
+				cur.Slot++
+			} else if invCount > 0 {
+				cur.OnInventory = true
+			}
+		}
+	}
+
+	// Re-clamp the strip cursor in case the inventory shrank (e.g. the
+	// last equippable item just got equipped).
+	if cur.OnInventory {
+		switch {
+		case invCount <= 0:
+			cur.OnInventory = false
+		case cur.InvTile >= invCount:
+			cur.InvTile = invCount - 1
+		case cur.InvTile < 0:
+			cur.InvTile = 0
+		}
+	}
+
+	if confirm {
+		equipCursorConfirm(g)
+	}
+}
+
+// equipCursorConfirm performs the keyboard/controller "lift or place"
+// at the focused cell, reusing the exact drag-drop rules so the cursor
+// and mouse paths can never diverge. With nothing held it lifts the
+// focused item into g.EquipDrag; while holding it lands the item on the
+// focused slot (tryEquipDrop) or unequips onto the strip, then clears
+// the held state — mirroring the mouse release block.
+func equipCursorConfirm(g *core.GameState) {
+	cur := g.EquipCursor
+	if g.EquipDrag.Source == core.EquipDragSourceNone {
+		// Lift the focused item.
+		if cur.OnInventory {
+			kind, ok := render.EquipPanelInventoryEntryKind(cur.InvTile)
+			if !ok || kind == core.ItemNone {
+				return
+			}
+			idx := findInventoryIndex(g.Inventory, kind)
+			if idx < 0 {
+				return
+			}
+			g.EquipDrag = core.NewInventoryDrag(kind, idx)
+			return
+		}
+		if cur.Member < 0 || cur.Member >= len(g.Party) {
+			return
+		}
+		kind := g.Party[cur.Member].Equipped[cur.Slot]
+		if kind == core.ItemNone {
+			return
+		}
+		g.EquipDrag = core.NewSlotDrag(kind, cur.Member, cur.Slot)
+		return
+	}
+	// Place the held item — clear the drag on every exit path, same as
+	// the mouse release's deferred ClearEquipDrag.
+	defer core.ClearEquipDrag(g)
+	if cur.OnInventory {
+		// Only a slot-sourced hold means anything on the strip (unequip);
+		// an inventory-sourced hold dropped back on the strip just
+		// cancels (the item was never removed from inventory on lift).
+		if g.EquipDrag.Source == core.EquipDragSourceSlot {
+			unequipBackToInventory(g, g.EquipDrag.PartyIndex, g.EquipDrag.SlotIndex)
+		}
+		return
+	}
+	tryEquipDrop(g, cur.Member, cur.Slot)
 }

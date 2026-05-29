@@ -15,7 +15,7 @@ const (
 	// Roster expansion: five new kinds bringing the bestiary to 12.
 	// CaveSpider / VampireBat / Wisp / StoneGolem / Necromancer
 	// each introduce a mechanic the existing roster doesn't cover
-	// (Bound status, lifesteal, Confused status, AoE phys casts, and
+	// (Webbed status, lifesteal, Confused status, AoE phys casts, and
 	// mid-fight summons respectively). Skeleton is the Necromancer's
 	// summon target — a tier-2 grunt that exists only via raises.
 	EnemyCaveSpider
@@ -253,8 +253,8 @@ var enemyDefinitions = []EnemyDefinition{
 		XPValue:            13,
 		AttackVerbSingular: "bites",
 		AttackVerbPlural:   "bite",
-		// SkillWeb is the tempo-control skill — applies Bound (half-SPD,
-		// can't be ingested while bound) for SpiderWebBoundTurns turns.
+		// SkillWeb is the tempo-control skill — applies Webbed (half-SPD,
+		// can't be ingested while webbed) for SpiderWebbedTurns turns.
 		// SkillCastChance is meaningful so the spider doesn't always web;
 		// plain bites pad the rounds in between to keep cast pressure
 		// from feeling spammy.

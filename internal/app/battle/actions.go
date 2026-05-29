@@ -198,12 +198,12 @@ func handleEnemyIngest(ctx enemySpellCtx) {
 		return
 	}
 	m := &g.Party[picked]
-	// Bound targets refuse Ingest — the design contract for Bound is
+	// Webbed targets refuse Ingest — the design contract for Webbed is
 	// "tempo control without removal," so the spider's web should
 	// shield the prey from the mantrap. The mantrap just bites
 	// instead this turn (caller falls back to plain melee on the
 	// next round when usableEnemySkills sees Ingest still pending).
-	if m.BoundTurns > 0 {
+	if m.WebbedTurns > 0 {
 		setBattleMessage(g, fmt.Sprintf("%s lunges, but %s is too tangled to swallow.", core.TheEnemy(ctx.def), m.Name))
 		return
 	}
@@ -248,7 +248,7 @@ func handleEnemySleep(ctx enemySpellCtx) {
 	audio.Play(audio.SoundInputHit)
 }
 
-// handleEnemyWeb applies the Cave Spider's Bound status. Already-bound
+// handleEnemyWeb applies the Cave Spider's Webbed status. Already-webbed
 // targets short-circuit with a flavor line (no stacking); otherwise
 // the duration rolls from BindMin/Max and lands on the target. The
 // target is guaranteed alive by pickEnemyAttackTarget's living-filter
@@ -256,23 +256,23 @@ func handleEnemySleep(ctx enemySpellCtx) {
 func handleEnemyWeb(ctx enemySpellCtx) {
 	g := ctx.g
 	m := &g.Party[ctx.target]
-	if m.BoundTurns > 0 {
-		setBattleMessage(g, fmt.Sprintf("%s spins a fresh web at %s — already bound.", core.TheEnemy(ctx.def), m.Name))
+	if m.WebbedTurns > 0 {
+		setBattleMessage(g, fmt.Sprintf("%s spins a fresh web at %s — already webbed.", core.TheEnemy(ctx.def), m.Name))
 		return
 	}
 	duration := ctx.effect.BindDuration(g.Rand())
 	if duration <= 0 {
-		duration = core.SpiderWebBoundMinTurns
+		duration = core.SpiderWebbedMinTurns
 	}
-	m.BoundTurns = core.ShortenStatusDuration(duration, core.EffectiveStats(*m).WIS)
+	m.WebbedTurns = core.ShortenStatusDuration(duration, core.EffectiveStats(*m).WIS)
 	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillWeb), ctx.target)
-	enemySpellLog(ctx, "%s is bound in sticky webs.", m.Name)
+	enemySpellLog(ctx, "%s is wrapped in sticky webs.", m.Name)
 	audio.Play(audio.SoundInputHit)
 }
 
 // handleEnemyConfuse applies the Will-o'-Wisp's Confused status.
 // WIS resistance lives in the universal ShortenStatusDuration path
-// (mirrors Sleep / Bound / Poison applies on the party side) — high
+// (mirrors Sleep / Webbed / Poison applies on the party side) — high
 // WIS cuts the duration; no separate per-cast resist roll.
 // Already-confused targets short-circuit (no stacking). Duration
 // rolls from ConfuseMin/Max. Target is living by upstream filter —
@@ -865,45 +865,10 @@ func applyPrayer(g *core.GameState, quality int) bool {
 	target := &g.Party[g.Battle.PartyTarget]
 	healPartyMember(g, g.Battle.PartyTarget, heal)
 	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillPrayer), g.Battle.PartyTarget)
-	// Prayer T3 cleanses Poison + Sleep on the target. The cleanses
-	// happen AFTER the heal so the player sees the heal pop even if
-	// the status would have otherwise ticked the same turn.
-	mod := core.SkillTierMod(actor, core.SkillPrayer)
-	cleansed := applyStatusCleanses(target, mod)
 	selfTarget := g.Battle.PartyTarget == g.Battle.CurrentParty
-	msg := prayerMessage(actor.Name, target.Name, heal, quality, selfTarget)
-	if cleansed != "" {
-		msg = fmt.Sprintf("%s %s", msg, cleansed)
-	}
-	setBattleMessage(g, msg)
+	setBattleMessage(g, prayerMessage(actor.Name, target.Name, heal, quality, selfTarget))
 	finishPartyAction(g)
 	return true
-}
-
-// applyStatusCleanses clears Poison/Sleep on the given party member
-// per the tier-effective mod bits and returns a human-readable
-// suffix describing what was cleared (empty string if nothing
-// happened). Single seam so a future cleanse-skill (Cleric universal
-// Purify, paladin Cure) wires in via the same flag-and-suffix path
-// instead of inlining the same status-zero loop.
-func applyStatusCleanses(m *core.PartyMember, mod core.SkillEffectDelta) string {
-	cleared := []string{}
-	if mod.CleansesPoison && m.PoisonTurns > 0 {
-		m.PoisonTurns = 0
-		cleared = append(cleared, "Poison")
-	}
-	if mod.CleansesSleep && m.SleepTurns > 0 {
-		m.SleepTurns = 0
-		cleared = append(cleared, "Sleep")
-	}
-	switch len(cleared) {
-	case 0:
-		return ""
-	case 1:
-		return "(Cleansed " + cleared[0] + ".)"
-	default:
-		return "(Cleansed " + cleared[0] + " + " + cleared[1] + ".)"
-	}
 }
 
 // --- Steal (Thief, base chance scales with quality) ---
@@ -1081,9 +1046,7 @@ func applyMassMend(g *core.GameState, quality int) bool {
 	actor := &g.Party[g.Battle.CurrentParty]
 	actor.AttackBump = core.BumpDuration
 	heal := core.ScaleHeal(core.SkillHealFor(actor, core.SkillMassMend), quality)
-	mod := core.SkillTierMod(actor, core.SkillMassMend)
 	healed := 0
-	cleansedTotal := 0
 	for i := range g.Party {
 		m := &g.Party[i]
 		if m.HP <= 0 || m.Ingested {
@@ -1096,24 +1059,12 @@ func applyMassMend(g *core.GameState, quality int) bool {
 			}
 			healed++
 		}
-		// Tier-3 cleanse applies to EVERY alive member touched, not
-		// only those that needed healing — a full-HP poisoned ally
-		// still benefits from the wash. Counted separately so the
-		// log can call it out even if the heal portion was a no-op.
-		if applyStatusCleanses(m, mod) != "" {
-			cleansedTotal++
-		}
 		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillMassMend), i)
 	}
-	switch {
-	case healed == 0 && cleansedTotal == 0:
+	if healed == 0 {
 		setBattleMessage(g, fmt.Sprintf("%s%s's Mass Mend finds no wounds.", qualityTag(quality), actor.Name))
-	case healed == 0:
-		setBattleMessage(g, fmt.Sprintf("%s%s's Mass Mend cleanses %d allies.", qualityTag(quality), actor.Name, cleansedTotal))
-	case cleansedTotal == 0:
+	} else {
 		setBattleMessage(g, fmt.Sprintf("%s%s mends %d allies for %d each.", qualityTag(quality), actor.Name, healed, heal))
-	default:
-		setBattleMessage(g, fmt.Sprintf("%s%s mends %d allies for %d each, cleansing %d.", qualityTag(quality), actor.Name, healed, heal, cleansedTotal))
 	}
 	finishPartyAction(g)
 	return true
@@ -1479,18 +1430,18 @@ func tickPoisonForIngestedParty(g *core.GameState) {
 	}
 }
 
-// tickBoundAfterPartyTurn drains the Bound counter at the end of the
-// bound member's own turn. Same shape as the Poison tick — actor-kind
-// dispatch up front, party-only today (no party skill applies Bound
+// tickWebbedAfterPartyTurn drains the Webbed counter at the end of the
+// webbed member's own turn. Same shape as the Poison tick — actor-kind
+// dispatch up front, party-only today (no party skill applies Webbed
 // to enemies). Emits a short log line when the status wears off so
-// the player sees the counter clear. No damage tied to Bound;
+// the player sees the counter clear. No damage tied to Webbed;
 // the slow / Ingest-refusal effect lives in actorSpeed +
 // handleEnemyIngest.
-func tickBoundAfterPartyTurn(g *core.GameState, actor core.ActorRef) {
-	tickPartyStatusCounter(g, actor, func(m *core.PartyMember) *int { return &m.BoundTurns }, "%s tears free of the webs.")
+func tickWebbedAfterPartyTurn(g *core.GameState, actor core.ActorRef) {
+	tickPartyStatusCounter(g, actor, func(m *core.PartyMember) *int { return &m.WebbedTurns }, "%s tears free of the webs.")
 }
 
-// tickConfusedAfterPartyTurn mirrors tickBoundAfterPartyTurn for the
+// tickConfusedAfterPartyTurn mirrors tickWebbedAfterPartyTurn for the
 // Confused status. The per-action retarget roll is honored at action
 // resolution time (see action handlers' confuse-retarget path); this
 // helper just drains the counter.
@@ -1499,7 +1450,7 @@ func tickConfusedAfterPartyTurn(g *core.GameState, actor core.ActorRef) {
 }
 
 // tickPartyStatusCounter is the shared body the non-damaging
-// end-of-party-turn status ticks (Bound, Confused) walk. Each ticker
+// end-of-party-turn status ticks (Webbed, Confused) walk. Each ticker
 // used to inline the same actor-kind dispatch + index bounds +
 // HP/counter guard. counterRef returns a pointer into the member's
 // field so the helper can both read and decrement without a
@@ -1513,7 +1464,7 @@ func tickConfusedAfterPartyTurn(g *core.GameState, actor core.ActorRef) {
 // a different seam for that: applyPartyPoisonTick on the party side and
 // applyEnemyDoTTick on the enemy side. Folding damage into this helper
 // would pile the death/kill-signal machinery into a signature meant for
-// the no-damage Bound / Confused drains.
+// the no-damage Webbed / Confused drains.
 func tickPartyStatusCounter(g *core.GameState, actor core.ActorRef, counterRef func(*core.PartyMember) *int, clearedFmt string) {
 	if !actor.ValidPartyIndex(g.Party) {
 		return
@@ -1668,7 +1619,7 @@ func damagePartyMember(g *core.GameState, partyIndex, rawAmount int, tag core.Sk
 //
 // Enemy side clears Burn + Sleep + Poison + Stun. Party side clears the
 // statuses a member can actually carry into death today: Sleep (goblin
-// mage), Bound (cave spider web), and Confused (will-o'-wisp). Poison is
+// mage), Webbed (cave spider web), and Confused (will-o'-wisp). Poison is
 // intentionally left so the corpse keeps its poison render hint while it
 // fades; Burn has no player-applicable source yet. Add new timed statuses
 // to whichever side can carry them so they can't linger on a corpse.
@@ -1681,7 +1632,7 @@ func clearEnemyStatusesOnDeath(enemy *core.Enemy) {
 
 func clearPartyStatusesOnDeath(member *core.PartyMember) {
 	member.SleepTurns = 0
-	member.BoundTurns = 0
+	member.WebbedTurns = 0
 	member.ConfusedTurns = 0
 }
 

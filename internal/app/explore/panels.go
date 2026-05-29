@@ -21,6 +21,7 @@ func openPanels(g *core.GameState) {
 	// free-look doesn't bleed into the overlay's screen-space rendering.
 	g.Player.LookYaw = 0
 	g.Player.LookPitch = 0
+	core.ResetEquipCursor(g)
 }
 
 // closePanels takes the overlay down. Tab + zoom + cursor state stays
@@ -49,13 +50,39 @@ const (
 )
 
 // updatePanels routes one frame of input to whatever tab is up.
-// Always-on bindings (close / tab cycle) live here; per-tab cursors
-// dispatch through panelTabHandler.
+// Always-on bindings (close / tab paging) live here; per-tab cursors
+// dispatch through the switch below.
+//
+// Navigation model: the shoulders + triggers page TABS (so the d-pad /
+// left stick is free to be an in-tab cursor), and the d-pad / stick
+// drives a 2-D cursor inside a tab — Left/Right picks the party-member
+// column, Up/Down moves the slot row (Equipment) or zooms (Map).
 func updatePanels(g *core.GameState) {
-	// Both Back and the toggle close — same edge handling so the
-	// big-start button is a true toggle.
-	if input.BackPressed() || input.PanelsTogglePressed() {
+	// Back closes the overlay — EXCEPT on the Equipment tab while an
+	// item is held by the keyboard/controller cursor, where Back drops
+	// the held item back instead (so a mis-lift doesn't kick the player
+	// all the way out). The toggle button always closes outright.
+	if input.BackPressed() {
+		if g.PanelsTab == core.PanelTabEquipment && g.EquipDrag.Source != core.EquipDragSourceNone {
+			core.ClearEquipDrag(g)
+			return
+		}
 		closePanels(g)
+		return
+	}
+	if input.PanelsTogglePressed() {
+		closePanels(g)
+		return
+	}
+	// Tab paging: L1/L2 back, R1/R2 forward on a pad; Tab / Shift+Tab on
+	// the keyboard. The arrows are deliberately NOT wired here anymore —
+	// they drive the in-tab cursor below.
+	if input.MenuTabNextPressed() {
+		setPanelTab(g, panelTabAdvance(g.PanelsTab, 1))
+		return
+	}
+	if input.MenuTabPrevPressed() {
+		setPanelTab(g, panelTabAdvance(g.PanelsTab, -1))
 		return
 	}
 	// Direct-tab keyboard shortcuts (C / E / I / K / M). Pressing the
@@ -70,27 +97,15 @@ func updatePanels(g *core.GameState) {
 		}
 		return
 	}
-	// L1 / R1 + Tab + Left/Right cycle tabs. Use TargetPrevious /
-	// TargetNext rather than ArrowLeft / ArrowRight because the
-	// shoulders read more naturally as "page back / forward" on a
-	// pad than the d-pad does.
-	if input.TargetNextPressed() {
-		setPanelTab(g, panelTabAdvance(g.PanelsTab, 1))
-		return
-	}
-	if input.TargetPreviousPressed() {
-		setPanelTab(g, panelTabAdvance(g.PanelsTab, -1))
-		return
-	}
 	switch g.PanelsTab {
 	case core.PanelTabCharacter:
-		// Character tab: Up/Down moves the party-member cursor;
-		// Confirm on a member with unspent stat points opens the
-		// level-up modal targeting that member. The modal closes
-		// the panels overlay automatically (its own input loop
-		// takes over). The "+" badge on the party-card name is
-		// the player's hint that allocation is available.
-		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, len(g.Party))
+		// Left/Right moves the party-member column; Confirm on a member
+		// with unspent stat points opens the level-up modal targeting
+		// that member. The modal closes the panels overlay automatically
+		// (its own input loop takes over). The "+" badge on the
+		// party-card name is the player's hint that allocation is
+		// available.
+		g.PanelsRowCursor = input.CursorLeftRightWrap(g.PanelsRowCursor, len(g.Party))
 		if input.ConfirmPressed() && g.PanelsRowCursor >= 0 && g.PanelsRowCursor < len(g.Party) {
 			m := g.Party[g.PanelsRowCursor]
 			if m.PendingLevelUps > 0 {
@@ -99,15 +114,14 @@ func updatePanels(g *core.GameState) {
 			}
 		}
 	case core.PanelTabEquipment:
-		// Equipment tab: Up/Down still moves the party-member
-		// highlight, BUT the primary interaction is mouse drag-drop
-		// between the inventory strip and the 5 per-member slots —
-		// see updateEquipmentDrag.
-		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, len(g.Party))
-		updateEquipmentDrag(g)
+		// Equipment tab supports BOTH mouse drag-and-drop AND a
+		// keyboard/controller lift/place cursor — see updateEquipmentTab.
+		updateEquipmentTab(g)
 	case core.PanelTabSkills:
-		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, len(g.Party))
+		// View-only tab: Left/Right moves the party-member column.
+		g.PanelsRowCursor = input.CursorLeftRightWrap(g.PanelsRowCursor, len(g.Party))
 	case core.PanelTabItems:
+		// Vertical inventory list: Up/Down walk the stacks.
 		count := len(core.LiveStacks(g.Inventory))
 		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, count)
 	case core.PanelTabMap:
@@ -155,6 +169,7 @@ func setPanelTab(g *core.GameState, t core.PanelTab) {
 		return
 	}
 	core.ClearEquipDrag(g)
+	core.ResetEquipCursor(g)
 	render.ResetEquipPanelLayout()
 	g.PanelsTab = t
 	g.PanelsRowCursor = 0

@@ -16,6 +16,12 @@ const gamepadID = int32(0)
 // noise from worn sticks doesn't generate phantom presses.
 const stickEdgeThreshold = float32(0.55)
 
+// lookStickDeadzone is the right-stick magnitude below which free-look
+// treats the stick as centered. Larger than zero so resting drift
+// doesn't pan the camera; smaller than stickEdgeThreshold because
+// free-look is analog (proportional), not an edge press.
+const lookStickDeadzone = float32(0.15)
+
 // stickEdgeKey identifies one of the four analog-stick directions for
 // the edge-detection memory.
 type stickEdgeKey int
@@ -165,6 +171,24 @@ func CursorLeftRight() int {
 	return 0
 }
 
+// CursorLeftRightWrap applies CursorLeftRight to a wrap-around cursor in
+// [0, count). Horizontal mirror of CursorUpDown — the game-panels
+// overlay uses it to move the selected party-member COLUMN (Stats /
+// Equipment / Skills) now that L1/L2/R1/R2 own tab paging and the
+// d-pad / stick drive the in-tab cursor. Safe for count <= 0.
+func CursorLeftRightWrap(cursor, count int) int {
+	if count <= 0 {
+		return cursor
+	}
+	switch CursorLeftRight() {
+	case 1:
+		return core.WrapIndex(cursor+1, count)
+	case -1:
+		return core.WrapIndex(cursor-1, count)
+	}
+	return cursor
+}
+
 func TargetNextPressed() bool {
 	return rl.IsKeyPressed(rl.KeyTab) || rl.IsKeyPressed(rl.KeyRight) || rl.IsKeyPressed(rl.KeyD) || rl.IsKeyPressed(rl.KeyDown) ||
 		padPressed(rl.GamepadButtonLeftFaceRight) || padPressed(rl.GamepadButtonRightTrigger1) || stickEdgeX(1)
@@ -261,6 +285,27 @@ func PanelTabShortcutPressed() (core.PanelTab, bool) {
 		return core.PanelTabMap, true
 	}
 	return 0, false
+}
+
+// MenuTabPrevPressed / MenuTabNextPressed page tabs INSIDE the
+// game-panels overlay. Both shoulders and both triggers cycle — L1/L2
+// page back, R1/R2 page forward — so the d-pad / left stick is free to
+// drive the in-tab 2-D cursor (member column ↔ slot row) instead of
+// doubling as tab navigation. Keyboard pages with Tab / Shift+Tab; the
+// per-tab letter shortcuts (PanelTabShortcutPressed) still jump
+// straight to a named tab.
+func MenuTabPrevPressed() bool {
+	if rl.IsKeyPressed(rl.KeyTab) && (rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)) {
+		return true
+	}
+	return padPressed(rl.GamepadButtonLeftTrigger1) || padPressed(rl.GamepadButtonLeftTrigger2)
+}
+
+func MenuTabNextPressed() bool {
+	if rl.IsKeyPressed(rl.KeyTab) && !rl.IsKeyDown(rl.KeyLeftShift) && !rl.IsKeyDown(rl.KeyRightShift) {
+		return true
+	}
+	return padPressed(rl.GamepadButtonRightTrigger1) || padPressed(rl.GamepadButtonRightTrigger2)
 }
 
 // RestartPressed reports the pause-menu "restart run" edge. Triangle/Y
@@ -381,4 +426,25 @@ func ResetStickEdges() {
 	prevStickEdges[stickEdgeDown] = yv >= stickEdgeThreshold
 	prevStickEdges[stickEdgeLeft] = xv <= -stickEdgeThreshold
 	prevStickEdges[stickEdgeRight] = xv >= stickEdgeThreshold
+}
+
+// LookStick returns the right analog stick offset for explore free-look
+// as (x, y) in roughly [-1, 1], with a centered deadzone so a resting
+// stick reads as (0, 0). Returns (0, 0) when no pad is connected.
+// Analog (not edge-detected): the free-look path scales these by
+// core.StickLookSense·dt, mirroring the right-mouse-drag axes so mouse
+// and controller share one look model.
+func LookStick() (float32, float32) {
+	if !gamepadConnected() {
+		return 0, 0
+	}
+	x := rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisRightX)
+	y := rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisRightY)
+	if x > -lookStickDeadzone && x < lookStickDeadzone {
+		x = 0
+	}
+	if y > -lookStickDeadzone && y < lookStickDeadzone {
+		y = 0
+	}
+	return x, y
 }

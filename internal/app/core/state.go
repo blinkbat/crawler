@@ -220,7 +220,7 @@ func resetPartyForFieldRecovery(party []PartyMember) []PartyMember {
 		out[i].PoisonTurns = 0
 		out[i].SleepTurns = 0
 		out[i].StunTurns = 0
-		out[i].BoundTurns = 0
+		out[i].WebbedTurns = 0
 		out[i].ConfusedTurns = 0
 		out[i].Ingested = false
 		out[i].IngestedBy = -1
