@@ -268,7 +268,8 @@ func updateEditorScene(state *appState, dt float32) {
 
 func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	camera := render.Camera(*game)
-	rl.ClearBackground(rl.NewColor(87, 172, 244, 255))
+	// No explicit clear — DrawSkyBackground paints the full viewport
+	// every frame, so any clear here would be immediately overdrawn.
 	render.DrawSkyBackground(assets, *game)
 	rl.BeginMode3D(camera)
 	render.DrawWorld(camera, *game, assets)

@@ -163,25 +163,11 @@ func AbsInt(v int) int {
 	return v
 }
 
-func MinInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func MaxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-
 // Sign returns -1, 0, or 1 depending on the sign of v. Sits next to
-// AbsInt / MinInt / MaxInt so callers find it in one place — the pack
-// AI's chase step picks a direction with this, and any future spatial
-// helper that needs a step vector should too.
+// AbsInt / Clamp / Min / Max (the builtin generics) so callers find
+// the small spatial helpers in one place — the pack AI's chase step
+// picks a direction with this, and any future spatial helper that
+// needs a step vector should too.
 func Sign(v int) int {
 	switch {
 	case v > 0:

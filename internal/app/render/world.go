@@ -163,79 +163,110 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 	// walls / floors / props pick up the warm pools of light. Must
 	// run after applyUniforms (same shader) and before the tile
 	// loop's BeginShaderMode draws.
-	assets.lighting.uploadTorches(collectTorches(m, camera))
+	torches := collectTorches(m, camera)
+	assets.lighting.uploadTorches(torches)
 
 	camPos := camera.Position
 	forward := horizontalForward(camera)
 
+	// Diagnostics: only collect counters when the render log is on,
+	// so the hot path stays a plain increment-free loop the rest of
+	// the time. logActive is a single function-call check.
+	logActive := IsRenderLogActive()
+	var stats renderFrameStats
+	if logActive {
+		stats.MapW = m.Width
+		stats.MapH = m.Height
+	}
+
 	rl.BeginShaderMode(assets.lighting.shader)
 	for z := 0; z < m.Height; z++ {
 		for x := 0; x < m.Width; x++ {
+			if logActive {
+				stats.TilesIterated++
+			}
 			cx := core.TileCenter(x)
 			cz := core.TileCenter(z)
 			dx := cx - camPos.X
 			dz := cz - camPos.Z
 			if dx*forward.X+dz*forward.Z < behindCullSlack {
+				if logActive {
+					stats.TilesCulled++
+				}
 				continue
 			}
 			center := rl.NewVector3(cx, 0, cz)
-			// Ceiling slab: thin textured cube at y = WallHeight,
-			// covering the tile from above. Drawn for every ceiling-
-			// flagged cell (including under-wall ones — the wall fills
-			// floor-to-ceiling, but the slab's bottom face caps the
-			// wall's top edge so adjacent open rooms don't see daylight
-			// peeking through). Uses the material's ceilingModel so the
-			// surface picks up the same lighting/time-of-day uniforms
-			// as walls and floors.
 			if m.CeilingAt(x, z) {
 				drawTileCube(material.ceilingModel, cx, core.WallHeight, cz, tileYawDeg(x, z))
+				if logActive {
+					stats.CeilingsDrawn++
+				}
 			}
-			// Walls layer wins — solid blocker, no floor underneath.
 			if m.Walls[z][x] == core.TileRock {
 				drawTileCube(material.wallModel, cx, core.WallHeight/2, cz, tileYawDeg(x, z))
+				if logActive {
+					stats.WallsDrawn++
+				}
 				continue
 			}
-			// Floor variant comes from the floor layer (auto = hash).
 			drawFloorTile(material, assets, m.Floor[z][x], x, z, cx, cz)
-			// Decor: explicit char overrides auto-scatter; '_' suppresses.
-			// center is the same Vector3 the prop branch uses below;
-			// pass it down so drawDecor's footprint branches don't
-			// rebuild it on every tile.
+			if logActive {
+				stats.FloorsDrawn++
+			}
 			drawDecor(assets, m.Decor[z][x], x, z, cx, cz, center)
-			// Props: render by char on the props layer. Built-in cases
-			// (T/X/O/B) keep their per-char scale tuning here; multi-tile
-			// anchors fall through the footprint-driven branch; single-
-			// tile fallbacks look themselves up in assets.propModels at
-			// scale 1.0.
+			if logActive && m.Decor[z][x] != core.DecorEmpty {
+				// DecorAuto still counts — the floor scatter is decor.
+				stats.DecorDrawn++
+			}
 			if prop := m.Props[z][x]; prop != core.TilePropEmpty {
 				propYaw := propYawDeg(x, z)
+				drawn := false
 				if handler := inlinePropTable[prop]; handler != nil {
 					handler(assets, m, x, z, center, propYaw)
+					drawn = true
 				} else if footprint := core.PropFootprint(prop); footprint != nil {
-					// Multi-tile anchor: shift the model origin to the
-					// centroid of the footprint so the mesh covers
-					// every occupied tile. Footprint tails (e.g.
-					// TileRockFormationTail) have PropFootprint(tail)
-					// == nil AND aren't in propModels, so they render
-					// nothing — the anchor's mesh on the partner tile
-					// covers them.
 					if pm := &assets.propModelTable[prop]; len(pm.parts) > 0 {
 						anchor := footprintAnchor(center, footprint)
 						if r := propShadowRadius[prop]; r > 0 {
 							drawGroundShadow(anchor.X, anchor.Z, r)
 						}
 						pm.draw(anchor, 1.0, propYaw)
+						drawn = true
 					}
 				} else if pm := &assets.propModelTable[prop]; len(pm.parts) > 0 {
 					if r := propShadowRadius[prop]; r > 0 {
 						drawGroundShadow(center.X, center.Z, r)
 					}
 					pm.draw(center, 1.0, propYaw)
+					drawn = true
+				}
+				if logActive && drawn {
+					stats.PropsDrawn++
 				}
 			}
 		}
 	}
 	rl.EndShaderMode()
+
+	if logActive {
+		stats.TorchCount = len(torches)
+		stats.CamPos = camera.Position
+		stats.CamDir = rl.NewVector3(camera.Target.X-camera.Position.X, camera.Target.Y-camera.Position.Y, camera.Target.Z-camera.Position.Z)
+		stats.CamFOV = camera.Fovy
+		stats.PlayerYaw = g.Player.Yaw
+		stats.PlayerPitch = 0
+		stats.PlayerLookYaw = g.Player.LookYaw
+		stats.PlayerLookPitch = g.Player.LookPitch
+		stats.StepCount = g.StepCount
+		stats.LightingShaderID = assets.lighting.shader.ID
+		stats.BillboardFogID = assets.billboardFog.shader.ID
+		stats.FogDensity = profile.FogDensity
+		stats.FogColor = profile.FogColor
+		stats.AmbientColor = profile.AmbientColor
+		stats.SunColor = profile.SunColor
+		stats.BattleActive = g.Battle.Active()
+		LogRenderFrame(stats)
+	}
 }
 
 // drawFloorTile picks a floor variant for the given tile and draws it.
@@ -306,20 +337,11 @@ func drawDecor(assets Resources, cell byte, x, z int, cx, cz float32, center rl.
 	// Inline-handled decor (bush / mushroom / pebble) dispatches
 	// through the inlineDecorTable in resources.go — a [256] array
 	// mirror of inlineDecorHandlers so the per-tile-per-frame hot path
-	// is an array index instead of a map hash. inlineDecorHandlers
-	// stays the authored source the coverage assert reads from.
+	// is an array index instead of a map hash.
 	if handler := inlineDecorTable[cell]; handler != nil {
 		handler(assets, x, z, cx, cz)
 		return
 	}
-	// Multi-tile decor anchor: shift the model origin to the centroid
-	// of the footprint so the mesh spans every occupied tile. Tail
-	// chars have DecorFootprint(tail) == nil AND aren't in decorModels,
-	// so they render nothing — the anchor on the partner tile covers
-	// them. Yaw is forced to 0 for multi-tile decor so the spanning
-	// orientation stays consistent with the footprint axis. The caller
-	// already computed `center` for the props/ceiling branches above —
-	// reuse it instead of rebuilding rl.NewVector3 per tile.
 	if footprint := core.DecorFootprint(cell); footprint != nil {
 		if dm := &assets.decorModelTable[cell]; len(dm.parts) > 0 {
 			dm.draw(footprintAnchor(center, footprint), 1.0, 0)

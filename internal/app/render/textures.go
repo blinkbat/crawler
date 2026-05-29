@@ -150,7 +150,7 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, color.RGBA{R: 188, G: 184, B: 172, A: 255}, math.Max(0, n)*0.30)
 			c = core.MixColor(c, color.RGBA{R: 30, G: 28, B: 24, A: 255}, math.Max(0, -n)*0.42)
 
-			edgeDist := core.MinInt(localX-mortar, core.MinInt(localY-mortar, core.MinInt(brickW-mortar-1-localX, brickH-mortar-1-localY)))
+			edgeDist := min(localX-mortar, min(localY-mortar, min(brickW-mortar-1-localX, brickH-mortar-1-localY)))
 			if edgeDist <= 2 {
 				c = core.MixColor(c, mortarColor, 0.45-float64(edgeDist)*0.12)
 			}
@@ -255,7 +255,7 @@ func makeStoneFloorPixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, highlight, math.Max(0, n)*0.32)
 			c = core.MixColor(c, color.RGBA{R: 24, G: 22, B: 20, A: 255}, math.Max(0, -n)*0.40)
 
-			edgeDist := core.MinInt(localX-grout, core.MinInt(localY-grout, core.MinInt(slab-1-localX, slab-1-localY)))
+			edgeDist := min(localX-grout, min(localY-grout, min(slab-1-localX, slab-1-localY)))
 			if edgeDist <= 3 {
 				c = core.MixColor(c, groutColor, 0.45-float64(edgeDist)*0.10)
 			}
@@ -484,7 +484,7 @@ func makePlankPixels(w, h int) []color.RGBA {
 
 			// Edge of the board: darken slightly so each plank reads as
 			// raised against its neighbor.
-			edge := core.MinInt(localY-gap, boardH-1-localY)
+			edge := min(localY-gap, boardH-1-localY)
 			if edge <= 2 {
 				c = core.MixColor(c, gapColor, 0.30-float64(edge)*0.10)
 			}
@@ -2207,10 +2207,10 @@ func fillRectPixels(pixels []color.RGBA, w, h, x, y, rw, rh int, col color.RGBA)
 }
 
 func fillTrianglePixels(pixels []color.RGBA, w, h, x1, y1, x2, y2, x3, y3 int, col color.RGBA) {
-	minX := core.MinInt(x1, core.MinInt(x2, x3))
-	maxX := core.MaxInt(x1, core.MaxInt(x2, x3))
-	minY := core.MinInt(y1, core.MinInt(y2, y3))
-	maxY := core.MaxInt(y1, core.MaxInt(y2, y3))
+	minX := min(x1, min(x2, x3))
+	maxX := max(x1, max(x2, x3))
+	minY := min(y1, min(y2, y3))
+	maxY := max(y1, max(y2, y3))
 	area := edgeFunction(x1, y1, x2, y2, x3, y3)
 	if area == 0 {
 		return

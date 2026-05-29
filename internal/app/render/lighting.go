@@ -124,13 +124,18 @@ func loadBillboardFogShader() billboardFogShaderPipe {
 	shader := rl.LoadShaderFromMemory(billboardFogVertexShader, resolveShaderFogCeiling(billboardFogFragmentShader))
 	if shader.ID == 0 {
 		log.Println("render: billboard fog shader failed to compile; billboards will not fog out at distance")
+		LogRenderError("billboard fog shader compile FAILED (shader.ID==0); raylib falls back to default shader, billboards will not fog")
+	} else {
+		LogRenderInit("billboard fog shader compiled OK (shader.ID=%d)", shader.ID)
 	}
-	return billboardFogShaderPipe{
+	pipe := billboardFogShaderPipe{
 		shader:        shader,
 		locViewPos:    rl.GetShaderLocation(shader, "viewPos"),
 		locFogColor:   rl.GetShaderLocation(shader, "fogColor"),
 		locFogDensity: rl.GetShaderLocation(shader, "fogDensity"),
 	}
+	LogRenderInit("billboard fog locs: viewPos=%d fogColor=%d fogDensity=%d", pipe.locViewPos, pipe.locFogColor, pipe.locFogDensity)
+	return pipe
 }
 
 func (s billboardFogShaderPipe) unload() {
@@ -199,6 +204,14 @@ out vec4 finalColor;
 
 void main() {
     vec4 texel = texture(texture0, fragTexCoord);
+    // Alpha-test cutout: fully-transparent fragments don't write to
+    // color OR depth. Without this, leaf/bush/etc. textures with
+    // 0-alpha pixels stamp their cutout shape into the depth buffer,
+    // which blocks anything behind them — trees behind other trees
+    // disappear, and the hidden bits shift as the camera moves
+    // because draw order changes the depth-buffer "holes." Threshold
+    // 0.5 is the standard alpha-cutout gate.
+    if (texel.a * colDiffuse.a < 0.5) discard;
     vec3 base = texel.rgb * fragColor.rgb * colDiffuse.rgb;
 
     vec3 N = normalize(fragNormal);
@@ -327,8 +340,11 @@ func loadLightingShader() lightingShader {
 		// will silently no-op past that point, so the world draws unlit with
 		// no other warning. One-line startup log so we don't lose the signal.
 		log.Println("render: lighting shader failed to compile; rendering will fall back to raylib's default shader")
+		LogRenderError("lighting shader compile FAILED (shader.ID==0); the world will draw with raylib's default shader, NO sun/ambient/fog/torch lighting")
+	} else {
+		LogRenderInit("lighting shader compiled OK (shader.ID=%d)", shader.ID)
 	}
-	return lightingShader{
+	s := lightingShader{
 		shader:            shader,
 		locViewPos:        rl.GetShaderLocation(shader, "viewPos"),
 		locSunDirection:   rl.GetShaderLocation(shader, "sunDirection"),
@@ -342,6 +358,9 @@ func loadLightingShader() lightingShader {
 		locTorchColor:     rl.GetShaderLocation(shader, "torchColor"),
 		locTorchRange:     rl.GetShaderLocation(shader, "torchRange"),
 	}
+	LogRenderInit("lighting locs: viewPos=%d sunDir=%d sunCol=%d amb=%d fogCol=%d fogDens=%d spec=%d shadow=%d torchPos=%d torchCol=%d torchRange=%d",
+		s.locViewPos, s.locSunDirection, s.locSunColor, s.locAmbientColor, s.locFogColor, s.locFogDensity, s.locSpecStrength, s.locShadowStrength, s.locTorchPos, s.locTorchColor, s.locTorchRange)
+	return s
 }
 
 // uploadTorches pushes the active torch point lights to the shader.

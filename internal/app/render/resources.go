@@ -343,6 +343,19 @@ func LoadResources() (r Resources) {
 	r.decorModelTable = flattenModelTable(r.decorModels)
 	r.propModelTable = flattenModelTable(r.propModels)
 
+	LogRenderInit("resources loaded: propModels=%d decorModels=%d doorProps=%d inlineProps=%d inlineDecor=%d",
+		len(r.propModels), len(r.decorModels), len(r.doorProps), len(inlinePropHandlers), len(inlineDecorHandlers))
+	tableNonEmpty := func(t *[256]propModel) int {
+		c := 0
+		for i := 0; i < 256; i++ {
+			if len(t[i].parts) > 0 {
+				c++
+			}
+		}
+		return c
+	}
+	LogRenderInit("flattened tables: propModelTable entries=%d decorModelTable entries=%d", tableNonEmpty(r.propModelTable), tableNonEmpty(r.decorModelTable))
+
 	committed = true
 	return r
 }
@@ -372,8 +385,7 @@ type inlineDecorRenderer func(assets Resources, x, z int, cx, cz float32)
 // rendered decor char is one map entry plus one helper function; the
 // coverage assert and the renderer (via inlineDecorTable below) both
 // pick it up without further edits. Replaces the older parallel
-// inlineDecorChars set + open-coded switch in world.go that could
-// drift silently.
+// char-set + open-coded switch in world.go that could drift silently.
 var inlineDecorHandlers = map[byte]inlineDecorRenderer{
 	core.DecorBush:     drawDecorBush,
 	core.DecorMushroom: drawDecorMushroom,
@@ -498,7 +510,7 @@ func assertPropCoverage(models map[byte]propModel) {
 		if isFootprintTail(c) {
 			continue
 		}
-		panic("render: prop char '" + string(c) + "' has no propModels entry and is not inline-handled — register a loadXxxProp in NewResources or add to inlinePropChars")
+		panic("render: prop char '" + string(c) + "' has no propModels entry and is not inline-handled — register a loadXxxProp in NewResources or add to inlinePropHandlers")
 	}
 }
 
