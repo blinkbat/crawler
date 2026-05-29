@@ -254,7 +254,6 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 		stats.CamDir = rl.NewVector3(camera.Target.X-camera.Position.X, camera.Target.Y-camera.Position.Y, camera.Target.Z-camera.Position.Z)
 		stats.CamFOV = camera.Fovy
 		stats.PlayerYaw = g.Player.Yaw
-		stats.PlayerPitch = 0
 		stats.PlayerLookYaw = g.Player.LookYaw
 		stats.PlayerLookPitch = g.Player.LookPitch
 		stats.StepCount = g.StepCount

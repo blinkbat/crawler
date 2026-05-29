@@ -324,12 +324,17 @@ func SkillDamageFor(m *PartyMember, s SkillID) int {
 		return 0
 	}
 	effect := EffectiveSkillEffect(m, s)
-	return scaleDamageByKind(def.Kind, m.Stats, effect.Damage)
+	// Read through EffectiveStats so equipped items' StatBonus picks
+	// up: an Iron Sword (+2 STR) bumps a Melee skill's pre-quality
+	// damage, a tome (+2 INT) bumps a Magic skill, etc. Base m.Stats
+	// stays clean — level-up spends still edit the base.
+	return scaleDamageByKind(def.Kind, EffectiveStats(*m), effect.Damage)
 }
 
 // SkillHealFor mirrors SkillDamageFor for healing skills — Heal kind
 // adds WIS to the tier-augmented base, anything else returns the base
-// effect's Heal field unchanged.
+// effect's Heal field unchanged. Reads through EffectiveStats so a
+// WIS-boosting accessory lifts heal output.
 func SkillHealFor(m *PartyMember, s SkillID) int {
 	if m == nil {
 		return SkillHeal(Stats{}, s)
@@ -339,7 +344,7 @@ func SkillHealFor(m *PartyMember, s SkillID) int {
 		return 0
 	}
 	effect := EffectiveSkillEffect(m, s)
-	return scaleHealByKind(def.Kind, m.Stats, effect.Heal)
+	return scaleHealByKind(def.Kind, EffectiveStats(*m), effect.Heal)
 }
 
 // SkillTierMod returns the combined delta of every purchased tier

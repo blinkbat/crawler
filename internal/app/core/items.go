@@ -8,7 +8,76 @@ const (
 	ItemNone ItemKind = iota
 	ItemCheese
 	ItemBatJerky
+	// Equipment items follow. Each one carries a SlotType +
+	// per-stat bonuses on its ItemDefinition. Inventory stores them
+	// like any other stack; the Equipment panel moves them between
+	// inventory and an equip slot via drag-and-drop.
+	ItemIronSword
+	ItemWoodenShield
+	ItemLeatherCap
+	ItemSilverRing
+	ItemBrassAmulet
 )
+
+// EquipmentSlotType classifies what equipment slot an item can go into.
+// SlotNone marks a consumable (cheese, jerky) and means "inventory-only,
+// can't be equipped." Hand items fit either hand slot; armor items fit
+// the body slot; accessory items fit either accessory slot.
+type EquipmentSlotType int
+
+const (
+	SlotNone EquipmentSlotType = iota
+	SlotHand
+	SlotArmor
+	SlotAccessory
+)
+
+// EquipSlotIndex enumerates the five concrete equip slots on a party
+// member. Used as the index into PartyMember.Equipped. Order is the
+// on-screen order (right hand, left hand, armor, two accessories).
+type EquipSlotIndex int
+
+const (
+	EquipRightHand EquipSlotIndex = iota
+	EquipLeftHand
+	EquipArmor
+	EquipAccessory1
+	EquipAccessory2
+	EquipSlotCount
+)
+
+// SlotIndexLabel returns the on-screen label for a slot index. Single
+// seam so the panel and tooltips don't drift on naming.
+func SlotIndexLabel(i EquipSlotIndex) string {
+	switch i {
+	case EquipRightHand:
+		return "R. HAND"
+	case EquipLeftHand:
+		return "L. HAND"
+	case EquipArmor:
+		return "ARMOR"
+	case EquipAccessory1:
+		return "ACCESSORY 1"
+	case EquipAccessory2:
+		return "ACCESSORY 2"
+	}
+	return "?"
+}
+
+// SlotIndexType reports the EquipmentSlotType an equip slot accepts.
+// Used by EquipItem to gate "can this item fit here?" — a Hand item
+// goes in RightHand/LeftHand, an Armor item in Armor, etc.
+func SlotIndexType(i EquipSlotIndex) EquipmentSlotType {
+	switch i {
+	case EquipRightHand, EquipLeftHand:
+		return SlotHand
+	case EquipArmor:
+		return SlotArmor
+	case EquipAccessory1, EquipAccessory2:
+		return SlotAccessory
+	}
+	return SlotNone
+}
 
 // ItemDefinition is the static registry data for an item kind. Effect is
 // resolved by the consume path in the battle code, not here.
@@ -24,6 +93,21 @@ type ItemDefinition struct {
 	// Description is reserved for a future tooltip. Fill it in when we add
 	// item descriptions in the UI.
 	Description string
+	// Slot is the equipment slot type this item fits into. SlotNone
+	// means it's a consumable — usable from the battle Item action but
+	// not equippable. Non-None items show up in the Equipment panel's
+	// drag-and-drop affordance.
+	Slot EquipmentSlotType
+	// ArmorBonus and MDefBonus add to the wearer's mitigation when
+	// this item is equipped. Both phys/magic flow through the same
+	// helpers (ApplyArmor / ApplyMagicDefense), so equipping armor
+	// effectively raises the corresponding cap.
+	ArmorBonus int
+	MDefBonus  int
+	// StatBonus is the per-stat additive applied while this item is
+	// equipped. Indexed by Stat (STR/DEX/INT/WIS/VIT/SPD); zero in any
+	// slot means no contribution.
+	StatBonus [StatCount]int
 }
 
 var itemDefinitions = []ItemDefinition{
@@ -31,6 +115,26 @@ var itemDefinitions = []ItemDefinition{
 	// Bat jerky heals more than cheese — bats are tougher to fight and
 	// harder to steal from, so the loot pays off the difficulty.
 	{Kind: ItemBatJerky, Name: "Bat Jerky", HealAmount: 9, Description: "Stringy, oddly satisfying. A traveler's lunch."},
+
+	// Equipment. Bonuses are intentionally modest so the very-basic
+	// system reads as a starting kit rather than a power spike. STR
+	// from a sword, defensive layering from a shield + cap, a small
+	// stat ring, an MDef amulet.
+	{Kind: ItemIronSword, Name: "Iron Sword", Description: "A plain iron longsword. +2 STR.",
+		Slot:      SlotHand,
+		StatBonus: [StatCount]int{StatSTR: 2}},
+	{Kind: ItemWoodenShield, Name: "Wooden Shield", Description: "Plywood-grade. +2 Armor.",
+		Slot:       SlotHand,
+		ArmorBonus: 2},
+	{Kind: ItemLeatherCap, Name: "Leather Cap", Description: "Worn leather. +1 Armor.",
+		Slot:       SlotArmor,
+		ArmorBonus: 1},
+	{Kind: ItemSilverRing, Name: "Silver Ring", Description: "A nicked silver band. +1 DEX.",
+		Slot:      SlotAccessory,
+		StatBonus: [StatCount]int{StatDEX: 1}},
+	{Kind: ItemBrassAmulet, Name: "Brass Amulet", Description: "A tarnished charm. +2 MDef.",
+		Slot:      SlotAccessory,
+		MDefBonus: 2},
 }
 
 // ItemStack is one inventory slot: a kind plus how many the player owns.

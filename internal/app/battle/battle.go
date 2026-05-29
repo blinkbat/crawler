@@ -205,14 +205,29 @@ func buildTurnQueue(g *core.GameState) []core.ActorRef {
 	if len(actors) == 0 {
 		return nil
 	}
-	target := len(actors)
+	// Only actors with positive SPD ever reach the ATB gate; counting
+	// SPD-0 actors toward `target` would prevent `actedCount` from
+	// reaching it (the picker skips them via the spd<=0 branch below),
+	// and the loop would only escape via the maxSlots fallback every
+	// round — inflating the queue to 4× the participant count. Filter
+	// them out of the target count up front. An author who sets SPD=0
+	// in the editor is explicitly opting that actor out of the queue.
+	target := 0
+	for _, a := range actors {
+		if a.spd > 0 {
+			target++
+		}
+	}
+	if target == 0 {
+		return nil
+	}
 	queue := make([]core.ActorRef, 0, target*2)
 	actedCount := 0
 	threshold := core.ATBReadyThreshold
 	// Hard cap: even pathological mixes (one tick-fast actor while
-	// everyone else has SPD 1) shouldn't blow past 4× the participant
-	// count of turns per round.
-	maxSlots := target * 4
+	// everyone else has SPD 1) shouldn't blow past the configured
+	// multiple of participant count per round.
+	maxSlots := target * core.ATBQueueSlotMultiplier
 	for actedCount < target && len(queue) < maxSlots {
 		// Pick the actor that reaches `threshold` in the fewest ticks.
 		// ticksNeeded = ceil((threshold - ready) / spd), compared via
@@ -265,7 +280,7 @@ func actorSpeed(g *core.GameState, actor core.ActorRef) int {
 		if !actor.ValidPartyIndex(g.Party) {
 			return 0
 		}
-		spd := g.Party[actor.Index].Stats.SPD
+		spd := core.EffectiveStats(g.Party[actor.Index]).SPD
 		if g.Party[actor.Index].BoundTurns > 0 {
 			spd /= 2
 			if spd < 1 {

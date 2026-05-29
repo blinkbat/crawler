@@ -393,6 +393,12 @@ type GameState struct {
 	PanelsOpen      bool
 	PanelsTab       PanelTab
 	PanelsRowCursor int
+	// EquipDrag tracks an in-progress drag on the Equipment tab: the
+	// item being held under the cursor, where it came from, and which
+	// member/slot/inventory index owned it. Zero-valued ("Source ==
+	// EquipDragSourceNone") means no drag — the panel renders resting
+	// state. ClearEquipDrag resets it on drop / overlay close.
+	EquipDrag EquipDragState
 	// PanelsMapZoom is the cells-on-screen value for the Map tab. Saved
 	// separately from PanelsScroll so cycling between tabs preserves
 	// each tab's cursor state. Initialized lazily on first Map view.
@@ -515,7 +521,17 @@ type PartyMember struct {
 	// every party member at character creation; enemies set non-zero
 	// values in their EnemyDefinition (amoeba is the headline tanky
 	// foe). Clipped against phys-tagged incoming damage in ApplyArmor.
+	// EffectiveArmor (party.go) sums this with bonuses from Equipped.
 	Armor int
+
+	// Equipped is the per-slot equipment, indexed by EquipSlotIndex
+	// (RightHand / LeftHand / Armor / Accessory1 / Accessory2).
+	// ItemNone means the slot is empty. Equipment stat bonuses /
+	// armor bonuses are read through EffectiveStats / EffectiveArmor
+	// / EffectiveMDef rather than baked into Stats directly, so a
+	// future "swap your sword mid-battle" path doesn't need to
+	// recompute base stats — the readers always pull from Equipped.
+	Equipped [EquipSlotCount]ItemKind
 
 	AttackBump  float32
 	DamageFlash float32
@@ -679,7 +695,7 @@ func AttackAccuracy(s Stats, quality int) float64 {
 // miss on top would feel punishing. `rng` is the GameState's per-state
 // RNG (g.Rand()); tests pass their own seeded source for determinism.
 func AttackHits(rng *rand.Rand, s Stats, quality int) bool {
-	return rng.Float64() < AttackAccuracy(s, quality)
+	return RollChance(rng, AttackAccuracy(s, quality))
 }
 
 // StealChance scales the base steal chance by DEX: chance = base × (1 + DEX/20).

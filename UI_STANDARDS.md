@@ -177,8 +177,10 @@ the tick mark.
 Today list owners paint their own row chrome inline (see
 `drawActionRow` in battle.go, Items / Skills rows in panels.go); the
 modal-cursor highlight goes through `DrawSelectedRow` in
-theme_export.go. A central `drawListRow(rect, state)` helper would be
-welcome once those sites can be unified without visual drift.
+theme_export.go. (A central `drawListRow(rect, state)` helper lived
+here briefly and was removed during the audit-perf pass — the
+remaining call sites already drift on small details that a single
+helper would have flattened poorly.)
 
 ### Selection chevron (in-world)
 Same `>` ASCII chevron, painted in `giltBright`, drawn via

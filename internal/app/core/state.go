@@ -63,6 +63,14 @@ func NewGameState(area AreaDefinition) GameState {
 		Visited:    visited,
 		ChestOpen:  -1,
 		DoorPrompt: -1,
+		// Starter equipment kit: one of every equippable in the
+		// registry, plus an extra ring so the player has something
+		// to drag-test the accessory slots with. Iterating
+		// AllItems() (instead of a hand-typed literal) means a new
+		// equippable in items.go appears in the starter kit for
+		// free, and the panel's drag-drop has something live to
+		// land on the first time it opens.
+		Inventory: starterEquipmentKit(),
 		Battle: Battle{
 			ActivePack:        -1,
 			EnemyIndex:        -1,
@@ -81,6 +89,28 @@ func NewGameState(area AreaDefinition) GameState {
 	}
 	RevealRadius(&g, startX, startZ, SightRadius)
 	return g
+}
+
+// starterEquipmentKit returns the inventory the party spawns with.
+// Walks AllItems() filtering for equippable items (Slot != SlotNone)
+// so adding a new piece of equipment to items.go automatically
+// shows up in fresh game state. Accessory items get a second copy
+// because there are two accessory slots and dragging the same kind
+// into both is the cleanest first-contact demo. Adjust if the new-
+// game economy ever demands a curated starter kit instead.
+func starterEquipmentKit() []ItemStack {
+	out := make([]ItemStack, 0, 8)
+	for _, def := range AllItems() {
+		if def.Slot == SlotNone {
+			continue
+		}
+		count := 1
+		if def.Slot == SlotAccessory {
+			count = 2
+		}
+		out = append(out, ItemStack{Kind: def.Kind, Count: count})
+	}
+	return out
 }
 
 // placeDoors converts the area's authored door list into runtime

@@ -1314,11 +1314,15 @@ type chestAddRule struct {
 }
 
 // chestAddHotkeys is the positional pool for the chest-edit modal.
-// Existing keys (C for Cheese, J for Jerky) preserved in registry
-// order. Extend as items are added; entries past pool length are
-// mouse-only.
+// Index i is the hotkey for the i-th item in core.AllItems registry
+// order. Mnemonic letters where they don't collide with existing
+// editor bindings: C=Cheese, J=Jerky, S=Sword, H=sHield, L=Leather,
+// R=Ring, M=aMulet. Extend as items are added; entries past pool
+// length are mouse-only — and the init check at the bottom of this
+// file panics if the pool is shorter than the registry so that's
+// caught at startup, not deep in the editor.
 var chestAddHotkeys = []int32{
-	rl.KeyC, rl.KeyJ, rl.KeyP, rl.KeyU, rl.KeyW, rl.KeyQ,
+	rl.KeyC, rl.KeyJ, rl.KeyS, rl.KeyH, rl.KeyL, rl.KeyR, rl.KeyM,
 }
 
 var chestAddRules = buildChestAddRules()

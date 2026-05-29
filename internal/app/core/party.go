@@ -623,10 +623,26 @@ func DodgeChance(s Stats) float64 {
 	return chance
 }
 
+// RollChance returns true with probability `p` against `rng`. The
+// single "did this probabilistic check land?" idiom shared by
+// RollDodge, RollCrit, AttackHits, and any future status-proc /
+// steal / lifesteal roll — keeps the dice-edge contract (`<`, not
+// `<=`) and the clamp behavior consistent. p outside [0, 1] is
+// allowed: p<=0 always returns false, p>=1 always returns true.
+func RollChance(rng *rand.Rand, p float64) bool {
+	if p <= 0 {
+		return false
+	}
+	if p >= 1 {
+		return true
+	}
+	return rng.Float64() < p
+}
+
 // RollDodge rolls a dodge attempt for the defender against `rng`. True
 // means the incoming basic attack misses entirely.
 func RollDodge(rng *rand.Rand, s Stats) bool {
-	return rng.Float64() < DodgeChance(s)
+	return RollChance(rng, DodgeChance(s))
 }
 
 // CritChance returns the [0, 1] probability that a connecting damage
@@ -654,7 +670,7 @@ func CritChance(s Stats, quality int) float64 {
 // should multiply the post-armor damage by CritMultiplier and surface
 // "Critical!" in the combat log.
 func RollCrit(rng *rand.Rand, s Stats, quality int) bool {
-	return rng.Float64() < CritChance(s, quality)
+	return RollChance(rng, CritChance(s, quality))
 }
 
 // ShortenStatusDuration returns the rolled status duration after

@@ -242,7 +242,7 @@ func handleEnemySleep(ctx enemySpellCtx) {
 	if duration <= 0 {
 		duration = core.SleepMinTurns
 	}
-	m.SleepTurns = core.ShortenStatusDuration(duration, m.Stats.WIS)
+	m.SleepTurns = core.ShortenStatusDuration(duration, core.EffectiveStats(*m).WIS)
 	core.EnqueuePartyVFX(g, core.VFXSleep, ctx.target)
 	enemySpellLog(ctx, "%s falls asleep.", m.Name)
 	audio.Play(audio.SoundInputHit)
@@ -264,7 +264,7 @@ func handleEnemyWeb(ctx enemySpellCtx) {
 	if duration <= 0 {
 		duration = core.SpiderWebBoundMinTurns
 	}
-	m.BoundTurns = core.ShortenStatusDuration(duration, m.Stats.WIS)
+	m.BoundTurns = core.ShortenStatusDuration(duration, core.EffectiveStats(*m).WIS)
 	core.EnqueuePartyVFX(g, core.VFXWeb, ctx.target)
 	enemySpellLog(ctx, "%s is bound in sticky webs.", m.Name)
 	audio.Play(audio.SoundInputHit)
@@ -289,7 +289,7 @@ func handleEnemyConfuse(ctx enemySpellCtx) {
 	if duration <= 0 {
 		duration = core.WispConfuseMinTurns
 	}
-	m.ConfusedTurns = core.ShortenStatusDuration(duration, m.Stats.WIS)
+	m.ConfusedTurns = core.ShortenStatusDuration(duration, core.EffectiveStats(*m).WIS)
 	core.EnqueuePartyVFX(g, core.VFXConfuse, ctx.target)
 	enemySpellLog(ctx, "%s grows confused.", m.Name)
 	audio.Play(audio.SoundInputHit)
@@ -714,7 +714,7 @@ func applyAttack(g *core.GameState, quality int) bool {
 	// they essentially never whiff. The swing animation still plays and
 	// the timing popup still grades — the player's mechanical performance
 	// is acknowledged — but no damage lands when the roll fails.
-	if !core.AttackHits(g.Rand(), attacker.Stats, quality) {
+	if !core.AttackHits(g.Rand(), core.EffectiveStats(*attacker), quality) {
 		// Whiff log keeps the quality prefix so the line reads consistently
 		// with hits ("Excellent! Warrior hits for 8." vs "Excellent! Warrior
 		// swings wide."). The popup over the actor still says "Excellent!"
@@ -740,7 +740,7 @@ func applyAttack(g *core.GameState, quality int) bool {
 	// the combat log uses it so what the player reads matches the HP
 	// delta (an Excellent vs an Amoeba prints "hits for 4", not the
 	// 12 we computed before armor clipped it down).
-	rawDamage := core.ScaleDamage(core.MeleeDamage(attacker.Stats, 0), quality)
+	rawDamage := core.ScaleDamage(core.MeleeDamage(core.EffectiveStats(*attacker), 0), quality)
 	crit, _ := rollSkillCrit(g, attacker, core.SkillNone, quality)
 	rawDamage = applyCritMultiplier(rawDamage, crit, false)
 	dealt, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagPhys)
@@ -899,7 +899,7 @@ func applySteal(g *core.GameState, quality int) bool {
 	effect := core.EffectiveSkillEffect(actor, core.SkillSteal)
 	// Steal chance: base × (1 + DEX/20), then quality multiplier on top.
 	// Capped at 1.0 so a perfect-Excellent high-DEX thief still rolls.
-	chance := core.StealChance(actor.Stats, effect.StealChance) * float64(core.TimingBonusMult(quality))
+	chance := core.StealChance(core.EffectiveStats(*actor), effect.StealChance) * float64(core.TimingBonusMult(quality))
 	if chance > 1 {
 		chance = 1
 	}
@@ -921,7 +921,7 @@ func applySteal(g *core.GameState, quality int) bool {
 		var defeated bool
 		var critBonus bool
 		if mod.StealBonusDamage > 0 {
-			rawBonus := actor.Stats.STR * mod.StealBonusDamage
+			rawBonus := core.EffectiveStats(*actor).STR * mod.StealBonusDamage
 			critBonus, _ = rollSkillCrit(g, actor, core.SkillSteal, quality)
 			rawBonus = applyCritMultiplier(rawBonus, critBonus, false)
 			bonus, defeated = damageEnemy(g, g.Battle.EnemyIndex, rawBonus, quality, core.SkillTagPhys)
@@ -1260,7 +1260,7 @@ func rollSkillCrit(g *core.GameState, actor *core.PartyMember, skill core.SkillI
 		}
 		return
 	}
-	crit = core.RollCrit(g.Rand(), actor.Stats, quality)
+	crit = core.RollCrit(g.Rand(), core.EffectiveStats(*actor), quality)
 	return
 }
 
@@ -1588,8 +1588,12 @@ func damagePartyMember(g *core.GameState, partyIndex, rawAmount int, tag core.Sk
 	if member.Ingested {
 		return 0, false
 	}
-	amount := core.ApplyArmor(rawAmount, tag, member.Armor)
-	amount = core.ApplyMagicDefense(amount, tag, core.MagicDefense(member.Stats))
+	// Mitigation reads through EffectiveArmor / EffectiveMDef so any
+	// equipped gear bonuses stack on top of the base values. Base
+	// member.Armor stays authored (0 today on the party side); items
+	// add to it via ArmorBonus / MDefBonus on their ItemDefinition.
+	amount := core.ApplyArmor(rawAmount, tag, core.EffectiveArmor(*member))
+	amount = core.ApplyMagicDefense(amount, tag, core.EffectiveMDef(*member))
 	member.DamageFlash = core.FlashDuration
 	member.HP -= amount
 	if amount > 0 {
@@ -1807,7 +1811,7 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	// stone golem slam, etc.) go through their own resolver and are
 	// NOT dodgeable today — mirrors AttackAccuracy, which only gates
 	// basic attacks.
-	if core.RollDodge(g.Rand(), g.Party[target].Stats) {
+	if core.RollDodge(g.Rand(), core.EffectiveStats(g.Party[target])) {
 		recordQuality(g, defendQuality, target, true)
 		setBattleMessage(g, fmt.Sprintf("%s sidesteps the %s.", g.Party[target].Name, core.EnemySingularNoun(*enemy)))
 		return true
@@ -1862,7 +1866,7 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	if damage > 0 && def.PoisonChance > 0 && g.Party[target].HP > 0 && g.Party[target].PoisonTurns <= 0 {
 		if g.Rand().Float64() < def.PoisonChance {
 			rawPoison := core.DefaultPoisonEffect.RollDuration(g.Rand())
-			g.Party[target].PoisonTurns = core.ShortenStatusDuration(rawPoison, g.Party[target].Stats.WIS)
+			g.Party[target].PoisonTurns = core.ShortenStatusDuration(rawPoison, core.EffectiveStats(g.Party[target]).WIS)
 			setBattleMessage(g, fmt.Sprintf("%s is poisoned!", g.Party[target].Name))
 		}
 	}
@@ -1877,8 +1881,13 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 		heal := int(float64(dealt) * def.LifestealPercent)
 		if heal > 0 {
 			enemy.HP += heal
-			if enemy.HP > core.EnemyInfoFor(*enemy).MaxHP {
-				enemy.HP = core.EnemyInfoFor(*enemy).MaxHP
+			// Cap against the per-instance MaxHP, not the definition's
+			// base MaxHP — a future raised/scaled enemy with a non-
+			// default per-instance ceiling would otherwise overheal
+			// past its real cap or undercap a buffed one. Today both
+			// values match because NewEnemy seeds from the same def.
+			if enemy.HP > enemy.MaxHP {
+				enemy.HP = enemy.MaxHP
 			}
 			setBattleMessage(g, fmt.Sprintf("%s drains life from %s (+%d HP).", core.TheEnemy(def), g.Party[target].Name, heal))
 		}

@@ -266,6 +266,15 @@ const (
 	// next instead of clumped at round boundaries.
 	ATBReadyThreshold = 100
 
+	// ATBQueueSlotMultiplier caps the per-round queue length at
+	// target × this multiplier — the runaway-fast actor safety net.
+	// With target = count of alive actors with SPD>0, a value of 4
+	// means a single 8× faster actor still can't act more than 4
+	// times per round and the slow actors all get their one turn.
+	// Sibling of ATBReadyThreshold so both ATB tuning knobs sit
+	// together.
+	ATBQueueSlotMultiplier = 4
+
 	// BurnTickDamage is the per-turn damage applied to a burning actor at
 	// the start of their own turn. Flat so the strategic value of burn
 	// stays predictable across enemy HP scales.

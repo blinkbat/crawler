@@ -3,6 +3,7 @@ package explore
 import (
 	"crawler/internal/app/core"
 	"crawler/internal/app/input"
+	"crawler/internal/app/render"
 )
 
 // openPanels raises the game-panels overlay and resets the per-tab
@@ -24,8 +25,14 @@ func openPanels(g *core.GameState) {
 
 // closePanels takes the overlay down. Tab + zoom + cursor state stays
 // on the GameState so reopening lands the player back where they were.
+// Any in-progress equipment drag is cancelled and the render-side
+// hit-rect layout is zeroed so reopening doesn't resume with a held
+// item or route a frame-one click against stale rects from the prior
+// session.
 func closePanels(g *core.GameState) {
 	g.PanelsOpen = false
+	core.ClearEquipDrag(g)
+	render.ResetEquipPanelLayout()
 }
 
 // panelsMapZoomDefault is the initial cells-on-screen value for the Map
@@ -91,11 +98,14 @@ func updatePanels(g *core.GameState) {
 				openLevelUpFor(g, g.PanelsRowCursor)
 			}
 		}
-	case core.PanelTabEquipment, core.PanelTabSkills:
-		// These tabs are read-only displays today. Up/Down scrolls
-		// the party-member cursor; Confirm / Back are handled
-		// above. (Skills tab confirm will open the tier-purchase
-		// flow once the tree UI lands.)
+	case core.PanelTabEquipment:
+		// Equipment tab: Up/Down still moves the party-member
+		// highlight, BUT the primary interaction is mouse drag-drop
+		// between the inventory strip and the 5 per-member slots —
+		// see updateEquipmentDrag.
+		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, len(g.Party))
+		updateEquipmentDrag(g)
+	case core.PanelTabSkills:
 		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, len(g.Party))
 	case core.PanelTabItems:
 		count := len(core.LiveStacks(g.Inventory))
@@ -132,11 +142,20 @@ func panelTabAdvance(t core.PanelTab, delta int) core.PanelTab {
 }
 
 // setPanelTab switches the active tab and resets the per-tab cursor.
-// Map zoom is preserved (handled separately on GameState).
+// Map zoom is preserved (handled separately on GameState). Any
+// in-flight Equipment drag is cancelled — leaving it active across
+// tab switches would let an LMB-release on a non-Equipment tab go
+// unobserved (updateEquipmentDrag only runs on the Equipment tab),
+// stranding the held item to be landed by the next stray click when
+// the user returns. Resetting the stored render-side hit-rect
+// layout on the same edge keeps the first frame after a switch INTO
+// Equipment from reading a stale layout from a previous visit.
 func setPanelTab(g *core.GameState, t core.PanelTab) {
 	if t == g.PanelsTab {
 		return
 	}
+	core.ClearEquipDrag(g)
+	render.ResetEquipPanelLayout()
 	g.PanelsTab = t
 	g.PanelsRowCursor = 0
 }

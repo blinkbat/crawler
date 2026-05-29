@@ -36,6 +36,19 @@ func panelsMapFooterText(areaName string, zoom int) string {
 	return panelsMapFooterCache.text
 }
 
+// panelTabDrawers dispatches by tab index to the per-tab body drawer.
+// Indexed array (not a map) so the literal length-checks at compile
+// time against PanelTabCount — adding a 6th tab is a single new
+// PanelTab const + a new drawer + adding its slot here; forgetting
+// one is a compile error, not a silent no-op like the old switch.
+var panelTabDrawers = [core.PanelTabCount]func(core.GameState, Resources, rl.Rectangle){
+	core.PanelTabStats:     drawPanelsStats,
+	core.PanelTabEquipment: drawPanelsEquipment,
+	core.PanelTabItems:     drawPanelsItems,
+	core.PanelTabSkills:    drawPanelsSkills,
+	core.PanelTabMap:       drawPanelsMap,
+}
+
 // DrawPanelsOverlay paints the game-panels modal — the five-tab overlay
 // raised by the gamepad middle button / keyboard I. Routes by
 // g.PanelsTab to the per-tab body drawer; the tab strip + footer hint
@@ -89,17 +102,8 @@ func DrawPanelsOverlay(g core.GameState, assets Resources) {
 	bodyRect := rl.NewRectangle(float32(cardX+22), float32(bodyY),
 		float32(cardW-44), float32(cardY+cardH-26-bodyY-overlayFooterReserve))
 
-	switch g.PanelsTab {
-	case core.PanelTabStats:
-		drawPanelsStats(g, assets, bodyRect)
-	case core.PanelTabEquipment:
-		drawPanelsEquipment(g, assets, bodyRect)
-	case core.PanelTabItems:
-		drawPanelsItems(g, assets, bodyRect)
-	case core.PanelTabSkills:
-		drawPanelsSkills(g, assets, bodyRect)
-	case core.PanelTabMap:
-		drawPanelsMap(g, assets, bodyRect)
+	if int(g.PanelsTab) >= 0 && int(g.PanelsTab) < len(panelTabDrawers) {
+		panelTabDrawers[g.PanelsTab](g, assets, bodyRect)
 	}
 
 	drawModalFooter(font, card, "L1/R1 tabs   Left/Right pick member   X close")
@@ -297,80 +301,383 @@ func plural(n int) string {
 	return "s"
 }
 
-// drawPanelsEquipment renders the Equipment tab. The equipment system
-// isn't authored yet, so the slots read as placeholders — but the
-// layout matches the Stats tab so the eye doesn't have to retrain on
-// every tab switch. Each slot row inside the card shows the label
-// (FontSmall, muted) above the value (FontBody, primary or dim
-// depending on whether the slot is filled).
-// equipmentSlot is one row in the per-member Equipment panel: the
-// label, the icon-draw function, and a fillFn that decides whether the
-// slot is occupied for this member and what value string + tone to show.
-// One row per slot keeps the label / icon / fill logic together instead
-// of split between a label slice and a parallel `switch slotIdx { ... }`
-// (which the audit flagged as a lockstep hazard).
-type equipmentSlot struct {
-	label  string
-	drawIcon func(cx, cy, r float32, col rl.Color)
-	// fill returns (filled, valueLabel) given the party member; the
-	// "Armor +N" row is the only filled state today.
-	fill func(m core.PartyMember) (bool, string)
+// drawPanelsEquipment renders the Equipment tab: a per-member column
+// of five drop targets (R.HAND, L.HAND, ARMOR, ACC1, ACC2) above a
+// shared inventory strip of every equippable item the party owns.
+// The strip is the drag source; the slots are the drop targets. The
+// input layer (explore/panels_drag.go) reads back the hit rects
+// stored on lastEquipLayout to route mouse events.
+//
+// While a drag is in progress (g.EquipDrag.Source != None), the
+// dragged item paints near the cursor and the compatible drop
+// targets gain a gilt outline so the player sees where it can land.
+
+// Equipment-tab layout constants. Co-located so tuning the panel
+// shape is a single-file edit; the drag-ghost width is locked to
+// the inventory-tile width on purpose (a hovering ghost the same
+// size as its source tile reads cleaner than a free-floating one),
+// so changing equipInventoryTileW automatically follows on the
+// ghost. equipMinColRegion is derived from the per-slot row height
+// × EquipSlotCount so the "is there room for the strip?" rescue
+// branch can never out-shrink the slot column underneath it.
+const (
+	equipSlotRowHeight    = float32(46)
+	equipStripGap         = float32(8)
+	equipStripHeight      = float32(110)
+	equipInventoryTileW   = float32(140)
+	equipInventoryTileH   = float32(64)
+	equipInventoryTileGap = float32(8)
+	equipDragGhostW       = equipInventoryTileW
+	equipDragGhostH       = float32(40)
+)
+
+// equipMinColRegion is the minimum height left for the per-member
+// slot column before the inventory strip starts auto-shrinking.
+// Derived from the slot row count so a new equip slot lifts the
+// floor automatically.
+var equipMinColRegion = equipSlotRowHeight * float32(core.EquipSlotCount)
+
+// slotIconForType returns the icon-draw function for an EquipSlotIndex
+// — the per-slot row variant.
+func slotIconForType(slot core.EquipSlotIndex) func(cx, cy, r float32, col rl.Color) {
+	return slotIconForKind(core.SlotIndexType(slot))
 }
 
-var equipmentSlots = [...]equipmentSlot{
-	{"WEAPON", func(cx, cy, r float32, col rl.Color) { drawSlotIconSword(cx, cy, r, col) },
-		func(core.PartyMember) (bool, string) { return false, "—" }},
-	{"ARMOR", func(cx, cy, r float32, col rl.Color) { drawSlotIconShield(cx, cy, r, col) },
-		func(m core.PartyMember) (bool, string) {
-			if m.Armor > 0 {
-				return true, "Armor +" + strconv.Itoa(m.Armor)
-			}
-			return false, "—"
-		}},
-	{"ACCESSORY", func(cx, cy, r float32, col rl.Color) { drawSlotIconRing(cx, cy, r, col) },
-		func(core.PartyMember) (bool, string) { return false, "—" }},
+// slotIconForKind returns the icon-draw function for an
+// EquipmentSlotType — the inventory-tile / drag-ghost variant.
+// One mapping, one place; the historical sword/shield/ring icons
+// stay if the slot type set ever expands (e.g. SlotConsumable).
+func slotIconForKind(t core.EquipmentSlotType) func(cx, cy, r float32, col rl.Color) {
+	switch t {
+	case core.SlotHand:
+		return drawSlotIconSword
+	case core.SlotArmor:
+		return drawSlotIconShield
+	case core.SlotAccessory:
+		return drawSlotIconRing
+	}
+	return drawSlotIconRing
+}
+
+// equipPanelLayout caches the hit-test rectangles laid down each
+// frame by drawPanelsEquipment so the input layer can read them
+// without re-running the layout math. SlotRects is flattened
+// [partyIndex][slotIndex] in row-major order; InventoryRects mirrors
+// the order of equippableInventory. PartyCount and InvCount let the
+// input layer iterate without re-deriving sizes.
+type equipPanelLayout struct {
+	SlotRects        []rl.Rectangle // len = PartyCount * EquipSlotCount
+	SlotPartyIdx     []int          // parallel: which member owns each rect
+	SlotIdx          []core.EquipSlotIndex
+	InventoryRects   []rl.Rectangle
+	InventoryEntries []equipInventoryEntry
+	DragCursor       rl.Vector2
+}
+
+type equipInventoryEntry struct {
+	Kind  core.ItemKind
+	Count int
+}
+
+// lastEquipLayout is the most recently drawn panel layout. Read by the
+// input layer in the same frame; render writes it AFTER drawing so
+// hit-test geometry matches what was painted. Single-threaded
+// renderer + single-threaded input means no synchronisation needed.
+var lastEquipLayout equipPanelLayout
+
+// LastEquipPanelLayout returns the panel's per-frame hit-rect layout.
+// Used by the explore-side drag-drop handler. Exposed (uppercase)
+// because the input layer lives in another package.
+func LastEquipPanelLayout() equipPanelLayout { return lastEquipLayout }
+
+// ResetEquipPanelLayout zeroes the cached hit-rect layout. Called
+// from the input layer on overlay close / tab switch so the first
+// frame after a transition can't observe stale rects from a previous
+// Equipment-tab visit — without this, an LMB-down on the frame
+// EQUIPMENT regains focus could route to coordinates that no longer
+// describe the layout the player sees.
+func ResetEquipPanelLayout() { lastEquipLayout = equipPanelLayout{} }
+
+// EquipPanelSlotHit returns (partyIndex, slot, true) if `pt` is inside
+// any slot rect, else (-1, 0, false). Mouse hit test for the input
+// layer.
+func EquipPanelSlotHit(pt rl.Vector2) (int, core.EquipSlotIndex, bool) {
+	for i, r := range lastEquipLayout.SlotRects {
+		if rl.CheckCollisionPointRec(pt, r) {
+			return lastEquipLayout.SlotPartyIdx[i], lastEquipLayout.SlotIdx[i], true
+		}
+	}
+	return -1, 0, false
+}
+
+// inventoryHitRect returns the index of the inventory tile under
+// `pt`, or -1. Shared by EquipPanelInventoryHit and
+// EquipPanelInventoryAreaHit so the iterate-rects loop lives in one
+// place — a future per-tile bounds check (padding, dead zone) can't
+// drift between the two callers.
+func inventoryHitRect(pt rl.Vector2) int {
+	for i, r := range lastEquipLayout.InventoryRects {
+		if rl.CheckCollisionPointRec(pt, r) {
+			return i
+		}
+	}
+	return -1
+}
+
+// EquipPanelInventoryHit returns (inventoryIndex into shared
+// inventory, ItemKind, true) when `pt` is over an inventory tile, else
+// (-1, ItemNone, false). InventoryIndex is the index in
+// GameState.Inventory (not the filtered equippable list), so the
+// input layer can ConsumeItem against it directly.
+func EquipPanelInventoryHit(pt rl.Vector2, g core.GameState) (int, core.ItemKind, bool) {
+	tileIdx := inventoryHitRect(pt)
+	if tileIdx < 0 {
+		return -1, core.ItemNone, false
+	}
+	kind := lastEquipLayout.InventoryEntries[tileIdx].Kind
+	for j := range g.Inventory {
+		if g.Inventory[j].Kind == kind && g.Inventory[j].Count > 0 {
+			return j, kind, true
+		}
+	}
+	return -1, core.ItemNone, false
+}
+
+// EquipPanelInventoryAreaHit reports whether `pt` is inside the
+// inventory strip's overall bounds (the gutter, not a specific tile).
+// Used by the input layer to detect "dropped on the inventory area" =
+// unequip, even when the cursor doesn't land on a specific tile.
+func EquipPanelInventoryAreaHit(pt rl.Vector2) bool {
+	return inventoryHitRect(pt) >= 0
 }
 
 func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) {
 	font := assets.Font()
+	lastEquipLayout = equipPanelLayout{} // reset every frame
 	if len(g.Party) == 0 {
 		return
 	}
-	cols, colW := memberColumnLayout(body, len(g.Party))
+
+	// Split the body into two regions: top for member columns, bottom
+	// for the inventory strip, with a small gap. If the body is too
+	// short to fit both at the canonical strip height + the minimum
+	// column region, the strip shrinks instead of the columns.
+	stripHeight := equipStripHeight
+	if body.Height < stripHeight+equipMinColRegion {
+		stripHeight = body.Height * 0.32
+	}
+	colsRegion := rl.NewRectangle(body.X, body.Y, body.Width, body.Height-stripHeight-equipStripGap)
+	stripRegion := rl.NewRectangle(body.X, body.Y+colsRegion.Height+equipStripGap, body.Width, stripHeight)
+
+	cols, colW := memberColumnLayout(colsRegion, len(g.Party))
+	slotRowH := equipSlotRowHeight
+	totalSlots := len(g.Party) * int(core.EquipSlotCount)
+	lastEquipLayout.SlotRects = make([]rl.Rectangle, 0, totalSlots)
+	lastEquipLayout.SlotPartyIdx = make([]int, 0, totalSlots)
+	lastEquipLayout.SlotIdx = make([]core.EquipSlotIndex, 0, totalSlots)
+
 	for i, m := range g.Party {
 		highlight := i == g.PanelsRowCursor
 		contentY := drawPartyMemberCardHeader(font, m, cols[i], highlight)
 		innerX := cols[i].X + 14
 		innerW := colW - 28
 
-		slotRowH := float32(46)
-		for slotIdx, slot := range equipmentSlots {
-			rowY := contentY + float32(slotIdx)*slotRowH
-			// Slot bezel: very faint inset so the rows read as a
-			// stack without competing with the card.
-			drawGlassPane(int32(innerX), int32(rowY), int32(innerW), int32(slotRowH-8), fadeColor(glassDeep, 0.55))
+		for s := core.EquipSlotIndex(0); s < core.EquipSlotCount; s++ {
+			rowY := contentY + float32(int(s))*slotRowH
+			slotRect := rl.NewRectangle(float32(innerX), rowY, float32(innerW), slotRowH-8)
+			lastEquipLayout.SlotRects = append(lastEquipLayout.SlotRects, slotRect)
+			lastEquipLayout.SlotPartyIdx = append(lastEquipLayout.SlotPartyIdx, i)
+			lastEquipLayout.SlotIdx = append(lastEquipLayout.SlotIdx, s)
 
-			// Slot sigil — small pictograph beside the label. Once an
-			// item slots in (filled=true), the sigil takes the gilt
-			// highlight; resting state stays dim.
-			filled, value := slot.fill(m)
+			// Compatible-target highlight: when a drag is active, slots
+			// the held item can land on take a gilt outline. Resting
+			// state is the standard glass bezel.
+			compatible := false
+			if g.EquipDrag.Source != core.EquipDragSourceNone {
+				compatible = core.CanEquipInSlot(g.EquipDrag.Kind, s)
+				// Suppress highlight on the drag origin so the source
+				// slot doesn't visually accept-itself.
+				if g.EquipDrag.Source == core.EquipDragSourceSlot &&
+					g.EquipDrag.PartyIndex == i && g.EquipDrag.SlotIndex == s {
+					compatible = false
+				}
+			}
+			bg := fadeColor(glassDeep, 0.55)
+			if compatible {
+				bg = fadeColor(glassWarm, 0.65)
+			}
+			drawGlassPane(int32(slotRect.X), int32(slotRect.Y), int32(slotRect.Width), int32(slotRect.Height), bg)
+			if compatible {
+				rl.DrawRectangleLinesEx(slotRect, 1.5, giltBright)
+			}
+
+			equippedKind := m.Equipped[s]
+			filled := equippedKind != core.ItemNone
 			iconCol := fadeColor(woodAccent, 0.7)
 			if filled {
 				iconCol = giltBright
 			}
-			slot.drawIcon(innerX+14, rowY+18, 9, iconCol)
+			slotIconForType(s)(float32(innerX)+14, rowY+18, 9, iconCol)
 
-			labelX := innerX + 32
-			drawTextWithShadow(font, slot.label, labelX, rowY+4, FontTiny, textMuted)
+			labelX := float32(innerX) + 32
+			drawTextWithShadow(font, core.SlotIndexLabel(s), labelX, rowY+4, FontTiny, textMuted)
+			value := "—"
 			valCol := textDim
 			if filled {
+				value = core.ItemInfo(equippedKind).Name
 				valCol = textPrimary
 			}
 			drawTextWithShadow(font, value, labelX, rowY+18, FontSmall, valCol)
 		}
 	}
-	footer := "Equipment system pending — values shown reflect the base armor stat only."
+
+	// Inventory strip: tile every equippable item in the party
+	// inventory. Consumables (cheese / jerky) stay off this strip —
+	// they belong on the Items tab. Hit rects are stored so the
+	// input layer can route drag-starts off these tiles.
+	drawCard(int32(stripRegion.X), int32(stripRegion.Y), int32(stripRegion.Width), int32(stripRegion.Height), surfacePrimary, borderSoft, borderSoft)
+	drawTextWithShadow(font, "EQUIPMENT INVENTORY", stripRegion.X+10, stripRegion.Y+6, FontTiny, textMuted)
+
+	entries := equippableInventoryEntries(g.Inventory)
+	lastEquipLayout.InventoryEntries = entries
+	lastEquipLayout.InventoryRects = make([]rl.Rectangle, 0, len(entries))
+
+	tileW := equipInventoryTileW
+	tileH := equipInventoryTileH
+	tileGap := equipInventoryTileGap
+	tileX := stripRegion.X + 10
+	tileY := stripRegion.Y + 24
+	overflow := 0
+	for entryIdx, entry := range entries {
+		if tileX+tileW > stripRegion.X+stripRegion.Width-10 {
+			tileX = stripRegion.X + 10
+			tileY += tileH + tileGap
+			if tileY+tileH > stripRegion.Y+stripRegion.Height-4 {
+				// Out of vertical room — count what's left so the
+				// player sees an honest "+N more" footer rather than
+				// silently truncating to whatever fit.
+				overflow = len(entries) - entryIdx
+				break
+			}
+		}
+		rect := rl.NewRectangle(tileX, tileY, tileW, tileH)
+		lastEquipLayout.InventoryRects = append(lastEquipLayout.InventoryRects, rect)
+
+		bg := fadeColor(glassMid, 0.85)
+		// Highlight inventory tiles when the cursor is over them
+		// during a drag-from-slot (so the player sees where the
+		// dropped item will go).
+		if g.EquipDrag.Source == core.EquipDragSourceSlot {
+			if rl.CheckCollisionPointRec(rl.GetMousePosition(), rect) {
+				bg = fadeColor(glassWarm, 0.85)
+			}
+		}
+		drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), bg)
+		def := core.ItemInfo(entry.Kind)
+		slotIconForKind(def.Slot)(rect.X+16, rect.Y+rect.Height/2, 10, giltBright)
+		drawTextWithShadow(font, def.Name, rect.X+34, rect.Y+8, FontTiny, textPrimary)
+		if entry.Count > 1 {
+			drawTextWithShadow(font, "x"+strconv.Itoa(entry.Count), rect.X+34, rect.Y+24, FontTiny, textHint)
+		}
+		// Bonus summary on the second line.
+		bonus := equipBonusSummary(def)
+		if bonus != "" {
+			drawTextWithShadow(font, bonus, rect.X+34, rect.Y+rect.Height-16, FontTiny, inkAccent)
+		}
+		tileX += tileW + tileGap
+	}
+	if len(entries) == 0 {
+		drawTextWithShadow(font, "No equipment held. Pickups from chests / steals land here.",
+			stripRegion.X+10, stripRegion.Y+stripRegion.Height/2-6, FontTiny, textHint)
+	}
+	if overflow > 0 {
+		// Honest truncation marker — drawn at the right edge of the
+		// strip's header so it doesn't compete with the visible tiles
+		// for click hit-tests. The hidden items are unreachable via
+		// drag for now; a scroll affordance is the obvious follow-up.
+		label := "+" + strconv.Itoa(overflow) + " more (not shown)"
+		m := rl.MeasureTextEx(font, label, FontTiny, 1)
+		drawTextWithShadow(font, label,
+			stripRegion.X+stripRegion.Width-m.X-10,
+			stripRegion.Y+6, FontTiny, inkAccent)
+	}
+
+	// Drag overlay — paints the held item as a tooltip near the
+	// mouse so the player sees what they're carrying.
+	if g.EquipDrag.Source != core.EquipDragSourceNone {
+		drawEquipDragGhost(g, font)
+	}
+
+	footer := "Drag items between the strip and the slots. Drop on inventory to unequip."
 	drawTextWithShadow(font, footer, body.X, body.Y+body.Height-16, FontTiny, textHint)
+}
+
+// equippableInventoryEntries filters g.Inventory down to items whose
+// definition has a real equipment slot. Order preserves the slice
+// order so the player's hand-picked inventory ordering stays stable
+// across frames.
+func equippableInventoryEntries(inv []core.ItemStack) []equipInventoryEntry {
+	out := make([]equipInventoryEntry, 0, len(inv))
+	for _, st := range inv {
+		if st.Count <= 0 {
+			continue
+		}
+		def, ok := core.ItemInfoOk(st.Kind)
+		if !ok || def.Slot == core.SlotNone {
+			continue
+		}
+		out = append(out, equipInventoryEntry{Kind: st.Kind, Count: st.Count})
+	}
+	return out
+}
+
+// equipBonusSummary returns the single-line "STR +2" / "Armor +1" /
+// "MDef +2" copy painted under an item's tile. Compact, builds the
+// shortest combination of bonuses authored on the def.
+func equipBonusSummary(def core.ItemDefinition) string {
+	parts := []string{}
+	if def.ArmorBonus != 0 {
+		parts = append(parts, "Armor +"+strconv.Itoa(def.ArmorBonus))
+	}
+	if def.MDefBonus != 0 {
+		parts = append(parts, "MDef +"+strconv.Itoa(def.MDefBonus))
+	}
+	for s := core.Stat(0); s < core.StatCount; s++ {
+		v := def.StatBonus[s]
+		if v == 0 {
+			continue
+		}
+		sign := "+"
+		if v < 0 {
+			sign = ""
+		}
+		parts = append(parts, core.StatLabel(s)+" "+sign+strconv.Itoa(v))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	out := parts[0]
+	for i := 1; i < len(parts); i++ {
+		out += "  " + parts[i]
+	}
+	return out
+}
+
+// drawEquipDragGhost paints the held item as a translucent tile at
+// the mouse position. Painted last so it floats above the rest of
+// the panel.
+func drawEquipDragGhost(g core.GameState, font rl.Font) {
+	mouse := rl.GetMousePosition()
+	def := core.ItemInfo(g.EquipDrag.Kind)
+	rect := rl.NewRectangle(mouse.X+10, mouse.Y+4, equipDragGhostW, equipDragGhostH)
+	drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), fadeColor(glassWarm, 0.95))
+	rl.DrawRectangleLinesEx(rect, 1.5, giltBright)
+	slotIconForKind(def.Slot)(rect.X+14, rect.Y+rect.Height/2, 9, giltBright)
+	drawTextWithShadow(font, def.Name, rect.X+30, rect.Y+8, FontTiny, textPrimary)
+	bonus := equipBonusSummary(def)
+	if bonus != "" {
+		drawTextWithShadow(font, bonus, rect.X+30, rect.Y+22, FontTiny, inkAccent)
+	}
 }
 
 // drawSlotIconSword paints a small upright longsword sigil for the

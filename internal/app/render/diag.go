@@ -97,19 +97,50 @@ func CloseRenderLog() {
 // IsRenderLogActive reports whether the log file is currently open.
 // Per-frame call sites use this to short-circuit the snapshot work
 // (camera + counts) when logging is off.
+//
+// LOCKING CONTRACT: This function takes renderLogMu. Callers MUST
+// NOT hold renderLogMu when calling — sync.Mutex is not reentrant
+// and a "log if active" wrapper that called this from inside
+// LogRenderInit / LogRenderFrame would self-deadlock. If a future
+// helper needs the same predicate from inside a logging call, split
+// out an isRenderLogActiveLocked() that reads `renderLogFile`
+// directly.
 func IsRenderLogActive() bool {
 	renderLogMu.Lock()
 	defer renderLogMu.Unlock()
 	return renderLogFile != nil
 }
 
+// renderLogPendingCap bounds the in-memory init/error backlog
+// retained while the log file is closed. Sized comfortably above
+// the actual startup line count (~6 init lines today: lighting
+// shader + locs + billboard fog + locs + resources + flat tables)
+// with headroom for future texture/material init dumps. Smaller
+// caps risked silently dropping the very lines the log is designed
+// to capture for render-bug bisection.
+const renderLogPendingCap = 512
+
+// trimPending evicts the oldest pending entry in place (copy +
+// re-slice the same array) so the dropped string headers actually
+// release for GC — `buf = buf[1:]` would advance the header but
+// leave the discarded element anchored in the underlying array.
+func trimPending() {
+	n := len(renderLogPendingInit)
+	if n == 0 {
+		return
+	}
+	copy(renderLogPendingInit, renderLogPendingInit[1:])
+	renderLogPendingInit[n-1] = ""
+	renderLogPendingInit = renderLogPendingInit[:n-1]
+}
+
 // LogRenderInit records a one-off init line (shader compile result,
 // model load count, etc.). If the log file is open it writes
 // immediately; otherwise it stashes the line in renderLogPendingInit
 // to be flushed the next time OpenRenderLog runs. The pending
-// buffer is bounded — past ~64 entries the oldest get dropped — so a
-// long session without the log toggled on can't grow the buffer
-// unboundedly.
+// buffer is bounded by renderLogPendingCap — past that the oldest
+// gets dropped so a long session without the log toggled on can't
+// grow the buffer unboundedly.
 func LogRenderInit(format string, args ...interface{}) {
 	line := fmt.Sprintf("[init] "+format, args...)
 	renderLogMu.Lock()
@@ -119,9 +150,8 @@ func LogRenderInit(format string, args ...interface{}) {
 		_ = renderLogFile.Sync()
 		return
 	}
-	const maxPending = 64
-	if len(renderLogPendingInit) >= maxPending {
-		renderLogPendingInit = renderLogPendingInit[1:]
+	if len(renderLogPendingInit) >= renderLogPendingCap {
+		trimPending()
 	}
 	renderLogPendingInit = append(renderLogPendingInit, line)
 }
@@ -138,9 +168,8 @@ func LogRenderError(format string, args ...interface{}) {
 		_ = renderLogFile.Sync()
 		return
 	}
-	const maxPending = 64
-	if len(renderLogPendingInit) >= maxPending {
-		renderLogPendingInit = renderLogPendingInit[1:]
+	if len(renderLogPendingInit) >= renderLogPendingCap {
+		trimPending()
 	}
 	renderLogPendingInit = append(renderLogPendingInit, line)
 }
@@ -163,10 +192,9 @@ type renderFrameStats struct {
 	CamPos           rl.Vector3
 	CamDir           rl.Vector3
 	CamFOV           float32
-	PlayerYaw        float32
-	PlayerPitch      float32
-	PlayerLookYaw    float32
-	PlayerLookPitch  float32
+	PlayerYaw       float32
+	PlayerLookYaw   float32
+	PlayerLookPitch float32
 	StepCount        int
 	LightingShaderID uint32
 	BillboardFogID   uint32

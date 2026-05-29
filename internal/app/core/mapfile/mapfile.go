@@ -714,6 +714,34 @@ const (
 	customEnemyFieldCountLegacy = 17
 )
 
+// customEnemyEncodeFormat is the fmt.Fprintf format string the
+// encoder writes one row per. Kept as a named constant so init() can
+// count its `%`-verbs and assert the encoder and customEnemyFieldCount
+// stay in lockstep — a future schema bump that touches the format
+// string without bumping the count (or vice versa) panics at startup
+// instead of producing a row the decoder rejects on the next load.
+const customEnemyEncodeFormat = "%s %s %d %d %d %d %d %d %d %d %d %d %d %d %d %g %d %s\n"
+
+func init() {
+	// Count the `%`-verbs (each consumes one argument). `%%` is a
+	// literal percent sign, not a verb — none today, but the loop is
+	// defensive so a future format with literal % doesn't double-count.
+	verbs := 0
+	for i := 0; i < len(customEnemyEncodeFormat); i++ {
+		if customEnemyEncodeFormat[i] != '%' {
+			continue
+		}
+		if i+1 < len(customEnemyEncodeFormat) && customEnemyEncodeFormat[i+1] == '%' {
+			i++
+			continue
+		}
+		verbs++
+	}
+	if verbs != customEnemyFieldCount {
+		panic(fmt.Sprintf("mapfile: customEnemyEncodeFormat has %d verbs, customEnemyFieldCount is %d — they must match", verbs, customEnemyFieldCount))
+	}
+}
+
 // parseCustomEnemyLine decodes a single positional row from the
 // `custom_enemies:` section. Field order documented on MapCustomEnemy.
 // Returns the wrap-style "line N: bad <field> %q" error every row
@@ -880,7 +908,10 @@ func (mf MapFile) Encode(w io.Writer) error {
 	}
 	// custom_enemies: emits only when present so older maps stay
 	// byte-identical. Order documented on MapCustomEnemy and matches
-	// parseCustomEnemyLine's positional decode.
+	// parseCustomEnemyLine's positional decode. The format string
+	// is broken out as customEnemyEncodeFormat so init() can assert
+	// its `%`-verb count matches customEnemyFieldCount — keeps the
+	// encoder and decoder honest about how many columns a row has.
 	if len(mf.CustomEnemies) > 0 {
 		fmt.Fprintln(bw, "custom_enemies:")
 		for _, ce := range mf.CustomEnemies {
@@ -888,7 +919,7 @@ func (mf MapFile) Encode(w io.Writer) error {
 			if len(ce.Skills) > 0 {
 				skills = strings.Join(ce.Skills, ",")
 			}
-			fmt.Fprintf(bw, "%s %s %d %d %d %d %d %d %d %d %d %d %d %d %d %g %d %s\n",
+			fmt.Fprintf(bw, customEnemyEncodeFormat,
 				ce.Name, ce.BaseKind,
 				ce.HP, ce.MP,
 				ce.STR, ce.DEX, ce.INT, ce.WIS, ce.VIT, ce.SPD,
