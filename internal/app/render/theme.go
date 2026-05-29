@@ -109,7 +109,7 @@ var (
 	barHPLow   = rl.NewColor(220, 88, 88, 255)
 	barMP      = rl.NewColor(104, 152, 224, 255)
 	barEnemyHP = rl.NewColor(204, 76, 76, 255)
-	barTrack   = rl.NewColor(10, 8, 14, 140)
+	barTrack   = rl.NewColor(8, 12, 22, 140)
 
 	// ----- Per-status accents (UI_STANDARDS.md "Per-status accents") -----
 	// Indexed by core.PartyStatusKind via partyStatusVisuals below; the
@@ -174,6 +174,13 @@ var (
 	markerPack     = rl.NewColor(220, 76, 70, 255)
 	markerPackEdge = rl.NewColor(255, 200, 200, 220)
 	markerOutline  = rl.NewColor(0, 0, 0, 220)
+
+	// mapTileFogColor is the dim fill drawn for cells that fall outside
+	// the area's bounds — the "fog" beyond the walkable map. Shared by
+	// both map surfaces (the corner minimap window and the panels-overlay
+	// Map tab) so the out-of-bounds tone is one source of truth instead
+	// of two near-identical literals that drift by a couple RGB units.
+	mapTileFogColor = rl.NewColor(8, 10, 14, 235)
 
 	// chestColors govern the chest billboard — body color, lid color,
 	// and the deeper tone for an emptied/looted chest. Pulled out here
@@ -822,12 +829,6 @@ func hpFillColor(value, maxValue int) color.RGBA {
 	}
 }
 
-// barTrackColor is the dim glass tint behind every HP/MP bar. Hoisted
-// from drawBar's body so the per-call construction of the same color
-// literal lives once at package scope, matching the pattern used by
-// minimapOutOfBoundsColor and panelsMapOutOfBoundsColor.
-var barTrackColor = rl.NewColor(8, 12, 22, 140)
-
 // barLabelMeasureCache memoizes rl.MeasureTextEx for short, constant
 // bar labels like "HP" and "MP". drawBar runs ~16 times per frame
 // across the party ribbon and enemy roster; the label measurement
@@ -895,7 +896,7 @@ func drawBar(font rl.Font, x, y, width, height float32, label string, value, max
 	if pct > 1 {
 		pct = 1
 	}
-	track := barTrackColor
+	track := barTrack
 	outline := borderDim
 	if muted {
 		fill = rl.NewColor(96, 84, 92, 230)

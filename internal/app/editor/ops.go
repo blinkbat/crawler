@@ -669,9 +669,7 @@ func resizeLayer(old []string, oldW, oldH, newW, newH int, fill byte) []string {
 // saved (Path == ""), open the Save As modal so the user can name it.
 func saveCurrent(s *State) {
 	if s.area.Path == "" {
-		s.modalFilename = sanitizeFilename(s.area.Name)
-		s.modal = modalSaveAs
-		s.focus = focusFilename
+		openSaveAsModal(s)
 		return
 	}
 	mf, err := core.MapFileFromArea(s.area)
@@ -747,13 +745,22 @@ func openModal(s *State, m modalKind) {
 	}
 }
 
+// openConfirmDirtyModal raises the unsaved-changes prompt, stashing the
+// action to run once the user resolves it (Save / Discard / Cancel).
+// Every "this would discard edits" entry point — New, Open, Exit to
+// title — routes through here so the pending-action + modal pairing
+// can't drift across call sites.
+func openConfirmDirtyModal(s *State, pending pendingAction) {
+	s.pending = pending
+	s.modal = modalConfirmDirty
+}
+
 // newMap is the user-facing entry: prompts about unsaved changes if the
 // current map is dirty, otherwise opens the new-map setup modal so the
 // author picks size + default floor before the area is replaced.
 func newMap(s *State) {
 	if s.dirty {
-		s.pending = pendingNew
-		s.modal = modalConfirmDirty
+		openConfirmDirtyModal(s, pendingNew)
 		return
 	}
 	openNewMapModal(s)
@@ -773,8 +780,7 @@ func openNewMapModal(s *State) {
 
 func requestOpen(s *State) {
 	if s.dirty {
-		s.pending = pendingOpen
-		s.modal = modalConfirmDirty
+		openConfirmDirtyModal(s, pendingOpen)
 		return
 	}
 	openModal(s, modalOpen)

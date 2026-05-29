@@ -116,6 +116,17 @@ func WrapNextAvailablePartyMember(party []PartyMember, start int) int {
 	return wrapNextWhere(party, start, partyAvailable)
 }
 
+// PeekNextEnemyTarget returns the party-member index the enemy side will
+// attack next — the first available slot after EnemyAttackCursor — WITHOUT
+// advancing the cursor. Returns -1 when nobody is available. The battle
+// side's pickEnemyAttackTarget commits the cursor after calling this; the
+// render side reads it to preview the incoming-hit marker non-mutatingly.
+// Sharing this peek keeps the "who's next" rule from drifting between the
+// two packages.
+func PeekNextEnemyTarget(g *GameState) int {
+	return WrapNextAvailablePartyMember(g.Party, g.Battle.EnemyAttackCursor+1)
+}
+
 // AvailablePartyTargets returns the indices of every member who can be
 // chosen as a heal/item target this turn — living AND not ingested.
 // Both target cyclers (heal skill, item use) route through this so a

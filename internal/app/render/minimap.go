@@ -33,11 +33,6 @@ func stepCounterText(modStep int) string {
 	return stepCounterCache.text
 }
 
-// minimapOutOfBoundsColor is the dim background tone drawn for the
-// 13x13 minimap window's cells that fall outside the area's bounds.
-// Hoisted from inside the per-tile loop so the value is named once
-// and the per-tile path is a plain copy.
-var minimapOutOfBoundsColor = rl.NewColor(8, 10, 14, 235)
 
 // Minimap geometry. Width / height pre-computed so MinimapWidth /
 // MinimapBottomY (below) can be called by sibling HUD panels — the
@@ -104,7 +99,7 @@ func drawMinimap(m core.AreaDefinition, g core.GameState, assets Resources) {
 			// so the player can't read the layout through the haze —
 			// the minimap is strictly "what you've walked on" until a
 			// step lands the tile inside the reveal radius.
-			col := minimapOutOfBoundsColor
+			col := mapTileFogColor
 			if m.InBounds(mapX, mapZ) && visitedAt(g, mapX, mapZ) {
 				col = minimapTileColor(m.Materials, m.TileAt(mapX, mapZ))
 			}
@@ -223,7 +218,7 @@ func drawMinimapTimeOfDay(font rl.Font, stepCount int, x, y, width int32) {
 	trackY := y + 18
 	trackH := int32(4)
 	trackW := width
-	rl.DrawRectangle(x, trackY, trackW, trackH, barTrackColor)
+	rl.DrawRectangle(x, trackY, trackW, trackH, barTrack)
 	segW := trackW / int32(core.TimeOfDayCount)
 	// Past phases: solid color. Current phase: filled by progress.
 	for i := 0; i < int(phase); i++ {

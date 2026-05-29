@@ -803,8 +803,7 @@ func Update(s *State, dt float32) Action {
 	if s.exitRequested {
 		s.exitRequested = false
 		if s.dirty {
-			s.pending = pendingExitToTitle
-			s.modal = modalConfirmDirty
+			openConfirmDirtyModal(s, pendingExitToTitle)
 			return ActionNone
 		}
 		return ActionExitToTitle

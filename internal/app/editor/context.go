@@ -266,9 +266,7 @@ func runContextItem(s *State, kind ctxItemKind) {
 	switch kind {
 	case ctxItemEditPack:
 		if idx := core.PackSpawnIndexAt(s.area.PackSpawns, x, z); idx >= 0 {
-			s.modal = modalPackEdit
-			s.modalPackIdx = idx
-			s.modalCursor = 0
+			openPackEditModal(s, idx)
 		}
 	case ctxItemDeletePack:
 		pushUndo(s)
@@ -279,9 +277,7 @@ func runContextItem(s *State, kind ctxItemKind) {
 		}
 	case ctxItemEditChest:
 		if idx := core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z); idx >= 0 {
-			s.modal = modalChestEdit
-			s.modalChestIdx = idx
-			s.modalCursor = 0
+			openChestEditModal(s, idx)
 		}
 	case ctxItemDeleteChest:
 		pushUndo(s)

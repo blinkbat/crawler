@@ -874,11 +874,12 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 
 	titleX := cx - titleW/2
 	titleY := bgY + padY
-	// Splash uses fade-driven shadow alphas (titleAlpha/subAlpha track the
-	// banner's overall opacity) so the shadow vanishes with the rest of the
-	// banner; that's why this isn't drawTextWithShadow.
-	rl.DrawTextEx(assets.hudFont, text, rl.NewVector2(titleX+3, titleY+3), titleSize*scale, spacing*scale, rl.NewColor(0, 0, 0, titleAlpha))
-	rl.DrawTextEx(assets.hudFont, text, rl.NewVector2(titleX, titleY), titleSize*scale, spacing*scale, rl.NewColor(248, 232, 198, titleAlpha))
+	// Splash needs fade-driven shadow alphas (titleAlpha/subAlpha track the
+	// banner's overall opacity) plus a heavier 3px drop offset and the title
+	// letter-spacing — drawTextWithShadowStyle takes all three (custom shadow
+	// color, offset, spacing), which is exactly what it documents itself for.
+	drawTextWithShadowStyle(assets.hudFont, text, titleX, titleY, titleSize*scale, spacing*scale,
+		rl.NewColor(248, 232, 198, titleAlpha), rl.NewColor(0, 0, 0, titleAlpha), 3, 3)
 
 	if subtitle != "" {
 		subX := cx - subMeasure.X/2
@@ -895,8 +896,8 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 		rl.DrawRectangle(int32(cx-ruleW/2), int32(ruleY), int32(ruleW/2-8), 1, ruleCol)
 		rl.DrawRectangle(int32(cx+8), int32(ruleY), int32(ruleW/2-8), 1, ruleCol)
 		drawFleuron(cx, ruleY, 3, fadeColor(giltBright, overall))
-		rl.DrawTextEx(assets.hudFont, subtitle, rl.NewVector2(subX+1, subY+1), subSize, 1, rl.NewColor(0, 0, 0, subAlpha))
-		rl.DrawTextEx(assets.hudFont, subtitle, rl.NewVector2(subX, subY), subSize, 1, rl.NewColor(borderEnemy.R, borderEnemy.G, borderEnemy.B, subAlpha))
+		drawTextWithShadowStyle(assets.hudFont, subtitle, subX, subY, subSize, 1,
+			rl.NewColor(borderEnemy.R, borderEnemy.G, borderEnemy.B, subAlpha), rl.NewColor(0, 0, 0, subAlpha), 1, 1)
 	}
 }
 

@@ -66,7 +66,7 @@ token — extend the palette instead.
 - **`barHPLow`** — `rgb(220, 88, 88) α=255` — danger ink.
 - **`barMP`** — `rgb(104, 152, 224) α=255` — sapphire ink.
 - **`barEnemyHP`** — `rgb(204, 76, 76) α=255` — claret.
-- **`barTrack`** — `rgb(10, 8, 14) α=220` — the empty bar track. Dark
+- **`barTrack`** — `rgb(8, 12, 22) α=140` — the empty bar track. Dark
   enough that the fill colour pops at any width.
 
 ### Per-status accents

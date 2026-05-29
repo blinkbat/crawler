@@ -215,6 +215,7 @@ func resetPartyForFieldRecovery(party []PartyMember) []PartyMember {
 		out[i].MP = out[i].MaxMP
 		out[i].AttackBump = 0
 		out[i].DamageFlash = 0
+		out[i].HitKnockback = 0
 		out[i].Defending = false
 		out[i].PoisonTurns = 0
 		out[i].SleepTurns = 0

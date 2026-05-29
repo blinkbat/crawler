@@ -21,6 +21,17 @@ const (
 	timingHeadingPickpocket = "PICKPOCKET!"
 )
 
+// Per-mode heading + base-fill tints, paired with the timingHeading*
+// strings above. Named so the bar's signature hue lives next to its
+// label instead of as a bare rl.NewColor literal inside each draw
+// function — a palette pass touches one block. (Pickpocket derives its
+// tint from seqOkColor and stays at its call site.)
+var (
+	timingHeadingStrikeColor = rl.NewColor(255, 232, 168, 240) // warm gold
+	timingHeadingDefendColor = rl.NewColor(168, 220, 255, 240) // cool blue
+	timingHeadingChargeColor = rl.NewColor(255, 184, 96, 240)  // warm orange
+)
+
 // --- Bar juice helpers ----------------------------------------------------
 //
 // barShake, barThrob, and tickFreshness are the three reusable feedback
@@ -291,10 +302,10 @@ func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x
 	isDefend := g.Battle.Phase == core.BattleEnemyTiming
 
 	heading := timingHeadingStrike
-	baseCol := rl.NewColor(255, 232, 168, 240)
+	baseCol := timingHeadingStrikeColor
 	if isDefend {
 		heading = timingHeadingDefend
-		baseCol = rl.NewColor(168, 220, 255, 240)
+		baseCol = timingHeadingDefendColor
 	}
 
 	xOff, yOff, drawnH := applyBarMotion(timing, g.Battle.TimingFlash, barH)
@@ -377,7 +388,7 @@ func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x
 // the player sees how close they are to the peak window even before pressing.
 func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
 	heading := timingHeadingCharge
-	baseCol := rl.NewColor(255, 184, 96, 240) // warm orange
+	baseCol := timingHeadingChargeColor
 	// Intro-pause heading: while the player hasn't engaged yet (intro
 	// counter > 0), swap to the "Press to start" prompt in the hint
 	// tone so they see the bar is waiting on input rather than already

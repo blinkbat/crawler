@@ -168,14 +168,14 @@ func enemySpellDamage(def core.EnemyDefinition, effect core.SkillEffect) int {
 // huge damage by accident.
 func handleEnemyFirebolt(ctx enemySpellCtx) {
 	g := ctx.g
-	dealt, killed := damagePartyMember(g, ctx.target, enemySpellDamage(ctx.def, ctx.effect), core.SkillTagMagic)
-	core.EnqueuePartyVFX(g, core.VFXEmber, ctx.target)
+	dealt, killed := damagePartyMember(g, ctx.target, enemySpellDamage(ctx.def, ctx.effect), core.SkillTagFor(core.SkillFirebolt))
+	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillFirebolt), ctx.target)
 	if killed {
 		setBattleMessage(g, fmt.Sprintf("%s incinerates %s.", core.TheEnemy(ctx.def), g.Party[ctx.target].Name))
 	} else {
 		enemySpellLog(ctx, "%s burns for %d.", g.Party[ctx.target].Name, dealt)
 	}
-	audio.Play(audio.SoundInputGreat)
+	audio.Play(audio.SoundEnemyHit)
 }
 
 // handleEnemyIngest is the mantrap signature: pulls the target out of
@@ -217,7 +217,7 @@ func handleEnemyIngest(ctx enemySpellCtx) {
 	// flowing INTO the swallower." Anchoring at the prey reverses
 	// the meaning (motes converge on the prey, which reads as
 	// "something attacking the prey" not "being absorbed").
-	core.EnqueueEnemyVFX(g, core.VFXIngest, ctx.slot)
+	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillIngest), ctx.slot)
 	setBattleMessage(g, fmt.Sprintf("%s engulfs %s!", core.TheEnemy(ctx.def), m.Name))
 	audio.Play(audio.SoundEnemyHit)
 }
@@ -243,7 +243,7 @@ func handleEnemySleep(ctx enemySpellCtx) {
 		duration = core.SleepMinTurns
 	}
 	m.SleepTurns = core.ShortenStatusDuration(duration, core.EffectiveStats(*m).WIS)
-	core.EnqueuePartyVFX(g, core.VFXSleep, ctx.target)
+	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillSleep), ctx.target)
 	enemySpellLog(ctx, "%s falls asleep.", m.Name)
 	audio.Play(audio.SoundInputHit)
 }
@@ -265,7 +265,7 @@ func handleEnemyWeb(ctx enemySpellCtx) {
 		duration = core.SpiderWebBoundMinTurns
 	}
 	m.BoundTurns = core.ShortenStatusDuration(duration, core.EffectiveStats(*m).WIS)
-	core.EnqueuePartyVFX(g, core.VFXWeb, ctx.target)
+	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillWeb), ctx.target)
 	enemySpellLog(ctx, "%s is bound in sticky webs.", m.Name)
 	audio.Play(audio.SoundInputHit)
 }
@@ -290,7 +290,7 @@ func handleEnemyConfuse(ctx enemySpellCtx) {
 		duration = core.WispConfuseMinTurns
 	}
 	m.ConfusedTurns = core.ShortenStatusDuration(duration, core.EffectiveStats(*m).WIS)
-	core.EnqueuePartyVFX(g, core.VFXConfuse, ctx.target)
+	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillConfuse), ctx.target)
 	enemySpellLog(ctx, "%s grows confused.", m.Name)
 	audio.Play(audio.SoundInputHit)
 }
@@ -310,8 +310,8 @@ func handleEnemyStoneslam(ctx enemySpellCtx) {
 		if m.HP <= 0 || m.Ingested {
 			continue
 		}
-		_, killed := damagePartyMember(g, i, raw, core.SkillTagPhys)
-		core.EnqueuePartyVFX(g, core.VFXStoneslam, i)
+		_, killed := damagePartyMember(g, i, raw, core.SkillTagFor(core.SkillStoneslam))
+		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillStoneslam), i)
 		hits++
 		if killed {
 			kills++
@@ -423,7 +423,7 @@ func chargeMP(g *core.GameState, skill core.SkillID, label string) bool {
 func applyAoEDamage(g *core.GameState, skill core.SkillID, damage, quality int) int {
 	hits := 0
 	tag := core.SkillTagFor(skill)
-	vfx := aoeVFXFor(skill)
+	vfx := vfxKindFor(skill)
 	for slot, m := range core.BattleMembers(g) {
 		if !m.Alive {
 			continue
@@ -435,16 +435,43 @@ func applyAoEDamage(g *core.GameState, skill core.SkillID, damage, quality int) 
 	return hits
 }
 
-// aoeVFXFor picks the per-skill VFX kind for an AoE damage skill.
-// Centralised so the table-style mapping lives in one place — adding
-// a new AoE skill is one row here, not a new switch inline at each
-// apply* site.
-func aoeVFXFor(skill core.SkillID) core.VFXKind {
+// vfxKindFor maps a skill to the particle effect its apply step queues.
+// Centralised so the skill→VFX mapping is one source of truth, mirroring
+// core.SkillTagFor (each apply site already pulls its SkillTag through a
+// helper rather than hardcoding it — the VFX kind is the same kind of
+// skill-derived property). Adding a new skill's effect is one row here
+// instead of an inline core.VFX<Kind> literal scattered across the apply
+// functions. Callers still choose the enqueue direction (EnqueueEnemyVFX
+// for hits, EnqueuePartyVFX for heals / enemy casts landing on the party).
+// Unmapped skills return core.VFXNone (no particles).
+func vfxKindFor(skill core.SkillID) core.VFXKind {
 	switch skill {
-	case core.SkillSwipe, core.SkillWhirlwind:
+	case core.SkillSwipe, core.SkillWhirlwind, core.SkillCrushingBlow, core.SkillBackstab:
 		return core.VFXSlash
 	case core.SkillArcBolt:
 		return core.VFXArc
+	case core.SkillFirebolt:
+		return core.VFXEmber
+	case core.SkillSmite:
+		return core.VFXSmite
+	case core.SkillVenomStrike:
+		return core.VFXVenom
+	case core.SkillFrostLance:
+		return core.VFXFrost
+	case core.SkillPrayer, core.SkillMassMend:
+		return core.VFXHeal
+	case core.SkillSteal:
+		return core.VFXSteal
+	case core.SkillSleep:
+		return core.VFXSleep
+	case core.SkillWeb:
+		return core.VFXWeb
+	case core.SkillConfuse:
+		return core.VFXConfuse
+	case core.SkillStoneslam:
+		return core.VFXStoneslam
+	case core.SkillIngest:
+		return core.VFXIngest
 	}
 	return core.VFXNone
 }
@@ -837,7 +864,7 @@ func applyPrayer(g *core.GameState, quality int) bool {
 	heal := core.ScaleHeal(core.SkillHealFor(actor, core.SkillPrayer), quality)
 	target := &g.Party[g.Battle.PartyTarget]
 	healPartyMember(g, g.Battle.PartyTarget, heal)
-	core.EnqueuePartyVFX(g, core.VFXHeal, g.Battle.PartyTarget)
+	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillPrayer), g.Battle.PartyTarget)
 	// Prayer T3 cleanses Poison + Sleep on the target. The cleanses
 	// happen AFTER the heal so the player sees the heal pop even if
 	// the status would have otherwise ticked the same turn.
@@ -926,7 +953,7 @@ func applySteal(g *core.GameState, quality int) bool {
 			rawBonus = applyCritMultiplier(rawBonus, critBonus, false)
 			bonus, defeated = damageEnemy(g, g.Battle.EnemyIndex, rawBonus, quality, core.SkillTagPhys)
 		}
-		core.EnqueueEnemyVFX(g, core.VFXSteal, g.Battle.EnemyIndex)
+		core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillSteal), g.Battle.EnemyIndex)
 		msg := stealMessage(actor.Name, item, quality)
 		switch {
 		case defeated:
@@ -969,7 +996,7 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 	// using the return keeps the log honest if a future Tag change
 	// brings armor back into play.
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillFirebolt))
-	core.EnqueueEnemyVFX(g, core.VFXEmber, g.Battle.EnemyIndex)
+	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillFirebolt), g.Battle.EnemyIndex)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	burned := tryProcStatus(g.Rand(), &enemy.BurnTurns, defeated, effect.BurnChance, quality, 0, effect.BurnDuration, core.EnemyInfoFor(*enemy).Stats.WIS)
 	setBattleMessage(g, appendCrit(fireboltMessage(actor.Name, target, damage, quality, defeated, burned, enemy.BurnTurns), crit))
@@ -1076,7 +1103,7 @@ func applyMassMend(g *core.GameState, quality int) bool {
 		if applyStatusCleanses(m, mod) != "" {
 			cleansedTotal++
 		}
-		core.EnqueuePartyVFX(g, core.VFXHeal, i)
+		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillMassMend), i)
 	}
 	switch {
 	case healed == 0 && cleansedTotal == 0:
@@ -1107,7 +1134,7 @@ func applySmite(g *core.GameState, quality int) bool {
 	crit, _ := rollSkillCrit(g, actor, core.SkillSmite, quality)
 	rawDamage = applyCritMultiplier(rawDamage, crit, false)
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillSmite))
-	core.EnqueueEnemyVFX(g, core.VFXSmite, g.Battle.EnemyIndex)
+	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillSmite), g.Battle.EnemyIndex)
 	// Smite T3 ("+25% stun") gives the base-stun-less skill a stun
 	// proc on Great+ timing. effect.StunChance is 0 at tier 0..2,
 	// so tryProcStatus short-circuits cleanly until the tier is
@@ -1162,7 +1189,7 @@ func applyVenomStrike(g *core.GameState, quality int) bool {
 	crit, _ := rollSkillCrit(g, actor, core.SkillVenomStrike, quality)
 	rawDamage = applyCritMultiplier(rawDamage, crit, false)
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillVenomStrike))
-	core.EnqueueEnemyVFX(g, core.VFXVenom, g.Battle.EnemyIndex)
+	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillVenomStrike), g.Battle.EnemyIndex)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	poisoned := tryProcStatus(g.Rand(), &enemy.PoisonTurns, defeated, effect.PoisonChance, quality, 0, effect.PoisonDuration, core.EnemyInfoFor(*enemy).Stats.WIS)
 	setBattleMessage(g, appendCrit(venomStrikeMessage(actor.Name, target, damage, quality, defeated, poisoned), crit))
@@ -1185,7 +1212,7 @@ func applyFrostLance(g *core.GameState, quality int) bool {
 	crit, _ := rollSkillCrit(g, actor, core.SkillFrostLance, quality)
 	rawDamage = applyCritMultiplier(rawDamage, crit, false)
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillFrostLance))
-	core.EnqueueEnemyVFX(g, core.VFXFrost, g.Battle.EnemyIndex)
+	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillFrostLance), g.Battle.EnemyIndex)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	// FrostLance is flavored as a freeze but reads from the canonical
 	// StunTurns counter — there's no separate "frozen" status today,
@@ -1291,6 +1318,23 @@ func appendCrit(msg string, crit bool) string {
 	return msg + " Critical!"
 }
 
+// mitigateDamage runs the canonical two-stage mitigation chain — armor
+// clip for phys-tagged hits, then magic-defense clip for magic-tagged
+// hits — and clamps the result at 0. Heal / Buff / None tags pass
+// straight through both stages. Both damage helpers (damageEnemy and
+// damagePartyMember) share it so the phys-then-magic order and the
+// floor-at-0 contract can't drift between the enemy and party sides;
+// each side still supplies its own armor / mdef (enemy reads the raw
+// EnemyDefinition fields, party reads the Effective* gear-folded values).
+func mitigateDamage(raw int, tag core.SkillTag, armor, mdef int) int {
+	d := core.ApplyArmor(raw, tag, armor)
+	d = core.ApplyMagicDefense(d, tag, mdef)
+	if d < 0 {
+		d = 0
+	}
+	return d
+}
+
 // damageEnemy applies `rawDamage` to the enemy at `slot`, clipped by
 // the enemy's Armor when `tag == SkillTagPhys`. Magic / Heal / Buff
 // tags bypass armor entirely. quality drives the floating damage popup
@@ -1312,22 +1356,14 @@ func damageEnemy(g *core.GameState, slot, rawDamage, quality int, tag core.Skill
 	if enemy == nil || !enemy.Alive {
 		return 0, false
 	}
-	damage := core.ApplyArmor(rawDamage, tag, enemy.Armor)
-	// Magic-tagged damage clips through the enemy's MDef (symmetric
-	// with the party-side ApplyMagicDefense path). Most enemies carry
-	// MDef 0 today — only the wizard-flavored kinds (Wisp, Goblin
-	// Mage, Necromancer) and the Stone Golem authored a non-zero
-	// value, so player Firebolt against unarmored grunts still feels
-	// the same. The future enemy-magic-resist pass tunes the field.
-	damage = core.ApplyMagicDefense(damage, tag, core.EnemyInfoFor(*enemy).MDef)
-	// Clamp negative damage at 0 — every current caller (ScaleDamage,
-	// burn ticks with BurnTickDamage>0) already produces non-negative
-	// values, but enforcing the contract here keeps a future
-	// caller from accidentally healing enemies by passing a signed
-	// stat delta.
-	if damage < 0 {
-		damage = 0
-	}
+	// Phys clips through Armor, magic clips through MDef (symmetric with
+	// the party-side path). Most enemies carry MDef 0 today — only the
+	// wizard-flavored kinds (Wisp, Goblin Mage, Necromancer) and the
+	// Stone Golem authored a non-zero value, so player Firebolt against
+	// unarmored grunts still feels the same. The clamp-at-0 inside
+	// mitigateDamage keeps a future caller from accidentally healing an
+	// enemy by passing a signed stat delta.
+	damage := mitigateDamage(rawDamage, tag, enemy.Armor, core.EnemyInfoFor(*enemy).MDef)
 	enemy.DamageFlash = core.FlashDuration
 	enemy.HP -= damage
 	if damage > 0 {
@@ -1413,6 +1449,19 @@ func applyPartyPoisonTick(g *core.GameState, index int) bool {
 	return false
 }
 
+// applyEnemyDoTTick is the enemy-side damaging-tick seam: drain the given
+// status counter by one and deal tickDamage as a Magic-tagged,
+// Good-quality hit (Magic so armor doesn't damp the DoT; Good gives the
+// orange "fire/venom" popup tint damageEnemy stamps). Returns
+// (dealt, defeated) so each DoT caller formats its own succumbs / suffers
+// line and does any post-kill bookkeeping (Burn repoints the player's
+// target cursor). Mirrors applyPartyPoisonTick on the enemy side; the
+// caller owns the up-front guard since it reads a status-specific counter.
+func applyEnemyDoTTick(g *core.GameState, index int, counter *int, tickDamage int) (int, bool) {
+	*counter--
+	return damageEnemy(g, index, tickDamage, core.TimingQualityGood, core.SkillTagMagic)
+}
+
 // tickPoisonForIngestedParty applies one tick of poison to every ingested
 // party member whose PoisonTurns counter is still active. Ingested members
 // are skipped from the per-turn queue (buildTurnQueue), so their normal
@@ -1458,11 +1507,13 @@ func tickConfusedAfterPartyTurn(g *core.GameState, actor core.ActorRef) {
 // counter hits zero, the helper formats with the member's name and
 // emits the cleared message. Pass "" for a silent clear.
 //
-// Poison's tick stays separate because it also deals damage and
-// returns a kill signal — the shape doesn't collapse cleanly into
-// this helper without piling the heal/death machinery into the
-// signature. Burn likewise sits in its own function for the same
-// reason (damage + start-of-turn semantics, different timing seam).
+// This is the NON-damaging seam (counter drain + optional cleared
+// message). The damaging ticks (Poison, Burn) keep their own functions
+// because they also deal damage and return a kill signal, and they share
+// a different seam for that: applyPartyPoisonTick on the party side and
+// applyEnemyDoTTick on the enemy side. Folding damage into this helper
+// would pile the death/kill-signal machinery into a signature meant for
+// the no-damage Bound / Confused drains.
 func tickPartyStatusCounter(g *core.GameState, actor core.ActorRef, counterRef func(*core.PartyMember) *int, clearedFmt string) {
 	if !actor.ValidPartyIndex(g.Party) {
 		return
@@ -1494,8 +1545,7 @@ func tickPoisonAfterEnemyTurn(g *core.GameState, actor core.ActorRef) bool {
 	if enemy == nil || !enemy.Alive || enemy.PoisonTurns <= 0 {
 		return false
 	}
-	enemy.PoisonTurns--
-	dealt, defeated := damageEnemy(g, actor.Index, core.PoisonTickDamage, core.TimingQualityGood, core.SkillTagMagic)
+	dealt, defeated := applyEnemyDoTTick(g, actor.Index, &enemy.PoisonTurns, core.PoisonTickDamage)
 	noun := core.EnemySingularNoun(*enemy)
 	if defeated {
 		setBattleMessage(g, fmt.Sprintf("The %s succumbs to the poison.", noun))
@@ -1518,12 +1568,7 @@ func tickBurnAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
 	if enemy == nil || !enemy.Alive || enemy.BurnTurns <= 0 {
 		return false
 	}
-	enemy.BurnTurns--
-	// Quality=Good gives the orange "fire" tint to the popup that damageEnemy
-	// stamps on a damaging hit.
-	// Burn ticks are magical (the fire is the spell residue), so armor
-	// doesn't damp them — same rule as the original Firebolt impact.
-	damageEnemy(g, actor.Index, core.BurnTickDamage, core.TimingQualityGood, core.SkillTagMagic)
+	applyEnemyDoTTick(g, actor.Index, &enemy.BurnTurns, core.BurnTickDamage)
 	def := core.EnemyInfoFor(*enemy)
 	if !enemy.Alive {
 		setBattleMessage(g, fmt.Sprintf("%s succumbs to the flames.", core.TheEnemy(def)))
@@ -1592,8 +1637,7 @@ func damagePartyMember(g *core.GameState, partyIndex, rawAmount int, tag core.Sk
 	// equipped gear bonuses stack on top of the base values. Base
 	// member.Armor stays authored (0 today on the party side); items
 	// add to it via ArmorBonus / MDefBonus on their ItemDefinition.
-	amount := core.ApplyArmor(rawAmount, tag, core.EffectiveArmor(*member))
-	amount = core.ApplyMagicDefense(amount, tag, core.EffectiveMDef(*member))
+	amount := mitigateDamage(rawAmount, tag, core.EffectiveArmor(*member), core.EffectiveMDef(*member))
 	member.DamageFlash = core.FlashDuration
 	member.HP -= amount
 	if amount > 0 {
@@ -1900,7 +1944,7 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 // PartyTarget) so the player's heal/item ally cycling doesn't shift who
 // enemies attack next.
 func pickEnemyAttackTarget(g *core.GameState) int {
-	target := core.WrapNextAvailablePartyMember(g.Party, g.Battle.EnemyAttackCursor+1)
+	target := core.PeekNextEnemyTarget(g)
 	if target >= 0 {
 		g.Battle.EnemyAttackCursor = target
 	}

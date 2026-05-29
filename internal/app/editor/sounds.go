@@ -302,8 +302,7 @@ func openSoundsModal(s *State) {
 // to close).
 func updateSoundsModal(s *State) Action {
 	if editorCancelPressed() {
-		s.modal = modalNone
-		soundDrag.sliderIdx = -1
+		closeModal(s)
 		return ActionNone
 	}
 	// Cache the saved-sounds list for both Update (this function) and

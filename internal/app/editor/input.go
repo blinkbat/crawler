@@ -404,9 +404,7 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 			// falls through to applyTool which plants a new chest with
 			// the default starter loot.
 			if idx := core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z); idx >= 0 {
-				s.modal = modalChestEdit
-				s.modalChestIdx = idx
-				s.modalCursor = 0
+				openChestEditModal(s, idx)
 				return
 			}
 		case entityPlaceDoor:
@@ -505,9 +503,7 @@ func finishDrag(s *State) {
 				// no-op'ing. Lets the author manage member list /
 				// reorder / remove without the awkward "use the diseased
 				// rat brush to add to a rat pack" workaround.
-				s.modal = modalPackEdit
-				s.modalPackIdx = s.dragPackIdx
-				s.modalCursor = 0
+				openPackEditModal(s, s.dragPackIdx)
 			}
 		}
 	case dragRect:
@@ -567,7 +563,16 @@ func zoomBy(s *State, anchor rl.Vector2, factor float32) {
 // instead of inlining the three-line set up — single seam for any
 // future "Save As" entry points (Ctrl+Shift+S, command palette, ...).
 func openSaveAsModal(s *State) {
-	s.modalFilename = mapStem(s.area.Path)
+	// Default the filename to the saved map's stem; for an as-yet-unsaved
+	// area (no path) fall back to the area's title so every Save As entry
+	// point — topbar button, Ctrl+S on an unnamed map, the confirm-dirty
+	// "Save" branch — pre-fills the same sensible name instead of one path
+	// showing the title and another showing an empty field.
+	stem := mapStem(s.area.Path)
+	if stem == "" {
+		stem = sanitizeFilename(s.area.Name)
+	}
+	s.modalFilename = stem
 	s.modal = modalSaveAs
 	s.focus = focusFilename
 }
@@ -705,7 +710,7 @@ func updateTextInput(s *State) {
 	}
 	if editorCancelPressed() {
 		if s.focus == focusFilename {
-			s.modal = modalNone
+			closeModal(s)
 		}
 		s.focus = focusNone
 	}
@@ -894,6 +899,29 @@ func closeModal(s *State) {
 		s.focus = focusNone
 		s.numericBuf = ""
 	}
+}
+
+// openPackEditModal opens the per-pack editor for spawn index idx.
+// Mirrors the chest / door path so every entry point (context menu,
+// click-without-drag) shares the same modal + index + cursor setup.
+func openPackEditModal(s *State, idx int) {
+	if idx < 0 || idx >= len(s.area.PackSpawns) {
+		return
+	}
+	s.modal = modalPackEdit
+	s.modalPackIdx = idx
+	s.modalCursor = 0
+}
+
+// openChestEditModal opens the per-chest editor for spawn index idx.
+// Mirrors the pack / door path.
+func openChestEditModal(s *State, idx int) {
+	if idx < 0 || idx >= len(s.area.ChestSpawns) {
+		return
+	}
+	s.modal = modalChestEdit
+	s.modalChestIdx = idx
+	s.modalCursor = 0
 }
 
 // openDoorEditModal opens the per-door editor for spawn index idx and
@@ -1422,7 +1450,7 @@ func updateOpenModal(s *State) Action {
 	}
 
 	if editorCancelPressed() {
-		s.modal = modalNone
+		closeModal(s)
 		return ActionNone
 	}
 	if len(s.modalPaths) == 0 {
@@ -1460,13 +1488,13 @@ func updateOpenModal(s *State) Action {
 		mf, err := mapfile.Load(path)
 		if err != nil {
 			s.flash("Open failed: " + err.Error())
-			s.modal = modalNone
+			closeModal(s)
 			return ActionNone
 		}
 		area, err := core.AreaFromMapFile(mf, path)
 		if err != nil {
 			s.flash("Open failed: " + err.Error())
-			s.modal = modalNone
+			closeModal(s)
 			return ActionNone
 		}
 		s.area = area
@@ -1474,7 +1502,7 @@ func updateOpenModal(s *State) Action {
 		s.undo = nil
 		s.redo = nil
 		s.dirty = false
-		s.modal = modalNone
+		closeModal(s)
 		s.flash("Opened " + core.MapIDFromPath(path))
 	}
 	return ActionNone
@@ -1561,7 +1589,7 @@ func updateSaveAsModal(s *State) Action {
 	}
 
 	if editorCancelPressed() {
-		s.modal = modalNone
+		closeModal(s)
 		s.focus = focusNone
 		s.pending = pendingNone
 		return ActionNone
@@ -1582,7 +1610,7 @@ func updateSaveAsModal(s *State) Action {
 //     same flow the old "Esc = exit" path used.
 func updateEscMenuModal(s *State) Action {
 	if editorCancelPressed() || rl.IsKeyPressed(rl.KeyC) {
-		s.modal = modalNone
+		closeModal(s)
 		return ActionNone
 	}
 	if rl.IsKeyPressed(rl.KeyD) {
@@ -1590,10 +1618,9 @@ func updateEscMenuModal(s *State) Action {
 		return ActionNone
 	}
 	if rl.IsKeyPressed(rl.KeyE) {
-		s.modal = modalNone
+		closeModal(s)
 		if s.dirty {
-			s.pending = pendingExitToTitle
-			s.modal = modalConfirmDirty
+			openConfirmDirtyModal(s, pendingExitToTitle)
 			return ActionNone
 		}
 		return ActionExitToTitle
@@ -1603,37 +1630,35 @@ func updateEscMenuModal(s *State) Action {
 
 func updateConfirmDirtyModal(s *State) Action {
 	if editorCancelPressed() || rl.IsKeyPressed(rl.KeyC) {
-		s.modal = modalNone
+		closeModal(s)
 		s.pending = pendingNone
 		return ActionNone
 	}
 	if rl.IsKeyPressed(rl.KeyD) {
-		s.modal = modalNone
+		closeModal(s)
 		return runPendingAction(s)
 	}
 	if rl.IsKeyPressed(rl.KeyS) {
 		if s.area.Path == "" {
-			s.modalFilename = sanitizeFilename(s.area.Name)
-			s.modal = modalSaveAs
-			s.focus = focusFilename
+			openSaveAsModal(s)
 			return ActionNone
 		}
 		mf, err := core.MapFileFromArea(s.area)
 		if err != nil {
 			s.flash("Save failed: " + err.Error())
-			s.modal = modalNone
+			closeModal(s)
 			s.pending = pendingNone
 			return ActionNone
 		}
 		if err := mapfile.Save(s.area.Path, mf); err != nil {
 			s.flash("Save failed: " + err.Error())
-			s.modal = modalNone
+			closeModal(s)
 			s.pending = pendingNone
 			return ActionNone
 		}
 		s.baseline = core.CloneArea(s.area)
 		s.dirty = false
-		s.modal = modalNone
+		closeModal(s)
 		return runPendingAction(s)
 	}
 	return ActionNone
@@ -1697,7 +1722,7 @@ func saveTo(s *State, name, path string) {
 	s.area.Path = path
 	s.baseline = core.CloneArea(s.area)
 	s.dirty = false
-	s.modal = modalNone
+	closeModal(s)
 	s.focus = focusNone
 	s.flash("Saved " + name)
 }

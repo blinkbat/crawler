@@ -8,13 +8,6 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// panelsMapOutOfBoundsColor is the dim fill used for cells outside
-// the area bounds on the panels-overlay Map tab. Lifted to a package
-// var so the per-cell loop doesn't build the rl.Color struct from
-// the same literal every iteration (the panels map iterates every
-// visible cell each frame the overlay is open — ~450 cells worst
-// case).
-var panelsMapOutOfBoundsColor = rl.NewColor(6, 8, 14, 235)
 
 // panelsMapFooterCache memoizes the "AreaName   zoom: N cells   ..."
 // footer string drawn on the Map tab. Both inputs change only on
@@ -982,7 +975,7 @@ func drawPanelsMap(g core.GameState, assets Resources, body rl.Rectangle) {
 				pw = 1
 			}
 			if !m.InBounds(mx, mz) {
-				rl.DrawRectangle(px, py, pw, pw, panelsMapOutOfBoundsColor)
+				rl.DrawRectangle(px, py, pw, pw, mapTileFogColor)
 				continue
 			}
 			// Unvisited tiles render the same flat darkness as out-of-
@@ -990,7 +983,7 @@ func drawPanelsMap(g core.GameState, assets Resources, body rl.Rectangle) {
 			// inside the SightRadius window of, not the underlying
 			// authored layout.
 			if !visitedAt(g, mx, mz) {
-				rl.DrawRectangle(px, py, pw, pw, panelsMapOutOfBoundsColor)
+				rl.DrawRectangle(px, py, pw, pw, mapTileFogColor)
 				continue
 			}
 			rl.DrawRectangle(px, py, pw, pw, minimapTileColor(m.Materials, m.TileAt(mx, mz)))

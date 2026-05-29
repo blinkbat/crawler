@@ -305,6 +305,45 @@ const (
 	slotCustomEnemies
 )
 
+// Section header names — the on-disk labels that introduce each part of
+// a .map file (the header line on disk is the name plus a colon, e.g.
+// "walls:"). Referenced by both sectionFor (parse) and Encode (write) so
+// the parser and encoder can't drift on a section spelling.
+const (
+	sectionWalls         = "walls"
+	sectionFloor         = "floor"
+	sectionDecor         = "decor"
+	sectionProps         = "props"
+	sectionCeiling       = "ceiling"
+	sectionEnemies       = "enemies"
+	sectionChests        = "chests"
+	sectionDoors         = "doors"
+	sectionCustomEnemies = "custom_enemies"
+)
+
+// namedLayer pairs a grid layer's on-disk section name with its rows.
+// Shared by validate (dimension checks) and Encode (header + row emit)
+// so the layer list lives in one place instead of two near-identical
+// struct-slice literals.
+type namedLayer struct {
+	name string
+	rows []string
+}
+
+// requiredLayers is the four mandatory grid layers in canonical on-disk
+// order. Ceiling is intentionally excluded — it's optional (legacy maps
+// omit it) and validated / encoded separately: Encode appends ceiling to
+// this list, while validate iterates it directly for the height/width
+// checks and handles ceiling on its own afterward.
+func (mf MapFile) requiredLayers() []namedLayer {
+	return []namedLayer{
+		{sectionWalls, mf.Walls},
+		{sectionFloor, mf.Floor},
+		{sectionDecor, mf.Decor},
+		{sectionProps, mf.Props},
+	}
+}
+
 // Parse reads a .map file from r. Errors pinpoint the first malformed line.
 func Parse(r io.Reader) (MapFile, error) {
 	mf := MapFile{}
@@ -491,23 +530,23 @@ func Parse(r io.Reader) (MapFile, error) {
 
 func sectionFor(raw string) (layerSlot, bool) {
 	switch strings.TrimSpace(raw) {
-	case "walls:":
+	case sectionWalls + ":":
 		return slotWalls, true
-	case "floor:":
+	case sectionFloor + ":":
 		return slotFloor, true
-	case "decor:":
+	case sectionDecor + ":":
 		return slotDecor, true
-	case "props:":
+	case sectionProps + ":":
 		return slotProps, true
-	case "ceiling:":
+	case sectionCeiling + ":":
 		return slotCeiling, true
-	case "enemies:":
+	case sectionEnemies + ":":
 		return slotEnemies, true
-	case "chests:":
+	case sectionChests + ":":
 		return slotChests, true
-	case "doors:":
+	case sectionDoors + ":":
 		return slotDoors, true
-	case "custom_enemies:":
+	case sectionCustomEnemies + ":":
 		return slotCustomEnemies, true
 	}
 	return slotNone, false
@@ -563,15 +602,7 @@ func (mf *MapFile) validate() error {
 	if mf.Width <= 0 || mf.Height <= 0 {
 		return fmt.Errorf("size must be >0x0; got %dx%d", mf.Width, mf.Height)
 	}
-	for _, layer := range []struct {
-		name string
-		rows []string
-	}{
-		{"walls", mf.Walls},
-		{"floor", mf.Floor},
-		{"decor", mf.Decor},
-		{"props", mf.Props},
-	} {
+	for _, layer := range mf.requiredLayers() {
 		if len(layer.rows) != mf.Height {
 			return fmt.Errorf("%s layer has %d rows, size declares %d", layer.name, len(layer.rows), mf.Height)
 		}
@@ -714,6 +745,28 @@ const (
 	customEnemyFieldCountLegacy = 17
 )
 
+// customEnemySchema maps the post-stats positional columns of a custom-
+// enemy row to their field index. Two layouts exist: the current schema
+// (MDef column present) and the legacy pre-MDef schema (MDef absent, so
+// mdef = -1 and every later column shifts left by one). Holding the
+// layout in one struct keeps the legacy/current split in a single place
+// instead of eight parallel index reassignments inside the decoder.
+type customEnemySchema struct {
+	armor  int
+	mdef   int // -1 when the row predates the MDef column
+	xp     int
+	tier   int
+	dmg    int
+	skch   int
+	spwr   int
+	skills int
+}
+
+var (
+	customEnemyCurrentSchema = customEnemySchema{armor: 10, mdef: 11, xp: 12, tier: 13, dmg: 14, skch: 15, spwr: 16, skills: 17}
+	customEnemyLegacySchema  = customEnemySchema{armor: 10, mdef: -1, xp: 11, tier: 12, dmg: 13, skch: 14, spwr: 15, skills: 16}
+)
+
 // customEnemyEncodeFormat is the fmt.Fprintf format string the
 // encoder writes one row per. Kept as a named constant so init() can
 // count its `%`-verbs and assert the encoder and customEnemyFieldCount
@@ -757,25 +810,13 @@ func parseCustomEnemyLine(line string, lineNo int) (MapCustomEnemy, error) {
 		Name:     fields[0],
 		BaseKind: fields[1],
 	}
-	// Column-index helpers track which slot each field sits in based on
-	// the legacy/current schema split. MDef is inserted between Armor
-	// and XPValue in the current schema; everything past it shifts one.
-	armorIdx := 10
-	mdefIdx := 11
-	xpIdx := 12
-	tierIdx := 13
-	dmgIdx := 14
-	skchIdx := 15
-	spwrIdx := 16
-	skillsIdx := 17
+	// Column layout depends on the legacy/current schema split. MDef is
+	// inserted between Armor and XPValue in the current schema; the
+	// legacy layout omits it (mdef = -1) and shifts everything past it
+	// left by one.
+	schema := customEnemyCurrentSchema
 	if legacy {
-		mdefIdx = -1
-		xpIdx = 11
-		tierIdx = 12
-		dmgIdx = 13
-		skchIdx = 14
-		spwrIdx = 15
-		skillsIdx = 16
+		schema = customEnemyLegacySchema
 	}
 	intFields := []struct {
 		dst  *int
@@ -790,18 +831,18 @@ func parseCustomEnemyLine(line string, lineNo int) (MapCustomEnemy, error) {
 		{&ce.WIS, fields[7], "wis"},
 		{&ce.VIT, fields[8], "vit"},
 		{&ce.SPD, fields[9], "spd"},
-		{&ce.Armor, fields[armorIdx], "armor"},
-		{&ce.XPValue, fields[xpIdx], "xp"},
-		{&ce.Tier, fields[tierIdx], "tier"},
-		{&ce.AttackDamage, fields[dmgIdx], "dmg"},
-		{&ce.SpellPower, fields[spwrIdx], "spwr"},
+		{&ce.Armor, fields[schema.armor], "armor"},
+		{&ce.XPValue, fields[schema.xp], "xp"},
+		{&ce.Tier, fields[schema.tier], "tier"},
+		{&ce.AttackDamage, fields[schema.dmg], "dmg"},
+		{&ce.SpellPower, fields[schema.spwr], "spwr"},
 	}
-	if mdefIdx >= 0 {
+	if schema.mdef >= 0 {
 		intFields = append(intFields, struct {
 			dst  *int
 			raw  string
 			name string
-		}{&ce.MDef, fields[mdefIdx], "mdef"})
+		}{&ce.MDef, fields[schema.mdef], "mdef"})
 	}
 	for _, f := range intFields {
 		v, err := parseIntField(f.raw, "custom enemy "+f.name, lineNo)
@@ -810,13 +851,13 @@ func parseCustomEnemyLine(line string, lineNo int) (MapCustomEnemy, error) {
 		}
 		*f.dst = v
 	}
-	chance, err := strconv.ParseFloat(fields[skchIdx], 64)
+	chance, err := strconv.ParseFloat(fields[schema.skch], 64)
 	if err != nil {
-		return MapCustomEnemy{}, fmt.Errorf("line %d: bad custom enemy sklch %q", lineNo, fields[skchIdx])
+		return MapCustomEnemy{}, fmt.Errorf("line %d: bad custom enemy sklch %q", lineNo, fields[schema.skch])
 	}
 	ce.SkillCastChance = chance
-	if fields[skillsIdx] != customEnemyNoSkillsToken {
-		for _, name := range strings.Split(fields[skillsIdx], ",") {
+	if fields[schema.skills] != customEnemyNoSkillsToken {
+		for _, name := range strings.Split(fields[schema.skills], ",") {
 			name = strings.TrimSpace(name)
 			if name == "" {
 				return MapCustomEnemy{}, fmt.Errorf("line %d: empty custom enemy skill entry", lineNo)
@@ -840,22 +881,13 @@ func (mf MapFile) Encode(w io.Writer) error {
 	if len(ceiling) == 0 {
 		ceiling = BlankLayer(mf.Width, mf.Height, CeilingOpenChar)
 	}
-	for _, layer := range []struct {
-		name string
-		rows []string
-	}{
-		{"walls", mf.Walls},
-		{"floor", mf.Floor},
-		{"decor", mf.Decor},
-		{"props", mf.Props},
-		{"ceiling", ceiling},
-	} {
+	for _, layer := range append(mf.requiredLayers(), namedLayer{sectionCeiling, ceiling}) {
 		fmt.Fprintf(bw, "%s:\n", layer.name)
 		for _, row := range layer.rows {
 			fmt.Fprintln(bw, row)
 		}
 	}
-	fmt.Fprintln(bw, "enemies:")
+	fmt.Fprintln(bw, sectionEnemies+":")
 	for _, p := range mf.Packs {
 		// Single-member packs encode the same as the legacy "kind X Z" line
 		// so maps without grouped packs stay byte-identical across the
@@ -870,7 +902,7 @@ func (mf MapFile) Encode(w io.Writer) error {
 			fmt.Fprintf(bw, "%s %d %d %s\n", members, p.X, p.Z, ai)
 		}
 	}
-	fmt.Fprintln(bw, "chests:")
+	fmt.Fprintln(bw, sectionChests+":")
 	for _, c := range mf.Chests {
 		token := emptyChestToken
 		if len(c.Items) > 0 {
@@ -883,7 +915,7 @@ func (mf MapFile) Encode(w io.Writer) error {
 	// the parser treats a missing section as zero-doors. Same rule as
 	// the pre-ceiling-section backwards compatibility above.
 	if len(mf.Doors) > 0 {
-		fmt.Fprintln(bw, "doors:")
+		fmt.Fprintln(bw, sectionDoors+":")
 		for _, d := range mf.Doors {
 			// Refuse to write a half-populated door (one of
 			// TargetMap/TargetDoor set, the other empty). The
@@ -913,7 +945,7 @@ func (mf MapFile) Encode(w io.Writer) error {
 	// its `%`-verb count matches customEnemyFieldCount — keeps the
 	// encoder and decoder honest about how many columns a row has.
 	if len(mf.CustomEnemies) > 0 {
-		fmt.Fprintln(bw, "custom_enemies:")
+		fmt.Fprintln(bw, sectionCustomEnemies+":")
 		for _, ce := range mf.CustomEnemies {
 			skills := customEnemyNoSkillsToken
 			if len(ce.Skills) > 0 {

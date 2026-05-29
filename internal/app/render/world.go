@@ -1055,15 +1055,16 @@ func isEnemyAttackerSlot(g core.GameState, slot int) bool {
 // lunging enemy will hit when the defend bar resolves. Drives the red
 // "incoming hit" marker above threatened heads during BattleEnemyTiming.
 // Every current enemy action (plain melee, Firebolt, Sleep, Ingest) is
-// single-target and routes through pickEnemyAttackTarget, which peeks
-// non-mutating via WrapNextAvailablePartyMember(EnemyAttackCursor+1).
+// single-target and shares core.PeekNextEnemyTarget — the same
+// non-mutating peek the battle side commits via pickEnemyAttackTarget —
+// so the marker can't drift from who actually gets hit.
 // Returning a slice (not a lone int) leaves room for AoE enemy skills
 // to extend the marker without touching the render call site.
 func enemyAttackTargets(g core.GameState) []int {
 	if g.Battle.Phase != core.BattleEnemyTiming {
 		return nil
 	}
-	target := core.WrapNextAvailablePartyMember(g.Party, g.Battle.EnemyAttackCursor+1)
+	target := core.PeekNextEnemyTarget(&g)
 	if target < 0 {
 		return nil
 	}
