@@ -578,9 +578,9 @@ func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources
 		if remaining < 0 {
 			remaining = 0
 		}
-		stripCol := rl.NewColor(140, 232, 168, 230)
+		stripCol := colorWithAlpha(seqOkColor, 230)
 		if remaining < 0.30 {
-			stripCol = rl.NewColor(228, 96, 96, 240)
+			stripCol = colorWithAlpha(seqFailColor, 240)
 		} else if remaining < 0.55 {
 			stripCol = rl.NewColor(232, 196, 92, 235)
 		}

@@ -77,8 +77,20 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 		}
 		drawStatIcon(s, float32(rowX)+14, float32(rowY)+18, 10, iconCol)
 		drawTextWithShadow(font, label, float32(rowX+34), float32(rowY+2), FontBody, col)
-		if desc := core.StatDescription(s); desc != "" {
-			drawTextWithShadow(font, desc, float32(rowX+86), float32(rowY+26), FontTiny, textHint)
+		// When the player has staged a spend on this row, swap the
+		// static description for the computed before→after preview so
+		// the row tells you what the point actually BUYS instead of
+		// just what stat it touches. Falls through to the static
+		// description when nothing is staged.
+		subText := core.StatPreviewLine(s, m.Stats, pending)
+		subCol := textHint
+		if subText != "" {
+			subCol = inkAccent
+		} else {
+			subText = core.StatDescription(s)
+		}
+		if subText != "" {
+			drawTextWithShadow(font, subText, float32(rowX+86), float32(rowY+26), FontTiny, subCol)
 		}
 
 		var preview string

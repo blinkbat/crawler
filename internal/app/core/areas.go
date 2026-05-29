@@ -143,7 +143,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 			}
 			members = append(members, CustomPackMember(def))
 		}
-		spawns = append(spawns, PackSpawn{TileX: p.X, TileZ: p.Z, Members: members})
+		spawns = append(spawns, PackSpawn{TileX: p.X, TileZ: p.Z, Members: members, AI: PackAIFromName(p.AI)})
 	}
 	chests := make([]ChestSpawn, 0, len(mf.Chests))
 	for _, c := range mf.Chests {
@@ -250,14 +250,15 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 			Members: names,
 			X:       s.TileX,
 			Z:       s.TileZ,
+			AI:      PackAIName(s.AI),
 		})
 	}
 	chests := make([]mapfile.MapChest, 0, len(a.ChestSpawns))
 	for _, c := range a.ChestSpawns {
 		names := make([]string, 0, len(c.Items))
 		for _, kind := range c.Items {
-			info := ItemInfo(kind)
-			if info.Name == "" || info.Name == "Unknown Item" {
+			info, ok := ItemInfoOk(kind)
+			if !ok || info.Name == "" {
 				return mapfile.MapFile{}, fmt.Errorf("unknown chest item kind %d at (%d,%d)", int(kind), c.TileX, c.TileZ)
 			}
 			names = append(names, info.Name)
@@ -475,31 +476,108 @@ var DoorStyleLabels = [DoorStyleCount]string{
 	DoorStyleField:    "Field",
 }
 
+// doorStyleNameTable is the canonical DoorStyle ↔ on-disk-name map.
+// Indexed by DoorStyle so DoorStyleName is an O(1) lookup; the name
+// strings match mapfile.DoorStyleNames row-for-row (init asserts the
+// length stays aligned). Both directions go through this table instead
+// of the two hand-mirrored switches that used to drift.
+var doorStyleNameTable = [DoorStyleCount]string{
+	DoorStyleBuilding: mapfile.DoorStyleBuildingName,
+	DoorStyleCave:     mapfile.DoorStyleCaveName,
+	DoorStyleField:    mapfile.DoorStyleFieldName,
+}
+
 // DoorStyleName maps a DoorStyle to its canonical on-disk string. An
 // out-of-range style (shouldn't happen) falls back to building so a
 // corrupt value still round-trips to a valid row.
 func DoorStyleName(s DoorStyle) string {
-	switch s {
-	case DoorStyleCave:
-		return mapfile.DoorStyleCaveName
-	case DoorStyleField:
-		return mapfile.DoorStyleFieldName
-	default:
+	if s < 0 || int(s) >= len(doorStyleNameTable) {
 		return mapfile.DoorStyleBuildingName
 	}
+	return doorStyleNameTable[s]
 }
 
 // doorStyleFromName maps an on-disk style string to a DoorStyle. Empty or
 // unrecognized resolves to building (the parser already validates names,
 // so this is the load-time default for a missing column).
 func doorStyleFromName(s string) DoorStyle {
-	switch strings.ToLower(s) {
-	case mapfile.DoorStyleCaveName:
-		return DoorStyleCave
-	case mapfile.DoorStyleFieldName:
-		return DoorStyleField
-	default:
-		return DoorStyleBuilding
+	want := strings.ToLower(s)
+	for i, name := range doorStyleNameTable {
+		if name == want {
+			return DoorStyle(i)
+		}
+	}
+	return DoorStyleBuilding
+}
+
+func init() {
+	if len(doorStyleNameTable) != len(mapfile.DoorStyleNames) {
+		panic("core: doorStyleNameTable length must match mapfile.DoorStyleNames — add a row when extending DoorStyle")
+	}
+	for i, name := range doorStyleNameTable {
+		if name != mapfile.DoorStyleNames[i] {
+			panic("core: doorStyleNameTable[" + name + "] disagrees with mapfile.DoorStyleNames — keep them in sync")
+		}
+	}
+}
+
+// packAINameTable is the canonical PackAI ↔ on-disk-name map. Indexed
+// by PackAI so PackAIName is an O(1) lookup; the strings match
+// mapfile.PackAINames row-for-row (init below asserts the length stays
+// aligned). Mirrors doorStyleNameTable's shape.
+var packAINameTable = [PackAICount]string{
+	PackAINone:        mapfile.PackAINoneName,
+	PackAIJunkyardDog: mapfile.PackAIJunkyardDogName,
+}
+
+// packAILabels is the editor-facing display name per mode — what the
+// pack-edit modal cycles through. Kept next to packAINameTable so the
+// on-disk slug and the player-facing label share one row position.
+var packAILabels = [PackAICount]string{
+	PackAINone:        "None (stationary)",
+	PackAIJunkyardDog: "Junkyard Dog",
+}
+
+// PackAIName returns the canonical on-disk string for a PackAI. Empty
+// or out-of-range falls back to the no-op mode so a corrupt value still
+// round-trips to a valid row.
+func PackAIName(ai PackAI) string {
+	if ai < 0 || int(ai) >= len(packAINameTable) {
+		return mapfile.PackAINoneName
+	}
+	return packAINameTable[ai]
+}
+
+// PackAIFromName maps an on-disk name (case-insensitive) to a PackAI.
+// Empty or unrecognized resolves to PackAINone (the editor's default
+// for a freshly-placed pack), so the loader doesn't need a separate
+// "missing column" branch.
+func PackAIFromName(s string) PackAI {
+	want := strings.ToLower(s)
+	for i, name := range packAINameTable {
+		if name == want {
+			return PackAI(i)
+		}
+	}
+	return PackAINone
+}
+
+// PackAILabel returns the editor-facing display name for a PackAI.
+func PackAILabel(ai PackAI) string {
+	if ai < 0 || int(ai) >= len(packAILabels) {
+		return packAILabels[PackAINone]
+	}
+	return packAILabels[ai]
+}
+
+func init() {
+	if len(packAINameTable) != len(mapfile.PackAINames) {
+		panic("core: packAINameTable length must match mapfile.PackAINames — add a row when extending PackAI")
+	}
+	for i, name := range packAINameTable {
+		if name != mapfile.PackAINames[i] {
+			panic("core: packAINameTable[" + name + "] disagrees with mapfile.PackAINames — keep them in sync")
+		}
 	}
 }
 

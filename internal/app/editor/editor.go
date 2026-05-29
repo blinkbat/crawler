@@ -299,22 +299,25 @@ func buildEntityBrushes() []Brush {
 	return brushes
 }
 
+// layerDisplayNames is the Layer→label table powering layerName.
+// Indexed by Layer so a new layer added to the enum must extend this
+// array, and the init below catches a length mismatch at startup —
+// same lockstep guard the sibling switches in applyTool / eraseAt /
+// activeGrid already panic on at a missing case.
+var layerDisplayNames = [layerCount]string{
+	LayerWalls:    "Walls",
+	LayerFloor:    "Floor",
+	LayerDecor:    "Decor",
+	LayerProps:    "Props",
+	LayerCeiling:  "Ceiling",
+	LayerEntities: "Entities",
+}
+
 func layerName(l Layer) string {
-	switch l {
-	case LayerWalls:
-		return "Walls"
-	case LayerFloor:
-		return "Floor"
-	case LayerDecor:
-		return "Decor"
-	case LayerProps:
-		return "Props"
-	case LayerCeiling:
-		return "Ceiling"
-	case LayerEntities:
-		return "Entities"
+	if int(l) < 0 || int(l) >= len(layerDisplayNames) {
+		panic("editor: layerName called with unhandled Layer — add it to layerDisplayNames")
 	}
-	return "?"
+	return layerDisplayNames[l]
 }
 
 type focusField int

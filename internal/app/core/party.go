@@ -21,10 +21,11 @@ type PartyClassDefinition struct {
 	MaxMP int
 	// Skills is the per-class learned list. Index 0 is the class's
 	// signature skill — shown in the action menu's Skill row by
-	// default. Indices 1+ are the universal pool (PowerStrike, Focus)
-	// every class learns; the in-battle Tab key cycles which one the
-	// Skill row casts. Always length SkillsPerClass; init asserts the
-	// shape stays consistent.
+	// default. Indices 1+ are the class's two thematic skills (e.g.
+	// Warrior: Crushing Blow / Whirlwind; Wizard: Frost Lance / Arc
+	// Bolt — see partyClassDefinitions for the per-class roster); the
+	// in-battle Tab key cycles which one the Skill row casts. Always
+	// length SkillsPerClass; init asserts the shape stays consistent.
 	Skills [SkillsPerClass]SkillID
 }
 
@@ -583,6 +584,101 @@ func ApplyArmor(dmg int, tag SkillTag, armor int) int {
 	return reduced
 }
 
+// MagicDefense returns the magic mitigation value derived from a Stats
+// block. Mirrors ApplyArmor's role on the phys side — currently WIS in
+// flat 1:1 (every point of WIS soaks 1 damage off a magic hit), but a
+// future caster-equipment pass can layer +MDef gear into this seam.
+func MagicDefense(s Stats) int {
+	return s.WIS
+}
+
+// ApplyMagicDefense clamps magic-tagged damage by the target's MDef,
+// floor 1. Symmetrical to ApplyArmor: phys hits clip against Armor,
+// magic hits clip against MDef. Heal/Buff/Phys/None tagged actions
+// bypass — phys hits already went through ApplyArmor and shouldn't be
+// double-soaked. Keeps the no-stack rule with armor explicit.
+func ApplyMagicDefense(dmg int, tag SkillTag, mdef int) int {
+	if tag != SkillTagMagic || mdef <= 0 || dmg <= 0 {
+		return dmg
+	}
+	reduced := dmg - mdef
+	if reduced < 1 {
+		return 1
+	}
+	return reduced
+}
+
+// DodgeChance returns the [0, 1] probability a defender sidesteps an
+// incoming basic attack. See config.go's DodgePerDEX / DodgeCap for
+// tuning notes. Skill-applied damage is not currently dodgeable —
+// mirrors AttackAccuracy, which only gates basic attacks.
+func DodgeChance(s Stats) float64 {
+	chance := DodgePerDEX * float64(s.DEX)
+	if chance > DodgeCap {
+		chance = DodgeCap
+	}
+	if chance < 0 {
+		chance = 0
+	}
+	return chance
+}
+
+// RollDodge rolls a dodge attempt for the defender against `rng`. True
+// means the incoming basic attack misses entirely.
+func RollDodge(rng *rand.Rand, s Stats) bool {
+	return rng.Float64() < DodgeChance(s)
+}
+
+// CritChance returns the [0, 1] probability that a connecting damage
+// roll crits. DEX is the linear driver; timing grade adds a per-grade
+// bonus from timingGrades.CritBonus. Returned chance is capped at
+// CritCap so even a max-DEX hero on Excellent timing leaves some swing
+// in the dice. Quality outside the table contributes no bonus (defensive
+// against a future grade enum extension that forgets the CritBonus
+// column — init asserts the table length, so this branch is dead today).
+func CritChance(s Stats, quality int) float64 {
+	base := CritBaseline + CritPerDEX*float64(s.DEX)
+	if quality >= 0 && quality < len(timingGrades) {
+		base += timingGrades[quality].CritBonus
+	}
+	if base > CritCap {
+		base = CritCap
+	}
+	if base < 0 {
+		base = 0
+	}
+	return base
+}
+
+// RollCrit rolls a crit attempt against `rng`. True means the caller
+// should multiply the post-armor damage by CritMultiplier and surface
+// "Critical!" in the combat log.
+func RollCrit(rng *rand.Rand, s Stats, quality int) bool {
+	return rng.Float64() < CritChance(s, quality)
+}
+
+// ShortenStatusDuration returns the rolled status duration after
+// subtracting wis/StatusShortenDivisor turns (floor 1). Applied when an
+// enemy lands Sleep / Poison / Bound / Confuse on a party member — a
+// high-WIS Cleric shrugs statuses off faster than a low-WIS Warrior.
+// Burn isn't called here because the party doesn't get burned today
+// (Firebolt is player → enemy only); when an enemy gains a burn skill,
+// the symmetric path (enemy WIS shortens player-applied burn) wires
+// through this same helper.
+func ShortenStatusDuration(duration, wis int) int {
+	if duration <= 0 {
+		return duration
+	}
+	if wis <= 0 || StatusShortenDivisor <= 0 {
+		return duration
+	}
+	shaved := duration - wis/StatusShortenDivisor
+	if shaved < 1 {
+		return 1
+	}
+	return shaved
+}
+
 // XPForLevel returns the XP cost to advance FROM level `level` to the
 // next. Geometric curve: LevelXPBase × LevelXPRatio^(level-1) — so
 // level 1→2 costs 100, level 2→3 costs 200, etc. Returns a positive
@@ -818,9 +914,9 @@ func AdjustStat(s *Stats, st Stat, delta int) {
 // description lands in the same place as its label / Get / Add.
 var statDescriptions = []string{
 	StatSTR: "Melee damage",
-	StatDEX: "Hit chance and Steal precision",
+	StatDEX: "Hit chance, Steal, Dodge, Crit",
 	StatINT: "Magic damage",
-	StatWIS: "Heal amount",
+	StatWIS: "Heal, Magic defense, Status resist",
 	StatVIT: fmt.Sprintf("Max HP (+%d per point)", HPPerVIT),
 	StatSPD: "Turn order priority",
 }
@@ -833,6 +929,44 @@ func StatDescription(s Stat) string {
 		return ""
 	}
 	return statDescriptions[s]
+}
+
+// StatPreviewLine returns the per-row "what this spend buys" string
+// the level-up modal shows IN PLACE of the static description when
+// the player has staged at least one point in the row. Computes the
+// projected post-spend derived values (damage, hit %, dodge %, crit
+// %, heal, mdef, max HP, etc.) by applying `pending` clones of the
+// stat's Add to a working copy. Returns "" when pending <= 0 or stat
+// is out-of-range so the renderer can fall through to StatDescription.
+func StatPreviewLine(stat Stat, current Stats, pending int) string {
+	if pending <= 0 || stat < 0 || int(stat) >= len(statTable) {
+		return ""
+	}
+	after := current
+	for i := 0; i < pending; i++ {
+		statTable[stat].Add(&after)
+	}
+	switch stat {
+	case StatSTR:
+		return fmt.Sprintf("Melee %d → %d", MeleeDamage(current, 0), MeleeDamage(after, 0))
+	case StatDEX:
+		h0 := AttackAccuracy(current, TimingQualityMiss) * 100
+		h1 := AttackAccuracy(after, TimingQualityMiss) * 100
+		d0 := DodgeChance(current) * 100
+		d1 := DodgeChance(after) * 100
+		c0 := CritChance(current, TimingQualityMiss) * 100
+		c1 := CritChance(after, TimingQualityMiss) * 100
+		return fmt.Sprintf("Hit %.0f→%.0f%%  Dodge %.0f→%.0f%%  Crit %.0f→%.0f%%", h0, h1, d0, d1, c0, c1)
+	case StatINT:
+		return fmt.Sprintf("Magic %d → %d", MagicDamage(current, 0), MagicDamage(after, 0))
+	case StatWIS:
+		return fmt.Sprintf("Heal %d→%d  MDef %d→%d", HealAmount(current, 0), HealAmount(after, 0), MagicDefense(current), MagicDefense(after))
+	case StatVIT:
+		return fmt.Sprintf("MaxHP %d → %d", MaxHPFor(current), MaxHPFor(after))
+	case StatSPD:
+		return fmt.Sprintf("SPD %d → %d", current.SPD, after.SPD)
+	}
+	return ""
 }
 
 // CommitLevelUp applies the staged stat-point spend on a member by

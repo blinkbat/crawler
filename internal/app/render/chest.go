@@ -129,11 +129,10 @@ func DrawChestPrompt(camera rl.Camera3D, g core.GameState, assets Resources) {
 	screen := rl.GetWorldToScreen(world, camera)
 	label := "Press Enter to open"
 	font := assets.Font()
-	size := float32(18)
-	m := rl.MeasureTextEx(font, label, size, 1)
+	m := rl.MeasureTextEx(font, label, FontBody, 1)
 	x := screen.X - m.X/2
 	y := screen.Y - m.Y - 8
-	drawTextWithShadow(font, label, x, y, size, borderActive)
+	drawTextWithShadow(font, label, x, y, FontBody, borderActive)
 }
 
 // DrawChestModal paints the chest-open dialog: a card with the item

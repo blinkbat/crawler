@@ -2,7 +2,6 @@ package battle
 
 import (
 	"fmt"
-	"sort"
 
 	"crawler/internal/app/audio"
 	"crawler/internal/app/core"
@@ -166,39 +165,101 @@ func beginNewRound(g *core.GameState) {
 	startActorTurn(g)
 }
 
-// buildTurnQueue assembles all living actors into a single list, sorted by
-// SPD descending. Stable sort means tied speeds keep their original order
-// (party first, then enemies, in their slot order). Ingested party members
-// are skipped — they re-enter the queue on the round AFTER their swallower
-// dies (the release flips Ingested off, the next beginNewRound picks them
-// up).
+// buildTurnQueue assembles the next batch of actor turns using an
+// ATB-style tick scheduler. Each alive actor has a readiness gauge
+// that accumulates by their SPD per tick; whoever crosses
+// ATBReadyThreshold first acts, then carries the overflow into the
+// next tick. The queue is naturally interleaved by who hits the gate
+// when — there's no rigid "round" of one slot per actor. A SPD 6
+// Thief reaches readiness roughly twice as often as a SPD 3 Warrior,
+// so the queue looks like [Thief, Goblin, Cleric, Thief, Wizard,
+// Warrior, ...] instead of clustered SPD-descending slots.
+//
+// Simulation runs from ready=0 each call and stops once every alive
+// actor has acted at least once (the "round" boundary that downstream
+// code — poison-on-ingested ticks, enemy-attack cursor reset — still
+// hangs poison and per-round housekeeping off). Ingested party
+// members are skipped entirely; they re-enter the queue the call
+// AFTER their swallower dies.
 func buildTurnQueue(g *core.GameState) []core.ActorRef {
 	members := core.BattleMembers(g)
-	queue := make([]core.ActorRef, 0, len(g.Party)+len(members))
+	type tickActor struct {
+		ref   core.ActorRef
+		spd   int
+		ready int
+		acted bool
+	}
+	actors := make([]tickActor, 0, len(g.Party)+len(members))
 	for i, p := range g.Party {
 		if p.HP <= 0 || p.Ingested {
 			continue
 		}
-		queue = append(queue, core.ActorRef{IsParty: true, Index: i})
+		actors = append(actors, tickActor{ref: core.ActorRef{IsParty: true, Index: i}, spd: actorSpeed(g, core.ActorRef{IsParty: true, Index: i})})
 	}
 	for slot, m := range members {
 		if !m.Alive {
 			continue
 		}
-		queue = append(queue, core.ActorRef{IsParty: false, Index: slot})
+		actors = append(actors, tickActor{ref: core.ActorRef{IsParty: false, Index: slot}, spd: actorSpeed(g, core.ActorRef{IsParty: false, Index: slot})})
 	}
-	sort.SliceStable(queue, func(a, b int) bool {
-		return actorSpeed(g, queue[a]) > actorSpeed(g, queue[b])
-	})
+	if len(actors) == 0 {
+		return nil
+	}
+	target := len(actors)
+	queue := make([]core.ActorRef, 0, target*2)
+	actedCount := 0
+	threshold := core.ATBReadyThreshold
+	// Hard cap: even pathological mixes (one tick-fast actor while
+	// everyone else has SPD 1) shouldn't blow past 4× the participant
+	// count of turns per round.
+	maxSlots := target * 4
+	for actedCount < target && len(queue) < maxSlots {
+		// Pick the actor that reaches `threshold` in the fewest ticks.
+		// ticksNeeded = ceil((threshold - ready) / spd), compared via
+		// cross-multiplication to keep everything integer.
+		bestIdx := -1
+		for i := range actors {
+			if actors[i].spd <= 0 {
+				continue
+			}
+			if bestIdx < 0 {
+				bestIdx = i
+				continue
+			}
+			li := (threshold - actors[i].ready) * actors[bestIdx].spd
+			lb := (threshold - actors[bestIdx].ready) * actors[i].spd
+			if li < lb {
+				bestIdx = i
+			}
+		}
+		if bestIdx < 0 {
+			break
+		}
+		need := threshold - actors[bestIdx].ready
+		ticks := (need + actors[bestIdx].spd - 1) / actors[bestIdx].spd
+		if ticks < 0 {
+			ticks = 0
+		}
+		for i := range actors {
+			actors[i].ready += ticks * actors[i].spd
+		}
+		queue = append(queue, actors[bestIdx].ref)
+		actors[bestIdx].ready -= threshold
+		if !actors[bestIdx].acted {
+			actors[bestIdx].acted = true
+			actedCount++
+		}
+	}
 	return queue
 }
 
-// actorSpeed returns the SPD of the actor. Party uses Stats.SPD; enemies use
-// the implicit per-kind Speed from EnemyDefinition. Bound party members
-// have their effective SPD halved (rounded down, floor 1) for the
-// turn-queue sort — Bound's signature is "you still act, but the world
-// gets ahead of you." Enemy-side Bound is not currently inflicted (no
-// player skill applies it yet), so the path is party-only today.
+// actorSpeed returns the SPD of the actor. Both sides read Stats.SPD
+// now that enemies carry a full Stats block (legacy EnemyDefinition.Speed
+// was retired in favour of symmetry). Bound party members have their
+// effective SPD halved (rounded down, floor 1) for the turn-queue
+// sort — Bound's signature is "you still act, but the world gets ahead
+// of you." Enemy-side Bound is not currently inflicted (no player
+// skill applies it yet), so the bound branch is party-only today.
 func actorSpeed(g *core.GameState, actor core.ActorRef) int {
 	if actor.IsParty {
 		if !actor.ValidPartyIndex(g.Party) {
@@ -217,7 +278,7 @@ func actorSpeed(g *core.GameState, actor core.ActorRef) int {
 	if m == nil {
 		return 0
 	}
-	return core.EnemyInfoFor(*m).Speed
+	return core.EnemyInfoFor(*m).Stats.SPD
 }
 
 // startActorTurn opens the turn of whatever actor sits at the queue cursor.
@@ -275,60 +336,64 @@ func startActorTurn(g *core.GameState) {
 	}
 }
 
-// tickSleepAtTurnStart decrements SleepTurns and emits a "(Name) sleeps."
-// log line when the actor is still asleep at turn start. Returns true
-// when the actor must skip their input action this turn. Mirrors
-// tickBurnAtTurnStart's shape: counter ticks here, wake-on-damage lives
-// in the damage helpers, both rules pinned to the actor's own turn.
-func tickSleepAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
+// tickSkipStatusAtTurnStart drains one tick from a skip-this-turn status
+// counter (Sleep / Stun) at the start of the afflicted actor's own
+// turn, emitting a "(Name) <verb>." log line and returning true if the
+// actor must skip their action. Shared body for tickSleepAtTurnStart /
+// tickStunAtTurnStart — they used to be byte-for-byte copies that
+// differed only in the field accessor and the verb.
+//
+// counterRefParty / counterRefEnemy return pointers into the affected
+// member's counter so the helper can both read and decrement without a
+// type-specific switch. (Sleep has a separate wake-on-damage path
+// inside the damage helpers — counter draining here is independent of
+// that.)
+func tickSkipStatusAtTurnStart(
+	g *core.GameState, actor core.ActorRef, verb string,
+	counterRefParty func(*core.PartyMember) *int,
+	counterRefEnemy func(*core.Enemy) *int,
+) bool {
 	if actor.IsParty {
 		if !actor.ValidPartyIndex(g.Party) {
 			return false
 		}
 		m := &g.Party[actor.Index]
-		if m.HP <= 0 || m.SleepTurns <= 0 {
+		if m.HP <= 0 {
 			return false
 		}
-		m.SleepTurns--
-		setBattleMessage(g, fmt.Sprintf("%s is asleep.", m.Name))
+		c := counterRefParty(m)
+		if *c <= 0 {
+			return false
+		}
+		*c--
+		setBattleMessage(g, fmt.Sprintf("%s %s.", m.Name, verb))
 		return true
 	}
 	enemy := core.BattleMemberAt(g, actor.Index)
-	if enemy == nil || !enemy.Alive || enemy.SleepTurns <= 0 {
+	if enemy == nil || !enemy.Alive {
 		return false
 	}
-	enemy.SleepTurns--
-	setBattleMessage(g, fmt.Sprintf("%s is asleep.", core.TheEnemy(core.EnemyInfoFor(*enemy))))
+	c := counterRefEnemy(enemy)
+	if *c <= 0 {
+		return false
+	}
+	*c--
+	setBattleMessage(g, fmt.Sprintf("%s %s.", core.TheEnemy(core.EnemyInfoFor(*enemy)), verb))
 	return true
 }
 
-// tickStunAtTurnStart decrements StunTurns and emits a "(Name) is
-// stunned." log line when the actor still owes a stunned turn at
-// their own turn start. Same shape as tickSleepAtTurnStart; the
-// difference is no wake-on-damage path — Stun's only out is the
-// counter running down naturally.
+func tickSleepAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
+	return tickSkipStatusAtTurnStart(g, actor, "is asleep",
+		func(m *core.PartyMember) *int { return &m.SleepTurns },
+		func(e *core.Enemy) *int { return &e.SleepTurns })
+}
+
+// Players can't currently be stunned (no enemy skill inflicts it yet),
+// but the helper's party branch keeps the symmetry future-proof.
 func tickStunAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
-	if actor.IsParty {
-		// Players can't currently be stunned (no enemy skill inflicts
-		// it yet), but the symmetry keeps the helper future-proof.
-		if !actor.ValidPartyIndex(g.Party) {
-			return false
-		}
-		m := &g.Party[actor.Index]
-		if m.HP <= 0 || m.StunTurns <= 0 {
-			return false
-		}
-		m.StunTurns--
-		setBattleMessage(g, fmt.Sprintf("%s is stunned.", m.Name))
-		return true
-	}
-	enemy := core.BattleMemberAt(g, actor.Index)
-	if enemy == nil || !enemy.Alive || enemy.StunTurns <= 0 {
-		return false
-	}
-	enemy.StunTurns--
-	setBattleMessage(g, fmt.Sprintf("%s is stunned.", core.TheEnemy(core.EnemyInfoFor(*enemy))))
-	return true
+	return tickSkipStatusAtTurnStart(g, actor, "is stunned",
+		func(m *core.PartyMember) *int { return &m.StunTurns },
+		func(e *core.Enemy) *int { return &e.StunTurns })
 }
 
 // isActorAlive answers "is this queue actor still in the fight?" Used for

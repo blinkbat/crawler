@@ -2,17 +2,54 @@ package core
 
 import "slices"
 
-// Junkyard-dog pack AI. Packs roam within a small leash around their
-// spawn tile, occasionally taking a step when the player does. They
-// step toward the player when the player is close, otherwise drift to
-// a random open neighbor that keeps them inside the leash. They don't
-// chase outside the leash and they don't move every step — the goal
-// is "this dog noticed you walk by and decided to look up," not "you
-// have a hostile escort following you across the map."
+// Pack AI dispatch. Each pack carries a PackAI mode authored on its
+// PackSpawn (default PackAINone — stationary, no per-step planning).
+// PlanPackSteps walks alive packs and, for each, hands control to the
+// planner registered for that pack's mode. New movement styles land as
+// one entry in packAIPlanners plus the per-mode planOneXxxPack body.
+//
+// Today's modes:
+//   - PackAINone: stationary. Never plans a step. The editor's "no AI"
+//     default and what every old map without an AI column resolves to.
+//   - PackAIJunkyardDog: wanders inside a small leash around the spawn
+//     tile, occasionally taking a step when the player does, and steps
+//     toward the player when they're close. Doesn't chase outside the
+//     leash and doesn't move every step — the goal is "this dog noticed
+//     you walk by and decided to look up," not "you have a hostile
+//     escort following you across the map."
 //
 // All randomness comes from GameState.RNG so the seed travels with the
 // run state (tests / future save-load) instead of leaking onto a
 // package-level singleton.
+
+// packPlanner plans one pack's per-step move. (state, packIndex,
+// occupied) → (step, planned). Implementations may roll dice off
+// g.RNG and read the player's tile; they must NOT mutate g or the
+// occupied map (the dispatcher reserves the destination after the
+// plan returns).
+type packPlanner func(g *GameState, idx int, occupied map[[2]int]bool) (packAIStep, bool)
+
+// packAIPlanners is the per-mode dispatch table. Indexed by PackAI so a
+// new mode is one row + one planner. Init below asserts every mode in
+// the enum has a row.
+var packAIPlanners = [PackAICount]packPlanner{
+	PackAINone:        planStationaryPack,
+	PackAIJunkyardDog: planJunkyardDogPack,
+}
+
+func init() {
+	for i, p := range packAIPlanners {
+		if p == nil {
+			panic("core: packAIPlanners missing a planner for PackAI " + PackAIName(PackAI(i)))
+		}
+	}
+}
+
+// planStationaryPack is the PackAINone planner — no step, ever. The
+// pack sits at its spawn tile until the player walks into it.
+func planStationaryPack(*GameState, int, map[[2]int]bool) (packAIStep, bool) {
+	return packAIStep{}, false
+}
 
 // PackStepIntoPlayer reports whether a pack at (tx, tz) and the player
 // at (px, pz) share a tile — the collision condition that should
@@ -80,7 +117,14 @@ func PlanPackSteps(g *GameState) []packAIStep {
 		if !PackAlive(g.Packs[i]) {
 			continue
 		}
-		plan, ok := planOnePack(g, i, occupied)
+		mode := g.Packs[i].AI
+		if int(mode) < 0 || int(mode) >= len(packAIPlanners) {
+			// Corrupt mode (out-of-range value from a future map). Treat
+			// as stationary — safer than crashing or planning random
+			// moves the author didn't intend.
+			continue
+		}
+		plan, ok := packAIPlanners[mode](g, i, occupied)
 		if !ok {
 			continue
 		}
@@ -93,7 +137,10 @@ func PlanPackSteps(g *GameState) []packAIStep {
 	return plans
 }
 
-func planOnePack(g *GameState, idx int, occupied map[[2]int]bool) (packAIStep, bool) {
+// planJunkyardDogPack plans one junkyard-dog pack's step. Same chase /
+// wander rules previously hard-coded as the only AI mode — now opt-in
+// per pack via PackAIJunkyardDog.
+func planJunkyardDogPack(g *GameState, idx int, occupied map[[2]int]bool) (packAIStep, bool) {
 	if g.RNG.Float32() >= PackStepChance {
 		return packAIStep{}, false
 	}

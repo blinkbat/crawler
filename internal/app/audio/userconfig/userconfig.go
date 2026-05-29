@@ -43,10 +43,15 @@ func SanitizeName(name string) string {
 	return core.SanitizeFilename(name, "")
 }
 
+// WavExt is the canonical file extension for user-sound .wav files.
+// Centralized so a format change (or a future .ogg variant) touches one
+// place instead of every "name+\".wav\"" / HasSuffix check.
+const WavExt = ".wav"
+
 // SoundPath returns the .wav path for a named user sound (no existence
 // check — caller's responsibility).
 func SoundPath(name string) string {
-	return filepath.Join(SoundsDir(), name+".wav")
+	return filepath.Join(SoundsDir(), name+WavExt)
 }
 
 // ListSounds returns the names (without .wav) of every .wav file in the
@@ -65,7 +70,7 @@ func ListSounds() []string {
 			continue
 		}
 		name := e.Name()
-		if !strings.HasSuffix(strings.ToLower(name), ".wav") {
+		if !strings.HasSuffix(strings.ToLower(name), WavExt) {
 			continue
 		}
 		out = append(out, strings.TrimSuffix(name, filepath.Ext(name)))
@@ -89,7 +94,7 @@ func WriteWAV(name string, pcm []int16) (string, error) {
 		return clean, err
 	}
 	wav := wavsynth.BuildWAV(pcm, wavsynth.SampleRate)
-	path := filepath.Join(dir, clean+".wav")
+	path := filepath.Join(dir, clean+WavExt)
 	if err := os.WriteFile(path, wav, core.AssetFileMode); err != nil {
 		return clean, err
 	}

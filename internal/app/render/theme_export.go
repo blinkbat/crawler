@@ -111,9 +111,9 @@ func DrawTextWithShadow(font rl.Font, text string, x, y, size float32, col color
 // bottom edge. Replaces the older blue-purple "active-tint" fill
 // so every list-style surface speaks the library aesthetic.
 //
-// Used by modal pickers (chest, level-up, sound editor) and any
-// non-`drawListRow` cursor highlight. New code should prefer
-// drawListRow directly for the full per-state ladder.
+// Used by modal pickers (chest, level-up, sound editor) for the
+// cursor-on-row highlight. The action menu, panels Items/Skills rows,
+// and the party card each paint their own variant inline today.
 func DrawSelectedRow(r rl.Rectangle) {
 	drawGlassPane(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height), glassWarm)
 	// Gilt left spine — 3 px, vertically inset 5 px top/bottom so it

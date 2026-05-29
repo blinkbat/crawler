@@ -268,8 +268,18 @@ func updateEditorScene(state *appState, dt float32) {
 
 func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	camera := render.Camera(*game)
-	// No explicit clear — DrawSkyBackground paints the full viewport
-	// every frame, so any clear here would be immediately overdrawn.
+	// Explicit clear is REQUIRED — bisect confirmed that without it
+	// the world geometry (props in particular) flickers and trees
+	// hide behind invisible depth-buffer holes that shift as the
+	// camera moves. The expected raylib contract is that
+	// BeginDrawing's implicit rlClearScreenBuffers covers depth,
+	// but on this build the depth buffer carries stale fragments
+	// from the previous frame without the explicit ClearBackground
+	// here. DrawSkyBackground paints the full viewport in 2D so the
+	// sky-blue color set by the clear is overdrawn immediately —
+	// the color value is irrelevant, the call is for the depth wipe
+	// that comes with it.
+	rl.ClearBackground(rl.NewColor(87, 172, 244, 255))
 	render.DrawSkyBackground(assets, *game)
 	rl.BeginMode3D(camera)
 	render.DrawWorld(camera, *game, assets)

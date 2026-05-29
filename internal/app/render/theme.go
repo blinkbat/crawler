@@ -60,7 +60,6 @@ var (
 	// ----- Gilt accents (selection / focus) -----
 	giltDim    = rl.NewColor(160, 124, 64, 255)
 	giltBright = rl.NewColor(232, 196, 112, 255)
-	giltGlow   = rl.NewColor(255, 232, 168, 210)
 
 	// ----- Parchment ink (text) -----
 	inkPrimary = rl.NewColor(232, 222, 196, 255)
@@ -656,7 +655,7 @@ func drawSmallPanelOutline(x, y, w, h int32, col color.RGBA) {
 }
 
 func fixedRoundnessFor(w, h int32, target float32) float32 {
-	minDim := float32(core.MinInt(int(w), int(h)))
+	minDim := float32(min(int(w), int(h)))
 	if minDim <= 0 {
 		return 0
 	}
@@ -735,65 +734,6 @@ func drawGlassPane(x, y, w, h int32, fill color.RGBA) {
 	roundness := fixedRoundnessFor(w, h, cornerRadius)
 	rl.DrawRectangleRounded(rect, roundness, 8, glassBaseWash)
 	rl.DrawRectangleRounded(rect, roundness, 8, fill)
-}
-
-// ListRowState enumerates the visual states a single row in a panel
-// list can take. UI_STANDARDS.md "Row" defines what each state
-// renders — Rest is bare, Hover gilds the spine + promotes text,
-// Selected pulses + underlines + uses inkAccent, Disabled mutes
-// every layer.
-type ListRowState int
-
-const (
-	ListRowRest ListRowState = iota
-	ListRowHover
-	ListRowSelected
-	ListRowDisabled
-)
-
-// drawListRow paints the panel-row chrome for one of the four
-// canonical row states. Single source of truth for "what does a
-// list row look like?" — owners pass the row rect, the helper
-// handles the inset fill, gilt spine, underline, and inset
-// padding. Returns the text rect (panel rect minus the spine
-// width + a small padding) so the caller can paint the row's
-// content without recomputing the inset.
-//
-// Owners draw row text via drawTextWithShadow at FontBody (or
-// FontSmall for dense lists). Active actor's spine is animated by
-// the caller via fadeColor + the standard pulse frequency.
-func drawListRow(rect rl.Rectangle, state ListRowState) rl.Rectangle {
-	if rect.Width <= 0 || rect.Height <= 0 {
-		return rect
-	}
-	// Inset glass plate, slightly darker than the panel body.
-	body := glassMid
-	if state == ListRowSelected {
-		body = glassWarm
-	}
-	if state == ListRowDisabled {
-		body = rl.NewColor(18, 14, 18, 130)
-	}
-	drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), body)
-
-	// Gilt left spine on Hover / Selected.
-	spineW := int32(3)
-	switch state {
-	case ListRowHover:
-		rl.DrawRectangle(int32(rect.X)+4, int32(rect.Y)+5, spineW, int32(rect.Height)-10, giltDim)
-	case ListRowSelected:
-		rl.DrawRectangle(int32(rect.X)+4, int32(rect.Y)+5, spineW, int32(rect.Height)-10, giltBright)
-		// Underline along the bottom edge — sells the "current row
-		// in a ledger" feel.
-		rl.DrawRectangle(int32(rect.X)+8, int32(rect.Y)+int32(rect.Height)-3, int32(rect.Width)-16, 1, giltDim)
-	}
-
-	// Text rect: padded past the spine on the left, breathing room
-	// on the right.
-	textPadL := float32(14)
-	textPadR := float32(8)
-	textRect := rl.NewRectangle(rect.X+textPadL, rect.Y+4, rect.Width-textPadL-textPadR, rect.Height-8)
-	return textRect
 }
 
 // drawPanelHeading paints a FontHeading title with the standard
@@ -892,9 +832,9 @@ var barTrackColor = rl.NewColor(8, 12, 22, 140)
 // bar labels like "HP" and "MP". drawBar runs ~16 times per frame
 // across the party ribbon and enemy roster; the label measurement
 // is a cgo round-trip that returns the same value every time for a
-// given (font.Texture.ID, label) pair. Cleared whenever the active
-// font changes (font reload after a setting flip, etc.) via
-// resetBarLabelMeasureCache from the font-swap path.
+// given (font.Texture.ID, label) pair. Self-invalidates when the font
+// texture ID changes (font reload after a setting flip, etc.) — see
+// barLabelMeasureCacheFontID and the ID check in drawBar.
 var barLabelMeasureCache = make(map[string]rl.Vector2, 8)
 
 // barLabelMeasureCacheFontID tracks the font the cache was built

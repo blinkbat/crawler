@@ -90,6 +90,16 @@ func ItemInfo(kind ItemKind) ItemDefinition {
 	return ItemDefinition{Kind: kind, Name: "Unknown Item"}
 }
 
+// ItemInfoOk is the registry-validating sibling of ItemInfo. Returns
+// (definition, true) when the kind is registered, (zero, false) when
+// it isn't — callers that need to reject unknown kinds (the .map
+// writer's chest serializer) use this instead of brittle-comparing
+// against the "Unknown Item" fallback string.
+func ItemInfoOk(kind ItemKind) (ItemDefinition, bool) {
+	def, ok := itemByKind[kind]
+	return def, ok
+}
+
 // AllItems returns the item registry in declaration order. Used by the
 // editor's chest-edit modal to build its add-rules table at init —
 // adding a new item kind is one row in itemDefinitions and the modal

@@ -263,24 +263,40 @@ func cancelTargetToActionMenu(g *core.GameState) {
 	setBattleStatus(g, "Choose an action.")
 }
 
-func cycleBattleTarget(g *core.GameState, delta int) {
-	living := core.LivingBattleEnemyIndices(g)
-	if len(living) == 0 {
+// cycleTargetSelection is the shared body for the enemy / party target
+// cyclers: fetch the live target indices, wrap the cursor by delta, and
+// commit + announce the new pick. The two cycle helpers used to be
+// near-identical apart from selector, state field, and status formatter.
+func cycleTargetSelection(
+	g *core.GameState,
+	current *int,
+	delta int,
+	living func() []int,
+	status func(g *core.GameState, slot, total int) string,
+) {
+	targets := living()
+	if len(targets) == 0 {
 		return
 	}
-	next := cycleTarget(g.Battle.EnemyIndex, living, delta)
-	g.Battle.EnemyIndex = living[next]
-	setBattleStatus(g, core.BattleEnemyTargetStatus(g, next+1, len(living)))
+	next := cycleTarget(*current, targets, delta)
+	*current = targets[next]
+	setBattleStatus(g, status(g, next+1, len(targets)))
+}
+
+func cycleBattleTarget(g *core.GameState, delta int) {
+	cycleTargetSelection(g, &g.Battle.EnemyIndex, delta,
+		func() []int { return core.LivingBattleEnemyIndices(g) },
+		func(g *core.GameState, slot, total int) string {
+			return core.BattleEnemyTargetStatus(g, slot, total)
+		})
 }
 
 func cyclePartyTarget(g *core.GameState, delta int) {
-	living := core.AvailablePartyTargets(g.Party)
-	if len(living) == 0 {
-		return
-	}
-	next := cycleTarget(g.Battle.PartyTarget, living, delta)
-	g.Battle.PartyTarget = living[next]
-	setBattleStatus(g, fmt.Sprintf("Targeting %s.", g.Party[g.Battle.PartyTarget].Name))
+	cycleTargetSelection(g, &g.Battle.PartyTarget, delta,
+		func() []int { return core.AvailablePartyTargets(g.Party) },
+		func(g *core.GameState, _, _ int) string {
+			return fmt.Sprintf("Targeting %s.", g.Party[g.Battle.PartyTarget].Name)
+		})
 }
 
 // cycleTarget returns the targets-slot the cursor should move to when the

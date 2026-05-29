@@ -37,10 +37,20 @@ type EnemyDefinition struct {
 	Item         string
 	MaxHP        int
 	AttackDamage int
-	// Speed is the implicit initiative value used to slot enemies into the
-	// mixed-initiative turn queue. Higher = acts earlier. Players have full
-	// stat blocks; enemies only need this one number for now.
-	Speed int
+	// Stats is the full STR/DEX/INT/WIS/VIT/SPD block — symmetric
+	// with the party side. SPD drives turn-order AND turn frequency
+	// (replaces the legacy standalone Speed field). DEX drives crit
+	// on basic attacks and dodge against incoming basic attacks. WIS
+	// shortens incoming status durations via ShortenStatusDuration.
+	// INT and STR are not yet read by damage formulas (AttackDamage
+	// / SpellPower still drive raw damage) but are authored so a
+	// future "derive damage from Stats" pass can retire those scalar
+	// fields without an authoring migration.
+	Stats Stats
+	// MDef is the magic-defense damp on incoming spells. Symmetric
+	// with Armor on the phys side: ApplyMagicDefense clips magic-
+	// tagged damage by MDef (floor 1); phys/heal/buff bypass.
+	MDef int
 	// Tier orders enemy kinds by threat. The highest-Tier member of a pack
 	// is the figure shown on the field (everyone else is hidden until the
 	// battle reveals them). Ties break by member order within the pack.
@@ -100,7 +110,7 @@ var enemyDefinitions = []EnemyDefinition{
 		Item:               "Morsel of Cheese",
 		MaxHP:              10,
 		AttackDamage:       3,
-		Speed:              6,
+		Stats:              Stats{STR: 2, DEX: 3, INT: 0, WIS: 1, VIT: 2, SPD: 6},
 		Tier:               1,
 		XPValue:            5,
 		AttackVerbSingular: "snaps",
@@ -120,7 +130,7 @@ var enemyDefinitions = []EnemyDefinition{
 		Item:               "Bat Jerky",
 		MaxHP:              7,
 		AttackDamage:       2,
-		Speed:              9,
+		Stats:              Stats{STR: 1, DEX: 5, INT: 0, WIS: 1, VIT: 1, SPD: 9},
 		Tier:               2,
 		XPValue:            8,
 		AttackVerbSingular: "bites",
@@ -138,7 +148,7 @@ var enemyDefinitions = []EnemyDefinition{
 		Item:               "",
 		MaxHP:              12,
 		AttackDamage:       3,
-		Speed:              5,
+		Stats:              Stats{STR: 2, DEX: 3, INT: 0, WIS: 2, VIT: 3, SPD: 5},
 		Tier:               3,
 		XPValue:            12,
 		AttackVerbSingular: "bites",
@@ -159,7 +169,7 @@ var enemyDefinitions = []EnemyDefinition{
 		Item:               "Morsel of Cheese",
 		MaxHP:              14,
 		AttackDamage:       4,
-		Speed:              5,
+		Stats:              Stats{STR: 3, DEX: 2, INT: 0, WIS: 1, VIT: 3, SPD: 5},
 		Tier:               3,
 		XPValue:            14,
 		AttackVerbSingular: "stabs",
@@ -178,7 +188,8 @@ var enemyDefinitions = []EnemyDefinition{
 		// danger is in the spells, not the wand-whack.
 		MaxHP:              9,
 		AttackDamage:       2,
-		Speed:              4,
+		Stats:              Stats{STR: 1, DEX: 2, INT: 6, WIS: 4, VIT: 2, SPD: 4},
+		MDef:               3,
 		Tier:               4,
 		XPValue:            20,
 		AttackVerbSingular: "swings a wand at",
@@ -188,7 +199,7 @@ var enemyDefinitions = []EnemyDefinition{
 		// the battle package's enemyAIPickSkill picks uniformly.
 		// Plain melee remains the SkillCastChance miss-roll fallback.
 		Skills:          []SkillID{SkillFirebolt, SkillSleep},
-		SkillCastChance: 0.5,
+		SkillCastChance: GoblinMageCastChance,
 		SpellPower:      6,
 	},
 	{
@@ -207,7 +218,8 @@ var enemyDefinitions = []EnemyDefinition{
 		// for the rest of the battle changes the whole math.
 		MaxHP:              22,
 		AttackDamage:       5,
-		Speed:              3,
+		Stats:              Stats{STR: 4, DEX: 1, INT: 0, WIS: 2, VIT: 5, SPD: 3},
+		MDef:               1,
 		Tier:               4,
 		XPValue:            22,
 		AttackVerbSingular: "snaps at",
@@ -236,7 +248,7 @@ var enemyDefinitions = []EnemyDefinition{
 		Item:               "",
 		MaxHP:              11,
 		AttackDamage:       3,
-		Speed:              7,
+		Stats:              Stats{STR: 2, DEX: 4, INT: 0, WIS: 2, VIT: 3, SPD: 7},
 		Tier:               3,
 		XPValue:            13,
 		AttackVerbSingular: "bites",
@@ -260,7 +272,7 @@ var enemyDefinitions = []EnemyDefinition{
 		Item:               "Bat Jerky",
 		MaxHP:              13,
 		AttackDamage:       4,
-		Speed:              8,
+		Stats:              Stats{STR: 3, DEX: 5, INT: 0, WIS: 1, VIT: 3, SPD: 8},
 		Tier:               4,
 		XPValue:            18,
 		AttackVerbSingular: "drains",
@@ -285,7 +297,8 @@ var enemyDefinitions = []EnemyDefinition{
 		// melee (the SkillConfuse cast is the real threat).
 		MaxHP:              6,
 		AttackDamage:       1,
-		Speed:              9,
+		Stats:              Stats{STR: 0, DEX: 6, INT: 4, WIS: 6, VIT: 1, SPD: 9},
+		MDef:               4,
 		Tier:               3,
 		XPValue:            16,
 		AttackVerbSingular: "flickers at",
@@ -310,7 +323,8 @@ var enemyDefinitions = []EnemyDefinition{
 		// passive shrug-everything stance.
 		MaxHP:              80,
 		AttackDamage:       7,
-		Speed:              1,
+		Stats:              Stats{STR: 6, DEX: 0, INT: 2, WIS: 3, VIT: 8, SPD: 1},
+		MDef:               6,
 		Tier:               5,
 		Armor:              14,
 		XPValue:            40,
@@ -338,7 +352,8 @@ var enemyDefinitions = []EnemyDefinition{
 		// reuse the field without an enemy-specific counter.
 		MaxHP:              26,
 		AttackDamage:       3,
-		Speed:              4,
+		Stats:              Stats{STR: 1, DEX: 2, INT: 6, WIS: 5, VIT: 4, SPD: 4},
+		MDef:               5,
 		Tier:               5,
 		XPValue:            36,
 		AttackVerbSingular: "incants at",
@@ -363,7 +378,7 @@ var enemyDefinitions = []EnemyDefinition{
 		// player's actions doing it. No skills.
 		MaxHP:              10,
 		AttackDamage:       3,
-		Speed:              4,
+		Stats:              Stats{STR: 2, DEX: 2, INT: 0, WIS: 0, VIT: 2, SPD: 4},
 		Tier:               2,
 		XPValue:            6,
 		AttackVerbSingular: "rakes",
@@ -383,7 +398,7 @@ var enemyDefinitions = []EnemyDefinition{
 		// shows up" lesson.
 		MaxHP:              8,
 		AttackDamage:       2,
-		Speed:              2,
+		Stats:              Stats{STR: 1, DEX: 0, INT: 0, WIS: 0, VIT: 2, SPD: 2},
 		Tier:               3,
 		XPValue:            16,
 		Armor:              8,
@@ -448,7 +463,7 @@ func EnemyInfo(kind EnemyKind) EnemyDefinition {
 		GroupName:          "Enemy Group",
 		MaxHP:              1,
 		AttackDamage:       1,
-		Speed:              5,
+		Stats:              Stats{STR: 1, DEX: 1, INT: 0, WIS: 0, VIT: 1, SPD: 5},
 		AttackVerbSingular: "strikes",
 		AttackVerbPlural:   "strike",
 	}
@@ -467,9 +482,10 @@ func EnemyInfoFor(enemy Enemy) EnemyDefinition {
 	if enemy.MaxHP > 0 {
 		def.MaxHP = enemy.MaxHP
 	}
-	if enemy.Armor != def.Armor {
-		def.Armor = enemy.Armor
-	}
+	// Armor: 0 is a meaningful live value (armor-stripped, or a custom
+	// enemy authored at 0), so unlike MaxHP we always copy through —
+	// the live runtime field is the source of truth.
+	def.Armor = enemy.Armor
 	return def
 }
 

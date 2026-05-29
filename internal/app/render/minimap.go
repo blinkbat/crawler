@@ -100,8 +100,12 @@ func drawMinimap(m core.AreaDefinition, g core.GameState, assets Resources) {
 		for localX := int32(0); localX < viewCells; localX++ {
 			mapX := startX + int(localX)
 			mapZ := startZ + int(localZ)
+			// Unrevealed tiles paint the same flat fog as out-of-bounds
+			// so the player can't read the layout through the haze —
+			// the minimap is strictly "what you've walked on" until a
+			// step lands the tile inside the reveal radius.
 			col := minimapOutOfBoundsColor
-			if m.InBounds(mapX, mapZ) {
+			if m.InBounds(mapX, mapZ) && visitedAt(g, mapX, mapZ) {
 				col = minimapTileColor(m.Materials, m.TileAt(mapX, mapZ))
 			}
 			rl.DrawRectangle(gridX+localX*cell, gridY+localZ*cell, cell-1, cell-1, col)
@@ -263,33 +267,17 @@ var playerArrowColor = rl.NewColor(132, 240, 148, 255)
 // glance.
 // mapChestMarkerColor / mapDoorMarkerColor / mapChestLootedColor now
 // alias the theme's marker palette so the minimap and the editor canvas
-// can never drift on entity tone. The fog values stay local — they're a
-// minimap-only concept. (Pack markers are intentionally omitted from
-// both the minimap and the panels Map tab, so no pack-marker aliases
-// live here.)
+// can never drift on entity tone. (Pack markers are intentionally
+// omitted from both the minimap and the panels Map tab, so no pack-
+// marker aliases live here.) Unvisited tiles fall back to the same
+// flat fog as out-of-bounds — the fog/mix variables were retired when
+// the partial-haze look proved to leak too much layout through to the
+// player.
 var (
-	mapChestMarkerColor   = markerChest
-	mapChestLootedColor   = markerChestDim
-	mapDoorMarkerColor    = markerDoor
-	mapUnexploredFogColor = color.RGBA{R: 14, G: 18, B: 28, A: 255}
-	mapUnexploredFogMix   = 0.78
+	mapChestMarkerColor = markerChest
+	mapChestLootedColor = markerChestDim
+	mapDoorMarkerColor  = markerDoor
 )
-
-// tileColorWithFog returns the on-screen color for a tile at (visited
-// state). Wraps minimapTileColor so callers don't have to interleave
-// the visited check with the layer lookup — the panels Map tab and
-// any future fog-aware minimap pass go through the same helper.
-// `tile` is the compositing char from AreaDefinition.TileAt; alpha
-// is preserved from the unfogged base.
-func tileColorWithFog(material core.MaterialSet, tile byte, visited bool) color.RGBA {
-	base := minimapTileColor(material, tile)
-	if visited {
-		return base
-	}
-	fog := mapUnexploredFogColor
-	fog.A = base.A
-	return core.MixColor(base, fog, mapUnexploredFogMix)
-}
 
 // drawFacingArrow paints a triangle at `center` pointing in `facing`.
 // `forward` is the half-depth (tip distance from center along facing)

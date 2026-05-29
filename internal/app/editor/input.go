@@ -1049,6 +1049,19 @@ var doorStyleKeys = []struct {
 	{rl.KeyThree, core.DoorStyleField},
 }
 
+// init guards the door-modal hotkey tables against drift with the
+// core enums they bind. If a new DoorStyle or cardinal facing lands
+// without a row here, startup panics — mirrors the lockstep guard
+// modalHandlers and entityBrushColors already use.
+func init() {
+	if len(doorFacingKeys) != core.FacingCount {
+		panic("editor: doorFacingKeys length must match core.FacingCount — add a row when extending the facing enum")
+	}
+	if len(doorStyleKeys) != int(core.DoorStyleCount) {
+		panic("editor: doorStyleKeys length must match core.DoorStyleCount — add a row when extending DoorStyle")
+	}
+}
+
 // deleteDoorAt removes the door spawn at idx (pushing undo, marking
 // dirty, and closing the modal). Shared by the door modal's click-Delete
 // button and its X-key shortcut, which open-coded the same append-splice.
@@ -1057,7 +1070,7 @@ func deleteDoorAt(s *State, idx int) {
 		return
 	}
 	pushUndo(s)
-	s.area.DoorSpawns = append(s.area.DoorSpawns[:idx], s.area.DoorSpawns[idx+1:]...)
+	s.area.DoorSpawns = removeModalListItem(s.area.DoorSpawns, idx)
 	s.dirty = true
 	closeModal(s)
 }
@@ -1124,7 +1137,7 @@ func updatePackEditModal(s *State) Action {
 			core.RemovePackMember(pack, s.modalCursor)
 			s.dirty = true
 			if len(pack.Members) == 0 {
-				s.area.PackSpawns = append(s.area.PackSpawns[:s.modalPackIdx], s.area.PackSpawns[s.modalPackIdx+1:]...)
+				s.area.PackSpawns = removeModalListItem(s.area.PackSpawns, s.modalPackIdx)
 				closeModal(s)
 				return ActionNone
 			}
@@ -1165,6 +1178,16 @@ func updatePackEditModal(s *State) Action {
 		} else {
 			s.flash("No custom enemies defined")
 		}
+	}
+	// A cycles the pack's movement-AI mode (None ↔ Junkyard Dog ↔ …).
+	// None is the default for new packs; cycling lands the author on
+	// the next mode in PackAI iota order. Pure authoring change — no
+	// member churn — so we push undo before the field write.
+	if rl.IsKeyPressed(rl.KeyA) {
+		pushUndo(s)
+		pack.AI = core.PackAI((int(pack.AI) + 1) % core.PackAICount)
+		s.dirty = true
+		s.flash("Pack AI: " + core.PackAILabel(pack.AI))
 	}
 	return ActionNone
 }

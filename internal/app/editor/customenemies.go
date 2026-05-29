@@ -54,6 +54,7 @@ const (
 	csMP
 	csAttack
 	csArmor
+	csMDef
 	csXP
 	csTier
 	csSpellPower
@@ -77,6 +78,7 @@ var customStatSpecs = []customStatSpec{
 	{csMP, "MP", 1, func(d *core.CustomEnemyDef) *int { return &d.MP }},
 	{csAttack, "Attack", 1, func(d *core.CustomEnemyDef) *int { return &d.AttackDamage }},
 	{csArmor, "Armor", 1, func(d *core.CustomEnemyDef) *int { return &d.Armor }},
+	{csMDef, "MDef", 1, func(d *core.CustomEnemyDef) *int { return &d.MDef }},
 	{csXP, "XP", 1, func(d *core.CustomEnemyDef) *int { return &d.XPValue }},
 	{csTier, "Tier", 1, func(d *core.CustomEnemyDef) *int { return &d.Tier }},
 	{csSpellPower, "SpellPwr", 1, func(d *core.CustomEnemyDef) *int { return &d.SpellPower }},
@@ -467,7 +469,7 @@ func updateCustomEnemiesModal(s *State) Action {
 			// matches what removeCustomEnemyReferences must clear.
 			finalizeFocusedField(s)
 			deletedName := def.Name
-			s.area.CustomEnemies = append(s.area.CustomEnemies[:s.modalCustomIdx], s.area.CustomEnemies[s.modalCustomIdx+1:]...)
+			s.area.CustomEnemies = removeModalListItem(s.area.CustomEnemies, s.modalCustomIdx)
 			removeCustomEnemyReferences(s, deletedName)
 			if s.modalCustomIdx >= len(s.area.CustomEnemies) {
 				s.modalCustomIdx = len(s.area.CustomEnemies) - 1
@@ -582,7 +584,7 @@ func cycleEnemyKind(cur core.EnemyKind, delta int) core.EnemyKind {
 func toggleCustomSkill(def *core.CustomEnemyDef, id core.SkillID) {
 	for i, have := range def.Skills {
 		if have == id {
-			def.Skills = append(def.Skills[:i], def.Skills[i+1:]...)
+			def.Skills = removeModalListItem(def.Skills, i)
 			return
 		}
 	}

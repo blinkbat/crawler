@@ -205,6 +205,13 @@ func updateDebugMenu(g *core.GameState) {
 		g.StepCount += core.StepsPerPhase
 	case core.DebugMenuEasyQuit:
 		g.EasyBattleQuit = !g.EasyBattleQuit
+	case core.DebugMenuRenderLog:
+		g.RenderLogEnabled = !g.RenderLogEnabled
+		if g.RenderLogEnabled {
+			render.OpenRenderLog()
+		} else {
+			render.CloseRenderLog()
+		}
 	case core.DebugMenuDisable:
 		g.DebugOverlay = false
 		g.DebugMenuOpen = false

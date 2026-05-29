@@ -48,8 +48,6 @@ token — extend the palette instead.
   cursor line. Visible but doesn't pulse.
 - **`giltBright`** — `rgb(232, 196, 112) α=255` — pulse peak of the
   active actor's frame; gilt edge of a selected target marker.
-- **`giltGlow`** — `rgb(255, 232, 168) α=210` — outer halo painted at
-  a wider stroke around any selection — soft ambient bloom.
 
 ### Parchment text
 - **`inkPrimary`** — `rgb(232, 222, 196) α=255` — body text, panel
@@ -176,9 +174,11 @@ the tick mark.
   `inkAccent`. Subtle pulse on the spine alpha (`0.7 → 1.0` over
   ~1.4 s) for the active actor's turn.
 
-Owners call `drawListRow(rect, state)` where state is the enum
-`{Rest, Hover, Selected, Disabled}` — single helper, one ladder of
-visual states, no row-by-row hand-tuning.
+Today list owners paint their own row chrome inline (see
+`drawActionRow` in battle.go, Items / Skills rows in panels.go); the
+modal-cursor highlight goes through `DrawSelectedRow` in
+theme_export.go. A central `drawListRow(rect, state)` helper would be
+welcome once those sites can be unified without visual drift.
 
 ### Selection chevron (in-world)
 Same `>` ASCII chevron, painted in `giltBright`, drawn via

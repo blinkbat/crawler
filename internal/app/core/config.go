@@ -110,8 +110,9 @@ const ActionRowCount = int(ActionRowDefend) + 1
 const (
 	// SightRadius is the Chebyshev fog-of-war reveal radius around
 	// the player. 1 = the 3×3 window centered on the player tile is
-	// marked Visited on every successful step. The Map panel reads
-	// Visited to fade unexplored tiles and hide entity markers there.
+	// marked Visited on every successful step. The corner minimap and
+	// the panels Map tab both read Visited to fade unexplored tiles
+	// (panels also hides entity markers on fogged tiles).
 	SightRadius = 1
 
 	// --- Pack AI (junkyard-dog leash) -------------------------------------
@@ -225,6 +226,46 @@ const (
 	AccuracyBaseline = 0.55
 	AccuracyPerDEX   = 0.04
 
+	// DodgeChance curve. A party member rolls a dodge against every
+	// incoming enemy basic attack: dodge succeeds → no damage, no status
+	// proc. DEX is the only driver, scaled linearly with a saturating
+	// cap so a future high-DEX rogue can't ever be untouchable.
+	// Warrior/Cleric/Wizard at DEX 2 dodge ~4%; Thief at DEX 6 dodges
+	// ~12%; cap kicks in at DEX 15.
+	DodgePerDEX = 0.02
+	DodgeCap    = 0.30
+
+	// Crit curve. Every connecting damage roll has a chance to crit;
+	// crits multiply the post-armor damage by CritMultiplier. Base
+	// chance + DEX scaling + a per-grade bonus pulled from
+	// timingGrades.CritBonus. CritPerDEX is intentionally LOW so timing
+	// (the player skill) is the dominant lever — DEX is a sweetener,
+	// not the main dial. Warrior (DEX 2) at Good ≈ 12%; Thief (DEX 6)
+	// at Excellent ≈ 36%. Doubling DEX from 2 → 4 lifts crit by ~2pp;
+	// chasing an Excellent press lifts it by ~20pp.
+	CritBaseline   = 0.05
+	CritPerDEX     = 0.008
+	CritCap        = 0.6
+	CritMultiplier = 2
+
+	// StatusShortenDivisor controls how much WIS shaves off the rolled
+	// duration of an enemy-applied status (Sleep / Poison / Bound /
+	// Confuse). Each StatusShortenDivisor points of WIS removes one
+	// turn from the roll. Floor is 1 — high WIS shortens but doesn't
+	// outright skip. Cleric (WIS 6) loses 2 turns; everyone else (WIS
+	// 1-2) loses nothing or one turn.
+	StatusShortenDivisor = 3
+
+	// ATBReadyThreshold is the readiness gate an actor must cross to
+	// take a turn under the tick-based scheduler. Each tick every alive
+	// actor's readiness gains its SPD; whoever crosses first acts (then
+	// keeps the overflow). Higher SPD → reaches the gate sooner AND
+	// more often. This is a continuous weight, not a per-round bonus —
+	// a SPD 6 actor takes ~2 turns for every 1 turn a SPD 3 actor
+	// takes, with the slots naturally interleaved by who hits the gate
+	// next instead of clumped at round boundaries.
+	ATBReadyThreshold = 100
+
 	// BurnTickDamage is the per-turn damage applied to a burning actor at
 	// the start of their own turn. Flat so the strategic value of burn
 	// stays predictable across enemy HP scales.
@@ -265,11 +306,11 @@ const (
 	StealBaseChance          = 0.40 // Thief: Steal base success before DEX/quality scaling.
 	FireboltBurnChance       = 0.45 // Wizard: Firebolt burn inflict before quality scaling.
 	DiseasedRatPoisonChance  = 0.60 // Diseased Rat: per-bite poison inflict.
+	GoblinMageCastChance     = 0.50 // Goblin Mage: per-turn roll into Firebolt / Sleep vs plain melee.
 	SpiderWebCastChance      = 0.45 // Cave Spider: roll-to-Web vs plain bite per turn.
 	VampireBatLifesteal      = 0.60 // Vampire Bat: fraction of post-armor damage healed back per bite.
-	WispConfuseCastChance    = 0.50 // Wisp: roll-to-Confuse vs flicker-bite per turn.
-	WispConfuseRetargetRoll  = 0.50 // Wisp: per-action chance a Confused member retargets randomly.
-	WispConfuseResistDivisor = 6    // Wisp: WIS / (WIS + this) is the per-cast resist roll; bigger = easier to resist.
+	WispConfuseCastChance   = 0.50 // Wisp: roll-to-Confuse vs flicker-bite per turn.
+	WispConfuseRetargetRoll = 0.50 // Wisp: per-action chance a Confused member retargets randomly.
 	StoneGolemSlamCastChance = 0.40 // Stone Golem: roll-to-Stoneslam vs single-target smash per turn.
 	NecromancerCastChance    = 0.55 // Necromancer: combined roll into Raise / Firebolt vs incant-melee.
 	NecromancerRaiseLimit    = 2    // Necromancer: hard cap on RaiseBones casts per battle.
@@ -371,12 +412,13 @@ var timingGrades = []struct {
 	Atk           float32
 	Def           float32
 	AccuracyBonus float64
+	CritBonus     float64
 }{
-	TimingQualityMiss:      {Label: "Miss...", Atk: 1.0, Def: 1.0, AccuracyBonus: 0.0},
-	TimingQualityNice:      {Label: "Nice!", Atk: 1.25, Def: 0.75, AccuracyBonus: 0.10},
-	TimingQualityGood:      {Label: "Good!", Atk: 1.5, Def: 0.5, AccuracyBonus: 0.20},
-	TimingQualityGreat:     {Label: "Great!", Atk: 1.75, Def: 0.35, AccuracyBonus: 0.30},
-	TimingQualityExcellent: {Label: "Excellent!", Atk: 2.0, Def: 0.25, AccuracyBonus: 0.45},
+	TimingQualityMiss:      {Label: "Miss...", Atk: 1.0, Def: 1.0, AccuracyBonus: 0.0, CritBonus: 0.0},
+	TimingQualityNice:      {Label: "Nice!", Atk: 1.25, Def: 0.75, AccuracyBonus: 0.10, CritBonus: 0.02},
+	TimingQualityGood:      {Label: "Good!", Atk: 1.5, Def: 0.5, AccuracyBonus: 0.20, CritBonus: 0.05},
+	TimingQualityGreat:     {Label: "Great!", Atk: 1.75, Def: 0.35, AccuracyBonus: 0.30, CritBonus: 0.12},
+	TimingQualityExcellent: {Label: "Excellent!", Atk: 2.0, Def: 0.25, AccuracyBonus: 0.45, CritBonus: 0.25},
 }
 
 // init asserts timingGrades covers every TimingQualityXxx grade. The
@@ -481,9 +523,9 @@ const (
 // (quality) controls frequency, not the duration.
 const (
 	// CrushingBlowStunChance gates the Warrior's signature heavy hit.
-	// Higher than PowerStrike's prototype rate because the cost (3 MP)
-	// and damage (+4 base) are both more aggressive — a Great-or-better
-	// landing should reliably lock the target down.
+	// Tuned high because the cost (3 MP) and damage (+4 base) are both
+	// aggressive — a Great-or-better landing should reliably lock the
+	// target down.
 	CrushingBlowStunChance = 0.50
 	// FrostLanceStunChance gates the Wizard's freeze. ALWAYS lands on
 	// Great/Excellent (1.0 base) but the apply handler still goes
@@ -559,6 +601,12 @@ const (
 	DebugMenuEnemies DebugMenuItem = iota
 	DebugMenuAdvanceTime
 	DebugMenuEasyQuit
+	// DebugMenuRenderLog toggles the render-pass diagnostics log file
+	// (crawler-render.log). When on, each DrawWorld writes a one-line
+	// snapshot of camera + tile counts + shader IDs to disk so a
+	// flicker/invisibility issue can be inspected from the resulting
+	// log even when reproducing the bug from outside the editor.
+	DebugMenuRenderLog
 	// DebugMenuDisable turns debug mode off (clears DebugOverlay) and
 	// closes the submenu. It's the only off-switch, since DebugOverlay
 	// doubles as the gate that makes this submenu reachable at all.

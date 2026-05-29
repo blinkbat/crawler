@@ -238,6 +238,7 @@ func placePacks(a AreaDefinition) []Pack {
 			X:       TileCenter(snap.TileX),
 			Z:       TileCenter(snap.TileZ),
 			Members: members,
+			AI:      spawn.AI,
 		})
 	}
 	return packs

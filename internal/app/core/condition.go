@@ -13,34 +13,41 @@ const (
 	EnemyConditionCount = int(EnemyNearDeath) + 1
 )
 
+// woundBands is the per-condition descriptor: the lower-bound HP
+// fraction that triggers the band (strictly greater than) plus the
+// human-readable label. Bands are ordered top-down from healthiest to
+// most-wounded — EnemyConditionFor walks the table and picks the first
+// row whose threshold the actor's HP percent clears. Replaces the two
+// parallel switches that hand-mirrored these thresholds and labels.
+var woundBands = [...]struct {
+	MinPercent float64
+	Condition  EnemyCondition
+	Label      string
+}{
+	{0.75, EnemyScuffed, "Scuffed"},
+	{0.50, EnemyInjured, "Injured"},
+	{0.25, EnemyBadlyWounded, "Badly Wounded"},
+	{0.0, EnemyNearDeath, "Near Death"}, // fallthrough: anything > 0
+}
+
 func EnemyConditionFor(enemy Enemy) EnemyCondition {
 	if enemy.MaxHP <= 0 || enemy.HP >= enemy.MaxHP {
 		return EnemyUnharmed
 	}
 	percent := float64(enemy.HP) / float64(enemy.MaxHP)
-	switch {
-	case percent > 0.75:
-		return EnemyScuffed
-	case percent > 0.5:
-		return EnemyInjured
-	case percent > 0.25:
-		return EnemyBadlyWounded
-	default:
-		return EnemyNearDeath
+	for _, band := range woundBands {
+		if percent > band.MinPercent {
+			return band.Condition
+		}
 	}
+	return EnemyNearDeath
 }
 
 func EnemyConditionLabel(condition EnemyCondition) string {
-	switch condition {
-	case EnemyScuffed:
-		return "Scuffed"
-	case EnemyInjured:
-		return "Injured"
-	case EnemyBadlyWounded:
-		return "Badly Wounded"
-	case EnemyNearDeath:
-		return "Near Death"
-	default:
-		return "Unharmed"
+	for _, band := range woundBands {
+		if band.Condition == condition {
+			return band.Label
+		}
 	}
+	return "Unharmed"
 }

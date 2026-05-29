@@ -242,7 +242,7 @@ func handleEnemySleep(ctx enemySpellCtx) {
 	if duration <= 0 {
 		duration = core.SleepMinTurns
 	}
-	m.SleepTurns = duration
+	m.SleepTurns = core.ShortenStatusDuration(duration, m.Stats.WIS)
 	core.EnqueuePartyVFX(g, core.VFXSleep, ctx.target)
 	enemySpellLog(ctx, "%s falls asleep.", m.Name)
 	audio.Play(audio.SoundInputHit)
@@ -264,17 +264,19 @@ func handleEnemyWeb(ctx enemySpellCtx) {
 	if duration <= 0 {
 		duration = core.SpiderWebBoundMinTurns
 	}
-	m.BoundTurns = duration
+	m.BoundTurns = core.ShortenStatusDuration(duration, m.Stats.WIS)
 	core.EnqueuePartyVFX(g, core.VFXWeb, ctx.target)
 	enemySpellLog(ctx, "%s is bound in sticky webs.", m.Name)
 	audio.Play(audio.SoundInputHit)
 }
 
-// handleEnemyConfuse applies the Will-o'-Wisp's Confused status. WIS
-// resists: roll a `WIS / (WIS + WispConfuseResistDivisor)` resist
-// against the apply, so a high-WIS Cleric is sturdier. Already-confused
-// targets short-circuit. Duration rolls from ConfuseMin/Max. Target is
-// living by upstream filter — no HP<=0 guard.
+// handleEnemyConfuse applies the Will-o'-Wisp's Confused status.
+// WIS resistance lives in the universal ShortenStatusDuration path
+// (mirrors Sleep / Bound / Poison applies on the party side) — high
+// WIS cuts the duration; no separate per-cast resist roll.
+// Already-confused targets short-circuit (no stacking). Duration
+// rolls from ConfuseMin/Max. Target is living by upstream filter —
+// no HP<=0 guard.
 func handleEnemyConfuse(ctx enemySpellCtx) {
 	g := ctx.g
 	m := &g.Party[ctx.target]
@@ -282,21 +284,12 @@ func handleEnemyConfuse(ctx enemySpellCtx) {
 		setBattleMessage(g, fmt.Sprintf("%s flickers at %s — already disoriented.", core.TheEnemy(ctx.def), m.Name))
 		return
 	}
-	// WIS resistance: higher WIS → higher resist chance. Caps at
-	// ~0.5 so even a high-WIS member can still get confused
-	// sometimes — the status shouldn't be a dead gate against a
-	// Cleric, just harder to land.
 	rng := g.Rand()
-	resist := float64(m.Stats.WIS) / float64(m.Stats.WIS+core.WispConfuseResistDivisor)
-	if rng.Float64() < resist {
-		enemySpellLog(ctx, "%s steadies their mind.", m.Name)
-		return
-	}
 	duration := ctx.effect.ConfuseDuration(rng)
 	if duration <= 0 {
 		duration = core.WispConfuseMinTurns
 	}
-	m.ConfusedTurns = duration
+	m.ConfusedTurns = core.ShortenStatusDuration(duration, m.Stats.WIS)
 	core.EnqueuePartyVFX(g, core.VFXConfuse, ctx.target)
 	enemySpellLog(ctx, "%s grows confused.", m.Name)
 	audio.Play(audio.SoundInputHit)
@@ -468,11 +461,14 @@ func aoeVFXFor(skill core.SkillID) core.VFXKind {
 // quality can proc" (Firebolt / Venom Strike); >0 gates the proc on
 // Great / Excellent (Crushing Blow / Frost Lance). durationFn is the
 // SkillEffect.{X}Duration roller — pre-bound by the caller so the
-// helper doesn't need a switch on which counter to roll.
+// helper doesn't need a switch on which counter to roll. resistWis
+// is the target's WIS, which shortens the rolled duration via
+// core.ShortenStatusDuration (mirrors the party-side enemy → party
+// status apply path).
 //
 // Returns true when the counter was just stamped — callers use it to
 // pick the "you stunned/burned/poisoned them" copy in their log line.
-func tryProcStatus(rng *rand.Rand, counter *int, defeated bool, baseChance float64, quality, minGrade int, durationFn func(*rand.Rand) int) bool {
+func tryProcStatus(rng *rand.Rand, counter *int, defeated bool, baseChance float64, quality, minGrade int, durationFn func(*rand.Rand) int, resistWis int) bool {
 	if defeated || baseChance <= 0 || counter == nil || *counter > 0 {
 		return false
 	}
@@ -486,7 +482,7 @@ func tryProcStatus(rng *rand.Rand, counter *int, defeated bool, baseChance float
 	if rng.Float64() >= chance {
 		return false
 	}
-	*counter = durationFn(rng)
+	*counter = core.ShortenStatusDuration(durationFn(rng), resistWis)
 	return *counter > 0
 }
 
@@ -728,6 +724,15 @@ func applyAttack(g *core.GameState, quality int) bool {
 		finishPartyAction(g)
 		return true
 	}
+	// Defender dodge: a connecting swing can still be sidestepped by a
+	// nimble enemy. Symmetric with the party-side dodge in
+	// resolveEnemyAttacker. Skills are NOT dodgeable (mirrors
+	// AttackAccuracy's basic-attack-only gate).
+	if core.RollDodge(g.Rand(), core.EnemyInfoFor(target).Stats) {
+		setBattleMessage(g, fmt.Sprintf("%s%s lunges but the %s slips aside.", qualityTag(quality), attacker.Name, core.EnemySingularNoun(target)))
+		finishPartyAction(g)
+		return true
+	}
 	// Basic Attack: STR + 0, scaled by timing quality. Physically tagged
 	// so the armor damp applies — basic attacks are the canonical phys
 	// swing against an armored foe (amoeba teaches the lesson). The
@@ -736,9 +741,11 @@ func applyAttack(g *core.GameState, quality int) bool {
 	// delta (an Excellent vs an Amoeba prints "hits for 4", not the
 	// 12 we computed before armor clipped it down).
 	rawDamage := core.ScaleDamage(core.MeleeDamage(attacker.Stats, 0), quality)
+	crit, _ := rollSkillCrit(g, attacker, core.SkillNone, quality)
+	rawDamage = applyCritMultiplier(rawDamage, crit, false)
 	dealt, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagPhys)
 	core.EnqueueEnemyVFX(g, core.VFXSlash, g.Battle.EnemyIndex)
-	setBattleMessage(g, attackResultMessage(attacker.Name, target, dealt, quality, defeated))
+	setBattleMessage(g, appendCrit(attackResultMessage(attacker.Name, target, dealt, quality, defeated), crit))
 	finishPartyAction(g)
 	return true
 }
@@ -759,6 +766,12 @@ func applySwipe(g *core.GameState, quality int) bool {
 	// the formation. Single-press fallback (Quality > Miss but tally
 	// mode never armed) still does one pass.
 	damage := scaleSkillDamage(actor, core.SkillSwipe, quality)
+	// Single crit roll for the whole Swipe — a lucky swing doubles the
+	// damage on every pass that lands. Per-pass rolls would feel noisier
+	// in the log without offering more decision depth, since the player
+	// can't react between sweeps.
+	crit, _ := rollSkillCrit(g, actor, core.SkillSwipe, quality)
+	damage = applyCritMultiplier(damage, crit, false)
 	passes := multiPressPasses(g.Battle.Timing, quality)
 	// `enemiesHit` is the COUNT OF DISTINCT FOES STRUCK — captured
 	// from the first pass only. Later passes may hit fewer enemies
@@ -776,7 +789,7 @@ func applySwipe(g *core.GameState, quality int) bool {
 	if enemiesHit == 0 || passes == 0 {
 		setBattleMessage(g, aoeEmptyMessage("Swipe", "catches only air"))
 	} else {
-		setBattleMessage(g, swipeMessage(actor.Name, enemiesHit, quality))
+		setBattleMessage(g, appendCrit(swipeMessage(actor.Name, enemiesHit, quality), crit))
 	}
 	finishPartyAction(g)
 	// Even if hits=0, the attack motion played and MP was spent — landed.
@@ -906,8 +919,11 @@ func applySteal(g *core.GameState, quality int) bool {
 		mod := core.SkillTierMod(actor, core.SkillSteal)
 		var bonus int
 		var defeated bool
+		var critBonus bool
 		if mod.StealBonusDamage > 0 {
 			rawBonus := actor.Stats.STR * mod.StealBonusDamage
+			critBonus, _ = rollSkillCrit(g, actor, core.SkillSteal, quality)
+			rawBonus = applyCritMultiplier(rawBonus, critBonus, false)
 			bonus, defeated = damageEnemy(g, g.Battle.EnemyIndex, rawBonus, quality, core.SkillTagPhys)
 		}
 		core.EnqueueEnemyVFX(g, core.VFXSteal, g.Battle.EnemyIndex)
@@ -918,7 +934,7 @@ func applySteal(g *core.GameState, quality int) bool {
 		case bonus > 0:
 			msg = fmt.Sprintf("%s The cut bleeds for %d.", msg, bonus)
 		}
-		setBattleMessage(g, msg)
+		setBattleMessage(g, appendCrit(msg, critBonus))
 	} else {
 		setBattleMessage(g, fmt.Sprintf("%s fails to steal.", actor.Name))
 	}
@@ -947,14 +963,16 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 	}
 	// Effect is pulled separately for the burn-chance roll below.
 	effect := core.EffectiveSkillEffect(actor, core.SkillFirebolt)
+	crit, _ := rollSkillCrit(g, actor, core.SkillFirebolt, quality)
+	rawDamage = applyCritMultiplier(rawDamage, crit, false)
 	// Firebolt is Magic-tagged so dealt == rawDamage in practice;
 	// using the return keeps the log honest if a future Tag change
 	// brings armor back into play.
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillFirebolt))
 	core.EnqueueEnemyVFX(g, core.VFXEmber, g.Battle.EnemyIndex)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	burned := tryProcStatus(g.Rand(), &enemy.BurnTurns, defeated, effect.BurnChance, quality, 0, effect.BurnDuration)
-	setBattleMessage(g, fireboltMessage(actor.Name, target, damage, quality, defeated, burned, enemy.BurnTurns))
+	burned := tryProcStatus(g.Rand(), &enemy.BurnTurns, defeated, effect.BurnChance, quality, 0, effect.BurnDuration, core.EnemyInfoFor(*enemy).Stats.WIS)
+	setBattleMessage(g, appendCrit(fireboltMessage(actor.Name, target, damage, quality, defeated, burned, enemy.BurnTurns), crit))
 	finishPartyAction(g)
 	return true
 }
@@ -975,14 +993,20 @@ func applyCrushingBlow(g *core.GameState, quality int) bool {
 	// landed Excellent timing roll. CritDoubleOnExcellent is the
 	// tier-only mod the apply path consults — bool flag so future
 	// "T4 triples" etc. would extend the mod struct, not this site.
+	// This tier doubling is INDEPENDENT of the universal crit roll
+	// below; an Excellent T3 swing that also wins the RollCrit dice
+	// stacks both multipliers (CritMultiplier × 2 = 4×) — same
+	// shape as Backstab T2's double-crit.
 	if quality == core.TimingQualityExcellent && core.SkillTierMod(actor, core.SkillCrushingBlow).CritDoubleOnExcellent {
 		rawDamage *= 2
 	}
+	crit, _ := rollSkillCrit(g, actor, core.SkillCrushingBlow, quality)
+	rawDamage = applyCritMultiplier(rawDamage, crit, false)
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillCrushingBlow))
 	core.EnqueueEnemyVFX(g, core.VFXSlash, g.Battle.EnemyIndex)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	stunned := tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, core.TimingQualityGreat, effect.StunDuration)
-	setBattleMessage(g, crushingBlowMessage(actor.Name, target, damage, quality, defeated, stunned))
+	stunned := tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, core.TimingQualityGreat, effect.StunDuration, core.EnemyInfoFor(*enemy).Stats.WIS)
+	setBattleMessage(g, appendCrit(crushingBlowMessage(actor.Name, target, damage, quality, defeated, stunned), crit))
 	finishPartyAction(g)
 	return true
 }
@@ -1002,11 +1026,15 @@ func applyAoESkill(g *core.GameState, skill core.SkillID, skillNoun, hitVerb, em
 	actor := &g.Party[g.Battle.CurrentParty]
 	actor.AttackBump = core.BumpDuration
 	damage := scaleSkillDamage(actor, skill, quality)
+	// Single crit roll for the whole sweep — when the dice come up
+	// every enemy caught in the AoE eats the doubled tick.
+	crit, _ := rollSkillCrit(g, actor, skill, quality)
+	damage = applyCritMultiplier(damage, crit, false)
 	hits := applyAoEDamage(g, skill, damage, quality)
 	if hits == 0 {
 		setBattleMessage(g, aoeEmptyMessage(skillNoun, emptyVerb))
 	} else {
-		setBattleMessage(g, aoeSkillMessage(actor.Name, skillNoun, hitVerb, hits, damage, quality))
+		setBattleMessage(g, appendCrit(aoeSkillMessage(actor.Name, skillNoun, hitVerb, hits, damage, quality), crit))
 	}
 	finishPartyAction(g)
 	return true
@@ -1076,6 +1104,8 @@ func applySmite(g *core.GameState, quality int) bool {
 		return false
 	}
 	effect := core.EffectiveSkillEffect(actor, core.SkillSmite)
+	crit, _ := rollSkillCrit(g, actor, core.SkillSmite, quality)
+	rawDamage = applyCritMultiplier(rawDamage, crit, false)
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillSmite))
 	core.EnqueueEnemyVFX(g, core.VFXSmite, g.Battle.EnemyIndex)
 	// Smite T3 ("+25% stun") gives the base-stun-less skill a stun
@@ -1083,8 +1113,8 @@ func applySmite(g *core.GameState, quality int) bool {
 	// so tryProcStatus short-circuits cleanly until the tier is
 	// purchased — no behavior change for un-upgraded clerics.
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	stunned := tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, core.TimingQualityGreat, effect.StunDuration)
-	setBattleMessage(g, smiteMessage(actor.Name, target, damage, quality, defeated, stunned))
+	stunned := tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, core.TimingQualityGreat, effect.StunDuration, core.EnemyInfoFor(*enemy).Stats.WIS)
+	setBattleMessage(g, appendCrit(smiteMessage(actor.Name, target, damage, quality, defeated, stunned), crit))
 	finishPartyAction(g)
 	return true
 }
@@ -1100,18 +1130,16 @@ func applyBackstab(g *core.GameState, quality int) bool {
 	if !ok {
 		return false
 	}
-	// Timing-gated crit: an Excellent landing doubles the post-scaling
-	// damage before armor. Phys-tagged, so amoebas still chew most of
-	// it; the doubling is the thief's reward for nailing the charge.
-	// Backstab T2 ("Excellent crits harder") stacks ANOTHER doubling
-	// — perfectly-timed Backstab at T2+ is x4 damage.
-	crit := quality >= core.TimingQualityExcellent
-	if crit {
-		rawDamage *= 2
-		if core.SkillTierMod(actor, core.SkillBackstab).CritDoubleOnExcellent {
-			rawDamage *= 2
-		}
-	}
+	// Timing-gated crit: an Excellent Backstab is a guaranteed crit
+	// (rollSkillCrit's Backstab-special branch). Phys-tagged, so
+	// amoebas still chew most of it; the multiplier is the thief's
+	// reward for nailing the charge. Backstab T2 ("Excellent crits
+	// harder") flags the `double` return, which applyCritMultiplier
+	// turns into the second ×2 — perfectly-timed Backstab at T2+ is
+	// x4 damage. Non-Excellent presses still get the universal
+	// DEX+timing crit chance via the same helper's RollCrit branch.
+	crit, double := rollSkillCrit(g, actor, core.SkillBackstab, quality)
+	rawDamage = applyCritMultiplier(rawDamage, crit, double)
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillBackstab))
 	core.EnqueueEnemyVFX(g, core.VFXSlash, g.Battle.EnemyIndex)
 	setBattleMessage(g, backstabMessage(actor.Name, target, damage, quality, defeated, crit))
@@ -1131,11 +1159,13 @@ func applyVenomStrike(g *core.GameState, quality int) bool {
 		return false
 	}
 	effect := core.EffectiveSkillEffect(actor, core.SkillVenomStrike)
+	crit, _ := rollSkillCrit(g, actor, core.SkillVenomStrike, quality)
+	rawDamage = applyCritMultiplier(rawDamage, crit, false)
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillVenomStrike))
 	core.EnqueueEnemyVFX(g, core.VFXVenom, g.Battle.EnemyIndex)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	poisoned := tryProcStatus(g.Rand(), &enemy.PoisonTurns, defeated, effect.PoisonChance, quality, 0, effect.PoisonDuration)
-	setBattleMessage(g, venomStrikeMessage(actor.Name, target, damage, quality, defeated, poisoned))
+	poisoned := tryProcStatus(g.Rand(), &enemy.PoisonTurns, defeated, effect.PoisonChance, quality, 0, effect.PoisonDuration, core.EnemyInfoFor(*enemy).Stats.WIS)
+	setBattleMessage(g, appendCrit(venomStrikeMessage(actor.Name, target, damage, quality, defeated, poisoned), crit))
 	finishPartyAction(g)
 	return true
 }
@@ -1152,6 +1182,8 @@ func applyFrostLance(g *core.GameState, quality int) bool {
 		return false
 	}
 	effect := core.EffectiveSkillEffect(actor, core.SkillFrostLance)
+	crit, _ := rollSkillCrit(g, actor, core.SkillFrostLance, quality)
+	rawDamage = applyCritMultiplier(rawDamage, crit, false)
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillFrostLance))
 	core.EnqueueEnemyVFX(g, core.VFXFrost, g.Battle.EnemyIndex)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
@@ -1162,8 +1194,8 @@ func applyFrostLance(g *core.GameState, quality int) bool {
 	// it queries (any future grep for StunTurns lands here cleanly);
 	// the player-facing log line keeps the "Frozen!" flavor via
 	// frostLanceMessage.
-	stunned := tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, core.TimingQualityGreat, effect.StunDuration)
-	setBattleMessage(g, frostLanceMessage(actor.Name, target, damage, quality, defeated, stunned))
+	stunned := tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, core.TimingQualityGreat, effect.StunDuration, core.EnemyInfoFor(*enemy).Stats.WIS)
+	setBattleMessage(g, appendCrit(frostLanceMessage(actor.Name, target, damage, quality, defeated, stunned), crit))
 	finishPartyAction(g)
 	return true
 }
@@ -1209,6 +1241,56 @@ func scaleSkillDamage(actor *core.PartyMember, skill core.SkillID, quality int) 
 	return core.ScaleDamage(core.SkillDamageFor(actor, skill), quality)
 }
 
+// rollSkillCrit returns the (crit, double) flags for `actor` using
+// `skill` at the given timing `quality`. Standard skills crit via the
+// probabilistic core.RollCrit (DEX + per-grade bonus from
+// timingGrades.CritBonus). Backstab keeps its signature "Excellent
+// timing = guaranteed crit" — and the T2 CritDoubleOnExcellent tier
+// stacks an additional doubling on that specific path. The `double`
+// flag is only ever true on the deterministic Backstab path; the
+// probabilistic crit just multiplies by core.CritMultiplier once.
+func rollSkillCrit(g *core.GameState, actor *core.PartyMember, skill core.SkillID, quality int) (crit, double bool) {
+	if actor == nil {
+		return false, false
+	}
+	if skill == core.SkillBackstab && quality >= core.TimingQualityExcellent {
+		crit = true
+		if core.SkillTierMod(actor, core.SkillBackstab).CritDoubleOnExcellent {
+			double = true
+		}
+		return
+	}
+	crit = core.RollCrit(g.Rand(), actor.Stats, quality)
+	return
+}
+
+// applyCritMultiplier returns the post-crit damage. Pass through
+// unchanged when neither flag is set so a no-crit hit stays a single
+// arithmetic op. The double flag is the Backstab-T2 stacker; it
+// multiplies AGAIN on top of the standard CritMultiplier.
+func applyCritMultiplier(raw int, crit, double bool) int {
+	if !crit {
+		return raw
+	}
+	out := raw * core.CritMultiplier
+	if double {
+		out *= 2
+	}
+	return out
+}
+
+// appendCrit suffixes the combat-log message with " Critical!" when
+// crit landed. Used by every damaging player skill EXCEPT Backstab,
+// which already encodes the crit in its proc-arm copy ("lands a clean
+// Backstab for X!"). Centralised so a future "crit color code" pass
+// touches one place instead of seven.
+func appendCrit(msg string, crit bool) string {
+	if !crit {
+		return msg
+	}
+	return msg + " Critical!"
+}
+
 // damageEnemy applies `rawDamage` to the enemy at `slot`, clipped by
 // the enemy's Armor when `tag == SkillTagPhys`. Magic / Heal / Buff
 // tags bypass armor entirely. quality drives the floating damage popup
@@ -1231,6 +1313,13 @@ func damageEnemy(g *core.GameState, slot, rawDamage, quality int, tag core.Skill
 		return 0, false
 	}
 	damage := core.ApplyArmor(rawDamage, tag, enemy.Armor)
+	// Magic-tagged damage clips through the enemy's MDef (symmetric
+	// with the party-side ApplyMagicDefense path). Most enemies carry
+	// MDef 0 today — only the wizard-flavored kinds (Wisp, Goblin
+	// Mage, Necromancer) and the Stone Golem authored a non-zero
+	// value, so player Firebolt against unarmored grunts still feels
+	// the same. The future enemy-magic-resist pass tunes the field.
+	damage = core.ApplyMagicDefense(damage, tag, core.EnemyInfoFor(*enemy).MDef)
 	// Clamp negative damage at 0 — every current caller (ScaleDamage,
 	// burn ticks with BurnTickDamage>0) already produces non-negative
 	// values, but enforcing the contract here keeps a future
@@ -1474,10 +1563,10 @@ func healPartyMember(g *core.GameState, partyIndex, amount int) bool {
 }
 
 // damagePartyMember applies `rawAmount` to a party member, armor-clipped
-// when `tag == SkillTagPhys`. Magic / Heal / Buff and poison ticks
-// bypass armor entirely (poison is the only current non-phys source on
-// the party side). Any damage > 0 wakes the member from Sleep — same
-// "violence breaks the spell" rule as the enemy side.
+// when `tag == SkillTagPhys` and WIS-clipped when `tag == SkillTagMagic`
+// via ApplyMagicDefense. Heal / Buff still bypass mitigation entirely.
+// Any damage > 0 wakes the member from Sleep — same "violence breaks
+// the spell" rule as the enemy side.
 //
 // Returns (dealtDamage, fatal): callers use the dealt number for the
 // combat-log message so what the player reads matches the HP delta —
@@ -1500,6 +1589,7 @@ func damagePartyMember(g *core.GameState, partyIndex, rawAmount int, tag core.Sk
 		return 0, false
 	}
 	amount := core.ApplyArmor(rawAmount, tag, member.Armor)
+	amount = core.ApplyMagicDefense(amount, tag, core.MagicDefense(member.Stats))
 	member.DamageFlash = core.FlashDuration
 	member.HP -= amount
 	if amount > 0 {
@@ -1709,7 +1799,29 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 		return false
 	}
 	enemy.AttackBump = core.BumpDuration
+	// Dodge precedes damage math: a DEX-driven sidestep eats the whole
+	// swing — no damage, no poison proc, no lifesteal — even on a hit
+	// the player blocked poorly. The defend-timing quality the player
+	// pressed is still recorded so the grade-quality history tracks
+	// what they did, not just what landed. Skills (goblin mage casts,
+	// stone golem slam, etc.) go through their own resolver and are
+	// NOT dodgeable today — mirrors AttackAccuracy, which only gates
+	// basic attacks.
+	if core.RollDodge(g.Rand(), g.Party[target].Stats) {
+		recordQuality(g, defendQuality, target, true)
+		setBattleMessage(g, fmt.Sprintf("%s sidesteps the %s.", g.Party[target].Name, core.EnemySingularNoun(*enemy)))
+		return true
+	}
 	rawDamage := core.EnemyInfoFor(*enemy).AttackDamage
+	// Enemy crit on basic attacks — symmetric with the player side, but
+	// no timing-grade bonus (enemies don't press a bar). Pure
+	// DEX-driven CritChance via core.RollCrit at the Miss grade
+	// keeps enemies on a flat ~5-10% crit floor where the player can
+	// push 30%+ on Excellent.
+	enemyCrit := core.RollCrit(g.Rand(), core.EnemyInfoFor(*enemy).Stats, core.TimingQualityMiss)
+	if enemyCrit {
+		rawDamage *= core.CritMultiplier
+	}
 	damage := core.ScaleIncomingDamage(rawDamage, defendQuality)
 	if g.Party[target].Defending {
 		scaled := int(float32(damage) * core.DefendingDamageMult)
@@ -1742,14 +1854,15 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	}
 	recordQuality(g, defendQuality, target, true)
 	def := core.EnemyInfoFor(*enemy)
-	setBattleMessage(g, enemyHitMessage(*enemy, g.Party[target].Name, dealt, defendQuality, g.Party[target].Defending))
+	setBattleMessage(g, appendCrit(enemyHitMessage(*enemy, g.Party[target].Name, dealt, defendQuality, g.Party[target].Defending), enemyCrit))
 	// Poison inflict: only on damaging hits from a poison-themed attacker
 	// against a target that's still alive and not already poisoned. The
 	// no-stack rule mirrors burn — re-poisoning a poisoned target on every
 	// bite would trivialize the duration roll.
 	if damage > 0 && def.PoisonChance > 0 && g.Party[target].HP > 0 && g.Party[target].PoisonTurns <= 0 {
 		if g.Rand().Float64() < def.PoisonChance {
-			g.Party[target].PoisonTurns = core.DefaultPoisonEffect.RollDuration(g.Rand())
+			rawPoison := core.DefaultPoisonEffect.RollDuration(g.Rand())
+			g.Party[target].PoisonTurns = core.ShortenStatusDuration(rawPoison, g.Party[target].Stats.WIS)
 			setBattleMessage(g, fmt.Sprintf("%s is poisoned!", g.Party[target].Name))
 		}
 	}

@@ -303,13 +303,40 @@ func plural(n int) string {
 // every tab switch. Each slot row inside the card shows the label
 // (FontSmall, muted) above the value (FontBody, primary or dim
 // depending on whether the slot is filled).
+// equipmentSlot is one row in the per-member Equipment panel: the
+// label, the icon-draw function, and a fillFn that decides whether the
+// slot is occupied for this member and what value string + tone to show.
+// One row per slot keeps the label / icon / fill logic together instead
+// of split between a label slice and a parallel `switch slotIdx { ... }`
+// (which the audit flagged as a lockstep hazard).
+type equipmentSlot struct {
+	label  string
+	drawIcon func(cx, cy, r float32, col rl.Color)
+	// fill returns (filled, valueLabel) given the party member; the
+	// "Armor +N" row is the only filled state today.
+	fill func(m core.PartyMember) (bool, string)
+}
+
+var equipmentSlots = [...]equipmentSlot{
+	{"WEAPON", func(cx, cy, r float32, col rl.Color) { drawSlotIconSword(cx, cy, r, col) },
+		func(core.PartyMember) (bool, string) { return false, "—" }},
+	{"ARMOR", func(cx, cy, r float32, col rl.Color) { drawSlotIconShield(cx, cy, r, col) },
+		func(m core.PartyMember) (bool, string) {
+			if m.Armor > 0 {
+				return true, "Armor +" + strconv.Itoa(m.Armor)
+			}
+			return false, "—"
+		}},
+	{"ACCESSORY", func(cx, cy, r float32, col rl.Color) { drawSlotIconRing(cx, cy, r, col) },
+		func(core.PartyMember) (bool, string) { return false, "—" }},
+}
+
 func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) {
 	font := assets.Font()
 	if len(g.Party) == 0 {
 		return
 	}
 	cols, colW := memberColumnLayout(body, len(g.Party))
-	slotLabels := []string{"WEAPON", "ARMOR", "ACCESSORY"}
 	for i, m := range g.Party {
 		highlight := i == g.PanelsRowCursor
 		contentY := drawPartyMemberCardHeader(font, m, cols[i], highlight)
@@ -317,38 +344,26 @@ func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) 
 		innerW := colW - 28
 
 		slotRowH := float32(46)
-		for slotIdx, label := range slotLabels {
+		for slotIdx, slot := range equipmentSlots {
 			rowY := contentY + float32(slotIdx)*slotRowH
-			// Slot bezel: very faint inset so the three rows
-			// read as a stack without competing with the card.
+			// Slot bezel: very faint inset so the rows read as a
+			// stack without competing with the card.
 			drawGlassPane(int32(innerX), int32(rowY), int32(innerW), int32(slotRowH-8), fadeColor(glassDeep, 0.55))
 
-			// Slot sigil — small pictograph beside the label. The
-			// equipment system isn't authored yet so the sigil
-			// renders dim; once an item slots in, a future pass
-			// can swap the colour to the item rarity tone.
+			// Slot sigil — small pictograph beside the label. Once an
+			// item slots in (filled=true), the sigil takes the gilt
+			// highlight; resting state stays dim.
+			filled, value := slot.fill(m)
 			iconCol := fadeColor(woodAccent, 0.7)
-			filled := slotIdx == 1 && m.Armor > 0
 			if filled {
 				iconCol = giltBright
 			}
-			iconCX := innerX + 14
-			iconCY := rowY + 18
-			switch slotIdx {
-			case 0:
-				drawSlotIconSword(iconCX, iconCY, 9, iconCol)
-			case 1:
-				drawSlotIconShield(iconCX, iconCY, 9, iconCol)
-			case 2:
-				drawSlotIconRing(iconCX, iconCY, 8, iconCol)
-			}
+			slot.drawIcon(innerX+14, rowY+18, 9, iconCol)
 
 			labelX := innerX + 32
-			drawTextWithShadow(font, label, labelX, rowY+4, FontTiny, textMuted)
-			value := "—"
+			drawTextWithShadow(font, slot.label, labelX, rowY+4, FontTiny, textMuted)
 			valCol := textDim
 			if filled {
-				value = "Armor +" + strconv.Itoa(m.Armor)
 				valCol = textPrimary
 			}
 			drawTextWithShadow(font, value, labelX, rowY+18, FontSmall, valCol)
@@ -663,8 +678,15 @@ func drawPanelsMap(g core.GameState, assets Resources, body rl.Rectangle) {
 				rl.DrawRectangle(px, py, pw, pw, panelsMapOutOfBoundsColor)
 				continue
 			}
-			visited := visitedAt(g, mx, mz)
-			rl.DrawRectangle(px, py, pw, pw, tileColorWithFog(m.Materials, m.TileAt(mx, mz), visited))
+			// Unvisited tiles render the same flat darkness as out-of-
+			// bounds — the map only reveals what the player has stepped
+			// inside the SightRadius window of, not the underlying
+			// authored layout.
+			if !visitedAt(g, mx, mz) {
+				rl.DrawRectangle(px, py, pw, pw, panelsMapOutOfBoundsColor)
+				continue
+			}
+			rl.DrawRectangle(px, py, pw, pw, minimapTileColor(m.Materials, m.TileAt(mx, mz)))
 		}
 	}
 

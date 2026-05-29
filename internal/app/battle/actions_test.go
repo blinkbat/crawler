@@ -48,15 +48,19 @@ func TestApplyAttack_DealsSTRDamageAndPopup(t *testing.T) {
 	g := newTestState()
 	startHP := g.Packs[0].Members[0].HP
 	applyAttack(g, core.TimingQualityExcellent)
-	// STR 6, base 0, Excellent doubles → 12. Rat has 10 MaxHP so the rat dies.
+	// STR 6, base 0, Excellent doubles → 12. Rat has 10 MaxHP so the rat
+	// dies either way. With the crit system in place, the roll can land
+	// a Critical that doubles AGAIN to 24 — the test accepts either,
+	// since the contract being asserted is "STR damage applied and the
+	// popup recorded the dealt figure," not "crit roll did/didn't fire."
 	if g.Packs[0].Members[0].HP != 0 {
 		t.Fatalf("expected rat at 0 HP, got %d (start %d)", g.Packs[0].Members[0].HP, startHP)
 	}
 	if g.Packs[0].Members[0].Alive {
 		t.Fatalf("rat should be dead")
 	}
-	if g.Packs[0].Members[0].DamagePopup != 12 {
-		t.Fatalf("popup should record dealt damage (12), got %d", g.Packs[0].Members[0].DamagePopup)
+	if got := g.Packs[0].Members[0].DamagePopup; got != 12 && got != 24 {
+		t.Fatalf("popup should record 12 (no crit) or 24 (crit), got %d", got)
 	}
 }
 

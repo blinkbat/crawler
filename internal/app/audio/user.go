@@ -29,6 +29,11 @@ import (
 // userconfig's equivalents — pure pass-through, no extra logic.
 func UserSoundPath(name string) string { return userconfig.SoundPath(name) }
 func ListUserSounds() []string         { return userconfig.ListSounds() }
+
+// WavExt is the canonical file extension for user-sound files; alias of
+// userconfig.WavExt so the editor's flash messages don't need a second
+// import.
+const WavExt = userconfig.WavExt
 func SaveUserSound(name string, pcm []int16) (string, error) {
 	return userconfig.WriteWAV(name, pcm)
 }
@@ -122,24 +127,16 @@ func ReloadUserAssignments() (failed []string, err error) {
 		return nil, nil
 	}
 	assigns := userconfig.LoadAssignments()
-	for cue := Sound(0); cue < soundCount; cue++ {
-		cueRow := soundCues[cue]
-		if cueRow.Canonical == "" {
-			continue
-		}
-		userName := assigns[cueRow.Canonical]
-		assigned := userName != ""
-		if userName == "" {
-			userName = cueRow.Canonical
-		}
-		newSound, fromFile := readOrSynthSound(userName, cueRow.PCM)
+	forEachCue(func(cue Sound, row soundCue) {
+		fileName, assigned := resolveAssignedFile(assigns, row.Canonical)
+		newSound, fromFile := readOrSynthSound(fileName, row.PCM)
 		if !fromFile && assigned {
 			// An explicitly-assigned file failed to load (the synth
 			// fallback covered playback, but the player should know).
-			failed = append(failed, cueRow.Canonical)
+			failed = append(failed, row.Canonical)
 		}
 		replaceSound(&bank[cue], newSound)
-	}
+	})
 	for cueName := range assigns {
 		if _, ok := soundIDByName[cueName]; !ok {
 			failed = append(failed, cueName)
@@ -231,11 +228,6 @@ func playThroughRing(wavBytes []byte) {
 // unloadPreviewRing releases every preview slot. Called by Close so the
 // ring's buffers get reclaimed when the audio device shuts down.
 func unloadPreviewRing() {
-	for i, s := range previewRing {
-		if s.Stream.Buffer != nil {
-			rl.UnloadSound(s)
-			previewRing[i] = rl.Sound{}
-		}
-	}
+	unloadSounds(previewRing[:])
 	previewCursor = 0
 }

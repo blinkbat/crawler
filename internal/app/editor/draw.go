@@ -1907,6 +1907,12 @@ func drawPackEditModal(s *State, font rl.Font, theme render.Theme) {
 		}
 	}
 	rl.DrawTextEx(font, leaderText,
+		rl.NewVector2(r.X+16, r.Y+r.Height-78), 12, 1, theme.TextMuted)
+
+	// AI mode readout — cycled by 'A' in updatePackEditModal. New packs
+	// default to None (stationary); the editor never opens with anything
+	// else until the author explicitly cycles.
+	rl.DrawTextEx(font, "AI: "+core.PackAILabel(pack.AI),
 		rl.NewVector2(r.X+16, r.Y+r.Height-60), 12, 1, theme.TextMuted)
 
 	rl.DrawTextEx(font, hintPackEditNav,
@@ -1914,13 +1920,14 @@ func drawPackEditModal(s *State, font rl.Font, theme render.Theme) {
 	// Build the add-shortcuts hint from packAddRules so display stays in
 	// sync with the input handler; adding a new enemy kind is one row
 	// in packAddRules and both the keymap and this label update.
-	addLabels := make([]string, 0, len(packAddRules))
+	addLabels := make([]string, 0, len(packAddRules)+2)
 	for _, rule := range packAddRules {
 		addLabels = append(addLabels, rule.Label)
 	}
 	if def, ok := selectedCustomEnemyForPack(s); ok {
 		addLabels = append(addLabels, "C add "+def.Name)
 	}
+	addLabels = append(addLabels, "A cycle AI")
 	rl.DrawTextEx(font, joinHintLabels(addLabels, hintEscClose),
 		rl.NewVector2(r.X+16, r.Y+r.Height-24), 12, 1, theme.TextHint)
 }

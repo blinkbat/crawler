@@ -81,12 +81,47 @@ type MapFile struct {
 }
 
 // MapPack is one authored pack at a tile. Members is a non-empty list of
-// enemy-kind names; on-disk format is "kind[,kind...] X Z" so a single-
-// member pack reads the same as the legacy "kind X Z" form.
+// enemy-kind names; on-disk format is "kind[,kind...] X Z [ai]" — three
+// fields stay the legacy form (AI defaults to "none"), an optional fourth
+// AI field names a non-default movement style.
 type MapPack struct {
 	Members []string
 	X       int
 	Z       int
+	// AI is the on-disk name of the pack's movement style (see
+	// PackAINames). Empty means "use the default" — the loader maps
+	// that to PackAINone, the stationary mode.
+	AI string
+}
+
+// Pack AI names — canonical on-disk strings for each core.PackAI value.
+// Defined in mapfile (the I/O package) so the leaf format never imports
+// core; core's PackAIName / PackAIFromName alias these via a table.
+const (
+	PackAINoneName        = "none"
+	PackAIJunkyardDogName = "junkyard_dog"
+)
+
+// PackAINames is the canonical on-disk order for pack-AI strings,
+// matching core.PackAINone/JunkyardDog by index. PackAINoneName at
+// index 0 means an absent / empty AI column resolves to the no-op
+// behavior — the default per the editor's "new packs are stationary"
+// rule.
+var PackAINames = [...]string{
+	PackAINoneName,
+	PackAIJunkyardDogName,
+}
+
+// IsPackAIName reports whether s names one of the canonical pack-AI
+// modes (case-insensitive).
+func IsPackAIName(s string) bool {
+	low := strings.ToLower(s)
+	for _, name := range PackAINames {
+		if name == low {
+			return true
+		}
+	}
+	return false
 }
 
 // MapChest is one authored chest at a tile. On-disk format mirrors
@@ -238,6 +273,7 @@ type MapCustomEnemy struct {
 	VIT             int
 	SPD             int
 	Armor           int
+	MDef            int
 	XPValue         int
 	Tier            int
 	AttackDamage    int
@@ -308,8 +344,11 @@ func Parse(r io.Reader) (MapFile, error) {
 
 		if state == slotEnemies {
 			fields := strings.Fields(line)
-			if len(fields) != 3 {
-				return mf, fmt.Errorf("line %d: expected '<kind[,kind...]> <x> <z>', got %q", lineNo, raw)
+			// 3 fields = legacy (AI defaults to "none"); 4 = AI column
+			// present. Same backward-compat shape doors use for the
+			// style column.
+			if len(fields) != 3 && len(fields) != 4 {
+				return mf, fmt.Errorf("line %d: expected '<kind[,kind...]> <x> <z> [ai]', got %q", lineNo, raw)
 			}
 			members := strings.Split(fields[0], ",")
 			for i, m := range members {
@@ -327,7 +366,14 @@ func Parse(r io.Reader) (MapFile, error) {
 			if err != nil {
 				return mf, err
 			}
-			mf.Packs = append(mf.Packs, MapPack{Members: members, X: x, Z: z})
+			ai := ""
+			if len(fields) == 4 {
+				ai = strings.ToLower(fields[3])
+				if !IsPackAIName(ai) {
+					return mf, fmt.Errorf("line %d: unknown pack AI %q (expected one of %v)", lineNo, fields[3], PackAINames)
+				}
+			}
+			mf.Packs = append(mf.Packs, MapPack{Members: members, X: x, Z: z, AI: ai})
 			continue
 		}
 
@@ -657,23 +703,51 @@ func parseIntField(s, name string, lineNo int) (int, error) {
 	return v, nil
 }
 
-// customEnemyFieldCount is the positional column count for a custom-
-// enemy row. Bumping the schema (adding a new stat column) is a single
-// edit here plus a matching parse/encode pair.
-const customEnemyFieldCount = 17
+// customEnemyFieldCount is the positional column count for a current-
+// schema custom-enemy row (MDef column included). Older maps written
+// before MDef shipped use customEnemyFieldCountLegacy below — the
+// parser accepts both widths and defaults MDef to 0 on the legacy
+// path so existing maps load unchanged. Bumping the schema again is a
+// matching parse/encode pair plus a legacy-width fallback if needed.
+const (
+	customEnemyFieldCount       = 18
+	customEnemyFieldCountLegacy = 17
+)
 
 // parseCustomEnemyLine decodes a single positional row from the
 // `custom_enemies:` section. Field order documented on MapCustomEnemy.
 // Returns the wrap-style "line N: bad <field> %q" error every row
-// decoder uses so the error report stays uniform.
+// decoder uses so the error report stays uniform. Accepts the legacy
+// 17-field width too (pre-MDef) so older maps round-trip.
 func parseCustomEnemyLine(line string, lineNo int) (MapCustomEnemy, error) {
 	fields := strings.Fields(line)
-	if len(fields) != customEnemyFieldCount {
+	legacy := len(fields) == customEnemyFieldCountLegacy
+	if !legacy && len(fields) != customEnemyFieldCount {
 		return MapCustomEnemy{}, fmt.Errorf("line %d: custom enemy expects %d fields, got %d", lineNo, customEnemyFieldCount, len(fields))
 	}
 	ce := MapCustomEnemy{
 		Name:     fields[0],
 		BaseKind: fields[1],
+	}
+	// Column-index helpers track which slot each field sits in based on
+	// the legacy/current schema split. MDef is inserted between Armor
+	// and XPValue in the current schema; everything past it shifts one.
+	armorIdx := 10
+	mdefIdx := 11
+	xpIdx := 12
+	tierIdx := 13
+	dmgIdx := 14
+	skchIdx := 15
+	spwrIdx := 16
+	skillsIdx := 17
+	if legacy {
+		mdefIdx = -1
+		xpIdx = 11
+		tierIdx = 12
+		dmgIdx = 13
+		skchIdx = 14
+		spwrIdx = 15
+		skillsIdx = 16
 	}
 	intFields := []struct {
 		dst  *int
@@ -688,11 +762,18 @@ func parseCustomEnemyLine(line string, lineNo int) (MapCustomEnemy, error) {
 		{&ce.WIS, fields[7], "wis"},
 		{&ce.VIT, fields[8], "vit"},
 		{&ce.SPD, fields[9], "spd"},
-		{&ce.Armor, fields[10], "armor"},
-		{&ce.XPValue, fields[11], "xp"},
-		{&ce.Tier, fields[12], "tier"},
-		{&ce.AttackDamage, fields[13], "dmg"},
-		{&ce.SpellPower, fields[15], "spwr"},
+		{&ce.Armor, fields[armorIdx], "armor"},
+		{&ce.XPValue, fields[xpIdx], "xp"},
+		{&ce.Tier, fields[tierIdx], "tier"},
+		{&ce.AttackDamage, fields[dmgIdx], "dmg"},
+		{&ce.SpellPower, fields[spwrIdx], "spwr"},
+	}
+	if mdefIdx >= 0 {
+		intFields = append(intFields, struct {
+			dst  *int
+			raw  string
+			name string
+		}{&ce.MDef, fields[mdefIdx], "mdef"})
 	}
 	for _, f := range intFields {
 		v, err := parseIntField(f.raw, "custom enemy "+f.name, lineNo)
@@ -701,13 +782,13 @@ func parseCustomEnemyLine(line string, lineNo int) (MapCustomEnemy, error) {
 		}
 		*f.dst = v
 	}
-	chance, err := strconv.ParseFloat(fields[14], 64)
+	chance, err := strconv.ParseFloat(fields[skchIdx], 64)
 	if err != nil {
-		return MapCustomEnemy{}, fmt.Errorf("line %d: bad custom enemy sklch %q", lineNo, fields[14])
+		return MapCustomEnemy{}, fmt.Errorf("line %d: bad custom enemy sklch %q", lineNo, fields[skchIdx])
 	}
 	ce.SkillCastChance = chance
-	if fields[16] != customEnemyNoSkillsToken {
-		for _, name := range strings.Split(fields[16], ",") {
+	if fields[skillsIdx] != customEnemyNoSkillsToken {
+		for _, name := range strings.Split(fields[skillsIdx], ",") {
 			name = strings.TrimSpace(name)
 			if name == "" {
 				return MapCustomEnemy{}, fmt.Errorf("line %d: empty custom enemy skill entry", lineNo)
@@ -750,8 +831,16 @@ func (mf MapFile) Encode(w io.Writer) error {
 	for _, p := range mf.Packs {
 		// Single-member packs encode the same as the legacy "kind X Z" line
 		// so maps without grouped packs stay byte-identical across the
-		// format change.
-		fmt.Fprintf(bw, "%s %d %d\n", strings.Join(p.Members, ","), p.X, p.Z)
+		// format change. The AI column is appended only when non-default
+		// (anything other than "none" / empty) so default-stationary
+		// packs round-trip to the same 3-field shape.
+		members := strings.Join(p.Members, ",")
+		ai := strings.ToLower(strings.TrimSpace(p.AI))
+		if ai == "" || ai == PackAINoneName {
+			fmt.Fprintf(bw, "%s %d %d\n", members, p.X, p.Z)
+		} else {
+			fmt.Fprintf(bw, "%s %d %d %s\n", members, p.X, p.Z, ai)
+		}
 	}
 	fmt.Fprintln(bw, "chests:")
 	for _, c := range mf.Chests {
@@ -799,11 +888,11 @@ func (mf MapFile) Encode(w io.Writer) error {
 			if len(ce.Skills) > 0 {
 				skills = strings.Join(ce.Skills, ",")
 			}
-			fmt.Fprintf(bw, "%s %s %d %d %d %d %d %d %d %d %d %d %d %d %g %d %s\n",
+			fmt.Fprintf(bw, "%s %s %d %d %d %d %d %d %d %d %d %d %d %d %d %g %d %s\n",
 				ce.Name, ce.BaseKind,
 				ce.HP, ce.MP,
 				ce.STR, ce.DEX, ce.INT, ce.WIS, ce.VIT, ce.SPD,
-				ce.Armor, ce.XPValue, ce.Tier, ce.AttackDamage,
+				ce.Armor, ce.MDef, ce.XPValue, ce.Tier, ce.AttackDamage,
 				ce.SkillCastChance, ce.SpellPower,
 				skills,
 			)

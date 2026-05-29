@@ -70,6 +70,7 @@ func CloneArea(a AreaDefinition) AreaDefinition {
 			TileX:   sp.TileX,
 			TileZ:   sp.TileZ,
 			Members: append([]PackMemberRef(nil), sp.Members...),
+			AI:      sp.AI,
 		}
 	}
 	out.ChestSpawns = make([]ChestSpawn, len(a.ChestSpawns))

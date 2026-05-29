@@ -24,7 +24,31 @@ type PackSpawn struct {
 	TileX   int
 	TileZ   int
 	Members []PackMemberRef
+	// AI selects the per-pack movement behavior. Zero value PackAINone
+	// is the default — the pack sits at its spawn tile until the player
+	// walks into it, the behavior every pack used to have implicitly.
+	// The author opts a pack into an active mode via the pack-edit
+	// modal in the editor.
+	AI PackAI
 }
+
+// PackAI is the movement style applied to one pack. Authored on the
+// PackSpawn so different packs on the same map can use different modes.
+type PackAI int
+
+const (
+	// PackAINone is the default — the pack is stationary, waiting for
+	// the player to step into it. No per-step planning runs.
+	PackAINone PackAI = iota
+	// PackAIJunkyardDog is the wander-near-spawn / chase-when-close
+	// behavior described in packai.go. Was the only mode in the
+	// codebase before per-pack AI landed; now opt-in per pack.
+	PackAIJunkyardDog
+	// PackAICount sizes name / label tables. Bump by adding a mode
+	// above this line; init guards (areas.go's packAINameTable,
+	// editor's modal row) catch the missing wiring at startup.
+	PackAICount = int(PackAIJunkyardDog) + 1
+)
 
 // ChestSpawn is one authored chest on the map: a tile position and the
 // loot the chest holds. The runtime form (Chest) carries an additional
@@ -293,6 +317,12 @@ type GameState struct {
 	// instantly from the action menu (drops the engaged pack and returns
 	// to explore). Off by default so normal play can't trivially flee.
 	EasyBattleQuit bool
+	// RenderLogEnabled (debug) turns on per-frame diagnostics dumped to
+	// crawler-render.log. Used to inspect the world-draw path
+	// (camera state, lighting profile, tile/prop counts, shader IDs)
+	// when chasing flicker / invisibility bugs that don't reproduce
+	// in the editor.
+	RenderLogEnabled bool
 	// Inventory is shared across the party — single global stack list.
 	// Stocked by Steal pickups and consumed by the in-battle Item action.
 	Inventory []ItemStack
@@ -454,6 +484,10 @@ type Pack struct {
 	// TickPackAnimations clears it when Elapsed >= Duration.
 	Anim    Animation
 	Members []Enemy
+	// AI mirrors the authoring PackSpawn.AI for this pack's runtime
+	// behavior — propagated by placePacks so the per-step planner can
+	// dispatch on the per-pack mode without crossing back to the area.
+	AI PackAI
 }
 
 // Stats is the per-actor attribute block. Drives derived values (HP from VIT)
@@ -576,7 +610,7 @@ type PartyMember struct {
 	// action menu's "Skill" row casts. In-battle Tab cycles it; the
 	// renderer reads it via PartySkill so the row label matches what
 	// Enter will actually fire. 0 = signature skill (default); 1+ =
-	// universal pool (PowerStrike, Focus).
+	// the class's two thematic skills (see PartyClassDefinition.Skills).
 	SkillCursor int
 }
 

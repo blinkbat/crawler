@@ -196,13 +196,49 @@ func Close() {
 // C-side UnloadSound. Shared by Init's recover branch and Close so the
 // "what does cleanup look like" answer lives in one place.
 func unloadBank() {
-	for _, s := range bank {
-		if s.Stream.Buffer == nil {
+	unloadSounds(bank[:])
+	bank = [soundCount]rl.Sound{}
+}
+
+// unloadSounds releases every non-zero rl.Sound in the slice. Shared by
+// unloadBank and unloadPreviewRing, which used to inline the same
+// "skip nil-buffer, UnloadSound, zero the slot" loop. Mutates the slice
+// in place (slot zeroing) so the buffer pointers can't be read again.
+func unloadSounds(slots []rl.Sound) {
+	for i := range slots {
+		if slots[i].Stream.Buffer == nil {
 			continue
 		}
-		rl.UnloadSound(s)
+		rl.UnloadSound(slots[i])
+		slots[i] = rl.Sound{}
 	}
-	bank = [soundCount]rl.Sound{}
+}
+
+// forEachCue walks every (non-empty-canonical) row of soundCues, the
+// shared scaffold loadBank / ensureBankOnDisk / ReloadUserAssignments
+// each used to open-code as `for cue := Sound(0); cue < soundCount; cue++`
+// then a `continue` on empty Canonical.
+func forEachCue(fn func(cue Sound, row soundCue)) {
+	for cue := Sound(0); cue < soundCount; cue++ {
+		row := soundCues[cue]
+		if row.Canonical == "" {
+			continue
+		}
+		fn(cue, row)
+	}
+}
+
+// resolveAssignedFile returns the filename a cue should load from given
+// the assignments map. Empty assignment falls back to the canonical
+// slug; assigned reports whether the player explicitly set an override
+// (so callers can flag "assigned file missing" diagnostics).
+func resolveAssignedFile(assigns map[string]string, canonical string) (name string, assigned bool) {
+	name = assigns[canonical]
+	assigned = name != ""
+	if name == "" {
+		name = canonical
+	}
+	return name, assigned
 }
 
 // Play fires the named sound. No-ops if audio isn't ready or the enum is
@@ -240,17 +276,10 @@ func Play(id Sound) {
 func loadBank() {
 	ensureBankOnDisk()
 	assigns := userconfig.LoadAssignments()
-	for cue := Sound(0); cue < soundCount; cue++ {
-		slug := soundCues[cue].Canonical
-		if slug == "" {
-			continue
-		}
-		fileName := assigns[slug]
-		if fileName == "" {
-			fileName = slug
-		}
-		bank[cue] = loadCueFromDisk(fileName, soundCues[cue].PCM)
-	}
+	forEachCue(func(cue Sound, row soundCue) {
+		fileName, _ := resolveAssignedFile(assigns, row.Canonical)
+		bank[cue] = loadCueFromDisk(fileName, row.PCM)
+	})
 }
 
 // ensureBankOnDisk writes any missing default .wav files and adds an
@@ -262,24 +291,23 @@ func loadBank() {
 func ensureBankOnDisk() {
 	assigns := userconfig.LoadAssignments()
 	assignsChanged := false
-	for cue := Sound(0); cue < soundCount; cue++ {
-		cueRow := soundCues[cue]
-		if cueRow.Canonical == "" || cueRow.PCM == nil {
-			continue
+	forEachCue(func(_ Sound, row soundCue) {
+		if row.PCM == nil {
+			return
 		}
 		// File: write the default if no .wav lives at the canonical
 		// name yet. Existing user-edited content is preserved.
-		path := UserSoundPath(cueRow.Canonical)
+		path := UserSoundPath(row.Canonical)
 		if _, err := os.Stat(path); err != nil {
-			_, _ = userconfig.WriteWAV(cueRow.Canonical, cueRow.PCM())
+			_, _ = userconfig.WriteWAV(row.Canonical, row.PCM())
 		}
 		// Action map: backfill the entry if assignments.txt is missing
 		// this cue. Same-name default means cue's slug → cue's slug.
-		if _, ok := assigns[cueRow.Canonical]; !ok {
-			assigns[cueRow.Canonical] = cueRow.Canonical
+		if _, ok := assigns[row.Canonical]; !ok {
+			assigns[row.Canonical] = row.Canonical
 			assignsChanged = true
 		}
-	}
+	})
 	if assignsChanged {
 		_ = userconfig.SaveAssignments(assigns)
 	}

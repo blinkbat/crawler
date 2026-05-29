@@ -117,10 +117,9 @@ func WrapNextAvailablePartyMember(party []PartyMember, start int) int {
 }
 
 // AvailablePartyTargets returns the indices of every member who can be
-// chosen as a heal/item target this turn. Mirrors LivingPartyTargets
-// but excludes ingested members; both target cyclers (heal skill, item
-// use) route through this so a Cleric can't waste a Prayer trying to
-// reach the prey inside a mantrap.
+// chosen as a heal/item target this turn — living AND not ingested.
+// Both target cyclers (heal skill, item use) route through this so a
+// Cleric can't waste a Prayer trying to reach the prey inside a mantrap.
 func AvailablePartyTargets(party []PartyMember) []int {
 	return indicesWhere(party, partyAvailable)
 }
@@ -228,22 +227,6 @@ func ActiveModal(g *GameState) ModalKind {
 
 func FirstLivingPartyMember(party []PartyMember) int {
 	return nextWhere(party, 0, partyAlive)
-}
-
-func NextLivingPartyMember(party []PartyMember, start int) int {
-	return nextWhere(party, start, partyAlive)
-}
-
-// WrapNextLivingPartyMember walks the party forward from `start`, wrapping to
-// index 0 once it falls off the end. Returns -1 only when no member is alive.
-// Used by the enemy round-robin attack cursor so the wrap behavior lives in
-// one helper instead of being implicit in callers.
-func WrapNextLivingPartyMember(party []PartyMember, start int) int {
-	return wrapNextWhere(party, start, partyAlive)
-}
-
-func LivingPartyTargets(party []PartyMember) []int {
-	return indicesWhere(party, partyAlive)
 }
 
 // EnemyAlive checks whether the slot in the given slice is in-bounds and

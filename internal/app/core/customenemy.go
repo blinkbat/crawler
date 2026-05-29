@@ -17,6 +17,7 @@ type CustomEnemyDef struct {
 	Stats    Stats
 
 	Armor           int
+	MDef            int
 	XPValue         int
 	Tier            int
 	AttackDamage    int
@@ -34,8 +35,9 @@ func DefaultCustomEnemy(name string, base EnemyKind) CustomEnemyDef {
 		BaseKind:        base,
 		HP:              def.MaxHP,
 		MP:              0,
-		Stats:           Stats{STR: 1, DEX: 1, INT: 1, WIS: 1, VIT: 1, SPD: def.Speed},
+		Stats:           def.Stats,
 		Armor:           def.Armor,
+		MDef:            def.MDef,
 		XPValue:         def.XPValue,
 		Tier:            def.Tier,
 		AttackDamage:    def.AttackDamage,
@@ -67,6 +69,7 @@ func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
 		MP:              ce.MP,
 		Stats:           Stats{STR: ce.STR, DEX: ce.DEX, INT: ce.INT, WIS: ce.WIS, VIT: ce.VIT, SPD: ce.SPD},
 		Armor:           ce.Armor,
+		MDef:            ce.MDef,
 		XPValue:         ce.XPValue,
 		Tier:            ce.Tier,
 		AttackDamage:    ce.AttackDamage,
@@ -111,6 +114,7 @@ func MapCustomEnemyFromDef(ce CustomEnemyDef) (mapfile.MapCustomEnemy, error) {
 		VIT:             ce.Stats.VIT,
 		SPD:             ce.Stats.SPD,
 		Armor:           ce.Armor,
+		MDef:            ce.MDef,
 		XPValue:         ce.XPValue,
 		Tier:            ce.Tier,
 		AttackDamage:    ce.AttackDamage,
@@ -138,9 +142,10 @@ func (d CustomEnemyDef) Definition() EnemyDefinition {
 	def.GroupName = display
 	def.MaxHP = d.HP
 	def.AttackDamage = d.AttackDamage
-	def.Speed = d.Stats.SPD
+	def.Stats = d.Stats
 	def.Tier = d.Tier
 	def.Armor = d.Armor
+	def.MDef = d.MDef
 	def.XPValue = d.XPValue
 	def.Skills = append([]SkillID(nil), d.Skills...)
 	def.SkillCastChance = d.SkillCastChance

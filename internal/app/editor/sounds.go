@@ -595,7 +595,7 @@ func saveCurrentSound(s *State) {
 		return
 	}
 	s.soundName = saved
-	s.flash("Saved " + saved + ".wav")
+	s.flash("Saved " + saved + audio.WavExt)
 }
 
 // drawSoundsModal renders the three-column sound editor with mouse-first

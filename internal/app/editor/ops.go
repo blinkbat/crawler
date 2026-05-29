@@ -243,38 +243,75 @@ func applyEntityBrush(s *State, x, z int, kind entityKind) {
 	}
 }
 
+// blockerCheck is one named "is this tile illegal for the entity being
+// placed?" predicate. blocker helpers below build these so the three
+// placement paths (door, chest, pack) read as a flat list of rules
+// rather than inlined if-flash-return ladders.
+type blockerCheck struct {
+	fail bool
+	msg  string
+}
+
+// firstBlocker returns the first failing check's message, or "" when
+// the tile is fine. Order matters — list start / wall / prop / floor /
+// other-entity in the order the player would naturally encounter them
+// so the flash always names the most obvious obstacle.
+func firstBlocker(checks ...blockerCheck) string {
+	for _, c := range checks {
+		if c.fail {
+			return c.msg
+		}
+	}
+	return ""
+}
+
+// Named tile-blocker predicates. Each captures one rule + its user-
+// facing message so placement helpers don't re-spell either. `noun`
+// is "Door" / "Chest" / "Pack" — surfaces in messages where the
+// entity word makes the cause obvious to the player.
+func blkStart(a *core.AreaDefinition, x, z int) blockerCheck {
+	return blockerCheck{a.StartTileX == x && a.StartTileZ == z, "Cell holds the player start"}
+}
+func blkWall(a *core.AreaDefinition, x, z int, noun string) blockerCheck {
+	return blockerCheck{a.Walls[z][x] == core.TileRock, noun + " needs an open cell (remove the wall first)"}
+}
+func blkProp(a *core.AreaDefinition, x, z int) blockerCheck {
+	return blockerCheck{core.IsPropChar(a.Props[z][x]), "Cell already holds a prop — clear it first"}
+}
+func blkDeepWater(a *core.AreaDefinition, x, z int, noun string) blockerCheck {
+	return blockerCheck{a.Floor[z][x] == core.FloorDeepWater, noun + " can't sit on deep water"}
+}
+func blkPackHere(a *core.AreaDefinition, x, z int) blockerCheck {
+	return blockerCheck{core.PackSpawnIndexAt(a.PackSpawns, x, z) >= 0, "Cell already holds a pack — clear it first"}
+}
+func blkChestHere(a *core.AreaDefinition, x, z int, clear bool) blockerCheck {
+	msg := "Cell already holds a chest"
+	if clear {
+		msg += " — clear it first"
+	}
+	return blockerCheck{core.ChestSpawnIndexAt(a.ChestSpawns, x, z) >= 0, msg}
+}
+func blkDoorHere(a *core.AreaDefinition, x, z int) blockerCheck {
+	return blockerCheck{core.DoorSpawnIndexAt(a.DoorSpawns, x, z) >= 0, "Cell already holds a door"}
+}
+
 // placeDoorAt drops a door at (x,z) with a placeholder name and a
 // "self" target. The author renames it / sets the target in the
 // modalDoorEdit modal opened by clicking the door. Like chests, doors
 // can't share a tile with a pack (the runtime would race the
 // transition trigger and the encounter start).
 func placeDoorAt(s *State, x, z int) {
-	if s.area.StartTileX == x && s.area.StartTileZ == z {
-		s.flash("Cell holds the player start")
-		return
-	}
-	if s.area.Walls[z][x] == core.TileRock {
-		s.flash("Door needs an open cell (remove the wall first)")
-		return
-	}
-	if core.IsPropChar(s.area.Props[z][x]) {
-		s.flash("Cell already holds a prop — clear it first")
-		return
-	}
-	if s.area.Floor[z][x] == core.FloorDeepWater {
-		s.flash("Door can't sit on deep water")
-		return
-	}
-	if core.PackSpawnIndexAt(s.area.PackSpawns, x, z) >= 0 {
-		s.flash("Cell already holds a pack — clear it first")
-		return
-	}
-	if core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z) >= 0 {
-		s.flash("Cell already holds a chest — clear it first")
-		return
-	}
-	if core.DoorSpawnIndexAt(s.area.DoorSpawns, x, z) >= 0 {
-		s.flash("Cell already holds a door")
+	a := &s.area
+	if msg := firstBlocker(
+		blkStart(a, x, z),
+		blkWall(a, x, z, "Door"),
+		blkProp(a, x, z),
+		blkDeepWater(a, x, z, "Door"),
+		blkPackHere(a, x, z),
+		blkChestHere(a, x, z, true),
+		blkDoorHere(a, x, z),
+	); msg != "" {
+		s.flash(msg)
 		return
 	}
 	name := nextDoorName(s.area.DoorSpawns)
@@ -353,32 +390,20 @@ func removeDoorAt(spawns []core.DoorSpawn, x, z int) []core.DoorSpawn {
 // and replace). Chests can't share a tile with a pack — the in-game
 // interact prompt would race the pack's start-battle trigger.
 func placeChestAt(s *State, x, z int) {
-	if s.area.StartTileX == x && s.area.StartTileZ == z {
-		s.flash("Cell holds the player start")
-		return
-	}
-	if s.area.Walls[z][x] == core.TileRock {
-		s.flash("Chest needs an open cell (remove the wall first)")
-		return
-	}
-	if core.IsPropChar(s.area.Props[z][x]) {
-		s.flash("Cell already holds a prop — clear it first")
-		return
-	}
+	a := &s.area
 	// Deep water blocks movement onto the tile, so a chest there would
 	// render floating with no way to step onto it (the player can still
 	// interact from an adjacent walkable tile, but the visual reads as
 	// a bug). Refuse rather than ship the surprise.
-	if s.area.Floor[z][x] == core.FloorDeepWater {
-		s.flash("Chest can't sit on deep water")
-		return
-	}
-	if core.PackSpawnIndexAt(s.area.PackSpawns, x, z) >= 0 {
-		s.flash("Cell already holds a pack — clear it first")
-		return
-	}
-	if core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z) >= 0 {
-		s.flash("Cell already holds a chest")
+	if msg := firstBlocker(
+		blkStart(a, x, z),
+		blkWall(a, x, z, "Chest"),
+		blkProp(a, x, z),
+		blkDeepWater(a, x, z, "Chest"),
+		blkPackHere(a, x, z),
+		blkChestHere(a, x, z, false),
+	); msg != "" {
+		s.flash(msg)
 		return
 	}
 	s.area.ChestSpawns = append(s.area.ChestSpawns, core.ChestSpawn{
@@ -459,12 +484,12 @@ func clearEntitiesAt(s *State, x, z int) bool {
 // addPackMember appends a member of `kind` to the pack at (x,z). If no pack
 // exists at the tile, creates a fresh pack with the single member.
 func addPackMember(s *State, x, z int, kind core.EnemyKind) {
-	if s.area.StartTileX == x && s.area.StartTileZ == z {
-		s.flash("Cell holds the player start")
-		return
-	}
-	if core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z) >= 0 {
-		s.flash("Cell already holds a chest — clear it first")
+	a := &s.area
+	if msg := firstBlocker(
+		blkStart(a, x, z),
+		blkChestHere(a, x, z, true),
+	); msg != "" {
+		s.flash(msg)
 		return
 	}
 	if idx := core.PackSpawnIndexAt(s.area.PackSpawns, x, z); idx >= 0 {

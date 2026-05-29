@@ -59,6 +59,9 @@ var debugMenuRows = []debugMenuRow{
 		}
 		return "Easy Battle Quit: Off"
 	}},
+	{Item: core.DebugMenuRenderLog, Label: func(g core.GameState) string {
+		return "Render Log: " + onOff(g.RenderLogEnabled)
+	}},
 	{Item: core.DebugMenuDisable, Label: func(core.GameState) string { return "Disable Debug Mode" }},
 	{Item: core.DebugMenuClose, Label: func(core.GameState) string { return "Close" }},
 }

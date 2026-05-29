@@ -197,9 +197,21 @@ func drawMapPicker(s State, font rl.Font, theme render.Theme, screenH int32) {
 	drawHint(font, "Up/Down navigate   Enter start   Esc back", screenH)
 }
 
+// Title-screen layout anchors. Pulled out of the inline literals
+// drawList / drawHint / drawError / drawMainMenu used to repeat so a
+// title-screen rebalance touches one block instead of half a dozen.
+const (
+	titleListAnchorFrac    = float32(0.42) // vertical anchor for the menu list (fraction of screenH)
+	titleListRowStride     = float32(44)   // gap between menu rows
+	titleListHeaderOffset  = float32(52)   // distance from list top up to the "Map:" header
+	titleFleuronGap        = float32(22)   // horizontal gap from active label edge to flanking fleuron centre
+	titleHintFooterOffset  = float32(36)   // distance from bottom edge up to the nav-hint baseline
+	titleErrorFooterOffset = float32(60)   // distance from bottom edge up to the error-message baseline
+)
+
 // drawList paints a vertical column of menu items centered horizontally.
-// screenH controls the vertical anchor (items start at 42% of screen
-// height); horizontal centering is handled by render.CenterXF which
+// screenH controls the vertical anchor (titleListAnchorFrac of the
+// screen); horizontal centering is handled by render.CenterXF which
 // re-reads the screen width directly, so callers don't pass screenW.
 //
 // Active row gets the full heraldic treatment: text in inkAccent
@@ -207,11 +219,11 @@ func drawMapPicker(s State, font rl.Font, theme render.Theme, screenH int32) {
 // announcing the selected option. Inactive rows render plain in
 // muted text so the cursor pops without a hard chevron.
 func drawList(items []string, cursor int, font rl.Font, theme render.Theme, screenH int32, header string) {
-	listY := float32(screenH) * 0.42
+	listY := float32(screenH) * titleListAnchorFrac
 	if header != "" {
 		sz := render.FontBody
 		m := rl.MeasureTextEx(font, header, sz, 1)
-		render.DrawTextWithShadow(font, header, render.CenterXF(m.X), listY-52, sz, theme.TextLabel)
+		render.DrawTextWithShadow(font, header, render.CenterXF(m.X), listY-titleListHeaderOffset, sz, theme.TextLabel)
 	}
 	for i, label := range items {
 		size := render.FontHeading
@@ -221,25 +233,25 @@ func drawList(items []string, cursor int, font rl.Font, theme render.Theme, scre
 			col = theme.BorderActive
 		}
 		m := rl.MeasureTextEx(font, label, size, render.FontSpacingHeading)
-		y := listY + float32(i)*44
+		y := listY + float32(i)*titleListRowStride
 		x := render.CenterXF(m.X)
 		render.DrawTextWithShadow(font, label, x, y, size, col)
 		if active {
 			flCY := y + m.Y/2
-			render.DrawFleuron(x-22, flCY, 5, theme.BorderActive)
-			render.DrawFleuron(x+m.X+22, flCY, 5, theme.BorderActive)
+			render.DrawFleuron(x-titleFleuronGap, flCY, 5, theme.BorderActive)
+			render.DrawFleuron(x+m.X+titleFleuronGap, flCY, 5, theme.BorderActive)
 		}
 	}
 }
 
 func drawHint(font rl.Font, text string, screenH int32) {
 	sw, _ := render.ScreenSizeF()
-	render.DrawFooterHint(font, text, sw/2, float32(screenH)-36, render.FontSmall)
+	render.DrawFooterHint(font, text, sw/2, float32(screenH)-titleHintFooterOffset, render.FontSmall)
 }
 
 func drawError(font rl.Font, theme render.Theme, msg string, screenH int32) {
 	size := render.FontSmall
 	m := rl.MeasureTextEx(font, msg, size, 1)
-	y := float32(screenH) - 60
+	y := float32(screenH) - titleErrorFooterOffset
 	render.DrawTextWithShadow(font, msg, render.CenterXF(m.X), y, size, theme.BorderDanger)
 }
