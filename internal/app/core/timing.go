@@ -66,6 +66,7 @@ const (
 //	  tick lands). SweetSpot is the centered "Excellent" point inside it.
 //	  Pressed is true once the player ever held the input.
 //	  Released is true once they let go (or the bar timed out while held).
+//
 // TallyWindow is one accept zone in a multi-press tally bar. Hit
 // marks the zone as already consumed so a player can't repeatedly
 // press inside the same window for free hits — only the first press
@@ -487,9 +488,13 @@ func (t *TimingState) pressTally() bool {
 }
 
 // resolveTally finalises a multi-press bar. Quality maps from Hits:
-// zero = Miss, partial = Good (got some), all-windows = Excellent
-// (perfect run). Most apply paths also read Hits directly so the
-// per-hit damage scaling lands without depending on Quality.
+// zero = Miss, all-windows = Excellent (perfect run), one short of all
+// = Great, any fewer than that = Good. For a 2-window bar the Good band
+// is unreachable (1-of-2 lands in the Great band) — intended: missing
+// half a two-hit tally is still a solid partial. The Good band is for
+// 3+-window bars, where landing e.g. 1 of 3 grades below Great. Most
+// apply paths also read Hits directly so the per-hit damage scaling
+// lands without depending on Quality.
 func (t *TimingState) resolveTally() {
 	t.Resolved = true
 	t.Pressed = t.Hits > 0
@@ -792,23 +797,16 @@ func TimingQualityLabel(quality int) string {
 // can round to 0 on tiny bases — that's by design (a Nice on a 1-damage
 // swing shouldn't print "1 damage" same as a Miss).
 func ScaleDamage(base int, quality int) int {
-	scaled := int(float32(base) * TimingBonusMult(quality))
+	scaled := scaleByMult(base, TimingBonusMult(quality))
 	if quality == TimingQualityExcellent && scaled <= base {
 		scaled = base + 1
-	}
-	if scaled < 0 {
-		scaled = 0
 	}
 	return scaled
 }
 
 // ScaleHeal applies an attack quality's multiplier to a base heal amount.
 func ScaleHeal(base int, quality int) int {
-	scaled := int(float32(base) * TimingBonusMult(quality))
-	if scaled < 0 {
-		scaled = 0
-	}
-	return scaled
+	return scaleByMult(base, TimingBonusMult(quality))
 }
 
 // ScaleIncomingDamage applies a defend quality's multiplier to incoming damage.
@@ -817,9 +815,17 @@ func ScaleHeal(base int, quality int) int {
 // fully zero the damage; that's intentional, matches how a successful
 // timed block reads in-game ("0 damage" with the block flourish).
 func ScaleIncomingDamage(base int, quality int) int {
-	scaled := int(float32(base) * TimingDefenseMult(quality))
+	return scaleByMult(base, TimingDefenseMult(quality))
+}
+
+// scaleByMult truncates base*mult to an int, clamped at 0 — the shared
+// core of every quality-scaled amount (damage, heal, incoming). Each
+// public wrapper layers its own special case (the Excellent damage
+// floor) on top.
+func scaleByMult(base int, mult float32) int {
+	scaled := int(float32(base) * mult)
 	if scaled < 0 {
-		scaled = 0
+		return 0
 	}
 	return scaled
 }

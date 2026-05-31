@@ -7,7 +7,7 @@ import (
 
 // Tests use a deterministic RNG so press-window placement, sequence targets,
 // and burn rolls become reproducible. The closure receives the seeded RNG;
-// callers pass it through to NewTimingState / NewSequenceState / AttackHits.
+// callers pass it through to NewTimingState / NewSequenceState / MemberAttackHits.
 func withSeededRNG(t *testing.T, seed int64, fn func(rng *rand.Rand)) {
 	t.Helper()
 	fn(rand.New(rand.NewSource(seed)))
@@ -406,47 +406,54 @@ func TestHitStopFor_OnlyOnHighGrades(t *testing.T) {
 	}
 }
 
-// TestAttackAccuracy_Curve checks the headline guarantees that the actual
-// party DEX spread depends on:
+// TestMeleeAccuracy_Curve checks the headline guarantees of the basic
+// (melee) attack's hit curve, now STR-driven:
 //
-//   - low-DEX classes (DEX 2) on Miss timing land in the 0.55–0.70 band
+//   - low-STR (STR 2) on Miss timing lands in the 0.55–0.70 band
 //   - Excellent timing always pushes accuracy to a clamped 1.0
 //   - any out-of-table quality (negative, unknown) falls back to base
 //   - accuracy stays inside [0, 1]
-func TestAttackAccuracy_Curve(t *testing.T) {
-	low := Stats{DEX: 2}
-	high := Stats{DEX: 6}
+func TestMeleeAccuracy_Curve(t *testing.T) {
+	low := Stats{STR: 2}
+	high := Stats{STR: 6}
 
-	if got := AttackAccuracy(low, TimingQualityMiss); got < 0.55 || got > 0.70 {
-		t.Errorf("low-DEX Miss should sit ~0.63, got %v", got)
+	if got := MeleeAccuracy(low, TimingQualityMiss); got < 0.55 || got > 0.70 {
+		t.Errorf("low-STR Miss should sit ~0.63, got %v", got)
 	}
-	if got := AttackAccuracy(low, TimingQualityExcellent); got != 1.0 {
-		t.Errorf("low-DEX Excellent should clamp to 1.0, got %v", got)
+	if got := MeleeAccuracy(low, TimingQualityExcellent); got != 1.0 {
+		t.Errorf("low-STR Excellent should clamp to 1.0, got %v", got)
 	}
-	if got := AttackAccuracy(high, TimingQualityExcellent); got != 1.0 {
-		t.Errorf("high-DEX Excellent should clamp to 1.0, got %v", got)
+	if got := MeleeAccuracy(high, TimingQualityExcellent); got != 1.0 {
+		t.Errorf("high-STR Excellent should clamp to 1.0, got %v", got)
 	}
-	if got := AttackAccuracy(high, TimingQualityMiss); got <= AttackAccuracy(low, TimingQualityMiss) {
-		t.Errorf("higher DEX should out-accuracy lower DEX on the same grade")
+	if got := MeleeAccuracy(high, TimingQualityMiss); got <= MeleeAccuracy(low, TimingQualityMiss) {
+		t.Errorf("higher STR should out-accuracy lower STR on the same grade")
 	}
-	if got := AttackAccuracy(low, -42); got != AttackAccuracy(low, TimingQualityMiss) {
+	if got := MeleeAccuracy(low, -42); got != MeleeAccuracy(low, TimingQualityMiss) {
 		t.Errorf("unknown quality should fall back to Miss baseline, got %v", got)
+	}
+	// RangedAccuracy mirrors the same curve off DEX (the seam for ranged
+	// attacks); confirm it tracks DEX, not STR.
+	if got := RangedAccuracy(Stats{DEX: 6}, TimingQualityMiss); got <= RangedAccuracy(Stats{DEX: 2}, TimingQualityMiss) {
+		t.Errorf("RangedAccuracy should scale with DEX")
 	}
 }
 
-// TestAttackHits_StatisticsRoughlyMatch fires AttackHits many times against a
-// known seed and asserts the hit rate is close to AttackAccuracy. Not a
-// precise distribution check — just a sanity guard that the dice are
-// actually being rolled against the curve, not a constant.
-func TestAttackHits_StatisticsRoughlyMatch(t *testing.T) {
+// TestMemberAttackHits_StatisticsRoughlyMatch fires MemberAttackHits many
+// times against a known seed and asserts the hit rate is close to the
+// member's accuracy curve. The member is unarmed (no equipped weapon), so
+// the basic attack is STR-governed and the expected rate is
+// MeleeAccuracy(STR). Not a precise distribution check — just a sanity
+// guard that the dice are actually rolled against the curve, not a constant.
+func TestMemberAttackHits_StatisticsRoughlyMatch(t *testing.T) {
 	withSeededRNG(t, 2024, func(rng *rand.Rand) {
-		stats := Stats{DEX: 2}
+		m := PartyMember{Stats: Stats{STR: 2}} // unarmed → STR governs
 		quality := TimingQualityNice
-		expected := AttackAccuracy(stats, quality)
+		expected := MeleeAccuracy(m.Stats, quality)
 		hits := 0
 		const trials = 4000
 		for i := 0; i < trials; i++ {
-			if AttackHits(rng, stats, quality) {
+			if MemberAttackHits(rng, m, quality) {
 				hits++
 			}
 		}
@@ -457,16 +464,17 @@ func TestAttackHits_StatisticsRoughlyMatch(t *testing.T) {
 	})
 }
 
-// TestAttackHits_ExcellentNeverWhiffs locks the contract that any DEX +
-// Excellent timing combination always lands. The accuracy clamps to 1.0
-// past that point, so the RNG roll should never come back false.
-func TestAttackHits_ExcellentNeverWhiffs(t *testing.T) {
+// TestMemberAttackHits_ExcellentNeverWhiffs locks the contract that any
+// stat + Excellent timing combination always lands. The accuracy clamps to
+// 1.0 past that point, so the RNG roll should never come back false. The
+// member is unarmed, so STR is the governing stat being swept.
+func TestMemberAttackHits_ExcellentNeverWhiffs(t *testing.T) {
 	withSeededRNG(t, 9, func(rng *rand.Rand) {
-		for dex := 0; dex <= 10; dex++ {
-			stats := Stats{DEX: dex}
+		for str := 0; str <= 10; str++ {
+			m := PartyMember{Stats: Stats{STR: str}} // unarmed → STR governs
 			for i := 0; i < 200; i++ {
-				if !AttackHits(rng, stats, TimingQualityExcellent) {
-					t.Fatalf("Excellent should always hit (DEX=%d, trial=%d)", dex, i)
+				if !MemberAttackHits(rng, m, TimingQualityExcellent) {
+					t.Fatalf("Excellent should always hit (STR=%d, trial=%d)", str, i)
 				}
 			}
 		}

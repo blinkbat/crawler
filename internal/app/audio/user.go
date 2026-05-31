@@ -34,6 +34,7 @@ func ListUserSounds() []string         { return userconfig.ListSounds() }
 // userconfig.WavExt so the editor's flash messages don't need a second
 // import.
 const WavExt = userconfig.WavExt
+
 func SaveUserSound(name string, pcm []int16) (string, error) {
 	return userconfig.WriteWAV(name, pcm)
 }
@@ -164,6 +165,10 @@ const (
 	WaveTriangle = wavsynth.WaveTriangle
 	WaveSaw      = wavsynth.WaveSaw
 )
+
+// WaveShapeCount re-exports the WaveShape enum size so the editor's
+// wave-picker slider bounds itself off the enum, not a literal.
+const WaveShapeCount = wavsynth.WaveShapeCount
 
 func WaveShapeName(w WaveShape) string { return wavsynth.WaveShapeName(w) }
 

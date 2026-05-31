@@ -38,11 +38,12 @@ func updateHotkeys(s *State) {
 	shift := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
 	alt := rl.IsKeyDown(rl.KeyLeftAlt) || rl.IsKeyDown(rl.KeyRightAlt)
 
-	// ALT tap-toggles the per-tile glyph overlay in the grid. The
-	// detection is "key released without a chord" so it never fights
-	// Alt+1..6 (layer jump) or any future Alt+key binding: if ANY key
-	// is pressed during the Alt hold we mark altChordUsed and the
-	// release fires no toggle. Edge press of Alt resets the flag.
+	// ALT tap-toggles the per-tile glyph overlay (off by default; when on
+	// it shows the ACTIVE layer's chars only). The detection is "key
+	// released without a chord" so it never fights Alt+1..6 (layer jump)
+	// or any future Alt+key binding: if ANY key is pressed during the Alt
+	// hold we mark altChordUsed and the release fires no toggle. Edge
+	// press of Alt resets the flag.
 	altPressed := rl.IsKeyPressed(rl.KeyLeftAlt) || rl.IsKeyPressed(rl.KeyRightAlt)
 	altReleased := rl.IsKeyReleased(rl.KeyLeftAlt) || rl.IsKeyReleased(rl.KeyRightAlt)
 	if altPressed {
@@ -59,7 +60,7 @@ func updateHotkeys(s *State) {
 		}
 	}
 	if altReleased && !s.altChordUsed {
-		s.hideTileGlyphs = !s.hideTileGlyphs
+		s.showTileGlyphs = !s.showTileGlyphs
 	}
 
 	// Alt+1..6 jumps directly to a layer — saves Tab-cycling when the
@@ -686,6 +687,15 @@ func acceptPrintable(r rune) bool { return true }
 // space-free input (filenames, etc.) can reuse this.
 func acceptPrintableNoSpace(r rune) bool { return r != ' ' }
 
+// acceptDigit accepts ASCII digits only — the filter for the numeric
+// resize fields so they share pumpPrintableASCII instead of a parallel
+// hand-rolled char-drain loop.
+func acceptDigit(r rune) bool { return r >= '0' && r <= '9' }
+
+// numericFieldMaxLen caps the resize numeric buffer — map dimensions are
+// at most four digits. Named so the cap isn't a bare literal in the pump.
+const numericFieldMaxLen = 4
+
 func updateTextInput(s *State) {
 	if s.focus == focusWidth || s.focus == focusHeight ||
 		s.focus == focusNewWidth || s.focus == focusNewHeight {
@@ -717,18 +727,7 @@ func updateTextInput(s *State) {
 }
 
 func updateNumericInput(s *State) {
-	for {
-		c := rl.GetCharPressed()
-		if c == 0 {
-			break
-		}
-		if c >= '0' && c <= '9' && len(s.numericBuf) < 4 {
-			s.numericBuf += string(rune(c))
-		}
-	}
-	if rl.IsKeyPressed(rl.KeyBackspace) && len(s.numericBuf) > 0 {
-		s.numericBuf = s.numericBuf[:len(s.numericBuf)-1]
-	}
+	pumpPrintableASCII(&s.numericBuf, numericFieldMaxLen, acceptDigit, nil)
 	if editorTabPressed() {
 		commitNumericInput(s)
 		cycleFocus(s)
@@ -888,6 +887,7 @@ func closeModal(s *State) {
 	s.modalValidateRows = nil
 	s.modalConfirmDelete = false
 	s.modalRenaming = ""
+	s.soundDeleteArmed = ""
 	soundDrag.sliderIdx = -1
 	// Door-edit text focus survives outside the modal in pumpPrintableASCII's
 	// flow, so explicitly drop it here too. The new-map dialog's numeric
@@ -982,8 +982,10 @@ func updateDoorEditModal(s *State) Action {
 			closeModal(s)
 			return ActionNone
 		case doorHitOutside:
-			// Click outside the card commits and closes — matches pack /
-			// chest modals that just need Esc.
+			// Click outside the card is a no-op (NOT a close): the door
+			// modal — like the pack / chest modals — is dismissed only via
+			// Esc, Enter, or the Done button, so a stray click can't lose
+			// in-progress field edits.
 		}
 	}
 
@@ -1345,12 +1347,14 @@ type chestAddRule struct {
 // Index i is the hotkey for the i-th item in core.AllItems registry
 // order. Mnemonic letters where they don't collide with existing
 // editor bindings: C=Cheese, J=Jerky, S=Sword, H=sHield, L=Leather,
-// R=Ring, M=aMulet. Extend as items are added; entries past pool
-// length are mouse-only — and the init check at the bottom of this
-// file panics if the pool is shorter than the registry so that's
-// caught at startup, not deep in the editor.
+// R=Ring, M=aMulet, then the sample weapons D=Dagger, E=rapiEr,
+// B=Bow, G=slinG, A=Axe, W=War hammer. Extend as items are added;
+// the init check at the bottom of this file panics if the pool is
+// shorter than the registry so that's caught at startup, not deep in
+// the editor.
 var chestAddHotkeys = []int32{
 	rl.KeyC, rl.KeyJ, rl.KeyS, rl.KeyH, rl.KeyL, rl.KeyR, rl.KeyM,
+	rl.KeyD, rl.KeyE, rl.KeyB, rl.KeyG, rl.KeyA, rl.KeyW,
 }
 
 var chestAddRules = buildChestAddRules()

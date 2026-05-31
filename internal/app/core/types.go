@@ -665,60 +665,44 @@ func HealAmount(s Stats, base int) int {
 	return s.WIS + base
 }
 
-// AttackAccuracy returns the hit chance [0, 1] of a basic attack given the
-// attacker's stats and the timing grade they scored. DEX is the primary
-// driver: a deft thief connects almost every swing, a stumpy warrior whiffs
-// more often when their timing slips. Timing quality stacks on top — a Miss
-// timing leaves accuracy at the DEX baseline, an Excellent press functionally
-// guarantees the hit by pushing accuracy past 1.0 before the clamp.
-//
-// Tuning is keyed off the actual party DEX spread (Warrior/Cleric/Wizard at
-// DEX 2, Thief at DEX 6):
-//
-//	Warrior (DEX 2), Miss timing:      0.63 → ~37% whiff
-//	Warrior (DEX 2), Good timing:      0.83 → ~17% whiff
-//	Warrior (DEX 2), Excellent timing: 1.08 → always hit
-//	Thief   (DEX 6), Miss timing:      0.79 → ~21% whiff
-//	Thief   (DEX 6), Excellent timing: 1.24 → always hit
-//
-// Basic attacks are the only action gated by this; skills already pay MP
-// and shouldn't be doubly punished by a whiff.
-func AttackAccuracy(s Stats, quality int) float64 {
-	base := AccuracyBaseline + AccuracyPerDEX*float64(s.DEX)
+// accuracyFrom is the shared hit-chance curve [0, 1]: a stat-driven
+// baseline plus the timing grade's bonus, clamped. The governing stat
+// differs by attack type — MeleeAccuracy passes STR, RangedAccuracy
+// passes DEX — but the curve shape is identical so the two can't drift.
+// An Excellent press pushes the result past 1.0 before the clamp, so a
+// perfectly-timed hit always lands regardless of stat.
+func accuracyFrom(stat int, quality int) float64 {
+	base := AccuracyBaseline + AccuracyPerStat*float64(stat)
 	bonus := 0.0
 	if quality >= 0 && quality < len(timingGrades) {
 		bonus = timingGrades[quality].AccuracyBonus
 	}
-	acc := base + bonus
-	if acc > 1.0 {
-		acc = 1.0
-	}
-	if acc < 0.0 {
-		acc = 0.0
-	}
-	return acc
+	return Clamp(base+bonus, 0, 1)
 }
 
-// AttackHits rolls an accuracy check using AttackAccuracy against the given
-// RNG. Returns true when the swing lands. Callers should use this only for
-// basic attacks — skills already pay their own resource costs and rolling
-// miss on top would feel punishing. `rng` is the GameState's per-state
-// RNG (g.Rand()); tests pass their own seeded source for determinism.
-func AttackHits(rng *rand.Rand, s Stats, quality int) bool {
-	return RollChance(rng, AttackAccuracy(s, quality))
+// MeleeAccuracy is the per-swing hit chance of a MELEE attack — STR is
+// the governing stat (a strong fighter lands their swings; a frail caster
+// flails). The basic attack is melee, so it rolls this. Skills aren't
+// accuracy-gated (they pay MP, shouldn't be double-jeopardied).
+func MeleeAccuracy(s Stats, quality int) float64 {
+	return accuracyFrom(s.STR, quality)
 }
 
-// StealChance scales the base steal chance by DEX: chance = base × (1 + DEX/20).
-// Capped at 1.0 so a high-DEX rogue can't ever exceed certainty.
-func StealChance(s Stats, base float64) float64 {
-	chance := base * (1 + float64(s.DEX)/20)
-	if chance > 1 {
-		chance = 1
-	}
-	if chance < 0 {
-		chance = 0
-	}
-	return chance
+// RangedAccuracy is the per-shot hit chance of a RANGED attack — DEX is
+// the governing stat. The seam for ranged attacks; no current attack is
+// flagged ranged, so DEX's live offensive roles stay dodge + crit until
+// a ranged attack rolls this.
+func RangedAccuracy(s Stats, quality int) float64 {
+	return accuracyFrom(s.DEX, quality)
+}
+
+// StealChance clamps the (tier-augmented) base steal chance to [0, 1].
+// Steal no longer scales with DEX — it's a flat base chance, modified
+// only by timing quality at the call site (applySteal). Kept as a
+// function so the clamp + the "base can exceed 1 via Steal tier bonuses"
+// contract live in one place.
+func StealChance(base float64) float64 {
+	return Clamp(base, 0, 1)
 }
 
 type Enemy struct {
@@ -867,6 +851,13 @@ type Battle struct {
 	// forecast HUD doesn't have to re-sort every frame. May go stale during
 	// the round if actors die; render-time death-skip handles that gracefully.
 	NextRoundQueue []ActorRef
+	// Readiness carries each actor's leftover ATB gauge ACROSS rounds,
+	// keyed by ActorRef. buildTurnQueue seeds from it and writes back the
+	// remainder each round, so SPD increases an actor's turn RATE (a
+	// faster actor's surplus accumulates into extra turns over time), not
+	// just turn order within a round. Reset at battle Start; new actors
+	// (raised skeletons) default to 0.
+	Readiness map[ActorRef]int
 
 	// Timed-hit minigame state. Timing drives the bar; TimingFlash holds the
 	// bar visible for a beat after a press; TimingIntro is a pre-bar pause so

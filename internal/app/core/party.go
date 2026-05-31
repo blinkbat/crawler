@@ -205,7 +205,7 @@ var partyClassByID = BuildRegistry(partyClassDefinitions, func(d PartyClassDefin
 var skillDefinitions = []skillDefinition{
 	{Skill: SkillSwipe, Name: "Swipe", Description: "STR-scaled cleave through every living enemy in the pack.", Cost: 2, TargetMode: ActionMenu, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigamePress, Effect: SkillEffect{Damage: 0}, PlayerCastable: true},
 	{Skill: SkillPrayer, Name: "Prayer", Description: "WIS-scaled single-ally heal. Charge bar — release at peak.", Cost: 4, TargetMode: ActionPartyTarget, Kind: SkillKindHeal, Tag: SkillTagHeal, Minigame: MinigameCharge, Effect: SkillEffect{Heal: 1}, PlayerCastable: true},
-	{Skill: SkillSteal, Name: "Steal", Description: "Pickpocket the target. DEX + timing drive the chance.", Cost: 0, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigameSequence, Effect: SkillEffect{StealChance: StealBaseChance}, PlayerCastable: true},
+	{Skill: SkillSteal, Name: "Steal", Description: "Pickpocket the target. Timing quality drives the chance.", Cost: 0, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigameSequence, Effect: SkillEffect{StealChance: StealBaseChance}, PlayerCastable: true},
 	{Skill: SkillFirebolt, Name: "Firebolt", Description: "INT-scaled magic damage. Chance to inflict Burn.", Cost: 5, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 1, BurnChance: FireboltBurnChance, BurnMinTurns: 2, BurnMaxTurns: 3}, PlayerCastable: true, EnemyCastable: true},
 	// Crushing Blow (Warrior): charge-up single-target physical hit.
 	// +4 base on top of STR, 3 MP. On Great/Excellent timing rolls
@@ -245,7 +245,7 @@ var skillDefinitions = []skillDefinition{
 	// INT, 5 MP. On Great/Excellent timing applies a 1-turn Stun —
 	// lower base damage than Firebolt but reliable lockout instead
 	// of the burn-chance lottery. Different tactical role.
-	{Skill: SkillFrostLance, Name: "Frost Lance", Description: "INT-scaled magic damage. Reliable Stun on Great+.", Cost: 5, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 2, StunChance: FrostLanceStunChance, StunMinTurns: 1, StunMaxTurns: 1}, PlayerCastable: true},
+	{Skill: SkillFrostLance, Name: "Frost Lance", Description: "INT-scaled magic damage. Reliable Stun on Great+.", Cost: 5, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 2, StunChance: FrostLanceStunChance, StunMinTurns: FrostLanceStunTurns, StunMaxTurns: FrostLanceStunTurns}, PlayerCastable: true},
 	// Arc Bolt (Wizard): sequence-minigame AoE magic. +1 base + INT
 	// per target, 6 MP. Each correct tap in the sequence reads as a
 	// new bolt arcing to the next enemy; on apply, all living enemies
@@ -574,14 +574,25 @@ func SkillTagFor(skill SkillID) SkillTag {
 // SkillTagNone caller goes through unaffected too so untagged legacy
 // callers keep their old behaviour.
 func ApplyArmor(dmg int, tag SkillTag, armor int) int {
-	if tag != SkillTagPhys || armor <= 0 || dmg <= 0 {
+	if tag != SkillTagPhys {
 		return dmg
 	}
-	reduced := dmg - armor
-	if reduced < 1 {
-		return 1
+	return mitigate(dmg, armor)
+}
+
+// mitigate subtracts `soak` from `dmg` with a floor of 1 (any
+// connection deals at least 1 — mitigation is a damp, not immunity).
+// Damage that's already 0 or a non-positive soak pass through. Shared
+// by ApplyArmor (phys) and ApplyMagicDefense (magic) so the floor-1
+// rule lives in one place.
+func mitigate(dmg, soak int) int {
+	if soak <= 0 || dmg <= 0 {
+		return dmg
 	}
-	return reduced
+	if reduced := dmg - soak; reduced > 1 {
+		return reduced
+	}
+	return 1
 }
 
 // MagicDefense returns the magic mitigation value derived from a Stats
@@ -598,34 +609,60 @@ func MagicDefense(s Stats) int {
 // bypass — phys hits already went through ApplyArmor and shouldn't be
 // double-soaked. Keeps the no-stack rule with armor explicit.
 func ApplyMagicDefense(dmg int, tag SkillTag, mdef int) int {
-	if tag != SkillTagMagic || mdef <= 0 || dmg <= 0 {
+	if tag != SkillTagMagic {
 		return dmg
 	}
-	reduced := dmg - mdef
-	if reduced < 1 {
-		return 1
+	return mitigate(dmg, mdef)
+}
+
+// ApplyFlatDamage applies a pre-resolved (already-mitigated) flat
+// `amount` to an actor: stamps the standard damage flash and floors HP
+// at 0. Returns true if this hit dropped the actor to 0. Pointer-based
+// because Enemy and PartyMember are distinct structs that carry the
+// same HP / DamageFlash fields. The shared HP-floor + flash contract
+// behind the in-battle damage helpers AND the out-of-battle poison
+// tick — so "Poison ticks for VIT% instead of flat" or a flash-timing
+// change lands in one place. Sleep-wake, recoil, mitigation, popups,
+// audio, and death-status cleanup stay with each caller because they
+// legitimately differ by context.
+func ApplyFlatDamage(hp *int, flash *float32, amount int) (died bool) {
+	*flash = FlashDuration
+	*hp -= amount
+	if *hp <= 0 {
+		*hp = 0
+		return true
 	}
-	return reduced
+	return false
+}
+
+// ApplyHitRecoil arms the "this actor visibly took a real hit" reaction
+// shared by the enemy and party damage paths: on positive `damage` the
+// knockback recoil timer arms and any active Sleep breaks ("violence
+// breaks the spell"). A zero/soaked hit leaves both untouched. Pointer-
+// based for the same Enemy/PartyMember reason as ApplyFlatDamage. The
+// out-of-battle poison tick deliberately does NOT call this — it has no
+// recoil and wakes only on a lethal tick.
+func ApplyHitRecoil(knockback *float32, sleep *int, damage int) {
+	if damage <= 0 {
+		return
+	}
+	*knockback = HitKnockbackDuration
+	if *sleep > 0 {
+		*sleep = 0
+	}
 }
 
 // DodgeChance returns the [0, 1] probability a defender sidesteps an
 // incoming basic attack. See config.go's DodgePerDEX / DodgeCap for
 // tuning notes. Skill-applied damage is not currently dodgeable —
-// mirrors AttackAccuracy, which only gates basic attacks.
+// mirrors MeleeAccuracy, which only gates basic attacks.
 func DodgeChance(s Stats) float64 {
-	chance := DodgePerDEX * float64(s.DEX)
-	if chance > DodgeCap {
-		chance = DodgeCap
-	}
-	if chance < 0 {
-		chance = 0
-	}
-	return chance
+	return Clamp(DodgePerDEX*float64(s.DEX), 0, DodgeCap)
 }
 
 // RollChance returns true with probability `p` against `rng`. The
 // single "did this probabilistic check land?" idiom shared by
-// RollDodge, RollCrit, AttackHits, and any future status-proc /
+// RollDodge, RollCrit, MemberAttackHits, and any future status-proc /
 // steal / lifesteal roll — keeps the dice-edge contract (`<`, not
 // `<=`) and the clamp behavior consistent. p outside [0, 1] is
 // allowed: p<=0 always returns false, p>=1 always returns true.
@@ -657,13 +694,7 @@ func CritChance(s Stats, quality int) float64 {
 	if quality >= 0 && quality < len(timingGrades) {
 		base += timingGrades[quality].CritBonus
 	}
-	if base > CritCap {
-		base = CritCap
-	}
-	if base < 0 {
-		base = 0
-	}
-	return base
+	return Clamp(base, 0, CritCap)
 }
 
 // RollCrit rolls a crit attempt against `rng`. True means the caller
@@ -706,6 +737,11 @@ func XPForLevel(level int) int {
 	cost := float64(LevelXPBase)
 	for i := BaseLevel; i < level; i++ {
 		cost *= LevelXPRatio
+		// Saturate before the curve can overflow float64→int at absurd
+		// levels; keeps the documented "positive integer" contract.
+		if cost >= MaxLevelXPCost {
+			return MaxLevelXPCost
+		}
 	}
 	return int(cost)
 }
@@ -886,14 +922,28 @@ type statSpec struct {
 	Label string
 	Get   func(Stats) int
 	Add   func(*Stats)
+	// Derive runs the level-up side effect a point in this stat triggers
+	// on the WHOLE member (not just Stats) — e.g. VIT growing MaxHP, INT
+	// growing the MP pool. Called by SpendStatPoint AFTER Add, so it reads
+	// the already-incremented stat. nil for stats with no pool side effect.
+	// Living in the row (rather than an if-chain in SpendStatPoint) means
+	// the init length-assert covers it and a new derived stat can't be
+	// silently forgotten.
+	Derive func(*PartyMember)
 }
 
 var statTable = []statSpec{
 	StatSTR: {Label: "STR", Get: func(s Stats) int { return s.STR }, Add: func(s *Stats) { s.STR++ }},
 	StatDEX: {Label: "DEX", Get: func(s Stats) int { return s.DEX }, Add: func(s *Stats) { s.DEX++ }},
-	StatINT: {Label: "INT", Get: func(s Stats) int { return s.INT }, Add: func(s *Stats) { s.INT++ }},
+	StatINT: {Label: "INT", Get: func(s Stats) int { return s.INT }, Add: func(s *Stats) { s.INT++ },
+		// INT feeds the MP pool: grow MaxMP and top off current MP by the
+		// same delta so the point is immediately usable.
+		Derive: func(m *PartyMember) { m.MaxMP += MPPerINT; GainUpTo(&m.MP, m.MaxMP, MPPerINT) }},
 	StatWIS: {Label: "WIS", Get: func(s Stats) int { return s.WIS }, Add: func(s *Stats) { s.WIS++ }},
-	StatVIT: {Label: "VIT", Get: func(s Stats) int { return s.VIT }, Add: func(s *Stats) { s.VIT++ }},
+	StatVIT: {Label: "VIT", Get: func(s Stats) int { return s.VIT }, Add: func(s *Stats) { s.VIT++ },
+		// VIT recomputes MaxHP authoritatively (= VIT·HPPerVIT) and heals
+		// by the per-point delta so the level-up feels rewarding.
+		Derive: func(m *PartyMember) { m.MaxHP = MaxHPFor(m.Stats); GainUpTo(&m.HP, m.MaxHP, HPPerVIT) }},
 	StatSPD: {Label: "SPD", Get: func(s Stats) int { return s.SPD }, Add: func(s *Stats) { s.SPD++ }},
 }
 
@@ -929,12 +979,12 @@ func AdjustStat(s *Stats, st Stat, delta int) {
 // renders. Lives next to statTable so a new Stat enum value's
 // description lands in the same place as its label / Get / Add.
 var statDescriptions = []string{
-	StatSTR: "Melee damage",
-	StatDEX: "Hit chance, Steal, Dodge, Crit",
-	StatINT: "Magic damage",
+	StatSTR: "Melee damage & hit chance",
+	StatDEX: "Dodge, Crit, Ranged hit",
+	StatINT: fmt.Sprintf("Magic damage & MP (+%d MP per point)", MPPerINT),
 	StatWIS: "Heal, Magic defense, Status resist",
 	StatVIT: fmt.Sprintf("Max HP (+%d per point)", HPPerVIT),
-	StatSPD: "Turn order priority",
+	StatSPD: "Turn frequency (act more often)",
 }
 
 // StatDescription returns the level-up modal blurb for the named
@@ -964,23 +1014,27 @@ func StatPreviewLine(stat Stat, current Stats, pending int) string {
 	}
 	switch stat {
 	case StatSTR:
-		return fmt.Sprintf("Melee %d → %d", MeleeDamage(current, 0), MeleeDamage(after, 0))
+		// STR drives both melee damage and melee hit chance.
+		h0 := MeleeAccuracy(current, TimingQualityMiss) * 100
+		h1 := MeleeAccuracy(after, TimingQualityMiss) * 100
+		return fmt.Sprintf("Melee %d→%d  Hit %.0f→%.0f%%", MeleeDamage(current, 0), MeleeDamage(after, 0), h0, h1)
 	case StatDEX:
-		h0 := AttackAccuracy(current, TimingQualityMiss) * 100
-		h1 := AttackAccuracy(after, TimingQualityMiss) * 100
+		// DEX's active effects are dodge + crit (ranged hit is dormant
+		// until a ranged attack ships, so it's left off the preview).
 		d0 := DodgeChance(current) * 100
 		d1 := DodgeChance(after) * 100
 		c0 := CritChance(current, TimingQualityMiss) * 100
 		c1 := CritChance(after, TimingQualityMiss) * 100
-		return fmt.Sprintf("Hit %.0f→%.0f%%  Dodge %.0f→%.0f%%  Crit %.0f→%.0f%%", h0, h1, d0, d1, c0, c1)
+		return fmt.Sprintf("Dodge %.0f→%.0f%%  Crit %.0f→%.0f%%", d0, d1, c0, c1)
 	case StatINT:
-		return fmt.Sprintf("Magic %d → %d", MagicDamage(current, 0), MagicDamage(after, 0))
+		// INT drives magic damage and the MP pool (MPPerINT per point).
+		return fmt.Sprintf("Magic %d→%d  MaxMP +%d", MagicDamage(current, 0), MagicDamage(after, 0), (after.INT-current.INT)*MPPerINT)
 	case StatWIS:
 		return fmt.Sprintf("Heal %d→%d  MDef %d→%d", HealAmount(current, 0), HealAmount(after, 0), MagicDefense(current), MagicDefense(after))
 	case StatVIT:
 		return fmt.Sprintf("MaxHP %d → %d", MaxHPFor(current), MaxHPFor(after))
 	case StatSPD:
-		return fmt.Sprintf("SPD %d → %d", current.SPD, after.SPD)
+		return fmt.Sprintf("SPD %d → %d (more turns)", current.SPD, after.SPD)
 	}
 	return ""
 }
@@ -1049,16 +1103,12 @@ func SpendStatPoint(m *PartyMember, stat Stat) bool {
 	if stat < 0 || int(stat) >= len(statTable) {
 		return false
 	}
-	oldMaxHP := MaxHPFor(m.Stats)
 	statTable[stat].Add(&m.Stats)
-	if stat == StatVIT {
-		newMaxHP := MaxHPFor(m.Stats)
-		delta := newMaxHP - oldMaxHP
-		m.MaxHP = newMaxHP
-		m.HP += delta
-		if m.HP > m.MaxHP {
-			m.HP = m.MaxHP
-		}
+	// Run the stat's pool side effect (VIT→MaxHP, INT→MaxMP), if any —
+	// table-driven so a new derived stat lands in its statTable row, not
+	// a hardcoded branch here.
+	if derive := statTable[stat].Derive; derive != nil {
+		derive(m)
 	}
 	m.PendingLevelUps--
 	return true
@@ -1114,9 +1164,11 @@ func (p PoisonEffect) RollDuration(rng *rand.Rand) int {
 //     this third path, ingest would silently pause the poison DoT.
 //
 // All three drain PoisonTurns, deal PoisonTickDamage, and bypass
-// armor (poison is magical decay). A future "rebalance poison
-// damage" or "Poison ticks for VIT% instead of flat" change must
-// touch all three — there is no single seam to swap.
+// armor (poison is magical decay). The HP-floor + damage-flash step is
+// now shared via ApplyFlatDamage, so a "Poison ticks for VIT% instead
+// of flat" change lands in one helper; what still legitimately differs
+// per path is the surrounding context (combat-log lines, the wake rule,
+// the round-vs-step cadence).
 //
 // Returns the number of members hit this step — callers can use it to
 // emit a HUD nudge ("Poison stings!") without re-walking the party.
@@ -1129,16 +1181,11 @@ func TickPoisonStep(g *GameState) int {
 		}
 		m.PoisonTurns--
 		// Poison is magical decay — bypass armor (matches the in-battle
-		// tick path which passes SkillTagMagic).
-		m.HP -= PoisonTickDamage
-		if m.HP < 0 {
-			m.HP = 0
-		}
-		m.DamageFlash = FlashDuration
-		if m.HP == 0 {
-			// Same wake-on-violence rule the battle damage path uses; a
-			// poisoned sleeper waking only to find they died isn't worse
-			// than dying asleep, but it keeps state consistent.
+		// tick path which passes SkillTagMagic). Shares the HP-floor +
+		// flash contract with the battle damage path via ApplyFlatDamage;
+		// the wake rule below is poison-specific (only a lethal tick wakes
+		// a sleeper out of battle, unlike the in-battle wake-on-any-hit).
+		if ApplyFlatDamage(&m.HP, &m.DamageFlash, PoisonTickDamage) {
 			m.SleepTurns = 0
 		}
 		ticks++

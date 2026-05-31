@@ -45,19 +45,9 @@ var (
 // backgrounds (most importantly the press cursor sitting on its own
 // preview zone — a pure-color cursor would visually disappear).
 func blendTowardWhite(col rl.Color, whiteAmount float32) rl.Color {
-	if whiteAmount < 0 {
-		whiteAmount = 0
-	}
-	if whiteAmount > 1 {
-		whiteAmount = 1
-	}
-	keep := 1 - whiteAmount
-	return rl.NewColor(
-		uint8(float32(col.R)*keep+255*whiteAmount),
-		uint8(float32(col.G)*keep+255*whiteAmount),
-		uint8(float32(col.B)*keep+255*whiteAmount),
-		col.A,
-	)
+	out := core.MixColor(col, rl.White, float64(core.Clamp(whiteAmount, 0, 1)))
+	out.A = col.A // preserve the source alpha; rl.White would drag it to 255
+	return out
 }
 
 // Miss-flash bar-shake tunables. shakeAmplitudePx is the peak horizontal
@@ -215,43 +205,23 @@ func drawTimingHeading(font rl.Font, text string, x, barW, y float32, baseCol rl
 	col := baseCol
 	if flashing {
 		col = flashCol
-		size = 34
+		// Flash punch — was a bespoke 34px; FontTitle (36) is the
+		// next size up on the locked 5-size scale (UI_STANDARDS.md).
+		size = FontTitle
 	}
 	measure := measureTimingHeading(font, text, size)
 	hx := x + (barW-measure.X)/2
 	hy := y - measure.Y - 6
-	rl.DrawTextEx(font, text, rl.NewVector2(hx+2, hy+2), size, 1.5, shadowStrong)
-	rl.DrawTextEx(font, text, rl.NewVector2(hx, hy), size, 1.5, col)
+	drawTextWithShadowStyle(font, text, hx, hy, size, 1.5, col, shadowStrong, 2, 2)
 }
 
-// timingHeadingMeasureCache memoizes drawTimingHeading's MeasureTextEx
-// per (text, size) pair. The bar lives for ~3 s of frames and the
-// text doesn't change once the bar is armed; only the size flips
-// between FontHeading and 34 during the flash hold. Two cache slots
-// cover the steady state, with a small fallback map for the rare
-// case of a fresh heading text.
-var timingHeadingMeasureCache = make(map[timingHeadingMeasureKey]rl.Vector2, 8)
-var timingHeadingMeasureCacheFontID uint32
-
-type timingHeadingMeasureKey struct {
-	text string
-	size float32
-}
+// timingHeadingMeasureCache memoizes drawTimingHeading's MeasureTextEx;
+// the size flips between FontHeading and FontTitle during the flash hold,
+// which the shared measureCache keys on.
+var timingHeadingMeasureCache measureCache
 
 func measureTimingHeading(font rl.Font, text string, size float32) rl.Vector2 {
-	if font.Texture.ID != timingHeadingMeasureCacheFontID {
-		for k := range timingHeadingMeasureCache {
-			delete(timingHeadingMeasureCache, k)
-		}
-		timingHeadingMeasureCacheFontID = font.Texture.ID
-	}
-	key := timingHeadingMeasureKey{text: text, size: size}
-	if v, ok := timingHeadingMeasureCache[key]; ok {
-		return v
-	}
-	v := rl.MeasureTextEx(font, text, size, 1.5)
-	timingHeadingMeasureCache[key] = v
-	return v
+	return timingHeadingMeasureCache.measure(font, text, size, 1.5)
 }
 
 // applyTimingFlashCursor draws the bright halo around the frozen cursor
@@ -272,6 +242,19 @@ func applyTimingFlashCursor(curX, y, barH, flashTimer float32, base rl.Color) (f
 // and charge). Named so a palette pass touches one line instead of the
 // per-function literals it replaced.
 var timingTrackColor = rl.NewColor(14, 16, 26, 230)
+
+// drawTimingTrack paints the dark base fill behind a timing bar. During
+// the flash hold the track fades to the grade color so the whole bar
+// pulses with the result. Shared by the press and charge bars so the
+// flash-fade math (and its 220 peak-alpha literal) lives in one place.
+func drawTimingTrack(drawX, drawY, barW, drawnH float32, quality int, isDefend, flashing bool, timingFlash float32) {
+	trackCol := timingTrackColor
+	if flashing {
+		trackCol = qualityColor(quality, isDefend)
+		trackCol.A = uint8(220 * flashAlpha(timingFlash))
+	}
+	rl.DrawRectangle(int32(drawX), int32(drawY), int32(barW), int32(drawnH), trackCol)
+}
 
 // drawExcellentShockwave paints the expanding ring that pops from the
 // frozen cursor on an Excellent timing resolution, fading as the flash
@@ -316,12 +299,7 @@ func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x
 
 	// Track — solid dark fill, no border. During the flash hold the track
 	// fades to the quality color so the whole bar pulses with the result.
-	trackCol := timingTrackColor
-	if flashing {
-		trackCol = qualityColor(timing.Quality, isDefend)
-		trackCol.A = uint8(220 * flashAlpha(g.Battle.TimingFlash))
-	}
-	rl.DrawRectangle(int32(drawX), int32(drawY), int32(barW), int32(drawnH), trackCol)
+	drawTimingTrack(drawX, drawY, barW, drawnH, timing.Quality, isDefend, flashing, g.Battle.TimingFlash)
 
 	// Quality zones inside the acceptance window — Nice (outermost) → Good →
 	// Great → Excellent (centered on the sweet spot). Each is a full-height
@@ -412,12 +390,7 @@ func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, 
 	drawTimingHeading(assets.hudFont, heading, drawX, barW, drawY, baseCol, flashing, qualityColor(timing.Quality, false))
 
 	// Track — dark base fill.
-	trackCol := timingTrackColor
-	if flashing {
-		trackCol = qualityColor(timing.Quality, false)
-		trackCol.A = uint8(220 * flashAlpha(g.Battle.TimingFlash))
-	}
-	rl.DrawRectangle(int32(drawX), int32(drawY), int32(barW), int32(drawnH), trackCol)
+	drawTimingTrack(drawX, drawY, barW, drawnH, timing.Quality, false, flashing, g.Battle.TimingFlash)
 
 	if !flashing {
 		// Bar layout below works in visual-fraction space directly, since
@@ -928,8 +901,7 @@ func DrawQualityPopup(camera rl.Camera3D, g core.GameState, assets Resources) {
 	y := screenPos.Y - measure.Y - rise
 
 	shadow := rl.NewColor(0, 0, 0, alpha)
-	rl.DrawTextEx(assets.hudFont, label, rl.NewVector2(x+3, y+3), size, 1.5, shadow)
-	rl.DrawTextEx(assets.hudFont, label, rl.NewVector2(x, y), size, 1.5, col)
+	drawTextWithShadowStyle(assets.hudFont, label, x, y, size, 1.5, col, shadow, 3, 3)
 }
 
 // qualityPopupAnchor returns the 3D world position the floating quality text
@@ -988,8 +960,7 @@ func DrawDamagePopups(camera rl.Camera3D, g core.GameState, assets Resources) {
 		y := screenPos.Y - measure.Y - rise
 
 		shadow := rl.NewColor(0, 0, 0, alpha)
-		rl.DrawTextEx(assets.hudFont, label, rl.NewVector2(x+2, y+2), size, 1.2, shadow)
-		rl.DrawTextEx(assets.hudFont, label, rl.NewVector2(x, y), size, 1.2, col)
+		drawTextWithShadowStyle(assets.hudFont, label, x, y, size, 1.2, col, shadow, 2, 2)
 	}
 }
 

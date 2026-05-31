@@ -44,18 +44,18 @@ func TestHealAmount_AddsWIS(t *testing.T) {
 	}
 }
 
-func TestStealChance_ScalesByDEX(t *testing.T) {
-	// base 0.40 × (1 + 6/20) = 0.40 × 1.30 = 0.52
-	got := StealChance(Stats{DEX: 6}, 0.40)
-	want := 0.52
+func TestStealChance_PassesBaseThrough(t *testing.T) {
+	// Steal no longer scales with DEX — the base passes through unchanged.
+	got := StealChance(0.40)
+	want := 0.40
 	if absFloat(got-want) > 1e-9 {
-		t.Errorf("StealChance(DEX=6, 0.40) = %v, want %v", got, want)
+		t.Errorf("StealChance(0.40) = %v, want %v", got, want)
 	}
 }
 
 func TestStealChance_CapsAtOne(t *testing.T) {
-	// base 0.9, DEX 20 → 0.9 × 2.0 = 1.8, should clamp to 1.
-	got := StealChance(Stats{DEX: 20}, 0.9)
+	// A tier-augmented base over 1 should clamp to 1.
+	got := StealChance(1.8)
 	if got != 1 {
 		t.Errorf("StealChance over 1 should clamp, got %v", got)
 	}
@@ -63,7 +63,7 @@ func TestStealChance_CapsAtOne(t *testing.T) {
 
 func TestStealChance_ClampsNegativeToZero(t *testing.T) {
 	// Pathological negative base — guard returns 0, not a negative chance.
-	got := StealChance(Stats{DEX: 4}, -0.5)
+	got := StealChance(-0.5)
 	if got != 0 {
 		t.Errorf("StealChance with negative base should clamp to 0, got %v", got)
 	}

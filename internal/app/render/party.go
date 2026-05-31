@@ -93,66 +93,33 @@ func partyStatusTurnLabel(kind core.PartyStatusKind, turns int) string {
 // of party-status label strings produced by partyStatusTurnLabel. Each
 // card with an active status would otherwise re-measure the same label
 // every frame.
-var partyStatusLabelMeasureCache = make(map[string]rl.Vector2, 32)
-var partyStatusLabelMeasureCacheFontID uint32
+var partyStatusLabelMeasureCache measureCache
 
 func measurePartyStatusLabel(font rl.Font, label string) rl.Vector2 {
-	if font.Texture.ID != partyStatusLabelMeasureCacheFontID {
-		for k := range partyStatusLabelMeasureCache {
-			delete(partyStatusLabelMeasureCache, k)
-		}
-		partyStatusLabelMeasureCacheFontID = font.Texture.ID
-	}
-	if v, ok := partyStatusLabelMeasureCache[label]; ok {
-		return v
-	}
-	v := rl.MeasureTextEx(font, label, FontTiny, 1)
-	partyStatusLabelMeasureCache[label] = v
-	return v
+	return partyStatusLabelMeasureCache.measure(font, label, FontTiny, 1)
 }
 
-// partyNamePlusCache memoizes per-member name decorations so the
-// always-visible party ribbon doesn't rebuild "Name +" string concats
-// or re-measure "Name " widths every frame. Keyed by raw member name;
-// the cache stays small (one entry per active class) and only grows
-// when a fresh name appears.
-var partyNamePlusCache = struct {
-	plusLabel  map[string]string
-	nameSpaceW map[string]rl.Vector2
-	fontID     uint32
-}{
-	plusLabel:  make(map[string]string, 8),
-	nameSpaceW: make(map[string]rl.Vector2, 8),
-}
+// partyNamePlusLabels memoizes the "<Name> +" badge string per member
+// name so the always-visible ribbon's hot path is a map lookup instead
+// of a fresh concat. Font-independent (it's just the string), so unlike
+// a measure cache it needs no font-ID invalidation.
+var partyNamePlusLabels = make(map[string]string, 8)
 
-// partyNamePlusBadge returns "<Name> +" with the concatenated string
-// cached per name so the ribbon's hot path is a map lookup instead of
-// a fresh string concat.
+// partyNameSpaceWidth measures "<Name> " at FontBody (for positioning the
+// "+" overlay), sharing the generic measureCache machinery.
+var partyNameSpaceWidth measureCache
+
 func partyNamePlusBadge(name string) string {
-	if v, ok := partyNamePlusCache.plusLabel[name]; ok {
+	if v, ok := partyNamePlusLabels[name]; ok {
 		return v
 	}
 	v := name + " +"
-	partyNamePlusCache.plusLabel[name] = v
+	partyNamePlusLabels[name] = v
 	return v
 }
 
-// measurePartyNameWithSpace returns rl.MeasureTextEx for "<Name> " at
-// FontBody. Width is invariant for a given (name, font) pair and the
-// "+" overlay reads it every frame the member has unspent points.
 func measurePartyNameWithSpace(font rl.Font, name string) rl.Vector2 {
-	if font.Texture.ID != partyNamePlusCache.fontID {
-		for k := range partyNamePlusCache.nameSpaceW {
-			delete(partyNamePlusCache.nameSpaceW, k)
-		}
-		partyNamePlusCache.fontID = font.Texture.ID
-	}
-	if v, ok := partyNamePlusCache.nameSpaceW[name]; ok {
-		return v
-	}
-	v := rl.MeasureTextEx(font, name+" ", FontBody, 1)
-	partyNamePlusCache.nameSpaceW[name] = v
-	return v
+	return partyNameSpaceWidth.measure(font, name+" ", FontBody, 1)
 }
 
 const (
@@ -195,7 +162,7 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 	iw, ih := int32(partyCardW), int32(partyCardH)
 
 	if active && !down {
-		halo := fadeColor(borderActive, 0.32+0.32*pulse(1.4))
+		halo := fadeColor(borderActive, pulseActiveActor())
 		drawPanelOutline(ix-3, iy-3, iw+6, ih+6, halo)
 	}
 	if selected {
@@ -266,7 +233,7 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 		labelX := x + partyCardW - measure.X - 12
 		labelCol := col
 		if flicker {
-			labelCol = fadeColor(col, 0.65+0.35*pulse(2.6))
+			labelCol = fadeColor(col, pulseFlicker())
 		}
 		drawTextWithShadow(font, label, labelX, y+14, labelSize, labelCol)
 	}

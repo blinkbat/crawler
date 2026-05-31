@@ -39,15 +39,11 @@ func DrawDoorPrompt(g core.GameState, assets Resources) {
 		return
 	}
 	dest := humanizeMapID(g.Doors[g.DoorPrompt].TargetMap)
-	screenW, screenH := screenSize()
 	panelW := int32(440)
 	panelH := int32(168)
-	panelX := centerX(panelW)
-	panelY := screenH/2 - panelH/2
-
-	rl.DrawRectangle(0, 0, screenW, screenH, surfaceVeil)
-	drawCard(panelX, panelY, panelW, panelH, surfacePrimary, borderSoft, borderSoft)
-	drawCardFiligree(panelX, panelY, panelW, panelH, giltDim)
+	rect := drawVeiledCard(panelW, panelH, borderSoft, borderSoft, giltDim)
+	panelX := int32(rect.X)
+	panelY := int32(rect.Y)
 
 	title := "DOORWAY"
 	tm := rl.MeasureTextEx(assets.hudFont, title, FontHeading, FontSpacingHeading)

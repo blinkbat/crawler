@@ -8,6 +8,19 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+// panelStatMeasureCache memoizes rl.MeasureTextEx for the Stats-tab's
+// right-aligned value strings (stat values, ARM, XP, status chip). These
+// change only on level-up / HP-spend / status change — not 60 Hz — but
+// drawPanelsStats was re-shaping ~8 strings per member every frame the
+// Stats tab is open (~32 cgo calls for a 4-member party). Keyed by
+// the tab mixes FontBody and FontSmall values (the shared measureCache
+// keys on size, so both coexist).
+var panelStatMeasureCache measureCache
+
+func measurePanelStatValue(font rl.Font, text string, size float32) rl.Vector2 {
+	return panelStatMeasureCache.measure(font, text, size, 1)
+}
+
 // panelsMapFooterCache memoizes the "AreaName   zoom: N cells   ..."
 // footer string drawn on the Map tab. Both inputs change only on
 // user action (open the overlay, change zoom, transition area), so
@@ -52,8 +65,10 @@ func DrawPanelsOverlay(g core.GameState, assets Resources) {
 	}
 	font := assets.Font()
 	// Panels overlay skips drawModalScaffold's heading band — the tab
-	// strip IS the heading. We do reuse the veil + centered card.
-	card := drawModalScaffold(font, overlayCardWidthHuge, overlayCardHeightLarge, "")
+	// strip IS the heading. We reuse the veil + centered card, sized
+	// screen-relative so the character menus fill most of the display and
+	// each per-member column has room for body-size text.
+	card := drawScreenFractionScaffold(font, panelsOverlayWidthFrac, panelsOverlayHeightFrac, "")
 	cardX, cardY := int32(card.X), int32(card.Y)
 	cardW, cardH := int32(card.Width), int32(card.Height)
 
@@ -87,7 +102,7 @@ func DrawPanelsOverlay(g core.GameState, assets Resources) {
 		drawTextWithShadow(font, label,
 			float32(tx)+float32(tabW)/2-m.X/2,
 			float32(tabRowY)+float32(tabH)/2-m.Y/2-1,
-			FontSmall, txt)
+			FontBody, txt)
 	}
 
 	bodyY := tabRowY + tabH + 18
@@ -101,33 +116,22 @@ func DrawPanelsOverlay(g core.GameState, assets Resources) {
 	drawModalFooter(font, card, "L1/R1 tabs   Left/Right pick member   X close")
 }
 
-// tabLabelMeasureCache memoizes panel-tab label measurements. Tab labels
-// come from a fixed core registry and never change at runtime, so this
-// cache fills once and stays warm.
-var tabLabelMeasureCache = make(map[string]rl.Vector2, 8)
-var tabLabelMeasureCacheFontID uint32
+// tabLabelMeasureCache memoizes panel-tab label measurements (fixed core
+// registry, fills once and stays warm).
+var tabLabelMeasureCache measureCache
 
 func measureTabLabel(font rl.Font, label string) rl.Vector2 {
-	if font.Texture.ID != tabLabelMeasureCacheFontID {
-		tabLabelMeasureCache = make(map[string]rl.Vector2, 8)
-		tabLabelMeasureCacheFontID = font.Texture.ID
-	}
-	if v, ok := tabLabelMeasureCache[label]; ok {
-		return v
-	}
-	v := rl.MeasureTextEx(font, label, FontSmall, 1)
-	tabLabelMeasureCache[label] = v
-	return v
+	return tabLabelMeasureCache.measure(font, label, FontBody, 1)
 }
 
 // memberColumnLayout returns the per-member column rectangles for any
 // tab that paints one card per party member (Stats / Equipment /
 // Skills). Equal-width columns with a small gap so the grid reads as
 // "ledger of party members" rather than a single dense slab.
-func memberColumnLayout(body rl.Rectangle, count int) ([]rl.Rectangle, float32) {
+func memberColumnLayout(body rl.Rectangle, count int) []rl.Rectangle {
 	const gap = float32(14)
 	if count <= 0 {
-		return nil, 0
+		return nil
 	}
 	total := body.Width - gap*float32(count-1)
 	colW := total / float32(count)
@@ -135,7 +139,16 @@ func memberColumnLayout(body rl.Rectangle, count int) ([]rl.Rectangle, float32) 
 	for i := 0; i < count; i++ {
 		cols[i] = rl.NewRectangle(body.X+float32(i)*(colW+gap), body.Y, colW, body.Height)
 	}
-	return cols, colW
+	return cols
+}
+
+// memberCardInner returns the inner content inset (X origin + width) for
+// a per-member card column — the writable region inside the gutter the
+// Stats / Equipment / Skills body drawers paint into. Centralizes the
+// 14px gutter the three used to hardcode as `col.X + 14` / `colW - 28`.
+func memberCardInner(col rl.Rectangle) (innerX, innerW float32) {
+	const gutter = 14
+	return col.X + gutter, col.Width - 2*gutter
 }
 
 // drawPartyMemberCardHeader paints the shared header chrome every
@@ -164,33 +177,33 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 	innerX := col.X + 14
 	innerW := col.Width - 24
 
-	y := col.Y + 12
+	y := col.Y + 16
 	nameCol := textPrimary
 	if !highlight {
 		nameCol = textMuted
 	}
 	// Class sigil flanks the name — same iconography as the party
-	// ribbon's card, but at a slightly larger radius so it reads
-	// as a banner crest in this fuller pane.
-	glyphR := float32(9)
+	// ribbon's card, but at a larger radius so it reads as a banner
+	// crest in this fuller pane.
+	glyphR := float32(12)
 	glyphCX := innerX + glyphR
-	glyphCY := y + FontBody/2
+	glyphCY := y + FontHeading/2
 	drawClassGlyph(glyphCX, glyphCY, glyphR, m.Class, classCol)
-	nameOffset := glyphR*2 + 10
-	drawTextWithShadow(font, m.Name, innerX+nameOffset, y, FontBody, nameCol)
-	y += 26
+	nameOffset := glyphR*2 + 12
+	drawTextWithShadow(font, m.Name, innerX+nameOffset, y, FontHeading, nameCol)
+	y += 36
 
 	// PartyMember.Name doubles as the class label in this build, so the
 	// sub-line just carries the level — no need to repeat the class.
 	sub := "Lv " + strconv.Itoa(m.Level)
-	drawTextWithShadow(font, sub, innerX, y, FontSmall, textMuted)
-	y += 24
+	drawTextWithShadow(font, sub, innerX, y, FontBody, textMuted)
+	y += 30
 
 	hpFill := hpFillColor(m.HP, m.MaxHP)
-	drawBar(font, innerX, y, innerW, 22, "HP", m.HP, m.MaxHP, hpFill, m.HP <= 0)
-	y += 28
-	drawBar(font, innerX, y, innerW, 22, "MP", m.MP, m.MaxMP, barMP, m.HP <= 0)
-	y += 32
+	drawBar(font, innerX, y, innerW, 28, "HP", m.HP, m.MaxHP, hpFill, m.HP <= 0)
+	y += 36
+	drawBar(font, innerX, y, innerW, 28, "MP", m.MP, m.MaxMP, barMP, m.HP <= 0)
+	y += 42
 
 	return y
 }
@@ -204,19 +217,18 @@ func drawPanelsStats(g core.GameState, assets Resources, body rl.Rectangle) {
 	if len(g.Party) == 0 {
 		return
 	}
-	cols, colW := memberColumnLayout(body, len(g.Party))
+	cols := memberColumnLayout(body, len(g.Party))
 	for i, m := range g.Party {
 		highlight := i == g.PanelsRowCursor
 		contentY := drawPartyMemberCardHeader(font, m, cols[i], highlight)
-		innerX := cols[i].X + 14
-		innerW := colW - 28
+		innerX, innerW := memberCardInner(cols[i])
 
 		// Stat grid: 2 columns, ceil(StatCount/2) rows. Each cell paints
 		// "[icon] LBL  value" with the icon in soft gilt to the left of
 		// the label, the label muted, and the value bright so the eye
 		// scans the numbers without losing the sigil row anchor.
 		statColW := innerW / 2
-		rowH := float32(22)
+		rowH := float32(30)
 		statRows := (core.StatCount + 1) / 2
 		statIconCol := fadeColor(woodAccent, 0.9)
 		for s := core.Stat(0); s < core.StatCount; s++ {
@@ -226,42 +238,42 @@ func drawPanelsStats(g core.GameState, assets Resources, body rl.Rectangle) {
 			cellY := contentY + float32(row)*rowH
 			label := core.StatLabel(s)
 			value := strconv.Itoa(core.StatValue(m.Stats, s))
-			drawStatIcon(s, cellX+7, cellY+9, 7, statIconCol)
-			drawTextWithShadow(font, label, cellX+18, cellY, FontSmall, textMuted)
+			drawStatIcon(s, cellX+9, cellY+13, 9, statIconCol)
+			drawTextWithShadow(font, label, cellX+24, cellY, FontBody, textMuted)
 			// Value right-aligned within the cell so the column
 			// of numbers lines up no matter the label width.
-			vm := rl.MeasureTextEx(font, value, FontSmall, 1)
-			drawTextWithShadow(font, value, cellX+statColW-vm.X-12, cellY, FontSmall, textPrimary)
+			vm := measurePanelStatValue(font, value, FontBody)
+			drawTextWithShadow(font, value, cellX+statColW-vm.X-14, cellY, FontBody, textPrimary)
 		}
 		contentY += float32(statRows) * rowH
 
 		// Armor + XP secondary row, slightly muted so they
 		// don't compete with the stat grid above.
-		contentY += 6
-		drawTextWithShadow(font, "ARM", innerX, contentY, FontTiny, textMuted)
+		contentY += 8
+		drawTextWithShadow(font, "ARM", innerX, contentY, FontSmall, textMuted)
 		armVal := strconv.Itoa(m.Armor)
-		am := rl.MeasureTextEx(font, armVal, FontTiny, 1)
-		drawTextWithShadow(font, armVal, innerX+statColW-am.X-12, contentY, FontTiny, textPrimary)
+		am := measurePanelStatValue(font, armVal, FontSmall)
+		drawTextWithShadow(font, armVal, innerX+statColW-am.X-14, contentY, FontSmall, textPrimary)
 
 		nextXP := core.XPForLevel(m.Level)
 		xpText := strconv.Itoa(m.XP) + " / " + strconv.Itoa(nextXP)
-		drawTextWithShadow(font, "XP", innerX+statColW, contentY, FontTiny, textMuted)
-		xm := rl.MeasureTextEx(font, xpText, FontTiny, 1)
-		drawTextWithShadow(font, xpText, innerX+innerW-xm.X, contentY, FontTiny, textPrimary)
-		contentY += 22
+		drawTextWithShadow(font, "XP", innerX+statColW, contentY, FontSmall, textMuted)
+		xm := measurePanelStatValue(font, xpText, FontSmall)
+		drawTextWithShadow(font, xpText, innerX+innerW-xm.X, contentY, FontSmall, textPrimary)
+		contentY += 28
 
 		// Status chip — bright pill in the per-status accent
 		// color so afflicted members read at a glance.
 		if kind, turns := core.PartyStatus(m); kind != core.PartyStatusNone {
 			label := partyStatusTurnLabel(kind, turns)
-			lm := measurePartyStatusLabel(font, label)
-			chipW := lm.X + 18
-			chipH := float32(20)
+			lm := measurePanelStatValue(font, label, FontSmall)
+			chipW := lm.X + 20
+			chipH := float32(26)
 			chipX := innerX
 			col, _ := partyStatusVisual(kind)
 			drawSmallPanel(int32(chipX), int32(contentY), int32(chipW), int32(chipH), fadeColor(col, 0.28))
 			drawSmallPanelOutline(int32(chipX), int32(contentY), int32(chipW), int32(chipH), fadeColor(col, 0.85))
-			drawTextWithShadow(font, label, chipX+9, contentY+2, FontTiny, col)
+			drawTextWithShadow(font, label, chipX+10, contentY+4, FontSmall, col)
 			contentY += chipH + 8
 		}
 
@@ -269,15 +281,15 @@ func drawPanelsStats(g core.GameState, assets Resources, body rl.Rectangle) {
 		// there's something to spend. Painted near the bottom of
 		// the card so it reads as a call-to-action footer.
 		if highlight && (m.PendingLevelUps > 0 || m.SkillPoints > 0) {
-			hintY := cols[i].Y + cols[i].Height - 44
+			hintY := cols[i].Y + cols[i].Height - 60
 			if m.PendingLevelUps > 0 {
 				hint := "Z   allocate " + strconv.Itoa(m.PendingLevelUps) + " stat pt" + plural(m.PendingLevelUps)
-				drawTextWithShadow(font, hint, innerX, hintY, FontTiny, inkAccent)
-				hintY += 16
+				drawTextWithShadow(font, hint, innerX, hintY, FontSmall, inkAccent)
+				hintY += 24
 			}
 			if m.SkillPoints > 0 {
 				hint := strconv.Itoa(m.SkillPoints) + " skill pt" + plural(m.SkillPoints) + "  (Skills tab)"
-				drawTextWithShadow(font, hint, innerX, hintY, FontTiny, inkAccent)
+				drawTextWithShadow(font, hint, innerX, hintY, FontSmall, inkAccent)
 			}
 		}
 	}
@@ -313,14 +325,14 @@ func plural(n int) string {
 // × EquipSlotCount so the "is there room for the strip?" rescue
 // branch can never out-shrink the slot column underneath it.
 const (
-	equipSlotRowHeight    = float32(46)
+	equipSlotRowHeight    = float32(56)
 	equipStripGap         = float32(8)
-	equipStripHeight      = float32(110)
-	equipInventoryTileW   = float32(140)
-	equipInventoryTileH   = float32(64)
-	equipInventoryTileGap = float32(8)
+	equipStripHeight      = float32(140)
+	equipInventoryTileW   = float32(190)
+	equipInventoryTileH   = float32(80)
+	equipInventoryTileGap = float32(10)
 	equipDragGhostW       = equipInventoryTileW
-	equipDragGhostH       = float32(40)
+	equipDragGhostH       = float32(48)
 )
 
 // equipMinColRegion is the minimum height left for the per-member
@@ -377,11 +389,6 @@ type equipInventoryEntry struct {
 // renderer + single-threaded input means no synchronisation needed.
 var lastEquipLayout equipPanelLayout
 
-// LastEquipPanelLayout returns the panel's per-frame hit-rect layout.
-// Used by the explore-side drag-drop handler. Exposed (uppercase)
-// because the input layer lives in another package.
-func LastEquipPanelLayout() equipPanelLayout { return lastEquipLayout }
-
 // ResetEquipPanelLayout zeroes the cached hit-rect layout. Called
 // from the input layer on overlay close / tab switch so the first
 // frame after a transition can't observe stale rects from a previous
@@ -401,7 +408,12 @@ func EquipPanelInventoryVisibleCount() int { return len(lastEquipLayout.Inventor
 // same per-frame entry list the strip drew, so a controller "lift"
 // targets exactly the tile the player sees.
 func EquipPanelInventoryEntryKind(i int) (core.ItemKind, bool) {
-	if i < 0 || i >= len(lastEquipLayout.InventoryEntries) {
+	// Bound by the VISIBLE tile count (InventoryRects), not the full
+	// entries list, so this can never return a kind for an off-screen
+	// (overflow-truncated) tile — keeps it in lockstep with
+	// EquipPanelInventoryVisibleCount, which the cursor clamps against.
+	// InventoryEntries[i] is safe because rects are a prefix of entries.
+	if i < 0 || i >= len(lastEquipLayout.InventoryRects) {
 		return core.ItemNone, false
 	}
 	return lastEquipLayout.InventoryEntries[i].Kind, true
@@ -478,7 +490,7 @@ func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) 
 	colsRegion := rl.NewRectangle(body.X, body.Y, body.Width, body.Height-stripHeight-equipStripGap)
 	stripRegion := rl.NewRectangle(body.X, body.Y+colsRegion.Height+equipStripGap, body.Width, stripHeight)
 
-	cols, colW := memberColumnLayout(colsRegion, len(g.Party))
+	cols := memberColumnLayout(colsRegion, len(g.Party))
 	slotRowH := equipSlotRowHeight
 	totalSlots := len(g.Party) * int(core.EquipSlotCount)
 	lastEquipLayout.SlotRects = make([]rl.Rectangle, 0, totalSlots)
@@ -488,8 +500,7 @@ func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) 
 	for i, m := range g.Party {
 		highlight := i == g.PanelsRowCursor
 		contentY := drawPartyMemberCardHeader(font, m, cols[i], highlight)
-		innerX := cols[i].X + 14
-		innerW := colW - 28
+		innerX, innerW := memberCardInner(cols[i])
 
 		for s := core.EquipSlotIndex(0); s < core.EquipSlotCount; s++ {
 			rowY := contentY + float32(int(s))*slotRowH
@@ -526,17 +537,17 @@ func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) 
 			if filled {
 				iconCol = giltBright
 			}
-			slotIconForType(s)(float32(innerX)+14, rowY+18, 9, iconCol)
+			slotIconForType(s)(float32(innerX)+16, rowY+26, 11, iconCol)
 
-			labelX := float32(innerX) + 32
-			drawTextWithShadow(font, core.SlotIndexLabel(s), labelX, rowY+4, FontTiny, textMuted)
+			labelX := float32(innerX) + 40
+			drawTextWithShadow(font, core.SlotIndexLabel(s), labelX, rowY+6, FontSmall, textMuted)
 			value := "—"
 			valCol := textDim
 			if filled {
 				value = core.ItemInfo(equippedKind).Name
 				valCol = textPrimary
 			}
-			drawTextWithShadow(font, value, labelX, rowY+18, FontSmall, valCol)
+			drawTextWithShadow(font, value, labelX, rowY+26, FontBody, valCol)
 		}
 	}
 
@@ -545,7 +556,7 @@ func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) 
 	// they belong on the Items tab. Hit rects are stored so the
 	// input layer can route drag-starts off these tiles.
 	drawCard(int32(stripRegion.X), int32(stripRegion.Y), int32(stripRegion.Width), int32(stripRegion.Height), surfacePrimary, borderSoft, borderSoft)
-	drawTextWithShadow(font, "EQUIPMENT INVENTORY", stripRegion.X+10, stripRegion.Y+6, FontTiny, textMuted)
+	drawTextWithShadow(font, "EQUIPMENT INVENTORY", stripRegion.X+10, stripRegion.Y+8, FontSmall, textMuted)
 
 	entries := equippableInventoryEntries(g.Inventory)
 	lastEquipLayout.InventoryEntries = entries
@@ -583,21 +594,21 @@ func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) 
 		}
 		drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), bg)
 		def := core.ItemInfo(entry.Kind)
-		slotIconForKind(def.Slot)(rect.X+16, rect.Y+rect.Height/2, 10, giltBright)
-		drawTextWithShadow(font, def.Name, rect.X+34, rect.Y+8, FontTiny, textPrimary)
+		slotIconForKind(def.Slot)(rect.X+18, rect.Y+rect.Height/2, 12, giltBright)
+		drawTextWithShadow(font, def.Name, rect.X+42, rect.Y+12, FontSmall, textPrimary)
 		if entry.Count > 1 {
-			drawTextWithShadow(font, "x"+strconv.Itoa(entry.Count), rect.X+34, rect.Y+24, FontTiny, textHint)
+			drawTextWithShadow(font, "x"+strconv.Itoa(entry.Count), rect.X+42, rect.Y+36, FontSmall, textHint)
 		}
 		// Bonus summary on the second line.
 		bonus := equipBonusSummary(def)
 		if bonus != "" {
-			drawTextWithShadow(font, bonus, rect.X+34, rect.Y+rect.Height-16, FontTiny, inkAccent)
+			drawTextWithShadow(font, bonus, rect.X+42, rect.Y+rect.Height-22, FontSmall, inkAccent)
 		}
 		tileX += tileW + tileGap
 	}
 	if len(entries) == 0 {
 		drawTextWithShadow(font, "No equipment held. Pickups from chests / steals land here.",
-			stripRegion.X+10, stripRegion.Y+stripRegion.Height/2-6, FontTiny, textHint)
+			stripRegion.X+10, stripRegion.Y+stripRegion.Height/2-6, FontSmall, textHint)
 	}
 	if overflow > 0 {
 		// Honest truncation marker — drawn at the right edge of the
@@ -605,10 +616,10 @@ func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) 
 		// for click hit-tests. The hidden items are unreachable via
 		// drag for now; a scroll affordance is the obvious follow-up.
 		label := "+" + strconv.Itoa(overflow) + " more (not shown)"
-		m := rl.MeasureTextEx(font, label, FontTiny, 1)
+		m := rl.MeasureTextEx(font, label, FontSmall, 1)
 		drawTextWithShadow(font, label,
 			stripRegion.X+stripRegion.Width-m.X-10,
-			stripRegion.Y+6, FontTiny, inkAccent)
+			stripRegion.Y+8, FontSmall, inkAccent)
 	}
 
 	// Keyboard/controller focus outline — drawn only when the cursor
@@ -627,7 +638,7 @@ func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) 
 	}
 
 	footer := "Mouse: drag between strip and slots.  Pad/keys: move cursor, Confirm lifts/places, Back cancels.  Drop on the strip to unequip."
-	drawTextWithShadow(font, footer, body.X, body.Y+body.Height-16, FontTiny, textHint)
+	drawTextWithShadow(font, footer, body.X, body.Y+body.Height-18, FontSmall, textHint)
 }
 
 // equipFocusRect returns the rectangle of the keyboard/controller focus
@@ -694,8 +705,29 @@ func equippableInventoryEntries(inv []core.ItemStack) []equipInventoryEntry {
 // equipBonusSummary returns the single-line "STR +2" / "Armor +1" /
 // "MDef +2" copy painted under an item's tile. Compact, builds the
 // shortest combination of bonuses authored on the def.
+// equipBonusSummaryCache memoizes equipBonusSummary by item kind. The
+// summary is built from the immutable ItemDefinition, so it's computed
+// once per kind rather than rebuilding a []string + concatenated string
+// for every visible equipment tile (and the drag ghost) every frame the
+// Equipment tab is open. The "" result for no-bonus items is cached too.
+var equipBonusSummaryCache = map[core.ItemKind]string{}
+
 func equipBonusSummary(def core.ItemDefinition) string {
+	if s, ok := equipBonusSummaryCache[def.Kind]; ok {
+		return s
+	}
 	parts := []string{}
+	// Lead with the weapon's mechanical class so the player can see at a
+	// glance which stat governs its to-hit/damage and whether it strikes at
+	// range — derived from the registry (core.WeaponAccuracyStat /
+	// WeaponIsRanged), never re-authored in item prose.
+	if def.Weapon != core.WeaponNone {
+		tag := core.StatLabel(core.WeaponAccuracyStat(def.Weapon)) + " weapon"
+		if core.WeaponIsRanged(def.Weapon) {
+			tag = core.StatLabel(core.WeaponAccuracyStat(def.Weapon)) + " ranged"
+		}
+		parts = append(parts, tag)
+	}
 	if def.ArmorBonus != 0 {
 		parts = append(parts, "Armor +"+strconv.Itoa(def.ArmorBonus))
 	}
@@ -713,13 +745,14 @@ func equipBonusSummary(def core.ItemDefinition) string {
 		}
 		parts = append(parts, core.StatLabel(s)+" "+sign+strconv.Itoa(v))
 	}
-	if len(parts) == 0 {
-		return ""
+	out := ""
+	if len(parts) > 0 {
+		out = parts[0]
+		for i := 1; i < len(parts); i++ {
+			out += "  " + parts[i]
+		}
 	}
-	out := parts[0]
-	for i := 1; i < len(parts); i++ {
-		out += "  " + parts[i]
-	}
+	equipBonusSummaryCache[def.Kind] = out
 	return out
 }
 
@@ -732,11 +765,11 @@ func drawEquipDragGhost(g core.GameState, font rl.Font, pos rl.Vector2) {
 	rect := rl.NewRectangle(pos.X, pos.Y, equipDragGhostW, equipDragGhostH)
 	drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), fadeColor(glassWarm, 0.95))
 	rl.DrawRectangleLinesEx(rect, 1.5, giltBright)
-	slotIconForKind(def.Slot)(rect.X+14, rect.Y+rect.Height/2, 9, giltBright)
-	drawTextWithShadow(font, def.Name, rect.X+30, rect.Y+8, FontTiny, textPrimary)
+	slotIconForKind(def.Slot)(rect.X+16, rect.Y+rect.Height/2, 11, giltBright)
+	drawTextWithShadow(font, def.Name, rect.X+34, rect.Y+8, FontSmall, textPrimary)
 	bonus := equipBonusSummary(def)
 	if bonus != "" {
-		drawTextWithShadow(font, bonus, rect.X+30, rect.Y+22, FontTiny, inkAccent)
+		drawTextWithShadow(font, bonus, rect.X+34, rect.Y+26, FontSmall, inkAccent)
 	}
 }
 
@@ -808,13 +841,19 @@ func drawSlotIconRing(cx, cy, r float32, col rl.Color) {
 // stack list on the left two-thirds, a description panel for the
 // cursored item on the right third. Empty inventory falls through to
 // a short note so the panel never reads as broken.
+// panelsItemStacksBuf is the reused scratch slice for the Items tab's
+// live-stack list — refilled each frame the tab is open instead of
+// allocating a fresh slice.
+var panelsItemStacksBuf []core.ItemStack
+
 func drawPanelsItems(g core.GameState, assets Resources, body rl.Rectangle) {
 	font := assets.Font()
-	stacks := core.LiveStacks(g.Inventory)
+	panelsItemStacksBuf = core.LiveStacksInto(g.Inventory, panelsItemStacksBuf)
+	stacks := panelsItemStacksBuf
 	if len(stacks) == 0 {
-		drawTextWithShadow(font, "Your bags are empty.", body.X+12, body.Y+12, FontBody, textMuted)
+		drawTextWithShadow(font, "Your bags are empty.", body.X+14, body.Y+16, FontHeading, textMuted)
 		drawTextWithShadow(font, "Loot from steals and chests will appear here.",
-			body.X+12, body.Y+44, FontSmall, textHint)
+			body.X+14, body.Y+54, FontBody, textHint)
 		return
 	}
 
@@ -827,8 +866,8 @@ func drawPanelsItems(g core.GameState, assets Resources, body rl.Rectangle) {
 
 	// List rows. Generous padding so each row reads as its own
 	// ledger line, not a cramped table cell.
-	rowH := float32(36)
-	rowPad := float32(12)
+	rowH := float32(46)
+	rowPad := float32(14)
 	cursor := g.PanelsRowCursor
 	if cursor < 0 {
 		cursor = 0
@@ -852,11 +891,11 @@ func drawPanelsItems(g core.GameState, assets Resources, body rl.Rectangle) {
 		if highlight {
 			nameCol = textPrimary
 		}
-		drawTextWithShadow(font, info.Name, listRect.X+rowPad, y+8, FontSmall, nameCol)
+		drawTextWithShadow(font, info.Name, listRect.X+rowPad, y+12, FontBody, nameCol)
 		// Count on the right edge of the row as a small chip.
 		countText := "x" + strconv.Itoa(stack.Count)
-		cm := rl.MeasureTextEx(font, countText, FontSmall, 1)
-		drawTextWithShadow(font, countText, listRect.X+listRect.Width-cm.X-rowPad, y+8, FontSmall, inkAccent)
+		cm := rl.MeasureTextEx(font, countText, FontBody, 1)
+		drawTextWithShadow(font, countText, listRect.X+listRect.Width-cm.X-rowPad, y+12, FontBody, inkAccent)
 	}
 
 	// Detail card: name, type/effect summary, count owned, description
@@ -867,19 +906,19 @@ func drawPanelsItems(g core.GameState, assets Resources, body rl.Rectangle) {
 		info := core.ItemInfo(stack.Kind)
 		dy := detailRect.Y + 14
 		dx := detailRect.X + 14
-		drawTextWithShadow(font, info.Name, dx, dy, FontBody, textPrimary)
-		dy += 28
+		drawTextWithShadow(font, info.Name, dx, dy, FontHeading, textPrimary)
+		dy += 38
 		effect := panelsItemHealLabel(info.HealAmount)
-		drawTextWithShadow(font, effect, dx, dy, FontSmall, inkAccent)
-		dy += 22
+		drawTextWithShadow(font, effect, dx, dy, FontBody, inkAccent)
+		dy += 30
 		owned := "Owned: " + strconv.Itoa(stack.Count)
-		drawTextWithShadow(font, owned, dx, dy, FontSmall, textMuted)
-		dy += 28
+		drawTextWithShadow(font, owned, dx, dy, FontBody, textMuted)
+		dy += 36
 		// Description placeholder (item registry doesn't carry one
 		// today). Wrap a short canned hint so the panel doesn't
 		// feel empty.
 		hint := "Consumable. Use from the battle menu's Item action."
-		drawTextWithShadow(font, hint, dx, dy, FontTiny, textHint)
+		drawTextWithShadow(font, hint, dx, dy, FontSmall, textHint)
 	}
 }
 
@@ -923,25 +962,11 @@ func panelsItemHealLabel(amount int) string {
 }
 
 // panelsItemHealLabelMeasureCache memoizes MeasureTextEx for the
-// right-aligned heal labels. The strings come from the precomputed
-// label cache so map keys are bounded; the per-row hot path is two
-// map reads instead of two cgo calls + an alloc.
-var panelsItemHealLabelMeasureCache = make(map[string]rl.Vector2, 32)
-var panelsItemHealLabelMeasureCacheFontID uint32
+// right-aligned heal labels (bounded keys from the precomputed label LUT).
+var panelsItemHealLabelMeasureCache measureCache
 
 func measurePanelsItemHealLabel(font rl.Font, label string) rl.Vector2 {
-	if font.Texture.ID != panelsItemHealLabelMeasureCacheFontID {
-		for k := range panelsItemHealLabelMeasureCache {
-			delete(panelsItemHealLabelMeasureCache, k)
-		}
-		panelsItemHealLabelMeasureCacheFontID = font.Texture.ID
-	}
-	if v, ok := panelsItemHealLabelMeasureCache[label]; ok {
-		return v
-	}
-	v := rl.MeasureTextEx(font, label, FontSmall, 1)
-	panelsItemHealLabelMeasureCache[label] = v
-	return v
+	return panelsItemHealLabelMeasureCache.measure(font, label, FontSmall, 1)
 }
 
 // drawPanelsSkills renders the Skills tab as one card per party
@@ -955,15 +980,14 @@ func drawPanelsSkills(g core.GameState, assets Resources, body rl.Rectangle) {
 	if len(g.Party) == 0 {
 		return
 	}
-	cols, colW := memberColumnLayout(body, len(g.Party))
+	cols := memberColumnLayout(body, len(g.Party))
 	for i, m := range g.Party {
 		highlight := i == g.PanelsRowCursor
 		contentY := drawPartyMemberCardHeader(font, m, cols[i], highlight)
-		innerX := cols[i].X + 14
-		innerW := colW - 28
+		innerX, innerW := memberCardInner(cols[i])
 
 		skills := core.PartySkills(m)
-		rowH := float32(54)
+		rowH := float32(66)
 		for j, s := range skills {
 			rowY := contentY + float32(j)*rowH
 			if rowY+rowH-6 > cols[i].Y+cols[i].Height {
@@ -988,15 +1012,15 @@ func drawPanelsSkills(g core.GameState, assets Resources, body rl.Rectangle) {
 			if !armed {
 				nameCol = textMuted
 			}
-			drawTextWithShadow(font, core.SkillName(s), innerX+10, rowY+4, FontSmall, nameCol)
+			drawTextWithShadow(font, core.SkillName(s), innerX+12, rowY+6, FontBody, nameCol)
 			cost := core.SkillCost(s)
 			if cost > 0 {
 				costText := skillCostMPLabel(cost)
-				cm := rl.MeasureTextEx(font, costText, FontTiny, 1)
-				drawTextWithShadow(font, costText, innerX+innerW-cm.X-10, rowY+6, FontTiny, inkAccent)
+				cm := rl.MeasureTextEx(font, costText, FontSmall, 1)
+				drawTextWithShadow(font, costText, innerX+innerW-cm.X-12, rowY+8, FontSmall, inkAccent)
 			}
 			// Description on the second line of the row.
-			drawTextWithShadow(font, core.SkillDescription(s), innerX+10, rowY+24, FontTiny, textHint)
+			drawTextWithShadow(font, core.SkillDescription(s), innerX+12, rowY+34, FontSmall, textHint)
 		}
 	}
 }
@@ -1014,7 +1038,7 @@ func drawPanelsMap(g core.GameState, assets Resources, body rl.Rectangle) {
 	}
 	zoom := g.PanelsMapZoom
 	if zoom <= 0 {
-		zoom = panelsMapZoomDefaultFallback
+		zoom = core.PanelMapZoomDefault
 	}
 	// Cell size in pixels: fit `zoom` cells across the body, then use
 	// the same size for the vertical so the map stays square. The
@@ -1125,7 +1149,7 @@ func drawPanelsMap(g core.GameState, assets Resources, body rl.Rectangle) {
 
 	// Map footer — area name + zoom indicator.
 	footer := panelsMapFooterText(g.Area.Name, zoom)
-	drawTextWithShadow(font, footer, body.X, body.Y+body.Height-18, FontTiny, textHint)
+	drawTextWithShadow(font, footer, body.X, body.Y+body.Height-20, FontSmall, textHint)
 }
 
 // drawCompassRose paints an 8-point compass rose at (cx, cy) within
@@ -1188,10 +1212,6 @@ func drawCompassRose(cx, cy float32, d float32, font rl.Font) {
 	nm := rl.MeasureTextEx(font, nLetter, FontTiny, 1)
 	drawTextWithShadow(font, nLetter, cx-nm.X/2, cy-outerR-nm.Y-2, FontTiny, inkAccent)
 }
-
-// panelsMapZoomDefaultFallback is the safety value when GameState was
-// built by a struct literal (tests) that didn't seed PanelsMapZoom.
-const panelsMapZoomDefaultFallback = 14
 
 // visitedAt reports whether the player has stepped on this tile. Helper
 // so the map-panel markers don't open-code the bounds check at every

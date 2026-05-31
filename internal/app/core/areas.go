@@ -335,12 +335,28 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 // unknown value returns ok=false instead of silently coercing to the first
 // option (which used to rewrite save data on the save path).
 
-type materialNameEntry struct {
-	value MaterialSet
+// namedEnum is one row of a value↔canonical-name table. Shared by the
+// material and facing registries so their forward (value→name) scan lives
+// once in lookupName. (The enemy-kind table carries an extra aliases
+// field and keeps its own entry type + scan.)
+type namedEnum[V comparable] struct {
+	value V
 	name  string
 }
 
-var materialNameTable = []materialNameEntry{
+// lookupName scans a namedEnum table for `target`, returning its
+// canonical name (ok=false on no match). The single forward-scan shared
+// by MaterialName and FacingName.
+func lookupName[V comparable](table []namedEnum[V], target V) (string, bool) {
+	for _, e := range table {
+		if e.value == target {
+			return e.name, true
+		}
+	}
+	return "", false
+}
+
+var materialNameTable = []namedEnum[MaterialSet]{
 	{MaterialDungeon, "dungeon"},
 	{MaterialField, "field"},
 }
@@ -350,12 +366,7 @@ var materialNameTable = []materialNameEntry{
 // .map files should propagate the failure rather than silently committing
 // a wrong material name.
 func MaterialName(m MaterialSet) (string, bool) {
-	for _, e := range materialNameTable {
-		if e.value == m {
-			return e.name, true
-		}
-	}
-	return "", false
+	return lookupName(materialNameTable, m)
 }
 
 func materialFromName(s string) (MaterialSet, bool) {
@@ -368,9 +379,20 @@ func materialFromName(s string) (MaterialSet, bool) {
 	return 0, false
 }
 
-// MaterialOptions is the editor's dropdown order. Stable so palette colors
-// stay associated with the right material in the UI.
-var MaterialOptions = []MaterialSet{MaterialDungeon, MaterialField}
+// MaterialOptions is the editor's dropdown order, derived from
+// materialNameTable so the two can't drift — a material added to the
+// name table shows up in the editor dropdown automatically, in the same
+// (stable) order so palette colors stay associated with the right
+// material. Previously a hand-maintained parallel slice with no link.
+var MaterialOptions = buildMaterialOptions()
+
+func buildMaterialOptions() []MaterialSet {
+	opts := make([]MaterialSet, len(materialNameTable))
+	for i, e := range materialNameTable {
+		opts[i] = e.value
+	}
+	return opts
+}
 
 // MaterialIsIndoor reports whether the material set represents an
 // enclosed interior (stone walls, ceiling slabs by default) vs. an
@@ -384,12 +406,7 @@ func MaterialIsIndoor(m MaterialSet) bool {
 	return m == MaterialDungeon
 }
 
-type facingNameEntry struct {
-	value int
-	name  string
-}
-
-var facingNameTable = []facingNameEntry{
+var facingNameTable = []namedEnum[int]{
 	{North, mapfile.FacingNorthName},
 	{East, mapfile.FacingEastName},
 	{South, mapfile.FacingSouthName},
@@ -408,32 +425,11 @@ var FacingShortLabels = [FacingCount]string{
 	West:  "W",
 }
 
-// FacingShortLabel returns the single-letter label for a facing value,
-// normalising out-of-range inputs first. Convenience wrapper for
-// callers that don't want to assume the int is already in [0, 4).
-func FacingShortLabel(f int) string {
-	return FacingShortLabels[NormalizeFacing(f)]
-}
-
-// IsFacingName reports whether s names one of the four canonical
-// facings (case-insensitive). Predicate counterpart to facingFromName
-// for callers that only need a yes/no answer.
-func IsFacingName(s string) bool {
-	_, ok := facingFromName(s)
-	return ok
-}
-
 // FacingName returns the canonical on-disk name for a facing. ok=false
 // only when normalization produces a value out of range, which can't
 // happen for the four legitimate enum values.
 func FacingName(f int) (string, bool) {
-	n := NormalizeFacing(f)
-	for _, e := range facingNameTable {
-		if e.value == n {
-			return e.name, true
-		}
-	}
-	return "", false
+	return lookupName(facingNameTable, NormalizeFacing(f))
 }
 
 func facingFromName(s string) (int, bool) {
@@ -627,6 +623,8 @@ func buildEnemyKindByName() map[string]EnemyKind {
 // EnemyKindName returns the canonical on-disk name for the enemy kind,
 // plus ok=false on unknown values. MapFileFromArea propagates the failure
 // to caller — better to refuse a save than silently rewrite enemy types.
+// Keeps its own scan (rather than the shared lookupName) because the enemy
+// table's rows carry an extra `aliases` field, so it isn't a namedEnum.
 func EnemyKindName(k EnemyKind) (string, bool) {
 	for _, e := range enemyKindNameTable {
 		if e.value == k {

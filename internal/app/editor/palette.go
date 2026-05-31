@@ -60,6 +60,11 @@ var (
 	floorAutoColor       = rl.NewColor(160, 168, 140, 255)
 	editorFallbackColor  = rl.NewColor(200, 200, 200, 255)
 	ceilingFallbackColor = rl.NewColor(110, 96, 80, 255)
+	// entityFallbackColor is the neutral swatch for an enemy kind with
+	// no entityBrushColors entry — shared by the brush builder and the
+	// in-grid pack marker so the two can't drift (was an inline
+	// rl.NewColor(180,180,180,255) literal at both sites).
+	entityFallbackColor = rl.NewColor(180, 180, 180, 255)
 	// clearBrushColor is the muted dark-grey swatch used by every
 	// "this brush sets the cell to its empty sentinel" entry (decor
 	// Force-empty, props None/erase, entities Clear). Three brushes

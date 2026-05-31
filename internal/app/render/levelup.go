@@ -24,7 +24,9 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 
 	font := assets.Font()
 	header := "LEVEL UP — " + m.Name
-	card := drawModalScaffold(font, overlayCardWidthLarge, overlayCardHeightLarge, header)
+	// Screen-relative so the stat-allocation menu reads large like the
+	// rest of the character menus (matches the panels overlay's sizing).
+	card := drawScreenFractionScaffold(font, levelUpModalWidthFrac, levelUpModalHeightFrac, header)
 	cardX, cardY := int32(card.X), int32(card.Y)
 	cardW := int32(card.Width)
 
@@ -40,7 +42,7 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 	drawTextWithShadow(font, primary, float32(cardX+22), float32(cardY+46), FontBody, textPrimary)
 	if m.SkillPoints > 0 {
 		secondary := strconv.Itoa(m.SkillPoints) + " skill pt" + plural(m.SkillPoints) + " banked — spend in the Skills tab"
-		drawTextWithShadow(font, secondary, float32(cardX+22), float32(cardY+72), FontTiny, inkAccent)
+		drawTextWithShadow(font, secondary, float32(cardX+22), float32(cardY+76), FontSmall, inkAccent)
 	}
 
 	// Stat rows. Each row is taller (52px) so the label, description,
@@ -48,13 +50,13 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 	//   left: LABEL (FontBody)
 	//   left + indent: description (FontTiny, dim)
 	//   right: current → new (FontBody, bright when staged)
-	rowY := cardY + 102
-	rowH := int32(52)
+	rowY := cardY + 112
+	rowH := int32(64)
 	rowX := cardX + 24
 	rowW := cardW - 48
 	for s := core.Stat(0); s < core.StatCount; s++ {
 		focused := g.LevelUpRowCursor == int(s)
-		rect := rl.NewRectangle(float32(rowX-6), float32(rowY-4), float32(rowW+12), float32(rowH-6))
+		rect := SelectionRowRect(rowX, rowY, rowW, rowH-6)
 		if focused {
 			DrawSelectedRow(rect)
 		} else {
@@ -75,8 +77,8 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 		if focused {
 			iconCol = giltBright
 		}
-		drawStatIcon(s, float32(rowX)+14, float32(rowY)+18, 10, iconCol)
-		drawTextWithShadow(font, label, float32(rowX+34), float32(rowY+2), FontBody, col)
+		drawStatIcon(s, float32(rowX)+16, float32(rowY)+24, 12, iconCol)
+		drawTextWithShadow(font, label, float32(rowX+44), float32(rowY+6), FontHeading, col)
 		// When the player has staged a spend on this row, swap the
 		// static description for the computed before→after preview so
 		// the row tells you what the point actually BUYS instead of
@@ -90,7 +92,7 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 			subText = core.StatDescription(s)
 		}
 		if subText != "" {
-			drawTextWithShadow(font, subText, float32(rowX+86), float32(rowY+26), FontTiny, subCol)
+			drawTextWithShadow(font, subText, float32(rowX+96), float32(rowY+36), FontSmall, subCol)
 		}
 
 		var preview string
@@ -101,8 +103,8 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 		} else {
 			preview = strconv.Itoa(cur)
 		}
-		rm := rl.MeasureTextEx(font, preview, FontBody, 1)
-		drawTextWithShadow(font, preview, float32(rowX)+float32(rowW)-rm.X-10, float32(rowY+2), FontBody, previewCol)
+		rm := rl.MeasureTextEx(font, preview, FontHeading, 1)
+		drawTextWithShadow(font, preview, float32(rowX)+float32(rowW)-rm.X-12, float32(rowY+6), FontHeading, previewCol)
 		rowY += rowH
 	}
 
@@ -110,7 +112,7 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 	{
 		rowY += 6
 		focused := g.LevelUpRowCursor == core.LevelUpApplyRowIndex
-		rect := rl.NewRectangle(float32(rowX-6), float32(rowY-4), float32(rowW+12), float32(rowH-6))
+		rect := SelectionRowRect(rowX, rowY, rowW, rowH-6)
 		applyBG := core.MixColor(glassDeep, glassWarm, 0.45)
 		drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), applyBG)
 		if focused {
@@ -128,12 +130,12 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 		// "this is the commit gate" cue. Drawn in gilt so the
 		// player's eye lands on it even when the row isn't
 		// focused.
-		labelW := rl.MeasureTextEx(font, label, FontBody, 1).X
-		labelX := float32(rowX + 4)
-		labelY := float32(rowY + 10)
-		drawTextWithShadow(font, label, labelX, labelY, FontBody, col)
-		flCY := labelY + FontBody/2
-		drawFleuronsFlanking(labelX, labelW, 16, flCY, 4, giltDim)
+		labelW := rl.MeasureTextEx(font, label, FontHeading, 1).X
+		labelX := float32(rowX + 6)
+		labelY := float32(rowY + 14)
+		drawTextWithShadow(font, label, labelX, labelY, FontHeading, col)
+		flCY := labelY + FontHeading/2
+		drawFleuronsFlanking(labelX, labelW, 18, flCY, 5, giltDim)
 	}
 
 	// VIT note removed — the per-stat description column already

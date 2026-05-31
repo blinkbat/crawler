@@ -227,14 +227,14 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 				} else if footprint := core.PropFootprint(prop); footprint != nil {
 					if pm := &assets.propModelTable[prop]; len(pm.parts) > 0 {
 						anchor := footprintAnchor(center, footprint)
-						if r := propShadowRadius[prop]; r > 0 {
+						if r := propShadowRadiusTable[prop]; r > 0 {
 							drawGroundShadow(anchor.X, anchor.Z, r)
 						}
 						pm.draw(anchor, 1.0, propYaw)
 						drawn = true
 					}
 				} else if pm := &assets.propModelTable[prop]; len(pm.parts) > 0 {
-					if r := propShadowRadius[prop]; r > 0 {
+					if r := propShadowRadiusTable[prop]; r > 0 {
 						drawGroundShadow(center.X, center.Z, r)
 					}
 					pm.draw(center, 1.0, propYaw)
@@ -548,14 +548,42 @@ var propShadowRadius = map[byte]float32{
 	core.TileSarcophagus:       0.50,
 }
 
+// propShadowRadiusTable is the [256]float32 mirror of propShadowRadius,
+// indexed by tile char so the per-tile world loop does an O(1) array
+// index instead of a map hash for every prop tile every frame (mirrors
+// inlinePropTable / decorModelTable). Built once at init; chars with no
+// entry read 0 (no shadow). propShadowRadius stays the authoring source.
+var propShadowRadiusTable = func() [256]float32 {
+	var t [256]float32
+	for ch, r := range propShadowRadius {
+		t[ch] = r
+	}
+	return t
+}()
+
+// areaKey identifies the area a per-area cache was built for, so the
+// cache rebuilds only when the player enters a different area (matched on
+// name + dimensions). Shared by enclosureCache and torchSiteCache so the
+// two "is this still the same area?" tests can't drift apart.
+type areaKey struct {
+	name          string
+	width, height int
+	primed        bool
+}
+
+func (k *areaKey) matches(m core.AreaDefinition) bool {
+	return k.primed && k.name == m.Name && k.width == m.Width && k.height == m.Height
+}
+
+func (k *areaKey) set(m core.AreaDefinition) {
+	k.name, k.width, k.height, k.primed = m.Name, m.Width, m.Height, true
+}
+
 // enclosureCache memoizes the last area's enclosure result so the
 // ceiling-coverage scan runs once per area, not once per frame.
 var enclosureCache struct {
-	name     string
-	width    int
-	height   int
+	areaKey
 	enclosed bool
-	primed   bool
 }
 
 // areaIsEnclosed reports whether the area is a roofed interior —
@@ -566,8 +594,7 @@ var enclosureCache struct {
 // dungeon with a few open-air courtyard tiles still counts as
 // enclosed, while a forest with zero ceilings never does.
 func areaIsEnclosed(m core.AreaDefinition) bool {
-	if enclosureCache.primed && enclosureCache.name == m.Name &&
-		enclosureCache.width == m.Width && enclosureCache.height == m.Height {
+	if enclosureCache.matches(m) {
 		return enclosureCache.enclosed
 	}
 	covered, total := 0, 0
@@ -583,11 +610,8 @@ func areaIsEnclosed(m core.AreaDefinition) bool {
 		}
 	}
 	enclosed := total > 0 && float64(covered)/float64(total) > 0.30
-	enclosureCache.name = m.Name
-	enclosureCache.width = m.Width
-	enclosureCache.height = m.Height
+	enclosureCache.set(m)
 	enclosureCache.enclosed = enclosed
-	enclosureCache.primed = true
 	return enclosed
 }
 
@@ -596,8 +620,8 @@ func areaIsEnclosed(m core.AreaDefinition) bool {
 // torchFlameModel so they glow. Three flame tints (hot core →
 // mid → tip) layer the bobbing blobs into a teardrop fire.
 var (
-	torchIron      = rl.NewColor(54, 50, 46, 255)
-	torchIronLight = rl.NewColor(92, 84, 76, 255)
+	torchIron       = rl.NewColor(54, 50, 46, 255)
+	torchIronLight  = rl.NewColor(92, 84, 76, 255)
 	torchFlameTints = [3]rl.Color{
 		rl.NewColor(255, 226, 150, 255), // hot core — pale gold
 		rl.NewColor(252, 162, 70, 255),  // mid — orange
@@ -647,8 +671,29 @@ var (
 // neighbouring torches wobble independently instead of pulsing in
 // lockstep. Returns an empty slice on areas with no braziers (every
 // field map), so the shader's torch loop contributes nothing.
-func collectTorches(m core.AreaDefinition, camera rl.Camera3D) []torchLight {
-	torchCandidateBuf = torchCandidateBuf[:0]
+// torchSite is the static (camera- and time-independent) data for one
+// brazier/torch tile: its light origin, the tile center used for camera
+// ranking, the flicker seed, and base brightness. All of it is fixed for
+// the lifetime of an area, so it's cached rather than rediscovered by a
+// full-grid scan every frame.
+type torchSite struct {
+	pos    rl.Vector3
+	cx, cz float32
+	hash   uint32
+	bright float32
+}
+
+// torchSiteCache memoizes the brazier/torch tile list for the current
+// area so the Width×Height grid scan runs once per area, not per frame
+// (mirrors enclosureCache). Per-frame work then reduces to distance +
+// flicker over the cached handful of sites.
+var torchSiteCache struct {
+	areaKey
+	sites []torchSite
+}
+
+func rebuildTorchSites(m core.AreaDefinition) {
+	torchSiteCache.sites = torchSiteCache.sites[:0]
 	for z := 0; z < m.Height; z++ {
 		for x := 0; x < m.Width; x++ {
 			prop := m.Props[z][x]
@@ -671,15 +716,28 @@ func collectTorches(m core.AreaDefinition, camera rl.Camera3D) []torchLight {
 				fx, fz := wallTorchFacing(m, x, z)
 				pos = rl.NewVector3(cx-fx*0.30, 1.42, cz-fz*0.30)
 			}
-			dx := cx - camera.Position.X
-			dz := cz - camera.Position.Z
-			torchCandidateBuf = append(torchCandidateBuf, torchCandidate{
-				pos:    pos,
-				dist:   dx*dx + dz*dz,
-				hash:   tileHash(x, z),
-				bright: bright,
+			torchSiteCache.sites = append(torchSiteCache.sites, torchSite{
+				pos: pos, cx: cx, cz: cz, hash: tileHash(x, z), bright: bright,
 			})
 		}
+	}
+	torchSiteCache.set(m)
+}
+
+func collectTorches(m core.AreaDefinition, camera rl.Camera3D) []torchLight {
+	if !torchSiteCache.matches(m) {
+		rebuildTorchSites(m)
+	}
+	torchCandidateBuf = torchCandidateBuf[:0]
+	for _, s := range torchSiteCache.sites {
+		dx := s.cx - camera.Position.X
+		dz := s.cz - camera.Position.Z
+		torchCandidateBuf = append(torchCandidateBuf, torchCandidate{
+			pos:    s.pos,
+			dist:   dx*dx + dz*dz,
+			hash:   s.hash,
+			bright: s.bright,
+		})
 	}
 	torchResultBuf = torchResultBuf[:0]
 	if len(torchCandidateBuf) == 0 {
@@ -881,6 +939,16 @@ func drawFloorDecoration(assets Resources, x, z int, cx, cz float32) {
 // lighter "weathered surface stone" tint than the chunky-boulder palette so
 // the cluster reads as ground detail rather than dropped boulders. A
 // per-pebble hash gives every member its own footprint/height/rotation.
+// pebblePaletteTints is the light "weathered surface stone" palette for
+// ground pebble scatter, indexed by per-pebble hash. Package-level so the
+// four colors aren't reconstructed on every drawPebbleCluster call.
+var pebblePaletteTints = [4]rl.Color{
+	rl.NewColor(228, 224, 214, 255),
+	rl.NewColor(216, 212, 202, 255),
+	rl.NewColor(232, 226, 214, 255),
+	rl.NewColor(220, 216, 208, 255),
+}
+
 func drawPebbleCluster(assets Resources, cx, cz float32, tileHash uint32) {
 	if len(assets.rockProp.models) == 0 {
 		return
@@ -892,14 +960,6 @@ func drawPebbleCluster(assets Resources, cx, cz float32, tileHash uint32) {
 	// Sum of two independent hash bits gives a 25% / 50% / 25% distribution
 	// for 2 / 3 / 4 — center-weighted so most clusters feel balanced.
 	count := 2 + int(tileHash&0x01) + int((tileHash>>1)&0x01)
-
-	// Light pebble palette. Indexed by per-pebble hash.
-	tints := [4]rl.Color{
-		rl.NewColor(228, 224, 214, 255),
-		rl.NewColor(216, 212, 202, 255),
-		rl.NewColor(232, 226, 214, 255),
-		rl.NewColor(220, 216, 208, 255),
-	}
 
 	for i := 0; i < count; i++ {
 		// Salt the tile hash with the pebble index so each member looks
@@ -928,7 +988,7 @@ func drawPebbleCluster(assets Resources, cx, cz float32, tileHash uint32) {
 		// replicate that math: RockMeshBaseHalfHeight * hght.
 		pos := rl.NewVector3(cx+ox, RockMeshBaseHalfHeight*hght, cz+oz)
 		scale := rl.NewVector3(foot, hght, foot*stretch)
-		tint := tints[(ih>>28)&0x03]
+		tint := pebblePaletteTints[(ih>>28)&0x03]
 		rl.DrawModelEx(baseModel, pos, rotationAxis, rot, scale, tint)
 	}
 }
@@ -1214,19 +1274,10 @@ func drawSelectorPyramid(tip rl.Vector3, height, baseRadius float32, col rl.Colo
 // preserving alpha. Used to derive shaded variants of a base tint without
 // authoring a new color per face.
 func shadeColor(c rl.Color, factor float32) rl.Color {
-	clamp := func(v float32) uint8 {
-		if v < 0 {
-			return 0
-		}
-		if v > 255 {
-			return 255
-		}
-		return uint8(v)
-	}
 	return rl.NewColor(
-		clamp(float32(c.R)*factor),
-		clamp(float32(c.G)*factor),
-		clamp(float32(c.B)*factor),
+		core.ClampByte(int(float32(c.R)*factor)),
+		core.ClampByte(int(float32(c.G)*factor)),
+		core.ClampByte(int(float32(c.B)*factor)),
 		c.A,
 	)
 }
@@ -1372,6 +1423,13 @@ func enemyDrawPosition(camera rl.Camera3D, g core.GameState, slot int, enemy cor
 
 	visibleSlot, count := battleEnemySlot(g, slot)
 	if count <= 0 {
+		// ActivePack is >= 0 here (first guard), but re-check the upper
+		// bound before indexing — same defensive form as the fallback
+		// above — so a malformed (Phase!=None, ActivePack out of range)
+		// state can't panic with an out-of-range index.
+		if g.Battle.ActivePack >= len(g.Packs) {
+			return rl.NewVector3(0, enemyBillboardY, 0)
+		}
 		p := g.Packs[g.Battle.ActivePack]
 		return tileWorldPos(p.TileX, p.TileZ, enemyBillboardY)
 	}
@@ -1437,14 +1495,33 @@ func enemyDrawPosition(camera rl.Camera3D, g core.GameState, slot int, enemy cor
 	)
 }
 
+// horizForwardCache memoizes the last horizontalForward result. The
+// camera is identical across every billboard / marker draw within a
+// frame (and usually across still frames), so this turns the ~6
+// per-frame Hypot/normalize calls into one — the rest hit the cache via
+// a 2-float compare. Single-threaded render path; exact float compare is
+// fine because the inputs are recomputed identically each call.
+var horizForwardCache struct {
+	dx, dz float32
+	result rl.Vector3
+	primed bool
+}
+
 func horizontalForward(camera rl.Camera3D) rl.Vector3 {
 	x := camera.Target.X - camera.Position.X
 	z := camera.Target.Z - camera.Position.Z
-	length := float32(math.Hypot(float64(x), float64(z)))
-	if length == 0 {
-		return rl.NewVector3(1, 0, 0)
+	if horizForwardCache.primed && horizForwardCache.dx == x && horizForwardCache.dz == z {
+		return horizForwardCache.result
 	}
-	return rl.NewVector3(x/length, 0, z/length)
+	length := float32(math.Hypot(float64(x), float64(z)))
+	result := rl.NewVector3(1, 0, 0)
+	if length != 0 {
+		result = rl.NewVector3(x/length, 0, z/length)
+	}
+	horizForwardCache.dx, horizForwardCache.dz = x, z
+	horizForwardCache.result = result
+	horizForwardCache.primed = true
+	return result
 }
 
 // battleEnemySlot maps a member slot to (visible slot, total visible

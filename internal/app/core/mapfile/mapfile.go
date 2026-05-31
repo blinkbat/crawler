@@ -321,6 +321,49 @@ const (
 	sectionCustomEnemies = "custom_enemies"
 )
 
+// layerSection describes one .map section: its on-disk name, the parse
+// slot it maps to, and (for the five grid layers) a field accessor into
+// MapFile. Entity sections (enemies/chests/doors/custom_enemies) carry a
+// nil field — they parse into spawn lists, not a grid. This is the single
+// source for sectionFor (name→slot) and layerSlice (slot→*[]string) so
+// the two can't drift on which sections exist or which own a grid.
+type layerSection struct {
+	name  string
+	slot  layerSlot
+	field func(*MapFile) *[]string
+}
+
+var layerSections = []layerSection{
+	{sectionWalls, slotWalls, func(mf *MapFile) *[]string { return &mf.Walls }},
+	{sectionFloor, slotFloor, func(mf *MapFile) *[]string { return &mf.Floor }},
+	{sectionDecor, slotDecor, func(mf *MapFile) *[]string { return &mf.Decor }},
+	{sectionProps, slotProps, func(mf *MapFile) *[]string { return &mf.Props }},
+	{sectionCeiling, slotCeiling, func(mf *MapFile) *[]string { return &mf.Ceiling }},
+	{sectionEnemies, slotEnemies, nil},
+	{sectionChests, slotChests, nil},
+	{sectionDoors, slotDoors, nil},
+	{sectionCustomEnemies, slotCustomEnemies, nil},
+}
+
+// init asserts layerSections covers every real slot (slotWalls..
+// slotCustomEnemies) exactly once, so a new layerSlot enum value added
+// without a table row panics at startup instead of silently parsing as
+// slotNone / encoding nothing.
+func init() {
+	seen := make(map[layerSlot]bool, len(layerSections))
+	for _, s := range layerSections {
+		if seen[s.slot] {
+			panic(fmt.Sprintf("mapfile: duplicate layerSections slot %d", s.slot))
+		}
+		seen[s.slot] = true
+	}
+	for slot := slotWalls; slot <= slotCustomEnemies; slot++ {
+		if !seen[slot] {
+			panic(fmt.Sprintf("mapfile: layerSections missing slot %d — add a row", slot))
+		}
+	}
+}
+
 // namedLayer pairs a grid layer's on-disk section name with its rows.
 // Shared by validate (dimension checks) and Encode (header + row emit)
 // so the layer list lives in one place instead of two near-identical
@@ -528,42 +571,30 @@ func Parse(r io.Reader) (MapFile, error) {
 	return mf, nil
 }
 
+// sectionFor maps a section-header line ("walls:", "doors:", …) to its
+// slot. The trailing colon is required (a bare "walls" is not a header),
+// matching the original switch's exact-match behavior.
 func sectionFor(raw string) (layerSlot, bool) {
-	switch strings.TrimSpace(raw) {
-	case sectionWalls + ":":
-		return slotWalls, true
-	case sectionFloor + ":":
-		return slotFloor, true
-	case sectionDecor + ":":
-		return slotDecor, true
-	case sectionProps + ":":
-		return slotProps, true
-	case sectionCeiling + ":":
-		return slotCeiling, true
-	case sectionEnemies + ":":
-		return slotEnemies, true
-	case sectionChests + ":":
-		return slotChests, true
-	case sectionDoors + ":":
-		return slotDoors, true
-	case sectionCustomEnemies + ":":
-		return slotCustomEnemies, true
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasSuffix(trimmed, ":") {
+		return slotNone, false
+	}
+	name := trimmed[:len(trimmed)-1]
+	for _, s := range layerSections {
+		if s.name == name {
+			return s.slot, true
+		}
 	}
 	return slotNone, false
 }
 
+// layerSlice returns the MapFile grid field for a grid-layer slot, or nil
+// for entity sections / unknown slots (matching the original switch).
 func layerSlice(mf *MapFile, slot layerSlot) *[]string {
-	switch slot {
-	case slotWalls:
-		return &mf.Walls
-	case slotFloor:
-		return &mf.Floor
-	case slotDecor:
-		return &mf.Decor
-	case slotProps:
-		return &mf.Props
-	case slotCeiling:
-		return &mf.Ceiling
+	for _, s := range layerSections {
+		if s.slot == slot && s.field != nil {
+			return s.field(mf)
+		}
 	}
 	return nil
 }
@@ -792,6 +823,17 @@ func init() {
 	}
 	if verbs != customEnemyFieldCount {
 		panic(fmt.Sprintf("mapfile: customEnemyEncodeFormat has %d verbs, customEnemyFieldCount is %d — they must match", verbs, customEnemyFieldCount))
+	}
+	// `skills` is the final positional column, so its index must be the
+	// last slot of the row width. The verb-count check above only guards
+	// the encoder; this guards the decoder's index table against drifting
+	// from the field count (a schema index bumped without the count, or
+	// vice versa, would silently mis-slice a parse).
+	if customEnemyCurrentSchema.skills != customEnemyFieldCount-1 {
+		panic(fmt.Sprintf("mapfile: customEnemyCurrentSchema.skills is %d, expected customEnemyFieldCount-1 (%d)", customEnemyCurrentSchema.skills, customEnemyFieldCount-1))
+	}
+	if customEnemyLegacySchema.skills != customEnemyFieldCountLegacy-1 {
+		panic(fmt.Sprintf("mapfile: customEnemyLegacySchema.skills is %d, expected customEnemyFieldCountLegacy-1 (%d)", customEnemyLegacySchema.skills, customEnemyFieldCountLegacy-1))
 	}
 }
 

@@ -172,7 +172,6 @@ var (
 	markerChestDim = rl.NewColor(160, 132, 78, 255)
 	markerDoor     = rl.NewColor(176, 132, 86, 255)
 	markerPack     = rl.NewColor(220, 76, 70, 255)
-	markerPackEdge = rl.NewColor(255, 200, 200, 220)
 	markerOutline  = rl.NewColor(0, 0, 0, 220)
 
 	// mapTileFogColor is the dim fill drawn for cells that fall outside
@@ -182,16 +181,13 @@ var (
 	// of two near-identical literals that drift by a couple RGB units.
 	mapTileFogColor = rl.NewColor(8, 10, 14, 235)
 
-	// chestColors govern the chest billboard — body color, lid color,
-	// and the deeper tone for an emptied/looted chest. Pulled out here
-	// rather than open-coded in DrawChests so the palette can be tuned
-	// without hunting through world-render code. The interact prompt
-	// reuses borderActive (the global "draw the player's eye here"
+	// chestColors govern the chest billboard — body color and lid color.
+	// Pulled out here rather than open-coded in DrawChests so the palette
+	// can be tuned without hunting through world-render code. The interact
+	// prompt reuses borderActive (the global "draw the player's eye here"
 	// yellow) so adding a new prompt color isn't needed.
-	chestBodyColor  = rl.NewColor(168, 116, 70, 255)
-	chestBodyLooted = rl.NewColor(98, 76, 56, 255)
-	chestLidColor   = rl.NewColor(196, 148, 92, 255)
-	chestMetalColor = rl.NewColor(220, 192, 102, 255)
+	chestBodyColor = rl.NewColor(168, 116, 70, 255)
+	chestLidColor  = rl.NewColor(196, 148, 92, 255)
 
 	// Shadow tints for drop-shadowed text and overlay scrims. Pre-named so
 	// callers don't open-code rl.NewColor(0,0,0,…) with a drifting alpha.
@@ -237,8 +233,8 @@ const (
 	// Letter spacing per size. Wider tracking on titles to sell the
 	// "engraved on hardwood" feel. Use these via the
 	// drawTextWithShadowStyle path; drawTextWithShadow defaults to 1.
-	FontSpacingTiny    = float32(1)
-	FontSpacingSmall   = float32(1)
+	// (FontTiny/FontSmall both track at the default 1, so no dedicated
+	// tokens — callers pass the literal 1.)
 	FontSpacingBody    = float32(1)
 	FontSpacingHeading = float32(2)
 	FontSpacingTitle   = float32(3)
@@ -270,19 +266,25 @@ const (
 	// The dimensions are sized to the modal's CONTENT — a chest with
 	// fewer items renders shorter via cardH expansion at the call site,
 	// but the WIDTH stays standardized.
-	overlayCardWidthSmall  = int32(360) // chest modal (item list)
-	overlayCardWidthMedium = int32(420) // level-up modal
-	overlayCardWidthLarge  = int32(680) // party stats overlay
-	overlayCardWidthHuge   = int32(820) // game panels overlay
+	overlayCardWidthSmall = int32(360) // chest modal (item list)
+	// The level-up modal and game-panels overlay size themselves
+	// screen-relative (drawScreenFractionScaffold) rather than off fixed
+	// widths, so the character menus scale with the window and stay
+	// readable. Clamped to the screen by overlayCardMarginScreen below.
+	// The panels overlay used to run nearly edge-to-edge (0.95×0.93);
+	// pulled in so the Tome reads as a framed dashboard with breathing
+	// room around it rather than a full-screen takeover.
+	panelsOverlayWidthFrac  = float32(0.84)
+	panelsOverlayHeightFrac = float32(0.84)
+	levelUpModalWidthFrac   = float32(0.60)
+	levelUpModalHeightFrac  = float32(0.85)
 
-	overlayCardHeightSmall  = int32(380) // level-up / party stats
-	overlayCardHeightLarge  = int32(520) // game panels overlay
-	overlayCardMarginScreen = int32(40)  // minimum margin between card and screen edges
+	overlayCardMarginScreen = int32(40) // minimum margin between card and screen edges
 
 	// Panels-overlay tab strip geometry. Shared by the panels surface
 	// only today — moved here so future tab-strip surfaces (a future
 	// equipment swap modal, a settings panel) can reuse the heights.
-	overlayTabHeight  = int32(34)
+	overlayTabHeight  = int32(46)
 	overlayTabPadding = int32(12)
 
 	// overlayFooterReserve is the vertical band at the bottom of every
@@ -290,7 +292,6 @@ const (
 	// footer rendered by DrawFooterHint. Body rect = card minus this
 	// band minus the heading band at the top.
 	overlayFooterReserve = int32(28)
-	overlayHeaderReserve = int32(40)
 )
 
 // drawModalScaffold paints the shared screen-veil + centered card +
@@ -315,16 +316,40 @@ func drawModalScaffold(font rl.Font, cardW, cardH int32, heading string) rl.Rect
 	if cardH > screenH-overlayCardMarginScreen {
 		cardH = screenH - overlayCardMarginScreen
 	}
+	rect := drawVeiledCard(cardW, cardH, borderSoft, borderActive, giltDim)
+	if heading != "" {
+		drawHeading(font, heading, int32(rect.X)+28, int32(rect.Y)+14, borderActive)
+	}
+	return rect
+}
+
+// drawVeiledCard paints the full-screen veil, a centered wood-framed
+// card at the given size, and its gilt corner filigree, returning the
+// card rect for the caller to title + fill. The bare composition shared
+// by drawModalScaffold (left-aligned heading) and the centered-title
+// overlays (drawTitledMenuCard, DrawDoorPrompt) so the veil+card+filigree
+// triple isn't maintained in three places. No screen clamp here —
+// drawModalScaffold clamps before calling; the fixed-size menu/door
+// cards don't need it. `outline`/`accent` are the drawCard strokes and
+// `filigree` the corner-bracket tone.
+func drawVeiledCard(cardW, cardH int32, outline, accent, filigree color.RGBA) rl.Rectangle {
+	screenW, screenH := screenSize()
 	cardX := centerX(cardW)
 	cardY := screenH/2 - cardH/2
-
 	rl.DrawRectangle(0, 0, screenW, screenH, surfaceVeil)
-	drawCard(cardX, cardY, cardW, cardH, surfacePrimary, borderSoft, borderActive)
-	drawCardFiligree(cardX, cardY, cardW, cardH, giltDim)
-	if heading != "" {
-		drawHeading(font, heading, cardX+28, cardY+14, borderActive)
-	}
+	drawCard(cardX, cardY, cardW, cardH, surfacePrimary, outline, accent)
+	drawCardFiligree(cardX, cardY, cardW, cardH, filigree)
 	return rl.NewRectangle(float32(cardX), float32(cardY), float32(cardW), float32(cardH))
+}
+
+// drawScreenFractionScaffold sizes a modal card as a fraction of the
+// current screen (wFrac × hFrac), then defers to drawModalScaffold for
+// centering + clamping. The two screen-relative overlays (game panels,
+// level-up) share it so the screenSize() read + multiply + int32-cast
+// boilerplate lives in one place.
+func drawScreenFractionScaffold(font rl.Font, wFrac, hFrac float32, heading string) rl.Rectangle {
+	sw, sh := screenSize()
+	return drawModalScaffold(font, int32(float32(sw)*wFrac), int32(float32(sh)*hFrac), heading)
 }
 
 // drawCardFiligree paints multi-stroke gilt corner brackets on a
@@ -402,25 +427,37 @@ func drawCardFiligree(x, y, w, h int32, col color.RGBA) {
 	}
 }
 
-// drawStatIcon dispatches to the per-stat sigil drawer. One small
-// glyph per Stat enum value, used on the level-up modal's stat rows
-// and the panels overlay's Stats tab so each row reads at a glance
-// without needing to lean on the 3-letter label.
-func drawStatIcon(s core.Stat, cx, cy, r float32, col color.RGBA) {
-	switch s {
-	case core.StatSTR:
-		drawStatIconSTR(cx, cy, r, col)
-	case core.StatDEX:
-		drawStatIconDEX(cx, cy, r, col)
-	case core.StatINT:
-		drawStatIconINT(cx, cy, r, col)
-	case core.StatWIS:
-		drawStatIconWIS(cx, cy, r, col)
-	case core.StatVIT:
-		drawStatIconVIT(cx, cy, r, col)
-	case core.StatSPD:
-		drawStatIconSPD(cx, cy, r, col)
+// statIconDrawers dispatches each Stat to its sigil drawer. A fixed
+// [core.StatCount] array (not a switch) so a new Stat forces a slot and
+// the init below panics on a nil entry at startup — the same coverage
+// contract the other render registries use, instead of a switch that
+// silently draws nothing for an unmapped Stat.
+var statIconDrawers = [core.StatCount]func(cx, cy, r float32, col color.RGBA){
+	core.StatSTR: drawStatIconSTR,
+	core.StatDEX: drawStatIconDEX,
+	core.StatINT: drawStatIconINT,
+	core.StatWIS: drawStatIconWIS,
+	core.StatVIT: drawStatIconVIT,
+	core.StatSPD: drawStatIconSPD,
+}
+
+func init() {
+	for s := core.Stat(0); s < core.StatCount; s++ {
+		if statIconDrawers[s] == nil {
+			panic("render: Stat " + strconv.Itoa(int(s)) + " has no statIconDrawers entry")
+		}
 	}
+}
+
+// drawStatIcon dispatches to the per-stat sigil drawer. One small glyph
+// per Stat enum value, used on the level-up modal's stat rows and the
+// panels overlay's Stats tab so each row reads at a glance without
+// leaning on the 3-letter label.
+func drawStatIcon(s core.Stat, cx, cy, r float32, col color.RGBA) {
+	if int(s) < 0 || int(s) >= len(statIconDrawers) {
+		return
+	}
+	statIconDrawers[s](cx, cy, r, col)
 }
 
 // STR — short-shafted hammer: rectangular head on top, narrow
@@ -761,33 +798,69 @@ func drawPanelHeading(font rl.Font, text string, x, y float32, accent color.RGBA
 	rl.DrawRectangle(int32(x), int32(y+measure.Y+2), tickW, 2, accent)
 }
 
-// panelHeadingMeasureCache memoizes rl.MeasureTextEx for panel-heading
-// strings. drawPanelHeading runs every frame for every visible HUD
-// panel ("COMBAT LOG", "TURN ORDER", "AREA", "PAUSED", the action-
-// menu header, etc.). All callers use FontHeading + FontSpacingHeading
-// so the cache is keyed solely on the text and the font texture ID.
-var panelHeadingMeasureCache = make(map[string]rl.Vector2, 16)
-var panelHeadingMeasureCacheFontID uint32
+// measureKey identifies a cached text measurement: the string plus the
+// size + spacing it was shaped at. (The same text can be measured at
+// different sizes — e.g. the panels Stats tab uses both FontBody and
+// FontSmall, the timing heading flips FontHeading↔FontTitle.)
+type measureKey struct {
+	text          string
+	size, spacing float32
+}
 
-func measurePanelHeading(font rl.Font, text string) rl.Vector2 {
-	if font.Texture.ID != panelHeadingMeasureCacheFontID {
-		for k := range panelHeadingMeasureCache {
-			delete(panelHeadingMeasureCache, k)
-		}
-		panelHeadingMeasureCacheFontID = font.Texture.ID
+// measureCache memoizes rl.MeasureTextEx, flushing when the font atlas
+// changes (font.Texture.ID shifts after a settings flip / font reload).
+// MeasureTextEx is a cgo round-trip that re-shapes the string; the HUD
+// re-measures the same labels every frame, so every per-frame measure
+// call site shares this ONE implementation instead of re-hand-rolling
+// the map + font-ID guard (there were ~11 near-identical copies). The
+// zero value is ready to use.
+type measureCache struct {
+	entries map[measureKey]rl.Vector2
+	fontID  uint32
+}
+
+func (c *measureCache) measure(font rl.Font, text string, size, spacing float32) rl.Vector2 {
+	if c.entries == nil || font.Texture.ID != c.fontID {
+		c.entries = make(map[measureKey]rl.Vector2, 32)
+		c.fontID = font.Texture.ID
 	}
-	if v, ok := panelHeadingMeasureCache[text]; ok {
+	key := measureKey{text: text, size: size, spacing: spacing}
+	if v, ok := c.entries[key]; ok {
 		return v
 	}
-	v := rl.MeasureTextEx(font, text, FontHeading, FontSpacingHeading)
-	panelHeadingMeasureCache[text] = v
+	v := rl.MeasureTextEx(font, text, size, spacing)
+	c.entries[key] = v
 	return v
+}
+
+// panelHeadingMeasureCache backs drawPanelHeading, which runs every frame
+// for every visible HUD panel ("COMBAT LOG", "TURN ORDER", "PAUSED", …).
+var panelHeadingMeasureCache measureCache
+
+func measurePanelHeading(font rl.Font, text string) rl.Vector2 {
+	return panelHeadingMeasureCache.measure(font, text, FontHeading, FontSpacingHeading)
 }
 
 // pulse oscillates 0..1 at the given frequency in Hz.
 func pulse(speed float64) float32 {
 	return 0.5 + 0.5*float32(math.Sin(rl.GetTime()*speed*math.Pi*2))
 }
+
+// pulseActiveActor / pulseHalo / pulseFlicker are the three canonical
+// breathing curves from UI_STANDARDS.md ("Pulse / breathing"). They are
+// the single source of truth so the active-actor frame, the selection
+// halo (cursor / target chevron), and the status flicker can't drift
+// apart into bespoke per-call-site amplitudes + frequencies. Each
+// re-expresses the documented `base + amp·sin(t·π·f)` in terms of
+// pulse(speed) (= 0.5 + 0.5·sin(t·speed·2π)), so speed = f/2 and the
+// offset/scale fold the documented base/amp:
+//
+//	active-actor: 0.70 + 0.30·sin(t·π·1.4)
+//	halo:         0.60 + 0.40·sin(t·π·2.0)
+//	flicker:      0.65 + 0.35·sin(t·π·2.6)
+func pulseActiveActor() float32 { return 0.40 + 0.60*pulse(0.7) }
+func pulseHalo() float32        { return 0.20 + 0.80*pulse(1.0) }
+func pulseFlicker() float32     { return 0.30 + 0.70*pulse(1.3) }
 
 // fadeColor returns col scaled by alpha multiplier in 0..1.
 func fadeColor(col color.RGBA, alpha float32) color.RGBA {
@@ -829,58 +902,18 @@ func hpFillColor(value, maxValue int) color.RGBA {
 	}
 }
 
-// barLabelMeasureCache memoizes rl.MeasureTextEx for short, constant
-// bar labels like "HP" and "MP". drawBar runs ~16 times per frame
-// across the party ribbon and enemy roster; the label measurement
-// is a cgo round-trip that returns the same value every time for a
-// given (font.Texture.ID, label) pair. Self-invalidates when the font
-// texture ID changes (font reload after a setting flip, etc.) — see
-// barLabelMeasureCacheFontID and the ID check in drawBar.
-var barLabelMeasureCache = make(map[string]rl.Vector2, 8)
-
-// barLabelMeasureCacheFontID tracks the font the cache was built
-// against. raylib's rl.Font carries a Texture2D ID; if it shifts,
-// the cached pixel widths are stale and the map is cleared.
-var barLabelMeasureCacheFontID uint32
+// barLabelMeasureCache backs the short constant bar labels ("HP"/"MP");
+// barValueMeasureCache backs the "10/20" value strings on the right edge.
+// drawBar runs ~16×/frame across the party ribbon + enemy roster.
+var barLabelMeasureCache measureCache
+var barValueMeasureCache measureCache
 
 func measureBarLabel(font rl.Font, label string) rl.Vector2 {
-	if font.Texture.ID != barLabelMeasureCacheFontID {
-		for k := range barLabelMeasureCache {
-			delete(barLabelMeasureCache, k)
-		}
-		barLabelMeasureCacheFontID = font.Texture.ID
-	}
-	if v, ok := barLabelMeasureCache[label]; ok {
-		return v
-	}
-	v := rl.MeasureTextEx(font, label, FontTiny, 1)
-	barLabelMeasureCache[label] = v
-	return v
+	return barLabelMeasureCache.measure(font, label, FontTiny, 1)
 }
 
-// barValueMeasureCache memoizes rl.MeasureTextEx for value strings
-// like "10/20" rendered to the right of each HP/MP bar. drawBar
-// produces ~14 of these per frame (party HP+MP + enemy roster); the
-// string changes only on HP/MP mutation, not 60 Hz, so caching by
-// the value text catches a long run of frames where it's stable.
-// The cache grows by one entry per unique value pair seen — small,
-// since most bars hover at a handful of common HP/MP pairs.
-var barValueMeasureCache = make(map[string]rl.Vector2, 32)
-var barValueMeasureCacheFontID uint32
-
 func measureBarValue(font rl.Font, valText string) rl.Vector2 {
-	if font.Texture.ID != barValueMeasureCacheFontID {
-		for k := range barValueMeasureCache {
-			delete(barValueMeasureCache, k)
-		}
-		barValueMeasureCacheFontID = font.Texture.ID
-	}
-	if v, ok := barValueMeasureCache[valText]; ok {
-		return v
-	}
-	v := rl.MeasureTextEx(font, valText, FontSmall, 1)
-	barValueMeasureCache[valText] = v
-	return v
+	return barValueMeasureCache.measure(font, valText, FontSmall, 1)
 }
 
 // drawBar renders a track + filled portion + thin outline, all rounded.

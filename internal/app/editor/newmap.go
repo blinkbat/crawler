@@ -114,8 +114,7 @@ func drawNewMapModal(s *State, font rl.Font, theme render.Theme) {
 		wText = s.numericBuf
 	}
 	drawTextField(font, l.widthValue, wText, s.focus == focusNewWidth)
-	drawButton(font, l.widthMinus, "-", false)
-	drawButton(font, l.widthPlus, "+", false)
+	drawStepperButtons(font, l.widthMinus, l.widthPlus)
 
 	drawLabel(font, "Height", rl.NewRectangle(l.card.X+20, l.heightValue.Y+(l.heightValue.Height-18)/2, 60, 18))
 	hText := fmt.Sprintf("%d", s.modalNewHeight)
@@ -123,8 +122,7 @@ func drawNewMapModal(s *State, font rl.Font, theme render.Theme) {
 		hText = s.numericBuf
 	}
 	drawTextField(font, l.heightValue, hText, s.focus == focusNewHeight)
-	drawButton(font, l.heightMinus, "-", false)
-	drawButton(font, l.heightPlus, "+", false)
+	drawStepperButtons(font, l.heightMinus, l.heightPlus)
 
 	// Floor section header + swatches.
 	drawLabel(font, "Default floor",
@@ -210,18 +208,13 @@ func updateNewMapModal(s *State) Action {
 		}
 	}
 
-	// Tab cycles between the width and height text fields. Mirrors the
-	// metadata panel's Tab cycle so muscle memory carries over.
-	if editorTabPressed() && (s.focus == focusNewWidth || s.focus == focusNewHeight) {
-		commitNumericInput(s)
-		if s.focus == focusNewWidth {
-			s.focus = focusNewHeight
-		} else {
-			s.focus = focusNewWidth
-		}
-		s.numericBuf = ""
-	}
-
+	// Tab cycles between the width and height fields — handled by
+	// updateNumericInput (via updateTextInput below), which commits the
+	// current field then cycleFocus()es to the next. This used to ALSO
+	// have an inline width↔height swap here, but it fired on the same
+	// Tab press as updateNumericInput's, double-swapping back to a no-op
+	// — so Tab silently did nothing. Routing solely through the shared
+	// cycleFocus both de-duplicates and makes Tab actually work.
 	if s.focus == focusNewWidth || s.focus == focusNewHeight {
 		updateTextInput(s)
 	}

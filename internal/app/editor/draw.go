@@ -19,6 +19,15 @@ const (
 	layerTabH  = float32(32)
 )
 
+// Entity-list (chest/pack contents) geometry, shared by drawEntityListRows
+// and entityListMaxRows so the painted rows and the fit calculation can't
+// drift: rows start entityListTop px below the card's top and step
+// entityListRowH px apart.
+const (
+	entityListTop  = float32(52)
+	entityListRowH = float32(22)
+)
+
 // layout recomputes screen rectangles each frame from the current window
 // size. Cell pixel size is the auto-fit size scaled by s.zoom; pan offsets
 // nudge the plot off-center so users can drag around large maps.
@@ -187,8 +196,8 @@ type doorEditLayout struct {
 
 func doorEditLayoutFor() doorEditLayout {
 	w, h := render.ScreenSizeF()
-	pw := float32(480)
-	ph := float32(424)
+	pw := doorEditModalW
+	ph := doorEditModalH
 	r := rl.NewRectangle((w-pw)/2, (h-ph)/2, pw, ph)
 	x := r.X + 16
 	fw := r.Width - 32
@@ -385,6 +394,16 @@ func drawButton(font rl.Font, r rl.Rectangle, label string, active bool) {
 		16, 1, text)
 }
 
+// drawStepperButtons paints the shared "−" / "+" adjuster pair for a
+// numeric stepper row (sidebar dims, new-map dims, custom-enemy stats).
+// The value cell differs per caller — an editable drawTextField vs a
+// drawReadonlyValue — so only the button pair, which was hand-repeated
+// at every stepper, is shared here.
+func drawStepperButtons(font rl.Font, minus, plus rl.Rectangle) {
+	drawButton(font, minus, "-", false)
+	drawButton(font, plus, "+", false)
+}
+
 // --- Layer tabs ------------------------------------------------------------
 
 func layerTabRect(s *State, i int) rl.Rectangle {
@@ -473,6 +492,7 @@ const (
 var paletteHints = []string{
 	"L-drag: paint",
 	"R-click: erase",
+	"R-click entity: edit/move/face",
 	"Shift+drag: rect",
 	"Ctrl+click: fill region",
 	"Ctrl+Shift+F: fill all",
@@ -851,8 +871,11 @@ func handleMetadataClick(s *State, p rl.Vector2) bool {
 	}
 	for i, br := range mr.matButtons {
 		if pointIn(p, br) {
-			s.area.Materials = core.MaterialOptions[i]
-			s.dirty = true
+			if s.area.Materials != core.MaterialOptions[i] {
+				pushUndo(s)
+				s.area.Materials = core.MaterialOptions[i]
+				s.dirty = true
+			}
 			return true
 		}
 	}
@@ -909,7 +932,7 @@ func (s *State) activeFieldRect() rl.Rectangle {
 }
 
 func drawMetadata(s *State, font rl.Font, theme render.Theme) {
-	rl.DrawRectangleRec(s.rect.metadata, rl.NewColor(24, 28, 38, 255))
+	rl.DrawRectangleRec(s.rect.metadata, bgPaletteCol)
 	rl.DrawLineEx(
 		rl.NewVector2(s.rect.metadata.X, s.rect.metadata.Y),
 		rl.NewVector2(s.rect.metadata.X, s.rect.metadata.Y+s.rect.metadata.Height),
@@ -956,11 +979,9 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 		hText = "H: " + s.numericBuf
 	}
 	drawTextField(font, mr.widthValue, wText, s.focus == focusWidth)
-	drawButton(font, mr.widthMinus, "-", false)
-	drawButton(font, mr.widthPlus, "+", false)
+	drawStepperButtons(font, mr.widthMinus, mr.widthPlus)
 	drawTextField(font, mr.heightValue, hText, s.focus == focusHeight)
-	drawButton(font, mr.heightMinus, "-", false)
-	drawButton(font, mr.heightPlus, "+", false)
+	drawStepperButtons(font, mr.heightMinus, mr.heightPlus)
 
 	// Player start coord + facing intentionally live on the PlayerStart
 	// entity instance now, not in the area-wide sidebar. Right-click the
@@ -1087,16 +1108,15 @@ func drawGrid(s *State, font rl.Font) {
 		zMax = s.area.Height
 	}
 
-	// Topmost-char overlay: at zooms where a glyph fits, paint the
-	// tile-char of the highest authored layer on each cell so the author
-	// can see at a glance what's actually there without hunting through
-	// the brush palette. Priority: prop > decor > wall > floor; empty
-	// sentinels (FloorAuto / DecorAuto / DecorEmpty / TilePropEmpty)
-	// produce no glyph. Threshold matches the axis-tick label threshold
-	// so the chrome turns on together. Layer alphas are blended in so a
-	// dimmed layer's glyph dims with its swatch.
+	// Active-layer char overlay: at zooms where a glyph fits, paint the
+	// tile-char of the CURRENTLY SELECTED layer on each cell so the author
+	// can read what's authored on the layer they're editing without every
+	// other layer's chars competing for attention (which read as noise).
+	// Off by default; ALT-tap toggles it (see showTileGlyphs). Empty
+	// sentinels produce no glyph. Threshold matches the axis-tick label
+	// threshold so the chrome turns on together.
 	const charOverlayMinCell = float32(14)
-	showCharOverlay := cell >= charOverlayMinCell && !s.hideTileGlyphs
+	showCharOverlay := cell >= charOverlayMinCell && s.showTileGlyphs
 	charFontSize := cell * 0.55
 	charShadow := rl.NewColor(8, 10, 14, 200)
 	charFG := rl.NewColor(248, 250, 252, 235)
@@ -1124,8 +1144,8 @@ func drawGrid(s *State, font rl.Font) {
 				drawCeilingHash(r, cell, fadeAlpha(ceilingColor(), ceilingAlpha))
 			}
 			if showCharOverlay {
-				if ch, alpha, ok := topmostTileGlyph(s, x, z, propAlpha, decorAlpha, wallAlpha, floorAlpha); ok {
-					drawTileGlyph(font, r, cell, charFontSize, ch, fadeAlpha(charFG, alpha), fadeAlpha(charShadow, alpha))
+				if ch, ok := currentLayerGlyph(s, x, z); ok {
+					drawTileGlyph(font, r, cell, charFontSize, ch, charFG, charShadow)
 				}
 			}
 		}
@@ -1488,7 +1508,7 @@ func packMarkerColor(kind core.EnemyKind) rl.Color {
 	if col, ok := entityBrushColors[kind]; ok {
 		return col
 	}
-	return rl.NewColor(180, 180, 180, 255)
+	return entityFallbackColor
 }
 
 // packMarkerInitial returns the single uppercase letter drawn at the
@@ -1631,27 +1651,38 @@ func drawCeilingHash(r rl.Rectangle, cell float32, col color.RGBA) {
 	rl.DrawLineEx(rl.NewVector2(r.X+cell, r.Y), rl.NewVector2(r.X, r.Y+cell), t, col)
 }
 
-// topmostTileGlyph returns the tile char to render as the cell's
-// overlay glyph, along with the per-layer alpha to use for fade
-// compositing. Priority — props > decor > walls > floor — matches the
-// painter order in drawGrid so the glyph names the visually topmost
-// authored content. Empty sentinels (TilePropEmpty / DecorAuto /
-// DecorEmpty / FloorAuto) yield ok==false so blank tiles stay blank
-// instead of dotting the grid with '.'/'_'.
-func topmostTileGlyph(s *State, x, z int, propA, decorA, wallA, floorA float32) (byte, float32, bool) {
-	if p := s.area.Props[z][x]; core.IsPropChar(p) {
-		return p, propA, true
+// currentLayerGlyph returns the tile char to overlay for the ACTIVE
+// layer's cell at (x, z), or ok==false when the cell is empty (or the
+// active layer carries no per-tile chars — Entities, whose content is
+// drawn as markers). Showing only the active layer keeps the overlay
+// readable; the old "topmost char across every layer" version was too
+// noisy. Empty sentinels (non-rock walls / FloorAuto / DecorAuto /
+// DecorEmpty / no-prop / no-ceiling) yield ok==false so blank cells
+// stay blank instead of dotting the grid.
+func currentLayerGlyph(s *State, x, z int) (byte, bool) {
+	switch s.layer {
+	case LayerWalls:
+		if w := s.area.Walls[z][x]; w == core.TileRock {
+			return w, true
+		}
+	case LayerFloor:
+		if f := s.area.Floor[z][x]; f != core.FloorAuto && f != 0 {
+			return f, true
+		}
+	case LayerDecor:
+		if d := s.area.Decor[z][x]; d != core.DecorAuto && d != core.DecorEmpty {
+			return d, true
+		}
+	case LayerProps:
+		if p := s.area.Props[z][x]; core.IsPropChar(p) {
+			return p, true
+		}
+	case LayerCeiling:
+		if s.area.CeilingAt(x, z) {
+			return s.area.Ceiling[z][x], true
+		}
 	}
-	if d := s.area.Decor[z][x]; d != core.DecorAuto && d != core.DecorEmpty {
-		return d, decorA, true
-	}
-	if s.area.Walls[z][x] == core.TileRock {
-		return core.TileRock, wallA, true
-	}
-	if f := s.area.Floor[z][x]; f != core.FloorAuto && f != 0 {
-		return f, floorA, true
-	}
-	return 0, 0, false
+	return 0, false
 }
 
 // drawTileGlyph paints a single-character glyph centered in `r` with a
@@ -1722,6 +1753,9 @@ func drawStatus(s *State, font rl.Font, theme render.Theme) {
 			alpha = 1
 		}
 		col := theme.TextPrimary
+		if e.warn {
+			col = theme.BorderDanger
+		}
 		col.A = uint8(float32(col.A) * (0.4 + 0.6*alpha))
 		render.DrawTextWithShadow(font, e.msg, r.X+12, y, 14, col)
 	}
@@ -1730,20 +1764,6 @@ func drawStatus(s *State, font rl.Font, theme render.Theme) {
 func drawModalVeil(theme render.Theme) {
 	w, h := render.ScreenSize()
 	rl.DrawRectangle(0, 0, w, h, theme.SurfaceVeil)
-}
-
-// joinHintLabels builds the modal hint footer string by concatenating
-// each rule's Label with a trailing "Esc close", separated by spaces.
-// Shared by drawPackEditModal and drawChestEditModal so a future entity
-// editor only writes its add-rule labels and trails through this helper.
-// `labels` is the per-rule label list (typically built by ranging over an
-// add-rules table); `trail` are tokens appended after the labels in
-// order.
-func joinHintLabels(labels []string, trail ...string) string {
-	all := make([]string, 0, len(labels)+len(trail))
-	all = append(all, labels...)
-	all = append(all, trail...)
-	return strings.Join(all, "   ")
 }
 
 func drawModalCard(theme render.Theme, pw, ph float32, accent rl.Color) rl.Rectangle {
@@ -1774,7 +1794,7 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 	} else if s.modalConfirmDelete {
 		header = "DELETE MAP"
 	}
-	r := drawModalHeader(font, theme, 460, 460, header, theme.BorderStrong)
+	r := drawModalHeader(font, theme, openModalW, openModalH, header, theme.BorderStrong)
 
 	if len(s.modalPaths) == 0 {
 		rl.DrawTextEx(font, "(no .map files in maps/)", rl.NewVector2(r.X+16, r.Y+50), 14, 1, theme.TextMuted)
@@ -1831,12 +1851,33 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 		rl.NewVector2(r.X+16, r.Y+r.Height-26), 12, 1, theme.TextHint)
 }
 
+// Modal card dimensions. saveAs is named because its field-rect helper
+// and draw call BOTH need the exact size (they must stay in lockstep, or
+// the input field lands off the card); the rest are named so the modal
+// sizes live with the other chrome constants instead of as bare literals
+// scattered across the draw functions. The Validate modal sizes its
+// height dynamically from the row count, so only its width is a const.
+const (
+	saveAsModalW = float32(420)
+	saveAsModalH = float32(160)
+
+	doorEditModalW     = float32(480)
+	doorEditModalH     = float32(424)
+	openModalW         = float32(460)
+	openModalH         = float32(460)
+	entityEditModalW   = float32(480) // pack-edit + chest-edit share this size
+	entityEditModalH   = float32(440)
+	escMenuModalW      = float32(380)
+	escMenuModalH      = float32(178)
+	confirmDirtyModalW = float32(460)
+	confirmDirtyModalH = float32(188)
+	validateModalW     = float32(560)
+)
+
 func saveAsFieldRect(s *State) rl.Rectangle {
 	w, h := render.ScreenSizeF()
-	pw := float32(420)
-	ph := float32(160)
-	r := rl.NewRectangle((w-pw)/2, (h-ph)/2, pw, ph)
-	return rl.NewRectangle(r.X+16, r.Y+58, pw-32, 28)
+	r := rl.NewRectangle((w-saveAsModalW)/2, (h-saveAsModalH)/2, saveAsModalW, saveAsModalH)
+	return rl.NewRectangle(r.X+16, r.Y+58, saveAsModalW-32, 28)
 }
 
 func drawSaveAsModal(s *State, font rl.Font, theme render.Theme) {
@@ -1846,7 +1887,7 @@ func drawSaveAsModal(s *State, font rl.Font, theme render.Theme) {
 		accent = theme.BorderDanger
 		title = "FILE EXISTS"
 	}
-	r := drawModalHeader(font, theme, 420, 160, title, accent)
+	r := drawModalHeader(font, theme, saveAsModalW, saveAsModalH, title, accent)
 
 	if s.awaitingOverwrite {
 		rl.DrawTextEx(font, fmt.Sprintf("Overwrite %s?", core.MapPath(s.modalFilename)),
@@ -1886,15 +1927,9 @@ func drawPackEditModal(s *State, font rl.Font, theme render.Theme) {
 		return
 	}
 	pack := s.area.PackSpawns[s.modalPackIdx]
-	r := drawModalHeader(font, theme, 380, 320,
+	r := drawModalHeader(font, theme, entityEditModalW, entityEditModalH,
 		"PACK AT "+core.TileCoord(pack.TileX, pack.TileZ),
 		theme.BorderActive)
-
-	drawEntityListRows(font, theme, r, len(pack.Members), s.modalCursor,
-		"(empty — close to drop)",
-		func(i int) string {
-			return core.PackMemberDisplayName(s.area, pack, i)
-		})
 
 	// Leader hint: the rendered field icon for the pack is the
 	// highest-Tier member (core.PackSpawnLeaderSlot). Tell the author so
@@ -1906,30 +1941,25 @@ func drawPackEditModal(s *State, font rl.Font, theme render.Theme) {
 			leaderText = "Leader (highest tier): " + core.PackMemberDisplayName(s.area, pack, leaderIdx)
 		}
 	}
-	rl.DrawTextEx(font, leaderText,
-		rl.NewVector2(r.X+16, r.Y+r.Height-78), 12, 1, theme.TextMuted)
-
-	// AI mode readout — cycled by 'A' in updatePackEditModal. New packs
-	// default to None (stationary); the editor never opens with anything
-	// else until the author explicitly cycles.
-	rl.DrawTextEx(font, "AI: "+core.PackAILabel(pack.AI),
-		rl.NewVector2(r.X+16, r.Y+r.Height-60), 12, 1, theme.TextMuted)
-
-	rl.DrawTextEx(font, hintPackEditNav,
-		rl.NewVector2(r.X+16, r.Y+r.Height-42), 12, 1, theme.TextHint)
 	// Build the add-shortcuts hint from packAddRules so display stays in
 	// sync with the input handler; adding a new enemy kind is one row
 	// in packAddRules and both the keymap and this label update.
-	addLabels := make([]string, 0, len(packAddRules)+2)
+	addLabels := make([]string, 0, len(packAddRules)+3)
 	for _, rule := range packAddRules {
 		addLabels = append(addLabels, rule.Label)
 	}
 	if def, ok := selectedCustomEnemyForPack(s); ok {
 		addLabels = append(addLabels, "C add "+def.Name)
 	}
-	addLabels = append(addLabels, "A cycle AI")
-	rl.DrawTextEx(font, joinHintLabels(addLabels, hintEscClose),
-		rl.NewVector2(r.X+16, r.Y+r.Height-24), 12, 1, theme.TextHint)
+	addLabels = append(addLabels, "A cycle AI", hintEscClose)
+	footerTop := drawEntityModalFooter(font, theme, r,
+		[]string{leaderText, "AI: " + core.PackAILabel(pack.AI)}, hintPackEditNav, addLabels)
+
+	drawEntityListRows(font, theme, r, len(pack.Members), s.modalCursor, entityListMaxRows(r, footerTop),
+		"(empty — close to drop)",
+		func(i int) string {
+			return core.PackMemberDisplayName(s.area, pack, i)
+		})
 }
 
 // drawChestEditModal renders the inline chest editor: header with
@@ -1942,44 +1972,115 @@ func drawChestEditModal(s *State, font rl.Font, theme render.Theme) {
 		return
 	}
 	chest := s.area.ChestSpawns[s.modalChestIdx]
-	r := drawModalHeader(font, theme, 380, 320,
+	r := drawModalHeader(font, theme, entityEditModalW, entityEditModalH,
 		"CHEST AT "+core.TileCoord(chest.TileX, chest.TileZ),
 		theme.BorderActive)
 
-	drawEntityListRows(font, theme, r, len(chest.Items), s.modalCursor,
+	addLabels := make([]string, 0, len(chestAddRules)+1)
+	for _, rule := range chestAddRules {
+		addLabels = append(addLabels, rule.Label)
+	}
+	addLabels = append(addLabels, hintEscClose)
+	footerTop := drawEntityModalFooter(font, theme, r, nil, hintChestEditNav, addLabels)
+
+	drawEntityListRows(font, theme, r, len(chest.Items), s.modalCursor, entityListMaxRows(r, footerTop),
 		"(empty — adds reveal it as pre-looted in game)",
 		func(i int) string {
 			return core.ItemInfo(chest.Items[i]).Name
 		})
-
-	rl.DrawTextEx(font, hintChestEditNav,
-		rl.NewVector2(r.X+16, r.Y+r.Height-42), 12, 1, theme.TextHint)
-	addLabels := make([]string, 0, len(chestAddRules))
-	for _, rule := range chestAddRules {
-		addLabels = append(addLabels, rule.Label)
-	}
-	rl.DrawTextEx(font, joinHintLabels(addLabels, hintEscClose),
-		rl.NewVector2(r.X+16, r.Y+r.Height-24), 12, 1, theme.TextHint)
 }
 
-func drawEntityListRows(font rl.Font, theme render.Theme, r rl.Rectangle, count, cursor int, emptyText string, rowText func(int) string) {
+// entityListMaxRows returns how many 22px list rows fit between the list
+// top and the footer block, so the scrolling list never collides with it.
+func entityListMaxRows(r rl.Rectangle, footerTop float32) int {
+	avail := footerTop - (r.Y + entityListTop) - 4
+	if avail < entityListRowH {
+		return 1
+	}
+	return int(avail / entityListRowH)
+}
+
+// drawEntityListRows draws the chest/pack item list, scrolled to keep the
+// cursor visible within maxRows so a long list (a full chest, a big pack)
+// never overflows the card or collides with the footer. "+N more"
+// indicators show when content is clipped above / below the window.
+func drawEntityListRows(font rl.Font, theme render.Theme, r rl.Rectangle, count, cursor, maxRows int, emptyText string, rowText func(int) string) {
 	if count == 0 {
 		rl.DrawTextEx(font, emptyText,
-			rl.NewVector2(r.X+16, r.Y+52), 14, 1, theme.TextHint)
+			rl.NewVector2(r.X+16, r.Y+entityListTop), 14, 1, theme.TextHint)
 		return
 	}
-	const rowH = float32(22)
-	for i := 0; i < count; i++ {
+	if maxRows < 1 {
+		maxRows = 1
+	}
+	top, end := scrollWindow(cursor, count, maxRows)
+	y := r.Y + entityListTop
+	if top > 0 {
+		rl.DrawTextEx(font, fmt.Sprintf("▲ %d more", top), rl.NewVector2(r.X+24, y-16), 12, 1, theme.TextHint)
+	}
+	for i := top; i < end; i++ {
 		text := rowText(i)
 		col := theme.TextMuted
 		if i == cursor {
 			col = theme.BorderActive
 			text = "> " + text
 		}
-		render.DrawTextWithShadow(font, text,
-			r.X+24, r.Y+52+float32(i)*rowH,
-			16, col)
+		render.DrawTextWithShadow(font, text, r.X+24, y, 16, col)
+		y += entityListRowH
 	}
+	if end < count {
+		rl.DrawTextEx(font, fmt.Sprintf("▼ %d more", count-end), rl.NewVector2(r.X+24, y), 12, 1, theme.TextHint)
+	}
+}
+
+// wrapHintTokens splits hint tokens across as many lines as needed so each
+// line fits maxW — used by the entity-edit footers whose add-key legend
+// grew past the card width as items/enemy kinds were added.
+func wrapHintTokens(font rl.Font, tokens []string, maxW, fontSize float32) []string {
+	var lines []string
+	cur := ""
+	for _, tok := range tokens {
+		trial := tok
+		if cur != "" {
+			trial = cur + "   " + tok
+		}
+		if cur != "" && rl.MeasureTextEx(font, trial, fontSize, 1).X > maxW {
+			lines = append(lines, cur)
+			cur = tok
+		} else {
+			cur = trial
+		}
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	return lines
+}
+
+// drawEntityModalFooter draws the bottom block of an entity-edit modal —
+// optional info lines (leader / AI), the nav hint, then the add-key
+// legend wrapped to the card width — bottom-anchored, and returns the Y
+// where the block starts so the caller can size the scrolling list above
+// it. addTokens are the per-item/enemy add labels (already including any
+// trailing "Esc close").
+func drawEntityModalFooter(font rl.Font, theme render.Theme, r rl.Rectangle, info []string, nav string, addTokens []string) float32 {
+	const lineH = float32(16)
+	legend := wrapHintTokens(font, addTokens, r.Width-32, 12)
+	lines := make([]string, 0, len(info)+1+len(legend))
+	lines = append(lines, info...)
+	lines = append(lines, nav)
+	lines = append(lines, legend...)
+	top := r.Y + r.Height - 10 - float32(len(lines))*lineH
+	y := top
+	for i, line := range lines {
+		col := theme.TextHint
+		if i < len(info) {
+			col = theme.TextMuted
+		}
+		rl.DrawTextEx(font, line, rl.NewVector2(r.X+16, y), 12, 1, col)
+		y += lineH
+	}
+	return top
 }
 
 // drawDoorEditModal renders the per-door editor. Mirrors the save-as
@@ -2043,7 +2144,7 @@ func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 // keystroke dismisses.
 func drawValidateModal(s *State, font rl.Font, theme render.Theme) {
 	rows := s.modalValidateRows
-	pw := float32(560)
+	pw := validateModalW
 	ph := float32(56 + float32(len(rows))*22 + 56)
 	if ph < 160 {
 		ph = 160
@@ -2076,7 +2177,7 @@ func drawValidateModal(s *State, font rl.Font, theme render.Theme) {
 // Body is intentionally minimal so the menu doesn't cover the area
 // the author was just looking at; sits centered.
 func drawEscMenuModal(s *State, font rl.Font, theme render.Theme) {
-	r := drawModalHeader(font, theme, 380, 178, "EDITOR MENU", theme.BorderActive)
+	r := drawModalHeader(font, theme, escMenuModalW, escMenuModalH, "EDITOR MENU", theme.BorderActive)
 	render.DrawTextWithShadow(font, "D  "+render.DisplayMenuRowLabel(), r.X+24, r.Y+58, 14, theme.TextPrimary)
 	render.DrawTextWithShadow(font, "C  Continue editing", r.X+24, r.Y+86, 14, theme.TextPrimary)
 	render.DrawTextWithShadow(font, "E  Exit to Title", r.X+24, r.Y+114, 14, theme.BorderDanger)
@@ -2085,7 +2186,7 @@ func drawEscMenuModal(s *State, font rl.Font, theme render.Theme) {
 }
 
 func drawConfirmDirtyModal(s *State, font rl.Font, theme render.Theme) {
-	r := drawModalHeader(font, theme, 460, 188, "UNSAVED CHANGES", theme.BorderActive)
+	r := drawModalHeader(font, theme, confirmDirtyModalW, confirmDirtyModalH, "UNSAVED CHANGES", theme.BorderActive)
 
 	id := core.MapIDFromPath(s.area.Path)
 	if id == "" {

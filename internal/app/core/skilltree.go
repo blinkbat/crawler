@@ -9,8 +9,8 @@ package core
 //
 // Design contract: each tier is ONE numeric/bool delta applied to a
 // SkillEffect field that already exists (Damage, BurnChance, etc.) or
-// a tier-only field below (AOECapBonus, HealBonus,
-// StealBonusDamage). Keeping the delta surface small means the apply
+// a tier-only field below (HealBonus, StealBonusDamage). Keeping the
+// delta surface small means the apply
 // path in battle/actions.go is:
 //
 //   effect := core.EffectiveSkillEffect(m, skill)
@@ -61,14 +61,6 @@ type SkillEffectDelta struct {
 	StunMaxTurns   int
 	SleepMinTurns  int
 	SleepMaxTurns  int
-	// AOECapBonus extends the target cap of an AoE skill (Swipe,
-	// Whirlwind, Arc Bolt, Mass Mend). Read by the apply path's
-	// target loop after the base cap has been resolved; 0 = no
-	// change. Battle today doesn't cap AoE targets, but the field
-	// is here so future encounter design ("Swipe T2: hit one more
-	// enemy when the pack has 4+") plugs in without touching the
-	// per-skill apply code.
-	AOECapBonus int
 	// StealBonusDamage is the STR-multiplier damage dealt on a
 	// successful steal (Thief Steal T3). 0 = the steal stays a
 	// pure utility cast.
@@ -89,7 +81,7 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	// ── Warrior ──────────────────────────────────────────────
 	SkillSwipe: {
 		{Tier: 1, Label: "+2 damage", Description: "+2 base damage to every hit in the cleave.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
-		{Tier: 2, Label: "+1 enemy hit", Description: "Cleave reaches one extra enemy in larger packs.", Cost: 1, Effect: SkillEffectDelta{AOECapBonus: 1}},
+		{Tier: 2, Label: "+2 damage", Description: "+2 more base damage to the whole cleave.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
 		{Tier: 3, Label: "+2 damage", Description: "Another +2 base damage. Whole pack feels it.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
 	},
 	SkillCrushingBlow: {
@@ -99,7 +91,7 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	},
 	SkillWhirlwind: {
 		{Tier: 1, Label: "+2 damage", Description: "+2 base damage per target on the spin.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
-		{Tier: 2, Label: "+1 enemy hit", Description: "Reach one extra enemy on the spin.", Cost: 1, Effect: SkillEffectDelta{AOECapBonus: 1}},
+		{Tier: 2, Label: "+2 damage", Description: "+2 more base damage per target on the spin.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
 		{Tier: 3, Label: "+2 damage", Description: "Another +2 base damage. Excellent timing eviscerates the pack.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
 	},
 	// ── Cleric ───────────────────────────────────────────────
@@ -197,11 +189,11 @@ func SkillTierOf(m *PartyMember, s SkillID) int {
 	return t
 }
 
-// SkillTierUpgradeFor returns the upgrade definition for a skill's
+// skillTierUpgradeFor returns the upgrade definition for a skill's
 // tier (1..MaxSkillTier). Returns ok=false when the tier index is out
 // of range; the UI uses this to grey out the "next purchase" line
 // when the tree is fully invested.
-func SkillTierUpgradeFor(s SkillID, tier int) (SkillTierUpgrade, bool) {
+func skillTierUpgradeFor(s SkillID, tier int) (SkillTierUpgrade, bool) {
 	if tier < 1 || tier > MaxSkillTier {
 		return SkillTierUpgrade{}, false
 	}
@@ -222,7 +214,7 @@ func SkillNextTierCost(m *PartyMember, s SkillID) (int, bool) {
 	if current >= MaxSkillTier {
 		return 0, false
 	}
-	up, ok := SkillTierUpgradeFor(s, current+1)
+	up, ok := skillTierUpgradeFor(s, current+1)
 	if !ok {
 		return 0, false
 	}
@@ -238,6 +230,12 @@ func SkillNextTierCost(m *PartyMember, s SkillID) (int, bool) {
 //
 // On success the SkillTiers map is allocated lazily, SkillPoints
 // decremented by the upgrade's Cost, and the new tier recorded.
+//
+// Deferred: nothing calls this yet — the Skills-panel buy UI that would
+// invoke it (and SkillNextTierCost) is not built. Kept as the intended
+// public spend entry point; the tier table and the combat reads through
+// EffectiveSkillEffect / SkillTierMod are already live, so only the
+// spend half awaits its UI.
 func SpendSkillTier(m *PartyMember, s SkillID) bool {
 	if m == nil {
 		return false
@@ -246,7 +244,7 @@ func SpendSkillTier(m *PartyMember, s SkillID) bool {
 	if current >= MaxSkillTier {
 		return false
 	}
-	up, ok := SkillTierUpgradeFor(s, current+1)
+	up, ok := skillTierUpgradeFor(s, current+1)
 	if !ok {
 		return false
 	}
@@ -279,7 +277,7 @@ func EffectiveSkillEffect(m *PartyMember, s SkillID) SkillEffect {
 	}
 	tier := SkillTierOf(m, s)
 	for i := 1; i <= tier; i++ {
-		up, ok := SkillTierUpgradeFor(s, i)
+		up, ok := skillTierUpgradeFor(s, i)
 		if !ok {
 			break
 		}
@@ -342,10 +340,9 @@ func SkillHealFor(m *PartyMember, s SkillID) int {
 
 // SkillTierMod returns the combined delta of every purchased tier
 // for the bool/integer "extension" fields that don't live in the
-// base SkillEffect — AOECapBonus, StealBonusDamage,
-// CritDoubleOnExcellent. The apply path reads these alongside the
-// SkillEffect to decide tier-only behaviors (extra AoE targets,
-// crit doubles).
+// base SkillEffect — StealBonusDamage, CritDoubleOnExcellent. The
+// apply path reads these alongside the SkillEffect to decide
+// tier-only behaviors (steal cuts, crit doubles).
 func SkillTierMod(m *PartyMember, s SkillID) SkillEffectDelta {
 	var mod SkillEffectDelta
 	if m == nil {
@@ -353,12 +350,11 @@ func SkillTierMod(m *PartyMember, s SkillID) SkillEffectDelta {
 	}
 	tier := SkillTierOf(m, s)
 	for i := 1; i <= tier; i++ {
-		up, ok := SkillTierUpgradeFor(s, i)
+		up, ok := skillTierUpgradeFor(s, i)
 		if !ok {
 			break
 		}
 		d := up.Effect
-		mod.AOECapBonus += d.AOECapBonus
 		mod.StealBonusDamage += d.StealBonusDamage
 		if d.CritDoubleOnExcellent {
 			mod.CritDoubleOnExcellent = true

@@ -107,13 +107,19 @@ func WriteWAV(name string, pcm []int16) (string, error) {
 // underlying os.Remove error verbatim so the caller can decide whether
 // to flash.
 func DeleteSound(name string) error {
-	if err := os.Remove(SoundPath(name)); err != nil {
+	// Sanitize before touching the filesystem so a crafted name can't
+	// path-traverse out of maps/sounds/ via os.Remove.
+	clean := SanitizeName(name)
+	if clean == "" {
+		return fmt.Errorf("invalid sound name")
+	}
+	if err := os.Remove(SoundPath(clean)); err != nil {
 		return err
 	}
 	assigns := LoadAssignments()
 	changed := false
 	for cue, file := range assigns {
-		if file == name {
+		if file == clean {
 			delete(assigns, cue)
 			changed = true
 		}
@@ -143,7 +149,10 @@ func LoadAssignments() map[string]string {
 			continue
 		}
 		cue := strings.TrimSpace(line[:eq])
-		name := strings.TrimSpace(line[eq+1:])
+		// Sanitize the filename stem at parse time so a hand-edited
+		// assignments.txt can't smuggle a path-traversal value into the
+		// SoundPath join downstream (loadCueFromDisk / PreviewFile).
+		name := SanitizeName(strings.TrimSpace(line[eq+1:]))
 		if cue == "" || name == "" {
 			continue
 		}

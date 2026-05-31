@@ -168,7 +168,7 @@ func DrawChestModal(g core.GameState, assets Resources) {
 		rowY += rowH
 	}
 	rowRect := func(y int32) rl.Rectangle {
-		return rl.NewRectangle(float32(rowX-6), float32(y-4), float32(rowW+12), float32(rowH))
+		return SelectionRowRect(rowX, y, rowW, rowH)
 	}
 	for i, st := range stacks {
 		focused := g.ChestMenuIndex == i

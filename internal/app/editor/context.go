@@ -274,6 +274,7 @@ func runContextItem(s *State, kind ctxItemKind) {
 		s.area.PackSpawns = removePackAt(s.area.PackSpawns, x, z)
 		if len(s.area.PackSpawns) != before {
 			s.dirty = true
+			s.flash("Deleted pack at " + core.TileCoord(x, z))
 		}
 	case ctxItemEditChest:
 		if idx := core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z); idx >= 0 {
@@ -285,6 +286,7 @@ func runContextItem(s *State, kind ctxItemKind) {
 		s.area.ChestSpawns = removeChestSpawnAt(s.area.ChestSpawns, x, z)
 		if len(s.area.ChestSpawns) != before {
 			s.dirty = true
+			s.flash("Deleted chest at " + core.TileCoord(x, z))
 		}
 	case ctxItemEditDoor:
 		if idx := core.DoorSpawnIndexAt(s.area.DoorSpawns, x, z); idx >= 0 {
@@ -296,9 +298,10 @@ func runContextItem(s *State, kind ctxItemKind) {
 		s.area.DoorSpawns = removeDoorAt(s.area.DoorSpawns, x, z)
 		if len(s.area.DoorSpawns) != before {
 			s.dirty = true
+			s.flash("Deleted door at " + core.TileCoord(x, z))
 		}
 	case ctxItemMoveStartHere:
-		if s.area.Walls[z][x] == core.TileRock {
+		if s.area.WallAt(x, z) {
 			s.flash("Player start needs an open cell")
 			return
 		}
@@ -306,7 +309,7 @@ func runContextItem(s *State, kind ctxItemKind) {
 			s.flash("Cell is occupied by a prop")
 			return
 		}
-		if s.area.Floor[z][x] == core.FloorDeepWater {
+		if core.IsBlockingFloor(s.area.Floor[z][x]) {
 			s.flash("Player start can't sit on deep water")
 			return
 		}
@@ -322,6 +325,11 @@ func runContextItem(s *State, kind ctxItemKind) {
 		setStartFacing(s, core.South)
 	case ctxItemStartFacingW:
 		setStartFacing(s, core.West)
+	default:
+		// Every ctxItemKind needs a case here (see the kind enum's doc).
+		// Fail closed like the layer switches (applyTool / activeGrid)
+		// rather than letting a new kind's menu row silently no-op.
+		panic(fmt.Sprintf("editor: runContextItem has no case for ctxItemKind %d", int(kind)))
 	}
 }
 

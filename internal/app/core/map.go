@@ -365,7 +365,7 @@ func (a AreaDefinition) BlockedAt(x, z int) bool {
 	if IsPropChar(a.Props[z][x]) && !PropIsNonBlocking(a.Props[z][x]) {
 		return true
 	}
-	return a.Floor[z][x] == FloorDeepWater
+	return IsBlockingFloor(a.Floor[z][x])
 }
 
 // PropIsNonBlocking reports whether a prop char, despite being a valid
@@ -766,12 +766,31 @@ func DecorTileChars() []byte {
 	return out
 }
 
+// blockingFloorChars is the single source of truth for floor-layer
+// chars that block movement. BlockedAt (the gate), IsBlockingFloor (the
+// per-char rule), and BlockingFloorChars (the registry the minimap +
+// init asserts read) all derive from it, so a future blocker (lava,
+// void) is one append here rather than three hand-synced sites.
+var blockingFloorChars = []byte{FloorDeepWater}
+
+// IsBlockingFloor reports whether a floor-layer char blocks movement.
+// Shared by BlockedAt and the editor placement checks so the gate and
+// the registry can't drift.
+func IsBlockingFloor(c byte) bool {
+	for _, b := range blockingFloorChars {
+		if b == c {
+			return true
+		}
+	}
+	return false
+}
+
 // BlockingFloorChars returns every floor-layer char that BlockedAt
-// reports true for. Today that's just FloorDeepWater; the slice exists
-// so callers (minimap color coverage, debug overlays) don't have to
-// open-code the set and a future blocker (lava, void) is one append.
+// reports true for (today just FloorDeepWater). Returns a fresh copy so
+// callers (minimap color coverage, init asserts) can't mutate the
+// canonical set.
 func BlockingFloorChars() []byte {
-	return []byte{FloorDeepWater}
+	return append([]byte(nil), blockingFloorChars...)
 }
 
 // floorTileCharList enumerates every floor-layer char with a defined
@@ -783,14 +802,6 @@ var floorTileCharList = []byte{
 	FloorGrass, FloorDirt, FloorDarkGrass, FloorStone,
 	FloorCobble, FloorPlank, FloorWater, FloorDeepWater,
 	FloorSand, FloorSnow,
-}
-
-// FloorTileChars returns the canonical list of named floor-layer
-// chars as a defensive copy. Mirrors PropTileChars / DecorTileChars.
-func FloorTileChars() []byte {
-	out := make([]byte, len(floorTileCharList))
-	copy(out, floorTileCharList)
-	return out
 }
 
 // TileLayer enumerates the four authored grid layers that carry a
@@ -814,7 +825,7 @@ const (
 // powers TileLabel. Sentinels (empty/auto chars) map to "" so the
 // debug overlay can skip them without an extra branch at the call
 // site. The init() block below asserts that every char in the
-// canonical FloorTileChars / DecorTileChars / PropTileChars / walls /
+// canonical floorTileCharList / DecorTileChars / PropTileChars / walls /
 // ceiling sets has an entry — adding a new tile const without a
 // label now panics at startup instead of returning "?" silently.
 var tileLabelTable = map[TileLayer]map[byte]string{

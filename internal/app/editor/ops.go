@@ -38,7 +38,7 @@ func footprintPlaceable(s *State, x, z int, footprint []core.MultiTileOffset) bo
 		if !s.area.InBounds(fx, fz) {
 			return false
 		}
-		if s.area.Walls[fz][fx] == core.TileRock {
+		if s.area.WallAt(fx, fz) {
 			return false
 		}
 		if s.area.StartTileX == fx && s.area.StartTileZ == fz {
@@ -107,7 +107,7 @@ func applyDecorBrush(s *State, x, z int, c byte) {
 				s.flash("Footprint extends off the map")
 				return
 			}
-			if s.area.Walls[fz][fx] == core.TileRock {
+			if s.area.WallAt(fx, fz) {
 				s.flash("Footprint cell is a wall")
 				return
 			}
@@ -130,7 +130,7 @@ func applyDecorBrush(s *State, x, z int, c byte) {
 		}
 		return
 	}
-	if s.area.Walls[z][x] == core.TileRock {
+	if s.area.WallAt(x, z) {
 		s.flash("Decor needs an open cell")
 		return
 	}
@@ -163,7 +163,7 @@ func applyPropBrush(s *State, x, z int, c byte) {
 				s.flash("Footprint extends off the map")
 				return
 			}
-			if s.area.Walls[fz][fx] == core.TileRock {
+			if s.area.WallAt(fx, fz) {
 				s.flash("Footprint cell is a wall")
 				return
 			}
@@ -184,7 +184,7 @@ func applyPropBrush(s *State, x, z int, c byte) {
 		}
 		return
 	}
-	if s.area.Walls[z][x] == core.TileRock {
+	if s.area.WallAt(x, z) {
 		s.flash("Props need an open cell (remove the wall first)")
 		return
 	}
@@ -211,7 +211,7 @@ func applyEntityBrush(s *State, x, z int, kind entityKind) {
 		clearEntitiesAt(s, x, z)
 		return
 	}
-	if s.area.Walls[z][x] == core.TileRock {
+	if s.area.WallAt(x, z) {
 		s.flash("Entities need an open cell")
 		return
 	}
@@ -227,7 +227,7 @@ func applyEntityBrush(s *State, x, z int, kind entityKind) {
 		// spawn. Packs and chests are tolerant of water (packs snap to
 		// the nearest walkable tile, chests interact from adjacent), so
 		// the floor-blocker rejection lives only on this branch.
-		if s.area.Floor[z][x] == core.FloorDeepWater {
+		if core.IsBlockingFloor(s.area.Floor[z][x]) {
 			s.flash("Player start can't sit on deep water")
 			return
 		}
@@ -273,13 +273,13 @@ func blkStart(a *core.AreaDefinition, x, z int) blockerCheck {
 	return blockerCheck{a.StartTileX == x && a.StartTileZ == z, "Cell holds the player start"}
 }
 func blkWall(a *core.AreaDefinition, x, z int, noun string) blockerCheck {
-	return blockerCheck{a.Walls[z][x] == core.TileRock, noun + " needs an open cell (remove the wall first)"}
+	return blockerCheck{a.WallAt(x, z), noun + " needs an open cell (remove the wall first)"}
 }
 func blkProp(a *core.AreaDefinition, x, z int) blockerCheck {
 	return blockerCheck{core.IsPropChar(a.Props[z][x]), "Cell already holds a prop — clear it first"}
 }
 func blkDeepWater(a *core.AreaDefinition, x, z int, noun string) blockerCheck {
-	return blockerCheck{a.Floor[z][x] == core.FloorDeepWater, noun + " can't sit on deep water"}
+	return blockerCheck{core.IsBlockingFloor(a.Floor[z][x]), noun + " can't sit on deep water"}
 }
 func blkPackHere(a *core.AreaDefinition, x, z int) blockerCheck {
 	return blockerCheck{core.PackSpawnIndexAt(a.PackSpawns, x, z) >= 0, "Cell already holds a pack — clear it first"}
@@ -627,11 +627,19 @@ func resize(s *State, w, h int) {
 	if s.area.StartTileZ >= h {
 		s.area.StartTileZ = h - 1
 	}
+	packsBefore, chestsBefore, doorsBefore := len(s.area.PackSpawns), len(s.area.ChestSpawns), len(s.area.DoorSpawns)
 	s.area.PackSpawns = slices.DeleteFunc(s.area.PackSpawns, func(sp core.PackSpawn) bool {
 		return sp.TileX >= w || sp.TileZ >= h
 	})
 	s.area.ChestSpawns = removeChestSpawnsOutside(s.area.ChestSpawns, w, h)
 	s.area.DoorSpawns = removeDoorSpawnsOutside(s.area.DoorSpawns, w, h)
+	// A shrink silently drops spawns past the new bounds (undoable, but the
+	// author should know). Flash a count of what fell off so it's not a
+	// quiet data loss.
+	dropped := (packsBefore - len(s.area.PackSpawns)) + (chestsBefore - len(s.area.ChestSpawns)) + (doorsBefore - len(s.area.DoorSpawns))
+	if dropped > 0 {
+		s.flash(fmt.Sprintf("Resize dropped %d spawn(s) outside the new bounds", dropped))
+	}
 	s.dirty = true
 }
 
@@ -683,10 +691,14 @@ func saveCurrent(s *State) {
 	}
 	s.baseline = core.CloneArea(s.area)
 	s.dirty = false
-	s.flash("Saved " + core.MapIDFromPath(s.area.Path))
+	// Flash reachability warnings FIRST (danger-tinted), then the "Saved"
+	// confirmation, so the confirmation is the newest entry and survives
+	// the status-log trim even when several warnings fire — the author
+	// always sees both "it saved" AND that the map has problems.
 	for _, w := range reachabilityWarnings(s.area) {
-		s.flash("Warning: " + w)
+		s.flashWarn("Warning: " + w)
 	}
+	s.flash("Saved " + core.MapIDFromPath(s.area.Path))
 }
 
 // renameMapFile renames a .map file on disk. Used by the Open modal's R key.

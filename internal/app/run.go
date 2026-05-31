@@ -6,6 +6,7 @@ import (
 	"crawler/internal/app/core/mapfile"
 	"crawler/internal/app/editor"
 	"crawler/internal/app/explore"
+	"crawler/internal/app/input"
 	"crawler/internal/app/render"
 	"crawler/internal/app/title"
 
@@ -56,11 +57,18 @@ func Run() {
 
 	assets := render.LoadResources()
 	defer assets.Unload()
+	// Flush + close the debug render log on exit if it was left enabled
+	// (the Debug-menu toggle is the only other close path). Idempotent.
+	defer render.CloseRenderLog()
 
 	state := appState{scene: sceneTitle, title: title.New()}
 
 	for !rl.WindowShouldClose() && !state.quit {
 		dt := rl.GetFrameTime()
+		// Sample the analog stick once per frame so the directional edge
+		// predicates (UpPressed / CursorUpDown / …) are idempotent within
+		// the frame — see input.NewFrame.
+		input.NewFrame()
 
 		switch state.scene {
 		case sceneTitle:
@@ -180,6 +188,14 @@ func applyAreaTransition(g *core.GameState) error {
 		}
 		x, z := doorExitTile(g.Area, g.Doors, *dest)
 		g.Player = core.NewPlayer(x, z, dest.Facing)
+		// Symmetry with the cross-map branch below (which rebuilds the
+		// whole GameState): drop any held equipment-drag and clear the
+		// particle pool so an in-map teleport can't strand a lifted item
+		// or leave stale VFX anchored at the old position. (Latent today —
+		// only the door prompt queues a transition and it has no held drag
+		// — but keeps a future "teleport from an open panel" honest.)
+		core.ClearEquipDrag(g)
+		core.RequestVFXReset(g)
 		return nil
 	}
 	area, err := core.LoadArea(core.MapPath(target))

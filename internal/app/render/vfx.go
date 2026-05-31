@@ -229,8 +229,22 @@ func spawnFromRequest(camera rl.Camera3D, g *core.GameState, req core.VFXRequest
 		spawnConfuse(origin)
 	case core.VFXIngest:
 		spawnIngest(origin)
+	default:
+		// A core.VFXKind with no spawn pattern here silently dropped its
+		// effect before. Surface it once per unknown kind (the log stash
+		// is bounded, so this can't spam) — a new kind that reaches the
+		// queue without a case is a wiring gap, not a no-op.
+		if !loggedUnknownVFX[req.Kind] {
+			loggedUnknownVFX[req.Kind] = true
+			LogRenderError("spawnFromRequest: no spawn pattern for VFX kind %d — effect dropped", int(req.Kind))
+		}
 	}
 }
+
+// loggedUnknownVFX dedupes the unknown-kind error so a missing spawn
+// pattern logs once, not every frame the effect is requested. Touched
+// only from the single-threaded render path.
+var loggedUnknownVFX = map[core.VFXKind]bool{}
 
 // --- Per-kind spawn patterns -----------------------------------------------
 //
@@ -248,50 +262,99 @@ func randAngle() float32 {
 	return vfxRNG.Float32() * 2 * math.Pi
 }
 
+// radialBurst parameterizes the "fling N particles outward on a random
+// horizontal heading" skeleton that nearly every impact/cast effect
+// shares (slash, ember, smite spray, venom, frost, arc, steal, death,
+// stoneslam). Each field is a literal the old hand-written loops baked
+// in; speed / VY / duration are uniform [min,max] ranges. The struct +
+// spawnRadialBurst collapse ~9 near-identical loop bodies so "calm every
+// burst down" is a one-function tune, as the section comment promised.
+type radialBurst struct {
+	count              int
+	speedMin, speedMax float32 // horizontal speed range
+	horizScale         float32 // VX/VZ multiplier (treated as 1 when 0)
+	posJitter          float32 // ± jitter on X and Z
+	yBase, yJitter     float32 // Y = base + jitter (relative to origin unless groundY)
+	groundY            bool    // Y is absolute (ground-anchored) instead of o.Y-relative
+	vyMin, vyMax       float32 // vertical velocity range
+	gravityY           float32
+	durMin, durMax     float32
+	sizeStart, sizeEnd float32
+	spin               float32 // ± spin amplitude (0 = no spin)
+	colorStart         rl.Color
+	colorEnd           rl.Color
+	shape              particleShape
+}
+
+// uniform draws a value in [lo, hi] from vfxRNG. lo==hi returns the
+// constant (still advances the stream, which is harmless — vfxRNG is
+// presentation-only and never feeds gameplay rolls).
+func uniform(lo, hi float32) float32 {
+	return lo + vfxRNG.Float32()*(hi-lo)
+}
+
+func spawnRadialBurst(o rl.Vector3, b radialBurst) {
+	horiz := b.horizScale
+	if horiz == 0 {
+		horiz = 1
+	}
+	for i := 0; i < b.count; i++ {
+		ang := randAngle()
+		speed := uniform(b.speedMin, b.speedMax)
+		y := b.yBase + vfxJitter(b.yJitter)
+		if !b.groundY {
+			y += o.Y
+		}
+		p := particle{
+			X:          o.X + vfxJitter(b.posJitter),
+			Y:          y,
+			Z:          o.Z + vfxJitter(b.posJitter),
+			VX:         float32(math.Cos(float64(ang))) * speed * horiz,
+			VY:         uniform(b.vyMin, b.vyMax),
+			VZ:         float32(math.Sin(float64(ang))) * speed * horiz,
+			GY:         b.gravityY,
+			Duration:   uniform(b.durMin, b.durMax),
+			SizeStart:  b.sizeStart,
+			SizeEnd:    b.sizeEnd,
+			ColorStart: b.colorStart,
+			ColorEnd:   b.colorEnd,
+			Shape:      b.shape,
+		}
+		if b.spin != 0 {
+			p.Spin = (vfxRNG.Float32()*2 - 1) * b.spin
+		}
+		pushParticle(p)
+	}
+}
+
 func spawnSlash(o rl.Vector3) {
 	// Bright crescent of fast outward sparks plus a quick ground
 	// ring. The ring sells "impact happened HERE" while the sparks
 	// sell direction and speed.
-	for i := 0; i < 14; i++ {
-		ang := randAngle()
-		speed := 2.4 + vfxRNG.Float32()*1.6
-		pushParticle(particle{
-			X: o.X, Y: o.Y + 0.05 + vfxJitter(0.18), Z: o.Z,
-			VX: float32(math.Cos(float64(ang))) * speed,
-			VY: 0.4 + vfxJitter(0.6),
-			VZ: float32(math.Sin(float64(ang))) * speed,
-			GY:         -3.2,
-			Duration:   0.32 + vfxRNG.Float32()*0.12,
-			SizeStart:  0.10,
-			SizeEnd:    0.02,
-			ColorStart: rl.NewColor(255, 248, 200, 255),
-			ColorEnd:   rl.NewColor(248, 196, 110, 0),
-			Shape:      shapeSpark,
-		})
-	}
+	spawnRadialBurst(o, radialBurst{
+		count: 14, speedMin: 2.4, speedMax: 4.0,
+		yBase: 0.05, yJitter: 0.18,
+		vyMin: -0.2, vyMax: 1.0, gravityY: -3.2,
+		durMin: 0.32, durMax: 0.44, sizeStart: 0.10, sizeEnd: 0.02,
+		colorStart: rl.NewColor(255, 248, 200, 255),
+		colorEnd:   rl.NewColor(248, 196, 110, 0),
+		shape:      shapeSpark,
+	})
 	pushRing(o, rl.NewColor(255, 232, 168, 220), 0.18, 1.1, 0.32)
 }
 
 func spawnEmber(o rl.Vector3) {
 	// Drifting orange embers + a hot core flash. Lives a bit longer
 	// than slash so the player sees the burn linger.
-	for i := 0; i < 22; i++ {
-		ang := randAngle()
-		speed := 0.9 + vfxRNG.Float32()*1.6
-		pushParticle(particle{
-			X: o.X + vfxJitter(0.08), Y: o.Y + vfxJitter(0.18), Z: o.Z + vfxJitter(0.08),
-			VX: float32(math.Cos(float64(ang))) * speed * 0.6,
-			VY: 0.9 + vfxRNG.Float32()*1.2,
-			VZ: float32(math.Sin(float64(ang))) * speed * 0.6,
-			GY:         -1.4,
-			Duration:   0.55 + vfxRNG.Float32()*0.30,
-			SizeStart:  0.16,
-			SizeEnd:    0.04,
-			ColorStart: rl.NewColor(255, 196, 96, 255),
-			ColorEnd:   rl.NewColor(180, 50, 30, 0),
-			Shape:      shapeMote,
-		})
-	}
+	spawnRadialBurst(o, radialBurst{
+		count: 22, speedMin: 0.9, speedMax: 2.5, horizScale: 0.6,
+		posJitter: 0.08, yJitter: 0.18,
+		vyMin: 0.9, vyMax: 2.1, gravityY: -1.4,
+		durMin: 0.55, durMax: 0.85, sizeStart: 0.16, sizeEnd: 0.04,
+		colorStart: rl.NewColor(255, 196, 96, 255),
+		colorEnd:   rl.NewColor(180, 50, 30, 0),
+		shape:      shapeMote,
+	})
 	pushRing(o, rl.NewColor(255, 152, 80, 220), 0.20, 1.4, 0.38)
 }
 
@@ -328,152 +391,92 @@ func spawnSmite(o rl.Vector3) {
 			Shape:      shapeShard,
 		})
 	}
-	for i := 0; i < 10; i++ {
-		ang := randAngle()
-		speed := 1.8 + vfxRNG.Float32()*1.2
-		pushParticle(particle{
-			X: o.X, Y: o.Y + 0.05, Z: o.Z,
-			VX: float32(math.Cos(float64(ang))) * speed,
-			VY: 0.4,
-			VZ: float32(math.Sin(float64(ang))) * speed,
-			GY:         -2.4,
-			Duration:   0.36,
-			SizeStart:  0.10,
-			SizeEnd:    0.02,
-			ColorStart: rl.NewColor(255, 240, 168, 255),
-			ColorEnd:   rl.NewColor(212, 152, 64, 0),
-			Shape:      shapeSpark,
-		})
-	}
+	spawnRadialBurst(o, radialBurst{
+		count: 10, speedMin: 1.8, speedMax: 3.0,
+		yBase: 0.05, vyMin: 0.4, vyMax: 0.4, gravityY: -2.4,
+		durMin: 0.36, durMax: 0.36, sizeStart: 0.10, sizeEnd: 0.02,
+		colorStart: rl.NewColor(255, 240, 168, 255),
+		colorEnd:   rl.NewColor(212, 152, 64, 0),
+		shape:      shapeSpark,
+	})
 	pushRing(o, rl.NewColor(255, 248, 168, 230), 0.22, 1.4, 0.42)
 }
 
 func spawnVenom(o rl.Vector3) {
 	// Lazy green mist; lingers longer than the others.
-	for i := 0; i < 18; i++ {
-		ang := randAngle()
-		speed := 0.4 + vfxRNG.Float32()*0.6
-		pushParticle(particle{
-			X: o.X + vfxJitter(0.10), Y: o.Y + vfxJitter(0.20), Z: o.Z + vfxJitter(0.10),
-			VX: float32(math.Cos(float64(ang))) * speed,
-			VY: 0.3 + vfxJitter(0.15),
-			VZ: float32(math.Sin(float64(ang))) * speed,
-			Duration:   0.7 + vfxRNG.Float32()*0.4,
-			SizeStart:  0.14,
-			SizeEnd:    0.22,
-			ColorStart: rl.NewColor(176, 232, 132, 220),
-			ColorEnd:   rl.NewColor(96, 140, 64, 0),
-			Shape:      shapeMote,
-		})
-	}
+	spawnRadialBurst(o, radialBurst{
+		count: 18, speedMin: 0.4, speedMax: 1.0,
+		posJitter: 0.10, yJitter: 0.20,
+		vyMin: 0.15, vyMax: 0.45,
+		durMin: 0.7, durMax: 1.1, sizeStart: 0.14, sizeEnd: 0.22,
+		colorStart: rl.NewColor(176, 232, 132, 220),
+		colorEnd:   rl.NewColor(96, 140, 64, 0),
+		shape:      shapeMote,
+	})
 }
 
 func spawnFrost(o rl.Vector3) {
 	// Sharp expanding diamond shards.
-	for i := 0; i < 18; i++ {
-		ang := randAngle()
-		speed := 2.0 + vfxRNG.Float32()*1.2
-		pushParticle(particle{
-			X: o.X, Y: o.Y + vfxJitter(0.20), Z: o.Z,
-			VX: float32(math.Cos(float64(ang))) * speed,
-			VY: 0.2 + vfxJitter(0.4),
-			VZ: float32(math.Sin(float64(ang))) * speed,
-			GY:         -1.6,
-			Duration:   0.4 + vfxRNG.Float32()*0.18,
-			SizeStart:  0.08,
-			SizeEnd:    0.18,
-			Spin:       (vfxRNG.Float32()*2 - 1) * 6,
-			ColorStart: rl.NewColor(220, 240, 255, 255),
-			ColorEnd:   rl.NewColor(104, 168, 224, 0),
-			Shape:      shapeShard,
-		})
-	}
+	spawnRadialBurst(o, radialBurst{
+		count: 18, speedMin: 2.0, speedMax: 3.2,
+		yJitter: 0.20, vyMin: -0.2, vyMax: 0.6, gravityY: -1.6,
+		durMin: 0.4, durMax: 0.58, sizeStart: 0.08, sizeEnd: 0.18, spin: 6,
+		colorStart: rl.NewColor(220, 240, 255, 255),
+		colorEnd:   rl.NewColor(104, 168, 224, 0),
+		shape:      shapeShard,
+	})
 	pushRing(o, rl.NewColor(180, 220, 255, 220), 0.20, 1.3, 0.32)
 }
 
 func spawnArc(o rl.Vector3) {
 	// Short, harsh blue flashes — mimics a chain-zap without an
 	// actual line-of-zap (too expensive to draw a polyline per arc).
-	for i := 0; i < 14; i++ {
-		ang := randAngle()
-		speed := 2.8 + vfxRNG.Float32()*1.0
-		pushParticle(particle{
-			X: o.X, Y: o.Y + vfxJitter(0.30), Z: o.Z,
-			VX: float32(math.Cos(float64(ang))) * speed,
-			VY: vfxJitter(0.8),
-			VZ: float32(math.Sin(float64(ang))) * speed,
-			Duration:   0.18,
-			SizeStart:  0.10,
-			SizeEnd:    0.02,
-			ColorStart: rl.NewColor(196, 224, 255, 255),
-			ColorEnd:   rl.NewColor(96, 132, 232, 0),
-			Shape:      shapeSpark,
-		})
-	}
+	spawnRadialBurst(o, radialBurst{
+		count: 14, speedMin: 2.8, speedMax: 3.8,
+		yJitter: 0.30, vyMin: -0.8, vyMax: 0.8,
+		durMin: 0.18, durMax: 0.18, sizeStart: 0.10, sizeEnd: 0.02,
+		colorStart: rl.NewColor(196, 224, 255, 255),
+		colorEnd:   rl.NewColor(96, 132, 232, 0),
+		shape:      shapeSpark,
+	})
 }
 
 func spawnSteal(o rl.Vector3) {
 	// Quick yellow star pop — small and fast so it reads as "pluck"
 	// not "explosion."
-	for i := 0; i < 8; i++ {
-		ang := randAngle()
-		speed := 1.6 + vfxRNG.Float32()*0.6
-		pushParticle(particle{
-			X: o.X, Y: o.Y + 0.1, Z: o.Z,
-			VX: float32(math.Cos(float64(ang))) * speed,
-			VY: 0.8 + vfxRNG.Float32()*0.4,
-			VZ: float32(math.Sin(float64(ang))) * speed,
-			GY:         -2.4,
-			Duration:   0.30,
-			SizeStart:  0.12,
-			SizeEnd:    0.02,
-			ColorStart: rl.NewColor(255, 240, 168, 255),
-			ColorEnd:   rl.NewColor(232, 196, 96, 0),
-			Shape:      shapeSpark,
-		})
-	}
+	spawnRadialBurst(o, radialBurst{
+		count: 8, speedMin: 1.6, speedMax: 2.2,
+		yBase: 0.1, vyMin: 0.8, vyMax: 1.2, gravityY: -2.4,
+		durMin: 0.30, durMax: 0.30, sizeStart: 0.12, sizeEnd: 0.02,
+		colorStart: rl.NewColor(255, 240, 168, 255),
+		colorEnd:   rl.NewColor(232, 196, 96, 0),
+		shape:      shapeSpark,
+	})
 }
 
 func spawnDeath(o rl.Vector3) {
 	// Gray dispersing dust.
-	for i := 0; i < 16; i++ {
-		ang := randAngle()
-		speed := 0.8 + vfxRNG.Float32()*0.6
-		pushParticle(particle{
-			X: o.X, Y: o.Y + vfxJitter(0.20), Z: o.Z,
-			VX: float32(math.Cos(float64(ang))) * speed,
-			VY: 0.2 + vfxJitter(0.2),
-			VZ: float32(math.Sin(float64(ang))) * speed,
-			GY:         -1.0,
-			Duration:   0.7 + vfxRNG.Float32()*0.4,
-			SizeStart:  0.14,
-			SizeEnd:    0.24,
-			ColorStart: rl.NewColor(184, 168, 152, 220),
-			ColorEnd:   rl.NewColor(96, 88, 84, 0),
-			Shape:      shapeDust,
-		})
-	}
+	spawnRadialBurst(o, radialBurst{
+		count: 16, speedMin: 0.8, speedMax: 1.4,
+		yJitter: 0.20, vyMin: 0.0, vyMax: 0.4, gravityY: -1.0,
+		durMin: 0.7, durMax: 1.1, sizeStart: 0.14, sizeEnd: 0.24,
+		colorStart: rl.NewColor(184, 168, 152, 220),
+		colorEnd:   rl.NewColor(96, 88, 84, 0),
+		shape:      shapeDust,
+	})
 }
 
 func spawnStoneslam(o rl.Vector3) {
 	// Big heavy dust cloud at the ground + outward shockwave.
-	for i := 0; i < 28; i++ {
-		ang := randAngle()
-		speed := 1.4 + vfxRNG.Float32()*1.2
-		pushParticle(particle{
-			X: o.X + vfxJitter(0.10), Y: 0.05 + vfxJitter(0.05), Z: o.Z + vfxJitter(0.10),
-			VX: float32(math.Cos(float64(ang))) * speed,
-			VY: 0.8 + vfxRNG.Float32()*0.6,
-			VZ: float32(math.Sin(float64(ang))) * speed,
-			GY:         -1.6,
-			Duration:   0.7 + vfxRNG.Float32()*0.4,
-			SizeStart:  0.22,
-			SizeEnd:    0.36,
-			ColorStart: rl.NewColor(168, 152, 128, 220),
-			ColorEnd:   rl.NewColor(86, 76, 64, 0),
-			Shape:      shapeDust,
-		})
-	}
+	spawnRadialBurst(o, radialBurst{
+		count: 28, speedMin: 1.4, speedMax: 2.6,
+		posJitter: 0.10, yBase: 0.05, yJitter: 0.05, groundY: true,
+		vyMin: 0.8, vyMax: 1.4, gravityY: -1.6,
+		durMin: 0.7, durMax: 1.1, sizeStart: 0.22, sizeEnd: 0.36,
+		colorStart: rl.NewColor(168, 152, 128, 220),
+		colorEnd:   rl.NewColor(86, 76, 64, 0),
+		shape:      shapeDust,
+	})
 	pushRing(rl.NewVector3(o.X, 0.05, o.Z), rl.NewColor(196, 184, 152, 240), 0.32, 2.2, 0.5)
 }
 
@@ -518,9 +521,9 @@ func spawnConfuse(o rl.Vector3) {
 		ang := randAngle()
 		radius := 0.20 + vfxRNG.Float32()*0.18
 		pushParticle(particle{
-			X: o.X + float32(math.Cos(float64(ang)))*radius,
-			Y: o.Y + 0.2 + vfxJitter(0.4),
-			Z: o.Z + float32(math.Sin(float64(ang)))*radius,
+			X:          o.X + float32(math.Cos(float64(ang)))*radius,
+			Y:          o.Y + 0.2 + vfxJitter(0.4),
+			Z:          o.Z + float32(math.Sin(float64(ang)))*radius,
 			VX:         -float32(math.Sin(float64(ang))) * 1.4,
 			VY:         vfxJitter(0.4),
 			VZ:         float32(math.Cos(float64(ang))) * 1.4,

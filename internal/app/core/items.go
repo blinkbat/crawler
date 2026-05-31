@@ -17,6 +17,15 @@ const (
 	ItemLeatherCap
 	ItemSilverRing
 	ItemBrassAmulet
+	// Sample weapons exercising the WeaponType taxonomy (weapons.go):
+	// DEX-governed light + ranged, STR-governed heavy. Stats are starter-
+	// kit modest and easy to retune.
+	ItemDagger
+	ItemRapier
+	ItemShortBow
+	ItemSling
+	ItemBattleAxe
+	ItemWarHammer
 )
 
 // EquipmentSlotType classifies what equipment slot an item can go into.
@@ -108,6 +117,12 @@ type ItemDefinition struct {
 	// equipped. Indexed by Stat (STR/DEX/INT/WIS/VIT/SPD); zero in any
 	// slot means no contribution.
 	StatBonus [StatCount]int
+	// Weapon classifies a SlotHand weapon (see WeaponType / weaponSpecs).
+	// WeaponNone for non-weapons — consumables, armor, accessories, and
+	// off-hand items like a shield — which leaves the wielder unarmed
+	// (STR melee) for basic-attack purposes. Drives which stat the basic
+	// attack rolls to-hit and scales damage off.
+	Weapon WeaponType
 }
 
 var itemDefinitions = []ItemDefinition{
@@ -122,6 +137,7 @@ var itemDefinitions = []ItemDefinition{
 	// stat ring, an MDef amulet.
 	{Kind: ItemIronSword, Name: "Iron Sword", Description: "A plain iron longsword. +2 STR.",
 		Slot:      SlotHand,
+		Weapon:    WeaponSword, // heavy melee → STR-governed to-hit + damage
 		StatBonus: [StatCount]int{StatSTR: 2}},
 	{Kind: ItemWoodenShield, Name: "Wooden Shield", Description: "Plywood-grade. +2 Armor.",
 		Slot:       SlotHand,
@@ -135,6 +151,37 @@ var itemDefinitions = []ItemDefinition{
 	{Kind: ItemBrassAmulet, Name: "Brass Amulet", Description: "A tarnished charm. +2 MDef.",
 		Slot:      SlotAccessory,
 		MDefBonus: 2},
+
+	// Sample weapons. The Weapon type picks which stat the basic attack
+	// rolls to-hit + scales damage off (DEX for light/ranged, STR for
+	// heavy); the StatBonus is a small on-equip sweetener. Tune freely.
+	// The weapon class (DEX/STR, ranged) is rendered from the data by
+	// equipBonusSummary, so it stays out of the prose; the "+N STAT"
+	// sweetener is kept in the description to match the other starter
+	// items' convention.
+	{Kind: ItemDagger, Name: "Dagger", Description: "A quick finesse blade. +1 DEX.",
+		Slot:      SlotHand,
+		Weapon:    WeaponDagger,
+		StatBonus: [StatCount]int{StatDEX: 1}},
+	{Kind: ItemRapier, Name: "Rapier", Description: "A slender thrusting sword. +1 DEX.",
+		Slot:      SlotHand,
+		Weapon:    WeaponRapier,
+		StatBonus: [StatCount]int{StatDEX: 1}},
+	{Kind: ItemShortBow, Name: "Short Bow", Description: "A simple short bow. +1 DEX.",
+		Slot:      SlotHand,
+		Weapon:    WeaponBow,
+		StatBonus: [StatCount]int{StatDEX: 1}},
+	{Kind: ItemSling, Name: "Sling", Description: "A leather sling.",
+		Slot:   SlotHand,
+		Weapon: WeaponSling},
+	{Kind: ItemBattleAxe, Name: "Battle Axe", Description: "A broad battle axe. +1 STR.",
+		Slot:      SlotHand,
+		Weapon:    WeaponAxe,
+		StatBonus: [StatCount]int{StatSTR: 1}},
+	{Kind: ItemWarHammer, Name: "War Hammer", Description: "A heavy two-handed maul. +2 STR.",
+		Slot:      SlotHand,
+		Weapon:    WeaponHammer,
+		StatBonus: [StatCount]int{StatSTR: 2}},
 }
 
 // ItemStack is one inventory slot: a kind plus how many the player owns.
@@ -270,13 +317,36 @@ func ConsumeItem(inv []ItemStack, kind ItemKind) ([]ItemStack, bool) {
 // the indices used to navigate the picker line up exactly with the rows
 // being drawn.
 func LiveStacks(inv []ItemStack) []ItemStack {
-	out := make([]ItemStack, 0, len(inv))
+	return LiveStacksInto(inv, nil)
+}
+
+// LiveStacksInto is the buffer-reusing form of LiveStacks: it filters
+// into `buf` (truncated first) and returns it, so a per-frame caller
+// (the panels Items tab, the battle item menu) keeps one scratch slice
+// across frames instead of allocating a fresh slice each frame. Pass nil
+// to allocate. The filtered content is identical to LiveStacks, so picker
+// indices still line up with drawn rows regardless of which form is used.
+func LiveStacksInto(inv, buf []ItemStack) []ItemStack {
+	buf = buf[:0]
 	for _, s := range inv {
 		if s.Count > 0 {
-			out = append(out, s)
+			buf = append(buf, s)
 		}
 	}
-	return out
+	return buf
+}
+
+// LiveStackCount returns how many inventory entries have a positive
+// count, without allocating — for callers (cursor-wrap math) that only
+// need the row count, not the rows.
+func LiveStackCount(inv []ItemStack) int {
+	n := 0
+	for _, s := range inv {
+		if s.Count > 0 {
+			n++
+		}
+	}
+	return n
 }
 
 // InventoryEmpty is a convenience for the "Item" menu option's enabled

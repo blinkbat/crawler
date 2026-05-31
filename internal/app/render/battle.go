@@ -144,7 +144,7 @@ func drawEnemyRosterRow(font rl.Font, enemy core.Enemy, x, y, w, h int32, target
 		leftPad = 32
 		bx := float32(x) + 8
 		cy := float32(y) + float32(h)/2
-		col := fadeColor(borderEnemy, 0.7+0.3*pulse(2.4))
+		col := fadeColor(borderEnemy, pulseHalo())
 		drawArrowMarker(rl.NewVector2(bx, cy), 12, 0, 9, col)
 	}
 
@@ -182,15 +182,18 @@ func drawEnemyRosterRow(font rl.Font, enemy core.Enemy, x, y, w, h int32, target
 	// unrolled if-blocks) is what lets a future fifth status land as a
 	// single appended row without re-tuning any per-pill geometry, as
 	// the comment above promises.
-	pills := []struct {
+	// Fixed-size array (not a slice literal) so this stays stack-local
+	// and allocates nothing — drawn every frame per enemy in the combat
+	// roster.
+	pills := [4]struct {
 		turns   int
 		fill    rl.Color
 		outline rl.Color
 		prefix  string
 	}{
-		{enemy.BurnTurns, fadeColor(statusBurn, 0.55+0.45*pulse(3.4)), statusBurnOutline, ""},
+		{enemy.BurnTurns, fadeColor(statusBurn, pulseFlicker()), statusBurnOutline, ""},
 		{enemy.SleepTurns, barSleep, statusSleepOutline, "Z"},
-		{enemy.PoisonTurns, fadeColor(statusPoison, 0.6+0.4*pulse(3.0)), statusPoisonOutline, "P"},
+		{enemy.PoisonTurns, fadeColor(statusPoison, pulseFlicker()), statusPoisonOutline, "P"},
 		{enemy.StunTurns, statusStun, statusStunOutline, "S"},
 	}
 	slot := 0
@@ -252,7 +255,7 @@ var statusTurnsCache = func() [20]struct{ plain, zPrefix, pPrefix, sPrefix strin
 func drawEnemyStatusPill(font rl.Font, x, y, w, h float32, fill, outline rl.Color, label string) {
 	drawSmallPanel(int32(x), int32(y), int32(w), int32(h), fill)
 	drawSmallPanelOutline(int32(x), int32(y), int32(w), int32(h), outline)
-	drawTextCentered(font, label, x+w/2, y+2, FontSmall, rl.RayWhite)
+	drawTextCentered(font, label, x+w/2, y+2, FontSmall, inkPrimary)
 }
 
 // combatLogTextPad is the horizontal inset between the combat-log
@@ -448,6 +451,11 @@ func wrappedCombatLogLines(font rl.Font, lines []string, innerW int32, maxLines 
 	return reversed
 }
 
+// actionMenuSubLabelGap is the vertical gap (px) from a mode's verb
+// heading to the sub-prompt / picker list beneath it in the action-menu
+// panel. Named so the five action-mode arms share one offset.
+const actionMenuSubLabelGap = 34
+
 func drawActionMenuPanel(g core.GameState, assets Resources) {
 	if g.Battle.Phase != core.BattlePlayer {
 		return
@@ -498,6 +506,10 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 	// which is what the player actually came here to read.
 	contentX := x + 22
 	contentY := y + 24
+	// subY is the baseline for the sub-prompt / picker list under the
+	// mode's verb heading — one offset so the five action-mode arms below
+	// can't drift on the heading-to-sublabel gap.
+	subY := contentY + actionMenuSubLabelGap
 
 	switch g.Battle.ActionMode {
 	case core.ActionEnemyTarget:
@@ -506,20 +518,20 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 			actionLabel = core.SkillName(g.Battle.PendingSkill)
 		}
 		drawTextWithShadow(assets.hudFont, actionLabel, float32(contentX), float32(contentY), FontHeading, textPrimary)
-		drawTextWithShadow(assets.hudFont, "Choose a target", float32(contentX), float32(contentY+34), FontSmall, textLabel)
+		drawTextWithShadow(assets.hudFont, "Choose a target", float32(contentX), float32(subY), FontSmall, textLabel)
 	case core.ActionPartyTarget:
 		targetName := "Ally"
 		if g.Battle.PartyTarget >= 0 && g.Battle.PartyTarget < len(g.Party) {
 			targetName = g.Party[g.Battle.PartyTarget].Name
 		}
 		drawTextWithShadow(assets.hudFont, fmt.Sprintf("%s -> %s", core.SkillName(g.Battle.PendingSkill), targetName), float32(contentX), float32(contentY), FontBody, textPrimary)
-		drawTextWithShadow(assets.hudFont, "Choose an ally", float32(contentX), float32(contentY+34), FontSmall, textLabel)
+		drawTextWithShadow(assets.hudFont, "Choose an ally", float32(contentX), float32(subY), FontSmall, textLabel)
 	case core.ActionItemMenu:
 		drawTextWithShadow(assets.hudFont, "Items", float32(contentX), float32(contentY), FontHeading, textPrimary)
-		drawItemMenuList(g, assets, contentX, contentY+34)
+		drawItemMenuList(g, assets, contentX, subY)
 	case core.ActionSkillMenu:
 		drawTextWithShadow(assets.hudFont, "Skills", float32(contentX), float32(contentY), FontHeading, textPrimary)
-		drawSkillMenuList(g, assets, contentX, contentY+34, member)
+		drawSkillMenuList(g, assets, contentX, subY, member)
 	case core.ActionItemTarget:
 		itemName := core.ItemInfo(g.Battle.PendingItem).Name
 		targetName := "Ally"
@@ -527,7 +539,7 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 			targetName = g.Party[g.Battle.PartyTarget].Name
 		}
 		drawTextWithShadow(assets.hudFont, fmt.Sprintf("%s -> %s", itemName, targetName), float32(contentX), float32(contentY), FontBody, textPrimary)
-		drawTextWithShadow(assets.hudFont, "Choose an ally", float32(contentX), float32(contentY+34), FontSmall, textLabel)
+		drawTextWithShadow(assets.hudFont, "Choose an ally", float32(contentX), float32(subY), FontSmall, textLabel)
 	default:
 		// Transient status line — populated by setBattleStatus to surface
 		// validation errors that aren't real combat-log events (e.g.
@@ -590,22 +602,34 @@ func drawActionMenuRow(font rl.Font, row core.ActionRow, iconX, labelX, y int32,
 	drawActionRow(font, labelX, y, label, suffix, selected)
 }
 
-// drawActionIcon dispatches to the per-action sigil drawer. Each
-// glyph is sized by `r` (its half-extent) and tinted by `col` so the
-// selection state propagates without duplicating the switch.
-func drawActionIcon(row core.ActionRow, cx, cy, r float32, col rl.Color) {
-	switch row {
-	case core.ActionRowAttack:
-		// Crossed swords — reuse the warrior class glyph at a
-		// smaller radius. Reads as "strike" without any text.
-		drawClassGlyphWarrior(cx, cy, r, col)
-	case core.ActionRowSkill:
-		drawActionIconSkill(cx, cy, r, col)
-	case core.ActionRowItem:
-		drawActionIconItem(cx, cy, r, col)
-	case core.ActionRowDefend:
-		drawActionIconDefend(cx, cy, r, col)
+// actionIconDrawers dispatches each action-menu row to its sigil
+// drawer. A fixed [core.ActionRowCount] array (not a switch) so adding
+// a row forces a slot and the init below panics on a nil entry at
+// startup, instead of a switch that silently draws a blank icon. Attack
+// reuses the warrior class glyph ("strike" without text).
+var actionIconDrawers = [core.ActionRowCount]func(cx, cy, r float32, col rl.Color){
+	core.ActionRowAttack: drawClassGlyphWarrior,
+	core.ActionRowSkill:  drawActionIconSkill,
+	core.ActionRowItem:   drawActionIconItem,
+	core.ActionRowDefend: drawActionIconDefend,
+}
+
+func init() {
+	for row := core.ActionRow(0); int(row) < core.ActionRowCount; row++ {
+		if actionIconDrawers[row] == nil {
+			panic(fmt.Sprintf("render: ActionRow %d has no actionIconDrawers entry", int(row)))
+		}
 	}
+}
+
+// drawActionIcon dispatches to the per-action sigil drawer. Each glyph
+// is sized by `r` (its half-extent) and tinted by `col` so the
+// selection state propagates without duplicating a switch.
+func drawActionIcon(row core.ActionRow, cx, cy, r float32, col rl.Color) {
+	if int(row) < 0 || int(row) >= len(actionIconDrawers) {
+		return
+	}
+	actionIconDrawers[row](cx, cy, r, col)
 }
 
 // drawActionIconSkill paints a four-rayed starburst with a bright
@@ -706,9 +730,15 @@ func drawSkillMenuList(g core.GameState, assets Resources, x, y int32, member co
 // "Name x Count" rows with the highlighted entry tinted by the selection
 // border. Empty inventory falls through to a single "(no items)" hint row
 // so the panel doesn't look broken if the player gets here somehow.
+// itemMenuStacksBuf is the reused scratch slice for the in-battle item
+// picker's live-stack list — refilled each frame the menu is up instead
+// of allocating fresh.
+var itemMenuStacksBuf []core.ItemStack
+
 func drawItemMenuList(g core.GameState, assets Resources, x, y int32) {
 	rowSpacing := int32(28)
-	living := core.LiveStacks(g.Inventory)
+	itemMenuStacksBuf = core.LiveStacksInto(g.Inventory, itemMenuStacksBuf)
+	living := itemMenuStacksBuf
 	if len(living) == 0 {
 		drawTextWithShadow(assets.hudFont, "(no items)", float32(x), float32(y), FontSmall, textDim)
 		return
@@ -754,27 +784,13 @@ func drawActionRow(font rl.Font, x, y int32, label, suffix string, selected bool
 	}
 }
 
-// actionRowSuffixMeasureCache memoizes the right-side suffix
-// measurements drawActionRow takes on every menu row every frame the
-// action menu is up. Suffixes are mostly stable ("▶", "5 MP", small
-// stack counts); caching turns a per-row cgo round-trip into a map
-// lookup.
-var actionRowSuffixMeasureCache = make(map[string]rl.Vector2, 16)
-var actionRowSuffixMeasureCacheFontID uint32
+// actionRowSuffixMeasureCache memoizes the right-side suffix measurements
+// drawActionRow takes on every menu row every frame ("▶", "5 MP", stack
+// counts).
+var actionRowSuffixMeasureCache measureCache
 
 func measureActionRowSuffix(font rl.Font, suffix string) rl.Vector2 {
-	if font.Texture.ID != actionRowSuffixMeasureCacheFontID {
-		for k := range actionRowSuffixMeasureCache {
-			delete(actionRowSuffixMeasureCache, k)
-		}
-		actionRowSuffixMeasureCacheFontID = font.Texture.ID
-	}
-	if v, ok := actionRowSuffixMeasureCache[suffix]; ok {
-		return v
-	}
-	v := rl.MeasureTextEx(font, suffix, FontSmall, 1)
-	actionRowSuffixMeasureCache[suffix] = v
-	return v
+	return actionRowSuffixMeasureCache.measure(font, suffix, FontSmall, 1)
 }
 
 // enemyConditionColors is the wound-state tint for the enemy roster's

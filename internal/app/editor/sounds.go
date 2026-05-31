@@ -22,7 +22,7 @@ type soundParamSet struct {
 	Volume       float64 // [0, 0.6]
 	Attack       float64 // seconds, [0, 0.05]
 	Release      float64 // seconds, [0, 0.30]
-	Wave         int     // 0..3 — index into audio.WaveX (Sine/Square/Triangle/Saw)
+	Wave         int     // 0..audio.WaveShapeCount-1 — index into audio.WaveX (Sine/Square/Triangle/Saw)
 	Noise        float64 // [0, 1] — noise mix amount
 	VibratoHz    float64 // [0, 15] — vibrato wobble rate
 	VibratoDepth float64 // [0, 0.5] — vibrato swing depth as a fraction of base Hz
@@ -33,13 +33,13 @@ type soundParamSet struct {
 // field on the soundParamSet via the getter/setter callbacks. Avoids
 // reflection while staying table-driven so adding a slider is one row.
 type soundParamSliderInfo struct {
-	Label  string
-	Min    float64
-	Max    float64
-	Step   float64
-	Get    func(*soundParamSet) float64
-	Set    func(*soundParamSet, float64)
-	Format string                // fmt verb / suffix — used when Display is nil
+	Label   string
+	Min     float64
+	Max     float64
+	Step    float64
+	Get     func(*soundParamSet) float64
+	Set     func(*soundParamSet, float64)
+	Format  string               // fmt verb / suffix — used when Display is nil
 	Display func(float64) string // optional custom value renderer (Wave row's "Sine"/"Square"/...)
 }
 
@@ -75,21 +75,21 @@ var soundParamSliders = []soundParamSliderInfo{
 		Set: func(p *soundParamSet, v float64) { p.Release = v },
 	},
 	{
-		// Wave shape — discrete 4-option toggle dressed up as a
-		// slider. Step=1 + Min/Max=0..3 means Left/Right cycles
-		// through the WaveX values one at a time, and the mouse-
-		// drag mapping rounds to the nearest integer. Display
-		// returns the human label so the readout shows "Sine"
-		// instead of "0".
-		Label: "Wave", Min: 0, Max: 3, Step: 1, Format: "%.0f",
+		// Wave shape — discrete toggle dressed up as a slider. Step=1 +
+		// Min/Max=0..WaveShapeCount-1 means Left/Right cycles through the
+		// WaveX values one at a time, and the mouse-drag mapping rounds to
+		// the nearest integer. Bounds derive from audio.WaveShapeCount so a
+		// fifth shape becomes reachable without editing this row. Display
+		// returns the human label so the readout shows "Sine" instead of "0".
+		Label: "Wave", Min: 0, Max: float64(audio.WaveShapeCount - 1), Step: 1, Format: "%.0f",
 		Get: func(p *soundParamSet) float64 { return float64(p.Wave) },
 		Set: func(p *soundParamSet, v float64) {
 			i := int(v + 0.5)
 			if i < 0 {
 				i = 0
 			}
-			if i > 3 {
-				i = 3
+			if i > audio.WaveShapeCount-1 {
+				i = audio.WaveShapeCount - 1
 			}
 			p.Wave = i
 		},
@@ -422,12 +422,7 @@ func handleSoundMouseClick(s *State, mp rl.Vector2, l *soundLayout, savedSounds 
 			return 1, i
 		}
 		if pointIn(mp, r.Delete) {
-			name := savedSounds[i]
-			if err := audio.DeleteUserSound(name); err != nil {
-				s.flash("Delete failed: " + err.Error())
-			} else {
-				s.flash("Deleted " + name)
-			}
+			confirmSoundDelete(s, savedSounds[i])
 			return 1, i
 		}
 		if pointIn(mp, r.Row) {
@@ -509,12 +504,26 @@ func updateSoundsListKeys(s *State, names []string) {
 		audio.PreviewFile(names[s.soundCursor])
 	}
 	if rl.IsKeyPressed(rl.KeyX) {
-		name := names[s.soundCursor]
-		if err := audio.DeleteUserSound(name); err != nil {
-			s.flash("Delete failed: " + err.Error())
-		} else {
-			s.flash("Deleted " + name)
-		}
+		confirmSoundDelete(s, names[s.soundCursor])
+	}
+}
+
+// confirmSoundDelete is a two-press guard on the irreversible saved-sound
+// delete: the first request arms `name` (and flashes a confirm prompt);
+// the second request for the SAME name performs the on-disk delete. A
+// different name re-arms instead of deleting, so a single misclick on the
+// × never destroys a .wav.
+func confirmSoundDelete(s *State, name string) {
+	if s.soundDeleteArmed != name {
+		s.soundDeleteArmed = name
+		s.flash("Delete " + name + "? Press × / X again to confirm")
+		return
+	}
+	s.soundDeleteArmed = ""
+	if err := audio.DeleteUserSound(name); err != nil {
+		s.flash("Delete failed: " + err.Error())
+	} else {
+		s.flash("Deleted " + name)
 	}
 }
 

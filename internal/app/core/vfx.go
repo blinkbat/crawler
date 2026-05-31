@@ -108,9 +108,15 @@ func EnqueuePartyVFX(g *GameState, kind VFXKind, slot int) {
 }
 
 // EnqueueTileVFX appends a VFX request anchored to a world tile.
-// Used by out-of-battle effects (future puzzle plates / door
+// Intended for out-of-battle effects (future puzzle plates / door
 // activations) and ground-anchored AoE shockwaves where the floor is
 // the visual centre.
+//
+// DEFERRED: nothing enqueues a tile-anchored request yet. The render
+// side already materialises VFXAnchorTile (render/vfx.go), so this is
+// the producer half waiting on its first caller — kept wired so the
+// future feature plugs in without re-deriving the anchor plumbing. Not
+// a live code path today.
 func EnqueueTileVFX(g *GameState, kind VFXKind, tileX, tileZ int) {
 	if g == nil || kind == VFXNone {
 		return

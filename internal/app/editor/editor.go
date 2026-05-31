@@ -36,9 +36,12 @@ const (
 	LayerProps
 	LayerCeiling
 	LayerEntities
-
-	layerCount = 6
 )
+
+// layerCount is the number of editor layers (the four grid layers +
+// ceiling + the entity list), derived from the enum's last value so
+// adding a layer doesn't need a separate magic-number bump.
+const layerCount = int(LayerEntities) + 1
 
 // numberRowKeys is the top-row 1..9 key codes. Package-level so the
 // brush-select hotkeys (1..9 / Shift+1..9, all nine) and the Alt+1..6
@@ -266,7 +269,7 @@ func buildEntityBrushes() []Brush {
 		}
 		col, ok := entityBrushColors[def.Kind]
 		if !ok {
-			col = rl.NewColor(180, 180, 180, 255)
+			col = entityFallbackColor
 		}
 		brushes = append(brushes, Brush{
 			Name:      "Add " + def.SingularName,
@@ -433,6 +436,10 @@ const (
 type statusEntry struct {
 	msg   string
 	timer float32
+	// warn tints the row danger-colored so warnings (e.g. post-save
+	// reachability problems) read distinctly from neutral confirmations
+	// like "Saved" instead of blending into the same status style.
+	warn bool
 }
 
 const undoLimit = 50
@@ -497,6 +504,11 @@ type State struct {
 	soundName      string
 	soundCursor    int // row cursor inside the sound modal
 	soundLeftPanel int // 0 = synth params, 1 = saved-sound list, 2 = cue assignments
+	// soundDeleteArmed is the saved-sound name awaiting a confirm press —
+	// the first ×/X arms it, the second (same name) deletes. Guards the
+	// irreversible on-disk .wav delete against a single misclick. Cleared
+	// on close and after a confirmed delete.
+	soundDeleteArmed string
 	// soundSavedCache holds the result of audio.ListUserSounds() for
 	// the current Update→Draw frame so we don't ReadDir twice per frame
 	// while the modal is open. Refreshed by updateSoundsModal at the
@@ -538,15 +550,15 @@ type State struct {
 	testRequested     bool
 	awaitingOverwrite bool
 
-	// hideTileGlyphs toggles the per-tile char overlay in the grid.
-	// Default false → overlay is ON, since most authors want to see
-	// what's where. ALT (tapped on release with no other key pressed
-	// during the hold) flips it so the author can hide the glyphs to
-	// inspect raw cell color or take a clean screenshot. altChordUsed
-	// tracks whether ALT+something was pressed during the current Alt
-	// hold; if so we suppress the toggle on release so Alt+1..6 (layer
-	// jump) doesn't double-trigger the overlay flip.
-	hideTileGlyphs bool
+	// showTileGlyphs toggles the per-tile char overlay in the grid.
+	// Default false → overlay OFF (drawing every layer's char at once is
+	// too noisy to leave on). ALT (tapped on release with no other key
+	// pressed during the hold) flips it ON; when on, each cell shows the
+	// char of the ACTIVE layer only (see currentLayerGlyph) so it stays
+	// legible. altChordUsed tracks whether ALT+something was pressed
+	// during the current Alt hold; if so we suppress the toggle on
+	// release so Alt+1..6 (layer jump) doesn't double-trigger the flip.
+	showTileGlyphs bool
 	altChordUsed   bool
 
 	// Ctrl+F5 "test from cursor" override: when testStartOverride is true,
@@ -835,14 +847,21 @@ const statusLogMaxEntries = 4
 // input below MinMapDimension fires a "too small" flash on every digit),
 // refresh its timer in place instead of stacking duplicate rows. Keeps
 // the log readable when the same validation error fires repeatedly.
-func (s *State) flash(msg string) {
+func (s *State) flash(msg string) { s.pushStatus(msg, false) }
+
+// flashWarn pushes a warning-tinted status row (drawn danger-colored)
+// so it stands out from neutral confirmations like "Saved".
+func (s *State) flashWarn(msg string) { s.pushStatus(msg, true) }
+
+func (s *State) pushStatus(msg string, warn bool) {
 	for i, e := range s.statusLog {
 		if e.msg == msg {
 			s.statusLog[i].timer = statusLogLifetime
+			s.statusLog[i].warn = warn
 			return
 		}
 	}
-	s.statusLog = append(s.statusLog, statusEntry{msg: msg, timer: statusLogLifetime})
+	s.statusLog = append(s.statusLog, statusEntry{msg: msg, timer: statusLogLifetime, warn: warn})
 	if len(s.statusLog) > statusLogMaxEntries {
 		s.statusLog = s.statusLog[len(s.statusLog)-statusLogMaxEntries:]
 	}

@@ -99,22 +99,10 @@ func drawTurnPanel(g core.GameState, assets Resources) {
 // panel paints up to 7 rows every battle frame; without this cache
 // each row costs a cgo round-trip even though the labels only change
 // when an actor enters or leaves the queue.
-var turnLabelMeasureCache = make(map[string]rl.Vector2, 16)
-var turnLabelMeasureCacheFontID uint32
+var turnLabelMeasureCache measureCache
 
 func measureTurnLabel(font rl.Font, label string) rl.Vector2 {
-	if font.Texture.ID != turnLabelMeasureCacheFontID {
-		for k := range turnLabelMeasureCache {
-			delete(turnLabelMeasureCache, k)
-		}
-		turnLabelMeasureCacheFontID = font.Texture.ID
-	}
-	if v, ok := turnLabelMeasureCache[label]; ok {
-		return v
-	}
-	v := rl.MeasureTextEx(font, label, FontSmall, 1)
-	turnLabelMeasureCache[label] = v
-	return v
+	return turnLabelMeasureCache.measure(font, label, FontSmall, 1)
 }
 
 func turnEntryColor(turn core.TurnEntry) color.RGBA {

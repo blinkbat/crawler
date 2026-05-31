@@ -22,6 +22,13 @@ import (
 // screen — the labels overlap badly past ~25 tiles even sorted by depth.
 const debugLabelRange = 4
 
+// Debug-overlay text tints — named so the two near-identical greens
+// (the coord heading vs the in-world tile labels) aren't inline literals.
+var (
+	debugHeadingColor = rl.NewColor(186, 240, 186, 245)
+	debugLabelColor   = rl.NewColor(220, 240, 220, 245)
+)
+
 // debugLabelsBuf reuses the per-tile label slice across frames so the
 // overlay's hot loop doesn't allocate a fresh slice every draw when
 // enabled. Renderer is single-threaded, so re-slicing is safe.
@@ -54,10 +61,9 @@ func DrawDebugOverlay(camera rl.Camera3D, g core.GameState, assets Resources) {
 		fmt.Sprintf("X=%d  Z=%d  %s", g.Player.TileX, g.Player.TileZ, facing),
 		fmt.Sprintf("step %d  %s", g.StepCount, m.Name),
 	}
-	debugHeadingCol := rl.NewColor(186, 240, 186, 245)
 	for i, line := range header {
 		x, y := float32(14), float32(12+i*22)
-		drawTextWithShadowStyle(assets.hudFont, line, x, y, FontBody, FontSpacingBody, debugHeadingCol, shadowHeavy, 1, 1)
+		drawTextWithShadowStyle(assets.hudFont, line, x, y, FontBody, FontSpacingBody, debugHeadingColor, shadowHeavy, 1, 1)
 	}
 
 	// Pre-compute forward so we can cheaply drop tiles behind the camera.
@@ -160,6 +166,5 @@ func drawDebugLabel(font rl.Font, text string, x, y float32) {
 	ry := y - measure.Y/2
 	const pad = float32(4)
 	rl.DrawRectangle(int32(rx-pad), int32(ry-pad/2), int32(measure.X+pad*2), int32(measure.Y+pad), rl.NewColor(0, 0, 0, 185))
-	rl.DrawTextEx(font, text, rl.NewVector2(rx+1, ry+1), size, spacing, shadowHeavy)
-	rl.DrawTextEx(font, text, rl.NewVector2(rx, ry), size, spacing, rl.NewColor(220, 240, 220, 245))
+	drawTextWithShadowStyle(font, text, rx, ry, size, spacing, debugLabelColor, shadowHeavy, 1, 1)
 }

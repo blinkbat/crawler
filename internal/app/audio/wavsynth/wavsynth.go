@@ -53,6 +53,12 @@ const (
 	waveShapeCount
 )
 
+// WaveShapeCount is the number of WaveShape values — exported so the
+// editor's wave picker derives its slider bound from the enum instead
+// of hardcoding the highest index, and a fifth shape becomes reachable
+// automatically.
+const WaveShapeCount = int(waveShapeCount)
+
 // WaveShapeName returns a human label for a WaveShape value — used
 // by the sound-editor row that exposes the shape picker.
 func WaveShapeName(w WaveShape) string {
@@ -317,13 +323,13 @@ func BuildWAV(pcm []int16, rate int) []byte {
 	_ = binary.Write(&buf, binary.LittleEndian, uint32(36+dataSize))
 	buf.WriteString("WAVE")
 	buf.WriteString("fmt ")
-	_ = binary.Write(&buf, binary.LittleEndian, uint32(16))                  // fmt chunk size
-	_ = binary.Write(&buf, binary.LittleEndian, uint16(1))                   // PCM
-	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavChannels))         // channels — mono
-	_ = binary.Write(&buf, binary.LittleEndian, uint32(rate))                // sample rate
-	_ = binary.Write(&buf, binary.LittleEndian, uint32(rate*wavBlockAlign))  // byte rate (rate × blockAlign)
-	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavBlockAlign))       // block align
-	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavBitsPerSample))    // bits per sample
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(16))                 // fmt chunk size
+	_ = binary.Write(&buf, binary.LittleEndian, uint16(1))                  // PCM
+	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavChannels))        // channels — mono
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(rate))               // sample rate
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(rate*wavBlockAlign)) // byte rate (rate × blockAlign)
+	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavBlockAlign))      // block align
+	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavBitsPerSample))   // bits per sample
 	buf.WriteString("data")
 	_ = binary.Write(&buf, binary.LittleEndian, uint32(dataSize))
 	_ = binary.Write(&buf, binary.LittleEndian, pcm)

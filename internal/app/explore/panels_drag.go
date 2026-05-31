@@ -4,8 +4,6 @@ import (
 	"crawler/internal/app/core"
 	"crawler/internal/app/input"
 	"crawler/internal/app/render"
-
-	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 // updateEquipmentDrag handles mouse drag-and-drop on the Equipment
@@ -15,14 +13,13 @@ import (
 // closePanels).
 //
 // The hit rects we test against are written by drawPanelsEquipment
-// the previous frame and exposed via render.LastEquipPanelLayout /
-// EquipPanel* lookups — single seam so render owns the layout and
-// input just reads it.
+// the previous frame and exposed via render's EquipPanel* lookups —
+// single seam so render owns the layout and input just reads it.
 func updateEquipmentDrag(g *core.GameState) {
-	mouse := rl.GetMousePosition()
+	mouse := input.PointerPos()
 
 	// Drag start — left mouse pressed, no existing drag.
-	if rl.IsMouseButtonPressed(rl.MouseLeftButton) && g.EquipDrag.Source == core.EquipDragSourceNone {
+	if input.DragStartPressed() && g.EquipDrag.Source == core.EquipDragSourceNone {
 		// Slot drag-start: only if the slot holds something.
 		if pi, slot, ok := render.EquipPanelSlotHit(mouse); ok {
 			if pi >= 0 && pi < len(g.Party) {
@@ -41,7 +38,7 @@ func updateEquipmentDrag(g *core.GameState) {
 	}
 
 	// Drag release — left mouse released, drag in progress.
-	if rl.IsMouseButtonReleased(rl.MouseLeftButton) && g.EquipDrag.Source != core.EquipDragSourceNone {
+	if input.DragReleased() && g.EquipDrag.Source != core.EquipDragSourceNone {
 		defer core.ClearEquipDrag(g)
 		// Dropped on a slot?
 		if pi, slot, ok := render.EquipPanelSlotHit(mouse); ok {
@@ -179,7 +176,7 @@ func updateEquipmentTab(g *core.GameState) {
 	// Device arbitration. Mouse movement or a held click hands control
 	// to the drag path; any cursor edge wakes the keyboard/controller
 	// cursor.
-	if md := rl.GetMouseDelta(); md.X != 0 || md.Y != 0 || rl.IsMouseButtonDown(rl.MouseLeftButton) {
+	if input.PointerMoved() || input.DragHeld() {
 		g.EquipCursorActive = false
 	}
 	if up || down || lr != 0 || confirm {

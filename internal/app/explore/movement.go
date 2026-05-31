@@ -128,12 +128,7 @@ func updateMenu(g *core.GameState) {
 		g.MenuOpen = false
 		return
 	}
-	if input.UpPressed() {
-		g.MenuIndex = core.WrapIndex(g.MenuIndex-1, core.PauseMenuCount)
-	}
-	if input.DownPressed() {
-		g.MenuIndex = core.WrapIndex(g.MenuIndex+1, core.PauseMenuCount)
-	}
+	g.MenuIndex = input.CursorUpDown(g.MenuIndex, core.PauseMenuCount)
 	if input.RestartPressed() {
 		restartGame(g)
 		return
@@ -227,8 +222,8 @@ func restartGame(g *core.GameState) {
 func updateFreeLook(p *core.Player, dt float32) {
 	// Mouse right-drag takes priority while held — relative motion, not
 	// dt-scaled (one mouse delta = one yaw nudge).
-	if rl.IsMouseButtonDown(rl.MouseRightButton) {
-		mouse := rl.GetMouseDelta()
+	if input.LookDragActive() {
+		mouse := input.LookMouseDelta()
 		p.LookYaw = core.Clamp(p.LookYaw+mouse.X*core.MouseSense, -core.MaxLookYaw, core.MaxLookYaw)
 		p.LookPitch = core.Clamp(p.LookPitch-mouse.Y*core.MouseSense, -core.MaxLookPitch, core.MaxLookPitch)
 		return

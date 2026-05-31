@@ -33,6 +33,7 @@ func Start(g *core.GameState, packIndex int) {
 	g.Battle.Queue = nil
 	g.Battle.QueueCursor = 0
 	g.Battle.NextRoundQueue = nil
+	g.Battle.Readiness = nil // fresh ATB gauges each battle
 	resetBattleAction(g)
 	setBattleMessage(g, core.BattleEncounterMessage(g))
 	beginNewRound(g)
@@ -59,6 +60,11 @@ func Update(g *core.GameState, dt float32) {
 			updateAttackTiming(g, dt)
 		case core.BattleEnemyTiming:
 			updateEnemyTiming(g, dt)
+		default:
+			// HitStop is only ever set during a timing phase; if a future
+			// phase sets it without a handler here, drain it rather than
+			// freeze the battle forever waiting for a tick that never comes.
+			g.Battle.HitStop = 0
 		}
 		return
 	}
@@ -159,9 +165,9 @@ func beginNewRound(g *core.GameState) {
 	g.Battle.Queue = buildTurnQueue(g)
 	g.Battle.QueueCursor = 0
 	// Pre-bake the projection of the round AFTER this one so TurnForecast
-	// doesn't have to re-sort every frame. The projection only matters when
-	// the current round runs short for the forecast's row budget.
-	g.Battle.NextRoundQueue = buildTurnQueue(g)
+	// doesn't have to re-sort every frame. Uses the non-persisting variant
+	// so it doesn't consume the readiness the real next round needs.
+	g.Battle.NextRoundQueue = projectNextRoundQueue(g)
 	startActorTurn(g)
 }
 
@@ -175,13 +181,29 @@ func beginNewRound(g *core.GameState) {
 // so the queue looks like [Thief, Goblin, Cleric, Thief, Wizard,
 // Warrior, ...] instead of clustered SPD-descending slots.
 //
-// Simulation runs from ready=0 each call and stops once every alive
-// actor has acted at least once (the "round" boundary that downstream
-// code — poison-on-ingested ticks, enemy-attack cursor reset — still
-// hangs poison and per-round housekeeping off). Ingested party
-// members are skipped entirely; they re-enter the queue the call
-// AFTER their swallower dies.
+// Each actor's gauge SEEDS from g.Battle.Readiness (carried across
+// rounds) rather than resetting to 0, so a faster actor's leftover
+// surplus accumulates into EXTRA turns over time — SPD drives turn rate,
+// not merely order. The sim still stops once every alive actor has acted
+// at least once (the "round" boundary downstream code — poison-on-
+// ingested ticks, enemy-attack cursor reset — hangs housekeeping off);
+// the persisted surplus is what lets a small/steady SPD lead eventually
+// convert to a bonus turn instead of being discarded at the round edge.
+// Ingested party members are skipped entirely; they re-enter the queue
+// the call AFTER their swallower dies.
 func buildTurnQueue(g *core.GameState) []core.ActorRef {
+	return simulateTurnQueue(g, true)
+}
+
+// projectNextRoundQueue previews the round AFTER the current one WITHOUT
+// advancing the persisted readiness — the real next round simulates from
+// the same gauge state and yields this same queue, so the turn-forecast
+// HUD stays accurate under the carry-over model.
+func projectNextRoundQueue(g *core.GameState) []core.ActorRef {
+	return simulateTurnQueue(g, false)
+}
+
+func simulateTurnQueue(g *core.GameState, persist bool) []core.ActorRef {
 	members := core.BattleMembers(g)
 	type tickActor struct {
 		ref   core.ActorRef
@@ -194,13 +216,15 @@ func buildTurnQueue(g *core.GameState) []core.ActorRef {
 		if p.HP <= 0 || p.Ingested {
 			continue
 		}
-		actors = append(actors, tickActor{ref: core.ActorRef{IsParty: true, Index: i}, spd: actorSpeed(g, core.ActorRef{IsParty: true, Index: i})})
+		ref := core.ActorRef{IsParty: true, Index: i}
+		actors = append(actors, tickActor{ref: ref, spd: actorSpeed(g, ref), ready: g.Battle.Readiness[ref]})
 	}
 	for slot, m := range members {
 		if !m.Alive {
 			continue
 		}
-		actors = append(actors, tickActor{ref: core.ActorRef{IsParty: false, Index: slot}, spd: actorSpeed(g, core.ActorRef{IsParty: false, Index: slot})})
+		ref := core.ActorRef{IsParty: false, Index: slot}
+		actors = append(actors, tickActor{ref: ref, spd: actorSpeed(g, ref), ready: g.Battle.Readiness[ref]})
 	}
 	if len(actors) == 0 {
 		return nil
@@ -219,7 +243,17 @@ func buildTurnQueue(g *core.GameState) []core.ActorRef {
 		}
 	}
 	if target == 0 {
-		return nil
+		// Degenerate encounter: every living actor has SPD <= 0 (only
+		// reachable via hand-authored custom-enemy stats — built-ins are
+		// all SPD > 0). Returning nil would leave startActorTurn ->
+		// beginNewRound rebuilding an empty queue forever (neither side
+		// is wiped), recursing to a stack overflow. Give each living
+		// actor one slot in declaration order so the round still resolves.
+		fallback := make([]core.ActorRef, 0, len(actors))
+		for _, a := range actors {
+			fallback = append(fallback, a.ref)
+		}
+		return fallback
 	}
 	queue := make([]core.ActorRef, 0, target*2)
 	actedCount := 0
@@ -264,6 +298,16 @@ func buildTurnQueue(g *core.GameState) []core.ActorRef {
 			actors[bestIdx].acted = true
 			actedCount++
 		}
+	}
+	if persist {
+		// Carry each actor's leftover gauge into the next round. Rebuilt
+		// fresh from the current actor set, so entries for actors who died
+		// this round are pruned automatically.
+		next := make(map[core.ActorRef]int, len(actors))
+		for _, a := range actors {
+			next[a.ref] = a.ready
+		}
+		g.Battle.Readiness = next
 	}
 	return queue
 }
@@ -334,11 +378,13 @@ func startActorTurn(g *core.GameState) {
 	// first so a target that's both sleeping and stunned reads as
 	// "asleep" in the log.
 	if asleep := tickSleepAtTurnStart(g, actor); asleep {
+		consumeDefendOnSkip(g, actor)
 		g.Battle.QueueCursor++
 		startActorTurn(g)
 		return
 	}
 	if stunned := tickStunAtTurnStart(g, actor); stunned {
+		consumeDefendOnSkip(g, actor)
 		g.Battle.QueueCursor++
 		startActorTurn(g)
 		return
@@ -348,6 +394,17 @@ func startActorTurn(g *core.GameState) {
 		beginPartyTurn(g, actor.Index)
 	} else {
 		beginEnemyAttack(g, actor.Index)
+	}
+}
+
+// consumeDefendOnSkip clears a party member's Defend brace when their
+// turn is skipped by Sleep/Stun. beginPartyTurn clears it on a normal
+// turn; without this a member who chose Defend and is then put to sleep
+// keeps the damage reduction every round they're out, instead of the
+// single round Defend is meant to last. Enemies don't use Defending.
+func consumeDefendOnSkip(g *core.GameState, actor core.ActorRef) {
+	if actor.IsParty && actor.Index >= 0 && actor.Index < len(g.Party) {
+		g.Party[actor.Index].Defending = false
 	}
 }
 
@@ -512,7 +569,7 @@ func updatePlayerBattle(g *core.GameState) {
 	// If the current actor died between turns (e.g. an enemy went first this
 	// round and killed them), the queue would normally advance past us — but
 	// as a defensive net here we skip ahead.
-	if !core.PartyMemberAlive(g.Party, g.Battle.CurrentParty) {
+	if !core.PartyMemberAvailable(g.Party, g.Battle.CurrentParty) {
 		g.Battle.QueueCursor++
 		startActorTurn(g)
 		return
@@ -1000,6 +1057,7 @@ func clearBattleResidual(g *core.GameState) {
 	g.Battle.Queue = nil
 	g.Battle.QueueCursor = 0
 	g.Battle.NextRoundQueue = nil
+	g.Battle.Readiness = nil
 	g.Battle.ClearTiming()
 	g.Battle.TimingIntro = 0
 	g.Battle.ChargeNeedsRelease = false
@@ -1013,6 +1071,11 @@ func clearBattleResidual(g *core.GameState) {
 
 func recoverFromLoss(g *core.GameState) {
 	core.ResetGameState(g)
+	// ResetGameState zeroed the VFX-reset flag, so re-request it here —
+	// otherwise the lost fight's formation-relative particles ghost in
+	// the field at wrong camera-relative spots (every other battle exit
+	// clears them via clearBattleResidual -> RequestVFXReset).
+	core.RequestVFXReset(g)
 	// Recovery toast is a transient status, not a combat-log event — using
 	// setBattleStatus keeps the fresh-run Log empty (the player isn't in
 	// battle anymore) while still surfacing the message on the field HUD.
@@ -1068,17 +1131,23 @@ func setBattleMessage(g *core.GameState, message string) {
 	}
 }
 
+// tickHitTimers decays the three per-actor hit-reaction timers (lunge
+// bump, damage flash, recoil knockback) toward zero — the trio
+// ApplyFlatDamage/ApplyHitRecoil arm. Shared by the party and enemy decay
+// loops so they can't drift on which timers fade.
+func tickHitTimers(bump, flash, knockback *float32, dt float32) {
+	*bump = core.ApproachZero(*bump, dt)
+	*flash = core.ApproachZero(*flash, dt)
+	*knockback = core.ApproachZero(*knockback, dt)
+}
+
 func updateBattleEffects(g *core.GameState, dt float32) {
 	for i := range g.Party {
-		g.Party[i].AttackBump = core.ApproachZero(g.Party[i].AttackBump, dt)
-		g.Party[i].DamageFlash = core.ApproachZero(g.Party[i].DamageFlash, dt)
-		g.Party[i].HitKnockback = core.ApproachZero(g.Party[i].HitKnockback, dt)
+		tickHitTimers(&g.Party[i].AttackBump, &g.Party[i].DamageFlash, &g.Party[i].HitKnockback, dt)
 	}
 	members := core.BattleMembers(g)
 	for i := range members {
-		members[i].AttackBump = core.ApproachZero(members[i].AttackBump, dt)
-		members[i].DamageFlash = core.ApproachZero(members[i].DamageFlash, dt)
-		members[i].HitKnockback = core.ApproachZero(members[i].HitKnockback, dt)
+		tickHitTimers(&members[i].AttackBump, &members[i].DamageFlash, &members[i].HitKnockback, dt)
 		members[i].DeathFade = core.ApproachZero(members[i].DeathFade, dt)
 		members[i].DamagePopupTimer = core.ApproachZero(members[i].DamagePopupTimer, dt)
 	}

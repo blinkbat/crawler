@@ -15,7 +15,7 @@ func openPanels(g *core.GameState) {
 	g.PanelsOpen = true
 	g.PanelsRowCursor = 0
 	if g.PanelsMapZoom <= 0 {
-		g.PanelsMapZoom = panelsMapZoomDefault
+		g.PanelsMapZoom = core.PanelMapZoomDefault
 	}
 	// Snap the look yaw/pitch back to neutral so a half-rotated
 	// free-look doesn't bleed into the overlay's screen-space rendering.
@@ -35,19 +35,6 @@ func closePanels(g *core.GameState) {
 	core.ClearEquipDrag(g)
 	render.ResetEquipPanelLayout()
 }
-
-// panelsMapZoomDefault is the initial cells-on-screen value for the Map
-// tab. Tuned so a typical 20×14 map fits comfortably with room for the
-// player arrow.
-const panelsMapZoomDefault = 14
-
-// panelsMapZoomMin / Max bound the zoomable-map's cells-on-screen
-// extents. Below the minimum the map crowds the player marker out;
-// above the maximum even a tiny map shows whole-map plus padding.
-const (
-	panelsMapZoomMin = 6
-	panelsMapZoomMax = 48
-)
 
 // updatePanels routes one frame of input to whatever tab is up.
 // Always-on bindings (close / tab paging) live here; per-tab cursors
@@ -122,25 +109,20 @@ func updatePanels(g *core.GameState) {
 		g.PanelsRowCursor = input.CursorLeftRightWrap(g.PanelsRowCursor, len(g.Party))
 	case core.PanelTabItems:
 		// Vertical inventory list: Up/Down walk the stacks.
-		count := len(core.LiveStacks(g.Inventory))
+		count := core.LiveStackCount(g.Inventory)
 		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, count)
 	case core.PanelTabMap:
 		// Up/Down zooms the map by one cells-on-screen step per press;
-		// the bounds (panelsMapZoomMin/Max) are soft-clamped so holding
+		// the bounds (core.PanelMapZoomMin/Max) are soft-clamped so holding
 		// the key doesn't run off the rails. (This is its own zoom model
 		// in cells-on-screen, distinct from the editor's float scale.)
 		if input.UpPressed() {
-			g.PanelsMapZoom -= 2
+			g.PanelsMapZoom -= core.PanelMapZoomStep
 		}
 		if input.DownPressed() {
-			g.PanelsMapZoom += 2
+			g.PanelsMapZoom += core.PanelMapZoomStep
 		}
-		if g.PanelsMapZoom < panelsMapZoomMin {
-			g.PanelsMapZoom = panelsMapZoomMin
-		}
-		if g.PanelsMapZoom > panelsMapZoomMax {
-			g.PanelsMapZoom = panelsMapZoomMax
-		}
+		g.PanelsMapZoom = core.Clamp(g.PanelsMapZoom, core.PanelMapZoomMin, core.PanelMapZoomMax)
 	}
 }
 

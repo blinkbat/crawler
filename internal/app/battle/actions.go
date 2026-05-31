@@ -533,10 +533,7 @@ func ensureAliveTargetOrCancel(g *core.GameState, refundSkill core.SkillID) bool
 	if refundSkill != core.SkillNone {
 		if cost := core.SkillCost(refundSkill); cost > 0 {
 			actor := &g.Party[g.Battle.CurrentParty]
-			actor.MP += cost
-			if actor.MP > actor.MaxMP {
-				actor.MP = actor.MaxMP
-			}
+			core.GainUpTo(&actor.MP, actor.MaxMP, cost)
 		}
 	}
 	setBattleStatus(g, "No target.")
@@ -689,8 +686,15 @@ func applyPendingAction(g *core.GameState, quality int) {
 		setBattleStatus(g, "No skill ready.")
 		return
 	}
+	// Capture the acting member BEFORE apply: handler.apply runs
+	// finishPartyAction → finishActorTurn → beginPartyTurn synchronously,
+	// which advances g.Battle.CurrentParty to the NEXT actor. Reading it
+	// after apply would stamp the quality popup over whoever acts next
+	// (when two party members are back-to-back in the queue) instead of
+	// the member whose timing this popup describes.
+	actor := g.Battle.CurrentParty
 	if landed := handler.apply(g, quality); landed {
-		recordQuality(g, quality, g.Battle.CurrentParty, false)
+		recordQuality(g, quality, actor, false)
 	}
 }
 
@@ -741,7 +745,7 @@ func applyAttack(g *core.GameState, quality int) bool {
 	// they essentially never whiff. The swing animation still plays and
 	// the timing popup still grades — the player's mechanical performance
 	// is acknowledged — but no damage lands when the roll fails.
-	if !core.AttackHits(g.Rand(), core.EffectiveStats(*attacker), quality) {
+	if !core.MemberAttackHits(g.Rand(), *attacker, quality) {
 		// Whiff log keeps the quality prefix so the line reads consistently
 		// with hits ("Excellent! Warrior hits for 8." vs "Excellent! Warrior
 		// swings wide."). The popup over the actor still says "Excellent!"
@@ -754,20 +758,21 @@ func applyAttack(g *core.GameState, quality int) bool {
 	// Defender dodge: a connecting swing can still be sidestepped by a
 	// nimble enemy. Symmetric with the party-side dodge in
 	// resolveEnemyAttacker. Skills are NOT dodgeable (mirrors
-	// AttackAccuracy's basic-attack-only gate).
+	// MeleeAccuracy's basic-attack-only gate).
 	if core.RollDodge(g.Rand(), core.EnemyInfoFor(target).Stats) {
 		setBattleMessage(g, fmt.Sprintf("%s%s lunges but the %s slips aside.", qualityTag(quality), attacker.Name, core.EnemySingularNoun(target)))
 		finishPartyAction(g)
 		return true
 	}
-	// Basic Attack: STR + 0, scaled by timing quality. Physically tagged
-	// so the armor damp applies — basic attacks are the canonical phys
-	// swing against an armored foe (amoeba teaches the lesson). The
-	// dealt number returned by damageEnemy is the POST-armor figure;
-	// the combat log uses it so what the player reads matches the HP
-	// delta (an Excellent vs an Amoeba prints "hits for 4", not the
-	// 12 we computed before armor clipped it down).
-	rawDamage := core.ScaleDamage(core.MeleeDamage(core.EffectiveStats(*attacker), 0), quality)
+	// Basic Attack: weapon-stat + 0, scaled by timing quality. The
+	// governing stat tracks the equipped weapon (STR heavy / DEX light +
+	// ranged) via MemberAttackDamage. Physically tagged so the armor damp
+	// applies — basic attacks are the canonical phys swing against an
+	// armored foe (amoeba teaches the lesson). The dealt number returned
+	// by damageEnemy is the POST-armor figure; the combat log uses it so
+	// what the player reads matches the HP delta (an Excellent vs an
+	// Amoeba prints "hits for 4", not the 12 we computed before armor).
+	rawDamage := core.ScaleDamage(core.MemberAttackDamage(*attacker, 0), quality)
 	crit, _ := rollSkillCrit(g, attacker, core.SkillNone, quality)
 	rawDamage = applyCritMultiplier(rawDamage, crit, false)
 	dealt, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagPhys)
@@ -889,9 +894,9 @@ func applySteal(g *core.GameState, quality int) bool {
 		return true
 	}
 	effect := core.EffectiveSkillEffect(actor, core.SkillSteal)
-	// Steal chance: base × (1 + DEX/20), then quality multiplier on top.
-	// Capped at 1.0 so a perfect-Excellent high-DEX thief still rolls.
-	chance := core.StealChance(core.EffectiveStats(*actor), effect.StealChance) * float64(core.TimingBonusMult(quality))
+	// Steal chance: flat base (no DEX scaling) with the timing-quality
+	// multiplier on top. Capped at 1.0 so a perfect Excellent still rolls.
+	chance := core.StealChance(effect.StealChance) * float64(core.TimingBonusMult(quality))
 	if chance > 1 {
 		chance = 1
 	}
@@ -1053,10 +1058,7 @@ func applyMassMend(g *core.GameState, quality int) bool {
 			continue
 		}
 		if m.HP < m.MaxHP {
-			m.HP += heal
-			if m.HP > m.MaxHP {
-				m.HP = m.MaxHP
-			}
+			core.GainUpTo(&m.HP, m.MaxHP, heal)
 			healed++
 		}
 		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillMassMend), i)
@@ -1315,23 +1317,18 @@ func damageEnemy(g *core.GameState, slot, rawDamage, quality int, tag core.Skill
 	// mitigateDamage keeps a future caller from accidentally healing an
 	// enemy by passing a signed stat delta.
 	damage := mitigateDamage(rawDamage, tag, enemy.Armor, core.EnemyInfoFor(*enemy).MDef)
-	enemy.DamageFlash = core.FlashDuration
-	enemy.HP -= damage
+	// Flash + HP-floor (shared with the party path + the poison tick) and
+	// the real-hit recoil/wake reaction (shared with the party path).
+	died := core.ApplyFlatDamage(&enemy.HP, &enemy.DamageFlash, damage)
 	if damage > 0 {
 		enemy.DamagePopup = damage
 		enemy.DamagePopupQuality = quality
 		enemy.DamagePopupTimer = core.QualityResultDuration
-		// Receiver recoil — the enemy flinches backward away from
-		// the camera. Only fires on real damage (armor-shrugged 1s
-		// still recoil; pure zero-damage connections don't).
-		enemy.HitKnockback = core.HitKnockbackDuration
-		// Any incoming damage shakes the enemy out of sleep — even an
-		// armor-clamped 1, since the contract is "the hit landed."
-		if enemy.SleepTurns > 0 {
-			enemy.SleepTurns = 0
-		}
 	}
-	if enemy.HP > 0 {
+	// Receiver recoil + wake-from-sleep — only on real damage (armor-
+	// shrugged 1s still recoil; pure zero-damage connections don't).
+	core.ApplyHitRecoil(&enemy.HitKnockback, &enemy.SleepTurns, damage)
+	if !died {
 		// Audible "thud" only on hits that actually scored. Zero-damage
 		// connections (e.g. Swipe with a 0 base) stay silent so the bar
 		// doesn't tick a sound on every empty swing.
@@ -1340,7 +1337,6 @@ func damageEnemy(g *core.GameState, slot, rawDamage, quality int, tag core.Skill
 		}
 		return damage, false
 	}
-	enemy.HP = 0
 	enemy.Alive = false
 	clearEnemyStatusesOnDeath(enemy)
 	core.EnqueueEnemyVFX(g, core.VFXDeath, slot)
@@ -1385,6 +1381,17 @@ func tickPoisonAfterPartyTurn(g *core.GameState, actor core.ActorRef) bool {
 // Shared by the end-of-turn tick and the ingested-member round tick,
 // which used to inline this damage-and-message body verbatim. Callers
 // guard HP/PoisonTurns before calling.
+// poisonTickMessage formats the end-of-turn poison-tick combat-log line
+// for either side — `subject` is the pre-resolved actor name (party) or
+// "The <noun>" (enemy), so the two ticks share one format instead of
+// two near-identical fmt.Sprintf pairs.
+func poisonTickMessage(subject string, dealt int, fatal bool) string {
+	if fatal {
+		return fmt.Sprintf("%s succumbs to the poison.", subject)
+	}
+	return fmt.Sprintf("%s suffers %d from poison.", subject, dealt)
+}
+
 func applyPartyPoisonTick(g *core.GameState, index int) bool {
 	member := &g.Party[index]
 	member.PoisonTurns--
@@ -1392,12 +1399,8 @@ func applyPartyPoisonTick(g *core.GameState, index int) bool {
 	// authoritative kill signal so a future "save at 1 HP" mechanic in
 	// damagePartyMember can't desync from the message we emit here.
 	dealt, killed := damagePartyMember(g, index, core.PoisonTickDamage, core.SkillTagMagic)
-	if killed {
-		setBattleMessage(g, fmt.Sprintf("%s succumbs to the poison.", member.Name))
-		return true
-	}
-	setBattleMessage(g, fmt.Sprintf("%s suffers %d from poison.", member.Name, dealt))
-	return false
+	setBattleMessage(g, poisonTickMessage(member.Name, dealt, killed))
+	return killed
 }
 
 // applyEnemyDoTTick is the enemy-side damaging-tick seam: drain the given
@@ -1497,13 +1500,8 @@ func tickPoisonAfterEnemyTurn(g *core.GameState, actor core.ActorRef) bool {
 		return false
 	}
 	dealt, defeated := applyEnemyDoTTick(g, actor.Index, &enemy.PoisonTurns, core.PoisonTickDamage)
-	noun := core.EnemySingularNoun(*enemy)
-	if defeated {
-		setBattleMessage(g, fmt.Sprintf("The %s succumbs to the poison.", noun))
-		return true
-	}
-	setBattleMessage(g, fmt.Sprintf("The %s suffers %d from poison.", noun, dealt))
-	return false
+	setBattleMessage(g, poisonTickMessage("The "+core.EnemySingularNoun(*enemy), dealt, defeated))
+	return defeated
 }
 
 // tickBurnAtTurnStart resolves the per-tick burn damage on a burning actor at
@@ -1549,10 +1547,7 @@ func healPartyMember(g *core.GameState, partyIndex, amount int) bool {
 	if member.Ingested {
 		return false
 	}
-	member.HP += amount
-	if member.HP > member.MaxHP {
-		member.HP = member.MaxHP
-	}
+	core.GainUpTo(&member.HP, member.MaxHP, amount)
 	member.DamageFlash = core.FlashDuration
 	audio.Play(audio.SoundHeal)
 	return true
@@ -1589,22 +1584,16 @@ func damagePartyMember(g *core.GameState, partyIndex, rawAmount int, tag core.Sk
 	// member.Armor stays authored (0 today on the party side); items
 	// add to it via ArmorBonus / MDefBonus on their ItemDefinition.
 	amount := mitigateDamage(rawAmount, tag, core.EffectiveArmor(*member), core.EffectiveMDef(*member))
-	member.DamageFlash = core.FlashDuration
-	member.HP -= amount
-	if amount > 0 {
-		// Reactionary knockback — only on real damage so a fully-
-		// soaked hit doesn't visually shove a tank who took 0. The
-		// renderer pushes the member toward the camera (away from
-		// the attacking enemy formation) for HitKnockbackDuration.
-		member.HitKnockback = core.HitKnockbackDuration
-		if member.SleepTurns > 0 {
-			member.SleepTurns = 0
-		}
-	}
-	if member.HP > 0 {
+	// Flash + HP-floor (shared with the enemy path + the poison tick).
+	died := core.ApplyFlatDamage(&member.HP, &member.DamageFlash, amount)
+	// Reactionary knockback + wake — only on real damage so a fully-
+	// soaked hit doesn't visually shove a tank who took 0. The renderer
+	// pushes the member toward the camera (away from the attacking enemy
+	// formation) for HitKnockbackDuration.
+	core.ApplyHitRecoil(&member.HitKnockback, &member.SleepTurns, amount)
+	if !died {
 		return amount, false
 	}
-	member.HP = 0
 	clearPartyStatusesOnDeath(member)
 	return amount, true
 }
@@ -1804,7 +1793,7 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	// pressed is still recorded so the grade-quality history tracks
 	// what they did, not just what landed. Skills (goblin mage casts,
 	// stone golem slam, etc.) go through their own resolver and are
-	// NOT dodgeable today — mirrors AttackAccuracy, which only gates
+	// NOT dodgeable today — mirrors MeleeAccuracy, which only gates
 	// basic attacks.
 	if core.RollDodge(g.Rand(), core.EffectiveStats(g.Party[target])) {
 		recordQuality(g, defendQuality, target, true)
@@ -1818,9 +1807,7 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	// keeps enemies on a flat ~5-10% crit floor where the player can
 	// push 30%+ on Excellent.
 	enemyCrit := core.RollCrit(g.Rand(), core.EnemyInfoFor(*enemy).Stats, core.TimingQualityMiss)
-	if enemyCrit {
-		rawDamage *= core.CritMultiplier
-	}
+	rawDamage = applyCritMultiplier(rawDamage, enemyCrit, false)
 	damage := core.ScaleIncomingDamage(rawDamage, defendQuality)
 	if g.Party[target].Defending {
 		scaled := int(float32(damage) * core.DefendingDamageMult)
@@ -1875,15 +1862,12 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	if def.LifestealPercent > 0 && dealt > 0 && enemy.HP > 0 {
 		heal := int(float64(dealt) * def.LifestealPercent)
 		if heal > 0 {
-			enemy.HP += heal
 			// Cap against the per-instance MaxHP, not the definition's
 			// base MaxHP — a future raised/scaled enemy with a non-
 			// default per-instance ceiling would otherwise overheal
 			// past its real cap or undercap a buffed one. Today both
 			// values match because NewEnemy seeds from the same def.
-			if enemy.HP > enemy.MaxHP {
-				enemy.HP = enemy.MaxHP
-			}
+			core.GainUpTo(&enemy.HP, enemy.MaxHP, heal)
 			setBattleMessage(g, fmt.Sprintf("%s drains life from %s (+%d HP).", core.TheEnemy(def), g.Party[target].Name, heal))
 		}
 	}

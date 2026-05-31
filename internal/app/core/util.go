@@ -35,18 +35,21 @@ func FlashTint(base color.RGBA, timer float32) color.RGBA {
 	return MixColor(base, color.RGBA{R: 255, G: 255, B: 255, A: base.A}, strength)
 }
 
-func BumpOffset(timer, distance float32) float32 {
+// sinePulse maps a countdown `timer` (running from `duration` down to 0)
+// onto a single half-sine arc scaled by `distance`: 0 at the start, peak
+// `distance` at the midpoint, back to 0 at the end. The shared shape
+// behind BumpOffset (lunge) and KnockbackOffset (recoil) so the recoil
+// curve can't drift between attacker and receiver.
+func sinePulse(timer, duration, distance float32) float32 {
 	if timer <= 0 {
 		return 0
 	}
-	t := 1 - timer/BumpDuration
-	if t < 0 {
-		t = 0
-	}
-	if t > 1 {
-		t = 1
-	}
+	t := Clamp(1-timer/duration, 0, 1)
 	return float32(math.Sin(float64(t)*math.Pi)) * distance
+}
+
+func BumpOffset(timer, distance float32) float32 {
+	return sinePulse(timer, BumpDuration, distance)
 }
 
 // KnockbackOffset returns the per-frame world-units offset for a
@@ -56,17 +59,7 @@ func BumpOffset(timer, distance float32) float32 {
 // Used by the renderer to push the hit sprite AWAY from its
 // attacker — sign of the application is the caller's choice.
 func KnockbackOffset(timer, distance float32) float32 {
-	if timer <= 0 {
-		return 0
-	}
-	t := 1 - timer/HitKnockbackDuration
-	if t < 0 {
-		t = 0
-	}
-	if t > 1 {
-		t = 1
-	}
-	return float32(math.Sin(float64(t)*math.Pi)) * distance
+	return sinePulse(timer, HitKnockbackDuration, distance)
 }
 
 func ApproachZero(v, amount float32) float32 {
@@ -215,6 +208,18 @@ func Clamp[T cmp.Ordered](v, min, max T) T {
 		return max
 	}
 	return v
+}
+
+// GainUpTo adds delta to *cur, clamped so it never exceeds max — the
+// shared "restore a pool toward its ceiling" primitive behind heals, the
+// MP refund, lifesteal, and the level-up pool growth (VIT→HP, INT→MP).
+// Keeps the add-then-clamp in one place. Negative delta just lowers cur;
+// callers needing a 0 floor clamp that separately.
+func GainUpTo(cur *int, max, delta int) {
+	*cur += delta
+	if *cur > max {
+		*cur = max
+	}
 }
 
 func ClampByte(v int) uint8 {

@@ -33,7 +33,6 @@ type Theme struct {
 	MarkerChestDim rl.Color
 	MarkerDoor     rl.Color
 	MarkerPack     rl.Color
-	MarkerPackEdge rl.Color
 	MarkerOutline  rl.Color
 }
 
@@ -60,7 +59,6 @@ func (r Resources) Theme() Theme {
 		MarkerChestDim:    markerChestDim,
 		MarkerDoor:        markerDoor,
 		MarkerPack:        markerPack,
-		MarkerPackEdge:    markerPackEdge,
 		MarkerOutline:     markerOutline,
 	}
 }
@@ -76,7 +74,6 @@ var (
 	MarkerChestDim = markerChestDim
 	MarkerDoor     = markerDoor
 	MarkerPack     = markerPack
-	MarkerPackEdge = markerPackEdge
 	MarkerOutline  = markerOutline
 )
 
@@ -93,7 +90,7 @@ func DrawHeading(font rl.Font, text string, x, y int32, accent color.RGBA) {
 
 // DrawSubHeading writes the second-tier heading style used inside modal
 // columns ("Synth params", "Saved sounds", etc.) — a drop-shadowed label
-// at 18px in the accent color. Lighter than DrawHeading, no underline.
+// at FontBody (20px) in the accent color. Lighter than DrawHeading, no underline.
 // Centralized here so modal authors don't reach for DrawTextWithShadow at
 // an ad-hoc size and drift the visual tier.
 func DrawSubHeading(font rl.Font, text string, x, y float32, accent color.RGBA) {
@@ -114,6 +111,16 @@ func DrawTextWithShadow(font rl.Font, text string, x, y, size float32, col color
 // Used by modal pickers (chest, level-up, sound editor) for the
 // cursor-on-row highlight. The action menu, panels Items/Skills rows,
 // and the party card each paint their own variant inline today.
+// SelectionRowRect insets a row's (x, y, w) by the canonical
+// DrawSelectedRow highlight padding (−6 x, −4 y, +12 w) so the gilt
+// spine + underline sit just outside the row content. Height passes
+// through unchanged — callers wanting the highlight shorter than the
+// row (level-up) pass a reduced h. Shared by the level-up and chest
+// modals so the inset can't drift between them.
+func SelectionRowRect(x, y, w, h int32) rl.Rectangle {
+	return rl.NewRectangle(float32(x-6), float32(y-4), float32(w+12), float32(h))
+}
+
 func DrawSelectedRow(r rl.Rectangle) {
 	drawGlassPane(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height), glassWarm)
 	// Gilt left spine — 3 px, vertically inset 5 px top/bottom so it

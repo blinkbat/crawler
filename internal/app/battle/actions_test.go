@@ -37,11 +37,56 @@ func newTestState() *core.GameState {
 		Packs:  []core.Pack{pack},
 		Battle: core.Battle{ActivePack: 0, EnemyIndex: 0, CurrentParty: 0, Phase: core.BattlePlayer, PartyTarget: 1, EnemyAttackCursor: -1},
 	}
+	// Deterministic RNG by default. Without this, g.Rand() lazily seeds
+	// from the auto-seeded global rand (core/types.go), making any
+	// RNG-driven path built on newTestState flaky run-to-run. Tests that
+	// need a specific roll still override via seedGameRNG.
+	g.RNG = rand.New(rand.NewSource(1))
 	// Pre-build a one-actor queue so finishActorTurn can run cursor++ without
 	// hitting an empty queue and triggering beginNewRound.
 	g.Battle.Queue = []core.ActorRef{{IsParty: true, Index: 0}}
 	g.Battle.QueueCursor = 0
 	return g
+}
+
+// TestBuildTurnQueue_SPDIncreasesTurnRate locks the contract that SPD
+// drives turn RATE (how often an actor acts over many rounds), not just
+// order within one round. A SPD-6 actor against a SPD-2 actor should take
+// roughly 3× the turns over a long run — only possible because readiness
+// now persists across rounds (the old per-round reset capped the fast
+// actor at ~2× and discarded its surplus at each round boundary).
+func TestBuildTurnQueue_SPDIncreasesTurnRate(t *testing.T) {
+	g := &core.GameState{
+		Party: []core.PartyMember{
+			{Name: "Fast", Stats: core.Stats{SPD: 6}, HP: 10, MaxHP: 10},
+			{Name: "Slow", Stats: core.Stats{SPD: 2}, HP: 10, MaxHP: 10},
+		},
+		// One dead enemy so BattleMembers is non-empty but contributes no
+		// queue actor — isolates the two party SPDs.
+		Packs:  []core.Pack{{Members: []core.Enemy{{Kind: core.EnemyRat, Alive: false}}}},
+		Battle: core.Battle{ActivePack: 0, EnemyIndex: 0, Phase: core.BattlePlayer},
+	}
+	fast, slow := 0, 0
+	const rounds = 300
+	for r := 0; r < rounds; r++ {
+		for _, ref := range buildTurnQueue(g) { // persists readiness across rounds
+			if !ref.IsParty {
+				continue
+			}
+			switch ref.Index {
+			case 0:
+				fast++
+			case 1:
+				slow++
+			}
+		}
+	}
+	if slow == 0 || fast <= slow {
+		t.Fatalf("SPD 6 should out-turn SPD 2: fast=%d slow=%d", fast, slow)
+	}
+	if ratio := float64(fast) / float64(slow); ratio < 2.5 {
+		t.Fatalf("SPD 6 vs 2 should grant ~3x the turns (rate, not just order); got ratio %.2f (fast=%d slow=%d)", ratio, fast, slow)
+	}
 }
 
 func TestApplyAttack_DealsSTRDamageAndPopup(t *testing.T) {
@@ -376,6 +421,8 @@ func TestTickBurnAtTurnStart_PartyActorIsNoOp(t *testing.T) {
 
 func TestResolveEnemyAttacker_DefendingHalvesDamage(t *testing.T) {
 	g := newTestState()
+	// newTestState seeds the RNG deterministically (seed 1) — the rat
+	// neither dodges nor crits, isolating the Defending soak.
 	// Set Vex defending and arm a rat to hit him next.
 	g.Party[0].Defending = true
 	g.Battle.EnemyAttackCursor = -1
@@ -396,6 +443,9 @@ func TestResolveEnemyAttacker_DefendingHalvesDamage(t *testing.T) {
 
 func TestResolveEnemyAttacker_ExcellentBlockCanZeroDamage(t *testing.T) {
 	g := newTestState()
+	// newTestState seeds the RNG deterministically (seed 1): the rat
+	// neither dodges nor crits, so the Excellent block math is what's
+	// under test, not a random crit doubling 3 → 6.
 	startHP := g.Party[0].HP
 	resolveEnemyAttacker(g, 0, core.TimingQualityExcellent)
 	taken := startHP - g.Party[0].HP

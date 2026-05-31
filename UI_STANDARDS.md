@@ -70,15 +70,19 @@ token — extend the palette instead.
   enough that the fill colour pops at any width.
 
 ### Per-status accents
-Match the status priority ladder in `core.PartyStatus`. All semi-glow:
-- **`statusPoison`** — `rgb(148, 200, 96)`
-- **`statusBurn`** — `rgb(240, 144, 72)`
-- **`statusSleep`** — `rgb(132, 196, 232)`
-- **`statusStun`** — `rgb(232, 220, 120)`
+Party-card / status-pill tints, ordered by the priority ladder in
+`core.PartyStatus`. Note `statusBurn` is **enemy-side only** (enemies
+can burn; party members can't today), so it is not a `PartyStatusKind`.
+All semi-glow:
+- **`statusDown`** — `rgb(220, 102, 102)` — knocked-out member (top of the ladder)
+- **`statusIngested`** — `rgb(200, 132, 220)`
 - **`statusWebbed`** — `rgb(180, 140, 220)`
 - **`statusConfused`** — `rgb(220, 188, 96)`
-- **`statusIngested`** — `rgb(200, 132, 220)`
+- **`statusStun`** — `rgb(232, 220, 120)`
+- **`statusSleep`** — `rgb(132, 196, 232)`
+- **`statusPoison`** — `rgb(148, 200, 96)`
 - **`statusDefending`** — `rgb(132, 196, 255)`
+- **`statusBurn`** — `rgb(240, 144, 72)` — *enemy-side only (not a `PartyStatusKind`)*
 
 ## Type
 

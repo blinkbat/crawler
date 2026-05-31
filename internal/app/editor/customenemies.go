@@ -2,6 +2,7 @@ package editor
 
 import (
 	"crawler/internal/app/core"
+	"crawler/internal/app/input"
 	"crawler/internal/app/render"
 	"fmt"
 
@@ -193,9 +194,101 @@ func activeCustomEnemy(s *State) *core.CustomEnemyDef {
 
 func openCustomEnemiesModal(s *State) {
 	s.modal = modalCustomEnemies
+	s.modalCursor = 0 // reset the form-row cursor for keyboard nav
 	if len(s.area.CustomEnemies) > 0 && s.modalCustomIdx < 0 {
 		s.modalCustomIdx = 0
 	}
+}
+
+// customEnemyRowCount is the number of keyboard-navigable form rows: the
+// base sprite, each numeric stat row, the six core stats, then each skill
+// toggle — in the same order they're drawn. The flat keyboard cursor
+// (s.modalCursor) indexes into this; customEnemyRowAt / applyCustomEnemyRow
+// and the draw highlight share the mapping so input and display can't drift.
+func customEnemyRowCount() int {
+	return 1 + len(customStatSpecs) + int(core.StatCount) + len(core.EnemyCastableSkills())
+}
+
+// customEnemySection names which group of the custom-enemy form a row
+// belongs to. The flat keyboard cursor and the mouse hit-test both
+// resolve to a (section, sub-index) pair so the form's row order lives in
+// ONE place (customEnemyRowAt) — the count, the cursor highlight, and the
+// adjust target can't desync.
+type customEnemySection int
+
+const (
+	cesBase  customEnemySection = iota // base sprite picker
+	cesStat                            // sub = index into customStatSpecs
+	cesCore                            // sub = index into the core stats (Stat)
+	cesSkill                           // sub = index into EnemyCastableSkills()
+)
+
+// customEnemyRowAt maps the flat cursor index to its (section, sub). The
+// single source of truth for the form's row layout; customEnemyRowCount,
+// customEnemyCursorRect, and the keyboard handler all go through it.
+func customEnemyRowAt(cursor int) (customEnemySection, int) {
+	if cursor <= 0 {
+		return cesBase, 0
+	}
+	i := cursor - 1
+	if i < len(customStatSpecs) {
+		return cesStat, i
+	}
+	i -= len(customStatSpecs)
+	if i < int(core.StatCount) {
+		return cesCore, i
+	}
+	return cesSkill, i - int(core.StatCount)
+}
+
+// applyCustomEnemyRow applies an edit to one form row — shared by the
+// keyboard nav AND the mouse +/- / click-to-toggle handlers so the
+// per-section semantics (cycle base, step stat, step core, toggle skill)
+// live once and can't diverge. dir is ±1; toggle flips a skill.
+func applyCustomEnemyRow(def *core.CustomEnemyDef, section customEnemySection, sub, dir int, toggle bool) {
+	switch section {
+	case cesBase:
+		if dir != 0 {
+			def.BaseKind = cycleEnemyKind(def.BaseKind, dir)
+		}
+	case cesStat:
+		if dir != 0 && sub >= 0 && sub < len(customStatSpecs) {
+			adjustCustomStat(def, customStatSpecs[sub].id, dir*customStatSpecs[sub].step)
+		}
+	case cesCore:
+		if dir != 0 && sub >= 0 && sub < int(core.StatCount) {
+			core.AdjustStat(&def.Stats, core.Stat(sub), dir)
+		}
+	case cesSkill:
+		skills := core.EnemyCastableSkills()
+		if (toggle || dir != 0) && sub >= 0 && sub < len(skills) {
+			toggleCustomSkill(def, skills[sub])
+		}
+	}
+}
+
+// customEnemyCursorRect returns the rect to outline for the keyboard
+// cursor's current row, resolved through the same customEnemyRowAt
+// mapping the adjust path uses.
+func customEnemyCursorRect(l customEnemyLayout, cursor int) (rl.Rectangle, bool) {
+	section, sub := customEnemyRowAt(cursor)
+	switch section {
+	case cesBase:
+		return rl.NewRectangle(l.basePrev.X, l.basePrev.Y, l.baseNext.X+l.baseNext.Width-l.basePrev.X, l.basePrev.Height), true
+	case cesStat:
+		if sub < len(l.statRows) {
+			return l.statRows[sub].rect, true
+		}
+	case cesCore:
+		if sub < len(l.coreStatRows) {
+			return l.coreStatRows[sub].rect, true
+		}
+	case cesSkill:
+		if sub >= 0 && sub < len(l.skillRows) {
+			return l.skillRows[sub], true
+		}
+	}
+	return rl.Rectangle{}, false
 }
 
 func customEnemyNameFieldRect(s *State) rl.Rectangle {
@@ -261,8 +354,7 @@ func drawCustomEnemiesModal(s *State, font rl.Font, theme render.Theme) {
 	for _, row := range l.statRows {
 		drawLabel(font, row.label, rl.NewRectangle(row.rect.X-78, row.rect.Y+8, 76, 18))
 		drawReadonlyValue(font, row.rect, customStatValueString(def, row.id))
-		drawButton(font, row.minus, "-", false)
-		drawButton(font, row.plus, "+", false)
+		drawStepperButtons(font, row.minus, row.plus)
 	}
 
 	// Core stat grid (STR/DEX/INT/WIS/VIT/SPD).
@@ -300,6 +392,14 @@ func drawCustomEnemiesModal(s *State, font rl.Font, theme render.Theme) {
 			13, 1, textEntry)
 	}
 
+	// Keyboard-cursor highlight on the focused form row (hidden while the
+	// name field is captured, since arrows then edit nothing).
+	if s.focus != focusCustomEnemyName {
+		if rect, ok := customEnemyCursorRect(l, s.modalCursor); ok {
+			rl.DrawRectangleLinesEx(rect, 2, theme.BorderActive)
+		}
+	}
+
 	// Footer buttons.
 	drawButton(font, l.deleteBtn, "Delete", false)
 	drawButton(font, l.closeBtn, "Close", false)
@@ -334,19 +434,6 @@ func adjustCustomStat(def *core.CustomEnemyDef, id customStatID, delta int) {
 			*v = 0
 		}
 	}
-}
-
-// stepSizeFor returns the per-click numeric step for a stat row.
-// SkillChance steps by 5 (interpreted as percent → 0.05); everything
-// else by 1. Single seam so the spec can grow without the click handler
-// having to know the math.
-func stepSizeFor(id customStatID) int {
-	for _, spec := range customStatSpecs {
-		if spec.id == id {
-			return spec.step
-		}
-	}
-	return 1
 }
 
 // nextCustomEnemyName picks an unused "customN" name so "+ Add new"
@@ -435,6 +522,31 @@ func updateCustomEnemiesModal(s *State) Action {
 		}
 	}
 
+	// Keyboard nav/adjust (when not typing the name): Up/Down move a row
+	// cursor over base + stats + core + skills; Left/Right adjust the
+	// focused numeric/base row; Enter/Space toggles a focused skill. Keeps
+	// the modal fully operable without a mouse, matching the editor's
+	// keyboard-first pack / chest / door modals.
+	if s.focus != focusCustomEnemyName {
+		if def := activeCustomEnemy(s); def != nil {
+			s.modalCursor = input.CursorUpDown(s.modalCursor, customEnemyRowCount())
+			dir := 0
+			if rl.IsKeyPressed(rl.KeyLeft) {
+				dir = -1
+			}
+			if rl.IsKeyPressed(rl.KeyRight) {
+				dir = 1
+			}
+			toggle := rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeySpace)
+			if dir != 0 || toggle {
+				pushUndo(s)
+				section, sub := customEnemyRowAt(s.modalCursor)
+				applyCustomEnemyRow(def, section, sub, dir, toggle)
+				s.dirty = true
+			}
+		}
+	}
+
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 		mp := rl.GetMousePosition()
 		l := customEnemyModalLayout(s)
@@ -447,6 +559,7 @@ func updateCustomEnemiesModal(s *State) Action {
 			}
 		}
 		if pointIn(mp, l.addBtn) {
+			pushUndo(s)
 			name := nextCustomEnemyName(s.area.CustomEnemies)
 			s.area.CustomEnemies = append(s.area.CustomEnemies, core.DefaultCustomEnemy(name, core.EnemyRat))
 			s.modalCustomIdx = len(s.area.CustomEnemies) - 1
@@ -468,6 +581,7 @@ func updateCustomEnemiesModal(s *State) Action {
 			// rewrites refs to def.Name, so the deletedName we read below
 			// matches what removeCustomEnemyReferences must clear.
 			finalizeFocusedField(s)
+			pushUndo(s)
 			deletedName := def.Name
 			s.area.CustomEnemies = removeModalListItem(s.area.CustomEnemies, s.modalCustomIdx)
 			removeCustomEnemyReferences(s, deletedName)
@@ -476,51 +590,61 @@ func updateCustomEnemiesModal(s *State) Action {
 			}
 			s.dirty = true
 			s.focus = focusNone
+			s.flash("Deleted custom enemy " + deletedName)
 			return ActionNone
 		}
 		if pointIn(mp, l.nameField) {
 			s.focus = focusCustomEnemyName
 			return ActionNone
 		}
+		// Base / stat / core / skill edits all route through the shared
+		// applyCustomEnemyRow (same as the keyboard path) so the per-row
+		// semantics live once: a clicked −/+ maps to dir ∓1, a clicked
+		// skill row to a toggle.
 		if pointIn(mp, l.basePrev) {
-			def.BaseKind = cycleEnemyKind(def.BaseKind, -1)
+			pushUndo(s)
+			applyCustomEnemyRow(def, cesBase, 0, -1, false)
 			s.dirty = true
 			return ActionNone
 		}
 		if pointIn(mp, l.baseNext) {
-			def.BaseKind = cycleEnemyKind(def.BaseKind, +1)
+			pushUndo(s)
+			applyCustomEnemyRow(def, cesBase, 0, +1, false)
 			s.dirty = true
 			return ActionNone
 		}
-		for _, row := range l.statRows {
-			step := stepSizeFor(row.id)
+		for i, row := range l.statRows {
 			if pointIn(mp, row.minus) {
-				adjustCustomStat(def, row.id, -step)
+				pushUndo(s)
+				applyCustomEnemyRow(def, cesStat, i, -1, false)
 				s.dirty = true
 				return ActionNone
 			}
 			if pointIn(mp, row.plus) {
-				adjustCustomStat(def, row.id, step)
+				pushUndo(s)
+				applyCustomEnemyRow(def, cesStat, i, +1, false)
 				s.dirty = true
 				return ActionNone
 			}
 		}
 		for i, row := range l.coreStatRows {
 			if pointIn(mp, row.minus) {
-				core.AdjustStat(&def.Stats, core.Stat(i), -1)
+				pushUndo(s)
+				applyCustomEnemyRow(def, cesCore, i, -1, false)
 				s.dirty = true
 				return ActionNone
 			}
 			if pointIn(mp, row.plus) {
-				core.AdjustStat(&def.Stats, core.Stat(i), +1)
+				pushUndo(s)
+				applyCustomEnemyRow(def, cesCore, i, +1, false)
 				s.dirty = true
 				return ActionNone
 			}
 		}
-		allSkills := core.EnemyCastableSkills()
-		for i, r := range l.skillRows {
-			if pointIn(mp, r) {
-				toggleCustomSkill(def, allSkills[i])
+		for i := range l.skillRows {
+			if pointIn(mp, l.skillRows[i]) {
+				pushUndo(s)
+				applyCustomEnemyRow(def, cesSkill, i, 0, true)
 				s.dirty = true
 				return ActionNone
 			}

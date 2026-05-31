@@ -121,6 +121,22 @@ const (
 	// (panels also hides entity markers on fogged tiles).
 	SightRadius = 1
 
+	// --- Panels Map-tab zoom (cells-on-screen) ----------------------------
+	//
+	// The zoomable Map tab measures zoom as "how many tiles fit across the
+	// view." Lives in config alongside the other UI tunables so the explore
+	// input handler (clamp + step) and the render draw (default fallback for
+	// struct-literal GameStates that didn't seed PanelsMapZoom) read one
+	// source instead of each package re-declaring the literal 14.
+	//
+	//   PanelMapZoomDefault — initial cells-on-screen (fits a ~20×14 map).
+	//   PanelMapZoomMin/Max — soft-clamp bounds for the Up/Down zoom.
+	//   PanelMapZoomStep    — cells-on-screen change per zoom press.
+	PanelMapZoomDefault = 14
+	PanelMapZoomMin     = 6
+	PanelMapZoomMax     = 48
+	PanelMapZoomStep    = 2
+
 	// --- Pack AI (junkyard-dog leash) -------------------------------------
 	//
 	// Packs wander when the player steps. They never leave their leash
@@ -205,8 +221,12 @@ const (
 	ChargeTick1Pct       = float32(0.25)
 	ChargeTick2Pct       = float32(0.50)
 	ChargeTick3Pct       = float32(0.75)
-	ChargePeakStart      = float32(0.75)
-	ChargePeakEnd        = float32(0.85)
+	// ChargePeakStart MUST equal ChargeTick3Pct: resolveCharge treats
+	// "past tick 3" and "entering the peak window" as the same boundary,
+	// so the charge-grade bands are only contiguous when they match.
+	// Tied to the same literal so a balance edit can't open a grading gap.
+	ChargePeakStart = ChargeTick3Pct
+	ChargePeakEnd   = float32(0.85)
 
 	// Pickpocket sequence minigame: tap a randomized run of N directions in
 	// order before time runs out. Each correct tap holds the grade; each
@@ -223,14 +243,15 @@ const (
 	// is reduced even further.
 	DefendingDamageMult = float32(0.5)
 
-	// Basic-attack accuracy curve. AttackAccuracy in types.go computes the
-	// per-swing hit chance as:
-	//     AccuracyBaseline + AccuracyPerDEX*DEX + timingBonus
-	// then clamps to [0, 1]. timingBonus comes from timingGrades.AccuracyBonus
-	// below; this pair sets the DEX-driven floor (Warrior at DEX 2 hits
-	// 0.63 on a Miss timing, Thief at DEX 6 hits 0.79).
+	// Attack accuracy curve. MeleeAccuracy / RangedAccuracy in types.go
+	// compute per-swing hit chance as:
+	//     AccuracyBaseline + AccuracyPerStat*stat + timingBonus
+	// then clamp to [0, 1]. The governing stat depends on the attack:
+	// MELEE accuracy is driven by STR, RANGED by DEX. timingBonus comes
+	// from timingGrades.AccuracyBonus below. With this pair, a STR-6
+	// Warrior melee-hits 0.79 on a Miss timing; a STR-2 caster hits 0.63.
 	AccuracyBaseline = 0.55
-	AccuracyPerDEX   = 0.04
+	AccuracyPerStat  = 0.04
 
 	// DodgeChance curve. A party member rolls a dodge against every
 	// incoming enemy basic attack: dodge succeeds → no damage, no status
@@ -318,7 +339,7 @@ const (
 	// literals (party.go skillDefinitions, enemies.go enemyDefinitions) so
 	// a balance pass touches one file. The registry still owns the
 	// per-entry binding; these constants are the values it cites.
-	StealBaseChance          = 0.40 // Thief: Steal base success before DEX/quality scaling.
+	StealBaseChance          = 0.40 // Thief: Steal base success before timing-quality scaling.
 	FireboltBurnChance       = 0.45 // Wizard: Firebolt burn inflict before quality scaling.
 	DiseasedRatPoisonChance  = 0.60 // Diseased Rat: per-bite poison inflict.
 	GoblinMageCastChance     = 0.50 // Goblin Mage: per-turn roll into Firebolt / Sleep vs plain melee.
@@ -421,7 +442,7 @@ var MultiPressWindow = struct {
 //
 // Defense multipliers are <1 (lower incoming damage); attack multipliers
 // are >=1 (higher outgoing damage); the accuracy bonus is added to the
-// DEX-driven baseline and clamped at 1.0 (see AttackAccuracy).
+// stat-driven baseline and clamped at 1.0 (see MeleeAccuracy / RangedAccuracy).
 var timingGrades = []struct {
 	Label         string
 	Atk           float32
@@ -547,6 +568,12 @@ const (
 	// through the same probability seam so a future "magic resist"
 	// stat can plug in at one place.
 	FrostLanceStunChance = 1.0
+	// FrostLanceStunTurns is Frost Lance's fixed 1-turn freeze (min ==
+	// max, a hard lock rather than the variable StunMinTurns..MaxTurns
+	// window Crushing Blow rolls). Named so the duration lives with the
+	// other status-duration tunables instead of as a bare literal in the
+	// skill definition.
+	FrostLanceStunTurns = 1
 	// VenomStrikePoisonChance gates the Thief's Poison apply. Tuned
 	// high so a clean sequence reliably lands the DoT; a Miss timing
 	// scales it down through the standard TimingBonusMult curve.
@@ -561,8 +588,14 @@ const (
 // respec. BaseLevel is the level every member starts at (1, not 0, so
 // the cost formula works out).
 const (
-	LevelXPBase     = 100
-	LevelXPRatio    = 2.0
+	LevelXPBase  = 100
+	LevelXPRatio = 2.0
+	// MaxLevelXPCost saturates the geometric per-level cost so XPForLevel
+	// always returns a sane positive int instead of overflowing to +Inf
+	// (and an unspecified int conversion) at absurd levels. 1<<30 (~1.07e9
+	// XP) is far past any reachable total, so it acts as an effective soft
+	// level cap without ever producing a garbage cost.
+	MaxLevelXPCost  = 1 << 30
 	LevelStatPoints = 3
 	// LevelSkillPoints is the number of skill points granted per
 	// level-up. Land on PartyMember.SkillPoints; the player spends
@@ -571,6 +604,14 @@ const (
 	// the tree, with no pressure to spend it immediately.
 	LevelSkillPoints = 1
 	BaseLevel        = 1
+
+	// MPPerINT is the MaxMP gained per point of INT spent at level-up.
+	// INT thus feeds the MP pool (casters who invest in INT both hit
+	// harder AND cast more often), mirroring how VIT spends grow MaxHP.
+	// The class's starting MaxMP is the authored base; INT grows it from
+	// there. Spending INT tops off current MP by the same delta so the
+	// bump feels immediately usable, the same way a VIT spend heals.
+	MPPerINT = 2
 )
 
 const (

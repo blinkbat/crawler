@@ -33,13 +33,17 @@ const (
 	stickEdgeRight
 )
 
-// prevStickEdges holds the "was past threshold last sample?" bit for
-// each direction. Replaces the four parallel globals (prevStickUp /
-// Down / Left / Right) that earlier passes carried — same shape, one
-// table. stickEdgeY / stickEdgeX index into this by direction so a
-// future fifth axis (right stick? trigger?) lands as one new key
-// instead of two parallel globals + a new helper.
-var prevStickEdges [4]bool
+// stickNow holds "is this direction past threshold THIS frame," sampled
+// once per frame by NewFrame; stickPrev holds the previous frame's
+// sample. A directional edge is stickNow && !stickPrev. Sampling once
+// per frame (rather than on every read) makes the directional
+// predicates IDEMPOTENT within a frame: UpPressed / CursorUpDown / etc.
+// can be called any number of times without the first call consuming
+// the edge out from under the second. Indexed by stickEdgeKey.
+var (
+	stickNow  [4]bool
+	stickPrev [4]bool
+)
 
 // gamepadConnected reports whether a gamepad is plugged in. All controller
 // reads short-circuit to false when there's no pad — keyboard-only play
@@ -64,37 +68,48 @@ func padReleased(button int32) bool {
 	return gamepadConnected() && rl.IsGamepadButtonReleased(gamepadID, button)
 }
 
-// stickAxisEdge returns true on the frame the analog axis crosses past
-// the threshold in `dir` (`-1` = negative direction, `+1` = positive).
-// Updates prev state so the stick must return below threshold before
-// the next edge can fire. Generic over the per-direction memory slot
-// so stickEdgeY (left stick Y) and stickEdgeX (left stick X) share
-// one body instead of inlining four near-identical branches.
-func stickAxisEdge(axis int32, dir int, negKey, posKey stickEdgeKey) bool {
+// NewFrame samples the analog stick once at the start of each frame and
+// rolls the directional edge state forward (stickPrev <- stickNow, then
+// re-sample stickNow). Call it exactly once per frame, before any input
+// is read — run.go's main loop does this ahead of scene dispatch.
+// Without it the directional edges never advance (stick navigation goes
+// dead); with it, the per-direction predicates are pure reads that stay
+// consistent no matter how many times they're called in a frame.
+func NewFrame() {
+	stickPrev = stickNow
 	if !gamepadConnected() {
-		return false
+		stickNow = [4]bool{}
+		return
 	}
-	v := rl.GetGamepadAxisMovement(gamepadID, axis)
-	if dir < 0 {
-		now := v <= -stickEdgeThreshold
-		edge := now && !prevStickEdges[negKey]
-		prevStickEdges[negKey] = now
-		return edge
-	}
-	now := v >= stickEdgeThreshold
-	edge := now && !prevStickEdges[posKey]
-	prevStickEdges[posKey] = now
-	return edge
+	yv := rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisLeftY)
+	xv := rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisLeftX)
+	stickNow[stickEdgeUp] = yv <= -stickEdgeThreshold
+	stickNow[stickEdgeDown] = yv >= stickEdgeThreshold
+	stickNow[stickEdgeLeft] = xv <= -stickEdgeThreshold
+	stickNow[stickEdgeRight] = xv >= stickEdgeThreshold
+}
+
+// stickEdge reports the one-frame press edge for a direction: past
+// threshold this frame, not last. Pure read (no mutation), so repeated
+// same-frame calls all agree.
+func stickEdge(key stickEdgeKey) bool {
+	return stickNow[key] && !stickPrev[key]
 }
 
 // stickEdgeY / stickEdgeX are thin wrappers naming the left-stick axes.
 // dir = -1 for up/left, +1 for down/right.
 func stickEdgeY(dir int) bool {
-	return stickAxisEdge(rl.GamepadAxisLeftY, dir, stickEdgeUp, stickEdgeDown)
+	if dir < 0 {
+		return stickEdge(stickEdgeUp)
+	}
+	return stickEdge(stickEdgeDown)
 }
 
 func stickEdgeX(dir int) bool {
-	return stickAxisEdge(rl.GamepadAxisLeftX, dir, stickEdgeLeft, stickEdgeRight)
+	if dir < 0 {
+		return stickEdge(stickEdgeLeft)
+	}
+	return stickEdge(stickEdgeRight)
 }
 
 // --- High-level semantic actions ---------------------------------------------
@@ -192,15 +207,6 @@ func CursorLeftRightWrap(cursor, count int) int {
 func TargetNextPressed() bool {
 	return rl.IsKeyPressed(rl.KeyTab) || rl.IsKeyPressed(rl.KeyRight) || rl.IsKeyPressed(rl.KeyD) || rl.IsKeyPressed(rl.KeyDown) ||
 		padPressed(rl.GamepadButtonLeftFaceRight) || padPressed(rl.GamepadButtonRightTrigger1) || stickEdgeX(1)
-}
-
-// NextTabPressed reports a pure Tab-key edge — used by the action
-// menu's "cycle the Skill row's active skill" handler. Kept distinct
-// from TargetNextPressed so the cycle key doesn't double up with the
-// arrow-key + analog-stick navigation that's already wired to the
-// up/down row cursor.
-func NextTabPressed() bool {
-	return rl.IsKeyPressed(rl.KeyTab) || padPressed(rl.GamepadButtonRightFaceRight)
 }
 
 func TargetPreviousPressed() bool {
@@ -417,15 +423,18 @@ func ArrowRightPressed() bool {
 // and re-tilt to register a fresh edge.
 func ResetStickEdges() {
 	if !gamepadConnected() {
-		prevStickEdges = [4]bool{}
+		stickNow = [4]bool{}
+		stickPrev = [4]bool{}
 		return
 	}
 	yv := rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisLeftY)
 	xv := rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisLeftX)
-	prevStickEdges[stickEdgeUp] = yv <= -stickEdgeThreshold
-	prevStickEdges[stickEdgeDown] = yv >= stickEdgeThreshold
-	prevStickEdges[stickEdgeLeft] = xv <= -stickEdgeThreshold
-	prevStickEdges[stickEdgeRight] = xv >= stickEdgeThreshold
+	stickNow[stickEdgeUp] = yv <= -stickEdgeThreshold
+	stickNow[stickEdgeDown] = yv >= stickEdgeThreshold
+	stickNow[stickEdgeLeft] = xv <= -stickEdgeThreshold
+	stickNow[stickEdgeRight] = xv >= stickEdgeThreshold
+	// Both equal -> no edge fires until the player centers and re-tilts.
+	stickPrev = stickNow
 }
 
 // LookStick returns the right analog stick offset for explore free-look
@@ -448,3 +457,29 @@ func LookStick() (float32, float32) {
 	}
 	return x, y
 }
+
+// --- Mouse / pointer (secondary input) ---------------------------------------
+// Gamepad-first: the mouse drives only the Equipment-tab drag-and-drop and
+// right-drag free-look today, but those reads still funnel through here so no
+// call site touches raylib directly and "is the mouse driving?" has one answer.
+
+// PointerPos is the current mouse position in screen space.
+func PointerPos() rl.Vector2 { return rl.GetMousePosition() }
+
+// PointerMoved reports whether the mouse moved at all this frame — used to
+// hand panel focus from the keyboard/controller cursor back to the mouse.
+func PointerMoved() bool {
+	d := rl.GetMouseDelta()
+	return d.X != 0 || d.Y != 0
+}
+
+// DragStartPressed / DragHeld / DragReleased wrap the left mouse button for
+// the Equipment-tab drag-and-drop loop.
+func DragStartPressed() bool { return rl.IsMouseButtonPressed(rl.MouseLeftButton) }
+func DragHeld() bool         { return rl.IsMouseButtonDown(rl.MouseLeftButton) }
+func DragReleased() bool     { return rl.IsMouseButtonReleased(rl.MouseLeftButton) }
+
+// LookDragActive reports the right-mouse free-look hold; LookMouseDelta is its
+// per-frame motion. The mouse counterpart of LookStick.
+func LookDragActive() bool       { return rl.IsMouseButtonDown(rl.MouseRightButton) }
+func LookMouseDelta() rl.Vector2 { return rl.GetMouseDelta() }

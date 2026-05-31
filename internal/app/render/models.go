@@ -188,9 +188,41 @@ func (t treeModel) draw(center rl.Vector3, scale, yaw float32) {
 // care about per-tile variance can pass 0 and get a stable tree. The
 // legacy treeModel.draw is preserved for menu/title/preview call sites
 // that aren't tile-positioned.
-func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32) {
-	if scale <= 0 {
-		scale = 1
+// treePartVariance is the per-part static jitter for one seed: the
+// canopy scale wobble, nudge offset, and final (species + jitter) tint.
+// All of it is seed-derived and frame-invariant, so it's computed once
+// and cached rather than re-derived per tree per frame.
+type treePartVariance struct {
+	sx, sy, sz     float32
+	nudgeX, nudgeZ float32
+	tint           color.RGBA
+	isCanopy       bool
+}
+
+// treeVariance is everything in a tree's shape that depends only on its
+// seed — NOT on the tile's scale (folded in via scaleFactor at draw),
+// its yaw (applied by the final rotate), or the per-frame wind sway.
+// Cached by seed so a forest doesn't re-run the hash mix + per-part frac
+// jitter + species tint every frame; only the 3 sway sines and the
+// cheap rotate/scale stay per-frame.
+type treeVariance struct {
+	scaleFactor   float32 // overall = tileScale * scaleFactor
+	heightStretch float32
+	dropIdx       int
+	swayPhase     float32
+	parts         []treePartVariance
+}
+
+// treeVarianceCache memoizes treeVariance by seed. seed is tileHash(x,z)
+// — deterministic and permanent, so entries never need invalidation;
+// growth is bounded by the number of distinct tree tiles ever drawn.
+// Touched only from the single-threaded render path. (One treeModel —
+// assets.tree — feeds drawVaried, so keying on seed alone is safe.)
+var treeVarianceCache = map[uint32]treeVariance{}
+
+func (t treeModel) variance(seed uint32) treeVariance {
+	if v, ok := treeVarianceCache[seed]; ok {
+		return v
 	}
 	// Mix once so per-byte slices below are decorrelated even when
 	// neighboring tiles' seeds differ by only a few bits.
@@ -200,25 +232,31 @@ func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32
 	mix ^= mix >> 13
 	frac := func(b byte) float32 { return (float32(int(b)) - 128) / 128 }
 
-	overall := scale * (1 + frac(byte(mix))*0.10)
-	// Height-only stretch: independent of overall scale so some trees
-	// read as noticeably taller / shorter than their neighbors even
-	// when the trunk girth is similar. Range ±28% — wide enough to be
-	// readable from the player's POV but bounded so a stretched canopy
-	// doesn't punch through the ceiling on indoor maps.
-	heightStretch := 1 + frac(byte(mix>>4))*0.28
+	v := treeVariance{
+		// Overall girth wobble (±10%). Multiplied by the tile's scale
+		// at draw time to produce `overall`.
+		scaleFactor: 1 + frac(byte(mix))*0.10,
+		// Height-only stretch: independent of overall scale so some trees
+		// read as noticeably taller / shorter than their neighbors even
+		// when the trunk girth is similar. Range ±28% — wide enough to be
+		// readable from the player's POV but bounded so a stretched canopy
+		// doesn't punch through the ceiling on indoor maps.
+		heightStretch: 1 + frac(byte(mix>>4))*0.28,
+		dropIdx:       -1,
+		swayPhase:     frac(byte(mix>>22)) * 6.283185,
+		parts:         make([]treePartVariance, len(t.parts)),
+	}
 
 	// Drop one side-canopy lump ~25% of the time. dropIdx == -1 means
 	// "draw everything." Walks parts to locate side canopies so this
 	// rule survives part-list reshuffles in loadTreeModel.
-	dropIdx := -1
 	if byte(mix>>8) < 64 {
 		nthSide := int(byte(mix>>16)) % 2
 		seen := 0
 		for i, part := range t.parts {
 			if part.modelIdx == treeMeshCanopySide {
 				if seen == nthSide {
-					dropIdx = i
+					v.dropIdx = i
 					break
 				}
 				seen++
@@ -241,6 +279,35 @@ func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32
 		species = treeSpeciesAutumn
 	}
 
+	for i, part := range t.parts {
+		isCanopy := part.modelIdx != treeMeshRoot && part.modelIdx != treeMeshTrunk
+		pv := treePartVariance{sx: 1, sy: 1, sz: 1, tint: part.tint, isCanopy: isCanopy}
+		if isCanopy {
+			pv.sx = 1 + frac(byte(mix>>uint(3+i*3)))*0.14
+			pv.sy = 1 + frac(byte(mix>>uint(5+i*5)))*0.14
+			pv.sz = 1 + frac(byte(mix>>uint(7+i*7)))*0.14
+			pv.nudgeX = frac(byte(mix>>uint(11+i*11))) * 0.20
+			pv.nudgeZ = frac(byte(mix>>uint(13+i*13))) * 0.20
+			// Pick the species palette first (green / blossom / autumn),
+			// then apply the standard ±14 per-channel jitter on top so
+			// lumps within one tree still walk in tone but the family
+			// colour is preserved.
+			pv.tint = jitterTint(speciesCanopyTint(part.tint, species), mix>>uint(7+i*4), 14)
+		}
+		v.parts[i] = pv
+	}
+
+	treeVarianceCache[seed] = v
+	return v
+}
+
+func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32) {
+	if scale <= 0 {
+		scale = 1
+	}
+	v := t.variance(seed)
+	overall := scale * v.scaleFactor
+
 	// Canopy sway — gentle wind animation. Each tree gets a unique
 	// phase offset from its seed so a stand of trees breathes
 	// asynchronously instead of stamping the same rocking motion
@@ -249,40 +316,29 @@ func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32
 	// "the tree is about to fall." Trunks are NOT swayed — only
 	// the foliage rides the wind, the way Wind Waker trees do.
 	swayTime := float32(rl.GetTime())
-	swayPhase := frac(byte(mix>>22)) * 6.283185
-	swayX := float32(math.Sin(float64(swayTime*0.85+swayPhase))) * 0.05
-	swayZ := float32(math.Sin(float64(swayTime*0.72+swayPhase+1.3))) * 0.04
-	swayY := float32(math.Sin(float64(swayTime*1.05+swayPhase*0.7))) * 0.025
+	swayX := float32(math.Sin(float64(swayTime*0.85+v.swayPhase))) * 0.05
+	swayZ := float32(math.Sin(float64(swayTime*0.72+v.swayPhase+1.3))) * 0.04
+	swayY := float32(math.Sin(float64(swayTime*1.05+v.swayPhase*0.7))) * 0.025
 
 	for i, part := range t.parts {
-		if i == dropIdx {
+		if i == v.dropIdx {
 			continue
 		}
-		isCanopy := part.modelIdx != treeMeshRoot && part.modelIdx != treeMeshTrunk
-
-		var sx, sy, sz float32 = 1, 1, 1
-		var nudgeX, nudgeZ float32
-		if isCanopy {
-			sx = 1 + frac(byte(mix>>uint(3+i*3)))*0.14
-			sy = 1 + frac(byte(mix>>uint(5+i*5)))*0.14
-			sz = 1 + frac(byte(mix>>uint(7+i*7)))*0.14
-			nudgeX = frac(byte(mix>>uint(11+i*11))) * 0.20
-			nudgeZ = frac(byte(mix>>uint(13+i*13))) * 0.20
-		}
+		pv := v.parts[i]
 
 		// Height stretch lifts canopy parts proportionally to their
 		// authored Y offset so the foliage rides on top of the
 		// stretched trunk, and stretches the trunk mesh itself so the
 		// bark cylinder fills the gap. Trunk Y scale and canopy lift
 		// use the same factor so they grow / shrink in lockstep.
-		yOffset := part.offset.Y * heightStretch
+		yOffset := part.offset.Y * v.heightStretch
 		trunkYScale := float32(1.0)
 		if part.modelIdx == treeMeshTrunk {
-			trunkYScale = heightStretch
+			trunkYScale = v.heightStretch
 		}
 
-		offX := part.offset.X + nudgeX
-		offZ := part.offset.Z + nudgeZ
+		offX := part.offset.X + pv.nudgeX
+		offZ := part.offset.Z + pv.nudgeZ
 		// Canopy lumps lean in the wind; higher lumps lean more
 		// than lower lumps (canopyLean scales the sway by the
 		// part's Y offset relative to a reference height) so the
@@ -290,7 +346,7 @@ func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32
 		// "tree breathing in a breeze" feel rather than the whole
 		// silhouette sliding sideways. Trunk and root are skipped.
 		offsetY := yOffset
-		if isCanopy {
+		if pv.isCanopy {
 			lean := part.offset.Y / 3.0
 			if lean > 1.4 {
 				lean = 1.4
@@ -301,20 +357,12 @@ func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32
 		}
 		offset := rotateOffsetY(rl.NewVector3(offX, offsetY, offZ), overall, yaw)
 		position := rl.NewVector3(center.X+offset.X, center.Y+offset.Y, center.Z+offset.Z)
-		drawScale := rl.NewVector3(part.scale.X*sx*overall, part.scale.Y*sy*trunkYScale*overall, part.scale.Z*sz*overall)
+		drawScale := rl.NewVector3(part.scale.X*pv.sx*overall, part.scale.Y*pv.sy*trunkYScale*overall, part.scale.Z*pv.sz*overall)
 		rotation := part.rotation
 		if isVerticalAxis(part.rotationAxis) {
 			rotation += yaw
 		}
-		tint := part.tint
-		if isCanopy {
-			// Pick the species palette first (green / blossom /
-			// autumn), then apply the standard ±14 per-channel
-			// jitter on top so lumps within one tree still walk
-			// in tone but the family colour is preserved.
-			tint = jitterTint(speciesCanopyTint(part.tint, species), mix>>uint(7+i*4), 14)
-		}
-		rl.DrawModelEx(t.models[part.modelIdx], position, partRotationAxis(part), rotation, drawScale, tint)
+		rl.DrawModelEx(t.models[part.modelIdx], position, partRotationAxis(part), rotation, drawScale, pv.tint)
 	}
 }
 
@@ -411,12 +459,26 @@ func (p propModel) draw(center rl.Vector3, scale, yaw float32) {
 	if scale <= 0 {
 		scale = 1
 	}
-	swayTime := float32(rl.GetTime())
-	// Position-derived phase: hash the rounded tile coords so each
-	// prop tile lands on a different point in the sway cycle.
-	posPhase := float32(math.Mod(float64(center.X)*0.73+float64(center.Z)*1.31, 6.283185))
-	swayX := float32(math.Sin(float64(swayTime*1.10+posPhase))) * 0.035
-	swayZ := float32(math.Sin(float64(swayTime*0.95+posPhase+1.4))) * 0.030
+	// Compute the wind sway only when at least one part actually sways.
+	// Rigid props (statues, pillars, crates — the bulk of a dungeon) then
+	// skip the GetTime + Mod + two Sin calls entirely; a short compare
+	// over the handful of parts is far cheaper than the transcendentals.
+	var swayX, swayZ float32
+	swaying := false
+	for _, part := range p.parts {
+		if part.sway > 0 {
+			swaying = true
+			break
+		}
+	}
+	if swaying {
+		swayTime := float32(rl.GetTime())
+		// Position-derived phase: hash the rounded tile coords so each
+		// prop tile lands on a different point in the sway cycle.
+		posPhase := float32(math.Mod(float64(center.X)*0.73+float64(center.Z)*1.31, 6.283185))
+		swayX = float32(math.Sin(float64(swayTime*1.10+posPhase))) * 0.035
+		swayZ = float32(math.Sin(float64(swayTime*0.95+posPhase+1.4))) * 0.030
+	}
 	for _, part := range p.parts {
 		offset := rotateOffsetY(part.offset, scale, yaw)
 		position := rl.NewVector3(center.X+offset.X, center.Y+offset.Y, center.Z+offset.Z)
@@ -470,6 +532,19 @@ const RockMeshBaseHeight = float32(0.36)
 // face lands flush with the floor regardless of the height jitter.
 const RockMeshBaseHalfHeight = RockMeshBaseHeight / 2
 
+// stonePalette* are the shared faceted-rock tints used by every rock
+// prop (boulder, cairn, 2×2 formation). Close-grouped pale greys with
+// slight warm/cool variation so multi-lump rocks read as one stone
+// broken at fault lines. Hoisted to package vars so a palette retune
+// touches one place instead of three loaders that previously each
+// re-declared the same four literals.
+var (
+	stonePaletteWarm  = rl.NewColor(214, 204, 188, 255)
+	stonePaletteCool  = rl.NewColor(196, 198, 202, 255)
+	stonePaletteDark  = rl.NewColor(176, 172, 164, 255)
+	stonePaletteLight = rl.NewColor(232, 224, 210, 255)
+)
+
 // loadRockProp builds a chunky polygonal boulder: a flat base with two or
 // three faceted lumps fused on top at varied angles, all in close-grouped
 // stone greys. The intent is "weathered rock outcrop you'd see in a
@@ -491,15 +566,8 @@ func loadRockProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 		attachShader(&models[i], shader)
 	}
 
-	// Stone palette — close-grouped pale greys with slight warm/cool
-	// variation so the parts read as one boulder broken at fault lines,
-	// not separate rocks stacked together. Lighter than the previous pass
-	// (which read as charcoal) so the boulder pops from the field's grass
-	// floor and the wall texture.
-	warm := rl.NewColor(214, 204, 188, 255)
-	cool := rl.NewColor(196, 198, 202, 255)
-	dark := rl.NewColor(176, 172, 164, 255)
-	light := rl.NewColor(232, 224, 210, 255)
+	// Shared stone palette (see stonePalette* package vars).
+	warm, cool, dark, light := stonePaletteWarm, stonePaletteCool, stonePaletteDark, stonePaletteLight
 
 	return propModel{
 		models: models,
@@ -545,9 +613,7 @@ func loadRockCairnProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 		setModelTexture(&models[i], rockTex)
 		attachShader(&models[i], shader)
 	}
-	warm := rl.NewColor(214, 204, 188, 255)
-	cool := rl.NewColor(196, 198, 202, 255)
-	dark := rl.NewColor(176, 172, 164, 255)
+	warm, cool, dark := stonePaletteWarm, stonePaletteCool, stonePaletteDark
 	return propModel{
 		models: models,
 		parts: []treePart{
@@ -576,10 +642,7 @@ func loadRockFormationProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 		setModelTexture(&models[i], rockTex)
 		attachShader(&models[i], shader)
 	}
-	warm := rl.NewColor(214, 204, 188, 255)
-	cool := rl.NewColor(196, 198, 202, 255)
-	dark := rl.NewColor(176, 172, 164, 255)
-	light := rl.NewColor(232, 224, 210, 255)
+	warm, cool, dark, light := stonePaletteWarm, stonePaletteCool, stonePaletteDark, stonePaletteLight
 	return propModel{
 		models: models,
 		parts: []treePart{
@@ -725,6 +788,15 @@ func loadMushroomProp(shader rl.Shader) propModel {
 	}
 }
 
+// chestMetalDark / chestMetalBright are the muted-brass band tint and
+// the brighter lockplate tint shared by the chest body and lid. The two
+// loaders build one physical object, so the bands MUST stay in sync —
+// the literals live here once rather than re-declared per loader.
+var (
+	chestMetalDark   = rl.NewColor(140, 108, 64, 255)
+	chestMetalBright = rl.NewColor(182, 148, 86, 255)
+)
+
 // loadChestBodyProp builds the wooden chest body with painted metal
 // hardware: four vertical corner straps, two horizontal hoop bands
 // (top + bottom), a lockplate centred on the front face, and a small
@@ -750,11 +822,10 @@ func loadChestBodyProp(shader rl.Shader, barkTex rl.Texture2D) propModel {
 		attachShader(&models[i], shader)
 	}
 	woodTint := chestBodyColor
-	// Muted brass / bronze for the iron banding — pulled into the
-	// same warm metal family without flaring against the muted
-	// wood beneath.
-	metalDark := rl.NewColor(140, 108, 64, 255)
-	metalBright := rl.NewColor(182, 148, 86, 255)
+	// Muted brass / bronze for the iron banding (shared with the lid via
+	// the chestMetal* package vars so the two pieces can't drift).
+	metalDark := chestMetalDark
+	metalBright := chestMetalBright
 	jewelTint := rl.NewColor(198, 92, 80, 255)
 	return propModel{
 		models: models,
@@ -804,7 +875,7 @@ func loadChestLidProp(shader rl.Shader, barkTex rl.Texture2D) propModel {
 		attachShader(&models[i], shader)
 	}
 	woodTint := chestLidColor
-	metalDark := rl.NewColor(140, 108, 64, 255)
+	metalDark := chestMetalDark
 	return propModel{
 		models: models,
 		parts: []treePart{

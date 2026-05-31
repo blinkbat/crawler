@@ -112,16 +112,12 @@ func pauseMenuRowInnerW() int32 {
 // overlays differ only in title string, row labels, and the cursor field,
 // which this captures via the closures.
 func drawTitledMenuCard(assets Resources, title string, rowCount int, label func(i int) string, selected func(i int) bool) {
-	screenW, screenH := screenSize()
 	panelW := pauseMenuPanelW
 	stride := pauseMenuRowH + pauseMenuRowGap
 	panelH := pauseMenuHeaderH + stride*int32(rowCount) + pauseMenuFootH
-	panelX := centerX(panelW)
-	panelY := screenH/2 - panelH/2
-
-	rl.DrawRectangle(0, 0, screenW, screenH, surfaceVeil)
-	drawCard(panelX, panelY, panelW, panelH, surfacePrimary, borderSoft, borderSoft)
-	drawCardFiligree(panelX, panelY, panelW, panelH, giltDim)
+	rect := drawVeiledCard(panelW, panelH, borderSoft, borderSoft, giltDim)
+	panelX := int32(rect.X)
+	panelY := int32(rect.Y)
 
 	// Centred title near the top of the card with flanking gilt fleurons
 	// on the title's vertical midline (~22px outside each text edge) — the
