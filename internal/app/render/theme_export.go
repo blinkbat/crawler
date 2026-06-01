@@ -77,6 +77,20 @@ var (
 	MarkerOutline  = markerOutline
 )
 
+// FadeColor returns col with its existing alpha scaled by the 0..1
+// multiplier (clamped). Public alias for fadeColor so non-render scenes
+// (the editor) fade palette colors through the same helper the HUD uses.
+func FadeColor(col color.RGBA, alpha float32) color.RGBA {
+	return fadeColor(col, alpha)
+}
+
+// ColorWithAlpha returns col with its alpha channel replaced by byteAlpha
+// (0-255). Public alias for colorWithAlpha — the "set, don't scale" form,
+// shared with the editor.
+func ColorWithAlpha(col color.RGBA, byteAlpha uint8) color.RGBA {
+	return colorWithAlpha(col, byteAlpha)
+}
+
 // DrawCard fills + outlines a rounded panel with the standard corner radius
 // and adds the left accent stripe. Public alias for drawCard.
 func DrawCard(x, y, w, h int32, fill, outline, accent color.RGBA) {

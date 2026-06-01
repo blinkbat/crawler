@@ -361,3 +361,47 @@ func InventoryEmpty(inv []ItemStack) bool {
 	}
 	return true
 }
+
+// isConsumable reports whether a kind is a battle-usable consumable: a
+// positive-count item with no equip slot (cheese, jerky). Equipment
+// (Slot != SlotNone) shares the global inventory but can't be "used" in
+// combat — applyItem would consume it for 0 heal. The inverse of
+// equippableInventoryEntries' Slot != SlotNone test, kept here so the
+// "what's usable as an item?" rule lives in one place.
+func isConsumable(kind ItemKind) bool {
+	return ItemInfo(kind).Slot == SlotNone
+}
+
+// LiveConsumables returns the positive-count inventory entries that are
+// consumables — the battle Item menu's eligible set. Equipment is filtered
+// out so the picker can't list (and applyItem can't destroy) gear. Both
+// the input layer (updateItemMenu) and the renderer (drawItemMenuList)
+// filter through this so picker indices line up with drawn rows.
+func LiveConsumables(inv []ItemStack) []ItemStack {
+	return LiveConsumablesInto(inv, nil)
+}
+
+// LiveConsumablesInto is the buffer-reusing form of LiveConsumables
+// (mirrors LiveStacksInto) for the per-frame renderer. Pass nil to allocate.
+func LiveConsumablesInto(inv, buf []ItemStack) []ItemStack {
+	buf = buf[:0]
+	for _, s := range inv {
+		if s.Count > 0 && isConsumable(s.Kind) {
+			buf = append(buf, s)
+		}
+	}
+	return buf
+}
+
+// HasConsumable reports whether the inventory holds any battle-usable
+// consumable — the enabled-state check for the "Item" action. Walks
+// directly (no alloc), same rule as LiveConsumables. Replaces a bare
+// InventoryEmpty check, which counted equipment as "have items."
+func HasConsumable(inv []ItemStack) bool {
+	for _, s := range inv {
+		if s.Count > 0 && isConsumable(s.Kind) {
+			return true
+		}
+	}
+	return false
+}

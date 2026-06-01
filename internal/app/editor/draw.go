@@ -1349,16 +1349,14 @@ func drawGrid(s *State, font rl.Font) {
 		}
 		cx, cy := s.rect.tileCorner(x0, z0)
 		r := rl.NewRectangle(cx, cy, float32(x1-x0+1)*cell, float32(z1-z0+1)*cell)
-		fill := brushPreviewColor(s)
-		fill.A = 110
+		fill := withAlpha(brushPreviewColor(s), 110)
 		rl.DrawRectangleRec(r, fill)
 		rl.DrawRectangleLinesEx(r, 2, rl.NewColor(255, 255, 255, 220))
 	}
 
 	if s.drag == dragStart && s.hoverX >= 0 {
 		gx, gy := s.rect.tileCenter(s.hoverX, s.hoverZ)
-		ghost := render.MarkerStart
-		ghost.A = 220
+		ghost := withAlpha(render.MarkerStart, 220)
 		rl.DrawCircleLines(int32(gx), int32(gy), cell*0.36, ghost)
 	}
 	if s.drag == dragPack && s.hoverX >= 0 && s.dragPackIdx >= 0 && s.dragPackIdx < len(s.area.PackSpawns) {
@@ -1536,17 +1534,12 @@ func layerAlpha(s *State, l Layer) float32 {
 	return 0.55
 }
 
+// fadeAlpha scales c's existing alpha by the 0..1 multiplier (clamped).
+// Thin alias over render.FadeColor so the multiply-and-clamp lives once in
+// render/theme.go — the editor canvas fades brush / marker colors through
+// the same helper the HUD uses (rl.Color is a color.RGBA alias).
 func fadeAlpha(c rl.Color, alpha float32) rl.Color {
-	a := float32(c.A) * alpha
-	if a < 0 {
-		a = 0
-	}
-	if a > 255 {
-		a = 255
-	}
-	out := c
-	out.A = uint8(a)
-	return out
+	return render.FadeColor(c, alpha)
 }
 
 func insetRect(r rl.Rectangle, inset float32) rl.Rectangle {

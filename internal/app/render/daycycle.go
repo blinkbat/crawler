@@ -135,9 +135,9 @@ func timeProfileAt(steps int) timeProfile {
 		SunColor:       lerpVec3(cur.SunColor, next.SunColor, p),
 		AmbientColor:   lerpVec3(cur.AmbientColor, next.AmbientColor, p),
 		FogColor:       lerpVec3(cur.FogColor, next.FogColor, p),
-		ShadowStrength: cur.ShadowStrength + (next.ShadowStrength-cur.ShadowStrength)*p,
+		ShadowStrength: core.Lerp(cur.ShadowStrength, next.ShadowStrength, p),
 		SkyTint:        lerpVec3(cur.SkyTint, next.SkyTint, p),
-		StarAlpha:      cur.StarAlpha + (next.StarAlpha-cur.StarAlpha)*p,
+		StarAlpha:      core.Lerp(cur.StarAlpha, next.StarAlpha, p),
 	}
 }
 
@@ -207,8 +207,8 @@ func applyTimeOfDay(base lightingProfile, t timeProfile, enclosed bool) lighting
 
 func lerpVec3(a, b rl.Vector3, t float32) rl.Vector3 {
 	return rl.NewVector3(
-		a.X+(b.X-a.X)*t,
-		a.Y+(b.Y-a.Y)*t,
-		a.Z+(b.Z-a.Z)*t,
+		core.Lerp(a.X, b.X, t),
+		core.Lerp(a.Y, b.Y, t),
+		core.Lerp(a.Z, b.Z, t),
 	)
 }

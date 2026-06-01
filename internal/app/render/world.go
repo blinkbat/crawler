@@ -849,6 +849,15 @@ func mix32(n uint32) uint32 {
 	return n
 }
 
+// hash01 maps an index to a stable pseudo-random float in [0, 1) by
+// finalizing it through mix32 and normalizing the low 24 bits. The
+// single-uint sibling of textures.go's hashFloat (which normalizes the
+// two-int hashXY) — used where a per-item deterministic [0,1) is wanted
+// without a particle pool (the rain streaks' per-streak traits).
+func hash01(n uint32) float32 {
+	return float32(mix32(n)&0xffffff) / float32(0x1000000)
+}
+
 // tileYawDeg returns 0/90/180/270 for floor and wall tiles. Square-footprint
 // cubes look identical at any of those rotations; what changes is the
 // texture, which kills the visible tiling pattern from same-orientation

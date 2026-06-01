@@ -1284,31 +1284,63 @@ type packAddRule struct {
 	Label string // appears in the modal's hint row, e.g. "R add Rat"
 }
 
-// packAddHotkeys is the positional pool: entry i in core.EnemyKinds()
-// gets pool[i]. Keys past pool length are 0 (no binding, mouse-only).
-// The existing keys are preserved in registry order so muscle memory
-// survives the refactor. Roster expansion (Cave Spider, Vampire Bat,
-// Wisp, Stone Golem, Necromancer, Skeleton) added six more slots —
-// chose distinct letters that don't collide with editor-level
-// hotkeys (Ctrl+S/O/N/Z/Y, G center-view, F5 test, Tab cycle).
-var packAddHotkeys = []int32{
-	rl.KeyR, rl.KeyB, rl.KeyD, rl.KeyG, rl.KeyM, rl.KeyN, rl.KeyV, rl.KeyZ,
-	rl.KeyP, // P → Cave Spider (its silhouette + the "P for prey-trapper" cue)
-	rl.KeyF, // F → Vampire Bat (fang)
-	rl.KeyW, // W → Will-o'-Wisp
-	rl.KeyK, // K → Stone Golem (stoneKind)
-	rl.KeyX, // X → Necromancer (skull-X)
-	rl.KeyJ, // J → Skeleton (Joints)
+// packAddHotkeys binds each enemy kind to the key that appends it in the
+// pack-edit modal. Keyed by EnemyKind (NOT slice position) so reordering
+// enemyDefinitions can't silently reshuffle the bindings — the old
+// positional pool drifted when EnemyAmoeba landed last in the slice
+// (≠ its enum position), putting add-keys on top of the modal's own
+// member-op controls. Every key must avoid packModalReservedKeys; the
+// init assert below fails closed on a collision, a duplicate, or an
+// unbound kind. Most letters are first-letter mnemonics; the three marked
+// below moved off reserved control keys.
+var packAddHotkeys = map[core.EnemyKind]int32{
+	core.EnemyRat:          rl.KeyR,
+	core.EnemyBat:          rl.KeyB,
+	core.EnemyDiseasedRat:  rl.KeyD,
+	core.EnemyGoblin:       rl.KeyG,
+	core.EnemyGoblinMage:   rl.KeyM,
+	core.EnemyVenusMantrap: rl.KeyN, // N — maNtrap
+	core.EnemyCaveSpider:   rl.KeyV,
+	core.EnemyVampireBat:   rl.KeyZ,
+	core.EnemyWisp:         rl.KeyP,
+	core.EnemyStoneGolem:   rl.KeyF,
+	core.EnemyNecromancer:  rl.KeyE, // E — nEcromancer (was W: collided with cursor-up)
+	core.EnemySkeleton:     rl.KeyL, // L — skeLeton (was K: collided with member move-up)
+	core.EnemyAmoeba:       rl.KeyO, // O — ooze/blob (was X: collided with member remove)
 }
 
-// init asserts the add-rule hotkey pools cover the current registries.
-// The pack-edit and chest-edit modals are keyboard-only for "add a
-// kind" — an entry with Key=0 (rl.KeyNull) would silently be
-// unauthorable. Failing closed at startup is cheaper than shipping a
-// map editor where the new enemy / item is invisible to the author.
+// packModalReservedKeys are the pack-edit modal's non-add controls: the
+// entity-list cursor nav (Up/Down, which input.CursorUpDown also reads as
+// W/S), member ops (X remove, K up, J down), custom-enemy add (C), pack-AI
+// cycle (A), and close (Esc/Enter). An enemy add-key landing on any of
+// these would fire two actions on one keypress — the bug the init assert
+// guards against.
+var packModalReservedKeys = map[int32]bool{
+	rl.KeyUp: true, rl.KeyDown: true, rl.KeyW: true, rl.KeyS: true,
+	rl.KeyX: true, rl.KeyK: true, rl.KeyJ: true,
+	rl.KeyC: true, rl.KeyA: true,
+	rl.KeyEscape: true, rl.KeyEnter: true, rl.KeyKpEnter: true,
+}
+
+// init asserts the add-rule hotkey wiring. The pack-edit and chest-edit
+// modals are keyboard-only for "add a kind" — a missing binding (Key=0)
+// would silently be unauthorable, and an add-key that collides with a
+// reserved modal control fires two actions at once. Failing closed at
+// startup is cheaper than shipping a broken editor.
 func init() {
-	if got, max := len(core.EnemyKinds()), len(packAddHotkeys); got > max {
-		panic("editor: packAddHotkeys pool too small (" + strconv.Itoa(got) + " enemies, " + strconv.Itoa(max) + " keys)")
+	seen := map[int32]bool{}
+	for _, def := range core.EnemyKinds() {
+		key, ok := packAddHotkeys[def.Kind]
+		if !ok || key == 0 {
+			panic("editor: packAddHotkeys missing a key for enemy kind " + def.SingularName)
+		}
+		if packModalReservedKeys[key] {
+			panic("editor: packAddHotkeys key for " + def.SingularName + " collides with a reserved pack-modal control")
+		}
+		if seen[key] {
+			panic("editor: packAddHotkeys key for " + def.SingularName + " duplicates another enemy's add-key")
+		}
+		seen[key] = true
 	}
 	if got, max := len(core.AllItems()), len(chestAddHotkeys); got > max {
 		panic("editor: chestAddHotkeys pool too small (" + strconv.Itoa(got) + " items, " + strconv.Itoa(max) + " keys)")
@@ -1317,14 +1349,14 @@ func init() {
 
 var packAddRules = buildPackAddRules()
 
+// buildPackAddRules walks core.EnemyKinds() (slice order — drives the hint
+// row's display order) and looks each kind's key up in packAddHotkeys, so
+// the binding is by-kind even though the rules render in registry order.
 func buildPackAddRules() []packAddRule {
 	defs := core.EnemyKinds()
 	out := make([]packAddRule, 0, len(defs))
-	for i, def := range defs {
-		key := int32(0)
-		if i < len(packAddHotkeys) {
-			key = packAddHotkeys[i]
-		}
+	for _, def := range defs {
+		key := packAddHotkeys[def.Kind]
 		out = append(out, packAddRule{
 			Key:   key,
 			Kind:  def.Kind,

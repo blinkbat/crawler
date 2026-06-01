@@ -91,7 +91,8 @@ var (
 // withAlpha returns c with its alpha overridden — lets a base palette
 // color be reused at different opacities (e.g. the placement ghost's
 // bright outline vs. its faint fill) without a second NewColor literal.
+// Thin alias over render.ColorWithAlpha so the set-alpha logic lives once
+// in render/theme.go (rl.Color is a color.RGBA alias, so it passes through).
 func withAlpha(c rl.Color, a uint8) rl.Color {
-	c.A = a
-	return c
+	return render.ColorWithAlpha(c, a)
 }

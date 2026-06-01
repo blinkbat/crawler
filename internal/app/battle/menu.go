@@ -32,7 +32,7 @@ func updateActionMenu(g *core.GameState) {
 		performDefend(g)
 		return
 	case core.ActionRowItem:
-		if core.InventoryEmpty(g.Inventory) {
+		if !core.HasConsumable(g.Inventory) {
 			setBattleStatus(g, "No items.")
 			return
 		}
@@ -124,7 +124,7 @@ func updateSkillMenu(g *core.GameState) {
 // to ally-target selection. Items only heal allies for now, so target mode
 // is always party.
 func updateItemMenu(g *core.GameState) {
-	living := core.LiveStacks(g.Inventory)
+	living := core.LiveConsumables(g.Inventory)
 	count := len(living)
 	if count == 0 {
 		// Inventory ran dry between opening the menu and now — not actually

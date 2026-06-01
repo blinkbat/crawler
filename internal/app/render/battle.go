@@ -579,7 +579,7 @@ func drawActionMenuOptions(g core.GameState, assets Resources, x, y int32, membe
 	_ = member
 	drawActionMenuRow(assets.hudFont, core.ActionRowSkill, x, labelX, y+int32(core.ActionRowSkill)*rowSpacing, "Skill", ">", cursor == core.ActionRowSkill)
 	itemSuffix := ">"
-	if total := totalItemCount(g.Inventory); total > 0 {
+	if total := consumableItemCount(g.Inventory); total > 0 {
 		itemSuffix = "x" + strconv.Itoa(total) + "  >"
 	}
 	drawActionMenuRow(assets.hudFont, core.ActionRowItem, x, labelX, y+int32(core.ActionRowItem)*rowSpacing, "Item", itemSuffix, cursor == core.ActionRowItem)
@@ -731,13 +731,14 @@ func drawSkillMenuList(g core.GameState, assets Resources, x, y int32, member co
 // border. Empty inventory falls through to a single "(no items)" hint row
 // so the panel doesn't look broken if the player gets here somehow.
 // itemMenuStacksBuf is the reused scratch slice for the in-battle item
-// picker's live-stack list — refilled each frame the menu is up instead
-// of allocating fresh.
+// picker's live-consumable list — refilled each frame the menu is up
+// instead of allocating fresh. Filtered to consumables so it lines up
+// with updateItemMenu's LiveConsumables (equipment isn't usable in combat).
 var itemMenuStacksBuf []core.ItemStack
 
 func drawItemMenuList(g core.GameState, assets Resources, x, y int32) {
 	rowSpacing := int32(28)
-	itemMenuStacksBuf = core.LiveStacksInto(g.Inventory, itemMenuStacksBuf)
+	itemMenuStacksBuf = core.LiveConsumablesInto(g.Inventory, itemMenuStacksBuf)
 	living := itemMenuStacksBuf
 	if len(living) == 0 {
 		drawTextWithShadow(assets.hudFont, "(no items)", float32(x), float32(y), FontSmall, textDim)
@@ -751,12 +752,14 @@ func drawItemMenuList(g core.GameState, assets Resources, x, y int32) {
 	}
 }
 
-// totalItemCount sums all the inventory's stack counts. Used by the action
-// menu's "Item xN" hint label.
-func totalItemCount(inv []core.ItemStack) int {
+// consumableItemCount sums the inventory's USABLE-consumable stack counts
+// (equipment shares the inventory but isn't usable in combat). Drives the
+// action menu's "Item xN" hint so the badge matches what the Item picker
+// actually lists — a fresh equipment-only inventory shows no count.
+func consumableItemCount(inv []core.ItemStack) int {
 	n := 0
 	for _, s := range inv {
-		if s.Count > 0 {
+		if s.Count > 0 && core.ItemInfo(s.Kind).Slot == core.SlotNone {
 			n += s.Count
 		}
 	}

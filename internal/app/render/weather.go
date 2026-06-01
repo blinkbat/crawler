@@ -69,23 +69,10 @@ func init() {
 	}
 }
 
-// weatherHash01 maps an integer to a stable pseudo-random float in [0,1)
-// (the "lowbias32" finalizer). Lets each rain streak derive a fixed column
-// / length / speed / phase from its index, so the rainfall is stateless —
-// no per-frame particle pool, just index + clock.
-func weatherHash01(n uint32) float32 {
-	n ^= n >> 16
-	n *= 0x7feb352d
-	n ^= n >> 15
-	n *= 0x846ca68b
-	n ^= n >> 16
-	return float32(n&0xffffff) / float32(0x1000000)
-}
-
 // DrawWeather paints the ambient-rain overlay in screen space, above the
 // 3D world but below the HUD (so menus / combat text stay crisp). No-op
 // when the storm is fully clear. Stateless: rl.GetTime() drives the fall
-// and each streak's traits come from weatherHash01(index), so nothing is
+// and each streak's traits come from hash01(index), so nothing is
 // retained between frames.
 func DrawWeather(g core.GameState) {
 	w := g.Weather
@@ -108,11 +95,11 @@ func DrawWeather(g core.GameState) {
 			streakCol := rl.NewColor(rainStreakR, rainStreakG, rainStreakB, uint8(intensity*vis.streakAlpha))
 			for i := 0; i < n; i++ {
 				u := uint32(i)
-				colFrac := weatherHash01(u*2 + 1)
-				length := rainStreakMin + weatherHash01(u*2+9)*(rainStreakMax-rainStreakMin)
-				speed := rainFallMin + weatherHash01(u*7+3)*(rainFallMax-rainFallMin)
-				phase := weatherHash01(u*13 + 5)
-				thick := rainThickMin + weatherHash01(u*5+11)*(rainThickMax-rainThickMin)
+				colFrac := hash01(u*2 + 1)
+				length := rainStreakMin + hash01(u*2+9)*(rainStreakMax-rainStreakMin)
+				speed := rainFallMin + hash01(u*7+3)*(rainFallMax-rainFallMin)
+				phase := hash01(u*13 + 5)
+				thick := rainThickMin + hash01(u*5+11)*(rainThickMax-rainThickMin)
 				// y wraps from above the top to below the bottom over `span`;
 				// the per-streak phase offsets each so they don't fall in lockstep.
 				span := sh + length
