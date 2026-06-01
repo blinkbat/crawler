@@ -207,6 +207,10 @@ func applyAreaTransition(g *core.GameState) error {
 	next.Party = g.Party
 	next.Inventory = g.Inventory
 	next.StepCount = g.StepCount
+	// Carry the storm across the threshold like the day/night phase: an
+	// outdoor->outdoor door keeps the rain rolling; stepping into a roofed
+	// area lets the next TickWeatherStep recede it.
+	next.Weather = g.Weather
 	next.RNG = g.RNG
 	next.DebugOverlay = g.DebugOverlay
 	next.EnemiesDisabled = g.EnemiesDisabled
@@ -310,6 +314,10 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	// party draw so impact sparks paint over the sprite, not under.
 	render.TickAndDrawVFX(camera, game)
 	rl.EndMode3D()
+	// Ambient rain sits above the 3D world (darkening it) but below the
+	// world-space popups and HUD, so combat numbers, prompts, and menus
+	// stay readable through the storm. No-op when the weather is clear.
+	render.DrawWeather(*game)
 	render.DrawChestPrompt(camera, *game, assets)
 	render.DrawDamagePopups(camera, *game, assets)
 	render.DrawQualityPopup(camera, *game, assets)

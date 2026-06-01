@@ -17,6 +17,13 @@ func Update(g *core.GameState) {
 	// / ClampFrameTime), so the whole game shares one minimum tick rate.
 	dt := core.ClampFrameTime(rl.GetFrameTime())
 
+	// Ambient-rain tint follows its target smoothly every adventure frame,
+	// before the modal/battle dispatch below can early-return — so the
+	// bluegray wash keeps easing in / out even while a panel is open or a
+	// battle is running (the storm's step-driven state only changes during
+	// free exploration; here it's purely the visual catch-up).
+	core.TickWeather(g, dt)
+
 	// Modal priority — single source of truth lives in core.ActiveModal
 	// so any future scene that needs the same "what overlay is on top?"
 	// answer reads from one helper instead of replicating the if-chain.
@@ -305,6 +312,10 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	// Hooking the tick here lines it up with the player's most natural
 	// "unit of time outside combat" — one tile traversed.
 	core.TickPoisonStep(g)
+	// Ambient weather advances on the same per-step beat: outdoors this
+	// rolls to start / counts down a rain storm; indoors it recedes any
+	// active storm. The smooth tint follow runs per frame in Update.
+	core.TickWeatherStep(g)
 	// Fog-of-war reveal: every step paints the 3×3 window centered on
 	// the player onto Visited, so the map shows the immediate vicinity
 	// even when the player only ever brushed past a tile. Radius is a

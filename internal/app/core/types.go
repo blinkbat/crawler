@@ -290,8 +290,13 @@ type GameState struct {
 	// one full loop through the six time-of-day phases. Incremented by the
 	// explore package when a step actually lands (not when blocked).
 	StepCount int
-	Player    Player
-	Party     []PartyMember
+	// Weather is the ambient-rain state (outdoor-only, purely atmospheric).
+	// Advances on landed steps + eases per frame; see core/weather.go. Zero
+	// value is WeatherClear with no cooldown, so a fresh session starts dry
+	// and the per-step roll governs the first storm.
+	Weather WeatherState
+	Player  Player
+	Party   []PartyMember
 	// Packs is the field roster — each pack occupies one tile and holds
 	// the enemies revealed if it's engaged. Only the highest-tier member
 	// of a pack is rendered on the field; the rest appear at battle start.

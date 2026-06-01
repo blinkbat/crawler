@@ -358,6 +358,40 @@ const (
 	StepsPerPhase = 25
 	StepsPerCycle = StepsPerPhase * TimeOfDayCount
 
+	// OutdoorCeilingThreshold is the ceiling-coverage fraction above which
+	// an area counts as an enclosed interior (roofed, no sky) rather than
+	// outdoor. One definition of "has a roof" shared by the spooky-dungeon
+	// lighting override (render) and the rain gate (core.AreaIsOutdoor) so
+	// the two can't drift. A field or roofless forest scores near 0; a real
+	// dungeon roofs most of its tiles.
+	OutdoorCeilingThreshold = 0.30
+
+	// Ambient rain (outdoor weather) tuning — purely atmospheric, see
+	// core/weather.go. A bluegray wash eases in and darkens the open-sky
+	// view, then rain falls for a spell before lifting. The state machine
+	// advances on landed player steps (trigger roll / downpour length /
+	// cooldown); the tint Intensity eases per frame so it fades rather than
+	// snaps. Rain only happens outdoors and never indoors.
+	//
+	// Durations are framed against the day/night cycle (StepsPerCycle = 150
+	// steps = one full day, StepsPerPhase = 25): a storm is short — under a
+	// phase to a couple phases — and the cooldown spans roughly one to ~2.5
+	// days so rain is an occasional event, not a constant.
+	RainStartChance       = 0.006 // per outdoor step (once off cooldown): chance a storm begins
+	RainMinSteps          = 18    // shortest downpour, in player steps (~0.7 phases)
+	RainMaxSteps          = 50    // longest downpour, in player steps (~2 phases)
+	RainCooldownMin       = 150   // min clear steps after a storm (~one full day) before rain may roll again
+	RainCooldownMax       = 380   // max of that random cooldown span (~2.5 days)
+	WeatherRampSpeed      = 0.40  // Intensity (0..1) eased per second — full tint ramp ≈ 2.5s
+	WeatherRainStartLevel = 0.85  // Intensity the darkening must reach before the rain actually falls
+
+	// Lightning (heavy storms only). A bolt blanks the world view bright
+	// for a blink, then the flash decays; bolts are scheduled at random
+	// gaps (one RNG draw per bolt, never per frame). All in seconds.
+	LightningIntervalMin = 4.0  // shortest gap between bolts
+	LightningIntervalMax = 13.0 // longest gap between bolts
+	LightningDecayPerSec = 3.6  // flash brightness lost per second (≈0.28s blink)
+
 	// BattleLogMaxLines caps the rolling combat log buffer so a long fight
 	// doesn't grow it unbounded. The renderer reads len(Log) to draw the
 	// last-N visible lines; this cap is the ceiling for any scrollback

@@ -586,30 +586,17 @@ var enclosureCache struct {
 	enclosed bool
 }
 
-// areaIsEnclosed reports whether the area is a roofed interior —
-// used to gate the spooky-dungeon lighting override. An outdoor
-// area (field, or a forest authored on the dungeon palette) has no
-// ceiling layer and reads as open-sky; a real dungeon has ceiling
-// slabs over most of its tiles. Threshold is 30 % coverage so a
-// dungeon with a few open-air courtyard tiles still counts as
-// enclosed, while a forest with zero ceilings never does.
+// areaIsEnclosed reports whether the area is a roofed interior — used to
+// gate the spooky-dungeon lighting override. The ceiling-coverage rule
+// (and the OutdoorCeilingThreshold it tests against) lives in
+// core.AreaIsOutdoor so the lighting gate and the rain gate share one
+// definition of "has a roof"; this just memoizes its result per area so
+// the scan runs once per area entry rather than once per frame.
 func areaIsEnclosed(m core.AreaDefinition) bool {
 	if enclosureCache.matches(m) {
 		return enclosureCache.enclosed
 	}
-	covered, total := 0, 0
-	for z := 0; z < m.Height; z++ {
-		for x := 0; x < m.Width; x++ {
-			if !m.InBounds(x, z) {
-				continue
-			}
-			total++
-			if m.CeilingAt(x, z) {
-				covered++
-			}
-		}
-	}
-	enclosed := total > 0 && float64(covered)/float64(total) > 0.30
+	enclosed := !core.AreaIsOutdoor(m)
 	enclosureCache.set(m)
 	enclosureCache.enclosed = enclosed
 	return enclosed
