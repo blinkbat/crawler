@@ -17,26 +17,32 @@ type partyClassPresentation struct {
 }
 
 var partyClassPresentations = map[core.PartyClass]partyClassPresentation{
+	// turnColor is the member's accent "slot color" — the single source
+	// for every HUD/UI/log tint keyed to a class (turn-order panel, party
+	// stat cards, panels member cards, combat-log names, target markers).
+	// Per-class hues: Warrior gold, Cleric off-white, Thief purple,
+	// Wizard pale blue. Tuned bright enough to read on the dark glass HUD
+	// and mutually distinct at a glance.
 	core.ClassWarrior: {
-		turnColor:   color.RGBA{R: 235, G: 88, B: 78, A: 255},
+		turnColor:   color.RGBA{R: 232, G: 184, B: 82, A: 255}, // gold
 		textureSeed: 1,
 		drawPixels:  drawWarriorPartyPixels,
 		dance:       warriorVictoryDance,
 	},
 	core.ClassCleric: {
-		turnColor:   color.RGBA{R: 244, G: 222, B: 138, A: 255},
+		turnColor:   color.RGBA{R: 238, G: 236, B: 226, A: 255}, // off-white
 		textureSeed: 2,
 		drawPixels:  drawClericPartyPixels,
 		dance:       clericVictoryDance,
 	},
 	core.ClassThief: {
-		turnColor:   color.RGBA{R: 94, G: 214, B: 148, A: 255},
+		turnColor:   color.RGBA{R: 182, G: 132, B: 236, A: 255}, // purple
 		textureSeed: 3,
 		drawPixels:  drawThiefPartyPixels,
 		dance:       thiefVictoryDance,
 	},
 	core.ClassWizard: {
-		turnColor:   color.RGBA{R: 120, G: 152, B: 255, A: 255},
+		turnColor:   color.RGBA{R: 148, G: 198, B: 244, A: 255}, // pale blue
 		textureSeed: 4,
 		drawPixels:  drawWizardPartyPixels,
 		dance:       wizardVictoryDance,
@@ -88,6 +94,11 @@ func drawClassGlyph(cx, cy, r float32, class core.PartyClass, col color.RGBA) {
 		drawClassGlyphThief(cx, cy, r, col)
 	case core.ClassWizard:
 		drawClassGlyphWizard(cx, cy, r, col)
+	default:
+		// Parallel to partyClassPresentations' init guard: a new class
+		// that forgets a glyph case fails loudly instead of drawing a
+		// blank sigil.
+		panic("render: drawClassGlyph missing case for party class")
 	}
 }
 

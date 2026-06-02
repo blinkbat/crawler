@@ -610,11 +610,12 @@ func beginPendingAction(g *core.GameState) {
 		// single-target Attack. Every other press-minigame skill keeps the
 		// classic one-zone bar.
 		if g.Battle.PendingSkill == core.SkillSwipe {
-			// Swipe is the canonical two-hit tally bar — both window
-			// hits land twice across the AoE formation. Other multi-
-			// hit skills, when they ship, swap `2` for their target
-			// hit count.
-			g.Battle.Timing = core.NewMultiPressState(g.Rand(), core.AttackTimingDuration, 2)
+			// Swipe is a two-hit tally bar: one window around the middle
+			// and one just before the commit tail — a "wind up, then the
+			// big swing" rhythm rather than two evenly-spread beats (the
+			// centers live in core.SwipeHitFracs). Both hits land across
+			// the whole AoE formation.
+			g.Battle.Timing = core.NewTallyStateAtCenters(core.AttackTimingDuration, core.SwipeHitFracs...)
 		} else {
 			g.Battle.Timing = core.NewTimingState(g.Rand(), core.AttackTimingDuration)
 		}
@@ -1844,8 +1845,11 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	// Poison inflict: only on damaging hits from a poison-themed attacker
 	// against a target that's still alive and not already poisoned. The
 	// no-stack rule mirrors burn — re-poisoning a poisoned target on every
-	// bite would trivialize the duration roll.
-	if damage > 0 && def.PoisonChance > 0 && g.Party[target].HP > 0 && g.Party[target].PoisonTurns <= 0 {
+	// bite would trivialize the duration roll. Gate on `dealt` (the
+	// post-armor/post-MDef figure), NOT the pre-mitigation `damage`, so a
+	// bite fully soaked to 0 by armor inflicts no DoT — matching the
+	// lifesteal block below which also reads `dealt`.
+	if dealt > 0 && def.PoisonChance > 0 && g.Party[target].HP > 0 && g.Party[target].PoisonTurns <= 0 {
 		if g.Rand().Float64() < def.PoisonChance {
 			rawPoison := core.DefaultPoisonEffect.RollDuration(g.Rand())
 			g.Party[target].PoisonTurns = core.ShortenStatusDuration(rawPoison, core.EffectiveStats(g.Party[target]).WIS)

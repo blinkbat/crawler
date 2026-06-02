@@ -129,13 +129,20 @@ const (
 	// struct-literal GameStates that didn't seed PanelsMapZoom) read one
 	// source instead of each package re-declaring the literal 14.
 	//
-	//   PanelMapZoomDefault — initial cells-on-screen (fits a ~20×14 map).
+	//   PanelMapZoomDefault — initial cells-on-screen (fits a ~16-wide map).
 	//   PanelMapZoomMin/Max — soft-clamp bounds for the Up/Down zoom.
 	//   PanelMapZoomStep    — cells-on-screen change per zoom press.
-	PanelMapZoomDefault = 14
-	PanelMapZoomMin     = 6
+	//
+	// Step is deliberately coarse so the range resolves to just a handful
+	// of distinct stops (8 / 16 / 24 / 32 / 40 / 48) rather than the old
+	// 22-stop crawl — a couple of presses takes you from "room" to "whole
+	// map." The default + min/max are all multiples of the step so every
+	// stop lands cleanly and the clamp can't strand the player on a
+	// fractional zoom.
+	PanelMapZoomDefault = 16
+	PanelMapZoomMin     = 8
 	PanelMapZoomMax     = 48
-	PanelMapZoomStep    = 2
+	PanelMapZoomStep    = 8
 
 	// --- Pack AI (junkyard-dog leash) -------------------------------------
 	//
@@ -375,13 +382,13 @@ const (
 	//
 	// Durations are framed against the day/night cycle (StepsPerCycle = 150
 	// steps = one full day, StepsPerPhase = 25): a storm is short — under a
-	// phase to a couple phases — and the cooldown spans roughly one to ~2.5
-	// days so rain is an occasional event, not a constant.
-	RainStartChance       = 0.006 // per outdoor step (once off cooldown): chance a storm begins
+	// phase to a couple phases — and the cooldown spans roughly half a day to
+	// ~1.2 days so rain is a recurring event without being constant.
+	RainStartChance       = 0.012 // per outdoor step (once off cooldown): chance a storm begins
 	RainMinSteps          = 18    // shortest downpour, in player steps (~0.7 phases)
 	RainMaxSteps          = 50    // longest downpour, in player steps (~2 phases)
-	RainCooldownMin       = 150   // min clear steps after a storm (~one full day) before rain may roll again
-	RainCooldownMax       = 380   // max of that random cooldown span (~2.5 days)
+	RainCooldownMin       = 70    // min clear steps after a storm (~half a day) before rain may roll again
+	RainCooldownMax       = 180   // max of that random cooldown span (~1.2 days)
 	WeatherRampSpeed      = 0.40  // Intensity (0..1) eased per second — full tint ramp ≈ 2.5s
 	WeatherRainStartLevel = 0.85  // Intensity the darkening must reach before the rain actually falls
 
@@ -462,6 +469,14 @@ var MultiPressWindow = struct {
 	WindowWidthFrac: 0.08,
 	CommitZoneFrac:  0.15,
 }
+
+// SwipeHitFracs are the two hand-placed tally-window centers for
+// Swipe's press bar (fractions of the bar duration): one around the
+// middle and one just before the commit tail — a "wind up, then the
+// big swing" rhythm rather than two evenly-spread beats. Passed to
+// core.NewTallyStateAtCenters; kept here beside MultiPressWindow so a
+// Swipe-feel balance pass lands in one file.
+var SwipeHitFracs = []float32{0.5, 0.78}
 
 // timingGrades is the single per-grade attribute table for the timed-hit
 // minigame. Every core-side function that varies by TimingQuality reads
@@ -661,34 +676,53 @@ const (
 	FacingCount = 4
 )
 
-// PauseMenuItem enumerates the rows in the pause menu. The integer values
-// double as menu cursor positions (g.MenuIndex), so reordering this enum
-// reorders the menu. Single source of truth shared by explore (cursor
-// dispatch) and render (row drawing) — neither side reinvents the count.
+// PauseMenuItem enumerates the rows in the top-level pause menu. The
+// integer values double as menu cursor positions (g.MenuIndex), so
+// reordering this enum reorders the menu. The top level is intentionally
+// minimal — Options and Debug each descend into their own submenu, Quit
+// exits. Single source of truth shared by explore (cursor dispatch) and
+// render (row drawing) — neither side reinvents the count.
 type PauseMenuItem int
 
 const (
-	PauseMenuRestart PauseMenuItem = iota
-	PauseMenuStats
-	PauseMenuDebug
-	PauseMenuDisplay
-	PauseMenuJukebox
+	PauseMenuOptions PauseMenuItem = iota // ▸ Options submenu (display, party stats, restart)
+	PauseMenuDebug                        // ▸ Debug submenu (toggles + audio tools)
 	PauseMenuQuit
 )
 
 // PauseMenuCount is the wrap modulus for the pause menu cursor. Bump by
-// adding a PauseMenuItem enum constant above this line — neither caller
-// hard-codes "3" anywhere.
+// adding a PauseMenuItem enum constant above this line.
 const PauseMenuCount = int(PauseMenuQuit) + 1
 
-// DebugMenuItem enumerates the rows in the debug submenu (reachable only
-// while DebugOverlay / "debug mode" is on). Like PauseMenuItem, the integer
-// values double as the cursor position (g.DebugMenuIndex), so reordering
-// this enum reorders the menu and adding a row is a single appended const.
+// OptionsMenuItem enumerates the rows in the Options submenu (opened from
+// the pause menu's Options row). Player-facing settings/actions live here:
+// the display-mode toggle, a jump to the party-stats dashboard, and a
+// run restart. Integer values double as the cursor (g.OptionsMenuIndex).
+type OptionsMenuItem int
+
+const (
+	OptionsMenuDisplay OptionsMenuItem = iota // Fullscreen / Windowed toggle
+	OptionsMenuStats                          // open the Tome on the Stats tab
+	OptionsMenuRestart
+	OptionsMenuClose
+)
+
+// OptionsMenuCount is the wrap modulus for the Options submenu cursor.
+const OptionsMenuCount = int(OptionsMenuClose) + 1
+
+// DebugMenuItem enumerates the rows in the Debug submenu (opened from the
+// pause menu's Debug row — now always reachable; the master "Debug Mode"
+// on/off toggle lives INSIDE the submenu rather than gating access to it).
+// Audio tools (the jukebox sound tester) live here too. Integer values
+// double as the cursor position (g.DebugMenuIndex).
 type DebugMenuItem int
 
 const (
-	DebugMenuEnemies DebugMenuItem = iota
+	// DebugMenuToggle flips DebugOverlay ("debug mode" — in-world tile
+	// labels + coord readout). The submenu itself is always reachable now,
+	// so this is an in-place toggle, not an access gate.
+	DebugMenuToggle DebugMenuItem = iota
+	DebugMenuEnemies
 	DebugMenuAdvanceTime
 	DebugMenuEasyQuit
 	// DebugMenuRenderLog toggles the render-pass diagnostics log file
@@ -697,10 +731,9 @@ const (
 	// flicker/invisibility issue can be inspected from the resulting
 	// log even when reproducing the bug from outside the editor.
 	DebugMenuRenderLog
-	// DebugMenuDisable turns debug mode off (clears DebugOverlay) and
-	// closes the submenu. It's the only off-switch, since DebugOverlay
-	// doubles as the gate that makes this submenu reachable at all.
-	DebugMenuDisable
+	// DebugMenuJukebox is the audio sound-tester: confirm cycles through
+	// and plays the sound bank. Moved here from the top-level pause menu.
+	DebugMenuJukebox
 	DebugMenuClose
 )
 

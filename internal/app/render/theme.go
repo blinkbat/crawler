@@ -780,6 +780,22 @@ func drawGlassPane(x, y, w, h int32, fill color.RGBA) {
 	rl.DrawRectangleRounded(rect, roundness, 8, fill)
 }
 
+// drawFocusableRow paints a selectable list row: a glass body that
+// warm-tints when focused, plus a gilt selection outline on the focused
+// row. One definition of the "cursored row" look shared by the panels
+// overlay's Skills list, Equipment slot rows, and the equip-slot
+// picker, so the three can't drift on fill tone or outline weight.
+func drawFocusableRow(rect rl.Rectangle, focused bool) {
+	bg := fadeColor(glassDeep, 0.55)
+	if focused {
+		bg = fadeColor(glassWarm, 0.85)
+	}
+	drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), bg)
+	if focused {
+		rl.DrawRectangleLinesEx(rect, 2, giltBright)
+	}
+}
+
 // drawPanelHeading paints a FontHeading title with the standard
 // wood-accent tick mark underline. Replaces the older drawHeading
 // helper (kept as an alias below). Use this for every persistent

@@ -124,7 +124,7 @@ func updateAdventureScene(state *appState) {
 			// clue, and otherwise drop the player off where they were.
 			// Common cause: target map file missing, or the named door
 			// doesn't exist in the destination.
-			state.game.Battle.Message = "Door failed: " + err.Error()
+			state.game.SetStatusMessage("Door failed: " + err.Error())
 		}
 		state.game.PendingTransition = core.AreaTransition{}
 	}
@@ -133,6 +133,11 @@ func updateAdventureScene(state *appState) {
 		if state.testFromEditor {
 			state.testFromEditor = false
 			state.scene = sceneEditor
+			// Drop lingering render-side particles, same as the return-to-
+			// title path: quitting a playtest mid-battle would otherwise
+			// freeze formation-relative particles in the pool and thaw them
+			// onto the next F5 playtest at stale positions.
+			render.ResetParticles()
 			return
 		}
 		returnToTitleScene(state)
@@ -189,12 +194,13 @@ func applyAreaTransition(g *core.GameState) error {
 		x, z := doorExitTile(g.Area, g.Doors, *dest)
 		g.Player = core.NewPlayer(x, z, dest.Facing)
 		// Symmetry with the cross-map branch below (which rebuilds the
-		// whole GameState): drop any held equipment-drag and clear the
-		// particle pool so an in-map teleport can't strand a lifted item
-		// or leave stale VFX anchored at the old position. (Latent today —
-		// only the door prompt queues a transition and it has no held drag
-		// — but keeps a future "teleport from an open panel" honest.)
-		core.ClearEquipDrag(g)
+		// whole GameState): close any open equipment picker and clear the
+		// particle pool so an in-map teleport can't leave the sub-modal
+		// stranded or leave stale VFX anchored at the old position.
+		// (Latent today — only the door prompt queues a transition and the
+		// panels overlay is closed during movement — but keeps a future
+		// "teleport from an open panel" honest.)
+		core.CloseEquipPicker(g)
 		core.RequestVFXReset(g)
 		return nil
 	}
@@ -215,6 +221,11 @@ func applyAreaTransition(g *core.GameState) error {
 	next.DebugOverlay = g.DebugOverlay
 	next.EnemiesDisabled = g.EnemiesDisabled
 	next.EasyBattleQuit = g.EasyBattleQuit
+	// The render-log FILE stays open across the transition (it's not closed
+	// here), and the per-frame logger gates on the file-open state, so the
+	// flag must carry too — otherwise the Debug submenu reads "Render Log:
+	// Off" while the log keeps writing, desyncing the toggle.
+	next.RenderLogEnabled = g.RenderLogEnabled
 	dest := core.DoorByName(next.Doors, doorName)
 	if dest == nil {
 		return errDoorNotFound(target, doorName)

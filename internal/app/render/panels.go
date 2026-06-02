@@ -113,7 +113,23 @@ func DrawPanelsOverlay(g core.GameState, assets Resources) {
 		panelTabDrawers[g.PanelsTab](g, assets, bodyRect)
 	}
 
-	drawModalFooter(font, card, "L1/R1 tabs   Left/Right pick member   X close")
+	footerHint := "L1/R1 tabs   Left/Right pick member   X close"
+	switch g.PanelsTab {
+	case core.PanelTabSkills:
+		footerHint = "L1/R1 tabs   Left/Right member  Up/Down skill   Confirm buy  F cast heal   X close"
+	case core.PanelTabItems:
+		footerHint = "L1/R1 tabs   Up/Down item   Confirm / F use   X close"
+	}
+	drawModalFooter(font, card, footerHint)
+
+	// Sub-modals painted on top of the whole overlay (frame + footer) so
+	// they read as "above" everything.
+	if g.PanelsTab == core.PanelTabEquipment && g.EquipPickerOpen {
+		drawEquipPicker(g, assets)
+	}
+	if g.UseTargetOpen {
+		drawUseTargetPicker(g, assets)
+	}
 }
 
 // tabLabelMeasureCache memoizes panel-tab label measurements (fixed core
@@ -124,31 +140,35 @@ func measureTabLabel(font rl.Font, label string) rl.Vector2 {
 	return tabLabelMeasureCache.measure(font, label, FontBody, 1)
 }
 
+// memberCardGutter is the single per-member-card layout unit: both the
+// gap between member columns and the content inset inside each card.
+// Centralized so the column layout, the card-content inset, and the card
+// header can't drift apart (they previously hardcoded 14 / 28 / 24).
+const memberCardGutter = float32(14)
+
 // memberColumnLayout returns the per-member column rectangles for any
 // tab that paints one card per party member (Stats / Equipment /
 // Skills). Equal-width columns with a small gap so the grid reads as
 // "ledger of party members" rather than a single dense slab.
 func memberColumnLayout(body rl.Rectangle, count int) []rl.Rectangle {
-	const gap = float32(14)
 	if count <= 0 {
 		return nil
 	}
-	total := body.Width - gap*float32(count-1)
+	total := body.Width - memberCardGutter*float32(count-1)
 	colW := total / float32(count)
 	cols := make([]rl.Rectangle, count)
 	for i := 0; i < count; i++ {
-		cols[i] = rl.NewRectangle(body.X+float32(i)*(colW+gap), body.Y, colW, body.Height)
+		cols[i] = rl.NewRectangle(body.X+float32(i)*(colW+memberCardGutter), body.Y, colW, body.Height)
 	}
 	return cols
 }
 
 // memberCardInner returns the inner content inset (X origin + width) for
 // a per-member card column — the writable region inside the gutter the
-// Stats / Equipment / Skills body drawers paint into. Centralizes the
-// 14px gutter the three used to hardcode as `col.X + 14` / `colW - 28`.
+// Stats / Equipment / Skills body drawers paint into. Single seam for the
+// gutter the three used to hardcode as `col.X + 14` / `colW - 28`.
 func memberCardInner(col rl.Rectangle) (innerX, innerW float32) {
-	const gutter = 14
-	return col.X + gutter, col.Width - 2*gutter
+	return col.X + memberCardGutter, col.Width - 2*memberCardGutter
 }
 
 // drawPartyMemberCardHeader paints the shared header chrome every
@@ -166,16 +186,27 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 
 	// Soft inset glass body. We don't paint a full wood-framed card per
 	// member (would compete with the outer modal's frame); a small
-	// rounded panel + a class stripe gives enough separation.
+	// rounded panel + a class stripe gives enough separation. The
+	// SELECTED member gets a much stronger treatment (warm wash + bold
+	// gilt frame below) — the old faint tint read as "nothing selected"
+	// across the Character / Skills / Equipment tabs.
 	cardBG := glassMid
 	if highlight {
-		cardBG = core.MixColor(glassMid, glassWarm, 0.55)
+		cardBG = core.MixColor(glassMid, glassWarm, 0.9)
 	}
 	drawGlassPane(int32(col.X), int32(col.Y), int32(col.Width), int32(col.Height), cardBG)
 	rl.DrawRectangle(int32(col.X), int32(col.Y)+6, 3, int32(col.Height)-12, classCol)
+	if highlight {
+		// Bold gilt frame around the active card — the same "you're
+		// here" gilt the tab underline / armed-skill spine use, scaled
+		// up to an unmistakable full-card border. Rounded to match the
+		// glass body's own corner radius so it hugs the pane.
+		rect := rl.NewRectangle(col.X, col.Y, col.Width, col.Height)
+		roundness := fixedRoundnessFor(int32(col.Width), int32(col.Height), cornerRadius)
+		rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, 3, giltBright)
+	}
 
-	innerX := col.X + 14
-	innerW := col.Width - 24
+	innerX, innerW := memberCardInner(col)
 
 	y := col.Y + 16
 	nameCol := textPrimary
@@ -305,41 +336,12 @@ func plural(n int) string {
 	return "s"
 }
 
-// drawPanelsEquipment renders the Equipment tab: a per-member column
-// of five drop targets (R.HAND, L.HAND, ARMOR, ACC1, ACC2) above a
-// shared inventory strip of every equippable item the party owns.
-// The strip is the drag source; the slots are the drop targets. The
-// input layer (explore/panels_drag.go) reads back the hit rects
-// stored on lastEquipLayout to route mouse events.
-//
-// While a drag is in progress (g.EquipDrag.Source != None), the
-// dragged item paints near the cursor and the compatible drop
-// targets gain a gilt outline so the player sees where it can land.
-
-// Equipment-tab layout constants. Co-located so tuning the panel
-// shape is a single-file edit; the drag-ghost width is locked to
-// the inventory-tile width on purpose (a hovering ghost the same
-// size as its source tile reads cleaner than a free-floating one),
-// so changing equipInventoryTileW automatically follows on the
-// ghost. equipMinColRegion is derived from the per-slot row height
-// × EquipSlotCount so the "is there room for the strip?" rescue
-// branch can never out-shrink the slot column underneath it.
-const (
-	equipSlotRowHeight    = float32(56)
-	equipStripGap         = float32(8)
-	equipStripHeight      = float32(140)
-	equipInventoryTileW   = float32(190)
-	equipInventoryTileH   = float32(80)
-	equipInventoryTileGap = float32(10)
-	equipDragGhostW       = equipInventoryTileW
-	equipDragGhostH       = float32(48)
-)
-
-// equipMinColRegion is the minimum height left for the per-member
-// slot column before the inventory strip starts auto-shrinking.
-// Derived from the slot row count so a new equip slot lifts the
-// floor automatically.
-var equipMinColRegion = equipSlotRowHeight * float32(core.EquipSlotCount)
+// equipSlotRowHeight is the per-slot row height inside a member's
+// Equipment-tab card (R.HAND / L.HAND / ARMOR / ACC1 / ACC2 stacked).
+// The tab works like the Items menu — navigate slots, Confirm to open
+// the item picker — so there's no inventory strip or drag ghost to size
+// anymore; just the slot rows.
+const equipSlotRowHeight = float32(56)
 
 // slotIconForType returns the icon-draw function for an EquipSlotIndex
 // — the per-slot row variant.
@@ -348,7 +350,7 @@ func slotIconForType(slot core.EquipSlotIndex) func(cx, cy, r float32, col rl.Co
 }
 
 // slotIconForKind returns the icon-draw function for an
-// EquipmentSlotType — the inventory-tile / drag-ghost variant.
+// EquipmentSlotType — the picker-row / slot-type icon variant.
 // One mapping, one place; the historical sword/shield/ring icons
 // stay if the slot type set ever expands (e.g. SlotConsumable).
 func slotIconForKind(t core.EquipmentSlotType) func(cx, cy, r float32, col rl.Color) {
@@ -363,113 +365,63 @@ func slotIconForKind(t core.EquipmentSlotType) func(cx, cy, r float32, col rl.Co
 	return drawSlotIconRing
 }
 
-// equipPanelLayout caches the hit-test rectangles laid down each
-// frame by drawPanelsEquipment so the input layer can read them
+// equipPanelLayout caches the hit-test rectangles laid down each frame
+// by the Equipment tab so the input layer can route a mouse click
 // without re-running the layout math. SlotRects is flattened
-// [partyIndex][slotIndex] in row-major order; InventoryRects mirrors
-// the order of equippableInventory. PartyCount and InvCount let the
-// input layer iterate without re-deriving sizes.
+// [member][slot] in row-major order (SlotMember / SlotIdx parallel it).
+// PickerRects holds the slot-picker sub-modal's row rects (parallel to
+// core.EquipPickerRows' order); PickerBounds is the whole picker card,
+// used to detect a click-outside dismiss, and PickerValid gates that so
+// a click can't dismiss a picker that wasn't drawn this frame.
 type equipPanelLayout struct {
-	SlotRects        []rl.Rectangle // len = PartyCount * EquipSlotCount
-	SlotPartyIdx     []int          // parallel: which member owns each rect
-	SlotIdx          []core.EquipSlotIndex
-	InventoryRects   []rl.Rectangle
-	InventoryEntries []equipInventoryEntry
-	DragCursor       rl.Vector2
+	SlotRects    []rl.Rectangle
+	SlotMember   []int
+	SlotIdx      []core.EquipSlotIndex
+	PickerRects  []rl.Rectangle
+	PickerBounds rl.Rectangle
+	PickerValid  bool
 }
 
-type equipInventoryEntry struct {
-	Kind  core.ItemKind
-	Count int
-}
-
-// lastEquipLayout is the most recently drawn panel layout. Read by the
-// input layer in the same frame; render writes it AFTER drawing so
-// hit-test geometry matches what was painted. Single-threaded
-// renderer + single-threaded input means no synchronisation needed.
+// lastEquipLayout is the most recently drawn Equipment-tab layout. Read
+// by the input layer in the same frame; render writes it AFTER drawing
+// so the hit rects match what was painted. Single-threaded renderer +
+// input means no synchronisation needed.
 var lastEquipLayout equipPanelLayout
 
-// ResetEquipPanelLayout zeroes the cached hit-rect layout. Called
-// from the input layer on overlay close / tab switch so the first
-// frame after a transition can't observe stale rects from a previous
-// Equipment-tab visit — without this, an LMB-down on the frame
-// EQUIPMENT regains focus could route to coordinates that no longer
-// describe the layout the player sees.
+// ResetEquipPanelLayout zeroes the cached hit rects. Called from the
+// input layer on overlay close / tab switch so the first frame after a
+// transition can't route a click against stale geometry.
 func ResetEquipPanelLayout() { lastEquipLayout = equipPanelLayout{} }
 
-// EquipPanelInventoryVisibleCount returns how many inventory tiles the
-// Equipment strip actually painted last frame (after overflow
-// truncation). The keyboard/controller cursor clamps to this so it
-// never focuses an off-screen tile.
-func EquipPanelInventoryVisibleCount() int { return len(lastEquipLayout.InventoryRects) }
-
-// EquipPanelInventoryEntryKind returns the ItemKind of the visible
-// inventory tile at index i (ok=false when out of range). Reads the
-// same per-frame entry list the strip drew, so a controller "lift"
-// targets exactly the tile the player sees.
-func EquipPanelInventoryEntryKind(i int) (core.ItemKind, bool) {
-	// Bound by the VISIBLE tile count (InventoryRects), not the full
-	// entries list, so this can never return a kind for an off-screen
-	// (overflow-truncated) tile — keeps it in lockstep with
-	// EquipPanelInventoryVisibleCount, which the cursor clamps against.
-	// InventoryEntries[i] is safe because rects are a prefix of entries.
-	if i < 0 || i >= len(lastEquipLayout.InventoryRects) {
-		return core.ItemNone, false
-	}
-	return lastEquipLayout.InventoryEntries[i].Kind, true
-}
-
-// EquipPanelSlotHit returns (partyIndex, slot, true) if `pt` is inside
-// any slot rect, else (-1, 0, false). Mouse hit test for the input
-// layer.
+// EquipPanelSlotHit returns (member, slot, true) if `pt` is inside a
+// slot rect, else (-1, 0, false). The Equipment tab opens that slot's
+// item picker on a click.
 func EquipPanelSlotHit(pt rl.Vector2) (int, core.EquipSlotIndex, bool) {
 	for i, r := range lastEquipLayout.SlotRects {
 		if rl.CheckCollisionPointRec(pt, r) {
-			return lastEquipLayout.SlotPartyIdx[i], lastEquipLayout.SlotIdx[i], true
+			return lastEquipLayout.SlotMember[i], lastEquipLayout.SlotIdx[i], true
 		}
 	}
 	return -1, 0, false
 }
 
-// inventoryHitRect returns the index of the inventory tile under
-// `pt`, or -1. Shared by EquipPanelInventoryHit and
-// EquipPanelInventoryAreaHit so the iterate-rects loop lives in one
-// place — a future per-tile bounds check (padding, dead zone) can't
-// drift between the two callers.
-func inventoryHitRect(pt rl.Vector2) int {
-	for i, r := range lastEquipLayout.InventoryRects {
+// EquipPanelPickerRowHit returns (rowIndex, true) if `pt` is inside a
+// slot-picker row rect, else (-1, false). The index lines up with
+// core.EquipPickerRows so the input layer acts on the clicked row.
+func EquipPanelPickerRowHit(pt rl.Vector2) (int, bool) {
+	for i, r := range lastEquipLayout.PickerRects {
 		if rl.CheckCollisionPointRec(pt, r) {
-			return i
+			return i, true
 		}
 	}
-	return -1
+	return -1, false
 }
 
-// EquipPanelInventoryHit returns (inventoryIndex into shared
-// inventory, ItemKind, true) when `pt` is over an inventory tile, else
-// (-1, ItemNone, false). InventoryIndex is the index in
-// GameState.Inventory (not the filtered equippable list), so the
-// input layer can ConsumeItem against it directly.
-func EquipPanelInventoryHit(pt rl.Vector2, g core.GameState) (int, core.ItemKind, bool) {
-	tileIdx := inventoryHitRect(pt)
-	if tileIdx < 0 {
-		return -1, core.ItemNone, false
-	}
-	kind := lastEquipLayout.InventoryEntries[tileIdx].Kind
-	for j := range g.Inventory {
-		if g.Inventory[j].Kind == kind && g.Inventory[j].Count > 0 {
-			return j, kind, true
-		}
-	}
-	return -1, core.ItemNone, false
-}
-
-// EquipPanelInventoryAreaHit reports whether `pt` is inside the
-// inventory strip's overall bounds (the gutter, not a specific tile).
-// Used by the input layer to detect "dropped on the inventory area" =
-// unequip, even when the cursor doesn't land on a specific tile.
-func EquipPanelInventoryAreaHit(pt rl.Vector2) bool {
-	return inventoryHitRect(pt) >= 0
+// EquipPanelClickOutsidePicker reports whether `pt` falls outside the
+// open picker card — the signal to dismiss the sub-modal on a stray
+// click. False when no picker was drawn this frame.
+func EquipPanelClickOutsidePicker(pt rl.Vector2) bool {
+	return lastEquipLayout.PickerValid && !rl.CheckCollisionPointRec(pt, lastEquipLayout.PickerBounds)
 }
 
 func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) {
@@ -479,57 +431,33 @@ func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) 
 		return
 	}
 
-	// Split the body into two regions: top for member columns, bottom
-	// for the inventory strip, with a small gap. If the body is too
-	// short to fit both at the canonical strip height + the minimum
-	// column region, the strip shrinks instead of the columns.
-	stripHeight := equipStripHeight
-	if body.Height < stripHeight+equipMinColRegion {
-		stripHeight = body.Height * 0.32
-	}
-	colsRegion := rl.NewRectangle(body.X, body.Y, body.Width, body.Height-stripHeight-equipStripGap)
-	stripRegion := rl.NewRectangle(body.X, body.Y+colsRegion.Height+equipStripGap, body.Width, stripHeight)
-
-	cols := memberColumnLayout(colsRegion, len(g.Party))
+	// One card per member, each listing its five equip slots as rows.
+	// No inventory strip — choosing gear happens in the slot picker
+	// sub-modal (drawEquipPicker), opened by Confirm / a click on a slot.
+	cols := memberColumnLayout(body, len(g.Party))
 	slotRowH := equipSlotRowHeight
 	totalSlots := len(g.Party) * int(core.EquipSlotCount)
 	lastEquipLayout.SlotRects = make([]rl.Rectangle, 0, totalSlots)
-	lastEquipLayout.SlotPartyIdx = make([]int, 0, totalSlots)
+	lastEquipLayout.SlotMember = make([]int, 0, totalSlots)
 	lastEquipLayout.SlotIdx = make([]core.EquipSlotIndex, 0, totalSlots)
 
 	for i, m := range g.Party {
-		highlight := i == g.PanelsRowCursor
-		contentY := drawPartyMemberCardHeader(font, m, cols[i], highlight)
+		memberHL := i == g.PanelsRowCursor
+		contentY := drawPartyMemberCardHeader(font, m, cols[i], memberHL)
 		innerX, innerW := memberCardInner(cols[i])
 
 		for s := core.EquipSlotIndex(0); s < core.EquipSlotCount; s++ {
 			rowY := contentY + float32(int(s))*slotRowH
 			slotRect := rl.NewRectangle(float32(innerX), rowY, float32(innerW), slotRowH-8)
 			lastEquipLayout.SlotRects = append(lastEquipLayout.SlotRects, slotRect)
-			lastEquipLayout.SlotPartyIdx = append(lastEquipLayout.SlotPartyIdx, i)
+			lastEquipLayout.SlotMember = append(lastEquipLayout.SlotMember, i)
 			lastEquipLayout.SlotIdx = append(lastEquipLayout.SlotIdx, s)
 
-			// Compatible-target highlight: when a drag is active, slots
-			// the held item can land on take a gilt outline. Resting
-			// state is the standard glass bezel.
-			compatible := false
-			if g.EquipDrag.Source != core.EquipDragSourceNone {
-				compatible = core.CanEquipInSlot(g.EquipDrag.Kind, s)
-				// Suppress highlight on the drag origin so the source
-				// slot doesn't visually accept-itself.
-				if g.EquipDrag.Source == core.EquipDragSourceSlot &&
-					g.EquipDrag.PartyIndex == i && g.EquipDrag.SlotIndex == s {
-					compatible = false
-				}
-			}
-			bg := fadeColor(glassDeep, 0.55)
-			if compatible {
-				bg = fadeColor(glassWarm, 0.65)
-			}
-			drawGlassPane(int32(slotRect.X), int32(slotRect.Y), int32(slotRect.Width), int32(slotRect.Height), bg)
-			if compatible {
-				rl.DrawRectangleLinesEx(slotRect, 1.5, giltBright)
-			}
+			// The focused slot (cursored member + slot row, picker
+			// closed) takes the shared focusable-row treatment so the
+			// player sees which slot Confirm will open the picker for.
+			focused := memberHL && int(s) == g.EquipSlotCursor && !g.EquipPickerOpen
+			drawFocusableRow(slotRect, focused)
 
 			equippedKind := m.Equipped[s]
 			filled := equippedKind != core.ItemNone
@@ -551,155 +479,138 @@ func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) 
 		}
 	}
 
-	// Inventory strip: tile every equippable item in the party
-	// inventory. Consumables (cheese / jerky) stay off this strip —
-	// they belong on the Items tab. Hit rects are stored so the
-	// input layer can route drag-starts off these tiles.
-	drawCard(int32(stripRegion.X), int32(stripRegion.Y), int32(stripRegion.Width), int32(stripRegion.Height), surfacePrimary, borderSoft, borderSoft)
-	drawTextWithShadow(font, "EQUIPMENT INVENTORY", stripRegion.X+10, stripRegion.Y+8, FontSmall, textMuted)
-
-	entries := equippableInventoryEntries(g.Inventory)
-	lastEquipLayout.InventoryEntries = entries
-	lastEquipLayout.InventoryRects = make([]rl.Rectangle, 0, len(entries))
-
-	tileW := equipInventoryTileW
-	tileH := equipInventoryTileH
-	tileGap := equipInventoryTileGap
-	tileX := stripRegion.X + 10
-	tileY := stripRegion.Y + 24
-	overflow := 0
-	for entryIdx, entry := range entries {
-		if tileX+tileW > stripRegion.X+stripRegion.Width-10 {
-			tileX = stripRegion.X + 10
-			tileY += tileH + tileGap
-			if tileY+tileH > stripRegion.Y+stripRegion.Height-4 {
-				// Out of vertical room — count what's left so the
-				// player sees an honest "+N more" footer rather than
-				// silently truncating to whatever fit.
-				overflow = len(entries) - entryIdx
-				break
-			}
-		}
-		rect := rl.NewRectangle(tileX, tileY, tileW, tileH)
-		lastEquipLayout.InventoryRects = append(lastEquipLayout.InventoryRects, rect)
-
-		bg := fadeColor(glassMid, 0.85)
-		// Highlight inventory tiles when the cursor is over them
-		// during a drag-from-slot (so the player sees where the
-		// dropped item will go).
-		if g.EquipDrag.Source == core.EquipDragSourceSlot {
-			if rl.CheckCollisionPointRec(rl.GetMousePosition(), rect) {
-				bg = fadeColor(glassWarm, 0.85)
-			}
-		}
-		drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), bg)
-		def := core.ItemInfo(entry.Kind)
-		slotIconForKind(def.Slot)(rect.X+18, rect.Y+rect.Height/2, 12, giltBright)
-		drawTextWithShadow(font, def.Name, rect.X+42, rect.Y+12, FontSmall, textPrimary)
-		if entry.Count > 1 {
-			drawTextWithShadow(font, "x"+strconv.Itoa(entry.Count), rect.X+42, rect.Y+36, FontSmall, textHint)
-		}
-		// Bonus summary on the second line.
-		bonus := equipBonusSummary(def)
-		if bonus != "" {
-			drawTextWithShadow(font, bonus, rect.X+42, rect.Y+rect.Height-22, FontSmall, inkAccent)
-		}
-		tileX += tileW + tileGap
-	}
-	if len(entries) == 0 {
-		drawTextWithShadow(font, "No equipment held. Pickups from chests / steals land here.",
-			stripRegion.X+10, stripRegion.Y+stripRegion.Height/2-6, FontSmall, textHint)
-	}
-	if overflow > 0 {
-		// Honest truncation marker — drawn at the right edge of the
-		// strip's header so it doesn't compete with the visible tiles
-		// for click hit-tests. The hidden items are unreachable via
-		// drag for now; a scroll affordance is the obvious follow-up.
-		label := "+" + strconv.Itoa(overflow) + " more (not shown)"
-		m := rl.MeasureTextEx(font, label, FontSmall, 1)
-		drawTextWithShadow(font, label,
-			stripRegion.X+stripRegion.Width-m.X-10,
-			stripRegion.Y+8, FontSmall, inkAccent)
-	}
-
-	// Keyboard/controller focus outline — drawn only when the cursor
-	// (not the mouse) is driving the panel. Brighter + thicker than the
-	// drag's compatible-slot outline so "where am I" reads distinctly
-	// from "where can this land."
-	focusRect, focusValid := equipFocusRect(g)
-	if focusValid {
-		rl.DrawRectangleLinesEx(focusRect, 2.5, giltBright)
-	}
-
-	// Drag overlay — paints the held item as a tooltip. Anchored to the
-	// focused cell when the cursor is driving, else trailing the mouse.
-	if g.EquipDrag.Source != core.EquipDragSourceNone {
-		drawEquipDragGhost(g, font, equipGhostAnchor(focusRect, focusValid, body))
-	}
-
-	footer := "Mouse: drag between strip and slots.  Pad/keys: move cursor, Confirm lifts/places, Back cancels.  Drop on the strip to unequip."
+	footer := "Up/Down slot   Left/Right member   Confirm: change gear   (or click a slot)"
 	drawTextWithShadow(font, footer, body.X, body.Y+body.Height-18, FontSmall, textHint)
 }
 
-// equipFocusRect returns the rectangle of the keyboard/controller focus
-// cell (ok=false when the cursor is inactive or the cached layout
-// doesn't yet describe the focused cell). Reads the same per-frame hit
-// rects the mouse path uses so the outline lands exactly on the painted
-// cell.
-func equipFocusRect(g core.GameState) (rl.Rectangle, bool) {
-	if !g.EquipCursorActive {
-		return rl.Rectangle{}, false
+// drawEquipPicker paints the slot's item-picker sub-modal: a smaller
+// card centered on screen, drawn ON TOP of the panels overlay, listing
+// the inventory items eligible for the focused slot plus an "Unequip"
+// row when the slot is filled. Mirrors the Items-menu feel — one row
+// per option, the cursored row gilded. The row rects + card bounds are
+// cached on lastEquipLayout so a click can pick a row (or dismiss when
+// it lands outside the card).
+func drawEquipPicker(g core.GameState, assets Resources) {
+	font := assets.Font()
+	member := g.PanelsRowCursor
+	if member < 0 || member >= len(g.Party) {
+		return
 	}
-	if g.EquipCursor.OnInventory {
-		i := g.EquipCursor.InvTile
-		if i >= 0 && i < len(lastEquipLayout.InventoryRects) {
-			return lastEquipLayout.InventoryRects[i], true
-		}
-		return rl.Rectangle{}, false
-	}
-	si := g.EquipCursor.Member*int(core.EquipSlotCount) + int(g.EquipCursor.Slot)
-	if si >= 0 && si < len(lastEquipLayout.SlotRects) {
-		return lastEquipLayout.SlotRects[si], true
-	}
-	return rl.Rectangle{}, false
-}
+	slot := core.EquipSlotIndex(g.EquipSlotCursor)
+	rows := core.EquipPickerRows(&g, member, slot)
 
-// equipGhostAnchor returns the top-left for the held-item ghost. When
-// the cursor owns the panel it floats just above the focused cell
-// (flipping below / clamping left if that would spill out of the body);
-// otherwise it trails the mouse like a classic drag tooltip.
-func equipGhostAnchor(focus rl.Rectangle, focusValid bool, body rl.Rectangle) rl.Vector2 {
-	if focusValid {
-		pos := rl.NewVector2(focus.X+focus.Width-equipDragGhostW, focus.Y-equipDragGhostH-6)
-		if pos.Y < body.Y {
-			pos.Y = focus.Y + focus.Height + 6
-		}
-		if pos.X < body.X {
-			pos.X = focus.X
-		}
-		return pos
+	const rowH = float32(46)
+	const headerH = float32(70)
+	const footerH = float32(34)
+	visibleRows := len(rows)
+	if visibleRows < 1 {
+		visibleRows = 1 // reserve a line for the "no eligible items" note
 	}
-	m := rl.GetMousePosition()
-	return rl.NewVector2(m.X+10, m.Y+4)
-}
+	_, sh := screenSizeF()
+	cardW := float32(440)
+	cardH := headerH + float32(visibleRows)*rowH + footerH
+	if maxH := sh * 0.78; cardH > maxH {
+		cardH = maxH
+	}
 
-// equippableInventoryEntries filters g.Inventory down to items whose
-// definition has a real equipment slot. Order preserves the slice
-// order so the player's hand-picked inventory ordering stays stable
-// across frames.
-func equippableInventoryEntries(inv []core.ItemStack) []equipInventoryEntry {
-	out := make([]equipInventoryEntry, 0, len(inv))
-	for _, st := range inv {
-		if st.Count <= 0 {
+	// Veil the overlay behind + draw the centered card via the shared
+	// modal scaffold (same veil tone + corner filigree as the title /
+	// pause / door modals), then lay the picker out in the returned rect.
+	card := drawVeiledCard(int32(cardW), int32(cardH), borderActive, woodAccent, woodAccent)
+
+	title := core.SlotIndexLabel(slot) + " — " + g.Party[member].Name
+	drawTextWithShadow(font, title, card.X+18, card.Y+14, FontHeading, textPrimary)
+	curKind := g.Party[member].Equipped[slot]
+	curText := "Equipped: —"
+	if curKind != core.ItemNone {
+		curText = "Equipped: " + core.ItemInfo(curKind).Name
+	}
+	drawTextWithShadow(font, curText, card.X+18, card.Y+46, FontSmall, textMuted)
+
+	lastEquipLayout.PickerRects = make([]rl.Rectangle, 0, len(rows))
+	lastEquipLayout.PickerBounds = card
+	lastEquipLayout.PickerValid = true
+
+	if len(rows) == 0 {
+		drawTextWithShadow(font, "No eligible items in inventory.", card.X+18, card.Y+headerH+8, FontBody, textHint)
+	}
+	listY := card.Y + headerH
+	for i, row := range rows {
+		ry := listY + float32(i)*rowH
+		rect := rl.NewRectangle(card.X+10, ry, card.Width-20, rowH-6)
+		lastEquipLayout.PickerRects = append(lastEquipLayout.PickerRects, rect)
+		focused := i == g.EquipPickerCursor
+		drawFocusableRow(rect, focused)
+		if row.Unequip {
+			drawTextWithShadow(font, "Unequip", rect.X+14, rect.Y+rect.Height/2-10, FontBody, inkAccent)
 			continue
 		}
-		def, ok := core.ItemInfoOk(st.Kind)
-		if !ok || def.Slot == core.SlotNone {
-			continue
+		def := core.ItemInfo(row.Kind)
+		slotIconForKind(def.Slot)(rect.X+18, rect.Y+rect.Height/2, 11, giltBright)
+		name := def.Name
+		if row.Count > 1 {
+			name += "  x" + strconv.Itoa(row.Count)
 		}
-		out = append(out, equipInventoryEntry{Kind: st.Kind, Count: st.Count})
+		drawTextWithShadow(font, name, rect.X+38, rect.Y+4, FontSmall, textPrimary)
+		if bonus := equipBonusSummary(def); bonus != "" {
+			drawTextWithShadow(font, bonus, rect.X+38, rect.Y+rect.Height-20, FontSmall, inkAccent)
+		}
 	}
-	return out
+
+	hint := "Confirm: equip   Back: cancel"
+	drawTextWithShadow(font, hint, card.X+18, card.Y+card.Height-26, FontSmall, textHint)
+}
+
+// drawUseTargetPicker paints the shared ally-target sub-modal for the
+// out-of-battle "use" actions (a consumable from the Items tab, a heal
+// skill from the Skills tab). A small veiled card lists the living party
+// members with their HP; the focused row is the recipient Confirm will
+// apply to. Title names what's being used. Keyboard/controller-driven
+// (UseTargetCursor) — no mouse hit rects, since nothing here was asked
+// to be clickable and the overlay stays controller-first.
+func drawUseTargetPicker(g core.GameState, assets Resources) {
+	font := assets.Font()
+	living := core.LivingPartyIndices(g.Party)
+
+	title := "Use"
+	switch {
+	case g.UsePendingItem != core.ItemNone:
+		title = "Use " + core.ItemInfo(g.UsePendingItem).Name
+	case g.UsePendingSkill != core.SkillNone:
+		title = "Cast " + core.SkillName(g.UsePendingSkill)
+	}
+
+	const rowH = float32(44)
+	const headerH = float32(56)
+	const footerH = float32(32)
+	visibleRows := len(living)
+	if visibleRows < 1 {
+		visibleRows = 1
+	}
+	cardW := float32(380)
+	cardH := headerH + float32(visibleRows)*rowH + footerH
+	card := drawVeiledCard(int32(cardW), int32(cardH), borderActive, woodAccent, woodAccent)
+
+	drawTextWithShadow(font, title, card.X+18, card.Y+16, FontHeading, textPrimary)
+	if len(living) == 0 {
+		drawTextWithShadow(font, "No one can be healed.", card.X+18, card.Y+headerH, FontBody, textHint)
+	}
+	listY := card.Y + headerH
+	for i, mi := range living {
+		ry := listY + float32(i)*rowH
+		rect := rl.NewRectangle(card.X+10, ry, card.Width-20, rowH-6)
+		drawFocusableRow(rect, i == g.UseTargetCursor)
+		m := g.Party[mi]
+		classCol := partyClassPresentationFor(m.Class).turnColor
+		drawClassGlyph(rect.X+20, rect.Y+rect.Height/2, 9, m.Class, classCol)
+		drawTextWithShadow(font, m.Name, rect.X+40, rect.Y+rect.Height/2-10, FontBody, textPrimary)
+		hp := "HP " + formatBarValue(m.HP, m.MaxHP)
+		hm := rl.MeasureTextEx(font, hp, FontSmall, 1)
+		drawTextWithShadow(font, hp, rect.X+rect.Width-hm.X-12, rect.Y+rect.Height/2-8, FontSmall, hpFillColor(m.HP, m.MaxHP))
+	}
+
+	hint := "Confirm: use   Back: cancel"
+	drawTextWithShadow(font, hint, card.X+18, card.Y+card.Height-26, FontSmall, textHint)
 }
 
 // equipBonusSummary returns the single-line "STR +2" / "Armor +1" /
@@ -708,8 +619,8 @@ func equippableInventoryEntries(inv []core.ItemStack) []equipInventoryEntry {
 // equipBonusSummaryCache memoizes equipBonusSummary by item kind. The
 // summary is built from the immutable ItemDefinition, so it's computed
 // once per kind rather than rebuilding a []string + concatenated string
-// for every visible equipment tile (and the drag ghost) every frame the
-// Equipment tab is open. The "" result for no-bonus items is cached too.
+// for every visible picker row every frame the Equipment tab is open.
+// The "" result for no-bonus items is cached too.
 var equipBonusSummaryCache = map[core.ItemKind]string{}
 
 func equipBonusSummary(def core.ItemDefinition) string {
@@ -754,23 +665,6 @@ func equipBonusSummary(def core.ItemDefinition) string {
 	}
 	equipBonusSummaryCache[def.Kind] = out
 	return out
-}
-
-// drawEquipDragGhost paints the held item as a translucent tile at the
-// given top-left position. Painted last so it floats above the rest of
-// the panel. `pos` is the mouse (drag) or the focused cell (cursor),
-// resolved by equipGhostAnchor.
-func drawEquipDragGhost(g core.GameState, font rl.Font, pos rl.Vector2) {
-	def := core.ItemInfo(g.EquipDrag.Kind)
-	rect := rl.NewRectangle(pos.X, pos.Y, equipDragGhostW, equipDragGhostH)
-	drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), fadeColor(glassWarm, 0.95))
-	rl.DrawRectangleLinesEx(rect, 1.5, giltBright)
-	slotIconForKind(def.Slot)(rect.X+16, rect.Y+rect.Height/2, 11, giltBright)
-	drawTextWithShadow(font, def.Name, rect.X+34, rect.Y+8, FontSmall, textPrimary)
-	bonus := equipBonusSummary(def)
-	if bonus != "" {
-		drawTextWithShadow(font, bonus, rect.X+34, rect.Y+26, FontSmall, inkAccent)
-	}
 }
 
 // drawSlotIconSword paints a small upright longsword sigil for the
@@ -970,11 +864,17 @@ func measurePanelsItemHealLabel(font rl.Font, label string) rl.Vector2 {
 }
 
 // drawPanelsSkills renders the Skills tab as one card per party
-// member, mirroring the Stats / Equipment layout. Inside each card
-// the member's learned skills stack as compact rows: name, MP cost
-// chip, short description below. The class skill currently armed for
-// battle (m.SkillCursor) gets a gilt left spine so the player sees
-// at a glance what the Skill action will fire.
+// member, mirroring the Stats / Equipment layout. Each card shows the
+// member's spendable SkillPoints, then stacks its learned skills as
+// rows: name + MP cost chip, a tier-progress pip strip, the next
+// purchasable upgrade's label + SP price (or "MAXED"), and a blurb of
+// what that purchase grants.
+//
+// The only row highlight is the purchase cursor: on the cursored
+// member, the focused skill row (PanelsSkillRow) draws a bright gilt
+// outline so the player sees which row Confirm will buy. (The in-battle
+// "armed skill" tint was removed — it read as a stray highlight here,
+// where the tab is about upgrading skills, not picking the loadout.)
 func drawPanelsSkills(g core.GameState, assets Resources, body rl.Rectangle) {
 	font := assets.Font()
 	if len(g.Party) == 0 {
@@ -986,42 +886,86 @@ func drawPanelsSkills(g core.GameState, assets Resources, body rl.Rectangle) {
 		contentY := drawPartyMemberCardHeader(font, m, cols[i], highlight)
 		innerX, innerW := memberCardInner(cols[i])
 
+		// Skill-point balance — the currency the tree spends. Bright
+		// when there's something to spend, muted at zero so a "nothing
+		// to do here" card reads quietly.
+		spText := strconv.Itoa(m.SkillPoints) + " SP"
+		spCol := textMuted
+		if m.SkillPoints > 0 {
+			spCol = inkAccent
+		}
+		drawTextWithShadow(font, "SKILL POINTS", innerX, contentY, FontSmall, textMuted)
+		sm := rl.MeasureTextEx(font, spText, FontSmall, 1)
+		drawTextWithShadow(font, spText, innerX+innerW-sm.X, contentY, FontSmall, spCol)
+		contentY += 26
+
 		skills := core.PartySkills(m)
-		rowH := float32(66)
+		rowH := float32(80)
 		for j, s := range skills {
+			if s == core.SkillNone {
+				continue
+			}
 			rowY := contentY + float32(j)*rowH
 			if rowY+rowH-6 > cols[i].Y+cols[i].Height {
 				break
 			}
-			armed := j == m.SkillCursor
+			focused := highlight && j == g.PanelsSkillRow
 
-			// Soft inset row. The armed skill gets a subtle warm
-			// tint so the eye lands on the active loadout.
-			rowBG := fadeColor(glassDeep, 0.55)
-			if armed {
-				rowBG = core.MixColor(rowBG, glassWarm, 0.65)
-			}
-			drawGlassPane(int32(innerX), int32(rowY), int32(innerW), int32(rowH-8), rowBG)
-			if armed {
-				rl.DrawRectangle(int32(innerX)+2, int32(rowY)+4, 3, int32(rowH-16), giltBright)
-			}
+			// Soft inset row — uniform for every skill; the purchase
+			// cursor is the only accent (shared focusable-row look).
+			drawFocusableRow(rl.NewRectangle(innerX, rowY, innerW, rowH-8), focused)
 
-			// Name on the left, MP cost chip on the right of the
-			// header line.
-			nameCol := textPrimary
-			if !armed {
-				nameCol = textMuted
-			}
-			drawTextWithShadow(font, core.SkillName(s), innerX+12, rowY+6, FontBody, nameCol)
-			cost := core.SkillCost(s)
-			if cost > 0 {
+			// Line 1: name (left) + MP cost chip (right).
+			drawTextWithShadow(font, core.SkillName(s), innerX+12, rowY+6, FontBody, textPrimary)
+			if cost := core.SkillCost(s); cost > 0 {
 				costText := skillCostMPLabel(cost)
 				cm := rl.MeasureTextEx(font, costText, FontSmall, 1)
 				drawTextWithShadow(font, costText, innerX+innerW-cm.X-12, rowY+8, FontSmall, inkAccent)
 			}
-			// Description on the second line of the row.
-			drawTextWithShadow(font, core.SkillDescription(s), innerX+12, rowY+34, FontSmall, textHint)
+
+			// Line 2: tier pips (left) + next-upgrade affordance (right).
+			tier := core.SkillTierOf(&m, s)
+			drawSkillTierPips(innerX+12, rowY+38, tier, core.MaxSkillTier)
+			var blurb string
+			if up, hasNext := core.SkillNextTierUpgrade(&m, s); hasNext {
+				// Bright gilt when the member can afford it, muted when
+				// they're short the points.
+				buyCol := giltBright
+				if m.SkillPoints < up.Cost {
+					buyCol = textMuted
+				}
+				buyText := up.Label + "   " + strconv.Itoa(up.Cost) + " SP"
+				bm := rl.MeasureTextEx(font, buyText, FontSmall, 1)
+				drawTextWithShadow(font, buyText, innerX+innerW-bm.X-12, rowY+32, FontSmall, buyCol)
+				blurb = up.Description
+			} else {
+				maxText := "MAXED"
+				mm := rl.MeasureTextEx(font, maxText, FontSmall, 1)
+				drawTextWithShadow(font, maxText, innerX+innerW-mm.X-12, rowY+32, FontSmall, fadeColor(giltBright, 0.8))
+				blurb = core.SkillDescription(s)
+			}
+
+			// Line 3: what the next purchase grants (or, once maxed,
+			// the base skill blurb so the row still reads as flavor).
+			drawTextWithShadow(font, blurb, innerX+12, rowY+56, FontSmall, textHint)
 		}
+	}
+}
+
+// drawSkillTierPips paints `total` diamond pips left-to-right at
+// (x, y) — the first `filled` in bright gilt, the rest as dim hollows —
+// giving the Skills tab a compact "2 of 3 upgrades bought" read for a
+// skill's investment.
+func drawSkillTierPips(x, y float32, filled, total int) {
+	const pipR = float32(5)
+	const pipGap = float32(16)
+	for i := 0; i < total; i++ {
+		cx := x + pipR + float32(i)*pipGap
+		col := fadeColor(giltBright, 0.22)
+		if i < filled {
+			col = giltBright
+		}
+		drawDiamondPip(cx, y, pipR, col)
 	}
 }
 
@@ -1059,25 +1003,29 @@ func drawPanelsMap(g core.GameState, assets Resources, body rl.Rectangle) {
 		for localX := 0; localX < cellsX; localX++ {
 			mx := startX + localX
 			mz := startZ + localZ
+			// Derive each cell's pixel rect from the difference of
+			// consecutive truncated edges (this cell's left, the next
+			// cell's left) rather than truncating origin AND size
+			// independently. With a fractional cellPx the old
+			// `pw := int32(cellPx)` left 1px seams that opened and
+			// closed across the grid as the fraction accumulated; tiling
+			// edge-to-edge guarantees neighbours abut with no gap or
+			// overlap, so the grid always reads as a solid sheet.
 			px := int32(mapX + float32(localX)*cellPx)
 			py := int32(mapY + float32(localZ)*cellPx)
-			pw := int32(cellPx)
+			pw := int32(mapX+float32(localX+1)*cellPx) - px
+			ph := int32(mapY+float32(localZ+1)*cellPx) - py
 			if pw < 1 {
 				pw = 1
 			}
-			if !m.InBounds(mx, mz) {
-				rl.DrawRectangle(px, py, pw, pw, mapTileFogColor)
-				continue
+			if ph < 1 {
+				ph = 1
 			}
-			// Unvisited tiles render the same flat darkness as out-of-
-			// bounds — the map only reveals what the player has stepped
-			// inside the SightRadius window of, not the underlying
-			// authored layout.
-			if !visitedAt(g, mx, mz) {
-				rl.DrawRectangle(px, py, pw, pw, mapTileFogColor)
-				continue
-			}
-			rl.DrawRectangle(px, py, pw, pw, minimapTileColor(m.Materials, m.TileAt(mx, mz)))
+			// Unvisited / out-of-bounds tiles render flat fog; revealed
+			// tiles show their material color. Shared fog rule with the
+			// corner minimap via mapCellFillColor so the two map surfaces
+			// can't drift on what lifts the fog.
+			rl.DrawRectangle(px, py, pw, ph, mapCellFillColor(m, g, mx, mz))
 		}
 	}
 
@@ -1224,6 +1172,18 @@ func visitedAt(g core.GameState, x, z int) bool {
 		return false
 	}
 	return g.Visited[z][x]
+}
+
+// mapCellFillColor is the shared fog-of-war fill rule for both the corner
+// minimap and the panels Map tab: a tile reveals its material color only
+// once it's in bounds AND the player has stepped within reveal range of
+// it; otherwise it paints flat fog (the same fill as out-of-bounds).
+// Single source so the two map surfaces can't drift on what lifts the fog.
+func mapCellFillColor(m core.AreaDefinition, g core.GameState, x, z int) rl.Color {
+	if m.InBounds(x, z) && visitedAt(g, x, z) {
+		return minimapTileColor(m.Materials, m.TileAt(x, z))
+	}
+	return mapTileFogColor
 }
 
 // drawPanelsMapArrow paints the player marker on the Map tab — a small

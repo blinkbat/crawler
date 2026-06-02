@@ -49,6 +49,10 @@ func PhaseName(p TimeOfDay) string {
 		return "Evening"
 	case Midnight:
 		return "Midnight"
+	default:
+		// Parallel to the TimeOfDayCount-locked timeProfiles array: a new
+		// phase that forgets a label here fails loudly instead of showing
+		// "?" in the HUD.
+		panic("core: PhaseName missing case for TimeOfDay")
 	}
-	return "?"
 }

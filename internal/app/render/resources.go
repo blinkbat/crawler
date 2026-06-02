@@ -143,6 +143,10 @@ func LoadResources() (r Resources) {
 	fieldMat.floorDarkModel = loadFloorModel(makeDarkGrassPixels(128, 128), r.lighting.shader)
 	fieldMat.hasFloorVariant = true
 	r.materials[core.MaterialField] = fieldMat
+	// Parallel to assertDecorCoverage / assertPropCoverage: every
+	// core.MaterialSet must have a loaded worldMaterial. Without this a
+	// new material would silently fall back to Field in worldMaterial().
+	assertMaterialCoverage(r.materials)
 
 	r.skyTexture = loadTexture(makeSkyPixels(1024, 512), 1024, 512, rl.FilterTrilinear)
 	rl.GenTextureMipmaps(&r.skyTexture)
@@ -666,6 +670,20 @@ func (r Resources) worldMaterial(material core.MaterialSet) worldMaterialResourc
 	return r.materials[core.MaterialField]
 }
 
+// assertMaterialCoverage panics unless every core.MaterialSet has a loaded
+// worldMaterial entry. Mirrors the assertDecorCoverage / assertPropCoverage
+// init-time contracts AGENTS.md documents so a new material can't silently
+// render as Field via worldMaterial's fallback.
+func assertMaterialCoverage(materials map[core.MaterialSet]worldMaterialResources) {
+	for i := 0; i < int(core.MaterialCount); i++ {
+		mat := core.MaterialSet(i)
+		if _, ok := materials[mat]; !ok {
+			name, _ := core.MaterialName(mat)
+			panic("render: material " + name + " has no worldMaterialResources — load it in NewResources")
+		}
+	}
+}
+
 // lightingFor picks the per-area lighting profile. Profiles are package-level
 // constants in lighting.go — this just routes by material.
 func lightingFor(material core.MaterialSet) lightingProfile {
@@ -868,7 +886,16 @@ func loadHUDFont() (rl.Font, bool) {
 		// Heading (26) and noticeably blurry at Title (36).
 		font := rl.LoadFontEx(path, 64, hudFontCodepoints)
 		if rl.IsFontValid(font) {
-			rl.SetTextureFilter(font.Texture, rl.FilterBilinear)
+			// Mipmaps + trilinear so the small UI sizes (Tiny 13 / Small
+			// 16 / Body 20) downsample from the 64 pt atlas smoothly
+			// instead of aliasing into hard, "pixely" edges — plain
+			// bilinear only samples the base level's 2×2 neighbourhood,
+			// which shimmers and jaggies under heavy minification. Mirrors
+			// the sky texture's mipmap+trilinear setup above; the 64 pt
+			// bake's glyph padding absorbs the minor cross-glyph bleed the
+			// lower mips introduce.
+			rl.GenTextureMipmaps(&font.Texture)
+			rl.SetTextureFilter(font.Texture, rl.FilterTrilinear)
 			return font, true
 		}
 	}

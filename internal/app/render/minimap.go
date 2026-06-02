@@ -44,7 +44,7 @@ func stepCounterText(modStep int) string {
 // Footer is the time-of-day phase bar beneath the grid.
 const (
 	minimapCell      = int32(12)
-	minimapViewCells = int32(13)
+	minimapViewCells = int32(17) // odd so the player sits dead-center; wider window shows more surrounding area
 	minimapHeader    = int32(26)
 	minimapFooter    = int32(28) // time-of-day strip beneath the grid
 	minimapPanelW    = minimapViewCells*minimapCell + 16
@@ -98,11 +98,9 @@ func drawMinimap(m core.AreaDefinition, g core.GameState, assets Resources) {
 			// Unrevealed tiles paint the same flat fog as out-of-bounds
 			// so the player can't read the layout through the haze —
 			// the minimap is strictly "what you've walked on" until a
-			// step lands the tile inside the reveal radius.
-			col := mapTileFogColor
-			if m.InBounds(mapX, mapZ) && visitedAt(g, mapX, mapZ) {
-				col = minimapTileColor(m.Materials, m.TileAt(mapX, mapZ))
-			}
+			// step lands the tile inside the reveal radius. Shared fog
+			// rule with the panels Map tab via mapCellFillColor.
+			col := mapCellFillColor(m, g, mapX, mapZ)
 			rl.DrawRectangle(gridX+localX*cell, gridY+localZ*cell, cell-1, cell-1, col)
 		}
 	}

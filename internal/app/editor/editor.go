@@ -502,8 +502,8 @@ type State struct {
 	// shouldn't reset the user's tuning work.
 	soundParams    soundParamSet
 	soundName      string
-	soundCursor    int // row cursor inside the sound modal
-	soundLeftPanel int // 0 = synth params, 1 = saved-sound list, 2 = cue assignments
+	soundCursor    int        // row cursor inside the sound modal
+	soundLeftPanel soundPanel // which column of the sound modal has focus
 	// soundDeleteArmed is the saved-sound name awaiting a confirm press —
 	// the first ×/X arms it, the second (same name) deletes. Guards the
 	// irreversible on-disk .wav delete against a single misclick. Cleared

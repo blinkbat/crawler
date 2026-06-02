@@ -327,6 +327,16 @@ func QuitPressed() bool {
 	return rl.IsKeyPressed(rl.KeyQ) || padPressed(rl.GamepadButtonMiddleLeft) // Select / Share
 }
 
+// UsePressed is the "use / cast" edge for the panels overlay's
+// out-of-battle actions: using a consumable on the Items tab and casting
+// a heal skill on the Skills tab (where Confirm is already spent on
+// buying tier upgrades, so the use action needs its own button). Bound
+// to keyboard F and the gamepad Square/X face button — the one AGENTS.md
+// flags as intentionally unbound, so claiming it here invents no combo.
+func UsePressed() bool {
+	return rl.IsKeyPressed(rl.KeyF) || padPressed(rl.GamepadButtonRightFaceLeft) // Square / X
+}
+
 // DebugFleePressed is the edge that abandons an active battle when the
 // debug "Easy Battle Quit" toggle is on. Bound to Backspace plus the
 // gamepad Select/Share button — kept off the action-menu's confirm /
@@ -459,9 +469,9 @@ func LookStick() (float32, float32) {
 }
 
 // --- Mouse / pointer (secondary input) ---------------------------------------
-// Gamepad-first: the mouse drives only the Equipment-tab drag-and-drop and
-// right-drag free-look today, but those reads still funnel through here so no
-// call site touches raylib directly and "is the mouse driving?" has one answer.
+// Gamepad-first: the mouse drives only the Equipment-tab slot-picker clicks
+// and right-drag free-look today, but those reads still funnel through here so
+// no call site touches raylib directly and "is the mouse driving?" has one answer.
 
 // PointerPos is the current mouse position in screen space.
 func PointerPos() rl.Vector2 { return rl.GetMousePosition() }
@@ -473,11 +483,10 @@ func PointerMoved() bool {
 	return d.X != 0 || d.Y != 0
 }
 
-// DragStartPressed / DragHeld / DragReleased wrap the left mouse button for
-// the Equipment-tab drag-and-drop loop.
-func DragStartPressed() bool { return rl.IsMouseButtonPressed(rl.MouseLeftButton) }
-func DragHeld() bool         { return rl.IsMouseButtonDown(rl.MouseLeftButton) }
-func DragReleased() bool     { return rl.IsMouseButtonReleased(rl.MouseLeftButton) }
+// ClickPressed reports a fresh left-mouse click. The Equipment-tab slot
+// picker uses it to register a click on a slot or picker row; routing it
+// through the input package keeps the raylib mouse read in one place.
+func ClickPressed() bool { return rl.IsMouseButtonPressed(rl.MouseLeftButton) }
 
 // LookDragActive reports the right-mouse free-look hold; LookMouseDelta is its
 // per-frame motion. The mouse counterpart of LookStick.

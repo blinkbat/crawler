@@ -1037,6 +1037,10 @@ func clearBattleResidual(g *core.GameState) {
 	// damageEnemy already releases on the killing blow; this catches
 	// every other exit (loss recovery, early-exit defensive path).
 	core.ReleaseAllIngested(g.Party)
+	// Clear the combat-only statuses (Sleep / Stun / Webbed / Confused /
+	// Defending) so they don't linger into exploration. Poison and death
+	// intentionally persist past the fight — see ClearPartyTransientStatuses.
+	core.ClearPartyTransientStatuses(g.Party)
 	// Drop any queued VFX intents — a stale "spawn ember on enemy 2"
 	// would otherwise materialise in the wrong scene on the next
 	// render. Also signal the render layer to clear its particle
@@ -1066,16 +1070,15 @@ func clearBattleResidual(g *core.GameState) {
 	g.Battle.SequencePulseIndex = -1
 	g.Battle.EnemyAttacker = -1
 	g.Battle.EnemyAttackCursor = -1
+	g.Battle.EnemyPendingSkill = core.SkillNone
 	resetBattleAction(g)
 }
 
 func recoverFromLoss(g *core.GameState) {
+	// ResetGameState now requests the VFX reset itself (so the in-menu
+	// Restart path gets it too), which drops the lost fight's formation-
+	// relative particles that would otherwise ghost in the field.
 	core.ResetGameState(g)
-	// ResetGameState zeroed the VFX-reset flag, so re-request it here —
-	// otherwise the lost fight's formation-relative particles ghost in
-	// the field at wrong camera-relative spots (every other battle exit
-	// clears them via clearBattleResidual -> RequestVFXReset).
-	core.RequestVFXReset(g)
 	// Recovery toast is a transient status, not a combat-log event — using
 	// setBattleStatus keeps the fresh-run Log empty (the player isn't in
 	// battle anymore) while still surfacing the message on the field HUD.
@@ -1105,7 +1108,7 @@ func resetBattleAction(g *core.GameState) {
 // in the same frame: the status would survive a frame instead of being
 // instantly shadowed by the action's log line.
 func setBattleStatus(g *core.GameState, message string) {
-	g.Battle.Message = message
+	g.SetStatusMessage(message)
 }
 
 // setBattleMessage writes to the transient status line AND appends to the

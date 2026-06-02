@@ -19,33 +19,36 @@ type pauseMenuRow struct {
 }
 
 var pauseMenuRows = []pauseMenuRow{
-	{Item: core.PauseMenuRestart, Label: func(core.GameState) string { return "Restart" }},
-	{Item: core.PauseMenuStats, Label: func(core.GameState) string { return "Party Stats" }},
-	{Item: core.PauseMenuDebug, Label: debugRowLabel},
-	{Item: core.PauseMenuDisplay, Label: func(core.GameState) string { return DisplayMenuRowLabel() }},
-	{Item: core.PauseMenuJukebox, Label: func(core.GameState) string { return JukeboxRowLabel() }},
+	{Item: core.PauseMenuOptions, Label: func(core.GameState) string { return "Options ▸" }},
+	{Item: core.PauseMenuDebug, Label: func(core.GameState) string { return "Debug ▸" }},
 	{Item: core.PauseMenuQuit, Label: func(core.GameState) string { return "Quit" }},
 }
 
-// debugRowLabel reflects the two-stage Debug row: off → "enable", on →
-// "open the tools submenu." The ▸ marks that confirming descends into a
-// submenu rather than toggling in place.
-func debugRowLabel(g core.GameState) string {
-	if g.DebugOverlay {
-		return "Debug Menu ▸"
-	}
-	return "Debug Mode: Off"
+// optionsMenuRow / debugMenuRow bind a submenu item enum to its label
+// producer — same shape as pauseMenuRow so every menu reuses drawMenuRow
+// / drawTitledMenuCard layout without a second renderer. The ▸ on the
+// pause-menu rows above marks "descends into a submenu."
+type optionsMenuRow struct {
+	Item  core.OptionsMenuItem
+	Label func(g core.GameState) string
 }
 
-// debugMenuRow binds a DebugMenuItem to its label producer — same shape
-// as pauseMenuRow so the submenu reuses drawMenuRow / row-stride layout
-// without inventing a second renderer.
+var optionsMenuRows = []optionsMenuRow{
+	{Item: core.OptionsMenuDisplay, Label: func(core.GameState) string { return DisplayMenuRowLabel() }},
+	{Item: core.OptionsMenuStats, Label: func(core.GameState) string { return "Party Stats" }},
+	{Item: core.OptionsMenuRestart, Label: func(core.GameState) string { return "Restart" }},
+	{Item: core.OptionsMenuClose, Label: func(core.GameState) string { return "Close" }},
+}
+
 type debugMenuRow struct {
 	Item  core.DebugMenuItem
 	Label func(g core.GameState) string
 }
 
 var debugMenuRows = []debugMenuRow{
+	{Item: core.DebugMenuToggle, Label: func(g core.GameState) string {
+		return "Debug Mode: " + onOff(g.DebugOverlay)
+	}},
 	{Item: core.DebugMenuEnemies, Label: func(g core.GameState) string {
 		return "Enemies: " + onOff(!g.EnemiesDisabled)
 	}},
@@ -62,7 +65,7 @@ var debugMenuRows = []debugMenuRow{
 	{Item: core.DebugMenuRenderLog, Label: func(g core.GameState) string {
 		return "Render Log: " + onOff(g.RenderLogEnabled)
 	}},
-	{Item: core.DebugMenuDisable, Label: func(core.GameState) string { return "Disable Debug Mode" }},
+	{Item: core.DebugMenuJukebox, Label: func(core.GameState) string { return JukeboxRowLabel() }},
 	{Item: core.DebugMenuClose, Label: func(core.GameState) string { return "Close" }},
 }
 
@@ -71,6 +74,14 @@ func onOff(b bool) string {
 		return "On"
 	}
 	return "Off"
+}
+
+// drawOptionsMenuOverlay paints the Options submenu via the shared
+// menu-card chrome, titled "OPTIONS".
+func drawOptionsMenuOverlay(g core.GameState, assets Resources) {
+	drawTitledMenuCard(assets, "OPTIONS", len(optionsMenuRows),
+		func(i int) string { return optionsMenuRows[i].Label(g) },
+		func(i int) bool { return g.OptionsMenuIndex == int(optionsMenuRows[i].Item) })
 }
 
 // drawDebugMenuOverlay paints the debug submenu via the shared menu-card

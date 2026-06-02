@@ -11,6 +11,10 @@ import (
 const (
 	MaterialDungeon MaterialSet = iota
 	MaterialField
+	// MaterialCount is the number of material sets. The init guard in
+	// this file asserts materialDefs covers every value below it, and
+	// render's NewResources asserts a worldMaterial exists for each.
+	MaterialCount
 )
 
 // mapsDirName is the on-disk folder name where .map files live. Single
@@ -356,9 +360,38 @@ func lookupName[V comparable](table []namedEnum[V], target V) (string, bool) {
 	return "", false
 }
 
-var materialNameTable = []namedEnum[MaterialSet]{
-	{MaterialDungeon, "dungeon"},
-	{MaterialField, "field"},
+// materialDef is one row of the material registry: the canonical on-disk
+// name plus per-material traits. indoor marks an enclosed interior (stone
+// walls, ceiling slabs by default) vs. an outdoor biome — minimap tone,
+// the world/wall pass, lighting profiles, and resource fallbacks branch on
+// it, so a future cave/crypt material is one row here, not a grep for
+// `== MaterialDungeon`. Single source for name lookup, editor dropdown
+// order, and the indoor predicate so they can't drift.
+type materialDef struct {
+	value  MaterialSet
+	name   string
+	indoor bool
+}
+
+var materialDefs = []materialDef{
+	{MaterialDungeon, "dungeon", true},
+	{MaterialField, "field", false},
+}
+
+func init() {
+	if len(materialDefs) != int(MaterialCount) {
+		panic("core: materialDefs must have one row per MaterialSet — add a row when adding a material")
+	}
+	seen := make([]bool, int(MaterialCount))
+	for _, d := range materialDefs {
+		if int(d.value) < 0 || int(d.value) >= int(MaterialCount) {
+			panic("core: materialDefs row has an out-of-range MaterialSet value")
+		}
+		if seen[d.value] {
+			panic("core: materialDefs has a duplicate MaterialSet row")
+		}
+		seen[d.value] = true
+	}
 }
 
 // MaterialName returns the canonical on-disk name for the material set,
@@ -366,44 +399,48 @@ var materialNameTable = []namedEnum[MaterialSet]{
 // .map files should propagate the failure rather than silently committing
 // a wrong material name.
 func MaterialName(m MaterialSet) (string, bool) {
-	return lookupName(materialNameTable, m)
+	for _, d := range materialDefs {
+		if d.value == m {
+			return d.name, true
+		}
+	}
+	return "", false
 }
 
 func materialFromName(s string) (MaterialSet, bool) {
 	low := strings.ToLower(s)
-	for _, e := range materialNameTable {
-		if e.name == low {
-			return e.value, true
+	for _, d := range materialDefs {
+		if d.name == low {
+			return d.value, true
 		}
 	}
 	return 0, false
 }
 
 // MaterialOptions is the editor's dropdown order, derived from
-// materialNameTable so the two can't drift — a material added to the
-// name table shows up in the editor dropdown automatically, in the same
-// (stable) order so palette colors stay associated with the right
-// material. Previously a hand-maintained parallel slice with no link.
+// materialDefs so the two can't drift — a material added to the registry
+// shows up in the editor dropdown automatically, in the same (stable)
+// order so palette colors stay associated with the right material.
 var MaterialOptions = buildMaterialOptions()
 
 func buildMaterialOptions() []MaterialSet {
-	opts := make([]MaterialSet, len(materialNameTable))
-	for i, e := range materialNameTable {
-		opts[i] = e.value
+	opts := make([]MaterialSet, len(materialDefs))
+	for i, d := range materialDefs {
+		opts[i] = d.value
 	}
 	return opts
 }
 
 // MaterialIsIndoor reports whether the material set represents an
 // enclosed interior (stone walls, ceiling slabs by default) vs. an
-// outdoor biome. Today only Dungeon answers true — but several
-// renderers (minimap tone, world/wall pass, resource fallbacks)
-// branch on `material == MaterialDungeon` open-coded, so a third
-// material would need them all updated independently. Routing
-// through this predicate now means a future cave/crypt material is
-// one row, not a grep.
+// outdoor biome, reading the trait off the material registry row.
 func MaterialIsIndoor(m MaterialSet) bool {
-	return m == MaterialDungeon
+	for _, d := range materialDefs {
+		if d.value == m {
+			return d.indoor
+		}
+	}
+	return false
 }
 
 var facingNameTable = []namedEnum[int]{

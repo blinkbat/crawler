@@ -1,6 +1,7 @@
 package explore
 
 import (
+	"crawler/internal/app/audio"
 	"crawler/internal/app/core"
 	"crawler/internal/app/input"
 	"crawler/internal/app/render"
@@ -14,6 +15,7 @@ import (
 func openPanels(g *core.GameState) {
 	g.PanelsOpen = true
 	g.PanelsRowCursor = 0
+	g.PanelsSkillRow = 0
 	if g.PanelsMapZoom <= 0 {
 		g.PanelsMapZoom = core.PanelMapZoomDefault
 	}
@@ -21,7 +23,8 @@ func openPanels(g *core.GameState) {
 	// free-look doesn't bleed into the overlay's screen-space rendering.
 	g.Player.LookYaw = 0
 	g.Player.LookPitch = 0
-	core.ResetEquipCursor(g)
+	core.ResetEquipPanels(g)
+	closeUseTarget(g)
 }
 
 // closePanels takes the overlay down. Tab + zoom + cursor state stays
@@ -32,7 +35,8 @@ func openPanels(g *core.GameState) {
 // session.
 func closePanels(g *core.GameState) {
 	g.PanelsOpen = false
-	core.ClearEquipDrag(g)
+	core.ResetEquipPanels(g)
+	closeUseTarget(g)
 	render.ResetEquipPanelLayout()
 }
 
@@ -45,15 +49,22 @@ func closePanels(g *core.GameState) {
 // drives a 2-D cursor inside a tab — Left/Right picks the party-member
 // column, Up/Down moves the slot row (Equipment) or zooms (Map).
 func updatePanels(g *core.GameState) {
-	// Back closes the overlay — EXCEPT on the Equipment tab while an
-	// item is held by the keyboard/controller cursor, where Back drops
-	// the held item back instead (so a mis-lift doesn't kick the player
-	// all the way out). The toggle button always closes outright.
+	// The out-of-battle "use" ally-target picker (Items / Skills tabs)
+	// and the Equipment-tab slot picker are modal sub-dialogs: while one
+	// is open it owns every panel input this frame (Back closes just the
+	// picker, not the whole overlay; tab paging / shortcuts are
+	// suppressed). Handle them first and return so nothing below sees the
+	// same edge.
+	if g.UseTargetOpen {
+		updateUseTargetPicker(g)
+		return
+	}
+	if g.PanelsTab == core.PanelTabEquipment && g.EquipPickerOpen {
+		updateEquipPicker(g)
+		return
+	}
+	// Back closes the overlay. The toggle button always closes outright.
 	if input.BackPressed() {
-		if g.PanelsTab == core.PanelTabEquipment && g.EquipDrag.Source != core.EquipDragSourceNone {
-			core.ClearEquipDrag(g)
-			return
-		}
 		closePanels(g)
 		return
 	}
@@ -101,16 +112,33 @@ func updatePanels(g *core.GameState) {
 			}
 		}
 	case core.PanelTabEquipment:
-		// Equipment tab supports BOTH mouse drag-and-drop AND a
-		// keyboard/controller lift/place cursor — see updateEquipmentTab.
+		// Equipment tab: a 2-D cursor over members × slots; Confirm or a
+		// mouse click on a slot opens that slot's item picker — see
+		// updateEquipmentTab.
 		updateEquipmentTab(g)
 	case core.PanelTabSkills:
-		// View-only tab: Left/Right moves the party-member column.
+		// 2-D cursor: Left/Right picks the party-member column, Up/Down
+		// picks the skill row within that member. Confirm buys the next
+		// tier of the focused skill (SkillPoints spent on the member),
+		// which the combat reads pick up on the next cast. Use (F / □)
+		// casts a heal skill out of battle — a separate button from
+		// Confirm so buying a tier and casting a heal never collide.
 		g.PanelsRowCursor = input.CursorLeftRightWrap(g.PanelsRowCursor, len(g.Party))
+		g.PanelsSkillRow = input.CursorUpDown(g.PanelsSkillRow, core.SkillsPerClass)
+		if input.ConfirmPressed() && g.PanelsRowCursor >= 0 && g.PanelsRowCursor < len(g.Party) {
+			buySkillTier(g)
+		}
+		if input.UsePressed() {
+			tryUseSkill(g)
+		}
 	case core.PanelTabItems:
-		// Vertical inventory list: Up/Down walk the stacks.
+		// Vertical inventory list: Up/Down walk the stacks. Confirm or
+		// Use (F / □) uses the cursored consumable on a chosen ally.
 		count := core.LiveStackCount(g.Inventory)
 		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, count)
+		if input.ConfirmPressed() || input.UsePressed() {
+			tryUseItem(g)
+		}
 	case core.PanelTabMap:
 		// Up/Down zooms the map by one cells-on-screen step per press;
 		// the bounds (core.PanelMapZoomMin/Max) are soft-clamped so holding
@@ -123,6 +151,34 @@ func updatePanels(g *core.GameState) {
 			g.PanelsMapZoom += core.PanelMapZoomStep
 		}
 		g.PanelsMapZoom = core.Clamp(g.PanelsMapZoom, core.PanelMapZoomMin, core.PanelMapZoomMax)
+	default:
+		// The render side is a compile-locked panelTabDrawers array; this
+		// input-side dispatch is hand-maintained, so a new tab without an
+		// input case would silently accept no input. Fail loudly instead.
+		panic("explore: updatePanels missing input case for PanelTab")
+	}
+}
+
+// buySkillTier spends one SkillPoint on the next tier of the focused
+// member's focused skill. On a successful purchase it pings the gilt
+// "great" cue; a refused buy (tree maxed, or not enough points) pings
+// the miss cue so the player gets feedback either way. The caller has
+// already bounds-checked PanelsRowCursor against the party.
+func buySkillTier(g *core.GameState) {
+	m := &g.Party[g.PanelsRowCursor]
+	skills := core.PartySkills(*m)
+	row := g.PanelsSkillRow
+	if row < 0 || row >= len(skills) {
+		return
+	}
+	s := skills[row]
+	if s == core.SkillNone {
+		return
+	}
+	if core.SpendSkillTier(m, s) {
+		audio.Play(audio.SoundInputGreat)
+	} else {
+		audio.Play(audio.SoundInputMiss)
 	}
 }
 
@@ -138,21 +194,20 @@ func panelTabAdvance(t core.PanelTab, delta int) core.PanelTab {
 }
 
 // setPanelTab switches the active tab and resets the per-tab cursor.
-// Map zoom is preserved (handled separately on GameState). Any
-// in-flight Equipment drag is cancelled — leaving it active across
-// tab switches would let an LMB-release on a non-Equipment tab go
-// unobserved (updateEquipmentDrag only runs on the Equipment tab),
-// stranding the held item to be landed by the next stray click when
-// the user returns. Resetting the stored render-side hit-rect
-// layout on the same edge keeps the first frame after a switch INTO
-// Equipment from reading a stale layout from a previous visit.
+// Map zoom is preserved (handled separately on GameState). The
+// Equipment-tab state (slot cursor + any open slot picker) is reset so
+// a tab switch can't leave the picker stranded, and the stored
+// render-side hit-rect layout is zeroed on the same edge so the first
+// frame after a switch INTO Equipment can't read a stale layout from a
+// previous visit.
 func setPanelTab(g *core.GameState, t core.PanelTab) {
 	if t == g.PanelsTab {
 		return
 	}
-	core.ClearEquipDrag(g)
-	core.ResetEquipCursor(g)
+	core.ResetEquipPanels(g)
+	closeUseTarget(g)
 	render.ResetEquipPanelLayout()
 	g.PanelsTab = t
 	g.PanelsRowCursor = 0
+	g.PanelsSkillRow = 0
 }

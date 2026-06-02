@@ -453,20 +453,13 @@ func EnemyInfo(kind EnemyKind) EnemyDefinition {
 	if def, ok := enemyByKind[kind]; ok {
 		return def
 	}
-	return EnemyDefinition{
-		Kind:               kind,
-		Name:               "Enemy",
-		SingularName:       "Enemy",
-		PluralName:         "Enemies",
-		SingularNoun:       "enemy",
-		PluralNoun:         "enemies",
-		GroupName:          "Enemy Group",
-		MaxHP:              1,
-		AttackDamage:       1,
-		Stats:              Stats{STR: 1, DEX: 1, INT: 0, WIS: 0, VIT: 1, SPD: 5},
-		AttackVerbSingular: "strikes",
-		AttackVerbPlural:   "strike",
-	}
+	// Unreachable for valid data: every declared kind has an enemyDefinitions
+	// row (enemyByKind is built from it), and the only externally-sourced
+	// kinds — custom enemies' BaseKind — are validated by EnemyKindFromName
+	// at load. Reaching here means an in-memory corrupt Kind or a declared
+	// enum value with no definition; surface it loudly rather than shipping a
+	// 1-HP "Enemy" placeholder silently into combat and the renderer.
+	panic(fmt.Sprintf("core: EnemyInfo called with unregistered kind %d — add it to enemyDefinitions", int(kind)))
 }
 
 // EnemyInfoFor is the read accessor for per-instance enemy display data.

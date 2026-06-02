@@ -126,6 +126,9 @@ const (
 	partyCardW   = float32(184)
 	partyCardH   = float32(118)
 	partyCardGap = float32(16)
+	// activeCardLift raises the active member's card above the ribbon row
+	// so "whose turn is it" reads at a glance, on top of the bold halo.
+	activeCardLift = float32(14)
 	// ribbonBottom is the bottom-edge margin for the party ribbon.
 	// Routed through hudEdgePad so the bottom margin matches the
 	// minimap's top margin (and every other HUD panel's edge
@@ -154,16 +157,25 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 		border = borderTarget
 		accent = borderTarget
 	case active:
-		bg = core.MixColor(surfacePrimary, surfaceActiveTint, 0.55)
+		bg = core.MixColor(surfacePrimary, surfaceActiveTint, 0.8)
 		border = borderActive
+	}
+
+	// Raise the active card above the row so it physically stands out.
+	if active && !down {
+		y -= activeCardLift
 	}
 
 	ix, iy := int32(x), int32(y)
 	iw, ih := int32(partyCardW), int32(partyCardH)
 
 	if active && !down {
-		halo := fadeColor(borderActive, pulseActiveActor())
-		drawPanelOutline(ix-3, iy-3, iw+6, ih+6, halo)
+		// Layered gilt halo — a solid inner ring plus a pulsing, wider
+		// outer ring — so the active card reads as unmistakably lit, not
+		// a faint outline.
+		drawPanelOutline(ix-3, iy-3, iw+6, ih+6, borderActive)
+		halo := fadeColor(borderActive, 0.35+0.65*pulseActiveActor())
+		drawPanelOutline(ix-6, iy-6, iw+12, ih+12, halo)
 	}
 	if selected {
 		drawPanelOutline(ix-3, iy-3, iw+6, ih+6, borderTarget)

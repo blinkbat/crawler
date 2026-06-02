@@ -55,6 +55,9 @@ func Update(g *core.GameState) {
 	case core.ModalDebugMenu:
 		updateDebugMenu(g)
 		return
+	case core.ModalOptionsMenu:
+		updateOptionsMenu(g)
+		return
 	case core.ModalPauseMenu:
 		updateMenu(g)
 		return
@@ -146,80 +149,104 @@ func updateMenu(g *core.GameState) {
 	}
 	if input.ConfirmPressed() {
 		switch core.PauseMenuItem(g.MenuIndex) {
-		case core.PauseMenuRestart:
-			restartGame(g)
-		case core.PauseMenuStats:
-			// Drop the pause menu and open the panels overlay on the
-			// Stats tab — that surface is the richer multi-tab
-			// dashboard (Stats / Equipment / Items / Skills / Map),
-			// of which the legacy compact view was a subset.
-			g.MenuOpen = false
-			openPanels(g)
-			g.PanelsTab = core.PanelTabStats
+		case core.PauseMenuOptions:
+			openOptionsMenu(g)
 		case core.PauseMenuDebug:
-			// First confirm enables debug mode; once on, the row opens the
-			// debug submenu (which holds the enemy / time / easy-quit
-			// toggles and the off-switch). "Tools only when debug is on."
-			if g.DebugOverlay {
-				openDebugMenu(g)
-			} else {
-				g.DebugOverlay = true
-			}
-		case core.PauseMenuDisplay:
-			render.ToggleDisplayMode()
-		case core.PauseMenuJukebox:
-			render.PlayJukebox()
+			openDebugMenu(g)
 		case core.PauseMenuQuit:
 			g.Quit = true
 		}
 	}
 }
 
-// openDebugMenu swaps the pause menu for the debug submenu. Reachable
-// only while debug mode (DebugOverlay) is on — the pause-menu Debug row
-// gates the call.
+// updateLeafMenu runs the shared input loop for a leaf submenu (Options /
+// Debug): Back clears the submenu's open flag, Up/Down moves its cursor,
+// Confirm fires onConfirm with the selected row index. The pause root
+// (updateMenu) doesn't use this — it carries extra Restart/Quit hotkeys —
+// but the two leaf submenus had byte-identical skeletons, so this is the
+// input-side companion to the render side's shared drawTitledMenuCard.
+func updateLeafMenu(open *bool, index *int, count int, onConfirm func(item int)) {
+	if input.BackPressed() {
+		*open = false
+		return
+	}
+	*index = input.CursorUpDown(*index, count)
+	if input.ConfirmPressed() {
+		onConfirm(*index)
+	}
+}
+
+// openOptionsMenu swaps the pause menu for the Options submenu.
+func openOptionsMenu(g *core.GameState) {
+	g.MenuOpen = false
+	g.OptionsMenuOpen = true
+	g.OptionsMenuIndex = 0
+}
+
+// updateOptionsMenu drives the Options submenu: display-mode toggle, a
+// jump to the party-stats dashboard, and a run restart. Back closes
+// straight to explore (a leaf submenu, not a pause sub-page — same shape
+// as the Debug submenu).
+func updateOptionsMenu(g *core.GameState) {
+	updateLeafMenu(&g.OptionsMenuOpen, &g.OptionsMenuIndex, core.OptionsMenuCount, func(item int) {
+		switch core.OptionsMenuItem(item) {
+		case core.OptionsMenuDisplay:
+			render.ToggleDisplayMode()
+		case core.OptionsMenuStats:
+			// Drop the menu and open the panels overlay on the Stats tab —
+			// the richer multi-tab dashboard the legacy compact view was a
+			// subset of.
+			g.OptionsMenuOpen = false
+			openPanels(g)
+			g.PanelsTab = core.PanelTabStats
+		case core.OptionsMenuRestart:
+			restartGame(g)
+		case core.OptionsMenuClose:
+			g.OptionsMenuOpen = false
+		}
+	})
+}
+
+// openDebugMenu swaps the pause menu for the Debug submenu. Always
+// reachable now — the master "Debug Mode" on/off toggle lives inside the
+// submenu (DebugMenuToggle) rather than gating access to it.
 func openDebugMenu(g *core.GameState) {
 	g.MenuOpen = false
 	g.DebugMenuOpen = true
 	g.DebugMenuIndex = 0
 }
 
-// updateDebugMenu drives the debug submenu: enemy on/off, advance the
-// time-of-day phase, easy-battle-quit toggle, and the debug-mode
-// off-switch. Back closes straight to explore (not back to the pause
-// menu) — the debug menu is a leaf, not a pause sub-page.
+// updateDebugMenu drives the debug submenu: the debug-mode toggle, enemy
+// on/off, advance the time-of-day phase, easy-battle-quit, render-log,
+// and the audio sound-tester. Back closes straight to explore (a leaf,
+// not a pause sub-page).
 func updateDebugMenu(g *core.GameState) {
-	if input.BackPressed() {
-		g.DebugMenuOpen = false
-		return
-	}
-	g.DebugMenuIndex = input.CursorUpDown(g.DebugMenuIndex, core.DebugMenuCount)
-	if !input.ConfirmPressed() {
-		return
-	}
-	switch core.DebugMenuItem(g.DebugMenuIndex) {
-	case core.DebugMenuEnemies:
-		g.EnemiesDisabled = !g.EnemiesDisabled
-	case core.DebugMenuAdvanceTime:
-		// One phase forward. StepCount drives the day/night cycle, so
-		// bumping it by a full phase advances the lighting without
-		// teleporting the player or disturbing encounter pacing.
-		g.StepCount += core.StepsPerPhase
-	case core.DebugMenuEasyQuit:
-		g.EasyBattleQuit = !g.EasyBattleQuit
-	case core.DebugMenuRenderLog:
-		g.RenderLogEnabled = !g.RenderLogEnabled
-		if g.RenderLogEnabled {
-			render.OpenRenderLog()
-		} else {
-			render.CloseRenderLog()
+	updateLeafMenu(&g.DebugMenuOpen, &g.DebugMenuIndex, core.DebugMenuCount, func(item int) {
+		switch core.DebugMenuItem(item) {
+		case core.DebugMenuToggle:
+			g.DebugOverlay = !g.DebugOverlay
+		case core.DebugMenuEnemies:
+			g.EnemiesDisabled = !g.EnemiesDisabled
+		case core.DebugMenuAdvanceTime:
+			// One phase forward. StepCount drives the day/night cycle, so
+			// bumping it by a full phase advances the lighting without
+			// teleporting the player or disturbing encounter pacing.
+			g.StepCount += core.StepsPerPhase
+		case core.DebugMenuEasyQuit:
+			g.EasyBattleQuit = !g.EasyBattleQuit
+		case core.DebugMenuRenderLog:
+			g.RenderLogEnabled = !g.RenderLogEnabled
+			if g.RenderLogEnabled {
+				render.OpenRenderLog()
+			} else {
+				render.CloseRenderLog()
+			}
+		case core.DebugMenuJukebox:
+			render.PlayJukebox()
+		case core.DebugMenuClose:
+			g.DebugMenuOpen = false
 		}
-	case core.DebugMenuDisable:
-		g.DebugOverlay = false
-		g.DebugMenuOpen = false
-	case core.DebugMenuClose:
-		g.DebugMenuOpen = false
-	}
+	})
 }
 
 func restartGame(g *core.GameState) {

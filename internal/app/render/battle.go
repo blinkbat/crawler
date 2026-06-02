@@ -470,13 +470,13 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 
 	screenW, _ := screenSize()
 	w := int32(340)
-	// Taller panel — 4 action rows now (Attack/Skill/Defend/Item) and the
-	// item picker mode reuses this same panel for its list. Anchors to
-	// the right edge using hudEdgePad so the menu lines up with the
-	// other right-side HUD chrome. Turn order is no longer to its
-	// right (moved to the left column under the minimap), so the
-	// action panel is the rightmost battle-HUD element now.
-	h := int32(280)
+	// Taller panel — a name header now sits atop 4 action rows
+	// (Attack/Skill/Defend/Item), and the item picker mode reuses this
+	// same panel for its list. Anchors to the right edge using hudEdgePad
+	// so the menu lines up with the other right-side HUD chrome. Turn
+	// order is no longer to its right (moved to the left column under the
+	// minimap), so the action panel is the rightmost battle-HUD element.
+	h := int32(312)
 	x := screenW - w - hudEdgePad
 	y := int32(PartyRibbonTopY()) - h - hudColumnGap
 	// Vertical collision guard: on a short-window resolution the
@@ -499,13 +499,14 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 	classCol := partyClassPresentationFor(member.Class).turnColor
 	drawCard(x, y, w, h, surfacePrimary, borderActive, classCol)
 
-	// Header removed — the active party card's halo + class-tinted
-	// accent stripe on the left edge of this panel already identify
-	// whose turn it is. The mode-specific content row below leads
-	// directly with the action verb ("Attack" / skill name / "Items"),
-	// which is what the player actually came here to read.
 	contentX := x + 22
-	contentY := y + 24
+	// Active member's name as the panel header, in their class color, so
+	// whose turn it is is spelled out right where the player picks the
+	// action — reinforcing the lifted/haloed party card and the glowing
+	// sprite. A thin gilt rule divides the header from the action rows.
+	drawTextWithShadow(assets.hudFont, member.Name, float32(contentX), float32(y+14), FontHeading, classCol)
+	rl.DrawRectangle(x+18, y+48, w-36, 1, fadeColor(giltBright, 0.5))
+	contentY := y + 58
 	// subY is the baseline for the sub-prompt / picker list under the
 	// mode's verb heading — one offset so the five action-mode arms below
 	// can't drift on the heading-to-sublabel gap.

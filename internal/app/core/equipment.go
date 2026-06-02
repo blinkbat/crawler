@@ -117,83 +117,105 @@ func EffectiveStats(m PartyMember) Stats {
 	return out
 }
 
-// EquipDragState tracks an in-progress drag-and-drop on the Equipment
-// panel. PartyIndex / SlotIndex point to the source if the drag began
-// from a slot (Source == EquipDragSourceSlot); InventoryIndex points
-// to the source if it began from the inventory list
-// (Source == EquipDragSourceInventory). Kind is the item being moved
-// so the renderer can paint a tooltip on the cursor without
-// re-resolving the source every frame.
-//
-// EquipDragSourceNone means no drag is active; the panel renders
-// resting state.
-type EquipDragSource int
-
-const (
-	EquipDragSourceNone EquipDragSource = iota
-	EquipDragSourceInventory
-	EquipDragSourceSlot
-)
-
-type EquipDragState struct {
-	Source         EquipDragSource
-	Kind           ItemKind
-	PartyIndex     int
-	SlotIndex      EquipSlotIndex
-	InventoryIndex int
+// EquipPickerRow is one selectable row in an equip slot's item picker
+// (the sub-modal the Equipment tab opens on a slot). A Kind == ItemNone
+// row with Unequip set is the synthetic "take it off" row, present only
+// when the slot is currently filled; every other row is an inventory
+// item that fits the slot, with its stack Count for the "xN" badge.
+type EquipPickerRow struct {
+	Kind    ItemKind
+	Count   int
+	Unequip bool
 }
 
-// NewSlotDrag builds an EquipDragSourceSlot state with the source
-// member + slot populated and the inventory index zeroed. Use
-// instead of building the literal by hand so a future invariant
-// (e.g. cross-member swap gates) lives in one constructor — and
-// the InventoryIndex field can never accidentally leak a stale
-// value from an earlier inventory drag.
-func NewSlotDrag(kind ItemKind, partyIndex int, slot EquipSlotIndex) EquipDragState {
-	return EquipDragState{
-		Source:     EquipDragSourceSlot,
-		Kind:       kind,
-		PartyIndex: partyIndex,
-		SlotIndex:  slot,
+// EquipPickerRows builds the ordered row list the slot picker shows for
+// (member, slot): an "Unequip" row first when the slot holds something,
+// then every inventory item that CanEquipInSlot, in inventory order.
+// Render draws this list and the input layer resolves the chosen
+// cursor/click index against it, so the two share ONE ordering and
+// can't drift (the same single-source-of-truth pattern the old
+// drag-drop rules used). Nil-safe.
+func EquipPickerRows(g *GameState, member int, slot EquipSlotIndex) []EquipPickerRow {
+	if g == nil {
+		return nil
 	}
-}
-
-// NewInventoryDrag builds an EquipDragSourceInventory state with the
-// inventory index populated and slot/party fields zeroed. Symmetric
-// sibling of NewSlotDrag.
-func NewInventoryDrag(kind ItemKind, inventoryIndex int) EquipDragState {
-	return EquipDragState{
-		Source:         EquipDragSourceInventory,
-		Kind:           kind,
-		InventoryIndex: inventoryIndex,
+	// Guard slot the same way member is guarded below: Equipped is a
+	// [EquipSlotCount]ItemKind array and CanEquipInSlot -> SlotIndexType
+	// now panics on an out-of-range slot, so an exported caller passing a
+	// bad slot would crash rather than get an empty list.
+	if slot < 0 || slot >= EquipSlotCount {
+		return nil
 	}
+	rows := make([]EquipPickerRow, 0, len(g.Inventory)+1)
+	if member >= 0 && member < len(g.Party) && g.Party[member].Equipped[slot] != ItemNone {
+		rows = append(rows, EquipPickerRow{Unequip: true})
+	}
+	for _, st := range g.Inventory {
+		if st.Count > 0 && CanEquipInSlot(st.Kind, slot) {
+			rows = append(rows, EquipPickerRow{Kind: st.Kind, Count: st.Count})
+		}
+	}
+	return rows
 }
 
-// ClearEquipDrag resets the drag state to "not dragging." Called on
-// drop, drag-cancel, and when the panels overlay closes.
-func ClearEquipDrag(g *GameState) {
-	g.EquipDrag = EquipDragState{}
+// EquipFromInventory equips one `kind` from the shared inventory into
+// the member's slot, returning any displaced item to the inventory (no
+// net item loss). Returns false and changes nothing when the member is
+// out of range, the kind doesn't fit the slot, or the kind isn't in
+// inventory. Centralizes the consume → equip → return-prev sequence the
+// Equipment-tab picker drives.
+func EquipFromInventory(g *GameState, member int, slot EquipSlotIndex, kind ItemKind) bool {
+	if g == nil || member < 0 || member >= len(g.Party) {
+		return false
+	}
+	if !CanEquipInSlot(kind, slot) {
+		return false
+	}
+	inv, ok := ConsumeItem(g.Inventory, kind)
+	if !ok {
+		return false
+	}
+	g.Inventory = inv
+	prev, equipOk := EquipItem(&g.Party[member], slot, kind)
+	if !equipOk {
+		// Equip refused — put the consumed item back so it isn't lost.
+		g.Inventory = AddItem(g.Inventory, kind, 1)
+		return false
+	}
+	if prev != ItemNone {
+		g.Inventory = AddItem(g.Inventory, prev, 1)
+	}
+	return true
 }
 
-// EquipCursorState is the keyboard/controller focus on the Equipment
-// tab — the cell the player highlights with the d-pad / stick when the
-// mouse isn't driving. OnInventory toggles the focus between a
-// member's equip slot (Member + Slot) and the shared inventory strip
-// (InvTile). It mirrors the mouse hit-test surface so a Confirm "lifts"
-// or "places" g.EquipDrag through the exact same drop rules a
-// drag-and-drop release uses.
-type EquipCursorState struct {
-	OnInventory bool
-	Member      int
-	Slot        EquipSlotIndex
-	InvTile     int
+// UnequipToInventory clears the member's slot and routes whatever was
+// in it back into the shared inventory. Returns false when the slot was
+// already empty (or the member is out of range).
+func UnequipToInventory(g *GameState, member int, slot EquipSlotIndex) bool {
+	if g == nil || member < 0 || member >= len(g.Party) {
+		return false
+	}
+	kind := UnequipItem(&g.Party[member], slot)
+	if kind == ItemNone {
+		return false
+	}
+	g.Inventory = AddItem(g.Inventory, kind, 1)
+	return true
 }
 
-// ResetEquipCursor parks the Equipment-tab focus at the first member's
-// first slot and marks the cursor inactive — the mouse owns the panel
-// until a directional / Confirm input wakes the cursor. Called on
-// overlay open and on switching INTO the Equipment tab.
-func ResetEquipCursor(g *GameState) {
-	g.EquipCursor = EquipCursorState{}
-	g.EquipCursorActive = false
+// ResetEquipPanels parks the Equipment-tab cursors and closes the slot
+// picker. Called on overlay open and on switching INTO the Equipment
+// tab so a re-entry starts on the first slot with no stale picker open.
+func ResetEquipPanels(g *GameState) {
+	g.EquipSlotCursor = 0
+	g.EquipPickerOpen = false
+	g.EquipPickerCursor = 0
+}
+
+// CloseEquipPicker dismisses the slot picker without touching the slot
+// cursor. Used by the Back handler and by anything that needs to tear
+// the sub-modal down (e.g. an area transition firing while it's open).
+func CloseEquipPicker(g *GameState) {
+	g.EquipPickerOpen = false
+	g.EquipPickerCursor = 0
 }

@@ -10,6 +10,20 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+// soundPanel identifies one column of the sound-creator modal. The cursor
+// moves between columns with Tab (wrapping mod soundPanelCount); each
+// column owns its own keyboard handler and set of click targets. Named so
+// the column dispatch reads by intent instead of bare 0/1/2 and the wrap
+// can't drift from a hardcoded "% 3".
+type soundPanel int
+
+const (
+	soundPanelParams soundPanel = iota // synth-param sliders + name + actions
+	soundPanelList                     // saved-sound list (Play/Delete rows)
+	soundPanelAssign                   // built-in cue assignments
+	soundPanelCount
+)
+
 // soundParamSet captures the tunables for a single sweep-style cue.
 // Bounded ranges are documented per field; the sliders in the sound
 // modal map their 0..1 normalized position into these ranges via
@@ -290,7 +304,7 @@ func openSoundsModal(s *State) {
 	}
 	s.modal = modalSounds
 	s.soundCursor = 0
-	s.soundLeftPanel = 0
+	s.soundLeftPanel = soundPanelParams
 	// Reset any leftover drag from a prior session — a stale sliderIdx
 	// would let the next mouse drag pop a different slider.
 	soundDrag.sliderIdx = -1
@@ -340,7 +354,7 @@ func updateSoundsModal(s *State) Action {
 				snapped = info.Max
 			}
 			info.Set(&s.soundParams, snapped)
-			s.soundLeftPanel = 0
+			s.soundLeftPanel = soundPanelParams
 			s.soundCursor = soundDrag.sliderIdx
 		}
 	}
@@ -356,7 +370,7 @@ func updateSoundsModal(s *State) Action {
 	// params column. The user has to click the field (which sets cursor
 	// to the name row) before keystrokes register — that fixes the old
 	// "Space types into the name" trap.
-	if s.soundLeftPanel == 0 && s.soundCursor == soundNameCursorIdx() {
+	if s.soundLeftPanel == soundPanelParams && s.soundCursor == soundNameCursorIdx() {
 		// No-space filter so the user can hit Space for Preview without
 		// also typing a space into the sound name. Shared pump from
 		// input.go — backspace handled there too.
@@ -365,17 +379,19 @@ func updateSoundsModal(s *State) Action {
 
 	// Keyboard fallbacks.
 	if editorTabPressed() {
-		s.soundLeftPanel = (s.soundLeftPanel + 1) % 3
+		s.soundLeftPanel = (s.soundLeftPanel + 1) % soundPanelCount
 		s.soundCursor = 0
 		return ActionNone
 	}
 	switch s.soundLeftPanel {
-	case 0:
+	case soundPanelParams:
 		updateSoundsParamsKeys(s)
-	case 1:
+	case soundPanelList:
 		updateSoundsListKeys(s, savedSounds)
-	case 2:
+	case soundPanelAssign:
 		updateSoundsAssignKeys(s)
+	default:
+		panic("editor: updateSoundsModal missing key handler for soundPanel")
 	}
 	return ActionNone
 }
@@ -390,27 +406,27 @@ func soundActionCursorIdx() int { return len(soundParamSliders) + 1 }
 // Returns the new (leftPanel, cursor) so the caller can use them to
 // drive subsequent draws and keyboard input. Returning early without
 // changing the cursor means "click was on a non-cursor target."
-func handleSoundMouseClick(s *State, mp rl.Vector2, l *soundLayout, savedSounds []string) (int, int) {
+func handleSoundMouseClick(s *State, mp rl.Vector2, l *soundLayout, savedSounds []string) (soundPanel, int) {
 	// Slider tracks — start a drag and immediately set the value at the
 	// click position so single-click also adjusts (not just drag).
 	for i := range soundParamSliders {
 		if pointIn(mp, l.sliderTracks[i]) {
 			soundDrag.sliderIdx = i
-			return 0, i
+			return soundPanelParams, i
 		}
 	}
 	// Name field — sets focus so keystrokes type into the name.
 	if pointIn(mp, l.nameField) {
-		return 0, soundNameCursorIdx()
+		return soundPanelParams, soundNameCursorIdx()
 	}
 	// Preview / Save action buttons.
 	if pointIn(mp, l.previewBtn) {
 		previewSoundParams(s.soundParams)
-		return 0, soundActionCursorIdx()
+		return soundPanelParams, soundActionCursorIdx()
 	}
 	if pointIn(mp, l.saveBtn) {
 		saveCurrentSound(s)
-		return 0, soundActionCursorIdx()
+		return soundPanelParams, soundActionCursorIdx()
 	}
 	// Saved-sounds list — clickable rows + per-row Play/× buttons.
 	for i, r := range l.listRows {
@@ -419,14 +435,14 @@ func handleSoundMouseClick(s *State, mp rl.Vector2, l *soundLayout, savedSounds 
 		}
 		if pointIn(mp, r.Play) {
 			audio.PreviewFile(savedSounds[i])
-			return 1, i
+			return soundPanelList, i
 		}
 		if pointIn(mp, r.Delete) {
 			confirmSoundDelete(s, savedSounds[i])
-			return 1, i
+			return soundPanelList, i
 		}
 		if pointIn(mp, r.Row) {
-			return 1, i
+			return soundPanelList, i
 		}
 	}
 	// Assignments column.
@@ -436,18 +452,18 @@ func handleSoundMouseClick(s *State, mp rl.Vector2, l *soundLayout, savedSounds 
 		}
 		if pointIn(mp, r.Play) {
 			audio.Play(assignableCueList[i])
-			return 2, i
+			return soundPanelAssign, i
 		}
 		if pointIn(mp, r.CycleLeft) {
 			cycleCueAssignment(s, assignableCueList[i], -1)
-			return 2, i
+			return soundPanelAssign, i
 		}
 		if pointIn(mp, r.CycleRight) {
 			cycleCueAssignment(s, assignableCueList[i], +1)
-			return 2, i
+			return soundPanelAssign, i
 		}
 		if pointIn(mp, r.Row) {
-			return 2, i
+			return soundPanelAssign, i
 		}
 	}
 	return s.soundLeftPanel, s.soundCursor
@@ -637,16 +653,16 @@ func drawSoundsModal(s *State, font rl.Font, theme render.Theme) {
 }
 
 func drawSoundsParamsCol(s *State, font rl.Font, theme render.Theme, l *soundLayout) {
-	drawSoundsColumnFrame(theme, l.paramsCol, s.soundLeftPanel == 0)
+	drawSoundsColumnFrame(theme, l.paramsCol, s.soundLeftPanel == soundPanelParams)
 	render.DrawSubHeading(font, "Synth params", l.paramsCol.X+12, l.paramsCol.Y+8, theme.BorderActive)
 
 	for i, slider := range soundParamSliders {
-		focused := s.soundLeftPanel == 0 && s.soundCursor == i
+		focused := s.soundLeftPanel == soundPanelParams && s.soundCursor == i
 		drawSoundsSlider(font, theme, l.paramsCol.X+12, l.sliderTracks[i].Y-8, l.paramsCol.Width-24, slider, s.soundParams, l.sliderTracks[i], focused)
 	}
 	// Name field. The "Name" label sits to the left of the text field;
 	// drawTextField paints the field itself with the shared editor palette.
-	nameFocused := s.soundLeftPanel == 0 && s.soundCursor == soundNameCursorIdx()
+	nameFocused := s.soundLeftPanel == soundPanelParams && s.soundCursor == soundNameCursorIdx()
 	nameLabelCol := theme.TextMuted
 	if nameFocused {
 		nameLabelCol = theme.BorderActive
@@ -654,7 +670,7 @@ func drawSoundsParamsCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 	rl.DrawTextEx(font, "Name", rl.NewVector2(l.paramsCol.X+12, l.nameField.Y+6), soundFontBody, 1, nameLabelCol)
 	drawTextField(font, l.nameField, s.soundName, nameFocused)
 	// Action buttons.
-	actionFocused := s.soundLeftPanel == 0 && s.soundCursor == soundActionCursorIdx()
+	actionFocused := s.soundLeftPanel == soundPanelParams && s.soundCursor == soundActionCursorIdx()
 	drawButton(font, l.previewBtn, "Preview (Space)", actionFocused)
 	drawButton(font, l.saveBtn, "Save", actionFocused)
 }
@@ -705,7 +721,7 @@ func drawSoundsSlider(font rl.Font, theme render.Theme, x, y, w float32, info so
 }
 
 func drawSoundsListCol(s *State, font rl.Font, theme render.Theme, l *soundLayout, names []string) {
-	drawSoundsColumnFrame(theme, l.listCol, s.soundLeftPanel == 1)
+	drawSoundsColumnFrame(theme, l.listCol, s.soundLeftPanel == soundPanelList)
 	render.DrawSubHeading(font, "Saved sounds", l.listCol.X+12, l.listCol.Y+8, theme.BorderActive)
 	if len(names) == 0 {
 		rl.DrawTextEx(font, "(no saved sounds yet)",
@@ -716,7 +732,7 @@ func drawSoundsListCol(s *State, font rl.Font, theme render.Theme, l *soundLayou
 	}
 	for i, name := range names {
 		r := l.listRows[i]
-		if s.soundLeftPanel == 1 && s.soundCursor == i {
+		if s.soundLeftPanel == soundPanelList && s.soundCursor == i {
 			render.DrawSelectedRow(r.Row)
 		}
 		render.DrawTextWithShadow(font, name,
@@ -727,11 +743,11 @@ func drawSoundsListCol(s *State, font rl.Font, theme render.Theme, l *soundLayou
 }
 
 func drawSoundsAssignCol(s *State, font rl.Font, theme render.Theme, l *soundLayout) {
-	drawSoundsColumnFrame(theme, l.assignCol, s.soundLeftPanel == 2)
+	drawSoundsColumnFrame(theme, l.assignCol, s.soundLeftPanel == soundPanelAssign)
 	render.DrawSubHeading(font, "Built-in cue assignments", l.assignCol.X+12, l.assignCol.Y+8, theme.BorderActive)
 	for i, cue := range assignableCueList {
 		r := l.assignRows[i]
-		if s.soundLeftPanel == 2 && s.soundCursor == i {
+		if s.soundLeftPanel == soundPanelAssign && s.soundCursor == i {
 			render.DrawSelectedRow(r.Row)
 		}
 		render.DrawTextWithShadow(font, audio.SoundName(cue),

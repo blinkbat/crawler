@@ -34,13 +34,14 @@ const (
 // is sized by it and asserted full at init.
 const RainKindCount = int(RainHeavy) + 1
 
-// rainKindWeights biases which storm rolls when one begins — light showers
-// common, heavy storms rare. Indexed by RainKind; summed and sampled by
-// rollRainKind, so the values are relative weights, not probabilities.
+// rainKindWeights biases which storm rolls when one begins — normal rain
+// the baseline, with heavy storms a frequent rather than rare outcome.
+// Indexed by RainKind; summed and sampled by rollRainKind, so the values
+// are relative weights, not probabilities.
 var rainKindWeights = [RainKindCount]float32{
-	RainLight:  0.50,
-	RainNormal: 0.35,
-	RainHeavy:  0.15,
+	RainLight:  0.30,
+	RainNormal: 0.40,
+	RainHeavy:  0.30,
 }
 
 // rollRainKind picks a storm flavor weighted by rainKindWeights.

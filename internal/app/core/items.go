@@ -11,7 +11,7 @@ const (
 	// Equipment items follow. Each one carries a SlotType +
 	// per-stat bonuses on its ItemDefinition. Inventory stores them
 	// like any other stack; the Equipment panel moves them between
-	// inventory and an equip slot via drag-and-drop.
+	// inventory and an equip slot via the slot picker.
 	ItemIronSword
 	ItemWoodenShield
 	ItemLeatherCap
@@ -69,8 +69,9 @@ func SlotIndexLabel(i EquipSlotIndex) string {
 		return "ACCESSORY 1"
 	case EquipAccessory2:
 		return "ACCESSORY 2"
+	default:
+		panic("core: SlotIndexLabel missing case for EquipSlotIndex")
 	}
-	return "?"
 }
 
 // SlotIndexType reports the EquipmentSlotType an equip slot accepts.
@@ -84,8 +85,12 @@ func SlotIndexType(i EquipSlotIndex) EquipmentSlotType {
 		return SlotArmor
 	case EquipAccessory1, EquipAccessory2:
 		return SlotAccessory
+	default:
+		// Load-bearing: CanEquipInSlot gates equipping on this result, so
+		// a new slot that forgets a case here would silently become
+		// un-equippable (SlotNone matches no item). Fail loudly instead.
+		panic("core: SlotIndexType missing case for EquipSlotIndex")
 	}
-	return SlotNone
 }
 
 // ItemDefinition is the static registry data for an item kind. Effect is
@@ -105,7 +110,7 @@ type ItemDefinition struct {
 	// Slot is the equipment slot type this item fits into. SlotNone
 	// means it's a consumable — usable from the battle Item action but
 	// not equippable. Non-None items show up in the Equipment panel's
-	// drag-and-drop affordance.
+	// slot picker.
 	Slot EquipmentSlotType
 	// ArmorBonus and MDefBonus add to the wearer's mitigation when
 	// this item is equipped. Both phys/magic flow through the same
@@ -365,9 +370,9 @@ func InventoryEmpty(inv []ItemStack) bool {
 // isConsumable reports whether a kind is a battle-usable consumable: a
 // positive-count item with no equip slot (cheese, jerky). Equipment
 // (Slot != SlotNone) shares the global inventory but can't be "used" in
-// combat — applyItem would consume it for 0 heal. The inverse of
-// equippableInventoryEntries' Slot != SlotNone test, kept here so the
-// "what's usable as an item?" rule lives in one place.
+// combat — applyItem would consume it for 0 heal. The inverse of the
+// Equipment-tab picker's CanEquipInSlot / Slot != SlotNone test, kept
+// here so the "what's usable as an item?" rule lives in one place.
 func isConsumable(kind ItemKind) bool {
 	return ItemInfo(kind).Slot == SlotNone
 }

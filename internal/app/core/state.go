@@ -64,12 +64,12 @@ func NewGameState(area AreaDefinition) GameState {
 		ChestOpen:  -1,
 		DoorPrompt: -1,
 		// Starter equipment kit: one of every equippable in the
-		// registry, plus an extra ring so the player has something
-		// to drag-test the accessory slots with. Iterating
-		// AllItems() (instead of a hand-typed literal) means a new
-		// equippable in items.go appears in the starter kit for
-		// free, and the panel's drag-drop has something live to
-		// land on the first time it opens.
+		// registry, plus an extra ring so the accessory slots have
+		// something to equip on first open. Iterating AllItems()
+		// (instead of a hand-typed literal) means a new equippable in
+		// items.go appears in the starter kit for free, and the
+		// Equipment panel's slot picker has something live to land on
+		// the first time it opens.
 		Inventory: starterEquipmentKit(),
 		Battle: Battle{
 			ActivePack:        -1,
@@ -95,7 +95,7 @@ func NewGameState(area AreaDefinition) GameState {
 // Walks AllItems() filtering for equippable items (Slot != SlotNone)
 // so adding a new piece of equipment to items.go automatically
 // shows up in fresh game state. Accessory items get a second copy
-// because there are two accessory slots and dragging the same kind
+// because there are two accessory slots and equipping the same kind
 // into both is the cleanest first-contact demo. Adjust if the new-
 // game economy ever demands a curated starter kit instead.
 func starterEquipmentKit() []ItemStack {
@@ -205,6 +205,12 @@ func ResetGameState(g *GameState) {
 	*g = NewGameState(g.Area)
 	g.Inventory = savedInventory
 	g.Party = savedParty
+	// Signal the render layer to drop any lingering particles. Restart can
+	// fire mid-battle (the pause menu's Restart row is reachable outside the
+	// two timing phases), so formation-relative battle particles would
+	// otherwise ghost into the fresh field at wrong camera-relative spots —
+	// the same reason clearBattleResidual / area transitions request it.
+	RequestVFXReset(g)
 }
 
 func resetPartyForFieldRecovery(party []PartyMember) []PartyMember {

@@ -221,6 +221,49 @@ func NewMultiPressState(rng *rand.Rand, duration float32, count int) TimingState
 	}
 }
 
+// NewTallyStateAtCenters builds a tally-mode press bar with accept
+// windows hand-placed at the given fractional centers (0..1 of the bar
+// duration) rather than NewMultiPressState's even spread. Used where a
+// skill wants a specific rhythm: Swipe's two hits sit around the middle
+// and just before the commit tail (a "wind up, then the big swing"
+// beat) instead of bunched at the two ends. Each window keeps
+// MultiPressWindow.WindowWidthFrac width and is clamped so it stays
+// fully inside [winWidth/2, commitStart-winWidth/2] — a center pushed
+// into the commit tail would otherwise become unpressable.
+func NewTallyStateAtCenters(duration float32, centers ...float32) TimingState {
+	if duration <= 0 {
+		duration = AttackTimingDuration
+	}
+	commitStart := 1.0 - MultiPressWindow.CommitZoneFrac
+	winWidth := MultiPressWindow.WindowWidthFrac
+	lo := winWidth * 0.5
+	hi := commitStart - winWidth*0.5
+	if hi < lo {
+		hi = lo
+	}
+	windows := make([]TallyWindow, 0, len(centers))
+	for _, c := range centers {
+		if c < lo {
+			c = lo
+		}
+		if c > hi {
+			c = hi
+		}
+		windows = append(windows, TallyWindow{
+			Start: (c - winWidth*0.5) * duration,
+			End:   (c + winWidth*0.5) * duration,
+			Sweet: c * duration,
+		})
+	}
+	return TimingState{
+		Kind:        TimingKindPress,
+		Active:      true,
+		Duration:    duration,
+		Windows:     windows,
+		CommitStart: commitStart * duration,
+	}
+}
+
 // randomizedPressWindow returns (start, end, sweet) fractions for a press
 // window placed inside [minStart, maxStart] with the fixed `width`. If the
 // roll would push the window past `maxEnd` it slides back so the full

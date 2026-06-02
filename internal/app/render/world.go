@@ -1003,10 +1003,11 @@ func DrawEnemies(camera rl.Camera3D, g core.GameState, assets Resources) {
 	drawBattlePack(camera, g, assets)
 }
 
-// enemyBillboardY is the y-anchor for every enemy/pack billboard. Half
-// of TileSize sits the billboard centered on the tile vertically so its
-// bottom edge meets the floor when the sprite size's Y is ~tile-height.
-// Named so the four call sites that used to inline 0.68 can't drift.
+// enemyBillboardY is the y-anchor for every enemy/pack billboard — an
+// empirically-tuned footing height (matches the billboard's half-height,
+// partyBillboardSize.Y below) so the sprite's bottom edge meets the floor
+// rather than floating or sinking. Named so the four call sites that used
+// to inline 0.68 can't drift.
 const enemyBillboardY = float32(0.68)
 
 // Party billboard sizes. partyBillboardSize is the idle silhouette; the
@@ -1079,6 +1080,12 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 		if enemy.Alive && targetingEnemy(g) && i == g.Battle.EnemyIndex {
 			tint = tintEnemyTargeted
 			drawTargetChevron(camera, position)
+		} else if enemy.Alive && aoeEnemyTargetPreview(g) {
+			// AoE skill highlighted in the Skill submenu: every living
+			// enemy gets a chevron so the player sees the cast hits the
+			// whole line, not one target.
+			tint = tintEnemyTargeted
+			drawTargetChevron(camera, position)
 		}
 		// During BattleEnemyTiming the warm tint on the attacker carries
 		// the "this one is swinging" read; the red pyramid moved over to
@@ -1096,6 +1103,26 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 		// fog color, only darken or color-filter the texture.
 		drawTextureBillboard(camera, visual.texture, position, visual.size, tint)
 	}
+}
+
+// aoeEnemyTargetPreview reports whether the player is highlighting an
+// all-enemy AoE skill in the Skill submenu — the cue to fan the target
+// chevron across every living enemy so the AoE reads before it fires.
+// Gated on Phase==BattlePlayer + ActionMode==ActionSkillMenu so it only
+// previews during selection, not once the timing bar arms.
+func aoeEnemyTargetPreview(g core.GameState) bool {
+	if g.Battle.Phase != core.BattlePlayer || g.Battle.ActionMode != core.ActionSkillMenu {
+		return false
+	}
+	if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
+		return false
+	}
+	skills := core.PartySkills(g.Party[g.Battle.CurrentParty])
+	idx := g.Battle.SkillMenuIndex
+	if idx < 0 || idx >= len(skills) {
+		return false
+	}
+	return core.SkillTargetsAllEnemies(skills[idx])
 }
 
 // isEnemyAttackerSlot reports whether the given active-pack member slot
@@ -1165,10 +1192,13 @@ var (
 	// Yellow — paired with the in-roster row highlight via
 	// targetingEnemy().
 	markerEnemyTarget = markerStyle{
-		tipYOffset: 0.74,
-		height:     0.20,
-		baseRadius: 0.085,
-		color:      rl.NewColor(255, 222, 94, 245),
+		// Sits lower (nearer the enemy's head, not floating high above)
+		// and bigger + fully opaque so the current target reads at a
+		// glance — the old marker was small, high, and easy to lose.
+		tipYOffset: 0.56,
+		height:     0.28,
+		baseRadius: 0.12,
+		color:      rl.NewColor(255, 224, 80, 255),
 		phase:      0.0,
 	}
 	// markerFriendlyTarget is the player's currently-selected ally
@@ -1318,6 +1348,18 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 		}
 		if g.Party[i].DamageFlash > 0 {
 			tint = core.FlashTint(tint, g.Party[i].DamageFlash)
+		}
+		// Active actor: a soft, pulsing, class-tinted additive copy drawn
+		// behind the sprite so it visibly glows — pairs with the lifted /
+		// haloed party card to make "your turn" unmistakable. Drawn before
+		// the crisp sprite so the silhouette stays sharp on top.
+		if inPlayerTurn(g) && i == g.Battle.CurrentParty && g.Party[i].HP > 0 {
+			glow := partyClassPresentationFor(g.Party[i].Class).turnColor
+			glow.A = uint8(150 * pulseActiveActor())
+			glowSize := rl.NewVector2(size.X*1.4, size.Y*1.16)
+			rl.BeginBlendMode(rl.BlendAdditive)
+			drawTextureBillboard(camera, texture, position, glowSize, glow)
+			rl.EndBlendMode()
 		}
 		// Distance fog is applied by the active billboard-fog
 		// shader (BeginShaderMode at the top of this function).

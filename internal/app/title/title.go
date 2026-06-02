@@ -52,8 +52,12 @@ func Update(s *State) Action {
 		return updateMain(s)
 	case modeMapPicker:
 		return updateMapPicker(s)
+	default:
+		// Mirrors run.go's scene-dispatch panic — a new title mode that
+		// forgets an Update case would otherwise be a dead screen that
+		// silently swallows all input.
+		panic("title: unhandled mode in Update")
 	}
-	return ActionNone
 }
 
 // mainMenuRowDef binds a title-menu row to its label producer and its
@@ -142,7 +146,7 @@ func Draw(s State, assets render.Resources) {
 	font := assets.Font()
 	theme := assets.Theme()
 	rl.ClearBackground(rl.NewColor(8, 12, 24, 255))
-	screenW, screenH := render.ScreenSize()
+	_, screenH := render.ScreenSize()
 
 	title := "CRAWLER"
 	// Game-name splash — the documented exception to the five-size
@@ -161,7 +165,7 @@ func Draw(s State, assets render.Resources) {
 	// frames the wordmark.
 	ruleY := titleY + tm.Y + 14
 	ruleW := tm.X + 48
-	ruleX := float32(screenW)/2 - ruleW/2
+	ruleX := render.CenterXF(ruleW)
 	render.DrawTitleRule(ruleX, ruleY, ruleW)
 
 	switch s.mode {

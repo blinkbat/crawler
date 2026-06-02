@@ -199,8 +199,12 @@ func PanelTabLabel(t PanelTab) string {
 		return "Skills"
 	case PanelTabMap:
 		return "Map"
+	default:
+		// Parallel to the PanelTabCount-locked render.panelTabDrawers
+		// array: a new tab that forgets a label here fails loudly instead
+		// of showing "?" in the tab strip.
+		panic("core: PanelTabLabel missing case for PanelTab")
 	}
-	return "?"
 }
 
 // Chest is one runtime chest on the field. Items is the stack-counted
@@ -309,11 +313,30 @@ type GameState struct {
 	// clean. It also doubles as the "debug mode" master gate: the Debug
 	// submenu (and its toggles below) is only reachable while this is on.
 	DebugOverlay bool
-	// DebugMenuOpen is true while the debug submenu is showing. Reachable
-	// only when DebugOverlay (debug mode) is on; opened from the pause
-	// menu's Debug row. DebugMenuIndex is its row cursor.
+	// DebugMenuOpen is true while the debug submenu is showing. Opened
+	// from the pause menu's Debug row (always reachable now — the master
+	// "Debug Mode" on/off toggle lives inside the submenu). DebugMenuIndex
+	// is its row cursor.
 	DebugMenuOpen  bool
 	DebugMenuIndex int
+	// OptionsMenuOpen is true while the Options submenu is showing (opened
+	// from the pause menu's Options row). OptionsMenuIndex is its cursor.
+	// Mutually exclusive with MenuOpen / DebugMenuOpen — opening a submenu
+	// drops the pause menu, mirroring the Debug submenu flow.
+	OptionsMenuOpen  bool
+	OptionsMenuIndex int
+	// Out-of-battle "use" target picker, shared by the panels overlay's
+	// Items tab (use a consumable on an ally) and Skills tab (cast a
+	// single-target heal on an ally). UseTargetOpen gates the ally-picker
+	// sub-modal; UseTargetCursor indexes the LIVING-member list it shows.
+	// Exactly one of UsePendingItem / UsePendingSkill is set (the other is
+	// its None sentinel) to say what the chosen ally receives; the skill
+	// path also remembers UsePendingCaster (the member paying the MP).
+	UseTargetOpen   bool
+	UseTargetCursor int
+	UsePendingItem  ItemKind
+	UsePendingSkill SkillID
+	UsePendingCaster int
 	// EnemiesDisabled (debug) removes field packs from play: they stop
 	// rendering and neither the step-into nor the wander AI can start a
 	// battle. Lets the player walk a map freely to inspect it.
@@ -398,22 +421,23 @@ type GameState struct {
 	PanelsOpen      bool
 	PanelsTab       PanelTab
 	PanelsRowCursor int
-	// EquipDrag tracks an in-progress drag on the Equipment tab: the
-	// item being held under the cursor, where it came from, and which
-	// member/slot/inventory index owned it. Zero-valued ("Source ==
-	// EquipDragSourceNone") means no drag — the panel renders resting
-	// state. ClearEquipDrag resets it on drop / overlay close.
-	EquipDrag EquipDragState
-	// EquipCursor is the keyboard/controller focus cell on the
-	// Equipment tab (a member's slot, or an inventory-strip tile).
-	// EquipCursorActive is true while the d-pad / stick — not the
-	// mouse — owns the panel: it flips on directional / Confirm input
-	// and back off when the mouse moves, so drag-and-drop and the
-	// cursor coexist without fighting. Render reads both to paint the
-	// focus outline and anchor the held-item ghost. Reset via
-	// core.ResetEquipCursor on overlay open / tab switch.
-	EquipCursor       EquipCursorState
-	EquipCursorActive bool
+	// PanelsSkillRow is the Skills-tab vertical cursor: which of the
+	// member's SkillsPerClass skills Confirm will buy the next tier of.
+	// Kept apart from PanelsRowCursor because the Skills tab is 2-D —
+	// PanelsRowCursor picks the member COLUMN (Left/Right) while this
+	// picks the skill ROW (Up/Down). Reset to 0 on tab switch / open,
+	// alongside PanelsRowCursor.
+	PanelsSkillRow int
+	// Equipment tab (no drag-and-drop — it works like the Items menu).
+	// EquipSlotCursor is the focused equip slot row (0..EquipSlotCount-1)
+	// on the cursored member (PanelsRowCursor picks the member column).
+	// Confirm/click on a slot opens the item picker: a smaller sub-modal
+	// listing the inventory items eligible for that slot. EquipPickerOpen
+	// gates that sub-modal and EquipPickerCursor is the row inside it.
+	// All three reset on overlay open / tab switch (ResetEquipPanels).
+	EquipSlotCursor   int
+	EquipPickerOpen   bool
+	EquipPickerCursor int
 	// PanelsMapZoom is the cells-on-screen value for the Map tab. Saved
 	// separately from PanelsScroll so cycling between tabs preserves
 	// each tab's cursor state. Initialized lazily on first Map view.
@@ -463,6 +487,15 @@ func (g *GameState) Rand() *rand.Rand {
 		g.RNG = rand.New(rand.NewSource(rand.Int63()))
 	}
 	return g.RNG
+}
+
+// SetStatusMessage writes the transient status / quiet-message line shown
+// under the HUD. Battle's setBattleStatus and the exploration code (e.g. a
+// failed door transition) share this slot — it doubles as the ambient
+// "quiet message" out of combat — so writes route through here rather than
+// poking g.Battle.Message directly at the call site.
+func (g *GameState) SetStatusMessage(msg string) {
+	g.Battle.Message = msg
 }
 
 // Pack is one runtime enemy pack on the field. Members carries the per-

@@ -167,6 +167,17 @@ type SkillEffect struct {
 	// rather than a hard-coded SkillID branch so future raises
 	// (Raise Zombie, Raise Ghoul) can reuse the apply.
 	AppliesSummonSkeleton bool
+	// AppliesAOEEnemies declares that a player skill hits EVERY living
+	// enemy in the pack (Swipe / Whirlwind / Arc Bolt) rather than a
+	// single target — the player-side mirror of AppliesAOEParty. The
+	// render-side targeting preview (SkillTargetsAllEnemies) reads it to
+	// fan the chevron across the whole enemy line; the battle apply path
+	// implements the actual multi-hit in each skill's applyAoEDamage
+	// handler. Set it on exactly the skills whose handler loops the pack
+	// so the preview and the hit can't disagree (a future single-target
+	// ActionMenu skill won't read as AoE the way the old shape-heuristic
+	// risked).
+	AppliesAOEEnemies bool
 }
 
 // Party stats post-difficulty pass. Numbers are deliberately tighter than
@@ -203,7 +214,7 @@ var partyClassByID = BuildRegistry(partyClassDefinitions, func(d PartyClassDefin
 // and Firebolt's burn-chance pulled down so a single Excellent doesn't
 // auto-burn every cast.
 var skillDefinitions = []skillDefinition{
-	{Skill: SkillSwipe, Name: "Swipe", Description: "STR-scaled cleave through every living enemy in the pack.", Cost: 2, TargetMode: ActionMenu, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigamePress, Effect: SkillEffect{Damage: 0}, PlayerCastable: true},
+	{Skill: SkillSwipe, Name: "Swipe", Description: "STR-scaled cleave through every living enemy in the pack.", Cost: 2, TargetMode: ActionMenu, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigamePress, Effect: SkillEffect{Damage: 0, AppliesAOEEnemies: true}, PlayerCastable: true},
 	{Skill: SkillPrayer, Name: "Prayer", Description: "WIS-scaled single-ally heal. Charge bar — release at peak.", Cost: 4, TargetMode: ActionPartyTarget, Kind: SkillKindHeal, Tag: SkillTagHeal, Minigame: MinigameCharge, Effect: SkillEffect{Heal: 1}, PlayerCastable: true},
 	{Skill: SkillSteal, Name: "Steal", Description: "Pickpocket the target. Timing quality drives the chance.", Cost: 0, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigameSequence, Effect: SkillEffect{StealChance: StealBaseChance}, PlayerCastable: true},
 	{Skill: SkillFirebolt, Name: "Firebolt", Description: "INT-scaled magic damage. Chance to inflict Burn.", Cost: 5, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 1, BurnChance: FireboltBurnChance, BurnMinTurns: 2, BurnMaxTurns: 3}, PlayerCastable: true, EnemyCastable: true},
@@ -217,7 +228,7 @@ var skillDefinitions = []skillDefinition{
 	// every enemy for chip damage, an Excellent reaps everyone. The
 	// cost is the charge wind-up risk: spinning up in a tight room
 	// can leave the warrior exposed if an enemy beats them on SPD.
-	{Skill: SkillWhirlwind, Name: "Whirlwind", Description: "STR-scaled AoE cleave. Charge — quality scales hard.", Cost: 4, TargetMode: ActionMenu, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 2}, PlayerCastable: true},
+	{Skill: SkillWhirlwind, Name: "Whirlwind", Description: "STR-scaled AoE cleave. Charge — quality scales hard.", Cost: 4, TargetMode: ActionMenu, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 2, AppliesAOEEnemies: true}, PlayerCastable: true},
 	// Mass Mend (Cleric): charge-up AoE heal. +1 base + WIS per ally,
 	// 6 MP. Smaller per-target than Prayer but covers the whole alive
 	// party — the cleric's answer to a Whirlwind / multi-poison turn
@@ -251,7 +262,7 @@ var skillDefinitions = []skillDefinition{
 	// new bolt arcing to the next enemy; on apply, all living enemies
 	// take quality-scaled damage. Magic-tagged so amoebas don't
 	// shrug it off. Pricier than Firebolt because it hits everyone.
-	{Skill: SkillArcBolt, Name: "Arc Bolt", Description: "INT-scaled magic AoE. Sequence — arcs to every enemy.", Cost: 6, TargetMode: ActionMenu, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameSequence, Effect: SkillEffect{Damage: 1}, PlayerCastable: true},
+	{Skill: SkillArcBolt, Name: "Arc Bolt", Description: "INT-scaled magic AoE. Sequence — arcs to every enemy.", Cost: 6, TargetMode: ActionMenu, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameSequence, Effect: SkillEffect{Damage: 1, AppliesAOEEnemies: true}, PlayerCastable: true},
 	// Sleep is the goblin-mage's signature. Magic-tagged so armor doesn't
 	// gate the proc; press-minigame so the cast resolves quickly. Damage
 	// is 0 — the only effect is the status. The mage doesn't pay MP
@@ -419,6 +430,44 @@ func SkillTargetMode(skill SkillID) ActionMode {
 		return def.TargetMode
 	}
 	return ActionMenu
+}
+
+// SkillTargetsAllEnemies reports whether a player skill hits every
+// living enemy in the pack (Swipe / Whirlwind / Arc Bolt). Reads the
+// declarative SkillEffect.AppliesAOEEnemies flag rather than inferring
+// from skill shape, so the render-side targeting preview (which fans
+// the chevron across the whole enemy line) stays pinned to the same
+// marker the AoE skills carry. Stoneslam hits the PARTY (AppliesAOEParty)
+// and is EnemyCastable-only, so it's excluded.
+func SkillTargetsAllEnemies(skill SkillID) bool {
+	def, ok := skillInfo(skill)
+	return ok && def.PlayerCastable && def.Effect.AppliesAOEEnemies
+}
+
+// SkillHealableOutOfBattle reports whether a player skill can be cast
+// from the panels overlay's Skills tab while exploring — currently the
+// Heal-tagged skills (Prayer, Mass Mend). Damage / utility skills stay
+// battle-only. Used by the Skills-tab "Use" action to decide which rows
+// are castable out of combat.
+func SkillHealableOutOfBattle(skill SkillID) bool {
+	def, ok := skillInfo(skill)
+	return ok && def.PlayerCastable && def.Tag == SkillTagHeal
+}
+
+// HealMember restores up to `amount` HP to a LIVING, non-ingested member,
+// clamped at MaxHP. It never revives (a downed member at HP <= 0 is
+// untouched — reviving is not a heal), ignores non-positive amounts, and
+// skips a member ingested by a mantrap (out of reach, untargetable —
+// matching applyMassMend's in-battle skip). Item / skill use routes
+// through this so the clamp + no-revive + ingest rules live in one place.
+func HealMember(m *PartyMember, amount int) {
+	if m == nil || amount <= 0 || m.HP <= 0 || m.Ingested {
+		return
+	}
+	m.HP += amount
+	if m.HP > m.MaxHP {
+		m.HP = m.MaxHP
+	}
 }
 
 func SkillEffectFor(skill SkillID) SkillEffect {
@@ -1035,8 +1084,13 @@ func StatPreviewLine(stat Stat, current Stats, pending int) string {
 		return fmt.Sprintf("MaxHP %d → %d", MaxHPFor(current), MaxHPFor(after))
 	case StatSPD:
 		return fmt.Sprintf("SPD %d → %d (more turns)", current.SPD, after.SPD)
+	default:
+		// statTable's init assert guarantees a row per Stat; this switch
+		// is the parallel one it doesn't cover. The leading range check
+		// means we only reach here for an in-range Stat with no preview
+		// case — a wiring gap worth surfacing loudly.
+		panic("core: StatPreviewLine missing case for stat")
 	}
-	return ""
 }
 
 // CommitLevelUp applies the staged stat-point spend on a member by

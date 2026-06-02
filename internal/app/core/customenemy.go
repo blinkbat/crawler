@@ -54,6 +54,15 @@ func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
 	if !ok {
 		return CustomEnemyDef{}, fmt.Errorf("custom enemy %q references unknown base kind %q", ce.Name, ce.BaseKind)
 	}
+	// HP must be positive. A hand-edited row with hp <= 0 would Instantiate
+	// to an Enemy{HP:0, MaxHP:0, Alive:true} — an "alive corpse" that
+	// enemyAlive() (keyed on Alive, not HP) counts as a live combatant, so
+	// the encounter can never be won until the player manually whittles it
+	// negative. Refuse it at load instead, the same way AreaFromMapFile
+	// rejects bad dimensions.
+	if ce.HP <= 0 {
+		return CustomEnemyDef{}, fmt.Errorf("custom enemy %q has non-positive HP (%d)", ce.Name, ce.HP)
+	}
 	skills := make([]SkillID, 0, len(ce.Skills))
 	for _, name := range ce.Skills {
 		id, ok := SkillIDFromOnDiskName(name)

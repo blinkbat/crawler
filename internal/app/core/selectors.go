@@ -82,6 +82,14 @@ func LivingPartyCount(party []PartyMember) int {
 	return countWhere(party, partyAlive)
 }
 
+// LivingPartyIndices returns the seat indices of every member with HP > 0
+// — the selectable set for the out-of-battle ally-target picker, where the
+// Ingested status doesn't apply. (The in-battle target cyclers use
+// AvailablePartyTargets, which additionally excludes ingested prey.)
+func LivingPartyIndices(party []PartyMember) []int {
+	return indicesWhere(party, partyAlive)
+}
+
 func PartyMemberAlive(party []PartyMember, index int) bool {
 	return index >= 0 && index < len(party) && party[index].HP > 0
 }
@@ -184,6 +192,23 @@ func ReleaseAllIngested(party []PartyMember) {
 	}
 }
 
+// ClearPartyTransientStatuses wipes the combat-only status effects off
+// every party member at battle exit — EXCEPT Poison, which lingers as a
+// lasting wound. It never touches HP, so the dead stay dead. Per the
+// current design call, only "dead" and "poisoned" survive a fight;
+// Sleep / Stun / Webbed / Confused and the Defending stance all clear
+// the moment the battle ends. (Ingest is released separately via
+// ReleaseAllIngested, which also restores the swallowed member.)
+func ClearPartyTransientStatuses(party []PartyMember) {
+	for i := range party {
+		party[i].SleepTurns = 0
+		party[i].StunTurns = 0
+		party[i].WebbedTurns = 0
+		party[i].ConfusedTurns = 0
+		party[i].Defending = false
+	}
+}
+
 // ModalKind tags the active full-screen modal in the exploration
 // scene. Listed in priority order — higher values "win" over lower
 // when multiple flags are set, mirroring the explore.Update gate
@@ -195,6 +220,7 @@ type ModalKind int
 const (
 	ModalNone ModalKind = iota
 	ModalPauseMenu
+	ModalOptionsMenu
 	ModalDebugMenu
 	ModalDoorPrompt
 	ModalChest
@@ -230,6 +256,8 @@ func ActiveModal(g *GameState) ModalKind {
 		return ModalDoorPrompt
 	case g.DebugMenuOpen:
 		return ModalDebugMenu
+	case g.OptionsMenuOpen:
+		return ModalOptionsMenu
 	case g.MenuOpen:
 		return ModalPauseMenu
 	}

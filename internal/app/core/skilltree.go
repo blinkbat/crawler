@@ -204,17 +204,26 @@ func skillTierUpgradeFor(s SkillID, tier int) (SkillTierUpgrade, bool) {
 	return rows[tier-1], true
 }
 
-// SkillNextTierCost returns the SkillPoint cost for the next
-// purchasable tier of `s` on member `m`, plus an ok flag (false when
-// the tree is already maxed). The Skills panel reads this for the
-// "Press Enter to learn" affordance and to decide whether a node
-// renders as buyable, available-but-too-expensive, or maxed.
-func SkillNextTierCost(m *PartyMember, s SkillID) (int, bool) {
+// SkillNextTierUpgrade returns the next purchasable upgrade for skill
+// `s` on member `m` — the tier one above whatever the member has
+// already bought — plus an ok flag that is false when the tree is
+// already maxed. The Skills panel's tree UI reads it to label the
+// "next purchase" affordance (its Label / Description / Cost) and to
+// decide whether a row renders as buyable, too-expensive, or maxed.
+func SkillNextTierUpgrade(m *PartyMember, s SkillID) (SkillTierUpgrade, bool) {
 	current := SkillTierOf(m, s)
 	if current >= MaxSkillTier {
-		return 0, false
+		return SkillTierUpgrade{}, false
 	}
-	up, ok := skillTierUpgradeFor(s, current+1)
+	return skillTierUpgradeFor(s, current+1)
+}
+
+// SkillNextTierCost returns the SkillPoint cost for the next
+// purchasable tier of `s` on member `m`, plus an ok flag (false when
+// the tree is already maxed). Thin cost-only wrapper over
+// SkillNextTierUpgrade for callers that only need the price.
+func SkillNextTierCost(m *PartyMember, s SkillID) (int, bool) {
+	up, ok := SkillNextTierUpgrade(m, s)
 	if !ok {
 		return 0, false
 	}
@@ -231,11 +240,10 @@ func SkillNextTierCost(m *PartyMember, s SkillID) (int, bool) {
 // On success the SkillTiers map is allocated lazily, SkillPoints
 // decremented by the upgrade's Cost, and the new tier recorded.
 //
-// Deferred: nothing calls this yet — the Skills-panel buy UI that would
-// invoke it (and SkillNextTierCost) is not built. Kept as the intended
-// public spend entry point; the tier table and the combat reads through
-// EffectiveSkillEffect / SkillTierMod are already live, so only the
-// spend half awaits its UI.
+// Invoked by the panels overlay's Skills tab (explore/panels.go): the
+// player navigates to a skill row and Confirms to buy its next tier.
+// The combat reads through EffectiveSkillEffect / SkillTierMod pick the
+// purchased tiers up immediately on the next cast.
 func SpendSkillTier(m *PartyMember, s SkillID) bool {
 	if m == nil {
 		return false

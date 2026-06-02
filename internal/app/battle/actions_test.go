@@ -93,19 +93,25 @@ func TestApplyAttack_DealsSTRDamageAndPopup(t *testing.T) {
 	g := newTestState()
 	startHP := g.Packs[0].Members[0].HP
 	applyAttack(g, core.TimingQualityExcellent)
-	// STR 6, base 0, Excellent doubles → 12. Rat has 10 MaxHP so the rat
-	// dies either way. With the crit system in place, the roll can land
-	// a Critical that doubles AGAIN to 24 — the test accepts either,
-	// since the contract being asserted is "STR damage applied and the
-	// popup recorded the dealt figure," not "crit roll did/didn't fire."
+	// STR 6, base 0, Excellent doubles → 12 base damage. The crit roll can
+	// double AGAIN to 24; appendCrit suffixes " Critical!" to the log line
+	// exactly when it fires. Rather than accept either value (which would
+	// pass even if the popup ignored the crit), tie the popup to the actual
+	// crit outcome so a bug that doubled without a crit — or failed to
+	// double on one — is caught. Deterministic under the seed-1 RNG.
 	if g.Packs[0].Members[0].HP != 0 {
 		t.Fatalf("expected rat at 0 HP, got %d (start %d)", g.Packs[0].Members[0].HP, startHP)
 	}
 	if g.Packs[0].Members[0].Alive {
 		t.Fatalf("rat should be dead")
 	}
-	if got := g.Packs[0].Members[0].DamagePopup; got != 12 && got != 24 {
-		t.Fatalf("popup should record 12 (no crit) or 24 (crit), got %d", got)
+	crit := strings.Contains(g.Battle.Message, "Critical")
+	want := 12
+	if crit {
+		want = 24
+	}
+	if got := g.Packs[0].Members[0].DamagePopup; got != want {
+		t.Fatalf("popup should be %d (crit=%v), got %d", want, crit, got)
 	}
 }
 
