@@ -222,6 +222,7 @@ const (
 	ModalPauseMenu
 	ModalOptionsMenu
 	ModalDebugMenu
+	ModalShop
 	ModalDoorPrompt
 	ModalChest
 	ModalPanels
@@ -250,6 +251,11 @@ func ActiveModal(g *GameState) ModalKind {
 		return ModalLevelUp
 	case g.PanelsOpen:
 		return ModalPanels
+	case g.ShopOpen:
+		// Opened from the pause menu (which clears MenuOpen), so in
+		// practice nothing else is open alongside it; sits high in the
+		// ladder so a stray lower flag can't shadow the shop's input.
+		return ModalShop
 	case g.ChestOpen >= 0 && g.ChestOpen < len(g.Chests):
 		return ModalChest
 	case g.DoorPrompt >= 0 && g.DoorPrompt < len(g.Doors):
@@ -275,28 +281,41 @@ func EnemyAlive(enemies []Enemy, index int) bool {
 	return index >= 0 && index < len(enemies) && enemies[index].Alive
 }
 
+// ActivePack returns a write-through pointer to the engaged pack, or nil
+// when no battle is in progress / ActivePack is out of range. The single
+// home for the "is there a live engaged pack?" bounds check — BattleMembers,
+// BattleMemberAt, AwardBattleXP, AwardBattleLoot, and the enemy-summon path
+// all read through it instead of each re-rolling
+// `ActivePack < 0 || >= len(g.Packs)`.
+func ActivePack(g *GameState) *Pack {
+	if g.Battle.ActivePack < 0 || g.Battle.ActivePack >= len(g.Packs) {
+		return nil
+	}
+	return &g.Packs[g.Battle.ActivePack]
+}
+
 // BattleMembers returns the active pack's member slice, or nil when no
 // pack is engaged. Callers that need write access through the slice (HP,
 // flags, etc.) can index it directly since &Members[i] is stable for the
 // lifetime of the pack.
 func BattleMembers(g *GameState) []Enemy {
-	if g.Battle.ActivePack < 0 || g.Battle.ActivePack >= len(g.Packs) {
-		return nil
+	if p := ActivePack(g); p != nil {
+		return p.Members
 	}
-	return g.Packs[g.Battle.ActivePack].Members
+	return nil
 }
 
 // BattleMemberAt returns a write-through pointer to one member of the
 // active pack, or nil if the slot is invalid.
 func BattleMemberAt(g *GameState, slot int) *Enemy {
-	if g.Battle.ActivePack < 0 || g.Battle.ActivePack >= len(g.Packs) {
+	p := ActivePack(g)
+	if p == nil {
 		return nil
 	}
-	members := g.Packs[g.Battle.ActivePack].Members
-	if slot < 0 || slot >= len(members) {
+	if slot < 0 || slot >= len(p.Members) {
 		return nil
 	}
-	return &members[slot]
+	return &p.Members[slot]
 }
 
 // BattleEnemyAlive is the slot-aware alive check for the active pack.
@@ -411,10 +430,11 @@ func PackXPValue(p Pack) int {
 // (for log messages). Called from winBattle right after the kill is
 // confirmed but before the victory timer / level-up modal trigger.
 func AwardBattleXP(g *GameState) (perMember int, leveledIndices []int) {
-	if g.Battle.ActivePack < 0 || g.Battle.ActivePack >= len(g.Packs) {
+	pack := ActivePack(g)
+	if pack == nil {
 		return 0, nil
 	}
-	perMember = PackXPValue(g.Packs[g.Battle.ActivePack])
+	perMember = PackXPValue(*pack)
 	if perMember <= 0 {
 		return 0, nil
 	}

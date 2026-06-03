@@ -100,16 +100,21 @@ type MapPack struct {
 const (
 	PackAINoneName        = "none"
 	PackAIJunkyardDogName = "junkyard_dog"
+	PackAIPatrolName      = "patrol"
+	PackAISkittishName    = "skittish"
 )
 
 // PackAINames is the canonical on-disk order for pack-AI strings,
-// matching core.PackAINone/JunkyardDog by index. PackAINoneName at
-// index 0 means an absent / empty AI column resolves to the no-op
-// behavior — the default per the editor's "new packs are stationary"
-// rule.
+// matching the core.PackAI enum by index. PackAINoneName at index 0
+// means an absent / empty AI column resolves to the no-op behavior —
+// the default per the editor's "new packs are stationary" rule. Order
+// here MUST match core's PackAI iota (core/areas.go's packAINameTable
+// init asserts the two stay aligned row-for-row).
 var PackAINames = [...]string{
 	PackAINoneName,
 	PackAIJunkyardDogName,
+	PackAIPatrolName,
+	PackAISkittishName,
 }
 
 // IsPackAIName reports whether s names one of the canonical pack-AI

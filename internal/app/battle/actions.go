@@ -337,11 +337,11 @@ func handleEnemyStoneslam(ctx enemySpellCtx) {
 // time we get here, a cast is legal.
 func handleEnemyRaiseBones(ctx enemySpellCtx) {
 	g := ctx.g
-	if g.Battle.ActivePack < 0 || g.Battle.ActivePack >= len(g.Packs) {
+	pack := core.ActivePack(g)
+	if pack == nil {
 		setBattleMessage(g, fmt.Sprintf("%s gestures, but the bones refuse to rise.", core.TheEnemy(ctx.def)))
 		return
 	}
-	pack := &g.Packs[g.Battle.ActivePack]
 	skeleton := core.NewEnemy(core.EnemySkeleton)
 	pack.Members = append(pack.Members, skeleton)
 	// The skeleton enters the turn queue automatically: beginNewRound
@@ -746,13 +746,18 @@ func applyAttack(g *core.GameState, quality int) bool {
 	// they essentially never whiff. The swing animation still plays and
 	// the timing popup still grades — the player's mechanical performance
 	// is acknowledged — but no damage lands when the roll fails.
-	if !core.MemberAttackHits(g.Rand(), *attacker, quality) {
+	if !core.MemberAttackHitsTarget(g.Rand(), *attacker, target, quality) {
 		// Whiff log keeps the quality prefix so the line reads consistently
 		// with hits ("Excellent! Warrior hits for 8." vs "Excellent! Warrior
 		// swings wide."). The popup over the actor still says "Excellent!"
 		// because the *timing* graded that way — accuracy is a separate roll
-		// layered on top.
-		setBattleMessage(g, fmt.Sprintf("%s%s swings wide.", qualityTag(quality), attacker.Name))
+		// layered on top. A melee swing at a flyer reads "can't reach" so the
+		// elevated miss rate is legible as the flying penalty, not bad luck.
+		whiff := fmt.Sprintf("%s%s swings wide.", qualityTag(quality), attacker.Name)
+		if core.EnemyInfoFor(target).Flying && !core.MemberMeleeReachesFlyer(*attacker) {
+			whiff = fmt.Sprintf("%s%s can't reach the airborne %s.", qualityTag(quality), attacker.Name, core.EnemySingularNoun(target))
+		}
+		setBattleMessage(g, whiff)
 		finishPartyAction(g)
 		return true
 	}

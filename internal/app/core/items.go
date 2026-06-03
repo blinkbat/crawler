@@ -128,13 +128,19 @@ type ItemDefinition struct {
 	// (STR melee) for basic-attack purposes. Drives which stat the basic
 	// attack rolls to-hit and scales damage off.
 	Weapon WeaponType
+	// Price is the gold cost to buy this item at the shop. 0 means "not
+	// for sale" — such an item never appears in the shop's Buy catalog
+	// (ShopCatalog) and can't be sold back (SellableStacks filters it
+	// out). Sell-back value is ShopSellPrice(Price). Every starter item
+	// carries a price so the shop has stock and the inventory is liquid.
+	Price int
 }
 
 var itemDefinitions = []ItemDefinition{
-	{Kind: ItemCheese, Name: "Morsel of Cheese", HealAmount: 4, Description: "A bite of stale cheese. Better than nothing."},
+	{Kind: ItemCheese, Name: "Morsel of Cheese", HealAmount: 4, Price: 6, Description: "A bite of stale cheese. Better than nothing."},
 	// Bat jerky heals more than cheese — bats are tougher to fight and
 	// harder to steal from, so the loot pays off the difficulty.
-	{Kind: ItemBatJerky, Name: "Bat Jerky", HealAmount: 9, Description: "Stringy, oddly satisfying. A traveler's lunch."},
+	{Kind: ItemBatJerky, Name: "Bat Jerky", HealAmount: 9, Price: 12, Description: "Stringy, oddly satisfying. A traveler's lunch."},
 
 	// Equipment. Bonuses are intentionally modest so the very-basic
 	// system reads as a starting kit rather than a power spike. STR
@@ -143,18 +149,23 @@ var itemDefinitions = []ItemDefinition{
 	{Kind: ItemIronSword, Name: "Iron Sword", Description: "A plain iron longsword. +2 STR.",
 		Slot:      SlotHand,
 		Weapon:    WeaponSword, // heavy melee → STR-governed to-hit + damage
+		Price:     40,
 		StatBonus: [StatCount]int{StatSTR: 2}},
 	{Kind: ItemWoodenShield, Name: "Wooden Shield", Description: "Plywood-grade. +2 Armor.",
 		Slot:       SlotHand,
+		Price:      30,
 		ArmorBonus: 2},
 	{Kind: ItemLeatherCap, Name: "Leather Cap", Description: "Worn leather. +1 Armor.",
 		Slot:       SlotArmor,
+		Price:      20,
 		ArmorBonus: 1},
 	{Kind: ItemSilverRing, Name: "Silver Ring", Description: "A nicked silver band. +1 DEX.",
 		Slot:      SlotAccessory,
+		Price:     25,
 		StatBonus: [StatCount]int{StatDEX: 1}},
 	{Kind: ItemBrassAmulet, Name: "Brass Amulet", Description: "A tarnished charm. +2 MDef.",
 		Slot:      SlotAccessory,
+		Price:     35,
 		MDefBonus: 2},
 
 	// Sample weapons. The Weapon type picks which stat the basic attack
@@ -167,25 +178,31 @@ var itemDefinitions = []ItemDefinition{
 	{Kind: ItemDagger, Name: "Dagger", Description: "A quick finesse blade. +1 DEX.",
 		Slot:      SlotHand,
 		Weapon:    WeaponDagger,
+		Price:     25,
 		StatBonus: [StatCount]int{StatDEX: 1}},
 	{Kind: ItemRapier, Name: "Rapier", Description: "A slender thrusting sword. +1 DEX.",
 		Slot:      SlotHand,
 		Weapon:    WeaponRapier,
+		Price:     35,
 		StatBonus: [StatCount]int{StatDEX: 1}},
 	{Kind: ItemShortBow, Name: "Short Bow", Description: "A simple short bow. +1 DEX.",
 		Slot:      SlotHand,
 		Weapon:    WeaponBow,
+		Price:     35,
 		StatBonus: [StatCount]int{StatDEX: 1}},
 	{Kind: ItemSling, Name: "Sling", Description: "A leather sling.",
 		Slot:   SlotHand,
-		Weapon: WeaponSling},
+		Weapon: WeaponSling,
+		Price:  15},
 	{Kind: ItemBattleAxe, Name: "Battle Axe", Description: "A broad battle axe. +1 STR.",
 		Slot:      SlotHand,
 		Weapon:    WeaponAxe,
+		Price:     45,
 		StatBonus: [StatCount]int{StatSTR: 1}},
 	{Kind: ItemWarHammer, Name: "War Hammer", Description: "A heavy two-handed maul. +2 STR.",
 		Slot:      SlotHand,
 		Weapon:    WeaponHammer,
+		Price:     55,
 		StatBonus: [StatCount]int{StatSTR: 2}},
 }
 

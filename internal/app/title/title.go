@@ -16,6 +16,7 @@ type Action int
 const (
 	ActionNone Action = iota
 	ActionStartAdventure
+	ActionContinue
 	ActionOpenEditor
 	ActionQuit
 )
@@ -26,6 +27,11 @@ type State struct {
 	mapPaths      []string
 	chosenMapPath string
 	loadError     string
+	// hasSave caches core.SaveExists() once at construction. The save
+	// file can't change while the title screen is up (you can only save
+	// in-game), and New() runs on every return to title, so this avoids
+	// an os.Stat syscall every frame from updateMain + drawMainMenu.
+	hasSave bool
 }
 
 type titleMode int
@@ -35,7 +41,7 @@ const (
 	modeMapPicker
 )
 
-func New() State { return State{mode: modeMain} }
+func New() State { return State{mode: modeMain, hasSave: core.SaveExists()} }
 
 func (s State) ChosenMapPath() string { return s.chosenMapPath }
 
@@ -70,6 +76,15 @@ type mainMenuRowDef struct {
 	Action func(s *State) Action
 }
 
+// continueRow loads the most recent save. Prepended to the menu (so it's
+// the default cursor position) only when a save file exists — a fresh
+// install shows Adventure first. The run loop consumes ActionContinue by
+// reading + applying the save.
+var continueRow = mainMenuRowDef{
+	Label:  func() string { return "Continue" },
+	Action: func(*State) Action { return ActionContinue },
+}
+
 var mainMenuRows = []mainMenuRowDef{
 	{
 		Label: func() string { return "Adventure" },
@@ -98,18 +113,31 @@ var mainMenuRows = []mainMenuRowDef{
 	},
 }
 
+// mainRows returns the active main-menu rows, prepending Continue when a
+// save file is present (hasSave, cached in State). Both updateMain (cursor +
+// confirm dispatch) and drawMainMenu (labels) read this so the row a cursor
+// index resolves to can't drift between input and render.
+func mainRows(hasSave bool) []mainMenuRowDef {
+	if hasSave {
+		return append([]mainMenuRowDef{continueRow}, mainMenuRows...)
+	}
+	return mainMenuRows
+}
+
 // mainMenuLabels returns the title menu's row labels in draw order. Used
 // by drawMainMenu's drawList call and as the cursor's wrap modulus.
-func mainMenuLabels() []string {
-	labels := make([]string, len(mainMenuRows))
-	for i, row := range mainMenuRows {
+func mainMenuLabels(hasSave bool) []string {
+	rows := mainRows(hasSave)
+	labels := make([]string, len(rows))
+	for i, row := range rows {
 		labels[i] = row.Label()
 	}
 	return labels
 }
 
 func updateMain(s *State) Action {
-	s.cursor = input.CursorUpDown(s.cursor, len(mainMenuRows))
+	rows := mainRows(s.hasSave)
+	s.cursor = input.CursorUpDown(s.cursor, len(rows))
 	// Quit (Q / Select) or Back (Esc / X / Circle) both exit from the main
 	// menu — there's nowhere to back up to, so "cancel" and "quit" collapse
 	// to the same action here.
@@ -118,8 +146,8 @@ func updateMain(s *State) Action {
 	}
 	if input.ConfirmPressed() {
 		s.loadError = ""
-		if s.cursor >= 0 && s.cursor < len(mainMenuRows) {
-			return mainMenuRows[s.cursor].Action(s)
+		if s.cursor >= 0 && s.cursor < len(rows) {
+			return rows[s.cursor].Action(s)
 		}
 	}
 	return ActionNone
@@ -181,7 +209,7 @@ func Draw(s State, assets render.Resources) {
 }
 
 func drawMainMenu(s State, font rl.Font, theme render.Theme, screenH int32) {
-	drawList(mainMenuLabels(), s.cursor, font, theme, screenH, "")
+	drawList(mainMenuLabels(s.hasSave), s.cursor, font, theme, screenH, "")
 	drawHint(font, "Up/Down navigate   Enter select   Esc/Q quit", screenH)
 }
 

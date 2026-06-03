@@ -107,6 +107,19 @@ func updateTitleScene(state *appState) {
 		}
 		state.game = core.NewGameState(area)
 		state.scene = sceneAdventure
+	case title.ActionContinue:
+		data, err := core.LoadSave()
+		if err != nil {
+			state.title.SetLoadError("Load failed: " + err.Error())
+			return
+		}
+		game, err := core.GameStateFromSave(data)
+		if err != nil {
+			state.title.SetLoadError("Load failed: " + err.Error())
+			return
+		}
+		state.game = game
+		state.scene = sceneAdventure
 	case title.ActionOpenEditor:
 		state.editor = editor.New()
 		state.scene = sceneEditor
@@ -161,9 +174,9 @@ func returnToTitleScene(state *appState) {
 
 // applyAreaTransition loads the destination map and rebuilds the
 // GameState so the player exits through the matching door. Inventory,
-// party (HP/MP/levels/status), and StepCount are preserved across the
-// transition — only the world (area, packs, chests, doors) is
-// swapped. Battle / chest / modal state is dropped, since any of
+// party (HP/MP/levels/status), gold, the quest journal, and StepCount are
+// preserved across the transition — only the world (area, packs, chests,
+// doors) is swapped. Battle / chest / modal state is dropped, since any of
 // those flags would dangle pointers into the old area.
 //
 // Fog-of-war contract: the destination's Visited grid is allocated
@@ -212,6 +225,11 @@ func applyAreaTransition(g *core.GameState) error {
 	// Carry forward the things that belong to the party, not the world.
 	next.Party = g.Party
 	next.Inventory = g.Inventory
+	// Gold + the quest journal travel with the party, not the map — without
+	// this they'd reset to the fresh-state seed (0 gold, starter quests)
+	// every time the player walked through a door.
+	next.Gold = g.Gold
+	next.Quests = g.Quests
 	next.StepCount = g.StepCount
 	// Carry the storm across the threshold like the day/night phase: an
 	// outdoor->outdoor door keeps the rain rolling; stepping into a roofed

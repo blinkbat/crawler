@@ -561,6 +561,8 @@ func init() {
 var packAINameTable = [PackAICount]string{
 	PackAINone:        mapfile.PackAINoneName,
 	PackAIJunkyardDog: mapfile.PackAIJunkyardDogName,
+	PackAIPatrol:      mapfile.PackAIPatrolName,
+	PackAISkittish:    mapfile.PackAISkittishName,
 }
 
 // packAILabels is the editor-facing display name per mode — what the
@@ -569,6 +571,8 @@ var packAINameTable = [PackAICount]string{
 var packAILabels = [PackAICount]string{
 	PackAINone:        "None (stationary)",
 	PackAIJunkyardDog: "Junkyard Dog",
+	PackAIPatrol:      "Patrol (paces)",
+	PackAISkittish:    "Skittish (flees)",
 }
 
 // PackAIName returns the canonical on-disk string for a PackAI. Empty

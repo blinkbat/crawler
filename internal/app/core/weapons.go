@@ -86,15 +86,23 @@ func WeaponAccuracyStat(wt WeaponType) Stat {
 	return weaponSpecs[wt].Accuracy
 }
 
-// WeaponIsRanged reports whether the weapon strikes at range. Currently
-// informational (the seam for future ranged-only rules — line of sight,
-// melee-defense bypass, distinct VFX); the to-hit stat is what it drives
-// today via WeaponAccuracyStat.
+// WeaponIsRanged reports whether the weapon strikes at range. Drives the
+// to-hit stat via WeaponAccuracyStat AND, now, the flying-target rule via
+// CanReachFlying — a ranged weapon ignores the melee-vs-flyer penalty. Still
+// the seam for further ranged-only rules (line of sight, distinct VFX).
 func WeaponIsRanged(wt WeaponType) bool {
 	if wt < 0 || wt >= WeaponTypeCount {
 		return false
 	}
 	return weaponSpecs[wt].Ranged
+}
+
+// CanReachFlying reports whether a weapon can strike a Flying enemy without
+// the melee penalty. Ranged weapons can; melee (and unarmed) can't. The
+// single predicate the flying-target accuracy rule reads, so "what reaches a
+// flyer?" lives in one place if the rule ever grows (e.g. reach polearms).
+func CanReachFlying(wt WeaponType) bool {
+	return WeaponIsRanged(wt)
 }
 
 // EquippedWeapon returns the WeaponType in the member's right hand, or
@@ -117,6 +125,36 @@ func memberAttackAccuracy(m PartyMember, quality int) float64 {
 // MemberAttackHits rolls the weapon-governed basic-attack hit chance.
 func MemberAttackHits(rng *rand.Rand, m PartyMember, quality int) bool {
 	return RollChance(rng, memberAttackAccuracy(m, quality))
+}
+
+// memberAttackAccuracyVs folds the flying-target penalty into the basic-
+// attack hit chance: a melee swing at a Flying enemy loses
+// FlyingMeleeAccuracyPenalty off the top (a ranged weapon shrugs it via
+// CanReachFlying). Applied post-clamp, so it can pull even an Excellent
+// press below a guaranteed hit — melee-vs-flyer is meant to be unreliable.
+func memberAttackAccuracyVs(m PartyMember, flying bool, quality int) float64 {
+	acc := memberAttackAccuracy(m, quality)
+	if flying && !CanReachFlying(EquippedWeapon(m)) {
+		acc = Clamp(acc-FlyingMeleeAccuracyPenalty, 0, 1)
+	}
+	return acc
+}
+
+// MemberAttackHitsTarget rolls the basic-attack hit chance against a known
+// defender, applying the flying-target melee penalty. Prefer this over
+// MemberAttackHits wherever the target enemy is in hand (battle's
+// applyAttack); the bare MemberAttackHits stays for callers that only have
+// the attacker (previews / tests).
+func MemberAttackHitsTarget(rng *rand.Rand, m PartyMember, target Enemy, quality int) bool {
+	return RollChance(rng, memberAttackAccuracyVs(m, EnemyInfoFor(target).Flying, quality))
+}
+
+// MemberMeleeReachesFlyer reports whether the member's basic attack can
+// reach a Flying target without penalty — i.e. they're wielding a ranged
+// weapon. Used by the battle layer to flavor a flyer whiff as "out of
+// reach" rather than a plain miss.
+func MemberMeleeReachesFlyer(m PartyMember) bool {
+	return CanReachFlying(EquippedWeapon(m))
 }
 
 // MemberAttackDamage is the basic-attack pre-quality damage for a member:

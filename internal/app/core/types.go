@@ -44,10 +44,21 @@ const (
 	// behavior described in packai.go. Was the only mode in the
 	// codebase before per-pack AI landed; now opt-in per pack.
 	PackAIJunkyardDog
+	// PackAIPatrol paces a fixed line along the X axis around the spawn
+	// tile (out to PatrolRadius, bouncing at the ends and at walls),
+	// ignoring the player until it paces into their tile — a sentry on a
+	// beat, not a hunter. Tracks its current pace direction in
+	// Pack.PatrolDir.
+	PackAIPatrol
+	// PackAISkittish flees: when the player is within SkittishFleeRadius
+	// it steps directly away (never onto the player, so it can't engage);
+	// otherwise it wanders its leash like the junkyard dog's idle branch.
+	// Prey that runs rather than fights.
+	PackAISkittish
 	// PackAICount sizes name / label tables. Bump by adding a mode
 	// above this line; init guards (areas.go's packAINameTable,
 	// editor's modal row) catch the missing wiring at startup.
-	PackAICount = int(PackAIJunkyardDog) + 1
+	PackAICount = int(PackAISkittish) + 1
 )
 
 // ChestSpawn is one authored chest on the map: a tile position and the
@@ -174,6 +185,7 @@ const (
 	PanelTabEquipment
 	PanelTabItems
 	PanelTabSkills
+	PanelTabQuests
 	PanelTabMap
 	PanelTabCount
 )
@@ -197,6 +209,8 @@ func PanelTabLabel(t PanelTab) string {
 		return "Items"
 	case PanelTabSkills:
 		return "Skills"
+	case PanelTabQuests:
+		return "Quests"
 	case PanelTabMap:
 		return "Map"
 	default:
@@ -354,6 +368,22 @@ type GameState struct {
 	// Inventory is shared across the party — single global stack list.
 	// Stocked by Steal pickups and consumed by the in-battle Item action.
 	Inventory []ItemStack
+	// Gold is the party's shared currency. Earned from battle loot
+	// (AwardBattleLoot) and spent at the pause-menu shop. Persisted in the
+	// save file. Single pool, like Inventory.
+	Gold int
+	// Shop overlay (pause-menu Shop ▸). ShopOpen gates it; ShopTab picks
+	// the Buy / Sell column; ShopCursor is the highlighted row within the
+	// active tab's list. All three reset on open (openShop). Mutually
+	// exclusive with the other overlays via core.ActiveModal's ladder.
+	ShopOpen   bool
+	ShopTab    ShopTab
+	ShopCursor int
+	// Quests is the journal — a save-persisted list of objectives the
+	// player reads from the char menu's Quests tab. Carried across area
+	// transitions / restarts like Party / Inventory / Gold. Empty for now
+	// (no seed quests); the Quests tab uses PanelsRowCursor for its row.
+	Quests []Quest
 	// Chests is the runtime list of on-field chests. Built from
 	// AreaDefinition.ChestSpawns by NewGameState. Looted chests stay in
 	// the slice (so their open-lid sprite keeps rendering); the explore
@@ -542,6 +572,12 @@ type Pack struct {
 	// behavior — propagated by placePacks so the per-step planner can
 	// dispatch on the per-pack mode without crossing back to the area.
 	AI PackAI
+	// PatrolDir is the PackAIPatrol pace direction along the X axis
+	// (+1 east / -1 west). Runtime-only (not authored or saved — packs
+	// rebuild fresh): placePacks seeds it to +1; the patrol planner flips
+	// it at the leash boundary / a wall, and the explore step-applier
+	// writes the chosen direction back. Unused by the other AI modes.
+	PatrolDir int
 }
 
 // Stats is the per-actor attribute block. Drives derived values (HP from VIT)
@@ -931,6 +967,14 @@ type Battle struct {
 	// and the bar's apply step is deferred. Pauses every transient ticker
 	// (popup, sprite bumps, damage flashes) so the moment punctuates.
 	HitStop float32
+
+	// ShakeTimer is the combat screen-shake countdown, set alongside
+	// HitStop when a Great/Excellent press resolves (CombatShakeFor) and
+	// decayed in updateBattleEffects. The render camera reads it to offset
+	// the view (see render.Camera); the wall-clock-driven oscillation means
+	// the screen shakes even while HitStop freezes the sim. Reset at battle
+	// Start / clearBattleResidual.
+	ShakeTimer float32
 
 	// SequencePulseTimer + Index drive the brief scale-up animation on the
 	// arrow that just landed correctly during the pickpocket sequence. The

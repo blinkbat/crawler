@@ -36,6 +36,8 @@ type optionsMenuRow struct {
 var optionsMenuRows = []optionsMenuRow{
 	{Item: core.OptionsMenuDisplay, Label: func(core.GameState) string { return DisplayMenuRowLabel() }},
 	{Item: core.OptionsMenuStats, Label: func(core.GameState) string { return "Party Stats" }},
+	{Item: core.OptionsMenuQuests, Label: func(core.GameState) string { return "Quests" }},
+	{Item: core.OptionsMenuSave, Label: func(core.GameState) string { return "Save Game" }},
 	{Item: core.OptionsMenuRestart, Label: func(core.GameState) string { return "Restart" }},
 	{Item: core.OptionsMenuClose, Label: func(core.GameState) string { return "Close" }},
 }
@@ -147,6 +149,25 @@ func drawTitledMenuCard(assets Resources, title string, rowCount int, label func
 		drawMenuRow(assets.hudFont, label(i), rowX, panelY+rowY, selected(i))
 		rowY += stride
 	}
+}
+
+// drawTitledCardHeader draws a centered veiled overlay card with a
+// fleuron-flanked FontTitle title, and returns the card's top-left origin
+// plus the Y just below the title (where a subtitle / first row starts).
+// Shared by the shop and quest-journal overlays — those need a custom body
+// (two-column rows, tab header) so they can't use drawTitledMenuCard, but
+// the card-chrome + title preamble is identical, so it lives here once.
+func drawTitledCardHeader(assets Resources, title string, panelW, panelH int32) (panelX, panelY int32, belowTitleY float32) {
+	font := assets.hudFont
+	rect := drawVeiledCard(panelW, panelH, borderSoft, borderSoft, giltDim)
+	panelX = int32(rect.X)
+	panelY = int32(rect.Y)
+	tm := rl.MeasureTextEx(font, title, FontTitle, FontSpacingTitle)
+	titleX := float32(panelX) + float32(panelW)/2 - tm.X/2
+	titleY := float32(panelY + 18)
+	drawTextWithShadowStyle(font, title, titleX, titleY, FontTitle, FontSpacingTitle, textPrimary, shadowStrong, 1, 1)
+	drawFleuronsFlanking(titleX, tm.X, 22, titleY+tm.Y/2, 5, giltDim)
+	return panelX, panelY, titleY + tm.Y
 }
 
 func drawMenuOverlay(g core.GameState, assets Resources) {

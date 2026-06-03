@@ -17,6 +17,13 @@ import "slices"
 //     leash and doesn't move every step — the goal is "this dog noticed
 //     you walk by and decided to look up," not "you have a hostile
 //     escort following you across the map."
+//   - PackAIPatrol: paces a fixed line along the X axis around the spawn
+//     tile (out to PatrolRadius, bouncing at the ends / walls), ignoring
+//     the player but engaging if it paces onto their tile — a sentry on a
+//     beat. Tracks its pace direction in Pack.PatrolDir.
+//   - PackAISkittish: flees directly away when the player is within
+//     SkittishFleeRadius, otherwise wanders the leash. Never engages —
+//     it only runs, so the player has to corner it to catch it.
 //
 // All randomness comes from GameState.RNG so the seed travels with the
 // run state (tests / future save-load) instead of leaking onto a
@@ -35,6 +42,8 @@ type packPlanner func(g *GameState, idx int, occupied map[[2]int]bool) (packAISt
 var packAIPlanners = [PackAICount]packPlanner{
 	PackAINone:        planStationaryPack,
 	PackAIJunkyardDog: planJunkyardDogPack,
+	PackAIPatrol:      planPatrolPack,
+	PackAISkittish:    planSkittishPack,
 }
 
 func init() {
@@ -84,6 +93,12 @@ type packAIStep struct {
 	NextZ        int
 	EngagePlayer bool
 	Moved        bool
+	// PatrolDir carries the pace direction a PackAIPatrol planner chose
+	// this step (it may have flipped at a wall / leash end). The step
+	// applier (explore's tickPackAI) writes it back onto Pack.PatrolDir
+	// for patrol packs only; the other modes leave it at its zero value
+	// and the applier ignores it for them.
+	PatrolDir int
 }
 
 // PlanPackSteps walks every alive pack and returns the moves they
@@ -200,6 +215,108 @@ func chaseStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int,
 			continue
 		}
 		return tx, tz, true
+	}
+	return 0, 0, false
+}
+
+// planPatrolPack plans one patrolling pack's step. The pack paces along
+// the X axis around its home tile out to PatrolRadius, bouncing at the
+// ends and at any blocker. It ignores the player's position entirely (no
+// chase) but DOES engage if its pace walks it onto the player's tile — a
+// sentry you can blunder into. The chosen pace direction (possibly flipped
+// this step) rides back on the step's PatrolDir for the applier to persist.
+func planPatrolPack(g *GameState, idx int, occupied map[[2]int]bool) (packAIStep, bool) {
+	if g.RNG.Float32() >= PatrolStepChance {
+		return packAIStep{}, false
+	}
+	p := g.Packs[idx]
+	px, pz := g.Player.TileX, g.Player.TileZ
+	dir := p.PatrolDir
+	if dir == 0 {
+		dir = 1
+	}
+	// Try the current pace direction; if the next tile is past the patrol
+	// span or blocked, flip and try the other way. A fully-boxed-in patrol
+	// (both sides blocked) just holds its tile this step.
+	for _, d := range [2]int{dir, -dir} {
+		nx := p.TileX + d
+		nz := p.TileZ
+		if AbsInt(nx-p.HomeX) > PatrolRadius {
+			continue
+		}
+		if !packCanMoveTo(g, p, occupied, nx, nz, true /* allow player tile = engage */, px, pz) {
+			continue
+		}
+		return packAIStep{
+			PackIdx:      idx,
+			NextX:        nx,
+			NextZ:        nz,
+			EngagePlayer: PackStepIntoPlayer(nx, nz, px, pz),
+			Moved:        true,
+			PatrolDir:    d,
+		}, true
+	}
+	return packAIStep{}, false
+}
+
+// planSkittishPack plans one skittish pack's step: flee directly away when
+// the player is within SkittishFleeRadius, otherwise wander the leash like
+// the junkyard dog's idle branch. A fleeing pack never steps onto the
+// player (allowPlayer=false in fleeStep), so it can't engage — it only ever
+// runs, and the player has to corner it against a wall / leash edge to
+// catch it.
+func planSkittishPack(g *GameState, idx int, occupied map[[2]int]bool) (packAIStep, bool) {
+	if g.RNG.Float32() >= PackStepChance {
+		return packAIStep{}, false
+	}
+	p := g.Packs[idx]
+	px, pz := g.Player.TileX, g.Player.TileZ
+	if ChebyshevDistance(p.TileX, p.TileZ, px, pz) <= SkittishFleeRadius {
+		if nx, nz, ok := fleeStep(g, p, occupied, px, pz); ok {
+			return packAIStep{PackIdx: idx, NextX: nx, NextZ: nz, Moved: true}, true
+		}
+		return packAIStep{}, false
+	}
+	nx, nz, ok := wanderStep(g, p, occupied, px, pz)
+	if !ok {
+		return packAIStep{}, false
+	}
+	return packAIStep{PackIdx: idx, NextX: nx, NextZ: nz, Moved: true}, true
+}
+
+// fleeStep picks the cardinal step that increases distance from the player,
+// staying inside the leash and refusing the player's own tile (so a fleeing
+// pack can't accidentally engage). Prefers the axis with the smaller current
+// separation so the pack breaks line-of-approach on the side the player is
+// closing from. Returns false when no away-step is open (cornered).
+func fleeStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int, int, bool) {
+	dx := p.TileX - px // sign points AWAY from the player along X
+	dz := p.TileZ - pz
+	// Away direction per axis; when level on an axis (delta 0), default to
+	// the positive step so the pack still has a way to peel off.
+	awayX := Sign(dx)
+	if awayX == 0 {
+		awayX = 1
+	}
+	awayZ := Sign(dz)
+	if awayZ == 0 {
+		awayZ = 1
+	}
+	// Try the axis where the player is nearest first (smaller |delta|) so
+	// the pack opens the tighter gap.
+	steps := [2][2]int{{awayX, 0}, {0, awayZ}}
+	if AbsInt(dz) < AbsInt(dx) {
+		steps = [2][2]int{{0, awayZ}, {awayX, 0}}
+	}
+	for _, s := range steps {
+		nx, nz := p.TileX+s[0], p.TileZ+s[1]
+		if ChebyshevDistance(nx, nz, p.HomeX, p.HomeZ) > PackLeashRadius {
+			continue
+		}
+		if !packCanMoveTo(g, p, occupied, nx, nz, false /* never onto the player */, px, pz) {
+			continue
+		}
+		return nx, nz, true
 	}
 	return 0, 0, false
 }

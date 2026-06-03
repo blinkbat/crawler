@@ -823,6 +823,19 @@ func HitStopFor(quality int) float32 {
 	return 0
 }
 
+// CombatShakeFor returns the screen-shake duration a graded hit earns —
+// only Great / Excellent presses shake (the timed-hit payoff), Excellent
+// harder + longer. Mirrors HitStopFor so the two impact knobs sit together.
+func CombatShakeFor(quality int) float32 {
+	switch quality {
+	case TimingQualityExcellent:
+		return CombatShakeExcellent
+	case TimingQualityGreat:
+		return CombatShakeGreat
+	}
+	return 0
+}
+
 // TimingQualityLabel returns the popup text for a quality grade. Reads
 // from timingGrades (config.go); out-of-range values fall back to the
 // Miss label so a future grade addition is one table-row edit.

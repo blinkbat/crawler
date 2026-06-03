@@ -80,6 +80,17 @@ func Camera(g core.GameState) rl.Camera3D {
 		cp*float32(math.Sin(float64(yaw))),
 	)
 	position := rl.NewVector3(p.X, core.EyeHeight, p.Z)
+	// Combat screen shake: a small positional jitter on a well-timed hit,
+	// scaled by the remaining ShakeTimer so it eases out. Oscillation is
+	// wall-clock-driven (two incommensurate frequencies so it wobbles rather
+	// than sliding) so the shake is visible even while hit-stop freezes the
+	// sim. Battle-only — never perturbs the exploration camera.
+	if g.Battle.Active() && g.Battle.ShakeTimer > 0 && core.CombatShakeMagnitude > 0 {
+		amp := core.CombatShakeMagnitude * core.Clamp(g.Battle.ShakeTimer/core.CombatShakeMax, 0, 1)
+		t := rl.GetTime()
+		position.X += float32(math.Sin(t*47.0)) * amp
+		position.Y += float32(math.Sin(t*61.0)) * amp
+	}
 	// Frame-time-driven approach: each frame, push currentFOV toward
 	// the target by at most fovTweenRate*dt degrees. The Approach
 	// helper from core stops at the target without overshooting, so a
@@ -1222,7 +1233,34 @@ var (
 		color:      rl.NewColor(255, 96, 96, 245),
 		phase:      0.9,
 	}
+	// markerActiveTurn floats over the party member whose turn it is — the
+	// "you're up" cursor that pairs with the (subtler) turn glow. Warm gold,
+	// a touch larger than the target markers so the active actor reads first.
+	markerActiveTurn = markerStyle{
+		tipYOffset: 0.62,
+		height:     0.18,
+		baseRadius: 0.08,
+		color:      rl.NewColor(255, 232, 130, 255),
+		phase:      0.6,
+	}
 )
+
+// drawMarkerOnTop draws a selector pyramid on a depth-disabled "overlay"
+// layer so it ALWAYS renders above world geometry and billboards — it can
+// never clip into the unit it hovers over or scenery between it and the
+// camera. rlgl batches draws, so the depth-state toggle only lands cleanly
+// when the active batch is flushed before AND after (DrawRenderBatchActive);
+// depth WRITES are disabled too so the marker can't occlude billboards drawn
+// after it in the same pass. State is restored so later draws are unaffected.
+func drawMarkerOnTop(unitPos rl.Vector3, style markerStyle) {
+	rl.DrawRenderBatchActive() // flush prior depth-tested geometry
+	rl.DisableDepthTest()
+	rl.DisableDepthMask()
+	drawMarker(unitPos, style)
+	rl.DrawRenderBatchActive() // flush the marker with depth off
+	rl.EnableDepthMask()
+	rl.EnableDepthTest()
+}
 
 // drawMarker is the single entry point for every selector-pyramid call
 // site. `unitPos` is the unit's billboard center; the helper anchors
@@ -1242,7 +1280,7 @@ func enemyVisualFor(assets Resources, kind core.EnemyKind) (enemyVisual, bool) {
 }
 
 func drawTargetChevron(camera rl.Camera3D, position rl.Vector3) {
-	drawMarker(position, markerEnemyTarget)
+	drawMarkerOnTop(position, markerEnemyTarget)
 }
 
 // drawSelectorPyramid renders the JRPG-classic floating cursor: a square-
@@ -1355,8 +1393,11 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 		// the crisp sprite so the silhouette stays sharp on top.
 		if inPlayerTurn(g) && i == g.Battle.CurrentParty && g.Party[i].HP > 0 {
 			glow := partyClassPresentationFor(g.Party[i].Class).turnColor
-			glow.A = uint8(150 * pulseActiveActor())
-			glowSize := rl.NewVector2(size.X*1.4, size.Y*1.16)
+			// Toned down: the active-turn pyramid below now carries the
+			// "you're up" read, so the glow is a subtle halo (lower alpha,
+			// tighter size) rather than the dominant cue it used to be.
+			glow.A = uint8(80 * pulseActiveActor())
+			glowSize := rl.NewVector2(size.X*1.2, size.Y*1.08)
 			rl.BeginBlendMode(rl.BlendAdditive)
 			drawTextureBillboard(camera, texture, position, glowSize, glow)
 			rl.EndBlendMode()
@@ -1364,6 +1405,12 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 		// Distance fog is applied by the active billboard-fog
 		// shader (BeginShaderMode at the top of this function).
 		drawTextureBillboard(camera, texture, position, size, tint)
+		// Active-actor turn cursor: a gold pyramid over whose turn it is,
+		// on the depth-disabled marker layer so it never clips. Pairs with
+		// the (now subtle) turn glow as the primary "you're up" signal.
+		if inPlayerTurn(g) && i == g.Battle.CurrentParty && g.Party[i].HP > 0 {
+			drawMarkerOnTop(position, markerActiveTurn)
+		}
 		// Same gate as the enemy chevron: target marker only during the
 		// menu phase, NOT during the timing bar that follows the
 		// confirm. inPlayerTurn includes BattleAttackTiming and would
@@ -1389,11 +1436,11 @@ func partyTextureFor(assets Resources, member core.PartyMember) (rl.Texture2D, b
 }
 
 func drawFriendlyTargetMarker(camera rl.Camera3D, position rl.Vector3) {
-	drawMarker(position, markerFriendlyTarget)
+	drawMarkerOnTop(position, markerFriendlyTarget)
 }
 
 func drawEnemyAttackTargetMarker(camera rl.Camera3D, position rl.Vector3) {
-	drawMarker(position, markerEnemyAttackTarget)
+	drawMarkerOnTop(position, markerEnemyAttackTarget)
 }
 
 func partySpritePosition(camera rl.Camera3D, index int, class core.PartyClass, bump, victoryDance float32, knockback float32) rl.Vector3 {

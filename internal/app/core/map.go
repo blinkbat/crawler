@@ -231,14 +231,15 @@ func placePacks(a AreaDefinition) []Pack {
 			members = append(members, NewEnemy(member.Kind))
 		}
 		packs = append(packs, Pack{
-			TileX:   snap.TileX,
-			TileZ:   snap.TileZ,
-			HomeX:   snap.TileX,
-			HomeZ:   snap.TileZ,
-			X:       TileCenter(snap.TileX),
-			Z:       TileCenter(snap.TileZ),
-			Members: members,
-			AI:      spawn.AI,
+			TileX:     snap.TileX,
+			TileZ:     snap.TileZ,
+			HomeX:     snap.TileX,
+			HomeZ:     snap.TileZ,
+			X:         TileCenter(snap.TileX),
+			Z:         TileCenter(snap.TileZ),
+			Members:   members,
+			AI:        spawn.AI,
+			PatrolDir: 1, // east by default; only PackAIPatrol reads/flips it
 		})
 	}
 	return packs

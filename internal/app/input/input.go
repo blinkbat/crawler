@@ -271,6 +271,7 @@ func PanelsTogglePressed() bool {
 //	E → Equipment
 //	I → Items     (Inventory)
 //	K → Skills    (note the K in "skills")
+//	J → Quests    (Journal — Q is the turn-left key, so J stands in)
 //	M → Map
 //
 // Used by both the explore-loop "open panels to this tab" path and
@@ -287,6 +288,8 @@ func PanelTabShortcutPressed() (core.PanelTab, bool) {
 		return core.PanelTabItems, true
 	case rl.IsKeyPressed(rl.KeyK):
 		return core.PanelTabSkills, true
+	case rl.IsKeyPressed(rl.KeyJ):
+		return core.PanelTabQuests, true
 	case rl.IsKeyPressed(rl.KeyM):
 		return core.PanelTabMap, true
 	}

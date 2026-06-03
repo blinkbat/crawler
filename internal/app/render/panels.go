@@ -51,6 +51,7 @@ var panelTabDrawers = [core.PanelTabCount]func(core.GameState, Resources, rl.Rec
 	core.PanelTabEquipment: drawPanelsEquipment,
 	core.PanelTabItems:     drawPanelsItems,
 	core.PanelTabSkills:    drawPanelsSkills,
+	core.PanelTabQuests:    drawPanelsQuests,
 	core.PanelTabMap:       drawPanelsMap,
 }
 
@@ -105,7 +106,22 @@ func DrawPanelsOverlay(g core.GameState, assets Resources) {
 			FontBody, txt)
 	}
 
-	bodyY := tabRowY + tabH + 18
+	// Persistent info strip, shown on EVERY tab: current location (area
+	// name) on the left, party gold on the right. Drawn here in the shared
+	// chrome (not per-tab) so it's always visible regardless of the active
+	// tab, and the body is pushed below it.
+	const panelsInfoStripH = int32(22)
+	infoY := tabRowY + tabH + 4
+	areaName := g.Area.Name
+	if areaName == "" {
+		areaName = "Unknown"
+	}
+	drawTextWithShadow(font, areaName, float32(cardX+24), float32(infoY), FontSmall, textPrimary)
+	goldStr := fmt.Sprintf("Gold: %d", g.Gold)
+	gm := rl.MeasureTextEx(font, goldStr, FontSmall, 1)
+	drawTextWithShadow(font, goldStr, float32(cardX+cardW-24)-gm.X, float32(infoY), FontSmall, borderActive)
+
+	bodyY := infoY + panelsInfoStripH + 6
 	bodyRect := rl.NewRectangle(float32(cardX+22), float32(bodyY),
 		float32(cardW-44), float32(cardY+cardH-26-bodyY-overlayFooterReserve))
 
@@ -468,18 +484,33 @@ func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) 
 			slotIconForType(s)(float32(innerX)+16, rowY+26, 11, iconCol)
 
 			labelX := float32(innerX) + 40
-			drawTextWithShadow(font, core.SlotIndexLabel(s), labelX, rowY+6, FontSmall, textMuted)
-			value := "—"
+			// The focused slot's label brightens so the cursor's location
+			// reads at a glance against the column of muted slot names.
+			labelCol := textMuted
+			if focused {
+				labelCol = textPrimary
+			}
+			drawTextWithShadow(font, core.SlotIndexLabel(s), labelX, rowY+6, FontSmall, labelCol)
+			value := "(empty)"
 			valCol := textDim
 			if filled {
 				value = core.ItemInfo(equippedKind).Name
 				valCol = textPrimary
 			}
 			drawTextWithShadow(font, value, labelX, rowY+26, FontBody, valCol)
+			// The FOCUSED slot expands to show its item's bonus — contextual
+			// detail for the row you're on, so the player can read what's
+			// equipped without opening the picker, and without cluttering all
+			// 20 rows with bonus text in the narrow per-member columns.
+			if focused && filled {
+				if bonus := equipBonusSummary(core.ItemInfo(equippedKind)); bonus != "" {
+					drawTextWithShadow(font, bonus, labelX, rowY+42, FontSmall, inkAccent)
+				}
+			}
 		}
 	}
 
-	footer := "Up/Down slot   Left/Right member   Confirm: change gear   (or click a slot)"
+	footer := "Up/Down slot   Left/Right member   Confirm / click: change gear"
 	drawTextWithShadow(font, footer, body.X, body.Y+body.Height-18, FontSmall, textHint)
 }
 

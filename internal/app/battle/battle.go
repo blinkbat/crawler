@@ -26,6 +26,7 @@ func Start(g *core.GameState, packIndex int) {
 	g.Battle.ClearTiming()
 	g.Battle.TimingIntro = 0
 	g.Battle.HitStop = 0
+	g.Battle.ShakeTimer = 0
 	g.Battle.SequencePulseTimer = 0
 	g.Battle.SequencePulseIndex = -1
 	g.Battle.EnemyAttacker = -1
@@ -623,6 +624,11 @@ func tickFlashHold(g *core.GameState, dt float32, onResolve func()) bool {
 		return true
 	}
 	g.Battle.TimingFlash = 0
+	// Screen-shake the camera on a well-timed hit — set alongside the
+	// hit-stop so the impact freeze and the shake land together (the shake
+	// oscillation is wall-clock-driven, so it's visible through the freeze).
+	// Zero for Miss/Nice/Good, so this is a no-op on weak presses.
+	g.Battle.ShakeTimer = core.CombatShakeFor(g.Battle.Timing.Quality)
 	if stop := core.HitStopFor(g.Battle.Timing.Quality); stop > 0 {
 		g.Battle.HitStop = stop
 		return true
@@ -990,6 +996,16 @@ func winBattle(g *core.GameState, message string) {
 			setBattleMessage(g, fmt.Sprintf("%s reaches level %d!", g.Party[idx].Name, g.Party[idx].Level))
 		}
 	}
+	// Gold + item drops fire right after XP, off the same defeated pack.
+	// Logged separately so a fight that paid out nothing (e.g. a zero-gold
+	// Skeleton raise) doesn't print a misleading "finds 0 gold" line.
+	gold, drops := core.AwardBattleLoot(g)
+	if gold > 0 {
+		setBattleMessage(g, fmt.Sprintf("Party finds %d gold.", gold))
+	}
+	for _, kind := range drops {
+		setBattleMessage(g, fmt.Sprintf("Picked up %s.", core.ItemInfo(kind).Name))
+	}
 }
 
 func loseBattle(g *core.GameState, message string) {
@@ -1158,6 +1174,11 @@ func updateBattleEffects(g *core.GameState, dt float32) {
 	if g.Battle.SequencePulseTimer <= 0 {
 		g.Battle.SequencePulseIndex = -1
 	}
+	// Decay the combat screen shake. Paused during hit-stop (Update
+	// early-returns before this runs while HitStop > 0), so a Great/Excellent
+	// hit reads as freeze → settle: the camera shakes hard through the freeze,
+	// then eases back once the world unpauses.
+	g.Battle.ShakeTimer = core.ApproachZero(g.Battle.ShakeTimer, dt)
 }
 
 func battleDeathFadeActive(g *core.GameState) bool {

@@ -1,6 +1,7 @@
 package explore
 
 import (
+	"crawler/internal/app/audio"
 	"crawler/internal/app/battle"
 	"crawler/internal/app/core"
 	"crawler/internal/app/input"
@@ -51,6 +52,9 @@ func Update(g *core.GameState) {
 		return
 	case core.ModalDoorPrompt:
 		updateDoorPrompt(g)
+		return
+	case core.ModalShop:
+		updateShop(g)
 		return
 	case core.ModalDebugMenu:
 		updateDebugMenu(g)
@@ -199,6 +203,14 @@ func updateOptionsMenu(g *core.GameState) {
 			g.OptionsMenuOpen = false
 			openPanels(g)
 			g.PanelsTab = core.PanelTabStats
+		case core.OptionsMenuQuests:
+			// Journal now lives in the char menu — open the panels overlay
+			// on the Quests tab (mirrors how OptionsMenuStats opens Stats).
+			g.OptionsMenuOpen = false
+			openPanels(g)
+			g.PanelsTab = core.PanelTabQuests
+		case core.OptionsMenuSave:
+			saveGame(g)
 		case core.OptionsMenuRestart:
 			restartGame(g)
 		case core.OptionsMenuClose:
@@ -251,6 +263,31 @@ func updateDebugMenu(g *core.GameState) {
 
 func restartGame(g *core.GameState) {
 	core.ResetGameState(g)
+}
+
+// saveGame writes the run to disk from the Options submenu. Closes the
+// submenu so the resulting status message (success or the error reason) is
+// visible under the HUD, and plays a confirm / refusal ping. A failed write
+// (read-only disk, permissions) surfaces its reason rather than silently
+// no-op'ing.
+func saveGame(g *core.GameState) {
+	g.OptionsMenuOpen = false
+	// Saving is a field action — refuse mid-battle. A save snapshots only
+	// the persistent run (no battle state), so reloading would drop the
+	// fight; and although NewSaveData defensively strips combat-transient
+	// statuses, the cleaner contract is "you can't save during a fight."
+	if g.Battle.Active() {
+		g.SetStatusMessage("Can't save during a battle.")
+		audio.Play(audio.SoundInputMiss)
+		return
+	}
+	if err := core.SaveGame(g); err != nil {
+		g.SetStatusMessage("Save failed: " + err.Error())
+		audio.Play(audio.SoundInputMiss)
+		return
+	}
+	g.SetStatusMessage("Game saved.")
+	audio.Play(audio.SoundInputGreat)
 }
 
 func updateFreeLook(p *core.Player, dt float32) {
@@ -539,6 +576,13 @@ func tickPackAI(g *core.GameState) int {
 		core.StartPackStep(p, plan.NextX, plan.NextZ)
 		p.TileX = plan.NextX
 		p.TileZ = plan.NextZ
+		// Persist the patrol pace direction the planner settled on (it may
+		// have flipped at a wall / leash end). Only patrol packs read this
+		// field, so the write is gated on the mode — other modes leave
+		// plan.PatrolDir zero and shouldn't have it stamped onto them.
+		if p.AI == core.PackAIPatrol {
+			p.PatrolDir = plan.PatrolDir
+		}
 		if plan.EngagePlayer && engaged < 0 {
 			engaged = plan.PackIdx
 			core.SnapPackToTile(p)

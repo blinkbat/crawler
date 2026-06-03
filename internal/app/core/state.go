@@ -71,6 +71,7 @@ func NewGameState(area AreaDefinition) GameState {
 		// Equipment panel's slot picker has something live to land on
 		// the first time it opens.
 		Inventory: starterEquipmentKit(),
+		Quests:    StarterQuests(),
 		Battle: Battle{
 			ActivePack:        -1,
 			EnemyIndex:        -1,
@@ -202,9 +203,16 @@ func placeChests(a AreaDefinition) []Chest {
 func ResetGameState(g *GameState) {
 	savedInventory := g.Inventory
 	savedParty := resetPartyForFieldRecovery(g.Party)
+	savedGold := g.Gold
+	savedQuests := g.Quests
 	*g = NewGameState(g.Area)
 	g.Inventory = savedInventory
 	g.Party = savedParty
+	// Gold + the quest journal are run progression, not world state — they
+	// survive a loss-recovery / restart the same way inventory and party
+	// levels do.
+	g.Gold = savedGold
+	g.Quests = savedQuests
 	// Signal the render layer to drop any lingering particles. Restart can
 	// fire mid-battle (the pause menu's Restart row is reachable outside the
 	// two timing phases), so formation-relative battle particles would

@@ -1,0 +1,108 @@
+package explore
+
+import (
+	"crawler/internal/app/audio"
+	"crawler/internal/app/core"
+	"crawler/internal/app/input"
+)
+
+// Shop overlay (pause-menu Shop ▸). Two tabs: Buy from a fixed catalog,
+// Sell back the player's own priced inventory at half value. Gamepad-first
+// — L1/L2/R1/R2 (or Tab/Shift+Tab) page the Buy/Sell tabs, the d-pad/stick
+// moves the row cursor, Confirm transacts one unit, Back closes. Mirrors the
+// leaf-submenu shape in movement.go but carries its own per-tab list math, so
+// it isn't routed through updateLeafMenu.
+
+// openShop swaps the pause menu for the shop overlay, opening on the Buy
+// tab with the cursor at the top.
+func openShop(g *core.GameState) {
+	g.MenuOpen = false
+	g.ShopOpen = true
+	g.ShopTab = core.ShopTabBuy
+	g.ShopCursor = 0
+}
+
+// updateShop drives the shop overlay's input. Tab paging resets the cursor
+// (the two tabs have independent list lengths, so a stale cursor could land
+// off the end). Confirm dispatches to the active tab's transaction.
+func updateShop(g *core.GameState) {
+	if input.BackPressed() {
+		g.ShopOpen = false
+		return
+	}
+	if input.MenuTabNextPressed() {
+		g.ShopTab = core.ShopTab(core.WrapIndex(int(g.ShopTab)+1, int(core.ShopTabCount)))
+		g.ShopCursor = 0
+	} else if input.MenuTabPrevPressed() {
+		g.ShopTab = core.ShopTab(core.WrapIndex(int(g.ShopTab)-1, int(core.ShopTabCount)))
+		g.ShopCursor = 0
+	}
+	rows := shopRowCount(g)
+	g.ShopCursor = input.CursorUpDown(g.ShopCursor, rows)
+	if input.ConfirmPressed() {
+		switch g.ShopTab {
+		case core.ShopTabBuy:
+			buyShopItem(g)
+		case core.ShopTabSell:
+			sellShopItem(g)
+		}
+	}
+}
+
+// shopRowCount is the number of selectable rows on the active tab — the
+// catalog length on Buy, the sellable-stack count on Sell. Drives the
+// cursor wrap so navigation can't run off the list.
+func shopRowCount(g *core.GameState) int {
+	switch g.ShopTab {
+	case core.ShopTabBuy:
+		return len(core.ShopCatalog())
+	case core.ShopTabSell:
+		return len(core.SellableStacks(g.Inventory))
+	}
+	return 0
+}
+
+// buyShopItem purchases one unit of the cursored catalog item when the
+// party can afford it. A gilt ping confirms; a miss ping refuses (off the
+// list or short on gold).
+func buyShopItem(g *core.GameState) {
+	catalog := core.ShopCatalog()
+	if g.ShopCursor < 0 || g.ShopCursor >= len(catalog) {
+		audio.Play(audio.SoundInputMiss)
+		return
+	}
+	def := catalog[g.ShopCursor]
+	if g.Gold < def.Price {
+		audio.Play(audio.SoundInputMiss)
+		return
+	}
+	g.Gold -= def.Price
+	g.Inventory = core.AddItem(g.Inventory, def.Kind, 1)
+	audio.Play(audio.SoundInputGreat)
+}
+
+// sellShopItem sells one unit of the cursored inventory stack for its
+// half-price sell value. Reads the same SellableStacks list the renderer
+// draws so the cursor row matches; clamps the cursor when the last unit of
+// a stack is sold and the list shrinks underneath it.
+func sellShopItem(g *core.GameState) {
+	stacks := core.SellableStacks(g.Inventory)
+	if g.ShopCursor < 0 || g.ShopCursor >= len(stacks) {
+		audio.Play(audio.SoundInputMiss)
+		return
+	}
+	kind := stacks[g.ShopCursor].Kind
+	inv, ok := core.ConsumeItem(g.Inventory, kind)
+	if !ok {
+		audio.Play(audio.SoundInputMiss)
+		return
+	}
+	g.Inventory = inv
+	g.Gold += core.ShopSellPrice(core.ItemInfo(kind).Price)
+	audio.Play(audio.SoundInputGreat)
+	// Selling the last unit shrinks the list; keep the cursor in range so
+	// it lands on the next row (or the new last row) instead of off the end.
+	if n := len(core.SellableStacks(g.Inventory)); g.ShopCursor >= n && n > 0 {
+		g.ShopCursor = n - 1
+	}
+}

@@ -164,6 +164,19 @@ const (
 	PackStepChance  = 0.35
 	PackChaseRadius = 3
 
+	// PackAIPatrol tuning. A patrolling pack paces along the X axis out
+	// to PatrolRadius tiles from its home, bouncing at the ends and at
+	// walls. PatrolStepChance is higher than PackStepChance so a sentry
+	// keeps a steady, readable beat rather than idling like a dog.
+	PatrolRadius     = 4
+	PatrolStepChance = 0.6
+
+	// PackAISkittish tuning. A skittish pack flees when the player is
+	// within SkittishFleeRadius (Chebyshev), stepping directly away; past
+	// that it wanders its leash. Matched to PackChaseRadius so prey starts
+	// running at the same range a junkyard dog would start chasing.
+	SkittishFleeRadius = 3
+
 	// BattleSplashDuration is how long the encounter banner sits on screen at
 	// the start of a battle. The battle code seeds Battle.Splash with this and
 	// the renderer uses it for ease-in/ease-out math, so they stay in sync.
@@ -187,6 +200,18 @@ const (
 	// — to feel like a satisfying punch, not a stutter.
 	HitStopGreat     = float32(0.10)
 	HitStopExcellent = float32(0.16)
+
+	// Combat screen shake — the camera-punch juice on a well-timed hit.
+	// Set as a countdown on Battle.ShakeTimer when a Great/Excellent press
+	// resolves (CombatShakeFor); the render camera offsets by
+	// CombatShakeMagnitude world units, scaled by ShakeTimer/CombatShakeMax,
+	// with the oscillation driven off the wall clock so the screen visibly
+	// shakes even through the impact freeze (hit-stop). Excellent shakes
+	// harder + longer than Great. Tunable; CombatShakeMagnitude=0 disables.
+	CombatShakeGreat     = float32(0.12)
+	CombatShakeExcellent = float32(0.22)
+	CombatShakeMax       = CombatShakeExcellent // normalizer for the intensity ramp
+	CombatShakeMagnitude = float32(0.045)       // peak camera offset, world units
 
 	// Sequence arrow pulse: how long an arrow scales up after landing a
 	// correct tap. Slightly less than the flash duration so the pulse decays
@@ -259,6 +284,16 @@ const (
 	// Warrior melee-hits 0.79 on a Miss timing; a STR-2 caster hits 0.63.
 	AccuracyBaseline = 0.55
 	AccuracyPerStat  = 0.04
+
+	// FlyingMeleeAccuracyPenalty is subtracted from a basic attack's hit
+	// chance when the target is Flying and the wielder's weapon strikes in
+	// melee (not WeaponIsRanged). The scaffold for "bring a bow to fight
+	// bats" — a ranged weapon shrugs the penalty entirely. Applied to the
+	// post-clamp accuracy, so unlike the stat/timing curve it can pull even
+	// an Excellent press below a guaranteed hit: melee-vs-flyer is meant to
+	// be unreliable. Tunable; 0 disables the scaffold. Only the basic attack
+	// reads this (skills aren't accuracy-gated).
+	FlyingMeleeAccuracyPenalty = 0.30
 
 	// DodgeChance curve. A party member rolls a dodge against every
 	// incoming enemy basic attack: dodge succeeds → no damage, no status
@@ -703,6 +738,8 @@ type OptionsMenuItem int
 const (
 	OptionsMenuDisplay OptionsMenuItem = iota // Fullscreen / Windowed toggle
 	OptionsMenuStats                          // open the Tome on the Stats tab
+	OptionsMenuQuests                         // open the quest-journal overlay
+	OptionsMenuSave                           // write the run to the save file
 	OptionsMenuRestart
 	OptionsMenuClose
 )

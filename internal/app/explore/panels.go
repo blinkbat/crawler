@@ -139,6 +139,10 @@ func updatePanels(g *core.GameState) {
 		if input.ConfirmPressed() || input.UsePressed() {
 			tryUseItem(g)
 		}
+	case core.PanelTabQuests:
+		// Read-only journal: Up/Down browse the quest rows. No Confirm
+		// action — quests advance through gameplay hooks, not this screen.
+		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, len(g.Quests))
 	case core.PanelTabMap:
 		// Up/Down zooms the map by one cells-on-screen step per press;
 		// the bounds (core.PanelMapZoomMin/Max) are soft-clamped so holding

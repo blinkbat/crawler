@@ -96,6 +96,24 @@ type EnemyDefinition struct {
 	// pass the floor through to the heal in proportion. Heal caps at
 	// MaxHP so a sustained drain doesn't overcap.
 	LifestealPercent float64
+	// GoldMin / GoldMax bound the gold this enemy pays out on defeat —
+	// a uniform roll in [GoldMin, GoldMax] per member, summed across the
+	// pack in AwardBattleLoot. Both zero = no gold (Skeleton raises stay
+	// near-worthless so the necromancer summon isn't a gold faucet).
+	// Roughly Tier * 3 .. Tier * 6, scaled by perceived threat.
+	GoldMin int
+	GoldMax int
+	// Drops is the per-defeat item drop table — each entry rolls its
+	// Chance independently and lands in the shared inventory on victory.
+	// Separate from Item (the mid-fight steal loot, one per enemy). Empty
+	// for most kinds; the tougher foes seed a small chance at gear.
+	Drops []ItemDrop
+	// Flying marks an airborne enemy. A melee basic attack against a
+	// flyer takes a steep accuracy penalty (FlyingMeleeAccuracyPenalty)
+	// unless the wielder's weapon strikes at range (WeaponIsRanged) —
+	// the scaffold for "bring a bow to fight bats." Skills and enemy
+	// attacks are unaffected. See MemberAttackHitsTarget.
+	Flying bool
 }
 
 var enemyDefinitions = []EnemyDefinition{
@@ -113,6 +131,8 @@ var enemyDefinitions = []EnemyDefinition{
 		Stats:              Stats{STR: 2, DEX: 3, INT: 0, WIS: 1, VIT: 2, SPD: 6},
 		Tier:               1,
 		XPValue:            5,
+		GoldMin:            1,
+		GoldMax:            3,
 		AttackVerbSingular: "snaps",
 		AttackVerbPlural:   "snap",
 	},
@@ -133,6 +153,9 @@ var enemyDefinitions = []EnemyDefinition{
 		Stats:              Stats{STR: 1, DEX: 5, INT: 0, WIS: 1, VIT: 1, SPD: 9},
 		Tier:               2,
 		XPValue:            8,
+		GoldMin:            2,
+		GoldMax:            4,
+		Flying:             true,
 		AttackVerbSingular: "bites",
 		AttackVerbPlural:   "bite",
 	},
@@ -151,6 +174,8 @@ var enemyDefinitions = []EnemyDefinition{
 		Stats:              Stats{STR: 2, DEX: 3, INT: 0, WIS: 2, VIT: 3, SPD: 5},
 		Tier:               3,
 		XPValue:            12,
+		GoldMin:            2,
+		GoldMax:            5,
 		AttackVerbSingular: "bites",
 		AttackVerbPlural:   "bite",
 		// DiseasedRatPoisonChance per bite. Pairs with the rat's higher
@@ -172,6 +197,9 @@ var enemyDefinitions = []EnemyDefinition{
 		Stats:              Stats{STR: 3, DEX: 2, INT: 0, WIS: 1, VIT: 3, SPD: 5},
 		Tier:               3,
 		XPValue:            14,
+		GoldMin:            3,
+		GoldMax:            6,
+		Drops:              []ItemDrop{{Kind: ItemCheese, Chance: 0.30}},
 		AttackVerbSingular: "stabs",
 		AttackVerbPlural:   "stab",
 	},
@@ -201,6 +229,9 @@ var enemyDefinitions = []EnemyDefinition{
 		Skills:          []SkillID{SkillFirebolt, SkillSleep},
 		SkillCastChance: GoblinMageCastChance,
 		SpellPower:      6,
+		GoldMin:         5,
+		GoldMax:         10,
+		Drops:           []ItemDrop{{Kind: ItemBatJerky, Chance: 0.25}},
 	},
 	{
 		Kind:         EnemyVenusMantrap,
@@ -236,6 +267,8 @@ var enemyDefinitions = []EnemyDefinition{
 		// the time even when starving, which read as "doesn't
 		// prioritize ingest."
 		SkillCastChance: 1.0,
+		GoldMin:         6,
+		GoldMax:         12,
 	},
 	{
 		Kind:               EnemyCaveSpider,
@@ -260,6 +293,8 @@ var enemyDefinitions = []EnemyDefinition{
 		// from feeling spammy.
 		Skills:          []SkillID{SkillWeb},
 		SkillCastChance: SpiderWebCastChance,
+		GoldMin:         2,
+		GoldMax:         5,
 	},
 	{
 		Kind:               EnemyVampireBat,
@@ -282,6 +317,9 @@ var enemyDefinitions = []EnemyDefinition{
 		// Reused tag SkillTagPhys (the bite is physical); no Skills are
 		// listed because the lifesteal rides on plain melee, not a cast.
 		LifestealPercent: VampireBatLifesteal,
+		GoldMin:          4,
+		GoldMax:          8,
+		Flying:           true,
 	},
 	{
 		Kind:         EnemyWisp,
@@ -305,6 +343,9 @@ var enemyDefinitions = []EnemyDefinition{
 		AttackVerbPlural:   "flicker at",
 		Skills:             []SkillID{SkillConfuse},
 		SkillCastChance:    WispConfuseCastChance,
+		GoldMin:            3,
+		GoldMax:            7,
+		Flying:             true,
 	},
 	{
 		Kind:         EnemyStoneGolem,
@@ -333,6 +374,9 @@ var enemyDefinitions = []EnemyDefinition{
 		Skills:             []SkillID{SkillStoneslam},
 		SkillCastChance:    StoneGolemSlamCastChance,
 		SpellPower:         4,
+		GoldMin:            15,
+		GoldMax:            30,
+		Drops:              []ItemDrop{{Kind: ItemWoodenShield, Chance: 0.20}},
 	},
 	{
 		Kind:         EnemyNecromancer,
@@ -361,6 +405,9 @@ var enemyDefinitions = []EnemyDefinition{
 		Skills:             []SkillID{SkillRaiseBones, SkillFirebolt},
 		SkillCastChance:    NecromancerCastChance,
 		SpellPower:         5,
+		GoldMin:            12,
+		GoldMax:            24,
+		Drops:              []ItemDrop{{Kind: ItemBrassAmulet, Chance: 0.25}},
 	},
 	{
 		Kind:         EnemySkeleton,
@@ -402,6 +449,8 @@ var enemyDefinitions = []EnemyDefinition{
 		Tier:               3,
 		XPValue:            16,
 		Armor:              8,
+		GoldMin:            2,
+		GoldMax:            5,
 		AttackVerbSingular: "engulfs",
 		AttackVerbPlural:   "engulf",
 	},
@@ -425,6 +474,25 @@ func init() {
 		}
 		if def.PoisonChance < 0 || def.PoisonChance > 1 {
 			panic("core/enemies: " + def.Name + " PoisonChance must be in [0, 1]")
+		}
+		// Gold bounds must be non-negative and ordered — AwardBattleLoot
+		// tolerates a slip at runtime, but a negative/inverted authored
+		// value is almost always a typo, so reject it where it's written.
+		if def.GoldMin < 0 || def.GoldMax < 0 {
+			panic("core/enemies: " + def.Name + " GoldMin/GoldMax must be non-negative")
+		}
+		if def.GoldMax < def.GoldMin {
+			panic("core/enemies: " + def.Name + " GoldMax must be >= GoldMin")
+		}
+		// Drop chances ride the same [0, 1] contract as the proc fields,
+		// and a drop must name a real item kind.
+		for _, d := range def.Drops {
+			if d.Chance < 0 || d.Chance > 1 {
+				panic("core/enemies: " + def.Name + " drop Chance must be in [0, 1]")
+			}
+			if _, ok := ItemInfoOk(d.Kind); !ok {
+				panic("core/enemies: " + def.Name + " drops an unregistered item kind")
+			}
 		}
 	}
 }
