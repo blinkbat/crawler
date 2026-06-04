@@ -163,8 +163,53 @@ func CursorUpDown(cursor, count int) int {
 // done editing" — and the two key handlers had drifted apart across
 // modal updaters until this consolidation. Mouse-only close paths still
 // go through their own button hit-tests; this is the keyboard rule.
+// (Pad B also closes via EditorCancelPressed at the call sites.)
 func ModalClosePressed() bool {
-	return rl.IsKeyPressed(rl.KeyEscape) || rl.IsKeyPressed(rl.KeyEnter)
+	return rl.IsKeyPressed(rl.KeyEscape) || rl.IsKeyPressed(rl.KeyEnter) ||
+		padPressed(rl.GamepadButtonRightFaceRight) // B / Circle
+}
+
+// --- Editor bindings ---------------------------------------------------------
+// The map editor is keyboard+mouse-first but must still be operable with a
+// controller (AGENTS.md). These predicates live here with the rest so the
+// editor's bindings aren't raw rl reads scattered across editor/input.go.
+// Note the editor deliberately uses Enter ALONE for commit (not the
+// ConfirmPressed chord's Z / Space, which would type into a Name field) —
+// so it gets its own confirm rather than reusing ConfirmPressed.
+
+// EditorConfirmPressed is the editor's modal/commit edge: Enter (keyboard,
+// chord-free so it can't collide with text entry) plus the pad A face
+// button.
+func EditorConfirmPressed() bool {
+	return rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeyKpEnter) ||
+		padPressed(rl.GamepadButtonRightFaceDown) // A / Cross
+}
+
+// EditorCancelPressed is the editor's cancel/back edge: Esc plus pad B.
+func EditorCancelPressed() bool {
+	return rl.IsKeyPressed(rl.KeyEscape) ||
+		padPressed(rl.GamepadButtonRightFaceRight) // B / Circle
+}
+
+// EditorTabPressed cycles text-field focus inside an editor modal. Tab is
+// inherently a keyboard affordance (field-to-field focus); the pad drives
+// modal row nav through CursorUpDown instead.
+func EditorTabPressed() bool {
+	return rl.IsKeyPressed(rl.KeyTab)
+}
+
+// EditorPaintPressed / EditorErasePressed are the grid-cursor paint / erase
+// edges. Keyboard keeps Space / Backspace (so they don't collide with the
+// modal Enter-commit), and the pad A / B face buttons paint / erase so the
+// canvas is editable with a controller too. (Grid and modal contexts are
+// mutually exclusive, so reusing A / B here doesn't fight the modal
+// confirm / cancel.)
+func EditorPaintPressed() bool {
+	return rl.IsKeyPressed(rl.KeySpace) || padPressed(rl.GamepadButtonRightFaceDown) // A / Cross
+}
+
+func EditorErasePressed() bool {
+	return rl.IsKeyPressed(rl.KeyBackspace) || padPressed(rl.GamepadButtonRightFaceRight) // B / Circle
 }
 
 // CursorLeftRight returns -1 on a Left edge, +1 on a Right edge, 0
@@ -315,6 +360,21 @@ func MenuTabNextPressed() bool {
 		return true
 	}
 	return padPressed(rl.GamepadButtonRightTrigger1) || padPressed(rl.GamepadButtonRightTrigger2)
+}
+
+// PagedTab applies the L1/R1 (+ Tab / Shift+Tab) tab-paging edges to a
+// wrap-around tab enum, returning the new value and whether it changed —
+// so the caller can reset a per-tab cursor on a switch. Generic over the
+// tab enum so the panels overlay and the shop share one Next/Prev →
+// WrapEnum branch instead of hand-rolling it each.
+func PagedTab[T ~int](cur T, count int) (T, bool) {
+	switch {
+	case MenuTabNextPressed():
+		return core.WrapEnum(cur, 1, count), true
+	case MenuTabPrevPressed():
+		return core.WrapEnum(cur, -1, count), true
+	}
+	return cur, false
 }
 
 // RestartPressed reports the pause-menu "restart run" edge. Triangle/Y

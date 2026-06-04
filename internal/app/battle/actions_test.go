@@ -270,13 +270,13 @@ func TestApplySteal_LandsItemAndClearsLoot(t *testing.T) {
 	seedGameRNG(t, g, 1)
 	g.Battle.CurrentParty = 2 // Nyx (thief)
 	preItem := g.Packs[0].Members[0].Item
-	if preItem == "" {
+	if preItem == core.ItemNone {
 		t.Fatalf("expected rat to start with stealable item")
 	}
 	// DEX 6 + Excellent quality → very high chance; for seed=1 this lands.
 	applySteal(g, core.TimingQualityExcellent)
 	// On success Item is cleared; on failure the message says fail.
-	if g.Packs[0].Members[0].Item == "" {
+	if g.Packs[0].Members[0].Item == core.ItemNone {
 		if g.Inventory == nil || len(g.Inventory) == 0 {
 			t.Fatalf("success should add item to inventory")
 		}
@@ -293,7 +293,7 @@ func TestApplySteal_LandsItemAndClearsLoot(t *testing.T) {
 func TestApplySteal_EmptyEnemyMessages(t *testing.T) {
 	g := newTestState()
 	g.Battle.CurrentParty = 2
-	g.Packs[0].Members[0].Item = ""
+	g.Packs[0].Members[0].Item = core.ItemNone
 	if !applySteal(g, core.TimingQualityGood) {
 		t.Fatalf("steal on empty enemy still 'lands' (gesture happens)")
 	}

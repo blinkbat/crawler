@@ -286,7 +286,7 @@ func nearestOpenTile(a AreaDefinition, wantX, wantZ int, occupied map[[2]int]boo
 			if !a.FloorAt(x, z) || occupied[[2]int{x, z}] {
 				continue
 			}
-			dist := AbsInt(x-wantX) + AbsInt(z-wantZ)
+			dist := ManhattanDistance(x, z, wantX, wantZ)
 			if dist < bestDist {
 				bestDist = dist
 				bestX, bestZ = x, z
@@ -482,7 +482,7 @@ func ChestIndexAt(chests []Chest, x, z int) int {
 // Diagonals don't count — the player can't step diagonally either.
 func AdjacentChestIndex(chests []Chest, x, z int) int {
 	for i, c := range chests {
-		if AbsInt(c.TileX-x)+AbsInt(c.TileZ-z) == 1 {
+		if ManhattanDistance(c.TileX, c.TileZ, x, z) == 1 {
 			return i
 		}
 	}

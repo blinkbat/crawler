@@ -191,8 +191,11 @@ func drawEnemyRosterRow(font rl.Font, enemy core.Enemy, x, y, w, h int32, target
 		outline rl.Color
 		prefix  string
 	}{
+		// Fills pull from the canonical per-status accent tokens
+		// (theme.go) so the enemy pill and the party-card label read the
+		// same hue for a given status — one token edit retints both.
 		{enemy.BurnTurns, fadeColor(statusBurn, pulseFlicker()), statusBurnOutline, ""},
-		{enemy.SleepTurns, barSleep, statusSleepOutline, "Z"},
+		{enemy.SleepTurns, statusSleep, statusSleepOutline, "Z"},
 		{enemy.PoisonTurns, fadeColor(statusPoison, pulseFlicker()), statusPoisonOutline, "P"},
 		{enemy.StunTurns, statusStun, statusStunOutline, "S"},
 	}
@@ -505,7 +508,7 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 	// action — reinforcing the lifted/haloed party card and the glowing
 	// sprite. A thin gilt rule divides the header from the action rows.
 	drawTextWithShadow(assets.hudFont, member.Name, float32(contentX), float32(y+14), FontHeading, classCol)
-	rl.DrawRectangle(x+18, y+48, w-36, 1, fadeColor(giltBright, 0.5))
+	drawGiltRule(x+18, y+48, w-36, 1, 0.5)
 	contentY := y + 58
 	// subY is the baseline for the sub-prompt / picker list under the
 	// mode's verb heading — one offset so the five action-mode arms below

@@ -51,6 +51,23 @@ func DefaultCustomEnemy(name string, base EnemyKind) CustomEnemyDef {
 	}
 }
 
+// validateEnemyStatBounds checks the scalar combat-stat fields common to
+// the static registry (EnemyDefinition) and authored custom enemies
+// (CustomEnemyDef): SkillCastChance rides a [0,1] contract (a stray 5
+// would cast every turn) and the mitigation / reward / damage fields must
+// be non-negative. Returns a descriptive error (nil when clean) so the
+// registry init can panic on it while the map loader surfaces it to the
+// author — one set of bounds, two failure modes, no drift.
+func validateEnemyStatBounds(name string, skillCastChance float64, armor, mdef, attackDamage, xpValue, spellPower int) error {
+	if skillCastChance < 0 || skillCastChance > 1 {
+		return fmt.Errorf("enemy %q has SkillCastChance %v outside [0, 1]", name, skillCastChance)
+	}
+	if armor < 0 || mdef < 0 || attackDamage < 0 || xpValue < 0 || spellPower < 0 {
+		return fmt.Errorf("enemy %q has a negative stat field (armor/mdef/attack/xp/spellpower)", name)
+	}
+	return nil
+}
+
 // CustomEnemyDefFromMap converts one on-disk custom enemy row into the core
 // definition used by editor/runtime code.
 func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
@@ -68,14 +85,11 @@ func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
 		return CustomEnemyDef{}, fmt.Errorf("custom enemy %q has non-positive HP (%d)", ce.Name, ce.HP)
 	}
 	// Mirror the static-registry init guards (enemies.go) for hand-edited
-	// rows: SkillCastChance rides a [0,1] contract (a stray 5 would cast every
-	// turn), and the mitigation / reward / damage fields must be non-negative.
-	// Refuse bad data at load rather than letting it reach combat math.
-	if ce.SkillCastChance < 0 || ce.SkillCastChance > 1 {
-		return CustomEnemyDef{}, fmt.Errorf("custom enemy %q has SkillCastChance %v outside [0, 1]", ce.Name, ce.SkillCastChance)
-	}
-	if ce.Armor < 0 || ce.MDef < 0 || ce.AttackDamage < 0 || ce.XPValue < 0 || ce.SpellPower < 0 {
-		return CustomEnemyDef{}, fmt.Errorf("custom enemy %q has a negative stat field (armor/mdef/attack/xp/spellpower)", ce.Name)
+	// rows via the shared validateEnemyStatBounds so the two paths can't
+	// drift on bounds. Refuse bad data at load rather than letting it reach
+	// combat math.
+	if err := validateEnemyStatBounds(ce.Name, ce.SkillCastChance, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower); err != nil {
+		return CustomEnemyDef{}, err
 	}
 	skills := make([]SkillID, 0, len(ce.Skills))
 	for _, name := range ce.Skills {

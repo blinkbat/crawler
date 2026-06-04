@@ -34,7 +34,11 @@ type EnemyDefinition struct {
 	SingularNoun string
 	PluralNoun   string
 	GroupName    string
-	Item         string
+	// Item is the kind this enemy carries as steal loot (Thief's Steal),
+	// ItemNone for enemies that carry nothing. Typed as ItemKind (not a
+	// name string) so the steal path equips it directly with no
+	// name→kind round-trip.
+	Item         ItemKind
 	MaxHP        int
 	AttackDamage int
 	// Stats is the full STR/DEX/INT/WIS/VIT/SPD block — symmetric
@@ -125,7 +129,7 @@ var enemyDefinitions = []EnemyDefinition{
 		SingularNoun:       "rat",
 		PluralNoun:         "rats",
 		GroupName:          "Rat Pack",
-		Item:               "Morsel of Cheese",
+		Item:               ItemCheese,
 		MaxHP:              10,
 		AttackDamage:       3,
 		Stats:              Stats{STR: 2, DEX: 3, INT: 0, WIS: 1, VIT: 2, SPD: 6},
@@ -147,7 +151,7 @@ var enemyDefinitions = []EnemyDefinition{
 		// Bat jerky heals more than rat cheese — see ItemHealAmount; the bat
 		// is also faster and harder to land hits on, so the loot is the
 		// payoff for fighting (or robbing) the trickier enemy.
-		Item:               "Bat Jerky",
+		Item:               ItemBatJerky,
 		MaxHP:              7,
 		AttackDamage:       2,
 		Stats:              Stats{STR: 1, DEX: 5, INT: 0, WIS: 1, VIT: 1, SPD: 9},
@@ -168,7 +172,7 @@ var enemyDefinitions = []EnemyDefinition{
 		PluralNoun:   "diseased rats",
 		GroupName:    "Diseased Pack",
 		// No carried loot — its meat is no good for eating.
-		Item:               "",
+		Item:               ItemNone,
 		MaxHP:              12,
 		AttackDamage:       3,
 		Stats:              Stats{STR: 2, DEX: 3, INT: 0, WIS: 2, VIT: 3, SPD: 5},
@@ -191,7 +195,7 @@ var enemyDefinitions = []EnemyDefinition{
 		SingularNoun:       "goblin",
 		PluralNoun:         "goblins",
 		GroupName:          "Goblin Band",
-		Item:               "Morsel of Cheese",
+		Item:               ItemCheese,
 		MaxHP:              14,
 		AttackDamage:       4,
 		Stats:              Stats{STR: 3, DEX: 2, INT: 0, WIS: 1, VIT: 3, SPD: 5},
@@ -211,7 +215,7 @@ var enemyDefinitions = []EnemyDefinition{
 		SingularNoun: "goblin mage",
 		PluralNoun:   "goblin mages",
 		GroupName:    "Mage Coven",
-		Item:         "Bat Jerky",
+		Item:         ItemBatJerky,
 		// Lower HP than a regular goblin — squishy spellcaster. The
 		// danger is in the spells, not the wand-whack.
 		MaxHP:              9,
@@ -241,7 +245,7 @@ var enemyDefinitions = []EnemyDefinition{
 		SingularNoun: "amoeba",
 		PluralNoun:   "amoebae",
 		GroupName:    "Amoeba Cluster",
-		Item:         "",
+		Item:         ItemNone,
 		// Low HP × very high armor: phys swings whiff to 1, magic
 		// shreds. Sets up the "switch your party to magic when armor
 		// shows up" lesson.
@@ -264,7 +268,7 @@ var enemyDefinitions = []EnemyDefinition{
 		SingularNoun: "mantrap",
 		PluralNoun:   "mantraps",
 		GroupName:    "Mantrap Grove",
-		Item:         "",
+		Item:         ItemNone,
 		// Slow, tanky, two-trick lurker: a heavy bite when the party gets
 		// close, plus the signature Ingest that pulls a member out of the
 		// fight until the plant is killed. The bite alone is mid-tier;
@@ -301,7 +305,7 @@ var enemyDefinitions = []EnemyDefinition{
 		SingularNoun:       "cave spider",
 		PluralNoun:         "cave spiders",
 		GroupName:          "Spider Nest",
-		Item:               "",
+		Item:               ItemNone,
 		MaxHP:              11,
 		AttackDamage:       3,
 		Stats:              Stats{STR: 2, DEX: 4, INT: 0, WIS: 2, VIT: 3, SPD: 7},
@@ -327,7 +331,7 @@ var enemyDefinitions = []EnemyDefinition{
 		SingularNoun:       "vampire bat",
 		PluralNoun:         "vampire bats",
 		GroupName:          "Vampire Swarm",
-		Item:               "Bat Jerky",
+		Item:               ItemBatJerky,
 		MaxHP:              13,
 		AttackDamage:       4,
 		Stats:              Stats{STR: 3, DEX: 5, INT: 0, WIS: 1, VIT: 3, SPD: 8},
@@ -352,7 +356,7 @@ var enemyDefinitions = []EnemyDefinition{
 		SingularNoun: "wisp",
 		PluralNoun:   "wisps",
 		GroupName:    "Wisp Cluster",
-		Item:         "",
+		Item:         ItemNone,
 		// Fragile but fast — high SPD lets it go before the party can
 		// reliably burst it down, and its bite is just a placeholder
 		// melee (the SkillConfuse cast is the real threat).
@@ -378,7 +382,7 @@ var enemyDefinitions = []EnemyDefinition{
 		SingularNoun: "golem",
 		PluralNoun:   "golems",
 		GroupName:    "Golem Pair",
-		Item:         "",
+		Item:         ItemNone,
 		// Tier-5 elite. Beefy HP, very high armor, slow as the amoeba.
 		// Stoneslam is an AoE phys cast hitting every living party slot —
 		// armor on the player side clips it, so a Defending Warrior eats
@@ -409,7 +413,7 @@ var enemyDefinitions = []EnemyDefinition{
 		SingularNoun: "necromancer",
 		PluralNoun:   "necromancers",
 		GroupName:    "Crypt Coven",
-		Item:         "",
+		Item:         ItemNone,
 		// Tier-5 boss. Mid HP — squishy enough that focusing it ends the
 		// summoning loop, but enough armor of position (always at the
 		// back of a pack) that "kill the necro first" is a real choice.
@@ -440,7 +444,7 @@ var enemyDefinitions = []EnemyDefinition{
 		SingularNoun: "skeleton",
 		PluralNoun:   "skeletons",
 		GroupName:    "Bone Mob",
-		Item:         "",
+		Item:         ItemNone,
 		// Tier-2 grunt that exists only as a Necromancer raise (no
 		// PackSpawn authoring path drops them directly today, though
 		// authors can if they want a free skeleton). Stats are lean —
@@ -469,8 +473,11 @@ var enemyByKind = BuildRegistry(enemyDefinitions, func(d EnemyDefinition) EnemyK
 // folded into the generic BuildRegistry helper.
 func init() {
 	for _, def := range enemyDefinitions {
-		if def.SkillCastChance < 0 || def.SkillCastChance > 1 {
-			panic("core/enemies: " + def.Name + " SkillCastChance must be in [0, 1]")
+		// Shared with the custom-enemy loader (customenemy.go): SkillCastChance
+		// [0,1] + non-negative mitigation/reward/damage fields. Panic here
+		// since a bad static-registry row is a programmer error, not data.
+		if err := validateEnemyStatBounds(def.Name, def.SkillCastChance, def.Armor, def.MDef, def.AttackDamage, def.XPValue, def.SpellPower); err != nil {
+			panic("core/enemies: " + err.Error())
 		}
 		if def.PoisonChance < 0 || def.PoisonChance > 1 {
 			panic("core/enemies: " + def.Name + " PoisonChance must be in [0, 1]")

@@ -65,6 +65,28 @@ var panelTabDrawers = [core.PanelTabCount]func(core.GameState, Resources, rl.Rec
 	core.PanelTabMap:       drawPanelsMap,
 }
 
+// panelTabFooterHints is the control-hint strip shown along the bottom of
+// the overlay, per active tab. Parallel to panelTabDrawers and sized
+// [PanelTabCount], so adding a tab forces a hint slot (compile error if
+// missed) instead of silently inheriting a generic hint via a switch's
+// fall-through. init asserts none is empty.
+var panelTabFooterHints = [core.PanelTabCount]string{
+	core.PanelTabStats:     "L1/R1 tabs   Left/Right pick member   X close",
+	core.PanelTabEquipment: "L1/R1 tabs   Left/Right pick member   X close",
+	core.PanelTabItems:     "L1/R1 tabs   Up/Down item   Confirm / F use   X close",
+	core.PanelTabSkills:    "L1/R1 tabs   Left/Right member  Up/Down skill   Confirm buy  F cast heal   X close",
+	core.PanelTabQuests:    "L1/R1 tabs   Left/Right pick member   X close",
+	core.PanelTabMap:       "L1/R1 tabs   Left/Right pick member   X close",
+}
+
+func init() {
+	for t := core.PanelTab(0); t < core.PanelTabCount; t++ {
+		if panelTabFooterHints[t] == "" {
+			panic(fmt.Sprintf("render/panels: panelTabFooterHints missing a hint for tab %d", int(t)))
+		}
+	}
+}
+
 // DrawPanelsOverlay paints the game-panels modal — the five-tab overlay
 // raised by the gamepad middle button / keyboard I. Routes by
 // g.PanelsTab to the per-tab body drawer; the tab strip + footer hint
@@ -106,7 +128,7 @@ func DrawPanelsOverlay(g core.GameState, assets Resources) {
 			// Gilt underline strip at the bottom of the active tab —
 			// the same "you're here" mark the list rows use, scaled
 			// to the tab width.
-			rl.DrawRectangle(tx+8, tabRowY+tabH-3, tabW-16, 2, giltBright)
+			drawGiltRule(tx+8, tabRowY+tabH-3, tabW-16, 2, 1.0)
 		}
 		label := core.PanelTabLabel(t)
 		m := measureTabLabel(font, label)
@@ -139,12 +161,9 @@ func DrawPanelsOverlay(g core.GameState, assets Resources) {
 		panelTabDrawers[g.PanelsTab](g, assets, bodyRect)
 	}
 
-	footerHint := "L1/R1 tabs   Left/Right pick member   X close"
-	switch g.PanelsTab {
-	case core.PanelTabSkills:
-		footerHint = "L1/R1 tabs   Left/Right member  Up/Down skill   Confirm buy  F cast heal   X close"
-	case core.PanelTabItems:
-		footerHint = "L1/R1 tabs   Up/Down item   Confirm / F use   X close"
+	footerHint := panelTabFooterHints[core.PanelTabStats]
+	if int(g.PanelsTab) >= 0 && int(g.PanelsTab) < len(panelTabFooterHints) {
+		footerHint = panelTabFooterHints[g.PanelsTab]
 	}
 	drawModalFooter(font, card, footerHint)
 
@@ -221,7 +240,11 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 		cardBG = selectedGlassTint(glassMid, 0.9)
 	}
 	drawGlassPane(int32(col.X), int32(col.Y), int32(col.Width), int32(col.Height), cardBG)
-	rl.DrawRectangle(int32(col.X), int32(col.Y)+6, 3, int32(col.Height)-12, classCol)
+	// Class accent stripe, flush to the pane's left edge (not the inset
+	// drawAccentStripe layout, which sits a few px in from a full card's
+	// border). Shares stripeWidth so the bar weight tracks the rest of
+	// the accent stripes even though the inset differs.
+	rl.DrawRectangle(int32(col.X), int32(col.Y)+6, stripeWidth, int32(col.Height)-12, classCol)
 	if highlight {
 		// Bold gilt frame around the active card — the same "you're
 		// here" gilt the tab underline / armed-skill spine use, scaled
@@ -818,9 +841,10 @@ func drawPanelsItems(g core.GameState, assets Resources, body rl.Rectangle) {
 		info := core.ItemInfo(stack.Kind)
 		highlight := i == cursor
 		if highlight {
-			drawGlassPane(int32(listRect.X), int32(y), int32(listRect.Width), int32(rowH-4),
-				selectedGlassTint(glassMid, 0.6))
-			rl.DrawRectangle(int32(listRect.X)+2, int32(y)+4, 3, int32(rowH-12), giltBright)
+			// Shared focused-row look (same as the Equipment / Skills
+			// tabs in this overlay) so the panels tabs read consistently
+			// instead of this list painting its own glass + gilt spine.
+			drawFocusableRow(rl.NewRectangle(listRect.X, y, listRect.Width, rowH-4), true)
 		}
 		nameCol := textMuted
 		if highlight {

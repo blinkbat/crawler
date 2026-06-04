@@ -395,17 +395,26 @@ func init() {
 	}
 }
 
+// findMaterialDef is the single forward scan over the material registry,
+// shared by MaterialName / MaterialIsIndoor so they can't drift on lookup
+// logic (materialFromName scans by name instead). Returns ok=false when
+// the value is out of range.
+func findMaterialDef(m MaterialSet) (materialDef, bool) {
+	for _, d := range materialDefs {
+		if d.value == m {
+			return d, true
+		}
+	}
+	return materialDef{}, false
+}
+
 // MaterialName returns the canonical on-disk name for the material set,
 // plus ok=false when the value is out of range. Callers that write to
 // .map files should propagate the failure rather than silently committing
 // a wrong material name.
 func MaterialName(m MaterialSet) (string, bool) {
-	for _, d := range materialDefs {
-		if d.value == m {
-			return d.name, true
-		}
-	}
-	return "", false
+	d, ok := findMaterialDef(m)
+	return d.name, ok
 }
 
 func materialFromName(s string) (MaterialSet, bool) {
@@ -436,12 +445,8 @@ func buildMaterialOptions() []MaterialSet {
 // enclosed interior (stone walls, ceiling slabs by default) vs. an
 // outdoor biome, reading the trait off the material registry row.
 func MaterialIsIndoor(m MaterialSet) bool {
-	for _, d := range materialDefs {
-		if d.value == m {
-			return d.indoor
-		}
-	}
-	return false
+	d, _ := findMaterialDef(m)
+	return d.indoor
 }
 
 var facingNameTable = []namedEnum[int]{

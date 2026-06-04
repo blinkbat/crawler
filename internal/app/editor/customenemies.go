@@ -104,8 +104,7 @@ const (
 )
 
 func customEnemyModalLayout(s *State) customEnemyLayout {
-	sw, sh := render.ScreenSizeF()
-	card := rl.NewRectangle((sw-customCardWidth)/2, (sh-customCardHeight)/2, customCardWidth, customCardHeight)
+	card := centeredCardRect(customCardWidth, customCardHeight)
 
 	l := customEnemyLayout{card: card}
 	// List column on the left, below the heading reserve.
@@ -297,10 +296,7 @@ func customEnemyNameFieldRect(s *State) rl.Rectangle {
 
 func drawCustomEnemiesModal(s *State, font rl.Font, theme render.Theme) {
 	l := customEnemyModalLayout(s)
-	drawModalVeil(theme)
-	render.DrawCard(int32(l.card.X), int32(l.card.Y), int32(l.card.Width), int32(l.card.Height),
-		theme.SurfacePrimary, theme.BorderSoft, theme.BorderStrong)
-	render.DrawHeading(font, "CUSTOM ENEMIES", int32(l.card.X+16), int32(l.card.Y+12), theme.BorderStrong)
+	drawModalHeaderAt(font, theme, l.card, "CUSTOM ENEMIES", theme.BorderStrong)
 
 	mp := rl.GetMousePosition()
 
@@ -530,14 +526,14 @@ func updateCustomEnemiesModal(s *State) Action {
 	if s.focus != focusCustomEnemyName {
 		if def := activeCustomEnemy(s); def != nil {
 			s.modalCursor = input.CursorUpDown(s.modalCursor, customEnemyRowCount())
-			dir := 0
-			if rl.IsKeyPressed(rl.KeyLeft) {
-				dir = -1
-			}
-			if rl.IsKeyPressed(rl.KeyRight) {
-				dir = 1
-			}
-			toggle := rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeySpace)
+			// Left/Right adjusts the focused stat; routed through the input
+			// package (keyboard + pad + stick) like the sibling sound modal,
+			// rather than raw arrow-key reads.
+			dir := input.CursorLeftRight()
+			// Enter / pad A toggles a boolean row; Space is kept as a
+			// keyboard convenience (safe — this branch is gated off the
+			// name-field focus, so it can't eat a typed space).
+			toggle := input.EditorConfirmPressed() || rl.IsKeyPressed(rl.KeySpace)
 			if dir != 0 || toggle {
 				pushUndo(s)
 				section, sub := customEnemyRowAt(s.modalCursor)

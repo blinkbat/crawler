@@ -28,6 +28,11 @@ var chestGeo = chestGeometry{
 const (
 	chestLidLootedLift    = float32(0.34)
 	chestLidLootedTiltDeg = float32(-58)
+	// chestLidHingeZOffset is the Z of the lid's pivot relative to the
+	// chest centre. The looted-lid rotation references it twice (the
+	// hinge anchor and the per-part relative-Z); a single const keeps
+	// the two in lockstep so the lid can't pivot around the wrong line.
+	chestLidHingeZOffset = float32(-0.25)
 )
 
 // DrawChests renders every chest as a two-piece painted prop —
@@ -72,7 +77,7 @@ func DrawChests(camera rl.Camera3D, g core.GameState, assets Resources) {
 // chestLid propModel parts list drives the rendering; only the
 // per-part transform differs.
 func drawChestLidLooted(assets Resources, base rl.Vector3, lidCentreY float32) {
-	hingeZ := base.Z - 0.25
+	hingeZ := base.Z + chestLidHingeZOffset
 	tiltRad := float64(chestLidLootedTiltDeg) * math.Pi / 180
 	cosT := float32(math.Cos(tiltRad))
 	sinT := float32(math.Sin(tiltRad))
@@ -85,7 +90,7 @@ func drawChestLidLooted(assets Resources, base rl.Vector3, lidCentreY float32) {
 		// Relative-to-hinge coords (subtract hinge Z; lid centre Y
 		// becomes the hinge Y after adding the lift).
 		relY := offY + chestLidLootedLift
-		relZ := offZ - (-0.25) // hinge sits at z = -0.25 relative to chest centre, so part's authored Z already lines up
+		relZ := offZ - chestLidHingeZOffset // hinge sits at chestLidHingeZOffset relative to chest centre, so the part's authored Z already lines up
 		// Rotate around X axis through the hinge: (y, z) → (y',
 		// z') = (y·cos − z·sin, y·sin + z·cos). With our negative
 		// tilt the lid pivots backward (z grows negative as y

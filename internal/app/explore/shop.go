@@ -30,11 +30,8 @@ func updateShop(g *core.GameState) {
 		g.ShopOpen = false
 		return
 	}
-	if input.MenuTabNextPressed() {
-		g.ShopTab = core.WrapEnum(g.ShopTab, 1, int(core.ShopTabCount))
-		g.ShopCursor = 0
-	} else if input.MenuTabPrevPressed() {
-		g.ShopTab = core.WrapEnum(g.ShopTab, -1, int(core.ShopTabCount))
+	if next, changed := input.PagedTab(g.ShopTab, int(core.ShopTabCount)); changed {
+		g.ShopTab = next
 		g.ShopCursor = 0
 	}
 	rows := shopRowCount(g)

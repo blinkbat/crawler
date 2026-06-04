@@ -346,10 +346,10 @@ type GameState struct {
 	// Exactly one of UsePendingItem / UsePendingSkill is set (the other is
 	// its None sentinel) to say what the chosen ally receives; the skill
 	// path also remembers UsePendingCaster (the member paying the MP).
-	UseTargetOpen   bool
-	UseTargetCursor int
-	UsePendingItem  ItemKind
-	UsePendingSkill SkillID
+	UseTargetOpen    bool
+	UseTargetCursor  int
+	UsePendingItem   ItemKind
+	UsePendingSkill  SkillID
 	UsePendingCaster int
 	// EnemiesDisabled (debug) removes field packs from play: they stop
 	// rendering and neither the step-into nor the wander AI can start a
@@ -798,12 +798,14 @@ type Enemy struct {
 	CustomName            string
 	DefinitionOverride    EnemyDefinition
 	HasDefinitionOverride bool
-	// Item is the steal loot. Seeded from EnemyDefinition.Item at spawn time
-	// and cleared once stolen, so the same enemy can't be looted twice in
-	// one battle. Per-enemy overrides aren't currently authored anywhere —
-	// if/when the editor grows per-spawn loot, the Name + custom MaxHP
-	// fields can follow in the same pass.
-	Item string
+	// Item is the steal loot kind. Seeded from EnemyDefinition.Item at
+	// spawn time and reset to ItemNone once stolen, so the same enemy
+	// can't be looted twice in one battle. ItemKind (not a name string)
+	// so the steal path adds it to inventory without a name→kind lookup.
+	// Per-enemy overrides aren't currently authored anywhere — if/when
+	// the editor grows per-spawn loot, the Name + custom MaxHP fields can
+	// follow in the same pass.
+	Item ItemKind
 
 	// Armor is the per-instance damage damp seeded from
 	// EnemyDefinition.Armor at NewEnemy time. Phys-tagged damage clips

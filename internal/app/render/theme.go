@@ -74,8 +74,8 @@ var (
 	surfaceLog        = glassMid
 	surfaceVeil       = veil
 	surfaceActiveTint = glassWarm
-	surfaceTargetTint = rl.NewColor(20, 38, 32, 140) // faint emerald glass for friendly target
-	surfaceDownTint   = rl.NewColor(28, 22, 28, 115)  // knocked down — dim grey wash
+	surfaceTargetTint = rl.NewColor(20, 38, 32, 140)    // faint emerald glass for friendly target
+	surfaceDownTint   = rl.NewColor(28, 22, 28, 115)    // knocked down — dim grey wash
 	accentPartyDown   = rl.NewColor(120, 110, 116, 200) // knocked-down party card accent (name tick / edge)
 	surfaceEnemyTint  = glassDanger
 
@@ -130,15 +130,9 @@ var (
 	// silhouette. Lighter / more saturated than the fill so the pill
 	// reads as a "glow with a hard rim" against the panel.
 	statusBurnOutline   = rl.NewColor(255, 200, 120, 220)
-	statusSleepOutline  = barSleepOutline
+	statusSleepOutline  = rl.NewColor(190, 220, 244, 220)
 	statusPoisonOutline = rl.NewColor(180, 232, 132, 220)
 	statusStunOutline   = rl.NewColor(248, 232, 160, 230)
-	// barSleep is the indigo-blue used for the sleep-status indicator
-	// (Z-counter beside enemy HP bars). Shares the barMP RGB but with
-	// reduced alpha so the panel reads as "soft glow" rather than the
-	// solid MP-bar tone.
-	barSleep        = rl.NewColor(96, 162, 232, 200)
-	barSleepOutline = rl.NewColor(190, 220, 244, 220)
 
 	// Turn-order panel: the danger red an enemy row reads as. Named so
 	// it isn't a bare literal buried in turnEntryColor's getter.
@@ -153,6 +147,15 @@ var (
 	timingHeldColor   = rl.NewColor(255, 244, 144, 255)
 	seqOkColor        = rl.NewColor(140, 232, 168, 255)
 	seqFailColor      = rl.NewColor(228, 96, 96, 255)
+	// timingWarnColor is the "running low on time" amber the sequence
+	// strip fades through before it goes red. timingCommitColor is the
+	// multi-press bar's late commit-zone orange. timingTickColor is the
+	// near-black vertical separator between charge-bar segments. Named
+	// here with the other timing accents so the bars don't carry bare
+	// NewColor literals at drifting alphas.
+	timingWarnColor   = rl.NewColor(232, 196, 92, 235)
+	timingCommitColor = rl.NewColor(255, 168, 96, 200)
+	timingTickColor   = rl.NewColor(28, 32, 44, 235)
 
 	// Billboard tints for the in-world combatant markers — the warm
 	// off-white the player's target reads as, and the slightly redder
@@ -724,6 +727,15 @@ func drawAccentStripe(panelX, panelY, panelH int32, col color.RGBA) {
 		return
 	}
 	rl.DrawRectangle(panelX+5, panelY+8, stripeWidth, panelH-16, col)
+}
+
+// drawGiltRule paints a thin horizontal gilt separator — the hairline a
+// panel heading or tab strip draws under itself. One primitive so the
+// "thin brass divider" stamp lives in a single place; callers pass the
+// rect and the alpha to fade giltBright by. (The battle splash's
+// fleuron-flanked divider is a distinct ornament and stays bespoke.)
+func drawGiltRule(x, y, w, h int32, alpha float32) {
+	rl.DrawRectangle(x, y, w, h, fadeColor(giltBright, alpha))
 }
 
 // drawCard renders a wood-framed glass pane — the library aesthetic

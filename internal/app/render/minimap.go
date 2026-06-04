@@ -33,7 +33,6 @@ func stepCounterText(modStep int) string {
 	return stepCounterCache.text
 }
 
-
 // Minimap geometry. Width / height pre-computed so MinimapWidth /
 // MinimapBottomY (below) can be called by sibling HUD panels — the
 // turn-order column docks directly under the minimap on the left
@@ -178,24 +177,44 @@ var minimapPropColors = map[byte]rl.Color{
 	core.TileSarcophagus:       rl.NewColor(200, 192, 174, 240),
 }
 
+// minimapTileColor maps a composed tile char (from AreaDefinition.TileAt)
+// to its 2D-map swatch, following a strict legibility convention:
+// WALKABLE tiles are DARK and BLOCKING tiles (walls, deep water, props)
+// are LIGHT. The dark floor reads as the negative space you move through
+// and every solid thing pops brighter against it, so "where can I walk"
+// is obvious at a glance. Tones stay above the near-black fog
+// (mapTileFogColor) so explored-but-walkable never reads as unrevealed.
+// Shared by the corner minimap and the panels Map tab via
+// mapCellFillColor.
 func minimapTileColor(material core.MaterialSet, tile byte) color.RGBA {
 	indoor := core.MaterialIsIndoor(material)
-	if tile == core.TileRock {
+	switch {
+	case tile == core.TileRock:
+		// Walls: light stone, the brightest structural blocker so it
+		// frames the dark walkable space.
 		if indoor {
-			return rl.NewColor(132, 132, 126, 235)
+			return rl.NewColor(178, 176, 168, 235)
 		}
-		return rl.NewColor(112, 112, 106, 235)
-	}
-	if tile == core.FloorDeepWater {
-		return rl.NewColor(28, 60, 104, 235)
+		return rl.NewColor(160, 158, 150, 235)
+	case tile == core.FloorDeepWater:
+		// Deep water blocks movement, so it reads LIGHT like the other
+		// blockers — a bright, clearly-impassable blue, not the old dark
+		// navy that looked like walkable floor.
+		return rl.NewColor(122, 172, 216, 235)
 	}
 	if col, ok := minimapPropColors[tile]; ok {
+		// Props block; their identity hues all sit lighter than the dark
+		// walkable floor below, so they read as "stuff in the way."
 		return col
 	}
+	// Walkable open floor: deliberately dark (well above the near-black
+	// fog tone) so corridors and rooms read as the dark path. A subtle
+	// biome tint keeps indoor vs outdoor distinguishable without lifting
+	// it into blocker brightness.
 	if indoor {
-		return rl.NewColor(82, 84, 88, 235)
+		return rl.NewColor(44, 46, 52, 235)
 	}
-	return rl.NewColor(60, 121, 54, 235)
+	return rl.NewColor(38, 56, 40, 235)
 }
 
 // drawMinimapTimeOfDay paints the day/night cycle indicator under the

@@ -6,6 +6,23 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+// Editor type scale. The map editor packs far more text into dense
+// panels, topbars, tooltips, and modal hint rows than the in-game HUD,
+// so it runs its OWN smaller scale rather than the render.Font* tokens
+// (whose FontSmall is already 16 and FontBody 20 — too large for this
+// chrome, and large enough to overflow the editor's tight buttons /
+// fields). Named here so the scale lives in one place instead of as
+// bare DrawTextEx / MeasureTextEx literals scattered across draw.go.
+// (sounds.go keeps its own soundFont* trio for the sound modal.)
+const (
+	editorFontTopbar = float32(18) // topbar map-id label
+	editorFontBody   = float32(16) // buttons + primary panel text
+	editorFontLabel  = float32(14) // topbar info line / field labels
+	editorFontHint   = float32(13) // modal hint rows
+	editorFontHintSm = float32(12) // tight secondary hint rows
+	editorFontTick   = float32(11) // axis tick labels / tightest captions
+)
+
 // Editor UI chrome palette. The map-content colors (tile brushes, swatches)
 // already live in layerBrushes (editor.go); these are the colors of the
 // editor's own buttons, panels, borders, and overlays so they're not
@@ -38,9 +55,15 @@ var (
 
 	// Text colors specific to the editor; the shared HUD theme covers most
 	// strings, these handle the brighter entry text and the swatch outline.
-	textBright    = rl.NewColor(220, 230, 245, 255)
-	textEntry     = rl.NewColor(230, 234, 244, 255)
-	textReadonly  = rl.NewColor(200, 210, 230, 255)
+	textBright   = rl.NewColor(220, 230, 245, 255)
+	textEntry    = rl.NewColor(230, 234, 244, 255)
+	textReadonly = rl.NewColor(200, 210, 230, 255)
+	// Plain black scrims at varying alpha for the canvas grid + swatch
+	// rims. These happen to share RGBA with render's shadowStrong (200) /
+	// shadowLight (160), but they're a different purpose (canvas chrome,
+	// not HUD text shadows) and render doesn't export those tokens — kept
+	// local on purpose. Promote to a shared "black scrim" token only if
+	// more sites accrue.
 	swatchEdge    = rl.NewColor(0, 0, 0, 200)
 	gridLineCol   = rl.NewColor(0, 0, 0, 80)
 	gridLineMajor = rl.NewColor(0, 0, 0, 160)

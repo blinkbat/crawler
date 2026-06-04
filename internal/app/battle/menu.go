@@ -5,6 +5,7 @@ import (
 	"crawler/internal/app/input"
 	"fmt"
 	"log"
+	"slices"
 )
 
 func updateActionMenu(g *core.GameState) {
@@ -319,17 +320,10 @@ func cyclePartyTarget(g *core.GameState, delta int) {
 // or a heal target dies between frames, the cursor would jump to the
 // front with no diagnostic trail.
 func cycleTarget(current int, targets []int, delta int) int {
-	currentSlot := 0
-	found := false
-	for i, target := range targets {
-		if target == current {
-			currentSlot = i
-			found = true
-			break
-		}
-	}
-	if !found {
+	currentSlot := slices.Index(targets, current)
+	if currentSlot < 0 {
 		log.Printf("battle.cycleTarget: current=%d not in targets=%v (selection invariant broken)", current, targets)
+		currentSlot = 0
 	}
 	return core.WrapIndex(currentSlot+delta, len(targets))
 }

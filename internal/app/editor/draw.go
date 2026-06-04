@@ -195,10 +195,7 @@ type doorEditLayout struct {
 }
 
 func doorEditLayoutFor() doorEditLayout {
-	w, h := render.ScreenSizeF()
-	pw := doorEditModalW
-	ph := doorEditModalH
-	r := rl.NewRectangle((w-pw)/2, (h-ph)/2, pw, ph)
+	r := centeredCardRect(doorEditModalW, doorEditModalH)
 	x := r.X + 16
 	fw := r.Width - 32
 	y := r.Y + 56
@@ -342,11 +339,11 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 		dirtyMark = " *"
 	}
 	label := fmt.Sprintf("%s%s", id, dirtyMark)
-	measure := rl.MeasureTextEx(font, label, 18, 1)
+	measure := rl.MeasureTextEx(font, label, editorFontTopbar, 1)
 	labelX := s.rect.topbar.Width - measure.X - 10
 	render.DrawTextWithShadow(font, label,
 		labelX, (topbarH-measure.Y)/2,
-		18, theme.TextMuted)
+		editorFontTopbar, theme.TextMuted)
 
 	coord := "—"
 	hoverDesc := ""
@@ -356,9 +353,9 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 	}
 	infoLabel := fmt.Sprintf("cell %s   %s   layer %s   brush %dx%d   zoom %.0f%%   phase %s (T)   undo %d/%d",
 		coord, hoverDesc, layerName(s.layer), s.brushSize, s.brushSize, s.zoom*100, core.PhaseName(s.previewPhase), len(s.undo), undoLimit)
-	infoMeasure := rl.MeasureTextEx(font, infoLabel, 14, 1)
+	infoMeasure := rl.MeasureTextEx(font, infoLabel, editorFontLabel, 1)
 	infoX := labelX - infoMeasure.X - 24
-	render.DrawTextWithShadow(font, infoLabel, infoX, (topbarH-infoMeasure.Y)/2, 14, theme.TextHint)
+	render.DrawTextWithShadow(font, infoLabel, infoX, (topbarH-infoMeasure.Y)/2, editorFontLabel, theme.TextHint)
 }
 
 // topbarBtnWidths overrides the default 64-px topbar button width for
@@ -390,10 +387,10 @@ func drawButton(font rl.Font, r rl.Rectangle, label string, active bool) {
 	}
 	rl.DrawRectangleRec(r, bg)
 	rl.DrawRectangleLinesEx(r, 1, border)
-	measure := rl.MeasureTextEx(font, label, 16, 1)
+	measure := rl.MeasureTextEx(font, label, editorFontBody, 1)
 	rl.DrawTextEx(font, label,
 		rl.NewVector2(r.X+(r.Width-measure.X)/2, r.Y+(r.Height-measure.Y)/2),
-		16, 1, text)
+		editorFontBody, 1, text)
 }
 
 // drawStepperButtons paints the shared "−" / "+" adjuster pair for a
@@ -1768,9 +1765,18 @@ func drawModalVeil(theme render.Theme) {
 	rl.DrawRectangle(0, 0, w, h, theme.SurfaceVeil)
 }
 
-func drawModalCard(theme render.Theme, pw, ph float32, accent rl.Color) rl.Rectangle {
+// centeredCardRect returns the screen-centered rect for a modal card of
+// the given size. The (screen − card)/2 centering math lived in a
+// half-dozen modal layout helpers (each of which needs the rect before
+// drawing, for hit-testing); one helper keeps them from drifting and
+// recenters cleanly on window resize.
+func centeredCardRect(pw, ph float32) rl.Rectangle {
 	w, h := render.ScreenSizeF()
-	r := rl.NewRectangle((w-pw)/2, (h-ph)/2, pw, ph)
+	return rl.NewRectangle((w-pw)/2, (h-ph)/2, pw, ph)
+}
+
+func drawModalCard(theme render.Theme, pw, ph float32, accent rl.Color) rl.Rectangle {
+	r := centeredCardRect(pw, ph)
 	render.DrawCard(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height),
 		theme.SurfacePrimary, theme.BorderSoft, accent)
 	return r
@@ -1783,10 +1789,22 @@ func drawModalCard(theme render.Theme, pw, ph float32, accent rl.Color) rl.Recta
 // every modal opened with; keeping the trio atomic means a missing veil
 // or a drifted heading offset can't slip in modal-by-modal.
 func drawModalHeader(font rl.Font, theme render.Theme, pw, ph float32, title string, accent rl.Color) rl.Rectangle {
-	drawModalVeil(theme)
-	r := drawModalCard(theme, pw, ph, accent)
-	render.DrawHeading(font, title, int32(r.X+16), int32(r.Y+12), accent)
+	r := centeredCardRect(pw, ph)
+	drawModalHeaderAt(font, theme, r, title, accent)
 	return r
+}
+
+// drawModalHeaderAt is drawModalHeader for callers that already computed
+// the card rect — the custom-layout modals (door / new-map / custom-
+// enemies) that need the rect for hit-testing before drawing. Same
+// veil → card → heading trio, just with a caller-supplied rect instead
+// of a freshly-centered one, so those modals can't open-code (and drift
+// on) the trio.
+func drawModalHeaderAt(font rl.Font, theme render.Theme, card rl.Rectangle, title string, accent rl.Color) {
+	drawModalVeil(theme)
+	render.DrawCard(int32(card.X), int32(card.Y), int32(card.Width), int32(card.Height),
+		theme.SurfacePrimary, theme.BorderSoft, accent)
+	render.DrawHeading(font, title, int32(card.X+16), int32(card.Y+12), accent)
 }
 
 func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
@@ -1877,8 +1895,7 @@ const (
 )
 
 func saveAsFieldRect(s *State) rl.Rectangle {
-	w, h := render.ScreenSizeF()
-	r := rl.NewRectangle((w-saveAsModalW)/2, (h-saveAsModalH)/2, saveAsModalW, saveAsModalH)
+	r := centeredCardRect(saveAsModalW, saveAsModalH)
 	return rl.NewRectangle(r.X+16, r.Y+58, saveAsModalW-32, 28)
 }
 
@@ -2094,11 +2111,8 @@ func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 	}
 	door := s.area.DoorSpawns[s.modalDoorIdx]
 	l := doorEditLayoutFor()
-	drawModalVeil(theme)
-	render.DrawCard(int32(l.card.X), int32(l.card.Y), int32(l.card.Width), int32(l.card.Height),
-		theme.SurfacePrimary, theme.BorderSoft, theme.BorderActive)
 	header := "DOOR AT " + core.TileCoord(door.TileX, door.TileZ)
-	render.DrawHeading(font, header, int32(l.card.X+16), int32(l.card.Y+12), theme.BorderActive)
+	drawModalHeaderAt(font, theme, l.card, header, theme.BorderActive)
 
 	// Name field.
 	drawLabel(font, "Name (unique on this map)",

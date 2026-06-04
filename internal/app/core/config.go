@@ -119,6 +119,11 @@ const (
 	// marked Visited on every successful step. The corner minimap and
 	// the panels Map tab both read Visited to fade unexplored tiles
 	// (panels also hides entity markers on fogged tiles).
+	//
+	// NOTE: this radius CONSTANT is SightRadius; RevealRadius is the
+	// FUNCTION (packai.go) that consumes it to paint the window. Docs
+	// that say "RevealRadius 3×3 fog" mean SightRadius=1 fed through the
+	// RevealRadius() call — don't mistake the function for the radius.
 	SightRadius = 1
 
 	// --- Panels Map-tab zoom (cells-on-screen) ----------------------------
@@ -369,12 +374,18 @@ const (
 	// Sleep + Stun in their own blocks lower in the file, and the
 	// new Webbed / Confuse in the roster-expansion section, which
 	// made "how long does X last?" a three-place search.
-	PoisonMinTurns       = 3
-	PoisonMaxTurns       = 5
-	SleepMinTurns        = 2
-	SleepMaxTurns        = 5
-	StunMinTurns         = 1
-	StunMaxTurns         = 2
+	PoisonMinTurns = 3
+	PoisonMaxTurns = 5
+	SleepMinTurns  = 2
+	SleepMaxTurns  = 5
+	StunMinTurns   = 1
+	StunMaxTurns   = 2
+	// FrostLanceStunTurns is Frost Lance's fixed 1-turn freeze (min ==
+	// max, a hard lock rather than the variable StunMinTurns..MaxTurns
+	// window Crushing Blow rolls). Lives here with the other
+	// status-duration tunables; its proc gate (FrostLanceStunChance)
+	// stays with the other cast chances below.
+	FrostLanceStunTurns  = 1
 	SpiderWebbedMinTurns = 3
 	SpiderWebbedMaxTurns = 3
 	WispConfuseMinTurns  = 2
@@ -656,14 +667,9 @@ const (
 	// FrostLanceStunChance gates the Wizard's freeze. ALWAYS lands on
 	// Great/Excellent (1.0 base) but the apply handler still goes
 	// through the same probability seam so a future "magic resist"
-	// stat can plug in at one place.
+	// stat can plug in at one place. (Its fixed duration,
+	// FrostLanceStunTurns, lives in the "Status duration bounds" block.)
 	FrostLanceStunChance = 1.0
-	// FrostLanceStunTurns is Frost Lance's fixed 1-turn freeze (min ==
-	// max, a hard lock rather than the variable StunMinTurns..MaxTurns
-	// window Crushing Blow rolls). Named so the duration lives with the
-	// other status-duration tunables instead of as a bare literal in the
-	// skill definition.
-	FrostLanceStunTurns = 1
 	// VenomStrikePoisonChance gates the Thief's Poison apply. Tuned
 	// high so a clean sequence reliably lands the DoT; a Miss timing
 	// scales it down through the standard TimingBonusMult curve.

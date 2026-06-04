@@ -887,7 +887,7 @@ func applySteal(g *core.GameState, quality int) bool {
 	actor := &g.Party[g.Battle.CurrentParty]
 	actor.AttackBump = core.BumpDuration
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	if enemy.Item == "" {
+	if enemy.Item == core.ItemNone {
 		setBattleMessage(g, "There is nothing to steal.")
 		finishPartyAction(g)
 		// The thief's hand still moved — popup with the quality reads as
@@ -899,15 +899,12 @@ func applySteal(g *core.GameState, quality int) bool {
 	// multiplier on top, capped at 1.0 so a perfect Excellent still rolls.
 	chance := core.QualityScaledChance(core.StealChance(effect.StealChance), quality)
 	if g.Rand().Float64() < chance {
-		item := enemy.Item
-		// Only consume the item from the enemy if its name maps to a
-		// registered kind. An unknown name (none today, but defensive) is
-		// LEFT on the enemy rather than cleared — clearing it before the
-		// failed AddItem would silently destroy the loot.
-		if kind := core.ItemKindByName(item); kind != core.ItemNone {
-			enemy.Item = ""
-			g.Inventory = core.AddItem(g.Inventory, kind, 1)
-		}
+		kind := enemy.Item
+		// Add the stolen kind to the inventory and clear it off the enemy
+		// so the same foe can't be looted twice. Guarded by the
+		// ItemNone check above, so kind is always a real item here.
+		enemy.Item = core.ItemNone
+		g.Inventory = core.AddItem(g.Inventory, kind, 1)
 		// Steal T3 ("Cuts on lift") deals STR damage on a landed
 		// steal. The multiplier-style StealBonusDamage (current
 		// table value 1) scales STR linearly so future tunes ("T4
@@ -923,7 +920,7 @@ func applySteal(g *core.GameState, quality int) bool {
 			bonus, defeated = damageEnemy(g, g.Battle.EnemyIndex, rawBonus, quality, core.SkillTagPhys)
 		}
 		core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillSteal), g.Battle.EnemyIndex)
-		msg := stealMessage(actor.Name, item, quality)
+		msg := stealMessage(actor.Name, kind, quality)
 		switch {
 		case defeated:
 			msg = fmt.Sprintf("%s The cut fells the %s.", msg, core.EnemySingularNoun(*enemy))
@@ -1662,9 +1659,9 @@ func prayerMessage(name, targetName string, heal, quality int, self bool) string
 	return fmt.Sprintf("%s%s prays over %s (+%d HP).", tag, name, targetName, heal)
 }
 
-func stealMessage(name, item string, quality int) string {
+func stealMessage(name string, kind core.ItemKind, quality int) string {
 	tag := qualityTag(quality)
-	return fmt.Sprintf("%s%s steals %s.", tag, name, item)
+	return fmt.Sprintf("%s%s steals %s.", tag, name, core.ItemInfo(kind).Name)
 }
 
 func fireboltMessage(name string, target core.Enemy, damage, quality int, defeated, burned bool, burnTurns int) string {

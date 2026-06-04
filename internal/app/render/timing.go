@@ -399,7 +399,9 @@ func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, 
 		// is the only thing that moves non-linearly across them.
 
 		// Decay zone (dim warning) — drawn first so the peak overlays it.
-		decayCol := rl.NewColor(184, 96, 80, 220)
+		// Uses the Nice grade's attack tone (a muted brick) at reduced
+		// alpha so a palette retune of the grades carries the bar along.
+		decayCol := colorWithAlpha(qualityColor(core.TimingQualityNice, false), 220)
 		drawBarSlice(drawX, drawY, barW, drawnH, core.ChargePeakEnd, 1.0, decayCol)
 
 		// Peak window (release zone) — bright Excellent color.
@@ -414,7 +416,9 @@ func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, 
 		if timing.Pressed {
 			fillEnd := chargeFillEnd(timing)
 			if fillEnd > 0 {
-				chargeCol := rl.NewColor(232, 144, 80, 220)
+				// Good grade's attack tone at reduced alpha — same source
+				// as the grade swatches so the bar never drifts from them.
+				chargeCol := colorWithAlpha(qualityColor(core.TimingQualityGood, false), 220)
 				drawBarSlice(drawX, drawY, barW, drawnH, 0, fillEnd, chargeCol)
 			}
 		}
@@ -566,7 +570,7 @@ func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources
 		if remaining < 0.30 {
 			stripCol = colorWithAlpha(seqFailColor, 240)
 		} else if remaining < 0.55 {
-			stripCol = rl.NewColor(232, 196, 92, 235)
+			stripCol = timingWarnColor
 		}
 		// Center-anchored shrink: the line stays centered as it retracts
 		// from both ends, matching how the arrows are centered in their slots.
@@ -699,7 +703,7 @@ func chargeFillEnd(timing core.TimingState) float32 {
 // of the bar — the visible boundary between charge segments.
 func drawChargeTick(timing core.TimingState, barX, barY, barW, barH float32, pct float32) {
 	tx := barX + pct*barW
-	tickCol := rl.NewColor(28, 32, 44, 235)
+	tickCol := timingTickColor
 	rl.DrawRectangle(int32(tx-1), int32(barY)-3, 2, int32(barH)+6, tickCol)
 }
 
@@ -824,7 +828,7 @@ func drawTallyBar(t core.TimingState, barX, barY, barW, barH float32, isDefend b
 	if t.CommitStart < t.Duration {
 		commitX := barX + (t.CommitStart/t.Duration)*barW
 		commitW := barX + barW - commitX
-		commitCol := rl.NewColor(255, 168, 96, 200)
+		commitCol := timingCommitColor
 		// If the cursor's inside the commit zone, throb it too —
 		// matches the unhit-window preview so the player sees the
 		// "exit gate is live" without reading a separate visual

@@ -18,14 +18,6 @@ import (
 // is always a valid party seat index (>= 0).
 const noCaster = -1
 
-// livingMemberIndices returns the seat indices of party members with
-// HP > 0 — the selectable set for the ally-target picker. Thin wrapper
-// over the shared core selector so the input and render sides agree on
-// which members are pickable.
-func livingMemberIndices(g *core.GameState) []int {
-	return core.LivingPartyIndices(g.Party)
-}
-
 // tryUseItem handles a use press on the Items tab. The cursored stack
 // must be a healing consumable; it opens the ally-target picker carrying
 // that item. Equipment / no-effect rows ping the miss cue.
@@ -106,7 +98,7 @@ func updateUseTargetPicker(g *core.GameState) {
 		closeUseTarget(g)
 		return
 	}
-	living := livingMemberIndices(g)
+	living := core.LivingPartyIndices(g.Party)
 	if len(living) == 0 {
 		closeUseTarget(g)
 		return

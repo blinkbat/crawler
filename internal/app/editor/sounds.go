@@ -156,19 +156,17 @@ func soundParamDefaults() soundParamSet {
 // Three "body" font sizes (label / value / list) all collapse to one
 // soundFontBody — they had drifted to the same 16pt value, so the
 // distinction was misleading. Hint stays smaller for the footer; the
-// heading is 18pt (previously written as `soundFontHeading - 2` at
-// every call site, now its own constant).
+// SOUNDS heading is drawn through render.DrawHeading (no local size).
 const (
-	soundModalW      = float32(900)
-	soundModalH      = float32(560)
-	soundFontBody    = float32(16)
-	soundFontHint    = float32(13)
-	soundFontHeading = float32(18)
-	soundRowH        = float32(34) // slider row height
-	soundListRowH    = float32(30)
-	soundAssignRowH  = float32(48) // two-line cue row (name + assigned)
-	soundColGap      = float32(14)
-	soundButtonH     = float32(32)
+	soundModalW     = float32(900)
+	soundModalH     = float32(560)
+	soundFontBody   = float32(16)
+	soundFontHint   = float32(13)
+	soundRowH       = float32(34) // slider row height
+	soundListRowH   = float32(30)
+	soundAssignRowH = float32(48) // two-line cue row (name + assigned)
+	soundColGap     = float32(14)
+	soundButtonH    = float32(32)
 )
 
 // assignableCueList is the fixed list of built-in cues the assignments
@@ -225,8 +223,7 @@ type soundLayout struct {
 // of inputs — both Update and Draw call this so they agree on
 // hit-test geometry.
 func computeSoundLayout(savedSounds []string) soundLayout {
-	sw, sh := render.ScreenSizeF()
-	card := rl.NewRectangle((sw-soundModalW)/2, (sh-soundModalH)/2, soundModalW, soundModalH)
+	card := centeredCardRect(soundModalW, soundModalH)
 	colW := (card.Width - 32 - 2*soundColGap) / 3
 	colY := card.Y + 56
 	colH := card.Height - 110
@@ -636,10 +633,10 @@ func drawSoundsModal(s *State, font rl.Font, theme render.Theme) {
 		savedSounds = audio.ListUserSounds()
 	}
 	l := computeSoundLayout(savedSounds)
-	// computeSoundLayout's card uses the same (screen-modal)/2 centering
-	// math as drawModalHeader's drawModalCard, so we get back the
-	// identical rect we already have in l.card — visual + hit-test stay
-	// in sync without duplicating the card-draw call.
+	// Both computeSoundLayout and drawModalHeader center the card through
+	// the shared centeredCardRect, so the rect drawModalHeader paints is
+	// identical to l.card — visual + hit-test stay in sync without
+	// duplicating the card-draw call.
 	_ = drawModalHeader(font, theme, soundModalW, soundModalH, "SOUNDS", theme.BorderActive)
 
 	drawSoundsParamsCol(s, font, theme, &l)

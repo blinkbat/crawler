@@ -12,24 +12,23 @@ import (
 )
 
 // editorCommitPressed / editorCancelPressed / editorTabPressed name the
-// editor-side keyboard conventions used by every modal updater. The
-// editor's bindings diverge from explore.Update's `input.ConfirmPressed`
-// (Z / Space / Enter / gamepad A) on purpose: modal text fields use
-// Tab to cycle focus and Enter (alone) to commit, so the Z / Space
-// confirm chord would collide with typing letters into a Name field.
-// Editor modals therefore route through these helpers instead of the
-// shared `input` package — every binding decision lives in one place
-// rather than at 25 inline `rl.IsKeyPressed(...)` sites.
+// editor-side commit / cancel / focus-cycle edges used by every modal
+// updater. They delegate to the input package (input.Editor* predicates)
+// so the bindings live in the one remappable place per AGENTS.md, while
+// the editor diverges from explore's `input.ConfirmPressed` (Z / Space /
+// Enter / pad A) on purpose: modal text fields use Tab to cycle focus and
+// Enter (alone) to commit, so the Z / Space chord would collide with
+// typing into a Name field. The pad A / B face buttons commit / cancel.
 func editorCommitPressed() bool {
-	return rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeyKpEnter)
+	return input.EditorConfirmPressed()
 }
 
 func editorCancelPressed() bool {
-	return rl.IsKeyPressed(rl.KeyEscape)
+	return input.EditorCancelPressed()
 }
 
 func editorTabPressed() bool {
-	return rl.IsKeyPressed(rl.KeyTab)
+	return input.EditorTabPressed()
 }
 
 // updateHotkeys handles keyboard shortcuts when no text field is focused.
@@ -222,22 +221,25 @@ func updateGridCursor(s *State) {
 	mw := s.area.Width
 	mh := s.area.Height
 	moved := false
-	if rl.IsKeyPressed(rl.KeyLeft) {
+	// Arrow keys / D-pad / left stick walk the grid cursor (input.Arrow*
+	// includes the pad + stick edges, so the canvas navigates with a
+	// controller too). Clamp-not-wrap: the cursor stops at the map edge.
+	if input.ArrowLeftPressed() {
 		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
 		s.gridCursorX = core.Clamp(s.gridCursorX-1, 0, mw-1)
 		moved = true
 	}
-	if rl.IsKeyPressed(rl.KeyRight) {
+	if input.ArrowRightPressed() {
 		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
 		s.gridCursorX = core.Clamp(s.gridCursorX+1, 0, mw-1)
 		moved = true
 	}
-	if rl.IsKeyPressed(rl.KeyUp) {
+	if input.ArrowUpPressed() {
 		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
 		s.gridCursorZ = core.Clamp(s.gridCursorZ-1, 0, mh-1)
 		moved = true
 	}
-	if rl.IsKeyPressed(rl.KeyDown) {
+	if input.ArrowDownPressed() {
 		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
 		s.gridCursorZ = core.Clamp(s.gridCursorZ+1, 0, mh-1)
 		moved = true
@@ -248,11 +250,11 @@ func updateGridCursor(s *State) {
 	if s.gridCursorX < 0 {
 		return
 	}
-	if rl.IsKeyPressed(rl.KeySpace) {
+	if input.EditorPaintPressed() {
 		pushUndo(s)
 		applyToolBrushed(s, s.gridCursorX, s.gridCursorZ)
 	}
-	if rl.IsKeyPressed(rl.KeyBackspace) {
+	if input.EditorErasePressed() {
 		pushUndo(s)
 		eraseAt(s, s.gridCursorX, s.gridCursorZ)
 	}

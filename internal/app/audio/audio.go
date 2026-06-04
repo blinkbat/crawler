@@ -70,6 +70,12 @@ type soundCue struct {
 	PCM       func() []int16
 }
 
+// PCM-synth arg order (these are positional, so a transposed column is a
+// silent timbre change — see wavsynth for the canonical contract):
+//   SynthClick(duration, pitchHz, pitchDrop, noise, volume)
+//   SynthChord(duration, freqs, volume)
+//   SynthChime(noteDuration, firstHz, secondHz, volume)
+//   SynthSweep(duration, startHz, endHz, volume, attack, release)
 var soundCues = [soundCount]soundCue{
 	// Bright UI tick — high pitch, large noise mix, very short.
 	SoundInputHit: {Display: "Input Hit", Canonical: "input_hit",

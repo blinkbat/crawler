@@ -75,12 +75,8 @@ func updatePanels(g *core.GameState) {
 	// Tab paging: L1/L2 back, R1/R2 forward on a pad; Tab / Shift+Tab on
 	// the keyboard. The arrows are deliberately NOT wired here anymore —
 	// they drive the in-tab cursor below.
-	if input.MenuTabNextPressed() {
-		setPanelTab(g, panelTabAdvance(g.PanelsTab, 1))
-		return
-	}
-	if input.MenuTabPrevPressed() {
-		setPanelTab(g, panelTabAdvance(g.PanelsTab, -1))
+	if next, changed := input.PagedTab(g.PanelsTab, int(core.PanelTabCount)); changed {
+		setPanelTab(g, next)
 		return
 	}
 	// Direct-tab keyboard shortcuts (C / E / I / K / M). Pressing the
@@ -184,12 +180,6 @@ func buySkillTier(g *core.GameState) {
 	} else {
 		audio.Play(audio.SoundInputMiss)
 	}
-}
-
-// panelTabAdvance shifts the tab cursor by delta with wrap. Centralized
-// so the L1/R1 paths don't drift apart on the wrap math.
-func panelTabAdvance(t core.PanelTab, delta int) core.PanelTab {
-	return core.WrapEnum(t, delta, int(core.PanelTabCount))
 }
 
 // setPanelTab switches the active tab and resets the per-tab cursor.

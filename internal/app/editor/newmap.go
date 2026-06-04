@@ -39,11 +39,7 @@ const (
 )
 
 func newMapModalLayout() newMapLayout {
-	sw, sh := render.ScreenSizeF()
-	card := rl.NewRectangle(
-		(sw-newMapCardWidth)/2,
-		(sh-newMapCardHeight)/2,
-		newMapCardWidth, newMapCardHeight)
+	card := centeredCardRect(newMapCardWidth, newMapCardHeight)
 
 	l := newMapLayout{card: card}
 
@@ -102,10 +98,7 @@ func newMapFieldRect(s *State) rl.Rectangle {
 
 func drawNewMapModal(s *State, font rl.Font, theme render.Theme) {
 	l := newMapModalLayout()
-	drawModalVeil(theme)
-	render.DrawCard(int32(l.card.X), int32(l.card.Y), int32(l.card.Width), int32(l.card.Height),
-		theme.SurfacePrimary, theme.BorderSoft, theme.BorderStrong)
-	render.DrawHeading(font, "NEW MAP", int32(l.card.X+16), int32(l.card.Y+12), theme.BorderStrong)
+	drawModalHeaderAt(font, theme, l.card, "NEW MAP", theme.BorderStrong)
 
 	// Dimensions section.
 	drawLabel(font, "Width", rl.NewRectangle(l.card.X+20, l.widthValue.Y+(l.widthValue.Height-18)/2, 60, 18))

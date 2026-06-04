@@ -1082,9 +1082,9 @@ func StatPreviewLine(stat Stat, current Stats, pending int) string {
 		return fmt.Sprintf("SPD %d → %d (more turns)", current.SPD, after.SPD)
 	default:
 		// statTable's init assert guarantees a row per Stat; this switch
-		// is the parallel one it doesn't cover. The leading range check
-		// means we only reach here for an in-range Stat with no preview
-		// case — a wiring gap worth surfacing loudly.
+		// is the parallel one it doesn't cover. The package init() calls
+		// StatPreviewLine for every Stat, so a missing case trips this
+		// panic at STARTUP rather than when a player stages that stat.
 		panic("core: StatPreviewLine missing case for stat")
 	}
 }
@@ -1120,6 +1120,18 @@ func init() {
 	}
 	if len(statSetters) != int(StatCount) {
 		panic("core: statSetters length must match StatCount — add a row when adding a Stat enum value")
+	}
+	// StatPreviewLine's per-stat switch is the one parallel table the
+	// length-asserts above can't cover (each case formats different
+	// derived values, so it can't collapse into a []string). Force its
+	// coverage here: calling it for every Stat with a staged point makes
+	// a missing case panic at STARTUP (the switch's default) instead of
+	// when a player happens to stage that stat mid-game.
+	var probe Stats
+	for i := Stat(0); i < StatCount; i++ {
+		if StatPreviewLine(i, probe, 1) == "" {
+			panic(fmt.Sprintf("core: StatPreviewLine returned empty for stat index %d — add a preview case", int(i)))
+		}
 	}
 }
 

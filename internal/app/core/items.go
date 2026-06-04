@@ -55,51 +55,57 @@ const (
 	EquipSlotCount
 )
 
+// equipSlotInfo is the single source for each equip slot's on-screen
+// label AND the EquipmentSlotType it accepts, indexed by EquipSlotIndex.
+// One row per slot so the label and the equip-gate type can't drift, and
+// adding a slot is one row caught by the init length-check below (rather
+// than two parallel switches that could each miss a case).
+var equipSlotInfo = [EquipSlotCount]struct {
+	Label string
+	Type  EquipmentSlotType
+}{
+	EquipRightHand:  {"R. HAND", SlotHand},
+	EquipLeftHand:   {"L. HAND", SlotHand},
+	EquipArmor:      {"ARMOR", SlotArmor},
+	EquipAccessory1: {"ACCESSORY 1", SlotAccessory},
+	EquipAccessory2: {"ACCESSORY 2", SlotAccessory},
+}
+
+func init() {
+	// Sized [EquipSlotCount], so a missing/extra slot is a compile error;
+	// guard against a zero-value (empty label / SlotNone) row slipping in
+	// when a new slot is added without filling its entry — CanEquipInSlot
+	// reads SlotIndexType, and a SlotNone row would silently become
+	// un-equippable.
+	for i := EquipSlotIndex(0); i < EquipSlotCount; i++ {
+		if equipSlotInfo[i].Label == "" || equipSlotInfo[i].Type == SlotNone {
+			panic("core: equipSlotInfo missing a row for an EquipSlotIndex")
+		}
+	}
+}
+
 // SlotIndexLabel returns the on-screen label for a slot index. Single
 // seam so the panel and tooltips don't drift on naming.
 func SlotIndexLabel(i EquipSlotIndex) string {
-	switch i {
-	case EquipRightHand:
-		return "R. HAND"
-	case EquipLeftHand:
-		return "L. HAND"
-	case EquipArmor:
-		return "ARMOR"
-	case EquipAccessory1:
-		return "ACCESSORY 1"
-	case EquipAccessory2:
-		return "ACCESSORY 2"
-	default:
-		panic("core: SlotIndexLabel missing case for EquipSlotIndex")
-	}
+	return equipSlotInfo[i].Label
 }
 
 // SlotIndexType reports the EquipmentSlotType an equip slot accepts.
 // Used by EquipItem to gate "can this item fit here?" — a Hand item
 // goes in RightHand/LeftHand, an Armor item in Armor, etc.
 func SlotIndexType(i EquipSlotIndex) EquipmentSlotType {
-	switch i {
-	case EquipRightHand, EquipLeftHand:
-		return SlotHand
-	case EquipArmor:
-		return SlotArmor
-	case EquipAccessory1, EquipAccessory2:
-		return SlotAccessory
-	default:
-		// Load-bearing: CanEquipInSlot gates equipping on this result, so
-		// a new slot that forgets a case here would silently become
-		// un-equippable (SlotNone matches no item). Fail loudly instead.
-		panic("core: SlotIndexType missing case for EquipSlotIndex")
-	}
+	return equipSlotInfo[i].Type
 }
 
 // ItemDefinition is the static registry data for an item kind. Effect is
 // resolved by the consume path in the battle code, not here.
 type ItemDefinition struct {
 	Kind ItemKind
-	// Name is what shows in the log and the picker UI. Match the strings
-	// in EnemyDefinition.Item exactly so steal pickups can find their
-	// item kind by name.
+	// Name is what shows in the log and the picker UI. It's also the
+	// on-disk identifier for chest loot: chest spawns in .map files name
+	// their item by this string and AreaFromMapFile resolves it via
+	// ItemKindByName, so renaming an item means re-saving any map that
+	// stocks it. (Enemy steal loot is keyed by ItemKind now, not name.)
 	Name string
 	// HealAmount is the HP restored when used in battle. 0 means "non-
 	// healing item" (none yet, but we keep the field general).

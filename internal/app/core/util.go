@@ -201,8 +201,8 @@ func Sign(v int) int {
 // ChebyshevDistance returns the king-move distance between two tiles —
 // the max of the per-axis absolute deltas. Used by leash / chase /
 // AoE radius checks where diagonal-equivalent steps should count the
-// same as cardinal ones. Manhattan callers stay on `AbsInt(a-b) +
-// AbsInt(c-d)` since that's a different shape (diamond vs square).
+// same as cardinal ones. ManhattanDistance is the diamond-shaped
+// sibling for grid-step counts (adjacency, nearest-free-tile).
 func ChebyshevDistance(ax, az, bx, bz int) int {
 	dx := AbsInt(ax - bx)
 	dz := AbsInt(az - bz)
@@ -210,6 +210,15 @@ func ChebyshevDistance(ax, az, bx, bz int) int {
 		return dx
 	}
 	return dz
+}
+
+// ManhattanDistance returns the grid-step (L1) distance between two
+// tiles — the sum of the per-axis absolute deltas. Used where a step
+// counts the same in any cardinal direction (nearest-free-tile search,
+// adjacency == 1 checks). Sibling to ChebyshevDistance (diamond vs
+// square).
+func ManhattanDistance(ax, az, bx, bz int) int {
+	return AbsInt(ax-bx) + AbsInt(az-bz)
 }
 
 func Smoothstep(t float32) float32 {
