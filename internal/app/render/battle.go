@@ -133,19 +133,31 @@ func drawEnemyRosterRow(font rl.Font, enemy core.Enemy, x, y, w, h int32, target
 		nameCol = textDim
 	}
 	if targeted {
-		bg = core.MixColor(bg, surfaceEnemyTint, 0.7)
+		// Brighter enemy-tinted fill than before so the current target
+		// clearly stands apart from the idle rows.
+		bg = core.MixColor(bg, surfaceEnemyTint, 0.9)
 		border = borderEnemy
 	}
 	drawGlassPane(x, y, w, h, bg)
-	drawSmallPanelOutline(x, y, w, h, border)
+	if targeted {
+		// Layered halo (pulsing outer ring + solid inner border) — the same
+		// "this is the live selection" treatment the party ribbon's active
+		// card uses, so the enemy target highlight reads as unmistakably lit
+		// rather than a faint tint shift.
+		halo := fadeColor(borderEnemy, 0.30+0.55*pulseHalo())
+		drawSmallPanelOutline(x-3, y-3, w+6, h+6, halo)
+		drawSmallPanelOutline(x, y, w, h, borderEnemy)
+	} else {
+		drawSmallPanelOutline(x, y, w, h, border)
+	}
 
 	leftPad := int32(22)
 	if targeted {
-		leftPad = 32
-		bx := float32(x) + 8
+		leftPad = 34
+		bx := float32(x) + 9
 		cy := float32(y) + float32(h)/2
 		col := fadeColor(borderEnemy, pulseHalo())
-		drawArrowMarker(rl.NewVector2(bx, cy), 12, 0, 9, col)
+		drawArrowMarker(rl.NewVector2(bx, cy), 13, 0, 10, col)
 	}
 
 	condition, condCol := enemyHealthStyle(enemy)
@@ -154,34 +166,39 @@ func drawEnemyRosterRow(font rl.Font, enemy core.Enemy, x, y, w, h int32, target
 	displayName := core.EnemyDisplayName(enemy)
 	drawTextWithShadow(font, displayName, nameX, float32(y+10), FontHeading, nameCol)
 
+	// The qualitative wound state is the DEFAULT health read for every row —
+	// the exact HP bar is hidden unless this enemy is the current target
+	// (below). So the roster stays clean and "how hurt is it" comes from the
+	// condition word, with the precise bar surfaced only for the one you're
+	// aiming at.
 	condSize := FontSmall
 	condY := float32(y) + float32(h) - condSize - 9
 	drawTextWithShadow(font, condition, nameX, condY, condSize, condCol)
 
-	// HP bar on the right, vertically centered.
-	barW := float32(200)
-	barH := float32(28)
-	barX := float32(x+w) - barW - 16
-	barY := float32(y) + (float32(h)-barH)/2
-	drawBar(font, barX, barY, barW, barH, "HP", enemy.HP, enemy.MaxHP, barEnemyHP, fading)
-
-	// Status pills sit immediately left of the HP bar, stacked
-	// vertically with the most recently applied / shortest-duration
-	// at the top. Burn / Sleep / Poison / Stun all use the same pill
-	// shape; only the fill color + label letter changes. Drawing
-	// through a slot-based stack means a future fifth status (e.g.
-	// Frostbite) lands as one entry in the slice without re-tuning
-	// any per-pill geometry. Limit to 4 visible — the panel doesn't
-	// have vertical room for more without colliding with the row
-	// above, and four-status concurrence is exotic enough to accept
-	// the truncation.
+	// Right side: status pills anchored to the right edge. The HP bar shows
+	// ONLY for the targeted enemy; when it does, it claims the right edge and
+	// the pills tuck in to its left.
 	pillW := float32(34)
-	pillH := barH
-	pillX := barX - pillW - 10
+	pillH := float32(28)
+	rightEdge := float32(x+w) - 16
+	pillX := rightEdge - pillW
+	pillBaseY := float32(y) + (float32(h)-pillH)/2
+	if targeted {
+		barW := float32(190)
+		barH := float32(28)
+		barX := rightEdge - barW
+		barY := float32(y) + (float32(h)-barH)/2
+		drawBar(font, barX, barY, barW, barH, "HP", enemy.HP, enemy.MaxHP, barEnemyHP, fading)
+		pillX = barX - pillW - 10
+		pillBaseY = barY
+	}
+
 	// Slot-stacked status pills. Walking a slice (rather than four
 	// unrolled if-blocks) is what lets a future fifth status land as a
-	// single appended row without re-tuning any per-pill geometry, as
-	// the comment above promises.
+	// single appended row without re-tuning any per-pill geometry. Limit to
+	// 4 visible — the panel doesn't have vertical room for more without
+	// colliding with the row above, and four-status concurrence is exotic
+	// enough to accept the truncation.
 	// Fixed-size array (not a slice literal) so this stays stack-local
 	// and allocates nothing — drawn every frame per enemy in the combat
 	// roster.
@@ -204,7 +221,7 @@ func drawEnemyRosterRow(font rl.Font, enemy core.Enemy, x, y, w, h int32, target
 		if p.turns <= 0 {
 			continue
 		}
-		pillY := barY - float32(slot)*(pillH+4)
+		pillY := pillBaseY - float32(slot)*(pillH+4)
 		drawEnemyStatusPill(font, pillX, pillY, pillW, pillH,
 			p.fill, p.outline, statusTurnsLabel(p.prefix, p.turns))
 		slot++

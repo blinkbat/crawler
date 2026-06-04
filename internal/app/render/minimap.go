@@ -80,7 +80,7 @@ func drawMinimap(m core.AreaDefinition, g core.GameState, assets Resources) {
 		// Area name reads as the panel's natural label — no "AREA"
 		// tick. Centered above the grid so it doesn't crowd the
 		// upper-left wood mitre.
-		nameMeasure := rl.MeasureTextEx(assets.hudFont, areaName, FontSmall, 1)
+		nameMeasure := minimapMeasureCache.measure(assets.hudFont, areaName, FontSmall, 1)
 		nameX := float32(pad) + (float32(panelW)-nameMeasure.X)/2
 		drawTextWithShadow(assets.hudFont, areaName, nameX, float32(pad+6), FontSmall, textMuted)
 	}
@@ -222,13 +222,21 @@ func minimapTileColor(material core.MaterialSet, tile byte) color.RGBA {
 // and a thin progress bar showing how far through the current phase the
 // player is. The cycle is 150 steps total (6 × 25), so the bar wraps
 // every full day.
+//
+// minimapMeasureCache memoizes rl.MeasureTextEx for the two strings the
+// always-visible minimap shapes every frame — the centered area name and the
+// right-aligned "step N / M" counter. Both change only on area transition /
+// landed step, not at 60 Hz, so the raw per-frame CGO measure was pure waste.
+// The shared cache keys on (text, size), so the two sizes coexist.
+var minimapMeasureCache measureCache
+
 func drawMinimapTimeOfDay(font rl.Font, stepCount int, x, y, width int32) {
 	phase, progress := core.PhaseAtStep(stepCount)
 	name := core.PhaseName(phase)
 	// Line 1: "DAWN  step 12 / 150" (left-aligned phase, right-aligned counter).
 	drawTextWithShadow(font, name, float32(x), float32(y), FontSmall, textPrimary)
 	counter := stepCounterText(stepCount % core.StepsPerCycle)
-	measure := rl.MeasureTextEx(font, counter, FontTiny, 1)
+	measure := minimapMeasureCache.measure(font, counter, FontTiny, 1)
 	drawTextWithShadow(font, counter, float32(x)+float32(width)-measure.X, float32(y)+1, FontTiny, textHint)
 	// Line 2: thin track, with the phase highlighted as a 1/N segment that
 	// fills as the player walks through it.

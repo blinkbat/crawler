@@ -351,6 +351,15 @@ type GameState struct {
 	UsePendingItem   ItemKind
 	UsePendingSkill  SkillID
 	UsePendingCaster int
+	// Out-of-battle heal-skill chooser (Skills tab Use). Raised only when the
+	// cursored member has MORE THAN ONE out-of-battle heal (today just the
+	// Cleric: Prayer + Mass Mend) — a single heal casts directly, none refuses.
+	// HealPickCaster is the member; HealPickCursor indexes core.OutOfBattleHeals
+	// for that member. On confirm it routes into the same cast path (ally picker
+	// for a single-target heal, immediate party-wide apply for Mass Mend).
+	HealPickOpen   bool
+	HealPickCaster int
+	HealPickCursor int
 	// EnemiesDisabled (debug) removes field packs from play: they stop
 	// rendering and neither the step-into nor the wander AI can start a
 	// battle. Lets the player walk a map freely to inspect it.
@@ -372,10 +381,11 @@ type GameState struct {
 	// (AwardBattleLoot) and spent at the pause-menu shop. Persisted in the
 	// save file. Single pool, like Inventory.
 	Gold int
-	// Shop overlay (pause-menu Shop ▸). ShopOpen gates it; ShopTab picks
-	// the Buy / Sell column; ShopCursor is the highlighted row within the
-	// active tab's list. All three reset on open (openShop). Mutually
-	// exclusive with the other overlays via core.ActiveModal's ladder.
+	// Shop overlay. Opened IN-UNIVERSE (by a merchant / shop tile in the
+	// world — entry point not yet wired; never a menu row). ShopOpen gates it;
+	// ShopTab picks the Buy / Sell column; ShopCursor is the highlighted row
+	// within the active tab's list. All three reset on open (openShop).
+	// Mutually exclusive with the other overlays via core.ActiveModal's ladder.
 	ShopOpen   bool
 	ShopTab    ShopTab
 	ShopCursor int
@@ -451,13 +461,18 @@ type GameState struct {
 	PanelsOpen      bool
 	PanelsTab       PanelTab
 	PanelsRowCursor int
-	// PanelsSkillRow is the Skills-tab vertical cursor: which of the
-	// member's SkillsPerClass skills Confirm will buy the next tier of.
-	// Kept apart from PanelsRowCursor because the Skills tab is 2-D —
-	// PanelsRowCursor picks the member COLUMN (Left/Right) while this
-	// picks the skill ROW (Up/Down). Reset to 0 on tab switch / open,
-	// alongside PanelsRowCursor.
-	PanelsSkillRow int
+	// Skill-tree modal: a Diablo-2-style sub-dialog raised from the Skills
+	// tab (Confirm on a member) showing that member's three trees. While
+	// SkillTreeOpen the modal owns panel input — SkillTreeCol picks the
+	// tree column (Left/Right), SkillTreeRow picks the node within it
+	// (Up/Down), Confirm invests a SkillPoint, Back closes just the modal.
+	// SkillTreeMember is the member the trees belong to (the cursored party
+	// column at open time). All reset when the modal opens; SkillTreeOpen
+	// is forced false on overlay close / tab switch so it can't strand.
+	SkillTreeOpen   bool
+	SkillTreeMember int
+	SkillTreeCol    int
+	SkillTreeRow    int
 	// Equipment tab (no drag-and-drop — it works like the Items menu).
 	// EquipSlotCursor is the focused equip slot row (0..EquipSlotCount-1)
 	// on the cursored member (PanelsRowCursor picks the member column).
@@ -713,6 +728,14 @@ type PartyMember struct {
 	// Firebolt and a Cleric's same skill (if a future class shared one)
 	// can level independently.
 	SkillTiers map[SkillID]int
+	// TreeRanks tracks ranks invested per Diablo-2-style skill-tree node
+	// (see core/skilltrees.go), keyed by node ID. nil-safe: an
+	// un-invested node reads 0 via TreeNodeRank. Spent from SkillPoints
+	// in the Skills-tab tree modal. UI-only for now — ranks fill pips and
+	// gate prerequisites but don't yet alter combat (the "skill impl"
+	// pass wires effects to these ranks later). Serializes with the rest
+	// of PartyMember in the save file; old saves load it as nil.
+	TreeRanks map[string]int
 	// SkillCursor is the index into the class's Skills array that the
 	// action menu's "Skill" row casts. In-battle Tab cycles it; the
 	// renderer reads it via PartySkill so the row label matches what
@@ -977,13 +1000,18 @@ type Battle struct {
 	// (popup, sprite bumps, damage flashes) so the moment punctuates.
 	HitStop float32
 
-	// ShakeTimer is the combat screen-shake countdown, set alongside
-	// HitStop when a Great/Excellent press resolves (CombatShakeFor) and
-	// decayed in updateBattleEffects. The render camera reads it to offset
-	// the view (see render.Camera); the wall-clock-driven oscillation means
-	// the screen shakes even while HitStop freezes the sim. Reset at battle
-	// Start / clearBattleResidual.
+	// ShakeTimer / ShakePeak / ShakeDur drive the combat screen-shake.
+	// ShakeTimer is the countdown (decayed in updateBattleEffects);
+	// ShakePeak is the peak camera offset in world units; ShakeDur is the
+	// duration it was armed with (the normalizer for the ease-out). The
+	// render camera offsets by ShakePeak·(ShakeTimer/ShakeDur). All three
+	// are armed together by core.TriggerCombatShake — a small base on a
+	// well-timed press, a bigger one on crits / AoE casts (which override
+	// the base). The wall-clock-driven oscillation means the screen shakes
+	// even while HitStop freezes the sim. Reset at Start / clearBattleResidual.
 	ShakeTimer float32
+	ShakePeak  float32
+	ShakeDur   float32
 
 	// SequencePulseTimer + Index drive the brief scale-up animation on the
 	// arrow that just landed correctly during the pickpocket sequence. The

@@ -4,8 +4,6 @@ import (
 	"fmt"
 
 	"crawler/internal/app/core"
-
-	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 func DrawOverlay(g core.GameState, assets Resources) {
@@ -51,6 +49,12 @@ var goldReadout = struct {
 	str  string
 }{last: -1}
 
+// goldReadoutMeasureCache memoizes the gold label's MeasureTextEx. The label
+// string is already cached above; this caches its measurement too so the
+// per-frame exploration HUD doesn't make a CGO measure call for an unchanged
+// width. Keyed on the label text, so it refreshes when the gold total does.
+var goldReadoutMeasureCache measureCache
+
 // drawGoldReadout paints a small gilt gold chip in the top-left corner
 // during free exploration. A glass pane backs the "<n> G" label so it
 // reads over busy world geometry. Kept out of the battle / overlay paths —
@@ -62,7 +66,7 @@ func drawGoldReadout(g core.GameState, assets Resources) {
 		goldReadout.str = fmt.Sprintf("%d G", g.Gold)
 	}
 	label := goldReadout.str
-	m := rl.MeasureTextEx(font, label, FontBody, FontSpacingBody)
+	m := goldReadoutMeasureCache.measure(font, label, FontBody, FontSpacingBody)
 	padX, padY := float32(12), float32(6)
 	x, y := hudEdgePad, hudEdgePad
 	w := int32(m.X + padX*2)

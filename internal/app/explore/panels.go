@@ -1,7 +1,6 @@
 package explore
 
 import (
-	"crawler/internal/app/audio"
 	"crawler/internal/app/core"
 	"crawler/internal/app/input"
 	"crawler/internal/app/render"
@@ -15,7 +14,6 @@ import (
 func openPanels(g *core.GameState) {
 	g.PanelsOpen = true
 	g.PanelsRowCursor = 0
-	g.PanelsSkillRow = 0
 	if g.PanelsMapZoom <= 0 {
 		g.PanelsMapZoom = core.PanelMapZoomDefault
 	}
@@ -25,6 +23,8 @@ func openPanels(g *core.GameState) {
 	g.Player.LookPitch = 0
 	core.ResetEquipPanels(g)
 	closeUseTarget(g)
+	closeSkillTree(g)
+	closeHealPick(g)
 }
 
 // closePanels takes the overlay down. Tab + zoom + cursor state stays
@@ -37,6 +37,8 @@ func closePanels(g *core.GameState) {
 	g.PanelsOpen = false
 	core.ResetEquipPanels(g)
 	closeUseTarget(g)
+	closeSkillTree(g)
+	closeHealPick(g)
 	render.ResetEquipPanelLayout()
 }
 
@@ -55,6 +57,14 @@ func updatePanels(g *core.GameState) {
 	// picker, not the whole overlay; tab paging / shortcuts are
 	// suppressed). Handle them first and return so nothing below sees the
 	// same edge.
+	if g.SkillTreeOpen {
+		updateSkillTreeModal(g)
+		return
+	}
+	if g.HealPickOpen {
+		updateHealPicker(g)
+		return
+	}
 	if g.UseTargetOpen {
 		updateUseTargetPicker(g)
 		return
@@ -113,16 +123,14 @@ func updatePanels(g *core.GameState) {
 		// updateEquipmentTab.
 		updateEquipmentTab(g)
 	case core.PanelTabSkills:
-		// 2-D cursor: Left/Right picks the party-member column, Up/Down
-		// picks the skill row within that member. Confirm buys the next
-		// tier of the focused skill (SkillPoints spent on the member),
-		// which the combat reads pick up on the next cast. Use (F / □)
-		// casts a heal skill out of battle — a separate button from
-		// Confirm so buying a tier and casting a heal never collide.
+		// Summary view: Left/Right picks the party-member column; Confirm
+		// opens that member's skill-tree modal (the Diablo-2-style three-
+		// tree sub-dialog where SkillPoints are actually spent). Use (F / □)
+		// still casts a Heal-tag skill out of battle — a separate button so
+		// opening the trees and casting a heal never collide.
 		g.PanelsRowCursor = input.CursorLeftRightWrap(g.PanelsRowCursor, len(g.Party))
-		g.PanelsSkillRow = input.CursorUpDown(g.PanelsSkillRow, core.SkillsPerClass)
 		if input.ConfirmPressed() && g.PanelsRowCursor >= 0 && g.PanelsRowCursor < len(g.Party) {
-			buySkillTier(g)
+			openSkillTreeFor(g, g.PanelsRowCursor)
 		}
 		if input.UsePressed() {
 			tryUseSkill(g)
@@ -159,29 +167,6 @@ func updatePanels(g *core.GameState) {
 	}
 }
 
-// buySkillTier spends one SkillPoint on the next tier of the focused
-// member's focused skill. On a successful purchase it pings the gilt
-// "great" cue; a refused buy (tree maxed, or not enough points) pings
-// the miss cue so the player gets feedback either way. The caller has
-// already bounds-checked PanelsRowCursor against the party.
-func buySkillTier(g *core.GameState) {
-	m := &g.Party[g.PanelsRowCursor]
-	skills := core.PartySkills(*m)
-	row := g.PanelsSkillRow
-	if row < 0 || row >= len(skills) {
-		return
-	}
-	s := skills[row]
-	if s == core.SkillNone {
-		return
-	}
-	if core.SpendSkillTier(m, s) {
-		audio.Play(audio.SoundInputGreat)
-	} else {
-		audio.Play(audio.SoundInputMiss)
-	}
-}
-
 // setPanelTab switches the active tab and resets the per-tab cursor.
 // Map zoom is preserved (handled separately on GameState). The
 // Equipment-tab state (slot cursor + any open slot picker) is reset so
@@ -195,8 +180,9 @@ func setPanelTab(g *core.GameState, t core.PanelTab) {
 	}
 	core.ResetEquipPanels(g)
 	closeUseTarget(g)
+	closeSkillTree(g)
+	closeHealPick(g)
 	render.ResetEquipPanelLayout()
 	g.PanelsTab = t
 	g.PanelsRowCursor = 0
-	g.PanelsSkillRow = 0
 }

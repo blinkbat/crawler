@@ -551,6 +551,10 @@ func setLayerCell(layer *[]string, x, z int, b byte) {
 // editing session you can accumulate dozens of MB of unreachable-but-
 // uncollectable AreaDefinitions. The copy frees them for GC.
 func pushUndo(s *State) {
+	// Every forward mutation snapshots through here first, so it's the one
+	// place to invalidate the cached reachability warnings (see
+	// State.ReachabilityWarnings).
+	s.reachValid = false
 	snap := core.CloneArea(s.area)
 	s.undo = append(s.undo, snap)
 	if len(s.undo) > undoLimit {
@@ -570,6 +574,7 @@ func undoOne(s *State) {
 	s.undo = s.undo[:len(s.undo)-1]
 	s.redo = append(s.redo, core.CloneArea(s.area))
 	s.area = last
+	s.reachValid = false // area replaced — recompute reachability lazily
 	// Stepping back to a snapshot that matches the on-disk baseline should
 	// drop the dirty marker — don't pester the user with the unsaved-changes
 	// modal if their working state is identical to what's on disk.
@@ -585,6 +590,7 @@ func redoOne(s *State) {
 	s.redo = s.redo[:len(s.redo)-1]
 	s.undo = append(s.undo, core.CloneArea(s.area))
 	s.area = last
+	s.reachValid = false // area replaced — recompute reachability lazily
 	s.dirty = !core.AreaContentEqual(s.area, s.baseline)
 }
 
@@ -1212,6 +1218,7 @@ func performNewMap(s *State, w, h int, floor byte) {
 	s.baseline = core.CloneArea(s.area)
 	s.undo = nil
 	s.redo = nil
+	s.reachValid = false // fresh area — recompute reachability lazily
 	s.dirty = false
 	s.zoom = 1
 	s.panX, s.panY = 0, 0

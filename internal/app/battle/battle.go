@@ -627,8 +627,11 @@ func tickFlashHold(g *core.GameState, dt float32, onResolve func()) bool {
 	// Screen-shake the camera on a well-timed hit — set alongside the
 	// hit-stop so the impact freeze and the shake land together (the shake
 	// oscillation is wall-clock-driven, so it's visible through the freeze).
-	// Zero for Miss/Nice/Good, so this is a no-op on weak presses.
-	g.Battle.ShakeTimer = core.CombatShakeFor(g.Battle.Timing.Quality)
+	// This is the SUBTLE base (zero for Miss/Nice/Good); the apply step that
+	// follows (onResolve) arms the bigger shake for crits / AoE casts, which
+	// overrides this via TriggerCombatShake's keep-the-stronger rule.
+	basePeak, baseDur := core.CombatShakeFor(g.Battle.Timing.Quality)
+	core.TriggerCombatShake(&g.Battle, basePeak, baseDur)
 	if stop := core.HitStopFor(g.Battle.Timing.Quality); stop > 0 {
 		g.Battle.HitStop = stop
 		return true

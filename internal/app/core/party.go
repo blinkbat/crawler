@@ -454,6 +454,22 @@ func SkillHealableOutOfBattle(skill SkillID) bool {
 	return ok && def.PlayerCastable && def.Tag == SkillTagHeal
 }
 
+// OutOfBattleHeals returns the member's skills castable as a heal outside
+// battle (SkillHealableOutOfBattle), in class-skill order — e.g. the Cleric's
+// {Prayer, Mass Mend}. The Skills-tab "Use" flow reads this to decide whether
+// to cast directly (one heal), pop a chooser (multiple), or refuse (none).
+// Allocates a small slice; called on a button press / while the chooser modal
+// is open, never on a per-frame combat path.
+func OutOfBattleHeals(m PartyMember) []SkillID {
+	var out []SkillID
+	for _, s := range PartySkills(m) {
+		if s != SkillNone && SkillHealableOutOfBattle(s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // HealMember restores up to `amount` HP to a LIVING, non-ingested member,
 // clamped at MaxHP. It never revives (a downed member at HP <= 0 is
 // untouched — reviving is not a heal), ignores non-positive amounts, and

@@ -839,17 +839,36 @@ func HitStopFor(quality int) float32 {
 	return 0
 }
 
-// CombatShakeFor returns the screen-shake duration a graded hit earns —
-// only Great / Excellent presses shake (the timed-hit payoff), Excellent
-// harder + longer. Mirrors HitStopFor so the two impact knobs sit together.
-func CombatShakeFor(quality int) float32 {
+// CombatShakeFor returns the BASE screen-shake (peak amplitude + duration) a
+// graded hit earns — only Great / Excellent presses shake (the timed-hit
+// payoff), Excellent a touch harder + longer. This is deliberately subtle;
+// the big shake (crits / AoE) is armed separately via TriggerCombatShake.
+// Mirrors HitStopFor so the two impact knobs sit together.
+func CombatShakeFor(quality int) (peak, dur float32) {
 	switch quality {
 	case TimingQualityExcellent:
-		return CombatShakeExcellent
+		return CombatShakeExcellentPeak, CombatShakeExcellentDur
 	case TimingQualityGreat:
-		return CombatShakeGreat
+		return CombatShakeGreatPeak, CombatShakeGreatDur
 	}
-	return 0
+	return 0, 0
+}
+
+// TriggerCombatShake arms the camera shake with an explicit peak amplitude
+// (world units) and duration (seconds). A stronger shake already in flight is
+// NOT stomped by a weaker one — so the big crit/AoE shake survives the small
+// grade-based base that gets armed a frame earlier in the same resolve. No-op
+// for a nil battle or a non-positive peak/duration (e.g. a Miss/Nice/Good).
+func TriggerCombatShake(b *Battle, peak, dur float32) {
+	if b == nil || peak <= 0 || dur <= 0 {
+		return
+	}
+	if b.ShakeTimer > 0 && b.ShakePeak > peak {
+		return
+	}
+	b.ShakePeak = peak
+	b.ShakeDur = dur
+	b.ShakeTimer = dur
 }
 
 // TimingQualityLabel returns the popup text for a quality grade. Reads

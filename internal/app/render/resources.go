@@ -783,28 +783,34 @@ func loadEnemyVisuals() (map[core.EnemyKind]enemyVisual, []rl.Texture2D) {
 			texture: ratTexture,
 			// Square size: the authored PNG is a 1:1 canvas (the old
 			// procedural sprite was a 72×96 portrait), so a square world
-			// size keeps the art from stretching. 1.35 keeps the vertical
-			// presence close to the old 1.22-tall billboard while planting
-			// the feet near the floor under the shared center-anchor
-			// (enemyBillboardY); the disc below covers the small remainder.
-			// Tune this single value if the rat reads too big/small.
-			size: rl.NewVector2(1.35, 1.35),
+			// size keeps the art from stretching. Dropped 1.35 → 1.05: at
+			// 1.35 the rat dwarfed every other enemy (peers are ~0.9–1.3)
+			// and so read as standing far in FRONT of the formation even
+			// though all sprites share the same battle depth — it just
+			// took more screen. 1.05 sits it in line with the others while
+			// still reading as a chunky rat. Tune this single value if the
+			// rat reads too big/small.
+			size: rl.NewVector2(1.05, 1.05),
 			// Contact shadow so the rat reads as planted rather than
 			// floating — opt-in per kind (see enemyVisual.shadowRadius).
 			// Wider than the sprite's footprint so it grounds the chunky
-			// body without looking like a tight pin-spot.
-			shadowRadius: 0.60,
+			// body without looking like a tight pin-spot. Scaled down with
+			// the smaller sprite (0.60 → 0.46).
+			shadowRadius: 0.46,
 			// The PNG is center-weighted, so at the shared center-anchor the
-			// rat floated and its top clipped the selector pyramid. Drop the
-			// sprite ~1/3 of its height (the shadow stays put) so it plants
-			// on the floor. Tune alongside size if grounding shifts.
-			yOffset: -0.45,
-			// The pyramid anchors to the (un-lowered) formation center, so
-			// after dropping the sprite it needs nudging back toward the
-			// rat's head: down from the default, plus slightly screen-right
-			// so it sits over the head cleanly rather than dead-center.
-			markerYOffset: -0.18,
-			markerXOffset: 0.12,
+			// rat floated and its top clipped the selector chevron. Drop the
+			// sprite so it plants on the floor; -0.60 keeps the same foot
+			// line as the old (1.35, -0.45) pairing after the shrink
+			// (a smaller sprite's bottom edge rises, so the drop deepened by
+			// half the size delta). Tune alongside size if grounding shifts.
+			yOffset: -0.60,
+			// The target chevron anchors to the (un-lowered) formation
+			// center, so after dropping the sprite it needs nudging back
+			// toward the rat's head: down from the default (tracking the
+			// lower, smaller head), plus slightly screen-right so it sits
+			// over the head cleanly rather than dead-center.
+			markerYOffset: -0.48,
+			markerXOffset: 0.10,
 			// Somewhat darker than the source PNG — a near-neutral gray
 			// (~0.72×) with a faint warm bias so the brown/orange read
 			// survives. Multiplies into the runtime tint; raise toward 255

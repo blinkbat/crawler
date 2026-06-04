@@ -457,6 +457,15 @@ const undoLimit = 50
 type State struct {
 	area core.AreaDefinition
 
+	// reachWarnings caches the last reachabilityWarnings(s.area) result so the
+	// metadata panel's per-frame badge draw doesn't re-run a full-grid BFS
+	// (plus two w*h allocations) every frame. reachValid=false means "stale,
+	// recompute on next read"; it's flipped false by every area mutation —
+	// pushUndo (the universal pre-mutation hook), undo/redo, and performNewMap.
+	// Zero value (false) is correct: the first read computes it.
+	reachWarnings []string
+	reachValid    bool
+
 	layer    Layer
 	brushIdx [layerCount]int
 	// paletteScroll is the per-layer vertical scroll offset (in pixels)
@@ -638,13 +647,19 @@ func (s State) Area() core.AreaDefinition {
 	return core.CloneArea(s.area)
 }
 
-// ReachabilityWarnings runs reachabilityWarnings against the current
-// area state and returns the result. The check is a single flood-fill
-// (a few hundred cells on a typical authored map) so we can afford to
-// compute it per-frame rather than caching across edits — the metadata
-// panel calls this once per draw to render the warnings badge.
+// ReachabilityWarnings returns the cached reachabilityWarnings(s.area)
+// result, recomputing only when the area changed since the last call. The
+// metadata panel calls this once per draw (every frame the editor is open),
+// and the check is a full-grid flood-fill that allocates two w*h bool slices
+// — on a large map that's wasteful GC pressure 60×/sec for a value that only
+// changes on an edit. reachValid is invalidated by every area mutation
+// (pushUndo / undo / redo / performNewMap), so the cache can't go stale.
 func (s *State) ReachabilityWarnings() []string {
-	return reachabilityWarnings(s.area)
+	if !s.reachValid {
+		s.reachWarnings = reachabilityWarnings(s.area)
+		s.reachValid = true
+	}
+	return s.reachWarnings
 }
 
 // PreviewStepCount returns the StepCount value that places the player at

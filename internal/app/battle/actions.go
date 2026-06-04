@@ -430,6 +430,11 @@ func applyAoEDamage(g *core.GameState, skill core.SkillID, damage, quality int) 
 		core.EnqueueEnemyVFX(g, vfx, slot)
 		hits++
 	}
+	if hits > 0 {
+		// AoE casts are the "costly" hits that earn the big camera punch
+		// (overrides the subtle base shake from the timing grade).
+		core.TriggerCombatShake(&g.Battle, core.CombatShakeBigPeak, core.CombatShakeBigDur)
+	}
 	return hits
 }
 
@@ -1234,9 +1239,15 @@ func rollSkillCrit(g *core.GameState, actor *core.PartyMember, skill core.SkillI
 		if core.SkillTierMod(actor, core.SkillBackstab).CritDoubleOnExcellent {
 			double = true
 		}
+		core.TriggerCombatShake(&g.Battle, core.CombatShakeBigPeak, core.CombatShakeBigDur)
 		return
 	}
 	crit = core.RollCrit(g.Rand(), core.EffectiveStats(*actor), quality)
+	if crit {
+		// Crits are the "big hit" moment — punch the camera harder than a
+		// plain well-timed press (overrides the subtle base shake).
+		core.TriggerCombatShake(&g.Battle, core.CombatShakeBigPeak, core.CombatShakeBigDur)
+	}
 	return
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 )
@@ -85,6 +86,14 @@ func saveSanitizedParty(party []PartyMember) []PartyMember {
 		out[i].AttackBump = 0
 		out[i].DamageFlash = 0
 		out[i].HitKnockback = 0
+		// copy() above is shallow, so the snapshot's progression maps still
+		// alias the live party's. Clone them so the sanitized copy is fully
+		// independent — today it's only marshalled (read-only), but an
+		// independent snapshot can't be corrupted by a future deferred /
+		// async save that mutates the live party between snapshot and write.
+		// maps.Clone preserves nil for an un-invested member.
+		out[i].SkillTiers = maps.Clone(out[i].SkillTiers)
+		out[i].TreeRanks = maps.Clone(out[i].TreeRanks)
 	}
 	return out
 }

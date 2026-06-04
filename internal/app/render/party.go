@@ -128,7 +128,9 @@ const (
 	partyCardGap = float32(16)
 	// activeCardLift raises the active member's card above the ribbon row
 	// so "whose turn is it" reads at a glance, on top of the bold halo.
-	activeCardLift = float32(14)
+	// Raised from 14 → 24 so the lift is the primary turn cue now that the
+	// in-world pyramid + glow were removed (see DrawPartySprites).
+	activeCardLift = float32(24)
 	// ribbonBottom is the bottom-edge margin for the party ribbon.
 	// Routed through hudEdgePad so the bottom margin matches the
 	// minimap's top margin (and every other HUD panel's edge
@@ -137,9 +139,21 @@ const (
 	ribbonBottom = float32(hudEdgePad)
 )
 
+// drawCardScrim paints the shared dim wash (theme's surfaceDimScrim) over a
+// card's rounded rect, matching drawCard's corner radius so the dim hugs the
+// card body. Used to recede NON-active party cards during a member's turn so
+// the lifted active card reads as "whose turn" at a glance; the targeted ally
+// is skipped so heal/item targeting stays legible (see DrawPartyRibbon).
+func drawCardScrim(x, y, w, h int32) {
+	rect := rl.NewRectangle(float32(x), float32(y), float32(w), float32(h))
+	roundness := fixedRoundnessFor(w, h, cornerRadius)
+	rl.DrawRectangleRounded(rect, roundness, 8, surfaceDimScrim)
+}
+
 // drawPartyCard renders a single party member card. The class accent stripe
-// keeps members recognizable at a glance even when names are short.
-func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, selected, down bool) {
+// keeps members recognizable at a glance even when names are short. `dim`
+// requests the inactive-member wash (applied last, over the whole card).
+func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, selected, down, dim bool) {
 	classCol := partyClassPresentationFor(member.Class).turnColor
 	accent := classCol
 	bg := surfacePrimary
@@ -253,6 +267,13 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 	hpFill := hpFillColor(member.HP, member.MaxHP)
 	drawBar(font, contentX, y+44, contentW, 30, "HP", member.HP, member.MaxHP, hpFill, down)
 	drawBar(font, contentX, y+80, contentW, 30, "MP", member.MP, member.MaxMP, barMP, down)
+
+	// Dim wash over inactive cards (painted last, over everything) so the
+	// lifted active card pops. The active and the targeted-ally cards opt
+	// out — DrawPartyRibbon only sets dim for the rest.
+	if dim {
+		drawCardScrim(ix, iy, iw, ih)
+	}
 }
 
 // DrawPartyRibbon renders the always-visible bottom party ribbon. Cards are
@@ -278,6 +299,11 @@ func DrawPartyRibbon(g core.GameState, assets Resources) {
 		selectedIdx = core.HighlightedAllyIndex(&g)
 	}
 
+	// Dim the OTHER cards only when a party member is actually up
+	// (ActiveActorIndex is -1 on enemy turns / between turns, so the ribbon
+	// stays at full brightness then rather than greying out wholesale).
+	dimOthers := activeIdx >= 0 && activeIdx < len(g.Party) && core.PartyMemberAvailable(g.Party, activeIdx)
+
 	for i, member := range g.Party {
 		x := startX + (partyCardW+partyCardGap)*float32(i)
 		// Active / selected glow only paints on a member who can act
@@ -288,13 +314,19 @@ func DrawPartyRibbon(g core.GameState, assets Resources) {
 		// in case a stale PartyTarget gets left pointing at someone the
 		// mantrap swallowed mid-action.
 		available := core.PartyMemberAvailable(g.Party, i)
+		active := i == activeIdx && available
+		selected := i == selectedIdx && available
+		// Dim every non-active card except the one being targeted (its
+		// green highlight must stay legible during heal/item targeting).
+		dim := dimOthers && !active && !selected
 		drawPartyCard(
 			assets.hudFont,
 			member,
 			x, y,
-			i == activeIdx && available,
-			i == selectedIdx && available,
+			active,
+			selected,
 			member.HP <= 0,
+			dim,
 		)
 	}
 }

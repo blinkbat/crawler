@@ -1,5 +1,18 @@
 package core
 
+// ⚠ CURRENTLY INERT — pending the skill-effect rewire. This per-skill tier
+// ladder predates the Diablo-2-style skill trees in skilltrees.go, which are
+// now the player-facing progression UI (spending into PartyMember.TreeRanks).
+// NOTHING writes PartyMember.SkillTiers in gameplay anymore — the old buy
+// path (SpendSkillTier ← buySkillTier) was removed when the Skills tab became
+// the tree modal — so EffectiveSkillEffect / SkillDamageFor / SkillHealFor /
+// SkillTierMod (still called from battle/actions.go) always resolve to the
+// BASE effect. The machinery is kept as the seam the effect-wiring pass will
+// reuse: when tree nodes start granting combat effects, route them through
+// here (or replace this with a TreeRanks-driven equivalent). Until then,
+// treat the "tier" reads as base-only and don't assume SkillTiers is ever
+// non-empty outside tests.
+//
 // Skill tree: per-skill upgrade ladder + helpers that fold the tier
 // modifiers into the SkillEffect the battle code applies. Each player-
 // castable skill has MaxSkillTier purchasable upgrades, bought one at

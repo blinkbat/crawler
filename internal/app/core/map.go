@@ -643,8 +643,12 @@ func FootprintWorldOffset(offsets []MultiTileOffset) (x, z float32) {
 // PropFootprint returns the cells occupied by the prop anchored at the
 // given anchor char, including the anchor itself at (0,0). Single-tile
 // props return a single-element slice. Returns nil for non-anchor or
-// unknown chars — callers should treat that as "single-tile". The
-// returned slice is fresh; modifying it is harmless.
+// unknown chars — callers should treat that as "single-tile".
+//
+// The returned slice is SHARED + read-only (the offsets are constant per
+// anchor) — callers must not mutate it. It used to return a fresh literal,
+// but the world-draw loop calls this per visible multi-tile anchor every
+// frame, so a shared backing array avoids a per-frame heap allocation.
 //
 // Used by the editor to auto-fill footprint shadow chars when painting a
 // multi-tile anchor, and to validate the footprint fits in-bounds before
@@ -652,10 +656,18 @@ func FootprintWorldOffset(offsets []MultiTileOffset) (x, z float32) {
 func PropFootprint(anchor byte) []MultiTileOffset {
 	switch anchor {
 	case TileRockFormation:
-		return []MultiTileOffset{{0, 0}, {1, 0}, {0, 1}, {1, 1}}
+		return rockFormationFootprint
 	}
 	return nil
 }
+
+// Shared, read-only footprint offset slices (see PropFootprint /
+// DecorFootprint). Package-level so the per-frame draw path returns them
+// without allocating a fresh literal each call.
+var (
+	rockFormationFootprint = []MultiTileOffset{{0, 0}, {1, 0}, {0, 1}, {1, 1}}
+	archwayFootprint       = []MultiTileOffset{{0, 0}, {1, 0}}
+)
 
 // PropFootprintTail returns the char that should be written to the tail
 // cells of a multi-tile prop's footprint (every cell except the anchor).
@@ -675,7 +687,7 @@ func PropFootprintTail(anchor byte) byte {
 func DecorFootprint(anchor byte) []MultiTileOffset {
 	switch anchor {
 	case DecorArchway:
-		return []MultiTileOffset{{0, 0}, {1, 0}}
+		return archwayFootprint
 	}
 	return nil
 }

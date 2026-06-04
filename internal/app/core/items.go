@@ -34,6 +34,31 @@ const (
 	ItemCrustOfBread // small healing consumable (Slot == SlotNone)
 )
 
+// init pins every ItemKind's serialized integer value. ItemKind is stored as
+// its int in save files (SaveData.Inventory), so inserting a kind mid-enum
+// renumbers every later kind and silently corrupts existing saves. These
+// explicit literals are the on-disk contract: a mid-enum insert shifts a
+// kind's iota value away from its pinned literal and trips this panic at
+// startup, instead of corrupting saves silently. APPENDING a new kind at the
+// end is the only safe edit — add the kind above, then one pinned line here.
+func init() {
+	pinned := [...]struct {
+		kind ItemKind
+		val  int
+	}{
+		{ItemNone, 0}, {ItemCheese, 1}, {ItemBatJerky, 2},
+		{ItemIronSword, 3}, {ItemWoodenShield, 4}, {ItemLeatherCap, 5},
+		{ItemSilverRing, 6}, {ItemBrassAmulet, 7}, {ItemDagger, 8},
+		{ItemRapier, 9}, {ItemShortBow, 10}, {ItemSling, 11},
+		{ItemBattleAxe, 12}, {ItemWarHammer, 13}, {ItemCrustOfBread, 14},
+	}
+	for _, p := range pinned {
+		if int(p.kind) != p.val {
+			panic("core: ItemKind serialization value drifted — never insert mid-enum (it renumbers saved items); append new kinds at the end and pin them in items.go's init")
+		}
+	}
+}
+
 // EquipmentSlotType classifies what equipment slot an item can go into.
 // SlotNone marks a consumable (cheese, jerky) and means "inventory-only,
 // can't be equipped." Hand items fit either hand slot; armor items fit

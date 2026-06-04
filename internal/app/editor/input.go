@@ -607,18 +607,25 @@ type textFieldConfig struct {
 	Accept func(rune) bool
 }
 
+// defaultTextFieldMaxLen is the rune budget shared by the general-purpose
+// editor text fields (names, filenames, door target paths). One named source
+// so the limit tunes in a single place instead of being repeated as a literal
+// per field + in the defensive default below. Fields that need a different cap
+// (e.g. focusCustomEnemyName) override it explicitly.
+const defaultTextFieldMaxLen = 96
+
 // textFieldConfigs maps each focusField to its rune-budget +
 // acceptance rule. Foci NOT in this table (focusNone, focusWidth /
 // Height — those are numeric inputs handled by updateNumericInput,
 // not pumpPrintableASCII) reuse the default below via
 // configForFocus.
 var textFieldConfigs = map[focusField]textFieldConfig{
-	focusName:            {96, acceptPrintable},
-	focusQuiet:           {96, acceptPrintable},
-	focusFilename:        {96, acceptPrintable},
-	focusDoorName:        {96, acceptPrintable},
-	focusDoorTargetMap:   {96, acceptPrintable},
-	focusDoorTargetDoor:  {96, acceptPrintable},
+	focusName:            {defaultTextFieldMaxLen, acceptPrintable},
+	focusQuiet:           {defaultTextFieldMaxLen, acceptPrintable},
+	focusFilename:        {defaultTextFieldMaxLen, acceptPrintable},
+	focusDoorName:        {defaultTextFieldMaxLen, acceptPrintable},
+	focusDoorTargetMap:   {defaultTextFieldMaxLen, acceptPrintable},
+	focusDoorTargetDoor:  {defaultTextFieldMaxLen, acceptPrintable},
 	focusCustomEnemyName: {24, acceptPrintable},
 }
 
@@ -626,10 +633,10 @@ func configForFocus(f focusField) textFieldConfig {
 	if cfg, ok := textFieldConfigs[f]; ok {
 		return cfg
 	}
-	// Defensive default: a 96-char permissive field. Used by future
+	// Defensive default: a permissive field at the shared cap. Used by future
 	// text foci that get wired up before someone remembers to add a
 	// row; pump still bounds the buffer so the failure mode is bounded.
-	return textFieldConfig{MaxLen: 96, Accept: acceptPrintable}
+	return textFieldConfig{MaxLen: defaultTextFieldMaxLen, Accept: acceptPrintable}
 }
 
 // pumpFocusField pumps printable runes into `target` using the
@@ -1004,7 +1011,7 @@ func updateDoorEditModal(s *State) Action {
 		target := doorEditTextTarget(s)
 		if target != nil {
 			// Route through pumpFocusField so the door fields read
-			// their rune-budget from textFieldConfigs (96 today) —
+			// their rune-budget from textFieldConfigs (defaultTextFieldMaxLen) —
 			// keeps the door modal in sync with the editor-chrome
 			// fields without a second copy of the cap. The pump's
 			// onChange is s.markDirty, which sets s.dirty=true

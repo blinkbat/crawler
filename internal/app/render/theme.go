@@ -50,6 +50,15 @@ var (
 	glassWarm     = rl.NewColor(28, 22, 16, 145)
 	glassDanger   = rl.NewColor(36, 16, 18, 135)
 	veil          = rl.NewColor(0, 0, 0, 130)
+	// surfaceCardBackdrop is an OPAQUE dark panel fill (glass-family tone at
+	// full alpha) for modals that must fully hide the world behind them — it's
+	// painted UNDER the glass body so the frame + filigree still composite on
+	// top. The skill-tree modal uses it; reuse it for any future opaque modal.
+	surfaceCardBackdrop = rl.NewColor(24, 20, 29, 255)
+	// surfaceDimScrim is the translucent dark wash laid over inactive elements
+	// to recede them beneath a lit selection (the non-active party ribbon
+	// cards). Close to glassBaseWash but its own alpha so the two stay tunable.
+	surfaceDimScrim = rl.NewColor(6, 8, 14, 105)
 
 	// ----- Wood frames -----
 	woodDark   = rl.NewColor(48, 30, 18, 255)

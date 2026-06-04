@@ -1,0 +1,309 @@
+package core
+
+// Diablo-2-style skill trees: each party class has THREE thematic trees,
+// each a vertical ladder of skill nodes the player invests SkillPoints
+// into. This file is the UI-facing DATA + navigation layer only — the
+// nodes carry name / description / cost / rank / prerequisite, but they
+// do NOT (yet) wire any combat effect. Buying a node fills its rank pips
+// and spends a SkillPoint; the gameplay each node grants is deferred to a
+// later "skill impl" pass. (The legacy per-skill skillTierTable upgrades
+// in skilltree.go still exist and still drive combat through
+// EffectiveSkillEffect — they're simply no longer the screen the player
+// shops from.)
+//
+// Design contract, mirroring the registry-invariant pattern used across
+// the codebase (tiles / props / skills): the init guard below panics on
+// drift — wrong tree count, duplicate node id, or a prerequisite that
+// points outside its own tree — so a malformed authoring edit fails at
+// process start instead of producing a silently-broken tree.
+
+// skillTreesPerClass is the fixed number of trees every class exposes.
+// Three is the design target (one offense-y, one support-y, one
+// risk/identity tree per class); the modal UI lays out exactly this many
+// columns.
+const skillTreesPerClass = 3
+
+// SkillTreeNode is one purchasable node in a class tree. Rank is tracked
+// per party member in PartyMember.TreeRanks keyed by ID. Tier is the
+// node's row within its tree (0 = root, filled in by the builder).
+// Requires names the node that must hold at least one rank before this
+// one unlocks (D2-style gating); "" means "always available" (the root).
+type SkillTreeNode struct {
+	ID       string
+	Name     string
+	Desc     string
+	MaxRank  int
+	Cost     int // SkillPoints per rank
+	Tier     int
+	Requires string
+}
+
+// SkillTreeDef is one of a class's three trees: a display name, a short
+// theme blurb (the kind of skills it holds), and its ordered node ladder.
+type SkillTreeDef struct {
+	Name  string
+	Theme string
+	Nodes []SkillTreeNode
+}
+
+// nd is the terse node constructor used by the tree tables — every node
+// currently costs one SkillPoint per rank, so Cost is fixed here and the
+// authoring rows only carry id / name / blurb / max-rank.
+func nd(id, name, desc string, maxRank int) SkillTreeNode {
+	return SkillTreeNode{ID: id, Name: name, Desc: desc, MaxRank: maxRank, Cost: 1}
+}
+
+// linearTree wires a slice of nodes into a single-chain tree: each node's
+// Tier becomes its index and each (past the root) requires the node above
+// it. Keeps the authoring tables free of hand-numbered tiers / repeated
+// Requires strings — branching trees would set those explicitly instead.
+func linearTree(name, theme string, nodes []SkillTreeNode) SkillTreeDef {
+	for i := range nodes {
+		nodes[i].Tier = i
+		if i > 0 {
+			nodes[i].Requires = nodes[i-1].ID
+		}
+	}
+	return SkillTreeDef{Name: name, Theme: theme, Nodes: nodes}
+}
+
+// classSkillTrees is the source of truth for every class's three trees.
+// Authored as linear ladders for this first UI pass; the data model
+// already supports arbitrary Requires for future branching.
+var classSkillTrees = map[PartyClass][]SkillTreeDef{
+	// ── Warrior ──────────────────────────────────────────────────────
+	ClassWarrior: {
+		linearTree("Battle Sense", "Disable, hinder, intercept, react", []SkillTreeNode{
+			nd("shield-bash", "Shield Bash", "Phys hit with a chance to Stun on good timing.", 3),
+			nd("taunt", "Taunt", "Force the target enemy to attack the Warrior next turn.", 1),
+			nd("guard", "Guard", "Cover an ally this round; their incoming hits redirect to you.", 3),
+			nd("sunder", "Sunder", "Phys hit that pushes the target's turn later.", 3),
+			nd("riposte", "Riposte", "Passive: counter when you dodge or a Guarded ally is struck.", 1),
+		}),
+		linearTree("Ancestral Call", "Utility, light heal, protection, summons", []SkillTreeNode{
+			nd("second-wind", "Second Wind", "A small self or party heal.", 3),
+			nd("war-banner", "War Banner", "Plant a banner: party gains stats while it stands.", 3),
+			nd("stone-skin", "Stone Skin", "Grant an ally temporary Armor and MDef.", 3),
+			nd("ancestral-spirit", "Ancestral Spirit", "Summon a warrior shade to fight beside the party.", 1),
+			nd("last-stand", "Last Stand", "Capstone: once per battle, survive a lethal blow at 1 HP.", 1),
+		}),
+		linearTree("Fury", "Lifesteal, bleed, AoE, self-harm", []SkillTreeNode{
+			nd("cleave", "Cleave", "Multi-hit AoE swing across the enemy pack.", 3),
+			nd("rend", "Rend", "Phys hit that applies a Bleed damage-over-time.", 3),
+			nd("bloodthirst", "Bloodthirst", "Passive: heal for a share of all physical damage dealt.", 3),
+			nd("reckless-swing", "Reckless Swing", "A heavy hit that lowers your own Armor for a turn.", 3),
+			nd("crimson-rampage", "Crimson Rampage", "Capstone: deal more damage the lower your HP.", 1),
+		}),
+	},
+	// ── Cleric ───────────────────────────────────────────────────────
+	ClassCleric: {
+		linearTree("Radiance", "Holy offense, smite, anti-status", []SkillTreeNode{
+			nd("smite", "Smite", "Magic burst; bonus damage to undead.", 3),
+			nd("searing-light", "Searing Light", "A radiant damage-over-time.", 3),
+			nd("blind", "Blind", "Lower an enemy's accuracy for several turns.", 3),
+			nd("consecrate", "Consecrate", "AoE radiant damage across the enemy pack.", 3),
+			nd("judgment", "Judgment", "Capstone: execute low-HP enemies for massive damage.", 1),
+		}),
+		linearTree("Mercy", "Restoration, regen, cleanse, revive", []SkillTreeNode{
+			nd("prayer", "Prayer", "Single-target heal on an ally.", 3),
+			nd("cleanse", "Cleanse", "Cure status effects on one ally.", 3),
+			nd("renewal", "Renewal", "Heal-over-time regeneration on an ally.", 3),
+			nd("mass-mend", "Mass Mend", "Heal the entire living party at once.", 3),
+			nd("resurrect", "Resurrect", "Capstone: revive a downed party member.", 1),
+		}),
+		linearTree("Conviction", "Buffs, wards, retribution", []SkillTreeNode{
+			nd("blessing", "Blessing", "Buff the party's stats and accuracy.", 3),
+			nd("aegis", "Aegis", "Shield an ally against the next hit.", 3),
+			nd("retribution", "Retribution", "Passive: attackers take reflected damage.", 3),
+			nd("martyrs-bond", "Martyr's Bond", "Redirect an ally's incoming damage to the Cleric.", 1),
+			nd("bulwark-of-faith", "Bulwark of Faith", "Capstone: party-wide Armor and MDef aura.", 1),
+		}),
+	},
+	// ── Thief ────────────────────────────────────────────────────────
+	ClassThief: {
+		linearTree("Shadow Arts", "Stealth, evasion, control", []SkillTreeNode{
+			nd("backstab", "Backstab", "High-crit opener; damage doubles on Excellent timing.", 3),
+			nd("cripple", "Cripple", "Lower an enemy's SPD.", 3),
+			nd("smoke-bomb", "Smoke Bomb", "Party gains evasion; enemies lose accuracy for a turn.", 3),
+			nd("vanish", "Vanish", "Become untargetable for one turn and drop aggro.", 1),
+			nd("shadow-step", "Shadow Step", "Passive: bonus damage when acting before the target.", 3),
+		}),
+		linearTree("Venomancy", "Toxins, DoT, armor break", []SkillTreeNode{
+			nd("venom-strike", "Venom Strike", "Phys hit that applies Poison.", 3),
+			nd("corrosive-vial", "Corrosive Vial", "Break an enemy's Armor so all hits land harder.", 3),
+			nd("poison-cloud", "Poison Cloud", "AoE Poison across the enemy pack.", 3),
+			nd("lacerate", "Lacerate", "A Bleed that stacks alongside Poison.", 3),
+			nd("plague", "Plague", "Capstone: poison spreads when a poisoned enemy dies.", 1),
+		}),
+		linearTree("Cutpurse", "Larceny, tempo, passive masteries", []SkillTreeNode{
+			nd("steal", "Steal", "Pickpocket the target; timing drives the chance.", 3),
+			nd("mug", "Mug", "Deal damage and steal in a single hit.", 3),
+			nd("lucky-strike", "Lucky Strike", "Passive: increased critical-hit chance.", 3),
+			nd("fleet-footed", "Fleet Footed", "Passive: increased dodge and SPD.", 3),
+			nd("killing-spree", "Killing Spree", "Capstone: a kill grants a burst of turn speed.", 1),
+		}),
+	},
+	// ── Wizard ───────────────────────────────────────────────────────
+	ClassWizard: {
+		linearTree("Pyromancy", "Fire, burn, AoE detonation", []SkillTreeNode{
+			nd("firebolt", "Firebolt", "Single-target fire; chance to apply Burn.", 3),
+			nd("fireball", "Fireball", "AoE fire across the enemy pack.", 3),
+			nd("immolate", "Immolate", "A sustained Burn damage zone.", 3),
+			nd("combust", "Combust", "Detonate a target's Burn stacks for a damage spike.", 3),
+			nd("meteor", "Meteor", "Capstone: a massive delayed AoE.", 1),
+		}),
+		linearTree("Cryomancy", "Frost, slow, freeze, control", []SkillTreeNode{
+			nd("frost-lance", "Frost Lance", "Magic hit with a Stun proc on good timing.", 3),
+			nd("frostbite", "Frostbite", "Chill a target, reducing its SPD.", 3),
+			nd("cone-of-cold", "Cone of Cold", "AoE slow across the enemy pack.", 3),
+			nd("ice-armor", "Ice Armor", "Buff: attackers are chilled; gain MDef.", 3),
+			nd("shatter", "Shatter", "Capstone: bonus damage against frozen or stunned foes.", 1),
+		}),
+		linearTree("Storm", "Lightning, chain, arcane utility", []SkillTreeNode{
+			nd("arc-bolt", "Arc Bolt", "Single-target lightning.", 3),
+			nd("chain-lightning", "Chain Lightning", "Lightning that bounces across the pack.", 3),
+			nd("static-field", "Static Field", "Deal damage as a share of the enemy's current HP.", 3),
+			nd("dispel", "Dispel", "Strip a buff or status from an enemy.", 3),
+			nd("overcharge", "Overcharge", "Capstone: regenerate MP; spells may cost nothing.", 1),
+		}),
+	},
+}
+
+func init() {
+	for _, c := range []PartyClass{ClassWarrior, ClassCleric, ClassThief, ClassWizard} {
+		trees, ok := classSkillTrees[c]
+		if !ok || len(trees) != skillTreesPerClass {
+			panic("core: classSkillTrees must define exactly skillTreesPerClass trees per class")
+		}
+		seen := map[string]bool{}
+		for _, tr := range trees {
+			if tr.Name == "" {
+				panic("core: skill tree with empty Name")
+			}
+			if len(tr.Nodes) == 0 {
+				panic("core: skill tree '" + tr.Name + "' has no nodes")
+			}
+			inTree := map[string]bool{}
+			for _, n := range tr.Nodes {
+				inTree[n.ID] = true
+			}
+			for _, n := range tr.Nodes {
+				if n.ID == "" || n.MaxRank < 1 || n.Cost < 1 {
+					panic("core: malformed skill tree node in " + tr.Name)
+				}
+				if seen[n.ID] {
+					panic("core: duplicate skill tree node id '" + n.ID + "'")
+				}
+				seen[n.ID] = true
+				if n.Requires != "" && !inTree[n.Requires] {
+					panic("core: skill tree node '" + n.ID + "' requires '" + n.Requires + "' outside its tree")
+				}
+			}
+		}
+	}
+}
+
+// SkillTreesFor returns the three trees a class learns. The returned
+// slice is the shared authoring data — callers read it, never mutate it.
+func SkillTreesFor(c PartyClass) []SkillTreeDef {
+	return classSkillTrees[c]
+}
+
+// findTreeNode locates a node by id within a class's trees.
+func findTreeNode(c PartyClass, id string) (SkillTreeNode, bool) {
+	for _, tr := range classSkillTrees[c] {
+		for _, n := range tr.Nodes {
+			if n.ID == id {
+				return n, true
+			}
+		}
+	}
+	return SkillTreeNode{}, false
+}
+
+// SkillTreeNodeName resolves a node id to its display name within a
+// class — used by the UI to spell out a locked node's prerequisite.
+func SkillTreeNodeName(c PartyClass, id string) (string, bool) {
+	n, ok := findTreeNode(c, id)
+	if !ok {
+		return "", false
+	}
+	return n.Name, true
+}
+
+// TreeNodeRank returns how many ranks the member has invested in a node
+// (0..MaxRank). Nil-safe and clamp-safe so a fresh member with no
+// TreeRanks map reads 0 for everything.
+func TreeNodeRank(m *PartyMember, id string) int {
+	if m == nil || m.TreeRanks == nil {
+		return 0
+	}
+	return m.TreeRanks[id]
+}
+
+// SkillNodeUnlocked reports whether the node's prerequisite is satisfied:
+// a root node (no Requires) is always unlocked; otherwise the required
+// node must hold at least one rank.
+func SkillNodeUnlocked(m *PartyMember, n SkillTreeNode) bool {
+	if n.Requires == "" {
+		return true
+	}
+	return TreeNodeRank(m, n.Requires) >= 1
+}
+
+// SkillNodeMaxed reports whether the member has bought every rank of a node.
+func SkillNodeMaxed(m *PartyMember, n SkillTreeNode) bool {
+	return TreeNodeRank(m, n.ID) >= n.MaxRank
+}
+
+// SkillNodeBuyable reports whether the member can purchase the node's next
+// rank right now: unlocked, not maxed, and enough SkillPoints.
+func SkillNodeBuyable(m *PartyMember, n SkillTreeNode) bool {
+	if m == nil {
+		return false
+	}
+	return SkillNodeUnlocked(m, n) && !SkillNodeMaxed(m, n) && m.SkillPoints >= n.Cost
+}
+
+// BuySkillNode purchases one rank of the node `id` for member `m`,
+// spending its Cost in SkillPoints. Returns false and changes nothing
+// when the node is unknown, locked, maxed, or unaffordable. The rank is
+// recorded in TreeRanks; it carries no combat effect yet (UI-only pass).
+func BuySkillNode(m *PartyMember, id string) bool {
+	if m == nil {
+		return false
+	}
+	n, ok := findTreeNode(m.Class, id)
+	if !ok {
+		return false
+	}
+	if !SkillNodeBuyable(m, n) {
+		return false
+	}
+	if m.TreeRanks == nil {
+		m.TreeRanks = make(map[string]int, 8)
+	}
+	m.TreeRanks[id] = TreeNodeRank(m, id) + 1
+	m.SkillPoints -= n.Cost
+	return true
+}
+
+// TreeInvestedRanks sums the ranks the member has bought across a whole
+// tree — the numerator of the Skills-tab summary's "3 / 15" read.
+func TreeInvestedRanks(m *PartyMember, tr SkillTreeDef) int {
+	total := 0
+	for _, n := range tr.Nodes {
+		total += TreeNodeRank(m, n.ID)
+	}
+	return total
+}
+
+// TreeMaxRanks sums a tree's MaxRank across every node — the denominator
+// of the "invested / total" summary read.
+func TreeMaxRanks(tr SkillTreeDef) int {
+	total := 0
+	for _, n := range tr.Nodes {
+		total += n.MaxRank
+	}
+	return total
+}

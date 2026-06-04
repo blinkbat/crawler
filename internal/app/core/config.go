@@ -207,16 +207,21 @@ const (
 	HitStopExcellent = float32(0.16)
 
 	// Combat screen shake — the camera-punch juice on a well-timed hit.
-	// Set as a countdown on Battle.ShakeTimer when a Great/Excellent press
-	// resolves (CombatShakeFor); the render camera offsets by
-	// CombatShakeMagnitude world units, scaled by ShakeTimer/CombatShakeMax,
-	// with the oscillation driven off the wall clock so the screen visibly
-	// shakes even through the impact freeze (hit-stop). Excellent shakes
-	// harder + longer than Great. Tunable; CombatShakeMagnitude=0 disables.
-	CombatShakeGreat     = float32(0.12)
-	CombatShakeExcellent = float32(0.22)
-	CombatShakeMax       = CombatShakeExcellent // normalizer for the intensity ramp
-	CombatShakeMagnitude = float32(0.045)       // peak camera offset, world units
+	// Each tier carries its own PEAK amplitude (world-unit camera offset)
+	// and DURATION; the render camera offsets by peak·(ShakeTimer/ShakeDur),
+	// oscillation driven off the wall clock so the screen visibly shakes
+	// even through the impact freeze (hit-stop). Armed via TriggerCombatShake.
+	//
+	// Philosophy: a normal well-timed hit shakes only SUBTLY — the screen
+	// shouldn't lurch on every press. The BIG shake is reserved for the
+	// high-impact moments (crits and AoE casts), which arm it explicitly and
+	// override the small grade-based base. Set any peak to 0 to mute that tier.
+	CombatShakeGreatPeak     = float32(0.016) // subtle normal Great
+	CombatShakeGreatDur      = float32(0.10)
+	CombatShakeExcellentPeak = float32(0.026) // a touch more for Excellent
+	CombatShakeExcellentDur  = float32(0.14)
+	CombatShakeBigPeak       = float32(0.055) // crits + AoE casts: the real punch
+	CombatShakeBigDur        = float32(0.30)
 
 	// Sequence arrow pulse: how long an arrow scales up after landing a
 	// correct tap. Slightly less than the flash duration so the pulse decays

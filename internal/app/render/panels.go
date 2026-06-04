@@ -74,7 +74,7 @@ var panelTabFooterHints = [core.PanelTabCount]string{
 	core.PanelTabStats:     "L1/R1 tabs   Left/Right pick member   X close",
 	core.PanelTabEquipment: "L1/R1 tabs   Left/Right pick member   X close",
 	core.PanelTabItems:     "L1/R1 tabs   Up/Down item   Confirm / F use   X close",
-	core.PanelTabSkills:    "L1/R1 tabs   Left/Right member  Up/Down skill   Confirm buy  F cast heal   X close",
+	core.PanelTabSkills:    "L1/R1 tabs   Left/Right member   Confirm open trees   F cast heal   X close",
 	core.PanelTabQuests:    "L1/R1 tabs   Left/Right pick member   X close",
 	core.PanelTabMap:       "L1/R1 tabs   Left/Right pick member   X close",
 }
@@ -172,8 +172,14 @@ func DrawPanelsOverlay(g core.GameState, assets Resources) {
 	if g.PanelsTab == core.PanelTabEquipment && g.EquipPickerOpen {
 		drawEquipPicker(g, assets)
 	}
+	if g.HealPickOpen {
+		drawHealPicker(g, assets)
+	}
 	if g.UseTargetOpen {
 		drawUseTargetPicker(g, assets)
+	}
+	if g.SkillTreeOpen {
+		DrawSkillTreeModal(g, assets)
 	}
 }
 
@@ -677,6 +683,46 @@ func drawUseTargetPicker(g core.GameState, assets Resources) {
 	drawTextWithShadow(font, hint, card.X+18, card.Y+card.Height-26, FontSmall, textHint)
 }
 
+// drawHealPicker paints the out-of-battle heal-skill chooser — a small veiled
+// card listing the caster's out-of-battle heals (e.g. the Cleric's Prayer +
+// Mass Mend) with their MP cost, the cursored row gilded. Raised only when a
+// member has more than one such heal (HealPickOpen); a single heal casts
+// directly without this step. Controller-driven (HealPickCursor).
+func drawHealPicker(g core.GameState, assets Resources) {
+	font := assets.Font()
+	caster := g.HealPickCaster
+	if caster < 0 || caster >= len(g.Party) {
+		return
+	}
+	heals := core.OutOfBattleHeals(g.Party[caster])
+	if len(heals) == 0 {
+		return
+	}
+
+	const rowH = float32(44)
+	const headerH = float32(56)
+	const footerH = float32(32)
+	cardW := float32(360)
+	cardH := headerH + float32(len(heals))*rowH + footerH
+	card := drawVeiledCard(int32(cardW), int32(cardH), borderActive, woodAccent, woodAccent)
+
+	drawTextWithShadow(font, "Cast Heal — "+g.Party[caster].Name, card.X+18, card.Y+16, FontHeading, textPrimary)
+
+	listY := card.Y + headerH
+	for i, s := range heals {
+		ry := listY + float32(i)*rowH
+		rect := rl.NewRectangle(card.X+10, ry, card.Width-20, rowH-6)
+		drawFocusableRow(rect, i == g.HealPickCursor)
+		drawTextWithShadow(font, core.SkillName(s), rect.X+14, rect.Y+rect.Height/2-10, FontBody, textPrimary)
+		costText := skillCostMPLabel(core.SkillCost(s))
+		cm := rl.MeasureTextEx(font, costText, FontSmall, 1)
+		drawTextWithShadow(font, costText, rect.X+rect.Width-cm.X-12, rect.Y+rect.Height/2-8, FontSmall, inkAccent)
+	}
+
+	hint := "Confirm: cast   Back: cancel"
+	drawTextWithShadow(font, hint, card.X+18, card.Y+card.Height-26, FontSmall, textHint)
+}
+
 // equipBonusSummary returns the single-line "STR +2" / "Armor +1" /
 // "MDef +2" copy painted under an item's tile. Compact, builds the
 // shortest combination of bonuses authored on the def.
@@ -928,18 +974,13 @@ func measurePanelsItemHealLabel(font rl.Font, label string) rl.Vector2 {
 	return panelsItemHealLabelMeasureCache.measure(font, label, FontSmall, 1)
 }
 
-// drawPanelsSkills renders the Skills tab as one card per party
-// member, mirroring the Stats / Equipment layout. Each card shows the
-// member's spendable SkillPoints, then stacks its learned skills as
-// rows: name + MP cost chip, a tier-progress pip strip, the next
-// purchasable upgrade's label + SP price (or "MAXED"), and a blurb of
-// what that purchase grants.
-//
-// The only row highlight is the purchase cursor: on the cursored
-// member, the focused skill row (PanelsSkillRow) draws a bright gilt
-// outline so the player sees which row Confirm will buy. (The in-battle
-// "armed skill" tint was removed — it read as a stray highlight here,
-// where the tab is about upgrading skills, not picking the loadout.)
+// drawPanelsSkills renders the Skills tab as one card per party member,
+// mirroring the Stats / Equipment layout. Each card is a SUMMARY of the
+// member's three Diablo-2-style skill trees: the spendable SkillPoints
+// balance up top, then one row per tree showing the tree name, an
+// invested/total rank read, and its theme blurb. Confirm on the cursored
+// member opens the full skill-tree modal (DrawSkillTreeModal) where points
+// are actually spent — this tab just gives the at-a-glance overview.
 func drawPanelsSkills(g core.GameState, assets Resources, body rl.Rectangle) {
 	font := assets.Font()
 	if len(g.Party) == 0 {
@@ -951,9 +992,9 @@ func drawPanelsSkills(g core.GameState, assets Resources, body rl.Rectangle) {
 		contentY := drawPartyMemberCardHeader(font, m, cols[i], highlight)
 		innerX, innerW := memberCardInner(cols[i])
 
-		// Skill-point balance — the currency the tree spends. Bright
-		// when there's something to spend, muted at zero so a "nothing
-		// to do here" card reads quietly.
+		// Skill-point balance — the currency the trees spend. Bright when
+		// there's something to spend, muted at zero so a "nothing to do
+		// here" card reads quietly.
 		spText := strconv.Itoa(m.SkillPoints) + " SP"
 		spCol := textMuted
 		if m.SkillPoints > 0 {
@@ -962,57 +1003,35 @@ func drawPanelsSkills(g core.GameState, assets Resources, body rl.Rectangle) {
 		drawTextWithShadow(font, "SKILL POINTS", innerX, contentY, FontSmall, textMuted)
 		sm := rl.MeasureTextEx(font, spText, FontSmall, 1)
 		drawTextWithShadow(font, spText, innerX+innerW-sm.X, contentY, FontSmall, spCol)
-		contentY += 26
+		contentY += 30
 
-		skills := core.PartySkills(m)
-		rowH := float32(80)
-		for j, s := range skills {
-			if s == core.SkillNone {
-				continue
-			}
-			rowY := contentY + float32(j)*rowH
-			if rowY+rowH-6 > cols[i].Y+cols[i].Height {
+		// One summary panel per tree: name + invested/total + theme.
+		trees := core.SkillTreesFor(m.Class)
+		rowH := float32(70)
+		for ti, tr := range trees {
+			rowY := contentY + float32(ti)*rowH
+			if rowY+rowH-10 > cols[i].Y+cols[i].Height {
 				break
 			}
-			focused := highlight && j == g.PanelsSkillRow
+			rect := rl.NewRectangle(innerX, rowY, innerW, rowH-10)
+			drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), glassMid)
 
-			// Soft inset row — uniform for every skill; the purchase
-			// cursor is the only accent (shared focusable-row look).
-			drawFocusableRow(rl.NewRectangle(innerX, rowY, innerW, rowH-8), focused)
-
-			// Line 1: name (left) + MP cost chip (right).
-			drawTextWithShadow(font, core.SkillName(s), innerX+12, rowY+6, FontBody, textPrimary)
-			if cost := core.SkillCost(s); cost > 0 {
-				costText := skillCostMPLabel(cost)
-				cm := rl.MeasureTextEx(font, costText, FontSmall, 1)
-				drawTextWithShadow(font, costText, innerX+innerW-cm.X-12, rowY+8, FontSmall, inkAccent)
+			drawTextWithShadow(font, tr.Name, rect.X+12, rect.Y+8, FontBody, textPrimary)
+			invested := core.TreeInvestedRanks(&m, tr)
+			ratio := strconv.Itoa(invested) + " / " + strconv.Itoa(core.TreeMaxRanks(tr))
+			rm := rl.MeasureTextEx(font, ratio, FontSmall, 1)
+			ratioCol := textMuted
+			if invested > 0 {
+				ratioCol = giltBright
 			}
+			drawTextWithShadow(font, ratio, rect.X+rect.Width-rm.X-12, rect.Y+10, FontSmall, ratioCol)
+			drawTextWithShadow(font, tr.Theme, rect.X+12, rect.Y+34, FontSmall, textHint)
+		}
 
-			// Line 2: tier pips (left) + next-upgrade affordance (right).
-			tier := core.SkillTierOf(&m, s)
-			drawSkillTierPips(innerX+12, rowY+38, tier, core.MaxSkillTier)
-			var blurb string
-			if up, hasNext := core.SkillNextTierUpgrade(&m, s); hasNext {
-				// Bright gilt when the member can afford it, muted when
-				// they're short the points.
-				buyCol := giltBright
-				if m.SkillPoints < up.Cost {
-					buyCol = textMuted
-				}
-				buyText := up.Label + "   " + strconv.Itoa(up.Cost) + " SP"
-				bm := rl.MeasureTextEx(font, buyText, FontSmall, 1)
-				drawTextWithShadow(font, buyText, innerX+innerW-bm.X-12, rowY+32, FontSmall, buyCol)
-				blurb = up.Description
-			} else {
-				maxText := "MAXED"
-				mm := rl.MeasureTextEx(font, maxText, FontSmall, 1)
-				drawTextWithShadow(font, maxText, innerX+innerW-mm.X-12, rowY+32, FontSmall, fadeColor(giltBright, 0.8))
-				blurb = core.SkillDescription(s)
-			}
-
-			// Line 3: what the next purchase grants (or, once maxed,
-			// the base skill blurb so the row still reads as flavor).
-			drawTextWithShadow(font, blurb, innerX+12, rowY+56, FontSmall, textHint)
+		// Call-to-action on the cursored member: Confirm opens the trees.
+		if highlight {
+			hintY := cols[i].Y + cols[i].Height - 30
+			drawTextWithShadow(font, "Confirm: open skill trees", innerX, hintY, FontSmall, inkAccent)
 		}
 	}
 }
