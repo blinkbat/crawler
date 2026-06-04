@@ -323,6 +323,10 @@ func updateMouse(s *State) {
 			topbarBtns[hit].action(s)
 			return
 		}
+		if hit := toolbarButtonAt(s, mp); hit >= 0 {
+			toolbarBtns[hit].action(s)
+			return
+		}
 		if hit := layerTabAt(s, mp); hit >= 0 {
 			s.layer = Layer(hit)
 			return
@@ -1164,36 +1168,29 @@ func updatePackEditModal(s *State) Action {
 	if !updateEntityListCursor(s, memberCount) {
 		return ActionNone
 	}
+
+	// Mouse: click a member row to select, or a button to add / remove /
+	// reorder / cycle AI. Buttons + their actions come from the same
+	// packEditCmds the draw renders, so click index == button.
+	if handleEntityModalClick(s, memberCount, packEditCmds) {
+		return ActionNone
+	}
+
+	// Keyboard accelerators (mirror the buttons). X remove, K/J reorder,
+	// the packAddRules letters add a kind, C adds the selected custom
+	// enemy, A cycles the movement-AI mode.
 	if memberCount > 0 {
 		if rl.IsKeyPressed(rl.KeyX) {
-			pushUndo(s)
-			core.RemovePackMember(pack, s.modalCursor)
-			s.dirty = true
-			if len(pack.Members) == 0 {
-				s.area.PackSpawns = removeModalListItem(s.area.PackSpawns, s.modalPackIdx)
-				closeModal(s)
-				return ActionNone
-			}
+			packRemoveSelected(s, pack)
+			return ActionNone
 		}
-		// K = move highlighted member up; J = move down. Mirrors the
-		// natural arrow-up/down direction in the rendered list.
-		if rl.IsKeyPressed(rl.KeyK) && s.modalCursor > 0 {
-			pushUndo(s)
-			core.SwapPackMembers(pack, s.modalCursor-1, s.modalCursor)
-			s.modalCursor--
-			s.dirty = true
+		if rl.IsKeyPressed(rl.KeyK) {
+			packMoveSelected(s, pack, -1)
 		}
-		if rl.IsKeyPressed(rl.KeyJ) && s.modalCursor < memberCount-1 {
-			pushUndo(s)
-			core.SwapPackMembers(pack, s.modalCursor+1, s.modalCursor)
-			s.modalCursor++
-			s.dirty = true
+		if rl.IsKeyPressed(rl.KeyJ) {
+			packMoveSelected(s, pack, +1)
 		}
 	}
-	// Add-kind shortcuts driven by the packAddRules table — adding a
-	// new enemy kind is one row in that slice instead of three hand-
-	// typed `if rl.IsKeyPressed(...)` blocks. The hint row in the modal
-	// reads its label out of the same table so display stays in sync.
 	for _, rule := range packAddRules {
 		if rl.IsKeyPressed(rule.Key) {
 			pushUndo(s)
@@ -1212,10 +1209,6 @@ func updatePackEditModal(s *State) Action {
 			s.flash("No custom enemies defined")
 		}
 	}
-	// A cycles the pack's movement-AI mode (None ↔ Junkyard Dog ↔ …).
-	// None is the default for new packs; cycling lands the author on
-	// the next mode in PackAI iota order. Pure authoring change — no
-	// member churn — so we push undo before the field write.
 	if rl.IsKeyPressed(rl.KeyA) {
 		pushUndo(s)
 		pack.AI = core.PackAI((int(pack.AI) + 1) % core.PackAICount)
@@ -1223,6 +1216,121 @@ func updatePackEditModal(s *State) Action {
 		s.flash("Pack AI: " + core.PackAILabel(pack.AI))
 	}
 	return ActionNone
+}
+
+// handleEntityModalClick processes a left-click in a pack/chest edit
+// modal: select the clicked list row, or run the clicked add/action
+// button's command. `builder` supplies the modal's (adds, actions) cmd
+// lists (packEditCmds / chestEditCmds) — the same builder the draw uses,
+// so click index == button. Returns true when the click was consumed (the
+// caller should return). Shared so the two editors can't drift on the
+// row-then-actions-then-adds hit order.
+func handleEntityModalClick(s *State, count int, builder func(*State) (adds, actions []modalCmd)) bool {
+	if !rl.IsMouseButtonPressed(rl.MouseLeftButton) {
+		return false
+	}
+	adds, actions := builder(s)
+	lay := entityModalLayoutFor(s.modalCursor, count, cmdLabels(adds), cmdLabels(actions))
+	mp := rl.GetMousePosition()
+	if idx := entityRowAt(lay, mp); idx >= 0 {
+		s.modalCursor = idx
+		return true
+	}
+	for i, rect := range lay.actRects {
+		if pointIn(mp, rect) {
+			actions[i].run()
+			return true
+		}
+	}
+	for i, rect := range lay.addRects {
+		if pointIn(mp, rect) {
+			adds[i].run()
+			return true
+		}
+	}
+	return false
+}
+
+// packEditCmds builds the pack-edit modal's add buttons (one per
+// packAddRules kind + the selected custom enemy) and action buttons
+// (Remove / Up / Down / AI). Called by both the draw (for labels) and the
+// click handler (runs the clicked .run), so buttons and actions can't
+// drift. Caller must have validated s.modalPackIdx.
+func packEditCmds(s *State) (adds, actions []modalCmd) {
+	pack := &s.area.PackSpawns[s.modalPackIdx]
+	for _, rule := range packAddRules {
+		rule := rule
+		adds = append(adds, modalCmd{
+			label: "+ " + core.EnemyInfo(rule.Kind).SingularName,
+			run: func() Action {
+				pushUndo(s)
+				core.AppendBuiltinPackMember(pack, rule.Kind)
+				s.modalCursor = len(pack.Members) - 1
+				s.dirty = true
+				return ActionNone
+			},
+		})
+	}
+	if def, ok := selectedCustomEnemyForPack(s); ok {
+		def := def
+		adds = append(adds, modalCmd{
+			label: "+ " + def.Name,
+			run: func() Action {
+				pushUndo(s)
+				core.AppendCustomPackMember(pack, def)
+				s.modalCursor = len(pack.Members) - 1
+				s.dirty = true
+				return ActionNone
+			},
+		})
+	}
+	actions = []modalCmd{
+		{label: "Remove", run: func() Action { packRemoveSelected(s, pack); return ActionNone }},
+		{label: "Up", run: func() Action { packMoveSelected(s, pack, -1); return ActionNone }},
+		{label: "Down", run: func() Action { packMoveSelected(s, pack, +1); return ActionNone }},
+		{label: "AI: " + core.PackAILabel(pack.AI), run: func() Action {
+			pushUndo(s)
+			pack.AI = core.PackAI((int(pack.AI) + 1) % core.PackAICount)
+			s.dirty = true
+			s.flash("Pack AI: " + core.PackAILabel(pack.AI))
+			return ActionNone
+		}},
+	}
+	return adds, actions
+}
+
+// packRemoveSelected removes the cursored member, dropping the whole pack
+// (and closing the modal) if it empties. Shared by the Remove button and
+// the X accelerator.
+func packRemoveSelected(s *State, pack *core.PackSpawn) {
+	if len(pack.Members) == 0 {
+		return
+	}
+	pushUndo(s)
+	core.RemovePackMember(pack, s.modalCursor)
+	s.dirty = true
+	if len(pack.Members) == 0 {
+		s.area.PackSpawns = removeModalListItem(s.area.PackSpawns, s.modalPackIdx)
+		closeModal(s)
+		return
+	}
+	if s.modalCursor >= len(pack.Members) {
+		s.modalCursor = len(pack.Members) - 1
+	}
+}
+
+// packMoveSelected swaps the cursored member with its neighbor in dir
+// (-1 up / +1 down), no-op at the ends. Shared by the Up/Down buttons and
+// the K/J accelerators.
+func packMoveSelected(s *State, pack *core.PackSpawn, dir int) {
+	j := s.modalCursor + dir
+	if j < 0 || j >= len(pack.Members) {
+		return
+	}
+	pushUndo(s)
+	core.SwapPackMembers(pack, s.modalCursor, j)
+	s.modalCursor = j
+	s.dirty = true
 }
 
 func updateEntityListCursor(s *State, count int) bool {
@@ -1259,23 +1367,6 @@ func selectedCustomEnemyForPack(s *State) (core.CustomEnemyDef, bool) {
 	}
 	return s.area.CustomEnemies[idx], true
 }
-
-// Hint-row string constants for editor modal footers. Defined here next
-// to the modal updaters so the keybindings ("Esc close", "X remove",
-// "K/J move…") sit beside the actual rl.KeyEscape / rl.KeyX / rl.KeyK
-// handlers that listen for them. Drift between key handler and label is
-// the thing the constants are meant to prevent — longer hints are
-// composed from the shorter tokens so renaming a key ("Up/Down" →
-// "↑/↓") is a one-line edit.
-const (
-	hintSep          = "   "
-	hintEscClose     = "Esc close"
-	hintXRemove      = "X remove"
-	hintUpDownNav    = "Up/Down nav"
-	hintKJReorder    = "K/J move up/down"
-	hintPackEditNav  = hintUpDownNav + hintSep + hintXRemove + hintSep + hintKJReorder
-	hintChestEditNav = hintUpDownNav + hintSep + hintXRemove
-)
 
 // packAddRule binds a keyboard shortcut to the EnemyKind it adds in the
 // pack-edit modal. The slice is built at init from core.EnemyKinds() +
@@ -1381,14 +1472,16 @@ type chestAddRule struct {
 // chestAddHotkeys is the positional pool for the chest-edit modal.
 // Index i is the hotkey for the i-th item in core.AllItems registry
 // order. Mnemonic letters where they don't collide with existing
-// editor bindings: C=Cheese, J=Jerky, S=Sword, H=sHield, L=Leather,
-// R=Ring, M=aMulet, then the sample weapons D=Dagger, E=rapiEr,
-// B=Bow, G=slinG, A=Axe, W=War hammer. Extend as items are added;
-// the init check at the bottom of this file panics if the pool is
-// shorter than the registry so that's caught at startup, not deep in
-// the editor.
+// editor bindings: C=Cheese, J=Jerky, F=bread (Fare — B/R/E/A/D are all
+// taken), S=Sword, H=sHield, L=Leather, R=Ring, M=aMulet, then the
+// sample weapons D=Dagger, E=rapiEr, B=Bow, G=slinG, A=Axe, W=War
+// hammer. The order must track the itemDefinitions slice — bread sits
+// after jerky there, so its key sits at the matching index here.
+// Extend as items are added; the init check at the bottom of this file
+// panics if the pool is shorter than the registry so that's caught at
+// startup, not deep in the editor.
 var chestAddHotkeys = []int32{
-	rl.KeyC, rl.KeyJ, rl.KeyS, rl.KeyH, rl.KeyL, rl.KeyR, rl.KeyM,
+	rl.KeyC, rl.KeyJ, rl.KeyF, rl.KeyS, rl.KeyH, rl.KeyL, rl.KeyR, rl.KeyM,
 	rl.KeyD, rl.KeyE, rl.KeyB, rl.KeyG, rl.KeyA, rl.KeyW,
 }
 
@@ -1462,21 +1555,17 @@ func updateChestEditModal(s *State) Action {
 	if !updateEntityListCursor(s, itemCount) {
 		return ActionNone
 	}
-	if itemCount > 0 {
-		if rl.IsKeyPressed(rl.KeyX) {
-			pushUndo(s)
-			chest.Items = removeModalListItem(chest.Items, s.modalCursor)
-			s.dirty = true
-			// Re-clamp the cursor the same frame: removing the last item
-			// leaves modalCursor one past the end until the next frame's
-			// updateEntityListCursor would fix it. Mirrors the pack/delete paths.
-			if s.modalCursor >= len(chest.Items) {
-				s.modalCursor = len(chest.Items) - 1
-				if s.modalCursor < 0 {
-					s.modalCursor = 0
-				}
-			}
-		}
+
+	// Mouse: click an item row to select, or a button to add / remove.
+	if handleEntityModalClick(s, itemCount, chestEditCmds) {
+		return ActionNone
+	}
+
+	// Keyboard accelerators (mirror the buttons): X removes, the
+	// chestAddRules letters add an item.
+	if itemCount > 0 && rl.IsKeyPressed(rl.KeyX) {
+		chestRemoveSelected(s, chest)
+		return ActionNone
 	}
 	for _, rule := range chestAddRules {
 		if rl.IsKeyPressed(rule.Key) {
@@ -1487,6 +1576,47 @@ func updateChestEditModal(s *State) Action {
 		}
 	}
 	return ActionNone
+}
+
+// chestEditCmds builds the chest-edit modal's add buttons (one per
+// chestAddRules item) and the Remove action button. Shared by draw and
+// the click handler. Caller must have validated s.modalChestIdx.
+func chestEditCmds(s *State) (adds, actions []modalCmd) {
+	chest := &s.area.ChestSpawns[s.modalChestIdx]
+	for _, rule := range chestAddRules {
+		rule := rule
+		adds = append(adds, modalCmd{
+			label: "+ " + shortItemLabel(core.ItemInfo(rule.Kind).Name),
+			run: func() Action {
+				pushUndo(s)
+				chest.Items = append(chest.Items, rule.Kind)
+				s.modalCursor = len(chest.Items) - 1
+				s.dirty = true
+				return ActionNone
+			},
+		})
+	}
+	actions = []modalCmd{
+		{label: "Remove", run: func() Action { chestRemoveSelected(s, chest); return ActionNone }},
+	}
+	return adds, actions
+}
+
+// chestRemoveSelected removes the cursored item (an empty chest is a valid
+// authored shape, so it stays). Shared by the Remove button and X.
+func chestRemoveSelected(s *State, chest *core.ChestSpawn) {
+	if len(chest.Items) == 0 {
+		return
+	}
+	pushUndo(s)
+	chest.Items = removeModalListItem(chest.Items, s.modalCursor)
+	s.dirty = true
+	if s.modalCursor >= len(chest.Items) {
+		s.modalCursor = len(chest.Items) - 1
+	}
+	if s.modalCursor < 0 {
+		s.modalCursor = 0
+	}
 }
 
 func updateOpenModal(s *State) Action {
@@ -1506,111 +1636,166 @@ func updateOpenModal(s *State) Action {
 	}
 	s.modalCursor = input.CursorUpDown(s.modalCursor, len(s.modalPaths))
 
-	if rl.IsKeyPressed(rl.KeyR) {
-		s.modalRenaming = core.MapIDFromPath(s.modalPaths[s.modalCursor])
-		return ActionNone
-	}
-	if rl.IsKeyPressed(rl.KeyD) {
-		s.modalConfirmDelete = true
-		return ActionNone
-	}
-	if rl.IsKeyPressed(rl.KeyC) {
-		newPath, err := duplicateMapFile(s.modalPaths[s.modalCursor])
-		if err != nil {
-			s.flash("Duplicate failed: " + err.Error())
+	// Mouse: click a list row to select it (action buttons handled below).
+	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
+		if idx := openModalRowAt(s, rl.GetMousePosition()); idx >= 0 {
+			s.modalCursor = idx
 			return ActionNone
 		}
-		refreshOpenList(s)
-		for i, p := range s.modalPaths {
-			if p == newPath {
-				s.modalCursor = i
-				break
-			}
-		}
-		s.flash("Duplicated to " + core.MapIDFromPath(newPath))
-		return ActionNone
 	}
-
-	if editorCommitPressed() {
-		path := s.modalPaths[s.modalCursor]
-		mf, err := mapfile.Load(path)
-		if err != nil {
-			s.flash("Open failed: " + err.Error())
-			closeModal(s)
-			return ActionNone
-		}
-		area, err := core.AreaFromMapFile(mf, path)
-		if err != nil {
-			s.flash("Open failed: " + err.Error())
-			closeModal(s)
-			return ActionNone
-		}
-		s.area = area
-		s.baseline = core.CloneArea(area)
-		s.undo = nil
-		s.redo = nil
-		s.dirty = false
-		closeModal(s)
-		s.flash("Opened " + core.MapIDFromPath(path))
+	// Action buttons + their keyboard accelerators.
+	cmds := openModalActionCmds(s)
+	rects := modalButtonRow(centeredCardRect(openModalW, openModalH), cmdLabels(cmds))
+	if act, ran := runModalCmds(cmds, rects); ran {
+		return act
 	}
 	return ActionNone
+}
+
+// openModalActionCmds: 0=Open (Enter), 1=Rename (R), 2=Delete (D),
+// 3=Duplicate (C). The row-click selection is handled separately in
+// updateOpenModal (it isn't a button).
+func openModalActionCmds(s *State) []modalCmd {
+	return []modalCmd{
+		{label: "Open", hot: editorCommitPressed, run: func() Action { return openSelectedMap(s) }},
+		{label: "Rename", hot: keyHot(rl.KeyR), run: func() Action {
+			s.modalRenaming = core.MapIDFromPath(s.modalPaths[s.modalCursor])
+			return ActionNone
+		}},
+		{label: "Delete", hot: keyHot(rl.KeyD), run: func() Action { s.modalConfirmDelete = true; return ActionNone }},
+		{label: "Duplicate", hot: keyHot(rl.KeyC), run: func() Action { openDuplicateSelected(s); return ActionNone }},
+	}
+}
+
+// openSelectedMap loads the cursored map into the editor. Shared by the
+// Open button and the Enter accelerator.
+func openSelectedMap(s *State) Action {
+	path := s.modalPaths[s.modalCursor]
+	mf, err := mapfile.Load(path)
+	if err != nil {
+		s.flash("Open failed: " + err.Error())
+		closeModal(s)
+		return ActionNone
+	}
+	area, err := core.AreaFromMapFile(mf, path)
+	if err != nil {
+		s.flash("Open failed: " + err.Error())
+		closeModal(s)
+		return ActionNone
+	}
+	s.area = area
+	s.baseline = core.CloneArea(area)
+	s.undo = nil
+	s.redo = nil
+	s.dirty = false
+	closeModal(s)
+	s.flash("Opened " + core.MapIDFromPath(path))
+	return ActionNone
+}
+
+// openDuplicateSelected copies the cursored map on disk and selects the
+// copy. Shared by the Duplicate button and the C accelerator.
+func openDuplicateSelected(s *State) {
+	newPath, err := duplicateMapFile(s.modalPaths[s.modalCursor])
+	if err != nil {
+		s.flash("Duplicate failed: " + err.Error())
+		return
+	}
+	refreshOpenList(s)
+	for i, p := range s.modalPaths {
+		if p == newPath {
+			s.modalCursor = i
+			break
+		}
+	}
+	// Defensive clamp (mirrors updateOpenConfirmDelete): if the copy
+	// somehow isn't in the refreshed list, the cursor keeps its old value
+	// — keep it in range so the next row index / draw can't run off the end.
+	if s.modalCursor >= len(s.modalPaths) {
+		s.modalCursor = len(s.modalPaths) - 1
+	}
+	if s.modalCursor < 0 {
+		s.modalCursor = 0
+	}
+	s.flash("Duplicated to " + core.MapIDFromPath(newPath))
 }
 
 func updateOpenRename(s *State) Action {
 	pumpPrintableASCII(&s.modalRenaming, 64, acceptPrintable, nil)
-	if editorCancelPressed() {
-		s.modalRenaming = ""
-		return ActionNone
-	}
-	if editorCommitPressed() {
-		oldPath := s.modalPaths[s.modalCursor]
-		newPath, err := renameMapFile(oldPath, s.modalRenaming)
-		s.modalRenaming = ""
-		if err != nil {
-			s.flash("Rename failed: " + err.Error())
-			return ActionNone
-		}
-		if s.area.Path == oldPath {
-			s.area.Path = newPath
-		}
-		refreshOpenList(s)
-		for i, p := range s.modalPaths {
-			if p == newPath {
-				s.modalCursor = i
-				break
-			}
-		}
-		s.flash("Renamed to " + core.MapIDFromPath(newPath))
+	cmds := openRenameCmds(s)
+	rects := modalButtonRow(centeredCardRect(openModalW, openModalH), cmdLabels(cmds))
+	if act, ran := runModalCmds(cmds, rects); ran {
+		return act
 	}
 	return ActionNone
 }
 
-func updateOpenConfirmDelete(s *State) Action {
-	if editorCancelPressed() || rl.IsKeyPressed(rl.KeyN) {
-		s.modalConfirmDelete = false
-		return ActionNone
+// openRenameCmds: 0=Rename (Enter), 1=Cancel (Esc).
+func openRenameCmds(s *State) []modalCmd {
+	return []modalCmd{
+		{label: "Rename", hot: editorCommitPressed, run: func() Action { openRenameCommit(s); return ActionNone }},
+		{label: "Cancel", hot: editorCancelPressed, run: func() Action { s.modalRenaming = ""; return ActionNone }},
 	}
-	if rl.IsKeyPressed(rl.KeyY) {
-		path := s.modalPaths[s.modalCursor]
-		if err := os.Remove(path); err != nil {
-			s.flash("Delete failed: " + err.Error())
-			s.modalConfirmDelete = false
-			return ActionNone
+}
+
+func openRenameCommit(s *State) {
+	oldPath := s.modalPaths[s.modalCursor]
+	newPath, err := renameMapFile(oldPath, s.modalRenaming)
+	s.modalRenaming = ""
+	if err != nil {
+		s.flash("Rename failed: " + err.Error())
+		return
+	}
+	if s.area.Path == oldPath {
+		s.area.Path = newPath
+	}
+	refreshOpenList(s)
+	for i, p := range s.modalPaths {
+		if p == newPath {
+			s.modalCursor = i
+			break
 		}
-		if s.area.Path == path {
-			s.area.Path = ""
-		}
-		s.flash("Deleted " + core.MapIDFromPath(path))
-		refreshOpenList(s)
-		if s.modalCursor >= len(s.modalPaths) {
-			s.modalCursor = len(s.modalPaths) - 1
-		}
-		if s.modalCursor < 0 {
-			s.modalCursor = 0
-		}
-		s.modalConfirmDelete = false
+	}
+	s.flash("Renamed to " + core.MapIDFromPath(newPath))
+}
+
+func updateOpenConfirmDelete(s *State) Action {
+	cmds := openDeleteConfirmCmds(s)
+	rects := modalButtonRow(centeredCardRect(openModalW, openModalH), cmdLabels(cmds))
+	if act, ran := runModalCmds(cmds, rects); ran {
+		return act
 	}
 	return ActionNone
+}
+
+// openDeleteConfirmCmds: 0=Delete (Y), 1=Cancel (Esc/N).
+func openDeleteConfirmCmds(s *State) []modalCmd {
+	return []modalCmd{
+		{label: "Delete", hot: keyHot(rl.KeyY), run: func() Action { openDeleteSelected(s); return ActionNone }},
+		{label: "Cancel", hot: func() bool { return editorCancelPressed() || rl.IsKeyPressed(rl.KeyN) },
+			run: func() Action { s.modalConfirmDelete = false; return ActionNone }},
+	}
+}
+
+func openDeleteSelected(s *State) {
+	path := s.modalPaths[s.modalCursor]
+	if err := os.Remove(path); err != nil {
+		s.flash("Delete failed: " + err.Error())
+		s.modalConfirmDelete = false
+		return
+	}
+	if s.area.Path == path {
+		s.area.Path = ""
+	}
+	s.flash("Deleted " + core.MapIDFromPath(path))
+	refreshOpenList(s)
+	if s.modalCursor >= len(s.modalPaths) {
+		s.modalCursor = len(s.modalPaths) - 1
+	}
+	if s.modalCursor < 0 {
+		s.modalCursor = 0
+	}
+	s.modalConfirmDelete = false
 }
 
 func refreshOpenList(s *State) {
@@ -1620,18 +1805,10 @@ func refreshOpenList(s *State) {
 
 func updateSaveAsModal(s *State) Action {
 	if s.awaitingOverwrite {
-		if rl.IsKeyPressed(rl.KeyY) {
-			s.awaitingOverwrite = false
-			confirmModalForce(s)
-			if s.modal == modalNone {
-				return runPendingAction(s)
-			}
-			return ActionNone
-		}
-		if rl.IsKeyPressed(rl.KeyN) || editorCancelPressed() {
-			s.awaitingOverwrite = false
-			s.focus = focusFilename
-			return ActionNone
+		cmds := saveAsOverwriteCmds(s)
+		rects := modalButtonStack(centeredCardRect(saveAsModalW, saveAsModalH), cmdLabels(cmds))
+		if act, ran := runModalCmds(cmds, rects); ran {
+			return act
 		}
 		return ActionNone
 	}
@@ -1649,6 +1826,27 @@ func updateSaveAsModal(s *State) Action {
 	return ActionNone
 }
 
+// saveAsOverwriteCmds: 0=Overwrite (Y), 1=Cancel / pick a different name
+// (N / Esc). Only used while s.awaitingOverwrite.
+func saveAsOverwriteCmds(s *State) []modalCmd {
+	return []modalCmd{
+		{label: "Overwrite", hot: keyHot(rl.KeyY), run: func() Action {
+			s.awaitingOverwrite = false
+			confirmModalForce(s)
+			if s.modal == modalNone {
+				return runPendingAction(s)
+			}
+			return ActionNone
+		}},
+		{label: "Cancel", hot: func() bool { return rl.IsKeyPressed(rl.KeyN) || editorCancelPressed() },
+			run: func() Action {
+				s.awaitingOverwrite = false
+				s.focus = focusFilename
+				return ActionNone
+			}},
+	}
+}
+
 // updateEscMenuModal handles input for the editor's pause-style menu.
 //   - Esc / C: close menu, resume editing.
 //   - D: toggle display mode (fullscreen ↔ windowed). Menu stays open
@@ -1657,60 +1855,86 @@ func updateSaveAsModal(s *State) Action {
 //     area has unsaved edits so save/discard/cancel still works —
 //     same flow the old "Esc = exit" path used.
 func updateEscMenuModal(s *State) Action {
-	if editorCancelPressed() || rl.IsKeyPressed(rl.KeyC) {
-		closeModal(s)
-		return ActionNone
-	}
-	if rl.IsKeyPressed(rl.KeyD) {
-		render.ToggleDisplayMode()
-		return ActionNone
-	}
-	if rl.IsKeyPressed(rl.KeyE) {
-		closeModal(s)
-		if s.dirty {
-			openConfirmDirtyModal(s, pendingExitToTitle)
-			return ActionNone
-		}
-		return ActionExitToTitle
+	cmds := escMenuCmds(s)
+	rects := modalButtonStack(centeredCardRect(escMenuModalW, escMenuModalH), cmdLabels(cmds))
+	if act, ran := runModalCmds(cmds, rects); ran {
+		return act
 	}
 	return ActionNone
 }
 
+// escMenuCmds: 0=Display (D), 1=Continue (Esc/C), 2=Exit to Title (E).
+func escMenuCmds(s *State) []modalCmd {
+	return []modalCmd{
+		{label: render.DisplayMenuRowLabel(), hot: keyHot(rl.KeyD),
+			run: func() Action { render.ToggleDisplayMode(); return ActionNone }},
+		{label: "Continue editing", hot: cancelHot,
+			run: func() Action { closeModal(s); return ActionNone }},
+		{label: "Exit to Title", hot: keyHot(rl.KeyE), run: func() Action {
+			closeModal(s)
+			if s.dirty {
+				openConfirmDirtyModal(s, pendingExitToTitle)
+				return ActionNone
+			}
+			return ActionExitToTitle
+		}},
+	}
+}
+
 func updateConfirmDirtyModal(s *State) Action {
-	if editorCancelPressed() || rl.IsKeyPressed(rl.KeyC) {
+	cmds := confirmDirtyCmds(s)
+	rects := modalButtonStack(centeredCardRect(confirmDirtyModalW, confirmDirtyModalH), cmdLabels(cmds))
+	if act, ran := runModalCmds(cmds, rects); ran {
+		return act
+	}
+	return ActionNone
+}
+
+// confirmDirtyCmds: 0=Save (S), 1=Discard (D), 2=Cancel (Esc/C).
+func confirmDirtyCmds(s *State) []modalCmd {
+	return []modalCmd{
+		{label: "Save", hot: keyHot(rl.KeyS), run: func() Action { return confirmDirtySave(s) }},
+		{label: "Discard", hot: keyHot(rl.KeyD), run: func() Action { closeModal(s); return runPendingAction(s) }},
+		{label: "Cancel", hot: cancelHot, run: func() Action {
+			closeModal(s)
+			s.pending = pendingNone
+			return ActionNone
+		}},
+	}
+}
+
+// confirmDirtySave persists the current map (or opens Save As when it has
+// no path yet), then runs the pending action. Shared by the Save button
+// and the S accelerator.
+func confirmDirtySave(s *State) Action {
+	if s.area.Path == "" {
+		openSaveAsModal(s)
+		return ActionNone
+	}
+	mf, err := core.MapFileFromArea(s.area)
+	if err != nil {
+		s.flash("Save failed: " + err.Error())
 		closeModal(s)
 		s.pending = pendingNone
 		return ActionNone
 	}
-	if rl.IsKeyPressed(rl.KeyD) {
+	if err := mapfile.Save(s.area.Path, mf); err != nil {
+		s.flash("Save failed: " + err.Error())
 		closeModal(s)
-		return runPendingAction(s)
+		s.pending = pendingNone
+		return ActionNone
 	}
-	if rl.IsKeyPressed(rl.KeyS) {
-		if s.area.Path == "" {
-			openSaveAsModal(s)
-			return ActionNone
-		}
-		mf, err := core.MapFileFromArea(s.area)
-		if err != nil {
-			s.flash("Save failed: " + err.Error())
-			closeModal(s)
-			s.pending = pendingNone
-			return ActionNone
-		}
-		if err := mapfile.Save(s.area.Path, mf); err != nil {
-			s.flash("Save failed: " + err.Error())
-			closeModal(s)
-			s.pending = pendingNone
-			return ActionNone
-		}
-		s.baseline = core.CloneArea(s.area)
-		s.dirty = false
-		closeModal(s)
-		return runPendingAction(s)
-	}
-	return ActionNone
+	s.baseline = core.CloneArea(s.area)
+	s.dirty = false
+	closeModal(s)
+	return runPendingAction(s)
 }
+
+// keyHot / cancelHot build modalCmd accelerator predicates. cancelHot is
+// the editor's "back" edge (Esc / pad B) plus the C key several confirm
+// modals also accept.
+func keyHot(k int32) func() bool { return func() bool { return rl.IsKeyPressed(k) } }
+func cancelHot() bool            { return editorCancelPressed() || rl.IsKeyPressed(rl.KeyC) }
 
 func runPendingAction(s *State) Action {
 	p := s.pending

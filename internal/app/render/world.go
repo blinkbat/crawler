@@ -1260,37 +1260,26 @@ func isEnemyAttackerSlot(g core.GameState, slot int) bool {
 	return g.Battle.EnemyAttacker == slot
 }
 
-// enemyAttackTargets returns the party-member indices the currently
-// lunging enemy will hit when the defend bar resolves. Drives the red
-// "incoming hit" marker above threatened heads during BattleEnemyTiming.
-// Every current enemy action (plain melee, Firebolt, Sleep, Ingest) is
-// single-target and shares core.PeekNextEnemyTarget — the same
-// non-mutating peek the battle side commits via pickEnemyAttackTarget —
-// so the marker can't drift from who actually gets hit.
-// Returning a slice (not a lone int) leaves room for AoE enemy skills
-// to extend the marker without touching the render call site.
-func enemyAttackTargets(g core.GameState) []int {
+// enemyAttackTarget returns the party-member slot the currently lunging
+// enemy will hit when the defend bar resolves, plus ok=false when no
+// marker should show. Drives the red "incoming hit" marker above the
+// threatened head during BattleEnemyTiming. Every current enemy action
+// (plain melee, Firebolt, Sleep, Ingest) is single-target and shares
+// core.PeekNextEnemyTarget — the same non-mutating peek the battle side
+// commits via pickEnemyAttackTarget — so the marker can't drift from who
+// actually gets hit. Returns a scalar (not a per-frame []int) to stay
+// allocation-free on the draw path; a future AoE enemy skill would change
+// this to a set + the caller's single `==` check back to a membership
+// test.
+func enemyAttackTarget(g core.GameState) (int, bool) {
 	if g.Battle.Phase != core.BattleEnemyTiming {
-		return nil
+		return -1, false
 	}
 	target := core.PeekNextEnemyTarget(&g)
 	if target < 0 {
-		return nil
+		return -1, false
 	}
-	return []int{target}
-}
-
-// slotInIntList is a tiny linear-scan membership check for the small
-// per-frame slices returned by enemyAttackTargets — pulling in slices.Contains
-// would mean a new stdlib import for one cold call. Stays inline at the
-// caller's risk profile (≤ party-size N).
-func slotInIntList(slot int, list []int) bool {
-	for _, v := range list {
-		if v == slot {
-			return true
-		}
-	}
-	return false
+	return target, true
 }
 
 // markerStyle bundles every parameter that distinguishes one selector
@@ -1472,7 +1461,7 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 	// face do.
 	defer beginBillboardFogPass(camera, g, assets)()
 	victoryDance := victoryDanceElapsed(g)
-	incomingTargets := enemyAttackTargets(g)
+	incomingSlot, hasIncoming := enemyAttackTarget(g)
 	for i := range g.Party {
 		// Ingested members are tucked away inside a mantrap — don't
 		// draw their billboard on the field. The status badge on the
@@ -1535,10 +1524,10 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 		if g.Battle.Phase == core.BattlePlayer && targetingAlly(g) && i == g.Battle.PartyTarget && g.Party[i].HP > 0 {
 			drawFriendlyTargetMarker(camera, position)
 		}
-		// Red "incoming hit" marker above every party member the lunging
+		// Red "incoming hit" marker above the party member the lunging
 		// enemy is about to strike. Phase gating lives in
-		// enemyAttackTargets — it returns nil outside BattleEnemyTiming.
-		if g.Party[i].HP > 0 && slotInIntList(i, incomingTargets) {
+		// enemyAttackTarget — it returns ok=false outside BattleEnemyTiming.
+		if g.Party[i].HP > 0 && hasIncoming && i == incomingSlot {
 			drawEnemyAttackTargetMarker(camera, position)
 		}
 	}
@@ -1741,8 +1730,13 @@ func battleEnemySlot(g core.GameState, memberSlot int) (int, int) {
 	visible := 0
 	count := 0
 	found := -1
-	for i, m := range core.BattleMembers(&g) {
-		if !m.Alive && m.DeathFade <= 0 {
+	// Index-range (not value-range): Enemy embeds a full
+	// DefinitionOverride, so `for _, m := range` would copy that whole
+	// struct per iteration — wasteful when we only read two fields, and
+	// this runs once per enemy per frame (O(n²) over the pack).
+	members := core.BattleMembers(&g)
+	for i := range members {
+		if !members[i].Alive && members[i].DeathFade <= 0 {
 			continue
 		}
 		if i == memberSlot {

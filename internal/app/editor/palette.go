@@ -6,21 +6,16 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Editor type scale. The map editor packs far more text into dense
-// panels, topbars, tooltips, and modal hint rows than the in-game HUD,
-// so it runs its OWN smaller scale rather than the render.Font* tokens
-// (whose FontSmall is already 16 and FontBody 20 — too large for this
-// chrome, and large enough to overflow the editor's tight buttons /
-// fields). Named here so the scale lives in one place instead of as
-// bare DrawTextEx / MeasureTextEx literals scattered across draw.go.
-// (sounds.go keeps its own soundFont* trio for the sound modal.)
+// Editor type scale for the chrome the topbar / toolbar / buttons draw.
+// The map editor runs its OWN smaller scale rather than the render.Font*
+// tokens (whose FontSmall is already 16 and FontBody 20 — too large for
+// this chrome, and large enough to overflow the editor's tight buttons).
+// (Modal hint rows and axis ticks still use bare 11–13 literals in
+// draw.go; sounds.go keeps its own soundFont* trio for the sound modal.)
 const (
 	editorFontTopbar = float32(18) // topbar map-id label
 	editorFontBody   = float32(16) // buttons + primary panel text
 	editorFontLabel  = float32(14) // topbar info line / field labels
-	editorFontHint   = float32(13) // modal hint rows
-	editorFontHintSm = float32(12) // tight secondary hint rows
-	editorFontTick   = float32(11) // axis tick labels / tightest captions
 )
 
 // Editor UI chrome palette. The map-content colors (tile brushes, swatches)

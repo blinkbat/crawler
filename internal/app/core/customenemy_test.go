@@ -194,7 +194,7 @@ func TestResetGameStatePreservesProgressionAndRecoversParty(t *testing.T) {
 		StartFacing: East,
 	}
 	g := NewGameState(area)
-	// Clear starter equipment so the inventory-survives-reset
+	// Clear the starter rations so the inventory-survives-reset
 	// assertion below tests JUST the cheese stack the test stamps in.
 	g.Inventory = nil
 	g.Inventory = AddItem(g.Inventory, ItemCheese, 2)

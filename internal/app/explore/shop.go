@@ -54,7 +54,9 @@ func shopRowCount(g *core.GameState) int {
 	case core.ShopTabBuy:
 		return len(core.ShopCatalog())
 	case core.ShopTabSell:
-		return len(core.SellableStacks(g.Inventory))
+		// No-alloc count — updateShop calls this every frame the Sell tab
+		// is open and only needs the row count, not the materialized slice.
+		return core.SellableCount(g.Inventory)
 	}
 	return 0
 }

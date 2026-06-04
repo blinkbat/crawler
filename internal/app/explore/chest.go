@@ -22,20 +22,24 @@ func updateChestModal(g *core.GameState) {
 		return
 	}
 
-	stacks := core.LiveStacks(chest.Items)
+	// Row count via the no-alloc LiveStackCount — this runs every frame the
+	// modal is open, so the filtered slice is materialized only once a
+	// Confirm actually lands (below), not per frame just to read len().
+	stackCount := core.LiveStackCount(chest.Items)
 	// Empty-chest shortcut: no rows to pick, only Take All (no-op) — just
 	// mark looted and close so the player isn't stuck in an empty dialog.
-	if len(stacks) == 0 {
+	if stackCount == 0 {
 		closeChest(g, chest)
 		return
 	}
 
-	rowCount := len(stacks) + 1 // items + "Take All"
+	rowCount := stackCount + 1 // items + "Take All"
 	g.ChestMenuIndex = input.CursorUpDown(g.ChestMenuIndex, rowCount)
 
 	if !input.ConfirmPressed() {
 		return
 	}
+	stacks := core.LiveStacks(chest.Items)
 	if g.ChestMenuIndex == core.ChestTakeAllRow(len(stacks)) {
 		for _, st := range stacks {
 			g.Inventory = core.AddItem(g.Inventory, st.Kind, st.Count)

@@ -63,14 +63,8 @@ func NewGameState(area AreaDefinition) GameState {
 		Visited:    visited,
 		ChestOpen:  -1,
 		DoorPrompt: -1,
-		// Starter equipment kit: one of every equippable in the
-		// registry, plus an extra ring so the accessory slots have
-		// something to equip on first open. Iterating AllItems()
-		// (instead of a hand-typed literal) means a new equippable in
-		// items.go appears in the starter kit for free, and the
-		// Equipment panel's slot picker has something live to land on
-		// the first time it opens.
-		Inventory: starterEquipmentKit(),
+		// Starting bag: rations only, no equipment — see starterInventory.
+		Inventory: starterInventory(),
 		Quests:    StarterQuests(),
 		Battle: Battle{
 			ActivePack:        -1,
@@ -92,26 +86,15 @@ func NewGameState(area AreaDefinition) GameState {
 	return g
 }
 
-// starterEquipmentKit returns the inventory the party spawns with.
-// Walks AllItems() filtering for equippable items (Slot != SlotNone)
-// so adding a new piece of equipment to items.go automatically
-// shows up in fresh game state. Accessory items get a second copy
-// because there are two accessory slots and equipping the same kind
-// into both is the cleanest first-contact demo. Adjust if the new-
-// game economy ever demands a curated starter kit instead.
-func starterEquipmentKit() []ItemStack {
-	out := make([]ItemStack, 0, 8)
-	for _, def := range AllItems() {
-		if def.Slot == SlotNone {
-			continue
-		}
-		count := 1
-		if def.Slot == SlotAccessory {
-			count = 2
-		}
-		out = append(out, ItemStack{Kind: def.Kind, Count: count})
+// starterInventory returns the inventory the party spawns with. The
+// party starts with NO equipment — every member's Equipped slots are
+// empty (NewParty leaves them zero) and the bag carries no gear, just a
+// few rations: 3 crusts of bread, a small heal. Equipment is earned
+// through shops / chests / drops, not handed out at character creation.
+func starterInventory() []ItemStack {
+	return []ItemStack{
+		{Kind: ItemCrustOfBread, Count: 3},
 	}
-	return out
 }
 
 // placeDoors converts the area's authored door list into runtime

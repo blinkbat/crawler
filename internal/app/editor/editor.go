@@ -596,6 +596,7 @@ type State struct {
 
 type layoutRect struct {
 	topbar    rl.Rectangle
+	toolbar   rl.Rectangle // action button row beneath the topbar menu bar
 	layerTabs rl.Rectangle
 	palette   rl.Rectangle
 	metadata  rl.Rectangle

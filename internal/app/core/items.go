@@ -26,6 +26,12 @@ const (
 	ItemSling
 	ItemBattleAxe
 	ItemWarHammer
+	// New ItemKinds are appended HERE, at the end, not inserted above —
+	// ItemKind serializes as its integer value in save files
+	// (SaveData.Inventory), so inserting mid-enum would renumber every
+	// later item and corrupt existing saves. Registry/display order is
+	// the itemDefinitions slice order, which is independent of this value.
+	ItemCrustOfBread // small healing consumable (Slot == SlotNone)
 )
 
 // EquipmentSlotType classifies what equipment slot an item can go into.
@@ -147,6 +153,11 @@ var itemDefinitions = []ItemDefinition{
 	// Bat jerky heals more than cheese — bats are tougher to fight and
 	// harder to steal from, so the loot pays off the difficulty.
 	{Kind: ItemBatJerky, Name: "Bat Jerky", HealAmount: 9, Price: 12, Description: "Stringy, oddly satisfying. A traveler's lunch."},
+	// Crust of bread — the humblest heal, the party's starting ration.
+	// Smaller than cheese on purpose (it's a crust). Registry order here
+	// drives the chest-add hotkey position, so a key was inserted at the
+	// matching index in editor.chestAddHotkeys.
+	{Kind: ItemCrustOfBread, Name: "Crust of Bread", HealAmount: 3, Price: 3, Description: "A dry heel of bread. A small bite back to your feet."},
 
 	// Equipment. Bonuses are intentionally modest so the very-basic
 	// system reads as a starting kit rather than a power spike. STR

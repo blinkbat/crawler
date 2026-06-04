@@ -1521,7 +1521,12 @@ func tickBurnAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
 	if enemy == nil || !enemy.Alive || enemy.BurnTurns <= 0 {
 		return false
 	}
-	applyEnemyDoTTick(g, actor.Index, &enemy.BurnTurns, core.BurnTickDamage)
+	// Use the post-mitigation dealt amount (burn is magic-tagged, so an
+	// enemy's MDef clips it) for the log, so the "burns for N" line matches
+	// the HP drop + damage popup — same contract the poison tick honors.
+	// Logging the raw BurnTickDamage overstated the hit on MDef enemies
+	// (Goblin Mage / Wisp / Necromancer / Stone Golem).
+	dealt, _ := applyEnemyDoTTick(g, actor.Index, &enemy.BurnTurns, core.BurnTickDamage)
 	def := core.EnemyInfoFor(*enemy)
 	if !enemy.Alive {
 		setBattleMessage(g, fmt.Sprintf("%s succumbs to the flames.", core.TheEnemy(def)))
@@ -1532,7 +1537,7 @@ func tickBurnAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
 		}
 		return true
 	}
-	setBattleMessage(g, fmt.Sprintf("%s burns for %d.", core.TheEnemy(def), core.BurnTickDamage))
+	setBattleMessage(g, fmt.Sprintf("%s burns for %d.", core.TheEnemy(def), dealt))
 	return false
 }
 

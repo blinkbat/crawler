@@ -156,8 +156,8 @@ func customEnemyModalLayout(s *State) customEnemyLayout {
 	for i := 0; i < int(core.StatCount); i++ {
 		col := i % csCols
 		row := i / csCols
-		cellX := formX + float32(col)*(cellW+6)
-		cellY := formY + float32(row)*(cellH+6)
+		cellX := formX + float32(col)*(cellW+tightBtnGap)
+		cellY := formY + float32(row)*(cellH+tightBtnGap)
 		l.coreStatRows[i] = customStatRow{
 			label: core.StatLabel(core.Stat(i)),
 			rect:  rl.NewRectangle(cellX+34, cellY, 40, cellH),
@@ -165,7 +165,7 @@ func customEnemyModalLayout(s *State) customEnemyLayout {
 			plus:  rl.NewRectangle(cellX+104, cellY, 24, cellH),
 		}
 	}
-	formY += float32((int(core.StatCount)+csCols-1)/csCols) * (cellH + 6)
+	formY += float32((int(core.StatCount)+csCols-1)/csCols) * (cellH + tightBtnGap)
 
 	skills := core.EnemyCastableSkills()
 	l.skillRows = make([]rl.Rectangle, len(skills))
@@ -173,10 +173,12 @@ func customEnemyModalLayout(s *State) customEnemyLayout {
 		l.skillRows[i] = rl.NewRectangle(formX, formY+float32(i)*24, formW, 22)
 	}
 
-	// Footer.
-	btnY := card.Y + card.Height - 44
-	l.deleteBtn = rl.NewRectangle(card.X+16, btnY, 110, 30)
-	l.closeBtn = rl.NewRectangle(card.X+card.Width-94, btnY, 80, 30)
+	// Footer. Delete uses the shared wide-button size (matches the door
+	// modal); Close stays narrower at its own width.
+	const closeW = float32(80)
+	btnY := card.Y + card.Height - modalBtnH - modalBottomInset
+	l.deleteBtn = rl.NewRectangle(card.X+modalContentInset, btnY, modalWideBtnW, modalBtnH)
+	l.closeBtn = rl.NewRectangle(card.X+card.Width-closeW-modalContentInset, btnY, closeW, modalBtnH)
 	return l
 }
 

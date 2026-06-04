@@ -13,15 +13,16 @@ import (
 
 const (
 	topbarH    = float32(48)
+	toolbarH   = float32(38) // action button row beneath the topbar
 	paletteW   = float32(220)
 	metadataW  = float32(360)
 	gridMargin = float32(8)
 	layerTabH  = float32(32)
 )
 
-// Entity-list (chest/pack contents) geometry, shared by drawEntityListRows
-// and entityListMaxRows so the painted rows and the fit calculation can't
-// drift: rows start entityListTop px below the card's top and step
+// Entity-list (chest/pack contents) geometry, used by entityModalLayoutFor
+// and drawEntityListWindow so the painted rows and the click hit-rects
+// can't drift: rows start entityListTop px below the card's top and step
 // entityListRowH px apart.
 const (
 	entityListTop  = float32(52)
@@ -35,13 +36,19 @@ func (s *State) layout() {
 	w, h := render.ScreenSizeF()
 
 	s.rect.topbar = rl.NewRectangle(0, 0, w, topbarH)
+	// Action toolbar row directly beneath the topbar menu bar; everything
+	// below starts at contentTop so adding the row just pushes the work
+	// area down (all regions derive from this baseline, so the grid /
+	// palette / metadata cascade automatically).
+	s.rect.toolbar = rl.NewRectangle(0, topbarH, w, toolbarH)
+	contentTop := topbarH + toolbarH
 	// Layer tabs sit at the top of the palette column.
 	tabsHeight := float32(layerCount) * layerTabH
-	s.rect.layerTabs = rl.NewRectangle(0, topbarH, paletteW, tabsHeight)
-	paletteY := topbarH + tabsHeight
+	s.rect.layerTabs = rl.NewRectangle(0, contentTop, paletteW, tabsHeight)
+	paletteY := contentTop + tabsHeight
 	s.rect.palette = rl.NewRectangle(0, paletteY, paletteW, h-paletteY)
-	s.rect.metadata = rl.NewRectangle(w-metadataW, topbarH, metadataW, h-topbarH)
-	s.rect.grid = rl.NewRectangle(paletteW, topbarH, w-paletteW-metadataW, h-topbarH)
+	s.rect.metadata = rl.NewRectangle(w-metadataW, contentTop, metadataW, h-contentTop)
+	s.rect.grid = rl.NewRectangle(paletteW, contentTop, w-paletteW-metadataW, h-contentTop)
 
 	if s.area.Width == 0 || s.area.Height == 0 {
 		s.rect.cellPx = 0
@@ -103,6 +110,7 @@ func Draw(s *State, assets render.Resources) {
 	s.layout()
 	rl.ClearBackground(bgWindow)
 	drawTopbar(s, font, theme)
+	drawToolbar(s, font, theme)
 	drawLayerTabs(s, font, theme)
 	drawPalette(s, font, theme)
 	drawMetadata(s, font, theme)
@@ -209,23 +217,15 @@ func doorEditLayoutFor() doorEditLayout {
 	y += rowGap + 6
 	// Facing row: one equal-width button per Facing (mirrors the style row
 	// below so a new facing scales the layout instead of clipping past 4).
-	facingN := int(core.FacingCount)
-	bw := (fw - float32(facingN-1)*6) / float32(facingN)
 	var facing [core.FacingCount]rl.Rectangle
-	for i := 0; i < facingN; i++ {
-		facing[i] = rl.NewRectangle(x+float32(i)*(bw+6), y, bw, fieldH)
-	}
+	copy(facing[:], equalButtonRow(x, y, fw, fieldH, int(core.FacingCount)))
 	y += rowGap
 	// Style row: one button per DoorStyle.
-	styleN := int(core.DoorStyleCount)
-	sbw := (fw - float32(styleN-1)*6) / float32(styleN)
 	var style [core.DoorStyleCount]rl.Rectangle
-	for i := 0; i < styleN; i++ {
-		style[i] = rl.NewRectangle(x+float32(i)*(sbw+6), y, sbw, fieldH)
-	}
-	y = r.Y + r.Height - 44
-	deleteBtn := rl.NewRectangle(x, y, 110, 30)
-	closeBtn := rl.NewRectangle(r.X+r.Width-110-16, y, 110, 30)
+	copy(style[:], equalButtonRow(x, y, fw, fieldH, int(core.DoorStyleCount)))
+	y = r.Y + r.Height - modalBtnH - modalBottomInset
+	deleteBtn := rl.NewRectangle(x, y, modalWideBtnW, modalBtnH)
+	closeBtn := rl.NewRectangle(r.X+r.Width-modalWideBtnW-modalContentInset, y, modalWideBtnW, modalBtnH)
 	return doorEditLayout{
 		card:      r,
 		nameField: nameField,
@@ -286,6 +286,10 @@ func doorEditHitTest(s *State, p rl.Vector2) doorEditHit {
 type topbarBtn struct {
 	label  string
 	action func(*State)
+	// activeFn, when set, draws the button highlighted while it returns
+	// true — used for toggle actions (e.g. the glyph overlay) so the
+	// button reads as "on" without a separate indicator.
+	active func(*State) bool
 }
 
 var topbarBtns = []topbarBtn{
@@ -299,6 +303,76 @@ var topbarBtns = []topbarBtn{
 	{label: "Back", action: func(s *State) { s.exitRequested = true }},
 }
 
+// toolbarBtns is the action row beneath the topbar — the editing
+// commands that used to be keyboard-only (the hotkeys still work as
+// accelerators, but every one now has a button so the editor is
+// navigable by mouse alone). Each action reuses the same handler the
+// hotkey calls, so the two can't drift. Layer switching lives in the
+// left layer-tabs column and brush selection in the palette, so those
+// aren't repeated here.
+var toolbarBtns = []topbarBtn{
+	{label: "Undo", action: undoOne},
+	{label: "Redo", action: redoOne},
+	{label: "Fill", action: fillEntireLayer},
+	{label: "Brush -", action: func(s *State) { s.brushSize = stepBrush(s.brushSize, -1) }},
+	{label: "Brush +", action: func(s *State) { s.brushSize = stepBrush(s.brushSize, +1) }},
+	{label: "Center", action: func(s *State) { centerViewOnTile(s, s.area.StartTileX, s.area.StartTileZ) }},
+	{label: "Reset View", action: func(s *State) { s.zoom = 1; s.panX, s.panY = 0, 0 }},
+	{label: "Glyphs",
+		action: func(s *State) { s.showTileGlyphs = !s.showTileGlyphs },
+		active: func(s *State) bool { return s.showTileGlyphs }},
+	{label: "Phase", action: func(s *State) {
+		s.previewPhase = core.TimeOfDay((int(s.previewPhase) + 1) % core.TimeOfDayCount)
+		s.flash("Preview: " + core.PhaseName(s.previewPhase))
+	}},
+	{label: "Test", action: func(s *State) { s.testRequested = true }},
+}
+
+// toolbarButtonAt returns the index of the toolbar button under p, or
+// buttonStripHit / drawButtonStrip are the shared left-to-right button
+// walk for the topbar (menu bar) and the toolbar (action row) — both are
+// `[]topbarBtn` strips at a fixed Y/height, so one walk keeps their draw
+// and hit-test in lockstep instead of four hand-maintained copies.
+const buttonStripStartX = float32(8)
+
+func buttonStripHit(btns []topbarBtn, y, h float32, p rl.Vector2) int {
+	x := buttonStripStartX
+	for i, b := range btns {
+		w := buttonWidth(b.label)
+		if pointIn(p, rl.NewRectangle(x, y, w, h)) {
+			return i
+		}
+		x += w + tightBtnGap
+	}
+	return -1
+}
+
+func drawButtonStrip(font rl.Font, s *State, btns []topbarBtn, y, h float32) {
+	x := buttonStripStartX
+	for _, b := range btns {
+		w := buttonWidth(b.label)
+		drawButton(font, rl.NewRectangle(x, y, w, h), b.label, b.active != nil && b.active(s))
+		x += w + tightBtnGap
+	}
+}
+
+func toolbarButtonAt(s *State, p rl.Vector2) int {
+	if !pointIn(p, s.rect.toolbar) {
+		return -1
+	}
+	return buttonStripHit(toolbarBtns, s.rect.toolbar.Y+6, toolbarH-12, p)
+}
+
+func drawToolbar(s *State, font rl.Font, theme render.Theme) {
+	_ = theme
+	rl.DrawRectangleRec(s.rect.toolbar, bgWindow)
+	rl.DrawLineEx(
+		rl.NewVector2(0, s.rect.toolbar.Y+toolbarH),
+		rl.NewVector2(s.rect.toolbar.Width, s.rect.toolbar.Y+toolbarH),
+		1, outlineHard)
+	drawButtonStrip(font, s, toolbarBtns, s.rect.toolbar.Y+6, toolbarH-12)
+}
+
 // topbarButtonAt returns the index of the button under p, or -1.
 // Integer index pairs with topbarBtns so the caller can fire the
 // action directly without a stringly-typed indirection.
@@ -306,29 +380,14 @@ func topbarButtonAt(s *State, p rl.Vector2) int {
 	if !pointIn(p, s.rect.topbar) {
 		return -1
 	}
-	x := float32(8)
-	for i, b := range topbarBtns {
-		w := buttonWidth(b.label)
-		r := rl.NewRectangle(x, 6, w, topbarH-12)
-		if pointIn(p, r) {
-			return i
-		}
-		x += w + 6
-	}
-	return -1
+	return buttonStripHit(topbarBtns, 6, topbarH-12, p)
 }
 
 func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 	rl.DrawRectangleRec(s.rect.topbar, theme.SurfacePrimary)
 	rl.DrawLineEx(rl.NewVector2(0, topbarH), rl.NewVector2(s.rect.topbar.Width, topbarH), 1, outlineHard)
 
-	x := float32(8)
-	for _, b := range topbarBtns {
-		w := buttonWidth(b.label)
-		r := rl.NewRectangle(x, 6, w, topbarH-12)
-		drawButton(font, r, b.label, false)
-		x += w + 6
-	}
+	drawButtonStrip(font, s, topbarBtns, 6, topbarH-12)
 
 	id := core.MapIDFromPath(s.area.Path)
 	if id == "" {
@@ -362,16 +421,254 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 // labels that need extra space. Adding a wider button is a one-row
 // edit; missing entries fall through to the default.
 var topbarBtnWidths = map[string]float32{
-	"Save As":  90,
-	"Validate": 90,
-	"Back":     70,
+	"Save As":    90,
+	"Validate":   90,
+	"Back":       70,
+	"Reset View": 96,
+	"Brush -":    78,
+	"Brush +":    78,
 }
 
 func buttonWidth(label string) float32 {
 	if w, ok := topbarBtnWidths[label]; ok {
 		return w
 	}
-	return 72
+	// Auto-size to the label so long captions ("Discard", "Overwrite",
+	// "Exit to Title") don't overflow a fixed-width button. ~8px/char at
+	// editorFontBody plus padding, floored at 72 so short labels stay
+	// tidy. Deterministic from the string, so a modal's draw and its
+	// click hit-test (both via modalButtonRow) agree without measuring.
+	w := float32(len(label))*8 + 28
+	if w < 72 {
+		w = 72
+	}
+	return w
+}
+
+// Modal button-layout tunables, shared by every modal's button helpers so
+// the card padding / button size is one source instead of bare literals
+// repeated across the row / stack / grid layouts and their hit-tests.
+const (
+	modalBtnH         = float32(30)  // action button height
+	modalContentInset = float32(16)  // left/right card padding (body width = card.Width - 2*inset)
+	modalBtnGap       = float32(8)   // gap between stacked / row modal buttons
+	modalBottomInset  = float32(14)  // gap from the card's bottom edge to the button block
+	tightBtnGap       = float32(6)   // gap for dense strips: the topbar/toolbar, the wrapped add grid, equal-width rows
+	modalWideBtnW     = float32(110) // width of the Delete / Close affordance shared by the door + custom-enemy modals
+)
+
+// modalContentWidth is the usable inner width of a modal card.
+func modalContentWidth(card rl.Rectangle) float32 { return card.Width - 2*modalContentInset }
+
+// modalButtonRow lays buttons out left-to-right along the bottom-left of a
+// modal card (auto-width per label) and returns their rects in order.
+// Used where a few short actions fit one line (e.g. the open-map modal's
+// Open / Rename / Delete / Duplicate).
+func modalButtonRow(card rl.Rectangle, labels []string) []rl.Rectangle {
+	rects := make([]rl.Rectangle, len(labels))
+	x := card.X + modalContentInset
+	y := card.Y + card.Height - modalBtnH - modalBottomInset
+	for i, lbl := range labels {
+		w := buttonWidth(lbl)
+		rects[i] = rl.NewRectangle(x, y, w, modalBtnH)
+		x += w + modalBtnGap
+	}
+	return rects
+}
+
+// modalButtonStack lays full-width buttons out vertically, anchored to the
+// bottom of the card (so header + body text own the top) and returns them
+// in top-to-bottom order. Full-width means they can never overflow the
+// card horizontally — the robust choice for menus / confirm dialogs.
+func modalButtonStack(card rl.Rectangle, labels []string) []rl.Rectangle {
+	n := len(labels)
+	rects := make([]rl.Rectangle, n)
+	x := card.X + modalContentInset
+	w := modalContentWidth(card)
+	bottom := card.Y + card.Height - modalBottomInset
+	for i := n - 1; i >= 0; i-- {
+		bottom -= modalBtnH
+		rects[i] = rl.NewRectangle(x, bottom, w, modalBtnH)
+		bottom -= modalBtnGap
+	}
+	return rects
+}
+
+// modalButtonRow, modalButtonStack, and buttonGrid (the wrapped variant
+// the entity modals use) are the geometry sources a modal's draw and its
+// click handler share so the two can't drift — the same role
+// doorEditLayoutFor plays for the door modal. drawModalButtons paints a
+// computed rect set; modalButtonHit returns the clicked index.
+func drawModalButtons(font rl.Font, rects []rl.Rectangle, labels []string) {
+	for i, r := range rects {
+		drawButton(font, r, labels[i], false)
+	}
+}
+
+func modalButtonHit(rects []rl.Rectangle) int {
+	if !rl.IsMouseButtonPressed(rl.MouseLeftButton) {
+		return -1
+	}
+	mp := rl.GetMousePosition()
+	for i, r := range rects {
+		if pointIn(mp, r) {
+			return i
+		}
+	}
+	return -1
+}
+
+// modalCmd is a labeled action for a modal's buttons. The same builder
+// produces the cmds for both draw (reads .label) and the click handler
+// (runs .run), so a button's caption and its action live on one row and
+// can't drift — this is what lets the confirm/menu modals drop their
+// fragile "hit==2 means Cancel" index switches. `hot` is an optional
+// keyboard accelerator (Esc / Y / D …) that fires the same .run; `run`
+// returns the editor Action to propagate (ActionNone for most).
+type modalCmd struct {
+	label string
+	hot   func() bool
+	run   func() Action
+}
+
+// runModalCmds fires the cmd under a left-click (rects come from
+// modalButtonStack/Row over the same labels) OR whose `hot` accelerator
+// is pressed, and returns its Action plus true. The label↔action pairing
+// lives in the cmd row, so there's no index-to-meaning switch to keep in
+// lockstep with the label order.
+func runModalCmds(cmds []modalCmd, rects []rl.Rectangle) (Action, bool) {
+	click := modalButtonHit(rects)
+	for i, c := range cmds {
+		if i == click || (c.hot != nil && c.hot()) {
+			return c.run(), true
+		}
+	}
+	return ActionNone, false
+}
+
+func cmdLabels(cmds []modalCmd) []string {
+	out := make([]string, len(cmds))
+	for i, c := range cmds {
+		out[i] = c.label
+	}
+	return out
+}
+
+// buttonGrid lays auto-width buttons left-to-right within [x, x+maxW],
+// wrapping to a new row when the next would exceed maxW, growing downward
+// from y. Returns rects in label order — the geometry source shared by an
+// entity modal's draw and click hit-test. (A short label set that fits one
+// line simply doesn't wrap.)
+func buttonGrid(x, y, maxW float32, labels []string) []rl.Rectangle {
+	rects := make([]rl.Rectangle, len(labels))
+	cx, cy := x, y
+	for i, lbl := range labels {
+		w := buttonWidth(lbl)
+		if cx > x && cx+w > x+maxW {
+			cx = x
+			cy += modalBtnH + tightBtnGap
+		}
+		rects[i] = rl.NewRectangle(cx, cy, w, modalBtnH)
+		cx += w + tightBtnGap
+	}
+	return rects
+}
+
+// equalButtonRow splits width w into n equal-width button rects at (x, y),
+// height h, with tightBtnGap between them. The "divide a row into N equal
+// buttons + a gap" math was hand-rolled at the door facing/style rows, the
+// metadata material buttons, and the custom-enemy base-sprite row — this
+// is the one source for all of them.
+func equalButtonRow(x, y, w, h float32, n int) []rl.Rectangle {
+	if n <= 0 {
+		return nil
+	}
+	bw := (w - float32(n-1)*tightBtnGap) / float32(n)
+	rects := make([]rl.Rectangle, n)
+	for i := 0; i < n; i++ {
+		rects[i] = rl.NewRectangle(x+float32(i)*(bw+tightBtnGap), y, bw, h)
+	}
+	return rects
+}
+
+// buttonGridHeight is the total vertical span buttonGrid uses for labels
+// at the given width (0 for an empty set).
+func buttonGridHeight(maxW float32, labels []string) float32 {
+	if len(labels) == 0 {
+		return 0
+	}
+	rects := buttonGrid(0, 0, maxW, labels)
+	last := rects[len(rects)-1]
+	return last.Y + last.Height
+}
+
+// entityModalLayout is the shared geometry for the pack/chest editors: the
+// scrolled list window plus the action-button row and the wrapped add
+// grid, all derived once so draw and the click handler agree.
+type entityModalLayout struct {
+	card          rl.Rectangle
+	listTop, rowH float32
+	topRow, end   int
+	actRects      []rl.Rectangle
+	addRects      []rl.Rectangle
+}
+
+func entityModalLayoutFor(cursor, count int, addLabels, actLabels []string) entityModalLayout {
+	card := centeredCardRect(entityEditModalW, entityEditModalH)
+	gridW := modalContentWidth(card)
+	gridX := card.X + modalContentInset
+	addH := buttonGridHeight(gridW, addLabels)
+	actH := buttonGridHeight(gridW, actLabels)
+	addTop := card.Y + card.Height - modalBottomInset - addH
+	actTop := addTop - modalBtnGap - actH
+	addRects := buttonGrid(gridX, addTop, gridW, addLabels)
+	actRects := buttonGrid(gridX, actTop, gridW, actLabels)
+	listTop := card.Y + entityListTop
+	listBottom := actTop - modalBtnGap
+	maxRows := int((listBottom - listTop) / entityListRowH)
+	if maxRows < 1 {
+		maxRows = 1
+	}
+	topRow, end := scrollWindow(cursor, count, maxRows)
+	return entityModalLayout{card, listTop, entityListRowH, topRow, end, actRects, addRects}
+}
+
+// entityRowAt returns the list index whose row is under p, or -1.
+func entityRowAt(lay entityModalLayout, p rl.Vector2) int {
+	for i := lay.topRow; i < lay.end; i++ {
+		row := rl.NewRectangle(lay.card.X+modalContentInset, lay.listTop+float32(i-lay.topRow)*lay.rowH, modalContentWidth(lay.card), lay.rowH)
+		if pointIn(p, row) {
+			return i
+		}
+	}
+	return -1
+}
+
+// drawEntityListWindow paints the pack/chest list rows for a precomputed
+// layout window, highlighting the cursor row, with ▲/▼ "N more" clip
+// indicators.
+func drawEntityListWindow(font rl.Font, theme render.Theme, lay entityModalLayout, count, cursor int, emptyText string, rowText func(int) string) {
+	if count == 0 {
+		rl.DrawTextEx(font, emptyText, rl.NewVector2(lay.card.X+16, lay.listTop), 14, 1, theme.TextHint)
+		return
+	}
+	y := lay.listTop
+	if lay.topRow > 0 {
+		rl.DrawTextEx(font, fmt.Sprintf("▲ %d more", lay.topRow), rl.NewVector2(lay.card.X+24, y-16), 12, 1, theme.TextHint)
+	}
+	for i := lay.topRow; i < lay.end; i++ {
+		text := rowText(i)
+		col := theme.TextMuted
+		if i == cursor {
+			col = theme.BorderActive
+			text = "> " + text
+		}
+		render.DrawTextWithShadow(font, text, lay.card.X+24, y, 16, col)
+		y += lay.rowH
+	}
+	if lay.end < count {
+		rl.DrawTextEx(font, fmt.Sprintf("▼ %d more", count-lay.end), rl.NewVector2(lay.card.X+24, y), 12, 1, theme.TextHint)
+	}
 }
 
 func drawButton(font rl.Font, r rl.Rectangle, label string, active bool) {
@@ -764,11 +1061,7 @@ func metadataRects(s *State) metaRect {
 
 	r.matLabel = rl.NewRectangle(x, y, w, 18)
 	y += 22
-	r.matButtons = make([]rl.Rectangle, len(core.MaterialOptions))
-	bw := (w - 6) / float32(len(core.MaterialOptions))
-	for i := range core.MaterialOptions {
-		r.matButtons[i] = rl.NewRectangle(x+float32(i)*(bw+6), y, bw, 30)
-	}
+	r.matButtons = equalButtonRow(x, y, w, modalBtnH, len(core.MaterialOptions))
 	y += 42
 
 	r.quietLabel = rl.NewRectangle(x, y, w, 18)
@@ -1807,6 +2100,35 @@ func drawModalHeaderAt(font rl.Font, theme render.Theme, card rl.Rectangle, titl
 	render.DrawHeading(font, title, int32(card.X+16), int32(card.Y+12), accent)
 }
 
+// openModalListGeom returns the open-map list geometry — the card, the
+// first visible row's Y, the row height, and the visible [topRow, end)
+// window — shared by drawOpenModal and openModalRowAt so the painted rows
+// and the click hit-rects line up.
+func openModalListGeom(s *State) (card rl.Rectangle, listTop, rowH float32, topRow, end int) {
+	card = centeredCardRect(openModalW, openModalH)
+	rowH = 22
+	listTop = card.Y + 50
+	listBottom := card.Y + card.Height - 52 // room for the action button row
+	rowsVisible := int((listBottom - listTop) / rowH)
+	if rowsVisible < 1 {
+		rowsVisible = 1
+	}
+	topRow, end = scrollWindow(s.modalCursor, len(s.modalPaths), rowsVisible)
+	return
+}
+
+// openModalRowAt returns the path index whose list row is under p, or -1.
+func openModalRowAt(s *State, p rl.Vector2) int {
+	card, listTop, rowH, topRow, end := openModalListGeom(s)
+	for i := topRow; i < end; i++ {
+		row := rl.NewRectangle(card.X+12, listTop+float32(i-topRow)*rowH, card.Width-24, rowH)
+		if pointIn(p, row) {
+			return i
+		}
+	}
+	return -1
+}
+
 func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 	header := "OPEN MAP"
 	if s.modalRenaming != "" {
@@ -1818,20 +2140,11 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 
 	if len(s.modalPaths) == 0 {
 		rl.DrawTextEx(font, "(no .map files in maps/)", rl.NewVector2(r.X+16, r.Y+50), 14, 1, theme.TextMuted)
-		rl.DrawTextEx(font, "Esc to close", rl.NewVector2(r.X+16, r.Y+r.Height-26), 12, 1, theme.TextHint)
+		rl.DrawTextEx(font, "Esc / click outside to close", rl.NewVector2(r.X+16, r.Y+r.Height-26), 12, 1, theme.TextHint)
 		return
 	}
-	// Visible window over the path list so a maps/ dir with more than the
-	// modal can show doesn't clip off the bottom (the hint text overdraws
-	// the tail rows). scrollWindow handles the cursor-keep-visible math.
-	const rowH = float32(22)
-	listTop := r.Y + 50
-	listBottom := r.Y + r.Height - 32 // leave room for hint row
-	rowsVisible := int((listBottom - listTop) / rowH)
-	if rowsVisible < 1 {
-		rowsVisible = 1
-	}
-	topRow, end := scrollWindow(s.modalCursor, len(s.modalPaths), rowsVisible)
+
+	_, listTop, rowH, topRow, end := openModalListGeom(s)
 	for i := topRow; i < end; i++ {
 		path := s.modalPaths[i]
 		text := core.MapIDFromPath(path)
@@ -1843,7 +2156,7 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 		render.DrawTextWithShadow(font, text, r.X+18, listTop+float32(i-topRow)*rowH, 16, col)
 	}
 	// Scroll hint when the list extends past the visible window.
-	if len(s.modalPaths) > rowsVisible {
+	if topRow > 0 || end < len(s.modalPaths) {
 		more := fmt.Sprintf("(%d / %d)", s.modalCursor+1, len(s.modalPaths))
 		measure := rl.MeasureTextEx(font, more, 12, 1)
 		rl.DrawTextEx(font, more,
@@ -1852,23 +2165,25 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 	}
 
 	if s.modalRenaming != "" {
-		fieldR := rl.NewRectangle(r.X+16, r.Y+r.Height-72, r.Width-32, 28)
+		fieldR := rl.NewRectangle(r.X+16, r.Y+r.Height-86, r.Width-32, 28)
 		drawTextField(font, fieldR, s.modalRenaming, true)
-		rl.DrawTextEx(font, "New name (without .map)   Enter rename   Esc cancel",
-			rl.NewVector2(r.X+16, r.Y+r.Height-26), 12, 1, theme.TextHint)
+		labels := cmdLabels(openRenameCmds(s))
+		drawModalButtons(font, modalButtonRow(r, labels), labels)
 		return
 	}
 	if s.modalConfirmDelete {
 		path := s.modalPaths[s.modalCursor]
 		rl.DrawTextEx(font, fmt.Sprintf("Delete %s? This is permanent.", core.MapIDFromPath(path)),
-			rl.NewVector2(r.X+16, r.Y+r.Height-72), 14, 1, theme.BorderDanger)
-		rl.DrawTextEx(font, "Y delete   N / Esc cancel",
-			rl.NewVector2(r.X+16, r.Y+r.Height-26), 12, 1, theme.TextHint)
+			rl.NewVector2(r.X+16, r.Y+r.Height-86), 14, 1, theme.BorderDanger)
+		labels := cmdLabels(openDeleteConfirmCmds(s))
+		drawModalButtons(font, modalButtonRow(r, labels), labels)
 		return
 	}
 
-	rl.DrawTextEx(font, "Up/Down nav   Enter open   R rename   D delete   C duplicate   Esc cancel",
-		rl.NewVector2(r.X+16, r.Y+r.Height-26), 12, 1, theme.TextHint)
+	// Main view: click a row to select, then an action button (or the
+	// keyboard accelerators) to act.
+	labels := cmdLabels(openModalActionCmds(s))
+	drawModalButtons(font, modalButtonRow(r, labels), labels)
 }
 
 // Modal card dimensions. saveAs is named because its field-rect helper
@@ -1890,7 +2205,7 @@ const (
 	escMenuModalW      = float32(380)
 	escMenuModalH      = float32(178)
 	confirmDirtyModalW = float32(460)
-	confirmDirtyModalH = float32(188)
+	confirmDirtyModalH = float32(212) // tall enough that the contextual hint clears the bottom-anchored button stack
 	validateModalW     = float32(560)
 )
 
@@ -1911,8 +2226,8 @@ func drawSaveAsModal(s *State, font rl.Font, theme render.Theme) {
 	if s.awaitingOverwrite {
 		rl.DrawTextEx(font, fmt.Sprintf("Overwrite %s?", core.MapPath(s.modalFilename)),
 			rl.NewVector2(r.X+16, r.Y+44), 14, 1, theme.TextPrimary)
-		render.DrawTextWithShadow(font, "Y  Overwrite", r.X+24, r.Y+78, 14, theme.BorderDanger)
-		render.DrawTextWithShadow(font, "N / Esc  Pick a different name", r.X+24, r.Y+100, 14, theme.TextMuted)
+		labels := cmdLabels(saveAsOverwriteCmds(s))
+		drawModalButtons(font, modalButtonStack(r, labels), labels)
 		return
 	}
 
@@ -1950,9 +2265,8 @@ func drawPackEditModal(s *State, font rl.Font, theme render.Theme) {
 		"PACK AT "+core.TileCoord(pack.TileX, pack.TileZ),
 		theme.BorderActive)
 
-	// Leader hint: the rendered field icon for the pack is the
-	// highest-Tier member (core.PackSpawnLeaderSlot). Tell the author so
-	// they can understand which member's silhouette shows in-world.
+	// Leader hint near the top: the rendered field icon is the highest-
+	// Tier member, so the author knows whose silhouette shows in-world.
 	leaderText := "Leader: —"
 	if len(pack.Members) > 0 {
 		leaderIdx := core.PackSpawnLeaderSlot(s.area, pack)
@@ -1960,25 +2274,17 @@ func drawPackEditModal(s *State, font rl.Font, theme render.Theme) {
 			leaderText = "Leader (highest tier): " + core.PackMemberDisplayName(s.area, pack, leaderIdx)
 		}
 	}
-	// Build the add-shortcuts hint from packAddRules so display stays in
-	// sync with the input handler; adding a new enemy kind is one row
-	// in packAddRules and both the keymap and this label update.
-	addLabels := make([]string, 0, len(packAddRules)+3)
-	for _, rule := range packAddRules {
-		addLabels = append(addLabels, rule.Label)
-	}
-	if def, ok := selectedCustomEnemyForPack(s); ok {
-		addLabels = append(addLabels, "C add "+def.Name)
-	}
-	addLabels = append(addLabels, "A cycle AI", hintEscClose)
-	footerTop := drawEntityModalFooter(font, theme, r,
-		[]string{leaderText, "AI: " + core.PackAILabel(pack.AI)}, hintPackEditNav, addLabels)
+	render.DrawTextWithShadow(font, leaderText, r.X+16, r.Y+38, 12, theme.TextMuted)
+	render.DrawTextWithShadow(font, "Click a member to select; buttons below add / remove / reorder.",
+		r.X+16, r.Y+54, 11, theme.TextHint)
 
-	drawEntityListRows(font, theme, r, len(pack.Members), s.modalCursor, entityListMaxRows(r, footerTop),
+	adds, actions := packEditCmds(s)
+	lay := entityModalLayoutFor(s.modalCursor, len(pack.Members), cmdLabels(adds), cmdLabels(actions))
+	drawEntityListWindow(font, theme, lay, len(pack.Members), s.modalCursor,
 		"(empty — close to drop)",
-		func(i int) string {
-			return core.PackMemberDisplayName(s.area, pack, i)
-		})
+		func(i int) string { return core.PackMemberDisplayName(s.area, pack, i) })
+	drawModalButtons(font, lay.actRects, cmdLabels(actions))
+	drawModalButtons(font, lay.addRects, cmdLabels(adds))
 }
 
 // drawChestEditModal renders the inline chest editor: header with
@@ -1994,112 +2300,16 @@ func drawChestEditModal(s *State, font rl.Font, theme render.Theme) {
 	r := drawModalHeader(font, theme, entityEditModalW, entityEditModalH,
 		"CHEST AT "+core.TileCoord(chest.TileX, chest.TileZ),
 		theme.BorderActive)
+	render.DrawTextWithShadow(font, "Click an item to select; buttons below add / remove.",
+		r.X+16, r.Y+40, 11, theme.TextHint)
 
-	addLabels := make([]string, 0, len(chestAddRules)+1)
-	for _, rule := range chestAddRules {
-		addLabels = append(addLabels, rule.Label)
-	}
-	addLabels = append(addLabels, hintEscClose)
-	footerTop := drawEntityModalFooter(font, theme, r, nil, hintChestEditNav, addLabels)
-
-	drawEntityListRows(font, theme, r, len(chest.Items), s.modalCursor, entityListMaxRows(r, footerTop),
+	adds, actions := chestEditCmds(s)
+	lay := entityModalLayoutFor(s.modalCursor, len(chest.Items), cmdLabels(adds), cmdLabels(actions))
+	drawEntityListWindow(font, theme, lay, len(chest.Items), s.modalCursor,
 		"(empty — adds reveal it as pre-looted in game)",
-		func(i int) string {
-			return core.ItemInfo(chest.Items[i]).Name
-		})
-}
-
-// entityListMaxRows returns how many 22px list rows fit between the list
-// top and the footer block, so the scrolling list never collides with it.
-func entityListMaxRows(r rl.Rectangle, footerTop float32) int {
-	avail := footerTop - (r.Y + entityListTop) - 4
-	if avail < entityListRowH {
-		return 1
-	}
-	return int(avail / entityListRowH)
-}
-
-// drawEntityListRows draws the chest/pack item list, scrolled to keep the
-// cursor visible within maxRows so a long list (a full chest, a big pack)
-// never overflows the card or collides with the footer. "+N more"
-// indicators show when content is clipped above / below the window.
-func drawEntityListRows(font rl.Font, theme render.Theme, r rl.Rectangle, count, cursor, maxRows int, emptyText string, rowText func(int) string) {
-	if count == 0 {
-		rl.DrawTextEx(font, emptyText,
-			rl.NewVector2(r.X+16, r.Y+entityListTop), 14, 1, theme.TextHint)
-		return
-	}
-	if maxRows < 1 {
-		maxRows = 1
-	}
-	top, end := scrollWindow(cursor, count, maxRows)
-	y := r.Y + entityListTop
-	if top > 0 {
-		rl.DrawTextEx(font, fmt.Sprintf("▲ %d more", top), rl.NewVector2(r.X+24, y-16), 12, 1, theme.TextHint)
-	}
-	for i := top; i < end; i++ {
-		text := rowText(i)
-		col := theme.TextMuted
-		if i == cursor {
-			col = theme.BorderActive
-			text = "> " + text
-		}
-		render.DrawTextWithShadow(font, text, r.X+24, y, 16, col)
-		y += entityListRowH
-	}
-	if end < count {
-		rl.DrawTextEx(font, fmt.Sprintf("▼ %d more", count-end), rl.NewVector2(r.X+24, y), 12, 1, theme.TextHint)
-	}
-}
-
-// wrapHintTokens splits hint tokens across as many lines as needed so each
-// line fits maxW — used by the entity-edit footers whose add-key legend
-// grew past the card width as items/enemy kinds were added.
-func wrapHintTokens(font rl.Font, tokens []string, maxW, fontSize float32) []string {
-	var lines []string
-	cur := ""
-	for _, tok := range tokens {
-		trial := tok
-		if cur != "" {
-			trial = cur + "   " + tok
-		}
-		if cur != "" && rl.MeasureTextEx(font, trial, fontSize, 1).X > maxW {
-			lines = append(lines, cur)
-			cur = tok
-		} else {
-			cur = trial
-		}
-	}
-	if cur != "" {
-		lines = append(lines, cur)
-	}
-	return lines
-}
-
-// drawEntityModalFooter draws the bottom block of an entity-edit modal —
-// optional info lines (leader / AI), the nav hint, then the add-key
-// legend wrapped to the card width — bottom-anchored, and returns the Y
-// where the block starts so the caller can size the scrolling list above
-// it. addTokens are the per-item/enemy add labels (already including any
-// trailing "Esc close").
-func drawEntityModalFooter(font rl.Font, theme render.Theme, r rl.Rectangle, info []string, nav string, addTokens []string) float32 {
-	const lineH = float32(16)
-	legend := wrapHintTokens(font, addTokens, r.Width-32, 12)
-	lines := make([]string, 0, len(info)+1+len(legend))
-	lines = append(lines, info...)
-	lines = append(lines, nav)
-	lines = append(lines, legend...)
-	top := r.Y + r.Height - 10 - float32(len(lines))*lineH
-	y := top
-	for i, line := range lines {
-		col := theme.TextHint
-		if i < len(info) {
-			col = theme.TextMuted
-		}
-		rl.DrawTextEx(font, line, rl.NewVector2(r.X+16, y), 12, 1, col)
-		y += lineH
-	}
-	return top
+		func(i int) string { return core.ItemInfo(chest.Items[i]).Name })
+	drawModalButtons(font, lay.actRects, cmdLabels(actions))
+	drawModalButtons(font, lay.addRects, cmdLabels(adds))
 }
 
 // drawDoorEditModal renders the per-door editor. Mirrors the save-as
@@ -2193,13 +2403,17 @@ func drawValidateModal(s *State, font rl.Font, theme render.Theme) {
 //
 // Body is intentionally minimal so the menu doesn't cover the area
 // the author was just looking at; sits centered.
+// The confirm/menu modals build their buttons as []modalCmd (label +
+// keyboard accelerator + action, all on one row) via the *Cmds funcs in
+// input.go; both the draw (cmdLabels) and the handler (runModalCmds) call
+// the same builder so captions and actions can't drift.
+
 func drawEscMenuModal(s *State, font rl.Font, theme render.Theme) {
 	r := drawModalHeader(font, theme, escMenuModalW, escMenuModalH, "EDITOR MENU", theme.BorderActive)
-	render.DrawTextWithShadow(font, "D  "+render.DisplayMenuRowLabel(), r.X+24, r.Y+58, 14, theme.TextPrimary)
-	render.DrawTextWithShadow(font, "C  Continue editing", r.X+24, r.Y+86, 14, theme.TextPrimary)
-	render.DrawTextWithShadow(font, "E  Exit to Title", r.X+24, r.Y+114, 14, theme.BorderDanger)
-	render.DrawTextWithShadow(font, "Esc  Close", r.X+24, r.Y+142, 14, theme.TextMuted)
-	_ = s
+	labels := cmdLabels(escMenuCmds(s))
+	drawModalButtons(font, modalButtonStack(r, labels), labels)
+	render.DrawTextWithShadow(font, "(D display · C continue · E exit · Esc close)",
+		r.X+16, r.Y+40, 12, theme.TextHint)
 }
 
 func drawConfirmDirtyModal(s *State, font rl.Font, theme render.Theme) {
@@ -2228,8 +2442,23 @@ func drawConfirmDirtyModal(s *State, font rl.Font, theme render.Theme) {
 	}
 
 	rl.DrawTextEx(font, body, rl.NewVector2(r.X+16, r.Y+44), 14, 1, theme.TextPrimary)
+	// Contextual hint above the buttons explains what Save/Discard do for
+	// this pending action (new map / open / exit); the buttons stay short.
+	render.DrawTextWithShadow(font, hintForPending(saveLabel, discardLabel), r.X+16, r.Y+66, 12, theme.TextHint)
 
-	render.DrawTextWithShadow(font, saveLabel, r.X+24, r.Y+80, 14, theme.BorderStrong)
-	render.DrawTextWithShadow(font, discardLabel, r.X+24, r.Y+102, 14, theme.BorderDanger)
-	render.DrawTextWithShadow(font, "Esc  Cancel", r.X+24, r.Y+124, 14, theme.TextMuted)
+	labels := cmdLabels(confirmDirtyCmds(s))
+	drawModalButtons(font, modalButtonStack(r, labels), labels)
+}
+
+// hintForPending strips the leading "S  " / "D  " accelerator prefix off
+// the contextual save/discard captions so the hint reads as prose under
+// the body line.
+func hintForPending(saveLabel, discardLabel string) string {
+	trim := func(s string) string {
+		if i := strings.Index(s, "  "); i >= 0 {
+			return strings.TrimSpace(s[i:])
+		}
+		return s
+	}
+	return trim(saveLabel) + " · " + trim(discardLabel)
 }

@@ -529,7 +529,7 @@ func updateSoundsListKeys(s *State, names []string) {
 func confirmSoundDelete(s *State, name string) {
 	if s.soundDeleteArmed != name {
 		s.soundDeleteArmed = name
-		s.flash("Delete " + name + "? Press × / X again to confirm")
+		s.flash("Delete " + name + "? Click × again (or press X) to confirm")
 		return
 	}
 	s.soundDeleteArmed = ""

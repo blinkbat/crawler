@@ -92,6 +92,21 @@ func SellableStacks(inv []ItemStack) []ItemStack {
 	return out
 }
 
+// SellableCount is the no-alloc count of sellable stacks — same predicate
+// as SellableStacks without materializing the slice. The shop's row-count
+// path runs every frame the Sell tab is open and only needs the length,
+// so it calls this instead of len(SellableStacks(...)) (mirrors
+// LiveStackCount vs LiveStacks).
+func SellableCount(inv []ItemStack) int {
+	n := 0
+	for _, s := range inv {
+		if s.Count > 0 && ItemInfo(s.Kind).Price > 0 {
+			n++
+		}
+	}
+	return n
+}
+
 // AwardBattleLoot grants the defeated pack's gold + item drops to the
 // party. Gold is the sum of a uniform roll in each member's [GoldMin,
 // GoldMax]; item drops roll each member's Drops table independently. Adds

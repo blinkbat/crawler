@@ -124,14 +124,31 @@ var timeProfiles = [core.TimeOfDayCount]timeProfile{
 	},
 }
 
+// timeProfileCache memoizes the last (steps → profile) result. The
+// profile is a pure function of the step count, which is constant within
+// a frame, but DrawSkyBackground and DrawWorld each sample it once per
+// frame — so without the cache the six lerp blends run twice every
+// frame. Keyed on steps so it stays correct across the player taking a
+// step (the only thing that changes the profile); order-independent, so
+// it works whether the sky or the world draws first.
+var timeProfileCache struct {
+	steps  int
+	primed bool
+	prof   timeProfile
+}
+
 // timeProfileAt samples the cycle at the given step count and returns the
 // blended profile between the current phase and the next. Wraps at the
-// midnight→dawn boundary so the loop is seamless.
+// midnight→dawn boundary so the loop is seamless. Memoized per step count
+// (see timeProfileCache).
 func timeProfileAt(steps int) timeProfile {
+	if timeProfileCache.primed && timeProfileCache.steps == steps {
+		return timeProfileCache.prof
+	}
 	phase, p := core.PhaseAtStep(steps)
 	cur := timeProfiles[phase]
 	next := timeProfiles[(int(phase)+1)%len(timeProfiles)]
-	return timeProfile{
+	prof := timeProfile{
 		SunColor:       lerpVec3(cur.SunColor, next.SunColor, p),
 		AmbientColor:   lerpVec3(cur.AmbientColor, next.AmbientColor, p),
 		FogColor:       lerpVec3(cur.FogColor, next.FogColor, p),
@@ -139,6 +156,10 @@ func timeProfileAt(steps int) timeProfile {
 		SkyTint:        lerpVec3(cur.SkyTint, next.SkyTint, p),
 		StarAlpha:      core.Lerp(cur.StarAlpha, next.StarAlpha, p),
 	}
+	timeProfileCache.steps = steps
+	timeProfileCache.prof = prof
+	timeProfileCache.primed = true
+	return prof
 }
 
 // skyColor converts a SkyTint vector to a clamped 0–255 RGBA color usable
