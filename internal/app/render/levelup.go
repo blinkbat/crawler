@@ -113,7 +113,7 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 		rowY += 6
 		focused := g.LevelUpRowCursor == core.LevelUpApplyRowIndex
 		rect := SelectionRowRect(rowX, rowY, rowW, rowH-6)
-		applyBG := core.MixColor(glassDeep, glassWarm, 0.45)
+		applyBG := selectedGlassTint(glassDeep, 0.45)
 		drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), applyBG)
 		if focused {
 			DrawSelectedRow(rect)

@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -190,5 +191,5 @@ type saveVersionError struct {
 }
 
 func (e *saveVersionError) Error() string {
-	return "save file version is newer than this build supports"
+	return fmt.Sprintf("unsupported save file version %d (this build reads 1..%d)", e.got, e.max)
 }

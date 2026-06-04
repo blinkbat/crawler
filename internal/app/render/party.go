@@ -150,14 +150,14 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 	case down:
 		bg = surfaceDownTint
 		border = borderDim
-		accent = rl.NewColor(120, 110, 116, 200)
+		accent = accentPartyDown
 		nameCol = textDim
 	case selected:
 		bg = surfaceTargetTint
 		border = borderTarget
 		accent = borderTarget
 	case active:
-		bg = core.MixColor(surfacePrimary, surfaceActiveTint, 0.8)
+		bg = selectedGlassTint(surfacePrimary, 0.8)
 		border = borderActive
 	}
 
@@ -267,8 +267,8 @@ func DrawPartyRibbon(g core.GameState, assets Resources) {
 
 	totalW := partyCardW*count + partyCardGap*(count-1)
 	startX := centerXF(totalW)
-	if startX < 16 {
-		startX = 16
+	if startX < float32(hudEdgePad) {
+		startX = float32(hudEdgePad)
 	}
 	y := screenH - partyCardH - ribbonBottom
 

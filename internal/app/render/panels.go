@@ -8,14 +8,14 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// selectedGlassTint is the cursored / active glass wash used across the
-// panels overlay — a blend from glassMid toward glassWarm. t controls how
-// warm the highlight reads (the tab strip, the member-card header, and the
-// item row each pick their own warmth). Centralized so the "what does a
-// highlighted glass surface look like" color pair lives in one place instead
-// of three open-coded MixColor calls that drift apart.
-func selectedGlassTint(t float64) rl.Color {
-	return core.MixColor(glassMid, glassWarm, t)
+// selectedGlassTint is the cursored / active glass wash used across the HUD:
+// a blend from a `base` glass color toward glassWarm by `t`. Most panel
+// surfaces wash from glassMid; the member-card-active and level-up surfaces
+// wash from the deeper glassDeep/surfacePrimary. Centralized so every
+// "highlighted glass surface" shares one warm target instead of open-coding
+// MixColor(…, glassWarm, …) and drifting apart.
+func selectedGlassTint(base rl.Color, t float64) rl.Color {
+	return core.MixColor(base, glassWarm, t)
 }
 
 // panelStatMeasureCache memoizes rl.MeasureTextEx for the Stats-tab's
@@ -98,7 +98,7 @@ func DrawPanelsOverlay(g core.GameState, assets Resources) {
 		bg := glassMid
 		txt := textMuted
 		if active {
-			bg = selectedGlassTint(0.65)
+			bg = selectedGlassTint(glassMid, 0.65)
 			txt = textPrimary
 		}
 		drawGlassPane(tx, tabRowY, tabW, tabH, bg)
@@ -218,7 +218,7 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 	// across the Character / Skills / Equipment tabs.
 	cardBG := glassMid
 	if highlight {
-		cardBG = selectedGlassTint(0.9)
+		cardBG = selectedGlassTint(glassMid, 0.9)
 	}
 	drawGlassPane(int32(col.X), int32(col.Y), int32(col.Width), int32(col.Height), cardBG)
 	rl.DrawRectangle(int32(col.X), int32(col.Y)+6, 3, int32(col.Height)-12, classCol)
@@ -819,7 +819,7 @@ func drawPanelsItems(g core.GameState, assets Resources, body rl.Rectangle) {
 		highlight := i == cursor
 		if highlight {
 			drawGlassPane(int32(listRect.X), int32(y), int32(listRect.Width), int32(rowH-4),
-				selectedGlassTint(0.6))
+				selectedGlassTint(glassMid, 0.6))
 			rl.DrawRectangle(int32(listRect.X)+2, int32(y)+4, 3, int32(rowH-12), giltBright)
 		}
 		nameCol := textMuted

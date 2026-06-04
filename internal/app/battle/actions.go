@@ -222,6 +222,23 @@ func handleEnemyIngest(ctx enemySpellCtx) {
 	audio.Play(audio.SoundEnemyHit)
 }
 
+// applyEnemyStatus is the shared mechanical tail of the enemy status casts
+// (Sleep / Webbed / Confused): floor a non-positive rolled duration, apply it
+// to the target's counter shortened by WIS (the universal resist path), fire
+// the status VFX, and play the land cue. The caller owns the per-status guards
+// and log lines — those vary in wording and in whether they name the caster —
+// so only the identical apply mechanics live here. The enemy→party mirror of
+// the player→enemy tryProcStatus tail (which the latter's comment references).
+func applyEnemyStatus(ctx enemySpellCtx, counter *int, duration, floor int, vfxSkill core.SkillID) {
+	if duration <= 0 {
+		duration = floor
+	}
+	m := &ctx.g.Party[ctx.target]
+	*counter = core.ShortenStatusDuration(duration, core.EffectiveStats(*m).WIS)
+	core.EnqueuePartyVFX(ctx.g, vfxKindFor(vfxSkill), ctx.target)
+	audio.Play(audio.SoundInputHit)
+}
+
 // handleEnemySleep applies the goblin-mage Sleep cast. Already-asleep
 // targets short-circuit with a flavor line; otherwise the duration
 // rolls from the skill's effect block and lands on the target.
@@ -238,14 +255,8 @@ func handleEnemySleep(ctx enemySpellCtx) {
 		enemySpellLog(ctx, "%s is already asleep.", m.Name)
 		return
 	}
-	duration := ctx.effect.SleepDuration(g.Rand())
-	if duration <= 0 {
-		duration = core.SleepMinTurns
-	}
-	m.SleepTurns = core.ShortenStatusDuration(duration, core.EffectiveStats(*m).WIS)
-	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillSleep), ctx.target)
+	applyEnemyStatus(ctx, &m.SleepTurns, ctx.effect.SleepDuration(g.Rand()), core.SleepMinTurns, core.SkillSleep)
 	enemySpellLog(ctx, "%s falls asleep.", m.Name)
-	audio.Play(audio.SoundInputHit)
 }
 
 // handleEnemyWeb applies the Cave Spider's Webbed status. Already-webbed
@@ -260,14 +271,8 @@ func handleEnemyWeb(ctx enemySpellCtx) {
 		setBattleMessage(g, fmt.Sprintf("%s spins a fresh web at %s — already webbed.", core.TheEnemy(ctx.def), m.Name))
 		return
 	}
-	duration := ctx.effect.BindDuration(g.Rand())
-	if duration <= 0 {
-		duration = core.SpiderWebbedMinTurns
-	}
-	m.WebbedTurns = core.ShortenStatusDuration(duration, core.EffectiveStats(*m).WIS)
-	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillWeb), ctx.target)
+	applyEnemyStatus(ctx, &m.WebbedTurns, ctx.effect.BindDuration(g.Rand()), core.SpiderWebbedMinTurns, core.SkillWeb)
 	enemySpellLog(ctx, "%s is wrapped in sticky webs.", m.Name)
-	audio.Play(audio.SoundInputHit)
 }
 
 // handleEnemyConfuse applies the Will-o'-Wisp's Confused status.
@@ -284,15 +289,8 @@ func handleEnemyConfuse(ctx enemySpellCtx) {
 		setBattleMessage(g, fmt.Sprintf("%s flickers at %s — already disoriented.", core.TheEnemy(ctx.def), m.Name))
 		return
 	}
-	rng := g.Rand()
-	duration := ctx.effect.ConfuseDuration(rng)
-	if duration <= 0 {
-		duration = core.WispConfuseMinTurns
-	}
-	m.ConfusedTurns = core.ShortenStatusDuration(duration, core.EffectiveStats(*m).WIS)
-	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillConfuse), ctx.target)
+	applyEnemyStatus(ctx, &m.ConfusedTurns, ctx.effect.ConfuseDuration(g.Rand()), core.WispConfuseMinTurns, core.SkillConfuse)
 	enemySpellLog(ctx, "%s grows confused.", m.Name)
-	audio.Play(audio.SoundInputHit)
 }
 
 // handleEnemyStoneslam fires the Stone Golem's AoE phys cast. Hits

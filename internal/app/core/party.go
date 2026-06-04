@@ -549,11 +549,7 @@ func rollDuration(rng *rand.Rand, min, max int) int {
 	if min <= 0 || max < min {
 		return 0
 	}
-	span := max - min
-	if span <= 0 {
-		return min
-	}
-	return min + rng.Intn(span+1)
+	return RandRangeI(rng, min, max)
 }
 
 // BurnDuration rolls a uniform burn duration in [Min, Max]. Routes

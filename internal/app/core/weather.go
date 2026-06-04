@@ -173,7 +173,7 @@ func TickWeather(g *GameState, dt float32) {
 	case WeatherBuilding:
 		if w.Intensity >= WeatherRainStartLevel {
 			w.Phase = WeatherRaining
-			w.RainStepsLeft = RainMinSteps + g.Rand().Intn(RainMaxSteps-RainMinSteps+1)
+			w.RainStepsLeft = RandRangeI(g.Rand(), RainMinSteps, RainMaxSteps)
 			if w.Kind == RainHeavy {
 				// Arm the first bolt a few seconds in, not the instant
 				// the rain starts.
@@ -184,7 +184,7 @@ func TickWeather(g *GameState, dt float32) {
 		if w.Intensity <= 0.01 {
 			w.Intensity = 0
 			w.Phase = WeatherClear
-			w.Cooldown = RainCooldownMin + g.Rand().Intn(RainCooldownMax-RainCooldownMin+1)
+			w.Cooldown = RandRangeI(g.Rand(), RainCooldownMin, RainCooldownMax)
 		}
 	}
 	tickLightning(g, dt)

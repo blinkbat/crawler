@@ -833,9 +833,16 @@ func floodFill(s *State, x, z int, b byte) {
 			stack = append(stack, [2]int{px + 1, pz}, [2]int{px - 1, pz}, [2]int{px, pz + 1}, [2]int{px, pz - 1})
 		}
 	})
-	// Wall flood that turns cells into '#' nukes any packs that fell inside.
+	// Wall flood that turns cells into '#' nukes any pack/chest/door that
+	// fell inside — same cleanup applyWallBrush does per-cell and
+	// fillEntireLayer does for a full fill, routed through the shared
+	// removeSpawnsWhere over core.TileXZ. (Previously only packs were pruned,
+	// leaving chests/doors embedded in the new wall.)
 	if s.layer == LayerWalls && b == core.TileRock {
-		s.area.PackSpawns = removeSpawnsWhere(s.area.PackSpawns, func(x, z int) bool { return s.area.BlockedAt(x, z) })
+		blocked := func(x, z int) bool { return s.area.BlockedAt(x, z) }
+		s.area.PackSpawns = removeSpawnsWhere(s.area.PackSpawns, blocked)
+		s.area.ChestSpawns = removeSpawnsWhere(s.area.ChestSpawns, blocked)
+		s.area.DoorSpawns = removeSpawnsWhere(s.area.DoorSpawns, blocked)
 	}
 	s.dirty = true
 }

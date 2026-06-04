@@ -75,7 +75,8 @@ var (
 	surfaceVeil       = veil
 	surfaceActiveTint = glassWarm
 	surfaceTargetTint = rl.NewColor(20, 38, 32, 140) // faint emerald glass for friendly target
-	surfaceDownTint   = rl.NewColor(28, 22, 28, 115) // knocked down — dim grey wash
+	surfaceDownTint   = rl.NewColor(28, 22, 28, 115)  // knocked down — dim grey wash
+	accentPartyDown   = rl.NewColor(120, 110, 116, 200) // knocked-down party card accent (name tick / edge)
 	surfaceEnemyTint  = glassDanger
 
 	// Enemy-roster row tints (drawEnemyRosterRow): the live row's glass

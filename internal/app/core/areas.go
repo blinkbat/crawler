@@ -653,10 +653,20 @@ var enemyKindByName = buildEnemyKindByName()
 
 func buildEnemyKindByName() map[string]EnemyKind {
 	m := make(map[string]EnemyKind, len(enemyKindNameTable))
+	add := func(key string, v EnemyKind) {
+		// Collision assert: two DIFFERENT kinds claiming the same name/alias
+		// would silently last-write-wins and mis-route EnemyKindFromName. The
+		// missing-row assert in init() can't catch this; guard it here at
+		// build time. (A kind repeating its own alias is harmless — same value.)
+		if existing, dup := m[key]; dup && existing != v {
+			panic("core: enemyKindNameTable name/alias collision on " + key)
+		}
+		m[key] = v
+	}
 	for _, e := range enemyKindNameTable {
-		m[e.name] = e.value
+		add(e.name, e.value)
 		for _, alias := range e.aliases {
-			m[alias] = e.value
+			add(alias, e.value)
 		}
 	}
 	return m

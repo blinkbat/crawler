@@ -1181,7 +1181,7 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 		chevronPos.Y += visual.markerYOffset
 		if visual.markerXOffset != 0 {
 			fwd := horizontalForward(camera)
-			right := rl.NewVector3(-fwd.Z, 0, fwd.X)
+			right := horizontalRight(fwd)
 			chevronPos.X += right.X * visual.markerXOffset
 			chevronPos.Z += right.Z * visual.markerXOffset
 		}
@@ -1562,7 +1562,7 @@ func drawEnemyAttackTargetMarker(camera rl.Camera3D, position rl.Vector3) {
 
 func partySpritePosition(camera rl.Camera3D, index int, class core.PartyClass, bump, victoryDance float32, knockback float32) rl.Vector3 {
 	forward := horizontalForward(camera)
-	right := rl.NewVector3(-forward.Z, 0, forward.X)
+	right := horizontalRight(forward)
 	// Party billboards pushed FURTHER from the camera (0.96 → 1.45)
 	// so they sit visibly inside the arena instead of pressed up
 	// against the lens. Pairs with the battle-FOV zoom + the
@@ -1636,7 +1636,7 @@ func enemyDrawPosition(camera rl.Camera3D, g core.GameState, slot int, enemy cor
 		return tileWorldPos(p.TileX, p.TileZ, enemyBillboardY)
 	}
 	forward := horizontalForward(camera)
-	right := rl.NewVector3(-forward.Z, 0, forward.X)
+	right := horizontalRight(forward)
 	// Formation center.Y lifted from 0.7 → 1.0 so enemy billboards
 	// sit centered vertically in the screen instead of hugging the
 	// bottom third under the narrower battle FOV. Pairs with the
@@ -1707,6 +1707,14 @@ var horizForwardCache struct {
 	dx, dz float32
 	result rl.Vector3
 	primed bool
+}
+
+// horizontalRight is the camera's right vector projected onto the XZ plane —
+// perpendicular to horizontalForward. Billboard formation layout and the
+// per-kind marker nudge both derive screen-right from this, so the
+// (-fwd.Z, 0, fwd.X) expression lives in exactly one place.
+func horizontalRight(forward rl.Vector3) rl.Vector3 {
+	return rl.NewVector3(-forward.Z, 0, forward.X)
 }
 
 func horizontalForward(camera rl.Camera3D) rl.Vector3 {

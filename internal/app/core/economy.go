@@ -134,8 +134,5 @@ func rollGold(rng *rand.Rand, lo, hi int) int {
 	if lo < 0 {
 		lo = 0
 	}
-	if hi == lo {
-		return lo
-	}
-	return lo + rng.Intn(hi-lo+1)
+	return RandRangeI(rng, lo, hi)
 }

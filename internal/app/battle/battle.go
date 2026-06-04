@@ -1023,6 +1023,11 @@ func fleeBattle(g *core.GameState) {
 	if g.Battle.ActivePack >= 0 && g.Battle.ActivePack < len(g.Packs) {
 		g.Packs = append(g.Packs[:g.Battle.ActivePack], g.Packs[g.Battle.ActivePack+1:]...)
 	}
+	// The fled pack is already removed above; clear ActivePack BEFORE
+	// leaveBattle so clearBattleResidual's "pack defeated" drop (which fires
+	// on LivingBattleCount==0) can't re-remove whatever pack shifted into the
+	// now-stale slot.
+	g.Battle.ActivePack = -1
 	leaveBattle(g, g.Area.QuietMessage)
 }
 

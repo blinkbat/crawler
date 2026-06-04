@@ -1067,10 +1067,11 @@ func drawReadonlyValue(font rl.Font, r rl.Rectangle, text string) {
 
 // --- Grid ------------------------------------------------------------------
 
-// drawGrid paints all four grid layers stacked, then the entity overlays.
-// Layers other than the active one are dimmed so the focus is on what
-// the next click will affect. Order: floor → walls → decor → props →
-// entities (start + spawns).
+// drawGrid paints the four flat-color grid layers (floor → walls → decor →
+// props) stacked, then the ceiling hash overlay and the entity overlays
+// (start + spawns). Layers other than the active one are dimmed so the focus
+// is on what the next click will affect. Order: floor → walls → decor →
+// props → ceiling (hash) → entities.
 func drawGrid(s *State, font rl.Font) {
 	rl.DrawRectangleRec(s.rect.grid, bgFieldInset)
 	if s.rect.cellPx <= 0 {
@@ -1585,23 +1586,32 @@ func brushPreviewColor(s *State) rl.Color {
 	panic(fmt.Sprintf("editor: brushPreviewColor missing case for layer %d", int(s.layer)))
 }
 
-// tileColorByChar maps each grid layer's tile chars to swatch colors,
-// built once at init from layerBrushes (editor.go) so the palette UI and
-// the grid-cell preview can't drift on color. Adding a new tile char is
-// one row in layerBrushes — both the brush palette and the grid preview
-// pick it up. Unknown chars fall through to tileColorFallback.
-var tileColorByChar = buildTileColorMaps()
+// tileColorByChar is the per-layer, per-tile-char swatch color for the editor
+// grid, flattened to a [layerCount][256] array (was a map[Layer]map[byte]) so
+// the per-cell lookup in drawGrid is a single indexed read instead of two map
+// hashes — the grid repaints every visible cell every frame. Built once at
+// init from layerBrushes (editor.go) so the palette UI and the grid preview
+// can't drift on color; adding a tile char stays one row in layerBrushes.
+// Each layer's row is pre-filled with that layer's fallback (tileColorFallback),
+// then palette chars overwrite — so an unrecognized char reads as the fallback
+// with no per-cell branch.
+var tileColorByChar = buildTileColorTable()
 
-func buildTileColorMaps() map[Layer]map[byte]rl.Color {
-	out := make(map[Layer]map[byte]rl.Color, len(layerBrushes))
-	for layer, brushes := range layerBrushes {
-		m := make(map[byte]rl.Color, len(brushes))
-		for _, b := range brushes {
+func buildTileColorTable() [layerCount][256]rl.Color {
+	var out [layerCount][256]rl.Color
+	for layer := 0; layer < layerCount; layer++ {
+		fallback := editorFallbackColor
+		if c, ok := tileColorFallback[Layer(layer)]; ok {
+			fallback = c
+		}
+		for c := range out[layer] {
+			out[layer][c] = fallback
+		}
+		for _, b := range layerBrushes[layer] {
 			if b.Char != 0 {
-				m[b.Char] = b.Color
+				out[layer][b.Char] = b.Color
 			}
 		}
-		out[Layer(layer)] = m
 	}
 	return out
 }
@@ -1618,15 +1628,12 @@ var tileColorFallback = map[Layer]rl.Color{
 }
 
 func tileColor(layer Layer, c byte) rl.Color {
-	if m, ok := tileColorByChar[layer]; ok {
-		if col, ok := m[c]; ok {
-			return col
-		}
+	if layer < 0 || int(layer) >= layerCount {
+		return editorFallbackColor
 	}
-	if col, ok := tileColorFallback[layer]; ok {
-		return col
-	}
-	return editorFallbackColor
+	// Fallback is pre-baked into every row, so this single index covers both
+	// palette chars and unrecognized ones — no map hash, no branch.
+	return tileColorByChar[layer][c]
 }
 
 func wallColor() color.RGBA        { return tileColor(LayerWalls, core.TileRock) }
@@ -2109,8 +2116,9 @@ func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawTextField(font, l.doorField, door.TargetDoor, s.focus == focusDoorTargetDoor)
 
 	// Facing row.
+	lastFacing := l.facing[core.FacingCount-1]
 	drawLabel(font, "Facing / wall to affix to (player walks out this way)",
-		rl.NewRectangle(l.facing[0].X, l.facing[0].Y-16, l.facing[3].X+l.facing[3].Width-l.facing[0].X, 14))
+		rl.NewRectangle(l.facing[0].X, l.facing[0].Y-16, lastFacing.X+lastFacing.Width-l.facing[0].X, 14))
 	for i, fr := range l.facing {
 		drawButton(font, fr, core.FacingShortLabels[i], door.Facing == i)
 	}

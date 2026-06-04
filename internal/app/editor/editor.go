@@ -39,9 +39,9 @@ const (
 	LayerEntities
 )
 
-// layerCount is the number of editor layers (the four grid layers +
-// ceiling + the entity list), derived from the enum's last value so
-// adding a layer doesn't need a separate magic-number bump.
+// layerCount is the number of editor layers (the five grid layers +
+// the entity list), derived from the enum's last value so adding a
+// layer doesn't need a separate magic-number bump.
 const layerCount = int(LayerEntities) + 1
 
 // numberRowKeys is the top-row 1..9 key codes. Package-level so the

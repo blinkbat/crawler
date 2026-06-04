@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"image/color"
 	"math"
+	"math/rand"
 )
 
 // BuildRegistry collapses the four "build O(1) lookup map from a
@@ -158,6 +159,20 @@ func WrapEnum[T ~int](v T, delta, count int) T {
 		return v
 	}
 	return T(WrapIndex(int(v)+delta, count))
+}
+
+// RandRangeI returns a uniform int in [lo, hi] (inclusive) from rng — the
+// integer twin of (*GameState).RandRangeF. Single home for the
+// "lo + rng.Intn(hi-lo+1)" body shared by rollGold / rollDuration and the
+// weather step/cooldown rolls. Callers that need degenerate-bounds tolerance
+// (inverted / negative) layer their own guard on top; this is defensive only
+// in that hi <= lo returns lo (so a misuse can't panic Intn with a
+// non-positive argument).
+func RandRangeI(rng *rand.Rand, lo, hi int) int {
+	if hi <= lo {
+		return lo
+	}
+	return lo + rng.Intn(hi-lo+1)
 }
 
 func AbsInt(v int) int {
