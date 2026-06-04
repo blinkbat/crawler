@@ -519,6 +519,13 @@ func (g *GameState) Rand() *rand.Rand {
 	return g.RNG
 }
 
+// RandRangeF returns a uniform float32 in [lo, hi) from the GameState RNG
+// (nil-safe via Rand). Single home for the "lo + rand*(hi-lo)" range roll
+// so the expression can't drift between call sites (weather lightning, etc.).
+func (g *GameState) RandRangeF(lo, hi float32) float32 {
+	return lo + g.Rand().Float32()*(hi-lo)
+}
+
 // SetStatusMessage writes the transient status / quiet-message line shown
 // under the HUD. Battle's setBattleStatus and the exploration code (e.g. a
 // failed door transition) share this slot — it doubles as the ambient
@@ -667,7 +674,7 @@ type PartyMember struct {
 	IngestedBy int
 
 	// WebbedTurns counts the Cave Spider's web. While > 0 the member's
-	// effective SPD is halved (via EffectiveSPD) and Ingest refuses
+	// effective SPD is halved (in battle.actorSpeed) and Ingest refuses
 	// to land on them. Ticks at the END of the webbed member's own
 	// turn (like Poison). Inflicted by SkillWeb; expires when the
 	// counter ticks to 0. Does not stack — re-applying replaces the

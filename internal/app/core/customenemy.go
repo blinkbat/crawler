@@ -13,8 +13,12 @@ type CustomEnemyDef struct {
 	Name     string
 	BaseKind EnemyKind
 	HP       int
-	MP       int
-	Stats    Stats
+	// MP is RESERVED: authored and persisted through the mapfile, but the
+	// runtime Enemy has no MP pool (enemy casts gate on SkillCastChance, not
+	// resource), so Definition()/Instantiate() do not apply it. Kept so the
+	// schema is forward-compatible if enemy MP mechanics ship later.
+	MP    int
+	Stats Stats
 
 	Armor           int
 	MDef            int
@@ -62,6 +66,16 @@ func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
 	// rejects bad dimensions.
 	if ce.HP <= 0 {
 		return CustomEnemyDef{}, fmt.Errorf("custom enemy %q has non-positive HP (%d)", ce.Name, ce.HP)
+	}
+	// Mirror the static-registry init guards (enemies.go) for hand-edited
+	// rows: SkillCastChance rides a [0,1] contract (a stray 5 would cast every
+	// turn), and the mitigation / reward / damage fields must be non-negative.
+	// Refuse bad data at load rather than letting it reach combat math.
+	if ce.SkillCastChance < 0 || ce.SkillCastChance > 1 {
+		return CustomEnemyDef{}, fmt.Errorf("custom enemy %q has SkillCastChance %v outside [0, 1]", ce.Name, ce.SkillCastChance)
+	}
+	if ce.Armor < 0 || ce.MDef < 0 || ce.AttackDamage < 0 || ce.XPValue < 0 || ce.SpellPower < 0 {
+		return CustomEnemyDef{}, fmt.Errorf("custom enemy %q has a negative stat field (armor/mdef/attack/xp/spellpower)", ce.Name)
 	}
 	skills := make([]SkillID, 0, len(ce.Skills))
 	for _, name := range ce.Skills {

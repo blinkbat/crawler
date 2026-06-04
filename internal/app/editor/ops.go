@@ -812,8 +812,11 @@ func floodFill(s *State, x, z int, b byte) {
 	}
 	target := (*layer)[z][x]
 	if target == b {
-		return
+		return // no-op fill (cell already the brush color) — snapshot nothing
 	}
+	// Snapshot only now that the fill is known to change cells, so a no-op
+	// Ctrl+click doesn't push a useless undo step (and clobber the redo stack).
+	pushUndo(s)
 	rewriteLayerRows(layer, func(rows [][]byte) {
 		stack := [][2]int{{x, z}}
 		for len(stack) > 0 {

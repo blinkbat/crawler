@@ -502,10 +502,7 @@ func tryProcStatus(rng *rand.Rand, counter *int, defeated bool, baseChance float
 	if minGrade > 0 && quality < minGrade {
 		return false
 	}
-	chance := baseChance * float64(core.TimingBonusMult(quality))
-	if chance > 1 {
-		chance = 1
-	}
+	chance := core.QualityScaledChance(baseChance, quality)
 	if rng.Float64() >= chance {
 		return false
 	}
@@ -901,18 +898,16 @@ func applySteal(g *core.GameState, quality int) bool {
 	}
 	effect := core.EffectiveSkillEffect(actor, core.SkillSteal)
 	// Steal chance: flat base (no DEX scaling) with the timing-quality
-	// multiplier on top. Capped at 1.0 so a perfect Excellent still rolls.
-	chance := core.StealChance(effect.StealChance) * float64(core.TimingBonusMult(quality))
-	if chance > 1 {
-		chance = 1
-	}
+	// multiplier on top, capped at 1.0 so a perfect Excellent still rolls.
+	chance := core.QualityScaledChance(core.StealChance(effect.StealChance), quality)
 	if g.Rand().Float64() < chance {
 		item := enemy.Item
-		enemy.Item = ""
-		// Drop the loot into shared inventory so the Item action can use it
-		// later. Unknown item names (none today, but defensive) silently
-		// don't add — better than panicking.
+		// Only consume the item from the enemy if its name maps to a
+		// registered kind. An unknown name (none today, but defensive) is
+		// LEFT on the enemy rather than cleared — clearing it before the
+		// failed AddItem would silently destroy the loot.
 		if kind := core.ItemKindByName(item); kind != core.ItemNone {
+			enemy.Item = ""
 			g.Inventory = core.AddItem(g.Inventory, kind, 1)
 		}
 		// Steal T3 ("Cuts on lift") deals STR damage on a landed
@@ -1001,7 +996,7 @@ func applyCrushingBlow(g *core.GameState, quality int) bool {
 	// stacks both multipliers (CritMultiplier × 2 = 4×) — same
 	// shape as Backstab T2's double-crit.
 	if quality == core.TimingQualityExcellent && core.SkillTierMod(actor, core.SkillCrushingBlow).CritDoubleOnExcellent {
-		rawDamage *= 2
+		rawDamage *= core.TierDamageDoubler
 	}
 	crit, _ := rollSkillCrit(g, actor, core.SkillCrushingBlow, quality)
 	rawDamage = applyCritMultiplier(rawDamage, crit, false)
@@ -1260,7 +1255,7 @@ func applyCritMultiplier(raw int, crit, double bool) int {
 	}
 	out := raw * core.CritMultiplier
 	if double {
-		out *= 2
+		out *= core.TierDamageDoubler
 	}
 	return out
 }
@@ -1429,6 +1424,14 @@ func applyEnemyDoTTick(g *core.GameState, index int, counter *int, tickDamage in
 // into a free pause of the DoT. Fire this once per round from beginNewRound
 // (before the loss gate) so a poison kill while ingested still routes
 // through ActivePartyCount and triggers the loss check.
+//
+// No double-tick: the round's turn queue is built once at beginNewRound
+// (skipping ingested members) and never rebuilt mid-round, and
+// ReleaseIngestedBy only clears the Ingested flag — it does not re-queue the
+// freed member. So a member ingested at round start is drained here exactly
+// once and can't also reach an end-of-turn tick the same round; if released
+// mid-round it rejoins the queue (and the end-of-turn tick) only at the NEXT
+// beginNewRound, where it's no longer ingested and so isn't drained here.
 func tickPoisonForIngestedParty(g *core.GameState) {
 	for i := range g.Party {
 		m := &g.Party[i]

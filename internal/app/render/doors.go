@@ -38,7 +38,13 @@ func DrawDoorPrompt(g core.GameState, assets Resources) {
 	if g.DoorPrompt < 0 || g.DoorPrompt >= len(g.Doors) {
 		return
 	}
-	dest := humanizeMapID(g.Doors[g.DoorPrompt].TargetMap)
+	target := g.Doors[g.DoorPrompt].TargetMap
+	if target == core.SelfMapToken {
+		// Same-map portal carries the "self" placeholder; show the current
+		// area's own name rather than humanizing "self" into "Self".
+		target = core.MapIDFromPath(g.Area.Path)
+	}
+	dest := humanizeMapID(target)
 	panelW := int32(440)
 	panelH := int32(168)
 	rect := drawVeiledCard(panelW, panelH, borderSoft, borderSoft, giltDim)

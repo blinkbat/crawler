@@ -177,7 +177,7 @@ func TickWeather(g *GameState, dt float32) {
 			if w.Kind == RainHeavy {
 				// Arm the first bolt a few seconds in, not the instant
 				// the rain starts.
-				w.NextFlash = LightningIntervalMin + g.Rand().Float32()*(LightningIntervalMax-LightningIntervalMin)
+				w.NextFlash = g.RandRangeF(LightningIntervalMin, LightningIntervalMax)
 			}
 		}
 	case WeatherClearing:
@@ -202,7 +202,7 @@ func tickLightning(g *GameState, dt float32) {
 		w.NextFlash -= dt
 		if w.NextFlash <= 0 {
 			w.Flash = 1
-			w.NextFlash = LightningIntervalMin + g.Rand().Float32()*(LightningIntervalMax-LightningIntervalMin)
+			w.NextFlash = g.RandRangeF(LightningIntervalMin, LightningIntervalMax)
 		}
 	}
 	w.Flash = Approach(w.Flash, 0, LightningDecayPerSec*dt)

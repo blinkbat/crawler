@@ -104,6 +104,17 @@ out vec4 finalColor;
 
 void main() {
     vec4 texel = texture(texture0, fragTexCoord);
+    // Alpha-test cutout: drop near-transparent sprite fragments so the
+    // billboard's transparent quad corners don't WRITE DEPTH and clip the
+    // particles / geometry drawn behind them (the "sprites cut up by an
+    // invisible bounding box" bug — particles draw last, depth-tested, in
+    // the same 3D pass). Tested on the texture's own alpha only, not the
+    // runtime tint/fade alpha, so the cutout silhouette stays stable while
+    // a defeated enemy fades out. The threshold is far lower than the world
+    // shader's 0.5 (hard foliage cutouts) on purpose: it kills only the
+    // fully-transparent quad while leaving the soft, alpha-blended sprite
+    // edge intact, which a 0.5 cutout would harden.
+    if (texel.a < 0.08) discard;
     vec3 base = texel.rgb * fragColor.rgb * colDiffuse.rgb;
     float dist = length(viewPos - fragPosition);
     float fog = 1.0 - exp(-fogDensity * dist);

@@ -189,12 +189,7 @@ func buySkillTier(g *core.GameState) {
 // panelTabAdvance shifts the tab cursor by delta with wrap. Centralized
 // so the L1/R1 paths don't drift apart on the wrap math.
 func panelTabAdvance(t core.PanelTab, delta int) core.PanelTab {
-	next := int(t) + delta
-	count := int(core.PanelTabCount)
-	if count <= 0 {
-		return t
-	}
-	return core.PanelTab(core.WrapIndex(next, count))
+	return core.WrapEnum(t, delta, int(core.PanelTabCount))
 }
 
 // setPanelTab switches the active tab and resets the per-tab cursor.

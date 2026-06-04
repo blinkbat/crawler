@@ -165,6 +165,6 @@ func drawDebugLabel(font rl.Font, text string, x, y float32) {
 	rx := x - measure.X/2
 	ry := y - measure.Y/2
 	const pad = float32(4)
-	rl.DrawRectangle(int32(rx-pad), int32(ry-pad/2), int32(measure.X+pad*2), int32(measure.Y+pad), rl.NewColor(0, 0, 0, 185))
+	rl.DrawRectangle(int32(rx-pad), int32(ry-pad/2), int32(measure.X+pad*2), int32(measure.Y+pad), shadowMid)
 	drawTextWithShadowStyle(font, text, rx, ry, size, spacing, debugLabelColor, shadowHeavy, 1, 1)
 }

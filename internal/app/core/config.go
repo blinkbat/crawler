@@ -317,6 +317,12 @@ const (
 	CritCap        = 0.6
 	CritMultiplier = 2
 
+	// TierDamageDoubler is the ×N a skill-tier "doubles damage" bonus applies
+	// (Backstab T2's crit stacker and Crushing Blow T3's Excellent doubler).
+	// Named so the two doubling sites in battle/actions.go don't each inline a
+	// bare 2; it stacks on top of CritMultiplier where both fire.
+	TierDamageDoubler = 2
+
 	// StatusShortenDivisor controls how much WIS shaves off the rolled
 	// duration of an enemy-applied status (Sleep / Poison / Webbed /
 	// Confuse). Each StatusShortenDivisor points of WIS removes one

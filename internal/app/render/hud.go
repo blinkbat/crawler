@@ -64,7 +64,7 @@ func drawGoldReadout(g core.GameState, assets Resources) {
 	label := goldReadout.str
 	m := rl.MeasureTextEx(font, label, FontBody, FontSpacingBody)
 	padX, padY := float32(12), float32(6)
-	x, y := int32(16), int32(16)
+	x, y := hudEdgePad, hudEdgePad
 	w := int32(m.X + padX*2)
 	h := int32(m.Y + padY*2)
 	drawGlassPane(x, y, w, h, glassDeep)

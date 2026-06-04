@@ -234,6 +234,29 @@ var enemyDefinitions = []EnemyDefinition{
 		Drops:           []ItemDrop{{Kind: ItemBatJerky, Chance: 0.25}},
 	},
 	{
+		Kind:         EnemyAmoeba,
+		Name:         "Stone Amoeba",
+		SingularName: "Amoeba",
+		PluralName:   "Amoebae",
+		SingularNoun: "amoeba",
+		PluralNoun:   "amoebae",
+		GroupName:    "Amoeba Cluster",
+		Item:         "",
+		// Low HP × very high armor: phys swings whiff to 1, magic
+		// shreds. Sets up the "switch your party to magic when armor
+		// shows up" lesson.
+		MaxHP:              8,
+		AttackDamage:       2,
+		Stats:              Stats{STR: 1, DEX: 0, INT: 0, WIS: 0, VIT: 2, SPD: 2},
+		Tier:               3,
+		XPValue:            16,
+		Armor:              8,
+		GoldMin:            2,
+		GoldMax:            5,
+		AttackVerbSingular: "engulfs",
+		AttackVerbPlural:   "engulf",
+	},
+	{
 		Kind:         EnemyVenusMantrap,
 		Name:         "Venus Mantrap",
 		SingularName: "Mantrap",
@@ -430,29 +453,6 @@ var enemyDefinitions = []EnemyDefinition{
 		XPValue:            6,
 		AttackVerbSingular: "rakes",
 		AttackVerbPlural:   "rake",
-	},
-	{
-		Kind:         EnemyAmoeba,
-		Name:         "Stone Amoeba",
-		SingularName: "Amoeba",
-		PluralName:   "Amoebae",
-		SingularNoun: "amoeba",
-		PluralNoun:   "amoebae",
-		GroupName:    "Amoeba Cluster",
-		Item:         "",
-		// Low HP × very high armor: phys swings whiff to 1, magic
-		// shreds. Sets up the "switch your party to magic when armor
-		// shows up" lesson.
-		MaxHP:              8,
-		AttackDamage:       2,
-		Stats:              Stats{STR: 1, DEX: 0, INT: 0, WIS: 0, VIT: 2, SPD: 2},
-		Tier:               3,
-		XPValue:            16,
-		Armor:              8,
-		GoldMin:            2,
-		GoldMax:            5,
-		AttackVerbSingular: "engulfs",
-		AttackVerbPlural:   "engulf",
 	},
 }
 

@@ -70,17 +70,24 @@ func TestSaveDataJSONRoundTrip(t *testing.T) {
 	}
 }
 
-// TestLoadSaveRejectsNewerVersion confirms a save stamped with a future
-// format version is refused rather than silently misread.
-func TestLoadSaveRejectsNewerVersion(t *testing.T) {
-	blob, _ := json.Marshal(SaveData{Version: SaveVersion + 1, MapID: "dungeon"})
-	var data SaveData
-	if err := json.Unmarshal(blob, &data); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+// TestSaveVersionSupported exercises LoadSave's actual version gate (the
+// extracted saveVersionSupported predicate) without touching the on-disk
+// save. A future version is refused (can't parse it), and a 0/missing version
+// is refused too — every real save stamps Version >= 1 via NewSaveData, so a 0
+// is a corrupt or partially-written blob, not legitimate v0 content.
+func TestSaveVersionSupported(t *testing.T) {
+	cases := []struct {
+		version int
+		want    bool
+	}{
+		{SaveVersion, true},
+		{SaveVersion + 1, false}, // too new — unreadable future format
+		{0, false},               // missing/zero — corrupt, not v0 data
+		{-1, false},              // garbage
 	}
-	// LoadSave's version gate is the rule under test; replicate its check
-	// here without touching disk.
-	if data.Version <= SaveVersion {
-		t.Fatalf("expected a newer version, got %d", data.Version)
+	for _, tc := range cases {
+		if got := saveVersionSupported(tc.version); got != tc.want {
+			t.Errorf("saveVersionSupported(%d) = %v, want %v", tc.version, got, tc.want)
+		}
 	}
 }

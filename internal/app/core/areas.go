@@ -32,6 +32,11 @@ const (
 	AssetFileMode = mapfile.AssetFileMode
 )
 
+// SelfMapToken is the door TargetMap placeholder meaning "this same map".
+// Re-exported from mapfile so runtime/render callers can recognize a
+// self-portal without importing the leaf I/O package.
+const SelfMapToken = mapfile.SelfMapToken
+
 // MapsDir returns the directory where .map files live. Thin wrapper
 // over ResolveAssetDir so the asset-folder lookup story is consistent
 // with maps/sounds/ and any future asset directory.
@@ -161,29 +166,25 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		}
 		chests = append(chests, ChestSpawn{TileX: c.X, TileZ: c.Z, Items: kinds})
 	}
-	// Doors round-trip. SelfMapToken expands to the area's own map id
-	// here so the runtime never sees the placeholder. The map id is
-	// MapIDFromPath(path) — for an unsaved editor area (empty Path)
-	// we leave TargetMap as "self" since there's no canonical id yet.
-	localMapID := ""
-	if path != "" {
-		localMapID = MapIDFromPath(path)
-	}
+	// Doors round-trip. A same-map portal keeps SelfMapToken in the runtime
+	// rather than being expanded to the concrete map id here — the transition
+	// resolver (run.applyAreaTransition) and the editor validator both
+	// understand the placeholder, and keeping it means the self-link survives
+	// a map rename. Expanding it used to leave a stale id behind after a
+	// rename, which then re-serialized as an explicit (now-wrong) cross-map
+	// target. Display sites (the door prompt) resolve "self" to the current
+	// area name.
 	doors := make([]DoorSpawn, 0, len(mf.Doors))
 	for _, d := range mf.Doors {
 		facing, ok := facingFromName(d.Facing)
 		if !ok {
 			return AreaDefinition{}, fmt.Errorf("door %q has bad facing %q", d.Name, d.Facing)
 		}
-		target := d.TargetMap
-		if target == mapfile.SelfMapToken && localMapID != "" {
-			target = localMapID
-		}
 		doors = append(doors, DoorSpawn{
 			TileX:      d.X,
 			TileZ:      d.Z,
 			Name:       d.Name,
-			TargetMap:  target,
+			TargetMap:  d.TargetMap,
 			TargetDoor: d.TargetDoor,
 			Facing:     facing,
 			Style:      doorStyleFromName(d.Style),
@@ -659,6 +660,19 @@ func buildEnemyKindByName() map[string]EnemyKind {
 		}
 	}
 	return m
+}
+
+// Coverage assert: every registered EnemyKind must have a name row in
+// enemyKindNameTable. Without this a new kind silently fails EnemyKindName
+// (returning ok=false), which only surfaces when a map placing it is saved —
+// not at startup. Mirrors the materialDefs / packAINameTable / doorStyleNameTable
+// asserts above so the enemy table can't drift out of sync with the enum.
+func init() {
+	for _, def := range EnemyKinds() {
+		if _, ok := EnemyKindName(def.Kind); !ok {
+			panic("core: enemyKindNameTable is missing a name row for enemy kind " + def.Name)
+		}
+	}
 }
 
 // EnemyKindName returns the canonical on-disk name for the enemy kind,

@@ -24,9 +24,10 @@ const (
 	ActionTest
 )
 
-// Layer names which of the area's four grids (or the entity list) the
-// editor is currently authoring. Active layer drives the palette, the
-// click action, and the visual emphasis on the grid.
+// Layer names which of the area's five grid layers (walls / floor / decor /
+// props / ceiling) — or the entity list — the editor is currently authoring.
+// Active layer drives the palette, the click action, and the visual emphasis
+// on the grid.
 type Layer int
 
 const (
@@ -213,6 +214,14 @@ var layerBrushes = [layerCount][]Brush{
 // Start brushes respectively; enemies take Key3..KeyN. Past pool
 // length, brushes get no hotkey (mouse-only) — matching the convention
 // on other layers.
+//
+// Positional-by-palette-order is intentional here (the palette IS an ordered
+// list, like every other layer's). This is NOT the same contract as the
+// by-kind editor.packAddHotkeys map, which binds pack-edit MODAL actions and
+// must stay stable per kind across reorders. enemyDefinitions is kept in
+// EnemyKind enum order (asserted-adjacent in core), so the i-th palette enemy
+// is deterministic; the keys are distinct constants that never collide with
+// the reserved Key1/Key2.
 var entityBrushHotkeys = []int32{rl.KeyThree, rl.KeyFour, rl.KeyFive, rl.KeySix, rl.KeySeven, rl.KeyEight, rl.KeyNine}
 
 // entityBrushColors is the per-enemy swatch tint. Falls back to a

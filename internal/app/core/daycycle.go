@@ -34,25 +34,32 @@ func PhaseAtStep(steps int) (phase TimeOfDay, progress float32) {
 	return phase, progress
 }
 
-// PhaseName returns the human-readable label rendered in the HUD.
-func PhaseName(p TimeOfDay) string {
-	switch p {
-	case Dawn:
-		return "Dawn"
-	case Morning:
-		return "Morning"
-	case Afternoon:
-		return "Afternoon"
-	case Dusk:
-		return "Dusk"
-	case Evening:
-		return "Evening"
-	case Midnight:
-		return "Midnight"
-	default:
-		// Parallel to the TimeOfDayCount-locked timeProfiles array: a new
-		// phase that forgets a label here fails loudly instead of showing
-		// "?" in the HUD.
-		panic("core: PhaseName missing case for TimeOfDay")
+// phaseNames is the human-readable HUD label per phase, indexed by TimeOfDay.
+// Table (not a switch) so it parallels the render-side timeProfiles[TimeOfDayCount]
+// array and is guarded by the same kind of init length/coverage assert the
+// other enum→string tables use (packAINameTable, doorStyleNameTable). A new
+// phase that forgets a label leaves a "" entry the init() below catches at
+// startup, rather than panicking only when that phase is reached at runtime.
+var phaseNames = [TimeOfDayCount]string{
+	Dawn:      "Dawn",
+	Morning:   "Morning",
+	Afternoon: "Afternoon",
+	Dusk:      "Dusk",
+	Evening:   "Evening",
+	Midnight:  "Midnight",
+}
+
+func init() {
+	for _, n := range phaseNames {
+		if n == "" {
+			panic("core: phaseNames is missing a label for a TimeOfDay phase — add a row to the keyed array")
+		}
 	}
+}
+
+// PhaseName returns the human-readable label rendered in the HUD. An
+// out-of-range phase index panics (array bounds) — like the prior switch's
+// default case, invalid input fails loud rather than rendering a blank.
+func PhaseName(p TimeOfDay) string {
+	return phaseNames[p]
 }

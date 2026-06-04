@@ -618,9 +618,12 @@ func (t *TimingState) SequenceInput(dir int) bool {
 	return false
 }
 
-// resolveSequence grades the pickpocket pattern. Baseline is Excellent; each
-// non-correct slot (wrong key OR pending/timed-out) drops one grade. Finishing
-// all-correct under StealFastThreshold bumps grade by one (capped Excellent).
+// resolveSequence grades the pickpocket pattern. Each non-correct slot (wrong
+// key OR pending/timed-out) drops one grade from Excellent — but a flawless run
+// only reaches Excellent when finished under StealFastThreshold; a clean-but-slow
+// pickpocket caps at Great, so speed is the deciding edge for the top grade.
+// (Previously the speed bonus was dead code: it bumped an already-Excellent
+// clean run and re-clamped straight back, so it never changed the outcome.)
 func (t *TimingState) resolveSequence() {
 	t.Resolved = true
 	correctCount := 0
@@ -631,8 +634,9 @@ func (t *TimingState) resolveSequence() {
 	}
 	wrongCount := len(t.SequenceTargets) - correctCount
 	grade := TimingQualityExcellent - wrongCount
-	if wrongCount == 0 && t.Elapsed < StealFastThreshold {
-		grade++
+	if wrongCount == 0 && t.Elapsed >= StealFastThreshold {
+		// Flawless but slow — the top grade is reserved for a fast clean run.
+		grade = TimingQualityGreat
 	}
 	if grade < TimingQualityMiss {
 		grade = TimingQualityMiss
@@ -741,6 +745,18 @@ func TimingBonusMult(quality int) float32 {
 		return timingGrades[TimingQualityMiss].Atk
 	}
 	return timingGrades[quality].Atk
+}
+
+// QualityScaledChance scales a base probability by the timing-quality
+// offensive multiplier and clamps to [_, 1]. Single home for the
+// "base * TimingBonusMult(quality), cap at 1.0" pattern shared by
+// status-proc and steal-success rolls.
+func QualityScaledChance(base float64, quality int) float64 {
+	c := base * float64(TimingBonusMult(quality))
+	if c > 1 {
+		c = 1
+	}
+	return c
 }
 
 // TimingDefenseMult is the incoming damage multiplier for a defend quality.

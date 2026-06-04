@@ -12,6 +12,66 @@ import (
 type enemyVisual struct {
 	texture rl.Texture2D
 	size    rl.Vector2
+	// shadowRadius is the half-extent (world units) of the soft contact
+	// disc painted on the floor beneath this billboard, matching the
+	// prop grounding signature (see propShadowRadius). Zero = no shadow,
+	// which is every procedural sprite's default — only kinds that opt in
+	// (currently the file-textured Feral Rat) get a disc so the existing
+	// roster's look is unchanged.
+	shadowRadius float32
+	// yOffset shifts THIS billboard up (+) or down (−) from the shared
+	// enemyBillboardY center-anchor, in world units. The contact shadow
+	// stays anchored to the unaltered tile position; the selector pyramid
+	// is nudged separately via markerYOffset (below). A negative offset
+	// lowers a sprite that floats without dragging the shadow with it.
+	// Zero for every procedural sprite (their art is already
+	// bottom-weighted); only center-weighted authored PNGs need it (the
+	// Feral Rat). NOTE: yOffset is calibrated against the BATTLE formation
+	// center (battleFormationCenterY); drawFieldPacks adds the framing-lift
+	// delta back so a grounded sprite plants on the floor in both views.
+	yOffset float32
+	// markerYOffset / markerXOffset nudge THIS kind's selector pyramid from
+	// the default anchor (formation center + markerStyle.tipYOffset), in
+	// world units. Y is up(+)/down(−); X is along the camera-right axis
+	// (screen right(+)/left(−)) so the nudge reads the same regardless of
+	// which way the battle camera faces. Per-unit-type so a sprite whose
+	// visible head sits off the billboard center (a yOffset-lowered or
+	// asymmetric PNG) can place its cursor cleanly. Zero = the shared
+	// default, unchanged for every procedural kind.
+	markerYOffset float32
+	markerXOffset float32
+	// tint is a per-kind base color multiplied (raylib ColorTint semantics:
+	// a*b/255 per channel) into the runtime billboard tint — darken with a
+	// gray, recolor with a hue, etc. It folds in AFTER the combat tint
+	// branches (death fade / targeting / attacker / damage flash), so a
+	// tinted sprite stays proportionally tinted in every state. The zero
+	// value (A==0) means "untinted"; use A==255 when setting one. See
+	// resolveTint / the draw sites.
+	tint rl.Color
+}
+
+// resolveTint returns the per-kind base tint, treating the zero-value Color
+// (A==0, what an unset `tint` field is) as White so untinted kinds draw at
+// full texture color. Any real tint sets A==255, so the alpha test cleanly
+// separates "unset" from a deliberate color — and folding it in never
+// reduces the runtime tint's own alpha (death fade) since White's A is 255.
+func (v enemyVisual) resolveTint() rl.Color {
+	if v.tint.A == 0 {
+		return rl.White
+	}
+	return v.tint
+}
+
+// tintMul multiplies two colors channel-wise (raylib's ColorTint: a*b/255
+// per channel, alpha included). Used to fold a sprite's per-kind base tint
+// into the runtime billboard tint without a shader.
+func tintMul(a, b rl.Color) rl.Color {
+	return rl.NewColor(
+		uint8(int(a.R)*int(b.R)/255),
+		uint8(int(a.G)*int(b.G)/255),
+		uint8(int(a.B)*int(b.B)/255),
+		uint8(int(a.A)*int(b.A)/255),
+	)
 }
 
 // exploreFOV is the wide field-of-view used while walking the world.
@@ -1021,6 +1081,16 @@ func DrawEnemies(camera rl.Camera3D, g core.GameState, assets Resources) {
 // to inline 0.68 can't drift.
 const enemyBillboardY = float32(0.68)
 
+// battleFormationCenterY is the vertical center enemy billboards render at
+// during battle — lifted above the walking-field enemyBillboardY so the
+// roster sits screen-centered under the narrow battle FOV (see the comment
+// in enemyDrawPosition). enemyFieldLift is the delta between the two; the
+// field draw adds it back for yOffset-grounded sprites whose yOffset was
+// calibrated against this battle center, so they plant on the floor in the
+// field instead of sinking by the lift amount.
+const battleFormationCenterY = float32(1.0)
+const enemyFieldLift = battleFormationCenterY - enemyBillboardY
+
 // Party billboard sizes. partyBillboardSize is the idle silhouette; the
 // active actor bumps up to partyBillboardSizeActive for a soft "your
 // turn" emphasis. Named so the size and the active-state highlight
@@ -1058,7 +1128,21 @@ func drawFieldPacks(camera rl.Camera3D, g core.GameState, assets Resources) {
 		// fallback to tileWorldPos is needed; pack.X/Z is always
 		// authoritative for the field render.
 		position := rl.NewVector3(pack.X, enemyBillboardY, pack.Z)
-		drawTextureBillboard(camera, visual.texture, position, visual.size, rl.White)
+		if visual.shadowRadius > 0 {
+			drawGroundShadow(position.X, position.Z, visual.shadowRadius)
+		}
+		billboardPos := position
+		billboardPos.Y += visual.yOffset
+		// yOffset is calibrated against the lifted battle formation center;
+		// the field anchor sits enemyFieldLift lower, so a grounded sprite
+		// would sink by that delta here. Add it back (only matters when
+		// yOffset is set — procedural sprites keep yOffset 0 and are
+		// unaffected) so the rat plants on the field floor exactly as it
+		// does in battle.
+		if visual.yOffset != 0 {
+			billboardPos.Y += enemyFieldLift
+		}
+		drawTextureBillboard(camera, visual.texture, billboardPos, visual.size, visual.resolveTint())
 	}
 }
 
@@ -1088,15 +1172,28 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 		// Phase==BattlePlayer so the chevron drops the moment the
 		// timing bar arms — shared with the roster row's `targetable`
 		// flag so both yellow indicators behave identically.
+		// Per-kind cursor placement: nudge the chevron anchor by the
+		// visual's markerYOffset so a lowered sprite's pyramid sits at its
+		// head, not the roster-default height. Stays on the formation
+		// position (not the yOffset-lowered billboard) so the only vertical
+		// control is this one explicit, per-unit-type value.
+		chevronPos := position
+		chevronPos.Y += visual.markerYOffset
+		if visual.markerXOffset != 0 {
+			fwd := horizontalForward(camera)
+			right := rl.NewVector3(-fwd.Z, 0, fwd.X)
+			chevronPos.X += right.X * visual.markerXOffset
+			chevronPos.Z += right.Z * visual.markerXOffset
+		}
 		if enemy.Alive && targetingEnemy(g) && i == g.Battle.EnemyIndex {
 			tint = tintEnemyTargeted
-			drawTargetChevron(camera, position)
+			drawTargetChevron(camera, chevronPos)
 		} else if enemy.Alive && aoeEnemyTargetPreview(g) {
 			// AoE skill highlighted in the Skill submenu: every living
 			// enemy gets a chevron so the player sees the cast hits the
 			// whole line, not one target.
 			tint = tintEnemyTargeted
-			drawTargetChevron(camera, position)
+			drawTargetChevron(camera, chevronPos)
 		}
 		// During BattleEnemyTiming the warm tint on the attacker carries
 		// the "this one is swinging" read; the red pyramid moved over to
@@ -1108,11 +1205,29 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 		if enemy.DamageFlash > 0 {
 			tint = core.FlashTint(tint, enemy.DamageFlash)
 		}
+		// Fold in the per-kind base tint last, so a tinted sprite stays
+		// proportionally tinted in every combat state (idle / targeted /
+		// attacking / flashing). Untinted kinds resolve to White (no-op).
+		tint = tintMul(tint, visual.resolveTint())
+		// Soft contact disc under the billboard so the sprite reads as
+		// planted rather than floating on the lighting gradient. Drawn
+		// before the billboard (ground first, then the upright sprite
+		// over it) and only for kinds that opt in via shadowRadius. The
+		// disc keeps the default material shader, so the active
+		// billboard-fog BeginShaderMode doesn't tint it — same unlit
+		// behaviour the prop shadows rely on under the world lighting pass.
+		if visual.shadowRadius > 0 {
+			drawGroundShadow(position.X, position.Z, visual.shadowRadius)
+		}
 		// Distance fog is applied by the active billboard-fog shader
 		// (BeginShaderMode at the top of this function), not by a
 		// CPU tint pass — multiplicative tint can't lerp toward the
 		// fog color, only darken or color-filter the texture.
-		drawTextureBillboard(camera, visual.texture, position, visual.size, tint)
+		// yOffset lowers/raises only the sprite — the chevron above and
+		// the shadow below stay anchored to the tile position.
+		billboardPos := position
+		billboardPos.Y += visual.yOffset
+		drawTextureBillboard(camera, visual.texture, billboardPos, visual.size, tint)
 	}
 }
 
@@ -1204,11 +1319,13 @@ var (
 	// targetingEnemy().
 	markerEnemyTarget = markerStyle{
 		// Sits lower (nearer the enemy's head, not floating high above)
-		// and bigger + fully opaque so the current target reads at a
-		// glance — the old marker was small, high, and easy to lose.
+		// and a touch bigger + fully opaque so the current target reads
+		// at a glance — but kept modest so it doesn't overpower the
+		// sprite. Per-kind nudges (markerYOffset / markerXOffset on
+		// enemyVisual) fine-tune where it lands over each enemy.
 		tipYOffset: 0.56,
-		height:     0.28,
-		baseRadius: 0.12,
+		height:     0.20,
+		baseRadius: 0.085,
 		color:      rl.NewColor(255, 224, 80, 255),
 		phase:      0.0,
 	}
@@ -1375,9 +1492,9 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 		size := partyBillboardSize
 		tint := rl.White
 		if g.Party[i].HP <= 0 {
-			tint = rl.NewColor(110, 110, 120, 190)
+			tint = tintPartyDown
 		} else if inPlayerTurn(g) && i == g.Battle.CurrentParty {
-			tint = rl.NewColor(255, 245, 204, 255)
+			tint = tintPartyActive
 			size = partyBillboardSizeActive
 		} else if memberDance > 0 {
 			_, _, _, scale := victoryDanceMotion(g.Party[i].Class, memberDance)
@@ -1528,7 +1645,7 @@ func enemyDrawPosition(camera rl.Camera3D, g core.GameState, slot int, enemy cor
 	// HP bars.
 	center := rl.NewVector3(
 		camera.Position.X+forward.X*2.55,
-		1.0,
+		battleFormationCenterY,
 		camera.Position.Z+forward.Z*2.55,
 	)
 	// Adaptive spacing: a tile is ~2.05 world units wide, so a six-

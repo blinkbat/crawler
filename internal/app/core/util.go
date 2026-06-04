@@ -149,6 +149,17 @@ func WrapIndex(index, count int) int {
 	return index
 }
 
+// WrapEnum shifts an enum-typed index by delta and wraps it into [0, count)
+// via WrapIndex. Single home for "advance a tab/cursor enum with wraparound"
+// (panel tabs, shop tabs) so the modular arithmetic isn't re-inlined per
+// call site / per direction. Returns v unchanged when count <= 0.
+func WrapEnum[T ~int](v T, delta, count int) T {
+	if count <= 0 {
+		return v
+	}
+	return T(WrapIndex(int(v)+delta, count))
+}
+
 func AbsInt(v int) int {
 	if v < 0 {
 		return -v

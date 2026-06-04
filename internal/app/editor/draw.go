@@ -188,7 +188,7 @@ type doorEditLayout struct {
 	nameField rl.Rectangle
 	mapField  rl.Rectangle
 	doorField rl.Rectangle
-	facing    [4]rl.Rectangle
+	facing    [core.FacingCount]rl.Rectangle
 	style     [core.DoorStyleCount]rl.Rectangle
 	deleteBtn rl.Rectangle
 	closeBtn  rl.Rectangle
@@ -210,10 +210,12 @@ func doorEditLayoutFor() doorEditLayout {
 	y += rowGap
 	doorField := rl.NewRectangle(x, y, fw, fieldH)
 	y += rowGap + 6
-	// Facing row: four equal-width buttons.
-	bw := (fw - 18) / 4
-	var facing [4]rl.Rectangle
-	for i := 0; i < 4; i++ {
+	// Facing row: one equal-width button per Facing (mirrors the style row
+	// below so a new facing scales the layout instead of clipping past 4).
+	facingN := int(core.FacingCount)
+	bw := (fw - float32(facingN-1)*6) / float32(facingN)
+	var facing [core.FacingCount]rl.Rectangle
+	for i := 0; i < facingN; i++ {
 		facing[i] = rl.NewRectangle(x+float32(i)*(bw+6), y, bw, fieldH)
 	}
 	y += rowGap

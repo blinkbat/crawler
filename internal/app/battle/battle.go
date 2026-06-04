@@ -1069,7 +1069,13 @@ func clearBattleResidual(g *core.GameState) {
 	// air on every battle exit.
 	g.VFXQueue = g.VFXQueue[:0]
 	core.RequestVFXReset(g)
-	if g.Battle.Phase == core.BattleWon && g.Battle.ActivePack >= 0 && g.Battle.ActivePack < len(g.Packs) {
+	// Drop the active pack when it's defeated — either the normal BattleWon
+	// path OR the defensive early-exit in Update (all enemies dead but the
+	// phase never reached BattleWon, e.g. a desynced kill). LivingBattleCount
+	// counts living enemies, so ==0 means the pack is wiped; on a loss / flee
+	// enemies survive (count > 0) and the pack correctly stays on the field.
+	packDefeated := g.Battle.Phase == core.BattleWon || core.LivingBattleCount(g) == 0
+	if packDefeated && g.Battle.ActivePack >= 0 && g.Battle.ActivePack < len(g.Packs) {
 		g.Packs = append(g.Packs[:g.Battle.ActivePack], g.Packs[g.Battle.ActivePack+1:]...)
 	}
 	g.Battle.ActivePack = -1

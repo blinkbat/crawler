@@ -3,6 +3,8 @@ package core
 import (
 	"path/filepath"
 	"testing"
+
+	"crawler/internal/app/core/mapfile"
 )
 
 // repoRoot returns the project root from the test working dir (Go runs
@@ -13,30 +15,29 @@ func repoRoot() string {
 }
 
 // TestBundledMapsLoad sanity-checks every .map file shipped under maps/.
-// Strict per-map assertions about prop placement and enemy counts were
-// removed once the editor became the source of truth — they were brittle
-// against any hand edit. The loose checks below catch the failures we
-// actually care about: malformed files, bad starts, unreadable headers.
+// Strict per-map assertions about prop placement, materials, and enemy
+// counts were removed once the editor became the source of truth — they were
+// brittle against any hand edit (and against adding/removing maps). The test
+// now DISCOVERS the maps on disk via glob rather than naming them, so renaming
+// or deleting a map can't make this go stale. The loose checks below catch the
+// failures we actually care about: malformed files, bad starts, unreadable
+// headers, unreachable packs.
 func TestBundledMapsLoad(t *testing.T) {
-	cases := []struct {
-		id           string
-		wantMaterial MaterialSet
-	}{
-		{"dungeon", MaterialDungeon},
-		{"field", MaterialField},
-		{"forgotten_plaza", MaterialField},
+	paths, err := filepath.Glob(filepath.Join(repoRoot(), "maps", "*"+mapfile.Ext))
+	if err != nil {
+		t.Fatalf("glob maps: %v", err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.id, func(t *testing.T) {
-			area, err := LoadArea(filepath.Join(repoRoot(), "maps", tc.id+".map"))
+	if len(paths) == 0 {
+		t.Skip("no bundled maps under maps/ to check")
+	}
+	for _, path := range paths {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			area, err := LoadArea(path)
 			if err != nil {
 				t.Fatalf("load: %v", err)
 			}
 			if area.Name == "" {
 				t.Errorf("name empty")
-			}
-			if area.Materials != tc.wantMaterial {
-				t.Errorf("materials: got %v, want %v", area.Materials, tc.wantMaterial)
 			}
 			if area.Width == 0 || area.Height == 0 {
 				t.Fatalf("empty layout")
@@ -109,6 +110,46 @@ func unreachablePacks(a AreaDefinition) int {
 		}
 	}
 	return blocked
+}
+
+// TestSelfDoorSurvivesRename guards the self-portal round-trip. A door whose
+// TargetMap is the SelfMapToken must keep that placeholder through
+// load → (rename area path) → save; otherwise a same-map portal silently
+// re-serializes as an explicit (now-wrong) cross-map target after a rename,
+// because the runtime door still held the OLD expanded map id.
+func TestSelfDoorSurvivesRename(t *testing.T) {
+	mf := mapfile.MapFile{
+		Name:      "Self Door",
+		Materials: "dungeon",
+		Width:     3,
+		Height:    3,
+		StartX:    1,
+		StartZ:    1,
+		StartFace: "east",
+		Walls:     []string{"...", "...", "..."},
+		Floor:     []string{"...", "...", "..."},
+		Decor:     []string{"...", "...", "..."},
+		Props:     []string{"...", "...", "..."},
+		Doors: []mapfile.MapDoor{
+			{Name: "loop", TargetMap: mapfile.SelfMapToken, TargetDoor: "loop", X: 0, Z: 1, Facing: "west"},
+		},
+	}
+	area, err := AreaFromMapFile(mf, "maps/original.map")
+	if err != nil {
+		t.Fatalf("AreaFromMapFile: %v", err)
+	}
+	if got := area.DoorSpawns[0].TargetMap; got != mapfile.SelfMapToken {
+		t.Fatalf("self door should keep the %q placeholder at load (not the expanded id), got %q", mapfile.SelfMapToken, got)
+	}
+	// Rename: the area is now saved under a different path than it loaded from.
+	area.Path = "maps/renamed.map"
+	encoded, err := MapFileFromArea(area)
+	if err != nil {
+		t.Fatalf("MapFileFromArea: %v", err)
+	}
+	if got := encoded.Doors[0].TargetMap; got != mapfile.SelfMapToken {
+		t.Fatalf("self door should re-serialize as %q after rename, got %q", mapfile.SelfMapToken, got)
+	}
 }
 
 func isStartBlocked(a AreaDefinition) bool {

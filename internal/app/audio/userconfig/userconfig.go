@@ -178,7 +178,16 @@ func SaveAssignments(assigns map[string]string) error {
 	}
 	sort.Strings(cues)
 	for _, cue := range cues {
-		fmt.Fprintf(&b, "%s=%s\n", cue, assigns[cue])
+		// Write the sanitized stem so the file is always canonical and matches
+		// the (sanitized) on-disk .wav name. LoadAssignments re-sanitizes for
+		// path-traversal safety; SanitizeName is idempotent, so the write and
+		// load sides can't disagree and round-trip lossless. A value that
+		// sanitizes to empty is degenerate — drop it rather than emit "cue=".
+		name := SanitizeName(assigns[cue])
+		if name == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "%s=%s\n", cue, name)
 	}
 	return os.WriteFile(filepath.Join(dir, AssignmentFile), []byte(b.String()), core.AssetFileMode)
 }

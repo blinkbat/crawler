@@ -200,6 +200,13 @@ func applyItem(g *core.GameState) {
 		resetBattleAction(g)
 		return
 	}
+	if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
+		// Defensive: the live caller (updatePlayerBattle) guards this, but
+		// don't index g.Party with a stale CurrentParty if a future path
+		// reaches an item-target confirm mid-transition. Mirrors performDefend.
+		resetBattleAction(g)
+		return
+	}
 	if target < 0 || target >= len(g.Party) || g.Party[target].HP <= 0 {
 		setBattleStatus(g, "Invalid target.")
 		return

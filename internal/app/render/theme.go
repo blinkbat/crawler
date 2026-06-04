@@ -160,6 +160,12 @@ var (
 	// world.go's draw loop.
 	tintEnemyTargeted = rl.NewColor(255, 228, 190, 255)
 	tintEnemyAttacker = rl.NewColor(255, 196, 156, 255)
+	// Party-side billboard tints, the mirror of the enemy pair above: the
+	// desaturated gray a knocked-out member fades to, and the warm wash on
+	// the member whose turn it is. Named here so DrawPartySprites pulls from
+	// the same palette block instead of inlining NewColor literals.
+	tintPartyDown   = rl.NewColor(110, 110, 120, 190)
+	tintPartyActive = rl.NewColor(255, 245, 204, 255)
 
 	// Editor + minimap entity-marker colors. Centralised here so the
 	// in-grid markers (editor's draw.go), the on-disk-list swatches

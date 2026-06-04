@@ -5,6 +5,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"image/color"
 	"os"
+	"path/filepath"
 	"runtime"
 )
 
@@ -176,9 +177,15 @@ func LoadResources() (r Resources) {
 	// so they go through loadRepeatTexture; the rock-wall pixels live at
 	// the standard 128×128 tile size and use the mipmapped pipeline.
 	// These textures are about to be handed to loadTreeModel, which assumes
-	// ownership via the model. We don't commit them to r between create and
-	// hand-off (small leak window), but staged cleanup catches panics inside
-	// loadTreeModel itself via r.tree if it gets assigned.
+	// ownership via the model (setModelTexture → UnloadModel frees them).
+	// There's a small leak window: a panic between minting a texture here and
+	// the model taking ownership would orphan it (the recover-path r.Unload
+	// can't see it yet). This is deliberately NOT fixed by also tracking these
+	// in an owned []Texture2D (the way enemyTextures are) — those billboard
+	// textures aren't model-owned, but these ARE, so an owned list would
+	// double-free them on the normal teardown. The window only matters on a
+	// load-time panic (the process is already crashing), so the orphan is an
+	// accepted trade-off rather than risking a double-free in the happy path.
 	barkTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
 	leafTex := loadRepeatTexture(makeLeafPixels(96, 96), 96, 96)
 	r.tree = loadTreeModel(r.lighting.shader, barkTex, leafTex)
@@ -707,9 +714,54 @@ func loadEnemySprite(pixels []color.RGBA, w, h int, owned *[]rl.Texture2D) rl.Te
 	return tex
 }
 
+// spritesDirName is the on-disk asset folder for authored enemy/billboard
+// PNGs, a sibling of maps/ and maps/sounds/ resolved through the same
+// core.ResolveAssetDir machinery (cwd-relative for `go run`, next-to-exe
+// for a portable copy). Single source so the path lives in one place.
+const spritesDirName = "maps/sprites"
+
+// loadEnemySpriteFile loads an authored sprite PNG from the sprites asset
+// dir and returns it as a billboard-ready texture. Unlike loadEnemySprite
+// (which mints tiny pixel-art atlases drawn at FilterPoint), a high-res
+// authored PNG is heavily minified when drawn as a small world billboard,
+// so it gets mipmaps + trilinear filtering — the same smooth-minification
+// setup the HUD font and sky texture use — to avoid shimmering/aliasing at
+// distance. Returns ok=false (and registers nothing) when the file is
+// missing or fails to decode, so the caller can fall back to procedural
+// art rather than rendering a blank quad. Registered textures are appended
+// to owned for Unload, matching loadEnemySprite.
+func loadEnemySpriteFile(name string, owned *[]rl.Texture2D) (rl.Texture2D, bool) {
+	path := filepath.Join(core.ResolveAssetDir(spritesDirName), name)
+	if _, err := os.Stat(path); err != nil {
+		return rl.Texture2D{}, false
+	}
+	tex := rl.LoadTexture(path)
+	if tex.ID == 0 || tex.Width <= 0 || tex.Height <= 0 {
+		// Decode failure (ID 0) or a corrupt-but-loadable zero-dimension
+		// image: fall back to procedural art. Unload a non-zero handle first
+		// so the reject path doesn't leak it.
+		if tex.ID != 0 {
+			rl.UnloadTexture(tex)
+		}
+		return rl.Texture2D{}, false
+	}
+	rl.GenTextureMipmaps(&tex)
+	rl.SetTextureFilter(tex, rl.FilterTrilinear)
+	rl.SetTextureWrap(tex, rl.WrapClamp)
+	*owned = append(*owned, tex)
+	return tex, true
+}
+
 func loadEnemyVisuals() (map[core.EnemyKind]enemyVisual, []rl.Texture2D) {
 	var owned []rl.Texture2D
-	ratTexture := loadEnemySprite(makeRatPixels(72, 96), 72, 96, &owned)
+	// Feral Rat: authored billboard PNG from maps/sprites. If the file is
+	// missing or won't decode we fall back to the procedural makeRatPixels
+	// art (the previous sprite, preserved below) so a checkout without the
+	// asset still renders a rat and the coverage assert never trips.
+	ratTexture, ratFromFile := loadEnemySpriteFile("feral_rat.png", &owned)
+	if !ratFromFile {
+		ratTexture = loadEnemySprite(makeRatPixels(72, 96), 72, 96, &owned)
+	}
 	batTexture := loadEnemySprite(makeBatPixels(80, 88), 80, 88, &owned)
 	diseasedRatTexture := loadEnemySprite(makeDiseasedRatPixels(72, 96), 72, 96, &owned)
 	goblinTexture := loadEnemySprite(makeGoblinPixels(72, 112), 72, 112, &owned)
@@ -729,7 +781,35 @@ func loadEnemyVisuals() (map[core.EnemyKind]enemyVisual, []rl.Texture2D) {
 	visuals := map[core.EnemyKind]enemyVisual{
 		core.EnemyRat: {
 			texture: ratTexture,
-			size:    rl.NewVector2(0.82, 1.22),
+			// Square size: the authored PNG is a 1:1 canvas (the old
+			// procedural sprite was a 72×96 portrait), so a square world
+			// size keeps the art from stretching. 1.35 keeps the vertical
+			// presence close to the old 1.22-tall billboard while planting
+			// the feet near the floor under the shared center-anchor
+			// (enemyBillboardY); the disc below covers the small remainder.
+			// Tune this single value if the rat reads too big/small.
+			size: rl.NewVector2(1.35, 1.35),
+			// Contact shadow so the rat reads as planted rather than
+			// floating — opt-in per kind (see enemyVisual.shadowRadius).
+			// Wider than the sprite's footprint so it grounds the chunky
+			// body without looking like a tight pin-spot.
+			shadowRadius: 0.60,
+			// The PNG is center-weighted, so at the shared center-anchor the
+			// rat floated and its top clipped the selector pyramid. Drop the
+			// sprite ~1/3 of its height (the shadow stays put) so it plants
+			// on the floor. Tune alongside size if grounding shifts.
+			yOffset: -0.45,
+			// The pyramid anchors to the (un-lowered) formation center, so
+			// after dropping the sprite it needs nudging back toward the
+			// rat's head: down from the default, plus slightly screen-right
+			// so it sits over the head cleanly rather than dead-center.
+			markerYOffset: -0.18,
+			markerXOffset: 0.12,
+			// Somewhat darker than the source PNG — a near-neutral gray
+			// (~0.72×) with a faint warm bias so the brown/orange read
+			// survives. Multiplies into the runtime tint; raise toward 255
+			// for lighter, lower for darker.
+			tint: rl.NewColor(184, 178, 174, 255),
 		},
 		core.EnemyBat: {
 			texture: batTexture,

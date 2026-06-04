@@ -156,7 +156,7 @@ func PlanPackSteps(g *GameState) []packAIStep {
 // wander rules previously hard-coded as the only AI mode — now opt-in
 // per pack via PackAIJunkyardDog.
 func planJunkyardDogPack(g *GameState, idx int, occupied map[[2]int]bool) (packAIStep, bool) {
-	if g.RNG.Float32() >= PackStepChance {
+	if g.Rand().Float32() >= PackStepChance {
 		return packAIStep{}, false
 	}
 	p := g.Packs[idx]
@@ -226,7 +226,7 @@ func chaseStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int,
 // sentry you can blunder into. The chosen pace direction (possibly flipped
 // this step) rides back on the step's PatrolDir for the applier to persist.
 func planPatrolPack(g *GameState, idx int, occupied map[[2]int]bool) (packAIStep, bool) {
-	if g.RNG.Float32() >= PatrolStepChance {
+	if g.Rand().Float32() >= PatrolStepChance {
 		return packAIStep{}, false
 	}
 	p := g.Packs[idx]
@@ -266,7 +266,7 @@ func planPatrolPack(g *GameState, idx int, occupied map[[2]int]bool) (packAIStep
 // runs, and the player has to corner it against a wall / leash edge to
 // catch it.
 func planSkittishPack(g *GameState, idx int, occupied map[[2]int]bool) (packAIStep, bool) {
-	if g.RNG.Float32() >= PackStepChance {
+	if g.Rand().Float32() >= PackStepChance {
 		return packAIStep{}, false
 	}
 	p := g.Packs[idx]
@@ -326,7 +326,7 @@ func wanderStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int
 	// Shuffle in place via Fisher-Yates against the shared RNG so the
 	// wander direction is independent of FacingVector's array order.
 	for i := 3; i > 0; i-- {
-		j := g.RNG.Intn(i + 1)
+		j := g.Rand().Intn(i + 1)
 		cardinals[i], cardinals[j] = cardinals[j], cardinals[i]
 	}
 	for _, c := range cardinals {

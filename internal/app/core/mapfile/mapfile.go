@@ -554,7 +554,11 @@ func Parse(r io.Reader) (MapFile, error) {
 		// tolerated (some editors auto-insert one before the next section
 		// header) but a non-blank overflow row is a structural error — the
 		// validator would catch it later, but reporting it on the offending
-		// line gives a better diagnostic.
+		// line gives a better diagnostic. (The format is headers-first:
+		// `size:` precedes every grid, so Height is always set here. A
+		// hand-edited file that puts `size:` after a grid is malformed — the
+		// size line is then read as a grid row and validate() rejects the
+		// 0x0 dims, which is correct.)
 		target := layerSlice(&mf, state)
 		if target == nil {
 			continue

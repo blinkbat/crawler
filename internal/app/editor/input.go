@@ -374,7 +374,8 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 	gridLayer := isGridLayer(s.layer)
 
 	if gridLayer && ctrl {
-		pushUndo(s)
+		// floodFill snapshots undo itself (only when the fill actually
+		// changes cells), so a no-op Ctrl+click leaves the undo stack alone.
 		floodFill(s, x, z, s.activeBrush().Char)
 		s.drag = dragNone
 		return
@@ -1464,6 +1465,15 @@ func updateChestEditModal(s *State) Action {
 			pushUndo(s)
 			chest.Items = removeModalListItem(chest.Items, s.modalCursor)
 			s.dirty = true
+			// Re-clamp the cursor the same frame: removing the last item
+			// leaves modalCursor one past the end until the next frame's
+			// updateEntityListCursor would fix it. Mirrors the pack/delete paths.
+			if s.modalCursor >= len(chest.Items) {
+				s.modalCursor = len(chest.Items) - 1
+				if s.modalCursor < 0 {
+					s.modalCursor = 0
+				}
+			}
 		}
 	}
 	for _, rule := range chestAddRules {

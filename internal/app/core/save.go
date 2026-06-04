@@ -102,7 +102,7 @@ func SaveGame(g *GameState) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(SaveDir(), 0o755); err != nil {
+	if err := os.MkdirAll(SaveDir(), AssetDirMode); err != nil {
 		return err
 	}
 	return os.WriteFile(SavePath(), blob, AssetFileMode)
@@ -113,6 +113,16 @@ func SaveGame(g *GameState) error {
 func SaveExists() bool {
 	info, err := os.Stat(SavePath())
 	return err == nil && !info.IsDir()
+}
+
+// saveVersionSupported reports whether a decoded save's Version is one this
+// build can read. Rejects too-new (a future format we can't parse) AND < 1:
+// every real save stamps Version >= 1 via NewSaveData, so a 0 means a missing
+// version field or a corrupt / partially-written blob that still parsed as
+// JSON — not v0 content. Pulled out of LoadSave so the gate is unit-testable
+// without touching the on-disk save file.
+func saveVersionSupported(v int) bool {
+	return v >= 1 && v <= SaveVersion
 }
 
 // LoadSave reads and decodes the save file. Returns an error for a missing
@@ -126,7 +136,7 @@ func LoadSave() (SaveData, error) {
 	if err := json.Unmarshal(blob, &data); err != nil {
 		return SaveData{}, err
 	}
-	if data.Version > SaveVersion {
+	if !saveVersionSupported(data.Version) {
 		return SaveData{}, &saveVersionError{got: data.Version, max: SaveVersion}
 	}
 	return data, nil

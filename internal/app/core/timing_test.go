@@ -13,6 +13,44 @@ func withSeededRNG(t *testing.T, seed int64, fn func(rng *rand.Rand)) {
 	fn(rand.New(rand.NewSource(seed)))
 }
 
+// TestResolveSequenceGrades locks the pickpocket grading after the dead-code
+// fix. A flawless run reaches Excellent ONLY when finished under
+// StealFastThreshold; a clean-but-slow run caps at Great (speed is the
+// deciding edge), and each wrong slot drops one grade from Excellent.
+func TestResolveSequenceGrades(t *testing.T) {
+	correct := func(n int) []int {
+		r := make([]int, n)
+		for i := range r {
+			r[i] = SeqResultCorrect
+		}
+		return r
+	}
+	cases := []struct {
+		name    string
+		results []int
+		elapsed float32
+		want    int
+	}{
+		{"clean and fast", correct(3), StealFastThreshold - 0.1, TimingQualityExcellent},
+		{"clean but slow", correct(3), StealFastThreshold + 0.1, TimingQualityGreat},
+		{"one wrong (fast)", []int{SeqResultCorrect, 0, SeqResultCorrect}, StealFastThreshold - 0.1, TimingQualityGreat},
+		{"two wrong", []int{SeqResultCorrect, 0, 0}, 0, TimingQualityGood},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := &TimingState{
+				SequenceTargets: make([]int, len(tc.results)),
+				SequenceResults: tc.results,
+				Elapsed:         tc.elapsed,
+			}
+			ts.resolveSequence()
+			if ts.Quality != tc.want {
+				t.Fatalf("grade = %d, want %d", ts.Quality, tc.want)
+			}
+		})
+	}
+}
+
 func TestNewTimingState_ZeroDurationDefaults(t *testing.T) {
 	withSeededRNG(t, 1, func(rng *rand.Rand) {
 		s := NewTimingState(rng, 0)

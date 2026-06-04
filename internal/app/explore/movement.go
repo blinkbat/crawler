@@ -387,8 +387,8 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	// want torchlight / vision modifiers, they pipe a different radius
 	// into RevealRadius here instead of a second reveal pass.
 	core.RevealRadius(g, targetX, targetZ, core.SightRadius)
-	// Junkyard-dog AI tick: each alive pack rolls (independently) on
-	// every successful player step. If a pack lands on the player,
+	// Pack-AI tick (per-pack mode dispatched in core.PlanPackSteps): each
+	// alive pack plans (independently) on every successful player step. If a pack lands on the player,
 	// initiate the battle and snap the player's VISUAL coords to the
 	// new tile center so the splash doesn't show them mid-animation
 	// frozen at the previous tile. The step animation is skipped on
@@ -539,8 +539,9 @@ func updateDoorPrompt(g *core.GameState) {
 	}
 }
 
-// tickPackAI advances every alive pack one step under the
-// junkyard-dog rules in core.PlanPackSteps. Returns the index of a
+// tickPackAI advances every alive pack one step under its authored AI mode
+// (None / JunkyardDog / Patrol / Skittish, dispatched in core.PlanPackSteps).
+// Returns the index of a
 // pack that walked onto the player's tile (battle should start with
 // that pack), or -1 if no engagement happened this tick. Packs that
 // chose to move have their tile AND animation updated; non-movers

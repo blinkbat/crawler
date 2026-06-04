@@ -148,6 +148,39 @@ func TestCustomEnemyPackRoundTripAndRuntimeStats(t *testing.T) {
 	}
 }
 
+// TestCustomEnemyDefFromMapRejectsBadFields locks the load-time validation
+// that mirrors the static enemy registry's init guards: a hand-edited custom
+// enemy row with an out-of-range cast chance or a negative mitigation / reward
+// / damage field is refused at load rather than silently reaching combat math.
+func TestCustomEnemyDefFromMapRejectsBadFields(t *testing.T) {
+	base := mapfile.MapCustomEnemy{Name: "bad", BaseKind: "bat", HP: 10}
+	// Sanity: the clean baseline loads (so the cases below isolate the field).
+	if _, err := CustomEnemyDefFromMap(base); err != nil {
+		t.Fatalf("clean custom enemy should load, got %v", err)
+	}
+	cases := []struct {
+		name   string
+		mutate func(*mapfile.MapCustomEnemy)
+	}{
+		{"cast chance > 1", func(c *mapfile.MapCustomEnemy) { c.SkillCastChance = 5 }},
+		{"negative cast chance", func(c *mapfile.MapCustomEnemy) { c.SkillCastChance = -0.5 }},
+		{"negative armor", func(c *mapfile.MapCustomEnemy) { c.Armor = -1 }},
+		{"negative mdef", func(c *mapfile.MapCustomEnemy) { c.MDef = -1 }},
+		{"negative attack", func(c *mapfile.MapCustomEnemy) { c.AttackDamage = -3 }},
+		{"negative xp", func(c *mapfile.MapCustomEnemy) { c.XPValue = -10 }},
+		{"non-positive HP", func(c *mapfile.MapCustomEnemy) { c.HP = 0 }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ce := base
+			tc.mutate(&ce)
+			if _, err := CustomEnemyDefFromMap(ce); err == nil {
+				t.Fatalf("expected an error for %s, got nil", tc.name)
+			}
+		})
+	}
+}
+
 func TestResetGameStatePreservesProgressionAndRecoversParty(t *testing.T) {
 	area := AreaDefinition{
 		Width:       3,

@@ -143,6 +143,15 @@ func TickAndDrawVFX(camera rl.Camera3D, g *core.GameState) {
 	write := 0
 	for read := range particles {
 		p := &particles[read]
+		// Draw at the current state BEFORE advancing, so each live particle
+		// renders this frame at its current t (a freshly-spawned one at t=0)
+		// and is guaranteed at least one visible frame even if this frame's
+		// clamped dt would age it past its Duration. Advancing first (the old
+		// order) could tick a sub-dt-lifetime particle straight past alive()
+		// and cull it before it ever drew. Latent today — every effect's
+		// Duration exceeds the dt clamp — but keeps a future short effect
+		// honest. The one-frame physics lag this introduces is imperceptible.
+		drawParticle(camera, p)
 		p.Elapsed += dt
 		if !p.alive() {
 			continue
@@ -160,9 +169,6 @@ func TickAndDrawVFX(camera rl.Camera3D, g *core.GameState) {
 		write++
 	}
 	particles = particles[:write]
-	for i := range particles {
-		drawParticle(camera, &particles[i])
-	}
 }
 
 // resolveAnchor returns the world-space "spawn origin" for a VFX

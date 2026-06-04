@@ -8,6 +8,16 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+// selectedGlassTint is the cursored / active glass wash used across the
+// panels overlay — a blend from glassMid toward glassWarm. t controls how
+// warm the highlight reads (the tab strip, the member-card header, and the
+// item row each pick their own warmth). Centralized so the "what does a
+// highlighted glass surface look like" color pair lives in one place instead
+// of three open-coded MixColor calls that drift apart.
+func selectedGlassTint(t float64) rl.Color {
+	return core.MixColor(glassMid, glassWarm, t)
+}
+
 // panelStatMeasureCache memoizes rl.MeasureTextEx for the Stats-tab's
 // right-aligned value strings (stat values, ARM, XP, status chip). These
 // change only on level-up / HP-spend / status change — not 60 Hz — but
@@ -88,7 +98,7 @@ func DrawPanelsOverlay(g core.GameState, assets Resources) {
 		bg := glassMid
 		txt := textMuted
 		if active {
-			bg = core.MixColor(glassMid, glassWarm, 0.65)
+			bg = selectedGlassTint(0.65)
 			txt = textPrimary
 		}
 		drawGlassPane(tx, tabRowY, tabW, tabH, bg)
@@ -208,7 +218,7 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 	// across the Character / Skills / Equipment tabs.
 	cardBG := glassMid
 	if highlight {
-		cardBG = core.MixColor(glassMid, glassWarm, 0.9)
+		cardBG = selectedGlassTint(0.9)
 	}
 	drawGlassPane(int32(col.X), int32(col.Y), int32(col.Width), int32(col.Height), cardBG)
 	rl.DrawRectangle(int32(col.X), int32(col.Y)+6, 3, int32(col.Height)-12, classCol)
@@ -809,7 +819,7 @@ func drawPanelsItems(g core.GameState, assets Resources, body rl.Rectangle) {
 		highlight := i == cursor
 		if highlight {
 			drawGlassPane(int32(listRect.X), int32(y), int32(listRect.Width), int32(rowH-4),
-				core.MixColor(glassMid, glassWarm, 0.6))
+				selectedGlassTint(0.6))
 			rl.DrawRectangle(int32(listRect.X)+2, int32(y)+4, 3, int32(rowH-12), giltBright)
 		}
 		nameCol := textMuted
