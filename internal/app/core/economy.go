@@ -4,9 +4,9 @@ import "math/rand"
 
 // Gold, loot drops, and the shop catalog. The economy loop: enemies pay
 // out gold + roll item drops on defeat (AwardBattleLoot, called from
-// winBattle), and the player spends gold at the pause-menu shop (ShopCatalog
-// / ShopSellPrice). Item prices live on ItemDefinition.Price; per-enemy gold
-// + drop tables live on EnemyDefinition.
+// winBattle), and the player will spend gold at a shop once openShop is wired
+// to a merchant/tile (currently no entry point). Item prices live on
+// ItemDefinition.Price; per-enemy gold + drop tables live on EnemyDefinition.
 
 // ItemDrop is one possible loot item an enemy yields on death, with the
 // per-defeat probability it actually drops. Distinct from the steal Item

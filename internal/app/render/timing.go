@@ -938,7 +938,7 @@ func DrawDamagePopups(camera rl.Camera3D, g core.GameState, assets Resources) {
 		// so for the killing blow we want the number to keep floating after
 		// the body fades. enemyDrawPosition still returns a valid spot since
 		// the member's slot is stable for the lifetime of the active pack.
-		pos := enemyDrawPosition(camera, g, i, enemy)
+		pos := enemyDrawPosition(camera, &g, i, enemy)
 		pos.Y += 0.6
 		screenPos := rl.GetWorldToScreen(pos, camera)
 		sw, _ := screenSizeF()

@@ -60,7 +60,24 @@ const (
 	FloorDeepWater = 'W' // deep water — blocks movement, vision passes over
 	FloorSand      = 'n' // pale sand
 	FloorSnow      = 'i' // packed snow
+	// Ramp floor tiles — walkable slopes that bridge the tile's elevation
+	// LEVEL (stored in the Elevation layer) to one level higher in the
+	// arrow's direction. The arrow points UPHILL: '^' rises north, '>' east,
+	// 'v' south, '<' west. Walking up a ramp from a level-N tile lands on a
+	// level-(N+1) tile; the reverse descends. ('v' deliberately overlaps the
+	// 'v' clover decor char — registered in crossLayerCharOverlaps; per-layer
+	// dispatch keeps them distinct.)
+	FloorRampNorth = '^'
+	FloorRampEast  = '>'
+	FloorRampSouth = 'v'
+	FloorRampWest  = '<'
 )
+
+// ElevationGround is the runtime alias of mapfile.ElevationGroundChar — the
+// elevation-layer char for the lowest level (0). Blank/legacy maps seed to it
+// so they read as flat. Kept in sync via the init assert in areas.go's
+// sibling consts (TileCeilingOpen mirrors CeilingOpenChar the same way).
+const ElevationGround = mapfile.ElevationGroundChar
 
 // Decor layer. '.' means "let the renderer's auto-scatter decide"; '_'
 // suppresses any auto decor; explicit chars force a specific small prop.
@@ -322,6 +339,133 @@ func (a AreaDefinition) CeilingAt(x, z int) bool {
 		return false
 	}
 	return row[x] == TileCeilingSolid
+}
+
+// ElevationLevelAt returns the ground LEVEL (0..9) of tile (x,z). Ramp tiles
+// store their LOW level here. Out-of-bounds, a missing/short elevation layer,
+// or a non-digit cell all read as level 0 — so maps without an elevation
+// layer (older .map files load as a blank all-'0' layer; struct-literal areas
+// leave it nil) are uniformly flat.
+func (a AreaDefinition) ElevationLevelAt(x, z int) int {
+	if !a.InBounds(x, z) || len(a.Elevation) != a.Height {
+		return 0
+	}
+	row := a.Elevation[z]
+	if x >= len(row) {
+		return 0
+	}
+	c := row[x]
+	if c < '0' || c > '9' {
+		return 0
+	}
+	return int(c - '0')
+}
+
+// IsRampChar reports whether a floor-layer char is one of the four directional
+// ramp tiles.
+func IsRampChar(c byte) bool {
+	switch c {
+	case FloorRampNorth, FloorRampEast, FloorRampSouth, FloorRampWest:
+		return true
+	}
+	return false
+}
+
+// RampAscentFacing maps a ramp floor char to the cardinal facing it rises
+// toward (uphill), as a North/East/South/West int usable with FacingVector.
+// ok=false for non-ramp chars.
+func RampAscentFacing(c byte) (int, bool) {
+	switch c {
+	case FloorRampNorth:
+		return North, true
+	case FloorRampEast:
+		return East, true
+	case FloorRampSouth:
+		return South, true
+	case FloorRampWest:
+		return West, true
+	}
+	return 0, false
+}
+
+// RampCharForFacing returns the ramp floor char that ascends toward the given
+// cardinal facing — the inverse of RampAscentFacing. Used by the editor's
+// smart ramp tool to stamp the right arrow once it knows which way is uphill.
+func RampCharForFacing(facing int) byte {
+	switch NormalizeFacing(facing) {
+	case North:
+		return FloorRampNorth
+	case East:
+		return FloorRampEast
+	case South:
+		return FloorRampSouth
+	case West:
+		return FloorRampWest
+	}
+	return FloorRampNorth
+}
+
+// RampAt reports whether tile (x,z)'s floor is a ramp and, if so, the cardinal
+// facing it ascends toward. Convenience over reading Floor[z][x] +
+// RampAscentFacing at the call site; ok=false out of bounds or on flat floor.
+func (a AreaDefinition) RampAt(x, z int) (facing int, ok bool) {
+	if !a.InBounds(x, z) || len(a.Floor) != a.Height {
+		return 0, false
+	}
+	row := a.Floor[z]
+	if x >= len(row) {
+		return 0, false
+	}
+	return RampAscentFacing(row[x])
+}
+
+// StandGroundY returns the world-space Y of the ground at tile (x,z): the
+// resting height the player / a billboard sits at. Flat tiles read
+// level·LevelStep; a ramp reads its MID-slope height (low+0.5)·LevelStep,
+// since a unit standing on the ramp tile rests at its center, halfway up.
+func (a AreaDefinition) StandGroundY(x, z int) float32 {
+	level := float32(a.ElevationLevelAt(x, z))
+	if _, ok := a.RampAt(x, z); ok {
+		level += 0.5
+	}
+	return level * LevelStep
+}
+
+// edgeLevel returns the elevation level at tile (x,z)'s edge facing `dir`, and
+// ok=false when there's no walkable edge there. A flat tile presents its level
+// on all four edges. A ramp presents its HIGH level (low+1) on the edge it
+// ascends toward, its LOW level on the opposite edge, and NO walkable edge on
+// its two perpendicular sides (those are sheer — you can't mount a ramp from
+// the side).
+func (a AreaDefinition) edgeLevel(x, z, dir int) (int, bool) {
+	if !a.InBounds(x, z) {
+		return 0, false
+	}
+	if f, ok := a.RampAt(x, z); ok {
+		low := a.ElevationLevelAt(x, z)
+		switch NormalizeFacing(dir) {
+		case f:
+			return low + 1, true
+		case NormalizeFacing(f + 2):
+			return low, true
+		default:
+			return 0, false
+		}
+	}
+	return a.ElevationLevelAt(x, z), true
+}
+
+// StepElevationOK reports whether a step from (fromX,fromZ) to the adjacent
+// tile in cardinal direction `dir` connects without a cliff — i.e. the edge
+// the player leaves and the edge they enter sit at the same elevation level,
+// honoring ramps (which bridge two levels). A mismatch is a cliff (blocked);
+// a perpendicular attempt to mount/dismount a ramp is also blocked (edgeLevel
+// returns ok=false there). Flat-to-flat at equal levels always passes.
+func (a AreaDefinition) StepElevationOK(fromX, fromZ, dir int) bool {
+	dx, dz := FacingVector(dir)
+	from, ok1 := a.edgeLevel(fromX, fromZ, dir)
+	to, ok2 := a.edgeLevel(fromX+dx, fromZ+dz, NormalizeFacing(dir+2))
+	return ok1 && ok2 && from == to
 }
 
 // TileAt returns a "compositing" character for code that just wants to
@@ -815,6 +959,7 @@ var floorTileCharList = []byte{
 	FloorGrass, FloorDirt, FloorDarkGrass, FloorStone,
 	FloorCobble, FloorPlank, FloorWater, FloorDeepWater,
 	FloorSand, FloorSnow,
+	FloorRampNorth, FloorRampEast, FloorRampSouth, FloorRampWest,
 }
 
 // TileLayer enumerates the four authored grid layers that carry a
@@ -858,6 +1003,10 @@ var tileLabelTable = map[TileLayer]map[byte]string{
 		FloorDeepWater: "Deep Water",
 		FloorSand:      "Sand",
 		FloorSnow:      "Snow",
+		FloorRampNorth: "Ramp ↑N",
+		FloorRampEast:  "Ramp →E",
+		FloorRampSouth: "Ramp ↓S",
+		FloorRampWest:  "Ramp ←W",
 	},
 	TileLayerDecor: {
 		DecorAuto:        "",
@@ -1005,6 +1154,11 @@ var crossLayerCharOverlaps = []crossLayerOverlap{
 		A: TileLayerDecor, B: TileLayerFloor, Char: 'k',
 		NameA: "DecorRootCluster", NameB: "FloorDarkGrass",
 		Reason: "root-cluster decor and dark-grass floor share the 'k' mnemonic.",
+	},
+	{
+		A: TileLayerDecor, B: TileLayerFloor, Char: 'v',
+		NameA: "DecorClover", NameB: "FloorRampSouth",
+		Reason: "clover decor and the south-ascending ramp floor tile share 'v' (v reads as a downward chevron); layers dispatch independently.",
 	},
 }
 

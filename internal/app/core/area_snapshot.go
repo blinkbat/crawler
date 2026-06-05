@@ -2,16 +2,17 @@ package core
 
 import "slices"
 
-// gridLayers returns pointers to the area's five authored grid-layer
-// slices in canonical order (walls, floor, decor, props, ceiling). The
-// single place that enumerates the grid layers for bulk operations —
-// CloneArea and AreaContentEqual walk this instead of hand-listing the
-// five fields, so a sixth layer is one row here, not several lockstep
-// edits. (The MapFile↔Area converters still list the fields explicitly:
-// they pair each layer with the separate mapfile.MapFile type and apply
-// the ceiling blank-default, which this accessor can't model.)
+// gridLayers returns pointers to the area's six authored grid-layer
+// slices in canonical order (walls, floor, decor, props, ceiling,
+// elevation). The single place that enumerates the grid layers for bulk
+// operations — CloneArea and AreaContentEqual walk this instead of
+// hand-listing the fields, so a new layer is one row here, not several
+// lockstep edits. (The MapFile↔Area converters still list the fields
+// explicitly: they pair each layer with the separate mapfile.MapFile type
+// and apply the ceiling / elevation blank-default, which this accessor
+// can't model.)
 func (a *AreaDefinition) gridLayers() []*[]string {
-	return []*[]string{&a.Walls, &a.Floor, &a.Decor, &a.Props, &a.Ceiling}
+	return []*[]string{&a.Walls, &a.Floor, &a.Decor, &a.Props, &a.Ceiling, &a.Elevation}
 }
 
 // AreaContentEqual reports whether two areas have identical authorable

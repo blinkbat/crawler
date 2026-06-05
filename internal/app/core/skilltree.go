@@ -15,10 +15,12 @@ package core
 //
 // Skill tree: per-skill upgrade ladder + helpers that fold the tier
 // modifiers into the SkillEffect the battle code applies. Each player-
-// castable skill has MaxSkillTier purchasable upgrades, bought one at
-// a time via SpendSkillTier from the Skills panel's tree UI. The base
-// skill (tier 0) is always available the moment the class learns it;
-// tiers 1..MaxSkillTier stack additive deltas onto the base effect.
+// castable skill has MaxSkillTier possible upgrade slots. The legacy
+// SpendSkillTier buyer is currently inert gameplay plumbing; active player
+// progression spends points through BuySkillNode in the tree modal. The base
+// skill (tier 0) is always available the moment the class learns it; tiers
+// 1..MaxSkillTier stack additive deltas onto the base effect when this seam is
+// wired back to live tree purchases.
 //
 // Design contract: each tier is ONE numeric/bool delta applied to a
 // SkillEffect field that already exists (Damage, BurnChance, etc.) or
@@ -243,7 +245,9 @@ func SkillNextTierCost(m *PartyMember, s SkillID) (int, bool) {
 	return up.Cost, true
 }
 
-// SpendSkillTier purchases the next tier of `s` on member `m`. Returns
+// SpendSkillTier purchases the next tier of `s` on member `m`. It is an inert
+// compatibility seam for the older per-skill tier ladder; live gameplay spends
+// skill points through BuySkillNode from the tree modal. Returns
 // false (and changes nothing) when:
 //   - the skill is already at MaxSkillTier
 //   - the member doesn't have enough SkillPoints
@@ -253,10 +257,9 @@ func SkillNextTierCost(m *PartyMember, s SkillID) (int, bool) {
 // On success the SkillTiers map is allocated lazily, SkillPoints
 // decremented by the upgrade's Cost, and the new tier recorded.
 //
-// Invoked by the panels overlay's Skills tab (explore/panels.go): the
-// player navigates to a skill row and Confirms to buy its next tier.
-// The combat reads through EffectiveSkillEffect / SkillTierMod pick the
-// purchased tiers up immediately on the next cast.
+// When this seam is wired back to live progression, combat reads through
+// EffectiveSkillEffect / SkillTierMod will pick the purchased tiers up on the
+// next cast.
 func SpendSkillTier(m *PartyMember, s SkillID) bool {
 	if m == nil {
 		return false

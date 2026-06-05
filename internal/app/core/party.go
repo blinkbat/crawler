@@ -411,6 +411,10 @@ func SkillCost(skill SkillID) int {
 	return 0
 }
 
+func CanAffordSkill(m PartyMember, skill SkillID) bool {
+	return m.MP >= SkillCost(skill)
+}
+
 // SkillCastLimitFor returns the registry's PerBattleCastLimit for a
 // skill — 0 means "uncapped." The battle AI's usableEnemySkills
 // filter reads this to drop a skill from the cast set once an enemy
@@ -1110,7 +1114,7 @@ func StatPreviewLine(stat Stat, current Stats, pending int) string {
 // at least one point landed so the caller can decide whether to
 // advance to the next pending member. Skill points are NOT spent
 // here — they accrue on the member at level-up time and are spent
-// from the Skills panel's tree UI via SpendSkillTier.
+// from the Skills panel's tree UI via BuySkillNode.
 func CommitLevelUp(m *PartyMember, pendingStats [StatCount]int) bool {
 	if m == nil {
 		return false

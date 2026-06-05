@@ -103,10 +103,20 @@ func (s *State) cellAt(p rl.Vector2) (int, int) {
 // Draw() before anything reads it.
 var frameMouse rl.Vector2
 
+// frameAssets stashes the current frame's render.Resources so modal handlers
+// (whose signatures only carry *State / font / theme) can reach the loaded
+// enemy textures the Foe Visualizer's live 3D preview needs. Same single-
+// threaded, rewritten-at-top-of-Draw discipline as frameMouse. Update runs
+// before Draw, so an Update-phase reader sees the PREVIOUS frame's bundle —
+// fine, because Resources is the immutable loaded-asset set, stable across
+// frames.
+var frameAssets render.Resources
+
 func Draw(s *State, assets render.Resources) {
 	font := assets.Font()
 	theme := assets.Theme()
 	frameMouse = rl.GetMousePosition()
+	frameAssets = assets
 	s.layout()
 	rl.ClearBackground(bgWindow)
 	drawTopbar(s, font, theme)
@@ -148,6 +158,7 @@ var modalHandlers = map[modalKind]modalHandler{
 	modalNew:           {draw: drawNewMapModal, update: updateNewMapModal},
 	modalCustomEnemies: {draw: drawCustomEnemiesModal, update: updateCustomEnemiesModal},
 	modalEscMenu:       {draw: drawEscMenuModal, update: updateEscMenuModal},
+	modalFoeView:       {draw: drawFoeViewModal, update: updateFoeViewModal},
 }
 
 // init asserts every dispatchable modalKind (modalNone and modalCount
@@ -299,6 +310,7 @@ var topbarBtns = []topbarBtn{
 	{label: "Save As", action: openSaveAsModal},
 	{label: "Sounds", action: openSoundsModal},
 	{label: "Enemies", action: openCustomEnemiesModal},
+	{label: "Foes", action: openFoeViewModal},
 	{label: "Validate", action: openValidateModal},
 	{label: "Back", action: func(s *State) { s.exitRequested = true }},
 }
@@ -318,11 +330,16 @@ var toolbarBtns = []topbarBtn{
 	{label: "Brush +", action: func(s *State) { s.brushSize = stepBrush(s.brushSize, +1) }},
 	{label: "Center", action: func(s *State) { centerViewOnTile(s, s.area.StartTileX, s.area.StartTileZ) }},
 	{label: "Reset View", action: func(s *State) { s.zoom = 1; s.panX, s.panY = 0, 0 }},
+	{label: "Lvl -", action: func(s *State) { s.editLevel = clampLevel(s.editLevel - 1) }},
+	{label: "Lvl +", action: func(s *State) { s.editLevel = clampLevel(s.editLevel + 1) }},
+	{label: "Ramp",
+		action: func(s *State) { s.rampMode = !s.rampMode },
+		active: func(s *State) bool { return s.rampMode }},
 	{label: "Glyphs",
 		action: func(s *State) { s.showTileGlyphs = !s.showTileGlyphs },
 		active: func(s *State) bool { return s.showTileGlyphs }},
 	{label: "Phase", action: func(s *State) {
-		s.previewPhase = core.TimeOfDay((int(s.previewPhase) + 1) % core.TimeOfDayCount)
+		s.previewPhase = core.WrapEnum(s.previewPhase, 1, core.TimeOfDayCount)
 		s.flash("Preview: " + core.PhaseName(s.previewPhase))
 	}},
 	{label: "Test", action: func(s *State) { s.testRequested = true }},
@@ -371,6 +388,17 @@ func drawToolbar(s *State, font rl.Font, theme render.Theme) {
 		rl.NewVector2(s.rect.toolbar.Width, s.rect.toolbar.Y+toolbarH),
 		1, outlineHard)
 	drawButtonStrip(font, s, toolbarBtns, s.rect.toolbar.Y+6, toolbarH-12)
+	// Height-selector readout (right-aligned): the level the Elevation brush
+	// stamps + the slice-view focus; flags Ramp tool-mode when active.
+	label := fmt.Sprintf("Height: %d", s.editLevel)
+	if s.rampMode {
+		label += "  [RAMP]"
+	}
+	sz := editorFontLabel
+	m := rl.MeasureTextEx(font, label, sz, 1)
+	rl.DrawTextEx(font, label,
+		rl.NewVector2(s.rect.toolbar.Width-m.X-12, s.rect.toolbar.Y+(toolbarH-sz)/2),
+		sz, 1, rl.NewColor(220, 210, 180, 255))
 }
 
 // topbarButtonAt returns the index of the button under p, or -1.
@@ -649,12 +677,12 @@ func entityRowAt(lay entityModalLayout, p rl.Vector2) int {
 // indicators.
 func drawEntityListWindow(font rl.Font, theme render.Theme, lay entityModalLayout, count, cursor int, emptyText string, rowText func(int) string) {
 	if count == 0 {
-		rl.DrawTextEx(font, emptyText, rl.NewVector2(lay.card.X+16, lay.listTop), 14, 1, theme.TextHint)
+		rl.DrawTextEx(font, emptyText, rl.NewVector2(lay.card.X+16, lay.listTop), editorFontLabel, 1, theme.TextHint)
 		return
 	}
 	y := lay.listTop
 	if lay.topRow > 0 {
-		rl.DrawTextEx(font, fmt.Sprintf("▲ %d more", lay.topRow), rl.NewVector2(lay.card.X+24, y-16), 12, 1, theme.TextHint)
+		rl.DrawTextEx(font, fmt.Sprintf("▲ %d more", lay.topRow), rl.NewVector2(lay.card.X+24, y-16), editorFontHint, 1, theme.TextHint)
 	}
 	for i := lay.topRow; i < lay.end; i++ {
 		text := rowText(i)
@@ -667,7 +695,7 @@ func drawEntityListWindow(font rl.Font, theme render.Theme, lay entityModalLayou
 		y += lay.rowH
 	}
 	if lay.end < count {
-		rl.DrawTextEx(font, fmt.Sprintf("▼ %d more", count-lay.end), rl.NewVector2(lay.card.X+24, y), 12, 1, theme.TextHint)
+		rl.DrawTextEx(font, fmt.Sprintf("▼ %d more", count-lay.end), rl.NewVector2(lay.card.X+24, y), editorFontHint, 1, theme.TextHint)
 	}
 }
 
@@ -991,6 +1019,10 @@ func isSentinelBrush(layer Layer, char byte) bool {
 		// walls layer reads, but conceptually a sentinel (let sky
 		// show through), not a paintable look.
 		return char == core.TileCeilingOpen
+	case LayerElevation:
+		// Ground level ('0') is the implicit "flat" default; treat it as a
+		// sentinel so it reads as the no-op level in the palette.
+		return char == core.ElevationGround
 	case LayerEntities:
 		// Entities aren't tile chars — no sentinel concept applies.
 		return false
@@ -1327,7 +1359,7 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 }
 
 func drawLabel(font rl.Font, text string, r rl.Rectangle) {
-	rl.DrawTextEx(font, text, rl.NewVector2(r.X, r.Y), 14, 1, editorLabelColor)
+	rl.DrawTextEx(font, text, rl.NewVector2(r.X, r.Y), editorFontLabel, 1, editorLabelColor)
 }
 
 func drawTextField(font rl.Font, r rl.Rectangle, text string, focused bool) {
@@ -1441,6 +1473,12 @@ func drawGrid(s *State, font rl.Font) {
 					drawTileGlyph(font, r, cell, charFontSize, ch, charFG, charShadow)
 				}
 			}
+			// Height slice-view: while the Elevation layer is active, overlay
+			// each cell's level (tint + digit) and connective ramp arrows so
+			// the heightmap is legible in the flat editor grid.
+			if s.layer == LayerElevation {
+				drawElevationSlice(s, font, r, cell, x, z)
+			}
 		}
 	}
 
@@ -1475,31 +1513,31 @@ func drawGrid(s *State, font rl.Font) {
 	}
 
 	// Axis tick labels every 5 cells. Only at zoom levels where cells are
-	// big enough to comfortably fit a 10pt digit — at very small zooms the
+	// big enough to comfortably fit a tick digit — at very small zooms the
 	// labels would overlap and read as visual noise.
 	if cell >= 18 {
 		tickCol := rl.NewColor(220, 224, 232, 180)
 		// Top axis: column numbers.
 		for x := (xMin / 5) * 5; x < lineXMax; x += 5 {
 			label := fmt.Sprintf("%d", x)
-			m := rl.MeasureTextEx(font, label, 10, 1)
+			m := rl.MeasureTextEx(font, label, editorFontTick, 1)
 			px := s.rect.gridX + float32(x)*cell - m.X/2
 			py := s.rect.gridY - m.Y - 2
 			if py < s.rect.grid.Y+2 {
 				continue
 			}
-			rl.DrawTextEx(font, label, rl.NewVector2(px, py), 10, 1, tickCol)
+			rl.DrawTextEx(font, label, rl.NewVector2(px, py), editorFontTick, 1, tickCol)
 		}
 		// Left axis: row numbers.
 		for z := (zMin / 5) * 5; z < lineZMax; z += 5 {
 			label := fmt.Sprintf("%d", z)
-			m := rl.MeasureTextEx(font, label, 10, 1)
+			m := rl.MeasureTextEx(font, label, editorFontTick, 1)
 			px := s.rect.gridX - m.X - 4
 			py := s.rect.gridY + float32(z)*cell - m.Y/2
 			if px < s.rect.grid.X+2 {
 				continue
 			}
-			rl.DrawTextEx(font, label, rl.NewVector2(px, py), 10, 1, tickCol)
+			rl.DrawTextEx(font, label, rl.NewVector2(px, py), editorFontTick, 1, tickCol)
 		}
 	}
 
@@ -1866,6 +1904,10 @@ func brushPreviewColor(s *State) rl.Color {
 		return floorColor(core.FloorAuto)
 	case LayerCeiling:
 		return ceilingColor()
+	case LayerElevation:
+		// Tint the drag-rect preview by the selected level so a region paint
+		// reads as "this height."
+		return elevationLevelColor(s.editLevel)
 	case LayerEntities:
 		// Entity layer paints a marker, not a tile char — use the
 		// fallback so the drag-rect preview reads as neutral. The
@@ -1924,6 +1966,55 @@ func tileColor(layer Layer, c byte) rl.Color {
 	// Fallback is pre-baked into every row, so this single index covers both
 	// palette chars and unrecognized ones — no map hash, no branch.
 	return tileColorByChar[layer][c]
+}
+
+// elevationLevelColor maps an elevation level to an earthy swatch (dark low →
+// light high) for the brush preview + the height-selector label.
+func elevationLevelColor(level int) rl.Color {
+	level = clampLevel(level)
+	t := float32(level) / float32(maxEditLevel)
+	return rl.NewColor(uint8(92+t*120), uint8(72+t*108), uint8(56+t*66), 255)
+}
+
+// drawElevationSlice overlays the height "slice view" on a cell while the
+// Elevation layer is active: a translucent tint keyed to the cell's level
+// relative to the selected editLevel (the current level pops, lower levels go
+// cool, higher go warm), the level digit, and — on ramp tiles — the ramp arrow
+// highlighted as a connector.
+func drawElevationSlice(s *State, font rl.Font, r rl.Rectangle, cell float32, x, z int) {
+	lvl := s.area.ElevationLevelAt(x, z)
+	rl.DrawRectangleRec(r, elevationSliceTint(lvl, s.editLevel))
+	shadow := rl.NewColor(8, 10, 14, 200)
+	if facing, ok := s.area.RampAt(x, z); ok {
+		rl.DrawRectangleLinesEx(r, 2, rl.NewColor(120, 230, 140, 220))
+		drawTileGlyph(font, r, cell, cell*0.62, core.RampCharForFacing(facing), rl.NewColor(150, 240, 165, 245), shadow)
+		return
+	}
+	if cell >= 12 {
+		drawTileGlyph(font, r, cell, cell*0.5, byte('0'+lvl), rl.NewColor(245, 245, 250, 230), shadow)
+	}
+}
+
+// elevationSliceTint tints a cell by its level relative to the selected edit
+// level so the heightmap reads at a glance in the flat grid: selected level a
+// soft green wash, lower levels cool blue (deeper = denser), higher warm orange.
+func elevationSliceTint(level, sel int) rl.Color {
+	switch {
+	case level == sel:
+		return rl.NewColor(120, 200, 130, 60)
+	case level < sel:
+		a := 60 + (sel-level)*30
+		if a > 170 {
+			a = 170
+		}
+		return rl.NewColor(40, 70, 150, uint8(a))
+	default:
+		a := 50 + (level-sel)*28
+		if a > 160 {
+			a = 160
+		}
+		return rl.NewColor(210, 130, 50, uint8(a))
+	}
 }
 
 func wallColor() color.RGBA        { return tileColor(LayerWalls, core.TileRock) }
@@ -2026,7 +2117,7 @@ func drawStatus(s *State, font rl.Font, theme render.Theme) {
 	const pad = 12
 	maxW := float32(0)
 	for _, e := range s.statusLog {
-		m := rl.MeasureTextEx(font, e.msg, 14, 1)
+		m := rl.MeasureTextEx(font, e.msg, editorFontLabel, 1)
 		if m.X > maxW {
 			maxW = m.X
 		}
@@ -2049,7 +2140,7 @@ func drawStatus(s *State, font rl.Font, theme render.Theme) {
 			col = theme.BorderDanger
 		}
 		col.A = uint8(float32(col.A) * (0.4 + 0.6*alpha))
-		render.DrawTextWithShadow(font, e.msg, r.X+12, y, 14, col)
+		render.DrawTextWithShadow(font, e.msg, r.X+12, y, editorFontLabel, col)
 	}
 }
 
@@ -2139,8 +2230,8 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 	r := drawModalHeader(font, theme, openModalW, openModalH, header, theme.BorderStrong)
 
 	if len(s.modalPaths) == 0 {
-		rl.DrawTextEx(font, "(no .map files in maps/)", rl.NewVector2(r.X+16, r.Y+50), 14, 1, theme.TextMuted)
-		rl.DrawTextEx(font, "Esc / click outside to close", rl.NewVector2(r.X+16, r.Y+r.Height-26), 12, 1, theme.TextHint)
+		rl.DrawTextEx(font, "(no .map files in maps/)", rl.NewVector2(r.X+16, r.Y+50), editorFontLabel, 1, theme.TextMuted)
+		rl.DrawTextEx(font, "Esc / click outside to close", rl.NewVector2(r.X+16, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
 		return
 	}
 
@@ -2158,10 +2249,10 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 	// Scroll hint when the list extends past the visible window.
 	if topRow > 0 || end < len(s.modalPaths) {
 		more := fmt.Sprintf("(%d / %d)", s.modalCursor+1, len(s.modalPaths))
-		measure := rl.MeasureTextEx(font, more, 12, 1)
+		measure := rl.MeasureTextEx(font, more, editorFontHint, 1)
 		rl.DrawTextEx(font, more,
 			rl.NewVector2(r.X+r.Width-measure.X-16, r.Y+30),
-			12, 1, theme.TextHint)
+			editorFontHint, 1, theme.TextHint)
 	}
 
 	if s.modalRenaming != "" {
@@ -2174,7 +2265,7 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 	if s.modalConfirmDelete {
 		path := s.modalPaths[s.modalCursor]
 		rl.DrawTextEx(font, fmt.Sprintf("Delete %s? This is permanent.", core.MapIDFromPath(path)),
-			rl.NewVector2(r.X+16, r.Y+r.Height-86), 14, 1, theme.BorderDanger)
+			rl.NewVector2(r.X+16, r.Y+r.Height-86), editorFontLabel, 1, theme.BorderDanger)
 		labels := cmdLabels(openDeleteConfirmCmds(s))
 		drawModalButtons(font, modalButtonRow(r, labels), labels)
 		return
@@ -2225,13 +2316,13 @@ func drawSaveAsModal(s *State, font rl.Font, theme render.Theme) {
 
 	if s.awaitingOverwrite {
 		rl.DrawTextEx(font, fmt.Sprintf("Overwrite %s?", core.MapPath(s.modalFilename)),
-			rl.NewVector2(r.X+16, r.Y+44), 14, 1, theme.TextPrimary)
+			rl.NewVector2(r.X+16, r.Y+44), editorFontLabel, 1, theme.TextPrimary)
 		labels := cmdLabels(saveAsOverwriteCmds(s))
 		drawModalButtons(font, modalButtonStack(r, labels), labels)
 		return
 	}
 
-	rl.DrawTextEx(font, "Filename (without .map):", rl.NewVector2(r.X+16, r.Y+40), 12, 1, theme.TextLabel)
+	rl.DrawTextEx(font, "Filename (without .map):", rl.NewVector2(r.X+16, r.Y+40), editorFontHint, 1, theme.TextLabel)
 
 	field := saveAsFieldRect(s)
 	drawTextField(font, field, s.modalFilename, true)
@@ -2242,13 +2333,13 @@ func drawSaveAsModal(s *State, font rl.Font, theme render.Theme) {
 	sanitized := sanitizeFilename(s.modalFilename)
 	previewPath := core.MapPath(sanitized)
 	rl.DrawTextEx(font, fmt.Sprintf("Will save to: %s", previewPath),
-		rl.NewVector2(r.X+16, r.Y+96), 12, 1, theme.TextMuted)
+		rl.NewVector2(r.X+16, r.Y+96), editorFontHint, 1, theme.TextMuted)
 	if sanitized != strings.TrimSuffix(strings.TrimSuffix(s.modalFilename, ".map"), ".MAP") {
 		rl.DrawTextEx(font, "(Punctuation and spaces are stripped)",
 			rl.NewVector2(r.X+16, r.Y+112), 11, 1, theme.BorderDanger)
 	}
 	rl.DrawTextEx(font, "Enter save   Esc cancel",
-		rl.NewVector2(r.X+16, r.Y+r.Height-26), 12, 1, theme.TextHint)
+		rl.NewVector2(r.X+16, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
 }
 
 // drawPackEditModal renders the inline pack editor: header with pack
@@ -2274,7 +2365,7 @@ func drawPackEditModal(s *State, font rl.Font, theme render.Theme) {
 			leaderText = "Leader (highest tier): " + core.PackMemberDisplayName(s.area, pack, leaderIdx)
 		}
 	}
-	render.DrawTextWithShadow(font, leaderText, r.X+16, r.Y+38, 12, theme.TextMuted)
+	render.DrawTextWithShadow(font, leaderText, r.X+16, r.Y+38, editorFontHint, theme.TextMuted)
 	render.DrawTextWithShadow(font, "Click a member to select; buttons below add / remove / reorder.",
 		r.X+16, r.Y+54, 11, theme.TextHint)
 
@@ -2393,7 +2484,7 @@ func drawValidateModal(s *State, font rl.Font, theme render.Theme) {
 		}
 	}
 	rl.DrawTextEx(font, "Esc / Enter / click   close",
-		rl.NewVector2(r.X+16, r.Y+r.Height-26), 12, 1, theme.TextHint)
+		rl.NewVector2(r.X+16, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
 }
 
 // drawEscMenuModal paints the editor's pause-style menu. Three rows:
@@ -2413,7 +2504,7 @@ func drawEscMenuModal(s *State, font rl.Font, theme render.Theme) {
 	labels := cmdLabels(escMenuCmds(s))
 	drawModalButtons(font, modalButtonStack(r, labels), labels)
 	render.DrawTextWithShadow(font, "(D display · C continue · E exit · Esc close)",
-		r.X+16, r.Y+40, 12, theme.TextHint)
+		r.X+16, r.Y+40, editorFontHint, theme.TextHint)
 }
 
 func drawConfirmDirtyModal(s *State, font rl.Font, theme render.Theme) {
@@ -2441,10 +2532,10 @@ func drawConfirmDirtyModal(s *State, font rl.Font, theme render.Theme) {
 		discardLabel = "D  Discard then pick another map"
 	}
 
-	rl.DrawTextEx(font, body, rl.NewVector2(r.X+16, r.Y+44), 14, 1, theme.TextPrimary)
+	rl.DrawTextEx(font, body, rl.NewVector2(r.X+16, r.Y+44), editorFontLabel, 1, theme.TextPrimary)
 	// Contextual hint above the buttons explains what Save/Discard do for
 	// this pending action (new map / open / exit); the buttons stay short.
-	render.DrawTextWithShadow(font, hintForPending(saveLabel, discardLabel), r.X+16, r.Y+66, 12, theme.TextHint)
+	render.DrawTextWithShadow(font, hintForPending(saveLabel, discardLabel), r.X+16, r.Y+66, editorFontHint, theme.TextHint)
 
 	labels := cmdLabels(confirmDirtyCmds(s))
 	drawModalButtons(font, modalButtonStack(r, labels), labels)

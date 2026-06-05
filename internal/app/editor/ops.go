@@ -71,6 +71,10 @@ func applyTool(s *State, x, z int) {
 		applyPropBrush(s, x, z, brush.Char)
 	case LayerCeiling:
 		setLayerCell(&s.area.Ceiling, x, z, brush.Char)
+	case LayerElevation:
+		// brush.Char is '0'+editLevel (activeBrush rewrites it), so this
+		// stamps the height selector's current level onto the cell.
+		setLayerCell(&s.area.Elevation, x, z, brush.Char)
 	case LayerEntities:
 		applyEntityBrush(s, x, z, brush.Entity)
 		return // entity branch sets dirty itself when it lands
@@ -451,6 +455,13 @@ func eraseAt(s *State, x, z int) {
 		setLayerCell(&s.area.Props, x, z, core.TilePropEmpty)
 	case LayerCeiling:
 		setLayerCell(&s.area.Ceiling, x, z, core.TileCeilingOpen)
+	case LayerElevation:
+		// Reset the cell to ground level; if it carried a ramp, clear that
+		// too (a ramp with no step is meaningless).
+		setLayerCell(&s.area.Elevation, x, z, core.ElevationGround)
+		if _, ok := s.area.RampAt(x, z); ok {
+			setLayerCell(&s.area.Floor, x, z, core.FloorAuto)
+		}
 	case LayerEntities:
 		if !clearEntitiesAt(s, x, z) {
 			return
@@ -459,6 +470,44 @@ func eraseAt(s *State, x, z int) {
 		panic("editor: eraseAt missing case for layer — add it here, in applyTool, and in activeGrid")
 	}
 	s.dirty = true
+}
+
+// placeRamp is the smart ramp tool (toolbar Ramp mode). It inspects the
+// clicked tile's cardinal neighbors, finds the single axis whose two opposite
+// sides differ by exactly one level, and stamps the correct ramp arrow + its
+// low level — so the author never has to pick a direction or hand-set the
+// digit (the class of bug that the manual approach kept producing). Refuses
+// (with a flash) when no neighbor pair forms a clean ±1 step. Snapshots undo
+// only on a successful placement.
+func placeRamp(s *State, x, z int) {
+	if !s.area.InBounds(x, z) {
+		return
+	}
+	for _, pair := range [2][2]int{{core.North, core.South}, {core.East, core.West}} {
+		af, bf := pair[0], pair[1]
+		adx, adz := core.FacingVector(af)
+		bdx, bdz := core.FacingVector(bf)
+		if !s.area.InBounds(x+adx, z+adz) || !s.area.InBounds(x+bdx, z+bdz) {
+			continue
+		}
+		aLvl := s.area.ElevationLevelAt(x+adx, z+adz)
+		bLvl := s.area.ElevationLevelAt(x+bdx, z+bdz)
+		var ascend, low int
+		switch {
+		case aLvl == bLvl+1:
+			ascend, low = af, bLvl // higher side is toward af
+		case bLvl == aLvl+1:
+			ascend, low = bf, aLvl
+		default:
+			continue
+		}
+		pushUndo(s)
+		setLayerCell(&s.area.Floor, x, z, core.RampCharForFacing(ascend))
+		setLayerCell(&s.area.Elevation, x, z, byte('0'+low))
+		s.dirty = true
+		return
+	}
+	s.flash("Ramp needs one neighbor a level higher on a single axis (set heights first)")
 }
 
 // clearEntitiesAt removes the pack, chest, and door at (x,z). Returns
@@ -625,6 +674,7 @@ func resize(s *State, w, h int) {
 	s.area.Decor = resizeLayer(s.area.Decor, s.area.Width, s.area.Height, w, h, core.DecorAuto)
 	s.area.Props = resizeLayer(s.area.Props, s.area.Width, s.area.Height, w, h, core.TilePropEmpty)
 	s.area.Ceiling = resizeLayer(s.area.Ceiling, s.area.Width, s.area.Height, w, h, core.TileCeilingOpen)
+	s.area.Elevation = resizeLayer(s.area.Elevation, s.area.Width, s.area.Height, w, h, core.ElevationGround)
 	s.area.Width = w
 	s.area.Height = h
 	if s.area.StartTileX >= w {
@@ -972,6 +1022,8 @@ func activeGrid(s *State) *[]string {
 		return &s.area.Props
 	case LayerCeiling:
 		return &s.area.Ceiling
+	case LayerElevation:
+		return &s.area.Elevation
 	case LayerEntities:
 		// Entities have no grid slice — nil is the legitimate "not a grid
 		// layer" answer flood-fill checks for. Distinguished from an
@@ -1048,7 +1100,21 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 			continue
 		}
 		visited[idx] = true
-		stack = append(stack, [2]int{px + 1, pz}, [2]int{px - 1, pz}, [2]int{px, pz + 1}, [2]int{px, pz - 1})
+		// Expand only to elevation-CONNECTED neighbors: a cliff (level
+		// mismatch with no ramp) blocks, a ramp bridges. On a flat map every
+		// StepElevationOK is true, so this is identical to the old 4-way push.
+		if a.StepElevationOK(px, pz, core.East) {
+			stack = append(stack, [2]int{px + 1, pz})
+		}
+		if a.StepElevationOK(px, pz, core.West) {
+			stack = append(stack, [2]int{px - 1, pz})
+		}
+		if a.StepElevationOK(px, pz, core.South) {
+			stack = append(stack, [2]int{px, pz + 1})
+		}
+		if a.StepElevationOK(px, pz, core.North) {
+			stack = append(stack, [2]int{px, pz - 1})
+		}
 	}
 	// Check reachability against the SNAPPED pack positions, not the
 	// authored ones — placePacks relocates pack tiles to the nearest open

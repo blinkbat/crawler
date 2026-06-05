@@ -83,7 +83,7 @@ func beginHealCast(g *core.GameState, caster int, skill core.SkillID) {
 		audio.Play(audio.SoundInputMiss)
 		return
 	}
-	if g.Party[caster].MP < core.SkillCost(skill) {
+	if !core.CanAffordSkill(g.Party[caster], skill) {
 		audio.Play(audio.SoundInputMiss) // not enough MP
 		return
 	}
@@ -184,7 +184,7 @@ func applyUseToMember(g *core.GameState, member int) {
 			break
 		}
 		cost := core.SkillCost(skill)
-		if g.Party[caster].MP < cost {
+		if !core.CanAffordSkill(g.Party[caster], skill) {
 			audio.Play(audio.SoundInputMiss) // MP drained between open and confirm
 			break
 		}

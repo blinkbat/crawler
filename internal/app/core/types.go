@@ -255,7 +255,12 @@ type AreaDefinition struct {
 	// only TileCeilingSolid cells get an overhead slab rendered. Empty
 	// rows here are normalized into a blank layer at load time so older
 	// .map files (pre-ceiling) keep working without a re-save.
-	Ceiling     []string
+	Ceiling []string
+	// Elevation is the sixth geometry layer: per-tile ground LEVEL ('0'..'9'),
+	// same dimensions as Walls. A ramp floor tile stores its LOW level here.
+	// Older .map files without an elevation: section load as an all-'0' (flat)
+	// layer, so ElevationLevelAt reads 0 everywhere for them.
+	Elevation   []string
 	Materials   MaterialSet
 	StartTileX  int
 	StartTileZ  int
@@ -286,7 +291,13 @@ type Player struct {
 	Yaw       float32
 	LookYaw   float32
 	LookPitch float32
-	Anim      Animation
+	// GroundY is the world-space height of the ground under the player,
+	// eased during a step animation (see updateAnimation). Only meaningful
+	// while Anim.Kind == AnimStep; at rest the camera derives the ground
+	// height from the tile via AreaDefinition.StandGroundY, so this needs no
+	// initialization on spawn / load / transition.
+	GroundY float32
+	Anim    Animation
 }
 
 type Animation struct {
@@ -299,6 +310,12 @@ type Animation struct {
 	ToZ      float32
 	FromYaw  float32
 	ToYaw    float32
+	// FromY / ToY ease the player's ground height across a step when the
+	// from-tile and to-tile sit at different elevation levels (walking a
+	// ramp). Both are AreaDefinition.StandGroundY values; zero for flat
+	// steps, so a level map never moves the camera vertically.
+	FromY float32
+	ToY   float32
 }
 
 type GameState struct {

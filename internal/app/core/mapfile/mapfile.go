@@ -10,7 +10,9 @@
 //	walls  : '.' open, '#' wall
 //	floor  : '.' auto-variant (per-tile hash), 'g' grass, 'd' dirt,
 //	         'k' dark grass, 's' stone, 'c' cobblestone path, 'w' planks,
-//	         '~' shallow water, 'W' deep water (blocks), 'n' sand, 'i' snow
+//	         '~' shallow water, 'W' deep water (blocks), 'n' sand, 'i' snow,
+//	         '^'/'>'/'v'/'<' ramp ascending N/E/S/W (walkable; bridges the
+//	         tile's elevation level to one higher in the arrow's direction)
 //	decor  : '.' auto-scatter, '_' force-empty, 'b' bush, 'm' mushroom,
 //	         'p' pebble cluster, ',' tall grass, 'f' wildflowers,
 //	         'v' clover, 'r' reeds, 'o' bones, 'x' scorch, '!' blood,
@@ -27,6 +29,10 @@
 //	         of a 2×2 footprint), 'j' formation tail (the other 3 tiles
 //	         of the 2×2). All blocking; the anchor's mesh covers the
 //	         whole footprint and tails render nothing.
+//	ceiling  : '.' open (sky shows through), '#' solid overhead slab.
+//	elevation: per-tile ground LEVEL '0'..'9' (blank/absent ⇒ '0'). A ramp
+//	         floor tile stores its LOW level here; it rises one level toward
+//	         its arrow. Optional layer — older maps load as all-'0' (flat).
 package mapfile
 
 import (
@@ -59,7 +65,12 @@ type MapFile struct {
 	// loader fills with a blank "no ceiling" layer so older maps stay
 	// compatible with no manual edit.
 	Ceiling []string
-	Packs   []MapPack
+	// Elevation is the optional sixth grid: per-tile ground LEVEL ('0'..'9').
+	// Like Ceiling, .map files written before this section existed parse with
+	// Elevation empty, which the loader fills with a blank all-'0' (flat)
+	// layer so older maps stay compatible with no manual edit.
+	Elevation []string
+	Packs     []MapPack
 	// Chests is the authored chest list. Each entry's Items field is a
 	// comma-separated list of item names ("Morsel of Cheese,Bat Jerky")
 	// matching ItemDefinition.Name. Empty list = an empty chest (renders
@@ -247,6 +258,12 @@ const (
 	CeilingSolidChar = '#'
 )
 
+// ElevationGroundChar is the on-disk sentinel for the lowest ground level
+// (level 0) in the optional elevation layer. Blank / absent elevation rows
+// seed to this so flat maps read as all level 0. core.ElevationGround aliases
+// it so the "flat" convention doesn't drift across the package boundary.
+const ElevationGroundChar = '0'
+
 // AssetDirMode / AssetFileMode are the os mode bits for auto-created
 // asset directories and files. Defined in this leaf I/O package so Save
 // (and other writers) can use them without importing core; core's
@@ -304,6 +321,7 @@ const (
 	slotDecor
 	slotProps
 	slotCeiling
+	slotElevation
 	slotEnemies
 	slotChests
 	slotDoors
@@ -320,6 +338,7 @@ const (
 	sectionDecor         = "decor"
 	sectionProps         = "props"
 	sectionCeiling       = "ceiling"
+	sectionElevation     = "elevation"
 	sectionEnemies       = "enemies"
 	sectionChests        = "chests"
 	sectionDoors         = "doors"
@@ -327,7 +346,7 @@ const (
 )
 
 // layerSection describes one .map section: its on-disk name, the parse
-// slot it maps to, and (for the five grid layers) a field accessor into
+// slot it maps to, and (for the six grid layers) a field accessor into
 // MapFile. Entity sections (enemies/chests/doors/custom_enemies) carry a
 // nil field — they parse into spawn lists, not a grid. This is the single
 // source for sectionFor (name→slot) and layerSlice (slot→*[]string) so
@@ -344,6 +363,7 @@ var layerSections = []layerSection{
 	{sectionDecor, slotDecor, func(mf *MapFile) *[]string { return &mf.Decor }},
 	{sectionProps, slotProps, func(mf *MapFile) *[]string { return &mf.Props }},
 	{sectionCeiling, slotCeiling, func(mf *MapFile) *[]string { return &mf.Ceiling }},
+	{sectionElevation, slotElevation, func(mf *MapFile) *[]string { return &mf.Elevation }},
 	{sectionEnemies, slotEnemies, nil},
 	{sectionChests, slotChests, nil},
 	{sectionDoors, slotDoors, nil},
@@ -669,6 +689,20 @@ func (mf *MapFile) validate() error {
 	default:
 		return fmt.Errorf("ceiling layer has %d rows, size declares %d", len(mf.Ceiling), mf.Height)
 	}
+	// Elevation is optional too (same legacy rule as ceiling): missing → blank
+	// all-'0' (flat) layer; full height → validate widths; partial → malformed.
+	switch len(mf.Elevation) {
+	case 0:
+		mf.Elevation = BlankLayer(mf.Width, mf.Height, ElevationGroundChar)
+	case mf.Height:
+		for i, row := range mf.Elevation {
+			if len(row) != mf.Width {
+				return fmt.Errorf("elevation layer row %d has %d cols, size declares %d", i, len(row), mf.Width)
+			}
+		}
+	default:
+		return fmt.Errorf("elevation layer has %d rows, size declares %d", len(mf.Elevation), mf.Height)
+	}
 	if mf.StartX < 0 || mf.StartX >= mf.Width || mf.StartZ < 0 || mf.StartZ >= mf.Height {
 		return fmt.Errorf("start (%d,%d) outside map", mf.StartX, mf.StartZ)
 	}
@@ -932,7 +966,11 @@ func (mf MapFile) Encode(w io.Writer) error {
 	if len(ceiling) == 0 {
 		ceiling = BlankLayer(mf.Width, mf.Height, CeilingOpenChar)
 	}
-	for _, layer := range append(mf.requiredLayers(), namedLayer{sectionCeiling, ceiling}) {
+	elevation := mf.Elevation
+	if len(elevation) == 0 {
+		elevation = BlankLayer(mf.Width, mf.Height, ElevationGroundChar)
+	}
+	for _, layer := range append(mf.requiredLayers(), namedLayer{sectionCeiling, ceiling}, namedLayer{sectionElevation, elevation}) {
 		fmt.Fprintf(bw, "%s:\n", layer.name)
 		for _, row := range layer.rows {
 			fmt.Fprintln(bw, row)

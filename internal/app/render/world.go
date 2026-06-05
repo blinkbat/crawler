@@ -40,6 +40,22 @@ type enemyVisual struct {
 	// default, unchanged for every procedural kind.
 	markerYOffset float32
 	markerXOffset float32
+	// depthOffset pushes THIS kind's BATTLE billboard further from the camera
+	// (+ = back into the arena) along the camera-forward axis. Lets a sprite
+	// whose authored art sits forward in its box (the square Feral Rat PNG)
+	// sit back in line with the procedural roster instead of looming. Zero for
+	// every procedural kind. Battle-only; the field render is world-anchored.
+	depthOffset float32
+	// shadowOffsetX / shadowOffsetZ nudge the contact disc from the sprite's
+	// FINAL footprint (after depthOffset), along the camera-right(+ = screen
+	// right) and camera-forward(+ = into the arena) axes respectively. The disc
+	// always rides the sprite's drawn XZ — these are an extra welded nudge so
+	// an author can park the shadow exactly under the visible feet of an
+	// off-center PNG without it drifting when the sprite is moved. Zero = dead
+	// under the billboard. World units; camera-relative so the nudge reads the
+	// same regardless of which way the battle camera faces.
+	shadowOffsetX float32
+	shadowOffsetZ float32
 	// tint is a per-kind base color multiplied (raylib ColorTint semantics:
 	// a*b/255 per channel) into the runtime billboard tint — darken with a
 	// gray, recolor with a hue, etc. It folds in AFTER the combat tint
@@ -60,6 +76,63 @@ func (v enemyVisual) resolveTint() rl.Color {
 		return rl.White
 	}
 	return v.tint
+}
+
+// shadowFootprint returns the world XZ where THIS visual's contact disc should
+// land: the sprite's drawn footprint plus the visual's camera-relative
+// shadowOffset nudge. Welding the disc to the same XZ the billboard draws at
+// (depthOffset already folded into `position`) is what keeps "the shadow stays
+// under the feet" true no matter how the sprite is pushed around — the offsets
+// are an explicit extra placement, not a separate anchor that can drift.
+func shadowFootprint(camera rl.Camera3D, position rl.Vector3, v enemyVisual) (float32, float32) {
+	x, z := position.X, position.Z
+	if v.shadowOffsetX != 0 || v.shadowOffsetZ != 0 {
+		fwd := horizontalForward(camera)
+		right := horizontalRight(fwd)
+		x += right.X*v.shadowOffsetX + fwd.X*v.shadowOffsetZ
+		z += right.Z*v.shadowOffsetX + fwd.Z*v.shadowOffsetZ
+	}
+	return x, z
+}
+
+// enemyVisualOverride snapshots the tunable fields of an enemyVisual into the
+// raylib-free core.EnemyVisualOverride the editor edits and the save file
+// stores. The texture is intentionally excluded — it always comes from the
+// sprite asset, never the override. The inverse (applying an override onto a
+// visual) is applyEnemyVisualOverride.
+func enemyVisualOverride(v enemyVisual) core.EnemyVisualOverride {
+	return core.EnemyVisualOverride{
+		SizeX:         v.size.X,
+		SizeY:         v.size.Y,
+		YOffset:       v.yOffset,
+		DepthOffset:   v.depthOffset,
+		ShadowRadius:  v.shadowRadius,
+		ShadowOffsetX: v.shadowOffsetX,
+		ShadowOffsetZ: v.shadowOffsetZ,
+		MarkerYOffset: v.markerYOffset,
+		MarkerXOffset: v.markerXOffset,
+		TintR:         v.tint.R,
+		TintG:         v.tint.G,
+		TintB:         v.tint.B,
+		TintA:         v.tint.A,
+	}
+}
+
+// applyEnemyVisualOverride returns v with every tunable field replaced by the
+// override's value, preserving the texture (and any non-overridable internals).
+// Used both by loadEnemyVisuals (overlay the save file onto code defaults) and
+// by the editor's live preview (draw the in-progress edit without a reload).
+func applyEnemyVisualOverride(v enemyVisual, ov core.EnemyVisualOverride) enemyVisual {
+	v.size = rl.NewVector2(ov.SizeX, ov.SizeY)
+	v.yOffset = ov.YOffset
+	v.depthOffset = ov.DepthOffset
+	v.shadowRadius = ov.ShadowRadius
+	v.shadowOffsetX = ov.ShadowOffsetX
+	v.shadowOffsetZ = ov.ShadowOffsetZ
+	v.markerYOffset = ov.MarkerYOffset
+	v.markerXOffset = ov.MarkerXOffset
+	v.tint = rl.NewColor(ov.TintR, ov.TintG, ov.TintB, ov.TintA)
+	return v
 }
 
 // tintMul multiplies two colors channel-wise (raylib's ColorTint: a*b/255
@@ -139,7 +212,15 @@ func Camera(g core.GameState) rl.Camera3D {
 		float32(math.Sin(float64(pitch))),
 		cp*float32(math.Sin(float64(yaw))),
 	)
-	position := rl.NewVector3(p.X, core.EyeHeight, p.Z)
+	// Elevation: the eye rides the ground height of the tile underfoot. At
+	// rest that's StandGroundY(tile); mid-step it's the eased Player.GroundY
+	// the movement tick interpolates across a ramp (so the camera climbs
+	// smoothly instead of snapping a level at the tile boundary).
+	groundY := g.Area.StandGroundY(p.TileX, p.TileZ)
+	if p.Anim.Kind == core.AnimStep {
+		groundY = p.GroundY
+	}
+	position := rl.NewVector3(p.X, core.EyeHeight+groundY, p.Z)
 	// Combat screen shake: a small positional jitter on a well-timed hit,
 	// scaled by the remaining ShakeTimer so it eases out. Oscillation is
 	// wall-clock-driven (two incommensurate frequencies so it wobbles rather
@@ -223,6 +304,17 @@ func DrawSkyBackground(assets Resources, g core.GameState) {
 // visible against the fog's gentle tail (which clamps at 85% saturation).
 const behindCullSlack = float32(-2.5)
 
+// behindCull reports whether world point p sits far enough behind the camera
+// to skip drawing it, using the same generous slack the DrawWorld tile loop
+// applies inline. `forward` is the caller's already-computed horizontal forward
+// (hoisted out of per-item loops). Shared by the chest / door entity draws so
+// they cull consistently with the floor under them.
+func behindCull(camera rl.Camera3D, forward, p rl.Vector3) bool {
+	dx := p.X - camera.Position.X
+	dz := p.Z - camera.Position.Z
+	return dx*forward.X+dz*forward.Z < behindCullSlack
+}
+
 func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 	m := g.Area
 	material := assets.worldMaterial(m.Materials)
@@ -266,21 +358,31 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 				}
 				continue
 			}
-			center := rl.NewVector3(cx, 0, cz)
+			// Elevation: this tile's floor (and everything on it) rides up by
+			// its level. A raised tile also drops a solid wall-textured support
+			// column from the ground to its level, so the plateau reads as a
+			// cliff face rather than a floating slab — adjacent same-level tiles
+			// merge into one mass and the sides toward lower neighbors are the
+			// exposed cliff. (No per-edge riser bookkeeping needed.)
+			elevY := float32(m.ElevationLevelAt(x, z)) * core.LevelStep
+			if elevY > 0 {
+				drawElevationColumn(material, cx, cz, elevY, tileYawDeg(x, z))
+			}
+			center := rl.NewVector3(cx, elevY, cz)
 			if m.CeilingAt(x, z) {
-				drawTileCube(material.ceilingModel, cx, core.WallHeight, cz, tileYawDeg(x, z))
+				drawTileCube(material.ceilingModel, cx, core.WallHeight+elevY, cz, tileYawDeg(x, z))
 				if logActive {
 					stats.CeilingsDrawn++
 				}
 			}
 			if m.Walls[z][x] == core.TileRock {
-				drawTileCube(material.wallModel, cx, core.WallHeight/2, cz, tileYawDeg(x, z))
+				drawTileCube(material.wallModel, cx, core.WallHeight/2+elevY, cz, tileYawDeg(x, z))
 				if logActive {
 					stats.WallsDrawn++
 				}
 				continue
 			}
-			drawFloorTile(material, assets, m.Floor[z][x], x, z, cx, cz)
+			drawFloorTile(material, assets, m.Floor[z][x], x, z, cx, cz, elevY)
 			if logActive {
 				stats.FloorsDrawn++
 			}
@@ -362,14 +464,20 @@ func footprintAnchor(center rl.Vector3, footprint []core.MultiTileOffset) rl.Vec
 //
 // Universal variants render at the same y as the base floor so adjacent
 // tiles meet flush without visible seams.
-func drawFloorTile(material worldMaterialResources, assets Resources, cell byte, x, z int, cx, cz float32) {
+func drawFloorTile(material worldMaterialResources, assets Resources, cell byte, x, z int, cx, cz, elevY float32) {
 	yaw := tileYawDeg(x, z)
+	// Ramp tiles draw a solid earth wedge (their Elevation cell is the LOW
+	// level, so elevY is the low edge height) instead of a flat floor slab.
+	if facing, ok := core.RampAscentFacing(cell); ok {
+		drawRampWedge(assets.rampModel, cx, cz, elevY, facing)
+		return
+	}
 	if special, ok := assets.specialFloors[cell]; ok {
-		drawTileCube(special, cx, -0.03, cz, yaw)
+		drawTileCube(special, cx, -0.03+elevY, cz, yaw)
 		return
 	}
 	if !material.hasFloorVariant {
-		drawTileCube(material.floorModel, cx, -0.03, cz, yaw)
+		drawTileCube(material.floorModel, cx, -0.03+elevY, cz, yaw)
 		return
 	}
 	// All explicit floor chars (grass, dirt, dark grass, stone, cobble,
@@ -383,7 +491,64 @@ func drawFloorTile(material worldMaterialResources, assets Resources, cell byte,
 	case 2:
 		model = material.floorDarkModel
 	}
-	drawTileCube(model, cx, -0.03, cz, yaw)
+	drawTileCube(model, cx, -0.03+elevY, cz, yaw)
+}
+
+// triNormal returns the unit normal of triangle (a,b,c) by the right-hand
+// rule (CCW → outward). Used by the ramp-wedge mesh builder to orient faces.
+func triNormal(a, b, c rl.Vector3) rl.Vector3 {
+	ux, uy, uz := b.X-a.X, b.Y-a.Y, b.Z-a.Z
+	vx, vy, vz := c.X-a.X, c.Y-a.Y, c.Z-a.Z
+	nx, ny, nz := uy*vz-uz*vy, uz*vx-ux*vz, ux*vy-uy*vx
+	l := float32(math.Sqrt(float64(nx*nx + ny*ny + nz*nz)))
+	if l > 0 {
+		nx, ny, nz = nx/l, ny/l, nz/l
+	}
+	return rl.NewVector3(nx, ny, nz)
+}
+
+// rampFacingYaw maps a ramp's ascent facing to the Y-rotation (degrees) that
+// turns the wedge model (built ascending toward -Z / north) to face that way.
+// Verified against the FacingVector convention (North 0,-1; East 1,0; etc.).
+func rampFacingYaw(facing int) float32 {
+	switch facing {
+	case core.North:
+		return 0
+	case core.West:
+		return 90
+	case core.South:
+		return 180
+	case core.East:
+		return 270
+	}
+	return 0
+}
+
+// drawRampWedge draws the shared solid ramp wedge at tile (cx,cz) with its low
+// edge resting at lowY (= lowLevel·LevelStep), yaw-rotated to ascend toward
+// `facing`. The model's geometry guarantees the high edge lands one LevelStep
+// up — flush with the higher floor — and the footprint fills the tile.
+func drawRampWedge(model rl.Model, cx, cz, lowY float32, facing int) {
+	rl.DrawModelEx(model,
+		rl.NewVector3(cx, lowY, cz),
+		rl.NewVector3(0, 1, 0), rampFacingYaw(facing),
+		rl.NewVector3(1, 1, 1), rl.White)
+}
+
+// drawElevationColumn draws a solid wall-textured column from the ground (y=0)
+// up to topY at the tile center, giving a raised tile a cliff/retaining face
+// instead of a floating slab. Scales the material's wall cube (native height
+// WallHeight) to topY. Columns between two same-level tiles overdraw hidden
+// internal faces — cheap, and it avoids any per-edge riser bookkeeping.
+func drawElevationColumn(material worldMaterialResources, cx, cz, topY, yawDeg float32) {
+	if topY <= 0 {
+		return
+	}
+	rl.DrawModelEx(material.wallModel,
+		rl.NewVector3(cx, topY/2, cz),
+		rl.NewVector3(0, 1, 0), yawDeg,
+		rl.NewVector3(1, topY/core.WallHeight, 1),
+		rl.White)
 }
 
 // drawDecor renders the floor-layer decoration for a tile. '.' falls through
@@ -840,13 +1005,22 @@ func collectTorches(m core.AreaDefinition, camera rl.Camera3D) []torchLight {
 // rim) scaled to `radius` and laid just above the floor at y=0.02 so
 // it composites over the floor texture without z-fighting. `radius`
 // is the half-extent in world units (a tile is 1.0 across).
+const groundShadowFloorClearance = float32(0.02)
+
 func drawGroundShadow(cx, cz, radius float32) {
+	drawGroundShadowAt(cx, groundShadowFloorClearance, cz, radius)
+}
+
+// drawGroundShadowAt is drawGroundShadow with an explicit Y, so a contact disc
+// can sit on a raised tile's floor (a pack/chest on an elevation plateau)
+// instead of the world ground plane.
+func drawGroundShadowAt(cx, cy, cz, radius float32) {
 	if !groundShadowReady || radius <= 0 {
 		return
 	}
 	rl.DrawModelEx(
 		groundShadowModel,
-		rl.NewVector3(cx, 0.02, cz),
+		rl.NewVector3(cx, cy, cz),
 		rl.NewVector3(0, 1, 0), 0,
 		rl.NewVector3(radius*2, 1, radius*2),
 		rl.White,
@@ -1127,9 +1301,11 @@ func drawFieldPacks(camera rl.Camera3D, g core.GameState, assets Resources) {
 		// them mid-step, and engagement/win paths snap them. No
 		// fallback to tileWorldPos is needed; pack.X/Z is always
 		// authoritative for the field render.
-		position := rl.NewVector3(pack.X, enemyBillboardY, pack.Z)
+		groundY := g.Area.StandGroundY(pack.TileX, pack.TileZ)
+		position := rl.NewVector3(pack.X, enemyBillboardY+groundY, pack.Z)
 		if visual.shadowRadius > 0 {
-			drawGroundShadow(position.X, position.Z, visual.shadowRadius)
+			sx, sz := shadowFootprint(camera, position, visual)
+			drawGroundShadowAt(sx, groundY+groundShadowFloorClearance, sz, visual.shadowRadius)
 		}
 		billboardPos := position
 		billboardPos.Y += visual.yOffset
@@ -1153,7 +1329,25 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 	// with the world geometry around them.
 	defer beginBillboardFogPass(camera, g, assets)()
 	members := core.BattleMembers(&g)
-	for i, enemy := range members {
+	// Precompute the visible (alive-or-fading) member count once, and track
+	// each drawn member's visible-slot index incrementally below. This is what
+	// battleEnemySlot used to recompute per enemy (a re-walk of the whole pack
+	// inside the loop = O(n²)); doing it once keeps the loop O(n) with no extra
+	// allocation. The increment mirrors battleEnemySlot's "found = visible;
+	// visible++" so the formation layout is identical.
+	visibleCount := 0
+	for i := range members {
+		if members[i].Alive || members[i].DeathFade > 0 {
+			visibleCount++
+		}
+	}
+	visibleSlot := -1
+	for i := range members {
+		enemy := &members[i]
+		fading := enemy.Alive || enemy.DeathFade > 0
+		if fading {
+			visibleSlot++
+		}
 		visual, ok := enemyVisualFor(assets, enemy.Kind)
 		if !ok {
 			continue
@@ -1161,7 +1355,16 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 		if !enemy.Alive && enemy.DeathFade <= 0 {
 			continue
 		}
-		position := enemyDrawPosition(camera, g, i, enemy)
+		position := enemyFormationPos(camera, &g, visibleSlot, visibleCount, enemy)
+		// Per-kind depth push-back (the square Feral Rat PNG) — move the
+		// billboard further from the camera along forward so it sits in line
+		// with the procedural roster instead of looming. The shadow + chevron
+		// derived below ride the adjusted position.
+		if visual.depthOffset != 0 {
+			fwd := horizontalForward(camera)
+			position.X += fwd.X * visual.depthOffset
+			position.Z += fwd.Z * visual.depthOffset
+		}
 		tint := rl.White
 		if !enemy.Alive {
 			alpha := uint8(220 * core.Clamp(float64(enemy.DeathFade/core.DeathFadeDuration), 0, 1))
@@ -1217,7 +1420,8 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 		// billboard-fog BeginShaderMode doesn't tint it — same unlit
 		// behaviour the prop shadows rely on under the world lighting pass.
 		if visual.shadowRadius > 0 {
-			drawGroundShadow(position.X, position.Z, visual.shadowRadius)
+			sx, sz := shadowFootprint(camera, position, visual)
+			drawGroundShadow(sx, sz, visual.shadowRadius)
 		}
 		// Distance fog is applied by the active billboard-fog shader
 		// (BeginShaderMode at the top of this function), not by a
@@ -1573,8 +1777,13 @@ func victoryDanceMotion(class core.PartyClass, elapsed float32) (float32, float3
 }
 
 // enemyDrawPosition returns the 3D position to render the given member of
-// the active pack at, given its slot in the battle formation.
-func enemyDrawPosition(camera rl.Camera3D, g core.GameState, slot int, enemy core.Enemy) rl.Vector3 {
+// the active pack at, resolving its visible slot from g. This is the
+// single-shot path used by popup / VFX anchors; the per-frame battle draw
+// loop (drawBattlePack) precomputes the slot mapping once and calls
+// enemyFormationPos directly so it doesn't re-walk the pack per enemy
+// (which made the loop O(n²)). Takes g by pointer so the per-enemy call
+// doesn't copy the whole GameState.
+func enemyDrawPosition(camera rl.Camera3D, g *core.GameState, slot int, enemy core.Enemy) rl.Vector3 {
 	if g.Battle.Phase == core.BattleNone || g.Battle.ActivePack < 0 {
 		// Fallback for any stray caller during a phase transition; use the
 		// active pack's tile if we still know it.
@@ -1585,8 +1794,16 @@ func enemyDrawPosition(camera rl.Camera3D, g core.GameState, slot int, enemy cor
 		}
 		return pack
 	}
-
 	visibleSlot, count := battleEnemySlot(g, slot)
+	return enemyFormationPos(camera, g, visibleSlot, count, &enemy)
+}
+
+// enemyFormationPos is the formation-placement math for one enemy given its
+// already-resolved (visibleSlot, count). Split out of enemyDrawPosition so the
+// per-frame battle loop can compute the slot mapping ONCE (a single O(n) pass)
+// and call this per member, instead of each call re-walking the pack to find
+// its slot — turning a per-frame O(n²) into O(n).
+func enemyFormationPos(camera rl.Camera3D, g *core.GameState, visibleSlot, count int, enemy *core.Enemy) rl.Vector3 {
 	if count <= 0 {
 		// ActivePack is >= 0 here (first guard), but re-check the upper
 		// bound before indexing — same defensive form as the fallback
@@ -1597,6 +1814,13 @@ func enemyDrawPosition(camera rl.Camera3D, g core.GameState, slot int, enemy cor
 		}
 		p := g.Packs[g.Battle.ActivePack]
 		return tileWorldPos(p.TileX, p.TileZ, enemyBillboardY)
+	}
+	// A fully-faded member (DeathFade elapsed) whose damage popup still lingers
+	// resolves to visibleSlot -1 from battleEnemySlot; without this clamp the
+	// offset math (visibleSlot - (count-1)/2) drives the popup off to the left
+	// of the formation. Anchor it to the first slot instead.
+	if visibleSlot < 0 {
+		visibleSlot = 0
 	}
 	forward := horizontalForward(camera)
 	right := horizontalRight(forward)
@@ -1700,15 +1924,14 @@ func horizontalForward(camera rl.Camera3D) rl.Vector3 {
 // battleEnemySlot maps a member slot to (visible slot, total visible
 // count) — visible meaning alive or still death-fading. Returns -1 for the
 // visible slot when the queried member isn't currently visible.
-func battleEnemySlot(g core.GameState, memberSlot int) (int, int) {
+func battleEnemySlot(g *core.GameState, memberSlot int) (int, int) {
 	visible := 0
 	count := 0
 	found := -1
 	// Index-range (not value-range): Enemy embeds a full
 	// DefinitionOverride, so `for _, m := range` would copy that whole
-	// struct per iteration — wasteful when we only read two fields, and
-	// this runs once per enemy per frame (O(n²) over the pack).
-	members := core.BattleMembers(&g)
+	// struct per iteration — wasteful when we only read two fields.
+	members := core.BattleMembers(g)
 	for i := range members {
 		if !members[i].Alive && members[i].DeathFade <= 0 {
 			continue

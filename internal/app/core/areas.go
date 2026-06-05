@@ -194,6 +194,10 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	if len(ceiling) == 0 {
 		ceiling = mapfile.BlankLayer(mf.Width, mf.Height, TileCeilingOpen)
 	}
+	elevation := mf.Elevation
+	if len(elevation) == 0 {
+		elevation = mapfile.BlankLayer(mf.Width, mf.Height, ElevationGround)
+	}
 	return AreaDefinition{
 		Path:          path,
 		Name:          mf.Name,
@@ -204,6 +208,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		Decor:         append([]string(nil), mf.Decor...),
 		Props:         append([]string(nil), mf.Props...),
 		Ceiling:       append([]string(nil), ceiling...),
+		Elevation:     append([]string(nil), elevation...),
 		Materials:     mat,
 		StartTileX:    mf.StartX,
 		StartTileZ:    mf.StartZ,
@@ -301,6 +306,10 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 	if len(ceiling) == 0 {
 		ceiling = mapfile.BlankLayer(a.Width, a.Height, TileCeilingOpen)
 	}
+	elevation := a.Elevation
+	if len(elevation) == 0 {
+		elevation = mapfile.BlankLayer(a.Width, a.Height, ElevationGround)
+	}
 	customs := make([]mapfile.MapCustomEnemy, 0, len(a.CustomEnemies))
 	for _, ce := range a.CustomEnemies {
 		mapCE, err := MapCustomEnemyFromDef(ce)
@@ -323,6 +332,7 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		Decor:         append([]string(nil), a.Decor...),
 		Props:         append([]string(nil), a.Props...),
 		Ceiling:       append([]string(nil), ceiling...),
+		Elevation:     append([]string(nil), elevation...),
 		Packs:         packs,
 		Chests:        chests,
 		Doors:         doors,

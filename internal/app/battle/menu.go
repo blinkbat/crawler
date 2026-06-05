@@ -208,8 +208,19 @@ func applyItem(g *core.GameState) {
 		resetBattleAction(g)
 		return
 	}
-	if target < 0 || target >= len(g.Party) || g.Party[target].HP <= 0 {
+	// Ingested is checked alongside HP<=0: the target picker excludes ingested
+	// allies, but a mantrap can swallow the chosen ally between target-select
+	// and this confirm (mixed-initiative). Without this guard the stack is
+	// consumed and healPartyMember no-ops on the ingested member — item wasted.
+	if target < 0 || target >= len(g.Party) || g.Party[target].HP <= 0 || g.Party[target].Ingested {
 		setBattleStatus(g, "Invalid target.")
+		return
+	}
+	def := core.ItemInfo(kind)
+	// Don't spend a heal item on a full-HP ally — the Mass Mend path guards the
+	// same way (actions.go); without this the stack is consumed for zero gain.
+	if def.HealAmount > 0 && g.Party[target].HP >= g.Party[target].MaxHP {
+		setBattleStatus(g, g.Party[target].Name+" is already at full HP.")
 		return
 	}
 	// Try to consume from inventory first — bail without using the action's
@@ -221,7 +232,6 @@ func applyItem(g *core.GameState) {
 		return
 	}
 	g.Inventory = updated
-	def := core.ItemInfo(kind)
 	healed := healPartyMember(g, target, def.HealAmount)
 	actor := &g.Party[g.Battle.CurrentParty]
 	actor.AttackBump = core.BumpDuration

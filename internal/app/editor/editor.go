@@ -1,6 +1,6 @@
 // Package editor is the in-game map authoring tool. Maps are stored as
-// five parallel ASCII layers (walls / floor / decor / props / ceiling)
-// plus a list of entities (player start, enemy spawns, chests). The
+// six paintable grid layers (walls / floor / decor / props / ceiling /
+// elevation) plus a list of entities (player start, enemy spawns, chests). The
 // editor lets the user select an active layer and paint into it with
 // layer-specific brushes.
 package editor
@@ -24,8 +24,8 @@ const (
 	ActionTest
 )
 
-// Layer names which of the area's five grid layers (walls / floor / decor /
-// props / ceiling) — or the entity list — the editor is currently authoring.
+// Layer names which of the area's six grid layers (walls / floor / decor /
+// props / ceiling / elevation) — or the entity list — the editor is currently authoring.
 // Active layer drives the palette, the click action, and the visual emphasis
 // on the grid.
 type Layer int
@@ -36,11 +36,16 @@ const (
 	LayerDecor
 	LayerProps
 	LayerCeiling
+	LayerElevation
 	LayerEntities
 )
 
-// layerCount is the number of editor layers (the five grid layers +
-// the entity list), derived from the enum's last value so adding a
+// maxEditLevel is the highest elevation level the height selector reaches
+// (levels serialize as a single digit '0'..'9' in the Elevation grid).
+const maxEditLevel = 9
+
+// layerCount is the number of editor layers (six grid layers + the
+// entity list), derived from the enum's last value so adding a
 // layer doesn't need a separate magic-number bump.
 const layerCount = int(LayerEntities) + 1
 
@@ -206,6 +211,13 @@ var layerBrushes = [layerCount][]Brush{
 		{Name: "Solid (#)", Char: core.TileCeilingSolid, Hotkey: rl.KeyOne, Color: rl.NewColor(110, 96, 80, 255)},
 		{Name: "Open (.)", Char: core.TileCeilingOpen, Hotkey: rl.KeyTwo, Color: rl.NewColor(86, 142, 196, 255)},
 	},
+	// Elevation: a single "Set Height" brush stamps the height selector's
+	// current level (activeBrush rewrites its Char to '0'+editLevel each
+	// frame, so flood-fill + the brush preview pick the level up for free).
+	// Ramp placement is the toolbar's Ramp tool-mode, not a brush.
+	LayerElevation: {
+		{Name: "Set Height", Char: 0, Hotkey: rl.KeyOne, Color: rl.NewColor(150, 140, 120, 255)},
+	},
 	LayerEntities: buildEntityBrushes(),
 }
 
@@ -317,12 +329,13 @@ func buildEntityBrushes() []Brush {
 // same lockstep guard the sibling switches in applyTool / eraseAt /
 // activeGrid already panic on at a missing case.
 var layerDisplayNames = [layerCount]string{
-	LayerWalls:    "Walls",
-	LayerFloor:    "Floor",
-	LayerDecor:    "Decor",
-	LayerProps:    "Props",
-	LayerCeiling:  "Ceiling",
-	LayerEntities: "Entities",
+	LayerWalls:     "Walls",
+	LayerFloor:     "Floor",
+	LayerElevation: "Elevation",
+	LayerDecor:     "Decor",
+	LayerProps:     "Props",
+	LayerCeiling:   "Ceiling",
+	LayerEntities:  "Entities",
 }
 
 func layerName(l Layer) string {
@@ -414,6 +427,14 @@ const (
 	// (which still bounces through modalConfirmDirty if the area has
 	// unsaved edits).
 	modalEscMenu
+	// modalFoeView is the Foe Visualizer: a live combat-preview pane for any
+	// enemy KIND plus sliders for its billboard placement, contact shadow,
+	// target cursor, and tint. Save writes the tuning to maps/sprites/
+	// visuals.json (core.EnemyVisualOverride), which the game overlays on its
+	// code-default visuals at load — so the author tunes a foe and saves it
+	// straight into the game. Map-independent (it edits global per-kind look,
+	// not anything on the current area).
+	modalFoeView
 	// modalCount is the count sentinel for the modalKind enum — used by
 	// the modalHandlers init assert in draw.go to walk every legal
 	// value and confirm the dispatch table is complete. Keep this row
@@ -468,6 +489,13 @@ type State struct {
 
 	layer    Layer
 	brushIdx [layerCount]int
+	// editLevel is the height selector's current level (0..maxEditLevel): the
+	// value the Elevation "Set Height" brush stamps and the focus level for
+	// the slice-view tinting. rampMode toggles the smart ramp tool — while on,
+	// a left-click places a connective ramp (right-click clears one) instead
+	// of normal painting.
+	editLevel int
+	rampMode  bool
 	// paletteScroll is the per-layer vertical scroll offset (in pixels)
 	// applied to the brush entries. Adjusted by mouse-wheel when the
 	// pointer is over the palette. Clamped in drawPalette so the bottom
@@ -532,7 +560,25 @@ type State struct {
 	// while the modal is open. Refreshed by updateSoundsModal at the
 	// top of each frame; drawSoundsModal reads it back.
 	soundSavedCache []string
-	pending         pendingAction
+	// soundAssignCache is the cue-slug → user-sound assignment map, cached
+	// alongside soundSavedCache. Both are refreshed on modal-open and after
+	// each save/delete/assign mutation (refreshSoundCaches) — NOT per frame —
+	// so the assign column's draw can index this map instead of re-reading +
+	// re-parsing assignments.txt once per cue every frame.
+	soundAssignCache map[string]string
+
+	// Foe Visualizer (modalFoeView) state. foeKind is the enemy kind being
+	// tuned; foeVisual is the working override the sliders edit + the preview
+	// draws; foeBaseline snapshots the values at open so Reset reverts this
+	// session's edits. foeCursor is the focused slider row. Persist across
+	// open/close so reopening returns to the last foe.
+	foeKind     core.EnemyKind
+	foeVisual   core.EnemyVisualOverride
+	foeBaseline core.EnemyVisualOverride
+	foeCursor   int
+	foeInit     bool
+
+	pending pendingAction
 
 	undo  []core.AreaDefinition
 	redo  []core.AreaDefinition
@@ -726,6 +772,7 @@ func blankArea(w, h int, floorChar byte) core.AreaDefinition {
 	decor := make([]string, h)
 	props := make([]string, h)
 	ceiling := make([]string, h)
+	elevation := make([]string, h)
 	for z := 0; z < h; z++ {
 		wb := make([]byte, w)
 		for x := 0; x < w; x++ {
@@ -740,6 +787,7 @@ func blankArea(w, h int, floorChar byte) core.AreaDefinition {
 		decor[z] = blankRow(w, core.DecorAuto)
 		props[z] = blankRow(w, core.TilePropEmpty)
 		ceiling[z] = blankRow(w, core.TileCeilingOpen)
+		elevation[z] = blankRow(w, core.ElevationGround)
 	}
 	return core.AreaDefinition{
 		Name:         "Untitled",
@@ -750,6 +798,7 @@ func blankArea(w, h int, floorChar byte) core.AreaDefinition {
 		Decor:        decor,
 		Props:        props,
 		Ceiling:      ceiling,
+		Elevation:    elevation,
 		Materials:    core.MaterialDungeon,
 		StartTileX:   1,
 		StartTileZ:   1,
@@ -766,14 +815,32 @@ func blankRow(width int, c byte) string {
 	return string(b)
 }
 
-// activeBrush returns the currently selected brush in the active layer.
+// activeBrush returns the currently selected brush in the active layer. On the
+// Elevation layer the brush char is the height selector's current level
+// ('0'+editLevel) rather than a static palette char, so paint / flood-fill /
+// the brush preview all stamp the selected height through the normal path.
 func (s *State) activeBrush() Brush {
 	palette := layerBrushes[s.layer]
 	idx := s.brushIdx[s.layer]
 	if idx < 0 || idx >= len(palette) {
 		idx = 0
 	}
-	return palette[idx]
+	b := palette[idx]
+	if s.layer == LayerElevation {
+		b.Char = byte('0' + clampLevel(s.editLevel))
+	}
+	return b
+}
+
+// clampLevel bounds a level into [0, maxEditLevel].
+func clampLevel(l int) int {
+	if l < 0 {
+		return 0
+	}
+	if l > maxEditLevel {
+		return maxEditLevel
+	}
+	return l
 }
 
 // Update advances the editor one frame. Returns the next action for the

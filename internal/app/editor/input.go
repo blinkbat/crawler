@@ -129,7 +129,7 @@ func updateHotkeys(s *State) {
 		if shift {
 			dir = -1
 		}
-		s.layer = Layer((int(s.layer) + dir + layerCount) % layerCount)
+		s.layer = core.WrapEnum(s.layer, dir, layerCount)
 	}
 
 	// F5: launch a playtest of the current in-memory area without saving.
@@ -166,6 +166,16 @@ func updateHotkeys(s *State) {
 		s.brushSize = stepBrush(s.brushSize, +1)
 	}
 
+	// Height selector (the elevation level the Set Height brush stamps + the
+	// slice-view focus). PgUp/PgDn are the keyboard accelerators for the
+	// toolbar's Lvl -/+ buttons.
+	if rl.IsKeyPressed(rl.KeyPageUp) {
+		s.editLevel = clampLevel(s.editLevel + 1)
+	}
+	if rl.IsKeyPressed(rl.KeyPageDown) {
+		s.editLevel = clampLevel(s.editLevel - 1)
+	}
+
 	if !ctrl && rl.IsKeyPressed(rl.KeyHome) {
 		s.zoom = 1
 		s.panX, s.panY = 0, 0
@@ -182,7 +192,7 @@ func updateHotkeys(s *State) {
 	// T cycles the day/night preview phase. Shows in the top bar and seeds
 	// StepCount on F5 so the playtest drops into that phase.
 	if !ctrl && rl.IsKeyPressed(rl.KeyT) {
-		s.previewPhase = core.TimeOfDay((int(s.previewPhase) + 1) % core.TimeOfDayCount)
+		s.previewPhase = core.WrapEnum(s.previewPhase, 1, core.TimeOfDayCount)
 		s.flash("Preview: " + core.PhaseName(s.previewPhase))
 	}
 
@@ -351,6 +361,17 @@ func updateMouse(s *State) {
 			continueDrag(s, hx, hz)
 		}
 		if rl.IsMouseButtonPressed(rl.MouseRightButton) {
+			// Ramp tool-mode: right-click clears a ramp at the tile (its floor
+			// arrow → auto floor), leaving the elevation digit so the cliff
+			// stays. No-op (no undo snapshot) on a non-ramp tile.
+			if s.rampMode {
+				if _, ok := s.area.RampAt(hx, hz); ok {
+					pushUndo(s)
+					setLayerCell(&s.area.Floor, hx, hz, core.FloorAuto)
+					s.dirty = true
+				}
+				return
+			}
 			// On the Entities layer, right-click opens the context menu
 			// over the tile so the author can Edit / Delete / move-start
 			// without having to switch brushes. Empty entity cells fall
@@ -377,6 +398,14 @@ func updateMouse(s *State) {
 // LayerEntities brushes grab the entity under the cursor for drag-move
 // when there is one. Ctrl+click on a grid layer is flood fill.
 func startDrag(s *State, x, z int, ctrl, shift bool) {
+	// Ramp tool-mode: a left-click drops a connective ramp via the smart
+	// tool (derives direction + low level from the neighbors), short-
+	// circuiting normal painting. placeRamp snapshots undo on success.
+	if s.rampMode {
+		placeRamp(s, x, z)
+		s.drag = dragNone
+		return
+	}
 	gridLayer := isGridLayer(s.layer)
 
 	if gridLayer && ctrl {
@@ -1204,6 +1233,7 @@ func updatePackEditModal(s *State) Action {
 			core.AppendBuiltinPackMember(pack, rule.Kind)
 			s.modalCursor = len(pack.Members) - 1
 			s.dirty = true
+			return ActionNone
 		}
 	}
 	if rl.IsKeyPressed(rl.KeyC) {
@@ -1218,7 +1248,7 @@ func updatePackEditModal(s *State) Action {
 	}
 	if rl.IsKeyPressed(rl.KeyA) {
 		pushUndo(s)
-		pack.AI = core.PackAI((int(pack.AI) + 1) % core.PackAICount)
+		pack.AI = core.WrapEnum(pack.AI, 1, core.PackAICount)
 		s.dirty = true
 		s.flash("Pack AI: " + core.PackAILabel(pack.AI))
 	}
@@ -1297,7 +1327,7 @@ func packEditCmds(s *State) (adds, actions []modalCmd) {
 		{label: "Down", run: func() Action { packMoveSelected(s, pack, +1); return ActionNone }},
 		{label: "AI: " + core.PackAILabel(pack.AI), run: func() Action {
 			pushUndo(s)
-			pack.AI = core.PackAI((int(pack.AI) + 1) % core.PackAICount)
+			pack.AI = core.WrapEnum(pack.AI, 1, core.PackAICount)
 			s.dirty = true
 			s.flash("Pack AI: " + core.PackAILabel(pack.AI))
 			return ActionNone

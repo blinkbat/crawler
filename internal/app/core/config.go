@@ -22,9 +22,15 @@ const (
 	// 15 FPS floor on simulation stepping.
 	MaxFrameStep = float32(1.0 / 15.0)
 
-	TileSize      = 2.05
-	WallHeight    = 2.25
-	EyeHeight     = 1.32
+	TileSize   = 2.05
+	WallHeight = 2.25
+	EyeHeight  = 1.32
+	// LevelStep is the world-space height of one elevation level (the
+	// Elevation grid layer). A tile at level N renders its floor at
+	// N·LevelStep and a ramp slopes one LevelStep over its tile. Tunable:
+	// larger = more dramatic verticality + steeper ramps. 2.4 (~ WallHeight)
+	// over a 2.05 tile is a ~49° ramp — a level reads as a full story up.
+	LevelStep     = float32(2.4)
 	StepDuration  = 0.18
 	TurnDuration  = 0.14
 	BumpDuration  = 0.18
@@ -700,7 +706,7 @@ const (
 	LevelStatPoints = 3
 	// LevelSkillPoints is the number of skill points granted per
 	// level-up. Land on PartyMember.SkillPoints; the player spends
-	// them later from the Skills panel's tree UI via SpendSkillTier.
+	// them later from the Skills panel's tree UI via BuySkillNode.
 	// Default 1 — each level reliably unlocks one tier somewhere in
 	// the tree, with no pressure to spend it immediately.
 	LevelSkillPoints = 1

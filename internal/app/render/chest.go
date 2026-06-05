@@ -48,9 +48,15 @@ const (
 // still bound. The body / lid propModels live on Resources so the
 // meshes load once at startup and unload at game exit.
 func DrawChests(camera rl.Camera3D, g core.GameState, assets Resources) {
+	forward := horizontalForward(camera)
 	for _, ch := range g.Chests {
-		base := tileWorldPos(ch.TileX, ch.TileZ, 0)
-		drawGroundShadow(base.X, base.Z, 0.40)
+		base := tileWorldPos(ch.TileX, ch.TileZ, g.Area.StandGroundY(ch.TileX, ch.TileZ))
+		// Skip chests behind the camera — same generous slack the world tile
+		// loop uses, so a chest you just turned from doesn't pop out.
+		if behindCull(camera, forward, base) {
+			continue
+		}
+		drawGroundShadowAt(base.X, base.Y+groundShadowFloorClearance, base.Z, 0.40)
 
 		// Body — sits at floor level. propModel.draw owns the
 		// per-part offsets, scales, and tints.
@@ -66,7 +72,6 @@ func DrawChests(camera rl.Camera3D, g core.GameState, assets Resources) {
 			assets.chestLid.draw(lidPos, 1.0, 0)
 		}
 	}
-	_ = camera
 }
 
 // drawChestLidLooted paints the lid in its "thrown open" pose —

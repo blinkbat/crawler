@@ -10,12 +10,14 @@ import (
 // The map editor runs its OWN smaller scale rather than the render.Font*
 // tokens (whose FontSmall is already 16 and FontBody 20 — too large for
 // this chrome, and large enough to overflow the editor's tight buttons).
-// (Modal hint rows and axis ticks still use bare 11–13 literals in
-// draw.go; sounds.go keeps its own soundFont* trio for the sound modal.)
+// (Modal-specific 11/13 accent sizes still live at their narrow call sites;
+// sounds.go keeps its own soundFont* trio for the sound modal.)
 const (
 	editorFontTopbar = float32(18) // topbar map-id label
 	editorFontBody   = float32(16) // buttons + primary panel text
 	editorFontLabel  = float32(14) // topbar info line / field labels
+	editorFontHint   = float32(12) // compact modal/footer hints
+	editorFontTick   = float32(10) // grid axis tick labels
 )
 
 // Editor UI chrome palette. The map-content colors (tile brushes, swatches)

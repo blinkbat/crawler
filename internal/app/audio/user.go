@@ -100,13 +100,21 @@ func AssignUserSound(cue Sound, userName string) (failed []string, err error) {
 // CurrentAssignment returns the user-sound name currently assigned to a
 // cue, or "" if the cue uses the procedural default. Caller's UI reads
 // this to render "Cue X → my_sound.wav" or "Cue X → (default)".
+//
+// This re-reads + re-parses assignments.txt on every call. A caller that
+// reads several cues at once (the editor's sound modal, per frame) should
+// load the whole map ONCE via AllAssignments and index it with
+// SoundCanonicalName instead of calling this per cue.
 func CurrentAssignment(cue Sound) string {
-	assigns := userconfig.LoadAssignments()
-	cueName := SoundCanonicalName(cue)
-	if cueName == "" {
-		return ""
-	}
-	return assigns[cueName]
+	return AllAssignments()[SoundCanonicalName(cue)]
+}
+
+// AllAssignments returns the full cue-slug → user-sound-name map parsed from
+// assignments.txt (the single source CurrentAssignment indexes). Callers that
+// need several cues' assignments in one frame load this once and index it with
+// SoundCanonicalName, collapsing N file reads+parses into one.
+func AllAssignments() map[string]string {
+	return userconfig.LoadAssignments()
 }
 
 // ReloadUserAssignments re-reads assignments.txt and overlays the bank

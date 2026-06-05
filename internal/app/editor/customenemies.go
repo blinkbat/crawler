@@ -536,9 +536,13 @@ func updateCustomEnemiesModal(s *State) Action {
 			// keyboard convenience (safe — this branch is gated off the
 			// name-field focus, so it can't eat a typed space).
 			toggle := input.EditorConfirmPressed() || rl.IsKeyPressed(rl.KeySpace)
-			if dir != 0 || toggle {
+			section, sub := customEnemyRowAt(s.modalCursor)
+			// Only snapshot undo + mark dirty when the row actually changes:
+			// base/stat/core rows respond to Left/Right (dir); only skill rows
+			// toggle on Confirm. Without this, Confirm on a non-skill row added a
+			// phantom undo step and falsely raised the unsaved-changes prompt.
+			if dir != 0 || (toggle && section == cesSkill) {
 				pushUndo(s)
-				section, sub := customEnemyRowAt(s.modalCursor)
 				applyCustomEnemyRow(def, section, sub, dir, toggle)
 				s.dirty = true
 			}
@@ -695,7 +699,7 @@ func cycleEnemyKind(cur core.EnemyKind, delta int) core.EnemyKind {
 			break
 		}
 	}
-	idx = (idx + delta + len(defs)) % len(defs)
+	idx = core.WrapIndex(idx+delta, len(defs))
 	return defs[idx].Kind
 }
 

@@ -184,7 +184,7 @@ func resolveAnchor(camera rl.Camera3D, g *core.GameState, req core.VFXRequest) (
 		if req.SlotIdx < 0 || req.SlotIdx >= len(members) {
 			return rl.Vector3{}, false
 		}
-		return enemyDrawPosition(camera, *g, req.SlotIdx, members[req.SlotIdx]), true
+		return enemyDrawPosition(camera, g, req.SlotIdx, members[req.SlotIdx]), true
 	case core.VFXAnchorParty:
 		if req.SlotIdx < 0 || req.SlotIdx >= len(g.Party) {
 			return rl.Vector3{}, false

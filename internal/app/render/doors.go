@@ -19,8 +19,12 @@ import (
 // "locked" state can add a closed-panel variant or recolor the brass
 // keystone.
 func DrawDoors(camera rl.Camera3D, g core.GameState, assets Resources) {
+	forward := horizontalForward(camera)
 	for _, d := range g.Doors {
 		center := tileWorldPos(d.TileX, d.TileZ, 0)
+		if behindCull(camera, forward, center) {
+			continue
+		}
 		yaw := doorYawDeg(d.Facing)
 		style := d.Style
 		if style < 0 || int(style) >= len(assets.doorProps) {
@@ -68,9 +72,23 @@ func DrawDoorPrompt(g core.GameState, assets Resources) {
 // label ("Forgotten Plaza") for the door prompt. Underscores become
 // spaces and each word is title-cased; an empty id falls back to "the
 // next area" so the prompt always reads as a sentence.
+//
+// DrawDoorPrompt calls this every frame the (held) prompt is open with the
+// same id, and the FieldsFunc + per-word slicing + Join allocate three times
+// per call. A single-entry memo on the input collapses that to one allocation
+// the frame the prompt opens — same shape as the goldReadout / stepCounter
+// caches elsewhere in the HUD.
+var (
+	humanizeCacheIn  string
+	humanizeCacheOut string
+)
+
 func humanizeMapID(id string) string {
 	if id == "" {
 		return "the next area"
+	}
+	if id == humanizeCacheIn {
+		return humanizeCacheOut
 	}
 	words := strings.FieldsFunc(id, func(r rune) bool { return r == '_' || r == '-' })
 	for i, w := range words {
@@ -79,7 +97,15 @@ func humanizeMapID(id string) string {
 		}
 		words[i] = strings.ToUpper(w[:1]) + w[1:]
 	}
-	return strings.Join(words, " ")
+	out := strings.Join(words, " ")
+	if out == "" {
+		// id was all separators ("_", "-") — FieldsFunc yielded no words.
+		// Fall back to the same sentence the empty-id case uses rather than
+		// rendering "Enter ?", and cache that so the memo stays consistent.
+		out = "the next area"
+	}
+	humanizeCacheIn, humanizeCacheOut = id, out
+	return out
 }
 
 // doorYawDeg maps a core.Facing direction to the degree rotation the

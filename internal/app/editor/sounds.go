@@ -2,6 +2,7 @@ package editor
 
 import (
 	"crawler/internal/app/audio"
+	"crawler/internal/app/core"
 	"crawler/internal/app/input"
 	"crawler/internal/app/render"
 	"fmt"
@@ -302,9 +303,23 @@ func openSoundsModal(s *State) {
 	s.modal = modalSounds
 	s.soundCursor = 0
 	s.soundLeftPanel = soundPanelParams
+	// Seed the disk-backed caches once on open; they're refreshed only on
+	// mutation thereafter, never per frame.
+	refreshSoundCaches(s)
 	// Reset any leftover drag from a prior session — a stale sliderIdx
 	// would let the next mouse drag pop a different slider.
 	soundDrag.sliderIdx = -1
+}
+
+// refreshSoundCaches re-reads the saved-sounds directory listing and the
+// cue-assignment map from disk into State. The sound modal only mutates these
+// through save / delete / assign actions in this package, so refreshing here
+// (on open + after each mutation) keeps the per-frame draw/update off the disk
+// entirely — previously the list ReadDir ran every Update frame and the
+// assignment file was read+parsed once per cue every Draw frame.
+func refreshSoundCaches(s *State) {
+	s.soundSavedCache = audio.ListUserSounds()
+	s.soundAssignCache = audio.AllAssignments()
 }
 
 // updateSoundsModal handles the sound modal's input. Mouse-first now:
@@ -316,10 +331,8 @@ func updateSoundsModal(s *State) Action {
 		closeModal(s)
 		return ActionNone
 	}
-	// Cache the saved-sounds list for both Update (this function) and
-	// Draw (drawSoundsModal reads s.soundSavedCache). Without this each
-	// frame would hit os.ReadDir twice while the modal is open.
-	s.soundSavedCache = audio.ListUserSounds()
+	// Read the saved-sounds list from the cache (populated on open + after
+	// each save/delete via refreshSoundCaches) — no per-frame os.ReadDir.
 	savedSounds := s.soundSavedCache
 	layout := computeSoundLayout(savedSounds)
 
@@ -337,20 +350,7 @@ func updateSoundsModal(s *State) Action {
 		} else if soundDrag.sliderIdx < len(soundParamSliders) {
 			info := soundParamSliders[soundDrag.sliderIdx]
 			track := layout.sliderTracks[soundDrag.sliderIdx]
-			t := (mp.X - track.X) / track.Width
-			if t < 0 {
-				t = 0
-			}
-			if t > 1 {
-				t = 1
-			}
-			raw := info.Min + float64(t)*(info.Max-info.Min)
-			steps := (raw - info.Min) / info.Step
-			snapped := info.Min + float64(int(steps+0.5))*info.Step
-			if snapped > info.Max {
-				snapped = info.Max
-			}
-			info.Set(&s.soundParams, snapped)
+			info.Set(&s.soundParams, sliderSnap(info.Min, info.Max, info.Step, track.X, track.Width, mp.X))
 			s.soundLeftPanel = soundPanelParams
 			s.soundCursor = soundDrag.sliderIdx
 		}
@@ -537,6 +537,7 @@ func confirmSoundDelete(s *State, name string) {
 		s.flash("Delete failed: " + err.Error())
 	} else {
 		s.flash("Deleted " + name)
+		refreshSoundCaches(s)
 	}
 }
 
@@ -575,7 +576,7 @@ func cycleCueAssignment(s *State, cue audio.Sound, delta int) {
 			break
 		}
 	}
-	idx = (idx + delta + len(options)) % len(options)
+	idx = core.WrapIndex(idx+delta, len(options))
 	failed, err := audio.AssignUserSound(cue, options[idx])
 	if err != nil {
 		s.flash("Assign failed: " + err.Error())
@@ -584,6 +585,7 @@ func cycleCueAssignment(s *State, cue audio.Sound, delta int) {
 	if len(failed) > 0 {
 		s.flash("Saved assignment but reload failed for: " + strings.Join(failed, ", "))
 	}
+	refreshSoundCaches(s)
 }
 
 // previewSoundParams synthesizes the current slider settings into PCM
@@ -617,6 +619,7 @@ func saveCurrentSound(s *State) {
 	}
 	s.soundName = saved
 	s.flash("Saved " + saved + audio.WavExt)
+	refreshSoundCaches(s)
 }
 
 // drawSoundsModal renders the three-column sound editor with mouse-first
@@ -673,35 +676,6 @@ func drawSoundsParamsCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 }
 
 func drawSoundsSlider(font rl.Font, theme render.Theme, x, y, w float32, info soundParamSliderInfo, p soundParamSet, track rl.Rectangle, focused bool) {
-	col := theme.TextMuted
-	if focused {
-		col = theme.BorderActive
-	}
-	rl.DrawTextEx(font, info.Label, rl.NewVector2(x, y), soundFontBody, 1, col)
-	// Slider track + filled portion + thumb circle. surfaceLog is the
-	// theme's "dark recessed inset" tone — same one drawBar uses for
-	// HP/MP track backgrounds, so the slider visually matches the bar.
-	rl.DrawRectangleRec(track, theme.SurfaceLog)
-	t := float32(0)
-	if info.Max > info.Min {
-		t = float32((info.Get(&p) - info.Min) / (info.Max - info.Min))
-	}
-	fillW := track.Width * t
-	fillCol := theme.TextLabel
-	if focused {
-		fillCol = theme.BorderActive
-	}
-	rl.DrawRectangleRec(rl.NewRectangle(track.X, track.Y, fillW, track.Height), fillCol)
-	rl.DrawRectangleLinesEx(track, 1, theme.BorderDim)
-	// Thumb dot at the current value position — gives the slider a
-	// clear grab affordance when the user mouses over the track.
-	thumbX := track.X + fillW
-	thumbY := track.Y + track.Height/2
-	thumbCol := theme.BorderStrong
-	if focused {
-		thumbCol = theme.BorderActive
-	}
-	rl.DrawCircle(int32(thumbX), int32(thumbY), 7, thumbCol)
 	// Numeric readout to the right of the track. Display callback
 	// overrides the fmt.Sprintf path for rows that render a label
 	// instead of a number (the Wave row's "Sine"/"Square"/etc.).
@@ -712,9 +686,9 @@ func drawSoundsSlider(font rl.Font, theme render.Theme, x, y, w float32, info so
 	} else {
 		val = fmt.Sprintf(info.Format, value)
 	}
-	rl.DrawTextEx(font, val,
-		rl.NewVector2(x+w-78, y),
-		soundFontBody, 1, col)
+	drawSlider(font, theme, info.Label, val, value, info.Min, info.Max,
+		rl.NewVector2(x, y), rl.NewVector2(x+w-78, y),
+		soundFontBody, track, 7, focused)
 }
 
 func drawSoundsListCol(s *State, font rl.Font, theme render.Theme, l *soundLayout, names []string) {
@@ -749,7 +723,7 @@ func drawSoundsAssignCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 		}
 		render.DrawTextWithShadow(font, audio.SoundName(cue),
 			r.Row.X+8, r.Row.Y+4, soundFontBody, theme.TextMuted)
-		assigned := audio.CurrentAssignment(cue)
+		assigned := s.soundAssignCache[audio.SoundCanonicalName(cue)]
 		assignedLabel := "(default)"
 		if assigned != "" {
 			assignedLabel = "→ " + assigned

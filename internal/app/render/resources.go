@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"unsafe"
 )
 
 type Resources struct {
@@ -49,6 +50,12 @@ type Resources struct {
 	// regardless of the area's material set. Built once on load and shared
 	// across materials.
 	specialFloors map[byte]rl.Model
+
+	// rampModel is the solid wedge (triangular prism) drawn for ramp floor
+	// tiles — built once, earth-textured, drawn yaw-rotated per ascent
+	// direction. Sized to one tile × LevelStep so it meets the low and high
+	// floors flush (see buildRampWedgeModel).
+	rampModel rl.Model
 
 	// New decor models keyed by decor-layer char (tall grass, flowers,
 	// clover, reeds, bones, scorch, blood, cobweb, stump, log, leaf pile).
@@ -241,6 +248,8 @@ func LoadResources() (r Resources) {
 	r.specialFloors[core.FloorDirt] = loadFloorModel(makeDirtPixels(128, 128), r.lighting.shader)
 	r.specialFloors[core.FloorDarkGrass] = loadFloorModel(makeDarkGrassPixels(128, 128), r.lighting.shader)
 	r.specialFloors[core.FloorStone] = loadFloorModel(makeStoneFloorPixels(128, 128), r.lighting.shader)
+	// Earth-textured solid ramp wedge, shared by every ramp floor tile.
+	r.rampModel = buildRampWedgeModel(makeDirtPixels(128, 128), r.lighting.shader)
 
 	// Stone family textures for the new prop set. Each loader owns the
 	// texture handle outright via setModelTexture so unload-by-model is
@@ -346,6 +355,7 @@ func LoadResources() (r Resources) {
 
 	assertDecorCoverage(r.decorModels)
 	assertPropCoverage(r.propModels)
+	assertDoorProps(r.doorProps)
 
 	// Flatten the maps into [256]propModel tables so the per-tile draw
 	// path is an array index instead of a map hash. Built once after
@@ -525,6 +535,14 @@ func assertPropCoverage(models map[byte]propModel) {
 	}
 }
 
+func assertDoorProps(models [core.DoorStyleCount]propModel) {
+	for i := range models {
+		if len(models[i].parts) == 0 {
+			panic("render: door style " + core.DoorStyleName(core.DoorStyle(i)) + " has no doorProps entry")
+		}
+	}
+}
+
 // isFootprintTail reports whether c is a tail char for a multi-tile
 // prop anchor. Tails render nothing; the anchor's mesh covers them.
 // Walks the known anchor set instead of a hand-maintained tail list
@@ -570,6 +588,7 @@ func (r Resources) Unload() {
 	r.mushroomProp.unload()
 	r.chestBody.unload()
 	r.chestLid.unload()
+	rl.UnloadModel(r.rampModel)
 	if groundShadowReady {
 		rl.UnloadModel(groundShadowModel)
 		groundShadowReady = false
@@ -635,6 +654,70 @@ func loadTileModel(pixels []color.RGBA, height float32, shader rl.Shader) rl.Mod
 // Floor cubes use a flat 0.06 height so the wall geometry overlaps cleanly.
 func loadFloorModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
 	return loadTileModel(pixels, 0.06, shader)
+}
+
+// rampWedge* are the CPU-side mesh arrays for the ramp wedge, kept alive for
+// the process lifetime. gen2brain's UploadMesh pins + go-manages these (so
+// UnloadModel won't C-free them), but holding a package reference guarantees
+// the Mesh's *float32 pointers can never dangle.
+var rampWedgeVerts, rampWedgeNormals, rampWedgeUVs []float32
+
+// buildRampWedgeModel builds a SOLID wedge (right triangular prism) sized to
+// one tile (TileSize wide/deep × LevelStep tall), ascending toward -Z (north):
+// the low edge (south, +Z) sits at local y=0, the high edge (north, -Z) at
+// y=LevelStep, filled solid down to y=0. Drawn at (cx, lowLevel·LevelStep, cz)
+// the low edge meets the low floor and the high edge the one-higher floor
+// exactly flush, the footprint fills the whole tile (no neighbor gap), and the
+// bottom/back/side faces make it opaque earth (no see-through). drawRampWedge
+// yaw-rotates this one model to face each ascent direction.
+func buildRampWedgeModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
+	const half = float32(core.TileSize) / 2
+	H := core.LevelStep
+	lowSL := rl.NewVector3(-half, 0, half) // low edge (south), left
+	lowSR := rl.NewVector3(half, 0, half)  // low edge (south), right
+	hiNL := rl.NewVector3(-half, H, -half) // high edge (north), left
+	hiNR := rl.NewVector3(half, H, -half)  // high edge (north), right
+	botNL := rl.NewVector3(-half, 0, -half)
+	botNR := rl.NewVector3(half, 0, -half)
+	// Interior reference point so each face's winding can be flipped to face
+	// outward (correct normals + no back-face culling surprises).
+	center := rl.NewVector3(0, H/3, -half/3)
+
+	var verts, normals, uvs []float32
+	addTri := func(a, b, c rl.Vector3) {
+		n := triNormal(a, b, c)
+		mid := rl.NewVector3((a.X+b.X+c.X)/3, (a.Y+b.Y+c.Y)/3, (a.Z+b.Z+c.Z)/3)
+		if n.X*(mid.X-center.X)+n.Y*(mid.Y-center.Y)+n.Z*(mid.Z-center.Z) < 0 {
+			b, c = c, b // flip winding so the normal points outward
+			n = triNormal(a, b, c)
+		}
+		for _, p := range [3]rl.Vector3{a, b, c} {
+			verts = append(verts, p.X, p.Y, p.Z)
+			normals = append(normals, n.X, n.Y, n.Z)
+		}
+		uvs = append(uvs, 0, 0, 1, 0, 0.5, 1)
+	}
+	addQuad := func(a, b, c, d rl.Vector3) { addTri(a, b, c); addTri(a, c, d) }
+
+	addQuad(lowSL, lowSR, hiNR, hiNL)   // sloped top
+	addQuad(lowSL, lowSR, botNR, botNL) // bottom (y=0 footprint)
+	addQuad(botNL, botNR, hiNR, hiNL)   // north (high) wall
+	addTri(lowSL, hiNL, botNL)          // west side
+	addTri(lowSR, hiNR, botNR)          // east side
+
+	rampWedgeVerts, rampWedgeNormals, rampWedgeUVs = verts, normals, uvs
+	mesh := rl.Mesh{
+		VertexCount:   int32(len(verts) / 3),
+		TriangleCount: int32(len(verts) / 9),
+	}
+	mesh.Vertices = (*float32)(unsafe.Pointer(&verts[0]))
+	mesh.Normals = (*float32)(unsafe.Pointer(&normals[0]))
+	mesh.Texcoords = (*float32)(unsafe.Pointer(&uvs[0]))
+	rl.UploadMesh(&mesh, false)
+	model := rl.LoadModelFromMesh(mesh)
+	setModelTexture(&model, loadTiledTexture(pixels))
+	attachShader(&model, shader)
+	return model
 }
 
 // loadGroundShadowModel builds the soft contact-shadow plane: a 1×1
@@ -714,12 +797,6 @@ func loadEnemySprite(pixels []color.RGBA, w, h int, owned *[]rl.Texture2D) rl.Te
 	return tex
 }
 
-// spritesDirName is the on-disk asset folder for authored enemy/billboard
-// PNGs, a sibling of maps/ and maps/sounds/ resolved through the same
-// core.ResolveAssetDir machinery (cwd-relative for `go run`, next-to-exe
-// for a portable copy). Single source so the path lives in one place.
-const spritesDirName = "maps/sprites"
-
 // loadEnemySpriteFile loads an authored sprite PNG from the sprites asset
 // dir and returns it as a billboard-ready texture. Unlike loadEnemySprite
 // (which mints tiny pixel-art atlases drawn at FilterPoint), a high-res
@@ -731,7 +808,7 @@ const spritesDirName = "maps/sprites"
 // art rather than rendering a blank quad. Registered textures are appended
 // to owned for Unload, matching loadEnemySprite.
 func loadEnemySpriteFile(name string, owned *[]rl.Texture2D) (rl.Texture2D, bool) {
-	path := filepath.Join(core.ResolveAssetDir(spritesDirName), name)
+	path := filepath.Join(core.ResolveAssetDir(core.SpritesDirName), name)
 	if _, err := os.Stat(path); err != nil {
 		return rl.Texture2D{}, false
 	}
@@ -758,7 +835,7 @@ func loadEnemyVisuals() (map[core.EnemyKind]enemyVisual, []rl.Texture2D) {
 	// missing or won't decode we fall back to the procedural makeRatPixels
 	// art (the previous sprite, preserved below) so a checkout without the
 	// asset still renders a rat and the coverage assert never trips.
-	ratTexture, ratFromFile := loadEnemySpriteFile("feral_rat.png", &owned)
+	ratTexture, ratFromFile := loadEnemySpriteFile(core.EnemySlug(core.EnemyRat)+".png", &owned)
 	if !ratFromFile {
 		ratTexture = loadEnemySprite(makeRatPixels(72, 96), 72, 96, &owned)
 	}
@@ -797,19 +874,18 @@ func loadEnemyVisuals() (map[core.EnemyKind]enemyVisual, []rl.Texture2D) {
 			// body without looking like a tight pin-spot. Scaled down with
 			// the smaller sprite (0.60 → 0.46).
 			shadowRadius: 0.46,
-			// The PNG is center-weighted, so at the shared center-anchor the
-			// rat floated and its top clipped the selector chevron. Drop the
-			// sprite so it plants on the floor; -0.60 keeps the same foot
-			// line as the old (1.35, -0.45) pairing after the shrink
-			// (a smaller sprite's bottom edge rises, so the drop deepened by
-			// half the size delta). Tune alongside size if grounding shifts.
-			yOffset: -0.60,
-			// The target chevron anchors to the (un-lowered) formation
-			// center, so after dropping the sprite it needs nudging back
-			// toward the rat's head: down from the default (tracking the
-			// lower, smaller head), plus slightly screen-right so it sits
-			// over the head cleanly rather than dead-center.
-			markerYOffset: -0.48,
+			// The PNG is center-weighted in its square box; -0.60 dropped it
+			// too far (read as sunk into the floor compared to the bottom-
+			// weighted procedural sprites), so it's raised to -0.42. Tune
+			// alongside size/depthOffset if grounding shifts.
+			yOffset: -0.42,
+			// Push the rat BACK into the arena so its square box doesn't loom
+			// at the camera — sits it in line with the procedural roster.
+			depthOffset: 0.7,
+			// The target chevron anchors to the (un-lowered) formation center,
+			// so it tracks the raised head (markerYOffset) plus a slight
+			// screen-right nudge so it sits over the head, not dead-center.
+			markerYOffset: -0.30,
 			markerXOffset: 0.10,
 			// Somewhat darker than the source PNG — a near-neutral gray
 			// (~0.72×) with a faint warm bias so the brown/orange read
@@ -906,6 +982,20 @@ func loadEnemyVisuals() (map[core.EnemyKind]enemyVisual, []rl.Texture2D) {
 			panic("render: missing enemyVisuals entry for " + def.Name + " — author a sprite and register it in loadEnemyVisuals")
 		}
 	}
+	// Overlay author-tuned overrides from maps/sprites/visuals.json on top of
+	// the code defaults above (authored in the editor's Foe Visualizer). A
+	// missing file is a clean no-op; a kind present in the file gets its
+	// tunable fields replaced while keeping its code-default texture. Keyed by
+	// core.EnemySlug so this loader and the editor agree on the key. A
+	// malformed file is swallowed (defaults stand) rather than crashing the
+	// whole game on boot over a bad tuning file.
+	if overrides, err := core.LoadEnemyVisualOverrides(); err == nil {
+		for kind, v := range visuals {
+			if ov, ok := overrides[core.EnemySlug(kind)]; ok {
+				visuals[kind] = applyEnemyVisualOverride(v, ov)
+			}
+		}
+	}
 	return visuals, owned
 }
 
@@ -1000,11 +1090,11 @@ func systemFontCandidates() []string {
 	switch runtime.GOOS {
 	case "windows":
 		return []string{
-			`C:\Windows\Fonts\constan.ttf`,  // Constantia — refined serif, the headline choice
-			`C:\Windows\Fonts\cambria.ttc`,  // Cambria — second-best serif
-			`C:\Windows\Fonts\georgia.ttf`,  // Georgia — classic web serif fallback
-			`C:\Windows\Fonts\pala.ttf`,     // Palatino Linotype — older alternate
-			`C:\Windows\Fonts\seguisb.ttf`,  // Segoe UI Semibold — final sans fallback
+			`C:\Windows\Fonts\constan.ttf`, // Constantia — refined serif, the headline choice
+			`C:\Windows\Fonts\cambria.ttc`, // Cambria — second-best serif
+			`C:\Windows\Fonts\georgia.ttf`, // Georgia — classic web serif fallback
+			`C:\Windows\Fonts\pala.ttf`,    // Palatino Linotype — older alternate
+			`C:\Windows\Fonts\seguisb.ttf`, // Segoe UI Semibold — final sans fallback
 		}
 	case "darwin":
 		return []string{

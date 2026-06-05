@@ -347,7 +347,13 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	// swallowed by the generic blocker rule. Pack-AI rolls happen on
 	// a successful step, so we run them only when this branch DOESN'T
 	// fire.
-	if idx := core.PackIndexAtTile(g.Packs, targetX, targetZ); idx >= 0 && !g.EnemiesDisabled {
+	// A pack on a cliff (different elevation level with no connecting ramp)
+	// can't be reached, so it can't be engaged either — fall through to the
+	// normal blocked-move handling. No-op on flat maps (StepElevationOK is
+	// always true at equal levels).
+	engageDir, engageDirOK := facingForTile(p, targetX, targetZ)
+	engageReachable := !engageDirOK || g.Area.StepElevationOK(p.TileX, p.TileZ, engageDir)
+	if idx := core.PackIndexAtTile(g.Packs, targetX, targetZ); idx >= 0 && !g.EnemiesDisabled && engageReachable {
 		if startTurnToTile(p, targetX, targetZ) {
 			return
 		}
@@ -366,6 +372,15 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	if !core.CanEnterTile(g, targetX, targetZ, core.EnterOpts{AllowDoorTile: true}) {
 		return
 	}
+	// Elevation gate: the step must connect without a cliff (matching edge
+	// levels), honoring ramps. Steps are orthogonal, so the tile delta
+	// resolves to a single cardinal direction via facingForTile.
+	if dir, ok := facingForTile(p, targetX, targetZ); ok && !g.Area.StepElevationOK(p.TileX, p.TileZ, dir) {
+		return
+	}
+	// Ground height the player leaves from — captured before TileX/TileZ
+	// advance so a ramp step can ease the camera between levels.
+	fromGroundY := g.Area.StandGroundY(p.TileX, p.TileZ)
 
 	p.TileX = targetX
 	p.TileZ = targetZ
@@ -406,6 +421,8 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 		FromZ:    p.Z,
 		ToX:      core.TileCenter(targetX),
 		ToZ:      core.TileCenter(targetZ),
+		FromY:    fromGroundY,
+		ToY:      g.Area.StandGroundY(targetX, targetZ),
 	}
 }
 
@@ -474,6 +491,7 @@ func updateAnimation(g *core.GameState, dt float32) {
 	case core.AnimStep:
 		p.X = core.Lerp(p.Anim.FromX, p.Anim.ToX, eased)
 		p.Z = core.Lerp(p.Anim.FromZ, p.Anim.ToZ, eased)
+		p.GroundY = core.Lerp(p.Anim.FromY, p.Anim.ToY, eased)
 	case core.AnimTurn:
 		p.Yaw = core.Lerp(p.Anim.FromYaw, p.Anim.ToYaw, eased)
 	}
@@ -484,6 +502,7 @@ func updateAnimation(g *core.GameState, dt float32) {
 	if p.Anim.Kind == core.AnimStep {
 		p.X = core.TileCenter(p.TileX)
 		p.Z = core.TileCenter(p.TileZ)
+		p.GroundY = p.Anim.ToY
 	}
 	p.Yaw = core.FacingYaw(p.Facing)
 	p.Anim = core.Animation{}

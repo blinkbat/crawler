@@ -120,6 +120,9 @@ void main() {
     float fog = 1.0 - exp(-fogDensity * dist);
     fog = clamp(fog, 0.0, {{FOG_CEILING}});
     vec3 lit = mix(base, fogColor, fog);
+    // Global slight desaturation (muted-storybook palette): pull a bit of
+    // saturation toward luminance. Keep in sync with the world shader's line.
+    lit = mix(lit, vec3(dot(lit, vec3(0.299, 0.587, 0.114))), 0.22);
     finalColor = vec4(lit, texel.a * fragColor.a * colDiffuse.a);
 }
 `
@@ -298,6 +301,9 @@ void main() {
     float fog = 1.0 - exp(-fogDensity * dist);
     fog = clamp(fog, 0.0, {{FOG_CEILING}});
     lit = mix(lit, fogColor, fog);
+    // Global slight desaturation (muted-storybook palette): pull a bit of
+    // saturation toward luminance. Keep in sync with the billboard shader.
+    lit = mix(lit, vec3(dot(lit, vec3(0.299, 0.587, 0.114))), 0.22);
 
     finalColor = vec4(lit, texel.a * fragColor.a * colDiffuse.a);
 }

@@ -60,6 +60,42 @@ func targetingAlly(g core.GameState) bool {
 	return g.Battle.ActionMode == core.ActionPartyTarget || g.Battle.ActionMode == core.ActionItemTarget
 }
 
+type enemyStatusKind int
+
+const (
+	enemyStatusBurn enemyStatusKind = iota
+	enemyStatusSleep
+	enemyStatusPoison
+	enemyStatusStun
+	enemyStatusCount
+)
+
+type enemyStatusPillVisual struct {
+	turns   func(*core.Enemy) int
+	fill    rl.Color
+	outline rl.Color
+	prefix  string
+	flicker bool
+}
+
+var enemyStatusPillVisuals = [enemyStatusCount]enemyStatusPillVisual{
+	enemyStatusBurn:   {turns: func(e *core.Enemy) int { return e.BurnTurns }, fill: statusBurn, outline: statusBurnOutline, flicker: true},
+	enemyStatusSleep:  {turns: func(e *core.Enemy) int { return e.SleepTurns }, fill: statusSleep, outline: statusSleepOutline, prefix: "Z"},
+	enemyStatusPoison: {turns: func(e *core.Enemy) int { return e.PoisonTurns }, fill: statusPoison, outline: statusPoisonOutline, prefix: "P", flicker: true},
+	enemyStatusStun:   {turns: func(e *core.Enemy) int { return e.StunTurns }, fill: statusStun, outline: statusStunOutline, prefix: "S"},
+}
+
+func init() {
+	if len(enemyStatusPillVisuals) != int(enemyStatusCount) {
+		panic(fmt.Sprintf("enemyStatusPillVisuals length %d != enemyStatusCount %d", len(enemyStatusPillVisuals), enemyStatusCount))
+	}
+	for i, v := range enemyStatusPillVisuals {
+		if v.turns == nil {
+			panic(fmt.Sprintf("enemyStatusPillVisuals[%d] has no turns reader", i))
+		}
+	}
+}
+
 // drawEnemyRoster shows the active pack at the top of the screen.
 // Replaces the legacy floating target tooltip and the dense enemy info line
 // that used to sit atop the bottom panel.
@@ -74,7 +110,7 @@ func drawEnemyRoster(g core.GameState, assets Resources) {
 
 	rowH := int32(60)
 	// Inner pad replaces the old header band — the row content names
-	// the enemies and shows their HP; a tautological "GOBLINS 3/5"
+	// the enemies and shows their wound state; a tautological "GOBLINS 3/5"
 	// title above them was just chrome.
 	topPad := int32(18)
 	padBottom := int32(18)
@@ -98,7 +134,10 @@ func drawEnemyRoster(g core.GameState, assets Resources) {
 	selectedSlot := core.SelectedEnemySlot(&g)
 
 	for i, slot := range slots {
-		enemy := members[slot]
+		// &members[slot] — pass the enemy by pointer so the per-row draw
+		// doesn't copy the 496-byte Enemy (it embeds a full DefinitionOverride)
+		// once per roster row per frame.
+		enemy := &members[slot]
 		rowY := y + topPad + int32(i)*rowH
 		drawEnemyRosterRow(assets.hudFont, enemy, x+14, rowY, w-28, rowH-8, targetable && slot == selectedSlot, !enemy.Alive)
 	}
@@ -120,7 +159,7 @@ func visibleRosterSlots(g core.GameState) []int {
 	return rosterSlotsBuf
 }
 
-func drawEnemyRosterRow(font rl.Font, enemy core.Enemy, x, y, w, h int32, targeted, fading bool) {
+func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targeted, fading bool) {
 	// Roster row tints follow the glass-token family — translucent
 	// glass over the (also translucent) outer card body, so the
 	// world hints through.
@@ -163,67 +202,40 @@ func drawEnemyRosterRow(font rl.Font, enemy core.Enemy, x, y, w, h int32, target
 	condition, condCol := enemyHealthStyle(enemy)
 
 	nameX := float32(x + leftPad)
-	displayName := core.EnemyDisplayName(enemy)
+	displayName := core.EnemyDisplayName(*enemy)
 	drawTextWithShadow(font, displayName, nameX, float32(y+10), FontHeading, nameCol)
 
-	// The qualitative wound state is the DEFAULT health read for every row —
-	// the exact HP bar is hidden unless this enemy is the current target
-	// (below). So the roster stays clean and "how hurt is it" comes from the
-	// condition word, with the precise bar surfaced only for the one you're
-	// aiming at.
+	// Health reads ENTIRELY from the qualitative wound-state word — exact
+	// enemy HP is intentionally never shown (a future "inspect/scan" skill
+	// will reveal numbers). So no HP bar at all; the condition word is it.
 	condSize := FontSmall
 	condY := float32(y) + float32(h) - condSize - 9
 	drawTextWithShadow(font, condition, nameX, condY, condSize, condCol)
 
-	// Right side: status pills anchored to the right edge. The HP bar shows
-	// ONLY for the targeted enemy; when it does, it claims the right edge and
-	// the pills tuck in to its left.
+	// Status pills, anchored to the right edge (no HP bar to tuck beside).
 	pillW := float32(34)
 	pillH := float32(28)
 	rightEdge := float32(x+w) - 16
 	pillX := rightEdge - pillW
 	pillBaseY := float32(y) + (float32(h)-pillH)/2
-	if targeted {
-		barW := float32(190)
-		barH := float32(28)
-		barX := rightEdge - barW
-		barY := float32(y) + (float32(h)-barH)/2
-		drawBar(font, barX, barY, barW, barH, "HP", enemy.HP, enemy.MaxHP, barEnemyHP, fading)
-		pillX = barX - pillW - 10
-		pillBaseY = barY
-	}
 
-	// Slot-stacked status pills. Walking a slice (rather than four
-	// unrolled if-blocks) is what lets a future fifth status land as a
-	// single appended row without re-tuning any per-pill geometry. Limit to
-	// 4 visible — the panel doesn't have vertical room for more without
-	// colliding with the row above, and four-status concurrence is exotic
-	// enough to accept the truncation.
-	// Fixed-size array (not a slice literal) so this stays stack-local
-	// and allocates nothing — drawn every frame per enemy in the combat
-	// roster.
-	pills := [4]struct {
-		turns   int
-		fill    rl.Color
-		outline rl.Color
-		prefix  string
-	}{
-		// Fills pull from the canonical per-status accent tokens
-		// (theme.go) so the enemy pill and the party-card label read the
-		// same hue for a given status — one token edit retints both.
-		{enemy.BurnTurns, fadeColor(statusBurn, pulseFlicker()), statusBurnOutline, ""},
-		{enemy.SleepTurns, statusSleep, statusSleepOutline, "Z"},
-		{enemy.PoisonTurns, fadeColor(statusPoison, pulseFlicker()), statusPoisonOutline, "P"},
-		{enemy.StunTurns, statusStun, statusStunOutline, "S"},
-	}
+	// Slot-stacked status pills. Walking the init-asserted visual table is what
+	// lets a future fifth enemy status land as one appended row without
+	// re-tuning any per-pill geometry. Limit to 4 visible — the panel doesn't
+	// have vertical room for more without colliding with the row above.
 	slot := 0
-	for _, p := range pills {
-		if p.turns <= 0 {
+	for _, p := range enemyStatusPillVisuals {
+		turns := p.turns(enemy)
+		if turns <= 0 {
 			continue
+		}
+		fill := p.fill
+		if p.flicker {
+			fill = fadeColor(fill, pulseFlicker())
 		}
 		pillY := pillBaseY - float32(slot)*(pillH+4)
 		drawEnemyStatusPill(font, pillX, pillY, pillW, pillH,
-			p.fill, p.outline, statusTurnsLabel(p.prefix, p.turns))
+			fill, p.outline, statusTurnsLabel(p.prefix, turns))
 		slot++
 	}
 }
@@ -838,8 +850,8 @@ func init() {
 	}
 }
 
-func enemyHealthStyle(enemy core.Enemy) (string, color.RGBA) {
-	condition := core.EnemyConditionFor(enemy)
+func enemyHealthStyle(enemy *core.Enemy) (string, color.RGBA) {
+	condition := core.EnemyConditionFor(*enemy)
 	return core.EnemyConditionLabel(condition), enemyConditionColors[condition]
 }
 
