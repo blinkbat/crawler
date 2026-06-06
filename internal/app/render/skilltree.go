@@ -128,6 +128,8 @@ func drawSkillTreeColumn(font rl.Font, g core.GameState, m *core.PartyMember, tr
 			lineCol = fadeColor(giltBright, 0.7)
 		}
 		rl.DrawRectangle(int32(cx-1), int32(ay), 2, int32(by-ay), lineCol)
+		drawDiamondPip(cx, ay, 2.2, lineCol)
+		drawDiamondPip(cx, by, 2.2, lineCol)
 	}
 
 	for i, node := range nodes {
@@ -154,7 +156,7 @@ func drawSkillTreeNode(font rl.Font, m *core.PartyMember, node core.SkillTreeNod
 	case rank > 0:
 		bg = selectedGlassTint(glassMid, 0.5)
 	}
-	drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), bg)
+	drawSkillNodePlate(rect, bg, rank, unlocked, focused)
 	if focused {
 		roundness := fixedRoundnessFor(int32(rect.Width), int32(rect.Height), cornerRadius)
 		rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, 3, giltBright)
@@ -185,6 +187,32 @@ func drawSkillTreeNode(font rl.Font, m *core.PartyMember, node core.SkillTreeNod
 	}
 	cm := rl.MeasureTextEx(font, chip, FontTiny, 1)
 	drawTextWithShadow(font, chip, rect.X+rect.Width-cm.X-10, rect.Y+rect.Height-16, FontTiny, chipCol)
+}
+
+func drawSkillNodePlate(rect rl.Rectangle, bg rl.Color, rank int, unlocked, focused bool) {
+	rl.DrawRectangle(int32(rect.X+2), int32(rect.Y+3), int32(rect.Width), int32(rect.Height), fadeColor(shadowHeavy, 0.18))
+	drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), bg)
+	outline := fadeColor(woodAccent, 0.42)
+	if !unlocked {
+		outline = fadeColor(borderDim, 0.62)
+	}
+	if rank > 0 {
+		outline = fadeColor(giltDim, 0.72)
+	}
+	if focused {
+		outline = fadeColor(giltBright, 0.90)
+	}
+	rl.DrawRectangleLinesEx(rect, 1, outline)
+	if rect.Width >= 96 && rect.Height >= 40 {
+		pip := fadeColor(outline, 0.82)
+		drawDiamondPip(rect.X+8, rect.Y+8, 1.8, pip)
+		drawDiamondPip(rect.X+rect.Width-8, rect.Y+8, 1.8, pip)
+		drawDiamondPip(rect.X+8, rect.Y+rect.Height-8, 1.8, pip)
+		drawDiamondPip(rect.X+rect.Width-8, rect.Y+rect.Height-8, 1.8, pip)
+	}
+	if rank > 0 && rect.Width >= 130 {
+		drawFleuron(rect.X+rect.Width/2, rect.Y+rect.Height-12, 2.1, fadeColor(giltDim, 0.42))
+	}
 }
 
 // drawSkillTreeDetail paints the bottom strip describing the focused node:

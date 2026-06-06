@@ -88,6 +88,7 @@ func drawMinimap(m core.AreaDefinition, g core.GameState, assets Resources) {
 	gridX := pad + 8
 	gridY := pad + 8 + header
 	footerY := gridY + gridSize + 6
+	drawMinimapGridBacking(gridX, gridY, gridSize)
 	drawMinimapTimeOfDay(assets.hudFont, g.StepCount, pad+14, footerY, panelW-28)
 
 	for localZ := int32(0); localZ < viewCells; localZ++ {
@@ -113,6 +114,50 @@ func drawMinimap(m core.AreaDefinition, g core.GameState, assets Resources) {
 		rl.NewVector2(float32(gridX+gridSize/2), float32(gridY+gridSize/2)),
 		p.Facing,
 	)
+	drawMinimapCartographerFrame(assets.hudFont, gridX, gridY, gridSize)
+}
+
+func drawMinimapGridBacking(x, y, size int32) {
+	drawGlassPane(x-3, y-3, size+5, size+5, fadeColor(glassWarm, 0.55))
+	rl.DrawRectangle(x-1, y-1, size+1, size+1, fadeColor(woodInlay, 0.65))
+}
+
+func drawMinimapCartographerFrame(font rl.Font, x, y, size int32) {
+	frame := rl.NewRectangle(float32(x-3), float32(y-3), float32(size+5), float32(size+5))
+	rl.DrawRectangleLinesEx(frame, 2, fadeColor(woodAccent, 0.82))
+	inner := rl.NewRectangle(float32(x), float32(y), float32(size-1), float32(size-1))
+	rl.DrawRectangleLinesEx(inner, 1, fadeColor(giltDim, 0.55))
+
+	// Subtle crosshair and rule marks: enough to read as a cartographer's
+	// plate without covering the actual dungeon cells.
+	mid := size / 2
+	ruleCol := fadeColor(giltDim, 0.22)
+	rl.DrawRectangle(x+mid, y+2, 1, size-5, ruleCol)
+	rl.DrawRectangle(x+2, y+mid, size-5, 1, ruleCol)
+	for i := int32(4); i < size-4; i += minimapCell * 4 {
+		rl.DrawRectangle(x+i, y-2, 1, 4, fadeColor(giltDim, 0.38))
+		rl.DrawRectangle(x+i, y+size-2, 1, 4, fadeColor(giltDim, 0.28))
+		rl.DrawRectangle(x-2, y+i, 4, 1, fadeColor(giltDim, 0.38))
+		rl.DrawRectangle(x+size-2, y+i, 4, 1, fadeColor(giltDim, 0.28))
+	}
+
+	pipCol := fadeColor(giltBright, 0.72)
+	drawDiamondPip(float32(x-3), float32(y-3), 2.6, pipCol)
+	drawDiamondPip(float32(x+size+2), float32(y-3), 2.6, pipCol)
+	drawDiamondPip(float32(x-3), float32(y+size+2), 2.6, pipCol)
+	drawDiamondPip(float32(x+size+2), float32(y+size+2), 2.6, pipCol)
+
+	// Compass initials are tiny and outside the cell area, so they don't
+	// consume map real estate but still make the inset feel authored.
+	nCol := fadeColor(inkAccent, 0.78)
+	nm := minimapMeasureCache.measure(font, "N", FontTiny, 1)
+	sm := minimapMeasureCache.measure(font, "S", FontTiny, 1)
+	wm := minimapMeasureCache.measure(font, "W", FontTiny, 1)
+	em := minimapMeasureCache.measure(font, "E", FontTiny, 1)
+	drawTextWithShadow(font, "N", float32(x)+float32(size)/2-nm.X/2, float32(y)-13, FontTiny, nCol)
+	drawTextWithShadow(font, "S", float32(x)+float32(size)/2-sm.X/2, float32(y+size)+4, FontTiny, nCol)
+	drawTextWithShadow(font, "W", float32(x)+3, float32(y)+float32(size)/2-wm.Y/2, FontTiny, nCol)
+	drawTextWithShadow(font, "E", float32(x+size)-em.X-4, float32(y)+float32(size)/2-em.Y/2, FontTiny, nCol)
 }
 
 // minimapPropColors keys every prop-layer char to its minimap swatch.
@@ -243,6 +288,7 @@ func drawMinimapTimeOfDay(font rl.Font, stepCount int, x, y, width int32) {
 	trackY := y + 18
 	trackH := int32(4)
 	trackW := width
+	rl.DrawRectangle(x-2, trackY-2, trackW+4, trackH+4, fadeColor(woodDark, 0.72))
 	rl.DrawRectangle(x, trackY, trackW, trackH, barTrack)
 	segW := trackW / int32(core.TimeOfDayCount)
 	// Past phases: solid color. Current phase: filled by progress.
@@ -259,7 +305,15 @@ func drawMinimapTimeOfDay(font rl.Font, stepCount int, x, y, width int32) {
 	// is here" at a glance, more legible than the colour wash alone.
 	cursorX := float32(x+int32(phase)*segW) + float32(segW)*progress
 	cursorY := float32(trackY) + float32(trackH)/2 - 5
+	for i := int32(0); i <= int32(core.TimeOfDayCount); i++ {
+		tx := x + i*segW
+		if i == int32(core.TimeOfDayCount) {
+			tx = x + trackW
+		}
+		rl.DrawRectangle(tx, trackY-3, 1, trackH+6, fadeColor(giltDim, 0.42))
+	}
 	drawDiamondPip(cursorX, cursorY, 3, giltBright)
+	drawDiamondPip(cursorX, float32(trackY+trackH)+5, 2, fadeColor(giltDim, 0.70))
 }
 
 // phaseColors mirrors the rough sky tint of each lighting phase so the HUD

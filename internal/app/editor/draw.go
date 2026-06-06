@@ -710,8 +710,20 @@ func drawButton(font rl.Font, r rl.Rectangle, label string, active bool) {
 	if pointIn(frameMouse, r) {
 		bg = bgRowHover
 	}
+	rl.DrawRectangleRec(rl.NewRectangle(r.X+2, r.Y+2, r.Width, r.Height), render.FadeColor(rl.Black, 0.18))
+	top := render.FadeColor(editorBorderActive, 0.18)
+	bot := render.FadeColor(rl.Black, 0.16)
 	rl.DrawRectangleRec(r, bg)
+	if r.Width > 4 && r.Height > 4 {
+		rl.DrawRectangleGradientV(int32(r.X+2), int32(r.Y+2), int32(r.Width-4), int32(r.Height-4), top, bot)
+	}
 	rl.DrawRectangleLinesEx(r, 1, border)
+	if active {
+		rl.DrawRectangleRec(rl.NewRectangle(r.X+4, r.Y+5, 3, r.Height-10), editorBorderActive)
+	}
+	if r.Width >= 44 && r.Height >= 24 {
+		rl.DrawCircleV(rl.NewVector2(r.X+r.Width-8, r.Y+8), 1.5, render.FadeColor(editorBorderActive, 0.55))
+	}
 	measure := rl.MeasureTextEx(font, label, editorFontBody, 1)
 	rl.DrawTextEx(font, label,
 		rl.NewVector2(r.X+(r.Width-measure.X)/2, r.Y+(r.Height-measure.Y)/2),

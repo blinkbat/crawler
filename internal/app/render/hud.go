@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"crawler/internal/app/core"
+	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 func DrawOverlay(g core.GameState, assets Resources) {
@@ -68,9 +69,25 @@ func drawGoldReadout(g core.GameState, assets Resources) {
 	label := goldReadout.str
 	m := goldReadoutMeasureCache.measure(font, label, FontBody, FontSpacingBody)
 	padX, padY := float32(12), float32(6)
-	x, y := hudEdgePad, hudEdgePad
-	w := int32(m.X + padX*2)
+	iconW := float32(28)
+	x := hudEdgePad + MinimapWidth() + hudColumnGap
+	y := hudEdgePad
+	w := int32(m.X + padX*2 + iconW)
 	h := int32(m.Y + padY*2)
-	drawGlassPane(x, y, w, h, glassDeep)
-	drawTextWithShadow(font, label, float32(x)+padX, float32(y)+padY, FontBody, borderActive)
+	screenW, _ := screenSize()
+	if x+w > screenW-hudEdgePad {
+		x = screenW - hudEdgePad - w
+	}
+	drawCard(x, y, w, h, glassWarm, borderSoft, borderActive)
+	cy := float32(y) + float32(h)/2
+	drawCoinGlyph(float32(x)+padX+10, cy, 8)
+	drawTextWithShadow(font, label, float32(x)+padX+iconW, float32(y)+padY, FontBody, borderActive)
+}
+
+func drawCoinGlyph(cx, cy, r float32) {
+	rl.DrawCircleV(rl.NewVector2(cx, cy), r+2, fadeColor(woodDark, 0.85))
+	rl.DrawCircleV(rl.NewVector2(cx, cy), r, rl.NewColor(218, 168, 78, 255))
+	rl.DrawCircleV(rl.NewVector2(cx, cy), r*0.62, rl.NewColor(152, 104, 42, 255))
+	rl.DrawCircleV(rl.NewVector2(cx-r*0.28, cy-r*0.30), r*0.22, fadeColor(giltBright, 0.85))
+	drawDiamondPip(cx+r*0.38, cy+r*0.32, 1.5, fadeColor(giltBright, 0.65))
 }

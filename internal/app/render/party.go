@@ -220,6 +220,7 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 	if down {
 		glyphCol = fadeColor(classCol, 0.45)
 	}
+	drawClassMedallion(glyphCX, glyphCY, glyphR+4, glyphCol, down)
 	drawClassGlyph(glyphCX, glyphCY, glyphR, member.Class, glyphCol)
 	nameX := contentX + glyphR*2 + 8
 
@@ -274,6 +275,22 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 	if dim {
 		drawCardScrim(ix, iy, iw, ih)
 	}
+}
+
+func drawClassMedallion(cx, cy, r float32, col rl.Color, muted bool) {
+	outer := fadeColor(woodDark, 0.88)
+	rim := fadeColor(giltDim, 0.78)
+	inner := fadeColor(glassWarm, 0.85)
+	if muted {
+		rim = fadeColor(rim, 0.45)
+		inner = fadeColor(inner, 0.45)
+	}
+	rl.DrawCircleV(rl.NewVector2(cx+1, cy+2), r+1, fadeColor(shadowHeavy, 0.24))
+	rl.DrawCircleV(rl.NewVector2(cx, cy), r+1.5, outer)
+	rl.DrawCircleV(rl.NewVector2(cx, cy), r, rim)
+	rl.DrawCircleV(rl.NewVector2(cx, cy), r-2.5, inner)
+	rl.DrawCircleV(rl.NewVector2(cx-r*0.25, cy-r*0.25), 1.6, fadeColor(inkPrimary, 0.32))
+	drawDiamondPip(cx+r*0.72, cy-r*0.55, 1.2, fadeColor(col, 0.70))
 }
 
 // DrawPartyRibbon renders the always-visible bottom party ribbon. Cards are

@@ -104,6 +104,7 @@ func DrawPanelsOverlay(g core.GameState, assets Resources) {
 	card := drawScreenFractionScaffold(font, panelsOverlayWidthFrac, panelsOverlayHeightFrac, "")
 	cardX, cardY := int32(card.X), int32(card.Y)
 	cardW, cardH := int32(card.Width), int32(card.Height)
+	drawTomeBinding(cardX, cardY, cardW, cardH)
 
 	// Tab strip across the top. Each tab is a flat label on a soft
 	// glass tile; the active tab gets a brighter glass + a thick gilt
@@ -180,6 +181,36 @@ func DrawPanelsOverlay(g core.GameState, assets Resources) {
 	}
 	if g.SkillTreeOpen {
 		DrawSkillTreeModal(g, assets)
+	}
+}
+
+func drawTomeBinding(cardX, cardY, cardW, cardH int32) {
+	if cardW < 520 || cardH < 360 {
+		return
+	}
+	inset := int32(14)
+	leftPage := rl.NewRectangle(float32(cardX+inset), float32(cardY+inset), float32(cardW/2-inset-6), float32(cardH-inset*2))
+	rightPage := rl.NewRectangle(float32(cardX+cardW/2+6), float32(cardY+inset), float32(cardW/2-inset-6), float32(cardH-inset*2))
+	rl.DrawRectangleGradientEx(leftPage,
+		fadeColor(inkPrimary, 0.035), fadeColor(shadowHeavy, 0.035),
+		fadeColor(shadowHeavy, 0.055), fadeColor(shadowHeavy, 0.075))
+	rl.DrawRectangleGradientEx(rightPage,
+		fadeColor(shadowHeavy, 0.055), fadeColor(shadowHeavy, 0.075),
+		fadeColor(inkPrimary, 0.035), fadeColor(shadowHeavy, 0.035))
+
+	spineX := cardX + cardW/2
+	spineTop := cardY + 26
+	spineH := cardH - 52
+	rl.DrawRectangleGradientH(spineX-8, spineTop, 16, spineH,
+		fadeColor(shadowHeavy, 0.05), fadeColor(woodDark, 0.28))
+	rl.DrawRectangle(spineX-1, spineTop+8, 2, spineH-16, fadeColor(woodInlay, 0.72))
+	rl.DrawRectangle(spineX+3, spineTop+18, 1, spineH-36, fadeColor(giltDim, 0.24))
+
+	studCol := fadeColor(giltDim, 0.55)
+	for i := 0; i < 5; i++ {
+		t := float32(i+1) / 6
+		cy := float32(spineTop) + float32(spineH)*t
+		drawDiamondPip(float32(spineX), cy, 2.4, studCol)
 	}
 }
 

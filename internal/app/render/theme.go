@@ -65,6 +65,7 @@ var (
 	woodMid    = rl.NewColor(96, 62, 36, 255)
 	woodLight  = rl.NewColor(150, 104, 64, 255)
 	woodAccent = rl.NewColor(184, 140, 92, 255)
+	woodInlay  = rl.NewColor(34, 22, 14, 175)
 
 	// ----- Gilt accents (selection / focus) -----
 	giltDim    = rl.NewColor(160, 124, 64, 255)
@@ -355,10 +356,24 @@ func drawVeiledCard(cardW, cardH int32, outline, accent, filigree color.RGBA) rl
 	screenW, screenH := screenSize()
 	cardX := centerX(cardW)
 	cardY := screenH/2 - cardH/2
-	rl.DrawRectangle(0, 0, screenW, screenH, surfaceVeil)
+	drawCandleVeil(screenW, screenH)
 	drawCard(cardX, cardY, cardW, cardH, surfacePrimary, outline, accent)
 	drawCardFiligree(cardX, cardY, cardW, cardH, filigree)
 	return rl.NewRectangle(float32(cardX), float32(cardY), float32(cardW), float32(cardH))
+}
+
+func drawCandleVeil(screenW, screenH int32) {
+	rl.DrawRectangle(0, 0, screenW, screenH, surfaceVeil)
+	if screenW <= 0 || screenH <= 0 {
+		return
+	}
+	rl.DrawRectangleGradientEx(
+		rl.NewRectangle(0, 0, float32(screenW), float32(screenH)),
+		rl.NewColor(56, 34, 18, 52),
+		rl.NewColor(0, 0, 0, 36),
+		rl.NewColor(18, 22, 44, 30),
+		rl.NewColor(0, 0, 0, 56),
+	)
 }
 
 // drawScreenFractionScaffold sizes a modal card as a fraction of the
@@ -691,6 +706,7 @@ func drawPanel(x, y, w, h int32, fill color.RGBA) {
 	}
 	rect := rl.NewRectangle(float32(x), float32(y), float32(w), float32(h))
 	rl.DrawRectangleRounded(rect, fixedRoundnessFor(w, h, cornerRadius), 8, fill)
+	drawSoftPanelBevel(x, y, w, h, false)
 }
 
 func drawPanelOutline(x, y, w, h int32, col color.RGBA) {
@@ -707,6 +723,25 @@ func drawSmallPanel(x, y, w, h int32, fill color.RGBA) {
 	}
 	rect := rl.NewRectangle(float32(x), float32(y), float32(w), float32(h))
 	rl.DrawRectangleRounded(rect, fixedRoundnessFor(w, h, smallCornerRadius), 6, fill)
+	drawSoftPanelBevel(x, y, w, h, true)
+}
+
+func drawSoftPanelBevel(x, y, w, h int32, small bool) {
+	if w < 12 || h < 10 {
+		return
+	}
+	inset := int32(3)
+	if small {
+		inset = 2
+	}
+	iw := w - inset*2
+	ih := h - inset*2
+	if iw <= 0 || ih <= 0 {
+		return
+	}
+	rl.DrawRectangleGradientV(x+inset, y+inset, iw, ih,
+		fadeColor(inkPrimary, 0.08),
+		fadeColor(shadowHeavy, 0.10))
 }
 
 func drawSmallPanelOutline(x, y, w, h int32, col color.RGBA) {
@@ -771,6 +806,7 @@ func drawCard(x, y, w, h int32, fill, outline, accent color.RGBA) {
 	//      translucent surface in the HUD uses).
 	//   2. Three concentric hardwood frame strokes painted ON TOP
 	//      as outlines, so the body underneath stays glass.
+	drawCardDropShadow(x, y, w, h)
 	drawGlassPane(x, y, w, h, fill)
 	rect := rl.NewRectangle(float32(x), float32(y), float32(w), float32(h))
 	roundness := fixedRoundnessFor(w, h, cornerRadius)
@@ -778,8 +814,65 @@ func drawCard(x, y, w, h int32, fill, outline, accent color.RGBA) {
 	rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, frameThick, woodLight)
 	rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, float32(woodFrameOuter+woodFrameBand), woodMid)
 	rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, float32(woodFrameOuter), outline)
+	drawCardInlay(x, y, w, h)
 	if accent.A > 0 {
 		drawAccentStripe(x, y, h, accent)
+	}
+}
+
+func drawCardDropShadow(x, y, w, h int32) {
+	if w < 32 || h < 24 {
+		return
+	}
+	roundness := fixedRoundnessFor(w, h, cornerRadius)
+	soft := rl.NewRectangle(float32(x+6), float32(y+8), float32(w), float32(h))
+	near := rl.NewRectangle(float32(x+2), float32(y+3), float32(w), float32(h))
+	rl.DrawRectangleRounded(soft, roundness, 8, fadeColor(shadowHeavy, 0.22))
+	rl.DrawRectangleRounded(near, roundness, 8, fadeColor(shadowStrong, 0.28))
+}
+
+// drawCardInlay adds the small carved details that make a HUD pane read
+// like old CRPG cabinetry rather than a flat overlay: an inner dark groove,
+// a soft gilt hairline just inside it, and tiny brass pips at the mitered
+// corners. Skips narrow/tiny panes so chips and small row highlights stay
+// crisp instead of over-ornamented.
+func drawCardInlay(x, y, w, h int32) {
+	if w < 96 || h < 52 {
+		return
+	}
+	inset := int32(woodFrameOuter + woodFrameBand + woodFrameInner + 4)
+	innerW := w - inset*2
+	innerH := h - inset*2
+	if innerW <= 0 || innerH <= 0 {
+		return
+	}
+	rect := rl.NewRectangle(float32(x+inset), float32(y+inset), float32(innerW), float32(innerH))
+	roundness := fixedRoundnessFor(innerW, innerH, smallCornerRadius)
+	rl.DrawRectangleRoundedLinesEx(rect, roundness, 6, 1, woodInlay)
+
+	// A partial gilt line on the top and bottom reads like a recessed brass
+	// wire inlay without boxing in the content.
+	lineInset := int32(18)
+	if innerW > lineInset*2 {
+		topY := y + inset + 2
+		botY := y + h - inset - 3
+		lineX := x + inset + lineInset
+		lineW := innerW - lineInset*2
+		rl.DrawRectangle(lineX, topY, lineW, 1, fadeColor(giltDim, 0.42))
+		rl.DrawRectangle(lineX, botY, lineW, 1, fadeColor(giltDim, 0.28))
+	}
+
+	pipCol := fadeColor(giltDim, 0.75)
+	hiCol := fadeColor(giltBright, 0.55)
+	corners := [4]rl.Vector2{
+		rl.NewVector2(float32(x+inset), float32(y+inset)),
+		rl.NewVector2(float32(x+w-inset), float32(y+inset)),
+		rl.NewVector2(float32(x+inset), float32(y+h-inset)),
+		rl.NewVector2(float32(x+w-inset), float32(y+h-inset)),
+	}
+	for _, c := range corners {
+		drawDiamondPip(c.X, c.Y, 2.1, pipCol)
+		drawDiamondPip(c.X, c.Y, 0.8, hiCol)
 	}
 }
 
@@ -806,6 +899,28 @@ func drawGlassPane(x, y, w, h int32, fill color.RGBA) {
 	roundness := fixedRoundnessFor(w, h, cornerRadius)
 	rl.DrawRectangleRounded(rect, roundness, 8, glassBaseWash)
 	rl.DrawRectangleRounded(rect, roundness, 8, fill)
+	drawGlassGradientWash(x, y, w, h)
+}
+
+func drawGlassGradientWash(x, y, w, h int32) {
+	if w < 24 || h < 20 {
+		return
+	}
+	inset := int32(4)
+	if w < 80 || h < 44 {
+		inset = 3
+	}
+	innerW := w - inset*2
+	innerH := h - inset*2
+	if innerW <= 0 || innerH <= 0 {
+		return
+	}
+	r := rl.NewRectangle(float32(x+inset), float32(y+inset), float32(innerW), float32(innerH))
+	topLeft := rl.NewColor(255, 226, 166, 20)
+	topRight := rl.NewColor(255, 226, 166, 10)
+	bottomLeft := rl.NewColor(0, 0, 0, 22)
+	bottomRight := rl.NewColor(0, 0, 0, 42)
+	rl.DrawRectangleGradientEx(r, topLeft, bottomLeft, topRight, bottomRight)
 }
 
 // drawFocusableRow paints a selectable list row: a glass body that
@@ -839,7 +954,14 @@ func drawPanelHeading(font rl.Font, text string, x, y float32, accent color.RGBA
 	if tickW < headingTickMinWidth {
 		tickW = headingTickMinWidth
 	}
-	rl.DrawRectangle(int32(x), int32(y+measure.Y+2), tickW, 2, accent)
+	ruleY := int32(y + measure.Y + 3)
+	ruleX := int32(x)
+	ruleW := tickW + 18
+	rl.DrawRectangle(ruleX+6, ruleY, ruleW-12, 2, fadeColor(accent, 0.85))
+	rl.DrawRectangle(ruleX+18, ruleY+4, ruleW-36, 1, fadeColor(accent, 0.35))
+	drawDiamondPip(float32(ruleX+2), float32(ruleY+1), 2.4, fadeColor(accent, 0.85))
+	drawDiamondPip(float32(ruleX+ruleW-2), float32(ruleY+1), 2.4, fadeColor(accent, 0.85))
+	drawFleuron(float32(ruleX+ruleW+8), float32(ruleY+1), 3.2, fadeColor(accent, 0.65))
 }
 
 // measureKey identifies a cached text measurement: the string plus the
@@ -979,14 +1101,17 @@ func drawBar(font rl.Font, x, y, width, height float32, label string, value, max
 		fill = rl.NewColor(96, 84, 92, 230)
 	}
 	ix, iy, iw, ih := int32(x), int32(y), int32(width), int32(height)
+	drawGaugeWell(ix, iy, iw, ih)
 	drawSmallPanel(ix, iy, iw, ih, track)
 	if pct > 0 {
 		fillW := int32(float32(iw-2) * pct)
 		if fillW > 0 {
 			drawSmallPanel(ix+1, iy+1, fillW, ih-2, fill)
+			drawGaugeFillDepth(ix+1, iy+1, fillW, ih-2, muted)
 		}
 	}
 	drawSmallPanelOutline(ix, iy, iw, ih, outline)
+	drawGaugeBezel(ix, iy, iw, ih, muted)
 
 	// Tape-measure ticks — small triangular notches biting in from
 	// the top and bottom edges of the bar at the 25/50/75 % marks.
@@ -1063,6 +1188,50 @@ func drawBar(font rl.Font, x, y, width, height float32, label string, value, max
 		rl.DrawTextEx(font, valText, rl.NewVector2(valX+2, valY+2), valSize, 1, shadowHeavy)
 		rl.DrawTextEx(font, valText, rl.NewVector2(valX+1, valY+1), valSize, 1, shadowHeavy)
 		rl.DrawTextEx(font, valText, rl.NewVector2(valX, valY), valSize, 1, valColor)
+	}
+}
+
+func drawGaugeWell(x, y, w, h int32) {
+	if w <= 0 || h <= 0 {
+		return
+	}
+	rl.DrawRectangle(x+2, y+2, w, h, fadeColor(shadowHeavy, 0.26))
+	rl.DrawRectangle(x+1, y+1, w, h, fadeColor(woodDark, 0.36))
+}
+
+func drawGaugeFillDepth(x, y, w, h int32, muted bool) {
+	if w <= 2 || h <= 4 {
+		return
+	}
+	hi := fadeColor(inkPrimary, 0.18)
+	lo := fadeColor(shadowHeavy, 0.20)
+	if muted {
+		hi = fadeColor(inkDim, 0.12)
+		lo = fadeColor(shadowHeavy, 0.16)
+	}
+	if w > 4 && h > 5 {
+		rl.DrawRectangleGradientV(x+2, y+2, w-4, h-4, hi, lo)
+	}
+}
+
+func drawGaugeBezel(x, y, w, h int32, muted bool) {
+	if w < 28 || h < 10 {
+		return
+	}
+	top := fadeColor(woodLight, 0.70)
+	bot := fadeColor(woodDark, 0.78)
+	if muted {
+		top = fadeColor(woodMid, 0.35)
+		bot = fadeColor(woodDark, 0.55)
+	}
+	rl.DrawRectangle(x+3, y, w-6, 1, top)
+	rl.DrawRectangle(x+3, y+h-1, w-6, 1, bot)
+	rl.DrawRectangle(x, y+3, 1, h-6, bot)
+	rl.DrawRectangle(x+w-1, y+3, 1, h-6, top)
+	if w >= 80 {
+		capCol := fadeColor(giltDim, 0.55)
+		drawDiamondPip(float32(x+6), float32(y+h/2), 2, capCol)
+		drawDiamondPip(float32(x+w-6), float32(y+h/2), 2, capCol)
 	}
 }
 

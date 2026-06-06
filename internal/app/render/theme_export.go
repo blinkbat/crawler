@@ -136,7 +136,16 @@ func SelectionRowRect(x, y, w, h int32) rl.Rectangle {
 }
 
 func DrawSelectedRow(r rl.Rectangle) {
+	rl.DrawRectangle(int32(r.X+2), int32(r.Y+3), int32(r.Width), int32(r.Height), fadeColor(shadowHeavy, 0.20))
 	drawGlassPane(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height), glassWarm)
+	rl.DrawRectangleLinesEx(r, 1, fadeColor(giltDim, 0.75))
+	if r.Width > 24 && r.Height > 10 {
+		rl.DrawRectangleGradientV(
+			int32(r.X+8), int32(r.Y+3), int32(r.Width-16), int32(r.Height/2),
+			fadeColor(giltBright, 0.18),
+			fadeColor(giltBright, 0.02),
+		)
+	}
 	// Gilt left spine — 3 px, vertically inset 5 px top/bottom so it
 	// reads as a marker rather than the entire left edge. Termini
 	// pips at each end of the spine give it the "illuminated
@@ -148,6 +157,9 @@ func DrawSelectedRow(r rl.Rectangle) {
 	pipX := float32(spineX) + 1
 	drawDiamondPip(pipX, float32(spineTop)-1, 2.5, giltBright)
 	drawDiamondPip(pipX, float32(spineTop+spineH)+1, 2.5, giltBright)
+	if r.Width >= 96 && r.Height >= 28 {
+		drawFleuron(r.X+r.Width-16, r.Y+r.Height/2, 2.4, fadeColor(giltDim, 0.55))
+	}
 	// Underline along the bottom edge, capped by tiny pips so the
 	// underline doesn't read as a bare line.
 	underY := int32(r.Y+r.Height) - 3
