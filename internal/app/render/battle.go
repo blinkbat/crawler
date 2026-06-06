@@ -150,8 +150,11 @@ var rosterSlotsBuf = make([]int, 0, 16)
 
 func visibleRosterSlots(g core.GameState) []int {
 	rosterSlotsBuf = rosterSlotsBuf[:0]
-	for i, m := range core.BattleMembers(&g) {
-		if !m.Alive && m.DeathFade <= 0 {
+	// Index-range: Enemy embeds a full DefinitionOverride, so a value-range
+	// would copy ~496 bytes per member per frame just to read two bools.
+	members := core.BattleMembers(&g)
+	for i := range members {
+		if !members[i].Alive && members[i].DeathFade <= 0 {
 			continue
 		}
 		rosterSlotsBuf = append(rosterSlotsBuf, i)
@@ -179,13 +182,10 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 	}
 	drawGlassPane(x, y, w, h, bg)
 	if targeted {
-		// Layered halo (pulsing outer ring + solid inner border) — the same
-		// "this is the live selection" treatment the party ribbon's active
-		// card uses, so the enemy target highlight reads as unmistakably lit
-		// rather than a faint tint shift.
-		halo := fadeColor(borderEnemy, 0.30+0.55*pulseHalo())
-		drawSmallPanelOutline(x-3, y-3, w+6, h+6, halo)
-		drawSmallPanelOutline(x, y, w, h, borderEnemy)
+		// Solid inner ring + pulsing wider ring — the same "this is the live
+		// selection" treatment the party ribbon's active card uses, shared via
+		// drawSelectionHalo so the two can't drift.
+		drawSelectionHalo(x, y, w, h, borderEnemy, pulseHalo(), true)
 	} else {
 		drawSmallPanelOutline(x, y, w, h, border)
 	}
@@ -488,6 +488,45 @@ func wrappedCombatLogLines(font rl.Font, lines []string, innerW int32, maxLines 
 // panel. Named so the five action-mode arms share one offset.
 const actionMenuSubLabelGap = 34
 
+// Action-row geometry — the key-plate size + selection inset shared by the
+// action menu and the skill/item picker rows so the two row styles align.
+const (
+	actionRowW = int32(284)
+	actionRowH = int32(32)
+)
+
+// itemMenuSuffix caches the "x<N>  >" badge on the action menu's Item row,
+// rebuilt only when the consumable count changes — not every frame the player
+// sits in the (steady-state) action menu. Returns ">" when empty.
+var itemSuffixCache struct {
+	total int
+	text  string
+}
+
+func itemMenuSuffix(total int) string {
+	if total <= 0 {
+		return ">"
+	}
+	if total != itemSuffixCache.total {
+		itemSuffixCache.total = total
+		itemSuffixCache.text = "x" + strconv.Itoa(total) + "  >"
+	}
+	return itemSuffixCache.text
+}
+
+// arrowPrompt caches the "A -> B" target prompt so the per-frame draw doesn't
+// fmt.Sprintf while the player cycles the target. The two target modes
+// (skill→ally, item→ally) share it since only one is active at a time.
+var arrowPromptCache struct{ a, b, text string }
+
+func arrowPrompt(a, b string) string {
+	if a != arrowPromptCache.a || b != arrowPromptCache.b {
+		arrowPromptCache.a, arrowPromptCache.b = a, b
+		arrowPromptCache.text = a + " -> " + b
+	}
+	return arrowPromptCache.text
+}
+
 func drawActionMenuPanel(g core.GameState, assets Resources) {
 	if g.Battle.Phase != core.BattlePlayer {
 		return
@@ -537,7 +576,10 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 	// action — reinforcing the lifted/haloed party card and the glowing
 	// sprite. A thin gilt rule divides the header from the action rows.
 	drawTextWithShadow(assets.hudFont, member.Name, float32(contentX), float32(y+14), FontHeading, classCol)
-	drawGiltRule(x+18, y+48, w-36, 1, 0.5)
+	ruleY := y + 48
+	drawGiltRule(x+18, ruleY, w-36, 1, 0.5)
+	drawDiamondPip(float32(x+18), float32(ruleY), 2.4, fadeColor(giltDim, 0.85))
+	drawDiamondPip(float32(x+w-18), float32(ruleY), 2.4, fadeColor(giltDim, 0.85))
 	contentY := y + 58
 	// subY is the baseline for the sub-prompt / picker list under the
 	// mode's verb heading — one offset so the five action-mode arms below
@@ -557,7 +599,7 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 		if g.Battle.PartyTarget >= 0 && g.Battle.PartyTarget < len(g.Party) {
 			targetName = g.Party[g.Battle.PartyTarget].Name
 		}
-		drawTextWithShadow(assets.hudFont, fmt.Sprintf("%s -> %s", core.SkillName(g.Battle.PendingSkill), targetName), float32(contentX), float32(contentY), FontBody, textPrimary)
+		drawTextWithShadow(assets.hudFont, arrowPrompt(core.SkillName(g.Battle.PendingSkill), targetName), float32(contentX), float32(contentY), FontBody, textPrimary)
 		drawTextWithShadow(assets.hudFont, "Choose an ally", float32(contentX), float32(subY), FontSmall, textLabel)
 	case core.ActionItemMenu:
 		drawTextWithShadow(assets.hudFont, "Items", float32(contentX), float32(contentY), FontHeading, textPrimary)
@@ -571,7 +613,7 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 		if g.Battle.PartyTarget >= 0 && g.Battle.PartyTarget < len(g.Party) {
 			targetName = g.Party[g.Battle.PartyTarget].Name
 		}
-		drawTextWithShadow(assets.hudFont, fmt.Sprintf("%s -> %s", itemName, targetName), float32(contentX), float32(contentY), FontBody, textPrimary)
+		drawTextWithShadow(assets.hudFont, arrowPrompt(itemName, targetName), float32(contentX), float32(contentY), FontBody, textPrimary)
 		drawTextWithShadow(assets.hudFont, "Choose an ally", float32(contentX), float32(subY), FontSmall, textLabel)
 	default:
 		// Transient status line — populated by setBattleStatus to surface
@@ -583,6 +625,16 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 			contentY += 26
 		}
 		drawActionMenuOptions(g, assets, contentX, contentY, member)
+	}
+
+	// Input-hint footer (gamepad-first): the confirm/back affordances seated
+	// over a faint gilt rule, so the action surface reads as an input prompt.
+	// Skipped when the panel is shrunk on a short window (would collide with
+	// the rows). Submenu entry is already cued by the per-row "▸" suffix.
+	if h >= 260 {
+		hintY := y + h - 28
+		drawGiltRule(x+18, hintY-12, w-36, 1, 0.3)
+		drawTextWithShadow(assets.hudFont, "A  Confirm       B  Back", float32(contentX), float32(hintY), FontSmall, textDim)
 	}
 }
 
@@ -611,10 +663,7 @@ func drawActionMenuOptions(g core.GameState, assets Resources, x, y int32, membe
 	drawActionMenuRow(assets.hudFont, core.ActionRowAttack, x, labelX, y+int32(core.ActionRowAttack)*rowSpacing, "Attack", "", cursor == core.ActionRowAttack)
 	_ = member
 	drawActionMenuRow(assets.hudFont, core.ActionRowSkill, x, labelX, y+int32(core.ActionRowSkill)*rowSpacing, "Skill", ">", cursor == core.ActionRowSkill)
-	itemSuffix := ">"
-	if total := consumableItemCount(g.Inventory); total > 0 {
-		itemSuffix = "x" + strconv.Itoa(total) + "  >"
-	}
+	itemSuffix := itemMenuSuffix(core.ConsumableCount(g.Inventory))
 	drawActionMenuRow(assets.hudFont, core.ActionRowItem, x, labelX, y+int32(core.ActionRowItem)*rowSpacing, "Item", itemSuffix, cursor == core.ActionRowItem)
 	drawActionMenuRow(assets.hudFont, core.ActionRowDefend, x, labelX, y+int32(core.ActionRowDefend)*rowSpacing, "Defend", "", cursor == core.ActionRowDefend)
 }
@@ -625,14 +674,33 @@ func drawActionMenuOptions(g core.GameState, assets Resources, x, y int32, membe
 // potion flask (Item), tower shield (Defend). Icon glyphs are
 // procedural (no asset dependency) so they read crisp at any DPI.
 func drawActionMenuRow(font rl.Font, row core.ActionRow, iconX, labelX, y int32, label, suffix string, selected bool) {
+	// The "key" plate + label + suffix come from the shared drawActionRow (also
+	// used by the skill/item submenu lists, so the whole action-input surface
+	// reads as one stack-of-keys family). This row adds the icon medallion on
+	// top, in the left gutter — the action sigil seated in a gilt-ringed rivet.
+	drawActionRow(font, labelX, y, label, suffix, selected)
+	iconCX := float32(iconX) + 9
+	iconCY := float32(y) + 13
+	drawIconMedallion(iconCX, iconCY, selected)
 	iconCol := giltDim
 	if selected {
 		iconCol = giltBright
 	}
-	iconCX := float32(iconX) + 10
-	iconCY := float32(y) + 14
-	drawActionIcon(row, iconCX, iconCY, 9, iconCol)
-	drawActionRow(font, labelX, y, label, suffix, selected)
+	drawActionIcon(row, iconCX, iconCY, 7, iconCol)
+}
+
+// drawIconMedallion paints a small socketed medallion behind an action sigil:
+// a dark seat, a gilt ring (candle-lit when selected), and a recessed dark face
+// the icon draws onto — the "rivet with an engraved badge" look, built from
+// stacked filled discs (no thin outline) so it reads as a solid fixture.
+func drawIconMedallion(cx, cy float32, selected bool) {
+	ring := fadeColor(giltDim, 0.85)
+	if selected {
+		ring = fadeColor(giltBright, 0.9*candleFlicker())
+	}
+	rl.DrawCircleV(rl.NewVector2(cx, cy), 12, fadeColor(woodDark, 0.95))
+	rl.DrawCircleV(rl.NewVector2(cx, cy), 11, ring)
+	rl.DrawCircleV(rl.NewVector2(cx, cy), 9.5, fadeColor(glassDeep, 0.96))
 }
 
 // actionIconDrawers dispatches each action-menu row to its sigil
@@ -770,7 +838,9 @@ func drawSkillMenuList(g core.GameState, assets Resources, x, y int32, member co
 var itemMenuStacksBuf []core.ItemStack
 
 func drawItemMenuList(g core.GameState, assets Resources, x, y int32) {
-	rowSpacing := int32(28)
+	// 32 (not 28) so each row's "key" plate (actionRowH=32, drawn by
+	// drawActionRow) has clearance and the plates don't overlap.
+	rowSpacing := int32(32)
 	itemMenuStacksBuf = core.LiveConsumablesInto(g.Inventory, itemMenuStacksBuf)
 	living := itemMenuStacksBuf
 	if len(living) == 0 {
@@ -785,36 +855,22 @@ func drawItemMenuList(g core.GameState, assets Resources, x, y int32) {
 	}
 }
 
-// consumableItemCount sums the inventory's USABLE-consumable stack counts
-// (equipment shares the inventory but isn't usable in combat). Drives the
-// action menu's "Item xN" hint so the badge matches what the Item picker
-// actually lists — a fresh equipment-only inventory shows no count.
-func consumableItemCount(inv []core.ItemStack) int {
-	n := 0
-	for _, s := range inv {
-		if s.Count > 0 && core.ItemInfo(s.Kind).Slot == core.SlotNone {
-			n += s.Count
-		}
-	}
-	return n
-}
-
 func drawActionRow(font rl.Font, x, y int32, label, suffix string, selected bool) {
-	rowW := int32(284)
-	rowH := int32(32)
+	// Every action / skill / item row is an engraved "key" plate so the whole
+	// action-input surface reads as one stack-of-keys family: the selected one
+	// gets the warm gilt selection plate (gilt spine + underline via
+	// DrawSelectedRow), the rest a dark glass key with a soft wood rim.
 	if selected {
-		// Selection style is gilt spine + underline (via
-		// DrawSelectedRowI). Earlier passes also drew an arrow
-		// marker beside the spine; removed because the spine
-		// already names the cursor per UI_STANDARDS.md and the
-		// two indicators visually competed.
-		DrawSelectedRowI(x-8, y-4, rowW, rowH)
+		DrawSelectedRowI(x-8, y-4, actionRowW, actionRowH)
+	} else {
+		drawGlassPane(x-8, y-4, actionRowW, actionRowH, fadeColor(glassDeep, 0.5))
+		drawSmallPanelOutline(x-8, y-4, actionRowW, actionRowH, fadeColor(woodMid, 0.45))
 	}
 	drawTextWithShadow(font, label, float32(x), float32(y), FontBody, textPrimary)
 	if suffix != "" {
 		size := FontSmall
 		measure := measureActionRowSuffix(font, suffix)
-		sx := float32(x) + float32(rowW) - measure.X - 22
+		sx := float32(x) + float32(actionRowW) - measure.X - 22
 		sy := float32(y) + 5
 		drawTextWithShadow(font, suffix, sx, sy, size, textLabel)
 	}
@@ -945,8 +1001,7 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 		ruleW := subMeasure.X * 0.6
 		ruleY := subY - 4
 		ruleCol := fadeColor(giltDim, overall)
-		rl.DrawRectangle(int32(cx-ruleW/2), int32(ruleY), int32(ruleW/2-8), 1, ruleCol)
-		rl.DrawRectangle(int32(cx+8), int32(ruleY), int32(ruleW/2-8), 1, ruleCol)
+		drawSplitRule(cx-ruleW/2, cx+ruleW/2, cx, ruleY, 8, ruleCol)
 		drawFleuron(cx, ruleY, 3, fadeColor(giltBright, overall))
 		drawTextWithShadowStyle(assets.hudFont, subtitle, subX, subY, subSize, 1,
 			rl.NewColor(borderEnemy.R, borderEnemy.G, borderEnemy.B, subAlpha), rl.NewColor(0, 0, 0, subAlpha), 1, 1)

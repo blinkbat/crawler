@@ -190,7 +190,7 @@ func drawSkillTreeNode(font rl.Font, m *core.PartyMember, node core.SkillTreeNod
 }
 
 func drawSkillNodePlate(rect rl.Rectangle, bg rl.Color, rank int, unlocked, focused bool) {
-	rl.DrawRectangle(int32(rect.X+2), int32(rect.Y+3), int32(rect.Width), int32(rect.Height), fadeColor(shadowHeavy, 0.18))
+	drawPaneDropShadow(rect)
 	drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), bg)
 	outline := fadeColor(woodAccent, 0.42)
 	if !unlocked {

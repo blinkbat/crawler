@@ -376,7 +376,7 @@ func updateSoundsModal(s *State) Action {
 
 	// Keyboard fallbacks.
 	if editorTabPressed() {
-		s.soundLeftPanel = (s.soundLeftPanel + 1) % soundPanelCount
+		s.soundLeftPanel = core.WrapEnum(s.soundLeftPanel, 1, int(soundPanelCount))
 		s.soundCursor = 0
 		return ActionNone
 	}

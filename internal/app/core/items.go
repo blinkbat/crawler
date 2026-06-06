@@ -469,3 +469,16 @@ func HasConsumable(inv []ItemStack) bool {
 	}
 	return false
 }
+
+// ConsumableCount sums the positive-count consumable stacks — the single
+// source for "how many usable items" so the battle action menu's "Item xN"
+// badge can't drift from the LiveConsumables picker's definition of consumable.
+func ConsumableCount(inv []ItemStack) int {
+	n := 0
+	for _, s := range inv {
+		if s.Count > 0 && isConsumable(s.Kind) {
+			n += s.Count
+		}
+	}
+	return n
+}

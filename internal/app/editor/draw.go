@@ -691,7 +691,7 @@ func drawEntityListWindow(font rl.Font, theme render.Theme, lay entityModalLayou
 			col = theme.BorderActive
 			text = "> " + text
 		}
-		render.DrawTextWithShadow(font, text, lay.card.X+24, y, 16, col)
+		render.DrawTextWithShadow(font, text, lay.card.X+24, y, editorFontBody, col)
 		y += lay.rowH
 	}
 	if lay.end < count {
@@ -786,7 +786,7 @@ func drawLayerTabs(s *State, font rl.Font, theme render.Theme) {
 		rl.DrawRectangleRec(inner, bg)
 		rl.DrawRectangleLinesEx(inner, 1, border)
 		label := fmt.Sprintf("%d %s", i+1, layerName(Layer(i)))
-		render.DrawTextWithShadow(font, label, inner.X+10, inner.Y+(inner.Height-16)/2, 16, text)
+		render.DrawTextWithShadow(font, label, inner.X+10, inner.Y+(inner.Height-16)/2, editorFontBody, text)
 	}
 }
 
@@ -1344,7 +1344,7 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 		badgeValue := rl.NewRectangle(mr.reachArea.X, mr.reachArea.Y+22, mr.reachArea.Width, 30)
 		rl.DrawRectangleRec(badgeValue, rl.NewColor(14, 22, 18, 255))
 		rl.DrawRectangleLinesEx(badgeValue, 1, editorReachOK)
-		rl.DrawTextEx(font, "OK", rl.NewVector2(badgeValue.X+8, badgeValue.Y+(badgeValue.Height-16)/2), 16, 1, rl.NewColor(150, 220, 180, 255))
+		rl.DrawTextEx(font, "OK", rl.NewVector2(badgeValue.X+8, badgeValue.Y+(badgeValue.Height-16)/2), editorFontBody, 1, rl.NewColor(150, 220, 180, 255))
 	} else {
 		// Stack one row per warning so the author can read them all
 		// without hover/click. Red panel + outline so the badge pops
@@ -1360,7 +1360,7 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 		for i, w := range rows {
 			rl.DrawTextEx(font, "! "+w,
 				rl.NewVector2(box.X+6, box.Y+5+float32(i)*22),
-				14, 1, rl.NewColor(240, 180, 180, 255))
+				editorFontLabel, 1, rl.NewColor(240, 180, 180, 255))
 		}
 		if len(warnings) > len(rows) {
 			rl.DrawTextEx(font, fmt.Sprintf("(+%d more)", len(warnings)-len(rows)),
@@ -1390,13 +1390,13 @@ func drawTextField(font rl.Font, r rl.Rectangle, text string, focused bool) {
 			display += " "
 		}
 	}
-	rl.DrawTextEx(font, display, rl.NewVector2(r.X+8, r.Y+(r.Height-16)/2), 16, 1, textEntry)
+	rl.DrawTextEx(font, display, rl.NewVector2(r.X+8, r.Y+(r.Height-16)/2), editorFontBody, 1, textEntry)
 }
 
 func drawReadonlyValue(font rl.Font, r rl.Rectangle, text string) {
 	rl.DrawRectangleRec(r, bgFieldInset)
 	rl.DrawRectangleLinesEx(r, 1, editorBorderInactive)
-	rl.DrawTextEx(font, text, rl.NewVector2(r.X+8, r.Y+(r.Height-16)/2), 16, 1, textReadonly)
+	rl.DrawTextEx(font, text, rl.NewVector2(r.X+8, r.Y+(r.Height-16)/2), editorFontBody, 1, textReadonly)
 }
 
 // --- Grid ------------------------------------------------------------------
@@ -2256,7 +2256,7 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 			col = theme.BorderActive
 			text = "> " + text
 		}
-		render.DrawTextWithShadow(font, text, r.X+18, listTop+float32(i-topRow)*rowH, 16, col)
+		render.DrawTextWithShadow(font, text, r.X+18, listTop+float32(i-topRow)*rowH, editorFontBody, col)
 	}
 	// Scroll hint when the list extends past the visible window.
 	if topRow > 0 || end < len(s.modalPaths) {
@@ -2486,7 +2486,7 @@ func drawValidateModal(s *State, font rl.Font, theme render.Theme) {
 	r := drawModalHeader(font, theme, pw, ph, "VALIDATE MAP", theme.BorderActive)
 	if len(rows) == 0 {
 		rl.DrawTextEx(font, "All checks pass.",
-			rl.NewVector2(r.X+16, r.Y+50), 16, 1, theme.BorderStrong)
+			rl.NewVector2(r.X+16, r.Y+50), editorFontBody, 1, theme.BorderStrong)
 	} else {
 		y := r.Y + 50
 		for _, line := range rows {

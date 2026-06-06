@@ -136,13 +136,14 @@ func SelectionRowRect(x, y, w, h int32) rl.Rectangle {
 }
 
 func DrawSelectedRow(r rl.Rectangle) {
-	rl.DrawRectangle(int32(r.X+2), int32(r.Y+3), int32(r.Width), int32(r.Height), fadeColor(shadowHeavy, 0.20))
+	flick := candleFlicker()
+	drawPaneDropShadow(r)
 	drawGlassPane(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height), glassWarm)
-	rl.DrawRectangleLinesEx(r, 1, fadeColor(giltDim, 0.75))
+	rl.DrawRectangleLinesEx(r, 1, fadeColor(giltDim, 0.75*flick))
 	if r.Width > 24 && r.Height > 10 {
 		rl.DrawRectangleGradientV(
 			int32(r.X+8), int32(r.Y+3), int32(r.Width-16), int32(r.Height/2),
-			fadeColor(giltBright, 0.18),
+			fadeColor(giltBright, 0.20*flick),
 			fadeColor(giltBright, 0.02),
 		)
 	}
@@ -199,10 +200,7 @@ func DrawTitleRule(x, y, w float32) {
 	// rather than as pips on a continuous line.
 	leftStart := x + endFlR + 4
 	rightEnd := x + w - endFlR - 4
-	midLeftEnd := cx - midFlR - 6
-	midRightStart := cx + midFlR + 6
-	rl.DrawRectangle(int32(leftStart), int32(y), int32(midLeftEnd-leftStart), 1, giltDim)
-	rl.DrawRectangle(int32(midRightStart), int32(y), int32(rightEnd-midRightStart), 1, giltDim)
+	drawSplitRule(leftStart, rightEnd, cx, y, midFlR+6, giltDim)
 	drawFleuron(x+endFlR, y, endFlR, giltDim)
 	drawFleuron(x+w-endFlR, y, endFlR, giltDim)
 	drawFleuron(cx, y, midFlR, giltBright)

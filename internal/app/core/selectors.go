@@ -528,9 +528,12 @@ func turnEntryFor(g *GameState, actor ActorRef) (TurnEntry, bool) {
 	if actor.Index < 0 || actor.Index >= len(members) {
 		return TurnEntry{}, false
 	}
-	enemy := members[actor.Index]
+	// Pointer, not a value copy: Enemy embeds a full DefinitionOverride, and
+	// this runs per queue entry (up to ATBQueueSlots) every battle frame via
+	// the cached forecast. The dead-entry early-return then costs no copy.
+	enemy := &members[actor.Index]
 	if !enemy.Alive {
 		return TurnEntry{}, false
 	}
-	return TurnEntry{Label: EnemyInfoFor(enemy).SingularName, Enemy: true}, true
+	return TurnEntry{Label: EnemyInfoFor(*enemy).SingularName, Enemy: true}, true
 }

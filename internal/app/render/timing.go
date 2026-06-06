@@ -929,7 +929,9 @@ func DrawDamagePopups(camera rl.Camera3D, g core.GameState, assets Resources) {
 	if !g.Battle.Active() {
 		return
 	}
-	for i, enemy := range core.BattleMembers(&g) {
+	members := core.BattleMembers(&g)
+	for i := range members {
+		enemy := &members[i] // index-range + pointer: no ~496-byte Enemy copy per member
 		if enemy.DamagePopupTimer <= 0 {
 			continue
 		}

@@ -184,12 +184,10 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 	iw, ih := int32(partyCardW), int32(partyCardH)
 
 	if active && !down {
-		// Layered gilt halo — a solid inner ring plus a pulsing, wider
-		// outer ring — so the active card reads as unmistakably lit, not
-		// a faint outline.
-		drawPanelOutline(ix-3, iy-3, iw+6, ih+6, borderActive)
-		halo := fadeColor(borderActive, 0.35+0.65*pulseActiveActor())
-		drawPanelOutline(ix-6, iy-6, iw+12, ih+12, halo)
+		// Layered gilt halo — solid inner ring + pulsing wider outer ring — so
+		// the active card reads as unmistakably lit. Shared with the battle
+		// roster's targeted-row halo via drawSelectionHalo.
+		drawSelectionHalo(ix-3, iy-3, iw+6, ih+6, borderActive, pulseActiveActor(), false)
 	}
 	if selected {
 		drawPanelOutline(ix-3, iy-3, iw+6, ih+6, borderTarget)

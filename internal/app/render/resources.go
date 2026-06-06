@@ -222,6 +222,13 @@ func LoadResources() (r Resources) {
 	groundShadowModel = loadGroundShadowModel()
 	groundShadowReady = true
 
+	// HUD material grain — a tiny transparent speckle/fiber overlay tiled over
+	// every glass panel body (drawGlassRelief) so the UI reads as real leaded
+	// glass rather than a flat fill. Package singleton like groundShadowModel:
+	// the theme draw helpers are free functions with no Resources handle.
+	hudGrainTex = loadTexture(makeHudGrainPixels(64, 64), 64, 64, rl.FilterBilinear)
+	hudGrainReady = true
+
 	// Wall-torch flame blob — a small unlit emissive sphere (default
 	// material shader, like the ground-shadow disc) tinted to fire
 	// colours and animated per-frame by drawWallTorch.
@@ -592,6 +599,10 @@ func (r Resources) Unload() {
 	if groundShadowReady {
 		rl.UnloadModel(groundShadowModel)
 		groundShadowReady = false
+	}
+	if hudGrainReady {
+		rl.UnloadTexture(hudGrainTex)
+		hudGrainReady = false
 	}
 	if torchFlameReady {
 		rl.UnloadModel(torchFlameModel)

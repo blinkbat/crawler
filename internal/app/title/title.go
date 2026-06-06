@@ -173,8 +173,15 @@ func updateMapPicker(s *State) Action {
 func Draw(s State, assets render.Resources) {
 	font := assets.Font()
 	theme := assets.Theme()
-	rl.ClearBackground(rl.NewColor(8, 12, 24, 255))
-	_, screenH := render.ScreenSize()
+	screenW, screenH := render.ScreenSize()
+	// ClearBackground first — load-bearing for the depth-buffer wipe on this
+	// raylib build (see AGENTS.md), independent of the opaque backdrop painted
+	// over it. The color is immediately overdrawn by DrawCandlelitBackdrop.
+	rl.ClearBackground(rl.NewColor(8, 10, 20, 255))
+	// Candlelit backdrop — warm radial pool + drifting dust + grain over a deep
+	// gradient — so the launch screen opens like a tome by candlelight rather
+	// than a flat fill.
+	render.DrawCandlelitBackdrop(screenW, screenH)
 
 	title := "CRAWLER"
 	// Game-name splash — the documented exception to the five-size
@@ -185,7 +192,12 @@ func Draw(s State, assets render.Resources) {
 	tm := rl.MeasureTextEx(font, title, titleSize, titleSpacing)
 	titleX := render.CenterXF(tm.X)
 	titleY := float32(screenH) * 0.18
-	render.DrawTextWithShadow(font, title, titleX, titleY, titleSize, theme.TextPrimary)
+	// Embossed gilt wordmark: deep cast shadow, gold body, then a fine cream
+	// speculum nudged up-left so the letters read as raised, candle-struck
+	// gold leaf rather than flat text.
+	rl.DrawTextEx(font, title, rl.NewVector2(titleX+3, titleY+4), titleSize, titleSpacing, rl.NewColor(0, 0, 0, 210))
+	rl.DrawTextEx(font, title, rl.NewVector2(titleX, titleY), titleSize, titleSpacing, theme.BorderActive)
+	rl.DrawTextEx(font, title, rl.NewVector2(titleX-1, titleY-1), titleSize, titleSpacing, rl.NewColor(255, 246, 220, 130))
 
 	// Gilt rule beneath the title, flanked by fleurons — the heraldic
 	// banner divider 90s D&D box art used between a game title and

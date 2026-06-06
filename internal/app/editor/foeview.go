@@ -299,12 +299,12 @@ func drawFoeViewModal(s *State, font rl.Font, theme render.Theme) {
 	drawButton(font, l.prevFoeBtn, "<", false)
 	drawButton(font, l.nextFoeBtn, ">", false)
 	name := core.EnemyInfo(s.foeKind).Name
-	nameSize := rl.MeasureTextEx(font, name, 18, 1)
+	nameSize := rl.MeasureTextEx(font, name, editorFontTopbar, 1)
 	nameSpanX := l.prevFoeBtn.X + l.prevFoeBtn.Width
 	nameSpanW := l.nextFoeBtn.X - nameSpanX
 	rl.DrawTextEx(font, name,
 		rl.NewVector2(nameSpanX+(nameSpanW-nameSize.X)/2, l.prevFoeBtn.Y+5),
-		18, 1, theme.TextPrimary)
+		editorFontTopbar, 1, theme.TextPrimary)
 
 	for i := range foeFields {
 		drawFoeSlider(font, theme, l, i, s)

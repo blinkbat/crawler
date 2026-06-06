@@ -88,31 +88,15 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 	rl.DrawGrid(14, 1)
 	_ = foePreviewGrid
 
-	// Mirror drawBattlePack's ordering exactly: depthOffset shifts the
-	// formation position first, then the shadow + chevron derive from that
-	// adjusted position, then yOffset lowers only the sprite.
-	position := foeAnchor
-	if v.depthOffset != 0 {
-		fwd := horizontalForward(cam)
-		position.X += fwd.X * v.depthOffset
-		position.Z += fwd.Z * v.depthOffset
-	}
+	// Same per-kind placement as the battle roster, via the shared helper so
+	// the preview stays faithful to drawBattlePack's depth/shadow/chevron/
+	// yOffset ordering by construction (not by a hand-synced comment).
+	place := resolveBillboardPlacement(cam, foeAnchor, v)
 	if v.shadowRadius > 0 {
-		sx, sz := shadowFootprint(cam, position, v)
-		drawGroundShadow(sx, sz, v.shadowRadius)
+		drawGroundShadow(place.shadowX, place.shadowZ, v.shadowRadius)
 	}
-	chevronPos := position
-	chevronPos.Y += v.markerYOffset
-	if v.markerXOffset != 0 {
-		fwd := horizontalForward(cam)
-		right := horizontalRight(fwd)
-		chevronPos.X += right.X * v.markerXOffset
-		chevronPos.Z += right.Z * v.markerXOffset
-	}
-	drawTargetChevron(cam, chevronPos)
-	billboardPos := position
-	billboardPos.Y += v.yOffset
-	drawTextureBillboard(cam, v.texture, billboardPos, v.size, v.resolveTint())
+	drawTargetChevron(cam, place.chevron)
+	drawTextureBillboard(cam, v.texture, place.sprite, v.size, v.resolveTint())
 
 	rl.EndMode3D()
 	rl.EndTextureMode()

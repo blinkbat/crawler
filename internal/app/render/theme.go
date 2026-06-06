@@ -266,6 +266,11 @@ const (
 	woodFrameOuter = int32(2)
 	woodFrameBand  = int32(3)
 	woodFrameInner = int32(1)
+	// cardFrameThick is the total wood-frame band width (outer + band + inner).
+	// drawCard's stroke width, drawCardFiligree's corner inset (+5), and
+	// drawCardInlay's inset (+4) all derive from this so bumping any frame band
+	// keeps the three frame decorations aligned.
+	cardFrameThick = woodFrameOuter + woodFrameBand + woodFrameInner
 
 	// Heading tick markers (drawHeading underline) have a minimum width so
 	// short headings still read as labelled. Bar value text inset is the
@@ -374,6 +379,68 @@ func drawCandleVeil(screenW, screenH int32) {
 		rl.NewColor(18, 22, 44, 30),
 		rl.NewColor(0, 0, 0, 56),
 	)
+	flick := candleFlicker()
+	cx := screenW / 2
+	cy := screenH / 2
+	// Warm candlelight pool blooming from the center where the card will sit —
+	// a soft radial wash that breathes with the flame. Darkens the periphery by
+	// contrast so the eye is drawn inward to the lit dialog.
+	poolR := float32(min(int(screenW), int(screenH))) * 0.66
+	rl.DrawCircleGradient(cx, cy, poolR,
+		fadeColor(rl.NewColor(78, 50, 24, 255), 0.11*flick),
+		rl.NewColor(0, 0, 0, 0))
+	// Drifting dust motes catching the candlelight — stateless, hash-seeded,
+	// slowly falling and wrapping. Few enough (per drawDustMotes) to be free.
+	drawDustMotes(screenW, screenH, flick)
+}
+
+// drawDustMotes scatters a handful of faint warm motes that drift slowly
+// downward (wrapping at the bottom) with a gentle horizontal sway — the
+// floating dust you only notice in a shaft of candlelight. Stateless: position
+// and twinkle derive from a per-mote hash plus rl.GetTime(), so no pool to
+// retain and nothing to reset between modals.
+func drawDustMotes(screenW, screenH int32, flick float32) {
+	const motes = 16
+	t := rl.GetTime()
+	fw := float32(screenW)
+	fh := float32(screenH)
+	warm := rl.NewColor(255, 230, 184, 255)
+	for i := 0; i < motes; i++ {
+		hx := hash01(uint32(i*2654435761 + 1))
+		hy := hash01(uint32(i*40503 + 7))
+		fall := float32(math.Mod(t*9+float64(hy)*float64(fh), float64(fh)))
+		sway := float32(math.Sin(t*0.35+float64(i)*1.7)) * 22
+		mx := hx*fw + sway
+		my := fall
+		// Twinkle inline from the already-captured t instead of pulse() (which
+		// would re-cross cgo for rl.GetTime() once per mote).
+		tw := 0.5 + 0.5*float32(math.Sin(t*(0.25+float64(i)*0.04)*math.Pi*2))
+		a := (0.06 + 0.07*tw) * flick
+		rl.DrawCircleV(rl.NewVector2(mx, my), 1.2, fadeColor(warm, a))
+	}
+}
+
+// DrawCandlelitBackdrop paints a full-screen candlelit background: a deep
+// vertical gradient (near-black indigo at the top settling to warm brown at the
+// base), a wide radial pool of candlelight blooming from the upper third and
+// breathing with the flame, drifting dust motes, and a faint material grain
+// over everything. The title screen uses it so the launch screen reads as a
+// grimoire opened by candlelight instead of a flat fill. Exported because the
+// title package lives outside render.
+func DrawCandlelitBackdrop(screenW, screenH int32) {
+	if screenW <= 0 || screenH <= 0 {
+		return
+	}
+	rl.DrawRectangleGradientV(0, 0, screenW, screenH,
+		rl.NewColor(8, 10, 20, 255), rl.NewColor(22, 15, 12, 255))
+	flick := candleFlicker()
+	poolY := int32(float32(screenH) * 0.34)
+	poolR := float32(min(int(screenW), int(screenH))) * 0.72
+	rl.DrawCircleGradient(screenW/2, poolY, poolR,
+		fadeColor(rl.NewColor(96, 62, 28, 255), 0.30*flick),
+		rl.NewColor(0, 0, 0, 0))
+	drawDustMotes(screenW, screenH, flick)
+	drawHudGrain(0, 0, screenW, screenH, 0.5)
 }
 
 // drawScreenFractionScaffold sizes a modal card as a fraction of the
@@ -404,7 +471,7 @@ func drawCardFiligree(x, y, w, h int32, col color.RGBA) {
 	if w < 80 || h < 80 {
 		return
 	}
-	inset := int32(woodFrameOuter + woodFrameBand + woodFrameInner + 5)
+	inset := int32(cardFrameThick + 5)
 	outerArm := int32(14)
 	innerArm := int32(8)
 	innerInset := int32(4)
@@ -782,6 +849,16 @@ func drawGiltRule(x, y, w, h int32, alpha float32) {
 	rl.DrawRectangle(x, y, w, h, fadeColor(giltBright, alpha))
 }
 
+// drawSplitRule draws a 1px horizontal rule from leftX to rightX broken by a
+// `gap` on each side of cx (to seat a centre fleuron). The two-segment line is
+// shared by the title banner divider (DrawTitleRule, which adds end-cap +
+// centre fleurons over it) and the battle-splash divider (which fades it with
+// the splash) so the segment math isn't hand-written in both.
+func drawSplitRule(leftX, rightX, cx, y, gap float32, col color.RGBA) {
+	rl.DrawRectangle(int32(leftX), int32(y), int32(cx-gap-leftX), 1, col)
+	rl.DrawRectangle(int32(cx+gap), int32(y), int32(rightX-(cx+gap)), 1, col)
+}
+
 // drawCard renders a wood-framed glass pane — the library aesthetic
 // every panel-shaped surface uses. Owns the four-layer composition
 // from UI_STANDARDS.md "Panel": outer woodDark stroke, woodMid band,
@@ -810,7 +887,7 @@ func drawCard(x, y, w, h int32, fill, outline, accent color.RGBA) {
 	drawGlassPane(x, y, w, h, fill)
 	rect := rl.NewRectangle(float32(x), float32(y), float32(w), float32(h))
 	roundness := fixedRoundnessFor(w, h, cornerRadius)
-	frameThick := float32(woodFrameOuter + woodFrameBand + woodFrameInner)
+	frameThick := float32(cardFrameThick)
 	rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, frameThick, woodLight)
 	rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, float32(woodFrameOuter+woodFrameBand), woodMid)
 	rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, float32(woodFrameOuter), outline)
@@ -825,8 +902,13 @@ func drawCardDropShadow(x, y, w, h int32) {
 		return
 	}
 	roundness := fixedRoundnessFor(w, h, cornerRadius)
+	// Three stacked, offset copies — widest+faintest first — so the card casts
+	// a soft graduated shadow that lifts it convincingly off the world behind
+	// it rather than a single hard drop.
+	wide := rl.NewRectangle(float32(x+10), float32(y+14), float32(w), float32(h))
 	soft := rl.NewRectangle(float32(x+6), float32(y+8), float32(w), float32(h))
 	near := rl.NewRectangle(float32(x+2), float32(y+3), float32(w), float32(h))
+	rl.DrawRectangleRounded(wide, roundness, 8, fadeColor(shadowHeavy, 0.13))
 	rl.DrawRectangleRounded(soft, roundness, 8, fadeColor(shadowHeavy, 0.22))
 	rl.DrawRectangleRounded(near, roundness, 8, fadeColor(shadowStrong, 0.28))
 }
@@ -840,7 +922,7 @@ func drawCardInlay(x, y, w, h int32) {
 	if w < 96 || h < 52 {
 		return
 	}
-	inset := int32(woodFrameOuter + woodFrameBand + woodFrameInner + 4)
+	inset := int32(cardFrameThick + 4)
 	innerW := w - inset*2
 	innerH := h - inset*2
 	if innerW <= 0 || innerH <= 0 {
@@ -862,17 +944,16 @@ func drawCardInlay(x, y, w, h int32) {
 		rl.DrawRectangle(lineX, botY, lineW, 1, fadeColor(giltDim, 0.28))
 	}
 
-	pipCol := fadeColor(giltDim, 0.75)
-	hiCol := fadeColor(giltBright, 0.55)
 	corners := [4]rl.Vector2{
 		rl.NewVector2(float32(x+inset), float32(y+inset)),
 		rl.NewVector2(float32(x+w-inset), float32(y+inset)),
 		rl.NewVector2(float32(x+inset), float32(y+h-inset)),
 		rl.NewVector2(float32(x+w-inset), float32(y+h-inset)),
 	}
+	// Domed brass rivets at the inner corners — the carved-cabinet hardware
+	// detail. Replaces the old flat diamond pips with lit half-spheres.
 	for _, c := range corners {
-		drawDiamondPip(c.X, c.Y, 2.1, pipCol)
-		drawDiamondPip(c.X, c.Y, 0.8, hiCol)
+		drawBrassStud(c.X, c.Y, 2.3)
 	}
 }
 
@@ -900,6 +981,7 @@ func drawGlassPane(x, y, w, h int32, fill color.RGBA) {
 	rl.DrawRectangleRounded(rect, roundness, 8, glassBaseWash)
 	rl.DrawRectangleRounded(rect, roundness, 8, fill)
 	drawGlassGradientWash(x, y, w, h)
+	drawGlassRelief(x, y, w, h)
 }
 
 func drawGlassGradientWash(x, y, w, h int32) {
@@ -923,6 +1005,99 @@ func drawGlassGradientWash(x, y, w, h int32) {
 	rl.DrawRectangleGradientEx(r, topLeft, bottomLeft, topRight, bottomRight)
 }
 
+// ---- Skeuomorphic relief: grain, candlelight, glass depth -----------------
+// (The "wet dream by candlelight" pass — real material tooth, recessed glass,
+// lit hardwood, and a living flame breathing over the gilt.)
+
+// hudGrainTex is the tileable transparent grain overlay (specks + fibers) minted
+// once in NewResources and tiled over every glass body by drawGlassRelief. A
+// package singleton because the theme draw helpers are free functions with no
+// Resources handle (same reason groundShadowModel is). hudGrainReady guards the
+// pre-init / headless window (tests) so the draw is a clean no-op.
+var (
+	hudGrainTex   rl.Texture2D
+	hudGrainReady bool
+)
+
+// hudGrainAlpha is the white-tint alpha the grain overlay is drawn at. The
+// texels are already low-alpha, so this is a master "tooth" knob — raise for a
+// rougher, more antique surface, lower toward 0 to silence it.
+const hudGrainAlpha = float32(0.85)
+
+// drawHudGrain tiles hudGrainTex across (x,y,w,h) at the given alpha. WrapRepeat
+// on the texture means a source rect the size of the destination tiles it in a
+// single draw. No-op until the texture exists.
+func drawHudGrain(x, y, w, h int32, alpha float32) {
+	if !hudGrainReady || w <= 0 || h <= 0 {
+		return
+	}
+	src := rl.NewRectangle(0, 0, float32(w), float32(h))
+	dst := rl.NewRectangle(float32(x), float32(y), float32(w), float32(h))
+	rl.DrawTexturePro(hudGrainTex, src, dst, rl.NewVector2(0, 0), 0, fadeColor(rl.White, alpha))
+}
+
+// candleFlicker returns a slow, organic 0.86..1.0 multiplier — the breath of a
+// candle flame. Three incommensurate sines summed so it never reads as a clean
+// loop; multiply gilt accent brightness/alpha by it on the ornaments that
+// should feel lit (frame speculum, brass studs, heading rule) for the
+// "by candlelight" shimmer. Deliberately shallow — it should register
+// subliminally, never strobe.
+// flickerCache memoizes candleFlicker within a frame. rl.GetTime() is constant
+// across a single frame, so the (3-sin) flicker value is identical for every
+// ornament that asks for it that frame — it was being recomputed dozens of
+// times per frame (4 brass studs per card, frame sheen, heading, etc.). Keyed
+// on the frame's time so it auto-refreshes next frame.
+var flickerCache struct {
+	t      float64
+	value  float32
+	primed bool
+}
+
+func candleFlicker() float32 {
+	t := rl.GetTime()
+	if flickerCache.primed && t == flickerCache.t {
+		return flickerCache.value
+	}
+	n := 0.5*math.Sin(t*3.1) + 0.3*math.Sin(t*7.7+1.3) + 0.2*math.Sin(t*17.3+2.6)
+	v := float32(0.93 + 0.07*n)
+	flickerCache.t, flickerCache.value, flickerCache.primed = t, v, true
+	return v
+}
+
+// drawGlassRelief layers the depth cues over a translucent glass body: the
+// material grain, a soft inner shadow bleeding down from the top inner edge
+// (the pane sits recessed behind its frame), and a thin warm rim-light along
+// the bottom inner edge (light pooling at the base of lit cabinet glass). Kept
+// faint so the world still reads through. Called at the tail of drawGlassPane,
+// so EVERY glass surface in the UI — cards, sub-panes, focusable rows — gains
+// the same physically-consistent depth at once.
+func drawGlassRelief(x, y, w, h int32) {
+	if w < 22 || h < 16 {
+		return
+	}
+	inset := int32(3)
+	iw := w - inset*2
+	ih := h - inset*2
+	if iw <= 0 || ih <= 0 {
+		return
+	}
+	// Just the material grain — the glass sheen comes from drawGlassGradientWash
+	// and the lift from drawCardDropShadow. The earlier inner-shadow + rim-light
+	// hairlines read as ambiguous "lines on glass" noise, so they're gone.
+	drawHudGrain(x+inset, y+inset, iw, ih, hudGrainAlpha)
+}
+
+// drawBrassStud paints a small domed rivet — the cabinet-hardware detail at
+// frame corners: a dark seat ring, a gilt dome, and a bright upper-left
+// speculum (candle-modulated) so it reads as a polished metal half-sphere
+// catching the light rather than a flat dot.
+func drawBrassStud(cx, cy, r float32) {
+	rl.DrawCircleV(rl.NewVector2(cx, cy), r+1, fadeColor(woodDark, 0.9))
+	rl.DrawCircleV(rl.NewVector2(cx, cy), r, giltDim)
+	rl.DrawCircleV(rl.NewVector2(cx-r*0.32, cy-r*0.32), r*0.42,
+		fadeColor(giltBright, 0.92*candleFlicker()))
+}
+
 // drawFocusableRow paints a selectable list row: a glass body that
 // warm-tints when focused, plus a gilt selection outline on the focused
 // row. One definition of the "cursored row" look shared by the panels
@@ -934,9 +1109,40 @@ func drawFocusableRow(rect rl.Rectangle, focused bool) {
 		bg = fadeColor(glassWarm, 0.85)
 	}
 	drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), bg)
-	if focused {
-		rl.DrawRectangleLinesEx(rect, 2, giltBright)
+	if !focused {
+		return
 	}
+	ix, iy := int32(rect.X), int32(rect.Y)
+	ih := int32(rect.Height)
+	flick := candleFlicker()
+	// Gilt selection frame, breathing with the flame, plus a leading gilt spine.
+	rl.DrawRectangleLinesEx(rect, 2, fadeColor(giltBright, 0.72+0.28*flick))
+	if ih > 8 {
+		rl.DrawRectangle(ix+2, iy+3, 2, ih-6, fadeColor(giltBright, 0.8*flick))
+	}
+}
+
+// drawSelectionHalo paints the shared "this is the live selection" emphasis: a
+// solid inner ring around (x,y,w,h) plus a wider, pulsing outer ring in the
+// same tint. `pulseV` is the caller's breathing-curve sample (pulseActiveActor
+// for the party ribbon's active card, pulseHalo for the battle roster's
+// targeted row) so each surface keeps its own cadence; `small` picks the
+// small-radius outline for compact surfaces. Both call sites route through this
+// so their halo geometry + pulse→alpha mapping can't drift.
+func drawSelectionHalo(x, y, w, h int32, tint color.RGBA, pulseV float32, small bool) {
+	outline := drawPanelOutline
+	if small {
+		outline = drawSmallPanelOutline
+	}
+	outline(x, y, w, h, tint)
+	outline(x-3, y-3, w+6, h+6, fadeColor(tint, 0.30+0.55*pulseV))
+}
+
+// drawPaneDropShadow stamps the cheap offset drop shadow under a selectable
+// glass pane (the menu/list selected row + the skill-tree node plate) — one
+// offset + alpha so the two can't drift apart by a couple alpha points.
+func drawPaneDropShadow(r rl.Rectangle) {
+	rl.DrawRectangle(int32(r.X+2), int32(r.Y+3), int32(r.Width), int32(r.Height), fadeColor(shadowHeavy, 0.20))
 }
 
 // drawPanelHeading paints a FontHeading title with the standard
@@ -957,11 +1163,17 @@ func drawPanelHeading(font rl.Font, text string, x, y float32, accent color.RGBA
 	ruleY := int32(y + measure.Y + 3)
 	ruleX := int32(x)
 	ruleW := tickW + 18
+	flick := candleFlicker()
 	rl.DrawRectangle(ruleX+6, ruleY, ruleW-12, 2, fadeColor(accent, 0.85))
 	rl.DrawRectangle(ruleX+18, ruleY+4, ruleW-36, 1, fadeColor(accent, 0.35))
+	// Polished-brass speculum: a short bright glint riding the left of the rule,
+	// breathing with the candle so the heading underline reads as lit metal.
+	if ruleW > 28 {
+		rl.DrawRectangle(ruleX+6, ruleY, 12, 1, fadeColor(giltBright, 0.6*flick))
+	}
 	drawDiamondPip(float32(ruleX+2), float32(ruleY+1), 2.4, fadeColor(accent, 0.85))
 	drawDiamondPip(float32(ruleX+ruleW-2), float32(ruleY+1), 2.4, fadeColor(accent, 0.85))
-	drawFleuron(float32(ruleX+ruleW+8), float32(ruleY+1), 3.2, fadeColor(accent, 0.65))
+	drawFleuron(float32(ruleX+ruleW+8), float32(ruleY+1), 3.2, fadeColor(accent, 0.65*flick))
 }
 
 // measureKey identifies a cached text measurement: the string plus the
@@ -1211,6 +1423,14 @@ func drawGaugeFillDepth(x, y, w, h int32, muted bool) {
 	}
 	if w > 4 && h > 5 {
 		rl.DrawRectangleGradientV(x+2, y+2, w-4, h-4, hi, lo)
+		// Glass-tube specular cap — a bright hairline riding the top of the
+		// fill so the gauge reads as a curved, light-catching tube of liquid
+		// rather than a flat bar. Brighter when not muted.
+		spec := fadeColor(inkPrimary, 0.34)
+		if muted {
+			spec = fadeColor(inkDim, 0.16)
+		}
+		rl.DrawRectangle(x+2, y+2, w-4, 1, spec)
 	}
 }
 

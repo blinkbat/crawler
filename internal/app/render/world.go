@@ -1322,6 +1322,44 @@ func drawFieldPacks(camera rl.Camera3D, g core.GameState, assets Resources) {
 	}
 }
 
+// billboardPlacement bundles the derived draw positions for a per-kind enemy
+// billboard once depthOffset / markerOffset / yOffset are applied. Shared by
+// the battle roster draw (drawBattlePack) and the editor Foe Visualizer preview
+// (DrawFoePreview) so the placement SEQUENCE both depend on lives in one place.
+// (drawFieldPacks uses a different ground-anchored, no-chevron path.)
+type billboardPlacement struct {
+	base    rl.Vector3 // formation position after the depthOffset push-back
+	shadowX float32    // contact-disc footprint (camera-relative shadowOffset folded in)
+	shadowZ float32
+	chevron rl.Vector3 // target-cursor anchor (markerY/X applied)
+	sprite  rl.Vector3 // billboard center (yOffset applied)
+}
+
+// resolveBillboardPlacement applies v.depthOffset (push back along camera-
+// forward) to position, then derives the contact-shadow footprint, the target-
+// chevron anchor (markerY/X), and the sprite center (yOffset) from that
+// adjusted base — the exact ordering drawBattlePack and DrawFoePreview share.
+func resolveBillboardPlacement(camera rl.Camera3D, position rl.Vector3, v enemyVisual) billboardPlacement {
+	base := position
+	if v.depthOffset != 0 {
+		fwd := horizontalForward(camera)
+		base.X += fwd.X * v.depthOffset
+		base.Z += fwd.Z * v.depthOffset
+	}
+	sx, sz := shadowFootprint(camera, base, v)
+	chevron := base
+	chevron.Y += v.markerYOffset
+	if v.markerXOffset != 0 {
+		fwd := horizontalForward(camera)
+		right := horizontalRight(fwd)
+		chevron.X += right.X * v.markerXOffset
+		chevron.Z += right.Z * v.markerXOffset
+	}
+	sprite := base
+	sprite.Y += v.yOffset
+	return billboardPlacement{base: base, shadowX: sx, shadowZ: sz, chevron: chevron, sprite: sprite}
+}
+
 // drawBattlePack renders every member of the active pack in battle
 // formation: living and recently-defeated (still fading) alike.
 func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
@@ -1356,15 +1394,11 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 			continue
 		}
 		position := enemyFormationPos(camera, &g, visibleSlot, visibleCount, enemy)
-		// Per-kind depth push-back (the square Feral Rat PNG) — move the
-		// billboard further from the camera along forward so it sits in line
-		// with the procedural roster instead of looming. The shadow + chevron
-		// derived below ride the adjusted position.
-		if visual.depthOffset != 0 {
-			fwd := horizontalForward(camera)
-			position.X += fwd.X * visual.depthOffset
-			position.Z += fwd.Z * visual.depthOffset
-		}
+		// Per-kind depth/marker/yOffset placement (depth push-back for the
+		// square Feral Rat PNG, the chevron anchor, the contact-shadow
+		// footprint, and the lowered sprite center) all derive from one shared
+		// helper so battle + the editor Foe Visualizer can't drift on ordering.
+		place := resolveBillboardPlacement(camera, position, visual)
 		tint := rl.White
 		if !enemy.Alive {
 			alpha := uint8(220 * core.Clamp(float64(enemy.DeathFade/core.DeathFadeDuration), 0, 1))
@@ -1375,28 +1409,15 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 		// Phase==BattlePlayer so the chevron drops the moment the
 		// timing bar arms — shared with the roster row's `targetable`
 		// flag so both yellow indicators behave identically.
-		// Per-kind cursor placement: nudge the chevron anchor by the
-		// visual's markerYOffset so a lowered sprite's pyramid sits at its
-		// head, not the roster-default height. Stays on the formation
-		// position (not the yOffset-lowered billboard) so the only vertical
-		// control is this one explicit, per-unit-type value.
-		chevronPos := position
-		chevronPos.Y += visual.markerYOffset
-		if visual.markerXOffset != 0 {
-			fwd := horizontalForward(camera)
-			right := horizontalRight(fwd)
-			chevronPos.X += right.X * visual.markerXOffset
-			chevronPos.Z += right.Z * visual.markerXOffset
-		}
 		if enemy.Alive && targetingEnemy(g) && i == g.Battle.EnemyIndex {
 			tint = tintEnemyTargeted
-			drawTargetChevron(camera, chevronPos)
+			drawTargetChevron(camera, place.chevron)
 		} else if enemy.Alive && aoeEnemyTargetPreview(g) {
 			// AoE skill highlighted in the Skill submenu: every living
 			// enemy gets a chevron so the player sees the cast hits the
 			// whole line, not one target.
 			tint = tintEnemyTargeted
-			drawTargetChevron(camera, chevronPos)
+			drawTargetChevron(camera, place.chevron)
 		}
 		// During BattleEnemyTiming the warm tint on the attacker carries
 		// the "this one is swinging" read; the red pyramid moved over to
@@ -1420,18 +1441,13 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 		// billboard-fog BeginShaderMode doesn't tint it — same unlit
 		// behaviour the prop shadows rely on under the world lighting pass.
 		if visual.shadowRadius > 0 {
-			sx, sz := shadowFootprint(camera, position, visual)
-			drawGroundShadow(sx, sz, visual.shadowRadius)
+			drawGroundShadow(place.shadowX, place.shadowZ, visual.shadowRadius)
 		}
 		// Distance fog is applied by the active billboard-fog shader
 		// (BeginShaderMode at the top of this function), not by a
 		// CPU tint pass — multiplicative tint can't lerp toward the
 		// fog color, only darken or color-filter the texture.
-		// yOffset lowers/raises only the sprite — the chevron above and
-		// the shadow below stay anchored to the tile position.
-		billboardPos := position
-		billboardPos.Y += visual.yOffset
-		drawTextureBillboard(camera, visual.texture, billboardPos, visual.size, tint)
+		drawTextureBillboard(camera, visual.texture, place.sprite, visual.size, tint)
 	}
 }
 
@@ -1783,7 +1799,7 @@ func victoryDanceMotion(class core.PartyClass, elapsed float32) (float32, float3
 // enemyFormationPos directly so it doesn't re-walk the pack per enemy
 // (which made the loop O(n²)). Takes g by pointer so the per-enemy call
 // doesn't copy the whole GameState.
-func enemyDrawPosition(camera rl.Camera3D, g *core.GameState, slot int, enemy core.Enemy) rl.Vector3 {
+func enemyDrawPosition(camera rl.Camera3D, g *core.GameState, slot int, enemy *core.Enemy) rl.Vector3 {
 	if g.Battle.Phase == core.BattleNone || g.Battle.ActivePack < 0 {
 		// Fallback for any stray caller during a phase transition; use the
 		// active pack's tile if we still know it.
@@ -1795,7 +1811,7 @@ func enemyDrawPosition(camera rl.Camera3D, g *core.GameState, slot int, enemy co
 		return pack
 	}
 	visibleSlot, count := battleEnemySlot(g, slot)
-	return enemyFormationPos(camera, g, visibleSlot, count, &enemy)
+	return enemyFormationPos(camera, g, visibleSlot, count, enemy)
 }
 
 // enemyFormationPos is the formation-placement math for one enemy given its

@@ -849,6 +849,46 @@ func hashFloat(x, y int) float64 {
 	return float64(hashXY(x, y)&0xFFFF) / 65535.0
 }
 
+// makeHudGrainPixels builds a small, tileable grain OVERLAY for HUD glass
+// surfaces. The base is fully transparent; over it we sprinkle sparse low-alpha
+// dark specks (smoke / pits in old leaded glass), warmer light flecks (dust
+// motes catching candlelight), and faint horizontal "laid-paper" fibers. Drawn
+// white-tinted at low alpha over a translucent panel body, it gives the pane
+// real surface tooth WITHOUT shifting its base tone or killing the see-through
+// glass — almost every texel is alpha 0, so the world still reads through the
+// gaps. Per-texel-independent specks tile seamlessly under WrapRepeat.
+func makeHudGrainPixels(w, h int) []color.RGBA {
+	px := make([]color.RGBA, w*h)
+	for y := 0; y < h; y++ {
+		// Faint horizontal fiber every few rows — the "laid lines" of hand-
+		// pressed paper / brushed glass. Two cadences (dark + light) at
+		// coprime spacings so they don't beat into an obvious stripe.
+		fiber := 0
+		if y%7 == 0 {
+			fiber = -1
+		} else if y%11 == 0 {
+			fiber = 1
+		}
+		for x := 0; x < w; x++ {
+			r := hash01(hashXY(x, y))
+			c := color.RGBA{0, 0, 0, 0}
+			switch {
+			case r < 0.06:
+				c = color.RGBA{R: 0, G: 0, B: 0, A: uint8(16 + r/0.06*26)} // 16..42
+			case r > 0.965:
+				c = color.RGBA{R: 255, G: 240, B: 214, A: uint8(12 + (r-0.965)/0.035*18)} // 12..30
+			}
+			if fiber == -1 && c.A < 14 {
+				c = color.RGBA{R: 0, G: 0, B: 0, A: 12}
+			} else if fiber == 1 && c.A < 12 {
+				c = color.RGBA{R: 255, G: 238, B: 210, A: 9}
+			}
+			px[y*w+x] = c
+		}
+	}
+	return px
+}
+
 func makeSkyPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	// Pastel painted sky — soft baby-blue at the zenith, warm

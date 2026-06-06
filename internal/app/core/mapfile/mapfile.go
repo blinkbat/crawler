@@ -1,9 +1,9 @@
 // Package mapfile is the on-disk representation of an explorable area. The
-// format is plain text, multi-section: header lines, then one ASCII grid
-// per editing layer (walls / floor / decor / props), then a list of enemy
-// spawns. Chosen so a map diffs cleanly in git, can be glanced at in any
-// editor without parsing, and gives the editor's layer system a 1:1
-// mapping with on-disk structure.
+// format is plain text, multi-section: header lines, then one ASCII grid per
+// editing layer (walls / floor / decor / props / ceiling / elevation), then
+// enemy / chest / door spawn sections. Chosen so a map diffs cleanly in git,
+// can be glanced at in any editor without parsing, and gives the editor's
+// layer system a 1:1 mapping with on-disk structure.
 //
 // Layer character conventions:
 //

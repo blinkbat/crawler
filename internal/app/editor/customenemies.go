@@ -317,7 +317,7 @@ func drawCustomEnemiesModal(s *State, font rl.Font, theme render.Theme) {
 		if name == "" {
 			name = "(unnamed)"
 		}
-		rl.DrawTextEx(font, name, rl.NewVector2(r.X+8, r.Y+(r.Height-14)/2), 14, 1, textEntry)
+		rl.DrawTextEx(font, name, rl.NewVector2(r.X+8, r.Y+(r.Height-14)/2), editorFontLabel, 1, textEntry)
 	}
 	drawButton(font, l.addBtn, "+ Add new", false)
 
@@ -326,7 +326,7 @@ func drawCustomEnemiesModal(s *State, font rl.Font, theme render.Theme) {
 	if def == nil {
 		formX := l.listArea.X + l.listArea.Width + 16
 		rl.DrawTextEx(font, "Select an entry on the left, or click + Add new.",
-			rl.NewVector2(formX, l.listArea.Y+8), 14, 1, theme.TextHint)
+			rl.NewVector2(formX, l.listArea.Y+8), editorFontLabel, 1, theme.TextHint)
 		drawButton(font, l.closeBtn, "Close", false)
 		return
 	}

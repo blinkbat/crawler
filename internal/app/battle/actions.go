@@ -403,12 +403,10 @@ func canAffordSkill(actor core.PartyMember, skill core.SkillID) bool {
 // pool" or "MP refunds on cancel" change is one helper.
 func chargeMP(g *core.GameState, skill core.SkillID, label string) bool {
 	actor := &g.Party[g.Battle.CurrentParty]
-	cost := core.SkillCost(skill)
-	if actor.MP < cost {
+	if !core.SpendSkillMP(actor, skill) {
 		setBattleStatus(g, label+" needs more MP.")
 		return false
 	}
-	actor.MP -= cost
 	return true
 }
 
@@ -550,15 +548,19 @@ func ensureAliveTargetOrCancel(g *core.GameState, refundSkill core.SkillID) bool
 // refunded MP and ended the turn, so callers just `return false`. The
 // returned rawDamage is the pre-armor figure; callers may still mutate it
 // (crit doublers) before handing it to damageEnemy.
-func beginSingleTargetSkill(g *core.GameState, skill core.SkillID, quality int) (actor *core.PartyMember, target core.Enemy, rawDamage int, ok bool) {
+func beginSingleTargetSkill(g *core.GameState, skill core.SkillID, quality int) (actor *core.PartyMember, target core.Enemy, rawDamage, resistWIS int, ok bool) {
 	if !ensureAliveTargetOrCancel(g, skill) {
-		return nil, core.Enemy{}, 0, false
+		return nil, core.Enemy{}, 0, 0, false
 	}
 	actor = &g.Party[g.Battle.CurrentParty]
 	actor.AttackBump = core.BumpDuration
 	rawDamage = scaleSkillDamage(actor, skill, quality)
 	target = *core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	return actor, target, rawDamage, true
+	// resistWIS is the target's WIS, hoisted here so the status-proc callers
+	// don't each re-derive core.EnemyInfoFor(*enemy).Stats.WIS (it doesn't
+	// change mid-action).
+	resistWIS = core.EnemyInfoFor(target).Stats.WIS
+	return actor, target, rawDamage, resistWIS, true
 }
 
 // beginPendingAction is invoked once the player has confirmed their target
@@ -955,7 +957,7 @@ func setupFirebolt(g *core.GameState) bool {
 func applyFirebolt(g *core.GameState, quality int) bool {
 	// Firebolt's setup committed MP; the shared head refunds it if the
 	// target died before apply.
-	actor, target, rawDamage, ok := beginSingleTargetSkill(g, core.SkillFirebolt, quality)
+	actor, target, rawDamage, resistWIS, ok := beginSingleTargetSkill(g, core.SkillFirebolt, quality)
 	if !ok {
 		return false
 	}
@@ -969,7 +971,7 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillFirebolt))
 	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillFirebolt), g.Battle.EnemyIndex)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	burned := tryProcStatus(g.Rand(), &enemy.BurnTurns, defeated, effect.BurnChance, quality, 0, effect.BurnDuration, core.EnemyInfoFor(*enemy).Stats.WIS)
+	burned := tryProcStatus(g.Rand(), &enemy.BurnTurns, defeated, effect.BurnChance, quality, 0, effect.BurnDuration, resistWIS)
 	setBattleMessage(g, appendCrit(fireboltMessage(actor.Name, target, damage, quality, defeated, burned, enemy.BurnTurns), crit))
 	finishPartyAction(g)
 	return true
@@ -982,7 +984,7 @@ func setupCrushingBlow(g *core.GameState) bool {
 }
 
 func applyCrushingBlow(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, ok := beginSingleTargetSkill(g, core.SkillCrushingBlow, quality)
+	actor, target, rawDamage, resistWIS, ok := beginSingleTargetSkill(g, core.SkillCrushingBlow, quality)
 	if !ok {
 		return false
 	}
@@ -1003,7 +1005,7 @@ func applyCrushingBlow(g *core.GameState, quality int) bool {
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillCrushingBlow))
 	core.EnqueueEnemyVFX(g, core.VFXSlash, g.Battle.EnemyIndex)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	stunned := tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, core.TimingQualityGreat, effect.StunDuration, core.EnemyInfoFor(*enemy).Stats.WIS)
+	stunned := tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, core.TimingQualityGreat, effect.StunDuration, resistWIS)
 	setBattleMessage(g, appendCrit(crushingBlowMessage(actor.Name, target, damage, quality, defeated, stunned), crit))
 	finishPartyAction(g)
 	return true
@@ -1059,9 +1061,13 @@ func applyMassMend(g *core.GameState, quality int) bool {
 			continue
 		}
 		if m.HP < m.MaxHP {
-			core.GainUpTo(&m.HP, m.MaxHP, heal)
 			healed++
 		}
+		// Route the actual heal through the canonical core.HealMember (clamp +
+		// no-revive/ingest guards) rather than re-implementing GainUpTo, so a
+		// heal-rule change lands in one place. The HP<MaxHP check above is only
+		// the "counts as a mend" tally for the log line.
+		core.HealMember(m, heal)
 		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillMassMend), i)
 	}
 	if healed == 0 {
@@ -1080,7 +1086,7 @@ func setupSmite(g *core.GameState) bool {
 }
 
 func applySmite(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, ok := beginSingleTargetSkill(g, core.SkillSmite, quality)
+	actor, target, rawDamage, resistWIS, ok := beginSingleTargetSkill(g, core.SkillSmite, quality)
 	if !ok {
 		return false
 	}
@@ -1094,7 +1100,7 @@ func applySmite(g *core.GameState, quality int) bool {
 	// so tryProcStatus short-circuits cleanly until the tier is
 	// purchased — no behavior change for un-upgraded clerics.
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	stunned := tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, core.TimingQualityGreat, effect.StunDuration, core.EnemyInfoFor(*enemy).Stats.WIS)
+	stunned := tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, core.TimingQualityGreat, effect.StunDuration, resistWIS)
 	setBattleMessage(g, appendCrit(smiteMessage(actor.Name, target, damage, quality, defeated, stunned), crit))
 	finishPartyAction(g)
 	return true
@@ -1107,7 +1113,7 @@ func setupBackstab(g *core.GameState) bool {
 }
 
 func applyBackstab(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, ok := beginSingleTargetSkill(g, core.SkillBackstab, quality)
+	actor, target, rawDamage, _, ok := beginSingleTargetSkill(g, core.SkillBackstab, quality)
 	if !ok {
 		return false
 	}
@@ -1135,7 +1141,7 @@ func setupVenomStrike(g *core.GameState) bool {
 }
 
 func applyVenomStrike(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, ok := beginSingleTargetSkill(g, core.SkillVenomStrike, quality)
+	actor, target, rawDamage, resistWIS, ok := beginSingleTargetSkill(g, core.SkillVenomStrike, quality)
 	if !ok {
 		return false
 	}
@@ -1145,7 +1151,7 @@ func applyVenomStrike(g *core.GameState, quality int) bool {
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillVenomStrike))
 	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillVenomStrike), g.Battle.EnemyIndex)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	poisoned := tryProcStatus(g.Rand(), &enemy.PoisonTurns, defeated, effect.PoisonChance, quality, 0, effect.PoisonDuration, core.EnemyInfoFor(*enemy).Stats.WIS)
+	poisoned := tryProcStatus(g.Rand(), &enemy.PoisonTurns, defeated, effect.PoisonChance, quality, 0, effect.PoisonDuration, resistWIS)
 	setBattleMessage(g, appendCrit(venomStrikeMessage(actor.Name, target, damage, quality, defeated, poisoned), crit))
 	finishPartyAction(g)
 	return true
@@ -1158,7 +1164,7 @@ func setupFrostLance(g *core.GameState) bool {
 }
 
 func applyFrostLance(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, ok := beginSingleTargetSkill(g, core.SkillFrostLance, quality)
+	actor, target, rawDamage, resistWIS, ok := beginSingleTargetSkill(g, core.SkillFrostLance, quality)
 	if !ok {
 		return false
 	}
@@ -1175,7 +1181,7 @@ func applyFrostLance(g *core.GameState, quality int) bool {
 	// it queries (any future grep for StunTurns lands here cleanly);
 	// the player-facing log line keeps the "Frozen!" flavor via
 	// frostLanceMessage.
-	stunned := tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, core.TimingQualityGreat, effect.StunDuration, core.EnemyInfoFor(*enemy).Stats.WIS)
+	stunned := tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, core.TimingQualityGreat, effect.StunDuration, resistWIS)
 	setBattleMessage(g, appendCrit(frostLanceMessage(actor.Name, target, damage, quality, defeated, stunned), crit))
 	finishPartyAction(g)
 	return true
@@ -1820,7 +1826,7 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 		setBattleMessage(g, fmt.Sprintf("%s sidesteps the %s.", g.Party[target].Name, core.EnemySingularNoun(*enemy)))
 		return true
 	}
-	rawDamage := core.EnemyInfoFor(*enemy).AttackDamage
+	rawDamage := core.EnemyBasicDamage(*enemy)
 	// Enemy crit on basic attacks — symmetric with the player side, but
 	// no timing-grade bonus (enemies don't press a bar). Pure
 	// DEX-driven CritChance via core.RollCrit at the Miss grade

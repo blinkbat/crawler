@@ -395,8 +395,9 @@ type GameState struct {
 	// Stocked by Steal pickups and consumed by the in-battle Item action.
 	Inventory []ItemStack
 	// Gold is the party's shared currency. Earned from battle loot
-	// (AwardBattleLoot) and spent at the pause-menu shop. Persisted in the
-	// save file. Single pool, like Inventory.
+	// (AwardBattleLoot) and will be spent at an in-universe shop once openShop
+	// is wired to a merchant / tile (the pause-menu shop entry was removed).
+	// Persisted in the save file. Single pool, like Inventory.
 	Gold int
 	// Shop overlay. Opened IN-UNIVERSE (by a merchant / shop tile in the
 	// world — entry point not yet wired; never a menu row). ShopOpen gates it;

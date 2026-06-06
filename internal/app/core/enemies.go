@@ -557,6 +557,15 @@ func EnemyInfoFor(enemy Enemy) EnemyDefinition {
 	return def
 }
 
+// EnemyBasicDamage is the enemy's basic-attack damage, read through the
+// definition overlay. The single seam for "how hard does this enemy's basic
+// swing hit" — symmetric with the party side's MemberAttackDamage — so the
+// anticipated "derive from Stats.STR" pass edits this one accessor instead of
+// an inline EnemyInfoFor(...).AttackDamage field read at the call site.
+func EnemyBasicDamage(e Enemy) int {
+	return EnemyInfoFor(e).AttackDamage
+}
+
 func NewEnemy(kind EnemyKind) Enemy {
 	def := EnemyInfo(kind)
 	return Enemy{

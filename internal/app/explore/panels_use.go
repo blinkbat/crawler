@@ -102,7 +102,7 @@ func beginHealCast(g *core.GameState, caster int, skill core.SkillID) {
 	for i := range g.Party {
 		core.HealMember(&g.Party[i], amount)
 	}
-	g.Party[caster].MP -= core.SkillCost(skill)
+	core.SpendSkillMP(&g.Party[caster], skill)
 	audio.Play(audio.SoundHeal)
 }
 
@@ -167,13 +167,21 @@ func applyUseToMember(g *core.GameState, member int) {
 	switch {
 	case g.UsePendingItem != core.ItemNone:
 		kind := g.UsePendingItem
+		def := core.ItemInfo(kind)
+		// Don't burn a heal item on a full-HP ally — parity with the battle-side
+		// applyItem guard; without it the stack is consumed for zero gain
+		// (HealMember clamps at MaxHP).
+		if def.HealAmount > 0 && g.Party[member].HP >= g.Party[member].MaxHP {
+			audio.Play(audio.SoundInputMiss)
+			break
+		}
 		inv, ok := core.ConsumeItem(g.Inventory, kind)
 		if !ok {
 			audio.Play(audio.SoundInputMiss)
 			break
 		}
 		g.Inventory = inv
-		core.HealMember(&g.Party[member], core.ItemInfo(kind).HealAmount)
+		core.HealMember(&g.Party[member], def.HealAmount)
 		audio.Play(audio.SoundHeal)
 	case g.UsePendingSkill != core.SkillNone:
 		caster := g.UsePendingCaster
@@ -183,13 +191,12 @@ func applyUseToMember(g *core.GameState, member int) {
 			// confirming — a corpse can't pay MP or cast.
 			break
 		}
-		cost := core.SkillCost(skill)
-		if !core.CanAffordSkill(g.Party[caster], skill) {
+		heal := core.SkillHealFor(&g.Party[caster], skill)
+		if !core.SpendSkillMP(&g.Party[caster], skill) {
 			audio.Play(audio.SoundInputMiss) // MP drained between open and confirm
 			break
 		}
-		core.HealMember(&g.Party[member], core.SkillHealFor(&g.Party[caster], skill))
-		g.Party[caster].MP -= cost
+		core.HealMember(&g.Party[member], heal)
 		audio.Play(audio.SoundHeal)
 	}
 	closeUseTarget(g)

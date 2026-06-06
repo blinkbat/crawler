@@ -415,6 +415,20 @@ func CanAffordSkill(m PartyMember, skill SkillID) bool {
 	return m.MP >= SkillCost(skill)
 }
 
+// SpendSkillMP checks affordability and, if the member can pay, deducts the
+// skill's MP cost — returning whether the cast may proceed. The single seam for
+// "pay for a skill": battle's chargeMP wraps it (adding the battle-status
+// message on failure) and the out-of-battle cast path calls it directly, so a
+// future "refund on cancel" / "VIT raises the MP pool" rule is one edit, not
+// several inlined `MP -= SkillCost` sites.
+func SpendSkillMP(m *PartyMember, skill SkillID) bool {
+	if m == nil || !CanAffordSkill(*m, skill) {
+		return false
+	}
+	m.MP -= SkillCost(skill)
+	return true
+}
+
 // SkillCastLimitFor returns the registry's PerBattleCastLimit for a
 // skill — 0 means "uncapped." The battle AI's usableEnemySkills
 // filter reads this to drop a skill from the cast set once an enemy

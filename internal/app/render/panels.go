@@ -447,8 +447,13 @@ func slotIconForKind(t core.EquipmentSlotType) func(cx, cy, r float32, col rl.Co
 		return drawSlotIconShield
 	case core.SlotAccessory:
 		return drawSlotIconRing
+	default:
+		// Loud-fail on an unmapped slot type, matching the codebase's
+		// dispatch-coverage convention (drawClassGlyph, actionIconDrawers,
+		// statIconDrawers) — a new EquipmentSlotType must add its icon here
+		// rather than silently rendering a ring.
+		panic(fmt.Sprintf("render: EquipmentSlotType %d has no slotIconForKind entry", int(t)))
 	}
-	return drawSlotIconRing
 }
 
 // equipPanelLayout caches the hit-test rectangles laid down each frame
