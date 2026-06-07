@@ -524,6 +524,15 @@ func TheEnemy(def EnemyDefinition) string {
 	return "The " + def.SingularNoun
 }
 
+// EnemyInfoOk is the validating sibling of EnemyInfo (mirrors ItemInfoOk):
+// returns (definition, true) for a registered kind, (zero, false) otherwise —
+// for callers that want to handle an unknown kind rather than take EnemyInfo's
+// panic (e.g. a tool validating externally-sourced kinds before use).
+func EnemyInfoOk(kind EnemyKind) (EnemyDefinition, bool) {
+	def, ok := enemyByKind[kind]
+	return def, ok
+}
+
 func EnemyInfo(kind EnemyKind) EnemyDefinition {
 	if def, ok := enemyByKind[kind]; ok {
 		return def

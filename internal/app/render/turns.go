@@ -109,5 +109,5 @@ func turnEntryColor(turn core.TurnEntry) color.RGBA {
 	if turn.Enemy {
 		return turnEnemyColor
 	}
-	return partyClassPresentationFor(turn.Class).turnColor
+	return classAccent(turn.Class)
 }

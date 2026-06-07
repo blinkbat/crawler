@@ -428,12 +428,7 @@ func LiveStackCount(inv []ItemStack) int {
 // slice directly (cheaper than allocating via LiveStacks just to check
 // length) but shares the same "positive count wins" rule.
 func InventoryEmpty(inv []ItemStack) bool {
-	for _, s := range inv {
-		if s.Count > 0 {
-			return false
-		}
-	}
-	return true
+	return LiveStackCount(inv) == 0
 }
 
 // isConsumable reports whether a kind is a battle-usable consumable: a
@@ -444,6 +439,14 @@ func InventoryEmpty(inv []ItemStack) bool {
 // here so the "what's usable as an item?" rule lives in one place.
 func isConsumable(kind ItemKind) bool {
 	return ItemInfo(kind).Slot == SlotNone
+}
+
+// liveConsumable is the shared "this stack is a usable consumable right now"
+// predicate — positive count AND no equip slot. Single source for the battle
+// Item menu's eligible set, its enabled-state check, and its count badge, so
+// the three can't drift on what "consumable" means.
+func liveConsumable(s ItemStack) bool {
+	return s.Count > 0 && isConsumable(s.Kind)
 }
 
 // ItemHelpsTarget reports whether using a restorative item on m would do
@@ -476,7 +479,7 @@ func LiveConsumables(inv []ItemStack) []ItemStack {
 func LiveConsumablesInto(inv, buf []ItemStack) []ItemStack {
 	buf = buf[:0]
 	for _, s := range inv {
-		if s.Count > 0 && isConsumable(s.Kind) {
+		if liveConsumable(s) {
 			buf = append(buf, s)
 		}
 	}
@@ -489,7 +492,7 @@ func LiveConsumablesInto(inv, buf []ItemStack) []ItemStack {
 // InventoryEmpty check, which counted equipment as "have items."
 func HasConsumable(inv []ItemStack) bool {
 	for _, s := range inv {
-		if s.Count > 0 && isConsumable(s.Kind) {
+		if liveConsumable(s) {
 			return true
 		}
 	}
@@ -502,7 +505,7 @@ func HasConsumable(inv []ItemStack) bool {
 func ConsumableCount(inv []ItemStack) int {
 	n := 0
 	for _, s := range inv {
-		if s.Count > 0 && isConsumable(s.Kind) {
+		if liveConsumable(s) {
 			n += s.Count
 		}
 	}

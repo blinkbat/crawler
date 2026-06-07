@@ -47,15 +47,28 @@ func updateActionMenu(g *core.GameState) {
 	}
 }
 
+// currentMember returns the acting party member (the CurrentParty slot) and
+// whether the slot index is valid. The "is CurrentParty in range?" guard was
+// open-coded at every action entry point; this is the single accessor so the
+// bounds rule lives in one place. Callers handle the !ok case their own way
+// (some resetBattleAction, some just return).
+func currentMember(g *core.GameState) (*core.PartyMember, bool) {
+	if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
+		return nil, false
+	}
+	return &g.Party[g.Battle.CurrentParty], true
+}
+
 // openSkillMenu transitions the action menu into the skill-picker
 // submenu. Seeds the cursor from the member's persisted SkillCursor so
 // the submenu opens on their last-used skill instead of always jumping
 // back to slot 0.
 func openSkillMenu(g *core.GameState) {
-	if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
+	member, ok := currentMember(g)
+	if !ok {
 		return
 	}
-	idx := g.Party[g.Battle.CurrentParty].SkillCursor
+	idx := member.SkillCursor
 	if idx < 0 || idx >= core.SkillsPerClass {
 		idx = 0
 	}
@@ -69,11 +82,12 @@ func openSkillMenu(g *core.GameState) {
 // the chosen skill and transitions into its target mode (or arms the
 // timing bar directly when the skill is self-cast / AoE).
 func updateSkillMenu(g *core.GameState) {
-	if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
+	member, ok := currentMember(g)
+	if !ok {
 		resetBattleAction(g)
 		return
 	}
-	skills := core.PartySkills(g.Party[g.Battle.CurrentParty])
+	skills := core.PartySkills(*member)
 	if len(skills) == 0 {
 		resetBattleAction(g)
 		setBattleStatus(g, "No skill ready.")
@@ -201,7 +215,7 @@ func applyItem(g *core.GameState) {
 		resetBattleAction(g)
 		return
 	}
-	if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
+	if _, ok := currentMember(g); !ok {
 		// Defensive: the live caller (updatePlayerBattle) guards this, but
 		// don't index g.Party with a stale CurrentParty if a future path
 		// reaches an item-target confirm mid-transition. Mirrors performDefend.
@@ -270,10 +284,10 @@ func itemUseMessage(actorName, targetName string, def core.ItemDefinition, heale
 // No timing minigame — the boost is the whole reward, and showing a bar would
 // imply an opportunity for a better outcome that doesn't exist.
 func performDefend(g *core.GameState) {
-	if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
+	member, ok := currentMember(g)
+	if !ok {
 		return
 	}
-	member := &g.Party[g.Battle.CurrentParty]
 	member.Defending = true
 	setBattleMessage(g, fmt.Sprintf("%s braces for impact.", member.Name))
 	finishPartyAction(g)

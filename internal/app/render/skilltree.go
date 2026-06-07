@@ -67,7 +67,7 @@ func DrawSkillTreeModal(g core.GameState, assets Resources) {
 
 	// Header: class crest + "<name> — Skill Trees" on the left, the
 	// spendable SkillPoint balance on the right.
-	classCol := partyClassPresentationFor(m.Class).turnColor
+	classCol := classAccent(m.Class)
 	drawClassGlyph(card.X+30, card.Y+30, 12, m.Class, classCol)
 	drawTextWithShadow(font, m.Name+" — Skill Trees", card.X+54, card.Y+16, FontHeading, textPrimary)
 	spText := strconv.Itoa(m.SkillPoints) + " SP"

@@ -210,8 +210,8 @@ func splitWords(s string) []string {
 // different size each; this helper keeps the centering + shadow rule
 // in one place. `cx` is the screen-space center X to anchor against
 // (`centerX(cardW) + cardW/2` for a centered card); `y` is the hint's
-// top y in screen space; `size` is the font size (modals use 13, the
-// title screen uses 14).
+// top y in screen space; `size` is one of the FontX size tokens the
+// callers pass (FontTiny / FontSmall per UI_STANDARDS.md's five-size scale).
 func DrawFooterHint(font rl.Font, text string, cx, y, size float32) {
 	m := rl.MeasureTextEx(font, text, size, 1)
 	drawTextWithShadow(font, text, cx-m.X/2, y, size, textHint)

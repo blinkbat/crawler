@@ -72,7 +72,7 @@ func ShopCatalog() []ItemDefinition {
 	if shopCatalogCache == nil {
 		out := make([]ItemDefinition, 0, len(itemDefinitions))
 		for _, def := range itemDefinitions {
-			if def.Price > 0 {
+			if itemForSale(def) {
 				out = append(out, def)
 			}
 		}
@@ -81,13 +81,22 @@ func ShopCatalog() []ItemDefinition {
 	return shopCatalogCache
 }
 
+// itemForSale is the shared "this item is buyable / sellable" predicate —
+// a positive Price (0 == not for sale, per ItemDefinition.Price). Single
+// source for the buy catalog and the sell-list filters so they can't drift.
+func itemForSale(def ItemDefinition) bool { return def.Price > 0 }
+
+// sellableStack is the inventory-stack form of itemForSale: a positive-count
+// stack whose item is for sale.
+func sellableStack(s ItemStack) bool { return s.Count > 0 && itemForSale(ItemInfo(s.Kind)) }
+
 // SellableStacks returns the inventory stacks the player can sell — live
 // stacks whose item carries a positive Price. The shop's Sell list reads
 // this so cursor rows line up with drawn rows (mirrors LiveStacks).
 func SellableStacks(inv []ItemStack) []ItemStack {
 	out := make([]ItemStack, 0, len(inv))
 	for _, s := range inv {
-		if s.Count > 0 && ItemInfo(s.Kind).Price > 0 {
+		if sellableStack(s) {
 			out = append(out, s)
 		}
 	}
@@ -102,7 +111,7 @@ func SellableStacks(inv []ItemStack) []ItemStack {
 func SellableCount(inv []ItemStack) int {
 	n := 0
 	for _, s := range inv {
-		if s.Count > 0 && ItemInfo(s.Kind).Price > 0 {
+		if sellableStack(s) {
 			n++
 		}
 	}

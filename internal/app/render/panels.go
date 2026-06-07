@@ -76,7 +76,7 @@ const footerHintMemberTabs = "L1/R1 tabs   Left/Right pick member   X close"
 
 var panelTabFooterHints = [core.PanelTabCount]string{
 	core.PanelTabStats:     footerHintMemberTabs,
-	core.PanelTabEquipment: footerHintMemberTabs,
+	core.PanelTabEquipment: "L1/R1 tabs   Left/Right member   Up/Down slot   Confirm change gear   X close",
 	core.PanelTabItems:     "L1/R1 tabs   Up/Down item   Confirm / F use   X close",
 	core.PanelTabSkills:    "L1/R1 tabs   Left/Right member   Confirm open trees   F cast heal   X close",
 	core.PanelTabQuests:    footerHintMemberTabs,
@@ -269,7 +269,7 @@ func memberCardInner(col rl.Rectangle) (innerX, innerW float32) {
 // the name and tints the card body so the active member pops without
 // adding a heavy second selection chrome.
 func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangle, highlight bool) float32 {
-	classCol := partyClassPresentationFor(m.Class).turnColor
+	classCol := classAccent(m.Class)
 
 	// Soft inset glass body. We don't paint a full wood-framed card per
 	// member (would compete with the outer modal's frame); a small
@@ -589,9 +589,9 @@ func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) 
 			}
 		}
 	}
-
-	footer := "Up/Down slot   Left/Right member   Confirm / click: change gear"
-	drawTextWithShadow(font, footer, body.X, body.Y+body.Height-18, FontSmall, textHint)
+	// Footer is painted once by DrawPanelsOverlay from panelTabFooterHints
+	// (Equipment has its own row there) — no per-tab inline footer here, or
+	// the overlay's centered hint and this one would both show.
 }
 
 // drawEquipPicker paints the slot's item-picker sub-modal: a smaller
@@ -712,7 +712,7 @@ func drawUseTargetPicker(g core.GameState, assets Resources) {
 		rect := rl.NewRectangle(card.X+10, ry, card.Width-20, rowH-6)
 		drawFocusableRow(rect, i == g.UseTargetCursor)
 		m := g.Party[mi]
-		classCol := partyClassPresentationFor(m.Class).turnColor
+		classCol := classAccent(m.Class)
 		drawClassGlyph(rect.X+20, rect.Y+rect.Height/2, 9, m.Class, classCol)
 		drawTextWithShadow(font, m.Name, rect.X+40, rect.Y+rect.Height/2-10, FontBody, textPrimary)
 		hp := "HP " + formatBarValue(m.HP, m.MaxHP)

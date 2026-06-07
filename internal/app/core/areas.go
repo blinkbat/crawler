@@ -190,14 +190,8 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 			Style:      doorStyleFromName(d.Style),
 		})
 	}
-	ceiling := mf.Ceiling
-	if len(ceiling) == 0 {
-		ceiling = mapfile.BlankLayer(mf.Width, mf.Height, TileCeilingOpen)
-	}
-	elevation := mf.Elevation
-	if len(elevation) == 0 {
-		elevation = mapfile.BlankLayer(mf.Width, mf.Height, ElevationGround)
-	}
+	ceiling := mapfile.OptionalLayerOrBlank(mf.Ceiling, mf.Width, mf.Height, TileCeilingOpen)
+	elevation := mapfile.OptionalLayerOrBlank(mf.Elevation, mf.Width, mf.Height, ElevationGround)
 	return AreaDefinition{
 		Path:          path,
 		Name:          mf.Name,
@@ -302,14 +296,8 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 			Style:      DoorStyleName(d.Style),
 		})
 	}
-	ceiling := a.Ceiling
-	if len(ceiling) == 0 {
-		ceiling = mapfile.BlankLayer(a.Width, a.Height, TileCeilingOpen)
-	}
-	elevation := a.Elevation
-	if len(elevation) == 0 {
-		elevation = mapfile.BlankLayer(a.Width, a.Height, ElevationGround)
-	}
+	ceiling := mapfile.OptionalLayerOrBlank(a.Ceiling, a.Width, a.Height, TileCeilingOpen)
+	elevation := mapfile.OptionalLayerOrBlank(a.Elevation, a.Width, a.Height, ElevationGround)
 	customs := make([]mapfile.MapCustomEnemy, 0, len(a.CustomEnemies))
 	for _, ce := range a.CustomEnemies {
 		mapCE, err := MapCustomEnemyFromDef(ce)

@@ -52,13 +52,7 @@ var foeFields = []foeField{
 }
 
 func clampByte(v float64) uint8 {
-	if v < 0 {
-		return 0
-	}
-	if v > 255 {
-		return 255
-	}
-	return uint8(v + 0.5)
+	return uint8(clampRange(v, 0, 255) + 0.5)
 }
 
 // foeDrag holds the in-flight slider drag for the modal. sliderIdx == -1 means

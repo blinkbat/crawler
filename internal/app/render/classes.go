@@ -71,6 +71,14 @@ func partyClassPresentationFor(class core.PartyClass) partyClassPresentation {
 	return presentation
 }
 
+// classAccent is the per-class accent color (the class's turn color) used for
+// card spines, name ticks, and the turn-order panel. One accessor so the six
+// draw sites don't each two-hop through partyClassPresentationFor(...).turnColor
+// — a single seam if the accent ever stops being the turn color.
+func classAccent(class core.PartyClass) rl.Color {
+	return partyClassPresentationFor(class).turnColor
+}
+
 // drawClassGlyph paints a small sigil identifying a party-class — the
 // kind of pictograph 90s D&D box art used to flank a character name.
 // Glyphs are geometric (no per-class texture asset) so they render

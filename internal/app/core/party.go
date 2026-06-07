@@ -36,6 +36,14 @@ type PartyClassDefinition struct {
 // yet, so it's a const rather than a configurable.
 const SkillsPerClass = 3
 
+// PartyMemberCount is the fixed party size = number of class definitions.
+// The slice order is the seating / tie-break contract (see partyClassDefinitions),
+// and render formation + save format index by class slot, so the count is a
+// real contract, not incidental. init() asserts len(partyClassDefinitions)
+// matches — adding a class is an append plus bumping this, which then trips
+// any downstream that assumed four until it's updated.
+const PartyMemberCount = 4
+
 // SkillKind tags how a skill scales off the actor's stats.
 //
 //	Melee:   damage = STR + base
@@ -214,9 +222,9 @@ var partyClassByID = BuildRegistry(partyClassDefinitions, func(d PartyClassDefin
 
 // Skill registry. Effect.Damage / Effect.Heal are flat baselines that the
 // stat-scaled formulas add on top (see types.go's MeleeDamage etc.). Tuned
-// so that a focused class with their stat at 8 lands roughly the same total
-// damage as the pre-stats values: e.g. Wizard (INT 8) Firebolt = 8 + 2 = 10
-// pre-quality, scaling further with timing. Difficulty pass: bases trimmed
+// so that a focused class (top stat 6 post-difficulty-pass) lands a sensible
+// total: e.g. Wizard (INT 6) Firebolt = 6 + 1 base = 7 pre-quality, scaling
+// further with timing. Difficulty pass: bases trimmed
 // and Firebolt's burn-chance pulled down so a single Excellent doesn't
 // auto-burn every cast.
 var skillDefinitions = []skillDefinition{
@@ -508,6 +516,16 @@ func HealMember(m *PartyMember, amount int) {
 	if m.HP > m.MaxHP {
 		m.HP = m.MaxHP
 	}
+}
+
+// clearMemberAnimTimers zeros a member's transient ANIMATION timers (lunge /
+// damage-flash / knockback) — not gameplay state. Shared by the field-recovery
+// reset and the save sanitizer so "what's an animation timer" lives in one
+// place (statuses go through ClearPartyTransientStatuses instead).
+func clearMemberAnimTimers(m *PartyMember) {
+	m.AttackBump = 0
+	m.DamageFlash = 0
+	m.HitKnockback = 0
 }
 
 // RestoreMP tops up a member's MP by amount, clamped at MaxMP, and returns the
@@ -1168,6 +1186,9 @@ func CommitLevelUp(m *PartyMember, pendingStats [StatCount]int) bool {
 }
 
 func init() {
+	if len(partyClassDefinitions) != PartyMemberCount {
+		panic("core: partyClassDefinitions length must match PartyMemberCount — append a class and bump PartyMemberCount together")
+	}
 	if len(statTable) != int(StatCount) {
 		panic("core: statTable length must match StatCount — add a row when adding a Stat enum value")
 	}

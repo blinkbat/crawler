@@ -154,7 +154,7 @@ func drawCardScrim(x, y, w, h int32) {
 // keeps members recognizable at a glance even when names are short. `dim`
 // requests the inactive-member wash (applied last, over the whole card).
 func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, selected, down, dim bool) {
-	classCol := partyClassPresentationFor(member.Class).turnColor
+	classCol := classAccent(member.Class)
 	accent := classCol
 	bg := surfacePrimary
 	border := borderSoft

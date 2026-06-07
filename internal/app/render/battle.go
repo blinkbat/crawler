@@ -567,7 +567,7 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 		y = bottomPad - h
 	}
 
-	classCol := partyClassPresentationFor(member.Class).turnColor
+	classCol := classAccent(member.Class)
 	drawCard(x, y, w, h, surfacePrimary, borderActive, classCol)
 
 	contentX := x + 22

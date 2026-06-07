@@ -14,13 +14,7 @@ func clampStartCoord(v, dim int) int {
 	if dim <= 0 {
 		return 0
 	}
-	if v < 0 {
-		return 0
-	}
-	if v >= dim {
-		return dim - 1
-	}
-	return v
+	return Clamp(v, 0, dim-1)
 }
 
 func NewPlayer(tileX, tileZ, facing int) Player {
@@ -209,20 +203,18 @@ func ResetGameState(g *GameState) {
 func resetPartyForFieldRecovery(party []PartyMember) []PartyMember {
 	out := make([]PartyMember, len(party))
 	copy(out, party)
+	// Delegate the "what's a combat-transient status" list to the canonical
+	// clearers (shared with the save sanitizer) rather than re-listing it.
+	ClearPartyTransientStatuses(out) // Sleep / Stun / Webbed / Confused / Defending
+	ReleaseAllIngested(out)          // Ingested / IngestedBy
 	for i := range out {
 		out[i].HP = out[i].MaxHP
 		out[i].MP = out[i].MaxMP
-		out[i].AttackBump = 0
-		out[i].DamageFlash = 0
-		out[i].HitKnockback = 0
-		out[i].Defending = false
+		// Field recovery is a FULL restore, so it also clears Poison — which
+		// the battle-exit clearer deliberately preserves, hence the explicit
+		// line here on top of the shared clearers.
 		out[i].PoisonTurns = 0
-		out[i].SleepTurns = 0
-		out[i].StunTurns = 0
-		out[i].WebbedTurns = 0
-		out[i].ConfusedTurns = 0
-		out[i].Ingested = false
-		out[i].IngestedBy = -1
+		clearMemberAnimTimers(&out[i])
 	}
 	return out
 }

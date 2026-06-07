@@ -50,9 +50,9 @@ const maxEditLevel = 9
 const layerCount = int(LayerEntities) + 1
 
 // numberRowKeys is the top-row 1..9 key codes. Package-level so the
-// brush-select hotkeys (1..9 / Shift+1..9, all nine) and the Alt+1..6
-// layer jump (first layerCount) don't rebuild the slice every input
-// frame. The first six double as the per-layer jump keys.
+// brush-select hotkeys (1..9 / Shift+1..9, all nine) and the Alt+1..N
+// layer jump (first layerCount = 7 keys) don't rebuild the slice every
+// input frame. The first layerCount entries double as the per-layer jump keys.
 var numberRowKeys = [9]int32{
 	rl.KeyOne, rl.KeyTwo, rl.KeyThree, rl.KeyFour, rl.KeyFive,
 	rl.KeySix, rl.KeySeven, rl.KeyEight, rl.KeyNine,

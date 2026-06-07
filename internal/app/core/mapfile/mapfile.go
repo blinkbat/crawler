@@ -977,14 +977,8 @@ func (mf MapFile) Encode(w io.Writer) error {
 	fmt.Fprintf(bw, "quiet: %s\n", mf.Quiet)
 	fmt.Fprintf(bw, "size: %dx%d\n", mf.Width, mf.Height)
 	fmt.Fprintf(bw, "start: %d %d %s\n", mf.StartX, mf.StartZ, mf.StartFace)
-	ceiling := mf.Ceiling
-	if len(ceiling) == 0 {
-		ceiling = BlankLayer(mf.Width, mf.Height, CeilingOpenChar)
-	}
-	elevation := mf.Elevation
-	if len(elevation) == 0 {
-		elevation = BlankLayer(mf.Width, mf.Height, ElevationGroundChar)
-	}
+	ceiling := OptionalLayerOrBlank(mf.Ceiling, mf.Width, mf.Height, CeilingOpenChar)
+	elevation := OptionalLayerOrBlank(mf.Elevation, mf.Width, mf.Height, ElevationGroundChar)
 	for _, layer := range append(mf.requiredLayers(), namedLayer{sectionCeiling, ceiling}, namedLayer{sectionElevation, elevation}) {
 		fmt.Fprintf(bw, "%s:\n", layer.name)
 		for _, row := range layer.rows {
@@ -1175,6 +1169,18 @@ func BlankLayer(width, height int, c byte) []string {
 	row := strings.Repeat(string(c), width)
 	for i := range rows {
 		rows[i] = row
+	}
+	return rows
+}
+
+// OptionalLayerOrBlank returns rows unchanged when present, else a blank
+// (width × height, all-`c`) layer. The single "absent optional layer ⇒ blank"
+// rule shared by Encode and the Area↔MapFile converters in core/areas.go, so
+// the ceiling/elevation default isn't open-coded at each. (validate keeps its
+// own switch because it ALSO width-validates a present layer.)
+func OptionalLayerOrBlank(rows []string, width, height int, c byte) []string {
+	if len(rows) == 0 {
+		return BlankLayer(width, height, c)
 	}
 	return rows
 }

@@ -90,9 +90,7 @@ func saveSanitizedParty(party []PartyMember) []PartyMember {
 	for i := range out {
 		// Animation timers aren't statuses, so they're not in the clearers
 		// above; zero them so a save can't carry a mid-lunge offset.
-		out[i].AttackBump = 0
-		out[i].DamageFlash = 0
-		out[i].HitKnockback = 0
+		clearMemberAnimTimers(&out[i])
 		// copy() above is shallow, so the snapshot's progression maps still
 		// alias the live party's. Clone them so the sanitized copy is fully
 		// independent — today it's only marshalled (read-only), but an

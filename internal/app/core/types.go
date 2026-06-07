@@ -238,10 +238,11 @@ type Chest struct {
 // via AreaFromMapFile (see areas.go). Path is the source disk location and
 // is empty for unsaved maps the editor is still working on.
 //
-// Geometry is layered: Walls / Floor / Decor / Props are four parallel
-// ASCII grids of the same dimensions. Width and Height are stored
-// explicitly so blank layers can be reconstructed without inferring
-// from any single grid (an empty .map gets all four blank).
+// Geometry is layered into parallel ASCII grids of the same dimensions: the
+// four required layers (Walls / Floor / Decor / Props) plus two optional ones
+// (Ceiling / Elevation, documented on their fields below). Width and Height
+// are stored explicitly so blank layers can be reconstructed without
+// inferring from any single grid (an empty .map gets blank layers).
 type AreaDefinition struct {
 	Path   string
 	Name   string

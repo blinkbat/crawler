@@ -349,17 +349,8 @@ func (a AreaDefinition) WallAt(x, z int) bool {
 // section get a blank ceiling layer at parse time, so this always
 // returns false for them.
 func (a AreaDefinition) CeilingAt(x, z int) bool {
-	if !a.InBounds(x, z) {
-		return false
-	}
-	if len(a.Ceiling) != a.Height {
-		return false
-	}
-	row := a.Ceiling[z]
-	if x >= len(row) {
-		return false
-	}
-	return row[x] == TileCeilingSolid
+	c, ok := a.layerByteAt(a.Ceiling, x, z)
+	return ok && c == TileCeilingSolid
 }
 
 // ElevationLevelAt returns the ground LEVEL (0..9) of tile (x,z). Ramp tiles
@@ -368,15 +359,8 @@ func (a AreaDefinition) CeilingAt(x, z int) bool {
 // layer (older .map files load as a blank all-'0' layer; struct-literal areas
 // leave it nil) are uniformly flat.
 func (a AreaDefinition) ElevationLevelAt(x, z int) int {
-	if !a.InBounds(x, z) || len(a.Elevation) != a.Height {
-		return 0
-	}
-	row := a.Elevation[z]
-	if x >= len(row) {
-		return 0
-	}
-	c := row[x]
-	if c < '0' || c > '9' {
+	c, ok := a.layerByteAt(a.Elevation, x, z)
+	if !ok || c < '0' || c > '9' {
 		return 0
 	}
 	return int(c - '0')
@@ -430,14 +414,11 @@ func RampCharForFacing(facing int) byte {
 // facing it ascends toward. Convenience over reading Floor[z][x] +
 // RampAscentFacing at the call site; ok=false out of bounds or on flat floor.
 func (a AreaDefinition) RampAt(x, z int) (facing int, ok bool) {
-	if !a.InBounds(x, z) || len(a.Floor) != a.Height {
+	c, present := a.layerByteAt(a.Floor, x, z)
+	if !present {
 		return 0, false
 	}
-	row := a.Floor[z]
-	if x >= len(row) {
-		return 0, false
-	}
-	return RampAscentFacing(row[x])
+	return RampAscentFacing(c)
 }
 
 // StandGroundY returns the world-space Y of the ground at tile (x,z): the

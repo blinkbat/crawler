@@ -732,10 +732,11 @@ func actionHandlerFor(skill core.SkillID) (actionHandlers, bool) {
 }
 
 // recordQuality stamps the floating quality popup over the given party slot
-// for QualityResultDuration. isBlock chooses the defend palette (and the
-// "BLOCK!" label override) over the attack palette. Single source of truth
-// for both attack-side and block-side quality popups so the field set never
-// drifts between callers.
+// for QualityResultDuration. isBlock sets g.Battle.LastQualityIsBlock, which
+// the renderer reads to pick the defend palette + the "BLOCK!" label (that
+// label/palette override lives in render/timing.go, not here). Single source
+// of truth for both attack- and block-side quality popups so the field set
+// never drifts between callers.
 //
 // NB: Miss-grade popups DO get stamped here (the timing still graded the
 // player's input, even though no damage / no whiff message), and render
