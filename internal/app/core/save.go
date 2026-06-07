@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
 // Save / load. A single JSON save file capturing the persistent subset of a
@@ -64,8 +65,14 @@ func NewSaveData(g *GameState) SaveData {
 		StepCount:    g.StepCount,
 		Gold:         g.Gold,
 		Party:        saveSanitizedParty(g.Party),
-		Inventory:    g.Inventory,
-		Quests:       g.Quests,
+		// Detach Inventory / Quests from the live slices (same defensive-copy
+		// rationale as saveSanitizedParty): today the snapshot is marshalled
+		// synchronously, but an independent copy can't be torn by a future
+		// deferred / async save mutating the live run between snapshot and
+		// write. ItemStack / Quest are value types, so a shallow clone fully
+		// detaches the backing array.
+		Inventory: slices.Clone(g.Inventory),
+		Quests:    slices.Clone(g.Quests),
 	}
 }
 
@@ -164,11 +171,21 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	}
 	g := NewGameState(area)
 	if len(data.Party) > 0 {
+		// A save is external input (file on disk, possibly hand-edited or
+		// written by an older build). Clamp each member's numeric fields and
+		// drop unknown equipped item kinds before overlaying, so corrupt data
+		// (HP>MaxHP, MaxHP<=0, Level<BaseLevel, a renumbered ItemKind) can't
+		// feed nonsense into battle / level-up / equipment math. Mirrors the
+		// bounds guard custom enemies already get at load.
+		sanitizeLoadedParty(data.Party)
 		g.Party = data.Party
 	}
 	// Inventory / quests may legitimately be empty; copy through as-is so a
 	// player who sold everything stays empty rather than re-seeding the kit.
-	g.Inventory = data.Inventory
+	// Drop stacks whose ItemKind is no longer registered (an older save or a
+	// hand-edit) — they'd otherwise sit in the bag as un-usable "Unknown
+	// Item" dead weight.
+	g.Inventory = pruneUnknownItems(data.Inventory)
 	g.Gold = data.Gold
 	if len(data.Quests) > 0 {
 		g.Quests = data.Quests
@@ -190,6 +207,70 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	}
 	RevealRadius(&g, x, z, SightRadius)
 	return g, nil
+}
+
+// sanitizeLoadedParty clamps a loaded party's mutable numeric fields into
+// sane ranges and clears unknown equipped item kinds, so a corrupt or hand-
+// edited save can't feed nonsense (HP>MaxHP, negative HP, MaxHP<=0,
+// Level<BaseLevel, a renumbered ItemKind) into battle / level-up /
+// equipment math. Mutates in place — mirrors the bounds guard the custom-
+// enemy load path applies.
+func sanitizeLoadedParty(party []PartyMember) {
+	for i := range party {
+		m := &party[i]
+		if m.MaxHP < 1 {
+			m.MaxHP = 1
+		}
+		if m.MaxMP < 0 {
+			m.MaxMP = 0
+		}
+		m.HP = Clamp(m.HP, 0, m.MaxHP)
+		m.MP = Clamp(m.MP, 0, m.MaxMP)
+		if m.Level < BaseLevel {
+			m.Level = BaseLevel
+		}
+		if m.XP < 0 {
+			m.XP = 0
+		}
+		if m.PendingLevelUps < 0 {
+			m.PendingLevelUps = 0
+		}
+		if m.SkillPoints < 0 {
+			m.SkillPoints = 0
+		}
+		// Clear any slot holding an unregistered kind: walkEquipped skips
+		// unknown kinds, so it would occupy the slot while contributing no
+		// bonuses — a silently dead slot. Empty it so the slot is re-usable.
+		for s := range m.Equipped {
+			if m.Equipped[s] == ItemNone {
+				continue
+			}
+			if _, ok := ItemInfoOk(m.Equipped[s]); !ok {
+				m.Equipped[s] = ItemNone
+			}
+		}
+	}
+}
+
+// pruneUnknownItems drops inventory stacks whose ItemKind isn't registered
+// (a save predating an item, or a hand-edit) or whose count is non-positive.
+// Such a stack would otherwise sit in the bag as un-usable "Unknown Item"
+// dead weight. Returns a fresh slice; nil/empty input returns nil.
+func pruneUnknownItems(inv []ItemStack) []ItemStack {
+	if len(inv) == 0 {
+		return nil
+	}
+	out := make([]ItemStack, 0, len(inv))
+	for _, st := range inv {
+		if st.Count <= 0 || st.Kind == ItemNone {
+			continue
+		}
+		if _, ok := ItemInfoOk(st.Kind); !ok {
+			continue
+		}
+		out = append(out, st)
+	}
+	return out
 }
 
 // saveVersionError reports a save file written by a newer build than this

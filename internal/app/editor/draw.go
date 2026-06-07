@@ -796,6 +796,13 @@ func paletteToolAt(s *State, p rl.Vector2) int {
 	if !pointIn(p, s.rect.palette) {
 		return -1
 	}
+	// Reject clicks in the heading band. drawPalette scissor-clips the entry
+	// list to below palette.Y+headerReserve, so a scrolled entry whose rect
+	// overlaps the heading is visually hidden yet would otherwise still
+	// hit-test here. Mirrors handleMetadataClick's header-band guard.
+	if p.Y < s.rect.palette.Y+headerReserve {
+		return -1
+	}
 	palette := layerBrushes[s.layer]
 	for i := range palette {
 		r := paletteEntryRect(s, i)

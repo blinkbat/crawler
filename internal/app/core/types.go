@@ -520,6 +520,11 @@ type GameState struct {
 	// draw. Cleared on area transition + on battle exit so stale
 	// particles don't render in the new scene.
 	VFXQueue []VFXRequest
+	// vfxQueueSpare is the back-buffer DrainVFXQueue swaps in so the drained
+	// slice it returns is never aliased by the live VFXQueue (a spawn handler
+	// that re-enqueues mid-drain appends to the fresh buffer, not the one the
+	// caller is iterating). The two buffers ping-pong, reusing capacity.
+	vfxQueueSpare []VFXRequest
 	// VFXResetRequested is a one-shot signal to the render layer:
 	// when true, drop every live particle BEFORE processing the next
 	// frame's VFXQueue. The bool is the only seam battle code can

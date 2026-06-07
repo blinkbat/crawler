@@ -472,18 +472,20 @@ func handleSoundMouseClick(s *State, mp rl.Vector2, l *soundLayout, savedSounds 
 // elsewhere).
 func updateSoundsParamsKeys(s *State) {
 	rowCount := len(soundParamSliders) + 2 // sliders + name + actions
-	s.soundCursor = input.CursorUpDown(s.soundCursor, rowCount)
+	if s.soundCursor == soundNameCursorIdx() {
+		// On the Name row every printable key (incl. W/S) feeds the name
+		// buffer, so navigate off it with arrow/pad-only up-down — otherwise
+		// typing a name containing those letters also scrolls the cursor away
+		// (and once off the name row, keystrokes stop reaching the buffer).
+		s.soundCursor = input.CursorUpDownTextSafe(s.soundCursor, rowCount)
+	} else {
+		s.soundCursor = input.CursorUpDown(s.soundCursor, rowCount)
+	}
 	if s.soundCursor < len(soundParamSliders) {
 		slider := soundParamSliders[s.soundCursor]
 		if delta := input.CursorLeftRight(); delta != 0 {
 			v := slider.Get(&s.soundParams) + float64(delta)*slider.Step
-			if v < slider.Min {
-				v = slider.Min
-			}
-			if v > slider.Max {
-				v = slider.Max
-			}
-			slider.Set(&s.soundParams, v)
+			slider.Set(&s.soundParams, clampRange(v, slider.Min, slider.Max))
 		}
 		if rl.IsKeyPressed(rl.KeySpace) {
 			previewSoundParams(s.soundParams)

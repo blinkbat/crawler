@@ -78,7 +78,9 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 	if w <= 0 || h <= 0 {
 		return
 	}
-	ensureFoePreviewRT(w, h)
+	if !ensureFoePreviewRT(w, h) {
+		return
+	}
 	cam := foePreviewCamera()
 
 	rl.BeginTextureMode(foePreviewRT)
@@ -112,17 +114,26 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 // ensureFoePreviewRT lazily (re)creates the cached off-screen texture when it's
 // missing or the requested size changed. The old texture is unloaded before a
 // resize so the GPU handle doesn't leak across window-size changes.
-func ensureFoePreviewRT(w, h int32) {
+func ensureFoePreviewRT(w, h int32) bool {
 	if foePreviewRTInit && foePreviewRTW == w && foePreviewRTH == h {
-		return
+		return true
 	}
 	if foePreviewRTInit {
 		rl.UnloadRenderTexture(foePreviewRT)
+		foePreviewRTInit = false
 	}
-	foePreviewRT = rl.LoadRenderTexture(w, h)
+	rt := rl.LoadRenderTexture(w, h)
+	if rt.ID == 0 {
+		// Allocation failed (e.g. GPU OOM). Stay uninitialized so the caller
+		// skips drawing and we retry next frame, rather than driving
+		// BeginTextureMode/BeginMode3D against an invalid render target.
+		return false
+	}
+	foePreviewRT = rt
 	rl.SetTextureFilter(foePreviewRT.Texture, rl.FilterBilinear)
 	foePreviewRTW, foePreviewRTH = w, h
 	foePreviewRTInit = true
+	return true
 }
 
 // CloseFoePreview unloads the cached off-screen texture. The editor calls this

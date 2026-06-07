@@ -99,7 +99,8 @@ const (
 	// player picks the "Skill" row, lets them choose which of the
 	// class's 3 learned skills to cast. Confirming a row in this menu
 	// arms the chosen skill and transitions into its target mode
-	// (party / enemy / no-target) the same way performSkill used to.
+	// (party / enemy / no-target) — see battle.updateSkillMenu →
+	// beginPendingAction.
 	ActionSkillMenu
 )
 

@@ -359,8 +359,7 @@ func drawCustomEnemiesModal(s *State, font rl.Font, theme render.Theme) {
 	for i, row := range l.coreStatRows {
 		drawLabel(font, row.label, rl.NewRectangle(row.rect.X-32, row.rect.Y+8, 32, 18))
 		drawReadonlyValue(font, row.rect, fmt.Sprintf("%d", core.StatValue(def.Stats, core.Stat(i))))
-		drawButton(font, row.minus, "-", false)
-		drawButton(font, row.plus, "+", false)
+		drawStepperButtons(font, row.minus, row.plus)
 	}
 
 	// Skill toggles.
@@ -495,6 +494,12 @@ func finalizeFocusedField(s *State) {
 			def.Name = uniqueCustomEnemyName(s.area.CustomEnemies, s.modalCustomIdx, def.Name)
 			renameCustomEnemyReferences(s, oldName, def.Name)
 		}
+	case focusWidth, focusHeight:
+		// Metadata Width/Height buffer into s.numericBuf and only apply on
+		// commit. The Enter/Tab paths call commitNumericInput directly; the
+		// click-outside-defocus path goes through here, so without this the
+		// typed dimension is silently discarded on click-away.
+		commitNumericInput(s)
 	}
 }
 

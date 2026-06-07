@@ -519,6 +519,10 @@ func finishDrag(s *State) {
 					s.flash("Cell holds the player start")
 				} else if core.ChestSpawnIndexAt(s.area.ChestSpawns, s.hoverX, s.hoverZ) >= 0 {
 					s.flash("Cell holds a chest — clear it first")
+				} else if core.DoorSpawnIndexAt(s.area.DoorSpawns, s.hoverX, s.hoverZ) >= 0 {
+					// Mirror placeDoorAt's door/pack exclusion on the drag path
+					// too — a pack sharing a door tile races the transition.
+					s.flash("Cell holds a door — clear it first")
 				} else {
 					pushUndo(s)
 					// Drop any pack that was already at the destination cell
@@ -652,9 +656,12 @@ var textFieldConfigs = map[focusField]textFieldConfig{
 	focusName:            {defaultTextFieldMaxLen, acceptPrintable},
 	focusQuiet:           {defaultTextFieldMaxLen, acceptPrintable},
 	focusFilename:        {defaultTextFieldMaxLen, acceptPrintable},
-	focusDoorName:        {defaultTextFieldMaxLen, acceptPrintable},
-	focusDoorTargetMap:   {defaultTextFieldMaxLen, acceptPrintable},
-	focusDoorTargetDoor:  {defaultTextFieldMaxLen, acceptPrintable},
+	// Door identifier fields reject spaces: the .map door row is
+	// space-delimited, so a space here would corrupt the round-trip
+	// (validate() also backstops this at save time).
+	focusDoorName:        {defaultTextFieldMaxLen, acceptPrintableNoSpace},
+	focusDoorTargetMap:   {defaultTextFieldMaxLen, acceptPrintableNoSpace},
+	focusDoorTargetDoor:  {defaultTextFieldMaxLen, acceptPrintableNoSpace},
 	focusCustomEnemyName: {24, acceptPrintable},
 }
 
@@ -790,9 +797,12 @@ func commitNumericInput(s *State) {
 	if s.numericBuf == "" {
 		return
 	}
-	v := 0
-	for _, c := range s.numericBuf {
-		v = v*10 + int(c-'0')
+	// Buffer is digit-only (acceptDigit) and capped at numericFieldMaxLen,
+	// so Atoi can't realistically fail; bail cleanly if it ever does.
+	v, err := strconv.Atoi(s.numericBuf)
+	if err != nil {
+		s.numericBuf = ""
+		return
 	}
 	// Floor at MinMapDimension (not 1) so the metadata field can't
 	// produce a 2-wide map that `resize` would then re-clamp anyway.
@@ -921,6 +931,13 @@ func validateModalState(s *State) {
 // = -1` snippets that drifted per modal — the chest-edit updater was
 // missing a modalCursor reset under the previous shape.
 func closeModal(s *State) {
+	// The Foe Visualizer caches an off-screen RenderTexture2D. Free it from
+	// this central seam (not only the modal's own Close/cancel buttons) so
+	// any path that dismisses a modal via closeModal can't leak the GPU
+	// handle across reopen. Idempotent when nothing is allocated.
+	if s.modal == modalFoeView {
+		render.CloseFoePreview()
+	}
 	s.modal = modalNone
 	s.modalCursor = 0
 	s.modalPackIdx = -1

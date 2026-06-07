@@ -277,7 +277,7 @@ const (
 // MapCustomEnemy is one author-defined enemy template in the on-disk
 // format. Fields are positional whitespace-separated on a single line:
 //
-//	<name> <base_kind> <hp> <mp> <str> <dex> <int> <wis> <vit> <spd> <armor> <xp> <tier> <dmg> <sklch> <spwr> <skills>
+//	<name> <base_kind> <hp> <mp> <str> <dex> <int> <wis> <vit> <spd> <armor> <mdef> <xp> <tier> <dmg> <sklch> <spwr> <skills>
 //
 // Skills is `-` for none or a comma-separated list of skill names
 // ("firebolt,sleep"). BaseKind is the on-disk enemy name ("rat",
@@ -306,8 +306,8 @@ type MapCustomEnemy struct {
 
 // customEnemyNoSkillsToken is the single-field placeholder for a
 // custom enemy with no skills. Mirrors emptyChestToken — keeps the
-// row well-formed at 17 whitespace-separated fields without inventing
-// an empty-column syntax.
+// row well-formed at customEnemyFieldCount (18) whitespace-separated
+// fields without inventing an empty-column syntax.
 const customEnemyNoSkillsToken = "-"
 
 // layerSlot is the parser's notion of "which grid is the upcoming N rows
@@ -735,8 +735,23 @@ func (mf *MapFile) validate() error {
 		if d.Name == "" {
 			return fmt.Errorf("door at (%d,%d) has empty name", d.X, d.Z)
 		}
+		// The door row is space-delimited with three variable-width
+		// leading fields (name, target_map, target_door), so whitespace
+		// in any of them is unrecoverable on re-parse — Fields() would
+		// split it into the wrong column count. Reject at the data-model
+		// boundary so a spaced name fails loudly at save (see Save) rather
+		// than silently producing a .map the parser later rejects.
+		if strings.ContainsAny(d.Name, " \t") {
+			return fmt.Errorf("door name %q must not contain whitespace", d.Name)
+		}
 		if !d.HasTarget() {
 			return fmt.Errorf("door %q at (%d,%d) missing target_map/target_door", d.Name, d.X, d.Z)
+		}
+		if strings.ContainsAny(d.TargetMap, " \t") {
+			return fmt.Errorf("door %q target_map %q must not contain whitespace", d.Name, d.TargetMap)
+		}
+		if strings.ContainsAny(d.TargetDoor, " \t") {
+			return fmt.Errorf("door %q target_door %q must not contain whitespace", d.Name, d.TargetDoor)
 		}
 		if _, dup := seenNames[d.Name]; dup {
 			return fmt.Errorf("duplicate door name %q in map", d.Name)
@@ -1063,6 +1078,15 @@ func Load(path string) (MapFile, error) {
 }
 
 func Save(path string, mf MapFile) error {
+	// Validate BEFORE touching disk. os.Create truncates, so a structurally
+	// invalid map (out-of-bounds entity, empty/duplicate/whitespace door
+	// name, …) must be rejected here — otherwise we'd both write a .map the
+	// parser later refuses to load AND truncate the prior good file on the
+	// way to that failure. This is the same check Parse runs on load, so a
+	// saved map is always re-loadable.
+	if err := mf.validate(); err != nil {
+		return fmt.Errorf("refusing to save invalid map %q: %w", path, err)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), AssetDirMode); err != nil {
 		return err
 	}

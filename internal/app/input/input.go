@@ -158,6 +158,35 @@ func CursorUpDown(cursor, count int) int {
 	return cursor
 }
 
+// UpPressedArrows / DownPressedArrows are text-entry-safe vertical nav:
+// the arrow keys and pad/stick, but NOT the W/S letter keys. A cursor
+// row that doubles as a text field (the sound modal's Name row) can move
+// off the row with these without the typed W/S letters also scrolling it.
+func UpPressedArrows() bool {
+	return rl.IsKeyPressed(rl.KeyUp) || padPressed(rl.GamepadButtonLeftFaceUp) || stickEdgeY(-1)
+}
+
+func DownPressedArrows() bool {
+	return rl.IsKeyPressed(rl.KeyDown) || padPressed(rl.GamepadButtonLeftFaceDown) || stickEdgeY(1)
+}
+
+// CursorUpDownTextSafe is CursorUpDown without the W/S letter keys, for a
+// row list that contains an active text field (so typing those letters
+// edits the field instead of moving the cursor). Pad/stick/arrows still
+// navigate, so a keyboard user is never trapped on the text row.
+func CursorUpDownTextSafe(cursor, count int) int {
+	if count <= 0 {
+		return cursor
+	}
+	if UpPressedArrows() {
+		cursor = core.WrapIndex(cursor-1, count)
+	}
+	if DownPressedArrows() {
+		cursor = core.WrapIndex(cursor+1, count)
+	}
+	return cursor
+}
+
 // ModalClosePressed is the edge-detect predicate for closing an editor
 // modal. Esc and Enter both dismiss — Esc is "cancel", Enter is "I'm
 // done editing" — and the two key handlers had drifted apart across

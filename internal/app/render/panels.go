@@ -70,13 +70,17 @@ var panelTabDrawers = [core.PanelTabCount]func(core.GameState, Resources, rl.Rec
 // [PanelTabCount], so adding a tab forces a hint slot (compile error if
 // missed) instead of silently inheriting a generic hint via a switch's
 // fall-through. init asserts none is empty.
+// footerHintMemberTabs is the shared control hint for tabs whose only
+// interaction is the member-column cursor (Stats / Equipment / Quests / Map).
+const footerHintMemberTabs = "L1/R1 tabs   Left/Right pick member   X close"
+
 var panelTabFooterHints = [core.PanelTabCount]string{
-	core.PanelTabStats:     "L1/R1 tabs   Left/Right pick member   X close",
-	core.PanelTabEquipment: "L1/R1 tabs   Left/Right pick member   X close",
+	core.PanelTabStats:     footerHintMemberTabs,
+	core.PanelTabEquipment: footerHintMemberTabs,
 	core.PanelTabItems:     "L1/R1 tabs   Up/Down item   Confirm / F use   X close",
 	core.PanelTabSkills:    "L1/R1 tabs   Left/Right member   Confirm open trees   F cast heal   X close",
-	core.PanelTabQuests:    "L1/R1 tabs   Left/Right pick member   X close",
-	core.PanelTabMap:       "L1/R1 tabs   Left/Right pick member   X close",
+	core.PanelTabQuests:    footerHintMemberTabs,
+	core.PanelTabMap:       footerHintMemberTabs,
 }
 
 func init() {
@@ -87,8 +91,9 @@ func init() {
 	}
 }
 
-// DrawPanelsOverlay paints the game-panels modal — the five-tab overlay
-// raised by the gamepad middle button / keyboard I. Routes by
+// DrawPanelsOverlay paints the game-panels modal — the six-tab overlay
+// (Character / Equipment / Items / Skills / Quests / Map) raised by the
+// gamepad middle button / keyboard I. Routes by
 // g.PanelsTab to the per-tab body drawer; the tab strip + footer hint
 // are drawn once around all of them so the chrome stays consistent.
 // No-op when the overlay isn't open.
@@ -1000,14 +1005,6 @@ func panelsItemHealLabel(amount int) string {
 		return panelsItemHealLabelCache[amount]
 	}
 	return "+" + strconv.Itoa(amount) + " HP"
-}
-
-// panelsItemHealLabelMeasureCache memoizes MeasureTextEx for the
-// right-aligned heal labels (bounded keys from the precomputed label LUT).
-var panelsItemHealLabelMeasureCache measureCache
-
-func measurePanelsItemHealLabel(font rl.Font, label string) rl.Vector2 {
-	return panelsItemHealLabelMeasureCache.measure(font, label, FontSmall, 1)
 }
 
 // drawPanelsSkills renders the Skills tab as one card per party member,

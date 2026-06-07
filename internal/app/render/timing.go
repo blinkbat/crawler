@@ -862,6 +862,13 @@ func flashAlpha(remaining float32) float32 {
 	return t * t
 }
 
+// popupOffScreenX reports whether a world-anchored popup's projected screen X
+// has drifted far enough past the viewport edges (beyond offscreenPopupSlack)
+// that it should be culled. Shared by the quality + damage popup draws.
+func popupOffScreenX(screenX, screenW float32) bool {
+	return screenX < -offscreenPopupSlack || screenX > screenW+offscreenPopupSlack
+}
+
 // DrawQualityPopup floats the most recent quality result above the actor for
 // QualityResultDuration after each timing resolution. Punches in with a quick
 // scale-up for impact, then fades up and out.
@@ -883,7 +890,7 @@ func DrawQualityPopup(camera rl.Camera3D, g core.GameState, assets Resources) {
 	worldPos.Y += 0.6
 	screenPos := rl.GetWorldToScreen(worldPos, camera)
 	sw, _ := screenSizeF()
-	if screenPos.X < -offscreenPopupSlack || screenPos.X > sw+offscreenPopupSlack {
+	if popupOffScreenX(screenPos.X, sw) {
 		return
 	}
 
@@ -944,7 +951,7 @@ func DrawDamagePopups(camera rl.Camera3D, g core.GameState, assets Resources) {
 		pos.Y += 0.6
 		screenPos := rl.GetWorldToScreen(pos, camera)
 		sw, _ := screenSizeF()
-		if screenPos.X < -offscreenPopupSlack || screenPos.X > sw+offscreenPopupSlack {
+		if popupOffScreenX(screenPos.X, sw) {
 			continue
 		}
 

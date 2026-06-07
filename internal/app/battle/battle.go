@@ -347,9 +347,19 @@ func actorSpeed(g *core.GameState, actor core.ActorRef) int {
 // battle if everyone on a side has died).
 func startActorTurn(g *core.GameState) {
 	for g.Battle.QueueCursor < len(g.Battle.Queue) {
-		if isActorAlive(g, g.Battle.Queue[g.Battle.QueueCursor]) {
+		skipped := g.Battle.Queue[g.Battle.QueueCursor]
+		if isActorAlive(g, skipped) {
 			break
 		}
+		// A party member queued this round but ingested before their turn
+		// still owes their end-of-turn Poison tick — "Poison survives the
+		// lockout". Without this the DoT pauses for the swallow round and only
+		// resumes via tickPoisonForIngestedParty next round. The helper no-ops
+		// on dead members (HP<=0) and enemies, so it fires only for an alive,
+		// ingested, poisoned member. buildTurnQueue excludes members ingested
+		// at round start, so the queue can only hold a member ingested
+		// mid-round → ticked once here, never double with the round tick.
+		tickPoisonAfterPartyTurn(g, skipped)
 		g.Battle.QueueCursor++
 	}
 	if g.Battle.QueueCursor >= len(g.Battle.Queue) {
@@ -380,12 +390,14 @@ func startActorTurn(g *core.GameState) {
 	// "asleep" in the log.
 	if asleep := tickSleepAtTurnStart(g, actor); asleep {
 		consumeDefendOnSkip(g, actor)
+		drainNonDamagingPartyStatuses(g, actor)
 		g.Battle.QueueCursor++
 		startActorTurn(g)
 		return
 	}
 	if stunned := tickStunAtTurnStart(g, actor); stunned {
 		consumeDefendOnSkip(g, actor)
+		drainNonDamagingPartyStatuses(g, actor)
 		g.Battle.QueueCursor++
 		startActorTurn(g)
 		return
@@ -407,6 +419,19 @@ func consumeDefendOnSkip(g *core.GameState, actor core.ActorRef) {
 	if actor.IsParty && actor.Index >= 0 && actor.Index < len(g.Party) {
 		g.Party[actor.Index].Defending = false
 	}
+}
+
+// drainNonDamagingPartyStatuses ticks the party-side counters that carry
+// no damage (Webbed, Confused) for the actor whose turn just ended.
+// finishActorTurn calls it on a normal turn; the Sleep/Stun skip path in
+// startActorTurn calls it too — without that, a member who is webbed/
+// confused AND asleep/stunned never has those counters decrement (their
+// turn is skipped, so finishActorTurn never runs), and the slow / retarget
+// effect outlasts its rolled duration. No-ops on enemies and on members
+// with the counter already at zero.
+func drainNonDamagingPartyStatuses(g *core.GameState, actor core.ActorRef) {
+	tickWebbedAfterPartyTurn(g, actor)
+	tickConfusedAfterPartyTurn(g, actor)
 }
 
 // tickSkipStatusAtTurnStart drains one tick from a skip-this-turn status
@@ -513,9 +538,9 @@ func finishActorTurn(g *core.GameState) {
 		// status counter ticks at the END of the webbed/confused
 		// member's own turn so they get one full action under the
 		// status before the counter decrements. Mirrors the Poison
-		// shape; same actor-kind dispatch.
-		tickWebbedAfterPartyTurn(g, g.Battle.Queue[g.Battle.QueueCursor])
-		tickConfusedAfterPartyTurn(g, g.Battle.Queue[g.Battle.QueueCursor])
+		// shape; same actor-kind dispatch. (The Sleep/Stun skip path
+		// drains these too, so a skipped turn still elapses the duration.)
+		drainNonDamagingPartyStatuses(g, g.Battle.Queue[g.Battle.QueueCursor])
 	}
 	if checkEnemyWipeout(g) {
 		return
@@ -994,7 +1019,9 @@ func winBattle(g *core.GameState, message string) {
 	// when those points are still unspent.
 	perMember, leveled := core.AwardBattleXP(g)
 	if perMember > 0 {
-		setBattleMessage(g, fmt.Sprintf("%s Party gains %d XP each.", message, perMember))
+		// The kill line was already logged above; don't re-embed `message`
+		// here or it prints twice in the combat log.
+		setBattleMessage(g, fmt.Sprintf("Party gains %d XP each.", perMember))
 		for _, idx := range leveled {
 			setBattleMessage(g, fmt.Sprintf("%s reaches level %d!", g.Party[idx].Name, g.Party[idx].Level))
 		}

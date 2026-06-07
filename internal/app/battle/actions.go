@@ -168,7 +168,7 @@ func enemySpellDamage(def core.EnemyDefinition, effect core.SkillEffect) int {
 // huge damage by accident.
 func handleEnemyFirebolt(ctx enemySpellCtx) {
 	g := ctx.g
-	dealt, killed := damagePartyMember(g, ctx.target, enemySpellDamage(ctx.def, ctx.effect), core.SkillTagFor(core.SkillFirebolt))
+	dealt, killed := damagePartyMemberDefendable(g, ctx.target, enemySpellDamage(ctx.def, ctx.effect), core.SkillTagFor(core.SkillFirebolt))
 	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillFirebolt), ctx.target)
 	if killed {
 		setBattleMessage(g, fmt.Sprintf("%s incinerates %s.", core.TheEnemy(ctx.def), g.Party[ctx.target].Name))
@@ -296,8 +296,9 @@ func handleEnemyConfuse(ctx enemySpellCtx) {
 // handleEnemyStoneslam fires the Stone Golem's AoE phys cast. Hits
 // every living party member (skipping ingested ones — they're
 // untargetable while inside their swallower) with damage = SpellPower
-// + Effect.Damage, tagged Phys so per-target Armor / Defending
-// applies. No status component — the slam is pure damage.
+// + Effect.Damage, tagged Phys so per-target Armor applies. Routed
+// through damagePartyMemberDefendable so a braced member soaks the slam
+// the same as a basic melee hit. No status component — pure damage.
 func handleEnemyStoneslam(ctx enemySpellCtx) {
 	g := ctx.g
 	raw := enemySpellDamage(ctx.def, ctx.effect)
@@ -308,7 +309,7 @@ func handleEnemyStoneslam(ctx enemySpellCtx) {
 		if m.HP <= 0 || m.Ingested {
 			continue
 		}
-		_, killed := damagePartyMember(g, i, raw, core.SkillTagFor(core.SkillStoneslam))
+		_, killed := damagePartyMemberDefendable(g, i, raw, core.SkillTagFor(core.SkillStoneslam))
 		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillStoneslam), i)
 		hits++
 		if killed {
@@ -416,7 +417,7 @@ func chargeMP(g *core.GameState, skill core.SkillID, label string) bool {
 // log message — three apply handlers (Swipe / Whirlwind / Arc Bolt)
 // used to inline the same `for slot, m := range core.BattleMembers
 // { if !m.Alive continue; damageEnemy }` loop.
-func applyAoEDamage(g *core.GameState, skill core.SkillID, damage, quality int) int {
+func applyAoEDamage(g *core.GameState, skill core.SkillID, damage, quality int, shake bool) int {
 	hits := 0
 	tag := core.SkillTagFor(skill)
 	vfx := vfxKindFor(skill)
@@ -428,9 +429,11 @@ func applyAoEDamage(g *core.GameState, skill core.SkillID, damage, quality int) 
 		core.EnqueueEnemyVFX(g, vfx, slot)
 		hits++
 	}
-	if hits > 0 {
+	if hits > 0 && shake {
 		// AoE casts are the "costly" hits that earn the big camera punch
-		// (overrides the subtle base shake from the timing grade).
+		// (overrides the subtle base shake from the timing grade). Callers
+		// that loop this (multi-pass Swipe) pass shake=false and fire one
+		// shake after all passes so the punch arms once per attack.
 		core.TriggerCombatShake(&g.Battle, core.CombatShakeBigPeak, core.CombatShakeBigDur)
 	}
 	return hits
@@ -664,7 +667,11 @@ func maybeConfuseRetarget(g *core.GameState) {
 		picked := slots[rng.Intn(len(slots))]
 		if picked != g.Battle.EnemyIndex {
 			g.Battle.EnemyIndex = picked
-			setBattleStatus(g, fmt.Sprintf("%s is confused — wrong target!", g.Party[actor].Name))
+			// Log it (not setBattleStatus) — the timing bar arms the same
+			// frame and would overwrite the transient prompt slot, so the
+			// player would never see the "wrong target" notice on a
+			// charge/sequence skill. The combat log persists.
+			setBattleMessage(g, fmt.Sprintf("%s is confused — wrong target!", g.Party[actor].Name))
 		}
 	case core.ActionPartyTarget:
 		slots := core.AvailablePartyTargets(g.Party)
@@ -674,7 +681,7 @@ func maybeConfuseRetarget(g *core.GameState) {
 		picked := slots[rng.Intn(len(slots))]
 		if picked != g.Battle.PartyTarget {
 			g.Battle.PartyTarget = picked
-			setBattleStatus(g, fmt.Sprintf("%s is confused — wrong ally!", g.Party[actor].Name))
+			setBattleMessage(g, fmt.Sprintf("%s is confused — wrong ally!", g.Party[actor].Name))
 		}
 	}
 }
@@ -820,11 +827,19 @@ func applySwipe(g *core.GameState, quality int) bool {
 	// Earlier code captured the LAST pass's count, which undercounted
 	// the swing whenever the first sweep got a kill.
 	enemiesHit := 0
+	anyHit := false
 	for p := 0; p < passes; p++ {
-		hit := applyAoEDamage(g, core.SkillSwipe, damage, quality)
+		hit := applyAoEDamage(g, core.SkillSwipe, damage, quality, false)
+		if hit > 0 {
+			anyHit = true
+		}
 		if p == 0 {
 			enemiesHit = hit
 		}
+	}
+	if anyHit {
+		// One big camera punch per Swipe, not one per tally pass.
+		core.TriggerCombatShake(&g.Battle, core.CombatShakeBigPeak, core.CombatShakeBigDur)
 	}
 	if enemiesHit == 0 || passes == 0 {
 		setBattleMessage(g, aoeEmptyMessage("Swipe", "catches only air"))
@@ -1030,7 +1045,7 @@ func applyAoESkill(g *core.GameState, skill core.SkillID, skillNoun, hitVerb, em
 	// every enemy caught in the AoE eats the doubled tick.
 	crit, _ := rollSkillCrit(g, actor, skill, quality)
 	damage = applyCritMultiplier(damage, crit, false)
-	hits := applyAoEDamage(g, skill, damage, quality)
+	hits := applyAoEDamage(g, skill, damage, quality, true)
 	if hits == 0 {
 		setBattleMessage(g, aoeEmptyMessage(skillNoun, emptyVerb))
 	} else {
@@ -1624,6 +1639,24 @@ func damagePartyMember(g *core.GameState, partyIndex, rawAmount int, tag core.Sk
 	return amount, true
 }
 
+// damagePartyMemberDefendable applies an incoming HIT to a party member,
+// honoring their Defend brace BEFORE mitigation — for enemy basic attacks
+// and damaging casts (Firebolt, Stoneslam), anything the player can
+// reasonably brace against. DoT ticks (poison) call damagePartyMember
+// directly so the one-turn brace doesn't soak a status that ticks on the
+// member's own turn. The brace floors at 1 when the pre-Defend amount was
+// positive (a soak, not free immunity); a hit already zeroed upstream by a
+// perfect timing block arrives as rawAmount<=0 and stays 0.
+func damagePartyMemberDefendable(g *core.GameState, partyIndex, rawAmount int, tag core.SkillTag) (int, bool) {
+	if rawAmount > 0 && partyIndex >= 0 && partyIndex < len(g.Party) && g.Party[partyIndex].Defending {
+		rawAmount = int(float32(rawAmount) * core.DefendingDamageMult)
+		if rawAmount < 1 {
+			rawAmount = 1
+		}
+	}
+	return damagePartyMember(g, partyIndex, rawAmount, tag)
+}
+
 // clearEnemyStatusesOnDeath / clearPartyStatusesOnDeath are the two
 // canonical "wipe transient timed statuses now that this actor is
 // dead" hooks. Centralizing them means a future timed status (Curse,
@@ -1835,23 +1868,14 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	enemyCrit := core.RollCrit(g.Rand(), core.EnemyInfoFor(*enemy).Stats, core.TimingQualityMiss)
 	rawDamage = applyCritMultiplier(rawDamage, enemyCrit, false)
 	damage := core.ScaleIncomingDamage(rawDamage, defendQuality)
-	if g.Party[target].Defending {
-		scaled := int(float32(damage) * core.DefendingDamageMult)
-		// Don't let Defending fully zero a hit unless the timing block already
-		// did — that way Defend is a meaningful soak, not a free immunity.
-		if scaled <= 0 && damage > 0 {
-			scaled = 1
-		}
-		damage = scaled
-	}
 	// Plain enemy melee is physically tagged so the party's Armor field
 	// (currently 0 for all members, future equipment) damps the bite.
 	// Spell-casting enemies (goblin mage) dispatch through their own
-	// resolver and pass SkillTagMagic where appropriate. dealt is the
-	// post-armor figure used in the message so once equipment lands
-	// the log will reflect "Warrior soaks the goblin for X" with the
-	// real number.
-	dealt, _ := damagePartyMember(g, target, damage, core.SkillTagPhys)
+	// resolver and pass SkillTagMagic where appropriate. The Defend brace
+	// (and its floor-at-1 soak) is applied inside damagePartyMemberDefendable
+	// — shared with the damaging enemy casts so Defend soaks every incoming
+	// hit, not just melee. dealt is the post-armor figure used in the message.
+	dealt, _ := damagePartyMemberDefendable(g, target, damage, core.SkillTagPhys)
 	// Slash VFX only when damage actually landed — an Excellent
 	// defend can clamp damage to 0, and the player just performed a
 	// successful block. Spawning impact sparks on a perfect parry

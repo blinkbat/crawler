@@ -158,21 +158,10 @@ func seedFoeVisual(s *State) {
 }
 
 // cycleFoe steps to the prev/next enemy kind (wrapping) and re-seeds the working
-// copy from that kind's live visual.
+// copy from that kind's live visual. Shares the registry walk with the
+// custom-enemy modal's Base picker via cycleEnemyKind.
 func cycleFoe(s *State, dir int) {
-	defs := core.EnemyKinds()
-	if len(defs) == 0 {
-		return
-	}
-	idx := 0
-	for i, d := range defs {
-		if d.Kind == s.foeKind {
-			idx = i
-			break
-		}
-	}
-	idx = core.WrapIndex(idx+dir, len(defs))
-	s.foeKind = defs[idx].Kind
+	s.foeKind = cycleEnemyKind(s.foeKind, dir)
 	seedFoeVisual(s)
 }
 

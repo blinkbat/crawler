@@ -172,16 +172,14 @@ func Init() {
 			panic(r)
 		}
 	}()
+	// loadBank already reads assignments.txt and loads each cue from its
+	// assigned .wav (resolveAssignedFile + loadCueFromDisk), so the user
+	// overlay is applied here — no separate ReloadUserAssignments pass at
+	// boot (that re-decoded every cue a second time). The editor's Sounds
+	// modal still calls ReloadUserAssignments explicitly when an assignment
+	// changes mid-session.
 	loadBank()
 	ready = true
-	// Overlay any user-saved assignments (maps/sounds/assignments.txt)
-	// on top of the procedural bank. Missing files / malformed lines are
-	// skipped silently at startup — built-in cues stay as the procedural
-	// defaults. Failed cue slugs come back via ReloadUserAssignments's
-	// first return but we don't surface them at boot since there's no
-	// HUD yet to show a warning; the editor's Sounds modal will pick
-	// them up via its explicit reload on Assign.
-	_, _ = ReloadUserAssignments()
 }
 
 // Close unloads the bank and shuts the audio device down. Mirrors Init —

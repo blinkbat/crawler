@@ -834,13 +834,7 @@ func (s *State) activeBrush() Brush {
 
 // clampLevel bounds a level into [0, maxEditLevel].
 func clampLevel(l int) int {
-	if l < 0 {
-		return 0
-	}
-	if l > maxEditLevel {
-		return maxEditLevel
-	}
-	return l
+	return core.Clamp(l, 0, maxEditLevel)
 }
 
 // Update advances the editor one frame. Returns the next action for the

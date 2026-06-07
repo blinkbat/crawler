@@ -37,7 +37,9 @@ func ShopTabLabel(t ShopTab) string {
 	case ShopTabSell:
 		return "Sell"
 	default:
-		return "?"
+		// Mirror PanelTabLabel: a new ShopTab that forgets a label fails
+		// loudly instead of silently rendering "?" in the tab strip.
+		panic("core: ShopTabLabel missing case for ShopTab")
 	}
 }
 

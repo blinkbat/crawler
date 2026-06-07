@@ -12,7 +12,7 @@ const (
 	EnemyGoblinMage
 	EnemyAmoeba
 	EnemyVenusMantrap
-	// Roster expansion: five new kinds bringing the bestiary to 12.
+	// Roster expansion: six new kinds bringing the bestiary to 13.
 	// CaveSpider / VampireBat / Wisp / StoneGolem / Necromancer
 	// each introduce a mechanic the existing roster doesn't cover
 	// (Webbed status, lifesteal, Confused status, AoE phys casts, and

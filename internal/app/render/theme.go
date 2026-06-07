@@ -320,15 +320,16 @@ const (
 )
 
 // drawModalScaffold paints the shared screen-veil + centered card +
-// heading band for every modal overlay (chest, level-up, party stats,
-// panels). Returns the card rect so the caller can lay out its body
-// inside without redoing the centering math. Pass an empty heading
+// heading band for every modal overlay (chest, level-up, the panels
+// overlay — Party Stats now lives in the panels Character tab, not a
+// standalone modal). Returns the card rect so the caller can lay out its
+// body inside without redoing the centering math. Pass an empty heading
 // to skip the header band — the caller still gets the right card
 // rect.
 //
-// The three older overlays (chest / levelup / party stats) used to
-// open-code rl.DrawRectangle(0,0,…,surfaceVeil) + drawCard + drawHeading
-// each in slightly different orders. This helper plus the
+// The older overlays (chest / levelup) used to open-code
+// rl.DrawRectangle(0,0,…,surfaceVeil) + drawCard + drawHeading each in
+// slightly different orders. This helper plus the
 // overlayCardWidth* / overlayCardHeight* constants in this file are
 // the seam where future "shrink for small screens" or "fade-in"
 // behaviour lands once.

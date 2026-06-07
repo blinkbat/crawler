@@ -840,8 +840,20 @@ func loadEnemySpriteFile(name string, owned *[]rl.Texture2D) (rl.Texture2D, bool
 	return tex, true
 }
 
-func loadEnemyVisuals() (map[core.EnemyKind]enemyVisual, []rl.Texture2D) {
-	var owned []rl.Texture2D
+func loadEnemyVisuals() (visuals map[core.EnemyKind]enemyVisual, owned []rl.Texture2D) {
+	// The caller (LoadResources) assigns r.enemyTextures only on a clean
+	// RETURN, so its recover-path Unload can't free textures we uploaded
+	// before panicking (the coverage assert below, or a sprite upload OOM).
+	// Free the accumulated handles here and re-propagate so the abort stays
+	// leak-safe — matching LoadResources' own recover discipline.
+	defer func() {
+		if rec := recover(); rec != nil {
+			for _, t := range owned {
+				rl.UnloadTexture(t)
+			}
+			panic(rec)
+		}
+	}()
 	// Feral Rat: authored billboard PNG from maps/sprites. If the file is
 	// missing or won't decode we fall back to the procedural makeRatPixels
 	// art (the previous sprite, preserved below) so a checkout without the
@@ -866,7 +878,7 @@ func loadEnemyVisuals() (map[core.EnemyKind]enemyVisual, []rl.Texture2D) {
 	stoneGolemTexture := loadEnemySprite(makeStoneGolemPixels(96, 120), 96, 120, &owned)
 	necromancerTexture := loadEnemySprite(makeNecromancerPixels(72, 112), 72, 112, &owned)
 	skeletonTexture := loadEnemySprite(makeSkeletonPixels(72, 112), 72, 112, &owned)
-	visuals := map[core.EnemyKind]enemyVisual{
+	visuals = map[core.EnemyKind]enemyVisual{
 		core.EnemyRat: {
 			texture: ratTexture,
 			// Square size: the authored PNG is a 1:1 canvas (the old

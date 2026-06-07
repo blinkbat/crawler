@@ -537,6 +537,11 @@ func addPackMember(s *State, x, z int, kind core.EnemyKind) {
 	if msg := firstBlocker(
 		blkStart(a, x, z),
 		blkChestHere(a, x, z, true),
+		// A pack must not share a tile with a door — placeDoorAt already
+		// forbids the reverse (door-on-pack); without this, the runtime
+		// would race the area-transition trigger against the encounter
+		// start when the player steps onto the shared tile.
+		blkDoorHere(a, x, z),
 	); msg != "" {
 		s.flash(msg)
 		return
@@ -677,6 +682,12 @@ func resize(s *State, w, h int) {
 	s.area.Elevation = resizeLayer(s.area.Elevation, s.area.Width, s.area.Height, w, h, core.ElevationGround)
 	s.area.Width = w
 	s.area.Height = h
+	// resizeLayer fills new wall cells with plain TileOpen, so a grow leaves
+	// the new outer rows/cols walkable to the edge (the doc's "walls
+	// border-only" promise was unmet). Re-seal the perimeter ring with
+	// TileRock so a resized map always has a complete outer wall, matching
+	// blankArea.
+	sealWallBorder(&s.area)
 	if s.area.StartTileX >= w {
 		s.area.StartTileX = w - 1
 	}
@@ -684,9 +695,7 @@ func resize(s *State, w, h int) {
 		s.area.StartTileZ = h - 1
 	}
 	packsBefore, chestsBefore, doorsBefore := len(s.area.PackSpawns), len(s.area.ChestSpawns), len(s.area.DoorSpawns)
-	s.area.PackSpawns = slices.DeleteFunc(s.area.PackSpawns, func(sp core.PackSpawn) bool {
-		return sp.TileX >= w || sp.TileZ >= h
-	})
+	s.area.PackSpawns = removePackSpawnsOutside(s.area.PackSpawns, w, h)
 	s.area.ChestSpawns = removeChestSpawnsOutside(s.area.ChestSpawns, w, h)
 	s.area.DoorSpawns = removeDoorSpawnsOutside(s.area.DoorSpawns, w, h)
 	// A shrink silently drops spawns past the new bounds (undoable, but the
@@ -705,10 +714,34 @@ func removeDoorSpawnsOutside(spawns []core.DoorSpawn, w, h int) []core.DoorSpawn
 	return removeSpawnsWhere(spawns, func(x, z int) bool { return x >= w || z >= h })
 }
 
+// removePackSpawnsOutside drops pack entries whose tile sits past the new
+// bounds after a shrink. Mirrors removeChestSpawnsOutside / removeDoorSpawnsOutside
+// so all three resize-prune paths share the generic removeSpawnsWhere helper.
+func removePackSpawnsOutside(spawns []core.PackSpawn, w, h int) []core.PackSpawn {
+	return removeSpawnsWhere(spawns, func(x, z int) bool { return x >= w || z >= h })
+}
+
 // removeChestSpawnsOutside drops chest entries whose tile sits past
 // the new bounds.
 func removeChestSpawnsOutside(spawns []core.ChestSpawn, w, h int) []core.ChestSpawn {
 	return removeSpawnsWhere(spawns, func(x, z int) bool { return x >= w || z >= h })
+}
+
+// sealWallBorder stamps TileRock around the outer ring of the walls layer,
+// leaving the interior untouched. Called after resize so a grown/shrunk map
+// always carries a complete outer wall ring — resizeLayer fills new wall
+// cells with plain TileOpen, which would otherwise leave the new edge
+// walkable to the boundary. Matches blankArea's perimeter rule.
+func sealWallBorder(a *core.AreaDefinition) {
+	for z := 0; z < a.Height && z < len(a.Walls); z++ {
+		row := []byte(a.Walls[z])
+		for x := 0; x < a.Width && x < len(row); x++ {
+			if x == 0 || z == 0 || x == a.Width-1 || z == a.Height-1 {
+				row[x] = core.TileRock
+			}
+		}
+		a.Walls[z] = string(row)
+	}
 }
 
 // resizeLayer copies an old WxH grid into a new W'xH' grid, padding the
@@ -895,12 +928,21 @@ func floodFill(s *State, x, z int, b byte) {
 	// removeSpawnsWhere over core.TileXZ. (Previously only packs were pruned,
 	// leaving chests/doors embedded in the new wall.)
 	if s.layer == LayerWalls && b == core.TileRock {
-		blocked := func(x, z int) bool { return s.area.BlockedAt(x, z) }
-		s.area.PackSpawns = removeSpawnsWhere(s.area.PackSpawns, blocked)
-		s.area.ChestSpawns = removeSpawnsWhere(s.area.ChestSpawns, blocked)
-		s.area.DoorSpawns = removeSpawnsWhere(s.area.DoorSpawns, blocked)
+		pruneBlockedSpawns(&s.area)
 	}
 	s.dirty = true
+}
+
+// pruneBlockedSpawns drops any pack / chest / door spawn that now sits on a
+// blocked tile — the cleanup a wall flood/fill (and applyWallBrush per-cell)
+// owes after turning cells into '#'. Routed through the shared
+// removeSpawnsWhere over core.TileXZ so all three entity lists are pruned by
+// the same rule.
+func pruneBlockedSpawns(a *core.AreaDefinition) {
+	blocked := func(x, z int) bool { return a.BlockedAt(x, z) }
+	a.PackSpawns = removeSpawnsWhere(a.PackSpawns, blocked)
+	a.ChestSpawns = removeSpawnsWhere(a.ChestSpawns, blocked)
+	a.DoorSpawns = removeSpawnsWhere(a.DoorSpawns, blocked)
 }
 
 // rewriteLayerRows clones the layer's row strings into a mutable
@@ -950,10 +992,7 @@ func fillEntireLayer(s *State) {
 	// out of play. Same cleanup applyWallBrush does per-cell, routed
 	// through the shared removeSpawnsWhere over core.TileXZ.
 	if s.layer == LayerWalls && brush.Char == core.TileRock {
-		blocked := func(x, z int) bool { return s.area.BlockedAt(x, z) }
-		s.area.PackSpawns = removeSpawnsWhere(s.area.PackSpawns, blocked)
-		s.area.ChestSpawns = removeSpawnsWhere(s.area.ChestSpawns, blocked)
-		s.area.DoorSpawns = removeSpawnsWhere(s.area.DoorSpawns, blocked)
+		pruneBlockedSpawns(&s.area)
 	}
 	s.dirty = true
 	s.flash("Filled " + layerName(s.layer))

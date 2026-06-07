@@ -53,7 +53,15 @@ func updateChestModal(g *core.GameState) {
 		return
 	}
 	picked := stacks[g.ChestMenuIndex]
-	chest.Items, _ = core.ConsumeItem(chest.Items, picked.Kind)
+	updated, ok := core.ConsumeItem(chest.Items, picked.Kind)
+	if !ok {
+		// Defensive: `picked` comes from LiveStacks (positive count), so
+		// consume should always succeed. If LiveStacks/ConsumeItem ever
+		// diverge, bail without adding to inventory rather than handing out
+		// a free item the chest still holds.
+		return
+	}
+	chest.Items = updated
 	g.Inventory = core.AddItem(g.Inventory, picked.Kind, 1)
 	audio.Play(audio.SoundInputHit)
 	// After taking, if no items remain, close + mark looted. Otherwise

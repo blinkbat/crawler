@@ -315,11 +315,32 @@ func nearestOpenTile(a AreaDefinition, wantX, wantZ int, occupied map[[2]int]boo
 
 // WallAt returns true if the cell holds a wall in the walls layer. Out-of-
 // bounds reads as a wall so callers don't have to range-check first.
+// layerByteAt safely reads layer[z][x], returning ok=false when the layer
+// is short or ragged (missing rows / a short row). Loaded / edited maps are
+// always full-rectangular, but a hand-built or partially-populated
+// AreaDefinition (test fixtures, a future builder) would otherwise panic on
+// index-out-of-range in the base-layer readers below — this lets them fall
+// back to a safe default instead, matching CeilingAt / ElevationLevelAt.
+func (a AreaDefinition) layerByteAt(layer []string, x, z int) (byte, bool) {
+	if z < 0 || z >= len(layer) {
+		return 0, false
+	}
+	row := layer[z]
+	if x < 0 || x >= len(row) {
+		return 0, false
+	}
+	return row[x], true
+}
+
 func (a AreaDefinition) WallAt(x, z int) bool {
 	if !a.InBounds(x, z) {
 		return true
 	}
-	return a.Walls[z][x] == TileRock
+	c, ok := a.layerByteAt(a.Walls, x, z)
+	if !ok {
+		return true // ragged / short walls layer reads as solid
+	}
+	return c == TileRock
 }
 
 // CeilingAt reports whether the cell has a solid ceiling slab. Out-of-
@@ -476,13 +497,13 @@ func (a AreaDefinition) TileAt(x, z int) byte {
 	if !a.InBounds(x, z) {
 		return TileRock
 	}
-	if a.Walls[z][x] == TileRock {
+	if w, ok := a.layerByteAt(a.Walls, x, z); !ok || w == TileRock {
 		return TileRock
 	}
-	if p := a.Props[z][x]; IsPropChar(p) {
+	if p, ok := a.layerByteAt(a.Props, x, z); ok && IsPropChar(p) {
 		return p
 	}
-	if a.Floor[z][x] == FloorDeepWater {
+	if f, ok := a.layerByteAt(a.Floor, x, z); ok && f == FloorDeepWater {
 		return FloorDeepWater
 	}
 	return TileOpen
@@ -504,13 +525,16 @@ func (a AreaDefinition) BlockedAt(x, z int) bool {
 	if !a.InBounds(x, z) {
 		return true
 	}
-	if a.Walls[z][x] == TileRock {
+	if w, ok := a.layerByteAt(a.Walls, x, z); !ok || w == TileRock {
+		return true // ragged / short walls layer reads as blocked
+	}
+	if p, ok := a.layerByteAt(a.Props, x, z); ok && IsPropChar(p) && !PropIsNonBlocking(p) {
 		return true
 	}
-	if IsPropChar(a.Props[z][x]) && !PropIsNonBlocking(a.Props[z][x]) {
-		return true
+	if f, ok := a.layerByteAt(a.Floor, x, z); ok {
+		return IsBlockingFloor(f)
 	}
-	return IsBlockingFloor(a.Floor[z][x])
+	return false
 }
 
 // PropIsNonBlocking reports whether a prop char, despite being a valid
@@ -694,17 +718,25 @@ func AreaTileSummary(a AreaDefinition, x, z int) string {
 		return ""
 	}
 	parts := make([]string, 0, 8)
-	if lbl := TileLabel(TileLayerWalls, a.Walls[z][x]); lbl != "" {
-		parts = append(parts, lbl)
+	if w, ok := a.layerByteAt(a.Walls, x, z); ok {
+		if lbl := TileLabel(TileLayerWalls, w); lbl != "" {
+			parts = append(parts, lbl)
+		}
 	}
-	if lbl := TileLabel(TileLayerFloor, a.Floor[z][x]); lbl != "" {
-		parts = append(parts, lbl)
+	if f, ok := a.layerByteAt(a.Floor, x, z); ok {
+		if lbl := TileLabel(TileLayerFloor, f); lbl != "" {
+			parts = append(parts, lbl)
+		}
 	}
-	if lbl := TileLabel(TileLayerDecor, a.Decor[z][x]); lbl != "" {
-		parts = append(parts, lbl)
+	if d, ok := a.layerByteAt(a.Decor, x, z); ok {
+		if lbl := TileLabel(TileLayerDecor, d); lbl != "" {
+			parts = append(parts, lbl)
+		}
 	}
-	if lbl := TileLabel(TileLayerProps, a.Props[z][x]); lbl != "" {
-		parts = append(parts, lbl)
+	if p, ok := a.layerByteAt(a.Props, x, z); ok {
+		if lbl := TileLabel(TileLayerProps, p); lbl != "" {
+			parts = append(parts, lbl)
+		}
 	}
 	if a.StartTileX == x && a.StartTileZ == z {
 		parts = append(parts, "Start")

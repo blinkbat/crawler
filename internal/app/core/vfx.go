@@ -127,14 +127,21 @@ func EnqueueTileVFX(g *GameState, kind VFXKind, tileX, tileZ int) {
 // DrainVFXQueue returns the pending requests and clears the queue.
 // Render calls this once per frame; the caller is responsible for
 // materialising each request into particles before the queue refills
-// next frame. Capacity is reused so battle-heavy frames don't keep
-// reallocating the underlying array.
+// next frame.
+//
+// The live queue is swapped with a spare back-buffer rather than re-sliced
+// in place, so the returned slice is NOT aliased by g.VFXQueue: a spawn
+// handler that enqueues a follow-on VFX during the drain appends to the
+// fresh (empty) buffer, not the slice the caller is mid-iteration over.
+// The two buffers ping-pong, so capacity is still reused frame to frame and
+// battle-heavy frames don't keep reallocating.
 func DrainVFXQueue(g *GameState) []VFXRequest {
 	if g == nil || len(g.VFXQueue) == 0 {
 		return nil
 	}
 	out := g.VFXQueue
-	g.VFXQueue = g.VFXQueue[:0]
+	g.VFXQueue = g.vfxQueueSpare[:0]
+	g.vfxQueueSpare = out
 	return out
 }
 

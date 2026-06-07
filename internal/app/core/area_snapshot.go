@@ -28,9 +28,24 @@ func AreaContentEqual(a, b AreaDefinition) bool {
 	}
 	al, bl := a.gridLayers(), b.gridLayers()
 	for i := range al {
-		if !slices.Equal(*al[i], *bl[i]) {
-			return false
+		if slices.Equal(*al[i], *bl[i]) {
+			continue
 		}
+		// Ceiling / Elevation are optional layers: the loader fills an
+		// absent one with a canonical blank, so an area with them omitted
+		// must not read as "dirty" vs one filled to that default. Identify
+		// them by pointer (reorder-safe vs gridLayers' order) and compare
+		// with absent==blank semantics.
+		if al[i] == &a.Ceiling {
+			if optionalLayerEqual(*al[i], *bl[i], a.Width, a.Height, TileCeilingOpen) {
+				continue
+			}
+		} else if al[i] == &a.Elevation {
+			if optionalLayerEqual(*al[i], *bl[i], a.Width, a.Height, ElevationGround) {
+				continue
+			}
+		}
+		return false
 	}
 	if !packSpawnsEqual(a.PackSpawns, b.PackSpawns) ||
 		!chestSpawnsEqual(a.ChestSpawns, b.ChestSpawns) ||
@@ -39,6 +54,35 @@ func AreaContentEqual(a, b AreaDefinition) bool {
 		return false
 	}
 	return true
+}
+
+// optionalLayerEqual compares two optional grid layers (Ceiling, Elevation),
+// treating an absent / short layer as equal to a full layer of (width,
+// height) filled with the canonical blank char. Keeps the dirty-check stable
+// when one side omits a layer the loader would have blank-filled.
+func optionalLayerEqual(a, b []string, width, height int, blank byte) bool {
+	return slices.Equal(
+		normalizeOptionalLayer(a, width, height, blank),
+		normalizeOptionalLayer(b, width, height, blank),
+	)
+}
+
+// normalizeOptionalLayer returns layer unchanged when it's already a full
+// (height-row) layer, otherwise the canonical blank layer of the given size.
+func normalizeOptionalLayer(layer []string, width, height int, blank byte) []string {
+	if len(layer) == height {
+		return layer
+	}
+	buf := make([]byte, width)
+	for i := range buf {
+		buf[i] = blank
+	}
+	row := string(buf)
+	out := make([]string, height)
+	for i := range out {
+		out[i] = row
+	}
+	return out
 }
 
 func packSpawnsEqual(a, b []PackSpawn) bool {
