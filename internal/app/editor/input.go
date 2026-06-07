@@ -1490,8 +1490,16 @@ func init() {
 		}
 		seen[key] = true
 	}
-	if got, max := len(core.AllItems()), len(chestAddHotkeys); got > max {
-		panic("editor: chestAddHotkeys pool too small (" + strconv.Itoa(got) + " items, " + strconv.Itoa(max) + " keys)")
+	seenChest := map[int32]bool{}
+	for _, def := range core.AllItems() {
+		key, ok := chestAddHotkeys[def.Kind]
+		if !ok || key == 0 {
+			panic("editor: chestAddHotkeys missing a key for item " + def.Name + " — add a keyed row")
+		}
+		if seenChest[key] {
+			panic("editor: chestAddHotkeys key for " + def.Name + " duplicates another item's add-key")
+		}
+		seenChest[key] = true
 	}
 }
 
@@ -1515,28 +1523,38 @@ func buildPackAddRules() []packAddRule {
 }
 
 // chestAddRule binds a keyboard shortcut to the ItemKind it appends in
-// the chest-edit modal. Built at init from core.AllItems() + the
-// positional hotkey pool below — same shape as packAddRules.
+// the chest-edit modal. Built at init from core.AllItems() looked up
+// against the by-kind hotkey map below — same shape as packAddRules.
 type chestAddRule struct {
 	Key   int32
 	Kind  core.ItemKind
 	Label string
 }
 
-// chestAddHotkeys is the positional pool for the chest-edit modal.
-// Index i is the hotkey for the i-th item in core.AllItems registry
-// order. Mnemonic letters where they don't collide with existing
-// editor bindings: C=Cheese, J=Jerky, F=bread (Fare — B/R/E/A/D are all
-// taken), S=Sword, H=sHield, L=Leather, R=Ring, M=aMulet, then the
-// sample weapons D=Dagger, E=rapiEr, B=Bow, G=slinG, A=Axe, W=War
-// hammer. The order must track the itemDefinitions slice — bread sits
-// after jerky there, so its key sits at the matching index here.
-// Extend as items are added; the init check at the bottom of this file
-// panics if the pool is shorter than the registry so that's caught at
-// startup, not deep in the editor.
-var chestAddHotkeys = []int32{
-	rl.KeyC, rl.KeyJ, rl.KeyF, rl.KeyS, rl.KeyH, rl.KeyL, rl.KeyR, rl.KeyM,
-	rl.KeyD, rl.KeyE, rl.KeyB, rl.KeyG, rl.KeyA, rl.KeyW,
+// chestAddHotkeys maps each item kind to its chest-edit add hotkey. Keyed
+// BY KIND (not registry position) so adding/reordering an item is one keyed
+// row that can't silently shift every later item's letter the way the old
+// positional pool did — mirrors packAddHotkeys. Mnemonic letters where they
+// don't collide: C=Cheese, J=Jerky, F=bread (Fare), P=Phial, S=Sword,
+// H=sHield, L=Leather, R=Ring, M=aMulet, D=Dagger, E=rapiEr, B=Bow, G=slinG,
+// A=Axe, W=War hammer. The init check below panics if any item kind is
+// missing a key (or two share one) — caught at startup, not deep in the editor.
+var chestAddHotkeys = map[core.ItemKind]int32{
+	core.ItemCheese:       rl.KeyC,
+	core.ItemBatJerky:     rl.KeyJ,
+	core.ItemCrustOfBread: rl.KeyF,
+	core.ItemMagicPhial:   rl.KeyP,
+	core.ItemIronSword:    rl.KeyS,
+	core.ItemWoodenShield: rl.KeyH,
+	core.ItemLeatherCap:   rl.KeyL,
+	core.ItemSilverRing:   rl.KeyR,
+	core.ItemBrassAmulet:  rl.KeyM,
+	core.ItemDagger:       rl.KeyD,
+	core.ItemRapier:       rl.KeyE,
+	core.ItemShortBow:     rl.KeyB,
+	core.ItemSling:        rl.KeyG,
+	core.ItemBattleAxe:    rl.KeyA,
+	core.ItemWarHammer:    rl.KeyW,
 }
 
 var chestAddRules = buildChestAddRules()
@@ -1544,11 +1562,8 @@ var chestAddRules = buildChestAddRules()
 func buildChestAddRules() []chestAddRule {
 	defs := core.AllItems()
 	out := make([]chestAddRule, 0, len(defs))
-	for i, def := range defs {
-		key := int32(0)
-		if i < len(chestAddHotkeys) {
-			key = chestAddHotkeys[i]
-		}
+	for _, def := range defs {
+		key := chestAddHotkeys[def.Kind] // coverage guaranteed by init() below
 		out = append(out, chestAddRule{
 			Key:   key,
 			Kind:  def.Kind,

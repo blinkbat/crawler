@@ -15,10 +15,13 @@ import (
 // STRIKE / DEFEND depending on whose timing phase is active). Any future
 // "translate the bar text" pass lands here once.
 const (
-	timingHeadingStrike     = "STRIKE!"
-	timingHeadingDefend     = "DEFEND!"
-	timingHeadingCharge     = "CHARGE!"
-	timingHeadingPickpocket = "PICKPOCKET!"
+	timingHeadingStrike       = "STRIKE!"
+	timingHeadingDefend       = "DEFEND!"
+	timingHeadingCharge       = "CHARGE!"
+	timingHeadingPickpocket   = "PICKPOCKET!"
+	timingHeadingReels        = "STOP THE REELS!"
+	timingHeadingRecallMemo   = "MEMORIZE!"
+	timingHeadingRecallRecall = "RECALL!"
 )
 
 // Per-mode heading + base-fill tints, paired with the timingHeading*
@@ -27,10 +30,93 @@ const (
 // function — a palette pass touches one block. (Pickpocket derives its
 // tint from seqOkColor and stays at its call site.)
 var (
-	timingHeadingStrikeColor = rl.NewColor(255, 232, 168, 240) // warm gold
-	timingHeadingDefendColor = rl.NewColor(168, 220, 255, 240) // cool blue
-	timingHeadingChargeColor = rl.NewColor(255, 184, 96, 240)  // warm orange
+	timingHeadingStrikeColor       = mute(rl.NewColor(255, 232, 168, 240)) // warm gold
+	timingHeadingDefendColor       = mute(rl.NewColor(168, 220, 255, 240)) // cool blue
+	timingHeadingChargeColor       = mute(rl.NewColor(255, 184, 96, 240))  // warm orange
+	timingHeadingReelsColor        = mute(rl.NewColor(255, 244, 144, 240)) // gold-yellow gamble
+	timingHeadingRecallMemoColor   = mute(rl.NewColor(255, 244, 144, 240)) // memorize: held-yellow
+	timingHeadingRecallRecallColor = mute(rl.NewColor(140, 232, 168, 240)) // recall: thief green
 )
+
+// Shared timing-bar layout + alpha tunables. Every bar that lays out an arrow
+// row (sequence / recall) or a dwindling timer strip (sequence / recall) reads
+// these, so a tweak can't drift the bars apart — the cause of the copy-paste
+// the bar helpers below were extracted to kill.
+const (
+	barRowPadPx          = float32(18)   // horizontal padding inside a bar row
+	barCellGapPx         = float32(12)   // gap between reel cells
+	arrowSizeSlotFrac    = float32(0.35) // arrow half-extent as a fraction of slot width
+	arrowSizeBarHCap     = float32(0.85) // arrow size ceiling as a fraction of bar height
+	timerStripUrgentFrac = float32(0.30) // remaining-time fraction below which the strip reads red
+	timerStripWarnFrac   = float32(0.55) // ...below which it reads warn-amber
+	barHighlightAlpha    = uint8(245)    // fully-lit element (pending arrow, locked reel frame, cursor underline)
+	iconShadowAlpha      = uint8(180)    // arrow drop-shadow alpha
+	reelRimAlpha         = uint8(150)    // dark rim behind a reel symbol (definition over glass)
+)
+
+// fadeForFlash scales a color's alpha by the flash-hold envelope when the bar
+// is in its resolved flash, else returns it unchanged. Replaces the
+// `if flashing { col.A = uint8(float32(col.A) * flashAlpha(flashTimer)) }`
+// block the press / sequence / reel / recall draws each open-coded.
+func fadeForFlash(col rl.Color, flashing bool, flashTimer float32) rl.Color {
+	if flashing {
+		col.A = uint8(float32(col.A) * flashAlpha(flashTimer))
+	}
+	return col
+}
+
+// arrowRowLayout returns the shared geometry for an evenly-spaced arrow row
+// (sequence + recall bars). ok=false when the bar is too narrow or empty, so
+// callers bail rather than draw flipped-sign geometry. The per-slot center is
+// drawX + pad + slotWidth*(i+0.5).
+func arrowRowLayout(barW, barH float32, count int) (pad, slotWidth, arrowSize float32, ok bool) {
+	if count <= 0 {
+		return 0, 0, 0, false
+	}
+	pad = barRowPadPx
+	available := barW - pad*2
+	if available <= 0 {
+		return 0, 0, 0, false
+	}
+	slotWidth = available / float32(count)
+	arrowSize = slotWidth * arrowSizeSlotFrac
+	if arrowSize > barH*arrowSizeBarHCap {
+		arrowSize = barH * arrowSizeBarHCap
+	}
+	return pad, slotWidth, arrowSize, true
+}
+
+// drawSequenceCursorUnderline paints the bright "next slot" underline beneath
+// the arrow at (cx, cy). Shared by the sequence and recall bars.
+func drawSequenceCursorUnderline(cx, cy, arrowSize float32) {
+	ux := cx - arrowSize*0.85
+	uw := arrowSize * 1.7
+	uy := cy + arrowSize + 8
+	rl.DrawRectangle(int32(ux)+2, int32(uy)+2, int32(uw), 4, shadowLight)
+	rl.DrawRectangle(int32(ux), int32(uy), int32(uw), 4, colorWithAlpha(timingHeldColor, barHighlightAlpha))
+}
+
+// drawDwindlingTimerStrip paints the thin center-anchored line under a bar's
+// content that shrinks toward the center as `remaining` (1 → 0) drains,
+// reddening as the clock runs out. Shared by the sequence and recall bars;
+// callers gate on `!flashing && Duration > 0` and pass 1-Progress().
+func drawDwindlingTimerStrip(drawX, y, barW, barH, remaining float32) {
+	if remaining < 0 {
+		remaining = 0
+	}
+	stripH := float32(3)
+	stripY := y + barH + 10
+	stripCol := colorWithAlpha(seqOkColor, 230)
+	if remaining < timerStripUrgentFrac {
+		stripCol = colorWithAlpha(seqFailColor, 240)
+	} else if remaining < timerStripWarnFrac {
+		stripCol = timingWarnColor
+	}
+	visW := barW * remaining
+	stripX := drawX + (barW-visW)*0.5
+	rl.DrawRectangle(int32(stripX)+1, int32(stripY)+1, int32(visW), int32(stripH), shadowLight)
+	rl.DrawRectangle(int32(stripX), int32(stripY), int32(visW), int32(stripH), stripCol)
+}
 
 // --- Bar juice helpers ----------------------------------------------------
 //
@@ -170,10 +256,16 @@ func drawTimingBar(g core.GameState, assets Resources) {
 	x, y, barW, barH := timingBarLayout()
 
 	switch timing.Kind {
-	case core.TimingKindCharge:
+	case core.TimingKindCharge, core.TimingKindOvercharge:
+		// Overcharge reuses the charge bar's visuals; its post-peak decay
+		// band already reads as a danger zone (where the overload lives).
 		drawChargeBar(timing, g, assets, x, y, barW, barH, flashing)
 	case core.TimingKindSequence:
 		drawSequenceBar(timing, g, assets, x, y, barW, barH, flashing)
+	case core.TimingKindRecall:
+		drawRecallBar(timing, g, assets, x, y, barW, barH, flashing)
+	case core.TimingKindReels:
+		drawReelBar(timing, g, assets, x, y, barW, barH, flashing)
 	default:
 		drawPressBar(timing, g, assets, x, y, barW, barH, flashing)
 	}
@@ -488,23 +580,9 @@ func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources
 	drawTimingHeading(assets.hudFont, heading, drawX, barW, y, baseCol, flashing, qualityColor(timing.Quality, false))
 
 	count := len(timing.SequenceTargets)
-	if count == 0 {
+	pad, slotWidth, arrowSize, ok := arrowRowLayout(barW, barH, count)
+	if !ok {
 		return
-	}
-
-	// Arrows are spaced evenly across the row. With no track to constrain
-	// them, we can size them larger so they read as the focus of the prompt.
-	pad := float32(18)
-	available := barW - pad*2
-	if available <= 0 {
-		// Window too narrow to lay out arrows with any padding — bail rather
-		// than draw flipped-sign geometry.
-		return
-	}
-	slotWidth := available / float32(count)
-	arrowSize := slotWidth * 0.35
-	if arrowSize > barH*0.85 {
-		arrowSize = barH * 0.85
 	}
 
 	for i, dir := range timing.SequenceTargets {
@@ -519,11 +597,9 @@ func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources
 		case core.SeqResultWrong:
 			col = seqFailColor // red
 		default:
-			col = colorWithAlpha(timingCursorColor, 245) // pending bright white
+			col = colorWithAlpha(timingCursorColor, barHighlightAlpha) // pending bright white
 		}
-		if flashing {
-			col.A = uint8(float32(col.A) * flashAlpha(g.Battle.TimingFlash))
-		}
+		col = fadeForFlash(col, flashing, g.Battle.TimingFlash)
 
 		// Per-slot pulse: the just-landed correct slot scales up briefly so
 		// each tap reads as a discrete win. Drives off SequencePulseTimer
@@ -539,45 +615,130 @@ func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources
 
 		// Drop shadow: same triangle drawn 3 px down-right in transparent
 		// black so the arrow stays readable over busy 3D backgrounds.
-		shadowAlpha := uint8(180)
-		if flashing {
-			shadowAlpha = uint8(float32(shadowAlpha) * flashAlpha(g.Battle.TimingFlash))
-		}
-		drawArrow(cx+3, cy+3, slotSize, dir, rl.NewColor(0, 0, 0, shadowAlpha))
+		shadow := fadeForFlash(rl.NewColor(0, 0, 0, iconShadowAlpha), flashing, g.Battle.TimingFlash)
+		drawArrow(cx+3, cy+3, slotSize, dir, shadow)
 		drawArrow(cx, cy, slotSize, dir, col)
 
-		// Cursor underline below the next slot.
 		if !flashing && i == timing.SequenceCursor {
-			ux := cx - arrowSize*0.85
-			uw := arrowSize * 1.7
-			uy := cy + arrowSize + 8
-			rl.DrawRectangle(int32(ux)+2, int32(uy)+2, int32(uw), 4, shadowLight)
-			rl.DrawRectangle(int32(ux), int32(uy), int32(uw), 4, colorWithAlpha(timingHeldColor, 245))
+			drawSequenceCursorUnderline(cx, cy, arrowSize)
 		}
 	}
 
-	// Dwindling timer — a thin line under the arrow row that shrinks toward
-	// the center as time runs out. Red when the clock's almost gone so the
-	// urgency reads in peripheral vision.
 	if !flashing && timing.Duration > 0 {
-		stripH := float32(3)
-		stripY := y + barH + 10
-		remaining := 1.0 - timing.Progress()
-		if remaining < 0 {
-			remaining = 0
+		drawDwindlingTimerStrip(drawX, y, barW, barH, 1.0-timing.Progress())
+	}
+}
+
+// reelSymbolColors are the slot symbols' fill hues — well-separated colors so
+// a "match" reads at a glance. Indexed by symbol modulo its length, so it
+// stays safe if core.ReelSymbolCount ever changes (symbols would just share
+// hues rather than index out of range).
+var reelSymbolColors = []rl.Color{
+	mute(rl.NewColor(255, 206, 84, 255)),  // gold
+	mute(rl.NewColor(96, 208, 255, 255)),  // cyan
+	mute(rl.NewColor(236, 120, 200, 255)), // magenta
+	mute(rl.NewColor(140, 232, 168, 255)), // green
+}
+
+// drawReelBar paints Steal's slot-machine gamble: one framed cell per reel,
+// each showing its current symbol. A spinning reel's symbol is dimmed; a
+// stopped reel gilds its frame and shows the locked symbol solid. On the
+// resolve flash the symbols fade with the grade tint. Mirrors the other bars'
+// heading + bar-motion handling.
+func drawReelBar(timing core.TimingState, g core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
+	xOff, _, _ := applyBarMotion(timing, g.Battle.TimingFlash, barH)
+	drawX := x + xOff
+	drawTimingHeading(assets.hudFont, timingHeadingReels, drawX, barW, y, timingHeadingReelsColor, flashing, qualityColor(timing.Quality, false))
+
+	n := len(timing.Reels)
+	if n == 0 {
+		return
+	}
+	available := barW - barRowPadPx*2 - barCellGapPx*float32(n-1)
+	if available <= 0 {
+		return
+	}
+	cellW := available / float32(n)
+	cy := y + barH*0.5
+	for i := 0; i < n; i++ {
+		cellX := drawX + barRowPadPx + (cellW+barCellGapPx)*float32(i)
+		stopped := timing.Reels[i].Stop >= 0
+
+		rl.DrawRectangle(int32(cellX), int32(y), int32(cellW), int32(barH), timingTrackColor)
+		frame := colorWithAlpha(timingCursorColor, 110) // dim frame while spinning
+		if stopped {
+			frame = colorWithAlpha(timingHeldColor, barHighlightAlpha)
 		}
-		stripCol := colorWithAlpha(seqOkColor, 230)
-		if remaining < 0.30 {
-			stripCol = colorWithAlpha(seqFailColor, 240)
-		} else if remaining < 0.55 {
-			stripCol = timingWarnColor
+		rl.DrawRectangleLinesEx(rl.NewRectangle(cellX, y, cellW, barH), 2, frame)
+
+		sym := timing.ReelSymbolAt(i)
+		col := reelSymbolColors[sym%len(reelSymbolColors)]
+		if !stopped {
+			col = colorWithAlpha(col, 140) // dim while spinning
 		}
-		// Center-anchored shrink: the line stays centered as it retracts
-		// from both ends, matching how the arrows are centered in their slots.
-		visW := barW * remaining
-		stripX := drawX + (barW-visW)*0.5
-		rl.DrawRectangle(int32(stripX)+1, int32(stripY)+1, int32(visW), int32(stripH), shadowLight)
-		rl.DrawRectangle(int32(stripX), int32(stripY), int32(visW), int32(stripH), stripCol)
+		col = fadeForFlash(col, flashing, g.Battle.TimingFlash)
+		// Dark rim behind the symbol so it reads crisply (etched) over the
+		// translucent glass cell — same "definition over glass" logic as the
+		// mandatory text drop-shadow (UI_STANDARDS.md). Matters more now that
+		// the symbol fills are muted toward parchment tones.
+		sx := cellX + cellW*0.5
+		r := barH * 0.30
+		rl.DrawCircleV(rl.NewVector2(sx, cy), r+2, fadeForFlash(rl.NewColor(0, 0, 0, reelRimAlpha), flashing, g.Battle.TimingFlash))
+		rl.DrawCircleV(rl.NewVector2(sx, cy), r, col)
+	}
+}
+
+// drawRecallBar paints Arc Bolt's memory minigame. During the reveal phase it
+// shows the full directional pattern lit ("MEMORIZE!"); once the pattern
+// hides ("RECALL!") the arrows go face-down — pending slots are dim dots,
+// landed slots reveal their answer tinted green (correct) or red (wrong) so
+// the player gets feedback as they go. Reuses the sequence bar's arrow icons,
+// cursor underline, and dwindling timer strip.
+func drawRecallBar(timing core.TimingState, g core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
+	hidden := timing.RecallHidden()
+	heading := timingHeadingRecallMemo
+	baseCol := timingHeadingRecallMemoColor
+	if hidden {
+		heading = timingHeadingRecallRecall
+		baseCol = timingHeadingRecallRecallColor
+	}
+	xOff, _, _ := applyBarMotion(timing, g.Battle.TimingFlash, barH)
+	drawX := x + xOff
+	drawTimingHeading(assets.hudFont, heading, drawX, barW, y, baseCol, flashing, qualityColor(timing.Quality, false))
+
+	count := len(timing.SequenceTargets)
+	pad, slotWidth, arrowSize, ok := arrowRowLayout(barW, barH, count)
+	if !ok {
+		return
+	}
+	for i := 0; i < count; i++ {
+		cx := drawX + pad + slotWidth*(float32(i)+0.5)
+		cy := y + barH*0.5
+		if !hidden {
+			// Memorize phase: show every pattern arrow lit, with a drop shadow
+			// (matches the sequence bar) so it reads over busy 3D backgrounds.
+			drawArrow(cx+3, cy+3, arrowSize, timing.SequenceTargets[i], rl.NewColor(0, 0, 0, iconShadowAlpha))
+			drawArrow(cx, cy, arrowSize, timing.SequenceTargets[i], colorWithAlpha(timingCursorColor, barHighlightAlpha))
+			continue
+		}
+		// Recall phase: arrows hidden. Landed slots reveal their answer tinted
+		// by correctness; pending slots stay a dim face-down dot.
+		switch timing.SequenceResults[i] {
+		case core.SeqResultCorrect:
+			drawArrow(cx, cy, arrowSize, timing.SequenceTargets[i], fadeForFlash(seqOkColor, flashing, g.Battle.TimingFlash))
+		case core.SeqResultWrong:
+			drawArrow(cx, cy, arrowSize, timing.SequenceTargets[i], fadeForFlash(seqFailColor, flashing, g.Battle.TimingFlash))
+		default:
+			rl.DrawCircleV(rl.NewVector2(cx, cy), arrowSize*0.5, colorWithAlpha(timingCursorColor, 90))
+		}
+
+		if !flashing && i == timing.SequenceCursor {
+			drawSequenceCursorUnderline(cx, cy, arrowSize)
+		}
+	}
+
+	if !flashing && timing.Duration > 0 {
+		drawDwindlingTimerStrip(drawX, y, barW, barH, 1.0-timing.Progress())
 	}
 }
 

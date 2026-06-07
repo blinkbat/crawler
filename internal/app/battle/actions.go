@@ -593,21 +593,36 @@ func beginPendingAction(g *core.GameState) {
 	// switch only handles ActionMode values that have targets.
 	maybeConfuseRetarget(g)
 	intro := core.AttackTimingIntro
-	switch core.SkillMinigameFor(g.Battle.PendingSkill) {
-	case core.MinigameCharge:
-		g.Battle.Timing = core.NewChargeState(core.ChargeTimingDuration)
+	switch mg := core.SkillMinigameFor(g.Battle.PendingSkill); mg {
+	case core.MinigameCharge, core.MinigameOvercharge:
+		// Both charge-family bars share the hold/release flow and pre-arm
+		// gating; only the constructor (and its resolve/overload band) differ.
 		// Charge gets a longer pre-arm pause so the player has time to read
 		// the prompt; pressing the input during the intro skips straight
 		// into the bar (handled in updateAttackTiming). ChargeNeedsRelease
 		// blocks the very same Enter the player used to confirm the
 		// target from being read as engaging the charge — they must
 		// release once first, then a fresh press engages.
+		if mg == core.MinigameOvercharge {
+			g.Battle.Timing = core.NewOverchargeState(core.ChargeTimingDuration)
+		} else {
+			g.Battle.Timing = core.NewChargeState(core.ChargeTimingDuration)
+		}
 		intro = core.ChargeTimingIntro
 		g.Battle.ChargeNeedsRelease = true
 	case core.MinigameSequence:
-		g.Battle.Timing = core.NewSequenceState(g.Rand(), core.StealTimingDuration, core.StealSequenceLength)
+		g.Battle.Timing = core.NewSequenceState(g.Rand(), core.SequenceTimingDuration, core.SequenceLength)
 		// Clear analog-stick edge memory so a player whose stick happens to
 		// be tilted when the bar arms doesn't get a phantom input on frame 1.
+		input.ResetStickEdges()
+	case core.MinigameReels:
+		// Slot gamble — stop each reel with a press (no directional input,
+		// so no stick-edge reset needed).
+		g.Battle.Timing = core.NewReelState(g.Rand(), core.ReelTimingDuration)
+	case core.MinigameRecall:
+		// Memory pattern — directional taps after the reveal hides, same as
+		// the sequence bar, so clear stick edges too.
+		g.Battle.Timing = core.NewRecallState(g.Rand(), core.RecallTimingDuration, core.RecallPatternLength, core.RecallRevealTime)
 		input.ResetStickEdges()
 	default:
 		// Swipe gets a two-zone press bar (one hit zone per half of the
@@ -976,6 +991,13 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 	if !ok {
 		return false
 	}
+	// Overcharge: a release past the peak (Overcharge minigame) overloads the
+	// bolt — flat bonus damage on top of the guaranteed Excellent grade. The
+	// recoil it costs is applied after the hit lands, below.
+	overloaded := g.Battle.Timing.Overloaded
+	if overloaded {
+		rawDamage += core.OverchargeDamageBonus
+	}
 	// Effect is pulled separately for the burn-chance roll below.
 	effect := core.EffectiveSkillEffect(actor, core.SkillFirebolt)
 	crit, _ := rollSkillCrit(g, actor, core.SkillFirebolt, quality)
@@ -988,6 +1010,15 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	burned := tryProcStatus(g.Rand(), &enemy.BurnTurns, defeated, effect.BurnChance, quality, 0, effect.BurnDuration, resistWIS)
 	setBattleMessage(g, appendCrit(fireboltMessage(actor.Name, target, damage, quality, defeated, burned, enemy.BurnTurns), crit))
+	if overloaded {
+		// The overcharged bolt recoils on the caster. SkillTagNone so the
+		// self-burn bypasses the caster's own armor/MDef (it's not an attack
+		// to be mitigated), and damagePartyMember handles the death/status
+		// cleanup if it drops them.
+		recoil, _ := damagePartyMember(g, g.Battle.CurrentParty, core.OverchargeRecoil, core.SkillTagNone)
+		core.EnqueuePartyVFX(g, core.VFXEmber, g.Battle.CurrentParty)
+		setBattleMessage(g, fmt.Sprintf("%s overcharges the bolt — and is scorched for %d!", actor.Name, recoil))
+	}
 	finishPartyAction(g)
 	return true
 }

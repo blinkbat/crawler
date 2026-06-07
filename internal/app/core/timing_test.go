@@ -15,7 +15,7 @@ func withSeededRNG(t *testing.T, seed int64, fn func(rng *rand.Rand)) {
 
 // TestResolveSequenceGrades locks the pickpocket grading after the dead-code
 // fix. A flawless run reaches Excellent ONLY when finished under
-// StealFastThreshold; a clean-but-slow run caps at Great (speed is the
+// SequenceFastThreshold; a clean-but-slow run caps at Great (speed is the
 // deciding edge), and each wrong slot drops one grade from Excellent.
 func TestResolveSequenceGrades(t *testing.T) {
 	correct := func(n int) []int {
@@ -31,14 +31,18 @@ func TestResolveSequenceGrades(t *testing.T) {
 		elapsed float32
 		want    int
 	}{
-		{"clean and fast", correct(3), StealFastThreshold - 0.1, TimingQualityExcellent},
-		{"clean but slow", correct(3), StealFastThreshold + 0.1, TimingQualityGreat},
-		{"one wrong (fast)", []int{SeqResultCorrect, 0, SeqResultCorrect}, StealFastThreshold - 0.1, TimingQualityGreat},
+		{"clean and fast", correct(3), SequenceFastThreshold - 0.1, TimingQualityExcellent},
+		{"clean but slow", correct(3), SequenceFastThreshold + 0.1, TimingQualityGreat},
+		{"one wrong (fast)", []int{SeqResultCorrect, 0, SeqResultCorrect}, SequenceFastThreshold - 0.1, TimingQualityGreat},
 		{"two wrong", []int{SeqResultCorrect, 0, 0}, 0, TimingQualityGood},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ts := &TimingState{
+				// Sequence kind: the fast-threshold speed demotion is
+				// Sequence-only (Recall is excluded), so the grading this
+				// case checks only fires for TimingKindSequence.
+				Kind:            TimingKindSequence,
 				SequenceTargets: make([]int, len(tc.results)),
 				SequenceResults: tc.results,
 				Elapsed:         tc.elapsed,
@@ -217,7 +221,7 @@ func TestCharge_TimeoutWithoutHoldIsMiss(t *testing.T) {
 func TestSequence_AllCorrectFastIsExcellent(t *testing.T) {
 	withSeededRNG(t, 99, func(rng *rand.Rand) {
 		s := NewSequenceState(rng, 2.0, 4)
-		s.Elapsed = StealFastThreshold - 0.1
+		s.Elapsed = SequenceFastThreshold - 0.1
 		for _, dir := range s.SequenceTargets {
 			s.SequenceInput(dir)
 		}
@@ -517,4 +521,216 @@ func TestMemberAttackHits_ExcellentNeverWhiffs(t *testing.T) {
 			}
 		}
 	})
+}
+
+// --- Reels (slot) minigame -------------------------------------------------
+
+// reelsFromStops builds a []Reel with the given locked Stop values (Speed /
+// Offset unused once stopped) — for grading tests that set the result directly.
+func reelsFromStops(stops ...int) []Reel {
+	reels := make([]Reel, len(stops))
+	for i, s := range stops {
+		reels[i] = Reel{Stop: s}
+	}
+	return reels
+}
+
+// TestReels_MatchTiers pins the payout grading directly via the stop values:
+// three matching = Excellent (jackpot), exactly two = Good, all distinct =
+// Miss (a real whiff).
+func TestReels_MatchTiers(t *testing.T) {
+	cases := []struct {
+		name  string
+		stops []int
+		want  int
+	}{
+		{"three of a kind", []int{2, 2, 2}, TimingQualityExcellent},
+		{"a pair", []int{1, 3, 1}, TimingQualityGood},
+		{"all distinct", []int{0, 1, 2}, TimingQualityMiss},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Pressed: true — grade the match tiers as a PLAYED bar; a no-play
+			// (!Pressed) reels bar is Miss regardless of symbols (see
+			// TestReels_NoPlayIsMiss).
+			s := &TimingState{Kind: TimingKindReels, Active: true, Pressed: true, Reels: reelsFromStops(tc.stops...)}
+			s.resolveReels()
+			if !s.Resolved || s.Quality != tc.want {
+				t.Fatalf("stops %v graded %v, want %v", tc.stops, s.Quality, tc.want)
+			}
+		})
+	}
+}
+
+// TestReels_StopLocksAndResolves checks each press locks the next spinning
+// reel and the final stop resolves the bar.
+func TestReels_StopLocksAndResolves(t *testing.T) {
+	withSeededRNG(t, 5, func(rng *rand.Rand) {
+		s := NewReelState(rng, 2.0)
+		if got := len(s.Reels); got != ReelCount {
+			t.Fatalf("expected %d reels, got %d", ReelCount, got)
+		}
+		for i := 0; i < ReelCount; i++ {
+			last := s.StopNextReel()
+			if s.Reels[i].Stop < 0 {
+				t.Fatalf("reel %d should be locked after a stop", i)
+			}
+			wantLast := i == ReelCount-1
+			if last != wantLast {
+				t.Fatalf("StopNextReel resolve=%v at reel %d, want %v", last, i, wantLast)
+			}
+		}
+		if !s.Resolved {
+			t.Fatalf("bar should resolve once every reel is stopped")
+		}
+		// A press past the last reel is a no-op.
+		if s.StopNextReel() {
+			t.Fatalf("stop after resolve should be a no-op")
+		}
+	})
+}
+
+// TestReels_TimeoutLocksSpinningReels checks an un-played bar still resolves
+// (locking whatever's showing) and reads as a no-play Miss-ish result.
+func TestReels_TimeoutLocksSpinning(t *testing.T) {
+	withSeededRNG(t, 6, func(rng *rand.Rand) {
+		s := NewReelState(rng, 1.0)
+		s.Tick(2.0)
+		if !s.Resolved {
+			t.Fatalf("reel bar should resolve at timeout")
+		}
+		for i := range s.Reels {
+			if s.Reels[i].Stop < 0 {
+				t.Fatalf("reel %d still spinning after timeout", i)
+			}
+		}
+		if s.Pressed {
+			t.Fatalf("a timed-out bar with no stop should not read as Pressed")
+		}
+	})
+}
+
+// --- Recall (memory) minigame ----------------------------------------------
+
+// TestRecall_RevealGate confirms the pattern stays hidden until RevealTime
+// elapses, then opens — and that recall input grades through the shared
+// sequence resolve.
+func TestRecall_RevealGateAndGrade(t *testing.T) {
+	withSeededRNG(t, 8, func(rng *rand.Rand) {
+		s := NewRecallState(rng, 3.0, 4, 1.2)
+		if s.Kind != TimingKindRecall {
+			t.Fatalf("expected recall kind")
+		}
+		if s.RecallHidden() {
+			t.Fatalf("pattern should be visible (not hidden) at elapsed 0")
+		}
+		s.Elapsed = s.RevealTime + 0.01
+		if !s.RecallHidden() {
+			t.Fatalf("pattern should hide once past RevealTime")
+		}
+		// Reproduce it perfectly during the hidden (input) phase. Recall input
+		// can only ever land at Elapsed >= RevealTime (gated by the battle
+		// loop), which is past SequenceFastThreshold — so this asserts the
+		// Recall-specific rule that a flawless recall reaches Excellent
+		// regardless of clock (the speed demotion is Sequence-only). A
+		// realistic in-phase Elapsed is used, not the impossible sub-reveal
+		// value the earlier test set.
+		s.Elapsed = s.RevealTime + 0.5
+		if s.Elapsed < SequenceFastThreshold {
+			t.Fatalf("test premise broken: recall input must land past SequenceFastThreshold")
+		}
+		for _, dir := range s.SequenceTargets {
+			s.SequenceInput(dir)
+		}
+		if !s.Resolved || s.Quality != TimingQualityExcellent {
+			t.Fatalf("perfect recall should be Excellent regardless of clock, got resolved=%v q=%v", s.Resolved, s.Quality)
+		}
+	})
+}
+
+// TestRecall_NoSpeedDemotion pins that the Sequence-only fast-threshold
+// demotion does NOT apply to Recall: a flawless recall finished well after
+// SequenceFastThreshold still grades Excellent (regression guard for the bug
+// where Recall could never reach Excellent).
+func TestRecall_NoSpeedDemotion(t *testing.T) {
+	s := &TimingState{
+		Kind:            TimingKindRecall,
+		SequenceTargets: []int{SeqDirUp, SeqDirDown},
+		SequenceResults: []int{SeqResultCorrect, SeqResultCorrect},
+		Elapsed:         SequenceFastThreshold + 5, // deliberately "slow"
+	}
+	s.resolveSequence()
+	if s.Quality != TimingQualityExcellent {
+		t.Fatalf("flawless recall should stay Excellent past the fast threshold, got %v", s.Quality)
+	}
+	// The same results on a Sequence bar DO get demoted to Great.
+	seq := &TimingState{
+		Kind:            TimingKindSequence,
+		SequenceTargets: []int{SeqDirUp, SeqDirDown},
+		SequenceResults: []int{SeqResultCorrect, SeqResultCorrect},
+		Elapsed:         SequenceFastThreshold + 5,
+	}
+	seq.resolveSequence()
+	if seq.Quality != TimingQualityGreat {
+		t.Fatalf("flawless-but-slow Sequence should demote to Great, got %v", seq.Quality)
+	}
+}
+
+// TestReels_NoPlayIsMiss pins finding #1's fix: a reels bar that times out
+// with no reel ever stopped grades Miss outright, even if the random
+// auto-locked symbols happen to match — a walk-away can't earn a steal.
+func TestReels_NoPlayIsMiss(t *testing.T) {
+	// Hand-set three matching stops but leave Pressed=false (no player stop).
+	s := &TimingState{Kind: TimingKindReels, Active: true, Reels: reelsFromStops(2, 2, 2)}
+	s.resolveReels()
+	if s.Quality != TimingQualityMiss {
+		t.Fatalf("no-play reels (even with matching symbols) should be Miss, got %v", s.Quality)
+	}
+	// With a player stop recorded, the same triple grades Excellent.
+	s2 := &TimingState{Kind: TimingKindReels, Active: true, Reels: reelsFromStops(2, 2, 2), Pressed: true}
+	s2.resolveReels()
+	if s2.Quality != TimingQualityExcellent {
+		t.Fatalf("played triple should be Excellent, got %v", s2.Quality)
+	}
+}
+
+// --- Overcharge minigame ---------------------------------------------------
+
+// TestOvercharge_GradesAndOverloadBand confirms the pre-peak/peak grades match
+// a normal charge, and that releasing PAST the peak overloads (Excellent +
+// Overloaded) instead of the normal charge's decay-to-Miss.
+func TestOvercharge_GradesAndOverloadBand(t *testing.T) {
+	mk := func(visual float32) *TimingState {
+		s := NewOverchargeState(2.0)
+		s.Hold()
+		s.Elapsed = ChargeElapsedForVisual(visual, s.Duration)
+		return &s
+	}
+	// Sweet-spot release: Excellent, NOT overloaded.
+	s := mk((ChargePeakStart + ChargePeakEnd) / 2)
+	s.Release()
+	if s.Quality != TimingQualityExcellent || s.Overloaded {
+		t.Fatalf("peak release should be clean Excellent, got q=%v overloaded=%v", s.Quality, s.Overloaded)
+	}
+	// Before tick1: Miss, not overloaded.
+	s = mk(ChargeTick1Pct - 0.01)
+	s.Release()
+	if s.Quality != TimingQualityMiss || s.Overloaded {
+		t.Fatalf("early release should Miss without overload, got q=%v overloaded=%v", s.Quality, s.Overloaded)
+	}
+	// Past the peak: OVERLOAD (Excellent + Overloaded) where a normal charge
+	// would have decayed to Miss.
+	s = mk(ChargePeakEnd + 0.05)
+	s.Release()
+	if !s.Overloaded || s.Quality != TimingQualityExcellent {
+		t.Fatalf("past-peak release should overload to Excellent, got q=%v overloaded=%v", s.Quality, s.Overloaded)
+	}
+	// A normal charge at the same spot must still Miss (no overload field).
+	nc := NewChargeState(2.0)
+	nc.Hold()
+	nc.Elapsed = ChargeElapsedForVisual(ChargePeakEnd+0.05, nc.Duration)
+	nc.Release()
+	if nc.Quality != TimingQualityMiss || nc.Overloaded {
+		t.Fatalf("normal charge past peak should Miss without overload, got q=%v overloaded=%v", nc.Quality, nc.Overloaded)
+	}
 }

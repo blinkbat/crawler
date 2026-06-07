@@ -32,6 +32,7 @@ const (
 	// later item and corrupt existing saves. Registry/display order is
 	// the itemDefinitions slice order, which is independent of this value.
 	ItemCrustOfBread // small healing consumable (Slot == SlotNone)
+	ItemMagicPhial   // small MP-restore consumable (Slot == SlotNone)
 )
 
 // init pins every ItemKind's serialized integer value. ItemKind is stored as
@@ -51,6 +52,7 @@ func init() {
 		{ItemSilverRing, 6}, {ItemBrassAmulet, 7}, {ItemDagger, 8},
 		{ItemRapier, 9}, {ItemShortBow, 10}, {ItemSling, 11},
 		{ItemBattleAxe, 12}, {ItemWarHammer, 13}, {ItemCrustOfBread, 14},
+		{ItemMagicPhial, 15},
 	}
 	for _, p := range pinned {
 		if int(p.kind) != p.val {
@@ -138,9 +140,13 @@ type ItemDefinition struct {
 	// ItemKindByName, so renaming an item means re-saving any map that
 	// stocks it. (Enemy steal loot is keyed by ItemKind now, not name.)
 	Name string
-	// HealAmount is the HP restored when used in battle. 0 means "non-
-	// healing item" (none yet, but we keep the field general).
+	// HealAmount is the HP restored when used. 0 means "restores no HP".
 	HealAmount int
+	// MPAmount is the MP restored when used (the Magic Phial). 0 means
+	// "restores no MP". An item may set either field (or, in principle,
+	// both); the use paths skip the use only when NEITHER would help the
+	// target. Mirrors HealAmount on the MP axis.
+	MPAmount int
 	// Description is reserved for a future tooltip. Fill it in when we add
 	// item descriptions in the UI.
 	Description string
@@ -183,6 +189,10 @@ var itemDefinitions = []ItemDefinition{
 	// drives the chest-add hotkey position, so a key was inserted at the
 	// matching index in editor.chestAddHotkeys.
 	{Kind: ItemCrustOfBread, Name: "Crust of Bread", HealAmount: 3, Price: 3, Description: "A dry heel of bread. A small bite back to your feet."},
+	// Magic Phial — the MP counterpart to the food rations. Restores a small
+	// pool of MP so a caster isn't stranded between fights. Consumable
+	// (Slot == SlotNone) so it lists in the Item picker like the food.
+	{Kind: ItemMagicPhial, Name: "Magic Phial", MPAmount: 8, Price: 14, Description: "A vial of cold blue draught. Restores a little MP."},
 
 	// Equipment. Bonuses are intentionally modest so the very-basic
 	// system reads as a starting kit rather than a power spike. STR
@@ -434,6 +444,22 @@ func InventoryEmpty(inv []ItemStack) bool {
 // here so the "what's usable as an item?" rule lives in one place.
 func isConsumable(kind ItemKind) bool {
 	return ItemInfo(kind).Slot == SlotNone
+}
+
+// ItemHelpsTarget reports whether using a restorative item on m would do
+// anything — it restores HP and m isn't at full HP, OR restores MP and m
+// isn't at full MP. A non-restorative item (HealAmount==0 && MPAmount==0)
+// returns true (using it is a deliberate action, not a wasted heal). Both
+// use paths — battle applyItem and explore applyUseToMember — gate on this so
+// the "don't burn a restorative on a target full on what it gives" rule lives
+// in one place instead of duplicated per call site.
+func ItemHelpsTarget(def ItemDefinition, m PartyMember) bool {
+	if def.HealAmount <= 0 && def.MPAmount <= 0 {
+		return true // not a restorative — using it isn't "wasted"
+	}
+	hpUseful := def.HealAmount > 0 && m.HP < m.MaxHP
+	mpUseful := def.MPAmount > 0 && m.MP < m.MaxMP
+	return hpUseful || mpUseful
 }
 
 // LiveConsumables returns the positive-count inventory entries that are

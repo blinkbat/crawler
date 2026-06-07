@@ -16,6 +16,17 @@ All colors live in `render/theme.go` as package variables. Never
 inline an `rl.NewColor(...)` literal for any surface that already has a
 token — extend the palette instead.
 
+**Saturation knob.** The bright accent tokens (HP/MP/enemy bars, status
+pills + outlines, the turn-order enemy red, sequence pass/fail, the
+timing-bar heading tints, and the reel-symbol hues) are wrapped in
+`mute(...)`, which pulls each toward its luminance gray by
+`paletteSaturationCut` (currently `0.30`). One knob tones the whole
+accent set toward the muted "library" look — raise toward 1 for grayer,
+lower for punchier. The earthy base tokens (glass / wood / ink / veil)
+are already low-saturation and are NOT routed through `mute` — the
+frame-and-parchment identity stays put while the colorful bits calm
+down. New bright accents should be `mute`-wrapped too.
+
 ### Glass surfaces
 - **`glassDeep`** — `rgb(14, 12, 18) α=210` — the canonical pane tint.
   Used as the body fill of every persistent HUD panel and every modal.
@@ -200,6 +211,26 @@ Same `>` ASCII chevron, painted in `giltBright`, drawn via
   shadow, padded `barValuePadRight` from the right edge.
 
 Owners call `drawBar(font, x, y, w, h, label, value, max, fill, muted)`.
+
+### Timing-bar minigames (combat)
+The timed-hit bar above the party ribbon is its own minimal HUD family
+(NOT a wood-framed panel — a transient strip). All variants share the
+`timing*` accent tokens (`timingTrackColor` fill, `timingCursorColor`,
+`timingHeldColor`, `seqOkColor` / `seqFailColor`) and a `FontHeading`
+prompt drawn via `drawTimingHeading` (flips to `FontTitle` + the grade
+tint during the resolve flash). Six kinds dispatch in `drawTimingBar`:
+Press, Charge, Sequence, **Reels** (one framed-glass cell per spinner;
+the locked cell gilds; symbols are `mute`-d hues with a dark rim so they
+read etched over the translucent glass), **Recall** (sequence arrows
+shown then hidden), and **Overcharge** (the Charge bar; its post-peak
+band is the overload zone).
+
+When you add a bar variant, reuse the shared row helpers
+(`arrowRowLayout`, `drawSequenceCursorUnderline`,
+`drawDwindlingTimerStrip`, `fadeForFlash`) and the `bar*` / `arrowSize*`
+/ `timerStrip*` consts — don't re-derive the geometry or re-spell the
+alphas (the sequence/recall bars drifted on copied literals until those
+were extracted).
 
 ## Behaviour standards
 

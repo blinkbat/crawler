@@ -19,13 +19,19 @@ const (
 
 // TimingKind picks how the bar grades input.
 //
-//	Press:    hit the input once during a window.
-//	Charge:   hold through three ticks, release at the peak.
-//	Sequence: tap a randomized run of directions in order before time's up.
+//	Press:      hit the input once during a window.
+//	Charge:     hold through three ticks, release at the peak.
+//	Sequence:   tap a randomized run of directions in order before time's up.
+//	Reels:      slot-machine — stop each spinning reel; matches pay off.
+//	Recall:     memory — a directional pattern shows then hides; reproduce it.
+//	Overcharge: a charge bar with a post-peak OVERLOAD band (bonus + recoil).
 const (
-	TimingKindPress    = 0
-	TimingKindCharge   = 1
-	TimingKindSequence = 2
+	TimingKindPress      = 0
+	TimingKindCharge     = 1
+	TimingKindSequence   = 2
+	TimingKindReels      = 3
+	TimingKindRecall     = 4
+	TimingKindOvercharge = 5
 )
 
 // Sequence-minigame direction codes. Stored in TimingState.SequenceTargets
@@ -119,9 +125,26 @@ type TimingState struct {
 	// Sequence-kind state (unused for press/charge). Targets is the random
 	// run of directions; Cursor points at the next slot to fill; Results is
 	// parallel to Targets and holds Pending / Correct / Wrong per slot.
+	// Recall-kind reuses these three for its pattern + per-slot grading.
 	SequenceTargets []int
 	SequenceResults []int
 	SequenceCursor  int
+
+	// Reels-kind state (TimingKindReels). One Reel per spinner. A press locks
+	// the next still-spinning reel on whatever symbol it's showing;
+	// resolveReels grades by the largest matching set across the locked reels.
+	Reels []Reel
+
+	// Recall-kind state (TimingKindRecall). RevealTime is how long the
+	// pattern (in SequenceTargets) stays face-up before it hides and input
+	// opens — the "memorize, then reproduce from memory" phase split.
+	RevealTime float32
+
+	// Overcharge-kind state (TimingKindOvercharge). Set true by
+	// resolveOvercharge when the player releases past the peak window (into
+	// the overload band): the skill's apply path reads it to grant the bonus
+	// effect and apply recoil.
+	Overloaded bool
 }
 
 // IsTallyMode reports whether this is a multi-press tally bar. Render
@@ -387,10 +410,10 @@ func NewChargeState(duration float32) TimingState {
 // in order; pending/wrong slots drop the grade.
 func NewSequenceState(rng *rand.Rand, duration float32, length int) TimingState {
 	if duration <= 0 {
-		duration = StealTimingDuration
+		duration = SequenceTimingDuration
 	}
 	if length <= 0 {
-		length = StealSequenceLength
+		length = SequenceLength
 	}
 	targets := make([]int, length)
 	for i := range targets {
@@ -403,6 +426,191 @@ func NewSequenceState(rng *rand.Rand, duration float32, length int) TimingState 
 		SequenceTargets: targets,
 		SequenceResults: make([]int, length),
 	}
+}
+
+// Reel is one spinner in the slot (Reels) minigame. Speed is its symbol
+// cadence (symbols/sec), Offset its starting symbol, and Stop the locked
+// symbol once the player stops it (-1 while still spinning). Bundling the
+// three into one struct (vs the old parallel ReelSpeeds/Offsets/Stops slices)
+// keeps them in lockstep by construction — no per-field bounds-checking.
+type Reel struct {
+	Speed  float32
+	Offset int
+	Stop   int
+}
+
+// NewReelState builds a slot-machine bar: ReelCount reels each cycling
+// ReelSymbolCount symbols at its own (RNG-varied, desynced) speed. A press
+// locks the next still-spinning reel onto whatever symbol it's showing; the
+// bar resolves once every reel is stopped (or the duration elapses, locking
+// the rest). resolveReels grades by the largest matching set.
+func NewReelState(rng *rand.Rand, duration float32) TimingState {
+	if duration <= 0 {
+		duration = ReelTimingDuration
+	}
+	reels := make([]Reel, ReelCount)
+	for i := range reels {
+		reels[i] = Reel{
+			// Desynced speeds so the player can't stop all reels on one beat
+			// for a guaranteed jackpot — matching three takes skill plus luck.
+			Speed:  ReelSpinMin + float32(rng.Float64())*(ReelSpinMax-ReelSpinMin),
+			Offset: rng.Intn(ReelSymbolCount),
+			Stop:   -1,
+		}
+	}
+	return TimingState{
+		Kind:     TimingKindReels,
+		Active:   true,
+		Duration: duration,
+		Reels:    reels,
+	}
+}
+
+// ReelSymbolAt returns the symbol currently shown on reel i: its locked value
+// if stopped, else the spinning value derived from elapsed time and the
+// reel's speed/offset. Render and resolve both read this so a stopped reel
+// always shows exactly what it locked.
+func (t TimingState) ReelSymbolAt(i int) int {
+	if i < 0 || i >= len(t.Reels) {
+		return 0
+	}
+	r := t.Reels[i]
+	if r.Stop >= 0 {
+		return r.Stop
+	}
+	steps := int(t.Elapsed * r.Speed)
+	return (r.Offset + steps) % ReelSymbolCount
+}
+
+// StopNextReel locks the next still-spinning reel onto its current symbol.
+// Returns true if this stop resolved the bar (the last reel landed). No-op
+// when every reel is already stopped. Reels-kind only.
+func (t *TimingState) StopNextReel() bool {
+	if !t.Active || t.Resolved || t.Kind != TimingKindReels {
+		return false
+	}
+	for i := range t.Reels {
+		if t.Reels[i].Stop >= 0 {
+			continue
+		}
+		t.Reels[i].Stop = t.ReelSymbolAt(i)
+		t.Pressed = true
+		if t.allReelsStopped() {
+			t.resolveReels()
+			return true
+		}
+		return false
+	}
+	return false
+}
+
+func (t TimingState) allReelsStopped() bool {
+	for i := range t.Reels {
+		if t.Reels[i].Stop < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// resolveReels finalises the slot result. Any reel still spinning at timeout
+// locks on its current symbol first. Three matching symbols = Excellent
+// (jackpot), exactly two = Good, all distinct = Miss — a real gamble where
+// the player can whiff. A pure timeout where the player never stopped a reel
+// (!Pressed) is a no-PLAY, graded Miss outright: otherwise the random
+// auto-locked symbols would frequently match and hand a walk-away player a
+// boosted Steal chance (the apply path reads Quality regardless of Pressed).
+func (t *TimingState) resolveReels() {
+	for i := range t.Reels {
+		if t.Reels[i].Stop < 0 {
+			t.Reels[i].Stop = t.ReelSymbolAt(i)
+		}
+	}
+	t.Resolved = true
+	if !t.Pressed {
+		t.Quality = TimingQualityMiss
+		return
+	}
+	switch largestReelMatch(t.Reels) {
+	case 3:
+		t.Quality = TimingQualityExcellent
+	case 2:
+		t.Quality = TimingQualityGood
+	default:
+		t.Quality = TimingQualityMiss
+	}
+}
+
+// largestReelMatch returns the size of the most-repeated locked symbol across
+// the reels (called after every reel is stopped).
+func largestReelMatch(reels []Reel) int {
+	best := 0
+	for i := range reels {
+		c := 0
+		for j := range reels {
+			if reels[j].Stop == reels[i].Stop {
+				c++
+			}
+		}
+		if c > best {
+			best = c
+		}
+	}
+	return best
+}
+
+// NewRecallState builds a memory-pattern bar: a random directional run shows
+// face-up for `reveal` seconds, then hides — the player reproduces it from
+// memory before the bar elapses. Reuses the Sequence* fields and
+// resolveSequence grading; the only differences from a sequence bar are the
+// reveal-then-hide phase (RecallHidden) and that input is ignored until the
+// pattern hides (gated at the call site).
+func NewRecallState(rng *rand.Rand, duration float32, length int, reveal float32) TimingState {
+	if duration <= 0 {
+		duration = RecallTimingDuration
+	}
+	if length <= 0 {
+		length = RecallPatternLength
+	}
+	if reveal <= 0 {
+		reveal = RecallRevealTime
+	}
+	// Reveal MUST end before the bar does, or RecallHidden never flips: there'd
+	// be no input window and the resolve-flash would paint the memorize branch
+	// (answer lit). Cap it to leave at least a fraction of the bar for input.
+	if maxReveal := duration * 0.8; reveal > maxReveal {
+		reveal = maxReveal
+	}
+	targets := make([]int, length)
+	for i := range targets {
+		targets[i] = rng.Intn(SeqDirCount)
+	}
+	return TimingState{
+		Kind:            TimingKindRecall,
+		Active:          true,
+		Duration:        duration,
+		RevealTime:      reveal,
+		SequenceTargets: targets,
+		SequenceResults: make([]int, length),
+	}
+}
+
+// RecallHidden reports whether a recall bar's pattern has hidden — i.e. the
+// reveal phase is over and the input phase is open. Render gates "show the
+// arrows" on this; the battle input loop gates "accept directional taps" on it.
+func (t TimingState) RecallHidden() bool {
+	return t.Kind == TimingKindRecall && t.Elapsed >= t.RevealTime
+}
+
+// NewOverchargeState builds a charge bar with a post-peak OVERLOAD band:
+// releasing past the peak (or holding to the end) overcharges the spell —
+// bonus effect at the cost of recoil — instead of decaying straight to Miss.
+// Identical cursor/curve to a normal charge; only the resolve differs
+// (resolveOvercharge).
+func NewOverchargeState(duration float32) TimingState {
+	t := NewChargeState(duration)
+	t.Kind = TimingKindOvercharge
+	return t
 }
 
 // Tick advances the bar by dt. For press bars, auto-resolves a Miss if the
@@ -431,19 +639,23 @@ func (t *TimingState) Tick(dt float32) {
 		return
 	}
 	switch t.Kind {
-	case TimingKindCharge:
-		// Bar timed out. If they engaged at all, treat as released-late;
-		// otherwise it's just a Miss.
+	case TimingKindCharge, TimingKindOvercharge:
+		// Bar timed out. If they engaged at all, treat as released-late
+		// (overcharge grades this as an overload); otherwise it's just a Miss.
 		if t.Pressed {
 			t.Released = true
-			t.resolveCharge()
+			t.resolveChargeKind()
 		} else {
 			t.Quality = TimingQualityMiss
 			t.Resolved = true
 		}
-	case TimingKindSequence:
+	case TimingKindSequence, TimingKindRecall:
 		// Time's up — pending slots count as wrong, grade what we have.
+		// Recall shares the sequence grading (it's a hidden-pattern sequence).
 		t.resolveSequence()
+	case TimingKindReels:
+		// Time's up — lock any reel still spinning and grade the result.
+		t.resolveReels()
 	default:
 		// Press bar timed out. Tally-mode bars resolve with the
 		// hits they accumulated (could be partial); single-window
@@ -570,10 +782,17 @@ func (t *TimingState) Hold() {
 	if !t.Active || t.Resolved {
 		return
 	}
-	if t.Kind != TimingKindCharge {
+	if !t.isChargeFamily() {
 		return
 	}
 	t.Pressed = true
+}
+
+// isChargeFamily reports whether this bar uses the hold-and-release charge
+// flow (normal Charge or its Overcharge variant). Both share Hold / Release
+// / Tick-timeout handling — only the resolve grader differs.
+func (t TimingState) isChargeFamily() bool {
+	return t.Kind == TimingKindCharge || t.Kind == TimingKindOvercharge
 }
 
 // Release closes a charge bar. Returns true if this release resolved the bar.
@@ -583,11 +802,11 @@ func (t *TimingState) Release() bool {
 	if !t.Active || t.Resolved {
 		return false
 	}
-	if t.Kind != TimingKindCharge || !t.Pressed {
+	if !t.isChargeFamily() || !t.Pressed {
 		return false
 	}
 	t.Released = true
-	t.resolveCharge()
+	t.resolveChargeKind()
 	return true
 }
 
@@ -598,7 +817,7 @@ func (t *TimingState) SequenceInput(dir int) bool {
 	if !t.Active || t.Resolved {
 		return false
 	}
-	if t.Kind != TimingKindSequence {
+	if t.Kind != TimingKindSequence && t.Kind != TimingKindRecall {
 		return false
 	}
 	if t.SequenceCursor >= len(t.SequenceTargets) {
@@ -618,12 +837,16 @@ func (t *TimingState) SequenceInput(dir int) bool {
 	return false
 }
 
-// resolveSequence grades the pickpocket pattern. Each non-correct slot (wrong
-// key OR pending/timed-out) drops one grade from Excellent — but a flawless run
-// only reaches Excellent when finished under StealFastThreshold; a clean-but-slow
-// pickpocket caps at Great, so speed is the deciding edge for the top grade.
-// (Previously the speed bonus was dead code: it bumped an already-Excellent
-// clean run and re-clamped straight back, so it never changed the outcome.)
+// resolveSequence grades the directional-sequence pattern. Each non-correct
+// slot (wrong key OR pending/timed-out) drops one grade from Excellent. For
+// the plain sequence bar (TimingKindSequence — Venom Strike) a flawless run
+// only reaches Excellent when finished under SequenceFastThreshold — a
+// clean-but-slow run caps at Great, so speed is the deciding edge. The shared
+// Recall bar (TimingKindRecall)
+// is EXCLUDED from that demotion: its input is gated until the pattern hides
+// (Elapsed >= RevealTime > SequenceFastThreshold), so the speed clause would make
+// Excellent structurally unreachable — the memory itself is its skill test, so
+// a flawless recall earns Excellent regardless of clock.
 func (t *TimingState) resolveSequence() {
 	t.Resolved = true
 	correctCount := 0
@@ -634,7 +857,7 @@ func (t *TimingState) resolveSequence() {
 	}
 	wrongCount := len(t.SequenceTargets) - correctCount
 	grade := TimingQualityExcellent - wrongCount
-	if wrongCount == 0 && t.Elapsed >= StealFastThreshold {
+	if t.Kind == TimingKindSequence && wrongCount == 0 && t.Elapsed >= SequenceFastThreshold {
 		// Flawless but slow — the top grade is reserved for a fast clean run.
 		grade = TimingQualityGreat
 	}
@@ -670,14 +893,25 @@ func (t *TimingState) resolveSequence() {
 func (t *TimingState) resolveCharge() {
 	t.Resolved = true
 	p := ChargeCursorProgress(t.Elapsed, t.Duration)
+	// chargeGradeUpToPeak returns Miss for "past the peak" (inPeak=false),
+	// which is exactly the normal charge's held-too-long penalty.
+	t.Quality, _ = chargeGradeUpToPeak(p)
+}
 
+// chargeGradeUpToPeak grades a charge cursor at visual progress p across the
+// pre-peak ticks and the peak window, returning (grade, inPeak). inPeak is
+// false when p is PAST the peak window — the caller decides what that means:
+// resolveCharge takes the returned Miss (held too long), while
+// resolveOvercharge reinterprets it as an OVERLOAD (bonus + recoil). Sharing
+// this keeps the two charge resolvers' tick/peak bands from drifting.
+func chargeGradeUpToPeak(p float32) (grade int, inPeak bool) {
 	switch {
 	case p < ChargeTick1Pct:
-		t.Quality = TimingQualityMiss
+		return TimingQualityMiss, true
 	case p < ChargeTick2Pct:
-		t.Quality = TimingQualityNice
+		return TimingQualityNice, true
 	case p < ChargeTick3Pct:
-		t.Quality = TimingQualityGood
+		return TimingQualityGood, true
 	case p <= ChargePeakEnd:
 		// In the peak window — split Great vs Excellent on sweet-spot proximity.
 		sweet := (ChargePeakStart + ChargePeakEnd) * 0.5
@@ -687,13 +921,40 @@ func (t *TimingState) resolveCharge() {
 		}
 		windowSize := ChargePeakEnd - ChargePeakStart
 		if windowSize <= 0 || distance/windowSize <= 0.30 {
-			t.Quality = TimingQualityExcellent
-		} else {
-			t.Quality = TimingQualityGreat
+			return TimingQualityExcellent, true
 		}
+		return TimingQualityGreat, true
 	default:
-		// Past the peak — they held too long.
-		t.Quality = TimingQualityMiss
+		return TimingQualityMiss, false
+	}
+}
+
+// resolveOvercharge grades like resolveCharge through the peak, but PAST the
+// peak — where a normal charge decays to Miss — it OVERLOADS: the release
+// still counts as a top-tier (Excellent) hit and sets Overloaded so the
+// skill's apply path grants the bonus and applies recoil. Releasing before
+// the first tick still misses; the brave-but-greedy late release pays off
+// with a cost.
+func (t *TimingState) resolveOvercharge() {
+	t.Resolved = true
+	p := ChargeCursorProgress(t.Elapsed, t.Duration)
+	grade, inPeak := chargeGradeUpToPeak(p)
+	if !inPeak {
+		t.Quality = TimingQualityExcellent
+		t.Overloaded = true
+		return
+	}
+	t.Quality = grade
+}
+
+// resolveChargeKind dispatches a charge resolve to the normal or overload
+// grader. Both charge-family kinds (Charge / Overcharge) route through here
+// from Release and the Tick timeout so the late-release path can't diverge.
+func (t *TimingState) resolveChargeKind() {
+	if t.Kind == TimingKindOvercharge {
+		t.resolveOvercharge()
+	} else {
+		t.resolveCharge()
 	}
 }
 
@@ -724,7 +985,7 @@ func (t TimingState) Progress() float32 {
 	if t.Duration <= 0 {
 		return 0
 	}
-	if t.Kind == TimingKindCharge {
+	if t.isChargeFamily() {
 		return ChargeCursorProgress(t.Elapsed, t.Duration)
 	}
 	p := t.Elapsed / t.Duration

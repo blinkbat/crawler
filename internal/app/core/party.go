@@ -53,13 +53,19 @@ const (
 
 // SkillMinigame picks which timing minigame arms when the skill confirms.
 // Press is the default (a single-press window); Charge is hold-and-release
-// with three ticks; Sequence is the directional pickpocket rhythm.
+// with three ticks; Sequence is the directional tap rhythm (Venom Strike);
+// Reels is
+// the slot-machine gamble; Recall is the show-then-hide memory pattern;
+// Overcharge is a charge bar with a risky post-peak overload band.
 type SkillMinigame int
 
 const (
 	MinigamePress SkillMinigame = iota
 	MinigameCharge
 	MinigameSequence
+	MinigameReels
+	MinigameRecall
+	MinigameOvercharge
 )
 
 type skillDefinition struct {
@@ -216,8 +222,8 @@ var partyClassByID = BuildRegistry(partyClassDefinitions, func(d PartyClassDefin
 var skillDefinitions = []skillDefinition{
 	{Skill: SkillSwipe, Name: "Swipe", Description: "STR-scaled cleave through every living enemy in the pack.", Cost: 2, TargetMode: ActionMenu, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigamePress, Effect: SkillEffect{Damage: 0, AppliesAOEEnemies: true}, PlayerCastable: true},
 	{Skill: SkillPrayer, Name: "Prayer", Description: "WIS-scaled single-ally heal. Charge bar — release at peak.", Cost: 4, TargetMode: ActionPartyTarget, Kind: SkillKindHeal, Tag: SkillTagHeal, Minigame: MinigameCharge, Effect: SkillEffect{Heal: 1}, PlayerCastable: true},
-	{Skill: SkillSteal, Name: "Steal", Description: "Pickpocket the target. Timing quality drives the chance.", Cost: 0, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigameSequence, Effect: SkillEffect{StealChance: StealBaseChance}, PlayerCastable: true},
-	{Skill: SkillFirebolt, Name: "Firebolt", Description: "INT-scaled magic damage. Chance to inflict Burn.", Cost: 5, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 1, BurnChance: FireboltBurnChance, BurnMinTurns: 2, BurnMaxTurns: 3}, PlayerCastable: true, EnemyCastable: true},
+	{Skill: SkillSteal, Name: "Steal", Description: "Pickpocket the target. Stop the reels — matches drive the chance.", Cost: 0, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigameReels, Effect: SkillEffect{StealChance: StealBaseChance}, PlayerCastable: true},
+	{Skill: SkillFirebolt, Name: "Firebolt", Description: "INT-scaled magic damage. Charge; release past the peak to Overcharge (bonus damage, burns you). Chance to inflict Burn.", Cost: 5, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameOvercharge, Effect: SkillEffect{Damage: 1, BurnChance: FireboltBurnChance, BurnMinTurns: 2, BurnMaxTurns: 3}, PlayerCastable: true, EnemyCastable: true},
 	// Crushing Blow (Warrior): charge-up single-target physical hit.
 	// +4 base on top of STR, 3 MP. On Great/Excellent timing rolls
 	// CrushingBlowStunChance for the Stun proc — heavy-hit fantasy
@@ -262,7 +268,7 @@ var skillDefinitions = []skillDefinition{
 	// new bolt arcing to the next enemy; on apply, all living enemies
 	// take quality-scaled damage. Magic-tagged so amoebas don't
 	// shrug it off. Pricier than Firebolt because it hits everyone.
-	{Skill: SkillArcBolt, Name: "Arc Bolt", Description: "INT-scaled magic AoE. Sequence — arcs to every enemy.", Cost: 6, TargetMode: ActionMenu, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameSequence, Effect: SkillEffect{Damage: 1, AppliesAOEEnemies: true}, PlayerCastable: true},
+	{Skill: SkillArcBolt, Name: "Arc Bolt", Description: "INT-scaled magic AoE. Memorize the glyph pattern, then recall it — arcs to every enemy.", Cost: 6, TargetMode: ActionMenu, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameRecall, Effect: SkillEffect{Damage: 1, AppliesAOEEnemies: true}, PlayerCastable: true},
 	// Sleep is the goblin-mage's signature. Magic-tagged so armor doesn't
 	// gate the proc; press-minigame so the cast resolves quickly. Damage
 	// is 0 — the only effect is the status. The mage doesn't pay MP
@@ -502,6 +508,22 @@ func HealMember(m *PartyMember, amount int) {
 	if m.HP > m.MaxHP {
 		m.HP = m.MaxHP
 	}
+}
+
+// RestoreMP tops up a member's MP by amount, clamped at MaxMP, and returns the
+// actual amount restored (0 if already full / not eligible). Mirrors
+// HealMember on the MP axis: a downed (HP<=0) or ingested member can't drink.
+// Used by the Magic Phial's use paths.
+func RestoreMP(m *PartyMember, amount int) int {
+	if m == nil || amount <= 0 || m.HP <= 0 || m.Ingested {
+		return 0
+	}
+	before := m.MP
+	m.MP += amount
+	if m.MP > m.MaxMP {
+		m.MP = m.MaxMP
+	}
+	return m.MP - before
 }
 
 func SkillEffectFor(skill SkillID) SkillEffect {

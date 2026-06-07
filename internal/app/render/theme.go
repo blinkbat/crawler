@@ -16,6 +16,28 @@ import (
 // in four draw helpers.
 const sqrt2Inv = float32(0.7071)
 
+// paletteSaturationCut pulls every BRIGHT accent token a fraction of the way
+// toward its own luminance gray, taming the palette toward the muted
+// "library" look (parchment + waxed wood, not neon). It's applied via mute()
+// to the saturated accents only — the HP/MP/enemy bars, status pills + their
+// outlines, the turn-order enemy red, the timing-bar accents, and the
+// sequence pass/fail greens. The earthy base tokens (glass / wood / ink /
+// veil) are already low-saturation and are NOT routed through mute(), so the
+// frame-and-parchment identity is preserved while the colorful bits calm
+// down. One knob: raise toward 1 for grayer, lower toward 0 for punchier.
+const paletteSaturationCut = 0.30
+
+// mute desaturates c toward its perceptual-luminance gray by
+// paletteSaturationCut, preserving alpha. Used on the bright accent tokens in
+// the palette below so the whole accent set tones down from a single knob.
+func mute(c rl.Color) rl.Color {
+	lum := float32(c.R)*0.30 + float32(c.G)*0.59 + float32(c.B)*0.11
+	toward := func(v uint8) uint8 {
+		return uint8(float32(v) + (lum-float32(v))*paletteSaturationCut)
+	}
+	return rl.NewColor(toward(c.R), toward(c.G), toward(c.B), c.A)
+}
+
 // The Library palette. See UI_STANDARDS.md for the full rationale and
 // the rule "no new rl.NewColor literals for any surface that already
 // has a token." Every persistent HUD pane is dark glass framed in
@@ -105,9 +127,9 @@ var (
 	borderSoft   = woodDark                     // default outer stroke
 	borderStrong = woodAccent                   // heading underline accent
 	borderActive = giltBright                   // active actor panel frame
-	borderTarget = rl.NewColor(118, 200, 132, 235)
-	borderEnemy  = rl.NewColor(212, 120, 80, 235)
-	borderDanger = rl.NewColor(220, 88, 88, 235)
+	borderTarget = mute(rl.NewColor(118, 200, 132, 235))
+	borderEnemy  = mute(rl.NewColor(212, 120, 80, 235))
+	borderDanger = mute(rl.NewColor(220, 88, 88, 235))
 
 	textPrimary = inkPrimary
 	textMuted   = inkMuted
@@ -115,38 +137,38 @@ var (
 	textDim     = inkDim
 	textHint    = inkDim
 
-	barHPHigh  = rl.NewColor(116, 200, 132, 255)
-	barHPMid   = rl.NewColor(224, 184, 88, 255)
-	barHPLow   = rl.NewColor(220, 88, 88, 255)
-	barMP      = rl.NewColor(104, 152, 224, 255)
-	barEnemyHP = rl.NewColor(204, 76, 76, 255)
-	barTrack   = rl.NewColor(8, 12, 22, 140)
+	barHPHigh  = mute(rl.NewColor(116, 200, 132, 255))
+	barHPMid   = mute(rl.NewColor(224, 184, 88, 255))
+	barHPLow   = mute(rl.NewColor(220, 88, 88, 255))
+	barMP      = mute(rl.NewColor(104, 152, 224, 255))
+	barEnemyHP = mute(rl.NewColor(204, 76, 76, 255))
+	barTrack   = rl.NewColor(8, 12, 22, 140) // near-black track, already muted
 
 	// ----- Per-status accents (UI_STANDARDS.md "Per-status accents") -----
 	// Indexed by core.PartyStatusKind via partyStatusVisuals below; the
 	// raw tokens are exported here so non-party surfaces (enemy pills,
 	// future field-status overlays) can pull the same hue without
 	// re-typing the RGBs.
-	statusPoison    = rl.NewColor(148, 200, 96, 240)
-	statusBurn      = rl.NewColor(240, 144, 72, 240)
-	statusSleep     = rl.NewColor(132, 196, 232, 240)
-	statusStun      = rl.NewColor(232, 220, 120, 240)
-	statusWebbed    = rl.NewColor(180, 140, 220, 240)
-	statusConfused  = rl.NewColor(220, 188, 96, 240)
-	statusIngested  = rl.NewColor(200, 132, 220, 240)
-	statusDefending = rl.NewColor(132, 196, 255, 240)
-	statusDown      = rl.NewColor(220, 102, 102, 235)
+	statusPoison    = mute(rl.NewColor(148, 200, 96, 240))
+	statusBurn      = mute(rl.NewColor(240, 144, 72, 240))
+	statusSleep     = mute(rl.NewColor(132, 196, 232, 240))
+	statusStun      = mute(rl.NewColor(232, 220, 120, 240))
+	statusWebbed    = mute(rl.NewColor(180, 140, 220, 240))
+	statusConfused  = mute(rl.NewColor(220, 188, 96, 240))
+	statusIngested  = mute(rl.NewColor(200, 132, 220, 240))
+	statusDefending = mute(rl.NewColor(132, 196, 255, 240))
+	statusDown      = mute(rl.NewColor(220, 102, 102, 235))
 	// Outline tints paired with the fills above for the enemy-pill
 	// silhouette. Lighter / more saturated than the fill so the pill
 	// reads as a "glow with a hard rim" against the panel.
-	statusBurnOutline   = rl.NewColor(255, 200, 120, 220)
-	statusSleepOutline  = rl.NewColor(190, 220, 244, 220)
-	statusPoisonOutline = rl.NewColor(180, 232, 132, 220)
-	statusStunOutline   = rl.NewColor(248, 232, 160, 230)
+	statusBurnOutline   = mute(rl.NewColor(255, 200, 120, 220))
+	statusSleepOutline  = mute(rl.NewColor(190, 220, 244, 220))
+	statusPoisonOutline = mute(rl.NewColor(180, 232, 132, 220))
+	statusStunOutline   = mute(rl.NewColor(248, 232, 160, 230))
 
 	// Turn-order panel: the danger red an enemy row reads as. Named so
 	// it isn't a bare literal buried in turnEntryColor's getter.
-	turnEnemyColor = rl.NewColor(245, 100, 92, 255)
+	turnEnemyColor = mute(rl.NewColor(245, 100, 92, 255))
 
 	// Timing-bar accent tokens. The bright cursor white, the "held /
 	// RELEASE" gold, and the sequence-bar pass/fail greens & reds used
@@ -155,8 +177,8 @@ var (
 	// few sites that want a softer alpha wrap these in colorWithAlpha.
 	timingCursorColor = rl.NewColor(248, 248, 252, 255)
 	timingHeldColor   = rl.NewColor(255, 244, 144, 255)
-	seqOkColor        = rl.NewColor(140, 232, 168, 255)
-	seqFailColor      = rl.NewColor(228, 96, 96, 255)
+	seqOkColor        = mute(rl.NewColor(140, 232, 168, 255))
+	seqFailColor      = mute(rl.NewColor(228, 96, 96, 255))
 	// timingWarnColor is the "running low on time" amber the sequence
 	// strip fades through before it goes red. timingCommitColor is the
 	// multi-press bar's late commit-zone orange. timingTickColor is the

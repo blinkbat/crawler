@@ -89,11 +89,13 @@ func NewGameState(area AreaDefinition) GameState {
 // starterInventory returns the inventory the party spawns with. The
 // party starts with NO equipment — every member's Equipped slots are
 // empty (NewParty leaves them zero) and the bag carries no gear, just a
-// few rations: 3 crusts of bread, a small heal. Equipment is earned
-// through shops / chests / drops, not handed out at character creation.
+// few rations: 3 crusts of bread (a small HP heal) and 2 magic phials (a
+// small MP restore, so the casters aren't dry on the first fight).
+// Equipment is earned through shops / chests / drops, not at creation.
 func starterInventory() []ItemStack {
 	return []ItemStack{
 		{Kind: ItemCrustOfBread, Count: 3},
+		{Kind: ItemMagicPhial, Count: 2},
 	}
 }
 

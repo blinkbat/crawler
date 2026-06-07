@@ -28,8 +28,9 @@ func tryUseItem(g *core.GameState) {
 		return
 	}
 	kind := stacks[idx].Kind
-	if core.ItemInfo(kind).HealAmount <= 0 {
-		audio.Play(audio.SoundInputMiss) // equipment / non-healing item
+	def := core.ItemInfo(kind)
+	if def.HealAmount <= 0 && def.MPAmount <= 0 {
+		audio.Play(audio.SoundInputMiss) // equipment / no restorative effect
 		return
 	}
 	g.UseTargetOpen = true
@@ -168,10 +169,10 @@ func applyUseToMember(g *core.GameState, member int) {
 	case g.UsePendingItem != core.ItemNone:
 		kind := g.UsePendingItem
 		def := core.ItemInfo(kind)
-		// Don't burn a heal item on a full-HP ally — parity with the battle-side
-		// applyItem guard; without it the stack is consumed for zero gain
-		// (HealMember clamps at MaxHP).
-		if def.HealAmount > 0 && g.Party[member].HP >= g.Party[member].MaxHP {
+		m := &g.Party[member]
+		// Don't burn a restorative on a full ally — shared rule with the
+		// battle-side applyItem guard (core.ItemHelpsTarget).
+		if !core.ItemHelpsTarget(def, *m) {
 			audio.Play(audio.SoundInputMiss)
 			break
 		}
@@ -181,7 +182,8 @@ func applyUseToMember(g *core.GameState, member int) {
 			break
 		}
 		g.Inventory = inv
-		core.HealMember(&g.Party[member], def.HealAmount)
+		core.HealMember(m, def.HealAmount)
+		core.RestoreMP(m, def.MPAmount)
 		audio.Play(audio.SoundHeal)
 	case g.UsePendingSkill != core.SkillNone:
 		caster := g.UsePendingCaster

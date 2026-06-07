@@ -954,8 +954,7 @@ func drawPanelsItems(g core.GameState, assets Resources, body rl.Rectangle) {
 		dx := detailRect.X + 14
 		drawTextWithShadow(font, info.Name, dx, dy, FontHeading, textPrimary)
 		dy += 38
-		effect := panelsItemHealLabel(info.HealAmount)
-		drawTextWithShadow(font, effect, dx, dy, FontBody, inkAccent)
+		drawTextWithShadow(font, panelsItemEffectLabel(info), dx, dy, FontBody, inkAccent)
 		dy += 30
 		owned := "Owned: " + strconv.Itoa(stack.Count)
 		drawTextWithShadow(font, owned, dx, dy, FontBody, textMuted)
@@ -1005,6 +1004,27 @@ func panelsItemHealLabel(amount int) string {
 		return panelsItemHealLabelCache[amount]
 	}
 	return "+" + strconv.Itoa(amount) + " HP"
+}
+
+// panelsItemEffectLabel is the Items-tab detail line for a consumable's
+// restorative effect: the cached "+N HP" label, "+N MP", both (HP then MP),
+// or a "no effect" note. One home for the HP/MP composition so the draw site
+// doesn't open-code the concat.
+func panelsItemEffectLabel(info core.ItemDefinition) string {
+	effect := ""
+	if info.HealAmount > 0 {
+		effect = panelsItemHealLabel(info.HealAmount)
+	}
+	if info.MPAmount > 0 {
+		if effect != "" {
+			effect += "   "
+		}
+		effect += "+" + strconv.Itoa(info.MPAmount) + " MP"
+	}
+	if effect == "" {
+		return "No restorative effect"
+	}
+	return effect
 }
 
 // drawPanelsSkills renders the Skills tab as one card per party member,

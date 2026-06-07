@@ -277,14 +277,41 @@ const (
 	ChargePeakStart = ChargeTick3Pct
 	ChargePeakEnd   = float32(0.85)
 
-	// Pickpocket sequence minigame: tap a randomized run of N directions in
+	// Directional-sequence minigame: tap a randomized run of N directions in
 	// order before time runs out. Each correct tap holds the grade; each
 	// miss (wrong key OR a slot that timed out unfilled) drops it one notch.
-	// Finishing all-correct under StealFastThreshold bumps grade by one
-	// (capped at Excellent).
-	StealTimingDuration = float32(1.8)
-	StealSequenceLength = 5
-	StealFastThreshold  = float32(1.0)
+	// Finishing all-correct under SequenceFastThreshold keeps the top grade.
+	// Used by Venom Strike (and the shared Recall bar, which opts out of the
+	// speed clause). Named generically since Steal moved to the Reels bar.
+	SequenceTimingDuration = float32(1.8)
+	SequenceLength         = 5
+	SequenceFastThreshold  = float32(1.0)
+
+	// Reels (slot) minigame — Steal's gamble. Stop each of ReelCount spinning
+	// reels; matching symbols pay off (3 = jackpot/Excellent, 2 = Good, all
+	// distinct = Miss). Reels spin between ReelSpinMin..ReelSpinMax symbols/sec,
+	// rolled per-reel so they desync (no single beat stops all three matched).
+	ReelTimingDuration = float32(2.4)
+	ReelCount          = 3
+	ReelSymbolCount    = 4
+	ReelSpinMin        = float32(7)
+	ReelSpinMax        = float32(11)
+
+	// Recall (memory) minigame — Arc Bolt's pattern. A run of RecallPatternLength
+	// directions shows for RecallRevealTime seconds, then hides; the player
+	// reproduces it from memory before RecallTimingDuration elapses. Duration
+	// must exceed the reveal so there's an input window after the hide.
+	RecallTimingDuration = float32(3.0)
+	RecallPatternLength  = 4
+	RecallRevealTime     = float32(1.2)
+
+	// Overcharge backfire — Firebolt's risk band. Releasing the charge PAST the
+	// peak overloads the bolt: it lands a guaranteed Excellent-tier hit PLUS
+	// OverchargeDamageBonus flat extra damage, but recoils OverchargeRecoil
+	// flat self-damage onto the caster. The bonus is what makes the greedy
+	// late release worth the burn over a clean peak release.
+	OverchargeDamageBonus = 4
+	OverchargeRecoil      = 3
 
 	// DefendingDamageMult scales incoming damage when the target picked the
 	// Defend action on their previous turn. Stacks multiplicatively with the

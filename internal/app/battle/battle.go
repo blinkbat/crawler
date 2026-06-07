@@ -671,6 +671,34 @@ func tickFlashHold(g *core.GameState, dt float32, onResolve func()) bool {
 // engaged resolution triggers a brief flash hold so the quality reads before
 // the action lands; an auto-miss applies immediately so the turn doesn't
 // dwell on a non-event.
+// driveSequenceInput reads one directional tap into the active sequence/recall
+// bar and fires the per-slot pulse on a correct land. Shared by the Sequence
+// and Recall timing kinds (Recall gates the call on its reveal phase) so the
+// four-arrow dispatch + pulse bookkeeping lives in one place.
+func driveSequenceInput(g *core.GameState) {
+	prevCursor := g.Battle.Timing.SequenceCursor
+	switch {
+	case g.Battle.Timing.Resolved:
+		// no input once resolved
+	case input.ArrowUpPressed():
+		g.Battle.Timing.SequenceInput(core.SeqDirUp)
+	case input.ArrowRightPressed():
+		g.Battle.Timing.SequenceInput(core.SeqDirRight)
+	case input.ArrowDownPressed():
+		g.Battle.Timing.SequenceInput(core.SeqDirDown)
+	case input.ArrowLeftPressed():
+		g.Battle.Timing.SequenceInput(core.SeqDirLeft)
+	}
+	// Light up the pulse for the just-landed slot — only on Correct, so
+	// a wrong tap still draws the red result but doesn't bounce.
+	if g.Battle.Timing.SequenceCursor > prevCursor &&
+		prevCursor < len(g.Battle.Timing.SequenceResults) &&
+		g.Battle.Timing.SequenceResults[prevCursor] == core.SeqResultCorrect {
+		g.Battle.SequencePulseTimer = core.SequencePulseDuration
+		g.Battle.SequencePulseIndex = prevCursor
+	}
+}
+
 func updateAttackTiming(g *core.GameState, dt float32) {
 	if tickFlashHold(g, dt, func() { applyPendingAction(g, g.Battle.Timing.Quality) }) {
 		return
@@ -692,7 +720,8 @@ func updateAttackTiming(g *core.GameState, dt float32) {
 		// into the next frame's input check and instantly engage the
 		// charge — bar cursor would advance, player's natural release
 		// of the confirm key would resolve the bar at quality=Miss.
-		if g.Battle.Timing.Kind == core.TimingKindCharge && engageReady && input.AttackTimingPressed() {
+		isCharge := g.Battle.Timing.Kind == core.TimingKindCharge || g.Battle.Timing.Kind == core.TimingKindOvercharge
+		if isCharge && engageReady && input.AttackTimingPressed() {
 			g.Battle.TimingIntro = 0
 		} else {
 			g.Battle.TimingIntro -= dt
@@ -700,50 +729,44 @@ func updateAttackTiming(g *core.GameState, dt float32) {
 		}
 	}
 
+	// Each arm only DRIVES input for its kind; the shared "advance the bar if
+	// the input didn't already resolve it" tick is hoisted out below so it
+	// isn't copy-pasted into every case.
 	switch g.Battle.Timing.Kind {
-	case core.TimingKindCharge:
+	case core.TimingKindCharge, core.TimingKindOvercharge:
 		// Hold/Release also gated by engageReady. A player still
 		// holding the confirm key at the 3s auto-arm doesn't engage
 		// the bar — cursor ticks past Peak to Miss naturally. They
-		// must release-then-press to land a quality.
+		// must release-then-press to land a quality. Overcharge shares
+		// the exact flow; only its resolve (overload band) differs.
 		if engageReady && !g.Battle.Timing.Resolved && input.AttackTimingHeld() {
 			g.Battle.Timing.Hold()
 		}
 		if engageReady && !g.Battle.Timing.Resolved && input.AttackTimingReleased() {
 			g.Battle.Timing.Release()
 		}
-		if !g.Battle.Timing.Resolved {
-			g.Battle.Timing.Tick(dt)
-		}
 	case core.TimingKindSequence:
-		prevCursor := g.Battle.Timing.SequenceCursor
-		if !g.Battle.Timing.Resolved && input.ArrowUpPressed() {
-			g.Battle.Timing.SequenceInput(core.SeqDirUp)
-		} else if !g.Battle.Timing.Resolved && input.ArrowRightPressed() {
-			g.Battle.Timing.SequenceInput(core.SeqDirRight)
-		} else if !g.Battle.Timing.Resolved && input.ArrowDownPressed() {
-			g.Battle.Timing.SequenceInput(core.SeqDirDown)
-		} else if !g.Battle.Timing.Resolved && input.ArrowLeftPressed() {
-			g.Battle.Timing.SequenceInput(core.SeqDirLeft)
+		driveSequenceInput(g)
+	case core.TimingKindRecall:
+		// Memory bar: directional taps are ignored during the reveal phase
+		// (the player is memorizing); once the pattern hides, input drives
+		// the same per-slot grading as the sequence bar.
+		if g.Battle.Timing.RecallHidden() {
+			driveSequenceInput(g)
 		}
-		// Light up the pulse for the just-landed slot — only on Correct, so
-		// a wrong tap still draws the red result but doesn't bounce.
-		if g.Battle.Timing.SequenceCursor > prevCursor &&
-			prevCursor < len(g.Battle.Timing.SequenceResults) &&
-			g.Battle.Timing.SequenceResults[prevCursor] == core.SeqResultCorrect {
-			g.Battle.SequencePulseTimer = core.SequencePulseDuration
-			g.Battle.SequencePulseIndex = prevCursor
-		}
-		if !g.Battle.Timing.Resolved {
-			g.Battle.Timing.Tick(dt)
+	case core.TimingKindReels:
+		// Slot gamble: each press stops the next spinning reel.
+		if !g.Battle.Timing.Resolved && input.AttackTimingPressed() {
+			g.Battle.Timing.StopNextReel()
 		}
 	default:
 		if !g.Battle.Timing.Resolved && input.AttackTimingPressed() {
 			g.Battle.Timing.Press()
 		}
-		if !g.Battle.Timing.Resolved {
-			g.Battle.Timing.Tick(dt)
-		}
+	}
+
+	if !g.Battle.Timing.Resolved {
+		g.Battle.Timing.Tick(dt)
 	}
 
 	if !g.Battle.Timing.Resolved {

@@ -217,10 +217,12 @@ func applyItem(g *core.GameState) {
 		return
 	}
 	def := core.ItemInfo(kind)
-	// Don't spend a heal item on a full-HP ally — the Mass Mend path guards the
-	// same way (actions.go); without this the stack is consumed for zero gain.
-	if def.HealAmount > 0 && g.Party[target].HP >= g.Party[target].MaxHP {
-		setBattleStatus(g, g.Party[target].Name+" is already at full HP.")
+	tgt := &g.Party[target]
+	// Don't spend a restorative on a target it can't help — the shared rule
+	// (refuse only when full on every axis the item restores) lives in
+	// core.ItemHelpsTarget, used by the out-of-battle path too.
+	if !core.ItemHelpsTarget(def, *tgt) {
+		setBattleStatus(g, tgt.Name+" doesn't need that right now.")
 		return
 	}
 	// Try to consume from inventory first — bail without using the action's
@@ -232,16 +234,36 @@ func applyItem(g *core.GameState) {
 		return
 	}
 	g.Inventory = updated
-	healed := healPartyMember(g, target, def.HealAmount)
+	healed := false
+	if def.HealAmount > 0 {
+		healed = healPartyMember(g, target, def.HealAmount)
+	}
+	restoredMP := 0
+	if def.MPAmount > 0 {
+		restoredMP = core.RestoreMP(tgt, def.MPAmount)
+	}
 	actor := &g.Party[g.Battle.CurrentParty]
 	actor.AttackBump = core.BumpDuration
-	if healed && def.HealAmount > 0 {
-		setBattleMessage(g, fmt.Sprintf("%s eats %s (+%d HP).", g.Party[target].Name, def.Name, def.HealAmount))
-	} else {
-		setBattleMessage(g, fmt.Sprintf("%s uses %s.", actor.Name, def.Name))
-	}
+	setBattleMessage(g, itemUseMessage(actor.Name, tgt.Name, def, healed, def.HealAmount, restoredMP))
 	g.Battle.PendingItem = core.ItemNone
 	finishPartyAction(g)
+}
+
+// itemUseMessage formats the combat-log line for a consumed item by what it
+// actually restored: HP (food — "eats"), MP (phial — "drinks"), both, or a
+// plain "uses" for a no-restore item. hp is the nominal HealAmount (matching
+// the pre-MP behaviour); mp is the ACTUAL MP restored.
+func itemUseMessage(actorName, targetName string, def core.ItemDefinition, healed bool, hp, mp int) string {
+	switch {
+	case healed && hp > 0 && mp > 0:
+		return fmt.Sprintf("%s uses %s (+%d HP, +%d MP).", targetName, def.Name, hp, mp)
+	case healed && hp > 0:
+		return fmt.Sprintf("%s eats %s (+%d HP).", targetName, def.Name, hp)
+	case mp > 0:
+		return fmt.Sprintf("%s drinks %s (+%d MP).", targetName, def.Name, mp)
+	default:
+		return fmt.Sprintf("%s uses %s.", actorName, def.Name)
+	}
 }
 
 // performDefend marks the current member as defending and ends their turn.

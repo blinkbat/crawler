@@ -221,3 +221,26 @@ func absFloat(f float64) float64 {
 	}
 	return f
 }
+
+// TestRestoreMP_ClampsAndReportsDelta locks the Magic Phial's MP-restore
+// helper: it tops up toward MaxMP, returns the actual amount restored, and
+// no-ops on a downed member (mirroring HealMember).
+func TestRestoreMP_ClampsAndReportsDelta(t *testing.T) {
+	m := &PartyMember{MP: 2, MaxMP: 10, HP: 5, MaxHP: 5}
+	if got := RestoreMP(m, 5); got != 5 || m.MP != 7 {
+		t.Fatalf("RestoreMP(5): delta %d, MP %d; want 5, 7", got, m.MP)
+	}
+	// Over-fill clamps at MaxMP and reports only what fit.
+	if got := RestoreMP(m, 99); got != 3 || m.MP != 10 {
+		t.Fatalf("RestoreMP overfill: delta %d, MP %d; want 3, 10", got, m.MP)
+	}
+	// Already full → no-op, zero delta.
+	if got := RestoreMP(m, 5); got != 0 {
+		t.Fatalf("RestoreMP at full should restore 0, got %d", got)
+	}
+	// A downed member can't drink.
+	dead := &PartyMember{MP: 0, MaxMP: 10, HP: 0}
+	if got := RestoreMP(dead, 5); got != 0 || dead.MP != 0 {
+		t.Fatalf("downed RestoreMP should no-op, got delta %d MP %d", got, dead.MP)
+	}
+}
