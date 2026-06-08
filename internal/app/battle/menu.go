@@ -69,7 +69,7 @@ func openSkillMenu(g *core.GameState) {
 		return
 	}
 	idx := member.SkillCursor
-	if idx < 0 || idx >= core.SkillsPerClass {
+	if learned := core.PartySkills(*member); idx < 0 || idx >= len(learned) {
 		idx = 0
 	}
 	g.Battle.SkillMenuIndex = idx

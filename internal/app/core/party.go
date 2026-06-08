@@ -19,22 +19,7 @@ type PartyClassDefinition struct {
 	Name  string
 	Stats Stats
 	MaxMP int
-	// Skills is the per-class learned list. Index 0 is the class's
-	// signature skill — shown in the action menu's Skill row by
-	// default. Indices 1+ are the class's two thematic skills (e.g.
-	// Warrior: Crushing Blow / Whirlwind; Wizard: Frost Lance / Arc
-	// Bolt — see partyClassDefinitions for the per-class roster); the
-	// in-battle Tab key cycles which one the Skill row casts. Always
-	// length SkillsPerClass; init asserts the shape stays consistent.
-	Skills [SkillsPerClass]SkillID
 }
-
-// SkillsPerClass is the slot count each party class learns. Fixed at
-// 3 for now ("3 skills per char, we will refine later" per the
-// design call) — bumping this requires extending every class def's
-// Skills array and isn't a behavior the menu copes with dynamically
-// yet, so it's a const rather than a configurable.
-const SkillsPerClass = 3
 
 // PartyMemberCount is the fixed party size = number of class definitions.
 // The slice order is the seating / tie-break contract (see partyClassDefinitions),
@@ -205,14 +190,10 @@ type SkillEffect struct {
 // slice silently reshuffles party formation and tie-broken initiative; if
 // you need to add a class, append rather than insert.
 var partyClassDefinitions = []PartyClassDefinition{
-	{Class: ClassWarrior, Name: "Warrior", Stats: Stats{STR: 6, DEX: 2, INT: 1, WIS: 1, VIT: 5, SPD: 3}, MaxMP: 4,
-		Skills: [SkillsPerClass]SkillID{SkillSwipe, SkillCrushingBlow, SkillWhirlwind}},
-	{Class: ClassCleric, Name: "Cleric", Stats: Stats{STR: 2, DEX: 2, INT: 2, WIS: 6, VIT: 4, SPD: 4}, MaxMP: 9,
-		Skills: [SkillsPerClass]SkillID{SkillPrayer, SkillMassMend, SkillSmite}},
-	{Class: ClassThief, Name: "Thief", Stats: Stats{STR: 3, DEX: 6, INT: 2, WIS: 1, VIT: 4, SPD: 6}, MaxMP: 5,
-		Skills: [SkillsPerClass]SkillID{SkillSteal, SkillBackstab, SkillVenomStrike}},
-	{Class: ClassWizard, Name: "Wizard", Stats: Stats{STR: 1, DEX: 2, INT: 6, WIS: 2, VIT: 4, SPD: 4}, MaxMP: 10,
-		Skills: [SkillsPerClass]SkillID{SkillFirebolt, SkillFrostLance, SkillArcBolt}},
+	{Class: ClassWarrior, Name: "Warrior", Stats: Stats{STR: 6, DEX: 2, INT: 1, WIS: 1, VIT: 5, SPD: 3}, MaxMP: 4},
+	{Class: ClassCleric, Name: "Cleric", Stats: Stats{STR: 2, DEX: 2, INT: 2, WIS: 6, VIT: 4, SPD: 4}, MaxMP: 9},
+	{Class: ClassThief, Name: "Thief", Stats: Stats{STR: 3, DEX: 6, INT: 2, WIS: 1, VIT: 4, SPD: 6}, MaxMP: 5},
+	{Class: ClassWizard, Name: "Wizard", Stats: Stats{STR: 1, DEX: 2, INT: 6, WIS: 2, VIT: 4, SPD: 4}, MaxMP: 10},
 }
 
 // partyClassByID is the O(1) lookup for partyClassDefinitions. Built once
@@ -355,34 +336,32 @@ func partyClassInfo(class PartyClass) (PartyClassDefinition, bool) {
 }
 
 // PartySkill returns the skill the action menu's Skill row currently
-// casts for this member. With multiple skills per class (SkillsPerClass)
-// the result depends on member.SkillCursor; the in-battle Tab key
-// cycles that index. Out-of-range cursors clamp to 0 so a corrupted
-// save can't crash the action menu.
+// casts for this member: the entry at member.SkillCursor within the
+// member's LEARNED skills (see LearnedSkills / PartySkills). The
+// in-battle Tab key cycles that index. Out-of-range cursors — a
+// corrupted save, or a skill un-learned since the cursor was last set —
+// clamp to 0; a member who has learned nothing yet returns SkillNone.
 func PartySkill(member PartyMember) SkillID {
-	def, ok := partyClassInfo(member.Class)
-	if !ok {
+	skills := PartySkills(member)
+	if len(skills) == 0 {
 		return SkillNone
 	}
 	idx := member.SkillCursor
-	if idx < 0 || idx >= len(def.Skills) {
+	if idx < 0 || idx >= len(skills) {
 		idx = 0
 	}
-	return def.Skills[idx]
+	return skills[idx]
 }
 
-// PartySkills returns the full learned skill array for a member.
-// Used by the panels overlay's Skills tab, the battle skill submenu,
-// and the cycle logic. Returns the fixed-size array (not a slice) so
-// per-frame callers don't allocate — previously this minted a fresh
-// slice every frame. Callers iterate with `for i, s := range arr`.
-// Unknown class returns a zero array; range yields SkillsPerClass
-// SkillNone values which callers already filter.
-func PartySkills(member PartyMember) [SkillsPerClass]SkillID {
-	if def, ok := partyClassInfo(member.Class); ok {
-		return def.Skills
-	}
-	return [SkillsPerClass]SkillID{}
+// PartySkills returns the member's learned castable skills — the set
+// they have invested at least one rank into through the skill trees, in
+// a stable tree/node order (see LearnedSkills). Used by the panels
+// overlay's Skills tab, the battle skill submenu, and the cycle logic.
+// A member who has learned nothing yet returns an empty slice; every
+// caller already handles len == 0. Replaces the old fixed class loadout:
+// progression now flows entirely through the Tome's tree purchases.
+func PartySkills(member PartyMember) []SkillID {
+	return LearnedSkills(&member)
 }
 
 func skillInfo(skill SkillID) (skillDefinition, bool) {

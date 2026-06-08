@@ -1,26 +1,19 @@
 package core
 
-// ⚠ CURRENTLY INERT — pending the skill-effect rewire. This per-skill tier
-// ladder predates the Diablo-2-style skill trees in skilltrees.go, which are
-// now the player-facing progression UI (spending into PartyMember.TreeRanks).
-// NOTHING writes PartyMember.SkillTiers in gameplay anymore — the old buy
-// path (SpendSkillTier ← buySkillTier) was removed when the Skills tab became
-// the tree modal — so EffectiveSkillEffect / SkillDamageFor / SkillHealFor /
-// SkillTierMod (still called from battle/actions.go) always resolve to the
-// BASE effect. The machinery is kept as the seam the effect-wiring pass will
-// reuse: when tree nodes start granting combat effects, route them through
-// here (or replace this with a TreeRanks-driven equivalent). Until then,
-// treat the "tier" reads as base-only and don't assume SkillTiers is ever
-// non-empty outside tests.
+// Per-skill upgrade ladder + helpers that fold the tier modifiers into the
+// SkillEffect the battle code applies. Each player-castable skill has
+// MaxSkillTier possible upgrade slots. This is now LIVE: the Diablo-2-style
+// skill trees in skilltrees.go drive it — BuySkillNode writes
+// PartyMember.SkillTiers as the player ranks up a granting node (rank 1 =
+// tier 0 / base, each further rank = the next tier), and EffectiveSkillEffect
+// / SkillDamageFor / SkillHealFor / SkillTierMod (called from
+// battle/actions.go) fold the purchased deltas into every cast. Points are
+// spent only through the tree modal (BuySkillNode) — there is no separate
+// per-skill buyer.
 //
-// Skill tree: per-skill upgrade ladder + helpers that fold the tier
-// modifiers into the SkillEffect the battle code applies. Each player-
-// castable skill has MaxSkillTier possible upgrade slots. The legacy
-// SpendSkillTier buyer is currently inert gameplay plumbing; active player
-// progression spends points through BuySkillNode in the tree modal. The base
-// skill (tier 0) is always available the moment the class learns it; tiers
-// 1..MaxSkillTier stack additive deltas onto the base effect when this seam is
-// wired back to live tree purchases.
+// The base skill (tier 0) is available the moment a tree node learns it;
+// tiers 1..MaxSkillTier stack additive deltas onto the base effect as the
+// node's rank climbs.
 //
 // Design contract: each tier is ONE numeric/bool delta applied to a
 // SkillEffect field that already exists (Damage, BurnChance, etc.) or
@@ -217,70 +210,6 @@ func skillTierUpgradeFor(s SkillID, tier int) (SkillTierUpgrade, bool) {
 		return SkillTierUpgrade{}, false
 	}
 	return rows[tier-1], true
-}
-
-// SkillNextTierUpgrade returns the next purchasable upgrade for skill
-// `s` on member `m` — the tier one above whatever the member has
-// already bought — plus an ok flag that is false when the tree is
-// already maxed. The Skills panel's tree UI reads it to label the
-// "next purchase" affordance (its Label / Description / Cost) and to
-// decide whether a row renders as buyable, too-expensive, or maxed.
-func SkillNextTierUpgrade(m *PartyMember, s SkillID) (SkillTierUpgrade, bool) {
-	current := SkillTierOf(m, s)
-	if current >= MaxSkillTier {
-		return SkillTierUpgrade{}, false
-	}
-	return skillTierUpgradeFor(s, current+1)
-}
-
-// SkillNextTierCost returns the SkillPoint cost for the next
-// purchasable tier of `s` on member `m`, plus an ok flag (false when
-// the tree is already maxed). Thin cost-only wrapper over
-// SkillNextTierUpgrade for callers that only need the price.
-func SkillNextTierCost(m *PartyMember, s SkillID) (int, bool) {
-	up, ok := SkillNextTierUpgrade(m, s)
-	if !ok {
-		return 0, false
-	}
-	return up.Cost, true
-}
-
-// SpendSkillTier purchases the next tier of `s` on member `m`. It is an inert
-// compatibility seam for the older per-skill tier ladder; live gameplay spends
-// skill points through BuySkillNode from the tree modal. Returns
-// false (and changes nothing) when:
-//   - the skill is already at MaxSkillTier
-//   - the member doesn't have enough SkillPoints
-//   - the skill doesn't have a tier ladder (defensive — should never
-//     fire today thanks to the init guard)
-//
-// On success the SkillTiers map is allocated lazily, SkillPoints
-// decremented by the upgrade's Cost, and the new tier recorded.
-//
-// When this seam is wired back to live progression, combat reads through
-// EffectiveSkillEffect / SkillTierMod will pick the purchased tiers up on the
-// next cast.
-func SpendSkillTier(m *PartyMember, s SkillID) bool {
-	if m == nil {
-		return false
-	}
-	current := SkillTierOf(m, s)
-	if current >= MaxSkillTier {
-		return false
-	}
-	up, ok := skillTierUpgradeFor(s, current+1)
-	if !ok {
-		return false
-	}
-	if m.SkillPoints < up.Cost {
-		return false
-	}
-	if m.SkillTiers == nil {
-		m.SkillTiers = make(map[SkillID]int, 4)
-	}
-	m.SkillTiers[s] = current + 1
-	m.SkillPoints -= up.Cost
-	return true
 }
 
 // EffectiveSkillEffect returns the base SkillEffect for `s` with

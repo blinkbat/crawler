@@ -755,16 +755,17 @@ type PartyMember struct {
 	// TreeRanks tracks ranks invested per Diablo-2-style skill-tree node
 	// (see core/skilltrees.go), keyed by node ID. nil-safe: an
 	// un-invested node reads 0 via TreeNodeRank. Spent from SkillPoints
-	// in the Skills-tab tree modal. UI-only for now — ranks fill pips and
-	// gate prerequisites but don't yet alter combat (the "skill impl"
-	// pass wires effects to these ranks later). Serializes with the rest
-	// of PartyMember in the save file; old saves load it as nil.
+	// in the Skills-tab tree modal. Ranks DO drive combat: a node's first
+	// rank learns its GrantSkill (LearnedSkills → the battle Skill menu)
+	// and each further rank advances SkillTiers so EffectiveSkillEffect
+	// applies the upgrade. Serializes with the rest of PartyMember in the
+	// save file; old saves load it as nil.
 	TreeRanks map[string]int
-	// SkillCursor is the index into the class's Skills array that the
-	// action menu's "Skill" row casts. In-battle Tab cycles it; the
-	// renderer reads it via PartySkill so the row label matches what
-	// Enter will actually fire. 0 = signature skill (default); 1+ =
-	// the class's two thematic skills (see PartyClassDefinition.Skills).
+	// SkillCursor is the index into the member's LEARNED skills (see
+	// LearnedSkills / PartySkills) that the action menu's "Skill" row
+	// casts. In-battle Tab cycles it; the renderer reads it via PartySkill
+	// so the row label matches what Enter will actually fire. Clamps to 0
+	// when out of range (e.g. a skill un-learned since it was last set).
 	SkillCursor int
 }
 
@@ -1052,9 +1053,9 @@ type Battle struct {
 	ItemMenuIndex int
 	// SkillMenuIndex is the cursor inside the Skill submenu (opens
 	// when the player picks the "Skill" action row). Indexes into the
-	// current member's PartyClassDefinition.Skills. Persisted on the
-	// member as SkillCursor on confirm so the next turn's submenu
-	// opens on whichever skill they last picked.
+	// current member's learned skills (LearnedSkills / PartySkills).
+	// Persisted on the member as SkillCursor on confirm so the next
+	// turn's submenu opens on whichever skill they last picked.
 	SkillMenuIndex int
 }
 

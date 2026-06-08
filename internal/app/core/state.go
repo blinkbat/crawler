@@ -235,6 +235,12 @@ func NewParty() []PartyMember {
 			// banked and no pending point-allocations. XPForLevel(1)
 			// is the threshold to reach level 2.
 			Level: BaseLevel,
+			// One starting SkillPoint, no skills learned: every member
+			// begins UNLEARNED and the player spends this first point in
+			// the Tome to choose their opening skill (true first choice).
+			// LearnedSkills is empty until that purchase, so the battle
+			// Skill menu reads "(no skills)" until they invest.
+			SkillPoints: 1,
 		})
 	}
 	return party

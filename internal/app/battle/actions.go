@@ -52,31 +52,15 @@ var skillActionHandlers = map[core.SkillID]actionHandlers{
 	core.SkillArcBolt:      {setup: setupArcBolt, apply: applyArcBolt},
 }
 
-// init asserts the two halves of the player-castable contract stay in
-// sync: every party class's Skill must be PlayerCastable AND have an
-// entry in skillActionHandlers, and every PlayerCastable skill in the
-// registry must have a handler. Without this, a future class that
-// pointed at an enemy-only skill (or a registry author who forgot to
-// register a handler) would only surface at playtest as "No skill
-// ready." — a vague runtime error far from the cause.
+// init asserts the player-castable contract: every PlayerCastable skill
+// in the registry must have an entry in skillActionHandlers. Skill
+// progression now flows through the skill trees (core.LearnedSkills),
+// and core asserts every tree node's GrantSkill is PlayerCastable — so
+// "every granted skill resolves to a handler" follows transitively from
+// this single loop. Without it, a registry author who forgot to register
+// a handler would only surface at playtest as "No skill ready." — a
+// vague runtime error far from the cause.
 func init() {
-	for _, def := range core.PartyClasses() {
-		// Each class learns SkillsPerClass skills; every slot must be
-		// player-castable AND have a handler. Looping the array means
-		// adding a new universal skill (or per-class slot) only needs
-		// the registry rows — this assert picks it up automatically.
-		for _, s := range def.Skills {
-			if s == core.SkillNone {
-				continue
-			}
-			if !core.SkillPlayerCastable(s) {
-				panic("battle: class " + def.Name + " skill " + core.SkillName(s) + " is not PlayerCastable — flip the flag in core/party.go skillDefinitions")
-			}
-			if _, ok := skillActionHandlers[s]; !ok {
-				panic("battle: class " + def.Name + " skill " + core.SkillName(s) + " has no skillActionHandlers entry — register a setup/apply pair")
-			}
-		}
-	}
 	for _, s := range core.PlayerCastableSkills() {
 		if _, ok := skillActionHandlers[s]; !ok {
 			panic("battle: PlayerCastable skill " + core.SkillName(s) + " has no skillActionHandlers entry")

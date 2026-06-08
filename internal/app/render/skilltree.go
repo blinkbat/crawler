@@ -11,8 +11,9 @@ import (
 // tab (Confirm on a party member). It paints the member's three trees as
 // side-by-side columns of stacked nodes with connector lines, rank pips,
 // and lock / available / maxed states, plus a detail strip describing the
-// focused node. UI-only — investing fills pips and spends SkillPoints but
-// grants no combat effect yet (see core/skilltrees.go).
+// focused node. Investing a node's first rank LEARNS its skill (it appears
+// in the battle Skill menu) and further ranks upgrade it through the
+// SkillTiers ladder (see core.BuySkillNode / core.LearnedSkills).
 
 // Tree-column geometry: narrow columns with generous spacing between them.
 // The card is sized to fit exactly these (smaller than a screen fraction),

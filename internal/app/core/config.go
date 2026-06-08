@@ -619,10 +619,12 @@ const (
 	SkillPrayer
 	SkillSteal
 	SkillFirebolt
-	// Class-thematic skills. Each class learns its signature (above)
-	// plus two unique entries here; in-battle Tab cycles SkillCursor
-	// across all three. See skillDefinitions for handler-shaping
-	// notes and skillActionHandlers for the setup/apply registrations.
+	// The rest of the player-castable skills, grouped by class. There is
+	// no fixed per-class loadout: a member learns skills by ranking up
+	// tree nodes (GrantSkill in core/skilltrees.go) and the battle Skill
+	// menu cycles whatever they've learned. See skillDefinitions for
+	// handler-shaping notes and skillActionHandlers for the setup/apply
+	// registrations.
 	//
 	// Warrior: Crushing Blow (charge phys, stun proc), Whirlwind
 	// (charge AoE phys).

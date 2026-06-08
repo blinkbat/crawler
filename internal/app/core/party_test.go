@@ -152,17 +152,30 @@ func TestSkillTargetMode_MatchesRegistry(t *testing.T) {
 	}
 }
 
-func TestPartySkill_MatchesClass(t *testing.T) {
-	cases := map[PartyClass]SkillID{
-		ClassWarrior: SkillSwipe,
-		ClassCleric:  SkillPrayer,
-		ClassThief:   SkillSteal,
-		ClassWizard:  SkillFirebolt,
+func TestPartySkill_UnlearnedThenLearned(t *testing.T) {
+	// New model: every member starts UNLEARNED — PartySkill returns
+	// SkillNone until a granting node is bought, then resolves to the
+	// learned skill at SkillCursor. (root node id → skill it grants.)
+	cases := map[PartyClass]struct {
+		node string
+		want SkillID
+	}{
+		ClassWarrior: {"shield-bash", SkillCrushingBlow},
+		ClassCleric:  {"smite", SkillSmite},
+		ClassThief:   {"steal", SkillSteal},
+		ClassWizard:  {"firebolt", SkillFirebolt},
 	}
-	for class, want := range cases {
-		got := PartySkill(PartyMember{Class: class})
-		if got != want {
-			t.Errorf("PartySkill(class=%v) = %v, want %v", class, got, want)
+	for class, c := range cases {
+		m := PartyMember{Class: class}
+		if got := PartySkill(m); got != SkillNone {
+			t.Errorf("PartySkill(unlearned %v) = %v, want SkillNone", class, got)
+		}
+		m.SkillPoints = 1
+		if !BuySkillNode(&m, c.node) {
+			t.Fatalf("BuySkillNode(%v, %q) failed", class, c.node)
+		}
+		if got := PartySkill(m); got != c.want {
+			t.Errorf("PartySkill(learned %v) = %v, want %v", class, got, c.want)
 		}
 	}
 }
