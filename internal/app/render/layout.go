@@ -229,3 +229,23 @@ const modalFooterTextOffset = float32(22)
 func drawModalFooter(font rl.Font, card rl.Rectangle, text string) {
 	DrawFooterHint(font, text, card.X+card.Width/2, card.Y+card.Height-modalFooterTextOffset, FontTiny)
 }
+
+// pickerFooterTextOffset is the gap from a sub-modal picker card's bottom
+// edge up to its LEFT-aligned footer-hint baseline. Distinct from
+// modalFooterTextOffset (22) because the picker hints render at FontSmall
+// (taller than the centered footer's FontTiny), so they sit a few pixels
+// higher to keep the larger glyphs clear of the card's bottom edge — the
+// difference is the font size, not drift, hence its own named token.
+// Replaces the bare `-26` the four picker sub-modals each open-coded.
+const pickerFooterTextOffset = float32(26)
+
+// drawModalFooterLeft paints a LEFT-aligned footer hint at the bottom of a
+// sub-modal card — the mirror of the centered drawModalFooter. The four
+// picker sub-modals (equip / use-target / heal / skill-tree) each drew
+// their hint at `card.Y+card.Height-26` with a manual drawTextWithShadow;
+// this routes that through one seam (FINDING #13) so the left inset
+// (matching the title's card.X+24-ish gutter is passed by the caller) and
+// the bottom offset live in one place. `x` is the hint's left edge.
+func drawModalFooterLeft(font rl.Font, card rl.Rectangle, x float32, text string) {
+	drawTextWithShadow(font, text, x, card.Y+card.Height-pickerFooterTextOffset, FontSmall, textHint)
+}

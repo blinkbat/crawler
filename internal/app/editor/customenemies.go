@@ -15,8 +15,13 @@ import (
 type customEnemyLayout struct {
 	card     rl.Rectangle
 	listArea rl.Rectangle
-	listRows []rl.Rectangle
-	addBtn   rl.Rectangle
+	// listTop is the Y of the first visible row; listTopRow..listEnd is the
+	// scroll window (via scrollWindow) so a long custom-enemy list no longer
+	// overflows the card. Row rects are computed on demand by listRowRect.
+	listTop    float32
+	listTopRow int
+	listEnd    int
+	addBtn     rl.Rectangle
 
 	nameField rl.Rectangle
 	baseLabel rl.Rectangle
@@ -112,10 +117,15 @@ func customEnemyModalLayout(s *State) customEnemyLayout {
 	listY := card.Y + 56
 	listH := card.Height - 56 - 56 // leave footer for Delete/Close
 	l.listArea = rl.NewRectangle(listX, listY, customListWidth, listH)
-	l.listRows = make([]rl.Rectangle, len(s.area.CustomEnemies))
-	for i := range s.area.CustomEnemies {
-		l.listRows[i] = rl.NewRectangle(listX, listY+float32(i)*customRowHeight, customListWidth, customRowHeight-2)
+	l.listTop = listY
+	// Reserve the bottom strip for "+ Add new"; the rows above it scroll so a
+	// long list can't run off the card. The window follows the selected entry.
+	rowsAreaH := listH - 36
+	maxRows := int(rowsAreaH / customRowHeight)
+	if maxRows < 1 {
+		maxRows = 1
 	}
+	l.listTopRow, l.listEnd = scrollWindow(s.modalCustomIdx, len(s.area.CustomEnemies), maxRows)
 	l.addBtn = rl.NewRectangle(listX, listY+listH-30, customListWidth, 26)
 
 	// Right column: form. Anchored to the right of the list.
@@ -133,12 +143,13 @@ func customEnemyModalLayout(s *State) customEnemyLayout {
 	l.statRows = make([]customStatRow, len(customStatSpecs))
 	for i, spec := range customStatSpecs {
 		rowY := formY + float32(i)*36
+		value, minus, plus := stepperRow(formX+82, rowY, 76, 4)
 		l.statRows[i] = customStatRow{
 			id:    spec.id,
 			label: spec.label,
-			rect:  rl.NewRectangle(formX+82, rowY, 76, 30),
-			minus: rl.NewRectangle(formX+162, rowY, 30, 30),
-			plus:  rl.NewRectangle(formX+196, rowY, 30, 30),
+			rect:  value,
+			minus: minus,
+			plus:  plus,
 		}
 	}
 	formY += float32(len(customStatSpecs)) * 36
@@ -180,6 +191,12 @@ func customEnemyModalLayout(s *State) customEnemyLayout {
 	l.deleteBtn = rl.NewRectangle(card.X+modalContentInset, btnY, modalWideBtnW, modalBtnH)
 	l.closeBtn = rl.NewRectangle(card.X+card.Width-closeW-modalContentInset, btnY, closeW, modalBtnH)
 	return l
+}
+
+// listRowRect returns the on-screen rect for absolute list index i. Only
+// meaningful for i in [listTopRow, listEnd) — the visible scroll window.
+func (l customEnemyLayout) listRowRect(i int) rl.Rectangle {
+	return rl.NewRectangle(l.listArea.X, l.listTop+float32(i-l.listTopRow)*customRowHeight, customListWidth, customRowHeight-2)
 }
 
 // activeCustomEnemy returns a pointer to the selected entry or nil
@@ -302,22 +319,33 @@ func drawCustomEnemiesModal(s *State, font rl.Font, theme render.Theme) {
 
 	mp := rl.GetMousePosition()
 
-	// Left list.
+	// Left list. Only the [listTopRow, listEnd) window is painted; the
+	// selected row uses the shared gilt DrawSelectedRow treatment (matching
+	// the sound modal's saved-list) instead of a bespoke bgActive fill.
 	rl.DrawRectangleRec(l.listArea, bgFieldInset)
 	rl.DrawRectangleLinesEx(l.listArea, 1, editorBorderInactive)
-	for i, r := range l.listRows {
-		bg := bgEntry
+	for i := l.listTopRow; i < l.listEnd; i++ {
+		r := l.listRowRect(i)
 		if i == s.modalCustomIdx {
-			bg = bgActive
-		} else if pointIn(mp, r) {
-			bg = bgRowHover
+			render.DrawSelectedRow(r)
+		} else {
+			bg := bgEntry
+			if pointIn(mp, r) {
+				bg = bgRowHover
+			}
+			rl.DrawRectangleRec(r, bg)
 		}
-		rl.DrawRectangleRec(r, bg)
 		name := s.area.CustomEnemies[i].Name
 		if name == "" {
 			name = "(unnamed)"
 		}
-		rl.DrawTextEx(font, name, rl.NewVector2(r.X+8, r.Y+(r.Height-14)/2), editorFontLabel, 1, textEntry)
+		rl.DrawTextEx(font, name, rl.NewVector2(r.X+8, r.Y+(r.Height-editorFontLabel)/2), editorFontLabel, 1, textEntry)
+	}
+	if l.listTopRow > 0 {
+		rl.DrawTextEx(font, "▲ more", rl.NewVector2(l.listArea.X+8, l.listArea.Y-14), editorFontTiny, 1, theme.TextHint)
+	}
+	if l.listEnd < len(s.area.CustomEnemies) {
+		rl.DrawTextEx(font, "▼ more", rl.NewVector2(l.listArea.X+8, l.addBtn.Y-16), editorFontTiny, 1, theme.TextHint)
 	}
 	drawButton(font, l.addBtn, "+ Add new", false)
 
@@ -344,8 +372,8 @@ func drawCustomEnemiesModal(s *State, font rl.Font, theme render.Theme) {
 	drawButton(font, l.basePrev, "<", false)
 	rl.DrawRectangleRec(rl.NewRectangle(l.basePrev.X+l.basePrev.Width+4, l.basePrev.Y, l.baseNext.X-l.basePrev.X-l.basePrev.Width-8, l.basePrev.Height), bgFieldInset)
 	rl.DrawTextEx(font, baseName,
-		rl.NewVector2(l.basePrev.X+l.basePrev.Width+12, l.basePrev.Y+(l.basePrev.Height-14)/2),
-		14, 1, textEntry)
+		rl.NewVector2(l.basePrev.X+l.basePrev.Width+12, l.basePrev.Y+(l.basePrev.Height-editorFontLabel)/2),
+		editorFontLabel, 1, textEntry)
 	drawButton(font, l.baseNext, ">", false)
 
 	// Stat rows.
@@ -385,8 +413,8 @@ func drawCustomEnemiesModal(s *State, font rl.Font, theme render.Theme) {
 			mark = "[x]"
 		}
 		rl.DrawTextEx(font, mark+" "+core.SkillName(sid),
-			rl.NewVector2(row.X+8, row.Y+(row.Height-13)/2),
-			13, 1, textEntry)
+			rl.NewVector2(row.X+8, row.Y+(row.Height-editorFontAccent)/2),
+			editorFontAccent, 1, textEntry)
 	}
 
 	// Keyboard-cursor highlight on the focused form row (hidden while the
@@ -557,9 +585,9 @@ func updateCustomEnemiesModal(s *State) Action {
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 		mp := rl.GetMousePosition()
 		l := customEnemyModalLayout(s)
-		// List clicks.
-		for i, r := range l.listRows {
-			if pointIn(mp, r) {
+		// List clicks (visible window only).
+		for i := l.listTopRow; i < l.listEnd; i++ {
+			if pointIn(mp, l.listRowRect(i)) {
 				s.modalCustomIdx = i
 				s.focus = focusNone
 				return ActionNone

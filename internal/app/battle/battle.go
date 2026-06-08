@@ -540,7 +540,6 @@ func isActorAlive(g *core.GameState, actor core.ActorRef) bool {
 }
 
 // finishActorTurn is the single hand-off used by every action's apply* path.
-// Replaces the old finishPartyAction (party→party / party→enemy phase flip).
 // Checks win/lose, fixes up EnemyIndex if the target died, advances the
 // queue cursor, and starts the next actor's turn.
 //

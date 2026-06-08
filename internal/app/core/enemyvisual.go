@@ -62,6 +62,14 @@ func EnemySlug(kind EnemyKind) string {
 // slugify lowercases s and collapses every run of non-alphanumeric characters
 // into a single underscore, trimming leading/trailing underscores. Stable for
 // a given input so it's safe as a persisted key.
+//
+// On-disk contract: the enemy-visual / sprite-asset KEY (visuals.json key +
+// <slug>.png basename). Alphanumeric + single underscore only; punctuation
+// and apostrophes vanish ("Will-o'-Wisp" -> "will_o_wisp"). Intentionally NOT
+// the same as SanitizeFilename (areas.go — keeps hyphens, strips other
+// punctuation, has a fallback) or SanitizeCustomEnemyName (customenemy.go —
+// preserves case + punctuation, only folds whitespace to underscore). Don't
+// swap one for another; each owns a different on-disk format.
 func slugify(s string) string {
 	var b strings.Builder
 	prevUnderscore := false

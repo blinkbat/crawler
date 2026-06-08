@@ -714,6 +714,13 @@ func EnemyKindFromName(s string) (EnemyKind, bool) {
 // otherwise the empty string comes back so the caller can refuse the
 // save. Shared by the editor's map-save flow and audio's user-sound
 // save so both apply the same character-class contract.
+//
+// On-disk contract: a user-facing FILENAME stem (.map / .wav). KEEPS hyphens
+// (so "cave-1" stays "cave-1") and offers a fallback when nothing usable
+// remains. Intentionally NOT the same as slugify (enemyvisual.go — folds
+// hyphens into underscores, no fallback) or SanitizeCustomEnemyName
+// (customenemy.go — preserves case + punctuation, only collapses whitespace).
+// Don't substitute one for another; each owns a distinct on-disk format.
 func SanitizeFilename(name, fallback string) string {
 	out := strings.ToLower(strings.TrimSpace(name))
 	out = strings.ReplaceAll(out, " ", "_")

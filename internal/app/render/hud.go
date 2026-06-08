@@ -1,8 +1,6 @@
 package render
 
 import (
-	"fmt"
-
 	"crawler/internal/app/core"
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -64,7 +62,7 @@ func drawGoldReadout(g core.GameState, assets Resources) {
 	font := assets.hudFont
 	if g.Gold != goldReadout.last {
 		goldReadout.last = g.Gold
-		goldReadout.str = fmt.Sprintf("%d G", g.Gold)
+		goldReadout.str = goldLabelShort(g.Gold)
 	}
 	label := goldReadout.str
 	m := goldReadoutMeasureCache.measure(font, label, FontBody, FontSpacingBody)

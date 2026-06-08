@@ -103,8 +103,7 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 		} else {
 			preview = strconv.Itoa(cur)
 		}
-		rm := rl.MeasureTextEx(font, preview, FontHeading, 1)
-		drawTextWithShadow(font, preview, float32(rowX)+float32(rowW)-rm.X-12, float32(rowY+6), FontHeading, previewCol)
+		drawTextRightAligned(font, preview, float32(rowX)+float32(rowW)-12, float32(rowY+6), FontHeading, previewCol)
 		rowY += rowH
 	}
 

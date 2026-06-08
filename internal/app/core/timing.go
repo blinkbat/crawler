@@ -62,6 +62,22 @@ const (
 	SeqDirCount = 4
 )
 
+func init() {
+	// SeqDir* (above) and the cardinal facings North/East/South/West
+	// (config.go) are intentionally the SAME clockwise order with the same
+	// int values, so directional code can read either set interchangeably.
+	// Nothing else pins them together, so assert the parity here — the same
+	// MinigamePress==TimingKindPress style guard above — so a reorder or an
+	// inserted value in one without the other fails loudly at startup.
+	if int(SeqDirCount) != int(FacingCount) ||
+		int(SeqDirUp) != int(North) ||
+		int(SeqDirRight) != int(East) ||
+		int(SeqDirDown) != int(South) ||
+		int(SeqDirLeft) != int(West) {
+		panic("core: SeqDir* and cardinal facing enums have drifted out of lockstep")
+	}
+}
+
 // Per-slot result for the sequence minigame. SequenceResults is a slice
 // parallel to SequenceTargets — one entry per arrow.
 const (

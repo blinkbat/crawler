@@ -10,13 +10,15 @@ import (
 // The map editor runs its OWN smaller scale rather than the render.Font*
 // tokens (whose FontSmall is already 16 and FontBody 20 — too large for
 // this chrome, and large enough to overflow the editor's tight buttons).
-// (Modal-specific 11/13 accent sizes still live at their narrow call sites;
-// sounds.go keeps its own soundFont* trio for the sound modal.)
+// editorFontAccent/Tiny cover the dense list-row and sub-hint sizes;
+// sounds.go keeps its own soundFont* trio for the sound modal.
 const (
 	editorFontTopbar = float32(18) // topbar map-id label
 	editorFontBody   = float32(16) // buttons + primary panel text
 	editorFontLabel  = float32(14) // topbar info line / field labels
+	editorFontAccent = float32(13) // dense list rows / palette hints
 	editorFontHint   = float32(12) // compact modal/footer hints
+	editorFontTiny   = float32(11) // sub-hint captions
 	editorFontTick   = float32(10) // grid axis tick labels
 )
 
@@ -64,6 +66,14 @@ var (
 	swatchEdge    = rl.NewColor(0, 0, 0, 200)
 	gridLineCol   = rl.NewColor(0, 0, 0, 80)
 	gridLineMajor = rl.NewColor(0, 0, 0, 160)
+	// glyphShadow is the dark drop-shadow behind canvas tile-glyphs and
+	// elevation digits — outlineHard at 200 alpha (was an inline
+	// rl.NewColor(8,10,14,200) at the char-overlay and elevation-slice draws).
+	glyphShadow = withAlpha(outlineHard, 200)
+	// selectionOutline is the white ring around the brush-ghost,
+	// rectangle-drag, and pack-drag previews on the canvas (was a 200/220
+	// alpha split across the three sites that read as unintentional).
+	selectionOutline = rl.NewColor(255, 255, 255, 220)
 	// entityMarkerOutline is the dark ring drawn around pack / chest /
 	// start markers on the editor canvas. Aliases render.MarkerOutline
 	// so the editor canvas and the minimap can never drift on the

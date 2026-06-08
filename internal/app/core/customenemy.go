@@ -163,6 +163,18 @@ func MapCustomEnemyFromDef(ce CustomEnemyDef) (mapfile.MapCustomEnemy, error) {
 
 // Definition synthesizes the effective EnemyDefinition used by battle and
 // selectors for a custom enemy.
+//
+// LOCKSTEP SITES — a new authored custom-enemy field must be added in all of:
+//  1. the CustomEnemyDef struct (above),
+//  2. the mapfile.MapCustomEnemy struct (mapfile/mapfile.go) + its encode
+//     format/field-count,
+//  3. MapCustomEnemyFromDef (def -> mapfile row),
+//  4. CustomEnemyDefFromMap (mapfile row -> def),
+//  5. this Definition() (def -> runtime EnemyDefinition), and
+//  6. Instantiate() if the field affects the materialized Enemy.
+//
+// The encode<->decode pair (3 & 4) is guarded by
+// TestCustomEnemyDefMapRoundTrip, so a dropped field there fails loudly.
 func (d CustomEnemyDef) Definition() EnemyDefinition {
 	base := EnemyInfo(d.BaseKind)
 	display := strings.ReplaceAll(strings.TrimSpace(d.Name), "_", " ")
@@ -317,6 +329,14 @@ func PackSpawnLeaderKind(a AreaDefinition, sp PackSpawn) EnemyKind {
 
 // SanitizeCustomEnemyName collapses whitespace into underscores and trims
 // edges so mapfile rows remain field-splittable.
+//
+// On-disk contract: a custom-enemy NAME token inside a whitespace-delimited
+// .map row. PRESERVES case and punctuation — it only folds runs of
+// whitespace to a single underscore (the loader's strings.Fields split is
+// the only thing it must survive). Intentionally NOT the same as slugify
+// (enemyvisual.go — lowercases + strips punctuation) or SanitizeFilename
+// (areas.go — lowercases, restricts to [a-z0-9_-]). Don't swap one for
+// another; each owns a different on-disk format.
 func SanitizeCustomEnemyName(name string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(name)), "_")
 }

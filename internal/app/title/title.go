@@ -213,6 +213,10 @@ func Draw(s State, assets render.Resources) {
 		drawMainMenu(s, font, theme, screenH)
 	case modeMapPicker:
 		drawMapPicker(s, font, theme, screenH)
+	default:
+		// Mirrors Update's (and run.go's) unhandled-mode panic — a new title
+		// mode added to Update but missed here would render a blank screen.
+		panic("title: unhandled mode in Draw")
 	}
 
 	if s.loadError != "" {
@@ -222,7 +226,9 @@ func Draw(s State, assets render.Resources) {
 
 func drawMainMenu(s State, font rl.Font, theme render.Theme, screenH int32) {
 	drawList(mainMenuLabels(s.hasSave), s.cursor, font, theme, screenH, "")
-	drawHint(font, "Up/Down navigate   Enter select   Esc/Q quit", screenH)
+	// Device-neutral verbs (per AGENTS.md's controller-first hint contract) —
+	// this is the first surface shown, so it must not assume a keyboard.
+	drawHint(font, "Navigate     Select     Quit", screenH)
 }
 
 func drawMapPicker(s State, font rl.Font, theme render.Theme, screenH int32) {

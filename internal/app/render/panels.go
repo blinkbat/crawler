@@ -155,9 +155,7 @@ func DrawPanelsOverlay(g core.GameState, assets Resources) {
 		areaName = "Unknown"
 	}
 	drawTextWithShadow(font, areaName, float32(cardX+24), float32(infoY), FontSmall, textPrimary)
-	goldStr := fmt.Sprintf("Gold: %d", g.Gold)
-	gm := rl.MeasureTextEx(font, goldStr, FontSmall, 1)
-	drawTextWithShadow(font, goldStr, float32(cardX+cardW-24)-gm.X, float32(infoY), FontSmall, borderActive)
+	drawTextRightAligned(font, goldLabelFull(g.Gold), float32(cardX+cardW-24), float32(infoY), FontSmall, borderActive)
 
 	bodyY := infoY + panelsInfoStripH + 6
 	bodyRect := rl.NewRectangle(float32(cardX+22), float32(bodyY),
@@ -364,8 +362,7 @@ func drawPanelsStats(g core.GameState, assets Resources, body rl.Rectangle) {
 			drawTextWithShadow(font, label, cellX+24, cellY, FontBody, textMuted)
 			// Value right-aligned within the cell so the column
 			// of numbers lines up no matter the label width.
-			vm := measurePanelStatValue(font, value, FontBody)
-			drawTextWithShadow(font, value, cellX+statColW-vm.X-14, cellY, FontBody, textPrimary)
+			drawTextRightAligned(font, value, cellX+statColW-14, cellY, FontBody, textPrimary)
 		}
 		contentY += float32(statRows) * rowH
 
@@ -374,14 +371,12 @@ func drawPanelsStats(g core.GameState, assets Resources, body rl.Rectangle) {
 		contentY += 8
 		drawTextWithShadow(font, "ARM", innerX, contentY, FontSmall, textMuted)
 		armVal := strconv.Itoa(m.Armor)
-		am := measurePanelStatValue(font, armVal, FontSmall)
-		drawTextWithShadow(font, armVal, innerX+statColW-am.X-14, contentY, FontSmall, textPrimary)
+		drawTextRightAligned(font, armVal, innerX+statColW-14, contentY, FontSmall, textPrimary)
 
 		nextXP := core.XPForLevel(m.Level)
 		xpText := strconv.Itoa(m.XP) + " / " + strconv.Itoa(nextXP)
 		drawTextWithShadow(font, "XP", innerX+statColW, contentY, FontSmall, textMuted)
-		xm := measurePanelStatValue(font, xpText, FontSmall)
-		drawTextWithShadow(font, xpText, innerX+innerW-xm.X, contentY, FontSmall, textPrimary)
+		drawTextRightAligned(font, xpText, innerX+innerW, contentY, FontSmall, textPrimary)
 		contentY += 28
 
 		// Status chip — bright pill in the per-status accent
@@ -393,9 +388,11 @@ func drawPanelsStats(g core.GameState, assets Resources, body rl.Rectangle) {
 			chipH := float32(26)
 			chipX := innerX
 			col, _ := partyStatusVisual(kind)
-			drawSmallPanel(int32(chipX), int32(contentY), int32(chipW), int32(chipH), fadeColor(col, 0.28))
-			drawSmallPanelOutline(int32(chipX), int32(contentY), int32(chipW), int32(chipH), fadeColor(col, 0.85))
-			drawTextWithShadow(font, label, chipX+10, contentY+4, FontSmall, col)
+			// Shares drawStatusPill with the enemy-roster pill so the two
+			// silhouettes can't drift (FINDING #18); left-aligned + tinted
+			// in the status color (its own anchoring, hence centered=false).
+			drawStatusPill(font, chipX, contentY, chipW, chipH,
+				fadeColor(col, 0.28), fadeColor(col, 0.85), label, col, false)
 			contentY += chipH + 8
 		}
 
@@ -594,6 +591,51 @@ func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) 
 	// the overlay's centered hint and this one would both show.
 }
 
+// Shared picker sub-modal geometry tokens (FINDING #12). The
+// use-target + heal pickers are visually identical, so they share these.
+// The equip picker keeps its OWN taller header (it carries an extra
+// "Equipped: …" sub-title line under the title) and slightly taller rows
+// — those distinct values stay as equipPicker* tokens below rather than
+// being force-unified, since the difference is real (a second header
+// line), not drift.
+const (
+	pickerRowH    = float32(44)
+	pickerHeaderH = float32(56)
+	pickerFooterH = float32(32)
+)
+
+// equipPicker* are the equip picker's own geometry: a taller header for
+// the "Equipped: …" sub-title line and a touch more row height. Kept
+// distinct from the shared picker* tokens on purpose (see above).
+const (
+	equipPickerRowH    = float32(46)
+	equipPickerHeaderH = float32(70)
+	equipPickerFooterH = float32(34)
+)
+
+// pickerCardLeftInset is the shared left gutter for a picker sub-modal's
+// title + footer hint, so the three pickers stop each hardcoding card.X+18
+// / card.X+24 independently.
+const pickerCardLeftInset = float32(18)
+
+// pickerTitleTopInset is the shared top inset for a picker sub-modal's
+// FontHeading title. Unifies the 14 / 16 the pickers had drifted to (a
+// 2px cosmetic difference inside each header band) onto one value.
+const pickerTitleTopInset = float32(16)
+
+// drawPickerCard paints the shared picker sub-modal chrome (FINDING #12):
+// the veiled wood-and-glass card (same veil + borderActive frame +
+// woodAccent filigree the four pickers all opened with) plus the
+// left-aligned FontHeading title at the shared inset, returning the card
+// rect for the caller to lay its rows + footer into. Consolidates the
+// drawVeiledCard(...) + drawTextWithShadow(title, …) preamble the equip /
+// use-target / heal pickers and the skill-tree modal each repeated.
+func drawPickerCard(font rl.Font, cardW, cardH float32, title string) rl.Rectangle {
+	card := drawVeiledCard(int32(cardW), int32(cardH), borderActive, woodAccent, woodAccent)
+	drawTextWithShadow(font, title, card.X+pickerCardLeftInset, card.Y+pickerTitleTopInset, FontHeading, textPrimary)
+	return card
+}
+
 // drawEquipPicker paints the slot's item-picker sub-modal: a smaller
 // card centered on screen, drawn ON TOP of the panels overlay, listing
 // the inventory items eligible for the focused slot plus an "Unequip"
@@ -610,27 +652,25 @@ func drawEquipPicker(g core.GameState, assets Resources) {
 	slot := core.EquipSlotIndex(g.EquipSlotCursor)
 	rows := core.EquipPickerRows(&g, member, slot)
 
-	const rowH = float32(46)
-	const headerH = float32(70)
-	const footerH = float32(34)
+	const rowH = equipPickerRowH
+	const headerH = equipPickerHeaderH
 	visibleRows := len(rows)
 	if visibleRows < 1 {
 		visibleRows = 1 // reserve a line for the "no eligible items" note
 	}
 	_, sh := screenSizeF()
 	cardW := float32(440)
-	cardH := headerH + float32(visibleRows)*rowH + footerH
+	cardH := headerH + float32(visibleRows)*rowH + equipPickerFooterH
 	if maxH := sh * 0.78; cardH > maxH {
 		cardH = maxH
 	}
 
-	// Veil the overlay behind + draw the centered card via the shared
-	// modal scaffold (same veil tone + corner filigree as the title /
+	// Veil the overlay behind + draw the centered card + title via the
+	// shared picker chrome (same veil tone + corner filigree as the title /
 	// pause / door modals), then lay the picker out in the returned rect.
-	card := drawVeiledCard(int32(cardW), int32(cardH), borderActive, woodAccent, woodAccent)
-
 	title := core.SlotIndexLabel(slot) + " — " + g.Party[member].Name
-	drawTextWithShadow(font, title, card.X+18, card.Y+14, FontHeading, textPrimary)
+	card := drawPickerCard(font, cardW, cardH, title)
+
 	curKind := g.Party[member].Equipped[slot]
 	curText := "Equipped: —"
 	if curKind != core.ItemNone {
@@ -668,8 +708,7 @@ func drawEquipPicker(g core.GameState, assets Resources) {
 		}
 	}
 
-	hint := "Confirm: equip   Back: cancel"
-	drawTextWithShadow(font, hint, card.X+18, card.Y+card.Height-26, FontSmall, textHint)
+	drawModalFooterLeft(font, card, card.X+pickerCardLeftInset, "Confirm: equip   Back: cancel")
 }
 
 // drawUseTargetPicker paints the shared ally-target sub-modal for the
@@ -691,20 +730,18 @@ func drawUseTargetPicker(g core.GameState, assets Resources) {
 		title = "Cast " + core.SkillName(g.UsePendingSkill)
 	}
 
-	const rowH = float32(44)
-	const headerH = float32(56)
-	const footerH = float32(32)
+	const rowH = pickerRowH
+	const headerH = pickerHeaderH
 	visibleRows := len(living)
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
 	cardW := float32(380)
-	cardH := headerH + float32(visibleRows)*rowH + footerH
-	card := drawVeiledCard(int32(cardW), int32(cardH), borderActive, woodAccent, woodAccent)
+	cardH := headerH + float32(visibleRows)*rowH + pickerFooterH
+	card := drawPickerCard(font, cardW, cardH, title)
 
-	drawTextWithShadow(font, title, card.X+18, card.Y+16, FontHeading, textPrimary)
 	if len(living) == 0 {
-		drawTextWithShadow(font, "No one can be healed.", card.X+18, card.Y+headerH, FontBody, textHint)
+		drawTextWithShadow(font, "No one can be healed.", card.X+pickerCardLeftInset, card.Y+headerH, FontBody, textHint)
 	}
 	listY := card.Y + headerH
 	for i, mi := range living {
@@ -716,12 +753,10 @@ func drawUseTargetPicker(g core.GameState, assets Resources) {
 		drawClassGlyph(rect.X+20, rect.Y+rect.Height/2, 9, m.Class, classCol)
 		drawTextWithShadow(font, m.Name, rect.X+40, rect.Y+rect.Height/2-10, FontBody, textPrimary)
 		hp := "HP " + formatBarValue(m.HP, m.MaxHP)
-		hm := rl.MeasureTextEx(font, hp, FontSmall, 1)
-		drawTextWithShadow(font, hp, rect.X+rect.Width-hm.X-12, rect.Y+rect.Height/2-8, FontSmall, hpFillColor(m.HP, m.MaxHP))
+		drawTextRightAligned(font, hp, rect.X+rect.Width-12, rect.Y+rect.Height/2-8, FontSmall, hpFillColor(m.HP, m.MaxHP))
 	}
 
-	hint := "Confirm: use   Back: cancel"
-	drawTextWithShadow(font, hint, card.X+18, card.Y+card.Height-26, FontSmall, textHint)
+	drawModalFooterLeft(font, card, card.X+pickerCardLeftInset, "Confirm: use   Back: cancel")
 }
 
 // drawHealPicker paints the out-of-battle heal-skill chooser — a small veiled
@@ -740,14 +775,11 @@ func drawHealPicker(g core.GameState, assets Resources) {
 		return
 	}
 
-	const rowH = float32(44)
-	const headerH = float32(56)
-	const footerH = float32(32)
+	const rowH = pickerRowH
+	const headerH = pickerHeaderH
 	cardW := float32(360)
-	cardH := headerH + float32(len(heals))*rowH + footerH
-	card := drawVeiledCard(int32(cardW), int32(cardH), borderActive, woodAccent, woodAccent)
-
-	drawTextWithShadow(font, "Cast Heal — "+g.Party[caster].Name, card.X+18, card.Y+16, FontHeading, textPrimary)
+	cardH := headerH + float32(len(heals))*rowH + pickerFooterH
+	card := drawPickerCard(font, cardW, cardH, "Cast Heal — "+g.Party[caster].Name)
 
 	listY := card.Y + headerH
 	for i, s := range heals {
@@ -756,12 +788,10 @@ func drawHealPicker(g core.GameState, assets Resources) {
 		drawFocusableRow(rect, i == g.HealPickCursor)
 		drawTextWithShadow(font, core.SkillName(s), rect.X+14, rect.Y+rect.Height/2-10, FontBody, textPrimary)
 		costText := skillCostMPLabel(core.SkillCost(s))
-		cm := rl.MeasureTextEx(font, costText, FontSmall, 1)
-		drawTextWithShadow(font, costText, rect.X+rect.Width-cm.X-12, rect.Y+rect.Height/2-8, FontSmall, inkAccent)
+		drawTextRightAligned(font, costText, rect.X+rect.Width-12, rect.Y+rect.Height/2-8, FontSmall, inkAccent)
 	}
 
-	hint := "Confirm: cast   Back: cancel"
-	drawTextWithShadow(font, hint, card.X+18, card.Y+card.Height-26, FontSmall, textHint)
+	drawModalFooterLeft(font, card, card.X+pickerCardLeftInset, "Confirm: cast   Back: cancel")
 }
 
 // equipBonusSummary returns the single-line "STR +2" / "Armor +1" /
@@ -940,8 +970,7 @@ func drawPanelsItems(g core.GameState, assets Resources, body rl.Rectangle) {
 		drawTextWithShadow(font, info.Name, listRect.X+rowPad, y+12, FontBody, nameCol)
 		// Count on the right edge of the row as a small chip.
 		countText := "x" + strconv.Itoa(stack.Count)
-		cm := rl.MeasureTextEx(font, countText, FontBody, 1)
-		drawTextWithShadow(font, countText, listRect.X+listRect.Width-cm.X-rowPad, y+12, FontBody, inkAccent)
+		drawTextRightAligned(font, countText, listRect.X+listRect.Width-rowPad, y+12, FontBody, inkAccent)
 	}
 
 	// Detail card: name, type/effect summary, count owned, description
@@ -983,6 +1012,38 @@ var skillCostMPLabelCache = func() [32]string {
 	var out [32]string
 	for i := range out {
 		out[i] = strconv.Itoa(i) + " MP"
+	}
+	return out
+}()
+
+// goldLabelFull / goldLabelShort centralize the two gold-readout
+// formats so each visible format has ONE source (FINDING #16). The two
+// surfaces deliberately read differently: the Tome info strip + shop
+// header show the spelled-out "Gold: N", while the exploration HUD chip
+// shows the compact "N G" beside its coin glyph. Both wrap fmt.Sprintf
+// (gold changes only on loot / shop transactions, so the per-frame draws
+// route the already-cached values from goldReadout / right-align cache —
+// no LUT needed for the unbounded gold range).
+func goldLabelFull(n int) string  { return fmt.Sprintf("Gold: %d", n) }
+func goldLabelShort(n int) string { return fmt.Sprintf("%d G", n) }
+
+// skillPointsLabel returns "<n> SP" — the skill-point read shared by the
+// Skills-tab member balance, the skill-tree modal's balance + per-node
+// cost chips, and the invest prompt (FINDING #16). MP cost is centralized
+// as skillCostMPLabel; this is its SP sibling, LUT-cached over the small
+// range skill-point balances + node costs span (currently 1-3 per node,
+// a handful banked).
+func skillPointsLabel(n int) string {
+	if n >= 0 && n < len(skillPointsLabelCache) {
+		return skillPointsLabelCache[n]
+	}
+	return strconv.Itoa(n) + " SP"
+}
+
+var skillPointsLabelCache = func() [32]string {
+	var out [32]string
+	for i := range out {
+		out[i] = strconv.Itoa(i) + " SP"
 	}
 	return out
 }()
@@ -1048,14 +1109,13 @@ func drawPanelsSkills(g core.GameState, assets Resources, body rl.Rectangle) {
 		// Skill-point balance — the currency the trees spend. Bright when
 		// there's something to spend, muted at zero so a "nothing to do
 		// here" card reads quietly.
-		spText := strconv.Itoa(m.SkillPoints) + " SP"
+		spText := skillPointsLabel(m.SkillPoints)
 		spCol := textMuted
 		if m.SkillPoints > 0 {
 			spCol = inkAccent
 		}
 		drawTextWithShadow(font, "SKILL POINTS", innerX, contentY, FontSmall, textMuted)
-		sm := rl.MeasureTextEx(font, spText, FontSmall, 1)
-		drawTextWithShadow(font, spText, innerX+innerW-sm.X, contentY, FontSmall, spCol)
+		drawTextRightAligned(font, spText, innerX+innerW, contentY, FontSmall, spCol)
 		contentY += 30
 
 		// One summary panel per tree: name + invested/total + theme.
@@ -1072,12 +1132,11 @@ func drawPanelsSkills(g core.GameState, assets Resources, body rl.Rectangle) {
 			drawTextWithShadow(font, tr.Name, rect.X+12, rect.Y+8, FontBody, textPrimary)
 			invested := core.TreeInvestedRanks(&m, tr)
 			ratio := strconv.Itoa(invested) + " / " + strconv.Itoa(core.TreeMaxRanks(tr))
-			rm := rl.MeasureTextEx(font, ratio, FontSmall, 1)
 			ratioCol := textMuted
 			if invested > 0 {
 				ratioCol = giltBright
 			}
-			drawTextWithShadow(font, ratio, rect.X+rect.Width-rm.X-12, rect.Y+10, FontSmall, ratioCol)
+			drawTextRightAligned(font, ratio, rect.X+rect.Width-12, rect.Y+10, FontSmall, ratioCol)
 			drawTextWithShadow(font, tr.Theme, rect.X+12, rect.Y+34, FontSmall, textHint)
 		}
 

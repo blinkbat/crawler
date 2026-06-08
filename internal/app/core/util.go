@@ -168,6 +168,13 @@ func WrapEnum[T ~int](v T, delta, count int) T {
 // (inverted / negative) layer their own guard on top; this is defensive only
 // in that hi <= lo returns lo (so a misuse can't panic Intn with a
 // non-positive argument).
+//
+// Degenerate-bounds policy: hi <= lo RETURNS LO (clamp toward the low bound).
+// The two callers that wrap this deliberately differ — rollGold (economy.go)
+// SWAPS inverted bounds then clamps to >= 0, and rollDuration (party.go)
+// RETURNS 0 on min <= 0 || max < min. Don't "unify" them; the policies are
+// intentional (a loot amount can't be negative, a status duration fails open
+// to "no effect").
 func RandRangeI(rng *rand.Rand, lo, hi int) int {
 	if hi <= lo {
 		return lo

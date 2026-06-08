@@ -118,6 +118,23 @@ func pauseMenuRowInnerW() int32 {
 	return pauseMenuPanelW - pauseMenuRowInsetX - pauseMenuRowRightPad
 }
 
+// drawCardTitle paints the centred FontTitle card title with flanking gilt
+// fleurons on its vertical midline (~22px outside each text edge) — the
+// 90s grimoire ◆──── TITLE ────◆ look. The shared preamble extracted from
+// drawTitledMenuCard and drawTitledCardHeader (FINDING #17): both measured
+// the title, centred it across panelW, shadow-drew it, and flanked it with
+// fleurons, differing ONLY by the title's top inset (+24 vs +18) — now the
+// `topInset` parameter. Returns the Y just below the title (titleY +
+// measured height) so the shop header can place its subtitle row.
+func drawCardTitle(font rl.Font, title string, panelX, panelY, panelW int32, topInset float32) (belowTitleY float32) {
+	tm := rl.MeasureTextEx(font, title, FontTitle, FontSpacingTitle)
+	titleX := float32(panelX) + float32(panelW)/2 - tm.X/2
+	titleY := float32(panelY) + topInset
+	drawTextWithShadowStyle(font, title, titleX, titleY, FontTitle, FontSpacingTitle, textPrimary, shadowStrong, 1, 1)
+	drawFleuronsFlanking(titleX, tm.X, 22, titleY+tm.Y/2, 5, giltDim)
+	return titleY + tm.Y
+}
+
 // drawTitledMenuCard paints the shared pause/debug menu chrome: the veil,
 // the gilt-framed card sized to rowCount, the centred FontTitle title with
 // flanking fleurons, and each row via drawMenuRow. selected reports whether
@@ -132,16 +149,7 @@ func drawTitledMenuCard(assets Resources, title string, rowCount int, label func
 	panelX := int32(rect.X)
 	panelY := int32(rect.Y)
 
-	// Centred title near the top of the card with flanking gilt fleurons
-	// on the title's vertical midline (~22px outside each text edge) — the
-	// 90s grimoire feel: ◆──── TITLE ────◆.
-	titleMeasure := rl.MeasureTextEx(assets.hudFont, title, FontTitle, FontSpacingTitle)
-	titleX := float32(panelX) + float32(panelW)/2 - titleMeasure.X/2
-	titleY := float32(panelY + 24)
-	drawTextWithShadowStyle(assets.hudFont, title, titleX, titleY,
-		FontTitle, FontSpacingTitle, textPrimary, shadowStrong, 1, 1)
-	flCY := titleY + titleMeasure.Y/2
-	drawFleuronsFlanking(titleX, titleMeasure.X, 22, flCY, 5, giltDim)
+	drawCardTitle(assets.hudFont, title, panelX, panelY, panelW, 24)
 
 	rowY := pauseMenuHeaderH
 	rowX := panelX + pauseMenuRowInsetX
@@ -154,20 +162,15 @@ func drawTitledMenuCard(assets Resources, title string, rowCount int, label func
 // drawTitledCardHeader draws a centered veiled overlay card with a
 // fleuron-flanked FontTitle title, and returns the card's top-left origin
 // plus the Y just below the title (where a subtitle / first row starts).
-// Shared by the shop and quest-journal overlays — those need a custom body
-// (two-column rows, tab header) so they can't use drawTitledMenuCard, but
-// the card-chrome + title preamble is identical, so it lives here once.
+// Used by the shop overlay — it needs a custom body (two-column rows, tab
+// header) so it can't use drawTitledMenuCard, but the card-chrome + title
+// preamble is identical, so it lives here once (via drawCardTitle).
 func drawTitledCardHeader(assets Resources, title string, panelW, panelH int32) (panelX, panelY int32, belowTitleY float32) {
-	font := assets.hudFont
 	rect := drawVeiledCard(panelW, panelH, borderSoft, borderSoft, giltDim)
 	panelX = int32(rect.X)
 	panelY = int32(rect.Y)
-	tm := rl.MeasureTextEx(font, title, FontTitle, FontSpacingTitle)
-	titleX := float32(panelX) + float32(panelW)/2 - tm.X/2
-	titleY := float32(panelY + 18)
-	drawTextWithShadowStyle(font, title, titleX, titleY, FontTitle, FontSpacingTitle, textPrimary, shadowStrong, 1, 1)
-	drawFleuronsFlanking(titleX, tm.X, 22, titleY+tm.Y/2, 5, giltDim)
-	return panelX, panelY, titleY + tm.Y
+	belowTitleY = drawCardTitle(assets.hudFont, title, panelX, panelY, panelW, 18)
+	return panelX, panelY, belowTitleY
 }
 
 func drawMenuOverlay(g core.GameState, assets Resources) {

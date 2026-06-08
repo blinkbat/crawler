@@ -473,6 +473,18 @@ func ItemHelpsTarget(def ItemDefinition, m PartyMember) bool {
 	return hpUseful || mpUseful
 }
 
+// MemberCanBeHealed is the canonical "is an HP heal not wasted on this ally?"
+// gate for out-of-battle heal-target selection: the member must be alive
+// (HP > 0 — heals don't revive), not ingested by a mantrap (out of reach,
+// same skip HealMember applies), and not already at full HP. Mirrors the HP
+// branch of ItemHelpsTarget but with no MP axis, so callers that only offer
+// an HP heal (heal-skill target pickers) don't accept an ally who's full on
+// HP just because they're low on MP. ItemHelpsTarget is left as-is — its MP
+// axis is load-bearing for MP-restoring items.
+func MemberCanBeHealed(m PartyMember) bool {
+	return m.HP > 0 && !m.Ingested && m.HP < m.MaxHP
+}
+
 // LiveConsumables returns the positive-count inventory entries that are
 // consumables — the battle Item menu's eligible set. Equipment is filtered
 // out so the picker can't list (and applyItem can't destroy) gear. Both

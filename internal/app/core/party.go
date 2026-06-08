@@ -494,6 +494,23 @@ func HealMember(m *PartyMember, amount int) {
 	GainUpTo(&m.HP, m.MaxHP, amount)
 }
 
+// HealWholeParty applies HealMember(amount) to every LIVING (HP > 0) party
+// member. The shared party-wide heal loop behind both the in-battle and the
+// out-of-battle Mass Mend, so the "who does a party heal touch?" rule lives
+// in one place. HealMember's own guards (no revive, clamp at MaxHP, ingest
+// skip) still apply per member; the HP > 0 check here keeps the loop from
+// even calling HealMember on the dead.
+func HealWholeParty(g *GameState, amount int) {
+	if g == nil || amount <= 0 {
+		return
+	}
+	for i := range g.Party {
+		if g.Party[i].HP > 0 {
+			HealMember(&g.Party[i], amount)
+		}
+	}
+}
+
 // clearMemberAnimTimers zeros a member's transient ANIMATION timers (lunge /
 // damage-flash / knockback) — not gameplay state. Shared by the field-recovery
 // reset and the save sanitizer so "what's an animation timer" lives in one
@@ -592,6 +609,11 @@ func SumStatPending(p [StatCount]int) int {
 // up the SkillEffect by accident doesn't roll a phantom DoT. Single
 // helper means four near-identical 8-liners collapse to one body;
 // each public method is now a thin wrapper that names its fields.
+//
+// Degenerate-bounds policy: RETURN 0 on min <= 0 || max < min (fail open to
+// "no status effect"). This intentionally differs from its two siblings —
+// RandRangeI (util.go) returns lo on hi <= lo, and rollGold (economy.go)
+// swaps inverted bounds then clamps to >= 0.
 func rollDuration(rng *rand.Rand, min, max int) int {
 	if min <= 0 || max < min {
 		return 0

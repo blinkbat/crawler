@@ -71,13 +71,12 @@ func DrawSkillTreeModal(g core.GameState, assets Resources) {
 	classCol := classAccent(m.Class)
 	drawClassGlyph(card.X+30, card.Y+30, 12, m.Class, classCol)
 	drawTextWithShadow(font, m.Name+" — Skill Trees", card.X+54, card.Y+16, FontHeading, textPrimary)
-	spText := strconv.Itoa(m.SkillPoints) + " SP"
+	spText := skillPointsLabel(m.SkillPoints)
 	spCol := textMuted
 	if m.SkillPoints > 0 {
 		spCol = inkAccent
 	}
-	spm := rl.MeasureTextEx(font, spText, FontBody, 1)
-	drawTextWithShadow(font, spText, card.X+card.Width-spm.X-24, card.Y+20, FontBody, spCol)
+	drawTextRightAligned(font, spText, card.X+card.Width-24, card.Y+20, FontBody, spCol)
 
 	// Body region for the tree columns, above the detail strip. Columns are
 	// a fixed narrow width, centered as a block so the spacing reads evenly.
@@ -94,8 +93,7 @@ func DrawSkillTreeModal(g core.GameState, assets Resources) {
 
 	drawSkillTreeDetail(font, g, &m, trees, card, detailH, footerH)
 
-	hint := "Left/Right: tree   Up/Down: node   Confirm: invest   Back: close"
-	drawTextWithShadow(font, hint, card.X+24, card.Y+card.Height-26, FontSmall, textHint)
+	drawModalFooterLeft(font, card, card.X+24, "Left/Right: tree   Up/Down: node   Confirm: invest   Back: close")
 }
 
 // drawSkillTreeColumn paints one tree as a labelled column: name + gilt
@@ -180,14 +178,13 @@ func drawSkillTreeNode(font rl.Font, m *core.PartyMember, node core.SkillTreeNod
 		chip = "locked"
 		chipCol = textDim
 	default:
-		chip = strconv.Itoa(node.Cost) + " SP"
+		chip = skillPointsLabel(node.Cost)
 		chipCol = giltBright
 		if m.SkillPoints < node.Cost {
 			chipCol = textMuted
 		}
 	}
-	cm := rl.MeasureTextEx(font, chip, FontTiny, 1)
-	drawTextWithShadow(font, chip, rect.X+rect.Width-cm.X-10, rect.Y+rect.Height-16, FontTiny, chipCol)
+	drawTextRightAligned(font, chip, rect.X+rect.Width-10, rect.Y+rect.Height-16, FontTiny, chipCol)
 }
 
 func drawSkillNodePlate(rect rl.Rectangle, bg rl.Color, rank int, unlocked, focused bool) {
@@ -239,8 +236,7 @@ func drawSkillTreeDetail(font rl.Font, g core.GameState, m *core.PartyMember, tr
 	drawTextWithShadow(font, node.Name, x+12, y+8, FontBody, textPrimary)
 	rank := core.TreeNodeRank(m, node.ID)
 	state := "Rank " + strconv.Itoa(rank) + " / " + strconv.Itoa(node.MaxRank)
-	sm := rl.MeasureTextEx(font, state, FontSmall, 1)
-	drawTextWithShadow(font, state, x+w-sm.X-12, y+10, FontSmall, inkAccent)
+	drawTextRightAligned(font, state, x+w-12, y+10, FontSmall, inkAccent)
 
 	drawTextWithShadow(font, node.Desc, x+12, y+34, FontSmall, textHint)
 
@@ -258,7 +254,7 @@ func drawSkillTreeDetail(font rl.Font, g core.GameState, m *core.PartyMember, tr
 	case m.SkillPoints < node.Cost:
 		foot = "Not enough skill points"
 	default:
-		foot = "Confirm to invest (" + strconv.Itoa(node.Cost) + " SP)"
+		foot = "Confirm to invest (" + skillPointsLabel(node.Cost) + ")"
 		footCol = giltBright
 	}
 	drawTextWithShadow(font, foot, x+12, y+detailH-22, FontSmall, footCol)

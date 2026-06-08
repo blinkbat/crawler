@@ -164,7 +164,7 @@ func contextMenuLayout(s *State) (rl.Rectangle, []rl.Rectangle) {
 	// drawContextMenu — we approximate width via a per-char average so
 	// the layout pass doesn't need the font handle here.
 	for _, it := range s.contextMenu.items {
-		w := float32(len(it.label))*9 + 28
+		w := approxTextWidth(it.label, editorFontLabel) + 28
 		if w > width {
 			width = w
 		}
@@ -220,8 +220,8 @@ func drawContextMenu(s *State, font rl.Font, theme render.Theme) {
 			col = theme.TextMuted
 		}
 		rl.DrawTextEx(font, label,
-			rl.NewVector2(r.X+8, r.Y+(r.Height-14)/2),
-			14, 1, col)
+			rl.NewVector2(r.X+8, r.Y+(r.Height-editorFontLabel)/2),
+			editorFontLabel, 1, col)
 	}
 }
 
@@ -301,16 +301,10 @@ func runContextItem(s *State, kind ctxItemKind) {
 			s.flash("Deleted door at " + core.TileCoord(x, z))
 		}
 	case ctxItemMoveStartHere:
-		if s.area.WallAt(x, z) {
-			s.flash("Player start needs an open cell")
-			return
-		}
-		if core.IsPropChar(s.area.Props[z][x]) {
-			s.flash("Cell is occupied by a prop")
-			return
-		}
-		if core.IsBlockingFloor(s.area.Floor[z][x]) {
-			s.flash("Player start can't sit on deep water")
+		// Shared player-start rule set (see ops.startBlockers) so this path
+		// and the entity-brush start tool can't drift on legality or wording.
+		if msg := firstBlocker(startBlockers(&s.area, x, z)...); msg != "" {
+			s.flash(msg)
 			return
 		}
 		pushUndo(s)

@@ -110,11 +110,22 @@ func CanReachFlying(wt WeaponType) bool {
 	return WeaponIsRanged(wt)
 }
 
-// EquippedWeapon returns the WeaponType in the member's right hand, or
-// WeaponNone when the hand is empty or holds a non-weapon (a shield's
-// ItemDefinition leaves Weapon at WeaponNone).
+// EquippedWeapon returns the WeaponType governing the member's basic attack.
+// The right hand wins when it holds a real weapon; otherwise, since
+// CanEquipInSlot lets a weapon sit in either hand, fall back to a weapon in
+// the LEFT hand (e.g. a sword off-hand beside a shield-less right hand) so a
+// left-equipped weapon isn't silently ignored. An empty slot resolves to
+// ItemNone whose ItemDefinition leaves Weapon at WeaponNone, and a non-weapon
+// hand item (a shield) is likewise WeaponNone — so when NEITHER hand holds a
+// real weapon this returns WeaponNone (the existing unarmed/STR-fists case).
 func EquippedWeapon(m PartyMember) WeaponType {
-	return ItemInfo(m.Equipped[EquipRightHand]).Weapon
+	if rh := ItemInfo(m.Equipped[EquipRightHand]).Weapon; rh != WeaponNone {
+		return rh
+	}
+	if lh := ItemInfo(m.Equipped[EquipLeftHand]).Weapon; lh != WeaponNone {
+		return lh
+	}
+	return WeaponNone
 }
 
 // memberAttackAccuracy is the basic-attack hit chance [0,1] for a member:

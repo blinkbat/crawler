@@ -457,6 +457,15 @@ var topbarBtnWidths = map[string]float32{
 	"Brush +":    78,
 }
 
+// approxTextWidth estimates a label's pixel width without a font handle —
+// ~0.5px per character per font point (so editorFontBody=16 ⇒ 8px/char).
+// The button and context-menu sizers lay out before they have the loaded
+// font, so both share this one heuristic instead of two disagreeing
+// per-char constants.
+func approxTextWidth(label string, fontSize float32) float32 {
+	return float32(len(label)) * fontSize * 0.5
+}
+
 func buttonWidth(label string) float32 {
 	if w, ok := topbarBtnWidths[label]; ok {
 		return w
@@ -466,7 +475,7 @@ func buttonWidth(label string) float32 {
 	// editorFontBody plus padding, floored at 72 so short labels stay
 	// tidy. Deterministic from the string, so a modal's draw and its
 	// click hit-test (both via modalButtonRow) agree without measuring.
-	w := float32(len(label))*8 + 28
+	w := approxTextWidth(label, editorFontBody) + 28
 	if w < 72 {
 		w = 72
 	}
@@ -740,6 +749,18 @@ func drawStepperButtons(font rl.Font, minus, plus rl.Rectangle) {
 	drawButton(font, plus, "+", false)
 }
 
+// stepperRow lays out a numeric stepper at (x,y): a value cell of width
+// valueW, then two modalBtnH-square "−"/"+" buttons each preceded by gap.
+// Parallels drawStepperButtons (which paints the pair) so the three stepper
+// modals (sidebar dims, new-map dims, custom-enemy stats) share one
+// placement formula instead of each hand-deriving the +offsets.
+func stepperRow(x, y, valueW, gap float32) (value, minus, plus rl.Rectangle) {
+	value = rl.NewRectangle(x, y, valueW, modalBtnH)
+	minus = rl.NewRectangle(value.X+value.Width+gap, y, modalBtnH, modalBtnH)
+	plus = rl.NewRectangle(minus.X+minus.Width+gap, y, modalBtnH, modalBtnH)
+	return value, minus, plus
+}
+
 // --- Layer tabs ------------------------------------------------------------
 
 func layerTabRect(s *State, i int) rl.Rectangle {
@@ -840,7 +861,7 @@ var paletteHints = []string{
 	"Ctrl+click: fill region",
 	"Ctrl+Shift+F: fill all",
 	"Tab: next layer",
-	"Alt+1..6: jump layer",
+	"Alt+1..7: jump layer",
 	"1..9 / Shift+1..9: brush",
 	"[ ] brush size",
 	"arrows: cursor",
@@ -972,7 +993,7 @@ func drawPalette(s *State, font rl.Font, theme render.Theme) {
 
 	y := s.rect.palette.Y + headerReserve + float32(len(palette))*paletteRowStride + 12 - s.paletteScroll[s.layer]
 	for _, h := range paletteHints {
-		rl.DrawTextEx(font, h, rl.NewVector2(s.rect.palette.X+12, y), 13, 1, theme.TextHint)
+		rl.DrawTextEx(font, h, rl.NewVector2(s.rect.palette.X+12, y), editorFontAccent, 1, theme.TextHint)
 		y += 16
 	}
 }
@@ -1122,13 +1143,9 @@ func metadataRects(s *State) metaRect {
 
 	r.dimsLabel = rl.NewRectangle(x, y, w, 18)
 	y += 22
-	r.widthValue = rl.NewRectangle(x, y, 96, 30)
-	r.widthMinus = rl.NewRectangle(x+102, y, 30, 30)
-	r.widthPlus = rl.NewRectangle(x+138, y, 30, 30)
+	r.widthValue, r.widthMinus, r.widthPlus = stepperRow(x, y, 96, 6)
 	y += 38
-	r.heightValue = rl.NewRectangle(x, y, 96, 30)
-	r.heightMinus = rl.NewRectangle(x+102, y, 30, 30)
-	r.heightPlus = rl.NewRectangle(x+138, y, 30, 30)
+	r.heightValue, r.heightMinus, r.heightPlus = stepperRow(x, y, 96, 6)
 	y += 42
 
 	// On-disk path readout. Player start tile + facing used to live
@@ -1462,7 +1479,7 @@ func drawGrid(s *State, font rl.Font) {
 	const charOverlayMinCell = float32(14)
 	showCharOverlay := cell >= charOverlayMinCell && s.showTileGlyphs
 	charFontSize := cell * 0.55
-	charShadow := rl.NewColor(8, 10, 14, 200)
+	charShadow := glyphShadow
 	charFG := rl.NewColor(248, 250, 252, 235)
 
 	for z := zMin; z < zMax; z++ {
@@ -1683,7 +1700,7 @@ func drawGrid(s *State, font rl.Font) {
 			side := float32(half*2 + 1)
 			cx, cy := s.rect.tileCorner(x0, z0)
 			r := rl.NewRectangle(cx, cy, cell*side, cell*side)
-			rl.DrawRectangleLinesEx(r, 2, rl.NewColor(255, 255, 255, 200))
+			rl.DrawRectangleLinesEx(r, 2, selectionOutline)
 		}
 	}
 
@@ -1701,7 +1718,7 @@ func drawGrid(s *State, font rl.Font) {
 		r := rl.NewRectangle(cx, cy, float32(x1-x0+1)*cell, float32(z1-z0+1)*cell)
 		fill := withAlpha(brushPreviewColor(s), 110)
 		rl.DrawRectangleRec(r, fill)
-		rl.DrawRectangleLinesEx(r, 2, rl.NewColor(255, 255, 255, 220))
+		rl.DrawRectangleLinesEx(r, 2, selectionOutline)
 	}
 
 	if s.drag == dragStart && s.hoverX >= 0 {
@@ -1711,7 +1728,7 @@ func drawGrid(s *State, font rl.Font) {
 	}
 	if s.drag == dragPack && s.hoverX >= 0 && s.dragPackIdx >= 0 && s.dragPackIdx < len(s.area.PackSpawns) {
 		gx, gy := s.rect.tileCenter(s.hoverX, s.hoverZ)
-		rl.DrawCircleLines(int32(gx), int32(gy), cell*0.32, rl.NewColor(255, 255, 255, 220))
+		rl.DrawCircleLines(int32(gx), int32(gy), cell*0.32, selectionOutline)
 	}
 
 	// Rich hover tooltip: when the cursor is over a tile that holds a
@@ -2003,7 +2020,7 @@ func elevationLevelColor(level int) rl.Color {
 func drawElevationSlice(s *State, font rl.Font, r rl.Rectangle, cell float32, x, z int) {
 	lvl := s.area.ElevationLevelAt(x, z)
 	rl.DrawRectangleRec(r, elevationSliceTint(lvl, s.editLevel))
-	shadow := rl.NewColor(8, 10, 14, 200)
+	shadow := glyphShadow
 	if facing, ok := s.area.RampAt(x, z); ok {
 		rl.DrawRectangleLinesEx(r, 2, rl.NewColor(120, 230, 140, 220))
 		drawTileGlyph(font, r, cell, cell*0.62, core.RampCharForFacing(facing), rl.NewColor(150, 240, 165, 245), shadow)
@@ -2355,7 +2372,7 @@ func drawSaveAsModal(s *State, font rl.Font, theme render.Theme) {
 		rl.NewVector2(r.X+16, r.Y+96), editorFontHint, 1, theme.TextMuted)
 	if sanitized != strings.TrimSuffix(strings.TrimSuffix(s.modalFilename, ".map"), ".MAP") {
 		rl.DrawTextEx(font, "(Punctuation and spaces are stripped)",
-			rl.NewVector2(r.X+16, r.Y+112), 11, 1, theme.BorderDanger)
+			rl.NewVector2(r.X+16, r.Y+112), editorFontTiny, 1, theme.BorderDanger)
 	}
 	rl.DrawTextEx(font, "Enter save   Esc cancel",
 		rl.NewVector2(r.X+16, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
@@ -2386,7 +2403,7 @@ func drawPackEditModal(s *State, font rl.Font, theme render.Theme) {
 	}
 	render.DrawTextWithShadow(font, leaderText, r.X+16, r.Y+38, editorFontHint, theme.TextMuted)
 	render.DrawTextWithShadow(font, "Click a member to select; buttons below add / remove / reorder.",
-		r.X+16, r.Y+54, 11, theme.TextHint)
+		r.X+16, r.Y+54, editorFontTiny, theme.TextHint)
 
 	adds, actions := packEditCmds(s)
 	lay := entityModalLayoutFor(s.modalCursor, len(pack.Members), cmdLabels(adds), cmdLabels(actions))
@@ -2411,7 +2428,7 @@ func drawChestEditModal(s *State, font rl.Font, theme render.Theme) {
 		"CHEST AT "+core.TileCoord(chest.TileX, chest.TileZ),
 		theme.BorderActive)
 	render.DrawTextWithShadow(font, "Click an item to select; buttons below add / remove.",
-		r.X+16, r.Y+40, 11, theme.TextHint)
+		r.X+16, r.Y+40, editorFontTiny, theme.TextHint)
 
 	adds, actions := chestEditCmds(s)
 	lay := entityModalLayoutFor(s.modalCursor, len(chest.Items), cmdLabels(adds), cmdLabels(actions))
@@ -2498,7 +2515,7 @@ func drawValidateModal(s *State, font rl.Font, theme render.Theme) {
 		y := r.Y + 50
 		for _, line := range rows {
 			rl.DrawTextEx(font, "! "+line,
-				rl.NewVector2(r.X+16, y), 13, 1, theme.BorderDanger)
+				rl.NewVector2(r.X+16, y), editorFontAccent, 1, theme.BorderDanger)
 			y += 22
 		}
 	}

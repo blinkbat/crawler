@@ -139,10 +139,13 @@ func DrawChestPrompt(camera rl.Camera3D, g core.GameState, assets Resources) {
 	screen := rl.GetWorldToScreen(world, camera)
 	label := "Press Enter to open"
 	font := assets.Font()
-	m := rl.MeasureTextEx(font, label, FontBody, 1)
-	x := screen.X - m.X/2
+	// Route through the cached centered-text helper (FINDING #15) so the
+	// constant prompt isn't re-measured every frame the player stands by a
+	// chest. The vertical anchor still needs the glyph height, but that's a
+	// constant per (font,size) — pull it from the same cache.
+	m := centeredMeasureCache.measure(font, label, FontBody, 1)
 	y := screen.Y - m.Y - 8
-	drawTextWithShadow(font, label, x, y, FontBody, borderActive)
+	drawTextCentered(font, label, screen.X, y, FontBody, borderActive)
 }
 
 // DrawChestModal paints the chest-open dialog: a card with the item

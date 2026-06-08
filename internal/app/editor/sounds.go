@@ -215,15 +215,29 @@ type soundLayout struct {
 	nameField    rl.Rectangle
 	previewBtn   rl.Rectangle
 	saveBtn      rl.Rectangle
-	listRows     []soundListRowRect   // one entry per saved-sound row
+	listRows     []soundListRowRect   // one entry per saved-sound row (rects only filled for the visible window)
 	assignRows   []soundAssignRowRect // one entry per built-in cue row
+	// listTopRow..listEnd is the saved-sounds scroll window (via scrollWindow)
+	// so a long list can't overflow the column off the card bottom.
+	listTopRow int
+	listEnd    int
 }
 
 // computeSoundLayout assembles the layout rectangles given the current
 // screen size and the cached lists (saved sounds, cues). Pure function
 // of inputs — both Update and Draw call this so they agree on
 // hit-test geometry.
-func computeSoundLayout(savedSounds []string) soundLayout {
+// soundListCursor is the saved-sounds row the scroll window should keep
+// visible: the live cursor when the list panel is focused, else row 0 (so
+// editing the params/assign columns doesn't yank the list to an unrelated row).
+func soundListCursor(s *State) int {
+	if s.soundLeftPanel == soundPanelList {
+		return s.soundCursor
+	}
+	return 0
+}
+
+func computeSoundLayout(savedSounds []string, listCursor int) soundLayout {
 	card := centeredCardRect(soundModalW, soundModalH)
 	colW := (card.Width - 32 - 2*soundColGap) / 3
 	colY := card.Y + 56
@@ -250,13 +264,21 @@ func computeSoundLayout(savedSounds []string) soundLayout {
 	l.previewBtn = rl.NewRectangle(x, y, (w-12)/2, soundButtonH)
 	l.saveBtn = rl.NewRectangle(x+(w-12)/2+12, y, (w-12)/2, soundButtonH)
 
-	// List column rows + per-row Play/× buttons.
+	// List column rows + per-row Play/× buttons. Only the visible window gets
+	// real rects; off-window entries stay zero (so they neither draw nor
+	// hit-test). The window keeps listCursor on screen.
 	lx := listCol.X + 12
 	lw := listCol.Width - 24
 	ly := listCol.Y + 36
+	listAreaH := listCol.Y + listCol.Height - 12 - ly
+	maxListRows := int(listAreaH / soundListRowH)
+	if maxListRows < 1 {
+		maxListRows = 1
+	}
+	l.listTopRow, l.listEnd = scrollWindow(listCursor, len(savedSounds), maxListRows)
 	l.listRows = make([]soundListRowRect, len(savedSounds))
-	for i := range savedSounds {
-		row := rl.NewRectangle(lx, ly+float32(i)*soundListRowH, lw, soundListRowH-4)
+	for i := l.listTopRow; i < l.listEnd; i++ {
+		row := rl.NewRectangle(lx, ly+float32(i-l.listTopRow)*soundListRowH, lw, soundListRowH-4)
 		l.listRows[i] = soundListRowRect{
 			Row:    row,
 			Play:   rl.NewRectangle(row.X+row.Width-78, row.Y+2, 32, row.Height-4),
@@ -334,7 +356,7 @@ func updateSoundsModal(s *State) Action {
 	// Read the saved-sounds list from the cache (populated on open + after
 	// each save/delete via refreshSoundCaches) — no per-frame os.ReadDir.
 	savedSounds := s.soundSavedCache
-	layout := computeSoundLayout(savedSounds)
+	layout := computeSoundLayout(savedSounds, soundListCursor(s))
 
 	mp := rl.GetMousePosition()
 	mouseDown := rl.IsMouseButtonDown(rl.MouseLeftButton)
@@ -425,11 +447,9 @@ func handleSoundMouseClick(s *State, mp rl.Vector2, l *soundLayout, savedSounds 
 		saveCurrentSound(s)
 		return soundPanelParams, soundActionCursorIdx()
 	}
-	// Saved-sounds list — clickable rows + per-row Play/× buttons.
-	for i, r := range l.listRows {
-		if i >= len(savedSounds) {
-			break
-		}
+	// Saved-sounds list — clickable rows + per-row Play/× buttons (visible window only).
+	for i := l.listTopRow; i < l.listEnd; i++ {
+		r := l.listRows[i]
 		if pointIn(mp, r.Play) {
 			audio.PreviewFile(savedSounds[i])
 			return soundPanelList, i
@@ -637,7 +657,7 @@ func drawSoundsModal(s *State, font rl.Font, theme render.Theme) {
 	if savedSounds == nil {
 		savedSounds = audio.ListUserSounds()
 	}
-	l := computeSoundLayout(savedSounds)
+	l := computeSoundLayout(savedSounds, soundListCursor(s))
 	// Both computeSoundLayout and drawModalHeader center the card through
 	// the shared centeredCardRect, so the rect drawModalHeader paints is
 	// identical to l.card — visual + hit-test stay in sync without
@@ -703,15 +723,21 @@ func drawSoundsListCol(s *State, font rl.Font, theme render.Theme, l *soundLayou
 			rl.NewVector2(l.listCol.X+12, l.listCol.Y+68), soundFontHint, 1, theme.TextHint)
 		return
 	}
-	for i, name := range names {
+	for i := l.listTopRow; i < l.listEnd; i++ {
 		r := l.listRows[i]
 		if s.soundLeftPanel == soundPanelList && s.soundCursor == i {
 			render.DrawSelectedRow(r.Row)
 		}
-		render.DrawTextWithShadow(font, name,
+		render.DrawTextWithShadow(font, names[i],
 			r.Row.X+8, r.Row.Y+6, soundFontBody, theme.TextMuted)
 		drawButton(font, r.Play, ">", false)
 		drawButton(font, r.Delete, "X", false)
+	}
+	if l.listTopRow > 0 {
+		rl.DrawTextEx(font, "▲ more", rl.NewVector2(l.listCol.X+l.listCol.Width-70, l.listCol.Y+10), soundFontHint, 1, theme.TextHint)
+	}
+	if l.listEnd < len(names) {
+		rl.DrawTextEx(font, "▼ more", rl.NewVector2(l.listCol.X+l.listCol.Width-70, l.listCol.Y+l.listCol.Height-20), soundFontHint, 1, theme.TextHint)
 	}
 }
 

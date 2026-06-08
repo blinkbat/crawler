@@ -522,7 +522,7 @@ func ensureAliveTargetOrCancel(g *core.GameState, refundSkill core.SkillID) bool
 		}
 	}
 	setBattleStatus(g, "No target.")
-	finishPartyAction(g)
+	finishActorTurn(g)
 	return false
 }
 
@@ -688,7 +688,7 @@ func maybeConfuseRetarget(g *core.GameState) {
 // applyPendingAction is invoked once the timing bar resolves. It runs the
 // recorded action's effect with the resulting quality and records the actor's
 // quality popup if (and only if) the action actually landed. Phase advancement
-// happens inside the apply* path via finishPartyAction.
+// happens inside the apply* path via finishActorTurn.
 func applyPendingAction(g *core.GameState, quality int) {
 	handler, ok := actionHandlerFor(g.Battle.PendingSkill)
 	if !ok {
@@ -696,7 +696,7 @@ func applyPendingAction(g *core.GameState, quality int) {
 		return
 	}
 	// Capture the acting member BEFORE apply: handler.apply runs
-	// finishPartyAction → finishActorTurn → beginPartyTurn synchronously,
+	// finishActorTurn → beginPartyTurn synchronously,
 	// which advances g.Battle.CurrentParty to the NEXT actor. Reading it
 	// after apply would stamp the quality popup over whoever acts next
 	// (when two party members are back-to-back in the queue) instead of
@@ -767,7 +767,7 @@ func applyAttack(g *core.GameState, quality int) bool {
 			whiff = fmt.Sprintf("%s%s can't reach the airborne %s.", qualityTag(quality), attacker.Name, core.EnemySingularNoun(target))
 		}
 		setBattleMessage(g, whiff)
-		finishPartyAction(g)
+		finishActorTurn(g)
 		return true
 	}
 	// Defender dodge: a connecting swing can still be sidestepped by a
@@ -776,7 +776,7 @@ func applyAttack(g *core.GameState, quality int) bool {
 	// MeleeAccuracy's basic-attack-only gate).
 	if core.RollDodge(g.Rand(), core.EnemyInfoFor(target).Stats) {
 		setBattleMessage(g, fmt.Sprintf("%s%s lunges but the %s slips aside.", qualityTag(quality), attacker.Name, core.EnemySingularNoun(target)))
-		finishPartyAction(g)
+		finishActorTurn(g)
 		return true
 	}
 	// Basic Attack: weapon-stat + 0, scaled by timing quality. The
@@ -793,7 +793,7 @@ func applyAttack(g *core.GameState, quality int) bool {
 	dealt, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagPhys)
 	core.EnqueueEnemyVFX(g, core.VFXSlash, g.Battle.EnemyIndex)
 	setBattleMessage(g, appendCrit(attackResultMessage(attacker.Name, target, dealt, quality, defeated), crit))
-	finishPartyAction(g)
+	finishActorTurn(g)
 	return true
 }
 
@@ -846,7 +846,7 @@ func applySwipe(g *core.GameState, quality int) bool {
 	} else {
 		setBattleMessage(g, appendCrit(swipeMessage(actor.Name, enemiesHit, quality), crit))
 	}
-	finishPartyAction(g)
+	finishActorTurn(g)
 	// Even if hits=0, the attack motion played and MP was spent — landed.
 	return true
 }
@@ -895,7 +895,7 @@ func applyPrayer(g *core.GameState, quality int) bool {
 	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillPrayer), g.Battle.PartyTarget)
 	selfTarget := g.Battle.PartyTarget == g.Battle.CurrentParty
 	setBattleMessage(g, prayerMessage(actor.Name, target.Name, heal, quality, selfTarget))
-	finishPartyAction(g)
+	finishActorTurn(g)
 	return true
 }
 
@@ -911,7 +911,7 @@ func applySteal(g *core.GameState, quality int) bool {
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	if enemy.Item == core.ItemNone {
 		setBattleMessage(g, "There is nothing to steal.")
-		finishPartyAction(g)
+		finishActorTurn(g)
 		// The thief's hand still moved — popup with the quality reads as
 		// "graded an empty grab" which is fine.
 		return true
@@ -953,7 +953,7 @@ func applySteal(g *core.GameState, quality int) bool {
 	} else {
 		setBattleMessage(g, fmt.Sprintf("%s fails to steal.", actor.Name))
 	}
-	finishPartyAction(g)
+	finishActorTurn(g)
 	return true
 }
 
@@ -1004,7 +1004,7 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 		core.EnqueuePartyVFX(g, core.VFXEmber, g.Battle.CurrentParty)
 		setBattleMessage(g, fmt.Sprintf("%s overcharges the bolt — and is scorched for %d!", actor.Name, recoil))
 	}
-	finishPartyAction(g)
+	finishActorTurn(g)
 	return true
 }
 
@@ -1038,7 +1038,7 @@ func applyCrushingBlow(g *core.GameState, quality int) bool {
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	stunned := tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, core.TimingQualityGreat, effect.StunDuration, resistWIS)
 	setBattleMessage(g, appendCrit(crushingBlowMessage(actor.Name, target, damage, quality, defeated, stunned), crit))
-	finishPartyAction(g)
+	finishActorTurn(g)
 	return true
 }
 
@@ -1067,7 +1067,7 @@ func applyAoESkill(g *core.GameState, skill core.SkillID, skillNoun, hitVerb, em
 	} else {
 		setBattleMessage(g, appendCrit(aoeSkillMessage(actor.Name, skillNoun, hitVerb, hits, damage, quality), crit))
 	}
-	finishPartyAction(g)
+	finishActorTurn(g)
 	return true
 }
 
@@ -1085,6 +1085,11 @@ func applyMassMend(g *core.GameState, quality int) bool {
 	actor := &g.Party[g.Battle.CurrentParty]
 	actor.AttackBump = core.BumpDuration
 	heal := core.ScaleHeal(core.SkillHealFor(actor, core.SkillMassMend), quality)
+	// Tally the wounds + queue per-member VFX on the PRE-heal HP, then apply
+	// the heal through the shared core.HealWholeParty so this and the
+	// out-of-battle Mass Mend (explore/panels_use.go) can't drift on the
+	// heal rule. HealWholeParty/HealMember no-op the dead/ingested and clamp
+	// at MaxHP; the HP<MaxHP check here is only the "counts as a mend" tally.
 	healed := 0
 	for i := range g.Party {
 		m := &g.Party[i]
@@ -1094,19 +1099,15 @@ func applyMassMend(g *core.GameState, quality int) bool {
 		if m.HP < m.MaxHP {
 			healed++
 		}
-		// Route the actual heal through the canonical core.HealMember (clamp +
-		// no-revive/ingest guards) rather than re-implementing GainUpTo, so a
-		// heal-rule change lands in one place. The HP<MaxHP check above is only
-		// the "counts as a mend" tally for the log line.
-		core.HealMember(m, heal)
 		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillMassMend), i)
 	}
+	core.HealWholeParty(g, heal)
 	if healed == 0 {
 		setBattleMessage(g, fmt.Sprintf("%s%s's Mass Mend finds no wounds.", qualityTag(quality), actor.Name))
 	} else {
 		setBattleMessage(g, fmt.Sprintf("%s%s mends %d allies for %d each.", qualityTag(quality), actor.Name, healed, heal))
 	}
-	finishPartyAction(g)
+	finishActorTurn(g)
 	return true
 }
 
@@ -1133,7 +1134,7 @@ func applySmite(g *core.GameState, quality int) bool {
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	stunned := tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, core.TimingQualityGreat, effect.StunDuration, resistWIS)
 	setBattleMessage(g, appendCrit(smiteMessage(actor.Name, target, damage, quality, defeated, stunned), crit))
-	finishPartyAction(g)
+	finishActorTurn(g)
 	return true
 }
 
@@ -1161,7 +1162,7 @@ func applyBackstab(g *core.GameState, quality int) bool {
 	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillBackstab))
 	core.EnqueueEnemyVFX(g, core.VFXSlash, g.Battle.EnemyIndex)
 	setBattleMessage(g, backstabMessage(actor.Name, target, damage, quality, defeated, crit))
-	finishPartyAction(g)
+	finishActorTurn(g)
 	return true
 }
 
@@ -1184,7 +1185,7 @@ func applyVenomStrike(g *core.GameState, quality int) bool {
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	poisoned := tryProcStatus(g.Rand(), &enemy.PoisonTurns, defeated, effect.PoisonChance, quality, 0, effect.PoisonDuration, resistWIS)
 	setBattleMessage(g, appendCrit(venomStrikeMessage(actor.Name, target, damage, quality, defeated, poisoned), crit))
-	finishPartyAction(g)
+	finishActorTurn(g)
 	return true
 }
 
@@ -1214,7 +1215,7 @@ func applyFrostLance(g *core.GameState, quality int) bool {
 	// frostLanceMessage.
 	stunned := tryProcStatus(g.Rand(), &enemy.StunTurns, defeated, effect.StunChance, quality, core.TimingQualityGreat, effect.StunDuration, resistWIS)
 	setBattleMessage(g, appendCrit(frostLanceMessage(actor.Name, target, damage, quality, defeated, stunned), crit))
-	finishPartyAction(g)
+	finishActorTurn(g)
 	return true
 }
 
@@ -1698,13 +1699,6 @@ func clearPartyStatusesOnDeath(member *core.PartyMember) {
 	member.SleepTurns = 0
 	member.WebbedTurns = 0
 	member.ConfusedTurns = 0
-}
-
-// finishPartyAction is the apply* hand-off — kept as a thin wrapper so the
-// per-skill apply functions keep their old names. Mixed-initiative scheduling
-// lives in finishActorTurn (battle.go), which advances the round queue.
-func finishPartyAction(g *core.GameState) {
-	finishActorTurn(g)
 }
 
 // --- Result text ---

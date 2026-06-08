@@ -278,16 +278,36 @@ var statusTurnsCache = func() [20]struct{ plain, zPrefix, pPrefix, sPrefix strin
 	return out
 }()
 
+// drawStatusPill paints the shared status-pill silhouette: a small
+// rounded fill pane + matching outline + a FontSmall single-line label.
+// The "fill + outline + label" core both status surfaces use — the
+// enemy-roster pill (drawEnemyStatusPill) and the Tome Stats-tab chip
+// (render/panels.go) — extracted so the two pill silhouettes can't drift
+// (FINDING #18). The two callers anchor + color the label differently
+// (enemy: centered inkPrimary; Stats chip: left-aligned status tint), so
+// the label placement is parameterized: `centered` true centers the
+// label (with the enemy pill's +2 top inset); false left-aligns it with
+// the Stats chip's +10/+4 inset. `labelCol` lets each pick its tone.
+func drawStatusPill(font rl.Font, x, y, w, h float32, fill, outline rl.Color, label string, labelCol rl.Color, centered bool) {
+	drawSmallPanel(int32(x), int32(y), int32(w), int32(h), fill)
+	drawSmallPanelOutline(int32(x), int32(y), int32(w), int32(h), outline)
+	if centered {
+		drawTextCentered(font, label, x+w/2, y+2, FontSmall, labelCol)
+	} else {
+		drawTextWithShadow(font, label, x+10, y+4, FontSmall, labelCol)
+	}
+}
+
 // drawEnemyStatusPill paints one rounded-rect status pill at the
 // given coords with a centered single-line label. Single helper so
 // every status (Burn / Sleep / Poison / Stun and future additions)
 // shares the same silhouette — earlier code repeated the
 // drawSmallPanel + drawSmallPanelOutline + drawTextCentered triple
-// inline per status, drifting on font size and outline tone.
+// inline per status, drifting on font size and outline tone. Thin
+// wrapper over drawStatusPill that pins the enemy pill's centered
+// inkPrimary label so its appearance is unchanged.
 func drawEnemyStatusPill(font rl.Font, x, y, w, h float32, fill, outline rl.Color, label string) {
-	drawSmallPanel(int32(x), int32(y), int32(w), int32(h), fill)
-	drawSmallPanelOutline(int32(x), int32(y), int32(w), int32(h), outline)
-	drawTextCentered(font, label, x+w/2, y+2, FontSmall, inkPrimary)
+	drawStatusPill(font, x, y, w, h, fill, outline, label, inkPrimary, true)
 }
 
 // combatLogTextPad is the horizontal inset between the combat-log

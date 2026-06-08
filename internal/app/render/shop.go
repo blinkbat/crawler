@@ -48,9 +48,7 @@ func drawShopOverlay(g core.GameState, assets Resources) {
 
 	// Gold readout (right) and Buy/Sell tabs (left) share the sub-title row.
 	subY := belowTitleY + 12
-	gold := fmt.Sprintf("Gold: %d", g.Gold)
-	gm := rl.MeasureTextEx(font, gold, FontBody, FontSpacingBody)
-	drawTextWithShadow(font, gold, float32(panelX+shopPanelW)-gm.X-float32(shopRowInsetX), subY, FontBody, borderActive)
+	drawTextRightAligned(font, goldLabelFull(g.Gold), float32(panelX+shopPanelW)-float32(shopRowInsetX), subY, FontBody, borderActive)
 	drawShopTabs(font, g.ShopTab, float32(panelX+shopRowInsetX), subY)
 
 	// Rows.
@@ -69,8 +67,7 @@ func drawShopOverlay(g core.GameState, assets Resources) {
 			nameCol = textMuted
 		}
 		drawTextWithShadow(font, r.name, float32(rowX), float32(rowY+4), FontBody, nameCol)
-		pm := rl.MeasureTextEx(font, r.price, FontBody, FontSpacingBody)
-		drawTextWithShadow(font, r.price, float32(rowX)+float32(innerW)-pm.X-12, float32(rowY+4), FontBody, textLabel)
+		drawTextRightAligned(font, r.price, float32(rowX)+float32(innerW)-12, float32(rowY+4), FontBody, textLabel)
 		rowY += stride
 	}
 

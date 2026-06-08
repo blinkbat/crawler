@@ -263,7 +263,7 @@ func applyItem(g *core.GameState) {
 	actor.AttackBump = core.BumpDuration
 	setBattleMessage(g, itemUseMessage(actor.Name, tgt.Name, def, healedHP > 0, healedHP, restoredMP))
 	g.Battle.PendingItem = core.ItemNone
-	finishPartyAction(g)
+	finishActorTurn(g)
 }
 
 // itemUseMessage formats the combat-log line for a consumed item by what it
@@ -293,7 +293,7 @@ func performDefend(g *core.GameState) {
 	}
 	member.Defending = true
 	setBattleMessage(g, fmt.Sprintf("%s braces for impact.", member.Name))
-	finishPartyAction(g)
+	finishActorTurn(g)
 }
 
 func updateEnemyTargeting(g *core.GameState) {

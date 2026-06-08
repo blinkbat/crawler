@@ -353,7 +353,36 @@ func PartyRibbonTopY() float32 {
 	return h - partyCardH - ribbonBottom
 }
 
+// centeredMeasureCache memoizes the MeasureTextEx backing drawTextCentered.
+// Its callers (enemy status pills — up to ~24/frame in heavy combat — the
+// door prompt, the chest "Press Enter to open" cue) all re-draw stable
+// strings every frame their surface is up, so caching the measure here
+// covers those hot/stable sites for free (FINDING #15).
+var centeredMeasureCache measureCache
+
 func drawTextCentered(font rl.Font, text string, centerX, y, size float32, col color.RGBA) {
-	measure := rl.MeasureTextEx(font, text, size, 1)
+	measure := centeredMeasureCache.measure(font, text, size, 1)
 	drawTextWithShadow(font, text, centerX-measure.X/2, y, size, col)
+}
+
+// rightAlignMeasureCache memoizes the MeasureTextEx call backing
+// drawTextRightAligned. Most right-aligned readouts (gold totals, SP/MP
+// costs, stat values, shop prices) are stable strings re-drawn every
+// frame while their surface is open, so caching the measure here covers
+// the per-frame cgo cost for every site that routes through the helper
+// (FINDING #15). The shared measureCache keys on (text,size,spacing), so
+// the FontSmall / FontBody / FontHeading / FontTiny callers coexist in
+// the one instance.
+var rightAlignMeasureCache measureCache
+
+// drawTextRightAligned draws `text` so its RIGHT edge sits at rightX
+// (the text occupies [rightX-width, rightX]). The right-aligned mirror
+// of drawTextCentered — consolidates the ~14 "measure.X then draw at
+// edge - measure.X - pad" sites that each open-coded the same subtraction
+// (gold readouts, stat/ARM/XP values, SP/ratio reads, MP costs, shop
+// prices). Routes the measure through rightAlignMeasureCache so those
+// hot, stable-string sites stop re-shaping every frame (FINDING #15).
+func drawTextRightAligned(font rl.Font, text string, rightX, y, size float32, col color.RGBA) {
+	measure := rightAlignMeasureCache.measure(font, text, size, 1)
+	drawTextWithShadow(font, text, rightX-measure.X, y, size, col)
 }

@@ -62,9 +62,9 @@ func updateHotkeys(s *State) {
 		s.showTileGlyphs = !s.showTileGlyphs
 	}
 
-	// Alt+1..6 jumps directly to a layer — saves Tab-cycling when the
-	// author knows which layer they want. Number row only; the keypad
-	// equivalents aren't bound to keep the binding compact.
+	// Alt+1..7 jumps directly to a layer (one per layerCount layer) — saves
+	// Tab-cycling when the author knows which layer they want. Number row
+	// only; the keypad equivalents aren't bound to keep the binding compact.
 	if alt {
 		for i := 0; i < layerCount; i++ {
 			if rl.IsKeyPressed(numberRowKeys[i]) {

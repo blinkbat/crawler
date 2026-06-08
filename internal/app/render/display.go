@@ -8,7 +8,7 @@ import (
 
 // DisplayMode names the user-selectable window presentation. The app boots
 // in Fullscreen (borderless windowed covering the monitor — see Run's call
-// to its own applyWindowedFullscreen helper); Windowed gives the user a
+// to render.SetDisplayMode(DisplayFullscreen)); Windowed gives the user a
 // resizable bordered window so they can drag, snap, or share-screen.
 type DisplayMode int
 

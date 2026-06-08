@@ -48,13 +48,9 @@ func newMapModalLayout() newMapLayout {
 	// dimensions row so the modal reads as the same control family.
 	y := card.Y + 64
 	xLeft := card.X + 20
-	l.widthValue = rl.NewRectangle(xLeft+62, y, 96, 30)
-	l.widthMinus = rl.NewRectangle(l.widthValue.X+l.widthValue.Width+6, y, 30, 30)
-	l.widthPlus = rl.NewRectangle(l.widthMinus.X+l.widthMinus.Width+6, y, 30, 30)
+	l.widthValue, l.widthMinus, l.widthPlus = stepperRow(xLeft+62, y, 96, 6)
 	y += 42
-	l.heightValue = rl.NewRectangle(xLeft+62, y, 96, 30)
-	l.heightMinus = rl.NewRectangle(l.heightValue.X+l.heightValue.Width+6, y, 30, 30)
-	l.heightPlus = rl.NewRectangle(l.heightMinus.X+l.heightMinus.Width+6, y, 30, 30)
+	l.heightValue, l.heightMinus, l.heightPlus = stepperRow(xLeft+62, y, 96, 6)
 
 	// Floor swatch grid. Each cell is 110x30 with 8px gutters so a 4×N
 	// layout still fits comfortably inside the 520-wide card.

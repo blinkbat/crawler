@@ -150,6 +150,11 @@ func AwardBattleLoot(g *GameState) (gold int, drops []ItemKind) {
 
 // rollGold returns a uniform int in [lo, hi], tolerant of unset (0, 0) and
 // inverted bounds so an authoring slip can't panic the loot award.
+//
+// Degenerate-bounds policy: SWAP inverted bounds, then clamp the result to
+// >= 0 (an authoring slip can't pay out negative gold). This intentionally
+// differs from its two siblings — RandRangeI (util.go) just returns lo on
+// hi <= lo, and rollDuration (party.go) returns 0 on min <= 0 || max < min.
 func rollGold(rng *rand.Rand, lo, hi int) int {
 	if hi < lo {
 		lo, hi = hi, lo

@@ -236,6 +236,22 @@ func applyEntityBrush(s *State, x, z int, kind entityKind) {
 		clearEntitiesAt(s, x, z)
 		return
 	}
+	// Player start carries its own COMPLETE rule set (no wall / prop / deep
+	// water — anything that would soft-lock the player on spawn), routed
+	// through the shared startBlockers so it matches the right-click "Move
+	// start here" path exactly. Handled before the generic entity guard so
+	// its wall/prop wording isn't pre-empted by the looser "Entities need an
+	// open cell" message.
+	if kind == entityPlayerStart {
+		if msg := firstBlocker(startBlockers(&s.area, x, z)...); msg != "" {
+			s.flash(msg)
+			return
+		}
+		s.area.StartTileX = x
+		s.area.StartTileZ = z
+		s.dirty = true
+		return
+	}
 	if s.area.WallAt(x, z) {
 		s.flash("Entities need an open cell")
 		return
@@ -246,19 +262,6 @@ func applyEntityBrush(s *State, x, z int, kind entityKind) {
 	}
 	brush := s.activeBrush()
 	switch kind {
-	case entityPlayerStart:
-		// Player start has the strictest tile rule: no walls, no props,
-		// no deep water — anything that would soft-lock the player on
-		// spawn. Packs and chests are tolerant of water (packs snap to
-		// the nearest walkable tile, chests interact from adjacent), so
-		// the floor-blocker rejection lives only on this branch.
-		if core.IsBlockingFloor(s.area.Floor[z][x]) {
-			s.flash("Player start can't sit on deep water")
-			return
-		}
-		s.area.StartTileX = x
-		s.area.StartTileZ = z
-		s.dirty = true
 	case entityAddEnemy:
 		addPackMember(s, x, z, brush.EnemyKind)
 	case entityPlaceChest:
@@ -318,6 +321,19 @@ func blkChestHere(a *core.AreaDefinition, x, z int, clear bool) blockerCheck {
 }
 func blkDoorHere(a *core.AreaDefinition, x, z int) blockerCheck {
 	return blockerCheck{core.DoorSpawnIndexAt(a.DoorSpawns, x, z) >= 0, "Cell already holds a door"}
+}
+
+// startBlockers is the player-start placement rule: no wall, no prop, no
+// deep water (anything that would soft-lock the player on spawn). Shared by
+// the entity-brush start tool (applyEntityBrush) AND the right-click "Move
+// start here" context action so the two paths can't drift on which tiles are
+// legal or on the flash wording. Pass through firstBlocker(startBlockers(...)...).
+func startBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
+	return []blockerCheck{
+		blkWall(a, x, z, "Player start"),
+		blkProp(a, x, z),
+		blkDeepWater(a, x, z, "Player start"),
+	}
 }
 
 // placeDoorAt drops a door at (x,z) with a placeholder name and a
