@@ -1,5 +1,7 @@
 package core
 
+import "fmt"
+
 type EnemyCondition int
 
 const (
@@ -50,4 +52,15 @@ func EnemyConditionLabel(condition EnemyCondition) string {
 		}
 	}
 	return "Unharmed"
+}
+
+func init() {
+	// woundBands must cover every condition except EnemyUnharmed (the
+	// HP==Max early-return, not a band). Adding an EnemyCondition bumps
+	// EnemyConditionCount — which forces the render color table to grow — so
+	// assert the band table grew too, or a new condition silently lacks a
+	// threshold and EnemyConditionFor can never return it.
+	if len(woundBands) != EnemyConditionCount-1 {
+		panic(fmt.Sprintf("core: woundBands has %d rows, expected EnemyConditionCount-1 (%d)", len(woundBands), EnemyConditionCount-1))
+	}
 }

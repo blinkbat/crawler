@@ -104,12 +104,27 @@ func LoadEnemyVisualOverrides() (map[string]EnemyVisualOverride, error) {
 // editor saving one foe never clobbers another foe's saved tuning. Creates the
 // sprites dir if it doesn't exist yet (first-author case).
 func SaveEnemyVisualOverride(slug string, ov EnemyVisualOverride) error {
-	all, err := LoadEnemyVisualOverrides()
-	if err != nil {
-		// A corrupt existing file shouldn't strand the author — start fresh
-		// rather than refusing every future save. The bad bytes are about to
-		// be overwritten anyway.
-		all = map[string]EnemyVisualOverride{}
+	all := map[string]EnemyVisualOverride{}
+	blob, err := os.ReadFile(EnemyVisualsPath())
+	switch {
+	case err == nil:
+		// Merge into the existing file. A corrupt (unparseable) file shouldn't
+		// strand the author from saving THIS foe — but overwriting it would
+		// silently destroy every OTHER foe's tuning that the bad bytes still
+		// hold (one stray character is enough to fail the parse). Preserve the
+		// original bytes in a sibling .bak first (best-effort) so the author
+		// can recover the rest, THEN start fresh. A genuine read error (locked
+		// file, bad permissions) is surfaced below instead of swallowed.
+		if uerr := json.Unmarshal(blob, &all); uerr != nil {
+			_ = os.WriteFile(EnemyVisualsPath()+".bak", blob, AssetFileMode)
+			all = map[string]EnemyVisualOverride{}
+		}
+	case os.IsNotExist(err):
+		// First author — the empty map is correct.
+	default:
+		// Transient I/O error: refuse rather than clobber the whole file with
+		// just this one slug.
+		return err
 	}
 	all[slug] = ov
 	return SaveEnemyVisualOverrides(all)

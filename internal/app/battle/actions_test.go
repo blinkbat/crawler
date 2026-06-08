@@ -49,6 +49,38 @@ func newTestState() *core.GameState {
 	return g
 }
 
+// TestSkippedTurnTicksPoison is the regression guard for the DoT-freeze bug:
+// a turn skipped by Sleep/Stun must still elapse the actor's Poison (damage +
+// duration), exactly as a normal turn does, on BOTH sides. Previously the
+// skip path ticked only Webbed/Confused, so a poisoned-and-incapacitated
+// actor paused its poison for the whole lockout.
+func TestSkippedTurnTicksPoison(t *testing.T) {
+	// Party side.
+	g := newTestState()
+	g.Party[0].HP = 10
+	g.Party[0].PoisonTurns = 3
+	startHP := g.Party[0].HP
+	advanceSkippedTurn(g, core.ActorRef{IsParty: true, Index: 0})
+	if g.Party[0].PoisonTurns != 2 {
+		t.Errorf("party poison duration: got %d, want 2 (one tick on skipped turn)", g.Party[0].PoisonTurns)
+	}
+	if g.Party[0].HP >= startHP {
+		t.Errorf("party poison dealt no damage on skipped turn: HP %d, was %d", g.Party[0].HP, startHP)
+	}
+
+	// Enemy side (a stunned, poisoned enemy).
+	g2 := newTestState()
+	enHP := g2.Packs[0].Members[0].HP
+	g2.Packs[0].Members[0].PoisonTurns = 2
+	advanceSkippedTurn(g2, core.ActorRef{IsParty: false, Index: 0})
+	if g2.Packs[0].Members[0].PoisonTurns != 1 {
+		t.Errorf("enemy poison duration: got %d, want 1 (one tick on skipped turn)", g2.Packs[0].Members[0].PoisonTurns)
+	}
+	if g2.Packs[0].Members[0].HP >= enHP {
+		t.Errorf("enemy poison dealt no damage on skipped turn: HP %d, was %d", g2.Packs[0].Members[0].HP, enHP)
+	}
+}
+
 // TestBuildTurnQueue_SPDIncreasesTurnRate locks the contract that SPD
 // drives turn RATE (how often an actor acts over many rounds), not just
 // order within one round. A SPD-6 actor against a SPD-2 actor should take

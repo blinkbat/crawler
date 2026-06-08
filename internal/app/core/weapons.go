@@ -73,6 +73,11 @@ func init() {
 		if weaponSpecs[wt].Label == "" {
 			panic(fmt.Sprintf("core: weaponSpecs missing a row for WeaponType %d — add its accuracy/reach", wt))
 		}
+		// Accuracy is documented as STR (heavy/unarmed) or DEX (light/ranged)
+		// only; anything else would silently govern to-hit off the wrong stat.
+		if a := weaponSpecs[wt].Accuracy; a != StatSTR && a != StatDEX {
+			panic(fmt.Sprintf("core: weaponSpecs[%d] Accuracy must be StatSTR or StatDEX, got %d", wt, a))
+		}
 	}
 }
 

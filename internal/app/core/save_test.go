@@ -70,6 +70,85 @@ func TestSaveDataJSONRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSanitizeLoadedParty_ClearsTransientCombatState guards the load-side
+// trust boundary: a hand-edited / older save carrying combat-only statuses
+// must not load a member still asleep, stunned, or ingested into exploration.
+// Poison is the deliberate exception — it persists out of battle, so it must
+// survive the sanitize.
+func TestSanitizeLoadedParty_ClearsTransientCombatState(t *testing.T) {
+	party := NewParty()
+	m := &party[0]
+	m.Ingested = true
+	m.IngestedBy = 2
+	m.SleepTurns = 9
+	m.StunTurns = 3
+	m.WebbedTurns = 4
+	m.ConfusedTurns = 5
+	m.Defending = true
+	m.PoisonTurns = 3 // must SURVIVE — poison carries into exploration
+
+	sanitizeLoadedParty(party)
+
+	g := &party[0]
+	// IngestedBy resets to the -1 "no captor" sentinel (ReleaseAllIngested),
+	// not 0 — the load-bearing flag is Ingested itself.
+	if g.Ingested || g.SleepTurns != 0 || g.StunTurns != 0 ||
+		g.WebbedTurns != 0 || g.ConfusedTurns != 0 || g.Defending {
+		t.Errorf("transient combat state not cleared on load: %+v", g)
+	}
+	if g.PoisonTurns != 3 {
+		t.Errorf("PoisonTurns should persist into exploration, got %d", g.PoisonTurns)
+	}
+}
+
+// TestOverlaySavedParty_Reconciles guards the PartyMemberCount-length,
+// class-ordered seating contract against a malformed save: a normal save maps
+// 1:1 (progression preserved), a short save keeps fresh defaults for missing
+// slots, and an out-of-range Class is dropped rather than leaking in.
+func TestOverlaySavedParty_Reconciles(t *testing.T) {
+	// Normal save: 1:1, progression preserved, length unchanged.
+	base := NewParty()
+	saved := NewParty()
+	saved[0].Level = 7
+	saved[0].SkillPoints = 4
+	overlaySavedParty(base, saved)
+	if len(base) != PartyMemberCount {
+		t.Fatalf("party length changed: %d, want %d", len(base), PartyMemberCount)
+	}
+	if base[0].Level != 7 || base[0].SkillPoints != 4 {
+		t.Errorf("normal overlay lost progression: %+v", base[0])
+	}
+
+	// Short save (one member): canonical length preserved; the present member
+	// is matched by class, missing slots keep fresh defaults.
+	base = NewParty()
+	overlaySavedParty(base, []PartyMember{{Class: ClassThief, Level: 9}})
+	if len(base) != PartyMemberCount {
+		t.Fatalf("short save broke length contract: %d", len(base))
+	}
+	thiefMatched := false
+	for _, m := range base {
+		if m.Class == ClassThief {
+			thiefMatched = m.Level == 9
+		}
+	}
+	if !thiefMatched {
+		t.Errorf("thief progression not overlaid from short save: %+v", base)
+	}
+
+	// Out-of-range Class: dropped, no slot inherits its data.
+	base = NewParty()
+	bad := append([]PartyMember(nil), NewParty()...)
+	bad[0].Class = PartyClass(99)
+	bad[0].Level = 50
+	overlaySavedParty(base, bad)
+	for _, m := range base {
+		if m.Level == 50 {
+			t.Errorf("out-of-range-class member leaked into party: %+v", m)
+		}
+	}
+}
+
 // TestSaveVersionSupported exercises LoadSave's actual version gate (the
 // extracted saveVersionSupported predicate) without touching the on-disk
 // save. A future version is refused (can't parse it), and a 0/missing version

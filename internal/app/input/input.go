@@ -229,16 +229,18 @@ func EditorTabPressed() bool {
 
 // EditorPaintPressed / EditorErasePressed are the grid-cursor paint / erase
 // edges. Keyboard keeps Space / Backspace (so they don't collide with the
-// modal Enter-commit), and the pad A / B face buttons paint / erase so the
-// canvas is editable with a controller too. (Grid and modal contexts are
-// mutually exclusive, so reusing A / B here doesn't fight the modal
-// confirm / cancel.)
+// modal Enter-commit). On the pad, A / Cross paints; erase uses Square / X
+// rather than B / Circle, because B / Circle is the global editor cancel edge
+// (it opens the Esc menu): sharing it would make a single "back" press both
+// erase the cursor tile AND open the menu in the same frame. The in-game Use
+// action also lives on Square / X, but the editor never reads that predicate,
+// so the two never overlap.
 func EditorPaintPressed() bool {
 	return rl.IsKeyPressed(rl.KeySpace) || padPressed(rl.GamepadButtonRightFaceDown) // A / Cross
 }
 
 func EditorErasePressed() bool {
-	return rl.IsKeyPressed(rl.KeyBackspace) || padPressed(rl.GamepadButtonRightFaceRight) // B / Circle
+	return rl.IsKeyPressed(rl.KeyBackspace) || padPressed(rl.GamepadButtonRightFaceLeft) // Square / X
 }
 
 // CursorLeftRight returns -1 on a Left edge, +1 on a Right edge, 0

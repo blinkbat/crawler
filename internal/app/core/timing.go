@@ -34,6 +34,21 @@ const (
 	TimingKindOvercharge = 5
 )
 
+func init() {
+	// SkillMinigame (party.go) and these TimingKind codes are parallel
+	// enumerations mapped 1:1 in battle.beginPendingAction. Assert they stay
+	// value-aligned so reordering or inserting a value in one without the
+	// other fails loudly at startup instead of silently arming the wrong bar.
+	if int(MinigamePress) != TimingKindPress ||
+		int(MinigameCharge) != TimingKindCharge ||
+		int(MinigameSequence) != TimingKindSequence ||
+		int(MinigameReels) != TimingKindReels ||
+		int(MinigameRecall) != TimingKindRecall ||
+		int(MinigameOvercharge) != TimingKindOvercharge {
+		panic("core: SkillMinigame and TimingKind enums have drifted out of lockstep")
+	}
+}
+
 // Sequence-minigame direction codes. Stored in TimingState.SequenceTargets
 // at NewSequenceState time; matched against player input at runtime.
 const (
@@ -521,6 +536,17 @@ func (t TimingState) allReelsStopped() bool {
 // auto-locked symbols would frequently match and hand a walk-away player a
 // boosted Steal chance (the apply path reads Quality regardless of Pressed).
 func (t *TimingState) resolveReels() {
+	// Snapshot the reels the player actually stopped BEFORE auto-locking the
+	// rest. Only player-stopped reels count toward the match — a reel left
+	// spinning still locks on its current symbol for display, but letting it
+	// time out must not luck into a jackpot from a randomly auto-locked symbol
+	// (the apply path reads Quality regardless of how the reel stopped).
+	stopped := make([]Reel, 0, len(t.Reels))
+	for i := range t.Reels {
+		if t.Reels[i].Stop >= 0 {
+			stopped = append(stopped, t.Reels[i])
+		}
+	}
 	for i := range t.Reels {
 		if t.Reels[i].Stop < 0 {
 			t.Reels[i].Stop = t.ReelSymbolAt(i)
@@ -531,7 +557,7 @@ func (t *TimingState) resolveReels() {
 		t.Quality = TimingQualityMiss
 		return
 	}
-	switch largestReelMatch(t.Reels) {
+	switch largestReelMatch(stopped) {
 	case 3:
 		t.Quality = TimingQualityExcellent
 	case 2:

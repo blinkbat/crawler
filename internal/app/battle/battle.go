@@ -30,6 +30,12 @@ func Start(g *core.GameState, packIndex int) {
 	g.Battle.SequencePulseTimer = 0
 	g.Battle.SequencePulseIndex = -1
 	g.Battle.EnemyAttacker = -1
+	// Belt-and-suspenders with the other transients above: clear any pending
+	// enemy cast so a Start that somehow followed an unclean exit can't make
+	// the first enemy turn skip its defend bar and fire a phantom spell. Both
+	// real entry paths (leaveBattle's clearBattleResidual, ResetGameState)
+	// already clear it, but every sibling transient is reset here too.
+	g.Battle.EnemyPendingSkill = core.SkillNone
 	g.Battle.LastQualityTimer = 0
 	g.Battle.Queue = nil
 	g.Battle.QueueCursor = 0
@@ -263,13 +269,25 @@ func simulateTurnQueue(g *core.GameState, persist bool) []core.ActorRef {
 	// everyone else has SPD 1) shouldn't blow past the configured
 	// multiple of participant count per round.
 	maxSlots := target * core.ATBQueueSlotMultiplier
-	for actedCount < target && len(queue) < maxSlots {
+	for actedCount < target {
+		// maxSlots caps SURPLUS turns (a fast actor acting many times before
+		// the slow ones), but must never starve a not-yet-acted actor of its
+		// guaranteed single turn. Once the queue hits the cap, keep advancing
+		// the clock yet only let actors that haven't acted this round be
+		// picked — otherwise an extreme SPD spread (e.g. 30 vs 1) lets the
+		// fast actor fill every slot before the slow actor crosses the gate,
+		// skipping its turn and the round-boundary housekeeping that hangs off
+		// "every alive actor acted at least once."
+		capped := len(queue) >= maxSlots
 		// Pick the actor that reaches `threshold` in the fewest ticks.
 		// ticksNeeded = ceil((threshold - ready) / spd), compared via
 		// cross-multiplication to keep everything integer.
 		bestIdx := -1
 		for i := range actors {
 			if actors[i].spd <= 0 {
+				continue
+			}
+			if capped && actors[i].acted {
 				continue
 			}
 			if bestIdx < 0 {
@@ -389,17 +407,11 @@ func startActorTurn(g *core.GameState) {
 	// first so a target that's both sleeping and stunned reads as
 	// "asleep" in the log.
 	if asleep := tickSleepAtTurnStart(g, actor); asleep {
-		consumeDefendOnSkip(g, actor)
-		drainNonDamagingPartyStatuses(g, actor)
-		g.Battle.QueueCursor++
-		startActorTurn(g)
+		advanceSkippedTurn(g, actor)
 		return
 	}
 	if stunned := tickStunAtTurnStart(g, actor); stunned {
-		consumeDefendOnSkip(g, actor)
-		drainNonDamagingPartyStatuses(g, actor)
-		g.Battle.QueueCursor++
-		startActorTurn(g)
+		advanceSkippedTurn(g, actor)
 		return
 	}
 
@@ -408,6 +420,28 @@ func startActorTurn(g *core.GameState) {
 	} else {
 		beginEnemyAttack(g, actor.Index)
 	}
+}
+
+// advanceSkippedTurn closes out a turn that Sleep or Stun cost the actor.
+// A skipped turn still ELAPSES the actor's per-turn effects, exactly as a
+// normal turn (finishActorTurn) and the ingest lockout do: it clears the
+// one-round Defend brace, drains the non-damaging party statuses
+// (Webbed/Confused), AND ticks Poison. The poison tick is the bug fix — it
+// was previously omitted here, so a poisoned actor who was repeatedly
+// slept/stunned had its DoT frozen (zero damage, no duration decrement) for
+// the whole lockout, unlike every other status. The tick can kill, so win
+// conditions are checked before advancing — mirroring finishActorTurn and
+// the burn-at-turn-start path.
+func advanceSkippedTurn(g *core.GameState, actor core.ActorRef) {
+	consumeDefendOnSkip(g, actor)
+	drainNonDamagingPartyStatuses(g, actor)
+	tickPoisonAfterPartyTurn(g, actor)
+	tickPoisonAfterEnemyTurn(g, actor)
+	if checkEnemyWipeout(g) || checkPartyWipeout(g) {
+		return
+	}
+	g.Battle.QueueCursor++
+	startActorTurn(g)
 }
 
 // consumeDefendOnSkip clears a party member's Defend brace when their
@@ -992,6 +1026,13 @@ func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
 	if !effect.AppliesAOEParty && !effect.AppliesSummonSkeleton {
 		target = pickEnemyAttackTarget(g)
 		if target < 0 {
+			// No living, non-ingested party target for a single-target cast
+			// (e.g. the last reachable ally just got swallowed mid-round).
+			// pickEnemyAttackTarget already advanced the round-robin cursor,
+			// so the queue stays consistent — but don't let the enemy's whole
+			// turn elapse with a blank combat log; surface the no-op so the
+			// forecast advancing isn't mistaken for a frozen battle.
+			setBattleMessage(g, fmt.Sprintf("The %s hesitates.", core.EnemySingularNoun(*enemy)))
 			return
 		}
 	}

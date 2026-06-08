@@ -248,9 +248,12 @@ func applyItem(g *core.GameState) {
 		return
 	}
 	g.Inventory = updated
-	healed := false
+	healedHP := 0
 	if def.HealAmount > 0 {
-		healed = healPartyMember(g, target, def.HealAmount)
+		before := tgt.HP
+		if healPartyMember(g, target, def.HealAmount) {
+			healedHP = tgt.HP - before
+		}
 	}
 	restoredMP := 0
 	if def.MPAmount > 0 {
@@ -258,15 +261,15 @@ func applyItem(g *core.GameState) {
 	}
 	actor := &g.Party[g.Battle.CurrentParty]
 	actor.AttackBump = core.BumpDuration
-	setBattleMessage(g, itemUseMessage(actor.Name, tgt.Name, def, healed, def.HealAmount, restoredMP))
+	setBattleMessage(g, itemUseMessage(actor.Name, tgt.Name, def, healedHP > 0, healedHP, restoredMP))
 	g.Battle.PendingItem = core.ItemNone
 	finishPartyAction(g)
 }
 
 // itemUseMessage formats the combat-log line for a consumed item by what it
 // actually restored: HP (food — "eats"), MP (phial — "drinks"), both, or a
-// plain "uses" for a no-restore item. hp is the nominal HealAmount (matching
-// the pre-MP behaviour); mp is the ACTUAL MP restored.
+// plain "uses" for a no-restore item. Both hp and mp are the ACTUAL amounts
+// gained (post-clamp), so the log can't claim "+8 HP" when only 1 landed.
 func itemUseMessage(actorName, targetName string, def core.ItemDefinition, healed bool, hp, mp int) string {
 	switch {
 	case healed && hp > 0 && mp > 0:

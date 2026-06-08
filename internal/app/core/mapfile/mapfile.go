@@ -699,6 +699,16 @@ func (mf *MapFile) validate() error {
 			if len(row) != mf.Width {
 				return fmt.Errorf("elevation layer row %d has %d cols, size declares %d", i, len(row), mf.Width)
 			}
+			// Every elevation cell must be a level digit '0'..'9' — the layer's
+			// documented domain. ElevationLevelAt silently reads anything else
+			// as ground level 0, so without this a stray non-digit (hand-edit,
+			// wrong layer pasted in) loads as flat ground and silently desyncs
+			// the intended cliff / ramp geometry with no diagnostic.
+			for c := 0; c < len(row); c++ {
+				if row[c] < '0' || row[c] > '9' {
+					return fmt.Errorf("elevation layer row %d col %d has non-digit %q (expected '0'..'9')", i, c, string(row[c]))
+				}
+			}
 		}
 	default:
 		return fmt.Errorf("elevation layer has %d rows, size declares %d", len(mf.Elevation), mf.Height)
@@ -752,6 +762,17 @@ func (mf *MapFile) validate() error {
 		}
 		if strings.ContainsAny(d.TargetDoor, " \t") {
 			return fmt.Errorf("door %q target_door %q must not contain whitespace", d.Name, d.TargetDoor)
+		}
+		// Facing / style must match what the parser accepts on reload — Encode
+		// writes Facing verbatim (and defaults an empty Style to building), so
+		// an out-of-vocabulary value would Save fine and then fail Parse. Reject
+		// it here at the data-model boundary, same philosophy as the asymmetric-
+		// target guard in Encode (an empty Style is legal — the encoder fills it).
+		if !IsFacingName(d.Facing) {
+			return fmt.Errorf("door %q facing %q must be north/east/south/west", d.Name, d.Facing)
+		}
+		if d.Style != "" && !IsDoorStyleName(d.Style) {
+			return fmt.Errorf("door %q style %q must be building/cave/field", d.Name, d.Style)
 		}
 		if _, dup := seenNames[d.Name]; dup {
 			return fmt.Errorf("duplicate door name %q in map", d.Name)
@@ -949,11 +970,28 @@ func parseCustomEnemyLine(line string, lineNo int) (MapCustomEnemy, error) {
 		if err != nil {
 			return MapCustomEnemy{}, err
 		}
+		// Every numeric custom-enemy field is logically non-negative (HP /
+		// stats / armor / xp / tier / damage / spell power / mdef). Rejecting
+		// a negative is correct on its own AND surfaces the most common
+		// symptom of a hand-edited wrong-width row mis-sliced under the
+		// legacy/current column split (a value landing in the wrong column),
+		// turning silent stat corruption into a load error.
+		if v < 0 {
+			return MapCustomEnemy{}, fmt.Errorf("line %d: custom enemy %s cannot be negative (%d) — check the column count", lineNo, f.name, v)
+		}
 		*f.dst = v
 	}
 	chance, err := strconv.ParseFloat(fields[schema.skch], 64)
 	if err != nil {
 		return MapCustomEnemy{}, fmt.Errorf("line %d: bad custom enemy sklch %q", lineNo, fields[schema.skch])
+	}
+	// Skill-cast chance is a probability in [0,1]. Bounding both ends (not
+	// just negatives) also hardens the legacy/current width split: a row that
+	// drops one field parses under the other schema and shifts an integer stat
+	// (HP / damage / armor — almost always >1) into this column, so the >1
+	// reject turns that silent mis-slice into a load error.
+	if chance < 0 || chance > 1 {
+		return MapCustomEnemy{}, fmt.Errorf("line %d: custom enemy skill-cast chance must be within [0,1] (%g) — check the column count", lineNo, chance)
 	}
 	ce.SkillCastChance = chance
 	if fields[schema.skills] != customEnemyNoSkillsToken {

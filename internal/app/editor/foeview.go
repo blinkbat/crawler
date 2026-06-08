@@ -147,6 +147,14 @@ func seedFoeVisual(s *State) {
 	if ov, ok := render.LiveFoeOverride(frameAssets, s.foeKind); ok {
 		s.foeVisual = ov
 		s.foeBaseline = ov
+	} else {
+		// No resolvable visual for this kind (e.g. a missing sprite). Reset the
+		// working copy + baseline to a defined empty override instead of
+		// leaving the PREVIOUS foe's slider values in place — otherwise editing
+		// and saving here would write that other foe's numbers under this
+		// kind's slug.
+		s.foeVisual = core.EnemyVisualOverride{}
+		s.foeBaseline = core.EnemyVisualOverride{}
 	}
 	s.foeCursor = 0
 }
@@ -179,7 +187,11 @@ func updateFoeViewModal(s *State) Action {
 	}
 
 	l := computeFoeViewLayout()
-	mp := frameMouse
+	// Read the cursor live (NOT the cached frameMouse, which is set in Draw and
+	// is therefore one frame stale here since Update runs before Draw) so a
+	// fast slider drag / click hit-tests against the current position. Matches
+	// updateSoundsModal, which also reads rl.GetMousePosition() directly.
+	mp := rl.GetMousePosition()
 	mouseDown := rl.IsMouseButtonDown(rl.MouseLeftButton)
 	mousePressed := rl.IsMouseButtonPressed(rl.MouseLeftButton)
 	mouseReleased := rl.IsMouseButtonReleased(rl.MouseLeftButton)

@@ -897,11 +897,15 @@ func loadEnemyVisuals() (visuals map[core.EnemyKind]enemyVisual, owned []rl.Text
 			// body without looking like a tight pin-spot. Scaled down with
 			// the smaller sprite (0.60 → 0.46).
 			shadowRadius: 0.46,
-			// The PNG is center-weighted in its square box; -0.60 dropped it
-			// too far (read as sunk into the floor compared to the bottom-
-			// weighted procedural sprites), so it's raised to -0.42. Tune
-			// alongside size/depthOffset if grounding shifts.
-			yOffset: -0.42,
+			// The PNG sits high in its square box (a transparent strip below
+			// the rat's feet), so a center-anchored billboard floats the
+			// visible feet above the floor-anchored contact shadow. Bracketing
+			// the gap: at -0.42 the feet float ~0.13 above the floor, while the
+			// previously-rejected -0.60 sank them ~0.05 below it. -0.55 lands
+			// the feet on the shadow (just inside the "too sunk" boundary).
+			// Tune alongside size/depthOffset — or live in the editor's Foe
+			// Visualizer (Y-offset slider → Save) — if grounding shifts.
+			yOffset: -0.55,
 			// Push the rat BACK into the arena so its square box doesn't loom
 			// at the camera — sits it in line with the procedural roster.
 			depthOffset: 0.7,

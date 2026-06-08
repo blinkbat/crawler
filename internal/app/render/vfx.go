@@ -599,6 +599,12 @@ func pushRing(o rl.Vector3, col color.RGBA, sizeStart, sizeEnd, duration float32
 // advanced by TickAndDrawVFX; this function just picks a primitive
 // based on shape and interpolates color + size by lifetime.
 func drawParticle(camera rl.Camera3D, p *particle) {
+	if p.Duration <= 0 {
+		// Guard the lifetime divide: drawParticle runs before the alive()
+		// cull, so a zero-Duration particle would otherwise yield NaN/Inf t
+		// and feed garbage into size/color/position.
+		return
+	}
 	t := p.Elapsed / p.Duration
 	if t < 0 {
 		t = 0

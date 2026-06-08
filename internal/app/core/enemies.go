@@ -472,6 +472,18 @@ var enemyByKind = BuildRegistry(enemyDefinitions, func(d EnemyDefinition) EnemyK
 // registry builder; lifted to a sibling init() block when the builder
 // folded into the generic BuildRegistry helper.
 func init() {
+	// Guard against a duplicate Kind in the registry. BuildRegistry above
+	// last-write-wins on a repeated key, so a copy-paste that duplicated a
+	// Kind would make EnemyInfo silently return the SECOND row while
+	// EnemyKinds() still lists both — a confusing data desync, not a crash.
+	// Panic at init like the name-table collision guard (buildEnemyKindByName).
+	seenKind := make(map[EnemyKind]struct{}, len(enemyDefinitions))
+	for _, def := range enemyDefinitions {
+		if _, dup := seenKind[def.Kind]; dup {
+			panic(fmt.Sprintf("core/enemies: duplicate EnemyKind %d (%q) in enemyDefinitions", def.Kind, def.Name))
+		}
+		seenKind[def.Kind] = struct{}{}
+	}
 	for _, def := range enemyDefinitions {
 		// Shared with the custom-enemy loader (customenemy.go): SkillCastChance
 		// [0,1] + non-negative mitigation/reward/damage fields. Panic here

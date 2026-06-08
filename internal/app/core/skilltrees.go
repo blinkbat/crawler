@@ -181,7 +181,7 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 			nd("shatter", "Shatter", "Capstone: bonus damage against frozen or stunned foes.", 1),
 		}),
 		linearTree("Storm", "Lightning, chain, arcane utility", []SkillTreeNode{
-			act("arc-bolt", "Arc Bolt", "Single-target lightning.", SkillArcBolt),
+			act("arc-bolt", "Arc Bolt", "An arc of lightning that strikes the whole pack.", SkillArcBolt),
 			nd("chain-lightning", "Chain Lightning", "Lightning that bounces across the pack.", 3),
 			nd("static-field", "Static Field", "Deal damage as a share of the enemy's current HP.", 3),
 			nd("dispel", "Dispel", "Strip a buff or status from an enemy.", 3),

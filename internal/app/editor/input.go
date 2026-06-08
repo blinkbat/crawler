@@ -562,7 +562,7 @@ func finishDrag(s *State) {
 // cell since stamping multiple starts/spawns isn't meaningful.
 func applyToolBrushed(s *State, x, z int) {
 	half := s.brushSize / 2
-	if !isGridLayer(s.layer) || s.brushSize <= 1 {
+	if !isGridLayer(s.layer) || s.brushSize <= 1 || brushHasMultiTileFootprint(s) {
 		applyTool(s, x, z)
 		return
 	}
@@ -573,18 +573,41 @@ func applyToolBrushed(s *State, x, z int) {
 	}
 }
 
+// brushHasMultiTileFootprint reports whether the active Props/Decor brush
+// stamps a multi-tile footprint. A size>1 brush over such a brush would
+// re-stamp the WHOLE footprint at every cell of the square — overlapping
+// placements plus a flurry of refusal flashes — so those collapse to a single
+// anchor stamp, the same way the entity layer always does.
+func brushHasMultiTileFootprint(s *State) bool {
+	c := s.activeBrush().Char
+	switch s.layer {
+	case LayerProps:
+		return core.PropFootprint(c) != nil
+	case LayerDecor:
+		return core.DecorFootprint(c) != nil
+	}
+	return false
+}
+
 func isGridLayer(l Layer) bool {
 	return l != LayerEntities
 }
 
+// minZoom / maxZoom bound the editor canvas zoom. Named here so the clamp,
+// the "Reset View" home (1.0), and any future zoom UI all tune in one place.
+const (
+	minZoom = float32(0.5)
+	maxZoom = float32(4)
+)
+
 func zoomBy(s *State, anchor rl.Vector2, factor float32) {
 	prev := s.zoom
 	next := prev * factor
-	if next < 0.5 {
-		next = 0.5
+	if next < minZoom {
+		next = minZoom
 	}
-	if next > 4 {
-		next = 4
+	if next > maxZoom {
+		next = maxZoom
 	}
 	if next == prev {
 		return
@@ -1470,6 +1493,18 @@ var packModalReservedKeys = map[int32]bool{
 	rl.KeyEscape: true, rl.KeyEnter: true, rl.KeyKpEnter: true,
 }
 
+// chestModalReservedKeys are the chest-edit modal's non-add controls: the
+// item-list cursor nav (Up/Down, which input.CursorUpDown also reads as
+// W/S), remove (X), and close (Esc/Enter). An item add-key landing on any of
+// these would fire two actions on one keypress (e.g. nav-up also adds an
+// item) — the bug the init assert guards against. Smaller than the pack
+// modal's set: the chest modal has no member-op / AI-cycle / custom-add keys.
+var chestModalReservedKeys = map[int32]bool{
+	rl.KeyUp: true, rl.KeyDown: true, rl.KeyW: true, rl.KeyS: true,
+	rl.KeyX:      true,
+	rl.KeyEscape: true, rl.KeyEnter: true, rl.KeyKpEnter: true,
+}
+
 // init asserts the add-rule hotkey wiring. The pack-edit and chest-edit
 // modals are keyboard-only for "add a kind" — a missing binding (Key=0)
 // would silently be unauthorable, and an add-key that collides with a
@@ -1495,6 +1530,9 @@ func init() {
 		key, ok := chestAddHotkeys[def.Kind]
 		if !ok || key == 0 {
 			panic("editor: chestAddHotkeys missing a key for item " + def.Name + " — add a keyed row")
+		}
+		if chestModalReservedKeys[key] {
+			panic("editor: chestAddHotkeys key for " + def.Name + " collides with a reserved chest-modal control (nav/remove/close)")
 		}
 		if seenChest[key] {
 			panic("editor: chestAddHotkeys key for " + def.Name + " duplicates another item's add-key")
@@ -1535,16 +1573,20 @@ type chestAddRule struct {
 // BY KIND (not registry position) so adding/reordering an item is one keyed
 // row that can't silently shift every later item's letter the way the old
 // positional pool did — mirrors packAddHotkeys. Mnemonic letters where they
-// don't collide: C=Cheese, J=Jerky, F=bread (Fare), P=Phial, S=Sword,
+// don't collide: C=Cheese, J=Jerky, F=bread (Fare), P=Phial, I=Iron sword,
 // H=sHield, L=Leather, R=Ring, M=aMulet, D=Dagger, E=rapiEr, B=Bow, G=slinG,
-// A=Axe, W=War hammer. The init check below panics if any item kind is
-// missing a key (or two share one) — caught at startup, not deep in the editor.
+// A=Axe, K=war hammer. (Iron sword and war hammer used to be S and W, but
+// CursorUpDown reads W/S as up/down — so navigating the chest list also
+// added those items; they're rebound off the nav keys and the init check
+// below now asserts against chestModalReservedKeys.) The init check panics
+// if any item kind is missing a key, two share one, or one collides with a
+// reserved nav/close control — caught at startup, not deep in the editor.
 var chestAddHotkeys = map[core.ItemKind]int32{
 	core.ItemCheese:       rl.KeyC,
 	core.ItemBatJerky:     rl.KeyJ,
 	core.ItemCrustOfBread: rl.KeyF,
 	core.ItemMagicPhial:   rl.KeyP,
-	core.ItemIronSword:    rl.KeyS,
+	core.ItemIronSword:    rl.KeyI,
 	core.ItemWoodenShield: rl.KeyH,
 	core.ItemLeatherCap:   rl.KeyL,
 	core.ItemSilverRing:   rl.KeyR,
@@ -1554,7 +1596,7 @@ var chestAddHotkeys = map[core.ItemKind]int32{
 	core.ItemShortBow:     rl.KeyB,
 	core.ItemSling:        rl.KeyG,
 	core.ItemBattleAxe:    rl.KeyA,
-	core.ItemWarHammer:    rl.KeyW,
+	core.ItemWarHammer:    rl.KeyK,
 }
 
 var chestAddRules = buildChestAddRules()
@@ -1642,6 +1684,7 @@ func updateChestEditModal(s *State) Action {
 			chest.Items = append(chest.Items, rule.Kind)
 			s.modalCursor = len(chest.Items) - 1
 			s.dirty = true
+			return ActionNone // one add per frame, matching updatePackEditModal
 		}
 	}
 	return ActionNone

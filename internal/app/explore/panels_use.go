@@ -60,8 +60,18 @@ func tryUseSkill(g *core.GameState) {
 	// The Skills tab is a tree summary now (Confirm opens the tree modal), so
 	// there's no per-skill cursor. Gather the member's out-of-battle heals and:
 	// none → refuse; one → cast it directly; several (Cleric's Prayer + Mass
-	// Mend) → pop a chooser so both stay reachable.
+	// Mend) → pop a chooser so both stay reachable. Keep only the heals the
+	// caster can currently afford so the chooser never lists a cast beginHealCast
+	// would just refuse (and so an unaffordable two-heal Cleric falls through to
+	// the "no usable heal" miss ping instead of a dead-end chooser).
 	heals := core.OutOfBattleHeals(g.Party[caster])
+	affordable := heals[:0]
+	for _, h := range heals {
+		if core.CanAffordSkill(g.Party[caster], h) {
+			affordable = append(affordable, h)
+		}
+	}
+	heals = affordable
 	switch len(heals) {
 	case 0:
 		audio.Play(audio.SoundInputMiss) // this member has no out-of-battle heal
@@ -97,14 +107,35 @@ func beginHealCast(g *core.GameState, caster int, skill core.SkillID) {
 		g.UsePendingCaster = caster
 		return
 	}
-	// Party-wide heal (Mass Mend): no target step. HealMember no-ops on
-	// the dead and clamps at MaxHP, so this is safe to fan across all.
+	// Party-wide heal (Mass Mend): no target step. Refuse the cast if no
+	// member can benefit (everyone alive is already at full HP) so it can't
+	// silently drain the caster's MP for zero effect — the same intent the
+	// item path enforces via core.ItemHelpsTarget. HealMember still no-ops on
+	// the dead/ingested and clamps at MaxHP, so the fan-out stays safe.
+	if !anyMemberBelowFull(g) {
+		audio.Play(audio.SoundInputMiss)
+		return
+	}
 	amount := core.SkillHealFor(&g.Party[caster], skill)
 	for i := range g.Party {
 		core.HealMember(&g.Party[i], amount)
 	}
 	core.SpendSkillMP(&g.Party[caster], skill)
 	audio.Play(audio.SoundHeal)
+}
+
+// anyMemberBelowFull reports whether any heal-eligible party member (alive and
+// not sealed in a mantrap) is below max HP — the precondition for a heal to do
+// anything. Mirrors core.HealMember's own no-op rules so the guard and the
+// apply can't drift.
+func anyMemberBelowFull(g *core.GameState) bool {
+	for i := range g.Party {
+		m := &g.Party[i]
+		if m.HP > 0 && !m.Ingested && m.HP < m.MaxHP {
+			return true
+		}
+	}
+	return false
 }
 
 // closeHealPick dismisses the out-of-battle heal chooser. Called on apply, on
@@ -191,6 +222,13 @@ func applyUseToMember(g *core.GameState, member int) {
 		if caster < 0 || caster >= len(g.Party) || g.Party[caster].HP <= 0 {
 			// Caster out of range, or died between opening the picker and
 			// confirming — a corpse can't pay MP or cast.
+			break
+		}
+		// Don't burn MP healing an already-full ally — the same rule the
+		// item path enforces via core.ItemHelpsTarget. Check before spending
+		// MP so a no-op cast costs nothing.
+		if member < 0 || member >= len(g.Party) || g.Party[member].HP >= g.Party[member].MaxHP {
+			audio.Play(audio.SoundInputMiss)
 			break
 		}
 		heal := core.SkillHealFor(&g.Party[caster], skill)

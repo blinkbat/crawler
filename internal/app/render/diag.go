@@ -62,6 +62,10 @@ func OpenRenderLog() {
 	}
 	renderLogFile = f
 	renderLogFrameNo = 0
+	// Reset the throttle counter too so the every-10th-tick flush gate starts
+	// from a known phase on each (re)open rather than at an arbitrary offset
+	// carried over from a previous session.
+	renderLogTickCnt = 0
 
 	// One-shot session banner + any pending init lines that fired
 	// while the log was closed (e.g., shader load during NewResources

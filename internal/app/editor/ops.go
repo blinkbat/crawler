@@ -149,9 +149,30 @@ func applyDecorBrush(s *State, x, z int, c byte) {
 	setLayerCell(&s.area.Decor, x, z, c)
 }
 
+// clearPropCell clears the prop at (x,z). If that cell holds a multi-tile prop
+// ANCHOR, the whole footprint — including the auto-painted tail cells — is
+// cleared, so erasing a multi-tile prop by its anchor doesn't strand orphaned
+// tail glyphs on the neighbouring cells. A single-tile prop (or already-empty
+// cell) just clears the one cell.
+func clearPropCell(a *core.AreaDefinition, x, z int) {
+	if !a.InBounds(x, z) {
+		return
+	}
+	if footprint := core.PropFootprint(a.Props[z][x]); footprint != nil {
+		for _, off := range footprint {
+			fx, fz := x+off.DX, z+off.DZ
+			if a.InBounds(fx, fz) {
+				setLayerCell(&a.Props, fx, fz, core.TilePropEmpty)
+			}
+		}
+		return
+	}
+	setLayerCell(&a.Props, x, z, core.TilePropEmpty)
+}
+
 func applyPropBrush(s *State, x, z int, c byte) {
 	if c == core.TilePropEmpty {
-		setLayerCell(&s.area.Props, x, z, core.TilePropEmpty)
+		clearPropCell(&s.area, x, z)
 		return
 	}
 	// Multi-tile prop anchor: validate the whole footprint fits and is
@@ -452,7 +473,7 @@ func eraseAt(s *State, x, z int) {
 		// than reset-to-random.
 		setLayerCell(&s.area.Decor, x, z, core.DecorEmpty)
 	case LayerProps:
-		setLayerCell(&s.area.Props, x, z, core.TilePropEmpty)
+		clearPropCell(&s.area, x, z)
 	case LayerCeiling:
 		setLayerCell(&s.area.Ceiling, x, z, core.TileCeilingOpen)
 	case LayerElevation:
@@ -688,11 +709,22 @@ func resize(s *State, w, h int) {
 	// TileRock so a resized map always has a complete outer wall, matching
 	// blankArea.
 	sealWallBorder(&s.area)
-	if s.area.StartTileX >= w {
-		s.area.StartTileX = w - 1
+	// sealWallBorder just stamped the perimeter ring with rock, so clamp a
+	// now-out-of-range start to the last INTERIOR cell (w-2 / h-2), not the
+	// border column/row (w-1 / h-1) which is guaranteed wall — landing the
+	// start on a blocked tile. Floor at 1 for a degenerate tiny map.
+	// (reachabilityWarnings still flags an interior cell the author walled off.)
+	if s.area.StartTileX >= w-1 {
+		s.area.StartTileX = w - 2
 	}
-	if s.area.StartTileZ >= h {
-		s.area.StartTileZ = h - 1
+	if s.area.StartTileX < 1 {
+		s.area.StartTileX = 1
+	}
+	if s.area.StartTileZ >= h-1 {
+		s.area.StartTileZ = h - 2
+	}
+	if s.area.StartTileZ < 1 {
+		s.area.StartTileZ = 1
 	}
 	packsBefore, chestsBefore, doorsBefore := len(s.area.PackSpawns), len(s.area.ChestSpawns), len(s.area.DoorSpawns)
 	s.area.PackSpawns = removePackSpawnsOutside(s.area.PackSpawns, w, h)
@@ -921,6 +953,16 @@ func floodFill(s *State, x, z int, b byte) {
 			rows[pz][px] = b
 			stack = append(stack, [2]int{px + 1, pz}, [2]int{px - 1, pz}, [2]int{px, pz + 1}, [2]int{px, pz - 1})
 		}
+		// Never wall over the player start tile — the same exemption
+		// applyWallBrush (per-cell) and fillEntireLayer enforce. The flood
+		// may have filled it (it's inside the connected region); restore it
+		// to the region's original value so the player can't spawn in rock.
+		if s.layer == LayerWalls && b == core.TileRock {
+			sx, sz := s.area.StartTileX, s.area.StartTileZ
+			if sz >= 0 && sz < len(rows) && sx >= 0 && sx < len(rows[sz]) && rows[sz][sx] == b {
+				rows[sz][sx] = target
+			}
+		}
 	})
 	// Wall flood that turns cells into '#' nukes any pack/chest/door that
 	// fell inside — same cleanup applyWallBrush does per-cell and
@@ -1029,6 +1071,17 @@ func paintRect(s *State, x0, z0, x1, z1 int) {
 	}
 	if z0 > z1 {
 		z0, z1 = z1, z0
+	}
+	if brushHasMultiTileFootprint(s) {
+		// A multi-tile-footprint prop/decor brush can't tile across a
+		// rectangle: every cell would re-validate the whole footprint against
+		// the neighbours just stamped and refuse, spraying refusal flashes and
+		// leaving a mostly-empty rect. Collapse to a single anchor stamp, the
+		// same way applyToolBrushed does for the square brush.
+		if s.area.InBounds(x0, z0) {
+			applyTool(s, x0, z0)
+		}
+		return
 	}
 	for z := z0; z <= z1; z++ {
 		for x := x0; x <= x1; x++ {

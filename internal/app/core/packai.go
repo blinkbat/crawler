@@ -211,6 +211,15 @@ func chaseStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int,
 	}
 	for i := 0; i < n; i++ {
 		tx, tz := p.TileX+steps[i][0], p.TileZ+steps[i][1]
+		// Stay on the leash even while chasing. A dog already at its leash
+		// edge must not be dragged further from home by a passing player —
+		// that's the "hostile escort across the map" behavior the mode
+		// docstring promises to avoid. Mirrors the leash gate wanderStep /
+		// fleeStep apply (PackChaseRadius < PackLeashRadius, so a player can
+		// still be chased while inside the leash, just not beyond it).
+		if ChebyshevDistance(tx, tz, p.HomeX, p.HomeZ) > PackLeashRadius {
+			continue
+		}
 		if !packCanMoveTo(g, p, occupied, tx, tz, true /* allow player tile */, px, pz) {
 			continue
 		}

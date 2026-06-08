@@ -176,7 +176,15 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 		// feed nonsense into battle / level-up / equipment math. Mirrors the
 		// bounds guard custom enemies already get at load.
 		sanitizeLoadedParty(data.Party)
-		g.Party = data.Party
+		// Reconcile against the canonical party. NewGameState seeded g.Party
+		// with a full, class-ordered NewParty(); a well-formed save (exactly
+		// PartyMemberCount members, classes in order) maps 1:1, so the result
+		// is the save unchanged. A save with the wrong member count or an
+		// out-of-range / mismatched Class can't violate the binding
+		// PartyMemberCount-length, class-ordered seating contract (which render
+		// formation + SPD tie-break index into): unmatched saved members are
+		// dropped, and any slot with no saved match keeps its fresh default.
+		overlaySavedParty(g.Party, data.Party)
 	}
 	// Inventory / quests may legitimately be empty; copy through as-is so a
 	// player who sold everything stays empty rather than re-seeding the kit.
@@ -185,8 +193,8 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	// Item" dead weight.
 	g.Inventory = pruneUnknownItems(data.Inventory)
 	g.Gold = data.Gold
-	if len(data.Quests) > 0 {
-		g.Quests = data.Quests
+	if pruned := pruneQuests(data.Quests); len(pruned) > 0 {
+		g.Quests = pruned
 	}
 	g.StepCount = data.StepCount
 	// Place the player at the saved tile, but fall back to the map's
@@ -205,6 +213,28 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	}
 	RevealRadius(&g, x, z, SightRadius)
 	return g, nil
+}
+
+// overlaySavedParty copies each saved member's run state onto the canonical
+// base slot of the same Class. `base` is a fresh class-ordered NewParty(), so
+// the result always has exactly PartyMemberCount members in seating order no
+// matter what `saved` looks like. A normal save maps 1:1 (identical result);
+// a save with extra/missing members or an out-of-range Class is repaired —
+// extras and unknown-class members find no slot and are dropped, and a slot
+// with no saved match keeps its fresh default (1 SkillPoint, nothing learned).
+// `saved` must already be sanitized (clamped) by sanitizeLoadedParty.
+func overlaySavedParty(base, saved []PartyMember) {
+	used := make([]bool, len(saved))
+	for i := range base {
+		for j := range saved {
+			if used[j] || saved[j].Class != base[i].Class {
+				continue
+			}
+			base[i] = saved[j]
+			used[j] = true
+			break
+		}
+	}
 }
 
 // sanitizeLoadedParty clamps a loaded party's mutable numeric fields into
@@ -247,6 +277,40 @@ func sanitizeLoadedParty(party []PartyMember) {
 				m.Equipped[s] = ItemNone
 			}
 		}
+		// Clone the decoded progression maps so the live party doesn't alias
+		// the maps held by `data.Party` (overlaySavedParty shallow-copies the
+		// struct). `data` is discarded today so no live aliasing results, but
+		// the write path already clones these (maps.Clone preserves nil) — mirror
+		// it so a future caller that retains `data` can't share mutable state.
+		m.SkillTiers = maps.Clone(m.SkillTiers)
+		m.TreeRanks = maps.Clone(m.TreeRanks)
+		// Drop skill/tree progression keyed to identifiers this build no
+		// longer knows (a save predating a SkillID or tree-node renumber).
+		// Left in, a stale key applies its invested tier/rank to the WRONG
+		// skill through EffectiveSkillEffect / LearnedSkills — so prune them
+		// at the load trust boundary, exactly like Equipped and the inventory.
+		for id := range m.SkillTiers {
+			if _, ok := skillInfo(id); !ok {
+				delete(m.SkillTiers, id)
+			}
+		}
+		for id := range m.TreeRanks {
+			if _, ok := findTreeNode(m.Class, id); !ok {
+				delete(m.TreeRanks, id)
+			}
+		}
+	}
+	// Combat-only state must never survive into the reloaded (exploration)
+	// run. The WRITE path (saveSanitizedParty) already strips these, but the
+	// load path is the trust boundary for hand-edited / older-format saves —
+	// clear them here too via the same canonical clearers, so an Ingested
+	// member (whose IngestedBy points at a pack slot the freshly-rebuilt area
+	// no longer has) or an asleep/stunned member can't load permanently
+	// locked out of combat with no enemy alive to ever release them.
+	ClearPartyTransientStatuses(party)
+	ReleaseAllIngested(party)
+	for i := range party {
+		clearMemberAnimTimers(&party[i])
 	}
 }
 
@@ -267,6 +331,28 @@ func pruneUnknownItems(inv []ItemStack) []ItemStack {
 			continue
 		}
 		out = append(out, st)
+	}
+	return out
+}
+
+// pruneQuests drops journal entries with an empty ID and collapses duplicate
+// IDs (keeping the first), so an older or hand-edited save can't seed the
+// journal with blank or doubled quests that QuestIndexByID would then resolve
+// inconsistently. Returns a fresh slice; nil/empty input returns nil. There is
+// no quest registry to validate IDs against yet (StarterQuests is empty); when
+// one ships, also drop unregistered IDs here, mirroring pruneUnknownItems.
+func pruneQuests(quests []Quest) []Quest {
+	if len(quests) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(quests))
+	out := make([]Quest, 0, len(quests))
+	for _, q := range quests {
+		if q.ID == "" || seen[q.ID] {
+			continue
+		}
+		seen[q.ID] = true
+		out = append(out, q)
 	}
 	return out
 }

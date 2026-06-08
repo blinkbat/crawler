@@ -491,10 +491,7 @@ func HealMember(m *PartyMember, amount int) {
 	if m == nil || amount <= 0 || m.HP <= 0 || m.Ingested {
 		return
 	}
-	m.HP += amount
-	if m.HP > m.MaxHP {
-		m.HP = m.MaxHP
-	}
+	GainUpTo(&m.HP, m.MaxHP, amount)
 }
 
 // clearMemberAnimTimers zeros a member's transient ANIMATION timers (lunge /
@@ -516,10 +513,7 @@ func RestoreMP(m *PartyMember, amount int) int {
 		return 0
 	}
 	before := m.MP
-	m.MP += amount
-	if m.MP > m.MaxMP {
-		m.MP = m.MaxMP
-	}
+	GainUpTo(&m.MP, m.MaxMP, amount)
 	return m.MP - before
 }
 

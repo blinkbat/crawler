@@ -867,11 +867,21 @@ func Update(s *State, dt float32) Action {
 
 	if s.testRequested {
 		s.testRequested = false
-		if warnings := reachabilityWarnings(s.area); len(warnings) > 0 {
+		// Validate the spawn the playtest will ACTUALLY use. On a Ctrl+F5
+		// "test from cursor" the run loop spawns at testStartOverride*, so the
+		// gate must check those coords — otherwise a bad authored start could
+		// block a perfectly valid cursor test (and the override cell would skip
+		// the full start-blocker, having only been BlockedAt-checked at arm).
+		checkArea := s.area
+		if s.testStartOverride {
+			checkArea.StartTileX = s.testStartOverrideX
+			checkArea.StartTileZ = s.testStartOverrideZ
+		}
+		if warnings := reachabilityWarnings(checkArea); len(warnings) > 0 {
 			for _, w := range warnings {
 				s.flash("Test: " + w)
 			}
-			if !canPlaytest(s.area) {
+			if !canPlaytest(checkArea) {
 				return ActionNone
 			}
 		}

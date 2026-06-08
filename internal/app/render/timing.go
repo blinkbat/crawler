@@ -335,17 +335,43 @@ func applyTimingFlashCursor(curX, y, barH, flashTimer float32, base rl.Color) (f
 // per-function literals it replaced.
 var timingTrackColor = rl.NewColor(14, 16, 26, 230)
 
-// drawTimingTrack paints the dark base fill behind a timing bar. During
-// the flash hold the track fades to the grade color so the whole bar
-// pulses with the result. Shared by the press and charge bars so the
-// flash-fade math (and its 220 peak-alpha literal) lives in one place.
+// drawTimingTrack paints the recessed glass gauge body behind a timing bar:
+// a sunk gauge well, then the dark glass track the quality light glows
+// through — the SAME gauge body the HP/MP bars use (drawGaugeWell +
+// drawSmallPanel), so the combat input bar reads as another instrument set
+// into the cabinet rather than a flat strip over the world. During the flash
+// hold the tube floods with the grade color so the whole bar pulses with the
+// result. Shared by the press and charge bars. The wood bezel + gilt frame +
+// brass studs are layered on TOP by drawTimingFrameOverlay after the interior
+// content draws.
 func drawTimingTrack(drawX, drawY, barW, drawnH float32, quality int, isDefend, flashing bool, timingFlash float32) {
-	trackCol := timingTrackColor
+	ix, iy, iw, ih := int32(drawX), int32(drawY), int32(barW), int32(drawnH)
+	drawGaugeWell(ix, iy, iw, ih)
+	drawSmallPanel(ix, iy, iw, ih, timingTrackColor)
 	if flashing {
-		trackCol = qualityColor(quality, isDefend)
-		trackCol.A = uint8(220 * flashAlpha(timingFlash))
+		flood := qualityColor(quality, isDefend)
+		flood.A = uint8(220 * flashAlpha(timingFlash))
+		drawSmallPanel(ix, iy, iw, ih, flood)
 	}
-	rl.DrawRectangle(int32(drawX), int32(drawY), int32(barW), int32(drawnH), trackCol)
+}
+
+// drawTimingFrameOverlay caps a press / charge timing bar with the candlelit
+// cabinet chrome — a wood bezel, a gilt frame breathing with the candle flame,
+// and brass studs at the corners — the same hardware vocabulary as the HP/MP
+// gauges and the panel cards. Drawn AFTER the bar's interior content (quality
+// zones, fill, cursor) so the frame seats cleanly over their edges and the
+// rounded gilt outline tidies the square corners of the full-height zones.
+func drawTimingFrameOverlay(drawX, drawY, barW, drawnH float32) {
+	ix, iy, iw, ih := int32(drawX), int32(drawY), int32(barW), int32(drawnH)
+	drawGaugeBezel(ix, iy, iw, ih, false)
+	flick := candleFlicker()
+	drawSmallPanelOutline(ix, iy, iw, ih, fadeColor(giltBright, 0.55+0.3*flick))
+	const studR = float32(3)
+	const studInset = float32(7)
+	drawBrassStud(drawX+studInset, drawY+studInset, studR)
+	drawBrassStud(drawX+barW-studInset, drawY+studInset, studR)
+	drawBrassStud(drawX+studInset, drawY+drawnH-studInset, studR)
+	drawBrassStud(drawX+barW-studInset, drawY+drawnH-studInset, studR)
 }
 
 // drawExcellentShockwave paints the expanding ring that pops from the
@@ -446,6 +472,9 @@ func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x
 	if flashing && timing.Quality == core.TimingQualityExcellent {
 		drawExcellentShockwave(curX, drawY, drawnH, g.Battle.TimingFlash, isDefend)
 	}
+
+	// Cabinet chrome over the top — wood bezel, breathing gilt frame, studs.
+	drawTimingFrameOverlay(drawX, drawY, barW, drawnH)
 }
 
 // drawChargeBar paints the charge-and-release bar. Layout from left to right:
@@ -547,6 +576,9 @@ func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, 
 	if flashing && timing.Quality == core.TimingQualityExcellent {
 		drawExcellentShockwave(curX, drawY, drawnH, g.Battle.TimingFlash, false)
 	}
+
+	// Cabinet chrome over the top — wood bezel, breathing gilt frame, studs.
+	drawTimingFrameOverlay(drawX, drawY, barW, drawnH)
 }
 
 // drawChargeTickWithFlash paints a tick marker plus a freshness overlay so
@@ -663,13 +695,12 @@ func drawReelBar(timing core.TimingState, g core.GameState, assets Resources, x,
 	for i := 0; i < n; i++ {
 		cellX := drawX + barRowPadPx + (cellW+barCellGapPx)*float32(i)
 		stopped := timing.Reels[i].Stop >= 0
+		ix, iy, iw, ih := int32(cellX), int32(y), int32(cellW), int32(barH)
 
-		rl.DrawRectangle(int32(cellX), int32(y), int32(cellW), int32(barH), timingTrackColor)
-		frame := colorWithAlpha(timingCursorColor, 110) // dim frame while spinning
-		if stopped {
-			frame = colorWithAlpha(timingHeldColor, barHighlightAlpha)
-		}
-		rl.DrawRectangleLinesEx(rl.NewRectangle(cellX, y, cellW, barH), 2, frame)
+		// Recessed glass window per reel — the same gauge body the press /
+		// charge tracks use, so a reel reads as a lit cabinet pane.
+		drawGaugeWell(ix, iy, iw, ih)
+		drawSmallPanel(ix, iy, iw, ih, timingTrackColor)
 
 		sym := timing.ReelSymbolAt(i)
 		col := reelSymbolColors[sym%len(reelSymbolColors)]
@@ -685,6 +716,22 @@ func drawReelBar(timing core.TimingState, g core.GameState, assets Resources, x,
 		r := barH * 0.30
 		rl.DrawCircleV(rl.NewVector2(sx, cy), r+2, fadeForFlash(rl.NewColor(0, 0, 0, reelRimAlpha), flashing, g.Battle.TimingFlash))
 		rl.DrawCircleV(rl.NewVector2(sx, cy), r, col)
+
+		// Frame: a dim wood rail while spinning; a gilt frame breathing with
+		// the candle flame plus corner studs once the reel locks — so a stopped
+		// reel gilds like a live panel instead of just brightening a line.
+		if stopped {
+			flick := candleFlicker()
+			drawGaugeBezel(ix, iy, iw, ih, false)
+			drawSmallPanelOutline(ix, iy, iw, ih, fadeForFlash(fadeColor(giltBright, 0.6+0.3*flick), flashing, g.Battle.TimingFlash))
+			drawBrassStud(cellX+6, y+6, 2.5)
+			drawBrassStud(cellX+cellW-6, y+6, 2.5)
+			drawBrassStud(cellX+6, y+barH-6, 2.5)
+			drawBrassStud(cellX+cellW-6, y+barH-6, 2.5)
+		} else {
+			drawGaugeBezel(ix, iy, iw, ih, true)
+			drawSmallPanelOutline(ix, iy, iw, ih, fadeColor(woodAccent, 0.55))
+		}
 	}
 }
 

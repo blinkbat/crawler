@@ -13,11 +13,43 @@ func CanEquipInSlot(kind ItemKind, slot EquipSlotIndex) bool {
 	if kind == ItemNone {
 		return false
 	}
+	// Bound the slot before SlotIndexType indexes the fixed equipSlotInfo
+	// array — an out-of-range slot must return false, not panic. EquipItem /
+	// UnequipItem guard the slot before they reach here, but EquipFromInventory
+	// (and any future caller) routes an unguarded slot straight in.
+	if slot < 0 || slot >= EquipSlotCount {
+		return false
+	}
 	def, ok := ItemInfoOk(kind)
 	if !ok || def.Slot == SlotNone {
 		return false
 	}
 	return def.Slot == SlotIndexType(slot)
+}
+
+// ItemIsTwoHanded reports whether `kind` is a two-handed hand weapon (one
+// that occupies both hand slots). ItemNone and unregistered kinds are
+// false. The off-hand exclusion the equip path enforces reads through this
+// so "what's two-handed?" lives in one place.
+func ItemIsTwoHanded(kind ItemKind) bool {
+	if kind == ItemNone {
+		return false
+	}
+	def, ok := ItemInfoOk(kind)
+	return ok && def.TwoHanded
+}
+
+// otherHand returns the opposite hand slot for a hand slot, or the slot
+// itself (with ok=false) for a non-hand slot.
+func otherHand(slot EquipSlotIndex) (EquipSlotIndex, bool) {
+	switch slot {
+	case EquipRightHand:
+		return EquipLeftHand, true
+	case EquipLeftHand:
+		return EquipRightHand, true
+	default:
+		return slot, false
+	}
 }
 
 // EquipItem stamps `kind` into the named slot on `m` (no inventory
@@ -111,7 +143,15 @@ func EffectiveStats(m PartyMember) Stats {
 				continue
 			}
 			cur := statTable[s].Get(out)
-			statSetters[s](&out, cur+delta)
+			next := cur + delta
+			// Floor at 0 so a negative StatBonus (a cursed / debuff item)
+			// can't drive an effective stat below zero, which would feed
+			// negative values into MaxHPFor / damage / accuracy math. Mirrors
+			// the 0-clamp AdjustStat applies to base-stat edits.
+			if next < 0 {
+				next = 0
+			}
+			statSetters[s](&out, next)
 		}
 	})
 	return out
@@ -176,7 +216,22 @@ func EquipFromInventory(g *GameState, member int, slot EquipSlotIndex, kind Item
 		return false
 	}
 	g.Inventory = inv
-	prev, equipOk := EquipItem(&g.Party[member], slot, kind)
+	m := &g.Party[member]
+	// Two-handed weapons occupy BOTH hands, so they can't share a hand-pair
+	// with any other hand item. Equipping a two-hander clears the other hand
+	// back to inventory; equipping anything into a hand while the other hand
+	// holds a two-hander clears that two-hander. This keeps a two-handed
+	// weapon from ever co-existing with an off-hand item (which would stack
+	// its StatBonus twice across both slots). The freed item routes back to
+	// the shared inventory just like a normal displaced item.
+	if other, isHand := otherHand(slot); isHand {
+		if ItemIsTwoHanded(kind) || ItemIsTwoHanded(m.Equipped[other]) {
+			if freed := UnequipItem(m, other); freed != ItemNone {
+				g.Inventory = AddItem(g.Inventory, freed, 1)
+			}
+		}
+	}
+	prev, equipOk := EquipItem(m, slot, kind)
 	if !equipOk {
 		// Equip refused — put the consumed item back so it isn't lost.
 		g.Inventory = AddItem(g.Inventory, kind, 1)

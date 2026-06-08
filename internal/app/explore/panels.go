@@ -21,6 +21,16 @@ func openPanels(g *core.GameState) {
 	// free-look doesn't bleed into the overlay's screen-space rendering.
 	g.Player.LookYaw = 0
 	g.Player.LookPitch = 0
+	resetPanelSubmodals(g)
+}
+
+// resetPanelSubmodals closes every panel sub-dialog (equipment slot picker,
+// use-target picker, skill-tree modal, heal chooser) in one place. The three
+// overlay lifecycle edges (open / close / tab-switch) all call it, so a new
+// sub-modal added to the overlay can't be forgotten on one path and leak
+// across it. The render-side hit-rect reset (ResetEquipPanelLayout) stays at
+// the close / tab-switch sites since open doesn't need it.
+func resetPanelSubmodals(g *core.GameState) {
 	core.ResetEquipPanels(g)
 	closeUseTarget(g)
 	closeSkillTree(g)
@@ -35,10 +45,7 @@ func openPanels(g *core.GameState) {
 // session.
 func closePanels(g *core.GameState) {
 	g.PanelsOpen = false
-	core.ResetEquipPanels(g)
-	closeUseTarget(g)
-	closeSkillTree(g)
-	closeHealPick(g)
+	resetPanelSubmodals(g)
 	render.ResetEquipPanelLayout()
 }
 
@@ -178,10 +185,7 @@ func setPanelTab(g *core.GameState, t core.PanelTab) {
 	if t == g.PanelsTab {
 		return
 	}
-	core.ResetEquipPanels(g)
-	closeUseTarget(g)
-	closeSkillTree(g)
-	closeHealPick(g)
+	resetPanelSubmodals(g)
 	render.ResetEquipPanelLayout()
 	g.PanelsTab = t
 	g.PanelsRowCursor = 0

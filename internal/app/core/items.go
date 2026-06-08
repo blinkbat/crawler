@@ -171,6 +171,13 @@ type ItemDefinition struct {
 	// (STR melee) for basic-attack purposes. Drives which stat the basic
 	// attack rolls to-hit and scales damage off.
 	Weapon WeaponType
+	// TwoHanded marks a hand weapon that occupies BOTH hands. A two-handed
+	// weapon can't co-exist with any off-hand item: EquipFromInventory clears
+	// the other hand when one is equipped (and clears the two-hander when an
+	// off-hand item is equipped beside it). Without this, the same weapon
+	// could sit in both hand slots and stack its StatBonus twice. Only
+	// meaningful for SlotHand items; ignored elsewhere.
+	TwoHanded bool
 	// Price is the gold cost to buy this item at the shop. 0 means "not
 	// for sale" — such an item never appears in the shop's Buy catalog
 	// (ShopCatalog) and can't be sold back (SellableStacks filters it
@@ -254,6 +261,7 @@ var itemDefinitions = []ItemDefinition{
 	{Kind: ItemWarHammer, Name: "War Hammer", Description: "A heavy two-handed maul. +2 STR.",
 		Slot:      SlotHand,
 		Weapon:    WeaponHammer,
+		TwoHanded: true, // a two-handed maul fills both hands — no off-hand item beside it
 		Price:     55,
 		StatBonus: [StatCount]int{StatSTR: 2}},
 }

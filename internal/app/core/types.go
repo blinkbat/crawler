@@ -74,9 +74,11 @@ type ChestSpawn struct {
 // DoorSpawn is one authored door on the map: a tile position, the
 // door's identifier (unique within this map), the destination map id
 // + door name to step into, and the post-transition facing the player
-// should adopt. Same shape as the on-disk MapDoor — mapfile->core
-// resolves SelfMapToken to the local map name at load time so the
-// runtime never sees the placeholder.
+// should adopt. Same shape as the on-disk MapDoor — a same-map portal
+// keeps the SelfMapToken ("self") placeholder END-TO-END (load preserves
+// it, see AreaFromMapFile; the transition + render layers resolve it to
+// the current map id at use time, see run.go and render/doors.go) so a
+// map rename can't strand a self-referencing door.
 // DoorStyle picks the visual fixture a door renders as. The destination /
 // transition behavior is identical across styles — this is purely how the
 // doorway looks so an author can match a door to its surroundings (a
