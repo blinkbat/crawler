@@ -74,6 +74,18 @@ func act(id, name, desc string, grant SkillID) SkillTreeNode {
 	return n
 }
 
+// actOnce is a single-rank granting node: it LEARNS its skill at rank 1 and
+// has NO upgrade ranks (MaxRank 1). For utility skills with no damage / proc
+// ladder to climb — Scan reveals HP, there's nothing for further ranks to
+// improve — where act()'s MaxSkillTier+1 ranks would just be dead pips. The
+// init guard treats it like any grant node (the granted skill must be
+// player-castable and unique within the class).
+func actOnce(id, name, desc string, grant SkillID) SkillTreeNode {
+	n := nd(id, name, desc, 1)
+	n.GrantSkill = grant
+	return n
+}
+
 // linearTree wires a slice of nodes into a single-chain tree: each node's
 // Tier becomes its index and each (past the root) requires the node above
 // it. Keeps the authoring tables free of hand-numbered tiers / repeated
@@ -144,6 +156,7 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 	ClassThief: {
 		linearTree("Shadow Arts", "Stealth, evasion, control", []SkillTreeNode{
 			act("backstab", "Backstab", "High-crit opener; damage doubles on Excellent timing.", SkillBackstab),
+			actOnce("scan", "Scan", "Inspect a foe: reveal its exact HP for the rest of the battle.", SkillScan),
 			nd("cripple", "Cripple", "Lower an enemy's SPD.", 3),
 			nd("smoke-bomb", "Smoke Bomb", "Party gains evasion; enemies lose accuracy for a turn.", 3),
 			nd("vanish", "Vanish", "Become untargetable for one turn and drop aggro.", 1),

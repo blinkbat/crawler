@@ -158,6 +158,15 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 // invariant pattern for skill / tile / prop registries.
 func init() {
 	for _, s := range PlayerCastableSkills() {
+		// A NoUpgrades skill (single-rank utility like Scan) legitimately
+		// has no tier ladder; it must carry NO stray tier rows, but it's
+		// exempt from the "exactly MaxSkillTier rows" requirement below.
+		if SkillHasNoUpgrades(s) {
+			if _, ok := skillTierTable[s]; ok {
+				panic("core: skill " + SkillName(s) + " is NoUpgrades but has skillTierTable rows — drop the rows or the flag")
+			}
+			continue
+		}
 		rows, ok := skillTierTable[s]
 		if !ok {
 			panic("core: PlayerCastable skill " + SkillName(s) + " has no skillTierTable entry — add MaxSkillTier upgrade rows")

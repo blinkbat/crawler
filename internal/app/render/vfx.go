@@ -235,6 +235,8 @@ func spawnFromRequest(camera rl.Camera3D, g *core.GameState, req core.VFXRequest
 		spawnConfuse(origin)
 	case core.VFXIngest:
 		spawnIngest(origin)
+	case core.VFXScan:
+		spawnScan(origin)
 	default:
 		// A core.VFXKind with no spawn pattern here silently dropped its
 		// effect before. Surface it once per unknown kind (the log stash
@@ -456,6 +458,20 @@ func spawnSteal(o rl.Vector3) {
 		durMin: 0.30, durMax: 0.30, sizeStart: 0.12, sizeEnd: 0.02,
 		colorStart: rl.NewColor(255, 240, 168, 255),
 		colorEnd:   rl.NewColor(232, 196, 96, 0),
+		shape:      shapeSpark,
+	})
+}
+
+func spawnScan(o rl.Vector3) {
+	// Pale-cyan "reveal" pulse — a calm ring of motes drifting upward as
+	// the foe is identified. Slow and soft (low speed, gentle rise, longer
+	// life) so it reads as "studied," not "struck."
+	spawnRadialBurst(o, radialBurst{
+		count: 12, speedMin: 1.0, speedMax: 1.6,
+		yBase: 0.1, vyMin: 0.5, vyMax: 0.9, gravityY: -0.6,
+		durMin: 0.45, durMax: 0.6, sizeStart: 0.09, sizeEnd: 0.02,
+		colorStart: rl.NewColor(168, 240, 255, 255),
+		colorEnd:   rl.NewColor(96, 168, 220, 0),
 		shape:      shapeSpark,
 	})
 }

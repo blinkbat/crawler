@@ -674,6 +674,17 @@ const (
 	// (not a per-cast counter on the enemy). Tagged Magic; no
 	// targeting (the summon lands in the necromancer's own pack).
 	SkillRaiseBones
+	// SkillScan is the party-side inspect/scout cast — single enemy
+	// target, deals no damage and applies no status. A successful cast
+	// marks the target's KIND scanned in the persistent bestiary
+	// (g.Bestiary.MarkScanned), which identifies the kind: the battle
+	// roster and the journal's Bestiary tab then reveal its exact HP
+	// (otherwise health shows only as the qualitative wound-state
+	// word). Knowledge is kind-level, not per-instance, and survives
+	// the battle. Appended at the END of the
+	// enum: SkillID is a map key in saved SkillTiers, so a mid-enum
+	// insert would renumber later skills (same contract as ItemKind).
+	SkillScan
 )
 
 // SkillTag classifies a skill for damage-type interactions (armor,

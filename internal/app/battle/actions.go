@@ -41,6 +41,7 @@ var skillActionHandlers = map[core.SkillID]actionHandlers{
 	core.SkillSwipe:        {setup: setupSwipe, apply: applySwipe},
 	core.SkillPrayer:       {setup: setupPrayer, apply: applyPrayer},
 	core.SkillSteal:        {setup: setupTargetedEnemy, apply: applySteal},
+	core.SkillScan:         {setup: setupScan, apply: applyScan},
 	core.SkillFirebolt:     {setup: setupFirebolt, apply: applyFirebolt},
 	core.SkillCrushingBlow: {setup: setupCrushingBlow, apply: applyCrushingBlow},
 	core.SkillWhirlwind:    {setup: setupWhirlwind, apply: applyWhirlwind},
@@ -955,6 +956,36 @@ func applySteal(g *core.GameState, quality int) bool {
 	} else {
 		setBattleMessage(g, fmt.Sprintf("%s fails to steal.", actor.Name))
 	}
+	finishActorTurn(g)
+	return true
+}
+
+// setupScan validates the enemy target and commits Scan's MP cost (mirrors
+// setupFirebolt's setup→pay flow). A target that dies between confirm and
+// apply is refunded by ensureAliveTargetOrCancel in applyScan.
+func setupScan(g *core.GameState) bool {
+	return setupTargetedEnemyAndPay(g, core.SkillScan, "Scan")
+}
+
+// applyScan identifies the target's KIND in the bestiary
+// (Bestiary.MarkScanned) — the shortcut to the 5-kills-to-identify
+// threshold. Once identified, that kind's exact HP renders in the battle
+// roster (here and in every future encounter) and the bestiary tab marks
+// it known. No damage, no status, and no chance roll — the ID always
+// lands; the timing grade is cosmetic.
+func applyScan(g *core.GameState, quality int) bool {
+	// setupScan committed the MP; the shared head refunds it if the target
+	// died before apply.
+	if !ensureAliveTargetOrCancel(g, core.SkillScan) {
+		return false
+	}
+	actor := &g.Party[g.Battle.CurrentParty]
+	actor.AttackBump = core.BumpDuration
+	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
+	g.Bestiary.MarkScanned(enemy.Kind)
+	core.EnqueueEnemyVFX(g, core.VFXScan, g.Battle.EnemyIndex)
+	setBattleMessage(g, fmt.Sprintf("%s scans the %s — %d/%d HP. Identified.",
+		actor.Name, core.EnemySingularNoun(*enemy), enemy.HP, enemy.MaxHP))
 	finishActorTurn(g)
 	return true
 }

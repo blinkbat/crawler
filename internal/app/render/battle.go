@@ -139,7 +139,11 @@ func drawEnemyRoster(g core.GameState, assets Resources) {
 		// once per roster row per frame.
 		enemy := &members[slot]
 		rowY := y + topPad + int32(i)*rowH
-		drawEnemyRosterRow(assets.hudFont, enemy, x+14, rowY, w-28, rowH-8, targetable && slot == selectedSlot, !enemy.Alive)
+		// HP is revealed once the kind is identified in the bestiary (5
+		// kills or a Scan) — a kind-level fact, so every instance of a
+		// known kind shows its numbers, not just the one that was scanned.
+		known := g.Bestiary.Knows(enemy.Kind)
+		drawEnemyRosterRow(assets.hudFont, enemy, x+14, rowY, w-28, rowH-8, targetable && slot == selectedSlot, !enemy.Alive, known)
 	}
 }
 
@@ -162,7 +166,7 @@ func visibleRosterSlots(g core.GameState) []int {
 	return rosterSlotsBuf
 }
 
-func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targeted, fading bool) {
+func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targeted, fading, known bool) {
 	// Roster row tints follow the glass-token family — translucent
 	// glass over the (also translucent) outer card body, so the
 	// world hints through.
@@ -205,12 +209,20 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 	displayName := core.EnemyDisplayName(*enemy)
 	drawTextWithShadow(font, displayName, nameX, float32(y+10), FontHeading, nameCol)
 
-	// Health reads ENTIRELY from the qualitative wound-state word — exact
-	// enemy HP is intentionally never shown (a future "inspect/scan" skill
-	// will reveal numbers). So no HP bar at all; the condition word is it.
+	// Health reads from the qualitative wound-state word by default —
+	// exact enemy HP stays hidden until the kind is identified in the
+	// bestiary (5 kills or a Scan), which the caller passes as `known`. A
+	// known foe shows its real HP in claret just after the word; unknown
+	// foes show the word alone. So: no HP bar; the condition word, plus the
+	// revealed number once the party has earned (or scanned) the knowledge.
 	condSize := FontSmall
 	condY := float32(y) + float32(h) - condSize - 9
 	drawTextWithShadow(font, condition, nameX, condY, condSize, condCol)
+	if known {
+		condW := rl.MeasureTextEx(font, condition, condSize, 1).X
+		hpText := fmt.Sprintf("%d/%d", enemy.HP, enemy.MaxHP)
+		drawTextWithShadow(font, hpText, nameX+condW+12, condY, condSize, barEnemyHP)
+	}
 
 	// Status pills, anchored to the right edge (no HP bar to tuck beside).
 	pillW := float32(34)

@@ -6,13 +6,17 @@ import (
 )
 
 // WeaponType classifies a hand weapon by its governing accuracy stat and
-// its reach. HEAVY melee weapons are STR-governed; LIGHT (finesse) melee
-// and ALL ranged weapons are DEX-governed — so a strong fighter lands a
-// greataxe reliably while a nimble rogue lands a dagger or a bow. The
-// basic attack reads the wielder's equipped weapon to pick which stat
-// rolls the to-hit (and scales the damage) — see MemberAttackHits /
-// MemberAttackDamage. WeaponNone is unarmed / a non-weapon hand item
-// (e.g. a shield): a STR melee strike (fists).
+// its reach. The split is the same on both the melee and ranged sides:
+// HEAVY weapons (greataxe, war hammer; crossbow, arbalest) are
+// STR-governed, while LIGHT / finesse weapons (dagger, rapier; sling, bow,
+// throwing knives) are DEX-governed — so a strong fighter spans a crossbow
+// or swings a greataxe reliably while a nimble rogue lands a dagger or a
+// short bow. Ranged is NOT uniformly DEX anymore: a heavy crossbow needs
+// strength to span and steady, so it rolls off STR. The basic attack reads
+// the wielder's equipped weapon to pick which stat rolls the to-hit (and
+// scales the damage) — see MemberAttackHits / MemberAttackDamage.
+// WeaponNone is unarmed / a non-weapon hand item (e.g. a shield): a STR
+// melee strike (fists).
 type WeaponType int
 
 const (
@@ -29,11 +33,16 @@ const (
 	// Light / finesse melee — DEX-governed.
 	WeaponDagger
 	WeaponRapier
-	// Ranged — DEX-governed.
+	// Light ranged — DEX-governed (quick, finesse).
 	WeaponSling
 	WeaponBow
 	WeaponPistol
 	WeaponThrowingKnives
+	// Heavy ranged — STR-governed. A crossbow/arbalest needs strength to
+	// span and steady, so its to-hit (and basic-attack damage) rolls off
+	// STR, not DEX — the ranged mirror of the heavy-vs-light melee split.
+	WeaponCrossbow
+	WeaponArbalest
 	WeaponTypeCount
 )
 
@@ -42,7 +51,7 @@ const (
 // range.
 type weaponSpec struct {
 	Label    string
-	Accuracy Stat // StatSTR (heavy) or StatDEX (light / ranged)
+	Accuracy Stat // StatSTR (heavy melee / heavy ranged) or StatDEX (light melee / light ranged)
 	Ranged   bool
 }
 
@@ -66,6 +75,8 @@ var weaponSpecs = [WeaponTypeCount]weaponSpec{
 	WeaponBow:            {Label: "Bow", Accuracy: StatDEX, Ranged: true},
 	WeaponPistol:         {Label: "Pistol", Accuracy: StatDEX, Ranged: true},
 	WeaponThrowingKnives: {Label: "Throwing Knives", Accuracy: StatDEX, Ranged: true},
+	WeaponCrossbow:       {Label: "Crossbow", Accuracy: StatSTR, Ranged: true},
+	WeaponArbalest:       {Label: "Arbalest", Accuracy: StatSTR, Ranged: true},
 }
 
 func init() {

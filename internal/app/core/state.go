@@ -60,6 +60,10 @@ func NewGameState(area AreaDefinition) GameState {
 		// Starting bag: rations only, no equipment — see starterInventory.
 		Inventory: starterInventory(),
 		Quests:    StarterQuests(),
+		// Empty foe knowledge at the start of a run; fills as the party
+		// fights (RecordBattleKills) and scans (MarkScanned). A save
+		// overlays its persisted Bestiary on top in GameStateFromSave.
+		Bestiary: make(Bestiary),
 		Battle: Battle{
 			ActivePack:        -1,
 			EnemyIndex:        -1,

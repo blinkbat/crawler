@@ -149,6 +149,10 @@ func CursorUpDown(cursor, count int) int {
 	if count <= 0 {
 		return cursor
 	}
+	// Re-clamp even on a no-press frame: a list can shrink between
+	// frames (a stack consumed, an entry removed) and leave the stored
+	// cursor past the end until the next nav press.
+	cursor = core.Clamp(cursor, 0, count-1)
 	if UpPressed() {
 		cursor = core.WrapIndex(cursor-1, count)
 	}
@@ -178,6 +182,8 @@ func CursorUpDownTextSafe(cursor, count int) int {
 	if count <= 0 {
 		return cursor
 	}
+	// Same no-press re-clamp as CursorUpDown — see there.
+	cursor = core.Clamp(cursor, 0, count-1)
 	if UpPressedArrows() {
 		cursor = core.WrapIndex(cursor-1, count)
 	}
@@ -260,6 +266,8 @@ func CursorLeftRightWrap(cursor, count int) int {
 	if count <= 0 {
 		return cursor
 	}
+	// Same no-press re-clamp as CursorUpDown — see there.
+	cursor = core.Clamp(cursor, 0, count-1)
 	switch CursorLeftRight() {
 	case 1:
 		return core.WrapIndex(cursor+1, count)

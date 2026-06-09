@@ -59,6 +59,9 @@ const (
 	VFXConfuse
 	// Ingest apply — green throat motion (dragged toward enemy).
 	VFXIngest
+	// Scan — a quick pale-cyan "reveal" ring rising off the target as the
+	// Thief identifies it. Information cue, no impact feel.
+	VFXScan
 )
 
 // VFXAnchor names what target's world position the renderer should
@@ -88,8 +91,9 @@ type VFXRequest struct {
 }
 
 // EnqueueEnemyVFX appends a VFX request anchored to an active-pack
-// enemy slot. No-op when slot is out of range so callers can chain
-// after a damageEnemy() without re-checking the kill status.
+// enemy slot. The slot is NOT range-checked here — the render-side
+// drain drops requests whose slot is out of range, so callers can
+// chain after a damageEnemy() without re-checking the kill status.
 func EnqueueEnemyVFX(g *GameState, kind VFXKind, slot int) {
 	if g == nil || kind == VFXNone {
 		return
@@ -97,8 +101,9 @@ func EnqueueEnemyVFX(g *GameState, kind VFXKind, slot int) {
 	g.VFXQueue = append(g.VFXQueue, VFXRequest{Kind: kind, Anchor: VFXAnchorEnemy, SlotIdx: slot})
 }
 
-// EnqueuePartyVFX appends a VFX request anchored to a party slot. No-
-// op for out-of-range slots so heal helpers can call without first
+// EnqueuePartyVFX appends a VFX request anchored to a party slot. The
+// slot is NOT range-checked here — the render-side drain drops
+// out-of-range requests, so heal helpers can call without first
 // validating.
 func EnqueuePartyVFX(g *GameState, kind VFXKind, slot int) {
 	if g == nil || kind == VFXNone {

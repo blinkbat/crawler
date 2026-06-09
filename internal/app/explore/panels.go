@@ -151,9 +151,19 @@ func updatePanels(g *core.GameState) {
 			tryUseItem(g)
 		}
 	case core.PanelTabQuests:
-		// Read-only journal: Up/Down browse the quest rows. No Confirm
-		// action — quests advance through gameplay hooks, not this screen.
-		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, len(g.Quests))
+		// Journal hosts two sub-views: Left/Right toggles Quests ↔ Bestiary
+		// (resetting the row cursor so each opens at the top), Up/Down scroll
+		// the active list. Read-only — quests advance through gameplay hooks,
+		// the bestiary fills through kills / scans, neither acts on Confirm.
+		if sub := core.JournalSubtab(input.CursorLeftRightWrap(int(g.JournalTab), int(core.JournalSubtabCount))); sub != g.JournalTab {
+			g.JournalTab = sub
+			g.PanelsRowCursor = 0
+		}
+		rows := len(g.Quests)
+		if g.JournalTab == core.JournalBestiary {
+			rows = len(g.Bestiary.SeenKinds())
+		}
+		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, rows)
 	case core.PanelTabMap:
 		// Up/Down zooms the map by one cells-on-screen step per press;
 		// the bounds (core.PanelMapZoomMin/Max) are soft-clamped so holding

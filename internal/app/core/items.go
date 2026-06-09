@@ -33,6 +33,11 @@ const (
 	// the itemDefinitions slice order, which is independent of this value.
 	ItemCrustOfBread // small healing consumable (Slot == SlotNone)
 	ItemMagicPhial   // small MP-restore consumable (Slot == SlotNone)
+	// Ranged weapons split light/heavy like the melee tier (weapons.go):
+	// Throwing Knives are light DEX; the Crossbow + Arbalest are heavy STR.
+	ItemThrowingKnives
+	ItemCrossbow
+	ItemArbalest
 )
 
 // init pins every ItemKind's serialized integer value. ItemKind is stored as
@@ -52,7 +57,8 @@ func init() {
 		{ItemSilverRing, 6}, {ItemBrassAmulet, 7}, {ItemDagger, 8},
 		{ItemRapier, 9}, {ItemShortBow, 10}, {ItemSling, 11},
 		{ItemBattleAxe, 12}, {ItemWarHammer, 13}, {ItemCrustOfBread, 14},
-		{ItemMagicPhial, 15},
+		{ItemMagicPhial, 15}, {ItemThrowingKnives, 16}, {ItemCrossbow, 17},
+		{ItemArbalest, 18},
 	}
 	for _, p := range pinned {
 		if int(p.kind) != p.val {
@@ -263,6 +269,28 @@ var itemDefinitions = []ItemDefinition{
 		Weapon:    WeaponHammer,
 		TwoHanded: true, // a two-handed maul fills both hands — no off-hand item beside it
 		Price:     55,
+		StatBonus: [StatCount]int{StatSTR: 2}},
+
+	// Ranged weapons. Light (DEX) vs heavy (STR) mirrors the melee split:
+	// throwing knives are a quick finesse throw; the crossbow + arbalest
+	// need strength to span and steady, so they roll to-hit + basic-attack
+	// damage off STR. The arbalest is a two-handed siege piece. All three
+	// reach flyers without the melee-vs-flyer penalty (WeaponIsRanged).
+	{Kind: ItemThrowingKnives, Name: "Throwing Knives", Description: "A bandolier of balanced knives. +1 DEX.",
+		Slot:      SlotHand,
+		Weapon:    WeaponThrowingKnives, // light ranged → DEX-governed
+		Price:     28,
+		StatBonus: [StatCount]int{StatDEX: 1}},
+	{Kind: ItemCrossbow, Name: "Crossbow", Description: "A spanned crossbow. +1 STR.",
+		Slot:      SlotHand,
+		Weapon:    WeaponCrossbow, // heavy ranged → STR-governed
+		Price:     45,
+		StatBonus: [StatCount]int{StatSTR: 1}},
+	{Kind: ItemArbalest, Name: "Arbalest", Description: "A heavy steel arbalest. Two-handed. +2 STR.",
+		Slot:      SlotHand,
+		Weapon:    WeaponArbalest, // heavy ranged → STR-governed
+		TwoHanded: true,
+		Price:     60,
 		StatBonus: [StatCount]int{StatSTR: 2}},
 }
 

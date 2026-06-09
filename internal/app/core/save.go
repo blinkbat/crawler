@@ -46,6 +46,11 @@ type SaveData struct {
 	Party        []PartyMember `json:"party"`
 	Inventory    []ItemStack   `json:"inventory"`
 	Quests       []Quest       `json:"quests"`
+	// Bestiary persists foe knowledge (kill counts + scanned flags per
+	// kind). omitempty so saves written before the bestiary existed simply
+	// load with no entries — adding this optional field is save-compatible,
+	// so SaveVersion stays put.
+	Bestiary Bestiary `json:"bestiary,omitempty"`
 }
 
 // NewSaveData captures the current run into a serializable snapshot. The
@@ -73,6 +78,10 @@ func NewSaveData(g *GameState) SaveData {
 		// detaches the backing array.
 		Inventory: slices.Clone(g.Inventory),
 		Quests:    slices.Clone(g.Quests),
+		// Detach the bestiary map from the live run (same defensive-copy
+		// rationale as Inventory / Quests). BestiaryEntry is a value type,
+		// so maps.Clone fully decouples the snapshot; nil stays nil.
+		Bestiary: maps.Clone(g.Bestiary),
 	}
 }
 
@@ -196,6 +205,14 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	if pruned := pruneQuests(data.Quests); len(pruned) > 0 {
 		g.Quests = pruned
 	}
+	// Overlay the saved bestiary, dropping entries for kinds this build no
+	// longer registers (a save predating an EnemyKind renumber) — the same
+	// load-boundary hygiene Inventory / Quests / skills get. NewGameState
+	// already seeded a fresh empty map, so an empty/absent saved bestiary
+	// (older save) just leaves that in place.
+	if pruned := pruneBestiary(data.Bestiary); len(pruned) > 0 {
+		g.Bestiary = pruned
+	}
 	g.StepCount = data.StepCount
 	// Place the player at the saved tile, but fall back to the map's
 	// authored start if that tile is now blocked — the map may have been
@@ -277,6 +294,18 @@ func sanitizeLoadedParty(party []PartyMember) {
 				m.Equipped[s] = ItemNone
 			}
 		}
+		// Two-handed weapons occupy BOTH hands. EquipFromInventory enforces
+		// that exclusion at equip time, but a hand-edited save can carry a
+		// two-hander beside an off-hand item — or the same two-hander in both
+		// hands — and walkEquipped sums all slots, so the extra item's
+		// bonuses would double-count. Mirror the equip rule: a two-hander in
+		// either hand empties the other (right hand wins when both qualify).
+		switch {
+		case ItemIsTwoHanded(m.Equipped[EquipRightHand]):
+			m.Equipped[EquipLeftHand] = ItemNone
+		case ItemIsTwoHanded(m.Equipped[EquipLeftHand]):
+			m.Equipped[EquipRightHand] = ItemNone
+		}
 		// Clone the decoded progression maps so the live party doesn't alias
 		// the maps held by `data.Party` (overlaySavedParty shallow-copies the
 		// struct). `data` is discarded today so no live aliasing results, but
@@ -298,6 +327,14 @@ func sanitizeLoadedParty(party []PartyMember) {
 			if _, ok := findTreeNode(m.Class, id); !ok {
 				delete(m.TreeRanks, id)
 			}
+		}
+		// Bound SkillCursor against the learned-skill list the pruned
+		// TreeRanks now yield. PartySkill self-heals an out-of-range
+		// cursor at read time, so this is hygiene, not a crash fix —
+		// but it keeps the persisted value honest for any future reader
+		// that indexes without the clamp.
+		if skills := PartySkills(*m); m.SkillCursor < 0 || m.SkillCursor >= len(skills) {
+			m.SkillCursor = 0
 		}
 	}
 	// Combat-only state must never survive into the reloaded (exploration)
@@ -352,7 +389,37 @@ func pruneQuests(quests []Quest) []Quest {
 			continue
 		}
 		seen[q.ID] = true
+		// A hand-edited Status outside {Active, Complete} would be a
+		// "neither" entry both journal-header tallies skip. Clamp it to
+		// Active — the safe default for an entry we can't interpret.
+		if q.Status != QuestActive && q.Status != QuestComplete {
+			q.Status = QuestActive
+		}
 		out = append(out, q)
+	}
+	return out
+}
+
+// pruneBestiary drops bestiary entries for an EnemyKind this build no longer
+// registers (a save predating a kind renumber/removal) and any empty record
+// (no kills and not scanned). Negative kill counts from a hand-edit are
+// floored at zero. Returns a fresh map; nil/empty input returns nil.
+func pruneBestiary(b Bestiary) Bestiary {
+	if len(b) == 0 {
+		return nil
+	}
+	out := make(Bestiary, len(b))
+	for kind, e := range b {
+		if e.Kills <= 0 && !e.Scanned {
+			continue
+		}
+		if _, ok := EnemyInfoOk(kind); !ok {
+			continue
+		}
+		if e.Kills < 0 {
+			e.Kills = 0
+		}
+		out[kind] = e
 	}
 	return out
 }

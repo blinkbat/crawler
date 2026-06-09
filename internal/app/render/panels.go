@@ -80,7 +80,7 @@ var panelTabFooterHints = [core.PanelTabCount]string{
 	core.PanelTabEquipment: "L1/R1 tabs   Left/Right member   Up/Down slot   Confirm change gear   X close",
 	core.PanelTabItems:     "L1/R1 tabs   Up/Down item   Confirm / F use   X close",
 	core.PanelTabSkills:    "L1/R1 tabs   Left/Right member   Confirm open trees   F cast heal   X close",
-	core.PanelTabQuests:    footerHintMemberTabs,
+	core.PanelTabQuests:    "L1/R1 tabs   Left/Right Quests/Bestiary   Up/Down scroll   X close",
 	core.PanelTabMap:       footerHintMemberTabs,
 }
 

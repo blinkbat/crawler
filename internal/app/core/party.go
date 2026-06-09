@@ -104,6 +104,16 @@ type skillDefinition struct {
 	// even considers the skill; once spent, the skill drops out of
 	// the AI's pick list for the rest of the encounter.
 	PerBattleCastLimit int
+	// NoUpgrades marks a player-castable skill that has NO tier-upgrade
+	// ladder — a single-rank utility whose effect doesn't scale (Scan
+	// reveals a foe's HP; there's nothing to improve numerically). It's
+	// granted by an `actOnce` tree node (MaxRank 1, see skilltrees.go) and
+	// is EXEMPT from skilltree.go's "every PlayerCastable skill has exactly
+	// MaxSkillTier rows in skillTierTable" invariant: that guard skips a
+	// NoUpgrades skill (and asserts it carries no stray tier rows). Every
+	// other player skill leaves this false and keeps its standard 3-tier
+	// damage/proc ladder.
+	NoUpgrades bool
 }
 
 type SkillEffect struct {
@@ -258,6 +268,16 @@ var skillDefinitions = []skillDefinition{
 	// take quality-scaled damage. Magic-tagged so amoebas don't
 	// shrug it off. Pricier than Firebolt because it hits everyone.
 	{Skill: SkillArcBolt, Name: "Arc Bolt", Description: "INT-scaled magic AoE. Memorize the glyph pattern, then recall it — arcs to every enemy.", Cost: 6, TargetMode: ActionMenu, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameRecall, Effect: SkillEffect{Damage: 1, AppliesAOEEnemies: true}, PlayerCastable: true},
+	// Scan (Thief, via the Shadow Arts tree): single-target inspect that
+	// deals no damage and applies no status. A landed cast IDENTIFIES the
+	// target's KIND in the bestiary (Bestiary.MarkScanned) — the shortcut
+	// to the normal 5-kills-to-identify threshold — after which that
+	// kind's exact HP shows in the battle roster. Costs 2 MP so it's a
+	// real resource decision, not a free pre-cast every fight; a
+	// simple Press bar keeps it in the standard action flow, but the ID
+	// lands at any timing grade (it's information, not a chance roll).
+	// Tag None — never touches armor / resist math.
+	{Skill: SkillScan, Name: "Scan", Description: "Identify the target's kind — reveals its HP (here and in the bestiary). No damage.", Cost: 2, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigamePress, Effect: SkillEffect{}, PlayerCastable: true, NoUpgrades: true},
 	// Sleep is the goblin-mage's signature. Magic-tagged so armor doesn't
 	// gate the proc; press-minigame so the cast resolves quickly. Damage
 	// is 0 — the only effect is the status. The mage doesn't pay MP
@@ -302,6 +322,15 @@ var skillDefinitions = []skillDefinition{
 func SkillPlayerCastable(s SkillID) bool {
 	def, ok := skillInfo(s)
 	return ok && def.PlayerCastable
+}
+
+// SkillHasNoUpgrades reports whether a skill opts out of the tier-upgrade
+// ladder — a single-rank utility (Scan) whose effect doesn't scale. The
+// skilltree.go tier-table invariant skips these, and they're granted by an
+// actOnce tree node (MaxRank 1). Unknown skill IDs return false.
+func SkillHasNoUpgrades(s SkillID) bool {
+	def, ok := skillInfo(s)
+	return ok && def.NoUpgrades
 }
 
 // PlayerCastableSkills returns every skill flagged PlayerCastable, in

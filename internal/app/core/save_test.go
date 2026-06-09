@@ -101,6 +101,69 @@ func TestSanitizeLoadedParty_ClearsTransientCombatState(t *testing.T) {
 	}
 }
 
+// TestSanitizeLoadedParty_TwoHandedExclusion guards the load-side mirror of
+// EquipFromInventory's two-hander rule: a hand-edited save carrying a
+// two-handed weapon beside an off-hand item (or the same two-hander in both
+// hands) would double-count bonuses through walkEquipped, so the opposite
+// hand must come back empty.
+func TestSanitizeLoadedParty_TwoHandedExclusion(t *testing.T) {
+	// Two-hander + off-hand shield: the shield is evicted.
+	party := NewParty()
+	party[0].Equipped[EquipRightHand] = ItemWarHammer
+	party[0].Equipped[EquipLeftHand] = ItemWoodenShield
+	sanitizeLoadedParty(party)
+	if party[0].Equipped[EquipRightHand] != ItemWarHammer || party[0].Equipped[EquipLeftHand] != ItemNone {
+		t.Errorf("2H + off-hand survived load: %v", party[0].Equipped)
+	}
+
+	// Same two-hander duplicated into both hands: one copy survives.
+	party = NewParty()
+	party[0].Equipped[EquipRightHand] = ItemWarHammer
+	party[0].Equipped[EquipLeftHand] = ItemWarHammer
+	sanitizeLoadedParty(party)
+	if party[0].Equipped[EquipRightHand] != ItemWarHammer || party[0].Equipped[EquipLeftHand] != ItemNone {
+		t.Errorf("duplicated 2H survived load: %v", party[0].Equipped)
+	}
+
+	// Two-hander in the LEFT hand beside a right-hand weapon: the
+	// two-hander wins (it's the item whose contract is violated).
+	party = NewParty()
+	party[0].Equipped[EquipRightHand] = ItemIronSword
+	party[0].Equipped[EquipLeftHand] = ItemWarHammer
+	sanitizeLoadedParty(party)
+	if party[0].Equipped[EquipRightHand] != ItemNone || party[0].Equipped[EquipLeftHand] != ItemWarHammer {
+		t.Errorf("left-hand 2H beside a weapon survived load: %v", party[0].Equipped)
+	}
+
+	// One-handed pairs are untouched.
+	party = NewParty()
+	party[0].Equipped[EquipRightHand] = ItemIronSword
+	party[0].Equipped[EquipLeftHand] = ItemWoodenShield
+	sanitizeLoadedParty(party)
+	if party[0].Equipped[EquipRightHand] != ItemIronSword || party[0].Equipped[EquipLeftHand] != ItemWoodenShield {
+		t.Errorf("legitimate sword+shield pair was disturbed: %v", party[0].Equipped)
+	}
+}
+
+// TestPruneQuests_ClampsUnknownStatus guards the journal's load hygiene: a
+// hand-edited Status outside {Active, Complete} would be a "neither" entry
+// both header tallies skip, so it clamps to Active.
+func TestPruneQuests_ClampsUnknownStatus(t *testing.T) {
+	out := pruneQuests([]Quest{
+		{ID: "a", Status: QuestStatus(99)},
+		{ID: "b", Status: QuestComplete},
+	})
+	if len(out) != 2 {
+		t.Fatalf("pruneQuests dropped entries: %v", out)
+	}
+	if out[0].Status != QuestActive {
+		t.Errorf("garbage Status not clamped to Active: %v", out[0].Status)
+	}
+	if out[1].Status != QuestComplete {
+		t.Errorf("valid Complete status disturbed: %v", out[1].Status)
+	}
+}
+
 // TestOverlaySavedParty_Reconciles guards the PartyMemberCount-length,
 // class-ordered seating contract against a malformed save: a normal save maps
 // 1:1 (progression preserved), a short save keeps fresh defaults for missing

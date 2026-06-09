@@ -212,7 +212,9 @@ func PanelTabLabel(t PanelTab) string {
 	case PanelTabSkills:
 		return "Skills"
 	case PanelTabQuests:
-		return "Quests"
+		// Hosts two sub-tabs (Quests + Bestiary), so the top-level tab
+		// reads "Journal" — the quest log is one view within it.
+		return "Journal"
 	case PanelTabMap:
 		return "Map"
 	default:
@@ -220,6 +222,31 @@ func PanelTabLabel(t PanelTab) string {
 		// array: a new tab that forgets a label here fails loudly instead
 		// of showing "?" in the tab strip.
 		panic("core: PanelTabLabel missing case for PanelTab")
+	}
+}
+
+// JournalSubtab selects which view the Journal tab (PanelTabQuests) shows —
+// the quest log or the bestiary. The two are toggled with Left/Right inside
+// the tab (the journal has no member column to spend the horizontal axis
+// on); the active view is stored on GameState.JournalTab.
+type JournalSubtab int
+
+const (
+	JournalQuests JournalSubtab = iota
+	JournalBestiary
+	JournalSubtabCount
+)
+
+// JournalSubtabLabel returns the short label for a journal sub-tab, shown in
+// the sub-tab header strip.
+func JournalSubtabLabel(s JournalSubtab) string {
+	switch s {
+	case JournalQuests:
+		return "Quests"
+	case JournalBestiary:
+		return "Bestiary"
+	default:
+		panic("core: JournalSubtabLabel missing case for JournalSubtab")
 	}
 }
 
@@ -415,6 +442,12 @@ type GameState struct {
 	// transitions / restarts like Party / Inventory / Gold. Empty for now
 	// (no seed quests); the Quests tab uses PanelsRowCursor for its row.
 	Quests []Quest
+	// Bestiary is the party's accumulated foe knowledge (kill counts +
+	// scanned flags per enemy kind), shown in the journal's Bestiary
+	// sub-tab. Save-persisted and carried across transitions / restart
+	// like Quests. A kind becomes "known" (its HP revealed in the battle
+	// roster) after BestiaryIDKills defeats or one Scan. See bestiary.go.
+	Bestiary Bestiary
 	// Chests is the runtime list of on-field chests. Built from
 	// AreaDefinition.ChestSpawns by NewGameState. Looted chests stay in
 	// the slice (so their open-lid sprite keeps rendering); the explore
@@ -482,6 +515,12 @@ type GameState struct {
 	PanelsOpen      bool
 	PanelsTab       PanelTab
 	PanelsRowCursor int
+	// JournalTab selects which view the Journal tab shows — the quest log
+	// (JournalQuests, default) or the bestiary. Toggled with Left/Right
+	// while the Journal tab is active; PanelsRowCursor then scrolls the
+	// rows of whichever sub-view is showing. Not save-persisted (a UI
+	// cursor, like PanelsTab itself).
+	JournalTab JournalSubtab
 	// Skill-tree modal: a Diablo-2-style sub-dialog raised from the Skills
 	// tab (Confirm on a member) showing that member's three trees. While
 	// SkillTreeOpen the modal owns panel input — SkillTreeCol picks the

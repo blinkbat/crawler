@@ -216,11 +216,16 @@ type soundLayout struct {
 	previewBtn   rl.Rectangle
 	saveBtn      rl.Rectangle
 	listRows     []soundListRowRect   // one entry per saved-sound row (rects only filled for the visible window)
-	assignRows   []soundAssignRowRect // one entry per built-in cue row
+	assignRows   []soundAssignRowRect // one entry per built-in cue row (rects only filled for the visible window)
 	// listTopRow..listEnd is the saved-sounds scroll window (via scrollWindow)
 	// so a long list can't overflow the column off the card bottom.
 	listTopRow int
 	listEnd    int
+	// assignTopRow..assignEnd is the same scroll window for the cue
+	// assignments column — 6 cues fit today, but the cue list grows with
+	// the game and overflow rows would otherwise be unreachable.
+	assignTopRow int
+	assignEnd    int
 }
 
 // computeSoundLayout assembles the layout rectangles given the current
@@ -237,7 +242,15 @@ func soundListCursor(s *State) int {
 	return 0
 }
 
-func computeSoundLayout(savedSounds []string, listCursor int) soundLayout {
+// soundAssignCursor mirrors soundListCursor for the assignments column.
+func soundAssignCursor(s *State) int {
+	if s.soundLeftPanel == soundPanelAssign {
+		return s.soundCursor
+	}
+	return 0
+}
+
+func computeSoundLayout(savedSounds []string, listCursor, assignCursor int) soundLayout {
 	card := centeredCardRect(soundModalW, soundModalH)
 	colW := (modalContentWidth(card) - 2*soundColGap) / 3
 	colY := card.Y + 56
@@ -286,13 +299,21 @@ func computeSoundLayout(savedSounds []string, listCursor int) soundLayout {
 		}
 	}
 
-	// Assignments column.
+	// Assignments column. Same visible-window scheme as the saved-sounds
+	// list: only on-window cue rows get real rects, so a cue list that
+	// outgrows the column scrolls instead of overflowing off the card.
 	ax := assignCol.X + 12
 	aw := assignCol.Width - 24
 	ay := assignCol.Y + 36
+	assignAreaH := assignCol.Y + assignCol.Height - 12 - ay
+	maxAssignRows := int(assignAreaH / soundAssignRowH)
+	if maxAssignRows < 1 {
+		maxAssignRows = 1
+	}
+	l.assignTopRow, l.assignEnd = scrollWindow(assignCursor, len(assignableCueList), maxAssignRows)
 	l.assignRows = make([]soundAssignRowRect, len(assignableCueList))
-	for i := range assignableCueList {
-		row := rl.NewRectangle(ax, ay+float32(i)*soundAssignRowH, aw, soundAssignRowH-4)
+	for i := l.assignTopRow; i < l.assignEnd; i++ {
+		row := rl.NewRectangle(ax, ay+float32(i-l.assignTopRow)*soundAssignRowH, aw, soundAssignRowH-4)
 		l.assignRows[i] = soundAssignRowRect{
 			Row:        row,
 			Play:       rl.NewRectangle(row.X+row.Width-126, row.Y+12, 32, 24),
@@ -356,7 +377,7 @@ func updateSoundsModal(s *State) Action {
 	// Read the saved-sounds list from the cache (populated on open + after
 	// each save/delete via refreshSoundCaches) — no per-frame os.ReadDir.
 	savedSounds := s.soundSavedCache
-	layout := computeSoundLayout(savedSounds, soundListCursor(s))
+	layout := computeSoundLayout(savedSounds, soundListCursor(s), soundAssignCursor(s))
 
 	mp := rl.GetMousePosition()
 	mouseDown := rl.IsMouseButtonDown(rl.MouseLeftButton)
@@ -462,11 +483,9 @@ func handleSoundMouseClick(s *State, mp rl.Vector2, l *soundLayout, savedSounds 
 			return soundPanelList, i
 		}
 	}
-	// Assignments column.
-	for i, r := range l.assignRows {
-		if i >= len(assignableCueList) {
-			break
-		}
+	// Assignments column (visible window only — off-window rects are zero).
+	for i := l.assignTopRow; i < l.assignEnd; i++ {
+		r := l.assignRows[i]
 		if pointIn(mp, r.Play) {
 			audio.Play(assignableCueList[i])
 			return soundPanelAssign, i
@@ -657,7 +676,7 @@ func drawSoundsModal(s *State, font rl.Font, theme render.Theme) {
 	if savedSounds == nil {
 		savedSounds = audio.ListUserSounds()
 	}
-	l := computeSoundLayout(savedSounds, soundListCursor(s))
+	l := computeSoundLayout(savedSounds, soundListCursor(s), soundAssignCursor(s))
 	// Both computeSoundLayout and drawModalHeader center the card through
 	// the shared centeredCardRect, so the rect drawModalHeader paints is
 	// identical to l.card — visual + hit-test stay in sync without
@@ -744,7 +763,8 @@ func drawSoundsListCol(s *State, font rl.Font, theme render.Theme, l *soundLayou
 func drawSoundsAssignCol(s *State, font rl.Font, theme render.Theme, l *soundLayout) {
 	drawSoundsColumnFrame(theme, l.assignCol, s.soundLeftPanel == soundPanelAssign)
 	render.DrawSubHeading(font, "Built-in cue assignments", l.assignCol.X+12, l.assignCol.Y+8, theme.BorderActive)
-	for i, cue := range assignableCueList {
+	for i := l.assignTopRow; i < l.assignEnd; i++ {
+		cue := assignableCueList[i]
 		r := l.assignRows[i]
 		if s.soundLeftPanel == soundPanelAssign && s.soundCursor == i {
 			render.DrawSelectedRow(r.Row)
@@ -762,6 +782,12 @@ func drawSoundsAssignCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 		drawButton(font, r.Play, ">", false)
 		drawButton(font, r.CycleLeft, "<", false)
 		drawButton(font, r.CycleRight, ">", false)
+	}
+	if l.assignTopRow > 0 {
+		rl.DrawTextEx(font, "▲ more", rl.NewVector2(l.assignCol.X+l.assignCol.Width-70, l.assignCol.Y+10), soundFontHint, 1, theme.TextHint)
+	}
+	if l.assignEnd < len(assignableCueList) {
+		rl.DrawTextEx(font, "▼ more", rl.NewVector2(l.assignCol.X+l.assignCol.Width-70, l.assignCol.Y+l.assignCol.Height-20), soundFontHint, 1, theme.TextHint)
 	}
 }
 

@@ -1081,6 +1081,10 @@ func winBattle(g *core.GameState, message string) {
 	g.Battle.ClearTiming()
 	resetBattleAction(g)
 	setBattleMessage(g, message)
+	// Credit every felled foe to the bestiary (kill counts drive the
+	// 5-kills-to-identify threshold). Reads alongside the XP / loot
+	// awards below — all "the pack is dead, tally the spoils" bookkeeping.
+	core.RecordBattleKills(g)
 	// XP award fires once, right after the kill is confirmed. Living
 	// members get the full pack value; dead members get nothing
 	// (incentive to keep your tank up). Level-ups queue stat points
