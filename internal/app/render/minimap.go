@@ -317,8 +317,8 @@ func drawMinimapTimeOfDay(font rl.Font, stepCount int, x, y, width int32) {
 }
 
 // phaseColors mirrors the rough sky tint of each lighting phase so the HUD
-// strip itself reads as a tiny day at a glance. Indexed by TimeOfDay; size
-// is asserted at compile time against core.TimeOfDayCount via _phaseColorsLen.
+// strip itself reads as a tiny day at a glance. Indexed by TimeOfDay; the
+// [core.TimeOfDayCount] array size is itself the compile-time length guard.
 var phaseColors = [core.TimeOfDayCount]rl.Color{
 	core.Dawn:      rl.NewColor(232, 168, 152, 255), // dawn — rose
 	core.Morning:   rl.NewColor(220, 224, 200, 255), // morning — pale gold

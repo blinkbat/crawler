@@ -210,7 +210,6 @@ func updateItemTarget(g *core.GameState) {
 // finite resource, no need to extract a third demand on top.
 func applyItem(g *core.GameState) {
 	kind := g.Battle.PendingItem
-	target := g.Battle.PartyTarget
 	if kind == core.ItemNone {
 		resetBattleAction(g)
 		return
@@ -222,6 +221,12 @@ func applyItem(g *core.GameState) {
 		resetBattleAction(g)
 		return
 	}
+	// A confused actor may fumble the item onto a random living ally — the same
+	// per-action retarget a confused heal cast gets (AGENTS: "Confused =
+	// per-action random retarget"). Runs before we read the target so the
+	// fumble actually lands; a no-op when the actor isn't confused.
+	maybeConfuseRetarget(g)
+	target := g.Battle.PartyTarget
 	// Ingested is checked alongside HP<=0: the target picker excludes ingested
 	// allies, but a mantrap can swallow the chosen ally between target-select
 	// and this confirm (mixed-initiative). Without this guard the stack is

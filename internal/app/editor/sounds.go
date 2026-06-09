@@ -239,11 +239,11 @@ func soundListCursor(s *State) int {
 
 func computeSoundLayout(savedSounds []string, listCursor int) soundLayout {
 	card := centeredCardRect(soundModalW, soundModalH)
-	colW := (card.Width - 32 - 2*soundColGap) / 3
+	colW := (modalContentWidth(card) - 2*soundColGap) / 3
 	colY := card.Y + 56
 	colH := card.Height - 110
 
-	paramsCol := rl.NewRectangle(card.X+16, colY, colW, colH)
+	paramsCol := rl.NewRectangle(card.X+modalContentInset, colY, colW, colH)
 	listCol := rl.NewRectangle(paramsCol.X+colW+soundColGap, colY, colW, colH)
 	assignCol := rl.NewRectangle(listCol.X+colW+soundColGap, colY, colW, colH)
 

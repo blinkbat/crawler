@@ -113,7 +113,7 @@ func customEnemyModalLayout(s *State) customEnemyLayout {
 
 	l := customEnemyLayout{card: card}
 	// List column on the left, below the heading reserve.
-	listX := card.X + 16
+	listX := card.X + modalContentInset
 	listY := card.Y + 56
 	listH := card.Height - 56 - 56 // leave footer for Delete/Close
 	l.listArea = rl.NewRectangle(listX, listY, customListWidth, listH)

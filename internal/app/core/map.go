@@ -366,6 +366,15 @@ func (a AreaDefinition) ElevationLevelAt(x, z int) int {
 	return int(c - '0')
 }
 
+// ElevationChar encodes a level back to its on-disk / grid digit byte — the
+// inverse of ElevationLevelAt's `c - '0'` decode. Clamped to the single-digit
+// range [0, 9] so it always yields a valid '0'..'9' cell. The one home for the
+// `'0'+level` conversion the editor used to inline at every height-stamp and
+// height-glyph site (paint, flood/fill, ramp placement, slice-view digit).
+func ElevationChar(level int) byte {
+	return byte('0' + Clamp(level, 0, 9))
+}
+
 // IsRampChar reports whether a floor-layer char is one of the four directional
 // ramp tiles.
 func IsRampChar(c byte) bool {

@@ -27,6 +27,11 @@ const (
 const (
 	entityListTop  = float32(52)
 	entityListRowH = float32(22)
+	// entityListTextInset is where a row's TEXT starts — the card gutter
+	// (modalContentInset) plus a few px so the "> " cursor caret has room.
+	// Derived from modalContentInset (defined lower in this file) so a gutter
+	// change carries the row text with it instead of stranding a bare 24.
+	entityListTextInset = modalContentInset + 8
 )
 
 // layout recomputes screen rectangles each frame from the current window
@@ -71,11 +76,26 @@ func (s *State) layout() {
 	s.rect.cellPx = cell
 	totalW := cell * float32(mw)
 	totalH := cell * float32(mh)
-	s.rect.gridX = s.rect.grid.X + (s.rect.grid.Width-totalW)/2 + s.panX
-	s.rect.gridY = s.rect.grid.Y + (s.rect.grid.Height-totalH)/2 + s.panY
 	s.rect.gridW = totalW
 	s.rect.gridH = totalH
+	// baseX/baseY are gridX/gridY at pan==0 — the map centered in the grid
+	// viewport. Clamp the pan against these so a drag (or a stale pan left
+	// over from a higher zoom) can't fling the map off-screen: when the map
+	// fits it's kept fully inside; when it overflows, panning reaches each
+	// edge plus a little overscroll. This self-heals on zoom-out, where an
+	// old large pan would otherwise shove the now-smaller map into a corner.
+	baseX := s.rect.grid.X + (s.rect.grid.Width-totalW)/2
+	baseY := s.rect.grid.Y + (s.rect.grid.Height-totalH)/2
+	s.panX = core.ClampPanAxis(s.panX, baseX, s.rect.grid.X, s.rect.grid.Width, totalW, panOverscroll)
+	s.panY = core.ClampPanAxis(s.panY, baseY, s.rect.grid.Y, s.rect.grid.Height, totalH, panOverscroll)
+	s.rect.gridX = baseX + s.panX
+	s.rect.gridY = baseY + s.panY
 }
+
+// panOverscroll is how far past a map edge the canvas pan may push when the
+// map overflows the viewport — a small slack so edge tiles aren't jammed flush
+// against the palette / metadata panels.
+const panOverscroll = float32(48)
 
 // cellAt converts a screen-space mouse position into a (x,z) tile, or -1,-1
 // if the position is outside the grid plot.
@@ -125,6 +145,9 @@ func Draw(s *State, assets render.Resources) {
 	drawPalette(s, font, theme)
 	drawMetadata(s, font, theme)
 	drawGrid(s, font)
+	// Scrollbars paint on top of the panels + grid they scroll, but below
+	// status toasts and modals.
+	drawScrollbars(s)
 	if len(s.statusLog) > 0 {
 		drawStatus(s, font, theme)
 	}
@@ -215,7 +238,7 @@ type doorEditLayout struct {
 
 func doorEditLayoutFor() doorEditLayout {
 	r := centeredCardRect(doorEditModalW, doorEditModalH)
-	x := r.X + 16
+	x := r.X + modalContentInset
 	fw := r.Width - 32
 	y := r.Y + 56
 	fieldH := float32(28)
@@ -326,22 +349,22 @@ var toolbarBtns = []topbarBtn{
 	{label: "Undo", action: undoOne},
 	{label: "Redo", action: redoOne},
 	{label: "Fill", action: fillEntireLayer},
-	{label: "Brush -", action: func(s *State) { s.brushSize = stepBrush(s.brushSize, -1) }},
-	{label: "Brush +", action: func(s *State) { s.brushSize = stepBrush(s.brushSize, +1) }},
+	{label: "Brush -", action: func(s *State) { stepBrushSize(s, -1) }},
+	{label: "Brush +", action: func(s *State) { stepBrushSize(s, +1) }},
 	{label: "Center", action: func(s *State) { centerViewOnTile(s, s.area.StartTileX, s.area.StartTileZ) }},
-	{label: "Reset View", action: func(s *State) { s.zoom = 1; s.panX, s.panY = 0, 0 }},
-	{label: "Lvl -", action: func(s *State) { s.editLevel = clampLevel(s.editLevel - 1) }},
-	{label: "Lvl +", action: func(s *State) { s.editLevel = clampLevel(s.editLevel + 1) }},
+	{label: "Reset View", action: resetView},
+	{label: "Lvl -", action: func(s *State) { stepEditLevel(s, -1) }},
+	{label: "Lvl +", action: func(s *State) { stepEditLevel(s, +1) }},
+	{label: "Floors",
+		action: toggleLevelFocus,
+		active: func(s *State) bool { return s.levelFocus }},
 	{label: "Ramp",
 		action: func(s *State) { s.rampMode = !s.rampMode },
 		active: func(s *State) bool { return s.rampMode }},
 	{label: "Glyphs",
-		action: func(s *State) { s.showTileGlyphs = !s.showTileGlyphs },
+		action: toggleTileGlyphs,
 		active: func(s *State) bool { return s.showTileGlyphs }},
-	{label: "Phase", action: func(s *State) {
-		s.previewPhase = core.WrapEnum(s.previewPhase, 1, core.TimeOfDayCount)
-		s.flash("Preview: " + core.PhaseName(s.previewPhase))
-	}},
+	{label: "Phase", action: cyclePreviewPhase},
 	{label: "Test", action: func(s *State) { s.testRequested = true }},
 }
 
@@ -686,12 +709,12 @@ func entityRowAt(lay entityModalLayout, p rl.Vector2) int {
 // indicators.
 func drawEntityListWindow(font rl.Font, theme render.Theme, lay entityModalLayout, count, cursor int, emptyText string, rowText func(int) string) {
 	if count == 0 {
-		rl.DrawTextEx(font, emptyText, rl.NewVector2(lay.card.X+16, lay.listTop), editorFontLabel, 1, theme.TextHint)
+		rl.DrawTextEx(font, emptyText, rl.NewVector2(lay.card.X+modalContentInset, lay.listTop), editorFontLabel, 1, theme.TextHint)
 		return
 	}
 	y := lay.listTop
 	if lay.topRow > 0 {
-		rl.DrawTextEx(font, fmt.Sprintf("▲ %d more", lay.topRow), rl.NewVector2(lay.card.X+24, y-16), editorFontHint, 1, theme.TextHint)
+		rl.DrawTextEx(font, fmt.Sprintf("▲ %d more", lay.topRow), rl.NewVector2(lay.card.X+entityListTextInset, y-16), editorFontHint, 1, theme.TextHint)
 	}
 	for i := lay.topRow; i < lay.end; i++ {
 		text := rowText(i)
@@ -700,11 +723,11 @@ func drawEntityListWindow(font rl.Font, theme render.Theme, lay entityModalLayou
 			col = theme.BorderActive
 			text = "> " + text
 		}
-		render.DrawTextWithShadow(font, text, lay.card.X+24, y, editorFontBody, col)
+		render.DrawTextWithShadow(font, text, lay.card.X+entityListTextInset, y, editorFontBody, col)
 		y += lay.rowH
 	}
 	if lay.end < count {
-		rl.DrawTextEx(font, fmt.Sprintf("▼ %d more", count-lay.end), rl.NewVector2(lay.card.X+24, y), editorFontHint, 1, theme.TextHint)
+		rl.DrawTextEx(font, fmt.Sprintf("▼ %d more", count-lay.end), rl.NewVector2(lay.card.X+entityListTextInset, y), editorFontHint, 1, theme.TextHint)
 	}
 }
 
@@ -1509,10 +1532,12 @@ func drawGrid(s *State, font rl.Font) {
 					drawTileGlyph(font, r, cell, charFontSize, ch, charFG, charShadow)
 				}
 			}
-			// Height slice-view: while the Elevation layer is active, overlay
-			// each cell's level (tint + digit) and connective ramp arrows so
-			// the heightmap is legible in the flat editor grid.
-			if s.layer == LayerElevation {
+			// Height slice-view: overlay each cell's level (tint + digit) and
+			// connective ramp arrows so the heightmap is legible in the flat
+			// editor grid. Shown while the Elevation layer is active OR while
+			// the Floors lens is on (then it rides on top of every layer as a
+			// true overlay — the active floor crisp, others ghosted).
+			if s.levelFocus || s.layer == LayerElevation {
 				drawElevationSlice(s, font, r, cell, x, z)
 			}
 		}
@@ -2027,7 +2052,7 @@ func drawElevationSlice(s *State, font rl.Font, r rl.Rectangle, cell float32, x,
 		return
 	}
 	if cell >= 12 {
-		drawTileGlyph(font, r, cell, cell*0.5, byte('0'+lvl), rl.NewColor(245, 245, 250, 230), shadow)
+		drawTileGlyph(font, r, cell, cell*0.5, core.ElevationChar(lvl), rl.NewColor(245, 245, 250, 230), shadow)
 	}
 }
 
@@ -2224,7 +2249,7 @@ func drawModalHeaderAt(font rl.Font, theme render.Theme, card rl.Rectangle, titl
 	drawModalVeil(theme)
 	render.DrawCard(int32(card.X), int32(card.Y), int32(card.Width), int32(card.Height),
 		theme.SurfacePrimary, theme.BorderSoft, accent)
-	render.DrawHeading(font, title, int32(card.X+16), int32(card.Y+12), accent)
+	render.DrawHeading(font, title, int32(card.X+modalContentInset), int32(card.Y+12), accent)
 }
 
 // openModalListGeom returns the open-map list geometry — the card, the
@@ -2266,8 +2291,8 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 	r := drawModalHeader(font, theme, openModalW, openModalH, header, theme.BorderStrong)
 
 	if len(s.modalPaths) == 0 {
-		rl.DrawTextEx(font, "(no .map files in maps/)", rl.NewVector2(r.X+16, r.Y+50), editorFontLabel, 1, theme.TextMuted)
-		rl.DrawTextEx(font, "Esc / click outside to close", rl.NewVector2(r.X+16, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
+		rl.DrawTextEx(font, "(no .map files in maps/)", rl.NewVector2(r.X+modalContentInset, r.Y+50), editorFontLabel, 1, theme.TextMuted)
+		rl.DrawTextEx(font, "Esc / click outside to close", rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
 		return
 	}
 
@@ -2292,7 +2317,7 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 	}
 
 	if s.modalRenaming != "" {
-		fieldR := rl.NewRectangle(r.X+16, r.Y+r.Height-86, r.Width-32, 28)
+		fieldR := rl.NewRectangle(r.X+modalContentInset, r.Y+r.Height-86, r.Width-32, 28)
 		drawTextField(font, fieldR, s.modalRenaming, true)
 		labels := cmdLabels(openRenameCmds(s))
 		drawModalButtons(font, modalButtonRow(r, labels), labels)
@@ -2301,7 +2326,7 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 	if s.modalConfirmDelete {
 		path := s.modalPaths[s.modalCursor]
 		rl.DrawTextEx(font, fmt.Sprintf("Delete %s? This is permanent.", core.MapIDFromPath(path)),
-			rl.NewVector2(r.X+16, r.Y+r.Height-86), editorFontLabel, 1, theme.BorderDanger)
+			rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-86), editorFontLabel, 1, theme.BorderDanger)
 		labels := cmdLabels(openDeleteConfirmCmds(s))
 		drawModalButtons(font, modalButtonRow(r, labels), labels)
 		return
@@ -2338,7 +2363,7 @@ const (
 
 func saveAsFieldRect(s *State) rl.Rectangle {
 	r := centeredCardRect(saveAsModalW, saveAsModalH)
-	return rl.NewRectangle(r.X+16, r.Y+58, saveAsModalW-32, 28)
+	return rl.NewRectangle(r.X+modalContentInset, r.Y+58, saveAsModalW-32, 28)
 }
 
 func drawSaveAsModal(s *State, font rl.Font, theme render.Theme) {
@@ -2352,13 +2377,13 @@ func drawSaveAsModal(s *State, font rl.Font, theme render.Theme) {
 
 	if s.awaitingOverwrite {
 		rl.DrawTextEx(font, fmt.Sprintf("Overwrite %s?", core.MapPath(s.modalFilename)),
-			rl.NewVector2(r.X+16, r.Y+44), editorFontLabel, 1, theme.TextPrimary)
+			rl.NewVector2(r.X+modalContentInset, r.Y+44), editorFontLabel, 1, theme.TextPrimary)
 		labels := cmdLabels(saveAsOverwriteCmds(s))
 		drawModalButtons(font, modalButtonStack(r, labels), labels)
 		return
 	}
 
-	rl.DrawTextEx(font, "Filename (without .map):", rl.NewVector2(r.X+16, r.Y+40), editorFontHint, 1, theme.TextLabel)
+	rl.DrawTextEx(font, "Filename (without .map):", rl.NewVector2(r.X+modalContentInset, r.Y+40), editorFontHint, 1, theme.TextLabel)
 
 	field := saveAsFieldRect(s)
 	drawTextField(font, field, s.modalFilename, true)
@@ -2369,13 +2394,13 @@ func drawSaveAsModal(s *State, font rl.Font, theme render.Theme) {
 	sanitized := sanitizeFilename(s.modalFilename)
 	previewPath := core.MapPath(sanitized)
 	rl.DrawTextEx(font, fmt.Sprintf("Will save to: %s", previewPath),
-		rl.NewVector2(r.X+16, r.Y+96), editorFontHint, 1, theme.TextMuted)
+		rl.NewVector2(r.X+modalContentInset, r.Y+96), editorFontHint, 1, theme.TextMuted)
 	if sanitized != strings.TrimSuffix(strings.TrimSuffix(s.modalFilename, ".map"), ".MAP") {
 		rl.DrawTextEx(font, "(Punctuation and spaces are stripped)",
-			rl.NewVector2(r.X+16, r.Y+112), editorFontTiny, 1, theme.BorderDanger)
+			rl.NewVector2(r.X+modalContentInset, r.Y+112), editorFontTiny, 1, theme.BorderDanger)
 	}
 	rl.DrawTextEx(font, "Enter save   Esc cancel",
-		rl.NewVector2(r.X+16, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
+		rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
 }
 
 // drawPackEditModal renders the inline pack editor: header with pack
@@ -2401,9 +2426,9 @@ func drawPackEditModal(s *State, font rl.Font, theme render.Theme) {
 			leaderText = "Leader (highest tier): " + core.PackMemberDisplayName(s.area, pack, leaderIdx)
 		}
 	}
-	render.DrawTextWithShadow(font, leaderText, r.X+16, r.Y+38, editorFontHint, theme.TextMuted)
-	render.DrawTextWithShadow(font, "Click a member to select; buttons below add / remove / reorder.",
-		r.X+16, r.Y+54, editorFontTiny, theme.TextHint)
+	render.DrawTextWithShadow(font, leaderText, r.X+modalContentInset, r.Y+38, editorFontHint, theme.TextMuted)
+	render.DrawTextWithShadow(font, "Up/Down select · Enter add · X remove · K/J reorder · A cycle AI · Esc close",
+		r.X+modalContentInset, r.Y+54, editorFontTiny, theme.TextHint)
 
 	adds, actions := packEditCmds(s)
 	lay := entityModalLayoutFor(s.modalCursor, len(pack.Members), cmdLabels(adds), cmdLabels(actions))
@@ -2412,13 +2437,13 @@ func drawPackEditModal(s *State, font rl.Font, theme render.Theme) {
 		func(i int) string { return core.PackMemberDisplayName(s.area, pack, i) })
 	drawModalButtons(font, lay.actRects, cmdLabels(actions))
 	drawModalButtons(font, lay.addRects, cmdLabels(adds))
+	drawDropdown(s, font, theme) // add-member list, drawn on top when open
 }
 
-// drawChestEditModal renders the inline chest editor: header with
-// chest coords, the authored item list with the cursor highlighting
-// one entry, and a hint row at the bottom showing the add-item keys
-// from chestAddRules. Mirrors drawPackEditModal so the two entity
-// editors read as one visual family.
+// drawChestEditModal renders the inline chest editor: header with chest
+// coords, the authored item list with the cursor highlighting one entry, the
+// add / remove buttons, and the add-item dropdown on top when open. Mirrors
+// drawPackEditModal so the two entity editors read as one visual family.
 func drawChestEditModal(s *State, font rl.Font, theme render.Theme) {
 	if s.modalChestIdx < 0 || s.modalChestIdx >= len(s.area.ChestSpawns) {
 		return
@@ -2427,8 +2452,8 @@ func drawChestEditModal(s *State, font rl.Font, theme render.Theme) {
 	r := drawModalHeader(font, theme, entityEditModalW, entityEditModalH,
 		"CHEST AT "+core.TileCoord(chest.TileX, chest.TileZ),
 		theme.BorderActive)
-	render.DrawTextWithShadow(font, "Click an item to select; buttons below add / remove.",
-		r.X+16, r.Y+40, editorFontTiny, theme.TextHint)
+	render.DrawTextWithShadow(font, "Up/Down select · Enter add · X remove · Esc close",
+		r.X+modalContentInset, r.Y+40, editorFontTiny, theme.TextHint)
 
 	adds, actions := chestEditCmds(s)
 	lay := entityModalLayoutFor(s.modalCursor, len(chest.Items), cmdLabels(adds), cmdLabels(actions))
@@ -2437,6 +2462,7 @@ func drawChestEditModal(s *State, font rl.Font, theme render.Theme) {
 		func(i int) string { return core.ItemInfo(chest.Items[i]).Name })
 	drawModalButtons(font, lay.actRects, cmdLabels(actions))
 	drawModalButtons(font, lay.addRects, cmdLabels(adds))
+	drawDropdown(s, font, theme) // add-item list, drawn on top when open
 }
 
 // drawDoorEditModal renders the per-door editor. Mirrors the save-as
@@ -2489,7 +2515,7 @@ func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 	// Footer hint string mirrors the other modals' tiny hint row.
 	hint := "Tab cycle fields   N/E/S/W facing   1/2/3 style   X delete   Esc done"
 	rl.DrawTextEx(font, hint,
-		rl.NewVector2(l.card.X+16, l.card.Y+l.card.Height-72),
+		rl.NewVector2(l.card.X+modalContentInset, l.card.Y+l.card.Height-72),
 		11, 1, theme.TextHint)
 }
 
@@ -2510,17 +2536,17 @@ func drawValidateModal(s *State, font rl.Font, theme render.Theme) {
 	r := drawModalHeader(font, theme, pw, ph, "VALIDATE MAP", theme.BorderActive)
 	if len(rows) == 0 {
 		rl.DrawTextEx(font, "All checks pass.",
-			rl.NewVector2(r.X+16, r.Y+50), editorFontBody, 1, theme.BorderStrong)
+			rl.NewVector2(r.X+modalContentInset, r.Y+50), editorFontBody, 1, theme.BorderStrong)
 	} else {
 		y := r.Y + 50
 		for _, line := range rows {
 			rl.DrawTextEx(font, "! "+line,
-				rl.NewVector2(r.X+16, y), editorFontAccent, 1, theme.BorderDanger)
+				rl.NewVector2(r.X+modalContentInset, y), editorFontAccent, 1, theme.BorderDanger)
 			y += 22
 		}
 	}
 	rl.DrawTextEx(font, "Esc / Enter / click   close",
-		rl.NewVector2(r.X+16, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
+		rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
 }
 
 // drawEscMenuModal paints the editor's pause-style menu. Three rows:
@@ -2540,7 +2566,7 @@ func drawEscMenuModal(s *State, font rl.Font, theme render.Theme) {
 	labels := cmdLabels(escMenuCmds(s))
 	drawModalButtons(font, modalButtonStack(r, labels), labels)
 	render.DrawTextWithShadow(font, "(D display · C continue · E exit · Esc close)",
-		r.X+16, r.Y+40, editorFontHint, theme.TextHint)
+		r.X+modalContentInset, r.Y+40, editorFontHint, theme.TextHint)
 }
 
 func drawConfirmDirtyModal(s *State, font rl.Font, theme render.Theme) {
@@ -2568,10 +2594,10 @@ func drawConfirmDirtyModal(s *State, font rl.Font, theme render.Theme) {
 		discardLabel = "D  Discard then pick another map"
 	}
 
-	rl.DrawTextEx(font, body, rl.NewVector2(r.X+16, r.Y+44), editorFontLabel, 1, theme.TextPrimary)
+	rl.DrawTextEx(font, body, rl.NewVector2(r.X+modalContentInset, r.Y+44), editorFontLabel, 1, theme.TextPrimary)
 	// Contextual hint above the buttons explains what Save/Discard do for
 	// this pending action (new map / open / exit); the buttons stay short.
-	render.DrawTextWithShadow(font, hintForPending(saveLabel, discardLabel), r.X+16, r.Y+66, editorFontHint, theme.TextHint)
+	render.DrawTextWithShadow(font, hintForPending(saveLabel, discardLabel), r.X+modalContentInset, r.Y+66, editorFontHint, theme.TextHint)
 
 	labels := cmdLabels(confirmDirtyCmds(s))
 	drawModalButtons(font, modalButtonStack(r, labels), labels)

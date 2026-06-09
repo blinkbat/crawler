@@ -187,17 +187,6 @@ func CursorUpDownTextSafe(cursor, count int) int {
 	return cursor
 }
 
-// ModalClosePressed is the edge-detect predicate for closing an editor
-// modal. Esc and Enter both dismiss — Esc is "cancel", Enter is "I'm
-// done editing" — and the two key handlers had drifted apart across
-// modal updaters until this consolidation. Mouse-only close paths still
-// go through their own button hit-tests; this is the keyboard rule.
-// (Pad B also closes via EditorCancelPressed at the call sites.)
-func ModalClosePressed() bool {
-	return rl.IsKeyPressed(rl.KeyEscape) || rl.IsKeyPressed(rl.KeyEnter) ||
-		padPressed(rl.GamepadButtonRightFaceRight) // B / Circle
-}
-
 // --- Editor bindings ---------------------------------------------------------
 // The map editor is keyboard+mouse-first but must still be operable with a
 // controller (AGENTS.md). These predicates live here with the rest so the
@@ -328,11 +317,11 @@ func PausePressed(inBattle bool) bool {
 // from inside it.
 //
 // Keyboard does NOT toggle this way — the per-tab shortcuts
-// (PanelTabShortcutPressed) own E/C/K/M/I, so the keyboard player
+// (PanelTabShortcutPressed) own C/E/I/K/J/M, so the keyboard player
 // jumps directly to a named tab rather than opening "wherever I
 // was last." Pressing the same shortcut key again closes the
 // overlay (handled in explore/panels.go), preserving the toggle
-// feel without burning a sixth key on "open to last tab."
+// feel without a separate "open to last tab" key.
 func PanelsTogglePressed() bool {
 	return padPressed(rl.GamepadButtonMiddle) ||
 		padPressed(rl.GamepadButtonRightFaceUp) // Triangle / Y

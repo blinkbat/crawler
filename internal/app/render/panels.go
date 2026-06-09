@@ -52,10 +52,11 @@ func panelsMapFooterText(areaName string, zoom int) string {
 }
 
 // panelTabDrawers dispatches by tab index to the per-tab body drawer.
-// Indexed array (not a map) so the literal length-checks at compile
-// time against PanelTabCount — adding a 6th tab is a single new
-// PanelTab const + a new drawer + adding its slot here; forgetting
-// one is a compile error, not a silent no-op like the old switch.
+// Indexed array (not a map) sized [PanelTabCount], so adding a 6th tab is a
+// single new PanelTab const + a new drawer + its slot here. The array SIZE is
+// fixed at compile time, but a FORGOTTEN slot is a nil func (the zero value),
+// not a compile error — so the init below nil-checks every slot and panics at
+// startup, the same coverage guard statIconDrawers / actionIconDrawers use.
 var panelTabDrawers = [core.PanelTabCount]func(core.GameState, Resources, rl.Rectangle){
 	core.PanelTabStats:     drawPanelsStats,
 	core.PanelTabEquipment: drawPanelsEquipment,
@@ -85,6 +86,9 @@ var panelTabFooterHints = [core.PanelTabCount]string{
 
 func init() {
 	for t := core.PanelTab(0); t < core.PanelTabCount; t++ {
+		if panelTabDrawers[t] == nil {
+			panic(fmt.Sprintf("render/panels: panelTabDrawers missing a drawer for tab %d", int(t)))
+		}
 		if panelTabFooterHints[t] == "" {
 			panic(fmt.Sprintf("render/panels: panelTabFooterHints missing a hint for tab %d", int(t)))
 		}

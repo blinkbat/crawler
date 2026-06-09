@@ -86,9 +86,9 @@ const (
 	// creating a fresh pack if none is there yet. The specific kind to
 	// add lives on Brush.EnemyKind so a single entityKind value handles
 	// every enemy in core.EnemyKinds() — adding a new enemy is one row
-	// in core/enemies.go's enemyDefinitions and the brush list +
-	// packAddRules pick it up automatically. Right-click clears the
-	// entire pack.
+	// in core/enemies.go's enemyDefinitions and both the brush list and
+	// the pack editor's add-member dropdown pick it up automatically.
+	// Right-click clears the entire pack.
 	entityAddEnemy
 	// entityPlaceChest drops a chest at the clicked tile with the default
 	// starter loot (one of every defined item kind). Right-click clears
@@ -228,9 +228,10 @@ var layerBrushes = [layerCount][]Brush{
 // on other layers.
 //
 // Positional-by-palette-order is intentional here (the palette IS an ordered
-// list, like every other layer's). This is NOT the same contract as the
-// by-kind editor.packAddHotkeys map, which binds pack-edit MODAL actions and
-// must stay stable per kind across reorders. enemyDefinitions is kept in
+// list, like every other layer's): these 3..9 keys select a brush WITHIN the
+// active layer, the same generic number-row scheme every layer uses — not a
+// per-kind mnemonic. (The pack-edit MODAL no longer has per-kind add-keys at
+// all; it opens a dropdown — see dropdown.go.) enemyDefinitions is kept in
 // EnemyKind enum order (asserted-adjacent in core), so the i-th palette enemy
 // is deterministic; the keys are distinct constants that never collide with
 // the reserved Key1/Key2.
@@ -379,17 +380,18 @@ const (
 	modalSaveAs
 	modalConfirmDirty
 	// modalPackEdit displays the inline pack editor for a clicked pack
-	// on the Entities layer: list members with × to remove, ▲/▼ to
-	// reorder, and a + row to add new members. Anchored over the pack's
-	// tile. modalPackIdx holds the index into area.PackSpawns; if the
-	// pack gets dropped while the modal is open, the modal closes.
+	// on the Entities layer: list members with X to remove, K/J to
+	// reorder, and an "+ Add member" dropdown (Enter) to add new members.
+	// Anchored over the pack's tile. modalPackIdx holds the index into
+	// area.PackSpawns; if the pack gets dropped while the modal is open,
+	// the modal closes.
 	modalPackEdit
 	// modalChestEdit is the inline chest editor — analogous to
 	// modalPackEdit but for chests. Lists the chest's authored items
-	// with X to remove, ▲/▼ to reorder, and one-key shortcuts to append
-	// a new item kind from chestAddRules. Anchored over the chest's
-	// tile. modalChestIdx holds the area.ChestSpawns index; the modal
-	// closes if the chest gets dropped while open.
+	// with X to remove and an "+ Add item" dropdown (Enter) to append a
+	// new item kind. Anchored over the chest's tile. modalChestIdx holds
+	// the area.ChestSpawns index; the modal closes if the chest gets
+	// dropped while open.
 	modalChestEdit
 	// modalSounds is the in-editor sound creator. Lets the author
 	// synthesize a cue from sliders (sweep params), preview it, save it
@@ -496,6 +498,14 @@ type State struct {
 	// of normal painting.
 	editLevel int
 	rampMode  bool
+	// levelFocus is the "Floors" editing lens (toolbar toggle): treat each
+	// elevation level as its own floor. When on, (1) the grid ghosts every
+	// tile NOT at editLevel as a true overlay (cool below / warm above, the
+	// active floor crisp) on every layer, and (2) painting any content layer
+	// ALSO lifts that tile to editLevel — so picking a level and drawing
+	// builds that floor without hand-stamping the Elevation digit. Purely an
+	// authoring lens; the on-disk model stays one level per tile.
+	levelFocus bool
 	// paletteScroll is the per-layer vertical scroll offset (in pixels)
 	// applied to the brush entries. Adjusted by mouse-wheel when the
 	// pointer is over the palette. Clamped in drawPalette so the bottom
@@ -592,8 +602,15 @@ type State struct {
 
 	brushSize int
 
-	drag             dragKind
+	drag dragKind
+	// dragSnapshotDone reports whether the current paint stroke has already
+	// banked its single undo snapshot. dragUndoBefore holds the pre-stroke
+	// area, captured at stroke start and committed to the undo stack LAZILY by
+	// strokePaint — only once the stroke actually mutates a cell. A stroke that
+	// changes nothing (every cell refused by a brush guard, or painting a cell
+	// its current value) banks no undo step and leaves the redo stack intact.
 	dragSnapshotDone bool
+	dragUndoBefore   core.AreaDefinition
 	lastPaintX       int
 	lastPaintZ       int
 	rectAnchorX      int
@@ -609,6 +626,10 @@ type State struct {
 	panX    float32
 	panY    float32
 	panning bool
+	// scrollDrag is the cross-frame memory for an in-flight scrollbar thumb
+	// drag (which bar, and where inside the thumb the grab landed). Zero value
+	// (id == scrollNone) means no bar is being dragged. See scrollbar.go.
+	scrollDrag scrollDragState
 
 	exitRequested     bool
 	testRequested     bool
@@ -645,6 +666,12 @@ type State struct {
 	// a row, clicks outside, or presses Esc — see context.go for the
 	// row-build / dispatcher pair.
 	contextMenu contextMenuState
+
+	// dropdown is the single open-dropdown slot — the reusable "pick one of
+	// N" selector the pack/chest editors open instead of memorizing a long
+	// list of per-kind add-keys. Zero value (owner == ddNone) means closed.
+	// See dropdown.go.
+	dropdown dropdownState
 
 	rect layoutRect
 }
@@ -827,7 +854,7 @@ func (s *State) activeBrush() Brush {
 	}
 	b := palette[idx]
 	if s.layer == LayerElevation {
-		b.Char = byte('0' + clampLevel(s.editLevel))
+		b.Char = core.ElevationChar(s.editLevel)
 	}
 	return b
 }

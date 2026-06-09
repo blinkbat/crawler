@@ -6,6 +6,7 @@ import (
 	"crawler/internal/app/input"
 	"crawler/internal/app/render"
 	"os"
+	"reflect"
 	"strconv"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -59,7 +60,7 @@ func updateHotkeys(s *State) {
 		}
 	}
 	if altReleased && !s.altChordUsed {
-		s.showTileGlyphs = !s.showTileGlyphs
+		toggleTileGlyphs(s)
 	}
 
 	// Alt+1..7 jumps directly to a layer (one per layerCount layer) — saves
@@ -160,25 +161,24 @@ func updateHotkeys(s *State) {
 
 	// Brush size cycling (only for grid layers — non-grid is always size 1).
 	if !ctrl && rl.IsKeyPressed(rl.KeyLeftBracket) {
-		s.brushSize = stepBrush(s.brushSize, -1)
+		stepBrushSize(s, -1)
 	}
 	if !ctrl && rl.IsKeyPressed(rl.KeyRightBracket) {
-		s.brushSize = stepBrush(s.brushSize, +1)
+		stepBrushSize(s, +1)
 	}
 
 	// Height selector (the elevation level the Set Height brush stamps + the
 	// slice-view focus). PgUp/PgDn are the keyboard accelerators for the
 	// toolbar's Lvl -/+ buttons.
 	if rl.IsKeyPressed(rl.KeyPageUp) {
-		s.editLevel = clampLevel(s.editLevel + 1)
+		stepEditLevel(s, +1)
 	}
 	if rl.IsKeyPressed(rl.KeyPageDown) {
-		s.editLevel = clampLevel(s.editLevel - 1)
+		stepEditLevel(s, -1)
 	}
 
 	if !ctrl && rl.IsKeyPressed(rl.KeyHome) {
-		s.zoom = 1
-		s.panX, s.panY = 0, 0
+		resetView(s)
 	}
 
 	// Cycle starting facing for the player-start brush with R. Gated to
@@ -192,8 +192,7 @@ func updateHotkeys(s *State) {
 	// T cycles the day/night preview phase. Shows in the top bar and seeds
 	// StepCount on F5 so the playtest drops into that phase.
 	if !ctrl && rl.IsKeyPressed(rl.KeyT) {
-		s.previewPhase = core.WrapEnum(s.previewPhase, 1, core.TimeOfDayCount)
-		s.flash("Preview: " + core.PhaseName(s.previewPhase))
+		cyclePreviewPhase(s)
 	}
 
 	updateGridCursor(s)
@@ -222,6 +221,61 @@ func stepBrush(cur, dir int) int {
 		idx = len(brushSizeSteps) - 1
 	}
 	return brushSizeSteps[idx]
+}
+
+// The editor's toolbar buttons and their keyboard accelerators MUST run the
+// same body so they can't drift (toolbarBtns documents that contract). These
+// small helpers are that shared body — every toolbar action that has a hotkey
+// twin routes through one of them, the same way Undo/Redo/Fill/Center already
+// share undoOne/redoOne/fillEntireLayer/centerViewOnTile.
+
+// stepBrushSize cycles the brush width one step in dir. Shared by the toolbar's
+// Brush -/+ buttons and the [ / ] accelerators.
+func stepBrushSize(s *State, dir int) {
+	s.brushSize = stepBrush(s.brushSize, dir)
+}
+
+// stepEditLevel nudges the elevation height-selector by dir, clamped to the
+// valid range. Shared by the toolbar's Lvl -/+ buttons and PgUp/PgDn. In
+// Floors mode the active level IS the floor you're editing, so flash it for
+// feedback.
+func stepEditLevel(s *State, dir int) {
+	s.editLevel = clampLevel(s.editLevel + dir)
+	if s.levelFocus {
+		s.flash("Floor level " + strconv.Itoa(s.editLevel))
+	}
+}
+
+// toggleLevelFocus flips the "Floors" editing lens. Shared by the toolbar's
+// Floors button (no key — a toolbar toggle like Ramp/Glyphs). See
+// State.levelFocus for what the mode does.
+func toggleLevelFocus(s *State) {
+	s.levelFocus = !s.levelFocus
+	if s.levelFocus {
+		s.flash("Floor editing ON — level " + strconv.Itoa(s.editLevel) + "; paint builds this floor")
+	} else {
+		s.flash("Floor editing OFF")
+	}
+}
+
+// resetView snaps the canvas back to 1× zoom, centered (no pan). Shared by the
+// toolbar's "Reset View" button and the Home accelerator.
+func resetView(s *State) {
+	s.zoom = 1
+	s.panX, s.panY = 0, 0
+}
+
+// toggleTileGlyphs flips the per-tile glyph overlay. Shared by the toolbar's
+// Glyphs button and the Alt-tap accelerator.
+func toggleTileGlyphs(s *State) {
+	s.showTileGlyphs = !s.showTileGlyphs
+}
+
+// cyclePreviewPhase advances the day/night preview phase one step and flashes
+// the new phase name. Shared by the toolbar's Phase button and the T accelerator.
+func cyclePreviewPhase(s *State) {
+	s.previewPhase = core.WrapEnum(s.previewPhase, 1, core.TimeOfDayCount)
+	s.flash("Preview: " + core.PhaseName(s.previewPhase))
 }
 
 func updateGridCursor(s *State) {
@@ -314,6 +368,14 @@ func updateMouse(s *State) {
 		if w != 0 {
 			ScrollMetadata(s, -w*42)
 		}
+	}
+
+	// Interactive scrollbars (palette / metadata / canvas H+V). Run before
+	// painting + panning so grabbing a thumb or paging a track never bleeds
+	// into a tile paint or a pan; if a bar took the mouse this frame, we're
+	// done.
+	if s.updateScrollbars(mp) {
+		return
 	}
 
 	if rl.IsMouseButtonPressed(rl.MouseMiddleButton) && pointIn(mp, s.rect.grid) {
@@ -456,12 +518,8 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 			}
 		}
 		// Fall through: click on empty cell places a fresh entity.
-		s.drag = dragPaint
-		s.dragSnapshotDone = false
-		s.lastPaintX, s.lastPaintZ = -1, -1
-		pushUndo(s)
-		s.dragSnapshotDone = true
-		applyTool(s, x, z)
+		beginPaintStroke(s)
+		strokePaint(s, x, z)
 		s.lastPaintX, s.lastPaintZ = x, z
 		return
 	}
@@ -472,13 +530,42 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 		return
 	}
 
+	beginPaintStroke(s)
+	strokePaint(s, x, z)
+	s.lastPaintX, s.lastPaintZ = x, z
+}
+
+// beginPaintStroke arms a left-button paint/place drag. It records the
+// pre-stroke area so strokePaint can bank a single undo step covering the
+// whole stroke, but defers committing that snapshot until a cell actually
+// changes — so a stroke that paints nothing never clobbers the redo stack.
+func beginPaintStroke(s *State) {
 	s.drag = dragPaint
 	s.dragSnapshotDone = false
+	s.dragUndoBefore = core.CloneArea(s.area)
 	s.lastPaintX, s.lastPaintZ = -1, -1
-	pushUndo(s)
-	s.dragSnapshotDone = true
+}
+
+// strokePaint applies the active tool at (x,z) as one cell of a paint stroke
+// and commits the stroke's single undo snapshot lazily: only when a cell
+// actually changes the area, and only once per stroke. A stroke that mutates
+// nothing — every cell refused by a brush guard (prop on a wall, footprint off
+// the map, …) or painting a cell its current value — banks no undo step and
+// leaves the redo stack intact, mirroring floodFill's no-op guard. It also
+// repairs the dirty flag, which applyTool optimistically sets even when the
+// underlying brush refused the placement.
+func strokePaint(s *State, x, z int) {
+	wasDirty := s.dirty
 	applyToolBrushed(s, x, z)
-	s.lastPaintX, s.lastPaintZ = x, z
+	if s.dragSnapshotDone {
+		return // this stroke already banked its snapshot — nothing more to do
+	}
+	if reflect.DeepEqual(s.area, s.dragUndoBefore) {
+		s.dirty = wasDirty // refused / no-op cell: undo the optimistic dirty flip
+		return
+	}
+	commitUndoSnapshot(s, s.dragUndoBefore)
+	s.dragSnapshotDone = true
 }
 
 func continueDrag(s *State, x, z int) {
@@ -487,7 +574,7 @@ func continueDrag(s *State, x, z int) {
 		if x == s.lastPaintX && z == s.lastPaintZ {
 			return
 		}
-		applyToolBrushed(s, x, z)
+		strokePaint(s, x, z)
 		s.lastPaintX, s.lastPaintZ = x, z
 	}
 	// dragStart / dragPack / dragRect are commit-on-release; the live
@@ -967,6 +1054,7 @@ func closeModal(s *State) {
 	s.modalChestIdx = -1
 	s.modalDoorIdx = -1
 	s.modalCustomIdx = -1
+	closeDropdown(s) // a modal's add dropdown must not survive its parent
 	s.modalValidateRows = nil
 	s.modalConfirmDelete = false
 	s.modalRenaming = ""
@@ -1228,15 +1316,21 @@ func updateValidateModal(s *State) Action {
 	return ActionNone
 }
 
-// updatePackEditModal drives the inline pack editor: arrow keys / W-S
-// navigate the member list, X removes the highlighted member, J/K moves
-// it down/up in the list (J = "down arrow", K = "up arrow" mnemonic but
-// also matches Vim's J/K convention), R/B/D appends a new Rat/Bat/
-// Diseased rat. Esc/Enter close. If the pack disappears (e.g. user
-// removed the last member), the modal closes and the pack is dropped.
+// updatePackEditModal drives the inline pack editor: Up/Down navigate the
+// member list, Enter opens the add-member dropdown (pick any enemy / custom
+// enemy — no per-kind keys), X removes the highlighted member, K/J move it
+// up/down (Vim-style), A cycles the movement-AI mode, Esc closes. If the pack
+// disappears (e.g. the last member was removed), the modal closes and the
+// pack is dropped.
 func updatePackEditModal(s *State) Action {
 	if s.modalPackIdx < 0 || s.modalPackIdx >= len(s.area.PackSpawns) {
 		closeModal(s)
+		return ActionNone
+	}
+	// The add dropdown owns input (Up/Down/Enter/Esc + mouse) while it's open;
+	// the modal behind it stays inert.
+	if s.dropdownOpen() {
+		updateDropdown(s)
 		return ActionNone
 	}
 	pack := &s.area.PackSpawns[s.modalPackIdx]
@@ -1252,9 +1346,13 @@ func updatePackEditModal(s *State) Action {
 		return ActionNone
 	}
 
-	// Keyboard accelerators (mirror the buttons). X remove, K/J reorder,
-	// the packAddRules letters add a kind, C adds the selected custom
-	// enemy, A cycles the movement-AI mode.
+	// Keyboard: Enter opens the Add dropdown (the modal's primary action — it
+	// lists every enemy + custom enemy, so there are no per-kind add-keys);
+	// X removes the selected member, K/J reorder, A cycles the movement-AI mode.
+	if editorCommitPressed() {
+		openPackAddDropdown(s)
+		return ActionNone
+	}
 	if memberCount > 0 {
 		if rl.IsKeyPressed(rl.KeyX) {
 			packRemoveSelected(s, pack)
@@ -1265,25 +1363,6 @@ func updatePackEditModal(s *State) Action {
 		}
 		if rl.IsKeyPressed(rl.KeyJ) {
 			packMoveSelected(s, pack, +1)
-		}
-	}
-	for _, rule := range packAddRules {
-		if rl.IsKeyPressed(rule.Key) {
-			pushUndo(s)
-			core.AppendBuiltinPackMember(pack, rule.Kind)
-			s.modalCursor = len(pack.Members) - 1
-			s.dirty = true
-			return ActionNone
-		}
-	}
-	if rl.IsKeyPressed(rl.KeyC) {
-		if def, ok := selectedCustomEnemyForPack(s); ok {
-			pushUndo(s)
-			core.AppendCustomPackMember(pack, def)
-			s.modalCursor = len(pack.Members) - 1
-			s.dirty = true
-		} else {
-			s.flash("No custom enemies defined")
 		}
 	}
 	if rl.IsKeyPressed(rl.KeyA) {
@@ -1328,38 +1407,17 @@ func handleEntityModalClick(s *State, count int, builder func(*State) (adds, act
 	return false
 }
 
-// packEditCmds builds the pack-edit modal's add buttons (one per
-// packAddRules kind + the selected custom enemy) and action buttons
-// (Remove / Up / Down / AI). Called by both the draw (for labels) and the
-// click handler (runs the clicked .run), so buttons and actions can't
-// drift. Caller must have validated s.modalPackIdx.
+// packEditCmds builds the pack-edit modal's buttons: a single "+ Add member"
+// that opens the add dropdown, plus the Remove / Up / Down / AI actions.
+// Called by both the draw (for labels) and the click handler (runs the
+// clicked .run), so buttons and actions can't drift. The add dropdown lists
+// every builtin enemy + this map's custom enemies (see dropdown.go), so
+// there's no per-kind add button or add-key to keep in sync. Caller must have
+// validated s.modalPackIdx.
 func packEditCmds(s *State) (adds, actions []modalCmd) {
 	pack := &s.area.PackSpawns[s.modalPackIdx]
-	for _, rule := range packAddRules {
-		rule := rule
-		adds = append(adds, modalCmd{
-			label: "+ " + core.EnemyInfo(rule.Kind).SingularName,
-			run: func() Action {
-				pushUndo(s)
-				core.AppendBuiltinPackMember(pack, rule.Kind)
-				s.modalCursor = len(pack.Members) - 1
-				s.dirty = true
-				return ActionNone
-			},
-		})
-	}
-	if def, ok := selectedCustomEnemyForPack(s); ok {
-		def := def
-		adds = append(adds, modalCmd{
-			label: "+ " + def.Name,
-			run: func() Action {
-				pushUndo(s)
-				core.AppendCustomPackMember(pack, def)
-				s.modalCursor = len(pack.Members) - 1
-				s.dirty = true
-				return ActionNone
-			},
-		})
+	adds = []modalCmd{
+		{label: "+ Add member  (Enter)", run: func() Action { openPackAddDropdown(s); return ActionNone }},
 	}
 	actions = []modalCmd{
 		{label: "Remove", run: func() Action { packRemoveSelected(s, pack); return ActionNone }},
@@ -1374,6 +1432,31 @@ func packEditCmds(s *State) (adds, actions []modalCmd) {
 		}},
 	}
 	return adds, actions
+}
+
+// openPackAddDropdown arms the add-member dropdown anchored on the pack
+// editor's "+ Add member" button. It recomputes the modal layout to find that
+// button's rect — deterministic and identical to the draw — so the dropdown
+// drops from the right spot without threading the rect through the button's
+// run closure.
+func openPackAddDropdown(s *State) {
+	if s.modalPackIdx < 0 || s.modalPackIdx >= len(s.area.PackSpawns) {
+		return
+	}
+	pack := &s.area.PackSpawns[s.modalPackIdx]
+	adds, actions := packEditCmds(s)
+	lay := entityModalLayoutFor(s.modalCursor, len(pack.Members), cmdLabels(adds), cmdLabels(actions))
+	openDropdown(s, ddPackAdd, addButtonAnchor(lay))
+}
+
+// addButtonAnchor returns the rect an entity-edit modal's add dropdown drops
+// from — the "+ Add" button (the sole add-grid entry), or the card itself as a
+// fallback. Shared by the pack + chest open paths so the anchor rule lives once.
+func addButtonAnchor(lay entityModalLayout) rl.Rectangle {
+	if len(lay.addRects) > 0 {
+		return lay.addRects[0]
+	}
+	return lay.card
 }
 
 // packRemoveSelected removes the cursored member, dropping the whole pack
@@ -1410,6 +1493,12 @@ func packMoveSelected(s *State, pack *core.PackSpawn, dir int) {
 	s.dirty = true
 }
 
+// updateEntityListCursor clamps the modal's row cursor, closes on the
+// back edge (Esc / pad B), and moves the cursor with Up/Down. Closing is
+// Esc-only by design: the pack/chest editors free Enter to OPEN the add
+// dropdown (the modal's primary action), keeping the keyset universal —
+// Esc backs out, Enter confirms, arrows navigate — instead of the old
+// per-kind add-letter soup. Returns false when the modal closed.
 func updateEntityListCursor(s *State, count int) bool {
 	if s.modalCursor >= count {
 		s.modalCursor = count - 1
@@ -1417,7 +1506,7 @@ func updateEntityListCursor(s *State, count int) bool {
 	if s.modalCursor < 0 {
 		s.modalCursor = 0
 	}
-	if input.ModalClosePressed() {
+	if editorCancelPressed() {
 		closeModal(s)
 		return false
 	}
@@ -1434,231 +1523,19 @@ func removeModalListItem[T any](items []T, idx int) []T {
 	return append(items[:idx], items[idx+1:]...)
 }
 
-func selectedCustomEnemyForPack(s *State) (core.CustomEnemyDef, bool) {
-	if len(s.area.CustomEnemies) == 0 {
-		return core.CustomEnemyDef{}, false
-	}
-	idx := s.modalCustomIdx
-	if idx < 0 || idx >= len(s.area.CustomEnemies) {
-		idx = 0
-	}
-	return s.area.CustomEnemies[idx], true
-}
-
-// packAddRule binds a keyboard shortcut to the EnemyKind it adds in the
-// pack-edit modal. The slice is built at init from core.EnemyKinds() +
-// a positional hotkey pool — adding a new enemy is one row in core's
-// enemyDefinitions and the modal picks up the hotkey automatically.
-type packAddRule struct {
-	Key   int32
-	Kind  core.EnemyKind
-	Label string // appears in the modal's hint row, e.g. "R add Rat"
-}
-
-// packAddHotkeys binds each enemy kind to the key that appends it in the
-// pack-edit modal. Keyed by EnemyKind (NOT slice position) so reordering
-// enemyDefinitions can't silently reshuffle the bindings — the old
-// positional pool drifted when EnemyAmoeba landed last in the slice
-// (≠ its enum position), putting add-keys on top of the modal's own
-// member-op controls. Every key must avoid packModalReservedKeys; the
-// init assert below fails closed on a collision, a duplicate, or an
-// unbound kind. Most letters are first-letter mnemonics; the three marked
-// below moved off reserved control keys.
-var packAddHotkeys = map[core.EnemyKind]int32{
-	core.EnemyRat:          rl.KeyR,
-	core.EnemyBat:          rl.KeyB,
-	core.EnemyDiseasedRat:  rl.KeyD,
-	core.EnemyGoblin:       rl.KeyG,
-	core.EnemyGoblinMage:   rl.KeyM,
-	core.EnemyVenusMantrap: rl.KeyN, // N — maNtrap
-	core.EnemyCaveSpider:   rl.KeyV,
-	core.EnemyVampireBat:   rl.KeyZ,
-	core.EnemyWisp:         rl.KeyP,
-	core.EnemyStoneGolem:   rl.KeyF,
-	core.EnemyNecromancer:  rl.KeyE, // E — nEcromancer (was W: collided with cursor-up)
-	core.EnemySkeleton:     rl.KeyL, // L — skeLeton (was K: collided with member move-up)
-	core.EnemyAmoeba:       rl.KeyO, // O — ooze/blob (was X: collided with member remove)
-}
-
-// packModalReservedKeys are the pack-edit modal's non-add controls: the
-// entity-list cursor nav (Up/Down, which input.CursorUpDown also reads as
-// W/S), member ops (X remove, K up, J down), custom-enemy add (C), pack-AI
-// cycle (A), and close (Esc/Enter). An enemy add-key landing on any of
-// these would fire two actions on one keypress — the bug the init assert
-// guards against.
-var packModalReservedKeys = map[int32]bool{
-	rl.KeyUp: true, rl.KeyDown: true, rl.KeyW: true, rl.KeyS: true,
-	rl.KeyX: true, rl.KeyK: true, rl.KeyJ: true,
-	rl.KeyC: true, rl.KeyA: true,
-	rl.KeyEscape: true, rl.KeyEnter: true, rl.KeyKpEnter: true,
-}
-
-// chestModalReservedKeys are the chest-edit modal's non-add controls: the
-// item-list cursor nav (Up/Down, which input.CursorUpDown also reads as
-// W/S), remove (X), and close (Esc/Enter). An item add-key landing on any of
-// these would fire two actions on one keypress (e.g. nav-up also adds an
-// item) — the bug the init assert guards against. Smaller than the pack
-// modal's set: the chest modal has no member-op / AI-cycle / custom-add keys.
-var chestModalReservedKeys = map[int32]bool{
-	rl.KeyUp: true, rl.KeyDown: true, rl.KeyW: true, rl.KeyS: true,
-	rl.KeyX:      true,
-	rl.KeyEscape: true, rl.KeyEnter: true, rl.KeyKpEnter: true,
-}
-
-// init asserts the add-rule hotkey wiring. The pack-edit and chest-edit
-// modals are keyboard-only for "add a kind" — a missing binding (Key=0)
-// would silently be unauthorable, and an add-key that collides with a
-// reserved modal control fires two actions at once. Failing closed at
-// startup is cheaper than shipping a broken editor.
-func init() {
-	seen := map[int32]bool{}
-	for _, def := range core.EnemyKinds() {
-		key, ok := packAddHotkeys[def.Kind]
-		if !ok || key == 0 {
-			panic("editor: packAddHotkeys missing a key for enemy kind " + def.SingularName)
-		}
-		if packModalReservedKeys[key] {
-			panic("editor: packAddHotkeys key for " + def.SingularName + " collides with a reserved pack-modal control")
-		}
-		if seen[key] {
-			panic("editor: packAddHotkeys key for " + def.SingularName + " duplicates another enemy's add-key")
-		}
-		seen[key] = true
-	}
-	seenChest := map[int32]bool{}
-	for _, def := range core.AllItems() {
-		key, ok := chestAddHotkeys[def.Kind]
-		if !ok || key == 0 {
-			panic("editor: chestAddHotkeys missing a key for item " + def.Name + " — add a keyed row")
-		}
-		if chestModalReservedKeys[key] {
-			panic("editor: chestAddHotkeys key for " + def.Name + " collides with a reserved chest-modal control (nav/remove/close)")
-		}
-		if seenChest[key] {
-			panic("editor: chestAddHotkeys key for " + def.Name + " duplicates another item's add-key")
-		}
-		seenChest[key] = true
-	}
-}
-
-var packAddRules = buildPackAddRules()
-
-// buildPackAddRules walks core.EnemyKinds() (slice order — drives the hint
-// row's display order) and looks each kind's key up in packAddHotkeys, so
-// the binding is by-kind even though the rules render in registry order.
-func buildPackAddRules() []packAddRule {
-	defs := core.EnemyKinds()
-	out := make([]packAddRule, 0, len(defs))
-	for _, def := range defs {
-		key := packAddHotkeys[def.Kind]
-		out = append(out, packAddRule{
-			Key:   key,
-			Kind:  def.Kind,
-			Label: addRuleLabel(key, def.SingularName),
-		})
-	}
-	return out
-}
-
-// chestAddRule binds a keyboard shortcut to the ItemKind it appends in
-// the chest-edit modal. Built at init from core.AllItems() looked up
-// against the by-kind hotkey map below — same shape as packAddRules.
-type chestAddRule struct {
-	Key   int32
-	Kind  core.ItemKind
-	Label string
-}
-
-// chestAddHotkeys maps each item kind to its chest-edit add hotkey. Keyed
-// BY KIND (not registry position) so adding/reordering an item is one keyed
-// row that can't silently shift every later item's letter the way the old
-// positional pool did — mirrors packAddHotkeys. Mnemonic letters where they
-// don't collide: C=Cheese, J=Jerky, F=bread (Fare), P=Phial, I=Iron sword,
-// H=sHield, L=Leather, R=Ring, M=aMulet, D=Dagger, E=rapiEr, B=Bow, G=slinG,
-// A=Axe, K=war hammer. (Iron sword and war hammer used to be S and W, but
-// CursorUpDown reads W/S as up/down — so navigating the chest list also
-// added those items; they're rebound off the nav keys and the init check
-// below now asserts against chestModalReservedKeys.) The init check panics
-// if any item kind is missing a key, two share one, or one collides with a
-// reserved nav/close control — caught at startup, not deep in the editor.
-var chestAddHotkeys = map[core.ItemKind]int32{
-	core.ItemCheese:       rl.KeyC,
-	core.ItemBatJerky:     rl.KeyJ,
-	core.ItemCrustOfBread: rl.KeyF,
-	core.ItemMagicPhial:   rl.KeyP,
-	core.ItemIronSword:    rl.KeyI,
-	core.ItemWoodenShield: rl.KeyH,
-	core.ItemLeatherCap:   rl.KeyL,
-	core.ItemSilverRing:   rl.KeyR,
-	core.ItemBrassAmulet:  rl.KeyM,
-	core.ItemDagger:       rl.KeyD,
-	core.ItemRapier:       rl.KeyE,
-	core.ItemShortBow:     rl.KeyB,
-	core.ItemSling:        rl.KeyG,
-	core.ItemBattleAxe:    rl.KeyA,
-	core.ItemWarHammer:    rl.KeyK,
-}
-
-var chestAddRules = buildChestAddRules()
-
-func buildChestAddRules() []chestAddRule {
-	defs := core.AllItems()
-	out := make([]chestAddRule, 0, len(defs))
-	for _, def := range defs {
-		key := chestAddHotkeys[def.Kind] // coverage guaranteed by init() below
-		out = append(out, chestAddRule{
-			Key:   key,
-			Kind:  def.Kind,
-			Label: addRuleLabel(key, shortItemLabel(def.Name)),
-		})
-	}
-	return out
-}
-
-// addRuleLabel formats a modal-footer hint row from a hotkey + a noun.
-// "R add Rat" when the entry has a hotkey; just "add Rat" when it
-// doesn't — better than "? add Rat" which suggested a missing label
-// before the init guard caught pool overflow. Used by both
-// buildPackAddRules and buildChestAddRules.
-func addRuleLabel(key int32, name string) string {
-	if key == 0 {
-		return "add " + name
-	}
-	return hotkeyChar(key) + " add " + name
-}
-
-// shortItemLabel returns the last whitespace-separated word of an item
-// Name. "Morsel of Cheese" → "Cheese", "Bat Jerky" → "Jerky" — keeps
-// the hint footer compact instead of "C add Morsel of Cheese."
-func shortItemLabel(name string) string {
-	for i := len(name) - 1; i >= 0; i-- {
-		if name[i] == ' ' {
-			return name[i+1:]
-		}
-	}
-	return name
-}
-
-// hotkeyChar converts an rl.KeyX constant to the printable char it
-// represents ('A'-'Z' for letter keys). Used by the rule-builder to
-// fill the "X add Y" label prefix automatically. Returns "?" for any
-// key outside the letter range — callers should only pass letter keys.
-func hotkeyChar(key int32) string {
-	if key >= rl.KeyA && key <= rl.KeyZ {
-		return string(rune(int32('A') + (key - rl.KeyA)))
-	}
-	return "?"
-}
-
-// updateChestEditModal drives the inline chest editor: arrow keys
-// navigate the item list, X removes the highlighted item. Item add
-// shortcuts come from chestAddRules so adding an authored item kind
-// to the editor is one row. Esc/Enter close. If every item gets
-// removed the chest stays — an empty chest is a valid authored shape
-// (e.g. flavor decoration) and the runtime renders it pre-looted.
+// updateChestEditModal drives the inline chest editor: Up/Down navigate the
+// item list, Enter opens the add-item dropdown, X removes the highlighted
+// item, Esc closes. If every item gets removed the chest stays — an empty
+// chest is a valid authored shape (e.g. flavor decoration) and the runtime
+// renders it pre-looted.
 func updateChestEditModal(s *State) Action {
 	if s.modalChestIdx < 0 || s.modalChestIdx >= len(s.area.ChestSpawns) {
 		closeModal(s)
+		return ActionNone
+	}
+	// The add dropdown owns input while it's open.
+	if s.dropdownOpen() {
+		updateDropdown(s)
 		return ActionNone
 	}
 	chest := &s.area.ChestSpawns[s.modalChestIdx]
@@ -1672,46 +1549,44 @@ func updateChestEditModal(s *State) Action {
 		return ActionNone
 	}
 
-	// Keyboard accelerators (mirror the buttons): X removes, the
-	// chestAddRules letters add an item.
+	// Keyboard: Enter opens the Add dropdown (it lists every item kind, so
+	// there are no per-item add-keys); X removes the selected item.
+	if editorCommitPressed() {
+		openChestAddDropdown(s)
+		return ActionNone
+	}
 	if itemCount > 0 && rl.IsKeyPressed(rl.KeyX) {
 		chestRemoveSelected(s, chest)
 		return ActionNone
 	}
-	for _, rule := range chestAddRules {
-		if rl.IsKeyPressed(rule.Key) {
-			pushUndo(s)
-			chest.Items = append(chest.Items, rule.Kind)
-			s.modalCursor = len(chest.Items) - 1
-			s.dirty = true
-			return ActionNone // one add per frame, matching updatePackEditModal
-		}
-	}
 	return ActionNone
 }
 
-// chestEditCmds builds the chest-edit modal's add buttons (one per
-// chestAddRules item) and the Remove action button. Shared by draw and
-// the click handler. Caller must have validated s.modalChestIdx.
+// chestEditCmds builds the chest-edit modal's buttons: a single "+ Add item"
+// that opens the add dropdown (it lists every registered item kind — see
+// dropdown.go), plus the Remove action. Shared by draw and the click handler.
+// Caller must have validated s.modalChestIdx.
 func chestEditCmds(s *State) (adds, actions []modalCmd) {
 	chest := &s.area.ChestSpawns[s.modalChestIdx]
-	for _, rule := range chestAddRules {
-		rule := rule
-		adds = append(adds, modalCmd{
-			label: "+ " + shortItemLabel(core.ItemInfo(rule.Kind).Name),
-			run: func() Action {
-				pushUndo(s)
-				chest.Items = append(chest.Items, rule.Kind)
-				s.modalCursor = len(chest.Items) - 1
-				s.dirty = true
-				return ActionNone
-			},
-		})
+	adds = []modalCmd{
+		{label: "+ Add item  (Enter)", run: func() Action { openChestAddDropdown(s); return ActionNone }},
 	}
 	actions = []modalCmd{
 		{label: "Remove", run: func() Action { chestRemoveSelected(s, chest); return ActionNone }},
 	}
 	return adds, actions
+}
+
+// openChestAddDropdown arms the add-item dropdown anchored on the chest
+// editor's "+ Add item" button (see openPackAddDropdown for the anchor note).
+func openChestAddDropdown(s *State) {
+	if s.modalChestIdx < 0 || s.modalChestIdx >= len(s.area.ChestSpawns) {
+		return
+	}
+	chest := &s.area.ChestSpawns[s.modalChestIdx]
+	adds, actions := chestEditCmds(s)
+	lay := entityModalLayoutFor(s.modalCursor, len(chest.Items), cmdLabels(adds), cmdLabels(actions))
+	openDropdown(s, ddChestAdd, addButtonAnchor(lay))
 }
 
 // chestRemoveSelected removes the cursored item (an empty chest is a valid

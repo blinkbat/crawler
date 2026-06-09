@@ -77,16 +77,22 @@ func Update(g *core.GameState, dt float32) {
 	}
 	updateBattleEffects(g, dt)
 	tickQualityPopup(g, dt)
-	// Early-exit paths route through leaveBattle so residual queue / timing
-	// / attacker state doesn't linger across frames. The message is empty so
-	// we don't overwrite the quiet-area message with a stale combat status.
+	// Defensive early-exit: a desynced EnemyIndex (points past the active pack
+	// — e.g. a culled enemy) routes through leaveBattle so residual queue /
+	// timing / attacker state doesn't linger across frames. Empty message so we
+	// don't overwrite the quiet-area message with a stale combat status.
 	members := core.BattleMembers(g)
 	if g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(members) {
 		leaveBattle(g, "")
 		return
 	}
+	// All enemies down but the per-action win paths didn't fire (a state
+	// desync). Route through winBattle, NOT leaveBattle — an all-enemies-dead
+	// pack is a WIN, and leaveBattle would silently forfeit the encounter's
+	// XP / gold / loot. winBattle sets Phase = BattleWon, so this guard can't
+	// re-enter. Mirrors checkEnemyWipeout.
 	if core.LivingBattleCount(g) == 0 && g.Battle.Phase != core.BattleWon {
-		leaveBattle(g, "")
+		winBattle(g, core.LastBattleEnemyFallsMessage(g))
 		return
 	}
 	if g.Battle.Phase != core.BattleWon && g.Battle.Phase != core.BattleLost && core.ActivePartyCount(g.Party) == 0 {
@@ -1031,7 +1037,7 @@ func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
 			// so the queue stays consistent — but don't let the enemy's whole
 			// turn elapse with a blank combat log; surface the no-op so the
 			// forecast advancing isn't mistaken for a frozen battle.
-			setBattleMessage(g, fmt.Sprintf("The %s hesitates.", core.EnemySingularNoun(*enemy)))
+			setBattleMessage(g, fmt.Sprintf("%s hesitates.", core.TheEnemy(core.EnemyInfoFor(*enemy))))
 			return
 		}
 	}

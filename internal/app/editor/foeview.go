@@ -149,12 +149,17 @@ func seedFoeVisual(s *State) {
 		s.foeBaseline = ov
 	} else {
 		// No resolvable visual for this kind (e.g. a missing sprite). Reset the
-		// working copy + baseline to a defined empty override instead of
-		// leaving the PREVIOUS foe's slider values in place — otherwise editing
-		// and saving here would write that other foe's numbers under this
-		// kind's slug.
-		s.foeVisual = core.EnemyVisualOverride{}
-		s.foeBaseline = core.EnemyVisualOverride{}
+		// working copy + baseline to a defined override instead of leaving the
+		// PREVIOUS foe's slider values in place — otherwise editing and saving
+		// here would write that other foe's numbers under this kind's slug.
+		// Seed a VISIBLE unit size rather than the zero value: SizeX/Y are
+		// absolute billboard sizes with a 0.1 slider floor, so a zero seed would
+		// be an invisible foe and a Save would persist size 0. (Defensive —
+		// enemyVisualFor falls back to the Rat visual today, so this branch is
+		// currently unreachable.)
+		base := core.EnemyVisualOverride{SizeX: 1, SizeY: 1}
+		s.foeVisual = base
+		s.foeBaseline = base
 	}
 	s.foeCursor = 0
 }

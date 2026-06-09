@@ -81,7 +81,28 @@ func applyTool(s *State, x, z int) {
 	default:
 		panic("editor: applyTool missing case for layer — add it here, in eraseAt, and in activeGrid")
 	}
+	// Floors mode ("treat every level as its own floor"): a content paint also
+	// lifts the tile to the active level, so picking a level and painting
+	// builds that floor without hand-stamping the Elevation digit. Shared with
+	// the flood-fill and fill-all paths via stampActiveLevel so all three
+	// content-paint entry points honor the lens identically.
+	stampActiveLevel(s, x, z)
 	s.dirty = true
+}
+
+// stampActiveLevel lifts tile (x,z) to the active edit level when the Floors
+// lens is on — the single "a content paint builds the active floor" step
+// shared by applyTool, floodFill, and fillEntireLayer so the three paths can't
+// drift. No-op when Floors mode is off, on the Elevation layer (it sets the
+// level itself), or on Entities (no per-tile content, no elevation of its own).
+func stampActiveLevel(s *State, x, z int) {
+	if !s.levelFocus || s.layer == LayerElevation || s.layer == LayerEntities {
+		return
+	}
+	if !s.area.InBounds(x, z) {
+		return
+	}
+	setLayerCell(&s.area.Elevation, x, z, core.ElevationChar(s.editLevel))
 }
 
 func applyWallBrush(s *State, x, z int, c byte) {
@@ -540,7 +561,7 @@ func placeRamp(s *State, x, z int) {
 		}
 		pushUndo(s)
 		setLayerCell(&s.area.Floor, x, z, core.RampCharForFacing(ascend))
-		setLayerCell(&s.area.Elevation, x, z, byte('0'+low))
+		setLayerCell(&s.area.Elevation, x, z, core.ElevationChar(low))
 		s.dirty = true
 		return
 	}
@@ -642,12 +663,21 @@ func setLayerCell(layer *[]string, x, z int, b byte) {
 // editing session you can accumulate dozens of MB of unreachable-but-
 // uncollectable AreaDefinitions. The copy frees them for GC.
 func pushUndo(s *State) {
-	// Every forward mutation snapshots through here first, so it's the one
-	// place to invalidate the cached reachability warnings (see
-	// State.ReachabilityWarnings).
+	commitUndoSnapshot(s, core.CloneArea(s.area))
+}
+
+// commitUndoSnapshot banks `before` (the pre-mutation area) onto the undo
+// stack, invalidates the cached reachability warnings, and clears the redo
+// stack. pushUndo is the snapshot-the-current-state-now wrapper used by the
+// one-shot mutations; strokePaint hands in a snapshot it captured at stroke
+// start so a multi-cell drag banks ONE undo step covering the whole stroke —
+// and only when the stroke actually changed something.
+//
+// Every forward mutation routes through here, so it's the one place to
+// invalidate the reachability cache (see State.ReachabilityWarnings).
+func commitUndoSnapshot(s *State, before core.AreaDefinition) {
 	s.reachValid = false
-	snap := core.CloneArea(s.area)
-	s.undo = append(s.undo, snap)
+	s.undo = append(s.undo, before)
 	if len(s.undo) > undoLimit {
 		trimmed := make([]core.AreaDefinition, undoLimit)
 		copy(trimmed, s.undo[len(s.undo)-undoLimit:])
@@ -746,12 +776,20 @@ func resize(s *State, w, h int) {
 	s.area.PackSpawns = removePackSpawnsOutside(s.area.PackSpawns, w, h)
 	s.area.ChestSpawns = removeChestSpawnsOutside(s.area.ChestSpawns, w, h)
 	s.area.DoorSpawns = removeDoorSpawnsOutside(s.area.DoorSpawns, w, h)
-	// A shrink silently drops spawns past the new bounds (undoable, but the
-	// author should know). Flash a count of what fell off so it's not a
-	// quiet data loss.
+	// removeXOutside only drops spawns PAST the new bounds. A shrink can also
+	// leave a spawn on the tile that just BECAME the border ring (in-bounds, so
+	// kept above) — sealWallBorder then stamps a wall over it, burying a chest/
+	// door in a wall where it's unreachable and (unlike a pack) doesn't
+	// self-relocate at runtime. pruneBlockedSpawns drops any spawn now on a
+	// blocked tile (the sealed border included), closing that gap; no-op when
+	// nothing's buried.
+	pruneBlockedSpawns(&s.area)
+	// A shrink silently drops spawns past the new bounds or walled by them
+	// (undoable, but the author should know). Flash a count of what fell off so
+	// it's not a quiet data loss.
 	dropped := (packsBefore - len(s.area.PackSpawns)) + (chestsBefore - len(s.area.ChestSpawns)) + (doorsBefore - len(s.area.DoorSpawns))
 	if dropped > 0 {
-		s.flash(fmt.Sprintf("Resize dropped %d spawn(s) outside the new bounds", dropped))
+		s.flash(fmt.Sprintf("Resize dropped %d spawn(s) outside or walled by the new bounds", dropped))
 	}
 	s.dirty = true
 }
@@ -954,6 +992,7 @@ func floodFill(s *State, x, z int, b byte) {
 	// Snapshot only now that the fill is known to change cells, so a no-op
 	// Ctrl+click doesn't push a useless undo step (and clobber the redo stack).
 	pushUndo(s)
+	var filled [][2]int
 	rewriteLayerRows(layer, func(rows [][]byte) {
 		stack := [][2]int{{x, z}}
 		for len(stack) > 0 {
@@ -967,6 +1006,7 @@ func floodFill(s *State, x, z int, b byte) {
 				continue
 			}
 			rows[pz][px] = b
+			filled = append(filled, [2]int{px, pz})
 			stack = append(stack, [2]int{px + 1, pz}, [2]int{px - 1, pz}, [2]int{px, pz + 1}, [2]int{px, pz - 1})
 		}
 		// Never wall over the player start tile — the same exemption
@@ -980,6 +1020,13 @@ func floodFill(s *State, x, z int, b byte) {
 			}
 		}
 	})
+	// Floors mode: the flooded region joins the active floor — mirror of the
+	// per-cell stamp in applyTool, so Ctrl+click builds a floor the same way a
+	// stroke does. stampActiveLevel no-ops off Floors mode / on Elevation /
+	// Entities.
+	for _, c := range filled {
+		stampActiveLevel(s, c[0], c[1])
+	}
 	// Wall flood that turns cells into '#' nukes any pack/chest/door that
 	// fell inside — same cleanup applyWallBrush does per-cell and
 	// fillEntireLayer does for a full fill, routed through the shared
@@ -1051,6 +1098,17 @@ func fillEntireLayer(s *State) {
 	// through the shared removeSpawnsWhere over core.TileXZ.
 	if s.layer == LayerWalls && brush.Char == core.TileRock {
 		pruneBlockedSpawns(&s.area)
+	}
+	// Floors mode: a full content fill lifts the whole map to the active floor,
+	// consistent with the per-cell / flood-fill stamp. (At level 0 this is a
+	// no-op — the common base-laying case stays flat.) Guarded so flat-map
+	// fills skip the per-cell loop entirely.
+	if s.levelFocus && s.layer != LayerElevation {
+		for z := 0; z < s.area.Height; z++ {
+			for x := 0; x < s.area.Width; x++ {
+				stampActiveLevel(s, x, z)
+			}
+		}
 	}
 	s.dirty = true
 	s.flash("Filled " + layerName(s.layer))

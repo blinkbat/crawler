@@ -672,7 +672,9 @@ func maybeConfuseRetarget(g *core.GameState) {
 			// charge/sequence skill. The combat log persists.
 			setBattleMessage(g, fmt.Sprintf("%s is confused — wrong target!", g.Party[actor].Name))
 		}
-	case core.ActionPartyTarget:
+	case core.ActionPartyTarget, core.ActionItemTarget:
+		// Heal-skill target picker AND the item target picker both land on an
+		// ally, so a confused fumble re-rolls among the living party for both.
 		slots := core.AvailablePartyTargets(g.Party)
 		if len(slots) == 0 {
 			return
@@ -1553,7 +1555,7 @@ func tickPoisonAfterEnemyTurn(g *core.GameState, actor core.ActorRef) bool {
 		return false
 	}
 	dealt, defeated := applyEnemyDoTTick(g, actor.Index, &enemy.PoisonTurns, core.PoisonTickDamage)
-	setBattleMessage(g, poisonTickMessage("The "+core.EnemySingularNoun(*enemy), dealt, defeated))
+	setBattleMessage(g, poisonTickMessage(core.TheEnemy(core.EnemyInfoFor(*enemy)), dealt, defeated))
 	return defeated
 }
 
