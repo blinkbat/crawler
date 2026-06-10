@@ -40,7 +40,7 @@ var cachedLightingProfile lightingProfile
 // entirely into fog color — even at maximum distance, 15% of the
 // original tint survives. Single source of truth: both shaders
 // (lightingFragmentShader + billboardFogFragmentShader) carry
-// `{{FOG_CEILING}}` placeholders that resolveShaderFogCeiling
+// `{{FOG_CEILING}}` placeholders that resolveShaderTokens
 // substitutes with this value at LoadShaderFromMemory time.
 const fogCeiling = float32(0.85)
 

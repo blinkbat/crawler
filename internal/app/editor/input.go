@@ -91,6 +91,7 @@ func updateHotkeys(s *State) {
 			}
 			if rl.IsKeyPressed(k) {
 				s.brushIdx[s.layer] = idx
+				recordRecentBrush(s)
 			}
 		}
 	}
@@ -270,6 +271,38 @@ func toggleTileGlyphs(s *State) {
 	s.showTileGlyphs = !s.showTileGlyphs
 }
 
+// toggleLayerVisibility flips layer i's hidden flag (the layer-tab eye). When
+// solo is true (Alt-click), it isolates layer i instead: hide every other
+// layer, or — if i is already the only visible layer — reveal all of them
+// again, so the same Alt-click both enters and exits solo.
+func toggleLayerVisibility(s *State, i int, solo bool) {
+	if i < 0 || i >= layerCount {
+		return
+	}
+	if !solo {
+		s.layerHidden[i] = !s.layerHidden[i]
+		return
+	}
+	soloed := !s.layerHidden[i]
+	for j := 0; j < layerCount; j++ {
+		if j != i && !s.layerHidden[j] {
+			soloed = false
+			break
+		}
+	}
+	if soloed {
+		for j := range s.layerHidden {
+			s.layerHidden[j] = false
+		}
+		s.flash("All layers shown")
+	} else {
+		for j := range s.layerHidden {
+			s.layerHidden[j] = j != i
+		}
+		s.flash("Soloed " + layerName(Layer(i)))
+	}
+}
+
 // cyclePreviewPhase advances the day/night preview phase one step and flashes
 // the new phase name. Shared by the toolbar's Phase button and the T accelerator.
 func cyclePreviewPhase(s *State) {
@@ -398,16 +431,55 @@ func updateMouse(s *State) {
 			toolbarBtns[hit].action(s)
 			return
 		}
+		// Layer-tab eye toggles (visibility): check before tab-select so a
+		// click on the eye toggles the layer's hidden flag without also
+		// switching the active layer. Alt-click solos (hide all others).
+		if pointIn(mp, s.rect.layerTabs) {
+			for i := 0; i < layerCount; i++ {
+				if pointIn(mp, layerEyeRect(s, i)) {
+					alt := rl.IsKeyDown(rl.KeyLeftAlt) || rl.IsKeyDown(rl.KeyRightAlt)
+					toggleLayerVisibility(s, i, alt)
+					return
+				}
+			}
+		}
 		if hit := layerTabAt(s, mp); hit >= 0 {
 			s.layer = Layer(hit)
 			return
 		}
 		if hit := paletteToolAt(s, mp); hit >= 0 {
 			s.brushIdx[s.layer] = hit
+			recordRecentBrush(s)
 			return
 		}
 		if handleMetadataClick(s, mp) {
 			return
+		}
+	}
+
+	// Overview minimap click-to-jump: a click inside the corner minimap
+	// recenters the view on the corresponding tile rather than painting. Check
+	// before the grid-paint block since the minimap overlaps the grid pane.
+	if mr, ok := minimapRect(s); ok && rl.IsMouseButtonPressed(rl.MouseLeftButton) && pointIn(mp, mr) {
+		scale := mr.Width / float32(s.area.Width)
+		tx := core.Clamp(int((mp.X-mr.X)/scale), 0, s.area.Width-1)
+		tz := core.Clamp(int((mp.Y-mr.Y)/scale), 0, s.area.Height-1)
+		centerViewOnTile(s, tx, tz)
+		return
+	}
+
+	// Recent-brush quick-pick: a click on a swatch jumps to that layer + brush.
+	if brushRecentsVisible(s) && rl.IsMouseButtonPressed(rl.MouseLeftButton) {
+		for i := range s.recentBrushes {
+			if pointIn(mp, brushRecentRect(s, i)) {
+				ref := s.recentBrushes[i]
+				s.layer = ref.layer
+				if ref.idx >= 0 && ref.idx < len(layerBrushes[ref.layer]) {
+					s.brushIdx[ref.layer] = ref.idx
+				}
+				recordRecentBrush(s)
+				return
+			}
 		}
 	}
 
@@ -477,16 +549,8 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 		s.drag = dragNone
 		return
 	}
-	gridLayer := isGridLayer(s.layer)
-
-	if gridLayer && ctrl {
-		// floodFill snapshots undo itself (only when the fill actually
-		// changes cells), so a no-op Ctrl+click leaves the undo stack alone.
-		floodFill(s, x, z, s.activeBrush().Char)
-		s.drag = dragNone
-		return
-	}
-
+	// Entity layer: grab an existing entity for drag-move, or place a fresh
+	// one. The grid-paint tools below don't apply here.
 	if s.layer == LayerEntities {
 		brush := s.activeBrush()
 		switch brush.Entity {
@@ -535,15 +599,44 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 		return
 	}
 
-	if gridLayer && shift {
-		s.drag = dragRect
-		s.rectAnchorX, s.rectAnchorZ = x, z
-		return
+	// Grid layers: the active tool decides the action. While Brush is the
+	// active tool the legacy modifiers still override (Ctrl = Flood, Shift =
+	// Rect) so existing muscle memory keeps working; an explicitly-picked tool
+	// is honored as-is. (Alt = Pick is handled in updateMouse before we reach
+	// here, so it works under any tool.)
+	tool := s.tool
+	if tool == toolBrush {
+		if ctrl {
+			tool = toolFlood
+		} else if shift {
+			tool = toolRect
+		}
 	}
-
-	beginPaintStroke(s)
-	strokePaint(s, x, z)
-	s.lastPaintX, s.lastPaintZ = x, z
+	switch tool {
+	case toolPick:
+		sampleBrushAt(s, x, z)
+		s.drag = dragNone
+	case toolFlood:
+		// floodFill snapshots undo itself (only when the fill changes cells),
+		// so a no-op leaves the undo stack alone.
+		floodFill(s, x, z, s.activeBrush().Char)
+		s.drag = dragNone
+	case toolRect:
+		s.drag = dragRect
+		s.rectHollow = false
+		s.rectAnchorX, s.rectAnchorZ = x, z
+	case toolBox:
+		s.drag = dragRect
+		s.rectHollow = true
+		s.rectAnchorX, s.rectAnchorZ = x, z
+	case toolLine:
+		s.drag = dragLine
+		s.rectAnchorX, s.rectAnchorZ = x, z
+	default: // toolBrush
+		beginPaintStroke(s)
+		strokePaint(s, x, z)
+		s.lastPaintX, s.lastPaintZ = x, z
+	}
 }
 
 // beginPaintStroke arms a left-button paint/place drag. It records the
@@ -601,44 +694,17 @@ func continueDrag(s *State, x, z int) {
 }
 
 // paintLineBetween stamps the active brush along the grid line from (x0,z0) to
-// (x1,z1) via Bresenham, skipping the start cell (already painted) and
-// including the destination. Each step goes through strokePaint so the
-// stroke's single lazy undo snapshot and brush-size square still apply.
+// (x1,z1), skipping the start cell (already painted) and including the
+// destination. Each step goes through strokePaint so the stroke's single lazy
+// undo snapshot and brush-size square still apply. Shares the Bresenham walk
+// with the Line tool via walkLine (ops.go).
 func paintLineBetween(s *State, x0, z0, x1, z1 int) {
-	dx := x1 - x0
-	if dx < 0 {
-		dx = -dx
-	}
-	dz := z1 - z0
-	if dz < 0 {
-		dz = -dz
-	}
-	sx, sz := 1, 1
-	if x0 > x1 {
-		sx = -1
-	}
-	if z0 > z1 {
-		sz = -1
-	}
-	err := dx - dz
-	cx, cz := x0, z0
-	for {
-		if cx != x0 || cz != z0 {
-			strokePaint(s, cx, cz)
+	walkLine(x0, z0, x1, z1, func(cx, cz int) {
+		if cx == x0 && cz == z0 {
+			return // start already painted by the prior strokePaint
 		}
-		if cx == x1 && cz == z1 {
-			return
-		}
-		e2 := 2 * err
-		if e2 > -dz {
-			err -= dz
-			cx += sx
-		}
-		if e2 < dx {
-			err += dx
-			cz += sz
-		}
-	}
+		strokePaint(s, cx, cz)
+	})
 }
 
 func finishDrag(s *State) {
@@ -726,10 +792,20 @@ func finishDrag(s *State) {
 	case dragRect:
 		if s.hoverX >= 0 {
 			pushUndo(s)
-			paintRect(s, s.rectAnchorX, s.rectAnchorZ, s.hoverX, s.hoverZ)
+			if s.rectHollow {
+				paintRectOutline(s, s.rectAnchorX, s.rectAnchorZ, s.hoverX, s.hoverZ)
+			} else {
+				paintRect(s, s.rectAnchorX, s.rectAnchorZ, s.hoverX, s.hoverZ)
+			}
+		}
+	case dragLine:
+		if s.hoverX >= 0 {
+			pushUndo(s)
+			paintLine(s, s.rectAnchorX, s.rectAnchorZ, s.hoverX, s.hoverZ)
 		}
 	}
 	s.drag = dragNone
+	s.rectHollow = false
 	s.dragPackIdx = -1
 	s.dragChestIdx = -1
 	s.dragDoorIdx = -1
@@ -771,6 +847,26 @@ func isGridLayer(l Layer) bool {
 	return l != LayerEntities
 }
 
+// recordRecentBrush pushes the currently-selected (layer, brush) onto the
+// recent-brushes list (newest first, deduped, capped). Called at every
+// brush-select site — palette click, number-key hotkey, eyedropper, and the
+// recent-swatch click itself (which re-promotes the pick).
+func recordRecentBrush(s *State) {
+	ref := brushRef{s.layer, s.brushIdx[s.layer]}
+	next := make([]brushRef, 0, maxRecentBrushes)
+	next = append(next, ref)
+	for _, r := range s.recentBrushes {
+		if r == ref {
+			continue
+		}
+		if len(next) >= maxRecentBrushes {
+			break
+		}
+		next = append(next, r)
+	}
+	s.recentBrushes = next
+}
+
 // sampleBrushAt is the eyedropper (Alt+click): it reads the active layer's char
 // at (x,z) and selects the matching palette brush so the author can keep
 // painting with whatever is already on the map. On the Elevation layer it picks
@@ -793,6 +889,7 @@ func sampleBrushAt(s *State, x, z int) {
 	for i, b := range layerBrushes[s.layer] {
 		if b.Char == ch {
 			s.brushIdx[s.layer] = i
+			recordRecentBrush(s)
 			s.flash("Picked " + b.Name)
 			return
 		}
@@ -1443,6 +1540,62 @@ func cycleDoorFocus(s *State) {
 		s.focus = focusDoorTargetDoor
 	case focusDoorTargetDoor:
 		s.focus = focusDoorName
+	}
+}
+
+// openEntityListModal opens the Objects index (every pack / chest / door +
+// the player start). Cursor starts at the top.
+func openEntityListModal(s *State) {
+	s.modal = modalEntityList
+	s.modalCursor = 0
+}
+
+// updateEntityListModal drives the Objects index: Up/Down move the cursor,
+// Enter or a row click jumps the view to that entity and opens its editor,
+// Esc / click-outside closes.
+func updateEntityListModal(s *State) Action {
+	rows := entityListRows(s)
+	n := len(rows)
+	s.modalCursor = input.CursorUpDown(s.modalCursor, n)
+	if editorCancelPressed() {
+		closeModal(s)
+		return ActionNone
+	}
+	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
+		card, listTop, _, top, end := entityListGeom(s)
+		mp := rl.GetMousePosition()
+		if !pointIn(mp, card) {
+			closeModal(s)
+			return ActionNone
+		}
+		for i := top; i < end; i++ {
+			if pointIn(mp, entityListRowRect(card, listTop, i-top)) {
+				activateEntityRow(s, rows[i])
+				return ActionNone
+			}
+		}
+		return ActionNone
+	}
+	if editorCommitPressed() && s.modalCursor >= 0 && s.modalCursor < n {
+		activateEntityRow(s, rows[s.modalCursor])
+	}
+	return ActionNone
+}
+
+// activateEntityRow recenters the view on the row's entity and opens its
+// editor (the start row just recenters and closes). The open* helpers replace
+// the entity-list modal, so the author lands directly in the edit flow.
+func activateEntityRow(s *State, row entityListRow) {
+	centerViewOnTile(s, row.x, row.z)
+	switch row.kind {
+	case elPack:
+		openPackEditModal(s, row.idx)
+	case elChest:
+		openChestEditModal(s, row.idx)
+	case elDoor:
+		openDoorEditModal(s, row.idx)
+	default:
+		closeModal(s)
 	}
 }
 

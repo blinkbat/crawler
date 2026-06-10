@@ -11,14 +11,45 @@ import (
 
 // fogCeilingToken is the placeholder string both fragment shaders
 // carry where they would otherwise inline the `0.85` clamp ceiling.
-// resolveShaderFogCeiling substitutes the Go fogCeiling constant in
+// resolveShaderTokens substitutes the Go fogCeiling constant in
 // before LoadShaderFromMemory, so the GLSL source has the literal
 // value once it reaches the compiler. Keeps the ceiling tuned from
 // one place — see fogCeiling in distancefog.go.
 const fogCeilingToken = "{{FOG_CEILING}}"
 
-func resolveShaderFogCeiling(src string) string {
-	return strings.ReplaceAll(src, fogCeilingToken, fmt.Sprintf("%.4f", fogCeiling))
+// painterlyGradeToken is the placeholder both fragment shaders carry where the
+// shared color-grade ("the filter") goes. resolveShaderTokens substitutes
+// painterlyGradeGLSL in at shader-load time so the grade — and its tuning
+// knobs — live in exactly ONE place across Go + both shaders, instead of two
+// hand-synced copies.
+const painterlyGradeToken = "{{PAINTERLY_GRADE}}"
+
+// painterlyGradeGLSL is the shared day→night color grade injected into BOTH
+// fragment shaders so the world and billboards grade identically and can't
+// drift. Operates on the vec3 `lit` using the `nightMood` uniform (0 = serene
+// day, 1 = spooky night). Temp locals are wrapped in a block so they can't
+// collide with the host shader's scope. The four tuning KNOBS live here.
+const painterlyGradeGLSL = `
+    // (1) Soft highlight shoulder — roll bright pastels off instead of clipping.
+    lit = lit / (1.0 + 0.16 * max(max(lit.r, lit.g), lit.b));
+    {
+        // (2) Shadow lift: airy/papery by day, near-black gloom at night.
+        float lift = mix(0.055, 0.004, nightMood);
+        lit = lift + lit * (1.0 - lift);
+        // (3) Saturation: clean pastel by day, drained and eerie at night.
+        float gradeLuma = dot(lit, vec3(0.299, 0.587, 0.114));
+        lit = mix(lit, vec3(gradeLuma), mix(0.16, 0.45, nightMood));
+        // (4) Temperature: warm paper-cream by day, cold moonlit indigo at night.
+        lit *= mix(vec3(1.03, 1.00, 0.95), vec3(0.82, 0.88, 1.08), nightMood);
+    }
+`
+
+// resolveShaderTokens substitutes every shared Go-owned value into a fragment
+// shader's source at load time: the fog clamp ceiling and the painterly grade.
+func resolveShaderTokens(src string) string {
+	src = strings.ReplaceAll(src, fogCeilingToken, fmt.Sprintf("%.4f", fogCeiling))
+	src = strings.ReplaceAll(src, painterlyGradeToken, painterlyGradeGLSL)
+	return src
 }
 
 const lightingVertexShader = `#version 330
@@ -85,7 +116,7 @@ void main() {
 // else around them.
 //
 // {{FOG_CEILING}} is substituted at shader-load time from the Go
-// `fogCeiling` constant via resolveShaderFogCeiling, so the
+// `fogCeiling` constant via resolveShaderTokens, so the
 // ceiling lives in exactly one place across Go + both shaders.
 const billboardFogFragmentShader = `#version 330
 
@@ -122,15 +153,9 @@ void main() {
     fog = clamp(fog, 0.0, {{FOG_CEILING}});
     vec3 lit = mix(base, fogColor, fog);
 
-    // ---- Painterly grade ("the filter") — KEEP IN SYNC with the world
-    // shader's block so billboards sit in the same painting. See there for
-    // what each step does.
-    lit = lit / (1.0 + 0.16 * max(max(lit.r, lit.g), lit.b));
-    float lift = mix(0.055, 0.004, nightMood);
-    lit = lift + lit * (1.0 - lift);
-    float gradeLuma = dot(lit, vec3(0.299, 0.587, 0.114));
-    lit = mix(lit, vec3(gradeLuma), mix(0.16, 0.45, nightMood));
-    lit *= mix(vec3(1.03, 1.00, 0.95), vec3(0.82, 0.88, 1.08), nightMood);
+    // Shared painterly grade — injected from painterlyGradeGLSL (one source for
+    // both shaders).
+    {{PAINTERLY_GRADE}}
 
     finalColor = vec4(lit, texel.a * fragColor.a * colDiffuse.a);
 }
@@ -145,7 +170,7 @@ type billboardFogShaderPipe struct {
 }
 
 func loadBillboardFogShader() billboardFogShaderPipe {
-	shader := rl.LoadShaderFromMemory(billboardFogVertexShader, resolveShaderFogCeiling(billboardFogFragmentShader))
+	shader := rl.LoadShaderFromMemory(billboardFogVertexShader, resolveShaderTokens(billboardFogFragmentShader))
 	if shader.ID == 0 {
 		log.Println("render: billboard fog shader failed to compile; billboards will not fog out at distance")
 		LogRenderError("billboard fog shader compile FAILED (shader.ID==0); raylib falls back to default shader, billboards will not fog")
@@ -312,29 +337,16 @@ void main() {
     // the lit tint at maximum distance so silhouettes don't fade
     // to invisibility. {{FOG_CEILING}} is substituted at shader-
     // load time from the Go fogCeiling constant — see
-    // resolveShaderFogCeiling above. ONE source of truth across Go
+    // resolveShaderTokens above. ONE source of truth across Go
     // + both shaders.
     float dist = length(viewPos - fragPosition);
     float fog = 1.0 - exp(-fogDensity * dist);
     fog = clamp(fog, 0.0, {{FOG_CEILING}});
     lit = mix(lit, fogColor, fog);
 
-    // ---- Painterly grade ("the filter") — KEEP IN SYNC with the billboard
-    // shader so sprites and world sit in one painting. Driven by nightMood
-    // (0 day → 1 night). Four KNOBS:
-    // (1) Soft highlight shoulder: roll bright pastels off gently instead of
-    //     clipping to hard white — preserves the gouache softness.
-    lit = lit / (1.0 + 0.16 * max(max(lit.r, lit.g), lit.b));
-    // (2) Shadow lift: by DAY raise the black floor so nothing reads inky
-    //     (papery, austere, serene); by NIGHT let it fall near-black (gloom).
-    float lift = mix(0.055, 0.004, nightMood);
-    lit = lift + lit * (1.0 - lift);
-    // (3) Saturation: clean pastel by day, drained & eerie by night.
-    float gradeLuma = dot(lit, vec3(0.299, 0.587, 0.114));
-    lit = mix(lit, vec3(gradeLuma), mix(0.16, 0.45, nightMood));
-    // (4) Temperature wash: warm paper-cream by day → cold moonlit indigo at
-    //     night — a faint unifying tint ("painted on warm paper" vs "out after dark").
-    lit *= mix(vec3(1.03, 1.00, 0.95), vec3(0.82, 0.88, 1.08), nightMood);
+    // Shared painterly grade — injected from painterlyGradeGLSL (one source for
+    // both shaders).
+    {{PAINTERLY_GRADE}}
 
     finalColor = vec4(lit, texel.a * fragColor.a * colDiffuse.a);
 }
@@ -383,7 +395,7 @@ var (
 )
 
 func loadLightingShader() lightingShader {
-	shader := rl.LoadShaderFromMemory(lightingVertexShader, resolveShaderFogCeiling(lightingFragmentShader))
+	shader := rl.LoadShaderFromMemory(lightingVertexShader, resolveShaderTokens(lightingFragmentShader))
 	if shader.ID == 0 {
 		// Compile/link failure leaves shader.ID == 0; raylib's BeginShaderMode
 		// will silently no-op past that point, so the world draws unlit with

@@ -178,6 +178,11 @@ func Draw(s *State, assets render.Resources) {
 	drawPalette(s, font, theme)
 	drawMetadata(s, font, theme)
 	drawGrid(s, font)
+	// Overview minimap sits in the grid's bottom-right corner, on top of the
+	// grid but below scrollbars / status / modals.
+	drawMinimap(s)
+	// Recent-brush quick-pick row, bottom-left of the grid.
+	drawBrushRecents(s, font)
 	// Scrollbars paint on top of the panels + grid they scroll, but below
 	// status toasts and modals.
 	drawScrollbars(s)
@@ -211,6 +216,7 @@ var modalHandlers = map[modalKind]modalHandler{
 	modalSounds:        {draw: drawSoundsModal, update: updateSoundsModal},
 	modalDoorEdit:      {draw: drawDoorEditModal, update: updateDoorEditModal},
 	modalValidate:      {draw: drawValidateModal, update: updateValidateModal},
+	modalEntityList:    {draw: drawEntityListModal, update: updateEntityListModal},
 	modalNew:           {draw: drawNewMapModal, update: updateNewMapModal},
 	modalCustomEnemies: {draw: drawCustomEnemiesModal, update: updateCustomEnemiesModal},
 	modalEscMenu:       {draw: drawEscMenuModal, update: updateEscMenuModal},
@@ -367,6 +373,7 @@ var topbarBtns = []topbarBtn{
 	{label: "Sounds", action: openSoundsModal},
 	{label: "Enemies", action: openCustomEnemiesModal},
 	{label: "Foes", action: openFoeViewModal},
+	{label: "Objects", action: openEntityListModal},
 	{label: "Validate", action: openValidateModal},
 	{label: "Back", action: func(s *State) { s.exitRequested = true }},
 }
@@ -378,7 +385,11 @@ var topbarBtns = []topbarBtn{
 // hotkey calls, so the two can't drift. Layer switching lives in the
 // left layer-tabs column and brush selection in the palette, so those
 // aren't repeated here.
-var toolbarBtns = []topbarBtn{
+// toolbarActionBtns are the editing-command buttons. The full toolbar
+// (toolbarBtns) is the tool-select group followed by these — assembled in
+// init below so the tool group reads from toolModeLabels and a new tool needs
+// no button wiring.
+var toolbarActionBtns = []topbarBtn{
 	{label: "Undo", action: undoOne},
 	{label: "Redo", action: redoOne},
 	{label: "Fill", action: fillEntireLayer},
@@ -397,8 +408,29 @@ var toolbarBtns = []topbarBtn{
 	{label: "Glyphs",
 		action: toggleTileGlyphs,
 		active: func(s *State) bool { return s.showTileGlyphs }},
+	{label: "Links",
+		action: func(s *State) { s.showDoorLinks = !s.showDoorLinks },
+		active: func(s *State) bool { return s.showDoorLinks }},
 	{label: "Phase", action: cyclePreviewPhase},
 	{label: "Test", action: func(s *State) { s.testRequested = true }},
+}
+
+// toolbarBtns is the full action row: the tool-select group (Brush / Line /
+// Rect / Box / Flood / Pick, highlighted to show the active tool) followed by
+// the editing commands. Assembled once at init from toolModeLabels so adding a
+// tool is one enum row + label — no button wiring.
+var toolbarBtns []topbarBtn
+
+func init() {
+	for m, label := range toolModeLabels {
+		mode := toolMode(m)
+		toolbarBtns = append(toolbarBtns, topbarBtn{
+			label:  label,
+			action: func(s *State) { s.tool = mode },
+			active: func(s *State) bool { return s.tool == mode },
+		})
+	}
+	toolbarBtns = append(toolbarBtns, toolbarActionBtns...)
 }
 
 // toolbarButtonAt returns the index of the toolbar button under p, or
@@ -883,6 +915,203 @@ func stepperRow(x, y, valueW, gap float32) (value, minus, plus rl.Rectangle) {
 	return value, minus, plus
 }
 
+// Door-link overlay colors.
+var (
+	doorLinkColor         = rl.NewColor(120, 200, 255, 220) // resolved same-map link
+	doorLinkWarnColor     = rl.NewColor(255, 90, 90, 235)   // dangling: target_door doesn't resolve
+	doorLinkExternalColor = rl.NewColor(186, 162, 255, 205) // cross-map link (target in another file)
+)
+
+// markerPackDot is the flat pack color for the small dots in the Objects list
+// and the minimap (distinct from the per-kind packMarkerColor used on the
+// canvas). One source so the two dot sites can't drift.
+var markerPackDot = rl.NewColor(222, 92, 80, 255)
+
+// doorSpawnByName finds the door spawn with the given name in this map's
+// spawn list. Used by the door-link overlay to resolve same-map targets.
+func doorSpawnByName(spawns []core.DoorSpawn, name string) (core.DoorSpawn, bool) {
+	for _, d := range spawns {
+		if d.Name == name {
+			return d, true
+		}
+	}
+	return core.DoorSpawn{}, false
+}
+
+// drawDoorLinks renders the door-link diagnostic overlay (the "Links" toolbar
+// toggle): a connector from each door to its same-map target door, a warning
+// ring on doors whose target_door doesn't resolve in this map, and a neutral
+// ring on cross-map doors (their target lives in another file — the Validate
+// modal checks those). Doors are few, so this isn't culled.
+func drawDoorLinks(s *State, cell float32) {
+	selfID := core.MapIDFromPath(s.area.Path)
+	sameMap := func(target string) bool { return target == "" || target == "self" || target == selfID }
+	for _, d := range s.area.DoorSpawns {
+		cx, cy := s.rect.tileCenter(d.TileX, d.TileZ)
+		if sameMap(d.TargetMap) {
+			if tgt, ok := doorSpawnByName(s.area.DoorSpawns, d.TargetDoor); ok && d.TargetDoor != "" {
+				tx, ty := s.rect.tileCenter(tgt.TileX, tgt.TileZ)
+				rl.DrawLineEx(rl.NewVector2(cx, cy), rl.NewVector2(tx, ty), 2, doorLinkColor)
+				rl.DrawCircleV(rl.NewVector2(tx, ty), 3.5, doorLinkColor)
+			} else {
+				rl.DrawCircleLines(int32(cx), int32(cy), cell*0.46, doorLinkWarnColor)
+			}
+		} else {
+			rl.DrawCircleLines(int32(cx), int32(cy), cell*0.42, doorLinkExternalColor)
+		}
+	}
+}
+
+// clampF clamps a float to [lo, hi].
+func clampF(v, lo, hi float32) float32 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// minimapRect computes the on-screen rectangle of the overview minimap — the
+// downscaled whole-map thumbnail pinned to the grid pane's bottom-right corner
+// — and whether it should show (hidden when there's no map or the grid pane is
+// too small to spare the room). Shared by the draw and the click-to-jump
+// hit-test so they can't drift.
+func minimapRect(s *State) (rl.Rectangle, bool) {
+	if s.area.Width == 0 || s.area.Height == 0 || s.rect.cellPx <= 0 {
+		return rl.Rectangle{}, false
+	}
+	if s.rect.grid.Width < 260 || s.rect.grid.Height < 260 {
+		return rl.Rectangle{}, false
+	}
+	const maxDim = float32(150)
+	// pad ≥ scrollbarThickness (+ backing slack) so the minimap clears the
+	// canvas scrollbar gutters on the grid's right + bottom edges when zoomed in.
+	const pad = float32(16)
+	aw, ah := float32(s.area.Width), float32(s.area.Height)
+	scale := maxDim / aw
+	if h := maxDim / ah; h < scale {
+		scale = h
+	}
+	mw, mh := aw*scale, ah*scale
+	gx := s.rect.grid.X + s.rect.grid.Width - mw - pad
+	gy := s.rect.grid.Y + s.rect.grid.Height - mh - pad
+	return rl.NewRectangle(gx, gy, mw, mh), true
+}
+
+// drawMinimap paints the overview minimap: a floor base, wall pixels, entity
+// dots, and a frame marking the slice of the map currently visible in the grid
+// pane. Pixel-space iteration bounds the cost to the minimap's own area
+// (~150² max), independent of map size. Click-to-jump is in updateMouse.
+func drawMinimap(s *State) {
+	mr, ok := minimapRect(s)
+	if !ok {
+		return
+	}
+	scale := mr.Width / float32(s.area.Width)
+	rl.DrawRectangleRec(rl.NewRectangle(mr.X-4, mr.Y-4, mr.Width+8, mr.Height+8), rl.NewColor(12, 14, 20, 214))
+	rl.DrawRectangleLinesEx(rl.NewRectangle(mr.X-4, mr.Y-4, mr.Width+8, mr.Height+8), 1, editorBorderDim)
+	rl.DrawRectangleRec(mr, rl.NewColor(58, 56, 50, 255))
+
+	wallCol := rl.NewColor(150, 152, 160, 255)
+	wpx, hpx := int(mr.Width), int(mr.Height)
+	for py := 0; py < hpx; py++ {
+		tz := int(float32(py) / scale)
+		if tz >= s.area.Height {
+			break
+		}
+		for px := 0; px < wpx; px++ {
+			tx := int(float32(px) / scale)
+			if tx >= s.area.Width {
+				break
+			}
+			if s.area.Walls[tz][tx] == core.TileRock {
+				rl.DrawPixel(int32(mr.X)+int32(px), int32(mr.Y)+int32(py), wallCol)
+			}
+		}
+	}
+
+	dot := func(tx, tz int, col rl.Color) {
+		rl.DrawRectangle(int32(mr.X+float32(tx)*scale), int32(mr.Y+float32(tz)*scale), 2, 2, col)
+	}
+	for _, p := range s.area.PackSpawns {
+		if len(p.Members) > 0 {
+			dot(p.TileX, p.TileZ, markerPackDot)
+		}
+	}
+	for _, c := range s.area.ChestSpawns {
+		dot(c.TileX, c.TileZ, render.MarkerChest)
+	}
+	for _, d := range s.area.DoorSpawns {
+		dot(d.TileX, d.TileZ, render.MarkerDoor)
+	}
+	dot(s.area.StartTileX, s.area.StartTileZ, render.MarkerStart)
+
+	// Viewport frame — the slice of the map currently visible in the grid pane.
+	w, h := float32(s.area.Width), float32(s.area.Height)
+	vx0 := clampF((s.rect.grid.X-s.rect.gridX)/s.rect.cellPx, 0, w)
+	vx1 := clampF((s.rect.grid.X+s.rect.grid.Width-s.rect.gridX)/s.rect.cellPx, 0, w)
+	vz0 := clampF((s.rect.grid.Y-s.rect.gridY)/s.rect.cellPx, 0, h)
+	vz1 := clampF((s.rect.grid.Y+s.rect.grid.Height-s.rect.gridY)/s.rect.cellPx, 0, h)
+	rl.DrawRectangleLinesEx(
+		rl.NewRectangle(mr.X+vx0*scale, mr.Y+vz0*scale, (vx1-vx0)*scale, (vz1-vz0)*scale),
+		1, rl.NewColor(255, 240, 180, 230))
+}
+
+// brushRecentsVisible reports whether the recent-brush swatch row should show.
+func brushRecentsVisible(s *State) bool {
+	return len(s.recentBrushes) > 0 && s.rect.grid.Width >= 260 && s.rect.grid.Height >= 200
+}
+
+// brushRecentRect is the i-th recent-brush swatch rectangle, laid out left to
+// right in the grid pane's bottom-left corner. Shared by draw + click hit-test
+// so they can't drift.
+func brushRecentRect(s *State, i int) rl.Rectangle {
+	// pad ≥ scrollbarThickness (+ slack) so the row clears the bottom canvas
+	// scrollbar gutter when zoomed in.
+	const sw, pad, gap = float32(26), float32(16), float32(4)
+	x0 := s.rect.grid.X + pad
+	y := s.rect.grid.Y + s.rect.grid.Height - sw - pad
+	return rl.NewRectangle(x0+float32(i)*(sw+gap), y, sw, sw)
+}
+
+func recentSwatchColor(ref brushRef) rl.Color {
+	palette := layerBrushes[ref.layer]
+	if ref.idx < 0 || ref.idx >= len(palette) {
+		return rl.NewColor(80, 80, 90, 255)
+	}
+	return palette[ref.idx].Color
+}
+
+// drawBrushRecents paints the recent-brush quick-pick row (newest at left).
+// Each swatch shows the brush color + its layer's initial; clicking one (see
+// updateMouse) jumps to that layer + brush.
+func drawBrushRecents(s *State, font rl.Font) {
+	if !brushRecentsVisible(s) {
+		return
+	}
+	n := len(s.recentBrushes)
+	first := brushRecentRect(s, 0)
+	last := brushRecentRect(s, n-1)
+	bg := rl.NewRectangle(first.X-4, first.Y-4, (last.X+last.Width)-first.X+8, first.Height+8)
+	rl.DrawRectangleRec(bg, rl.NewColor(12, 14, 20, 205))
+	rl.DrawRectangleLinesEx(bg, 1, editorBorderDim)
+	mp := frameMouse
+	for i, ref := range s.recentBrushes {
+		r := brushRecentRect(s, i)
+		rl.DrawRectangleRec(r, recentSwatchColor(ref))
+		border := editorBorderDim
+		if pointIn(mp, r) {
+			border = editorBorderActive
+		}
+		rl.DrawRectangleLinesEx(r, 1, border)
+		if ln := layerName(ref.layer); len(ln) > 0 {
+			render.DrawTextWithShadow(font, ln[:1], r.X+3, r.Y+1, editorFontTick, rl.NewColor(245, 245, 250, 255))
+		}
+	}
+}
+
 // --- Layer tabs ------------------------------------------------------------
 
 func layerTabRect(s *State, i int) rl.Rectangle {
@@ -906,6 +1135,34 @@ func layerTabAt(s *State, p rl.Vector2) int {
 	return -1
 }
 
+// layerEyeRect is the small visibility-toggle box at the right edge of a
+// layer tab. Clicking it toggles the layer's hidden flag (Alt-click solos);
+// it's hit-tested before the tab-select so the eye doesn't also switch layers.
+func layerEyeRect(s *State, i int) rl.Rectangle {
+	r := layerTabRect(s, i)
+	const eye = float32(20)
+	return rl.NewRectangle(r.X+r.Width-6-eye-6, r.Y+(r.Height-eye)/2, eye, eye)
+}
+
+// drawLayerEye paints the open/closed visibility eye for a layer tab.
+func drawLayerEye(r rl.Rectangle, open, hover bool) {
+	cx := r.X + r.Width/2
+	cy := r.Y + r.Height/2
+	col := rl.NewColor(176, 182, 196, 255)
+	if !open {
+		col = rl.NewColor(98, 102, 112, 255)
+	}
+	if hover {
+		col = rl.NewColor(232, 236, 246, 255)
+	}
+	if open {
+		rl.DrawCircleLines(int32(cx), int32(cy), r.Width*0.34, col)
+		rl.DrawCircleV(rl.NewVector2(cx, cy), r.Width*0.14, col)
+	} else {
+		rl.DrawLineEx(rl.NewVector2(r.X+r.Width*0.18, cy), rl.NewVector2(r.X+r.Width*0.82, cy), 2, col)
+	}
+}
+
 func drawLayerTabs(s *State, font rl.Font, theme render.Theme) {
 	rl.DrawRectangleRec(s.rect.layerTabs, bgWindow)
 	// Re-use the Draw()-cached frameMouse instead of calling
@@ -914,6 +1171,7 @@ func drawLayerTabs(s *State, font rl.Font, theme render.Theme) {
 	for i := 0; i < layerCount; i++ {
 		r := layerTabRect(s, i)
 		active := Layer(i) == s.layer
+		hidden := s.layerHidden[i]
 		bg := bgPanel
 		border := editorBorderDim
 		text := theme.TextMuted
@@ -924,12 +1182,19 @@ func drawLayerTabs(s *State, font rl.Font, theme render.Theme) {
 		} else if pointIn(mp, r) {
 			bg = bgEntryHover
 		}
+		if hidden {
+			// Dim the label so the hidden state reads across the whole tab,
+			// not just the eye.
+			text = rl.NewColor(112, 116, 126, 255)
+		}
 		// Inset the tab so consecutive tabs don't share a border.
 		inner := rl.NewRectangle(r.X+6, r.Y+3, r.Width-12, r.Height-6)
 		rl.DrawRectangleRec(inner, bg)
 		rl.DrawRectangleLinesEx(inner, 1, border)
 		label := fmt.Sprintf("%d %s", i+1, layerName(Layer(i)))
 		render.DrawTextWithShadow(font, label, inner.X+10, inner.Y+(inner.Height-16)/2, editorFontBody, text)
+		eye := layerEyeRect(s, i)
+		drawLayerEye(eye, !hidden, pointIn(mp, eye))
 	}
 }
 
@@ -1590,6 +1855,11 @@ func drawGrid(s *State, font rl.Font) {
 	if zMax > s.area.Height {
 		zMax = s.area.Height
 	}
+	// inCullWindow reports whether a tile is inside the visible grid window —
+	// the shared test the entity-marker loops use to skip off-screen spawns.
+	inCullWindow := func(tx, tz int) bool {
+		return tx >= xMin && tx < xMax && tz >= zMin && tz < zMax
+	}
 
 	// Active-layer char overlay: at zooms where a glyph fits, paint the
 	// tile-char of the CURRENTLY SELECTED layer on each cell so the author
@@ -1599,31 +1869,44 @@ func drawGrid(s *State, font rl.Font) {
 	// sentinels produce no glyph. Threshold matches the axis-tick label
 	// threshold so the chrome turns on together.
 	const charOverlayMinCell = float32(14)
-	showCharOverlay := cell >= charOverlayMinCell && s.showTileGlyphs
+	showCharOverlay := cell >= charOverlayMinCell && s.showTileGlyphs && !s.layerHidden[s.layer]
 	charFontSize := cell * 0.55
 	charShadow := glyphShadow
 	charFG := rl.NewColor(248, 250, 252, 235)
+
+	// Per-layer visibility (the layer-tab eye toggles): hidden layers are
+	// skipped in the cell + marker draws so the author can isolate what they're
+	// working on. Hoisted out of the inner loop so it's a cheap bool per cell.
+	showFloor := !s.layerHidden[LayerFloor]
+	showWalls := !s.layerHidden[LayerWalls]
+	showDecor := !s.layerHidden[LayerDecor]
+	showProps := !s.layerHidden[LayerProps]
+	showCeiling := !s.layerHidden[LayerCeiling]
+	showElevation := !s.layerHidden[LayerElevation]
+	showEntities := !s.layerHidden[LayerEntities]
 
 	for z := zMin; z < zMax; z++ {
 		for x := xMin; x < xMax; x++ {
 			r := s.rect.tileRect(x, z)
 			// Floor is the base — always painted (except under a wall, where
 			// the wall covers it).
-			rl.DrawRectangleRec(r, fadeAlpha(floorColor(s.area.Floor[z][x]), floorAlpha))
-			if s.area.Walls[z][x] == core.TileRock {
+			if showFloor {
+				rl.DrawRectangleRec(r, fadeAlpha(floorColor(s.area.Floor[z][x]), floorAlpha))
+			}
+			if showWalls && s.area.Walls[z][x] == core.TileRock {
 				rl.DrawRectangleRec(r, fadeAlpha(wallColor(), wallAlpha))
 			}
-			if d := s.area.Decor[z][x]; d != core.DecorAuto {
+			if d := s.area.Decor[z][x]; showDecor && d != core.DecorAuto {
 				rl.DrawRectangleRec(insetRect(r, cell*0.28), fadeAlpha(decorColor(d), decorAlpha))
 			}
-			if p := s.area.Props[z][x]; core.IsPropChar(p) {
+			if p := s.area.Props[z][x]; showProps && core.IsPropChar(p) {
 				rl.DrawCircle(int32(r.X+cell/2), int32(r.Y+cell/2), cell*0.36, fadeAlpha(propColor(p), propAlpha))
 			}
 			// Ceiling hash overlay: shown only when the Ceiling layer is
 			// active or the cell holds a ceiling. Two diagonal stripes
 			// inside the cell so it reads as "covered" without obscuring
 			// the layer underneath.
-			if s.area.CeilingAt(x, z) {
+			if showCeiling && s.area.CeilingAt(x, z) {
 				drawCeilingHash(r, cell, fadeAlpha(ceilingColor(), ceilingAlpha))
 			}
 			if showCharOverlay {
@@ -1636,7 +1919,7 @@ func drawGrid(s *State, font rl.Font) {
 			// editor grid. Shown while the Elevation layer is active OR while
 			// the Floors lens is on (then it rides on top of every layer as a
 			// true overlay — the active floor crisp, others ghosted).
-			if s.levelFocus || s.layer == LayerElevation {
+			if showElevation && (s.levelFocus || s.layer == LayerElevation) {
 				drawElevationSlice(s, font, r, cell, x, z)
 			}
 		}
@@ -1714,7 +1997,7 @@ func drawGrid(s *State, font rl.Font) {
 		// Cull spawns outside the visible grid window (same window the tile
 		// loop uses) so a big map with many packs doesn't pay leader-lookup +
 		// string-format + MeasureTextEx for markers panned off-screen.
-		if sp.TileX < xMin || sp.TileX >= xMax || sp.TileZ < zMin || sp.TileZ >= zMax {
+		if !showEntities || !inCullWindow(sp.TileX, sp.TileZ) {
 			continue
 		}
 		cx, cy := s.rect.tileCenter(sp.TileX, sp.TileZ)
@@ -1748,7 +2031,7 @@ func drawGrid(s *State, font rl.Font) {
 	// from the round enemy-pack circles so the author can tell at a
 	// glance which entity sits where.
 	for _, c := range s.area.ChestSpawns {
-		if c.TileX < xMin || c.TileX >= xMax || c.TileZ < zMin || c.TileZ >= zMax {
+		if !showEntities || !inCullWindow(c.TileX, c.TileZ) {
 			continue
 		}
 		gx, gy := s.rect.tileCorner(c.TileX, c.TileZ)
@@ -1766,7 +2049,7 @@ func drawGrid(s *State, font rl.Font) {
 	// author can verify pairing at a glance. Distinct silhouette from
 	// chests (door = tall + arrow, chest = small square + lid).
 	for _, d := range s.area.DoorSpawns {
-		if d.TileX < xMin || d.TileX >= xMax || d.TileZ < zMin || d.TileZ >= zMax {
+		if !showEntities || !inCullWindow(d.TileX, d.TileZ) {
 			continue
 		}
 		gx, gy := s.rect.tileCorner(d.TileX, d.TileZ)
@@ -1787,15 +2070,25 @@ func drawGrid(s *State, font rl.Font) {
 		rl.DrawLineEx(rl.NewVector2(cx, cy), rl.NewVector2(tipX, tipY), 2, fadeAlpha(rl.NewColor(40, 24, 12, 255), entityAlpha))
 	}
 
-	// Player start marker.
-	sx, sy := s.rect.tileCenter(s.area.StartTileX, s.area.StartTileZ)
-	startCol := fadeAlpha(render.MarkerStart, entityAlpha)
-	rl.DrawCircle(int32(sx), int32(sy), cell*0.36, startCol)
-	rl.DrawCircleLines(int32(sx), int32(sy), cell*0.36, fadeAlpha(entityMarkerOutline, entityAlpha))
-	dx, dz := core.FacingVector(s.area.StartFacing)
-	tx := sx + float32(dx)*cell*0.42
-	ty := sy + float32(dz)*cell*0.42
-	rl.DrawLineEx(rl.NewVector2(sx, sy), rl.NewVector2(tx, ty), 3, fadeAlpha(rl.NewColor(20, 14, 0, 255), entityAlpha))
+	// Player start marker (part of the Entities layer, so it hides with it).
+	if showEntities {
+		sx, sy := s.rect.tileCenter(s.area.StartTileX, s.area.StartTileZ)
+		startCol := fadeAlpha(render.MarkerStart, entityAlpha)
+		rl.DrawCircle(int32(sx), int32(sy), cell*0.36, startCol)
+		rl.DrawCircleLines(int32(sx), int32(sy), cell*0.36, fadeAlpha(entityMarkerOutline, entityAlpha))
+		dx, dz := core.FacingVector(s.area.StartFacing)
+		tx := sx + float32(dx)*cell*0.42
+		ty := sy + float32(dz)*cell*0.42
+		rl.DrawLineEx(rl.NewVector2(sx, sy), rl.NewVector2(tx, ty), 3, fadeAlpha(rl.NewColor(20, 14, 0, 255), entityAlpha))
+	}
+
+	// Door-link overlay: when toggled on, draw a connector from each door to
+	// its same-map target door, and ring doors whose target_door doesn't
+	// resolve. Drawn above markers so the links read clearly. Independent of
+	// the entities-layer hide (it's its own diagnostic toggle).
+	if s.showDoorLinks {
+		drawDoorLinks(s, cell)
+	}
 
 	// Brush ghost / hover highlight.
 	hoverPx := s.hoverX
@@ -1852,9 +2145,18 @@ func drawGrid(s *State, font rl.Font) {
 		}
 		cx, cy := s.rect.tileCorner(x0, z0)
 		r := rl.NewRectangle(cx, cy, float32(x1-x0+1)*cell, float32(z1-z0+1)*cell)
-		fill := withAlpha(brushPreviewColor(s), 110)
-		rl.DrawRectangleRec(r, fill)
+		// Box tool previews as an outline only; Rect tool fills.
+		if !s.rectHollow {
+			rl.DrawRectangleRec(r, withAlpha(brushPreviewColor(s), 110))
+		}
 		rl.DrawRectangleLinesEx(r, 2, selectionOutline)
+	}
+
+	// Line drag preview — a segment from the anchor tile to the hovered tile.
+	if s.drag == dragLine && s.hoverX >= 0 {
+		ax, ay := s.rect.tileCenter(s.rectAnchorX, s.rectAnchorZ)
+		hx, hy := s.rect.tileCenter(s.hoverX, s.hoverZ)
+		rl.DrawLineEx(rl.NewVector2(ax, ay), rl.NewVector2(hx, hy), 3, selectionOutline)
 	}
 
 	if s.drag == dragStart && s.hoverX >= 0 {
@@ -2685,6 +2987,133 @@ func drawValidateModal(s *State, font rl.Font, theme render.Theme) {
 	}
 	rl.DrawTextEx(font, "Esc / Enter / click   close",
 		rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
+}
+
+// entityKindRow tags an entity-list row by what it points at.
+type entityKindRow int
+
+const (
+	elStart entityKindRow = iota
+	elPack
+	elChest
+	elDoor
+)
+
+// entityListRow is one row of the Objects index — a label plus the tile to
+// jump to and which editor the row opens.
+type entityListRow struct {
+	label string
+	x, z  int
+	kind  entityKindRow
+	idx   int // spawn index for pack/chest/door (unused for start)
+}
+
+const (
+	entityListModalW  = float32(580)
+	objectsRowH       = float32(24)
+	entityListVisible = 14
+)
+
+// entityListRows builds the Objects index fresh: player start, then every
+// pack / chest / door with a one-line summary + tile coord. Rebuilt on demand
+// (entities are few), so indices always match the live spawn slices.
+func entityListRows(s *State) []entityListRow {
+	rows := []entityListRow{{
+		label: "Player start  —  " + core.TileCoord(s.area.StartTileX, s.area.StartTileZ),
+		x:     s.area.StartTileX, z: s.area.StartTileZ, kind: elStart,
+	}}
+	for i, p := range s.area.PackSpawns {
+		name := "(empty)"
+		if len(p.Members) > 0 {
+			name = core.PackMemberDisplayName(s.area, p, core.PackSpawnLeaderSlot(s.area, p))
+		}
+		rows = append(rows, entityListRow{
+			label: fmt.Sprintf("Pack x%d  %s  —  %s", len(p.Members), name, core.TileCoord(p.TileX, p.TileZ)),
+			x:     p.TileX, z: p.TileZ, kind: elPack, idx: i,
+		})
+	}
+	for i, c := range s.area.ChestSpawns {
+		rows = append(rows, entityListRow{
+			label: fmt.Sprintf("Chest  %d items  —  %s", len(c.Items), core.TileCoord(c.TileX, c.TileZ)),
+			x:     c.TileX, z: c.TileZ, kind: elChest, idx: i,
+		})
+	}
+	for i, d := range s.area.DoorSpawns {
+		target := d.TargetDoor
+		if d.TargetMap != "" && d.TargetMap != "self" {
+			target = d.TargetMap + "/" + d.TargetDoor
+		}
+		rows = append(rows, entityListRow{
+			label: fmt.Sprintf("Door %s -> %s  —  %s", d.Name, target, core.TileCoord(d.TileX, d.TileZ)),
+			x:     d.TileX, z: d.TileZ, kind: elDoor, idx: i,
+		})
+	}
+	return rows
+}
+
+func entityRowColor(k entityKindRow) rl.Color {
+	switch k {
+	case elPack:
+		return markerPackDot
+	case elChest:
+		return render.MarkerChest
+	case elDoor:
+		return render.MarkerDoor
+	default:
+		return render.MarkerStart
+	}
+}
+
+// entityListGeom is the shared layout for the Objects modal — the card, the
+// first row's Y, the full row list, and the visible [top, end) window — so the
+// draw and the click hit-test can't drift.
+func entityListGeom(s *State) (card rl.Rectangle, listTop float32, rows []entityListRow, top, end int) {
+	rows = entityListRows(s)
+	shown := len(rows)
+	if shown > entityListVisible {
+		shown = entityListVisible
+	}
+	ph := 56 + float32(shown)*objectsRowH + 36
+	if ph < 150 {
+		ph = 150
+	}
+	card = centeredCardRect(entityListModalW, ph)
+	listTop = card.Y + 46
+	top, end = scrollWindow(s.modalCursor, len(rows), entityListVisible)
+	return card, listTop, rows, top, end
+}
+
+// entityListRowRect is the clickable rect for the screenRow-th visible row
+// (0-based within the window).
+func entityListRowRect(card rl.Rectangle, listTop float32, screenRow int) rl.Rectangle {
+	return rl.NewRectangle(card.X+modalContentInset, listTop+float32(screenRow)*objectsRowH,
+		card.Width-2*modalContentInset, objectsRowH)
+}
+
+func drawEntityListModal(s *State, font rl.Font, theme render.Theme) {
+	card, listTop, rows, top, end := entityListGeom(s)
+	drawModalHeaderAt(font, theme, card, "OBJECTS", theme.BorderActive)
+	if len(rows) == 0 {
+		rl.DrawTextEx(font, "No objects placed.",
+			rl.NewVector2(card.X+modalContentInset, listTop), editorFontBody, 1, theme.TextMuted)
+	}
+	mp := frameMouse
+	for i := top; i < end; i++ {
+		rr := entityListRowRect(card, listTop, i-top)
+		if i == s.modalCursor {
+			rl.DrawRectangleRec(rr, bgActive)
+		} else if pointIn(mp, rr) {
+			rl.DrawRectangleRec(rr, bgEntryHover)
+		}
+		rl.DrawCircleV(rl.NewVector2(rr.X+8, rr.Y+rr.Height/2), 4, entityRowColor(rows[i].kind))
+		col := theme.TextMuted
+		if i == s.modalCursor {
+			col = theme.TextPrimary
+		}
+		rl.DrawTextEx(font, rows[i].label, rl.NewVector2(rr.X+22, rr.Y+(rr.Height-16)/2), editorFontBody, 1, col)
+	}
+	rl.DrawTextEx(font, fmt.Sprintf("%d objects   ·   Up/Down + Enter or click a row to jump + edit   ·   Esc close", len(rows)),
+		rl.NewVector2(card.X+modalContentInset, card.Y+card.Height-26), editorFontHint, 1, theme.TextHint)
 }
 
 // drawEscMenuModal paints the editor's pause-style menu. Three rows:

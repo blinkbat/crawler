@@ -99,6 +99,24 @@ func measurePartyStatusLabel(font rl.Font, label string) rl.Vector2 {
 	return partyStatusLabelMeasureCache.measure(font, label, FontTiny, 1)
 }
 
+// statusTurnDigits caches the small turns-remaining numerals drawn beside a
+// party status icon, so the per-frame card draw doesn't allocate a string via
+// fmt/strconv each frame. Sized to match partyStatusTurnLabelCacheSize.
+var statusTurnDigits = func() [partyStatusTurnLabelCacheSize]string {
+	var d [partyStatusTurnLabelCacheSize]string
+	for i := range d {
+		d[i] = fmt.Sprintf("%d", i)
+	}
+	return d
+}()
+
+func statusTurnDigit(n int) string {
+	if n >= 0 && n < partyStatusTurnLabelCacheSize {
+		return statusTurnDigits[n]
+	}
+	return fmt.Sprintf("%d", n)
+}
+
 // partyNamePlusLabels memoizes the "<Name> +" badge string per member
 // name so the always-visible ribbon's hot path is a map lookup instead
 // of a fresh concat. Font-independent (it's just the string), so unlike
@@ -251,16 +269,23 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 	// the core layer shouldn't carry).
 	kind, turns := core.PartyStatus(member)
 	if kind != core.PartyStatusNone {
-		label := partyStatusTurnLabel(kind, turns)
 		col, flicker := partyStatusVisual(kind)
-		labelSize := FontTiny
-		measure := measurePartyStatusLabel(font, label)
-		labelX := x + partyCardW - measure.X - 12
-		labelCol := col
+		iconCol := col
 		if flicker {
-			labelCol = fadeColor(col, pulseFlicker())
+			iconCol = fadeColor(col, pulseFlicker())
 		}
-		drawTextWithShadow(font, label, labelX, y+14, labelSize, labelCol)
+		const statusIconR = float32(7)
+		icx := x + partyCardW - 12 - statusIconR
+		icy := y + 22
+		drawPartyStatusIcon(icx, icy, statusIconR, kind, iconCol)
+		// Counted statuses keep a compact turns-remaining numeral tucked LEFT of
+		// the glyph — the status WORD is now the drawn icon, but the turn count
+		// is gameplay-relevant so it stays (a number, not a word).
+		if turns > 0 {
+			num := statusTurnDigit(turns)
+			m := measurePartyStatusLabel(font, num)
+			drawTextWithShadow(font, num, icx-statusIconR-4-m.X, icy-FontTiny/2, FontTiny, iconCol)
+		}
 	}
 
 	hpFill := hpFillColor(member.HP, member.MaxHP)
@@ -272,6 +297,73 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 	// out — DrawPartyRibbon only sets dim for the rest.
 	if dim {
 		drawCardScrim(ix, iy, iw, ih)
+	}
+}
+
+// statusWebSpokes are the unit directions for the Webbed icon's radial strands
+// (6 spokes, 60° apart) — precomputed so the per-frame draw needs no trig.
+var statusWebSpokes = [6][2]float32{
+	{1, 0}, {0.5, 0.866}, {-0.5, 0.866}, {-1, 0}, {-0.5, -0.866}, {0.5, -0.866},
+}
+
+// statusDizzyDots are the offsets (×r) for the Stunned icon's orbiting star-dots.
+var statusDizzyDots = [3][2]float32{{-0.62, -0.5}, {0, -0.78}, {0.62, -0.5}}
+
+// drawPartyStatusIcon draws a small procedural status glyph centered at
+// (cx,cy) with radius r — the party card's status indicator, replacing the old
+// word label. A dark token disc backs it for legibility over the wood card;
+// col is the per-status accent (already flickered by the caller). Every shape
+// is a winding-safe primitive (circles / rings / sectors / lines / DrawPoly /
+// rounded rects) so nothing depends on hand-wound DrawTriangle vertex order.
+func drawPartyStatusIcon(cx, cy, r float32, kind core.PartyStatusKind, col rl.Color) {
+	c := rl.NewVector2(cx, cy)
+	rl.DrawCircleV(rl.NewVector2(cx, cy+1), r+3, fadeColor(shadowHeavy, 0.30))
+	rl.DrawCircleV(c, r+2, rl.NewColor(22, 19, 26, 235))
+	dark := rl.NewColor(12, 10, 15, 255)
+
+	switch kind {
+	case core.PartyStatusPoisoned:
+		// Toxic droplet: round body + pointed tip + a highlight bubble.
+		rl.DrawCircleV(rl.NewVector2(cx, cy+r*0.28), r*0.55, col)
+		rl.DrawPoly(rl.NewVector2(cx, cy-r*0.12), 3, r*0.5, -90, col)
+		rl.DrawCircleV(rl.NewVector2(cx-r*0.16, cy+r*0.2), r*0.16, fadeColor(rl.White, 0.7))
+	case core.PartyStatusAsleep:
+		// A drawn "Z" (three strokes) — the universal sleep mark, no font.
+		t := float32(2)
+		rl.DrawLineEx(rl.NewVector2(cx-r*0.5, cy-r*0.5), rl.NewVector2(cx+r*0.5, cy-r*0.5), t, col)
+		rl.DrawLineEx(rl.NewVector2(cx+r*0.5, cy-r*0.5), rl.NewVector2(cx-r*0.5, cy+r*0.5), t, col)
+		rl.DrawLineEx(rl.NewVector2(cx-r*0.5, cy+r*0.5), rl.NewVector2(cx+r*0.5, cy+r*0.5), t, col)
+	case core.PartyStatusStunned:
+		// Dizzy: orbiting star-dots above the head.
+		for _, d := range statusDizzyDots {
+			rl.DrawPoly(rl.NewVector2(cx+r*d[0], cy+r*d[1]), 4, r*0.26, 45, col)
+		}
+	case core.PartyStatusWebbed:
+		// Spider web: two rings + radial strands.
+		rl.DrawCircleLines(int32(cx), int32(cy), r*0.8, col)
+		rl.DrawCircleLines(int32(cx), int32(cy), r*0.42, col)
+		for _, d := range statusWebSpokes {
+			rl.DrawLineEx(c, rl.NewVector2(cx+r*0.8*d[0], cy+r*0.8*d[1]), 1, col)
+		}
+	case core.PartyStatusConfused:
+		// Confusion swirl: a near-closed ring with a gap.
+		rl.DrawRing(c, r*0.42, r*0.64, 20, 320, 20, col)
+	case core.PartyStatusIngested:
+		// Maw mid-swallow: open-mouth disc facing a small prey dot.
+		rl.DrawCircleSector(c, r*0.82, 35, 325, 20, col)
+		rl.DrawCircleV(rl.NewVector2(cx+r*0.95, cy), r*0.22, col)
+		rl.DrawCircleV(rl.NewVector2(cx-r*0.18, cy-r*0.22), r*0.14, dark)
+	case core.PartyStatusDefending:
+		// Shield: rounded badge body + a heraldic center spine.
+		rl.DrawRectangleRounded(rl.NewRectangle(cx-r*0.62, cy-r*0.7, r*1.24, r*1.5), 0.45, 6, col)
+		rl.DrawLineEx(rl.NewVector2(cx, cy-r*0.55), rl.NewVector2(cx, cy+r*0.55), 1.5, fadeColor(dark, 0.6))
+	case core.PartyStatusDown:
+		// Skull: dome + jaw + eye sockets.
+		rl.DrawCircleV(rl.NewVector2(cx, cy-r*0.12), r*0.78, col)
+		rl.DrawRectangleRounded(rl.NewRectangle(cx-r*0.42, cy+r*0.32, r*0.84, r*0.42), 0.4, 4, col)
+		rl.DrawCircleV(rl.NewVector2(cx-r*0.3, cy-r*0.16), r*0.2, dark)
+		rl.DrawCircleV(rl.NewVector2(cx+r*0.3, cy-r*0.16), r*0.2, dark)
+		rl.DrawLineEx(rl.NewVector2(cx, cy+r*0.34), rl.NewVector2(cx, cy+r*0.72), 1, dark)
 	}
 }
 

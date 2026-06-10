@@ -437,6 +437,11 @@ const (
 	// straight into the game. Map-independent (it edits global per-kind look,
 	// not anything on the current area).
 	modalFoeView
+	// modalEntityList is the "Objects" index: a scrollable list of every
+	// pack / chest / door (plus the player start) in the map. Clicking a row
+	// recenters the view on that entity and opens its editor — so the author
+	// can manage placements without hunting tiles on a big map.
+	modalEntityList
 	// modalCount is the count sentinel for the modalKind enum — used by
 	// the modalHandlers init assert in draw.go to walk every legal
 	// value and confirm the dispatch table is complete. Keep this row
@@ -461,11 +466,51 @@ const (
 	dragNone dragKind = iota
 	dragPaint
 	dragRect
+	dragLine
 	dragStart
 	dragPack
 	dragChest
 	dragDoor
 )
+
+// toolMode is the active grid-paint tool, chosen from the toolbar's tool
+// group. It makes the previously modifier-only actions (rectangle, flood,
+// eyedropper) discoverable and clickable, and adds Line + Box (hollow rect).
+// Modifiers still override while Brush is the active tool — Ctrl = Flood,
+// Shift = Rect, Alt = Pick — so existing muscle memory keeps working; an
+// explicitly chosen tool is honored without modifiers.
+type toolMode int
+
+const (
+	toolBrush toolMode = iota // freehand paint stroke (default)
+	toolLine                  // straight line, click anchor → release endpoint
+	toolRect                  // filled rectangle
+	toolBox                   // hollow rectangle outline (handy for room walls)
+	toolFlood                 // flood-fill the connected region
+	toolPick                  // eyedropper: sample the cell's char into the brush
+)
+
+// toolModeLabels are the toolbar button captions, indexed by toolMode. Kept
+// next to the enum so a new tool adds its label here and the toolbar picks it
+// up via the toolButtons builder.
+var toolModeLabels = [...]string{
+	toolBrush: "Brush",
+	toolLine:  "Line",
+	toolRect:  "Rect",
+	toolBox:   "Box",
+	toolFlood: "Flood",
+	toolPick:  "Pick",
+}
+
+// brushRef identifies a palette brush as (layer, index within that layer's
+// palette). Used by the recent-brushes quick-pick row.
+type brushRef struct {
+	layer Layer
+	idx   int
+}
+
+// maxRecentBrushes caps the recent-brush swatch row.
+const maxRecentBrushes = 8
 
 type statusEntry struct {
 	msg   string
@@ -499,6 +544,17 @@ type State struct {
 
 	layer    Layer
 	brushIdx [layerCount]int
+	// recentBrushes is the most-recently-selected (layer, brush) pairs,
+	// newest first, deduped and capped at maxRecentBrushes. Drawn as a quick
+	// swatch row in the grid's bottom-left corner; clicking one jumps to that
+	// layer + brush. Recorded by recordRecentBrush at every brush-select site.
+	recentBrushes []brushRef
+	// layerHidden hides a layer from the grid draw (the layer-tab eye
+	// toggles). Hidden layers still exist on disk and stay editable; this is
+	// a pure view filter so the author can isolate what they're working on.
+	// Alt-clicking an eye solos that layer (hides all others). Entities count
+	// as a layer here too, so entity markers can be hidden.
+	layerHidden [layerCount]bool
 	// editLevel is the height selector's current level (0..maxEditLevel): the
 	// value the Elevation "Set Height" brush stamps and the focus level for
 	// the slice-view tinting. rampMode toggles the smart ramp tool — while on,
@@ -610,6 +666,9 @@ type State struct {
 
 	brushSize int
 
+	// tool is the active grid-paint tool (toolbar tool group). Default
+	// toolBrush (zero value) preserves the original freehand-paint behavior.
+	tool toolMode
 	drag dragKind
 	// dragSnapshotDone reports whether the current paint stroke has already
 	// banked its single undo snapshot. dragUndoBefore holds the pre-stroke
@@ -623,7 +682,10 @@ type State struct {
 	lastPaintZ       int
 	rectAnchorX      int
 	rectAnchorZ      int
-	dragPackIdx      int
+	// rectHollow is set when a rectangle drag was started with the Box tool,
+	// so finishDrag paints only the outline instead of a filled block.
+	rectHollow  bool
+	dragPackIdx int
 	// dragChestIdx / dragDoorIdx mirror dragPackIdx for the chest / door
 	// drag-move flows: the spawn index grabbed at press, relocated (or, on a
 	// release-in-place, opened in its edit modal) at release. -1 when idle.
@@ -658,6 +720,10 @@ type State struct {
 	// release so Alt+1..6 (layer jump) doesn't double-trigger the flip.
 	showTileGlyphs bool
 	altChordUsed   bool
+	// showDoorLinks toggles the door-link diagnostic overlay (the "Links"
+	// toolbar button): connectors from each door to its same-map target plus
+	// warning rings on doors whose target_door doesn't resolve.
+	showDoorLinks bool
 
 	// Ctrl+F5 "test from cursor" override: when testStartOverride is true,
 	// the run loop consumes testStartOverrideX/Z as the playtest's

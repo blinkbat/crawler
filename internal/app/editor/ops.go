@@ -59,6 +59,10 @@ func applyTool(s *State, x, z int) {
 	if !s.area.InBounds(x, z) {
 		return
 	}
+	// Painting an invisible layer reads as a dead tool — if the layer being
+	// edited is hidden (its eye toggled off, or another layer soloed), reveal
+	// it so the stroke is actually visible. Idempotent; cheap per cell.
+	s.layerHidden[s.layer] = false
 	brush := s.activeBrush()
 	switch s.layer {
 	case LayerWalls:
@@ -513,6 +517,9 @@ func eraseAt(s *State, x, z int) {
 	if !s.area.InBounds(x, z) {
 		return
 	}
+	// Reveal the active layer so an erase on a hidden layer isn't an invisible
+	// no-op (mirrors applyTool).
+	s.layerHidden[s.layer] = false
 	switch s.layer {
 	case LayerWalls:
 		setLayerCell(&s.area.Walls, x, z, core.TileOpen)
@@ -1207,6 +1214,105 @@ func paintRect(s *State, x0, z0, x1, z1 int) {
 			applyTool(s, x, z)
 		}
 	}
+}
+
+// paintRectOutline paints only the border cells of the rectangle bounded by
+// (x0,z0)-(x1,z1) — the Box tool, for laying room walls without a fill-then-
+// hollow. Mirrors paintRect's footprint-collapse + player-start protection.
+func paintRectOutline(s *State, x0, z0, x1, z1 int) {
+	if s.layer == LayerEntities {
+		return
+	}
+	brush := s.activeBrush()
+	if x0 > x1 {
+		x0, x1 = x1, x0
+	}
+	if z0 > z1 {
+		z0, z1 = z1, z0
+	}
+	if brushHasMultiTileFootprint(s) {
+		if s.area.InBounds(x0, z0) {
+			applyTool(s, x0, z0)
+		}
+		return
+	}
+	for z := z0; z <= z1; z++ {
+		for x := x0; x <= x1; x++ {
+			if x != x0 && x != x1 && z != z0 && z != z1 {
+				continue // interior cell — outline only
+			}
+			if !s.area.InBounds(x, z) {
+				continue
+			}
+			if brush.Char == core.TileRock && s.area.StartTileX == x && s.area.StartTileZ == z {
+				continue
+			}
+			applyTool(s, x, z)
+		}
+	}
+}
+
+// walkLine invokes fn for every grid cell along the Bresenham line from
+// (x0,z0) to (x1,z1), inclusive of both endpoints. The one place the stepping
+// math lives — shared by the Line tool (paintLine) and the freehand stroke
+// interpolation (paintLineBetween, input.go) so they can't drift.
+func walkLine(x0, z0, x1, z1 int, fn func(x, z int)) {
+	dx := x1 - x0
+	if dx < 0 {
+		dx = -dx
+	}
+	dz := z1 - z0
+	if dz < 0 {
+		dz = -dz
+	}
+	sx, sz := 1, 1
+	if x0 > x1 {
+		sx = -1
+	}
+	if z0 > z1 {
+		sz = -1
+	}
+	err := dx - dz
+	cx, cz := x0, z0
+	for {
+		fn(cx, cz)
+		if cx == x1 && cz == z1 {
+			return
+		}
+		e2 := 2 * err
+		if e2 > -dz {
+			err -= dz
+			cx += sx
+		}
+		if e2 < dx {
+			err += dx
+			cz += sz
+		}
+	}
+}
+
+// paintLine paints the active brush along the grid line from (x0,z0) to
+// (x1,z1) — the Line tool. Mirrors paintRect's footprint-collapse + player-
+// start protection. Distinct from input.go's paintLineBetween, which stamps a
+// freehand stroke through the per-stroke lazy-undo machinery; this is a
+// one-shot committed op (finishDrag pushes the single undo).
+func paintLine(s *State, x0, z0, x1, z1 int) {
+	if s.layer == LayerEntities {
+		return
+	}
+	brush := s.activeBrush()
+	if brushHasMultiTileFootprint(s) {
+		if s.area.InBounds(x0, z0) {
+			applyTool(s, x0, z0)
+		}
+		return
+	}
+	walkLine(x0, z0, x1, z1, func(cx, cz int) {
+		if s.area.InBounds(cx, cz) &&
+			!(brush.Char == core.TileRock && s.area.StartTileX == cx && s.area.StartTileZ == cz) {
+			applyTool(s, cx, cz)
+		}
+	})
 }
 
 // activeGrid returns a pointer to the layer slice the user is editing, or
