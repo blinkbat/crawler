@@ -69,14 +69,19 @@ func newMapModalLayout() newMapLayout {
 			swatchW, swatchH)
 	}
 
-	// Footer buttons. Anchored to the card's bottom so adding swatch
+	// Footer buttons. Anchored to the card's bottom-right so adding swatch
 	// rows doesn't push them off the card; the swatch grid is sized to
-	// always leave room above this row.
-	btnY := card.Y + card.Height - 50
-	l.createBtn = rl.NewRectangle(card.X+card.Width-180, btnY, 80, 32)
-	l.cancelBtn = rl.NewRectangle(l.createBtn.X+l.createBtn.Width+10, btnY, 80, 32)
+	// always leave room above this row. Sizing/gap comes from the shared
+	// modal-button spec (buttonRowAt) so this modal can't drift off it.
+	btnY := card.Y + card.Height - modalBtnH - modalBottomInset
+	btns := buttonRowAt(card.X+card.Width-modalContentInset-buttonRowWidth(newMapBtnLabels), btnY, newMapBtnLabels)
+	l.createBtn, l.cancelBtn = btns[0], btns[1]
 	return l
 }
+
+// newMapBtnLabels is the footer row's single label source, shared by the
+// layout (per-label button widths) and the draw.
+var newMapBtnLabels = []string{"Create", "Cancel"}
 
 // newMapFieldRect returns the active text-field rect for the new-map
 // modal, used by State.activeFieldRect so click-outside-to-defocus and
@@ -125,8 +130,7 @@ func drawNewMapModal(s *State, font rl.Font, theme render.Theme) {
 	}
 
 	// Footer buttons + hint row.
-	drawButton(font, l.createBtn, "Create", false)
-	drawButton(font, l.cancelBtn, "Cancel", false)
+	drawModalButtons(font, []rl.Rectangle{l.createBtn, l.cancelBtn}, newMapBtnLabels)
 	rl.DrawTextEx(font, "Tab cycle fields   Enter create   Esc cancel",
 		rl.NewVector2(l.card.X+20, l.card.Y+l.card.Height-24),
 		13, 1, theme.TextHint)

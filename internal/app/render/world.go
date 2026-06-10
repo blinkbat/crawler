@@ -1456,6 +1456,11 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 // chevron across every living enemy so the AoE reads before it fires.
 // Gated on Phase==BattlePlayer + ActionMode==ActionSkillMenu so it only
 // previews during selection, not once the timing bar arms.
+// aoePreviewSkillsBuf is the reused scratch slice for the AoE target-preview
+// check — refilled via LearnedSkillsInto each frame the skill menu is open
+// instead of allocating, mirroring skillMenuSkillsBuf.
+var aoePreviewSkillsBuf []core.SkillID
+
 func aoeEnemyTargetPreview(g core.GameState) bool {
 	if g.Battle.Phase != core.BattlePlayer || g.Battle.ActionMode != core.ActionSkillMenu {
 		return false
@@ -1463,7 +1468,8 @@ func aoeEnemyTargetPreview(g core.GameState) bool {
 	if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
 		return false
 	}
-	skills := core.PartySkills(g.Party[g.Battle.CurrentParty])
+	aoePreviewSkillsBuf = core.LearnedSkillsInto(&g.Party[g.Battle.CurrentParty], aoePreviewSkillsBuf)
+	skills := aoePreviewSkillsBuf
 	idx := g.Battle.SkillMenuIndex
 	if idx < 0 || idx >= len(skills) {
 		return false

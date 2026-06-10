@@ -8,6 +8,16 @@ import (
 	"slices"
 )
 
+// skillMenuBuf / itemMenuBuf are reused scratch slices for the skill and
+// item submenus, refilled each frame the menu is open (via the *Into
+// buffer-reusing helpers) instead of allocating a fresh list — and a map,
+// in the skill case — every frame. Mirror render's itemMenuStacksBuf. Only
+// valid for the duration of the frame they're filled; never aliased.
+var (
+	skillMenuBuf []core.SkillID
+	itemMenuBuf  []core.ItemStack
+)
+
 func updateActionMenu(g *core.GameState) {
 	// Debug easy-quit: bail out of the fight entirely. Only live when the
 	// debug toggle is on, so normal play has no flee shortcut here.
@@ -69,7 +79,8 @@ func openSkillMenu(g *core.GameState) {
 		return
 	}
 	idx := member.SkillCursor
-	if learned := core.PartySkills(*member); idx < 0 || idx >= len(learned) {
+	skillMenuBuf = core.LearnedSkillsInto(member, skillMenuBuf)
+	if idx < 0 || idx >= len(skillMenuBuf) {
 		idx = 0
 	}
 	g.Battle.SkillMenuIndex = idx
@@ -87,7 +98,8 @@ func updateSkillMenu(g *core.GameState) {
 		resetBattleAction(g)
 		return
 	}
-	skills := core.PartySkills(*member)
+	skillMenuBuf = core.LearnedSkillsInto(member, skillMenuBuf)
+	skills := skillMenuBuf
 	if len(skills) == 0 {
 		resetBattleAction(g)
 		setBattleStatus(g, "No skill ready.")
@@ -139,7 +151,8 @@ func updateSkillMenu(g *core.GameState) {
 // to ally-target selection. Items only heal allies for now, so target mode
 // is always party.
 func updateItemMenu(g *core.GameState) {
-	living := core.LiveConsumables(g.Inventory)
+	itemMenuBuf = core.LiveConsumablesInto(g.Inventory, itemMenuBuf)
+	living := itemMenuBuf
 	count := len(living)
 	if count == 0 {
 		// Inventory ran dry between opening the menu and now — not actually

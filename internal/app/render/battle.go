@@ -219,9 +219,8 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 	condY := float32(y) + float32(h) - condSize - 9
 	drawTextWithShadow(font, condition, nameX, condY, condSize, condCol)
 	if known {
-		condW := rl.MeasureTextEx(font, condition, condSize, 1).X
-		hpText := fmt.Sprintf("%d/%d", enemy.HP, enemy.MaxHP)
-		drawTextWithShadow(font, hpText, nameX+condW+12, condY, condSize, barEnemyHP)
+		condW := rosterCondMeasureCache.measure(font, condition, condSize, 1).X
+		drawTextWithShadow(font, enemyHPLabel(enemy.HP, enemy.MaxHP), nameX+condW+12, condY, condSize, barEnemyHP)
 	}
 
 	// Status pills, anchored to the right edge (no HP bar to tuck beside).
@@ -273,6 +272,28 @@ func statusTurnsLabel(prefix string, turns int) string {
 		}
 	}
 	return fmt.Sprintf("%s%d", prefix, turns)
+}
+
+// rosterCondMeasureCache memoizes rl.MeasureTextEx for the handful of
+// wound-state condition words an identified enemy's HP readout offsets
+// against — without it every known enemy costs a cgo measure round-trip
+// per roster frame.
+var rosterCondMeasureCache measureCache
+
+// enemyHPLabelCache memoizes the identified-enemy "HP/MaxHP" roster string
+// per (hp, max) pair so the readout doesn't fmt.Sprintf per enemy per
+// battle frame. Bounded: keys only span (0..MaxHP, MaxHP) pairs actually
+// seen in play — a few hundred tiny strings across all kinds.
+var enemyHPLabelCache = map[[2]int]string{}
+
+func enemyHPLabel(hp, max int) string {
+	k := [2]int{hp, max}
+	if s, ok := enemyHPLabelCache[k]; ok {
+		return s
+	}
+	s := fmt.Sprintf("%d/%d", hp, max)
+	enemyHPLabelCache[k] = s
+	return s
 }
 
 // statusTurnsCache holds pre-formatted "N", "ZN", "PN", "SN" strings
@@ -842,9 +863,16 @@ func drawActionIconDefend(cx, cy, r float32, col rl.Color) {
 // drawSkillMenuList renders the skill submenu — one row per learned
 // skill with the MP cost on the right. Mirrors drawItemMenuList so the
 // two submenus read as the same widget family.
+// skillMenuSkillsBuf is the reused scratch slice for the in-battle skill
+// picker's learned-skill list — refilled each frame the menu is up via
+// LearnedSkillsInto instead of allocating a fresh slice + map, mirroring
+// itemMenuStacksBuf.
+var skillMenuSkillsBuf []core.SkillID
+
 func drawSkillMenuList(g core.GameState, assets Resources, x, y int32, member core.PartyMember) {
 	rowSpacing := int32(32)
-	skills := core.PartySkills(member)
+	skillMenuSkillsBuf = core.LearnedSkillsInto(&member, skillMenuSkillsBuf)
+	skills := skillMenuSkillsBuf
 	if len(skills) == 0 {
 		drawTextWithShadow(assets.hudFont, "(no skills)", float32(x), float32(y), FontSmall, textDim)
 		return
@@ -1040,13 +1068,27 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 	}
 }
 
+// splashSubtitleCache memoizes the formatted subtitle by (count, noun) so
+// the ~40 frames a splash is visible don't each pay a fmt.Sprintf — same
+// rebuild-on-change pattern as hud.go's goldReadout cache.
+var splashSubtitleCache struct {
+	count int
+	noun  string
+	text  string
+}
+
 func splashSubtitle(g core.GameState) string {
 	count := len(core.BattleMembers(&g))
 	if count <= 1 {
 		return "Hostile encounter"
 	}
 	def := core.BattleEnemyInfo(&g)
-	return fmt.Sprintf("%d %s closing in", count, def.PluralNoun)
+	if splashSubtitleCache.count != count || splashSubtitleCache.noun != def.PluralNoun {
+		splashSubtitleCache.count = count
+		splashSubtitleCache.noun = def.PluralNoun
+		splashSubtitleCache.text = fmt.Sprintf("%d %s closing in", count, def.PluralNoun)
+	}
+	return splashSubtitleCache.text
 }
 
 func easeOutBack(t float32) float32 {

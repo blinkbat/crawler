@@ -45,11 +45,19 @@ var (
 	stickPrev [4]bool
 )
 
-// gamepadConnected reports whether a gamepad is plugged in. All controller
-// reads short-circuit to false when there's no pad — keyboard-only play
-// still works, and we don't pay the cost of probing axes that aren't there.
+// padAvailable caches rl.IsGamepadAvailable, sampled once per frame in
+// NewFrame. A connect/disconnect can't change mid-frame, but every pad
+// predicate (padPressed / padDown / padReleased) used to re-probe it — so a
+// single explore frame issued ~10-15 redundant cgo round-trips asking the
+// same question. Caching collapses that to one read per frame.
+var padAvailable bool
+
+// gamepadConnected reports whether a gamepad is plugged in (cached per frame;
+// see padAvailable). All controller reads short-circuit to false when there's
+// no pad — keyboard-only play still works, and we don't pay the cost of
+// probing axes that aren't there.
 func gamepadConnected() bool {
-	return rl.IsGamepadAvailable(gamepadID)
+	return padAvailable
 }
 
 // padPressed is a thin alias for "edge press of a gamepad button if a pad
@@ -76,6 +84,9 @@ func padReleased(button int32) bool {
 // dead); with it, the per-direction predicates are pure reads that stay
 // consistent no matter how many times they're called in a frame.
 func NewFrame() {
+	// Sample pad presence once here; every predicate this frame reads the
+	// cached padAvailable instead of re-probing raylib (see gamepadConnected).
+	padAvailable = rl.IsGamepadAvailable(gamepadID)
 	stickPrev = stickNow
 	if !gamepadConnected() {
 		stickNow = [4]bool{}

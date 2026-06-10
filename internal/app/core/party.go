@@ -498,16 +498,24 @@ func SkillHealableOutOfBattle(skill SkillID) bool {
 // battle (SkillHealableOutOfBattle), in class-skill order — e.g. the Cleric's
 // {Prayer, Mass Mend}. The Skills-tab "Use" flow reads this to decide whether
 // to cast directly (one heal), pop a chooser (multiple), or refuse (none).
-// Allocates a small slice; called on a button press / while the chooser modal
-// is open, never on a per-frame combat path.
+// Allocates a small slice; per-frame callers (the chooser's update + draw
+// loops) use OutOfBattleHealsInto with a reusable buffer instead.
 func OutOfBattleHeals(m PartyMember) []SkillID {
-	var out []SkillID
+	return OutOfBattleHealsInto(nil, m)
+}
+
+// OutOfBattleHealsInto is OutOfBattleHeals into a caller-owned buffer
+// (re-sliced to length 0) — the allocation-free variant for the heal
+// chooser's per-frame update/draw paths. The returned slice aliases buf's
+// backing array and is valid until the caller's next reuse of it.
+func OutOfBattleHealsInto(buf []SkillID, m PartyMember) []SkillID {
+	buf = buf[:0]
 	for _, s := range PartySkills(m) {
 		if s != SkillNone && SkillHealableOutOfBattle(s) {
-			out = append(out, s)
+			buf = append(buf, s)
 		}
 	}
-	return out
+	return buf
 }
 
 // HealMember restores up to `amount` HP to a LIVING, non-ingested member,

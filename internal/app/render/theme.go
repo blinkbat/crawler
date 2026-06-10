@@ -143,6 +143,9 @@ var (
 	barMP      = mute(rl.NewColor(104, 152, 224, 255))
 	barEnemyHP = mute(rl.NewColor(204, 76, 76, 255))
 	barTrack   = rl.NewColor(8, 12, 22, 140) // near-black track, already muted
+	// barMutedFill is the desaturated plum fill drawBar swaps in when a
+	// bar is muted (e.g. a downed member's gauges).
+	barMutedFill = rl.NewColor(96, 84, 92, 230)
 
 	// ----- Per-status accents (UI_STANDARDS.md "Per-status accents") -----
 	// Indexed by core.PartyStatusKind via partyStatusVisuals below; the
@@ -1333,7 +1336,7 @@ func drawBar(font rl.Font, x, y, width, height float32, label string, value, max
 	track := barTrack
 	outline := borderDim
 	if muted {
-		fill = rl.NewColor(96, 84, 92, 230)
+		fill = barMutedFill
 	}
 	ix, iy, iw, ih := int32(x), int32(y), int32(width), int32(height)
 	drawGaugeWell(ix, iy, iw, ih)

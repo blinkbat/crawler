@@ -362,9 +362,15 @@ func startBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
 // modalDoorEdit modal opened by clicking the door. Like chests, doors
 // can't share a tile with a pack (the runtime would race the
 // transition trigger and the encounter start).
-func placeDoorAt(s *State, x, z int) {
-	a := &s.area
-	if msg := firstBlocker(
+// doorPlaceBlockers / chestPlaceBlockers are the shared legality rule sets for
+// dropping (or drag-relocating) a door / chest at (x,z). Both the initial
+// placement brushes (placeDoorAt / placeChestAt) and the drag-move release path
+// run through these so "where can this entity sit?" and its flash wording live
+// in one place. When checking a relocation, the dragged entity is still at its
+// OLD tile, so blkChestHere/blkDoorHere on the destination correctly flag only a
+// DIFFERENT entity already sitting there.
+func doorPlaceBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
+	return []blockerCheck{
 		blkStart(a, x, z),
 		blkWall(a, x, z, "Door"),
 		blkProp(a, x, z),
@@ -372,7 +378,23 @@ func placeDoorAt(s *State, x, z int) {
 		blkPackHere(a, x, z),
 		blkChestHere(a, x, z, true),
 		blkDoorHere(a, x, z),
-	); msg != "" {
+	}
+}
+
+func chestPlaceBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
+	return []blockerCheck{
+		blkStart(a, x, z),
+		blkWall(a, x, z, "Chest"),
+		blkProp(a, x, z),
+		blkDeepWater(a, x, z, "Chest"),
+		blkPackHere(a, x, z),
+		blkChestHere(a, x, z, false),
+	}
+}
+
+func placeDoorAt(s *State, x, z int) {
+	a := &s.area
+	if msg := firstBlocker(doorPlaceBlockers(a, x, z)...); msg != "" {
 		s.flash(msg)
 		return
 	}
@@ -457,14 +479,7 @@ func placeChestAt(s *State, x, z int) {
 	// render floating with no way to step onto it (the player can still
 	// interact from an adjacent walkable tile, but the visual reads as
 	// a bug). Refuse rather than ship the surprise.
-	if msg := firstBlocker(
-		blkStart(a, x, z),
-		blkWall(a, x, z, "Chest"),
-		blkProp(a, x, z),
-		blkDeepWater(a, x, z, "Chest"),
-		blkPackHere(a, x, z),
-		blkChestHere(a, x, z, false),
-	); msg != "" {
+	if msg := firstBlocker(chestPlaceBlockers(a, x, z)...); msg != "" {
 		s.flash(msg)
 		return
 	}
@@ -656,12 +671,12 @@ func setLayerCell(layer *[]string, x, z int, b byte) {
 // invalidates the redo stack — standard text-editor undo semantics.
 // Capped at undoLimit to bound memory.
 //
-// On trim we copy into a fresh backing array rather than reslicing the
-// tail. Reslicing would advance the slice header but the original array
-// still pins the trimmed-off head snapshots in memory — each snapshot
-// holds multiple string-row slices plus PackSpawns, so over a long
-// editing session you can accumulate dozens of MB of unreachable-but-
-// uncollectable AreaDefinitions. The copy frees them for GC.
+// On trim we shift the window down IN PLACE (copy + reslice) and nil out the
+// vacated tail slots so their AreaDefinitions (string rows + spawns) are
+// released for GC. Reslicing alone would advance the header but leave the
+// trimmed-off head snapshots pinned by the backing array; an explicit nil of
+// the freed slots releases them without allocating a fresh array every stroke
+// (which the old make+copy did, churning ~17KB per stroke once at the cap).
 func pushUndo(s *State) {
 	commitUndoSnapshot(s, core.CloneArea(s.area))
 }
@@ -677,11 +692,16 @@ func pushUndo(s *State) {
 // invalidate the reachability cache (see State.ReachabilityWarnings).
 func commitUndoSnapshot(s *State, before core.AreaDefinition) {
 	s.reachValid = false
+	s.contentEpoch++
 	s.undo = append(s.undo, before)
-	if len(s.undo) > undoLimit {
-		trimmed := make([]core.AreaDefinition, undoLimit)
-		copy(trimmed, s.undo[len(s.undo)-undoLimit:])
-		s.undo = trimmed
+	if excess := len(s.undo) - undoLimit; excess > 0 {
+		// Shift the kept window to the front in place, then release the now-
+		// duplicated tail slots so the trimmed-off snapshots can be collected.
+		copy(s.undo, s.undo[excess:])
+		for i := undoLimit; i < len(s.undo); i++ {
+			s.undo[i] = core.AreaDefinition{}
+		}
+		s.undo = s.undo[:undoLimit]
 	}
 	s.redo = nil
 }
@@ -696,6 +716,7 @@ func undoOne(s *State) {
 	s.redo = append(s.redo, core.CloneArea(s.area))
 	s.area = last
 	s.reachValid = false // area replaced — recompute reachability lazily
+	s.contentEpoch++
 	// Stepping back to a snapshot that matches the on-disk baseline should
 	// drop the dirty marker — don't pester the user with the unsaved-changes
 	// modal if their working state is identical to what's on disk.
@@ -712,6 +733,7 @@ func redoOne(s *State) {
 	s.undo = append(s.undo, core.CloneArea(s.area))
 	s.area = last
 	s.reachValid = false // area replaced — recompute reachability lazily
+	s.contentEpoch++
 	s.dirty = !core.AreaContentEqual(s.area, s.baseline)
 }
 
@@ -1024,8 +1046,18 @@ func floodFill(s *State, x, z int, b byte) {
 	// per-cell stamp in applyTool, so Ctrl+click builds a floor the same way a
 	// stroke does. stampActiveLevel no-ops off Floors mode / on Elevation /
 	// Entities.
-	for _, c := range filled {
-		stampActiveLevel(s, c[0], c[1])
+	if s.levelFocus && s.layer != LayerElevation && s.layer != LayerEntities {
+		// Batch the elevation lift of the flooded region into one row-set
+		// rewrite rather than per-cell stampActiveLevel string rebuilds.
+		ch := core.ElevationChar(s.editLevel)
+		rewriteLayerRows(&s.area.Elevation, func(rows [][]byte) {
+			for _, c := range filled {
+				x, z := c[0], c[1]
+				if z >= 0 && z < len(rows) && x >= 0 && x < len(rows[z]) {
+					rows[z][x] = ch
+				}
+			}
+		})
 	}
 	// Wall flood that turns cells into '#' nukes any pack/chest/door that
 	// fell inside — same cleanup applyWallBrush does per-cell and
@@ -1104,11 +1136,18 @@ func fillEntireLayer(s *State) {
 	// no-op — the common base-laying case stays flat.) Guarded so flat-map
 	// fills skip the per-cell loop entirely.
 	if s.levelFocus && s.layer != LayerElevation {
-		for z := 0; z < s.area.Height; z++ {
-			for x := 0; x < s.area.Width; x++ {
-				stampActiveLevel(s, x, z)
+		// Batch the whole-map elevation lift into one row-set rewrite instead
+		// of a per-cell stampActiveLevel (each of which rebuilt a full row
+		// string) — same write as stampActiveLevel: ElevationChar(editLevel)
+		// into every in-bounds cell.
+		ch := core.ElevationChar(s.editLevel)
+		rewriteLayerRows(&s.area.Elevation, func(rows [][]byte) {
+			for z := 0; z < s.area.Height && z < len(rows); z++ {
+				for x := 0; x < s.area.Width && x < len(rows[z]); x++ {
+					rows[z][x] = ch
+				}
 			}
-		}
+		})
 	}
 	s.dirty = true
 	s.flash("Filled " + layerName(s.layer))
@@ -1451,6 +1490,7 @@ func performNewMap(s *State, w, h int, floor byte) {
 	s.undo = nil
 	s.redo = nil
 	s.reachValid = false // fresh area — recompute reachability lazily
+	s.contentEpoch++
 	s.dirty = false
 	s.zoom = 1
 	s.panX, s.panY = 0, 0

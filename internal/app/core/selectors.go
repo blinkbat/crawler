@@ -26,6 +26,20 @@ func indicesWhere[T any](slice []T, pred func(T) bool) []int {
 	return out
 }
 
+// indicesWhereInto is indicesWhere writing into a caller-owned buffer
+// (re-sliced to length 0) — the allocation-free variant for per-frame
+// callers. The returned slice aliases buf's backing array and is valid
+// until the caller's next reuse of that buffer.
+func indicesWhereInto[T any](buf []int, slice []T, pred func(T) bool) []int {
+	buf = buf[:0]
+	for i, v := range slice {
+		if pred(v) {
+			buf = append(buf, i)
+		}
+	}
+	return buf
+}
+
 // countWhere returns the number of elements matching `pred`.
 func countWhere[T any](slice []T, pred func(T) bool) int {
 	n := 0
@@ -88,6 +102,13 @@ func LivingPartyCount(party []PartyMember) int {
 // AvailablePartyTargets, which additionally excludes ingested prey.)
 func LivingPartyIndices(party []PartyMember) []int {
 	return indicesWhere(party, partyAlive)
+}
+
+// LivingPartyIndicesInto is LivingPartyIndices into a caller-owned buffer —
+// for the per-frame picker paths (use-target update + draw) that would
+// otherwise allocate a fresh index slice every frame the picker is open.
+func LivingPartyIndicesInto(buf []int, party []PartyMember) []int {
+	return indicesWhereInto(buf, party, partyAlive)
 }
 
 func PartyMemberAlive(party []PartyMember, index int) bool {

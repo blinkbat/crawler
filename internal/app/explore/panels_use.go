@@ -81,14 +81,24 @@ func tryUseSkill(g *core.GameState) {
 // can currently afford the MP for. The chooser (tryUseSkill) and its driver
 // (updateHealPicker) both go through this ONE helper so the list the chooser
 // opened with and the list the cursor walks can't diverge.
+// Reusable buffers for the per-frame picker paths (heal chooser + ally
+// target picker run this every frame they're open). Single-threaded
+// update loop; the returned slices are valid until the next call.
+var (
+	outOfBattleHealsBuf []core.SkillID
+	affordableHealsBuf  []core.SkillID
+	useTargetLivingBuf  []int
+)
+
 func affordableOutOfBattleHeals(m core.PartyMember) []core.SkillID {
-	var out []core.SkillID
-	for _, h := range core.OutOfBattleHeals(m) {
+	outOfBattleHealsBuf = core.OutOfBattleHealsInto(outOfBattleHealsBuf, m)
+	affordableHealsBuf = affordableHealsBuf[:0]
+	for _, h := range outOfBattleHealsBuf {
 		if core.CanAffordSkill(m, h) {
-			out = append(out, h)
+			affordableHealsBuf = append(affordableHealsBuf, h)
 		}
 	}
-	return out
+	return affordableHealsBuf
 }
 
 // beginHealCast resolves a chosen out-of-battle heal for `caster`: a
@@ -185,7 +195,8 @@ func updateUseTargetPicker(g *core.GameState) {
 		closeUseTarget(g)
 		return
 	}
-	living := core.LivingPartyIndices(g.Party)
+	living := core.LivingPartyIndicesInto(useTargetLivingBuf, g.Party)
+	useTargetLivingBuf = living
 	if len(living) == 0 {
 		closeUseTarget(g)
 		return

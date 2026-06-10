@@ -1,5 +1,7 @@
 package core
 
+import "slices"
+
 // Diablo-2-style skill trees: each party class has THREE thematic trees,
 // each a vertical ladder of skill nodes the player invests SkillPoints
 // into. This file is the DATA + navigation layer for the trees AND the
@@ -378,20 +380,30 @@ func LearnedSkills(m *PartyMember) []SkillID {
 	if m == nil {
 		return nil
 	}
-	var out []SkillID
-	seen := map[SkillID]bool{}
+	return LearnedSkillsInto(m, nil)
+}
+
+// LearnedSkillsInto is the buffer-reusing form of LearnedSkills for the
+// per-frame callers (the battle skill submenu input + draw, the AoE target
+// preview). Pass nil to allocate. Dedup is a linear slices.Contains over the
+// (tiny) result instead of a per-call map allocation, so a menu open that
+// ticks every frame doesn't churn a map + slice through the GC. Nil-safe.
+func LearnedSkillsInto(m *PartyMember, buf []SkillID) []SkillID {
+	buf = buf[:0]
+	if m == nil {
+		return buf
+	}
 	for _, tr := range classSkillTrees[m.Class] {
 		for _, n := range tr.Nodes {
-			if n.GrantSkill == SkillNone || seen[n.GrantSkill] {
+			if n.GrantSkill == SkillNone || slices.Contains(buf, n.GrantSkill) {
 				continue
 			}
 			if TreeNodeRank(m, n.ID) >= 1 {
-				out = append(out, n.GrantSkill)
-				seen[n.GrantSkill] = true
+				buf = append(buf, n.GrantSkill)
 			}
 		}
 	}
-	return out
+	return buf
 }
 
 // TreeInvestedRanks sums the ranks the member has bought across a whole

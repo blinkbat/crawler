@@ -43,22 +43,11 @@ type soundParamSet struct {
 	VibratoDepth float64 // [0, 0.5] — vibrato swing depth as a fraction of base Hz
 }
 
-// soundParamSliderInfo describes one row in the sound modal's slider
-// column. The cursor walks this slice; each row reads/writes its named
-// field on the soundParamSet via the getter/setter callbacks. Avoids
-// reflection while staying table-driven so adding a slider is one row.
-type soundParamSliderInfo struct {
-	Label   string
-	Min     float64
-	Max     float64
-	Step    float64
-	Get     func(*soundParamSet) float64
-	Set     func(*soundParamSet, float64)
-	Format  string               // fmt verb / suffix — used when Display is nil
-	Display func(float64) string // optional custom value renderer (Wave row's "Sine"/"Square"/...)
-}
-
-var soundParamSliders = []soundParamSliderInfo{
+// soundParamSliders describes the sound modal's slider column — one
+// sliderField (slider.go) row per synth parameter. The cursor walks this
+// slice; each row reads/writes its named field on the soundParamSet via
+// the getter/setter callbacks.
+var soundParamSliders = []sliderField[soundParamSet]{
 	{
 		Label: "Duration", Min: 0.03, Max: 0.40, Step: 0.01, Format: "%.2fs",
 		Get: func(p *soundParamSet) float64 { return p.Duration },
@@ -716,7 +705,7 @@ func drawSoundsParamsCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 	drawButton(font, l.saveBtn, "Save", actionFocused)
 }
 
-func drawSoundsSlider(font rl.Font, theme render.Theme, x, y, w float32, info soundParamSliderInfo, p soundParamSet, track rl.Rectangle, focused bool) {
+func drawSoundsSlider(font rl.Font, theme render.Theme, x, y, w float32, info sliderField[soundParamSet], p soundParamSet, track rl.Rectangle, focused bool) {
 	// Numeric readout to the right of the track. Display callback
 	// overrides the fmt.Sprintf path for rows that render a label
 	// instead of a number (the Wave row's "Sine"/"Square"/etc.).

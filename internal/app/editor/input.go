@@ -6,7 +6,6 @@ import (
 	"crawler/internal/app/input"
 	"crawler/internal/app/render"
 	"os"
-	"reflect"
 	"strconv"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -415,8 +414,18 @@ func updateMouse(s *State) {
 	if pointIn(mp, s.rect.grid) && hx >= 0 {
 		ctrl := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
 		shift := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
+		alt := rl.IsKeyDown(rl.KeyLeftAlt) || rl.IsKeyDown(rl.KeyRightAlt)
 
 		if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
+			// Eyedropper: Alt+left-click on a grid layer samples the cell's
+			// char back into the active brush (Photoshop-standard). Mark the
+			// Alt chord used so the Alt release doesn't also toggle the glyph
+			// overlay (see updateHotkeys).
+			if alt && isGridLayer(s.layer) {
+				sampleBrushAt(s, hx, hz)
+				s.altChordUsed = true
+				return
+			}
 			startDrag(s, hx, hz, ctrl, shift)
 		}
 		if rl.IsMouseButtonDown(rl.MouseLeftButton) {
@@ -498,22 +507,24 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 				return
 			}
 		case entityPlaceChest:
-			// Click on an existing chest opens the chest-edit modal so
-			// the author can change the loot. Click on an empty tile
-			// falls through to applyTool which plants a new chest with
-			// the default starter loot.
+			// Click on an existing chest grabs it for drag-move (drag to a new
+			// tile) OR opens the chest-edit modal (release on the same tile —
+			// see finishDrag's dragChest branch), mirroring the pack flow. Click
+			// on an empty tile falls through to applyTool which plants a new
+			// chest with the default starter loot.
 			if idx := core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z); idx >= 0 {
-				openChestEditModal(s, idx)
+				s.drag = dragChest
+				s.dragChestIdx = idx
 				return
 			}
 		case entityPlaceDoor:
-			// Click on an existing door opens the door-edit modal so
-			// the author can set its target_map / target_door / facing
-			// without having to hand-edit the .map. Click on an empty
-			// tile falls through to applyTool which plants a fresh
+			// Click on an existing door grabs it for drag-move OR opens the
+			// door-edit modal on release-in-place (mirrors chest / pack). Click
+			// on an empty tile falls through to applyTool which plants a fresh
 			// placeholder door.
 			if idx := core.DoorSpawnIndexAt(s.area.DoorSpawns, x, z); idx >= 0 {
-				openDoorEditModal(s, idx)
+				s.drag = dragDoor
+				s.dragDoorIdx = idx
 				return
 			}
 		}
@@ -560,7 +571,7 @@ func strokePaint(s *State, x, z int) {
 	if s.dragSnapshotDone {
 		return // this stroke already banked its snapshot — nothing more to do
 	}
-	if reflect.DeepEqual(s.area, s.dragUndoBefore) {
+	if core.AreaContentEqual(s.area, s.dragUndoBefore) {
 		s.dirty = wasDirty // refused / no-op cell: undo the optimistic dirty flip
 		return
 	}
@@ -574,11 +585,60 @@ func continueDrag(s *State, x, z int) {
 		if x == s.lastPaintX && z == s.lastPaintZ {
 			return
 		}
-		strokePaint(s, x, z)
+		// Interpolate the cells between the last painted cell and this one so
+		// a fast mouse sweep (or a big jump at high zoom) lays a continuous
+		// stroke instead of a dotted, gappy line. The very first cell of a
+		// stroke (lastPaint == -1) just stamps where it lands.
+		if s.lastPaintX >= 0 {
+			paintLineBetween(s, s.lastPaintX, s.lastPaintZ, x, z)
+		} else {
+			strokePaint(s, x, z)
+		}
 		s.lastPaintX, s.lastPaintZ = x, z
 	}
-	// dragStart / dragPack / dragRect are commit-on-release; the live
-	// preview lives in draw.go.
+	// dragStart / dragPack / dragChest / dragDoor / dragRect are
+	// commit-on-release; the live preview lives in draw.go.
+}
+
+// paintLineBetween stamps the active brush along the grid line from (x0,z0) to
+// (x1,z1) via Bresenham, skipping the start cell (already painted) and
+// including the destination. Each step goes through strokePaint so the
+// stroke's single lazy undo snapshot and brush-size square still apply.
+func paintLineBetween(s *State, x0, z0, x1, z1 int) {
+	dx := x1 - x0
+	if dx < 0 {
+		dx = -dx
+	}
+	dz := z1 - z0
+	if dz < 0 {
+		dz = -dz
+	}
+	sx, sz := 1, 1
+	if x0 > x1 {
+		sx = -1
+	}
+	if z0 > z1 {
+		sz = -1
+	}
+	err := dx - dz
+	cx, cz := x0, z0
+	for {
+		if cx != x0 || cz != z0 {
+			strokePaint(s, cx, cz)
+		}
+		if cx == x1 && cz == z1 {
+			return
+		}
+		e2 := 2 * err
+		if e2 > -dz {
+			err -= dz
+			cx += sx
+		}
+		if e2 < dx {
+			err += dx
+			cz += sz
+		}
+	}
 }
 
 func finishDrag(s *State) {
@@ -634,6 +694,35 @@ func finishDrag(s *State) {
 				openPackEditModal(s, s.dragPackIdx)
 			}
 		}
+	case dragChest:
+		if s.hoverX >= 0 && s.dragChestIdx >= 0 && s.dragChestIdx < len(s.area.ChestSpawns) {
+			c := s.area.ChestSpawns[s.dragChestIdx]
+			if c.TileX == s.hoverX && c.TileZ == s.hoverZ {
+				// Release in place → open the loot editor (the old click action).
+				openChestEditModal(s, s.dragChestIdx)
+			} else if msg := firstBlocker(chestPlaceBlockers(&s.area, s.hoverX, s.hoverZ)...); msg != "" {
+				s.flash(msg)
+			} else {
+				pushUndo(s)
+				s.area.ChestSpawns[s.dragChestIdx].TileX = s.hoverX
+				s.area.ChestSpawns[s.dragChestIdx].TileZ = s.hoverZ
+				s.dirty = true
+			}
+		}
+	case dragDoor:
+		if s.hoverX >= 0 && s.dragDoorIdx >= 0 && s.dragDoorIdx < len(s.area.DoorSpawns) {
+			d := s.area.DoorSpawns[s.dragDoorIdx]
+			if d.TileX == s.hoverX && d.TileZ == s.hoverZ {
+				openDoorEditModal(s, s.dragDoorIdx)
+			} else if msg := firstBlocker(doorPlaceBlockers(&s.area, s.hoverX, s.hoverZ)...); msg != "" {
+				s.flash(msg)
+			} else {
+				pushUndo(s)
+				s.area.DoorSpawns[s.dragDoorIdx].TileX = s.hoverX
+				s.area.DoorSpawns[s.dragDoorIdx].TileZ = s.hoverZ
+				s.dirty = true
+			}
+		}
 	case dragRect:
 		if s.hoverX >= 0 {
 			pushUndo(s)
@@ -642,6 +731,8 @@ func finishDrag(s *State) {
 	}
 	s.drag = dragNone
 	s.dragPackIdx = -1
+	s.dragChestIdx = -1
+	s.dragDoorIdx = -1
 }
 
 // applyToolBrushed runs the active brush over the brush-size square
@@ -678,6 +769,56 @@ func brushHasMultiTileFootprint(s *State) bool {
 
 func isGridLayer(l Layer) bool {
 	return l != LayerEntities
+}
+
+// sampleBrushAt is the eyedropper (Alt+click): it reads the active layer's char
+// at (x,z) and selects the matching palette brush so the author can keep
+// painting with whatever is already on the map. On the Elevation layer it picks
+// the cell's height into the height selector instead, since that layer stamps
+// digits rather than palette chars. Flashes when no palette brush matches.
+func sampleBrushAt(s *State, x, z int) {
+	if !s.area.InBounds(x, z) {
+		return
+	}
+	if s.layer == LayerElevation {
+		lvl := clampLevel(int(s.area.Elevation[z][x]) - '0')
+		s.editLevel = lvl
+		s.flash("Picked level " + strconv.Itoa(lvl))
+		return
+	}
+	ch, ok := activeLayerCharAt(s, x, z)
+	if !ok {
+		return
+	}
+	for i, b := range layerBrushes[s.layer] {
+		if b.Char == ch {
+			s.brushIdx[s.layer] = i
+			s.flash("Picked " + b.Name)
+			return
+		}
+	}
+	s.flash("No brush matches this tile")
+}
+
+// activeLayerCharAt returns the raw char stored at (x,z) on the active grid
+// layer — including "empty"/sentinel chars, which the eyedropper can validly
+// sample. ok is false for the Entities layer, which has no per-tile char.
+func activeLayerCharAt(s *State, x, z int) (byte, bool) {
+	switch s.layer {
+	case LayerWalls:
+		return s.area.Walls[z][x], true
+	case LayerFloor:
+		return s.area.Floor[z][x], true
+	case LayerDecor:
+		return s.area.Decor[z][x], true
+	case LayerProps:
+		return s.area.Props[z][x], true
+	case LayerCeiling:
+		return s.area.Ceiling[z][x], true
+	case LayerElevation:
+		return s.area.Elevation[z][x], true
+	}
+	return 0, false
 }
 
 // minZoom / maxZoom bound the editor canvas zoom. Named here so the clamp,

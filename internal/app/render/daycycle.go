@@ -197,6 +197,11 @@ func applyTimeOfDay(base lightingProfile, t timeProfile, enclosed bool) lighting
 	ambient := t.AmbientColor
 	fog := t.FogColor
 	shadow := t.ShadowStrength
+	// Mood drives the painterly grade (serene by day → spooky at night).
+	// Outdoors it tracks StarAlpha, which already eases 0 (bright day) → 1
+	// (midnight) across the cycle, so the grade and the star field rise
+	// together. Enclosed dungeons get pinned uneasy below — set there.
+	mood := t.StarAlpha
 	// Spooky-dungeon override applies ONLY to actually enclosed
 	// areas — dungeon material set (dense fog) AND a real ceiling
 	// overhead. A forest authored on the dungeon palette (stone
@@ -215,6 +220,13 @@ func applyTimeOfDay(base lightingProfile, t timeProfile, enclosed bool) lighting
 		ambient = rl.NewVector3(0.12, 0.13, 0.17)
 		fog = rl.NewVector3(0.03, 0.04, 0.06)
 		shadow = 0.80
+		// Underground reads spooky regardless of the surface clock — but
+		// not fully maxed, so the warm brazier torch pools still glow against
+		// the cold grade rather than being desaturated away. Take the higher
+		// of "it's also night outside" and this floor.
+		if mood < 0.7 {
+			mood = 0.7
+		}
 	}
 	return lightingProfile{
 		SunColor:         sun,
@@ -223,6 +235,7 @@ func applyTimeOfDay(base lightingProfile, t timeProfile, enclosed bool) lighting
 		FogDensity:       base.FogDensity,
 		SpecularStrength: base.SpecularStrength,
 		ShadowStrength:   shadow,
+		Mood:             mood,
 	}
 }
 

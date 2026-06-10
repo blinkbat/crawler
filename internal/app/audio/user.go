@@ -94,7 +94,30 @@ func AssignUserSound(cue Sound, userName string) (failed []string, err error) {
 	if saveErr := userconfig.SaveAssignments(assigns); saveErr != nil {
 		return nil, saveErr
 	}
-	return ReloadUserAssignments()
+	// Only the cue we just (re)assigned changed — reload its single bank slot
+	// rather than re-reading + re-decoding every cue's .wav via the full
+	// ReloadUserAssignments sweep.
+	return reloadOneCue(cue), nil
+}
+
+// reloadOneCue rebuilds just `cue`'s bank slot from the current assignments
+// file — the targeted form of ReloadUserAssignments for when one assignment
+// changes. Returns the cue's canonical slug in `failed` if it had an explicit
+// assignment that couldn't load. No-op (nil) when the device isn't ready or
+// cue is out of range.
+func reloadOneCue(cue Sound) (failed []string) {
+	if !ready || cue < 0 || cue >= soundCount {
+		return nil
+	}
+	assigns := userconfig.LoadAssignments()
+	row := soundCues[cue]
+	fileName, assigned := resolveAssignedFile(assigns, row.Canonical)
+	newSound, fromFile := readOrSynthSound(fileName, row.PCM)
+	if !fromFile && assigned {
+		failed = append(failed, row.Canonical)
+	}
+	replaceSound(&bank[cue], newSound)
+	return failed
 }
 
 // CurrentAssignment returns the user-sound name currently assigned to a

@@ -86,12 +86,34 @@ func (b Bestiary) SeenKinds() []EnemyKind {
 		return nil
 	}
 	var out []EnemyKind
-	for _, def := range EnemyKinds() {
-		if b.Seen(def.Kind) {
-			out = append(out, def.Kind)
+	// Walk the registry slice directly rather than EnemyKinds(), whose
+	// defensive copy of every (large) EnemyDefinition would allocate on a
+	// per-frame draw path. We only read each def's Kind here.
+	for i := range enemyDefinitions {
+		if b.Seen(enemyDefinitions[i].Kind) {
+			out = append(out, enemyDefinitions[i].Kind)
 		}
 	}
 	return out
+}
+
+// SeenCount returns how many kinds have a record — the row count the
+// bestiary tab's cursor wraps over. Allocation-free counterpart of
+// len(SeenKinds()): the per-frame input path only needs the count, so it
+// never builds the slice (nor the EnemyKinds() copy SeenKinds avoids).
+// Counts the same registered+seen set SeenKinds lists, so the two can't
+// drift. Nil-safe.
+func (b Bestiary) SeenCount() int {
+	if len(b) == 0 {
+		return 0
+	}
+	n := 0
+	for i := range enemyDefinitions {
+		if b.Seen(enemyDefinitions[i].Kind) {
+			n++
+		}
+	}
+	return n
 }
 
 // RecordBattleKills credits a defeat for every dead member of the active

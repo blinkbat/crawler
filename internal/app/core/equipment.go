@@ -176,26 +176,36 @@ type EquipPickerRow struct {
 // can't drift (the same single-source-of-truth pattern the old
 // drag-drop rules used). Nil-safe.
 func EquipPickerRows(g *GameState, member int, slot EquipSlotIndex) []EquipPickerRow {
+	return EquipPickerRowsInto(nil, g, member, slot)
+}
+
+// EquipPickerRowsInto is EquipPickerRows into a caller-owned buffer
+// (re-sliced to length 0) — the allocation-free variant for the slot
+// picker's per-frame update/draw paths, which would otherwise allocate
+// an inventory-sized row slice twice per frame while the picker is open.
+// The returned slice aliases buf's backing array and is valid until the
+// caller's next reuse of it. Nil-safe.
+func EquipPickerRowsInto(buf []EquipPickerRow, g *GameState, member int, slot EquipSlotIndex) []EquipPickerRow {
+	buf = buf[:0]
 	if g == nil {
-		return nil
+		return buf
 	}
 	// Guard slot the same way member is guarded below: Equipped is a
 	// [EquipSlotCount]ItemKind array and CanEquipInSlot -> SlotIndexType
 	// now panics on an out-of-range slot, so an exported caller passing a
 	// bad slot would crash rather than get an empty list.
 	if slot < 0 || slot >= EquipSlotCount {
-		return nil
+		return buf
 	}
-	rows := make([]EquipPickerRow, 0, len(g.Inventory)+1)
 	if member >= 0 && member < len(g.Party) && g.Party[member].Equipped[slot] != ItemNone {
-		rows = append(rows, EquipPickerRow{Unequip: true})
+		buf = append(buf, EquipPickerRow{Unequip: true})
 	}
 	for _, st := range g.Inventory {
 		if st.Count > 0 && CanEquipInSlot(st.Kind, slot) {
-			rows = append(rows, EquipPickerRow{Kind: st.Kind, Count: st.Count})
+			buf = append(buf, EquipPickerRow{Kind: st.Kind, Count: st.Count})
 		}
 	}
-	return rows
+	return buf
 }
 
 // EquipFromInventory equips one `kind` from the shared inventory into

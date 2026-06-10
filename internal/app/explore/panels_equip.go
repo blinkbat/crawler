@@ -49,6 +49,12 @@ func updateEquipmentTab(g *core.GameState) {
 // Mouse: click a row to pick it, or click outside the picker card to
 // dismiss. The member + slot are read from the frozen cursors (input
 // can't move them while the picker owns the frame).
+// equipPickerRowsBuf is updateEquipPicker's reusable row buffer — the
+// picker recomputes its rows every frame it's open (cursor clamp + click
+// resolution), so without this each open-picker frame allocates an
+// inventory-sized slice. Single-threaded update loop; valid per frame.
+var equipPickerRowsBuf []core.EquipPickerRow
+
 func updateEquipPicker(g *core.GameState) {
 	member := g.PanelsRowCursor
 	slot := core.EquipSlotIndex(g.EquipSlotCursor)
@@ -60,7 +66,8 @@ func updateEquipPicker(g *core.GameState) {
 		closeEquipPicker(g)
 		return
 	}
-	rows := core.EquipPickerRows(g, member, slot)
+	rows := core.EquipPickerRowsInto(equipPickerRowsBuf, g, member, slot)
+	equipPickerRowsBuf = rows
 	if input.ClickPressed() {
 		pt := input.PointerPos()
 		if row, ok := render.EquipPanelPickerRowHit(pt); ok {

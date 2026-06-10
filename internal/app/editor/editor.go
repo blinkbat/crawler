@@ -463,6 +463,8 @@ const (
 	dragRect
 	dragStart
 	dragPack
+	dragChest
+	dragDoor
 )
 
 type statusEntry struct {
@@ -488,6 +490,12 @@ type State struct {
 	// Zero value (false) is correct: the first read computes it.
 	reachWarnings []string
 	reachValid    bool
+	// contentEpoch bumps on every area mutation (the same chokepoints that
+	// flip reachValid: commitUndoSnapshot, undo/redo, performNewMap). Per-frame
+	// draws that cache a derived-from-content string (the topbar info readout,
+	// the hover tooltip) key on it so they rebuild only when the map actually
+	// changed, not every frame.
+	contentEpoch uint64
 
 	layer    Layer
 	brushIdx [layerCount]int
@@ -616,6 +624,11 @@ type State struct {
 	rectAnchorX      int
 	rectAnchorZ      int
 	dragPackIdx      int
+	// dragChestIdx / dragDoorIdx mirror dragPackIdx for the chest / door
+	// drag-move flows: the spawn index grabbed at press, relocated (or, on a
+	// release-in-place, opened in its edit modal) at release. -1 when idle.
+	dragChestIdx int
+	dragDoorIdx  int
 
 	gridCursorX int
 	gridCursorZ int
@@ -786,6 +799,8 @@ func freshState(a core.AreaDefinition) State {
 		hoverX:         -1,
 		hoverZ:         -1,
 		dragPackIdx:    -1,
+		dragChestIdx:   -1,
+		dragDoorIdx:    -1,
 		modalPackIdx:   -1,
 		modalChestIdx:  -1,
 		modalDoorIdx:   -1,

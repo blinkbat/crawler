@@ -490,6 +490,29 @@ var lastEquipLayout equipPanelLayout
 // transition can't route a click against stale geometry.
 func ResetEquipPanelLayout() { lastEquipLayout = equipPanelLayout{} }
 
+// resetEquipLayoutKeepBufs clears the per-frame layout cache while
+// RETAINING the slice backing arrays, so the Equipment tab's every-frame
+// rebuild re-slices into the same memory instead of allocating fresh
+// slices per frame. ResetEquipPanelLayout (overlay close) still zeroes
+// everything, releasing the buffers between Tome visits.
+func resetEquipLayoutKeepBufs() {
+	lastEquipLayout = equipPanelLayout{
+		SlotRects:   lastEquipLayout.SlotRects[:0],
+		SlotMember:  lastEquipLayout.SlotMember[:0],
+		SlotIdx:     lastEquipLayout.SlotIdx[:0],
+		PickerRects: lastEquipLayout.PickerRects[:0],
+	}
+}
+
+// Per-frame scratch buffers for the picker draw paths. Single-threaded
+// renderer — reused across frames to avoid steady-state allocation while
+// a picker / chooser is open; contents are valid only within the frame.
+var (
+	equipPickerRowsDrawBuf []core.EquipPickerRow
+	useTargetLivingDrawBuf []int
+	healPickerHealsDrawBuf []core.SkillID
+)
+
 // EquipPanelSlotHit returns (member, slot, true) if `pt` is inside a
 // slot rect, else (-1, 0, false). The Equipment tab opens that slot's
 // item picker on a click.
@@ -523,7 +546,7 @@ func EquipPanelClickOutsidePicker(pt rl.Vector2) bool {
 
 func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) {
 	font := assets.Font()
-	lastEquipLayout = equipPanelLayout{} // reset every frame
+	resetEquipLayoutKeepBufs() // reset every frame, retaining buffers
 	if len(g.Party) == 0 {
 		return
 	}
@@ -533,10 +556,6 @@ func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) 
 	// sub-modal (drawEquipPicker), opened by Confirm / a click on a slot.
 	cols := memberColumnLayout(body, len(g.Party))
 	slotRowH := equipSlotRowHeight
-	totalSlots := len(g.Party) * int(core.EquipSlotCount)
-	lastEquipLayout.SlotRects = make([]rl.Rectangle, 0, totalSlots)
-	lastEquipLayout.SlotMember = make([]int, 0, totalSlots)
-	lastEquipLayout.SlotIdx = make([]core.EquipSlotIndex, 0, totalSlots)
 
 	for i, m := range g.Party {
 		memberHL := i == g.PanelsRowCursor
@@ -640,6 +659,22 @@ func drawPickerCard(font rl.Font, cardW, cardH float32, title string) rl.Rectang
 	return card
 }
 
+// Picker list-row geometry, shared by the three picker sub-modals (equip /
+// use-target / heal): each row is inset pickerRowInsetX from both card
+// edges and leaves pickerRowGap of breathing room below itself inside its
+// rowH slot.
+const (
+	pickerRowInsetX = float32(10)
+	pickerRowGap    = float32(6)
+)
+
+// pickerRowRect returns row i's rect in a picker list that starts at listY.
+// The single geometry source for the pickers' row loops, so a row-spacing
+// retune is one edit instead of three.
+func pickerRowRect(card rl.Rectangle, listY float32, i int, rowH float32) rl.Rectangle {
+	return rl.NewRectangle(card.X+pickerRowInsetX, listY+float32(i)*rowH, card.Width-2*pickerRowInsetX, rowH-pickerRowGap)
+}
+
 // drawEquipPicker paints the slot's item-picker sub-modal: a smaller
 // card centered on screen, drawn ON TOP of the panels overlay, listing
 // the inventory items eligible for the focused slot plus an "Unequip"
@@ -654,7 +689,8 @@ func drawEquipPicker(g core.GameState, assets Resources) {
 		return
 	}
 	slot := core.EquipSlotIndex(g.EquipSlotCursor)
-	rows := core.EquipPickerRows(&g, member, slot)
+	rows := core.EquipPickerRowsInto(equipPickerRowsDrawBuf, &g, member, slot)
+	equipPickerRowsDrawBuf = rows
 
 	const rowH = equipPickerRowH
 	const headerH = equipPickerHeaderH
@@ -680,19 +716,18 @@ func drawEquipPicker(g core.GameState, assets Resources) {
 	if curKind != core.ItemNone {
 		curText = "Equipped: " + core.ItemInfo(curKind).Name
 	}
-	drawTextWithShadow(font, curText, card.X+18, card.Y+46, FontSmall, textMuted)
+	drawTextWithShadow(font, curText, card.X+pickerCardLeftInset, card.Y+46, FontSmall, textMuted)
 
-	lastEquipLayout.PickerRects = make([]rl.Rectangle, 0, len(rows))
+	lastEquipLayout.PickerRects = lastEquipLayout.PickerRects[:0]
 	lastEquipLayout.PickerBounds = card
 	lastEquipLayout.PickerValid = true
 
 	if len(rows) == 0 {
-		drawTextWithShadow(font, "No eligible items in inventory.", card.X+18, card.Y+headerH+8, FontBody, textHint)
+		drawTextWithShadow(font, "No eligible items in inventory.", card.X+pickerCardLeftInset, card.Y+headerH+8, FontBody, textHint)
 	}
 	listY := card.Y + headerH
 	for i, row := range rows {
-		ry := listY + float32(i)*rowH
-		rect := rl.NewRectangle(card.X+10, ry, card.Width-20, rowH-6)
+		rect := pickerRowRect(card, listY, i, rowH)
 		lastEquipLayout.PickerRects = append(lastEquipLayout.PickerRects, rect)
 		focused := i == g.EquipPickerCursor
 		drawFocusableRow(rect, focused)
@@ -724,7 +759,8 @@ func drawEquipPicker(g core.GameState, assets Resources) {
 // to be clickable and the overlay stays controller-first.
 func drawUseTargetPicker(g core.GameState, assets Resources) {
 	font := assets.Font()
-	living := core.LivingPartyIndices(g.Party)
+	living := core.LivingPartyIndicesInto(useTargetLivingDrawBuf, g.Party)
+	useTargetLivingDrawBuf = living
 
 	title := "Use"
 	switch {
@@ -749,8 +785,7 @@ func drawUseTargetPicker(g core.GameState, assets Resources) {
 	}
 	listY := card.Y + headerH
 	for i, mi := range living {
-		ry := listY + float32(i)*rowH
-		rect := rl.NewRectangle(card.X+10, ry, card.Width-20, rowH-6)
+		rect := pickerRowRect(card, listY, i, rowH)
 		drawFocusableRow(rect, i == g.UseTargetCursor)
 		m := g.Party[mi]
 		classCol := classAccent(m.Class)
@@ -774,7 +809,8 @@ func drawHealPicker(g core.GameState, assets Resources) {
 	if caster < 0 || caster >= len(g.Party) {
 		return
 	}
-	heals := core.OutOfBattleHeals(g.Party[caster])
+	heals := core.OutOfBattleHealsInto(healPickerHealsDrawBuf, g.Party[caster])
+	healPickerHealsDrawBuf = heals
 	if len(heals) == 0 {
 		return
 	}
@@ -787,8 +823,7 @@ func drawHealPicker(g core.GameState, assets Resources) {
 
 	listY := card.Y + headerH
 	for i, s := range heals {
-		ry := listY + float32(i)*rowH
-		rect := rl.NewRectangle(card.X+10, ry, card.Width-20, rowH-6)
+		rect := pickerRowRect(card, listY, i, rowH)
 		drawFocusableRow(rect, i == g.HealPickCursor)
 		drawTextWithShadow(font, core.SkillName(s), rect.X+14, rect.Y+rect.Height/2-10, FontBody, textPrimary)
 		costText := skillCostMPLabel(core.SkillCost(s))

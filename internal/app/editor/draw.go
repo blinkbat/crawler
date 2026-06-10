@@ -6,10 +6,43 @@ import (
 	"fmt"
 	"image/color"
 	"math"
+	"strconv"
 	"strings"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
+
+// glyphStr maps a byte to its one-character string. Built once so
+// drawTileGlyph doesn't allocate `string([]byte{ch})` per visible tile per
+// frame — on a zoomed-out big map with the glyph overlay / Floors lens on,
+// that was thousands of heap allocations every frame.
+var glyphStr = func() [256]string {
+	var t [256]string
+	for i := range t {
+		t[i] = string([]byte{byte(i)})
+	}
+	return t
+}()
+
+// tickLabels holds pre-formatted decimal labels for every 5th grid
+// coordinate, up to the max map dimension. Built once so the axis-tick draw
+// indexes coord/5 instead of fmt.Sprintf-ing each visible tick every frame.
+var tickLabels = func() []string {
+	t := make([]string, core.MaxMapDimension/5+2)
+	for i := range t {
+		t[i] = strconv.Itoa(i * 5)
+	}
+	return t
+}()
+
+// tickLabel returns the pre-formatted label for coordinate c (a multiple of
+// 5), falling back to a fresh format if c somehow lands past the table.
+func tickLabel(c int) string {
+	if i := c / 5; i >= 0 && i < len(tickLabels) {
+		return tickLabels[i]
+	}
+	return strconv.Itoa(c)
+}
 
 const (
 	topbarH    = float32(48)
@@ -434,38 +467,84 @@ func topbarButtonAt(s *State, p rl.Vector2) int {
 	return buttonStripHit(topbarBtns, 6, topbarH-12, p)
 }
 
+// topbarInfoKey captures everything the topbar's name + info readouts are
+// derived from. When it's unchanged frame-to-frame, drawTopbar reuses the
+// cached strings + measures instead of re-running MapIDFromPath, AreaTileSummary
+// (which allocates), several Sprintfs, and three MeasureTextEx every frame.
+type topbarInfoKey struct {
+	epoch          uint64
+	hoverX, hoverZ int
+	layer          Layer
+	brushSize      int
+	zoom           float32
+	phase          core.TimeOfDay
+	undoLen        int
+	dirty          bool
+	path           string
+}
+
+var (
+	topbarInfoKeyCache topbarInfoKey
+	topbarInfoReady    bool
+	topbarNameLabel    string
+	topbarNameMeasure  rl.Vector2
+	topbarInfoLabel    string
+	topbarInfoMeasure  rl.Vector2
+)
+
 func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 	rl.DrawRectangleRec(s.rect.topbar, theme.SurfacePrimary)
 	rl.DrawLineEx(rl.NewVector2(0, topbarH), rl.NewVector2(s.rect.topbar.Width, topbarH), 1, outlineHard)
 
 	drawButtonStrip(font, s, topbarBtns, 6, topbarH-12)
 
-	id := core.MapIDFromPath(s.area.Path)
-	if id == "" {
-		id = "(unsaved)"
+	key := topbarInfoKey{
+		epoch:     s.contentEpoch,
+		hoverX:    s.hoverX,
+		hoverZ:    s.hoverZ,
+		layer:     s.layer,
+		brushSize: s.brushSize,
+		zoom:      s.zoom,
+		phase:     s.previewPhase,
+		undoLen:   len(s.undo),
+		dirty:     s.dirty,
+		path:      s.area.Path,
 	}
-	dirtyMark := ""
-	if s.dirty {
-		dirtyMark = " *"
-	}
-	label := fmt.Sprintf("%s%s", id, dirtyMark)
-	measure := rl.MeasureTextEx(font, label, editorFontTopbar, 1)
-	labelX := s.rect.topbar.Width - measure.X - 10
-	render.DrawTextWithShadow(font, label,
-		labelX, (topbarH-measure.Y)/2,
-		editorFontTopbar, theme.TextMuted)
+	if !topbarInfoReady || key != topbarInfoKeyCache {
+		id := core.MapIDFromPath(s.area.Path)
+		if id == "" {
+			id = "(unsaved)"
+		}
+		dirtyMark := ""
+		if s.dirty {
+			dirtyMark = " *"
+		}
+		topbarNameLabel = id + dirtyMark
+		topbarNameMeasure = rl.MeasureTextEx(font, topbarNameLabel, editorFontTopbar, 1)
 
-	coord := "—"
-	hoverDesc := ""
-	if s.hoverX >= 0 {
-		coord = core.TileCoord(s.hoverX, s.hoverZ)
-		hoverDesc = core.AreaTileSummary(s.area, s.hoverX, s.hoverZ)
+		coord := "—"
+		hoverDesc := ""
+		if s.hoverX >= 0 {
+			coord = core.TileCoord(s.hoverX, s.hoverZ)
+			hoverDesc = core.AreaTileSummary(s.area, s.hoverX, s.hoverZ)
+		}
+		topbarInfoLabel = fmt.Sprintf("cell %s   %s   layer %s   brush %dx%d   zoom %.0f%%   phase %s (T)   undo %d/%d",
+			coord, hoverDesc, layerName(s.layer), s.brushSize, s.brushSize, s.zoom*100, core.PhaseName(s.previewPhase), len(s.undo), undoLimit)
+		topbarInfoMeasure = rl.MeasureTextEx(font, topbarInfoLabel, editorFontLabel, 1)
+
+		topbarInfoKeyCache = key
+		topbarInfoReady = true
 	}
-	infoLabel := fmt.Sprintf("cell %s   %s   layer %s   brush %dx%d   zoom %.0f%%   phase %s (T)   undo %d/%d",
-		coord, hoverDesc, layerName(s.layer), s.brushSize, s.brushSize, s.zoom*100, core.PhaseName(s.previewPhase), len(s.undo), undoLimit)
-	infoMeasure := rl.MeasureTextEx(font, infoLabel, editorFontLabel, 1)
-	infoX := labelX - infoMeasure.X - 24
-	render.DrawTextWithShadow(font, infoLabel, infoX, (topbarH-infoMeasure.Y)/2, editorFontLabel, theme.TextHint)
+
+	// Positioning re-reads the live window width each frame (it can change on
+	// resize without invalidating the cached strings); only the strings +
+	// their measured sizes are memoized.
+	labelX := s.rect.topbar.Width - topbarNameMeasure.X - 10
+	render.DrawTextWithShadow(font, topbarNameLabel,
+		labelX, (topbarH-topbarNameMeasure.Y)/2,
+		editorFontTopbar, theme.TextMuted)
+	infoX := labelX - topbarInfoMeasure.X - 24
+	render.DrawTextWithShadow(font, topbarInfoLabel, infoX, (topbarH-topbarInfoMeasure.Y)/2, editorFontLabel, theme.TextHint)
 }
 
 // topbarBtnWidths overrides the default 64-px topbar button width for
@@ -525,15 +604,35 @@ func modalContentWidth(card rl.Rectangle) float32 { return card.Width - 2*modalC
 // Used where a few short actions fit one line (e.g. the open-map modal's
 // Open / Rename / Delete / Duplicate).
 func modalButtonRow(card rl.Rectangle, labels []string) []rl.Rectangle {
+	return buttonRowAt(card.X+modalContentInset, card.Y+card.Height-modalBtnH-modalBottomInset, labels)
+}
+
+// buttonRowAt lays a row of auto-width modal buttons left-to-right from
+// (x, y) using the shared modalBtnH / modalBtnGap spec. modalButtonRow
+// anchors it to a card's bottom-left; callers with a bespoke anchor (the
+// Foe Visualizer's right column, the new-map modal's right-aligned pair)
+// place the same row shape elsewhere without re-deriving size/gap math.
+func buttonRowAt(x, y float32, labels []string) []rl.Rectangle {
 	rects := make([]rl.Rectangle, len(labels))
-	x := card.X + modalContentInset
-	y := card.Y + card.Height - modalBtnH - modalBottomInset
 	for i, lbl := range labels {
 		w := buttonWidth(lbl)
 		rects[i] = rl.NewRectangle(x, y, w, modalBtnH)
 		x += w + modalBtnGap
 	}
 	return rects
+}
+
+// buttonRowWidth is the total horizontal span buttonRowAt would occupy
+// for labels — used to right-anchor a row against a card edge.
+func buttonRowWidth(labels []string) float32 {
+	var w float32
+	for i, lbl := range labels {
+		if i > 0 {
+			w += modalBtnGap
+		}
+		w += buttonWidth(lbl)
+	}
+	return w
 }
 
 // modalButtonStack lays full-width buttons out vertically, anchored to the
@@ -1580,7 +1679,7 @@ func drawGrid(s *State, font rl.Font) {
 		tickCol := rl.NewColor(220, 224, 232, 180)
 		// Top axis: column numbers.
 		for x := (xMin / 5) * 5; x < lineXMax; x += 5 {
-			label := fmt.Sprintf("%d", x)
+			label := tickLabel(x)
 			m := rl.MeasureTextEx(font, label, editorFontTick, 1)
 			px := s.rect.gridX + float32(x)*cell - m.X/2
 			py := s.rect.gridY - m.Y - 2
@@ -1591,7 +1690,7 @@ func drawGrid(s *State, font rl.Font) {
 		}
 		// Left axis: row numbers.
 		for z := (zMin / 5) * 5; z < lineZMax; z += 5 {
-			label := fmt.Sprintf("%d", z)
+			label := tickLabel(z)
 			m := rl.MeasureTextEx(font, label, editorFontTick, 1)
 			px := s.rect.gridX - m.X - 4
 			py := s.rect.gridY + float32(z)*cell - m.Y/2
@@ -1610,6 +1709,12 @@ func drawGrid(s *State, font rl.Font) {
 	// the player only sees the leader from afar.
 	for _, sp := range s.area.PackSpawns {
 		if len(sp.Members) == 0 {
+			continue
+		}
+		// Cull spawns outside the visible grid window (same window the tile
+		// loop uses) so a big map with many packs doesn't pay leader-lookup +
+		// string-format + MeasureTextEx for markers panned off-screen.
+		if sp.TileX < xMin || sp.TileX >= xMax || sp.TileZ < zMin || sp.TileZ >= zMax {
 			continue
 		}
 		cx, cy := s.rect.tileCenter(sp.TileX, sp.TileZ)
@@ -1643,6 +1748,9 @@ func drawGrid(s *State, font rl.Font) {
 	// from the round enemy-pack circles so the author can tell at a
 	// glance which entity sits where.
 	for _, c := range s.area.ChestSpawns {
+		if c.TileX < xMin || c.TileX >= xMax || c.TileZ < zMin || c.TileZ >= zMax {
+			continue
+		}
 		gx, gy := s.rect.tileCorner(c.TileX, c.TileZ)
 		inset := cell * 0.25
 		rl.DrawRectangleRec(
@@ -1658,6 +1766,9 @@ func drawGrid(s *State, font rl.Font) {
 	// author can verify pairing at a glance. Distinct silhouette from
 	// chests (door = tall + arrow, chest = small square + lid).
 	for _, d := range s.area.DoorSpawns {
+		if d.TileX < xMin || d.TileX >= xMax || d.TileZ < zMin || d.TileZ >= zMax {
+			continue
+		}
 		gx, gy := s.rect.tileCorner(d.TileX, d.TileZ)
 		insetX := cell * 0.30
 		insetY := cell * 0.12
@@ -1755,6 +1866,14 @@ func drawGrid(s *State, font rl.Font) {
 		gx, gy := s.rect.tileCenter(s.hoverX, s.hoverZ)
 		rl.DrawCircleLines(int32(gx), int32(gy), cell*0.32, selectionOutline)
 	}
+	// Chest / door drag-move ghosts: a square outline at the hovered
+	// destination tile so the relocation reads before release (mirrors the
+	// pack circle).
+	if (s.drag == dragChest || s.drag == dragDoor) && s.hoverX >= 0 {
+		gx, gy := s.rect.tileCorner(s.hoverX, s.hoverZ)
+		inset := cell * 0.22
+		rl.DrawRectangleLinesEx(rl.NewRectangle(gx+inset, gy+inset, cell-2*inset, cell-2*inset), 2, selectionOutline)
+	}
 
 	// Rich hover tooltip: when the cursor is over a tile that holds a
 	// pack / chest / door / start, render a small card near the mouse
@@ -1769,22 +1888,41 @@ func drawGrid(s *State, font rl.Font) {
 // drawHoverTooltip paints a small panel near the mouse with the entity
 // contents at (hoverX, hoverZ). No-op when the tile is empty so cursor
 // noise doesn't follow the mouse across blank floor.
+// Hover-tooltip memo: the contents + measured width only change when the map
+// mutates (contentEpoch) or the cursor moves to a different tile, so we don't
+// rebuild the line slice (which allocates maps + slices) and re-measure every
+// frame the cursor merely rests on an entity tile.
+var (
+	tooltipKeyEpoch uint64
+	tooltipKeyX     int = -1
+	tooltipKeyZ     int = -1
+	tooltipReady    bool
+	tooltipLines    []string
+	tooltipWidth    float32
+)
+
 func drawHoverTooltip(s *State, font rl.Font) {
 	x, z := s.hoverX, s.hoverZ
-	lines := tooltipLinesFor(s, x, z)
+	if !tooltipReady || tooltipKeyEpoch != s.contentEpoch || tooltipKeyX != x || tooltipKeyZ != z {
+		tooltipLines = tooltipLinesFor(s, x, z)
+		tooltipWidth = 0
+		for _, l := range tooltipLines {
+			m := rl.MeasureTextEx(font, l, 11, 1)
+			if m.X > tooltipWidth {
+				tooltipWidth = m.X
+			}
+		}
+		tooltipKeyEpoch = s.contentEpoch
+		tooltipKeyX, tooltipKeyZ = x, z
+		tooltipReady = true
+	}
+	lines := tooltipLines
 	if len(lines) == 0 {
 		return
 	}
 	const padding = float32(6)
 	const lineH = float32(14)
-	width := float32(0)
-	for _, l := range lines {
-		m := rl.MeasureTextEx(font, l, 11, 1)
-		if m.X > width {
-			width = m.X
-		}
-	}
-	w := width + padding*2
+	w := tooltipWidth + padding*2
 	h := float32(len(lines))*lineH + padding*2
 	mp := frameMouse
 	tx := mp.X + 14
@@ -2134,7 +2272,7 @@ func currentLayerGlyph(s *State, x, z int) (byte, bool) {
 // size is sized to the cell so the glyph scales with zoom; shadow stays
 // 1px so it doesn't blur out at small zooms.
 func drawTileGlyph(font rl.Font, r rl.Rectangle, cell, fontSize float32, ch byte, fg, shadow rl.Color) {
-	text := string([]byte{ch})
+	text := glyphStr[ch]
 	m := rl.MeasureTextEx(font, text, fontSize, 1)
 	px := r.X + (cell-m.X)/2
 	py := r.Y + (cell-m.Y)/2

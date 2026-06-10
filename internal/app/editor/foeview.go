@@ -18,37 +18,26 @@ import (
 // the game, no rebuild. The preview mirrors drawBattlePack's exact geometry
 // (render.DrawFoePreview), so what reads right here reads right in an encounter.
 
-// foeField is one editable scalar on the working override. get/set bridge the
-// typed core.EnemyVisualOverride fields (some uint8 for tint) to the slider's
-// float64 world; min/max/step bound it and format renders the readout.
-type foeField struct {
-	label  string
-	get    func(*core.EnemyVisualOverride) float64
-	set    func(*core.EnemyVisualOverride, float64)
-	min    float64
-	max    float64
-	step   float64
-	format string
-}
-
 // foeFields is the complete, ordered set of tunable visual fields — EVERY field
 // of core.EnemyVisualOverride is here (tool-completeness: the data model is
 // fully authorable from the tool, nothing left hand-edit-only). Placement,
-// then shadow, then cursor, then tint.
-var foeFields = []foeField{
-	{label: "Size X", get: func(o *core.EnemyVisualOverride) float64 { return float64(o.SizeX) }, set: func(o *core.EnemyVisualOverride, v float64) { o.SizeX = float32(v) }, min: 0.1, max: 3.0, step: 0.05, format: "%.2f"},
-	{label: "Size Y", get: func(o *core.EnemyVisualOverride) float64 { return float64(o.SizeY) }, set: func(o *core.EnemyVisualOverride, v float64) { o.SizeY = float32(v) }, min: 0.1, max: 3.0, step: 0.05, format: "%.2f"},
-	{label: "Y Offset", get: func(o *core.EnemyVisualOverride) float64 { return float64(o.YOffset) }, set: func(o *core.EnemyVisualOverride, v float64) { o.YOffset = float32(v) }, min: -2.0, max: 2.0, step: 0.02, format: "%.2f"},
-	{label: "Depth", get: func(o *core.EnemyVisualOverride) float64 { return float64(o.DepthOffset) }, set: func(o *core.EnemyVisualOverride, v float64) { o.DepthOffset = float32(v) }, min: -2.0, max: 3.0, step: 0.05, format: "%.2f"},
-	{label: "Shadow R", get: func(o *core.EnemyVisualOverride) float64 { return float64(o.ShadowRadius) }, set: func(o *core.EnemyVisualOverride, v float64) { o.ShadowRadius = float32(v) }, min: 0.0, max: 1.5, step: 0.02, format: "%.2f"},
-	{label: "Shadow X", get: func(o *core.EnemyVisualOverride) float64 { return float64(o.ShadowOffsetX) }, set: func(o *core.EnemyVisualOverride, v float64) { o.ShadowOffsetX = float32(v) }, min: -1.5, max: 1.5, step: 0.02, format: "%.2f"},
-	{label: "Shadow Z", get: func(o *core.EnemyVisualOverride) float64 { return float64(o.ShadowOffsetZ) }, set: func(o *core.EnemyVisualOverride, v float64) { o.ShadowOffsetZ = float32(v) }, min: -1.5, max: 1.5, step: 0.02, format: "%.2f"},
-	{label: "Cursor Y", get: func(o *core.EnemyVisualOverride) float64 { return float64(o.MarkerYOffset) }, set: func(o *core.EnemyVisualOverride, v float64) { o.MarkerYOffset = float32(v) }, min: -2.0, max: 2.0, step: 0.02, format: "%.2f"},
-	{label: "Cursor X", get: func(o *core.EnemyVisualOverride) float64 { return float64(o.MarkerXOffset) }, set: func(o *core.EnemyVisualOverride, v float64) { o.MarkerXOffset = float32(v) }, min: -1.5, max: 1.5, step: 0.02, format: "%.2f"},
-	{label: "Tint R", get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintR) }, set: func(o *core.EnemyVisualOverride, v float64) { o.TintR = clampByte(v) }, min: 0, max: 255, step: 1, format: "%.0f"},
-	{label: "Tint G", get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintG) }, set: func(o *core.EnemyVisualOverride, v float64) { o.TintG = clampByte(v) }, min: 0, max: 255, step: 1, format: "%.0f"},
-	{label: "Tint B", get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintB) }, set: func(o *core.EnemyVisualOverride, v float64) { o.TintB = clampByte(v) }, min: 0, max: 255, step: 1, format: "%.0f"},
-	{label: "Tint A", get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintA) }, set: func(o *core.EnemyVisualOverride, v float64) { o.TintA = clampByte(v) }, min: 0, max: 255, step: 1, format: "%.0f"},
+// then shadow, then cursor, then tint. Each row is a sliderField (slider.go)
+// whose Get/Set bridge the typed override fields (some uint8 for tint) to the
+// slider's float64 world.
+var foeFields = []sliderField[core.EnemyVisualOverride]{
+	{Label:"Size X", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.SizeX) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.SizeX = float32(v) }, Min:0.1, Max:3.0, Step:0.05, Format:"%.2f"},
+	{Label:"Size Y", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.SizeY) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.SizeY = float32(v) }, Min:0.1, Max:3.0, Step:0.05, Format:"%.2f"},
+	{Label:"Y Offset", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.YOffset) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.YOffset = float32(v) }, Min:-2.0, Max:2.0, Step:0.02, Format:"%.2f"},
+	{Label:"Depth", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.DepthOffset) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.DepthOffset = float32(v) }, Min:-2.0, Max:3.0, Step:0.05, Format:"%.2f"},
+	{Label:"Shadow R", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.ShadowRadius) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.ShadowRadius = float32(v) }, Min:0.0, Max:1.5, Step:0.02, Format:"%.2f"},
+	{Label:"Shadow X", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.ShadowOffsetX) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.ShadowOffsetX = float32(v) }, Min:-1.5, Max:1.5, Step:0.02, Format:"%.2f"},
+	{Label:"Shadow Z", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.ShadowOffsetZ) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.ShadowOffsetZ = float32(v) }, Min:-1.5, Max:1.5, Step:0.02, Format:"%.2f"},
+	{Label:"Cursor Y", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.MarkerYOffset) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.MarkerYOffset = float32(v) }, Min:-2.0, Max:2.0, Step:0.02, Format:"%.2f"},
+	{Label:"Cursor X", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.MarkerXOffset) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.MarkerXOffset = float32(v) }, Min:-1.5, Max:1.5, Step:0.02, Format:"%.2f"},
+	{Label:"Tint R", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintR) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.TintR = clampByte(v) }, Min:0, Max:255, Step:1, Format:"%.0f"},
+	{Label:"Tint G", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintG) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.TintG = clampByte(v) }, Min:0, Max:255, Step:1, Format:"%.0f"},
+	{Label:"Tint B", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintB) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.TintB = clampByte(v) }, Min:0, Max:255, Step:1, Format:"%.0f"},
+	{Label:"Tint A", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintA) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.TintA = clampByte(v) }, Min:0, Max:255, Step:1, Format:"%.0f"},
 }
 
 func clampByte(v float64) uint8 {
@@ -73,6 +62,11 @@ const (
 	foeValueW     = float32(56)
 	foeTrackH     = float32(12)
 )
+
+// foeViewBtnLabels is the action row's single label source — the layout
+// (buttonRowAt sizes each button to its label) and the draw read the same
+// slice so the painted text and the hit rects can't drift.
+var foeViewBtnLabels = []string{"Save", "Reset", "Close"}
 
 type foeViewLayout struct {
 	card         rl.Rectangle
@@ -112,11 +106,8 @@ func computeFoeViewLayout() foeViewLayout {
 		rowTop += foeSliderRowH
 	}
 
-	btnY := card.Y + card.Height - 42
-	bw, bh, gap := float32(92), float32(30), float32(10)
-	saveBtn := rl.NewRectangle(rightX, btnY, bw, bh)
-	resetBtn := rl.NewRectangle(rightX+bw+gap, btnY, bw, bh)
-	closeBtn := rl.NewRectangle(rightX+2*(bw+gap), btnY, bw, bh)
+	btns := buttonRowAt(rightX, card.Y+card.Height-modalBtnH-modalBottomInset, foeViewBtnLabels)
+	saveBtn, resetBtn, closeBtn := btns[0], btns[1], btns[2]
 
 	return foeViewLayout{
 		card: card, preview: preview,
@@ -231,8 +222,8 @@ func updateFoeViewModal(s *State) Action {
 	if s.foeCursor >= 0 && s.foeCursor < len(foeFields) {
 		if delta := input.CursorLeftRight(); delta != 0 {
 			f := foeFields[s.foeCursor]
-			v := f.get(&s.foeVisual) + float64(delta)*f.step
-			f.set(&s.foeVisual, clampRange(v, f.min, f.max))
+			v := f.Get(&s.foeVisual) + float64(delta)*f.Step
+			f.Set(&s.foeVisual, clampRange(v, f.Min, f.Max))
 		}
 	}
 	return ActionNone
@@ -278,7 +269,7 @@ func handleFoeViewClick(s *State, l *foeViewLayout, mp rl.Vector2) {
 // range, snapped to its step grain.
 func setFoeFieldFromTrack(s *State, i int, track rl.Rectangle, mouseX float32) {
 	f := foeFields[i]
-	f.set(&s.foeVisual, sliderSnap(f.min, f.max, f.step, track.X, track.Width, mouseX))
+	f.Set(&s.foeVisual, sliderSnap(f.Min, f.Max, f.Step, track.X, track.Width, mouseX))
 }
 
 // padRect grows r by (dx, dy) on every side — used to give the thin slider
@@ -310,9 +301,7 @@ func drawFoeViewModal(s *State, font rl.Font, theme render.Theme) {
 		drawFoeSlider(font, theme, l, i, s)
 	}
 
-	drawButton(font, l.saveBtn, "Save", false)
-	drawButton(font, l.resetBtn, "Reset", false)
-	drawButton(font, l.closeBtn, "Close", false)
+	drawModalButtons(font, []rl.Rectangle{l.saveBtn, l.resetBtn, l.closeBtn}, foeViewBtnLabels)
 
 	// Footer hint + persistence note, under the preview pane (clear of the
 	// right-side buttons).
@@ -328,9 +317,9 @@ func drawFoeSlider(font rl.Font, theme render.Theme, l foeViewLayout, i int, s *
 	f := foeFields[i]
 	track := l.sliderTracks[i]
 	focused := s.foeCursor == i
-	value := f.get(&s.foeVisual)
-	val := fmt.Sprintf(f.format, value)
-	drawSlider(font, theme, f.label, val, value, f.min, f.max,
+	value := f.Get(&s.foeVisual)
+	val := fmt.Sprintf(f.Format, value)
+	drawSlider(font, theme, f.Label, val, value, f.Min, f.Max,
 		rl.NewVector2(track.X-foeLabelW, track.Y-4), rl.NewVector2(track.X+track.Width+8, track.Y-4),
 		13, track, 6, focused)
 }

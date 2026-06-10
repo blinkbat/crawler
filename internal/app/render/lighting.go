@@ -99,6 +99,7 @@ uniform vec4 colDiffuse;
 uniform vec3 viewPos;
 uniform vec3 fogColor;
 uniform float fogDensity;
+uniform float nightMood; // 0 = serene day, 1 = spooky night — drives the grade
 
 out vec4 finalColor;
 
@@ -120,9 +121,17 @@ void main() {
     float fog = 1.0 - exp(-fogDensity * dist);
     fog = clamp(fog, 0.0, {{FOG_CEILING}});
     vec3 lit = mix(base, fogColor, fog);
-    // Global slight desaturation (muted-storybook palette): pull a bit of
-    // saturation toward luminance. Keep in sync with the world shader's line.
-    lit = mix(lit, vec3(dot(lit, vec3(0.299, 0.587, 0.114))), 0.22);
+
+    // ---- Painterly grade ("the filter") — KEEP IN SYNC with the world
+    // shader's block so billboards sit in the same painting. See there for
+    // what each step does.
+    lit = lit / (1.0 + 0.16 * max(max(lit.r, lit.g), lit.b));
+    float lift = mix(0.055, 0.004, nightMood);
+    lit = lift + lit * (1.0 - lift);
+    float gradeLuma = dot(lit, vec3(0.299, 0.587, 0.114));
+    lit = mix(lit, vec3(gradeLuma), mix(0.16, 0.45, nightMood));
+    lit *= mix(vec3(1.03, 1.00, 0.95), vec3(0.82, 0.88, 1.08), nightMood);
+
     finalColor = vec4(lit, texel.a * fragColor.a * colDiffuse.a);
 }
 `
@@ -132,6 +141,7 @@ type billboardFogShaderPipe struct {
 	locViewPos    int32
 	locFogColor   int32
 	locFogDensity int32
+	locNightMood  int32
 }
 
 func loadBillboardFogShader() billboardFogShaderPipe {
@@ -147,8 +157,9 @@ func loadBillboardFogShader() billboardFogShaderPipe {
 		locViewPos:    rl.GetShaderLocation(shader, "viewPos"),
 		locFogColor:   rl.GetShaderLocation(shader, "fogColor"),
 		locFogDensity: rl.GetShaderLocation(shader, "fogDensity"),
+		locNightMood:  rl.GetShaderLocation(shader, "nightMood"),
 	}
-	LogRenderInit("billboard fog locs: viewPos=%d fogColor=%d fogDensity=%d", pipe.locViewPos, pipe.locFogColor, pipe.locFogDensity)
+	LogRenderInit("billboard fog locs: viewPos=%d fogColor=%d fogDensity=%d nightMood=%d", pipe.locViewPos, pipe.locFogColor, pipe.locFogDensity, pipe.locNightMood)
 	return pipe
 }
 
@@ -177,6 +188,8 @@ func (s billboardFogShaderPipe) applyUniforms(camera rl.Camera3D, profile lighti
 	rl.SetShaderValue(s.shader, s.locFogColor, uniformVec3Buf[:], rl.ShaderUniformVec3)
 	uniformFloatBuf[0] = profile.FogDensity
 	rl.SetShaderValue(s.shader, s.locFogDensity, uniformFloatBuf[:], rl.ShaderUniformFloat)
+	uniformFloatBuf[0] = profile.Mood
+	rl.SetShaderValue(s.shader, s.locNightMood, uniformFloatBuf[:], rl.ShaderUniformFloat)
 }
 
 // Cast shadows used to live here as a separate depth pass + PCF lookup. They
@@ -204,6 +217,7 @@ uniform vec3 fogColor;
 uniform float fogDensity;
 uniform float specularStrength;
 uniform float shadowStrength;
+uniform float nightMood; // 0 = serene day, 1 = spooky night — drives the grade
 
 // Torch point lights. Unused slots carry a zero color so the loop
 // always runs MAX_TORCHES iterations (a fixed bound 330 likes) with
@@ -239,16 +253,19 @@ void main() {
     float upDot = N.y * 0.5 + 0.5;
     vec3 hemi = mix(ambientColor * 0.65, ambientColor, upDot);
 
-    // Gentle painted shading — soft smoothstep banding that
-    // still suggests the storybook cel feel, but at a much
-    // lower mix so the surface stays close to the original
-    // continuous wrap-diffuse. Anything stronger pushes the
-    // brightness range too wide for comfortable viewing.
-    float wrap = clamp((dot(N, L) + 0.25) / 1.25, 0.0, 1.0);
-    float toon = smoothstep(0.18, 0.55, wrap) * 0.50
-               + smoothstep(0.55, 0.85, wrap) * 0.50;
-    float shade = mix(wrap, toon, 0.35);
-    vec3 diffuse = sunColor * mix(NdotL, shade, 0.35);
+    // Painted cel shading — a soft three-tone ramp (shadow / mid / light)
+    // with smoothstepped terminators so the banding reads as gouache
+    // brushwork, not hard plastic toon. The shadow band floors at 0.45 so
+    // unlit faces stay luminous and airy (Wind-Waker-ish serenity) rather
+    // than sinking to black; night gloom comes from the grade + dim night
+    // sun, not from crushed diffuse. KNOBS: band centers/softness below,
+    // and the two mix() weights (how "cel" vs smooth the surface reads).
+    float wrap = clamp((dot(N, L) + 0.30) / 1.30, 0.0, 1.0);
+    float band = 0.45
+               + smoothstep(0.34, 0.46, wrap) * 0.27
+               + smoothstep(0.60, 0.74, wrap) * 0.28;
+    float shade = mix(wrap, band, 0.55);
+    vec3 diffuse = sunColor * mix(NdotL, shade, 0.55);
 
     float spec = 0.0;
     if (specularStrength > 0.001 && NdotL > 0.0) {
@@ -301,9 +318,23 @@ void main() {
     float fog = 1.0 - exp(-fogDensity * dist);
     fog = clamp(fog, 0.0, {{FOG_CEILING}});
     lit = mix(lit, fogColor, fog);
-    // Global slight desaturation (muted-storybook palette): pull a bit of
-    // saturation toward luminance. Keep in sync with the billboard shader.
-    lit = mix(lit, vec3(dot(lit, vec3(0.299, 0.587, 0.114))), 0.22);
+
+    // ---- Painterly grade ("the filter") — KEEP IN SYNC with the billboard
+    // shader so sprites and world sit in one painting. Driven by nightMood
+    // (0 day → 1 night). Four KNOBS:
+    // (1) Soft highlight shoulder: roll bright pastels off gently instead of
+    //     clipping to hard white — preserves the gouache softness.
+    lit = lit / (1.0 + 0.16 * max(max(lit.r, lit.g), lit.b));
+    // (2) Shadow lift: by DAY raise the black floor so nothing reads inky
+    //     (papery, austere, serene); by NIGHT let it fall near-black (gloom).
+    float lift = mix(0.055, 0.004, nightMood);
+    lit = lift + lit * (1.0 - lift);
+    // (3) Saturation: clean pastel by day, drained & eerie by night.
+    float gradeLuma = dot(lit, vec3(0.299, 0.587, 0.114));
+    lit = mix(lit, vec3(gradeLuma), mix(0.16, 0.45, nightMood));
+    // (4) Temperature wash: warm paper-cream by day → cold moonlit indigo at
+    //     night — a faint unifying tint ("painted on warm paper" vs "out after dark").
+    lit *= mix(vec3(1.03, 1.00, 0.95), vec3(0.82, 0.88, 1.08), nightMood);
 
     finalColor = vec4(lit, texel.a * fragColor.a * colDiffuse.a);
 }
@@ -319,6 +350,7 @@ type lightingShader struct {
 	locFogDensity     int32
 	locSpecStrength   int32
 	locShadowStrength int32
+	locNightMood      int32
 	locTorchPos       int32
 	locTorchColor     int32
 	locTorchRange     int32
@@ -371,6 +403,7 @@ func loadLightingShader() lightingShader {
 		locFogDensity:     rl.GetShaderLocation(shader, "fogDensity"),
 		locSpecStrength:   rl.GetShaderLocation(shader, "specularStrength"),
 		locShadowStrength: rl.GetShaderLocation(shader, "shadowStrength"),
+		locNightMood:      rl.GetShaderLocation(shader, "nightMood"),
 		locTorchPos:       rl.GetShaderLocation(shader, "torchPos"),
 		locTorchColor:     rl.GetShaderLocation(shader, "torchColor"),
 		locTorchRange:     rl.GetShaderLocation(shader, "torchRange"),
@@ -446,6 +479,8 @@ func (l lightingShader) applyUniforms(camera rl.Camera3D, ambient lightingProfil
 	rl.SetShaderValue(l.shader, l.locSpecStrength, uniformFloatBuf[:], rl.ShaderUniformFloat)
 	uniformFloatBuf[0] = ambient.ShadowStrength
 	rl.SetShaderValue(l.shader, l.locShadowStrength, uniformFloatBuf[:], rl.ShaderUniformFloat)
+	uniformFloatBuf[0] = ambient.Mood
+	rl.SetShaderValue(l.shader, l.locNightMood, uniformFloatBuf[:], rl.ShaderUniformFloat)
 }
 
 type lightingProfile struct {
@@ -455,6 +490,12 @@ type lightingProfile struct {
 	FogDensity       float32
 	SpecularStrength float32
 	ShadowStrength   float32
+	// Mood is the day→night dial that drives the painterly grade in both
+	// fragment shaders: 0 = bright airy serene daylight, 1 = drained spooky
+	// night. Set per frame by applyTimeOfDay (outdoors it tracks the star
+	// alpha; enclosed dungeons are pinned high so they read uneasy at any
+	// hour). The grade reads it as the `nightMood` uniform.
+	Mood float32
 }
 
 // Per-area lighting profiles, hoisted to package vars so we don't rebuild a

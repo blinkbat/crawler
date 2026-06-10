@@ -161,7 +161,7 @@ func updatePanels(g *core.GameState) {
 		}
 		rows := len(g.Quests)
 		if g.JournalTab == core.JournalBestiary {
-			rows = len(g.Bestiary.SeenKinds())
+			rows = g.Bestiary.SeenCount()
 		}
 		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, rows)
 	case core.PanelTabMap:

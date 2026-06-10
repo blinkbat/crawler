@@ -16,8 +16,8 @@ package core
 // node's rank climbs.
 //
 // Design contract: each tier is ONE numeric/bool delta applied to a
-// SkillEffect field that already exists (Damage, BurnChance, etc.) or
-// a tier-only field below (HealBonus, StealBonusDamage). Keeping the
+// SkillEffect field that already exists (Damage, Heal, BurnChance,
+// etc.) or a tier-only field below (StealBonusDamage). Keeping the
 // delta surface small means the apply
 // path in battle/actions.go is:
 //
@@ -56,7 +56,6 @@ type SkillTierUpgrade struct {
 type SkillEffectDelta struct {
 	Damage         int
 	Heal           int
-	HealBonus      int // extra heal applied to the apply path's heal amount
 	StealChance    float64
 	BurnChance     float64
 	BurnMinTurns   int
@@ -104,14 +103,14 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	},
 	// ── Cleric ───────────────────────────────────────────────
 	SkillPrayer: {
-		{Tier: 1, Label: "+3 heal", Description: "+3 base heal on the target.", Cost: 1, Effect: SkillEffectDelta{HealBonus: 3}},
-		{Tier: 2, Label: "+3 heal", Description: "Another +3 heal. Tank-grade recovery in one cast.", Cost: 1, Effect: SkillEffectDelta{HealBonus: 3}},
-		{Tier: 3, Label: "+3 heal", Description: "A third +3 heal — Prayer alone can top off a tank.", Cost: 1, Effect: SkillEffectDelta{HealBonus: 3}},
+		{Tier: 1, Label: "+3 heal", Description: "+3 base heal on the target.", Cost: 1, Effect: SkillEffectDelta{Heal: 3}},
+		{Tier: 2, Label: "+3 heal", Description: "Another +3 heal. Tank-grade recovery in one cast.", Cost: 1, Effect: SkillEffectDelta{Heal: 3}},
+		{Tier: 3, Label: "+3 heal", Description: "A third +3 heal — Prayer alone can top off a tank.", Cost: 1, Effect: SkillEffectDelta{Heal: 3}},
 	},
 	SkillMassMend: {
-		{Tier: 1, Label: "+2 heal", Description: "+2 base heal across every alive party member.", Cost: 1, Effect: SkillEffectDelta{HealBonus: 2}},
-		{Tier: 2, Label: "+2 heal", Description: "Another +2 heal across the whole party.", Cost: 1, Effect: SkillEffectDelta{HealBonus: 2}},
-		{Tier: 3, Label: "+2 heal", Description: "A third +2 heal — full-party sustain in one cast.", Cost: 1, Effect: SkillEffectDelta{HealBonus: 2}},
+		{Tier: 1, Label: "+2 heal", Description: "+2 base heal across every alive party member.", Cost: 1, Effect: SkillEffectDelta{Heal: 2}},
+		{Tier: 2, Label: "+2 heal", Description: "Another +2 heal across the whole party.", Cost: 1, Effect: SkillEffectDelta{Heal: 2}},
+		{Tier: 3, Label: "+2 heal", Description: "A third +2 heal — full-party sustain in one cast.", Cost: 1, Effect: SkillEffectDelta{Heal: 2}},
 	},
 	SkillSmite: {
 		{Tier: 1, Label: "+2 damage", Description: "+2 base damage on the press tap.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
@@ -245,7 +244,7 @@ func EffectiveSkillEffect(m *PartyMember, s SkillID) SkillEffect {
 		}
 		d := up.Effect
 		eff.Damage += d.Damage
-		eff.Heal += d.Heal + d.HealBonus
+		eff.Heal += d.Heal
 		eff.StealChance += d.StealChance
 		eff.BurnChance += d.BurnChance
 		eff.BurnMinTurns += d.BurnMinTurns

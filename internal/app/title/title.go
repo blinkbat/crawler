@@ -25,6 +25,7 @@ type State struct {
 	mode          titleMode
 	cursor        int
 	mapPaths      []string
+	mapNames      []string // display names for mapPaths, derived once when mapPaths is set (#6)
 	chosenMapPath string
 	loadError     string
 	// hasSave caches core.SaveExists() once at construction. The save
@@ -32,6 +33,14 @@ type State struct {
 	// in-game), and New() runs on every return to title, so this avoids
 	// an os.Stat syscall every frame from updateMain + drawMainMenu.
 	hasSave bool
+	// rows is the active main-menu row set, built once in New() (its
+	// membership only depends on hasSave, which is fixed for the title's
+	// lifetime). labels is a reusable buffer refilled in place each draw —
+	// the Display row's label is dynamic, but the slice never reallocates.
+	// Both replace per-frame allocations that updateMain + drawMainMenu used
+	// to make every frame.
+	rows   []mainMenuRowDef
+	labels []string
 }
 
 type titleMode int
@@ -41,7 +50,16 @@ const (
 	modeMapPicker
 )
 
-func New() State { return State{mode: modeMain, hasSave: core.SaveExists()} }
+func New() State {
+	hasSave := core.SaveExists()
+	rows := mainRows(hasSave)
+	return State{
+		mode:    modeMain,
+		hasSave: hasSave,
+		rows:    rows,
+		labels:  make([]string, len(rows)),
+	}
+}
 
 func (s State) ChosenMapPath() string { return s.chosenMapPath }
 
@@ -91,6 +109,13 @@ var mainMenuRows = []mainMenuRowDef{
 		Action: func(s *State) Action {
 			paths, _ := mapfile.List(core.MapsDir())
 			s.mapPaths = paths
+			// Derive the display names once here, not every frame in
+			// drawMapPicker — the path list is fixed for as long as the
+			// picker is open.
+			s.mapNames = make([]string, len(paths))
+			for i, p := range paths {
+				s.mapNames[i] = core.MapIDFromPath(p)
+			}
 			s.cursor = 0
 			s.mode = modeMapPicker
 			return ActionNone
@@ -124,19 +149,18 @@ func mainRows(hasSave bool) []mainMenuRowDef {
 	return mainMenuRows
 }
 
-// mainMenuLabels returns the title menu's row labels in draw order. Used
-// by drawMainMenu's drawList call and as the cursor's wrap modulus.
-func mainMenuLabels(hasSave bool) []string {
-	rows := mainRows(hasSave)
-	labels := make([]string, len(rows))
-	for i, row := range rows {
-		labels[i] = row.Label()
+// menuLabels refills s.labels (a reused buffer, never reallocated) with the
+// current row labels in draw order and returns it. The Display row's label is
+// produced fresh each frame so the live mode shows; the others are constant.
+func (s State) menuLabels() []string {
+	for i, row := range s.rows {
+		s.labels[i] = row.Label()
 	}
-	return labels
+	return s.labels
 }
 
 func updateMain(s *State) Action {
-	rows := mainRows(s.hasSave)
+	rows := s.rows
 	s.cursor = input.CursorUpDown(s.cursor, len(rows))
 	// Quit (Q / Select) or Back (Esc / X / Circle) both exit from the main
 	// menu — there's nowhere to back up to, so "cancel" and "quit" collapse
@@ -225,7 +249,7 @@ func Draw(s State, assets render.Resources) {
 }
 
 func drawMainMenu(s State, font rl.Font, theme render.Theme, screenH int32) {
-	drawList(mainMenuLabels(s.hasSave), s.cursor, font, theme, screenH, "")
+	drawList(s.menuLabels(), s.cursor, font, theme, screenH, "")
 	// Device-neutral verbs (per AGENTS.md's controller-first hint contract) —
 	// this is the first surface shown, so it must not assume a keyboard.
 	drawHint(font, "Navigate     Select     Quit", screenH)
@@ -239,11 +263,7 @@ func drawMapPicker(s State, font rl.Font, theme render.Theme, screenH int32) {
 		drawHint(font, "Esc to go back", screenH)
 		return
 	}
-	items := make([]string, len(s.mapPaths))
-	for i, p := range s.mapPaths {
-		items[i] = core.MapIDFromPath(p)
-	}
-	drawList(items, s.cursor, font, theme, screenH, header)
+	drawList(s.mapNames, s.cursor, font, theme, screenH, header)
 	drawHint(font, "Up/Down navigate   Enter start   Esc back", screenH)
 }
 
