@@ -86,6 +86,15 @@ func setSentinel(v reflect.Value) {
 		v.SetFloat(0.5)
 	case reflect.Bool:
 		v.SetBool(true)
+	case reflect.Struct:
+		// A struct field (e.g. BuffStats Stats) carries its sentinel in its
+		// first field — setting one member is enough to prove the whole struct
+		// is summed through EffectiveSkillEffect (SumStats touches every field
+		// uniformly, so a per-field omission can't hide).
+		if v.NumField() == 0 {
+			panic("skilleffect_delta_test: empty struct field — extend setSentinel")
+		}
+		setSentinel(v.Field(0))
 	default:
 		panic("skilleffect_delta_test: unhandled SkillEffectDelta field kind " + v.Kind().String() + " — extend setSentinel")
 	}

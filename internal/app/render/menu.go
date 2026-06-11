@@ -1,6 +1,8 @@
 package render
 
 import (
+	"fmt"
+
 	"crawler/internal/app/core"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -68,7 +70,34 @@ var debugMenuRows = []debugMenuRow{
 		return "Render Log: " + onOff(g.RenderLogEnabled)
 	}},
 	{Item: core.DebugMenuJukebox, Label: func(core.GameState) string { return JukeboxRowLabel() }},
+	{Item: core.DebugMenuAllSkills, Label: func(g core.GameState) string {
+		return "All Skills: " + onOff(g.DebugAllSkills)
+	}},
+	{Item: core.DebugMenuBoostStats, Label: func(core.GameState) string {
+		return fmt.Sprintf("Boost Stats (+%d)", core.DebugStatBoost)
+	}},
+	{Item: core.DebugMenuSkipBattles, Label: func(g core.GameState) string {
+		return "Skip Battles: " + onOff(g.DebugSkipBattles)
+	}},
 	{Item: core.DebugMenuClose, Label: func(core.GameState) string { return "Close" }},
+}
+
+// init asserts each pause/submenu row slice has exactly one row per enum value
+// (its wrap-modulus count). The rows are matched to the cursor by their .Item
+// enum value, not by slice index, so a missing/extra/reordered row wouldn't
+// crash — it would silently drop a row's highlight or mis-pair one. This
+// length check catches that drift at startup, mirroring the registry-invariant
+// asserts elsewhere (statTable, timingGrades, partyStatusVisuals, …).
+func init() {
+	if len(pauseMenuRows) != core.PauseMenuCount {
+		panic(fmt.Sprintf("pauseMenuRows length %d != PauseMenuCount %d", len(pauseMenuRows), core.PauseMenuCount))
+	}
+	if len(optionsMenuRows) != core.OptionsMenuCount {
+		panic(fmt.Sprintf("optionsMenuRows length %d != OptionsMenuCount %d", len(optionsMenuRows), core.OptionsMenuCount))
+	}
+	if len(debugMenuRows) != core.DebugMenuCount {
+		panic(fmt.Sprintf("debugMenuRows length %d != DebugMenuCount %d", len(debugMenuRows), core.DebugMenuCount))
+	}
 }
 
 func onOff(b bool) string {

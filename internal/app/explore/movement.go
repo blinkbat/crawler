@@ -255,6 +255,13 @@ func updateDebugMenu(g *core.GameState) {
 			}
 		case core.DebugMenuJukebox:
 			render.PlayJukebox()
+		case core.DebugMenuAllSkills:
+			g.DebugAllSkills = !g.DebugAllSkills
+		case core.DebugMenuBoostStats:
+			// One-shot action (not a toggle): each confirm stacks another boost.
+			core.DebugBoostParty(g.Party, core.DebugStatBoost)
+		case core.DebugMenuSkipBattles:
+			g.DebugSkipBattles = !g.DebugSkipBattles
 		case core.DebugMenuClose:
 			g.DebugMenuOpen = false
 		}
@@ -361,6 +368,12 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 		// doesn't show it mid-step. Mirrors the AI-side engagement
 		// snap inside tickPackAI.
 		core.SnapPackToTile(&g.Packs[idx])
+		// Debug "Skip Battles": auto-resolve the pack as a win (kills + XP +
+		// loot) without entering the battle scene, then stay in explore.
+		if g.DebugSkipBattles {
+			battle.DebugSkipWin(g, idx)
+			return
+		}
 		battle.Start(g, idx)
 		return
 	}

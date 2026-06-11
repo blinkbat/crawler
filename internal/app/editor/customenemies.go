@@ -470,12 +470,7 @@ func nextCustomEnemyName(defs []core.CustomEnemyDef) string {
 	for _, d := range defs {
 		taken[d.Name] = true
 	}
-	for i := 1; ; i++ {
-		candidate := fmt.Sprintf("custom%d", i)
-		if !taken[candidate] {
-			return candidate
-		}
-	}
+	return firstUnusedName(taken, "custom%d")
 }
 
 // uniqueCustomEnemyName resolves a typed-in name to one that doesn't

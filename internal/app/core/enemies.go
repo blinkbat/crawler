@@ -148,8 +148,8 @@ var enemyDefinitions = []EnemyDefinition{
 		SingularNoun: "bat",
 		PluralNoun:   "bats",
 		GroupName:    "Bat Swarm",
-		// Bat jerky heals more than rat cheese — see ItemHealAmount; the bat
-		// is also faster and harder to land hits on, so the loot is the
+		// Bat jerky heals more than rat cheese — see ItemDefinition.HealAmount;
+		// the bat is also faster and harder to land hits on, so the loot is the
 		// payoff for fighting (or robbing) the trickier enemy.
 		Item:               ItemBatJerky,
 		MaxHP:              7,

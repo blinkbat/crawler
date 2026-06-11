@@ -157,6 +157,11 @@ const (
 	soundAssignRowH = float32(48) // two-line cue row (name + assigned)
 	soundColGap     = float32(14)
 	soundButtonH    = float32(32)
+	// soundNameMaxLen caps the sound-name text field. The sound modal pumps
+	// this field directly (no-space filter) rather than through input.go's
+	// textFieldConfigs table, so its cap lives here next to the modal's other
+	// layout constants instead of as a bare literal at the pump call.
+	soundNameMaxLen = 32
 )
 
 // assignableCueList is the fixed list of built-in cues the assignments
@@ -403,7 +408,7 @@ func updateSoundsModal(s *State) Action {
 		// No-space filter so the user can hit Space for Preview without
 		// also typing a space into the sound name. Shared pump from
 		// input.go — backspace handled there too.
-		pumpPrintableASCII(&s.soundName, 32, acceptPrintableNoSpace, nil)
+		pumpPrintableASCII(&s.soundName, soundNameMaxLen, acceptPrintableNoSpace, nil)
 	}
 
 	// Keyboard fallbacks.

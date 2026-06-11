@@ -124,6 +124,33 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 			}
 		}
 	}
+	// Ceiling / elevation are OPTIONAL — absent ones blank-fill below via
+	// OptionalLayerOrBlank. But a PRESENT one must still match the declared
+	// dimensions, exactly like the required layers above: OptionalLayerOrBlank
+	// only substitutes a blank grid when the section is entirely empty, so a
+	// truncated / hand-edited layer would otherwise slip through unvalidated
+	// and silently read as the default for its missing cells (a short ceiling
+	// layer reads as "no roof", flipping AreaIsOutdoor → wrong weather/lighting).
+	optional := []struct {
+		name string
+		rows []string
+	}{
+		{"ceiling", mf.Ceiling},
+		{"elevation", mf.Elevation},
+	}
+	for _, layer := range optional {
+		if len(layer.rows) == 0 {
+			continue // absent — blank-filled at the bottom of this function
+		}
+		if len(layer.rows) != mf.Height {
+			return AreaDefinition{}, fmt.Errorf("%s layer has %d rows, declared height %d", layer.name, len(layer.rows), mf.Height)
+		}
+		for i, row := range layer.rows {
+			if len(row) != mf.Width {
+				return AreaDefinition{}, fmt.Errorf("%s layer row %d has width %d, want %d", layer.name, i, len(row), mf.Width)
+			}
+		}
+	}
 	if mf.StartX < 0 || mf.StartX >= mf.Width || mf.StartZ < 0 || mf.StartZ >= mf.Height {
 		return AreaDefinition{}, fmt.Errorf("start position (%d,%d) is out of bounds for %dx%d", mf.StartX, mf.StartZ, mf.Width, mf.Height)
 	}
@@ -269,10 +296,6 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		}
 		chests = append(chests, mapfile.MapChest{Items: names, X: c.TileX, Z: c.TileZ})
 	}
-	localMapID := ""
-	if a.Path != "" {
-		localMapID = MapIDFromPath(a.Path)
-	}
 	doors := make([]mapfile.MapDoor, 0, len(a.DoorSpawns))
 	for _, d := range a.DoorSpawns {
 		faceName, ok := FacingName(d.Facing)
@@ -281,9 +304,10 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		}
 		// Encode same-map portals back to SelfMapToken so a moved/renamed
 		// map keeps its internal links intact. Cross-map targets stay as
-		// their explicit map id.
+		// their explicit map id. (A target already equal to SelfMapToken is
+		// itself a self-portal, so this normalizes it to itself — a no-op.)
 		target := d.TargetMap
-		if localMapID != "" && target == localMapID {
+		if IsSelfPortal(a, target) {
 			target = mapfile.SelfMapToken
 		}
 		doors = append(doors, mapfile.MapDoor{
@@ -757,4 +781,17 @@ func MapPath(id string) string {
 func MapIDFromPath(path string) string {
 	base := filepath.Base(path)
 	return strings.TrimSuffix(base, filepath.Ext(base))
+}
+
+// IsSelfPortal reports whether a door's TargetMap refers to the area `a`
+// itself — either the explicit SelfMapToken placeholder or `a`'s own map id
+// (derived from its Path). An unsaved area (empty Path) has no id, so only the
+// token counts. Centralizes the "is this door same-map?" test the editor's
+// door validator (crossMapDoorWarnings) and the save encoder (MapFileFromArea)
+// both need, so the two can't drift on the comparison.
+func IsSelfPortal(a AreaDefinition, target string) bool {
+	if target == SelfMapToken {
+		return true
+	}
+	return a.Path != "" && target == MapIDFromPath(a.Path)
 }

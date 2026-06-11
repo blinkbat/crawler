@@ -365,6 +365,23 @@ func actorSpeed(g *core.GameState, actor core.ActorRef) int {
 	return core.EnemyInfoFor(*m).Stats.SPD
 }
 
+// actorAppearsBefore reports whether `ref` occupies any queue slot strictly
+// before `cursor`. ActorRef is a comparable {IsParty, Index} value, so this is
+// an exact identity match. Used by the skip loop to tick an ingested member's
+// Poison only on their FIRST slot in the round (the ATB queue can hold the
+// same fast actor several times — see simulateTurnQueue).
+func actorAppearsBefore(queue []core.ActorRef, cursor int, ref core.ActorRef) bool {
+	if cursor > len(queue) {
+		cursor = len(queue)
+	}
+	for i := 0; i < cursor; i++ {
+		if queue[i] == ref {
+			return true
+		}
+	}
+	return false
+}
+
 // startActorTurn opens the turn of whatever actor sits at the queue cursor.
 // Order each turn: skip-if-dead → burn tick (may kill) → input action.
 // If the queue runs off the end, a fresh round starts (which may end the
@@ -382,8 +399,17 @@ func startActorTurn(g *core.GameState) {
 		// on dead members (HP<=0) and enemies, so it fires only for an alive,
 		// ingested, poisoned member. buildTurnQueue excludes members ingested
 		// at round start, so the queue can only hold a member ingested
-		// mid-round → ticked once here, never double with the round tick.
-		tickPoisonAfterPartyTurn(g, skipped)
+		// mid-round.
+		//
+		// Tick ONLY on the member's FIRST queue slot this round: under ATB
+		// carry-over a high-SPD member can hold several slots, and any earlier
+		// slot already accounted for one tick (a real turn before the ingest,
+		// via finishActorTurn, or this same first-slot guard). Without the
+		// guard a fast, mid-round-ingested member takes one poison tick per
+		// slot — double damage and double duration drain in a single round.
+		if !actorAppearsBefore(g.Battle.Queue, g.Battle.QueueCursor, skipped) {
+			tickPoisonAfterPartyTurn(g, skipped)
+		}
 		g.Battle.QueueCursor++
 	}
 	if g.Battle.QueueCursor >= len(g.Battle.Queue) {
@@ -472,6 +498,7 @@ func consumeDefendOnSkip(g *core.GameState, actor core.ActorRef) {
 func drainNonDamagingPartyStatuses(g *core.GameState, actor core.ActorRef) {
 	tickWebbedAfterPartyTurn(g, actor)
 	tickConfusedAfterPartyTurn(g, actor)
+	tickBlessAfterPartyTurn(g, actor)
 }
 
 // tickSkipStatusAtTurnStart drains one tick from a skip-this-turn status
@@ -545,6 +572,18 @@ func isActorAlive(g *core.GameState, actor core.ActorRef) bool {
 	return core.BattleEnemyAlive(g, actor.Index)
 }
 
+// repointEnemyCursorIfDead moves g.Battle.EnemyIndex onto the next living
+// enemy when the currently-pointed one has died, leaving it put if none
+// remain. Shared by finishActorTurn and beginPartyTurn so the "don't leave the
+// target cursor on a corpse" rule lives in one place.
+func repointEnemyCursorIfDead(g *core.GameState) {
+	if !core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
+		if next := core.NextLivingBattleEnemy(g); next >= 0 {
+			g.Battle.EnemyIndex = next
+		}
+	}
+}
+
 // finishActorTurn is the single hand-off used by every action's apply* path.
 // Checks win/lose, fixes up EnemyIndex if the target died, advances the
 // queue cursor, and starts the next actor's turn.
@@ -587,11 +626,7 @@ func finishActorTurn(g *core.GameState) {
 	if checkPartyWipeout(g) {
 		return
 	}
-	if !core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
-		if next := core.NextLivingBattleEnemy(g); next >= 0 {
-			g.Battle.EnemyIndex = next
-		}
-	}
+	repointEnemyCursorIfDead(g)
 	g.Battle.QueueCursor++
 	startActorTurn(g)
 }
@@ -623,11 +658,7 @@ func beginPartyTurn(g *core.GameState, partyIndex int) {
 			return
 		}
 	}
-	if !core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
-		if next := core.NextLivingBattleEnemy(g); next >= 0 {
-			g.Battle.EnemyIndex = next
-		}
-	}
+	repointEnemyCursorIfDead(g)
 }
 
 func updatePlayerBattle(g *core.GameState) {
@@ -1109,6 +1140,34 @@ func winBattle(g *core.GameState, message string) {
 	for _, kind := range drops {
 		setBattleMessage(g, fmt.Sprintf("Picked up %s.", core.ItemInfo(kind).Name))
 	}
+}
+
+// DebugSkipWin auto-resolves a pack as a win WITHOUT entering the battle
+// scene — the debug "Skip Battles" toggle's engagement path. It fells every
+// pack member, then runs the exact win bookkeeping a fought battle would
+// (winBattle: bestiary kills + XP + loot) and the normal teardown (leaveBattle
+// → clearBattleResidual, which removes the defeated pack because Phase is
+// BattleWon). Called from explore's engagement check instead of Start when
+// g.DebugSkipBattles is on. No-ops on an invalid / already-dead pack.
+func DebugSkipWin(g *core.GameState, packIndex int) {
+	if packIndex < 0 || packIndex >= len(g.Packs) || !core.PackAlive(g.Packs[packIndex]) {
+		return
+	}
+	g.Battle.ActivePack = packIndex
+	g.Battle.EnemyIndex = -1
+	// Preallocate the log so winBattle's setBattleMessage appends don't grow a
+	// nil slice (Start does the same before its messages).
+	g.Battle.Log = make([]string, 0, core.BattleLogMaxLines)
+	// Fell the whole pack so RecordBattleKills / AwardBattleXP / AwardBattleLoot
+	// tally it exactly as a fought win would.
+	for i := range g.Packs[packIndex].Members {
+		g.Packs[packIndex].Members[i].HP = 0
+		g.Packs[packIndex].Members[i].Alive = false
+	}
+	winBattle(g, "Debug: skipped the battle.")
+	// leaveBattle's clearBattleResidual drops the pack (Phase == BattleWon) and
+	// resets all battle transients back to the explore-clean state.
+	leaveBattle(g, g.Area.QuietMessage)
 }
 
 func loseBattle(g *core.GameState, message string) {

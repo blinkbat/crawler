@@ -39,7 +39,15 @@ func CacheTurnForecastForFrame(g *core.GameState) {
 const (
 	turnPanelTopPad    = int32(12)
 	turnPanelBottomPad = int32(10)
+	turnPanelRowH      = int32(28)
 )
+
+// turnPanelHeight is the panel's pixel height for n forecast rows. Shared by
+// the draw (drawTurnPanel) and the docked combat-log's bottom-edge read
+// (TurnPanelBottomY) so the two can't drift on the row height / pad math.
+func turnPanelHeight(n int) int32 {
+	return turnPanelTopPad + int32(n)*turnPanelRowH + turnPanelBottomPad
+}
 
 // TurnPanelBottomY returns the Y screen coordinate of the bottom
 // edge of the turn-order panel — used by the combat-log panel that
@@ -50,9 +58,7 @@ func TurnPanelBottomY(g core.GameState) int32 {
 	if len(turns) == 0 {
 		return MinimapBottomY()
 	}
-	rowH := int32(28)
-	h := turnPanelTopPad + int32(len(turns))*rowH + turnPanelBottomPad
-	return MinimapBottomY() + hudColumnGap + h
+	return MinimapBottomY() + hudColumnGap + turnPanelHeight(len(turns))
 }
 
 func drawTurnPanel(g core.GameState, assets Resources) {
@@ -63,8 +69,8 @@ func drawTurnPanel(g core.GameState, assets Resources) {
 	w := turnPanelW
 	x := hudEdgePad
 	y := MinimapBottomY() + hudColumnGap
-	rowH := int32(28)
-	h := turnPanelTopPad + int32(len(turns))*rowH + turnPanelBottomPad
+	rowH := turnPanelRowH
+	h := turnPanelHeight(len(turns))
 
 	drawCard(x, y, w, h, surfacePrimary, borderSoft, borderSoft)
 

@@ -152,6 +152,51 @@ func TestSelfDoorSurvivesRename(t *testing.T) {
 	}
 }
 
+// TestAreaFromMapFile_ValidatesOptionalLayerDimensions guards that a PRESENT
+// ceiling/elevation layer is dimension-checked like the required layers — a
+// truncated one must be rejected at load rather than silently reading as the
+// default (e.g. a short ceiling reads "no roof", flipping AreaIsOutdoor →
+// wrong weather/lighting). Absent and full-dimension layers still load clean.
+func TestAreaFromMapFile_ValidatesOptionalLayerDimensions(t *testing.T) {
+	base := func() mapfile.MapFile {
+		return mapfile.MapFile{
+			Name: "Optional", Materials: "dungeon", Width: 3, Height: 3,
+			StartX: 1, StartZ: 1, StartFace: "east",
+			Walls: []string{"...", "...", "..."},
+			Floor: []string{"...", "...", "..."},
+			Decor: []string{"...", "...", "..."},
+			Props: []string{"...", "...", "..."},
+		}
+	}
+
+	// Absent optional layers blank-fill — must load clean.
+	if _, err := AreaFromMapFile(base(), "maps/m.map"); err != nil {
+		t.Fatalf("absent optional layers should load: %v", err)
+	}
+
+	// Full-dimension ceiling + elevation — must load clean.
+	full := base()
+	full.Ceiling = []string{"...", "...", "..."}
+	full.Elevation = []string{"000", "000", "000"}
+	if _, err := AreaFromMapFile(full, "maps/m.map"); err != nil {
+		t.Fatalf("full-dimension optional layers should load: %v", err)
+	}
+
+	// Short ceiling (2 rows, declared height 3) — must be rejected.
+	short := base()
+	short.Ceiling = []string{"...", "..."}
+	if _, err := AreaFromMapFile(short, "maps/m.map"); err == nil {
+		t.Error("a present-but-short ceiling layer must be rejected, not blank-substituted")
+	}
+
+	// Narrow elevation row (width 2 vs declared 3) — must be rejected.
+	narrow := base()
+	narrow.Elevation = []string{"000", "00", "000"}
+	if _, err := AreaFromMapFile(narrow, "maps/m.map"); err == nil {
+		t.Error("a present elevation layer with a short row must be rejected")
+	}
+}
+
 func isStartBlocked(a AreaDefinition) bool {
 	if a.StartTileZ < 0 || a.StartTileZ >= a.Height {
 		return true

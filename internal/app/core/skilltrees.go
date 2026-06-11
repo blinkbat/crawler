@@ -141,13 +141,13 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 		}),
 		linearTree("Mercy", "Restoration, regen, cleanse, revive", []SkillTreeNode{
 			act("prayer", "Prayer", "Single-target heal on an ally.", SkillPrayer),
-			nd("cleanse", "Cleanse", "Cure status effects on one ally.", 3),
+			actOnce("cleanse", "Cleanse", "Cure an ally's Poison, Sleep, Stun, Web and Confusion.", SkillCleanse),
 			nd("renewal", "Renewal", "Heal-over-time regeneration on an ally.", 3),
 			nd("mass-mend", "Mass Mend", "Heal the entire living party at once.", 3),
 			nd("resurrect", "Resurrect", "Capstone: revive a downed party member.", 1),
 		}),
 		linearTree("Conviction", "Buffs, wards, retribution", []SkillTreeNode{
-			nd("blessing", "Blessing", "Buff the party's stats and accuracy.", 3),
+			act("blessing", "Blessing", "Buff the whole party's STR, DEX, INT and WIS for a few turns.", SkillBless),
 			nd("aegis", "Aegis", "Shield an ally against the next hit.", 3),
 			nd("retribution", "Retribution", "Passive: attackers take reflected damage.", 3),
 			nd("martyrs-bond", "Martyr's Bond", "Redirect an ally's incoming damage to the Cleric.", 1),
@@ -166,8 +166,8 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 		}),
 		linearTree("Venomancy", "Toxins, DoT, armor break", []SkillTreeNode{
 			act("venom-strike", "Venom Strike", "Phys hit that applies Poison.", SkillVenomStrike),
+			act("poison-cloud", "Poison Cloud", "AoE Poison across the enemy pack.", SkillPoisonCloud),
 			nd("corrosive-vial", "Corrosive Vial", "Break an enemy's Armor so all hits land harder.", 3),
-			nd("poison-cloud", "Poison Cloud", "AoE Poison across the enemy pack.", 3),
 			nd("lacerate", "Lacerate", "A Bleed that stacks alongside Poison.", 3),
 			nd("plague", "Plague", "Capstone: poison spreads when a poisoned enemy dies.", 1),
 		}),
@@ -183,7 +183,7 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 	ClassWizard: {
 		linearTree("Pyromancy", "Fire, burn, AoE detonation", []SkillTreeNode{
 			act("firebolt", "Firebolt", "Single-target fire; chance to apply Burn.", SkillFirebolt),
-			nd("fireball", "Fireball", "AoE fire across the enemy pack.", 3),
+			act("fireball", "Fireball", "AoE fire across the enemy pack; per-target Burn.", SkillFireball),
 			nd("immolate", "Immolate", "A sustained Burn damage zone.", 3),
 			nd("combust", "Combust", "Detonate a target's Burn stacks for a damage spike.", 3),
 			nd("meteor", "Meteor", "Capstone: a massive delayed AoE.", 1),

@@ -54,6 +54,11 @@ func updateActionMenu(g *core.GameState) {
 	case core.ActionRowSkill:
 		openSkillMenu(g)
 		return
+	default:
+		// A new ActionRow added to the enum without a case here would
+		// otherwise make Confirm on that row a silent no-op. Surface it
+		// instead of swallowing the press.
+		setBattleStatus(g, "Choose an action.")
 	}
 }
 
@@ -73,13 +78,26 @@ func currentMember(g *core.GameState) (*core.PartyMember, bool) {
 // submenu. Seeds the cursor from the member's persisted SkillCursor so
 // the submenu opens on their last-used skill instead of always jumping
 // back to slot 0.
+// refreshSkillMenuBuf repopulates the shared skill-menu buffer for `member`:
+// the learned-skill list normally, or EVERY player-castable skill when the
+// debug "all skills" toggle (g.DebugAllSkills) is on, so any skill can be
+// tested without learning it. Both the open and the per-frame update path call
+// this so the two can't diverge on which list they show.
+func refreshSkillMenuBuf(g *core.GameState, member *core.PartyMember) {
+	if g.DebugAllSkills {
+		skillMenuBuf = core.PlayerCastableSkillsInto(skillMenuBuf)
+		return
+	}
+	skillMenuBuf = core.LearnedSkillsInto(member, skillMenuBuf)
+}
+
 func openSkillMenu(g *core.GameState) {
 	member, ok := currentMember(g)
 	if !ok {
 		return
 	}
 	idx := member.SkillCursor
-	skillMenuBuf = core.LearnedSkillsInto(member, skillMenuBuf)
+	refreshSkillMenuBuf(g, member)
 	if idx < 0 || idx >= len(skillMenuBuf) {
 		idx = 0
 	}
@@ -98,7 +116,7 @@ func updateSkillMenu(g *core.GameState) {
 		resetBattleAction(g)
 		return
 	}
-	skillMenuBuf = core.LearnedSkillsInto(member, skillMenuBuf)
+	refreshSkillMenuBuf(g, member)
 	skills := skillMenuBuf
 	if len(skills) == 0 {
 		resetBattleAction(g)
@@ -126,7 +144,7 @@ func updateSkillMenu(g *core.GameState) {
 	// the rule matches chargeMP's deduct-time check. Two separate
 	// inlines of `actor.MP < cost` previously made a "potion of
 	// free cast" or "VIT-raises-MP-cap" feature a two-place edit.
-	if !canAffordSkill(g.Party[g.Battle.CurrentParty], skill) {
+	if !g.DebugAllSkills && !canAffordSkill(g.Party[g.Battle.CurrentParty], skill) {
 		setBattleStatus(g, fmt.Sprintf("%s needs %d MP.", core.SkillName(skill), core.SkillCost(skill)))
 		return
 	}

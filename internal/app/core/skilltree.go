@@ -77,6 +77,13 @@ type SkillEffectDelta struct {
 	// turns the hit into a double-damage crit. Used by Crushing
 	// Blow T3 and Backstab T2.
 	CritDoubleOnExcellent bool
+	// BuffStats / BuffTurns are the buff-skill deltas — per-stat magnitude and
+	// duration added onto the base SkillEffect's BuffStats / BuffTurns as the
+	// granting node ranks up. Bless's tiers use these (T2/T3 add magnitude, T1
+	// adds a turn); EffectiveSkillEffect folds them in alongside the other
+	// numeric fields.
+	BuffStats Stats
+	BuffTurns int
 }
 
 // skillTierTable is the source of truth for every player-castable
@@ -117,6 +124,11 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 		{Tier: 2, Label: "+2 damage", Description: "Another +2 base damage.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
 		{Tier: 3, Label: "+25% stun", Description: "Lands a Stun roll with 25% chance on Great/Excellent timing.", Cost: 1, Effect: SkillEffectDelta{StunChance: 0.25, StunMinTurns: 1, StunMaxTurns: 1}},
 	},
+	SkillBless: {
+		{Tier: 1, Label: "+1 turn", Description: "The blessing lingers one turn longer on the whole party.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
+		{Tier: 2, Label: "+1 to blessed stats", Description: "+1 more to STR, DEX, INT and WIS for every blessed ally.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{STR: 1, DEX: 1, INT: 1, WIS: 1}}},
+		{Tier: 3, Label: "+1 to blessed stats", Description: "Another +1 to all four blessed stats — a maxed blessing is a sweeping party buff.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{STR: 1, DEX: 1, INT: 1, WIS: 1}}},
+	},
 	// ── Thief ────────────────────────────────────────────────
 	SkillSteal: {
 		{Tier: 1, Label: "+15% chance", Description: "Steal succeeds 15% more often.", Cost: 1, Effect: SkillEffectDelta{StealChance: 0.15}},
@@ -133,6 +145,11 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 		{Tier: 2, Label: "+1 Poison turn", Description: "Poison's max-roll duration extends by one turn.", Cost: 1, Effect: SkillEffectDelta{PoisonMaxTurns: 1}},
 		{Tier: 3, Label: "+2 damage", Description: "+2 base damage on the strike itself.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
 	},
+	SkillPoisonCloud: {
+		{Tier: 1, Label: "+15% Poison", Description: "Every enemy in the cloud rolls a 15% higher Poison chance.", Cost: 1, Effect: SkillEffectDelta{PoisonChance: 0.15}},
+		{Tier: 2, Label: "+1 Poison turn", Description: "The cloud's Poison lingers one extra turn on its max roll.", Cost: 1, Effect: SkillEffectDelta{PoisonMaxTurns: 1}},
+		{Tier: 3, Label: "+1 damage", Description: "+1 base damage to every enemy caught in the cloud.", Cost: 1, Effect: SkillEffectDelta{Damage: 1}},
+	},
 	// ── Wizard ───────────────────────────────────────────────
 	SkillFirebolt: {
 		{Tier: 1, Label: "+2 damage", Description: "+2 base damage on the bolt.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
@@ -148,6 +165,11 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 		{Tier: 1, Label: "+1 damage", Description: "+1 base damage per arc target.", Cost: 1, Effect: SkillEffectDelta{Damage: 1}},
 		{Tier: 2, Label: "+1 damage", Description: "Another +1 damage per target.", Cost: 1, Effect: SkillEffectDelta{Damage: 1}},
 		{Tier: 3, Label: "+15% Burn", Description: "Every arc target rolls a 15% burn chance.", Cost: 1, Effect: SkillEffectDelta{BurnChance: 0.15, BurnMinTurns: 1, BurnMaxTurns: 2}},
+	},
+	SkillFireball: {
+		{Tier: 1, Label: "+2 damage", Description: "+2 base magic damage to every enemy in the blast.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
+		{Tier: 2, Label: "+20% Burn", Description: "Per-target Burn-apply chance bumped by 20%.", Cost: 1, Effect: SkillEffectDelta{BurnChance: 0.20}},
+		{Tier: 3, Label: "+1 Burn turn", Description: "Burn lasts one turn longer on min and max rolls.", Cost: 1, Effect: SkillEffectDelta{BurnMinTurns: 1, BurnMaxTurns: 1}},
 	},
 }
 
@@ -257,6 +279,8 @@ func EffectiveSkillEffect(m *PartyMember, s SkillID) SkillEffect {
 		eff.StunMaxTurns += d.StunMaxTurns
 		eff.SleepMinTurns += d.SleepMinTurns
 		eff.SleepMaxTurns += d.SleepMaxTurns
+		eff.BuffStats = SumStats(eff.BuffStats, d.BuffStats)
+		eff.BuffTurns += d.BuffTurns
 	}
 	return eff
 }

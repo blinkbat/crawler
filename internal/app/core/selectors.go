@@ -217,9 +217,32 @@ func ReleaseAllIngested(party []PartyMember) {
 // every party member at battle exit — EXCEPT Poison, which lingers as a
 // lasting wound. It never touches HP, so the dead stay dead. Per the
 // current design call, only "dead" and "poisoned" survive a fight;
-// Sleep / Stun / Webbed / Confused and the Defending stance all clear
-// the moment the battle ends. (Ingest is released separately via
-// ReleaseAllIngested, which also restores the swallowed member.)
+// Sleep / Stun / Webbed / Confused, the Defending stance, and any active
+// Bless buff all clear the moment the battle ends. (Ingest is released
+// separately via ReleaseAllIngested, which also restores the swallowed
+// member.)
+// CureDebuffs clears the curable NEGATIVE combat statuses off a single member
+// — Poison, Sleep, Stun, Webbed, Confused — and returns how many were active
+// (so the caller can phrase "nothing to cure" vs "cured N"). It deliberately
+// leaves the Defending stance and the positive Bless buff (BuffTurns) intact,
+// and does NOT touch Ingested (a lockout, not a curable status — an ingested
+// member is untargetable anyway). The Cleric's Cleanse is the caller; kept
+// here beside ClearPartyTransientStatuses so the "what counts as a curable
+// debuff" set lives in one place.
+func CureDebuffs(m *PartyMember) int {
+	if m == nil {
+		return 0
+	}
+	cured := 0
+	for _, c := range []*int{&m.PoisonTurns, &m.SleepTurns, &m.StunTurns, &m.WebbedTurns, &m.ConfusedTurns} {
+		if *c > 0 {
+			cured++
+			*c = 0
+		}
+	}
+	return cured
+}
+
 func ClearPartyTransientStatuses(party []PartyMember) {
 	for i := range party {
 		party[i].SleepTurns = 0
@@ -227,6 +250,8 @@ func ClearPartyTransientStatuses(party []PartyMember) {
 		party[i].WebbedTurns = 0
 		party[i].ConfusedTurns = 0
 		party[i].Defending = false
+		party[i].BuffTurns = 0
+		party[i].BuffStats = Stats{}
 	}
 }
 

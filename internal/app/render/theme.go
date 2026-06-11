@@ -92,6 +92,12 @@ var (
 	// ----- Gilt accents (selection / focus) -----
 	giltDim    = rl.NewColor(160, 124, 64, 255)
 	giltBright = rl.NewColor(232, 196, 112, 255)
+	// Coin sigil tones (the gold HUD coin glyph): a brighter face and a darker
+	// inner shade than the gilt selection accents. Named here with the rest of
+	// the gilt family so a palette retune reaches the coin glyph too, instead
+	// of leaving two bare literals in hud.go's drawCoinGlyph.
+	coinFace  = rl.NewColor(218, 168, 78, 255)
+	coinShade = rl.NewColor(152, 104, 42, 255)
 
 	// ----- Parchment ink (text) -----
 	inkPrimary = rl.NewColor(232, 222, 196, 255)
@@ -161,6 +167,11 @@ var (
 	statusIngested  = mute(rl.NewColor(200, 132, 220, 240))
 	statusDefending = mute(rl.NewColor(132, 196, 255, 240))
 	statusDown      = mute(rl.NewColor(220, 102, 102, 235))
+	// statusBlessed is the lone POSITIVE buff accent — a warm holy gilt that
+	// reads as a blessing rather than the green/amber threat hues. Distinct
+	// from statusStun's flatter yellow by its warmer, gilt-leaning tone (and
+	// it never flickers).
+	statusBlessed = mute(rl.NewColor(244, 212, 128, 240))
 	// Outline tints paired with the fills above for the enemy-pill
 	// silhouette. Lighter / more saturated than the fill so the pill
 	// reads as a "glow with a hard rim" against the panel.

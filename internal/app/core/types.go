@@ -421,6 +421,17 @@ type GameState struct {
 	// when chasing flicker / invisibility bugs that don't reproduce
 	// in the editor.
 	RenderLogEnabled bool
+	// DebugAllSkills (debug) makes the battle skill menu list EVERY
+	// player-castable skill (not just the ones a member has learned) and makes
+	// casts free (chargeMP skips the MP deduction, and the menu's affordability
+	// gate is bypassed). For testing any skill without grinding the tree or MP.
+	DebugAllSkills bool
+	// DebugSkipBattles (debug) auto-resolves an engaged pack as a win — kills +
+	// XP + loot awarded via the normal win path — WITHOUT entering the battle
+	// scene. Distinct from EnemiesDisabled, which removes encounters entirely
+	// (no reward); skip-battles still pays out so the player can clear/level a
+	// map fast. See battle.DebugSkipWin.
+	DebugSkipBattles bool
 	// Inventory is shared across the party — single global stack list.
 	// Stocked by Steal pickups and consumed by the in-battle Item action.
 	Inventory []ItemStack
@@ -767,6 +778,20 @@ type PartyMember struct {
 	// time. Ticks at the END of the confused member's own turn.
 	// WIS-resistible at apply roll; does not stack.
 	ConfusedTurns int
+
+	// BuffTurns / BuffStats carry an active stat buff (the Cleric's Bless is
+	// the first user). While BuffTurns > 0, BuffStats is folded into
+	// EffectiveStats so every stat-driven roll (damage / accuracy / dodge /
+	// crit / heal / status-resist) reads the boosted value. Ticks at the END
+	// of the buffed member's own turn (like Webbed / Confused) via
+	// drainNonDamagingPartyStatuses. Combat-only — ClearPartyTransientStatuses
+	// wipes it on battle exit. Positive, not a threat, so the party card paints
+	// it as the low-priority PartyStatusBlessed. Does not stack: re-applying
+	// replaces both fields. The first user buffs the offensive / support stats
+	// (STR/DEX/INT/WIS) and deliberately leaves VIT (would desync MaxHP) and
+	// SPD (would perturb the ATB turn-order machinery) untouched.
+	BuffTurns int
+	BuffStats Stats
 
 	// Level and XP track per-character progression. XP is the running
 	// total toward the next level; XPForLevel(Level) is the threshold.

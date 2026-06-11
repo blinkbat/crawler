@@ -198,9 +198,7 @@ var itemDefinitions = []ItemDefinition{
 	// harder to steal from, so the loot pays off the difficulty.
 	{Kind: ItemBatJerky, Name: "Bat Jerky", HealAmount: 9, Price: 12, Description: "Stringy, oddly satisfying. A traveler's lunch."},
 	// Crust of bread — the humblest heal, the party's starting ration.
-	// Smaller than cheese on purpose (it's a crust). Registry order here
-	// drives the chest-add hotkey position, so a key was inserted at the
-	// matching index in editor.chestAddHotkeys.
+	// Smaller than cheese on purpose (it's a crust).
 	{Kind: ItemCrustOfBread, Name: "Crust of Bread", HealAmount: 3, Price: 3, Description: "A dry heel of bread. A small bite back to your feet."},
 	// Magic Phial — the MP counterpart to the food rations. Restores a small
 	// pool of MP so a caster isn't stranded between fights. Consumable

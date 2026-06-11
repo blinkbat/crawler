@@ -84,8 +84,8 @@ func drawGoldReadout(g core.GameState, assets Resources) {
 
 func drawCoinGlyph(cx, cy, r float32) {
 	rl.DrawCircleV(rl.NewVector2(cx, cy), r+2, fadeColor(woodDark, 0.85))
-	rl.DrawCircleV(rl.NewVector2(cx, cy), r, rl.NewColor(218, 168, 78, 255))
-	rl.DrawCircleV(rl.NewVector2(cx, cy), r*0.62, rl.NewColor(152, 104, 42, 255))
+	rl.DrawCircleV(rl.NewVector2(cx, cy), r, coinFace)
+	rl.DrawCircleV(rl.NewVector2(cx, cy), r*0.62, coinShade)
 	rl.DrawCircleV(rl.NewVector2(cx-r*0.28, cy-r*0.30), r*0.22, fadeColor(giltBright, 0.85))
 	drawDiamondPip(cx+r*0.38, cy+r*0.32, 1.5, fadeColor(giltBright, 0.65))
 }

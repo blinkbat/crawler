@@ -154,6 +154,23 @@ func EffectiveStats(m PartyMember) Stats {
 			statSetters[s](&out, next)
 		}
 	})
+	// An active stat buff (Cleric's Bless) folds on top of equipment, on the
+	// same per-stat floor-at-0 rule. Combat-only and per-turn-ticked, so this
+	// read re-renders the boosted sheet only while BuffTurns is running; a
+	// member with no buff (the common case) skips the loop entirely.
+	if m.BuffTurns > 0 {
+		for s := Stat(0); s < StatCount; s++ {
+			delta := statTable[s].Get(m.BuffStats)
+			if delta == 0 {
+				continue
+			}
+			next := statTable[s].Get(out) + delta
+			if next < 0 {
+				next = 0
+			}
+			statSetters[s](&out, next)
+		}
+	}
 	return out
 }
 

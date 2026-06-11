@@ -123,8 +123,10 @@ func DrawTextWithShadow(font rl.Font, text string, x, y, size float32, col color
 // so every list-style surface speaks the library aesthetic.
 //
 // Used by modal pickers (chest, level-up, sound editor) for the
-// cursor-on-row highlight. The action menu, panels Items/Skills rows,
-// and the party card each paint their own variant inline today.
+// cursor-on-row highlight. The action menu and party card paint their
+// own variant inline; the panels Items/Skills/Equipment rows route
+// through drawFocusableRow (theme.go), which owns both focused and
+// unfocused row states.
 // SelectionRowRect insets a row's (x, y, w) by the canonical
 // DrawSelectedRow highlight padding (−6 x, −4 y, +12 w) so the gilt
 // spine + underline sit just outside the row content. Height passes

@@ -33,6 +33,7 @@ var partyStatusVisuals = [core.PartyStatusCount]struct {
 	core.PartyStatusStunned:   {statusStun, true},
 	core.PartyStatusAsleep:    {statusSleep, true},
 	core.PartyStatusPoisoned:  {statusPoison, true},
+	core.PartyStatusBlessed:   {statusBlessed, false},
 	core.PartyStatusDefending: {statusDefending, false},
 }
 
@@ -353,6 +354,14 @@ func drawPartyStatusIcon(cx, cy, r float32, kind core.PartyStatusKind, col rl.Co
 		rl.DrawCircleSector(c, r*0.82, 35, 325, 20, col)
 		rl.DrawCircleV(rl.NewVector2(cx+r*0.95, cy), r*0.22, col)
 		rl.DrawCircleV(rl.NewVector2(cx-r*0.18, cy-r*0.22), r*0.14, dark)
+	case core.PartyStatusBlessed:
+		// Blessing: two rising chevrons — the universal "buff / stats up" mark,
+		// in the warm gilt accent.
+		t := float32(2)
+		rl.DrawLineEx(rl.NewVector2(cx-r*0.55, cy+r*0.12), rl.NewVector2(cx, cy-r*0.38), t, col)
+		rl.DrawLineEx(rl.NewVector2(cx, cy-r*0.38), rl.NewVector2(cx+r*0.55, cy+r*0.12), t, col)
+		rl.DrawLineEx(rl.NewVector2(cx-r*0.55, cy+r*0.62), rl.NewVector2(cx, cy+r*0.12), t, col)
+		rl.DrawLineEx(rl.NewVector2(cx, cy+r*0.12), rl.NewVector2(cx+r*0.55, cy+r*0.62), t, col)
 	case core.PartyStatusDefending:
 		// Shield: rounded badge body + a heraldic center spine.
 		rl.DrawRectangleRounded(rl.NewRectangle(cx-r*0.62, cy-r*0.7, r*1.24, r*1.5), 0.45, 6, col)

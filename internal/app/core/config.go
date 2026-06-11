@@ -685,6 +685,29 @@ const (
 	// enum: SkillID is a map key in saved SkillTiers, so a mid-enum
 	// insert would renumber later skills (same contract as ItemKind).
 	SkillScan
+	// SkillBless is the Cleric's party-wide stat buff (the Conviction tree's
+	// "Blessing" root). No damage, no target pick — it stamps a temporary
+	// STR/DEX/INT/WIS boost on every living member for BlessBuffTurns of their
+	// turns. Tagged Buff (the first SkillTagBuff user). Player-castable;
+	// appended at the END of the enum for the same saved-map-key reason as
+	// SkillScan above.
+	SkillBless
+	// SkillFireball is the Wizard's AoE fire (Pyromancy tree's "Fireball" node,
+	// learned after Firebolt). INT-scaled magic damage to EVERY living enemy
+	// plus a per-target Burn roll — the pack-clearing counterpart to Firebolt's
+	// single bolt. Appended at the END of the enum (saved-map-key contract).
+	SkillFireball
+	// SkillPoisonCloud is the Thief's AoE toxin (Venomancy tree's "Poison Cloud"
+	// node, learned after Venom Strike). Light STR-scaled damage to every living
+	// enemy plus a per-target Poison roll — turns the single-target DoT into a
+	// whole-pack one. Appended at the END (saved-map-key contract).
+	SkillPoisonCloud
+	// SkillCleanse is the Cleric's status cure (Mercy tree's "Cleanse" node,
+	// learned after Prayer). Single ally target, no damage: clears the curable
+	// combat debuffs (Poison/Sleep/Stun/Webbed/Confused) via core.CureDebuffs,
+	// leaving the Bless buff and Defending intact. NoUpgrades (single rank, like
+	// Scan). Appended at the END (saved-map-key contract).
+	SkillCleanse
 )
 
 // SkillTag classifies a skill for damage-type interactions (armor,
@@ -726,6 +749,32 @@ const (
 	// high so a clean sequence reliably lands the DoT; a Miss timing
 	// scales it down through the standard TimingBonusMult curve.
 	VenomStrikePoisonChance = 0.75
+	// FireballBurnChance gates the Wizard AoE fire's per-target Burn roll.
+	// Lower than the single-target FireboltBurnChance — Fireball hits the whole
+	// pack, so a more modest per-target chance keeps "burn the entire room"
+	// from being a guaranteed every-cast outcome.
+	FireballBurnChance = 0.30
+	// PoisonCloudPoisonChance gates the Thief AoE toxin's per-target Poison
+	// roll. Lower than the single-target VenomStrikePoisonChance for the same
+	// whole-pack reason as FireballBurnChance.
+	PoisonCloudPoisonChance = 0.45
+)
+
+// Bless (Cleric) tuning. The buff is party-wide and always lands (no proc
+// roll — like Scan, the timing grade is cosmetic), so its strength is purely
+// these magnitudes plus the tree's tier ladder. BlessBuffPerStat lifts each
+// of STR/DEX/INT/WIS; VIT and SPD are intentionally left out (VIT would
+// desync MaxHP, SPD would perturb the ATB turn order). Numbers are
+// deliberately modest — a 4-MP support cast that the player tops up via the
+// Conviction tree's tier upgrades.
+const (
+	// BlessBuffPerStat is the base per-stat boost (tier 0) applied to each of
+	// the four buffed stats.
+	BlessBuffPerStat = 1
+	// BlessBuffTurns is the base duration (tier 0) in the recipient's own
+	// turns. Fixed, not rolled — a support buff the player invests skill
+	// points into shouldn't gamble its duration.
+	BlessBuffTurns = 3
 )
 
 // XP / level constants. Per-character XP and levels (one pool + one
@@ -835,9 +884,27 @@ const (
 	// DebugMenuJukebox is the audio sound-tester: confirm cycles through
 	// and plays the sound bank. Moved here from the top-level pause menu.
 	DebugMenuJukebox
+	// DebugMenuAllSkills toggles g.DebugAllSkills: the battle skill menu lists
+	// every player-castable skill and casts are free.
+	DebugMenuAllSkills
+	// DebugMenuBoostStats is a one-shot ACTION (not a toggle): adds
+	// DebugStatBoost to every base stat of every party member and refreshes
+	// their HP/MP pools (god-mode for testing). Confirming it again stacks
+	// another boost.
+	DebugMenuBoostStats
+	// DebugMenuSkipBattles toggles g.DebugSkipBattles: engaging a pack instantly
+	// resolves it as a win (kills + XP + loot) without entering the battle
+	// scene. Distinct from DebugMenuEnemies (which disables encounters
+	// entirely, with no reward).
+	DebugMenuSkipBattles
 	DebugMenuClose
 )
 
 // DebugMenuCount is the wrap modulus for the debug submenu cursor. Bump by
 // adding a DebugMenuItem constant above this line.
 const DebugMenuCount = int(DebugMenuClose) + 1
+
+// DebugStatBoost is the amount DebugMenuBoostStats adds to every base stat of
+// every party member per activation. Large enough to trivialize fights for
+// testing (and, via the INT/VIT pool refresh, to bankroll free-cast testing).
+const DebugStatBoost = 100

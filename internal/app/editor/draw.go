@@ -944,8 +944,9 @@ func doorSpawnByName(spawns []core.DoorSpawn, name string) (core.DoorSpawn, bool
 // ring on cross-map doors (their target lives in another file — the Validate
 // modal checks those). Doors are few, so this isn't culled.
 func drawDoorLinks(s *State, cell float32) {
-	selfID := core.MapIDFromPath(s.area.Path)
-	sameMap := func(target string) bool { return target == "" || target == "self" || target == selfID }
+	// An empty target is an unset door (drawn as a self-link); otherwise defer
+	// to the canonical self-portal test (SelfMapToken or this map's own id).
+	sameMap := func(target string) bool { return target == "" || core.IsSelfPortal(s.area, target) }
 	for _, d := range s.area.DoorSpawns {
 		cx, cy := s.rect.tileCenter(d.TileX, d.TileZ)
 		if sameMap(d.TargetMap) {
@@ -2236,13 +2237,12 @@ func drawHoverTooltip(s *State, font rl.Font) {
 		ty = mp.Y - h - 8
 	}
 	r := rl.NewRectangle(tx, ty, w, h)
-	bg := rl.NewColor(18, 22, 30, 230)
-	rl.DrawRectangleRec(r, bg)
+	rl.DrawRectangleRec(r, tooltipBG)
 	rl.DrawRectangleLinesEx(r, 1, editorBorderActive)
 	for i, l := range lines {
-		col := rl.NewColor(220, 224, 234, 255)
+		col := tooltipText
 		if i == 0 {
-			col = rl.NewColor(255, 220, 124, 255)
+			col = tooltipHeading
 		}
 		rl.DrawTextEx(font, l,
 			rl.NewVector2(r.X+padding, r.Y+padding+float32(i)*lineH),
@@ -3040,7 +3040,7 @@ func entityListRows(s *State) []entityListRow {
 	}
 	for i, d := range s.area.DoorSpawns {
 		target := d.TargetDoor
-		if d.TargetMap != "" && d.TargetMap != "self" {
+		if d.TargetMap != "" && d.TargetMap != core.SelfMapToken {
 			target = d.TargetMap + "/" + d.TargetDoor
 		}
 		rows = append(rows, entityListRow{

@@ -197,9 +197,16 @@ func LoadResources() (r Resources) {
 	leafTex := loadRepeatTexture(makeLeafPixels(96, 96), 96, 96)
 	r.tree = loadTreeModel(r.lighting.shader, barkTex, leafTex)
 
-	// Field props get their own texture instances so the prop models own
-	// them outright (UnloadModel handles the texture). Sharing would either
-	// double-unload or require external ownership tracking.
+	// Field props each get their OWN texture instance (no cross-prop sharing).
+	// NOTE: raylib's UnloadModel frees the materials' maps array but NOT the
+	// GL textures bound into them (rmodels.c: "the user is responsible for
+	// freeing models shaders and textures"), so propModel.unload() does not
+	// reclaim these. They're effectively held until process exit, where the
+	// driver frees all GPU memory — acceptable because Resources has a single
+	// process-lifetime (Unload runs once, run.go). The per-prop instancing
+	// keeps that exit-time release free of the alias double-free a shared
+	// texture would invite; if Resources ever becomes recreatable mid-run,
+	// these need explicit UnloadTexture tracking to avoid a real leak.
 	rockTex := loadTiledTexture(makeRockWallPixels(128, 128))
 	bushTex := loadRepeatTexture(makeLeafPixels(96, 96), 96, 96)
 
@@ -564,8 +571,15 @@ func isFootprintTail(c byte) bool {
 }
 
 func (r Resources) Unload() {
-	// UnloadModel walks the model's materials and unloads each map's texture,
-	// so wall/floor textures are freed here — no separate UnloadTexture call.
+	// NOTE: raylib's UnloadModel frees the model's meshes + the materials' maps
+	// array, but NOT the GL textures bound into those maps (rmodels.c). So the
+	// wall/floor/ceiling textures (and the prop textures freed via .unload()
+	// below) are NOT reclaimed here — they're held until process exit, where
+	// the driver releases all GPU memory. This is acceptable only because
+	// Unload runs exactly once, at shutdown (run.go); it is NOT a per-scene
+	// teardown. If that ever changes, these textures must be tracked and
+	// UnloadTexture'd explicitly — and any texture aliased across models (see
+	// the enemyTextures dedup note below) de-duped first to avoid a double-free.
 	for _, material := range r.materials {
 		rl.UnloadModel(material.wallModel)
 		rl.UnloadModel(material.floorModel)

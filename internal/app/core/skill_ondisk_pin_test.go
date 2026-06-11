@@ -32,6 +32,10 @@ var skillOnDiskPins = map[SkillID]string{
 	SkillStoneslam:    "stoneslam",
 	SkillRaiseBones:   "raise_bones",
 	SkillScan:         "scan",
+	SkillBless:        "bless",
+	SkillFireball:     "fireball",
+	SkillPoisonCloud:  "poison_cloud",
+	SkillCleanse:      "cleanse",
 }
 
 func TestSkillOnDiskNameIsPinned(t *testing.T) {

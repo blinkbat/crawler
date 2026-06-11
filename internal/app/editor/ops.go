@@ -5,10 +5,8 @@ import (
 	"crawler/internal/app/core/mapfile"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 )
 
 // activeFootprint returns the multi-tile footprint of the active brush,
@@ -407,7 +405,7 @@ func placeDoorAt(s *State, x, z int) {
 		TileX:      x,
 		TileZ:      z,
 		Name:       name,
-		TargetMap:  "self",
+		TargetMap:  core.SelfMapToken,
 		TargetDoor: name,
 		// Default the facing to point away from an adjacent wall (the
 		// door "affixes" to that wall, opening into the room). Falls back
@@ -431,21 +429,30 @@ func doorFacingForCell(a *core.AreaDefinition, x, z int) int {
 	return a.StartFacing
 }
 
+// firstUnusedName returns the first `format`-with-N (N from 1 up) whose
+// rendered string isn't already in `taken`. Shared by the door and
+// custom-enemy placeholder namers so the "auto-pick a free slot name" loop
+// lives in one place (the taken-set build stays per-caller — they walk
+// different slice types).
+func firstUnusedName(taken map[string]bool, format string) string {
+	for i := 1; ; i++ {
+		name := fmt.Sprintf(format, i)
+		if !taken[name] {
+			return name
+		}
+	}
+}
+
 // nextDoorName picks an unused placeholder name for a freshly-placed
 // door. "door_1", "door_2", … — the author renames in the modal. The
 // name needs to be unique within the map so runtime resolution by
 // name is unambiguous.
 func nextDoorName(spawns []core.DoorSpawn) string {
-	taken := make(map[string]struct{}, len(spawns))
+	taken := make(map[string]bool, len(spawns))
 	for _, sp := range spawns {
-		taken[sp.Name] = struct{}{}
+		taken[sp.Name] = true
 	}
-	for i := 1; ; i++ {
-		name := fmt.Sprintf("door_%d", i)
-		if _, dup := taken[name]; !dup {
-			return name
-		}
-	}
+	return firstUnusedName(taken, "door_%d")
 }
 
 // removeSpawnsAt drops every spawn sitting on (x, z), generic over the
@@ -1530,10 +1537,6 @@ func crossMapDoorWarnings(a core.AreaDefinition) []string {
 	if len(a.DoorSpawns) == 0 {
 		return nil
 	}
-	localMapID := ""
-	if a.Path != "" {
-		localMapID = core.MapIDFromPath(a.Path)
-	}
 	// Cache loaded destination maps by id so multiple doors pointing
 	// at the same target each only trigger one disk read.
 	loaded := make(map[string]core.AreaDefinition)
@@ -1543,7 +1546,7 @@ func crossMapDoorWarnings(a core.AreaDefinition) []string {
 			continue // already flagged by reachabilityWarnings
 		}
 		// Same-map portal: just verify the named door exists locally.
-		if d.TargetMap == "self" || d.TargetMap == localMapID {
+		if core.IsSelfPortal(a, d.TargetMap) {
 			if !mapHasDoor(a.DoorSpawns, d.TargetDoor) {
 				out = append(out, fmt.Sprintf("door %q targets self/%s — no matching door in this map", d.Name, d.TargetDoor))
 			}
@@ -1601,14 +1604,6 @@ func performNewMap(s *State, w, h int, floor byte) {
 	s.zoom = 1
 	s.panX, s.panY = 0, 0
 	s.flash("New map")
-}
-
-func mapStem(path string) string {
-	if path == "" {
-		return ""
-	}
-	base := filepath.Base(path)
-	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
 // sanitizeFilename is a thin wrapper over core.SanitizeFilename with

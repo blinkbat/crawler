@@ -1,0 +1,65 @@
+package core
+
+import (
+	"slices"
+	"testing"
+)
+
+// TestCureDebuffs_ClearsDebuffsKeepsBuffAndDefend pins what Cleanse removes:
+// the five curable debuffs, leaving the Bless buff and Defending stance intact,
+// and reporting an accurate cured count.
+func TestCureDebuffs_ClearsDebuffsKeepsBuffAndDefend(t *testing.T) {
+	m := PartyMember{
+		HP: 5, PoisonTurns: 2, SleepTurns: 1, StunTurns: 1, WebbedTurns: 3, ConfusedTurns: 2,
+		Defending: true, BuffTurns: 3, BuffStats: Stats{STR: 1},
+	}
+	if cured := CureDebuffs(&m); cured != 5 {
+		t.Errorf("cured %d, want 5", cured)
+	}
+	if m.PoisonTurns != 0 || m.SleepTurns != 0 || m.StunTurns != 0 || m.WebbedTurns != 0 || m.ConfusedTurns != 0 {
+		t.Errorf("debuffs not all cleared: %+v", m)
+	}
+	if !m.Defending {
+		t.Error("Cleanse wrongly stripped the Defending stance")
+	}
+	if m.BuffTurns != 3 || m.BuffStats.STR != 1 {
+		t.Errorf("Cleanse wrongly stripped the Bless buff: turns=%d stats=%+v", m.BuffTurns, m.BuffStats)
+	}
+
+	// A member with no debuffs reports zero cured.
+	clean := PartyMember{HP: 5}
+	if got := CureDebuffs(&clean); got != 0 {
+		t.Errorf("clean member cured = %d, want 0", got)
+	}
+	// Nil-safe.
+	if got := CureDebuffs(nil); got != 0 {
+		t.Errorf("nil member cured = %d, want 0", got)
+	}
+}
+
+// TestNewSkillTreeNodesGrant verifies the three newly-wired granting nodes
+// (Fireball / Poison Cloud / Cleanse) learn their skill once their root and
+// the node itself are ranked.
+func TestNewSkillTreeNodesGrant(t *testing.T) {
+	cases := []struct {
+		class      PartyClass
+		root, node string
+		skill      SkillID
+	}{
+		{ClassWizard, "firebolt", "fireball", SkillFireball},
+		{ClassThief, "venom-strike", "poison-cloud", SkillPoisonCloud},
+		{ClassCleric, "prayer", "cleanse", SkillCleanse},
+	}
+	for _, c := range cases {
+		m := PartyMember{Class: c.class, SkillPoints: 4}
+		if !BuySkillNode(&m, c.root) {
+			t.Fatalf("%v: buying root %q failed", c.class, c.root)
+		}
+		if !BuySkillNode(&m, c.node) {
+			t.Fatalf("%v: buying node %q failed (prereq not satisfied?)", c.class, c.node)
+		}
+		if !slices.Contains(LearnedSkills(&m), c.skill) {
+			t.Errorf("%v: after ranking %q, LearnedSkills lacks %s", c.class, c.node, SkillName(c.skill))
+		}
+	}
+}

@@ -51,6 +51,10 @@ var skillActionHandlers = map[core.SkillID]actionHandlers{
 	core.SkillVenomStrike:  {setup: setupVenomStrike, apply: applyVenomStrike},
 	core.SkillFrostLance:   {setup: setupFrostLance, apply: applyFrostLance},
 	core.SkillArcBolt:      {setup: setupArcBolt, apply: applyArcBolt},
+	core.SkillBless:        {setup: setupBless, apply: applyBless},
+	core.SkillFireball:     {setup: setupFireball, apply: applyFireball},
+	core.SkillPoisonCloud:  {setup: setupPoisonCloud, apply: applyPoisonCloud},
+	core.SkillCleanse:      {setup: setupCleanse, apply: applyCleanse},
 }
 
 // init asserts the player-castable contract: every PlayerCastable skill
@@ -289,11 +293,7 @@ func handleEnemyStoneslam(ctx enemySpellCtx) {
 	raw := enemySpellDamage(ctx.def, ctx.effect)
 	hits := 0
 	kills := 0
-	for i := range g.Party {
-		m := &g.Party[i]
-		if m.HP <= 0 || m.Ingested {
-			continue
-		}
+	for _, i := range core.AvailablePartyTargets(g.Party) {
 		_, killed := damagePartyMemberDefendable(g, i, raw, core.SkillTagFor(core.SkillStoneslam))
 		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillStoneslam), i)
 		hits++
@@ -388,6 +388,13 @@ func canAffordSkill(actor core.PartyMember, skill core.SkillID) bool {
 // + deduct; routing through here means a future "VIT also affects MP
 // pool" or "MP refunds on cancel" change is one helper.
 func chargeMP(g *core.GameState, skill core.SkillID, label string) bool {
+	// Debug "all skills" makes every cast free — pairs with the skill menu
+	// listing skills the member never paid the MP to learn. This is the single
+	// MP chokepoint (setupTargetedEnemyAndPay routes through here too), so the
+	// one bypass covers every skill.
+	if g.DebugAllSkills {
+		return true
+	}
 	actor := &g.Party[g.Battle.CurrentParty]
 	if !core.SpendSkillMP(actor, skill) {
 		setBattleStatus(g, label+" needs more MP.")
@@ -439,15 +446,15 @@ func vfxKindFor(skill core.SkillID) core.VFXKind {
 		return core.VFXSlash
 	case core.SkillArcBolt:
 		return core.VFXArc
-	case core.SkillFirebolt:
+	case core.SkillFirebolt, core.SkillFireball:
 		return core.VFXEmber
 	case core.SkillSmite:
 		return core.VFXSmite
-	case core.SkillVenomStrike:
+	case core.SkillVenomStrike, core.SkillPoisonCloud:
 		return core.VFXVenom
 	case core.SkillFrostLance:
 		return core.VFXFrost
-	case core.SkillPrayer, core.SkillMassMend:
+	case core.SkillPrayer, core.SkillMassMend, core.SkillBless, core.SkillCleanse:
 		return core.VFXHeal
 	case core.SkillSteal:
 		return core.VFXSteal
@@ -1081,31 +1088,11 @@ func setupWhirlwind(g *core.GameState) bool {
 	return chargeMP(g, core.SkillWhirlwind, "Whirlwind")
 }
 
-// applyAoESkill is the shared body for the charge/sequence AoE damage
-// skills (Whirlwind, Arc Bolt): bump the actor, quality-scale the
-// damage, hit every living enemy, and log the "landed on N" or "caught
-// only air" line. The two handlers used to be byte-for-byte identical
-// apart from the skill id and the two verbs.
-func applyAoESkill(g *core.GameState, skill core.SkillID, skillNoun, hitVerb, emptyVerb string, quality int) bool {
-	actor := &g.Party[g.Battle.CurrentParty]
-	actor.AttackBump = core.BumpDuration
-	damage := scaleSkillDamage(actor, skill, quality)
-	// Single crit roll for the whole sweep — when the dice come up
-	// every enemy caught in the AoE eats the doubled tick.
-	crit, _ := rollSkillCrit(g, actor, skill, quality)
-	damage = applyCritMultiplier(damage, crit, false)
-	hits := applyAoEDamage(g, skill, damage, quality, true)
-	if hits == 0 {
-		setBattleMessage(g, aoeEmptyMessage(skillNoun, emptyVerb))
-	} else {
-		setBattleMessage(g, appendCrit(aoeSkillMessage(actor.Name, skillNoun, hitVerb, hits, damage, quality), crit))
-	}
-	finishActorTurn(g)
-	return true
-}
-
 func applyWhirlwind(g *core.GameState, quality int) bool {
-	return applyAoESkill(g, core.SkillWhirlwind, "Whirlwind", "hits", "catches only air", quality)
+	// SkillWhirlwind carries no Burn/Poison, so applyAoEStatusSkill's per-target
+	// status rolls short-circuit (chance 0) — a pure AoE damage cast. Shares the
+	// one AoE body so the damage/crit/shake/log path can't drift.
+	return applyAoEStatusSkill(g, core.SkillWhirlwind, "Whirlwind", "hits", "catches only air", quality)
 }
 
 // --- Mass Mend (Cleric, charge AoE heal) ---
@@ -1124,12 +1111,8 @@ func applyMassMend(g *core.GameState, quality int) bool {
 	// heal rule. HealWholeParty/HealMember no-op the dead/ingested and clamp
 	// at MaxHP; the HP<MaxHP check here is only the "counts as a mend" tally.
 	healed := 0
-	for i := range g.Party {
-		m := &g.Party[i]
-		if m.HP <= 0 || m.Ingested {
-			continue
-		}
-		if m.HP < m.MaxHP {
+	for _, i := range core.AvailablePartyTargets(g.Party) {
+		if g.Party[i].HP < g.Party[i].MaxHP {
 			healed++
 		}
 		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillMassMend), i)
@@ -1140,6 +1123,42 @@ func applyMassMend(g *core.GameState, quality int) bool {
 	} else {
 		setBattleMessage(g, fmt.Sprintf("%s%s mends %d allies for %d each.", qualityTag(quality), actor.Name, healed, heal))
 	}
+	finishActorTurn(g)
+	return true
+}
+
+// --- Bless (Cleric, press party-wide stat buff) ---
+
+func setupBless(g *core.GameState) bool {
+	// No target gate: Bless always hits the whole living party, so the only
+	// setup step is committing the MP (mirrors Mass Mend's chargeMP setup).
+	return chargeMP(g, core.SkillBless, "Bless")
+}
+
+// applyBless stamps the tier-folded stat buff on every living, non-ingested
+// party member (the caster included). The buff always lands — like Scan, the
+// timing grade is cosmetic — so there's no proc roll. EffectiveSkillEffect
+// folds the Conviction tree's purchased tiers (magnitude + duration) into the
+// base BuffStats / BuffTurns before they're written, and a re-cast replaces
+// the existing buff rather than stacking (matching the no-stack rule every
+// other status follows).
+func applyBless(g *core.GameState, quality int) bool {
+	actor := &g.Party[g.Battle.CurrentParty]
+	actor.AttackBump = core.BumpDuration
+	effect := core.EffectiveSkillEffect(actor, core.SkillBless)
+	blessed := 0
+	for _, i := range core.AvailablePartyTargets(g.Party) {
+		m := &g.Party[i]
+		m.BuffStats = effect.BuffStats
+		m.BuffTurns = effect.BuffTurns
+		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillBless), i)
+		blessed++
+	}
+	// Report the EFFECTIVE per-stat boost (effect.BuffStats.STR — all four
+	// buffed stats share the same magnitude), not the base constant, so the
+	// log line stays honest once Conviction-tree tiers raise it.
+	setBattleMessage(g, fmt.Sprintf("%s%s blesses %d allies (+%d stats, %d turns).",
+		qualityTag(quality), actor.Name, blessed, effect.BuffStats.STR, effect.BuffTurns))
 	finishActorTurn(g)
 	return true
 }
@@ -1259,7 +1278,116 @@ func setupArcBolt(g *core.GameState) bool {
 }
 
 func applyArcBolt(g *core.GameState, quality int) bool {
-	return applyAoESkill(g, core.SkillArcBolt, "Arc Bolt", "arcs across", "dissipates with no target", quality)
+	// Routed through applyAoEStatusSkill (not the old status-free AoE body) so
+	// Arc Bolt's T3 "+15% Burn" delta actually procs per arc target — the
+	// previous applyAoEDamage path silently dropped it. T0-T2 carry BurnChance
+	// 0, so the per-target roll short-circuits and they're unchanged.
+	return applyAoEStatusSkill(g, core.SkillArcBolt, "Arc Bolt", "arcs across", "dissipates with no target", quality)
+}
+
+// --- AoE skills (shared body; per-target status when the skill carries it) ---
+
+// applyAoEStatusSkill is the single body for every whole-pack AoE skill
+// (Whirlwind, Arc Bolt, Fireball, Poison Cloud). It bumps the actor,
+// quality-scales the damage with one crit roll for the whole sweep, hits every
+// living enemy, and — per target — rolls the skill's Burn / Poison from the
+// tier-augmented effect against that enemy's WIS (the same tryProcStatus the
+// single-target casts use). A skill with no Burn/Poison (Whirlwind) has
+// chance 0, so the roll short-circuits and it's pure damage; only the status
+// the skill actually carries can proc. The lower-level applyAoEDamage remains
+// for the multi-PASS Swipe (which loops it per press).
+func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, skillNoun, hitVerb, emptyVerb string, quality int) bool {
+	actor := &g.Party[g.Battle.CurrentParty]
+	actor.AttackBump = core.BumpDuration
+	effect := core.EffectiveSkillEffect(actor, skill)
+	damage := scaleSkillDamage(actor, skill, quality)
+	crit, _ := rollSkillCrit(g, actor, skill, quality)
+	damage = applyCritMultiplier(damage, crit, false)
+	tag := core.SkillTagFor(skill)
+	vfx := vfxKindFor(skill)
+	hits := 0
+	afflicted := 0
+	for slot, m := range core.BattleMembers(g) {
+		if !m.Alive {
+			continue
+		}
+		_, defeated := damageEnemy(g, slot, damage, quality, tag)
+		core.EnqueueEnemyVFX(g, vfx, slot)
+		hits++
+		enemy := core.BattleMemberAt(g, slot)
+		resistWIS := core.EnemyInfoFor(*enemy).Stats.WIS
+		if tryProcStatus(g.Rand(), &enemy.BurnTurns, defeated, effect.BurnChance, quality, 0, effect.BurnDuration, resistWIS) {
+			afflicted++
+		}
+		if tryProcStatus(g.Rand(), &enemy.PoisonTurns, defeated, effect.PoisonChance, quality, 0, effect.PoisonDuration, resistWIS) {
+			afflicted++
+		}
+	}
+	if hits == 0 {
+		setBattleMessage(g, aoeEmptyMessage(skillNoun, emptyVerb))
+		finishActorTurn(g)
+		return true
+	}
+	// AoE casts earn the big camera punch (mirrors applyAoEDamage's shake=true).
+	core.TriggerCombatShake(&g.Battle, core.CombatShakeBigPeak, core.CombatShakeBigDur)
+	msg := appendCrit(aoeSkillMessage(actor.Name, skillNoun, hitVerb, hits, damage, quality), crit)
+	if afflicted > 0 {
+		msg = fmt.Sprintf("%s %d afflicted.", msg, afflicted)
+	}
+	setBattleMessage(g, msg)
+	finishActorTurn(g)
+	return true
+}
+
+// --- Fireball (Wizard, charge AoE fire + per-target Burn) ---
+
+func setupFireball(g *core.GameState) bool {
+	return chargeMP(g, core.SkillFireball, "Fireball")
+}
+
+func applyFireball(g *core.GameState, quality int) bool {
+	return applyAoEStatusSkill(g, core.SkillFireball, "Fireball", "engulfs", "fizzles with no target", quality)
+}
+
+// --- Poison Cloud (Thief, sequence AoE toxin + per-target Poison) ---
+
+func setupPoisonCloud(g *core.GameState) bool {
+	return chargeMP(g, core.SkillPoisonCloud, "Poison Cloud")
+}
+
+func applyPoisonCloud(g *core.GameState, quality int) bool {
+	return applyAoEStatusSkill(g, core.SkillPoisonCloud, "Poison Cloud", "blankets", "disperses with no target", quality)
+}
+
+// --- Cleanse (Cleric, press single-ally status cure) ---
+
+func setupCleanse(g *core.GameState) bool {
+	// Pre-cost target validation (mirrors setupPrayer): a dead / unselected
+	// ally refuses the cast WITHOUT spending MP.
+	if g.Battle.PartyTarget < 0 || g.Battle.PartyTarget >= len(g.Party) {
+		setBattleStatus(g, "No ally selected.")
+		return false
+	}
+	if g.Party[g.Battle.PartyTarget].HP <= 0 {
+		setBattleStatus(g, "Cleanse can't reach the fallen.")
+		return false
+	}
+	return chargeMP(g, core.SkillCleanse, "Cleanse")
+}
+
+func applyCleanse(g *core.GameState, quality int) bool {
+	actor := &g.Party[g.Battle.CurrentParty]
+	actor.AttackBump = core.BumpDuration
+	target := &g.Party[g.Battle.PartyTarget]
+	cured := core.CureDebuffs(target)
+	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillCleanse), g.Battle.PartyTarget)
+	if cured == 0 {
+		setBattleMessage(g, fmt.Sprintf("%s%s cleanses %s — nothing ailed them.", qualityTag(quality), actor.Name, target.Name))
+	} else {
+		setBattleMessage(g, fmt.Sprintf("%s%s cleanses %s — %d cured.", qualityTag(quality), actor.Name, target.Name, cured))
+	}
+	finishActorTurn(g)
+	return true
 }
 
 // --- Damage / heal helpers (unchanged from previous behavior) ---
@@ -1536,6 +1664,18 @@ func tickWebbedAfterPartyTurn(g *core.GameState, actor core.ActorRef) {
 // helper just drains the counter.
 func tickConfusedAfterPartyTurn(g *core.GameState, actor core.ActorRef) {
 	tickPartyStatusCounter(g, actor, func(m *core.PartyMember) *int { return &m.ConfusedTurns }, "%s's head clears.")
+}
+
+// tickBlessAfterPartyTurn drains the Bless buff counter at the end of the
+// blessed member's own turn — same non-damaging seam as Webbed / Confused, so
+// a buff lasts the recipient's BuffTurns turns. The stat boost stays live
+// while BuffTurns > 0 (EffectiveStats reads it); this only counts it down. The
+// per-stat magnitude (BuffStats) is left intact while the counter runs and
+// zeroed wholesale on battle exit by ClearPartyTransientStatuses — leaving the
+// stale magnitude here is harmless because EffectiveStats gates entirely on
+// BuffTurns > 0.
+func tickBlessAfterPartyTurn(g *core.GameState, actor core.ActorRef) {
+	tickPartyStatusCounter(g, actor, func(m *core.PartyMember) *int { return &m.BuffTurns }, "%s's blessing fades.")
 }
 
 // tickPartyStatusCounter is the shared body the non-damaging

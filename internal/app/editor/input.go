@@ -957,7 +957,7 @@ func openSaveAsModal(s *State) {
 	// point — topbar button, Ctrl+S on an unnamed map, the confirm-dirty
 	// "Save" branch — pre-fills the same sensible name instead of one path
 	// showing the title and another showing an empty field.
-	stem := mapStem(s.area.Path)
+	stem := core.MapIDFromPath(s.area.Path)
 	if stem == "" {
 		stem = sanitizeFilename(s.area.Name)
 	}
@@ -1969,6 +1969,12 @@ func openSelectedMap(s *State) Action {
 	s.undo = nil
 	s.redo = nil
 	s.dirty = false
+	// The area was replaced wholesale — invalidate the content-derived caches
+	// the same way performNewMap / undoOne / redoOne do, or the metadata
+	// panel's reachability badge and the hover tooltip keep showing the
+	// PREVIOUS map's data until the next edit happens to flip these.
+	s.reachValid = false
+	s.contentEpoch++
 	closeModal(s)
 	s.flash("Opened " + core.MapIDFromPath(path))
 	return ActionNone

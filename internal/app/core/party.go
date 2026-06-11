@@ -187,6 +187,20 @@ type SkillEffect struct {
 	// ActionMenu skill won't read as AoE the way the old shape-heuristic
 	// risked).
 	AppliesAOEEnemies bool
+	// BuffStats / BuffTurns declare a stat buff a skill grants its target(s)
+	// for BuffTurns of their turns (Cleric's Bless is the first user). The
+	// apply path stamps both onto the recipient's BuffStats / BuffTurns, where
+	// EffectiveStats folds them in while the counter runs. Zero BuffTurns =
+	// the skill grants no buff, so a non-buff skill that picks up the
+	// SkillEffect by accident applies nothing. Pairs with SkillTagBuff +
+	// AppliesAOEPartyBuff for the party-wide case.
+	BuffStats Stats
+	BuffTurns int
+	// AppliesAOEPartyBuff flags a buff skill whose BuffStats/BuffTurns land on
+	// EVERY living party member instead of a single ally — the buff-side
+	// mirror of AppliesAOEParty (damage) and AppliesAOEEnemies. Bless sets it;
+	// the apply handler loops the living party stamping the buff on each.
+	AppliesAOEPartyBuff bool
 }
 
 // Party stats post-difficulty pass. Numbers are deliberately tighter than
@@ -278,6 +292,32 @@ var skillDefinitions = []skillDefinition{
 	// lands at any timing grade (it's information, not a chance roll).
 	// Tag None — never touches armor / resist math.
 	{Skill: SkillScan, Name: "Scan", Description: "Identify the target's kind — reveals its HP (here and in the bestiary). No damage.", Cost: 2, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigamePress, Effect: SkillEffect{}, PlayerCastable: true, NoUpgrades: true},
+	// Bless (Cleric, Conviction tree): party-wide stat buff. TargetMode
+	// ActionMenu (no target pick — it always hits the whole party, like Mass
+	// Mend / Whirlwind), Utility kind (the buff doesn't stat-scale), Buff tag
+	// (the first SkillTagBuff user; bypasses armor/MDef, though it deals no
+	// damage anyway). Press minigame keeps it in the standard flow; the grade
+	// is cosmetic — the buff always lands. AppliesAOEPartyBuff drives the
+	// loop-the-party apply. Tier upgrades (skilltree.go) stack magnitude +
+	// duration onto the base BuffStats / BuffTurns below.
+	{Skill: SkillBless, Name: "Bless", Description: "Bless the whole party — raises STR, DEX, INT and WIS for a few turns. No damage.", Cost: 4, TargetMode: ActionMenu, Kind: SkillKindUtility, Tag: SkillTagBuff, Minigame: MinigamePress, Effect: SkillEffect{BuffStats: Stats{STR: BlessBuffPerStat, DEX: BlessBuffPerStat, INT: BlessBuffPerStat, WIS: BlessBuffPerStat}, BuffTurns: BlessBuffTurns, AppliesAOEPartyBuff: true}, PlayerCastable: true},
+	// Fireball (Wizard, Pyromancy tree): the AoE counterpart to Firebolt.
+	// INT-scaled magic damage to every living enemy (AppliesAOEEnemies) plus a
+	// per-target Burn roll. Charge minigame. Pricier than Arc Bolt (6) because
+	// it also burns. Applied via applyAoEStatusSkill in battle/actions.go.
+	{Skill: SkillFireball, Name: "Fireball", Description: "INT-scaled magic fire across the whole pack. Charge — per-target Burn chance.", Cost: 7, TargetMode: ActionMenu, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 1, AppliesAOEEnemies: true, BurnChance: FireballBurnChance, BurnMinTurns: 2, BurnMaxTurns: 3}, PlayerCastable: true},
+	// Poison Cloud (Thief, Venomancy tree): the AoE counterpart to Venom Strike.
+	// Light STR-scaled damage to every living enemy plus a per-target Poison
+	// roll. Phys-tagged + Melee-kind to mirror Venom Strike (the direct damage
+	// is minor — the whole-pack DoT is the point; poison ticks bypass armor
+	// regardless). Sequence minigame, same rhythm identity as Venom Strike.
+	{Skill: SkillPoisonCloud, Name: "Poison Cloud", Description: "STR-scaled toxin across the whole pack. Sequence — per-target Poison chance.", Cost: 6, TargetMode: ActionMenu, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigameSequence, Effect: SkillEffect{Damage: 1, AppliesAOEEnemies: true, PoisonChance: PoisonCloudPoisonChance, PoisonMinTurns: PoisonMinTurns, PoisonMaxTurns: PoisonMaxTurns}, PlayerCastable: true},
+	// Cleanse (Cleric, Mercy tree): single-ally status cure — no damage, no
+	// scaling. Clears the curable combat debuffs via core.CureDebuffs (leaves
+	// the Bless buff + Defending intact). NoUpgrades: a cure has no damage/proc
+	// ladder to climb, same as Scan. Press minigame; the cure always lands
+	// (grade cosmetic).
+	{Skill: SkillCleanse, Name: "Cleanse", Description: "Cure an ally's Poison, Sleep, Stun, Web and Confusion. No damage.", Cost: 3, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigamePress, Effect: SkillEffect{}, PlayerCastable: true, NoUpgrades: true},
 	// Sleep is the goblin-mage's signature. Magic-tagged so armor doesn't
 	// gate the proc; press-minigame so the cast resolves quickly. Damage
 	// is 0 — the only effect is the status. The mage doesn't pay MP
@@ -338,13 +378,22 @@ func SkillHasNoUpgrades(s SkillID) bool {
 // one has a handler registered, and reusable for any future "what
 // skills can I learn?" UI that needs the canonical list.
 func PlayerCastableSkills() []SkillID {
-	out := make([]SkillID, 0, len(skillDefinitions))
+	return PlayerCastableSkillsInto(make([]SkillID, 0, len(skillDefinitions)))
+}
+
+// PlayerCastableSkillsInto is the buffer-reusing form of PlayerCastableSkills
+// (re-sliced to length 0) for the per-frame caller: the battle skill menu's
+// debug "all skills" mode rebuilds this list every frame the submenu is open.
+// Pass nil to allocate. The set is static (registry-derived), so order is the
+// skillDefinitions order.
+func PlayerCastableSkillsInto(buf []SkillID) []SkillID {
+	buf = buf[:0]
 	for _, def := range skillDefinitions {
 		if def.PlayerCastable {
-			out = append(out, def.Skill)
+			buf = append(buf, def.Skill)
 		}
 	}
-	return out
+	return buf
 }
 
 // skillByID is the O(1) lookup table for skillDefinitions. Built once at
@@ -978,6 +1027,11 @@ const (
 	PartyStatusStunned
 	PartyStatusAsleep
 	PartyStatusPoisoned
+	// PartyStatusBlessed is the lone POSITIVE counted status today (Cleric's
+	// Bless). It sits just above Defending in priority — below every threat so
+	// a blessed-and-poisoned member still surfaces the poison — and, like
+	// Defending, doesn't flicker (good news shouldn't read as an alarm).
+	PartyStatusBlessed
 	PartyStatusDefending
 	// PartyStatusCount is the length-assert sentinel for any render-side
 	// table indexed by PartyStatusKind. New status kinds slot in above
@@ -1016,6 +1070,8 @@ func PartyStatus(m PartyMember) (kind PartyStatusKind, turns int) {
 		return PartyStatusAsleep, m.SleepTurns
 	case m.PoisonTurns > 0:
 		return PartyStatusPoisoned, m.PoisonTurns
+	case m.BuffTurns > 0:
+		return PartyStatusBlessed, m.BuffTurns
 	case m.Defending:
 		return PartyStatusDefending, 0
 	}
@@ -1042,6 +1098,8 @@ func PartyStatusLabel(kind PartyStatusKind) string {
 		return "ASLEEP"
 	case PartyStatusPoisoned:
 		return "POISONED"
+	case PartyStatusBlessed:
+		return "BLESSED"
 	case PartyStatusDefending:
 		return "DEFENDING"
 	}
@@ -1111,6 +1169,19 @@ var statSetters = []func(*Stats, int){
 	StatSPD: func(s *Stats, v int) { s.SPD = v },
 }
 
+// SumStats returns the per-field sum of two stat blocks. Used to fold a
+// skill's per-tier BuffStats delta into its base effect (EffectiveSkillEffect)
+// — no clamping, since buff deltas are authored non-negative; the floor-at-0
+// guard lives at the EffectiveStats fold site where a hypothetical debuff
+// would matter.
+func SumStats(a, b Stats) Stats {
+	var out Stats
+	for s := Stat(0); s < StatCount; s++ {
+		statSetters[s](&out, statTable[s].Get(a)+statTable[s].Get(b))
+	}
+	return out
+}
+
 // AdjustStat applies delta to the named stat, clamping at zero. Used
 // by the custom-enemy editor's +/- buttons. Single seam so a future
 // per-stat range cap or "you can't drop VIT below 1 or the HP math
@@ -1124,6 +1195,26 @@ func AdjustStat(s *Stats, st Stat, delta int) {
 		v = 0
 	}
 	statSetters[st](s, v)
+}
+
+// DebugBoostParty adds `amount` to every base stat of every party member and
+// refreshes their derived pools the same way the per-point level-up Derive
+// hooks do — MaxHP recomputed authoritatively from the new VIT, MaxMP grown by
+// MPPerINT per added INT point — then tops HP/MP off (reviving the downed,
+// since this is a god-mode test button). Combat re-reads stats through
+// EffectiveStats, so a mid-battle boost takes effect immediately. Wired to the
+// Debug submenu's "Boost Stats" row.
+func DebugBoostParty(party []PartyMember, amount int) {
+	for i := range party {
+		m := &party[i]
+		for s := Stat(0); s < StatCount; s++ {
+			AdjustStat(&m.Stats, s, amount)
+		}
+		m.MaxHP = MaxHPFor(m.Stats)
+		m.MaxMP += amount * MPPerINT
+		m.HP = m.MaxHP
+		m.MP = m.MaxMP
+	}
 }
 
 // statDescriptions is the per-stat one-liner the level-up modal
