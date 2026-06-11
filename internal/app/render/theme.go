@@ -167,11 +167,16 @@ var (
 	statusIngested  = mute(rl.NewColor(200, 132, 220, 240))
 	statusDefending = mute(rl.NewColor(132, 196, 255, 240))
 	statusDown      = mute(rl.NewColor(220, 102, 102, 235))
-	// statusBlessed is the lone POSITIVE buff accent — a warm holy gilt that
-	// reads as a blessing rather than the green/amber threat hues. Distinct
-	// from statusStun's flatter yellow by its warmer, gilt-leaning tone (and
-	// it never flickers).
+	// statusBlessed is a POSITIVE buff accent — a warm holy gilt that reads as
+	// a blessing rather than the green/amber threat hues. Distinct from
+	// statusStun's flatter yellow by its warmer, gilt-leaning tone (and it
+	// never flickers).
 	statusBlessed = mute(rl.NewColor(244, 212, 128, 240))
+	// statusRegen is the POSITIVE heal-over-time accent (Renewal) — a fresh
+	// mint green that reads as "healing," kept cleaner/brighter than
+	// statusPoison's sickly olive so the two greens don't confuse. Never
+	// flickers (it's good news).
+	statusRegen = mute(rl.NewColor(120, 224, 150, 240))
 	// Outline tints paired with the fills above for the enemy-pill
 	// silhouette. Lighter / more saturated than the fill so the pill
 	// reads as a "glow with a hard rim" against the panel.

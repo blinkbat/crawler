@@ -217,10 +217,10 @@ func ReleaseAllIngested(party []PartyMember) {
 // every party member at battle exit — EXCEPT Poison, which lingers as a
 // lasting wound. It never touches HP, so the dead stay dead. Per the
 // current design call, only "dead" and "poisoned" survive a fight;
-// Sleep / Stun / Webbed / Confused, the Defending stance, and any active
-// Bless buff all clear the moment the battle ends. (Ingest is released
-// separately via ReleaseAllIngested, which also restores the swallowed
-// member.)
+// Sleep / Stun / Webbed / Confused, the Defending stance, and the positive
+// Bless buff + Renewal regen all clear the moment the battle ends. (Ingest is
+// released separately via ReleaseAllIngested, which also restores the
+// swallowed member.)
 // CureDebuffs clears the curable NEGATIVE combat statuses off a single member
 // — Poison, Sleep, Stun, Webbed, Confused — and returns how many were active
 // (so the caller can phrase "nothing to cure" vs "cured N"). It deliberately
@@ -252,6 +252,8 @@ func ClearPartyTransientStatuses(party []PartyMember) {
 		party[i].Defending = false
 		party[i].BuffTurns = 0
 		party[i].BuffStats = Stats{}
+		party[i].RegenTurns = 0
+		party[i].RegenPerTurn = 0
 	}
 }
 
@@ -457,6 +459,18 @@ func PackLeader(p Pack) Enemy {
 		return Enemy{}
 	}
 	return p.Members[PackLeaderSlot(p)]
+}
+
+// PackLeaderKind returns just the EnemyKind of the highest-Tier member (the
+// zero kind for an empty pack). The per-frame field-billboard path
+// (render.drawFieldPacks) needs only the kind, so this avoids PackLeader's
+// full Enemy copy (which embeds the pointer-bearing DefinitionOverride) once
+// per pack per frame.
+func PackLeaderKind(p Pack) EnemyKind {
+	if len(p.Members) == 0 {
+		return Enemy{}.Kind
+	}
+	return p.Members[PackLeaderSlot(p)].Kind
 }
 
 // PackXPValue is the sum of XPValue across every member of a pack —

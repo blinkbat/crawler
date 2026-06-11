@@ -139,6 +139,28 @@ func EquippedWeapon(m PartyMember) WeaponType {
 	return WeaponNone
 }
 
+// WeaponHitVFX returns the impact VFX kind for a BASIC attack with this weapon,
+// driving both the particle burst and the clarity glyph (impact ring vs slash
+// stroke). Blunt strikes — unarmed fists, club, hammer — and ranged projectile
+// hits read as a percussive VFXImpact ("thud"), while edged melee (sword, axe,
+// spear, dagger, rapier, halberd, greataxe, two-hander) reads as a VFXSlash
+// "cut." So an unarmed punch or a hammer blow shows an impact, not a slice. Out
+// of range falls back to VFXImpact (the unarmed default, matching
+// WeaponAccuracyStat's STR-fists fallback).
+func WeaponHitVFX(wt WeaponType) VFXKind {
+	if wt < 0 || wt >= WeaponTypeCount {
+		return VFXImpact
+	}
+	switch wt {
+	case WeaponNone, WeaponClub, WeaponHammer:
+		return VFXImpact
+	}
+	if WeaponIsRanged(wt) {
+		return VFXImpact
+	}
+	return VFXSlash
+}
+
 // memberAttackAccuracy is the basic-attack hit chance [0,1] for a member:
 // the shared accuracy curve over the governing stat of their equipped
 // weapon (STR for heavy / unarmed, DEX for light + ranged) at the given

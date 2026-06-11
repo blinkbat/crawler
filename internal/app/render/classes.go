@@ -228,12 +228,19 @@ func drawClassGlyphThief(cx, cy, r float32, col color.RGBA) {
 // medallion. The inner field reads as the negative space inside the
 // star's five "rays" so the silhouette doesn't go solid at small
 // sizes.
+// wizardGlyphVerts is a reused scratch for the 10 star vertices below. The
+// render path is single-threaded and this glyph draws EVERY frame on the
+// always-visible party ribbon (the Wizard card), so a package-level array
+// avoids a per-frame escaping heap slice — same scratch pattern as
+// torchPosBuf / the status-glyph spoke tables elsewhere in render.
+var wizardGlyphVerts [10]rl.Vector2
+
 func drawClassGlyphWizard(cx, cy, r float32, col color.RGBA) {
 	const points = 5
 	outer := r
 	inner := r * 0.45
 	angleStart := -math.Pi / 2 // start at top
-	verts := make([]rl.Vector2, points*2)
+	verts := wizardGlyphVerts[:]
 	for i := 0; i < points*2; i++ {
 		angle := angleStart + float64(i)*math.Pi/float64(points)
 		radius := outer

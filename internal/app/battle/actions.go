@@ -55,6 +55,8 @@ var skillActionHandlers = map[core.SkillID]actionHandlers{
 	core.SkillFireball:     {setup: setupFireball, apply: applyFireball},
 	core.SkillPoisonCloud:  {setup: setupPoisonCloud, apply: applyPoisonCloud},
 	core.SkillCleanse:      {setup: setupCleanse, apply: applyCleanse},
+	core.SkillSecondWind:   {setup: setupSecondWind, apply: applySecondWind},
+	core.SkillRenewal:      {setup: setupRenewal, apply: applyRenewal},
 }
 
 // init asserts the player-castable contract: every PlayerCastable skill
@@ -454,7 +456,7 @@ func vfxKindFor(skill core.SkillID) core.VFXKind {
 		return core.VFXVenom
 	case core.SkillFrostLance:
 		return core.VFXFrost
-	case core.SkillPrayer, core.SkillMassMend, core.SkillBless, core.SkillCleanse:
+	case core.SkillPrayer, core.SkillMassMend, core.SkillBless, core.SkillCleanse, core.SkillSecondWind, core.SkillRenewal:
 		return core.VFXHeal
 	case core.SkillSteal:
 		return core.VFXSteal
@@ -801,7 +803,11 @@ func applyAttack(g *core.GameState, quality int) bool {
 	crit, _ := rollSkillCrit(g, attacker, core.SkillNone, quality)
 	rawDamage = applyCritMultiplier(rawDamage, crit, false)
 	dealt, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagPhys)
-	core.EnqueueEnemyVFX(g, core.VFXSlash, g.Battle.EnemyIndex)
+	// Glyph/particle keyed to the weapon: an unarmed fist or a blunt club/hammer
+	// (and ranged strikes) reads as a percussive impact; an edged weapon reads as
+	// a slash. Basic attacks are the only weapon-driven swing — skills pick their
+	// VFX via vfxKindFor.
+	core.EnqueueEnemyVFX(g, core.WeaponHitVFX(core.EquippedWeapon(*attacker)), g.Battle.EnemyIndex)
 	setBattleMessage(g, appendCrit(attackResultMessage(attacker.Name, target, dealt, quality, defeated), crit))
 	finishActorTurn(g)
 	return true
@@ -877,21 +883,29 @@ func multiPressPasses(t core.TimingState, quality int) int {
 	return 1
 }
 
-// --- Prayer (Cleric, heals an ally) ---
-
-func setupPrayer(g *core.GameState) bool {
-	// Pre-cost target validation: a dead / unselected ally refuses the
-	// cast WITHOUT spending MP, since the player is being asked to pick
-	// a different target rather than burning their cast.
+// setupTargetedAllyAndPay is the single-ally counterpart of
+// setupTargetedEnemyAndPay: confirm a LIVING party member is targeted, then
+// deduct the skill's MP. A dead / unselected ally refuses WITHOUT spending MP
+// (the player is being asked to re-pick, not to burn the cast). The
+// no-selection message is shared; deadMsg is the per-skill refusal for a downed
+// target (Prayer "cannot revive", Cleanse/Renewal "can't reach the fallen") so
+// a future single-ally heal can't drift on the validation shape.
+func setupTargetedAllyAndPay(g *core.GameState, skill core.SkillID, label, deadMsg string) bool {
 	if g.Battle.PartyTarget < 0 || g.Battle.PartyTarget >= len(g.Party) {
 		setBattleStatus(g, "No ally selected.")
 		return false
 	}
 	if g.Party[g.Battle.PartyTarget].HP <= 0 {
-		setBattleStatus(g, "Prayer cannot revive.")
+		setBattleStatus(g, deadMsg)
 		return false
 	}
-	return chargeMP(g, core.SkillPrayer, "Prayer")
+	return chargeMP(g, skill, label)
+}
+
+// --- Prayer (Cleric, heals an ally) ---
+
+func setupPrayer(g *core.GameState) bool {
+	return setupTargetedAllyAndPay(g, core.SkillPrayer, "Prayer", "Prayer cannot revive.")
 }
 
 func applyPrayer(g *core.GameState, quality int) bool {
@@ -1151,6 +1165,15 @@ func applyBless(g *core.GameState, quality int) bool {
 		m := &g.Party[i]
 		m.BuffStats = effect.BuffStats
 		m.BuffTurns = effect.BuffTurns
+		// The caster is the CURRENT actor, so finishActorTurn's end-of-turn drain
+		// (tickBlessAfterPartyTurn) immediately ticks THEIR copy down one before
+		// they act again — costing the caster a turn of their own blessing that
+		// allies (drained on their own later turns) keep. Grant the caster one
+		// extra so every blessed member gets the full effect.BuffTurns of useful
+		// duration. Re-casting overwrites, so this never compounds.
+		if i == g.Battle.CurrentParty {
+			m.BuffTurns++
+		}
 		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillBless), i)
 		blessed++
 	}
@@ -1362,17 +1385,7 @@ func applyPoisonCloud(g *core.GameState, quality int) bool {
 // --- Cleanse (Cleric, press single-ally status cure) ---
 
 func setupCleanse(g *core.GameState) bool {
-	// Pre-cost target validation (mirrors setupPrayer): a dead / unselected
-	// ally refuses the cast WITHOUT spending MP.
-	if g.Battle.PartyTarget < 0 || g.Battle.PartyTarget >= len(g.Party) {
-		setBattleStatus(g, "No ally selected.")
-		return false
-	}
-	if g.Party[g.Battle.PartyTarget].HP <= 0 {
-		setBattleStatus(g, "Cleanse can't reach the fallen.")
-		return false
-	}
-	return chargeMP(g, core.SkillCleanse, "Cleanse")
+	return setupTargetedAllyAndPay(g, core.SkillCleanse, "Cleanse", "Cleanse can't reach the fallen.")
 }
 
 func applyCleanse(g *core.GameState, quality int) bool {
@@ -1386,6 +1399,57 @@ func applyCleanse(g *core.GameState, quality int) bool {
 	} else {
 		setBattleMessage(g, fmt.Sprintf("%s%s cleanses %s — %d cured.", qualityTag(quality), actor.Name, target.Name, cured))
 	}
+	finishActorTurn(g)
+	return true
+}
+
+// --- Second Wind (Warrior, charge flat self-heal) ---
+
+func setupSecondWind(g *core.GameState) bool {
+	// No target pick (ActionMenu, self-heal) — just commit the MP.
+	return chargeMP(g, core.SkillSecondWind, "Second Wind")
+}
+
+func applySecondWind(g *core.GameState, quality int) bool {
+	actor := &g.Party[g.Battle.CurrentParty]
+	actor.AttackBump = core.BumpDuration
+	// SkillHealFor on a Utility-kind skill returns the flat Effect.Heal (no WIS
+	// scaling); ScaleHeal applies the timing quality on top.
+	heal := core.ScaleHeal(core.SkillHealFor(actor, core.SkillSecondWind), quality)
+	if healPartyMember(g, g.Battle.CurrentParty, heal) {
+		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillSecondWind), g.Battle.CurrentParty)
+		setBattleMessage(g, fmt.Sprintf("%s%s catches a second wind — recovers %d HP.", qualityTag(quality), actor.Name, heal))
+	} else {
+		setBattleMessage(g, fmt.Sprintf("%s%s is already at full health.", qualityTag(quality), actor.Name))
+	}
+	finishActorTurn(g)
+	return true
+}
+
+// --- Renewal (Cleric, charge heal-over-time on one ally) ---
+
+func setupRenewal(g *core.GameState) bool {
+	return setupTargetedAllyAndPay(g, core.SkillRenewal, "Renewal", "Renewal can't reach the fallen.")
+}
+
+func applyRenewal(g *core.GameState, quality int) bool {
+	actor := &g.Party[g.Battle.CurrentParty]
+	actor.AttackBump = core.BumpDuration
+	effect := core.EffectiveSkillEffect(actor, core.SkillRenewal)
+	// Snapshot the per-turn heal at cast: Renewal is Heal-kind so SkillHealFor
+	// folds the caster's WIS, and ScaleHeal folds the timing quality. Floored
+	// at 1 so a regen always does something. RegenTurns is the (tier-augmented)
+	// fixed duration. Re-casting replaces the existing regen (no stacking).
+	perTurn := core.ScaleHeal(core.SkillHealFor(actor, core.SkillRenewal), quality)
+	if perTurn < 1 {
+		perTurn = 1
+	}
+	target := &g.Party[g.Battle.PartyTarget]
+	target.RegenPerTurn = perTurn
+	target.RegenTurns = effect.RegenTurns
+	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillRenewal), g.Battle.PartyTarget)
+	setBattleMessage(g, fmt.Sprintf("%s%s lays a renewal on %s — +%d HP at the end of their next %d turns.",
+		qualityTag(quality), actor.Name, target.Name, perTurn, effect.RegenTurns))
 	finishActorTurn(g)
 	return true
 }
@@ -1601,10 +1665,13 @@ func poisonTickMessage(subject string, dealt int, fatal bool) string {
 func applyPartyPoisonTick(g *core.GameState, index int) bool {
 	member := &g.Party[index]
 	member.PoisonTurns--
-	// damagePartyMember returns true on the fatal hit; use it as the
-	// authoritative kill signal so a future "save at 1 HP" mechanic in
-	// damagePartyMember can't desync from the message we emit here.
-	dealt, killed := damagePartyMember(g, index, core.PoisonTickDamage, core.SkillTagMagic)
+	// damagePartyMemberPoison returns true on the fatal hit; use it as the
+	// authoritative kill signal so a future "save at 1 HP" mechanic can't desync
+	// from the message we emit here. NOTE: it deliberately bypasses the ingested
+	// lockout in damagePartyMember — tickPoisonForIngestedParty fires this for
+	// ingested members, and poison is designed to keep ticking on ingested prey
+	// (otherwise ingest would silently zero the DoT and become a free escape).
+	dealt, killed := damagePartyMemberPoison(g, index)
 	setBattleMessage(g, poisonTickMessage(member.Name, dealt, killed))
 	return killed
 }
@@ -1676,6 +1743,40 @@ func tickConfusedAfterPartyTurn(g *core.GameState, actor core.ActorRef) {
 // BuffTurns > 0.
 func tickBlessAfterPartyTurn(g *core.GameState, actor core.ActorRef) {
 	tickPartyStatusCounter(g, actor, func(m *core.PartyMember) *int { return &m.BuffTurns }, "%s's blessing fades.")
+}
+
+// tickRegenAfterPartyTurn applies one tick of the Renewal heal-over-time at the
+// END of the regenerating member's own turn — the positive mirror of
+// tickPoisonAfterPartyTurn. It can't use tickPartyStatusCounter (that seam only
+// drains a counter, it doesn't heal), so it inlines the same actor-kind / HP /
+// counter guards and routes the heal through healPartyMember (which clamps at
+// MaxHP, flashes, and no-ops a dead/ingested member). Party-only — no enemy
+// applies regen.
+func tickRegenAfterPartyTurn(g *core.GameState, actor core.ActorRef) {
+	if !actor.ValidPartyIndex(g.Party) {
+		return
+	}
+	m := &g.Party[actor.Index]
+	if m.HP <= 0 || m.RegenTurns <= 0 {
+		return
+	}
+	m.RegenTurns--
+	healed := healPartyMember(g, actor.Index, m.RegenPerTurn)
+	if healed {
+		core.EnqueuePartyVFX(g, core.VFXHeal, actor.Index)
+	}
+	// Log honestly: report the HP only when a heal actually landed (a tick on a
+	// full-HP member heals nothing), and always announce the fade on the final
+	// tick — including when that last tick itself healed.
+	fades := m.RegenTurns == 0
+	switch {
+	case healed && fades:
+		setBattleMessage(g, fmt.Sprintf("%s renews %d HP — the renewal fades.", m.Name, m.RegenPerTurn))
+	case healed:
+		setBattleMessage(g, fmt.Sprintf("%s renews %d HP.", m.Name, m.RegenPerTurn))
+	case fades:
+		setBattleMessage(g, fmt.Sprintf("%s's renewal fades.", m.Name))
+	}
 }
 
 // tickPartyStatusCounter is the shared body the non-damaging
@@ -1803,13 +1904,24 @@ func damagePartyMember(g *core.GameState, partyIndex, rawAmount int, tag core.Sk
 	if member.HP <= 0 {
 		return 0, false
 	}
-	// Ingested prey is sealed off — no damage reaches them while inside
-	// the mantrap. Defense in depth: pickEnemyAttackTarget already routes
-	// around ingested members, but any future damage source that picked
-	// by index would otherwise bypass the lockout.
+	// Ingested prey is sealed off — no EXTERNAL damage reaches them while inside
+	// the mantrap. Defense in depth: pickEnemyAttackTarget already routes around
+	// ingested members, but any future damage source that picked by index would
+	// otherwise bypass the lockout. The internal poison DoT is exempt — it ticks
+	// on ingested prey via damagePartyMemberPoison (which skips this guard), so
+	// ingest can't silently zero a standing poison.
 	if member.Ingested {
 		return 0, false
 	}
+	return applyPartyDamage(g, member, rawAmount, tag)
+}
+
+// applyPartyDamage mitigates + applies rawAmount to an ALREADY-validated, living
+// party member (the caller owns the bounds / dead / lockout checks), running the
+// shared flash / recoil / wake / rumble / death bookkeeping. Split out of
+// damagePartyMember so the poison DoT — which by design keeps ticking on
+// ingested prey — can reach this same bookkeeping without the ingest lockout.
+func applyPartyDamage(g *core.GameState, member *core.PartyMember, rawAmount int, tag core.SkillTag) (int, bool) {
 	// Mitigation reads through EffectiveArmor / EffectiveMDef so any
 	// equipped gear bonuses stack on top of the base values. Base
 	// member.Armor stays authored (0 today on the party side); items
@@ -1822,11 +1934,34 @@ func damagePartyMember(g *core.GameState, partyIndex, rawAmount int, tag core.Sk
 	// pushes the member toward the camera (away from the attacking enemy
 	// formation) for HitKnockbackDuration.
 	core.ApplyHitRecoil(&member.HitKnockback, &member.SleepTurns, amount)
+	// Haptic "ouch" — buzz the pad when a hit actually lands. Gated on amount>0
+	// like the recoil/wake above (a fully-soaked 0 doesn't buzz). Taking a hit
+	// doesn't shake the camera, so this arms rumble directly (TriggerCombatShake
+	// is for the player's own offensive impacts).
+	if amount > 0 {
+		core.TriggerRumble(&g.Battle, core.RumbleHurtStrength, core.RumbleHurtDur)
+	}
 	if !died {
 		return amount, false
 	}
 	clearPartyStatusesOnDeath(member)
 	return amount, true
+}
+
+// damagePartyMemberPoison applies one poison tick, bypassing the ingested
+// lockout in damagePartyMember (poison keeps ticking on ingested prey —
+// tickPoisonForIngestedParty) while still honoring the bounds + already-dead
+// guards. Magic-tagged so MDef mitigates it, identical to the non-ingested
+// end-of-turn tick that previously routed through damagePartyMember.
+func damagePartyMemberPoison(g *core.GameState, partyIndex int) (int, bool) {
+	if partyIndex < 0 || partyIndex >= len(g.Party) {
+		return 0, false
+	}
+	member := &g.Party[partyIndex]
+	if member.HP <= 0 {
+		return 0, false
+	}
+	return applyPartyDamage(g, member, core.PoisonTickDamage, core.SkillTagMagic)
 }
 
 // damagePartyMemberDefendable applies an incoming HIT to a party member,
@@ -2059,12 +2194,13 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	// — shared with the damaging enemy casts so Defend soaks every incoming
 	// hit, not just melee. dealt is the post-armor figure used in the message.
 	dealt, _ := damagePartyMemberDefendable(g, target, damage, core.SkillTagPhys)
-	// Slash VFX only when damage actually landed — an Excellent
+	// Impact VFX only when damage actually landed — an Excellent
 	// defend can clamp damage to 0, and the player just performed a
 	// successful block. Spawning impact sparks on a perfect parry
-	// would visually undersell the block.
+	// would visually undersell the block. Enemy melee (claw/bite/slam)
+	// reads as a percussive impact, not a bladed slash.
 	if dealt > 0 {
-		core.EnqueuePartyVFX(g, core.VFXSlash, target)
+		core.EnqueuePartyVFX(g, core.VFXImpact, target)
 	}
 	if defendQuality > core.TimingQualityMiss {
 		// A successful block recoils the defender slightly so the impact reads

@@ -37,6 +37,7 @@ type optionsMenuRow struct {
 
 var optionsMenuRows = []optionsMenuRow{
 	{Item: core.OptionsMenuDisplay, Label: func(core.GameState) string { return DisplayMenuRowLabel() }},
+	{Item: core.OptionsMenuVibration, Label: func(g core.GameState) string { return "Vibration: " + onOff(g.RumbleEnabled) }},
 	{Item: core.OptionsMenuStats, Label: func(core.GameState) string { return "Party Stats" }},
 	{Item: core.OptionsMenuQuests, Label: func(core.GameState) string { return "Quests" }},
 	{Item: core.OptionsMenuSave, Label: func(core.GameState) string { return "Save Game" }},
@@ -79,6 +80,7 @@ var debugMenuRows = []debugMenuRow{
 	{Item: core.DebugMenuSkipBattles, Label: func(g core.GameState) string {
 		return "Skip Battles: " + onOff(g.DebugSkipBattles)
 	}},
+	{Item: core.DebugMenuTestRumble, Label: func(core.GameState) string { return "Test Rumble" }},
 	{Item: core.DebugMenuClose, Label: func(core.GameState) string { return "Close" }},
 }
 

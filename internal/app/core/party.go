@@ -201,6 +201,14 @@ type SkillEffect struct {
 	// mirror of AppliesAOEParty (damage) and AppliesAOEEnemies. Bless sets it;
 	// the apply handler loops the living party stamping the buff on each.
 	AppliesAOEPartyBuff bool
+	// RegenTurns declares a heal-over-time a skill grants its ally target
+	// (Cleric's Renewal — the game's first HoT). The apply path stamps it onto
+	// the recipient's RegenTurns and snapshots the per-turn heal (the skill's
+	// quality/WIS-scaled Heal) onto RegenPerTurn; the regen then ticks at the
+	// END of the member's own turn (like Poison, inverted) until it runs out.
+	// Zero = no HoT. The positive-status mirror of the Burn/Poison min/max
+	// fields; fixed duration (not rolled) like BuffTurns.
+	RegenTurns int
 }
 
 // Party stats post-difficulty pass. Numbers are deliberately tighter than
@@ -236,7 +244,7 @@ var skillDefinitions = []skillDefinition{
 	{Skill: SkillSwipe, Name: "Swipe", Description: "STR-scaled cleave through every living enemy in the pack.", Cost: 2, TargetMode: ActionMenu, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigamePress, Effect: SkillEffect{Damage: 0, AppliesAOEEnemies: true}, PlayerCastable: true},
 	{Skill: SkillPrayer, Name: "Prayer", Description: "WIS-scaled single-ally heal. Charge bar — release at peak.", Cost: 4, TargetMode: ActionPartyTarget, Kind: SkillKindHeal, Tag: SkillTagHeal, Minigame: MinigameCharge, Effect: SkillEffect{Heal: 1}, PlayerCastable: true},
 	{Skill: SkillSteal, Name: "Steal", Description: "Pickpocket the target. Stop the reels — matches drive the chance.", Cost: 0, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigameReels, Effect: SkillEffect{StealChance: StealBaseChance}, PlayerCastable: true},
-	{Skill: SkillFirebolt, Name: "Firebolt", Description: "INT-scaled magic damage. Charge; release past the peak to Overcharge (bonus damage, burns you). Chance to inflict Burn.", Cost: 5, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameOvercharge, Effect: SkillEffect{Damage: 1, BurnChance: FireboltBurnChance, BurnMinTurns: 2, BurnMaxTurns: 3}, PlayerCastable: true, EnemyCastable: true},
+	{Skill: SkillFirebolt, Name: "Firebolt", Description: "INT-scaled magic damage. Charge; release past the peak to Overcharge (bonus damage, burns you). Chance to inflict Burn.", Cost: 5, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameOvercharge, Effect: SkillEffect{Damage: 1, BurnChance: FireboltBurnChance, BurnMinTurns: FireBurnMinTurns, BurnMaxTurns: FireBurnMaxTurns}, PlayerCastable: true, EnemyCastable: true},
 	// Crushing Blow (Warrior): charge-up single-target physical hit.
 	// +4 base on top of STR, 3 MP. On Great/Excellent timing rolls
 	// CrushingBlowStunChance for the Stun proc — heavy-hit fantasy
@@ -305,7 +313,7 @@ var skillDefinitions = []skillDefinition{
 	// INT-scaled magic damage to every living enemy (AppliesAOEEnemies) plus a
 	// per-target Burn roll. Charge minigame. Pricier than Arc Bolt (6) because
 	// it also burns. Applied via applyAoEStatusSkill in battle/actions.go.
-	{Skill: SkillFireball, Name: "Fireball", Description: "INT-scaled magic fire across the whole pack. Charge — per-target Burn chance.", Cost: 7, TargetMode: ActionMenu, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 1, AppliesAOEEnemies: true, BurnChance: FireballBurnChance, BurnMinTurns: 2, BurnMaxTurns: 3}, PlayerCastable: true},
+	{Skill: SkillFireball, Name: "Fireball", Description: "INT-scaled magic fire across the whole pack. Charge — per-target Burn chance.", Cost: 7, TargetMode: ActionMenu, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 1, AppliesAOEEnemies: true, BurnChance: FireballBurnChance, BurnMinTurns: FireBurnMinTurns, BurnMaxTurns: FireBurnMaxTurns}, PlayerCastable: true},
 	// Poison Cloud (Thief, Venomancy tree): the AoE counterpart to Venom Strike.
 	// Light STR-scaled damage to every living enemy plus a per-target Poison
 	// roll. Phys-tagged + Melee-kind to mirror Venom Strike (the direct damage
@@ -318,6 +326,19 @@ var skillDefinitions = []skillDefinition{
 	// ladder to climb, same as Scan. Press minigame; the cure always lands
 	// (grade cosmetic).
 	{Skill: SkillCleanse, Name: "Cleanse", Description: "Cure an ally's Poison, Sleep, Stun, Web and Confusion. No damage.", Cost: 3, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigamePress, Effect: SkillEffect{}, PlayerCastable: true, NoUpgrades: true},
+	// Second Wind (Warrior, Ancestral Call tree): a flat self-heal. ActionMenu
+	// (no target — heals the caster), Utility kind so the Warrior's low WIS
+	// doesn't gate it (the base is flat; quality still scales the cast). Tag
+	// None (battle-only; a heal has no mitigation/armor interaction). Charge
+	// minigame to give the breather some weight. Tier ladder adds +heal.
+	{Skill: SkillSecondWind, Name: "Second Wind", Description: "Catch your breath — a flat self-heal. Charge.", Cost: 3, TargetMode: ActionMenu, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigameCharge, Effect: SkillEffect{Heal: SecondWindHealBase}, PlayerCastable: true},
+	// Renewal (Cleric, Mercy tree): heal-over-time on one ally — the game's
+	// first HoT. Heal kind so the per-turn amount snapshots the caster's
+	// WIS-scaled value at cast; Tag None (battle-only — regen ticks need turns,
+	// so it's not an out-of-battle heal). Effect.Heal is the base per-turn
+	// amount, RegenTurns the base duration; the apply stamps them onto the
+	// target's RegenPerTurn / RegenTurns. Tier ladder adds +turns / +per-turn.
+	{Skill: SkillRenewal, Name: "Renewal", Description: "Heal-over-time on an ally — restores HP at the end of their turns. Charge.", Cost: 4, TargetMode: ActionPartyTarget, Kind: SkillKindHeal, Tag: SkillTagNone, Minigame: MinigameCharge, Effect: SkillEffect{Heal: RenewalRegenBase, RegenTurns: RenewalRegenTurns}, PlayerCastable: true},
 	// Sleep is the goblin-mage's signature. Magic-tagged so armor doesn't
 	// gate the proc; press-minigame so the cast resolves quickly. Damage
 	// is 0 — the only effect is the status. The mage doesn't pay MP
@@ -1027,11 +1048,12 @@ const (
 	PartyStatusStunned
 	PartyStatusAsleep
 	PartyStatusPoisoned
-	// PartyStatusBlessed is the lone POSITIVE counted status today (Cleric's
-	// Bless). It sits just above Defending in priority — below every threat so
-	// a blessed-and-poisoned member still surfaces the poison — and, like
-	// Defending, doesn't flicker (good news shouldn't read as an alarm).
+	// PartyStatusBlessed / PartyStatusRegen are POSITIVE counted statuses
+	// (Cleric's Bless / Renewal). They sit just above Defending in priority —
+	// below every threat so a poisoned-and-blessed member still surfaces the
+	// poison — and, like Defending, don't flicker (good news shouldn't alarm).
 	PartyStatusBlessed
+	PartyStatusRegen
 	PartyStatusDefending
 	// PartyStatusCount is the length-assert sentinel for any render-side
 	// table indexed by PartyStatusKind. New status kinds slot in above
@@ -1072,6 +1094,8 @@ func PartyStatus(m PartyMember) (kind PartyStatusKind, turns int) {
 		return PartyStatusPoisoned, m.PoisonTurns
 	case m.BuffTurns > 0:
 		return PartyStatusBlessed, m.BuffTurns
+	case m.RegenTurns > 0:
+		return PartyStatusRegen, m.RegenTurns
 	case m.Defending:
 		return PartyStatusDefending, 0
 	}
@@ -1100,6 +1124,8 @@ func PartyStatusLabel(kind PartyStatusKind) string {
 		return "POISONED"
 	case PartyStatusBlessed:
 		return "BLESSED"
+	case PartyStatusRegen:
+		return "REGEN"
 	case PartyStatusDefending:
 		return "DEFENDING"
 	}
@@ -1331,6 +1357,16 @@ func init() {
 	for i := Stat(0); i < StatCount; i++ {
 		if StatPreviewLine(i, probe, 1) == "" {
 			panic(fmt.Sprintf("core: StatPreviewLine returned empty for stat index %d — add a preview case", int(i)))
+		}
+	}
+	// PartyStatusLabel is the same kind of switch-shaped parallel-to-enum table
+	// the length-asserts can't cover. Force its coverage so a new
+	// PartyStatusKind added to the enum but missed in the label switch panics
+	// at STARTUP instead of rendering a silent blank label. PartyStatusNone is
+	// the one kind with no label (the absence of a status), so skip it.
+	for k := PartyStatusNone + 1; k < PartyStatusCount; k++ {
+		if PartyStatusLabel(k) == "" {
+			panic(fmt.Sprintf("core: PartyStatusLabel returned empty for kind %d — add a label case", int(k)))
 		}
 	}
 }

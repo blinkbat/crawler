@@ -117,7 +117,7 @@ func (p *particle) alive() bool { return p.Elapsed < p.Duration }
 // live particle by raylib's frame dt, then issues billboard / disc
 // draws for each. Must be called inside an rl.BeginMode3D / EndMode3D
 // pair so particles depth-sort with the world.
-func TickAndDrawVFX(camera rl.Camera3D, g *core.GameState) {
+func TickAndDrawVFX(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	// Reset request fires when battle / explore signals "drop every
 	// live particle now" (battle exit + area transition + scene
 	// return). Honored BEFORE draining the queue so the new frame's
@@ -125,9 +125,10 @@ func TickAndDrawVFX(camera rl.Camera3D, g *core.GameState) {
 	// particles whose anchors no longer mean anything.
 	if core.TakeVFXResetRequest(g) {
 		ResetParticles()
+		resetHitGlyphs()
 	}
 	for _, req := range core.DrainVFXQueue(g) {
-		spawnFromRequest(camera, g, req)
+		spawnFromRequest(camera, g, req, assets)
 	}
 	dt := rl.GetFrameTime()
 	// Clamp dt to the same upper bound the gameplay layers use so a
@@ -201,14 +202,42 @@ func resolveAnchor(camera rl.Camera3D, g *core.GameState, req core.VFXRequest) (
 // pattern. Each pattern composes 1-30 particles. Keep particle counts
 // small per spawn — many cheap dots read better than a few expensive
 // ones, and our draw cost is dominated by billboard transforms.
-func spawnFromRequest(camera rl.Camera3D, g *core.GameState, req core.VFXRequest) {
+func spawnFromRequest(camera rl.Camera3D, g *core.GameState, req core.VFXRequest, assets Resources) {
 	origin, ok := resolveAnchor(camera, g, req)
 	if !ok {
 		return
 	}
+	// Per-enemy GFX tuning: a struck enemy KIND can nudge + resize its impact
+	// particle burst and clarity glyph (authored in the Foe Visualizer). Only
+	// enemy-anchored VFX are keyed by kind; party- and tile-anchored effects use
+	// the raw resolved origin at 1×. The glyph keeps its own anchor (raw origin +
+	// glyph offsets); `origin` is then rebound to the particle anchor so the
+	// per-kind dispatch switch below stays untouched and scaleBurst scales the
+	// burst around its own center.
+	glyphOrigin, glyphScale := origin, float32(1)
+	particleScale := float32(1)
+	switch req.Anchor {
+	case core.VFXAnchorEnemy:
+		if v, ok := enemyVisualForVFX(g, assets, req.SlotIdx); ok {
+			glyphOrigin = cameraRelativeOffset(camera, origin, v.glyphXOffset, v.glyphYOffset, 0)
+			glyphScale = v.effectiveGlyphScale()
+			origin = cameraRelativeOffset(camera, origin, v.particleXOffset, v.particleYOffset, v.particleZOffset)
+			particleScale = v.effectiveParticleScale()
+		}
+	case core.VFXAnchorParty:
+		// Party sprites sit low and near the camera, projecting into the bottom
+		// HUD band; lift the glyph above the member's head so the incoming-hit
+		// cue is visible. (No per-kind tuning for party — that's enemy-only.)
+		glyphOrigin.Y += partyGlyphExtraRise
+	}
+	// Snapshot the pool length so scaleBurst transforms only the particles THIS
+	// request appends (every spawnXxx pushes onto the shared pool).
+	from := len(particles)
 	switch req.Kind {
 	case core.VFXSlash:
 		spawnSlash(origin)
+	case core.VFXImpact:
+		spawnImpact(origin)
 	case core.VFXEmber:
 		spawnEmber(origin)
 	case core.VFXHeal:
@@ -246,6 +275,56 @@ func spawnFromRequest(camera rl.Camera3D, g *core.GameState, req core.VFXRequest
 			loggedUnknownVFX[req.Kind] = true
 			LogRenderError("spawnFromRequest: no spawn pattern for VFX kind %d — effect dropped", int(req.Kind))
 		}
+	}
+	// Uniformly scale the just-spawned burst (spread + dot size) by the kind's
+	// particleScale around its anchor. A 1× scale is a no-op fast-path inside.
+	scaleBurst(origin, from, particleScale)
+	// Clarity glyph: a crisp 2D vector shape over the struck target, keyed by
+	// the VFX kind (slash / impact / frost / spark / fire / holy / venom). Drawn
+	// in the HUD pass by DrawHitGlyphs; glyphNone (heal / status / utility VFX)
+	// is a no-op, so only damaging hits get one — and every existing impact VFX
+	// gets it for free (player→foe and enemy→party alike). Anchored + sized by
+	// the kind's glyph offsets/scale.
+	spawnHitGlyph(hitGlyphForVFX(req.Kind), glyphOrigin, glyphScale)
+}
+
+// enemyVisualForVFX resolves the per-kind enemyVisual for the enemy occupying
+// battle slot, mirroring resolveAnchor's slot bounds check so a stale/out-of-
+// range request can't panic. ok=false when the slot is empty or the kind has no
+// visual — callers then fall back to an un-nudged, 1× burst/glyph.
+func enemyVisualForVFX(g *core.GameState, assets Resources, slot int) (enemyVisual, bool) {
+	members := core.BattleMembers(g)
+	if slot < 0 || slot >= len(members) {
+		return enemyVisual{}, false
+	}
+	return enemyVisualFor(assets, members[slot].Kind)
+}
+
+// scaleBurst uniformly resizes the particles in particles[from:] around anchor
+// o: it scales each particle's XZ displacement from o, its velocity, its
+// constant accel, and its start/end size by `scale`. Because velocity AND
+// gravity scale together, the trajectory's TIMING is preserved while its
+// spatial envelope (peak height, spread) scales linearly — so a 1.5× burst
+// looks like the same burst, just bigger. Y POSITION is deliberately left
+// untouched: ground rings/dust seed at an absolute floor Y, and scaling that
+// around the torso-height anchor would punch them through the floor; scaling
+// velocity + size already carries the size read. scale<=0 or ==1 is a no-op.
+func scaleBurst(o rl.Vector3, from int, scale float32) {
+	if scale <= 0 || scale == 1 || from >= len(particles) {
+		return
+	}
+	for i := from; i < len(particles); i++ {
+		p := &particles[i]
+		p.X = o.X + (p.X-o.X)*scale
+		p.Z = o.Z + (p.Z-o.Z)*scale
+		p.VX *= scale
+		p.VY *= scale
+		p.VZ *= scale
+		p.GX *= scale
+		p.GY *= scale
+		p.GZ *= scale
+		p.SizeStart *= scale
+		p.SizeEnd *= scale
 	}
 }
 
@@ -349,6 +428,23 @@ func spawnSlash(o rl.Vector3) {
 		shape:      shapeSpark,
 	})
 	pushRing(o, rl.NewColor(255, 232, 168, 220), 0.18, 1.1, 0.32)
+}
+
+func spawnImpact(o rl.Vector3) {
+	// Blunt/percussive hit: a tight, fast pop of pale sparks + a small bright
+	// ring right at the contact point. Punchier and more compact than the slash
+	// crescent (fewer, shorter-lived sparks; a smaller ring) so it reads as a
+	// "thud," not a "cut" — the unarmed/club/hammer and claw/bite/slam look.
+	spawnRadialBurst(o, radialBurst{
+		count: 12, speedMin: 1.8, speedMax: 3.2,
+		yBase: 0.05, yJitter: 0.14,
+		vyMin: -0.1, vyMax: 0.9, gravityY: -3.0,
+		durMin: 0.22, durMax: 0.32, sizeStart: 0.13, sizeEnd: 0.02,
+		colorStart: rl.NewColor(255, 246, 214, 255),
+		colorEnd:   rl.NewColor(220, 178, 120, 0),
+		shape:      shapeSpark,
+	})
+	pushRing(o, rl.NewColor(255, 230, 178, 220), 0.14, 0.8, 0.26)
 }
 
 func spawnEmber(o rl.Vector3) {

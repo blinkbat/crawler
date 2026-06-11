@@ -129,7 +129,21 @@ func SaveGame(g *GameState) error {
 	if err := os.MkdirAll(SaveDir(), AssetDirMode); err != nil {
 		return err
 	}
-	return os.WriteFile(SavePath(), blob, AssetFileMode)
+	// Atomic write: stage the blob in a sibling temp file, then rename it over
+	// the real save. os.Rename is atomic on a single volume (and replaces the
+	// destination on Windows via MoveFileEx), so a crash / power loss / disk-full
+	// mid-write leaves the PRIOR save fully intact instead of truncating the only
+	// copy to a partial, undecodable blob that LoadSave can't recover. Best-effort
+	// cleanup of the temp on a rename failure so a failed save doesn't litter.
+	tmp := SavePath() + ".tmp"
+	if err := os.WriteFile(tmp, blob, AssetFileMode); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, SavePath()); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // SaveExists reports whether a readable save file is present — the gate for
@@ -202,9 +216,14 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	// Item" dead weight.
 	g.Inventory = pruneUnknownItems(data.Inventory)
 	g.Gold = data.Gold
-	if pruned := pruneQuests(data.Quests); len(pruned) > 0 {
-		g.Quests = pruned
-	}
+	// The loaded quest journal is authoritative — assign it unconditionally
+	// (even when it prunes to empty) so a player who cleared/never-had quests
+	// stays empty rather than silently re-seeding NewGameState's StarterQuests.
+	// Matches the inventory "copy through as-is even if empty" rule just above;
+	// Quests is a slice so a nil/empty result is safe to store (unlike Bestiary
+	// below, whose nil-map guard must stay to avoid a write panic on the next
+	// kill-record).
+	g.Quests = pruneQuests(data.Quests)
 	// Overlay the saved bestiary, dropping entries for kinds this build no
 	// longer registers (a save predating an EnemyKind renumber) — the same
 	// load-boundary hygiene Inventory / Quests / skills get. NewGameState

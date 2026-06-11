@@ -9,7 +9,8 @@ import (
 
 // EnemyVisualOverride is the on-disk, raylib-free description of how a single
 // enemy KIND is drawn as a battle/field billboard: its size, vertical/back
-// nudges, contact-shadow disc, target-cursor placement, and a base tint. It
+// nudges, contact-shadow disc, target-cursor placement + size, the anchor +
+// size of the in-combat hit-glyph and particle burst, and a base tint. It
 // mirrors render's internal enemyVisual struct field-for-field (minus the GPU
 // texture, which always comes from the sprite PNG / procedural art — never the
 // save file). The editor's Foe Visualizer authors these and writes them to
@@ -18,7 +19,11 @@ import (
 // code default stands, so a fresh checkout renders exactly as before.
 //
 // All distances are world units (a tile is 1.0 across); tint channels are
-// 0..255 with TintA==0 meaning "untinted" (matches render's resolveTint).
+// 0..255 with TintA==0 meaning "untinted" (matches render's resolveTint). The
+// three *Scale fields multiply a default size — a ZERO value means "unset, use
+// the 1.0 default" (matches render's effective*Scale accessors), so a visuals
+// file authored before these fields existed keeps full-size glyphs/particles/
+// cursor rather than reading the missing field as an invisible 0.
 type EnemyVisualOverride struct {
 	SizeX         float32 `json:"sizeX"`
 	SizeY         float32 `json:"sizeY"`
@@ -29,10 +34,26 @@ type EnemyVisualOverride struct {
 	ShadowOffsetZ float32 `json:"shadowOffsetZ"`
 	MarkerYOffset float32 `json:"markerYOffset"`
 	MarkerXOffset float32 `json:"markerXOffset"`
-	TintR         uint8   `json:"tintR"`
-	TintG         uint8   `json:"tintG"`
-	TintB         uint8   `json:"tintB"`
-	TintA         uint8   `json:"tintA"`
+	// MarkerScale multiplies the target chevron's silhouette size (1 = default).
+	MarkerScale float32 `json:"markerScale"`
+	// Hit-glyph anchor nudge + size. GlyphXOffset/GlyphYOffset shift the clarity
+	// glyph from the struck sprite's center along camera-right(+ = screen right)
+	// and world-up(+); GlyphScale multiplies its on-screen radius (1 = default).
+	GlyphXOffset float32 `json:"glyphX"`
+	GlyphYOffset float32 `json:"glyphY"`
+	GlyphScale   float32 `json:"glyphScale"`
+	// Particle-burst anchor nudge + size. ParticleX/Y/ZOffset shift the burst
+	// origin along camera-right(+ = screen right), world-up(+), and camera-
+	// forward(+ = into the arena); ParticleScale uniformly scales the burst's
+	// spread + dot size (1 = default).
+	ParticleXOffset float32 `json:"particleX"`
+	ParticleYOffset float32 `json:"particleY"`
+	ParticleZOffset float32 `json:"particleZ"`
+	ParticleScale   float32 `json:"particleScale"`
+	TintR           uint8   `json:"tintR"`
+	TintG           uint8   `json:"tintG"`
+	TintB           uint8   `json:"tintB"`
+	TintA           uint8   `json:"tintA"`
 }
 
 // enemyVisualsFileName is the basename of the override file inside the sprites

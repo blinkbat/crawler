@@ -54,4 +54,12 @@ func TestIngestedPoisonTicksOncePerRound(t *testing.T) {
 	if g.Party[2].PoisonTurns != 2 {
 		t.Errorf("ingested member poison drained to %d, want 2 (one tick per round, not one per queue slot)", g.Party[2].PoisonTurns)
 	}
+	// And the tick must actually deal damage. Regression guard: the poison tick
+	// routed through damagePartyMember, whose ingested-lockout early-return
+	// zeroed the damage — the counter drained while HP stayed put, making ingest
+	// a free poison escape. Assert HP actually fell (poison ticks on ingested
+	// prey by design).
+	if g.Party[2].HP >= 8 {
+		t.Errorf("ingested member HP stayed at %d after a poison tick — ingest must not zero the DoT (the counter drained but no damage landed)", g.Party[2].HP)
+	}
 }

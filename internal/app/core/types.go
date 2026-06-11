@@ -432,6 +432,12 @@ type GameState struct {
 	// (no reward); skip-battles still pays out so the player can clear/level a
 	// map fast. See battle.DebugSkipWin.
 	DebugSkipBattles bool
+	// RumbleEnabled is the player-facing controller-vibration setting (Options
+	// menu → "Vibration"). Defaults true (set in NewParty/state seeding);
+	// when false, input.ApplyRumble forces the motor level to 0 so combat
+	// rumble is fully muted. Runtime preference (not persisted in SaveData,
+	// like the display-mode toggle).
+	RumbleEnabled bool
 	// Inventory is shared across the party — single global stack list.
 	// Stocked by Steal pickups and consumed by the in-battle Item action.
 	Inventory []ItemStack
@@ -793,6 +799,17 @@ type PartyMember struct {
 	BuffTurns int
 	BuffStats Stats
 
+	// RegenTurns / RegenPerTurn carry an active heal-over-time (the Cleric's
+	// Renewal — the game's first HoT). While RegenTurns > 0, the member heals
+	// RegenPerTurn at the END of their own turn (the positive mirror of
+	// Poison), then the counter decrements. RegenPerTurn is snapshotted at cast
+	// (caster's WIS-scaled per-turn heal) so a later WIS change doesn't retune
+	// an in-flight regen. Combat-only — ClearPartyTransientStatuses wipes it on
+	// battle exit; surfaces as the low-priority positive PartyStatusRegen. Does
+	// not stack: re-applying replaces both fields.
+	RegenTurns   int
+	RegenPerTurn int
+
 	// Level and XP track per-character progression. XP is the running
 	// total toward the next level; XPForLevel(Level) is the threshold.
 	// PendingLevelUps queues completed level-ups whose stat points the
@@ -1103,6 +1120,18 @@ type Battle struct {
 	ShakeTimer float32
 	ShakePeak  float32
 	ShakeDur   float32
+
+	// RumbleStrength / RumbleTimer / RumbleDur drive the controller vibration —
+	// the haptic half of impact feedback, armed alongside the shake by
+	// TriggerCombatShake (and directly on taking a hit). RumbleStrength is the
+	// peak motor level in [0,1]; RumbleTimer counts down; RumbleDur normalizes
+	// the ease-out. core.TickRumble decays them per frame (scene-independently,
+	// in the main loop) and returns the level the run loop hands to
+	// input.ApplyRumble — keeping the rl.SetGamepadVibration call out of core.
+	// Reset at Start; decays to 0 on its own so it can't stick on.
+	RumbleStrength float32
+	RumbleTimer    float32
+	RumbleDur      float32
 
 	// SequencePulseTimer + Index drive the brief scale-up animation on the
 	// arrow that just landed correctly during the pickpocket sequence. The

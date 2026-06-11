@@ -62,6 +62,26 @@ func LiveFoeOverride(assets Resources, kind core.EnemyKind) (core.EnemyVisualOve
 	return enemyVisualOverride(v), true
 }
 
+// SetLiveFoeOverride applies ov onto the in-memory visual for kind, so the
+// editor's just-saved tuning takes effect immediately — without a reload. The
+// enemyVisuals map is shared by reference through the (by-value) Resources, so
+// mutating an entry here updates the same map the editor's render loop and
+// LiveFoeOverride read; otherwise the editor would re-seed from the stale loaded
+// value on the next foe-cycle and the save would look reverted. The texture is
+// preserved (applyEnemyVisualOverride keeps it). No-op if the kind is absent or
+// the map is nil. Persisted separately to visuals.json by the caller; this is
+// only the live in-memory mirror.
+func SetLiveFoeOverride(assets Resources, kind core.EnemyKind, ov core.EnemyVisualOverride) {
+	if assets.enemyVisuals == nil {
+		return
+	}
+	base, ok := assets.enemyVisuals[kind]
+	if !ok {
+		return
+	}
+	assets.enemyVisuals[kind] = applyEnemyVisualOverride(base, ov)
+}
+
 // DrawFoePreview renders kind's billboard — with the in-progress override ov
 // applied on top of its code-default texture — into rect: ground, contact
 // shadow, the upright sprite, and the target chevron, arranged with the exact
@@ -97,8 +117,22 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 	if v.shadowRadius > 0 {
 		drawGroundShadow(place.shadowX, place.shadowZ, v.shadowRadius)
 	}
-	drawTargetChevron(cam, place.chevron)
+	drawTargetChevron(cam, place.chevron, v.effectiveMarkerScale())
 	drawTextureBillboard(cam, v.texture, place.sprite, v.size, v.resolveTint())
+
+	// Authoring gizmos: small wireframe spheres at the combat anchor of this
+	// kind's particle burst (orange) and hit glyph (cyan), so the glyph/particle
+	// anchor + size sliders have live feedback even though the real glyph/
+	// particle systems don't run in this static diorama. Anchored at foeAnchor
+	// (NOT place.base) to match the battle VFX origin — resolveAnchor uses the
+	// pre-depthOffset formation center — nudged + sized by the same fields and
+	// helpers (cameraRelativeOffset, hitGlyphRise, effective*Scale) the live path
+	// uses, so what reads here reads in an encounter.
+	pAnchor := cameraRelativeOffset(cam, foeAnchor, v.particleXOffset, v.particleYOffset, v.particleZOffset)
+	drawAnchorGizmo(pAnchor, 0.16*v.effectiveParticleScale(), rl.NewColor(255, 168, 86, 210))
+	gAnchor := cameraRelativeOffset(cam, foeAnchor, v.glyphXOffset, v.glyphYOffset, 0)
+	gAnchor.Y += hitGlyphRise
+	drawAnchorGizmo(gAnchor, 0.13*v.effectiveGlyphScale(), rl.NewColor(176, 226, 255, 220))
 
 	rl.EndMode3D()
 	rl.EndTextureMode()
@@ -109,6 +143,24 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 		rl.NewRectangle(0, 0, float32(w), -float32(h)),
 		rl.NewVector2(rect.X, rect.Y),
 		rl.White)
+}
+
+// drawAnchorGizmo paints a small wireframe sphere at p, drawn depth-independent
+// (like the selector pyramid in drawMarkerOnTop) so it's never hidden behind the
+// opaque billboard. Foe Visualizer authoring aid only — radius tracks the
+// effect's size slider so the gizmo doubles as a rough size readout. State is
+// restored so the blit and any later draw are unaffected.
+func drawAnchorGizmo(p rl.Vector3, radius float32, col rl.Color) {
+	if radius <= 0 {
+		return
+	}
+	rl.DrawRenderBatchActive() // flush prior depth-tested geometry
+	rl.DisableDepthTest()
+	rl.DisableDepthMask()
+	rl.DrawSphereWires(p, radius, 6, 6, col)
+	rl.DrawRenderBatchActive() // flush the gizmo with depth off
+	rl.EnableDepthMask()
+	rl.EnableDepthTest()
 }
 
 // ensureFoePreviewRT lazily (re)creates the cached off-screen texture when it's

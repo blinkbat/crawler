@@ -60,6 +60,9 @@ func Run() {
 	// Flush + close the debug render log on exit if it was left enabled
 	// (the Debug-menu toggle is the only other close path). Idempotent.
 	defer render.CloseRenderLog()
+	// Cut controller vibration on exit so the pad doesn't keep buzzing if the
+	// process lingers after the window closes.
+	defer input.StopRumble()
 
 	state := appState{scene: sceneTitle, title: title.New()}
 
@@ -80,6 +83,12 @@ func Run() {
 		default:
 			panic("run: unhandled scene in update dispatch — add it to both scene switches")
 		}
+
+		// Drive controller rumble every frame, scene-independently: TickRumble
+		// decays the combat-rumble envelope (and returns 0 outside battle / in
+		// the title+editor scenes, where Battle is zero-valued), so a rumble
+		// armed just before a battle ends still eases off instead of sticking.
+		input.ApplyRumble(core.TickRumble(&state.game.Battle, dt), state.game.RumbleEnabled)
 
 		rl.BeginDrawing()
 		switch state.scene {
@@ -341,13 +350,16 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	// (mutating g), advances the render-side pool by raylib's frame
 	// dt, and emits draws for every live particle. Kept after the
 	// party draw so impact sparks paint over the sprite, not under.
-	render.TickAndDrawVFX(camera, game)
+	render.TickAndDrawVFX(camera, game, assets)
 	rl.EndMode3D()
 	// Ambient rain sits above the 3D world (darkening it) but below the
 	// world-space popups and HUD, so combat numbers, prompts, and menus
 	// stay readable through the storm. No-op when the weather is clear.
 	render.DrawWeather(*game)
 	render.DrawChestPrompt(camera, *game, assets)
+	// Hit-glyph clarity shapes over struck targets — HUD pass (crisp 2D), but
+	// before the damage popups so the number floats on top of the glyph.
+	render.DrawHitGlyphs(camera)
 	render.DrawDamagePopups(camera, *game, assets)
 	render.DrawQualityPopup(camera, *game, assets)
 	render.DrawDebugOverlay(camera, *game, assets)

@@ -20,10 +20,12 @@ import (
 
 // foeFields is the complete, ordered set of tunable visual fields — EVERY field
 // of core.EnemyVisualOverride is here (tool-completeness: the data model is
-// fully authorable from the tool, nothing left hand-edit-only). Placement,
-// then shadow, then cursor, then tint. Each row is a sliderField (slider.go)
-// whose Get/Set bridge the typed override fields (some uint8 for tint) to the
-// slider's float64 world.
+// fully authorable from the tool, nothing left hand-edit-only). Order groups by
+// concern so the two-column layout splits cleanly: placement, shadow, cursor
+// (+size) fill the left column; glyph anchor+size, particle anchor+size, then
+// tint fill the right. Each row is a sliderField (slider.go) whose Get/Set
+// bridge the typed override fields (some uint8 for tint) to the slider's
+// float64 world.
 var foeFields = []sliderField[core.EnemyVisualOverride]{
 	{Label:"Size X", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.SizeX) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.SizeX = float32(v) }, Min:0.1, Max:3.0, Step:0.05, Format:"%.2f"},
 	{Label:"Size Y", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.SizeY) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.SizeY = float32(v) }, Min:0.1, Max:3.0, Step:0.05, Format:"%.2f"},
@@ -34,6 +36,14 @@ var foeFields = []sliderField[core.EnemyVisualOverride]{
 	{Label:"Shadow Z", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.ShadowOffsetZ) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.ShadowOffsetZ = float32(v) }, Min:-1.5, Max:1.5, Step:0.02, Format:"%.2f"},
 	{Label:"Cursor Y", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.MarkerYOffset) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.MarkerYOffset = float32(v) }, Min:-2.0, Max:2.0, Step:0.02, Format:"%.2f"},
 	{Label:"Cursor X", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.MarkerXOffset) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.MarkerXOffset = float32(v) }, Min:-1.5, Max:1.5, Step:0.02, Format:"%.2f"},
+	{Label:"Cursor Sz", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.MarkerScale) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.MarkerScale = float32(v) }, Min:0.2, Max:3.0, Step:0.05, Format:"%.2f"},
+	{Label:"Glyph X", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.GlyphXOffset) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.GlyphXOffset = float32(v) }, Min:-1.5, Max:1.5, Step:0.02, Format:"%.2f"},
+	{Label:"Glyph Y", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.GlyphYOffset) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.GlyphYOffset = float32(v) }, Min:-1.5, Max:1.5, Step:0.02, Format:"%.2f"},
+	{Label:"Glyph Sz", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.GlyphScale) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.GlyphScale = float32(v) }, Min:0.2, Max:3.0, Step:0.05, Format:"%.2f"},
+	{Label:"Ptcl X", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.ParticleXOffset) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.ParticleXOffset = float32(v) }, Min:-1.5, Max:1.5, Step:0.02, Format:"%.2f"},
+	{Label:"Ptcl Y", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.ParticleYOffset) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.ParticleYOffset = float32(v) }, Min:-1.5, Max:1.5, Step:0.02, Format:"%.2f"},
+	{Label:"Ptcl Z", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.ParticleZOffset) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.ParticleZOffset = float32(v) }, Min:-1.5, Max:1.5, Step:0.02, Format:"%.2f"},
+	{Label:"Ptcl Sz", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.ParticleScale) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.ParticleScale = float32(v) }, Min:0.2, Max:3.0, Step:0.05, Format:"%.2f"},
 	{Label:"Tint R", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintR) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.TintR = clampByte(v) }, Min:0, Max:255, Step:1, Format:"%.0f"},
 	{Label:"Tint G", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintG) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.TintG = clampByte(v) }, Min:0, Max:255, Step:1, Format:"%.0f"},
 	{Label:"Tint B", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintB) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.TintB = clampByte(v) }, Min:0, Max:255, Step:1, Format:"%.0f"},
@@ -52,7 +62,10 @@ var foeDrag = struct{ sliderIdx int }{sliderIdx: -1}
 // Modal geometry. Wide card: preview pane on the left, slider stack on the
 // right. Fixed size (the editor runs borderless-fullscreen, so there's room).
 const (
-	foeModalW     = float32(940)
+	// Wider than the original 940 to fit the slider stack in TWO columns (the
+	// field count roughly doubled with the glyph/particle/cursor-size rows); the
+	// height is unchanged because two columns keep the stack short.
+	foeModalW     = float32(1040)
 	foeModalH     = float32(600)
 	foeHeaderH    = float32(40)
 	foePad        = float32(16)
@@ -61,6 +74,7 @@ const (
 	foeLabelW     = float32(86)
 	foeValueW     = float32(56)
 	foeTrackH     = float32(12)
+	foeColGap     = float32(26) // gutter between the two slider columns
 )
 
 // foeViewBtnLabels is the action row's single label source — the layout
@@ -97,13 +111,25 @@ func computeFoeViewLayout() foeViewLayout {
 	prevBtn := rl.NewRectangle(rightX, nameY, pickBtnW, 28)
 	nextBtn := rl.NewRectangle(rightX+rightW-pickBtnW, nameY, pickBtnW, 28)
 
-	trackX := rightX + foeLabelW
-	trackW := rightW - foeLabelW - foeValueW
+	// Two-column slider stack: split rightW into two equal columns separated by
+	// foeColGap, each column laying out label | track | value exactly as the old
+	// single column did (drawFoeSlider / handleFoeViewClick read tracks[i]
+	// rectangles + position the label/value relative to each, so they stay
+	// column-agnostic — only the rectangles move). The left column gets the ceil
+	// half so an odd count puts the extra row on the left.
+	colW := (rightW - foeColGap) / 2
+	colTrackW := colW - foeLabelW - foeValueW
+	firstColRows := (len(foeFields) + 1) / 2
 	tracks := make([]rl.Rectangle, len(foeFields))
-	rowTop := nameY + 28 + 16
+	rowBase := nameY + 28 + 16
 	for i := range foeFields {
-		tracks[i] = rl.NewRectangle(trackX, rowTop+(foeSliderRowH-foeTrackH)/2, trackW, foeTrackH)
-		rowTop += foeSliderRowH
+		col, row := 0, i
+		if i >= firstColRows {
+			col, row = 1, i-firstColRows
+		}
+		colX := rightX + float32(col)*(colW+foeColGap)
+		y := rowBase + float32(row)*foeSliderRowH + (foeSliderRowH-foeTrackH)/2
+		tracks[i] = rl.NewRectangle(colX+foeLabelW, y, colTrackW, foeTrackH)
 	}
 
 	btns := buttonRowAt(rightX, card.Y+card.Height-modalBtnH-modalBottomInset, foeViewBtnLabels)
@@ -169,10 +195,15 @@ func saveFoeVisual(s *State) {
 		s.flashWarn("Save failed: " + err.Error())
 		return
 	}
+	// Mirror the save into the live in-memory visual so cycling to another foe
+	// and back re-seeds from the SAVED values (LiveFoeOverride reads this map),
+	// and the editor's world/preview updates immediately — otherwise the save
+	// looked reverted because seedFoeVisual re-read the stale loaded value.
+	render.SetLiveFoeOverride(frameAssets, s.foeKind, s.foeVisual)
 	// The working copy is now what's on disk — make it the Reset baseline so a
 	// later Reset reverts to the just-saved state, not pre-save edits.
 	s.foeBaseline = s.foeVisual
-	s.flash("Saved " + core.EnemyInfo(s.foeKind).Name + " → " + slug + " (restart to see in game)")
+	s.flash("Saved " + core.EnemyInfo(s.foeKind).Name + " → " + slug + " (live in editor; restart game to apply)")
 }
 
 func updateFoeViewModal(s *State) Action {
@@ -306,10 +337,10 @@ func drawFoeViewModal(s *State, font rl.Font, theme render.Theme) {
 	// Footer hint + persistence note, under the preview pane (clear of the
 	// right-side buttons).
 	render.DrawTextWithShadow(font,
-		"D-pad row/adjust   |   drag sliders   |   use buttons to change foe, save, reset, or close",
+		"D-pad row/adjust   |   drag sliders   |   buttons: change foe / save / reset / close",
 		l.card.X+foePad, l.preview.Y+l.preview.Height+8, 12, theme.TextHint)
 	render.DrawTextWithShadow(font,
-		"Saves to maps/sprites/visuals.json as \""+core.EnemySlug(s.foeKind)+"\"",
+		"orange sphere = particle origin   ·   cyan = hit glyph   ·   saves to visuals.json as \""+core.EnemySlug(s.foeKind)+"\"",
 		l.card.X+foePad, l.preview.Y+l.preview.Height+26, 12, theme.TextMuted)
 }
 

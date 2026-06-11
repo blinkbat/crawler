@@ -24,22 +24,37 @@ import (
 var partyStatusVisuals = [core.PartyStatusCount]struct {
 	Col     rl.Color
 	Flicker bool
+	// Glyph paints the status's symbol centered at (cx,cy) radius r in the
+	// accent col. Every kind EXCEPT PartyStatusNone carries one; the init below
+	// asserts that, so a status added to the enum but missed here can't render
+	// as a bare disc (and, unlike a plain length check on a fixed-size array,
+	// the nil-Glyph probe actually catches a missing table row).
+	Glyph func(cx, cy, r float32, col rl.Color)
 }{
-	core.PartyStatusNone:      {rl.NewColor(220, 220, 220, 220), false},
-	core.PartyStatusDown:      {statusDown, false},
-	core.PartyStatusIngested:  {statusIngested, true},
-	core.PartyStatusWebbed:    {statusWebbed, true},
-	core.PartyStatusConfused:  {statusConfused, true},
-	core.PartyStatusStunned:   {statusStun, true},
-	core.PartyStatusAsleep:    {statusSleep, true},
-	core.PartyStatusPoisoned:  {statusPoison, true},
-	core.PartyStatusBlessed:   {statusBlessed, false},
-	core.PartyStatusDefending: {statusDefending, false},
+	core.PartyStatusNone:      {Col: rl.NewColor(220, 220, 220, 220)},
+	core.PartyStatusDown:      {Col: statusDown, Glyph: drawStatusGlyphDown},
+	core.PartyStatusIngested:  {Col: statusIngested, Flicker: true, Glyph: drawStatusGlyphIngested},
+	core.PartyStatusWebbed:    {Col: statusWebbed, Flicker: true, Glyph: drawStatusGlyphWebbed},
+	core.PartyStatusConfused:  {Col: statusConfused, Flicker: true, Glyph: drawStatusGlyphConfused},
+	core.PartyStatusStunned:   {Col: statusStun, Flicker: true, Glyph: drawStatusGlyphStunned},
+	core.PartyStatusAsleep:    {Col: statusSleep, Flicker: true, Glyph: drawStatusGlyphAsleep},
+	core.PartyStatusPoisoned:  {Col: statusPoison, Flicker: true, Glyph: drawStatusGlyphPoisoned},
+	core.PartyStatusBlessed:   {Col: statusBlessed, Glyph: drawStatusGlyphBlessed},
+	core.PartyStatusRegen:     {Col: statusRegen, Glyph: drawStatusGlyphRegen},
+	core.PartyStatusDefending: {Col: statusDefending, Glyph: drawStatusGlyphDefending},
 }
 
 func init() {
-	if len(partyStatusVisuals) != int(core.PartyStatusCount) {
-		panic(fmt.Sprintf("partyStatusVisuals length %d != PartyStatusCount %d", len(partyStatusVisuals), core.PartyStatusCount))
+	// PartyStatusNone is the absence of a status (no glyph); every other kind
+	// must carry one. A missing table row leaves a nil Glyph — caught here at
+	// startup rather than as a silent bare-disc draw.
+	for k := core.PartyStatusKind(0); k < core.PartyStatusCount; k++ {
+		if k == core.PartyStatusNone {
+			continue
+		}
+		if partyStatusVisuals[k].Glyph == nil {
+			panic(fmt.Sprintf("partyStatusVisuals[%d] has no Glyph — add the row", int(k)))
+		}
 	}
 }
 
@@ -310,70 +325,108 @@ var statusWebSpokes = [6][2]float32{
 // statusDizzyDots are the offsets (×r) for the Stunned icon's orbiting star-dots.
 var statusDizzyDots = [3][2]float32{{-0.62, -0.5}, {0, -0.78}, {0.62, -0.5}}
 
-// drawPartyStatusIcon draws a small procedural status glyph centered at
-// (cx,cy) with radius r — the party card's status indicator, replacing the old
-// word label. A dark token disc backs it for legibility over the wood card;
-// col is the per-status accent (already flickered by the caller). Every shape
-// is a winding-safe primitive (circles / rings / sectors / lines / DrawPoly /
-// rounded rects) so nothing depends on hand-wound DrawTriangle vertex order.
-func drawPartyStatusIcon(cx, cy, r float32, kind core.PartyStatusKind, col rl.Color) {
-	c := rl.NewVector2(cx, cy)
-	rl.DrawCircleV(rl.NewVector2(cx, cy+1), r+3, fadeColor(shadowHeavy, 0.30))
-	rl.DrawCircleV(c, r+2, rl.NewColor(22, 19, 26, 235))
-	dark := rl.NewColor(12, 10, 15, 255)
+// statusGlyphDark is the near-black used for the cut-out details inside a few
+// status glyphs (the skull's sockets/jaw, the ingest prey dot, the shield's
+// center spine). Hoisted out of drawPartyStatusIcon so the extracted glyph
+// funcs share one tone.
+var statusGlyphDark = rl.NewColor(12, 10, 15, 255)
 
-	switch kind {
-	case core.PartyStatusPoisoned:
-		// Toxic droplet: round body + pointed tip + a highlight bubble.
-		rl.DrawCircleV(rl.NewVector2(cx, cy+r*0.28), r*0.55, col)
-		rl.DrawPoly(rl.NewVector2(cx, cy-r*0.12), 3, r*0.5, -90, col)
-		rl.DrawCircleV(rl.NewVector2(cx-r*0.16, cy+r*0.2), r*0.16, fadeColor(rl.White, 0.7))
-	case core.PartyStatusAsleep:
-		// A drawn "Z" (three strokes) — the universal sleep mark, no font.
-		t := float32(2)
-		rl.DrawLineEx(rl.NewVector2(cx-r*0.5, cy-r*0.5), rl.NewVector2(cx+r*0.5, cy-r*0.5), t, col)
-		rl.DrawLineEx(rl.NewVector2(cx+r*0.5, cy-r*0.5), rl.NewVector2(cx-r*0.5, cy+r*0.5), t, col)
-		rl.DrawLineEx(rl.NewVector2(cx-r*0.5, cy+r*0.5), rl.NewVector2(cx+r*0.5, cy+r*0.5), t, col)
-	case core.PartyStatusStunned:
-		// Dizzy: orbiting star-dots above the head.
-		for _, d := range statusDizzyDots {
-			rl.DrawPoly(rl.NewVector2(cx+r*d[0], cy+r*d[1]), 4, r*0.26, 45, col)
-		}
-	case core.PartyStatusWebbed:
-		// Spider web: two rings + radial strands.
-		rl.DrawCircleLines(int32(cx), int32(cy), r*0.8, col)
-		rl.DrawCircleLines(int32(cx), int32(cy), r*0.42, col)
-		for _, d := range statusWebSpokes {
-			rl.DrawLineEx(c, rl.NewVector2(cx+r*0.8*d[0], cy+r*0.8*d[1]), 1, col)
-		}
-	case core.PartyStatusConfused:
-		// Confusion swirl: a near-closed ring with a gap.
-		rl.DrawRing(c, r*0.42, r*0.64, 20, 320, 20, col)
-	case core.PartyStatusIngested:
-		// Maw mid-swallow: open-mouth disc facing a small prey dot.
-		rl.DrawCircleSector(c, r*0.82, 35, 325, 20, col)
-		rl.DrawCircleV(rl.NewVector2(cx+r*0.95, cy), r*0.22, col)
-		rl.DrawCircleV(rl.NewVector2(cx-r*0.18, cy-r*0.22), r*0.14, dark)
-	case core.PartyStatusBlessed:
-		// Blessing: two rising chevrons — the universal "buff / stats up" mark,
-		// in the warm gilt accent.
-		t := float32(2)
-		rl.DrawLineEx(rl.NewVector2(cx-r*0.55, cy+r*0.12), rl.NewVector2(cx, cy-r*0.38), t, col)
-		rl.DrawLineEx(rl.NewVector2(cx, cy-r*0.38), rl.NewVector2(cx+r*0.55, cy+r*0.12), t, col)
-		rl.DrawLineEx(rl.NewVector2(cx-r*0.55, cy+r*0.62), rl.NewVector2(cx, cy+r*0.12), t, col)
-		rl.DrawLineEx(rl.NewVector2(cx, cy+r*0.12), rl.NewVector2(cx+r*0.55, cy+r*0.62), t, col)
-	case core.PartyStatusDefending:
-		// Shield: rounded badge body + a heraldic center spine.
-		rl.DrawRectangleRounded(rl.NewRectangle(cx-r*0.62, cy-r*0.7, r*1.24, r*1.5), 0.45, 6, col)
-		rl.DrawLineEx(rl.NewVector2(cx, cy-r*0.55), rl.NewVector2(cx, cy+r*0.55), 1.5, fadeColor(dark, 0.6))
-	case core.PartyStatusDown:
-		// Skull: dome + jaw + eye sockets.
-		rl.DrawCircleV(rl.NewVector2(cx, cy-r*0.12), r*0.78, col)
-		rl.DrawRectangleRounded(rl.NewRectangle(cx-r*0.42, cy+r*0.32, r*0.84, r*0.42), 0.4, 4, col)
-		rl.DrawCircleV(rl.NewVector2(cx-r*0.3, cy-r*0.16), r*0.2, dark)
-		rl.DrawCircleV(rl.NewVector2(cx+r*0.3, cy-r*0.16), r*0.2, dark)
-		rl.DrawLineEx(rl.NewVector2(cx, cy+r*0.34), rl.NewVector2(cx, cy+r*0.72), 1, dark)
+// drawPartyStatusIcon draws a small procedural status glyph centered at
+// (cx,cy) with radius r — the party card's status indicator. A dark token disc
+// backs it for legibility over the wood card; col is the per-status accent
+// (already flickered by the caller). The per-kind symbol is dispatched from
+// the partyStatusVisuals table's Glyph func (init-asserted present for every
+// non-None kind) rather than a switch, so a new status can't be missed. Every
+// glyph shape is a winding-safe primitive (circles / rings / sectors / lines /
+// DrawPoly / rounded rects) so nothing depends on hand-wound DrawTriangle
+// vertex order.
+func drawPartyStatusIcon(cx, cy, r float32, kind core.PartyStatusKind, col rl.Color) {
+	rl.DrawCircleV(rl.NewVector2(cx, cy+1), r+3, fadeColor(shadowHeavy, 0.30))
+	rl.DrawCircleV(rl.NewVector2(cx, cy), r+2, rl.NewColor(22, 19, 26, 235))
+	if kind < 0 || int(kind) >= len(partyStatusVisuals) {
+		return
 	}
+	if glyph := partyStatusVisuals[kind].Glyph; glyph != nil {
+		glyph(cx, cy, r, col)
+	}
+}
+
+// drawStatusGlyph* paint one status symbol each; they're the rows of
+// partyStatusVisuals.Glyph (bodies are the former drawPartyStatusIcon switch
+// cases, unchanged).
+
+func drawStatusGlyphPoisoned(cx, cy, r float32, col rl.Color) {
+	// Toxic droplet: round body + pointed tip + a highlight bubble.
+	rl.DrawCircleV(rl.NewVector2(cx, cy+r*0.28), r*0.55, col)
+	rl.DrawPoly(rl.NewVector2(cx, cy-r*0.12), 3, r*0.5, -90, col)
+	rl.DrawCircleV(rl.NewVector2(cx-r*0.16, cy+r*0.2), r*0.16, fadeColor(rl.White, 0.7))
+}
+
+func drawStatusGlyphAsleep(cx, cy, r float32, col rl.Color) {
+	// A drawn "Z" (three strokes) — the universal sleep mark, no font.
+	t := float32(2)
+	rl.DrawLineEx(rl.NewVector2(cx-r*0.5, cy-r*0.5), rl.NewVector2(cx+r*0.5, cy-r*0.5), t, col)
+	rl.DrawLineEx(rl.NewVector2(cx+r*0.5, cy-r*0.5), rl.NewVector2(cx-r*0.5, cy+r*0.5), t, col)
+	rl.DrawLineEx(rl.NewVector2(cx-r*0.5, cy+r*0.5), rl.NewVector2(cx+r*0.5, cy+r*0.5), t, col)
+}
+
+func drawStatusGlyphStunned(cx, cy, r float32, col rl.Color) {
+	// Dizzy: orbiting star-dots above the head.
+	for _, d := range statusDizzyDots {
+		rl.DrawPoly(rl.NewVector2(cx+r*d[0], cy+r*d[1]), 4, r*0.26, 45, col)
+	}
+}
+
+func drawStatusGlyphWebbed(cx, cy, r float32, col rl.Color) {
+	// Spider web: two rings + radial strands.
+	c := rl.NewVector2(cx, cy)
+	rl.DrawCircleLines(int32(cx), int32(cy), r*0.8, col)
+	rl.DrawCircleLines(int32(cx), int32(cy), r*0.42, col)
+	for _, d := range statusWebSpokes {
+		rl.DrawLineEx(c, rl.NewVector2(cx+r*0.8*d[0], cy+r*0.8*d[1]), 1, col)
+	}
+}
+
+func drawStatusGlyphConfused(cx, cy, r float32, col rl.Color) {
+	// Confusion swirl: a near-closed ring with a gap.
+	rl.DrawRing(rl.NewVector2(cx, cy), r*0.42, r*0.64, 20, 320, 20, col)
+}
+
+func drawStatusGlyphIngested(cx, cy, r float32, col rl.Color) {
+	// Maw mid-swallow: open-mouth disc facing a small prey dot.
+	rl.DrawCircleSector(rl.NewVector2(cx, cy), r*0.82, 35, 325, 20, col)
+	rl.DrawCircleV(rl.NewVector2(cx+r*0.95, cy), r*0.22, col)
+	rl.DrawCircleV(rl.NewVector2(cx-r*0.18, cy-r*0.22), r*0.14, statusGlyphDark)
+}
+
+func drawStatusGlyphBlessed(cx, cy, r float32, col rl.Color) {
+	// Blessing: two rising chevrons — the universal "buff / stats up" mark.
+	t := float32(2)
+	rl.DrawLineEx(rl.NewVector2(cx-r*0.55, cy+r*0.12), rl.NewVector2(cx, cy-r*0.38), t, col)
+	rl.DrawLineEx(rl.NewVector2(cx, cy-r*0.38), rl.NewVector2(cx+r*0.55, cy+r*0.12), t, col)
+	rl.DrawLineEx(rl.NewVector2(cx-r*0.55, cy+r*0.62), rl.NewVector2(cx, cy+r*0.12), t, col)
+	rl.DrawLineEx(rl.NewVector2(cx, cy+r*0.12), rl.NewVector2(cx+r*0.55, cy+r*0.62), t, col)
+}
+
+func drawStatusGlyphRegen(cx, cy, r float32, col rl.Color) {
+	// Healing cross (a "+") — the universal restore mark, in mint green.
+	rl.DrawRectangleRounded(rl.NewRectangle(cx-r*0.2, cy-r*0.62, r*0.4, r*1.24), 0.4, 4, col)
+	rl.DrawRectangleRounded(rl.NewRectangle(cx-r*0.62, cy-r*0.2, r*1.24, r*0.4), 0.4, 4, col)
+}
+
+func drawStatusGlyphDefending(cx, cy, r float32, col rl.Color) {
+	// Shield: rounded badge body + a heraldic center spine.
+	rl.DrawRectangleRounded(rl.NewRectangle(cx-r*0.62, cy-r*0.7, r*1.24, r*1.5), 0.45, 6, col)
+	rl.DrawLineEx(rl.NewVector2(cx, cy-r*0.55), rl.NewVector2(cx, cy+r*0.55), 1.5, fadeColor(statusGlyphDark, 0.6))
+}
+
+func drawStatusGlyphDown(cx, cy, r float32, col rl.Color) {
+	// Skull: dome + jaw + eye sockets.
+	rl.DrawCircleV(rl.NewVector2(cx, cy-r*0.12), r*0.78, col)
+	rl.DrawRectangleRounded(rl.NewRectangle(cx-r*0.42, cy+r*0.32, r*0.84, r*0.42), 0.4, 4, col)
+	rl.DrawCircleV(rl.NewVector2(cx-r*0.3, cy-r*0.16), r*0.2, statusGlyphDark)
+	rl.DrawCircleV(rl.NewVector2(cx+r*0.3, cy-r*0.16), r*0.2, statusGlyphDark)
+	rl.DrawLineEx(rl.NewVector2(cx, cy+r*0.34), rl.NewVector2(cx, cy+r*0.72), 1, statusGlyphDark)
 }
 
 func drawClassMedallion(cx, cy, r float32, col rl.Color, muted bool) {

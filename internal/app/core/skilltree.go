@@ -84,6 +84,10 @@ type SkillEffectDelta struct {
 	// numeric fields.
 	BuffStats Stats
 	BuffTurns int
+	// RegenTurns is the heal-over-time duration delta (Renewal's tiers add
+	// turns; the per-turn amount rides the existing Heal delta). Folded into
+	// the base SkillEffect.RegenTurns by EffectiveSkillEffect.
+	RegenTurns int
 }
 
 // skillTierTable is the source of truth for every player-castable
@@ -108,6 +112,11 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 		{Tier: 2, Label: "+2 damage", Description: "+2 more base damage per target on the spin.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
 		{Tier: 3, Label: "+2 damage", Description: "Another +2 base damage. Excellent timing eviscerates the pack.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
 	},
+	SkillSecondWind: {
+		{Tier: 1, Label: "+3 heal", Description: "+3 to the flat self-heal.", Cost: 1, Effect: SkillEffectDelta{Heal: 3}},
+		{Tier: 2, Label: "+3 heal", Description: "Another +3 to the breather.", Cost: 1, Effect: SkillEffectDelta{Heal: 3}},
+		{Tier: 3, Label: "+3 heal", Description: "A third +3 — a maxed Second Wind is a real comeback.", Cost: 1, Effect: SkillEffectDelta{Heal: 3}},
+	},
 	// ── Cleric ───────────────────────────────────────────────
 	SkillPrayer: {
 		{Tier: 1, Label: "+3 heal", Description: "+3 base heal on the target.", Cost: 1, Effect: SkillEffectDelta{Heal: 3}},
@@ -128,6 +137,11 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 		{Tier: 1, Label: "+1 turn", Description: "The blessing lingers one turn longer on the whole party.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
 		{Tier: 2, Label: "+1 to blessed stats", Description: "+1 more to STR, DEX, INT and WIS for every blessed ally.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{STR: 1, DEX: 1, INT: 1, WIS: 1}}},
 		{Tier: 3, Label: "+1 to blessed stats", Description: "Another +1 to all four blessed stats — a maxed blessing is a sweeping party buff.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{STR: 1, DEX: 1, INT: 1, WIS: 1}}},
+	},
+	SkillRenewal: {
+		{Tier: 1, Label: "+1 turn", Description: "The regen ticks one more turn.", Cost: 1, Effect: SkillEffectDelta{RegenTurns: 1}},
+		{Tier: 2, Label: "+1 heal/turn", Description: "+1 to the per-turn heal (before WIS scaling).", Cost: 1, Effect: SkillEffectDelta{Heal: 1}},
+		{Tier: 3, Label: "+1 turn", Description: "Another turn of regen — a maxed Renewal sustains an ally for the whole fight.", Cost: 1, Effect: SkillEffectDelta{RegenTurns: 1}},
 	},
 	// ── Thief ────────────────────────────────────────────────
 	SkillSteal: {
@@ -281,6 +295,7 @@ func EffectiveSkillEffect(m *PartyMember, s SkillID) SkillEffect {
 		eff.SleepMaxTurns += d.SleepMaxTurns
 		eff.BuffStats = SumStats(eff.BuffStats, d.BuffStats)
 		eff.BuffTurns += d.BuffTurns
+		eff.RegenTurns += d.RegenTurns
 	}
 	return eff
 }

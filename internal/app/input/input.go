@@ -76,6 +76,46 @@ func padReleased(button int32) bool {
 	return gamepadConnected() && rl.IsGamepadButtonReleased(gamepadID, button)
 }
 
+// lastRumbleLevel is the last motor level handed to the platform driver.
+// Tracked so an idle stretch (level 0) doesn't re-issue the call every frame —
+// the driver is invoked only when the level changes, plus once to stop at 0.
+var lastRumbleLevel float32 = -1
+
+// ApplyRumble drives the controller vibration motors to `level` (0..1) for this
+// frame, forcing 0 when vibration is disabled or no pad is connected. The run
+// loop calls this every frame with the decayed level from core.TickRumble; a
+// non-zero level re-issues each frame (so the motor tracks the falloff), while
+// an idle 0 is a no-op after the single stop call. The actual motor output goes
+// through the platform-specific setGamepadRumble (XInput on Windows; a no-op
+// elsewhere) — raylib's own SetGamepadVibration is a no-op on the GLFW backend
+// this build uses, so we deliberately do NOT call it.
+func ApplyRumble(level float32, enabled bool) {
+	if !enabled || !gamepadConnected() {
+		level = 0
+	}
+	if level < 0 {
+		level = 0
+	} else if level > 1 {
+		level = 1
+	}
+	if level == 0 && lastRumbleLevel == 0 {
+		return // motor already off — don't re-issue every idle frame
+	}
+	lastRumbleLevel = level
+	setGamepadRumble(level)
+}
+
+// StopRumble cuts the motors immediately. Called on exit so a controller can't
+// keep buzzing if the process lingers after the window closes (XInput vibration
+// persists until changed, so an explicit stop matters).
+func StopRumble() {
+	if lastRumbleLevel == 0 {
+		return
+	}
+	lastRumbleLevel = 0
+	setGamepadRumble(0)
+}
+
 // NewFrame samples the analog stick once at the start of each frame and
 // rolls the directional edge state forward (stickPrev <- stickNow, then
 // re-sample stickNow). Call it exactly once per frame, before any input

@@ -1172,6 +1172,57 @@ func TriggerCombatShake(b *Battle, peak, dur float32) {
 	b.ShakePeak = peak
 	b.ShakeDur = dur
 	b.ShakeTimer = dur
+	// Impact feedback has two halves: the camera shake (above) and a
+	// proportional controller rumble. Arming both here means every shake site
+	// (good press / crit / AoE) buzzes the pad too, graded by the same peak —
+	// one knob, no scattered TriggerRumble calls. Taking a hit doesn't shake,
+	// so that path arms TriggerRumble directly.
+	TriggerRumble(b, peak*RumblePerShakePeak, dur)
+}
+
+// TriggerRumble arms the controller-rumble envelope: peak motor strength
+// (clamped to [0,1]) for `dur` seconds, decayed by TickRumble. Keep-the-stronger
+// like TriggerCombatShake — a weaker buzz won't stomp a stronger one still in
+// flight. No-op on a nil battle or non-positive strength/dur. This is the
+// raylib-free intent layer; input.ApplyRumble drives the actual motor.
+func TriggerRumble(b *Battle, strength, dur float32) {
+	if b == nil || strength <= 0 || dur <= 0 {
+		return
+	}
+	if strength > 1 {
+		strength = 1
+	}
+	if b.RumbleTimer > 0 && b.RumbleStrength > strength {
+		return
+	}
+	b.RumbleStrength = strength
+	b.RumbleDur = dur
+	b.RumbleTimer = dur
+}
+
+// TickRumble decays the rumble envelope by dt and returns the current motor
+// level in [0,1] (RumbleStrength scaled by the remaining fraction), or 0 when
+// no rumble is active. Pure / raylib-free — the run loop calls it EVERY frame
+// (scene-independently) and hands the level to input.ApplyRumble. Decaying in
+// the main loop (not a battle-only update) is what guarantees a rumble armed
+// just before battle exit still eases to 0 instead of sticking the motor on.
+func TickRumble(b *Battle, dt float32) float32 {
+	if b == nil || b.RumbleTimer <= 0 || b.RumbleDur <= 0 {
+		return 0
+	}
+	b.RumbleTimer -= dt
+	if b.RumbleTimer <= 0 {
+		b.RumbleTimer = 0
+		return 0
+	}
+	level := b.RumbleStrength * (b.RumbleTimer / b.RumbleDur)
+	if level < 0 {
+		return 0
+	}
+	if level > 1 {
+		return 1
+	}
+	return level
 }
 
 // TimingQualityLabel returns the popup text for a quality grade. Reads

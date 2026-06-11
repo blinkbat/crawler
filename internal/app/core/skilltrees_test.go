@@ -71,21 +71,30 @@ func TestBuySkillNode_LearnsThenUpgradesLadder(t *testing.T) {
 	}
 }
 
-// TestBuySkillNode_PassiveRootGrantsNoSkill guards the GrantSkill==SkillNone
+// TestBuySkillNode_PassiveNodeGrantsNoSkill guards the GrantSkill==SkillNone
 // branch: a deferred/passive node records its rank but must not learn a
-// castable skill or write the SkillTiers ladder.
-func TestBuySkillNode_PassiveRootGrantsNoSkill(t *testing.T) {
-	m := PartyMember{Class: ClassWarrior, SkillPoints: 1}
-	if !BuySkillNode(&m, "second-wind") {
-		t.Fatal("buy second-wind failed")
+// castable skill or write the SkillTiers ladder. Every tree ROOT now grants a
+// skill, so this uses a passive tier-1 node (`taunt`, reached after its
+// granting root `shield-bash`): buying the passive node must not change the
+// learned-skill set or the SkillTiers map the root established.
+func TestBuySkillNode_PassiveNodeGrantsNoSkill(t *testing.T) {
+	m := PartyMember{Class: ClassWarrior, SkillPoints: 2}
+	if !BuySkillNode(&m, "shield-bash") { // root — grants Crushing Blow
+		t.Fatal("buy shield-bash failed")
 	}
-	if got := LearnedSkills(&m); len(got) != 0 {
-		t.Errorf("LearnedSkills after passive node = %v, want empty", got)
+	learnedBefore := len(LearnedSkills(&m))
+	tiersBefore := len(m.SkillTiers)
+
+	if !BuySkillNode(&m, "taunt") { // tier-1 passive node — grants nothing
+		t.Fatal("buy taunt failed")
 	}
-	if len(m.SkillTiers) != 0 {
-		t.Errorf("SkillTiers after passive node = %v, want empty", m.SkillTiers)
+	if got := len(LearnedSkills(&m)); got != learnedBefore {
+		t.Errorf("passive node changed LearnedSkills count %d -> %d", learnedBefore, got)
 	}
-	if got := TreeNodeRank(&m, "second-wind"); got != 1 {
-		t.Errorf("second-wind rank = %d, want 1", got)
+	if len(m.SkillTiers) != tiersBefore {
+		t.Errorf("passive node wrote a SkillTiers entry: %v", m.SkillTiers)
+	}
+	if got := TreeNodeRank(&m, "taunt"); got != 1 {
+		t.Errorf("taunt rank = %d, want 1", got)
 	}
 }

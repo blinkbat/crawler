@@ -230,6 +230,21 @@ const (
 	CombatShakeBigPeak       = float32(0.055) // crits + AoE casts: the real punch
 	CombatShakeBigDur        = float32(0.30)
 
+	// Controller rumble — the haptic half of "impact feedback", armed
+	// alongside the camera shake (see TriggerCombatShake). RumblePerShakePeak
+	// maps a shake's world-unit peak to a motor strength in [0,1] (clamped), so
+	// rumble grades automatically with the shake: a subtle Great press buzzes
+	// lightly (~0.24), a crit/AoE punch buzzes hard (~0.83). One knob.
+	RumblePerShakePeak = float32(15.0)
+	// Taking a hit buzzes too (the "ouch" — it doesn't shake the camera, so it
+	// arms rumble directly in damagePartyMember). A flat medium pulse.
+	RumbleHurtStrength = float32(0.45)
+	RumbleHurtDur      = float32(0.18)
+	// The Debug menu's "Test Rumble" pulse — strong + long enough to be
+	// unmistakable when verifying vibration works.
+	RumbleTestStrength = float32(0.8)
+	RumbleTestDur      = float32(0.5)
+
 	// Sequence arrow pulse: how long an arrow scales up after landing a
 	// correct tap. Slightly less than the flash duration so the pulse decays
 	// before the bar fades, keeping each tap visually punctuated.
@@ -708,6 +723,16 @@ const (
 	// leaving the Bless buff and Defending intact. NoUpgrades (single rank, like
 	// Scan). Appended at the END (saved-map-key contract).
 	SkillCleanse
+	// SkillSecondWind is the Warrior's self-heal (Ancestral Call tree's "Second
+	// Wind" root). No target pick — heals the caster a flat amount (Utility
+	// kind, so the Warrior's dump WIS doesn't gate it). The Warrior's only
+	// heal; battle-only. Appended at the END (saved-map-key contract).
+	SkillSecondWind
+	// SkillRenewal is the Cleric's heal-over-time (Mercy tree's "Renewal" node,
+	// learned after Prayer). Single ally target: it stamps a regen (RegenTurns
+	// / RegenPerTurn) that ticks healing at the end of the ally's turns. The
+	// game's first HoT. Appended at the END (saved-map-key contract).
+	SkillRenewal
 )
 
 // SkillTag classifies a skill for damage-type interactions (armor,
@@ -754,6 +779,12 @@ const (
 	// pack, so a more modest per-target chance keeps "burn the entire room"
 	// from being a guaranteed every-cast outcome.
 	FireballBurnChance = 0.30
+	// FireBurnMinTurns / FireBurnMaxTurns are the Burn duration bounds shared by
+	// the Wizard's fire skills (Firebolt + Fireball). Named here now that two
+	// skills set the same 2–3, instead of inlining the literals at each
+	// registry row (the poison side already centralizes via PoisonMin/MaxTurns).
+	FireBurnMinTurns = 2
+	FireBurnMaxTurns = 3
 	// PoisonCloudPoisonChance gates the Thief AoE toxin's per-target Poison
 	// roll. Lower than the single-target VenomStrikePoisonChance for the same
 	// whole-pack reason as FireballBurnChance.
@@ -775,6 +806,19 @@ const (
 	// turns. Fixed, not rolled — a support buff the player invests skill
 	// points into shouldn't gamble its duration.
 	BlessBuffTurns = 3
+)
+
+// Second Wind (Warrior) + Renewal (Cleric) heal tuning. Both base values fold
+// the skill-tier ladder on top via skillTierTable.
+const (
+	// SecondWindHealBase is the flat self-heal (tier 0). Utility-kind, so it
+	// is NOT WIS-scaled — a fixed amount appropriate for the low-WIS Warrior.
+	SecondWindHealBase = 6
+	// RenewalRegenBase is the base per-turn heal (tier 0); Renewal is Heal-kind
+	// so the actual per-turn amount snapshots the caster's WIS-scaled value at
+	// cast time. RenewalRegenTurns is the base duration (fixed, not rolled).
+	RenewalRegenBase  = 2
+	RenewalRegenTurns = 3
 )
 
 // XP / level constants. Per-character XP and levels (one pool + one
@@ -849,10 +893,11 @@ const PauseMenuCount = int(PauseMenuQuit) + 1
 type OptionsMenuItem int
 
 const (
-	OptionsMenuDisplay OptionsMenuItem = iota // Fullscreen / Windowed toggle
-	OptionsMenuStats                          // open the Tome on the Stats tab
-	OptionsMenuQuests                         // open the quest-journal overlay
-	OptionsMenuSave                           // write the run to the save file
+	OptionsMenuDisplay   OptionsMenuItem = iota // Fullscreen / Windowed toggle
+	OptionsMenuVibration                        // controller rumble On / Off
+	OptionsMenuStats                            // open the Tome on the Stats tab
+	OptionsMenuQuests                           // open the quest-journal overlay
+	OptionsMenuSave                             // write the run to the save file
 	OptionsMenuRestart
 	OptionsMenuClose
 )
@@ -897,6 +942,11 @@ const (
 	// scene. Distinct from DebugMenuEnemies (which disables encounters
 	// entirely, with no reward).
 	DebugMenuSkipBattles
+	// DebugMenuTestRumble fires a one-shot controller-rumble pulse so vibration
+	// can be felt/verified outside combat (the rumble path is hard to confirm
+	// otherwise — raylib's GLFW backend has no vibration, so it runs through the
+	// XInput driver on Windows).
+	DebugMenuTestRumble
 	DebugMenuClose
 )
 

@@ -58,12 +58,16 @@ func DefaultCustomEnemy(name string, base EnemyKind) CustomEnemyDef {
 // be non-negative. Returns a descriptive error (nil when clean) so the
 // registry init can panic on it while the map loader surfaces it to the
 // author — one set of bounds, two failure modes, no drift.
-func validateEnemyStatBounds(name string, skillCastChance float64, armor, mdef, attackDamage, xpValue, spellPower int) error {
+func validateEnemyStatBounds(name string, skillCastChance float64, armor, mdef, attackDamage, xpValue, spellPower, tier int) error {
 	if skillCastChance < 0 || skillCastChance > 1 {
 		return fmt.Errorf("enemy %q has SkillCastChance %v outside [0, 1]", name, skillCastChance)
 	}
-	if armor < 0 || mdef < 0 || attackDamage < 0 || xpValue < 0 || spellPower < 0 {
-		return fmt.Errorf("enemy %q has a negative stat field (armor/mdef/attack/xp/spellpower)", name)
+	// Tier is included so the editor save path (MapCustomEnemyFromDef →
+	// validateEnemyStatBounds) agrees with the map LOADER (parseCustomEnemyLine,
+	// which rejects every negative numeric field): without it, a negative tier
+	// authored in the editor saves fine but yields an unloadable map.
+	if armor < 0 || mdef < 0 || attackDamage < 0 || xpValue < 0 || spellPower < 0 || tier < 0 {
+		return fmt.Errorf("enemy %q has a negative stat field (armor/mdef/attack/xp/spellpower/tier)", name)
 	}
 	return nil
 }
@@ -88,7 +92,7 @@ func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
 	// rows via the shared validateEnemyStatBounds so the two paths can't
 	// drift on bounds. Refuse bad data at load rather than letting it reach
 	// combat math.
-	if err := validateEnemyStatBounds(ce.Name, ce.SkillCastChance, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower); err != nil {
+	if err := validateEnemyStatBounds(ce.Name, ce.SkillCastChance, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower, ce.Tier); err != nil {
 		return CustomEnemyDef{}, err
 	}
 	skills := make([]SkillID, 0, len(ce.Skills))
@@ -122,6 +126,19 @@ func MapCustomEnemyFromDef(ce CustomEnemyDef) (mapfile.MapCustomEnemy, error) {
 	baseName, ok := EnemyKindName(ce.BaseKind)
 	if !ok {
 		return mapfile.MapCustomEnemy{}, fmt.Errorf("custom enemy %q has unknown base kind %d", ce.Name, int(ce.BaseKind))
+	}
+	// Validate the numeric bounds on the way OUT, matching the map LOADER
+	// (parseCustomEnemyLine rejects negatives; CustomEnemyDefFromMap re-checks via
+	// validateEnemyStatBounds). The editor clamps stats at 0, but a non-editor
+	// writer (importer/script — see the lockstep note below) could otherwise
+	// persist a negative field that the loader would then refuse, yielding an
+	// unloadable map. MP isn't in the shared validator (the static registry has
+	// no MP pool), so it's checked here alongside.
+	if err := validateEnemyStatBounds(ce.Name, ce.SkillCastChance, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower, ce.Tier); err != nil {
+		return mapfile.MapCustomEnemy{}, err
+	}
+	if ce.MP < 0 {
+		return mapfile.MapCustomEnemy{}, fmt.Errorf("custom enemy %q has negative MP %d", ce.Name, ce.MP)
 	}
 	skillNames := make([]string, 0, len(ce.Skills))
 	for _, id := range ce.Skills {

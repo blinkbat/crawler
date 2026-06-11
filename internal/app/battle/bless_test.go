@@ -34,9 +34,21 @@ func TestApplyBless_BuffsLivingPartyAndSkipsDownedIngested(t *testing.T) {
 	if got := core.EffectiveStats(sol).INT; got != solBaseINT+core.BlessBuffPerStat {
 		t.Errorf("Sol EffectiveStats.INT = %d, want %d", got, solBaseINT+core.BlessBuffPerStat)
 	}
-	// The caster (Mira, slot 1) is included in the party-wide buff.
+	// The caster (Mira, slot 1) is included in the party-wide buff — and gets one
+	// EXTRA turn at apply time to absorb the end-of-turn self-drain that, in real
+	// play, ticks the caster's copy down once immediately (the caster is the
+	// current actor). This isolated test routes finishActorTurn's drain onto the
+	// downed queue-cursor actor (Vex, slot 0) instead, so it observes the
+	// PRE-drain value: BlessBuffTurns+1.
+	if g.Party[1].BuffTurns != core.BlessBuffTurns+1 {
+		t.Errorf("caster BuffTurns = %d, want %d (BlessBuffTurns+1, pre-self-drain)", g.Party[1].BuffTurns, core.BlessBuffTurns+1)
+	}
+	// And that extra turn nets out: one self-drain (what finishActorTurn does to
+	// the caster on the cast turn in real play) leaves the caster at exactly
+	// BlessBuffTurns — the same useful duration the allies got, not one fewer.
+	tickBlessAfterPartyTurn(g, core.ActorRef{IsParty: true, Index: 1})
 	if g.Party[1].BuffTurns != core.BlessBuffTurns {
-		t.Errorf("caster BuffTurns = %d, want %d", g.Party[1].BuffTurns, core.BlessBuffTurns)
+		t.Errorf("caster BuffTurns after one self-drain = %d, want %d (must match allies, not be one short)", g.Party[1].BuffTurns, core.BlessBuffTurns)
 	}
 	// Downed and ingested members get nothing.
 	if g.Party[0].BuffTurns != 0 {

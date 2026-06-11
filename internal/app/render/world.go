@@ -56,6 +56,29 @@ type enemyVisual struct {
 	// same regardless of which way the battle camera faces.
 	shadowOffsetX float32
 	shadowOffsetZ float32
+	// markerScale multiplies the selector-pyramid silhouette (height + base
+	// radius) for THIS kind's target chevron, so a big foe can wear a bigger
+	// cursor and a small one a daintier cursor. Zero = unset → 1.0 (see
+	// effectiveMarkerScale); the position is still tuned by markerY/XOffset.
+	markerScale float32
+	// glyphXOffset / glyphYOffset nudge THIS kind's hit-clarity glyph from the
+	// struck sprite's center along camera-right(+ = screen right) and world-up(+)
+	// before it projects to screen, so the glyph sits over the visible body of an
+	// off-center PNG. glyphScale multiplies its on-screen radius. Zero offsets =
+	// centered (plus the shared hitGlyphRise lift); zero scale = unset → 1.0.
+	glyphXOffset float32
+	glyphYOffset float32
+	glyphScale   float32
+	// particleXOffset / particleYOffset / particleZOffset nudge THIS kind's
+	// impact particle burst origin along camera-right(+), world-up(+), and
+	// camera-forward(+ = into the arena); particleScale uniformly scales the
+	// burst's spread + dot size around that origin. Lets a tiny rat get a tight
+	// little puff and a Stone Golem a big slam. Zero offsets = at the sprite
+	// center; zero scale = unset → 1.0 (see effectiveParticleScale).
+	particleXOffset float32
+	particleYOffset float32
+	particleZOffset float32
+	particleScale   float32
 	// tint is a per-kind base color multiplied (raylib ColorTint semantics:
 	// a*b/255 per channel) into the runtime billboard tint — darken with a
 	// gray, recolor with a hue, etc. It folds in AFTER the combat tint
@@ -78,6 +101,24 @@ func (v enemyVisual) resolveTint() rl.Color {
 	return v.tint
 }
 
+// effectiveMarkerScale / effectiveGlyphScale / effectiveParticleScale resolve a
+// per-kind size multiplier, treating the zero value (an unset field, or a
+// missing field in a visuals.json written before these existed) as 1.0 — full
+// size. Mirrors resolveTint's "zero = sensible default" handling so the code
+// defaults never need to spell out a 1.0 for every kind, and a non-negative
+// authored value (the editor's slider floor is 0.1) is honored verbatim. A
+// negative value can't be authored but is clamped up to 1.0 defensively.
+func (v enemyVisual) effectiveMarkerScale() float32   { return scaleOrDefault(v.markerScale) }
+func (v enemyVisual) effectiveGlyphScale() float32    { return scaleOrDefault(v.glyphScale) }
+func (v enemyVisual) effectiveParticleScale() float32 { return scaleOrDefault(v.particleScale) }
+
+func scaleOrDefault(s float32) float32 {
+	if s <= 0 {
+		return 1
+	}
+	return s
+}
+
 // shadowFootprint returns the world XZ where THIS visual's contact disc should
 // land: the sprite's drawn footprint plus the visual's camera-relative
 // shadowOffset nudge. Welding the disc to the same XZ the billboard draws at
@@ -93,6 +134,24 @@ func shadowFootprint(camera rl.Camera3D, position rl.Vector3, v enemyVisual) (fl
 		z += right.Z*v.shadowOffsetX + fwd.Z*v.shadowOffsetZ
 	}
 	return x, z
+}
+
+// cameraRelativeOffset nudges world point p by dx along camera-right(+ = screen
+// right), dy along world-up(+), and dz along camera-forward(+ = into the scene).
+// Camera-relative XZ (same basis as shadowFootprint / markerXOffset) so the
+// nudge reads identically regardless of which way the battle camera faces. A
+// zero nudge returns p untouched (and skips the trig). Used to place the
+// per-kind hit-glyph and particle-burst anchors over a struck enemy.
+func cameraRelativeOffset(camera rl.Camera3D, p rl.Vector3, dx, dy, dz float32) rl.Vector3 {
+	if dx == 0 && dy == 0 && dz == 0 {
+		return p
+	}
+	fwd := horizontalForward(camera)
+	right := horizontalRight(fwd)
+	p.X += right.X*dx + fwd.X*dz
+	p.Z += right.Z*dx + fwd.Z*dz
+	p.Y += dy
+	return p
 }
 
 // enemyVisualOverride snapshots the tunable fields of an enemyVisual into the
@@ -111,10 +170,21 @@ func enemyVisualOverride(v enemyVisual) core.EnemyVisualOverride {
 		ShadowOffsetZ: v.shadowOffsetZ,
 		MarkerYOffset: v.markerYOffset,
 		MarkerXOffset: v.markerXOffset,
-		TintR:         v.tint.R,
-		TintG:         v.tint.G,
-		TintB:         v.tint.B,
-		TintA:         v.tint.A,
+		// Snapshot the EFFECTIVE scale (resolves an unset 0 → 1.0) so the editor
+		// seeds its sliders at full size, not a confusing 0. Offsets snapshot raw
+		// (0 = no nudge, which is also their default).
+		MarkerScale:     v.effectiveMarkerScale(),
+		GlyphXOffset:    v.glyphXOffset,
+		GlyphYOffset:    v.glyphYOffset,
+		GlyphScale:      v.effectiveGlyphScale(),
+		ParticleXOffset: v.particleXOffset,
+		ParticleYOffset: v.particleYOffset,
+		ParticleZOffset: v.particleZOffset,
+		ParticleScale:   v.effectiveParticleScale(),
+		TintR:           v.tint.R,
+		TintG:           v.tint.G,
+		TintB:           v.tint.B,
+		TintA:           v.tint.A,
 	}
 }
 
@@ -131,6 +201,17 @@ func applyEnemyVisualOverride(v enemyVisual, ov core.EnemyVisualOverride) enemyV
 	v.shadowOffsetZ = ov.ShadowOffsetZ
 	v.markerYOffset = ov.MarkerYOffset
 	v.markerXOffset = ov.MarkerXOffset
+	// Scales direct-assign; the effective*Scale accessors fold an unset 0 (or a
+	// pre-existing visuals.json that lacks these fields) back to 1.0 at the draw
+	// site, so a 0 here never means "invisible."
+	v.markerScale = ov.MarkerScale
+	v.glyphXOffset = ov.GlyphXOffset
+	v.glyphYOffset = ov.GlyphYOffset
+	v.glyphScale = ov.GlyphScale
+	v.particleXOffset = ov.ParticleXOffset
+	v.particleYOffset = ov.ParticleYOffset
+	v.particleZOffset = ov.ParticleZOffset
+	v.particleScale = ov.ParticleScale
 	v.tint = rl.NewColor(ov.TintR, ov.TintG, ov.TintB, ov.TintA)
 	return v
 }
@@ -1291,8 +1372,7 @@ func drawFieldPacks(camera rl.Camera3D, g core.GameState, assets Resources) {
 		if !core.PackAlive(pack) {
 			continue
 		}
-		leader := core.PackLeader(pack)
-		visual, ok := enemyVisualFor(assets, leader.Kind)
+		visual, ok := enemyVisualFor(assets, core.PackLeaderKind(pack))
 		if !ok {
 			continue
 		}
@@ -1411,13 +1491,13 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 		// flag so both yellow indicators behave identically.
 		if enemy.Alive && targetingEnemy(g) && i == g.Battle.EnemyIndex {
 			tint = tintEnemyTargeted
-			drawTargetChevron(camera, place.chevron)
+			drawTargetChevron(camera, place.chevron, visual.effectiveMarkerScale())
 		} else if enemy.Alive && aoeEnemyTargetPreview(g) {
 			// AoE skill highlighted in the Skill submenu: every living
 			// enemy gets a chevron so the player sees the cast hits the
 			// whole line, not one target.
 			tint = tintEnemyTargeted
-			drawTargetChevron(camera, place.chevron)
+			drawTargetChevron(camera, place.chevron, visual.effectiveMarkerScale())
 		}
 		// During BattleEnemyTiming the warm tint on the attacker carries
 		// the "this one is swinging" read; the red pyramid moved over to
@@ -1601,8 +1681,19 @@ func enemyVisualFor(assets Resources, kind core.EnemyKind) (enemyVisual, bool) {
 	return visual, ok && visual.texture.ID != 0
 }
 
-func drawTargetChevron(camera rl.Camera3D, position rl.Vector3) {
-	drawMarkerOnTop(position, markerEnemyTarget)
+// drawTargetChevron draws the yellow enemy-target selector pyramid at position,
+// scaled by the struck kind's per-kind markerScale (1 = default size). Folding
+// the scale into a local copy of the shared markerEnemyTarget style keeps the
+// style table itself per-role (not per-kind) while letting a big foe wear a
+// bigger cursor — only this enemy-side marker is kind-scaled; the friendly /
+// incoming-attack markers keep their fixed role sizes.
+func drawTargetChevron(camera rl.Camera3D, position rl.Vector3, scale float32) {
+	style := markerEnemyTarget
+	if scale > 0 && scale != 1 {
+		style.height *= scale
+		style.baseRadius *= scale
+	}
+	drawMarkerOnTop(position, style)
 }
 
 // drawSelectorPyramid renders the JRPG-classic floating cursor: a square-

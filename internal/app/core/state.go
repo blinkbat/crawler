@@ -57,6 +57,9 @@ func NewGameState(area AreaDefinition) GameState {
 		Visited:    visited,
 		ChestOpen:  -1,
 		DoorPrompt: -1,
+		// Controller vibration on by default; the player can mute it in the
+		// Options menu. Runtime preference (not persisted in SaveData).
+		RumbleEnabled: true,
 		// Starting bag: rations only, no equipment — see starterInventory.
 		Inventory: starterInventory(),
 		Quests:    StarterQuests(),
@@ -188,14 +191,26 @@ func ResetGameState(g *GameState) {
 	savedParty := resetPartyForFieldRecovery(g.Party)
 	savedGold := g.Gold
 	savedQuests := g.Quests
+	savedBestiary := g.Bestiary
+	savedRumble := g.RumbleEnabled
 	*g = NewGameState(g.Area)
 	g.Inventory = savedInventory
 	g.Party = savedParty
-	// Gold + the quest journal are run progression, not world state — they
-	// survive a loss-recovery / restart the same way inventory and party
-	// levels do.
+	// Gold + the quest journal + the bestiary are run progression, not world
+	// state — they survive a loss-recovery / restart the same way inventory and
+	// party levels do. Without restoring the bestiary, a wipe-and-recover or
+	// pause-menu Restart would silently wipe every kill count + Scanned flag,
+	// even though those are persisted to disk and carried across area
+	// transitions. NewGameState already seeded a fresh map; only overwrite it
+	// when the prior run actually had one (nil stays nil — harmless).
 	g.Gold = savedGold
 	g.Quests = savedQuests
+	if savedBestiary != nil {
+		g.Bestiary = savedBestiary
+	}
+	// Preserve the player's vibration preference across a restart (an
+	// accessibility setting, not world state).
+	g.RumbleEnabled = savedRumble
 	// Signal the render layer to drop any lingering particles. Restart can
 	// fire mid-battle (the pause menu's Restart row is reachable outside the
 	// two timing phases), so formation-relative battle particles would

@@ -27,6 +27,7 @@ func Start(g *core.GameState, packIndex int) {
 	g.Battle.TimingIntro = 0
 	g.Battle.HitStop = 0
 	g.Battle.ShakeTimer = 0
+	g.Battle.RumbleTimer = 0
 	g.Battle.SequencePulseTimer = 0
 	g.Battle.SequencePulseIndex = -1
 	g.Battle.EnemyAttacker = -1
@@ -499,6 +500,7 @@ func drainNonDamagingPartyStatuses(g *core.GameState, actor core.ActorRef) {
 	tickWebbedAfterPartyTurn(g, actor)
 	tickConfusedAfterPartyTurn(g, actor)
 	tickBlessAfterPartyTurn(g, actor)
+	tickRegenAfterPartyTurn(g, actor)
 }
 
 // tickSkipStatusAtTurnStart drains one tick from a skip-this-turn status
@@ -708,7 +710,7 @@ func tickFlashHold(g *core.GameState, dt float32, onResolve func()) bool {
 			return true
 		}
 		g.Battle.HitStop = 0
-		onResolve()
+		fireImpact(g, onResolve)
 		return true
 	}
 	if g.Battle.TimingFlash <= 0 {
@@ -719,20 +721,30 @@ func tickFlashHold(g *core.GameState, dt float32, onResolve func()) bool {
 		return true
 	}
 	g.Battle.TimingFlash = 0
-	// Screen-shake the camera on a well-timed hit — set alongside the
-	// hit-stop so the impact freeze and the shake land together (the shake
-	// oscillation is wall-clock-driven, so it's visible through the freeze).
-	// This is the SUBTLE base (zero for Miss/Nice/Good); the apply step that
-	// follows (onResolve) arms the bigger shake for crits / AoE casts, which
-	// overrides this via TriggerCombatShake's keep-the-stronger rule.
-	basePeak, baseDur := core.CombatShakeFor(g.Battle.Timing.Quality)
-	core.TriggerCombatShake(&g.Battle, basePeak, baseDur)
 	if stop := core.HitStopFor(g.Battle.Timing.Quality); stop > 0 {
+		// Great/Excellent: freeze first (anticipation), then fireImpact resolves
+		// + shakes once the freeze releases — see fireImpact for why the shake
+		// no longer arms here (it used to read as preceding the hit).
 		g.Battle.HitStop = stop
 		return true
 	}
-	onResolve()
+	fireImpact(g, onResolve)
 	return true
+}
+
+// fireImpact runs the action's apply (onResolve: damage / heal / per-skill VFX /
+// hit-glyph / popups) and THEN arms the base combat shake — so the shake lands
+// WITH the impact (after the hit-stop freeze) instead of during it. It used to
+// arm at flash-end, before both the freeze and onResolve, which made the screen
+// shake DURING the anticipation freeze — reading as the shake preceding the
+// attack. Now: flash → freeze (still) → fireImpact (damage + VFX + shake all at
+// the connect). CombatShakeFor returns 0 for Miss/Nice/Good (no base shake), and
+// a stronger crit/AoE shake armed inside onResolve survives the base arm here
+// via TriggerCombatShake's keep-the-stronger rule.
+func fireImpact(g *core.GameState, onResolve func()) {
+	onResolve()
+	basePeak, baseDur := core.CombatShakeFor(g.Battle.Timing.Quality)
+	core.TriggerCombatShake(&g.Battle, basePeak, baseDur)
 }
 
 // updateAttackTiming drives the player's attack/skill timing bar. The bar

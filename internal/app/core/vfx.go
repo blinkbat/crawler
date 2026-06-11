@@ -29,9 +29,14 @@ type VFXKind int
 
 const (
 	VFXNone VFXKind = iota
-	// Melee impact — bright spark cluster at the target. Used by
-	// basic Attack, Swipe, Backstab, Whirlwind, Crushing Blow.
+	// Bladed melee — a quick crescent slash stroke + spark cluster. Used by
+	// edged basic attacks (sword/axe/dagger/spear) and the bladed melee skills
+	// (Swipe, Backstab, Whirlwind, Crushing Blow).
 	VFXSlash
+	// Blunt/percussive melee — a compact "thud" pop + impact ring. Used by
+	// unarmed fists, blunt weapons (club/hammer), ranged projectile strikes, and
+	// enemy claw/bite/slam basic attacks. Maps to the impact clarity glyph.
+	VFXImpact
 	// Firebolt impact — orange/red embers drifting upward + a
 	// short-lived shockwave ring at ground.
 	VFXEmber

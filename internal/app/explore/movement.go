@@ -196,6 +196,8 @@ func updateOptionsMenu(g *core.GameState) {
 		switch core.OptionsMenuItem(item) {
 		case core.OptionsMenuDisplay:
 			render.ToggleDisplayMode()
+		case core.OptionsMenuVibration:
+			g.RumbleEnabled = !g.RumbleEnabled
 		case core.OptionsMenuStats:
 			// Drop the menu and open the panels overlay on the Stats tab —
 			// the richer multi-tab dashboard the legacy compact view was a
@@ -262,6 +264,11 @@ func updateDebugMenu(g *core.GameState) {
 			core.DebugBoostParty(g.Party, core.DebugStatBoost)
 		case core.DebugMenuSkipBattles:
 			g.DebugSkipBattles = !g.DebugSkipBattles
+		case core.DebugMenuTestRumble:
+			// Arm a pulse on g.Battle; the main loop's TickRumble/ApplyRumble
+			// drives it every frame regardless of scene, so it fires even with
+			// the pause menu open and out of combat.
+			core.TriggerRumble(&g.Battle, core.RumbleTestStrength, core.RumbleTestDur)
 		case core.DebugMenuClose:
 			g.DebugMenuOpen = false
 		}

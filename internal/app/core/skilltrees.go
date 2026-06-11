@@ -116,7 +116,7 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 			nd("riposte", "Riposte", "Passive: counter when you dodge or a Guarded ally is struck.", 1),
 		}),
 		linearTree("Ancestral Call", "Utility, light heal, protection, summons", []SkillTreeNode{
-			nd("second-wind", "Second Wind", "A small self or party heal.", 3),
+			act("second-wind", "Second Wind", "A flat self-heal — catch your breath mid-fight.", SkillSecondWind),
 			nd("war-banner", "War Banner", "Plant a banner: party gains stats while it stands.", 3),
 			nd("stone-skin", "Stone Skin", "Grant an ally temporary Armor and MDef.", 3),
 			nd("ancestral-spirit", "Ancestral Spirit", "Summon a warrior shade to fight beside the party.", 1),
@@ -142,8 +142,8 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 		linearTree("Mercy", "Restoration, regen, cleanse, revive", []SkillTreeNode{
 			act("prayer", "Prayer", "Single-target heal on an ally.", SkillPrayer),
 			actOnce("cleanse", "Cleanse", "Cure an ally's Poison, Sleep, Stun, Web and Confusion.", SkillCleanse),
-			nd("renewal", "Renewal", "Heal-over-time regeneration on an ally.", 3),
-			nd("mass-mend", "Mass Mend", "Heal the entire living party at once.", 3),
+			act("renewal", "Renewal", "Heal-over-time regeneration on an ally.", SkillRenewal),
+			act("mass-mend", "Mass Mend", "Heal the entire living party at once.", SkillMassMend),
 			nd("resurrect", "Resurrect", "Capstone: revive a downed party member.", 1),
 		}),
 		linearTree("Conviction", "Buffs, wards, retribution", []SkillTreeNode{
