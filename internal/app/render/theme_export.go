@@ -149,6 +149,7 @@ func DrawSelectedRow(r rl.Rectangle) {
 			fadeColor(giltBright, 0.02),
 		)
 	}
+	drawRowSheen(r, flick)
 	// Gilt left spine — 3 px, vertically inset 5 px top/bottom so it
 	// reads as a marker rather than the entire left edge. Termini
 	// pips at each end of the spine give it the "illuminated

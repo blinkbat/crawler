@@ -1064,7 +1064,7 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 		drawSplitRule(cx-ruleW/2, cx+ruleW/2, cx, ruleY, 8, ruleCol)
 		drawFleuron(cx, ruleY, 3, fadeColor(giltBright, overall))
 		drawTextWithShadowStyle(assets.hudFont, subtitle, subX, subY, subSize, 1,
-			rl.NewColor(borderEnemy.R, borderEnemy.G, borderEnemy.B, subAlpha), rl.NewColor(0, 0, 0, subAlpha), 1, 1)
+			colorWithAlpha(borderEnemy, subAlpha), rl.NewColor(0, 0, 0, subAlpha), 1, 1)
 	}
 }
 

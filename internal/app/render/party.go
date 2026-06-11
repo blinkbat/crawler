@@ -304,8 +304,12 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 		}
 	}
 
+	// HP rides the LIVE gauge: a hot trailing ghost marks each hit's bite
+	// before draining (barghost.go, keyed by the stable member name), and a
+	// sub-quarter tank breathes red. MP stays static — spends are deliberate,
+	// not threats, and a trailing ghost there would read as a leak.
 	hpFill := hpFillColor(member.HP, member.MaxHP)
-	drawBar(font, contentX, y+44, contentW, 30, "HP", member.HP, member.MaxHP, hpFill, down)
+	drawBarLive(font, "hp:"+member.Name, contentX, y+44, contentW, 30, "HP", member.HP, member.MaxHP, hpFill, down)
 	drawBar(font, contentX, y+80, contentW, 30, "MP", member.MP, member.MaxMP, barMP, down)
 
 	// Dim wash over inactive cards (painted last, over everything) so the
@@ -515,7 +519,9 @@ func PartyRibbonTopY() float32 {
 var centeredMeasureCache measureCache
 
 func drawTextCentered(font rl.Font, text string, centerX, y, size float32, col color.RGBA) {
-	measure := centeredMeasureCache.measure(font, text, size, 1)
+	// Measure at the same canonicalSpacing drawTextWithShadow renders with,
+	// so heading-size text centers on its true (tracked) width.
+	measure := centeredMeasureCache.measure(font, text, size, canonicalSpacing(size))
 	drawTextWithShadow(font, text, centerX-measure.X/2, y, size, col)
 }
 
@@ -537,6 +543,8 @@ var rightAlignMeasureCache measureCache
 // prices). Routes the measure through rightAlignMeasureCache so those
 // hot, stable-string sites stop re-shaping every frame (FINDING #15).
 func drawTextRightAligned(font rl.Font, text string, rightX, y, size float32, col color.RGBA) {
-	measure := rightAlignMeasureCache.measure(font, text, size, 1)
+	// Same canonicalSpacing pairing as drawTextCentered — measured width
+	// must include the heading tracking or the right edge drifts.
+	measure := rightAlignMeasureCache.measure(font, text, size, canonicalSpacing(size))
 	drawTextWithShadow(font, text, rightX-measure.X, y, size, col)
 }

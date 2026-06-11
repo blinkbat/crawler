@@ -49,6 +49,20 @@ func drawJournalSubtabHeader(font rl.Font, active core.JournalSubtab, body rl.Re
 	return FontBody + 14
 }
 
+// Journal list rhythm — ONE set of metrics shared by both sub-views (Quests
+// and Bestiary). Both lists draw the identical two-line row anatomy (FontBody
+// title at +2, FontSmall detail at journalRowDetailDY) under the same sub-tab
+// header, so they must page at the same stride; they had drifted apart on
+// copy-tuned literals (rowH 56 vs 48, listTop +30 vs +28, detail +26 vs +24),
+// which made flipping between Quests and Bestiary subtly "jump." Title spans
+// 2..22, detail 26..42, leaving 10px of air under the 46px selection plate
+// (journalRowH - 6).
+const (
+	journalRowH        = float32(52)
+	journalListTopDY   = float32(30) // tally line is FontSmall at +4; list starts below it
+	journalRowDetailDY = float32(26)
+)
+
 // journalScrollFirst returns the index of the first row a journal list
 // should draw so the cursored row stays inside a window of `visible` rows —
 // the input side walks the full list, so without this the highlight scrolls
@@ -82,18 +96,17 @@ func drawJournalQuests(g core.GameState, font rl.Font, body rl.Rectangle) {
 		core.ActiveQuestCount(quests), core.CompletedQuestCount(quests))
 	drawTextWithShadow(font, tally, body.X+8, body.Y+4, FontSmall, textLabel)
 
-	const rowH = float32(56)
-	listTop := body.Y + 30
-	visible := int((body.Y + body.Height - listTop) / rowH)
+	listTop := body.Y + journalListTopDY
+	visible := int((body.Y + body.Height - listTop) / journalRowH)
 	first := journalScrollFirst(g.PanelsRowCursor, len(quests), visible)
 	rowY := listTop
 	for i := first; i < len(quests); i++ {
 		q := quests[i]
-		if rowY+rowH > body.Y+body.Height {
+		if rowY+journalRowH > body.Y+body.Height {
 			break // don't overflow the body rect
 		}
 		if i == g.PanelsRowCursor {
-			DrawSelectedRowI(int32(body.X), int32(rowY-2), int32(body.Width), int32(rowH-6))
+			DrawSelectedRowI(int32(body.X), int32(rowY-2), int32(body.Width), int32(journalRowH-6))
 		}
 		titleCol := textPrimary
 		titleText := q.Title
@@ -102,8 +115,8 @@ func drawJournalQuests(g core.GameState, font rl.Font, body rl.Rectangle) {
 			titleText = q.Title + "  — Complete"
 		}
 		drawTextWithShadow(font, titleText, body.X+8, rowY+2, FontBody, titleCol)
-		drawTextWithShadow(font, q.Desc, body.X+8, rowY+26, FontSmall, textMuted)
-		rowY += rowH
+		drawTextWithShadow(font, q.Desc, body.X+8, rowY+journalRowDetailDY, FontSmall, textMuted)
+		rowY += journalRowH
 	}
 }
 
@@ -124,18 +137,17 @@ func drawJournalBestiary(g core.GameState, font rl.Font, body rl.Rectangle) {
 	tally := fmt.Sprintf("%d of %d kinds recorded", len(seen), len(core.EnemyKinds()))
 	drawTextWithShadow(font, tally, body.X+8, body.Y+4, FontSmall, textLabel)
 
-	const rowH = float32(48)
-	listTop := body.Y + 28
-	visible := int((body.Y + body.Height - listTop) / rowH)
+	listTop := body.Y + journalListTopDY
+	visible := int((body.Y + body.Height - listTop) / journalRowH)
 	first := journalScrollFirst(g.PanelsRowCursor, len(seen), visible)
 	rowY := listTop
 	for i := first; i < len(seen); i++ {
 		kind := seen[i]
-		if rowY+rowH > body.Y+body.Height {
+		if rowY+journalRowH > body.Y+body.Height {
 			break // don't overflow the body rect
 		}
 		if i == g.PanelsRowCursor {
-			DrawSelectedRowI(int32(body.X), int32(rowY-2), int32(body.Width), int32(rowH-6))
+			DrawSelectedRowI(int32(body.X), int32(rowY-2), int32(body.Width), int32(journalRowH-6))
 		}
 		def := core.EnemyInfo(kind)
 		entry := g.Bestiary.Entry(kind)
@@ -147,14 +159,14 @@ func drawJournalBestiary(g core.GameState, font rl.Font, body rl.Rectangle) {
 				tag = "scanned"
 			}
 			hp := fmt.Sprintf("HP %d", def.MaxHP)
-			drawTextWithShadow(font, hp, body.X+8, rowY+24, FontSmall, barEnemyHP)
+			drawTextWithShadow(font, hp, body.X+8, rowY+journalRowDetailDY, FontSmall, barEnemyHP)
 			meta := fmt.Sprintf("   •   defeated %d   •   identified (%s)", entry.Kills, tag)
 			hpW := rl.MeasureTextEx(font, hp, FontSmall, 1).X
-			drawTextWithShadow(font, meta, body.X+8+hpW, rowY+24, FontSmall, textMuted)
+			drawTextWithShadow(font, meta, body.X+8+hpW, rowY+journalRowDetailDY, FontSmall, textMuted)
 		} else {
 			detail := fmt.Sprintf("HP ???   •   defeated %d / %d to identify", entry.Kills, core.BestiaryIDKills)
-			drawTextWithShadow(font, detail, body.X+8, rowY+24, FontSmall, textMuted)
+			drawTextWithShadow(font, detail, body.X+8, rowY+journalRowDetailDY, FontSmall, textMuted)
 		}
-		rowY += rowH
+		rowY += journalRowH
 	}
 }

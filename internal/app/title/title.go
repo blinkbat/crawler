@@ -3,6 +3,8 @@
 package title
 
 import (
+	"math"
+
 	"crawler/internal/app/core"
 	"crawler/internal/app/core/mapfile"
 	"crawler/internal/app/input"
@@ -222,6 +224,17 @@ func Draw(s State, assets render.Resources) {
 	rl.DrawTextEx(font, title, rl.NewVector2(titleX+3, titleY+4), titleSize, titleSpacing, rl.NewColor(0, 0, 0, 210))
 	rl.DrawTextEx(font, title, rl.NewVector2(titleX, titleY), titleSize, titleSpacing, theme.BorderActive)
 	rl.DrawTextEx(font, title, rl.NewVector2(titleX-1, titleY-1), titleSize, titleSpacing, rl.NewColor(255, 246, 220, 130))
+	// Shimmer pass — the wordmark redrawn in bright cream, scissor-clipped to
+	// a narrow band that sweeps the title every titleSheenPeriod seconds (with
+	// a dark beat between passes, since the band starts and ends fully
+	// off-glyph). Clipping the TEXT redraw (not drawing a band over it) means
+	// only the letterforms light up — the glint rides the leaf itself.
+	sweepSpan := tm.X + 2*titleSheenBandW
+	sweepT := float32(math.Mod(rl.GetTime()/titleSheenPeriod, 1))
+	bandX := titleX - titleSheenBandW + sweepT*sweepSpan
+	rl.BeginScissorMode(int32(bandX), int32(titleY), int32(titleSheenBandW), int32(tm.Y+8))
+	rl.DrawTextEx(font, title, rl.NewVector2(titleX, titleY), titleSize, titleSpacing, rl.NewColor(255, 244, 206, 96))
+	rl.EndScissorMode()
 
 	// Gilt rule beneath the title, flanked by fleurons — the heraldic
 	// banner divider 90s D&D box art used between a game title and
@@ -277,6 +290,12 @@ const (
 	titleFleuronGap        = float32(22)   // horizontal gap from active label edge to flanking fleuron centre
 	titleHintFooterOffset  = float32(36)   // distance from bottom edge up to the nav-hint baseline
 	titleErrorFooterOffset = float32(60)   // distance from bottom edge up to the error-message baseline
+	// Masthead shimmer: every titleSheenPeriod seconds a narrow bright band
+	// sweeps across the gold-leaf wordmark (a scissored re-draw of the title
+	// in cream), so the leaf catches the candle the way the gilt ornaments
+	// already do. Slow + occasional — a glint, not a marquee.
+	titleSheenPeriod = 5.6
+	titleSheenBandW  = float32(110)
 )
 
 // drawList paints a vertical column of menu items centered horizontally.

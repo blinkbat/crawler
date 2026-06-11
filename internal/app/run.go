@@ -356,6 +356,10 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	// world-space popups and HUD, so combat numbers, prompts, and menus
 	// stay readable through the storm. No-op when the weather is clear.
 	render.DrawWeather(*game)
+	// Danger vignette — claret edges breathing while an enemy is mid-swing
+	// (defend timing). Same layer slot as the weather wash: over the world,
+	// under every popup and HUD pane. No-op outside that phase.
+	render.DrawBattleDangerVignette(*game)
 	render.DrawChestPrompt(camera, *game, assets)
 	// Hit-glyph clarity shapes over struck targets — HUD pass (crisp 2D), but
 	// before the damage popups so the number floats on top of the glyph.

@@ -135,6 +135,16 @@ size is a bug.
   "engraved title" feel against a wood frame)
 - `FontTitle`: spacing **3**
 
+This ladder is applied **automatically**: `drawTextWithShadow` (and the
+helpers built on it — `drawTextCentered`, `drawTextRightAligned`,
+`DrawFooterHint`, the wrap/fit helpers) resolves spacing from the size
+via `canonicalSpacing(size)`, so a plain call site conforms by
+construction and draw + measure can never disagree on width. Only
+`drawTextWithShadowStyle` takes spacing explicitly — use it when an
+ad-hoc tracking is genuinely load-bearing (the timing-bar prompt's 1.5,
+the debug overlay's 1.2, animation-scaled splash text) and pair it with
+a `MeasureTextEx` at the same spacing.
+
 ### Drop shadow
 Every text call routes through `drawTextWithShadow` (1px offset,
 `shadowStrong`) or `drawTextWithShadowStyle` for ad-hoc. Never inline
@@ -212,6 +222,21 @@ Same `>` ASCII chevron, painted in `giltBright`, drawn via
 
 Owners call `drawBar(font, x, y, w, h, label, value, max, fill, muted)`.
 
+**Live gauges.** Combat-facing bars (the party ribbon's HP) route through
+`drawBarLive(font, key, ...)` instead — same body plus three treatments:
+- **Damage ghost** — when the value drops, the lost slice holds for a beat
+  in `barGhostHot` (hot parchment-gold) then drains into the fill edge
+  (`render/barghost.go`; render-side state keyed by the caller's string
+  identity, cleared with the VFX pools on scene reset).
+- **Heartbeat** — at ≤ 25 % the fill breathes at the status-flicker rate
+  and the value text turns `barHPLow`.
+- **Meniscus** — a bright hairline rides the fill's leading edge so the
+  level reads as liquid in the glass tube.
+
+Dashboard bars (the Tome's Stats tab) stay on plain `drawBar` — the juice
+plays only where the stakes are. MP bars stay static everywhere (spends
+are deliberate, not threats).
+
 ### Timing-bar minigames (combat)
 The timed-hit bar above the party ribbon is its own minimal HUD family
 (NOT a wood-framed panel — a transient strip). All variants share the
@@ -282,6 +307,25 @@ Owners call `DrawFooterHint(font, text, cx, y, FontTiny)`.
   `HitKnockbackDist` over `HitKnockbackDuration`.
 
 Never invent a new pulse frequency for a one-off panel.
+
+### Light sweeps (position, not alpha)
+Two sanctioned wall-clock sweeps — candlelight moving across a surface,
+not a pulse. Both are slow, shared-clock (every instance on screen rides
+the same light), and have a dark beat between passes:
+- **Selection-plate sheen** — `drawRowSheen`, every `DrawSelectedRow`
+  plate, one pass per `rowSheenPeriod` (3.8 s), gilt at ≤ 0.13 alpha,
+  scissor-clipped to the plate.
+- **Masthead shimmer** — the title-screen wordmark redrawn in cream
+  through a sweeping scissor band, one pass per `titleSheenPeriod`
+  (5.6 s). The glint rides the letterforms, never a rectangle over them.
+
+### Danger vignette (combat)
+While an enemy is mid-swing (`BattleEnemyTiming`), the screen edges
+breathe claret: four shallow `borderDanger` gradients
+(`render/vignette.go`, depth 16 % of the short dimension, peak alpha 34,
+status-flicker rhythm), drawn over the world and under every HUD pane.
+Peripheral pressure for the defend window — the same beat the rumble and
+the red incoming-attack marker mark. No other phase tints the frame.
 
 ## How to extend this document
 

@@ -152,6 +152,11 @@ var (
 	// barMutedFill is the desaturated plum fill drawBar swaps in when a
 	// bar is muted (e.g. a downed member's gauges).
 	barMutedFill = rl.NewColor(96, 84, 92, 230)
+	// barGhostHot is the trailing "damage ghost" segment a live gauge leaves
+	// behind when its value drops (see barghost.go) — hot parchment-gold so
+	// the just-lost slice reads as a burn against any fill tone. Gilt-family
+	// transient, so NOT routed through mute() (matches the gilt accents).
+	barGhostHot = rl.NewColor(255, 226, 168, 235)
 
 	// ----- Per-status accents (UI_STANDARDS.md "Per-status accents") -----
 	// Indexed by core.PartyStatusKind via partyStatusVisuals below; the
@@ -292,10 +297,14 @@ const (
 	FontTitle   = float32(36)
 
 	// Letter spacing per size. Wider tracking on titles to sell the
-	// "engraved on hardwood" feel. Use these via the
-	// drawTextWithShadowStyle path; drawTextWithShadow defaults to 1.
-	// (FontTiny/FontSmall both track at the default 1, so no dedicated
-	// tokens — callers pass the literal 1.)
+	// "engraved on hardwood" feel. drawTextWithShadow (and the centered /
+	// right-aligned / footer helpers built on it) applies these
+	// AUTOMATICALLY via canonicalSpacing(size) — heading-size text tracks
+	// at 2, title-size at 3, everything smaller at 1 — so plain call sites
+	// conform without remembering the Style variant. Pass them explicitly
+	// only through drawTextWithShadowStyle when pairing with a manual
+	// MeasureTextEx. (FontTiny/FontSmall/FontBody all track at 1 —
+	// FontSpacingBody covers the trio.)
 	FontSpacingBody    = float32(1)
 	FontSpacingHeading = float32(2)
 	FontSpacingTitle   = float32(3)
@@ -1266,6 +1275,41 @@ func pulse(speed float64) float32 {
 	return 0.5 + 0.5*float32(math.Sin(rl.GetTime()*speed*math.Pi*2))
 }
 
+// rowSheenPeriod is the seconds one full sheen sweep takes to cross a
+// selected row (drawRowSheen). Slow — the band drifts like candlelight
+// caught on lacquer, it doesn't "scan."
+const rowSheenPeriod = 3.8
+
+// drawRowSheen sweeps a soft gilt light-band across a selection plate — the
+// candle catching the polished brass as it breathes. Scissor-clipped to the
+// rect so the band never paints outside the row; the band position derives
+// from wall-clock time, so every selected row in the UI shares one drifting
+// light source (they don't strobe independently). Skipped on rows too small
+// to read the gradient. Layered ABOVE the warm glass body and BELOW the
+// spine/pips/underline so the ornaments stay crisp under the moving light.
+func drawRowSheen(r rl.Rectangle, flick float32) {
+	if r.Width < 48 || r.Height < 12 {
+		return
+	}
+	band := r.Width * 0.30
+	if band < 36 {
+		band = 36
+	}
+	if band > 110 {
+		band = 110
+	}
+	// 0..1 sweep phase; the band starts fully off the left edge and exits
+	// fully off the right so there's a beat of "no sheen" between passes.
+	t, _ := math.Modf(rl.GetTime() / rowSheenPeriod)
+	x := r.X - band + float32(t)*(r.Width+2*band)
+	peak := fadeColor(giltBright, 0.13*flick)
+	clear := fadeColor(giltBright, 0)
+	rl.BeginScissorMode(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height))
+	rl.DrawRectangleGradientH(int32(x), int32(r.Y), int32(band/2), int32(r.Height), clear, peak)
+	rl.DrawRectangleGradientH(int32(x+band/2), int32(r.Y), int32(band/2), int32(r.Height), peak, clear)
+	rl.EndScissorMode()
+}
+
 // pulseActiveActor / pulseHalo / pulseFlicker are the three canonical
 // breathing curves from UI_STANDARDS.md ("Pulse / breathing"). They are
 // the single source of truth so the active-actor frame, the selection
@@ -1336,32 +1380,100 @@ func measureBarValue(font rl.Font, valText string) rl.Vector2 {
 	return barValueMeasureCache.measure(font, valText, FontSmall, 1)
 }
 
+// clampBarPct clips a fill fraction to [0, 1] — shared by the gauge body and
+// the live-state wrappers so over/underflowing values (temp HP, debug boosts)
+// can't draw outside the track.
+func clampBarPct(pct float32) float32 {
+	if pct < 0 {
+		return 0
+	}
+	if pct > 1 {
+		return 1
+	}
+	return pct
+}
+
 // drawBar renders a track + filled portion + thin outline, all rounded.
 // label is drawn as a small uppercase tag at the bar's left, value text on right.
+// Static form — no trailing damage ghost, no low-value heartbeat. Dashboard
+// surfaces (the Tome's Stats tab) use this; live combat gauges go through
+// drawBarLive so the juice only plays where the stakes are.
 func drawBar(font rl.Font, x, y, width, height float32, label string, value, maxValue int, fill color.RGBA, muted bool) {
+	drawBarState(font, x, y, width, height, label, value, maxValue, fill, muted, -1, false)
+}
+
+// drawBarLive is drawBar plus the living-gauge treatments, keyed by a stable
+// identity string (e.g. "hp:Warrior") that owns the trailing state:
+//   - damage ghost: a hot gilt segment marks the just-lost slice, holding a
+//     beat then draining into the fill edge (barghost.go) — the size of a hit
+//     reads from the ribbon even when the eye was on the timing bar;
+//   - heartbeat: when the value sits at or under a quarter, the fill breathes
+//     at the status-flicker rate and the value text turns danger-red, so a
+//     critical member reads peripherally without a popup.
+//
+// The party ribbon's HP gauges use both; its MP gauge stays static (spends
+// are deliberate, not threats). Muted (downed) gauges suppress both.
+func drawBarLive(font rl.Font, key string, x, y, width, height float32, label string, value, maxValue int, fill color.RGBA, muted bool) {
 	if maxValue <= 0 {
 		maxValue = 1
 	}
-	pct := float32(value) / float32(maxValue)
-	if pct < 0 {
-		pct = 0
+	pct := clampBarPct(float32(value) / float32(maxValue))
+	ghost := float32(-1)
+	if !muted {
+		ghost = ghostPctFor(key, pct)
 	}
-	if pct > 1 {
-		pct = 1
+	drawBarState(font, x, y, width, height, label, value, maxValue, fill, muted, ghost, !muted)
+}
+
+// drawBarState is the shared gauge body behind drawBar / drawBarLive.
+// ghostPct >= 0 draws the trailing damage segment from the fill edge out to
+// that level; heartbeat enables the low-value breathing treatment.
+func drawBarState(font rl.Font, x, y, width, height float32, label string, value, maxValue int, fill color.RGBA, muted bool, ghostPct float32, heartbeat bool) {
+	if maxValue <= 0 {
+		maxValue = 1
 	}
+	pct := clampBarPct(float32(value) / float32(maxValue))
 	track := barTrack
 	outline := borderDim
 	if muted {
 		fill = barMutedFill
 	}
+	// Low-value heartbeat: the fill itself breathes at the canonical status-
+	// flicker rate. Gated on heartbeat (live gauges only) so dashboard bars
+	// and muted (downed) gauges stay still.
+	lowPulse := heartbeat && pct > 0 && pct <= 0.25
+	if lowPulse {
+		fill = fadeColor(fill, 0.70+0.30*pulseFlicker())
+	}
 	ix, iy, iw, ih := int32(x), int32(y), int32(width), int32(height)
 	drawGaugeWell(ix, iy, iw, ih)
 	drawSmallPanel(ix, iy, iw, ih, track)
+	// Trailing damage ghost — painted UNDER the live fill, spanning from the
+	// fill edge out to the held level, so the drain visibly sweeps toward the
+	// real value. Slightly translucent: the track grain reads through, which
+	// keeps it "afterimage," not "second fill."
+	if ghostPct > pct {
+		gp := clampBarPct(ghostPct)
+		ghostW := int32(float32(iw-2) * gp)
+		if ghostW > 0 {
+			drawSmallPanel(ix+1, iy+1, ghostW, ih-2, fadeColor(barGhostHot, 0.80))
+		}
+	}
 	if pct > 0 {
 		fillW := int32(float32(iw-2) * pct)
 		if fillW > 0 {
 			drawSmallPanel(ix+1, iy+1, fillW, ih-2, fill)
 			drawGaugeFillDepth(ix+1, iy+1, fillW, ih-2, muted)
+			// Liquid meniscus — a bright hairline riding the fill's leading
+			// edge so the level reads as the surface of liquid in a glass
+			// tube, and any motion (drain, regen tick, ghost catch-up)
+			// glints. Skipped at the extremes (nothing to mark) and on
+			// muted gauges.
+			if !muted && pct < 1 && fillW >= 6 && ih > 8 {
+				menX := ix + 1 + fillW - 1
+				menCol := fadeColor(core.MixColor(fill, inkPrimary, 0.65), 0.85)
+				rl.DrawRectangle(menX, iy+3, 2, ih-6, menCol)
+			}
 		}
 	}
 	drawSmallPanelOutline(ix, iy, iw, ih, outline)
@@ -1433,6 +1545,12 @@ func drawBar(font rl.Font, x, y, width, height float32, label string, value, max
 		valColor := textPrimary
 		if muted {
 			valColor = textDim
+		}
+		// Critical gauge: the number itself turns danger-red alongside the
+		// breathing fill, so "someone's about to drop" reads even at a
+		// glance that only catches the text.
+		if lowPulse {
+			valColor = barHPLow
 		}
 		// Value text size is locked at FontSmall inside measureBarValue;
 		// valSize stays in scope below for the draw calls.
@@ -1545,13 +1663,36 @@ func drawArrowMarker(center rl.Vector2, tipDx, tipDy, halfWidth float32, col col
 	)
 }
 
+// canonicalSpacing maps a font size to its standard letter spacing from
+// UI_STANDARDS.md "Type": Tiny/Small/Body track at 1, Heading at 2
+// (FontSpacingHeading), Title and up at 3 (FontSpacingTitle). The single
+// source the plain text helpers (drawTextWithShadow, drawTextCentered,
+// drawTextRightAligned, DrawFooterHint, the wrap/fit helpers) consult, so
+// heading-size text drawn through the convenience path gets its engraved
+// tracking automatically and draw + measure can never disagree on width.
+// Sites with a genuinely load-bearing ad-hoc spacing still use
+// drawTextWithShadowStyle, which takes spacing explicitly.
+func canonicalSpacing(size float32) float32 {
+	switch {
+	case size >= FontTitle:
+		return FontSpacingTitle
+	case size >= FontHeading:
+		return FontSpacingHeading
+	default:
+		return FontSpacingBody
+	}
+}
+
 // drawTextWithShadow paints text twice: once offset by (1,1) at shadowStrong,
 // once at the requested color. The single +1 offset reads as a clean drop
 // shadow under most HUD sizes; callers that want a heavier shadow for large
-// titles (menu rows, debug pills) go through drawTextWithShadowStyle. Lives
-// here alongside the shadowLight/Mid/Strong/Heavy palette it consumes.
+// titles (menu rows, debug pills) go through drawTextWithShadowStyle. Letter
+// spacing follows canonicalSpacing(size) — the UI_STANDARDS tracking ladder —
+// so FontHeading text through this path engraves at spacing 2 without every
+// call site having to remember the Style variant. Lives here alongside the
+// shadowLight/Mid/Strong/Heavy palette it consumes.
 func drawTextWithShadow(font rl.Font, text string, x, y, size float32, col color.RGBA) {
-	drawTextWithShadowStyle(font, text, x, y, size, 1, col, shadowStrong, 1, 1)
+	drawTextWithShadowStyle(font, text, x, y, size, canonicalSpacing(size), col, shadowStrong, 1, 1)
 }
 
 // drawTextWithShadowStyle is the parametric form of drawTextWithShadow.

@@ -126,6 +126,10 @@ func TickAndDrawVFX(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if core.TakeVFXResetRequest(g) {
 		ResetParticles()
 		resetHitGlyphs()
+		// Trailing HP-bar ghosts are presentation residue like the pools
+		// above — drop them on the same scene-shape signal so a mid-drain
+		// trail can't ghost into the next scene's first frame.
+		resetBarGhosts()
 	}
 	for _, req := range core.DrainVFXQueue(g) {
 		spawnFromRequest(camera, g, req, assets)

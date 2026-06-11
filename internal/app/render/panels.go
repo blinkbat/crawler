@@ -28,7 +28,10 @@ func selectedGlassTint(base rl.Color, t float64) rl.Color {
 var panelStatMeasureCache measureCache
 
 func measurePanelStatValue(font rl.Font, text string, size float32) rl.Vector2 {
-	return panelStatMeasureCache.measure(font, text, size, 1)
+	// canonicalSpacing pairs this measure with drawTextWithShadow's tracking
+	// (identity for today's FontBody/FontSmall callers; stays correct if a
+	// heading-size value ever routes through).
+	return panelStatMeasureCache.measure(font, text, size, canonicalSpacing(size))
 }
 
 // panelsMapFooterCache memoizes the "AreaName   zoom: N cells   ..."

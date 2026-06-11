@@ -113,12 +113,16 @@ func wrapTextLines(font rl.Font, text string, size, maxW float32) []string {
 			cur = ""
 		}
 	}
+	// Measure at the size's canonical tracking so wrapped lines can't
+	// overflow when drawn through drawTextWithShadow (which tracks
+	// heading-size text wider than the default 1).
+	spacing := canonicalSpacing(size)
 	for _, w := range words {
 		candidate := w
 		if cur != "" {
 			candidate = cur + " " + w
 		}
-		m := rl.MeasureTextEx(font, candidate, size, 1)
+		m := rl.MeasureTextEx(font, candidate, size, spacing)
 		if m.X <= maxW {
 			cur = candidate
 			continue
@@ -129,7 +133,7 @@ func wrapTextLines(font rl.Font, text string, size, maxW float32) []string {
 		// If the word itself is narrower than maxW, just start a new
 		// line with it. Otherwise the word ALONE is wider than the
 		// panel — break it character-wise so no line overflows.
-		wMeasure := rl.MeasureTextEx(font, w, size, 1)
+		wMeasure := rl.MeasureTextEx(font, w, size, spacing)
 		if wMeasure.X <= maxW {
 			cur = w
 			continue
@@ -163,9 +167,10 @@ func breakWideWord(font rl.Font, word string, size, maxW float32) []string {
 	}
 	var out []string
 	cur := make([]rune, 0, len(word))
+	spacing := canonicalSpacing(size)
 	for _, r := range word {
 		candidate := string(append(cur, r))
-		m := rl.MeasureTextEx(font, candidate, size, 1)
+		m := rl.MeasureTextEx(font, candidate, size, spacing)
 		if m.X <= maxW || len(cur) == 0 {
 			cur = append(cur, r)
 			continue
@@ -213,7 +218,7 @@ func splitWords(s string) []string {
 // top y in screen space; `size` is one of the FontX size tokens the
 // callers pass (FontTiny / FontSmall per UI_STANDARDS.md's five-size scale).
 func DrawFooterHint(font rl.Font, text string, cx, y, size float32) {
-	m := rl.MeasureTextEx(font, text, size, 1)
+	m := rl.MeasureTextEx(font, text, size, canonicalSpacing(size))
 	drawTextWithShadow(font, text, cx-m.X/2, y, size, textHint)
 }
 

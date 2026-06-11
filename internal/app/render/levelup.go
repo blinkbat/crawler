@@ -129,7 +129,7 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 		// "this is the commit gate" cue. Drawn in gilt so the
 		// player's eye lands on it even when the row isn't
 		// focused.
-		labelW := rl.MeasureTextEx(font, label, FontHeading, 1).X
+		labelW := rl.MeasureTextEx(font, label, FontHeading, FontSpacingHeading).X
 		labelX := float32(rowX + 6)
 		labelY := float32(rowY + 14)
 		drawTextWithShadow(font, label, labelX, labelY, FontHeading, col)
