@@ -88,7 +88,8 @@ func journalScrollFirst(cursor, count, visible int) int {
 func drawJournalQuests(g core.GameState, font rl.Font, body rl.Rectangle) {
 	quests := g.Quests
 	if len(quests) == 0 {
-		drawTextWithShadow(font, "No quests yet.", body.X+8, body.Y+8, FontBody, textMuted)
+		drawEmptyLedgerNote(font, body, "No quests yet.",
+			"Deeds taken on will be recorded here.")
 		return
 	}
 
@@ -129,8 +130,8 @@ func drawJournalQuests(g core.GameState, font rl.Font, body rl.Rectangle) {
 func drawJournalBestiary(g core.GameState, font rl.Font, body rl.Rectangle) {
 	seen := g.Bestiary.SeenKinds()
 	if len(seen) == 0 {
-		drawTextWithShadow(font, "No foes recorded yet — defeat or Scan enemies to fill the bestiary.",
-			body.X+8, body.Y+8, FontBody, textMuted)
+		drawEmptyLedgerNote(font, body, "No foes recorded yet.",
+			"Defeat or Scan enemies to fill the bestiary.")
 		return
 	}
 

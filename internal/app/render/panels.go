@@ -163,6 +163,15 @@ func DrawPanelsOverlay(g core.GameState, assets Resources) {
 	}
 	drawTextWithShadow(font, areaName, float32(cardX+24), float32(infoY), FontSmall, textPrimary)
 	drawTextRightAligned(font, goldLabelFull(g.Gold), float32(cardX+cardW-24), float32(infoY), FontSmall, borderActive)
+	// Header rule under the info strip — a faint wood-accent hairline with
+	// diamond termini (the same dialect as the panel-heading underline) so
+	// the location/gold band reads as the ledger's ruled header, cleanly
+	// separated from whichever page is open below.
+	stripRuleY := infoY + panelsInfoStripH
+	stripRuleCol := fadeColor(woodAccent, 0.38)
+	rl.DrawRectangle(cardX+24, stripRuleY, cardW-48, 1, stripRuleCol)
+	drawDiamondPip(float32(cardX+24), float32(stripRuleY), 1.8, stripRuleCol)
+	drawDiamondPip(float32(cardX+cardW-24), float32(stripRuleY), 1.8, stripRuleCol)
 
 	bodyY := infoY + panelsInfoStripH + 6
 	bodyRect := rl.NewRectangle(float32(cardX+22), float32(bodyY),
@@ -968,9 +977,8 @@ func drawPanelsItems(g core.GameState, assets Resources, body rl.Rectangle) {
 	panelsItemStacksBuf = core.LiveStacksInto(g.Inventory, panelsItemStacksBuf)
 	stacks := panelsItemStacksBuf
 	if len(stacks) == 0 {
-		drawTextWithShadow(font, "Your bags are empty.", body.X+14, body.Y+16, FontHeading, textMuted)
-		drawTextWithShadow(font, "Loot from steals and chests will appear here.",
-			body.X+14, body.Y+54, FontBody, textHint)
+		drawEmptyLedgerNote(font, body, "Your bags are empty.",
+			"Loot from steals and chests will appear here.")
 		return
 	}
 

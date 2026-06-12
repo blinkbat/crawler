@@ -436,6 +436,21 @@ func drawCombatLogPanel(g core.GameState, assets Resources) {
 	innerW := w - 2*innerInset - 6
 	innerH := h - 2*innerInset
 
+	lineH := int32(22)
+	lineSize := FontSmall
+
+	// Ruled-parchment lines — a whisper-faint hairline at the BOTTOM of each
+	// line slot, so the pane reads as a scribe's ruled ledger page even before
+	// (and after) text fills it. Bottom-anchored at the same -6 footing the
+	// text loop uses, so entries always sit exactly ON their rule no matter
+	// how many lines are visible. Inset a touch from both edges so the rules
+	// read as page ruling, not frame strokes.
+	ruleX := innerX + 2
+	ruleW := innerW - 10
+	for ry := innerY + innerH - 6; ry > innerY+lineH/2; ry -= lineH {
+		rl.DrawRectangle(ruleX, ry, ruleW, 1, fadeColor(inkDim, 0.13))
+	}
+
 	lines := g.Battle.Log
 	if len(lines) == 0 && g.Battle.Message != "" {
 		lines = []string{g.Battle.Message}
@@ -443,9 +458,6 @@ func drawCombatLogPanel(g core.GameState, assets Resources) {
 	if len(lines) == 0 {
 		return
 	}
-
-	lineH := int32(22)
-	lineSize := FontSmall
 	maxLines := int(innerH / lineH)
 	if maxLines < 1 {
 		maxLines = 1

@@ -229,6 +229,19 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 
 	drawCard(ix, iy, iw, ih, bg, border, accent)
 
+	// Class-sigil watermark — the member's crest ghosted LARGE into the
+	// card's lower-right glass, the way an illuminated ledger watermarks its
+	// owner's mark into the page. Painted right after the card body so the
+	// name, status icon, and both gauges layer over it; whisper-faint (and
+	// fainter still when downed) so it reads as depth in the glass, never as
+	// content. Sized/placed so the sigil peeks between the bars and the
+	// card's right frame instead of fighting the bar text.
+	wmCol := fadeColor(classCol, 0.11)
+	if down {
+		wmCol = fadeColor(classCol, 0.05)
+	}
+	drawClassGlyph(x+partyCardW-38, y+partyCardH-42, 30, member.Class, wmCol)
+
 	if selected {
 		centerX := x + partyCardW/2
 		drawArrowMarker(rl.NewVector2(centerX, y+2), 0, -12, 10, borderTarget)

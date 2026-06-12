@@ -220,6 +220,14 @@ func splitWords(s string) []string {
 func DrawFooterHint(font rl.Font, text string, cx, y, size float32) {
 	m := rl.MeasureTextEx(font, text, size, canonicalSpacing(size))
 	drawTextWithShadow(font, text, cx-m.X/2, y, size, textHint)
+	// Tiny diamond termini flanking the hint — the footer's quiet stitch into
+	// the panel ornament language (heading rules and the info-strip rule end
+	// the same way). Kept at the hint's own dimness so the footer stays the
+	// most recessive line on the card.
+	pipCol := fadeColor(textHint, 0.65)
+	pipY := y + m.Y/2
+	drawDiamondPip(cx-m.X/2-14, pipY, 1.8, pipCol)
+	drawDiamondPip(cx+m.X/2+14, pipY, 1.8, pipCol)
 }
 
 // modalFooterTextOffset is the gap from a modal card's bottom edge up to

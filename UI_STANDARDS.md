@@ -295,7 +295,30 @@ Every modal calls `drawModalScaffold(font, w, h, heading)`:
 Every modal has a footer line such as
 `Z confirm   X cancel   Up/Down navigate`.
 Painted in `FontTiny` `inkDim`, centred, never customised per modal.
-Owners call `DrawFooterHint(font, text, cx, y, FontTiny)`.
+Owners call `DrawFooterHint(font, text, cx, y, FontTiny)` — which also
+stitches tiny diamond termini 14 px outside the text edges (the same
+end-cap dialect the heading rules use), at the hint's own dimness.
+
+### Static ornament dialect
+The carved-cabinet details share a small vocabulary — reuse these, don't
+invent siblings:
+- **Ruled page** — the combat log paints a whisper hairline
+  (`inkDim` ≤ 0.13) at the bottom of every line slot, bottom-anchored to
+  the same footing as the text so entries sit ON their rule.
+- **Watermark** — a surface owned by an actor may ghost that actor's
+  sigil LARGE into its lower glass (`drawClassGlyph` at α ≈ 0.11,
+  fainter when downed). Content always layers over it; it reads as
+  depth in the glass, never as information.
+- **Sequence thread** — an ordered forecast (turn panel) stitches its
+  row markers with a 1 px `inkDim` strand ending in a pip, so the list
+  reads as one lineage rather than disconnected chips.
+- **Header rule** — a chrome strip that owns the body below it (the
+  Tome's location/gold band) underlines itself with a `woodAccent`
+  hairline ending in diamond pips, matching the panel-heading underline.
+- **Blank ledger page** — empty list states route through
+  `drawEmptyLedgerNote(font, body, text, sub)`: a dim gilt fleuron with
+  flanking hairlines over the centred message (+ optional dimmer hint
+  line). No more bare left-aligned "nothing here" text.
 
 ### Pulse / breathing
 - Active-actor pulse: `0.70 + 0.30·sin(t·π·1.4)` on alpha.

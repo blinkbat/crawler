@@ -74,6 +74,20 @@ func drawTurnPanel(g core.GameState, assets Resources) {
 
 	drawCard(x, y, w, h, surfacePrimary, borderSoft, borderSoft)
 
+	// Sequence thread — a faint vertical line stitched down through the row
+	// markers (under them), tying the forecast into one strand the way a
+	// lineage chart threads its entries. Static chrome: it runs from the
+	// acting row's marker to the last row so the queue reads as "this, then
+	// these," not seven disconnected chips. Skipped for a single row (nothing
+	// to thread).
+	if len(turns) > 1 {
+		threadX := x + 10 + 7 // center of the per-row tick column
+		threadTop := y + turnPanelTopPad + rowH/2
+		threadH := int32(len(turns)-1) * rowH
+		rl.DrawRectangle(threadX, threadTop, 1, threadH, fadeColor(inkDim, 0.32))
+		drawDiamondPip(float32(threadX), float32(threadTop+threadH), 2, fadeColor(inkDim, 0.5))
+	}
+
 	for i, turn := range turns {
 		rowY := y + turnPanelTopPad + int32(i)*rowH
 		col := turnEntryColor(turn)

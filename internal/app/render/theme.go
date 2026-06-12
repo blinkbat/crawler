@@ -754,6 +754,32 @@ func drawStatIconSPD(cx, cy, r float32, col color.RGBA) {
 	rl.DrawCircleV(rl.NewVector2(cx, cy), 1.4, giltBright)
 }
 
+// drawEmptyLedgerNote is the standard "this page is blank" treatment for an
+// empty list surface (no quests, no recorded foes, an empty bag): a dim gilt
+// fleuron with short flanking hairlines — the unfilled-entry mark a scribe
+// rules into a ledger — over the centered message in muted ink. Sits in the
+// upper third of the body rect so it reads as the page's letterhead, not a
+// modal. One composable so every empty state speaks the same dialect instead
+// of each tab left-aligning bare text at its own inset.
+func drawEmptyLedgerNote(font rl.Font, body rl.Rectangle, text, sub string) {
+	cx := body.X + body.Width/2
+	ornY := body.Y + body.Height*0.26
+	drawFleuron(cx, ornY, 4, fadeColor(giltDim, 0.55))
+	lineW := float32(46)
+	gap := float32(16)
+	lineCol := fadeColor(giltDim, 0.35)
+	rl.DrawRectangle(int32(cx-gap-lineW), int32(ornY), int32(lineW), 1, lineCol)
+	rl.DrawRectangle(int32(cx+gap), int32(ornY), int32(lineW), 1, lineCol)
+	drawDiamondPip(cx-gap-lineW, ornY, 1.5, lineCol)
+	drawDiamondPip(cx+gap+lineW, ornY, 1.5, lineCol)
+	drawTextCentered(font, text, cx, ornY+18, FontBody, textMuted)
+	// Optional second line — the "what fills this page" hint, a step dimmer
+	// and smaller so the note keeps one clear voice.
+	if sub != "" {
+		drawTextCentered(font, sub, cx, ornY+18+FontBody+10, FontSmall, textHint)
+	}
+}
+
 // drawDiamondPip paints a small filled diamond centered on (cx, cy)
 // with half-extent r. Used at filigree corner joints and as the
 // fleuron sigil flanking the pause-menu title.
