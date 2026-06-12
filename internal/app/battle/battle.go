@@ -10,11 +10,17 @@ import (
 
 // Start engages the pack at packIndex. The entire pack roster becomes the
 // in-battle enemy list; no spatial clustering is involved.
-func Start(g *core.GameState, packIndex int) {
+// Start begins a battle against the pack at packIndex. fleeReturnX/Z is the
+// tile the player retreats to on a successful Flee — the square they were on
+// before the engaging step (the caller passes its pre-step tile so a pack
+// ambush steps the player back rather than leaving them on the pack's tile).
+func Start(g *core.GameState, packIndex, fleeReturnX, fleeReturnZ int) {
 	if packIndex < 0 || packIndex >= len(g.Packs) || !core.PackAlive(g.Packs[packIndex]) {
 		return
 	}
 	g.Battle.ActivePack = packIndex
+	g.Battle.FleeReturnX = fleeReturnX
+	g.Battle.FleeReturnZ = fleeReturnZ
 	g.Battle.EnemyIndex = core.NextLivingBattleEnemy(g)
 	g.Battle.PartyTarget = core.FirstLivingPartyMember(g.Party)
 	g.Battle.EnemyAttackCursor = -1
@@ -37,6 +43,7 @@ func Start(g *core.GameState, packIndex int) {
 	// real entry paths (leaveBattle's clearBattleResidual, ResetGameState)
 	// already clear it, but every sibling transient is reset here too.
 	g.Battle.EnemyPendingSkill = core.SkillNone
+	g.Battle.EnemyAttackMisses = false
 	g.Battle.LastQualityTimer = 0
 	g.Battle.Queue = nil
 	g.Battle.QueueCursor = 0
@@ -931,6 +938,7 @@ func beginEnemyAttack(g *core.GameState, slot int) {
 	// timing yet — keeping the UX scope tight).
 	enemy := core.BattleMemberAt(g, slot)
 	g.Battle.EnemyPendingSkill = core.SkillNone
+	g.Battle.EnemyAttackMisses = false
 	if enemy != nil {
 		g.Battle.EnemyPendingSkill = enemyAIPickSkill(g, *enemy, slot)
 	}
@@ -938,6 +946,16 @@ func beginEnemyAttack(g *core.GameState, slot int) {
 		// Mark the Timing as already resolved so the defend bar never
 		// arms — the spell-cast intro elapses and resolveAndFinish
 		// routes through resolveEnemySpell.
+		g.Battle.Timing = core.TimingState{Resolved: true}
+		return
+	}
+	// Plain melee: roll the enemy's accuracy NOW, before the defend bar. A
+	// clean whiff means there's nothing to defend — skip the input minigame
+	// entirely (same Timing.Resolved=true short-circuit the spell path uses)
+	// and let the intro beat elapse into the miss narration. Accuracy reads
+	// EffectiveEnemyStats so a future accuracy debuff (Blind) lowers it.
+	if enemy != nil && !core.RollEnemyHit(g.Rand(), core.EffectiveEnemyStats(*enemy)) {
+		g.Battle.EnemyAttackMisses = true
 		g.Battle.Timing = core.TimingState{Resolved: true}
 		return
 	}
@@ -1036,6 +1054,14 @@ func updateEnemyTiming(g *core.GameState, dt float32) {
 		resolveAndFinishEnemyAttack(g)
 		return
 	}
+	// Miss path: the accuracy roll in beginEnemyAttack whiffed, so no defend
+	// bar armed. Once the intro beat elapses, resolve straight to the no-damage
+	// miss narration — without the SoundInputMiss the auto-miss tail below would
+	// play (the player didn't fumble a press; the enemy fumbled its swing).
+	if g.Battle.EnemyAttackMisses {
+		resolveAndFinishEnemyAttack(g)
+		return
+	}
 	if !g.Battle.Timing.Resolved && input.DefendTimingPressed() {
 		g.Battle.Timing.Press()
 	}
@@ -1059,14 +1085,18 @@ func updateEnemyTiming(g *core.GameState, dt float32) {
 // EnemyPendingSkill — SkillNone for plain melee, anything else routes
 // through resolveEnemySpell with the picked cast.
 func resolveAndFinishEnemyAttack(g *core.GameState) {
-	if g.Battle.EnemyPendingSkill != core.SkillNone {
+	switch {
+	case g.Battle.EnemyAttackMisses:
+		resolveEnemyMiss(g, g.Battle.EnemyAttacker)
+	case g.Battle.EnemyPendingSkill != core.SkillNone:
 		resolveEnemySpell(g, g.Battle.EnemyAttacker, g.Battle.EnemyPendingSkill)
-	} else {
+	default:
 		resolveEnemyAttacker(g, g.Battle.EnemyAttacker, g.Battle.Timing.Quality)
 	}
 	g.Battle.ClearTiming()
 	g.Battle.EnemyAttacker = -1
 	g.Battle.EnemyPendingSkill = core.SkillNone
+	g.Battle.EnemyAttackMisses = false
 	finishActorTurn(g)
 }
 
@@ -1293,6 +1323,7 @@ func clearBattleResidual(g *core.GameState) {
 	g.Battle.EnemyAttacker = -1
 	g.Battle.EnemyAttackCursor = -1
 	g.Battle.EnemyPendingSkill = core.SkillNone
+	g.Battle.EnemyAttackMisses = false
 	resetBattleAction(g)
 }
 

@@ -115,10 +115,13 @@ const (
 	ActionRowSkill
 	ActionRowItem
 	ActionRowDefend
+	// ActionRowFlee is the LAST row (below Defend): roll to escape the fight and
+	// retreat to the pre-combat tile. See performFlee / FleeChance.
+	ActionRowFlee
 )
 
 // ActionRowCount is the wrap modulus for the action-menu cursor.
-const ActionRowCount = int(ActionRowDefend) + 1
+const ActionRowCount = int(ActionRowFlee) + 1
 
 const (
 	// SightRadius is the Chebyshev fog-of-war reveal radius around
@@ -362,6 +365,36 @@ const (
 	// ~12%; cap kicks in at DEX 15.
 	DodgePerDEX = 0.02
 	DodgeCap    = 0.30
+
+	// Enemy basic-attack accuracy. An enemy melee swing rolls to-hit BEFORE the
+	// player's defend bar arms — a clean miss skips the input minigame entirely
+	// (there's nothing to defend). DEX-driven (read through EffectiveEnemyStats,
+	// so a future accuracy debuff like Blind lowers it), clamped to
+	// [Floor, Cap]: even a sharp foe occasionally whiffs, and a heavily-debuffed
+	// one still lands sometimes (never a soft-lock of a harmless enemy). Enemy
+	// SKILLS are NOT accuracy-gated — same rule as player skills. Tuned modest:
+	// DEX 3 ≈ 86%, DEX 6 ≈ 92%, so ~8–14% of swings whiff at typical stats.
+	EnemyAccuracyBaseline = 0.80
+	EnemyAccuracyPerDEX   = 0.02
+	EnemyAccuracyFloor    = 0.30
+	EnemyAccuracyCap      = 0.95
+
+	// Flee (combat menu, last row). Success ends the fight and retreats the
+	// party to the pre-combat tile; failure costs the actor's turn. Chance is
+	// driven by the party's average living level vs the pack's average living
+	// level: even-level ≈ BaseFleeChance, each level of advantage shifts it by
+	// FleePerLevelStep, clamped to [FleeFloor, FleeCap] so escape is never
+	// guaranteed and never impossible. So +3 levels over the pack ≈ 80%, −3
+	// under ≈ 20%.
+	BaseFleeChance   = 0.50
+	FleePerLevelStep = 0.10
+	FleeFloor        = 0.10
+	FleeCap          = 0.95
+
+	// DefaultEnemyLevel is the level every foe reads at when its definition
+	// doesn't author one (EnemyDefinition.Level == 0). Used by the flee math;
+	// no other system reads enemy level yet (no XP/scaling wiring).
+	DefaultEnemyLevel = 1
 
 	// Crit curve. Every connecting damage roll has a chance to crit;
 	// crits multiply the post-armor damage by CritMultiplier. Base
@@ -740,6 +773,25 @@ const (
 	// turn-rate drops while the counter runs. Appended at the END (saved-map-key
 	// contract).
 	SkillCripple
+	// SkillFrostbite is the Wizard's chilling frost (Cryomancy tree's "Frostbite"
+	// node, learned after Frost Lance). INT-scaled magic damage that ALWAYS
+	// chills — it stamps the same SPD debuff as Cripple (the enemy BuffStats
+	// mirror) on a surviving target, so it's the "damage + debuff" counterpart to
+	// Cripple's pure-utility slow. Appended at the END (saved-map-key contract).
+	SkillFrostbite
+	// SkillCorrosiveVial is the Thief's armor break (Subterfuge tree's "Corrosive
+	// Vial" node). Single enemy target, no damage: it strips the target's
+	// per-instance Armor (floored at 0) for the rest of the battle so every
+	// subsequent phys hit lands harder. A permanent break, not a turn-counted
+	// status — it mutates Enemy.Armor directly. Appended at the END
+	// (saved-map-key contract).
+	SkillCorrosiveVial
+	// SkillConeOfCold is the Wizard's AoE chill (Cryomancy tree's "Cone of Cold"
+	// node, learned after Frostbite). INT-scaled frost damage to EVERY living
+	// enemy plus a guaranteed per-target SPD chill — the pack-wide counterpart to
+	// Frostbite's single bolt, routed through applyAoEStatusSkill. Appended at the
+	// END (saved-map-key contract).
+	SkillConeOfCold
 )
 
 // SkillTag classifies a skill for damage-type interactions (armor,
@@ -828,6 +880,40 @@ const (
 	// CrippleTurns is the base duration in the target's own turns. Fixed, not
 	// rolled — mirrors Bless.
 	CrippleTurns = 3
+)
+
+// Frostbite (Wizard) tuning — INT-scaled frost damage that always chills (the
+// SPD-debuff counterpart to Cripple, delivered with a damaging hit). The damage
+// rolls/scales like any magic skill; the chill is guaranteed on a surviving
+// target (timing only scales the damage), stored as a negative BuffStats.SPD.
+const (
+	// FrostbiteDamageBase is the tier-0 base damage (INT-scaled by SkillKindMagic).
+	FrostbiteDamageBase = 2
+	// FrostbiteSPDReduction is the base SPD sapped by the chill (negative BuffStats.SPD).
+	FrostbiteSPDReduction = 2
+	// FrostbiteChillTurns is the base chill duration in the target's own turns.
+	FrostbiteChillTurns = 3
+)
+
+// Corrosive Vial (Thief) tuning — a permanent (battle-duration) armor break, not
+// a turn-counted status. Strips the target's per-instance Armor (floored at 0);
+// re-casting strips further. Distinct from the Stats-debuff mirror — it mutates
+// Enemy.Armor, which the damageEnemy phys-mitigation chain reads live.
+const (
+	// CorrosiveArmorReduction is the tier-0 Armor stripped per cast.
+	CorrosiveArmorReduction = 4
+)
+
+// Cone of Cold (Wizard) tuning — the AoE counterpart to Frostbite. Lower
+// per-target damage and a shallower/shorter chill than the single-target bolt,
+// since it hits the whole pack. Same guaranteed-chill rule (no proc roll).
+const (
+	// ConeOfColdDamageBase is the tier-0 per-target damage (INT-scaled).
+	ConeOfColdDamageBase = 1
+	// ConeOfColdSPDReduction is the per-target SPD sapped by the chill.
+	ConeOfColdSPDReduction = 1
+	// ConeOfColdChillTurns is the per-target chill duration in the target's turns.
+	ConeOfColdChillTurns = 2
 )
 
 // Second Wind (Warrior) + Renewal (Cleric) heal tuning. Both base values fold
@@ -994,12 +1080,12 @@ const DebugStatBoost = 100
 type RetroFilterKind int
 
 const (
-	RetroFilterPixelate RetroFilterKind = iota // chunky low-res UV quantize
-	RetroFilterChroma                          // RGB fringing (VHS / worn composite)
-	RetroFilterPosterize                       // color-level crush (8/16-bit feel)
-	RetroFilterDither                          // 4×4 Bayer ordered dithering
-	RetroFilterGameBoy                         // 4-shade green LCD palette remap
-	RetroFilterScanlines                       // CRT horizontal line darkening
+	RetroFilterPixelate  RetroFilterKind = iota // chunky low-res UV quantize
+	RetroFilterChroma                           // RGB fringing (VHS / worn composite)
+	RetroFilterPosterize                        // color-level crush (8/16-bit feel)
+	RetroFilterDither                           // 4×4 Bayer ordered dithering
+	RetroFilterGameBoy                          // 4-shade green LCD palette remap
+	RetroFilterScanlines                        // CRT horizontal line darkening
 	RetroFilterCount
 )
 

@@ -42,6 +42,9 @@ func updateActionMenu(g *core.GameState) {
 	case core.ActionRowDefend:
 		performDefend(g)
 		return
+	case core.ActionRowFlee:
+		performFlee(g)
+		return
 	case core.ActionRowItem:
 		if !core.HasConsumable(g.Inventory) {
 			setBattleStatus(g, "No items.")
@@ -330,6 +333,46 @@ func performDefend(g *core.GameState) {
 	member.Defending = true
 	setBattleMessage(g, fmt.Sprintf("%s braces for impact.", member.Name))
 	finishActorTurn(g)
+}
+
+// performFlee attempts to escape the fight. The chance scales the party's
+// average living level against the pack's (core.FleeChance). On success the
+// battle ends and the party retreats to the pre-combat tile (Battle.FleeReturn)
+// — the pack STAYS on the field (you fled, you didn't kill it; clearBattleResidual
+// keeps an alive pack). On failure the attempt burns the actor's turn, so the
+// enemies get their swing.
+func performFlee(g *core.GameState) {
+	member, ok := currentMember(g)
+	if !ok {
+		return
+	}
+	pack := core.ActivePack(g)
+	if pack == nil {
+		return
+	}
+	chance := core.FleeChance(core.PartyAverageLevel(g.Party), core.PackAverageLevel(*pack))
+	if !core.RollChance(g.Rand(), chance) {
+		setBattleMessage(g, fmt.Sprintf("%s tries to flee — and can't break away!", member.Name))
+		finishActorTurn(g)
+		return
+	}
+	// Escaped: snap the party back to the pre-combat tile (clearing any step
+	// animation) and leave combat. The pack survives, so the player lands where
+	// they started and is free to walk off. The retreat tile is always walkable
+	// (the player legitimately stood on it and terrain can't change mid-battle),
+	// so the only dynamic hazard is a pack having moved onto it — in a
+	// pack-into-player ambush, the engaging tick can (rarely) step ANOTHER pack
+	// onto the just-vacated tile. Guard against that: only reposition when no
+	// pack occupies the tile, otherwise escape combat in place rather than
+	// teleporting on top of a pack.
+	if core.PackIndexAtTile(g.Packs, g.Battle.FleeReturnX, g.Battle.FleeReturnZ) < 0 {
+		g.Player.TileX = g.Battle.FleeReturnX
+		g.Player.TileZ = g.Battle.FleeReturnZ
+		g.Player.X = core.TileCenter(g.Battle.FleeReturnX)
+		g.Player.Z = core.TileCenter(g.Battle.FleeReturnZ)
+		g.Player.Anim = core.Animation{}
+	}
+	leaveBattle(g, fmt.Sprintf("%s leads the party in a hasty retreat!", member.Name))
 }
 
 func updateEnemyTargeting(g *core.GameState) {

@@ -88,6 +88,9 @@ type SkillEffectDelta struct {
 	// turns; the per-turn amount rides the existing Heal delta). Folded into
 	// the base SkillEffect.RegenTurns by EffectiveSkillEffect.
 	RegenTurns int
+	// ArmorReduction is the Corrosive Vial armor-strip delta — tiers deepen the
+	// break. Folded into the base SkillEffect.ArmorReduction by EffectiveSkillEffect.
+	ArmorReduction int
 }
 
 // skillTierTable is the source of truth for every player-castable
@@ -164,6 +167,11 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 		{Tier: 2, Label: "-1 more SPD", Description: "Saps another point of SPD while it lasts.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{SPD: -1}}},
 		{Tier: 3, Label: "-1 more SPD", Description: "Another point of SPD — a maxed Cripple drags a slow foe to a crawl.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{SPD: -1}}},
 	},
+	SkillCorrosiveVial: {
+		{Tier: 1, Label: "+2 Armor break", Description: "Strips 2 more Armor per vial.", Cost: 1, Effect: SkillEffectDelta{ArmorReduction: 2}},
+		{Tier: 2, Label: "+2 Armor break", Description: "Another +2 Armor stripped.", Cost: 1, Effect: SkillEffectDelta{ArmorReduction: 2}},
+		{Tier: 3, Label: "+3 Armor break", Description: "A maxed vial melts even a heavy carapace.", Cost: 1, Effect: SkillEffectDelta{ArmorReduction: 3}},
+	},
 	SkillPoisonCloud: {
 		{Tier: 1, Label: "+15% Poison", Description: "Every enemy in the cloud rolls a 15% higher Poison chance.", Cost: 1, Effect: SkillEffectDelta{PoisonChance: 0.15}},
 		{Tier: 2, Label: "+1 Poison turn", Description: "The cloud's Poison lingers one extra turn on its max roll.", Cost: 1, Effect: SkillEffectDelta{PoisonMaxTurns: 1}},
@@ -179,6 +187,16 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 		{Tier: 1, Label: "+2 damage", Description: "+2 base damage on the lance.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
 		{Tier: 2, Label: "+15% Stun", Description: "Stun roll gets +15% chance on Great/Excellent.", Cost: 1, Effect: SkillEffectDelta{StunChance: 0.15}},
 		{Tier: 3, Label: "+1 Stun turn", Description: "Stun lasts an extra turn when it lands.", Cost: 1, Effect: SkillEffectDelta{StunMinTurns: 1, StunMaxTurns: 1}},
+	},
+	SkillFrostbite: {
+		{Tier: 1, Label: "+2 damage", Description: "+2 base frost damage.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
+		{Tier: 2, Label: "+1 chill turn", Description: "The chill lingers one of the target's turns longer.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
+		{Tier: 3, Label: "-1 more SPD", Description: "Saps another point of SPD — a maxed Frostbite nearly freezes its mark.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{SPD: -1}}},
+	},
+	SkillConeOfCold: {
+		{Tier: 1, Label: "+1 damage", Description: "+1 base frost damage to every enemy in the cone.", Cost: 1, Effect: SkillEffectDelta{Damage: 1}},
+		{Tier: 2, Label: "+1 chill turn", Description: "The pack-wide chill lasts one extra turn.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
+		{Tier: 3, Label: "-1 more SPD", Description: "Saps another point of SPD from every chilled foe.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{SPD: -1}}},
 	},
 	SkillArcBolt: {
 		{Tier: 1, Label: "+1 damage", Description: "+1 base damage per arc target.", Cost: 1, Effect: SkillEffectDelta{Damage: 1}},
@@ -301,6 +319,7 @@ func EffectiveSkillEffect(m *PartyMember, s SkillID) SkillEffect {
 		eff.BuffStats = SumStats(eff.BuffStats, d.BuffStats)
 		eff.BuffTurns += d.BuffTurns
 		eff.RegenTurns += d.RegenTurns
+		eff.ArmorReduction += d.ArmorReduction
 	}
 	return eff
 }

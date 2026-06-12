@@ -452,6 +452,48 @@ func leaderSlot(n int, tierAt func(int) int) int {
 	return bestSlot
 }
 
+// PartyAverageLevel returns the mean Level of LIVING party members (HP > 0),
+// or 0 when the whole party is down. The party side of the flee-chance math.
+func PartyAverageLevel(party []PartyMember) float64 {
+	sum, n := 0, 0
+	for i := range party {
+		if party[i].HP > 0 {
+			sum += party[i].Level
+			n++
+		}
+	}
+	if n == 0 {
+		return 0
+	}
+	return float64(sum) / float64(n)
+}
+
+// PackAverageLevel returns the mean EnemyLevel of LIVING pack members, or 0 for
+// an empty / all-dead pack. The pack side of the flee-chance math — averaging
+// (not max) so a lone weak straggler is easy to flee and a fresh full pack is
+// hard.
+func PackAverageLevel(p Pack) float64 {
+	sum, n := 0, 0
+	for i := range p.Members {
+		if p.Members[i].Alive {
+			sum += EnemyLevel(p.Members[i])
+			n++
+		}
+	}
+	if n == 0 {
+		return 0
+	}
+	return float64(sum) / float64(n)
+}
+
+// FleeChance returns the [FleeFloor, FleeCap] probability of a successful flee,
+// driven by the party's average living level vs the pack's: even-level ≈
+// BaseFleeChance, each level of party advantage shifts it by FleePerLevelStep.
+// Never guaranteed, never impossible.
+func FleeChance(partyAvgLevel, packAvgLevel float64) float64 {
+	return Clamp(BaseFleeChance+(partyAvgLevel-packAvgLevel)*FleePerLevelStep, FleeFloor, FleeCap)
+}
+
 // PackLeaderSlot returns the slot of the pack's leader: the highest-Tier
 // member, ties broken by member order. Empty packs return 0 (callers
 // should range-check before drawing).

@@ -731,6 +731,7 @@ func drawActionMenuOptions(g core.GameState, assets Resources, x, y int32, membe
 	itemSuffix := itemMenuSuffix(core.ConsumableCount(g.Inventory))
 	drawActionMenuRow(assets.hudFont, core.ActionRowItem, x, labelX, y+int32(core.ActionRowItem)*rowSpacing, "Item", itemSuffix, cursor == core.ActionRowItem)
 	drawActionMenuRow(assets.hudFont, core.ActionRowDefend, x, labelX, y+int32(core.ActionRowDefend)*rowSpacing, "Defend", "", cursor == core.ActionRowDefend)
+	drawActionMenuRow(assets.hudFont, core.ActionRowFlee, x, labelX, y+int32(core.ActionRowFlee)*rowSpacing, "Flee", "", cursor == core.ActionRowFlee)
 }
 
 // drawActionMenuRow wraps drawActionRow with an action-specific icon
@@ -778,6 +779,7 @@ var actionIconDrawers = [core.ActionRowCount]func(cx, cy, r float32, col rl.Colo
 	core.ActionRowSkill:  drawActionIconSkill,
 	core.ActionRowItem:   drawActionIconItem,
 	core.ActionRowDefend: drawActionIconDefend,
+	core.ActionRowFlee:   drawActionIconFlee,
 }
 
 func init() {
@@ -870,6 +872,22 @@ func drawActionIconDefend(cx, cy, r float32, col rl.Color) {
 	// Centre boss + bright pip.
 	rl.DrawCircleV(rl.NewVector2(cx, cy-r*0.05), r*0.26, fadeColor(col, 0.6))
 	rl.DrawCircleV(rl.NewVector2(cx, cy-r*0.05), r*0.12, giltBright)
+}
+
+// drawActionIconFlee draws a "dash away" sigil — a double chevron pointing right
+// (>>), reading as "break away / exit fast." Thick line segments so it stays
+// crisp at any DPI, matching the procedural-glyph family; the leading chevron is
+// brighter for a sense of motion.
+func drawActionIconFlee(cx, cy, r float32, col rl.Color) {
+	thick := r * 0.34
+	h := r * 0.62
+	chevron := func(tipX float32, c rl.Color) {
+		tip := rl.NewVector2(tipX, cy)
+		rl.DrawLineEx(rl.NewVector2(tipX-h, cy-h), tip, thick, c)
+		rl.DrawLineEx(tip, rl.NewVector2(tipX-h, cy+h), thick, c)
+	}
+	chevron(cx-r*0.15, fadeColor(col, 0.6)) // trailing chevron, dimmer
+	chevron(cx+r*0.5, col)                  // leading chevron
 }
 
 // drawSkillMenuList renders the skill submenu — one row per learned

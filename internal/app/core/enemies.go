@@ -58,7 +58,12 @@ type EnemyDefinition struct {
 	// Tier orders enemy kinds by threat. The highest-Tier member of a pack
 	// is the figure shown on the field (everyone else is hidden until the
 	// battle reveals them). Ties break by member order within the pack.
-	Tier               int
+	Tier int
+	// Level is the foe's power level, read only by the flee-chance math today
+	// (party avg level vs pack avg level). 0 means "unauthored" — EnemyLevel
+	// resolves it to DefaultEnemyLevel, so every kind has a sane level without
+	// per-row authoring. No XP/scaling wiring reads it yet.
+	Level              int
 	AttackVerbSingular string
 	AttackVerbPlural   string
 	// PoisonChance is the per-hit probability (0..1) that this enemy's
@@ -604,6 +609,17 @@ func EffectiveEnemyStats(e Enemy) Stats {
 		statSetters[s](&out, next)
 	}
 	return out
+}
+
+// EnemyLevel is the foe's level, defaulting an unauthored (0) definition to
+// DefaultEnemyLevel so every kind has a sane level without per-row authoring.
+// Read by the flee-chance math (party avg level vs pack avg level); no other
+// system reads enemy level yet.
+func EnemyLevel(e Enemy) int {
+	if l := EnemyInfoFor(e).Level; l > 0 {
+		return l
+	}
+	return DefaultEnemyLevel
 }
 
 // EnemyBasicDamage is the enemy's basic-attack damage, read through the

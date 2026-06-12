@@ -395,6 +395,12 @@ func updatePlayer(g *core.GameState, dt float32) {
 }
 
 func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
+	// The tile the player stands on entering this step — the square a
+	// successful Flee retreats to. For a step-into-pack engage the player
+	// never moves (this stays the current tile); for a pack-ambush engage
+	// (the player completes a step, then a pack lands on them) this is the
+	// pre-step tile, so fleeing steps back OFF the pack rather than onto it.
+	fleeFromX, fleeFromZ := p.TileX, p.TileZ
 	dx, dz := core.FacingVector(p.Facing)
 	rx, rz := core.FacingVector(core.NormalizeFacing(p.Facing + 1))
 	targetX := p.TileX + dx*forward + rx*strafe
@@ -425,7 +431,7 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 			battle.DebugSkipWin(g, idx)
 			return
 		}
-		battle.Start(g, idx)
+		battle.Start(g, idx, fleeFromX, fleeFromZ)
 		return
 	}
 	// Everything else (walls, props, deep water, chests, other packs)
@@ -475,7 +481,7 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	if engagedPack := tickPackAI(g); engagedPack >= 0 {
 		p.X = core.TileCenter(targetX)
 		p.Z = core.TileCenter(targetZ)
-		battle.Start(g, engagedPack)
+		battle.Start(g, engagedPack, fleeFromX, fleeFromZ)
 		return
 	}
 	p.Anim = core.Animation{

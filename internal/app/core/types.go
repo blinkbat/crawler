@@ -1126,6 +1126,21 @@ type Battle struct {
 	// turn end by resolveAndFinishEnemyAttack.
 	EnemyPendingSkill SkillID
 
+	// EnemyAttackMisses is set when a plain-melee enemy turn rolled a clean
+	// miss (RollEnemyHit failed in beginEnemyAttack). Like EnemyPendingSkill it
+	// suppresses the defend bar — there's nothing to defend against a whiff —
+	// and routes resolveAndFinishEnemyAttack to the no-damage miss narration.
+	// Only meaningful for basic attacks (skills aren't accuracy-gated). Cleared
+	// on turn end by resolveAndFinishEnemyAttack.
+	EnemyAttackMisses bool
+
+	// FleeReturnX / FleeReturnZ are the tile the player retreats to on a
+	// successful Flee — the square they occupied BEFORE the engaging step (so a
+	// pack-ambush flee steps back off the pack's tile rather than co-locating).
+	// Seeded by Start from the engage site's pre-step tile.
+	FleeReturnX int
+	FleeReturnZ int
+
 	// HitStop is the post-flash freeze on Great/Excellent grades — see
 	// HitStopFor in core/timing.go. While >0, battle Update returns early
 	// and the bar's apply step is deferred. Pauses every transient ticker

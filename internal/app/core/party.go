@@ -209,6 +209,12 @@ type SkillEffect struct {
 	// Zero = no HoT. The positive-status mirror of the Burn/Poison min/max
 	// fields; fixed duration (not rolled) like BuffTurns.
 	RegenTurns int
+	// ArmorReduction declares how much a skill strips from the target enemy's
+	// per-instance Armor (the Thief's Corrosive Vial). Applied directly to
+	// Enemy.Armor (floored at 0) for the rest of the battle — distinct from the
+	// turn-counted BuffStats debuff: a permanent armor break, not a status, that
+	// the damageEnemy mitigation chain reads immediately. Zero = no strip.
+	ArmorReduction int
 }
 
 // Party stats post-difficulty pass. Numbers are deliberately tighter than
@@ -286,11 +292,26 @@ var skillDefinitions = []skillDefinition{
 	// so the foe's ATB turn-rate drops. SkillTagNone (no mitigation interaction,
 	// like Steal/Scan).
 	{Skill: SkillCripple, Name: "Cripple", Description: "Sap an enemy's SPD for a few turns, slowing how often it acts. No damage.", Cost: 3, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigamePress, Effect: SkillEffect{BuffStats: Stats{SPD: -CrippleSPDReduction}, BuffTurns: CrippleTurns}, PlayerCastable: true},
+	// Corrosive Vial (Thief): single-target armor break. No damage — strips the
+	// target's per-instance Armor (floored at 0) for the rest of the battle so
+	// phys hits land harder. A permanent break, not a turn-counted status (it
+	// mutates Enemy.Armor directly). SkillTagNone, like Cripple / Steal.
+	{Skill: SkillCorrosiveVial, Name: "Corrosive Vial", Description: "Hurl acid that eats an enemy's Armor for the rest of the fight, so every hit lands harder. No damage.", Cost: 3, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigamePress, Effect: SkillEffect{ArmorReduction: CorrosiveArmorReduction}, PlayerCastable: true},
 	// Frost Lance (Wizard): charge-up single-target magic. +2 base +
 	// INT, 5 MP. On Great/Excellent timing applies a 1-turn Stun —
 	// lower base damage than Firebolt but reliable lockout instead
 	// of the burn-chance lottery. Different tactical role.
 	{Skill: SkillFrostLance, Name: "Frost Lance", Description: "INT-scaled magic damage. Reliable Stun on Great+.", Cost: 5, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: 2, StunChance: FrostLanceStunChance, StunMinTurns: FrostLanceStunTurns, StunMaxTurns: FrostLanceStunTurns}, PlayerCastable: true},
+	// Frostbite (Wizard): charge magic that always chills. INT-scaled damage
+	// plus a guaranteed SPD debuff (the enemy BuffStats mirror) on a surviving
+	// target — the damaging counterpart to Cripple's pure-utility slow. The
+	// chill always lands (no proc roll), so timing only scales the damage.
+	{Skill: SkillFrostbite, Name: "Frostbite", Description: "INT-scaled frost magic that always chills — lowers the target's SPD for a few turns.", Cost: 4, TargetMode: ActionEnemyTarget, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: FrostbiteDamageBase, BuffStats: Stats{SPD: -FrostbiteSPDReduction}, BuffTurns: FrostbiteChillTurns}, PlayerCastable: true},
+	// Cone of Cold (Wizard): AoE chill — INT-scaled frost damage to every living
+	// enemy plus a guaranteed per-target SPD chill. The pack-wide Frostbite,
+	// routed through applyAoEStatusSkill (AppliesAOEEnemies). Lower per-target
+	// damage / shorter chill than the single bolt.
+	{Skill: SkillConeOfCold, Name: "Cone of Cold", Description: "INT-scaled frost across the whole pack. Charge — chills every enemy, lowering their SPD.", Cost: 7, TargetMode: ActionMenu, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: ConeOfColdDamageBase, AppliesAOEEnemies: true, BuffStats: Stats{SPD: -ConeOfColdSPDReduction}, BuffTurns: ConeOfColdChillTurns}, PlayerCastable: true},
 	// Arc Bolt (Wizard): sequence-minigame AoE magic. +1 base + INT
 	// per target, 6 MP. Each correct tap in the sequence reads as a
 	// new bolt arcing to the next enemy; on apply, all living enemies
@@ -930,6 +951,23 @@ func CritChance(s Stats, quality int) float64 {
 // "Critical!" in the combat log.
 func RollCrit(rng *rand.Rand, s Stats, quality int) bool {
 	return RollChance(rng, CritChance(s, quality))
+}
+
+// EnemyHitChance is the [0,1] probability an enemy's BASIC physical attack
+// connects, rolled BEFORE the defend bar so a whiff can skip the input minigame
+// entirely (nothing to defend). DEX-driven (read through EffectiveEnemyStats, so
+// a future accuracy debuff like Blind lowers it) and clamped to
+// [EnemyAccuracyFloor, EnemyAccuracyCap] — even a sharp foe can whiff and a
+// debuffed one still lands sometimes. Enemy SKILLS are NOT accuracy-gated,
+// mirroring the player side where only basic attacks roll MeleeAccuracy.
+func EnemyHitChance(s Stats) float64 {
+	return Clamp(EnemyAccuracyBaseline+EnemyAccuracyPerDEX*float64(s.DEX), EnemyAccuracyFloor, EnemyAccuracyCap)
+}
+
+// RollEnemyHit rolls whether an enemy's basic attack connects. False = a clean
+// miss; the caller skips the defend bar and narrates the whiff.
+func RollEnemyHit(rng *rand.Rand, s Stats) bool {
+	return RollChance(rng, EnemyHitChance(s))
 }
 
 // ShortenStatusDuration returns the rolled status duration after

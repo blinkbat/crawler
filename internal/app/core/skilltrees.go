@@ -167,7 +167,7 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 		linearTree("Venomancy", "Toxins, DoT, armor break", []SkillTreeNode{
 			act("venom-strike", "Venom Strike", "Phys hit that applies Poison.", SkillVenomStrike),
 			act("poison-cloud", "Poison Cloud", "AoE Poison across the enemy pack.", SkillPoisonCloud),
-			nd("corrosive-vial", "Corrosive Vial", "Break an enemy's Armor so all hits land harder.", 3),
+			act("corrosive-vial", "Corrosive Vial", "Eat away an enemy's Armor for the fight, so all hits land harder.", SkillCorrosiveVial),
 			nd("lacerate", "Lacerate", "A Bleed that stacks alongside Poison.", 3),
 			nd("plague", "Plague", "Capstone: poison spreads when a poisoned enemy dies.", 1),
 		}),
@@ -190,8 +190,8 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 		}),
 		linearTree("Cryomancy", "Frost, slow, freeze, control", []SkillTreeNode{
 			act("frost-lance", "Frost Lance", "Magic hit with a Stun proc on good timing.", SkillFrostLance),
-			nd("frostbite", "Frostbite", "Chill a target, reducing its SPD.", 3),
-			nd("cone-of-cold", "Cone of Cold", "AoE slow across the enemy pack.", 3),
+			act("frostbite", "Frostbite", "Frost magic that always chills, reducing the target's SPD.", SkillFrostbite),
+			act("cone-of-cold", "Cone of Cold", "Frost across the whole pack that chills every enemy, lowering SPD.", SkillConeOfCold),
 			nd("ice-armor", "Ice Armor", "Buff: attackers are chilled; gain MDef.", 3),
 			nd("shatter", "Shatter", "Capstone: bonus damage against frozen or stunned foes.", 1),
 		}),
