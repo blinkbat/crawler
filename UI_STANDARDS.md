@@ -28,20 +28,23 @@ frame-and-parchment identity stays put while the colorful bits calm
 down. New bright accents should be `mute`-wrapped too.
 
 ### Glass surfaces
-- **`glassDeep`** — `rgb(14, 12, 18) α=210` — the canonical pane tint.
+Panes composite as `glassBaseWash` (α=88) + the family tint below —
+roughly 55-62 % apparent opacity. Deliberately thin: the dungeon glows
+through every pane (the BG-era "UI floats over the world" read); the
+mandatory text drop shadows are what keep ink legible at this thinness.
+- **`glassDeep`** — `rgb(14, 12, 18) α=100` — the canonical pane tint.
   Used as the body fill of every persistent HUD panel and every modal.
-  Dark enough to read parchment text against; transparent enough that
-  the world bleeds through faintly.
-- **`glassMid`** — `rgb(22, 18, 24) α=200` — used as the INNER section
+- **`glassMid`** — `rgb(22, 18, 24) α=84` — used as the INNER section
   fill of a panel (inset rectangles, list rows). Reads as a slightly
   inset second pane behind the outer one.
-- **`glassWarm`** — `rgb(28, 22, 16) α=200` — for the active row / the
-  currently-selected actor's card. Same alpha family as `glassDeep`
-  but tilted toward amber so the eye drifts to the cursor.
-- **`glassDanger`** — `rgb(36, 16, 18) α=200` — for the threatened
+- **`glassWarm`** — `rgb(28, 22, 16) α=118` — for the active row / the
+  currently-selected actor's card. Same family as `glassDeep` but
+  tilted toward amber so the eye drifts to the cursor.
+- **`glassDanger`** — `rgb(36, 16, 18) α=112` — for the threatened
   party member during enemy attack timing, and for danger modals
   (confirm-discard, etc.).
-- **`veil`** — `rgb(0, 0, 0) α=140` — full-screen modal scrim.
+- **`veil`** — `rgb(0, 0, 0) α=130` — full-screen modal scrim (NOT
+  thinned with the panes — modals still need separation).
 
 ### Wood frames
 - **`woodDark`** — `rgb(48, 30, 18) α=255` — the outer-edge frame stroke.
@@ -145,6 +148,26 @@ ad-hoc tracking is genuinely load-bearing (the timing-bar prompt's 1.5,
 the debug overlay's 1.2, animation-scaled splash text) and pair it with
 a `MeasureTextEx` at the same spacing.
 
+### Engraved lettering (heading tier and up)
+Large text wears a top-lit metal-leaf gradient via
+`drawEngravedText(font, text, x, y, size, base)` (exported as
+`DrawEngravedText`): heavy +2 drop shadow, full body in `base`, a
+bright scissored band over the upper ~45 % (base mixed toward
+parchment), a deep band under the lower ~28 % (base mixed toward
+black). The bands are re-draws of the same string, so the gradient
+rides the letterforms exactly. It tracks at `canonicalSpacing(size)` —
+identical measure to plain text — so existing centering math holds;
+`drawEngravedTextSpaced` exists for the one load-bearing ad-hoc
+tracking (the timing prompt's 1.5).
+
+WHERE: panel/modal headings (`drawPanelHeading`), menu titles + rows
+(`drawCardTitle`, pause/debug rows, title-screen rows), combat verbs
+(action-menu header + Attack/Items/Skills), roster enemy names,
+level-up stat labels, the timing-bar prompt, Tome member names +
+picker titles + item detail names, the door prompt. NOT for FontBody
+or smaller (bands collapse into noise), and not for high-count list
+rows — it's four passes per string, priced for the heading tier.
+
 ### Drop shadow
 Every text call routes through `drawTextWithShadow` (1px offset,
 `shadowStrong`) or `drawTextWithShadowStyle` for ad-hoc. Never inline
@@ -176,6 +199,16 @@ of the glass tokens (`glassDeep` / `glassMid` / `glassWarm` /
 for resting, `borderActive` / `borderDanger` to tint the frame for
 state), and `accent` is the optional left-spine stripe (pass a
 zero-alpha color to skip).
+
+**Carved bevel.** `drawCard` finishes the frame with `drawCardBevel` —
+directional light that turns the flat strokes into raised molding:
+a warm highlight along the frame's top edge (dimmer down the left),
+deep shadow along the bottom (dimmer up the right), and on panes ≥ 56 px
+tall the opposite pair at the inner lip (shadow under the top lip,
+faint light at the sill) so the glass reads recessed INTO the frame.
+Hairlines stop short of the corners; chips below 56×34 skip it. The
+corner filigree's outer brackets also carry a 1 px dark offset so they
+read as cast-metal braces raised off the frame, not flush gilt paint.
 
 ### Heading
 ```

@@ -116,6 +116,13 @@ func DrawTextWithShadow(font rl.Font, text string, x, y, size float32, col color
 	drawTextWithShadow(font, text, x, y, size, col)
 }
 
+// DrawEngravedText is the exported top-lit gradient lettering (see
+// drawEngravedText) for scenes outside render — the title screen's menu
+// rows. Heading-tier and up only, same contract as the internal form.
+func DrawEngravedText(font rl.Font, text string, x, y, size float32, col color.RGBA) {
+	drawEngravedText(font, text, x, y, size, col)
+}
+
 // DrawSelectedRow paints the standard "cursor is on this row"
 // highlight per UI_STANDARDS.md "Row > Selected": warm glass fill,
 // gilt left spine (3 px), and a thin gilt-dim underline along the

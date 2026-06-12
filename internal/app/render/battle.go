@@ -207,7 +207,7 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 
 	nameX := float32(x + leftPad)
 	displayName := core.EnemyDisplayName(*enemy)
-	drawTextWithShadow(font, displayName, nameX, float32(y+10), FontHeading, nameCol)
+	drawEngravedText(font, displayName, nameX, float32(y+10), FontHeading, nameCol)
 
 	// Health reads from the qualitative wound-state word by default —
 	// exact enemy HP stays hidden until the kind is identified in the
@@ -640,7 +640,7 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 	// whose turn it is is spelled out right where the player picks the
 	// action — reinforcing the lifted/haloed party card and the glowing
 	// sprite. A thin gilt rule divides the header from the action rows.
-	drawTextWithShadow(assets.hudFont, member.Name, float32(contentX), float32(y+14), FontHeading, classCol)
+	drawEngravedText(assets.hudFont, member.Name, float32(contentX), float32(y+14), FontHeading, classCol)
 	ruleY := y + 48
 	drawGiltRule(x+18, ruleY, w-36, 1, 0.5)
 	drawDiamondPip(float32(x+18), float32(ruleY), 2.4, fadeColor(giltDim, 0.85))
@@ -657,7 +657,7 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 		if g.Battle.PendingSkill != core.SkillNone {
 			actionLabel = core.SkillName(g.Battle.PendingSkill)
 		}
-		drawTextWithShadow(assets.hudFont, actionLabel, float32(contentX), float32(contentY), FontHeading, textPrimary)
+		drawEngravedText(assets.hudFont, actionLabel, float32(contentX), float32(contentY), FontHeading, textPrimary)
 		drawTextWithShadow(assets.hudFont, "Choose a target", float32(contentX), float32(subY), FontSmall, textLabel)
 	case core.ActionPartyTarget:
 		targetName := "Ally"
@@ -667,10 +667,10 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 		drawTextWithShadow(assets.hudFont, arrowPrompt(core.SkillName(g.Battle.PendingSkill), targetName), float32(contentX), float32(contentY), FontBody, textPrimary)
 		drawTextWithShadow(assets.hudFont, "Choose an ally", float32(contentX), float32(subY), FontSmall, textLabel)
 	case core.ActionItemMenu:
-		drawTextWithShadow(assets.hudFont, "Items", float32(contentX), float32(contentY), FontHeading, textPrimary)
+		drawEngravedText(assets.hudFont, "Items", float32(contentX), float32(contentY), FontHeading, textPrimary)
 		drawItemMenuList(g, assets, contentX, subY)
 	case core.ActionSkillMenu:
-		drawTextWithShadow(assets.hudFont, "Skills", float32(contentX), float32(contentY), FontHeading, textPrimary)
+		drawEngravedText(assets.hudFont, "Skills", float32(contentX), float32(contentY), FontHeading, textPrimary)
 		drawSkillMenuList(g, assets, contentX, subY, member)
 	case core.ActionItemTarget:
 		itemName := core.ItemInfo(g.Battle.PendingItem).Name

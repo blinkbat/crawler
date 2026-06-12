@@ -70,7 +70,7 @@ func DrawSkillTreeModal(g core.GameState, assets Resources) {
 	// spendable SkillPoint balance on the right.
 	classCol := classAccent(m.Class)
 	drawClassGlyph(card.X+30, card.Y+30, 12, m.Class, classCol)
-	drawTextWithShadow(font, m.Name+" — Skill Trees", card.X+54, card.Y+16, FontHeading, textPrimary)
+	drawEngravedText(font, m.Name+" — Skill Trees", card.X+54, card.Y+16, FontHeading, textPrimary)
 	spText := skillPointsLabel(m.SkillPoints)
 	spCol := textMuted
 	if m.SkillPoints > 0 {

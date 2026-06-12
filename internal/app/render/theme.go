@@ -63,14 +63,17 @@ var (
 	// the glass tint over it. Both layers are translucent — the
 	// world composes through both. Cumulative effective opacity is
 	// roughly 1 - (1-wash)(1-tint), which lands the pane near
-	// 60-70 % apparent opacity at the alphas below: dark enough to
-	// read as glass, translucent enough that the world hints
-	// through.
-	glassBaseWash = rl.NewColor(8, 6, 10, 115)
-	glassDeep     = rl.NewColor(14, 12, 18, 130)
-	glassMid      = rl.NewColor(22, 18, 24, 105)
-	glassWarm     = rl.NewColor(28, 22, 16, 145)
-	glassDanger   = rl.NewColor(36, 16, 18, 135)
+	// 55-62 % apparent opacity at the alphas below — thinned from an
+	// earlier ~70 % so the dungeon genuinely glows through every pane
+	// (the BG-era "UI floats over the world" read). The mandatory text
+	// drop shadows are what keep parchment ink legible at this
+	// thinness; if a future pass thins further, check the combat log
+	// over a lit floor first.
+	glassBaseWash = rl.NewColor(8, 6, 10, 88)
+	glassDeep     = rl.NewColor(14, 12, 18, 100)
+	glassMid      = rl.NewColor(22, 18, 24, 84)
+	glassWarm     = rl.NewColor(28, 22, 16, 118)
+	glassDanger   = rl.NewColor(36, 16, 18, 112)
 	veil          = rl.NewColor(0, 0, 0, 130)
 	// surfaceCardBackdrop is an OPAQUE dark panel fill (glass-family tone at
 	// full alpha) for modals that must fully hide the world behind them — it's
@@ -542,16 +545,21 @@ func drawCardFiligree(x, y, w, h int32, col color.RGBA) {
 		if i == 2 || i == 3 {
 			dy = -1
 		}
-		// Outer L — 14 px arms, 2 px thick.
+		// Outer L — 14 px arms, 2 px thick. A 1px dark offset copy is laid
+		// first so the bracket reads as cast metal RAISED off the frame
+		// (the BG-era corner brace), not gilt paint flush with the wood.
 		outerHX := c[0]
 		if dx < 0 {
 			outerHX = c[0] - outerArm
 		}
-		rl.DrawRectangle(outerHX, c[1], outerArm, 2, col)
 		outerVY := c[1]
 		if dy < 0 {
 			outerVY = c[1] - outerArm
 		}
+		braceShadow := fadeColor(shadowHeavy, 0.70)
+		rl.DrawRectangle(outerHX+1, c[1]+1, outerArm, 2, braceShadow)
+		rl.DrawRectangle(c[0]+1, outerVY+1, 2, outerArm, braceShadow)
+		rl.DrawRectangle(outerHX, c[1], outerArm, 2, col)
 		rl.DrawRectangle(c[0], outerVY, 2, outerArm, col)
 		// Inner L — shorter and thinner, offset diagonally inward
 		// from the outer bracket. Reads as the second cast line
@@ -968,9 +976,55 @@ func drawCard(x, y, w, h int32, fill, outline, accent color.RGBA) {
 	rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, frameThick, woodLight)
 	rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, float32(woodFrameOuter+woodFrameBand), woodMid)
 	rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, float32(woodFrameOuter), outline)
+	drawCardBevel(x, y, w, h)
 	drawCardInlay(x, y, w, h)
 	if accent.A > 0 {
 		drawAccentStripe(x, y, h, accent)
+	}
+}
+
+// drawCardBevel carves the flat three-stroke frame into raised molding — the
+// chunky directionally-lit bevel 90s CRPG dialog frames wore. Two opposing
+// light reads, hairlines only (the strokes stay the structure):
+//
+//   - RAISED outer edge: a warm highlight along the frame's top (and a dimmer
+//     one down the left) where overhead candlelight catches the molding, and
+//     a deep shadow along the bottom (dimmer up the right) where it falls
+//     away — the frame stands proud of the world.
+//   - RECESSED inner lip: the opposite pair where the frame meets the glass —
+//     shadow under the top lip (the molding overhangs the pane) and a faint
+//     light at the bottom lip (light pooling on the sill) — the glass sits
+//     sunk INTO the frame.
+//
+// Lines stop short of the corners (cornerClear) so they never fight the
+// rounded mitres; small chips skip the treatment entirely.
+func drawCardBevel(x, y, w, h int32) {
+	if w < 56 || h < 34 {
+		return
+	}
+	const cornerClear = int32(9)
+	ft := cardFrameThick // inner lip sits where the frame band ends
+	hx := x + cornerClear
+	hw := w - cornerClear*2
+	vy := y + cornerClear
+	vh := h - cornerClear*2
+	if hw <= 0 || vh <= 0 {
+		return
+	}
+	hi := fadeColor(woodAccent, 0.80)
+	hiSide := fadeColor(woodAccent, 0.36)
+	lo := fadeColor(shadowHeavy, 0.62)
+	loSide := fadeColor(shadowHeavy, 0.34)
+	// Raised outer edge.
+	rl.DrawRectangle(hx, y+1, hw, 1, hi)
+	rl.DrawRectangle(hx, y+h-2, hw, 1, lo)
+	rl.DrawRectangle(x+1, vy, 1, vh, hiSide)
+	rl.DrawRectangle(x+w-2, vy, 1, vh, loSide)
+	// Recessed inner lip (only when the pane is tall enough that the two
+	// reads don't merge into stripes).
+	if h >= 56 {
+		rl.DrawRectangle(hx, y+ft, hw, 1, fadeColor(shadowHeavy, 0.42))
+		rl.DrawRectangle(hx, y+h-ft-1, hw, 1, fadeColor(woodAccent, 0.22))
 	}
 }
 
@@ -1231,7 +1285,9 @@ func drawPaneDropShadow(r rl.Rectangle) {
 // panels, borderActive for the focused / active panel, borderDanger
 // for danger modals, etc. Header text is always inkPrimary.
 func drawPanelHeading(font rl.Font, text string, x, y float32, accent color.RGBA) {
-	drawTextWithShadowStyle(font, text, x, y, FontHeading, FontSpacingHeading, inkPrimary, shadowStrong, 1, 1)
+	// Engraved (top-lit gradient) lettering — the heading tier wears the
+	// 90s-CRPG metal-leaf treatment everywhere via this one seam.
+	drawEngravedText(font, text, x, y, FontHeading, inkPrimary)
 	measure := measurePanelHeading(font, text)
 	tickW := int32(measure.X)
 	if tickW < headingTickMinWidth {
@@ -1719,6 +1775,55 @@ func canonicalSpacing(size float32) float32 {
 // shadowLight/Mid/Strong/Heavy palette it consumes.
 func drawTextWithShadow(font rl.Font, text string, x, y, size float32, col color.RGBA) {
 	drawTextWithShadowStyle(font, text, x, y, size, canonicalSpacing(size), col, shadowStrong, 1, 1)
+}
+
+// engravedMeasureCache backs drawEngravedText's band math — engraved labels
+// (panel headings, action verbs, menu titles) are stable strings redrawn
+// every frame their surface is up.
+var engravedMeasureCache measureCache
+
+// drawEngravedText paints large text as top-lit engraved metal — the gradient
+// lettering 90s CRPG dialog headers wore. Four passes over one string:
+//
+//	heavy drop shadow (+2,+2) → full-height body in `base` → a bright
+//	top-light band (upper ~45 %, base mixed toward parchment-white) → a
+//	deep band at the baseline (lower ~28 %, base mixed toward black)
+//
+// The two bands are scissor-clipped re-draws of the SAME string, so the
+// gradient rides the letterforms exactly (counters and serifs shade
+// correctly) — no texture, no per-glyph work. Spacing follows
+// canonicalSpacing(size), same as drawTextWithShadow, so engraved and plain
+// text of the same size always measure identically — callers can center
+// against a plain MeasureTextEx at the canonical spacing.
+//
+// Reserve it for the heading tier and up (panel/modal headings, action
+// verbs, menu titles): at body sizes the bands collapse into noise, and the
+// four passes are priced for the handful of large labels on screen, not for
+// list rows.
+func drawEngravedText(font rl.Font, text string, x, y, size float32, base color.RGBA) {
+	drawEngravedTextSpaced(font, text, x, y, size, canonicalSpacing(size), base)
+}
+
+// drawEngravedTextSpaced is the explicit-spacing core of drawEngravedText,
+// for the few engraved surfaces whose tracking is load-bearing (the
+// timing-bar prompt's 1.5). Pair with a MeasureTextEx at the same spacing.
+func drawEngravedTextSpaced(font rl.Font, text string, x, y, size, spacing float32, base color.RGBA) {
+	m := engravedMeasureCache.measure(font, text, size, spacing)
+	rl.DrawTextEx(font, text, rl.NewVector2(x+2, y+2), size, spacing, shadowHeavy)
+	rl.DrawTextEx(font, text, rl.NewVector2(x, y), size, spacing, base)
+	// Band rects pad ±2 px horizontally so antialiased glyph edges aren't
+	// shaved at the scissor boundary.
+	lit := core.MixColor(base, inkPrimary, 0.55)
+	lit.A = base.A
+	rl.BeginScissorMode(int32(x-2), int32(y), int32(m.X+4), int32(m.Y*0.45))
+	rl.DrawTextEx(font, text, rl.NewVector2(x, y), size, spacing, lit)
+	rl.EndScissorMode()
+	deep := core.MixColor(base, rl.NewColor(0, 0, 0, base.A), 0.34)
+	deep.A = base.A
+	deepTop := y + m.Y*0.72
+	rl.BeginScissorMode(int32(x-2), int32(deepTop), int32(m.X+4), int32(m.Y-m.Y*0.72+2))
+	rl.DrawTextEx(font, text, rl.NewVector2(x, y), size, spacing, deep)
+	rl.EndScissorMode()
 }
 
 // drawTextWithShadowStyle is the parametric form of drawTextWithShadow.

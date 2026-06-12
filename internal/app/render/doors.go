@@ -57,9 +57,11 @@ func DrawDoorPrompt(g core.GameState, assets Resources) {
 
 	title := "DOORWAY"
 	tm := rl.MeasureTextEx(assets.hudFont, title, FontHeading, FontSpacingHeading)
-	drawTextWithShadowStyle(assets.hudFont, title,
+	// Engraved header — the measure above is at the canonical heading
+	// spacing, exactly what drawEngravedText tracks at, so centering holds.
+	drawEngravedText(assets.hudFont, title,
 		float32(panelX)+float32(panelW)/2-tm.X/2, float32(panelY+22),
-		FontHeading, FontSpacingHeading, textPrimary, shadowStrong, 1, 1)
+		FontHeading, textPrimary)
 
 	cardCenterX := float32(panelX) + float32(panelW)/2
 	drawTextCentered(assets.hudFont, "Enter "+dest+"?",

@@ -326,7 +326,7 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 	glyphCY := y + FontHeading/2
 	drawClassGlyph(glyphCX, glyphCY, glyphR, m.Class, classCol)
 	nameOffset := glyphR*2 + 12
-	drawTextWithShadow(font, m.Name, innerX+nameOffset, y, FontHeading, nameCol)
+	drawEngravedText(font, m.Name, innerX+nameOffset, y, FontHeading, nameCol)
 	y += 36
 
 	// PartyMember.Name doubles as the class label in this build, so the
@@ -667,7 +667,7 @@ const pickerTitleTopInset = float32(16)
 // use-target / heal pickers and the skill-tree modal each repeated.
 func drawPickerCard(font rl.Font, cardW, cardH float32, title string) rl.Rectangle {
 	card := drawVeiledCard(int32(cardW), int32(cardH), borderActive, woodAccent, woodAccent)
-	drawTextWithShadow(font, title, card.X+pickerCardLeftInset, card.Y+pickerTitleTopInset, FontHeading, textPrimary)
+	drawEngravedText(font, title, card.X+pickerCardLeftInset, card.Y+pickerTitleTopInset, FontHeading, textPrimary)
 	return card
 }
 
@@ -1031,7 +1031,7 @@ func drawPanelsItems(g core.GameState, assets Resources, body rl.Rectangle) {
 		info := core.ItemInfo(stack.Kind)
 		dy := detailRect.Y + 14
 		dx := detailRect.X + 14
-		drawTextWithShadow(font, info.Name, dx, dy, FontHeading, textPrimary)
+		drawEngravedText(font, info.Name, dx, dy, FontHeading, textPrimary)
 		dy += 38
 		drawTextWithShadow(font, panelsItemEffectLabel(info), dx, dy, FontBody, inkAccent)
 		dy += 30

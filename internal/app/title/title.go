@@ -324,7 +324,9 @@ func drawList(items []string, cursor int, font rl.Font, theme render.Theme, scre
 		m := rl.MeasureTextEx(font, label, size, render.FontSpacingHeading)
 		y := listY + float32(i)*titleListRowStride
 		x := render.CenterXF(m.X)
-		render.DrawTextWithShadow(font, label, x, y, size, col)
+		// Engraved menu rows — the launch options wear the same top-lit
+		// metal-leaf gradient the in-game headings do.
+		render.DrawEngravedText(font, label, x, y, size, col)
 		if active {
 			flCY := y + m.Y/2
 			render.DrawFleuron(x-titleFleuronGap, flCY, 5, theme.BorderActive)

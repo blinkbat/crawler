@@ -78,7 +78,7 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 			iconCol = giltBright
 		}
 		drawStatIcon(s, float32(rowX)+16, float32(rowY)+24, 12, iconCol)
-		drawTextWithShadow(font, label, float32(rowX+44), float32(rowY+6), FontHeading, col)
+		drawEngravedText(font, label, float32(rowX+44), float32(rowY+6), FontHeading, col)
 		// When the player has staged a spend on this row, swap the
 		// static description for the computed before→after preview so
 		// the row tells you what the point actually BUYS instead of
@@ -132,7 +132,7 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 		labelW := rl.MeasureTextEx(font, label, FontHeading, FontSpacingHeading).X
 		labelX := float32(rowX + 6)
 		labelY := float32(rowY + 14)
-		drawTextWithShadow(font, label, labelX, labelY, FontHeading, col)
+		drawEngravedText(font, label, labelX, labelY, FontHeading, col)
 		flCY := labelY + FontHeading/2
 		drawFleuronsFlanking(labelX, labelW, 18, flCY, 5, giltDim)
 	}

@@ -161,7 +161,9 @@ func drawCardTitle(font rl.Font, title string, panelX, panelY, panelW int32, top
 	tm := rl.MeasureTextEx(font, title, FontTitle, FontSpacingTitle)
 	titleX := float32(panelX) + float32(panelW)/2 - tm.X/2
 	titleY := float32(panelY) + topInset
-	drawTextWithShadowStyle(font, title, titleX, titleY, FontTitle, FontSpacingTitle, textPrimary, shadowStrong, 1, 1)
+	// Engraved title-tier lettering. Centering above stays exact:
+	// drawEngravedText tracks at canonicalSpacing(FontTitle) == FontSpacingTitle.
+	drawEngravedText(font, title, titleX, titleY, FontTitle, textPrimary)
 	drawFleuronsFlanking(titleX, tm.X, 22, titleY+tm.Y/2, 5, giltDim)
 	return titleY + tm.Y
 }
@@ -225,5 +227,7 @@ func drawMenuRow(font rl.Font, text string, x, y int32, selected bool) {
 	if selected {
 		DrawSelectedRowI(x-18, y-6, pauseMenuRowInnerW(), pauseMenuRowH)
 	}
-	drawTextWithShadowStyle(font, text, float32(x+12), float32(y), FontHeading, FontSpacingHeading, textPrimary, shadowMid, 2, 2)
+	// Engraved heading-tier rows — drawEngravedText's own +2 drop shadow
+	// supplies the weight the old hand-set (+2,+2) shadow carried.
+	drawEngravedText(font, text, float32(x+12), float32(y), FontHeading, textPrimary)
 }

@@ -304,7 +304,10 @@ func drawTimingHeading(font rl.Font, text string, x, barW, y float32, baseCol rl
 	measure := measureTimingHeading(font, text, size)
 	hx := x + (barW-measure.X)/2
 	hy := y - measure.Y - 6
-	drawTextWithShadowStyle(font, text, hx, hy, size, 1.5, col, shadowStrong, 2, 2)
+	// Engraved (top-lit gradient) prompt — the input verb is the loudest
+	// text in combat, so it wears the same metal-leaf treatment the panel
+	// headings do, at this bar's own 1.5 tracking (measure above matches).
+	drawEngravedTextSpaced(font, text, hx, hy, size, 1.5, col)
 }
 
 // timingHeadingMeasureCache memoizes drawTimingHeading's MeasureTextEx;
