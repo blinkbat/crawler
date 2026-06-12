@@ -73,6 +73,14 @@ func Run() {
 		// the frame — see input.NewFrame.
 		input.NewFrame()
 
+		// Global Alt+Enter fullscreen/windowed toggle — scene-independent
+		// (title, adventure, editor, mid-menu, mid-battle). Handled BEFORE
+		// the scene update; the input package's Enter-based confirms ignore
+		// Enter-with-Alt so this press never doubles as a commit.
+		if input.DisplayTogglePressed() {
+			render.ToggleDisplayMode()
+		}
+
 		switch state.scene {
 		case sceneTitle:
 			updateTitleScene(&state)
@@ -326,6 +334,25 @@ func updateEditorScene(state *appState, dt float32) {
 
 func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	camera := render.Camera(*game)
+	// Retro-filter capture (Debug ▸ Retro Filters): when any filter is
+	// active, the environment pass below renders into an off-screen texture
+	// that EndRetroCapture blits back through the filter shader — so the
+	// WORLD pixelates/scans/dithers while sprites, HUD, popups, and weather
+	// stay crisp. With filters off (the default) this is a single boolean
+	// check and the scene renders directly as always.
+	//
+	// Skybox exemption (the menu's "Filter Skybox" toggle): when the sky is
+	// exempt, it's drawn CRISP to the backbuffer up front and the capture is
+	// cleared TRANSPARENT instead — the filtered environment then
+	// alpha-composites over the clean sky at blit time.
+	skyCrisp := core.AnyRetroFilterActive(&game.RetroFilters) && !game.RetroFilterSky
+	if skyCrisp {
+		// This clear doubles as the frame's backbuffer depth wipe for the
+		// crisp-sky arm (see the load-bearing-clear note below).
+		rl.ClearBackground(rl.NewColor(87, 172, 244, 255))
+		render.DrawSkyBackground(assets, *game)
+	}
+	filtered := render.BeginRetroCapture(game)
 	// Explicit clear is REQUIRED — bisect confirmed that without it
 	// the world geometry (props in particular) flickers and trees
 	// hide behind invisible depth-buffer holes that shift as the
@@ -336,13 +363,41 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	// here. DrawSkyBackground paints the full viewport in 2D so the
 	// sky-blue color set by the clear is overdrawn immediately —
 	// the color value is irrelevant, the call is for the depth wipe
-	// that comes with it.
-	rl.ClearBackground(rl.NewColor(87, 172, 244, 255))
-	render.DrawSkyBackground(assets, *game)
+	// that comes with it. (Inside a retro capture the clear lands on
+	// the capture texture's own color+depth buffers — same contract.
+	// The crisp-sky arm cleared the backbuffer above and clears the
+	// capture to TRANSPARENT here so the sky survives the blit; if its
+	// capture failed to start, the backbuffer is already cleared+sky'd.)
+	if filtered && skyCrisp {
+		rl.ClearBackground(rl.Blank)
+	} else if !skyCrisp {
+		rl.ClearBackground(rl.NewColor(87, 172, 244, 255))
+		render.DrawSkyBackground(assets, *game)
+	}
+	// ENVIRONMENT pass — sky, world geometry, chests, doors. This is the
+	// half the retro filters apply to.
 	rl.BeginMode3D(camera)
 	render.DrawWorld(camera, *game, assets)
 	render.DrawChests(camera, *game, assets)
 	render.DrawDoors(camera, *game, assets)
+	rl.EndMode3D()
+	// Close the retro capture and blit the FILTERED environment to the
+	// backbuffer — opaquely in the normal arm, alpha-composited over the
+	// crisp sky in the exempt arm. Sprites are deliberately not in the
+	// capture — they stay crisp "on top" of the crunched world.
+	if filtered {
+		render.EndRetroCapture(game, skyCrisp)
+	}
+	// SPRITE pass — enemies, party, particles, always at full resolution.
+	// Unfiltered: the backbuffer still holds the environment pass's depth,
+	// so occlusion just works. Filtered: the blit was 2D (no depth), so
+	// RetroDepthPrepass re-renders the environment depth-only (ZERO/ONE
+	// blend — color untouched) and the billboards depth-test against walls
+	// and trees exactly as if they'd been drawn in one pass.
+	rl.BeginMode3D(camera)
+	if filtered {
+		render.RetroDepthPrepass(camera, *game, assets)
+	}
 	render.DrawEnemies(camera, *game, assets)
 	render.DrawPartySprites(camera, *game, assets)
 	// VFX inside the 3D pass so billboard particles depth-sort with

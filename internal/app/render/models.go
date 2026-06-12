@@ -74,20 +74,31 @@ func rotateOffsetY(offset rl.Vector3, scale, yawDeg float32) rl.Vector3 {
 }
 
 const (
-	treeMeshRoot = iota // wide squat cylinder at the base — reads as the trunk's root flare
+	treeMeshRoot = iota // tapering cone at the trunk's foot — the root flare
 	treeMeshTrunk
 	treeMeshCanopyLow
 	treeMeshCanopyHigh
 	treeMeshCanopySide
 	treeMeshCanopyAccent
+	// treeMeshBranch is the tapering bough cone that bridges trunk → canopy.
+	// A BARK part — the variance pass must exclude it from canopy
+	// jitter/species-tint the same way it excludes root + trunk.
+	treeMeshBranch
 )
 
 func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 	models := []rl.Model{
-		treeMeshRoot: rl.LoadModelFromMesh(rl.GenMeshCylinder(0.32, 0.18, 10)),
-		// Trunk lengthened from 1.55 → 2.55 so the silhouette reads
-		// as a grown tree rather than a stubby shrub.
-		treeMeshTrunk: rl.LoadModelFromMesh(rl.GenMeshCylinder(0.18, 2.55, 12)),
+		// Flare cone hugging the very base — the bole's swell at the soil
+		// line, merging the root toes into one mass.
+		treeMeshRoot: rl.LoadModelFromMesh(rl.GenMeshCone(0.30, 0.40, 10)),
+		// Trunk: ONE tall cone. A cone IS a continuously tapering trunk —
+		// no stacked segments, so no end-cap ledges catching the sun as
+		// bright rings (the failure of the earlier telescoped version).
+		// Its point is buried deep in the canopy (tip 3.4 vs dome center
+		// 2.55), so the visible run tapers 0.20 → ~0.11 smoothly. The
+		// part tilts the whole cone ~3° off plumb, pivoting at the GROUND
+		// (cone base sits at the origin), which is how real trees lean.
+		treeMeshTrunk: rl.LoadModelFromMesh(rl.GenMeshCone(0.20, 3.4, 12)),
 		// Canopy lumps enlarged from the prior 0.92/0.78/0.55/0.38
 		// pass — pushes the silhouette toward a Wind-Waker storybook
 		// "puff" dome. The Low lump is now the dominant base mass;
@@ -97,10 +108,14 @@ func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 		treeMeshCanopyHigh:   rl.LoadModelFromMesh(rl.GenMeshSphere(0.96, 14, 18)),
 		treeMeshCanopySide:   rl.LoadModelFromMesh(rl.GenMeshSphere(0.68, 12, 16)),
 		treeMeshCanopyAccent: rl.LoadModelFromMesh(rl.GenMeshSphere(0.46, 10, 14)),
+		// Bough segment — a CONE, because limbs taper. Each bough chains
+		// two of these (thick steep lower + thin shallower upper) into a
+		// visible elbow, the articulation a single straight stick can't give.
+		treeMeshBranch: rl.LoadModelFromMesh(rl.GenMeshCone(0.082, 0.55, 7)),
 	}
 	for i := range models {
 		tex := leafTex
-		if i == treeMeshRoot || i == treeMeshTrunk {
+		if i == treeMeshRoot || i == treeMeshTrunk || i == treeMeshBranch {
 			tex = barkTex
 		}
 		setModelTexture(&models[i], tex)
@@ -120,9 +135,14 @@ func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 	return treeModel{
 		models: models,
 		parts: []treePart{
-			{modelIdx: treeMeshTrunk, offset: rl.NewVector3(0, 0.06, 0), scale: rl.NewVector3(1, 1, 1), tint: rl.White},
-			// Dominant low canopy — broad mass anchoring the dome.
-			{modelIdx: treeMeshCanopyLow, offset: rl.NewVector3(0, 2.55, 0), scale: rl.NewVector3(1, 0.95, 1), tint: leafMid},
+			// Trunk — one continuously-tapering cone, tilted ~3° at the
+			// ground so the tree leans like a grown thing (the tilt axis
+			// rotates with per-tile yaw, so every tree leans its own way).
+			{modelIdx: treeMeshTrunk, offset: rl.NewVector3(0, 0.01, 0), scale: rl.NewVector3(1, 1, 1), rotation: 3, rotationAxis: rl.NewVector3(1, 0, 0.4), tint: rl.White},
+			// Dominant low canopy — broad mass anchoring the dome, nudged
+			// a touch toward the trunk's lean so the crown loads over the
+			// bole's top, not over its base.
+			{modelIdx: treeMeshCanopyLow, offset: rl.NewVector3(0.06, 2.55, 0.01), scale: rl.NewVector3(1, 0.95, 1), tint: leafMid},
 			// Crown — slightly offset upward, brighter, catches the
 			// sky tint.
 			{modelIdx: treeMeshCanopyHigh, offset: rl.NewVector3(-0.05, 3.20, 0.05), scale: rl.NewVector3(1, 1, 1), tint: leafBase},
@@ -138,6 +158,55 @@ func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 			// sun-dappled gilt highlights.
 			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(0.30, 3.40, -0.22), scale: rl.NewVector3(1, 1, 1), tint: leafGold},
 			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(-0.26, 3.26, 0.28), scale: rl.NewVector3(1, 1, 1), tint: leafGold},
+
+			// ---- FORM PASS (appended so the canopy lumps above keep their
+			// established per-index variance) ----
+			//
+			// NOTE: no separate under-canopy "occlusion ball" — an earlier
+			// attempt drew a wide dark flattened sphere under the dome and
+			// its equator poked past the canopy as a dark saucer ring
+			// (worse under per-part jitter). The under-shadow comes from
+			// the sun shader's NdotL on each lump's normals, which is
+			// orientation-correct and can't poke.
+			//
+			// Every limb below is a CONE (taper toward the tip) and every
+			// bough is TWO cones meeting at an elbow — the articulation
+			// that separates "grown" from "assembled from pipes." Joint
+			// and tip positions are computed from the axis-angle rotation
+			// (cone +Y rotated θ around the given axis), not eyeballed,
+			// with upper segments seated ~0.08 BACK along the lower
+			// segment so the elbows stay closed across the ±28 % height
+			// stretch (the small authored overlap absorbs the joint slip).
+
+			// Base flare — the bole's swell at the soil line. The ONLY
+			// root geometry: a single smooth tapering cone the trunk rises
+			// through. (Earlier passes tried radiating root cones — both
+			// long buttresses and stubby toes read as spikes from the
+			// player's low approach angle, so the ground grip is carried
+			// entirely by this swell + the contact shadow.)
+			{modelIdx: treeMeshRoot, offset: rl.NewVector3(0, 0, 0), scale: rl.NewVector3(1, 1, 1), tint: rl.White},
+
+			// Bough A — toward +Z. Lower segment leaves the mid-trunk at a
+			// steep 30°; the upper continues from the elbow at 58°, thinner.
+			// Elbow at (−0.03, 1.78, 0.28); tip at (−0.17, 2.04, 0.75).
+			{modelIdx: treeMeshBranch, offset: rl.NewVector3(0.05, 1.30, 0.02), scale: rl.NewVector3(1, 1, 1), rotation: 30, rotationAxis: rl.NewVector3(1, 0, 0.3), tint: rl.White},
+			{modelIdx: treeMeshBranch, offset: rl.NewVector3(-0.02, 1.71, 0.25), scale: rl.NewVector3(0.73, 1.13, 0.73), rotation: 58, rotationAxis: rl.NewVector3(1, 0, 0.3), tint: color.RGBA{R: 234, G: 224, B: 212, A: 255}},
+			// Bough B — toward +X, higher on the trunk, mirrored arc.
+			// Elbow at (0.17, 1.93, −0.07); tip at (0.60, 2.20, −0.17).
+			{modelIdx: treeMeshBranch, offset: rl.NewVector3(-0.04, 1.48, -0.02), scale: rl.NewVector3(0.98, 0.91, 0.98), rotation: -26, rotationAxis: rl.NewVector3(0.25, 0, 1), tint: rl.White},
+			{modelIdx: treeMeshBranch, offset: rl.NewVector3(0.14, 1.86, -0.06), scale: rl.NewVector3(0.67, 1.05, 0.67), rotation: -54, rotationAxis: rl.NewVector3(0.25, 0, 1), tint: color.RGBA{R: 230, G: 220, B: 208, A: 255}},
+			// Back stub — a third short bough toward −Z so the crotch
+			// reads from every approach (phyllotaxis, cheaply). Base seated
+			// on the trunk AXIS (the 3° lean carries the upper trunk +Z;
+			// an off-axis −Z base would exit the tapered cone up here).
+			{modelIdx: treeMeshBranch, offset: rl.NewVector3(0, 1.58, 0), scale: rl.NewVector3(0.73, 0.78, 0.73), rotation: -38, rotationAxis: rl.NewVector3(1, 0, -0.2), tint: color.RGBA{R: 226, G: 216, B: 202, A: 255}},
+
+			// Leaf tufts seated on each bough's computed tip — canopy
+			// family (sway + species tint), so no bough ends in a naked
+			// spike and the foliage visibly hangs OFF the branch structure.
+			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(-0.17, 2.06, 0.74), scale: rl.NewVector3(0.78, 0.70, 0.78), tint: leafDeep},
+			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(0.60, 2.22, -0.17), scale: rl.NewVector3(0.72, 0.66, 0.72), tint: leafMid},
+			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(-0.05, 1.94, -0.27), scale: rl.NewVector3(0.55, 0.50, 0.55), tint: leafDeep},
 		},
 	}
 }
@@ -146,11 +215,11 @@ func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 // around the vertical axis through the tree's trunk. Yaw rotates each part's
 // offset around the prop center so the whole canopy/lump arrangement
 // reorients with the prop. Parts whose own rotationAxis is the default
-// vertical also have yaw added to their part.rotation so their geometry
-// (cylinders, etc.) spins in step. Tilted-axis parts can't compose cleanly
-// with yaw without matrix math, so they keep their tilted spin and only
-// the offset rotates — visually fine because most tilted parts in the
-// codebase are sphere-ish lumps that read symmetrically anyway.
+// vertical have yaw added to their part.rotation; TILTED parts compose via
+// yawedTiltAxis — rotating the tilt AXIS by yaw equals yaw∘tilt for our
+// rotationally-symmetric meshes — so a tilted bough and the (vertical-axis)
+// leaf tuft glued to its tip swing together under per-tile yaw instead of
+// the tuft orbiting away from a world-fixed branch.
 func (t treeModel) draw(center rl.Vector3, scale, yaw float32) {
 	if scale <= 0 {
 		scale = 1
@@ -159,12 +228,27 @@ func (t treeModel) draw(center rl.Vector3, scale, yaw float32) {
 		offset := rotateOffsetY(part.offset, scale, yaw)
 		position := rl.NewVector3(center.X+offset.X, center.Y+offset.Y, center.Z+offset.Z)
 		drawScale := rl.NewVector3(part.scale.X*scale, part.scale.Y*scale, part.scale.Z*scale)
+		axis := partRotationAxis(part)
 		rotation := part.rotation
 		if isVerticalAxis(part.rotationAxis) {
 			rotation += yaw
+		} else {
+			axis = yawedTiltAxis(axis, yaw)
 		}
-		rl.DrawModelEx(t.models[part.modelIdx], position, partRotationAxis(part), rotation, drawScale, part.tint)
+		rl.DrawModelEx(t.models[part.modelIdx], position, axis, rotation, drawScale, part.tint)
 	}
+}
+
+// yawedTiltAxis rotates a part's tilt axis around world-up by yaw degrees.
+// For a mesh that's rotationally symmetric about its own +Y (every cylinder,
+// cone, and sphere in this file), R_y(yaw)·R_axis(θ) == R_{R_y(yaw)·axis}(θ)
+// up to an invisible pre-spin — so this IS the correct yaw composition for
+// tilted parts, done with one vector rotate instead of matrix stacking.
+func yawedTiltAxis(axis rl.Vector3, yaw float32) rl.Vector3 {
+	if yaw == 0 {
+		return axis
+	}
+	return rl.Vector3RotateByAxisAngle(axis, rl.NewVector3(0, 1, 0), yaw*float32(math.Pi)/180)
 }
 
 // drawVaried renders the tree with per-tile shape variance seeded from
@@ -280,19 +364,31 @@ func (t treeModel) variance(seed uint32) treeVariance {
 	}
 
 	for i, part := range t.parts {
-		isCanopy := part.modelIdx != treeMeshRoot && part.modelIdx != treeMeshTrunk
+		// Bark parts (root flare, trunk, boughs) are rigid wood: no canopy
+		// jitter, no wind lean, and crucially no species remap — a blossom
+		// tree's BRANCHES don't turn pink.
+		isBark := part.modelIdx == treeMeshRoot || part.modelIdx == treeMeshTrunk ||
+			part.modelIdx == treeMeshBranch
+		isCanopy := !isBark
 		pv := treePartVariance{sx: 1, sy: 1, sz: 1, tint: part.tint, isCanopy: isCanopy}
 		if isCanopy {
-			pv.sx = 1 + frac(byte(mix>>uint(3+i*3)))*0.14
-			pv.sy = 1 + frac(byte(mix>>uint(5+i*5)))*0.14
-			pv.sz = 1 + frac(byte(mix>>uint(7+i*7)))*0.14
-			pv.nudgeX = frac(byte(mix>>uint(11+i*11))) * 0.20
-			pv.nudgeZ = frac(byte(mix>>uint(13+i*13))) * 0.20
+			// Shift amounts wrap mod 25 so they stay inside the uint32 —
+			// the old unwrapped `i*11`-style shifts overflowed for part
+			// index ≥ 2 (Go defines >>33 on uint32 as 0), which silently
+			// froze every higher-index lump's jitter at the SAME constant
+			// (frac(0) = −1 → fixed −0.20 nudges, fixed 0.86 scales) on
+			// every tree. Wrapping restores genuine per-seed variety for
+			// the whole part list, tip tufts included.
+			pv.sx = 1 + frac(byte(mix>>uint((3+i*5)%25)))*0.14
+			pv.sy = 1 + frac(byte(mix>>uint((7+i*9)%25)))*0.14
+			pv.sz = 1 + frac(byte(mix>>uint((11+i*13)%25)))*0.14
+			pv.nudgeX = frac(byte(mix>>uint((5+i*11)%25))) * 0.20
+			pv.nudgeZ = frac(byte(mix>>uint((13+i*17)%25))) * 0.20
 			// Pick the species palette first (green / blossom / autumn),
 			// then apply the standard ±14 per-channel jitter on top so
 			// lumps within one tree still walk in tone but the family
 			// colour is preserved.
-			pv.tint = jitterTint(speciesCanopyTint(part.tint, species), mix>>uint(7+i*4), 14)
+			pv.tint = jitterTint(speciesCanopyTint(part.tint, species), mix>>uint((7+i*4)%23), 14)
 		}
 		v.parts[i] = pv
 	}
@@ -358,11 +454,19 @@ func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32
 		offset := rotateOffsetY(rl.NewVector3(offX, offsetY, offZ), overall, yaw)
 		position := rl.NewVector3(center.X+offset.X, center.Y+offset.Y, center.Z+offset.Z)
 		drawScale := rl.NewVector3(part.scale.X*pv.sx*overall, part.scale.Y*pv.sy*trunkYScale*overall, part.scale.Z*pv.sz*overall)
+		axis := partRotationAxis(part)
 		rotation := part.rotation
 		if isVerticalAxis(part.rotationAxis) {
 			rotation += yaw
+		} else {
+			// Tilted parts (boughs, surface roots) compose with the
+			// per-tile yaw via the rotated tilt axis — see yawedTiltAxis —
+			// so they swing with the tree instead of pointing the same
+			// world direction in every grove (and the tip tufts stay
+			// glued to their boughs).
+			axis = yawedTiltAxis(axis, yaw)
 		}
-		rl.DrawModelEx(t.models[part.modelIdx], position, partRotationAxis(part), rotation, drawScale, pv.tint)
+		rl.DrawModelEx(t.models[part.modelIdx], position, axis, rotation, drawScale, pv.tint)
 	}
 }
 
@@ -516,6 +620,15 @@ const (
 	rockMeshBase  = iota // flat cube — used by the pebble drawer, not the boulder
 	rockMeshLump         // medium faceted lump (5 rings × 6 slices)
 	rockMeshChunk        // small faceted chunk (4 rings × 5 slices)
+	rockMeshMoss         // untextured moss cushion (tinted green at the part level)
+)
+
+// mossPaletteBright / mossPaletteDeep are the moss-cushion tints shared by
+// every mossy rock prop — kept adjacent to the stone palette so the pair
+// retunes together. Bright sits on sun-side caps, deep in crevice patches.
+var (
+	mossPaletteBright = rl.NewColor(122, 160, 100, 255)
+	mossPaletteDeep   = rl.NewColor(96, 138, 90, 255)
 )
 
 // RockMeshBaseHeight is the Y dimension passed to GenMeshCube for the
@@ -560,9 +673,15 @@ func loadRockProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 		// die, more smooths into a pillow.
 		rockMeshLump:  rl.LoadModelFromMesh(rl.GenMeshSphere(0.55, 5, 6)),
 		rockMeshChunk: rl.LoadModelFromMesh(rl.GenMeshSphere(0.36, 4, 5)),
+		// Moss cushion — UNtextured (the rock grain would read as lichen-
+		// on-granite, not growth), tinted meadow-green at the part level.
+		// Low-facet so the cushion stays in the chunky-stone language.
+		rockMeshMoss: rl.LoadModelFromMesh(rl.GenMeshSphere(0.30, 5, 7)),
 	}
 	for i := range models {
-		setModelTexture(&models[i], rockTex)
+		if i != rockMeshMoss {
+			setModelTexture(&models[i], rockTex)
+		}
 		attachShader(&models[i], shader)
 	}
 
@@ -594,6 +713,14 @@ func loadRockProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 			// ground level, makes the boulder feel weathered (eroded
 			// chunks settling at its foot) instead of freshly placed.
 			{modelIdx: rockMeshChunk, offset: rl.NewVector3(-0.52, 0.13, 0.08), scale: rl.NewVector3(0.65, 0.45, 0.65), rotation: 65, rotationAxis: rl.NewVector3(1, 3, 0), tint: light},
+
+			// Moss cushions — flattened green caps draped over the upper
+			// faces. Age in two strokes: a bright pad catching the sun on
+			// the main mass's shoulder, a deeper patch tucked into the
+			// crevice between lumps. The boulder reads as having SAT here
+			// for decades, not been placed this morning.
+			{modelIdx: rockMeshMoss, offset: rl.NewVector3(-0.18, 0.74, 0.10), scale: rl.NewVector3(1.15, 0.34, 1.10), rotation: 24, rotationAxis: rl.NewVector3(1, 6, 0), tint: mossPaletteBright},
+			{modelIdx: rockMeshMoss, offset: rl.NewVector3(0.26, 0.54, -0.10), scale: rl.NewVector3(0.85, 0.30, 0.80), rotation: -38, rotationAxis: rl.NewVector3(0, 6, 1), tint: mossPaletteDeep},
 		},
 	}
 }
@@ -608,18 +735,30 @@ func loadRockCairnProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 		rl.LoadModelFromMesh(rl.GenMeshSphere(0.42, 5, 7)),
 		rl.LoadModelFromMesh(rl.GenMeshSphere(0.32, 5, 6)),
 		rl.LoadModelFromMesh(rl.GenMeshSphere(0.22, 4, 5)),
+		rl.LoadModelFromMesh(rl.GenMeshSphere(0.30, 5, 7)), // moss cushion (untextured)
 	}
 	for i := range models {
-		setModelTexture(&models[i], rockTex)
+		if i != 3 {
+			setModelTexture(&models[i], rockTex)
+		}
 		attachShader(&models[i], shader)
 	}
-	warm, cool, dark := stonePaletteWarm, stonePaletteCool, stonePaletteDark
+	warm, cool, dark, light := stonePaletteWarm, stonePaletteCool, stonePaletteDark, stonePaletteLight
 	return propModel{
 		models: models,
 		parts: []treePart{
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.34, 0), scale: rl.NewVector3(1.1, 0.85, 1.1), rotation: 13, rotationAxis: rl.NewVector3(1, 4, 1), tint: warm},
 			{modelIdx: 1, offset: rl.NewVector3(0.04, 0.78, -0.06), scale: rl.NewVector3(1.0, 0.95, 1.0), rotation: -22, rotationAxis: rl.NewVector3(2, 5, 1), tint: cool},
 			{modelIdx: 2, offset: rl.NewVector3(-0.05, 1.10, 0.04), scale: rl.NewVector3(1.0, 0.95, 1.0), rotation: 38, rotationAxis: rl.NewVector3(1, 5, 0), tint: dark},
+			// Old growth on an old marker: a moss bonnet draped over the
+			// middle stone's shoulder (cairns weather from the joints out).
+			{modelIdx: 3, offset: rl.NewVector3(-0.10, 0.92, 0.06), scale: rl.NewVector3(0.80, 0.28, 0.75), rotation: 31, rotationAxis: rl.NewVector3(1, 6, 0), tint: mossPaletteDeep},
+			// Settled contact pebbles at the foot — a stacked marker
+			// presses into the soil; the spill of small stones reads as
+			// "placed long ago," and grounds the column the way the
+			// boulder's flank pebble grounds it.
+			{modelIdx: 2, offset: rl.NewVector3(0.34, 0.09, 0.16), scale: rl.NewVector3(0.50, 0.35, 0.50), rotation: 57, rotationAxis: rl.NewVector3(1, 3, 0), tint: light},
+			{modelIdx: 2, offset: rl.NewVector3(-0.30, 0.07, -0.20), scale: rl.NewVector3(0.42, 0.30, 0.42), rotation: -19, rotationAxis: rl.NewVector3(0, 4, 1), tint: cool},
 		},
 	}
 }
@@ -637,9 +776,12 @@ func loadRockFormationProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 		rl.LoadModelFromMesh(rl.GenMeshSphere(0.70, 5, 6)),
 		rl.LoadModelFromMesh(rl.GenMeshSphere(0.55, 5, 6)),
 		rl.LoadModelFromMesh(rl.GenMeshSphere(0.40, 4, 5)),
+		rl.LoadModelFromMesh(rl.GenMeshSphere(0.34, 5, 7)), // moss cushion (untextured)
 	}
 	for i := range models {
-		setModelTexture(&models[i], rockTex)
+		if i != 4 {
+			setModelTexture(&models[i], rockTex)
+		}
 		attachShader(&models[i], shader)
 	}
 	warm, cool, dark, light := stonePaletteWarm, stonePaletteCool, stonePaletteDark, stonePaletteLight
@@ -660,6 +802,14 @@ func loadRockFormationProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 			{modelIdx: 3, offset: rl.NewVector3(0.05, 1.18, -0.08), scale: rl.NewVector3(1.0, 0.85, 1.0), rotation: 65, rotationAxis: rl.NewVector3(1, 4, 0), tint: light},
 			// Cap accent — slight asymmetric peak.
 			{modelIdx: 3, offset: rl.NewVector3(-0.18, 1.32, 0.10), scale: rl.NewVector3(0.8, 0.75, 0.8), rotation: -25, rotationAxis: rl.NewVector3(2, 4, 1), tint: dark},
+			// Moss colonising the joints — growth concentrates where rain
+			// channels between fused lumps, so the cushions sit IN the
+			// crevices (not perched on peaks): one over the main/NE seam,
+			// one in the SW shadow pocket, one high where the crown meets
+			// the central mass.
+			{modelIdx: 4, offset: rl.NewVector3(0.36, 0.92, 0.30), scale: rl.NewVector3(1.05, 0.32, 1.00), rotation: 18, rotationAxis: rl.NewVector3(1, 6, 0), tint: mossPaletteBright},
+			{modelIdx: 4, offset: rl.NewVector3(-0.42, 0.66, -0.30), scale: rl.NewVector3(0.90, 0.28, 0.85), rotation: -44, rotationAxis: rl.NewVector3(0, 6, 1), tint: mossPaletteDeep},
+			{modelIdx: 4, offset: rl.NewVector3(-0.06, 1.24, 0.02), scale: rl.NewVector3(0.70, 0.26, 0.66), rotation: 52, rotationAxis: rl.NewVector3(1, 5, 1), tint: mossPaletteDeep},
 		},
 	}
 }
@@ -710,7 +860,10 @@ func loadBushProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
 	leafLump := rl.LoadModelFromMesh(rl.GenMeshSphere(0.62, 12, 16))
 	leafLumpSm := rl.LoadModelFromMesh(rl.GenMeshSphere(0.46, 10, 14))
 	bloom := rl.LoadModelFromMesh(rl.GenMeshSphere(0.085, 8, 10))
-	models := []rl.Model{leafLump, leafLumpSm, bloom}
+	// Twig core — a stubby untextured cylinder visible only in the gaps
+	// between the low lumps; sells "grown from a woody heart" at a glance.
+	twig := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.07, 0.34, 7))
+	models := []rl.Model{leafLump, leafLumpSm, bloom, twig}
 	setModelTexture(&models[0], leafTex)
 	setModelTexture(&models[1], leafTex)
 	for i := range models {
@@ -721,12 +874,19 @@ func loadBushProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
 	leafBase := color.RGBA{R: 142, G: 200, B: 112, A: 255}
 	leafDeep := color.RGBA{R: 102, G: 164, B: 100, A: 255}
 	leafGold := color.RGBA{R: 224, G: 230, B: 152, A: 255}
+	leafShadow := color.RGBA{R: 76, G: 122, B: 82, A: 255}
+	twigBrown := color.RGBA{R: 112, G: 84, B: 58, A: 255}
 	bloomYellow := color.RGBA{R: 242, G: 216, B: 122, A: 255}
 	bloomWhite := color.RGBA{R: 244, G: 240, B: 226, A: 255}
 	bloomPink := color.RGBA{R: 238, G: 176, B: 198, A: 255}
 	return propModel{
 		models: models,
 		parts: []treePart{
+			// Woody heart first: rigid twig trunk, then a deep-shadow inner
+			// lump — the painter's core shadow that makes the bright lumps
+			// over it read as one shrub with an interior, not three balloons.
+			{modelIdx: 3, offset: rl.NewVector3(0, 0, 0), scale: rl.NewVector3(1, 1, 1), tint: twigBrown},
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.40, 0), scale: rl.NewVector3(1.25, 0.85, 1.25), tint: leafShadow, sway: 0.40},
 			// Three overlapping leaf lumps — a dominant base with
 			// two side lumps for the painterly "cluster of round
 			// bunches" silhouette. Sway is modest so the bush
@@ -734,6 +894,11 @@ func loadBushProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.52, 0), scale: rl.NewVector3(1, 0.92, 1), tint: leafBase, sway: 0.55},
 			{modelIdx: 1, offset: rl.NewVector3(0.34, 0.68, 0.20), scale: rl.NewVector3(1, 1, 1), tint: leafDeep, sway: 0.65},
 			{modelIdx: 1, offset: rl.NewVector3(-0.32, 0.64, -0.18), scale: rl.NewVector3(1, 1, 1), tint: leafGold, sway: 0.65},
+			// Ground skirt — two low flattened lumps spilling outward at the
+			// base, so the silhouette widens toward the soil the way real
+			// shrubs pool instead of balancing on a point.
+			{modelIdx: 1, offset: rl.NewVector3(0.26, 0.24, -0.28), scale: rl.NewVector3(0.95, 0.55, 0.95), tint: leafDeep, sway: 0.30},
+			{modelIdx: 1, offset: rl.NewVector3(-0.30, 0.22, 0.24), scale: rl.NewVector3(0.90, 0.50, 0.90), tint: leafShadow, sway: 0.30},
 			// Wildflower blooms dotted across the upper hemisphere
 			// of the bush. Three colours so the patch reads as
 			// mixed wildflowers, not a costume bouquet. Blooms
@@ -756,7 +921,11 @@ func loadMushroomProp(shader rl.Shader) propModel {
 	spot := rl.LoadModelFromMesh(rl.GenMeshSphere(0.028, 6, 8))
 	smallStem := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.03, 0.10, 8))
 	smallCap := rl.LoadModelFromMesh(rl.GenMeshSphere(0.085, 8, 10))
-	models := []rl.Model{stem, capDome, spot, smallStem, smallCap}
+	// Gill plate — a thin wide disc tucked under the main cap's rim. From
+	// the player's low approach angle the UNDERSIDE of a toadstool is half
+	// of what you see; without it the cap floated on a bare stick.
+	gill := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.125, 0.035, 12))
+	models := []rl.Model{stem, capDome, spot, smallStem, smallCap, gill}
 	for i := range models {
 		attachShader(&models[i], shader)
 	}
@@ -766,24 +935,29 @@ func loadMushroomProp(shader rl.Shader) propModel {
 	capCream := color.RGBA{R: 218, G: 198, B: 160, A: 255}
 	capApricot := color.RGBA{R: 210, G: 162, B: 132, A: 255}
 	spotWhite := color.RGBA{R: 228, G: 224, B: 212, A: 255}
+	gillShade := color.RGBA{R: 186, G: 172, B: 146, A: 255}
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Main toadstool — tall stem, domed red cap, four
-			// painted-white spots scattered across the cap's
-			// upper hemisphere.
+			// Main toadstool — tall stem, gill plate, domed red cap (tilted
+			// a few degrees so it reads as grown toward the light, not
+			// machined), four painted-white spots across the upper dome.
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.02, 0), scale: rl.NewVector3(1, 1, 1), tint: stemTint},
-			{modelIdx: 1, offset: rl.NewVector3(0, 0.18, 0), scale: rl.NewVector3(1, 0.72, 1), tint: capRed},
+			{modelIdx: 5, offset: rl.NewVector3(0, 0.155, 0), scale: rl.NewVector3(1, 1, 1), rotation: 7, rotationAxis: rl.NewVector3(1, 8, 0), tint: gillShade},
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.19, 0), scale: rl.NewVector3(1, 0.72, 1), rotation: 7, rotationAxis: rl.NewVector3(1, 8, 0), tint: capRed},
 			{modelIdx: 2, offset: rl.NewVector3(0.05, 0.245, 0.02), scale: rl.NewVector3(1, 1, 1), tint: spotWhite},
 			{modelIdx: 2, offset: rl.NewVector3(-0.04, 0.24, 0.05), scale: rl.NewVector3(1, 1, 1), tint: spotWhite},
 			{modelIdx: 2, offset: rl.NewVector3(0.02, 0.255, -0.06), scale: rl.NewVector3(1, 1, 1), tint: spotWhite},
 			{modelIdx: 2, offset: rl.NewVector3(-0.06, 0.23, -0.03), scale: rl.NewVector3(1, 1, 1), tint: spotWhite},
-			// Companion 1 — small cream cap nestled to the side.
+			// Companion 1 — small cream cap nestled to the side, its own
+			// little gill disc under the rim.
 			{modelIdx: 3, offset: rl.NewVector3(0.18, 0.01, 0.12), scale: rl.NewVector3(1, 1, 1), tint: stemDarker},
-			{modelIdx: 4, offset: rl.NewVector3(0.18, 0.11, 0.12), scale: rl.NewVector3(1, 0.74, 1), tint: capCream},
+			{modelIdx: 5, offset: rl.NewVector3(0.18, 0.085, 0.12), scale: rl.NewVector3(0.60, 0.8, 0.60), tint: gillShade},
+			{modelIdx: 4, offset: rl.NewVector3(0.18, 0.11, 0.12), scale: rl.NewVector3(1, 0.74, 1), rotation: -6, rotationAxis: rl.NewVector3(0, 8, 1), tint: capCream},
 			// Companion 2 — apricot cap on the other side.
 			{modelIdx: 3, offset: rl.NewVector3(-0.16, 0.01, -0.14), scale: rl.NewVector3(0.95, 0.95, 0.95), tint: stemDarker},
-			{modelIdx: 4, offset: rl.NewVector3(-0.16, 0.10, -0.14), scale: rl.NewVector3(0.92, 0.72, 0.92), tint: capApricot},
+			{modelIdx: 5, offset: rl.NewVector3(-0.16, 0.078, -0.14), scale: rl.NewVector3(0.55, 0.8, 0.55), tint: gillShade},
+			{modelIdx: 4, offset: rl.NewVector3(-0.16, 0.10, -0.14), scale: rl.NewVector3(0.92, 0.72, 0.92), rotation: 9, rotationAxis: rl.NewVector3(1, 8, 0.4), tint: capApricot},
 		},
 	}
 }

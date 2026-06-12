@@ -947,6 +947,11 @@ const (
 	// otherwise — raylib's GLFW backend has no vibration, so it runs through the
 	// XInput driver on Windows).
 	DebugMenuTestRumble
+	// DebugMenuRetro opens the Retro Filters sub-submenu — per-filter
+	// intensity sliders for the 3D world's post-process stack (pixelate,
+	// scanlines, dither, …). Filters layer: every non-zero intensity is
+	// applied in one shader pass, in a fixed pipeline order.
+	DebugMenuRetro
 	DebugMenuClose
 )
 
@@ -958,3 +963,123 @@ const DebugMenuCount = int(DebugMenuClose) + 1
 // every party member per activation. Large enough to trivialize fights for
 // testing (and, via the INT/VIT pool refresh, to bankroll free-cast testing).
 const DebugStatBoost = 100
+
+// RetroFilterKind enumerates the retro post-process filters applicable to the
+// 3D world (Debug ▸ Retro Filters). Each has an independent 0..1 intensity on
+// GameState.RetroFilters; every non-zero filter applies in ONE combined shader
+// pass in this fixed pipeline order (sampling effects first, palette work in
+// the middle, screen-space scanlines last), so filters layer freely.
+type RetroFilterKind int
+
+const (
+	RetroFilterPixelate RetroFilterKind = iota // chunky low-res UV quantize
+	RetroFilterChroma                          // RGB fringing (VHS / worn composite)
+	RetroFilterPosterize                       // color-level crush (8/16-bit feel)
+	RetroFilterDither                          // 4×4 Bayer ordered dithering
+	RetroFilterGameBoy                         // 4-shade green LCD palette remap
+	RetroFilterScanlines                       // CRT horizontal line darkening
+	RetroFilterCount
+)
+
+// retroFilterNames is the display-label registry, indexed by RetroFilterKind
+// and length-locked to the enum so a new filter can't ship unlabeled.
+var retroFilterNames = [RetroFilterCount]string{
+	RetroFilterPixelate:  "Pixelate",
+	RetroFilterChroma:    "Chroma Fringe",
+	RetroFilterPosterize: "Posterize",
+	RetroFilterDither:    "Dither",
+	RetroFilterGameBoy:   "Game Boy",
+	RetroFilterScanlines: "Scanlines",
+}
+
+func init() {
+	for k := RetroFilterKind(0); k < RetroFilterCount; k++ {
+		if retroFilterNames[k] == "" {
+			// config.go is deliberately import-free; a static message is
+			// enough — the enum is small and the zero row is obvious.
+			panic("core: retroFilterNames has an empty entry — label every RetroFilterKind")
+		}
+	}
+}
+
+// RetroFilterName returns the display label for a filter kind ("" out of range).
+func RetroFilterName(k RetroFilterKind) string {
+	if k < 0 || k >= RetroFilterCount {
+		return ""
+	}
+	return retroFilterNames[k]
+}
+
+// Retro Filters submenu rows: one slider row per filter, then the Filter
+// Skybox toggle, Reset to Default, All Off, and Close. The first
+// RetroFilterCount cursor positions ARE the filter kinds.
+const (
+	RetroMenuSkyToggle = int(RetroFilterCount)
+	RetroMenuResetAll  = int(RetroFilterCount) + 1
+	RetroMenuAllOff    = int(RetroFilterCount) + 2
+	RetroMenuClose     = int(RetroFilterCount) + 3
+	RetroMenuCount     = int(RetroFilterCount) + 4
+)
+
+// RetroFilterStep is the Left/Right intensity increment, and
+// RetroFilterToggleDefault is the intensity a Confirm-toggle turns a filter
+// ON at when its authored default is zero (Confirm on a non-zero filter
+// zeroes it; Confirm on a zero filter restores its DefaultRetroFilters level
+// when one exists).
+const (
+	RetroFilterStep          = 0.1
+	RetroFilterToggleDefault = 0.7
+)
+
+// DefaultRetroFilters is the out-of-the-box filter mix — a faint pixelate /
+// posterize wash with a touch more chroma fringe under a moderate ordered
+// dither: "90s CD-ROM FMV" rather than any single effect at full blast.
+// Pairs with DefaultRetroFilterSky (the sky stays crisp behind the crunched
+// world by default). New games start here; Reset to Default restores it.
+func DefaultRetroFilters() [RetroFilterCount]float64 {
+	var f [RetroFilterCount]float64
+	f[RetroFilterPixelate] = 0.1
+	f[RetroFilterChroma] = 0.2
+	f[RetroFilterPosterize] = 0.1
+	f[RetroFilterDither] = 0.4
+	return f
+}
+
+// DefaultRetroFilterSky is the out-of-the-box skybox treatment: NOT filtered
+// — the dithered/pixelated environment composites over a clean sky.
+const DefaultRetroFilterSky = false
+
+// AdjustRetroFilter nudges an intensity by dir (±1) steps, clamped to [0, 1].
+func AdjustRetroFilter(v *float64, dir int) {
+	*v = Clamp(*v+float64(dir)*RetroFilterStep, 0, 1)
+}
+
+// ToggleRetroFilter flips filters[k] between off and its "on" level: the
+// filter's DefaultRetroFilters intensity when it has one, else the shared
+// RetroFilterToggleDefault (so Game Boy / Scanlines — default-off — still
+// toggle ON to something visible).
+func ToggleRetroFilter(filters *[RetroFilterCount]float64, k RetroFilterKind) {
+	if k < 0 || k >= RetroFilterCount {
+		return
+	}
+	if filters[k] > 0 {
+		filters[k] = 0
+		return
+	}
+	if def := DefaultRetroFilters()[k]; def > 0 {
+		filters[k] = def
+		return
+	}
+	filters[k] = RetroFilterToggleDefault
+}
+
+// AnyRetroFilterActive reports whether at least one filter has a non-zero
+// intensity — the render side's gate for the whole post-process pass.
+func AnyRetroFilterActive(filters *[RetroFilterCount]float64) bool {
+	for _, v := range filters {
+		if v > 0 {
+			return true
+		}
+	}
+	return false
+}

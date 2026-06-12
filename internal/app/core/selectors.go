@@ -270,6 +270,7 @@ const (
 	ModalPauseMenu
 	ModalOptionsMenu
 	ModalDebugMenu
+	ModalRetroMenu
 	ModalShop
 	ModalDoorPrompt
 	ModalChest
@@ -308,6 +309,12 @@ func ActiveModal(g *GameState) ModalKind {
 		return ModalChest
 	case g.DoorPrompt >= 0 && g.DoorPrompt < len(g.Doors):
 		return ModalDoorPrompt
+	case g.RetroMenuOpen:
+		// Above the debug menu: it's the debug menu's child and replaces it
+		// on screen (openRetroMenu clears DebugMenuOpen, same hand-off as
+		// pause → debug), but the priority slot keeps a stray double-open
+		// from letting the parent shadow the child's input.
+		return ModalRetroMenu
 	case g.DebugMenuOpen:
 		return ModalDebugMenu
 	case g.OptionsMenuOpen:

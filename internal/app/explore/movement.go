@@ -56,6 +56,9 @@ func Update(g *core.GameState) {
 	case core.ModalShop:
 		updateShop(g)
 		return
+	case core.ModalRetroMenu:
+		updateRetroMenu(g)
+		return
 	case core.ModalDebugMenu:
 		updateDebugMenu(g)
 		return
@@ -269,10 +272,51 @@ func updateDebugMenu(g *core.GameState) {
 			// drives it every frame regardless of scene, so it fires even with
 			// the pause menu open and out of combat.
 			core.TriggerRumble(&g.Battle, core.RumbleTestStrength, core.RumbleTestDur)
+		case core.DebugMenuRetro:
+			openRetroMenu(g)
 		case core.DebugMenuClose:
 			g.DebugMenuOpen = false
 		}
 	})
+}
+
+// openRetroMenu swaps the Debug submenu for the Retro Filters sub-submenu —
+// the same hand-off shape as pause → debug.
+func openRetroMenu(g *core.GameState) {
+	g.DebugMenuOpen = false
+	g.RetroMenuOpen = true
+	g.RetroMenuIndex = 0
+}
+
+// updateRetroMenu drives the Retro Filters submenu. The first
+// RetroFilterCount rows are intensity sliders (cursor position == filter
+// kind): Left/Right nudges the intensity by RetroFilterStep, Confirm toggles
+// between off and the default intensity. Filters LAYER — any number can be
+// non-zero at once; the render pass applies them all in one shader. The last
+// two rows are Reset All and Close. Back returns to explore (leaf-menu rule).
+func updateRetroMenu(g *core.GameState) {
+	updateLeafMenu(&g.RetroMenuOpen, &g.RetroMenuIndex, core.RetroMenuCount, func(item int) {
+		switch {
+		case item < int(core.RetroFilterCount):
+			core.ToggleRetroFilter(&g.RetroFilters, core.RetroFilterKind(item))
+		case item == core.RetroMenuSkyToggle:
+			g.RetroFilterSky = !g.RetroFilterSky
+		case item == core.RetroMenuResetAll:
+			g.RetroFilters = core.DefaultRetroFilters()
+			g.RetroFilterSky = core.DefaultRetroFilterSky
+		case item == core.RetroMenuAllOff:
+			g.RetroFilters = [core.RetroFilterCount]float64{}
+		case item == core.RetroMenuClose:
+			g.RetroMenuOpen = false
+		}
+	})
+	// Fine intensity adjust on the cursored slider row. Gated on the menu
+	// still being open (updateLeafMenu may have just closed it via Back).
+	if g.RetroMenuOpen && g.RetroMenuIndex < int(core.RetroFilterCount) {
+		if delta := input.CursorLeftRight(); delta != 0 {
+			core.AdjustRetroFilter(&g.RetroFilters[g.RetroMenuIndex], delta)
+		}
+	}
 }
 
 func restartGame(g *core.GameState) {

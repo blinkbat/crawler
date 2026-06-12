@@ -571,6 +571,9 @@ func isFootprintTail(c byte) bool {
 }
 
 func (r Resources) Unload() {
+	// Retro-filter pass (shader + capture RT) is a package-level lazy
+	// singleton, not a Resources field — free it alongside everything else.
+	UnloadRetroFilter()
 	// NOTE: raylib's UnloadModel frees the model's meshes + the materials' maps
 	// array, but NOT the GL textures bound into those maps (rmodels.c). So the
 	// wall/floor/ceiling textures (and the prop textures freed via .unload()
@@ -1083,6 +1086,8 @@ func buildHUDFontCodepoints() []rune {
 		'≤', // less-than-or-equal (thresholds)
 		'▲', // pack-edit reorder up, list arrows
 		'▶', // action-row submenu indicator
+		'▸', // small submenu chevron — pause-menu "Options ▸" / "Debug ▸" rows
+		'◂', // small left chevron (cushion for ▸'s mirror)
 		'▼', // pack-edit reorder down, list arrows
 		'●', // bullet / active marker
 	)

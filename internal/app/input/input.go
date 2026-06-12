@@ -167,8 +167,23 @@ func stickEdgeX(dir int) bool {
 // Every action accepts both keyboard and controller. Keep call sites using
 // these names so future remapping touches one file.
 
+// altDown reports either Alt key held — the modifier that turns Enter into
+// the display-mode toggle (DisplayTogglePressed) instead of a confirm.
+func altDown() bool {
+	return rl.IsKeyDown(rl.KeyLeftAlt) || rl.IsKeyDown(rl.KeyRightAlt)
+}
+
+// DisplayTogglePressed is the global Alt+Enter fullscreen/windowed toggle
+// edge. Polled once per frame in the main loop (scene-independent — works on
+// the title screen, in menus, mid-battle, and in the editor). The Enter
+// branches of ConfirmPressed / EditorConfirmPressed explicitly ignore
+// Enter-with-Alt so the same press can't simultaneously confirm a menu row.
+func DisplayTogglePressed() bool {
+	return altDown() && (rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeyKpEnter))
+}
+
 func ConfirmPressed() bool {
-	return rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeySpace) || rl.IsKeyPressed(rl.KeyZ) ||
+	return (rl.IsKeyPressed(rl.KeyEnter) && !altDown()) || rl.IsKeyPressed(rl.KeySpace) || rl.IsKeyPressed(rl.KeyZ) ||
 		padPressed(rl.GamepadButtonRightFaceDown) // A on Xbox / Cross on PS
 }
 
@@ -256,7 +271,9 @@ func CursorUpDownTextSafe(cursor, count int) int {
 // chord-free so it can't collide with text entry) plus the pad A face
 // button.
 func EditorConfirmPressed() bool {
-	return rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeyKpEnter) ||
+	// Enter-with-Alt is the global display toggle (DisplayTogglePressed),
+	// not a commit — same guard as ConfirmPressed.
+	return ((rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeyKpEnter)) && !altDown()) ||
 		padPressed(rl.GamepadButtonRightFaceDown) // A / Cross
 }
 

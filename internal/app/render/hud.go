@@ -18,6 +18,10 @@ func DrawOverlay(g core.GameState, assets Resources) {
 		drawShopOverlay(g, assets)
 		return
 	}
+	if g.RetroMenuOpen {
+		drawRetroMenuOverlay(g, assets)
+		return
+	}
 	if g.DebugMenuOpen {
 		drawDebugMenuOverlay(g, assets)
 		return

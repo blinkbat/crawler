@@ -64,10 +64,15 @@ func makeRockWallPixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, shadow, math.Max(0, -n)*0.55)
 
 			// Painted crack scatter — sparser than the prior
-			// hash-grid lines, drawn as small soft pits.
+			// hash-grid lines, drawn as small soft pits. Each pit gets a
+			// lit LOWER lip (the cell row just beneath it): under a high
+			// key light a recess shadows itself and throws light on the
+			// ledge below — one extra mix and the pits turn concave.
 			pit := hashByteXY(x/3, y/3)
 			if pit%64 == 0 {
 				c = core.MixColor(c, shadow, 0.38)
+			} else if y >= 3 && hashByteXY(x/3, (y-3)/3)%64 == 0 {
+				c = core.MixColor(c, highlight, 0.30)
 			}
 			// Block divisions: instead of a hard 24-px hash
 			// grid, paint a soft seam ONLY where the broad
@@ -94,6 +99,17 @@ func makeRockWallPixels(w, h int) []color.RGBA {
 					}
 				}
 			}
+			// Vertical form: ground occlusion gathers at the cliff's
+			// foot (soil splash + bounce-shadow), and the top course
+			// catches a kiss of sky. Gives the face a large-scale value
+			// structure the per-pixel noise can't supply — the wall
+			// reads as STANDING, rooted below and lit above.
+			vy := float64(y) / float64(h)
+			if vy > 0.66 {
+				c = core.MixColor(c, shadow, (vy-0.66)*0.50)
+			} else if vy < 0.14 {
+				c = core.MixColor(c, highlight, (0.14-vy)*0.55)
+			}
 			pixels[y*w+x] = c
 		}
 	}
@@ -117,6 +133,14 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 	mortarLight := color.RGBA{R: 118, G: 110, B: 96, A: 255}
 	moss := color.RGBA{R: 148, G: 184, B: 132, A: 255}
 
+	// One committed key light — high and to the left, the painter's
+	// default sun. Every brick bevels the SAME way: lit lip along its top
+	// and left, shadowed fall-off along its bottom and right, and a cast
+	// shadow dropped into the mortar seam beneath it. That single
+	// consistent assumption is what flips the wall from "flat grid with
+	// dark lines" to "courses of stone standing proud of their mortar."
+	lip := color.RGBA{R: 232, G: 220, B: 196, A: 255}
+	pitDark := color.RGBA{R: 30, G: 28, B: 24, A: 255}
 	for y := 0; y < h; y++ {
 		row := y / brickH
 		offset := 0
@@ -128,6 +152,20 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 			localY := y % brickH
 			if localX < mortar || localY < mortar {
 				c := core.MixColor(mortarColor, mortarLight, float64(hashByteXY(x, y)%64)/200.0)
+				// Cast shadow + caught light inside the seam: the brick
+				// ABOVE a horizontal seam shadows the seam's top pixel;
+				// the sill below catches a sliver of light. Vertical
+				// seams shadow on their left (the neighboring brick
+				// blocks the key light). Recessed mortar, not drawn line.
+				if localY < mortar {
+					if localY == 0 {
+						c = core.MixColor(c, pitDark, 0.52)
+					} else {
+						c = core.MixColor(c, mortarLight, 0.30)
+					}
+				} else if localX == 0 {
+					c = core.MixColor(c, pitDark, 0.38)
+				}
 				if hashByteXY(x/2, y) < 20 {
 					c = core.MixColor(c, moss, 0.18)
 				}
@@ -148,11 +186,26 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 			// Muted highlight (cream → soft stone-white) so the
 			// brick crests don't flare against the muted base.
 			c = core.MixColor(c, color.RGBA{R: 188, G: 184, B: 172, A: 255}, math.Max(0, n)*0.30)
-			c = core.MixColor(c, color.RGBA{R: 30, G: 28, B: 24, A: 255}, math.Max(0, -n)*0.42)
+			c = core.MixColor(c, pitDark, math.Max(0, -n)*0.42)
 
-			edgeDist := min(localX-mortar, min(localY-mortar, min(brickW-mortar-1-localX, brickH-mortar-1-localY)))
-			if edgeDist <= 2 {
-				c = core.MixColor(c, mortarColor, 0.45-float64(edgeDist)*0.12)
+			// Directional bevel. Top lip brightest, left lip a step
+			// dimmer; bottom edge falls into shadow, right edge a step
+			// less. Per-brick hash nudges the lip strength so courses
+			// don't read machine-extruded.
+			bevelJitter := 0.85 + float64(hashByteXY(brickX*5, row*11)%64)/210.0
+			distTop := localY - mortar
+			distLeft := localX - mortar
+			distBottom := brickH - 1 - localY
+			distRight := brickW - 1 - localX
+			if distTop <= 1 {
+				c = core.MixColor(c, lip, (0.44-float64(distTop)*0.18)*bevelJitter)
+			} else if distLeft <= 1 {
+				c = core.MixColor(c, lip, (0.28-float64(distLeft)*0.12)*bevelJitter)
+			}
+			if distBottom <= 1 {
+				c = core.MixColor(c, pitDark, (0.46-float64(distBottom)*0.18)*bevelJitter)
+			} else if distRight <= 1 {
+				c = core.MixColor(c, pitDark, (0.26-float64(distRight)*0.10)*bevelJitter)
 			}
 
 			if hashByteXY(brickX*17+localX/3, row*31+localY/3)%80 < 4 {
@@ -188,16 +241,36 @@ func makeGrassPixels(w, h int) []color.RGBA {
 	bloomWhite := color.RGBA{R: 244, G: 240, B: 224, A: 255}
 	bloomPink := color.RGBA{R: 238, G: 174, B: 196, A: 255}
 
+	dapple := color.RGBA{R: 214, G: 234, B: 148, A: 255}
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			broad := fbmNoise(float64(x), float64(y), 0.020, 3)
 			c := base
 			c = core.MixColor(c, light, math.Max(0, broad)*0.55)
 			c = core.MixColor(c, dark, math.Max(0, -broad)*0.40)
+			// Canopy dapple — a second, much broader band of warm lemon
+			// light pooling across the meadow, the way sun falls through
+			// scattered cloud / leaves. Big calm pools (period ~entire
+			// texture), so the floor gains large-scale light STRUCTURE
+			// without breaking the "calm wash" philosophy above.
+			dap := fbmNoise(float64(x)-340, float64(y)+209, 0.008, 2)
+			if dap > 0.28 {
+				c = core.MixColor(c, dapple, (dap-0.28)*0.45)
+			}
 			// Optional dirt scuff — lazy large patches.
 			m := fbmNoise(float64(x)+512, float64(y)-271, 0.014, 2)
 			if m > 0.50 {
 				c = core.MixColor(c, dirt, (m-0.50)*0.65)
+			}
+			// Sparse paired blade strokes — a short dark rooted dash with
+			// a lit dash beside it on the sun side (the same high-left key
+			// the masonry bevels use). Grouped on a 4-px vertical grain so
+			// each pair reads as one drawn blade, not salt-and-pepper.
+			// Sparse enough (~1 in 70 columns) to keep the wash calm.
+			if hashByteXY(x*3, y/4)%140 < 2 {
+				c = core.MixColor(c, dark, 0.55)
+			} else if x > 0 && hashByteXY((x-1)*3, y/4)%140 < 2 {
+				c = core.MixColor(c, light, 0.50)
 			}
 			// Very sparse bloom scatter — the prop-painted
 			// flowers carry the floral detail; the texture
@@ -255,9 +328,34 @@ func makeStoneFloorPixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, highlight, math.Max(0, n)*0.32)
 			c = core.MixColor(c, color.RGBA{R: 24, G: 22, B: 20, A: 255}, math.Max(0, -n)*0.40)
 
-			edgeDist := min(localX-grout, min(localY-grout, min(slab-1-localX, slab-1-localY)))
-			if edgeDist <= 3 {
-				c = core.MixColor(c, groutColor, 0.45-float64(edgeDist)*0.10)
+			// Foot-worn sheen — centuries of boots polish the MIDDLE of a
+			// slab while grime collects at the grout: a soft radial lift
+			// peaking at the slab center. Subtle (≤0.12) but it's what
+			// separates "laid and walked floor" from "printed grid."
+			fx := float64(localX) - float64(slab)/2
+			fy := float64(localY) - float64(slab)/2
+			wear := 1.0 - (fx*fx+fy*fy)/(float64(slab*slab)/4.0)
+			if wear > 0 {
+				c = core.MixColor(c, highlight, wear*0.12)
+			}
+
+			// Directional bevel under the same high-left key light as the
+			// brick wall: lit lip top/left, shadowed fall bottom/right —
+			// each slab tips subtly toward the light instead of the old
+			// uniform edge-darkening that read as a flat border.
+			distTop := localY - grout
+			distLeft := localX - grout
+			distBottom := slab - 1 - localY
+			distRight := slab - 1 - localX
+			if distTop <= 1 {
+				c = core.MixColor(c, highlight, 0.30-float64(distTop)*0.12)
+			} else if distLeft <= 1 {
+				c = core.MixColor(c, highlight, 0.20-float64(distLeft)*0.08)
+			}
+			if distBottom <= 2 {
+				c = core.MixColor(c, groutColor, 0.40-float64(distBottom)*0.12)
+			} else if distRight <= 2 {
+				c = core.MixColor(c, groutColor, 0.28-float64(distRight)*0.09)
 			}
 			if hashByteXY(slabX*11+localX/4, slabY*19+localY/4)%72 < 3 {
 				c = adjust(c, -32)
@@ -414,15 +512,27 @@ func makeCobblePixels(w, h int) []color.RGBA {
 				c = core.MixColor(c, cool, 0.22+float64(tone-38)/240.0)
 			}
 
-			// Per-pixel cobble shading: pretend each stone is a tiny dome —
-			// brighter near its center, darker at the rim. Cheap, gives the
-			// path a wet-rounded read.
-			lighting := 1.0 - d*0.75
+			// Per-pixel cobble shading: each stone is a tiny dome lit by
+			// the same high-left key as the masonry — the highlight sits
+			// OFF-CENTER toward the upper-left of each stone, and the rim
+			// shadow deepens on the lower-right, so the whole path reads
+			// as rounded stones under one sun instead of radial buttons.
+			ldx := (dx + 3.0) / rx
+			ldy := (dy + 3.0) / ry
+			dlit := ldx*ldx + ldy*ldy
+			lighting := 1.0 - dlit*0.62
 			if lighting > 0 {
-				c = core.MixColor(c, light, lighting*0.32)
+				c = core.MixColor(c, light, lighting*0.38)
 			}
 			if d > 0.78 {
-				c = core.MixColor(c, dark, (d-0.78)*1.6)
+				rimT := (d - 0.78) * 1.6
+				// Shadow side (lower-right) rims darker than the lit side.
+				if dx+dy > 0 {
+					rimT *= 1.35
+				} else {
+					rimT *= 0.7
+				}
+				c = core.MixColor(c, dark, rimT)
 			}
 
 			n := fbmNoise(float64(x)*1.4, float64(y)*1.4, 0.20, 4)
@@ -526,6 +636,14 @@ func makeWaterPixels(w, h int) []color.RGBA {
 			peak := fbmNoise(float64(x)*1.3+311, float64(y)*1.3-91, 0.10, 3)
 			if peak > 0.55 {
 				c = core.MixColor(c, shine, (peak-0.55)*1.4)
+			}
+			// Sun glints — rare short HORIZONTAL dashes of near-white
+			// riding the ripple crests (hashing x/7 keeps each dash a
+			// solid 7-px streak, the way low sun skips off water in
+			// little bars rather than single sparkles). Crest-gated so
+			// glints sit on the lit side of a ripple, never in a trough.
+			if band > 0.25 && hashByteXY(x/7, y)%170 < 2 {
+				c = core.MixColor(c, shine, 0.85)
 			}
 			// Hint of sandy bottom where the FBM dips deep — reads as water
 			// that you can almost see through.
@@ -649,17 +767,28 @@ func makeBarkPixels(w, h int) []color.RGBA {
 	light := color.RGBA{R: 214, G: 184, B: 142, A: 255}
 	moss := color.RGBA{R: 154, G: 188, B: 138, A: 255}
 
+	rim := color.RGBA{R: 236, G: 208, B: 162, A: 255}
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			// Sinuous ridge wave — same trick as before but the
 			// noise warp is gentler so the ridges flow as
 			// painted brush-strokes, not jagged sawteeth.
-			ridge := math.Sin(float64(x)*0.40 + fbmNoise(float64(x), float64(y), 0.04, 3)*3.2)
+			warp := fbmNoise(float64(x), float64(y), 0.04, 3) * 3.2
+			ridge := math.Sin(float64(x)*0.40 + warp)
 			ridge = math.Abs(ridge)
 			n := fbmNoise(float64(x)*0.9, float64(y)*0.4, 0.22, 4)
 			c := base
 			c = core.MixColor(c, light, math.Max(0, ridge-0.42)*1.5)
 			c = core.MixColor(c, deep, math.Max(0, 0.38-ridge)*0.7)
+			// Side-lit fissures: where the wave CLIMBS out of a crease
+			// (previous column still in shadow, this one cresting), the
+			// ridge's left flank catches the key light as a warm rim.
+			// One comparison per pixel and the bark's vertical plates
+			// pop into relief instead of reading as flat stripes.
+			prevRidge := math.Abs(math.Sin(float64(x-1)*0.40 + warp))
+			if ridge > 0.46 && prevRidge < 0.40 {
+				c = core.MixColor(c, rim, 0.45)
+			}
 			c = core.MixColor(c, light, math.Max(0, n)*0.32)
 			c = core.MixColor(c, deep, math.Max(0, -n)*0.40)
 
@@ -711,6 +840,14 @@ func makeLeafPixels(w, h int) []color.RGBA {
 			if broad > 0.32 && fine > 0.38 {
 				c = core.MixColor(c, hotspot, 0.25)
 			}
+			// NOTE: no v-axis "crown light / belly shadow" gradient here.
+			// raylib's GenMeshSphere keeps par_shapes' parametrization,
+			// whose poles run along ±Z (HORIZONTAL in world space) — a
+			// texture-v gradient paints a dark hemisphere SIDEWAYS across
+			// every canopy lump, facing a random direction per tile yaw.
+			// The real top-light/under-shadow comes from the sun shader's
+			// NdotL on the sphere normals, which is orientation-correct
+			// for free. Keep this texture isotropic.
 			pixels[y*w+x] = c
 		}
 	}
@@ -731,6 +868,7 @@ func makeMarblePixels(w, h int) []color.RGBA {
 	vein := color.RGBA{R: 116, G: 110, B: 102, A: 255}
 	deep := color.RGBA{R: 76, G: 72, B: 66, A: 255}
 
+	polish := color.RGBA{R: 238, G: 232, B: 218, A: 255}
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			n := fbmNoise(float64(x), float64(y), 0.04, 4)
@@ -739,13 +877,27 @@ func makeMarblePixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, warm, math.Max(0, n)*0.35)
 			c = core.MixColor(c, cool, math.Max(0, -n)*0.30)
 
-			// Veins: pixel-thin streaks where two FBM samples cross zero.
+			// Veins: pixel-thin streaks where two FBM samples cross zero,
+			// wrapped in a soft warm BRUISE (mineral staining bleeds into
+			// the stone around a vein — real marble is never a clean line
+			// on white) before the dark crack core.
 			vt := math.Abs(m + n*0.4)
+			if vt < 0.12 {
+				c = core.MixColor(c, warm, (0.12-vt)*2.2)
+			}
 			if vt < 0.06 {
 				c = core.MixColor(c, vein, 0.45)
 			}
 			if vt < 0.02 {
 				c = core.MixColor(c, deep, 0.55)
+			}
+			// Polish sheen — a broad diagonal light-band swept across the
+			// slab, as if the dressed face catches a window's reflection.
+			// Sine-based so it tiles seamlessly; faint so it reads as
+			// "polished," never as a painted stripe.
+			s := math.Sin((float64(x) + float64(y)*0.7) * 0.045)
+			if s > 0.55 {
+				c = core.MixColor(c, polish, (s-0.55)*0.40)
 			}
 			pixels[y*w+x] = c
 		}

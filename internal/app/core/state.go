@@ -60,6 +60,11 @@ func NewGameState(area AreaDefinition) GameState {
 		// Controller vibration on by default; the player can mute it in the
 		// Options menu. Runtime preference (not persisted in SaveData).
 		RumbleEnabled: true,
+		// Out-of-the-box retro post-process mix (Debug ▸ Retro Filters) —
+		// same preference class as RumbleEnabled: runtime, not in SaveData,
+		// preserved across Restart. Sky stays crisp by default.
+		RetroFilters:   DefaultRetroFilters(),
+		RetroFilterSky: DefaultRetroFilterSky,
 		// Starting bag: rations only, no equipment — see starterInventory.
 		Inventory: starterInventory(),
 		Quests:    StarterQuests(),
@@ -193,6 +198,8 @@ func ResetGameState(g *GameState) {
 	savedQuests := g.Quests
 	savedBestiary := g.Bestiary
 	savedRumble := g.RumbleEnabled
+	savedRetroFilters := g.RetroFilters
+	savedRetroSky := g.RetroFilterSky
 	*g = NewGameState(g.Area)
 	g.Inventory = savedInventory
 	g.Party = savedParty
@@ -209,8 +216,11 @@ func ResetGameState(g *GameState) {
 		g.Bestiary = savedBestiary
 	}
 	// Preserve the player's vibration preference across a restart (an
-	// accessibility setting, not world state).
+	// accessibility setting, not world state) — and the retro-filter
+	// intensities, the same class of presentation preference.
 	g.RumbleEnabled = savedRumble
+	g.RetroFilters = savedRetroFilters
+	g.RetroFilterSky = savedRetroSky
 	// Signal the render layer to drop any lingering particles. Restart can
 	// fire mid-battle (the pause menu's Restart row is reachable outside the
 	// two timing phases), so formation-relative battle particles would

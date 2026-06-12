@@ -81,7 +81,40 @@ var debugMenuRows = []debugMenuRow{
 		return "Skip Battles: " + onOff(g.DebugSkipBattles)
 	}},
 	{Item: core.DebugMenuTestRumble, Label: func(core.GameState) string { return "Test Rumble" }},
+	{Item: core.DebugMenuRetro, Label: func(g core.GameState) string {
+		if core.AnyRetroFilterActive(&g.RetroFilters) {
+			return "Retro Filters ▸ (On)"
+		}
+		return "Retro Filters ▸"
+	}},
 	{Item: core.DebugMenuClose, Label: func(core.GameState) string { return "Close" }},
+}
+
+// retroMenuRowLabel formats one Retro Filters submenu row. Slider rows show
+// the filter name + its live intensity as PLAIN TEXT ("Pixelate: 60%", or
+// "Off") — the adjust affordance (intensity bar + left/right arrows) is
+// DRAWN with primitives by drawRetroMenuOverlay, never font glyphs, so it
+// can't fall out of the atlas and render as "?". Kept as a function (not a
+// row table) because the row set is positional — the first RetroFilterCount
+// cursor slots ARE the filter kinds, per core's contract.
+func retroMenuRowLabel(g core.GameState, i int) string {
+	switch {
+	case i < int(core.RetroFilterCount):
+		name := core.RetroFilterName(core.RetroFilterKind(i))
+		v := g.RetroFilters[i]
+		if v <= 0 {
+			return name + ": Off"
+		}
+		return fmt.Sprintf("%s: %.0f%%", name, v*100)
+	case i == core.RetroMenuSkyToggle:
+		return "Filter Skybox: " + onOff(g.RetroFilterSky)
+	case i == core.RetroMenuResetAll:
+		return "Reset to Default"
+	case i == core.RetroMenuAllOff:
+		return "All Off"
+	default:
+		return "Close"
+	}
 }
 
 // init asserts each pause/submenu row slice has exactly one row per enum value
@@ -112,7 +145,7 @@ func onOff(b bool) string {
 // drawOptionsMenuOverlay paints the Options submenu via the shared
 // menu-card chrome, titled "OPTIONS".
 func drawOptionsMenuOverlay(g core.GameState, assets Resources) {
-	drawTitledMenuCard(assets, "OPTIONS", len(optionsMenuRows),
+	drawTitledMenuCard(assets, "OPTIONS", pauseMenuPanelW, len(optionsMenuRows),
 		func(i int) string { return optionsMenuRows[i].Label(g) },
 		func(i int) bool { return g.OptionsMenuIndex == int(optionsMenuRows[i].Item) })
 }
@@ -120,9 +153,59 @@ func drawOptionsMenuOverlay(g core.GameState, assets Resources) {
 // drawDebugMenuOverlay paints the debug submenu via the shared menu-card
 // chrome, titled "DEBUG". The card height tracks the debug row count.
 func drawDebugMenuOverlay(g core.GameState, assets Resources) {
-	drawTitledMenuCard(assets, "DEBUG", len(debugMenuRows),
+	drawTitledMenuCard(assets, "DEBUG", pauseMenuPanelW, len(debugMenuRows),
 		func(i int) string { return debugMenuRows[i].Label(g) },
 		func(i int) bool { return g.DebugMenuIndex == int(debugMenuRows[i].Item) })
+}
+
+// Retro-menu slider chrome geometry — the drawn intensity bar each filter
+// row carries at its right edge, and the adjust arrows that flank the bar on
+// the cursored row. ALL of it is primitive-drawn (rects + triangles), no
+// font glyphs, per the "construct glyphs with pixels" rule.
+const (
+	retroBarW      = int32(74)
+	retroBarH      = int32(10)
+	retroBarTextDY = int32(13) // bar's vertical center below the row's text top
+	retroArrowGap  = float32(13)
+)
+
+// drawRetroMenuOverlay paints the Retro Filters sub-submenu, titled "RETRO
+// FILTERS". Rows are positional (cursor slot == filter kind), so the
+// highlight matches the cursor index directly. On top of the shared card it
+// draws each slider row's intensity gauge (track + gilt fill + bezel ticks)
+// and, on the cursored slider row, candle-bright left/right arrow triangles
+// — the Left/Right-to-adjust affordance.
+func drawRetroMenuOverlay(g core.GameState, assets Resources) {
+	panelX, panelY := drawTitledMenuCard(assets, "RETRO FILTERS", retroMenuPanelW, core.RetroMenuCount,
+		func(i int) string { return retroMenuRowLabel(g, i) },
+		func(i int) bool { return g.RetroMenuIndex == i })
+
+	stride := pauseMenuRowH + pauseMenuRowGap
+	rowX := panelX + pauseMenuRowInsetX
+	barX := rowX + menuRowInnerW(retroMenuPanelW) - retroBarW - 14
+	flick := candleFlicker()
+	for i := 0; i < int(core.RetroFilterCount); i++ {
+		rowTextY := panelY + pauseMenuHeaderH + stride*int32(i)
+		barY := rowTextY + retroBarTextDY - retroBarH/2
+		v := g.RetroFilters[i]
+		// Track + fill: the same dark-glass-tube language as the HP gauges,
+		// at chip scale. Fill is gilt — "how much of this dial is turned."
+		rl.DrawRectangle(barX, barY, retroBarW, retroBarH, barTrack)
+		if v > 0 {
+			fillW := int32(float64(retroBarW-2) * v)
+			if fillW > 0 {
+				rl.DrawRectangle(barX+1, barY+1, fillW, retroBarH-2, fadeColor(giltBright, 0.55+0.45*float32(v)))
+			}
+		}
+		rl.DrawRectangleLines(barX, barY, retroBarW, retroBarH, fadeColor(woodLight, 0.6))
+		if g.RetroMenuIndex == i {
+			// Drawn ◂ ▸ affordance — triangles, not font runes.
+			cy := float32(barY + retroBarH/2)
+			col := fadeColor(giltBright, 0.65+0.35*flick)
+			drawArrowMarker(rl.NewVector2(float32(barX)-retroArrowGap, cy), -7, 0, 6, col)
+			drawArrowMarker(rl.NewVector2(float32(barX+retroBarW)+retroArrowGap, cy), 7, 0, 6, col)
+		}
+	}
 }
 
 // Pause menu layout. Panel is centered on screen; rows stack at a fixed
@@ -141,13 +224,19 @@ const (
 	pauseMenuRowRightPad = int32(46)
 )
 
-// pauseMenuRowInnerW is the highlight-rectangle width, derived from the
-// panel width minus the symmetric left/right gutters. Was previously a
-// hardcoded 316; this expression keeps the rectangle aligned if the panel
-// resizes.
-func pauseMenuRowInnerW() int32 {
-	return pauseMenuPanelW - pauseMenuRowInsetX - pauseMenuRowRightPad
+// menuRowInnerW is the highlight-rectangle width for a menu card of the
+// given panel width — the panel minus the symmetric left/right gutters.
+// Parameterized (was pauseMenuRowInnerW, fixed to pauseMenuPanelW) because
+// the retro-filters card runs wider so its drawn intensity bars never
+// collide with the longer slider labels.
+func menuRowInnerW(panelW int32) int32 {
+	return panelW - pauseMenuRowInsetX - pauseMenuRowRightPad
 }
+
+// retroMenuPanelW is the Retro Filters card width — wider than the standard
+// pause card so "Chroma Fringe: 100%" plus the right-aligned intensity bar
+// fit on one row without overlapping.
+const retroMenuPanelW = int32(560)
 
 // drawCardTitle paints the centred FontTitle card title with flanking gilt
 // fleurons on its vertical midline (~22px outside each text edge) — the
@@ -174,22 +263,26 @@ func drawCardTitle(font rl.Font, title string, panelX, panelY, panelW int32, top
 // a given row index is the cursor. Returns nothing — the pause and debug
 // overlays differ only in title string, row labels, and the cursor field,
 // which this captures via the closures.
-func drawTitledMenuCard(assets Resources, title string, rowCount int, label func(i int) string, selected func(i int) bool) {
-	panelW := pauseMenuPanelW
+func drawTitledMenuCard(assets Resources, title string, panelW int32, rowCount int, label func(i int) string, selected func(i int) bool) (panelX, panelY int32) {
 	stride := pauseMenuRowH + pauseMenuRowGap
 	panelH := pauseMenuHeaderH + stride*int32(rowCount) + pauseMenuFootH
 	rect := drawVeiledCard(panelW, panelH, borderSoft, borderSoft, giltDim)
-	panelX := int32(rect.X)
-	panelY := int32(rect.Y)
+	panelX = int32(rect.X)
+	panelY = int32(rect.Y)
 
 	drawCardTitle(assets.hudFont, title, panelX, panelY, panelW, 24)
 
+	rowInnerW := menuRowInnerW(panelW)
 	rowY := pauseMenuHeaderH
 	rowX := panelX + pauseMenuRowInsetX
 	for i := 0; i < rowCount; i++ {
-		drawMenuRow(assets.hudFont, label(i), rowX, panelY+rowY, selected(i))
+		drawMenuRow(assets.hudFont, label(i), rowX, panelY+rowY, rowInnerW, selected(i))
 		rowY += stride
 	}
+	// Geometry returned so a caller can overlay row decorations (the retro
+	// menu's drawn intensity bars / adjust arrows) without re-deriving —
+	// and without the overlay drifting from the rows if this layout changes.
+	return panelX, panelY
 }
 
 // drawTitledCardHeader draws a centered veiled overlay card with a
@@ -207,7 +300,7 @@ func drawTitledCardHeader(assets Resources, title string, panelW, panelH int32) 
 }
 
 func drawMenuOverlay(g core.GameState, assets Resources) {
-	drawTitledMenuCard(assets, "MENU", len(pauseMenuRows),
+	drawTitledMenuCard(assets, "MENU", pauseMenuPanelW, len(pauseMenuRows),
 		func(i int) string { return pauseMenuRows[i].Label(g) },
 		func(i int) bool { return g.MenuIndex == int(pauseMenuRows[i].Item) })
 }
@@ -223,9 +316,9 @@ func drawMenuOverlay(g core.GameState, assets Resources) {
 // per UI_STANDARDS.md "Row > Selected." The arrow was the OLD
 // selection cue and visually competed with the new spine when
 // both were painted.
-func drawMenuRow(font rl.Font, text string, x, y int32, selected bool) {
+func drawMenuRow(font rl.Font, text string, x, y, innerW int32, selected bool) {
 	if selected {
-		DrawSelectedRowI(x-18, y-6, pauseMenuRowInnerW(), pauseMenuRowH)
+		DrawSelectedRowI(x-18, y-6, innerW, pauseMenuRowH)
 	}
 	// Engraved heading-tier rows — drawEngravedText's own +2 drop shadow
 	// supplies the weight the old hand-set (+2,+2) shadow carried.

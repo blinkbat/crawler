@@ -380,6 +380,21 @@ type GameState struct {
 	// is its row cursor.
 	DebugMenuOpen  bool
 	DebugMenuIndex int
+	// RetroMenuOpen is true while the Retro Filters sub-submenu (opened from
+	// the Debug submenu's Retro Filters row) is showing; RetroMenuIndex is
+	// its row cursor. RetroFilters holds the per-filter 0..1 intensities the
+	// render layer's post-process pass reads each frame — all zeros (the
+	// default) means the pass is skipped entirely. Preserved across Restart
+	// like RumbleEnabled (a presentation preference, not world state); not
+	// part of SaveData.
+	RetroMenuOpen  bool
+	RetroMenuIndex int
+	RetroFilters   [RetroFilterCount]float64
+	// RetroFilterSky chooses whether the skybox is captured inside the
+	// filter pass (true, the default — the whole vista crunches together)
+	// or drawn crisp to the backbuffer with the filtered environment
+	// alpha-blitted over it (false — pixelated ruins against a clean sky).
+	RetroFilterSky bool
 	// OptionsMenuOpen is true while the Options submenu is showing (opened
 	// from the pause menu's Options row). OptionsMenuIndex is its cursor.
 	// Mutually exclusive with MenuOpen / DebugMenuOpen — opening a submenu
