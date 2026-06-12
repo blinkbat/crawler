@@ -479,8 +479,7 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	// frozen at the previous tile. The step animation is skipped on
 	// engagement — battle takes the camera over immediately anyway.
 	if engagedPack := tickPackAI(g); engagedPack >= 0 {
-		p.X = core.TileCenter(targetX)
-		p.Z = core.TileCenter(targetZ)
+		core.SnapPlayerToTile(p) // p.TileX/Z were advanced to targetX/Z above
 		battle.Start(g, engagedPack, fleeFromX, fleeFromZ)
 		return
 	}
@@ -570,8 +569,7 @@ func updateAnimation(g *core.GameState, dt float32) {
 		return
 	}
 	if p.Anim.Kind == core.AnimStep {
-		p.X = core.TileCenter(p.TileX)
-		p.Z = core.TileCenter(p.TileZ)
+		core.SnapPlayerToTile(p)
 		p.GroundY = p.Anim.ToY
 	}
 	p.Yaw = core.FacingYaw(p.Facing)

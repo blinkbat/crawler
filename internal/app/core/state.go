@@ -28,6 +28,15 @@ func NewPlayer(tileX, tileZ, facing int) Player {
 	}
 }
 
+// SnapPlayerToTile pins the player's visual X/Z to the center of its current
+// tile, ending any in-flight step interpolation. The player-side mirror of
+// SnapPackToTile — used wherever the player is placed without an animated step
+// (the engage snap, the step-anim finish, the flee retreat).
+func SnapPlayerToTile(p *Player) {
+	p.X = TileCenter(p.TileX)
+	p.Z = TileCenter(p.TileZ)
+}
+
 func NewGameState(area AreaDefinition) GameState {
 	// Defensive coord clamp. AreaFromMapFile already validates disk loads,
 	// but the editor's F5 path can build a GameState directly from in-memory

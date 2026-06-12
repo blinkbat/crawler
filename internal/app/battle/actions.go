@@ -1063,8 +1063,7 @@ func applyCripple(g *core.GameState, quality int) bool {
 	actor.AttackBump = core.BumpDuration
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	effect := core.EffectiveSkillEffect(actor, core.SkillCripple)
-	enemy.BuffStats = effect.BuffStats
-	enemy.BuffTurns = effect.BuffTurns
+	core.StampEnemyDebuff(enemy, effect)
 	core.EnqueueEnemyVFX(g, core.VFXVenom, g.Battle.EnemyIndex)
 	setBattleMessage(g, fmt.Sprintf("%s cripples the %s — slowed for %d turns.",
 		actor.Name, core.EnemySingularNoun(*enemy), enemy.BuffTurns))
@@ -1096,12 +1095,7 @@ func applyFrostbite(g *core.GameState, quality int) bool {
 	// The chill lands only on a surviving target — no point debuffing a corpse
 	// (BuffTurns would dangle until clearEnemyStatusesOnDeath). Guaranteed when
 	// alive, so `chilled` == survived for the message arm.
-	chilled := false
-	if !defeated && enemy != nil && effect.BuffTurns > 0 {
-		enemy.BuffStats = effect.BuffStats
-		enemy.BuffTurns = effect.BuffTurns
-		chilled = true
-	}
+	chilled := !defeated && core.StampEnemyDebuff(enemy, effect)
 	setBattleMessage(g, appendCrit(frostbiteMessage(actor.Name, target, damage, quality, defeated, chilled), crit))
 	finishActorTurn(g)
 	return true
@@ -1484,9 +1478,7 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, skillNoun, hitVe
 		// proc roll), stamped via the enemy BuffStats debuff. Skills carrying no
 		// buff (Whirlwind / Arc Bolt / Fireball / Poison Cloud) have BuffTurns 0
 		// and skip it, so this stays inert for them.
-		if !defeated && effect.BuffTurns > 0 {
-			enemy.BuffStats = effect.BuffStats
-			enemy.BuffTurns = effect.BuffTurns
+		if !defeated && core.StampEnemyDebuff(enemy, effect) {
 			afflicted++
 		}
 	}

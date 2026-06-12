@@ -368,8 +368,7 @@ func performFlee(g *core.GameState) {
 	if core.PackIndexAtTile(g.Packs, g.Battle.FleeReturnX, g.Battle.FleeReturnZ) < 0 {
 		g.Player.TileX = g.Battle.FleeReturnX
 		g.Player.TileZ = g.Battle.FleeReturnZ
-		g.Player.X = core.TileCenter(g.Battle.FleeReturnX)
-		g.Player.Z = core.TileCenter(g.Battle.FleeReturnZ)
+		core.SnapPlayerToTile(&g.Player)
 		g.Player.Anim = core.Animation{}
 	}
 	leaveBattle(g, fmt.Sprintf("%s leads the party in a hasty retreat!", member.Name))

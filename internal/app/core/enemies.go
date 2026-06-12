@@ -611,6 +611,25 @@ func EffectiveEnemyStats(e Enemy) Stats {
 	return out
 }
 
+// StampEnemyDebuff applies a skill's stat debuff (its negative BuffStats) onto
+// the enemy for effect.BuffTurns of the enemy's turns — the single home for the
+// enemy-side buff/debuff stamp that Cripple, Frostbite, and Cone of Cold all
+// share. Returns false (and no-ops) when the target is nil or the skill carries
+// no buff (BuffTurns == 0), so a damage skill with no chill component skips it
+// cleanly and callers can use the bool to drive their "chilled / afflicted"
+// log. Re-stamping overwrites rather than stacks, matching the no-stack rule;
+// EffectiveEnemyStats folds the stamped delta while the counter runs. Callers
+// that deal damage first should gate on `!defeated` so a killed target keeps no
+// dangling debuff (the kill check is a battle concept this pure helper can't see).
+func StampEnemyDebuff(e *Enemy, effect SkillEffect) bool {
+	if e == nil || effect.BuffTurns <= 0 {
+		return false
+	}
+	e.BuffStats = effect.BuffStats
+	e.BuffTurns = effect.BuffTurns
+	return true
+}
+
 // EnemyLevel is the foe's level, defaulting an unauthored (0) definition to
 // DefaultEnemyLevel so every kind has a sane level without per-row authoring.
 // Read by the flee-chance math (party avg level vs pack avg level); no other
