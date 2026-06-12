@@ -363,7 +363,16 @@ func actorSpeed(g *core.GameState, actor core.ActorRef) int {
 	if m == nil {
 		return 0
 	}
-	return core.EnemyInfoFor(*m).Stats.SPD
+	// Effective SPD folds any active debuff (the Thief's Cripple). Floor at 1 so
+	// a heavy SPD debuff can't drive the gauge to 0 — at 0 the enemy would never
+	// cross the ATB threshold, never take a turn, and so never tick the debuff
+	// down (it drains at end-of-turn): a permanent self-sustaining lockout. A
+	// crippled foe still acts, just rarely.
+	spd := core.EffectiveEnemyStats(*m).SPD
+	if spd < 1 {
+		spd = 1
+	}
+	return spd
 }
 
 // actorAppearsBefore reports whether `ref` occupies any queue slot strictly
@@ -468,6 +477,7 @@ func startActorTurn(g *core.GameState) {
 func advanceSkippedTurn(g *core.GameState, actor core.ActorRef) {
 	consumeDefendOnSkip(g, actor)
 	drainNonDamagingPartyStatuses(g, actor)
+	drainNonDamagingEnemyStatuses(g, actor)
 	tickPoisonAfterPartyTurn(g, actor)
 	tickPoisonAfterEnemyTurn(g, actor)
 	if checkEnemyWipeout(g) || checkPartyWipeout(g) {
@@ -501,6 +511,16 @@ func drainNonDamagingPartyStatuses(g *core.GameState, actor core.ActorRef) {
 	tickConfusedAfterPartyTurn(g, actor)
 	tickBlessAfterPartyTurn(g, actor)
 	tickRegenAfterPartyTurn(g, actor)
+}
+
+// drainNonDamagingEnemyStatuses ticks the enemy-side non-damaging counters
+// (buff/debuff turns) for the actor whose turn just ended — the enemy mirror of
+// drainNonDamagingPartyStatuses. Called at the same end-of-turn seams (normal
+// turn end + the Sleep/Stun skip path) so a debuff elapses even on a skipped
+// turn. No-ops on party actors and on enemies with no active buff; a future
+// enemy self-buff / regen plugs in here.
+func drainNonDamagingEnemyStatuses(g *core.GameState, actor core.ActorRef) {
+	tickEnemyBuffAfterTurn(g, actor)
 }
 
 // tickSkipStatusAtTurnStart drains one tick from a skip-this-turn status
@@ -614,6 +634,7 @@ func finishActorTurn(g *core.GameState) {
 		// on the wrong actor kind so dispatching is fine here.
 		tickPoisonAfterPartyTurn(g, g.Battle.Queue[g.Battle.QueueCursor])
 		tickPoisonAfterEnemyTurn(g, g.Battle.Queue[g.Battle.QueueCursor])
+		drainNonDamagingEnemyStatuses(g, g.Battle.Queue[g.Battle.QueueCursor])
 		// Webbed + Confused tick alongside Poison — every party-side
 		// status counter ticks at the END of the webbed/confused
 		// member's own turn so they get one full action under the

@@ -57,6 +57,7 @@ var skillActionHandlers = map[core.SkillID]actionHandlers{
 	core.SkillCleanse:      {setup: setupCleanse, apply: applyCleanse},
 	core.SkillSecondWind:   {setup: setupSecondWind, apply: applySecondWind},
 	core.SkillRenewal:      {setup: setupRenewal, apply: applyRenewal},
+	core.SkillCripple:      {setup: setupCripple, apply: applyCripple},
 }
 
 // init asserts the player-castable contract: every PlayerCastable skill
@@ -583,7 +584,7 @@ func beginSingleTargetSkill(g *core.GameState, skill core.SkillID, quality int) 
 	// resistWIS is the target's WIS, hoisted here so the status-proc callers
 	// don't each re-derive core.EnemyInfoFor(*enemy).Stats.WIS (it doesn't
 	// change mid-action).
-	resistWIS = core.EnemyInfoFor(target).Stats.WIS
+	resistWIS = core.EffectiveEnemyStats(target).WIS
 	return actor, target, rawDamage, resistWIS, true
 }
 
@@ -813,7 +814,7 @@ func applyAttack(g *core.GameState, quality int) bool {
 	// nimble enemy. Symmetric with the party-side dodge in
 	// resolveEnemyAttacker. Skills are NOT dodgeable (mirrors
 	// MeleeAccuracy's basic-attack-only gate).
-	if core.RollDodge(g.Rand(), core.EnemyInfoFor(target).Stats) {
+	if core.RollDodge(g.Rand(), core.EffectiveEnemyStats(target)) {
 		setBattleMessage(g, fmt.Sprintf("%s%s lunges but the %s slips aside.", qualityTag(quality), attacker.Name, core.EnemySingularNoun(target)))
 		finishActorTurn(g)
 		return true
@@ -1034,6 +1035,36 @@ func applyScan(g *core.GameState, quality int) bool {
 	core.EnqueueEnemyVFX(g, core.VFXScan, g.Battle.EnemyIndex)
 	setBattleMessage(g, fmt.Sprintf("%s scans the %s — %d/%d HP. Identified.",
 		actor.Name, core.EnemySingularNoun(*enemy), enemy.HP, enemy.MaxHP))
+	finishActorTurn(g)
+	return true
+}
+
+func setupCripple(g *core.GameState) bool {
+	return setupTargetedEnemyAndPay(g, core.SkillCripple, "Cripple")
+}
+
+// applyCripple stamps the SPD debuff onto the targeted enemy — the first
+// enemy-side debuff. No damage and (like Bless / Scan) the timing grade is
+// cosmetic, so there's no proc roll: the negative-SPD BuffStats and BuffTurns
+// (tier-folded via EffectiveSkillEffect) land on the enemy's BuffStats /
+// BuffTurns, where EffectiveEnemyStats folds them into its ATB turn-rate while
+// the counter runs. Re-casting overwrites rather than stacking, matching the
+// no-stack rule every other status follows.
+func applyCripple(g *core.GameState, quality int) bool {
+	// setupCripple committed the MP; the shared head refunds it if the target
+	// died before apply.
+	if !ensureAliveTargetOrCancel(g, core.SkillCripple) {
+		return false
+	}
+	actor := &g.Party[g.Battle.CurrentParty]
+	actor.AttackBump = core.BumpDuration
+	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
+	effect := core.EffectiveSkillEffect(actor, core.SkillCripple)
+	enemy.BuffStats = effect.BuffStats
+	enemy.BuffTurns = effect.BuffTurns
+	core.EnqueueEnemyVFX(g, core.VFXVenom, g.Battle.EnemyIndex)
+	setBattleMessage(g, fmt.Sprintf("%s cripples the %s — slowed for %d turns.",
+		actor.Name, core.EnemySingularNoun(*enemy), enemy.BuffTurns))
 	finishActorTurn(g)
 	return true
 }
@@ -1365,7 +1396,7 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, skillNoun, hitVe
 		core.EnqueueEnemyVFX(g, vfx, slot)
 		hits++
 		enemy := core.BattleMemberAt(g, slot)
-		resistWIS := core.EnemyInfoFor(*enemy).Stats.WIS
+		resistWIS := core.EffectiveEnemyStats(*enemy).WIS
 		if tryProcStatus(g.Rand(), &enemy.BurnTurns, defeated, effect.BurnChance, quality, 0, effect.BurnDuration, resistWIS) {
 			afflicted++
 		}
@@ -1772,6 +1803,28 @@ func tickBlessAfterPartyTurn(g *core.GameState, actor core.ActorRef) {
 	tickPartyStatusCounter(g, actor, func(m *core.PartyMember) *int { return &m.BuffTurns }, "%s's blessing fades.")
 }
 
+// tickEnemyBuffAfterTurn drains an enemy's buff/debuff counter at the end of its
+// own turn — the enemy-side mirror of tickBlessAfterPartyTurn. While BuffTurns >
+// 0, EffectiveEnemyStats folds BuffStats into the enemy's combat stats (a player
+// debuff like Cripple stamps NEGATIVE deltas); this only counts the timer down.
+// BuffStats is left intact while the counter runs and gates entirely on
+// BuffTurns > 0, so a stale magnitude after expiry is inert (zeroed on death by
+// clearEnemyStatusesOnDeath). No-ops on party actors and on a dead enemy (its
+// turn-end housekeeping may run after a poison tick killed it this same step).
+func tickEnemyBuffAfterTurn(g *core.GameState, actor core.ActorRef) {
+	if actor.IsParty {
+		return
+	}
+	enemy := core.BattleMemberAt(g, actor.Index)
+	if enemy == nil || !enemy.Alive || enemy.BuffTurns <= 0 {
+		return
+	}
+	enemy.BuffTurns--
+	if enemy.BuffTurns == 0 {
+		setBattleMessage(g, fmt.Sprintf("%s shakes off the affliction.", core.TheEnemy(core.EnemyInfoFor(*enemy))))
+	}
+}
+
 // tickRegenAfterPartyTurn applies one tick of the Renewal heal-over-time at the
 // END of the regenerating member's own turn — the positive mirror of
 // tickPoisonAfterPartyTurn. It can't use tickPartyStatusCounter (that seam only
@@ -2028,7 +2081,7 @@ func damagePartyMemberDefendable(g *core.GameState, partyIndex, rawAmount int, t
 // not hunting for scattered field assignments. (The sets differ by design: see
 // the doc comment above for which statuses each actor can carry into death.)
 func clearEnemyStatusesOnDeath(enemy *core.Enemy) {
-	for _, c := range []*int{&enemy.BurnTurns, &enemy.SleepTurns, &enemy.PoisonTurns, &enemy.StunTurns} {
+	for _, c := range []*int{&enemy.BurnTurns, &enemy.SleepTurns, &enemy.PoisonTurns, &enemy.StunTurns, &enemy.BuffTurns} {
 		*c = 0
 	}
 }
@@ -2213,7 +2266,7 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	// DEX-driven CritChance via core.RollCrit at the Miss grade
 	// keeps enemies on a flat ~5-10% crit floor where the player can
 	// push 30%+ on Excellent.
-	enemyCrit := core.RollCrit(g.Rand(), core.EnemyInfoFor(*enemy).Stats, core.TimingQualityMiss)
+	enemyCrit := core.RollCrit(g.Rand(), core.EffectiveEnemyStats(*enemy), core.TimingQualityMiss)
 	rawDamage = applyCritMultiplier(rawDamage, enemyCrit, false)
 	damage := core.ScaleIncomingDamage(rawDamage, defendQuality)
 	// Plain enemy melee is physically tagged so the party's Armor field

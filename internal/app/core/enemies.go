@@ -578,6 +578,34 @@ func EnemyInfoFor(enemy Enemy) EnemyDefinition {
 	return def
 }
 
+// EffectiveEnemyStats returns the enemy's combat stats with any active
+// buff/debuff folded in — the enemy-side mirror of EffectiveStats. While
+// BuffTurns > 0, BuffStats is added per-stat (a player debuff stamps NEGATIVE
+// deltas, e.g. the Thief's Cripple lowering SPD; a future enemy self-buff would
+// stamp positive), each stat floored at 0 like the party reader so a debuff
+// can't drive a stat negative into the combat math. The base stats stay clean
+// on the definition; combat reads (dodge / crit / turn-rate / status-resist)
+// route through here so every kind of stat delta lands. Cheap fast-path when no
+// buff is active (the common case).
+func EffectiveEnemyStats(e Enemy) Stats {
+	out := EnemyInfoFor(e).Stats
+	if e.BuffTurns <= 0 {
+		return out
+	}
+	for s := Stat(0); s < StatCount; s++ {
+		delta := statTable[s].Get(e.BuffStats)
+		if delta == 0 {
+			continue
+		}
+		next := statTable[s].Get(out) + delta
+		if next < 0 {
+			next = 0
+		}
+		statSetters[s](&out, next)
+	}
+	return out
+}
+
 // EnemyBasicDamage is the enemy's basic-attack damage, read through the
 // definition overlay. The single seam for "how hard does this enemy's basic
 // swing hit" — symmetric with the party side's MemberAttackDamage — so the

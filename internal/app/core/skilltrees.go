@@ -159,7 +159,7 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 		linearTree("Shadow Arts", "Stealth, evasion, control", []SkillTreeNode{
 			act("backstab", "Backstab", "High-crit opener; damage doubles on Excellent timing.", SkillBackstab),
 			actOnce("scan", "Scan", "Inspect a foe: reveal its exact HP for the rest of the battle.", SkillScan),
-			nd("cripple", "Cripple", "Lower an enemy's SPD.", 3),
+			act("cripple", "Cripple", "Sap an enemy's SPD, slowing how often it acts.", SkillCripple),
 			nd("smoke-bomb", "Smoke Bomb", "Party gains evasion; enemies lose accuracy for a turn.", 3),
 			nd("vanish", "Vanish", "Become untargetable for one turn and drop aggro.", 1),
 			nd("shadow-step", "Shadow Step", "Passive: bonus damage when acting before the target.", 3),

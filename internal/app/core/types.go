@@ -988,6 +988,15 @@ type Enemy struct {
 	// of the enemy's static definition.
 	PoisonTurns int
 
+	// BuffTurns / BuffStats carry a stat buff/debuff — the enemy-side mirror of
+	// the PartyMember fields. While BuffTurns > 0, BuffStats folds into the
+	// enemy's combat stats via EffectiveEnemyStats. A player debuff (the Thief's
+	// Cripple) stamps NEGATIVE deltas; a future enemy self-buff would stamp
+	// positive. Decrements at the end of the enemy's own turn
+	// (tickEnemyBuffAfterTurn), cleared on death by clearEnemyStatusesOnDeath.
+	BuffTurns int
+	BuffStats Stats
+
 	// SkillCastCount tracks per-battle uses of any skill whose
 	// definition carries a non-zero PerBattleCastLimit. Read by
 	// usableEnemySkills to filter the AI's pick list — once a

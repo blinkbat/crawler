@@ -733,6 +733,13 @@ const (
 	// / RegenPerTurn) that ticks healing at the end of the ally's turns. The
 	// game's first HoT. Appended at the END (saved-map-key contract).
 	SkillRenewal
+	// SkillCripple is the Thief's SPD debuff (Subterfuge tree's "Cripple" node) —
+	// the FIRST enemy-side debuff. Single enemy target, no damage: it stamps a
+	// negative SPD onto the target's BuffStats/BuffTurns (the enemy-side mirror of
+	// the party buff fields), folded by EffectiveEnemyStats so the foe's ATB
+	// turn-rate drops while the counter runs. Appended at the END (saved-map-key
+	// contract).
+	SkillCripple
 )
 
 // SkillTag classifies a skill for damage-type interactions (armor,
@@ -806,6 +813,21 @@ const (
 	// turns. Fixed, not rolled — a support buff the player invests skill
 	// points into shouldn't gamble its duration.
 	BlessBuffTurns = 3
+)
+
+// Cripple (Thief) tuning — the first enemy-side debuff. Like Bless, the timing
+// grade is cosmetic and the effect always lands; strength is these magnitudes
+// plus the Subterfuge tree's tier ladder. Saps SPD only (the read site with a
+// clean, visible payoff — the enemy's ATB turn-rate slows); a negative BuffStats
+// delta folded by EffectiveEnemyStats. Modest so a maxed Cripple slows but
+// doesn't trivially freeze a fast foe (the ATB read floors effective SPD at 1).
+const (
+	// CrippleSPDReduction is the base SPD sapped (tier 0); stored as a negative
+	// BuffStats.SPD on the target.
+	CrippleSPDReduction = 2
+	// CrippleTurns is the base duration in the target's own turns. Fixed, not
+	// rolled — mirrors Bless.
+	CrippleTurns = 3
 )
 
 // Second Wind (Warrior) + Renewal (Cleric) heal tuning. Both base values fold

@@ -159,6 +159,11 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 		{Tier: 2, Label: "+1 Poison turn", Description: "Poison's max-roll duration extends by one turn.", Cost: 1, Effect: SkillEffectDelta{PoisonMaxTurns: 1}},
 		{Tier: 3, Label: "+2 damage", Description: "+2 base damage on the strike itself.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
 	},
+	SkillCripple: {
+		{Tier: 1, Label: "+1 turn", Description: "The cripple lingers one of the target's turns longer.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
+		{Tier: 2, Label: "-1 more SPD", Description: "Saps another point of SPD while it lasts.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{SPD: -1}}},
+		{Tier: 3, Label: "-1 more SPD", Description: "Another point of SPD — a maxed Cripple drags a slow foe to a crawl.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{SPD: -1}}},
+	},
 	SkillPoisonCloud: {
 		{Tier: 1, Label: "+15% Poison", Description: "Every enemy in the cloud rolls a 15% higher Poison chance.", Cost: 1, Effect: SkillEffectDelta{PoisonChance: 0.15}},
 		{Tier: 2, Label: "+1 Poison turn", Description: "The cloud's Poison lingers one extra turn on its max roll.", Cost: 1, Effect: SkillEffectDelta{PoisonMaxTurns: 1}},

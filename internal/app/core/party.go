@@ -279,6 +279,13 @@ var skillDefinitions = []skillDefinition{
 	// identity. Poison-apply chance scales with quality so a clean
 	// sequence reliably lands the DoT.
 	{Skill: SkillVenomStrike, Name: "Venom Strike", Description: "STR-scaled phys hit. Sequence — applies Poison.", Cost: 3, TargetMode: ActionEnemyTarget, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigameSequence, Effect: SkillEffect{Damage: 1, PoisonChance: VenomStrikePoisonChance, PoisonMinTurns: PoisonMinTurns, PoisonMaxTurns: PoisonMaxTurns}, PlayerCastable: true},
+	// Cripple (Thief): single-target SPD debuff, the first enemy-side debuff.
+	// No damage — like Bless the timing grade is cosmetic and the effect always
+	// lands. Stamps a negative SPD onto the target's BuffStats/BuffTurns (the
+	// enemy-side mirror of the party buff fields), folded by EffectiveEnemyStats
+	// so the foe's ATB turn-rate drops. SkillTagNone (no mitigation interaction,
+	// like Steal/Scan).
+	{Skill: SkillCripple, Name: "Cripple", Description: "Sap an enemy's SPD for a few turns, slowing how often it acts. No damage.", Cost: 3, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigamePress, Effect: SkillEffect{BuffStats: Stats{SPD: -CrippleSPDReduction}, BuffTurns: CrippleTurns}, PlayerCastable: true},
 	// Frost Lance (Wizard): charge-up single-target magic. +2 base +
 	// INT, 5 MP. On Great/Excellent timing applies a 1-turn Stun —
 	// lower base damage than Firebolt but reliable lockout instead
