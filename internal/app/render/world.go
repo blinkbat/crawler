@@ -386,37 +386,68 @@ func DrawSkyBackground(assets Resources, g core.GameState) {
 const behindCullSlack = float32(-2.5)
 
 // behindCull reports whether world point p sits far enough behind the camera
-// to skip drawing it, using the same generous slack the DrawWorld tile loop
-// applies inline. `forward` is the caller's already-computed horizontal forward
-// (hoisted out of per-item loops). Shared by the chest / door entity draws so
+// to skip drawing it. `camPos` is the camera position and `forward` the
+// caller's already-computed horizontal forward — both hoisted out of per-item
+// loops so this stays a cheap dot per call. The single home for the cull rule:
+// the DrawWorld tile loop, the chest draw, and the door draw all call it so
 // they cull consistently with the floor under them.
-func behindCull(camera rl.Camera3D, forward, p rl.Vector3) bool {
-	dx := p.X - camera.Position.X
-	dz := p.Z - camera.Position.Z
+func behindCull(camPos, forward, p rl.Vector3) bool {
+	dx := p.X - camPos.X
+	dz := p.Z - camPos.Z
 	return dx*forward.X+dz*forward.Z < behindCullSlack
 }
 
+// DrawWorld draws the full lit environment pass — see drawWorld.
 func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
+	drawWorld(camera, g, assets, false)
+}
+
+// drawWorld rasterizes the environment geometry (sky-less: floors, walls,
+// ceilings, elevation columns, props, decor, ramps).
+//
+// depthOnly=false is the normal pass: recompute the lighting profile, upload
+// the sun/fog/torch uniforms, and (when the render log is on) gather per-tile
+// diagnostics.
+//
+// depthOnly=true is the retro-filter depth prepass (see RetroDepthPrepass). It
+// SKIPS all of that lighting CPU setup and the diagnostics, drawing only the
+// geometry. The prepass runs in the SAME frame immediately after a full
+// DrawWorld whose uniforms still bind the lighting shader, with the SAME camera
+// and time-of-day profile — so collectTorches / applyUniforms / uploadTorches /
+// cacheLightingProfile would recompute byte-identical values. The geometry
+// drawn (same models, same transforms, ground shadows and torch flames
+// included) is identical to the full pass, so the rebuilt depth buffer matches
+// the captured one exactly and the crisp sprite pass can't z-fight it. The
+// per-pixel lighting shader still runs (it's attached to every model's
+// material, not switchable via BeginShaderMode), but the redundant CPU lighting
+// re-setup and the torch grid-scan are elided.
+func drawWorld(camera rl.Camera3D, g core.GameState, assets Resources, depthOnly bool) {
 	m := g.Area
 	material := assets.worldMaterial(m.Materials)
-	profile := applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(g.StepCount), areaIsEnclosed(m))
-	cacheLightingProfile(profile)
-	assets.lighting.applyUniforms(camera, profile)
-	// Torch point lights — collect the brazier props nearest the
-	// camera, flicker them, and upload before the geometry pass so
-	// walls / floors / props pick up the warm pools of light. Must
-	// run after applyUniforms (same shader) and before the tile
-	// loop's BeginShaderMode draws.
-	torches := collectTorches(m, camera)
-	assets.lighting.uploadTorches(torches)
+	var profile lightingProfile
+	var torches []torchLight
+	if !depthOnly {
+		profile = applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(g.StepCount), areaIsEnclosed(m))
+		cacheLightingProfile(profile)
+		assets.lighting.applyUniforms(camera, profile)
+		// Torch point lights — collect the brazier props nearest the
+		// camera, flicker them, and upload before the geometry pass so
+		// walls / floors / props pick up the warm pools of light. Must
+		// run after applyUniforms (same shader) and before the tile
+		// loop's BeginShaderMode draws.
+		torches = collectTorches(m, camera)
+		assets.lighting.uploadTorches(torches)
+	}
 
 	camPos := camera.Position
 	forward := horizontalForward(camera)
 
 	// Diagnostics: only collect counters when the render log is on,
 	// so the hot path stays a plain increment-free loop the rest of
-	// the time. logActive is a single function-call check.
-	logActive := IsRenderLogActive()
+	// the time. logActive is a single function-call check. The depth
+	// prepass never logs — it's a duplicate of the full pass that ran
+	// this frame, so its counts would double-report.
+	logActive := IsRenderLogActive() && !depthOnly
 	var stats renderFrameStats
 	if logActive {
 		stats.MapW = m.Width
@@ -431,9 +462,7 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 			}
 			cx := core.TileCenter(x)
 			cz := core.TileCenter(z)
-			dx := cx - camPos.X
-			dz := cz - camPos.Z
-			if dx*forward.X+dz*forward.Z < behindCullSlack {
+			if behindCull(camPos, forward, rl.NewVector3(cx, 0, cz)) {
 				if logActive {
 					stats.TilesCulled++
 				}

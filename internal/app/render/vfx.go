@@ -233,6 +233,15 @@ func spawnFromRequest(camera rl.Camera3D, g *core.GameState, req core.VFXRequest
 		// HUD band; lift the glyph above the member's head so the incoming-hit
 		// cue is visible. (No per-kind tuning for party — that's enemy-only.)
 		glyphOrigin.Y += partyGlyphExtraRise
+	case core.VFXAnchorTile:
+		// Tile-anchored effects use the raw resolved origin at 1× — no per-kind
+		// glyph/particle tuning, same as party. Explicit so a new VFXAnchor
+		// can't silently inherit this no-op.
+	default:
+		if !loggedUnknownAnchor[req.Anchor] {
+			loggedUnknownAnchor[req.Anchor] = true
+			LogRenderError("spawnFromRequest: unhandled VFXAnchor %d — using raw origin at 1×", int(req.Anchor))
+		}
 	}
 	// Snapshot the pool length so scaleBurst transforms only the particles THIS
 	// request appends (every spawnXxx pushes onto the shared pool).
@@ -336,6 +345,11 @@ func scaleBurst(o rl.Vector3, from int, scale float32) {
 // pattern logs once, not every frame the effect is requested. Touched
 // only from the single-threaded render path.
 var loggedUnknownVFX = map[core.VFXKind]bool{}
+
+// loggedUnknownAnchor dedupes the unhandled-anchor warning (a new core.VFXAnchor
+// reaching spawnFromRequest without a switch case) the same way, so it logs
+// once per kind rather than every frame the effect is requested.
+var loggedUnknownAnchor = map[core.VFXAnchor]bool{}
 
 // --- Per-kind spawn patterns -----------------------------------------------
 //

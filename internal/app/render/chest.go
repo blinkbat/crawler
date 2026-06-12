@@ -53,7 +53,7 @@ func DrawChests(camera rl.Camera3D, g core.GameState, assets Resources) {
 		base := tileWorldPos(ch.TileX, ch.TileZ, g.Area.StandGroundY(ch.TileX, ch.TileZ))
 		// Skip chests behind the camera — same generous slack the world tile
 		// loop uses, so a chest you just turned from doesn't pop out.
-		if behindCull(camera, forward, base) {
+		if behindCull(camera.Position, forward, base) {
 			continue
 		}
 		drawGroundShadowAt(base.X, base.Y+groundShadowFloorClearance, base.Z, 0.40)

@@ -220,7 +220,17 @@ func handleEnemyIngest(ctx enemySpellCtx) {
 // and log lines — those vary in wording and in whether they name the caster —
 // so only the identical apply mechanics live here. The enemy→party mirror of
 // the player→enemy tryProcStatus tail (which the latter's comment references).
-func applyEnemyStatus(ctx enemySpellCtx, counter *int, duration, floor int, vfxSkill core.SkillID) {
+// Returns true when the status actually landed. The validity invariant (target
+// in range, alive, not ingested) lives HERE with the dereference rather than
+// being owned by each caller / leaned on the upstream pickEnemyAttackTarget
+// filter — so a future caster that forgets its own guard can't stamp a status
+// onto a corpse or an ingested ally, and the bool lets the caller skip its
+// success log so it can't claim a status that didn't land. No behavior change
+// today: the current callers always pass a living, non-ingested target.
+func applyEnemyStatus(ctx enemySpellCtx, counter *int, duration, floor int, vfxSkill core.SkillID) bool {
+	if !core.PartyMemberAvailable(ctx.g.Party, ctx.target) {
+		return false
+	}
 	if duration <= 0 {
 		duration = floor
 	}
@@ -228,6 +238,7 @@ func applyEnemyStatus(ctx enemySpellCtx, counter *int, duration, floor int, vfxS
 	*counter = core.ShortenStatusDuration(duration, core.EffectiveStats(*m).WIS)
 	core.EnqueuePartyVFX(ctx.g, vfxKindFor(vfxSkill), ctx.target)
 	audio.Play(audio.SoundInputHit)
+	return true
 }
 
 // handleEnemySleep applies the goblin-mage Sleep cast. Already-asleep
@@ -246,8 +257,9 @@ func handleEnemySleep(ctx enemySpellCtx) {
 		enemySpellLog(ctx, "%s is already asleep.", m.Name)
 		return
 	}
-	applyEnemyStatus(ctx, &m.SleepTurns, ctx.effect.SleepDuration(g.Rand()), core.SleepMinTurns, core.SkillSleep)
-	enemySpellLog(ctx, "%s falls asleep.", m.Name)
+	if applyEnemyStatus(ctx, &m.SleepTurns, ctx.effect.SleepDuration(g.Rand()), core.SleepMinTurns, core.SkillSleep) {
+		enemySpellLog(ctx, "%s falls asleep.", m.Name)
+	}
 }
 
 // handleEnemyWeb applies the Cave Spider's Webbed status. Already-webbed
@@ -262,8 +274,9 @@ func handleEnemyWeb(ctx enemySpellCtx) {
 		setBattleMessage(g, fmt.Sprintf("%s spins a fresh web at %s — already webbed.", core.TheEnemy(ctx.def), m.Name))
 		return
 	}
-	applyEnemyStatus(ctx, &m.WebbedTurns, ctx.effect.BindDuration(g.Rand()), core.SpiderWebbedMinTurns, core.SkillWeb)
-	enemySpellLog(ctx, "%s is wrapped in sticky webs.", m.Name)
+	if applyEnemyStatus(ctx, &m.WebbedTurns, ctx.effect.BindDuration(g.Rand()), core.SpiderWebbedMinTurns, core.SkillWeb) {
+		enemySpellLog(ctx, "%s is wrapped in sticky webs.", m.Name)
+	}
 }
 
 // handleEnemyConfuse applies the Will-o'-Wisp's Confused status.
@@ -280,8 +293,9 @@ func handleEnemyConfuse(ctx enemySpellCtx) {
 		setBattleMessage(g, fmt.Sprintf("%s flickers at %s — already disoriented.", core.TheEnemy(ctx.def), m.Name))
 		return
 	}
-	applyEnemyStatus(ctx, &m.ConfusedTurns, ctx.effect.ConfuseDuration(g.Rand()), core.WispConfuseMinTurns, core.SkillConfuse)
-	enemySpellLog(ctx, "%s grows confused.", m.Name)
+	if applyEnemyStatus(ctx, &m.ConfusedTurns, ctx.effect.ConfuseDuration(g.Rand()), core.WispConfuseMinTurns, core.SkillConfuse) {
+		enemySpellLog(ctx, "%s grows confused.", m.Name)
+	}
 }
 
 // handleEnemyStoneslam fires the Stone Golem's AoE phys cast. Hits
@@ -494,13 +508,26 @@ func vfxKindFor(skill core.SkillID) core.VFXKind {
 // Returns true when the counter was just stamped — callers use it to
 // pick the "you stunned/burned/poisoned them" copy in their log line.
 func tryProcStatus(rng *rand.Rand, counter *int, defeated bool, baseChance float64, quality, minGrade int, durationFn func(*rand.Rand) int, resistWis int) bool {
-	if defeated || baseChance <= 0 || counter == nil || *counter > 0 {
-		return false
-	}
 	if minGrade > 0 && quality < minGrade {
 		return false
 	}
-	chance := core.QualityScaledChance(baseChance, quality)
+	// Player-side procs scale the base chance by the timing grade; the shared
+	// applyStatusRoll owns the guard + roll + WIS-shorten apply below.
+	return applyStatusRoll(rng, counter, defeated, core.QualityScaledChance(baseChance, quality), durationFn, resistWis)
+}
+
+// applyStatusRoll is the shared status-proc core: it refuses when the target is
+// defeated, the chance is non-positive, or the counter is already running (the
+// no-stack rule), then rolls `chance` and on success stamps the WIS-shortened
+// duration onto the counter. Both tryProcStatus (player-side, which pre-scales
+// chance by the timing grade) and the enemy basic-attack proc (raw chance, no
+// timing minigame) route through it so the "guard → roll → WIS-shorten apply"
+// rule lives in ONE place instead of being hand-rolled per side. Returns true
+// when the counter was just stamped.
+func applyStatusRoll(rng *rand.Rand, counter *int, defeated bool, chance float64, durationFn func(*rand.Rand) int, resistWis int) bool {
+	if defeated || chance <= 0 || counter == nil || *counter > 0 {
+		return false
+	}
 	if rng.Float64() >= chance {
 		return false
 	}
@@ -1996,17 +2023,20 @@ func damagePartyMemberDefendable(g *core.GameState, partyIndex, rawAmount int, t
 // intentionally left so the corpse keeps its poison render hint while it
 // fades; Burn has no player-applicable source yet. Add new timed statuses
 // to whichever side can carry them so they can't linger on a corpse.
+// Each side's death-clear set is ONE declared list of the timed-status counters
+// that side carries — adding a new timed status is appending one pointer here,
+// not hunting for scattered field assignments. (The sets differ by design: see
+// the doc comment above for which statuses each actor can carry into death.)
 func clearEnemyStatusesOnDeath(enemy *core.Enemy) {
-	enemy.BurnTurns = 0
-	enemy.SleepTurns = 0
-	enemy.PoisonTurns = 0
-	enemy.StunTurns = 0
+	for _, c := range []*int{&enemy.BurnTurns, &enemy.SleepTurns, &enemy.PoisonTurns, &enemy.StunTurns} {
+		*c = 0
+	}
 }
 
 func clearPartyStatusesOnDeath(member *core.PartyMember) {
-	member.SleepTurns = 0
-	member.WebbedTurns = 0
-	member.ConfusedTurns = 0
+	for _, c := range []*int{&member.SleepTurns, &member.WebbedTurns, &member.ConfusedTurns} {
+		*c = 0
+	}
 }
 
 // --- Result text ---
@@ -2217,10 +2247,13 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	// post-armor/post-MDef figure), NOT the pre-mitigation `damage`, so a
 	// bite fully soaked to 0 by armor inflicts no DoT — matching the
 	// lifesteal block below which also reads `dealt`.
-	if dealt > 0 && def.PoisonChance > 0 && g.Party[target].HP > 0 && g.Party[target].PoisonTurns <= 0 {
-		if g.Rand().Float64() < def.PoisonChance {
-			rawPoison := core.DefaultPoisonEffect.RollDuration(g.Rand())
-			g.Party[target].PoisonTurns = core.ShortenStatusDuration(rawPoison, core.EffectiveStats(g.Party[target]).WIS)
+	if dealt > 0 {
+		// Raw-chance proc (no timing minigame on the enemy side) through the
+		// shared applyStatusRoll, which owns the alive / not-already-poisoned
+		// guard and the WIS-shortened stamp — the same core the player-side
+		// tryProcStatus uses with a quality-scaled chance.
+		if applyStatusRoll(g.Rand(), &g.Party[target].PoisonTurns, g.Party[target].HP <= 0,
+			def.PoisonChance, core.DefaultPoisonEffect.RollDuration, core.EffectiveStats(g.Party[target]).WIS) {
 			setBattleMessage(g, fmt.Sprintf("%s is poisoned!", g.Party[target].Name))
 		}
 	}

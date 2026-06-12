@@ -22,7 +22,7 @@ func DrawDoors(camera rl.Camera3D, g core.GameState, assets Resources) {
 	forward := horizontalForward(camera)
 	for _, d := range g.Doors {
 		center := tileWorldPos(d.TileX, d.TileZ, 0)
-		if behindCull(camera, forward, center) {
+		if behindCull(camera.Position, forward, center) {
 			continue
 		}
 		yaw := doorYawDeg(d.Facing)

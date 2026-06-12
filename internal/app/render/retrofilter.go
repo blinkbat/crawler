@@ -31,6 +31,17 @@ var (
 	retroLocs    [core.RetroFilterCount]int32
 )
 
+// Reused uniform-upload scratch so EndRetroCapture doesn't allocate a fresh
+// []float32 per SetShaderValue every frame the pass runs (mirrors lighting.go's
+// uniformVec3Buf / uniformFloatBuf). SetShaderValue copies the value through to
+// GL synchronously, so reusing one buffer across the per-filter loop is safe.
+// Render is single-threaded; one shared scratch each is fine.
+var (
+	retroResBuf  [2]float32
+	retroTimeBuf [1]float32
+	retroValBuf  [1]float32
+)
+
 // retroUniformNames maps each filter kind to its shader uniform, length-locked
 // to the enum by the array size (a new filter without a uniform is a compile
 // error here and a startup panic below if left empty).
@@ -166,8 +177,15 @@ func ensureRetroShader() bool {
 	retroShader = sh
 	retroLocRes = rl.GetShaderLocation(sh, "resolution")
 	retroLocTime = rl.GetShaderLocation(sh, "time")
+	// Stamp the resolved uniform locations to the render log so the shader half
+	// of the RetroFilterKind contract is observable: a filter whose uniform was
+	// dropped/renamed in the shader source (or never wired into the pipeline)
+	// resolves to -1 here, visible in the log without a false-positive panic
+	// (GL legitimately reports -1 for a declared-but-unused uniform too).
+	LogRenderInit("retro filter shader %d locs: resolution=%d time=%d", sh.ID, retroLocRes, retroLocTime)
 	for k := range retroLocs {
 		retroLocs[k] = rl.GetShaderLocation(sh, retroUniformNames[k])
+		LogRenderInit("retro filter loc %s (%s)=%d", core.RetroFilterName(core.RetroFilterKind(k)), retroUniformNames[k], retroLocs[k])
 	}
 	retroLoaded = true
 	return true
@@ -237,13 +255,13 @@ func EndRetroCapture(g *core.GameState, skyOnBackbuffer bool) {
 	if !skyOnBackbuffer {
 		rl.ClearBackground(rl.Black)
 	}
-	res := []float32{float32(retroRTW), float32(retroRTH)}
-	rl.SetShaderValue(retroShader, retroLocRes, res, rl.ShaderUniformVec2)
-	t := []float32{float32(rl.GetTime())}
-	rl.SetShaderValue(retroShader, retroLocTime, t, rl.ShaderUniformFloat)
+	retroResBuf[0], retroResBuf[1] = float32(retroRTW), float32(retroRTH)
+	rl.SetShaderValue(retroShader, retroLocRes, retroResBuf[:], rl.ShaderUniformVec2)
+	retroTimeBuf[0] = float32(rl.GetTime())
+	rl.SetShaderValue(retroShader, retroLocTime, retroTimeBuf[:], rl.ShaderUniformFloat)
 	for k := range retroLocs {
-		v := []float32{float32(g.RetroFilters[k])}
-		rl.SetShaderValue(retroShader, retroLocs[k], v, rl.ShaderUniformFloat)
+		retroValBuf[0] = float32(g.RetroFilters[k])
+		rl.SetShaderValue(retroShader, retroLocs[k], retroValBuf[:], rl.ShaderUniformFloat)
 	}
 	rl.BeginShaderMode(retroShader)
 	// RenderTextures store rows bottom-up; the negative source height flips
@@ -271,10 +289,17 @@ const (
 // The classic color-mask depth prepass, done with blend factors because the
 // raylib-go bindings don't expose rlColorMask. Only runs while filters are
 // active, so the environment double-draw costs nothing in normal play.
+//
+// The world geometry goes through drawWorld's depthOnly path: the full
+// DrawWorld that fed the capture already set this frame's lighting/torch/fog
+// uniforms (same shader, same camera, same time-of-day), so the prepass skips
+// re-collecting torches and re-uploading those uniforms — it only needs the
+// geometry re-rasterized to rebuild depth. (DrawChests / DrawDoors carry no
+// such per-frame lighting setup, so they re-run as-is.)
 func RetroDepthPrepass(camera rl.Camera3D, g core.GameState, assets Resources) {
 	rl.SetBlendFactors(glZero, glOne, glFuncAdd)
 	rl.BeginBlendMode(rl.BlendCustom)
-	DrawWorld(camera, g, assets)
+	drawWorld(camera, g, assets, true)
 	DrawChests(camera, g, assets)
 	DrawDoors(camera, g, assets)
 	rl.EndBlendMode()

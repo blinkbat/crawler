@@ -110,9 +110,12 @@ var (
 	// Hover-tooltip chrome: a near-opaque dark backing, light body text, and
 	// a gilt heading tint for the first line. Named here with the rest of the
 	// editor chrome rather than inline in draw.go's tooltip draw.
-	tooltipBG      = rl.NewColor(18, 22, 30, 230)
-	tooltipText    = rl.NewColor(220, 224, 234, 255)
-	tooltipHeading = rl.NewColor(255, 220, 124, 255)
+	tooltipBG   = rl.NewColor(18, 22, 30, 230)
+	tooltipText = rl.NewColor(220, 224, 234, 255)
+	// Same gilt the render theme uses for entity-marker starts (already
+	// consumed here as render.MarkerStart in draw.go) — share the token so a
+	// gilt retune can't leave the tooltip heading behind.
+	tooltipHeading = render.MarkerStart
 
 	// Semantic ok/warn pairs. The reachability metadata badge uses the
 	// muted pair; the placement-footprint ghost uses the brighter pair
