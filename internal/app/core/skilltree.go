@@ -91,6 +91,19 @@ type SkillEffectDelta struct {
 	// ArmorReduction is the Corrosive Vial armor-strip delta — tiers deepen the
 	// break. Folded into the base SkillEffect.ArmorReduction by EffectiveSkillEffect.
 	ArmorReduction int
+	// ATBPush is the Sunder readiness-shove delta — tiers shove the target's ATB
+	// gauge harder. Folded into the base SkillEffect.ATBPush.
+	ATBPush int
+	// BuffArmor / BuffMDef are the Stone Skin ward deltas — tiers raise the flat
+	// Armor / MDef granted. Folded into the base SkillEffect.BuffArmor / BuffMDef.
+	BuffArmor int
+	BuffMDef  int
+	// ShieldHP is the Aegis absorb-pool delta — tiers grow the shield. Folded
+	// into the base SkillEffect.ShieldHP.
+	ShieldHP int
+	// IceArmorTurns is the Ice Armor duration delta — tiers extend how long the
+	// frost ward stands. Folded into the base SkillEffect.IceArmorTurns.
+	IceArmorTurns int
 }
 
 // skillTierTable is the source of truth for every player-castable
@@ -208,6 +221,45 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 		{Tier: 2, Label: "+20% Burn", Description: "Per-target Burn-apply chance bumped by 20%.", Cost: 1, Effect: SkillEffectDelta{BurnChance: 0.20}},
 		{Tier: 3, Label: "+1 Burn turn", Description: "Burn lasts one turn longer on min and max rolls.", Cost: 1, Effect: SkillEffectDelta{BurnMinTurns: 1, BurnMaxTurns: 1}},
 	},
+	// ── Warrior (tree-node skills) ───────────────────────────
+	SkillSunder: {
+		{Tier: 1, Label: "+2 damage", Description: "+2 base damage on the sundering blow.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
+		{Tier: 2, Label: "+2 damage", Description: "Another +2 base damage.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
+		{Tier: 3, Label: "Harder shove", Description: "Knocks the target's turn even further back.", Cost: 1, Effect: SkillEffectDelta{ATBPush: 25}},
+	},
+	SkillWarBanner: {
+		{Tier: 1, Label: "+1 turn", Description: "The banner stands one turn longer.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
+		{Tier: 2, Label: "+1 STR/Armor", Description: "+1 more to the rallied STR and Armor for every ally.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{STR: 1}, BuffArmor: 1}},
+		{Tier: 3, Label: "+1 STR/Armor", Description: "Another +1 to both — a maxed banner is a sweeping party buff.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{STR: 1}, BuffArmor: 1}},
+	},
+	SkillStoneSkin: {
+		{Tier: 1, Label: "+2 Armor", Description: "+2 more Armor on the ward.", Cost: 1, Effect: SkillEffectDelta{BuffArmor: 2}},
+		{Tier: 2, Label: "+2 MDef", Description: "+2 more MDef on the ward.", Cost: 1, Effect: SkillEffectDelta{BuffMDef: 2}},
+		{Tier: 3, Label: "+1 turn", Description: "The ward lasts one of the ally's turns longer.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
+	},
+	// ── Cleric (tree-node skills) ────────────────────────────
+	SkillBlind: {
+		{Tier: 1, Label: "+1 turn", Description: "The blindness lingers one of the target's turns longer.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
+		{Tier: 2, Label: "-1 more DEX", Description: "Saps another point of accuracy while it lasts.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{DEX: -1}}},
+		{Tier: 3, Label: "-1 more DEX", Description: "Another point of accuracy — a maxed Blind nearly closes a foe's eyes.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{DEX: -1}}},
+	},
+	SkillAegis: {
+		{Tier: 1, Label: "+4 shield", Description: "+4 to the absorb pool.", Cost: 1, Effect: SkillEffectDelta{ShieldHP: 4}},
+		{Tier: 2, Label: "+4 shield", Description: "Another +4 absorb.", Cost: 1, Effect: SkillEffectDelta{ShieldHP: 4}},
+		{Tier: 3, Label: "+6 shield", Description: "A maxed Aegis turns aside a heavy blow outright.", Cost: 1, Effect: SkillEffectDelta{ShieldHP: 6}},
+	},
+	// ── Thief (tree-node skills) ─────────────────────────────
+	SkillSmokeBomb: {
+		{Tier: 1, Label: "+1 turn", Description: "The smoke hangs one turn longer.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
+		{Tier: 2, Label: "+1 DEX swing", Description: "Another point of party evasion and enemy accuracy loss.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{DEX: 1}}},
+		{Tier: 3, Label: "+1 DEX swing", Description: "A maxed Smoke Bomb blinds the room and slips the party clear.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{DEX: 1}}},
+	},
+	// ── Wizard (tree-node skills) ────────────────────────────
+	SkillIceArmor: {
+		{Tier: 1, Label: "+1 turn", Description: "The frost ward stands one turn longer.", Cost: 1, Effect: SkillEffectDelta{IceArmorTurns: 1}},
+		{Tier: 2, Label: "+1 turn", Description: "Another turn of ward.", Cost: 1, Effect: SkillEffectDelta{IceArmorTurns: 1}},
+		{Tier: 3, Label: "+2 turns", Description: "A maxed Ice Armor sheathes the caster for most of a fight.", Cost: 1, Effect: SkillEffectDelta{IceArmorTurns: 2}},
+	},
 }
 
 // init asserts every player-castable skill has exactly MaxSkillTier
@@ -320,6 +372,11 @@ func EffectiveSkillEffect(m *PartyMember, s SkillID) SkillEffect {
 		eff.BuffTurns += d.BuffTurns
 		eff.RegenTurns += d.RegenTurns
 		eff.ArmorReduction += d.ArmorReduction
+		eff.ATBPush += d.ATBPush
+		eff.BuffArmor += d.BuffArmor
+		eff.BuffMDef += d.BuffMDef
+		eff.ShieldHP += d.ShieldHP
+		eff.IceArmorTurns += d.IceArmorTurns
 	}
 	return eff
 }

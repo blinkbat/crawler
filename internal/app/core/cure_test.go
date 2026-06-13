@@ -11,8 +11,9 @@ import (
 func TestCureDebuffs_ClearsDebuffsKeepsBuffAndDefend(t *testing.T) {
 	m := PartyMember{
 		HP: 5, PoisonTurns: 2, SleepTurns: 1, StunTurns: 1, WebbedTurns: 3, ConfusedTurns: 2,
-		Defending: true, BuffTurns: 3, BuffStats: Stats{STR: 1},
+		Defending: true,
 	}
+	StampPartyBuff(&m, SkillBless, SkillEffect{BuffStats: Stats{STR: 1}, BuffTurns: 3})
 	if cured := CureDebuffs(&m); cured != 5 {
 		t.Errorf("cured %d, want 5", cured)
 	}
@@ -22,8 +23,8 @@ func TestCureDebuffs_ClearsDebuffsKeepsBuffAndDefend(t *testing.T) {
 	if !m.Defending {
 		t.Error("Cleanse wrongly stripped the Defending stance")
 	}
-	if m.BuffTurns != 3 || m.BuffStats.STR != 1 {
-		t.Errorf("Cleanse wrongly stripped the Bless buff: turns=%d stats=%+v", m.BuffTurns, m.BuffStats)
+	if len(m.Buffs) != 1 || m.Buffs[0].Source != SkillBless {
+		t.Errorf("Cleanse wrongly stripped the Bless buff: %+v", m.Buffs)
 	}
 
 	// A member with no debuffs reports zero cured.

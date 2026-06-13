@@ -678,6 +678,37 @@ func TestResolveAndFinishEnemyAttack_PoisonKillWinsBattle(t *testing.T) {
 	}
 }
 
+// TestResolveEnemyAttacker_IceArmorChillsAttacker pins the Ice Armor reprisal:
+// a connecting basic attack on a frost-warded party member stamps an SPD chill
+// onto the attacker via the enemy debuff mirror. Every member's DEX is zeroed so
+// RollDodge can never void the swing — we need a guaranteed connecting hit.
+func TestResolveEnemyAttacker_IceArmorChillsAttacker(t *testing.T) {
+	g := newTestState()
+	g.Battle.EnemyAttacker = 0
+	for i := range g.Party {
+		g.Party[i].Stats.DEX = 0
+		g.Party[i].IceArmorTurns = 2
+	}
+	enemy := core.BattleMemberAt(g, 0)
+	if len(enemy.Debuffs) != 0 {
+		t.Fatalf("precondition: attacker should start un-debuffed, got %+v", enemy.Debuffs)
+	}
+	if !resolveEnemyAttacker(g, 0, core.TimingQualityMiss) {
+		t.Fatal("resolveEnemyAttacker reported no action")
+	}
+	if got := core.MaxStatusModTurns(enemy.Debuffs); got != core.IceArmorChillTurns {
+		t.Fatalf("ice armor should chill attacker for %d turns, got %d", core.IceArmorChillTurns, got)
+	}
+	if got := enemyDebuffStats(*enemy).SPD; got != -core.IceArmorChillSPD {
+		t.Fatalf("ice armor chill should sap %d SPD, got %d", core.IceArmorChillSPD, got)
+	}
+}
+
+// enemyDebuffStats / partyBuffStats sum the stackable mod slices for test reads —
+// the post-refactor replacement for poking the old single BuffStats field.
+func enemyDebuffStats(e core.Enemy) core.Stats { s, _, _ := core.SumStatusMods(e.Debuffs); return s }
+func partyBuffStats(m core.PartyMember) core.Stats { s, _, _ := core.SumStatusMods(m.Buffs); return s }
+
 func TestTickFlashHold_LowGradeFiresImmediatelyAtFlashZero(t *testing.T) {
 	g := newTestState()
 	g.Battle.Timing.Quality = core.TimingQualityGood

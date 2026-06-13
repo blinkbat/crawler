@@ -215,6 +215,29 @@ type SkillEffect struct {
 	// turn-counted BuffStats debuff: a permanent armor break, not a status, that
 	// the damageEnemy mitigation chain reads immediately. Zero = no strip.
 	ArmorReduction int
+	// ATBPush is how much a skill shoves the target enemy's ATB readiness gauge
+	// backwards on a landed hit (the Warrior's Sunder), delaying its next turn.
+	// A one-shot subtraction from g.Battle.Readiness, distinct from the SPD
+	// debuff — it doesn't persist, it just resets the clock once. Zero = no push.
+	ATBPush int
+	// BuffArmor / BuffMDef ride the party buff bundle alongside BuffStats: a buff
+	// skill (the Warrior's Stone Skin) can grant flat Armor / MDef for BuffTurns,
+	// folded by EffectiveArmor / EffectiveMDef while the shared counter runs.
+	// Zero = the buff grants no defensive bonus (Bless leaves these 0). Stamped
+	// together with BuffStats / BuffTurns via StampPartyBuff.
+	BuffArmor int
+	BuffMDef  int
+	// ShieldHP declares a damage-absorbing shield a skill grants its ally target
+	// (the Cleric's Aegis). Stamped onto PartyMember.ShieldHP, which the party
+	// damage path spends before HP until depleted or the battle ends. Zero = no
+	// shield. Not turn-counted — it lasts until the absorb pool is used up.
+	ShieldHP int
+	// IceArmorTurns declares the duration of a reactive frost ward a skill grants
+	// its caster (the Wizard's Ice Armor): while PartyMember.IceArmorTurns runs,
+	// the caster gains MDef and chills any enemy that lands a basic attack on
+	// them. Zero = the skill grants no ward. Fixed duration (not rolled), ticked
+	// at the caster's end-of-turn like the other buffs.
+	IceArmorTurns int
 }
 
 // Party stats post-difficulty pass. Numbers are deliberately tighter than
@@ -312,6 +335,41 @@ var skillDefinitions = []skillDefinition{
 	// routed through applyAoEStatusSkill (AppliesAOEEnemies). Lower per-target
 	// damage / shorter chill than the single bolt.
 	{Skill: SkillConeOfCold, Name: "Cone of Cold", Description: "INT-scaled frost across the whole pack. Charge — chills every enemy, lowering their SPD.", Cost: 7, TargetMode: ActionMenu, Kind: SkillKindMagic, Tag: SkillTagMagic, Minigame: MinigameCharge, Effect: SkillEffect{Damage: ConeOfColdDamageBase, AppliesAOEEnemies: true, BuffStats: Stats{SPD: -ConeOfColdSPDReduction}, BuffTurns: ConeOfColdChillTurns}, PlayerCastable: true},
+	// Sunder (Warrior, Battle Sense tree): STR-scaled phys hit that also shoves
+	// the target's ATB readiness back (ATBPush) so its next turn lands later — a
+	// damaging tempo swing, the offensive counterpart to the Thief's Cripple.
+	// Charge minigame; the push lands whenever the hit connects.
+	{Skill: SkillSunder, Name: "Sunder", Description: "STR-scaled phys hit that shoves the target's turn later. Charge.", Cost: 4, TargetMode: ActionEnemyTarget, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigameCharge, Effect: SkillEffect{Damage: SunderDamageBase, ATBPush: SunderATBPush}, PlayerCastable: true},
+	// Taunt (Warrior, Battle Sense tree): forces the target enemy to attack the
+	// casting Warrior on its next turn (no damage). Single-rank utility, like Scan
+	// / Cleanse — NoUpgrades. Press minigame; the pull always lands.
+	{Skill: SkillTaunt, Name: "Taunt", Description: "Force the target enemy to attack you next turn. No damage.", Cost: 2, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigamePress, Effect: SkillEffect{}, PlayerCastable: true, NoUpgrades: true},
+	// War Banner (Warrior, Ancestral Call tree): party-wide STR + Armor rally —
+	// the martial mirror of Bless, using the shared party buff bundle. No target
+	// (ActionMenu); Buff tag; press minigame, grade cosmetic. Armor (not VIT) is
+	// the defensive half — a VIT buff would be inert since MaxHP isn't re-derived.
+	{Skill: SkillWarBanner, Name: "War Banner", Description: "Plant a banner — raises the whole party's STR and Armor for several turns. No damage.", Cost: 5, TargetMode: ActionMenu, Kind: SkillKindUtility, Tag: SkillTagBuff, Minigame: MinigamePress, Effect: SkillEffect{BuffStats: Stats{STR: WarBannerPerStat}, BuffArmor: WarBannerArmor, BuffTurns: WarBannerTurns, AppliesAOEPartyBuff: true}, PlayerCastable: true},
+	// Stone Skin (Warrior, Ancestral Call tree): single-ally Armor + MDef ward via
+	// the party buff bundle's BuffArmor / BuffMDef fields. No damage; ally target;
+	// press minigame, grade cosmetic.
+	{Skill: SkillStoneSkin, Name: "Stone Skin", Description: "Ward an ally with temporary Armor and MDef. No damage.", Cost: 4, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagBuff, Minigame: MinigamePress, Effect: SkillEffect{BuffArmor: StoneSkinArmor, BuffMDef: StoneSkinMDef, BuffTurns: StoneSkinTurns}, PlayerCastable: true},
+	// Blind (Cleric, Radiance tree): saps the target enemy's DEX (the accuracy
+	// stat) so it whiffs more — the DEX-flavored sibling of Cripple, via the enemy
+	// BuffStats debuff mirror. No damage; press minigame, grade cosmetic.
+	{Skill: SkillBlind, Name: "Blind", Description: "Sear an enemy's eyes — lowers its accuracy for several turns. No damage.", Cost: 3, TargetMode: ActionEnemyTarget, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigamePress, Effect: SkillEffect{BuffStats: Stats{DEX: -BlindDEXReduction}, BuffTurns: BlindTurns}, PlayerCastable: true},
+	// Aegis (Cleric, Conviction tree): grants an ally a damage-absorbing shield
+	// (ShieldHP) that soaks incoming hits before HP until depleted. No damage;
+	// ally target; press minigame, grade cosmetic.
+	{Skill: SkillAegis, Name: "Aegis", Description: "Shield an ally — absorbs incoming damage before it reaches their HP. No damage.", Cost: 4, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagBuff, Minigame: MinigamePress, Effect: SkillEffect{ShieldHP: AegisShieldBase}, PlayerCastable: true},
+	// Smoke Bomb (Thief, Shadow Arts tree): one DEX magnitude buffs the whole
+	// party's evasion AND saps every enemy's accuracy. No target (ActionMenu); the
+	// party-buff side rides BuffStats/BuffTurns, the enemy-debuff side mirrors it
+	// in the handler. Press minigame, grade cosmetic.
+	{Skill: SkillSmokeBomb, Name: "Smoke Bomb", Description: "Drop a smoke screen — the party gains evasion while every enemy loses accuracy. No damage.", Cost: 4, TargetMode: ActionMenu, Kind: SkillKindUtility, Tag: SkillTagNone, Minigame: MinigamePress, Effect: SkillEffect{BuffStats: Stats{DEX: SmokeBombDEX}, BuffTurns: SmokeBombTurns, AppliesAOEPartyBuff: true}, PlayerCastable: true},
+	// Ice Armor (Wizard, Cryomancy tree): self-buff — while it stands the caster
+	// gains MDef and chills any enemy that lands a basic attack on them. No target
+	// (ActionMenu, self); Buff tag; charge minigame to give the ward some weight.
+	{Skill: SkillIceArmor, Name: "Ice Armor", Description: "Sheathe yourself in frost — gain MDef and chill any foe that strikes you. Charge.", Cost: 5, TargetMode: ActionMenu, Kind: SkillKindUtility, Tag: SkillTagBuff, Minigame: MinigameCharge, Effect: SkillEffect{IceArmorTurns: IceArmorTurnsBase}, PlayerCastable: true},
 	// Arc Bolt (Wizard): sequence-minigame AoE magic. +1 base + INT
 	// per target, 6 MP. Each correct tap in the sequence reads as a
 	// new bolt arcing to the next enemy; on apply, all living enemies
@@ -1137,8 +1195,8 @@ func PartyStatus(m PartyMember) (kind PartyStatusKind, turns int) {
 		return PartyStatusAsleep, m.SleepTurns
 	case m.PoisonTurns > 0:
 		return PartyStatusPoisoned, m.PoisonTurns
-	case m.BuffTurns > 0:
-		return PartyStatusBlessed, m.BuffTurns
+	case len(m.Buffs) > 0:
+		return PartyStatusBlessed, MaxStatusModTurns(m.Buffs)
 	case m.RegenTurns > 0:
 		return PartyStatusRegen, m.RegenTurns
 	case m.Defending:
@@ -1251,6 +1309,102 @@ func SumStats(a, b Stats) Stats {
 		statSetters[s](&out, statTable[s].Get(a)+statTable[s].Get(b))
 	}
 	return out
+}
+
+// applyStatusMod inserts or refreshes a timed modifier in mods, keyed by Source:
+// an existing entry from the same skill is REPLACED (a re-cast refreshes, never
+// double-stacks), a new source is appended. A non-positive Turns is a no-op
+// (returns mods unchanged) so a zero-duration effect leaves no inert entry. The
+// shared insert path behind StampPartyBuff / StampEnemyDebuff — assign the
+// returned (possibly grown) slice back.
+func applyStatusMod(mods []StatusMod, mod StatusMod) []StatusMod {
+	if mod.Turns <= 0 {
+		return mods
+	}
+	for i := range mods {
+		if mods[i].Source == mod.Source {
+			mods[i] = mod
+			return mods
+		}
+	}
+	return append(mods, mod)
+}
+
+// SumStatusMods folds every active mod into one additive (stat, armor, mdef)
+// bundle. The shared core read behind EffectiveStats / EffectiveArmor /
+// EffectiveMDef (party) and EffectiveEnemyStats (enemy), so one stacking rule
+// governs both sides.
+func SumStatusMods(mods []StatusMod) (stats Stats, armor, mdef int) {
+	for _, m := range mods {
+		stats = SumStats(stats, m.Stats)
+		armor += m.Armor
+		mdef += m.MDef
+	}
+	return stats, armor, mdef
+}
+
+// addStatsFloored returns base + delta summed per-stat, each result floored at 0
+// so a negative delta (a debuff, or a future cursed item) can't drive a stat
+// below zero into the combat math (MaxHPFor / damage / accuracy). The single
+// fold behind EffectiveStats' buff layer and EffectiveEnemyStats — one floor
+// rule for both the party and enemy sides. A zero delta is a cheap no-op loop.
+func addStatsFloored(base, delta Stats) Stats {
+	out := base
+	for s := Stat(0); s < StatCount; s++ {
+		d := statTable[s].Get(delta)
+		if d == 0 {
+			continue
+		}
+		next := statTable[s].Get(out) + d
+		if next < 0 {
+			next = 0
+		}
+		statSetters[s](&out, next)
+	}
+	return out
+}
+
+// TickStatusMods decrements every mod's Turns by one and drops the expired ones,
+// returning the surviving slice (in place) plus the Sources that just expired
+// (for "X fades" narration). Drained at the bearer's end-of-turn.
+func TickStatusMods(mods []StatusMod) (remaining []StatusMod, expired []SkillID) {
+	remaining = mods[:0]
+	for _, m := range mods {
+		m.Turns--
+		if m.Turns > 0 {
+			remaining = append(remaining, m)
+		} else {
+			expired = append(expired, m.Source)
+		}
+	}
+	return remaining, expired
+}
+
+// MaxStatusModTurns returns the longest remaining duration across mods (0 when
+// none) — what the single positive-buff pill shows for a multiply-buffed member.
+func MaxStatusModTurns(mods []StatusMod) int {
+	longest := 0
+	for _, m := range mods {
+		if m.Turns > longest {
+			longest = m.Turns
+		}
+	}
+	return longest
+}
+
+// StampPartyBuff adds or refreshes one skill's buff on a member: a StatusMod
+// keyed by source carrying the effect's BuffStats / BuffArmor / BuffMDef for
+// BuffTurns. STACKS with OTHER skills' buffs (they sum in EffectiveStats /
+// EffectiveArmor / EffectiveMDef); re-casting the SAME skill refreshes its entry
+// rather than double-stacking. The single home for Bless / War Banner / Stone
+// Skin / Smoke Bomb's per-member stamp, mirroring the enemy-side StampEnemyDebuff.
+// Returns false (and no-ops) for a nil member or a non-buff effect (BuffTurns 0).
+func StampPartyBuff(m *PartyMember, source SkillID, e SkillEffect) bool {
+	if m == nil || e.BuffTurns <= 0 {
+		return false
+	}
+	m.Buffs = applyStatusMod(m.Buffs, StatusMod{Source: source, Stats: e.BuffStats, Armor: e.BuffArmor, MDef: e.BuffMDef, Turns: e.BuffTurns})
+	return true
 }
 
 // AdjustStat applies delta to the named stat, clamping at zero. Used

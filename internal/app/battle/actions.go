@@ -61,6 +61,14 @@ var skillActionHandlers = map[core.SkillID]actionHandlers{
 	core.SkillFrostbite:     {setup: setupFrostbite, apply: applyFrostbite},
 	core.SkillCorrosiveVial: {setup: setupCorrosiveVial, apply: applyCorrosiveVial},
 	core.SkillConeOfCold:    {setup: setupConeOfCold, apply: applyConeOfCold},
+	core.SkillSunder:        {setup: setupSunder, apply: applySunder},
+	core.SkillTaunt:         {setup: setupTaunt, apply: applyTaunt},
+	core.SkillWarBanner:     {setup: setupWarBanner, apply: applyWarBanner},
+	core.SkillStoneSkin:     {setup: setupStoneSkin, apply: applyStoneSkin},
+	core.SkillBlind:         {setup: setupBlind, apply: applyBlind},
+	core.SkillAegis:         {setup: setupAegis, apply: applyAegis},
+	core.SkillSmokeBomb:     {setup: setupSmokeBomb, apply: applySmokeBomb},
+	core.SkillIceArmor:      {setup: setupIceArmor, apply: applyIceArmor},
 }
 
 // init asserts the player-castable contract: every PlayerCastable skill
@@ -462,19 +470,19 @@ func applyAoEDamage(g *core.GameState, skill core.SkillID, damage, quality int, 
 // Unmapped skills return core.VFXNone (no particles).
 func vfxKindFor(skill core.SkillID) core.VFXKind {
 	switch skill {
-	case core.SkillSwipe, core.SkillWhirlwind, core.SkillCrushingBlow, core.SkillBackstab:
+	case core.SkillSwipe, core.SkillWhirlwind, core.SkillCrushingBlow, core.SkillBackstab, core.SkillSunder:
 		return core.VFXSlash
 	case core.SkillArcBolt:
 		return core.VFXArc
 	case core.SkillFirebolt, core.SkillFireball:
 		return core.VFXEmber
-	case core.SkillSmite:
+	case core.SkillSmite, core.SkillBlind:
 		return core.VFXSmite
 	case core.SkillVenomStrike, core.SkillPoisonCloud:
 		return core.VFXVenom
-	case core.SkillFrostLance, core.SkillFrostbite, core.SkillConeOfCold:
+	case core.SkillFrostLance, core.SkillFrostbite, core.SkillConeOfCold, core.SkillIceArmor:
 		return core.VFXFrost
-	case core.SkillPrayer, core.SkillMassMend, core.SkillBless, core.SkillCleanse, core.SkillSecondWind, core.SkillRenewal:
+	case core.SkillPrayer, core.SkillMassMend, core.SkillBless, core.SkillCleanse, core.SkillSecondWind, core.SkillRenewal, core.SkillWarBanner, core.SkillStoneSkin, core.SkillAegis:
 		return core.VFXHeal
 	case core.SkillSteal:
 		return core.VFXSteal
@@ -1063,10 +1071,10 @@ func applyCripple(g *core.GameState, quality int) bool {
 	actor.AttackBump = core.BumpDuration
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	effect := core.EffectiveSkillEffect(actor, core.SkillCripple)
-	core.StampEnemyDebuff(enemy, effect)
+	core.StampEnemyDebuff(enemy, core.SkillCripple, effect)
 	core.EnqueueEnemyVFX(g, core.VFXVenom, g.Battle.EnemyIndex)
 	setBattleMessage(g, fmt.Sprintf("%s cripples the %s — slowed for %d turns.",
-		actor.Name, core.EnemySingularNoun(*enemy), enemy.BuffTurns))
+		actor.Name, core.EnemySingularNoun(*enemy), effect.BuffTurns))
 	finishActorTurn(g)
 	return true
 }
@@ -1095,7 +1103,7 @@ func applyFrostbite(g *core.GameState, quality int) bool {
 	// The chill lands only on a surviving target — no point debuffing a corpse
 	// (BuffTurns would dangle until clearEnemyStatusesOnDeath). Guaranteed when
 	// alive, so `chilled` == survived for the message arm.
-	chilled := !defeated && core.StampEnemyDebuff(enemy, effect)
+	chilled := !defeated && core.StampEnemyDebuff(enemy, core.SkillFrostbite, effect)
 	setBattleMessage(g, appendCrit(frostbiteMessage(actor.Name, target, damage, quality, defeated, chilled), crit))
 	finishActorTurn(g)
 	return true
@@ -1288,23 +1296,7 @@ func applyBless(g *core.GameState, quality int) bool {
 	actor := &g.Party[g.Battle.CurrentParty]
 	actor.AttackBump = core.BumpDuration
 	effect := core.EffectiveSkillEffect(actor, core.SkillBless)
-	blessed := 0
-	for _, i := range core.AvailablePartyTargets(g.Party) {
-		m := &g.Party[i]
-		m.BuffStats = effect.BuffStats
-		m.BuffTurns = effect.BuffTurns
-		// The caster is the CURRENT actor, so finishActorTurn's end-of-turn drain
-		// (tickBlessAfterPartyTurn) immediately ticks THEIR copy down one before
-		// they act again — costing the caster a turn of their own blessing that
-		// allies (drained on their own later turns) keep. Grant the caster one
-		// extra so every blessed member gets the full effect.BuffTurns of useful
-		// duration. Re-casting overwrites, so this never compounds.
-		if i == g.Battle.CurrentParty {
-			m.BuffTurns++
-		}
-		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillBless), i)
-		blessed++
-	}
+	blessed := stampPartyWideBuff(g, effect, core.SkillBless)
 	// Report the EFFECTIVE per-stat boost (effect.BuffStats.STR — all four
 	// buffed stats share the same magnitude), not the base constant, so the
 	// log line stays honest once Conviction-tree tiers raise it.
@@ -1478,7 +1470,7 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, skillNoun, hitVe
 		// proc roll), stamped via the enemy BuffStats debuff. Skills carrying no
 		// buff (Whirlwind / Arc Bolt / Fireball / Poison Cloud) have BuffTurns 0
 		// and skip it, so this stays inert for them.
-		if !defeated && core.StampEnemyDebuff(enemy, effect) {
+		if !defeated && core.StampEnemyDebuff(enemy, skill, effect) {
 			afflicted++
 		}
 	}
@@ -1517,6 +1509,269 @@ func setupConeOfCold(g *core.GameState) bool {
 // in that shared body) on every surviving enemy.
 func applyConeOfCold(g *core.GameState, quality int) bool {
 	return applyAoEStatusSkill(g, core.SkillConeOfCold, "Cone of Cold", "sweeps over", "billows with no target", quality)
+}
+
+// --- Sunder (Warrior, charge phys + ATB shove) ---
+
+func setupSunder(g *core.GameState) bool {
+	return setupTargetedEnemyAndPay(g, core.SkillSunder, "Sunder")
+}
+
+// applySunder deals STR-scaled phys damage and, on a surviving target, shoves its
+// ATB readiness gauge back (effect.ATBPush) so its next turn lands later — the
+// offensive counterpart to Cripple's persistent SPD debuff: a one-shot tempo
+// swing, not a status. No shove on a kill (the dead slot's gauge is moot).
+func applySunder(g *core.GameState, quality int) bool {
+	actor, target, rawDamage, _, ok := beginSingleTargetSkill(g, core.SkillSunder, quality)
+	if !ok {
+		return false
+	}
+	effect := core.EffectiveSkillEffect(actor, core.SkillSunder)
+	crit, _ := rollSkillCrit(g, actor, core.SkillSunder, quality)
+	rawDamage = applyCritMultiplier(rawDamage, crit, false)
+	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillSunder))
+	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillSunder), g.Battle.EnemyIndex)
+	shoved := !defeated && pushEnemyReadiness(g, g.Battle.EnemyIndex, effect.ATBPush)
+	msg := fmt.Sprintf("%s%s sunders the %s for %d.", qualityTag(quality), actor.Name, core.EnemySingularNoun(target), damage)
+	switch {
+	case defeated:
+		msg = fmt.Sprintf("%s%s sunders the %s for %d — it falls.", qualityTag(quality), actor.Name, core.EnemySingularNoun(target), damage)
+	case shoved:
+		msg = fmt.Sprintf("%s Its turn is shoved back.", msg)
+	}
+	setBattleMessage(g, appendCrit(msg, crit))
+	finishActorTurn(g)
+	return true
+}
+
+// --- Taunt (Warrior, press forced-target pull) ---
+
+func setupTaunt(g *core.GameState) bool {
+	return setupTargetedEnemyAndPay(g, core.SkillTaunt, "Taunt")
+}
+
+// applyTaunt forces the target enemy to attack the casting Warrior on its next
+// turn (Enemy.TauntedBy / TauntTurns, honored by pickEnemyAttackTarget). No
+// damage; the pull always lands (timing grade cosmetic). Re-casting overwrites.
+func applyTaunt(g *core.GameState, quality int) bool {
+	if !ensureAliveTargetOrCancel(g, core.SkillTaunt) {
+		return false
+	}
+	actor := &g.Party[g.Battle.CurrentParty]
+	actor.AttackBump = core.BumpDuration
+	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
+	enemy.TauntedBy = g.Battle.CurrentParty
+	enemy.TauntTurns = core.TauntTurns
+	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillTaunt), g.Battle.EnemyIndex)
+	setBattleMessage(g, fmt.Sprintf("%s taunts the %s — it turns its glare on them.",
+		actor.Name, core.EnemySingularNoun(*enemy)))
+	finishActorTurn(g)
+	return true
+}
+
+// --- War Banner (Warrior, press party-wide STR/VIT rally) ---
+
+func setupWarBanner(g *core.GameState) bool {
+	return chargeMP(g, core.SkillWarBanner, "War Banner")
+}
+
+func applyWarBanner(g *core.GameState, quality int) bool {
+	actor := &g.Party[g.Battle.CurrentParty]
+	actor.AttackBump = core.BumpDuration
+	effect := core.EffectiveSkillEffect(actor, core.SkillWarBanner)
+	rallied := stampPartyWideBuff(g, effect, core.SkillWarBanner)
+	setBattleMessage(g, fmt.Sprintf("%s%s plants a war banner — %d allies rally (+%d STR, +%d Armor, %d turns).",
+		qualityTag(quality), actor.Name, rallied, effect.BuffStats.STR, effect.BuffArmor, effect.BuffTurns))
+	finishActorTurn(g)
+	return true
+}
+
+// --- Stone Skin (Warrior, press single-ally Armor/MDef ward) ---
+
+func setupStoneSkin(g *core.GameState) bool {
+	return setupTargetedAllyAndPay(g, core.SkillStoneSkin, "Stone Skin", "Stone Skin can't reach the fallen.")
+}
+
+func applyStoneSkin(g *core.GameState, quality int) bool {
+	actor := &g.Party[g.Battle.CurrentParty]
+	actor.AttackBump = core.BumpDuration
+	effect := core.EffectiveSkillEffect(actor, core.SkillStoneSkin)
+	target := &g.Party[g.Battle.PartyTarget]
+	eff := effect
+	// If the caster warded themselves, finishActorTurn ticks their buff down
+	// immediately — grant one extra so they get the full intended duration (same
+	// correction the party-wide case documents).
+	if g.Battle.PartyTarget == g.Battle.CurrentParty {
+		eff.BuffTurns++
+	}
+	core.StampPartyBuff(target, core.SkillStoneSkin, eff)
+	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillStoneSkin), g.Battle.PartyTarget)
+	setBattleMessage(g, fmt.Sprintf("%s%s wards %s in stone (+%d Armor, +%d MDef, %d turns).",
+		qualityTag(quality), actor.Name, target.Name, effect.BuffArmor, effect.BuffMDef, effect.BuffTurns))
+	finishActorTurn(g)
+	return true
+}
+
+// --- Blind (Cleric, press enemy accuracy debuff) ---
+
+func setupBlind(g *core.GameState) bool {
+	return setupTargetedEnemyAndPay(g, core.SkillBlind, "Blind")
+}
+
+// applyBlind saps the target's DEX (the stat EnemyHitChance reads) via the enemy
+// debuff mirror so it whiffs more often — the DEX-flavored sibling of Cripple. No
+// damage; the debuff always lands (timing cosmetic); re-casting overwrites.
+func applyBlind(g *core.GameState, quality int) bool {
+	if !ensureAliveTargetOrCancel(g, core.SkillBlind) {
+		return false
+	}
+	actor := &g.Party[g.Battle.CurrentParty]
+	actor.AttackBump = core.BumpDuration
+	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
+	effect := core.EffectiveSkillEffect(actor, core.SkillBlind)
+	core.StampEnemyDebuff(enemy, core.SkillBlind, effect)
+	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillBlind), g.Battle.EnemyIndex)
+	setBattleMessage(g, fmt.Sprintf("%s blinds the %s — its aim falters for %d turns.",
+		actor.Name, core.EnemySingularNoun(*enemy), effect.BuffTurns))
+	finishActorTurn(g)
+	return true
+}
+
+// --- Aegis (Cleric, press single-ally absorb shield) ---
+
+func setupAegis(g *core.GameState) bool {
+	return setupTargetedAllyAndPay(g, core.SkillAegis, "Aegis", "Aegis can't reach the fallen.")
+}
+
+// applyAegis grants the ally a damage-absorbing shield (ShieldHP) that the party
+// damage path spends before HP. Not turn-counted (no caster-tick correction
+// needed); re-casting replaces the pool rather than stacking.
+func applyAegis(g *core.GameState, quality int) bool {
+	actor := &g.Party[g.Battle.CurrentParty]
+	actor.AttackBump = core.BumpDuration
+	effect := core.EffectiveSkillEffect(actor, core.SkillAegis)
+	target := &g.Party[g.Battle.PartyTarget]
+	target.ShieldHP = effect.ShieldHP
+	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillAegis), g.Battle.PartyTarget)
+	setBattleMessage(g, fmt.Sprintf("%s%s raises an aegis over %s — absorbs the next %d damage.",
+		qualityTag(quality), actor.Name, target.Name, target.ShieldHP))
+	finishActorTurn(g)
+	return true
+}
+
+// --- Smoke Bomb (Thief, press party evasion + enemy accuracy loss) ---
+
+func setupSmokeBomb(g *core.GameState) bool {
+	return chargeMP(g, core.SkillSmokeBomb, "Smoke Bomb")
+}
+
+// applySmokeBomb buffs the whole party's DEX (evasion) and saps every living
+// enemy's DEX (accuracy) by the SAME magnitude — one number drives both sides.
+// The party side rides the shared buff bundle; the enemy side mirrors it (negated)
+// onto each foe's debuff. Both overwrite any existing buff/debuff (no-stack rule).
+func applySmokeBomb(g *core.GameState, quality int) bool {
+	actor := &g.Party[g.Battle.CurrentParty]
+	actor.AttackBump = core.BumpDuration
+	effect := core.EffectiveSkillEffect(actor, core.SkillSmokeBomb)
+	buffed := stampPartyWideBuff(g, effect, core.SkillSmokeBomb)
+	enemyDebuff := core.SkillEffect{BuffStats: core.Stats{DEX: -effect.BuffStats.DEX}, BuffTurns: effect.BuffTurns}
+	blinded := 0
+	for slot, m := range core.BattleMembers(g) {
+		if !m.Alive {
+			continue
+		}
+		if core.StampEnemyDebuff(core.BattleMemberAt(g, slot), core.SkillSmokeBomb, enemyDebuff) {
+			blinded++
+		}
+	}
+	setBattleMessage(g, fmt.Sprintf("%s%s drops a smoke bomb — %d allies gain evasion, %d foes lose their aim.",
+		qualityTag(quality), actor.Name, buffed, blinded))
+	finishActorTurn(g)
+	return true
+}
+
+// --- Ice Armor (Wizard, charge self frost ward) ---
+
+func setupIceArmor(g *core.GameState) bool {
+	return chargeMP(g, core.SkillIceArmor, "Ice Armor")
+}
+
+// applyIceArmor sheathes the caster in frost: while IceArmorTurns runs they gain
+// MDef (EffectiveMDef) and chill any enemy that lands a basic attack on them
+// (resolveEnemyAttacker). Self-only; grant +1 turn to offset finishActorTurn's
+// immediate end-of-turn tick so the caster nets the full duration (Bless rule).
+func applyIceArmor(g *core.GameState, quality int) bool {
+	actor := &g.Party[g.Battle.CurrentParty]
+	actor.AttackBump = core.BumpDuration
+	effect := core.EffectiveSkillEffect(actor, core.SkillIceArmor)
+	actor.IceArmorTurns = effect.IceArmorTurns + 1
+	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillIceArmor), g.Battle.CurrentParty)
+	setBattleMessage(g, fmt.Sprintf("%s%s sheathes in ice — +%d MDef, attackers chilled for %d turns.",
+		qualityTag(quality), actor.Name, core.IceArmorMDef, effect.IceArmorTurns))
+	finishActorTurn(g)
+	return true
+}
+
+// stampPartyWideBuff stamps the tier-folded party buff on every living,
+// non-ingested member (caster included) via core.StampPartyBuff, granting the
+// caster one extra turn of duration to offset finishActorTurn's immediate
+// end-of-turn tick (the correction Bless documents). Queues the buff VFX per
+// member and returns the count buffed. Shared by Bless / War Banner / Smoke Bomb.
+func stampPartyWideBuff(g *core.GameState, effect core.SkillEffect, skill core.SkillID) int {
+	buffed := 0
+	for _, i := range core.AvailablePartyTargets(g.Party) {
+		eff := effect
+		// The caster acts NOW, so finishActorTurn's end-of-turn drain ticks THEIR
+		// buff down one before they act again — grant them one extra turn so every
+		// member nets the full intended duration. Re-casting refreshes, never compounds.
+		if i == g.Battle.CurrentParty {
+			eff.BuffTurns++
+		}
+		core.StampPartyBuff(&g.Party[i], skill, eff)
+		core.EnqueuePartyVFX(g, vfxKindFor(skill), i)
+		buffed++
+	}
+	return buffed
+}
+
+// tickIceArmorAfterPartyTurn drains the Ice Armor ward at the end of the warded
+// member's own turn — same non-damaging seam as Bless / Renewal. The MDef bonus
+// and chill-on-hit stay live while IceArmorTurns > 0; this only counts it down.
+func tickIceArmorAfterPartyTurn(g *core.GameState, actor core.ActorRef) {
+	tickPartyStatusCounter(g, actor, func(m *core.PartyMember) *int { return &m.IceArmorTurns }, "%s's ice armor melts.")
+}
+
+// tickEnemyTauntAfterTurn drains a taunt at the end of the taunted enemy's own
+// turn — so a "attack the Warrior next turn" pull lasts exactly its window. The
+// enemy-side mirror of the buff drains; no-ops on party actors and untaunted foes.
+func tickEnemyTauntAfterTurn(g *core.GameState, actor core.ActorRef) {
+	if actor.IsParty {
+		return
+	}
+	enemy := core.BattleMemberAt(g, actor.Index)
+	if enemy == nil || !enemy.Alive || enemy.TauntTurns <= 0 {
+		return
+	}
+	enemy.TauntTurns--
+}
+
+// forcedTauntTarget returns the party slot the CURRENTLY-ATTACKING enemy
+// (g.Battle.EnemyAttacker) is taunted onto, if the pull is live AND the taunter is
+// still a reachable target (alive, not ingested). ok=false falls the caller back
+// to normal round-robin targeting — a dead / swallowed / lapsed taunt is ignored.
+func forcedTauntTarget(g *core.GameState) (int, bool) {
+	enemy := core.BattleMemberAt(g, g.Battle.EnemyAttacker)
+	if enemy == nil || enemy.TauntTurns <= 0 {
+		return -1, false
+	}
+	t := enemy.TauntedBy
+	if t < 0 || t >= len(g.Party) {
+		return -1, false
+	}
+	if g.Party[t].HP <= 0 || g.Party[t].Ingested {
+		return -1, false
+	}
+	return t, true
 }
 
 // --- Poison Cloud (Thief, sequence AoE toxin + per-target Poison) ---
@@ -1888,28 +2143,43 @@ func tickConfusedAfterPartyTurn(g *core.GameState, actor core.ActorRef) {
 // zeroed wholesale on battle exit by ClearPartyTransientStatuses — leaving the
 // stale magnitude here is harmless because EffectiveStats gates entirely on
 // BuffTurns > 0.
+// tickBlessAfterPartyTurn drains every stackable buff on the member at the end
+// of their own turn, dropping the expired ones and narrating each fade — the
+// stackable replacement for the old single Bless counter (so a member holding
+// Bless + War Banner + Stone Skin ticks all three independently).
 func tickBlessAfterPartyTurn(g *core.GameState, actor core.ActorRef) {
-	tickPartyStatusCounter(g, actor, func(m *core.PartyMember) *int { return &m.BuffTurns }, "%s's blessing fades.")
+	if !actor.ValidPartyIndex(g.Party) {
+		return
+	}
+	m := &g.Party[actor.Index]
+	if m.HP <= 0 || len(m.Buffs) == 0 {
+		return
+	}
+	remaining, expired := core.TickStatusMods(m.Buffs)
+	m.Buffs = remaining
+	for _, s := range expired {
+		setBattleMessage(g, fmt.Sprintf("%s's %s fades.", m.Name, core.SkillName(s)))
+	}
 }
 
-// tickEnemyBuffAfterTurn drains an enemy's buff/debuff counter at the end of its
-// own turn — the enemy-side mirror of tickBlessAfterPartyTurn. While BuffTurns >
-// 0, EffectiveEnemyStats folds BuffStats into the enemy's combat stats (a player
-// debuff like Cripple stamps NEGATIVE deltas); this only counts the timer down.
-// BuffStats is left intact while the counter runs and gates entirely on
-// BuffTurns > 0, so a stale magnitude after expiry is inert (zeroed on death by
-// clearEnemyStatusesOnDeath). No-ops on party actors and on a dead enemy (its
-// turn-end housekeeping may run after a poison tick killed it this same step).
+// tickEnemyBuffAfterTurn drains every stackable debuff on the enemy at the end
+// of its own turn, dropping the expired ones — the enemy-side mirror of
+// tickBlessAfterPartyTurn (so an enemy under Cripple + Blind ticks both
+// independently). EffectiveEnemyStats folds the summed deltas while they run.
+// No-ops on party actors and on a dead enemy (its turn-end housekeeping may run
+// after a poison tick killed it this same step). One "shakes off" line when the
+// last debuff clears keeps the log from spamming a fade per stat.
 func tickEnemyBuffAfterTurn(g *core.GameState, actor core.ActorRef) {
 	if actor.IsParty {
 		return
 	}
 	enemy := core.BattleMemberAt(g, actor.Index)
-	if enemy == nil || !enemy.Alive || enemy.BuffTurns <= 0 {
+	if enemy == nil || !enemy.Alive || len(enemy.Debuffs) == 0 {
 		return
 	}
-	enemy.BuffTurns--
-	if enemy.BuffTurns == 0 {
+	remaining, expired := core.TickStatusMods(enemy.Debuffs)
+	enemy.Debuffs = remaining
+	if len(expired) > 0 && len(remaining) == 0 {
 		setBattleMessage(g, fmt.Sprintf("%s shakes off the affliction.", core.TheEnemy(core.EnemyInfoFor(*enemy))))
 	}
 }
@@ -2096,6 +2366,18 @@ func applyPartyDamage(g *core.GameState, member *core.PartyMember, rawAmount int
 	// member.Armor stays authored (0 today on the party side); items
 	// add to it via ArmorBonus / MDefBonus on their ItemDefinition.
 	amount := mitigateDamage(rawAmount, tag, core.EffectiveArmor(*member), core.EffectiveMDef(*member))
+	// Aegis shield soaks post-mitigation damage BEFORE HP: spend the pool first,
+	// only the overflow reaches HP. A fully-absorbed hit reaches HP as 0 — so the
+	// recoil / wake / DoT-proc bookkeeping below all read the post-shield `amount`
+	// and a turned-aside blow flinches nothing.
+	if amount > 0 && member.ShieldHP > 0 {
+		absorbed := amount
+		if absorbed > member.ShieldHP {
+			absorbed = member.ShieldHP
+		}
+		member.ShieldHP -= absorbed
+		amount -= absorbed
+	}
 	// Flash + HP-floor (shared with the enemy path + the poison tick).
 	died := core.ApplyFlatDamage(&member.HP, &member.DamageFlash, amount)
 	// Reactionary knockback + wake — only on real damage so a fully-
@@ -2170,9 +2452,10 @@ func damagePartyMemberDefendable(g *core.GameState, partyIndex, rawAmount int, t
 // not hunting for scattered field assignments. (The sets differ by design: see
 // the doc comment above for which statuses each actor can carry into death.)
 func clearEnemyStatusesOnDeath(enemy *core.Enemy) {
-	for _, c := range []*int{&enemy.BurnTurns, &enemy.SleepTurns, &enemy.PoisonTurns, &enemy.StunTurns, &enemy.BuffTurns} {
+	for _, c := range []*int{&enemy.BurnTurns, &enemy.SleepTurns, &enemy.PoisonTurns, &enemy.StunTurns} {
 		*c = 0
 	}
+	enemy.Debuffs = nil
 }
 
 func clearPartyStatusesOnDeath(member *core.PartyMember) {
@@ -2444,6 +2727,16 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 			setBattleMessage(g, fmt.Sprintf("%s drains life from %s (+%d HP).", core.TheEnemy(def), g.Party[target].Name, heal))
 		}
 	}
+	// Ice Armor reprisal: a connecting basic attack chills its attacker when the
+	// struck defender is frost-warded (IceArmorTurns > 0) — an SPD debuff via the
+	// enemy debuff mirror, the reactive sibling of Frostbite. Lands on contact
+	// regardless of how much got through (even a Defended-to-0 hit "struck" the
+	// ward); overwrites any existing enemy debuff (no-stack, like the chills).
+	if g.Party[target].IceArmorTurns > 0 && enemy.HP > 0 {
+		if core.StampEnemyDebuff(enemy, core.SkillIceArmor, core.SkillEffect{BuffStats: core.Stats{SPD: -core.IceArmorChillSPD}, BuffTurns: core.IceArmorChillTurns}) {
+			setBattleMessage(g, fmt.Sprintf("%s's ice armor chills the %s.", g.Party[target].Name, core.EnemySingularNoun(*enemy)))
+		}
+	}
 	return true
 }
 
@@ -2452,6 +2745,14 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 // PartyTarget) so the player's heal/item ally cycling doesn't shift who
 // enemies attack next.
 func pickEnemyAttackTarget(g *core.GameState) int {
+	// Taunt override: a live pull forces the acting enemy onto the taunter, as
+	// long as that ally is still reachable. Falls through to the round-robin
+	// otherwise (taunter died / got ingested / the taunt lapsed). The cursor is
+	// still advanced to the forced slot so post-taunt targeting resumes from there.
+	if forced, ok := forcedTauntTarget(g); ok {
+		g.Battle.EnemyAttackCursor = forced
+		return forced
+	}
 	target := core.PeekNextEnemyTarget(g)
 	if target >= 0 {
 		g.Battle.EnemyAttackCursor = target

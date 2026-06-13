@@ -250,8 +250,9 @@ func ClearPartyTransientStatuses(party []PartyMember) {
 		party[i].WebbedTurns = 0
 		party[i].ConfusedTurns = 0
 		party[i].Defending = false
-		party[i].BuffTurns = 0
-		party[i].BuffStats = Stats{}
+		party[i].Buffs = nil
+		party[i].ShieldHP = 0
+		party[i].IceArmorTurns = 0
 		party[i].RegenTurns = 0
 		party[i].RegenPerTurn = 0
 	}

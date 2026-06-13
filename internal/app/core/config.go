@@ -792,6 +792,52 @@ const (
 	// Frostbite's single bolt, routed through applyAoEStatusSkill. Appended at the
 	// END (saved-map-key contract).
 	SkillConeOfCold
+	// SkillSunder is the Warrior's tempo strike (Battle Sense tree's "Sunder"
+	// node). A STR-scaled phys hit that ALSO shoves the target's ATB readiness
+	// back (effect.ATBPush) so its next turn comes later — the offensive
+	// counterpart to the Thief's Cripple, delivered with damage. Appended at the
+	// END (saved-map-key contract).
+	SkillSunder
+	// SkillTaunt is the Warrior's aggro pull (Battle Sense tree's "Taunt" node).
+	// Single enemy target, no damage: it forces that enemy to attack the casting
+	// Warrior on its next turn (Enemy.TauntedBy / TauntTurns, honored by
+	// pickEnemyAttackTarget). A single-rank utility (NoUpgrades, like Scan).
+	// Appended at the END (saved-map-key contract).
+	SkillTaunt
+	// SkillWarBanner is the Warrior's rally (Ancestral Call tree's "War Banner"
+	// node). No target — it stamps a party-wide STR/VIT-flavored stat buff (the
+	// martial counterpart to the Cleric's Bless), using the shared party buff
+	// bundle (BuffStats/BuffTurns). Appended at the END (saved-map-key contract).
+	SkillWarBanner
+	// SkillStoneSkin is the Warrior's ward (Ancestral Call tree's "Stone Skin"
+	// node). Single ally target, no damage: it grants temporary Armor + MDef via
+	// the party buff bundle's BuffArmor/BuffMDef fields (folded by
+	// EffectiveArmor/EffectiveMDef while BuffTurns runs). Appended at the END
+	// (saved-map-key contract).
+	SkillStoneSkin
+	// SkillBlind is the Cleric's accuracy debuff (Radiance tree's "Blind" node).
+	// Single enemy target, no damage: it saps the foe's DEX (the stat
+	// EnemyHitChance reads) via the enemy BuffStats debuff mirror, so the blinded
+	// enemy whiffs more often. The DEX-flavored sibling of the Thief's Cripple.
+	// Appended at the END (saved-map-key contract).
+	SkillBlind
+	// SkillAegis is the Cleric's shield (Conviction tree's "Aegis" node). Single
+	// ally target, no damage: it grants a damage-absorbing shield (PartyMember
+	// .ShieldHP) that soaks incoming hits before HP until depleted or the battle
+	// ends. Appended at the END (saved-map-key contract).
+	SkillAegis
+	// SkillSmokeBomb is the Thief's screen (Shadow Arts tree's "Smoke Bomb" node).
+	// No target — it buffs the whole party's DEX (evasion) AND saps every living
+	// enemy's DEX (accuracy) by the same magnitude for a short duration: one
+	// symmetric BuffStats.DEX value drives both sides. Appended at the END
+	// (saved-map-key contract).
+	SkillSmokeBomb
+	// SkillIceArmor is the Wizard's frost ward (Cryomancy tree's "Ice Armor"
+	// node). Self-buff, no target: while it lasts (PartyMember.IceArmorTurns) the
+	// caster gains MDef AND chills any enemy that lands a basic attack on them
+	// (the reactive counterpart to Frostbite's chill). Appended at the END
+	// (saved-map-key contract).
+	SkillIceArmor
 )
 
 // SkillTag classifies a skill for damage-type interactions (armor,
@@ -914,6 +960,99 @@ const (
 	ConeOfColdSPDReduction = 1
 	// ConeOfColdChillTurns is the per-target chill duration in the target's turns.
 	ConeOfColdChillTurns = 2
+)
+
+// Sunder (Warrior) tuning — a STR-scaled phys hit that also shoves the target's
+// ATB readiness back so its next turn lands later. The damage rolls/scales like
+// any melee skill; the push is a one-shot subtraction from the enemy's carry-over
+// readiness gauge (g.Battle.Readiness), distinct from Cripple's persistent SPD
+// debuff. Modest base damage — the tempo swing is the point, not the numbers.
+const (
+	// SunderDamageBase is the tier-0 base damage (STR-scaled by SkillKindMelee).
+	SunderDamageBase = 1
+	// SunderATBPush is the tier-0 readiness knocked off the target's ATB gauge
+	// on a landed hit. Expressed in the same units as ATBReadyThreshold so a
+	// push of ~half the threshold roughly delays the foe by half a turn.
+	SunderATBPush = 50
+)
+
+// Taunt (Warrior) tuning — forces the target to attack the Warrior on its next
+// turn. Single-rank utility (no damage, no tier ladder).
+const (
+	// TauntTurns is how many of the taunted enemy's turns the forced-target
+	// holds. 1 = "attack the Warrior next turn"; the counter drains at the
+	// enemy's end-of-turn so the pull lasts exactly that window.
+	TauntTurns = 1
+)
+
+// War Banner (Warrior) tuning — a party-wide STR + Armor rally (the martial
+// mirror of Bless). Uses the shared party buff bundle, so it overwrites / is
+// overwritten by any other party buff on a member (no-stack rule). STR sharpens
+// the party's blows; the flat Armor (BuffArmor, folded by EffectiveArmor while
+// BuffTurns runs) steels them against phys hits. VIT is deliberately NOT used —
+// MaxHP is a stored field that buffs don't re-derive, so a VIT buff would lift
+// no live roll; Armor is the working stand-in for the banner's "toughness".
+const (
+	// WarBannerPerStat is the base STR boost (tier 0).
+	WarBannerPerStat = 1
+	// WarBannerArmor is the base flat Armor granted to every ally (tier 0).
+	WarBannerArmor = 2
+	// WarBannerTurns is the base duration (tier 0) in each ally's own turns.
+	WarBannerTurns = 4
+)
+
+// Stone Skin (Warrior) tuning — temporary Armor + MDef on one ally via the party
+// buff bundle's BuffArmor/BuffMDef fields, gated by the shared BuffTurns counter.
+const (
+	// StoneSkinArmor / StoneSkinMDef are the tier-0 flat Armor / MDef granted.
+	StoneSkinArmor = 3
+	StoneSkinMDef  = 2
+	// StoneSkinTurns is the base duration in the recipient's own turns.
+	StoneSkinTurns = 3
+)
+
+// Blind (Cleric) tuning — saps the target enemy's DEX (the stat EnemyHitChance
+// reads) so it whiffs more often. The DEX-flavored sibling of Cripple; stored as
+// a negative BuffStats.DEX on the enemy debuff mirror.
+const (
+	// BlindDEXReduction is the base DEX sapped (tier 0); a negative BuffStats.DEX.
+	BlindDEXReduction = 3
+	// BlindTurns is the base duration in the target's own turns.
+	BlindTurns = 3
+)
+
+// Aegis (Cleric) tuning — a damage-absorbing shield on one ally. The pool soaks
+// post-mitigation damage before HP until it's spent or the battle ends.
+const (
+	// AegisShieldBase is the tier-0 absorb pool (HP-equivalent points).
+	AegisShieldBase = 8
+)
+
+// Smoke Bomb (Thief) tuning — one symmetric DEX magnitude drives both sides: the
+// whole party gains it (evasion via DEX-driven RollDodge) and every living enemy
+// loses it (accuracy via DEX-driven EnemyHitChance), for a short duration.
+const (
+	// SmokeBombDEX is the base DEX swing (tier 0): +DEX on the party, -DEX on
+	// each enemy.
+	SmokeBombDEX = 2
+	// SmokeBombTurns is the base duration in turns (each side ticks on its own
+	// turns). Short — it's a getaway screen, not a standing buff.
+	SmokeBombTurns = 2
+)
+
+// Ice Armor (Wizard) tuning — a self-buff that grants MDef and chills any enemy
+// that lands a basic attack on the warded caster. The reactive counterpart to
+// Frostbite's chill; tracked by PartyMember.IceArmorTurns.
+const (
+	// IceArmorMDef is the flat MDef granted while the ward stands.
+	IceArmorMDef = 3
+	// IceArmorTurnsBase is the base duration (tier 0) in the caster's own turns.
+	IceArmorTurnsBase = 3
+	// IceArmorChillSPD / IceArmorChillTurns are the SPD chill stamped on an
+	// attacker that strikes the warded caster (the enemy BuffStats debuff mirror,
+	// same shape as Cone of Cold's per-target chill).
+	IceArmorChillSPD   = 1
+	IceArmorChillTurns = 2
 )
 
 // Second Wind (Warrior) + Renewal (Cleric) heal tuning. Both base values fold

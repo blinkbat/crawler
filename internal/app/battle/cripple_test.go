@@ -22,11 +22,11 @@ func TestApplyCripple_LowersEnemySPD(t *testing.T) {
 	}
 
 	enemy := core.BattleMembers(g)[0]
-	if enemy.BuffTurns != core.CrippleTurns {
-		t.Errorf("BuffTurns = %d, want %d", enemy.BuffTurns, core.CrippleTurns)
+	if got := core.MaxStatusModTurns(enemy.Debuffs); got != core.CrippleTurns {
+		t.Errorf("debuff turns = %d, want %d", got, core.CrippleTurns)
 	}
-	if enemy.BuffStats.SPD != -core.CrippleSPDReduction {
-		t.Errorf("BuffStats.SPD = %d, want %d", enemy.BuffStats.SPD, -core.CrippleSPDReduction)
+	if got := enemyDebuffStats(enemy).SPD; got != -core.CrippleSPDReduction {
+		t.Errorf("debuff SPD = %d, want %d", got, -core.CrippleSPDReduction)
 	}
 	if got := core.EffectiveEnemyStats(enemy).SPD; got != baseSPD-core.CrippleSPDReduction {
 		t.Errorf("EffectiveEnemyStats.SPD = %d, want %d", got, baseSPD-core.CrippleSPDReduction)
@@ -37,23 +37,22 @@ func TestApplyCripple_LowersEnemySPD(t *testing.T) {
 // per the enemy's own turn and the SPD reduction stays live until it expires.
 func TestTickEnemyBuffAfterTurn_DrainsDebuff(t *testing.T) {
 	g := newTestState()
-	g.Packs[0].Members[0].BuffTurns = 2
-	g.Packs[0].Members[0].BuffStats = core.Stats{SPD: -2}
+	core.StampEnemyDebuff(&g.Packs[0].Members[0], core.SkillCripple, core.SkillEffect{BuffStats: core.Stats{SPD: -2}, BuffTurns: 2})
 	actor := core.ActorRef{IsParty: false, Index: 0}
 
 	base := core.EnemyInfoFor(g.Packs[0].Members[0]).Stats.SPD
 
 	tickEnemyBuffAfterTurn(g, actor)
-	if g.Packs[0].Members[0].BuffTurns != 1 {
-		t.Fatalf("after one tick BuffTurns = %d, want 1", g.Packs[0].Members[0].BuffTurns)
+	if got := core.MaxStatusModTurns(g.Packs[0].Members[0].Debuffs); got != 1 {
+		t.Fatalf("after one tick debuff turns = %d, want 1", got)
 	}
 	if got := core.EffectiveEnemyStats(g.Packs[0].Members[0]).SPD; got != base-2 {
 		t.Errorf("debuff dropped early at 1 turn left: EffectiveEnemyStats.SPD = %d, want %d", got, base-2)
 	}
 
 	tickEnemyBuffAfterTurn(g, actor)
-	if g.Packs[0].Members[0].BuffTurns != 0 {
-		t.Errorf("after second tick BuffTurns = %d, want 0", g.Packs[0].Members[0].BuffTurns)
+	if got := core.MaxStatusModTurns(g.Packs[0].Members[0].Debuffs); got != 0 {
+		t.Errorf("after second tick debuff turns = %d, want 0", got)
 	}
 	if got := core.EffectiveEnemyStats(g.Packs[0].Members[0]).SPD; got != base {
 		t.Errorf("expired debuff still applying: EffectiveEnemyStats.SPD = %d, want base %d", got, base)
@@ -66,8 +65,7 @@ func TestTickEnemyBuffAfterTurn_DrainsDebuff(t *testing.T) {
 func TestActorSpeed_CrippleNeverZero(t *testing.T) {
 	g := newTestState()
 	base := core.EnemyInfoFor(g.Packs[0].Members[0]).Stats.SPD
-	g.Packs[0].Members[0].BuffTurns = 3
-	g.Packs[0].Members[0].BuffStats = core.Stats{SPD: -(base + 5)} // over-deep debuff
+	core.StampEnemyDebuff(&g.Packs[0].Members[0], core.SkillCripple, core.SkillEffect{BuffStats: core.Stats{SPD: -(base + 5)}, BuffTurns: 3}) // over-deep debuff
 	actor := core.ActorRef{IsParty: false, Index: 0}
 
 	if got := actorSpeed(g, actor); got < 1 {

@@ -711,6 +711,23 @@ type Stats struct {
 	SPD int
 }
 
+// StatusMod is one active timed stat/defense modifier on a combatant — the unit
+// of the STACKABLE buff/debuff system. Multiple mods coexist and SUM: a party
+// member can hold Bless (STR/DEX/INT/WIS) and War Banner (STR + Armor) at once,
+// an enemy can hold Cripple (SPD) and Blind (DEX) at once. Keyed by Source, so
+// re-casting the SAME skill REFRESHES its entry (no double-stack) while DIFFERENT
+// skills add independent entries. Turns ticks down at the bearer's end-of-turn
+// and the mod is dropped at 0. Stats deltas are additive (negative = debuff);
+// Armor / MDef are flat defensive grants (Stone Skin / War Banner). Combat-only:
+// the party side is wiped on battle exit, the enemy side dies with the enemy.
+type StatusMod struct {
+	Source SkillID
+	Stats  Stats
+	Armor  int
+	MDef   int
+	Turns  int
+}
+
 type PartyMember struct {
 	Class PartyClass
 	Name  string
@@ -801,18 +818,31 @@ type PartyMember struct {
 	ConfusedTurns int
 
 	// BuffTurns / BuffStats carry an active stat buff (the Cleric's Bless is
-	// the first user). While BuffTurns > 0, BuffStats is folded into
-	// EffectiveStats so every stat-driven roll (damage / accuracy / dodge /
-	// crit / heal / status-resist) reads the boosted value. Ticks at the END
-	// of the buffed member's own turn (like Webbed / Confused) via
-	// drainNonDamagingPartyStatuses. Combat-only — ClearPartyTransientStatuses
-	// wipes it on battle exit. Positive, not a threat, so the party card paints
-	// it as the low-priority PartyStatusBlessed. Does not stack: re-applying
-	// replaces both fields. The first user buffs the offensive / support stats
-	// (STR/DEX/INT/WIS) and deliberately leaves VIT (would desync MaxHP) and
-	// SPD (would perturb the ATB turn-order machinery) untouched.
-	BuffTurns int
-	BuffStats Stats
+	// Buffs holds the member's active STACKABLE buffs (Bless, War Banner, Stone
+	// Skin, Smoke Bomb) as keyed StatusMod entries — see StatusMod. DIFFERENT
+	// skills coexist and SUM; re-casting the SAME skill refreshes its entry. The
+	// summed Stats fold into EffectiveStats (every stat-driven roll), Armor into
+	// EffectiveArmor, MDef into EffectiveMDef, all only while live. Each entry
+	// ticks at the END of the buffed member's own turn (like Webbed / Confused)
+	// via drainNonDamagingPartyStatuses and is dropped at 0. Combat-only —
+	// ClearPartyTransientStatuses wipes the slice on battle exit. Positive, not a
+	// threat, so any active buff paints the low-priority PartyStatusBlessed pill.
+	Buffs []StatusMod
+
+	// ShieldHP is a damage-absorbing pool (the Cleric's Aegis). The party damage
+	// path spends it BEFORE HP — incoming damage eats the shield first, and only
+	// the overflow reaches HP. Lasts until the pool is depleted or the battle
+	// ends (cleared by ClearPartyTransientStatuses); not turn-counted, unlike the
+	// buff bundle. Independent of BuffTurns, so Aegis coexists with Bless.
+	ShieldHP int
+
+	// IceArmorTurns is the Wizard's reactive frost ward (Ice Armor). While > 0 the
+	// member gains IceArmorMDef (folded by EffectiveMDef) AND any enemy that lands
+	// a basic attack on them is chilled (an SPD debuff stamped on the attacker).
+	// Ticks at the END of the warded member's own turn like the buff bundle, but
+	// is a SEPARATE counter (so Ice Armor coexists with Bless / Stone Skin).
+	// Cleared on battle exit by ClearPartyTransientStatuses.
+	IceArmorTurns int
 
 	// RegenTurns / RegenPerTurn carry an active heal-over-time (the Cleric's
 	// Renewal — the game's first HoT). While RegenTurns > 0, the member heals
@@ -988,14 +1018,23 @@ type Enemy struct {
 	// of the enemy's static definition.
 	PoisonTurns int
 
-	// BuffTurns / BuffStats carry a stat buff/debuff — the enemy-side mirror of
-	// the PartyMember fields. While BuffTurns > 0, BuffStats folds into the
-	// enemy's combat stats via EffectiveEnemyStats. A player debuff (the Thief's
-	// Cripple) stamps NEGATIVE deltas; a future enemy self-buff would stamp
-	// positive. Decrements at the end of the enemy's own turn
-	// (tickEnemyBuffAfterTurn), cleared on death by clearEnemyStatusesOnDeath.
-	BuffTurns int
-	BuffStats Stats
+	// Debuffs holds the enemy's active STACKABLE debuffs (Cripple SPD, Blind DEX,
+	// Smoke Bomb DEX, Frostbite / Cone of Cold / Ice Armor chill SPD) as keyed
+	// StatusMod entries — see StatusMod. The enemy-side mirror of PartyMember.Buffs:
+	// DIFFERENT skills coexist and SUM, the same refreshes. The summed Stats fold
+	// into EffectiveEnemyStats (player debuffs stamp NEGATIVE deltas) while live;
+	// each entry ticks at the end of the enemy's own turn (tickEnemyBuffAfterTurn)
+	// and is dropped at 0, all cleared on death by clearEnemyStatusesOnDeath.
+	Debuffs []StatusMod
+
+	// TauntTurns / TauntedBy force this enemy's basic-attack target (the
+	// Warrior's Taunt). While TauntTurns > 0, pickEnemyAttackTarget returns
+	// TauntedBy (the taunter's party slot) instead of the round-robin pick, as
+	// long as that ally is still a living available target. Drains at the enemy's
+	// end-of-turn (tickEnemyTauntAfterTurn), cleared on death. A lapsed or
+	// unreachable taunt falls back to normal targeting.
+	TauntTurns int
+	TauntedBy  int
 
 	// SkillCastCount tracks per-battle uses of any skill whose
 	// definition carries a non-zero PerBattleCastLimit. Read by

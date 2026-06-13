@@ -1,0 +1,277 @@
+{
+  "version": 1,
+  "mapID": "forest_path",
+  "playerTileX": 19,
+  "playerTileZ": 11,
+  "playerFacing": 3,
+  "stepCount": 242,
+  "gold": 11,
+  "party": [
+    {
+      "Class": 0,
+      "Name": "Warrior",
+      "Stats": {
+        "STR": 6,
+        "DEX": 2,
+        "INT": 1,
+        "WIS": 1,
+        "VIT": 5,
+        "SPD": 3
+      },
+      "HP": 10,
+      "MaxHP": 10,
+      "MP": 0,
+      "MaxMP": 4,
+      "Armor": 0,
+      "Equipped": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "AttackBump": 0,
+      "DamageFlash": 0,
+      "HitKnockback": 0,
+      "Defending": false,
+      "PoisonTurns": 0,
+      "SleepTurns": 0,
+      "StunTurns": 0,
+      "Ingested": false,
+      "IngestedBy": 0,
+      "WebbedTurns": 0,
+      "ConfusedTurns": 0,
+      "BuffTurns": 0,
+      "BuffStats": {
+        "STR": 0,
+        "DEX": 0,
+        "INT": 0,
+        "WIS": 0,
+        "VIT": 0,
+        "SPD": 0
+      },
+      "BuffArmor": 0,
+      "BuffMDef": 0,
+      "ShieldHP": 0,
+      "IceArmorTurns": 0,
+      "RegenTurns": 0,
+      "RegenPerTurn": 0,
+      "Level": 1,
+      "XP": 40,
+      "PendingLevelUps": 0,
+      "SkillPoints": 0,
+      "SkillTiers": {
+        "1": 0
+      },
+      "TreeRanks": {
+        "cleave": 1
+      },
+      "SkillCursor": 0
+    },
+    {
+      "Class": 1,
+      "Name": "Cleric",
+      "Stats": {
+        "STR": 2,
+        "DEX": 2,
+        "INT": 2,
+        "WIS": 6,
+        "VIT": 4,
+        "SPD": 4
+      },
+      "HP": 8,
+      "MaxHP": 8,
+      "MP": 1,
+      "MaxMP": 9,
+      "Armor": 0,
+      "Equipped": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "AttackBump": 0,
+      "DamageFlash": 0,
+      "HitKnockback": 0,
+      "Defending": false,
+      "PoisonTurns": 0,
+      "SleepTurns": 0,
+      "StunTurns": 0,
+      "Ingested": false,
+      "IngestedBy": 0,
+      "WebbedTurns": 0,
+      "ConfusedTurns": 0,
+      "BuffTurns": 0,
+      "BuffStats": {
+        "STR": 0,
+        "DEX": 0,
+        "INT": 0,
+        "WIS": 0,
+        "VIT": 0,
+        "SPD": 0
+      },
+      "BuffArmor": 0,
+      "BuffMDef": 0,
+      "ShieldHP": 0,
+      "IceArmorTurns": 0,
+      "RegenTurns": 0,
+      "RegenPerTurn": 0,
+      "Level": 1,
+      "XP": 40,
+      "PendingLevelUps": 0,
+      "SkillPoints": 0,
+      "SkillTiers": {
+        "2": 0
+      },
+      "TreeRanks": {
+        "prayer": 1
+      },
+      "SkillCursor": 0
+    },
+    {
+      "Class": 2,
+      "Name": "Thief",
+      "Stats": {
+        "STR": 3,
+        "DEX": 6,
+        "INT": 2,
+        "WIS": 1,
+        "VIT": 4,
+        "SPD": 6
+      },
+      "HP": 8,
+      "MaxHP": 8,
+      "MP": 2,
+      "MaxMP": 5,
+      "Armor": 0,
+      "Equipped": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "AttackBump": 0,
+      "DamageFlash": 0,
+      "HitKnockback": 0,
+      "Defending": false,
+      "PoisonTurns": 0,
+      "SleepTurns": 0,
+      "StunTurns": 0,
+      "Ingested": false,
+      "IngestedBy": 0,
+      "WebbedTurns": 0,
+      "ConfusedTurns": 0,
+      "BuffTurns": 0,
+      "BuffStats": {
+        "STR": 0,
+        "DEX": 0,
+        "INT": 0,
+        "WIS": 0,
+        "VIT": 0,
+        "SPD": 0
+      },
+      "BuffArmor": 0,
+      "BuffMDef": 0,
+      "ShieldHP": 0,
+      "IceArmorTurns": 0,
+      "RegenTurns": 0,
+      "RegenPerTurn": 0,
+      "Level": 1,
+      "XP": 40,
+      "PendingLevelUps": 0,
+      "SkillPoints": 0,
+      "SkillTiers": {
+        "10": 0
+      },
+      "TreeRanks": {
+        "venom-strike": 1
+      },
+      "SkillCursor": 0
+    },
+    {
+      "Class": 3,
+      "Name": "Wizard",
+      "Stats": {
+        "STR": 1,
+        "DEX": 2,
+        "INT": 6,
+        "WIS": 2,
+        "VIT": 4,
+        "SPD": 4
+      },
+      "HP": 8,
+      "MaxHP": 8,
+      "MP": 0,
+      "MaxMP": 10,
+      "Armor": 0,
+      "Equipped": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "AttackBump": 0,
+      "DamageFlash": 0,
+      "HitKnockback": 0,
+      "Defending": false,
+      "PoisonTurns": 0,
+      "SleepTurns": 0,
+      "StunTurns": 0,
+      "Ingested": false,
+      "IngestedBy": 0,
+      "WebbedTurns": 0,
+      "ConfusedTurns": 0,
+      "BuffTurns": 0,
+      "BuffStats": {
+        "STR": 0,
+        "DEX": 0,
+        "INT": 0,
+        "WIS": 0,
+        "VIT": 0,
+        "SPD": 0
+      },
+      "BuffArmor": 0,
+      "BuffMDef": 0,
+      "ShieldHP": 0,
+      "IceArmorTurns": 0,
+      "RegenTurns": 0,
+      "RegenPerTurn": 0,
+      "Level": 1,
+      "XP": 40,
+      "PendingLevelUps": 0,
+      "SkillPoints": 0,
+      "SkillTiers": {
+        "11": 0
+      },
+      "TreeRanks": {
+        "frost-lance": 1
+      },
+      "SkillCursor": 0
+    }
+  ],
+  "inventory": [
+    {
+      "Kind": 14,
+      "Count": 3
+    },
+    {
+      "Kind": 15,
+      "Count": 2
+    }
+  ],
+  "quests": null,
+  "bestiary": {
+    "0": {
+      "kills": 4
+    },
+    "1": {
+      "kills": 1
+    },
+    "2": {
+      "kills": 1
+    }
+  }
+}

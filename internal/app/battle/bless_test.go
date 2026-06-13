@@ -25,11 +25,11 @@ func TestApplyBless_BuffsLivingPartyAndSkipsDownedIngested(t *testing.T) {
 
 	// Sol (slot 3) is living and not the drained queue actor → full buff.
 	sol := g.Party[3]
-	if sol.BuffTurns != core.BlessBuffTurns {
-		t.Errorf("Sol BuffTurns = %d, want %d", sol.BuffTurns, core.BlessBuffTurns)
+	if got := core.MaxStatusModTurns(sol.Buffs); got != core.BlessBuffTurns {
+		t.Errorf("Sol buff turns = %d, want %d", got, core.BlessBuffTurns)
 	}
-	if sol.BuffStats.INT != core.BlessBuffPerStat {
-		t.Errorf("Sol BuffStats.INT = %d, want %d", sol.BuffStats.INT, core.BlessBuffPerStat)
+	if got := partyBuffStats(sol).INT; got != core.BlessBuffPerStat {
+		t.Errorf("Sol buff INT = %d, want %d", got, core.BlessBuffPerStat)
 	}
 	if got := core.EffectiveStats(sol).INT; got != solBaseINT+core.BlessBuffPerStat {
 		t.Errorf("Sol EffectiveStats.INT = %d, want %d", got, solBaseINT+core.BlessBuffPerStat)
@@ -40,22 +40,22 @@ func TestApplyBless_BuffsLivingPartyAndSkipsDownedIngested(t *testing.T) {
 	// current actor). This isolated test routes finishActorTurn's drain onto the
 	// downed queue-cursor actor (Vex, slot 0) instead, so it observes the
 	// PRE-drain value: BlessBuffTurns+1.
-	if g.Party[1].BuffTurns != core.BlessBuffTurns+1 {
-		t.Errorf("caster BuffTurns = %d, want %d (BlessBuffTurns+1, pre-self-drain)", g.Party[1].BuffTurns, core.BlessBuffTurns+1)
+	if got := core.MaxStatusModTurns(g.Party[1].Buffs); got != core.BlessBuffTurns+1 {
+		t.Errorf("caster buff turns = %d, want %d (BlessBuffTurns+1, pre-self-drain)", got, core.BlessBuffTurns+1)
 	}
 	// And that extra turn nets out: one self-drain (what finishActorTurn does to
 	// the caster on the cast turn in real play) leaves the caster at exactly
 	// BlessBuffTurns — the same useful duration the allies got, not one fewer.
 	tickBlessAfterPartyTurn(g, core.ActorRef{IsParty: true, Index: 1})
-	if g.Party[1].BuffTurns != core.BlessBuffTurns {
-		t.Errorf("caster BuffTurns after one self-drain = %d, want %d (must match allies, not be one short)", g.Party[1].BuffTurns, core.BlessBuffTurns)
+	if got := core.MaxStatusModTurns(g.Party[1].Buffs); got != core.BlessBuffTurns {
+		t.Errorf("caster buff turns after one self-drain = %d, want %d (must match allies, not be one short)", got, core.BlessBuffTurns)
 	}
 	// Downed and ingested members get nothing.
-	if g.Party[0].BuffTurns != 0 {
-		t.Errorf("downed Vex got BuffTurns %d, want 0", g.Party[0].BuffTurns)
+	if len(g.Party[0].Buffs) != 0 {
+		t.Errorf("downed Vex got a buff: %+v, want none", g.Party[0].Buffs)
 	}
-	if g.Party[2].BuffTurns != 0 {
-		t.Errorf("ingested Nyx got BuffTurns %d, want 0", g.Party[2].BuffTurns)
+	if len(g.Party[2].Buffs) != 0 {
+		t.Errorf("ingested Nyx got a buff: %+v, want none", g.Party[2].Buffs)
 	}
 }
 
@@ -63,13 +63,12 @@ func TestApplyBless_BuffsLivingPartyAndSkipsDownedIngested(t *testing.T) {
 // the member's turn and the magnitude stays live until the counter hits zero.
 func TestTickBlessAfterPartyTurn_DrainsBuff(t *testing.T) {
 	g := newTestState()
-	g.Party[3].BuffTurns = 2
-	g.Party[3].BuffStats = core.Stats{STR: 1, DEX: 1, INT: 1, WIS: 1}
+	core.StampPartyBuff(&g.Party[3], core.SkillBless, core.SkillEffect{BuffStats: core.Stats{STR: 1, DEX: 1, INT: 1, WIS: 1}, BuffTurns: 2})
 	actor := core.ActorRef{IsParty: true, Index: 3}
 
 	tickBlessAfterPartyTurn(g, actor)
-	if g.Party[3].BuffTurns != 1 {
-		t.Fatalf("after one tick BuffTurns = %d, want 1", g.Party[3].BuffTurns)
+	if got := core.MaxStatusModTurns(g.Party[3].Buffs); got != 1 {
+		t.Fatalf("after one tick buff turns = %d, want 1", got)
 	}
 	// Stats stay boosted while the counter still runs.
 	if got := core.EffectiveStats(g.Party[3]).STR; got != g.Party[3].Stats.STR+1 {
@@ -77,8 +76,8 @@ func TestTickBlessAfterPartyTurn_DrainsBuff(t *testing.T) {
 	}
 
 	tickBlessAfterPartyTurn(g, actor)
-	if g.Party[3].BuffTurns != 0 {
-		t.Errorf("after second tick BuffTurns = %d, want 0", g.Party[3].BuffTurns)
+	if got := core.MaxStatusModTurns(g.Party[3].Buffs); got != 0 {
+		t.Errorf("after second tick buff turns = %d, want 0", got)
 	}
 	// Counter expired → the boost no longer applies.
 	if got := core.EffectiveStats(g.Party[3]).STR; got != g.Party[3].Stats.STR {

@@ -583,50 +583,38 @@ func EnemyInfoFor(enemy Enemy) EnemyDefinition {
 	return def
 }
 
-// EffectiveEnemyStats returns the enemy's combat stats with any active
-// buff/debuff folded in — the enemy-side mirror of EffectiveStats. While
-// BuffTurns > 0, BuffStats is added per-stat (a player debuff stamps NEGATIVE
-// deltas, e.g. the Thief's Cripple lowering SPD; a future enemy self-buff would
-// stamp positive), each stat floored at 0 like the party reader so a debuff
-// can't drive a stat negative into the combat math. The base stats stay clean
-// on the definition; combat reads (dodge / crit / turn-rate / status-resist)
-// route through here so every kind of stat delta lands. Cheap fast-path when no
-// buff is active (the common case).
+// EffectiveEnemyStats returns the enemy's combat stats with every active debuff
+// folded in — the enemy-side mirror of EffectiveStats. The summed Debuffs stat
+// deltas are added per-stat (player debuffs stamp NEGATIVE deltas — Cripple SPD,
+// Blind DEX, and so on — and DIFFERENT skills' debuffs SUM), each stat floored at
+// 0 like the party reader so a debuff can't drive a stat negative into the combat
+// math. The base stats stay clean on the definition; combat reads (dodge / crit /
+// turn-rate / status-resist) route through here so every kind of stat delta lands.
+// Cheap fast-path when no debuff is active (the common case).
 func EffectiveEnemyStats(e Enemy) Stats {
 	out := EnemyInfoFor(e).Stats
-	if e.BuffTurns <= 0 {
+	if len(e.Debuffs) == 0 {
 		return out
 	}
-	for s := Stat(0); s < StatCount; s++ {
-		delta := statTable[s].Get(e.BuffStats)
-		if delta == 0 {
-			continue
-		}
-		next := statTable[s].Get(out) + delta
-		if next < 0 {
-			next = 0
-		}
-		statSetters[s](&out, next)
-	}
-	return out
+	delta, _, _ := SumStatusMods(e.Debuffs)
+	return addStatsFloored(out, delta)
 }
 
-// StampEnemyDebuff applies a skill's stat debuff (its negative BuffStats) onto
-// the enemy for effect.BuffTurns of the enemy's turns — the single home for the
-// enemy-side buff/debuff stamp that Cripple, Frostbite, and Cone of Cold all
-// share. Returns false (and no-ops) when the target is nil or the skill carries
-// no buff (BuffTurns == 0), so a damage skill with no chill component skips it
-// cleanly and callers can use the bool to drive their "chilled / afflicted"
-// log. Re-stamping overwrites rather than stacks, matching the no-stack rule;
-// EffectiveEnemyStats folds the stamped delta while the counter runs. Callers
-// that deal damage first should gate on `!defeated` so a killed target keeps no
-// dangling debuff (the kill check is a battle concept this pure helper can't see).
-func StampEnemyDebuff(e *Enemy, effect SkillEffect) bool {
+// StampEnemyDebuff adds or refreshes a skill's stat debuff (its negative
+// BuffStats) on the enemy for effect.BuffTurns of the enemy's turns — the single
+// home for the enemy-side stamp that Cripple, Blind, Frostbite, Cone of Cold,
+// Smoke Bomb, and the Ice Armor chill all share. Returns false (and no-ops) when
+// the target is nil or the skill carries no debuff (BuffTurns == 0), so a damage
+// skill with no chill component skips it cleanly and callers can use the bool to
+// drive their "chilled / afflicted" log. STACKS with OTHER skills' debuffs (they
+// sum in EffectiveEnemyStats); re-stamping the SAME skill refreshes its entry.
+// Callers that deal damage first should gate on `!defeated` so a killed target
+// keeps no dangling debuff (the kill check is a battle concept this can't see).
+func StampEnemyDebuff(e *Enemy, source SkillID, effect SkillEffect) bool {
 	if e == nil || effect.BuffTurns <= 0 {
 		return false
 	}
-	e.BuffStats = effect.BuffStats
-	e.BuffTurns = effect.BuffTurns
+	e.Debuffs = applyStatusMod(e.Debuffs, StatusMod{Source: source, Stats: effect.BuffStats, Armor: effect.BuffArmor, MDef: effect.BuffMDef, Turns: effect.BuffTurns})
 	return true
 }
 

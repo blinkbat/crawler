@@ -59,16 +59,15 @@ func TestApplyCleanse_CuresTargetButKeepsBuff(t *testing.T) {
 	g.Battle.PartyTarget = 3  // cleanse Sol (slot 3, not the drained queue actor)
 	g.Party[3].PoisonTurns = 3
 	g.Party[3].SleepTurns = 2
-	g.Party[3].BuffTurns = 2
-	g.Party[3].BuffStats = core.Stats{STR: 1}
+	core.StampPartyBuff(&g.Party[3], core.SkillBless, core.SkillEffect{BuffStats: core.Stats{STR: 1}, BuffTurns: 2})
 
 	applyCleanse(g, core.TimingQualityGood)
 
 	if g.Party[3].PoisonTurns != 0 || g.Party[3].SleepTurns != 0 {
 		t.Errorf("Cleanse left debuffs on the target: %+v", g.Party[3])
 	}
-	if g.Party[3].BuffTurns != 2 {
-		t.Errorf("Cleanse wrongly stripped the target's Bless buff (BuffTurns=%d, want 2)", g.Party[3].BuffTurns)
+	if got := core.MaxStatusModTurns(g.Party[3].Buffs); got != 2 {
+		t.Errorf("Cleanse wrongly stripped the target's Bless buff (turns=%d, want 2)", got)
 	}
 }
 

@@ -109,6 +109,10 @@ func walkEquipped(m PartyMember, fn func(def ItemDefinition)) {
 func EffectiveArmor(m PartyMember) int {
 	armor := m.Armor
 	walkEquipped(m, func(def ItemDefinition) { armor += def.ArmorBonus })
+	// Active buffs (Stone Skin, War Banner) fold their summed flat Armor on top —
+	// different buffs stack; an un-buffed member has no mods and skips the sum.
+	_, buffArmor, _ := SumStatusMods(m.Buffs)
+	armor += buffArmor
 	if armor < 0 {
 		armor = 0
 	}
@@ -121,6 +125,14 @@ func EffectiveArmor(m PartyMember) int {
 func EffectiveMDef(m PartyMember) int {
 	mdef := MagicDefense(m.Stats)
 	walkEquipped(m, func(def ItemDefinition) { mdef += def.MDefBonus })
+	// Active buffs (Stone Skin) fold their summed flat MDef in; Ice Armor's MDef
+	// rides its own separate IceArmorTurns counter — both add only while their
+	// respective ward stands, so an un-warded member adds nothing.
+	_, _, buffMDef := SumStatusMods(m.Buffs)
+	mdef += buffMDef
+	if m.IceArmorTurns > 0 {
+		mdef += IceArmorMDef
+	}
 	if mdef < 0 {
 		mdef = 0
 	}
@@ -154,24 +166,12 @@ func EffectiveStats(m PartyMember) Stats {
 			statSetters[s](&out, next)
 		}
 	})
-	// An active stat buff (Cleric's Bless) folds on top of equipment, on the
-	// same per-stat floor-at-0 rule. Combat-only and per-turn-ticked, so this
-	// read re-renders the boosted sheet only while BuffTurns is running; a
-	// member with no buff (the common case) skips the loop entirely.
-	if m.BuffTurns > 0 {
-		for s := Stat(0); s < StatCount; s++ {
-			delta := statTable[s].Get(m.BuffStats)
-			if delta == 0 {
-				continue
-			}
-			next := statTable[s].Get(out) + delta
-			if next < 0 {
-				next = 0
-			}
-			statSetters[s](&out, next)
-		}
-	}
-	return out
+	// Active stat buffs (Bless, War Banner, Smoke Bomb) fold on top of equipment,
+	// on the same per-stat floor-at-0 rule (addStatsFloored, shared with the
+	// enemy side). Their summed deltas re-render the boosted sheet only while
+	// buffs are live; an un-buffed member sums to zero and the fold is a no-op.
+	buffStats, _, _ := SumStatusMods(m.Buffs)
+	return addStatsFloored(out, buffStats)
 }
 
 // EquipPickerRow is one selectable row in an equip slot's item picker

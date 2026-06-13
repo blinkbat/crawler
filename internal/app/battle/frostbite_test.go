@@ -28,11 +28,11 @@ func TestApplyFrostbite_DamagesAndChillsSurvivor(t *testing.T) {
 	if enemy.HP >= 999 {
 		t.Errorf("target took no damage: HP = %d, want < 999", enemy.HP)
 	}
-	if enemy.BuffTurns != core.FrostbiteChillTurns {
-		t.Errorf("chill BuffTurns = %d, want %d", enemy.BuffTurns, core.FrostbiteChillTurns)
+	if got := core.MaxStatusModTurns(enemy.Debuffs); got != core.FrostbiteChillTurns {
+		t.Errorf("chill turns = %d, want %d", got, core.FrostbiteChillTurns)
 	}
-	if enemy.BuffStats.SPD != -core.FrostbiteSPDReduction {
-		t.Errorf("chill BuffStats.SPD = %d, want %d", enemy.BuffStats.SPD, -core.FrostbiteSPDReduction)
+	if got := enemyDebuffStats(enemy).SPD; got != -core.FrostbiteSPDReduction {
+		t.Errorf("chill SPD = %d, want %d", got, -core.FrostbiteSPDReduction)
 	}
 	if got := core.EffectiveEnemyStats(enemy).SPD; got != baseSPD-core.FrostbiteSPDReduction {
 		t.Errorf("EffectiveEnemyStats.SPD = %d, want %d", got, baseSPD-core.FrostbiteSPDReduction)
@@ -55,7 +55,7 @@ func TestApplyFrostbite_NoChillOnKill(t *testing.T) {
 	if enemy.Alive {
 		t.Fatalf("target should be dead after Frostbite on 1 HP")
 	}
-	if enemy.BuffTurns != 0 {
-		t.Errorf("killed target carries a chill: BuffTurns = %d, want 0", enemy.BuffTurns)
+	if len(enemy.Debuffs) != 0 {
+		t.Errorf("killed target carries a chill: %+v, want none", enemy.Debuffs)
 	}
 }

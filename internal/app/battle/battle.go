@@ -382,6 +382,28 @@ func actorSpeed(g *core.GameState, actor core.ActorRef) int {
 	return spd
 }
 
+// pushEnemyReadiness shoves an enemy's carry-over ATB readiness gauge backwards
+// by `amount` (floored at 0), delaying when it next crosses the threshold — the
+// Warrior's Sunder. A one-shot edit to the persisted Readiness map, distinct from
+// the SPD debuff (which lowers the per-tick rate every round); this just resets
+// the clock once. No-ops on a non-positive push (a tier-0 / un-pushing caller
+// skips the map touch). Returns true when the gauge actually moved.
+func pushEnemyReadiness(g *core.GameState, slot, amount int) bool {
+	if amount <= 0 {
+		return false
+	}
+	ref := core.ActorRef{IsParty: false, Index: slot}
+	if g.Battle.Readiness == nil {
+		g.Battle.Readiness = map[core.ActorRef]int{}
+	}
+	cur := g.Battle.Readiness[ref] - amount
+	if cur < 0 {
+		cur = 0
+	}
+	g.Battle.Readiness[ref] = cur
+	return true
+}
+
 // actorAppearsBefore reports whether `ref` occupies any queue slot strictly
 // before `cursor`. ActorRef is a comparable {IsParty, Index} value, so this is
 // an exact identity match. Used by the skip loop to tick an ingested member's
@@ -517,6 +539,7 @@ func drainNonDamagingPartyStatuses(g *core.GameState, actor core.ActorRef) {
 	tickWebbedAfterPartyTurn(g, actor)
 	tickConfusedAfterPartyTurn(g, actor)
 	tickBlessAfterPartyTurn(g, actor)
+	tickIceArmorAfterPartyTurn(g, actor)
 	tickRegenAfterPartyTurn(g, actor)
 }
 
@@ -528,6 +551,7 @@ func drainNonDamagingPartyStatuses(g *core.GameState, actor core.ActorRef) {
 // enemy self-buff / regen plugs in here.
 func drainNonDamagingEnemyStatuses(g *core.GameState, actor core.ActorRef) {
 	tickEnemyBuffAfterTurn(g, actor)
+	tickEnemyTauntAfterTurn(g, actor)
 }
 
 // tickSkipStatusAtTurnStart drains one tick from a skip-this-turn status

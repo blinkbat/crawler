@@ -110,15 +110,15 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 	ClassWarrior: {
 		linearTree("Battle Sense", "Disable, hinder, intercept, react", []SkillTreeNode{
 			act("shield-bash", "Shield Bash", "Phys hit with a chance to Stun on good timing.", SkillCrushingBlow),
-			nd("taunt", "Taunt", "Force the target enemy to attack the Warrior next turn.", 1),
+			actOnce("taunt", "Taunt", "Force the target enemy to attack the Warrior next turn.", SkillTaunt),
 			nd("guard", "Guard", "Cover an ally this round; their incoming hits redirect to you.", 3),
-			nd("sunder", "Sunder", "Phys hit that pushes the target's turn later.", 3),
+			act("sunder", "Sunder", "Phys hit that pushes the target's turn later.", SkillSunder),
 			nd("riposte", "Riposte", "Passive: counter when you dodge or a Guarded ally is struck.", 1),
 		}),
 		linearTree("Ancestral Call", "Utility, light heal, protection, summons", []SkillTreeNode{
 			act("second-wind", "Second Wind", "A flat self-heal — catch your breath mid-fight.", SkillSecondWind),
-			nd("war-banner", "War Banner", "Plant a banner: party gains stats while it stands.", 3),
-			nd("stone-skin", "Stone Skin", "Grant an ally temporary Armor and MDef.", 3),
+			act("war-banner", "War Banner", "Plant a banner: party gains stats while it stands.", SkillWarBanner),
+			act("stone-skin", "Stone Skin", "Grant an ally temporary Armor and MDef.", SkillStoneSkin),
 			nd("ancestral-spirit", "Ancestral Spirit", "Summon a warrior shade to fight beside the party.", 1),
 			nd("last-stand", "Last Stand", "Capstone: once per battle, survive a lethal blow at 1 HP.", 1),
 		}),
@@ -135,7 +135,7 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 		linearTree("Radiance", "Holy offense, smite, anti-status", []SkillTreeNode{
 			act("smite", "Smite", "Magic burst; bonus damage to undead.", SkillSmite),
 			nd("searing-light", "Searing Light", "A radiant damage-over-time.", 3),
-			nd("blind", "Blind", "Lower an enemy's accuracy for several turns.", 3),
+			act("blind", "Blind", "Lower an enemy's accuracy for several turns.", SkillBlind),
 			nd("consecrate", "Consecrate", "AoE radiant damage across the enemy pack.", 3),
 			nd("judgment", "Judgment", "Capstone: execute low-HP enemies for massive damage.", 1),
 		}),
@@ -148,7 +148,7 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 		}),
 		linearTree("Conviction", "Buffs, wards, retribution", []SkillTreeNode{
 			act("blessing", "Blessing", "Buff the whole party's STR, DEX, INT and WIS for a few turns.", SkillBless),
-			nd("aegis", "Aegis", "Shield an ally against the next hit.", 3),
+			act("aegis", "Aegis", "Shield an ally against the next hit.", SkillAegis),
 			nd("retribution", "Retribution", "Passive: attackers take reflected damage.", 3),
 			nd("martyrs-bond", "Martyr's Bond", "Redirect an ally's incoming damage to the Cleric.", 1),
 			nd("bulwark-of-faith", "Bulwark of Faith", "Capstone: party-wide Armor and MDef aura.", 1),
@@ -160,7 +160,7 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 			act("backstab", "Backstab", "High-crit opener; damage doubles on Excellent timing.", SkillBackstab),
 			actOnce("scan", "Scan", "Inspect a foe: reveal its exact HP for the rest of the battle.", SkillScan),
 			act("cripple", "Cripple", "Sap an enemy's SPD, slowing how often it acts.", SkillCripple),
-			nd("smoke-bomb", "Smoke Bomb", "Party gains evasion; enemies lose accuracy for a turn.", 3),
+			act("smoke-bomb", "Smoke Bomb", "Party gains evasion; enemies lose accuracy for a turn.", SkillSmokeBomb),
 			nd("vanish", "Vanish", "Become untargetable for one turn and drop aggro.", 1),
 			nd("shadow-step", "Shadow Step", "Passive: bonus damage when acting before the target.", 3),
 		}),
@@ -192,7 +192,7 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 			act("frost-lance", "Frost Lance", "Magic hit with a Stun proc on good timing.", SkillFrostLance),
 			act("frostbite", "Frostbite", "Frost magic that always chills, reducing the target's SPD.", SkillFrostbite),
 			act("cone-of-cold", "Cone of Cold", "Frost across the whole pack that chills every enemy, lowering SPD.", SkillConeOfCold),
-			nd("ice-armor", "Ice Armor", "Buff: attackers are chilled; gain MDef.", 3),
+			act("ice-armor", "Ice Armor", "Buff: attackers are chilled; gain MDef.", SkillIceArmor),
 			nd("shatter", "Shatter", "Capstone: bonus damage against frozen or stunned foes.", 1),
 		}),
 		linearTree("Storm", "Lightning, chain, arcane utility", []SkillTreeNode{

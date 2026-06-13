@@ -36,16 +36,14 @@ func TestBlessRegistryShape(t *testing.T) {
 // touches the stats Bless deliberately omits.
 func TestEffectiveStats_FoldsActiveBuff(t *testing.T) {
 	m := PartyMember{Stats: Stats{STR: 3, DEX: 2, INT: 1, WIS: 4, VIT: 5, SPD: 3}}
-	m.BuffStats = Stats{STR: 2, DEX: 2, INT: 2, WIS: 2}
 
-	// Counter at 0: the buff is inert, EffectiveStats == base.
-	m.BuffTurns = 0
+	// No active buff: EffectiveStats == base.
 	if got := EffectiveStats(m); got != m.Stats {
 		t.Errorf("inactive buff leaked: EffectiveStats = %+v, want base %+v", got, m.Stats)
 	}
 
-	// Counter running: each declared stat lifts, the rest stay put.
-	m.BuffTurns = 2
+	// One active buff: each declared stat lifts, the rest stay put.
+	StampPartyBuff(&m, SkillBless, SkillEffect{BuffStats: Stats{STR: 2, DEX: 2, INT: 2, WIS: 2}, BuffTurns: 2})
 	got := EffectiveStats(m)
 	if got.STR != 5 || got.DEX != 4 || got.INT != 3 || got.WIS != 6 {
 		t.Errorf("active buff fold = %+v, want STR5 DEX4 INT3 WIS6", got)
@@ -55,24 +53,49 @@ func TestEffectiveStats_FoldsActiveBuff(t *testing.T) {
 	}
 }
 
-// TestClearPartyTransientStatuses_ClearsBuff guards that the buff is combat-
-// only — both the counter and the magnitude are wiped on battle exit.
-func TestClearPartyTransientStatuses_ClearsBuff(t *testing.T) {
-	party := []PartyMember{{HP: 5, BuffTurns: 3, BuffStats: Stats{STR: 2, WIS: 1}}}
-	ClearPartyTransientStatuses(party)
-	if party[0].BuffTurns != 0 || party[0].BuffStats != (Stats{}) {
-		t.Errorf("buff survived battle exit: turns=%d stats=%+v", party[0].BuffTurns, party[0].BuffStats)
+// TestEffectiveStats_StacksMultipleBuffs is the core of the stackable system:
+// DIFFERENT skills' buffs coexist and SUM (their stat deltas, Armor, and MDef),
+// while re-casting the SAME skill refreshes its entry rather than double-stacking.
+func TestEffectiveStats_StacksMultipleBuffs(t *testing.T) {
+	m := PartyMember{Stats: Stats{STR: 3, DEX: 2}}
+	StampPartyBuff(&m, SkillBless, SkillEffect{BuffStats: Stats{STR: 1, DEX: 1}, BuffTurns: 3})
+	StampPartyBuff(&m, SkillWarBanner, SkillEffect{BuffStats: Stats{STR: 2}, BuffArmor: 2, BuffTurns: 4})
+
+	if got := EffectiveStats(m); got.STR != 6 || got.DEX != 3 { // STR 3+1+2, DEX 2+1
+		t.Errorf("stacked stats = STR%d/DEX%d, want STR6/DEX3", got.STR, got.DEX)
+	}
+	if a := EffectiveArmor(m); a != 2 {
+		t.Errorf("War Banner armor not folded alongside Bless: EffectiveArmor = %d, want 2", a)
+	}
+	// Re-cast Bless: refresh, not double-stack — STR stays 6.
+	StampPartyBuff(&m, SkillBless, SkillEffect{BuffStats: Stats{STR: 1, DEX: 1}, BuffTurns: 3})
+	if got := EffectiveStats(m); got.STR != 6 {
+		t.Errorf("re-cast double-stacked: STR = %d, want 6", got.STR)
 	}
 }
 
-// TestPartyStatus_BlessedPrecedence checks the buff surfaces as the lone
+// TestClearPartyTransientStatuses_ClearsBuff guards that buffs are combat-only —
+// the whole stack is wiped on battle exit.
+func TestClearPartyTransientStatuses_ClearsBuff(t *testing.T) {
+	party := []PartyMember{{HP: 5}}
+	StampPartyBuff(&party[0], SkillBless, SkillEffect{BuffStats: Stats{STR: 2, WIS: 1}, BuffTurns: 3})
+	ClearPartyTransientStatuses(party)
+	if len(party[0].Buffs) != 0 {
+		t.Errorf("buff survived battle exit: %+v", party[0].Buffs)
+	}
+}
+
+// TestPartyStatus_BlessedPrecedence checks any active buff surfaces as the lone
 // positive counted status, but any real threat (here Poison) outranks it so
 // the player still sees the danger.
 func TestPartyStatus_BlessedPrecedence(t *testing.T) {
-	if kind, turns := PartyStatus(PartyMember{HP: 5, BuffTurns: 3}); kind != PartyStatusBlessed || turns != 3 {
+	blessed := PartyMember{HP: 5}
+	StampPartyBuff(&blessed, SkillBless, SkillEffect{BuffStats: Stats{STR: 1}, BuffTurns: 3})
+	if kind, turns := PartyStatus(blessed); kind != PartyStatusBlessed || turns != 3 {
 		t.Errorf("blessed member status = (%v,%d), want (Blessed,3)", kind, turns)
 	}
-	if kind, _ := PartyStatus(PartyMember{HP: 5, BuffTurns: 3, PoisonTurns: 2}); kind != PartyStatusPoisoned {
+	blessed.PoisonTurns = 2
+	if kind, _ := PartyStatus(blessed); kind != PartyStatusPoisoned {
 		t.Errorf("poison+buff status = %v, want Poisoned (threat outranks buff)", kind)
 	}
 	if got := PartyStatusLabel(PartyStatusBlessed); got != "BLESSED" {

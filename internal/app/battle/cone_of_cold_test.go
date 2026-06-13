@@ -28,11 +28,11 @@ func TestApplyConeOfCold_ChillsWholePack(t *testing.T) {
 		if e.HP >= 999 {
 			t.Errorf("enemy %d took no damage: HP = %d", i, e.HP)
 		}
-		if e.BuffTurns != core.ConeOfColdChillTurns {
-			t.Errorf("enemy %d chill BuffTurns = %d, want %d", i, e.BuffTurns, core.ConeOfColdChillTurns)
+		if got := core.MaxStatusModTurns(e.Debuffs); got != core.ConeOfColdChillTurns {
+			t.Errorf("enemy %d chill turns = %d, want %d", i, got, core.ConeOfColdChillTurns)
 		}
-		if e.BuffStats.SPD != -core.ConeOfColdSPDReduction {
-			t.Errorf("enemy %d chill BuffStats.SPD = %d, want %d", i, e.BuffStats.SPD, -core.ConeOfColdSPDReduction)
+		if got := enemyDebuffStats(e).SPD; got != -core.ConeOfColdSPDReduction {
+			t.Errorf("enemy %d chill SPD = %d, want %d", i, got, -core.ConeOfColdSPDReduction)
 		}
 	}
 }
@@ -52,7 +52,7 @@ func TestApplyConeOfCold_NoChillOnKilledTarget(t *testing.T) {
 	if e.Alive {
 		t.Fatal("target should be dead after Cone of Cold on 1 HP")
 	}
-	if e.BuffTurns != 0 {
-		t.Errorf("killed target carries a chill: BuffTurns = %d, want 0", e.BuffTurns)
+	if len(e.Debuffs) != 0 {
+		t.Errorf("killed target carries a chill: %+v, want none", e.Debuffs)
 	}
 }
