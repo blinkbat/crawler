@@ -994,7 +994,14 @@ func Update(s *State, dt float32) Action {
 		return ActionNone
 	}
 
-	updateHotkeys(s)
+	// An open right-click context menu owns ALL input until it closes. Its own
+	// handler (updateContextMenu, inside updateMouse) absorbs the mouse and the
+	// Esc/click-outside close — but the keyboard hotkeys run BEFORE updateMouse,
+	// so gate them here too. Otherwise number keys, Ctrl+Z/Y, Alt+1..7, and
+	// Space/Backspace would mutate the map behind the open menu.
+	if !s.contextMenu.open {
+		updateHotkeys(s)
+	}
 	updateMouse(s)
 
 	if s.testRequested {

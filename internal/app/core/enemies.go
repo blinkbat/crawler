@@ -468,7 +468,19 @@ var enemyDefinitions = []EnemyDefinition{
 // enemyByKind is the O(1) lookup map for enemyDefinitions, built once at
 // init. EnemyInfo is called per-frame from the renderer (roster, popups),
 // so the map matches the partyClassByID / skillByID pattern in party.go.
-var enemyByKind = BuildRegistry(enemyDefinitions, func(d EnemyDefinition) EnemyKind { return d.Kind })
+//
+// Values are POINTERS into the enemyDefinitions backing array (stable — a
+// package-level slice never reallocates) rather than copies, so the narrow
+// field accessors (enemyGoverningDef → EnemyName / EnemySingularName /
+// enemyBaseStats) read a single field through the pointer instead of copying
+// the ~200-byte EnemyDefinition out of the map on every per-frame call.
+var enemyByKind = func() map[EnemyKind]*EnemyDefinition {
+	m := make(map[EnemyKind]*EnemyDefinition, len(enemyDefinitions))
+	for i := range enemyDefinitions {
+		m[enemyDefinitions[i].Kind] = &enemyDefinitions[i]
+	}
+	return m
+}()
 
 // Probability fields ride a [0, 1] contract — values past 1 roll
 // "always" which is usually a typo (a designer meant 0.5 and wrote 5).
@@ -532,6 +544,13 @@ func EnemyKinds() []EnemyDefinition {
 	return out
 }
 
+// EnemyKindCount returns the number of registered enemy kinds WITHOUT the
+// defensive whole-slice copy EnemyKinds() makes — for per-frame callers (e.g.
+// the bestiary tally header) that only need the count, not the definitions.
+func EnemyKindCount() int {
+	return len(enemyDefinitions)
+}
+
 // TheEnemy returns the article-prefixed singular form of an enemy ("The
 // rat", "The goblin mage"). Combat log lines repeated "The " + def.
 // SingularNoun a dozen times — centralising here means a future enemy
@@ -546,13 +565,15 @@ func TheEnemy(def EnemyDefinition) string {
 // for callers that want to handle an unknown kind rather than take EnemyInfo's
 // panic (e.g. a tool validating externally-sourced kinds before use).
 func EnemyInfoOk(kind EnemyKind) (EnemyDefinition, bool) {
-	def, ok := enemyByKind[kind]
-	return def, ok
+	if def, ok := enemyByKind[kind]; ok {
+		return *def, true
+	}
+	return EnemyDefinition{}, false
 }
 
 func EnemyInfo(kind EnemyKind) EnemyDefinition {
 	if def, ok := enemyByKind[kind]; ok {
-		return def
+		return *def
 	}
 	// Unreachable for valid data: every declared kind has an enemyDefinitions
 	// row (enemyByKind is built from it), and the only externally-sourced
@@ -568,9 +589,8 @@ func EnemyInfo(kind EnemyKind) EnemyDefinition {
 // applied if set — used wherever the renderer / log text needs descriptive
 // strings about the live enemy.
 func EnemyInfoFor(enemy Enemy) EnemyDefinition {
-	def := EnemyInfo(enemy.Kind)
+	def := *enemyGoverningDef(&enemy)
 	if enemy.HasDefinitionOverride {
-		def = enemy.DefinitionOverride
 		def.Kind = enemy.Kind
 	}
 	if enemy.MaxHP > 0 {
@@ -583,6 +603,33 @@ func EnemyInfoFor(enemy Enemy) EnemyDefinition {
 	return def
 }
 
+// enemyGoverningDef returns a POINTER to the definition that governs this
+// enemy's display/combat fields WITHOUT copying the ~200-byte EnemyDefinition:
+// the embedded DefinitionOverride for a custom enemy, else the shared registry
+// row. The narrow single-field accessors (EnemyName / EnemySingularName /
+// enemyBaseStats) read through it on the per-frame battle roster + turn-queue
+// paths, where EnemyInfoFor's full-struct value return is wasteful. Live MaxHP /
+// Armor overrides are NOT applied here — callers needing those go through
+// EnemyInfoFor. Panics on an unregistered kind, matching EnemyInfo's contract.
+func enemyGoverningDef(e *Enemy) *EnemyDefinition {
+	if e.HasDefinitionOverride {
+		return &e.DefinitionOverride
+	}
+	if def, ok := enemyByKind[e.Kind]; ok {
+		return def
+	}
+	panic(fmt.Sprintf("core: enemy carries unregistered kind %d — add it to enemyDefinitions", int(e.Kind)))
+}
+
+// EnemyName / EnemySingularName read a single descriptive field of an enemy's
+// governing definition without materializing the whole struct — the cheap
+// accessors for the per-frame battle roster and turn-queue labels (vs
+// EnemyInfoFor(...).Name, which copies ~200 bytes per call). Take *Enemy so the
+// caller doesn't copy the Enemy (which embeds the ~250-byte DefinitionOverride)
+// either.
+func EnemyName(e *Enemy) string         { return enemyGoverningDef(e).Name }
+func EnemySingularName(e *Enemy) string { return enemyGoverningDef(e).SingularName }
+
 // EffectiveEnemyStats returns the enemy's combat stats with every active debuff
 // folded in — the enemy-side mirror of EffectiveStats. The summed Debuffs stat
 // deltas are added per-stat (player debuffs stamp NEGATIVE deltas — Cripple SPD,
@@ -592,7 +639,10 @@ func EnemyInfoFor(enemy Enemy) EnemyDefinition {
 // turn-rate / status-resist) route through here so every kind of stat delta lands.
 // Cheap fast-path when no debuff is active (the common case).
 func EffectiveEnemyStats(e Enemy) Stats {
-	out := EnemyInfoFor(e).Stats
+	// Read base Stats through the governing-def pointer rather than
+	// EnemyInfoFor's full-struct value copy — this runs per combat roll
+	// (dodge / crit / resist / SPD) and only needs the 24-byte Stats block.
+	out := enemyGoverningDef(&e).Stats
 	if len(e.Debuffs) == 0 {
 		return out
 	}
@@ -673,11 +723,11 @@ func NewEnemy(kind EnemyKind) Enemy {
 }
 
 func EnemyDisplayName(enemy Enemy) string {
-	return EnemyInfoFor(enemy).Name
+	return enemyGoverningDef(&enemy).Name
 }
 
 func EnemySingularNoun(enemy Enemy) string {
-	return EnemyInfoFor(enemy).SingularNoun
+	return enemyGoverningDef(&enemy).SingularNoun
 }
 
 // These battle-string builders take *GameState like the rest of the

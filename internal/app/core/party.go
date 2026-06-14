@@ -1368,11 +1368,20 @@ var statSetters = []func(*Stats, int){
 // guard lives at the EffectiveStats fold site where a hypothetical debuff
 // would matter.
 func SumStats(a, b Stats) Stats {
-	var out Stats
-	for s := Stat(0); s < StatCount; s++ {
-		statSetters[s](&out, statTable[s].Get(a)+statTable[s].Get(b))
+	// Hand-unrolled per-field add rather than the statTable/statSetters enum
+	// loop: this is on the hottest combat path (folded per actor per action via
+	// EffectiveStats / EffectiveEnemyStats / EffectiveSkillEffect), where the
+	// slice-of-func-pointer indirection can't inline and dominates the cost of
+	// six integer adds. A new Stat field needs a line here — the tradeoff is
+	// deliberate for this fold (the editor/UI listing paths still use statTable).
+	return Stats{
+		STR: a.STR + b.STR,
+		DEX: a.DEX + b.DEX,
+		INT: a.INT + b.INT,
+		WIS: a.WIS + b.WIS,
+		VIT: a.VIT + b.VIT,
+		SPD: a.SPD + b.SPD,
 	}
-	return out
 }
 
 // applyStatusMod inserts or refreshes a timed modifier in mods, keyed by Source:
@@ -1413,19 +1422,25 @@ func SumStatusMods(mods []StatusMod) (stats Stats, armor, mdef int) {
 // fold behind EffectiveStats' buff layer and EffectiveEnemyStats — one floor
 // rule for both the party and enemy sides. A zero delta is a cheap no-op loop.
 func addStatsFloored(base, delta Stats) Stats {
-	out := base
-	for s := Stat(0); s < StatCount; s++ {
-		d := statTable[s].Get(delta)
-		if d == 0 {
-			continue
-		}
-		next := statTable[s].Get(out) + d
-		if next < 0 {
-			next = 0
-		}
-		statSetters[s](&out, next)
+	// Hand-unrolled per-field add+floor (see SumStats) — same hot-path rationale.
+	return Stats{
+		STR: floorInt(base.STR + delta.STR),
+		DEX: floorInt(base.DEX + delta.DEX),
+		INT: floorInt(base.INT + delta.INT),
+		WIS: floorInt(base.WIS + delta.WIS),
+		VIT: floorInt(base.VIT + delta.VIT),
+		SPD: floorInt(base.SPD + delta.SPD),
 	}
-	return out
+}
+
+// floorInt clamps a stat fold result up to 0 so a negative delta (a debuff, or a
+// future cursed item) can't drive an effective stat below zero into the combat
+// math (MaxHPFor / damage / accuracy).
+func floorInt(v int) int {
+	if v < 0 {
+		return 0
+	}
+	return v
 }
 
 // TickStatusMods decrements every mod's Turns by one and drops the expired ones,

@@ -132,11 +132,14 @@ func openContextMenu(s *State, clickX, clickY float32, tileX, tileZ int) {
 		return
 	}
 	// Cancel any in-flight left-button drag so a right-click that opens
-	// this menu mid-drag doesn't leave stale s.drag / dragPackIdx state.
-	// updateContextMenu absorbs all subsequent input until the menu
-	// closes — finishDrag would never get a chance to fire on its own.
+	// this menu mid-drag doesn't leave stale drag state. updateContextMenu
+	// absorbs all subsequent input until the menu closes — finishDrag would
+	// never get a chance to fire on its own, so reset ALL three drag-index
+	// slots (pack/chest/door), not just the pack one.
 	s.drag = dragNone
 	s.dragPackIdx = -1
+	s.dragChestIdx = -1
+	s.dragDoorIdx = -1
 	s.dragSnapshotDone = false
 	s.contextMenu = contextMenuState{
 		open:  true,

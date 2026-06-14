@@ -156,7 +156,11 @@ func anyMemberBelowFull(g *core.GameState) bool {
 // Back, and on overlay close / tab switch.
 func closeHealPick(g *core.GameState) {
 	g.HealPickOpen = false
-	g.HealPickCaster = 0
+	// -1, not 0: both readers (updateHealPicker, render.drawHealPicker) treat a
+	// caster index < 0 as "no caster" and bail, matching closeUseTarget's
+	// noCaster sentinel. Resetting to 0 left a valid party index sitting in a
+	// closed picker.
+	g.HealPickCaster = -1
 	g.HealPickCursor = 0
 }
 

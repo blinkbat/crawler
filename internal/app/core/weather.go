@@ -122,9 +122,32 @@ func AreaIsOutdoor(m AreaDefinition) bool {
 // tint-gated handoffs (Building->Raining once darkened, Clearing->Clear
 // once lifted) live in TickWeather, since they track the per-frame ease,
 // not steps.
+// outdoorVerdictCache memoizes AreaIsOutdoor for the current area so the
+// per-step weather tick doesn't rescan the whole ceiling grid on every landed
+// step. The verdict is fixed for an area's lifetime, so it's recomputed only on
+// entering a different area — mirrors render's enclosureCache (same name+dims
+// area key) for the lighting gate; the two share one definition of "has a roof"
+// via AreaIsOutdoor and now also share the once-per-area memoization shape.
+var outdoorVerdictCache struct {
+	name          string
+	width, height int
+	primed        bool
+	outdoor       bool
+}
+
+func areaIsOutdoorCached(m AreaDefinition) bool {
+	c := &outdoorVerdictCache
+	if c.primed && c.name == m.Name && c.width == m.Width && c.height == m.Height {
+		return c.outdoor
+	}
+	c.outdoor = AreaIsOutdoor(m)
+	c.name, c.width, c.height, c.primed = m.Name, m.Width, m.Height, true
+	return c.outdoor
+}
+
 func TickWeatherStep(g *GameState) {
 	w := &g.Weather
-	if !AreaIsOutdoor(g.Area) {
+	if !areaIsOutdoorCached(g.Area) {
 		// Roofed / underground: no rain here. A storm in progress drops
 		// to Clearing so the tint eases off via the per-frame follow.
 		if w.Phase == WeatherBuilding || w.Phase == WeatherRaining {

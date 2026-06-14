@@ -952,16 +952,26 @@ func DecorTileChars() []byte {
 // void) is one append here rather than three hand-synced sites.
 var blockingFloorChars = []byte{FloorDeepWater}
 
+// blockingFloorCharSet is the O(1) lookup mirror of blockingFloorChars, built
+// once at init — same pattern as propTileCharSet behind IsPropChar. BlockedAt
+// runs on every movement / pack-AI / nearest-open-tile query (the last is an
+// O(Width×Height) sweep per spawn), so the per-char rule is a set membership
+// test rather than a linear scan that would grow with each future blocker.
+// blockingFloorChars stays the single authoring source; this derives from it.
+var blockingFloorCharSet = func() map[byte]struct{} {
+	m := make(map[byte]struct{}, len(blockingFloorChars))
+	for _, b := range blockingFloorChars {
+		m[b] = struct{}{}
+	}
+	return m
+}()
+
 // IsBlockingFloor reports whether a floor-layer char blocks movement.
 // Shared by BlockedAt and the editor placement checks so the gate and
 // the registry can't drift.
 func IsBlockingFloor(c byte) bool {
-	for _, b := range blockingFloorChars {
-		if b == c {
-			return true
-		}
-	}
-	return false
+	_, ok := blockingFloorCharSet[c]
+	return ok
 }
 
 // BlockingFloorChars returns every floor-layer char that BlockedAt

@@ -646,5 +646,5 @@ func turnEntryFor(g *GameState, actor ActorRef) (TurnEntry, bool) {
 	if !enemy.Alive {
 		return TurnEntry{}, false
 	}
-	return TurnEntry{Label: EnemyInfoFor(*enemy).SingularName, Enemy: true}, true
+	return TurnEntry{Label: EnemySingularName(enemy), Enemy: true}, true
 }

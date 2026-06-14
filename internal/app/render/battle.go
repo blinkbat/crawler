@@ -219,7 +219,7 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 	condition, condCol := enemyHealthStyle(enemy)
 
 	nameX := float32(x + leftPad)
-	displayName := core.EnemyDisplayName(*enemy)
+	displayName := core.EnemyName(enemy)
 	drawEngravedText(font, displayName, nameX, float32(y+10), FontHeading, nameCol)
 
 	// Health reads from the qualitative wound-state word by default —

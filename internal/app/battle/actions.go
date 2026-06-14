@@ -2254,8 +2254,13 @@ func tickEnemyBuffAfterTurn(g *core.GameState, actor core.ActorRef) {
 	}
 	remaining, expired := core.TickStatusMods(enemy.Debuffs)
 	enemy.Debuffs = remaining
-	if len(expired) > 0 && len(remaining) == 0 {
-		setBattleMessage(g, fmt.Sprintf("%s shakes off the affliction.", core.TheEnemy(core.EnemyInfoFor(*enemy))))
+	// Narrate per expired SOURCE (one line per skill), mirroring the party side's
+	// tickBlessAfterPartyTurn. TickStatusMods returns expired sources (skills),
+	// not per-stat rows, so this is one line per debuff — not spam. The old
+	// "shakes off the affliction" line only fired when the LAST debuff cleared,
+	// silently dropping feedback when one of several stacked debuffs expired.
+	for _, s := range expired {
+		setBattleMessage(g, fmt.Sprintf("%s's %s wears off.", core.TheEnemy(core.EnemyInfoFor(*enemy)), core.SkillName(s)))
 	}
 }
 
@@ -2461,11 +2466,12 @@ func damagePartyMember(g *core.GameState, partyIndex, rawAmount int, tag core.Sk
 // damagePartyMember so the poison DoT — which by design keeps ticking on
 // ingested prey — can reach this same bookkeeping without the ingest lockout.
 func applyPartyDamage(g *core.GameState, member *core.PartyMember, rawAmount int, tag core.SkillTag) (int, bool) {
-	// Mitigation reads through EffectiveArmor / EffectiveMDef so any
-	// equipped gear bonuses stack on top of the base values. Base
-	// member.Armor stays authored (0 today on the party side); items
+	// Mitigation reads through EffectiveDefenses (one equipment + buff walk for
+	// both Armor and MDef) so any equipped gear bonuses stack on top of the base
+	// values. Base member.Armor stays authored (0 today on the party side); items
 	// add to it via ArmorBonus / MDefBonus on their ItemDefinition.
-	amount := mitigateDamage(rawAmount, tag, core.EffectiveArmor(*member), core.EffectiveMDef(*member))
+	armorVal, mdefVal := core.EffectiveDefenses(*member)
+	amount := mitigateDamage(rawAmount, tag, armorVal, mdefVal)
 	// Aegis shield soaks post-mitigation damage BEFORE HP: spend the pool first,
 	// only the overflow reaches HP. A fully-absorbed hit reaches HP as 0 — so the
 	// recoil / wake / DoT-proc bookkeeping below all read the post-shield `amount`

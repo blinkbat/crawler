@@ -219,13 +219,28 @@ func placeCrystals(a AreaDefinition) []Crystal {
 		}
 		return false
 	}
-	cx, cz := sx, sz
-	for _, d := range [...][2]int{{0, -1}, {0, 1}, {-1, 0}, {1, 0}} {
+	neighbors := [...][2]int{{0, -1}, {0, 1}, {-1, 0}, {1, 0}}
+	cx, cz, found := sx, sz, false
+	for _, d := range neighbors {
 		nx, nz := sx+d[0], sz+d[1]
 		if a.InBounds(nx, nz) && !a.BlockedAt(nx, nz) && !isDoorTile(nx, nz) {
-			cx, cz = nx, nz
+			cx, cz, found = nx, nz, true
 			break
 		}
+	}
+	// Fallback is the start tile itself — fine UNLESS the start IS a door (a
+	// crystal billboard on a door looks wrong and the door transition could fire
+	// before the player uses it). In that rare case prefer any standable neighbor
+	// (even an unrelated one) over the door; if there's genuinely nowhere clear,
+	// skip the entrance crystal rather than plant it on the door.
+	if !found && isDoorTile(sx, sz) {
+		for _, d := range neighbors {
+			nx, nz := sx+d[0], sz+d[1]
+			if a.InBounds(nx, nz) && !a.BlockedAt(nx, nz) {
+				return []Crystal{{TileX: nx, TileZ: nz, Charge: CrystalRechargeSteps, Charged: true}}
+			}
+		}
+		return nil
 	}
 	return []Crystal{{TileX: cx, TileZ: cz, Charge: CrystalRechargeSteps, Charged: true}}
 }

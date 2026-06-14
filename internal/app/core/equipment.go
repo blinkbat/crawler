@@ -90,14 +90,14 @@ func UnequipItem(m *PartyMember, slot EquipSlotIndex) ItemKind {
 	return prev
 }
 
-// walkEquipped invokes `fn` once for every equipped item on `m`. Empty
-// slots and unknown kinds are skipped. The three Effective* readers
-// share this so a new "per-equipment contribution" reader (e.g. a
-// future EffectiveSpeed cap or HP-bonus accumulator) lives in one
-// loop shape; today's three were near-identical iterate-and-accumulate
-// patterns that would silently drift if a slot rule (e.g. "two-handed
-// weapons block off-hand") needed to be added.
-func walkEquipped(m PartyMember, fn func(def ItemDefinition)) {
+// foldEquipment walks the member's equipped items ONCE, accumulating their
+// per-stat StatBonus, ArmorBonus, and MDefBonus in a single pass. Empty slots
+// and unknown kinds are skipped. The three Effective* readers and the combined
+// EffectiveDefenses share this so the per-hit / per-roll combat paths fold
+// equipment one time instead of re-walking the Equipped array (with its per-slot
+// ItemInfoOk map lookup) once per reader. Per-stat adds are hand-unrolled to
+// match the inlined SumStats/addStatsFloored folds — this is hot combat math.
+func foldEquipment(m PartyMember) (stats Stats, armor, mdef int) {
 	for i := 0; i < int(EquipSlotCount); i++ {
 		kind := m.Equipped[i]
 		if kind == ItemNone {
@@ -107,8 +107,16 @@ func walkEquipped(m PartyMember, fn func(def ItemDefinition)) {
 		if !ok {
 			continue
 		}
-		fn(def)
+		armor += def.ArmorBonus
+		mdef += def.MDefBonus
+		stats.STR += def.StatBonus[StatSTR]
+		stats.DEX += def.StatBonus[StatDEX]
+		stats.INT += def.StatBonus[StatINT]
+		stats.WIS += def.StatBonus[StatWIS]
+		stats.VIT += def.StatBonus[StatVIT]
+		stats.SPD += def.StatBonus[StatSPD]
 	}
+	return stats, armor, mdef
 }
 
 // EffectiveArmor sums the member's base Armor with the ArmorBonus of
@@ -116,8 +124,8 @@ func walkEquipped(m PartyMember, fn func(def ItemDefinition)) {
 // stacks on top of base — ApplyArmor never needs to know about the
 // Equipped array directly.
 func EffectiveArmor(m PartyMember) int {
-	armor := m.Armor
-	walkEquipped(m, func(def ItemDefinition) { armor += def.ArmorBonus })
+	_, equipArmor, _ := foldEquipment(m)
+	armor := m.Armor + equipArmor
 	// Active buffs (Stone Skin, War Banner) fold their summed flat Armor on top —
 	// different buffs stack; an un-buffed member has no mods and skips the sum.
 	_, buffArmor, _ := SumStatusMods(m.Buffs)
@@ -132,8 +140,8 @@ func EffectiveArmor(m PartyMember) int {
 // ApplyMagicDefense — base derived from WIS plus any MDefBonus on
 // equipped items. Floor at 0.
 func EffectiveMDef(m PartyMember) int {
-	mdef := MagicDefense(m.Stats)
-	walkEquipped(m, func(def ItemDefinition) { mdef += def.MDefBonus })
+	_, _, equipMDef := foldEquipment(m)
+	mdef := MagicDefense(m.Stats) + equipMDef
 	// Active buffs (Stone Skin) fold their summed flat MDef in; Ice Armor's MDef
 	// rides its own separate IceArmorTurns counter — both add only while their
 	// respective ward stands, so an un-warded member adds nothing.
@@ -148,30 +156,41 @@ func EffectiveMDef(m PartyMember) int {
 	return mdef
 }
 
+// EffectiveDefenses returns the member's effective Armor AND MDef from a SINGLE
+// equipment + buff walk — for the per-hit damage path (mitigateDamage), which
+// needs both at once and would otherwise call EffectiveArmor then EffectiveMDef
+// back to back, walking the Equipped array and summing m.Buffs twice. Same
+// floor/Ice-Armor rules as the two readers it folds together.
+func EffectiveDefenses(m PartyMember) (armor, mdef int) {
+	_, equipArmor, equipMDef := foldEquipment(m)
+	_, buffArmor, buffMDef := SumStatusMods(m.Buffs)
+	armor = m.Armor + equipArmor + buffArmor
+	if armor < 0 {
+		armor = 0
+	}
+	mdef = MagicDefense(m.Stats) + equipMDef + buffMDef
+	if m.IceArmorTurns > 0 {
+		mdef += IceArmorMDef
+	}
+	if mdef < 0 {
+		mdef = 0
+	}
+	return armor, mdef
+}
+
 // EffectiveStats returns the member's base stats with equipped item
 // StatBonus values folded in. Used wherever combat / UI reads stats
 // for display or rolls — keeps the base Stats block clean (level-up
 // spends always edit the base) while equipment effectively re-renders
-// the stat sheet. Loops over the Stat enum (instead of hand-unrolling
-// the six fields) so a new Stat constant + statTable row automatically
-// picks up its equipment bonus without a parallel edit here.
+// the stat sheet.
 func EffectiveStats(m PartyMember) Stats {
-	// Fold every equipped item's per-stat bonus into ONE delta, then add it on
-	// top of the base via addStatsFloored — the same shared "sum stats, floor
-	// each at 0" fold the buff layer below uses. The floor (mirroring the
-	// 0-clamp AdjustStat applies to base edits) keeps a negative StatBonus (a
-	// cursed / debuff item) from driving an effective stat below zero into
-	// MaxHPFor / damage / accuracy math. Looping the Stat enum (vs hand-unrolling
-	// the six fields) means a new Stat + statTable row picks up its equipment
-	// bonus with no parallel edit here.
-	var equipDelta Stats
-	walkEquipped(m, func(def ItemDefinition) {
-		for s := Stat(0); s < StatCount; s++ {
-			if d := def.StatBonus[s]; d != 0 {
-				statSetters[s](&equipDelta, statTable[s].Get(equipDelta)+d)
-			}
-		}
-	})
+	// Fold every equipped item's per-stat bonus into ONE delta (one Equipped
+	// walk via foldEquipment), then add it on top of the base via addStatsFloored
+	// — the same shared "sum stats, floor each at 0" fold the buff layer below
+	// uses. The floor (mirroring the 0-clamp AdjustStat applies to base edits)
+	// keeps a negative StatBonus (a cursed / debuff item) from driving an
+	// effective stat below zero into MaxHPFor / damage / accuracy math.
+	equipDelta, _, _ := foldEquipment(m)
 	out := addStatsFloored(m.Stats, equipDelta)
 	// Active stat buffs (Bless, War Banner, Smoke Bomb) fold on top of equipment,
 	// on the same per-stat floor-at-0 rule. Their summed deltas re-render the
