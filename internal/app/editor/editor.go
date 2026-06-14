@@ -442,6 +442,11 @@ const (
 	// recenters the view on that entity and opens its editor — so the author
 	// can manage placements without hunting tiles on a big map.
 	modalEntityList
+	// modalHitGlyphs is the read-only Hit Glyphs viewer: a looping gallery of the
+	// combat clarity glyphs (slash / impact / frost / spark / fire / holy / venom)
+	// drawn over a struck target. Pure preview so the author can see the symbols
+	// that normally flash for a fraction of a second mid-attack. See hitglyphs.go.
+	modalHitGlyphs
 	// modalCount is the count sentinel for the modalKind enum — used by
 	// the modalHandlers init assert in draw.go to walk every legal
 	// value and confirm the dispatch table is complete. Keep this row
@@ -471,6 +476,7 @@ const (
 	dragPack
 	dragChest
 	dragDoor
+	dragSelect // marquee region drag (toolSelect): sets the copy/paste selection on release
 )
 
 // toolMode is the active grid-paint tool, chosen from the toolbar's tool
@@ -482,24 +488,39 @@ const (
 type toolMode int
 
 const (
-	toolBrush toolMode = iota // freehand paint stroke (default)
-	toolLine                  // straight line, click anchor → release endpoint
-	toolRect                  // filled rectangle
-	toolBox                   // hollow rectangle outline (handy for room walls)
-	toolFlood                 // flood-fill the connected region
-	toolPick                  // eyedropper: sample the cell's char into the brush
+	toolBrush  toolMode = iota // freehand paint stroke (default)
+	toolLine                   // straight line, click anchor → release endpoint
+	toolRect                   // filled rectangle
+	toolBox                    // hollow rectangle outline (handy for room walls)
+	toolFlood                  // flood-fill the connected region
+	toolPick                   // eyedropper: sample the cell's char into the brush
+	toolSelect                 // marquee: drag a region to copy (Ctrl+C) / paste (Ctrl+V)
 )
 
 // toolModeLabels are the toolbar button captions, indexed by toolMode. Kept
 // next to the enum so a new tool adds its label here and the toolbar picks it
 // up via the toolButtons builder.
 var toolModeLabels = [...]string{
-	toolBrush: "Brush",
-	toolLine:  "Line",
-	toolRect:  "Rect",
-	toolBox:   "Box",
-	toolFlood: "Flood",
-	toolPick:  "Pick",
+	toolBrush:  "Brush",
+	toolLine:   "Line",
+	toolRect:   "Rect",
+	toolBox:    "Box",
+	toolFlood:  "Flood",
+	toolPick:   "Pick",
+	toolSelect: "Select",
+}
+
+// toolModeHelp is the hover-tooltip text per tool — the terse labels above don't
+// say what Box / Flood / Pick / Select do, so the toolbar shows this on hover.
+// Indexed by toolMode like toolModeLabels.
+var toolModeHelp = [...]string{
+	toolBrush:  "Paint freehand with the selected brush.",
+	toolLine:   "Drag a straight line of tiles.",
+	toolRect:   "Drag a filled rectangle.",
+	toolBox:    "Drag a hollow rectangle — handy for room walls.",
+	toolFlood:  "Flood-fill the connected same-tile region.",
+	toolPick:   "Eyedropper — sample the clicked tile into the brush.",
+	toolSelect: "Marquee — drag a region, then Ctrl+C to copy, Ctrl+V to paste.",
 }
 
 // brushRef identifies a palette brush as (layer, index within that layer's
@@ -624,11 +645,12 @@ type State struct {
 	soundName      string
 	soundCursor    int        // row cursor inside the sound modal
 	soundLeftPanel soundPanel // which column of the sound modal has focus
-	// soundDeleteArmed is the saved-sound name awaiting a confirm press —
-	// the first ×/X arms it, the second (same name) deletes. Guards the
-	// irreversible on-disk .wav delete against a single misclick. Cleared
-	// on close and after a confirmed delete.
-	soundDeleteArmed string
+	// deleteArmed is the shared two-press delete guard token: the first Delete
+	// click for a token (e.g. "sound:<name>", "custom:<name>", "door") arms it
+	// with a flash, the second for the SAME token confirms. One field + the
+	// armOrConfirmDelete helper back the sound / custom-enemy / door deletes so
+	// the "click again to confirm" rule lives once. Cleared on modal close.
+	deleteArmed string
 	// soundSavedCache holds the result of audio.ListUserSounds() for
 	// the current Update→Draw frame so we don't ReadDir twice per frame
 	// while the modal is open. Refreshed by updateSoundsModal at the
@@ -670,6 +692,14 @@ type State struct {
 	// toolBrush (zero value) preserves the original freehand-paint behavior.
 	tool toolMode
 	drag dragKind
+
+	// Region copy/paste (toolSelect). selActive marks a committed marquee; its
+	// inclusive, normalized tile bounds are sel{X0,Z0,X1,Z1}. clipboard holds the
+	// last Ctrl+C snapshot (across the six grid layers) for Ctrl+V paste at the
+	// cursor. Tiles only — entities aren't part of a region copy.
+	selActive                  bool
+	selX0, selZ0, selX1, selZ1 int
+	clipboard                  core.TileRegion
 	// dragSnapshotDone reports whether the current paint stroke has already
 	// banked its single undo snapshot. dragUndoBefore holds the pre-stroke
 	// area, captured at stroke start and committed to the undo stack LAZILY by
@@ -967,6 +997,13 @@ func Update(s *State, dt float32) Action {
 			finalizeFocusedField(s)
 			s.focus = focusNone
 		}
+		return ActionNone
+	}
+
+	// An open menu-bar pull-down (or any top-level dropdown) owns input — handle
+	// it here so the canvas + hotkeys stay inert behind it. No-op when closed.
+	if s.dropdownOpen() {
+		updateDropdown(s)
 		return ActionNone
 	}
 

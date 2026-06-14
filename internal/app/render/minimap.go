@@ -51,7 +51,7 @@ const (
 )
 
 // MinimapWidth is the on-screen width of the corner minimap card.
-// Used by the turn-order / combat-log panels (which sit beneath the
+// Used by the turn-order / action-log panels (which sit beneath the
 // minimap on the same left edge) so they can match its width
 // without baking in a literal.
 func MinimapWidth() int32 { return minimapPanelW }

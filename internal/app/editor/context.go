@@ -54,7 +54,12 @@ type contextMenuState struct {
 	x, y         float32
 	tileX, tileZ int
 	items        []ctxItem
-	hoverIdx     int
+}
+
+// isDelete reports whether a row is a destructive delete (drawn red so it can't
+// be mistaken for the Edit row sitting right above it).
+func (k ctxItemKind) isDelete() bool {
+	return k == ctxItemDeletePack || k == ctxItemDeleteChest || k == ctxItemDeleteDoor
 }
 
 // contextItemsAt builds the menu's row list based on what occupies
@@ -134,13 +139,12 @@ func openContextMenu(s *State, clickX, clickY float32, tileX, tileZ int) {
 	s.dragPackIdx = -1
 	s.dragSnapshotDone = false
 	s.contextMenu = contextMenuState{
-		open:     true,
-		x:        clickX,
-		y:        clickY,
-		tileX:    tileX,
-		tileZ:    tileZ,
-		items:    items,
-		hoverIdx: -1,
+		open:  true,
+		x:     clickX,
+		y:     clickY,
+		tileX: tileX,
+		tileZ: tileZ,
+		items: items,
 	}
 }
 
@@ -218,6 +222,11 @@ func drawContextMenu(s *State, font rl.Font, theme render.Theme) {
 		col := theme.TextPrimary
 		if !hovered {
 			col = theme.TextMuted
+		}
+		// Destructive rows read red so "Delete pack" can't be misclicked for the
+		// "Edit pack" row directly above it.
+		if s.contextMenu.items[i].kind.isDelete() {
+			col = theme.BorderDanger
 		}
 		rl.DrawTextEx(font, label,
 			rl.NewVector2(r.X+8, r.Y+(r.Height-editorFontLabel)/2),

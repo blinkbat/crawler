@@ -189,9 +189,15 @@ func Draw(s *State, assets render.Resources) {
 	if len(s.statusLog) > 0 {
 		drawStatus(s, font, theme)
 	}
+	// Toolbar hover tooltip: drawn here (late, over the canvas) rather than inside
+	// drawToolbar (early, under it). Self-suppresses when a modal/menu is up.
+	drawToolbarTooltip(s, font, theme)
 	if h, ok := modalHandlers[s.modal]; ok && h.draw != nil {
 		h.draw(s, font, theme)
 	}
+	// A modal's picker dropdown paints on top of it — once, here, so no modal
+	// repeats the call. No-op when no dropdown is open.
+	drawDropdown(s, font, theme)
 	// Right-click context menu paints last so it sits over the grid and
 	// any modal that happens to coexist with it (today the menu closes
 	// before a modal opens — but cheap to keep this order future-proof).
@@ -221,6 +227,7 @@ var modalHandlers = map[modalKind]modalHandler{
 	modalCustomEnemies: {draw: drawCustomEnemiesModal, update: updateCustomEnemiesModal},
 	modalEscMenu:       {draw: drawEscMenuModal, update: updateEscMenuModal},
 	modalFoeView:       {draw: drawFoeViewModal, update: updateFoeViewModal},
+	modalHitGlyphs:     {draw: drawHitGlyphsModal, update: updateHitGlyphsModal},
 }
 
 // init asserts every dispatchable modalKind (modalNone and modalCount
@@ -363,20 +370,22 @@ type topbarBtn struct {
 	// true — used for toggle actions (e.g. the glyph overlay) so the
 	// button reads as "on" without a separate indicator.
 	active func(*State) bool
+	// enabled, when set, gates a context-sensitive control: the button is always
+	// DRAWN (in its fixed position, so the row never reflows) but renders grayed
+	// and ignores clicks unless enabled returns true. Used so elevation controls
+	// are live only on the Elevation layer, etc. — present-but-inactive, which
+	// reads as "this exists, not here" without the buttons sliding around as the
+	// layer changes. nil = always enabled. The dispatch checks it before firing.
+	enabled func(*State) bool
+	// help, when set, is a one-line explanation shown as a hover tooltip — the
+	// toolbar uses it so terse tool names (Box / Flood / Pick / Select) and the
+	// brush/elevation steppers explain themselves. "" = no tooltip.
+	help string
 }
 
-var topbarBtns = []topbarBtn{
-	{label: "New", action: newMap},
-	{label: "Open", action: requestOpen},
-	{label: "Save", action: saveCurrent},
-	{label: "Save As", action: openSaveAsModal},
-	{label: "Sounds", action: openSoundsModal},
-	{label: "Enemies", action: openCustomEnemiesModal},
-	{label: "Foes", action: openFoeViewModal},
-	{label: "Objects", action: openEntityListModal},
-	{label: "Validate", action: openValidateModal},
-	{label: "Back", action: func(s *State) { s.exitRequested = true }},
-}
+// The top menu bar (File / Edit / View / Assets / Map) lives in menus.go as
+// menuBarBtns — each label opens a pull-down of grouped commands. It replaced a
+// flat 10-button strip; the per-command actions moved into the menu rows there.
 
 // toolbarBtns is the action row beneath the topbar — the editing
 // commands that used to be keyboard-only (the hotkeys still work as
@@ -385,34 +394,46 @@ var topbarBtns = []topbarBtn{
 // hotkey calls, so the two can't drift. Layer switching lives in the
 // left layer-tabs column and brush selection in the palette, so those
 // aren't repeated here.
-// toolbarActionBtns are the editing-command buttons. The full toolbar
-// (toolbarBtns) is the tool-select group followed by these — assembled in
-// init below so the tool group reads from toolModeLabels and a new tool needs
-// no button wiring.
+// Context-visibility predicates (see topbarBtn.enabled): grid-painting controls
+// are dead on the Entities layer; the elevation cluster only does anything on
+// the Elevation layer. Graying them on the wrong layer declutters the toolbar to
+// what the active layer can actually use.
+func onGridLayer(s *State) bool      { return s.layer != LayerEntities }
+func onElevationLayer(s *State) bool { return s.layer == LayerElevation }
+
+// onElevationOrFocused gates the level controls (Floor± / Floors lens / Height
+// readout). The Floors lens ghosts non-focused levels on EVERY layer and a
+// content paint lifts the tile to editLevel, so once the lens is on these stay
+// reachable on any layer — letting the author re-aim the focused level or switch
+// the lens OFF while painting walls/floor/etc. (without it, the lens's only
+// off-switch would be back on the Elevation layer). Ramp stays elevation-only —
+// it's a pure elevation-brush mode, not part of the cross-layer lens.
+func onElevationOrFocused(s *State) bool { return s.layer == LayerElevation || s.levelFocus }
+
+// toolbarActionBtns are the SECOND-ROW controls kept OUT of the menus because
+// you reach for them constantly while painting: undo/redo, the brush-size
+// steppers, and the contextual elevation cluster (Floor± / Floors lens / Ramp).
+// Everything rarer — file ops, view toggles, validate/playtest, the asset
+// editors — moved into the menu bar (menus.go). The full toolbar (toolbarBtns)
+// is the tool-select group followed by these. Undo/Redo gray out when their
+// stack is empty; the rest gate on the active layer via the predicates above.
 var toolbarActionBtns = []topbarBtn{
-	{label: "Undo", action: undoOne},
-	{label: "Redo", action: redoOne},
-	{label: "Fill", action: fillEntireLayer},
-	{label: "Brush -", action: func(s *State) { stepBrushSize(s, -1) }},
-	{label: "Brush +", action: func(s *State) { stepBrushSize(s, +1) }},
-	{label: "Center", action: func(s *State) { centerViewOnTile(s, s.area.StartTileX, s.area.StartTileZ) }},
-	{label: "Reset View", action: resetView},
-	{label: "Lvl -", action: func(s *State) { stepEditLevel(s, -1) }},
-	{label: "Lvl +", action: func(s *State) { stepEditLevel(s, +1) }},
+	{label: "Undo", action: undoOne, enabled: func(s *State) bool { return len(s.undo) > 0 }, help: "Step back one change (Ctrl+Z)."},
+	{label: "Redo", action: redoOne, enabled: func(s *State) bool { return len(s.redo) > 0 }, help: "Re-apply the last undone change (Ctrl+Y)."},
+	{label: "Brush -", action: func(s *State) { stepBrushSize(s, -1) }, enabled: onGridLayer, help: "Shrink the brush footprint."},
+	{label: "Brush +", action: func(s *State) { stepBrushSize(s, +1) }, enabled: onGridLayer, help: "Grow the brush footprint."},
+	{label: "Floor -", action: func(s *State) { stepEditLevel(s, -1) }, enabled: onElevationOrFocused, help: "Lower the focused elevation level."},
+	{label: "Floor +", action: func(s *State) { stepEditLevel(s, +1) }, enabled: onElevationOrFocused, help: "Raise the focused elevation level."},
 	{label: "Floors",
-		action: toggleLevelFocus,
-		active: func(s *State) bool { return s.levelFocus }},
+		action:  toggleLevelFocus,
+		active:  func(s *State) bool { return s.levelFocus },
+		enabled: onElevationOrFocused,
+		help:    "Floors lens: ghost other levels; a paint lifts the tile to this level."},
 	{label: "Ramp",
-		action: func(s *State) { s.rampMode = !s.rampMode },
-		active: func(s *State) bool { return s.rampMode }},
-	{label: "Glyphs",
-		action: toggleTileGlyphs,
-		active: func(s *State) bool { return s.showTileGlyphs }},
-	{label: "Links",
-		action: func(s *State) { s.showDoorLinks = !s.showDoorLinks },
-		active: func(s *State) bool { return s.showDoorLinks }},
-	{label: "Phase", action: cyclePreviewPhase},
-	{label: "Test", action: func(s *State) { s.testRequested = true }},
+		action:  func(s *State) { s.rampMode = !s.rampMode },
+		active:  func(s *State) bool { return s.rampMode },
+		enabled: onElevationLayer,
+		help:    "Ramp mode: paint sloped transitions between elevation levels."},
 }
 
 // toolbarBtns is the full action row: the tool-select group (Brush / Line /
@@ -428,6 +449,7 @@ func init() {
 			label:  label,
 			action: func(s *State) { s.tool = mode },
 			active: func(s *State) bool { return s.tool == mode },
+			help:   toolModeHelp[m],
 		})
 	}
 	toolbarBtns = append(toolbarBtns, toolbarActionBtns...)
@@ -456,7 +478,12 @@ func drawButtonStrip(font rl.Font, s *State, btns []topbarBtn, y, h float32) {
 	x := buttonStripStartX
 	for _, b := range btns {
 		w := buttonWidth(b.label)
-		drawButton(font, rl.NewRectangle(x, y, w, h), b.label, b.active != nil && b.active(s))
+		r := rl.NewRectangle(x, y, w, h)
+		if b.enabled != nil && !b.enabled(s) {
+			drawButtonDisabled(font, r, b.label) // context-inactive: drawn grayed, in place
+		} else {
+			drawButton(font, r, b.label, b.active != nil && b.active(s))
+		}
 		x += w + tightBtnGap
 	}
 }
@@ -469,7 +496,6 @@ func toolbarButtonAt(s *State, p rl.Vector2) int {
 }
 
 func drawToolbar(s *State, font rl.Font, theme render.Theme) {
-	_ = theme
 	rl.DrawRectangleRec(s.rect.toolbar, bgWindow)
 	rl.DrawLineEx(
 		rl.NewVector2(0, s.rect.toolbar.Y+toolbarH),
@@ -477,26 +503,71 @@ func drawToolbar(s *State, font rl.Font, theme render.Theme) {
 		1, outlineHard)
 	drawButtonStrip(font, s, toolbarBtns, s.rect.toolbar.Y+6, toolbarH-12)
 	// Height-selector readout (right-aligned): the level the Elevation brush
-	// stamps + the slice-view focus; flags Ramp tool-mode when active.
-	label := fmt.Sprintf("Height: %d", s.editLevel)
-	if s.rampMode {
-		label += "  [RAMP]"
+	// stamps + the slice-view focus; flags Ramp tool-mode when active. Shown
+	// whenever the level controls are live (Elevation layer, or any layer while
+	// the Floors lens is on) so the focused level is visible while it matters.
+	// [RAMP] only on the Elevation layer — ramp is an elevation-brush mode.
+	if onElevationOrFocused(s) {
+		label := fmt.Sprintf("Height: %d", s.editLevel)
+		if s.rampMode && s.layer == LayerElevation {
+			label += "  [RAMP]"
+		}
+		sz := editorFontLabel
+		m := rl.MeasureTextEx(font, label, sz, 1)
+		rl.DrawTextEx(font, label,
+			rl.NewVector2(s.rect.toolbar.Width-m.X-12, s.rect.toolbar.Y+(toolbarH-sz)/2),
+			sz, 1, rl.NewColor(220, 210, 180, 255))
 	}
-	sz := editorFontLabel
-	m := rl.MeasureTextEx(font, label, sz, 1)
-	rl.DrawTextEx(font, label,
-		rl.NewVector2(s.rect.toolbar.Width-m.X-12, s.rect.toolbar.Y+(toolbarH-sz)/2),
-		sz, 1, rl.NewColor(220, 210, 180, 255))
+	// NB: the hover tooltip is drawn LATE in Draw (drawToolbarTooltip), not here —
+	// drawToolbar runs before the grid, so a tooltip drawn here would be painted
+	// over by the canvas (only its border peeked out below the bar).
 }
 
-// topbarButtonAt returns the index of the button under p, or -1.
-// Integer index pairs with topbarBtns so the caller can fire the
-// action directly without a stringly-typed indirection.
+// drawToolbarTooltip paints the hovered toolbar button's help bubble. It's
+// called near the END of Draw — NOT inside drawToolbar, which runs before the
+// grid/panels — so the tooltip layers on top of the canvas instead of being
+// overdrawn by it. Suppressed while a modal or menu owns the screen.
+func drawToolbarTooltip(s *State, font rl.Font, theme render.Theme) {
+	if s.modal != modalNone || s.dropdownOpen() {
+		return
+	}
+	mp := rl.GetMousePosition()
+	if !pointIn(mp, s.rect.toolbar) {
+		return
+	}
+	if hit := toolbarButtonAt(s, mp); hit >= 0 && toolbarBtns[hit].help != "" {
+		drawButtonTooltip(font, theme, toolbarBtns[hit].help, mp)
+	}
+}
+
+// drawButtonTooltip paints a one-line help bubble near the cursor (below-right,
+// clamped to the screen) — the toolbar's hover explanation for a button. (The
+// canvas tile tooltip is the separate drawHoverTooltip.)
+func drawButtonTooltip(font rl.Font, theme render.Theme, text string, mp rl.Vector2) {
+	const pad = float32(6)
+	tw := rl.MeasureTextEx(font, text, editorFontHint, 1).X
+	w := tw + 2*pad
+	h := editorFontHint + 2*pad
+	x, y := mp.X+14, mp.Y+18
+	sw, sh := render.ScreenSizeF()
+	if x+w > sw-4 {
+		x = sw - 4 - w
+	}
+	if y+h > sh-4 {
+		y = mp.Y - 6 - h
+	}
+	render.DrawCard(int32(x), int32(y), int32(w), int32(h), theme.SurfacePrimary, theme.BorderSoft, theme.BorderActive)
+	rl.DrawTextEx(font, text, rl.NewVector2(x+pad, y+pad), editorFontHint, 1, theme.TextPrimary)
+}
+
+// topbarButtonAt returns the index of the menu-bar label under p, or -1.
+// Integer index pairs with menuBarBtns so the caller can open that menu
+// directly without a stringly-typed indirection.
 func topbarButtonAt(s *State, p rl.Vector2) int {
 	if !pointIn(p, s.rect.topbar) {
 		return -1
 	}
-	return buttonStripHit(topbarBtns, 6, topbarH-12, p)
+	return buttonStripHit(menuBarBtns, 6, topbarH-12, p)
 }
 
 // topbarInfoKey captures everything the topbar's name + info readouts are
@@ -528,7 +599,7 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 	rl.DrawRectangleRec(s.rect.topbar, theme.SurfacePrimary)
 	rl.DrawLineEx(rl.NewVector2(0, topbarH), rl.NewVector2(s.rect.topbar.Width, topbarH), 1, outlineHard)
 
-	drawButtonStrip(font, s, topbarBtns, 6, topbarH-12)
+	drawButtonStrip(font, s, menuBarBtns, 6, topbarH-12)
 
 	key := topbarInfoKey{
 		epoch:     s.contentEpoch,
@@ -560,8 +631,8 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 			coord = core.TileCoord(s.hoverX, s.hoverZ)
 			hoverDesc = core.AreaTileSummary(s.area, s.hoverX, s.hoverZ)
 		}
-		topbarInfoLabel = fmt.Sprintf("cell %s   %s   layer %s   brush %dx%d   zoom %.0f%%   phase %s (T)   undo %d/%d",
-			coord, hoverDesc, layerName(s.layer), s.brushSize, s.brushSize, s.zoom*100, core.PhaseName(s.previewPhase), len(s.undo), undoLimit)
+		topbarInfoLabel = fmt.Sprintf("cell %s   %s   layer %s   brush %dx%d   zoom %.0f%%   phase %s (T)   undo %d/%d   redo %d",
+			coord, hoverDesc, layerName(s.layer), s.brushSize, s.brushSize, s.zoom*100, core.PhaseName(s.previewPhase), len(s.undo), undoLimit, len(s.redo))
 		topbarInfoMeasure = rl.MeasureTextEx(font, topbarInfoLabel, editorFontLabel, 1)
 
 		topbarInfoKeyCache = key
@@ -891,6 +962,18 @@ func drawButton(font rl.Font, r rl.Rectangle, label string, active bool) {
 	rl.DrawTextEx(font, label,
 		rl.NewVector2(r.X+(r.Width-measure.X)/2, r.Y+(r.Height-measure.Y)/2),
 		editorFontBody, 1, text)
+}
+
+// drawButtonDisabled paints a context-inactive toolbar button: same footprint
+// (so the strip never reflows) but a flat, dimmed fill + faded text and no hover
+// response — reads as "this control exists, just not on this layer."
+func drawButtonDisabled(font rl.Font, r rl.Rectangle, label string) {
+	rl.DrawRectangleRec(r, render.FadeColor(bgButton, 0.45))
+	rl.DrawRectangleLinesEx(r, 1, render.FadeColor(editorBorderMid, 0.5))
+	measure := rl.MeasureTextEx(font, label, editorFontBody, 1)
+	rl.DrawTextEx(font, label,
+		rl.NewVector2(r.X+(r.Width-measure.X)/2, r.Y+(r.Height-measure.Y)/2),
+		editorFontBody, 1, render.FadeColor(textBright, 0.38))
 }
 
 // drawStepperButtons paints the shared "−" / "+" adjuster pair for a
@@ -2153,6 +2236,23 @@ func drawGrid(s *State, font rl.Font) {
 		rl.DrawRectangleLinesEx(r, 2, selectionOutline)
 	}
 
+	// Region marquee (Select tool): the live drag (dragSelect) and, when not
+	// dragging, the committed selection that Ctrl+C / Ctrl+V act on. Amber so it
+	// reads apart from the white brush / rectangle-drag ghost above.
+	if s.drag == dragSelect && s.hoverX >= 0 {
+		x0, x1 := min(s.rectAnchorX, s.hoverX), max(s.rectAnchorX, s.hoverX)
+		z0, z1 := min(s.rectAnchorZ, s.hoverZ), max(s.rectAnchorZ, s.hoverZ)
+		cx, cy := s.rect.tileCorner(x0, z0)
+		r := rl.NewRectangle(cx, cy, float32(x1-x0+1)*cell, float32(z1-z0+1)*cell)
+		rl.DrawRectangleRec(r, marqueeFill)
+		rl.DrawRectangleLinesEx(r, 2, marqueeOutline)
+	} else if s.selActive {
+		cx, cy := s.rect.tileCorner(s.selX0, s.selZ0)
+		r := rl.NewRectangle(cx, cy, float32(s.selX1-s.selX0+1)*cell, float32(s.selZ1-s.selZ0+1)*cell)
+		rl.DrawRectangleRec(r, marqueeFill)
+		rl.DrawRectangleLinesEx(r, 2, marqueeOutline)
+	}
+
 	// Line drag preview — a segment from the anchor tile to the hovered tile.
 	if s.drag == dragLine && s.hoverX >= 0 {
 		ax, ay := s.rect.tileCenter(s.rectAnchorX, s.rectAnchorZ)
@@ -2877,7 +2977,6 @@ func drawPackEditModal(s *State, font rl.Font, theme render.Theme) {
 		func(i int) string { return core.PackMemberDisplayName(s.area, pack, i) })
 	drawModalButtons(font, lay.actRects, cmdLabels(actions))
 	drawModalButtons(font, lay.addRects, cmdLabels(adds))
-	drawDropdown(s, font, theme) // add-member list, drawn on top when open
 }
 
 // drawChestEditModal renders the inline chest editor: header with chest
@@ -2902,7 +3001,6 @@ func drawChestEditModal(s *State, font rl.Font, theme render.Theme) {
 		func(i int) string { return core.ItemInfo(chest.Items[i]).Name })
 	drawModalButtons(font, lay.actRects, cmdLabels(actions))
 	drawModalButtons(font, lay.addRects, cmdLabels(adds))
-	drawDropdown(s, font, theme) // add-item list, drawn on top when open
 }
 
 // drawDoorEditModal renders the per-door editor. Mirrors the save-as
@@ -2949,7 +3047,9 @@ func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 	}
 
 	// Delete + Close buttons.
-	drawButton(font, l.deleteBtn, "Delete door (X)", false)
+	// Delete highlights while armed (first of the two-press confirm) so the
+	// primed state persists past the flash toast.
+	drawButton(font, l.deleteBtn, "Delete door (X)", s.deleteArmed == "door")
 	drawButton(font, l.closeBtn, "Done (Esc)", false)
 
 	// Footer hint string mirrors the other modals' tiny hint row.

@@ -302,6 +302,7 @@ func RetroDepthPrepass(camera rl.Camera3D, g core.GameState, assets Resources) {
 	drawWorld(camera, g, assets, true)
 	DrawChests(camera, g, assets)
 	DrawDoors(camera, g, assets)
+	DrawCrystals(camera, g, assets)
 	rl.EndBlendMode()
 }
 

@@ -149,6 +149,13 @@ type SkillEffect struct {
 	PoisonChance   float64
 	PoisonMinTurns int
 	PoisonMaxTurns int
+	// BleedChance / Min / Max gate the Bleed DoT (Warrior Rend / Thief
+	// Lacerate) on an enemy target — same shape as Poison, but a SEPARATE
+	// counter (Enemy.BleedTurns) so Bleed stacks alongside Poison. Zero chance
+	// short-circuits the apply.
+	BleedChance   float64
+	BleedMinTurns int
+	BleedMaxTurns int
 	// BindChance / Min / Max gate Webbed apply on the target. Webbed
 	// halves SPD and refuses Ingest until cleared; the Cave Spider's
 	// SkillWeb is the headline applier. Same fail-open shape as the
@@ -370,6 +377,15 @@ var skillDefinitions = []skillDefinition{
 	// gains MDef and chills any enemy that lands a basic attack on them. No target
 	// (ActionMenu, self); Buff tag; charge minigame to give the ward some weight.
 	{Skill: SkillIceArmor, Name: "Ice Armor", Description: "Sheathe yourself in frost — gain MDef and chill any foe that strikes you. Charge.", Cost: 5, TargetMode: ActionMenu, Kind: SkillKindUtility, Tag: SkillTagBuff, Minigame: MinigameCharge, Effect: SkillEffect{IceArmorTurns: IceArmorTurnsBase}, PlayerCastable: true},
+	// Rend (Warrior, Fury tree): STR-scaled phys hit that applies Bleed — the
+	// game's third DoT, on its own Enemy.BleedTurns counter so it stacks with
+	// Poison. Charge minigame (a wound-up cleaving cut); the bleed is a
+	// quality-scaled proc like Venom Strike's Poison.
+	{Skill: SkillRend, Name: "Rend", Description: "STR-scaled phys hit that opens a Bleed wound — damage over time. Charge.", Cost: 4, TargetMode: ActionEnemyTarget, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigameCharge, Effect: SkillEffect{Damage: RendDamageBase, BleedChance: RendBleedChance, BleedMinTurns: BleedMinTurns, BleedMaxTurns: BleedMaxTurns}, PlayerCastable: true},
+	// Lacerate (Thief, Venomancy tree): the same Bleed DoT as Rend, lighter base
+	// hit — its draw is stacking the bleed alongside the tree's Poison (separate
+	// counters). Sequence minigame, matching the Thief's Venom Strike.
+	{Skill: SkillLacerate, Name: "Lacerate", Description: "STR-scaled phys cut that opens a Bleed — stacks alongside Poison. Sequence.", Cost: 4, TargetMode: ActionEnemyTarget, Kind: SkillKindMelee, Tag: SkillTagPhys, Minigame: MinigameSequence, Effect: SkillEffect{Damage: LacerateDamageBase, BleedChance: LacerateBleedChance, BleedMinTurns: BleedMinTurns, BleedMaxTurns: BleedMaxTurns}, PlayerCastable: true},
 	// Arc Bolt (Wizard): sequence-minigame AoE magic. +1 base + INT
 	// per target, 6 MP. Each correct tap in the sequence reads as a
 	// new bolt arcing to the next enemy; on apply, all living enemies
@@ -704,6 +720,47 @@ func HealWholeParty(g *GameState, amount int) {
 	}
 }
 
+// RestorePartyFully tops every LIVING member to full HP AND full MP — the
+// healing crystal's effect (and a clean home for any future "full rest" source).
+// Per-member MaxHP/MaxMP are the caps; HealMember / RestoreMP clamp and skip the
+// dead / ingested. Returns the number of members restored.
+func RestorePartyFully(g *GameState) int {
+	if g == nil {
+		return 0
+	}
+	restored := 0
+	for i := range g.Party {
+		m := &g.Party[i]
+		if m.HP <= 0 || m.Ingested {
+			continue
+		}
+		HealMember(m, m.MaxHP)
+		RestoreMP(m, m.MaxMP)
+		restored++
+	}
+	return restored
+}
+
+// TickCrystalRecharge advances every DORMANT crystal's charge by one step,
+// re-arming it (Charged=true) once it reaches CrystalRechargeSteps. Charged
+// crystals are left alone. Call once per landed exploration step, alongside the
+// poison / weather / day-cycle ticks.
+func TickCrystalRecharge(g *GameState) {
+	if g == nil {
+		return
+	}
+	for i := range g.Crystals {
+		c := &g.Crystals[i]
+		if c.Charged {
+			continue
+		}
+		if c.Charge++; c.Charge >= CrystalRechargeSteps {
+			c.Charge = CrystalRechargeSteps
+			c.Charged = true
+		}
+	}
+}
+
 // clearMemberAnimTimers zeros a member's transient ANIMATION timers (lunge /
 // damage-flash / knockback) — not gameplay state. Shared by the field-recovery
 // reset and the save sanitizer so "what's an animation timer" lives in one
@@ -860,6 +917,13 @@ func (effect SkillEffect) ConfuseDuration(rng *rand.Rand) int {
 // accident doesn't poison anyone. Used by applyVenomStrike.
 func (effect SkillEffect) PoisonDuration(rng *rand.Rand) int {
 	return rollDuration(rng, effect.PoisonMinTurns, effect.PoisonMaxTurns)
+}
+
+// BleedDuration rolls a uniform bleed duration in [Min, Max] — mirrors
+// PoisonDuration; degenerate bounds return 0 so a non-bleed skill that picks up
+// the effect by accident bleeds no one. Used by the Rend / Lacerate apply.
+func (effect SkillEffect) BleedDuration(rng *rand.Rand) int {
+	return rollDuration(rng, effect.BleedMinTurns, effect.BleedMaxTurns)
 }
 
 // SkillTagFor returns the SkillTag of a skill — used by the damage path

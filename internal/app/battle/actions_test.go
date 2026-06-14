@@ -131,19 +131,26 @@ func TestApplyAttack_DealsSTRDamageAndPopup(t *testing.T) {
 	// pass even if the popup ignored the crit), tie the popup to the actual
 	// crit outcome so a bug that doubled without a crit — or failed to
 	// double on one — is caught. Deterministic under the seed-1 RNG.
-	if g.Packs[0].Members[0].HP != 0 {
-		t.Fatalf("expected rat at 0 HP, got %d (start %d)", g.Packs[0].Members[0].HP, startHP)
-	}
-	if g.Packs[0].Members[0].Alive {
-		t.Fatalf("rat should be dead")
-	}
-	crit := strings.Contains(g.Battle.Message, "Critical")
+	crit := strings.Contains(g.StatusMessage, "Critical")
 	want := 12
 	if crit {
 		want = 24
 	}
 	if got := g.Packs[0].Members[0].DamagePopup; got != want {
 		t.Fatalf("popup should be %d (crit=%v), got %d", want, crit, got)
+	}
+	// HP drops by the dealt damage (clamped at 0) — asserted relative to the
+	// spawn HP rather than a hardcoded 0, so the global EnemyDifficultyMul (which
+	// scales the rat's spawn HP) can't make this brittle.
+	expHP := startHP - want
+	if expHP < 0 {
+		expHP = 0
+	}
+	if got := g.Packs[0].Members[0].HP; got != expHP {
+		t.Fatalf("expected rat at %d HP (start %d, took %d), got %d", expHP, startHP, want, got)
+	}
+	if alive := g.Packs[0].Members[0].Alive; alive != (expHP > 0) {
+		t.Fatalf("rat Alive=%v, want %v (HP %d)", alive, expHP > 0, expHP)
 	}
 }
 
@@ -157,8 +164,8 @@ func TestApplyAttack_NoTargetBailsCleanly(t *testing.T) {
 	if landed := applyAttack(g, core.TimingQualityExcellent); landed {
 		t.Fatalf("applyAttack on dead target should not land")
 	}
-	if !strings.Contains(g.Battle.Message, "No target") {
-		t.Fatalf("expected 'No target' status, got %q", g.Battle.Message)
+	if !strings.Contains(g.StatusMessage, "No target") {
+		t.Fatalf("expected 'No target' status, got %q", g.StatusMessage)
 	}
 }
 
@@ -199,8 +206,8 @@ func TestSetupPrayer_RequiresValidLivingAlly(t *testing.T) {
 	if setupPrayer(g) {
 		t.Fatalf("setupPrayer should refuse to revive")
 	}
-	if !strings.Contains(g.Battle.Message, "revive") {
-		t.Fatalf("expected revive-refusal message, got %q", g.Battle.Message)
+	if !strings.Contains(g.StatusMessage, "revive") {
+		t.Fatalf("expected revive-refusal message, got %q", g.StatusMessage)
 	}
 }
 
@@ -312,12 +319,12 @@ func TestApplySteal_LandsItemAndClearsLoot(t *testing.T) {
 		if g.Inventory == nil || len(g.Inventory) == 0 {
 			t.Fatalf("success should add item to inventory")
 		}
-		if !strings.Contains(g.Battle.Message, "steals") {
-			t.Fatalf("success should set steal message, got %q", g.Battle.Message)
+		if !strings.Contains(g.StatusMessage, "steals") {
+			t.Fatalf("success should set steal message, got %q", g.StatusMessage)
 		}
 	} else {
-		if !strings.Contains(g.Battle.Message, "fails") {
-			t.Fatalf("failure should set fail message, got %q", g.Battle.Message)
+		if !strings.Contains(g.StatusMessage, "fails") {
+			t.Fatalf("failure should set fail message, got %q", g.StatusMessage)
 		}
 	}
 }
@@ -329,8 +336,8 @@ func TestApplySteal_EmptyEnemyMessages(t *testing.T) {
 	if !applySteal(g, core.TimingQualityGood) {
 		t.Fatalf("steal on empty enemy still 'lands' (gesture happens)")
 	}
-	if !strings.Contains(g.Battle.Message, "nothing to steal") {
-		t.Fatalf("expected 'nothing to steal', got %q", g.Battle.Message)
+	if !strings.Contains(g.StatusMessage, "nothing to steal") {
+		t.Fatalf("expected 'nothing to steal', got %q", g.StatusMessage)
 	}
 }
 
@@ -481,15 +488,16 @@ func TestResolveEnemyAttacker_DefendingHalvesDamage(t *testing.T) {
 
 func TestResolveEnemyAttacker_ExcellentBlockCanZeroDamage(t *testing.T) {
 	g := newTestState()
-	// newTestState seeds the RNG deterministically (seed 1): the rat
-	// neither dodges nor crits, so the Excellent block math is what's
-	// under test, not a random crit doubling 3 → 6.
+	// Use a Wisp (AttackDamage 1) so the Excellent block reaches 0 regardless of
+	// the global EnemyDifficultyMul: 1 scales to 1, and 1 × 0.25 (Excellent
+	// defense) truncates to 0 — even a crit (×2 → 2 × 0.25 = 0) still zeroes, so
+	// the assertion holds without depending on the seed avoiding a crit/dodge.
+	g.Packs[0].Members[0] = core.NewEnemy(core.EnemyWisp)
 	startHP := g.Party[0].HP
 	resolveEnemyAttacker(g, 0, core.TimingQualityExcellent)
 	taken := startHP - g.Party[0].HP
-	// AttackDamage=3 × 0.25 (Excellent defense) = 0 (int truncation).
 	if taken != 0 {
-		t.Fatalf("Excellent block of 3 dmg should drop to 0, took %d", taken)
+		t.Fatalf("Excellent block of a 1-dmg hit should drop to 0, took %d", taken)
 	}
 }
 
@@ -552,6 +560,56 @@ func TestResolveEnemyAttacker_DiseasedRatCanInflictPoison(t *testing.T) {
 	}
 	if !landed {
 		t.Fatalf("expected at least one of 5 seeds to land poison from a 60%% chance")
+	}
+}
+
+// TestTickBleedAfterEnemyTurn_DamagesAndStacksWithPoison pins the third DoT:
+// the bleed tick drains its OWN counter and deals damage, leaving any Poison
+// counter untouched — proving Bleed and Poison run independently (stack).
+func TestTickBleedAfterEnemyTurn_DamagesAndStacksWithPoison(t *testing.T) {
+	g := newTestState()
+	e := &g.Packs[0].Members[0]
+	e.HP, e.MaxHP = 50, 50
+	e.BleedTurns = 2
+	e.PoisonTurns = 2 // a coexisting DoT the bleed tick must not touch
+	startHP := e.HP
+
+	if tickBleedAfterEnemyTurn(g, core.ActorRef{IsParty: false, Index: 0}) {
+		t.Fatal("bleed should not kill a 50-HP enemy")
+	}
+	if e.BleedTurns != 1 {
+		t.Errorf("BleedTurns = %d, want 1", e.BleedTurns)
+	}
+	if e.PoisonTurns != 2 {
+		t.Errorf("bleed tick wrongly drained PoisonTurns = %d, want 2 (DoTs stack independently)", e.PoisonTurns)
+	}
+	if e.HP >= startHP {
+		t.Errorf("bleed dealt no damage: HP %d -> %d", startHP, e.HP)
+	}
+}
+
+// TestApplyRend_OpensBleed confirms a connecting Rend stamps the Bleed counter
+// with a sane duration. Seed-looped since the apply is an 85% quality-scaled proc.
+func TestApplyRend_OpensBleed(t *testing.T) {
+	landed := false
+	for seed := int64(1); seed <= 8 && !landed; seed++ {
+		g := newTestState()
+		g.Battle.CurrentParty = 0
+		g.Battle.EnemyIndex = 0
+		g.Packs[0].Members[0].HP, g.Packs[0].Members[0].MaxHP = 99, 99
+		seedGameRNG(t, g, seed)
+		if !applyRend(g, core.TimingQualityExcellent) {
+			t.Fatal("applyRend reported not-landed")
+		}
+		if bt := core.BattleMembers(g)[0].BleedTurns; bt > 0 {
+			landed = true
+			if bt > core.BleedMaxTurns {
+				t.Errorf("bleed duration %d exceeds max %d", bt, core.BleedMaxTurns)
+			}
+		}
+	}
+	if !landed {
+		t.Fatal("expected Rend to open a Bleed within 8 seeds at 85% chance")
 	}
 }
 
@@ -671,7 +729,7 @@ func TestResolveAndFinishEnemyAttack_PoisonKillWinsBattle(t *testing.T) {
 	resolveAndFinishEnemyAttack(g)
 
 	if g.Battle.Phase != core.BattleWon {
-		t.Fatalf("poison killing the last enemy should win battle, phase=%v message=%q", g.Battle.Phase, g.Battle.Message)
+		t.Fatalf("poison killing the last enemy should win battle, phase=%v message=%q", g.Battle.Phase, g.StatusMessage)
 	}
 	if g.Packs[0].Members[0].Alive {
 		t.Fatalf("enemy should be dead after poison tick")
@@ -706,7 +764,7 @@ func TestResolveEnemyAttacker_IceArmorChillsAttacker(t *testing.T) {
 
 // enemyDebuffStats / partyBuffStats sum the stackable mod slices for test reads —
 // the post-refactor replacement for poking the old single BuffStats field.
-func enemyDebuffStats(e core.Enemy) core.Stats { s, _, _ := core.SumStatusMods(e.Debuffs); return s }
+func enemyDebuffStats(e core.Enemy) core.Stats     { s, _, _ := core.SumStatusMods(e.Debuffs); return s }
 func partyBuffStats(m core.PartyMember) core.Stats { s, _, _ := core.SumStatusMods(m.Buffs); return s }
 
 func TestTickFlashHold_LowGradeFiresImmediatelyAtFlashZero(t *testing.T) {

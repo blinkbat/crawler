@@ -28,7 +28,7 @@ func DrawOverlay(g core.GameState, assets Resources) {
 	}
 	if g.Battle.Active() {
 		// Compute the turn forecast once per frame; TurnPanelBottomY
-		// (called from the combat log) and drawTurnPanel both read
+		// (called from the action log) and drawTurnPanel both read
 		// the cached slice instead of re-running TurnForecast.
 		CacheTurnForecastForFrame(&g)
 		drawBattleHUD(g, assets)
@@ -40,6 +40,10 @@ func DrawOverlay(g core.GameState, assets Resources) {
 		return
 	}
 	drawMinimap(g.Area, g, assets)
+	// The action log persists out of combat (bottom-left), so exploration shows
+	// the same rolling pane as battle — saves, crystal rests, the last fight's
+	// result, etc. Reads g.ActionLog, which is no longer reset between fights.
+	drawActionLogPanel(g, assets)
 	DrawPartyRibbon(g, assets)
 	drawGoldReadout(g, assets)
 }

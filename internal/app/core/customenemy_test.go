@@ -121,7 +121,11 @@ func TestCustomEnemyPackRoundTripAndRuntimeStats(t *testing.T) {
 		t.Fatalf("custom enemy should carry a definition override")
 	}
 	def := EnemyInfoFor(enemy)
-	if def.SingularName != "venom bat" || def.MaxHP != 33 || def.Stats.SPD != 12 ||
+	// EnemyInfoFor overlays the per-instance MaxHP, which Instantiate scales by
+	// the global difficulty dial (like NewEnemy) — so the authored 33 reads back
+	// as ScaleEnemyDifficulty(33). The other fields are unscaled (damage scales
+	// later, at EnemyBasicDamage read time, not in the def).
+	if def.SingularName != "venom bat" || def.MaxHP != ScaleEnemyDifficulty(33) || def.Stats.SPD != 12 ||
 		def.AttackDamage != 11 || def.XPValue != 77 || def.Tier != 9 ||
 		def.SkillCastChance != 1 || def.SpellPower != 8 || def.Armor != 4 {
 		t.Fatalf("custom definition not applied: %+v", def)

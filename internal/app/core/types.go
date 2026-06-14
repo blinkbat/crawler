@@ -263,6 +263,20 @@ type Chest struct {
 	Looted bool
 }
 
+// Crystal is a Legend-of-Grimrock-style healing crystal placed in the world.
+// While Charged, stepping onto or beside it fully restores the party's HP+MP
+// AND autosaves the game, then it goes dormant (Charged=false, Charge=0). It
+// recharges slowly over the player's steps (Charge climbs by 1 per landed step
+// until it reaches CrystalRechargeSteps, which re-arms it). Non-blocking: the
+// player can stand on its tile. Runtime-only entity (placed near the start by
+// placeCrystals); the Charge/Charged state persists in SaveData like StepCount.
+type Crystal struct {
+	TileX   int
+	TileZ   int
+	Charge  int
+	Charged bool
+}
+
 // AreaDefinition is the runtime form of a map. Built from a mapfile.MapFile
 // via AreaFromMapFile (see areas.go). Path is the source disk location and
 // is empty for unsaved maps the editor is still working on.
@@ -490,6 +504,22 @@ type GameState struct {
 	// movement loop checks this slice on every step-land to detect
 	// "stepped onto a door" and fire the transition.
 	Doors []Door
+	// Crystals is the runtime list of healing crystals (see Crystal). Placed
+	// near the start by placeCrystals; the explore step-land loop recharges them
+	// per step and fires the heal+autosave when the player lands on/beside a
+	// charged one. Charge state persists across save/load via SaveData.
+	Crystals []Crystal
+	// ActionLog is the rolling log of notable ACTIONS, in and out of combat —
+	// attacks/skills/results during a fight, and saves / crystal rests / failed
+	// door transitions while exploring. One continuous buffer (NOT reset per
+	// battle and NOT a step counter) so the bottom-left HUD pane reads the same
+	// whether or not a fight is on. Capped at ActionLogMaxLines; written via
+	// LogMessage (consecutive duplicates coalesced). StatusMessage is the latest
+	// single line — the transient status / "quiet" cue shown under the HUD, also
+	// the freshest ActionLog entry. Both were formerly Battle.Log / Battle.Message,
+	// which misnamed an in-and-out-of-combat log as battle-only.
+	ActionLog     []string
+	StatusMessage string
 	// DoorPrompt is the index into Doors of the door the player just
 	// stepped onto and is being asked to confirm, or -1 when no prompt is
 	// showing. Stepping onto a door opens this confirm modal instead of
@@ -638,13 +668,33 @@ func (g *GameState) RandRangeF(lo, hi float32) float32 {
 	return lo + g.Rand().Float32()*(hi-lo)
 }
 
-// SetStatusMessage writes the transient status / quiet-message line shown
-// under the HUD. Battle's setBattleStatus and the exploration code (e.g. a
-// failed door transition) share this slot — it doubles as the ambient
-// "quiet message" out of combat — so writes route through here rather than
-// poking g.Battle.Message directly at the call site.
+// SetStatusMessage writes the transient status line shown under the HUD WITHOUT
+// recording it in the ActionLog. For prompts that aren't actions in their own
+// right — "Choose a target", "Can't save during a battle" — so the rolling log
+// isn't polluted with UI cues. For a real action/result that should persist in
+// the log, call LogMessage instead.
 func (g *GameState) SetStatusMessage(msg string) {
-	g.Battle.Message = msg
+	g.StatusMessage = msg
+}
+
+// LogMessage sets the status line AND records msg in the rolling ActionLog (the
+// bottom-left HUD pane, shown in combat AND exploration). Consecutive duplicates
+// are coalesced and the buffer is capped at ActionLogMaxLines. An empty msg
+// clears the status line without logging. This is the path for actions/results
+// (combat hits, saves, crystal rests, door failures); UI prompts use
+// SetStatusMessage so they don't accrete in the log.
+func (g *GameState) LogMessage(msg string) {
+	g.StatusMessage = msg
+	if msg == "" {
+		return
+	}
+	if n := len(g.ActionLog); n > 0 && g.ActionLog[n-1] == msg {
+		return
+	}
+	g.ActionLog = append(g.ActionLog, msg)
+	if len(g.ActionLog) > ActionLogMaxLines {
+		g.ActionLog = g.ActionLog[len(g.ActionLog)-ActionLogMaxLines:]
+	}
 }
 
 // Pack is one runtime enemy pack on the field. Members carries the per-
@@ -1018,6 +1068,13 @@ type Enemy struct {
 	// of the enemy's static definition.
 	PoisonTurns int
 
+	// BleedTurns is the player-applied Bleed DoT (Warrior Rend / Thief
+	// Lacerate) — a SEPARATE counter from PoisonTurns so Bleed STACKS alongside
+	// Poison rather than clobbering it. Decrements at the end of the enemy's own
+	// turn (tickBleedAfterEnemyTurn) dealing BleedTickDamage, the same cadence as
+	// Poison; cleared on death by clearEnemyStatusesOnDeath.
+	BleedTurns int
+
 	// Debuffs holds the enemy's active STACKABLE debuffs (Cripple SPD, Blind DEX,
 	// Smoke Bomb DEX, Frostbite / Cone of Cold / Ice Armor chill SPD) as keyed
 	// StatusMod entries — see StatusMod. The enemy-side mirror of PartyMember.Buffs:
@@ -1114,8 +1171,6 @@ type Battle struct {
 	Phase             BattlePhase
 	Timer             float32
 	Splash            float32
-	Message           string
-	Log               []string
 
 	// Mixed-initiative turn queue. Built once at the start of each round
 	// (sorted by SPD descending, ties broken by side then index), consumed

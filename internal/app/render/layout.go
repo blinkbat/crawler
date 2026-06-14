@@ -90,7 +90,7 @@ func behindCamera(camera rl.Camera3D, p rl.Vector3) bool {
 // wider than `maxW` at the given font + size. Words that exceed
 // `maxW` on their own (long IDs, paths, numeric readouts) are
 // character-broken into multiple pieces so the panel never has
-// to render text past its right edge. Used by drawCombatLogPanel
+// to render text past its right edge. Used by drawActionLogPanel
 // and anywhere else a fixed-width text surface needs to soft-
 // break sentences.
 func wrapTextLines(font rl.Font, text string, size, maxW float32) []string {
@@ -98,7 +98,7 @@ func wrapTextLines(font rl.Font, text string, size, maxW float32) []string {
 		return nil
 	}
 	// strings.Fields collapses runs of whitespace and trims leading /
-	// trailing space — combat-log lines build via fmt.Sprintf so they
+	// trailing space — action-log lines build via fmt.Sprintf so they
 	// don't carry stray indentation, but the trim guards against a
 	// future emitter that does.
 	words := splitWords(text)

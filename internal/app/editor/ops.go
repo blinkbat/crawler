@@ -681,6 +681,50 @@ func setLayerCell(layer *[]string, x, z int, b byte) {
 	(*layer)[z] = string(row)
 }
 
+// copySelection snapshots the active marquee region (all six grid layers) into
+// the clipboard for paste. The transform lives in core.CopyRegion; this is the
+// editor glue (selection state + a flash).
+func copySelection(s *State) {
+	if !s.selActive {
+		s.flash("Select a region first (Select tool), then Ctrl+C")
+		return
+	}
+	s.clipboard = core.CopyRegion(&s.area, s.selX0, s.selZ0, s.selX1, s.selZ1)
+	if s.clipboard.Empty() {
+		s.flash("Nothing to copy")
+		return
+	}
+	s.flash(fmt.Sprintf("Copied %d×%d region — Ctrl+V to paste at the cursor", s.clipboard.W, s.clipboard.H))
+}
+
+// pasteSelection stamps the clipboard with its top-left at (atX,atZ) under one
+// undo step (pushUndo also flags reachability + bumps the content epoch). No-op
+// off-map or with an empty clipboard.
+func pasteSelection(s *State, atX, atZ int) {
+	if s.clipboard.Empty() {
+		s.flash("Clipboard empty — select a region and Ctrl+C first")
+		return
+	}
+	if !s.area.InBounds(atX, atZ) {
+		s.flash("Hover over the map, then Ctrl+V to paste at the cursor")
+		return
+	}
+	pushUndo(s)
+	s.area.PasteRegion(s.clipboard, atX, atZ)
+	s.dirty = true
+	s.flash(fmt.Sprintf("Pasted %d×%d region", s.clipboard.W, s.clipboard.H))
+}
+
+// clearSelection drops the active marquee selection. It deliberately leaves the
+// clipboard intact (so a cross-map copy→paste still works) — call it when the
+// area is replaced (New / Open) or resized, where the selection's tile bounds
+// would otherwise point at coordinates that no longer match the new map (and
+// could render an outline off the smaller/blank grid). A same-map paint undo
+// keeps its selection, so this is NOT called from undoOne / redoOne.
+func clearSelection(s *State) {
+	s.selActive = false
+}
+
 // pushUndo snapshots the current area before a mutation. Any new mutation
 // invalidates the redo stack — standard text-editor undo semantics.
 // Capped at undoLimit to bound memory.
@@ -785,6 +829,7 @@ func resize(s *State, w, h int) {
 	s.area.Elevation = resizeLayer(s.area.Elevation, s.area.Width, s.area.Height, w, h, core.ElevationGround)
 	s.area.Width = w
 	s.area.Height = h
+	clearSelection(s) // bounds changed — a stale marquee could outline off-grid
 	// resizeLayer fills new wall cells with plain TileOpen, so a grow leaves
 	// the new outer rows/cols walkable to the edge (the doc's "walls
 	// border-only" promise was unmet). Re-seal the perimeter ring with
@@ -1601,6 +1646,7 @@ func performNewMap(s *State, w, h int, floor byte) {
 	s.reachValid = false // fresh area — recompute reachability lazily
 	s.contentEpoch++
 	s.dirty = false
+	clearSelection(s) // new map — old selection coords no longer apply
 	s.zoom = 1
 	s.panX, s.panY = 0, 0
 	s.flash("New map")

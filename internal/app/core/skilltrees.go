@@ -124,7 +124,7 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 		}),
 		linearTree("Fury", "Lifesteal, bleed, AoE, self-harm", []SkillTreeNode{
 			act("cleave", "Cleave", "Multi-hit AoE swing across the enemy pack.", SkillSwipe),
-			nd("rend", "Rend", "Phys hit that applies a Bleed damage-over-time.", 3),
+			act("rend", "Rend", "Phys hit that applies a Bleed damage-over-time.", SkillRend),
 			nd("bloodthirst", "Bloodthirst", "Passive: heal for a share of all physical damage dealt.", 3),
 			nd("reckless-swing", "Reckless Swing", "A heavy hit that lowers your own Armor for a turn.", 3),
 			nd("crimson-rampage", "Crimson Rampage", "Capstone: deal more damage the lower your HP.", 1),
@@ -168,7 +168,7 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 			act("venom-strike", "Venom Strike", "Phys hit that applies Poison.", SkillVenomStrike),
 			act("poison-cloud", "Poison Cloud", "AoE Poison across the enemy pack.", SkillPoisonCloud),
 			act("corrosive-vial", "Corrosive Vial", "Eat away an enemy's Armor for the fight, so all hits land harder.", SkillCorrosiveVial),
-			nd("lacerate", "Lacerate", "A Bleed that stacks alongside Poison.", 3),
+			act("lacerate", "Lacerate", "A Bleed that stacks alongside Poison.", SkillLacerate),
 			nd("plague", "Plague", "Capstone: poison spreads when a poisoned enemy dies.", 1),
 		}),
 		linearTree("Cutpurse", "Larceny, tempo, passive masteries", []SkillTreeNode{

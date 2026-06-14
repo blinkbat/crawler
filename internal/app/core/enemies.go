@@ -634,16 +634,30 @@ func EnemyLevel(e Enemy) int {
 // swing hit" — symmetric with the party side's MemberAttackDamage — so the
 // anticipated "derive from Stats.STR" pass edits this one accessor instead of
 // an inline EnemyInfoFor(...).AttackDamage field read at the call site.
+// ScaleEnemyDifficulty applies the global EnemyDifficulty multiplier
+// (EnemyDifficultyNum/Den) to a base stat — round-to-nearest, integer-exact, and
+// floored at 1 for any positive input so a scaled damage/HP value never collapses
+// to 0. The single seam behind "make foes harder": spawn HP, basic-attack damage,
+// and enemy spell damage all route through it (the last from the battle package).
+func ScaleEnemyDifficulty(n int) int {
+	scaled := (n*EnemyDifficultyNum + EnemyDifficultyDen/2) / EnemyDifficultyDen
+	if n > 0 && scaled < 1 {
+		scaled = 1
+	}
+	return scaled
+}
+
 func EnemyBasicDamage(e Enemy) int {
-	return EnemyInfoFor(e).AttackDamage
+	return ScaleEnemyDifficulty(EnemyInfoFor(e).AttackDamage)
 }
 
 func NewEnemy(kind EnemyKind) Enemy {
 	def := EnemyInfo(kind)
+	maxHP := ScaleEnemyDifficulty(def.MaxHP)
 	return Enemy{
 		Kind:  kind,
-		HP:    def.MaxHP,
-		MaxHP: def.MaxHP,
+		HP:    maxHP,
+		MaxHP: maxHP,
 		Alive: true,
 		Item:  def.Item,
 		Armor: def.Armor,

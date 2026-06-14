@@ -51,6 +51,31 @@ type SaveData struct {
 	// load with no entries — adding this optional field is save-compatible,
 	// so SaveVersion stays put.
 	Bestiary Bestiary `json:"bestiary,omitempty"`
+	// Crystals persists healing-crystal charge state, by index, parallel to the
+	// crystals placeCrystals rebuilds for the map on load. omitempty + an index
+	// overlay (only when counts match) keeps it save-compatible: older saves load
+	// with fresh (charged) crystals, so SaveVersion stays put. Without this a
+	// reload would re-arm a spent crystal — a free heal+save fountain.
+	Crystals []CrystalSave `json:"crystals,omitempty"`
+}
+
+// CrystalSave is the persisted charge state of one healing crystal.
+type CrystalSave struct {
+	Charge  int  `json:"charge"`
+	Charged bool `json:"charged"`
+}
+
+// crystalSaves snapshots the live crystals' charge state for SaveData (nil when
+// there are none, so the field stays omitempty-absent).
+func crystalSaves(crystals []Crystal) []CrystalSave {
+	if len(crystals) == 0 {
+		return nil
+	}
+	out := make([]CrystalSave, len(crystals))
+	for i, c := range crystals {
+		out[i] = CrystalSave{Charge: c.Charge, Charged: c.Charged}
+	}
+	return out
 }
 
 // NewSaveData captures the current run into a serializable snapshot. The
@@ -82,6 +107,8 @@ func NewSaveData(g *GameState) SaveData {
 		// rationale as Inventory / Quests). BestiaryEntry is a value type,
 		// so maps.Clone fully decouples the snapshot; nil stays nil.
 		Bestiary: maps.Clone(g.Bestiary),
+		// Crystal charge state, by index (crystalSaves makes an independent copy).
+		Crystals: crystalSaves(g.Crystals),
 	}
 }
 
@@ -233,6 +260,16 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 		g.Bestiary = pruned
 	}
 	g.StepCount = data.StepCount
+	// Overlay saved crystal charge onto the freshly-placed crystals, by index.
+	// Only when the counts match (they do for a same-map reload — placeCrystals
+	// is deterministic); a mismatch from an edited map leaves the fresh charged
+	// crystals rather than misaligning charge to the wrong tile.
+	if len(data.Crystals) == len(g.Crystals) {
+		for i := range g.Crystals {
+			g.Crystals[i].Charge = data.Crystals[i].Charge
+			g.Crystals[i].Charged = data.Crystals[i].Charged
+		}
+	}
 	// Place the player at the saved tile, but fall back to the map's
 	// authored start if that tile is now blocked — the map may have been
 	// edited (geometry changed, shrunk) between save and load, and a

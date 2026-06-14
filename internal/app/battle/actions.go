@@ -69,6 +69,8 @@ var skillActionHandlers = map[core.SkillID]actionHandlers{
 	core.SkillAegis:         {setup: setupAegis, apply: applyAegis},
 	core.SkillSmokeBomb:     {setup: setupSmokeBomb, apply: applySmokeBomb},
 	core.SkillIceArmor:      {setup: setupIceArmor, apply: applyIceArmor},
+	core.SkillRend:          {setup: setupRend, apply: applyRend},
+	core.SkillLacerate:      {setup: setupLacerate, apply: applyLacerate},
 }
 
 // init asserts the player-castable contract: every PlayerCastable skill
@@ -157,7 +159,9 @@ func enemySpellLog(ctx enemySpellCtx, rest string, args ...any) {
 // magic) and Stoneslam (AoE phys); future damage spells slot in here
 // instead of re-typing the floor-1 clamp.
 func enemySpellDamage(def core.EnemyDefinition, effect core.SkillEffect) int {
-	raw := def.SpellPower + effect.Damage
+	// Scale by the global enemy-difficulty dial (same seam as basic-attack /
+	// spawn HP) so casters and AoE foes get harder in lockstep, then floor at 1.
+	raw := core.ScaleEnemyDifficulty(def.SpellPower + effect.Damage)
 	if raw < 1 {
 		raw = 1
 	}
@@ -470,7 +474,7 @@ func applyAoEDamage(g *core.GameState, skill core.SkillID, damage, quality int, 
 // Unmapped skills return core.VFXNone (no particles).
 func vfxKindFor(skill core.SkillID) core.VFXKind {
 	switch skill {
-	case core.SkillSwipe, core.SkillWhirlwind, core.SkillCrushingBlow, core.SkillBackstab, core.SkillSunder:
+	case core.SkillSwipe, core.SkillWhirlwind, core.SkillCrushingBlow, core.SkillBackstab, core.SkillSunder, core.SkillRend, core.SkillLacerate:
 		return core.VFXSlash
 	case core.SkillArcBolt:
 		return core.VFXArc
@@ -1361,6 +1365,57 @@ func applyBackstab(g *core.GameState, quality int) bool {
 	return true
 }
 
+// dotStrike describes a "phys hit that procs a single-target DoT" skill — the
+// shared shape behind Venom Strike (Poison), Rend, and Lacerate (Bleed). The
+// closures select which enemy counter the DoT lands on and which SkillEffect
+// fields drive its chance / duration, so applyDoTStrike stays status-agnostic;
+// `arms` narrates the hit. Mirrors the table-driven style of enemyStatusPillVisuals.
+type dotStrike struct {
+	counter func(*core.Enemy) *int
+	chance  func(core.SkillEffect) float64
+	dur     func(core.SkillEffect) func(*rand.Rand) int
+	arms    procMessageArms
+}
+
+var venomStrikeDoT = dotStrike{
+	counter: func(e *core.Enemy) *int { return &e.PoisonTurns },
+	chance:  func(eff core.SkillEffect) float64 { return eff.PoisonChance },
+	dur:     func(eff core.SkillEffect) func(*rand.Rand) int { return eff.PoisonDuration },
+	arms:    venomStrikeArms,
+}
+
+// bleedDoT builds the Bleed descriptor for Rend / Lacerate — same counter and
+// effect fields, only the narration (arms) differs per skill.
+func bleedDoT(arms procMessageArms) dotStrike {
+	return dotStrike{
+		counter: func(e *core.Enemy) *int { return &e.BleedTurns },
+		chance:  func(eff core.SkillEffect) float64 { return eff.BleedChance },
+		dur:     func(eff core.SkillEffect) func(*rand.Rand) int { return eff.BleedDuration },
+		arms:    arms,
+	}
+}
+
+// applyDoTStrike is the single body for every phys-hit-plus-DoT skill: a
+// stat-scaled hit that, on a surviving target, rolls the DoT apply (dot.chance,
+// quality-scaled) onto dot.counter via the shared tryProcStatus (inheriting the
+// no-stack + WIS-shorten rules), then narrates via dot.arms.
+func applyDoTStrike(g *core.GameState, skill core.SkillID, quality int, dot dotStrike) bool {
+	actor, target, rawDamage, resistWIS, ok := beginSingleTargetSkill(g, skill, quality)
+	if !ok {
+		return false
+	}
+	effect := core.EffectiveSkillEffect(actor, skill)
+	crit, _ := rollSkillCrit(g, actor, skill, quality)
+	rawDamage = applyCritMultiplier(rawDamage, crit, false)
+	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(skill))
+	core.EnqueueEnemyVFX(g, vfxKindFor(skill), g.Battle.EnemyIndex)
+	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
+	procced := tryProcStatus(g.Rand(), dot.counter(enemy), defeated, dot.chance(effect), quality, 0, dot.dur(effect), resistWIS)
+	setBattleMessage(g, appendCrit(procSkillMessage(dot.arms, actor.Name, target, damage, quality, defeated, procced), crit))
+	finishActorTurn(g)
+	return true
+}
+
 // --- Venom Strike (Thief, sequence phys + Poison apply) ---
 
 func setupVenomStrike(g *core.GameState) bool {
@@ -1368,21 +1423,28 @@ func setupVenomStrike(g *core.GameState) bool {
 }
 
 func applyVenomStrike(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, resistWIS, ok := beginSingleTargetSkill(g, core.SkillVenomStrike, quality)
-	if !ok {
-		return false
-	}
-	effect := core.EffectiveSkillEffect(actor, core.SkillVenomStrike)
-	crit, _ := rollSkillCrit(g, actor, core.SkillVenomStrike, quality)
-	rawDamage = applyCritMultiplier(rawDamage, crit, false)
-	damage, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(core.SkillVenomStrike))
-	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillVenomStrike), g.Battle.EnemyIndex)
-	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	poisoned := tryProcStatus(g.Rand(), &enemy.PoisonTurns, defeated, effect.PoisonChance, quality, 0, effect.PoisonDuration, resistWIS)
-	setBattleMessage(g, appendCrit(venomStrikeMessage(actor.Name, target, damage, quality, defeated, poisoned), crit))
-	finishActorTurn(g)
-	return true
+	return applyDoTStrike(g, core.SkillVenomStrike, quality, venomStrikeDoT)
 }
+
+// --- Rend (Warrior) / Lacerate (Thief): phys hit + Bleed DoT apply ---
+
+func setupRend(g *core.GameState) bool {
+	return setupTargetedEnemyAndPay(g, core.SkillRend, "Rend")
+}
+
+func applyRend(g *core.GameState, quality int) bool {
+	return applyDoTStrike(g, core.SkillRend, quality, bleedDoT(rendArms))
+}
+
+func setupLacerate(g *core.GameState) bool {
+	return setupTargetedEnemyAndPay(g, core.SkillLacerate, "Lacerate")
+}
+
+func applyLacerate(g *core.GameState, quality int) bool {
+	return applyDoTStrike(g, core.SkillLacerate, quality, bleedDoT(lacerateArms))
+}
+
+// --- Frost Lance (Wizard, charge magic with reliable Stun on Great+) ---
 
 // --- Frost Lance (Wizard, charge magic with reliable Stun on Great+) ---
 
@@ -2057,11 +2119,22 @@ func tickPoisonAfterPartyTurn(g *core.GameState, actor core.ActorRef) bool {
 // for either side — `subject` is the pre-resolved actor name (party) or
 // "The <noun>" (enemy), so the two ticks share one format instead of
 // two near-identical fmt.Sprintf pairs.
-func poisonTickMessage(subject string, dealt int, fatal bool) string {
+// dotTickMessage is the shared "<subject> took a DoT tick" line: the fatalLine
+// (one %s) when the tick killed, else the sufferFmt (%s + %d dealt). Poison and
+// Bleed differ only in their two format strings.
+func dotTickMessage(subject string, dealt int, fatal bool, fatalLine, sufferFmt string) string {
 	if fatal {
-		return fmt.Sprintf("%s succumbs to the poison.", subject)
+		return fmt.Sprintf(fatalLine, subject)
 	}
-	return fmt.Sprintf("%s suffers %d from poison.", subject, dealt)
+	return fmt.Sprintf(sufferFmt, subject, dealt)
+}
+
+func poisonTickMessage(subject string, dealt int, fatal bool) string {
+	return dotTickMessage(subject, dealt, fatal, "%s succumbs to the poison.", "%s suffers %d from poison.")
+}
+
+func bleedTickMessage(subject string, dealt int, fatal bool) string {
+	return dotTickMessage(subject, dealt, fatal, "%s bleeds out.", "%s bleeds for %d.")
 }
 
 func applyPartyPoisonTick(g *core.GameState, index int) bool {
@@ -2252,22 +2325,49 @@ func tickPartyStatusCounter(g *core.GameState, actor core.ActorRef, counterRef f
 	}
 }
 
-// tickPoisonAfterEnemyTurn is the enemy-side mirror of
-// tickPoisonAfterPartyTurn. The Thief's Venom Strike applies
-// Enemy.PoisonTurns; this helper drains the counter after the enemy's
-// own turn lands and deals PoisonTickDamage. Magic-tagged so armor
-// doesn't damp the DoT — same rule the party-side tick uses.
-func tickPoisonAfterEnemyTurn(g *core.GameState, actor core.ActorRef) bool {
+// tickEnemyDoTAfterTurn is the shared body for every enemy end-of-turn damaging
+// DoT (Poison, Bleed): no-op on party actors / dead / un-afflicted enemies, else
+// drain the selected counter by one, deal tickDamage (Magic-tagged via
+// applyEnemyDoTTick so armor doesn't damp it), and narrate via msg. Returns true
+// if the tick killed the enemy. Burn is NOT routed here — it ticks at turn-START.
+func tickEnemyDoTAfterTurn(g *core.GameState, actor core.ActorRef, counterOf func(*core.Enemy) *int, tickDamage int, msg func(string, int, bool) string) bool {
 	if actor.IsParty {
 		return false
 	}
 	enemy := core.BattleMemberAt(g, actor.Index)
-	if enemy == nil || !enemy.Alive || enemy.PoisonTurns <= 0 {
+	if enemy == nil || !enemy.Alive {
 		return false
 	}
-	dealt, defeated := applyEnemyDoTTick(g, actor.Index, &enemy.PoisonTurns, core.PoisonTickDamage)
-	setBattleMessage(g, poisonTickMessage(core.TheEnemy(core.EnemyInfoFor(*enemy)), dealt, defeated))
+	counter := counterOf(enemy)
+	if *counter <= 0 {
+		return false
+	}
+	dealt, defeated := applyEnemyDoTTick(g, actor.Index, counter, tickDamage)
+	setBattleMessage(g, msg(core.TheEnemy(core.EnemyInfoFor(*enemy)), dealt, defeated))
 	return defeated
+}
+
+// tickPoisonAfterEnemyTurn / tickBleedAfterEnemyTurn are the per-status wrappers
+// (kept as named entry points for tests). The Thief's Venom Strike applies
+// Enemy.PoisonTurns; Rend / Lacerate apply the SEPARATE Enemy.BleedTurns so the
+// two DoTs run at once.
+func tickPoisonAfterEnemyTurn(g *core.GameState, actor core.ActorRef) bool {
+	return tickEnemyDoTAfterTurn(g, actor, func(e *core.Enemy) *int { return &e.PoisonTurns }, core.PoisonTickDamage, poisonTickMessage)
+}
+
+func tickBleedAfterEnemyTurn(g *core.GameState, actor core.ActorRef) bool {
+	return tickEnemyDoTAfterTurn(g, actor, func(e *core.Enemy) *int { return &e.BleedTurns }, core.BleedTickDamage, bleedTickMessage)
+}
+
+// tickEnemyEndOfTurnDoTs runs ALL of an enemy's end-of-turn damaging DoTs in one
+// call — the single seam both turn-end paths (advanceSkippedTurn + finishActorTurn)
+// invoke, so a new enemy DoT is added here ONCE instead of at both sites (where a
+// missed site silently freezes the DoT during Sleep/Stun skips). Returns true if
+// any tick killed the enemy; callers re-check win conditions regardless.
+func tickEnemyEndOfTurnDoTs(g *core.GameState, actor core.ActorRef) bool {
+	poisonKill := tickPoisonAfterEnemyTurn(g, actor)
+	bleedKill := tickBleedAfterEnemyTurn(g, actor)
+	return poisonKill || bleedKill
 }
 
 // tickBurnAtTurnStart resolves the per-tick burn damage on a burning actor at
@@ -2452,7 +2552,7 @@ func damagePartyMemberDefendable(g *core.GameState, partyIndex, rawAmount int, t
 // not hunting for scattered field assignments. (The sets differ by design: see
 // the doc comment above for which statuses each actor can carry into death.)
 func clearEnemyStatusesOnDeath(enemy *core.Enemy) {
-	for _, c := range []*int{&enemy.BurnTurns, &enemy.SleepTurns, &enemy.PoisonTurns, &enemy.StunTurns} {
+	for _, c := range []*int{&enemy.BurnTurns, &enemy.SleepTurns, &enemy.PoisonTurns, &enemy.BleedTurns, &enemy.StunTurns} {
 		*c = 0
 	}
 	enemy.Debuffs = nil
@@ -2564,6 +2664,16 @@ var (
 		// guaranteed on survival — but kept for the procSkillMessage contract.
 		plain: "%[1]s%[2]s bites the %[3]s for %[4]d.",
 	}
+	rendArms = procMessageArms{
+		defeated: "%[1]s%[2]s's Rend tears the %[3]s apart.",
+		proc:     "%[1]s%[2]s rends the %[3]s for %[4]d — it's bleeding.",
+		plain:    "%[1]s%[2]s rends the %[3]s for %[4]d.",
+	}
+	lacerateArms = procMessageArms{
+		defeated: "%[1]s%[2]s's Lacerate opens the %[3]s up for good.",
+		proc:     "%[1]s%[2]s lacerates the %[3]s for %[4]d — it's bleeding.",
+		plain:    "%[1]s%[2]s lacerates the %[3]s for %[4]d.",
+	}
 )
 
 func crushingBlowMessage(name string, target core.Enemy, damage, quality int, defeated, stunned bool) string {
@@ -2576,10 +2686,6 @@ func smiteMessage(name string, target core.Enemy, damage, quality int, defeated,
 
 func backstabMessage(name string, target core.Enemy, damage, quality int, defeated, crit bool) string {
 	return procSkillMessage(backstabArms, name, target, damage, quality, defeated, crit)
-}
-
-func venomStrikeMessage(name string, target core.Enemy, damage, quality int, defeated, poisoned bool) string {
-	return procSkillMessage(venomStrikeArms, name, target, damage, quality, defeated, poisoned)
 }
 
 func frostLanceMessage(name string, target core.Enemy, damage, quality int, defeated, stunned bool) string {

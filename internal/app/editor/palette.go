@@ -74,6 +74,11 @@ var (
 	// rectangle-drag, and pack-drag previews on the canvas (was a 200/220
 	// alpha split across the three sites that read as unintentional).
 	selectionOutline = rl.NewColor(255, 255, 255, 220)
+	// marqueeOutline / marqueeFill style the region copy/paste marquee (the
+	// Select tool). Amber so the committed region reads distinct from the
+	// white brush / rectangle-drag ghost (selectionOutline) on the same canvas.
+	marqueeOutline = rl.NewColor(255, 206, 84, 235)
+	marqueeFill    = rl.NewColor(255, 206, 84, 40)
 	// entityMarkerOutline is the dark ring drawn around pack / chest /
 	// start markers on the editor canvas. Aliases render.MarkerOutline
 	// so the editor canvas and the minimap can never drift on the

@@ -340,11 +340,34 @@ func saveGame(g *core.GameState) {
 		return
 	}
 	if err := core.SaveGame(g); err != nil {
-		g.SetStatusMessage("Save failed: " + err.Error())
+		g.LogMessage("Save failed: " + err.Error())
 		audio.Play(audio.SoundInputMiss)
 		return
 	}
-	g.SetStatusMessage("Game saved.")
+	g.LogMessage("Game saved.")
+	audio.Play(audio.SoundInputGreat)
+}
+
+// tryHealingCrystal fires the Grimrock-style crystal when the player lands on or
+// beside a CHARGED crystal: restore the whole party to full HP+MP, put the
+// crystal dormant, and AUTOSAVE (the codebase's first autosave). No-op when no
+// charged crystal is in reach. The heal+discharge always lands; the save is
+// best-effort — it refuses on an unsaved editor-playtest map (Area.Path == ""),
+// in which case the party is still restored and the message says so.
+func tryHealingCrystal(g *core.GameState, x, z int) {
+	idx := core.AdjacentChargedCrystalIndex(g.Crystals, x, z)
+	if idx < 0 {
+		return
+	}
+	core.RestorePartyFully(g)
+	g.Crystals[idx].Charged = false
+	g.Crystals[idx].Charge = 0
+	if err := core.SaveGame(g); err != nil {
+		g.LogMessage("The crystal restores the party. (Autosave failed: " + err.Error() + ")")
+		audio.Play(audio.SoundInputGreat)
+		return
+	}
+	g.LogMessage("The crystal restores the party and saves your progress.")
 	audio.Play(audio.SoundInputGreat)
 }
 
@@ -472,6 +495,12 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	// want torchlight / vision modifiers, they pipe a different radius
 	// into RevealRadius here instead of a second reveal pass.
 	core.RevealRadius(g, targetX, targetZ, core.SightRadius)
+	// Healing crystals: recharge every dormant crystal one step (TickCrystalRecharge
+	// runs first so the crystal we may discharge below isn't re-charged this same
+	// step), then fire the heal+autosave if the player landed on or beside a
+	// charged one.
+	core.TickCrystalRecharge(g)
+	tryHealingCrystal(g, targetX, targetZ)
 	// Pack-AI tick (per-pack mode dispatched in core.PlanPackSteps): each
 	// alive pack plans (independently) on every successful player step. If a pack lands on the player,
 	// initiate the battle and snap the player's VISUAL coords to the

@@ -63,6 +63,9 @@ type SkillEffectDelta struct {
 	PoisonChance   float64
 	PoisonMinTurns int
 	PoisonMaxTurns int
+	BleedChance    float64
+	BleedMinTurns  int
+	BleedMaxTurns  int
 	StunChance     float64
 	StunMinTurns   int
 	StunMaxTurns   int
@@ -260,6 +263,17 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 		{Tier: 2, Label: "+1 turn", Description: "Another turn of ward.", Cost: 1, Effect: SkillEffectDelta{IceArmorTurns: 1}},
 		{Tier: 3, Label: "+2 turns", Description: "A maxed Ice Armor sheathes the caster for most of a fight.", Cost: 1, Effect: SkillEffectDelta{IceArmorTurns: 2}},
 	},
+	// ── Bleed strikes (Warrior Rend / Thief Lacerate) ────────
+	SkillRend: {
+		{Tier: 1, Label: "+2 damage", Description: "+2 base damage on the opening cut.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
+		{Tier: 2, Label: "+1 Bleed turn", Description: "The wound bleeds one turn longer on min and max rolls.", Cost: 1, Effect: SkillEffectDelta{BleedMinTurns: 1, BleedMaxTurns: 1}},
+		{Tier: 3, Label: "+15% Bleed", Description: "Bleed-apply chance bumped by 15% — a maxed Rend almost always draws blood.", Cost: 1, Effect: SkillEffectDelta{BleedChance: 0.15}},
+	},
+	SkillLacerate: {
+		{Tier: 1, Label: "+1 damage", Description: "+1 base damage on the cut.", Cost: 1, Effect: SkillEffectDelta{Damage: 1}},
+		{Tier: 2, Label: "+1 Bleed turn", Description: "The wound bleeds one turn longer on min and max rolls.", Cost: 1, Effect: SkillEffectDelta{BleedMinTurns: 1, BleedMaxTurns: 1}},
+		{Tier: 3, Label: "+15% Bleed", Description: "Bleed-apply chance bumped by 15%.", Cost: 1, Effect: SkillEffectDelta{BleedChance: 0.15}},
+	},
 }
 
 // init asserts every player-castable skill has exactly MaxSkillTier
@@ -363,6 +377,9 @@ func EffectiveSkillEffect(m *PartyMember, s SkillID) SkillEffect {
 		eff.PoisonChance += d.PoisonChance
 		eff.PoisonMinTurns += d.PoisonMinTurns
 		eff.PoisonMaxTurns += d.PoisonMaxTurns
+		eff.BleedChance += d.BleedChance
+		eff.BleedMinTurns += d.BleedMinTurns
+		eff.BleedMaxTurns += d.BleedMaxTurns
 		eff.StunChance += d.StunChance
 		eff.StunMinTurns += d.StunMinTurns
 		eff.StunMaxTurns += d.StunMaxTurns

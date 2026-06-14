@@ -157,8 +157,8 @@ func measurePartyNameWithSpace(font rl.Font, name string) rl.Vector2 {
 }
 
 const (
-	partyCardW   = float32(184)
-	partyCardH   = float32(118)
+	partyCardW   = float32(208)
+	partyCardH   = float32(134)
 	partyCardGap = float32(16)
 	// activeCardLift raises the active member's card above the ribbon row
 	// so "whose turn is it" reads at a glance, on top of the bold halo.
@@ -322,8 +322,8 @@ func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, 
 	// sub-quarter tank breathes red. MP stays static — spends are deliberate,
 	// not threats, and a trailing ghost there would read as a leak.
 	hpFill := hpFillColor(member.HP, member.MaxHP)
-	drawBarLive(font, "hp:"+member.Name, contentX, y+44, contentW, 30, "HP", member.HP, member.MaxHP, hpFill, down)
-	drawBar(font, contentX, y+80, contentW, 30, "MP", member.MP, member.MaxMP, barMP, down)
+	drawBarLive(font, "hp:"+member.Name, contentX, y+50, contentW, 32, "HP", member.HP, member.MaxHP, hpFill, down)
+	drawBar(font, contentX, y+90, contentW, 32, "MP", member.MP, member.MaxMP, barMP, down)
 
 	// Dim wash over inactive cards (painted last, over everything) so the
 	// lifted active card pops. The active and the targeted-ally cards opt

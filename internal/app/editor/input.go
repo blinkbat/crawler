@@ -108,6 +108,13 @@ func updateHotkeys(s *State) {
 		undoOne(s)
 	case ctrl && rl.IsKeyPressed(rl.KeyY):
 		redoOne(s)
+	case ctrl && rl.IsKeyPressed(rl.KeyC):
+		copySelection(s)
+	case ctrl && rl.IsKeyPressed(rl.KeyV):
+		pasteSelection(s, s.hoverX, s.hoverZ)
+	case rl.IsKeyPressed(rl.KeyEscape) && s.selActive:
+		s.selActive = false
+		s.flash("Selection cleared")
 	case ctrl && rl.IsKeyPressed(rl.KeyS):
 		saveCurrent(s)
 	case ctrl && rl.IsKeyPressed(rl.KeyO):
@@ -424,11 +431,15 @@ func updateMouse(s *State) {
 
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 		if hit := topbarButtonAt(s, mp); hit >= 0 {
-			topbarBtns[hit].action(s)
+			menuBarBtns[hit].action(s) // opens that menu's pull-down (menus.go)
 			return
 		}
 		if hit := toolbarButtonAt(s, mp); hit >= 0 {
-			toolbarBtns[hit].action(s)
+			// A context-disabled button is drawn grayed in place; swallow its click
+			// without firing (so the strip stays stable but inactive controls no-op).
+			if b := toolbarBtns[hit]; b.enabled == nil || b.enabled(s) {
+				b.action(s)
+			}
 			return
 		}
 		// Layer-tab eye toggles (visibility): check before tab-select so a
@@ -632,6 +643,9 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 	case toolLine:
 		s.drag = dragLine
 		s.rectAnchorX, s.rectAnchorZ = x, z
+	case toolSelect:
+		s.drag = dragSelect
+		s.rectAnchorX, s.rectAnchorZ = x, z
 	default: // toolBrush
 		beginPaintStroke(s)
 		strokePaint(s, x, z)
@@ -802,6 +816,14 @@ func finishDrag(s *State) {
 		if s.hoverX >= 0 {
 			pushUndo(s)
 			paintLine(s, s.rectAnchorX, s.rectAnchorZ, s.hoverX, s.hoverZ)
+		}
+	case dragSelect:
+		// Commit the marquee as the active selection (normalized inclusive
+		// bounds). No tile edit — copy/paste act on it via Ctrl+C / Ctrl+V.
+		if s.hoverX >= 0 {
+			s.selX0, s.selX1 = min(s.rectAnchorX, s.hoverX), max(s.rectAnchorX, s.hoverX)
+			s.selZ0, s.selZ1 = min(s.rectAnchorZ, s.hoverZ), max(s.rectAnchorZ, s.hoverZ)
+			s.selActive = true
 		}
 	}
 	s.drag = dragNone
@@ -1001,9 +1023,9 @@ const defaultTextFieldMaxLen = 96
 // not pumpPrintableASCII) reuse the default below via
 // configForFocus.
 var textFieldConfigs = map[focusField]textFieldConfig{
-	focusName:            {defaultTextFieldMaxLen, acceptPrintable},
-	focusQuiet:           {defaultTextFieldMaxLen, acceptPrintable},
-	focusFilename:        {defaultTextFieldMaxLen, acceptPrintable},
+	focusName:     {defaultTextFieldMaxLen, acceptPrintable},
+	focusQuiet:    {defaultTextFieldMaxLen, acceptPrintable},
+	focusFilename: {defaultTextFieldMaxLen, acceptPrintable},
 	// Door identifier fields reject spaces: the .map door row is
 	// space-delimited, so a space here would corrupt the round-trip
 	// (validate() also backstops this at save time).
@@ -1227,6 +1249,13 @@ func updateModal(s *State) Action {
 	// inline; centralizing it here means the draw/update pair can
 	// trust their indices.
 	validateModalState(s)
+	// A picker dropdown (opened by some modals) owns input while it's up — handle
+	// it ONCE here, before the per-modal updater, so the modal behind it stays
+	// inert and no modal has to repeat the short-circuit. No-ops when closed.
+	if s.dropdownOpen() {
+		updateDropdown(s)
+		return ActionNone
+	}
 	if h, ok := modalHandlers[s.modal]; ok && h.update != nil {
 		return h.update(s)
 	}
@@ -1278,6 +1307,21 @@ func validateModalState(s *State) {
 // the prior one. Replaces ~18 hand-typed `s.modal = modalNone; s.modalXxxIdx
 // = -1` snippets that drifted per modal — the chest-edit updater was
 // missing a modalCursor reset under the previous shape.
+// armOrConfirmDelete is the shared two-press delete guard: the first call for a
+// token arms it (flashing msg) and returns false; the next call for the SAME
+// token clears the arm and returns true (proceed). A different token re-arms, so
+// switching targets can't confirm the wrong delete. One field + one helper
+// behind the sound / custom-enemy / door deletes. Cleared on modal close.
+func armOrConfirmDelete(s *State, token, msg string) bool {
+	if s.deleteArmed != token {
+		s.deleteArmed = token
+		s.flash(msg)
+		return false
+	}
+	s.deleteArmed = ""
+	return true
+}
+
 func closeModal(s *State) {
 	// The Foe Visualizer caches an off-screen RenderTexture2D. Free it from
 	// this central seam (not only the modal's own Close/cancel buttons) so
@@ -1292,11 +1336,11 @@ func closeModal(s *State) {
 	s.modalChestIdx = -1
 	s.modalDoorIdx = -1
 	s.modalCustomIdx = -1
-	closeDropdown(s) // a modal's add dropdown must not survive its parent
+	closeDropdown(s) // a modal's picker dropdown must not survive its parent
 	s.modalValidateRows = nil
 	s.modalConfirmDelete = false
 	s.modalRenaming = ""
-	s.soundDeleteArmed = ""
+	s.deleteArmed = ""
 	soundDrag.sliderIdx = -1
 	// Door-edit text focus survives outside the modal in pumpPrintableASCII's
 	// flow, so explicitly drop it here too. The new-map dialog's numeric
@@ -1508,6 +1552,11 @@ func deleteDoorAt(s *State, idx int) {
 	if idx < 0 || idx >= len(s.area.DoorSpawns) {
 		return
 	}
+	// Two-press confirm (shared by the Delete button + the X key): a door may
+	// carry hand-authored cross-map links, so guard the first press.
+	if !armOrConfirmDelete(s, "door", "Delete this door? Click Delete (or press X) again to confirm") {
+		return
+	}
 	pushUndo(s)
 	s.area.DoorSpawns = removeModalListItem(s.area.DoorSpawns, idx)
 	s.dirty = true
@@ -1621,12 +1670,6 @@ func updatePackEditModal(s *State) Action {
 		closeModal(s)
 		return ActionNone
 	}
-	// The add dropdown owns input (Up/Down/Enter/Esc + mouse) while it's open;
-	// the modal behind it stays inert.
-	if s.dropdownOpen() {
-		updateDropdown(s)
-		return ActionNone
-	}
 	pack := &s.area.PackSpawns[s.modalPackIdx]
 	memberCount := len(pack.Members)
 	if !updateEntityListCursor(s, memberCount) {
@@ -1717,15 +1760,28 @@ func packEditCmds(s *State) (adds, actions []modalCmd) {
 		{label: "Remove", run: func() Action { packRemoveSelected(s, pack); return ActionNone }},
 		{label: "Up", run: func() Action { packMoveSelected(s, pack, -1); return ActionNone }},
 		{label: "Down", run: func() Action { packMoveSelected(s, pack, +1); return ActionNone }},
-		{label: "AI: " + core.PackAILabel(pack.AI), run: func() Action {
-			pushUndo(s)
-			pack.AI = core.WrapEnum(pack.AI, 1, core.PackAICount)
-			s.dirty = true
-			s.flash("Pack AI: " + core.PackAILabel(pack.AI))
-			return ActionNone
-		}},
+		{label: "AI: " + core.PackAILabel(pack.AI) + "  ▼", run: func() Action { openPackAIDropdown(s); return ActionNone }},
 	}
 	return adds, actions
+}
+
+// openPackAIDropdown arms the AI-mode dropdown anchored on the pack editor's
+// "AI:" action button — the author picks a mode from the full list instead of
+// cycling one step per click (and can see every mode at once). Mirrors
+// openPackAddDropdown's recompute-the-layout-to-find-the-button-rect approach.
+func openPackAIDropdown(s *State) {
+	if s.modalPackIdx < 0 || s.modalPackIdx >= len(s.area.PackSpawns) {
+		return
+	}
+	pack := &s.area.PackSpawns[s.modalPackIdx]
+	adds, actions := packEditCmds(s)
+	lay := entityModalLayoutFor(s.modalCursor, len(pack.Members), cmdLabels(adds), cmdLabels(actions))
+	// The AI button is the last action (Remove / Up / Down / AI).
+	anchor := lay.card
+	if len(lay.actRects) > 0 {
+		anchor = lay.actRects[len(lay.actRects)-1]
+	}
+	openDropdown(s, ddPackAI, anchor)
 }
 
 // openPackAddDropdown arms the add-member dropdown anchored on the pack
@@ -1825,11 +1881,6 @@ func removeModalListItem[T any](items []T, idx int) []T {
 func updateChestEditModal(s *State) Action {
 	if s.modalChestIdx < 0 || s.modalChestIdx >= len(s.area.ChestSpawns) {
 		closeModal(s)
-		return ActionNone
-	}
-	// The add dropdown owns input while it's open.
-	if s.dropdownOpen() {
-		updateDropdown(s)
 		return ActionNone
 	}
 	chest := &s.area.ChestSpawns[s.modalChestIdx]
@@ -1969,6 +2020,7 @@ func openSelectedMap(s *State) Action {
 	s.undo = nil
 	s.redo = nil
 	s.dirty = false
+	clearSelection(s) // different map — old selection coords no longer apply
 	// The area was replaced wholesale — invalidate the content-derived caches
 	// the same way performNewMap / undoOne / redoOne do, or the metadata
 	// panel's reachability badge and the hover tooltip keep showing the

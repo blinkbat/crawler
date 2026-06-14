@@ -25,10 +25,9 @@ func Start(g *core.GameState, packIndex, fleeReturnX, fleeReturnZ int) {
 	g.Battle.PartyTarget = core.FirstLivingPartyMember(g.Party)
 	g.Battle.EnemyAttackCursor = -1
 	g.Battle.Splash = core.BattleSplashDuration
-	// Preallocate to the cap so the 15-30+ setBattleMessage appends per
-	// fight don't trigger slice growth. setBattleMessage trims to
-	// BattleLogMaxLines on overflow, so cap is the steady-state ceiling.
-	g.Battle.Log = make([]string, 0, core.BattleLogMaxLines)
+	// The ActionLog is a continuous in-and-out-of-combat buffer on GameState
+	// (LogMessage caps it), so a fight no longer resets it — entering combat
+	// just keeps appending to whatever exploration already logged.
 	g.Battle.ClearTiming()
 	g.Battle.TimingIntro = 0
 	g.Battle.HitStop = 0
@@ -508,7 +507,7 @@ func advanceSkippedTurn(g *core.GameState, actor core.ActorRef) {
 	drainNonDamagingPartyStatuses(g, actor)
 	drainNonDamagingEnemyStatuses(g, actor)
 	tickPoisonAfterPartyTurn(g, actor)
-	tickPoisonAfterEnemyTurn(g, actor)
+	tickEnemyEndOfTurnDoTs(g, actor)
 	if checkEnemyWipeout(g) || checkPartyWipeout(g) {
 		return
 	}
@@ -659,12 +658,12 @@ func finishActorTurn(g *core.GameState) {
 	// confirm and apply) can't leak a stuck freeze across the next phase.
 	g.Battle.HitStop = 0
 	if g.Battle.QueueCursor >= 0 && g.Battle.QueueCursor < len(g.Battle.Queue) {
-		// Party side ticks party poison; enemy side ticks enemy poison.
-		// Both run at end-of-actor-turn so the actor still gets their
-		// action in before the DoT lands. Each helper short-circuits
-		// on the wrong actor kind so dispatching is fine here.
+		// Party side ticks party poison; enemy side ticks ALL its end-of-turn
+		// DoTs (poison + bleed) via the one seam. Both run at end-of-actor-turn
+		// so the actor still gets their action in before the DoT lands. Each
+		// helper short-circuits on the wrong actor kind so dispatching is fine.
 		tickPoisonAfterPartyTurn(g, g.Battle.Queue[g.Battle.QueueCursor])
-		tickPoisonAfterEnemyTurn(g, g.Battle.Queue[g.Battle.QueueCursor])
+		tickEnemyEndOfTurnDoTs(g, g.Battle.Queue[g.Battle.QueueCursor])
 		drainNonDamagingEnemyStatuses(g, g.Battle.Queue[g.Battle.QueueCursor])
 		// Webbed + Confused tick alongside Poison — every party-side
 		// status counter ticks at the END of the webbed/confused
@@ -1242,9 +1241,6 @@ func DebugSkipWin(g *core.GameState, packIndex int) {
 	}
 	g.Battle.ActivePack = packIndex
 	g.Battle.EnemyIndex = -1
-	// Preallocate the log so winBattle's setBattleMessage appends don't grow a
-	// nil slice (Start does the same before its messages).
-	g.Battle.Log = make([]string, 0, core.BattleLogMaxLines)
 	// Fell the whole pack so RecordBattleKills / AwardBattleXP / AwardBattleLoot
 	// tally it exactly as a fought win would.
 	for i := range g.Packs[packIndex].Members {
@@ -1398,17 +1394,10 @@ func setBattleStatus(g *core.GameState, message string) {
 // patterns ("Warrior hits / Rat bites / Warrior hits") reading the same
 // twice is correct — the player needs to see the sequence.
 func setBattleMessage(g *core.GameState, message string) {
-	g.Battle.Message = message
-	if message == "" {
-		return
-	}
-	if len(g.Battle.Log) > 0 && g.Battle.Log[len(g.Battle.Log)-1] == message {
-		return
-	}
-	g.Battle.Log = append(g.Battle.Log, message)
-	if len(g.Battle.Log) > core.BattleLogMaxLines {
-		g.Battle.Log = g.Battle.Log[len(g.Battle.Log)-core.BattleLogMaxLines:]
-	}
+	// Combat results are actions — record them in the shared ActionLog (which
+	// dedupes consecutive repeats + caps the buffer). Transient prompts still
+	// route through g.SetStatusMessage so they don't accrete in the log.
+	g.LogMessage(message)
 }
 
 // tickHitTimers decays the three per-actor hit-reaction timers (lunge

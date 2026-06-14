@@ -19,7 +19,7 @@ type partyClassPresentation struct {
 var partyClassPresentations = map[core.PartyClass]partyClassPresentation{
 	// turnColor is the member's accent "slot color" — the single source
 	// for every HUD/UI/log tint keyed to a class (turn-order panel, party
-	// stat cards, panels member cards, combat-log names, target markers).
+	// stat cards, panels member cards, action-log names, target markers).
 	// Per-class hues: Warrior gold, Cleric off-white, Thief purple,
 	// Wizard pale blue. Tuned bright enough to read on the dark glass HUD
 	// and mutually distinct at a glance.

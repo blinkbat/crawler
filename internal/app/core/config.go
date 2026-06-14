@@ -379,6 +379,17 @@ const (
 	EnemyAccuracyFloor    = 0.30
 	EnemyAccuracyCap      = 0.95
 
+	// EnemyDifficulty{Num,Den} is the GLOBAL "make foes harder" dial, expressed
+	// as a num/den rational so the scaling stays integer-exact (no float / math
+	// import): 7/5 = 1.4× the authored baseline. ScaleEnemyDifficulty applies it
+	// at three seams — spawn HP (NewEnemy), basic-attack damage (EnemyBasicDamage),
+	// and enemy spell/AoE damage (battle.enemySpellDamage) — so one edit retunes
+	// the whole roster's lethality without touching the per-kind authored numbers
+	// (or their init validators). Deliberately leaves accuracy / crit / XP / gold
+	// alone: foes hit HARDER and survive longer, but don't whiff less or pay more.
+	EnemyDifficultyNum = 7
+	EnemyDifficultyDen = 5
+
 	// Flee (combat menu, last row). Success ends the fight and retreats the
 	// party to the pre-combat tile; failure costs the actor's turn. Chance is
 	// driven by the party's average living level vs the pack's average living
@@ -454,6 +465,13 @@ const (
 	// faster than they can heal it back without dedicated cleansing.
 	PoisonTickDamage = 1
 
+	// BleedTickDamage is the per-turn damage applied to a bleeding enemy at the
+	// END of its own turn (same cadence as Poison). Flat like Burn/Poison; set
+	// to 2 — a martial wound bites harder than the Diseased Rat's 1-per-turn
+	// poison, the trade-off being Bleed is player-applied only (Rend / Lacerate)
+	// and ticks on its OWN counter so it can run alongside Poison.
+	BleedTickDamage = 2
+
 	// Status duration bounds. Every (Poison / Sleep / Stun / Webbed /
 	// Confuse / Burn) status rolls a uniform duration in
 	// [Min, Max] inclusive when it lands. Co-located so a balance
@@ -477,6 +495,11 @@ const (
 	SpiderWebbedMaxTurns = 3
 	WispConfuseMinTurns  = 2
 	WispConfuseMaxTurns  = 2
+	// Bleed duration bounds — the Rend / Lacerate DoT (BleedTickDamage/turn on
+	// Enemy.BleedTurns). Rolls uniform in [Min, Max] like the others; the proc
+	// gates (RendBleedChance / LacerateBleedChance) live with the cast chances.
+	BleedMinTurns = 3
+	BleedMaxTurns = 4
 	// (Burn min/max travel on SkillEffect.Burn fields per skill —
 	// no global default since only the Wizard's Firebolt sets it
 	// today, and the registry value is the canonical source.)
@@ -503,6 +526,12 @@ const (
 	// phase the player walked into.
 	StepsPerPhase = 25
 	StepsPerCycle = StepsPerPhase * TimeOfDayCount
+
+	// CrystalRechargeSteps is how many landed exploration steps a dormant
+	// healing crystal needs to re-arm (Charge climbs 1/step to this ceiling).
+	// ~2.4 day-phases of walking — long enough that the heal+autosave is a
+	// deliberate resource, not a free fountain you camp on.
+	CrystalRechargeSteps = 60
 
 	// OutdoorCeilingThreshold is the ceiling-coverage fraction above which
 	// an area counts as an enclosed interior (roofed, no sky) rather than
@@ -538,11 +567,11 @@ const (
 	LightningIntervalMax = 13.0 // longest gap between bolts
 	LightningDecayPerSec = 3.6  // flash brightness lost per second (≈0.28s blink)
 
-	// BattleLogMaxLines caps the rolling combat log buffer so a long fight
+	// ActionLogMaxLines caps the rolling action log buffer so a long fight
 	// doesn't grow it unbounded. The renderer reads len(Log) to draw the
 	// last-N visible lines; this cap is the ceiling for any scrollback
 	// feature that might land later.
-	BattleLogMaxLines = 40
+	ActionLogMaxLines = 40
 
 	// MaxMapDimension caps editor map width/height. Used by both the typed
 	// numeric input and the +/- resize buttons so they share one ceiling.
@@ -838,6 +867,17 @@ const (
 	// (the reactive counterpart to Frostbite's chill). Appended at the END
 	// (saved-map-key contract).
 	SkillIceArmor
+	// SkillRend is the Warrior's bleed strike (Fury tree's "Rend" node). A
+	// STR-scaled phys hit that applies Bleed — the game's third damage-over-time
+	// (after Burn and Poison), a flat-tick DoT on its own Enemy.BleedTurns
+	// counter so it STACKS alongside Poison. Appended at the END (saved-map-key
+	// contract).
+	SkillRend
+	// SkillLacerate is the Thief's bleed strike (Venomancy tree's "Lacerate"
+	// node). The same Bleed DoT as Rend, flavored as a toxin-tree cut that
+	// deliberately stacks alongside the tree's Poison (separate counters).
+	// Appended at the END (saved-map-key contract).
+	SkillLacerate
 )
 
 // SkillTag classifies a skill for damage-type interactions (armor,
@@ -1053,6 +1093,23 @@ const (
 	// same shape as Cone of Cold's per-target chill).
 	IceArmorChillSPD   = 1
 	IceArmorChillTurns = 2
+)
+
+// Rend (Warrior) + Lacerate (Thief) tuning — the two Bleed strikes. A phys hit
+// that applies the Bleed DoT (BleedTickDamage/turn for BleedMin..MaxTurns on
+// Enemy.BleedTurns) on a connecting hit. The bleed apply is a quality-scaled
+// proc (like Venom Strike's Poison) gated by *BleedChance; the no-stack +
+// WIS-shorten rules ride the shared tryProcStatus path. Rend hits harder (STR
+// Warrior); Lacerate is the lighter Thief cut whose draw is stacking onto Poison.
+const (
+	// RendDamageBase / LacerateDamageBase are the tier-0 base damage (stat-scaled
+	// by SkillKindMelee).
+	RendDamageBase     = 2
+	LacerateDamageBase = 1
+	// RendBleedChance / LacerateBleedChance gate the Bleed apply before timing
+	// scaling — high, so "applies a Bleed" reads reliable on a good hit.
+	RendBleedChance     = 0.85
+	LacerateBleedChance = 0.85
 )
 
 // Second Wind (Warrior) + Renewal (Cleric) heal tuning. Both base values fold

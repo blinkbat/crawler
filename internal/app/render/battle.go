@@ -12,14 +12,14 @@ import (
 
 // drawBattleHUD orchestrates the in-combat HUD. Each panel owns one screen
 // region (top-center roster, bottom-left log, bottom-center action, top-right
-// turn order) so they never compete for the same real estate. The combat
+// turn order) so they never compete for the same real estate. The action
 // log is pinned bottom-left through every phase — including the timing
 // minigame — so the player can keep reading the last few events while
 // they press. The action menu yields to the bar (it has nothing useful
 // to show during press/charge anyway).
 func drawBattleHUD(g core.GameState, assets Resources) {
 	drawEnemyRoster(g, assets)
-	drawCombatLogPanel(g, assets)
+	drawActionLogPanel(g, assets)
 	if !timingActive(g) {
 		drawActionMenuPanel(g, assets)
 	}
@@ -66,6 +66,7 @@ const (
 	enemyStatusBurn enemyStatusKind = iota
 	enemyStatusSleep
 	enemyStatusPoison
+	enemyStatusBleed
 	enemyStatusStun
 	enemyStatusCount
 )
@@ -82,6 +83,7 @@ var enemyStatusPillVisuals = [enemyStatusCount]enemyStatusPillVisual{
 	enemyStatusBurn:   {turns: func(e *core.Enemy) int { return e.BurnTurns }, fill: statusBurn, outline: statusBurnOutline, flicker: true},
 	enemyStatusSleep:  {turns: func(e *core.Enemy) int { return e.SleepTurns }, fill: statusSleep, outline: statusSleepOutline, prefix: "Z"},
 	enemyStatusPoison: {turns: func(e *core.Enemy) int { return e.PoisonTurns }, fill: statusPoison, outline: statusPoisonOutline, prefix: "P", flicker: true},
+	enemyStatusBleed:  {turns: func(e *core.Enemy) int { return e.BleedTurns }, fill: statusBleed, outline: statusBleedOutline, prefix: "B", flicker: true},
 	enemyStatusStun:   {turns: func(e *core.Enemy) int { return e.StunTurns }, fill: statusStun, outline: statusStunOutline, prefix: "S"},
 }
 
@@ -93,6 +95,17 @@ func init() {
 		if v.turns == nil {
 			panic(fmt.Sprintf("enemyStatusPillVisuals[%d] has no turns reader", i))
 		}
+		// Pre-format this pill prefix's turn labels so the per-frame roster draw
+		// never Sprintf's. Sourcing the keys from the pill table here means a new
+		// status's prefix is cached automatically — no parallel list to forget.
+		if _, ok := statusTurnsCache[v.prefix]; ok {
+			continue
+		}
+		labels := make([]string, statusTurnsCacheMax)
+		for n := range labels {
+			labels[n] = fmt.Sprintf("%s%d", v.prefix, n)
+		}
+		statusTurnsCache[v.prefix] = labels
 	}
 }
 
@@ -231,9 +244,10 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 	pillBaseY := float32(y) + (float32(h)-pillH)/2
 
 	// Slot-stacked status pills. Walking the init-asserted visual table is what
-	// lets a future fifth enemy status land as one appended row without
-	// re-tuning any per-pill geometry. Limit to 4 visible — the panel doesn't
-	// have vertical room for more without colliding with the row above.
+	// lets a new enemy status land as one appended row without re-tuning any
+	// per-pill geometry. Pills stack upward from pillBaseY; in practice an enemy
+	// shows 1-2 at once (the five kinds rarely co-occur — Sleep/Stun skip turns,
+	// so a fully-stacked Burn+Sleep+Poison+Bleed+Stun is unreachable in play).
 	slot := 0
 	for _, p := range enemyStatusPillVisuals {
 		turns := p.turns(enemy)
@@ -258,17 +272,9 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 // fmt.Sprintf alloc on the enemy roster hot path (up to 4 statuses ×
 // 6 enemies = 24 strings/frame in heavy combat).
 func statusTurnsLabel(prefix string, turns int) string {
-	if turns >= 0 && turns < len(statusTurnsCache) {
-		labels := &statusTurnsCache[turns]
-		switch prefix {
-		case "":
-			return labels.plain
-		case "Z":
-			return labels.zPrefix
-		case "P":
-			return labels.pPrefix
-		case "S":
-			return labels.sPrefix
+	if turns >= 0 && turns < statusTurnsCacheMax {
+		if labels, ok := statusTurnsCache[prefix]; ok {
+			return labels[turns]
 		}
 	}
 	return fmt.Sprintf("%s%d", prefix, turns)
@@ -296,20 +302,18 @@ func enemyHPLabel(hp, max int) string {
 	return s
 }
 
-// statusTurnsCache holds pre-formatted "N", "ZN", "PN", "SN" strings
-// for the small turn-count range that covers every realistic case
-// plus tuning slack. Widened to 20 so a future tuning bump (longer
-// burn/sleep ceilings) doesn't drop the path back into fmt.Sprintf.
-var statusTurnsCache = func() [20]struct{ plain, zPrefix, pPrefix, sPrefix string } {
-	var out [20]struct{ plain, zPrefix, pPrefix, sPrefix string }
-	for i := range out {
-		out[i].plain = fmt.Sprintf("%d", i)
-		out[i].zPrefix = fmt.Sprintf("Z%d", i)
-		out[i].pPrefix = fmt.Sprintf("P%d", i)
-		out[i].sPrefix = fmt.Sprintf("S%d", i)
-	}
-	return out
-}()
+// statusTurnsCacheMax is the turn-count ceiling the label cache covers; past it
+// statusTurnsLabel falls back to fmt.Sprintf. Generous slack over every real
+// status duration so a tuning bump doesn't drop the path back into Sprintf.
+const statusTurnsCacheMax = 20
+
+// statusTurnsCache holds pre-formatted "<prefix><turns>" labels per pill prefix
+// so the per-frame roster draw never fmt.Sprintf's per pill. Keyed by prefix and
+// BUILT FROM enemyStatusPillVisuals at init (see init above), so EVERY pill's
+// prefix — present and future — is cached automatically. (A hand-maintained
+// per-prefix switch previously let the new Bleed "B" pill fall through to a
+// per-frame Sprintf; sourcing the keys from the pill table removes that trap.)
+var statusTurnsCache = map[string][]string{}
 
 // drawStatusPill paints the shared status-pill silhouette: a small
 // rounded fill pane + matching outline + a FontSmall single-line label.
@@ -343,21 +347,21 @@ func drawEnemyStatusPill(font rl.Font, x, y, w, h float32, fill, outline rl.Colo
 	drawStatusPill(font, x, y, w, h, fill, outline, label, inkPrimary, true)
 }
 
-// combatLogTextPad is the horizontal inset between the combat-log
+// actionLogTextPad is the horizontal inset between the action-log
 // inner panel edge and the rendered text. Both the wrap width
 // (subtracts 2× pad) and the per-line text X (adds 1× pad) read
 // this so the inset can't drift between the two seams — earlier
 // the wrap used `innerW - 20` and the draw used `innerX + 10`
 // with the coupling implicit.
-const combatLogTextPad = int32(10)
+const actionLogTextPad = int32(10)
 
-// drawCombatLogSpine paints the binding-edge ornament along the left
-// inside of the combat log pane: a thin wood-accent stripe terminated
+// drawActionLogSpine paints the binding-edge ornament along the left
+// inside of the action log pane: a thin wood-accent stripe terminated
 // by gilt fleurons at both ends with a middle diamond pip flanked by
 // horizontal "binding ties". Reads as a scribe's ledger spine — the
 // dressing that ties the rolling text to the rest of the
 // wood-and-glass HUD.
-func drawCombatLogSpine(panelX, panelY, panelH int32) {
+func drawActionLogSpine(panelX, panelY, panelH int32) {
 	const inset = int32(10)
 	stripeX := panelX + inset
 	stripeY := panelY + 18
@@ -377,33 +381,35 @@ func drawCombatLogSpine(panelX, panelY, panelH int32) {
 	rl.DrawRectangle(stripeX+2, int32(midY), 4, 1, tieCol)
 }
 
-// combatLogVisualLine is the wrapped+styled product of one source log
+// actionLogVisualLine is the wrapped+styled product of one source log
 // line. Lifted to package scope so the persistent cache can hold it
 // across frames.
-type combatLogVisualLine struct {
+type actionLogVisualLine struct {
 	text  string
 	fresh bool
 }
 
-// combatLogCache memoizes the wrapped combat log between frames. The
+// actionLogCache memoizes the wrapped action log between frames. The
 // log only changes on setBattleMessage; without this cache,
-// drawCombatLogPanel re-runs wrapTextLines + MeasureTextEx every
+// drawActionLogPanel re-runs wrapTextLines + MeasureTextEx every
 // frame even when nothing's new. Invalidates on log length change,
 // last-line content change, or panel-geometry change.
-var combatLogCache struct {
-	visible      []combatLogVisualLine
+var actionLogCache struct {
+	visible      []actionLogVisualLine
 	lastLogLen   int
 	lastLastLine string
 	lastInnerW   int32
 	lastMaxLines int
 }
 
-func drawCombatLogPanel(g core.GameState, assets Resources) {
-	// Combat log is the bottom-left HUD pane: tall, soft-edged glass
-	// that the world bleeds through. No header label — the rolling
-	// text is self-evident. The pane stretches to almost reach the
-	// turn panel above, then floors at 160 px so it stays usable on
-	// very short windows.
+// drawActionLogPanel paints the rolling ACTION LOG — the bottom-left HUD pane
+// shown both in combat and during exploration (g.ActionLog persists across the
+// two). The name is historical; it's no longer combat-only.
+func drawActionLogPanel(g core.GameState, assets Resources) {
+	// Bottom-left HUD pane: tall, soft-edged glass that the world bleeds
+	// through. No header label — the rolling text is self-evident. The pane
+	// stretches to almost reach the turn panel above, then floors at 160 px so
+	// it stays usable on very short windows.
 	w := int32(320)
 	h := int32(300)
 	x := hudEdgePad
@@ -423,7 +429,7 @@ func drawCombatLogPanel(g core.GameState, assets Resources) {
 	// edge, dotted with three small pips. Reads as the bound-edge of
 	// a scribe's ledger, anchoring the rolling text against the
 	// world bleed-through.
-	drawCombatLogSpine(x, y, h)
+	drawActionLogSpine(x, y, h)
 
 	// Without the header band the inner content fills the full pane
 	// minus a small symmetric inset. Wood frame eats ~6 px on each
@@ -451,9 +457,9 @@ func drawCombatLogPanel(g core.GameState, assets Resources) {
 		rl.DrawRectangle(ruleX, ry, ruleW, 1, fadeColor(inkDim, 0.13))
 	}
 
-	lines := g.Battle.Log
-	if len(lines) == 0 && g.Battle.Message != "" {
-		lines = []string{g.Battle.Message}
+	lines := g.ActionLog
+	if len(lines) == 0 && g.StatusMessage != "" {
+		lines = []string{g.StatusMessage}
 	}
 	if len(lines) == 0 {
 		return
@@ -463,56 +469,57 @@ func drawCombatLogPanel(g core.GameState, assets Resources) {
 		maxLines = 1
 	}
 
-	wrapW := float32(innerW - 2*combatLogTextPad)
-	visible := wrappedCombatLogLines(assets.hudFont, lines, innerW, maxLines, lineSize, wrapW)
+	wrapW := float32(innerW - 2*actionLogTextPad)
+	visible := wrappedActionLogLines(assets.hudFont, lines, innerW, maxLines, lineSize, wrapW)
 	startY := innerY + innerH - int32(len(visible))*lineH - 6
 	n := len(visible)
 	for i, vl := range visible {
-		// Fade-to-top: bottom line at full alpha (newest), top line
-		// at ~0.18. Linear ramp in between so older entries gently
-		// dissolve into the glass rather than getting cut off hard.
+		// Fade-to-top: bottom line (newest) at full alpha, oldest line at 0.5.
+		// Gentle linear ramp so older entries recede into the glass without
+		// becoming unreadable — the floor was 0.18, which faded the top lines
+		// nearly to nothing (they "fade too much").
 		var alpha float32 = 1
 		if n > 1 {
 			posT := float32(i) / float32(n-1) // 0 at top, 1 at bottom
-			alpha = 0.18 + 0.82*posT
+			alpha = 0.5 + 0.5*posT
 		}
 		base := textMuted
 		if vl.fresh {
 			base = textPrimary
 		}
 		col := fadeColor(base, alpha)
-		drawTextWithShadow(assets.hudFont, vl.text, float32(innerX+combatLogTextPad), float32(startY+int32(i)*lineH), lineSize, col)
+		drawTextWithShadow(assets.hudFont, vl.text, float32(innerX+actionLogTextPad), float32(startY+int32(i)*lineH), lineSize, col)
 	}
 }
 
-// wrappedCombatLogLines returns the visible wrapped log lines for the
+// wrappedActionLogLines returns the visible wrapped log lines for the
 // given source slice, reusing the cached result when the inputs are
 // unchanged. The cache invalidates on (length, last-line, innerW,
 // maxLines) — covering the two ways a log mutates (append, or
 // trim+append on overflow) and any panel-geometry shift caused by the
-// turn-panel collision guard at the top of drawCombatLogPanel.
-func wrappedCombatLogLines(font rl.Font, lines []string, innerW int32, maxLines int, lineSize, wrapW float32) []combatLogVisualLine {
+// turn-panel collision guard at the top of drawActionLogPanel.
+func wrappedActionLogLines(font rl.Font, lines []string, innerW int32, maxLines int, lineSize, wrapW float32) []actionLogVisualLine {
 	lastLine := ""
 	if len(lines) > 0 {
 		lastLine = lines[len(lines)-1]
 	}
-	if combatLogCache.lastLogLen == len(lines) &&
-		combatLogCache.lastLastLine == lastLine &&
-		combatLogCache.lastInnerW == innerW &&
-		combatLogCache.lastMaxLines == maxLines {
-		return combatLogCache.visible
+	if actionLogCache.lastLogLen == len(lines) &&
+		actionLogCache.lastLastLine == lastLine &&
+		actionLogCache.lastInnerW == innerW &&
+		actionLogCache.lastMaxLines == maxLines {
+		return actionLogCache.visible
 	}
 
 	// Wrap each source line to the inner content width. We walk from
 	// the NEWEST entry backward, building wraps in reverse, and stop
 	// once we have enough visual lines to fill the panel. This avoids
 	// re-wrapping older log lines that would just be sliced away —
-	// with BattleLogMaxLines=40 sources averaging ~10 words, the old
+	// with ActionLogMaxLines=40 sources averaging ~10 words, the old
 	// "wrap-everything-then-slice" path made ~400 MeasureTextEx calls
 	// per frame; this caps the work at ~maxLines × per-source words.
-	reversed := combatLogCache.visible[:0]
+	reversed := actionLogCache.visible[:0]
 	if cap(reversed) < maxLines {
-		reversed = make([]combatLogVisualLine, 0, maxLines)
+		reversed = make([]actionLogVisualLine, 0, maxLines)
 	}
 	for i := len(lines) - 1; i >= 0 && len(reversed) < maxLines; i-- {
 		fresh := i == len(lines)-1
@@ -521,13 +528,13 @@ func wrappedCombatLogLines(font rl.Font, lines []string, innerW int32, maxLines 
 		if len(wraps) == 0 {
 			// Empty source line — preserve as a blank gap so logged
 			// "" entries (if any) still take a row.
-			reversed = append(reversed, combatLogVisualLine{text: "", fresh: fresh})
+			reversed = append(reversed, actionLogVisualLine{text: "", fresh: fresh})
 			continue
 		}
 		// Append wraps in REVERSE so reversed[] stays "newest first."
 		// Final reverse pass below restores chronological order.
 		for j := len(wraps) - 1; j >= 0; j-- {
-			reversed = append(reversed, combatLogVisualLine{text: wraps[j], fresh: fresh})
+			reversed = append(reversed, actionLogVisualLine{text: wraps[j], fresh: fresh})
 			if len(reversed) >= maxLines {
 				break
 			}
@@ -540,11 +547,11 @@ func wrappedCombatLogLines(font rl.Font, lines []string, innerW int32, maxLines 
 	for i, j := 0, len(reversed)-1; i < j; i, j = i+1, j-1 {
 		reversed[i], reversed[j] = reversed[j], reversed[i]
 	}
-	combatLogCache.visible = reversed
-	combatLogCache.lastLogLen = len(lines)
-	combatLogCache.lastLastLine = lastLine
-	combatLogCache.lastInnerW = innerW
-	combatLogCache.lastMaxLines = maxLines
+	actionLogCache.visible = reversed
+	actionLogCache.lastLogLen = len(lines)
+	actionLogCache.lastLastLine = lastLine
+	actionLogCache.lastInnerW = innerW
+	actionLogCache.lastMaxLines = maxLines
 	return reversed
 }
 
@@ -592,6 +599,11 @@ func arrowPrompt(a, b string) string {
 	return arrowPromptCache.text
 }
 
+// actionMenuLift raises the bottom-right action menu this many px above the
+// bare ribbon gap, so it clears the active member's raised card and reads as a
+// distinct band rather than crowding the party row.
+const actionMenuLift = int32(30)
+
 func drawActionMenuPanel(g core.GameState, assets Resources) {
 	if g.Battle.Phase != core.BattlePlayer {
 		return
@@ -614,12 +626,15 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 	// minimap), so the action panel is the rightmost battle-HUD element.
 	h := int32(312)
 	x := screenW - w - hudEdgePad
-	y := int32(PartyRibbonTopY()) - h - hudColumnGap
+	// Sit a bit higher than the bare ribbon gap so the menu clears the active
+	// member's raised card (activeCardLift) and reads as its own band above the
+	// party row rather than crowding it.
+	y := int32(PartyRibbonTopY()) - h - hudColumnGap - actionMenuLift
 	// Vertical collision guard: on a short-window resolution the
 	// 280px panel might slip behind the top edge (y < 16). Floor the
 	// top edge at hudEdgePad and shrink height to whatever fits
 	// between hudEdgePad and PartyRibbonTopY. Same defensive pattern
-	// the combat log uses against the left column. Floor height at
+	// the action log uses against the left column. Floor height at
 	// 160 so the action rows stay readable.
 	if y < int32(hudEdgePad) {
 		topPad := int32(hudEdgePad)
@@ -682,7 +697,7 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 		drawTextWithShadow(assets.hudFont, "Choose an ally", float32(contentX), float32(subY), FontSmall, textLabel)
 	default:
 		// Transient status line — populated by setBattleStatus to surface
-		// validation errors that aren't real combat-log events (e.g.
+		// validation errors that aren't real action-log events (e.g.
 		// "Swipe needs more MP."). Picker modes use their own hardcoded
 		// prompt so we only render this in the action menu itself.
 		if status := transientStatus(g); status != "" {
@@ -703,16 +718,16 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 	}
 }
 
-// transientStatus returns Battle.Message when it's a "status" string that
+// transientStatus returns StatusMessage when it's a "status" string that
 // hasn't been logged yet (i.e. set via setBattleStatus, not setBattleMessage).
 // Returns "" when Message is empty or matches the most recent log entry, so
 // result/log messages don't render twice.
 func transientStatus(g core.GameState) string {
-	msg := g.Battle.Message
+	msg := g.StatusMessage
 	if msg == "" {
 		return ""
 	}
-	if n := len(g.Battle.Log); n > 0 && g.Battle.Log[n-1] == msg {
+	if n := len(g.ActionLog); n > 0 && g.ActionLog[n-1] == msg {
 		return ""
 	}
 	return msg

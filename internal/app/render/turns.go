@@ -21,7 +21,7 @@ const (
 // doesn't allocate. CacheTurnForecastForFrame populates it once at the
 // top of the battle HUD pass; TurnPanelBottomY and drawTurnPanel then
 // read the same slice, eliminating the duplicate TurnForecast call
-// (combat-log layout used to invoke it via TurnPanelBottomY, and the
+// (action-log layout used to invoke it via TurnPanelBottomY, and the
 // turn panel itself reinvoked it on the very next line).
 var turnForecastBuf = make([]core.TurnEntry, 0, 7)
 
@@ -43,16 +43,16 @@ const (
 )
 
 // turnPanelHeight is the panel's pixel height for n forecast rows. Shared by
-// the draw (drawTurnPanel) and the docked combat-log's bottom-edge read
+// the draw (drawTurnPanel) and the docked action-log's bottom-edge read
 // (TurnPanelBottomY) so the two can't drift on the row height / pad math.
 func turnPanelHeight(n int) int32 {
 	return turnPanelTopPad + int32(n)*turnPanelRowH + turnPanelBottomPad
 }
 
 // TurnPanelBottomY returns the Y screen coordinate of the bottom
-// edge of the turn-order panel — used by the combat-log panel that
+// edge of the turn-order panel — used by the action-log panel that
 // docks below it on the same left edge. Returns the minimap bottom
-// when the queue is empty (no panel painted, so combat log slots up).
+// when the queue is empty (no panel painted, so action log slots up).
 func TurnPanelBottomY(g core.GameState) int32 {
 	turns := turnForecastBuf
 	if len(turns) == 0 {

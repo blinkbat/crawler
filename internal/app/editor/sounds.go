@@ -562,12 +562,9 @@ func updateSoundsListKeys(s *State, names []string) {
 // different name re-arms instead of deleting, so a single misclick on the
 // × never destroys a .wav.
 func confirmSoundDelete(s *State, name string) {
-	if s.soundDeleteArmed != name {
-		s.soundDeleteArmed = name
-		s.flash("Delete " + name + "? Click × again (or press X) to confirm")
+	if !armOrConfirmDelete(s, "sound:"+name, "Delete "+name+"? Click × again (or press X) to confirm") {
 		return
 	}
-	s.soundDeleteArmed = ""
 	if err := audio.DeleteUserSound(name); err != nil {
 		s.flash("Delete failed: " + err.Error())
 	} else {

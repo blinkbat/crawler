@@ -81,7 +81,7 @@ type customStatSpec struct {
 
 var customStatSpecs = []customStatSpec{
 	{csHP, "HP", 1, func(d *core.CustomEnemyDef) *int { return &d.HP }},
-	{csMP, "MP", 1, func(d *core.CustomEnemyDef) *int { return &d.MP }},
+	{csMP, "MP (n/a)", 1, func(d *core.CustomEnemyDef) *int { return &d.MP }},
 	{csAttack, "Attack", 1, func(d *core.CustomEnemyDef) *int { return &d.AttackDamage }},
 	{csArmor, "Armor", 1, func(d *core.CustomEnemyDef) *int { return &d.Armor }},
 	{csMDef, "MDef", 1, func(d *core.CustomEnemyDef) *int { return &d.MDef }},
@@ -371,7 +371,7 @@ func drawCustomEnemiesModal(s *State, font rl.Font, theme render.Theme) {
 	}
 	drawButton(font, l.basePrev, "<", false)
 	rl.DrawRectangleRec(rl.NewRectangle(l.basePrev.X+l.basePrev.Width+4, l.basePrev.Y, l.baseNext.X-l.basePrev.X-l.basePrev.Width-8, l.basePrev.Height), bgFieldInset)
-	rl.DrawTextEx(font, baseName,
+	rl.DrawTextEx(font, baseName+"  ▼", // ▼ = click the name to pick a base kind from all kinds
 		rl.NewVector2(l.basePrev.X+l.basePrev.Width+12, l.basePrev.Y+(l.basePrev.Height-editorFontLabel)/2),
 		editorFontLabel, 1, textEntry)
 	drawButton(font, l.baseNext, ">", false)
@@ -425,8 +425,14 @@ func drawCustomEnemiesModal(s *State, font rl.Font, theme render.Theme) {
 		}
 	}
 
-	// Footer buttons.
-	drawButton(font, l.deleteBtn, "Delete", false)
+	// Footer buttons. The Delete button highlights while a delete is armed (the
+	// first of the two-press confirm) so the primed state stays visible after the
+	// flash toast fades.
+	delArmed := false
+	if def := activeCustomEnemy(s); def != nil {
+		delArmed = s.deleteArmed == "custom:"+def.Name
+	}
+	drawButton(font, l.deleteBtn, "Delete", delArmed)
 	drawButton(font, l.closeBtn, "Close", false)
 }
 
@@ -605,6 +611,12 @@ func updateCustomEnemiesModal(s *State) Action {
 			return ActionNone
 		}
 		if pointIn(mp, l.deleteBtn) {
+			// Two-press confirm: deleting a custom enemy also rewrites every pack
+			// reference to it (blast radius), so guard the first click. The def-name
+			// token means a different entry re-arms (can't confirm the wrong delete).
+			if !armOrConfirmDelete(s, "custom:"+def.Name, "Delete custom enemy "+def.Name+"? Click Delete again to confirm") {
+				return ActionNone
+			}
 			// Finalize first: if the name field was mid-edit, def.Name holds
 			// the uncommitted text while pack-member refs are still keyed on
 			// the last-finalized name. Finalizing sanitizes/uniquifies and
@@ -641,6 +653,12 @@ func updateCustomEnemiesModal(s *State) Action {
 			pushUndo(s)
 			applyCustomEnemyRow(def, cesBase, 0, +1, false)
 			s.dirty = true
+			return ActionNone
+		}
+		// Click the base NAME (between the < > arrows) to open a dropdown of every
+		// kind — jump instead of cycling. The arrows still step prev/next.
+		if baseSpan := nameSpanBetween(l.basePrev, l.baseNext); pointIn(mp, baseSpan) {
+			openDropdownBelow(s, ddCustomBase, baseSpan)
 			return ActionNone
 		}
 		for i, row := range l.statRows {

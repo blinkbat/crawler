@@ -326,3 +326,31 @@ func drawGlyphVenom(cx, cy, t, baseR float32) {
 	rl.DrawLineEx(rl.NewVector2(cx, dripTopY), rl.NewVector2(cx, dripTopY+drip), 2, col)
 	rl.DrawCircleV(rl.NewVector2(cx, dripTopY+drip), 3, col)
 }
+
+// --- Editor gallery export -------------------------------------------------
+// The hit glyphs flash for ~0.4s mid-attack, so the author never gets a good
+// look. The editor's Hit Glyphs viewer (editor/hitglyphs.go) plays each one on a
+// loop; these two symbols are the only window it needs into this otherwise
+// render-private art.
+
+// EditorHitGlyphNames lists the clarity-glyph styles for that viewer, in the
+// order EditorDrawHitGlyph indexes them — parallel to the glyphSlash..glyphVenom
+// enum (gallery index i → kind i+1, skipping glyphNone). The init below asserts
+// the count matches the enum so a new glyph can't silently drop out of the gallery.
+var EditorHitGlyphNames = []string{"Slash", "Impact", "Frost", "Spark", "Fire", "Holy", "Venom"}
+
+func init() {
+	if len(EditorHitGlyphNames) != int(glyphVenom) {
+		panic("render: EditorHitGlyphNames out of sync with the hitGlyphKind enum")
+	}
+}
+
+// EditorDrawHitGlyph draws gallery glyph i (0-based, parallel to
+// EditorHitGlyphNames) at screen (cx,cy) with life fraction t∈[0,1] and size
+// scale — the editor loops t to animate the preview. Out-of-range i is a no-op.
+func EditorDrawHitGlyph(i int, cx, cy, t, scale float32) {
+	if i < 0 || i >= len(EditorHitGlyphNames) {
+		return
+	}
+	drawHitGlyph(hitGlyphKind(i+1), cx, cy, t, scale) // +1 skips glyphNone
+}

@@ -67,7 +67,7 @@ var (
 	// earlier ~70 % so the dungeon genuinely glows through every pane
 	// (the BG-era "UI floats over the world" read). The mandatory text
 	// drop shadows are what keep parchment ink legible at this
-	// thinness; if a future pass thins further, check the combat log
+	// thinness; if a future pass thins further, check the action log
 	// over a lit floor first.
 	glassBaseWash = rl.NewColor(8, 6, 10, 88)
 	glassDeep     = rl.NewColor(14, 12, 18, 100)
@@ -167,6 +167,7 @@ var (
 	// future field-status overlays) can pull the same hue without
 	// re-typing the RGBs.
 	statusPoison    = mute(rl.NewColor(148, 200, 96, 240))
+	statusBleed     = mute(rl.NewColor(200, 56, 56, 240))
 	statusBurn      = mute(rl.NewColor(240, 144, 72, 240))
 	statusSleep     = mute(rl.NewColor(132, 196, 232, 240))
 	statusStun      = mute(rl.NewColor(232, 220, 120, 240))
@@ -191,6 +192,7 @@ var (
 	statusBurnOutline   = mute(rl.NewColor(255, 200, 120, 220))
 	statusSleepOutline  = mute(rl.NewColor(190, 220, 244, 220))
 	statusPoisonOutline = mute(rl.NewColor(180, 232, 132, 220))
+	statusBleedOutline  = mute(rl.NewColor(248, 120, 120, 220))
 	statusStunOutline   = mute(rl.NewColor(248, 232, 160, 230))
 
 	// Turn-order panel: the danger red an enemy row reads as. Named so
@@ -271,14 +273,14 @@ var (
 const (
 	// hudEdgePad is the canonical distance every always-on HUD panel
 	// keeps from the screen edges. Pulled into theme so the minimap,
-	// turn panel, combat log, action menu, and party ribbon all
+	// turn panel, action log, action menu, and party ribbon all
 	// honour the same margin without each one picking its own.
 	// 16 reads "comfortable margin" at 1080p without wasting too much
 	// real estate on smaller windows.
 	hudEdgePad = int32(16)
 	// hudColumnGap is the vertical spacing between stacked HUD
 	// panels in the left/right column (minimap → turn panel →
-	// combat log). Smaller than hudEdgePad so adjacent panels feel
+	// action log). Smaller than hudEdgePad so adjacent panels feel
 	// grouped rather than scattered.
 	hudColumnGap = int32(10)
 

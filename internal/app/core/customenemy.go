@@ -224,10 +224,15 @@ func (d CustomEnemyDef) Definition() EnemyDefinition {
 // loadout for EnemyInfoFor readers.
 func (d CustomEnemyDef) Instantiate() Enemy {
 	def := d.Definition()
+	// Scale spawn HP by the global difficulty dial, exactly as NewEnemy does for
+	// base kinds — otherwise custom foes would get scaled damage (via
+	// EnemyBasicDamage / enemySpellDamage, which read the override) but baseline
+	// HP, leaving them inconsistently squishy as EnemyDifficultyMul rises.
+	maxHP := ScaleEnemyDifficulty(def.MaxHP)
 	return Enemy{
 		Kind:                  d.BaseKind,
-		HP:                    def.MaxHP,
-		MaxHP:                 def.MaxHP,
+		HP:                    maxHP,
+		MaxHP:                 maxHP,
 		Armor:                 def.Armor,
 		Alive:                 true,
 		Item:                  def.Item,

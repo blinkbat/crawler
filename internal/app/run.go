@@ -154,7 +154,7 @@ func updateAdventureScene(state *appState) {
 			// clue, and otherwise drop the player off where they were.
 			// Common cause: target map file missing, or the named door
 			// doesn't exist in the destination.
-			state.game.SetStatusMessage("Door failed: " + err.Error())
+			state.game.LogMessage("Door failed: " + err.Error())
 		}
 		state.game.PendingTransition = core.AreaTransition{}
 	}
@@ -380,6 +380,7 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	render.DrawWorld(camera, *game, assets)
 	render.DrawChests(camera, *game, assets)
 	render.DrawDoors(camera, *game, assets)
+	render.DrawCrystals(camera, *game, assets)
 	rl.EndMode3D()
 	// Close the retro capture and blit the FILTERED environment to the
 	// backbuffer — opaquely in the normal arm, alpha-composited over the

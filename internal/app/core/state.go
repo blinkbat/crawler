@@ -63,6 +63,7 @@ func NewGameState(area AreaDefinition) GameState {
 		Packs:      placePacks(area),
 		Chests:     placeChests(area),
 		Doors:      placeDoors(area),
+		Crystals:   placeCrystals(area),
 		Visited:    visited,
 		ChestOpen:  -1,
 		DoorPrompt: -1,
@@ -90,8 +91,11 @@ func NewGameState(area AreaDefinition) GameState {
 			PartyTarget:       0,
 			EnemyAttackCursor: -1,
 			Phase:             BattleNone,
-			Message:           area.QuietMessage,
 		},
+		// Seed the ambient status line from the area's quiet message (shown under
+		// the HUD until the first real action logs over it). Not appended to the
+		// ActionLog — it's per-area flavor, not an action.
+		StatusMessage: area.QuietMessage,
 		// Wall-clock seed so consecutive playthroughs differ. A future
 		// "Restart with seed N" command would assign a deterministic
 		// Rand here instead.
@@ -193,6 +197,60 @@ func placeChests(a AreaDefinition) []Chest {
 		})
 	}
 	return out
+}
+
+// placeCrystals drops the area's healing crystals. Today it synthesizes ONE
+// crystal on a walkable tile next to the start (a Grimrock-style save point by
+// the entrance), seeded CHARGED so the player can bank a save+heal on arrival.
+// It scans the four cardinal neighbors for a standable, non-door tile and falls
+// back to the start tile itself (crystals are non-blocking, so standing on one
+// is fine — the player just triggers it immediately). Runs for every area, so
+// each map's entrance gets a save crystal. (Editor-authored placement is a
+// future enhancement; the entity is runtime-only for now, but its charge state
+// persists via SaveData.)
+func placeCrystals(a AreaDefinition) []Crystal {
+	sx := clampStartCoord(a.StartTileX, a.Width)
+	sz := clampStartCoord(a.StartTileZ, a.Height)
+	isDoorTile := func(x, z int) bool {
+		for _, d := range a.DoorSpawns {
+			if d.TileX == x && d.TileZ == z {
+				return true
+			}
+		}
+		return false
+	}
+	cx, cz := sx, sz
+	for _, d := range [...][2]int{{0, -1}, {0, 1}, {-1, 0}, {1, 0}} {
+		nx, nz := sx+d[0], sz+d[1]
+		if a.InBounds(nx, nz) && !a.BlockedAt(nx, nz) && !isDoorTile(nx, nz) {
+			cx, cz = nx, nz
+			break
+		}
+	}
+	return []Crystal{{TileX: cx, TileZ: cz, Charge: CrystalRechargeSteps, Charged: true}}
+}
+
+// CrystalIndexAt returns the index of the crystal exactly on the tile, or -1.
+// Mirrors ChestIndexAt / DoorIndexAt.
+func CrystalIndexAt(crystals []Crystal, x, z int) int {
+	return slices.IndexFunc(crystals, func(c Crystal) bool { return c.TileX == x && c.TileZ == z })
+}
+
+// AdjacentChargedCrystalIndex returns the index of a CHARGED crystal the player
+// at (x,z) can use — on their tile (distance 0) or a cardinal neighbor (distance
+// 1), so a Grimrock crystal triggers whether you step onto it or up beside it.
+// Returns -1 when no charged crystal is in reach. Dormant crystals are ignored.
+func AdjacentChargedCrystalIndex(crystals []Crystal, x, z int) int {
+	for i := range crystals {
+		c := crystals[i]
+		if !c.Charged {
+			continue
+		}
+		if ManhattanDistance(c.TileX, c.TileZ, x, z) <= 1 {
+			return i
+		}
+	}
+	return -1
 }
 
 // ResetGameState rebuilds the world for the same area — used on loss recovery
