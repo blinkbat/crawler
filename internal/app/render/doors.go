@@ -30,6 +30,11 @@ func DrawDoors(camera rl.Camera3D, g core.GameState, assets Resources) {
 		if style < 0 || int(style) >= len(assets.doorProps) {
 			style = core.DoorStyleBuilding
 		}
+		// The fallback itself must be in range — guards the (assert-prevented)
+		// empty-table case instead of panicking on doorProps[0].
+		if int(style) < 0 || int(style) >= len(assets.doorProps) {
+			continue
+		}
 		assets.doorProps[style].draw(center, 1.0, yaw)
 	}
 }

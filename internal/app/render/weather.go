@@ -76,7 +76,11 @@ func init() {
 // retained between frames.
 func DrawWeather(g core.GameState) {
 	w := g.Weather
-	intensity := w.Intensity
+	// Intensity and Flash are eased into [0,1] upstream (TickWeather/tickLightning);
+	// clamp at the consumption site so the uint8 alpha casts below can never wrap
+	// even if that invariant ever drifts (a >1 value would alias to near-zero alpha).
+	intensity := core.Clamp(w.Intensity, 0, 1)
+	w.Flash = core.Clamp(w.Flash, 0, 1)
 	// A lightning flash can outlast the rain's fade by a blink, so it's
 	// checked independently of intensity. Nothing to paint otherwise.
 	if intensity <= 0.001 && w.Flash <= 0.001 {

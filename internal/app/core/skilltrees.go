@@ -256,6 +256,13 @@ func init() {
 					if granted[n.GrantSkill] {
 						panic("core: skill " + SkillName(n.GrantSkill) + " is granted by more than one node in the same class — BuySkillNode would desync its tier")
 					}
+					// A multi-rank node feeds ranks 2..N into the per-skill upgrade
+					// ladder, but a NoUpgrades skill has no ladder rows — those ranks
+					// would cost SkillPoints and fold nothing. Such a skill must be
+					// wired via a single-rank node (actOnce), not act().
+					if n.MaxRank > 1 && SkillHasNoUpgrades(n.GrantSkill) {
+						panic("core: skill tree node '" + n.ID + "' grants NoUpgrades skill " + SkillName(n.GrantSkill) + " with MaxRank>1 — extra ranks would waste SkillPoints; use a single-rank node")
+					}
 					granted[n.GrantSkill] = true
 				}
 			}

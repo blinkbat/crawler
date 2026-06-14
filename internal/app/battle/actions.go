@@ -383,6 +383,10 @@ func handleEnemyRaiseBones(ctx enemySpellCtx) {
 			caster.SkillCastCount = map[core.SkillID]int{}
 		}
 		caster.SkillCastCount[core.SkillRaiseBones]++
+		// Re-apply the cast bump on the LIVE pointer: resolveEnemySpell stamped
+		// it on ctx.enemy before dispatch, but the append above reallocated
+		// pack.Members, so that write landed on the now-orphaned copy.
+		caster.AttackBump = core.BumpDuration
 	}
 	setBattleMessage(g, fmt.Sprintf("%s incants — a skeleton claws up from the ground!", core.TheEnemy(ctx.def)))
 	audio.Play(audio.SoundInputHit)
@@ -575,6 +579,28 @@ func applyStatusRoll(rng *rand.Rand, counter *int, defeated bool, chance float64
 // Returns true when the target is still alive and the apply can proceed.
 func ensureAliveTargetOrCancel(g *core.GameState, refundSkill core.SkillID) bool {
 	if core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
+		return true
+	}
+	if refundSkill != core.SkillNone {
+		if cost := core.SkillCost(refundSkill); cost > 0 {
+			actor := &g.Party[g.Battle.CurrentParty]
+			core.GainUpTo(&actor.MP, actor.MaxMP, cost)
+		}
+	}
+	setBattleStatus(g, "No target.")
+	finishActorTurn(g)
+	return false
+}
+
+// ensureAlivePartyTargetOrCancel is the ally-side mirror of
+// ensureAliveTargetOrCancel for single-ally support skills (Aegis / Stone Skin
+// / Cleanse) that arm against g.Battle.PartyTarget but only apply once a timing
+// bar resolves. Mixed initiative can kill or ingest the chosen ally during that
+// window; unlike the heal skills these bypass healPartyMember (which already
+// guards death/ingest), so they re-check here. On a gone target it refunds the
+// MP, ends the turn, and returns false so the caller just `return false`.
+func ensureAlivePartyTargetOrCancel(g *core.GameState, refundSkill core.SkillID) bool {
+	if core.PartyMemberAvailable(g.Party, g.Battle.PartyTarget) {
 		return true
 	}
 	if refundSkill != core.SkillNone {
@@ -1526,11 +1552,14 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, skillNoun, hitVe
 		core.EnqueueEnemyVFX(g, vfx, slot)
 		hits++
 		resistWIS := core.EffectiveEnemyStats(*enemy).WIS
+		// Count this foe as afflicted AT MOST ONCE even if multiple statuses
+		// land, so the "N afflicted" tally can't exceed the number of foes.
+		struck := false
 		if tryProcStatus(g.Rand(), &enemy.BurnTurns, defeated, effect.BurnChance, quality, 0, effect.BurnDuration, resistWIS) {
-			afflicted++
+			struck = true
 		}
 		if tryProcStatus(g.Rand(), &enemy.PoisonTurns, defeated, effect.PoisonChance, quality, 0, effect.PoisonDuration, resistWIS) {
-			afflicted++
+			struck = true
 		}
 		// AoE stat debuff (Cone of Cold's chill) — the multi-target mirror of
 		// Frostbite's single-target chill. Guaranteed on a surviving target (no
@@ -1538,6 +1567,9 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, skillNoun, hitVe
 		// buff (Whirlwind / Arc Bolt / Fireball / Poison Cloud) have BuffTurns 0
 		// and skip it, so this stays inert for them.
 		if !defeated && core.StampEnemyDebuff(enemy, skill, effect) {
+			struck = true
+		}
+		if struck {
 			afflicted++
 		}
 	})
@@ -1660,6 +1692,9 @@ func setupStoneSkin(g *core.GameState) bool {
 }
 
 func applyStoneSkin(g *core.GameState, quality int) bool {
+	if !ensureAlivePartyTargetOrCancel(g, core.SkillStoneSkin) {
+		return false
+	}
 	actor := &g.Party[g.Battle.CurrentParty]
 	actor.AttackBump = core.BumpDuration
 	effect := core.EffectiveSkillEffect(actor, core.SkillStoneSkin)
@@ -1714,6 +1749,9 @@ func setupAegis(g *core.GameState) bool {
 // damage path spends before HP. Not turn-counted (no caster-tick correction
 // needed); re-casting replaces the pool rather than stacking.
 func applyAegis(g *core.GameState, quality int) bool {
+	if !ensureAlivePartyTargetOrCancel(g, core.SkillAegis) {
+		return false
+	}
 	actor := &g.Party[g.Battle.CurrentParty]
 	actor.AttackBump = core.BumpDuration
 	effect := core.EffectiveSkillEffect(actor, core.SkillAegis)
@@ -1855,6 +1893,9 @@ func setupCleanse(g *core.GameState) bool {
 }
 
 func applyCleanse(g *core.GameState, quality int) bool {
+	if !ensureAlivePartyTargetOrCancel(g, core.SkillCleanse) {
+		return false
+	}
 	actor := &g.Party[g.Battle.CurrentParty]
 	actor.AttackBump = core.BumpDuration
 	target := &g.Party[g.Battle.PartyTarget]

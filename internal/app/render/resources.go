@@ -684,11 +684,13 @@ func loadFloorModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
 	return loadTileModel(pixels, 0.06, shader)
 }
 
-// rampWedge* are the CPU-side mesh arrays for the ramp wedge, kept alive for
-// the process lifetime. gen2brain's UploadMesh pins + go-manages these (so
+// rampWedgePins keeps every ramp-wedge mesh's CPU-side arrays alive for the
+// process lifetime. gen2brain's UploadMesh pins + go-manages these (so
 // UnloadModel won't C-free them), but holding a package reference guarantees
-// the Mesh's *float32 pointers can never dangle.
-var rampWedgeVerts, rampWedgeNormals, rampWedgeUVs []float32
+// the Mesh's *float32 pointers can never dangle. We APPEND each call's arrays
+// rather than overwrite a fixed set of vars, so a second call can't orphan the
+// first model's still-referenced slices.
+var rampWedgePins [][]float32
 
 // buildRampWedgeModel builds a SOLID wedge (right triangular prism) sized to
 // one tile (TileSize wide/deep × LevelStep tall), ascending toward -Z (north):
@@ -733,7 +735,7 @@ func buildRampWedgeModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
 	addTri(lowSL, hiNL, botNL)          // west side
 	addTri(lowSR, hiNR, botNR)          // east side
 
-	rampWedgeVerts, rampWedgeNormals, rampWedgeUVs = verts, normals, uvs
+	rampWedgePins = append(rampWedgePins, verts, normals, uvs)
 	mesh := rl.Mesh{
 		VertexCount:   int32(len(verts) / 3),
 		TriangleCount: int32(len(verts) / 9),

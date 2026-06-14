@@ -359,9 +359,13 @@ func actorSpeed(g *core.GameState, actor core.ActorRef) int {
 		spd := core.EffectiveStats(g.Party[actor.Index]).SPD
 		if g.Party[actor.Index].WebbedTurns > 0 {
 			spd /= 2
-			if spd < 1 {
-				spd = 1
-			}
+		}
+		// Floor at 1 for the same reason the enemy branch below documents: a 0
+		// SPD (a future party-side SPD debuff, Web on a 1-SPD member, or a
+		// hand-edited stat) never crosses the ATB threshold, so the member would
+		// silently drop out of the turn queue and never act.
+		if spd < 1 {
+			spd = 1
 		}
 		return spd
 	}
@@ -1193,6 +1197,12 @@ func tickQualityPopup(g *core.GameState, dt float32) {
 }
 
 func winBattle(g *core.GameState, message string) {
+	// Idempotency guard: the whole spoils tally below (bestiary kills + XP +
+	// loot) must fire exactly once per won battle. If a future code path lands
+	// here again while the battle is already won, bail before double-crediting.
+	if g.Battle.Phase == core.BattleWon {
+		return
+	}
 	g.Battle.Phase = core.BattleWon
 	g.Battle.Timer = core.VictoryDanceDuration
 	g.Battle.ClearTiming()

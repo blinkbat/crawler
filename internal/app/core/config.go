@@ -35,6 +35,9 @@ const (
 	TurnDuration  = 0.14
 	BumpDuration  = 0.18
 	FlashDuration = 0.16
+	// FlashTintStrength is the peak fraction a flash washes a sprite toward
+	// white (FlashTint): both the cap and the per-frame scale ramp to it.
+	FlashTintStrength = 0.86
 	// HitKnockbackDuration is how long the receiver's recoil offset
 	// lasts after taking damage. A touch longer than BumpDuration so
 	// the impact reads as "the hit shoved them" — the attacker has

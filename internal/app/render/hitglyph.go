@@ -124,11 +124,15 @@ func DrawHitGlyphs(camera rl.Camera3D) {
 	}
 	dt := clampFrameDelta(rl.GetFrameTime())
 	sw, _ := screenSizeF()
+	forward := horizontalForward(camera)
 	write := 0
 	for read := range hitGlyphs {
 		gph := &hitGlyphs[read]
-		screen := rl.GetWorldToScreen(rl.NewVector3(gph.X, gph.Y, gph.Z), camera)
-		if !popupOffScreenX(screen.X, sw) {
+		anchor := rl.NewVector3(gph.X, gph.Y, gph.Z)
+		screen := rl.GetWorldToScreen(anchor, camera)
+		// GetWorldToScreen mirrors points behind the camera to the wrong side of
+		// the screen, so skip a behind-camera anchor (it would draw a ghost glyph).
+		if !behindCull(camera.Position, forward, anchor) && !popupOffScreenX(screen.X, sw) {
 			drawHitGlyph(gph.Kind, screen.X, screen.Y, gph.Elapsed/gph.Duration, gph.Scale)
 		}
 		gph.Elapsed += dt

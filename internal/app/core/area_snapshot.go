@@ -67,20 +67,46 @@ func optionalLayerEqual(a, b []string, width, height int, blank byte) bool {
 	)
 }
 
-// normalizeOptionalLayer returns layer unchanged when it's already a full
-// (height-row) layer, otherwise the canonical blank layer of the given size.
+// normalizeOptionalLayer returns a height×width layer with every row padded /
+// truncated to width using the canonical blank char. An absent layer (wrong row
+// count) becomes a full blank layer; a present-but-ragged layer (right row
+// count, short rows) has each row normalized — so an absent layer and one the
+// loader would blank-fill to the same shape compare equal rather than dirty.
 func normalizeOptionalLayer(layer []string, width, height int, blank byte) []string {
-	if len(layer) == height {
+	blankRow := func() string {
+		buf := make([]byte, width)
+		for i := range buf {
+			buf[i] = blank
+		}
+		return string(buf)
+	}
+	if len(layer) != height {
+		row := blankRow()
+		out := make([]string, height)
+		for i := range out {
+			out[i] = row
+		}
+		return out
+	}
+	// Right row count: normalize each row's width so a ragged row doesn't read
+	// as unequal vs the loader's blank-filled (full-width) form.
+	ragged := false
+	for _, r := range layer {
+		if len(r) != width {
+			ragged = true
+			break
+		}
+	}
+	if !ragged {
 		return layer
 	}
-	buf := make([]byte, width)
-	for i := range buf {
-		buf[i] = blank
-	}
-	row := string(buf)
 	out := make([]string, height)
-	for i := range out {
-		out[i] = row
+	for i, r := range layer {
+		buf := []byte(r)
+		for len(buf) < width {
+			buf = append(buf, blank)
+		}
+		out[i] = string(buf[:width])
 	}
 	return out
 }

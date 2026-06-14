@@ -88,6 +88,11 @@ func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
 	if ce.HP <= 0 {
 		return CustomEnemyDef{}, fmt.Errorf("custom enemy %q has non-positive HP (%d)", ce.Name, ce.HP)
 	}
+	// Symmetric with MapCustomEnemyFromDef's encode-side guard: reject negative
+	// MP at load too, so a hand-edited row can't load yet be unsaveable.
+	if ce.MP < 0 {
+		return CustomEnemyDef{}, fmt.Errorf("custom enemy %q has negative MP (%d)", ce.Name, ce.MP)
+	}
 	// Mirror the static-registry init guards (enemies.go) for hand-edited
 	// rows via the shared validateEnemyStatBounds so the two paths can't
 	// drift on bounds. Refuse bad data at load rather than letting it reach

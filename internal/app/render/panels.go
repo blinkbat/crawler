@@ -1276,6 +1276,11 @@ func drawPanelsMap(g core.GameState, assets Resources, body rl.Rectangle) {
 	if m.Width <= 0 || m.Height <= 0 {
 		return
 	}
+	// A degenerate body (tiny window, oversized footer reserve) would make
+	// cellPx 0, and int(body.Width/0) is int(NaN) — a garbage huge loop bound.
+	if body.Width <= 0 || body.Height <= 0 {
+		return
+	}
 	zoom := g.PanelsMapZoom
 	if zoom <= 0 {
 		zoom = core.PanelMapZoomDefault

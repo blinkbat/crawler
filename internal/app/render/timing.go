@@ -623,7 +623,12 @@ func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources
 	for i, dir := range timing.SequenceTargets {
 		cx := drawX + pad + slotWidth*(float32(i)+0.5)
 		cy := y + barH*0.5
-		state := timing.SequenceResults[i]
+		// SequenceResults is allocated parallel to SequenceTargets by core, but
+		// guard the index so a length drift degrades to "pending" rather than panicking.
+		state := core.SeqResultPending
+		if i < len(timing.SequenceResults) {
+			state = timing.SequenceResults[i]
+		}
 
 		var col rl.Color
 		switch state {
@@ -773,7 +778,11 @@ func drawRecallBar(timing core.TimingState, g core.GameState, assets Resources, 
 		}
 		// Recall phase: arrows hidden. Landed slots reveal their answer tinted
 		// by correctness; pending slots stay a dim face-down dot.
-		switch timing.SequenceResults[i] {
+		result := core.SeqResultPending
+		if i < len(timing.SequenceResults) {
+			result = timing.SequenceResults[i]
+		}
+		switch result {
 		case core.SeqResultCorrect:
 			drawArrow(cx, cy, arrowSize, timing.SequenceTargets[i], fadeForFlash(seqOkColor, flashing, g.Battle.TimingFlash))
 		case core.SeqResultWrong:

@@ -32,7 +32,7 @@ func FlashTint(base color.RGBA, timer float32) color.RGBA {
 	if timer <= 0 {
 		return base
 	}
-	strength := math.Min(0.86, float64(timer/FlashDuration)*0.86)
+	strength := math.Min(FlashTintStrength, float64(timer/FlashDuration)*FlashTintStrength)
 	return MixColor(base, color.RGBA{R: 255, G: 255, B: 255, A: base.A}, strength)
 }
 
@@ -275,7 +275,7 @@ func ClampByte(v int) uint8 {
 }
 
 func MixColor(a, b color.RGBA, t float64) color.RGBA {
-	t = math.Max(0, math.Min(1, t))
+	t = Clamp(t, 0, 1)
 	return color.RGBA{
 		R: uint8(float64(a.R)*(1-t) + float64(b.R)*t),
 		G: uint8(float64(a.G)*(1-t) + float64(b.G)*t),

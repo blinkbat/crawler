@@ -369,6 +369,12 @@ func pcmToSound(pcm []int16) rl.Sound {
 // pcmToSound (synth path) and playThroughRing (file/preview path) so
 // the WAV-bytes-to-rl.Sound conversion lives in one place.
 func bytesToSound(wav []byte) rl.Sound {
+	// Mirror pcmToSound's guard: never hand a Wave to a dead audio device. All
+	// current callers gate on readiness upstream, but keep the contract local so
+	// a future caller can't load on a closed device.
+	if !rl.IsAudioDeviceReady() {
+		return rl.Sound{}
+	}
 	wave := rl.LoadWaveFromMemory(".wav", wav, int32(len(wav)))
 	snd := rl.LoadSoundFromWave(wave)
 	rl.UnloadWave(wave)

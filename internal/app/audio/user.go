@@ -254,6 +254,11 @@ func PreviewFile(name string) {
 
 func playThroughRing(wavBytes []byte) {
 	snd := bytesToSound(wavBytes)
+	if snd.Stream.Buffer == nil {
+		// Dead device or malformed bytes — bytesToSound returned a zero Sound;
+		// don't store or play it.
+		return
+	}
 	// replaceSound unloads the slot we're about to overwrite — its raylib
 	// buffer was allocated by a prior preview and would leak otherwise.
 	replaceSound(&previewRing[previewCursor], snd)

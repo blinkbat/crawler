@@ -88,12 +88,26 @@ func (a *AreaDefinition) PasteRegion(r TileRegion, atX, atZ int) {
 	layers := a.gridLayers()
 	for li := 0; li < len(layers) && li < len(r.Layers); li++ {
 		lp := layers[li]
+		// Per-layer blank for padding a short (ragged) destination row up to the
+		// area width. Every layer's open cell is '.' except elevation; identify it
+		// by pointer (reorder-safe vs gridLayers' order), mirroring AreaContentEqual.
+		blank := byte(TileOpen)
+		if lp == &a.Elevation {
+			blank = ElevationGround
+		}
 		for i, row := range r.Layers[li] {
 			z := atZ + i
 			if z < 0 || z >= len(*lp) {
 				continue
 			}
 			dest := []byte((*lp)[z])
+			// A row shorter than the area width would silently drop in-bounds
+			// paste cells past its end; pad it to width with the layer blank first
+			// so the stamp lands fully (loaded maps are rectangular, but hand-built
+			// fixtures may not be).
+			for len(dest) < a.Width {
+				dest = append(dest, blank)
+			}
 			for j := 0; j < len(row); j++ {
 				x := atX + j
 				if x < 0 || x >= len(dest) {
