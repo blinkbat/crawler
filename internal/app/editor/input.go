@@ -1028,8 +1028,10 @@ type textFieldConfig struct {
 // defaultTextFieldMaxLen is the rune budget shared by the general-purpose
 // editor text fields (names, filenames, door target paths). One named source
 // so the limit tunes in a single place instead of being repeated as a literal
-// per field + in the defensive default below. Fields that need a different cap
-// (e.g. focusCustomEnemyName) override it explicitly.
+// per field + in the defensive default below. A field needing a different rule
+// sets it in its textFieldConfigs row — the door fields, for instance, keep
+// this cap but swap in acceptPrintableNoSpace. (The sound-creator modal's name
+// field carries its own cap separately, outside this table.)
 const defaultTextFieldMaxLen = 96
 
 // textFieldConfigs maps each focusField to its rune-budget +

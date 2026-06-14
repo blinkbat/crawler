@@ -490,7 +490,12 @@ const (
 	// window Crushing Blow rolls). Lives here with the other
 	// status-duration tunables; its proc gate (FrostLanceStunChance)
 	// stays with the other cast chances below.
-	FrostLanceStunTurns  = 1
+	FrostLanceStunTurns = 1
+	// StunTurnStep is one turn of stun — the unit a skill-tree tier grants
+	// (Smite T3's fresh stun) or extends a stun by (Frost Lance T3). Named so
+	// a tier's stun delta reads as "+1 turn" instead of a bare literal,
+	// matching how the base stun skills cite StunMinTurns / FrostLanceStunTurns.
+	StunTurnStep         = 1
 	SpiderWebbedMinTurns = 3
 	SpiderWebbedMaxTurns = 3
 	WispConfuseMinTurns  = 2
@@ -660,18 +665,27 @@ var SwipeHitFracs = []float32{0.5, 0.78}
 // Defense multipliers are <1 (lower incoming damage); attack multipliers
 // are >=1 (higher outgoing damage); the accuracy bonus is added to the
 // stat-driven baseline and clamped at 1.0 (see MeleeAccuracy / RangedAccuracy).
+// The HitStop / ShakePeak / ShakeDur columns are the per-grade IMPACT knobs
+// HitStopFor / CombatShakeFor read — only Great / Excellent earn a freeze +
+// camera punch (Miss/Nice/Good leave them zero so the action just flows). They
+// moved into this table from two parallel switches so adding a grade tier is
+// one row, not three edits. The named constants below stay the source values
+// so the impact tuning still reads in one block.
 var timingGrades = []struct {
 	Label         string
 	Atk           float32
 	Def           float32
 	AccuracyBonus float64
 	CritBonus     float64
+	HitStop       float32
+	ShakePeak     float32
+	ShakeDur      float32
 }{
 	TimingQualityMiss:      {Label: "Miss...", Atk: 1.0, Def: 1.0, AccuracyBonus: 0.0, CritBonus: 0.0},
 	TimingQualityNice:      {Label: "Nice!", Atk: 1.25, Def: 0.75, AccuracyBonus: 0.10, CritBonus: 0.02},
 	TimingQualityGood:      {Label: "Good!", Atk: 1.5, Def: 0.5, AccuracyBonus: 0.20, CritBonus: 0.05},
-	TimingQualityGreat:     {Label: "Great!", Atk: 1.75, Def: 0.35, AccuracyBonus: 0.30, CritBonus: 0.12},
-	TimingQualityExcellent: {Label: "Excellent!", Atk: 2.0, Def: 0.25, AccuracyBonus: 0.45, CritBonus: 0.25},
+	TimingQualityGreat:     {Label: "Great!", Atk: 1.75, Def: 0.35, AccuracyBonus: 0.30, CritBonus: 0.12, HitStop: HitStopGreat, ShakePeak: CombatShakeGreatPeak, ShakeDur: CombatShakeGreatDur},
+	TimingQualityExcellent: {Label: "Excellent!", Atk: 2.0, Def: 0.25, AccuracyBonus: 0.45, CritBonus: 0.25, HitStop: HitStopExcellent, ShakePeak: CombatShakeExcellentPeak, ShakeDur: CombatShakeExcellentDur},
 }
 
 // init asserts timingGrades covers every TimingQualityXxx grade. The

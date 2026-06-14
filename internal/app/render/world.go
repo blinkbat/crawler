@@ -327,6 +327,13 @@ func Camera(g core.GameState) rl.Camera3D {
 	)
 }
 
+// SkyClearColor is the backdrop ClearBackground color the adventure scene wipes
+// to before DrawSkyBackground paints over it. The color is overdrawn
+// immediately — the clear is load-bearing for the DEPTH wipe that rides with it
+// (see run.go) — so this exists mainly to single-source the literal across the
+// scene's two clear arms rather than for its visible hue.
+var SkyClearColor = rl.NewColor(87, 172, 244, 255)
+
 func DrawSkyBackground(assets Resources, g core.GameState) {
 	m := g.Area
 	texW := float32(assets.skyTexture.Width)

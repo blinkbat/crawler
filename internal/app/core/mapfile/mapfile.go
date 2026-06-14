@@ -119,7 +119,7 @@ const (
 // matching the core.PackAI enum by index. PackAINoneName at index 0
 // means an absent / empty AI column resolves to the no-op behavior —
 // the default per the editor's "new packs are stationary" rule. Order
-// here MUST match core's PackAI iota (core/areas.go's packAINameTable
+// here MUST match core's PackAI iota (core/areas.go's packAIDefs
 // init asserts the two stay aligned row-for-row).
 var PackAINames = [...]string{
 	PackAINoneName,

@@ -13,6 +13,15 @@ func screenSize() (w, h int32) {
 	return int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight())
 }
 
+// clampFrameDelta clips a per-frame delta to the shared simulation floor
+// (core.MaxFrameStep) so a long stall (alt-tab, breakpoint, GC pause) can't
+// fast-forward an animation past its lifetime in one frame. The render-side
+// animation pools (particles, hit glyphs, bar ghosts) share this so the 1/15s
+// ceiling can't drift from the gameplay layers' core.ClampFrameTime.
+func clampFrameDelta(dt float32) float32 {
+	return core.ClampFrameTime(dt)
+}
+
 // screenSizeF is the float32 variant for callers that center / scale by
 // fractional positions (popup anchors, splash math). Same underlying
 // raylib reads — just typed at the call site.

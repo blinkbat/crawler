@@ -4,6 +4,15 @@ package core
 // [EquipSlotCount]ItemKind array; this file owns the rules for moving
 // items between that array and GameState.Inventory.
 
+// validEquipSlot reports whether slot indexes a real equip slot. The single
+// bounds predicate the equip path shares (CanEquipInSlot / EquipItem /
+// UnequipItem / EquipPickerRowsInto) so the "what's a legal slot index" rule —
+// load-bearing because SlotIndexType indexes the fixed equipSlotInfo array and
+// panics out of range — lives in one place, matching ValidPartyIndex elsewhere.
+func validEquipSlot(slot EquipSlotIndex) bool {
+	return slot >= 0 && slot < EquipSlotCount
+}
+
 // CanEquipInSlot reports whether `item` fits `slot`. SlotNone items
 // (cheese / jerky) never fit anywhere — they're inventory-only.
 // Cross-slot fit is decided by EquipmentSlotType: a Hand-typed item
@@ -17,7 +26,7 @@ func CanEquipInSlot(kind ItemKind, slot EquipSlotIndex) bool {
 	// array — an out-of-range slot must return false, not panic. EquipItem /
 	// UnequipItem guard the slot before they reach here, but EquipFromInventory
 	// (and any future caller) routes an unguarded slot straight in.
-	if slot < 0 || slot >= EquipSlotCount {
+	if !validEquipSlot(slot) {
 		return false
 	}
 	def, ok := ItemInfoOk(kind)
@@ -59,7 +68,7 @@ func otherHand(slot EquipSlotIndex) (EquipSlotIndex, bool) {
 // inventory. Refuses incompatible (kind, slot) combos: returns
 // ItemNone and leaves the slot unchanged.
 func EquipItem(m *PartyMember, slot EquipSlotIndex, kind ItemKind) (ItemKind, bool) {
-	if m == nil || slot < 0 || slot >= EquipSlotCount {
+	if m == nil || !validEquipSlot(slot) {
 		return ItemNone, false
 	}
 	if !CanEquipInSlot(kind, slot) {
@@ -73,7 +82,7 @@ func EquipItem(m *PartyMember, slot EquipSlotIndex, kind ItemKind) (ItemKind, bo
 // UnequipItem clears the named slot and returns whatever was sitting
 // in it. The caller routes that kind back into the inventory.
 func UnequipItem(m *PartyMember, slot EquipSlotIndex) ItemKind {
-	if m == nil || slot < 0 || slot >= EquipSlotCount {
+	if m == nil || !validEquipSlot(slot) {
 		return ItemNone
 	}
 	prev := m.Equipped[slot]
@@ -147,29 +156,27 @@ func EffectiveMDef(m PartyMember) int {
 // the six fields) so a new Stat constant + statTable row automatically
 // picks up its equipment bonus without a parallel edit here.
 func EffectiveStats(m PartyMember) Stats {
-	out := m.Stats
+	// Fold every equipped item's per-stat bonus into ONE delta, then add it on
+	// top of the base via addStatsFloored — the same shared "sum stats, floor
+	// each at 0" fold the buff layer below uses. The floor (mirroring the
+	// 0-clamp AdjustStat applies to base edits) keeps a negative StatBonus (a
+	// cursed / debuff item) from driving an effective stat below zero into
+	// MaxHPFor / damage / accuracy math. Looping the Stat enum (vs hand-unrolling
+	// the six fields) means a new Stat + statTable row picks up its equipment
+	// bonus with no parallel edit here.
+	var equipDelta Stats
 	walkEquipped(m, func(def ItemDefinition) {
 		for s := Stat(0); s < StatCount; s++ {
-			delta := def.StatBonus[s]
-			if delta == 0 {
-				continue
+			if d := def.StatBonus[s]; d != 0 {
+				statSetters[s](&equipDelta, statTable[s].Get(equipDelta)+d)
 			}
-			cur := statTable[s].Get(out)
-			next := cur + delta
-			// Floor at 0 so a negative StatBonus (a cursed / debuff item)
-			// can't drive an effective stat below zero, which would feed
-			// negative values into MaxHPFor / damage / accuracy math. Mirrors
-			// the 0-clamp AdjustStat applies to base-stat edits.
-			if next < 0 {
-				next = 0
-			}
-			statSetters[s](&out, next)
 		}
 	})
+	out := addStatsFloored(m.Stats, equipDelta)
 	// Active stat buffs (Bless, War Banner, Smoke Bomb) fold on top of equipment,
-	// on the same per-stat floor-at-0 rule (addStatsFloored, shared with the
-	// enemy side). Their summed deltas re-render the boosted sheet only while
-	// buffs are live; an un-buffed member sums to zero and the fold is a no-op.
+	// on the same per-stat floor-at-0 rule. Their summed deltas re-render the
+	// boosted sheet only while buffs are live; an un-buffed member sums to zero
+	// and the fold is a no-op.
 	buffStats, _, _ := SumStatusMods(m.Buffs)
 	return addStatsFloored(out, buffStats)
 }
@@ -211,7 +218,7 @@ func EquipPickerRowsInto(buf []EquipPickerRow, g *GameState, member int, slot Eq
 	// [EquipSlotCount]ItemKind array and CanEquipInSlot -> SlotIndexType
 	// now panics on an out-of-range slot, so an exported caller passing a
 	// bad slot would crash rather than get an empty list.
-	if slot < 0 || slot >= EquipSlotCount {
+	if !validEquipSlot(slot) {
 		return buf
 	}
 	if member >= 0 && member < len(g.Party) && g.Party[member].Equipped[slot] != ItemNone {

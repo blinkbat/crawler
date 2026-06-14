@@ -122,10 +122,7 @@ func DrawHitGlyphs(camera rl.Camera3D) {
 	if len(hitGlyphs) == 0 {
 		return
 	}
-	dt := rl.GetFrameTime()
-	if dt > 1.0/15.0 {
-		dt = 1.0 / 15.0
-	}
+	dt := clampFrameDelta(rl.GetFrameTime())
 	sw, _ := screenSizeF()
 	write := 0
 	for read := range hitGlyphs {

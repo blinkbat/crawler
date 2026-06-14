@@ -150,7 +150,7 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	SkillSmite: {
 		{Tier: 1, Label: "+2 damage", Description: "+2 base damage on the press tap.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
 		{Tier: 2, Label: "+2 damage", Description: "Another +2 base damage.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
-		{Tier: 3, Label: "+25% stun", Description: "Lands a Stun roll with 25% chance on Great/Excellent timing.", Cost: 1, Effect: SkillEffectDelta{StunChance: 0.25, StunMinTurns: 1, StunMaxTurns: 1}},
+		{Tier: 3, Label: "+25% stun", Description: "Lands a Stun roll with 25% chance on Great/Excellent timing.", Cost: 1, Effect: SkillEffectDelta{StunChance: 0.25, StunMinTurns: StunTurnStep, StunMaxTurns: StunTurnStep}},
 	},
 	SkillBless: {
 		{Tier: 1, Label: "+1 turn", Description: "The blessing lingers one turn longer on the whole party.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
@@ -202,7 +202,7 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	SkillFrostLance: {
 		{Tier: 1, Label: "+2 damage", Description: "+2 base damage on the lance.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
 		{Tier: 2, Label: "+15% Stun", Description: "Stun roll gets +15% chance on Great/Excellent.", Cost: 1, Effect: SkillEffectDelta{StunChance: 0.15}},
-		{Tier: 3, Label: "+1 Stun turn", Description: "Stun lasts an extra turn when it lands.", Cost: 1, Effect: SkillEffectDelta{StunMinTurns: 1, StunMaxTurns: 1}},
+		{Tier: 3, Label: "+1 Stun turn", Description: "Stun lasts an extra turn when it lands.", Cost: 1, Effect: SkillEffectDelta{StunMinTurns: StunTurnStep, StunMaxTurns: StunTurnStep}},
 	},
 	SkillFrostbite: {
 		{Tier: 1, Label: "+2 damage", Description: "+2 base frost damage.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},

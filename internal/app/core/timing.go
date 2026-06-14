@@ -436,6 +436,18 @@ func NewChargeState(duration float32) TimingState {
 	}
 }
 
+// randomDirectionRun builds a length-N slice of random directional indices
+// (each in [0, SeqDirCount)). The shared pattern generator for the Sequence
+// and Recall minigame constructors, which otherwise hand-rolled the identical
+// make+fill loop in lockstep.
+func randomDirectionRun(rng *rand.Rand, length int) []int {
+	targets := make([]int, length)
+	for i := range targets {
+		targets[i] = rng.Intn(SeqDirCount)
+	}
+	return targets
+}
+
 // NewSequenceState builds a freshly-armed sequence-kind bar with `length`
 // random directional arrows. Player has `duration` seconds to tap them all
 // in order; pending/wrong slots drop the grade.
@@ -446,10 +458,7 @@ func NewSequenceState(rng *rand.Rand, duration float32, length int) TimingState 
 	if length <= 0 {
 		length = SequenceLength
 	}
-	targets := make([]int, length)
-	for i := range targets {
-		targets[i] = rng.Intn(SeqDirCount)
-	}
+	targets := randomDirectionRun(rng, length)
 	return TimingState{
 		Kind:            TimingKindSequence,
 		Active:          true,
@@ -623,10 +632,7 @@ func NewRecallState(rng *rand.Rand, duration float32, length int, reveal float32
 	if maxReveal := duration * 0.8; reveal > maxReveal {
 		reveal = maxReveal
 	}
-	targets := make([]int, length)
-	for i := range targets {
-		targets[i] = rng.Intn(SeqDirCount)
-	}
+	targets := randomDirectionRun(rng, length)
 	return TimingState{
 		Kind:            TimingKindRecall,
 		Active:          true,
@@ -935,25 +941,28 @@ func (t *TimingState) resolveSequence() {
 func (t *TimingState) resolveCharge() {
 	t.Resolved = true
 	p := ChargeCursorProgress(t.Elapsed, t.Duration)
-	// chargeGradeUpToPeak returns Miss for "past the peak" (inPeak=false),
-	// which is exactly the normal charge's held-too-long penalty.
+	// chargeGradeUpToPeak returns pastPeak=true PAST the peak window, where the
+	// returned grade is Miss — exactly the normal charge's held-too-long penalty.
 	t.Quality, _ = chargeGradeUpToPeak(p)
 }
 
 // chargeGradeUpToPeak grades a charge cursor at visual progress p across the
-// pre-peak ticks and the peak window, returning (grade, inPeak). inPeak is
-// false when p is PAST the peak window — the caller decides what that means:
-// resolveCharge takes the returned Miss (held too long), while
-// resolveOvercharge reinterprets it as an OVERLOAD (bonus + recoil). Sharing
-// this keeps the two charge resolvers' tick/peak bands from drifting.
-func chargeGradeUpToPeak(p float32) (grade int, inPeak bool) {
+// pre-peak ticks and the peak window, returning (grade, pastPeak). pastPeak is
+// true ONLY when p is past the peak window (the late-release case); the
+// pre-peak early-release Miss returns pastPeak=false so it isn't mistaken for
+// an overload. The caller decides what pastPeak means: resolveCharge takes the
+// returned Miss either way (held too long / released too early), while
+// resolveOvercharge reinterprets pastPeak as an OVERLOAD (bonus + recoil) but
+// still misses the pre-peak early release. Sharing this keeps the two charge
+// resolvers' tick/peak bands from drifting.
+func chargeGradeUpToPeak(p float32) (grade int, pastPeak bool) {
 	switch {
 	case p < ChargeTick1Pct:
-		return TimingQualityMiss, true
+		return TimingQualityMiss, false
 	case p < ChargeTick2Pct:
-		return TimingQualityNice, true
+		return TimingQualityNice, false
 	case p < ChargeTick3Pct:
-		return TimingQualityGood, true
+		return TimingQualityGood, false
 	case p <= ChargePeakEnd:
 		// In the peak window — split Great vs Excellent on sweet-spot proximity.
 		sweet := (ChargePeakStart + ChargePeakEnd) * 0.5
@@ -963,11 +972,11 @@ func chargeGradeUpToPeak(p float32) (grade int, inPeak bool) {
 		}
 		windowSize := ChargePeakEnd - ChargePeakStart
 		if windowSize <= 0 || distance/windowSize <= 0.30 {
-			return TimingQualityExcellent, true
+			return TimingQualityExcellent, false
 		}
-		return TimingQualityGreat, true
+		return TimingQualityGreat, false
 	default:
-		return TimingQualityMiss, false
+		return TimingQualityMiss, true
 	}
 }
 
@@ -980,8 +989,8 @@ func chargeGradeUpToPeak(p float32) (grade int, inPeak bool) {
 func (t *TimingState) resolveOvercharge() {
 	t.Resolved = true
 	p := ChargeCursorProgress(t.Elapsed, t.Duration)
-	grade, inPeak := chargeGradeUpToPeak(p)
-	if !inPeak {
+	grade, pastPeak := chargeGradeUpToPeak(p)
+	if pastPeak {
 		t.Quality = TimingQualityExcellent
 		t.Overloaded = true
 		return
@@ -1133,13 +1142,10 @@ func (t TimingState) PreviewQuality() int {
 // tickFlashHold) uses this to delay the apply step so the bar's flash hold
 // chains into a true world-pause before damage lands.
 func HitStopFor(quality int) float32 {
-	switch quality {
-	case TimingQualityExcellent:
-		return HitStopExcellent
-	case TimingQualityGreat:
-		return HitStopGreat
+	if quality < 0 || quality >= len(timingGrades) {
+		return 0
 	}
-	return 0
+	return timingGrades[quality].HitStop
 }
 
 // CombatShakeFor returns the BASE screen-shake (peak amplitude + duration) a
@@ -1148,13 +1154,11 @@ func HitStopFor(quality int) float32 {
 // the big shake (crits / AoE) is armed separately via TriggerCombatShake.
 // Mirrors HitStopFor so the two impact knobs sit together.
 func CombatShakeFor(quality int) (peak, dur float32) {
-	switch quality {
-	case TimingQualityExcellent:
-		return CombatShakeExcellentPeak, CombatShakeExcellentDur
-	case TimingQualityGreat:
-		return CombatShakeGreatPeak, CombatShakeGreatDur
+	if quality < 0 || quality >= len(timingGrades) {
+		return 0, 0
 	}
-	return 0, 0
+	g := timingGrades[quality]
+	return g.ShakePeak, g.ShakeDur
 }
 
 // TriggerCombatShake arms the camera shake with an explicit peak amplitude

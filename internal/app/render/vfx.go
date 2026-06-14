@@ -134,13 +134,10 @@ func TickAndDrawVFX(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	for _, req := range core.DrainVFXQueue(g) {
 		spawnFromRequest(camera, g, req, assets)
 	}
-	dt := rl.GetFrameTime()
 	// Clamp dt to the same upper bound the gameplay layers use so a
 	// long stall (debugger pause) doesn't fast-forward every particle
 	// past its lifetime in one frame.
-	if dt > 1.0/15.0 {
-		dt = 1.0 / 15.0
-	}
+	dt := clampFrameDelta(rl.GetFrameTime())
 	// Two-pointer sweep: advance + compact in place. Live particles
 	// stay at the front of the slice; expired ones get overwritten
 	// by the next live one. Keeps order stable enough for visual

@@ -383,6 +383,21 @@ func lookupName[V comparable](table []namedEnum[V], target V) (string, bool) {
 	return "", false
 }
 
+// indexByName scans a table for the first row whose name (extracted by `name`)
+// case-insensitively equals s, returning that row's index (ok=false on no
+// match). The single reverse (name→enum) scan the material / facing /
+// door-style / pack-AI decoders share — each used to open-code the same
+// strings.ToLower + linear-loop body.
+func indexByName[T any](table []T, s string, name func(T) string) (int, bool) {
+	want := strings.ToLower(s)
+	for i, row := range table {
+		if name(row) == want {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
 // materialDef is one row of the material registry: the canonical on-disk
 // name plus per-material traits. indoor marks an enclosed interior (stone
 // walls, ceiling slabs by default) vs. an outdoor biome — minimap tone,
@@ -440,11 +455,8 @@ func MaterialName(m MaterialSet) (string, bool) {
 }
 
 func materialFromName(s string) (MaterialSet, bool) {
-	low := strings.ToLower(s)
-	for _, d := range materialDefs {
-		if d.name == low {
-			return d.value, true
-		}
+	if i, ok := indexByName(materialDefs, s, func(d materialDef) string { return d.name }); ok {
+		return materialDefs[i].value, true
 	}
 	return 0, false
 }
@@ -498,11 +510,8 @@ func FacingName(f int) (string, bool) {
 }
 
 func facingFromName(s string) (int, bool) {
-	low := strings.ToLower(s)
-	for _, e := range facingNameTable {
-		if e.name == low {
-			return e.value, true
-		}
+	if i, ok := indexByName(facingNameTable, s, func(e namedEnum[int]) string { return e.name }); ok {
+		return facingNameTable[i].value, true
 	}
 	return 0, false
 }
@@ -528,89 +537,86 @@ func FacingAwayFromAdjacentWall(m AreaDefinition, x, z int) (facing int, found b
 	return 0, false
 }
 
-// DoorStyleLabels are the editor button labels for the door styles,
-// indexed by DoorStyle. Centralized so the door-edit modal doesn't carry
-// its own literal list.
-var DoorStyleLabels = [DoorStyleCount]string{
-	DoorStyleBuilding: "Building",
-	DoorStyleCave:     "Cave",
-	DoorStyleField:    "Field",
+// doorStyleDef bundles a DoorStyle's on-disk slug and editor button label in
+// ONE row so the two can't drift apart per style (was two parallel arrays).
+// Indexed by DoorStyle; the name matches mapfile.DoorStyleNames row-for-row
+// (init asserts the alignment). Both name directions go through this instead
+// of the hand-mirrored switches that used to drift.
+type doorStyleDef struct {
+	name  string // canonical on-disk slug
+	label string // editor button label
 }
 
-// doorStyleNameTable is the canonical DoorStyle ↔ on-disk-name map.
-// Indexed by DoorStyle so DoorStyleName is an O(1) lookup; the name
-// strings match mapfile.DoorStyleNames row-for-row (init asserts the
-// length stays aligned). Both directions go through this table instead
-// of the two hand-mirrored switches that used to drift.
-var doorStyleNameTable = [DoorStyleCount]string{
-	DoorStyleBuilding: mapfile.DoorStyleBuildingName,
-	DoorStyleCave:     mapfile.DoorStyleCaveName,
-	DoorStyleField:    mapfile.DoorStyleFieldName,
+var doorStyleDefs = [DoorStyleCount]doorStyleDef{
+	DoorStyleBuilding: {mapfile.DoorStyleBuildingName, "Building"},
+	DoorStyleCave:     {mapfile.DoorStyleCaveName, "Cave"},
+	DoorStyleField:    {mapfile.DoorStyleFieldName, "Field"},
 }
 
 // DoorStyleName maps a DoorStyle to its canonical on-disk string. An
 // out-of-range style (shouldn't happen) falls back to building so a
 // corrupt value still round-trips to a valid row.
 func DoorStyleName(s DoorStyle) string {
-	if s < 0 || int(s) >= len(doorStyleNameTable) {
+	if s < 0 || int(s) >= len(doorStyleDefs) {
 		return mapfile.DoorStyleBuildingName
 	}
-	return doorStyleNameTable[s]
+	return doorStyleDefs[s].name
+}
+
+// DoorStyleLabel returns the editor button label for a door style. An
+// out-of-range style falls back to the building row's label.
+func DoorStyleLabel(s DoorStyle) string {
+	if s < 0 || int(s) >= len(doorStyleDefs) {
+		return doorStyleDefs[DoorStyleBuilding].label
+	}
+	return doorStyleDefs[s].label
 }
 
 // doorStyleFromName maps an on-disk style string to a DoorStyle. Empty or
 // unrecognized resolves to building (the parser already validates names,
 // so this is the load-time default for a missing column).
 func doorStyleFromName(s string) DoorStyle {
-	want := strings.ToLower(s)
-	for i, name := range doorStyleNameTable {
-		if name == want {
-			return DoorStyle(i)
-		}
+	if i, ok := indexByName(doorStyleDefs[:], s, func(d doorStyleDef) string { return d.name }); ok {
+		return DoorStyle(i)
 	}
 	return DoorStyleBuilding
 }
 
 func init() {
-	if len(doorStyleNameTable) != len(mapfile.DoorStyleNames) {
-		panic("core: doorStyleNameTable length must match mapfile.DoorStyleNames — add a row when extending DoorStyle")
+	if len(doorStyleDefs) != len(mapfile.DoorStyleNames) {
+		panic("core: doorStyleDefs length must match mapfile.DoorStyleNames — add a row when extending DoorStyle")
 	}
-	for i, name := range doorStyleNameTable {
-		if name != mapfile.DoorStyleNames[i] {
-			panic("core: doorStyleNameTable[" + name + "] disagrees with mapfile.DoorStyleNames — keep them in sync")
+	for i, d := range doorStyleDefs {
+		if d.name != mapfile.DoorStyleNames[i] {
+			panic("core: doorStyleDefs[" + d.name + "] disagrees with mapfile.DoorStyleNames — keep them in sync")
 		}
 	}
 }
 
-// packAINameTable is the canonical PackAI ↔ on-disk-name map. Indexed
-// by PackAI so PackAIName is an O(1) lookup; the strings match
-// mapfile.PackAINames row-for-row (init below asserts the length stays
-// aligned). Mirrors doorStyleNameTable's shape.
-var packAINameTable = [PackAICount]string{
-	PackAINone:        mapfile.PackAINoneName,
-	PackAIJunkyardDog: mapfile.PackAIJunkyardDogName,
-	PackAIPatrol:      mapfile.PackAIPatrolName,
-	PackAISkittish:    mapfile.PackAISkittishName,
+// packAIDef bundles a PackAI's on-disk slug and editor-facing display label in
+// ONE row (mirrors doorStyleDef) so the slug and player-facing label share a
+// position and can't drift. Indexed by PackAI; the name matches
+// mapfile.PackAINames row-for-row (init below asserts it).
+type packAIDef struct {
+	name  string // canonical on-disk slug
+	label string // editor pack-edit modal label
 }
 
-// packAILabels is the editor-facing display name per mode — what the
-// pack-edit modal cycles through. Kept next to packAINameTable so the
-// on-disk slug and the player-facing label share one row position.
-var packAILabels = [PackAICount]string{
-	PackAINone:        "None (stationary)",
-	PackAIJunkyardDog: "Junkyard Dog",
-	PackAIPatrol:      "Patrol (paces)",
-	PackAISkittish:    "Skittish (flees)",
+var packAIDefs = [PackAICount]packAIDef{
+	PackAINone:        {mapfile.PackAINoneName, "None (stationary)"},
+	PackAIJunkyardDog: {mapfile.PackAIJunkyardDogName, "Junkyard Dog"},
+	PackAIPatrol:      {mapfile.PackAIPatrolName, "Patrol (paces)"},
+	PackAISkittish:    {mapfile.PackAISkittishName, "Skittish (flees)"},
 }
 
 // PackAIName returns the canonical on-disk string for a PackAI. Empty
 // or out-of-range falls back to the no-op mode so a corrupt value still
 // round-trips to a valid row.
 func PackAIName(ai PackAI) string {
-	if ai < 0 || int(ai) >= len(packAINameTable) {
+	if ai < 0 || int(ai) >= len(packAIDefs) {
 		return mapfile.PackAINoneName
 	}
-	return packAINameTable[ai]
+	return packAIDefs[ai].name
 }
 
 // PackAIFromName maps an on-disk name (case-insensitive) to a PackAI.
@@ -618,30 +624,27 @@ func PackAIName(ai PackAI) string {
 // for a freshly-placed pack), so the loader doesn't need a separate
 // "missing column" branch.
 func PackAIFromName(s string) PackAI {
-	want := strings.ToLower(s)
-	for i, name := range packAINameTable {
-		if name == want {
-			return PackAI(i)
-		}
+	if i, ok := indexByName(packAIDefs[:], s, func(d packAIDef) string { return d.name }); ok {
+		return PackAI(i)
 	}
 	return PackAINone
 }
 
 // PackAILabel returns the editor-facing display name for a PackAI.
 func PackAILabel(ai PackAI) string {
-	if ai < 0 || int(ai) >= len(packAILabels) {
-		return packAILabels[PackAINone]
+	if ai < 0 || int(ai) >= len(packAIDefs) {
+		return packAIDefs[PackAINone].label
 	}
-	return packAILabels[ai]
+	return packAIDefs[ai].label
 }
 
 func init() {
-	if len(packAINameTable) != len(mapfile.PackAINames) {
-		panic("core: packAINameTable length must match mapfile.PackAINames — add a row when extending PackAI")
+	if len(packAIDefs) != len(mapfile.PackAINames) {
+		panic("core: packAIDefs length must match mapfile.PackAINames — add a row when extending PackAI")
 	}
-	for i, name := range packAINameTable {
-		if name != mapfile.PackAINames[i] {
-			panic("core: packAINameTable[" + name + "] disagrees with mapfile.PackAINames — keep them in sync")
+	for i, d := range packAIDefs {
+		if d.name != mapfile.PackAINames[i] {
+			panic("core: packAIDefs[" + d.name + "] disagrees with mapfile.PackAINames — keep them in sync")
 		}
 	}
 }
@@ -702,7 +705,7 @@ func buildEnemyKindByName() map[string]EnemyKind {
 // Coverage assert: every registered EnemyKind must have a name row in
 // enemyKindNameTable. Without this a new kind silently fails EnemyKindName
 // (returning ok=false), which only surfaces when a map placing it is saved —
-// not at startup. Mirrors the materialDefs / packAINameTable / doorStyleNameTable
+// not at startup. Mirrors the materialDefs / packAIDefs / doorStyleDefs
 // asserts above so the enemy table can't drift out of sync with the enum.
 func init() {
 	for _, def := range EnemyKinds() {

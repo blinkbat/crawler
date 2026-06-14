@@ -697,7 +697,7 @@ func OutOfBattleHealsInto(buf []SkillID, m PartyMember) []SkillID {
 // matching applyMassMend's in-battle skip). Item / skill use routes
 // through this so the clamp + no-revive + ingest rules live in one place.
 func HealMember(m *PartyMember, amount int) {
-	if m == nil || amount <= 0 || m.HP <= 0 || m.Ingested {
+	if m == nil || amount <= 0 || !partyAvailable(*m) {
 		return
 	}
 	GainUpTo(&m.HP, m.MaxHP, amount)
@@ -731,7 +731,7 @@ func RestorePartyFully(g *GameState) int {
 	restored := 0
 	for i := range g.Party {
 		m := &g.Party[i]
-		if m.HP <= 0 || m.Ingested {
+		if !partyAvailable(*m) {
 			continue
 		}
 		HealMember(m, m.MaxHP)
@@ -776,7 +776,7 @@ func clearMemberAnimTimers(m *PartyMember) {
 // HealMember on the MP axis: a downed (HP<=0) or ingested member can't drink.
 // Used by the Magic Phial's use paths.
 func RestoreMP(m *PartyMember, amount int) int {
-	if m == nil || amount <= 0 || m.HP <= 0 || m.Ingested {
+	if m == nil || amount <= 0 || !partyAvailable(*m) {
 		return 0
 	}
 	before := m.MP

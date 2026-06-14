@@ -349,7 +349,7 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	if skyCrisp {
 		// This clear doubles as the frame's backbuffer depth wipe for the
 		// crisp-sky arm (see the load-bearing-clear note below).
-		rl.ClearBackground(rl.NewColor(87, 172, 244, 255))
+		rl.ClearBackground(render.SkyClearColor)
 		render.DrawSkyBackground(assets, *game)
 	}
 	filtered := render.BeginRetroCapture(game)
@@ -371,7 +371,7 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	if filtered && skyCrisp {
 		rl.ClearBackground(rl.Blank)
 	} else if !skyCrisp {
-		rl.ClearBackground(rl.NewColor(87, 172, 244, 255))
+		rl.ClearBackground(render.SkyClearColor)
 		render.DrawSkyBackground(assets, *game)
 	}
 	// ENVIRONMENT pass — sky, world geometry, chests, doors. This is the

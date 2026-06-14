@@ -3040,7 +3040,7 @@ func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawLabel(font, "Style (visual fixture)",
 		rl.NewRectangle(l.style[0].X, l.style[0].Y-16, lastStyle.X+lastStyle.Width-l.style[0].X, 14))
 	for i, sr := range l.style {
-		drawButton(font, sr, core.DoorStyleLabels[i], door.Style == core.DoorStyle(i))
+		drawButton(font, sr, core.DoorStyleLabel(core.DoorStyle(i)), door.Style == core.DoorStyle(i))
 	}
 
 	// Delete + Close buttons.

@@ -22,6 +22,10 @@ const (
 	skillTreeColW    = float32(248) // narrow tree column
 	skillTreeColGap  = float32(46)  // generous spacing between trees
 	skillTreeSidePad = float32(26)
+	// skillTreeCardInset is the modal's content gutter — the left/right margin
+	// the header balance, footer hints, and detail strip all inset by. One
+	// token so those uses (and the width derivation, 2× it) can't drift.
+	skillTreeCardInset = float32(24)
 )
 
 // DrawSkillTreeModal paints the skill-tree modal on top of the panels
@@ -76,7 +80,7 @@ func DrawSkillTreeModal(g core.GameState, assets Resources) {
 	if m.SkillPoints > 0 {
 		spCol = inkAccent
 	}
-	drawTextRightAligned(font, spText, card.X+card.Width-24, card.Y+20, FontBody, spCol)
+	drawTextRightAligned(font, spText, card.X+card.Width-skillTreeCardInset, card.Y+20, FontBody, spCol)
 
 	// Body region for the tree columns, above the detail strip. Columns are
 	// a fixed narrow width, centered as a block so the spacing reads evenly.
@@ -93,7 +97,7 @@ func DrawSkillTreeModal(g core.GameState, assets Resources) {
 
 	drawSkillTreeDetail(font, g, &m, trees, card, detailH, footerH)
 
-	drawModalFooterGlyphsLeft(font, card, card.X+24, []HintSeg{
+	drawModalFooterGlyphsLeft(font, card, card.X+skillTreeCardInset, []HintSeg{
 		Hint("Tree", GlyphLeftRight),
 		Hint("Node", GlyphUpDown),
 		Hint("Invest", GlyphA),
@@ -233,8 +237,8 @@ func drawSkillTreeDetail(font rl.Font, g core.GameState, m *core.PartyMember, tr
 	}
 	node := nodes[row]
 
-	x := card.X + 24
-	w := card.Width - 48
+	x := card.X + skillTreeCardInset
+	w := card.Width - skillTreeCardInset*2
 	y := card.Y + card.Height - footerH - detailH - 4
 	drawGlassPane(int32(x), int32(y), int32(w), int32(detailH), glassDeep)
 

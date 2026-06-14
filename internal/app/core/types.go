@@ -56,7 +56,7 @@ const (
 	// Prey that runs rather than fights.
 	PackAISkittish
 	// PackAICount sizes name / label tables. Bump by adding a mode
-	// above this line; init guards (areas.go's packAINameTable,
+	// above this line; init guards (areas.go's packAIDefs,
 	// editor's modal row) catch the missing wiring at startup.
 	PackAICount = int(PackAISkittish) + 1
 )

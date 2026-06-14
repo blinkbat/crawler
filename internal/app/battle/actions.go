@@ -435,24 +435,33 @@ func chargeMP(g *core.GameState, skill core.SkillID, label string) bool {
 	return true
 }
 
-// applyAoEDamage hits every living enemy in the active pack with the
-// given damage amount, routing through damageEnemy so the skill's
-// SkillTag-driven armor rules apply. Returns the hit count for the
-// log message — three apply handlers (Swipe / Whirlwind / Arc Bolt)
-// used to inline the same `for slot, m := range core.BattleMembers
-// { if !m.Alive continue; damageEnemy }` loop.
-func applyAoEDamage(g *core.GameState, skill core.SkillID, damage, quality int, shake bool) int {
-	hits := 0
-	tag := core.SkillTagFor(skill)
-	vfx := vfxKindFor(skill)
+// forEachLivingEnemy invokes fn(slot, enemy) for every alive member of the
+// active pack. The single living-enemy walk the whole-pack apply paths share
+// (applyAoEDamage / applyAoEStatusSkill / applySmokeBomb) so "who does a
+// pack-wide effect touch?" lives in one loop. enemy is the write-through
+// pointer (core.BattleMemberAt) so callers can mutate it directly.
+func forEachLivingEnemy(g *core.GameState, fn func(slot int, enemy *core.Enemy)) {
 	for slot, m := range core.BattleMembers(g) {
 		if !m.Alive {
 			continue
 		}
+		fn(slot, core.BattleMemberAt(g, slot))
+	}
+}
+
+// applyAoEDamage hits every living enemy in the active pack with the
+// given damage amount, routing through damageEnemy so the skill's
+// SkillTag-driven armor rules apply. Returns the hit count for the
+// log message.
+func applyAoEDamage(g *core.GameState, skill core.SkillID, damage, quality int, shake bool) int {
+	hits := 0
+	tag := core.SkillTagFor(skill)
+	vfx := vfxKindFor(skill)
+	forEachLivingEnemy(g, func(slot int, _ *core.Enemy) {
 		damageEnemy(g, slot, damage, quality, tag)
 		core.EnqueueEnemyVFX(g, vfx, slot)
 		hits++
-	}
+	})
 	if hits > 0 && shake {
 		// AoE casts are the "costly" hits that earn the big camera punch
 		// (overrides the subtle base shake from the timing grade). Callers
@@ -1512,14 +1521,10 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, skillNoun, hitVe
 	vfx := vfxKindFor(skill)
 	hits := 0
 	afflicted := 0
-	for slot, m := range core.BattleMembers(g) {
-		if !m.Alive {
-			continue
-		}
+	forEachLivingEnemy(g, func(slot int, enemy *core.Enemy) {
 		_, defeated := damageEnemy(g, slot, damage, quality, tag)
 		core.EnqueueEnemyVFX(g, vfx, slot)
 		hits++
-		enemy := core.BattleMemberAt(g, slot)
 		resistWIS := core.EffectiveEnemyStats(*enemy).WIS
 		if tryProcStatus(g.Rand(), &enemy.BurnTurns, defeated, effect.BurnChance, quality, 0, effect.BurnDuration, resistWIS) {
 			afflicted++
@@ -1535,7 +1540,7 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, skillNoun, hitVe
 		if !defeated && core.StampEnemyDebuff(enemy, skill, effect) {
 			afflicted++
 		}
-	}
+	})
 	if hits == 0 {
 		setBattleMessage(g, aoeEmptyMessage(skillNoun, emptyVerb))
 		finishActorTurn(g)
@@ -1738,14 +1743,11 @@ func applySmokeBomb(g *core.GameState, quality int) bool {
 	buffed := stampPartyWideBuff(g, effect, core.SkillSmokeBomb)
 	enemyDebuff := core.SkillEffect{BuffStats: core.Stats{DEX: -effect.BuffStats.DEX}, BuffTurns: effect.BuffTurns}
 	blinded := 0
-	for slot, m := range core.BattleMembers(g) {
-		if !m.Alive {
-			continue
-		}
-		if core.StampEnemyDebuff(core.BattleMemberAt(g, slot), core.SkillSmokeBomb, enemyDebuff) {
+	forEachLivingEnemy(g, func(_ int, enemy *core.Enemy) {
+		if core.StampEnemyDebuff(enemy, core.SkillSmokeBomb, enemyDebuff) {
 			blinded++
 		}
-	}
+	})
 	setBattleMessage(g, fmt.Sprintf("%s%s drops a smoke bomb — %d allies gain evasion, %d foes lose their aim.",
 		qualityTag(quality), actor.Name, buffed, blinded))
 	finishActorTurn(g)
@@ -2394,9 +2396,7 @@ func tickBurnAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
 		setBattleMessage(g, fmt.Sprintf("%s succumbs to the flames.", core.TheEnemy(def)))
 		// Repoint the player's targeting cursor if the burn killed the
 		// currently-selected enemy, so the next attack action has a valid one.
-		if next := core.NextLivingBattleEnemy(g); next >= 0 && !core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
-			g.Battle.EnemyIndex = next
-		}
+		repointEnemyCursorIfDead(g)
 		return true
 	}
 	setBattleMessage(g, fmt.Sprintf("%s burns for %d.", core.TheEnemy(def), dealt))

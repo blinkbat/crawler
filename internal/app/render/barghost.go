@@ -75,10 +75,7 @@ func ghostPctFor(key string, pct float32) float32 {
 	g.last = pct
 
 	if g.ghost > pct {
-		dt := rl.GetFrameTime()
-		if dt > 1.0/15.0 {
-			dt = 1.0 / 15.0
-		}
+		dt := clampFrameDelta(rl.GetFrameTime())
 		if g.hold > 0 {
 			g.hold -= dt
 		} else {

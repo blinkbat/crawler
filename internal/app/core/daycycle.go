@@ -37,7 +37,7 @@ func PhaseAtStep(steps int) (phase TimeOfDay, progress float32) {
 // phaseNames is the human-readable HUD label per phase, indexed by TimeOfDay.
 // Table (not a switch) so it parallels the render-side timeProfiles[TimeOfDayCount]
 // array and is guarded by the same kind of init length/coverage assert the
-// other enum→string tables use (packAINameTable, doorStyleNameTable). A new
+// other enum→string tables use (packAIDefs, doorStyleDefs). A new
 // phase that forgets a label leaves a "" entry the init() below catches at
 // startup, rather than panicking only when that phase is reached at runtime.
 var phaseNames = [TimeOfDayCount]string{
