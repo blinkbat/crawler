@@ -64,10 +64,13 @@ func DrawDoorPrompt(g core.GameState, assets Resources) {
 		FontHeading, textPrimary)
 
 	cardCenterX := float32(panelX) + float32(panelW)/2
-	drawTextCentered(assets.hudFont, "Enter "+dest+"?",
+	drawTextCentered(assets.hudFont, "Travel to "+dest+"?",
 		cardCenterX, float32(panelY+78), FontBody, textMuted)
-	drawTextCentered(assets.hudFont, "Enter — go through      Esc — stay",
-		cardCenterX, float32(panelY+panelH-40), FontSmall, textHint)
+	// Controller-first affordances (no spelled-out keys).
+	DrawHintBar(assets.hudFont, []HintSeg{
+		Hint("Enter", GlyphA),
+		Hint("Stay", GlyphB),
+	}, cardCenterX, float32(panelY+panelH-40), FontSmall)
 }
 
 // humanizeMapID turns a bare map id ("forgotten_plaza") into a display
@@ -103,7 +106,7 @@ func humanizeMapID(id string) string {
 	if out == "" {
 		// id was all separators ("_", "-") — FieldsFunc yielded no words.
 		// Fall back to the same sentence the empty-id case uses rather than
-		// rendering "Enter ?", and cache that so the memo stays consistent.
+		// rendering "Travel to ?", and cache that so the memo stays consistent.
 		out = "the next area"
 	}
 	humanizeCacheIn, humanizeCacheOut = id, out

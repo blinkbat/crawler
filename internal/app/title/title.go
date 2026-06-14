@@ -263,21 +263,28 @@ func Draw(s State, assets render.Resources) {
 
 func drawMainMenu(s State, font rl.Font, theme render.Theme, screenH int32) {
 	drawList(s.menuLabels(), s.cursor, font, theme, screenH, "")
-	// Device-neutral verbs (per AGENTS.md's controller-first hint contract) —
-	// this is the first surface shown, so it must not assume a keyboard.
-	drawHint(font, "Navigate     Select     Quit", screenH)
+	// Controller-first glyph hints (gamepad-first) — the first surface shown,
+	// so it must read as a controller prompt, not a keyboard one.
+	drawHint(font, []render.HintSeg{
+		render.Hint("Navigate", render.GlyphUpDown),
+		render.Hint("Select", render.GlyphA),
+	}, screenH)
 }
 
 func drawMapPicker(s State, font rl.Font, theme render.Theme, screenH int32) {
 	header := "Choose a map"
 	if len(s.mapPaths) == 0 {
-		items := []string{"(no maps in maps/ -- press Esc and try Editor first)"}
+		items := []string{"(no maps in maps/ — open the Editor to make one)"}
 		drawList(items, 0, font, theme, screenH, header)
-		drawHint(font, "Esc to go back", screenH)
+		drawHint(font, []render.HintSeg{render.Hint("Back", render.GlyphB)}, screenH)
 		return
 	}
 	drawList(s.mapNames, s.cursor, font, theme, screenH, header)
-	drawHint(font, "Up/Down navigate   Enter start   Esc back", screenH)
+	drawHint(font, []render.HintSeg{
+		render.Hint("Navigate", render.GlyphUpDown),
+		render.Hint("Start", render.GlyphA),
+		render.Hint("Back", render.GlyphB),
+	}, screenH)
 }
 
 // Title-screen layout anchors. Pulled out of the inline literals
@@ -335,9 +342,9 @@ func drawList(items []string, cursor int, font rl.Font, theme render.Theme, scre
 	}
 }
 
-func drawHint(font rl.Font, text string, screenH int32) {
+func drawHint(font rl.Font, segs []render.HintSeg, screenH int32) {
 	sw, _ := render.ScreenSizeF()
-	render.DrawFooterHint(font, text, sw/2, float32(screenH)-titleHintFooterOffset, render.FontSmall)
+	render.DrawHintBar(font, segs, sw/2, float32(screenH)-titleHintFooterOffset, render.FontSmall)
 }
 
 func drawError(font rl.Font, theme render.Theme, msg string, screenH int32) {

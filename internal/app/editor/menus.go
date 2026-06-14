@@ -49,7 +49,6 @@ var editorMenus = []menuGroup{
 	}},
 	{label: "Assets", items: []dropdownEntry{
 		{label: "Sounds…", apply: openSoundsModal, desc: "Create sound effects and bind them to game cues."},
-		{label: "Custom Enemies…", apply: openCustomEnemiesModal, desc: "Author map-specific enemy templates."},
 		{label: "Foe Visuals…", apply: openFoeViewModal, desc: "Tune a foe's sprite, placement, and tint — or import a PNG."},
 		{label: "Hit Glyphs…", apply: openHitGlyphsModal, desc: "Preview the combat hit symbols (slash, impact, frost, …)."},
 		{label: "Object List…", apply: openEntityListModal, desc: "Jump to any pack, chest, or door on the map."},

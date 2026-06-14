@@ -325,12 +325,36 @@ Every modal calls `drawModalScaffold(font, w, h, heading)`:
   `DrawFooterHint`.
 
 ### Footer hint
-Every modal has a footer line such as
-`Z confirm   X cancel   Up/Down navigate`.
-Painted in `FontTiny` `inkDim`, centred, never customised per modal.
-Owners call `DrawFooterHint(font, text, cx, y, FontTiny)` — which also
-stitches tiny diamond termini 14 px outside the text edges (the same
-end-cap dialect the heading rules use), at the hint's own dimness.
+Every modal has a footer line of control affordances. The game is
+**gamepad-first**, so hints render as **controller button GLYPHS**, never
+spelled-out keys — `[A] Confirm   [B] Back   [↕] Move`, not
+`Z confirm   X cancel`. (Keyboard glyphs are a later device-switch pass;
+today we draw the controller set only.)
+
+Owners build a `[]render.HintSeg` — each seg is one glyph (or two, e.g.
+`[LB][RB]`) plus its action word — and call `DrawHintBar(font, segs, cx,
+y, size)` (centred, with the same diamond termini the old text footer
+stitched) or `DrawHintBarLeft(font, segs, x, y, size)`. Modal owners use
+the `drawModalFooterGlyphs` / `drawModalFooterGlyphsLeft` wrappers, which
+own the card-geometry math (mirrors of the old `drawModalFooter` /
+`drawModalFooterLeft`, which remain for any pure-text footer). In-world
+press cues (chest / crystal / door) use `drawGlyphPrompt(font, glyph,
+verb, cx, y, size)` — brighter, no termini. Build segs with the terse
+`render.Hint("Verb", render.GlyphA)` constructor.
+
+### Controller glyphs
+`render/glyphs.go` draws the on-screen button icons procedurally (no PNG
+assets) in the library palette — the glyph hues + body/rim/ink tokens
+live in `theme.go` (`glyphAColor` … `glyphInk`). Style is **dark raised
+button + colored letter** (reads cleanest over dark glass): face buttons
+A/B/X/Y are a dark disc + colored ring + the letter in the button's hue
+(A green / B red / X blue / Y amber, all `mute()`-wrapped); LB/RB are
+bumper pills; Start/Select are the menu / view pictograms; the d-pad is a
+rounded tile with the active direction(s) chevroned in `giltBright`. The
+`InputGlyph` enum + `GlyphUpDown` / `GlyphLeftRight` paired directions are
+the vocabulary — extend the enum + the `drawInputGlyph` switch together.
+Glyphs keep full color (the icon is the point); only the trailing label
+rides the footer's dim ink.
 
 ### Static ornament dialect
 The carved-cabinet details share a small vocabulary — reuse these, don't

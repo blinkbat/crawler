@@ -1,7 +1,14 @@
 package render
 
 import (
+	"bytes"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	_ "image/gif"  // register decoders so image.Decode handles common drops
+	_ "image/jpeg" //
+	"image/png"
 	"os"
 	"path/filepath"
 
@@ -65,20 +72,207 @@ func BakeSpriteFilter(assets Resources, kind core.EnemyKind, f SpriteFilter) err
 	return exportSpritePNG(kind, img)
 }
 
-// ImportSpriteFromFile copies an external PNG in as the foe's sprite (the
+// ImportSpriteFromFile copies an external image in as the foe's sprite (the
 // "upload" path — the Foe Visualizer feeds it a drag-dropped file). The source
-// is loaded, validated, and re-exported to <slug>.png (backing up any existing
-// one), so the import normalizes whatever PNG variant the file was.
+// is decoded, validated, normalized to RGBA, and written to <slug>.png (backing
+// up any existing one).
+//
+// Transparency safety net: a billboard tint is a multiplicative wash over the
+// WHOLE sprite quad, so it only stays on the creature if the texture has a real
+// alpha channel (transparent background). A PNG flattened with an opaque matte
+// (a common "export lost transparency" mistake) would otherwise render — and
+// tint — as a solid rectangle ("tints the whole canvas"). So when an import has
+// essentially no transparency, we border-flood-key its background matte to
+// alpha before saving, restoring the see-through background.
 func ImportSpriteFromFile(kind core.EnemyKind, srcPath string) error {
-	img := rl.LoadImage(srcPath)
-	if img == nil || img.Width <= 0 || img.Height <= 0 {
-		if img != nil {
-			rl.UnloadImage(img)
-		}
-		return fmt.Errorf("not a loadable image: %s", filepath.Base(srcPath))
+	img, err := decodeToNRGBA(srcPath)
+	if err != nil {
+		return err
 	}
-	defer rl.UnloadImage(img)
-	return exportSpritePNG(kind, img)
+	keyOutOpaqueMatte(img)
+	return writeSpritePNG(kind, img)
+}
+
+// decodeToNRGBA loads srcPath into a straight-alpha image.NRGBA. It tries Go's
+// native decoders first (png/jpeg/gif), then falls back to raylib's loader for
+// the other formats raylib supports (bmp/tga/psd/hdr/pnm/…) so the import path
+// accepts the same breadth rl.LoadImage did, while still handing the keying and
+// PNG-encode steps a Go image.
+func decodeToNRGBA(srcPath string) (*image.NRGBA, error) {
+	if data, err := os.ReadFile(srcPath); err == nil {
+		if src, _, derr := image.Decode(bytes.NewReader(data)); derr == nil {
+			b := src.Bounds()
+			if b.Dx() > 0 && b.Dy() > 0 {
+				// Normalize to NRGBA so alpha edits are straight (non-premultiplied).
+				dst := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+				draw.Draw(dst, dst.Bounds(), src, b.Min, draw.Src)
+				return dst, nil
+			}
+		}
+	}
+	// Fallback: let raylib decode the formats Go's stdlib can't, then copy its
+	// (straight-alpha) pixels into an NRGBA. One LoadImageColors call crosses the
+	// cgo/purego boundary once, not per pixel.
+	rimg := rl.LoadImage(srcPath)
+	if rimg == nil || rimg.Width <= 0 || rimg.Height <= 0 {
+		if rimg != nil {
+			rl.UnloadImage(rimg)
+		}
+		return nil, fmt.Errorf("not a loadable image: %s", filepath.Base(srcPath))
+	}
+	defer rl.UnloadImage(rimg)
+	rl.ImageFormat(rimg, rl.UncompressedR8g8b8a8)
+	w, h := int(rimg.Width), int(rimg.Height)
+	colors := rl.LoadImageColors(rimg)
+	defer rl.UnloadImageColors(colors)
+	if len(colors) < w*h {
+		return nil, fmt.Errorf("could not read pixels: %s", filepath.Base(srcPath))
+	}
+	dst := image.NewNRGBA(image.Rect(0, 0, w, h))
+	for i := 0; i < w*h; i++ {
+		c := colors[i]
+		o := i * 4
+		dst.Pix[o], dst.Pix[o+1], dst.Pix[o+2], dst.Pix[o+3] = c.R, c.G, c.B, c.A
+	}
+	return dst, nil
+}
+
+// writeSpritePNG backs up any existing PNG, then writes img to <slug>.png. The
+// Go-image sibling of exportSpritePNG (used by the import path, which works in
+// image.NRGBA rather than rl.Image). Encodes to a buffer first so a failed
+// encode never truncates the existing sprite.
+func writeSpritePNG(kind core.EnemyKind, img image.Image) error {
+	dir := core.ResolveAssetDir(core.SpritesDirName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return fmt.Errorf("encode failed: %w", err)
+	}
+	path := spritePath(kind)
+	if _, err := os.Stat(path); err == nil {
+		_ = copyFile(path, path+".bak") // best-effort safety net
+	}
+	return os.WriteFile(path, buf.Bytes(), 0o644)
+}
+
+// keyOutOpaqueMatte clears an opaque background matte to transparency, but only
+// when the image has essentially no alpha already (so it never disturbs a
+// properly-authored transparent sprite). It flood-fills inward from the border,
+// clearing pixels within tolerance of the corner matte color — border-seeded so
+// an interior region that happens to match the matte color can't be punched out.
+// Returns whether it changed anything.
+func keyOutOpaqueMatte(img *image.NRGBA) bool {
+	w, h := img.Rect.Dx(), img.Rect.Dy()
+	total := w * h
+	if total == 0 {
+		return false
+	}
+	// Respect authored alpha: if ≥2% of pixels are already transparent, the
+	// sprite has a real cutout — leave it alone.
+	transparent := 0
+	for i := 3; i < len(img.Pix); i += 4 {
+		if img.Pix[i] < 16 {
+			transparent++
+		}
+	}
+	if transparent*50 >= total {
+		return false
+	}
+
+	const tol = 40
+	bg := cornerMatteColor(img, w, h)
+	// Only key when the four corners agree (a uniform border matte). If they
+	// differ, there's no distinct background to remove — e.g. a full-bleed
+	// opaque sprite — and flooding inward would erode content, so skip.
+	for _, c := range [4]color.NRGBA{
+		nrgbaAt(img, 0, 0), nrgbaAt(img, w-1, 0),
+		nrgbaAt(img, 0, h-1), nrgbaAt(img, w-1, h-1),
+	} {
+		if absDiffU8(c.R, bg.R) > tol || absDiffU8(c.G, bg.G) > tol || absDiffU8(c.B, bg.B) > tol {
+			return false
+		}
+	}
+	matches := func(x, y int) bool {
+		o := img.PixOffset(x, y)
+		return img.Pix[o+3] > 16 &&
+			absDiffU8(img.Pix[o], bg.R) <= tol &&
+			absDiffU8(img.Pix[o+1], bg.G) <= tol &&
+			absDiffU8(img.Pix[o+2], bg.B) <= tol
+	}
+	visited := make([]bool, total)
+	stack := make([]int, 0, 256)
+	push := func(x, y int) {
+		if x < 0 || y < 0 || x >= w || y >= h {
+			return
+		}
+		idx := y*w + x
+		if visited[idx] {
+			return
+		}
+		visited[idx] = true
+		if matches(x, y) {
+			stack = append(stack, idx)
+		}
+	}
+	for x := 0; x < w; x++ {
+		push(x, 0)
+		push(x, h-1)
+	}
+	for y := 0; y < h; y++ {
+		push(0, y)
+		push(w-1, y)
+	}
+	cleared := 0
+	for len(stack) > 0 {
+		idx := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		x, y := idx%w, idx/w
+		img.Pix[img.PixOffset(x, y)+3] = 0
+		cleared++
+		push(x+1, y)
+		push(x-1, y)
+		push(x, y+1)
+		push(x, y-1)
+	}
+	return cleared > 0
+}
+
+// cornerMatteColor returns the most common of the four corner pixels (ties →
+// top-left) — the presumed flat background matte.
+func cornerMatteColor(img *image.NRGBA, w, h int) color.NRGBA {
+	corners := [4]color.NRGBA{
+		nrgbaAt(img, 0, 0),
+		nrgbaAt(img, w-1, 0),
+		nrgbaAt(img, 0, h-1),
+		nrgbaAt(img, w-1, h-1),
+	}
+	best, bestCount := corners[0], 0
+	for _, c := range corners {
+		cnt := 0
+		for _, d := range corners {
+			if c == d {
+				cnt++
+			}
+		}
+		if cnt > bestCount {
+			best, bestCount = c, cnt
+		}
+	}
+	return best
+}
+
+func nrgbaAt(img *image.NRGBA, x, y int) color.NRGBA {
+	o := img.PixOffset(x, y)
+	return color.NRGBA{R: img.Pix[o], G: img.Pix[o+1], B: img.Pix[o+2], A: img.Pix[o+3]}
+}
+
+func absDiffU8(a, b uint8) int {
+	if a > b {
+		return int(a - b)
+	}
+	return int(b - a)
 }
 
 // RestoreSpriteBackup copies <slug>.png.bak back over <slug>.png — the one-step

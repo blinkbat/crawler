@@ -222,14 +222,10 @@ func drawGlyphSlash(cx, cy, t, baseR float32) {
 	rl.DrawLineEx(rl.NewVector2(x1-off, y1-off*0.25), rl.NewVector2(x2-off, y2-off*0.25), 2, fadeColor(col, 0.6))
 }
 
-// drawGlyphImpact — a blunt "POW": an expanding ring plus 8 radial spikes.
+// drawGlyphImpact — a blunt "POW": 8 radial spikes punching outward.
 func drawGlyphImpact(cx, cy, t, baseR float32) {
 	col := rl.NewColor(255, 236, 150, glyphFade(t))
 	r := baseR
-	ringR := r * (0.4 + 0.95*glyphGrow(t))
-	if ringR > 3 {
-		rl.DrawRing(rl.NewVector2(cx, cy), ringR-3, ringR, 28, 0, 360, fadeColor(col, 0.85))
-	}
 	spike := r * (0.5 + 0.45*glyphGrow(t))
 	inner := r * 0.25
 	for i := 0; i < 8; i++ {
@@ -259,29 +255,47 @@ func drawGlyphFrost(cx, cy, t, baseR float32) {
 	rl.DrawCircleV(rl.NewVector2(cx, cy), 2.5, col)
 }
 
-// drawGlyphSpark — 3 jagged lightning tendrils radiating out from a bright core.
+// drawGlyphSpark — 3 jagged lightning tendrils radiating from a bright core,
+// twitching frame-to-frame like a live electric arc.
 func drawGlyphSpark(cx, cy, t, baseR float32) {
 	a := glyphFade(t)
 	bolt := rl.NewColor(150, 205, 255, a)
 	r := baseR * 1.25
-	for _, ang := range []float64{-1.4, 0.35, 2.05} {
-		drawLightningTendril(cx, cy, ang, r, bolt)
+	// Step the wall clock into ~18 discrete frames/sec so the bolts SNAP to new
+	// jagged positions rather than sliding smoothly — that staccato is what
+	// reads as lightning twitch. Each tendril jitters off its own seed.
+	step := math.Floor(rl.GetTime() * 18)
+	for i, ang := range []float64{-1.4, 0.35, 2.05} {
+		drawLightningTendril(cx, cy, ang, r, bolt, step*3+float64(i))
 	}
 	rl.DrawCircleV(rl.NewVector2(cx, cy), 3, rl.NewColor(225, 242, 255, a))
 }
 
-// drawLightningTendril draws a 3-segment zigzag outward along `ang`.
-func drawLightningTendril(cx, cy float32, ang float64, r float32, col rl.Color) {
+// drawLightningTendril draws a 3-segment zigzag outward along `ang`. seed feeds
+// the per-segment twitch so each redraw frame jags a little differently.
+func drawLightningTendril(cx, cy float32, ang float64, r float32, col rl.Color, seed float64) {
 	dx, dy := float32(math.Cos(ang)), float32(math.Sin(ang))
 	px, py := -dy, dx // perpendicular jitter axis
 	steps := [...]struct{ along, perp float32 }{{0.38, 0.2}, {0.72, -0.16}, {1.0, 0.04}}
 	prevX, prevY := cx, cy
-	for _, s := range steps {
-		nx := cx + dx*r*s.along + px*r*s.perp
-		ny := cy + dy*r*s.along + py*r*s.perp
+	for si, s := range steps {
+		// Twitch the perpendicular offset by a stepped pseudo-random nudge so
+		// the bolt jitters like a live arc; kept small ("a bit") so it still
+		// aims along ang.
+		perp := s.perp + glyphJitter(seed+float64(si)*7.13)*0.16
+		nx := cx + dx*r*s.along + px*r*perp
+		ny := cy + dy*r*s.along + py*r*perp
 		rl.DrawLineEx(rl.NewVector2(prevX, prevY), rl.NewVector2(nx, ny), 2, col)
 		prevX, prevY = nx, ny
 	}
+}
+
+// glyphJitter is a cheap deterministic pseudo-random in [-1, 1) from a seed —
+// the fract(sin·k) hash — used to twitch the spark glyph's lightning per frame
+// step without pulling a real RNG into the render hot path.
+func glyphJitter(seed float64) float32 {
+	v := math.Sin(seed*12.9898) * 43758.5453
+	return float32((v-math.Floor(v))*2 - 1)
 }
 
 // drawGlyphFire — a flame burst: a slowly-rotating glow hex, radial spikes, and
@@ -309,7 +323,7 @@ func drawGlyphHoly(cx, cy, t, baseR float32) {
 		dx, dy := float32(math.Cos(ang)), float32(math.Sin(ang))
 		rl.DrawLineEx(rl.NewVector2(cx+dx*r*0.32, cy+dy*r*0.32), rl.NewVector2(cx+dx*r, cy+dy*r), 2, col)
 	}
-	rl.DrawRing(rl.NewVector2(cx, cy), r*0.42, r*0.52, 28, 0, 360, col)
+	rl.DrawRing(rl.NewVector2(cx, cy), r*0.42, r*0.52, 0, 360, 28, col)
 }
 
 // drawGlyphVenom — a toxic mark: a ring with a couple of bubbles and a drip that

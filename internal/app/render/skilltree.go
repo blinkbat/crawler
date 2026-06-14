@@ -93,7 +93,12 @@ func DrawSkillTreeModal(g core.GameState, assets Resources) {
 
 	drawSkillTreeDetail(font, g, &m, trees, card, detailH, footerH)
 
-	drawModalFooterLeft(font, card, card.X+24, "Left/Right: tree   Up/Down: node   Confirm: invest   Back: close")
+	drawModalFooterGlyphsLeft(font, card, card.X+24, []HintSeg{
+		Hint("Tree", GlyphLeftRight),
+		Hint("Node", GlyphUpDown),
+		Hint("Invest", GlyphA),
+		Hint("Close", GlyphB),
+	})
 }
 
 // drawSkillTreeColumn paints one tree as a labelled column: name + gilt

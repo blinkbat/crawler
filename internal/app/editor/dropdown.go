@@ -30,11 +30,10 @@ type dropdownOwner int
 
 const (
 	ddNone       dropdownOwner = iota
-	ddPackAdd                  // pack editor: pick a builtin enemy kind or a custom enemy to add
+	ddPackAdd                  // pack editor: pick a builtin enemy kind to add
 	ddChestAdd                 // chest editor: pick an item kind to add
 	ddPackAI                   // pack editor: pick the pack's AI mode (replaces the cycle button)
 	ddFoeKind                  // foe visualizer: pick which enemy kind to tune (replaces < > arrows)
-	ddCustomBase               // custom-enemy editor: pick the base sprite/kind (replaces < > arrows)
 	ddMenu                     // menu bar: the open top-level menu (File / Edit / View / …); see menus.go
 )
 
@@ -116,37 +115,16 @@ func dropdownEntries(s *State) []dropdownEntry {
 		return packAIEntries(s)
 	case ddFoeKind:
 		return foeKindEntries(s)
-	case ddCustomBase:
-		return customBaseEntries(s)
 	case ddMenu:
 		return menuEntries(s)
 	}
 	return nil
 }
 
-// customBaseEntries lists every enemy kind for the custom-enemy editor's base
-// picker — the dropdown replacement for the < > arrows (jump to a base sprite
-// instead of cycling 13+ kinds).
-func customBaseEntries(s *State) []dropdownEntry {
-	if activeCustomEnemy(s) == nil {
-		return nil
-	}
-	return enemyKindEntries(func(s *State, kind core.EnemyKind) {
-		def := activeCustomEnemy(s)
-		if def == nil {
-			return
-		}
-		pushUndo(s)
-		def.BaseKind = kind
-		s.dirty = true
-	})
-}
-
 // enemyKindEntries builds one dropdown row per registered enemy kind (label =
 // its singular name), each running `apply(s, kind)` when chosen. The shared base
-// for every "pick an enemy kind" dropdown — the foe-kind picker, the custom-enemy
-// base picker, and the builtin half of the pack-add list — so the EnemyKinds()
-// walk + label rule live once.
+// for every "pick an enemy kind" dropdown — the foe-kind picker and the pack-add
+// list — so the EnemyKinds() walk + label rule live once.
 func enemyKindEntries(apply func(*State, core.EnemyKind)) []dropdownEntry {
 	defs := core.EnemyKinds()
 	out := make([]dropdownEntry, 0, len(defs))
@@ -172,7 +150,7 @@ func foeKindEntries(s *State) []dropdownEntry {
 
 // nameSpanBetween returns the clickable rect of the value/name shown between a
 // pair of < > stepper arrows — the hit-target that opens the kind dropdown in
-// the foe + custom-enemy editors (so the geometry rule isn't copied per modal).
+// the foe visualizer (so the geometry rule isn't copied per modal).
 func nameSpanBetween(prev, next rl.Rectangle) rl.Rectangle {
 	x := prev.X + prev.Width
 	return rl.NewRectangle(x, prev.Y, next.X-x, prev.Height)
@@ -222,17 +200,9 @@ func chooseDropdownEntry(s *State, entries []dropdownEntry, idx int) {
 // --- Pack-add entries: builtin enemy kinds, then this map's custom enemies ---
 
 func packAddEntries(s *State) []dropdownEntry {
-	out := enemyKindEntries(func(s *State, kind core.EnemyKind) {
+	return enemyKindEntries(func(s *State, kind core.EnemyKind) {
 		packAddMember(s, func(p *core.PackSpawn) { core.AppendBuiltinPackMember(p, kind) })
 	})
-	for _, ce := range s.area.CustomEnemies {
-		ce := ce
-		out = append(out, dropdownEntry{
-			label: ce.Name + " (custom)",
-			apply: func(s *State) { packAddMember(s, func(p *core.PackSpawn) { core.AppendCustomPackMember(p, ce) }) },
-		})
-	}
-	return out
 }
 
 // packAddMember appends to the edited pack via add, then selects the new member

@@ -407,21 +407,27 @@ var actionLogCache struct {
 // two). The name is historical; it's no longer combat-only.
 func drawActionLogPanel(g core.GameState, assets Resources) {
 	// Bottom-left HUD pane: tall, soft-edged glass that the world bleeds
-	// through. No header label — the rolling text is self-evident. The pane
-	// stretches to almost reach the turn panel above, then floors at 160 px so
-	// it stays usable on very short windows.
+	// through. No header label — the rolling text is self-evident. The pane's
+	// BOTTOM edge pins to the screen bottom (hudEdgePad margin); it stretches
+	// up toward the turn panel, then floors at 160 px so it stays usable on
+	// very short windows.
 	w := int32(320)
 	h := int32(300)
+	_, screenH := screenSize()
 	x := hudEdgePad
-	y := int32(PartyRibbonTopY()) - h - hudColumnGap
+	bottomY := screenH - hudEdgePad
+	y := bottomY - h
 
+	// Top collision guard against the turn panel above: if the pane would
+	// overlap it, shrink height (floored at 160) while keeping the bottom edge
+	// pinned to the screen bottom.
 	if turnBottom := TurnPanelBottomY(g) + hudColumnGap; y < turnBottom {
-		shrunkH := h - (turnBottom - y)
+		shrunkH := bottomY - turnBottom
 		if shrunkH < 160 {
 			shrunkH = 160
 		}
 		h = shrunkH
-		y = int32(PartyRibbonTopY()) - h - hudColumnGap
+		y = bottomY - h
 	}
 
 	drawCard(x, y, w, h, surfacePrimary, borderSoft, borderSoft)
@@ -599,11 +605,6 @@ func arrowPrompt(a, b string) string {
 	return arrowPromptCache.text
 }
 
-// actionMenuLift raises the bottom-right action menu this many px above the
-// bare ribbon gap, so it clears the active member's raised card and reads as a
-// distinct band rather than crowding the party row.
-const actionMenuLift = int32(30)
-
 func drawActionMenuPanel(g core.GameState, assets Resources) {
 	if g.Battle.Phase != core.BattlePlayer {
 		return
@@ -616,35 +617,28 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 		return
 	}
 
-	screenW, _ := screenSize()
+	screenW, screenH := screenSize()
 	w := int32(340)
 	// Taller panel — a name header now sits atop 4 action rows
 	// (Attack/Skill/Defend/Item), and the item picker mode reuses this
-	// same panel for its list. Anchors to the right edge using hudEdgePad
-	// so the menu lines up with the other right-side HUD chrome. Turn
-	// order is no longer to its right (moved to the left column under the
-	// minimap), so the action panel is the rightmost battle-HUD element.
+	// same panel for its list. Pins to the bottom-RIGHT corner: right edge at
+	// hudEdgePad from the screen edge, bottom edge at hudEdgePad from the
+	// screen bottom.
 	h := int32(312)
 	x := screenW - w - hudEdgePad
-	// Sit a bit higher than the bare ribbon gap so the menu clears the active
-	// member's raised card (activeCardLift) and reads as its own band above the
-	// party row rather than crowding it.
-	y := int32(PartyRibbonTopY()) - h - hudColumnGap - actionMenuLift
-	// Vertical collision guard: on a short-window resolution the
-	// 280px panel might slip behind the top edge (y < 16). Floor the
-	// top edge at hudEdgePad and shrink height to whatever fits
-	// between hudEdgePad and PartyRibbonTopY. Same defensive pattern
-	// the action log uses against the left column. Floor height at
-	// 160 so the action rows stay readable.
-	if y < int32(hudEdgePad) {
-		topPad := int32(hudEdgePad)
-		bottomPad := int32(PartyRibbonTopY()) - int32(hudColumnGap)
-		shrunkH := bottomPad - topPad
+	bottomY := screenH - hudEdgePad
+	y := bottomY - h
+	// Vertical collision guard: on a short-window resolution the panel might
+	// slip behind the top edge. Floor the top edge at hudEdgePad and shrink
+	// height while keeping the bottom edge pinned to the screen bottom. Floor
+	// height at 160 so the action rows stay readable.
+	if y < hudEdgePad {
+		shrunkH := bottomY - hudEdgePad
 		if shrunkH < 160 {
 			shrunkH = 160
 		}
 		h = shrunkH
-		y = bottomPad - h
+		y = bottomY - h
 	}
 
 	classCol := classAccent(member.Class)
@@ -714,7 +708,10 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 	if h >= 260 {
 		hintY := y + h - 28
 		drawGiltRule(x+18, hintY-12, w-36, 1, 0.3)
-		drawTextWithShadow(assets.hudFont, "A  Confirm       B  Back", float32(contentX), float32(hintY), FontSmall, textDim)
+		DrawHintBarLeft(assets.hudFont, []HintSeg{
+			Hint("Confirm", GlyphA),
+			Hint("Back", GlyphB),
+		}, float32(contentX), float32(hintY), FontSmall)
 	}
 }
 

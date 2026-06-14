@@ -53,9 +53,15 @@ func turnPanelHeight(n int) int32 {
 // edge of the turn-order panel — used by the action-log panel that
 // docks below it on the same left edge. Returns the minimap bottom
 // when the queue is empty (no panel painted, so action log slots up).
+//
+// turnForecastBuf is only refreshed during the battle HUD pass, so out
+// of combat it holds the last fight's stale forecast. The turn panel is
+// likewise only painted in battle (drawTurnPanel runs from DrawOverlay's
+// battle branch), so when no battle is active there's no panel to dock
+// below — report the minimap bottom regardless of the stale buffer.
 func TurnPanelBottomY(g core.GameState) int32 {
 	turns := turnForecastBuf
-	if len(turns) == 0 {
+	if !g.Battle.Active() || len(turns) == 0 {
 		return MinimapBottomY()
 	}
 	return MinimapBottomY() + hudColumnGap + turnPanelHeight(len(turns))

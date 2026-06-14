@@ -48,7 +48,7 @@ func panelsMapFooterText(areaName string, zoom int) string {
 	if panelsMapFooterCache.areaName == areaName && panelsMapFooterCache.zoom == zoom {
 		return panelsMapFooterCache.text
 	}
-	panelsMapFooterCache.text = fmt.Sprintf("%s   zoom: %d cells   Up/Down to zoom", areaName, zoom)
+	panelsMapFooterCache.text = fmt.Sprintf("%s   zoom: %d cells", areaName, zoom)
 	panelsMapFooterCache.areaName = areaName
 	panelsMapFooterCache.zoom = zoom
 	return panelsMapFooterCache.text
@@ -75,16 +75,57 @@ var panelTabDrawers = [core.PanelTabCount]func(core.GameState, Resources, rl.Rec
 // missed) instead of silently inheriting a generic hint via a switch's
 // fall-through. init asserts none is empty.
 // footerHintMemberTabs is the shared control hint for tabs whose only
-// interaction is the member-column cursor (Stats / Equipment / Quests / Map).
-const footerHintMemberTabs = "L1/R1 tabs   Left/Right pick member   X close"
+// interaction is the member-column cursor (Stats / Quests / Map). Controller
+// glyphs only (gamepad-first) — no spelled-out keys. See render/glyphs.go.
+func footerHintMemberTabs() []HintSeg {
+	return []HintSeg{
+		Hint("Tabs", GlyphLB, GlyphRB),
+		Hint("Member", GlyphLeftRight),
+		Hint("Close", GlyphB),
+	}
+}
 
-var panelTabFooterHints = [core.PanelTabCount]string{
-	core.PanelTabStats:     footerHintMemberTabs,
-	core.PanelTabEquipment: "L1/R1 tabs   Left/Right member   Up/Down slot   Confirm change gear   X close",
-	core.PanelTabItems:     "L1/R1 tabs   Up/Down item   Confirm / F use   X close",
-	core.PanelTabSkills:    "L1/R1 tabs   Left/Right member   Confirm open trees   F cast heal   X close",
-	core.PanelTabQuests:    "L1/R1 tabs   Left/Right Quests/Bestiary   Up/Down scroll   X close",
-	core.PanelTabMap:       footerHintMemberTabs,
+// panelTabFooterHints is parallel to panelTabDrawers and sized [PanelTabCount],
+// so adding a tab forces a hint slot. Functions (not values) so each call
+// rebuilds its glyph segs fresh — they're cheap literals and this avoids shared
+// mutable slice state. init asserts none is nil.
+var panelTabFooterHints = [core.PanelTabCount]func() []HintSeg{
+	core.PanelTabStats: footerHintMemberTabs,
+	core.PanelTabEquipment: func() []HintSeg {
+		return []HintSeg{
+			Hint("Tabs", GlyphLB, GlyphRB),
+			Hint("Member", GlyphLeftRight),
+			Hint("Slot", GlyphUpDown),
+			Hint("Change gear", GlyphA),
+			Hint("Close", GlyphB),
+		}
+	},
+	core.PanelTabItems: func() []HintSeg {
+		return []HintSeg{
+			Hint("Tabs", GlyphLB, GlyphRB),
+			Hint("Item", GlyphUpDown),
+			Hint("Use", GlyphX),
+			Hint("Close", GlyphB),
+		}
+	},
+	core.PanelTabSkills: func() []HintSeg {
+		return []HintSeg{
+			Hint("Tabs", GlyphLB, GlyphRB),
+			Hint("Member", GlyphLeftRight),
+			Hint("Open trees", GlyphA),
+			Hint("Cast heal", GlyphX),
+			Hint("Close", GlyphB),
+		}
+	},
+	core.PanelTabQuests: func() []HintSeg {
+		return []HintSeg{
+			Hint("Tabs", GlyphLB, GlyphRB),
+			Hint("Quests / Bestiary", GlyphLeftRight),
+			Hint("Scroll", GlyphUpDown),
+			Hint("Close", GlyphB),
+		}
+	},
+	core.PanelTabMap: footerHintMemberTabs,
 }
 
 func init() {
@@ -92,7 +133,7 @@ func init() {
 		if panelTabDrawers[t] == nil {
 			panic(fmt.Sprintf("render/panels: panelTabDrawers missing a drawer for tab %d", int(t)))
 		}
-		if panelTabFooterHints[t] == "" {
+		if panelTabFooterHints[t] == nil {
 			panic(fmt.Sprintf("render/panels: panelTabFooterHints missing a hint for tab %d", int(t)))
 		}
 	}
@@ -185,7 +226,7 @@ func DrawPanelsOverlay(g core.GameState, assets Resources) {
 	if int(g.PanelsTab) >= 0 && int(g.PanelsTab) < len(panelTabFooterHints) {
 		footerHint = panelTabFooterHints[g.PanelsTab]
 	}
-	drawModalFooter(font, card, footerHint)
+	drawModalFooterGlyphs(font, card, footerHint())
 
 	// Sub-modals painted on top of the whole overlay (frame + footer) so
 	// they read as "above" everything.
@@ -759,7 +800,10 @@ func drawEquipPicker(g core.GameState, assets Resources) {
 		}
 	}
 
-	drawModalFooterLeft(font, card, card.X+pickerCardLeftInset, "Confirm: equip   Back: cancel")
+	drawModalFooterGlyphsLeft(font, card, card.X+pickerCardLeftInset, []HintSeg{
+		Hint("Equip", GlyphA),
+		Hint("Cancel", GlyphB),
+	})
 }
 
 // drawUseTargetPicker paints the shared ally-target sub-modal for the
@@ -807,7 +851,10 @@ func drawUseTargetPicker(g core.GameState, assets Resources) {
 		drawTextRightAligned(font, hp, rect.X+rect.Width-12, rect.Y+rect.Height/2-8, FontSmall, hpFillColor(m.HP, m.MaxHP))
 	}
 
-	drawModalFooterLeft(font, card, card.X+pickerCardLeftInset, "Confirm: use   Back: cancel")
+	drawModalFooterGlyphsLeft(font, card, card.X+pickerCardLeftInset, []HintSeg{
+		Hint("Use", GlyphA),
+		Hint("Cancel", GlyphB),
+	})
 }
 
 // drawHealPicker paints the out-of-battle heal-skill chooser — a small veiled
@@ -842,7 +889,10 @@ func drawHealPicker(g core.GameState, assets Resources) {
 		drawTextRightAligned(font, costText, rect.X+rect.Width-12, rect.Y+rect.Height/2-8, FontSmall, inkAccent)
 	}
 
-	drawModalFooterLeft(font, card, card.X+pickerCardLeftInset, "Confirm: cast   Back: cancel")
+	drawModalFooterGlyphsLeft(font, card, card.X+pickerCardLeftInset, []HintSeg{
+		Hint("Cast", GlyphA),
+		Hint("Cancel", GlyphB),
+	})
 }
 
 // equipBonusSummary returns the single-line "STR +2" / "Armor +1" /
@@ -1193,7 +1243,7 @@ func drawPanelsSkills(g core.GameState, assets Resources, body rl.Rectangle) {
 		// Call-to-action on the cursored member: Confirm opens the trees.
 		if highlight {
 			hintY := cols[i].Y + cols[i].Height - 30
-			drawTextWithShadow(font, "Confirm: open skill trees", innerX, hintY, FontSmall, inkAccent)
+			DrawHintBarLeft(font, []HintSeg{Hint("Open skill trees", GlyphA)}, innerX, hintY, FontSmall)
 		}
 	}
 }
@@ -1341,9 +1391,12 @@ func drawPanelsMap(g core.GameState, assets Resources, body rl.Rectangle) {
 	// large enough to read as 8-point.
 	drawCompassRose(body.X+body.Width-46, body.Y+10, 28, font)
 
-	// Map footer — area name + zoom indicator.
+	// Map footer — area name + zoom indicator, then the zoom glyph hint.
+	footerY := body.Y + body.Height - 20
 	footer := panelsMapFooterText(g.Area.Name, zoom)
-	drawTextWithShadow(font, footer, body.X, body.Y+body.Height-20, FontSmall, textHint)
+	drawTextWithShadow(font, footer, body.X, footerY, FontSmall, textHint)
+	footerW := rl.MeasureTextEx(font, footer, FontSmall, canonicalSpacing(FontSmall)).X
+	DrawHintBarLeft(font, []HintSeg{Hint("Zoom", GlyphUpDown)}, body.X+footerW+hintSegGap, footerY, FontSmall)
 }
 
 // drawCompassRose paints an 8-point compass rose at (cx, cy) within

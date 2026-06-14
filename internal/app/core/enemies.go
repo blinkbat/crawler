@@ -729,7 +729,7 @@ func BattleLossMessage(g *GameState) string {
 	count := LivingBattleCount(g)
 	def := BattleEnemyInfo(g)
 	if count <= 1 {
-		return fmt.Sprintf("The %s drives the party back. Press Enter to recover.", def.SingularNoun)
+		return fmt.Sprintf("The %s drives the party back. Press to recover.", def.SingularNoun)
 	}
-	return fmt.Sprintf("The %s drive the party back. Press Enter to recover.", def.PluralNoun)
+	return fmt.Sprintf("The %s drive the party back. Press to recover.", def.PluralNoun)
 }

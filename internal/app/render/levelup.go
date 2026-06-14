@@ -139,7 +139,13 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 
 	// VIT note removed — the per-stat description column already
 	// surfaces "Max HP (+2 per point)" on the VIT row itself.
-	drawModalFooter(font, card, "Up/Down pick   Z stage   X undo   Enter apply")
+	// Confirm both stages a stat point (on a stat row) and applies (on the
+	// Apply row); Back undoes a staged point. Controller glyphs only.
+	drawModalFooterGlyphs(font, card, []HintSeg{
+		Hint("Pick", GlyphUpDown),
+		Hint("Stage / Apply", GlyphA),
+		Hint("Undo", GlyphB),
+	})
 }
 
 // levelUpStagedTotal retired — core.SumStatPending is the single seam

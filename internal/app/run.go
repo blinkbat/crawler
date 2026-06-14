@@ -417,6 +417,7 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	// under every popup and HUD pane. No-op outside that phase.
 	render.DrawBattleDangerVignette(*game)
 	render.DrawChestPrompt(camera, *game, assets)
+	render.DrawCrystalPrompt(camera, *game, assets)
 	// Hit-glyph clarity shapes over struck targets — HUD pass (crisp 2D), but
 	// before the damage popups so the number floats on top of the glyph.
 	render.DrawHitGlyphs(camera)

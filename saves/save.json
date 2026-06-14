@@ -3,9 +3,9 @@
   "mapID": "forest_path",
   "playerTileX": 2,
   "playerTileZ": 2,
-  "playerFacing": 0,
-  "stepCount": 340,
-  "gold": 16,
+  "playerFacing": 3,
+  "stepCount": 34,
+  "gold": 17,
   "party": [
     {
       "Class": 0,
@@ -47,7 +47,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 1,
-      "XP": 62,
+      "XP": 40,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
@@ -98,7 +98,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 1,
-      "XP": 62,
+      "XP": 40,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
@@ -149,7 +149,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 1,
-      "XP": 62,
+      "XP": 40,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
@@ -200,14 +200,14 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 1,
-      "XP": 62,
+      "XP": 40,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
-        "11": 0
+        "12": 0
       },
       "TreeRanks": {
-        "frost-lance": 1
+        "arc-bolt": 1
       },
       "SkillCursor": 0
     }
@@ -225,17 +225,19 @@
   "quests": null,
   "bestiary": {
     "0": {
-      "kills": 6
+      "kills": 4
     },
     "1": {
       "kills": 1
     },
     "2": {
-      "kills": 2
+      "kills": 1
     }
   },
   "crystals": [
     {
+      "tileX": 1,
+      "tileZ": 2,
       "charge": 0,
       "charged": false
     }

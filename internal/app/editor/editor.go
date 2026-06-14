@@ -360,10 +360,6 @@ const (
 	// the area, since the area hasn't been replaced yet at edit time).
 	focusNewWidth
 	focusNewHeight
-	// focusCustomEnemyName is the rename text field on the custom-
-	// enemy edit form (modalCustomEnemies). Routes through the same
-	// pumpPrintableASCII helper the door-name and area-name fields use.
-	focusCustomEnemyName
 	// Door-edit text-field foci. Switch with Tab inside modalDoorEdit;
 	// updateTextInput dispatches the keystrokes onto the right field of
 	// the active DoorSpawn via activeTextTarget.
@@ -417,10 +413,6 @@ const (
 	// the topbar New button (after a confirmDirty bounce if the current
 	// area has unsaved edits).
 	modalNew
-	// modalCustomEnemies is the per-map custom-enemy authoring modal.
-	// CRUD for AreaDefinition.CustomEnemies: pick a base sprite, set stats,
-	// toggle skills, then add them to authored packs from the pack modal.
-	modalCustomEnemies
 	// modalEscMenu is the pause-style menu opened by pressing Esc on
 	// the editor canvas. Bridges the gap between "Esc = exit to title"
 	// (jarring on fullscreen, especially when the author wants to
@@ -630,10 +622,6 @@ type State struct {
 	modalNewWidth  int
 	modalNewHeight int
 	modalNewFloor  byte
-	// modalCustomIdx is the AreaDefinition.CustomEnemies index of the
-	// currently selected entry in the custom-enemies modal. -1 means
-	// no selection (the form shows a "pick one" placeholder).
-	modalCustomIdx int
 	// modalValidateRows is the snapshot of warnings shown in
 	// modalValidate. Captured at open time so the read-only display
 	// doesn't reflow while the user is reading it.
@@ -900,7 +888,6 @@ func freshState(a core.AreaDefinition) State {
 		modalPackIdx:   -1,
 		modalChestIdx:  -1,
 		modalDoorIdx:   -1,
-		modalCustomIdx: -1,
 	}
 }
 

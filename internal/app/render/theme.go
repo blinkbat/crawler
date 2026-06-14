@@ -102,6 +102,23 @@ var (
 	coinFace  = rl.NewColor(218, 168, 78, 255)
 	coinShade = rl.NewColor(152, 104, 42, 255)
 
+	// ----- Controller glyphs (on-screen button icons) -----
+	// Modern-game face-button hues, drawn as the letter + ring on a dark
+	// button body (the dark-button / colored-letter style that reads cleanest
+	// over the library's dark glass). mute()-wrapped like every other bright
+	// accent so the icons calm to the library palette while staying instantly
+	// recognizable (A green / B red / X blue / Y amber). See render/glyphs.go.
+	glyphAColor = mute(rl.NewColor(60, 168, 74, 255))  // confirm
+	glyphBColor = mute(rl.NewColor(206, 66, 58, 255))  // back / cancel
+	glyphXColor = mute(rl.NewColor(58, 124, 206, 255)) // use
+	glyphYColor = mute(rl.NewColor(228, 178, 52, 255)) // panels / Tome
+	// glyphBody is the dark raised button fill behind every glyph; glyphRim is
+	// the light bevel stroke around the non-face buttons (shoulders / start /
+	// select / d-pad); glyphInk is the neutral label/icon ink on those.
+	glyphBody = rl.NewColor(34, 30, 40, 235)
+	glyphRim  = rl.NewColor(150, 140, 150, 220)
+	glyphInk  = rl.NewColor(232, 226, 214, 255)
+
 	// ----- Parchment ink (text) -----
 	inkPrimary = rl.NewColor(232, 222, 196, 255)
 	inkMuted   = rl.NewColor(184, 172, 144, 240)

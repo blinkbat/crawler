@@ -103,7 +103,7 @@ func Update(g *core.GameState, dt float32) {
 		return
 	}
 	if g.Battle.Phase != core.BattleWon && g.Battle.Phase != core.BattleLost && core.ActivePartyCount(g.Party) == 0 {
-		loseBattle(g, "The party is driven back. Press Enter to recover.")
+		loseBattle(g, "The party is driven back. Press to recover.")
 		return
 	}
 	if g.Battle.Splash > 0 {

@@ -137,15 +137,10 @@ func DrawChestPrompt(camera rl.Camera3D, g core.GameState, assets Resources) {
 		return
 	}
 	screen := rl.GetWorldToScreen(world, camera)
-	label := "Press Enter to open"
-	font := assets.Font()
-	// Route through the cached centered-text helper (FINDING #15) so the
-	// constant prompt isn't re-measured every frame the player stands by a
-	// chest. The vertical anchor still needs the glyph height, but that's a
-	// constant per (font,size) — pull it from the same cache.
-	m := centeredMeasureCache.measure(font, label, FontBody, 1)
-	y := screen.Y - m.Y - 8
-	drawTextCentered(font, label, screen.X, y, FontBody, borderActive)
+	// Controller-first prompt: the confirm glyph + the verb (no spelled-out
+	// keys). gamepad-first per UI_STANDARDS.md.
+	y := screen.Y - glyphBoxH(FontBody) - 8
+	drawGlyphPrompt(assets.Font(), GlyphA, "Open", screen.X, y, FontBody)
 }
 
 // DrawChestModal paints the chest-open dialog: a card with the item
@@ -211,5 +206,9 @@ func DrawChestModal(g core.GameState, assets Resources) {
 		}
 		drawTextWithShadow(font, "Take All", float32(rowX), float32(rowY), FontBody, col)
 	}
-	drawModalFooter(font, card, "Up/Down move   Z take   X close")
+	drawModalFooterGlyphs(font, card, []HintSeg{
+		Hint("Move", GlyphUpDown),
+		Hint("Take", GlyphA),
+		Hint("Close", GlyphB),
+	})
 }

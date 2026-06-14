@@ -109,6 +109,13 @@ func Update(g *core.GameState) {
 	if g.Player.Anim.Kind == core.AnimNone && tryOpenAdjacentChest(g) {
 		return
 	}
+	// Confirm key also fires an adjacent charged healing crystal. Same
+	// gate as the chest: a settled player pressing Confirm. Checked after
+	// chests so the two interactions can't both fire on one press (a
+	// crystal and a chest are never on the same tile anyway).
+	if g.Player.Anim.Kind == core.AnimNone && tryUseAdjacentCrystal(g) {
+		return
+	}
 	updatePlayer(g, dt)
 }
 
@@ -348,17 +355,30 @@ func saveGame(g *core.GameState) {
 	audio.Play(audio.SoundInputGreat)
 }
 
-// tryHealingCrystal fires the Grimrock-style crystal when the player lands on or
-// beside a CHARGED crystal: restore the whole party to full HP+MP, put the
-// crystal dormant, and AUTOSAVE (the codebase's first autosave). No-op when no
-// charged crystal is in reach. The heal+discharge always lands; the save is
-// best-effort — it refuses on an unsaved editor-playtest map (Area.Path == ""),
-// in which case the party is still restored and the message says so.
-func tryHealingCrystal(g *core.GameState, x, z int) {
-	idx := core.AdjacentChargedCrystalIndex(g.Crystals, x, z)
-	if idx < 0 {
-		return
+// tryUseAdjacentCrystal is the Confirm-key interaction for healing crystals
+// (mirrors tryOpenAdjacentChest). When the player presses Confirm one tile away
+// from — or on top of — a CHARGED crystal, fire the Grimrock-style rest and
+// return true so the rest of the explore tick (free-look, movement) skips this
+// frame. No-op (returns false) when no charged crystal is in reach or Confirm
+// wasn't pressed, so the press falls through to movement as usual.
+func tryUseAdjacentCrystal(g *core.GameState) bool {
+	if !input.ConfirmPressed() {
+		return false
 	}
+	idx := core.AdjacentChargedCrystalIndex(g.Crystals, g.Player.TileX, g.Player.TileZ)
+	if idx < 0 {
+		return false
+	}
+	fireHealingCrystal(g, idx)
+	return true
+}
+
+// fireHealingCrystal restores the whole party to full HP+MP, puts the crystal
+// dormant, and AUTOSAVEs (the codebase's first autosave). The heal+discharge
+// always lands; the save is best-effort — it refuses on an unsaved editor-
+// playtest map (Area.Path == ""), in which case the party is still restored and
+// the message says so.
+func fireHealingCrystal(g *core.GameState, idx int) {
 	core.RestorePartyFully(g)
 	g.Crystals[idx].Charged = false
 	g.Crystals[idx].Charge = 0
@@ -495,12 +515,10 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	// want torchlight / vision modifiers, they pipe a different radius
 	// into RevealRadius here instead of a second reveal pass.
 	core.RevealRadius(g, targetX, targetZ, core.SightRadius)
-	// Healing crystals: recharge every dormant crystal one step (TickCrystalRecharge
-	// runs first so the crystal we may discharge below isn't re-charged this same
-	// step), then fire the heal+autosave if the player landed on or beside a
-	// charged one.
+	// Healing crystals: recharge every dormant crystal one step. The heal
+	// itself is no longer automatic — the player presses Confirm beside a
+	// charged crystal to use it (tryUseAdjacentCrystal), like opening a chest.
 	core.TickCrystalRecharge(g)
-	tryHealingCrystal(g, targetX, targetZ)
 	// Pack-AI tick (per-pack mode dispatched in core.PlanPackSteps): each
 	// alive pack plans (independently) on every successful player step. If a pack lands on the player,
 	// initiate the battle and snap the player's VISUAL coords to the

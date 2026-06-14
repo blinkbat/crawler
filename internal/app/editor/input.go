@@ -354,13 +354,28 @@ func updateGridCursor(s *State) {
 		return
 	}
 	if input.EditorPaintPressed() {
-		pushUndo(s)
-		applyToolBrushed(s, s.gridCursorX, s.gridCursorZ)
+		keyboardMutate(s, func() { applyToolBrushed(s, s.gridCursorX, s.gridCursorZ) })
 	}
 	if input.EditorErasePressed() {
-		pushUndo(s)
-		eraseAt(s, s.gridCursorX, s.gridCursorZ)
+		keyboardMutate(s, func() { eraseAt(s, s.gridCursorX, s.gridCursorZ) })
 	}
+}
+
+// keyboardMutate runs a single-cell keyboard paint/erase and banks an undo
+// snapshot lazily — only when the cell actually changed the area — so a no-op
+// keyboard stroke (cell already holds the brush, or a brush guard refused it)
+// doesn't clear the redo stack or bump the content epoch. Mirrors strokePaint's
+// guard for the mouse path, including repairing applyTool's optimistic dirty
+// flip when nothing changed.
+func keyboardMutate(s *State, apply func()) {
+	wasDirty := s.dirty
+	before := core.CloneArea(s.area)
+	apply()
+	if core.AreaContentEqual(s.area, before) {
+		s.dirty = wasDirty
+		return
+	}
+	commitUndoSnapshot(s, before)
 }
 
 func activateCursor(s *State, mw, mh int) (int, int) {
@@ -1030,9 +1045,8 @@ var textFieldConfigs = map[focusField]textFieldConfig{
 	// space-delimited, so a space here would corrupt the round-trip
 	// (validate() also backstops this at save time).
 	focusDoorName:        {defaultTextFieldMaxLen, acceptPrintableNoSpace},
-	focusDoorTargetMap:   {defaultTextFieldMaxLen, acceptPrintableNoSpace},
-	focusDoorTargetDoor:  {defaultTextFieldMaxLen, acceptPrintableNoSpace},
-	focusCustomEnemyName: {24, acceptPrintable},
+	focusDoorTargetMap:  {defaultTextFieldMaxLen, acceptPrintableNoSpace},
+	focusDoorTargetDoor: {defaultTextFieldMaxLen, acceptPrintableNoSpace},
 }
 
 func configForFocus(f focusField) textFieldConfig {
@@ -1191,6 +1205,20 @@ func commitNumericInput(s *State) {
 	s.numericBuf = ""
 }
 
+// finalizeFocusedField runs any per-field commit hook before focus drops.
+// Used by both the in-modal Enter/Tab path AND the click-outside-defocus path
+// in editor.Update so a stray click can't strand mid-edit state that the
+// modal's own commit would have finalized. Today only the metadata Width /
+// Height numeric fields need it: they buffer into s.numericBuf and apply only
+// on commit, so without this the typed dimension is silently discarded on a
+// click-away. Future text fields plug in via the same switch.
+func finalizeFocusedField(s *State) {
+	switch s.focus {
+	case focusWidth, focusHeight:
+		commitNumericInput(s)
+	}
+}
+
 func cycleFocus(s *State) {
 	if s.focus == focusFilename {
 		return
@@ -1281,18 +1309,6 @@ func validateModalState(s *State) {
 		if s.modalDoorIdx < 0 || s.modalDoorIdx >= len(s.area.DoorSpawns) {
 			closeModal(s)
 		}
-	case modalCustomEnemies:
-		// Clamp the custom-enemy cursor to the slice instead of
-		// closing — the modal lists every def and the cursor is
-		// internal navigation, not a hard reference to a single
-		// row that has to exist.
-		if n := len(s.area.CustomEnemies); n == 0 {
-			s.modalCustomIdx = 0
-		} else if s.modalCustomIdx < 0 {
-			s.modalCustomIdx = 0
-		} else if s.modalCustomIdx >= n {
-			s.modalCustomIdx = n - 1
-		}
 	}
 }
 
@@ -1335,7 +1351,6 @@ func closeModal(s *State) {
 	s.modalPackIdx = -1
 	s.modalChestIdx = -1
 	s.modalDoorIdx = -1
-	s.modalCustomIdx = -1
 	closeDropdown(s) // a modal's picker dropdown must not survive its parent
 	s.modalValidateRows = nil
 	s.modalConfirmDelete = false
@@ -1344,11 +1359,9 @@ func closeModal(s *State) {
 	soundDrag.sliderIdx = -1
 	// Door-edit text focus survives outside the modal in pumpPrintableASCII's
 	// flow, so explicitly drop it here too. The new-map dialog's numeric
-	// foci and the custom-enemy name field are similarly modal-scoped —
-	// they must not carry over.
+	// foci are similarly modal-scoped — they must not carry over.
 	if s.focus == focusDoorName || s.focus == focusDoorTargetMap || s.focus == focusDoorTargetDoor ||
-		s.focus == focusNewWidth || s.focus == focusNewHeight ||
-		s.focus == focusCustomEnemyName {
+		s.focus == focusNewWidth || s.focus == focusNewHeight {
 		s.focus = focusNone
 		s.numericBuf = ""
 	}

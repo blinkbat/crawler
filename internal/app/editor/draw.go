@@ -224,7 +224,6 @@ var modalHandlers = map[modalKind]modalHandler{
 	modalValidate:      {draw: drawValidateModal, update: updateValidateModal},
 	modalEntityList:    {draw: drawEntityListModal, update: updateEntityListModal},
 	modalNew:           {draw: drawNewMapModal, update: updateNewMapModal},
-	modalCustomEnemies: {draw: drawCustomEnemiesModal, update: updateCustomEnemiesModal},
 	modalEscMenu:       {draw: drawEscMenuModal, update: updateEscMenuModal},
 	modalFoeView:       {draw: drawFoeViewModal, update: updateFoeViewModal},
 	modalHitGlyphs:     {draw: drawHitGlyphsModal, update: updateHitGlyphsModal},
@@ -1743,8 +1742,6 @@ func (s *State) activeFieldRect() rl.Rectangle {
 	switch s.focus {
 	case focusNewWidth, focusNewHeight:
 		return newMapFieldRect(s)
-	case focusCustomEnemyName:
-		return customEnemyNameFieldRect(s)
 	case focusFilename:
 		return saveAsFieldRect(s)
 	}

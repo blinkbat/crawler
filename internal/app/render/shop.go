@@ -71,8 +71,11 @@ func drawShopOverlay(g core.GameState, assets Resources) {
 		rowY += stride
 	}
 
-	DrawFooterHint(font, "L1/R1 Buy/Sell   A confirm   B back",
-		float32(panelX)+float32(shopPanelW)/2, float32(panelY+panelH)-float32(shopFootH)+16, FontSmall)
+	DrawHintBar(font, []HintSeg{
+		Hint("Buy / Sell", GlyphLB, GlyphRB),
+		Hint("Confirm", GlyphA),
+		Hint("Back", GlyphB),
+	}, float32(panelX)+float32(shopPanelW)/2, float32(panelY+panelH)-float32(shopFootH)+16, FontSmall)
 }
 
 // shopRows builds the active tab's drawable rows. Buy reads the catalog

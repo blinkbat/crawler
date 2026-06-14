@@ -43,6 +43,29 @@ func DrawCrystals(camera rl.Camera3D, g core.GameState, assets Resources) {
 	}
 }
 
+// DrawCrystalPrompt paints the floating "press Enter to rest" cue over the
+// charged crystal the player is currently adjacent to (mirrors DrawChestPrompt).
+// Only charged crystals are interactable, so a spent one shows no prompt. Drawn
+// AFTER rl.EndMode3D so the prompt text renders in screen space — see
+// drawAdventureScene for the call order.
+func DrawCrystalPrompt(camera rl.Camera3D, g core.GameState, assets Resources) {
+	idx := core.AdjacentChargedCrystalIndex(g.Crystals, g.Player.TileX, g.Player.TileZ)
+	if idx < 0 {
+		return
+	}
+	c := g.Crystals[idx]
+	// Anchor above the gem's top point (midY 0.55 + half-height 0.38) plus a
+	// little headroom, matching the bob-free rest pose.
+	world := tileWorldPos(c.TileX, c.TileZ, 0.55+0.38+0.3)
+	if behindCamera(camera, world) {
+		return
+	}
+	screen := rl.GetWorldToScreen(world, camera)
+	// Controller-first prompt: confirm glyph + verb, no spelled-out key.
+	y := screen.Y - glyphBoxH(FontBody) - 8
+	drawGlyphPrompt(assets.Font(), GlyphA, "Rest", screen.X, y, FontBody)
+}
+
 // crystalColor is the gem body tint: a pulsing bright cyan while charged, a flat
 // dim slate while dormant.
 func crystalColor(charged bool, t float64) rl.Color {

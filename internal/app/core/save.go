@@ -61,6 +61,13 @@ type SaveData struct {
 
 // CrystalSave is the persisted charge state of one healing crystal.
 type CrystalSave struct {
+	// TileX/TileZ pin the charge to a specific crystal so load can match by
+	// position rather than by index — an edited map can relocate a crystal while
+	// keeping the same count, and a positional match avoids re-arming a spent
+	// charge onto the wrong tile. Older saves predate these fields and decode as
+	// (0,0), which simply won't match any real crystal tile (fresh charged wins).
+	TileX   int  `json:"tileX,omitempty"`
+	TileZ   int  `json:"tileZ,omitempty"`
 	Charge  int  `json:"charge"`
 	Charged bool `json:"charged"`
 }
@@ -73,7 +80,7 @@ func crystalSaves(crystals []Crystal) []CrystalSave {
 	}
 	out := make([]CrystalSave, len(crystals))
 	for i, c := range crystals {
-		out[i] = CrystalSave{Charge: c.Charge, Charged: c.Charged}
+		out[i] = CrystalSave{TileX: c.TileX, TileZ: c.TileZ, Charge: c.Charge, Charged: c.Charged}
 	}
 	return out
 }
@@ -260,14 +267,20 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 		g.Bestiary = pruned
 	}
 	g.StepCount = data.StepCount
-	// Overlay saved crystal charge onto the freshly-placed crystals, by index.
-	// Only when the counts match (they do for a same-map reload — placeCrystals
-	// is deterministic); a mismatch from an edited map leaves the fresh charged
-	// crystals rather than misaligning charge to the wrong tile.
-	if len(data.Crystals) == len(g.Crystals) {
-		for i := range g.Crystals {
-			g.Crystals[i].Charge = data.Crystals[i].Charge
-			g.Crystals[i].Charged = data.Crystals[i].Charged
+	// Overlay saved crystal charge onto the freshly-placed crystals, matched by
+	// TILE rather than by index. placeCrystals is deterministic, but an edited
+	// map can change which start-neighbor is first-walkable, yielding the same
+	// crystal COUNT at a different tile — an index/count overlay would then re-arm
+	// a spent charge onto a relocated crystal. Tile-matching leaves any crystal
+	// without a saved counterpart at its fresh charged default.
+	for i := range g.Crystals {
+		for j := range data.Crystals {
+			if data.Crystals[j].TileX == g.Crystals[i].TileX &&
+				data.Crystals[j].TileZ == g.Crystals[i].TileZ {
+				g.Crystals[i].Charge = data.Crystals[j].Charge
+				g.Crystals[i].Charged = data.Crystals[j].Charged
+				break
+			}
 		}
 	}
 	// Place the player at the saved tile, but fall back to the map's
