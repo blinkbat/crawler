@@ -152,6 +152,51 @@ func PlanPackSteps(g *GameState) []packAIStep {
 	return plans
 }
 
+// ApplyPackSteps applies the moves PlanPackSteps produced: each chosen pack's
+// tile AND visual animation advance, patrol packs persist their pace direction,
+// and the function returns the index of the ONE pack that engaged the player
+// this tick (or -1 if none). Pure core (no raylib) so the engagement contract
+// is headlessly testable; explore's tickPackAI is a thin wrapper around it.
+//
+// Only a SINGLE engagement resolves per tick. A second pack whose plan also
+// lands on the player's tile is held in place — its move is NOT applied —
+// because the engaged pack starts the battle and the loser would otherwise be
+// left overlapping the player with no battle of its own once that battle ends.
+//
+// The animation is armed BEFORE the tile update so StartPackStep captures the
+// pack's current X/Z as the "from"; the tile then jumps so subsequent packs'
+// planning this tick sees the new occupancy (PlanPackSteps already reserved it).
+func ApplyPackSteps(g *GameState, plans []packAIStep) int {
+	if g == nil {
+		return -1
+	}
+	engaged := -1
+	for _, plan := range plans {
+		if !plan.Moved {
+			continue
+		}
+		if plan.PackIdx < 0 || plan.PackIdx >= len(g.Packs) {
+			continue
+		}
+		if plan.EngagePlayer && engaged >= 0 {
+			continue
+		}
+		p := &g.Packs[plan.PackIdx]
+		StartPackStep(p, plan.NextX, plan.NextZ)
+		p.TileX = plan.NextX
+		p.TileZ = plan.NextZ
+		// Only patrol packs read PatrolDir; other modes leave it zero.
+		if p.AI == PackAIPatrol {
+			p.PatrolDir = plan.PatrolDir
+		}
+		if plan.EngagePlayer {
+			engaged = plan.PackIdx
+			SnapPackToTile(p)
+		}
+	}
+	return engaged
+}
+
 // planJunkyardDogPack plans one junkyard-dog pack's step. Same chase /
 // wander rules previously hard-coded as the only AI mode — now opt-in
 // per pack via PackAIJunkyardDog.
@@ -490,4 +535,3 @@ func PackIndexAtTile(packs []Pack, x, z int) int {
 		return PackAlive(p) && p.TileX == x && p.TileZ == z
 	})
 }
-

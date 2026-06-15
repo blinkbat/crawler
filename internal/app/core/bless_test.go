@@ -74,6 +74,35 @@ func TestEffectiveStats_StacksMultipleBuffs(t *testing.T) {
 	}
 }
 
+// TestEffectiveMDef_FoldsBuffWIS pins the fix that magic defense reads EFFECTIVE
+// WIS (base + buff/gear), not raw m.Stats — so a WIS-raising buff (Bless)
+// hardens MDef the same way it lifts heal/accuracy, symmetric with how
+// EffectiveArmor folds buff Armor. The dedicated MDefBonus channel (Stone Skin)
+// still stacks on top independently.
+func TestEffectiveMDef_FoldsBuffWIS(t *testing.T) {
+	m := PartyMember{Stats: Stats{WIS: 4}}
+	if got := EffectiveMDef(m); got != 4 { // MagicDefense == WIS
+		t.Fatalf("base EffectiveMDef = %d, want 4 (raw WIS)", got)
+	}
+
+	// A +3 WIS buff must raise MDef to 7 — it would stay 4 if MDef read raw m.Stats.
+	StampPartyBuff(&m, SkillBless, SkillEffect{BuffStats: Stats{WIS: 3}, BuffTurns: 3})
+	if got := EffectiveMDef(m); got != 7 {
+		t.Errorf("buffed EffectiveMDef = %d, want 7 (effective WIS 4+3)", got)
+	}
+
+	// The dedicated MDefBonus channel stacks on top of the WIS-derived MDef.
+	StampPartyBuff(&m, SkillStoneSkin, SkillEffect{BuffMDef: 2, BuffTurns: 3})
+	if got := EffectiveMDef(m); got != 9 {
+		t.Errorf("EffectiveMDef with buff MDef = %d, want 9 (7 + 2 MDefBonus)", got)
+	}
+
+	// EffectiveDefenses must agree with the standalone reader.
+	if _, mdef := EffectiveDefenses(m); mdef != 9 {
+		t.Errorf("EffectiveDefenses mdef = %d, want 9 (parity with EffectiveMDef)", mdef)
+	}
+}
+
 // TestClearPartyTransientStatuses_ClearsBuff guards that buffs are combat-only —
 // the whole stack is wiped on battle exit.
 func TestClearPartyTransientStatuses_ClearsBuff(t *testing.T) {
@@ -91,11 +120,11 @@ func TestClearPartyTransientStatuses_ClearsBuff(t *testing.T) {
 func TestPartyStatus_BlessedPrecedence(t *testing.T) {
 	blessed := PartyMember{HP: 5}
 	StampPartyBuff(&blessed, SkillBless, SkillEffect{BuffStats: Stats{STR: 1}, BuffTurns: 3})
-	if kind, turns := PartyStatus(blessed); kind != PartyStatusBlessed || turns != 3 {
+	if kind, turns := PartyStatus(&blessed); kind != PartyStatusBlessed || turns != 3 {
 		t.Errorf("blessed member status = (%v,%d), want (Blessed,3)", kind, turns)
 	}
 	blessed.PoisonTurns = 2
-	if kind, _ := PartyStatus(blessed); kind != PartyStatusPoisoned {
+	if kind, _ := PartyStatus(&blessed); kind != PartyStatusPoisoned {
 		t.Errorf("poison+buff status = %v, want Poisoned (threat outranks buff)", kind)
 	}
 	if got := PartyStatusLabel(PartyStatusBlessed); got != "BLESSED" {

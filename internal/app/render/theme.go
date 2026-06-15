@@ -1363,6 +1363,18 @@ func (c *measureCache) measure(font rl.Font, text string, size, spacing float32)
 	return v
 }
 
+// qualityPopupMeasureCache / damagePopupMeasureCache back the floating combat
+// popups, which animate their font size via a throb `scale`. The draw paths
+// measure at the FIXED base size (cache-friendly — few distinct labels) and
+// scale the result linearly, so the per-frame cgo MeasureTextEx round-trip a
+// size-keyed cache would never hit is avoided. The spacing term doesn't scale
+// with size, but for the short popup strings the error is sub-pixel and the
+// text is centered, so it's invisible.
+var (
+	qualityPopupMeasureCache measureCache
+	damagePopupMeasureCache  measureCache
+)
+
 // panelHeadingMeasureCache backs drawPanelHeading, which runs every frame
 // for every visible HUD panel ("COMBAT LOG", "TURN ORDER", "PAUSED", …).
 var panelHeadingMeasureCache measureCache

@@ -1192,7 +1192,9 @@ func FirstPendingLevelUp(party []PartyMember) int {
 // consistent. Keep ANY two-counter contract changes here (e.g. if
 // a future "free respec" path zeroes stats without touching skill
 // points, the badge logic doesn't need to be hunted down).
-func HasUnspentPoints(m PartyMember) bool {
+// Takes *PartyMember to avoid copying the (large) member struct on the
+// per-card-per-frame draw path; read-only.
+func HasUnspentPoints(m *PartyMember) bool {
 	return m.PendingLevelUps > 0 || m.SkillPoints > 0
 }
 
@@ -1243,7 +1245,9 @@ const (
 // Returns PartyStatusNone if the member has no surfaced status.
 // The `turns` return is the remaining counter for any counted
 // status, or 0 for boolean statuses (Down / Ingested / Defending).
-func PartyStatus(m PartyMember) (kind PartyStatusKind, turns int) {
+// Takes *PartyMember to avoid copying the member struct on the per-card-per-
+// frame draw path; read-only.
+func PartyStatus(m *PartyMember) (kind PartyStatusKind, turns int) {
 	switch {
 	case m.HP <= 0:
 		return PartyStatusDown, 0

@@ -1127,7 +1127,10 @@ func DrawQualityPopup(camera rl.Camera3D, g core.GameState, assets Resources) {
 	// rather than a hand-baked larger size literal.
 	baseSize := FontTitle
 	size := baseSize * scale
-	measure := rl.MeasureTextEx(assets.hudFont, label, size, 1.5)
+	// Measure at the fixed base size (cache hits) and scale; the animating
+	// `size` would miss a size-keyed cache and re-shape via cgo every frame.
+	base := qualityPopupMeasureCache.measure(assets.hudFont, label, baseSize, 1.5)
+	measure := rl.NewVector2(base.X*scale, base.Y*scale)
 	x := screenPos.X - measure.X/2
 	y := screenPos.Y - measure.Y - rise
 
@@ -1188,7 +1191,9 @@ func DrawDamagePopups(camera rl.Camera3D, g core.GameState, assets Resources) {
 		// on the standardized size scale).
 		baseSize := FontHeading
 		size := baseSize * scale
-		measure := rl.MeasureTextEx(assets.hudFont, label, size, 1.2)
+		// Measure at the fixed base size (cache hits) and scale; see DrawQualityPopup.
+		base := damagePopupMeasureCache.measure(assets.hudFont, label, baseSize, 1.2)
+		measure := rl.NewVector2(base.X*scale, base.Y*scale)
 		x := screenPos.X - measure.X/2
 		y := screenPos.Y - measure.Y - rise
 

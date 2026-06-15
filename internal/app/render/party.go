@@ -187,7 +187,7 @@ func drawCardScrim(x, y, w, h int32) {
 // drawPartyCard renders a single party member card. The class accent stripe
 // keeps members recognizable at a glance even when names are short. `dim`
 // requests the inactive-member wash (applied last, over the whole card).
-func drawPartyCard(font rl.Font, member core.PartyMember, x, y float32, active, selected, down, dim bool) {
+func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active, selected, down, dim bool) {
 	classCol := classAccent(member.Class)
 	accent := classCol
 	bg := surfacePrimary
@@ -490,7 +490,8 @@ func DrawPartyRibbon(g core.GameState, assets Resources) {
 	// stays at full brightness then rather than greying out wholesale).
 	dimOthers := activeIdx >= 0 && activeIdx < len(g.Party) && core.PartyMemberAvailable(g.Party, activeIdx)
 
-	for i, member := range g.Party {
+	for i := range g.Party {
+		member := &g.Party[i]
 		x := startX + (partyCardW+partyCardGap)*float32(i)
 		// Active / selected glow only paints on a member who can act
 		// AND be targeted this turn — i.e. not ingested. The turn queue

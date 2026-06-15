@@ -692,44 +692,8 @@ func tickPackAI(g *core.GameState) int {
 	if g.EnemiesDisabled {
 		return -1
 	}
-	plans := core.PlanPackSteps(g)
-	engaged := -1
-	for _, plan := range plans {
-		if !plan.Moved {
-			continue
-		}
-		if plan.PackIdx < 0 || plan.PackIdx >= len(g.Packs) {
-			continue
-		}
-		// Only ONE pack engages per tick. A second pack that would also
-		// engage this tick must NOT apply its move — its step lands on the
-		// player's tile, and with the engagement already claimed it would be
-		// left overlapping the player (with no battle of its own) once the
-		// first battle resolves. Hold it on its current tile this tick.
-		if plan.EngagePlayer && engaged >= 0 {
-			continue
-		}
-		p := &g.Packs[plan.PackIdx]
-		// Arm the visual animation BEFORE updating TileX/TileZ so
-		// StartPackStep captures the current pack.X/Z as the "from"
-		// (they still match the previous tile's center). The tile
-		// update below jumps the logical position so collision /
-		// AI planning on subsequent packs in this same tick see the
-		// new occupancy via PlanPackSteps' own reservation.
-		core.StartPackStep(p, plan.NextX, plan.NextZ)
-		p.TileX = plan.NextX
-		p.TileZ = plan.NextZ
-		// Persist the patrol pace direction the planner settled on (it may
-		// have flipped at a wall / leash end). Only patrol packs read this
-		// field, so the write is gated on the mode — other modes leave
-		// plan.PatrolDir zero and shouldn't have it stamped onto them.
-		if p.AI == core.PackAIPatrol {
-			p.PatrolDir = plan.PatrolDir
-		}
-		if plan.EngagePlayer {
-			engaged = plan.PackIdx
-			core.SnapPackToTile(p)
-		}
-	}
-	return engaged
+	// Plan then apply. The apply loop (single-engagement-per-tick rule, tile +
+	// animation advance, patrol-dir persist) lives in core.ApplyPackSteps so the
+	// engagement contract is unit-tested headlessly.
+	return core.ApplyPackSteps(g, core.PlanPackSteps(g))
 }

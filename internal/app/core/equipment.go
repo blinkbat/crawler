@@ -97,7 +97,7 @@ func UnequipItem(m *PartyMember, slot EquipSlotIndex) ItemKind {
 // equipment one time instead of re-walking the Equipped array (with its per-slot
 // ItemInfoOk map lookup) once per reader. Per-stat adds are hand-unrolled to
 // match the inlined SumStats/addStatsFloored folds — this is hot combat math.
-func foldEquipment(m PartyMember) (stats Stats, armor, mdef int) {
+func foldEquipment(m *PartyMember) (stats Stats, armor, mdef int) {
 	for i := 0; i < int(EquipSlotCount); i++ {
 		kind := m.Equipped[i]
 		if kind == ItemNone {
@@ -124,7 +124,7 @@ func foldEquipment(m PartyMember) (stats Stats, armor, mdef int) {
 // stacks on top of base — ApplyArmor never needs to know about the
 // Equipped array directly.
 func EffectiveArmor(m PartyMember) int {
-	_, equipArmor, _ := foldEquipment(m)
+	_, equipArmor, _ := foldEquipment(&m)
 	armor := m.Armor + equipArmor
 	// Active buffs (Stone Skin, War Banner) fold their summed flat Armor on top —
 	// different buffs stack; an un-buffed member has no mods and skips the sum.
@@ -144,7 +144,7 @@ func EffectiveArmor(m PartyMember) int {
 // buff Armor. The separate MDefBonus channel (equip + buff) and Ice Armor
 // add on top. Floor at 0.
 func EffectiveMDef(m PartyMember) int {
-	equipDelta, _, equipMDef := foldEquipment(m)
+	equipDelta, _, equipMDef := foldEquipment(&m)
 	// Active buffs (Stone Skin) fold their summed flat MDef in; Ice Armor's MDef
 	// rides its own separate IceArmorTurns counter — both add only while their
 	// respective ward stands, so an un-warded member adds nothing.
@@ -166,7 +166,7 @@ func EffectiveMDef(m PartyMember) int {
 // back to back, walking the Equipped array and summing m.Buffs twice. Same
 // floor/Ice-Armor rules as the two readers it folds together.
 func EffectiveDefenses(m PartyMember) (armor, mdef int) {
-	equipDelta, equipArmor, equipMDef := foldEquipment(m)
+	equipDelta, equipArmor, equipMDef := foldEquipment(&m)
 	buffStats, buffArmor, buffMDef := SumStatusMods(m.Buffs)
 	armor = m.Armor + equipArmor + buffArmor
 	if armor < 0 {
@@ -196,7 +196,7 @@ func EffectiveStats(m PartyMember) Stats {
 	// uses. The floor (mirroring the 0-clamp AdjustStat applies to base edits)
 	// keeps a negative StatBonus (a cursed / debuff item) from driving an
 	// effective stat below zero into MaxHPFor / damage / accuracy math.
-	equipDelta, _, _ := foldEquipment(m)
+	equipDelta, _, _ := foldEquipment(&m)
 	out := addStatsFloored(m.Stats, equipDelta)
 	// Active stat buffs (Bless, War Banner, Smoke Bomb) fold on top of equipment,
 	// on the same per-stat floor-at-0 rule. Their summed deltas re-render the

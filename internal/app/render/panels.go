@@ -438,7 +438,7 @@ func drawPanelsStats(g core.GameState, assets Resources, body rl.Rectangle) {
 
 		// Status chip — bright pill in the per-status accent
 		// color so afflicted members read at a glance.
-		if kind, turns := core.PartyStatus(m); kind != core.PartyStatusNone {
+		if kind, turns := core.PartyStatus(&m); kind != core.PartyStatusNone {
 			label := partyStatusTurnLabel(kind, turns)
 			lm := measurePanelStatValue(font, label, FontSmall)
 			chipW := lm.X + 20
