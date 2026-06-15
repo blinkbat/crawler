@@ -1486,8 +1486,6 @@ func applyLacerate(g *core.GameState, quality int) bool {
 
 // --- Frost Lance (Wizard, charge magic with reliable Stun on Great+) ---
 
-// --- Frost Lance (Wizard, charge magic with reliable Stun on Great+) ---
-
 func setupFrostLance(g *core.GameState) bool {
 	return setupTargetedEnemyAndPay(g, core.SkillFrostLance, "Frost Lance")
 }

@@ -33,7 +33,6 @@ var foeAnchor = rl.NewVector3(0, battleFormationCenterY, 0)
 var (
 	foePreviewBG     = rl.NewColor(26, 28, 34, 255)
 	foePreviewGround = rl.NewColor(54, 58, 66, 255)
-	foePreviewGrid   = rl.NewColor(72, 78, 88, 255)
 )
 
 // foePreviewCamera is the fixed three-quarter camera the diorama is viewed
@@ -108,7 +107,6 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 	rl.BeginMode3D(cam)
 	rl.DrawPlane(rl.NewVector3(0, 0, 0), rl.NewVector2(14, 14), foePreviewGround)
 	rl.DrawGrid(14, 1)
-	_ = foePreviewGrid
 
 	// Same per-kind placement as the battle roster, via the shared helper so
 	// the preview stays faithful to drawBattlePack's depth/shadow/chevron/

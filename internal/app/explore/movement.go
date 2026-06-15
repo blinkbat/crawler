@@ -701,6 +701,14 @@ func tickPackAI(g *core.GameState) int {
 		if plan.PackIdx < 0 || plan.PackIdx >= len(g.Packs) {
 			continue
 		}
+		// Only ONE pack engages per tick. A second pack that would also
+		// engage this tick must NOT apply its move — its step lands on the
+		// player's tile, and with the engagement already claimed it would be
+		// left overlapping the player (with no battle of its own) once the
+		// first battle resolves. Hold it on its current tile this tick.
+		if plan.EngagePlayer && engaged >= 0 {
+			continue
+		}
 		p := &g.Packs[plan.PackIdx]
 		// Arm the visual animation BEFORE updating TileX/TileZ so
 		// StartPackStep captures the current pack.X/Z as the "from"
@@ -718,7 +726,7 @@ func tickPackAI(g *core.GameState) int {
 		if p.AI == core.PackAIPatrol {
 			p.PatrolDir = plan.PatrolDir
 		}
-		if plan.EngagePlayer && engaged < 0 {
+		if plan.EngagePlayer {
 			engaged = plan.PackIdx
 			core.SnapPackToTile(p)
 		}

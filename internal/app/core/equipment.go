@@ -137,16 +137,20 @@ func EffectiveArmor(m PartyMember) int {
 }
 
 // EffectiveMDef returns the magic-defense value used by
-// ApplyMagicDefense — base derived from WIS plus any MDefBonus on
-// equipped items. Floor at 0.
+// ApplyMagicDefense. The WIS-derived base reads the EFFECTIVE WIS (base +
+// equipped StatBonus.WIS + buff WIS) so a +WIS item or a WIS-raising buff
+// (Bless) hardens magic defense the same way it lifts heal / accuracy /
+// damage through EffectiveStats — symmetric with EffectiveArmor folding
+// buff Armor. The separate MDefBonus channel (equip + buff) and Ice Armor
+// add on top. Floor at 0.
 func EffectiveMDef(m PartyMember) int {
-	_, _, equipMDef := foldEquipment(m)
-	mdef := MagicDefense(m.Stats) + equipMDef
+	equipDelta, _, equipMDef := foldEquipment(m)
 	// Active buffs (Stone Skin) fold their summed flat MDef in; Ice Armor's MDef
 	// rides its own separate IceArmorTurns counter — both add only while their
 	// respective ward stands, so an un-warded member adds nothing.
-	_, _, buffMDef := SumStatusMods(m.Buffs)
-	mdef += buffMDef
+	buffStats, _, buffMDef := SumStatusMods(m.Buffs)
+	eff := addStatsFloored(addStatsFloored(m.Stats, equipDelta), buffStats)
+	mdef := MagicDefense(eff) + equipMDef + buffMDef
 	if m.IceArmorTurns > 0 {
 		mdef += IceArmorMDef
 	}
@@ -162,13 +166,15 @@ func EffectiveMDef(m PartyMember) int {
 // back to back, walking the Equipped array and summing m.Buffs twice. Same
 // floor/Ice-Armor rules as the two readers it folds together.
 func EffectiveDefenses(m PartyMember) (armor, mdef int) {
-	_, equipArmor, equipMDef := foldEquipment(m)
-	_, buffArmor, buffMDef := SumStatusMods(m.Buffs)
+	equipDelta, equipArmor, equipMDef := foldEquipment(m)
+	buffStats, buffArmor, buffMDef := SumStatusMods(m.Buffs)
 	armor = m.Armor + equipArmor + buffArmor
 	if armor < 0 {
 		armor = 0
 	}
-	mdef = MagicDefense(m.Stats) + equipMDef + buffMDef
+	// WIS-derived MDef reads effective WIS (base + equip + buff) — see EffectiveMDef.
+	eff := addStatsFloored(addStatsFloored(m.Stats, equipDelta), buffStats)
+	mdef = MagicDefense(eff) + equipMDef + buffMDef
 	if m.IceArmorTurns > 0 {
 		mdef += IceArmorMDef
 	}

@@ -136,6 +136,15 @@ func (s *State) cellAt(p rl.Vector2) (int, int) {
 	if s.rect.cellPx <= 0 {
 		return -1, -1
 	}
+	// Reject points outside the grid VIEWPORT, not just the grid origin.
+	// When the map is panned/zoomed its tiles can extend visually under the
+	// metadata panel; without this gate a mouse over that panel resolves to a
+	// valid hidden tile, and the hover-driven paths that read hoverX/hoverZ
+	// without their own rect gate (paste-at-cursor, test-from-cursor) would
+	// act on a tile the user can't see.
+	if !pointIn(p, s.rect.grid) {
+		return -1, -1
+	}
 	if p.X < s.rect.gridX || p.Y < s.rect.gridY {
 		return -1, -1
 	}

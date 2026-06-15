@@ -34,6 +34,25 @@ func TestMemberCritChance_RespectsCap(t *testing.T) {
 	}
 }
 
+// TestMemberCritChance_ReadsEffectiveDEX pins that the member-aware crit curve
+// reads EFFECTIVE DEX (base + gear + buffs), not raw m.Stats — so a +DEX buff
+// lifts crit the same way gear does. Guards against a regression that swaps
+// EffectiveStats(m) back to m.Stats inside MemberCritChance (which the bare-stat
+// tests above can't catch).
+func TestMemberCritChance_ReadsEffectiveDEX(t *testing.T) {
+	thief := PartyMember{Class: ClassThief, Stats: Stats{DEX: 6}}
+	base := MemberCritChance(thief, TimingQualityMiss)
+
+	const buffDEX = 5
+	StampPartyBuff(&thief, SkillBless, SkillEffect{BuffStats: Stats{DEX: buffDEX}, BuffTurns: 3})
+	withBuff := MemberCritChance(thief, TimingQualityMiss)
+
+	wantDelta := buffDEX * CritPerDEX
+	if got := withBuff - base; math.Abs(got-wantDelta) > 1e-9 {
+		t.Errorf("buff-DEX crit delta = %.4f, want %.4f (MemberCritChance must read effective DEX)", got, wantDelta)
+	}
+}
+
 // TestPassiveRank_UnlearnedReadsZero confirms the nil-safe / wrong-class read:
 // a member who never bought the node (or carries no TreeRanks at all) reports 0,
 // so the battle hooks no-op without a class guard.

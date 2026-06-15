@@ -352,7 +352,7 @@ func sanitizeLoadedParty(party []PartyMember) {
 		if m.SkillPoints < 0 {
 			m.SkillPoints = 0
 		}
-		// Clear any slot holding an unregistered kind: walkEquipped skips
+		// Clear any slot holding an unregistered kind: foldEquipment skips
 		// unknown kinds, so it would occupy the slot while contributing no
 		// bonuses — a silently dead slot. Empty it so the slot is re-usable.
 		for s := range m.Equipped {
@@ -366,7 +366,7 @@ func sanitizeLoadedParty(party []PartyMember) {
 		// Two-handed weapons occupy BOTH hands. EquipFromInventory enforces
 		// that exclusion at equip time, but a hand-edited save can carry a
 		// two-hander beside an off-hand item — or the same two-hander in both
-		// hands — and walkEquipped sums all slots, so the extra item's
+		// hands — and foldEquipment sums all slots, so the extra item's
 		// bonuses would double-count. Mirror the equip rule: a two-hander in
 		// either hand empties the other (right hand wins when both qualify).
 		switch {

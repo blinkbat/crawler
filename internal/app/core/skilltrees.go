@@ -263,6 +263,13 @@ func init() {
 					if n.MaxRank > 1 && SkillHasNoUpgrades(n.GrantSkill) {
 						panic("core: skill tree node '" + n.ID + "' grants NoUpgrades skill " + SkillName(n.GrantSkill) + " with MaxRank>1 — extra ranks would waste SkillPoints; use a single-rank node")
 					}
+					// The converse: a single-rank node only ever learns the skill at
+					// tier 0, so a granted skill that DOES carry upgrade tiers would
+					// strand them — no rank can ever climb its ladder. Such a skill
+					// must be wired via a multi-rank node (act()), not actOnce().
+					if n.MaxRank <= 1 && !SkillHasNoUpgrades(n.GrantSkill) {
+						panic("core: skill tree node '" + n.ID + "' grants upgradeable skill " + SkillName(n.GrantSkill) + " with MaxRank<=1 — its upgrade tiers would be unreachable; use a multi-rank node")
+					}
 					granted[n.GrantSkill] = true
 				}
 			}
