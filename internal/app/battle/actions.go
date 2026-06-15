@@ -183,6 +183,8 @@ func handleEnemyFirebolt(ctx enemySpellCtx) {
 		enemySpellLog(ctx, "%s burns for %d.", g.Party[ctx.target].Name, dealt)
 	}
 	audio.Play(audio.SoundEnemyHit)
+	// A warded target's Retribution reflects part of the cast back at the caster.
+	tryRetribution(g, ctx.slot, ctx.target, dealt)
 }
 
 // handleEnemyIngest is the mantrap signature: pulls the target out of
@@ -326,12 +328,15 @@ func handleEnemyStoneslam(ctx enemySpellCtx) {
 	hits := 0
 	kills := 0
 	for _, i := range core.AvailablePartyTargets(g.Party) {
-		_, killed := damagePartyMemberDefendable(g, i, raw, core.SkillTagFor(core.SkillStoneslam))
+		dealt, killed := damagePartyMemberDefendable(g, i, raw, core.SkillTagFor(core.SkillStoneslam))
 		core.EnqueuePartyVFX(g, vfxKindFor(core.SkillStoneslam), i)
 		hits++
 		if killed {
 			kills++
 		}
+		// Each warded member reflects its share back at the golem; a reflect can
+		// drop it mid-volley, after which tryRetribution no-ops on the dead caster.
+		tryRetribution(g, ctx.slot, i, dealt)
 	}
 	switch {
 	case hits == 0:
@@ -629,7 +634,7 @@ func beginSingleTargetSkill(g *core.GameState, skill core.SkillID, quality int) 
 	}
 	actor = &g.Party[g.Battle.CurrentParty]
 	actor.AttackBump = core.BumpDuration
-	rawDamage = scaleSkillDamage(actor, skill, quality)
+	rawDamage = applyShadowStep(g, actor, scaleSkillDamage(actor, skill, quality))
 	target = *core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	// resistWIS is the target's WIS, hoisted here so the status-proc callers
 	// don't each re-derive core.EnemyInfoFor(*enemy).Stats.WIS (it doesn't
@@ -877,7 +882,7 @@ func applyAttack(g *core.GameState, quality int) bool {
 	// by damageEnemy is the POST-armor figure; the combat log uses it so
 	// what the player reads matches the HP delta (an Excellent vs an
 	// Amoeba prints "hits for 4", not the 12 we computed before armor).
-	rawDamage := core.ScaleDamage(core.MemberAttackDamage(*attacker, 0), quality)
+	rawDamage := applyShadowStep(g, attacker, core.ScaleDamage(core.MemberAttackDamage(*attacker, 0), quality))
 	crit, _ := rollSkillCrit(g, attacker, core.SkillNone, quality)
 	rawDamage = applyCritMultiplier(rawDamage, crit, false)
 	dealt, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagPhys)
@@ -2012,7 +2017,11 @@ func rollSkillCrit(g *core.GameState, actor *core.PartyMember, skill core.SkillI
 		core.TriggerCombatShake(&g.Battle, core.CombatShakeBigPeak, core.CombatShakeBigDur)
 		return
 	}
-	crit = core.RollCrit(g.Rand(), core.EffectiveStats(*actor), quality)
+	// MemberRollCrit folds the Thief's Lucky Strike passive into the DEX/timing
+	// crit curve (no-op for members without the node), so the one probabilistic
+	// crit path covers the passive too. Backstab's deterministic Excellent crit
+	// above is intentionally not boosted — it's already a guaranteed crit.
+	crit = core.MemberRollCrit(g.Rand(), *actor, quality)
 	if crit {
 		// Crits are the "big hit" moment — punch the camera harder than a
 		// plain well-timed press (overrides the subtle base shake).
@@ -2034,6 +2043,32 @@ func applyCritMultiplier(raw int, crit, double bool) int {
 		out *= core.TierDamageDoubler
 	}
 	return out
+}
+
+// targetActsLater reports whether the enemy in `enemySlot` has NOT yet taken a
+// turn this round — it occupies no queue slot before the cursor, so the acting
+// party member is striking ahead of the target's next turn. Shadow Step reads
+// this to gate its initiative bonus. An enemy that already acted this round
+// (and is queued again later under the ATB carry-over) counts as having acted,
+// so the bonus rewards genuinely getting the jump on a foe, not re-hitting one.
+func targetActsLater(g *core.GameState, enemySlot int) bool {
+	return !actorAppearsBefore(g.Battle.Queue, g.Battle.QueueCursor, core.ActorRef{Index: enemySlot})
+}
+
+// applyShadowStep folds the Thief's Shadow Step passive into an outgoing
+// single-target hit: +ShadowStepBonusPerRank of the raw damage per rank when
+// the actor strikes before the target acts this round. Members without the node
+// read rank 0 and pass through unchanged, so it's safe to fold into the shared
+// single-target damage head (only the Thief's Backstab / Venom Strike / basic
+// attack ever carry a non-zero rank — every other single-target skill belongs
+// to a class that can't own the node). Applied pre-crit so the bonus rides the
+// crit multiplier, the same as the base hit.
+func applyShadowStep(g *core.GameState, actor *core.PartyMember, raw int) int {
+	rank := core.PassiveRank(actor, core.PassiveShadowStep)
+	if rank <= 0 || raw <= 0 || !targetActsLater(g, g.Battle.EnemyIndex) {
+		return raw
+	}
+	return raw + int(float64(raw)*float64(rank)*core.ShadowStepBonusPerRank)
 }
 
 // appendCrit suffixes the combat-log message with " Critical!" when
@@ -2094,6 +2129,14 @@ func damageEnemy(g *core.GameState, slot, rawDamage, quality int, tag core.Skill
 	// mitigateDamage keeps a future caller from accidentally healing an
 	// enemy by passing a signed stat delta.
 	damage := mitigateDamage(rawDamage, tag, enemy.Armor, core.EnemyInfoFor(*enemy).MDef)
+	// Tally the acting member's physical output this turn for Warrior
+	// Bloodthirst. finishActorTurn converts it to lifesteal (only when the
+	// finishing actor is a party member with the node) and zeroes it, so
+	// reflect/counter phys damage dealt on an ENEMY's turn accumulates here but
+	// is discarded. Magic / heal / DoT-tick hits use other tags and don't feed it.
+	if tag == core.SkillTagPhys && damage > 0 {
+		g.Battle.PhysDamageThisTurn += damage
+	}
 	// Flash + HP-floor (shared with the party path + the poison tick) and
 	// the real-hit recoil/wake reaction (shared with the party path).
 	died := core.ApplyFlatDamage(&enemy.HP, &enemy.DamageFlash, damage)
@@ -2772,6 +2815,118 @@ func qualityTag(quality int) string {
 // round-robin cursor exactly as a connecting swing would, so targeting can't
 // drift based on whether the enemy hit) and lunges the sprite so the miss
 // reads. No damage, no status proc, no lifesteal.
+// bloodthirstHeal converts `physDamage` the member just dealt into self-healing
+// for their Warrior Bloodthirst passive: BloodthirstHealPerRank of it per rank,
+// capped at MaxHP. No-op without the node, for a downed / ingested member, or
+// when nothing was dealt. Logs the ACTUAL HP gained so a near-full Warrior
+// doesn't claim an overheal it didn't get. Shared by the end-of-turn tally path
+// (applyBloodthirst) and the off-turn Riposte counter — so "all physical damage
+// dealt" genuinely includes a counter struck on the enemy's turn, which the
+// turn tally discards.
+func bloodthirstHeal(g *core.GameState, member *core.PartyMember, physDamage int) {
+	rank := core.PassiveRank(member, core.PassiveBloodthirst)
+	if rank <= 0 || physDamage <= 0 || member.HP <= 0 || member.Ingested {
+		return
+	}
+	heal := int(float64(physDamage) * float64(rank) * core.BloodthirstHealPerRank)
+	if heal <= 0 {
+		return
+	}
+	before := member.HP
+	core.GainUpTo(&member.HP, member.MaxHP, heal)
+	if gained := member.HP - before; gained > 0 {
+		member.DamageFlash = core.FlashDuration
+		setBattleMessage(g, fmt.Sprintf("%s's bloodthirst restores %d HP.", member.Name, gained))
+	}
+}
+
+// applyBloodthirst banks the physical damage the just-acted party member dealt
+// across their turn (g.Battle.PhysDamageThisTurn, which finishActorTurn zeroes
+// immediately after) as Bloodthirst lifesteal. No-op for an enemy actor. The
+// heal lands once per turn — an AoE sweep's many hits roll up into one tidy heal
+// + one log line rather than dribbling per hit.
+func applyBloodthirst(g *core.GameState, actor core.ActorRef) {
+	if !actor.ValidPartyIndex(g.Party) {
+		return
+	}
+	bloodthirstHeal(g, &g.Party[actor.Index], g.Battle.PhysDamageThisTurn)
+}
+
+// tryRiposte fires the Warrior's Battle Sense counter when they DODGE an enemy
+// basic attack: an immediate phys strike back at the attacker for
+// RiposteDamageMult of the dodger's basic-attack damage. Single-rank node, so
+// no per-rank scaling. No-op for a member without the node or a dead attacker.
+// (The node's "or a Guarded ally is struck" half waits on the Guard cover
+// mechanic, which isn't wired yet — the description names only what fires.)
+func tryRiposte(g *core.GameState, dodger, enemySlot int) {
+	if dodger < 0 || dodger >= len(g.Party) {
+		return
+	}
+	member := &g.Party[dodger]
+	if core.PassiveRank(member, core.PassiveRiposte) <= 0 {
+		return
+	}
+	enemy := core.BattleMemberAt(g, enemySlot)
+	if enemy == nil || !enemy.Alive {
+		return
+	}
+	raw := int(float64(core.MemberAttackDamage(*member, 0)) * core.RiposteDamageMult)
+	if raw < 1 {
+		raw = 1
+	}
+	noun := core.EnemySingularNoun(*enemy)
+	dealt, defeated := damageEnemy(g, enemySlot, raw, core.TimingQualityGood, core.SkillTagPhys)
+	core.EnqueueEnemyVFX(g, core.WeaponHitVFX(core.EquippedWeapon(*member)), enemySlot)
+	if defeated {
+		setBattleMessage(g, fmt.Sprintf("%s ripostes — the %s drops!", member.Name, noun))
+	} else if dealt > 0 {
+		setBattleMessage(g, fmt.Sprintf("%s ripostes the %s for %d.", member.Name, noun, dealt))
+	}
+	// The counter's own physical damage feeds Bloodthirst directly: it lands on
+	// the ENEMY's turn, so the end-of-turn tally (cleared for the enemy actor)
+	// would otherwise drop it.
+	bloodthirstHeal(g, member, dealt)
+}
+
+// tryRetribution reflects a share of the damage an attacker just dealt to a
+// warded party member back at the attacker — the Cleric's Conviction passive,
+// RetributionReflectPerRank of the damage TAKEN per rank, Magic-tagged holy
+// thorns (so the reflect is mitigated by the foe's MDef, not its Armor, and
+// doesn't feed the phys Bloodthirst tally). Called from every enemy
+// damage-to-party site that knows its attacker (basic melee, Firebolt,
+// Stoneslam). No-op when the defender lacks the node, took no damage, or the
+// attacker is already dead — an earlier reflect in an AoE volley can drop it.
+func tryRetribution(g *core.GameState, enemySlot, defender, dealt int) {
+	if dealt <= 0 || defender < 0 || defender >= len(g.Party) {
+		return
+	}
+	// Thorns come from a LIVING ward — a hit that downed the defender draws no
+	// reflection (no dying-corpse retaliation).
+	if g.Party[defender].HP <= 0 {
+		return
+	}
+	rank := core.PassiveRank(&g.Party[defender], core.PassiveRetribution)
+	if rank <= 0 {
+		return
+	}
+	enemy := core.BattleMemberAt(g, enemySlot)
+	if enemy == nil || !enemy.Alive {
+		return
+	}
+	reflect := int(float64(dealt) * float64(rank) * core.RetributionReflectPerRank)
+	if reflect < 1 {
+		return
+	}
+	noun := core.EnemySingularNoun(*enemy)
+	refl, defeated := damageEnemy(g, enemySlot, reflect, core.TimingQualityGood, core.SkillTagMagic)
+	core.EnqueueEnemyVFX(g, core.VFXSmite, enemySlot)
+	if defeated {
+		setBattleMessage(g, fmt.Sprintf("%s's retribution fells the %s!", g.Party[defender].Name, noun))
+	} else if refl > 0 {
+		setBattleMessage(g, fmt.Sprintf("The %s takes %d from %s's retribution.", noun, refl, g.Party[defender].Name))
+	}
+}
+
 func resolveEnemyMiss(g *core.GameState, slot int) {
 	enemy := core.BattleMemberAt(g, slot)
 	if enemy == nil || !enemy.Alive {
@@ -2809,6 +2964,8 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	if core.RollDodge(g.Rand(), core.EffectiveStats(g.Party[target])) {
 		recordQuality(g, defendQuality, target, true)
 		setBattleMessage(g, fmt.Sprintf("%s sidesteps the %s.", g.Party[target].Name, core.EnemySingularNoun(*enemy)))
+		// Riposte: a Warrior with Battle Sense counters the moment they dodge.
+		tryRiposte(g, target, slot)
 		return true
 	}
 	rawDamage := core.EnemyBasicDamage(*enemy)
@@ -2890,6 +3047,10 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 			setBattleMessage(g, fmt.Sprintf("%s's ice armor chills the %s.", g.Party[target].Name, core.EnemySingularNoun(*enemy)))
 		}
 	}
+	// Retribution LAST: the bite landed (lifesteal + ice-armor chill already
+	// resolved on the live attacker), now the warded Cleric's holy thorns lash
+	// back — and may kill the attacker without disturbing the effects above.
+	tryRetribution(g, slot, target, dealt)
 	return true
 }
 

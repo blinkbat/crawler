@@ -512,6 +512,10 @@ func advanceSkippedTurn(g *core.GameState, actor core.ActorRef) {
 	drainNonDamagingEnemyStatuses(g, actor)
 	tickPoisonAfterPartyTurn(g, actor)
 	tickEnemyEndOfTurnDoTs(g, actor)
+	// Symmetry with finishActorTurn: a skipped turn deals no physical damage
+	// today, but zero the tally so a future "phys damage at turn start" source
+	// can't leak a stale figure into the next actor's Bloodthirst.
+	g.Battle.PhysDamageThisTurn = 0
 	if checkEnemyWipeout(g) || checkPartyWipeout(g) {
 		return
 	}
@@ -676,7 +680,14 @@ func finishActorTurn(g *core.GameState) {
 		// shape; same actor-kind dispatch. (The Sleep/Stun skip path
 		// drains these too, so a skipped turn still elapses the duration.)
 		drainNonDamagingPartyStatuses(g, g.Battle.Queue[g.Battle.QueueCursor])
+		// Bloodthirst converts the actor's physical output this turn to lifesteal
+		// (no-op unless that actor is a party member holding the node).
+		applyBloodthirst(g, g.Battle.Queue[g.Battle.QueueCursor])
 	}
+	// Zero the per-turn physical tally now that this turn's lifesteal (if any) is
+	// banked, so the next actor's hits start fresh and an enemy turn's reflect /
+	// counter damage can't leak into the next party member's Bloodthirst.
+	g.Battle.PhysDamageThisTurn = 0
 	if checkEnemyWipeout(g) {
 		return
 	}
@@ -1344,6 +1355,7 @@ func clearBattleResidual(g *core.GameState) {
 	g.Battle.QueueCursor = 0
 	g.Battle.NextRoundQueue = nil
 	g.Battle.Readiness = nil
+	g.Battle.PhysDamageThisTurn = 0
 	g.Battle.ClearTiming()
 	g.Battle.TimingIntro = 0
 	g.Battle.ChargeNeedsRelease = false

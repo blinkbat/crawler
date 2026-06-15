@@ -113,7 +113,7 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 			actOnce("taunt", "Taunt", "Force the target enemy to attack the Warrior next turn.", SkillTaunt),
 			nd("guard", "Guard", "Cover an ally this round; their incoming hits redirect to you.", 3),
 			act("sunder", "Sunder", "Phys hit that pushes the target's turn later.", SkillSunder),
-			nd("riposte", "Riposte", "Passive: counter when you dodge or a Guarded ally is struck.", 1),
+			nd("riposte", "Riposte", "Passive: counter-attack an enemy whose strike you dodge.", 1),
 		}),
 		linearTree("Ancestral Call", "Utility, light heal, protection, summons", []SkillTreeNode{
 			act("second-wind", "Second Wind", "A flat self-heal — catch your breath mid-fight.", SkillSecondWind),

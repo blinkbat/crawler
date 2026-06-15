@@ -1191,6 +1191,15 @@ type Battle struct {
 	// (raised skeletons) default to 0.
 	Readiness map[ActorRef]int
 
+	// PhysDamageThisTurn tallies the physical damage the actor at the queue
+	// cursor has dealt to enemies during their CURRENT turn. finishActorTurn
+	// converts it to Warrior Bloodthirst lifesteal (only for a party actor
+	// holding that passive) and then zeroes it, so it never leaks across turns.
+	// Only SkillTagPhys hits in damageEnemy feed it — magic / heal / DoT-tick
+	// damage and reflect/counter damage dealt on an enemy's turn are discarded.
+	// Turn-lifetime despite sitting by the round-lifetime queue fields.
+	PhysDamageThisTurn int
+
 	// Timed-hit minigame state. Timing drives the bar; TimingFlash holds the
 	// bar visible for a beat after a press; TimingIntro is a pre-bar pause so
 	// the prompt reads. EnemyAttacker tracks the queue slot of an attacking

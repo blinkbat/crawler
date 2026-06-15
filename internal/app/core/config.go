@@ -429,6 +429,31 @@ const (
 	// bare 2; it stacks on top of CritMultiplier where both fire.
 	TierDamageDoubler = 2
 
+	// Passive skill-tree tuning. The five passive nodes (GrantSkill==SkillNone)
+	// fold a per-RANK effect into combat rather than learning a castable skill;
+	// these dials set the per-rank magnitude. core/passives.go reads the node
+	// rank through PassiveRank; the battle pipeline applies the effect at the
+	// matching hook (crit roll, dodge, incoming-hit, single-target damage head,
+	// end-of-turn). All are shares of an existing figure so they scale with the
+	// rest of combat instead of needing their own balance pass.
+	//
+	// LuckyStrikeCritPerRank   — Thief Cutpurse: +crit chance per rank, added to
+	//   the DEX/timing curve and re-clamped at CritCap (3 ranks = +15pp, but the
+	//   cap still bites a high-DEX Thief on Excellent).
+	// BloodthirstHealPerRank   — Warrior Fury: heal this share of the physical
+	//   damage dealt across the whole turn, per rank (3 ranks = 30%).
+	// RetributionReflectPerRank— Cleric Conviction: reflect this share of the
+	//   damage TAKEN back at the attacker, per rank (3 ranks = 60%).
+	// ShadowStepBonusPerRank   — Thief Shadow Arts: +this share of a single-
+	//   target hit's damage per rank when striking before the target acts.
+	// RiposteDamageMult        — Warrior Battle Sense: a dodge counter deals this
+	//   share of the dodger's basic-attack damage (single-rank node, no ladder).
+	LuckyStrikeCritPerRank    = 0.05
+	BloodthirstHealPerRank    = 0.10
+	RetributionReflectPerRank = 0.20
+	ShadowStepBonusPerRank    = 0.15
+	RiposteDamageMult         = 0.75
+
 	// StatusShortenDivisor controls how much WIS shaves off the rolled
 	// duration of an enemy-applied status (Sleep / Poison / Webbed /
 	// Confuse). Each StatusShortenDivisor points of WIS removes one
