@@ -37,6 +37,29 @@ func SnapPlayerToTile(p *Player) {
 	p.Z = TileCenter(p.TileZ)
 }
 
+// CarryProgressionFrom copies the run-state that belongs to the PARTY, not the
+// world, from prev onto g: party + bag + gold + quest journal + step count +
+// weather + RNG + the debug/render runtime toggles. An area transition rebuilds
+// a fresh GameState for the destination map (so packs/chests/fog reset like a
+// save-point) and then calls this so those carried fields don't snap back to
+// the new-state seed (0 gold, starter quests, cleared weather, …). Lives here,
+// beside the GameState struct, so adding a new "travels with the party" field
+// is a one-line edit next to the field instead of a remembered copy buried in
+// the door-transition call site.
+func (g *GameState) CarryProgressionFrom(prev *GameState) {
+	g.Party = prev.Party
+	g.Inventory = prev.Inventory
+	g.Gold = prev.Gold
+	g.Quests = prev.Quests
+	g.StepCount = prev.StepCount
+	g.Weather = prev.Weather
+	g.RNG = prev.RNG
+	g.DebugOverlay = prev.DebugOverlay
+	g.EnemiesDisabled = prev.EnemiesDisabled
+	g.EasyBattleQuit = prev.EasyBattleQuit
+	g.RenderLogEnabled = prev.RenderLogEnabled
+}
+
 func NewGameState(area AreaDefinition) GameState {
 	// Defensive coord clamp. AreaFromMapFile already validates disk loads,
 	// but the editor's F5 path can build a GameState directly from in-memory

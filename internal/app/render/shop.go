@@ -99,7 +99,7 @@ func shopRows(g *core.GameState) []shopRow {
 			})
 		}
 		return rows
-	default: // ShopTabBuy
+	case core.ShopTabBuy:
 		catalog := core.ShopCatalog()
 		rows := make([]shopRow, 0, len(catalog))
 		for _, def := range catalog {
@@ -110,6 +110,10 @@ func shopRows(g *core.GameState) []shopRow {
 			})
 		}
 		return rows
+	default:
+		// A new ShopTab that forgets a rows case fails loudly instead of
+		// silently rendering the Buy list — mirrors core.ShopTabLabel.
+		panic("render: shopRows missing case for ShopTab")
 	}
 }
 

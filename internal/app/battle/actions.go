@@ -194,11 +194,10 @@ var targetedSetupConfig = map[core.SkillID]targetedSetupKind{
 // ensureAlive*OrCancel in each apply.
 func runTargetedSetup(g *core.GameState, skill core.SkillID) bool {
 	cfg := targetedSetupConfig[skill]
-	label := core.SkillName(skill)
 	if cfg.ally {
-		return setupTargetedAllyAndPay(g, skill, label, cfg.deadMsg)
+		return setupTargetedAllyAndPay(g, skill, cfg.deadMsg)
 	}
-	return setupTargetedEnemyAndPay(g, skill, label)
+	return setupTargetedEnemyAndPay(g, skill)
 }
 
 // targetedSetup binds runTargetedSetup to one skill, producing the actionSetup
@@ -275,11 +274,10 @@ func enemySpellLog(ctx enemySpellCtx, rest string, args ...any) {
 func enemySpellDamage(def core.EnemyDefinition, effect core.SkillEffect) int {
 	// Scale by the global enemy-difficulty dial (same seam as basic-attack /
 	// spawn HP) so casters and AoE foes get harder in lockstep, then floor at 1.
-	raw := core.ScaleEnemyDifficulty(def.SpellPower + effect.Damage)
-	if raw < 1 {
-		raw = 1
-	}
-	return raw
+	// ScaleEnemyDifficulty already floors any POSITIVE base at 1; the max here
+	// additionally forces a >=1 chip when the base (SpellPower+Damage) is <= 0,
+	// which that helper intentionally leaves at 0.
+	return max(core.ScaleEnemyDifficulty(def.SpellPower+effect.Damage), 1)
 }
 
 // handleEnemyFirebolt applies the goblin-mage style ranged magic
@@ -554,13 +552,13 @@ func canAffordSkill(actor core.PartyMember, skill core.SkillID) bool {
 // chargeMP is the shared "spend the skill's MP cost or refuse" helper
 // used by every MP-spending skill's setup function. Returns true and
 // deducts when the actor has enough MP; returns false and flashes
-// "{label} needs more MP." otherwise. label is the human-readable
-// skill name shown in the status (e.g. "Prayer", "Firebolt").
+// "{skill name} needs more MP." otherwise. The status label is derived
+// from core.SkillName(skill) so it can't drift from the registry name.
 //
 // Previously every setup function inlined the same three-line check
 // + deduct; routing through here means a future "VIT also affects MP
 // pool" or "MP refunds on cancel" change is one helper.
-func chargeMP(g *core.GameState, skill core.SkillID, label string) bool {
+func chargeMP(g *core.GameState, skill core.SkillID) bool {
 	// Debug "all skills" makes every cast free — pairs with the skill menu
 	// listing skills the member never paid the MP to learn. This is the single
 	// MP chokepoint (setupTargetedEnemyAndPay routes through here too), so the
@@ -570,7 +568,7 @@ func chargeMP(g *core.GameState, skill core.SkillID, label string) bool {
 	}
 	actor := &g.Party[g.Battle.CurrentParty]
 	if !core.SpendSkillMP(actor, skill) {
-		setBattleStatus(g, label+" needs more MP.")
+		setBattleStatus(g, core.SkillName(skill)+" needs more MP.")
 		return false
 	}
 	return true
@@ -1060,7 +1058,7 @@ func applyAttack(g *core.GameState, quality int) bool {
 // --- Swipe (Warrior, hits all enemies in the battle group) ---
 
 func setupSwipe(g *core.GameState) bool {
-	return chargeMP(g, core.SkillSwipe, "Swipe")
+	return chargeMP(g, core.SkillSwipe)
 }
 
 func applySwipe(g *core.GameState, quality int) bool {
@@ -1101,7 +1099,7 @@ func applySwipe(g *core.GameState, quality int) bool {
 		triggerBigShake(g)
 	}
 	if enemiesHit == 0 || passes == 0 {
-		setBattleMessage(g, aoeEmptyMessage("Swipe", "catches only air"))
+		setBattleMessage(g, aoeEmptyMessage(core.SkillName(core.SkillSwipe), "catches only air"))
 	} else {
 		setBattleMessage(g, appendCrit(swipeMessage(actor.Name, enemiesHit, quality), crit))
 	}
@@ -1133,7 +1131,7 @@ func multiPressPasses(t core.TimingState, quality int) int {
 // no-selection message is shared; deadMsg is the per-skill refusal for a downed
 // target (Prayer "cannot revive", Cleanse/Renewal "can't reach the fallen") so
 // a future single-ally heal can't drift on the validation shape.
-func setupTargetedAllyAndPay(g *core.GameState, skill core.SkillID, label, deadMsg string) bool {
+func setupTargetedAllyAndPay(g *core.GameState, skill core.SkillID, deadMsg string) bool {
 	if !partyIndexValid(g, g.Battle.PartyTarget) {
 		setBattleStatus(g, "No ally selected.")
 		return false
@@ -1142,7 +1140,7 @@ func setupTargetedAllyAndPay(g *core.GameState, skill core.SkillID, label, deadM
 		setBattleStatus(g, deadMsg)
 		return false
 	}
-	return chargeMP(g, skill, label)
+	return chargeMP(g, skill)
 }
 
 // --- Prayer (Cleric, heals an ally) ---
@@ -1391,20 +1389,20 @@ func applyCrushingBlow(g *core.GameState, quality int) bool {
 // --- Whirlwind (Warrior, charge AoE phys) ---
 
 func setupWhirlwind(g *core.GameState) bool {
-	return chargeMP(g, core.SkillWhirlwind, "Whirlwind")
+	return chargeMP(g, core.SkillWhirlwind)
 }
 
 func applyWhirlwind(g *core.GameState, quality int) bool {
 	// SkillWhirlwind carries no Burn/Poison, so applyAoEStatusSkill's per-target
 	// status rolls short-circuit (chance 0) — a pure AoE damage cast. Shares the
 	// one AoE body so the damage/crit/shake/log path can't drift.
-	return applyAoEStatusSkill(g, core.SkillWhirlwind, "Whirlwind", "hits", "catches only air", quality)
+	return applyAoEStatusSkill(g, core.SkillWhirlwind, "hits", "catches only air", quality)
 }
 
 // --- Mass Mend (Cleric, charge AoE heal) ---
 
 func setupMassMend(g *core.GameState) bool {
-	return chargeMP(g, core.SkillMassMend, "Mass Mend")
+	return chargeMP(g, core.SkillMassMend)
 }
 
 func applyMassMend(g *core.GameState, quality int) bool {
@@ -1437,7 +1435,7 @@ func applyMassMend(g *core.GameState, quality int) bool {
 func setupBless(g *core.GameState) bool {
 	// No target gate: Bless always hits the whole living party, so the only
 	// setup step is committing the MP (mirrors Mass Mend's chargeMP setup).
-	return chargeMP(g, core.SkillBless, "Bless")
+	return chargeMP(g, core.SkillBless)
 }
 
 // applyBless stamps the tier-folded stat buff on every living, non-ingested
@@ -1615,7 +1613,7 @@ func applyFrostLance(g *core.GameState, quality int) bool {
 // --- Arc Bolt (Wizard, sequence-tap AoE magic) ---
 
 func setupArcBolt(g *core.GameState) bool {
-	return chargeMP(g, core.SkillArcBolt, "Arc Bolt")
+	return chargeMP(g, core.SkillArcBolt)
 }
 
 func applyArcBolt(g *core.GameState, quality int) bool {
@@ -1623,7 +1621,7 @@ func applyArcBolt(g *core.GameState, quality int) bool {
 	// Arc Bolt's T3 "+15% Burn" delta actually procs per arc target — the
 	// previous applyAoEDamage path silently dropped it. T0-T2 carry BurnChance
 	// 0, so the per-target roll short-circuits and they're unchanged.
-	return applyAoEStatusSkill(g, core.SkillArcBolt, "Arc Bolt", "arcs across", "dissipates with no target", quality)
+	return applyAoEStatusSkill(g, core.SkillArcBolt, "arcs across", "dissipates with no target", quality)
 }
 
 // --- AoE skills (shared body; per-target status when the skill carries it) ---
@@ -1637,7 +1635,8 @@ func applyArcBolt(g *core.GameState, quality int) bool {
 // chance 0, so the roll short-circuits and it's pure damage; only the status
 // the skill actually carries can proc. The lower-level applyAoEDamage remains
 // for the multi-PASS Swipe (which loops it per press).
-func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, skillNoun, hitVerb, emptyVerb string, quality int) bool {
+func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, hitVerb, emptyVerb string, quality int) bool {
+	skillNoun := core.SkillName(skill)
 	actor := beginPartyAction(g)
 	effect := core.EffectiveSkillEffect(actor, skill)
 	damage := scaleSkillDamage(actor, skill, quality)
@@ -1692,22 +1691,22 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, skillNoun, hitVe
 // --- Fireball (Wizard, charge AoE fire + per-target Burn) ---
 
 func setupFireball(g *core.GameState) bool {
-	return chargeMP(g, core.SkillFireball, "Fireball")
+	return chargeMP(g, core.SkillFireball)
 }
 
 func applyFireball(g *core.GameState, quality int) bool {
-	return applyAoEStatusSkill(g, core.SkillFireball, "Fireball", "engulfs", "fizzles with no target", quality)
+	return applyAoEStatusSkill(g, core.SkillFireball, "engulfs", "fizzles with no target", quality)
 }
 
 func setupConeOfCold(g *core.GameState) bool {
-	return chargeMP(g, core.SkillConeOfCold, "Cone of Cold")
+	return chargeMP(g, core.SkillConeOfCold)
 }
 
 // applyConeOfCold is the AoE Frostbite: applyAoEStatusSkill deals the frost
 // sweep and stamps the guaranteed per-target SPD chill (the BuffTurns>0 branch
 // in that shared body) on every surviving enemy.
 func applyConeOfCold(g *core.GameState, quality int) bool {
-	return applyAoEStatusSkill(g, core.SkillConeOfCold, "Cone of Cold", "sweeps over", "billows with no target", quality)
+	return applyAoEStatusSkill(g, core.SkillConeOfCold, "sweeps over", "billows with no target", quality)
 }
 
 // --- Sunder (Warrior, charge phys + ATB shove) ---
@@ -1760,7 +1759,7 @@ func applyTaunt(g *core.GameState, quality int) bool {
 // --- War Banner (Warrior, press party-wide STR/VIT rally) ---
 
 func setupWarBanner(g *core.GameState) bool {
-	return chargeMP(g, core.SkillWarBanner, "War Banner")
+	return chargeMP(g, core.SkillWarBanner)
 }
 
 func applyWarBanner(g *core.GameState, quality int) bool {
@@ -1838,7 +1837,7 @@ func applyAegis(g *core.GameState, quality int) bool {
 // --- Smoke Bomb (Thief, press party evasion + enemy accuracy loss) ---
 
 func setupSmokeBomb(g *core.GameState) bool {
-	return chargeMP(g, core.SkillSmokeBomb, "Smoke Bomb")
+	return chargeMP(g, core.SkillSmokeBomb)
 }
 
 // applySmokeBomb buffs the whole party's DEX (evasion) and saps every living
@@ -1865,7 +1864,7 @@ func applySmokeBomb(g *core.GameState, quality int) bool {
 // --- Ice Armor (Wizard, charge self frost ward) ---
 
 func setupIceArmor(g *core.GameState) bool {
-	return chargeMP(g, core.SkillIceArmor, "Ice Armor")
+	return chargeMP(g, core.SkillIceArmor)
 }
 
 // applyIceArmor sheathes the caster in frost: while IceArmorTurns runs they gain
@@ -1964,11 +1963,11 @@ func forcedTauntTarget(g *core.GameState) (int, bool) {
 // --- Poison Cloud (Thief, sequence AoE toxin + per-target Poison) ---
 
 func setupPoisonCloud(g *core.GameState) bool {
-	return chargeMP(g, core.SkillPoisonCloud, "Poison Cloud")
+	return chargeMP(g, core.SkillPoisonCloud)
 }
 
 func applyPoisonCloud(g *core.GameState, quality int) bool {
-	return applyAoEStatusSkill(g, core.SkillPoisonCloud, "Poison Cloud", "blankets", "disperses with no target", quality)
+	return applyAoEStatusSkill(g, core.SkillPoisonCloud, "blankets", "disperses with no target", quality)
 }
 
 // --- Cleanse (Cleric, press single-ally status cure) ---
@@ -1994,7 +1993,7 @@ func applyCleanse(g *core.GameState, quality int) bool {
 
 func setupSecondWind(g *core.GameState) bool {
 	// No target pick (ActionMenu, self-heal) — just commit the MP.
-	return chargeMP(g, core.SkillSecondWind, "Second Wind")
+	return chargeMP(g, core.SkillSecondWind)
 }
 
 func applySecondWind(g *core.GameState, quality int) bool {
@@ -2053,13 +2052,13 @@ func applyRenewal(g *core.GameState, quality int) bool {
 // "wakefulness check" or
 // "concentration roll" lands in one helper.
 //
-// label is the human name passed through to chargeMP's status
-// message ("Firebolt needs more MP." etc.).
-func setupTargetedEnemyAndPay(g *core.GameState, skill core.SkillID, label string) bool {
+// chargeMP derives the "Firebolt needs more MP." status label from
+// core.SkillName(skill), so there's no per-skill name to pass through.
+func setupTargetedEnemyAndPay(g *core.GameState, skill core.SkillID) bool {
 	if !setupTargetedEnemy(g) {
 		return false
 	}
-	return chargeMP(g, skill, label)
+	return chargeMP(g, skill)
 }
 
 // scaleSkillDamage returns the quality-scaled raw damage figure for

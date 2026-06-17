@@ -53,6 +53,11 @@ func panelsMapFooterText(zoom int) string {
 	return panelsMapFooterCache.text
 }
 
+// panelsMapFooterMeasureCache memoizes the footer string's width so the hint
+// bar's start X doesn't re-shape the text every frame the Map tab is open —
+// matching the rest of the package's per-frame measures.
+var panelsMapFooterMeasureCache measureCache
+
 // panelTabDrawers dispatches by tab index to the per-tab body drawer.
 // Indexed array (not a map) sized [PanelTabCount], so adding a 6th tab is a
 // single new PanelTab const + a new drawer + its slot here. The array SIZE is
@@ -358,9 +363,7 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 		// here" gilt the tab underline / armed-skill spine use, scaled
 		// up to an unmistakable full-card border. Rounded to match the
 		// glass body's own corner radius so it hugs the pane.
-		rect := rl.NewRectangle(col.X, col.Y, col.Width, col.Height)
-		roundness := fixedRoundnessFor(int32(col.Width), int32(col.Height), cornerRadius)
-		rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, 3, giltBright)
+		drawGiltFocusRing(rl.NewRectangle(col.X, col.Y, col.Width, col.Height))
 	}
 
 	innerX, innerW := memberCardInner(col)
@@ -1471,7 +1474,7 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 	footerY := body.Y + body.Height - 20
 	footer := panelsMapFooterText(zoom)
 	drawTextWithShadow(font, footer, body.X, footerY, FontSmall, textHint)
-	footerW := rl.MeasureTextEx(font, footer, FontSmall, canonicalSpacing(FontSmall)).X
+	footerW := panelsMapFooterMeasureCache.measure(font, footer, FontSmall, canonicalSpacing(FontSmall)).X
 	DrawHintBarLeft(font, []HintSeg{Hint("Pan", GlyphLeftRight, GlyphUpDown), Hint("Zoom", GlyphA)}, body.X+footerW+hintSegGap, footerY, FontSmall)
 }
 

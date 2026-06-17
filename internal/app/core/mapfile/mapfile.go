@@ -916,7 +916,7 @@ func parseSize(val string) (int, int, error) {
 
 func parseStart(val string) (int, int, string, error) {
 	fields := strings.Fields(val)
-	if len(fields) != 3 {
+	if len(fields) != startFields {
 		return 0, 0, "", fmt.Errorf("start must be 'X Z facing', got %q", val)
 	}
 	x, err1 := strconv.Atoi(fields[0])
@@ -943,10 +943,12 @@ func IsFacingName(s string) bool {
 }
 
 // parseIntField parses a numeric field with the canonical "line N:
-// bad <name> %q" error wrap that every row decoder (packs, doors,
-// chests, dimensions, start coords) used to inline. Six near-
-// identical `strconv.Atoi` + `fmt.Errorf("line %d: bad %s %q", ...)`
-// blocks collapse into one helper.
+// bad <name> %q" error wrap that the entity-row decoders (packs, doors,
+// chests, crystals, custom enemy) inline. Several near-identical
+// `strconv.Atoi` + `fmt.Errorf("line %d: bad %s %q", ...)` blocks
+// collapse into one helper. The header rows (parseSize / parseStart)
+// deliberately keep their own validation — they check shape (WxH) and a
+// facing name, not just an integer, and their callers add the line wrap.
 func parseIntField(s, name string, lineNo int) (int, error) {
 	v, err := strconv.Atoi(s)
 	if err != nil {
@@ -969,6 +971,7 @@ const (
 	doorFields       = 7 // + trailing style column
 	chestFieldsMin   = 3 // "item[,item...] X Z" — item token may span fields, so >= not ==
 	crystalFields    = 2 // "X Z"
+	startFields      = 3 // header "start: X Z facing"
 )
 
 // Per-section encode format strings. Each is the fmt.Fprintf format the

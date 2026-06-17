@@ -6,6 +6,8 @@ import (
 	"sync"
 	"syscall"
 	"unsafe"
+
+	"crawler/internal/app/core"
 )
 
 // Windows controller rumble via XInput. raylib's GLFW desktop backend has NO
@@ -20,7 +22,10 @@ import (
 // disconnected index returns ERROR_DEVICE_NOT_CONNECTED and does nothing, so an
 // unplugged or non-XInput pad is a safe no-op rather than an error.
 
-const xinputPrimaryUser = 0
+// xinputPrimaryUser is the XInput user index we vibrate. Derived from the
+// shared gamepadID (raylib's primary slot) so the two can't drift if multi-pad
+// support ever lands — XInput user N and raylib gamepad N are the same pad.
+const xinputPrimaryUser = uint32(gamepadID)
 
 var (
 	xinputOnce     sync.Once
@@ -67,11 +72,7 @@ func setGamepadRumble(level float32) {
 	if !xinputReady {
 		return
 	}
-	if level < 0 {
-		level = 0
-	} else if level > 1 {
-		level = 1
-	}
+	level = core.Clamp(level, 0, 1)
 	speed := uint16(level * xinputMaxMotorSpeed)
 	vib := xinputVibration{leftMotor: speed, rightMotor: speed}
 	// LazyProc.Call keeps vib alive across the call; the uintptr(unsafe.Pointer)

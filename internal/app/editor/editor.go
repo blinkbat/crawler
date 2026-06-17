@@ -537,6 +537,11 @@ const (
 	// drawn over a struck target. Pure preview so the author can see the symbols
 	// that normally flash for a fraction of a second mid-attack. See hitglyphs.go.
 	modalHitGlyphs
+	// modalObjectView is the read-only Object Browser: a paged 3D gallery of every
+	// placeable decor + prop, each rendered as a live thumbnail (lit, ground-
+	// shadowed, animated) so the author can spot-check the whole object set at a
+	// glance without stamping them onto a map. Pure preview. See objectview.go.
+	modalObjectView
 	// modalCount is the count sentinel for the modalKind enum — used by
 	// the modalHandlers init assert in draw.go to walk every legal
 	// value and confirm the dispatch table is complete. Keep this row
@@ -814,6 +819,11 @@ type State struct {
 	// slider change / Revert / foe cycle / open). See foeview.go's asset* helpers.
 	assetCursor       int
 	assetPreviewStale bool
+
+	// objectViewPage is the current page of the Object Browser gallery
+	// (modalObjectView) — a paged grid of every placeable decor/prop thumbnail.
+	// Reset to 0 on open; the wheel / arrow keys page through. See objectview.go.
+	objectViewPage int
 
 	pending pendingAction
 

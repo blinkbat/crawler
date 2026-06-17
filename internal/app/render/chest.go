@@ -169,8 +169,8 @@ func DrawChestModal(g *core.GameState, assets Resources) {
 	// "TREASURE" was tautological. Card height now budgets for rows +
 	// Take All + footer only.
 	cardH := int32(48 + rowH*(int32(len(stacks))+1) + 32)
-	if cardH < 200 {
-		cardH = 200
+	if cardH < modalMinCardH {
+		cardH = modalMinCardH
 	}
 	card := drawModalScaffold(font, overlayCardWidthSmall, cardH, "")
 	cardX, cardY := int32(card.X), int32(card.Y)

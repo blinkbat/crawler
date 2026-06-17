@@ -887,7 +887,7 @@ func drawDialogNodeEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawModalHeaderAt(font, theme, l.card, "NODE "+n.ID, theme.BorderActive)
 
 	drawLabel(font, "Speaker (click to choose)", labelAbove(l.speakerBtn))
-	drawButton(font, l.speakerBtn, core.DialogSpeakerName(n.SpeakerID)+"  ▼", false)
+	drawButton(font, l.speakerBtn, core.DialogSpeakerName(n.SpeakerID)+dropdownArrowSuffix, false)
 
 	drawLabel(font, "Text", labelAbove(l.textField))
 	drawTextField(font, l.textField, n.Text, s.focus == focusDialogNodeText)
@@ -901,7 +901,7 @@ func drawDialogNodeEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawButton(font, l.menuToggle, "Menu node (auto-advance): "+render.OnOffLabel(n.IsMenuNode), n.IsMenuNode)
 
 	drawLabel(font, "End action when this line resolves (click to edit)", labelAbove(l.actionBtn))
-	drawButton(font, l.actionBtn, "Action: "+dialogActionLabel(n.EndAction)+"  ▼", n.EndAction != nil)
+	drawButton(font, l.actionBtn, "Action: "+dialogActionLabel(n.EndAction)+dropdownArrowSuffix, n.EndAction != nil)
 
 	drawLabel(font, fmt.Sprintf("Choices (%d) — Up/Down select, Enter edit", len(n.Choices)),
 		rl.NewRectangle(l.card.X+modalContentInset, l.actionBtn.Y+l.actionBtn.Height+10, l.card.Width, 14))
@@ -1137,7 +1137,7 @@ func drawDialogChoiceEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawTextField(font, l.nextField, c.NextNodeID, s.focus == focusDialogChoiceNext)
 
 	drawLabel(font, "End action on pick (click to edit)", labelAbove(l.actionBtn))
-	drawButton(font, l.actionBtn, "Action: "+dialogActionLabel(c.EndAction)+"  ▼", c.EndAction != nil)
+	drawButton(font, l.actionBtn, "Action: "+dialogActionLabel(c.EndAction)+dropdownArrowSuffix, c.EndAction != nil)
 
 	header := rl.NewRectangle(l.card.X+modalContentInset, l.actionBtn.Y+l.actionBtn.Height+8, l.card.Width, 14)
 	drawLabel(font, fmt.Sprintf("Conditions (%d) — gate selectability; Up/Down select, Enter edit", len(c.Conditions)), header)
@@ -1421,7 +1421,7 @@ func drawDialogActionEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawModalHeaderAt(font, theme, l.card, title, theme.BorderActive)
 
 	drawLabel(font, "Action (click to choose)", labelAbove(l.kindBtn))
-	drawButton(font, l.kindBtn, dialogActionLabel(a)+"  ▼", a != nil)
+	drawButton(font, l.kindBtn, dialogActionLabel(a)+dropdownArrowSuffix, a != nil)
 
 	if a != nil {
 		switch a.Kind {
@@ -1549,7 +1549,7 @@ func drawDialogCondEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawModalHeaderAt(font, theme, l.card, "CONDITION", theme.BorderActive)
 
 	drawLabel(font, "Kind (click to choose)", labelAbove(l.kindBtn))
-	drawButton(font, l.kindBtn, condKindLabel(c.Kind)+"  ▼", false)
+	drawButton(font, l.kindBtn, condKindLabel(c.Kind)+dropdownArrowSuffix, false)
 
 	switch c.Kind {
 	case core.DialogCondGold:
@@ -1559,10 +1559,10 @@ func drawDialogCondEditModal(s *State, font rl.Font, theme render.Theme) {
 		drawLabel(font, "Quest id", labelAbove(l.row1))
 		drawTextField(font, l.row1, c.QuestID, s.focus == focusDialogCondQuestID)
 		drawLabel(font, "Required status (click to choose)", labelAbove(l.row2))
-		drawButton(font, l.row2, questStatusLabel(c.QuestStatus)+"  ▼", false)
+		drawButton(font, l.row2, questStatusLabel(c.QuestStatus)+dropdownArrowSuffix, false)
 	case core.DialogCondFoeKilled:
 		drawLabel(font, "Foe (click to choose)", labelAbove(l.row1))
-		drawButton(font, l.row1, core.FoeKindName(c.FoeKind)+"  ▼", false)
+		drawButton(font, l.row1, core.FoeKindName(c.FoeKind)+dropdownArrowSuffix, false)
 		drawLabel(font, "Kills required (0 = at least one)", labelAbove(l.row2))
 		drawTextField(font, l.row2, numFieldText(s.focus == focusDialogCondFoeKills, c.FoeKills, s.dialogNumBuf), s.focus == focusDialogCondFoeKills)
 	case core.DialogCondTileVisited:
@@ -1801,14 +1801,14 @@ func drawDialogTriggerEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawModalHeaderAt(font, theme, l.card, "TRIGGER "+t.ID, theme.BorderActive)
 
 	drawLabel(font, "Kind (click to choose)", labelAbove(l.kindBtn))
-	drawButton(font, l.kindBtn, triggerKindLabel(t.Kind)+"  ▼", false)
+	drawButton(font, l.kindBtn, triggerKindLabel(t.Kind)+dropdownArrowSuffix, false)
 
 	drawLabel(font, "Start dialog (click to choose)", labelAbove(l.dialogBtn))
 	dlabel := t.DialogID
 	if dlabel == "" {
 		dlabel = "(pick a dialog)"
 	}
-	drawButton(font, l.dialogBtn, dlabel+"  ▼", false)
+	drawButton(font, l.dialogBtn, dlabel+dropdownArrowSuffix, false)
 
 	drawButton(font, l.onceToggle, "Fire once (M): "+render.OnOffLabel(t.Once), t.Once)
 
@@ -1820,7 +1820,7 @@ func drawDialogTriggerEditModal(s *State, font rl.Font, theme render.Theme) {
 		drawTextField(font, l.row2, numFieldText(s.focus == focusDialogTrigTileZ, t.TileZ, s.dialogNumBuf), s.focus == focusDialogTrigTileZ)
 	case core.DialogTriggerFoeKilled:
 		drawLabel(font, "Foe (click to choose)", labelAbove(l.row1))
-		drawButton(font, l.row1, core.FoeKindName(t.FoeKind)+"  ▼", false)
+		drawButton(font, l.row1, core.FoeKindName(t.FoeKind)+dropdownArrowSuffix, false)
 		drawLabel(font, "Kills required (0 = at least one)", labelAbove(l.row2))
 		drawTextField(font, l.row2, numFieldText(s.focus == focusDialogTrigFoeKills, t.FoeKills, s.dialogNumBuf), s.focus == focusDialogTrigFoeKills)
 	}

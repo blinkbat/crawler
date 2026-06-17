@@ -72,19 +72,33 @@ const (
 // automatically.
 const WaveShapeCount = int(waveShapeCount)
 
-// WaveShapeName returns a human label for a WaveShape value — used
-// by the sound-editor row that exposes the shape picker.
-func WaveShapeName(w WaveShape) string {
-	switch w {
-	case WaveSquare:
-		return "Square"
-	case WaveTriangle:
-		return "Triangle"
-	case WaveSaw:
-		return "Saw"
-	default:
-		return "Sine"
+// waveShapeNames is the per-shape human label, indexed by WaveShape. A
+// [waveShapeCount]string array (not a switch with a default) so a fifth
+// shape leaves an empty slot the init assert catches — the editor's
+// picker can't silently mislabel a new shape as "Sine".
+var waveShapeNames = [waveShapeCount]string{
+	WaveSine:     "Sine",
+	WaveSquare:   "Square",
+	WaveTriangle: "Triangle",
+	WaveSaw:      "Saw",
+}
+
+func init() {
+	for s := WaveShape(0); s < waveShapeCount; s++ {
+		if waveShapeNames[s] == "" {
+			panic("wavsynth: waveShapeNames missing label for a WaveShape")
+		}
 	}
+}
+
+// WaveShapeName returns a human label for a WaveShape value — used
+// by the sound-editor row that exposes the shape picker. An out-of-range
+// value (e.g. a stale persisted index) falls back to the Sine label.
+func WaveShapeName(w WaveShape) string {
+	if w < 0 || int(w) >= len(waveShapeNames) {
+		return waveShapeNames[WaveSine]
+	}
+	return waveShapeNames[w]
 }
 
 // SynthShape is the rich procedural sweep primitive. Generalises

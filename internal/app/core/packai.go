@@ -435,7 +435,7 @@ func wanderStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int
 	cardinals := cardinalSteps()
 	// Shuffle in place via Fisher-Yates against the shared RNG so the
 	// wander direction is independent of FacingVector's array order.
-	for i := 3; i > 0; i-- {
+	for i := len(cardinals) - 1; i > 0; i-- {
 		j := g.Rand().Intn(i + 1)
 		cardinals[i], cardinals[j] = cardinals[j], cardinals[i]
 	}

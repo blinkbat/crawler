@@ -327,7 +327,7 @@ func (t treeModel) variance(seed uint32) treeVariance {
 		// doesn't punch through the ceiling on indoor maps.
 		heightStretch: 1 + frac(byte(mix>>4))*0.28,
 		dropIdx:       -1,
-		swayPhase:     frac(byte(mix>>22)) * 6.283185,
+		swayPhase:     frac(byte(mix>>22)) * tau,
 		parts:         make([]treePartVariance, len(t.parts)),
 	}
 
@@ -436,11 +436,11 @@ func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32
 		offX := part.offset.X + pv.nudgeX
 		offZ := part.offset.Z + pv.nudgeZ
 		// Canopy lumps lean in the wind; higher lumps lean more
-		// than lower lumps (canopyLean scales the sway by the
-		// part's Y offset relative to a reference height) so the
-		// crown drifts further than the under-canopy mass — the
-		// "tree breathing in a breeze" feel rather than the whole
-		// silhouette sliding sideways. Trunk and root are skipped.
+		// than lower lumps (the `lean` factor below scales the sway by
+		// the part's Y offset, capped at 1.4) so the crown drifts
+		// further than the under-canopy mass — the "tree breathing in a
+		// breeze" feel rather than the whole silhouette sliding
+		// sideways. Trunk and root are skipped.
 		offsetY := yOffset
 		if pv.isCanopy {
 			lean := part.offset.Y / 3.0
@@ -579,7 +579,7 @@ func (p propModel) draw(center rl.Vector3, scale, yaw float32) {
 		swayTime := float32(rl.GetTime())
 		// Position-derived phase: hash the rounded tile coords so each
 		// prop tile lands on a different point in the sway cycle.
-		posPhase := float32(math.Mod(float64(center.X)*0.73+float64(center.Z)*1.31, 6.283185))
+		posPhase := float32(math.Mod(float64(center.X)*0.73+float64(center.Z)*1.31, tau))
 		swayX = float32(math.Sin(float64(swayTime*1.10+posPhase))) * 0.035
 		swayZ = float32(math.Sin(float64(swayTime*0.95+posPhase+1.4))) * 0.030
 	}
@@ -738,14 +738,23 @@ func loadRockProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 // stone palette as the boulder so they sit comfortably together in the
 // plaza.
 func loadRockCairnProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
+	// Local mesh indices into models below — named (and used as keyed slice
+	// indices) so reordering a mesh re-skins the parts in lockstep instead of
+	// silently shifting the moss-skip onto a stone.
+	const (
+		cairnMeshBottom = iota
+		cairnMeshMiddle
+		cairnMeshTop
+		cairnMeshMoss
+	)
 	models := []rl.Model{
-		rl.LoadModelFromMesh(rl.GenMeshSphere(0.42, 5, 7)),
-		rl.LoadModelFromMesh(rl.GenMeshSphere(0.32, 5, 6)),
-		rl.LoadModelFromMesh(rl.GenMeshSphere(0.22, 4, 5)),
-		rl.LoadModelFromMesh(rl.GenMeshSphere(0.30, 5, 7)), // moss cushion (untextured)
+		cairnMeshBottom: rl.LoadModelFromMesh(rl.GenMeshSphere(0.42, 5, 7)),
+		cairnMeshMiddle: rl.LoadModelFromMesh(rl.GenMeshSphere(0.32, 5, 6)),
+		cairnMeshTop:    rl.LoadModelFromMesh(rl.GenMeshSphere(0.22, 4, 5)),
+		cairnMeshMoss:   rl.LoadModelFromMesh(rl.GenMeshSphere(0.30, 5, 7)), // moss cushion (untextured)
 	}
 	for i := range models {
-		if i != 3 {
+		if i != cairnMeshMoss {
 			setModelTexture(&models[i], rockTex)
 		}
 		attachShader(&models[i], shader)
@@ -754,18 +763,18 @@ func loadRockCairnProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 	return propModel{
 		models: models,
 		parts: []treePart{
-			{modelIdx: 0, offset: rl.NewVector3(0, 0.34, 0), scale: rl.NewVector3(1.1, 0.85, 1.1), rotation: 13, rotationAxis: rl.NewVector3(1, 4, 1), tint: warm},
-			{modelIdx: 1, offset: rl.NewVector3(0.04, 0.78, -0.06), scale: rl.NewVector3(1.0, 0.95, 1.0), rotation: -22, rotationAxis: rl.NewVector3(2, 5, 1), tint: cool},
-			{modelIdx: 2, offset: rl.NewVector3(-0.05, 1.10, 0.04), scale: rl.NewVector3(1.0, 0.95, 1.0), rotation: 38, rotationAxis: rl.NewVector3(1, 5, 0), tint: dark},
+			{modelIdx: cairnMeshBottom, offset: rl.NewVector3(0, 0.34, 0), scale: rl.NewVector3(1.1, 0.85, 1.1), rotation: 13, rotationAxis: rl.NewVector3(1, 4, 1), tint: warm},
+			{modelIdx: cairnMeshMiddle, offset: rl.NewVector3(0.04, 0.78, -0.06), scale: rl.NewVector3(1.0, 0.95, 1.0), rotation: -22, rotationAxis: rl.NewVector3(2, 5, 1), tint: cool},
+			{modelIdx: cairnMeshTop, offset: rl.NewVector3(-0.05, 1.10, 0.04), scale: rl.NewVector3(1.0, 0.95, 1.0), rotation: 38, rotationAxis: rl.NewVector3(1, 5, 0), tint: dark},
 			// Old growth on an old marker: a moss bonnet draped over the
 			// middle stone's shoulder (cairns weather from the joints out).
-			{modelIdx: 3, offset: rl.NewVector3(-0.10, 0.92, 0.06), scale: rl.NewVector3(0.80, 0.28, 0.75), rotation: 31, rotationAxis: rl.NewVector3(1, 6, 0), tint: mossPaletteDeep},
+			{modelIdx: cairnMeshMoss, offset: rl.NewVector3(-0.10, 0.92, 0.06), scale: rl.NewVector3(0.80, 0.28, 0.75), rotation: 31, rotationAxis: rl.NewVector3(1, 6, 0), tint: mossPaletteDeep},
 			// Settled contact pebbles at the foot — a stacked marker
 			// presses into the soil; the spill of small stones reads as
 			// "placed long ago," and grounds the column the way the
 			// boulder's flank pebble grounds it.
-			{modelIdx: 2, offset: rl.NewVector3(0.34, 0.09, 0.16), scale: rl.NewVector3(0.50, 0.35, 0.50), rotation: 57, rotationAxis: rl.NewVector3(1, 3, 0), tint: light},
-			{modelIdx: 2, offset: rl.NewVector3(-0.30, 0.07, -0.20), scale: rl.NewVector3(0.42, 0.30, 0.42), rotation: -19, rotationAxis: rl.NewVector3(0, 4, 1), tint: cool},
+			{modelIdx: cairnMeshTop, offset: rl.NewVector3(0.34, 0.09, 0.16), scale: rl.NewVector3(0.50, 0.35, 0.50), rotation: 57, rotationAxis: rl.NewVector3(1, 3, 0), tint: light},
+			{modelIdx: cairnMeshTop, offset: rl.NewVector3(-0.30, 0.07, -0.20), scale: rl.NewVector3(0.42, 0.30, 0.42), rotation: -19, rotationAxis: rl.NewVector3(0, 4, 1), tint: cool},
 		},
 	}
 }
@@ -778,15 +787,25 @@ func loadRockCairnProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 // world units (~0.8 tile widths each direction) so the silhouette fills
 // the 2-tile span comfortably.
 func loadRockFormationProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
+	// Local mesh indices into models below — named (and used as keyed slice
+	// indices) so reordering a mesh re-skins the parts in lockstep instead of
+	// silently shifting the moss-skip onto a stone.
+	const (
+		formationMeshCore = iota
+		formationMeshShoulder
+		formationMeshChunk
+		formationMeshCrown
+		formationMeshMoss
+	)
 	models := []rl.Model{
-		rl.LoadModelFromMesh(rl.GenMeshSphere(0.95, 6, 7)),
-		rl.LoadModelFromMesh(rl.GenMeshSphere(0.70, 5, 6)),
-		rl.LoadModelFromMesh(rl.GenMeshSphere(0.55, 5, 6)),
-		rl.LoadModelFromMesh(rl.GenMeshSphere(0.40, 4, 5)),
-		rl.LoadModelFromMesh(rl.GenMeshSphere(0.34, 5, 7)), // moss cushion (untextured)
+		formationMeshCore:     rl.LoadModelFromMesh(rl.GenMeshSphere(0.95, 6, 7)),
+		formationMeshShoulder: rl.LoadModelFromMesh(rl.GenMeshSphere(0.70, 5, 6)),
+		formationMeshChunk:    rl.LoadModelFromMesh(rl.GenMeshSphere(0.55, 5, 6)),
+		formationMeshCrown:    rl.LoadModelFromMesh(rl.GenMeshSphere(0.40, 4, 5)),
+		formationMeshMoss:     rl.LoadModelFromMesh(rl.GenMeshSphere(0.34, 5, 7)), // moss cushion (untextured)
 	}
 	for i := range models {
-		if i != 4 {
+		if i != formationMeshMoss {
 			setModelTexture(&models[i], rockTex)
 		}
 		attachShader(&models[i], shader)
@@ -796,27 +815,27 @@ func loadRockFormationProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 		models: models,
 		parts: []treePart{
 			// Central mass — biggest lump anchoring the cluster.
-			{modelIdx: 0, offset: rl.NewVector3(0, 0.75, 0), scale: rl.NewVector3(1.05, 0.95, 1.05), rotation: 17, rotationAxis: rl.NewVector3(1, 4, 1), tint: warm},
+			{modelIdx: formationMeshCore, offset: rl.NewVector3(0, 0.75, 0), scale: rl.NewVector3(1.05, 0.95, 1.05), rotation: 17, rotationAxis: rl.NewVector3(1, 4, 1), tint: warm},
 			// NE shoulder pushing into the +X/+Z quadrant.
-			{modelIdx: 1, offset: rl.NewVector3(0.62, 0.55, 0.55), scale: rl.NewVector3(1.0, 0.85, 1.0), rotation: -28, rotationAxis: rl.NewVector3(2, 5, 1), tint: cool},
+			{modelIdx: formationMeshShoulder, offset: rl.NewVector3(0.62, 0.55, 0.55), scale: rl.NewVector3(1.0, 0.85, 1.0), rotation: -28, rotationAxis: rl.NewVector3(2, 5, 1), tint: cool},
 			// SW chunk, lower profile.
-			{modelIdx: 2, offset: rl.NewVector3(-0.55, 0.42, -0.45), scale: rl.NewVector3(1.0, 0.8, 1.0), rotation: 41, rotationAxis: rl.NewVector3(1, 5, 0), tint: dark},
+			{modelIdx: formationMeshChunk, offset: rl.NewVector3(-0.55, 0.42, -0.45), scale: rl.NewVector3(1.0, 0.8, 1.0), rotation: 41, rotationAxis: rl.NewVector3(1, 5, 0), tint: dark},
 			// NW protrusion.
-			{modelIdx: 2, offset: rl.NewVector3(-0.45, 0.50, 0.58), scale: rl.NewVector3(0.9, 0.75, 0.9), rotation: -52, rotationAxis: rl.NewVector3(0, 6, 1), tint: warm},
+			{modelIdx: formationMeshChunk, offset: rl.NewVector3(-0.45, 0.50, 0.58), scale: rl.NewVector3(0.9, 0.75, 0.9), rotation: -52, rotationAxis: rl.NewVector3(0, 6, 1), tint: warm},
 			// SE buttress.
-			{modelIdx: 2, offset: rl.NewVector3(0.58, 0.46, -0.52), scale: rl.NewVector3(0.95, 0.8, 0.95), rotation: 11, rotationAxis: rl.NewVector3(1, 3, 0), tint: cool},
+			{modelIdx: formationMeshChunk, offset: rl.NewVector3(0.58, 0.46, -0.52), scale: rl.NewVector3(0.95, 0.8, 0.95), rotation: 11, rotationAxis: rl.NewVector3(1, 3, 0), tint: cool},
 			// Crown lump on top.
-			{modelIdx: 3, offset: rl.NewVector3(0.05, 1.18, -0.08), scale: rl.NewVector3(1.0, 0.85, 1.0), rotation: 65, rotationAxis: rl.NewVector3(1, 4, 0), tint: light},
+			{modelIdx: formationMeshCrown, offset: rl.NewVector3(0.05, 1.18, -0.08), scale: rl.NewVector3(1.0, 0.85, 1.0), rotation: 65, rotationAxis: rl.NewVector3(1, 4, 0), tint: light},
 			// Cap accent — slight asymmetric peak.
-			{modelIdx: 3, offset: rl.NewVector3(-0.18, 1.32, 0.10), scale: rl.NewVector3(0.8, 0.75, 0.8), rotation: -25, rotationAxis: rl.NewVector3(2, 4, 1), tint: dark},
+			{modelIdx: formationMeshCrown, offset: rl.NewVector3(-0.18, 1.32, 0.10), scale: rl.NewVector3(0.8, 0.75, 0.8), rotation: -25, rotationAxis: rl.NewVector3(2, 4, 1), tint: dark},
 			// Moss colonising the joints — growth concentrates where rain
 			// channels between fused lumps, so the cushions sit IN the
 			// crevices (not perched on peaks): one over the main/NE seam,
 			// one in the SW shadow pocket, one high where the crown meets
 			// the central mass.
-			{modelIdx: 4, offset: rl.NewVector3(0.36, 0.92, 0.30), scale: rl.NewVector3(1.05, 0.32, 1.00), rotation: 18, rotationAxis: rl.NewVector3(1, 6, 0), tint: mossPaletteBright},
-			{modelIdx: 4, offset: rl.NewVector3(-0.42, 0.66, -0.30), scale: rl.NewVector3(0.90, 0.28, 0.85), rotation: -44, rotationAxis: rl.NewVector3(0, 6, 1), tint: mossPaletteDeep},
-			{modelIdx: 4, offset: rl.NewVector3(-0.06, 1.24, 0.02), scale: rl.NewVector3(0.70, 0.26, 0.66), rotation: 52, rotationAxis: rl.NewVector3(1, 5, 1), tint: mossPaletteDeep},
+			{modelIdx: formationMeshMoss, offset: rl.NewVector3(0.36, 0.92, 0.30), scale: rl.NewVector3(1.05, 0.32, 1.00), rotation: 18, rotationAxis: rl.NewVector3(1, 6, 0), tint: mossPaletteBright},
+			{modelIdx: formationMeshMoss, offset: rl.NewVector3(-0.42, 0.66, -0.30), scale: rl.NewVector3(0.90, 0.28, 0.85), rotation: -44, rotationAxis: rl.NewVector3(0, 6, 1), tint: mossPaletteDeep},
+			{modelIdx: formationMeshMoss, offset: rl.NewVector3(-0.06, 1.24, 0.02), scale: rl.NewVector3(0.70, 0.26, 0.66), rotation: 52, rotationAxis: rl.NewVector3(1, 5, 1), tint: mossPaletteDeep},
 		},
 	}
 }

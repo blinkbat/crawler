@@ -93,11 +93,7 @@ func ApplyRumble(level float32, enabled bool) {
 	if !enabled || !gamepadConnected() {
 		level = 0
 	}
-	if level < 0 {
-		level = 0
-	} else if level > 1 {
-		level = 1
-	}
+	level = core.Clamp(level, 0, 1)
 	if level == 0 && lastRumbleLevel == 0 {
 		return // motor already off — don't re-issue every idle frame
 	}
@@ -210,9 +206,24 @@ func DisplayTogglePressed() bool {
 	return altDown() && (rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeyKpEnter))
 }
 
+// confirmChord is the single definition of the "confirm" button set —
+// Enter / Space / Z plus the pad's A/Cross face button. The edge/level/release
+// variants below differ only in which key-state and pad-state readers they pass
+// in, so the key list lives here once instead of being re-typed three times.
+func confirmChord(keyState, padState func(int32) bool) bool {
+	return keyState(rl.KeyEnter) || keyState(rl.KeySpace) || keyState(rl.KeyZ) ||
+		padState(rl.GamepadButtonRightFaceDown) // A on Xbox / Cross on PS
+}
+
 func ConfirmPressed() bool {
-	return (rl.IsKeyPressed(rl.KeyEnter) && !altDown()) || rl.IsKeyPressed(rl.KeySpace) || rl.IsKeyPressed(rl.KeyZ) ||
-		padPressed(rl.GamepadButtonRightFaceDown) // A on Xbox / Cross on PS
+	// Enter arm ignores Alt+Enter so the fullscreen chord can't also confirm a
+	// menu row; the rest of the chord is the shared set.
+	return confirmChord(func(k int32) bool {
+		if k == rl.KeyEnter {
+			return rl.IsKeyPressed(k) && !altDown()
+		}
+		return rl.IsKeyPressed(k)
+	}, padPressed)
 }
 
 func BackPressed() bool {
@@ -400,10 +411,11 @@ func TargetPreviousPressed() bool {
 //
 // Controller mapping note: GamepadButtonMiddleRight is the "small
 // start" button — Options on PS5 / Start on Xbox / Menu on Switch.
-// The "big start" middle button (PS5 touchpad click / Xbox guide /
-// closest raylib exposes is GamepadButtonMiddle) is bound by
-// PanelsTogglePressed below for the game panels overlay so the two
-// reads don't fight over the same input.
+// The "big" middle button GamepadButtonMiddle (the PS button on a
+// DualSense / the guide button on Xbox — the closest raylib exposes to
+// the PS5 touchpad-click region) is bound by PanelsTogglePressed below
+// for the game panels overlay so the two reads don't fight over the
+// same input. Keep this description in sync with PanelsTogglePressed's.
 func PausePressed(inBattle bool) bool {
 	if rl.IsKeyPressed(rl.KeyP) || padPressed(rl.GamepadButtonMiddleRight) { // Start
 		return true
@@ -552,14 +564,6 @@ func TurnRightPressed() bool {
 		padPressed(rl.GamepadButtonRightTrigger1) // RB
 }
 
-func StrafeLeftPressed() bool {
-	return rl.IsKeyPressed(rl.KeyA) || stickEdgeX(-1)
-}
-
-func StrafeRightPressed() bool {
-	return rl.IsKeyPressed(rl.KeyD) || stickEdgeX(1)
-}
-
 // Held movement predicates: the level (key/button-down, stick-leaned) reads of
 // the four step directions and two turns. The exploration update gates the
 // move switch on the player being idle (animation finished), so a held key
@@ -599,15 +603,13 @@ func TurnRightHeld() bool {
 // Counterpart to ConfirmPressed (which is the down-edge); used by hold-mode
 // minigames where we need to know the button stays pressed.
 func ConfirmDown() bool {
-	return rl.IsKeyDown(rl.KeyEnter) || rl.IsKeyDown(rl.KeySpace) || rl.IsKeyDown(rl.KeyZ) ||
-		padDown(rl.GamepadButtonRightFaceDown)
+	return confirmChord(rl.IsKeyDown, padDown)
 }
 
 // ConfirmReleased reports whether a "confirm" key was just released this
 // frame (up-edge). Used by hold-mode minigames to detect "release now."
 func ConfirmReleased() bool {
-	return rl.IsKeyReleased(rl.KeyEnter) || rl.IsKeyReleased(rl.KeySpace) || rl.IsKeyReleased(rl.KeyZ) ||
-		padReleased(rl.GamepadButtonRightFaceDown)
+	return confirmChord(rl.IsKeyReleased, padReleased)
 }
 
 // AttackTimingPressed reports whether the player hit the "attack" button for a
@@ -669,6 +671,16 @@ func ResetStickEdges() {
 	stickPrev = stickNow
 }
 
+// applyDeadzone zeroes an analog axis value whose magnitude is below dz (a
+// centered dead band) and otherwise passes it through. Keeps the per-axis
+// dead-zone test in one place for LookStick's X and Y.
+func applyDeadzone(v, dz float32) float32 {
+	if v > -dz && v < dz {
+		return 0
+	}
+	return v
+}
+
 // LookStick returns the right analog stick offset for explore free-look
 // as (x, y) in roughly [-1, 1], with a centered deadzone so a resting
 // stick reads as (0, 0). Returns (0, 0) when no pad is connected.
@@ -679,14 +691,8 @@ func LookStick() (float32, float32) {
 	if !gamepadConnected() {
 		return 0, 0
 	}
-	x := rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisRightX)
-	y := rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisRightY)
-	if x > -lookStickDeadzone && x < lookStickDeadzone {
-		x = 0
-	}
-	if y > -lookStickDeadzone && y < lookStickDeadzone {
-		y = 0
-	}
+	x := applyDeadzone(rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisRightX), lookStickDeadzone)
+	y := applyDeadzone(rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisRightY), lookStickDeadzone)
 	return x, y
 }
 

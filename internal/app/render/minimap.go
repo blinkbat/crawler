@@ -351,8 +351,9 @@ var phaseColors = [core.TimeOfDayCount]rl.Color{
 
 // playerArrowColor is the shared green tint used wherever the player's
 // facing is drawn on a 2D map surface (corner minimap + panels Map
-// tab). Named so palette changes touch one literal.
-var playerArrowColor = rl.NewColor(132, 240, 148, 255)
+// tab). Aliases the theme marker palette's markerPlayer so it sits with
+// the sibling chest/door/pack markers instead of as a lone literal here.
+var playerArrowColor = markerPlayer
 
 // 2D map surface marker palette — shared by the corner minimap and
 // the panels Map tab so a future tuning pass adjusts both surfaces in

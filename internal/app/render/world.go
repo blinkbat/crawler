@@ -365,7 +365,6 @@ func Camera(g *core.GameState) rl.Camera3D {
 var SkyClearColor = rl.NewColor(87, 172, 244, 255)
 
 func DrawSkyBackground(assets Resources, g *core.GameState) {
-	m := g.Area
 	texW := float32(assets.skyTexture.Width)
 	texH := float32(assets.skyTexture.Height)
 	screenW, screenH := screenSizeF()
@@ -401,7 +400,6 @@ func DrawSkyBackground(assets Resources, g *core.GameState) {
 	// sky and no stars at night.
 	profile := timeProfileAt(g.StepCount)
 	tint := skyColor(profile.SkyTint)
-	_ = m
 	rl.DrawTexturePro(assets.skyTexture, source, dest, rl.NewVector2(0, 0), 0, tint)
 	// Star layer rides the same source/dest as the sky so the stars
 	// crop with the same aspect logic. Alpha = profile.StarAlpha *
@@ -742,12 +740,11 @@ func drawDecor(assets Resources, cell byte, x, z int, cx, cz float32, center rl.
 	}
 }
 
-// drawPropTree / drawPropTreeXL / drawPropRockLarge / drawPropBushLarge
-// are the inline-prop implementations registered in
-// inlinePropHandlers. Tree and TreeXL share assets.tree at different
-// scales; the other two wrap dedicated propModel fields. Pre-resolved
-// propYaw is passed in by the caller so all four handlers stay
-// uniform.
+// drawPropTreeScaled / drawPropTreeTwin / drawPropRockLarge / drawPropBushLarge
+// are the inline-prop implementations registered in inlinePropHandlers. The
+// four scaled-tree chars share assets.tree through drawPropTreeScaled (see
+// treePropScales below); the other two wrap dedicated propModel fields.
+// Pre-resolved propYaw is passed in by the caller so all handlers stay uniform.
 // treePropScales is the scale-per-char table for tree variants that
 // share assets.tree at different sizes. Four of the five tree props
 // differ only in their scale factor — Tree / TreeXL / TreeTall /
@@ -815,6 +812,18 @@ func drawPropBushLarge(assets Resources, _ core.AreaDefinition, _, _ int, center
 	assets.bushProp.draw(center, 1.3, propYaw)
 }
 
+// Wall-torch fixture geometry — shared by drawWallTorch (the visible
+// bracket/sconce) and rebuildTorchSites (the light-pool origin) so the
+// fixture height and its light source can't silently drift apart on a
+// retune. The light origin sits a touch above the sconce cup (where the
+// flame burns) and is inset toward the wall like the bracket.
+const (
+	wallTorchMount      = float32(0.40) // bracket distance from tile center toward the wall
+	wallTorchSconceY    = float32(1.30) // bracket/sconce height
+	wallTorchLightY     = float32(1.42) // light-pool origin height (just above the flame cup)
+	wallTorchLightInset = float32(0.30) // light origin offset from tile center toward the wall
+)
+
 // drawWallTorch is the inline handler for TileTorch. It auto-orients
 // the torch to the adjacent wall (facing away from it into the room),
 // draws an unlit iron bracket + sconce on the wall, and an animated
@@ -826,24 +835,22 @@ func drawWallTorch(assets Resources, m core.AreaDefinition, x, z int, center rl.
 	// Mount point: against the wall behind the torch, up at sconce
 	// height. The torch faces (fx,fz) into the room, so the wall is
 	// in the opposite direction.
-	const mount = 0.40
-	const sconceY = 1.30
-	wallX := center.X - fx*mount
-	wallZ := center.Z - fz*mount
+	wallX := center.X - fx*wallTorchMount
+	wallZ := center.Z - fz*wallTorchMount
 
 	// Iron bracket — a small dark cube flush on the wall, plus a
 	// short arm reaching out toward the room holding the sconce.
 	// Drawn lit (immediate mode under the world shader); the torch's
 	// own light pool keeps it visible.
-	bracket := rl.NewVector3(wallX, sconceY-0.12, wallZ)
+	bracket := rl.NewVector3(wallX, wallTorchSconceY-0.12, wallZ)
 	rl.DrawCube(bracket, 0.10, 0.22, 0.10, torchIron)
 	armX := wallX + fx*0.10
 	armZ := wallZ + fz*0.10
-	rl.DrawCube(rl.NewVector3(armX, sconceY, armZ), 0.08, 0.06, 0.08, torchIron)
+	rl.DrawCube(rl.NewVector3(armX, wallTorchSconceY, armZ), 0.08, 0.06, 0.08, torchIron)
 	// Sconce cup at the arm tip.
 	cupX := wallX + fx*0.16
 	cupZ := wallZ + fz*0.16
-	rl.DrawCube(rl.NewVector3(cupX, sconceY+0.04, cupZ), 0.16, 0.08, 0.16, torchIronLight)
+	rl.DrawCube(rl.NewVector3(cupX, wallTorchSconceY+0.04, cupZ), 0.16, 0.08, 0.16, torchIronLight)
 
 	// Animated flame — three emissive blobs above the cup, each
 	// bobbing on its own time offset so the flame flickers and
@@ -862,7 +869,7 @@ func drawWallTorch(assets Resources, m core.AreaDefinition, x, z int, center rl.
 		swayA := float32(math.Sin(float64(t*5.3+fp*1.4))) * 0.05
 		// Higher blobs are smaller and lean more — a teardrop
 		// flame shape that wavers.
-		y := sconceY + 0.09 + float32(i)*0.07 + bob
+		y := wallTorchSconceY + 0.09 + float32(i)*0.07 + bob
 		lean := float32(i) * 0.03
 		px := flameBaseX + fx*lean + swayA*fz
 		pz := flameBaseZ + fz*lean - swayA*fx
@@ -1100,7 +1107,7 @@ func rebuildTorchSites(m core.AreaDefinition) {
 				// Wall torch: light originates at the sconce, offset
 				// toward the wall + up at flame height.
 				fx, fz := wallTorchFacing(m, x, z)
-				pos = rl.NewVector3(cx-fx*0.30, 1.42, cz-fz*0.30)
+				pos = rl.NewVector3(cx-fx*wallTorchLightInset, wallTorchLightY, cz-fz*wallTorchLightInset)
 			}
 			torchSiteCache.sites = append(torchSiteCache.sites, torchSite{
 				pos: pos, cx: cx, cz: cz, hash: tileHash(x, z), bright: bright,

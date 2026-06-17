@@ -67,10 +67,42 @@ var rainVisuals = [core.RainKindCount]rainVisual{
 	core.RainHeavy:  {washAlpha: 112, streaks: 300, streakAlpha: 82},
 }
 
+// rainStreakTrait holds one streak's screen- and time-independent traits.
+// All five are pure functions of the streak index, so they're baked once at
+// init into rainStreakTraits and reused every frame — the draw loop used to
+// recompute 5 hash01s + derived math per streak per frame (up to 300 streaks
+// at RainHeavy → ~1500 hash calls/frame avoided).
+type rainStreakTrait struct {
+	colFrac float32
+	length  float32
+	speed   float32
+	phase   float32
+	thick   float32
+}
+
+// rainStreakTraits is sized to the largest rainVisuals streak count so every
+// rain kind indexes within it. Built in init (after the table is validated).
+var rainStreakTraits []rainStreakTrait
+
 func init() {
+	maxStreaks := 0
 	for k := 0; k < core.RainKindCount; k++ {
 		if rainVisuals[k] == (rainVisual{}) {
 			panic(fmt.Sprintf("render: rainVisuals missing a row for RainKind %d — add its wash/streak strength", k))
+		}
+		if s := int(rainVisuals[k].streaks); s > maxStreaks {
+			maxStreaks = s
+		}
+	}
+	rainStreakTraits = make([]rainStreakTrait, maxStreaks)
+	for i := range rainStreakTraits {
+		u := uint32(i)
+		rainStreakTraits[i] = rainStreakTrait{
+			colFrac: hash01(u*2 + 1),
+			length:  rainStreakMin + hash01(u*2+9)*(rainStreakMax-rainStreakMin),
+			speed:   rainFallMin + hash01(u*7+3)*(rainFallMax-rainFallMin),
+			phase:   hash01(u*13 + 5),
+			thick:   rainThickMin + hash01(u*5+11)*(rainThickMax-rainThickMin),
 		}
 	}
 }
@@ -109,24 +141,23 @@ func DrawWeather(g *core.GameState) {
 			rl.NewColor(rainWashR, rainWashG, rainWashB, uint8(intensity*vis.washAlpha)))
 
 		if n := int(intensity * vis.streaks); n > 0 {
+			if n > len(rainStreakTraits) {
+				n = len(rainStreakTraits)
+			}
 			t := float32(rl.GetTime())
 			streakCol := rl.NewColor(rainStreakR, rainStreakG, rainStreakB, uint8(intensity*vis.streakAlpha))
 			for i := 0; i < n; i++ {
-				u := uint32(i)
-				colFrac := hash01(u*2 + 1)
-				length := rainStreakMin + hash01(u*2+9)*(rainStreakMax-rainStreakMin)
-				speed := rainFallMin + hash01(u*7+3)*(rainFallMax-rainFallMin)
-				phase := hash01(u*13 + 5)
-				thick := rainThickMin + hash01(u*5+11)*(rainThickMax-rainThickMin)
+				tr := rainStreakTraits[i]
 				// y wraps from above the top to below the bottom over `span`;
 				// the per-streak phase offsets each so they don't fall in lockstep.
-				span := sh + length
-				y := float32(math.Mod(float64(t*speed+phase*span), float64(span))) - length
-				x := colFrac * sw
+				// Only y/x depend on time + screen size; the rest is precomputed.
+				span := sh + tr.length
+				y := float32(math.Mod(float64(t*tr.speed+tr.phase*span), float64(span))) - tr.length
+				x := tr.colFrac * sw
 				rl.DrawLineEx(
 					rl.NewVector2(x, y),
-					rl.NewVector2(x+rainSlant, y+length),
-					thick,
+					rl.NewVector2(x+rainSlant, y+tr.length),
+					tr.thick,
 					streakCol,
 				)
 			}

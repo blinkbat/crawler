@@ -155,8 +155,10 @@ type ItemDefinition struct {
 	// both); the use paths skip the use only when NEITHER would help the
 	// target. Mirrors HealAmount on the MP axis.
 	MPAmount int
-	// Description is reserved for a future tooltip. Fill it in when we add
-	// item descriptions in the UI.
+	// Description is the item's flavor/tooltip line. It's authored for every
+	// item in itemDefinitions but NOT yet read by any UI — wire it into the
+	// item picker / tooltip when that surface lands. (Authored-but-unconsumed,
+	// not dead: keep populating it so the eventual tooltip has copy.)
 	Description string
 	// Slot is the equipment slot type this item fits into. SlotNone
 	// means it's a consumable — usable from the battle Item action but
@@ -486,8 +488,16 @@ func liveConsumable(s ItemStack) bool {
 // use paths — battle applyItem and explore applyUseToMember — gate on this so
 // the "don't burn a restorative on a target full on what it gives" rule lives
 // in one place instead of duplicated per call site.
+// ItemIsRestorative reports whether an item restores HP or MP (vs equipment or
+// a pure-flavor consumable). The single definition of "restorative" — the
+// HealAmount/MPAmount field set that the use paths gate on — so the rule lives
+// in one place instead of being open-coded per call site.
+func ItemIsRestorative(def ItemDefinition) bool {
+	return def.HealAmount > 0 || def.MPAmount > 0
+}
+
 func ItemHelpsTarget(def ItemDefinition, m PartyMember) bool {
-	if def.HealAmount <= 0 && def.MPAmount <= 0 {
+	if !ItemIsRestorative(def) {
 		return true // not a restorative — using it isn't "wasted"
 	}
 	hpUseful := def.HealAmount > 0 && m.HP < m.MaxHP

@@ -590,6 +590,12 @@ func EnemyKindCount() int {
 // SingularNoun a dozen times — centralising here means a future enemy
 // that wants a different article ("An Amoeba" / a proper-named boss)
 // is one method, not a grep across battle.go and actions.go.
+//
+// Sentence-start "The <noun>" uses route through here. The few phrasings
+// that FUSE the article with other words — the plural "The <plural> drive
+// …" and "The last <noun> falls." (see BattleLossMessage /
+// LastBattleEnemyFallsMessage) — keep their own format strings, since a
+// per-enemy article override would need a plural/quantified form too.
 func TheEnemy(def EnemyDefinition) string {
 	return "The " + def.SingularNoun
 }
@@ -811,7 +817,7 @@ func BattleLossMessage(g *GameState) string {
 	count := LivingBattleCount(g)
 	def := BattleEnemyInfo(g)
 	if count <= 1 {
-		return fmt.Sprintf("The %s drives the party back. Press to recover.", def.SingularNoun)
+		return fmt.Sprintf("%s drives the party back. Press to recover.", TheEnemy(def))
 	}
 	return fmt.Sprintf("The %s drive the party back. Press to recover.", def.PluralNoun)
 }

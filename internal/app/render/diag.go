@@ -36,7 +36,7 @@ var (
 	renderLogFile    *os.File
 	renderLogFrameNo int
 	renderLogTickCnt int
-	// renderLogOpenInit is the init banner that gets stamped once on
+	// renderLogPendingInit is the init banner that gets stamped once on
 	// open + every shader / resource load that fires while the log
 	// is closed (so a Resources rebuild between toggles still gets
 	// captured the next time the user reopens the log).

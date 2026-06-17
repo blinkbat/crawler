@@ -243,6 +243,7 @@ var modalHandlers = map[modalKind]modalHandler{
 	modalFoeView:           {draw: drawFoeViewModal, update: updateFoeViewModal},
 	modalPartyView:         {draw: drawPartyViewModal, update: updatePartyViewModal},
 	modalHitGlyphs:         {draw: drawHitGlyphsModal, update: updateHitGlyphsModal},
+	modalObjectView:        {draw: drawObjectViewModal, update: updateObjectViewModal},
 	modalDialogList:        {draw: drawDialogListModal, update: updateDialogListModal},
 	modalDialogNodes:       {draw: drawDialogNodesModal, update: updateDialogNodesModal},
 	modalDialogNodeEdit:    {draw: drawDialogNodeEditModal, update: updateDialogNodeEditModal},
@@ -926,9 +927,9 @@ func drawEntityListWindow(font rl.Font, theme render.Theme, lay entityModalLayou
 		return
 	}
 	y := lay.listTop
-	if lay.topRow > 0 {
-		render.DrawRichText(font, fmt.Sprintf("▲ %d more", lay.topRow), rl.NewVector2(lay.card.X+entityListTextInset, y-16), editorFontHint, 1, theme.TextHint)
-	}
+	// Shared "▲ N more" / "▼ N more" clip indicators (no-op when nothing is
+	// hidden) so this list's affordance can't drift from the dialog lists'.
+	drawScrollMoreHint(font, theme, lay.card.X+entityListTextInset, y-16, lay.topRow, true)
 	for i := lay.topRow; i < lay.end; i++ {
 		text := rowText(i)
 		col := theme.TextMuted
@@ -939,9 +940,7 @@ func drawEntityListWindow(font rl.Font, theme render.Theme, lay entityModalLayou
 		render.DrawTextWithShadow(font, text, lay.card.X+entityListTextInset, y, editorFontBody, col)
 		y += lay.rowH
 	}
-	if lay.end < count {
-		render.DrawRichText(font, fmt.Sprintf("▼ %d more", count-lay.end), rl.NewVector2(lay.card.X+entityListTextInset, y), editorFontHint, 1, theme.TextHint)
-	}
+	drawScrollMoreHint(font, theme, lay.card.X+entityListTextInset, y, count-lay.end, false)
 }
 
 func drawButton(font rl.Font, r rl.Rectangle, label string, active bool) {
@@ -1222,13 +1221,19 @@ func layerTabAt(s *State, p rl.Vector2) int {
 	return -1
 }
 
-// layerEyeRect is the small visibility-toggle box at the right edge of a
-// layer tab. Clicking it toggles the layer's hidden flag (Alt-click solos);
-// it's hit-tested before the tab-select so the eye doesn't also switch layers.
-func layerEyeRect(s *State, i int) rl.Rectangle {
-	r := layerTabRect(s, i)
+// eyeBoxRect is the small visibility-toggle box inset at the right edge of a
+// layer tab / level row. The layer and level panels share the identical
+// geometry, so both layerEyeRect and levelEyeRect derive from this.
+func eyeBoxRect(r rl.Rectangle) rl.Rectangle {
 	const eye = float32(20)
 	return rl.NewRectangle(r.X+r.Width-6-eye-6, r.Y+(r.Height-eye)/2, eye, eye)
+}
+
+// layerEyeRect is the visibility-toggle box for a layer tab. Clicking it toggles
+// the layer's hidden flag (Alt-click solos); it's hit-tested before the
+// tab-select so the eye doesn't also switch layers.
+func layerEyeRect(s *State, i int) rl.Rectangle {
+	return eyeBoxRect(layerTabRect(s, i))
 }
 
 // drawLayerEye paints the open/closed visibility eye for a layer tab.
@@ -1336,9 +1341,7 @@ func levelRowRect(s *State, i int) rl.Rectangle {
 }
 
 func levelEyeRect(s *State, i int) rl.Rectangle {
-	r := levelRowRect(s, i)
-	const eye = float32(20)
-	return rl.NewRectangle(r.X+r.Width-6-eye-6, r.Y+(r.Height-eye)/2, eye, eye)
+	return eyeBoxRect(levelRowRect(s, i))
 }
 
 // levelRowAt returns the level index for a point in the panel's row area, or -1.

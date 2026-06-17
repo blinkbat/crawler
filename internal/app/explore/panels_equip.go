@@ -102,11 +102,7 @@ func applyEquipPick(g *core.GameState, member int, slot core.EquipSlotIndex, row
 	} else {
 		ok = core.EquipFromInventory(g, member, slot, row.Kind)
 	}
-	if ok {
-		audio.Play(audio.SoundInputGreat)
-	} else {
-		audio.Play(audio.SoundInputMiss)
-	}
+	audio.PlayResult(ok)
 	closeEquipPicker(g)
 }
 

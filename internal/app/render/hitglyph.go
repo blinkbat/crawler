@@ -215,7 +215,7 @@ func drawHitGlyph(kind hitGlyphKind, cx, cy, t, scale float32) {
 // drawGlyphSlash — a diagonal blade stroke that sweeps top-right → bottom-left,
 // with a thinner trailing edge, then fades. Reads as a quick cut.
 func drawGlyphSlash(cx, cy, t, baseR float32) {
-	col := rl.NewColor(245, 248, 255, glyphFade(t))
+	col := colorWithAlpha(glyphSlashColor, glyphFade(t))
 	r := baseR * 1.2
 	ext := t / 0.4 // stroke extends over the first 40% of life
 	if ext > 1 {
@@ -244,7 +244,7 @@ func spokeBurst(cx, cy float32, n int, inner, outer, thick float32, col rl.Color
 
 // drawGlyphImpact — a blunt "POW": 8 radial spikes punching outward.
 func drawGlyphImpact(cx, cy, t, baseR float32) {
-	col := rl.NewColor(255, 236, 150, glyphFade(t))
+	col := colorWithAlpha(glyphImpactColor, glyphFade(t))
 	r := baseR
 	spike := r * (0.5 + 0.45*glyphGrow(t))
 	spokeBurst(cx, cy, 8, r*0.25, spike, 3, col)
@@ -253,7 +253,7 @@ func drawGlyphImpact(cx, cy, t, baseR float32) {
 // drawGlyphFrost — a 6-armed snowflake (each arm a spoke + two tip branches),
 // popping in then fading. Pale blue.
 func drawGlyphFrost(cx, cy, t, baseR float32) {
-	col := rl.NewColor(170, 224, 255, glyphFade(t))
+	col := colorWithAlpha(glyphFrostColor, glyphFade(t))
 	r := glyphPopR(t, baseR)
 	for i := 0; i < 6; i++ {
 		ang := float64(i) * math.Pi / 3
@@ -276,7 +276,7 @@ func drawGlyphFrost(cx, cy, t, baseR float32) {
 // twitching frame-to-frame like a live electric arc.
 func drawGlyphSpark(cx, cy, t, baseR float32) {
 	a := glyphFade(t)
-	bolt := rl.NewColor(150, 205, 255, a)
+	bolt := colorWithAlpha(glyphSparkBolt, a)
 	r := baseR * 1.25
 	// Step the wall clock into ~18 discrete frames/sec so the bolts SNAP to new
 	// jagged positions rather than sliding smoothly — that staccato is what
@@ -287,7 +287,7 @@ func drawGlyphSpark(cx, cy, t, baseR float32) {
 	}
 	// Bright core scaled to baseR (≈3px at the default radius) so it tracks the
 	// glyph's size rather than sitting at a fixed pixel radius.
-	rl.DrawCircleV(rl.NewVector2(cx, cy), baseR*0.115, rl.NewColor(225, 242, 255, a))
+	rl.DrawCircleV(rl.NewVector2(cx, cy), baseR*0.115, colorWithAlpha(glyphSparkCore, a))
 }
 
 // drawLightningTendril draws a 3-segment zigzag outward along `ang`. seed feeds
@@ -321,8 +321,8 @@ func glyphJitter(seed float64) float32 {
 // a bright core, all expanding outward.
 func drawGlyphFire(cx, cy, t, baseR float32) {
 	a := glyphFade(t)
-	outer := rl.NewColor(255, 150, 60, a)
-	inner := rl.NewColor(255, 222, 130, a)
+	outer := colorWithAlpha(glyphFireOuter, a)
+	inner := colorWithAlpha(glyphFireInner, a)
 	r := baseR * (0.7 + 0.5*glyphGrow(t))
 	rl.DrawPoly(rl.NewVector2(cx, cy), 6, r*0.7, t*90, fadeColor(outer, 0.4))
 	for i := 0; i < 6; i++ {
@@ -335,7 +335,7 @@ func drawGlyphFire(cx, cy, t, baseR float32) {
 
 // drawGlyphHoly — radiant: 8 rays from a ring, expanding, gold.
 func drawGlyphHoly(cx, cy, t, baseR float32) {
-	col := rl.NewColor(255, 232, 150, glyphFade(t))
+	col := colorWithAlpha(glyphHolyColor, glyphFade(t))
 	r := baseR * (0.6 + 0.6*glyphGrow(t))
 	spokeBurst(cx, cy, 8, r*0.32, r, 2, col)
 	rl.DrawRing(rl.NewVector2(cx, cy), r*0.42, r*0.52, 0, 360, 28, col)
@@ -345,7 +345,7 @@ func drawGlyphHoly(cx, cy, t, baseR float32) {
 // grows downward as it fades. Green.
 func drawGlyphVenom(cx, cy, t, baseR float32) {
 	a := glyphFade(t)
-	col := rl.NewColor(150, 230, 110, a)
+	col := colorWithAlpha(glyphVenomColor, a)
 	r := glyphPopR(t, baseR)
 	rl.DrawCircleLines(int32(cx), int32(cy), r*0.5, col)
 	rl.DrawCircleV(rl.NewVector2(cx-r*0.3, cy-r*0.16), r*0.18, fadeColor(col, 0.85))

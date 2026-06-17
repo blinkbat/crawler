@@ -20,7 +20,7 @@ const (
 	dialogSpeakerBand = int32(40)
 	dialogBodyGap     = int32(16)  // gap between the body text block and the row list
 	dialogBottomPad   = int32(40)  // padding below the row list down to the card's bottom edge
-	dialogMinCardH    = int32(200) // floor so a short one-line node still reads as a card
+	dialogMinCardH    = modalMinCardH // floor so a short one-line node still reads as a card
 	// dialogMaxBodyLines bounds how many wrapped text lines the card shows so
 	// a pathologically long node body can't grow the card past the screen.
 	// Authored lines are short; a longer beat should be split across nodes.
@@ -136,7 +136,7 @@ func DrawDialogModal(g *core.GameState, assets Resources) {
 
 	// Speaker nameplate.
 	speakerName := core.DialogSpeakerName(node.SpeakerID)
-	drawHeading(font, speakerName, cardX+int32(dialogTextPadX), cardY+14, dialogSpeakerColor(node.SpeakerID))
+	drawHeading(font, speakerName, cardX+int32(dialogTextPadX), cardY+modalHeadingInsetY, dialogSpeakerColor(node.SpeakerID))
 
 	// Body text.
 	textX := float32(cardX + dialogTextPadX)

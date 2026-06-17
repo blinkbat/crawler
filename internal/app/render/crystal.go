@@ -86,7 +86,7 @@ func DrawCrystalPrompt(camera rl.Camera3D, g *core.GameState, assets Resources) 
 // dim slate while dormant.
 func crystalColor(charged bool, t float64) rl.Color {
 	if !charged {
-		return rl.NewColor(70, 92, 110, 190)
+		return crystalDormantBody
 	}
 	// Pulse the brightness between ~0.75 and 1.0 so a charged crystal "breathes."
 	// R/G ride the shared crystalCyanBase (theme.go) so the gem and the editor
@@ -99,7 +99,7 @@ func crystalColor(charged bool, t float64) rl.Color {
 // crystalEdge is the faceted wire tint paired with crystalColor.
 func crystalEdge(charged bool) rl.Color {
 	if !charged {
-		return rl.NewColor(110, 130, 150, 150)
+		return crystalEdgeDormant
 	}
-	return rl.NewColor(210, 250, 255, 220)
+	return crystalEdgeCharged
 }

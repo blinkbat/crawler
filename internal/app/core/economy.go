@@ -44,15 +44,15 @@ func ShopTabLabel(t ShopTab) string {
 }
 
 // ShopSellPrice is the gold recovered for selling one unit of an item:
-// half its catalog Price, floored at 1 so a priced item is always worth
-// something. Items with no Price (Price <= 0) aren't sellable — callers
-// gate on SellableStacks, which filters them out.
+// its catalog Price / ShopSellDivisor, floored at 1 so a priced item is
+// always worth something. Items with no Price (Price <= 0) aren't sellable
+// — callers gate on SellableStacks, which filters them out.
 func ShopSellPrice(price int) int {
 	if price <= 0 {
 		return 0
 	}
-	if half := price / 2; half > 0 {
-		return half
+	if part := price / ShopSellDivisor; part > 0 {
+		return part
 	}
 	return 1
 }

@@ -215,13 +215,20 @@ func drawFaceButton(font rl.Font, letter string, col color.RGBA, x, cy, gh, alph
 	return gh
 }
 
+// drawGlyphPill paints the shared controller-glyph backing: a rounded body fill
+// + a 1px rim, both faded by alpha. The shoulder, start/select, and d-pad
+// glyphs all sit on this same body/rim pairing (only the roundness differs), so
+// the token pair lives here instead of being re-typed per glyph.
+func drawGlyphPill(rect rl.Rectangle, roundness, alpha float32) {
+	rl.DrawRectangleRounded(rect, roundness, 6, fadeColor(glyphBody, alpha))
+	rl.DrawRectangleRoundedLinesEx(rect, roundness, 6, 1, fadeColor(glyphRim, alpha))
+}
+
 // drawShoulderButton is a bumper pill (wider than tall) with its LB/RB label.
 func drawShoulderButton(font rl.Font, label string, x, cy, gh, alpha float32) float32 {
 	w := gh * 1.55
 	h := gh * 0.82
-	rect := rl.NewRectangle(x, cy-h/2, w, h)
-	rl.DrawRectangleRounded(rect, 0.6, 6, fadeColor(glyphBody, alpha))
-	rl.DrawRectangleRoundedLinesEx(rect, 0.6, 6, 1, fadeColor(glyphRim, alpha))
+	drawGlyphPill(rl.NewRectangle(x, cy-h/2, w, h), 0.6, alpha)
 	drawGlyphLetter(font, label, x+w/2, cy, gh*0.5, fadeColor(glyphInk, alpha))
 	return w
 }
@@ -231,9 +238,7 @@ func drawShoulderButton(font rl.Font, label string, x, cy, gh, alpha float32) fl
 func drawStartSelect(start bool, x, cy, gh, alpha float32) float32 {
 	w := gh * 1.3
 	h := gh * 0.82
-	rect := rl.NewRectangle(x, cy-h/2, w, h)
-	rl.DrawRectangleRounded(rect, 0.6, 6, fadeColor(glyphBody, alpha))
-	rl.DrawRectangleRoundedLinesEx(rect, 0.6, 6, 1, fadeColor(glyphRim, alpha))
+	drawGlyphPill(rl.NewRectangle(x, cy-h/2, w, h), 0.6, alpha)
 	ink := fadeColor(glyphInk, alpha)
 	cx := x + w/2
 	if start {
@@ -257,9 +262,7 @@ func drawStartSelect(start bool, x, cy, gh, alpha float32) float32 {
 // reads as a d-pad.
 func drawDpadGlyph(g InputGlyph, x, cy, gh, alpha float32) float32 {
 	cx := x + gh/2
-	rect := rl.NewRectangle(x+1, cy-gh/2+1, gh-2, gh-2)
-	rl.DrawRectangleRounded(rect, 0.35, 6, fadeColor(glyphBody, alpha))
-	rl.DrawRectangleRoundedLinesEx(rect, 0.35, 6, 1, fadeColor(glyphRim, alpha))
+	drawGlyphPill(rl.NewRectangle(x+1, cy-gh/2+1, gh-2, gh-2), 0.35, alpha)
 
 	up := g == GlyphUp || g == GlyphUpDown
 	down := g == GlyphDown || g == GlyphUpDown

@@ -40,6 +40,20 @@ const (
 	skillNodePipMinW     = float32(96)
 	skillNodePipMinH     = float32(40)
 	skillNodeFleuronMinW = float32(130)
+	// Modal screen-fraction sizing — this is the only modal sized inline (it
+	// paints an opaque backdrop before drawVeiledCard, so it can't reuse the
+	// shared drawScreenFractionScaffold). Named to match the
+	// *ModalWidthFrac/HeightFrac token family the other modals use.
+	skillTreeMaxWidthFrac = float32(0.92) // columns shrink to fit rather than overflow this
+	skillTreeHeightFrac   = float32(0.74) // card height as a fraction of the screen
+	// Header / body vertical offsets from the card top (the "breathing room" pass).
+	skillTreeHeaderTitleY  = float32(24) // title baseline
+	skillTreeHeaderGlyphY  = float32(38) // class crest baseline (lower, off the mitre)
+	skillTreeHeaderSPY     = float32(28) // right-aligned skill-point balance baseline
+	skillTreeBodyTopY      = float32(74) // tree-column block top
+	skillTreeBodyBottomPad = float32(22) // gap above the detail strip + footer
+	skillTreeDetailH       = float32(84) // detail strip height
+	skillTreeFooterH       = float32(42) // footer hint-bar reserve
 )
 
 // DrawSkillTreeModal paints the skill-tree modal on top of the panels
@@ -65,12 +79,12 @@ func DrawSkillTreeModal(g *core.GameState, assets Resources) {
 	sw, sh := screenSizeF()
 	colW := skillTreeColW
 	cardW := skillTreeColW*float32(n) + skillTreeColGap*float32(n-1) + skillTreeSidePad*2
-	if maxW := sw * 0.92; cardW > maxW {
+	if maxW := sw * skillTreeMaxWidthFrac; cardW > maxW {
 		// Tiny screen: shrink the columns to fit rather than overflow.
 		cardW = maxW
 		colW = (cardW - skillTreeSidePad*2 - skillTreeColGap*float32(n-1)) / float32(n)
 	}
-	cardH := sh * 0.74
+	cardH := sh * skillTreeHeightFrac
 
 	// Opaque backdrop painted at the card's spot BEFORE the veiled card, so
 	// the glass body composites over solid dark instead of the world/overlay
@@ -89,23 +103,21 @@ func DrawSkillTreeModal(g *core.GameState, assets Resources) {
 	classCol := classAccent(m.Class)
 	// Header sits lower off the top frame (was +16/+30) so the title isn't
 	// crowding the wood mitre — part of the "more breathing room" pass.
-	drawClassGlyph(card.X+skillTreeHeaderGlyphX, card.Y+38, 12, m.Class, classCol)
-	drawEngravedText(font, m.Name+" — Skill Trees", card.X+skillTreeHeaderTitleX, card.Y+24, FontHeading, textPrimary)
+	drawClassGlyph(card.X+skillTreeHeaderGlyphX, card.Y+skillTreeHeaderGlyphY, 12, m.Class, classCol)
+	drawEngravedText(font, m.Name+" — Skill Trees", card.X+skillTreeHeaderTitleX, card.Y+skillTreeHeaderTitleY, FontHeading, textPrimary)
 	spText := skillPointsLabel(m.SkillPoints)
 	spCol := textMuted
 	if m.SkillPoints > 0 {
 		spCol = inkAccent
 	}
-	drawTextRightAligned(font, spText, card.X+card.Width-skillTreeCardInset, card.Y+28, FontBody, spCol)
+	drawTextRightAligned(font, spText, card.X+card.Width-skillTreeCardInset, card.Y+skillTreeHeaderSPY, FontBody, spCol)
 
 	// Body region for the tree columns, above the detail strip. Columns are
 	// a fixed narrow width, centered as a block so the spacing reads evenly.
 	// Deeper footer reserve + a wider gap above it keep the hint bar and the
 	// detail strip off the bottom frame (the "too tight / too cluttered" pass).
-	const detailH = float32(84)
-	const footerH = float32(42)
-	bodyTop := card.Y + 74
-	bodyBottom := card.Y + card.Height - detailH - footerH - 22
+	bodyTop := card.Y + skillTreeBodyTopY
+	bodyBottom := card.Y + card.Height - skillTreeDetailH - skillTreeFooterH - skillTreeBodyBottomPad
 	blockW := colW*float32(n) + skillTreeColGap*float32(n-1)
 	startX := card.X + (card.Width-blockW)/2
 	for ti, tr := range trees {
@@ -113,7 +125,7 @@ func DrawSkillTreeModal(g *core.GameState, assets Resources) {
 		drawSkillTreeColumn(font, g, &m, tr, ti, colX, bodyTop, colW, bodyBottom-bodyTop)
 	}
 
-	drawSkillTreeDetail(font, g, &m, trees, card, detailH, footerH)
+	drawSkillTreeDetail(font, g, &m, trees, card, skillTreeDetailH, skillTreeFooterH)
 
 	drawModalFooterGlyphsLeft(font, card, card.X+skillTreeCardInset, []HintSeg{
 		Hint("Tree", GlyphLeftRight),
@@ -184,8 +196,7 @@ func drawSkillTreeNode(font rl.Font, m *core.PartyMember, node core.SkillTreeNod
 	}
 	drawSkillNodePlate(rect, bg, rank, unlocked, focused)
 	if focused {
-		roundness := fixedRoundnessFor(int32(rect.Width), int32(rect.Height), cornerRadius)
-		rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, 3, giltBright)
+		drawGiltFocusRing(rect)
 	}
 
 	nameCol := rowTextColor(unlocked, !unlocked, textDim)

@@ -69,6 +69,11 @@ const (
 	dropdownPad      = float32(6)
 )
 
+// dropdownArrowSuffix is the "opens a picker" affordance appended to a button's
+// label whose click opens a dropdown. Kept in one place so the glyph can't
+// drift (▼ vs ▾ vs a different spacing) across the ~dozen picker buttons.
+const dropdownArrowSuffix = "  ▼"
+
 func (s *State) dropdownOpen() bool { return s.dropdown.owner != ddNone }
 
 // openDropdown arms the dropdown for owner, dropping from anchor. Resets the

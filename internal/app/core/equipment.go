@@ -137,10 +137,7 @@ func EffectiveArmor(m PartyMember) int {
 	// different buffs stack; an un-buffed member has no mods and skips the sum.
 	_, buffArmor, _ := SumStatusMods(m.Buffs)
 	armor += buffArmor
-	if armor < 0 {
-		armor = 0
-	}
-	return armor
+	return floorInt(armor)
 }
 
 // EffectiveMDef returns the magic-defense value used by
@@ -168,20 +165,14 @@ func EffectiveMDef(m PartyMember) int {
 func EffectiveDefenses(m PartyMember) (armor, mdef int) {
 	equipDelta, equipArmor, equipMDef := foldEquipment(&m)
 	buffStats, buffArmor, buffMDef := SumStatusMods(m.Buffs)
-	armor = m.Armor + equipArmor + buffArmor
-	if armor < 0 {
-		armor = 0
-	}
+	armor = floorInt(m.Armor + equipArmor + buffArmor)
 	// WIS-derived MDef reads effective WIS (base + equip + buff) — see EffectiveMDef.
 	eff := addStatsFloored(addStatsFloored(m.Stats, equipDelta), buffStats)
 	mdef = MagicDefense(eff) + equipMDef + buffMDef
 	if m.IceArmorTurns > 0 {
 		mdef += IceArmorMDef
 	}
-	if mdef < 0 {
-		mdef = 0
-	}
-	return armor, mdef
+	return armor, floorInt(mdef)
 }
 
 // EffectiveStats returns the member's base stats with equipped item

@@ -7,6 +7,28 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+// Level-up modal layout — header positions and the per-stat row grid.
+// Named (mirrors shop.go's shop* block) so a "rows too cramped" retune is
+// one edit here instead of bare offsets scattered through the draw loop.
+// Header/row offsets are relative to the card; column/baseline offsets are
+// relative to each row's origin.
+const (
+	levelUpHeaderX    = int32(22)   // header text inset from card left
+	levelUpHeaderY    = int32(46)   // primary readout baseline from card top
+	levelUpHeaderSubY = int32(76)   // skill-point reminder baseline from card top
+	levelUpRowTop     = int32(112)  // first stat row's top from card top
+	levelUpRowH       = int32(64)   // per-stat row height
+	levelUpRowX       = int32(24)   // row inset from card left
+	levelUpRowMargin  = int32(48)   // total horizontal row margin (2× the inset)
+	levelUpIconX      = float32(16) // stat sigil x from row left
+	levelUpIconY      = float32(24) // stat sigil y from row top
+	levelUpLabelX     = int32(44)   // label x from row left
+	levelUpLabelY     = int32(6)    // label / value baseline y from row top
+	levelUpSubX       = int32(96)   // sub-text x from row left
+	levelUpSubY       = int32(36)   // sub-text baseline y from row top
+	levelUpValueInset = float32(12) // right-aligned value inset from row right edge
+)
+
 // DrawLevelUpModal paints the post-battle stat-spend dialog. Each
 // stat row shows label + description + the running "current → new"
 // preview that reflects the player's staged pending picks. A skill-
@@ -39,10 +61,10 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 	if staged > 0 {
 		primary += "   ·   " + strconv.Itoa(staged) + " staged"
 	}
-	drawTextWithShadow(font, primary, float32(cardX+22), float32(cardY+46), FontBody, textPrimary)
+	drawTextWithShadow(font, primary, float32(cardX+levelUpHeaderX), float32(cardY+levelUpHeaderY), FontBody, textPrimary)
 	if m.SkillPoints > 0 {
 		secondary := strconv.Itoa(m.SkillPoints) + " skill pt" + plural(m.SkillPoints) + " banked — spend in the Skills tab"
-		drawTextWithShadow(font, secondary, float32(cardX+22), float32(cardY+76), FontSmall, inkAccent)
+		drawTextWithShadow(font, secondary, float32(cardX+levelUpHeaderX), float32(cardY+levelUpHeaderSubY), FontSmall, inkAccent)
 	}
 
 	// Stat rows. Each row is taller (64px) so the label, description,
@@ -50,10 +72,10 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 	//   left: LABEL (FontBody)
 	//   left + indent: description (FontTiny, dim)
 	//   right: current → new (FontBody, bright when staged)
-	rowY := cardY + 112
-	rowH := int32(64)
-	rowX := cardX + 24
-	rowW := cardW - 48
+	rowY := cardY + levelUpRowTop
+	rowH := levelUpRowH
+	rowX := cardX + levelUpRowX
+	rowW := cardW - levelUpRowMargin
 	for s := core.Stat(0); s < core.StatCount; s++ {
 		focused := g.LevelUpRowCursor == int(s)
 		rect := SelectionRowRect(rowX, rowY, rowW, rowH-6)
@@ -77,8 +99,8 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		if focused {
 			iconCol = giltBright
 		}
-		drawStatIcon(s, float32(rowX)+16, float32(rowY)+24, 12, iconCol)
-		drawEngravedText(font, label, float32(rowX+44), float32(rowY+6), FontHeading, col)
+		drawStatIcon(s, float32(rowX)+levelUpIconX, float32(rowY)+levelUpIconY, 12, iconCol)
+		drawEngravedText(font, label, float32(rowX+levelUpLabelX), float32(rowY+levelUpLabelY), FontHeading, col)
 		// When the player has staged a spend on this row, swap the
 		// static description for the computed before→after preview so
 		// the row tells you what the point actually BUYS instead of
@@ -92,7 +114,7 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 			subText = core.StatDescription(s)
 		}
 		if subText != "" {
-			drawTextWithShadow(font, subText, float32(rowX+96), float32(rowY+36), FontSmall, subCol)
+			drawTextWithShadow(font, subText, float32(rowX+levelUpSubX), float32(rowY+levelUpSubY), FontSmall, subCol)
 		}
 
 		var preview string
@@ -103,7 +125,7 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		} else {
 			preview = strconv.Itoa(cur)
 		}
-		drawTextRightAligned(font, preview, float32(rowX)+float32(rowW)-12, float32(rowY+6), FontHeading, previewCol)
+		drawTextRightAligned(font, preview, float32(rowX)+float32(rowW)-levelUpValueInset, float32(rowY+levelUpLabelY), FontHeading, previewCol)
 		rowY += rowH
 	}
 

@@ -644,7 +644,7 @@ func drawFoeViewModal(s *State, font rl.Font, theme render.Theme) {
 	// Foe picker header: < Name >.
 	drawButton(font, l.prevFoeBtn, "<", false)
 	drawButton(font, l.nextFoeBtn, ">", false)
-	name := core.EnemyInfo(s.foeKind).Name + "  ▼" // ▼ = click the name to pick from all kinds
+	name := core.EnemyInfo(s.foeKind).Name + dropdownArrowSuffix // ▼ = click the name to pick from all kinds
 	nameSize := render.MeasureRichText(font, name, editorFontTopbar, 1)
 	nameSpanX := l.prevFoeBtn.X + l.prevFoeBtn.Width
 	nameSpanW := l.nextFoeBtn.X - nameSpanX
@@ -714,13 +714,20 @@ func drawAssetTab(font rl.Font, theme render.Theme, l foeViewLayout, ov *core.En
 	}
 }
 
-func drawFoeSlider(font rl.Font, theme render.Theme, l foeViewLayout, i int, s *State) {
+// drawVisualSlider draws row i of the shared visualizer field stack (foeFields)
+// against the given working override and focused-row cursor. drawFoeSlider and
+// drawPartySlider differ only in those two (s.foeVisual/s.foeCursor vs
+// s.partyVisual/s.partyCursor), so both delegate here — mirroring how
+// drawAssetTab is already shared across the two visualizer modals.
+func drawVisualSlider(font rl.Font, theme render.Theme, l foeViewLayout, i int, ov *core.EnemyVisualOverride, cursor int) {
 	f := foeFields[i]
 	track := l.sliderTracks[i]
-	focused := s.foeCursor == i
-	value := f.Get(&s.foeVisual)
-	val := fmt.Sprintf(f.Format, value)
-	drawSlider(font, theme, f.Label, val, value, f.Min, f.Max,
+	value := f.Get(ov)
+	drawSlider(font, theme, f.Label, fmt.Sprintf(f.Format, value), value, f.Min, f.Max,
 		rl.NewVector2(track.X-foeLabelW, track.Y-4), rl.NewVector2(track.X+track.Width+8, track.Y-4),
-		editorFontAccent, track, 6, focused)
+		editorFontAccent, track, 6, cursor == i)
+}
+
+func drawFoeSlider(font rl.Font, theme render.Theme, l foeViewLayout, i int, s *State) {
+	drawVisualSlider(font, theme, l, i, &s.foeVisual, s.foeCursor)
 }

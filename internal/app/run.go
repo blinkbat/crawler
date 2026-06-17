@@ -239,28 +239,13 @@ func applyAreaTransition(g *core.GameState) error {
 		return err
 	}
 	next := core.NewGameState(area)
-	// Carry forward the things that belong to the party, not the world.
-	next.Party = g.Party
-	next.Inventory = g.Inventory
-	// Gold + the quest journal travel with the party, not the map — without
-	// this they'd reset to the fresh-state seed (0 gold, starter quests)
-	// every time the player walked through a door.
-	next.Gold = g.Gold
-	next.Quests = g.Quests
-	next.StepCount = g.StepCount
-	// Carry the storm across the threshold like the day/night phase: an
-	// outdoor->outdoor door keeps the rain rolling; stepping into a roofed
-	// area lets the next TickWeatherStep recede it.
-	next.Weather = g.Weather
-	next.RNG = g.RNG
-	next.DebugOverlay = g.DebugOverlay
-	next.EnemiesDisabled = g.EnemiesDisabled
-	next.EasyBattleQuit = g.EasyBattleQuit
-	// The render-log FILE stays open across the transition (it's not closed
-	// here), and the per-frame logger gates on the file-open state, so the
-	// flag must carry too — otherwise the Debug submenu reads "Render Log:
-	// Off" while the log keeps writing, desyncing the toggle.
-	next.RenderLogEnabled = g.RenderLogEnabled
+	// Carry forward the things that belong to the party, not the world — party,
+	// bag, gold, quest journal, step count, the weather (an outdoor->outdoor
+	// door keeps the rain rolling; a roofed area recedes it next TickWeatherStep),
+	// the RNG, and the debug/render-log runtime toggles. The "what travels with
+	// the party" set lives on core.GameState.CarryProgressionFrom so this door
+	// path and the struct can't drift.
+	next.CarryProgressionFrom(g)
 	dest := core.DoorByName(next.Doors, doorName)
 	if dest == nil {
 		return errDoorNotFound(target, doorName)

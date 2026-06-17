@@ -1526,6 +1526,8 @@ func closeModal(s *State) {
 	case modalPartyView:
 		render.ClosePartyPreview()
 		render.ClearAssetPreview()
+	case modalObjectView:
+		render.CloseObjectPreview()
 	}
 	s.modal = modalNone
 	s.modalCursor = 0
@@ -1961,7 +1963,7 @@ func packEditCmds(s *State) (adds, actions []modalCmd) {
 		{label: "Remove", run: func() Action { packRemoveSelected(s, pack); return ActionNone }},
 		{label: "Up", run: func() Action { packMoveSelected(s, pack, -1); return ActionNone }},
 		{label: "Down", run: func() Action { packMoveSelected(s, pack, +1); return ActionNone }},
-		{label: "AI: " + core.PackAILabel(pack.AI) + "  ▼", run: func() Action { openPackAIDropdown(s); return ActionNone }},
+		{label: "AI: " + core.PackAILabel(pack.AI) + dropdownArrowSuffix, run: func() Action { openPackAIDropdown(s); return ActionNone }},
 	}
 	return adds, actions
 }

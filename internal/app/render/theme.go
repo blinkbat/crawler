@@ -342,17 +342,40 @@ var (
 	markerChestDim = rl.NewColor(160, 132, 78, 255)
 	markerDoor     = rl.NewColor(176, 132, 86, 255)
 	markerPack     = rl.NewColor(220, 76, 70, 255)
+	markerPlayer   = rl.NewColor(132, 240, 148, 255) // player facing arrow (minimap + panels Map tab)
 	// crystalCyanBase is the shared charged-crystal cyan — the single source of
 	// truth for both the editor/minimap marker (markerCrystal) and the in-world
 	// gem body (crystal.go's crystalColor pulses this base's R/G channels). Keeps
 	// the marker and the entity the player sees in lockstep instead of two
 	// hand-synced literals.
 	crystalCyanBase = rl.NewColor(96, 214, 232, 255)
+	// Companion crystal tints — the dormant gem body and the charged/dormant
+	// faceted-edge wires. Live beside crystalCyanBase so the whole gem palette
+	// (charged body + dormant body + both edge states) tunes in one place
+	// instead of as scattered literals in crystal.go.
+	crystalDormantBody = rl.NewColor(70, 92, 110, 190)   // dormant gem body (flat slate)
+	crystalEdgeCharged = rl.NewColor(210, 250, 255, 220) // charged faceted wire
+	crystalEdgeDormant = rl.NewColor(110, 130, 150, 150) // dormant faceted wire
 	// markerCrystal reads as the same charged-crystal cyan the player sees, and
 	// stands clear of the amber chest / brown door / red pack / yellow start
 	// swatches.
 	markerCrystal = crystalCyanBase
 	markerOutline = rl.NewColor(0, 0, 0, 220)
+
+	// Hit-glyph clarity colors (render/hitglyph.go) — the signature hue of
+	// each attack glyph. Named here so the hues can be matched to their VFX
+	// particle bursts instead of living as scattered rl.NewColor literals per
+	// painter. Painters override the alpha per frame via
+	// colorWithAlpha(_, glyphFade(t)); the alpha below is a placeholder.
+	glyphSlashColor  = rl.NewColor(245, 248, 255, 255)
+	glyphImpactColor = rl.NewColor(255, 236, 150, 255)
+	glyphFrostColor  = rl.NewColor(170, 224, 255, 255)
+	glyphSparkBolt   = rl.NewColor(150, 205, 255, 255)
+	glyphSparkCore   = rl.NewColor(225, 242, 255, 255)
+	glyphFireOuter   = rl.NewColor(255, 150, 60, 255)
+	glyphFireInner   = rl.NewColor(255, 222, 130, 255)
+	glyphHolyColor   = rl.NewColor(255, 232, 150, 255)
+	glyphVenomColor  = rl.NewColor(150, 230, 110, 255)
 
 	// mapTileFogColor is the dim fill drawn for cells that fall outside
 	// the area's bounds — the "fog" beyond the walkable map. Shared by
@@ -407,6 +430,22 @@ const (
 	// pane's rows stop being readable, so it stays this tall even if that means
 	// overlapping a neighbor on a very small window.
 	hudPanelMinH = int32(160)
+
+	// Enemy roster card (battle.go) — the top-center pane listing the foes.
+	// Named here with the other HUD geometry so a "rows too cramped" retune is
+	// one edit rather than bare literals at the draw site.
+	rosterRowH      = int32(60)  // per-enemy row height
+	rosterTopPad    = int32(18)  // inset above the first row
+	rosterBottomPad = int32(18)  // inset below the last row
+	rosterW         = int32(560) // multi-enemy width
+	rosterWSingle   = int32(440) // single-enemy width (narrower)
+
+	// Combat HUD panes (battle.go) — the bottom-left action log and the
+	// bottom-right action menu. Both share the hudPanelMinH collision floor.
+	actionLogW  = int32(320)
+	actionLogH  = int32(300)
+	actionMenuW = int32(340)
+	actionMenuH = int32(312)
 
 	// Corner radii. Smaller than the previous pass (10/6 → 4/3) so the
 	// frame reads as a hardwood mitre joint rather than a modern UI
@@ -496,6 +535,10 @@ const (
 	// fewer items renders shorter via cardH expansion at the call site,
 	// but the WIDTH stays standardized.
 	overlayCardWidthSmall = int32(360) // chest modal (item list)
+	// modalMinCardH floors a content-sized modal card's height so a short
+	// node/list still reads as a card. Shared by the dialog and chest modals
+	// (both previously floored at an independent bare 200).
+	modalMinCardH = int32(200)
 	// The level-up modal and game-panels overlay size themselves
 	// screen-relative (drawScreenFractionScaffold) rather than off fixed
 	// widths, so the character menus scale with the window and stay
@@ -541,6 +584,12 @@ const (
 // overlayCardWidth* / overlayCardHeight* constants in this file are
 // the seam where future "shrink for small screens" or "fade-in"
 // behaviour lands once.
+// modalHeadingInsetY is the Y offset from a modal card's top edge to its
+// heading baseline. Shared by drawModalScaffold's built-in heading and the
+// dialog overlay's hand-drawn speaker nameplate (which passes an empty heading
+// to the scaffold and stamps its own at the same band) so the two stay aligned.
+const modalHeadingInsetY = int32(14)
+
 func drawModalScaffold(font rl.Font, cardW, cardH int32, heading string) rl.Rectangle {
 	screenW, screenH := screenSize()
 	// Soft clamp so a tiny window doesn't push the card off-screen.
@@ -552,7 +601,7 @@ func drawModalScaffold(font rl.Font, cardW, cardH int32, heading string) rl.Rect
 	}
 	rect := drawVeiledCard(cardW, cardH, borderSoft, borderActive, giltDim)
 	if heading != "" {
-		drawHeading(font, heading, int32(rect.X)+28, int32(rect.Y)+14, borderActive)
+		drawHeading(font, heading, int32(rect.X)+28, int32(rect.Y)+modalHeadingInsetY, borderActive)
 	}
 	return rect
 }
@@ -1093,6 +1142,16 @@ func drawSmallPanelOutline(x, y, w, h int32, col color.RGBA) {
 	}
 	rect := rl.NewRectangle(float32(x), float32(y), float32(w), float32(h))
 	rl.DrawRectangleRoundedLinesEx(rect, fixedRoundnessFor(w, h, smallCornerRadius), 6, 1, col)
+}
+
+// drawGiltFocusRing paints the bold 3px gilt "you're here" frame around a
+// focused/active rounded surface, with corners matching the glass body radius.
+// Shared by the active party member card (panels.go) and the focused skill-tree
+// node plate (skilltree.go) — both want the identical giltBright ring, so the
+// roundness + thickness + color triple lives in one place.
+func drawGiltFocusRing(rect rl.Rectangle) {
+	roundness := fixedRoundnessFor(int32(rect.Width), int32(rect.Height), cornerRadius)
+	rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, 3, giltBright)
 }
 
 func fixedRoundnessFor(w, h int32, target float32) float32 {

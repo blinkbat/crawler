@@ -123,15 +123,15 @@ func drawEnemyRoster(g *core.GameState, assets Resources) {
 		return
 	}
 
-	rowH := int32(60)
+	rowH := rosterRowH
 	// Inner pad replaces the old header band — the row content names
 	// the enemies and shows their wound state; a tautological "GOBLINS 3/5"
 	// title above them was just chrome.
-	topPad := int32(18)
-	padBottom := int32(18)
-	w := int32(560)
+	topPad := rosterTopPad
+	padBottom := rosterBottomPad
+	w := rosterW
 	if len(slots) <= 1 {
-		w = 440
+		w = rosterWSingle
 	}
 	h := topPad + int32(len(slots))*rowH + padBottom
 	x := centerX(w)
@@ -425,8 +425,8 @@ func drawActionLogPanel(g *core.GameState, assets Resources) {
 	// BOTTOM edge pins to the screen bottom (hudEdgePad margin); it stretches
 	// up toward the turn panel, then floors at 160 px so it stays usable on
 	// very short windows.
-	w := int32(320)
-	h := int32(300)
+	w := actionLogW
+	h := actionLogH
 	_, screenH := screenSize()
 	x := hudEdgePad
 	bottomY := screenH - hudEdgePad
@@ -632,13 +632,13 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	}
 
 	screenW, screenH := screenSize()
-	w := int32(340)
+	w := actionMenuW
 	// Taller panel — a name header now sits atop 4 action rows
 	// (Attack/Skill/Defend/Item), and the item picker mode reuses this
 	// same panel for its list. Pins to the bottom-RIGHT corner: right edge at
 	// hudEdgePad from the screen edge, bottom edge at hudEdgePad from the
 	// screen bottom.
-	h := int32(312)
+	h := actionMenuH
 	x := screenW - w - hudEdgePad
 	bottomY := screenH - hudEdgePad
 	y := bottomY - h
@@ -840,11 +840,11 @@ func init() {
 
 // drawActionIcon dispatches to the per-action sigil drawer. Each glyph
 // is sized by `r` (its half-extent) and tinted by `col` so the
-// selection state propagates without duplicating a switch.
+// selection state propagates without duplicating a switch. row indexes
+// the init-asserted [ActionRowCount] table directly — an out-of-range
+// row panics on the bounds check (loud, like slotIconForKind) rather
+// than silently drawing nothing.
 func drawActionIcon(row core.ActionRow, cx, cy, r float32, col rl.Color) {
-	if int(row) < 0 || int(row) >= len(actionIconDrawers) {
-		return
-	}
 	actionIconDrawers[row](cx, cy, r, col)
 }
 

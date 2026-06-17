@@ -111,7 +111,7 @@ func DrawHeading(font rl.Font, text string, x, y int32, accent color.RGBA) {
 
 // DrawSubHeading writes the second-tier heading style used inside modal
 // columns ("Synth params", "Saved sounds", etc.) — a drop-shadowed label
-// at FontBody (20px) in the accent color. Lighter than DrawHeading, no underline.
+// at FontBody in the accent color. Lighter than DrawHeading, no underline.
 // Centralized here so modal authors don't reach for DrawTextWithShadow at
 // an ad-hoc size and drift the visual tier.
 func DrawSubHeading(font rl.Font, text string, x, y float32, accent color.RGBA) {
@@ -136,11 +136,11 @@ func DrawEngravedText(font rl.Font, text string, x, y, size float32, col color.R
 // bottom edge. Replaces the older blue-purple "active-tint" fill
 // so every list-style surface speaks the library aesthetic.
 //
-// Used by modal pickers (chest, level-up, sound editor) for the
-// cursor-on-row highlight. The action menu and party card paint their
-// own variant inline; the panels Items/Skills/Equipment rows route
-// through drawFocusableRow (theme.go), which owns both focused and
-// unfocused row states.
+// Used by modal pickers (chest, dialog choices, level-up, and the
+// editor's sound editor) for the cursor-on-row highlight. The action
+// menu and party card paint their own variant inline; the panels
+// Items/Skills/Equipment rows route through drawFocusableRow (theme.go),
+// which owns both focused and unfocused row states.
 // SelectionRowRect insets a row's (x, y, w) by the canonical
 // DrawSelectedRow highlight padding (−6 x, −4 y, +12 w) so the gilt
 // spine + underline sit just outside the row content. Height passes

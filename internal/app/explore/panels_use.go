@@ -43,7 +43,7 @@ func tryUseItem(g *core.GameState) {
 	}
 	kind := stacks[idx].Kind
 	def := core.ItemInfo(kind)
-	if def.HealAmount <= 0 && def.MPAmount <= 0 {
+	if !core.ItemIsRestorative(def) {
 		audio.Play(audio.SoundInputMiss) // equipment / no restorative effect
 		return
 	}

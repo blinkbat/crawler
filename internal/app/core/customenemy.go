@@ -307,13 +307,23 @@ func SwapPackMembers(sp *PackSpawn, i, j int) {
 	sp.Members[i], sp.Members[j] = sp.Members[j], sp.Members[i]
 }
 
+// packMemberCustom resolves the custom enemy a pack slot names, if any: it reads
+// the slot's custom-name tag and looks it up in the area's custom roster.
+// ok=false means the slot is a plain built-in kind (read sp.Members[idx].Kind).
+// Shared by PackMemberDefinition and PackMemberVisualKind so the name→roster
+// resolution prologue lives in exactly one place.
+func packMemberCustom(a AreaDefinition, sp PackSpawn, idx int) (CustomEnemyDef, bool) {
+	if name := PackMemberCustomName(sp, idx); name != "" {
+		return CustomEnemyByName(a.CustomEnemies, name)
+	}
+	return CustomEnemyDef{}, false
+}
+
 // PackMemberDefinition returns the effective definition for an authored pack
 // member, resolving custom names through the containing area.
 func PackMemberDefinition(a AreaDefinition, sp PackSpawn, idx int) EnemyDefinition {
-	if name := PackMemberCustomName(sp, idx); name != "" {
-		if def, ok := CustomEnemyByName(a.CustomEnemies, name); ok {
-			return def.Definition()
-		}
+	if def, ok := packMemberCustom(a, sp, idx); ok {
+		return def.Definition()
 	}
 	if idx < 0 || idx >= len(sp.Members) {
 		return EnemyInfo(EnemyRat)
@@ -329,10 +339,8 @@ func PackMemberDisplayName(a AreaDefinition, sp PackSpawn, idx int) string {
 // PackMemberVisualKind returns the base kind whose sprite/color should
 // represent an authored pack slot.
 func PackMemberVisualKind(a AreaDefinition, sp PackSpawn, idx int) EnemyKind {
-	if name := PackMemberCustomName(sp, idx); name != "" {
-		if def, ok := CustomEnemyByName(a.CustomEnemies, name); ok {
-			return def.BaseKind
-		}
+	if def, ok := packMemberCustom(a, sp, idx); ok {
+		return def.BaseKind
 	}
 	if idx < 0 || idx >= len(sp.Members) {
 		return EnemyRat

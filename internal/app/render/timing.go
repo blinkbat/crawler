@@ -260,7 +260,13 @@ func drawTimingBar(g *core.GameState, assets Resources) {
 		drawRecallBar(timing, g, assets, x, y, barW, barH, flashing)
 	case core.TimingKindReels:
 		drawReelBar(timing, g, assets, x, y, barW, barH, flashing)
+	case core.TimingKindPress:
+		drawPressBar(timing, g, assets, x, y, barW, barH, flashing)
 	default:
+		// Unknown kind — a newly-added core.TimingKind with no bar here. Log it
+		// loudly (matching the package's fail-noisy house style) and fall back to
+		// the Press bar rather than drawing nothing.
+		LogRenderError("timing: no bar for TimingKind %d; drew Press fallback", int(timing.Kind))
 		drawPressBar(timing, g, assets, x, y, barW, barH, flashing)
 	}
 }

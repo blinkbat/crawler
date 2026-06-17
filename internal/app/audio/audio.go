@@ -274,6 +274,18 @@ func Play(id Sound) {
 	rl.PlaySound(bank[id])
 }
 
+// PlayResult fires the success/failure feedback cue for a bool-returning action
+// (bought a skill node, equipped an item, …): the bright SoundInputGreat on ok,
+// the SoundInputMiss buzz otherwise. Centralizes the ok→cue pairing that several
+// explore call sites would otherwise spell out as an if/else.
+func PlayResult(ok bool) {
+	if ok {
+		Play(SoundInputGreat)
+	} else {
+		Play(SoundInputMiss)
+	}
+}
+
 // loadBank is the one path that builds the bank from the on-disk
 // state: files + the action map (assignments.txt). Steps:
 //

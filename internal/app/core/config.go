@@ -432,6 +432,12 @@ const (
 	EnemyDifficultyNum = 7
 	EnemyDifficultyDen = 5
 
+	// ShopSellDivisor is the sell-back ratio: an item resells for its catalog
+	// Price / ShopSellDivisor (floored at 1 by ShopSellPrice). The economy's
+	// one sell-value lever, here with the other balance dials rather than
+	// inlined as a bare "/ 2" in economy.go.
+	ShopSellDivisor = 2
+
 	// Flee (combat menu, last row). Success ends the fight and retreats the
 	// party to the pre-combat tile; failure costs the actor's turn. Chance is
 	// driven by the party's average living level vs the pack's average living

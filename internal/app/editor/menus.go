@@ -52,6 +52,7 @@ var editorMenus = []menuGroup{
 		{label: "Foe Visuals…", apply: openFoeViewModal, desc: "Tune a foe's sprite, placement, and tint — or import a PNG."},
 		{label: "Party Visuals…", apply: openPartyViewModal, desc: "Tune a party class's sprite, placement, and tint — or import a PNG."},
 		{label: "Hit Glyphs…", apply: openHitGlyphsModal, desc: "Preview the combat hit symbols (slash, impact, frost, …)."},
+		{label: "Object Browser…", apply: openObjectViewModal, desc: "Spot-check every decor & prop as live 3D thumbnails."},
 		{label: "Object List…", apply: openEntityListModal, desc: "Jump to any pack, chest, or door on the map."},
 	}},
 	{label: "Map", items: []dropdownEntry{

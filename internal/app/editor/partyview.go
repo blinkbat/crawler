@@ -1,8 +1,6 @@
 package editor
 
 import (
-	"fmt"
-
 	"crawler/internal/app/core"
 	"crawler/internal/app/render"
 
@@ -273,12 +271,5 @@ func drawPartyViewModal(s *State, font rl.Font, theme render.Theme) {
 }
 
 func drawPartySlider(font rl.Font, theme render.Theme, l foeViewLayout, i int, s *State) {
-	f := foeFields[i]
-	track := l.sliderTracks[i]
-	focused := s.partyCursor == i
-	value := f.Get(&s.partyVisual)
-	val := fmt.Sprintf(f.Format, value)
-	drawSlider(font, theme, f.Label, val, value, f.Min, f.Max,
-		rl.NewVector2(track.X-foeLabelW, track.Y-4), rl.NewVector2(track.X+track.Width+8, track.Y-4),
-		editorFontAccent, track, 6, focused)
+	drawVisualSlider(font, theme, l, i, &s.partyVisual, s.partyCursor)
 }

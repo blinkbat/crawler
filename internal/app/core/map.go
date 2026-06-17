@@ -912,30 +912,43 @@ func FootprintWorldOffset(offsets []MultiTileOffset) (x, z float32) {
 // multi-tile anchor, and to validate the footprint fits in-bounds before
 // the click commits.
 func PropFootprint(anchor byte) []MultiTileOffset {
-	switch anchor {
-	case TileRockFormation:
-		return rockFormationFootprint
-	}
-	return nil
+	return propFootprints[anchor].offsets
 }
 
-// Shared, read-only footprint offset slices (see PropFootprint /
-// DecorFootprint). Package-level so the per-frame draw path returns them
-// without allocating a fresh literal each call.
+// footprintDef bundles a multi-tile anchor's footprint offsets with the tail
+// char stamped on every non-anchor cell of that footprint. Pairing them in one
+// row (instead of two parallel switches keyed on the same anchor) means adding
+// a multi-tile anchor is one table entry and the offsets + tail can't drift.
+type footprintDef struct {
+	offsets []MultiTileOffset
+	tail    byte
+}
+
+// Shared, read-only footprint offset slices. Package-level so the per-frame
+// draw path returns them without allocating a fresh literal each call.
 var (
 	rockFormationFootprint = []MultiTileOffset{{0, 0}, {1, 0}, {0, 1}, {1, 1}}
 	archwayFootprint       = []MultiTileOffset{{0, 0}, {1, 0}}
+)
+
+// propFootprints / decorFootprints map a multi-tile anchor char to its
+// footprint + tail. A miss returns the zero footprintDef (nil offsets, tail 0),
+// matching "single-tile or unknown anchor." The four accessors below read these
+// so the offsets and tail for one anchor stay defined together.
+var (
+	propFootprints = map[byte]footprintDef{
+		TileRockFormation: {offsets: rockFormationFootprint, tail: TileRockFormationTail},
+	}
+	decorFootprints = map[byte]footprintDef{
+		DecorArchway: {offsets: archwayFootprint, tail: DecorArchwayTail},
+	}
 )
 
 // PropFootprintTail returns the char that should be written to the tail
 // cells of a multi-tile prop's footprint (every cell except the anchor).
 // Returns 0 if the anchor is single-tile or unknown.
 func PropFootprintTail(anchor byte) byte {
-	switch anchor {
-	case TileRockFormation:
-		return TileRockFormationTail
-	}
-	return 0
+	return propFootprints[anchor].tail
 }
 
 // DecorFootprint mirrors PropFootprint for the decor layer. Decor doesn't
@@ -943,20 +956,12 @@ func PropFootprintTail(anchor byte) byte {
 // footprint so the renderer's anchor draws the spanning mesh and the
 // tail draws nothing.
 func DecorFootprint(anchor byte) []MultiTileOffset {
-	switch anchor {
-	case DecorArchway:
-		return archwayFootprint
-	}
-	return nil
+	return decorFootprints[anchor].offsets
 }
 
 // DecorFootprintTail returns the tail char for a multi-tile decor anchor.
 func DecorFootprintTail(anchor byte) byte {
-	switch anchor {
-	case DecorArchway:
-		return DecorArchwayTail
-	}
-	return 0
+	return decorFootprints[anchor].tail
 }
 
 // propTileCharList is the canonical list of every prop-layer char that

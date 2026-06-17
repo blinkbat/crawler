@@ -81,9 +81,5 @@ func buySkillNode(g *core.GameState) {
 	if g.SkillTreeRow < 0 || g.SkillTreeRow >= len(nodes) {
 		return
 	}
-	if core.BuySkillNode(m, nodes[g.SkillTreeRow].ID) {
-		audio.Play(audio.SoundInputGreat)
-	} else {
-		audio.Play(audio.SoundInputMiss)
-	}
+	audio.PlayResult(core.BuySkillNode(m, nodes[g.SkillTreeRow].ID))
 }
