@@ -145,6 +145,13 @@ func MapCustomEnemyFromDef(ce CustomEnemyDef) (mapfile.MapCustomEnemy, error) {
 	if ce.MP < 0 {
 		return mapfile.MapCustomEnemy{}, fmt.Errorf("custom enemy %q has negative MP %d", ce.Name, ce.MP)
 	}
+	// HP isn't in validateEnemyStatBounds either, and the LOADER
+	// (CustomEnemyDefFromMap) rejects HP <= 0 to avoid an "alive corpse"
+	// Enemy{HP:0, Alive:true}. Check it here so a non-editor writer can't
+	// persist a row the loader would then refuse — same lockstep as MP/Tier.
+	if ce.HP <= 0 {
+		return mapfile.MapCustomEnemy{}, fmt.Errorf("custom enemy %q has non-positive HP %d", ce.Name, ce.HP)
+	}
 	skillNames := make([]string, 0, len(ce.Skills))
 	for _, id := range ce.Skills {
 		name := SkillOnDiskName(id)

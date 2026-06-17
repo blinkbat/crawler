@@ -763,6 +763,11 @@ type State struct {
 	soundName      string
 	soundCursor    int        // row cursor inside the sound modal
 	soundLeftPanel soundPanel // which column of the sound modal has focus
+	// soundParamScroll is the vertical scroll offset (pixels) of the params
+	// column's slider body — the column now holds more sliders (grouped into
+	// Oscillator / Envelope / FX sections) than fit at once, so the body
+	// scrolls under a fixed sub-header and a fixed name/actions footer.
+	soundParamScroll float32
 	// deleteArmed is the shared two-press delete guard token: the first Delete
 	// click for a token (e.g. "sound:<name>", "custom:<name>", "door") arms it
 	// with a flash, the second for the SAME token confirms. One field + the

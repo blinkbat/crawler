@@ -386,18 +386,23 @@ func updateDropdown(s *State) bool {
 	lay := computeDropdownLayout(s, entries)
 	mp := rl.GetMousePosition()
 
-	if w := rl.GetMouseWheelMove(); w != 0 && pointIn(mp, lay.panel) {
-		s.dropdown.cursor = core.Clamp(s.dropdown.cursor-int(w), 0, len(entries)-1)
+	wheel := rl.GetMouseWheelMove()
+	if wheel != 0 && pointIn(mp, lay.panel) {
+		s.dropdown.cursor = core.Clamp(s.dropdown.cursor-int(wheel), 0, len(entries)-1)
 	}
 
 	// Mouse hover drives the cursor so the per-row description caption (and a
 	// keyboard Enter) follow the pointer. Without this the desc stuck to the last
 	// KEYBOARD row, so hovering menu items showed the wrong/no tooltip — the
-	// "dropdown tooltips don't work" report.
-	for i, rr := range lay.rows {
-		if pointIn(mp, rr) {
-			s.dropdown.cursor = lay.topRow + i
-			break
+	// "dropdown tooltips don't work" report. Skipped on a wheel-scroll frame:
+	// otherwise the row the pointer rests on immediately overrides the scroll,
+	// so the wheel appears dead whenever the cursor overlaps a row.
+	if wheel == 0 {
+		for i, rr := range lay.rows {
+			if pointIn(mp, rr) {
+				s.dropdown.cursor = lay.topRow + i
+				break
+			}
 		}
 	}
 

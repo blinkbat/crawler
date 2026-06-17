@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"crawler/internal/app/audio/wavsynth"
 )
 
 // withWorkingDir runs fn with the process cwd switched to dir, then
@@ -78,6 +80,70 @@ func TestWriteWAV_RoundTrip(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("ListSounds() = %v, missing %q", names, saved)
+		}
+	})
+}
+
+// TestWriteSound_ParamsRoundTrip writes a sound through the params-based
+// save path, then confirms both the .wav and the .snd sidecar land and
+// LoadParams reconstructs the exact knob values — the contract the
+// editor's "edit a saved sound" flow relies on. A delete then removes
+// both, leaving no orphan sidecar.
+func TestWriteSound_ParamsRoundTrip(t *testing.T) {
+	tmp := t.TempDir()
+	withWorkingDir(t, tmp, func() {
+		p := wavsynth.ShapeParams{
+			Duration: 0.12, StartHz: 330, EndHz: 990, Volume: 0.3,
+			Attack: 0.01, Decay: 0.05, Sustain: 0.6, Release: 0.08,
+			Wave: wavsynth.WaveSquare, PulseWidth: 0.3, NoiseMix: 0.2,
+			VibHz: 6, VibDepth: 0.1, TremoloHz: 4, TremoloDepth: 0.5,
+			Cutoff: 0.7, Drive: 0.4, Crush: 0.25,
+		}
+		saved, err := WriteSound("Edit Me!", p)
+		if err != nil {
+			t.Fatalf("WriteSound: %v", err)
+		}
+		if saved != "edit_me" {
+			t.Errorf("saved name = %q, want %q", saved, "edit_me")
+		}
+		if _, err := os.Stat(SoundPath(saved)); err != nil {
+			t.Errorf("expected .wav at %s: %v", SoundPath(saved), err)
+		}
+		if _, err := os.Stat(ParamsPath(saved)); err != nil {
+			t.Errorf("expected .snd sidecar at %s: %v", ParamsPath(saved), err)
+		}
+		got, ok := LoadParams(saved)
+		if !ok {
+			t.Fatal("LoadParams ok=false, want true")
+		}
+		if got != p {
+			t.Errorf("LoadParams round-trip mismatch:\n got  %+v\n want %+v", got, p)
+		}
+		// .snd is metadata, not a playable sound — it must not show up as a sound.
+		for _, n := range ListSounds() {
+			if strings.HasSuffix(n, ParamsExt) {
+				t.Errorf("ListSounds leaked sidecar entry %q", n)
+			}
+		}
+		if err := DeleteSound(saved); err != nil {
+			t.Fatalf("DeleteSound: %v", err)
+		}
+		if _, err := os.Stat(ParamsPath(saved)); !os.IsNotExist(err) {
+			t.Errorf("expected sidecar removed on delete, stat err = %v", err)
+		}
+	})
+}
+
+// TestLoadParams_MissingSidecar — a sound with no .snd (hand-dropped wav
+// or pre-sidecar save) reports ok=false rather than a zero-value sound.
+func TestLoadParams_MissingSidecar(t *testing.T) {
+	tmp := t.TempDir()
+	withWorkingDir(t, tmp, func() {
+		if _, err := WriteWAV("legacy", []int16{0, 0}); err != nil {
+			t.Fatalf("WriteWAV: %v", err)
+		}
+		if _, ok := LoadParams("legacy"); ok {
+			t.Error("LoadParams ok=true for a sound with no sidecar, want false")
 		}
 	})
 }

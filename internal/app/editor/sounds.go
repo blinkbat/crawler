@@ -25,59 +25,53 @@ const (
 	soundPanelCount
 )
 
-// soundParamSet captures the tunables for a single sweep-style cue.
-// Bounded ranges are documented per field; the sliders in the sound
-// modal map their 0..1 normalized position into these ranges via
-// soundParamSliders below. Defaults match a generic short input blip so
-// the modal opens with something audible on first preview.
-type soundParamSet struct {
-	Duration     float64 // seconds, [0.03, 0.40]
-	StartHz      float64 // Hz, [100, 1600]
-	EndHz        float64 // Hz, [100, 1600]
-	Volume       float64 // [0, 0.6]
-	Attack       float64 // seconds, [0, 0.05]
-	Release      float64 // seconds, [0, 0.30]
-	Wave         int     // 0..audio.WaveShapeCount-1 — index into audio.WaveX (Sine/Square/Triangle/Saw)
-	Noise        float64 // [0, 1] — noise mix amount
-	VibratoHz    float64 // [0, 15] — vibrato wobble rate
-	VibratoDepth float64 // [0, 0.5] — vibrato swing depth as a fraction of base Hz
+// soundParamSet captures the tunables for a single editor-authored cue.
+// It is an alias of audio.ShapeParams (the synth's own input struct) so
+// the editor, the synth, and the on-disk .snd sidecar all share ONE
+// param shape — no parallel struct to keep in lockstep, and a saved
+// sound round-trips losslessly back into the sliders. The sliders in
+// soundParamSliders map their 0..1 normalized position into the field
+// ranges; soundParamDefaults seeds an audible starter cue.
+type soundParamSet = audio.ShapeParams
+
+// soundSection groups consecutive soundParamSliders rows under a heading
+// in the (now scrollable) params column. Count is how many sliders the
+// section owns; the sum is asserted == len(soundParamSliders) at init so
+// a row added without a home is caught at startup, not silently hidden.
+type soundSection struct {
+	Title string
+	Count int
+}
+
+var soundSections = []soundSection{
+	{"Oscillator", 5}, // Wave, Start/End note, Pulse Width, Noise
+	{"Envelope", 6},   // Duration, Attack, Decay, Sustain, Release, Volume
+	{"FX", 7},         // Vibrato Hz/Depth, Tremolo Hz/Depth, Cutoff, Drive, Crush
+}
+
+// noteSlider builds a discrete note-picker row over an Hz field: the
+// underlying value stays a frequency (so the synth + sidecar are
+// unchanged), but the control reads/writes tempered note indices and the
+// readout shows "A4 (440)". Shared by the Start/End pitch rows so authored
+// pitches land on the same tempered grid as the procedural musical cues.
+func noteSlider(label string, get func(*soundParamSet) float64, set func(*soundParamSet, float64)) sliderField[soundParamSet] {
+	return sliderField[soundParamSet]{
+		Label: label, Min: 0, Max: float64(audio.NoteCount - 1), Step: 1, Format: "%.0f",
+		Get: func(p *soundParamSet) float64 { return float64(audio.NearestNoteIndex(get(p))) },
+		Set: func(p *soundParamSet, v float64) { set(p, audio.NoteHz(int(v+0.5))) },
+		Display: func(v float64) string {
+			i := int(v + 0.5)
+			return fmt.Sprintf("%s (%.0f)", audio.NoteName(i), audio.NoteHz(i))
+		},
+	}
 }
 
 // soundParamSliders describes the sound modal's slider column — one
-// sliderField (slider.go) row per synth parameter. The cursor walks this
-// slice; each row reads/writes its named field on the soundParamSet via
-// the getter/setter callbacks.
+// sliderField (slider.go) row per synth parameter, in soundSections
+// order. The cursor walks this slice; each row reads/writes its named
+// field on the soundParamSet via the getter/setter callbacks.
 var soundParamSliders = []sliderField[soundParamSet]{
-	{
-		Label: "Duration", Min: 0.03, Max: 0.40, Step: 0.01, Format: "%.2fs",
-		Get: func(p *soundParamSet) float64 { return p.Duration },
-		Set: func(p *soundParamSet, v float64) { p.Duration = v },
-	},
-	{
-		Label: "Start Hz", Min: 100, Max: 1600, Step: 20, Format: "%.0f Hz",
-		Get: func(p *soundParamSet) float64 { return p.StartHz },
-		Set: func(p *soundParamSet, v float64) { p.StartHz = v },
-	},
-	{
-		Label: "End Hz", Min: 100, Max: 1600, Step: 20, Format: "%.0f Hz",
-		Get: func(p *soundParamSet) float64 { return p.EndHz },
-		Set: func(p *soundParamSet, v float64) { p.EndHz = v },
-	},
-	{
-		Label: "Volume", Min: 0.0, Max: 0.6, Step: 0.02, Format: "%.2f",
-		Get: func(p *soundParamSet) float64 { return p.Volume },
-		Set: func(p *soundParamSet, v float64) { p.Volume = v },
-	},
-	{
-		Label: "Attack", Min: 0.0, Max: 0.05, Step: 0.005, Format: "%.3fs",
-		Get: func(p *soundParamSet) float64 { return p.Attack },
-		Set: func(p *soundParamSet, v float64) { p.Attack = v },
-	},
-	{
-		Label: "Release", Min: 0.0, Max: 0.30, Step: 0.01, Format: "%.2fs",
-		Get: func(p *soundParamSet) float64 { return p.Release },
-		Set: func(p *soundParamSet, v float64) { p.Release = v },
-	},
+	// — Oscillator —
 	{
 		// Wave shape — discrete toggle dressed up as a slider. Step=1 +
 		// Min/Max=0..WaveShapeCount-1 means Left/Right cycles through the
@@ -95,47 +89,129 @@ var soundParamSliders = []sliderField[soundParamSet]{
 			if i > audio.WaveShapeCount-1 {
 				i = audio.WaveShapeCount - 1
 			}
-			p.Wave = i
+			p.Wave = audio.WaveShape(i)
 		},
 		Display: func(v float64) string {
 			return audio.WaveShapeName(audio.WaveShape(int(v + 0.5)))
 		},
 	},
+	noteSlider("Start Note", func(p *soundParamSet) float64 { return p.StartHz }, func(p *soundParamSet, v float64) { p.StartHz = v }),
+	noteSlider("End Note", func(p *soundParamSet) float64 { return p.EndHz }, func(p *soundParamSet, v float64) { p.EndHz = v }),
 	{
-		Label: "Noise", Min: 0.0, Max: 1.0, Step: 0.05, Format: "%.2f",
-		Get: func(p *soundParamSet) float64 { return p.Noise },
-		Set: func(p *soundParamSet, v float64) { p.Noise = v },
+		Label: "Pulse Width", Min: 0.05, Max: 0.95, Step: 0.05, Format: "%.2f",
+		Get: func(p *soundParamSet) float64 { return p.PulseWidth },
+		Set: func(p *soundParamSet, v float64) { p.PulseWidth = v },
 	},
 	{
+		Label: "Noise", Min: 0.0, Max: 1.0, Step: 0.05, Format: "%.2f",
+		Get: func(p *soundParamSet) float64 { return p.NoiseMix },
+		Set: func(p *soundParamSet, v float64) { p.NoiseMix = v },
+	},
+	// — Envelope —
+	{
+		Label: "Duration", Min: 0.03, Max: 0.80, Step: 0.01, Format: "%.2fs",
+		Get: func(p *soundParamSet) float64 { return p.Duration },
+		Set: func(p *soundParamSet, v float64) { p.Duration = v },
+	},
+	{
+		Label: "Attack", Min: 0.0, Max: 0.20, Step: 0.005, Format: "%.3fs",
+		Get: func(p *soundParamSet) float64 { return p.Attack },
+		Set: func(p *soundParamSet, v float64) { p.Attack = v },
+	},
+	{
+		Label: "Decay", Min: 0.0, Max: 0.30, Step: 0.01, Format: "%.2fs",
+		Get: func(p *soundParamSet) float64 { return p.Decay },
+		Set: func(p *soundParamSet, v float64) { p.Decay = v },
+	},
+	{
+		Label: "Sustain", Min: 0.0, Max: 1.0, Step: 0.05, Format: "%.2f",
+		Get: func(p *soundParamSet) float64 { return p.Sustain },
+		Set: func(p *soundParamSet, v float64) { p.Sustain = v },
+	},
+	{
+		Label: "Release", Min: 0.0, Max: 0.40, Step: 0.01, Format: "%.2fs",
+		Get: func(p *soundParamSet) float64 { return p.Release },
+		Set: func(p *soundParamSet, v float64) { p.Release = v },
+	},
+	{
+		Label: "Volume", Min: 0.0, Max: 0.6, Step: 0.02, Format: "%.2f",
+		Get: func(p *soundParamSet) float64 { return p.Volume },
+		Set: func(p *soundParamSet, v float64) { p.Volume = v },
+	},
+	// — FX —
+	{
 		Label: "Vibrato Hz", Min: 0.0, Max: 15.0, Step: 0.5, Format: "%.1f Hz",
-		Get: func(p *soundParamSet) float64 { return p.VibratoHz },
-		Set: func(p *soundParamSet, v float64) { p.VibratoHz = v },
+		Get: func(p *soundParamSet) float64 { return p.VibHz },
+		Set: func(p *soundParamSet, v float64) { p.VibHz = v },
 	},
 	{
 		Label: "Vibrato Depth", Min: 0.0, Max: 0.5, Step: 0.02, Format: "%.2f",
-		Get: func(p *soundParamSet) float64 { return p.VibratoDepth },
-		Set: func(p *soundParamSet, v float64) { p.VibratoDepth = v },
+		Get: func(p *soundParamSet) float64 { return p.VibDepth },
+		Set: func(p *soundParamSet, v float64) { p.VibDepth = v },
+	},
+	{
+		Label: "Tremolo Hz", Min: 0.0, Max: 20.0, Step: 0.5, Format: "%.1f Hz",
+		Get: func(p *soundParamSet) float64 { return p.TremoloHz },
+		Set: func(p *soundParamSet, v float64) { p.TremoloHz = v },
+	},
+	{
+		Label: "Tremolo Depth", Min: 0.0, Max: 1.0, Step: 0.05, Format: "%.2f",
+		Get: func(p *soundParamSet) float64 { return p.TremoloDepth },
+		Set: func(p *soundParamSet, v float64) { p.TremoloDepth = v },
+	},
+	{
+		// Cutoff — one-pole low-pass; 1.0 = fully open (no filtering).
+		Label: "Cutoff", Min: 0.0, Max: 1.0, Step: 0.05, Format: "%.2f",
+		Get: func(p *soundParamSet) float64 { return p.Cutoff },
+		Set: func(p *soundParamSet, v float64) { p.Cutoff = v },
+	},
+	{
+		Label: "Drive", Min: 0.0, Max: 1.0, Step: 0.05, Format: "%.2f",
+		Get: func(p *soundParamSet) float64 { return p.Drive },
+		Set: func(p *soundParamSet, v float64) { p.Drive = v },
+	},
+	{
+		Label: "Crush", Min: 0.0, Max: 1.0, Step: 0.05, Format: "%.2f",
+		Get: func(p *soundParamSet) float64 { return p.Crush },
+		Set: func(p *soundParamSet, v float64) { p.Crush = v },
 	},
 }
 
+func init() {
+	sum := 0
+	for _, sec := range soundSections {
+		sum += sec.Count
+	}
+	if sum != len(soundParamSliders) {
+		panic("editor: soundSections counts must sum to len(soundParamSliders)")
+	}
+}
+
 // soundParamDefaults seeds the modal with a sane starter cue — a short
-// rising blip at modest volume. Audible on first preview so the author
-// gets feedback without first tuning anything. All 10 fields are listed
-// explicitly so a future enum reordering (e.g., WaveSine moving off
-// iota 0) doesn't silently shift the default timbre — the literal
-// expresses intent.
+// rising blip at modest volume with every "extra" knob at its neutral
+// (no-op) value: full sustain, open filter, no decay/tremolo/drive/crush.
+// All fields are listed explicitly so a future field/enum reordering
+// doesn't silently shift the default timbre — the literal expresses intent.
 func soundParamDefaults() soundParamSet {
 	return soundParamSet{
 		Duration:     0.10,
-		StartHz:      440,
-		EndHz:        660,
+		StartHz:      440, // A4
+		EndHz:        660, // ~E5
 		Volume:       0.22,
 		Attack:       0.005,
+		Decay:        0,
+		Sustain:      1,
 		Release:      0.04,
-		Wave:         int(audio.WaveSine),
-		Noise:        0,
-		VibratoHz:    0,
-		VibratoDepth: 0,
+		Wave:         audio.WaveSine,
+		PulseWidth:   0.5,
+		NoiseMix:     0,
+		VibHz:        0,
+		VibDepth:     0,
+		TremoloHz:    0,
+		TremoloDepth: 0,
+		Cutoff:       1, // filter open
+		Drive:        0,
+		Crush:        0,
 	}
 }
 
@@ -150,8 +226,8 @@ func soundParamDefaults() soundParamSet {
 // the smaller footer hint == editorFontAccent. The SOUNDS heading is drawn
 // through render.DrawHeading (no local size).
 const (
-	soundModalW     = float32(900)
-	soundModalH     = float32(560)
+	soundModalW     = float32(960)
+	soundModalH     = float32(600)
 	soundFontBody   = editorFontBody
 	soundFontHint   = editorFontAccent
 	soundRowH       = float32(34) // slider row height
@@ -159,6 +235,13 @@ const (
 	soundAssignRowH = float32(48) // two-line cue row (name + assigned)
 	soundColGap     = float32(14)
 	soundButtonH    = float32(32)
+	// paramsHeaderReserve / soundGroupHeaderH size the scrollable params
+	// column: a fixed sub-header band at the top, then a scrolling body of
+	// section headers (soundGroupHeaderH each) + slider rows under a fixed
+	// name/actions footer. The body scrolls because the grouped slider list
+	// is taller than the column.
+	paramsHeaderReserve = float32(30)
+	soundGroupHeaderH   = float32(22)
 	// soundNameMaxLen caps the sound-name text field. The sound modal pumps
 	// this field directly (no-space filter) rather than through input.go's
 	// textFieldConfigs table, so its cap lives here next to the modal's other
@@ -184,6 +267,7 @@ var assignableCueList = func() []audio.Sound {
 // impossible.
 type soundListRowRect struct {
 	Row    rl.Rectangle
+	Edit   rl.Rectangle
 	Play   rl.Rectangle
 	Delete rl.Rectangle
 }
@@ -207,12 +291,20 @@ type soundLayout struct {
 	paramsCol    rl.Rectangle
 	listCol      rl.Rectangle
 	assignCol    rl.Rectangle
-	sliderTracks []rl.Rectangle // per-slider clickable track; len == len(soundParamSliders)
-	nameField    rl.Rectangle
-	previewBtn   rl.Rectangle
-	saveBtn      rl.Rectangle
-	listRows     []soundListRowRect   // one entry per saved-sound row (rects only filled for the visible window)
-	assignRows   []soundAssignRowRect // one entry per built-in cue row (rects only filled for the visible window)
+	sliderTracks []rl.Rectangle // per-slider clickable track (scrolled); len == len(soundParamSliders)
+	// paramsViewport is the clipped scroll region the slider body draws/
+	// hit-tests inside; sectionHeaderY[i] is the scrolled screen Y of
+	// soundSections[i]'s heading. paramContentH is the body's full height
+	// and paramMaxScroll the clamped scroll ceiling.
+	paramsViewport rl.Rectangle
+	sectionHeaderY []float32
+	paramContentH  float32
+	paramMaxScroll float32
+	nameField      rl.Rectangle
+	previewBtn     rl.Rectangle
+	saveBtn        rl.Rectangle
+	listRows       []soundListRowRect   // one entry per saved-sound row (rects only filled for the visible window)
+	assignRows     []soundAssignRowRect // one entry per built-in cue row (rects only filled for the visible window)
 	// listTopRow..listEnd is the saved-sounds scroll window (via scrollWindow)
 	// so a long list can't overflow the column off the card bottom.
 	listTopRow int
@@ -246,7 +338,7 @@ func soundAssignCursor(s *State) int {
 	return 0
 }
 
-func computeSoundLayout(savedSounds []string, listCursor, assignCursor int) soundLayout {
+func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, paramScroll float32) soundLayout {
 	card := centeredCardRect(soundModalW, soundModalH)
 	colW := (modalContentWidth(card) - 2*soundColGap) / 3
 	colY := card.Y + 56
@@ -258,20 +350,57 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int) soun
 
 	l := soundLayout{card: card, paramsCol: paramsCol, listCol: listCol, assignCol: assignCol}
 
-	// Params column rows. sliderTracks is sized off soundParamSliders so
-	// adding a new slider doesn't require touching the layout struct.
+	// Params column: a fixed sub-header band, a scrollable body of section
+	// headers + slider rows, and a fixed footer (name + Preview/Save). The
+	// footer stays reachable no matter how far the body scrolls.
 	x := paramsCol.X + 12
 	w := paramsCol.Width - 24
-	y := paramsCol.Y + 30
+	footerH := soundRowH + 6 + soundButtonH + 8 // name row + gap + buttons + pad
+	vpY := paramsCol.Y + paramsHeaderReserve
+	vpH := paramsCol.Height - paramsHeaderReserve - footerH
+	if vpH < soundRowH {
+		vpH = soundRowH
+	}
+	l.paramsViewport = rl.NewRectangle(paramsCol.X+1, vpY, paramsCol.Width-2, vpH)
+
+	// First pass: unscrolled content offsets for each section header + slider,
+	// so we know the full content height before clamping the scroll.
+	sliderOff := make([]float32, len(soundParamSliders))
+	headerOff := make([]float32, len(soundSections))
+	contentY := float32(0)
+	gi := 0
+	for si, sec := range soundSections {
+		headerOff[si] = contentY
+		contentY += soundGroupHeaderH
+		for k := 0; k < sec.Count; k++ {
+			sliderOff[gi] = contentY
+			contentY += soundRowH
+			gi++
+		}
+	}
+	l.paramContentH = contentY
+	l.paramMaxScroll = contentY - vpH
+	if l.paramMaxScroll < 0 {
+		l.paramMaxScroll = 0
+	}
+	sc := core.Clamp(paramScroll, 0, l.paramMaxScroll)
+
+	// Second pass: place tracks + headers at their scrolled screen positions.
 	l.sliderTracks = make([]rl.Rectangle, len(soundParamSliders))
 	for i := range soundParamSliders {
-		l.sliderTracks[i] = rl.NewRectangle(x+90, y+8, w-180, 14)
-		y += soundRowH
+		l.sliderTracks[i] = rl.NewRectangle(x+96, vpY-sc+sliderOff[i]+8, w-176, 14)
 	}
-	l.nameField = rl.NewRectangle(x+70, y, w-70, 28)
-	y += soundRowH + 6
-	l.previewBtn = rl.NewRectangle(x, y, (w-12)/2, soundButtonH)
-	l.saveBtn = rl.NewRectangle(x+(w-12)/2+12, y, (w-12)/2, soundButtonH)
+	l.sectionHeaderY = make([]float32, len(soundSections))
+	for si := range soundSections {
+		l.sectionHeaderY[si] = vpY - sc + headerOff[si]
+	}
+
+	// Fixed footer below the viewport.
+	fy := vpY + vpH + 4
+	l.nameField = rl.NewRectangle(x+70, fy, w-70, 28)
+	fy += soundRowH + 6
+	l.previewBtn = rl.NewRectangle(x, fy, (w-12)/2, soundButtonH)
+	l.saveBtn = rl.NewRectangle(x+(w-12)/2+12, fy, (w-12)/2, soundButtonH)
 
 	// List column rows + per-row Play/× buttons. Only the visible window gets
 	// real rects; off-window entries stay zero (so they neither draw nor
@@ -290,6 +419,7 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int) soun
 		row := rl.NewRectangle(lx, ly+float32(i-l.listTopRow)*soundListRowH, lw, soundListRowH-4)
 		l.listRows[i] = soundListRowRect{
 			Row:    row,
+			Edit:   rl.NewRectangle(row.X+row.Width-118, row.Y+2, 38, row.Height-4),
 			Play:   rl.NewRectangle(row.X+row.Width-78, row.Y+2, 32, row.Height-4),
 			Delete: rl.NewRectangle(row.X+row.Width-40, row.Y+2, 32, row.Height-4),
 		}
@@ -370,12 +500,17 @@ func updateSoundsModal(s *State) Action {
 	// Read the saved-sounds list from the cache (populated on open + after
 	// each save/delete via refreshSoundCaches) — no per-frame os.ReadDir.
 	savedSounds := s.soundSavedCache
-	layout := computeSoundLayout(savedSounds, soundListCursor(s), soundAssignCursor(s))
+	layout := computeSoundLayout(savedSounds, soundListCursor(s), soundAssignCursor(s), s.soundParamScroll)
 
 	mp := rl.GetMousePosition()
 	mouseDown := rl.IsMouseButtonDown(rl.MouseLeftButton)
 	mousePressed := rl.IsMouseButtonPressed(rl.MouseLeftButton)
 	mouseReleased := rl.IsMouseButtonReleased(rl.MouseLeftButton)
+
+	// Wheel scrolls the params slider body when the pointer is over it.
+	if wheel := rl.GetMouseWheelMove(); wheel != 0 && pointIn(mp, layout.paramsViewport) {
+		s.soundParamScroll = core.Clamp(s.soundParamScroll-wheel*soundRowH, 0, layout.paramMaxScroll)
+	}
 
 	// Active slider drag: while held, map the mouse X within the track
 	// to a value in the slider's range. Snap to the slider's Step grain
@@ -414,7 +549,7 @@ func updateSoundsModal(s *State) Action {
 	}
 	switch s.soundLeftPanel {
 	case soundPanelParams:
-		updateSoundsParamsKeys(s)
+		updateSoundsParamsKeys(s, &layout)
 	case soundPanelList:
 		updateSoundsListKeys(s, savedSounds)
 	case soundPanelAssign:
@@ -437,9 +572,11 @@ func soundActionCursorIdx() int { return len(soundParamSliders) + 1 }
 // changing the cursor means "click was on a non-cursor target."
 func handleSoundMouseClick(s *State, mp rl.Vector2, l *soundLayout, savedSounds []string) (soundPanel, int) {
 	// Slider tracks — start a drag and immediately set the value at the
-	// click position so single-click also adjusts (not just drag).
+	// click position so single-click also adjusts (not just drag). Gated to
+	// the scroll viewport so a track scrolled behind the header/footer can't
+	// catch a click meant for those fixed elements.
 	for i := range soundParamSliders {
-		if pointIn(mp, l.sliderTracks[i]) {
+		if pointIn(mp, l.paramsViewport) && pointIn(mp, l.sliderTracks[i]) {
 			soundDrag.idx = i
 			// Apply the value at the click X immediately so a single click
 			// adjusts, not just a drag. soundDrag.update runs BEFORE this
@@ -468,6 +605,10 @@ func handleSoundMouseClick(s *State, mp rl.Vector2, l *soundLayout, savedSounds 
 	// Saved-sounds list — clickable rows + per-row Play/× buttons (visible window only).
 	for i := l.listTopRow; i < l.listEnd; i++ {
 		r := l.listRows[i]
+		if pointIn(mp, r.Edit) {
+			loadSoundForEdit(s, savedSounds[i])
+			return soundPanelList, i
+		}
 		if pointIn(mp, r.Play) {
 			audio.PreviewFile(savedSounds[i])
 			return soundPanelList, i
@@ -506,7 +647,7 @@ func handleSoundMouseClick(s *State, mp rl.Vector2, l *soundLayout, savedSounds 
 // arrows move the cursor + adjust sliders. Space previews. Enter saves
 // (cursor on the action row) or types nothing into the name (handled
 // elsewhere).
-func updateSoundsParamsKeys(s *State) {
+func updateSoundsParamsKeys(s *State, l *soundLayout) {
 	rowCount := len(soundParamSliders) + 2 // sliders + name + actions
 	if s.soundCursor == soundNameCursorIdx() {
 		// On the Name row every printable key (incl. W/S) feeds the name
@@ -518,6 +659,7 @@ func updateSoundsParamsKeys(s *State) {
 		s.soundCursor = input.CursorUpDown(s.soundCursor, rowCount)
 	}
 	if s.soundCursor < len(soundParamSliders) {
+		ensureSliderVisible(s, l)
 		slider := soundParamSliders[s.soundCursor]
 		if delta := input.CursorLeftRight(); delta != 0 {
 			v := slider.Get(&s.soundParams) + float64(delta)*slider.Step
@@ -543,6 +685,24 @@ func updateSoundsParamsKeys(s *State) {
 	}
 }
 
+// ensureSliderVisible nudges the params scroll so the cursor's slider row
+// sits inside the viewport — called after keyboard cursor moves so arrowing
+// down a long param list scrolls the body to follow instead of stranding the
+// cursor off-screen. No-op when the cursor isn't on a slider row.
+func ensureSliderVisible(s *State, l *soundLayout) {
+	if s.soundCursor < 0 || s.soundCursor >= len(l.sliderTracks) {
+		return
+	}
+	vp := l.paramsViewport
+	rowTop := l.sliderTracks[s.soundCursor].Y - 8
+	if rowTop < vp.Y {
+		s.soundParamScroll -= vp.Y - rowTop
+	} else if rowTop+soundRowH > vp.Y+vp.Height {
+		s.soundParamScroll += rowTop + soundRowH - (vp.Y + vp.Height)
+	}
+	s.soundParamScroll = core.Clamp(s.soundParamScroll, 0, l.paramMaxScroll)
+}
+
 func updateSoundsListKeys(s *State, names []string) {
 	if len(names) == 0 {
 		return
@@ -553,6 +713,9 @@ func updateSoundsListKeys(s *State, names []string) {
 	s.soundCursor = input.CursorUpDown(s.soundCursor, len(names))
 	if editorCommitPressed() || rl.IsKeyPressed(rl.KeySpace) {
 		audio.PreviewFile(names[s.soundCursor])
+	}
+	if rl.IsKeyPressed(rl.KeyE) {
+		loadSoundForEdit(s, names[s.soundCursor])
 	}
 	if rl.IsKeyPressed(rl.KeyX) {
 		confirmSoundDelete(s, names[s.soundCursor])
@@ -628,26 +791,39 @@ func cycleCueAssignment(s *State, cue audio.Sound, delta int) {
 // so the saved-sounds list isn't polluted and a user who saves a real
 // cue named "preview" doesn't clash.
 func previewSoundParams(p soundParamSet) {
-	pcm := audio.SynthShape(p.Duration, p.StartHz, p.EndHz, p.Volume, p.Attack, p.Release,
-		audio.WaveShape(p.Wave), p.Noise, p.VibratoHz, p.VibratoDepth)
-	audio.PreviewPCM(pcm)
+	audio.PreviewPCM(audio.SynthShapeParams(p))
 }
 
-// saveCurrentSound writes the slider state to maps/sounds/<name>.wav and
-// flashes a status message. audio.SaveUserSound now sanitizes the name
-// itself and returns the final on-disk form, so the editor reports
-// exactly what landed on disk (handles a user typing "My Cue!" → file
-// becomes "my_cue.wav").
+// loadSoundForEdit pulls a saved sound's knobs back into the params
+// column so it can be re-tuned and re-saved (overwriting). Sounds with no
+// .snd sidecar (hand-dropped .wav, or saved before sidecars existed)
+// can't be reconstructed — flash and leave the current params untouched.
+func loadSoundForEdit(s *State, name string) {
+	p, ok := audio.LoadUserSoundParams(name)
+	if !ok {
+		s.flash(name + " has no editable params (only its .wav exists)")
+		return
+	}
+	s.soundParams = p
+	s.soundName = name
+	s.soundLeftPanel = soundPanelParams
+	s.soundCursor = 0
+	s.soundParamScroll = 0
+	s.flash("Editing " + name)
+}
+
+// saveCurrentSound writes the slider state to maps/sounds/<name>.wav plus
+// its <name>.snd editing sidecar, and flashes a status message.
+// audio.SaveUserSoundParams sanitizes the name itself and returns the
+// final on-disk form, so the editor reports exactly what landed on disk
+// (handles a user typing "My Cue!" → file becomes "my_cue.wav"). Saving
+// onto an existing name overwrites it — that's the "edit then re-save" path.
 func saveCurrentSound(s *State) {
 	if strings.TrimSpace(s.soundName) == "" {
 		s.flash("Sound name required")
 		return
 	}
-	pcm := audio.SynthShape(s.soundParams.Duration, s.soundParams.StartHz, s.soundParams.EndHz,
-		s.soundParams.Volume, s.soundParams.Attack, s.soundParams.Release,
-		audio.WaveShape(s.soundParams.Wave), s.soundParams.Noise,
-		s.soundParams.VibratoHz, s.soundParams.VibratoDepth)
-	saved, err := audio.SaveUserSound(s.soundName, pcm)
+	saved, err := audio.SaveUserSoundParams(s.soundName, s.soundParams)
 	if err != nil {
 		s.flash("Save failed: " + err.Error())
 		return
@@ -670,7 +846,7 @@ func drawSoundsModal(s *State, font rl.Font, theme render.Theme) {
 	if savedSounds == nil {
 		savedSounds = audio.ListUserSounds()
 	}
-	l := computeSoundLayout(savedSounds, soundListCursor(s), soundAssignCursor(s))
+	l := computeSoundLayout(savedSounds, soundListCursor(s), soundAssignCursor(s), s.soundParamScroll)
 	// Both computeSoundLayout and drawModalHeader center the card through
 	// the shared centeredCardRect, so the rect drawModalHeader paints is
 	// identical to l.card — visual + hit-test stay in sync without
@@ -681,7 +857,7 @@ func drawSoundsModal(s *State, font rl.Font, theme render.Theme) {
 	drawSoundsListCol(s, font, theme, &l, savedSounds)
 	drawSoundsAssignCol(s, font, theme, &l)
 
-	hint := "Click sliders to drag   Click Play/Save/X/Prev/Next   Tab cycle column   Esc close"
+	hint := "Drag sliders · scroll params · Edit a saved sound to reload its knobs · Save overwrites · Tab cycles column · Esc closes"
 	render.DrawRichText(font, hint,
 		rl.NewVector2(l.card.X+18, l.card.Y+l.card.Height-26),
 		soundFontHint, 1, theme.TextHint)
@@ -691,12 +867,45 @@ func drawSoundsParamsCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 	drawSoundsColumnFrame(theme, l.paramsCol, s.soundLeftPanel == soundPanelParams)
 	render.DrawSubHeading(font, "Synth params", l.paramsCol.X+12, l.paramsCol.Y+8, theme.BorderActive)
 
-	for i, slider := range soundParamSliders {
-		focused := s.soundLeftPanel == soundPanelParams && s.soundCursor == i
-		drawSoundsSlider(font, theme, l.paramsCol.X+12, l.sliderTracks[i].Y-8, l.paramsCol.Width-24, slider, s.soundParams, l.sliderTracks[i], focused)
+	// Scrollable slider body: clip to the viewport so section headers / rows
+	// scrolled past the top or bottom don't paint over the sub-header or the
+	// fixed footer. Mirrors the palette/metadata scissor pattern.
+	vp := l.paramsViewport
+	rl.BeginScissorMode(int32(vp.X), int32(vp.Y), int32(vp.Width), int32(vp.Height))
+	gi := 0
+	for si, sec := range soundSections {
+		hy := l.sectionHeaderY[si]
+		// Only draw a header that falls within the viewport band.
+		if hy+soundGroupHeaderH > vp.Y && hy < vp.Y+vp.Height {
+			render.DrawRichText(font, sec.Title, rl.NewVector2(l.paramsCol.X+12, hy+4), soundFontHint, 1, theme.TextLabel)
+			lineY := hy + soundGroupHeaderH - 3
+			rl.DrawLineEx(rl.NewVector2(l.paramsCol.X+12, lineY), rl.NewVector2(l.paramsCol.X+l.paramsCol.Width-12, lineY), 1, theme.BorderDim)
+		}
+		for k := 0; k < sec.Count; k++ {
+			track := l.sliderTracks[gi]
+			// Skip rows fully outside the viewport (scissor would clip them
+			// anyway; this just avoids the draw work).
+			if track.Y+soundRowH > vp.Y && track.Y-8 < vp.Y+vp.Height {
+				focused := s.soundLeftPanel == soundPanelParams && s.soundCursor == gi
+				drawSoundsSlider(font, theme, l.paramsCol.X+12, track.Y-8, l.paramsCol.Width-24, soundParamSliders[gi], s.soundParams, track, focused)
+			}
+			gi++
+		}
 	}
-	// Name field. The "Name" label sits to the left of the text field;
-	// drawTextField paints the field itself with the shared editor palette.
+	rl.EndScissorMode()
+
+	// Scroll affordances when the body overflows.
+	if l.paramMaxScroll > 0 {
+		if s.soundParamScroll > 0 {
+			render.DrawRichText(font, "▲", rl.NewVector2(l.paramsCol.X+l.paramsCol.Width-22, vp.Y+2), soundFontHint, 1, theme.TextHint)
+		}
+		if s.soundParamScroll < l.paramMaxScroll {
+			render.DrawRichText(font, "▼", rl.NewVector2(l.paramsCol.X+l.paramsCol.Width-22, vp.Y+vp.Height-18), soundFontHint, 1, theme.TextHint)
+		}
+	}
+
+	// Name field (fixed footer). The "Name" label sits to the left of the
+	// text field; drawTextField paints the field with the shared palette.
 	nameFocused := s.soundLeftPanel == soundPanelParams && s.soundCursor == soundNameCursorIdx()
 	nameLabelCol := theme.TextMuted
 	if nameFocused {
@@ -704,7 +913,7 @@ func drawSoundsParamsCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 	}
 	render.DrawRichText(font, "Name", rl.NewVector2(l.paramsCol.X+12, l.nameField.Y+6), soundFontBody, 1, nameLabelCol)
 	drawTextField(font, l.nameField, s.soundName, nameFocused)
-	// Action buttons.
+	// Action buttons (fixed footer).
 	actionFocused := s.soundLeftPanel == soundPanelParams && s.soundCursor == soundActionCursorIdx()
 	drawButton(font, l.previewBtn, "Preview (Space)", actionFocused)
 	drawButton(font, l.saveBtn, "Save", actionFocused)
@@ -743,6 +952,7 @@ func drawSoundsListCol(s *State, font rl.Font, theme render.Theme, l *soundLayou
 		}
 		render.DrawTextWithShadow(font, names[i],
 			r.Row.X+8, r.Row.Y+6, soundFontBody, theme.TextMuted)
+		drawButton(font, r.Edit, "Edit", false)
 		drawButton(font, r.Play, ">", false)
 		drawButton(font, r.Delete, "X", false)
 	}

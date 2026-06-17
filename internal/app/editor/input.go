@@ -276,6 +276,7 @@ func stepEditLevel(s *State, dir int) {
 	if s.editLevel > s.topLevel {
 		s.topLevel = s.editLevel
 	}
+	s.levelHidden[s.editLevel] = false // the floor you step onto is always shown
 	s.flash("Active level " + strconv.Itoa(s.editLevel))
 }
 
@@ -318,29 +319,43 @@ func handleLevelsPanelClick(s *State, mp rl.Vector2) {
 		return
 	}
 	// Eye toggles first so a click on the eye doesn't also re-select the level.
+	// Row index i maps to level base+i through the scroll window.
+	base := levelScrollBase(s)
 	for i := 0; i < visibleLevelRows(s); i++ {
 		if pointIn(mp, levelEyeRect(s, i)) {
+			lvl := base + i
 			if _, _, alt := modifiers(); alt {
-				// Solo toggle: if level i is already the only one shown, reveal
-				// all; otherwise hide everything except i.
-				soloed := !s.levelHidden[i]
+				// Solo toggle: if lvl is already the only one shown, reveal all;
+				// otherwise hide everything except lvl. The active level is forced
+				// visible afterward so solo can't leave the edited floor flagged
+				// hidden (drawGrid would draw it anyway, desyncing the eye icon).
+				// The probe ignores editLevel: it's always force-revealed below, so
+				// when soloing a non-active level it would otherwise read as a second
+				// visible level and the toggle could never detect the soloed state
+				// (a second Alt-click re-soloed instead of revealing all).
+				soloed := !s.levelHidden[lvl]
 				for j := range s.levelHidden {
-					if j != i && !s.levelHidden[j] {
+					if j != lvl && j != s.editLevel && !s.levelHidden[j] {
 						soloed = false
 						break
 					}
 				}
 				for j := range s.levelHidden {
-					s.levelHidden[j] = !soloed && j != i
+					s.levelHidden[j] = !soloed && j != lvl
 				}
-			} else {
-				s.levelHidden[i] = !s.levelHidden[i]
+				s.levelHidden[s.editLevel] = false
+			} else if lvl != s.editLevel {
+				// The active level is always shown (drawGrid forces it visible so
+				// edits can't vanish), so refuse to mark it hidden — that keeps the
+				// eye icon honest instead of showing "hidden" over visible tiles.
+				s.levelHidden[lvl] = !s.levelHidden[lvl]
 			}
 			return
 		}
 	}
 	if i := levelRowAt(s, mp); i >= 0 {
 		s.editLevel = clampLevel(i)
+		s.levelHidden[s.editLevel] = false // selecting a floor reveals it
 	}
 }
 
@@ -904,17 +919,33 @@ func finishDrag(s *State) {
 		}
 	case dragRect:
 		if s.hoverX >= 0 {
-			pushUndo(s)
+			// Snapshot-then-compare instead of an eager pushUndo: an empty or
+			// all-refused rect (every cell rejected by a brush guard, or the
+			// brush already equals the cell) must NOT bank a junk undo step or
+			// clear the redo stack. Mirrors strokePaint's lazy commit.
+			wasDirty := s.dirty
+			before := core.CloneArea(s.area)
 			if s.rectHollow {
 				paintRectOutline(s, s.rectAnchorX, s.rectAnchorZ, s.hoverX, s.hoverZ)
 			} else {
 				paintRect(s, s.rectAnchorX, s.rectAnchorZ, s.hoverX, s.hoverZ)
 			}
+			if core.AreaContentEqual(s.area, before) {
+				s.dirty = wasDirty // no-op rect — undo the optimistic dirty flip
+			} else {
+				commitUndoSnapshot(s, before)
+			}
 		}
 	case dragLine:
 		if s.hoverX >= 0 {
-			pushUndo(s)
+			wasDirty := s.dirty
+			before := core.CloneArea(s.area)
 			paintLine(s, s.rectAnchorX, s.rectAnchorZ, s.hoverX, s.hoverZ)
+			if core.AreaContentEqual(s.area, before) {
+				s.dirty = wasDirty // no-op line — don't bank undo / clobber redo
+			} else {
+				commitUndoSnapshot(s, before)
+			}
 		}
 	case dragSelect:
 		// Commit the marquee as the active selection (normalized inclusive
@@ -1004,6 +1035,10 @@ func sampleBrushAt(s *State, x, z int) {
 		}
 		lvl := clampLevel(core.ElevationLevelFromChar(b))
 		s.editLevel = lvl
+		s.levelHidden[s.editLevel] = false // making it active reveals it (matches row-select / stepEditLevel)
+		if lvl > s.topLevel {
+			s.topLevel = lvl // surface a panel row for a level only this tile used
+		}
 		s.flash("Picked level " + strconv.Itoa(lvl))
 		return
 	}

@@ -14,6 +14,7 @@ package userconfig
 import (
 	"crawler/internal/app/audio/wavsynth"
 	"crawler/internal/app/core"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,10 +49,21 @@ func SanitizeName(name string) string {
 // place instead of every "name+\".wav\"" / HasSuffix check.
 const WavExt = ".wav"
 
+// ParamsExt is the extension of the sidecar that stores a saved sound's
+// synth knobs (JSON) next to its .wav, so the editor can reopen the
+// sound for editing. The .wav remains the playable artifact; the sidecar
+// is purely authoring metadata (a hand-dropped .wav simply has none).
+const ParamsExt = ".snd"
+
 // SoundPath returns the .wav path for a named user sound (no existence
 // check — caller's responsibility).
 func SoundPath(name string) string {
 	return filepath.Join(SoundsDir(), name+WavExt)
+}
+
+// ParamsPath returns the sidecar (.snd) path for a named user sound.
+func ParamsPath(name string) string {
+	return filepath.Join(SoundsDir(), name+ParamsExt)
 }
 
 // ListSounds returns the names (without .wav) of every .wav file in the
@@ -101,6 +113,51 @@ func WriteWAV(name string, pcm []int16) (string, error) {
 	return clean, nil
 }
 
+// WriteSound synthesizes p to PCM, writes maps/sounds/<name>.wav, and
+// writes a <name>.snd sidecar holding the synth knobs so the sound can be
+// reopened for editing. Returns the sanitized on-disk stem. The sidecar
+// write is best-effort — a failure there does NOT fail the save, since
+// the .wav (the playable artifact) already landed; the sound just won't
+// be re-editable. Overwrites any existing files at the same name.
+func WriteSound(name string, p wavsynth.ShapeParams) (string, error) {
+	clean := SanitizeName(name)
+	if clean == "" {
+		return "", fmt.Errorf("sound name required")
+	}
+	dir := SoundsDir()
+	if err := os.MkdirAll(dir, core.AssetDirMode); err != nil {
+		return clean, err
+	}
+	wav := wavsynth.BuildWAV(wavsynth.SynthShapeParams(p), wavsynth.SampleRate)
+	if err := os.WriteFile(filepath.Join(dir, clean+WavExt), wav, core.AssetFileMode); err != nil {
+		return clean, err
+	}
+	if data, err := json.MarshalIndent(p, "", "  "); err == nil {
+		_ = os.WriteFile(filepath.Join(dir, clean+ParamsExt), data, core.AssetFileMode)
+	}
+	return clean, nil
+}
+
+// LoadParams reads the <name>.snd sidecar and returns the saved synth
+// knobs. ok=false when the sidecar is missing or unparseable (e.g. a
+// hand-dropped .wav, or a sound saved before sidecars existed) — the
+// editor uses that to gray out "Edit" for sounds it can't reconstruct.
+func LoadParams(name string) (wavsynth.ShapeParams, bool) {
+	var p wavsynth.ShapeParams
+	clean := SanitizeName(name)
+	if clean == "" {
+		return p, false
+	}
+	data, err := os.ReadFile(ParamsPath(clean))
+	if err != nil {
+		return p, false
+	}
+	if json.Unmarshal(data, &p) != nil {
+		return p, false
+	}
+	return p, true
+}
+
 // DeleteSound removes a named .wav from maps/sounds/. After delete,
 // also strips any assignment that pointed at the file so the bank
 // doesn't try to reload a missing cue on next reload. Returns the
@@ -116,6 +173,9 @@ func DeleteSound(name string) error {
 	if err := os.Remove(SoundPath(clean)); err != nil {
 		return err
 	}
+	// Best-effort: drop the editing sidecar too (may not exist for a
+	// hand-dropped .wav) so it doesn't orphan after its .wav is gone.
+	_ = os.Remove(ParamsPath(clean))
 	assigns := LoadAssignments()
 	changed := false
 	for cue, file := range assigns {

@@ -31,9 +31,10 @@ var crystalGeo = crystalGeometry{
 // DrawCrystals paints every healing crystal in the current area as a floating,
 // gently-bobbing gem (a six-sided bipyramid) at its tile center. A CHARGED
 // crystal glows bright cyan and pulses; a spent one sits dim and still, so the
-// player can read its state at a glance. The lighting shader bound by DrawWorld
-// is still active here (same contract DrawChests / DrawDoors rely on), so the
-// gem picks up the area profile; callers must invoke this inside the 3D pass.
+// player can read its state at a glance. Drawn unlit via immediate-mode
+// DrawCylinderEx under raylib's default shader — DrawWorld has already called
+// EndShaderMode by the time the caller reaches here (same as DrawChests /
+// DrawDoors); callers must still invoke this inside the 3D pass (BeginMode3D).
 func DrawCrystals(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if len(g.Crystals) == 0 {
 		return
@@ -41,7 +42,7 @@ func DrawCrystals(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	forward := horizontalForward(camera)
 	t := rl.GetTime()
 	for _, c := range g.Crystals {
-		base := tileWorldPos(c.TileX, c.TileZ, 0)
+		base := tileWorldPos(c.TileX, c.TileZ, g.Area.StandGroundY(c.TileX, c.TileZ))
 		if behindCull(camera.Position, forward, base) {
 			continue
 		}
@@ -78,7 +79,7 @@ func DrawCrystalPrompt(camera rl.Camera3D, g *core.GameState, assets Resources) 
 	// Anchor above the gem's top point (FloatY + HalfHeight) plus a little
 	// headroom, matching the bob-free rest pose — read from crystalGeo so it
 	// tracks the gem geometry.
-	world := tileWorldPos(c.TileX, c.TileZ, crystalGeo.FloatY+crystalGeo.HalfHeight+crystalGeo.PromptHeadroom)
+	world := tileWorldPos(c.TileX, c.TileZ, g.Area.StandGroundY(c.TileX, c.TileZ)+crystalGeo.FloatY+crystalGeo.HalfHeight+crystalGeo.PromptHeadroom)
 	drawFloatingInteractPrompt(camera, world, "Rest", assets)
 }
 

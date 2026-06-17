@@ -131,6 +131,23 @@ func FacingYaw(facing int) float32 {
 	return facingTable[NormalizeFacing(facing)].Yaw
 }
 
+// FacingFromDelta returns the cardinal facing for a unit step (dx,dz) — the
+// inverse of FacingVector for single-tile cardinal moves. ok=false for a zero
+// or non-cardinal (diagonal / multi-tile) delta.
+func FacingFromDelta(dx, dz int) (int, bool) {
+	switch {
+	case dx == 0 && dz == -1:
+		return North, true
+	case dx == 1 && dz == 0:
+		return East, true
+	case dx == 0 && dz == 1:
+		return South, true
+	case dx == -1 && dz == 0:
+		return West, true
+	}
+	return 0, false
+}
+
 func NormalizeFacing(facing int) int {
 	facing %= FacingCount
 	if facing < 0 {

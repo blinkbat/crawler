@@ -156,14 +156,16 @@ func LoadResources() (r Resources) {
 	r.lighting = loadLightingShader()
 	r.billboardFog = loadBillboardFogShader()
 
+	// Commit each base material the instant it's built — a panic in a LATER
+	// load (the next material or a variant) must find every earlier model in
+	// r.materials so the recover-path Unload can free it. Building both before
+	// the first commit would orphan dungeonMat if fieldMat's load panicked.
 	dungeonMat := loadWorldMaterial(makeStoneBrickPixels(128, 128), makeStoneFloorPixels(128, 128), r.lighting.shader)
-	fieldMat := loadWorldMaterial(makeRockWallPixels(128, 128), makeGrassPixels(128, 128), r.lighting.shader)
-	// Commit both base materials BEFORE building the variants so a panic in
-	// the variants doesn't leak the base wall/floor models.
 	r.materials = map[core.MaterialSet]worldMaterialResources{
 		core.MaterialDungeon: dungeonMat,
-		core.MaterialField:   fieldMat,
 	}
+	fieldMat := loadWorldMaterial(makeRockWallPixels(128, 128), makeGrassPixels(128, 128), r.lighting.shader)
+	r.materials[core.MaterialField] = fieldMat
 	// Field gets two extra floor variants (dirt + dark grass), procedurally
 	// chosen per tile by hash for terrain variation. Built using the same
 	// path as the primary floor so they share filter / mipmap settings.
@@ -452,7 +454,7 @@ func flattenModelTable(src map[byte]propModel) *[256]propModel {
 // on Resources, hand-tuned scatter helper) rather than the generic
 // decorModels map. Same dispatch signature as the generic map keeps
 // world.go's drawDecor uniform.
-type inlineDecorRenderer func(assets Resources, x, z int, cx, cz float32)
+type inlineDecorRenderer func(assets Resources, x, z int, cx, cz, groundY float32)
 
 // inlineDecorHandlers is the SINGLE source of truth for inline decor
 // dispatch — assertDecorCoverage reads from it. Adding a new inline-

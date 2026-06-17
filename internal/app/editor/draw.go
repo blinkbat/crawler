@@ -1109,7 +1109,11 @@ func drawMinimap(s *State) {
 			if tx >= s.area.Width {
 				break
 			}
-			if core.IsWallChar(s.area.Walls[tz][tx]) {
+			// Route through cellAt, not a raw Walls[tz][tx] index: a ragged /
+			// partially-built loaded area can have Height > len(Walls) or rows
+			// shorter than Width, and the tz/tx<Height/Width guards above don't
+			// catch that — a raw index would panic.
+			if ch, ok := cellAt(s.area.Walls, tx, tz); ok && core.IsWallChar(ch) {
 				rl.DrawPixel(int32(mr.X)+int32(px), int32(mr.Y)+int32(py), wallCol)
 			}
 		}
@@ -1236,7 +1240,10 @@ func layerEyeRect(s *State, i int) rl.Rectangle {
 	return eyeBoxRect(layerTabRect(s, i))
 }
 
-// drawLayerEye paints the open/closed visibility eye for a layer tab.
+// drawLayerEye paints the visibility toggle as an almond EYE glyph: two lids
+// that meet at the left/right corners, with a pupil when shown or a diagonal
+// strike-through when hidden. Shared by the layer tabs and the Levels-panel
+// rows. (Was a ring + center dot, which read more like a target than an eye.)
 func drawLayerEye(r rl.Rectangle, open, hover bool) {
 	cx := r.X + r.Width/2
 	cy := r.Y + r.Height/2
@@ -1247,11 +1254,29 @@ func drawLayerEye(r rl.Rectangle, open, hover bool) {
 	if hover {
 		col = rl.NewColor(232, 236, 246, 255)
 	}
+	hw := r.Width * 0.40 // half-width: each corner sits hw from center
+	h := r.Width * 0.26  // how far the lids bulge above/below the centerline
+	const seg = 10
+	// The two lids are symmetric sine arcs: zero offset at the corners, peak at
+	// the middle. Walk t from the left corner to the right, stroking both lids.
+	var prevTop, prevBot rl.Vector2
+	for i := 0; i <= seg; i++ {
+		t := float32(i) / float32(seg)
+		x := cx - hw + t*2*hw
+		off := h * float32(math.Sin(float64(t)*math.Pi))
+		top := rl.NewVector2(x, cy-off)
+		bot := rl.NewVector2(x, cy+off)
+		if i > 0 {
+			rl.DrawLineEx(prevTop, top, 1.6, col)
+			rl.DrawLineEx(prevBot, bot, 1.6, col)
+		}
+		prevTop, prevBot = top, bot
+	}
 	if open {
-		rl.DrawCircleLines(int32(cx), int32(cy), r.Width*0.34, col)
-		rl.DrawCircleV(rl.NewVector2(cx, cy), r.Width*0.14, col)
+		rl.DrawCircleV(rl.NewVector2(cx, cy), r.Width*0.15, col) // pupil
 	} else {
-		rl.DrawLineEx(rl.NewVector2(r.X+r.Width*0.18, cy), rl.NewVector2(r.X+r.Width*0.82, cy), 2, col)
+		// Strike-through corner to corner so the hidden state reads instantly.
+		rl.DrawLineEx(rl.NewVector2(cx-hw-2, cy-h-2), rl.NewVector2(cx+hw+2, cy+h+2), 2, col)
 	}
 }
 
@@ -1318,6 +1343,26 @@ func levelsPanelHeight(s *State) float32 {
 	return float32(1+visibleLevelRows(s)) * layerTabH
 }
 
+// levelScrollBase is the level shown in the panel's FIRST row. When the map
+// has more levels than the panel can show (topLevel >= maxVisibleLevelRows),
+// the window scrolls to keep the active level (editLevel) on screen — so levels
+// 8..35 are reachable instead of stranded below the cap. Row i shows level
+// levelScrollBase()+i.
+func levelScrollBase(s *State) int {
+	rows := visibleLevelRows(s)
+	base := 0
+	if s.editLevel >= rows {
+		base = s.editLevel - rows + 1 // scroll just enough to reveal the active level
+	}
+	if top := s.topLevel - rows + 1; base > top {
+		base = top
+	}
+	if base < 0 {
+		base = 0
+	}
+	return base
+}
+
 func levelHeaderRect(s *State) rl.Rectangle {
 	return rl.NewRectangle(s.rect.levels.X, s.rect.levels.Y, s.rect.levels.Width, layerTabH)
 }
@@ -1344,11 +1389,14 @@ func levelEyeRect(s *State, i int) rl.Rectangle {
 	return eyeBoxRect(levelRowRect(s, i))
 }
 
-// levelRowAt returns the level index for a point in the panel's row area, or -1.
+// levelRowAt returns the LEVEL for a point in the panel's row area, or -1.
+// Maps the visible row index through levelScrollBase so a scrolled panel
+// selects the right level.
 func levelRowAt(s *State, p rl.Vector2) int {
+	base := levelScrollBase(s)
 	for i := 0; i < visibleLevelRows(s); i++ {
 		if pointIn(p, levelRowRect(s, i)) {
-			return i
+			return base + i
 		}
 	}
 	return -1
@@ -1362,10 +1410,12 @@ func drawLevelsPanel(s *State, font rl.Font, theme render.Theme) {
 	minus, plus := levelStepperRects(s)
 	drawLevelStepper(font, minus, "-", pointIn(mp, minus))
 	drawLevelStepper(font, plus, "+", pointIn(mp, plus))
+	base := levelScrollBase(s)
 	for i := 0; i < visibleLevelRows(s); i++ {
+		lvl := base + i
 		r := levelRowRect(s, i)
-		active := i == s.editLevel
-		hidden := s.levelHidden[i]
+		active := lvl == s.editLevel
+		hidden := s.levelHidden[lvl]
 		bg := bgPanel
 		border := editorBorderDim
 		text := theme.TextMuted
@@ -1382,10 +1432,24 @@ func drawLevelsPanel(s *State, font rl.Font, theme render.Theme) {
 		inner := rl.NewRectangle(r.X+6, r.Y+3, r.Width-12, r.Height-6)
 		rl.DrawRectangleRec(inner, bg)
 		rl.DrawRectangleLinesEx(inner, 1, border)
-		render.DrawTextWithShadow(font, "Lv "+strconv.Itoa(i), inner.X+10, inner.Y+(inner.Height-16)/2, editorFontBody, text)
+		render.DrawTextWithShadow(font, "Lv "+strconv.Itoa(lvl), inner.X+10, inner.Y+(inner.Height-16)/2, editorFontBody, text)
 		eye := levelEyeRect(s, i)
-		drawLayerEye(eye, !hidden, pointIn(mp, eye))
+		// The active level is always shown (it can't be hidden), so draw its eye
+		// locked-open and dimmed rather than as a live toggle that no-ops.
+		drawLevelEye(eye, !hidden, pointIn(mp, eye) && !active, active)
 	}
+}
+
+// drawLevelEye draws a Levels-panel row's visibility eye. The active level's
+// eye is LOCKED (the active floor is always shown and can't be hidden), so it's
+// drawn open and non-hover — it doesn't pretend to be a live toggle that
+// silently no-ops on click.
+func drawLevelEye(r rl.Rectangle, open, hover, locked bool) {
+	if locked {
+		drawLayerEye(r, true, false)
+		return
+	}
+	drawLayerEye(r, open, hover)
 }
 
 func drawLevelStepper(font rl.Font, r rl.Rectangle, label string, hover bool) {
@@ -2118,11 +2182,12 @@ func drawGrid(s *State, font rl.Font) {
 		for x := xMin; x < xMax; x++ {
 			r := s.rect.tileRect(x, z)
 			// Level visibility (Photoshop-style): a tile whose elevation level is
-			// hidden in the Levels panel isn't drawn at all — EXCEPT a ramp that
-			// connects to the active level, which always shows so you can see and
-			// route transitions across a hidden floor.
+			// hidden in the Levels panel isn't drawn at all — EXCEPT the ACTIVE
+			// level (you always see the floor you're editing, so a paint can never
+			// vanish behind its own hidden toggle) and a ramp that connects to the
+			// active level (so transitions across a hidden floor stay routable).
 			lvl := s.area.ElevationLevelAt(x, z)
-			if lvl >= 0 && lvl <= maxEditLevel &&
+			if lvl >= 0 && lvl <= maxEditLevel && lvl != s.editLevel &&
 				s.levelHidden[lvl] && !rampTouchesActiveLevel(s, x, z) {
 				continue
 			}
@@ -2133,6 +2198,12 @@ func drawGrid(s *State, font rl.Font) {
 			// the wall covers it).
 			if showFloor {
 				rl.DrawRectangleRec(r, fadeAlpha(floorColor(s.area.Floor[z][x]), floorAlpha*levelFade))
+			}
+			// While editing elevation, tint each raised cell by its level (dark
+			// low → light high) so the whole height map reads at a glance — even
+			// zoomed out below the per-tile glyph threshold. Ground stays untinted.
+			if s.layer == LayerElevation && lvl > 0 && lvl != s.editLevel {
+				rl.DrawRectangleRec(r, fadeAlpha(elevationLevelColor(lvl), 0.55*levelFade))
 			}
 			if w := s.area.Walls[z][x]; showWalls && core.IsWallChar(w) {
 				// Every wall variant paints as a wall cell (was rock-only, which
@@ -2654,8 +2725,14 @@ func layerAlpha(s *State, l Layer) float32 {
 // (hidden levels are skipped entirely upstream — this only governs visible
 // off-level tiles).
 const (
-	levelFadeFalloff = float32(0.4)
-	levelFadeMin     = float32(0.1)
+	// Off-level tiles dim with distance from the active floor so it stands out,
+	// but not so hard they become unreadable — the earlier 0.4 falloff / 0.1
+	// floor faded neighbours into near-invisible ghosts, which read as "the map
+	// keeps disappearing." A gentler 0.6 falloff and a 0.4 floor keep off-level
+	// context clearly legible while the active floor still pops (full alpha + the
+	// gold outline).
+	levelFadeFalloff = float32(0.6)
+	levelFadeMin     = float32(0.4)
 )
 
 // levelDistanceFade returns the opacity multiplier for a tile on elevation
@@ -2681,6 +2758,11 @@ func levelDistanceFade(s *State, lvl int) float32 {
 // and the grid lines.
 var currentLevelOutlineColor = rl.NewColor(255, 224, 130, 235)
 
+// currentLevelOutlineUnderlay is the dark halo drawn just under the gold core
+// so the outline keeps its contrast over pale, full-bright active-level floors
+// (where a lone gold line washed out and read as "vanishing").
+var currentLevelOutlineUnderlay = rl.NewColor(20, 20, 26, 220)
+
 // drawCurrentLevelOutline traces the perimeter of every connected group of
 // active-level (s.editLevel) tiles within the cull window: for each such tile
 // it strokes the cell edges that face a neighbour on a DIFFERENT level (or the
@@ -2688,7 +2770,27 @@ var currentLevelOutlineColor = rl.NewColor(255, 224, 130, 235)
 // and skipped, so what remains is a clean outline around each group. Each
 // boundary edge is drawn exactly once — only the active-level side strokes it.
 func drawCurrentLevelOutline(s *State, xMin, xMax, zMin, zMax int, cell float32) {
-	const thick = float32(2)
+	// Double-stroke: a dark underlay under a bright gold core so the outline
+	// reads over BOTH light full-bright active floors and dark backgrounds —
+	// a single thin gold line washed out over pale floors, which is why the
+	// border "sometimes vanished." Underlay is a touch thicker so it haloes.
+	const coreThick = float32(2)
+	const underThick = float32(4)
+	// Scan one tile beyond the visible cull window (clamped) so a group edge
+	// sitting exactly at the viewport boundary still gets its border stroked
+	// instead of being dropped with the off-window neighbour.
+	if xMin > 0 {
+		xMin--
+	}
+	if zMin > 0 {
+		zMin--
+	}
+	if xMax < s.area.Width {
+		xMax++
+	}
+	if zMax < s.area.Height {
+		zMax++
+	}
 	// offLevel reports whether (x,z) is off the active level — true when out of
 	// bounds (the map edge always bounds the group) or its elevation differs.
 	offLevel := func(x, z int) bool {
@@ -2697,6 +2799,11 @@ func drawCurrentLevelOutline(s *State, xMin, xMax, zMin, zMax int, cell float32)
 		}
 		return s.area.ElevationLevelAt(x, z) != s.editLevel
 	}
+	// edge strokes the underlay then the core for one cell edge (a..b).
+	edge := func(ax, ay, bx, by float32) {
+		rl.DrawLineEx(rl.NewVector2(ax, ay), rl.NewVector2(bx, by), underThick, currentLevelOutlineUnderlay)
+		rl.DrawLineEx(rl.NewVector2(ax, ay), rl.NewVector2(bx, by), coreThick, currentLevelOutlineColor)
+	}
 	for z := zMin; z < zMax; z++ {
 		for x := xMin; x < xMax; x++ {
 			if s.area.ElevationLevelAt(x, z) != s.editLevel {
@@ -2704,16 +2811,16 @@ func drawCurrentLevelOutline(s *State, xMin, xMax, zMin, zMax int, cell float32)
 			}
 			r := s.rect.tileRect(x, z)
 			if offLevel(x-1, z) { // left
-				rl.DrawLineEx(rl.NewVector2(r.X, r.Y), rl.NewVector2(r.X, r.Y+cell), thick, currentLevelOutlineColor)
+				edge(r.X, r.Y, r.X, r.Y+cell)
 			}
 			if offLevel(x+1, z) { // right
-				rl.DrawLineEx(rl.NewVector2(r.X+cell, r.Y), rl.NewVector2(r.X+cell, r.Y+cell), thick, currentLevelOutlineColor)
+				edge(r.X+cell, r.Y, r.X+cell, r.Y+cell)
 			}
 			if offLevel(x, z-1) { // top
-				rl.DrawLineEx(rl.NewVector2(r.X, r.Y), rl.NewVector2(r.X+cell, r.Y), thick, currentLevelOutlineColor)
+				edge(r.X, r.Y, r.X+cell, r.Y)
 			}
 			if offLevel(x, z+1) { // bottom
-				rl.DrawLineEx(rl.NewVector2(r.X, r.Y+cell), rl.NewVector2(r.X+cell, r.Y+cell), thick, currentLevelOutlineColor)
+				edge(r.X, r.Y+cell, r.X+cell, r.Y+cell)
 			}
 		}
 	}
@@ -2902,6 +3009,13 @@ func currentLayerGlyph(s *State, x, z int) (byte, bool) {
 	case LayerCeiling:
 		if s.area.CeilingAt(x, z) {
 			return s.area.Ceiling[z][x], true
+		}
+	case LayerElevation:
+		// Show each RAISED tile's level char ('1'..'9','A'..) so the author can
+		// read exact heights while editing elevation. Ground (level 0) is left
+		// blank so a mostly-flat map stays uncluttered.
+		if lvl := s.area.ElevationLevelAt(x, z); lvl > 0 {
+			return core.ElevationChar(lvl), true
 		}
 	}
 	return 0, false

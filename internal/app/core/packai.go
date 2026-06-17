@@ -461,7 +461,14 @@ func wanderStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int
 // player's tile without making the global player position a hidden
 // dependency.
 func packCanMoveTo(g *GameState, p Pack, occupied map[[2]int]bool, tx, tz int, allowPlayer bool, px, pz int) bool {
-	_ = p
+	// Honor the same cliff/ramp rule the player obeys (StepElevationOK): a pack
+	// may only step between tiles whose shared edge sits at one elevation, or
+	// across a ramp. Without this, packs climb sheer cliffs the player can't —
+	// and now that raised tiles draw no support column, a chasing pack visibly
+	// floats up onto a plateau. Pack steps are always one cardinal tile.
+	if dir, ok := FacingFromDelta(tx-p.TileX, tz-p.TileZ); ok && !g.Area.StepElevationOK(p.TileX, p.TileZ, dir) {
+		return false
+	}
 	return CanEnterTile(g, tx, tz, EnterOpts{
 		AllowDoorTile:   false,
 		AllowPlayerTile: allowPlayer,

@@ -251,6 +251,13 @@ func BeginRetroCapture(g *core.GameState) bool {
 // sky-on-backbuffer arm, run.go's own pre-sky ClearBackground performed
 // that same wipe.)
 func EndRetroCapture(g *core.GameState, skyOnBackbuffer bool) {
+	if g == nil {
+		// Defensive symmetry with BeginRetroCapture, which returns false (and
+		// enters no texture mode) on a nil g. Reaching here with nil means the
+		// caller ignored that contract — bail before the g.RetroFilters deref
+		// below rather than panic.
+		return
+	}
 	rl.EndTextureMode()
 	if !skyOnBackbuffer {
 		rl.ClearBackground(rl.Black)

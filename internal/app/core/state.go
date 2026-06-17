@@ -38,8 +38,9 @@ func SnapPlayerToTile(p *Player) {
 }
 
 // CarryProgressionFrom copies the run-state that belongs to the PARTY, not the
-// world, from prev onto g: party + bag + gold + quest journal + step count +
-// weather + RNG + the debug/render runtime toggles. An area transition rebuilds
+// world, from prev onto g: party + bag + gold + quest journal + bestiary +
+// step count + weather + RNG + the debug/render runtime toggles. An area
+// transition rebuilds
 // a fresh GameState for the destination map (so packs/chests/fog reset like a
 // save-point) and then calls this so those carried fields don't snap back to
 // the new-state seed (0 gold, starter quests, cleared weather, …). Lives here,
@@ -51,6 +52,12 @@ func (g *GameState) CarryProgressionFrom(prev *GameState) {
 	g.Inventory = prev.Inventory
 	g.Gold = prev.Gold
 	g.Quests = prev.Quests
+	// Foe knowledge travels with the party like the quest journal — without
+	// this, every door step wipes kill counts + Scanned flags (NewGameState
+	// seeded a fresh empty map). nil stays nil; mirrors ResetGameState's carry.
+	if prev.Bestiary != nil {
+		g.Bestiary = prev.Bestiary
+	}
 	g.StepCount = prev.StepCount
 	g.Weather = prev.Weather
 	g.RNG = prev.RNG
@@ -58,6 +65,12 @@ func (g *GameState) CarryProgressionFrom(prev *GameState) {
 	g.EnemiesDisabled = prev.EnemiesDisabled
 	g.EasyBattleQuit = prev.EasyBattleQuit
 	g.RenderLogEnabled = prev.RenderLogEnabled
+	// All-skills / skip-battles are the same class of runtime debug toggle as
+	// the four above — flipped from the same Debug submenu — so they travel
+	// with the run too. Without these, every door step silently reset them to
+	// off while their siblings persisted.
+	g.DebugAllSkills = prev.DebugAllSkills
+	g.DebugSkipBattles = prev.DebugSkipBattles
 }
 
 func NewGameState(area AreaDefinition) GameState {
@@ -344,6 +357,16 @@ func ResetGameState(g *GameState) {
 	savedRumble := g.RumbleEnabled
 	savedRetroFilters := g.RetroFilters
 	savedRetroSky := g.RetroFilterSky
+	// Debug toggles are runtime dev preferences, not world state — preserve them
+	// across a restart/loss-recovery the same way area transitions carry them
+	// (CarryProgressionFrom). Without this a tester loses every debug flag the
+	// moment they hit Restart.
+	savedDebugOverlay := g.DebugOverlay
+	savedEnemiesDisabled := g.EnemiesDisabled
+	savedEasyBattleQuit := g.EasyBattleQuit
+	savedRenderLog := g.RenderLogEnabled
+	savedAllSkills := g.DebugAllSkills
+	savedSkipBattles := g.DebugSkipBattles
 	*g = NewGameState(g.Area)
 	g.Inventory = savedInventory
 	g.Party = savedParty
@@ -365,6 +388,12 @@ func ResetGameState(g *GameState) {
 	g.RumbleEnabled = savedRumble
 	g.RetroFilters = savedRetroFilters
 	g.RetroFilterSky = savedRetroSky
+	g.DebugOverlay = savedDebugOverlay
+	g.EnemiesDisabled = savedEnemiesDisabled
+	g.EasyBattleQuit = savedEasyBattleQuit
+	g.RenderLogEnabled = savedRenderLog
+	g.DebugAllSkills = savedAllSkills
+	g.DebugSkipBattles = savedSkipBattles
 	// Signal the render layer to drop any lingering particles. Restart can
 	// fire mid-battle (the pause menu's Restart row is reachable outside the
 	// two timing phases), so formation-relative battle particles would

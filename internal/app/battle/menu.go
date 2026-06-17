@@ -275,11 +275,6 @@ func applyItem(g *core.GameState) {
 		resetBattleAction(g)
 		return
 	}
-	// A confused actor may fumble the item onto a random living ally — the same
-	// per-action retarget a confused heal cast gets (AGENTS: "Confused =
-	// per-action random retarget"). Runs before we read the target so the
-	// fumble actually lands; a no-op when the actor isn't confused.
-	maybeConfuseRetarget(g)
 	target := g.Battle.PartyTarget
 	// Ingested is checked alongside HP<=0: the target picker excludes ingested
 	// allies, but a mantrap can swallow the chosen ally between target-select
@@ -290,14 +285,24 @@ func applyItem(g *core.GameState) {
 		return
 	}
 	def := core.ItemInfo(kind)
-	tgt := &g.Party[target]
 	// Don't spend a restorative on a target it can't help — the shared rule
 	// (refuse only when full on every axis the item restores) lives in
 	// core.ItemHelpsTarget, used by the out-of-battle path too.
-	if !core.ItemHelpsTarget(def, *tgt) {
-		setBattleStatus(g, tgt.Name+" doesn't need that right now.")
+	if !core.ItemHelpsTarget(def, g.Party[target]) {
+		setBattleStatus(g, g.Party[target].Name+" doesn't need that right now.")
 		return
 	}
+	// A confused actor may fumble the item onto a random living ally — the same
+	// per-action retarget a confused heal cast gets (AGENTS: "Confused =
+	// per-action random retarget"). Deferred until AFTER the validity/help gates
+	// above so it fires exactly once on the path that commits the turn: running
+	// it first let a re-confirm (after an "invalid"/"doesn't need that" bounce,
+	// neither of which ends the turn) re-roll the fumble on every press and spam
+	// the log. Mirrors beginPendingAction, which retargets only after setup
+	// succeeds. A no-op when the actor isn't confused.
+	maybeConfuseRetarget(g)
+	target = g.Battle.PartyTarget
+	tgt := &g.Party[target]
 	// Try to consume from inventory first — bail without using the action's
 	// turn if the stack disappeared (defensive; shouldn't happen).
 	updated, ok := core.ConsumeItem(g.Inventory, kind)

@@ -15,6 +15,7 @@ import (
 	"encoding/binary"
 	"math"
 	"math/rand"
+	"strconv"
 )
 
 // SampleRate is the procedural-audio bank's working sample rate. 22050 is
@@ -101,101 +102,265 @@ func WaveShapeName(w WaveShape) string {
 	return waveShapeNames[w]
 }
 
-// SynthShape is the rich procedural sweep primitive. Generalises
-// SynthSweep with:
-//
-//   - Selectable oscillator (sine / square / triangle / saw).
-//   - Optional noise mix: blends in white-noise samples for grit /
-//     wind / static textures. 0 = pure tone, 1 = pure noise.
-//   - Optional vibrato: sinusoidal frequency modulation. vibHz sets
-//     the wobble rate, vibDepth is the fraction of the base
-//     frequency the wobble swings through (0..0.5 reads as natural
-//     vibrato; higher gets sci-fi).
-//
-// All extras default to "off" — a zero-everything call to SynthShape
-// produces the same output as SynthSweep with sine + no noise + no
-// vibrato. SynthSweep itself is now a thin wrapper.
-func SynthShape(duration, startHz, endHz, volume, attack, release float64,
-	wave WaveShape, noiseMix, vibHz, vibDepth float64) []int16 {
+// Musical note support. Lets the sound editor pick pitches as tempered
+// notes instead of raw Hz, so authored cues can sit in tune with the
+// procedural musical cues (the chord/chime bank). Equal temperament,
+// A4 = 440 Hz. Index 0 = C2; NoteCount spans five octaves up to B6,
+// covering the editor's pitch range musically.
+const (
+	noteA4Hz    = 440.0
+	noteA4Index = 33 // semitones from C2 (index 0) up to A4: 2 octaves + 9 = 33
+	// NoteCount is the number of addressable notes (C2..B6, five octaves).
+	NoteCount = 60
+)
 
-	samples := int(duration * SampleRate)
+var noteNames = [12]string{"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"}
+
+func clampNoteIndex(i int) int {
+	if i < 0 {
+		return 0
+	}
+	if i >= NoteCount {
+		return NoteCount - 1
+	}
+	return i
+}
+
+// NoteHz returns the equal-tempered frequency of note index i (0 = C2).
+func NoteHz(i int) float64 {
+	i = clampNoteIndex(i)
+	return noteA4Hz * math.Pow(2, float64(i-noteA4Index)/12.0)
+}
+
+// NoteName returns the scientific-pitch label of note index i, e.g.
+// "A4", "C#5". Used by the editor's note-picker readout.
+func NoteName(i int) string {
+	i = clampNoteIndex(i)
+	return noteNames[i%12] + strconv.Itoa(2+i/12)
+}
+
+// NearestNoteIndex returns the note index whose frequency is closest to
+// hz — the inverse of NoteHz, used so the editor's note picker can show
+// the right note for an arbitrary stored frequency (and round a freed-up
+// Hz onto the tempered grid).
+func NearestNoteIndex(hz float64) int {
+	if hz <= 0 {
+		return 0
+	}
+	return clampNoteIndex(int(math.Round(noteA4Index + 12*math.Log2(hz/noteA4Hz))))
+}
+
+// Voicing knobs for the FX params, named so the per-sample loop reads by
+// intent and the slider ranges have one home for their "feel" scaling.
+const (
+	driveMaxGain   = 5.0  // Drive=1 → tanh pre-gain of 1+5 = 6× (heavy saturation)
+	cutoffMinAlpha = 0.02 // floor on the one-pole LPF coefficient so Cutoff=0 stays a (very dark) tone, not silence
+	crushMaxHold   = 24   // Crush=1 → sample-and-hold 25 samples (~882 Hz effective rate at 22050)
+	maxDuration    = 30.0 // hard cap on a synth's length in seconds — sound effects are well under this; the ceiling only exists so a corrupt/hand-edited .snd sidecar can't drive a multi-GB make([]int16)
+)
+
+// ShapeParams is the full knob set for the procedural sound editor. It
+// supersedes SynthShape's positional argument list; SynthShape is now a
+// thin wrapper that fills the extra fields with their neutral (no-op)
+// values, so existing callers and the golden tests are byte-unaffected.
+//
+// Neutral values (a "do nothing extra" sound): Decay 0, Sustain 1,
+// PulseWidth 0.5, Cutoff 1 (filter open), Drive 0, Crush 0, Tremolo 0.
+type ShapeParams struct {
+	Duration     float64   `json:"duration"`      // seconds
+	StartHz      float64   `json:"start_hz"`      // sweep start frequency
+	EndHz        float64   `json:"end_hz"`        // sweep end frequency
+	Volume       float64   `json:"volume"`        // peak amplitude [0,1]
+	Attack       float64   `json:"attack"`        // ADSR attack, seconds
+	Decay        float64   `json:"decay"`         // ADSR decay, seconds (0 = skip)
+	Sustain      float64   `json:"sustain"`       // ADSR sustain level [0,1]
+	Release      float64   `json:"release"`       // ADSR release, seconds
+	Wave         WaveShape `json:"wave"`          // oscillator timbre
+	PulseWidth   float64   `json:"pulse_width"`   // square duty cycle [0.01,0.99]; 0.5 = symmetric
+	NoiseMix     float64   `json:"noise"`         // tone↔white-noise crossfade [0,1]
+	VibHz        float64   `json:"vibrato_hz"`    // pitch-wobble rate
+	VibDepth     float64   `json:"vibrato_depth"` // pitch-wobble depth (fraction of freq)
+	TremoloHz    float64   `json:"tremolo_hz"`    // amplitude-wobble rate
+	TremoloDepth float64   `json:"tremolo_depth"` // amplitude-wobble depth [0,1]
+	Cutoff       float64   `json:"cutoff"`        // one-pole low-pass [0,1]; 1 = open (bypass)
+	Drive        float64   `json:"drive"`         // soft-saturation amount [0,1]
+	Crush        float64   `json:"crush"`         // sample-rate reduction [0,1]
+}
+
+// clamp01 pins a value into [0,1] — the common guard for the mix-style knobs.
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+// adsrEnv computes the ADSR envelope level at elapsed time secs. With
+// Decay 0 + Sustain 1 it reduces to the original attack/sustain/release
+// shape SynthSweep used, so the neutral wrapper path is byte-identical.
+func adsrEnv(secs, duration, attack, decay, sustain, release, releaseStart float64) float64 {
+	switch {
+	case attack > 0 && secs < attack:
+		return secs / attack
+	case decay > 0 && secs < attack+decay:
+		return 1 - (1-sustain)*((secs-attack)/decay)
+	case secs < releaseStart:
+		return sustain
+	default:
+		if release <= 0 {
+			return sustain
+		}
+		e := sustain * (duration - secs) / release
+		if e < 0 {
+			e = 0
+		}
+		return e
+	}
+}
+
+// SynthShapeParams is the rich procedural sweep primitive. It generalises
+// SynthSweep with a selectable oscillator (with pulse-width for the
+// square), a full ADSR envelope, a tone↔noise crossfade, pitch vibrato +
+// amplitude tremolo, a one-pole low-pass, soft-saturation drive, and a
+// sample-rate-reduction bitcrush. The signal chain per sample is:
+//
+//	oscillator → noise mix → drive → low-pass → bitcrush → ×(ADSR·tremolo·volume)
+func SynthShapeParams(p ShapeParams) []int16 {
+	if p.Duration > maxDuration {
+		p.Duration = maxDuration
+	}
+	samples := int(p.Duration * SampleRate)
 	if samples <= 0 {
 		samples = 1
 	}
-	if noiseMix < 0 {
-		noiseMix = 0
-	}
-	if noiseMix > 1 {
-		noiseMix = 1
-	}
+	noiseMix := clamp01(p.NoiseMix)
+	sustain := clamp01(p.Sustain)
+	tremDepth := clamp01(p.TremoloDepth)
+	drive := clamp01(p.Drive)
+	crush := clamp01(p.Crush)
+	vibDepth := p.VibDepth
 	if vibDepth < 0 {
 		vibDepth = 0
 	}
+	pulse := p.PulseWidth
+	if pulse < 0.01 {
+		pulse = 0.01
+	}
+	if pulse > 0.99 {
+		pulse = 0.99
+	}
+	holdLen := 1 + int(crush*crushMaxHold+0.5) // 1 = no crush
+	releaseStart := p.Duration - p.Release
+
 	pcm := make([]int16, samples)
-	phase := 0.0
-	vibPhase := 0.0
-	// Deterministic noise seed so two consecutive previews of the
-	// same params produce identical waveforms — important for the
-	// editor's "did my slider change anything?" feedback loop.
+	phase, vibPhase, tremPhase := 0.0, 0.0, 0.0
+	// Deterministic noise seed so two consecutive previews of the same
+	// params produce identical waveforms — important for the editor's
+	// "did my slider change anything?" feedback loop.
 	noiseRng := rand.New(rand.NewSource(0xC0FFEE_BABE))
+	lpState := 0.0 // one-pole low-pass memory
+	heldTone := 0.0
+	holdCounter := 0
 	for i := 0; i < samples; i++ {
 		t := float64(i) / float64(samples)
-		freq := startHz + (endHz-startHz)*t
-		// Vibrato — sinusoidal FM. Phase-integrated like the main
-		// oscillator so the wobble doesn't click at sample edges.
-		if vibHz > 0 && vibDepth > 0 {
-			vibPhase += radiansPerSampleHz * vibHz
+		freq := p.StartHz + (p.EndHz-p.StartHz)*t
+		// Vibrato — sinusoidal FM, phase-integrated so the wobble doesn't
+		// click at sample edges.
+		if p.VibHz > 0 && vibDepth > 0 {
+			vibPhase += radiansPerSampleHz * p.VibHz
 			freq += freq * vibDepth * math.Sin(vibPhase)
 		}
 		phase += radiansPerSampleHz * freq
-		// Oscillator. Phase is unbounded, so we wrap to [0, 2π) for
-		// the shaped waves that read the position rather than the
-		// running sine.
+		// Oscillator. Phase is unbounded, so the shaped waves wrap to
+		// [0, 2π) (or [0,1) for the square's duty comparison).
 		var tone float64
-		switch wave {
+		switch p.Wave {
 		case WaveSquare:
-			if math.Sin(phase) >= 0 {
+			pp := math.Mod(phase, 2*math.Pi)
+			if pp < 0 {
+				pp += 2 * math.Pi
+			}
+			if pp/(2*math.Pi) < pulse {
 				tone = 1.0
 			} else {
 				tone = -1.0
 			}
 		case WaveTriangle:
-			p := math.Mod(phase, 2*math.Pi)
-			if p < 0 {
-				p += 2 * math.Pi
+			pq := math.Mod(phase, 2*math.Pi)
+			if pq < 0 {
+				pq += 2 * math.Pi
 			}
-			tone = 1.0 - 2.0*math.Abs(p-math.Pi)/math.Pi
+			tone = 1.0 - 2.0*math.Abs(pq-math.Pi)/math.Pi
 		case WaveSaw:
-			p := math.Mod(phase, 2*math.Pi)
-			if p < 0 {
-				p += 2 * math.Pi
+			pq := math.Mod(phase, 2*math.Pi)
+			if pq < 0 {
+				pq += 2 * math.Pi
 			}
-			tone = (p - math.Pi) / math.Pi
+			tone = (pq - math.Pi) / math.Pi
 		default:
 			tone = math.Sin(phase)
 		}
-		// Noise mix — crossfade between tone and noise. At 1.0 the
-		// tone disappears, leaving pure white noise (still
-		// envelope-shaped). At 0.0 the noise contributes nothing.
+		// Noise mix — crossfade between tone and white noise.
 		if noiseMix > 0 {
 			noise := noiseRng.Float64()*2 - 1
 			tone = tone*(1-noiseMix) + noise*noiseMix
 		}
-		// ADSR envelope (same as the original SynthSweep).
-		secs := float64(i) / float64(SampleRate)
-		env := 1.0
-		switch {
-		case secs < attack:
-			env = secs / attack
-		case secs > duration-release:
-			env = (duration - secs) / release
-			if env < 0 {
-				env = 0
+		// Drive — symmetric soft saturation, normalised so the peak stays
+		// near unity. Gated at 0 so the neutral path is untouched.
+		if drive > 0 {
+			g := 1 + drive*driveMaxGain
+			tone = math.Tanh(tone*g) / math.Tanh(g)
+		}
+		// Low-pass — one-pole. Bypassed exactly at Cutoff>=1 so the neutral
+		// path can't introduce float rounding (keeps the square binary).
+		if p.Cutoff < 1.0 {
+			alpha := p.Cutoff
+			if alpha < cutoffMinAlpha {
+				alpha = cutoffMinAlpha
+			}
+			lpState += alpha * (tone - lpState)
+			tone = lpState
+		}
+		// Bitcrush — sample-and-hold reduces the effective sample rate for a
+		// retro/aliased grain. holdLen==1 (Crush 0) is a no-op.
+		if holdLen > 1 {
+			if holdCounter == 0 {
+				heldTone = tone
+			}
+			tone = heldTone
+			holdCounter++
+			if holdCounter >= holdLen {
+				holdCounter = 0
 			}
 		}
-		pcm[i] = ClampToInt16(tone * env * volume)
+		secs := float64(i) / float64(SampleRate)
+		env := adsrEnv(secs, p.Duration, p.Attack, p.Decay, sustain, p.Release, releaseStart)
+		// Tremolo — sinusoidal amplitude modulation between (1-depth) and 1.
+		if p.TremoloHz > 0 && tremDepth > 0 {
+			tremPhase += radiansPerSampleHz * p.TremoloHz
+			env *= 1 - tremDepth*(0.5+0.5*math.Sin(tremPhase))
+		}
+		pcm[i] = ClampToInt16(tone * env * p.Volume)
 	}
 	return pcm
+}
+
+// SynthShape is the backward-compat positional wrapper over
+// SynthShapeParams: it fills the new knobs with their neutral values so a
+// sine/square/etc. call produces exactly what it did before the rich
+// params landed. The golden tests pin this byte-for-byte.
+func SynthShape(duration, startHz, endHz, volume, attack, release float64,
+	wave WaveShape, noiseMix, vibHz, vibDepth float64) []int16 {
+	return SynthShapeParams(ShapeParams{
+		Duration: duration, StartHz: startHz, EndHz: endHz, Volume: volume,
+		Attack: attack, Decay: 0, Sustain: 1, Release: release,
+		Wave: wave, PulseWidth: 0.5, NoiseMix: noiseMix,
+		VibHz: vibHz, VibDepth: vibDepth,
+		TremoloHz: 0, TremoloDepth: 0, Cutoff: 1, Drive: 0, Crush: 0,
+	})
 }
 
 // SynthSweep is the backward-compat wrapper: sine wave, no noise,

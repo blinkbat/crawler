@@ -40,6 +40,27 @@ func SaveUserSound(name string, pcm []int16) (string, error) {
 }
 func DeleteUserSound(name string) error { return userconfig.DeleteSound(name) }
 
+// ShapeParams is the full synth-knob set the sound editor edits — aliased
+// from wavsynth so editor code names a single type. SaveUserSoundParams
+// writes both the .wav and its editing sidecar; LoadUserSoundParams reads
+// the sidecar back (ok=false when a sound has none).
+type ShapeParams = wavsynth.ShapeParams
+
+func SaveUserSoundParams(name string, p ShapeParams) (string, error) {
+	return userconfig.WriteSound(name, p)
+}
+func LoadUserSoundParams(name string) (ShapeParams, bool) {
+	return userconfig.LoadParams(name)
+}
+
+// Musical-note helpers re-exported so the editor's note pickers can read
+// tempered pitches without importing wavsynth directly.
+const NoteCount = wavsynth.NoteCount
+
+func NoteHz(i int) float64            { return wavsynth.NoteHz(i) }
+func NoteName(i int) string           { return wavsynth.NoteName(i) }
+func NearestNoteIndex(hz float64) int { return wavsynth.NearestNoteIndex(hz) }
+
 // soundIDByName maps the canonical slug ("input_hit") to its Sound enum
 // value. Derived from soundCues at init so adding a new Sound enum
 // entry automatically picks up here too — no parallel table to keep
@@ -210,6 +231,10 @@ func SynthShape(duration, startHz, endHz, volume, attack, release float64,
 	return wavsynth.SynthShape(duration, startHz, endHz, volume, attack, release,
 		wave, noiseMix, vibHz, vibDepth)
 }
+
+// SynthShapeParams is the struct-based rich synth the sound editor drives.
+// Forwards verbatim to wavsynth.
+func SynthShapeParams(p ShapeParams) []int16 { return wavsynth.SynthShapeParams(p) }
 
 // previewRingSize bounds the in-flight preview clips. Sized at 4 because
 // previews are short (<1s) and the UI naturally caps how fast a user can

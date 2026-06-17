@@ -504,16 +504,18 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 				continue
 			}
 			// Elevation: this tile's floor (and everything on it) rides up by
-			// its level. A raised tile also drops a solid wall-textured support
-			// column from the ground to its level, so the plateau reads as a
-			// cliff face rather than a floating slab — adjacent same-level tiles
-			// merge into one mass and the sides toward lower neighbors are the
-			// exposed cliff. (No per-edge riser bookkeeping needed.)
+			// its level. No automatic support column is drawn beneath a raised
+			// tile — plateaus float, and the author builds any cliff/retaining
+			// face they want by painting walls on the lower tiles. This keeps the
+			// renderer from forcing a solid mass under every step and lets >1-level
+			// differences read as a real gap rather than one merged tower.
 			elevY := float32(m.ElevationLevelAt(x, z)) * core.LevelStep
-			if elevY > 0 {
-				drawElevationColumn(material, cx, cz, elevY, tileYawDeg(x, z))
-			}
-			center := rl.NewVector3(cx, elevY, cz)
+			// Scenery (decor/props) rests on the WALKABLE surface, which on a
+			// ramp tile is the mid-slope height, not the low edge elevY that the
+			// floor wedge is drawn from. Anchor it at StandGroundY so a prop or
+			// brazier on a ramp sits where a unit standing there would, instead
+			// of sinking to the low end. On flat tiles StandGroundY == elevY.
+			center := rl.NewVector3(cx, m.StandGroundY(x, z), cz)
 			if m.CeilingAt(x, z) {
 				drawTileCube(material.ceilingModel, cx, core.WallHeight+elevY, cz, tileYawDeg(x, z))
 				if logActive {
@@ -523,7 +525,8 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 			if wc := m.Walls[z][x]; core.IsWallChar(wc) {
 				// Plain rock uses the area material's wall (dungeon brick vs
 				// field rock); variants (ivy/cracked/crumbling) swap in their
-				// own per-char skin regardless of material.
+				// own per-char skin regardless of material. Wall rides the
+				// tile's elevation; nothing auto-sizes it.
 				wallModel := material.wallModel
 				if vm, ok := assets.wallVariants[wc]; ok {
 					wallModel = vm
@@ -553,14 +556,14 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 					if pm := &assets.propModelTable[prop]; len(pm.parts) > 0 {
 						anchor := footprintAnchor(center, footprint)
 						if r := propShadowRadiusTable[prop]; r > 0 {
-							drawGroundShadow(anchor.X, anchor.Z, r)
+							drawGroundShadowElev(anchor.X, anchor.Z, anchor.Y, r)
 						}
 						pm.draw(anchor, 1.0, propYaw)
 						drawn = true
 					}
 				} else if pm := &assets.propModelTable[prop]; len(pm.parts) > 0 {
 					if r := propShadowRadiusTable[prop]; r > 0 {
-						drawGroundShadow(center.X, center.Z, r)
+						drawGroundShadowElev(center.X, center.Z, center.Y, r)
 					}
 					pm.draw(center, 1.0, propYaw)
 					drawn = true
@@ -687,22 +690,6 @@ func drawRampWedge(model rl.Model, cx, cz, lowY float32, facing int) {
 		rl.NewVector3(1, 1, 1), rl.White)
 }
 
-// drawElevationColumn draws a solid wall-textured column from the ground (y=0)
-// up to topY at the tile center, giving a raised tile a cliff/retaining face
-// instead of a floating slab. Scales the material's wall cube (native height
-// WallHeight) to topY. Columns between two same-level tiles overdraw hidden
-// internal faces — cheap, and it avoids any per-edge riser bookkeeping.
-func drawElevationColumn(material worldMaterialResources, cx, cz, topY, yawDeg float32) {
-	if topY <= 0 {
-		return
-	}
-	rl.DrawModelEx(material.wallModel,
-		rl.NewVector3(cx, topY/2, cz),
-		rl.NewVector3(0, 1, 0), yawDeg,
-		rl.NewVector3(1, topY/core.WallHeight, 1),
-		rl.White)
-}
-
 // drawDecor renders the floor-layer decoration for a tile. '.' falls through
 // to the existing auto-scatter (hash decides whether to draw and what);
 // '_' suppresses the auto-scatter entirely; explicit chars draw a specific
@@ -718,7 +705,7 @@ func drawDecor(assets Resources, cell byte, x, z int, cx, cz float32, center rl.
 	case core.DecorEmpty:
 		return
 	case core.DecorAuto:
-		drawFloorDecoration(assets, x, z, cx, cz)
+		drawFloorDecoration(assets, x, z, cx, cz, center.Y)
 		return
 	}
 	// Inline-handled decor (bush / mushroom / pebble) dispatches
@@ -726,7 +713,7 @@ func drawDecor(assets Resources, cell byte, x, z int, cx, cz float32, center rl.
 	// mirror of inlineDecorHandlers so the per-tile-per-frame hot path
 	// is an array index instead of a map hash.
 	if handler := inlineDecorTable[cell]; handler != nil {
-		handler(assets, x, z, cx, cz)
+		handler(assets, x, z, cx, cz, center.Y)
 		return
 	}
 	if footprint := core.DecorFootprint(cell); footprint != nil {
@@ -773,7 +760,7 @@ func drawPropTreeScaled(char byte) inlinePropRenderer {
 		// Tree shadow scales with the tree's overall scale, plus
 		// a touch of slack so the painted disc sits a little wider
 		// than the trunk's projected footprint.
-		drawGroundShadow(center.X, center.Z, 0.34*scale+0.10)
+		drawGroundShadowElev(center.X, center.Z, center.Y, 0.34*scale+0.10)
 		assets.tree.drawVaried(center, scale, propYaw, tileHash(x, z))
 	}
 }
@@ -791,8 +778,8 @@ func drawPropTreeTwin(assets Resources, _ core.AreaDefinition, x, z int, center 
 	seed := tileHash(x, z)
 	left := rl.NewVector3(center.X-offset, center.Y, center.Z-offset)
 	right := rl.NewVector3(center.X+offset, center.Y, center.Z+offset)
-	drawGroundShadow(left.X, left.Z, 0.34*scaleBig+0.08)
-	drawGroundShadow(right.X, right.Z, 0.34*scaleSmall+0.08)
+	drawGroundShadowElev(left.X, left.Z, center.Y, 0.34*scaleBig+0.08)
+	drawGroundShadowElev(right.X, right.Z, center.Y, 0.34*scaleSmall+0.08)
 	if seed&1 == 0 {
 		assets.tree.drawVaried(left, scaleBig, propYaw, seed)
 		assets.tree.drawVaried(right, scaleSmall, propYaw+1.1, seed^0x9E3779B9)
@@ -803,12 +790,12 @@ func drawPropTreeTwin(assets Resources, _ core.AreaDefinition, x, z int, center 
 }
 
 func drawPropRockLarge(assets Resources, _ core.AreaDefinition, _, _ int, center rl.Vector3, propYaw float32) {
-	drawGroundShadow(center.X, center.Z, 0.42)
+	drawGroundShadowElev(center.X, center.Z, center.Y, 0.42)
 	assets.rockProp.draw(center, 1.0, propYaw)
 }
 
 func drawPropBushLarge(assets Resources, _ core.AreaDefinition, _, _ int, center rl.Vector3, propYaw float32) {
-	drawGroundShadow(center.X, center.Z, 0.48)
+	drawGroundShadowElev(center.X, center.Z, center.Y, 0.48)
 	assets.bushProp.draw(center, 1.3, propYaw)
 }
 
@@ -837,20 +824,24 @@ func drawWallTorch(assets Resources, m core.AreaDefinition, x, z int, center rl.
 	// in the opposite direction.
 	wallX := center.X - fx*wallTorchMount
 	wallZ := center.Z - fz*wallTorchMount
+	// All fixture heights ride the tile's elevation floor (center.Y) so a
+	// torch on a raised tile stays mounted to its wall instead of hanging at
+	// world-ground height.
+	baseY := center.Y
 
 	// Iron bracket — a small dark cube flush on the wall, plus a
 	// short arm reaching out toward the room holding the sconce.
 	// Drawn lit (immediate mode under the world shader); the torch's
 	// own light pool keeps it visible.
-	bracket := rl.NewVector3(wallX, wallTorchSconceY-0.12, wallZ)
+	bracket := rl.NewVector3(wallX, baseY+wallTorchSconceY-0.12, wallZ)
 	rl.DrawCube(bracket, 0.10, 0.22, 0.10, torchIron)
 	armX := wallX + fx*0.10
 	armZ := wallZ + fz*0.10
-	rl.DrawCube(rl.NewVector3(armX, wallTorchSconceY, armZ), 0.08, 0.06, 0.08, torchIron)
+	rl.DrawCube(rl.NewVector3(armX, baseY+wallTorchSconceY, armZ), 0.08, 0.06, 0.08, torchIron)
 	// Sconce cup at the arm tip.
 	cupX := wallX + fx*0.16
 	cupZ := wallZ + fz*0.16
-	rl.DrawCube(rl.NewVector3(cupX, wallTorchSconceY+0.04, cupZ), 0.16, 0.08, 0.16, torchIronLight)
+	rl.DrawCube(rl.NewVector3(cupX, baseY+wallTorchSconceY+0.04, cupZ), 0.16, 0.08, 0.16, torchIronLight)
 
 	// Animated flame — three emissive blobs above the cup, each
 	// bobbing on its own time offset so the flame flickers and
@@ -869,7 +860,7 @@ func drawWallTorch(assets Resources, m core.AreaDefinition, x, z int, center rl.
 		swayA := float32(math.Sin(float64(t*5.3+fp*1.4))) * 0.05
 		// Higher blobs are smaller and lean more — a teardrop
 		// flame shape that wavers.
-		y := wallTorchSconceY + 0.09 + float32(i)*0.07 + bob
+		y := baseY + wallTorchSconceY + 0.09 + float32(i)*0.07 + bob
 		lean := float32(i) * 0.03
 		px := flameBaseX + fx*lean + swayA*fz
 		pz := flameBaseZ + fz*lean - swayA*fx
@@ -1097,17 +1088,22 @@ func rebuildTorchSites(m core.AreaDefinition) {
 			}
 			cx := core.TileCenter(x)
 			cz := core.TileCenter(z)
+			// Light origin rides the tile's elevation so a raised torch/brazier
+			// lights at its actual flame height, matching the visible fixture.
+			// Use the walkable-surface height (mid-slope on a ramp tile, same as
+			// the fixture's scenery anchor) rather than the low-edge level.
+			elevY := m.StandGroundY(x, z)
 			var pos rl.Vector3
 			bright := float32(0.85) // wall torch — dimmer
 			if isBrazier {
 				// Floor brazier: flame at the bowl, brighter pool.
-				pos = rl.NewVector3(cx, torchFlameHeight, cz)
+				pos = rl.NewVector3(cx, elevY+torchFlameHeight, cz)
 				bright = 1.45
 			} else {
 				// Wall torch: light originates at the sconce, offset
 				// toward the wall + up at flame height.
 				fx, fz := wallTorchFacing(m, x, z)
-				pos = rl.NewVector3(cx-fx*wallTorchLightInset, wallTorchLightY, cz-fz*wallTorchLightInset)
+				pos = rl.NewVector3(cx-fx*wallTorchLightInset, elevY+wallTorchLightY, cz-fz*wallTorchLightInset)
 			}
 			torchSiteCache.sites = append(torchSiteCache.sites, torchSite{
 				pos: pos, cx: cx, cz: cz, hash: tileHash(x, z), bright: bright,
@@ -1197,23 +1193,33 @@ func drawGroundShadowAt(cx, cy, cz, radius float32) {
 	)
 }
 
+// drawGroundShadowElev draws a contact disc on a tile whose floor sits at
+// groundY (its elevation), keeping the same small floor clearance as the
+// ground-plane drawGroundShadow. Without this, props/decor/trees on a raised
+// tile cast their shadow on the world floor below — a shadow floating in the
+// gap under the plateau now that raised tiles draw no support column.
+func drawGroundShadowElev(cx, cz, groundY, radius float32) {
+	drawGroundShadowAt(cx, groundY+groundShadowFloorClearance, cz, radius)
+}
+
 // drawDecorBush / drawDecorMushroom / drawDecorPebble are the
 // inline-decor implementations registered in inlineDecorHandlers.
 // Each one is a thin wrapper around the dedicated propModel field /
 // scatter helper on Resources so the dispatch signature stays uniform
-// across every handler.
-func drawDecorBush(assets Resources, x, z int, cx, cz float32) {
-	drawGroundShadow(cx, cz, 0.36)
-	assets.bushProp.draw(rl.NewVector3(cx, 0, cz), 0.75, propYawDeg(x, z))
+// across every handler. groundY is the tile's elevation floor height so
+// decoration rides a raised tile instead of sinking to the world floor.
+func drawDecorBush(assets Resources, x, z int, cx, cz, groundY float32) {
+	drawGroundShadowElev(cx, cz, groundY, 0.36)
+	assets.bushProp.draw(rl.NewVector3(cx, groundY, cz), 0.75, propYawDeg(x, z))
 }
 
-func drawDecorMushroom(assets Resources, x, z int, cx, cz float32) {
-	drawGroundShadow(cx, cz, 0.20)
-	assets.mushroomProp.draw(rl.NewVector3(cx, 0, cz), 1.0, propYawDeg(x, z))
+func drawDecorMushroom(assets Resources, x, z int, cx, cz, groundY float32) {
+	drawGroundShadowElev(cx, cz, groundY, 0.20)
+	assets.mushroomProp.draw(rl.NewVector3(cx, groundY, cz), 1.0, propYawDeg(x, z))
 }
 
-func drawDecorPebble(assets Resources, x, z int, cx, cz float32) {
-	drawPebbleCluster(assets, cx, cz, tileHash(x, z))
+func drawDecorPebble(assets Resources, x, z int, cx, cz, groundY float32) {
+	drawPebbleCluster(assets, cx, cz, groundY, tileHash(x, z))
 }
 
 // drawTileCube draws a square-footprint cube model at (cx,cy,cz) with a yaw
@@ -1310,7 +1316,7 @@ func floorVariantHash(x, z int) int {
 // tiles get a decoration; small rocks are weighted heavier than the others
 // so the field reads as pebble-strewn ground. Props are passable (don't
 // update BlockedAt) and small rocks are squashed in Y so they look walkable.
-func drawFloorDecoration(assets Resources, x, z int, cx, cz float32) {
+func drawFloorDecoration(assets Resources, x, z int, cx, cz, groundY float32) {
 	h := hashXY(x, z)
 	chance := byte(h)
 	if chance > 42 { // ~16.5% rate
@@ -1324,7 +1330,7 @@ func drawFloorDecoration(assets Resources, x, z int, cx, cz float32) {
 	// center. int8 conversion gives signed -128..127, scaled to ~tile.
 	offX := float32(int8(h>>16)) / 230
 	offZ := float32(int8(h>>24)) / 230
-	pos := rl.NewVector3(cx+offX, 0, cz+offZ)
+	pos := rl.NewVector3(cx+offX, groundY, cz+offZ)
 
 	// Reuse the orientation hash so floor decorations also pick up a stable
 	// yaw — keeps clusters of small props from looking aligned when a few
@@ -1332,7 +1338,7 @@ func drawFloorDecoration(assets Resources, x, z int, cx, cz float32) {
 	decoYaw := float32(((h >> 12) % 12) * 30)
 	switch kind {
 	case 0, 1, 2, 3: // pebble cluster — see drawPebbleCluster comment
-		drawPebbleCluster(assets, cx, cz, h)
+		drawPebbleCluster(assets, cx, cz, groundY, h)
 	case 4: // small bush
 		assets.bushProp.draw(pos, 0.75, decoYaw)
 	case 5: // tiny mushroom
@@ -1360,7 +1366,7 @@ var pebblePaletteTints = [4]rl.Color{
 	rl.NewColor(220, 216, 208, 255),
 }
 
-func drawPebbleCluster(assets Resources, cx, cz float32, tileHash uint32) {
+func drawPebbleCluster(assets Resources, cx, cz, groundY float32, tileHash uint32) {
 	if len(assets.rockProp.models) == 0 {
 		return
 	}
@@ -1397,7 +1403,7 @@ func drawPebbleCluster(assets Resources, cx, cz float32, tileHash uint32) {
 		// propModel's base part offsets it half its height to clear the
 		// ground. We draw the mesh directly, not via the prop, so we
 		// replicate that math: RockMeshBaseHalfHeight * hght.
-		pos := rl.NewVector3(cx+ox, RockMeshBaseHalfHeight*hght, cz+oz)
+		pos := rl.NewVector3(cx+ox, groundY+RockMeshBaseHalfHeight*hght, cz+oz)
 		scale := rl.NewVector3(foot, hght, foot*stretch)
 		tint := pebblePaletteTints[(ih>>28)&0x03]
 		rl.DrawModelEx(baseModel, pos, rotationAxis, rot, scale, tint)

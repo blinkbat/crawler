@@ -94,14 +94,29 @@ func applyTool(s *State, x, z int) {
 	s.dirty = true
 }
 
+// layerStampsActiveLevel reports whether painting on `layer` should lift the
+// tile to the active edit level. Floor / decor / props / ceiling sit on (or
+// over) a floor, so painting them defines that floor's level. WALLS do NOT:
+// a wall is a vertical structure, and re-stamping its tile's level on paint
+// silently moved tiles between levels — under a fat brush it dropped a raised
+// neighbour to the active level, which read as "painting a wall erased the
+// walls on another level." Elevation sets the level itself; Entities have none.
+func layerStampsActiveLevel(layer Layer) bool {
+	switch layer {
+	case LayerElevation, LayerEntities, LayerWalls:
+		return false
+	}
+	return true
+}
+
 // stampActiveLevel lifts tile (x,z) to the active level — the single "a content
 // paint builds the active floor" step shared by applyTool, floodFill, and
 // fillEntireLayer so the three paths can't drift. The levels model is now
-// ALWAYS on (Photoshop-style), so every content paint targets the active level.
-// No-op on the Elevation layer (it sets the level itself) or Entities (no
-// per-tile content / no elevation of its own).
+// ALWAYS on (Photoshop-style), so every floor-defining content paint targets
+// the active level. Gated by layerStampsActiveLevel (walls/elevation/entities
+// are exempt).
 func stampActiveLevel(s *State, x, z int) {
-	if s.layer == LayerElevation || s.layer == LayerEntities {
+	if !layerStampsActiveLevel(s.layer) {
 		return
 	}
 	if !s.area.InBounds(x, z) {
@@ -644,6 +659,13 @@ func placeRamp(s *State, x, z int) {
 	if !s.area.InBounds(x, z) {
 		return
 	}
+	// A ramp lives on the FLOOR layer, but a tile with a wall renders the wall
+	// and never draws its floor — so a ramp stamped under a wall would be an
+	// invisible, non-functional connector. Refuse with feedback.
+	if s.area.WallAt(x, z) {
+		s.flash("Can't place a ramp on a wall tile — clear the wall first")
+		return
+	}
 	for _, pair := range [2][2]int{{core.North, core.South}, {core.East, core.West}} {
 		af, bf := pair[0], pair[1]
 		adx, adz := core.FacingVector(af)
@@ -1184,8 +1206,8 @@ func floodFill(s *State, x, z int, b byte) {
 	})
 	// The flooded region joins the active floor — mirror of the per-cell stamp
 	// in applyTool, so Ctrl+click builds a floor the same way a stroke does
-	// (levels model is always on now).
-	if s.layer != LayerElevation && s.layer != LayerEntities {
+	// (levels model is always on now). Walls are exempt (see stampActiveLevel).
+	if layerStampsActiveLevel(s.layer) {
 		// Batch the elevation lift of the flooded region into one row-set
 		// rewrite rather than per-cell stampActiveLevel string rebuilds.
 		ch := core.ElevationChar(s.editLevel)
@@ -1274,7 +1296,9 @@ func fillEntireLayer(s *State) {
 	// A full content fill lifts the whole map to the active floor, consistent
 	// with the per-cell / flood-fill stamp. (At level 0 — the default and the
 	// common base-laying case — this is a no-op, so flat maps stay flat.)
-	if s.layer != LayerElevation {
+	// Walls are exempt (see stampActiveLevel) so a wall fill can't flatten the
+	// whole height map.
+	if layerStampsActiveLevel(s.layer) {
 		// Batch the whole-map elevation lift into one row-set rewrite instead
 		// of a per-cell stampActiveLevel (each of which rebuilt a full row
 		// string) — same write as stampActiveLevel: ElevationChar(editLevel)

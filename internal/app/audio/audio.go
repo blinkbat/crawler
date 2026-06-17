@@ -156,6 +156,13 @@ func SoundCount() int {
 	return int(soundCount)
 }
 
+// CONTRACT: bank, ready, and the preview ring (user.go) are unsynchronized
+// package globals. Every accessor — Play, the PreviewPCM/PreviewFile ring, and
+// the ReloadUserAssignments/reloadOneCue mutators — MUST run on the single game
+// goroutine. There is no lock, so a reload's rl.UnloadSound landing while
+// another goroutine is mid-PlaySound on the same slot would be a use-after-free
+// in raylib's C side. If audio ever needs to be driven off-thread, add a mutex
+// guarding bank/ready/previewRing before doing so.
 var (
 	bank  [soundCount]rl.Sound
 	ready bool

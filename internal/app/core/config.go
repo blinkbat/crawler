@@ -23,13 +23,14 @@ const (
 	MaxFrameStep = float32(1.0 / 15.0)
 
 	TileSize   = 2.05
-	WallHeight = 2.25
+	WallHeight = LevelStep // one wall == one elevation step: a wall cliff face sits flush with the floor one level above (no gap)
 	EyeHeight  = 1.32
 	// LevelStep is the world-space height of one elevation level (the
 	// Elevation grid layer). A tile at level N renders its floor at
 	// N·LevelStep and a ramp slopes one LevelStep over its tile. Tunable:
-	// larger = more dramatic verticality + steeper ramps. 2.4 (~ WallHeight)
-	// over a 2.05 tile is a ~49° ramp — a level reads as a full story up.
+	// larger = more dramatic verticality + steeper ramps. 2.4 over a 2.05
+	// tile is a ~49° ramp — a level reads as a full story up. WallHeight is
+	// pinned to this so one wall covers exactly one level.
 	LevelStep     = float32(2.4)
 	StepDuration  = 0.18
 	TurnDuration  = 0.14

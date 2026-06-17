@@ -76,6 +76,12 @@ func DrawObjectPreview(rect rl.Rectangle, assets Resources, item ObjectPreviewIt
 	if w <= 0 || h <= 0 {
 		return
 	}
+	if assets.lighting.shader.ID == 0 {
+		// Lighting shader not built (zero-value Resources): the diorama draws
+		// through it, so bail rather than BeginShaderMode(0) and write uniforms
+		// to invalid locations. Mirrors DrawFoePreview gating its shader work.
+		return
+	}
 	if !objectPreviewRT.ensure(w, h) {
 		return
 	}
@@ -128,7 +134,7 @@ func drawObjectPreviewModel(assets Resources, item ObjectPreviewItem, center rl.
 		return
 	}
 	if handler := inlineDecorTable[char]; handler != nil {
-		handler(assets, 0, 0, center.X, center.Z)
+		handler(assets, 0, 0, center.X, center.Z, center.Y)
 		return
 	}
 	if dm := &assets.decorModelTable[char]; len(dm.parts) > 0 {
