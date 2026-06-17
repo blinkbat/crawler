@@ -211,14 +211,23 @@ func BackPressed() bool {
 		padPressed(rl.GamepadButtonRightFaceRight) // B / Circle
 }
 
+// padDirUp / padDirDown / padDirLeft / padDirRight are the controller half of
+// a directional press: D-pad face button OR analog-stick edge. The keyboard
+// half differs per family (WASD vs arrows-only), but the pad/stick binding is
+// identical everywhere — composing it here means remapping the d-pad/stick is
+// one edit, not a copy-paste sweep across UpPressed / *Arrows / Arrow* that a
+// miss could leave inconsistent.
+func padDirUp() bool    { return padPressed(rl.GamepadButtonLeftFaceUp) || stickEdgeY(-1) }
+func padDirDown() bool  { return padPressed(rl.GamepadButtonLeftFaceDown) || stickEdgeY(1) }
+func padDirLeft() bool  { return padPressed(rl.GamepadButtonLeftFaceLeft) || stickEdgeX(-1) }
+func padDirRight() bool { return padPressed(rl.GamepadButtonLeftFaceRight) || stickEdgeX(1) }
+
 func UpPressed() bool {
-	return rl.IsKeyPressed(rl.KeyUp) || rl.IsKeyPressed(rl.KeyW) ||
-		padPressed(rl.GamepadButtonLeftFaceUp) || stickEdgeY(-1)
+	return rl.IsKeyPressed(rl.KeyUp) || rl.IsKeyPressed(rl.KeyW) || padDirUp()
 }
 
 func DownPressed() bool {
-	return rl.IsKeyPressed(rl.KeyDown) || rl.IsKeyPressed(rl.KeyS) ||
-		padPressed(rl.GamepadButtonLeftFaceDown) || stickEdgeY(1)
+	return rl.IsKeyPressed(rl.KeyDown) || rl.IsKeyPressed(rl.KeyS) || padDirDown()
 }
 
 // CursorUpDown applies UpPressed / DownPressed to a wrap-around cursor
@@ -252,11 +261,11 @@ func CursorUpDown(cursor, count int) int {
 // row that doubles as a text field (the sound modal's Name row) can move
 // off the row with these without the typed W/S letters also scrolling it.
 func UpPressedArrows() bool {
-	return rl.IsKeyPressed(rl.KeyUp) || padPressed(rl.GamepadButtonLeftFaceUp) || stickEdgeY(-1)
+	return rl.IsKeyPressed(rl.KeyUp) || padDirUp()
 }
 
 func DownPressedArrows() bool {
-	return rl.IsKeyPressed(rl.KeyDown) || padPressed(rl.GamepadButtonLeftFaceDown) || stickEdgeY(1)
+	return rl.IsKeyPressed(rl.KeyDown) || padDirDown()
 }
 
 // CursorUpDownTextSafe is CursorUpDown without the W/S letter keys, for a
@@ -619,23 +628,19 @@ func DefendTimingPressed() bool {
 // D-pad, and the left analog stick. WASD is intentionally NOT accepted —
 // the prompt shows literal arrows so the input set should match.
 func ArrowUpPressed() bool {
-	return rl.IsKeyPressed(rl.KeyUp) ||
-		padPressed(rl.GamepadButtonLeftFaceUp) || stickEdgeY(-1)
+	return rl.IsKeyPressed(rl.KeyUp) || padDirUp()
 }
 
 func ArrowDownPressed() bool {
-	return rl.IsKeyPressed(rl.KeyDown) ||
-		padPressed(rl.GamepadButtonLeftFaceDown) || stickEdgeY(1)
+	return rl.IsKeyPressed(rl.KeyDown) || padDirDown()
 }
 
 func ArrowLeftPressed() bool {
-	return rl.IsKeyPressed(rl.KeyLeft) ||
-		padPressed(rl.GamepadButtonLeftFaceLeft) || stickEdgeX(-1)
+	return rl.IsKeyPressed(rl.KeyLeft) || padDirLeft()
 }
 
 func ArrowRightPressed() bool {
-	return rl.IsKeyPressed(rl.KeyRight) ||
-		padPressed(rl.GamepadButtonLeftFaceRight) || stickEdgeX(1)
+	return rl.IsKeyPressed(rl.KeyRight) || padDirRight()
 }
 
 // ResetStickEdges seeds the analog stick edge memory from the *current*

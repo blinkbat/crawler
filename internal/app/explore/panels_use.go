@@ -189,11 +189,12 @@ func updateHealPicker(g *core.GameState) {
 		return
 	}
 	caster := g.HealPickCaster
-	if caster < 0 || caster >= len(g.Party) {
+	m, ok := validMember(g, caster)
+	if !ok {
 		closeHealPick(g)
 		return
 	}
-	heals := affordableOutOfBattleHeals(g.Party[caster])
+	heals := affordableOutOfBattleHeals(*m)
 	if len(heals) == 0 {
 		closeHealPick(g)
 		return

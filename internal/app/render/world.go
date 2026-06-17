@@ -522,8 +522,15 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 					stats.CeilingsDrawn++
 				}
 			}
-			if m.Walls[z][x] == core.TileRock {
-				drawTileCube(material.wallModel, cx, core.WallHeight/2+elevY, cz, tileYawDeg(x, z))
+			if wc := m.Walls[z][x]; core.IsWallChar(wc) {
+				// Plain rock uses the area material's wall (dungeon brick vs
+				// field rock); variants (ivy/cracked/crumbling) swap in their
+				// own per-char skin regardless of material.
+				wallModel := material.wallModel
+				if vm, ok := assets.wallVariants[wc]; ok {
+					wallModel = vm
+				}
+				drawTileCube(wallModel, cx, core.WallHeight/2+elevY, cz, tileYawDeg(x, z))
 				if logActive {
 					stats.WallsDrawn++
 				}

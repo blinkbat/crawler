@@ -49,8 +49,12 @@ func loadXInput() {
 	}
 }
 
+// xinputMaxMotorSpeed is the full-scale value for an XINPUT_VIBRATION motor
+// speed (the uint16 ceiling); a normalized [0,1] level scales up to it.
+const xinputMaxMotorSpeed = 65535
+
 // xinputVibration mirrors the C XINPUT_VIBRATION struct: two motor speeds in
-// [0, 65535] (left = low-frequency/heavy, right = high-frequency/light).
+// [0, xinputMaxMotorSpeed] (left = low-frequency/heavy, right = high-frequency/light).
 type xinputVibration struct {
 	leftMotor  uint16
 	rightMotor uint16
@@ -68,7 +72,7 @@ func setGamepadRumble(level float32) {
 	} else if level > 1 {
 		level = 1
 	}
-	speed := uint16(level * 65535)
+	speed := uint16(level * xinputMaxMotorSpeed)
 	vib := xinputVibration{leftMotor: speed, rightMotor: speed}
 	// LazyProc.Call keeps vib alive across the call; the uintptr(unsafe.Pointer)
 	// is the standard syscall-argument idiom. Ignore the DWORD return (success /

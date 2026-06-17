@@ -215,9 +215,7 @@ func setPartyAssetFromTrack(s *State, i int, track rl.Rectangle, mouseX float32)
 func handlePartyViewClick(s *State, l *foeViewLayout, mp rl.Vector2) {
 	for i := range l.tabBtns {
 		if pointIn(mp, l.tabBtns[i]) {
-			selectFoeViewTab(s, i)
-			partyDrag.slider = noSliderDrag
-			partyDrag.asset = noSliderDrag
+			selectFoeViewTab(s, i, &partyDrag)
 			return
 		}
 	}

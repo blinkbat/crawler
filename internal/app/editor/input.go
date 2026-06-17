@@ -783,20 +783,11 @@ func finishDrag(s *State) {
 		if s.hoverX >= 0 && s.dragPackIdx >= 0 && s.dragPackIdx < len(s.area.PackSpawns) {
 			sp := s.area.PackSpawns[s.dragPackIdx]
 			if sp.TileX != s.hoverX || sp.TileZ != s.hoverZ {
-				if s.area.BlockedAt(s.hoverX, s.hoverZ) {
-					s.flash("Packs need an open cell")
-				} else if s.area.StartTileX == s.hoverX && s.area.StartTileZ == s.hoverZ {
-					s.flash("Cell holds the player start")
-				} else if core.ChestSpawnIndexAt(s.area.ChestSpawns, s.hoverX, s.hoverZ) >= 0 {
-					s.flash("Cell holds a chest — clear it first")
-				} else if core.DoorSpawnIndexAt(s.area.DoorSpawns, s.hoverX, s.hoverZ) >= 0 {
-					// Mirror placeDoorAt's door/pack exclusion on the drag path
-					// too — a pack sharing a door tile races the transition.
-					s.flash("Cell holds a door — clear it first")
-				} else if core.CrystalSpawnIndexAt(s.area.CrystalSpawns, s.hoverX, s.hoverZ) >= 0 {
-					// addPackMember refuses a pack on a crystal tile (one entity
-					// per tile); keep the drag-relocate path in lockstep.
-					s.flash("Cell holds a crystal — clear it first")
+				// Same legality as the brush place path (packPlaceBlockers) so the
+				// two can't drift — this open-coded set previously missed deep
+				// water vs addPackMember, and added crystal/door at different times.
+				if msg := firstBlocker(packPlaceBlockers(&s.area, s.hoverX, s.hoverZ)...); msg != "" {
+					s.flash(msg)
 				} else {
 					pushUndo(s)
 					// Drop any pack that was already at the destination cell

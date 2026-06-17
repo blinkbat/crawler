@@ -444,7 +444,7 @@ func updateFoeViewModal(s *State) Action {
 func handleFoeViewClick(s *State, l *foeViewLayout, mp rl.Vector2) {
 	for i := range l.tabBtns {
 		if pointIn(mp, l.tabBtns[i]) {
-			selectFoeViewTab(s, i)
+			selectFoeViewTab(s, i, &foeDrag)
 			return
 		}
 	}
@@ -516,13 +516,17 @@ func handleFoeViewClick(s *State, l *foeViewLayout, mp rl.Vector2) {
 // dropping any in-flight drag. The live FX preview is NOT touched: the
 // adjustments are part of the sprite's look, so the preview shows on BOTH tabs
 // (only the authoring gizmos are Layout-only, gated separately at draw time).
-func selectFoeViewTab(s *State, tab int) {
+func selectFoeViewTab(s *State, tab int, drag *struct{ slider, asset sliderDragState }) {
 	if s.foeViewTab == tab {
 		return
 	}
 	s.foeViewTab = tab
-	foeDrag.slider = noSliderDrag
-	foeDrag.asset = noSliderDrag
+	// Reset the CALLER's drag state (foeDrag or partyDrag) — passing it in keeps
+	// the foe and party modals symmetric through one seam, instead of this
+	// resetting only foeDrag while the party modal had to re-reset partyDrag
+	// itself (a drift hazard if that "redundant" reset were ever removed).
+	drag.slider = noSliderDrag
+	drag.asset = noSliderDrag
 }
 
 // setFoeAssetFromTrack maps a mouse X within an Asset-tab slider track to the

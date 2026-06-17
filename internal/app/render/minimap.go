@@ -220,6 +220,9 @@ var minimapPropColors = map[byte]rl.Color{
 	core.TileBrazier:           rl.NewColor(220, 132, 64, 240),
 	core.TileTorch:             rl.NewColor(240, 168, 96, 240),
 	core.TileSarcophagus:       rl.NewColor(200, 192, 174, 240),
+	core.TilePropExoticFlower:  rl.NewColor(206, 110, 170, 240),
+	core.TilePropTallFern:      rl.NewColor(90, 146, 86, 240),
+	core.TilePropGrassTuft:     rl.NewColor(140, 178, 108, 240),
 }
 
 // minimapTileColor maps a composed tile char (from AreaDefinition.TileAt)

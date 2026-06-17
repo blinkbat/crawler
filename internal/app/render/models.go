@@ -1536,6 +1536,103 @@ func loadReedProp(shader rl.Shader) propModel {
 	}
 }
 
+// loadExoticFlowerProp builds a large funky bloom on a tall stalk: a single
+// stem topped by two offset square petal rings (so the head reads as an
+// 8-point star from above), a domed center and a bold pistil pip, with a pair
+// of ground leaves anchoring it. Vivid out-of-palette colors (magenta / orange
+// / teal / gold) make it pop as the "exotic" oddball among the muted flora.
+// Non-blocking — registered in core.PropIsNonBlocking.
+func loadExoticFlowerProp(shader rl.Shader) propModel {
+	stem := rl.LoadModelFromMesh(rl.GenMeshCube(0.04, 0.5, 0.04))
+	petalOuter := rl.LoadModelFromMesh(rl.GenMeshCube(0.26, 0.02, 0.26))
+	petalInner := rl.LoadModelFromMesh(rl.GenMeshCube(0.17, 0.022, 0.17))
+	bloom := rl.LoadModelFromMesh(rl.GenMeshSphere(0.07, 10, 12))
+	pistil := rl.LoadModelFromMesh(rl.GenMeshSphere(0.045, 8, 10))
+	leaf := rl.LoadModelFromMesh(rl.GenMeshCube(0.07, 0.02, 0.12))
+	models := []rl.Model{stem, petalOuter, petalInner, bloom, pistil, leaf}
+	for i := range models {
+		attachShader(&models[i], shader)
+	}
+	stemTint := rl.NewColor(86, 132, 80, 255)
+	leafTint := rl.NewColor(104, 150, 92, 255)
+	magenta := rl.NewColor(206, 92, 168, 255)
+	orange := rl.NewColor(232, 150, 78, 255)
+	teal := rl.NewColor(96, 196, 188, 255)
+	gold := rl.NewColor(232, 206, 120, 255)
+	yAxis := rl.NewVector3(0, 1, 0)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.25, 0), scale: rl.NewVector3(1, 1, 1), tint: stemTint, sway: 0.5},
+			// Two petal rings, the second rotated 45° so the eight corners
+			// interleave into a starburst. Heavier sway than the stem so the
+			// head nods over a barely-bending stalk.
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.50, 0), scale: rl.NewVector3(1, 1, 1), rotation: 12, rotationAxis: yAxis, tint: magenta, sway: 1.0},
+			{modelIdx: 1, offset: rl.NewVector3(0, 0.515, 0), scale: rl.NewVector3(0.82, 1, 0.82), rotation: 45, rotationAxis: yAxis, tint: orange, sway: 1.0},
+			{modelIdx: 2, offset: rl.NewVector3(0, 0.53, 0), scale: rl.NewVector3(1, 1, 1), rotation: 22, rotationAxis: yAxis, tint: teal, sway: 1.0},
+			{modelIdx: 3, offset: rl.NewVector3(0, 0.55, 0), scale: rl.NewVector3(1, 1, 1), tint: gold, sway: 1.0},
+			{modelIdx: 4, offset: rl.NewVector3(0, 0.575, 0), scale: rl.NewVector3(1, 1, 1), tint: magenta, sway: 1.0},
+			{modelIdx: 5, offset: rl.NewVector3(0.08, 0.012, 0.02), scale: rl.NewVector3(1.4, 1, 1.6), rotation: 25, rotationAxis: yAxis, tint: leafTint},
+			{modelIdx: 5, offset: rl.NewVector3(-0.07, 0.012, -0.06), scale: rl.NewVector3(1.3, 1, 1.5), rotation: -50, rotationAxis: yAxis, tint: leafTint},
+		},
+	}
+}
+
+// loadTallFernProp builds a clump of tall arching fronds: several flat tall
+// boxes fanned outward at varied tilts so the silhouette reads as a fern bush.
+// Cool layered greens, gentle sway. Non-blocking.
+func loadTallFernProp(shader rl.Shader) propModel {
+	frond := rl.LoadModelFromMesh(rl.GenMeshCube(0.05, 0.55, 0.16))
+	models := []rl.Model{frond}
+	attachShader(&models[0], shader)
+	deep := rl.NewColor(58, 108, 58, 255)
+	mid := rl.NewColor(82, 140, 76, 255)
+	light := rl.NewColor(120, 170, 98, 255)
+	zAxis := rl.NewVector3(0, 0, 1)
+	xAxis := rl.NewVector3(1, 0, 0)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.28, 0), scale: rl.NewVector3(0.9, 1.08, 0.9), rotation: 6, rotationAxis: zAxis, tint: light, sway: 0.9},
+			{modelIdx: 0, offset: rl.NewVector3(0.12, 0.26, 0.05), scale: rl.NewVector3(1, 0.92, 1), rotation: 26, rotationAxis: zAxis, tint: deep, sway: 0.9},
+			{modelIdx: 0, offset: rl.NewVector3(-0.12, 0.25, 0.06), scale: rl.NewVector3(1, 0.9, 1), rotation: -28, rotationAxis: zAxis, tint: deep, sway: 0.9},
+			{modelIdx: 0, offset: rl.NewVector3(0.05, 0.27, -0.12), scale: rl.NewVector3(1, 1.02, 1), rotation: 20, rotationAxis: xAxis, tint: light, sway: 0.9},
+			{modelIdx: 0, offset: rl.NewVector3(-0.06, 0.26, 0.12), scale: rl.NewVector3(1, 0.95, 1), rotation: -22, rotationAxis: xAxis, tint: mid, sway: 0.9},
+			{modelIdx: 0, offset: rl.NewVector3(0.02, 0.27, -0.02), scale: rl.NewVector3(1, 1, 1), rotation: 10, rotationAxis: zAxis, tint: mid, sway: 0.9},
+		},
+	}
+}
+
+// loadGrassTuftProp builds a tall grass tuft — a fuller, taller cousin of the
+// flat decor tall-grass scatter, meant as a placeable prop for visual variance.
+// A fan of tall blades in warm grass greens with a few gold tips, full sway.
+// Non-blocking.
+func loadGrassTuftProp(shader rl.Shader) propModel {
+	blade := rl.LoadModelFromMesh(rl.GenMeshCube(0.045, 0.5, 0.045))
+	models := []rl.Model{blade}
+	attachShader(&models[0], shader)
+	light := rl.NewColor(150, 186, 110, 255)
+	mid := rl.NewColor(116, 162, 98, 255)
+	deep := rl.NewColor(84, 128, 80, 255)
+	gold := rl.NewColor(198, 196, 132, 255)
+	zAxis := rl.NewVector3(0, 0, 1)
+	xAxis := rl.NewVector3(1, 0, 0)
+	return propModel{
+		models: models,
+		parts: []treePart{
+			{modelIdx: 0, offset: rl.NewVector3(0, 0.25, 0), scale: rl.NewVector3(1, 1.05, 1), rotation: 5, rotationAxis: zAxis, tint: light, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(0.10, 0.24, 0.05), scale: rl.NewVector3(1, 0.95, 1), rotation: 18, rotationAxis: zAxis, tint: mid, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(-0.10, 0.24, 0.06), scale: rl.NewVector3(1, 0.92, 1), rotation: -20, rotationAxis: zAxis, tint: mid, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(0.06, 0.25, -0.10), scale: rl.NewVector3(1, 1.02, 1), rotation: 16, rotationAxis: xAxis, tint: deep, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(-0.07, 0.24, -0.08), scale: rl.NewVector3(1, 0.9, 1), rotation: -22, rotationAxis: xAxis, tint: deep, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(0.13, 0.23, -0.04), scale: rl.NewVector3(1, 0.88, 1), rotation: 26, rotationAxis: zAxis, tint: gold, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(-0.13, 0.24, 0.02), scale: rl.NewVector3(1, 0.9, 1), rotation: -26, rotationAxis: zAxis, tint: gold, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(0.0, 0.26, 0.12), scale: rl.NewVector3(1, 1.08, 1), rotation: 12, rotationAxis: xAxis, tint: light, sway: 1.0},
+			{modelIdx: 0, offset: rl.NewVector3(0.02, 0.25, -0.02), scale: rl.NewVector3(0.9, 1, 0.9), rotation: -8, rotationAxis: zAxis, tint: mid, sway: 1.0},
+		},
+	}
+}
+
 // loadBoneProp builds a small bone scatter: a skull-ish sphere and three
 // long-bone cylinders lying across each other on the ground. White-yellow
 // tints with deeper accents at the joints sell the "old, weathered" read.

@@ -479,6 +479,15 @@ var materialDefs = []materialDef{
 }
 
 func init() {
+	// Keep the grid-layer enumeration in lockstep with the on-disk format.
+	// gridLayers() (area_snapshot.go) drives CloneArea/AreaContentEqual/region,
+	// while AreaFromMapFile/MapFileFromArea hand-list the same six layer fields;
+	// if a 7th layer is added on one side but not the converters, it silently
+	// fails to round-trip. This panic forces the count to stay aligned with
+	// mapfile's grid-layer set, prompting a check of the converter pair.
+	if got := len((&AreaDefinition{}).gridLayers()); got != mapfile.GridLayerCount {
+		panic(fmt.Sprintf("core: gridLayers() has %d layers but mapfile has %d grid layers — update the Area↔MapFile converters (AreaFromMapFile / MapFileFromArea) too", got, mapfile.GridLayerCount))
+	}
 	if len(materialDefs) != int(MaterialCount) {
 		panic("core: materialDefs must have one row per MaterialSet — add a row when adding a material")
 	}

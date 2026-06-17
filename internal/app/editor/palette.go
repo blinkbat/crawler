@@ -95,6 +95,11 @@ var (
 	// ceiling slab tone for any non-palette ceiling char (corrupted
 	// save, future char dropped from the brush list).
 	floorAutoColor       = rl.NewColor(160, 168, 140, 255)
+	// wallSwatch is the base grey for the wall brush FAMILY (plain rock +
+	// ivy/cracked/crumbling variants). Variants derive from it via tintSwatch
+	// so the editor canvas reads walls as one muted family — light enough to
+	// stay legible against the dark grid and distinct from the warm floor tan.
+	wallSwatch = rl.NewColor(128, 128, 142, 255)
 	editorFallbackColor  = rl.NewColor(200, 200, 200, 255)
 	ceilingFallbackColor = rl.NewColor(110, 96, 80, 255)
 	// entityFallbackColor is the neutral swatch for an enemy kind with
@@ -134,6 +139,23 @@ var (
 	editorPlaceOK   = rl.NewColor(120, 240, 140, 255)
 	editorPlaceWarn = rl.NewColor(240, 110, 110, 255)
 )
+
+// tintSwatch nudges a base swatch by per-channel deltas (clamped to [0,255]),
+// keeping alpha. Used to derive a family of closely-related brush colors — e.g.
+// the wall variants shift off wallSwatch toward green-grey (ivy) or browner
+// grey (cracked/crumbling) so they read as one family yet stay distinguishable.
+func tintSwatch(base rl.Color, dr, dg, db int) rl.Color {
+	clamp := func(v, d int) uint8 {
+		v += d
+		if v < 0 {
+			v = 0
+		} else if v > 255 {
+			v = 255
+		}
+		return uint8(v)
+	}
+	return rl.NewColor(clamp(int(base.R), dr), clamp(int(base.G), dg), clamp(int(base.B), db), base.A)
+}
 
 // withAlpha returns c with its alpha overridden — lets a base palette
 // color be reused at different opacities (e.g. the placement ghost's

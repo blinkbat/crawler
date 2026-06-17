@@ -140,7 +140,7 @@ func applyDecorBrush(s *State, x, z int, c byte) {
 				s.flash("Footprint cell is a wall")
 				return
 			}
-			if core.IsPropChar(s.area.Props[fz][fx]) {
+			if ch, _ := cellAt(s.area.Props, fx, fz); core.IsPropChar(ch) {
 				s.flash("Footprint cell holds a prop")
 				return
 			}
@@ -163,7 +163,7 @@ func applyDecorBrush(s *State, x, z int, c byte) {
 		s.flash("Decor needs an open cell")
 		return
 	}
-	if core.IsPropChar(s.area.Props[z][x]) {
+	if ch, _ := cellAt(s.area.Props, x, z); core.IsPropChar(ch) {
 		s.flash("Decor cell is occupied by a prop")
 		return
 	}
@@ -183,7 +183,8 @@ func clearPropCell(a *core.AreaDefinition, x, z int) {
 	if !a.InBounds(x, z) {
 		return
 	}
-	if footprint := core.PropFootprint(a.Props[z][x]); footprint != nil {
+	propCh, _ := cellAt(a.Props, x, z)
+	if footprint := core.PropFootprint(propCh); footprint != nil {
 		for _, off := range footprint {
 			fx, fz := x+off.DX, z+off.DZ
 			if a.InBounds(fx, fz) {
@@ -281,7 +282,7 @@ func applyEntityBrush(s *State, x, z int, kind entityKind) {
 		s.flash("Entities need an open cell")
 		return
 	}
-	if core.IsPropChar(s.area.Props[z][x]) {
+	if ch, _ := cellAt(s.area.Props, x, z); core.IsPropChar(ch) {
 		s.flash("Cell is occupied by a prop")
 		return
 	}
@@ -407,6 +408,25 @@ func chestPlaceBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
 		blkDeepWater(a, x, z, "Chest"),
 		blkPackHere(a, x, z),
 		blkChestHere(a, x, z, false),
+		blkCrystalHere(a, x, z),
+	}
+}
+
+// packPlaceBlockers is the shared legality rule for dropping (or drag-relocating)
+// a pack at (x,z): no wall / prop / deep water / start / chest / door / crystal.
+// Deliberately omits blkPackHere — the brush path MERGES into an existing pack on
+// the tile and the drag path REPLACES it, so a pack already there isn't a blocker.
+// Both addPackMember and the dragPack release route through this so the place and
+// relocate paths can't drift (they previously did: the brush path skipped deep
+// water, the drag path open-coded its own slightly different set).
+func packPlaceBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
+	return []blockerCheck{
+		blkStart(a, x, z),
+		blkWall(a, x, z, "Pack"),
+		blkProp(a, x, z),
+		blkDeepWater(a, x, z, "Pack"),
+		blkChestHere(a, x, z, true),
+		blkDoorHere(a, x, z),
 		blkCrystalHere(a, x, z),
 	}
 }
@@ -675,18 +695,9 @@ func clearEntitiesAt(s *State, x, z int) bool {
 // exists at the tile, creates a fresh pack with the single member.
 func addPackMember(s *State, x, z int, kind core.EnemyKind) {
 	a := &s.area
-	if msg := firstBlocker(
-		blkStart(a, x, z),
-		blkChestHere(a, x, z, true),
-		// A pack must not share a tile with a door — placeDoorAt already
-		// forbids the reverse (door-on-pack); without this, the runtime
-		// would race the area-transition trigger against the encounter
-		// start when the player steps onto the shared tile.
-		blkDoorHere(a, x, z),
-		// And not with a crystal — keep one entity per tile so the markers
-		// stay legible and the clear paths stay uniform.
-		blkCrystalHere(a, x, z),
-	); msg != "" {
+	// Shared place/relocate legality (also forbids deep water, which this path
+	// used to allow while the drag path refused it).
+	if msg := firstBlocker(packPlaceBlockers(a, x, z)...); msg != "" {
 		s.flash(msg)
 		return
 	}
@@ -1013,13 +1024,9 @@ func saveCurrent(s *State) {
 	}
 	s.baseline = core.CloneArea(s.area)
 	s.dirty = false
-	// Flash reachability warnings FIRST (danger-tinted), then the "Saved"
-	// confirmation, so the confirmation is the newest entry and survives
-	// the status-log trim even when several warnings fire — the author
-	// always sees both "it saved" AND that the map has problems.
-	for _, w := range reachabilityWarnings(s.area) {
-		s.flashWarn("Warning: " + w)
-	}
+	// Saving no longer auto-flashes reachability warnings — reachability is an
+	// at-will check now (the Validate modal), not something forced on every
+	// save, since "can't reach X" is a design judgment, not a save error.
 	s.flash("Saved " + core.MapIDFromPath(s.area.Path))
 }
 

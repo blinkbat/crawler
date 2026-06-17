@@ -136,8 +136,16 @@ func init() {
 
 var layerBrushes = [layerCount][]Brush{
 	LayerWalls: {
-		{Name: "Wall (#)", Char: core.TileRock, Hotkey: rl.KeyOne, Color: rl.NewColor(96, 96, 110, 255)},
+		// All walls stay in one muted grey FAMILY (built off wallSwatch) so the
+		// editor canvas reads them as uniform structure — but each variant takes
+		// a subtle tint so they're still tellable apart at a glance, not a
+		// rainbow. The palette names carry the precise identity.
+		{Name: "Wall (#)", Char: core.TileRock, Hotkey: rl.KeyOne, Color: wallSwatch},
 		{Name: "Open (.)", Char: '.', Hotkey: rl.KeyTwo, Color: rl.NewColor(180, 168, 140, 255)},
+		{Name: "Rock+Light Ivy (+)", Char: core.TileWallRockIvyLight, Hotkey: rl.KeyThree, Color: tintSwatch(wallSwatch, -8, 6, -10)},
+		{Name: "Rock+Heavy Ivy (=)", Char: core.TileWallRockIvyHeavy, Hotkey: rl.KeyFour, Color: tintSwatch(wallSwatch, -20, 4, -22)},
+		{Name: "Rock Cracked (&)", Char: core.TileWallRockCracked, Hotkey: rl.KeyFive, Color: tintSwatch(wallSwatch, -10, -10, -8)},
+		{Name: "Rock Crumbling ($)", Char: core.TileWallRockCrumbling, Hotkey: rl.KeySix, Color: tintSwatch(wallSwatch, -2, -12, -22)},
 	},
 	LayerFloor: {
 		{Name: "Auto", Char: core.FloorAuto, Hotkey: rl.KeyOne, Color: floorAutoColor},
@@ -213,6 +221,10 @@ var layerBrushes = [layerCount][]Brush{
 		{Name: "Brazier (Z)", Char: core.TileBrazier, Color: rl.NewColor(220, 132, 64, 255)},
 		{Name: "Wall Torch (z)", Char: core.TileTorch, Color: rl.NewColor(240, 168, 96, 255)},
 		{Name: "Sarcophagus (A)", Char: core.TileSarcophagus, Color: rl.NewColor(200, 192, 174, 255)},
+		// Non-blocking decorative plants.
+		{Name: "Exotic Flower (e)", Char: core.TilePropExoticFlower, Color: rl.NewColor(206, 110, 170, 255)},
+		{Name: "Tall Fern (()", Char: core.TilePropTallFern, Color: rl.NewColor(90, 146, 86, 255)},
+		{Name: "Tall Grass ())", Char: core.TilePropGrassTuft, Color: rl.NewColor(140, 178, 108, 255)},
 	},
 	LayerCeiling: {
 		{Name: "Solid (#)", Char: core.TileCeilingSolid, Hotkey: rl.KeyOne, Color: rl.NewColor(110, 96, 80, 255)},
@@ -1176,13 +1188,16 @@ func Update(s *State, dt float32) Action {
 			checkArea.StartTileX = s.testStartOverrideX
 			checkArea.StartTileZ = s.testStartOverrideZ
 		}
-		if warnings := reachabilityWarnings(checkArea); len(warnings) > 0 {
-			for _, w := range warnings {
-				s.flash("Test: " + w)
-			}
-			if !canPlaytest(checkArea) {
-				return ActionNone
-			}
+		// Physical-only gate: block the playtest ONLY when the player would
+		// spawn somewhere impossible / confusing (start out of bounds, inside
+		// geometry, or sharing a chest tile). Reachability ("can you actually
+		// walk to the packs / chests?") is deliberately NOT a gate and is no
+		// longer auto-flashed here — a map may be hard, sealed, or unconventional
+		// by design, and the editor shouldn't presume how it's meant to be
+		// played. Reachability lives in the at-will Validate modal instead.
+		if !canPlaytest(checkArea) {
+			s.flash("Test: " + startTileBlocker(checkArea))
+			return ActionNone
 		}
 		// Cross-map door validation runs once at the F5 gate (loads
 		// every referenced .map from disk, so per-frame would be

@@ -25,7 +25,41 @@ func TileCoord(x, z int) string {
 const (
 	TileOpen = '.' // open cell (walkable)
 	TileRock = '#' // wall blocker
+	// Wall VARIANTS — all block movement exactly like TileRock; they differ
+	// only in how the renderer skins the wall cube (a per-tile rock-wall look
+	// independent of the area material). IsWallChar treats every entry here as
+	// a wall, so WallAt / BlockedAt / TileTypeAt all honor them automatically.
+	// Authored from the editor's Walls palette. Chars are symbols free on every
+	// grid layer (no cross-layer overlap to register).
+	TileWallRockIvyLight  = '+' // rock wall with sparse green ivy
+	TileWallRockIvyHeavy  = '=' // rock wall blanketed in ivy
+	TileWallRockCracked   = '&' // rock wall fractured with cracks (still solid)
+	TileWallRockCrumbling = '$' // rock wall in heavy disrepair (still solid)
 )
+
+// wallTileCharList is the canonical roster of walls-layer blocker chars — the
+// plain rock plus every variant. IsWallChar reads the set built from it, so
+// adding a wall variant is one row here (plus its render/editor/label wiring),
+// not a hand-edited condition at each of WallAt / BlockedAt / TileTypeAt.
+var wallTileCharList = []byte{
+	TileRock,
+	TileWallRockIvyLight,
+	TileWallRockIvyHeavy,
+	TileWallRockCracked,
+	TileWallRockCrumbling,
+}
+
+var wallTileCharSet = func() (set [256]bool) {
+	for _, c := range wallTileCharList {
+		set[c] = true
+	}
+	return
+}()
+
+// IsWallChar reports whether a walls-layer byte is a blocking wall (plain rock
+// or any variant). The single source the wall predicates share so a new
+// variant can't be a wall in one check but walkable in another.
+func IsWallChar(c byte) bool { return wallTileCharSet[c] }
 
 // Ceiling layer. Parallel grid to walls; chars share the wall convention
 // since both layers describe the same "solid block?" yes/no question (a
@@ -184,6 +218,13 @@ const (
 	// (dimmer-than-brazier) point light. Place it on a floor tile
 	// next to a wall.
 	TileTorch = 'z' // wall torch (non-blocking, animated flame, dim light)
+	// Non-blocking decorative plant props — vertical greenery with more
+	// presence than the flat decor-layer scatter, but the player/packs walk
+	// straight through them (registered in PropIsNonBlocking). Chars are
+	// symbols free on every layer.
+	TilePropExoticFlower = 'e' // large funky bloom on a tall stalk
+	TilePropTallFern     = '(' // cluster of tall arching fronds
+	TilePropGrassTuft    = ')' // tall grass tuft (visual variance)
 )
 
 // Doors are modeled as entities (like chests), not as a tile char on
@@ -351,7 +392,7 @@ func (a AreaDefinition) WallAt(x, z int) bool {
 	if !ok {
 		return true // ragged / short walls layer reads as solid
 	}
-	return c == TileRock
+	return IsWallChar(c)
 }
 
 // CeilingAt reports whether the cell has a solid ceiling slab. Out-of-
@@ -498,7 +539,10 @@ func (a AreaDefinition) TileAt(x, z int) byte {
 	if !a.InBounds(x, z) {
 		return TileRock
 	}
-	if w, ok := a.layerByteAt(a.Walls, x, z); !ok || w == TileRock {
+	if w, ok := a.layerByteAt(a.Walls, x, z); !ok || IsWallChar(w) {
+		// Normalize every wall variant (ivy / cracked / crumbling) to plain
+		// TileRock here so the minimap and other TileAt consumers treat all
+		// walls uniformly — no per-variant case to add, no walkable fall-through.
 		return TileRock
 	}
 	if p, ok := a.layerByteAt(a.Props, x, z); ok && IsPropChar(p) {
@@ -526,7 +570,7 @@ func (a AreaDefinition) BlockedAt(x, z int) bool {
 	if !a.InBounds(x, z) {
 		return true
 	}
-	if w, ok := a.layerByteAt(a.Walls, x, z); !ok || w == TileRock {
+	if w, ok := a.layerByteAt(a.Walls, x, z); !ok || IsWallChar(w) {
 		return true // ragged / short walls layer reads as blocked
 	}
 	if p, ok := a.layerByteAt(a.Props, x, z); ok && IsPropChar(p) && !PropIsNonBlocking(p) {
@@ -544,7 +588,11 @@ func (a AreaDefinition) BlockedAt(x, z int) bool {
 // (and packs) can walk through their tile — letting torches line a
 // corridor without sealing it. Every other prop blocks.
 func PropIsNonBlocking(c byte) bool {
-	return c == TileTorch
+	switch c {
+	case TileTorch, TilePropExoticFlower, TilePropTallFern, TilePropGrassTuft:
+		return true
+	}
+	return false
 }
 
 // EnterOpts parameterizes CanEnterTile. The zero value forbids door
@@ -907,6 +955,8 @@ var propTileCharList = []byte{
 	// Wall torch — a prop char for rendering/editor/registry, but
 	// exempted from blocking in BlockedAt (it mounts on the wall).
 	TileTorch,
+	// Non-blocking decorative plants (also exempted in PropIsNonBlocking).
+	TilePropExoticFlower, TilePropTallFern, TilePropGrassTuft,
 }
 
 // propTileCharSet is the O(1) lookup for IsPropChar, built once at
@@ -1041,8 +1091,12 @@ const (
 // label now panics at startup instead of returning "?" silently.
 var tileLabelTable = map[TileLayer]map[byte]string{
 	TileLayerWalls: {
-		TileOpen: "",
-		TileRock: "Wall",
+		TileOpen:              "",
+		TileRock:              "Wall",
+		TileWallRockIvyLight:  "Wall (Light Ivy)",
+		TileWallRockIvyHeavy:  "Wall (Heavy Ivy)",
+		TileWallRockCracked:   "Wall (Cracked)",
+		TileWallRockCrumbling: "Wall (Crumbling)",
 	},
 	TileLayerFloor: {
 		FloorAuto:      "",
@@ -1120,6 +1174,9 @@ var tileLabelTable = map[TileLayer]map[byte]string{
 		TileBrazier:           "Brazier",
 		TileSarcophagus:       "Sarcophagus",
 		TileTorch:             "Wall Torch",
+		TilePropExoticFlower:  "Exotic Flower",
+		TilePropTallFern:      "Tall Fern",
+		TilePropGrassTuft:     "Tall Grass",
 	},
 }
 

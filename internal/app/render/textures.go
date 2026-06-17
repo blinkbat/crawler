@@ -116,6 +116,161 @@ func makeRockWallPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
+// makeRockIvyPixels paints the rock wall, then grows ivy on it as discrete
+// leaves strung along wandering vines — not a flat green wash. A few woody vine
+// cords trail down the face; along each, small near-oval leaves alternate left
+// and right, each shaded from a lit upper-left to a darker lower-right so the
+// foliage reads as layered growth with real depth. Bare rock shows between the
+// vines. `heavy` adds more vines and packs the leaves closer/larger so the wall
+// reads as blanketed. Fully opaque — it's a cube-face skin.
+func makeRockIvyPixels(w, h int, heavy bool) []color.RGBA {
+	pixels := makeRockWallPixels(w, h)
+	// Layered ivy palette — several greens plus a woody vine so leaves don't
+	// read as one flat color.
+	vine := color.RGBA{R: 78, G: 84, B: 54, A: 255}
+	leafA := color.RGBA{R: 74, G: 122, B: 60, A: 255}
+	leafB := color.RGBA{R: 92, G: 142, B: 70, A: 255}
+	leafLit := color.RGBA{R: 132, G: 178, B: 92, A: 255}
+	leafDark := color.RGBA{R: 46, G: 90, B: 50, A: 255}
+
+	strands := 4
+	leafEvery := 10
+	leafR := 2.7
+	if heavy {
+		strands = 8
+		leafEvery = 6
+		leafR = 3.3
+	}
+	// plotLeaf stamps one near-oval leaf centered at (cx,cy), wrapping in x so a
+	// leaf near an edge continues on the far side (the texture tiles).
+	plotLeaf := func(cx, cy int, r float64, base color.RGBA) {
+		ri := int(r) + 1
+		for dy := -ri; dy <= ri; dy++ {
+			for dx := -ri; dx <= ri; dx++ {
+				fx := float64(dx) / r
+				fy := float64(dy) / (r * 1.35) // slightly taller than wide
+				if fx*fx+fy*fy > 1 {
+					continue
+				}
+				y := cy + dy
+				if y < 0 || y >= h {
+					continue
+				}
+				x := ((cx+dx)%w + w) % w
+				c := base
+				// Directional shading: lit toward upper-left, shadowed lower-right.
+				switch s := fx + fy; {
+				case s < -0.35:
+					c = core.MixColor(c, leafLit, 0.55)
+				case s > 0.45:
+					c = core.MixColor(c, leafDark, 0.55)
+				}
+				// A faint midrib down the leaf.
+				if dx == 0 {
+					c = core.MixColor(c, leafDark, 0.3)
+				}
+				pixels[y*w+x] = core.MixColor(pixels[y*w+x], c, 0.94)
+			}
+		}
+	}
+	for s := 0; s < strands; s++ {
+		x := float64(int(hashByteXY(s*23+5, 7)) % w)
+		for y := 0; y < h; y++ {
+			// Gentle wander: a sine plus a small per-row hash jitter.
+			x += math.Sin(float64(y)*0.07+float64(s)*1.7)*0.45 + (float64(int(hashByteXY(s, y))%3)-1)*0.28
+			cx := ((int(x))%w + w) % w
+			// Woody vine cord (two px wide, soft).
+			pixels[y*w+cx] = core.MixColor(pixels[y*w+cx], vine, 0.65)
+			if cx+1 < w {
+				pixels[y*w+cx+1] = core.MixColor(pixels[y*w+cx+1], vine, 0.32)
+			}
+			if y%leafEvery == 0 {
+				// Alternate the big leaf to one side, with a smaller one on the
+				// cord half a step down — staggered so it reads organic.
+				side := 1.0
+				if (y/leafEvery)%2 == 0 {
+					side = -1.0
+				}
+				base := leafA
+				if hashByteXY(s, y)%2 == 0 {
+					base = leafB
+				}
+				plotLeaf(cx+int(side*(leafR+1)), y, leafR, base)
+				plotLeaf(cx, y+leafEvery/2, leafR*0.66, leafDark)
+			}
+		}
+	}
+	return pixels
+}
+
+// makeRockCrackedPixels paints the rock wall with SUBTLE fractures — the
+// geometry carries the deform, so the texture only needs hairline cracks a touch
+// darker than the stone (not the near-black gouges of the first pass) plus a
+// faint caught-light lip. A couple of wandering near-vertical cracks with the
+// occasional short branch.
+func makeRockCrackedPixels(w, h int) []color.RGBA {
+	pixels := makeRockWallPixels(w, h)
+	crack := color.RGBA{R: 104, G: 98, B: 88, A: 255} // mid-tone, not near-black
+	lip := color.RGBA{R: 208, G: 200, B: 182, A: 255}
+
+	plot := func(x, y int, depth float64) {
+		if x < 0 || x >= w || y < 0 || y >= h {
+			return
+		}
+		pixels[y*w+x] = core.MixColor(pixels[y*w+x], crack, depth)
+		if x+1 < w {
+			pixels[y*w+x+1] = core.MixColor(pixels[y*w+x+1], lip, depth*0.2)
+		}
+	}
+	walkCrack := func(startX, startY, endY, seed int) {
+		x := float64(startX)
+		for y := startY; y < endY; y++ {
+			x += fbmNoise(float64(y)*0.5+float64(seed)*31, float64(seed)*7, 0.4, 3) * 1.1
+			plot(int(x), y, 0.45) // softer than the old 0.85
+			if hashByteXY(int(x), y)%52 == 0 {
+				bx := x
+				for by := y; by < y+h/8 && by < endY; by++ {
+					bx += 1.0
+					plot(int(bx), by, 0.32)
+				}
+			}
+		}
+	}
+	for i := 0; i < 2; i++ { // fewer cracks than before
+		sx := int(hashByteXY(i*17+5, 3)) % w
+		walkCrack(sx, 0, h, i+1)
+	}
+	return pixels
+}
+
+// makeRockCrumblingPixels paints the rock wall as weathered/chipped stone —
+// LIGHT now, not the dark gouges of the first pass (the mesh deform supplies the
+// broken silhouette + pitting). Soft mid-tone shadow gathers in the low noise
+// patches, a pale lit edge sits just above each, and pale rubble specks collect
+// near the base.
+func makeRockCrumblingPixels(w, h int) []color.RGBA {
+	pixels := makeRockWallPixels(w, h)
+	shadow := color.RGBA{R: 104, G: 98, B: 88, A: 255}
+	chipLit := color.RGBA{R: 206, G: 198, B: 180, A: 255}
+	rubble := color.RGBA{R: 168, G: 158, B: 142, A: 255}
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			n := fbmNoise(float64(x)*0.9+41, float64(y)*0.9+17, 0.03, 4)
+			if n < -0.18 {
+				pixels[y*w+x] = core.MixColor(pixels[y*w+x], shadow, math.Min(0.5, (-0.18-n)*2))
+			} else if y >= 2 {
+				if above := fbmNoise(float64(x)*0.9+41, float64(y-2)*0.9+17, 0.03, 4); above < -0.18 {
+					pixels[y*w+x] = core.MixColor(pixels[y*w+x], chipLit, 0.26)
+				}
+			}
+			if y > h*3/4 && hashByteXY(x, y)%6 == 0 {
+				pixels[y*w+x] = core.MixColor(pixels[y*w+x], rubble, 0.4)
+			}
+		}
+	}
+	return pixels
+}
+
 func makeStoneBrickPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	brickW := 32

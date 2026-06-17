@@ -7,7 +7,9 @@
 //
 // Layer character conventions:
 //
-//	walls  : '.' open, '#' wall
+//	walls  : '.' open, '#' wall, '+' rock+light ivy, '=' rock+heavy ivy,
+//	         '&' rock cracked, '$' rock crumbling (all variants still block;
+//	         they only change the wall's skin)
 //	floor  : '.' auto-variant (per-tile hash), 'g' grass, 'd' dirt,
 //	         'k' dark grass, 's' stone, 'c' cobblestone path, 'w' planks,
 //	         '~' shallow water, 'W' deep water (blocks), 'n' sand, 'i' snow,
@@ -417,10 +419,19 @@ var layerSections = []layerSection{
 	{SectionTriggers, slotTriggers, nil},
 }
 
+// GridLayerCount is the number of grid (string-row) layers a .map carries —
+// the layerSections rows with a field accessor (walls/floor/decor/props/
+// ceiling/elevation), as opposed to the spawn-list sections. Computed in init
+// from the table so it can't drift from it. Exported so core can assert its
+// own gridLayers() enumeration (and, by extension, the Area↔MapFile converters
+// that hand-list these fields) stays in lockstep — a 7th grid layer added on
+// either side trips a startup panic instead of silently failing to round-trip.
+var GridLayerCount int
+
 // init asserts layerSections covers every real slot (slotWalls..
 // slotCustomEnemies) exactly once, so a new layerSlot enum value added
 // without a table row panics at startup instead of silently parsing as
-// slotNone / encoding nothing.
+// slotNone / encoding nothing. It also tallies GridLayerCount.
 func init() {
 	seen := make(map[layerSlot]bool, len(layerSections))
 	for _, s := range layerSections {
@@ -428,6 +439,9 @@ func init() {
 			panic(fmt.Sprintf("mapfile: duplicate layerSections slot %d", s.slot))
 		}
 		seen[s.slot] = true
+		if s.field != nil {
+			GridLayerCount++
+		}
 	}
 	for slot := slotWalls; slot <= slotTriggers; slot++ {
 		if !seen[slot] {

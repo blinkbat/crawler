@@ -1120,7 +1120,7 @@ func drawMinimap(s *State) {
 			if tx >= s.area.Width {
 				break
 			}
-			if s.area.Walls[tz][tx] == core.TileRock {
+			if core.IsWallChar(s.area.Walls[tz][tx]) {
 				rl.DrawPixel(int32(mr.X)+int32(px), int32(mr.Y)+int32(py), wallCol)
 			}
 		}
@@ -2015,8 +2015,11 @@ func drawGrid(s *State, font rl.Font) {
 			if showFloor {
 				rl.DrawRectangleRec(r, fadeAlpha(floorColor(s.area.Floor[z][x]), floorAlpha))
 			}
-			if showWalls && s.area.Walls[z][x] == core.TileRock {
-				rl.DrawRectangleRec(r, fadeAlpha(wallColor(), wallAlpha))
+			if w := s.area.Walls[z][x]; showWalls && core.IsWallChar(w) {
+				// Every wall variant paints as a wall cell (was rock-only, which
+				// made ivy/cracked/crumbling tiles read as open floor); color by
+				// the specific char so the family's subtle tints show through.
+				rl.DrawRectangleRec(r, fadeAlpha(tileColor(LayerWalls, w), wallAlpha))
 			}
 			if d := s.area.Decor[z][x]; showDecor && d != core.DecorAuto {
 				rl.DrawRectangleRec(insetRect(r, cell*0.28), fadeAlpha(decorColor(d), decorAlpha))
@@ -2700,7 +2703,7 @@ func drawCeilingHash(r rl.Rectangle, cell float32, col color.RGBA) {
 func currentLayerGlyph(s *State, x, z int) (byte, bool) {
 	switch s.layer {
 	case LayerWalls:
-		if w := s.area.Walls[z][x]; w == core.TileRock {
+		if w := s.area.Walls[z][x]; core.IsWallChar(w) {
 			return w, true
 		}
 	case LayerFloor:

@@ -441,6 +441,14 @@ func handleSoundMouseClick(s *State, mp rl.Vector2, l *soundLayout, savedSounds 
 	for i := range soundParamSliders {
 		if pointIn(mp, l.sliderTracks[i]) {
 			soundDrag.idx = i
+			// Apply the value at the click X immediately so a single click
+			// adjusts, not just a drag. soundDrag.update runs BEFORE this
+			// dispatch in the frame, so without setting here a click-release
+			// with no motion would leave the value unchanged (the comment
+			// above promised single-click works; this makes it true).
+			info := soundParamSliders[i]
+			track := l.sliderTracks[i]
+			info.Set(&s.soundParams, sliderSnap(info.Min, info.Max, info.Step, track.X, track.Width, mp.X))
 			return soundPanelParams, i
 		}
 	}

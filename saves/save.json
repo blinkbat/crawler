@@ -1,11 +1,11 @@
 {
   "version": 1,
   "mapID": "forest_path",
-  "playerTileX": 2,
-  "playerTileZ": 2,
-  "playerFacing": 3,
-  "stepCount": 316,
-  "gold": 44,
+  "playerTileX": 13,
+  "playerTileZ": 25,
+  "playerFacing": 0,
+  "stepCount": 1012,
+  "gold": 79,
   "party": [
     {
       "Class": 0,
@@ -50,7 +50,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 2,
-      "XP": 2,
+      "XP": 82,
       "PendingLevelUps": 3,
       "SkillPoints": 1,
       "SkillTiers": {
@@ -87,7 +87,7 @@
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 4,
+      "DamagePopup": 1,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "Defending": false,
@@ -103,15 +103,15 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 1,
-      "XP": 40,
-      "PendingLevelUps": 0,
+      "Level": 2,
+      "XP": 20,
+      "PendingLevelUps": 3,
       "SkillPoints": 0,
       "SkillTiers": {
-        "2": 0
+        "2": 1
       },
       "TreeRanks": {
-        "prayer": 1
+        "prayer": 2
       },
       "SkillCursor": 0
     },
@@ -158,7 +158,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 2,
-      "XP": 20,
+      "XP": 100,
       "PendingLevelUps": 3,
       "SkillPoints": 1,
       "SkillTiers": {
@@ -195,7 +195,7 @@
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 4,
+      "DamagePopup": 1,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "Defending": false,
@@ -212,7 +212,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 2,
-      "XP": 20,
+      "XP": 100,
       "PendingLevelUps": 3,
       "SkillPoints": 1,
       "SkillTiers": {
@@ -227,7 +227,7 @@
   "inventory": [
     {
       "Kind": 14,
-      "Count": 3
+      "Count": 2
     },
     {
       "Kind": 15,
@@ -237,21 +237,22 @@
   "quests": null,
   "bestiary": {
     "0": {
-      "kills": 12
+      "kills": 20
     },
     "1": {
-      "kills": 3
+      "kills": 5
     },
     "2": {
-      "kills": 3
+      "kills": 5
     }
   },
   "crystals": [
     {
-      "tileX": 1,
-      "tileZ": 2,
+      "tileX": 13,
+      "tileZ": 24,
       "charge": 0,
-      "charged": false
+      "charged": false,
+      "saved": true
     }
   ]
 }
