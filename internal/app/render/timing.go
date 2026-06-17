@@ -355,6 +355,18 @@ func drawTimingTrack(drawX, drawY, barW, drawnH float32, quality int, isDefend, 
 	}
 }
 
+// Brass-stud geometry for the timing cabinet chrome: studR is the stud radius
+// and studInset its distance in from each corner on the full-height frame
+// overlay. The per-reel cabinet (drawReelBar) seats tighter, smaller studs
+// (reelStudR / reelStudInset) on its narrow cells — kept separate so the reel's
+// look stays pixel-identical rather than inheriting the wider frame's spacing.
+const (
+	studR         = float32(3)
+	studInset     = float32(7)
+	reelStudR     = float32(2.5)
+	reelStudInset = float32(6)
+)
+
 // drawTimingFrameOverlay caps a press / charge timing bar with the candlelit
 // cabinet chrome — a wood bezel, a gilt frame breathing with the candle flame,
 // and brass studs at the corners — the same hardware vocabulary as the HP/MP
@@ -366,8 +378,6 @@ func drawTimingFrameOverlay(drawX, drawY, barW, drawnH float32) {
 	drawGaugeBezel(ix, iy, iw, ih, false)
 	flick := candleFlicker()
 	drawSmallPanelOutline(ix, iy, iw, ih, fadeColor(giltBright, 0.55+0.3*flick))
-	const studR = float32(3)
-	const studInset = float32(7)
 	drawBrassStud(drawX+studInset, drawY+studInset, studR)
 	drawBrassStud(drawX+barW-studInset, drawY+studInset, studR)
 	drawBrassStud(drawX+studInset, drawY+drawnH-studInset, studR)
@@ -729,10 +739,10 @@ func drawReelBar(timing core.TimingState, g *core.GameState, assets Resources, x
 			flick := candleFlicker()
 			drawGaugeBezel(ix, iy, iw, ih, false)
 			drawSmallPanelOutline(ix, iy, iw, ih, fadeForFlash(fadeColor(giltBright, 0.6+0.3*flick), flashing, g.Battle.TimingFlash))
-			drawBrassStud(cellX+6, y+6, 2.5)
-			drawBrassStud(cellX+cellW-6, y+6, 2.5)
-			drawBrassStud(cellX+6, y+barH-6, 2.5)
-			drawBrassStud(cellX+cellW-6, y+barH-6, 2.5)
+			drawBrassStud(cellX+reelStudInset, y+reelStudInset, reelStudR)
+			drawBrassStud(cellX+cellW-reelStudInset, y+reelStudInset, reelStudR)
+			drawBrassStud(cellX+reelStudInset, y+barH-reelStudInset, reelStudR)
+			drawBrassStud(cellX+cellW-reelStudInset, y+barH-reelStudInset, reelStudR)
 		} else {
 			drawGaugeBezel(ix, iy, iw, ih, true)
 			drawSmallPanelOutline(ix, iy, iw, ih, fadeColor(woodAccent, 0.55))

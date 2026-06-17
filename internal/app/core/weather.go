@@ -233,7 +233,7 @@ func TickWeather(g *GameState, dt float32) {
 			}
 		}
 	case WeatherClearing:
-		if w.Intensity <= 0.01 {
+		if w.Intensity <= WeatherIntensityNearZero {
 			w.Intensity = 0
 			w.Phase = WeatherClear
 			w.Cooldown = RandRangeI(g.Rand(), RainCooldownMin, RainCooldownMax)

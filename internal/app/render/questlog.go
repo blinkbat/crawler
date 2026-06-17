@@ -212,7 +212,7 @@ func forEachJournalRow(body rl.Rectangle, cursor, count int, fn func(i int, rowY
 			break // don't overflow the body rect
 		}
 		if i == cursor {
-			DrawSelectedRowI(int32(body.X), int32(rowY-2), int32(body.Width), int32(journalRowH-6))
+			DrawSelectedRowI(int32(body.X), int32(rowY)-focusPlateInsetY, int32(body.Width), int32(journalRowH-6))
 		}
 		fn(i, rowY)
 		rowY += journalRowH

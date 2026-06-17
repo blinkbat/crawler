@@ -374,7 +374,7 @@ func vfxJitter(scale float32) float32 {
 }
 
 func randAngle() float32 {
-	return vfxRNG.Float32() * 2 * math.Pi
+	return vfxRNG.Float32() * tau
 }
 
 // radialBurst parameterizes the "fling N particles outward on a random

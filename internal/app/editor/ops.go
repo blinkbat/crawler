@@ -487,10 +487,9 @@ func doorFacingForCell(a *core.AreaDefinition, x, z int) int {
 }
 
 // firstUnusedName returns the first `format`-with-N (N from 1 up) whose
-// rendered string isn't already in `taken`. Shared by the door and
-// custom-enemy placeholder namers so the "auto-pick a free slot name" loop
-// lives in one place (the taken-set build stays per-caller — they walk
-// different slice types).
+// rendered string isn't already in `taken`. Used by the door placeholder
+// namer (nextDoorName) to auto-pick a free slot name; the taken-set build
+// stays in the caller.
 func firstUnusedName(taken map[string]bool, format string) string {
 	for i := 1; ; i++ {
 		name := fmt.Sprintf(format, i)

@@ -132,6 +132,15 @@ func NewFrame() {
 		stickNow = [4]bool{}
 		return
 	}
+	sampleStickNow()
+}
+
+// sampleStickNow fills stickNow from the current left-stick axes, marking each
+// direction active when its axis is past stickEdgeThreshold. Callers handle the
+// stickPrev bookkeeping around it (NewFrame rolls stickPrev forward before
+// sampling; ResetStickEdges copies stickPrev = stickNow after). Assumes a pad
+// is connected — the no-pad zeroing lives in the callers.
+func sampleStickNow() {
 	yv := rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisLeftY)
 	xv := rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisLeftX)
 	stickNow[stickEdgeUp] = yv <= -stickEdgeThreshold
@@ -655,12 +664,7 @@ func ResetStickEdges() {
 		stickPrev = [4]bool{}
 		return
 	}
-	yv := rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisLeftY)
-	xv := rl.GetGamepadAxisMovement(gamepadID, rl.GamepadAxisLeftX)
-	stickNow[stickEdgeUp] = yv <= -stickEdgeThreshold
-	stickNow[stickEdgeDown] = yv >= stickEdgeThreshold
-	stickNow[stickEdgeLeft] = xv <= -stickEdgeThreshold
-	stickNow[stickEdgeRight] = xv >= stickEdgeThreshold
+	sampleStickNow()
 	// Both equal -> no edge fires until the player centers and re-tilts.
 	stickPrev = stickNow
 }

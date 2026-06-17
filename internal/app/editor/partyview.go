@@ -2,11 +2,8 @@ package editor
 
 import (
 	"fmt"
-	"path/filepath"
-	"strings"
 
 	"crawler/internal/app/core"
-	"crawler/internal/app/input"
 	"crawler/internal/app/render"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -76,29 +73,11 @@ func cyclePartyClass(s *State, dir int) {
 // cyclePartyClassKind walks the class registry by delta (+1 / -1), wrapping.
 func cyclePartyClassKind(cur core.PartyClass, delta int) core.PartyClass {
 	defs := core.PartyClasses()
-	if len(defs) == 0 {
-		return cur
-	}
-	idx := 0
+	classes := make([]core.PartyClass, len(defs))
 	for i, def := range defs {
-		if def.Class == cur {
-			idx = i
-			break
-		}
+		classes[i] = def.Class
 	}
-	idx = core.WrapIndex(idx+delta, len(defs))
-	return defs[idx].Class
-}
-
-// partyClassName returns the display name for the tuned class (for the header
-// label + flash text), falling back to the slug if the class is somehow absent.
-func partyClassName(class core.PartyClass) string {
-	for _, def := range core.PartyClasses() {
-		if def.Class == class {
-			return def.Name
-		}
-	}
-	return core.PartyClassSlug(class)
+	return cycleByIndex(classes, cur, delta)
 }
 
 func savePartyVisual(s *State) {
@@ -111,7 +90,7 @@ func savePartyVisual(s *State) {
 	// from the SAVED values and the editor preview updates immediately.
 	render.SetLivePartyOverride(frameAssets, s.partyClass, s.partyVisual)
 	s.partyBaseline = s.partyVisual
-	s.flash("Saved " + partyClassName(s.partyClass) + " → " + slug + " (live in editor; restart game to apply)")
+	s.flash(savedVisualFlash(core.PartyClassName(s.partyClass), slug))
 }
 
 func updatePartyViewModal(s *State) Action {
@@ -123,24 +102,10 @@ func updatePartyViewModal(s *State) Action {
 	}
 
 	// "Upload": a PNG dropped while the modal is open imports as THIS class's
-	// sprite (drag-drop is the path; raylib has no file dialog). First .png only.
-	if rl.IsFileDropped() {
-		dropped := rl.LoadDroppedFiles()
-		for _, path := range dropped {
-			if !strings.EqualFold(filepath.Ext(path), ".png") {
-				continue
-			}
-			slug := core.PartyClassSlug(s.partyClass)
-			if err := render.ImportPartySpriteFromFile(s.partyClass, path); err != nil {
-				s.flashWarn("Import failed: " + err.Error())
-			} else {
-				render.ReloadPartySprite(frameAssets, s.partyClass)
-				s.flash("Imported " + filepath.Base(path) + " → " + slug + ".png (updated live)")
-			}
-			break
-		}
-		rl.UnloadDroppedFiles()
-	}
+	// sprite (drag-drop is the path; raylib has no file dialog).
+	importDroppedPNG(s, core.PartyClassSlug(s.partyClass),
+		func(path string) error { return render.ImportPartySpriteFromFile(s.partyClass, path) },
+		func() { render.ReloadPartySprite(frameAssets, s.partyClass) })
 
 	l := computeFoeViewLayout()
 	// Read the cursor live (not the one-frame-stale cached frameMouse), matching
@@ -174,26 +139,7 @@ func updatePartyViewModal(s *State) Action {
 		return ActionNone
 	}
 
-	if s.foeViewTab == foeTabLayout {
-		s.partyCursor = input.CursorUpDown(s.partyCursor, len(foeFields))
-		if s.partyCursor >= 0 && s.partyCursor < len(foeFields) {
-			if delta := input.CursorLeftRight(); delta != 0 {
-				f := foeFields[s.partyCursor]
-				v := f.Get(&s.partyVisual) + float64(delta)*f.Step
-				f.Set(&s.partyVisual, core.Clamp(v, f.Min, f.Max))
-			}
-		}
-	} else {
-		s.assetCursor = input.CursorUpDown(s.assetCursor, len(assetFields))
-		if s.assetCursor >= 0 && s.assetCursor < len(assetFields) {
-			if delta := input.CursorLeftRight(); delta != 0 {
-				f := assetFields[s.assetCursor]
-				v := f.Get(&s.partyVisual) + float64(delta)*f.Step
-				f.Set(&s.partyVisual, core.Clamp(v, f.Min, f.Max))
-				s.assetPreviewStale = true
-			}
-		}
-	}
+	navAdjustVisualTabs(s, &s.partyCursor, &s.partyVisual)
 	if s.assetPreviewStale {
 		render.RefreshPartyAssetPreview(frameAssets, s.partyClass, s.partyVisual)
 		s.assetPreviewStale = false
@@ -221,7 +167,7 @@ func handlePartyViewClick(s *State, l *foeViewLayout, mp rl.Vector2) {
 	}
 	if s.foeViewTab == foeTabLayout {
 		for i := range foeFields {
-			if pointIn(mp, padRect(l.sliderTracks[i], 0, 9)) {
+			if pointIn(mp, padRect(l.sliderTracks[i], 0, sliderHitPadY)) {
 				partyDrag.slider.idx = i
 				setPartyFieldFromTrack(s, i, l.sliderTracks[i], mp.X)
 				s.partyCursor = i
@@ -231,7 +177,7 @@ func handlePartyViewClick(s *State, l *foeViewLayout, mp rl.Vector2) {
 	}
 	if s.foeViewTab == foeTabAsset {
 		for i := range assetFields {
-			if pointIn(mp, padRect(l.assetTracks[i], 0, 9)) {
+			if pointIn(mp, padRect(l.assetTracks[i], 0, sliderHitPadY)) {
 				partyDrag.asset.idx = i
 				setPartyAssetFromTrack(s, i, l.assetTracks[i], mp.X)
 				s.assetCursor = i
@@ -299,7 +245,7 @@ func drawPartyViewModal(s *State, font rl.Font, theme render.Theme) {
 	// Class picker header: < Name >.
 	drawButton(font, l.prevFoeBtn, "<", false)
 	drawButton(font, l.nextFoeBtn, ">", false)
-	name := partyClassName(s.partyClass)
+	name := core.PartyClassName(s.partyClass)
 	nameSize := render.MeasureRichText(font, name, editorFontTopbar, 1)
 	nameSpanX := l.prevFoeBtn.X + l.prevFoeBtn.Width
 	nameSpanW := l.nextFoeBtn.X - nameSpanX
@@ -322,7 +268,7 @@ func drawPartyViewModal(s *State, font rl.Font, theme render.Theme) {
 		"D-pad row/adjust   |   drag sliders   |   buttons: change class / save / reset / close",
 		l.card.X+foePad, l.preview.Y+l.preview.Height+8, editorFontHint, theme.TextHint)
 	render.DrawTextWithShadow(font,
-		"orange sphere = particle origin   ·   cyan = hit glyph   ·   saves to partyvisuals.json as \""+core.PartyClassSlug(s.partyClass)+"\"",
+		visualizerFooterHint("class", core.PartyClassSlug(s.partyClass)),
 		l.card.X+foePad, l.preview.Y+l.preview.Height+26, editorFontHint, theme.TextMuted)
 }
 

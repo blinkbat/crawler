@@ -289,7 +289,7 @@ func chaseStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int,
 	dz := pz - p.TileZ
 	// Prefer the longer axis. If both are equal, X first — arbitrary
 	// but deterministic so the chase doesn't visually dither.
-	steps := [4][2]int{}
+	steps := [FacingCount][2]int{}
 	n := 0
 	if AbsInt(dx) >= AbsInt(dz) {
 		if dx != 0 {

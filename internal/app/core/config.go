@@ -632,13 +632,14 @@ const (
 	// steps = one full day, StepsPerPhase = 25): a storm is short — under a
 	// phase to a couple phases — and the cooldown spans roughly half a day to
 	// ~1.2 days so rain is a recurring event without being constant.
-	RainStartChance       = 0.012 // per outdoor step (once off cooldown): chance a storm begins
-	RainMinSteps          = 18    // shortest downpour, in player steps (~0.7 phases)
-	RainMaxSteps          = 50    // longest downpour, in player steps (~2 phases)
-	RainCooldownMin       = 70    // min clear steps after a storm (~half a day) before rain may roll again
-	RainCooldownMax       = 180   // max of that random cooldown span (~1.2 days)
-	WeatherRampSpeed      = 0.40  // Intensity (0..1) eased per second — full tint ramp ≈ 2.5s
-	WeatherRainStartLevel = 0.85  // Intensity the darkening must reach before the rain actually falls
+	RainStartChance          = 0.012 // per outdoor step (once off cooldown): chance a storm begins
+	RainMinSteps             = 18    // shortest downpour, in player steps (~0.7 phases)
+	RainMaxSteps             = 50    // longest downpour, in player steps (~2 phases)
+	RainCooldownMin          = 70    // min clear steps after a storm (~half a day) before rain may roll again
+	RainCooldownMax          = 180   // max of that random cooldown span (~1.2 days)
+	WeatherRampSpeed         = 0.40  // Intensity (0..1) eased per second — full tint ramp ≈ 2.5s
+	WeatherRainStartLevel    = 0.85  // Intensity the darkening must reach before the rain actually falls
+	WeatherIntensityNearZero = 0.01  // Intensity at/below which a Clearing storm snaps to Clear
 
 	// Lightning (heavy storms only). A bolt blanks the world view bright
 	// for a blink, then the flash decays; bolts are scheduled at random

@@ -332,7 +332,7 @@ func drawMenuOverlay(g *core.GameState, assets Resources) {
 // both were painted.
 func drawMenuRow(font rl.Font, text string, x, y, innerW int32, selected bool) {
 	if selected {
-		DrawSelectedRowI(x-18, y-6, innerW, pauseMenuRowH)
+		DrawSelectedRowI(x-menuRowInsetX, y-menuRowInsetY, innerW, pauseMenuRowH)
 	}
 	// Engraved heading-tier rows — drawEngravedText's own +2 drop shadow
 	// supplies the weight the old hand-set (+2,+2) shadow carried.

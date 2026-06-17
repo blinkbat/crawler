@@ -20,6 +20,12 @@ const (
 	shopRowGap    = int32(8)
 	shopFootH     = int32(50)
 	shopRowInsetX = int32(40)
+	// shopHintDrop nudges the footer hint down INTO the reserved shopFootH band
+	// (which starts at panelH-shopFootH) so the centered glyph strip seats in the
+	// middle of the footer rather than at its top edge. The shop hand-centers its
+	// hint at FontSmall rather than routing through drawModalFooterGlyphs, which
+	// would force FontTiny + the modal footer offset and shift this layout.
+	shopHintDrop = int32(16)
 )
 
 // shopRow is one drawable row of the shop list: the item label, its
@@ -60,7 +66,7 @@ func drawShopOverlay(g *core.GameState, assets Resources) {
 	}
 	for i, r := range rows {
 		if i == g.ShopCursor {
-			DrawSelectedRowI(rowX-12, rowY-2, innerW, shopRowH)
+			DrawSelectedRowI(rowX-focusPlateInsetX, rowY-focusPlateInsetY, innerW, shopRowH)
 		}
 		nameCol := rowTextColor(r.affordable, !r.affordable, textMuted)
 		drawTextWithShadow(font, r.name, float32(rowX), float32(rowY+4), FontBody, nameCol)
@@ -72,7 +78,7 @@ func drawShopOverlay(g *core.GameState, assets Resources) {
 		Hint("Buy / Sell", GlyphLB, GlyphRB),
 		Hint("Confirm", GlyphA),
 		Hint("Back", GlyphB),
-	}, float32(panelX)+float32(shopPanelW)/2, float32(panelY+panelH)-float32(shopFootH)+16, FontSmall)
+	}, float32(panelX)+float32(shopPanelW)/2, float32(panelY+panelH-shopFootH+shopHintDrop), FontSmall)
 }
 
 // shopRows builds the active tab's drawable rows. Buy reads the catalog

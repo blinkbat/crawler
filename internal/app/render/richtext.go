@@ -2,7 +2,6 @@ package render
 
 import (
 	"image/color"
-	"math"
 	"unicode/utf8"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -347,22 +346,23 @@ func glyphCheck(b glyphBox, col color.RGBA) {
 	rl.DrawLineEx(knee, rl.NewVector2(b.right, b.top), b.t, col)
 }
 
+// glyphStarFanBuf backs glyphStar's triangle-fan vertex list (centre + the 10
+// star points + a repeat of the first point to close the fan). Reused so the ★
+// glyph doesn't allocate per draw; copied off the shared starVerts buffer since
+// the fan needs the centre + closing vertex too.
+var glyphStarFanBuf = make([]rl.Vector2, 0, 12)
+
 func glyphStar(b glyphBox, col color.RGBA) {
-	// Five-point star as a triangle fan over alternating outer/inner radii.
+	// Five-point star as a triangle fan over alternating outer/inner radii,
+	// built from the shared starVerts primitive.
 	cx, cy := b.cx, b.cy
 	outer := b.triRadius()
-	inner := outer * 0.42
-	pts := make([]rl.Vector2, 0, 12)
+	verts := starVerts(cx, cy, outer, outer*0.42, 5)
+	pts := glyphStarFanBuf[:0]
 	pts = append(pts, rl.NewVector2(cx, cy))
-	for i := 0; i <= 10; i++ {
-		ang := -90.0 + float64(i)*36.0 // start pointing up
-		rad := outer
-		if i%2 == 1 {
-			rad = inner
-		}
-		ra := float32(ang) * (3.14159265 / 180)
-		pts = append(pts, rl.NewVector2(cx+rad*cosf(ra), cy+rad*sinf(ra)))
-	}
+	pts = append(pts, verts...)
+	pts = append(pts, verts[0]) // close the fan back to the first point
+	glyphStarFanBuf = pts
 	rl.DrawTriangleFan(pts, col)
 }
 
@@ -423,8 +423,3 @@ func glyphApprox(b glyphBox, col color.RGBA) {
 	rl.DrawLineEx(rl.NewVector2(b.left, b.cy-dy), rl.NewVector2(b.right, b.cy-dy), b.t, col)
 	rl.DrawLineEx(rl.NewVector2(b.left, b.cy+dy), rl.NewVector2(b.right, b.cy+dy), b.t, col)
 }
-
-// cosf/sinf are thin float32 wrappers over math.Cos/Sin for glyphStar's
-// vertex ring.
-func cosf(r float32) float32 { return float32(math.Cos(float64(r))) }
-func sinf(r float32) float32 { return float32(math.Sin(float64(r))) }

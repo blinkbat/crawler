@@ -536,6 +536,17 @@ func partyClassInfo(class PartyClass) (PartyClassDefinition, bool) {
 	return def, ok
 }
 
+// PartyClassName returns the display name for a party class ("Warrior"),
+// falling back to the class slug if the class is somehow unregistered. Mirrors
+// EnemyInfo(kind).Name on the foe side; used by the Party Visualizer for the
+// header label and save-flash text.
+func PartyClassName(class PartyClass) string {
+	if def, ok := partyClassInfo(class); ok {
+		return def.Name
+	}
+	return PartyClassSlug(class)
+}
+
 // PartySkill returns the skill the action menu's Skill row currently
 // casts for this member: the entry at member.SkillCursor within the
 // member's LEARNED skills (see LearnedSkills / PartySkills). The

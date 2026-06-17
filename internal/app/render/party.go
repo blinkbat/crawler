@@ -32,7 +32,7 @@ var partyStatusVisuals = [core.PartyStatusCount]struct {
 	// the nil-Glyph probe actually catches a missing table row).
 	Glyph func(cx, cy, r float32, col rl.Color)
 }{
-	core.PartyStatusNone:      {Col: rl.NewColor(220, 220, 220, 220)},
+	core.PartyStatusNone:      {Col: statusNoneAccent},
 	core.PartyStatusDown:      {Col: statusDown, Glyph: drawStatusGlyphDown},
 	core.PartyStatusIngested:  {Col: statusIngested, Flicker: true, Glyph: drawStatusGlyphIngested},
 	core.PartyStatusWebbed:    {Col: statusWebbed, Flicker: true, Glyph: drawStatusGlyphWebbed},
@@ -360,12 +360,6 @@ var statusWebSpokes = [6][2]float32{
 // statusDizzyDots are the offsets (×r) for the Stunned icon's orbiting star-dots.
 var statusDizzyDots = [3][2]float32{{-0.62, -0.5}, {0, -0.78}, {0.62, -0.5}}
 
-// statusGlyphDark is the near-black used for the cut-out details inside a few
-// status glyphs (the skull's sockets/jaw, the ingest prey dot, the shield's
-// center spine). Hoisted out of drawPartyStatusIcon so the extracted glyph
-// funcs share one tone.
-var statusGlyphDark = rl.NewColor(12, 10, 15, 255)
-
 // drawPartyStatusIcon draws a small procedural status glyph centered at
 // (cx,cy) with radius r — the party card's status indicator. A dark token disc
 // backs it for legibility over the wood card; col is the per-status accent
@@ -501,19 +495,20 @@ func drawStatusGlyphBleed(cx, cy, r float32, col rl.Color) {
 }
 
 func drawClassMedallion(cx, cy, r float32, col rl.Color, muted bool) {
-	outer := fadeColor(woodDark, 0.88)
 	rim := fadeColor(giltDim, 0.78)
 	inner := fadeColor(glassWarm, 0.85)
 	if muted {
 		rim = fadeColor(rim, 0.45)
 		inner = fadeColor(inner, 0.45)
 	}
-	rl.DrawCircleV(rl.NewVector2(cx+1, cy+2), r+1, fadeColor(shadowHeavy, 0.24))
-	rl.DrawCircleV(rl.NewVector2(cx, cy), r+1.5, outer)
-	rl.DrawCircleV(rl.NewVector2(cx, cy), r, rim)
-	rl.DrawCircleV(rl.NewVector2(cx, cy), r-2.5, inner)
-	rl.DrawCircleV(rl.NewVector2(cx-r*0.25, cy-r*0.25), 1.6, fadeColor(inkPrimary, 0.32))
-	drawDiamondPip(cx+r*0.72, cy-r*0.55, 1.2, fadeColor(col, 0.70))
+	// Shared medallion stack (shadow + woodDark seat + gilt ring + glass face);
+	// the pip callback adds the class-badge embellishment — a soft top-left
+	// highlight glint and a class-tinted corner diamond.
+	drawMedallion(cx, cy, r+1.5, r, r-2.5,
+		fadeColor(woodDark, 0.88), rim, inner, r+1, func() {
+			rl.DrawCircleV(rl.NewVector2(cx-r*0.25, cy-r*0.25), 1.6, fadeColor(inkPrimary, 0.32))
+			drawDiamondPip(cx+r*0.72, cy-r*0.55, 1.2, fadeColor(col, 0.70))
+		})
 }
 
 // DrawPartyRibbon renders the always-visible bottom party ribbon. Cards are

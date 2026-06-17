@@ -8,6 +8,26 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+// crystalGeometry bundles the world-unit dimensions the crystal gem is built
+// from, so the draw (DrawCrystals) and the floating prompt (DrawCrystalPrompt)
+// read the same numbers and can't drift — the same pattern as chestGeo. FloatY
+// is the gem's mid-point lift above the floor; HalfHeight is the waist-to-tip
+// distance of each cone; WaistRadius is the gem's widest radius; PromptHeadroom
+// is the extra lift from the top tip to the floating "Rest" cue.
+type crystalGeometry struct {
+	FloatY         float32
+	HalfHeight     float32
+	WaistRadius    float32
+	PromptHeadroom float32
+}
+
+var crystalGeo = crystalGeometry{
+	FloatY:         0.55,
+	HalfHeight:     0.38,
+	WaistRadius:    0.20,
+	PromptHeadroom: 0.3,
+}
+
 // DrawCrystals paints every healing crystal in the current area as a floating,
 // gently-bobbing gem (a six-sided bipyramid) at its tile center. A CHARGED
 // crystal glows bright cyan and pulses; a spent one sits dim and still, so the
@@ -27,19 +47,20 @@ func DrawCrystals(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		}
 		// Float the gem above the floor with a slow vertical bob.
 		bob := float32(math.Sin(t*2.0)) * 0.05
-		midY := base.Y + 0.55 + bob
+		midY := base.Y + crystalGeo.FloatY + bob
 		mid := rl.NewVector3(base.X, midY, base.Z)
-		top := rl.NewVector3(base.X, midY+0.38, base.Z)
-		bot := rl.NewVector3(base.X, midY-0.38, base.Z)
+		top := rl.NewVector3(base.X, midY+crystalGeo.HalfHeight, base.Z)
+		bot := rl.NewVector3(base.X, midY-crystalGeo.HalfHeight, base.Z)
 
 		col := crystalColor(c.Charged, t)
+		r := crystalGeo.WaistRadius
 		// Two stacked cones tip-to-tip form the gem: upper point (full radius at
 		// the waist → 0 at the top), lower point (0 at the bottom → full radius).
-		rl.DrawCylinderEx(mid, top, 0.20, 0.0, 6, col)
-		rl.DrawCylinderEx(bot, mid, 0.0, 0.20, 6, col)
+		rl.DrawCylinderEx(mid, top, r, 0.0, 6, col)
+		rl.DrawCylinderEx(bot, mid, 0.0, r, 6, col)
 		// Faceted wire outline so it reads as cut crystal, not a solid cone.
-		rl.DrawCylinderWiresEx(mid, top, 0.20, 0.0, 6, crystalEdge(c.Charged))
-		rl.DrawCylinderWiresEx(bot, mid, 0.0, 0.20, 6, crystalEdge(c.Charged))
+		rl.DrawCylinderWiresEx(mid, top, r, 0.0, 6, crystalEdge(c.Charged))
+		rl.DrawCylinderWiresEx(bot, mid, 0.0, r, 6, crystalEdge(c.Charged))
 	}
 }
 
@@ -54,16 +75,11 @@ func DrawCrystalPrompt(camera rl.Camera3D, g *core.GameState, assets Resources) 
 		return
 	}
 	c := g.Crystals[idx]
-	// Anchor above the gem's top point (midY 0.55 + half-height 0.38) plus a
-	// little headroom, matching the bob-free rest pose.
-	world := tileWorldPos(c.TileX, c.TileZ, 0.55+0.38+0.3)
-	if behindCamera(camera, world) {
-		return
-	}
-	screen := rl.GetWorldToScreen(world, camera)
-	// Controller-first prompt: confirm glyph + verb, no spelled-out key.
-	y := screen.Y - glyphBoxH(FontBody) - 8
-	drawGlyphPrompt(assets.Font(), GlyphA, "Rest", screen.X, y, FontBody)
+	// Anchor above the gem's top point (FloatY + HalfHeight) plus a little
+	// headroom, matching the bob-free rest pose — read from crystalGeo so it
+	// tracks the gem geometry.
+	world := tileWorldPos(c.TileX, c.TileZ, crystalGeo.FloatY+crystalGeo.HalfHeight+crystalGeo.PromptHeadroom)
+	drawFloatingInteractPrompt(camera, world, "Rest", assets)
 }
 
 // crystalColor is the gem body tint: a pulsing bright cyan while charged, a flat
@@ -73,8 +89,11 @@ func crystalColor(charged bool, t float64) rl.Color {
 		return rl.NewColor(70, 92, 110, 190)
 	}
 	// Pulse the brightness between ~0.75 and 1.0 so a charged crystal "breathes."
+	// R/G ride the shared crystalCyanBase (theme.go) so the gem and the editor
+	// marker can't drift; the blue channel stays pinned full + a fixed alpha for
+	// the bright cut-crystal read.
 	pulse := 0.75 + 0.25*float32(math.Sin(t*3.0)*0.5+0.5)
-	return rl.NewColor(uint8(120*pulse), uint8(230*pulse), 255, 235)
+	return rl.NewColor(uint8(float32(crystalCyanBase.R)*pulse), uint8(float32(crystalCyanBase.G)*pulse), 255, 235)
 }
 
 // crystalEdge is the faceted wire tint paired with crystalColor.

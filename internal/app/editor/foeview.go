@@ -107,6 +107,13 @@ const (
 	foeValueW     = float32(56)
 	foeTrackH     = float32(12)
 	foeColGap     = float32(26) // gutter between the two slider columns
+	// foePreviewZoomStep is the per-wheel-notch dolly applied to the preview
+	// pane's zoom (clamped to the render-side bounds).
+	foePreviewZoomStep = float32(0.2)
+	// sliderHitPadY fattens a slider track's click band vertically (the thin
+	// tracks are easy to miss) without changing how they draw. Shared by both
+	// Visualizers' Layout + Asset track hit-tests.
+	sliderHitPadY = float32(9)
 )
 
 // foeViewBtnLabels is the action row's single label source — the layout
@@ -147,6 +154,25 @@ var assetFields = []sliderField[core.EnemyVisualOverride]{
 var assetActionLabels = []string{"Revert"}
 
 const assetActionRevert = 0
+
+// savedVisualFlash is the shared save-confirmation toast for the Foe/Party
+// Visualizers: both persist a visual override the editor applies live but the
+// game only picks up on restart, so they show the identical message.
+func savedVisualFlash(name, slug string) string {
+	return "Saved " + name + " → " + slug + " (live in editor; restart game to apply)"
+}
+
+// visualizerFooterHint is the shared orange-sphere/cyan-glyph persistence note
+// painted under both Visualizers' preview panes. noun is "foe"/"class" — it
+// selects the override file the save writes (foes → visuals.json, classes →
+// partyvisuals.json) — and slug is that file's map key ("rat", "warrior").
+func visualizerFooterHint(noun, slug string) string {
+	file := "visuals.json"
+	if noun == "class" {
+		file = "partyvisuals.json"
+	}
+	return "orange sphere = particle origin   ·   cyan = hit glyph   ·   saves to " + file + " as \"" + slug + "\""
+}
 
 // clearVisualAdjustments zeroes the non-destructive image-adjustment fields of an
 // override (the Asset tab's Revert). Tint and the placement fields are untouched.
@@ -300,23 +326,34 @@ func cycleFoe(s *State, dir int) {
 	enterAssetEditing(s) // rebuild the live preview from the new foe's saved FX
 }
 
+// cycleByIndex finds cur in items, steps the index by delta, wraps at the ends,
+// and returns the item there. An empty list or an absent cur (idx stays 0)
+// returns the first item / cur respectively — the shared "step a picker by ±1"
+// body for the Foe (enemy kind) and Party (class) visualizer arrows.
+func cycleByIndex[T comparable](items []T, cur T, delta int) T {
+	if len(items) == 0 {
+		return cur
+	}
+	idx := 0
+	for i, it := range items {
+		if it == cur {
+			idx = i
+			break
+		}
+	}
+	return items[core.WrapIndex(idx+delta, len(items))]
+}
+
 // cycleEnemyKind walks the enemy registry by delta (+1 / -1), wrapping at the
 // ends. Skips nothing — every registered kind is a valid choice. Used by the
 // Foe Visualizer's < / > buttons.
 func cycleEnemyKind(cur core.EnemyKind, delta int) core.EnemyKind {
 	defs := core.EnemyKinds()
-	if len(defs) == 0 {
-		return cur
-	}
-	idx := 0
+	kinds := make([]core.EnemyKind, len(defs))
 	for i, def := range defs {
-		if def.Kind == cur {
-			idx = i
-			break
-		}
+		kinds[i] = def.Kind
 	}
-	idx = core.WrapIndex(idx+delta, len(defs))
-	return defs[idx].Kind
+	return cycleByIndex(kinds, cur, delta)
 }
 
 func saveFoeVisual(s *State) {
@@ -333,7 +370,63 @@ func saveFoeVisual(s *State) {
 	// The working copy is now what's on disk — make it the Reset baseline so a
 	// later Reset reverts to the just-saved state, not pre-save edits.
 	s.foeBaseline = s.foeVisual
-	s.flash("Saved " + core.EnemyInfo(s.foeKind).Name + " → " + slug + " (live in editor; restart game to apply)")
+	s.flash(savedVisualFlash(core.EnemyInfo(s.foeKind).Name, slug))
+}
+
+// importDroppedPNG handles a PNG dropped onto the window while a Visualizer
+// modal is open (raylib has no file dialog, so drag-drop is the import path).
+// It takes the first .png in the drop, runs importFn(path) to write it under
+// `slug`.png, then reloadFn() to rebuild the live sprite; non-PNG drops are
+// ignored. Shared by the Foe and Party visualizers (they differ only in the
+// import/reload targets). No-op when nothing was dropped.
+func importDroppedPNG(s *State, slug string, importFn func(path string) error, reloadFn func()) {
+	if !rl.IsFileDropped() {
+		return
+	}
+	dropped := rl.LoadDroppedFiles()
+	for _, path := range dropped {
+		if !strings.EqualFold(filepath.Ext(path), ".png") {
+			continue
+		}
+		if err := importFn(path); err != nil {
+			s.flashWarn("Import failed: " + err.Error())
+		} else {
+			reloadFn()
+			s.flash("Imported " + filepath.Base(path) + " → " + slug + ".png (updated live)")
+		}
+		break
+	}
+	// Free the C-side FilePathList raylib allocated for the drop.
+	rl.UnloadDroppedFiles()
+}
+
+// navAdjustVisualTabs runs the shared keyboard/d-pad row-nav + fine value
+// adjust for a Visualizer's active tab. On the Layout tab it walks the foeFields
+// stack via *layoutCursor; on the Asset tab it walks assetFields via s.assetCursor
+// and flags the live preview stale on a change. Both adjust the passed override
+// `ov` (s.foeVisual / s.partyVisual). layoutCursor is the caller's per-modal row
+// cursor (&s.foeCursor / &s.partyCursor). Shared so the two modals can't drift.
+func navAdjustVisualTabs(s *State, layoutCursor *int, ov *core.EnemyVisualOverride) {
+	if s.foeViewTab == foeTabLayout {
+		*layoutCursor = input.CursorUpDown(*layoutCursor, len(foeFields))
+		if *layoutCursor >= 0 && *layoutCursor < len(foeFields) {
+			if delta := input.CursorLeftRight(); delta != 0 {
+				f := foeFields[*layoutCursor]
+				v := f.Get(ov) + float64(delta)*f.Step
+				f.Set(ov, core.Clamp(v, f.Min, f.Max))
+			}
+		}
+	} else {
+		s.assetCursor = input.CursorUpDown(s.assetCursor, len(assetFields))
+		if s.assetCursor >= 0 && s.assetCursor < len(assetFields) {
+			if delta := input.CursorLeftRight(); delta != 0 {
+				f := assetFields[s.assetCursor]
+				v := f.Get(ov) + float64(delta)*f.Step
+				f.Set(ov, core.Clamp(v, f.Min, f.Max))
+				s.assetPreviewStale = true
+			}
+		}
+	}
 }
 
 func updateFoeViewModal(s *State) Action {
@@ -345,26 +438,10 @@ func updateFoeViewModal(s *State) Action {
 	}
 
 	// "Upload": a PNG dropped onto the window while the modal is open imports as
-	// THIS foe's sprite (raylib has no file dialog; drag-drop is the path). Takes
-	// the first .png in the drop; non-PNG drops are ignored.
-	if rl.IsFileDropped() {
-		dropped := rl.LoadDroppedFiles()
-		for _, path := range dropped {
-			if !strings.EqualFold(filepath.Ext(path), ".png") {
-				continue
-			}
-			slug := core.EnemySlug(s.foeKind)
-			if err := render.ImportSpriteFromFile(s.foeKind, path); err != nil {
-				s.flashWarn("Import failed: " + err.Error())
-			} else {
-				render.ReloadFoeSprite(frameAssets, s.foeKind)
-				s.flash("Imported " + filepath.Base(path) + " → " + slug + ".png (updated live)")
-			}
-			break
-		}
-		// Free the C-side FilePathList raylib allocated for the drop.
-		rl.UnloadDroppedFiles()
-	}
+	// THIS foe's sprite (raylib has no file dialog; drag-drop is the path).
+	importDroppedPNG(s, core.EnemySlug(s.foeKind),
+		func(path string) error { return render.ImportSpriteFromFile(s.foeKind, path) },
+		func() { render.ReloadFoeSprite(frameAssets, s.foeKind) })
 
 	l := computeFoeViewLayout()
 	// Read the cursor live (NOT the cached frameMouse, which is set in Draw and
@@ -408,26 +485,7 @@ func updateFoeViewModal(s *State) Action {
 	}
 
 	// Row navigation + fine value adjust, per tab.
-	if s.foeViewTab == foeTabLayout {
-		s.foeCursor = input.CursorUpDown(s.foeCursor, len(foeFields))
-		if s.foeCursor >= 0 && s.foeCursor < len(foeFields) {
-			if delta := input.CursorLeftRight(); delta != 0 {
-				f := foeFields[s.foeCursor]
-				v := f.Get(&s.foeVisual) + float64(delta)*f.Step
-				f.Set(&s.foeVisual, core.Clamp(v, f.Min, f.Max))
-			}
-		}
-	} else {
-		s.assetCursor = input.CursorUpDown(s.assetCursor, len(assetFields))
-		if s.assetCursor >= 0 && s.assetCursor < len(assetFields) {
-			if delta := input.CursorLeftRight(); delta != 0 {
-				f := assetFields[s.assetCursor]
-				v := f.Get(&s.foeVisual) + float64(delta)*f.Step
-				f.Set(&s.foeVisual, core.Clamp(v, f.Min, f.Max))
-				s.assetPreviewStale = true
-			}
-		}
-	}
+	navAdjustVisualTabs(s, &s.foeCursor, &s.foeVisual)
 	// Rebuild the live preview (shown on BOTH tabs — the FX are part of the look)
 	// from this foe's PRISTINE sprite + the override's current adjustments whenever
 	// they changed (slider drag / nav / Revert / foe cycle).
@@ -450,7 +508,7 @@ func handleFoeViewClick(s *State, l *foeViewLayout, mp rl.Vector2) {
 	}
 	if s.foeViewTab == foeTabLayout {
 		for i := range foeFields {
-			if pointIn(mp, padRect(l.sliderTracks[i], 0, 9)) {
+			if pointIn(mp, padRect(l.sliderTracks[i], 0, sliderHitPadY)) {
 				foeDrag.slider.idx = i
 				setFoeFieldFromTrack(s, i, l.sliderTracks[i], mp.X)
 				s.foeCursor = i
@@ -460,7 +518,7 @@ func handleFoeViewClick(s *State, l *foeViewLayout, mp rl.Vector2) {
 	}
 	if s.foeViewTab == foeTabAsset {
 		for i := range assetFields {
-			if pointIn(mp, padRect(l.assetTracks[i], 0, 9)) {
+			if pointIn(mp, padRect(l.assetTracks[i], 0, sliderHitPadY)) {
 				foeDrag.asset.idx = i
 				setFoeAssetFromTrack(s, i, l.assetTracks[i], mp.X)
 				s.assetCursor = i
@@ -563,7 +621,7 @@ func applyPreviewZoomWheel(s *State, preview rl.Rectangle, mp rl.Vector2) {
 	if w == 0 {
 		return
 	}
-	z := s.foeViewZoom + w*0.2
+	z := s.foeViewZoom + w*foePreviewZoomStep
 	if z < render.FoePreviewZoomMin {
 		z = render.FoePreviewZoomMin
 	}
@@ -611,7 +669,7 @@ func drawFoeViewModal(s *State, font rl.Font, theme render.Theme) {
 		"D-pad row/adjust   |   drag sliders   |   buttons: change foe / save / reset / close",
 		l.card.X+foePad, l.preview.Y+l.preview.Height+8, editorFontHint, theme.TextHint)
 	render.DrawTextWithShadow(font,
-		"orange sphere = particle origin   ·   cyan = hit glyph   ·   saves to visuals.json as \""+core.EnemySlug(s.foeKind)+"\"",
+		visualizerFooterHint("foe", core.EnemySlug(s.foeKind)),
 		l.card.X+foePad, l.preview.Y+l.preview.Height+26, editorFontHint, theme.TextMuted)
 
 }

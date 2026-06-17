@@ -23,6 +23,19 @@ import (
 // alias on the upper harmonics.
 const SampleRate = 22050
 
+// radiansPerSampleHz is the per-sample phase increment for a 1 Hz tone:
+// multiply by a frequency to advance an oscillator's phase by one sample.
+// Open-coded as `2 * math.Pi / float64(SampleRate)` in every synth loop
+// before being named here.
+const radiansPerSampleHz = 2 * math.Pi / float64(SampleRate)
+
+// bellEnv is the bell-shaped amplitude envelope sin(pi*t) for t in [0, 1] —
+// zero at both ends, peaks at t=0.5. Shared by the chord and chime cues so
+// their ring-out shape stays identical.
+func bellEnv(t float64) float64 {
+	return math.Sin(math.Pi * t)
+}
+
 // ClampToInt16 converts a float in [-1, 1] to a 16-bit PCM sample with
 // soft clipping. Out-of-range floats get pinned to the int16 endpoints
 // rather than wrapping — wrapping would produce harsh "ring modulator"
@@ -117,10 +130,10 @@ func SynthShape(duration, startHz, endHz, volume, attack, release float64,
 		// Vibrato — sinusoidal FM. Phase-integrated like the main
 		// oscillator so the wobble doesn't click at sample edges.
 		if vibHz > 0 && vibDepth > 0 {
-			vibPhase += 2 * math.Pi * vibHz / float64(SampleRate)
+			vibPhase += radiansPerSampleHz * vibHz
 			freq += freq * vibDepth * math.Sin(vibPhase)
 		}
-		phase += 2 * math.Pi * freq / float64(SampleRate)
+		phase += radiansPerSampleHz * freq
 		// Oscillator. Phase is unbounded, so we wrap to [0, 2π) for
 		// the shaped waves that read the position rather than the
 		// running sine.
@@ -193,12 +206,12 @@ func SynthChord(duration float64, freqs []float64, volume float64) []int16 {
 		t := float64(i) / float64(samples)
 		sum := 0.0
 		for k, freq := range freqs {
-			phases[k] += 2 * math.Pi * freq / float64(SampleRate)
+			phases[k] += radiansPerSampleHz * freq
 			sum += math.Sin(phases[k])
 		}
 		sum /= float64(len(freqs))
 		// Bell envelope: sin(pi*t) — zero at both ends, peaks at t=0.5.
-		env := math.Sin(math.Pi * t)
+		env := bellEnv(t)
 		pcm[i] = ClampToInt16(sum * env * volume)
 	}
 	return pcm
@@ -257,7 +270,7 @@ func SynthClick(duration, pitchHz, pitchDrop, noise, volume float64) []int16 {
 		if freq < 0 {
 			freq = 0
 		}
-		phase += 2 * math.Pi * freq / float64(SampleRate)
+		phase += radiansPerSampleHz * freq
 		sine := math.Sin(phase)
 		// White noise in [-1, 1]; rand.Float64() is [0, 1).
 		n := rng.Float64()*2 - 1
@@ -292,9 +305,9 @@ func SynthChime(noteDuration, firstHz, secondHz, volume float64) []int16 {
 		}
 		phase := 0.0
 		for i := 0; i < samplesPerNote; i++ {
-			phase += 2 * math.Pi * freq / float64(SampleRate)
+			phase += radiansPerSampleHz * freq
 			t := float64(i) / float64(samplesPerNote)
-			env := math.Sin(math.Pi * t)
+			env := bellEnv(t)
 			pcm[note*samplesPerNote+i] = ClampToInt16(math.Sin(phase) * env * volume)
 		}
 	}

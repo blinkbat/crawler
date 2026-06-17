@@ -45,7 +45,7 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		drawTextWithShadow(font, secondary, float32(cardX+22), float32(cardY+76), FontSmall, inkAccent)
 	}
 
-	// Stat rows. Each row is taller (52px) so the label, description,
+	// Stat rows. Each row is taller (64px) so the label, description,
 	// and preview don't collide at smaller widths. Layout per row:
 	//   left: LABEL (FontBody)
 	//   left + indent: description (FontTiny, dim)

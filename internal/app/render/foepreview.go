@@ -14,12 +14,56 @@ import (
 // world geometry lands inside the panel rect instead of the full window (raylib
 // has no public sub-rect 3D viewport, so a RenderTexture is the clean route).
 
-var (
-	foePreviewRT     rl.RenderTexture2D
-	foePreviewRTW    int32
-	foePreviewRTH    int32
-	foePreviewRTInit bool
-)
+// previewRT is a cached off-screen render target sized to a visualizer
+// preview panel. Both the Foe and Party visualizers keep their own instance
+// (foePreviewRT / partyPreviewRT) — the diorama 3D pass renders into it and
+// is then blitted into the panel rect. The (re)allocation + teardown logic is
+// identical for both, so it lives on this struct instead of being duplicated
+// per file.
+type previewRT struct {
+	rt   rl.RenderTexture2D
+	w, h int32
+	init bool
+}
+
+// ensure lazily (re)creates the cached off-screen texture when it's missing or
+// the requested size changed. The old texture is unloaded before a resize so
+// the GPU handle doesn't leak across window-size changes. Returns false when
+// the allocation fails (e.g. GPU OOM) so the caller skips drawing and retries
+// next frame, rather than driving BeginTextureMode/BeginMode3D against an
+// invalid render target.
+func (p *previewRT) ensure(w, h int32) bool {
+	if p.init && p.w == w && p.h == h {
+		return true
+	}
+	if p.init {
+		rl.UnloadRenderTexture(p.rt)
+		p.init = false
+	}
+	rt := rl.LoadRenderTexture(w, h)
+	if rt.ID == 0 {
+		return false
+	}
+	p.rt = rt
+	rl.SetTextureFilter(p.rt.Texture, rl.FilterBilinear)
+	p.w, p.h = w, h
+	p.init = true
+	return true
+}
+
+// close unloads the cached off-screen texture. Idempotent — safe to call when
+// nothing is allocated.
+func (p *previewRT) close() {
+	if !p.init {
+		return
+	}
+	rl.UnloadRenderTexture(p.rt)
+	p.rt = rl.RenderTexture2D{}
+	p.w, p.h = 0, 0
+	p.init = false
+}
+
+var foePreviewRT previewRT
 
 // foeAnchor is the preview's formation-center anchor — the same vertical center
 // (battleFormationCenterY) battle billboards use, so a foe that sits right in
@@ -33,6 +77,16 @@ var foeAnchor = rl.NewVector3(0, battleFormationCenterY, 0)
 var (
 	foePreviewBG     = rl.NewColor(26, 28, 34, 255)
 	foePreviewGround = rl.NewColor(54, 58, 66, 255)
+)
+
+// Authoring-gizmo tints shared by both visualizer previews (foe + party): the
+// orange particle-burst anchor, the cyan hit-glyph anchor, and the gold
+// floating-damage-number anchor. Hoisted here so the two preview draws read the
+// same three colors instead of re-typing the NewColor literals per file.
+var (
+	gizmoParticleColor = rl.NewColor(255, 168, 86, 210)
+	gizmoGlyphColor    = rl.NewColor(176, 226, 255, 220)
+	gizmoNumberColor   = rl.NewColor(255, 232, 120, 220)
 )
 
 // foePreviewCamera is the fixed three-quarter camera the diorama is viewed
@@ -124,12 +178,12 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 	if w <= 0 || h <= 0 {
 		return
 	}
-	if !ensureFoePreviewRT(w, h) {
+	if !foePreviewRT.ensure(w, h) {
 		return
 	}
 	cam := zoomedPreviewCamera(zoom)
 
-	rl.BeginTextureMode(foePreviewRT)
+	rl.BeginTextureMode(foePreviewRT.rt)
 	rl.ClearBackground(foePreviewBG)
 	rl.BeginMode3D(cam)
 	rl.DrawPlane(rl.NewVector3(0, 0, 0), rl.NewVector2(14, 14), foePreviewGround)
@@ -157,15 +211,15 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 	// sprite (and its baked tint / pixelation) reads clean.
 	if showGizmos {
 		pAnchor := cameraRelativeOffset(cam, foeAnchor, v.particleXOffset, v.particleYOffset, v.particleZOffset)
-		drawAnchorGizmo(pAnchor, 0.16*v.effectiveParticleScale(), rl.NewColor(255, 168, 86, 210))
+		drawAnchorGizmo(pAnchor, 0.16*v.effectiveParticleScale(), gizmoParticleColor)
 		gAnchor := cameraRelativeOffset(cam, foeAnchor, v.glyphXOffset, v.glyphYOffset, 0)
 		gAnchor.Y += hitGlyphRise
-		drawAnchorGizmo(gAnchor, 0.13*v.effectiveGlyphScale(), rl.NewColor(176, 226, 255, 220))
+		drawAnchorGizmo(gAnchor, 0.13*v.effectiveGlyphScale(), gizmoGlyphColor)
 		// Gold gizmo = floating damage-NUMBER spawn (Num X/Y). +0.6 Y matches the
 		// baked rise drawFloatingDamage adds, so the dot sits where the number does.
 		nAnchor := cameraRelativeOffset(cam, foeAnchor, v.popupXOffset, v.popupYOffset, 0)
 		nAnchor.Y += 0.6
-		drawAnchorGizmo(nAnchor, 0.10, rl.NewColor(255, 232, 120, 220))
+		drawAnchorGizmo(nAnchor, 0.10, gizmoNumberColor)
 	}
 
 	rl.EndMode3D()
@@ -173,7 +227,7 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 
 	// Blit the off-screen render into the panel. RenderTextures are stored
 	// flipped, so the source height is negated to draw it right-side up.
-	rl.DrawTextureRec(foePreviewRT.Texture,
+	rl.DrawTextureRec(foePreviewRT.rt.Texture,
 		rl.NewRectangle(0, 0, float32(w), -float32(h)),
 		rl.NewVector2(rect.X, rect.Y),
 		rl.White)
@@ -197,40 +251,9 @@ func drawAnchorGizmo(p rl.Vector3, radius float32, col rl.Color) {
 	rl.EnableDepthTest()
 }
 
-// ensureFoePreviewRT lazily (re)creates the cached off-screen texture when it's
-// missing or the requested size changed. The old texture is unloaded before a
-// resize so the GPU handle doesn't leak across window-size changes.
-func ensureFoePreviewRT(w, h int32) bool {
-	if foePreviewRTInit && foePreviewRTW == w && foePreviewRTH == h {
-		return true
-	}
-	if foePreviewRTInit {
-		rl.UnloadRenderTexture(foePreviewRT)
-		foePreviewRTInit = false
-	}
-	rt := rl.LoadRenderTexture(w, h)
-	if rt.ID == 0 {
-		// Allocation failed (e.g. GPU OOM). Stay uninitialized so the caller
-		// skips drawing and we retry next frame, rather than driving
-		// BeginTextureMode/BeginMode3D against an invalid render target.
-		return false
-	}
-	foePreviewRT = rt
-	rl.SetTextureFilter(foePreviewRT.Texture, rl.FilterBilinear)
-	foePreviewRTW, foePreviewRTH = w, h
-	foePreviewRTInit = true
-	return true
-}
-
 // CloseFoePreview unloads the cached off-screen texture. The editor calls this
 // when the Foe Visualizer modal closes so the GPU handle isn't held for the
 // rest of the session. Idempotent — safe to call when nothing is allocated.
 func CloseFoePreview() {
-	if !foePreviewRTInit {
-		return
-	}
-	rl.UnloadRenderTexture(foePreviewRT)
-	foePreviewRT = rl.RenderTexture2D{}
-	foePreviewRTW, foePreviewRTH = 0, 0
-	foePreviewRTInit = false
+	foePreviewRT.close()
 }

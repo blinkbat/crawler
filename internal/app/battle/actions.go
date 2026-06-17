@@ -710,6 +710,20 @@ func applyStatusRoll(rng *rand.Rand, counter *int, defeated bool, chance float64
 	return *counter > 0
 }
 
+// refundSkillMP returns the MP committed in setup back to the acting party
+// member when an action is cancelled at apply time. Only refund MP that was
+// actually spent: DebugAllSkills makes casts free (chargeMP short-circuits
+// without deducting), so refunding here would mint MP the actor never paid.
+// Basic Attack / Steal pass core.SkillNone (no MP cost) and refund nothing.
+func refundSkillMP(g *core.GameState, refundSkill core.SkillID) {
+	if refundSkill != core.SkillNone && !g.DebugAllSkills {
+		if cost := core.SkillCost(refundSkill); cost > 0 {
+			actor := &g.Party[g.Battle.CurrentParty]
+			core.GainUpTo(&actor.MP, actor.MaxMP, cost)
+		}
+	}
+}
+
 // ensureAliveTargetOrCancel is the apply-side counterpart of
 // setupTargetedEnemy. The setup gate runs before the timing minigame, but a
 // target can die between confirm and apply (e.g. a faster ally killed it on
@@ -727,15 +741,7 @@ func ensureAliveTargetOrCancel(g *core.GameState, refundSkill core.SkillID) bool
 	if core.BattleEnemyAlive(g, g.Battle.EnemyIndex) {
 		return true
 	}
-	// Only refund MP that was actually spent. DebugAllSkills makes casts free
-	// (chargeMP short-circuits without deducting), so refunding here would mint
-	// MP the actor never paid.
-	if refundSkill != core.SkillNone && !g.DebugAllSkills {
-		if cost := core.SkillCost(refundSkill); cost > 0 {
-			actor := &g.Party[g.Battle.CurrentParty]
-			core.GainUpTo(&actor.MP, actor.MaxMP, cost)
-		}
-	}
+	refundSkillMP(g, refundSkill)
 	setBattleStatus(g, msgNoTarget)
 	finishActorTurn(g)
 	return false
@@ -752,14 +758,7 @@ func ensureAlivePartyTargetOrCancel(g *core.GameState, refundSkill core.SkillID)
 	if core.PartyMemberAvailable(g.Party, g.Battle.PartyTarget) {
 		return true
 	}
-	// Only refund MP that was actually spent — DebugAllSkills casts are free
-	// (see ensureAliveTargetOrCancel).
-	if refundSkill != core.SkillNone && !g.DebugAllSkills {
-		if cost := core.SkillCost(refundSkill); cost > 0 {
-			actor := &g.Party[g.Battle.CurrentParty]
-			core.GainUpTo(&actor.MP, actor.MaxMP, cost)
-		}
-	}
+	refundSkillMP(g, refundSkill)
 	setBattleStatus(g, msgNoTarget)
 	finishActorTurn(g)
 	return false

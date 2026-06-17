@@ -499,7 +499,7 @@ func updateMouse(s *State) {
 		// still reach the reachability badge at the bottom.
 		w := rl.GetMouseWheelMove()
 		if w != 0 {
-			ScrollMetadata(s, -w*42)
+			ScrollMetadata(s, -w*metadataRowStride)
 		}
 	}
 

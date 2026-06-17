@@ -16,6 +16,21 @@ import (
 // in four draw helpers.
 const sqrt2Inv = float32(0.7071)
 
+// tau is one full turn in radians (2π) — the magnitude a "spread phase / angle
+// evenly over a full circle" computation multiplies a normalized [0,1) value
+// by. Named so the full-turn constant isn't a bare 6.2831853 / 2*math.Pi
+// scattered across the torch-phase and particle-angle code.
+const tau = 6.2831853
+
+// hashPhase maps a 32-bit hash to a stable phase angle in [0, tau): the low 16
+// bits scaled across a full turn. Used to give each torch flame (and any other
+// hash-seeded oscillator) its own fixed starting phase so a field of them
+// flickers out of sync. Replaces the verbatim
+// float32(h&0xFFFF)/65535.0*6.2831853 idiom.
+func hashPhase(h uint32) float32 {
+	return float32(h&0xFFFF) / 65535.0 * tau
+}
+
 // paletteSaturationCut pulls every BRIGHT accent token a fraction of the way
 // toward its own luminance gray, taming the palette toward the muted
 // "library" look (parchment + waxed wood, not neon). It's applied via mute()
@@ -124,6 +139,16 @@ var (
 	inkMuted   = rl.NewColor(184, 172, 144, 240)
 	inkDim     = rl.NewColor(132, 122, 100, 220)
 	inkAccent  = rl.NewColor(232, 196, 112, 255)
+	// statusGlyphDark is the near-black used for cut-out details inside a few
+	// status glyphs (the skull's sockets/jaw, the ingest prey dot, the shield's
+	// center spine) AND for the enemy roster pill's glyph + turn count (drawn
+	// dark on the bright pill fill). Cross-file (party.go glyphs + battle.go
+	// pills), so it lives here with the ink tokens.
+	statusGlyphDark = rl.NewColor(12, 10, 15, 255)
+	// statusNoneAccent is the neutral light-grey the PartyStatusNone row carries
+	// in partyStatusVisuals — the "no status" placeholder accent (no glyph). A
+	// named token so the table doesn't open-code a bare grey literal.
+	statusNoneAccent = rl.NewColor(220, 220, 220, 220)
 
 	// ----- Semantic aliases of the library palette (use freely) -----
 	// These names predate the wood/glass/gilt nomenclature but resolve
@@ -317,11 +342,16 @@ var (
 	markerChestDim = rl.NewColor(160, 132, 78, 255)
 	markerDoor     = rl.NewColor(176, 132, 86, 255)
 	markerPack     = rl.NewColor(220, 76, 70, 255)
-	// markerCrystal echoes the in-world charged-crystal cyan (see
-	// render/crystal.go's crystalColor) so the editor marker reads as the
-	// same entity the player sees, and stands clear of the amber chest /
-	// brown door / red pack / yellow start swatches.
-	markerCrystal = rl.NewColor(96, 214, 232, 255)
+	// crystalCyanBase is the shared charged-crystal cyan — the single source of
+	// truth for both the editor/minimap marker (markerCrystal) and the in-world
+	// gem body (crystal.go's crystalColor pulses this base's R/G channels). Keeps
+	// the marker and the entity the player sees in lockstep instead of two
+	// hand-synced literals.
+	crystalCyanBase = rl.NewColor(96, 214, 232, 255)
+	// markerCrystal reads as the same charged-crystal cyan the player sees, and
+	// stands clear of the amber chest / brown door / red pack / yellow start
+	// swatches.
+	markerCrystal = crystalCyanBase
 	markerOutline = rl.NewColor(0, 0, 0, 220)
 
 	// mapTileFogColor is the dim fill drawn for cells that fall outside
@@ -372,6 +402,11 @@ const (
 	// action log). Smaller than hudEdgePad so adjacent panels feel
 	// grouped rather than scattered.
 	hudColumnGap = int32(10)
+	// hudPanelMinH is the height floor a short-window collision guard shrinks a
+	// pinned HUD pane to (the action log + the action menu) — below this the
+	// pane's rows stop being readable, so it stays this tall even if that means
+	// overlapping a neighbor on a very small window.
+	hudPanelMinH = int32(160)
 
 	// Corner radii. Smaller than the previous pass (10/6 → 4/3) so the
 	// frame reads as a hardwood mitre joint rather than a modern UI
@@ -420,6 +455,17 @@ const (
 	// keeps the three frame decorations aligned.
 	cardFrameThick = woodFrameOuter + woodFrameBand + woodFrameInner
 
+	// Focus-plate insets: how far the gilt selection plate (DrawSelectedRowI)
+	// bleeds out past the row's text origin so the plate frames the row rather
+	// than sitting flush behind it. focusPlateInsetX/Y are the standard pair the
+	// shop + journal rows share; the pause menu sits its larger heading-tier rows
+	// on a deeper plate (menuRowInsetX/Y) so the wider gilt margin matches the
+	// bigger type. Named so none of the three carries a bare -12/-2 / -18/-6.
+	focusPlateInsetX = int32(12)
+	focusPlateInsetY = int32(2)
+	menuRowInsetX    = int32(18)
+	menuRowInsetY    = int32(6)
+
 	// Heading tick markers (drawHeading underline) have a minimum width so
 	// short headings still read as labelled. Bar value text inset is the
 	// constant pad on the right edge of drawBar.
@@ -461,6 +507,10 @@ const (
 	panelsOverlayHeightFrac = float32(0.80)
 	levelUpModalWidthFrac   = float32(0.60)
 	levelUpModalHeightFrac  = float32(0.85)
+	// victoryWidthFrac is the post-battle spoils card's screen-relative WIDTH
+	// (its height is content-sized; see DrawVictorySpoils). Lives here with the
+	// other modal-width fractions rather than in victory.go.
+	victoryWidthFrac = float32(0.5)
 
 	overlayCardMarginScreen = int32(40) // minimum margin between card and screen edges
 
@@ -891,6 +941,42 @@ func drawEmptyLedgerNote(font rl.Font, body rl.Rectangle, text, sub string) {
 	if sub != "" {
 		drawTextCentered(font, sub, cx, ornY+18+FontBody+10, FontSmall, textHint)
 	}
+}
+
+// starVertsBuf backs starVerts so the per-frame star draws (the Wizard class
+// glyph on the always-visible party ribbon, the ★ rich-text glyph) reuse one
+// slice instead of escaping a fresh one to the heap each call. The render path
+// is single-threaded, so sharing the buffer is safe — same scratch pattern as
+// the status-glyph spoke tables. Sized for the 5-point star (10 verts); grows
+// if a caller ever asks for more points.
+var starVertsBuf = make([]rl.Vector2, 0, 10)
+
+// starVerts returns the 2×points alternating outer/inner vertices of a regular
+// star centered at (cx, cy), the first vertex pointing straight up (-90°) and
+// stepping by π/points. Shared by the Wizard class glyph and the ★ rich-text
+// glyph so the two star silhouettes are built from one place. The returned
+// slice aliases a reused package buffer — copy it if it must outlive the next
+// call.
+func starVerts(cx, cy, outer, inner float32, points int) []rl.Vector2 {
+	n := points * 2
+	if cap(starVertsBuf) < n {
+		starVertsBuf = make([]rl.Vector2, 0, n)
+	}
+	verts := starVertsBuf[:0]
+	angleStart := -math.Pi / 2 // start at top
+	for i := 0; i < n; i++ {
+		angle := angleStart + float64(i)*math.Pi/float64(points)
+		radius := outer
+		if i%2 == 1 {
+			radius = inner
+		}
+		verts = append(verts, rl.NewVector2(
+			cx+float32(math.Cos(angle))*radius,
+			cy+float32(math.Sin(angle))*radius,
+		))
+	}
+	starVertsBuf = verts
+	return verts
 }
 
 // drawDiamondPip paints a small filled diamond centered on (cx, cy)

@@ -16,12 +16,10 @@ import (
 // pipeline; only the lookup (party class vs enemy kind) and the cached off-screen
 // render texture differ.
 
-var (
-	partyPreviewRT     rl.RenderTexture2D
-	partyPreviewRTW    int32
-	partyPreviewRTH    int32
-	partyPreviewRTInit bool
-)
+// partyPreviewRT is the party visualizer's cached off-screen render target —
+// the party-side twin of foePreviewRT. See foepreview.go for the previewRT
+// struct and its ensure/close methods.
+var partyPreviewRT previewRT
 
 // LivePartyOverride returns the currently-LOADED visual for class as an override
 // — code defaults with any maps/sprites/partyvisuals.json already overlaid at
@@ -76,12 +74,12 @@ func DrawPartyPreview(rect rl.Rectangle, assets Resources, class core.PartyClass
 	if w <= 0 || h <= 0 {
 		return
 	}
-	if !ensurePartyPreviewRT(w, h) {
+	if !partyPreviewRT.ensure(w, h) {
 		return
 	}
 	cam := zoomedPreviewCamera(zoom)
 
-	rl.BeginTextureMode(partyPreviewRT)
+	rl.BeginTextureMode(partyPreviewRT.rt)
 	rl.ClearBackground(foePreviewBG)
 	rl.BeginMode3D(cam)
 	rl.DrawPlane(rl.NewVector3(0, 0, 0), rl.NewVector2(14, 14), foePreviewGround)
@@ -101,57 +99,29 @@ func DrawPartyPreview(rect rl.Rectangle, assets Resources, class core.PartyClass
 	// sprite (and its baked tint / pixelation) reads clean.
 	if showGizmos {
 		pAnchor := cameraRelativeOffset(cam, foeAnchor, v.particleXOffset, v.particleYOffset, v.particleZOffset)
-		drawAnchorGizmo(pAnchor, 0.16*v.effectiveParticleScale(), rl.NewColor(255, 168, 86, 210))
+		drawAnchorGizmo(pAnchor, 0.16*v.effectiveParticleScale(), gizmoParticleColor)
 		gAnchor := cameraRelativeOffset(cam, foeAnchor, v.glyphXOffset, v.glyphYOffset, 0)
 		gAnchor.Y += hitGlyphRise
-		drawAnchorGizmo(gAnchor, 0.13*v.effectiveGlyphScale(), rl.NewColor(176, 226, 255, 220))
+		drawAnchorGizmo(gAnchor, 0.13*v.effectiveGlyphScale(), gizmoGlyphColor)
 		// Gold gizmo = floating damage-NUMBER spawn (Num X/Y); +0.6 Y matches the
 		// baked rise in drawFloatingDamage so the dot sits where the number floats.
 		nAnchor := cameraRelativeOffset(cam, foeAnchor, v.popupXOffset, v.popupYOffset, 0)
 		nAnchor.Y += 0.6
-		drawAnchorGizmo(nAnchor, 0.10, rl.NewColor(255, 232, 120, 220))
+		drawAnchorGizmo(nAnchor, 0.10, gizmoNumberColor)
 	}
 
 	rl.EndMode3D()
 	rl.EndTextureMode()
 
 	// RenderTextures are stored flipped, so the source height is negated.
-	rl.DrawTextureRec(partyPreviewRT.Texture,
+	rl.DrawTextureRec(partyPreviewRT.rt.Texture,
 		rl.NewRectangle(0, 0, float32(w), -float32(h)),
 		rl.NewVector2(rect.X, rect.Y),
 		rl.White)
 }
 
-// ensurePartyPreviewRT lazily (re)creates the cached off-screen texture when
-// missing or the requested size changed, unloading the old one first so the GPU
-// handle doesn't leak across window-size changes.
-func ensurePartyPreviewRT(w, h int32) bool {
-	if partyPreviewRTInit && partyPreviewRTW == w && partyPreviewRTH == h {
-		return true
-	}
-	if partyPreviewRTInit {
-		rl.UnloadRenderTexture(partyPreviewRT)
-		partyPreviewRTInit = false
-	}
-	rt := rl.LoadRenderTexture(w, h)
-	if rt.ID == 0 {
-		return false
-	}
-	partyPreviewRT = rt
-	rl.SetTextureFilter(partyPreviewRT.Texture, rl.FilterBilinear)
-	partyPreviewRTW, partyPreviewRTH = w, h
-	partyPreviewRTInit = true
-	return true
-}
-
 // ClosePartyPreview unloads the cached off-screen texture when the Party
 // Visualizer modal closes. Idempotent.
 func ClosePartyPreview() {
-	if !partyPreviewRTInit {
-		return
-	}
-	rl.UnloadRenderTexture(partyPreviewRT)
-	partyPreviewRT = rl.RenderTexture2D{}
-	partyPreviewRTW, partyPreviewRTH = 0, 0
-	partyPreviewRTInit = false
+	partyPreviewRT.close()
 }

@@ -18,10 +18,9 @@ import (
 // on Confirm. Drawn on top of the dimmed battle scene; see hud.go.
 
 const (
-	// The card is a modest fixed WIDTH but a content-sized HEIGHT, so a light
-	// haul doesn't float in a big near-empty panel (the height sums only the
-	// rows actually drawn). See DrawVictorySpoils.
-	victoryWidthFrac  = float32(0.5)
+	// The card is a modest fixed WIDTH (victoryWidthFrac, in theme.go) but a
+	// content-sized HEIGHT, so a light haul doesn't float in a big near-empty
+	// panel (the height sums only the rows actually drawn). See DrawVictorySpoils.
 	victoryMemberRowH = float32(54)
 	victoryNameRowH   = float32(30) // name line → XP bar vertical step
 	victoryNameInsetX = float32(22) // name X past the class rail in the gutter

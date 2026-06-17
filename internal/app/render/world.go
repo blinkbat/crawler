@@ -853,7 +853,7 @@ func drawWallTorch(assets Resources, m core.AreaDefinition, x, z int, center rl.
 		return
 	}
 	t := float32(rl.GetTime())
-	phase := float32(tileHash(x, z)&0xFFFF) / 65535.0 * 6.2831853
+	phase := hashPhase(tileHash(x, z))
 	flameBaseX := cupX
 	flameBaseZ := cupZ
 	for i := 0; i < 3; i++ {
@@ -1143,7 +1143,7 @@ func collectTorches(m core.AreaDefinition, camera rl.Camera3D) []torchLight {
 	t := float32(rl.GetTime())
 	for i := 0; i < n; i++ {
 		c := torchCandidateBuf[i]
-		phase := float32(c.hash&0xFFFF) / 65535.0 * 6.2831853
+		phase := hashPhase(c.hash)
 		// Organic flicker in ~0.72..1.0 from two desynced sines.
 		flick := 0.86 +
 			0.09*float32(math.Sin(float64(t*9.3+phase))) +

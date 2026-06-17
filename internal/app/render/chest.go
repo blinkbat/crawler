@@ -133,14 +133,22 @@ func DrawChestPrompt(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	}
 	ch := g.Chests[idx]
 	world := tileWorldPos(ch.TileX, ch.TileZ, chestGeo.BodyHeight+chestGeo.LidHeight+0.4)
+	drawFloatingInteractPrompt(camera, world, "Open", assets)
+}
+
+// drawFloatingInteractPrompt projects a world-space anchor to the screen and
+// paints the controller-first "[A] verb" cue just above it — the shared body of
+// the chest / crystal floating prompts (gamepad-first per UI_STANDARDS.md, no
+// spelled-out keys). `world` already encodes the per-entity anchor height; the
+// caller is skipped if the anchor falls behind the camera. Must be called after
+// rl.EndMode3D so the text lands in screen space.
+func drawFloatingInteractPrompt(camera rl.Camera3D, world rl.Vector3, verb string, assets Resources) {
 	if behindCamera(camera, world) {
 		return
 	}
 	screen := rl.GetWorldToScreen(world, camera)
-	// Controller-first prompt: the confirm glyph + the verb (no spelled-out
-	// keys). gamepad-first per UI_STANDARDS.md.
 	y := screen.Y - glyphBoxH(FontBody) - 8
-	drawGlyphPrompt(assets.Font(), GlyphA, "Open", screen.X, y, FontBody)
+	drawGlyphPrompt(assets.Font(), GlyphA, verb, screen.X, y, FontBody)
 }
 
 // DrawChestModal paints the chest-open dialog: a card with the item

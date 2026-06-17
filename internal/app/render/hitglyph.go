@@ -228,17 +228,26 @@ func drawGlyphSlash(cx, cy, t, baseR float32) {
 	rl.DrawLineEx(rl.NewVector2(x1-off, y1-off*0.25), rl.NewVector2(x2-off, y2-off*0.25), 2, fadeColor(col, 0.6))
 }
 
+// spokeBurst draws n evenly-spaced radial spokes from radius `inner` out to
+// `outer`, each `thick` px wide, in `col`. The shared body of the impact + holy
+// glyph bursts (both 8 evenly-spaced spokes differing only in radii/thickness/
+// color) so the two can't drift. The frost/fire bursts keep their own loops —
+// frost's spokes carry tip branches and fire's angle sweeps with t, so neither
+// reduces to a plain even fan.
+func spokeBurst(cx, cy float32, n int, inner, outer, thick float32, col rl.Color) {
+	for i := 0; i < n; i++ {
+		ang := float64(i) * 2 * math.Pi / float64(n)
+		dx, dy := float32(math.Cos(ang)), float32(math.Sin(ang))
+		rl.DrawLineEx(rl.NewVector2(cx+dx*inner, cy+dy*inner), rl.NewVector2(cx+dx*outer, cy+dy*outer), thick, col)
+	}
+}
+
 // drawGlyphImpact — a blunt "POW": 8 radial spikes punching outward.
 func drawGlyphImpact(cx, cy, t, baseR float32) {
 	col := rl.NewColor(255, 236, 150, glyphFade(t))
 	r := baseR
 	spike := r * (0.5 + 0.45*glyphGrow(t))
-	inner := r * 0.25
-	for i := 0; i < 8; i++ {
-		ang := float64(i) * math.Pi / 4
-		dx, dy := float32(math.Cos(ang)), float32(math.Sin(ang))
-		rl.DrawLineEx(rl.NewVector2(cx+dx*inner, cy+dy*inner), rl.NewVector2(cx+dx*spike, cy+dy*spike), 3, col)
-	}
+	spokeBurst(cx, cy, 8, r*0.25, spike, 3, col)
 }
 
 // drawGlyphFrost — a 6-armed snowflake (each arm a spoke + two tip branches),
@@ -258,7 +267,9 @@ func drawGlyphFrost(cx, cy, t, baseR float32) {
 		rl.DrawLineEx(rl.NewVector2(bx, by), rl.NewVector2(bx+(dx*0.5+px*0.7)*bl, by+(dy*0.5+py*0.7)*bl), 2, col)
 		rl.DrawLineEx(rl.NewVector2(bx, by), rl.NewVector2(bx+(dx*0.5-px*0.7)*bl, by+(dy*0.5-py*0.7)*bl), 2, col)
 	}
-	rl.DrawCircleV(rl.NewVector2(cx, cy), 2.5, col)
+	// Center hub scaled to baseR (≈2.5px at the default radius) so it tracks the
+	// glyph's size instead of sitting at a fixed pixel radius like the arms do.
+	rl.DrawCircleV(rl.NewVector2(cx, cy), baseR*0.096, col)
 }
 
 // drawGlyphSpark — 3 jagged lightning tendrils radiating from a bright core,
@@ -274,7 +285,9 @@ func drawGlyphSpark(cx, cy, t, baseR float32) {
 	for i, ang := range []float64{-1.4, 0.35, 2.05} {
 		drawLightningTendril(cx, cy, ang, r, bolt, step*3+float64(i))
 	}
-	rl.DrawCircleV(rl.NewVector2(cx, cy), 3, rl.NewColor(225, 242, 255, a))
+	// Bright core scaled to baseR (≈3px at the default radius) so it tracks the
+	// glyph's size rather than sitting at a fixed pixel radius.
+	rl.DrawCircleV(rl.NewVector2(cx, cy), baseR*0.115, rl.NewColor(225, 242, 255, a))
 }
 
 // drawLightningTendril draws a 3-segment zigzag outward along `ang`. seed feeds
@@ -324,11 +337,7 @@ func drawGlyphFire(cx, cy, t, baseR float32) {
 func drawGlyphHoly(cx, cy, t, baseR float32) {
 	col := rl.NewColor(255, 232, 150, glyphFade(t))
 	r := baseR * (0.6 + 0.6*glyphGrow(t))
-	for i := 0; i < 8; i++ {
-		ang := float64(i) * math.Pi / 4
-		dx, dy := float32(math.Cos(ang)), float32(math.Sin(ang))
-		rl.DrawLineEx(rl.NewVector2(cx+dx*r*0.32, cy+dy*r*0.32), rl.NewVector2(cx+dx*r, cy+dy*r), 2, col)
-	}
+	spokeBurst(cx, cy, 8, r*0.32, r, 2, col)
 	rl.DrawRing(rl.NewVector2(cx, cy), r*0.42, r*0.52, 0, 360, 28, col)
 }
 

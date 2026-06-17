@@ -11,7 +11,7 @@ import (
 )
 
 // drawBattleHUD orchestrates the in-combat HUD. Each panel owns one screen
-// region (top-center roster, bottom-left log, bottom-center action, top-right
+// region (top-center roster, bottom-left log, bottom-center action, left column
 // turn order) so they never compete for the same real estate. The action
 // log is pinned bottom-left through every phase — including the timing
 // minigame — so the player can keep reading the last few events while
@@ -340,8 +340,9 @@ func drawStatusPill(font rl.Font, x, y, w, h float32, fill, outline rl.Color, la
 // and the bare turn count on the right. Glyph + number are drawn in the dark
 // glyph ink (statusGlyphDark) for contrast against the bright status fill.
 func drawEnemyStatusPill(font rl.Font, x, y, w, h float32, fill, outline rl.Color, glyph func(cx, cy, r float32, col rl.Color), turnsLabel string) {
-	drawSmallPanel(int32(x), int32(y), int32(w), int32(h), fill)
-	drawSmallPanelOutline(int32(x), int32(y), int32(w), int32(h), outline)
+	// Fill + outline silhouette comes from the shared drawStatusPill core (empty
+	// label — this pill anchors its glyph + turn count itself, not centered).
+	drawStatusPill(font, x, y, w, h, fill, outline, "", statusGlyphDark, true)
 	if glyph != nil {
 		glyph(x+w*0.30, y+h*0.5, h*0.28, statusGlyphDark)
 	}
@@ -432,12 +433,12 @@ func drawActionLogPanel(g *core.GameState, assets Resources) {
 	y := bottomY - h
 
 	// Top collision guard against the turn panel above: if the pane would
-	// overlap it, shrink height (floored at 160) while keeping the bottom edge
-	// pinned to the screen bottom.
+	// overlap it, shrink height (floored at hudPanelMinH) while keeping the
+	// bottom edge pinned to the screen bottom.
 	if turnBottom := TurnPanelBottomY(g) + hudColumnGap; y < turnBottom {
 		shrunkH := bottomY - turnBottom
-		if shrunkH < 160 {
-			shrunkH = 160
+		if shrunkH < hudPanelMinH {
+			shrunkH = hudPanelMinH
 		}
 		h = shrunkH
 		y = bottomY - h
@@ -644,11 +645,11 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	// Vertical collision guard: on a short-window resolution the panel might
 	// slip behind the top edge. Floor the top edge at hudEdgePad and shrink
 	// height while keeping the bottom edge pinned to the screen bottom. Floor
-	// height at 160 so the action rows stay readable.
+	// height at hudPanelMinH so the action rows stay readable.
 	if y < hudEdgePad {
 		shrunkH := bottomY - hudEdgePad
-		if shrunkH < 160 {
-			shrunkH = 160
+		if shrunkH < hudPanelMinH {
+			shrunkH = hudPanelMinH
 		}
 		h = shrunkH
 		y = bottomY - h
@@ -783,18 +784,37 @@ func drawActionMenuRow(font rl.Font, row core.ActionRow, iconX, labelX, y int32,
 	drawActionIcon(row, iconCX, iconCY, 7, iconCol)
 }
 
+// drawMedallion paints the shared socketed-medallion primitive both the action
+// sigil rivet (drawIconMedallion) and the party class badge (drawClassMedallion)
+// are built on: an optional contact-shadow disc, a dark woodDark outer seat, a
+// gilt ring, and a recessed glass face the caller draws its sigil onto. The
+// three band radii are passed explicitly so each caller keeps its own
+// proportions; a shadowR > 0 paints a contact-shadow disc at that radius first;
+// `pip`, if non-nil, runs last for caller-specific embellishment (the class
+// badge's highlight + corner pip). Built from stacked filled discs (no thin
+// outline) so it reads as a solid fixture.
+func drawMedallion(cx, cy, outerR, ringR, faceR float32, outerCol, ringCol, faceCol rl.Color, shadowR float32, pip func()) {
+	if shadowR > 0 {
+		rl.DrawCircleV(rl.NewVector2(cx+1, cy+2), shadowR, fadeColor(shadowHeavy, 0.24))
+	}
+	rl.DrawCircleV(rl.NewVector2(cx, cy), outerR, outerCol)
+	rl.DrawCircleV(rl.NewVector2(cx, cy), ringR, ringCol)
+	rl.DrawCircleV(rl.NewVector2(cx, cy), faceR, faceCol)
+	if pip != nil {
+		pip()
+	}
+}
+
 // drawIconMedallion paints a small socketed medallion behind an action sigil:
 // a dark seat, a gilt ring (candle-lit when selected), and a recessed dark face
-// the icon draws onto — the "rivet with an engraved badge" look, built from
-// stacked filled discs (no thin outline) so it reads as a solid fixture.
+// the icon draws onto — the "rivet with an engraved badge" look.
 func drawIconMedallion(cx, cy float32, selected bool) {
 	ring := fadeColor(giltDim, 0.85)
 	if selected {
 		ring = fadeColor(giltBright, 0.9*candleFlicker())
 	}
-	rl.DrawCircleV(rl.NewVector2(cx, cy), 12, fadeColor(woodDark, 0.95))
-	rl.DrawCircleV(rl.NewVector2(cx, cy), 11, ring)
-	rl.DrawCircleV(rl.NewVector2(cx, cy), 9.5, fadeColor(glassDeep, 0.96))
+	drawMedallion(cx, cy, 12, 11, 9.5,
+		fadeColor(woodDark, 0.95), ring, fadeColor(glassDeep, 0.96), 0, nil)
 }
 
 // actionIconDrawers dispatches each action-menu row to its sigil

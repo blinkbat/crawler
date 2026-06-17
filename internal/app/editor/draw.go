@@ -427,13 +427,6 @@ type topbarBtn struct {
 func onGridLayer(s *State) bool      { return s.layer != LayerEntities }
 func onElevationLayer(s *State) bool { return s.layer == LayerElevation }
 
-// levelControlsEnabled gates the active-level steppers + height readout. The
-// Photoshop-style levels model is always on, so the active level is always
-// meaningful and these are always reachable (a content paint on any layer
-// builds the active floor). Kept as a predicate so the toolbar wiring is
-// uniform with the other gated buttons.
-func levelControlsEnabled(s *State) bool { return true }
-
 // toolbarActionBtns are the SECOND-ROW controls kept OUT of the menus because
 // you reach for them constantly while painting: undo/redo, the brush-size
 // steppers, and the contextual elevation cluster (Floor± / Floors lens / Ramp).
@@ -446,8 +439,8 @@ var toolbarActionBtns = []topbarBtn{
 	{label: "Redo", action: redoOne, enabled: func(s *State) bool { return len(s.redo) > 0 }, help: "Re-apply the last undone change (Ctrl+Y)."},
 	{label: "Brush -", action: func(s *State) { stepBrushSize(s, -1) }, enabled: onGridLayer, help: "Shrink the brush footprint."},
 	{label: "Brush +", action: func(s *State) { stepBrushSize(s, +1) }, enabled: onGridLayer, help: "Grow the brush footprint."},
-	{label: "Lvl -", action: func(s *State) { stepEditLevel(s, -1) }, enabled: levelControlsEnabled, help: "Lower the active level (the floor paints build onto). Also PgDn / the Levels panel."},
-	{label: "Lvl +", action: func(s *State) { stepEditLevel(s, +1) }, enabled: levelControlsEnabled, help: "Raise the active level (the floor paints build onto). Also PgUp / the Levels panel."},
+	{label: "Lvl -", action: func(s *State) { stepEditLevel(s, -1) }, help: "Lower the active level (the floor paints build onto). Also PgDn / the Levels panel."},
+	{label: "Lvl +", action: func(s *State) { stepEditLevel(s, +1) }, help: "Raise the active level (the floor paints build onto). Also PgUp / the Levels panel."},
 	{label: "Ramp",
 		action:  func(s *State) { s.rampMode = !s.rampMode },
 		active:  func(s *State) bool { return s.rampMode },
@@ -1799,6 +1792,10 @@ func metadataContentHeight(s *State) float32 {
 	s.metadataScroll = save
 	return mr.reachArea.Y + mr.reachArea.Height + 16 - s.rect.metadata.Y
 }
+
+// metadataRowStride is the approximate pixel height of one metadata-panel
+// field row — the wheel-scroll step so one notch moves about one field.
+const metadataRowStride = float32(42)
 
 // ScrollMetadata adjusts the metadata panel's vertical scroll offset by
 // dy pixels (positive = scroll down). Clamps to [0, max] so the bottom
