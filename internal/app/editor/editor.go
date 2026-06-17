@@ -72,6 +72,11 @@ type Brush struct {
 	EnemyKind core.EnemyKind // only meaningful when Entity == entityAddEnemy
 	Hotkey    int32
 	Color     rl.Color
+	// Erase marks the dedicated eraser brush: painting with it runs the
+	// active layer's eraseAt reset instead of stamping Char. Added to every
+	// grid layer's palette at init (right-click no longer erases — it opens
+	// the context menu).
+	Erase bool
 }
 
 type entityKind int
@@ -126,6 +131,15 @@ const (
 var paletteLabels [layerCount][]string
 
 func init() {
+	// Append a dedicated Erase brush to every grid layer (Entities already has
+	// its own entityClear brush). Right-click is reserved for the context menu,
+	// so erasing is a selectable brush — and also lives on the context menu.
+	for l := range layerBrushes {
+		if Layer(l) == LayerEntities {
+			continue
+		}
+		layerBrushes[l] = append(layerBrushes[l], Brush{Name: "Erase", Erase: true, Color: clearBrushColor})
+	}
 	for layer, brushes := range layerBrushes {
 		labels := make([]string, len(brushes))
 		for i, b := range brushes {
@@ -137,16 +151,17 @@ func init() {
 
 var layerBrushes = [layerCount][]Brush{
 	LayerWalls: {
-		// All walls stay in one muted grey FAMILY (built off wallSwatch) so the
-		// editor canvas reads them as uniform structure — but each variant takes
-		// a subtle tint so they're still tellable apart at a glance, not a
-		// rainbow. The palette names carry the precise identity.
-		{Name: "Wall (#)", Char: core.TileRock, Hotkey: rl.KeyOne, Color: wallSwatch},
-		{Name: "Open (.)", Char: '.', Hotkey: rl.KeyTwo, Color: rl.NewColor(180, 168, 140, 255)},
-		{Name: "Rock+Light Ivy (+)", Char: core.TileWallRockIvyLight, Hotkey: rl.KeyThree, Color: tintSwatch(wallSwatch, -8, 6, -10)},
-		{Name: "Rock+Heavy Ivy (=)", Char: core.TileWallRockIvyHeavy, Hotkey: rl.KeyFour, Color: tintSwatch(wallSwatch, -20, 4, -22)},
-		{Name: "Rock Cracked (&)", Char: core.TileWallRockCracked, Hotkey: rl.KeyFive, Color: tintSwatch(wallSwatch, -10, -10, -8)},
-		{Name: "Rock Crumbling ($)", Char: core.TileWallRockCrumbling, Hotkey: rl.KeySix, Color: tintSwatch(wallSwatch, -2, -12, -22)},
+		// Cliff-face SKINS (the layer is "Faces" now — walls are elevation). These
+		// pick the texture a tile's exposed cliff faces use; they don't block. The
+		// default '.' skin is plain rock, so it isn't a palette entry — paint Rock
+		// explicitly or a variant. All stay in one muted grey FAMILY (built off
+		// wallSwatch) with subtle per-variant tints so they read as uniform rock
+		// but stay tellable apart.
+		{Name: "Rock (#)", Char: core.TileRock, Hotkey: rl.KeyOne, Color: wallSwatch},
+		{Name: "Light Ivy (+)", Char: core.TileWallRockIvyLight, Hotkey: rl.KeyTwo, Color: tintSwatch(wallSwatch, -8, 6, -10)},
+		{Name: "Heavy Ivy (=)", Char: core.TileWallRockIvyHeavy, Hotkey: rl.KeyThree, Color: tintSwatch(wallSwatch, -20, 4, -22)},
+		{Name: "Cracked (&)", Char: core.TileWallRockCracked, Hotkey: rl.KeyFour, Color: tintSwatch(wallSwatch, -10, -10, -8)},
+		{Name: "Crumbling ($)", Char: core.TileWallRockCrumbling, Hotkey: rl.KeyFive, Color: tintSwatch(wallSwatch, -2, -12, -22)},
 	},
 	LayerFloor: {
 		{Name: "Auto", Char: core.FloorAuto, Hotkey: rl.KeyOne, Color: floorAutoColor},
@@ -360,7 +375,7 @@ func buildEntityBrushes() []Brush {
 // same lockstep guard the sibling switches in applyTool / eraseAt /
 // activeGrid already panic on at a missing case.
 var layerDisplayNames = [layerCount]string{
-	LayerWalls:     "Walls",
+	LayerWalls:     "Faces",
 	LayerFloor:     "Floor",
 	LayerElevation: "Elevation",
 	LayerDecor:     "Decor",
@@ -1064,6 +1079,8 @@ func freshState(a core.AreaDefinition) State {
 		area:                  a,
 		baseline:              core.CloneArea(a),
 		layer:                 LayerWalls,
+		editLevel:             core.ElevationBaseline,
+		topLevel:              core.ElevationBaseline + 1,
 		brushSize:             1,
 		zoom:                  1,
 		gridCursorX:           -1,
@@ -1091,21 +1108,30 @@ func blankArea(w, h int, floorChar byte) core.AreaDefinition {
 	props := make([]string, h)
 	ceiling := make([]string, h)
 	elevation := make([]string, h)
+	// The walkable interior sits at the baseline; the outer ring is raised one
+	// level to form an enclosing wall (the cliff faces render automatically).
+	// Face skins on the ring are explicit rock; the interior carries the default
+	// skin (only matters once the author carves elevation there).
+	baseChar := core.ElevationChar(core.ElevationBaseline)
+	wallChar := core.ElevationChar(core.ElevationBaseline + 1)
 	for z := 0; z < h; z++ {
 		wb := make([]byte, w)
+		eb := make([]byte, w)
 		for x := 0; x < w; x++ {
 			if x == 0 || z == 0 || x == w-1 || z == h-1 {
 				wb[x] = core.TileRock
+				eb[x] = wallChar
 			} else {
 				wb[x] = core.TileOpen
+				eb[x] = baseChar
 			}
 		}
 		walls[z] = string(wb)
+		elevation[z] = string(eb)
 		floor[z] = blankRow(w, floorChar)
 		decor[z] = blankRow(w, core.DecorAuto)
 		props[z] = blankRow(w, core.TilePropEmpty)
 		ceiling[z] = blankRow(w, core.TileCeilingOpen)
-		elevation[z] = blankRow(w, core.ElevationGround)
 	}
 	return core.AreaDefinition{
 		Name:         "Untitled",

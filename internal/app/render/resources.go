@@ -69,12 +69,12 @@ type Resources struct {
 	// across materials.
 	specialFloors map[byte]rl.Model
 
-	// Wall variants — keyed by their walls-layer char (ivy / cracked /
-	// crumbling). Each is a full-height tile cube with its own rock-based skin,
-	// drawn in place of the area material's wallModel for that cell. Plain
-	// TileRock is NOT here — it uses the material wall so a dungeon vs field
-	// wall still differs. Built once, shared across materials; Unload walks it.
-	wallVariants map[byte]rl.Model
+	// Face variants — keyed by their face-layer skin char (ivy / cracked /
+	// crumbling). Each is a vertical cliff-face quad with its own rock-based
+	// skin, drawn in place of the area material's faceModel for that cell. Plain
+	// TileRock is NOT here — it uses the material face so a dungeon vs field
+	// cliff still differs. Built once, shared across materials; Unload walks it.
+	faceVariants map[byte]rl.Model
 
 	// rampModel is the solid wedge (triangular prism) drawn for ramp floor
 	// tiles — built once, earth-textured, drawn yaw-rotated per ascent
@@ -118,7 +118,7 @@ type Resources struct {
 type worldMaterialResources struct {
 	// Each model owns its own diffuse texture via its material. Unload via
 	// rl.UnloadModel only — don't keep separate texture handles.
-	wallModel    rl.Model
+	faceModel    rl.Model // per-material plain-rock cliff-face quad (dungeon brick vs field rock)
 	floorModel   rl.Model
 	ceilingModel rl.Model // thin slab textured with the wall pixels, drawn over ceiling-flagged tiles
 	// Optional secondary floor variants for the field (dirt + dark grass).
@@ -284,17 +284,16 @@ func LoadResources() (r Resources) {
 	r.specialFloors[core.FloorDirt] = loadFloorModel(makeDirtPixels(128, 128), r.lighting.shader)
 	r.specialFloors[core.FloorDarkGrass] = loadFloorModel(makeDarkGrassPixels(128, 128), r.lighting.shader)
 	r.specialFloors[core.FloorStone] = loadFloorModel(makeStoneFloorPixels(128, 128), r.lighting.shader)
-	// Wall variants — full-height cubes with per-char rock skins (ivy /
-	// cracked / crumbling), shared across material sets like specialFloors.
+	// Face variants — vertical cliff-face quads with per-char rock skins (ivy /
+	// cracked / crumbling), shared across material sets like specialFloors. The
+	// cracked / crumbling variants are now flat quads carrying their damaged
+	// TEXTURE (the old deformed-cube geometry is gone with the wall cubes).
 	// Initialize first so a panic mid-way still unloads what landed.
-	r.wallVariants = make(map[byte]rl.Model)
-	r.wallVariants[core.TileWallRockIvyLight] = loadTileModel(makeRockIvyPixels(128, 128, false), core.WallHeight, r.lighting.shader)
-	r.wallVariants[core.TileWallRockIvyHeavy] = loadTileModel(makeRockIvyPixels(128, 128, true), core.WallHeight, r.lighting.shader)
-	// Cracked: a SLIGHT surface deform; crumbling: a heavier one (jagged top +
-	// deeper inward pitting). Textures stay subtle — the geometry carries the
-	// damaged read.
-	r.wallVariants[core.TileWallRockCracked] = buildDeformedWallModel(makeRockCrackedPixels(128, 128), 0.18, 0.06, r.lighting.shader)
-	r.wallVariants[core.TileWallRockCrumbling] = buildDeformedWallModel(makeRockCrumblingPixels(128, 128), 0.70, 0.22, r.lighting.shader)
+	r.faceVariants = make(map[byte]rl.Model)
+	r.faceVariants[core.TileWallRockIvyLight] = buildFaceQuadModel(makeRockIvyPixels(128, 128, false), r.lighting.shader)
+	r.faceVariants[core.TileWallRockIvyHeavy] = buildFaceQuadModel(makeRockIvyPixels(128, 128, true), r.lighting.shader)
+	r.faceVariants[core.TileWallRockCracked] = buildFaceQuadModel(makeRockCrackedPixels(128, 128), r.lighting.shader)
+	r.faceVariants[core.TileWallRockCrumbling] = buildFaceQuadModel(makeRockCrumblingPixels(128, 128), r.lighting.shader)
 
 	// Earth-textured solid ramp wedge, shared by every ramp floor tile.
 	r.rampModel = buildRampWedgeModel(makeDirtPixels(128, 128), r.lighting.shader)
@@ -625,7 +624,7 @@ func (r Resources) Unload() {
 	// UnloadTexture'd explicitly — and any texture aliased across models (see
 	// the enemyTextures dedup note below) de-duped first to avoid a double-free.
 	for _, material := range r.materials {
-		rl.UnloadModel(material.wallModel)
+		rl.UnloadModel(material.faceModel)
 		rl.UnloadModel(material.floorModel)
 		rl.UnloadModel(material.ceilingModel)
 		// Unconditional, NOT gated on hasFloorVariant: UnloadModel on a
@@ -674,7 +673,7 @@ func (r Resources) Unload() {
 	for _, model := range r.specialFloors {
 		rl.UnloadModel(model)
 	}
-	for _, model := range r.wallVariants {
+	for _, model := range r.faceVariants {
 		rl.UnloadModel(model)
 	}
 	for _, p := range r.decorModels {
@@ -796,135 +795,42 @@ func buildRampWedgeModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
 	return model
 }
 
-// deformedWallPins keeps deformed-wall mesh arrays alive for the process
-// lifetime (same rationale as rampWedgePins).
-var deformedWallPins [][]float32
+// facePins keeps every cliff-face quad's CPU-side mesh arrays alive for the
+// process lifetime (same rationale as rampWedgePins).
+var facePins [][]float32
 
-// buildDeformedWallModel builds a full-height wall cube whose surface is
-// physically deformed, for the cracked / crumbling variants. Two dials:
-//   - jag: how far the TOP edge dips per-column (a continuous function of world
-//     x,z so the silhouette reads as broken/uneven, not a clean rectangle).
-//   - dent: how far the side FACES push inward at their interior (worn,
-//     pitted stone). The 12 cube edges/corners and the y=0 base stay put, so
-//     adjacent faces share their seam vertices exactly (no gaps / depth holes)
-//     and the tile still fills its footprint and blocks like any wall.
-//
-// Cracked passes small values (subtle), crumbling larger ones (clearly broken).
-// Flat per-triangle normals give the faceted, chiselled-stone look the lighting
-// shader then shades. The texture maps 0..1 across each face like the plain cube.
-func buildDeformedWallModel(pixels []color.RGBA, jag, dent float32, shader rl.Shader) rl.Model {
+// buildFaceQuadModel builds ONE vertical cliff-face quad sized to a tile edge —
+// TileSize wide, LevelStep tall — sitting on the +Z (south) edge of the tile in
+// model space (x∈[-half,half], y∈[0,LevelStep], z=+half), its normal facing +Z
+// (outward, toward the lower neighbour). drawCliffFace translates it to a tile,
+// yaw-rotates it to the dropping edge, and scales Y by the level delta so one
+// model skins every cliff regardless of height. The texture maps 0..1 over one
+// LevelStep, so a multi-level face stretches it vertically (acceptable for
+// rock; revisit with tiled UVs if a cleaner repeat is wanted).
+func buildFaceQuadModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
 	const half = float32(core.TileSize) / 2
-	const seg = 9    // horizontal subdivisions per face
-	const segV = 6   // vertical subdivisions per side face
-	H := float32(core.WallHeight)
-	center := rl.NewVector3(0, H*0.32, 0)
+	H := core.LevelStep
+	// CCW as seen from +Z (the outward/viewer side) so the front face survives
+	// raylib's default back-face cull.
+	bl := rl.NewVector3(-half, 0, half)
+	br := rl.NewVector3(half, 0, half)
+	tr := rl.NewVector3(half, H, half)
+	tl := rl.NewVector3(-half, H, half)
 
-	// topH: jagged top height at a world (x,z), continuous so shared seam
-	// vertices on neighboring faces agree. Clamped so a column never drops below
-	// 62% height — still unmistakably a wall.
-	topH := func(x, z float32) float32 {
-		n := fbmNoise(float64(x)*1.7+13, float64(z)*1.7-21, 0.9, 3) // ~[-1,1]
-		hh := H - jag*float32(0.5+0.5*n)
-		if min := H * 0.62; hh < min {
-			hh = min
-		}
-		return hh
+	verts := []float32{
+		bl.X, bl.Y, bl.Z, br.X, br.Y, br.Z, tr.X, tr.Y, tr.Z, // tri 1
+		bl.X, bl.Y, bl.Z, tr.X, tr.Y, tr.Z, tl.X, tl.Y, tl.Z, // tri 2
 	}
-	// inwardDent: how far an interior side vertex pulls toward the tile center,
-	// zero on the face's edge rows/columns so seams stay welded.
-	inwardDent := func(x, y, z float32) float32 {
-		n := fbmNoise(float64(x)*2.3+float64(z)*2.3+5, float64(y)*2.3+3, 0.8, 3)
-		d := dent * float32(0.5+0.5*n)
-		if d < 0 {
-			d = 0
-		}
-		return d
+	normals := make([]float32, 0, len(verts))
+	for i := 0; i < 6; i++ {
+		normals = append(normals, 0, 0, 1) // +Z outward
+	}
+	uvs := []float32{
+		0, 1, 1, 1, 1, 0, // bl, br, tr
+		0, 1, 1, 0, 0, 0, // bl, tr, tl
 	}
 
-	var verts, normals, uvs []float32
-	addTri := func(a, b, c rl.Vector3, ua, ub, uc rl.Vector2) {
-		n := triNormal(a, b, c)
-		mid := rl.NewVector3((a.X+b.X+c.X)/3, (a.Y+b.Y+c.Y)/3, (a.Z+b.Z+c.Z)/3)
-		uvA, uvB, uvC := ua, ub, uc
-		if n.X*(mid.X-center.X)+n.Y*(mid.Y-center.Y)+n.Z*(mid.Z-center.Z) < 0 {
-			b, c = c, b
-			uvB, uvC = uvC, uvB
-			n = triNormal(a, b, c)
-		}
-		verts = append(verts, a.X, a.Y, a.Z, b.X, b.Y, b.Z, c.X, c.Y, c.Z)
-		for i := 0; i < 3; i++ {
-			normals = append(normals, n.X, n.Y, n.Z)
-		}
-		uvs = append(uvs, uvA.X, uvA.Y, uvB.X, uvB.Y, uvC.X, uvC.Y)
-	}
-	addQuad := func(a, b, c, d rl.Vector3, ua, ub, uc, ud rl.Vector2) {
-		addTri(a, b, c, ua, ub, uc)
-		addTri(a, c, d, ua, uc, ud)
-	}
-
-	// sideVert computes one side-face vertex. `fixed` is the constant ±half on
-	// the face's normal axis; `varies` walks the other horizontal axis; isX tells
-	// which axis is fixed. i,j index the grid (0..seg, 0..segV).
-	sideVert := func(fixedAxisIsX bool, fixedSign float32, i, j int) rl.Vector3 {
-		hpos := -half + float32(i)/seg*float32(core.TileSize)
-		var x, z float32
-		if fixedAxisIsX {
-			x, z = fixedSign*half, hpos
-		} else {
-			x, z = hpos, fixedSign*half
-		}
-		col := topH(x, z)
-		y := float32(j) / segV * col
-		// Dent interior vertices inward (skip edge rows/cols so seams weld).
-		if i > 0 && i < seg && j > 0 && j < segV {
-			d := inwardDent(x, y, z)
-			if fixedAxisIsX {
-				x -= fixedSign * d
-			} else {
-				z -= fixedSign * d
-			}
-		}
-		return rl.NewVector3(x, y, z)
-	}
-	uvAt := func(i, j int) rl.Vector2 {
-		return rl.NewVector2(float32(i)/seg, 1-float32(j)/segV)
-	}
-	addSide := func(fixedAxisIsX bool, fixedSign float32) {
-		for i := 0; i < seg; i++ {
-			for j := 0; j < segV; j++ {
-				a := sideVert(fixedAxisIsX, fixedSign, i, j)
-				b := sideVert(fixedAxisIsX, fixedSign, i+1, j)
-				c := sideVert(fixedAxisIsX, fixedSign, i+1, j+1)
-				d := sideVert(fixedAxisIsX, fixedSign, i, j+1)
-				addQuad(a, b, c, d, uvAt(i, j), uvAt(i+1, j), uvAt(i+1, j+1), uvAt(i, j+1))
-			}
-		}
-	}
-	addSide(true, 1)
-	addSide(true, -1)
-	addSide(false, 1)
-	addSide(false, -1)
-
-	// Top face: grid at the jagged height, perimeter matches the side tops.
-	topVert := func(i, j int) rl.Vector3 {
-		x := -half + float32(i)/seg*float32(core.TileSize)
-		z := -half + float32(j)/seg*float32(core.TileSize)
-		return rl.NewVector3(x, topH(x, z), z)
-	}
-	for i := 0; i < seg; i++ {
-		for j := 0; j < seg; j++ {
-			a, b, c, d := topVert(i, j), topVert(i+1, j), topVert(i+1, j+1), topVert(i, j+1)
-			addQuad(a, b, c, d, uvAt2(i, j, seg), uvAt2(i+1, j, seg), uvAt2(i+1, j+1, seg), uvAt2(i, j+1, seg))
-		}
-	}
-	// Bottom face (flat, unseen but kept solid so no light leaks underneath).
-	bl := rl.NewVector3(-half, 0, -half)
-	br := rl.NewVector3(half, 0, -half)
-	fr := rl.NewVector3(half, 0, half)
-	fl := rl.NewVector3(-half, 0, half)
-	addQuad(bl, br, fr, fl, rl.NewVector2(0, 0), rl.NewVector2(1, 0), rl.NewVector2(1, 1), rl.NewVector2(0, 1))
-
-	deformedWallPins = append(deformedWallPins, verts, normals, uvs)
+	facePins = append(facePins, verts, normals, uvs)
 	mesh := rl.Mesh{
 		VertexCount:   int32(len(verts) / 3),
 		TriangleCount: int32(len(verts) / 9),
@@ -937,11 +843,6 @@ func buildDeformedWallModel(pixels []color.RGBA, jag, dent float32, shader rl.Sh
 	setModelTexture(&model, loadTiledTexture(pixels))
 	attachShader(&model, shader)
 	return model
-}
-
-// uvAt2 is the square-grid UV (segments equal on both axes) for the top face.
-func uvAt2(i, j, seg int) rl.Vector2 {
-	return rl.NewVector2(float32(i)/float32(seg), float32(j)/float32(seg))
 }
 
 // loadGroundShadowModel builds the soft contact-shadow plane: a 1×1
@@ -963,12 +864,12 @@ func loadGroundShadowModel() rl.Model {
 
 func loadWorldMaterial(wallPixels, floorPixels []color.RGBA, shader rl.Shader) worldMaterialResources {
 	return worldMaterialResources{
-		wallModel:  loadTileModel(wallPixels, core.WallHeight, shader),
+		faceModel:  buildFaceQuadModel(wallPixels, shader),
 		floorModel: loadFloorModel(floorPixels, shader),
 		// Ceiling reuses the wall texture but at a thin (0.2) slab height
 		// so its bottom face shows beneath the player while the top sits
-		// just above WallHeight. Same shader so the lighting profile and
-		// time-of-day uniforms apply consistently with walls and floors.
+		// one level up. Same shader so the lighting profile and time-of-day
+		// uniforms apply consistently with faces and floors.
 		ceilingModel: loadTileModel(wallPixels, 0.2, shader),
 	}
 }

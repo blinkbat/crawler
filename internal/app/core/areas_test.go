@@ -214,11 +214,14 @@ func TestCrystalAuthoringAndValidation(t *testing.T) {
 		t.Fatalf("a legacy map should fall back to one entrance crystal, got %+v", got)
 	}
 
-	// A crystal on a wall tile is rejected at load.
-	onWall := base()
-	onWall.CrystalsDefined = true
-	onWall.Crystals = []mapfile.MapCrystal{{X: 0, Z: 0}} // corner is '#'
-	if _, err := AreaFromMapFile(onWall, "maps/c.map"); err == nil {
+	// A crystal on a blocked tile is rejected at load. Walls are gone (the
+	// faces layer no longer blocks), so block with deep water — the sole
+	// blocking floor — at (0,0) and try to place a crystal there.
+	onBlocked := base()
+	onBlocked.Floor = []string{"W..", "...", "..."} // 'W' deep water blocks
+	onBlocked.CrystalsDefined = true
+	onBlocked.Crystals = []mapfile.MapCrystal{{X: 0, Z: 0}}
+	if _, err := AreaFromMapFile(onBlocked, "maps/c.map"); err == nil {
 		t.Fatal("expected error for crystal on a blocked tile, got nil")
 	}
 

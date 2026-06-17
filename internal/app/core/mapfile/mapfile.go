@@ -7,9 +7,11 @@
 //
 // Layer character conventions:
 //
-//	walls  : '.' open, '#' wall, '+' rock+light ivy, '=' rock+heavy ivy,
-//	         '&' rock cracked, '$' rock crumbling (all variants still block;
-//	         they only change the wall's skin)
+//	walls  : per-tile CLIFF-FACE SKIN (legacy section name). These no longer
+//	         block — a wall is the rendered vertical face of an elevation step.
+//	         '.' default (plain rock) skin, '#' explicit rock, '+' rock+light
+//	         ivy, '=' rock+heavy ivy, '&' rock cracked, '$' rock crumbling. The
+//	         skin only shows where the tile's elevation exposes a face.
 //	floor  : '.' auto-variant (per-tile hash), 'g' grass, 'd' dirt,
 //	         'k' dark grass, 's' stone, 'c' cobblestone path, 'w' planks,
 //	         '~' shallow water, 'W' deep water (blocks), 'n' sand, 'i' snow,
@@ -32,10 +34,14 @@
 //	         of the 2×2). All blocking; the anchor's mesh covers the
 //	         whole footprint and tails render nothing.
 //	ceiling  : '.' open (sky shows through), '#' solid overhead slab.
-//	elevation: per-tile ground LEVEL — '0'..'9' for 0..9 then 'A'..'Z' for
-//	         10..35 (base-36, one char per cell; blank/absent ⇒ '0'). A ramp
+//	elevation: per-tile ground LEVEL — '0'..'9' for 0..9 then 'A'..'K' for
+//	         10..20 (base-36, one char per cell; blank/absent ⇒ '0'). The world
+//	         is built entirely from elevation: the walkable baseline sits at
+//	         level 10, walls/cliffs rise above it and pits drop below. A ramp
 //	         floor tile stores its LOW level here; it rises one level toward
-//	         its arrow. Optional layer — older maps load as all-'0' (flat).
+//	         its arrow. Any unramped level change between adjacent tiles is an
+//	         impassable cliff (and renders a face). Optional layer — pre-
+//	         elevation maps load as all-'0' (flat).
 package mapfile
 
 import (

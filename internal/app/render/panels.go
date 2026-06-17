@@ -1559,6 +1559,14 @@ func visitedAt(g *core.GameState, x, z int) bool {
 // Single source so the two map surfaces can't drift on what lifts the fog.
 func mapCellFillColor(m core.AreaDefinition, g *core.GameState, x, z int) rl.Color {
 	if m.InBounds(x, z) && visitedAt(g, x, z) {
+		// Walls are elevation now: a tile raised above the walkable baseline
+		// reads as a wall/cliff on the map (matches the editor overview).
+		if m.ElevationLevelAt(x, z) > core.ElevationBaseline {
+			if core.MaterialIsIndoor(m.Materials) {
+				return minimapWallIndoor
+			}
+			return minimapWallOutdoor
+		}
 		return minimapTileColor(m.Materials, m.TileAt(x, z))
 	}
 	return mapTileFogColor

@@ -19,29 +19,32 @@ func TileCoord(x, z int) string {
 // Tile characters. Grouped by the layer that owns them. The .map on-disk
 // format uses these literal bytes; the editor's brush palettes paint them.
 
-// Walls layer. TileOpen marks an open cell; TileRock is a wall blocker.
-// Both exported so callers don't have to open-code '.' / '#' against the
-// walls grid.
+// Face-skin layer (legacy on-disk name "walls"). These chars NO LONGER block
+// movement — a wall is now the rendered vertical FACE of an elevation step
+// (see StepElevationOK + the renderer's cliff faces). This layer only selects
+// which texture skins a tile's exposed cliff faces: TileOpen is the blank
+// default (plain rock), TileRock is explicit rock, and the variants swap the
+// rock skin for ivy / cracked / crumbling. Authored from the editor's Faces
+// palette; legacy maps' wall chars load straight in as skins, and their old
+// solid tiles are migrated up one elevation level so they still read as walls.
+// Chars are symbols free on every grid layer (no cross-layer overlap to
+// register).
 const (
-	TileOpen = '.' // open cell (walkable)
-	TileRock = '#' // wall blocker
-	// Wall VARIANTS — all block movement exactly like TileRock; they differ
-	// only in how the renderer skins the wall cube (a per-tile rock-wall look
-	// independent of the area material). IsWallChar treats every entry here as
-	// a wall, so WallAt / BlockedAt / TileTypeAt all honor them automatically.
-	// Authored from the editor's Walls palette. Chars are symbols free on every
-	// grid layer (no cross-layer overlap to register).
-	TileWallRockIvyLight  = '+' // rock wall with sparse green ivy
-	TileWallRockIvyHeavy  = '=' // rock wall blanketed in ivy
-	TileWallRockCracked   = '&' // rock wall fractured with cracks (still solid)
-	TileWallRockCrumbling = '$' // rock wall in heavy disrepair (still solid)
+	TileOpen = '.' // blank cell — default (plain rock) cliff-face skin
+	TileRock = '#' // explicit plain-rock cliff-face skin
+	// Face-skin VARIANTS — purely cosmetic, change only how a tile's cliff
+	// faces are textured. IsFaceSkinChar treats every entry here as a known
+	// skin. Authored from the editor's Faces palette.
+	TileWallRockIvyLight  = '+' // rock face with sparse green ivy
+	TileWallRockIvyHeavy  = '=' // rock face blanketed in ivy
+	TileWallRockCracked   = '&' // rock face fractured with cracks
+	TileWallRockCrumbling = '$' // rock face in heavy disrepair
 )
 
-// wallTileCharList is the canonical roster of walls-layer blocker chars — the
-// plain rock plus every variant. IsWallChar reads the set built from it, so
-// adding a wall variant is one row here (plus its render/editor/label wiring),
-// not a hand-edited condition at each of WallAt / BlockedAt / TileTypeAt.
-var wallTileCharList = []byte{
+// faceSkinCharList is the canonical roster of explicit face-skin chars — the
+// plain rock plus every variant. IsFaceSkinChar reads the set built from it,
+// so adding a skin is one row here (plus its render/editor/label wiring).
+var faceSkinCharList = []byte{
 	TileRock,
 	TileWallRockIvyLight,
 	TileWallRockIvyHeavy,
@@ -49,17 +52,18 @@ var wallTileCharList = []byte{
 	TileWallRockCrumbling,
 }
 
-var wallTileCharSet = func() (set [256]bool) {
-	for _, c := range wallTileCharList {
+var faceSkinCharSet = func() (set [256]bool) {
+	for _, c := range faceSkinCharList {
 		set[c] = true
 	}
 	return
 }()
 
-// IsWallChar reports whether a walls-layer byte is a blocking wall (plain rock
-// or any variant). The single source the wall predicates share so a new
-// variant can't be a wall in one check but walkable in another.
-func IsWallChar(c byte) bool { return wallTileCharSet[c] }
+// IsFaceSkinChar reports whether a face-layer byte is an explicit cliff-face
+// skin (plain rock or a variant). The blank TileOpen is NOT a member — it reads
+// as the default rock skin via FaceSkinAt. Single source so a new skin can't be
+// recognized in one check but not another.
+func IsFaceSkinChar(c byte) bool { return faceSkinCharSet[c] }
 
 // Ceiling layer. Parallel grid to walls; chars share the wall convention
 // since both layers describe the same "solid block?" yes/no question (a
@@ -384,15 +388,35 @@ func (a AreaDefinition) FloorCharAt(x, z int) (byte, bool) { return a.layerByteA
 func (a AreaDefinition) DecorCharAt(x, z int) (byte, bool) { return a.layerByteAt(a.Decor, x, z) }
 func (a AreaDefinition) PropCharAt(x, z int) (byte, bool)  { return a.layerByteAt(a.Props, x, z) }
 
+// WallAt reports whether the cell is a SOLID obstruction — off-map, a blocking
+// prop, or a blocking floor (deep water). Walls-as-tiles are gone; lateral
+// barriers now come from elevation steps (StepElevationOK), which this does NOT
+// consider. Kept for the few callers that mean "is there a solid thing here"
+// (prop/door auto-facing, the debug overlay, editor footprint guards). Out-of-
+// bounds reads as solid so callers don't have to range-check first.
 func (a AreaDefinition) WallAt(x, z int) bool {
 	if !a.InBounds(x, z) {
 		return true
 	}
-	c, ok := a.layerByteAt(a.Walls, x, z)
-	if !ok {
-		return true // ragged / short walls layer reads as solid
+	if p, ok := a.layerByteAt(a.Props, x, z); ok && IsPropChar(p) && !PropIsNonBlocking(p) {
+		return true
 	}
-	return IsWallChar(c)
+	if f, ok := a.layerByteAt(a.Floor, x, z); ok && IsBlockingFloor(f) {
+		return true
+	}
+	return false
+}
+
+// FaceSkinAt returns the cliff-face skin char for tile (x,z) — the texture the
+// renderer paints on any vertical face this tile exposes where it sits higher
+// than a neighbour (or the map edge). Blank / TileOpen / out-of-bounds default
+// to TileRock (plain rock). Authored from the editor's Faces palette.
+func (a AreaDefinition) FaceSkinAt(x, z int) byte {
+	c, ok := a.layerByteAt(a.Walls, x, z)
+	if !ok || c == TileOpen {
+		return TileRock
+	}
+	return c
 }
 
 // CeilingAt reports whether the cell has a solid ceiling slab. Out-of-
@@ -418,12 +442,20 @@ func (a AreaDefinition) ElevationLevelAt(x, z int) int {
 	return ElevationLevelFromChar(c)
 }
 
-// MaxElevationLevel is the highest addressable ground level. Levels 0..9 use the
-// digits '0'..'9'; 10..35 extend into 'A'..'Z'. Keeping ONE char per elevation
-// cell (base-36) lets a map stack 36 floors without a multi-char cell format —
-// which would have to special-case elevation in every grid operation that
-// assumes 1 char = 1 cell (resize, copy/paste, cell-write, snapshot compare).
-const MaxElevationLevel = 35
+// Elevation range. The whole world is now built from elevation: walls rise
+// above the baseline, holes/pits drop below it. ElevationBaseline is where the
+// default walkable floor sits, giving authors headroom in BOTH directions
+// (raise for walls/cliffs, lower for pits). New maps fill their elevation layer
+// at the baseline; the editor's height selector opens there.
+//
+// MaxElevationLevel is the highest addressable ground level. Levels 0..9 use
+// the digits '0'..'9'; 10..20 extend into 'A'..'K' (base-36 encoding, one char
+// per cell — see ElevationChar). The single char keeps every grid operation
+// (resize, copy/paste, cell-write, snapshot compare) at 1 char = 1 cell.
+const (
+	ElevationBaseline = 10
+	MaxElevationLevel = 20
+)
 
 // ElevationLevelFromChar decodes an elevation cell byte to a level: '0'..'9' →
 // 0..9, 'A'..'Z' → 10..35. Anything else (blank, stray char) reads as flat
@@ -517,6 +549,12 @@ func (a AreaDefinition) StandGroundY(x, z int) float32 {
 	return level * LevelStep
 }
 
+// EdgeLevel is the exported wrapper over edgeLevel — the elevation level at
+// tile (x,z)'s edge facing `dir`, ok=false for no walkable edge (off-map or a
+// ramp's sheer perpendicular side). The renderer's cliff-face pass uses it so
+// faces line up with the same edges StepElevationOK gates movement on.
+func (a AreaDefinition) EdgeLevel(x, z, dir int) (int, bool) { return a.edgeLevel(x, z, dir) }
+
 // edgeLevel returns the elevation level at tile (x,z)'s edge facing `dir`, and
 // ok=false when there's no walkable edge there. A flat tile presents its level
 // on all four edges. A ramp presents its HIGH level (low+1) on the edge it
@@ -555,18 +593,13 @@ func (a AreaDefinition) StepElevationOK(fromX, fromZ, dir int) bool {
 }
 
 // TileAt returns a "compositing" character for code that just wants to
-// know what's most-significantly at a cell — walls win over props win
-// over deep water win over open. Used by the minimap and any callers
-// that haven't switched to explicit per-layer queries yet.
+// know what's most-significantly at a cell — props win over deep water win
+// over open. Used by the minimap and any callers that haven't switched to
+// explicit per-layer queries yet. (Walls are gone; barriers are elevation,
+// which the minimap reads separately via ElevationLevelAt.)
 func (a AreaDefinition) TileAt(x, z int) byte {
 	if !a.InBounds(x, z) {
-		return TileRock
-	}
-	if w, ok := a.layerByteAt(a.Walls, x, z); !ok || IsWallChar(w) {
-		// Normalize every wall variant (ivy / cracked / crumbling) to plain
-		// TileRock here so the minimap and other TileAt consumers treat all
-		// walls uniformly — no per-variant case to add, no walkable fall-through.
-		return TileRock
+		return TileOpen
 	}
 	if p, ok := a.layerByteAt(a.Props, x, z); ok && IsPropChar(p) {
 		return p
@@ -577,12 +610,11 @@ func (a AreaDefinition) TileAt(x, z int) byte {
 	return TileOpen
 }
 
-// BlockedAt reports whether movement into this cell is impossible.
-// Either the walls layer has a wall, or the props layer holds a blocker.
-// Out-of-bounds reads as blocked (matches WallAt's convention) so callers
-// don't have to range-check first — note this means FloorAt(OOB) is false,
-// not "the cell is open but past the map." A caller that needs to
-// distinguish "off-map" from "blocked-on-map" should InBounds() first.
+// BlockedAt reports whether a tile is impossible to STAND on — a blocking prop
+// or a blocking floor (deep water). It does NOT consider elevation: a raised
+// tile is perfectly standable, you just can't STEP onto it across a cliff
+// without a ramp (that lateral rule lives in StepElevationOK). Out-of-bounds
+// reads as blocked so callers don't have to range-check first.
 //
 // Runtime blockers like chests sit on a separate slice (GameState.Chests)
 // and are NOT considered here — explore.go layers a ChestAt check on
@@ -592,9 +624,6 @@ func (a AreaDefinition) TileAt(x, z int) byte {
 func (a AreaDefinition) BlockedAt(x, z int) bool {
 	if !a.InBounds(x, z) {
 		return true
-	}
-	if w, ok := a.layerByteAt(a.Walls, x, z); !ok || IsWallChar(w) {
-		return true // ragged / short walls layer reads as blocked
 	}
 	if p, ok := a.layerByteAt(a.Props, x, z); ok && IsPropChar(p) && !PropIsNonBlocking(p) {
 		return true
@@ -1119,12 +1148,12 @@ const (
 // label now panics at startup instead of returning "?" silently.
 var tileLabelTable = map[TileLayer]map[byte]string{
 	TileLayerWalls: {
-		TileOpen:              "",
-		TileRock:              "Wall",
-		TileWallRockIvyLight:  "Wall (Light Ivy)",
-		TileWallRockIvyHeavy:  "Wall (Heavy Ivy)",
-		TileWallRockCracked:   "Wall (Cracked)",
-		TileWallRockCrumbling: "Wall (Crumbling)",
+		TileOpen:              "", // default rock skin — nothing to call out
+		TileRock:              "Rock Face",
+		TileWallRockIvyLight:  "Face (Light Ivy)",
+		TileWallRockIvyHeavy:  "Face (Heavy Ivy)",
+		TileWallRockCracked:   "Face (Cracked)",
+		TileWallRockCrumbling: "Face (Crumbling)",
 	},
 	TileLayerFloor: {
 		FloorAuto:      "",

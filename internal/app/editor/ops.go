@@ -64,9 +64,15 @@ func applyTool(s *State, x, z int) {
 	// it so the stroke is actually visible. Idempotent; cheap per cell.
 	s.layerHidden[s.layer] = false
 	brush := s.activeBrush()
+	if brush.Erase {
+		// The dedicated eraser brush runs the active layer's reset (same as the
+		// context-menu "Erase here"); right-click is the context menu now.
+		eraseAt(s, x, z)
+		return
+	}
 	switch s.layer {
 	case LayerWalls:
-		applyWallBrush(s, x, z, brush.Char)
+		applyFaceBrush(s, x, z, brush.Char)
 	case LayerFloor:
 		setLayerCell(&s.area.Floor, x, z, brush.Char)
 	case LayerDecor:
@@ -125,19 +131,12 @@ func stampActiveLevel(s *State, x, z int) {
 	setLayerCell(&s.area.Elevation, x, z, core.ElevationChar(s.editLevel))
 }
 
-func applyWallBrush(s *State, x, z int, c byte) {
-	turningWall := c == core.TileRock
-	if turningWall && s.area.StartTileX == x && s.area.StartTileZ == z {
-		s.flash("Move the player start before walling its tile")
-		return
-	}
+// applyFaceBrush sets the tile's cliff-face skin (the layer formerly known as
+// walls). Purely cosmetic — unlike the old wall brush it does NOT block or
+// clear props/decor/entities: a raised tile keeps its floor and scenery, and
+// the skin only shows where the tile's elevation exposes a face.
+func applyFaceBrush(s *State, x, z int, c byte) {
 	setLayerCell(&s.area.Walls, x, z, c)
-	if turningWall {
-		// Walls and props/decor/entities can't co-exist — wall wins.
-		setLayerCell(&s.area.Props, x, z, core.TilePropEmpty)
-		setLayerCell(&s.area.Decor, x, z, core.DecorAuto)
-		removeAllEntitiesAt(&s.area, x, z)
-	}
 }
 
 func applyDecorBrush(s *State, x, z int, c byte) {
@@ -632,9 +631,10 @@ func eraseAt(s *State, x, z int) {
 	case LayerCeiling:
 		setLayerCell(&s.area.Ceiling, x, z, core.TileCeilingOpen)
 	case LayerElevation:
-		// Reset the cell to ground level; if it carried a ramp, clear that
-		// too (a ramp with no step is meaningless).
-		setLayerCell(&s.area.Elevation, x, z, core.ElevationGround)
+		// Reset the cell to the walkable baseline (level 0 is now a deep pit, not
+		// "flat"); if it carried a ramp, clear that too (a ramp with no step is
+		// meaningless).
+		setLayerCell(&s.area.Elevation, x, z, core.ElevationChar(core.ElevationBaseline))
 		if _, ok := s.area.RampAt(x, z); ok {
 			setLayerCell(&s.area.Floor, x, z, core.FloorAuto)
 		}
@@ -917,7 +917,7 @@ func resize(s *State, w, h int) {
 	s.area.Decor = resizeLayer(s.area.Decor, s.area.Width, s.area.Height, w, h, core.DecorAuto)
 	s.area.Props = resizeLayer(s.area.Props, s.area.Width, s.area.Height, w, h, core.TilePropEmpty)
 	s.area.Ceiling = resizeLayer(s.area.Ceiling, s.area.Width, s.area.Height, w, h, core.TileCeilingOpen)
-	s.area.Elevation = resizeLayer(s.area.Elevation, s.area.Width, s.area.Height, w, h, core.ElevationGround)
+	s.area.Elevation = resizeLayer(s.area.Elevation, s.area.Width, s.area.Height, w, h, core.ElevationChar(core.ElevationBaseline))
 	s.area.Width = w
 	s.area.Height = h
 	clearSelection(s) // bounds changed — a stale marquee could outline off-grid
@@ -993,20 +993,39 @@ func removeChestSpawnsOutside(spawns []core.ChestSpawn, w, h int) []core.ChestSp
 	return removeSpawnsWhere(spawns, func(x, z int) bool { return x >= w || z >= h })
 }
 
-// sealWallBorder stamps TileRock around the outer ring of the walls layer,
-// leaving the interior untouched. Called after resize so a grown/shrunk map
-// always carries a complete outer wall ring — resizeLayer fills new wall
-// cells with plain TileOpen, which would otherwise leave the new edge
-// walkable to the boundary. Matches blankArea's perimeter rule.
+// sealWallBorder raises the outer ring one level above the walkable baseline
+// (an enclosing wall — the cliff faces render automatically) and gives it an
+// explicit rock face skin, leaving the interior untouched. Called after resize
+// so a grown/shrunk map always carries a complete outer wall. Matches
+// blankArea's perimeter rule. Walls are elevation now, so this stamps the
+// Elevation layer (+ the Faces layer's rock skin), not a solid wall char.
 func sealWallBorder(a *core.AreaDefinition) {
-	for z := 0; z < a.Height && z < len(a.Walls); z++ {
-		row := []byte(a.Walls[z])
-		for x := 0; x < a.Width && x < len(row); x++ {
-			if x == 0 || z == 0 || x == a.Width-1 || z == a.Height-1 {
-				row[x] = core.TileRock
+	wallChar := core.ElevationChar(core.ElevationBaseline + 1)
+	for z := 0; z < a.Height; z++ {
+		var faceRow, elevRow []byte
+		if z < len(a.Walls) {
+			faceRow = []byte(a.Walls[z])
+		}
+		if z < len(a.Elevation) {
+			elevRow = []byte(a.Elevation[z])
+		}
+		for x := 0; x < a.Width; x++ {
+			if x != 0 && z != 0 && x != a.Width-1 && z != a.Height-1 {
+				continue
+			}
+			if x < len(faceRow) {
+				faceRow[x] = core.TileRock
+			}
+			if x < len(elevRow) {
+				elevRow[x] = wallChar
 			}
 		}
-		a.Walls[z] = string(row)
+		if faceRow != nil {
+			a.Walls[z] = string(faceRow)
+		}
+		if elevRow != nil {
+			a.Elevation[z] = string(elevRow)
+		}
 	}
 }
 
@@ -1193,16 +1212,6 @@ func floodFill(s *State, x, z int, b byte) {
 			filled = append(filled, [2]int{px, pz})
 			stack = append(stack, [2]int{px + 1, pz}, [2]int{px - 1, pz}, [2]int{px, pz + 1}, [2]int{px, pz - 1})
 		}
-		// Never wall over the player start tile — the same exemption
-		// applyWallBrush (per-cell) and fillEntireLayer enforce. The flood
-		// may have filled it (it's inside the connected region); restore it
-		// to the region's original value so the player can't spawn in rock.
-		if s.layer == LayerWalls && b == core.TileRock {
-			sx, sz := s.area.StartTileX, s.area.StartTileZ
-			if sz >= 0 && sz < len(rows) && sx >= 0 && sx < len(rows[sz]) && rows[sz][sx] == b {
-				rows[sz][sx] = target
-			}
-		}
 	})
 	// The flooded region joins the active floor — mirror of the per-cell stamp
 	// in applyTool, so Ctrl+click builds a floor the same way a stroke does
@@ -1219,14 +1228,6 @@ func floodFill(s *State, x, z int, b byte) {
 				}
 			}
 		})
-	}
-	// Wall flood that turns cells into '#' nukes any pack/chest/door that
-	// fell inside — same cleanup applyWallBrush does per-cell and
-	// fillEntireLayer does for a full fill, routed through the shared
-	// removeSpawnsWhere over core.TileXZ. (Previously only packs were pruned,
-	// leaving chests/doors embedded in the new wall.)
-	if s.layer == LayerWalls && b == core.TileRock {
-		pruneBlockedSpawns(&s.area)
 	}
 	s.dirty = true
 }
@@ -1276,23 +1277,18 @@ func fillEntireLayer(s *State) {
 		return
 	}
 	brush := s.activeBrush()
+	if brush.Erase {
+		s.flash("Pick a brush to Fill (the eraser fills nothing)")
+		return
+	}
 	pushUndo(s)
 	rewriteLayerRows(layer, func(rows [][]byte) {
 		for z := 0; z < s.area.Height && z < len(rows); z++ {
 			for x := 0; x < s.area.Width && x < len(rows[z]); x++ {
-				if brush.Char == core.TileRock && s.area.StartTileX == x && s.area.StartTileZ == z {
-					continue
-				}
 				rows[z][x] = brush.Char
 			}
 		}
 	})
-	// Painting walls everywhere takes packs/chests/doors that fell inside
-	// out of play. Same cleanup applyWallBrush does per-cell, routed
-	// through the shared removeSpawnsWhere over core.TileXZ.
-	if s.layer == LayerWalls && brush.Char == core.TileRock {
-		pruneBlockedSpawns(&s.area)
-	}
 	// A full content fill lifts the whole map to the active floor, consistent
 	// with the per-cell / flood-fill stamp. (At level 0 — the default and the
 	// common base-laying case — this is a no-op, so flat maps stay flat.)

@@ -504,11 +504,10 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 				continue
 			}
 			// Elevation: this tile's floor (and everything on it) rides up by
-			// its level. No automatic support column is drawn beneath a raised
-			// tile — plateaus float, and the author builds any cliff/retaining
-			// face they want by painting walls on the lower tiles. This keeps the
-			// renderer from forcing a solid mass under every step and lets >1-level
-			// differences read as a real gap rather than one merged tower.
+			// its level. The world is a heightfield — a "wall" is the rendered
+			// vertical FACE of an elevation step (drawCliffFaces below), not a
+			// separate solid tile. A raised tile reads as a plateau/mesa; the
+			// faces on its lower-facing edges are its cliff.
 			elevY := float32(m.ElevationLevelAt(x, z)) * core.LevelStep
 			// Scenery (decor/props) rests on the WALKABLE surface, which on a
 			// ramp tile is the mid-slope height, not the low edge elevY that the
@@ -517,29 +516,19 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 			// of sinking to the low end. On flat tiles StandGroundY == elevY.
 			center := rl.NewVector3(cx, m.StandGroundY(x, z), cz)
 			if m.CeilingAt(x, z) {
-				drawTileCube(material.ceilingModel, cx, core.WallHeight+elevY, cz, tileYawDeg(x, z))
+				drawTileCube(material.ceilingModel, cx, core.LevelStep+elevY, cz, tileYawDeg(x, z))
 				if logActive {
 					stats.CeilingsDrawn++
 				}
 			}
-			if wc := m.Walls[z][x]; core.IsWallChar(wc) {
-				// Plain rock uses the area material's wall (dungeon brick vs
-				// field rock); variants (ivy/cracked/crumbling) swap in their
-				// own per-char skin regardless of material. Wall rides the
-				// tile's elevation; nothing auto-sizes it.
-				wallModel := material.wallModel
-				if vm, ok := assets.wallVariants[wc]; ok {
-					wallModel = vm
-				}
-				drawTileCube(wallModel, cx, core.WallHeight/2+elevY, cz, tileYawDeg(x, z))
-				if logActive {
-					stats.WallsDrawn++
-				}
-				continue
-			}
 			drawFloorTile(material, assets, m.Floor[z][x], x, z, cx, cz, elevY)
 			if logActive {
 				stats.FloorsDrawn++
+			}
+			// Cliff faces for every edge where this tile sits above its
+			// neighbour (or the map edge). Counted as WallsDrawn for the log.
+			if n := drawCliffFaces(material, assets, m, x, z, cx, cz); logActive {
+				stats.WallsDrawn += n
 			}
 			drawDecor(assets, m.Decor[z][x], x, z, cx, cz, center)
 			if logActive && m.Decor[z][x] != core.DecorEmpty {
@@ -647,6 +636,73 @@ func drawFloorTile(material worldMaterialResources, assets Resources, cell byte,
 		model = material.floorDarkModel
 	}
 	drawTileCube(model, cx, -0.03+elevY, cz, yaw)
+}
+
+// drawCliffFaces renders the vertical rock faces of tile (x,z) — one per
+// cardinal edge where this tile's ground sits ABOVE the neighbour's (or the
+// map edge), which is exactly where StepElevationOK forbids a step. A wall is
+// just these faces. Ramp tiles draw their own solid wedge (with side/back
+// walls) instead, so they're skipped here. Returns the number of faces drawn
+// (for the render-log's WallsDrawn tally).
+func drawCliffFaces(material worldMaterialResources, assets Resources, m core.AreaDefinition, x, z int, cx, cz float32) int {
+	if _, isRamp := m.RampAt(x, z); isRamp {
+		return 0 // the ramp wedge supplies its own faces
+	}
+	myLevel := m.ElevationLevelAt(x, z)
+	skin := material.faceModel
+	if vm, ok := assets.faceVariants[m.FaceSkinAt(x, z)]; ok {
+		skin = vm
+	}
+	drawn := 0
+	for _, d := range []int{core.North, core.East, core.South, core.West} {
+		dx, dz := core.FacingVector(d)
+		nx, nz := x+dx, z+dz
+		// Neighbour ground level across the shared edge: ramp-aware (EdgeLevel)
+		// when it presents a walkable edge, else its flat level; off-map reads
+		// as level 0 — a cliff down to the void.
+		nLevel := 0
+		if m.InBounds(nx, nz) {
+			if l, ok := m.EdgeLevel(nx, nz, core.NormalizeFacing(d+2)); ok {
+				nLevel = l
+			} else {
+				nLevel = m.ElevationLevelAt(nx, nz)
+			}
+		}
+		if myLevel <= nLevel {
+			continue
+		}
+		drawCliffFace(skin, cx, float32(nLevel)*core.LevelStep, cz, faceYaw(d), float32(myLevel-nLevel))
+		drawn++
+	}
+	return drawn
+}
+
+// faceYaw maps the dropping-edge direction to the Y-rotation that turns the
+// face-quad model (built on the +Z / south edge, normal +Z) so it sits on that
+// edge with its skin pointing outward toward the lower neighbour. From raylib's
+// Y-rotation +Z → (sinθ,0,cosθ): θ=0→+Z(S), 90→+X(E), 180→-Z(N), 270→-X(W).
+func faceYaw(d int) float32 {
+	switch d {
+	case core.South:
+		return 0
+	case core.East:
+		return 90
+	case core.North:
+		return 180
+	case core.West:
+		return 270
+	}
+	return 0
+}
+
+// drawCliffFace draws one face-quad at tile center (cx,cz) with its base at
+// baseY, yaw-rotated to the dropping edge and scaled vertically by the level
+// delta so the single LevelStep-tall model covers the whole cliff.
+func drawCliffFace(model rl.Model, cx, baseY, cz, yaw, levels float32) {
+	rl.DrawModelEx(model,
+		rl.NewVector3(cx, baseY, cz),
+		rl.NewVector3(0, 1, 0), yaw,
+		rl.NewVector3(1, levels, 1), rl.White)
 }
 
 // triNormal returns the unit normal of triangle (a,b,c) by the right-hand

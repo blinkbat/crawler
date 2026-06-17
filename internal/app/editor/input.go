@@ -640,22 +640,10 @@ func updateMouse(s *State) {
 				}
 				return
 			}
-			// On the Entities layer, right-click opens the context menu
-			// over the tile so the author can Edit / Delete / move-start
-			// without having to switch brushes. Empty entity cells fall
-			// through to the legacy erase (no-op on empties) so right-
-			// click stays a recoverable action either way.
-			if s.layer == LayerEntities {
-				if items := contextItemsAt(s, hx, hz); len(items) > 0 {
-					openContextMenu(s, mp.X, mp.Y, hx, hz)
-					return
-				}
-			}
-			// Route through keyboardMutate so an erase on an already-empty
-			// cell banks NO undo snapshot, doesn't clear the redo stack, and
-			// doesn't flip the dirty flag — matching the mouse-paint and
-			// keyboard mutation paths (eraseAt itself sets dirty unconditionally).
-			keyboardMutate(s, func() { eraseAt(s, hx, hz) })
+			// Right-click is for menus now (erasing is a selectable brush). Open
+			// the context menu over the tile: Edit/Delete entities, Set face
+			// skin (on a cliff edge), Erase here, Move start, …
+			openContextMenu(s, mp.X, mp.Y, hx, hz)
 		}
 	}
 
@@ -2259,10 +2247,11 @@ func openSelectedMap(s *State) Action {
 	s.redo = nil
 	s.dirty = false
 	clearSelection(s) // different map — old selection coords no longer apply
-	// Surface every level the loaded map uses in the Levels panel, and start on
-	// the ground floor (active level 0) per the fixed entry point.
+	// Surface every level the loaded map uses in the Levels panel, and open on
+	// the floor the player start sits on (the walkable baseline for a normal
+	// map) rather than level 0 — which is now a pit far below the baseline.
 	s.topLevel = maxAreaLevel(area)
-	s.editLevel = 0
+	s.editLevel = clampLevel(area.ElevationLevelAt(area.StartTileX, area.StartTileZ))
 	s.levelHidden = [maxEditLevel + 1]bool{}
 	// The area was replaced wholesale — invalidate the content-derived caches
 	// the same way performNewMap / undoOne / redoOne do, or the metadata

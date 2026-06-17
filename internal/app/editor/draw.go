@@ -1109,11 +1109,10 @@ func drawMinimap(s *State) {
 			if tx >= s.area.Width {
 				break
 			}
-			// Route through cellAt, not a raw Walls[tz][tx] index: a ragged /
-			// partially-built loaded area can have Height > len(Walls) or rows
-			// shorter than Width, and the tz/tx<Height/Width guards above don't
-			// catch that — a raw index would panic.
-			if ch, ok := cellAt(s.area.Walls, tx, tz); ok && core.IsWallChar(ch) {
+			// Walls are elevation now: paint a pixel where a tile rises above
+			// the walkable baseline (a cliff/wall reads as structure on the
+			// overview). Pits below the baseline stay blank.
+			if s.area.ElevationLevelAt(tx, tz) > core.ElevationBaseline {
 				rl.DrawPixel(int32(mr.X)+int32(px), int32(mr.Y)+int32(py), wallCol)
 			}
 		}
@@ -2205,10 +2204,10 @@ func drawGrid(s *State, font rl.Font) {
 			if s.layer == LayerElevation && lvl > 0 && lvl != s.editLevel {
 				rl.DrawRectangleRec(r, fadeAlpha(elevationLevelColor(lvl), 0.55*levelFade))
 			}
-			if w := s.area.Walls[z][x]; showWalls && core.IsWallChar(w) {
-				// Every wall variant paints as a wall cell (was rock-only, which
-				// made ivy/cracked/crumbling tiles read as open floor); color by
-				// the specific char so the family's subtle tints show through.
+			if w := s.area.Walls[z][x]; showWalls && core.IsFaceSkinChar(w) {
+				// Show an overlay only where an explicit face skin is assigned
+				// (rock/ivy/cracked/crumbling); the default '.' skin draws nothing
+				// since it only matters once elevation exposes a face.
 				rl.DrawRectangleRec(r, fadeAlpha(tileColor(LayerWalls, w), wallAlpha*levelFade))
 			}
 			if d := s.area.Decor[z][x]; showDecor && d != core.DecorAuto {
@@ -2991,7 +2990,7 @@ func drawCeilingHash(r rl.Rectangle, cell float32, col color.RGBA) {
 func currentLayerGlyph(s *State, x, z int) (byte, bool) {
 	switch s.layer {
 	case LayerWalls:
-		if w := s.area.Walls[z][x]; core.IsWallChar(w) {
+		if w := s.area.Walls[z][x]; core.IsFaceSkinChar(w) {
 			return w, true
 		}
 	case LayerFloor:

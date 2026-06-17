@@ -37,6 +37,13 @@ const (
 	// four rows — mirroring how doorEdit carries its facing as a payload
 	// rather than enumerating a kind per direction.
 	ctxItemStartFacing
+	// ctxItemSetFaceSkin assigns the right-clicked tile's cliff-face skin
+	// (rock / ivy / cracked / crumbling). The chosen skin char rides in
+	// ctxItem.skin. Offered only on a tile that actually exposes a face.
+	ctxItemSetFaceSkin
+	// ctxItemEraseTile resets the right-clicked cell on the ACTIVE layer (the
+	// same reset the eraser brush runs). Always offered.
+	ctxItemEraseTile
 )
 
 // ctxItem is one row in the right-click context menu. Built fresh by
@@ -50,6 +57,50 @@ type ctxItem struct {
 	// ignored by every other kind. Lets one facing kind cover all four rows
 	// instead of a kind per direction.
 	facing int
+	// skin is the payload for ctxItemSetFaceSkin (a face-layer char). Ignored
+	// by every other kind.
+	skin byte
+}
+
+// faceSkinChoice pairs a cliff-face skin char with its menu label, driving the
+// "Set face" rows. Mirrors the editor's Faces palette.
+type faceSkinChoice struct {
+	char  byte
+	label string
+}
+
+var faceSkinChoices = []faceSkinChoice{
+	{core.TileRock, "Rock"},
+	{core.TileWallRockIvyLight, "Light Ivy"},
+	{core.TileWallRockIvyHeavy, "Heavy Ivy"},
+	{core.TileWallRockCracked, "Cracked"},
+	{core.TileWallRockCrumbling, "Crumbling"},
+}
+
+// tileExposesFace reports whether tile (x,z) sits above any cardinal neighbour
+// (or the map edge) — i.e. it renders at least one cliff face, so a face-skin
+// choice is meaningful there. Mirrors the renderer's drawCliffFaces test.
+func tileExposesFace(a core.AreaDefinition, x, z int) bool {
+	if _, isRamp := a.RampAt(x, z); isRamp {
+		return false // ramps draw their own wedge, no skinnable face
+	}
+	my := a.ElevationLevelAt(x, z)
+	for _, d := range []int{core.North, core.East, core.South, core.West} {
+		dx, dz := core.FacingVector(d)
+		nx, nz := x+dx, z+dz
+		n := 0
+		if a.InBounds(nx, nz) {
+			if l, ok := a.EdgeLevel(nx, nz, core.NormalizeFacing(d+2)); ok {
+				n = l
+			} else {
+				n = a.ElevationLevelAt(nx, nz)
+			}
+		}
+		if my > n {
+			return true
+		}
+	}
+	return false
 }
 
 // contextMenuState is the in-State data for an open right-click menu.
@@ -128,6 +179,21 @@ func contextItemsAt(s *State, x, z int) []ctxItem {
 			ctxItem{label: "Move start here", kind: ctxItemMoveStartHere},
 		)
 	}
+	// Cliff-face skin: when the tile rises above a neighbour it shows a face,
+	// so offer quick per-tile skin assignment (the current skin is marked).
+	if tileExposesFace(s.area, x, z) {
+		cur := s.area.FaceSkinAt(x, z)
+		for _, sk := range faceSkinChoices {
+			marker := "  "
+			if cur == sk.char {
+				marker = "* "
+			}
+			items = append(items, ctxItem{label: marker + "Face: " + sk.label, kind: ctxItemSetFaceSkin, skin: sk.char})
+		}
+	}
+	// Erase the active layer's cell here — always available (the eraser is also
+	// a selectable brush).
+	items = append(items, ctxItem{label: "Erase " + layerName(s.layer) + " here", kind: ctxItemEraseTile})
 	return items
 }
 
@@ -339,6 +405,25 @@ func runContextItem(s *State, item ctxItem) {
 		s.dirty = true
 	case ctxItemStartFacing:
 		setStartFacing(s, item.facing)
+	case ctxItemSetFaceSkin:
+		// No-op (no undo) when the skin is already what's there.
+		if s.area.FaceSkinAt(x, z) == item.skin {
+			return
+		}
+		pushUndo(s)
+		setLayerCell(&s.area.Walls, x, z, item.skin)
+		s.dirty = true
+	case ctxItemEraseTile:
+		// Snapshot-then-commit-if-changed so a no-op erase banks no undo and
+		// doesn't clobber the redo stack (mirrors deleteSpawnAt / keyboardMutate).
+		before := core.CloneArea(s.area)
+		wasDirty := s.dirty
+		eraseAt(s, x, z)
+		if core.AreaContentEqual(s.area, before) {
+			s.dirty = wasDirty // eraseAt flips dirty unconditionally — undo a no-op
+		} else {
+			commitUndoSnapshot(s, before)
+		}
 	default:
 		// Every ctxItemKind needs a case here (see the kind enum's doc).
 		// Fail closed like the layer switches (applyTool / activeGrid)
