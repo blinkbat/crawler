@@ -83,7 +83,12 @@ func (s *State) layout() {
 	// Layer tabs sit at the top of the palette column.
 	tabsHeight := float32(layerCount) * layerTabH
 	s.rect.layerTabs = rl.NewRectangle(0, contentTop, paletteW, tabsHeight)
-	paletteY := contentTop + tabsHeight
+	// Levels panel directly beneath the layer tabs: a header row (label + −/+)
+	// then one row per level 0..topLevel (capped to maxVisibleLevelRows so a tall
+	// stack can't shove the palette off-screen).
+	levelsY := contentTop + tabsHeight
+	s.rect.levels = rl.NewRectangle(0, levelsY, paletteW, levelsPanelHeight(s))
+	paletteY := levelsY + s.rect.levels.Height
 	s.rect.palette = rl.NewRectangle(0, paletteY, paletteW, h-paletteY)
 	s.rect.metadata = rl.NewRectangle(w-metadataW, contentTop, metadataW, h-contentTop)
 	s.rect.grid = rl.NewRectangle(paletteW, contentTop, w-paletteW-metadataW, h-contentTop)
@@ -184,6 +189,7 @@ func Draw(s *State, assets render.Resources) {
 	drawTopbar(s, font, theme)
 	drawToolbar(s, font, theme)
 	drawLayerTabs(s, font, theme)
+	drawLevelsPanel(s, font, theme)
 	drawPalette(s, font, theme)
 	drawMetadata(s, font, theme)
 	drawGrid(s, font)
@@ -421,14 +427,12 @@ type topbarBtn struct {
 func onGridLayer(s *State) bool      { return s.layer != LayerEntities }
 func onElevationLayer(s *State) bool { return s.layer == LayerElevation }
 
-// onElevationOrFocused gates the level controls (Floor± / Floors lens / Height
-// readout). The Floors lens ghosts non-focused levels on EVERY layer and a
-// content paint lifts the tile to editLevel, so once the lens is on these stay
-// reachable on any layer — letting the author re-aim the focused level or switch
-// the lens OFF while painting walls/floor/etc. (without it, the lens's only
-// off-switch would be back on the Elevation layer). Ramp stays elevation-only —
-// it's a pure elevation-brush mode, not part of the cross-layer lens.
-func onElevationOrFocused(s *State) bool { return s.layer == LayerElevation || s.levelFocus }
+// levelControlsEnabled gates the active-level steppers + height readout. The
+// Photoshop-style levels model is always on, so the active level is always
+// meaningful and these are always reachable (a content paint on any layer
+// builds the active floor). Kept as a predicate so the toolbar wiring is
+// uniform with the other gated buttons.
+func levelControlsEnabled(s *State) bool { return true }
 
 // toolbarActionBtns are the SECOND-ROW controls kept OUT of the menus because
 // you reach for them constantly while painting: undo/redo, the brush-size
@@ -442,13 +446,8 @@ var toolbarActionBtns = []topbarBtn{
 	{label: "Redo", action: redoOne, enabled: func(s *State) bool { return len(s.redo) > 0 }, help: "Re-apply the last undone change (Ctrl+Y)."},
 	{label: "Brush -", action: func(s *State) { stepBrushSize(s, -1) }, enabled: onGridLayer, help: "Shrink the brush footprint."},
 	{label: "Brush +", action: func(s *State) { stepBrushSize(s, +1) }, enabled: onGridLayer, help: "Grow the brush footprint."},
-	{label: "Floor -", action: func(s *State) { stepEditLevel(s, -1) }, enabled: onElevationOrFocused, help: "Lower the focused elevation level."},
-	{label: "Floor +", action: func(s *State) { stepEditLevel(s, +1) }, enabled: onElevationOrFocused, help: "Raise the focused elevation level."},
-	{label: "Floors",
-		action:  toggleLevelFocus,
-		active:  func(s *State) bool { return s.levelFocus },
-		enabled: onElevationOrFocused,
-		help:    "Floors lens: ghost other levels; a paint lifts the tile to this level."},
+	{label: "Lvl -", action: func(s *State) { stepEditLevel(s, -1) }, enabled: levelControlsEnabled, help: "Lower the active level (the floor paints build onto). Also PgDn / the Levels panel."},
+	{label: "Lvl +", action: func(s *State) { stepEditLevel(s, +1) }, enabled: levelControlsEnabled, help: "Raise the active level (the floor paints build onto). Also PgUp / the Levels panel."},
 	{label: "Ramp",
 		action:  func(s *State) { s.rampMode = !s.rampMode },
 		active:  func(s *State) bool { return s.rampMode },
@@ -522,13 +521,11 @@ func drawToolbar(s *State, font rl.Font, theme render.Theme) {
 		rl.NewVector2(s.rect.toolbar.Width, s.rect.toolbar.Y+toolbarH),
 		1, outlineHard)
 	drawButtonStrip(font, s, toolbarBtns, s.rect.toolbar.Y+6, toolbarH-12)
-	// Height-selector readout (right-aligned): the level the Elevation brush
-	// stamps + the slice-view focus; flags Ramp tool-mode when active. Shown
-	// whenever the level controls are live (Elevation layer, or any layer while
-	// the Floors lens is on) so the focused level is visible while it matters.
-	// [RAMP] only on the Elevation layer — ramp is an elevation-brush mode.
-	if onElevationOrFocused(s) {
-		label := fmt.Sprintf("Height: %d", s.editLevel)
+	// Active-level readout (right-aligned): the floor every content paint builds
+	// onto. Always shown — the levels model is always on. [RAMP] flags ramp
+	// tool-mode (only meaningful on the Elevation layer).
+	{
+		label := fmt.Sprintf("Active level: %d", s.editLevel)
 		if s.rampMode && s.layer == LayerElevation {
 			label += "  [RAMP]"
 		}
@@ -1295,6 +1292,117 @@ func drawLayerTabs(s *State, font rl.Font, theme render.Theme) {
 	}
 }
 
+// --- Levels panel ----------------------------------------------------------
+//
+// The Photoshop-style elevation-level panel: a header (label + −/+ to shrink /
+// grow the range) then one row per level 0..topLevel, each with a visibility
+// eye and an active-level highlight. Clicking a row makes that level active
+// (the floor content paints build onto); clicking its eye hides/shows every
+// tile on that level in the grid. Mirrors the layer-tab geometry/visuals.
+
+const maxVisibleLevelRows = 8
+
+// visibleLevelRows is how many level rows the panel shows: 0..topLevel, capped
+// so a tall stack can't push the palette off-screen.
+func visibleLevelRows(s *State) int {
+	n := s.topLevel + 1
+	if n < 1 {
+		n = 1
+	}
+	if n > maxVisibleLevelRows {
+		n = maxVisibleLevelRows
+	}
+	return n
+}
+
+// levelsPanelHeight is the header row plus the visible level rows.
+func levelsPanelHeight(s *State) float32 {
+	return float32(1+visibleLevelRows(s)) * layerTabH
+}
+
+func levelHeaderRect(s *State) rl.Rectangle {
+	return rl.NewRectangle(s.rect.levels.X, s.rect.levels.Y, s.rect.levels.Width, layerTabH)
+}
+
+// levelMinusRect / levelPlusRect are the small range steppers in the header.
+func levelStepperRects(s *State) (minus, plus rl.Rectangle) {
+	h := levelHeaderRect(s)
+	const bw = float32(22)
+	plus = rl.NewRectangle(h.X+h.Width-6-bw, h.Y+(h.Height-bw)/2, bw, bw)
+	minus = rl.NewRectangle(plus.X-4-bw, h.Y+(h.Height-bw)/2, bw, bw)
+	return
+}
+
+func levelRowRect(s *State, i int) rl.Rectangle {
+	return rl.NewRectangle(
+		s.rect.levels.X,
+		s.rect.levels.Y+layerTabH+float32(i)*layerTabH,
+		s.rect.levels.Width,
+		layerTabH,
+	)
+}
+
+func levelEyeRect(s *State, i int) rl.Rectangle {
+	r := levelRowRect(s, i)
+	const eye = float32(20)
+	return rl.NewRectangle(r.X+r.Width-6-eye-6, r.Y+(r.Height-eye)/2, eye, eye)
+}
+
+// levelRowAt returns the level index for a point in the panel's row area, or -1.
+func levelRowAt(s *State, p rl.Vector2) int {
+	for i := 0; i < visibleLevelRows(s); i++ {
+		if pointIn(p, levelRowRect(s, i)) {
+			return i
+		}
+	}
+	return -1
+}
+
+func drawLevelsPanel(s *State, font rl.Font, theme render.Theme) {
+	rl.DrawRectangleRec(s.rect.levels, bgWindow)
+	mp := frameMouse
+	hdr := levelHeaderRect(s)
+	render.DrawTextWithShadow(font, "Levels", hdr.X+10, hdr.Y+(hdr.Height-16)/2, editorFontBody, theme.TextPrimary)
+	minus, plus := levelStepperRects(s)
+	drawLevelStepper(font, minus, "-", pointIn(mp, minus))
+	drawLevelStepper(font, plus, "+", pointIn(mp, plus))
+	for i := 0; i < visibleLevelRows(s); i++ {
+		r := levelRowRect(s, i)
+		active := i == s.editLevel
+		hidden := s.levelHidden[i]
+		bg := bgPanel
+		border := editorBorderDim
+		text := theme.TextMuted
+		if active {
+			bg = bgActive
+			border = editorBorderActive
+			text = theme.TextPrimary
+		} else if pointIn(mp, r) {
+			bg = bgEntryHover
+		}
+		if hidden {
+			text = rl.NewColor(112, 116, 126, 255)
+		}
+		inner := rl.NewRectangle(r.X+6, r.Y+3, r.Width-12, r.Height-6)
+		rl.DrawRectangleRec(inner, bg)
+		rl.DrawRectangleLinesEx(inner, 1, border)
+		render.DrawTextWithShadow(font, "Lv "+strconv.Itoa(i), inner.X+10, inner.Y+(inner.Height-16)/2, editorFontBody, text)
+		eye := levelEyeRect(s, i)
+		drawLayerEye(eye, !hidden, pointIn(mp, eye))
+	}
+}
+
+func drawLevelStepper(font rl.Font, r rl.Rectangle, label string, hover bool) {
+	bg := bgPanel
+	if hover {
+		bg = bgEntryHover
+	}
+	rl.DrawRectangleRec(r, bg)
+	rl.DrawRectangleLinesEx(r, 1, editorBorderDim)
+	m := render.MeasureRichText(font, label, editorFontBody, 1)
+	render.DrawRichText(font, label, rl.NewVector2(r.X+(r.Width-m.X)/2, r.Y+(r.Height-float32(editorFontBody))/2), editorFontBody, 1, rl.NewColor(220, 224, 234, 255))
+}
+
 // --- Palette ---------------------------------------------------------------
 
 func paletteToolAt(s *State, p rl.Vector2) int {
@@ -2004,49 +2112,58 @@ func drawGrid(s *State, font rl.Font) {
 	showDecor := !s.layerHidden[LayerDecor]
 	showProps := !s.layerHidden[LayerProps]
 	showCeiling := !s.layerHidden[LayerCeiling]
-	showElevation := !s.layerHidden[LayerElevation]
 	showEntities := !s.layerHidden[LayerEntities]
 
 	for z := zMin; z < zMax; z++ {
 		for x := xMin; x < xMax; x++ {
 			r := s.rect.tileRect(x, z)
+			// Level visibility (Photoshop-style): a tile whose elevation level is
+			// hidden in the Levels panel isn't drawn at all — EXCEPT a ramp that
+			// connects to the active level, which always shows so you can see and
+			// route transitions across a hidden floor.
+			lvl := s.area.ElevationLevelAt(x, z)
+			if lvl >= 0 && lvl <= maxEditLevel &&
+				s.levelHidden[lvl] && !rampTouchesActiveLevel(s, x, z) {
+				continue
+			}
+			// Visible off-level tiles fade with distance from the active level so
+			// the floor being edited stands out while neighbours read as context.
+			levelFade := levelDistanceFade(s, lvl)
 			// Floor is the base — always painted (except under a wall, where
 			// the wall covers it).
 			if showFloor {
-				rl.DrawRectangleRec(r, fadeAlpha(floorColor(s.area.Floor[z][x]), floorAlpha))
+				rl.DrawRectangleRec(r, fadeAlpha(floorColor(s.area.Floor[z][x]), floorAlpha*levelFade))
 			}
 			if w := s.area.Walls[z][x]; showWalls && core.IsWallChar(w) {
 				// Every wall variant paints as a wall cell (was rock-only, which
 				// made ivy/cracked/crumbling tiles read as open floor); color by
 				// the specific char so the family's subtle tints show through.
-				rl.DrawRectangleRec(r, fadeAlpha(tileColor(LayerWalls, w), wallAlpha))
+				rl.DrawRectangleRec(r, fadeAlpha(tileColor(LayerWalls, w), wallAlpha*levelFade))
 			}
 			if d := s.area.Decor[z][x]; showDecor && d != core.DecorAuto {
-				rl.DrawRectangleRec(insetRect(r, cell*0.28), fadeAlpha(decorColor(d), decorAlpha))
+				rl.DrawRectangleRec(insetRect(r, cell*0.28), fadeAlpha(decorColor(d), decorAlpha*levelFade))
 			}
 			if p := s.area.Props[z][x]; showProps && core.IsPropChar(p) {
-				rl.DrawCircle(int32(r.X+cell/2), int32(r.Y+cell/2), cell*0.36, fadeAlpha(propColor(p), propAlpha))
+				rl.DrawCircle(int32(r.X+cell/2), int32(r.Y+cell/2), cell*0.36, fadeAlpha(propColor(p), propAlpha*levelFade))
 			}
 			// Ceiling hash overlay: shown only when the Ceiling layer is
 			// active or the cell holds a ceiling. Two diagonal stripes
 			// inside the cell so it reads as "covered" without obscuring
 			// the layer underneath.
 			if showCeiling && s.area.CeilingAt(x, z) {
-				drawCeilingHash(r, cell, fadeAlpha(ceilingColor(), ceilingAlpha))
+				drawCeilingHash(r, cell, fadeAlpha(ceilingColor(), ceilingAlpha*levelFade))
 			}
 			if showCharOverlay {
 				if ch, ok := currentLayerGlyph(s, x, z); ok {
-					drawTileGlyph(font, r, cell, charFontSize, ch, charFG, charShadow)
+					drawTileGlyph(font, r, cell, charFontSize, ch, fadeAlpha(charFG, levelFade), fadeAlpha(charShadow, levelFade))
 				}
 			}
-			// Height slice-view: overlay each cell's level (tint + digit) and
-			// connective ramp arrows so the heightmap is legible in the flat
-			// editor grid. Shown while the Elevation layer is active OR while
-			// the Floors lens is on (then it rides on top of every layer as a
-			// true overlay — the active floor crisp, others ghosted).
-			if showElevation && (s.levelFocus || s.layer == LayerElevation) {
-				drawElevationSlice(s, font, r, cell, x, z)
-			}
+			// Ramp connector arrow — drawn on every ramp tile (the per-tile
+			// elevation digits + cool/warm slice tints are gone now; the Levels
+			// panel carries the "which floor" read). A ramp touching the active
+			// level shows even when its own level is hidden (the visibility skip
+			// above lets it through), so transitions stay visible.
+			drawRampConnector(s, font, r, cell, x, z)
 		}
 	}
 
@@ -2079,6 +2196,12 @@ func drawGrid(s *State, font rl.Font) {
 		}
 		rl.DrawLineEx(rl.NewVector2(s.rect.gridX, py), rl.NewVector2(s.rect.gridX+s.rect.gridW, py), 1, col)
 	}
+
+	// Outline around every group of current-level tiles: trace the perimeter
+	// where an active-level tile borders a different level (or the map edge),
+	// so the floor being edited reads as a clear silhouette over the faded
+	// neighbours. Drawn after the grid lines so it sits on top of them.
+	drawCurrentLevelOutline(s, xMin, xMax, zMin, zMax, cell)
 
 	// Axis tick labels every 5 cells. Only at zoom levels where cells are
 	// big enough to comfortably fit a tick digit — at very small zooms the
@@ -2523,6 +2646,79 @@ func layerAlpha(s *State, l Layer) float32 {
 	return 0.55
 }
 
+// Level-distance fade tunables. A VISIBLE tile whose elevation level differs
+// from the active edit level is dimmed so the floor being edited stands out
+// while neighbouring floors stay legible as context. Each level of distance
+// multiplies opacity by levelFadeFalloff; the result is floored at
+// levelFadeMin so far floors remain a faint ghost rather than vanishing
+// (hidden levels are skipped entirely upstream — this only governs visible
+// off-level tiles).
+const (
+	levelFadeFalloff = float32(0.4)
+	levelFadeMin     = float32(0.1)
+)
+
+// levelDistanceFade returns the opacity multiplier for a tile on elevation
+// level lvl: 1.0 on the active level, falling off geometrically with the
+// number of levels away from s.editLevel.
+func levelDistanceFade(s *State, lvl int) float32 {
+	d := lvl - s.editLevel
+	if d < 0 {
+		d = -d
+	}
+	if d == 0 {
+		return 1
+	}
+	f := float32(math.Pow(float64(levelFadeFalloff), float64(d)))
+	if f < levelFadeMin {
+		f = levelFadeMin
+	}
+	return f
+}
+
+// currentLevelOutlineColor is the silhouette stroke around active-level tile
+// groups — a bright warm gold so it reads over both the faded off-level cells
+// and the grid lines.
+var currentLevelOutlineColor = rl.NewColor(255, 224, 130, 235)
+
+// drawCurrentLevelOutline traces the perimeter of every connected group of
+// active-level (s.editLevel) tiles within the cull window: for each such tile
+// it strokes the cell edges that face a neighbour on a DIFFERENT level (or the
+// map edge). Interior edges between two active-level tiles are shared by both
+// and skipped, so what remains is a clean outline around each group. Each
+// boundary edge is drawn exactly once — only the active-level side strokes it.
+func drawCurrentLevelOutline(s *State, xMin, xMax, zMin, zMax int, cell float32) {
+	const thick = float32(2)
+	// offLevel reports whether (x,z) is off the active level — true when out of
+	// bounds (the map edge always bounds the group) or its elevation differs.
+	offLevel := func(x, z int) bool {
+		if x < 0 || z < 0 || x >= s.area.Width || z >= s.area.Height {
+			return true
+		}
+		return s.area.ElevationLevelAt(x, z) != s.editLevel
+	}
+	for z := zMin; z < zMax; z++ {
+		for x := xMin; x < xMax; x++ {
+			if s.area.ElevationLevelAt(x, z) != s.editLevel {
+				continue
+			}
+			r := s.rect.tileRect(x, z)
+			if offLevel(x-1, z) { // left
+				rl.DrawLineEx(rl.NewVector2(r.X, r.Y), rl.NewVector2(r.X, r.Y+cell), thick, currentLevelOutlineColor)
+			}
+			if offLevel(x+1, z) { // right
+				rl.DrawLineEx(rl.NewVector2(r.X+cell, r.Y), rl.NewVector2(r.X+cell, r.Y+cell), thick, currentLevelOutlineColor)
+			}
+			if offLevel(x, z-1) { // top
+				rl.DrawLineEx(rl.NewVector2(r.X, r.Y), rl.NewVector2(r.X+cell, r.Y), thick, currentLevelOutlineColor)
+			}
+			if offLevel(x, z+1) { // bottom
+				rl.DrawLineEx(rl.NewVector2(r.X, r.Y+cell), rl.NewVector2(r.X+cell, r.Y+cell), thick, currentLevelOutlineColor)
+			}
+		}
+	}
+}
+
 // fadeAlpha scales c's existing alpha by the 0..1 multiplier (clamped).
 // Thin alias over render.FadeColor so the multiply-and-clamp lives once in
 // render/theme.go — the editor canvas fades brush / marker colors through
@@ -2634,45 +2830,30 @@ func elevationLevelColor(level int) rl.Color {
 	return rl.NewColor(uint8(92+t*120), uint8(72+t*108), uint8(56+t*66), 255)
 }
 
-// drawElevationSlice overlays the height "slice view" on a cell while the
-// Elevation layer is active: a translucent tint keyed to the cell's level
-// relative to the selected editLevel (the current level pops, lower levels go
-// cool, higher go warm), the level digit, and — on ramp tiles — the ramp arrow
-// highlighted as a connector.
-func drawElevationSlice(s *State, font rl.Font, r rl.Rectangle, cell float32, x, z int) {
-	lvl := s.area.ElevationLevelAt(x, z)
-	rl.DrawRectangleRec(r, elevationSliceTint(lvl, s.editLevel))
-	shadow := glyphShadow
-	if facing, ok := s.area.RampAt(x, z); ok {
-		rl.DrawRectangleLinesEx(r, 2, rl.NewColor(120, 230, 140, 220))
-		drawTileGlyph(font, r, cell, cell*0.62, core.RampCharForFacing(facing), rl.NewColor(150, 240, 165, 245), shadow)
+// drawRampConnector highlights a ramp tile's connective arrow so level
+// transitions stay legible in the flat grid now that the per-tile elevation
+// digits and cool/warm slice tints are gone (the Levels panel + visibility
+// carry the "which floor" read). Non-ramp tiles draw nothing.
+func drawRampConnector(s *State, font rl.Font, r rl.Rectangle, cell float32, x, z int) {
+	facing, ok := s.area.RampAt(x, z)
+	if !ok {
 		return
 	}
-	if cell >= elevationDigitMinCell {
-		drawTileGlyph(font, r, cell, cell*0.5, core.ElevationChar(lvl), rl.NewColor(245, 245, 250, 230), shadow)
-	}
+	rl.DrawRectangleLinesEx(r, 2, rl.NewColor(120, 230, 140, 220))
+	drawTileGlyph(font, r, cell, cell*0.62, core.RampCharForFacing(facing), rl.NewColor(150, 240, 165, 245), glyphShadow)
 }
 
-// elevationSliceTint tints a cell by its level relative to the selected edit
-// level so the heightmap reads at a glance in the flat grid: selected level a
-// soft green wash, lower levels cool blue (deeper = denser), higher warm orange.
-func elevationSliceTint(level, sel int) rl.Color {
-	switch {
-	case level == sel:
-		return rl.NewColor(120, 200, 130, 60)
-	case level < sel:
-		a := 60 + (sel-level)*30
-		if a > 170 {
-			a = 170
-		}
-		return rl.NewColor(40, 70, 150, uint8(a))
-	default:
-		a := 50 + (level-sel)*28
-		if a > 160 {
-			a = 160
-		}
-		return rl.NewColor(210, 130, 50, uint8(a))
+// rampTouchesActiveLevel reports whether the ramp at (x,z) connects the active
+// level (editLevel) to an adjacent one — i.e. its LOW level is the active level
+// (ascending up out of it) or one below it (ascending up into it). Such ramps
+// stay visible even when their own level is hidden, so connections to the floor
+// you're editing are never lost behind a hidden-level toggle.
+func rampTouchesActiveLevel(s *State, x, z int) bool {
+	if _, ok := s.area.RampAt(x, z); !ok {
+		return false
 	}
+	low := s.area.ElevationLevelAt(x, z)
+	return low == s.editLevel || low == s.editLevel-1
 }
 
 func wallColor() color.RGBA        { return tileColor(LayerWalls, core.TileRock) }

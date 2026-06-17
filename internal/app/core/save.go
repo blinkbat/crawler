@@ -306,10 +306,12 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 				// other loaded field is sanitized at this trust boundary, and a
 				// corrupt/hand-edited value would otherwise feed the per-step
 				// recharge math nonsense (a negative charge that never re-arms,
-				// or an over-cap one). Derive Charged from the clamped charge so
-				// the two can't disagree (charged iff at the ceiling).
+				// or an over-cap one). Honor the saved Charged flag rather than
+				// re-deriving it from Charge: the spend path zeroes both together
+				// and recharge re-arms only at the ceiling, so the flag is the
+				// authoritative armed/dormant state — re-deriving would discard it.
 				g.Crystals[i].Charge = Clamp(cs.Charge, 0, CrystalRechargeSteps)
-				g.Crystals[i].Charged = g.Crystals[i].Charge >= CrystalRechargeSteps
+				g.Crystals[i].Charged = cs.Charged
 				break
 			}
 		}

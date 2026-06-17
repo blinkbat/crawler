@@ -2208,9 +2208,10 @@ func damageEnemy(g *core.GameState, slot, rawDamage, quality int, tag core.Skill
 	damage := mitigateDamage(rawDamage, tag, enemy.Armor, core.EnemyInfoFor(*enemy).MDef)
 	// Tally the acting member's physical output this turn for Warrior
 	// Bloodthirst. finishActorTurn converts it to lifesteal (only when the
-	// finishing actor is a party member with the node) and zeroes it, so
-	// reflect/counter phys damage dealt on an ENEMY's turn accumulates here but
-	// is discarded. Magic / heal / DoT-tick hits use other tags and don't feed it.
+	// finishing actor is a party member with the node) and zeroes it. Off-turn
+	// counters (tryRiposte) snapshot/restore this around their strike so their
+	// damage never enters the tally — they lifesteal directly instead. Magic /
+	// heal / DoT-tick hits use other tags and don't feed it.
 	if tag == core.SkillTagPhys && damage > 0 {
 		g.Battle.PhysDamageThisTurn += damage
 	}
@@ -2990,7 +2991,11 @@ func qualityTag(quality int) string {
 // (applyBloodthirst) and the off-turn Riposte counter — so "all physical damage
 // dealt" genuinely includes a counter struck on the enemy's turn, which the
 // turn tally discards.
-func bloodthirstHeal(g *core.GameState, member *core.PartyMember, physDamage int) {
+func bloodthirstHeal(g *core.GameState, partyIndex, physDamage int) {
+	if !partyIndexValid(g, partyIndex) {
+		return
+	}
+	member := &g.Party[partyIndex]
 	rank := core.PassiveRank(member, core.PassiveBloodthirst)
 	if rank <= 0 || physDamage <= 0 || member.HP <= 0 || member.Ingested {
 		return
@@ -3002,7 +3007,9 @@ func bloodthirstHeal(g *core.GameState, member *core.PartyMember, physDamage int
 	before := member.HP
 	core.GainUpTo(&member.HP, member.MaxHP, heal)
 	if gained := member.HP - before; gained > 0 {
-		member.DamageFlash = core.FlashDuration
+		// Heal feedback, not the white "took damage" flash — lifesteal is an HP
+		// gain, so use the same VFXHeal cue the skill-heals enqueue.
+		core.EnqueuePartyVFX(g, core.VFXHeal, partyIndex)
 		setBattleMessage(g, fmt.Sprintf("%s's bloodthirst restores %d HP.", member.Name, gained))
 	}
 }
@@ -3016,7 +3023,7 @@ func applyBloodthirst(g *core.GameState, actor core.ActorRef) {
 	if !actor.ValidPartyIndex(g.Party) {
 		return
 	}
-	bloodthirstHeal(g, &g.Party[actor.Index], g.Battle.PhysDamageThisTurn)
+	bloodthirstHeal(g, actor.Index, g.Battle.PhysDamageThisTurn)
 }
 
 // tryRiposte fires the Warrior's Battle Sense counter when they DODGE an enemy
@@ -3042,7 +3049,14 @@ func tryRiposte(g *core.GameState, dodger, enemySlot int) {
 		raw = 1
 	}
 	noun := core.EnemySingularNoun(*enemy)
+	// Keep this counter's damage OUT of the per-turn Bloodthirst tally: it lands
+	// on the enemy's turn and is lifestolen directly below, so snapshot/restore
+	// PhysDamageThisTurn around the strike. Otherwise it would double-count if a
+	// future path ever ran applyBloodthirst on a turn a Riposte fired — the tally
+	// then has exactly one source (a party member's own turn).
+	physTally := g.Battle.PhysDamageThisTurn
 	dealt, defeated := damageEnemy(g, enemySlot, raw, core.TimingQualityGood, core.SkillTagPhys)
+	g.Battle.PhysDamageThisTurn = physTally
 	core.EnqueueEnemyVFX(g, core.WeaponHitVFX(core.EquippedWeapon(*member)), enemySlot)
 	if defeated {
 		setBattleMessage(g, fmt.Sprintf("%s ripostes — the %s drops!", member.Name, noun))
@@ -3052,7 +3066,7 @@ func tryRiposte(g *core.GameState, dodger, enemySlot int) {
 	// The counter's own physical damage feeds Bloodthirst directly: it lands on
 	// the ENEMY's turn, so the end-of-turn tally (cleared for the enemy actor)
 	// would otherwise drop it.
-	bloodthirstHeal(g, member, dealt)
+	bloodthirstHeal(g, dodger, dealt)
 }
 
 // tryRetribution reflects a share of the damage an attacker just dealt to a

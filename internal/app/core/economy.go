@@ -127,6 +127,11 @@ func SellableCount(inv []ItemStack) int {
 // directly to g.Gold / g.Inventory and returns the totals for the battle
 // log. Called from winBattle right after AwardBattleXP; returns zero when
 // no pack is engaged (BattleMembers reports the active pack or nil).
+//
+// Only DEFEATED (!Alive) members pay out — you loot what you killed. At the
+// sole caller (winBattle) every member is already dead so this changes
+// nothing today, but it makes the award correct if ever called with a
+// partially-alive pack rather than over-paying for survivors.
 func AwardBattleLoot(g *GameState) (gold int, drops []ItemKind) {
 	members := BattleMembers(g)
 	if len(members) == 0 {
@@ -134,6 +139,9 @@ func AwardBattleLoot(g *GameState) (gold int, drops []ItemKind) {
 	}
 	rng := g.Rand()
 	for _, m := range members {
+		if m.Alive {
+			continue
+		}
 		def := EnemyInfoFor(m)
 		gold += rollGold(rng, def.GoldMin, def.GoldMax)
 		for _, d := range def.Drops {

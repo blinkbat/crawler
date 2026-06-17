@@ -40,9 +40,10 @@ const (
 	LayerEntities
 )
 
-// maxEditLevel is the highest elevation level the height selector reaches
-// (levels serialize as a single digit '0'..'9' in the Elevation grid).
-const maxEditLevel = 9
+// maxEditLevel is the highest elevation level the height selector reaches.
+// Levels serialize as one base-36 char per cell ('0'..'9' then 'A'..'Z'), so
+// the editor can stack up to core.MaxElevationLevel+1 floors.
+const maxEditLevel = core.MaxElevationLevel
 
 // layerCount is the number of editor layers (six grid layers + the
 // entity list), derived from the enum's last value so adding a
@@ -672,14 +673,18 @@ type State struct {
 	// of normal painting.
 	editLevel int
 	rampMode  bool
-	// levelFocus is the "Floors" editing lens (toolbar toggle): treat each
-	// elevation level as its own floor. When on, (1) the grid ghosts every
-	// tile NOT at editLevel as a true overlay (cool below / warm above, the
-	// active floor crisp) on every layer, and (2) painting any content layer
-	// ALSO lifts that tile to editLevel — so picking a level and drawing
-	// builds that floor without hand-stamping the Elevation digit. Purely an
-	// authoring lens; the on-disk model stays one level per tile.
-	levelFocus bool
+	// Verticality is now a Photoshop-style LEVELS model (always on — no lens
+	// toggle). editLevel is the ACTIVE level: every content paint lifts the
+	// painted tile to it (so picking a level and drawing builds that floor),
+	// and it's the level the Levels panel highlights. levelHidden[L] hides
+	// every tile on level L from the grid draw (the panel's per-level eye),
+	// EXCEPT a ramp connecting to the active level, which always shows so
+	// connections stay visible across hidden floors. topLevel is the highest
+	// level the panel exposes (grown via the panel's +; auto-covers any level
+	// present in the map or the active level). The on-disk model stays one
+	// level per tile — this is a pure authoring view.
+	levelHidden [maxEditLevel + 1]bool
+	topLevel    int
 	// paletteScroll is the per-layer vertical scroll offset (in pixels)
 	// applied to the brush entries. Adjusted by mouse-wheel when the
 	// pointer is over the palette. Clamped in drawPalette so the bottom
@@ -925,6 +930,7 @@ type layoutRect struct {
 	topbar    rl.Rectangle
 	toolbar   rl.Rectangle // action button row beneath the topbar menu bar
 	layerTabs rl.Rectangle
+	levels    rl.Rectangle // Photoshop-style elevation-level panel (eye toggles + active select)
 	palette   rl.Rectangle
 	metadata  rl.Rectangle
 	grid      rl.Rectangle

@@ -94,13 +94,14 @@ func applyTool(s *State, x, z int) {
 	s.dirty = true
 }
 
-// stampActiveLevel lifts tile (x,z) to the active edit level when the Floors
-// lens is on — the single "a content paint builds the active floor" step
-// shared by applyTool, floodFill, and fillEntireLayer so the three paths can't
-// drift. No-op when Floors mode is off, on the Elevation layer (it sets the
-// level itself), or on Entities (no per-tile content, no elevation of its own).
+// stampActiveLevel lifts tile (x,z) to the active level — the single "a content
+// paint builds the active floor" step shared by applyTool, floodFill, and
+// fillEntireLayer so the three paths can't drift. The levels model is now
+// ALWAYS on (Photoshop-style), so every content paint targets the active level.
+// No-op on the Elevation layer (it sets the level itself) or Entities (no
+// per-tile content / no elevation of its own).
 func stampActiveLevel(s *State, x, z int) {
-	if !s.levelFocus || s.layer == LayerElevation || s.layer == LayerEntities {
+	if s.layer == LayerElevation || s.layer == LayerEntities {
 		return
 	}
 	if !s.area.InBounds(x, z) {
@@ -1182,11 +1183,10 @@ func floodFill(s *State, x, z int, b byte) {
 			}
 		}
 	})
-	// Floors mode: the flooded region joins the active floor — mirror of the
-	// per-cell stamp in applyTool, so Ctrl+click builds a floor the same way a
-	// stroke does. stampActiveLevel no-ops off Floors mode / on Elevation /
-	// Entities.
-	if s.levelFocus && s.layer != LayerElevation && s.layer != LayerEntities {
+	// The flooded region joins the active floor — mirror of the per-cell stamp
+	// in applyTool, so Ctrl+click builds a floor the same way a stroke does
+	// (levels model is always on now).
+	if s.layer != LayerElevation && s.layer != LayerEntities {
 		// Batch the elevation lift of the flooded region into one row-set
 		// rewrite rather than per-cell stampActiveLevel string rebuilds.
 		ch := core.ElevationChar(s.editLevel)
@@ -1272,11 +1272,10 @@ func fillEntireLayer(s *State) {
 	if s.layer == LayerWalls && brush.Char == core.TileRock {
 		pruneBlockedSpawns(&s.area)
 	}
-	// Floors mode: a full content fill lifts the whole map to the active floor,
-	// consistent with the per-cell / flood-fill stamp. (At level 0 this is a
-	// no-op — the common base-laying case stays flat.) Guarded so flat-map
-	// fills skip the per-cell loop entirely.
-	if s.levelFocus && s.layer != LayerElevation {
+	// A full content fill lifts the whole map to the active floor, consistent
+	// with the per-cell / flood-fill stamp. (At level 0 — the default and the
+	// common base-laying case — this is a no-op, so flat maps stay flat.)
+	if s.layer != LayerElevation {
 		// Batch the whole-map elevation lift into one row-set rewrite instead
 		// of a per-cell stampActiveLevel (each of which rebuilt a full row
 		// string) — same write as stampActiveLevel: ElevationChar(editLevel)

@@ -32,7 +32,8 @@
 //	         of the 2×2). All blocking; the anchor's mesh covers the
 //	         whole footprint and tails render nothing.
 //	ceiling  : '.' open (sky shows through), '#' solid overhead slab.
-//	elevation: per-tile ground LEVEL '0'..'9' (blank/absent ⇒ '0'). A ramp
+//	elevation: per-tile ground LEVEL — '0'..'9' for 0..9 then 'A'..'Z' for
+//	         10..35 (base-36, one char per cell; blank/absent ⇒ '0'). A ramp
 //	         floor tile stores its LOW level here; it rises one level toward
 //	         its arrow. Optional layer — older maps load as all-'0' (flat).
 package mapfile
@@ -801,14 +802,14 @@ func (mf *MapFile) validate() error {
 			if len(row) != mf.Width {
 				return fmt.Errorf("elevation layer row %d has %d cols, size declares %d", i, len(row), mf.Width)
 			}
-			// Every elevation cell must be a level digit '0'..'9' — the layer's
-			// documented domain. ElevationLevelAt silently reads anything else
-			// as ground level 0, so without this a stray non-digit (hand-edit,
-			// wrong layer pasted in) loads as flat ground and silently desyncs
-			// the intended cliff / ramp geometry with no diagnostic.
+			// Every elevation cell must be a level char — '0'..'9' for levels
+			// 0..9, then 'A'..'Z' for 10..35 (base-36, one char per cell).
+			// ElevationLevelAt reads anything else as ground level 0, so without
+			// this a stray char (hand-edit, wrong layer pasted in) loads as flat
+			// ground and silently desyncs the intended cliff / ramp geometry.
 			for c := 0; c < len(row); c++ {
-				if row[c] < '0' || row[c] > '9' {
-					return fmt.Errorf("elevation layer row %d col %d has non-digit %q (expected '0'..'9')", i, c, string(row[c]))
+				if b := row[c]; !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'Z')) {
+					return fmt.Errorf("elevation layer row %d col %d has bad level char %q (expected '0'..'9' or 'A'..'Z')", i, c, string(row[c]))
 				}
 			}
 		}

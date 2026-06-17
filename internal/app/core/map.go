@@ -412,19 +412,42 @@ func (a AreaDefinition) CeilingAt(x, z int) bool {
 // leave it nil) are uniformly flat.
 func (a AreaDefinition) ElevationLevelAt(x, z int) int {
 	c, ok := a.layerByteAt(a.Elevation, x, z)
-	if !ok || c < '0' || c > '9' {
+	if !ok {
 		return 0
 	}
-	return int(c - '0')
+	return ElevationLevelFromChar(c)
 }
 
-// ElevationChar encodes a level back to its on-disk / grid digit byte — the
-// inverse of ElevationLevelAt's `c - '0'` decode. Clamped to the single-digit
-// range [0, 9] so it always yields a valid '0'..'9' cell. The one home for the
-// `'0'+level` conversion the editor used to inline at every height-stamp and
-// height-glyph site (paint, flood/fill, ramp placement, slice-view digit).
+// MaxElevationLevel is the highest addressable ground level. Levels 0..9 use the
+// digits '0'..'9'; 10..35 extend into 'A'..'Z'. Keeping ONE char per elevation
+// cell (base-36) lets a map stack 36 floors without a multi-char cell format —
+// which would have to special-case elevation in every grid operation that
+// assumes 1 char = 1 cell (resize, copy/paste, cell-write, snapshot compare).
+const MaxElevationLevel = 35
+
+// ElevationLevelFromChar decodes an elevation cell byte to a level: '0'..'9' →
+// 0..9, 'A'..'Z' → 10..35. Anything else (blank, stray char) reads as flat
+// ground level 0, so maps without an elevation layer stay uniformly flat.
+func ElevationLevelFromChar(c byte) int {
+	switch {
+	case c >= '0' && c <= '9':
+		return int(c - '0')
+	case c >= 'A' && c <= 'Z':
+		return int(c-'A') + 10
+	}
+	return 0
+}
+
+// ElevationChar encodes a level back to its single grid byte — the inverse of
+// ElevationLevelFromChar. Clamped to [0, MaxElevationLevel] so it always yields
+// a valid cell ('0'..'9' then 'A'..'Z'). The one home for the level→char
+// conversion the editor uses at every height-stamp / ramp-placement site.
 func ElevationChar(level int) byte {
-	return byte('0' + Clamp(level, 0, 9))
+	level = Clamp(level, 0, MaxElevationLevel)
+	if level < 10 {
+		return byte('0' + level)
+	}
+	return byte('A' + (level - 10))
 }
 
 // IsRampChar reports whether a floor-layer char is one of the four directional

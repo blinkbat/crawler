@@ -267,26 +267,80 @@ func stepBrushSize(s *State, dir int) {
 	s.brushSize = stepBrush(s.brushSize, dir)
 }
 
-// stepEditLevel nudges the elevation height-selector by dir, clamped to the
-// valid range. Shared by the toolbar's Lvl -/+ buttons and PgUp/PgDn. In
-// Floors mode the active level IS the floor you're editing, so flash it for
-// feedback.
+// stepEditLevel changes the ACTIVE level by dir, clamped, and grows the Levels
+// panel range to include it. The active level is the floor every content paint
+// builds onto, so flash it for feedback. Shared by the Levels panel ±, the
+// toolbar's Lvl -/+ buttons, and PgUp/PgDn.
 func stepEditLevel(s *State, dir int) {
 	s.editLevel = clampLevel(s.editLevel + dir)
-	if s.levelFocus {
-		s.flash("Floor level " + strconv.Itoa(s.editLevel))
+	if s.editLevel > s.topLevel {
+		s.topLevel = s.editLevel
 	}
+	s.flash("Active level " + strconv.Itoa(s.editLevel))
 }
 
-// toggleLevelFocus flips the "Floors" editing lens. Shared by the toolbar's
-// Floors button (no key — a toolbar toggle like Ramp/Glyphs). See
-// State.levelFocus for what the mode does.
-func toggleLevelFocus(s *State) {
-	s.levelFocus = !s.levelFocus
-	if s.levelFocus {
-		s.flash("Floor editing ON — level " + strconv.Itoa(s.editLevel) + "; paint builds this floor")
-	} else {
-		s.flash("Floor editing OFF")
+// maxAreaLevel returns the highest elevation level any tile in the area uses,
+// clamped to the editor's range — so loading a map surfaces a Levels-panel row
+// for every floor it actually contains.
+func maxAreaLevel(a core.AreaDefinition) int {
+	hi := 0
+	for z := 0; z < a.Height; z++ {
+		for x := 0; x < a.Width; x++ {
+			if l := a.ElevationLevelAt(x, z); l > hi {
+				hi = l
+			}
+		}
+	}
+	if hi > maxEditLevel {
+		hi = maxEditLevel
+	}
+	return hi
+}
+
+// handleLevelsPanelClick dispatches a left-click inside the Levels panel: the
+// range steppers (− / +), a per-level visibility eye (Alt-click solos), or a
+// row-select that makes that level the active floor.
+func handleLevelsPanelClick(s *State, mp rl.Vector2) {
+	minus, plus := levelStepperRects(s)
+	if pointIn(mp, minus) {
+		if s.topLevel > 0 {
+			s.topLevel--
+			if s.editLevel > s.topLevel {
+				s.editLevel = s.topLevel
+			}
+		}
+		return
+	}
+	if pointIn(mp, plus) {
+		if s.topLevel < maxEditLevel {
+			s.topLevel++
+		}
+		return
+	}
+	// Eye toggles first so a click on the eye doesn't also re-select the level.
+	for i := 0; i < visibleLevelRows(s); i++ {
+		if pointIn(mp, levelEyeRect(s, i)) {
+			if _, _, alt := modifiers(); alt {
+				// Solo toggle: if level i is already the only one shown, reveal
+				// all; otherwise hide everything except i.
+				soloed := !s.levelHidden[i]
+				for j := range s.levelHidden {
+					if j != i && !s.levelHidden[j] {
+						soloed = false
+						break
+					}
+				}
+				for j := range s.levelHidden {
+					s.levelHidden[j] = !soloed && j != i
+				}
+			} else {
+				s.levelHidden[i] = !s.levelHidden[i]
+			}
+			return
+		}
+	}
+	if i := levelRowAt(s, mp); i >= 0 {
+		s.editLevel = clampLevel(i)
 	}
 }
 
@@ -496,6 +550,13 @@ func updateMouse(s *State) {
 		}
 		if hit := layerTabAt(s, mp); hit >= 0 {
 			s.layer = Layer(hit)
+			return
+		}
+		// Levels panel: range steppers, per-level eye toggles, and row-select
+		// (click a level to make it the active floor). Checked before the
+		// palette so a click in this column isn't swallowed by it.
+		if pointIn(mp, s.rect.levels) {
+			handleLevelsPanelClick(s, mp)
 			return
 		}
 		if hit := paletteToolAt(s, mp); hit >= 0 {
@@ -941,7 +1002,7 @@ func sampleBrushAt(s *State, x, z int) {
 		if !ok {
 			return
 		}
-		lvl := clampLevel(int(b) - '0')
+		lvl := clampLevel(core.ElevationLevelFromChar(b))
 		s.editLevel = lvl
 		s.flash("Picked level " + strconv.Itoa(lvl))
 		return
@@ -2161,6 +2222,11 @@ func openSelectedMap(s *State) Action {
 	s.redo = nil
 	s.dirty = false
 	clearSelection(s) // different map — old selection coords no longer apply
+	// Surface every level the loaded map uses in the Levels panel, and start on
+	// the ground floor (active level 0) per the fixed entry point.
+	s.topLevel = maxAreaLevel(area)
+	s.editLevel = 0
+	s.levelHidden = [maxEditLevel + 1]bool{}
 	// The area was replaced wholesale — invalidate the content-derived caches
 	// the same way performNewMap / undoOne / redoOne do, or the metadata
 	// panel's reachability badge and the hover tooltip keep showing the
