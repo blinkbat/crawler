@@ -145,13 +145,15 @@ func soundParamDefaults() soundParamSet {
 //
 // Three "body" font sizes (label / value / list) all collapse to one
 // soundFontBody — they had drifted to the same 16pt value, so the
-// distinction was misleading. Hint stays smaller for the footer; the
-// SOUNDS heading is drawn through render.DrawHeading (no local size).
+// distinction was misleading. Both alias the shared editor type scale
+// (palette.go) so the sound modal can't drift off it: body == editorFontBody,
+// the smaller footer hint == editorFontAccent. The SOUNDS heading is drawn
+// through render.DrawHeading (no local size).
 const (
 	soundModalW     = float32(900)
 	soundModalH     = float32(560)
-	soundFontBody   = float32(16)
-	soundFontHint   = float32(13)
+	soundFontBody   = editorFontBody
+	soundFontHint   = editorFontAccent
 	soundRowH       = float32(34) // slider row height
 	soundListRowH   = float32(30)
 	soundAssignRowH = float32(48) // two-line cue row (name + assigned)
@@ -319,14 +321,11 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int) soun
 	return l
 }
 
-// soundDragState is set while the mouse is held on a slider track —
-// motion updates the slider's value continuously. Released when the
-// mouse button releases. Index < 0 means "no active drag."
-type soundDragState struct {
-	sliderIdx int
-}
-
-var soundDrag = soundDragState{sliderIdx: -1}
+// soundDrag is set while the mouse is held on a slider track — motion updates
+// the slider's value continuously. Released when the mouse button releases.
+// Uses the shared sliderDragState (idx < 0 means "no active drag"); see
+// foeview.go for the type + its update protocol.
+var soundDrag = noSliderDrag
 
 // openSoundsModal seeds the sound modal's defaults if this is the
 // first time and switches state. Called by the Sounds topbar button.
@@ -343,9 +342,9 @@ func openSoundsModal(s *State) {
 	// Seed the disk-backed caches once on open; they're refreshed only on
 	// mutation thereafter, never per frame.
 	refreshSoundCaches(s)
-	// Reset any leftover drag from a prior session — a stale sliderIdx
+	// Reset any leftover drag from a prior session — a stale index
 	// would let the next mouse drag pop a different slider.
-	soundDrag.sliderIdx = -1
+	soundDrag = noSliderDrag
 }
 
 // refreshSoundCaches re-reads the saved-sounds directory listing and the
@@ -381,23 +380,19 @@ func updateSoundsModal(s *State) Action {
 	// Active slider drag: while held, map the mouse X within the track
 	// to a value in the slider's range. Snap to the slider's Step grain
 	// so dragging produces clean readouts instead of fractional noise.
-	if soundDrag.sliderIdx >= 0 {
-		if !mouseDown {
-			soundDrag.sliderIdx = -1
-		} else if soundDrag.sliderIdx < len(soundParamSliders) {
-			info := soundParamSliders[soundDrag.sliderIdx]
-			track := layout.sliderTracks[soundDrag.sliderIdx]
-			info.Set(&s.soundParams, sliderSnap(info.Min, info.Max, info.Step, track.X, track.Width, mp.X))
-			s.soundLeftPanel = soundPanelParams
-			s.soundCursor = soundDrag.sliderIdx
-		}
-	}
+	soundDrag.update(mouseDown, len(soundParamSliders), func(idx int) {
+		info := soundParamSliders[idx]
+		track := layout.sliderTracks[idx]
+		info.Set(&s.soundParams, sliderSnap(info.Min, info.Max, info.Step, track.X, track.Width, mp.X))
+		s.soundLeftPanel = soundPanelParams
+		s.soundCursor = idx
+	})
 
 	if mousePressed && pointIn(mp, layout.card) {
 		s.soundLeftPanel, s.soundCursor = handleSoundMouseClick(s, mp, &layout, savedSounds)
 	}
 	if mouseReleased {
-		soundDrag.sliderIdx = -1
+		soundDrag = noSliderDrag
 	}
 
 	// Name field typing: only while the focus is on the name row of the
@@ -445,7 +440,7 @@ func handleSoundMouseClick(s *State, mp rl.Vector2, l *soundLayout, savedSounds 
 	// click position so single-click also adjusts (not just drag).
 	for i := range soundParamSliders {
 		if pointIn(mp, l.sliderTracks[i]) {
-			soundDrag.sliderIdx = i
+			soundDrag.idx = i
 			return soundPanelParams, i
 		}
 	}
@@ -518,7 +513,7 @@ func updateSoundsParamsKeys(s *State) {
 		slider := soundParamSliders[s.soundCursor]
 		if delta := input.CursorLeftRight(); delta != 0 {
 			v := slider.Get(&s.soundParams) + float64(delta)*slider.Step
-			slider.Set(&s.soundParams, clampRange(v, slider.Min, slider.Max))
+			slider.Set(&s.soundParams, core.Clamp(v, slider.Min, slider.Max))
 		}
 		if rl.IsKeyPressed(rl.KeySpace) {
 			previewSoundParams(s.soundParams)
@@ -679,7 +674,7 @@ func drawSoundsModal(s *State, font rl.Font, theme render.Theme) {
 	drawSoundsAssignCol(s, font, theme, &l)
 
 	hint := "Click sliders to drag   Click Play/Save/X/Prev/Next   Tab cycle column   Esc close"
-	rl.DrawTextEx(font, hint,
+	render.DrawRichText(font, hint,
 		rl.NewVector2(l.card.X+18, l.card.Y+l.card.Height-26),
 		soundFontHint, 1, theme.TextHint)
 }
@@ -699,7 +694,7 @@ func drawSoundsParamsCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 	if nameFocused {
 		nameLabelCol = theme.BorderActive
 	}
-	rl.DrawTextEx(font, "Name", rl.NewVector2(l.paramsCol.X+12, l.nameField.Y+6), soundFontBody, 1, nameLabelCol)
+	render.DrawRichText(font, "Name", rl.NewVector2(l.paramsCol.X+12, l.nameField.Y+6), soundFontBody, 1, nameLabelCol)
 	drawTextField(font, l.nameField, s.soundName, nameFocused)
 	// Action buttons.
 	actionFocused := s.soundLeftPanel == soundPanelParams && s.soundCursor == soundActionCursorIdx()
@@ -727,9 +722,9 @@ func drawSoundsListCol(s *State, font rl.Font, theme render.Theme, l *soundLayou
 	drawSoundsColumnFrame(theme, l.listCol, s.soundLeftPanel == soundPanelList)
 	render.DrawSubHeading(font, "Saved sounds", l.listCol.X+12, l.listCol.Y+8, theme.BorderActive)
 	if len(names) == 0 {
-		rl.DrawTextEx(font, "(no saved sounds yet)",
+		render.DrawRichText(font, "(no saved sounds yet)",
 			rl.NewVector2(l.listCol.X+12, l.listCol.Y+44), soundFontBody, 1, theme.TextHint)
-		rl.DrawTextEx(font, "Save one from the left column.",
+		render.DrawRichText(font, "Save one from the left column.",
 			rl.NewVector2(l.listCol.X+12, l.listCol.Y+68), soundFontHint, 1, theme.TextHint)
 		return
 	}
@@ -744,10 +739,10 @@ func drawSoundsListCol(s *State, font rl.Font, theme render.Theme, l *soundLayou
 		drawButton(font, r.Delete, "X", false)
 	}
 	if l.listTopRow > 0 {
-		rl.DrawTextEx(font, "▲ more", rl.NewVector2(l.listCol.X+l.listCol.Width-70, l.listCol.Y+10), soundFontHint, 1, theme.TextHint)
+		render.DrawRichText(font, "▲ more", rl.NewVector2(l.listCol.X+l.listCol.Width-70, l.listCol.Y+10), soundFontHint, 1, theme.TextHint)
 	}
 	if l.listEnd < len(names) {
-		rl.DrawTextEx(font, "▼ more", rl.NewVector2(l.listCol.X+l.listCol.Width-70, l.listCol.Y+l.listCol.Height-20), soundFontHint, 1, theme.TextHint)
+		render.DrawRichText(font, "▼ more", rl.NewVector2(l.listCol.X+l.listCol.Width-70, l.listCol.Y+l.listCol.Height-20), soundFontHint, 1, theme.TextHint)
 	}
 }
 
@@ -767,7 +762,7 @@ func drawSoundsAssignCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 		if assigned != "" {
 			assignedLabel = "→ " + assigned
 		}
-		rl.DrawTextEx(font, assignedLabel,
+		render.DrawRichText(font, assignedLabel,
 			rl.NewVector2(r.Row.X+8, r.Row.Y+24),
 			soundFontHint, 1, theme.TextHint)
 		drawButton(font, r.Play, ">", false)
@@ -775,10 +770,10 @@ func drawSoundsAssignCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 		drawButton(font, r.CycleRight, ">", false)
 	}
 	if l.assignTopRow > 0 {
-		rl.DrawTextEx(font, "▲ more", rl.NewVector2(l.assignCol.X+l.assignCol.Width-70, l.assignCol.Y+10), soundFontHint, 1, theme.TextHint)
+		render.DrawRichText(font, "▲ more", rl.NewVector2(l.assignCol.X+l.assignCol.Width-70, l.assignCol.Y+10), soundFontHint, 1, theme.TextHint)
 	}
 	if l.assignEnd < len(assignableCueList) {
-		rl.DrawTextEx(font, "▼ more", rl.NewVector2(l.assignCol.X+l.assignCol.Width-70, l.assignCol.Y+l.assignCol.Height-20), soundFontHint, 1, theme.TextHint)
+		render.DrawRichText(font, "▼ more", rl.NewVector2(l.assignCol.X+l.assignCol.Width-70, l.assignCol.Y+l.assignCol.Height-20), soundFontHint, 1, theme.TextHint)
 	}
 }
 

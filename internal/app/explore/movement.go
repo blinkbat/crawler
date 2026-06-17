@@ -41,6 +41,9 @@ func Update(g *core.GameState) {
 	//   - PauseMenu: routes input through the menu; pause-key edges
 	//     toggle the menu from either state.
 	switch core.ActiveModal(g) {
+	case core.ModalDialog:
+		updateDialogModal(g)
+		return
 	case core.ModalLevelUp:
 		updateLevelUpModal(g)
 		return
@@ -208,19 +211,6 @@ func updateOptionsMenu(g *core.GameState) {
 			render.ToggleDisplayMode()
 		case core.OptionsMenuVibration:
 			g.RumbleEnabled = !g.RumbleEnabled
-		case core.OptionsMenuStats:
-			// Drop the menu and open the panels overlay on the Stats tab —
-			// the richer multi-tab dashboard the legacy compact view was a
-			// subset of.
-			g.OptionsMenuOpen = false
-			openPanels(g)
-			g.PanelsTab = core.PanelTabStats
-		case core.OptionsMenuQuests:
-			// Journal now lives in the char menu — open the panels overlay
-			// on the Quests tab (mirrors how OptionsMenuStats opens Stats).
-			g.OptionsMenuOpen = false
-			openPanels(g)
-			g.PanelsTab = core.PanelTabQuests
 		case core.OptionsMenuSave:
 			saveGame(g)
 		case core.OptionsMenuRestart:
@@ -281,6 +271,8 @@ func updateDebugMenu(g *core.GameState) {
 			core.TriggerRumble(&g.Battle, core.RumbleTestStrength, core.RumbleTestDur)
 		case core.DebugMenuRetro:
 			openRetroMenu(g)
+		case core.DebugMenuStartDialog:
+			startFirstAreaDialog(g)
 		case core.DebugMenuClose:
 			g.DebugMenuOpen = false
 		}
@@ -421,18 +413,22 @@ func updatePlayer(g *core.GameState, dt float32) {
 		return
 	}
 
+	// Held (level) reads, not edge: the player completes one step/turn per
+	// animation, and holding the key re-fires the next as soon as this one
+	// lands — continuous movement paced by the animation. A tap still steps
+	// exactly once.
 	switch {
-	case input.TurnLeftPressed():
+	case input.TurnLeftHeld():
 		startTurn(p, -1)
-	case input.TurnRightPressed():
+	case input.TurnRightHeld():
 		startTurn(p, 1)
-	case input.UpPressed():
+	case input.StepForwardHeld():
 		startStep(p, g, 0, 1)
-	case input.DownPressed():
+	case input.StepBackHeld():
 		startStep(p, g, 0, -1)
-	case input.StrafeLeftPressed():
+	case input.StrafeLeftHeld():
 		startStep(p, g, -1, 0)
-	case input.StrafeRightPressed():
+	case input.StrafeRightHeld():
 		startStep(p, g, 1, 0)
 	}
 }
@@ -629,6 +625,13 @@ func updateAnimation(g *core.GameState, dt float32) {
 	// checks g.PendingTransition.TargetMap != "" and swaps.
 	if finishedKind == core.AnimStep {
 		tryQueueDoorTransition(g)
+		// Enter-tile dialog triggers fire on the same step-land beat as door
+		// transitions. Skip when a door prompt opened on this tile (a portal
+		// takes precedence) so the player isn't handed two overlays at once;
+		// FireEnterTileTriggers itself no-ops if a dialog is already open.
+		if g.DoorPrompt < 0 {
+			core.FireEnterTileTriggers(g, g.Player.TileX, g.Player.TileZ)
+		}
 	}
 }
 

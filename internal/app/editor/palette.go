@@ -13,13 +13,15 @@ import (
 // editorFontAccent/Tiny cover the dense list-row and sub-hint sizes;
 // sounds.go keeps its own soundFont* trio for the sound modal.
 const (
-	editorFontTopbar = float32(18) // topbar map-id label
-	editorFontBody   = float32(16) // buttons + primary panel text
-	editorFontLabel  = float32(14) // topbar info line / field labels
-	editorFontAccent = float32(13) // dense list rows / palette hints
-	editorFontHint   = float32(12) // compact modal/footer hints
-	editorFontTiny   = float32(11) // sub-hint captions
-	editorFontTick   = float32(10) // grid axis tick labels
+	// Bumped one notch up (was 18/16/14/13/12/11/10) alongside the game's
+	// canonical sizes for the Della Respira face.
+	editorFontTopbar = float32(20) // topbar map-id label
+	editorFontBody   = float32(18) // buttons + primary panel text
+	editorFontLabel  = float32(16) // topbar info line / field labels
+	editorFontAccent = float32(15) // dense list rows / palette hints
+	editorFontHint   = float32(14) // compact modal/footer hints
+	editorFontTiny   = float32(13) // sub-hint captions
+	editorFontTick   = float32(12) // grid axis tick labels
 )
 
 // Editor UI chrome palette. The map-content colors (tile brushes, swatches)

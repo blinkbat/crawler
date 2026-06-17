@@ -235,6 +235,70 @@ func absFloat(f float64) float64 {
 	return f
 }
 
+// TestProjectXP_Cases pins the pure level-projection used by both AddXP and
+// the victory spoils animation. Curve is geometric: XPForLevel(1)=100,
+// (2)=200, (3)=400 (LevelXPBase=100, LevelXPRatio=2).
+func TestProjectXP_Cases(t *testing.T) {
+	cases := []struct {
+		startLvl, startXP, added    int
+		wantLvl, wantXP, wantGained int
+		note                        string
+	}{
+		{1, 0, 50, 1, 50, 0, "no crossing"},
+		{1, 0, 100, 2, 0, 1, "exact single crossing"},
+		{1, 0, 150, 2, 50, 1, "single crossing with remainder"},
+		{1, 0, 350, 3, 50, 2, "multi-level crossing (100+200, +50)"},
+		{2, 150, 100, 3, 50, 1, "mid-level start crosses one"},
+		{1, 50, 0, 1, 50, 0, "zero added is a no-op"},
+		{1, 0, -10, 1, 0, 0, "negative added clamps to zero"},
+		{0, 0, 0, 1, 0, 0, "sub-base start normalizes to BaseLevel"},
+	}
+	for _, tc := range cases {
+		lvl, xp, gained := ProjectXP(tc.startLvl, tc.startXP, tc.added)
+		if lvl != tc.wantLvl || xp != tc.wantXP || gained != tc.wantGained {
+			t.Errorf("ProjectXP(%d,%d,%d) = (lvl %d, xp %d, gained %d); want (%d,%d,%d) — %s",
+				tc.startLvl, tc.startXP, tc.added, lvl, xp, gained,
+				tc.wantLvl, tc.wantXP, tc.wantGained, tc.note)
+		}
+	}
+}
+
+// TestAddXP_MatchesProjectXP locks AddXP's mutation to ProjectXP's pure
+// result (so the spoils screen's animated preview and the real award can't
+// drift) AND that each crossed level grants the right point payouts.
+func TestAddXP_MatchesProjectXP(t *testing.T) {
+	cases := []struct{ startLvl, startXP, amount int }{
+		{1, 0, 50}, {1, 0, 150}, {1, 0, 350}, {2, 150, 100}, {1, 90, 1000},
+	}
+	for _, tc := range cases {
+		wantLvl, wantXP, wantGained := ProjectXP(tc.startLvl, tc.startXP, tc.amount)
+		m := PartyMember{Level: tc.startLvl, XP: tc.startXP, HP: 10}
+		got := AddXP(&m, tc.amount)
+		if got != wantGained {
+			t.Errorf("AddXP(%d,%d,+%d) returned %d, want %d", tc.startLvl, tc.startXP, tc.amount, got, wantGained)
+		}
+		if m.Level != wantLvl || m.XP != wantXP {
+			t.Errorf("AddXP(%d,%d,+%d) left (lvl %d, xp %d), want (%d,%d)",
+				tc.startLvl, tc.startXP, tc.amount, m.Level, m.XP, wantLvl, wantXP)
+		}
+		if m.PendingLevelUps != wantGained*LevelStatPoints {
+			t.Errorf("AddXP gained %d levels → PendingLevelUps %d, want %d", wantGained, m.PendingLevelUps, wantGained*LevelStatPoints)
+		}
+		if m.SkillPoints != wantGained*LevelSkillPoints {
+			t.Errorf("AddXP gained %d levels → SkillPoints %d, want %d", wantGained, m.SkillPoints, wantGained*LevelSkillPoints)
+		}
+	}
+}
+
+// TestAddXP_DeadMemberNoop confirms a downed member earns nothing (the
+// "living members get XP" rule the spoils snapshot relies on for GainedXP).
+func TestAddXP_DeadMemberNoop(t *testing.T) {
+	m := PartyMember{Level: 2, XP: 80, HP: 0}
+	if got := AddXP(&m, 500); got != 0 || m.Level != 2 || m.XP != 80 || m.PendingLevelUps != 0 {
+		t.Errorf("AddXP on downed member mutated state: gained %d, lvl %d, xp %d, pending %d", got, m.Level, m.XP, m.PendingLevelUps)
+	}
+}
+
 // TestRestoreMP_ClampsAndReportsDelta locks the Magic Phial's MP-restore
 // helper: it tops up toward MaxMP, returns the actual amount restored, and
 // no-ops on a downed member (mirroring HealMember).

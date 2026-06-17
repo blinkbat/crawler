@@ -18,6 +18,20 @@ import (
 // is always a valid party seat index (>= 0).
 const noCaster = -1
 
+// validMember is the explore-side bounds guard: it resolves idx to a live
+// pointer into g.Party, returning ok=false when idx is out of range. The
+// `idx < 0 || idx >= len(g.Party)` check was open-coded at every panels /
+// skill-tree caster lookup; centralizing it keeps the slice-access contract
+// in one place. Callers layer their own HP / affordability checks on top —
+// this only answers "is the index a real party seat" and hands back the
+// pointer so the caller doesn't re-index.
+func validMember(g *core.GameState, idx int) (*core.PartyMember, bool) {
+	if idx < 0 || idx >= len(g.Party) {
+		return nil, false
+	}
+	return &g.Party[idx], true
+}
+
 // tryUseItem handles a use press on the Items tab. The cursored stack
 // must be a healing consumable; it opens the ally-target picker carrying
 // that item. Equipment / no-effect rows ping the miss cue.
@@ -47,10 +61,11 @@ func tryUseItem(g *core.GameState) {
 // pay the MP now.
 func tryUseSkill(g *core.GameState) {
 	caster := g.PanelsRowCursor
-	if caster < 0 || caster >= len(g.Party) {
+	m, ok := validMember(g, caster)
+	if !ok {
 		return
 	}
-	if g.Party[caster].HP <= 0 {
+	if m.HP <= 0 {
 		// A member downed in a won battle keeps HP=0 with MP intact into
 		// exploration; the Skills-tab cursor can still land on its column.
 		// Don't let a corpse cast.
@@ -64,7 +79,7 @@ func tryUseSkill(g *core.GameState) {
 	// caster can currently afford so the chooser never lists a cast beginHealCast
 	// would just refuse (and so an unaffordable two-heal Cleric falls through to
 	// the "no usable heal" miss ping instead of a dead-end chooser).
-	heals := affordableOutOfBattleHeals(g.Party[caster])
+	heals := affordableOutOfBattleHeals(*m)
 	switch len(heals) {
 	case 0:
 		audio.Play(audio.SoundInputMiss) // this member has no out-of-battle heal
@@ -107,11 +122,12 @@ func affordableOutOfBattleHeals(m core.PartyMember) []core.SkillID {
 // MP (the single-target path bills it on apply, in applyUseToMember). A short
 // MP / corpse re-check guards the gap between choosing and casting.
 func beginHealCast(g *core.GameState, caster int, skill core.SkillID) {
-	if caster < 0 || caster >= len(g.Party) || g.Party[caster].HP <= 0 {
+	m, ok := validMember(g, caster)
+	if !ok || m.HP <= 0 {
 		audio.Play(audio.SoundInputMiss)
 		return
 	}
-	if !core.CanAffordSkill(g.Party[caster], skill) {
+	if !core.CanAffordSkill(*m, skill) {
 		audio.Play(audio.SoundInputMiss) // not enough MP
 		return
 	}
@@ -133,9 +149,9 @@ func beginHealCast(g *core.GameState, caster int, skill core.SkillID) {
 		audio.Play(audio.SoundInputMiss)
 		return
 	}
-	amount := core.SkillHealFor(&g.Party[caster], skill)
+	amount := core.SkillHealFor(m, skill)
 	core.HealWholeParty(g, amount)
-	core.SpendSkillMP(&g.Party[caster], skill)
+	core.SpendSkillMP(m, skill)
 	audio.Play(audio.SoundHeal)
 }
 
@@ -236,9 +252,9 @@ func applyUseToMember(g *core.GameState, member int) {
 		core.RestoreMP(m, def.MPAmount)
 		audio.Play(audio.SoundHeal)
 	case g.UsePendingSkill != core.SkillNone:
-		caster := g.UsePendingCaster
 		skill := g.UsePendingSkill
-		if caster < 0 || caster >= len(g.Party) || g.Party[caster].HP <= 0 {
+		c, ok := validMember(g, g.UsePendingCaster)
+		if !ok || c.HP <= 0 {
 			// Caster out of range, or died between opening the picker and
 			// confirming — a corpse can't pay MP or cast.
 			break
@@ -247,16 +263,17 @@ func applyUseToMember(g *core.GameState, member int) {
 		// core.MemberCanBeHealed predicate (same HP rule the item path uses
 		// via core.ItemHelpsTarget). Check before spending MP so a no-op cast
 		// costs nothing. Bounds-checked first so the index can't panic.
-		if member < 0 || member >= len(g.Party) || !core.MemberCanBeHealed(g.Party[member]) {
+		recipient, ok := validMember(g, member)
+		if !ok || !core.MemberCanBeHealed(*recipient) {
 			audio.Play(audio.SoundInputMiss)
 			break
 		}
-		heal := core.SkillHealFor(&g.Party[caster], skill)
-		if !core.SpendSkillMP(&g.Party[caster], skill) {
+		heal := core.SkillHealFor(c, skill)
+		if !core.SpendSkillMP(c, skill) {
 			audio.Play(audio.SoundInputMiss) // MP drained between open and confirm
 			break
 		}
-		core.HealMember(&g.Party[member], heal)
+		core.HealMember(recipient, heal)
 		audio.Play(audio.SoundHeal)
 	}
 	closeUseTarget(g)

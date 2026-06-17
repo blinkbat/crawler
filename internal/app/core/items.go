@@ -1,5 +1,7 @@
 package core
 
+import "crawler/internal/app/core/mapfile"
+
 // ItemKind identifies a consumable item. Items are stack-counted in
 // GameState.Inventory: one ItemStack per kind with a Count.
 type ItemKind int
@@ -315,7 +317,7 @@ var (
 // less surprising than a future "Chest authored with one item but
 // loads with zero" bug after someone added an item named "(empty)".
 var reservedItemNames = map[string]struct{}{
-	"(empty)": {},
+	mapfile.EmptyChestToken: {},
 }
 
 // Guard the item registry against names that collide with the chest
@@ -435,13 +437,7 @@ func LiveStacks(inv []ItemStack) []ItemStack {
 // to allocate. The filtered content is identical to LiveStacks, so picker
 // indices still line up with drawn rows regardless of which form is used.
 func LiveStacksInto(inv, buf []ItemStack) []ItemStack {
-	buf = buf[:0]
-	for _, s := range inv {
-		if s.Count > 0 {
-			buf = append(buf, s)
-		}
-	}
-	return buf
+	return filterInto(buf, inv, func(s ItemStack) bool { return s.Count > 0 })
 }
 
 // LiveStackCount returns how many inventory entries have a positive
@@ -523,13 +519,7 @@ func LiveConsumables(inv []ItemStack) []ItemStack {
 // LiveConsumablesInto is the buffer-reusing form of LiveConsumables
 // (mirrors LiveStacksInto) for the per-frame renderer. Pass nil to allocate.
 func LiveConsumablesInto(inv, buf []ItemStack) []ItemStack {
-	buf = buf[:0]
-	for _, s := range inv {
-		if liveConsumable(s) {
-			buf = append(buf, s)
-		}
-	}
-	return buf
+	return filterInto(buf, inv, liveConsumable)
 }
 
 // HasConsumable reports whether the inventory holds any battle-usable

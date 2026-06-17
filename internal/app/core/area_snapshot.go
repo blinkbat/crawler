@@ -23,6 +23,7 @@ func AreaContentEqual(a, b AreaDefinition) bool {
 		a.Materials != b.Materials ||
 		a.StartTileX != b.StartTileX || a.StartTileZ != b.StartTileZ ||
 		a.StartFacing != b.StartFacing ||
+		a.CrystalsAuthored != b.CrystalsAuthored ||
 		a.QuietMessage != b.QuietMessage {
 		return false
 	}
@@ -50,10 +51,44 @@ func AreaContentEqual(a, b AreaDefinition) bool {
 	if !packSpawnsEqual(a.PackSpawns, b.PackSpawns) ||
 		!chestSpawnsEqual(a.ChestSpawns, b.ChestSpawns) ||
 		!slices.Equal(a.DoorSpawns, b.DoorSpawns) ||
-		!customEnemiesEqual(a.CustomEnemies, b.CustomEnemies) {
+		!slices.Equal(a.CrystalSpawns, b.CrystalSpawns) ||
+		!customEnemiesEqual(a.CustomEnemies, b.CustomEnemies) ||
+		!dialogsEqual(a.Dialogs, b.Dialogs) ||
+		!slices.Equal(a.Triggers, b.Triggers) {
 		return false
 	}
 	return true
+}
+
+// dialogsEqual deep-compares two areas' dialog lists. DialogChoiceCondition
+// is an all-comparable struct (slices.Equal works), but nodes/choices carry a
+// *DialogAction pointer, so those need a deref-aware walk rather than ==.
+func dialogsEqual(a, b []DialogDefinition) bool {
+	return slices.EqualFunc(a, b, func(ad, bd DialogDefinition) bool {
+		return ad.ID == bd.ID && ad.StartNodeID == bd.StartNodeID &&
+			slices.EqualFunc(ad.Nodes, bd.Nodes, dialogNodeEqual)
+	})
+}
+
+func dialogNodeEqual(a, b DialogNode) bool {
+	return a.ID == b.ID && a.SpeakerID == b.SpeakerID && a.Text == b.Text &&
+		a.NextNodeID == b.NextNodeID && a.ContinueLabel == b.ContinueLabel &&
+		a.IsMenuNode == b.IsMenuNode &&
+		dialogActionEqual(a.EndAction, b.EndAction) &&
+		slices.EqualFunc(a.Choices, b.Choices, dialogChoiceEqual)
+}
+
+func dialogChoiceEqual(a, b DialogChoice) bool {
+	return a.ID == b.ID && a.Label == b.Label && a.NextNodeID == b.NextNodeID &&
+		dialogActionEqual(a.EndAction, b.EndAction) &&
+		slices.Equal(a.Conditions, b.Conditions)
+}
+
+func dialogActionEqual(a, b *DialogAction) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // optionalLayerEqual compares two optional grid layers (Ceiling, Elevation),
@@ -165,10 +200,69 @@ func CloneArea(a AreaDefinition) AreaDefinition {
 		}
 	}
 	out.DoorSpawns = append([]DoorSpawn(nil), a.DoorSpawns...)
+	// CrystalSpawn is all-comparable (no nested slices), so a plain slice
+	// copy is a full deep copy — matching the DoorSpawn line above.
+	out.CrystalSpawns = append([]CrystalSpawn(nil), a.CrystalSpawns...)
 	out.CustomEnemies = make([]CustomEnemyDef, len(a.CustomEnemies))
 	for i, ce := range a.CustomEnemies {
 		out.CustomEnemies[i] = ce
 		out.CustomEnemies[i].Skills = append([]SkillID(nil), ce.Skills...)
 	}
+	out.Dialogs = CloneDialogs(a.Dialogs)
+	// DialogTrigger is all-comparable (no slices/pointers), so a plain slice
+	// copy is a full deep copy — no per-element walk needed (unlike Dialogs).
+	out.Triggers = append([]DialogTrigger(nil), a.Triggers...)
 	return out
+}
+
+// CloneDialogs deep-copies a dialog list so an editor undo snapshot (or a
+// runtime StartDialog copy) shares no backing slices / action pointers with
+// the source. Exported so StartDialog and the editor can take an independent
+// copy through one helper.
+func CloneDialogs(in []DialogDefinition) []DialogDefinition {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]DialogDefinition, len(in))
+	for i, d := range in {
+		out[i] = CloneDialogDef(d)
+	}
+	return out
+}
+
+// CloneDialogDef deep-copies a single definition — its Nodes slice, each
+// node's Choices slice, every Conditions slice, and the *DialogAction pointers
+// — so the copy shares no mutable backing with the source. StartDialog uses it
+// to take a self-contained runtime copy of the area's authored definition.
+func CloneDialogDef(d DialogDefinition) DialogDefinition {
+	out := DialogDefinition{
+		ID:          d.ID,
+		StartNodeID: d.StartNodeID,
+		Nodes:       make([]DialogNode, len(d.Nodes)),
+	}
+	for j, n := range d.Nodes {
+		cn := n
+		cn.EndAction = cloneDialogAction(n.EndAction)
+		if len(n.Choices) == 0 {
+			cn.Choices = nil
+		} else {
+			cn.Choices = make([]DialogChoice, len(n.Choices))
+			for k, c := range n.Choices {
+				cc := c
+				cc.EndAction = cloneDialogAction(c.EndAction)
+				cc.Conditions = append([]DialogChoiceCondition(nil), c.Conditions...)
+				cn.Choices[k] = cc
+			}
+		}
+		out.Nodes[j] = cn
+	}
+	return out
+}
+
+func cloneDialogAction(a *DialogAction) *DialogAction {
+	if a == nil {
+		return nil
+	}
+	cp := *a
+	return &cp
 }

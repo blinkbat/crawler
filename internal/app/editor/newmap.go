@@ -131,7 +131,7 @@ func drawNewMapModal(s *State, font rl.Font, theme render.Theme) {
 
 	// Footer buttons + hint row.
 	drawModalButtons(font, []rl.Rectangle{l.createBtn, l.cancelBtn}, newMapBtnLabels)
-	rl.DrawTextEx(font, "Click a swatch = floor   ·   Tab cycle fields   ·   Enter create   ·   Esc cancel",
+	render.DrawRichText(font, "Click a swatch = floor   ·   Tab cycle fields   ·   Enter create   ·   Esc cancel",
 		rl.NewVector2(l.card.X+20, l.card.Y+l.card.Height-24),
 		editorFontHint, 1, theme.TextHint)
 }

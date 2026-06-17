@@ -14,7 +14,7 @@ import (
 // top tab strip; this draws the sub-tab header strip, then fills the rest of
 // the body with the active sub-view. Both views are read-only; PanelsRowCursor
 // scrolls whichever list is showing.
-func drawPanelsQuests(g core.GameState, assets Resources, body rl.Rectangle) {
+func drawPanelsQuests(g *core.GameState, assets Resources, body rl.Rectangle) {
 	font := assets.hudFont
 	headerH := drawJournalSubtabHeader(font, g.JournalTab, body)
 	inner := rl.NewRectangle(body.X, body.Y+headerH, body.Width, body.Height-headerH)
@@ -31,21 +31,10 @@ func drawPanelsQuests(g core.GameState, assets Resources, body rl.Rectangle) {
 // underline, the other muted. Returns the vertical space it consumed so the
 // caller can place the sub-view below it.
 func drawJournalSubtabHeader(font rl.Font, active core.JournalSubtab, body rl.Rectangle) float32 {
-	x := body.X + 8
-	const gap = float32(22)
-	for s := core.JournalSubtab(0); s < core.JournalSubtabCount; s++ {
-		label := core.JournalSubtabLabel(s)
-		col := textMuted
-		if s == active {
-			col = textPrimary
-		}
-		drawTextWithShadow(font, label, x, body.Y+2, FontBody, col)
-		w := journalMeasureCache.measure(font, label, FontBody, 1).X
-		if s == active {
-			rl.DrawRectangle(int32(x), int32(body.Y+2+FontBody+2), int32(w), 2, inkAccent)
-		}
-		x += w + gap
-	}
+	drawTextTabStrip(font, body.X+journalRowInsetX, body.Y+2, int(core.JournalSubtabCount), int(active),
+		func(i int) string { return core.JournalSubtabLabel(core.JournalSubtab(i)) },
+		func(s string) float32 { return journalMeasureCache.measure(font, s, FontBody, 1).X },
+		textPrimary, 22, true)
 	return FontBody + 14
 }
 
@@ -61,6 +50,10 @@ const (
 	journalRowH        = float32(52)
 	journalListTopDY   = float32(30) // tally line is FontSmall at +4; list starts below it
 	journalRowDetailDY = float32(26)
+	// journalRowInsetX is the left inset shared by the sub-tab header, the tally
+	// line, the row text, and the selection plate so they all align on one edge
+	// (was a bare body.X+8 repeated across the sub-views).
+	journalRowInsetX = float32(8)
 )
 
 // The Journal tab re-measures the same handful of stable strings and
@@ -94,11 +87,14 @@ func journalTally(a, b int, bestiary bool) string {
 	return s
 }
 
-// bestiaryRowText holds a bestiary row's pre-formatted detail strings. A known
-// row uses hp + meta (drawn on one line, meta offset past hp); an unidentified
-// row uses detail alone.
+// bestiaryRowText holds a bestiary row's pre-formatted detail strings. `hp` is
+// drawn first (claret when identified, muted "HP ???" when not); `segs` are the
+// muted follow-on facts, each drawn after a small DRAWN diamond pip separator
+// (the old inline "•" bullets fell out of the procedural font atlas and rendered
+// as "?", so the separators are now pixel symbols, not glyphs).
 type bestiaryRowText struct {
-	hp, meta, detail string
+	hp   string
+	segs []string
 }
 
 type bestiaryRowKey struct {
@@ -113,6 +109,24 @@ type bestiaryRowKey struct {
 // Bestiary sub-tab is open. Bounded: enemy kinds × kill counts actually seen.
 var bestiaryRowCache = map[bestiaryRowKey]bestiaryRowText{}
 
+// drawBestiaryRowDetail paints a row's HP value (in hpCol) followed by each meta
+// segment in muted type, each preceded by a small DRAWN diamond pip — the pixel-
+// symbol replacement for the old "•" bullets that the font atlas couldn't render
+// (they showed as "?"). Pips are font-independent, so they always read.
+func drawBestiaryRowDetail(font rl.Font, t bestiaryRowText, x, y float32, hpCol rl.Color) {
+	drawTextWithShadow(font, t.hp, x, y, FontSmall, hpCol)
+	cursor := x + journalMeasureCache.measure(font, t.hp, FontSmall, 1).X
+	const sepGap = float32(9)
+	midY := y + FontSmall/2
+	for _, seg := range t.segs {
+		cursor += sepGap
+		drawDiamondPip(cursor, midY, 2.2, fadeColor(giltDim, 0.7))
+		cursor += sepGap
+		drawTextWithShadow(font, seg, cursor, y, FontSmall, textMuted)
+		cursor += journalMeasureCache.measure(font, seg, FontSmall, 1).X
+	}
+}
+
 func bestiaryRowStrings(kind core.EnemyKind, maxHP, kills int, scanned, known bool) bestiaryRowText {
 	k := bestiaryRowKey{kind: kind, kills: kills, scanned: scanned, known: known}
 	if t, ok := bestiaryRowCache[k]; ok {
@@ -125,9 +139,13 @@ func bestiaryRowStrings(kind core.EnemyKind, maxHP, kills int, scanned, known bo
 			tag = "scanned"
 		}
 		t.hp = fmt.Sprintf("HP %d", maxHP)
-		t.meta = fmt.Sprintf("   •   defeated %d   •   identified (%s)", kills, tag)
+		t.segs = []string{
+			fmt.Sprintf("defeated %d", kills),
+			fmt.Sprintf("identified (%s)", tag),
+		}
 	} else {
-		t.detail = fmt.Sprintf("HP ???   •   defeated %d / %d to identify", kills, core.BestiaryIDKills)
+		t.hp = "HP ???"
+		t.segs = []string{fmt.Sprintf("defeated %d / %d to identify", kills, core.BestiaryIDKills)}
 	}
 	bestiaryRowCache[k] = t
 	return t
@@ -155,7 +173,7 @@ func journalScrollFirst(cursor, count, visible int) int {
 // then a two-line row per quest (title + muted description), the cursor row
 // highlighted; completed quests render muted with a "— Complete" suffix. The
 // journal is empty for now, so the common case is the placeholder line.
-func drawJournalQuests(g core.GameState, font rl.Font, body rl.Rectangle) {
+func drawJournalQuests(g *core.GameState, font rl.Font, body rl.Rectangle) {
 	quests := g.Quests
 	if len(quests) == 0 {
 		drawEmptyLedgerNote(font, body, "No quests yet.",
@@ -164,28 +182,39 @@ func drawJournalQuests(g core.GameState, font rl.Font, body rl.Rectangle) {
 	}
 
 	tally := journalTally(core.ActiveQuestCount(quests), core.CompletedQuestCount(quests), false)
-	drawTextWithShadow(font, tally, body.X+8, body.Y+4, FontSmall, textLabel)
+	drawTextWithShadow(font, tally, body.X+journalRowInsetX, body.Y+4, FontSmall, textLabel)
 
-	listTop := body.Y + journalListTopDY
-	visible := int((body.Y + body.Height - listTop) / journalRowH)
-	first := journalScrollFirst(g.PanelsRowCursor, len(quests), visible)
-	rowY := listTop
-	for i := first; i < len(quests); i++ {
+	forEachJournalRow(body, g.PanelsRowCursor, len(quests), func(i int, rowY float32) {
 		q := quests[i]
-		if rowY+journalRowH > body.Y+body.Height {
-			break // don't overflow the body rect
-		}
-		if i == g.PanelsRowCursor {
-			DrawSelectedRowI(int32(body.X), int32(rowY-2), int32(body.Width), int32(journalRowH-6))
-		}
 		titleCol := textPrimary
 		titleText := q.Title
 		if q.IsComplete() {
 			titleCol = textMuted
 			titleText = q.Title + "  — Complete"
 		}
-		drawTextWithShadow(font, titleText, body.X+8, rowY+2, FontBody, titleCol)
-		drawTextWithShadow(font, q.Desc, body.X+8, rowY+journalRowDetailDY, FontSmall, textMuted)
+		drawTextWithShadow(font, titleText, body.X+journalRowInsetX, rowY+2, FontBody, titleCol)
+		drawTextWithShadow(font, q.Desc, body.X+journalRowInsetX, rowY+journalRowDetailDY, FontSmall, textMuted)
+	})
+}
+
+// forEachJournalRow walks the visible window of a journal list — the Quests
+// and Bestiary sub-views share it — painting the selection plate on the cursor
+// row and calling fn(i, rowY) to draw each row's content. Centralizes the
+// paging math, the body-overflow guard, and the -2/-6 selection-plate insets
+// so the two sub-views can't drift on copy-tuned literals.
+func forEachJournalRow(body rl.Rectangle, cursor, count int, fn func(i int, rowY float32)) {
+	listTop := body.Y + journalListTopDY
+	visible := int((body.Y + body.Height - listTop) / journalRowH)
+	first := journalScrollFirst(cursor, count, visible)
+	rowY := listTop
+	for i := first; i < count; i++ {
+		if rowY+journalRowH > body.Y+body.Height {
+			break // don't overflow the body rect
+		}
+		if i == cursor {
+			DrawSelectedRowI(int32(body.X), int32(rowY-2), int32(body.Width), int32(journalRowH-6))
+		}
+		fn(i, rowY)
 		rowY += journalRowH
 	}
 }
@@ -196,8 +225,13 @@ func drawJournalQuests(g core.GameState, font rl.Font, body rl.Rectangle) {
 // shows its real HP in claret and an "identified" tag; an unidentified kind
 // shows "HP ???" and progress toward the 5-kill threshold. Read-only;
 // PanelsRowCursor highlights the focused row.
-func drawJournalBestiary(g core.GameState, font rl.Font, body rl.Rectangle) {
-	seen := g.Bestiary.SeenKinds()
+// bestiarySeenBuf is the reused scratch slice for the per-frame Bestiary tab
+// draw, so SeenKindsInto doesn't allocate a fresh []EnemyKind every frame.
+var bestiarySeenBuf []core.EnemyKind
+
+func drawJournalBestiary(g *core.GameState, font rl.Font, body rl.Rectangle) {
+	seen := g.Bestiary.SeenKindsInto(bestiarySeenBuf)
+	bestiarySeenBuf = seen[:0]
 	if len(seen) == 0 {
 		drawEmptyLedgerNote(font, body, "No foes recorded yet.",
 			"Defeat or Scan enemies to fill the bestiary.")
@@ -205,33 +239,20 @@ func drawJournalBestiary(g core.GameState, font rl.Font, body rl.Rectangle) {
 	}
 
 	tally := journalTally(len(seen), core.EnemyKindCount(), true)
-	drawTextWithShadow(font, tally, body.X+8, body.Y+4, FontSmall, textLabel)
+	drawTextWithShadow(font, tally, body.X+journalRowInsetX, body.Y+4, FontSmall, textLabel)
 
-	listTop := body.Y + journalListTopDY
-	visible := int((body.Y + body.Height - listTop) / journalRowH)
-	first := journalScrollFirst(g.PanelsRowCursor, len(seen), visible)
-	rowY := listTop
-	for i := first; i < len(seen); i++ {
+	forEachJournalRow(body, g.PanelsRowCursor, len(seen), func(i int, rowY float32) {
 		kind := seen[i]
-		if rowY+journalRowH > body.Y+body.Height {
-			break // don't overflow the body rect
-		}
-		if i == g.PanelsRowCursor {
-			DrawSelectedRowI(int32(body.X), int32(rowY-2), int32(body.Width), int32(journalRowH-6))
-		}
 		def := core.EnemyInfo(kind)
 		entry := g.Bestiary.Entry(kind)
-		drawTextWithShadow(font, def.Name, body.X+8, rowY+2, FontBody, textPrimary)
+		drawTextWithShadow(font, def.Name, body.X+journalRowInsetX, rowY+2, FontBody, textPrimary)
 
 		known := g.Bestiary.Knows(kind)
 		rowText := bestiaryRowStrings(kind, def.MaxHP, entry.Kills, entry.Scanned, known)
+		hpCol := textMuted
 		if known {
-			drawTextWithShadow(font, rowText.hp, body.X+8, rowY+journalRowDetailDY, FontSmall, barEnemyHP)
-			hpW := journalMeasureCache.measure(font, rowText.hp, FontSmall, 1).X
-			drawTextWithShadow(font, rowText.meta, body.X+8+hpW, rowY+journalRowDetailDY, FontSmall, textMuted)
-		} else {
-			drawTextWithShadow(font, rowText.detail, body.X+8, rowY+journalRowDetailDY, FontSmall, textMuted)
+			hpCol = barEnemyHP
 		}
-		rowY += journalRowH
-	}
+		drawBestiaryRowDetail(font, rowText, body.X+journalRowInsetX, rowY+journalRowDetailDY, hpCol)
+	})
 }

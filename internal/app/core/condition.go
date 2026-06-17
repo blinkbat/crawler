@@ -32,7 +32,11 @@ var woundBands = [...]struct {
 	{0.0, EnemyNearDeath, "Near Death"}, // fallthrough: anything > 0
 }
 
-func EnemyConditionFor(enemy Enemy) EnemyCondition {
+// EnemyConditionFor takes *Enemy (not by value): Enemy embeds a full
+// EnemyDefinition (DefinitionOverride), so a by-value call would copy
+// hundreds of bytes per visible roster row per frame. It only reads
+// HP/MaxHP.
+func EnemyConditionFor(enemy *Enemy) EnemyCondition {
 	if enemy.MaxHP <= 0 || enemy.HP >= enemy.MaxHP {
 		return EnemyUnharmed
 	}

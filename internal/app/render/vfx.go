@@ -230,6 +230,19 @@ func spawnFromRequest(camera rl.Camera3D, g *core.GameState, req core.VFXRequest
 		// HUD band; lift the glyph above the member's head so the incoming-hit
 		// cue is visible. (No per-kind tuning for party — that's enemy-only.)
 		glyphOrigin.Y += partyGlyphExtraRise
+		// Per-CLASS GFX tuning, mirroring the enemy branch: a struck party
+		// member's class can nudge + resize its hit glyph and impact burst
+		// (authored in the Party Visualizer -> partyvisuals.json). Without
+		// this the saved Glyph/Ptcl offsets loaded fine but never reached the
+		// live FX, so tuning them "didn't seem to save."
+		if req.SlotIdx >= 0 && req.SlotIdx < len(g.Party) {
+			if v, ok := partyVisualFor(assets, g.Party[req.SlotIdx].Class); ok {
+				glyphOrigin = cameraRelativeOffset(camera, glyphOrigin, v.glyphXOffset, v.glyphYOffset, 0)
+				glyphScale = v.effectiveGlyphScale()
+				origin = cameraRelativeOffset(camera, origin, v.particleXOffset, v.particleYOffset, v.particleZOffset)
+				particleScale = v.effectiveParticleScale()
+			}
+		}
 	case core.VFXAnchorTile:
 		// Tile-anchored effects use the raw resolved origin at 1× — no per-kind
 		// glyph/particle tuning, same as party. Explicit so a new VFXAnchor

@@ -27,7 +27,7 @@ func updateActionMenu(g *core.GameState) {
 	}
 	g.Battle.MenuIndex = input.CursorUpDown(g.Battle.MenuIndex, core.ActionRowCount)
 	if input.BackPressed() {
-		setBattleStatus(g, "Choose an action.")
+		setBattleStatus(g, msgChooseAction)
 		return
 	}
 	if !input.ConfirmPressed() {
@@ -37,13 +37,16 @@ func updateActionMenu(g *core.GameState) {
 	case core.ActionRowAttack:
 		g.Battle.PendingSkill = core.SkillNone
 		g.Battle.ActionMode = core.ActionEnemyTarget
-		setBattleStatus(g, "Choose a target.")
+		setBattleStatus(g, msgChooseTarget)
 		return
 	case core.ActionRowDefend:
 		performDefend(g)
 		return
 	case core.ActionRowFlee:
-		performFlee(g)
+		// Gate the retreat behind a yes/no — a stray Confirm on this row
+		// shouldn't burn the turn fleeing by accident.
+		g.Battle.ActionMode = core.ActionFleeConfirm
+		setBattleStatus(g, "Flee this battle?")
 		return
 	case core.ActionRowItem:
 		if !core.HasConsumable(g.Inventory) {
@@ -61,7 +64,21 @@ func updateActionMenu(g *core.GameState) {
 		// A new ActionRow added to the enum without a case here would
 		// otherwise make Confirm on that row a silent no-op. Surface it
 		// instead of swallowing the press.
-		setBattleStatus(g, "Choose an action.")
+		setBattleStatus(g, msgChooseAction)
+	}
+}
+
+// updateFleeConfirm runs the Flee yes/no gate (ActionFleeConfirm): Confirm
+// commits the retreat, Back returns to the action menu. Keeps an accidental
+// Confirm on the Flee row from spending the turn fleeing.
+func updateFleeConfirm(g *core.GameState) {
+	if input.BackPressed() {
+		g.Battle.ActionMode = core.ActionMenu
+		setBattleStatus(g, msgChooseAction)
+		return
+	}
+	if input.ConfirmPressed() {
+		performFlee(g)
 	}
 }
 
@@ -71,7 +88,7 @@ func updateActionMenu(g *core.GameState) {
 // bounds rule lives in one place. Callers handle the !ok case their own way
 // (some resetBattleAction, some just return).
 func currentMember(g *core.GameState) (*core.PartyMember, bool) {
-	if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
+	if !partyIndexValid(g, g.Battle.CurrentParty) {
 		return nil, false
 	}
 	return &g.Party[g.Battle.CurrentParty], true
@@ -123,13 +140,13 @@ func updateSkillMenu(g *core.GameState) {
 	skills := skillMenuBuf
 	if len(skills) == 0 {
 		resetBattleAction(g)
-		setBattleStatus(g, "No skill ready.")
+		setBattleStatus(g, msgNoSkillReady)
 		return
 	}
 	g.Battle.SkillMenuIndex = input.CursorUpDown(g.Battle.SkillMenuIndex, len(skills))
 	if input.BackPressed() {
 		resetBattleAction(g)
-		setBattleStatus(g, "Choose an action.")
+		setBattleStatus(g, msgChooseAction)
 		return
 	}
 	if !input.ConfirmPressed() {
@@ -140,7 +157,7 @@ func updateSkillMenu(g *core.GameState) {
 	}
 	skill := skills[g.Battle.SkillMenuIndex]
 	if skill == core.SkillNone {
-		setBattleStatus(g, "No skill ready.")
+		setBattleStatus(g, msgNoSkillReady)
 		return
 	}
 	// MP gate routed through the shared canAffordSkill predicate so
@@ -185,7 +202,7 @@ func updateItemMenu(g *core.GameState) {
 	g.Battle.ItemMenuIndex = input.CursorUpDown(g.Battle.ItemMenuIndex, count)
 	if input.BackPressed() {
 		resetBattleAction(g)
-		setBattleStatus(g, "Choose an action.")
+		setBattleStatus(g, msgChooseAction)
 		return
 	}
 	if !input.ConfirmPressed() {
@@ -268,7 +285,7 @@ func applyItem(g *core.GameState) {
 	// allies, but a mantrap can swallow the chosen ally between target-select
 	// and this confirm (mixed-initiative). Without this guard the stack is
 	// consumed and healPartyMember no-ops on the ingested member — item wasted.
-	if target < 0 || target >= len(g.Party) || g.Party[target].HP <= 0 || g.Party[target].Ingested {
+	if !partyIndexValid(g, target) || g.Party[target].HP <= 0 || g.Party[target].Ingested {
 		setBattleStatus(g, "Invalid target.")
 		return
 	}
@@ -390,7 +407,7 @@ func updatePartyTargeting(g *core.GameState) {
 // action menu prompt.
 func cancelTargetToActionMenu(g *core.GameState) {
 	resetBattleAction(g)
-	setBattleStatus(g, "Choose an action.")
+	setBattleStatus(g, msgChooseAction)
 }
 
 // cycleTargetSelection is the shared body for the enemy / party target

@@ -28,10 +28,26 @@ type Quest struct {
 // IsComplete reports whether the quest has been marked done.
 func (q Quest) IsComplete() bool { return q.Status == QuestComplete }
 
-// StarterQuests is the journal a fresh game begins with. Empty for now —
-// the seam stays so seeding real objectives later is a one-line change here
-// rather than touching NewGameState.
-func StarterQuests() []Quest { return nil }
+// QuestInvestigateIsland is the stable ID of the opening quest every fresh
+// game begins with. Referenced by gameplay hooks (and dialog quest actions)
+// that complete it, so the string lives in one place rather than being
+// retyped at each call site.
+const QuestInvestigateIsland = "investigate-island"
+
+// StarterQuests is the journal a fresh game begins with. Seeds the opening
+// objective so a new run's Journal tab isn't empty; gameplay hooks (or a
+// dialog's quest action) call CompleteQuest(QuestInvestigateIsland) when the
+// island is explored.
+func StarterQuests() []Quest {
+	return []Quest{
+		{
+			ID:     QuestInvestigateIsland,
+			Title:  "Investigate the Island",
+			Desc:   "Explore the island and uncover what drew you here.",
+			Status: QuestActive,
+		},
+	}
+}
 
 // QuestIndexByID returns the index of the quest with the given ID, or -1 if
 // the log has no such entry. The lookup seam every quest mutation goes

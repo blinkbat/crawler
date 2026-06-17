@@ -11,7 +11,7 @@ import (
 // trees. Resets the modal cursor to the first node of the first tree and
 // dismisses any open use-target picker so two sub-modals can't co-exist.
 func openSkillTreeFor(g *core.GameState, member int) {
-	if member < 0 || member >= len(g.Party) {
+	if _, ok := validMember(g, member); !ok {
 		return
 	}
 	g.SkillTreeOpen = true
@@ -36,11 +36,12 @@ func updateSkillTreeModal(g *core.GameState) {
 		closeSkillTree(g)
 		return
 	}
-	if g.SkillTreeMember < 0 || g.SkillTreeMember >= len(g.Party) {
+	m, ok := validMember(g, g.SkillTreeMember)
+	if !ok {
 		closeSkillTree(g)
 		return
 	}
-	trees := core.SkillTreesFor(g.Party[g.SkillTreeMember].Class)
+	trees := core.SkillTreesFor(m.Class)
 	if len(trees) == 0 {
 		closeSkillTree(g)
 		return
@@ -68,7 +69,10 @@ func updateSkillTreeModal(g *core.GameState) {
 // (locked node, maxed, or not enough points) so the player gets feedback
 // either way.
 func buySkillNode(g *core.GameState) {
-	m := &g.Party[g.SkillTreeMember]
+	m, ok := validMember(g, g.SkillTreeMember)
+	if !ok {
+		return
+	}
 	trees := core.SkillTreesFor(m.Class)
 	if g.SkillTreeCol < 0 || g.SkillTreeCol >= len(trees) {
 		return

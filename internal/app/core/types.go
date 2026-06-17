@@ -114,18 +114,30 @@ func (d DoorSpawn) HasTarget() bool {
 	return mapfile.DoorTargetComplete(d.TargetMap, d.TargetDoor)
 }
 
+// CrystalSpawn is one authored healing crystal on the map: just a tile
+// position (a Grimrock-style save/heal point). The runtime form (Crystal)
+// adds the live Charge/Charged state, seeded charged at placement (see
+// placeCrystals) and persisted per-tile in SaveData. A map with no authored
+// crystals falls back to the auto entrance crystal, so pre-crystal maps are
+// unchanged.
+type CrystalSpawn struct {
+	TileX int
+	TileZ int
+}
+
 // TileXZ is implemented by the authored spawn types (PackSpawn /
-// ChestSpawn / DoorSpawn), all of which carry a TileX/TileZ position.
-// Generic "find / remove the spawn on this tile" helpers in core and the
-// editor range over it instead of re-typing the coordinate read per
+// ChestSpawn / DoorSpawn / CrystalSpawn), all of which carry a TileX/TileZ
+// position. Generic "find / remove the spawn on this tile" helpers in core
+// and the editor range over it instead of re-typing the coordinate read per
 // spawn slice.
 type TileXZ interface {
 	Tile() (int, int)
 }
 
-func (s PackSpawn) Tile() (int, int)  { return s.TileX, s.TileZ }
-func (s ChestSpawn) Tile() (int, int) { return s.TileX, s.TileZ }
-func (s DoorSpawn) Tile() (int, int)  { return s.TileX, s.TileZ }
+func (s PackSpawn) Tile() (int, int)    { return s.TileX, s.TileZ }
+func (s ChestSpawn) Tile() (int, int)   { return s.TileX, s.TileZ }
+func (s DoorSpawn) Tile() (int, int)    { return s.TileX, s.TileZ }
+func (s CrystalSpawn) Tile() (int, int) { return s.TileX, s.TileZ }
 
 // Door is one runtime door on the field. Built from AreaDefinition.
 // DoorSpawns by NewGameState (placeDoors). Doors block neither movement
@@ -318,12 +330,34 @@ type AreaDefinition struct {
 	// g.Doors in NewGameState; the explore movement loop reads the
 	// runtime list to detect "stepped onto a door tile" transitions.
 	DoorSpawns []DoorSpawn
+	// CrystalSpawns is the authored healing-crystal list. Converted to
+	// runtime Crystals (each seeded charged) by placeCrystals.
+	CrystalSpawns []CrystalSpawn
+	// CrystalsAuthored reports whether this map explicitly defines its
+	// crystals — true when the .map carried a `crystals:` section (which the
+	// editor always writes once it has touched a map). It lets an EMPTY
+	// CrystalSpawns mean "deliberately no crystals" rather than "unspecified":
+	// placeCrystals only synthesizes the default entrance crystal for maps
+	// where this is false (legacy maps predating editable crystals), so an
+	// authored map's exact crystal set — including zero — is honored.
+	CrystalsAuthored bool
 	// CustomEnemies are author-defined enemy templates scoped to this
 	// area. The editor's modalCustomEnemies CRUDs them; pack spawns
 	// reference them by Name; battle instantiates an Enemy via
 	// CustomEnemyDef.Instantiate. Empty for built-in-only maps.
 	CustomEnemies []CustomEnemyDef
 	QuietMessage  string
+	// Dialogs are the area's authored branching conversations (see
+	// core/dialog.go). Authored in the editor's Dialogs modal, persisted in
+	// the .map file's optional dialogs: section as one JSON object per line,
+	// and started at runtime by StartDialog (by id). Empty for maps with no
+	// conversations.
+	Dialogs []DialogDefinition
+	// Triggers auto-start a dialog on a world event (step onto a tile / a foe
+	// killed) — see core/dialogtrigger.go. Authored in the editor's Dialogs
+	// modal, persisted in the .map file's optional triggers: section. Empty
+	// for maps that only start dialogs by an explicit (debug) launcher.
+	Triggers []DialogTrigger
 }
 
 type Player struct {
@@ -609,12 +643,34 @@ type GameState struct {
 	// separately from PanelsScroll so cycling between tabs preserves
 	// each tab's cursor state. Initialized lazily on first Map view.
 	PanelsMapZoom int
+	// PanelsMapPanX / PanelsMapPanZ offset the Map tab's view center (in
+	// tiles) from the player, so the d-pad/stick can scroll the map around to
+	// inspect explored ground away from the party. Reset to 0 (re-centered on
+	// the player) whenever the overlay opens or the Map tab is (re)entered.
+	PanelsMapPanX int
+	PanelsMapPanZ int
 	// Visited tracks which tiles the player has stepped on for the
 	// fog-of-war reveal in the Map panel. Width matches Area.Width;
 	// indexed as Visited[z][x]. Built by NewGameState (start tile pre-
 	// marked) and updated on every successful step in explore.
 	Visited [][]bool
-	Quit    bool
+	// DialogOpen gates the branching-conversation overlay (see core/dialog.go);
+	// Dialog holds the live conversation (a copy of the area definition being
+	// played + the current node + the choice cursor). Highest-priority modal
+	// in the explore ladder — opened by StartDialog (a debug launcher today;
+	// an NPC/region trigger later) and dismissed by CloseDialog. Not part of
+	// SaveData — a conversation is transient, like a chest modal being open.
+	DialogOpen bool
+	Dialog     DialogState
+	// TriggersFired records which Once dialog triggers have fired (keyed by
+	// DialogTrigger.ID) so they don't repeat — see core/dialogtrigger.go.
+	// NewGameState starts it nil and an area transition rebuilds a fresh
+	// GameState, so (like the Visited fog grid) it resets per area visit.
+	// UNLIKE the fog grid it IS persisted: SaveData.TriggersFired carries the
+	// current area's set through save/load and GameStateFromSave overlays it
+	// back, so a Once intro cutscene saved past doesn't replay on reload.
+	TriggersFired map[string]bool
+	Quit          bool
 	// VFXQueue holds visual-effect spawn intents emitted by the battle
 	// and explore layers. The render layer drains it each frame and
 	// materialises particles in its private pool — keeping VFX data
@@ -812,6 +868,16 @@ type PartyMember struct {
 	// represents the receiver's recoil rather than the attacker's
 	// lunge. Set in damagePartyMember whenever real damage lands.
 	HitKnockback float32
+
+	// Floating damage popup state, mirroring the Enemy side so every
+	// damage source the party TAKES (enemy hits, casts, poison ticks,
+	// Overcharge recoil) floats a number above the sprite. Value is the
+	// number, Quality the timing grade (party-received hits aren't graded,
+	// so they pass TimingQualityMiss → no "!"), Timer counts down from
+	// QualityResultDuration. Set in applyPartyDamage on real damage.
+	DamagePopup        int
+	DamagePopupQuality int
+	DamagePopupTimer   float32
 
 	// Defending is set when the member chose the Defend action on their last
 	// turn. It cuts incoming damage. The flag is cleared at the start of the
@@ -1294,6 +1360,52 @@ type Battle struct {
 	// Persisted on the member as SkillCursor on confirm so the next
 	// turn's submenu opens on whichever skill they last picked.
 	SkillMenuIndex int
+
+	// Spoils + the two timers below drive the post-victory spoils screen
+	// (render/victory.go). Spoils is the before/after snapshot winBattle
+	// captures the moment it awards XP/gold/loot; VictoryElapsed counts up
+	// from 0 once the BattleWon phase begins (the spoils card eases in after
+	// VictoryDanceBeat, then fills bars over VictoryBarFillDuration);
+	// VictoryLevelSfxCursor / VictoryLootSfxCursor / VictoryTickSfxCursor
+	// record how many level-up, loot-pickup, and XP count-up cues have rung
+	// so the update loop fires SoundLevelUp / SoundItemGet / SoundXPTick
+	// exactly as each animating bar crosses a threshold / each loot row
+	// reveals / the shown XP climbs another VictoryXPPerTick. All reset in
+	// clearBattleResidual. When Spoils.Active is false (e.g. the debug
+	// skip-battle path) the old timer auto-leave runs instead of the screen.
+	Spoils                VictorySpoils
+	VictoryElapsed        float32
+	VictoryLevelSfxCursor int
+	VictoryLootSfxCursor  int
+	VictoryTickSfxCursor  int
+}
+
+// MemberSpoils is one party member's before→after XP snapshot for the
+// victory spoils screen. winBattle records Before* the instant before it
+// awards XP and After*/GainedXP straight after, so the screen can animate
+// the bar filling from the pre-battle state across any level thresholds the
+// real AwardBattleXP crossed. Dead members carry GainedXP == 0 (they earn
+// nothing — see AwardBattleXP) and render greyed.
+type MemberSpoils struct {
+	Slot      int
+	BeforeLvl int
+	BeforeXP  int // within-level remainder at BeforeLvl
+	AfterLvl  int
+	AfterXP   int
+	GainedXP  int
+}
+
+// VictorySpoils is the full payout of a won battle, captured by winBattle
+// for the spoils screen to replay as animation. The award math itself
+// (AwardBattleXP / AwardBattleLoot) is unchanged — this is a read-only
+// mirror of what those returned. Drops is the per-defeat item list folded
+// into kind→count stacks for display. Active gates the screen: false means
+// "no screen, fall back to the timed auto-leave" (debug skip-win).
+type VictorySpoils struct {
+	Members []MemberSpoils
+	Gold    int
+	Drops   []ItemStack
+	Active  bool
 }
 
 // Active reports whether a battle is currently in progress (any phase

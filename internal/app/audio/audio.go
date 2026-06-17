@@ -50,6 +50,10 @@ const (
 	SoundHeal                    // Prayer landed a heal
 	SoundEnemyHit                // any damage application on an enemy
 	SoundEnemyDeath              // enemy HP hit zero
+	SoundVictory                 // battle won — triumphant fanfare
+	SoundLevelUp                 // a member crossed a level on the spoils screen
+	SoundItemGet                 // a loot row revealed on the spoils screen
+	SoundXPTick                  // subtle blip as the spoils XP bars count up
 	soundCount
 )
 
@@ -72,10 +76,11 @@ type soundCue struct {
 
 // PCM-synth arg order (these are positional, so a transposed column is a
 // silent timbre change — see wavsynth for the canonical contract):
-//   SynthClick(duration, pitchHz, pitchDrop, noise, volume)
-//   SynthChord(duration, freqs, volume)
-//   SynthChime(noteDuration, firstHz, secondHz, volume)
-//   SynthSweep(duration, startHz, endHz, volume, attack, release)
+//
+//	SynthClick(duration, pitchHz, pitchDrop, noise, volume)
+//	SynthChord(duration, freqs, volume)
+//	SynthChime(noteDuration, firstHz, secondHz, volume)
+//	SynthSweep(duration, startHz, endHz, volume, attack, release)
 var soundCues = [soundCount]soundCue{
 	// Bright UI tick — high pitch, large noise mix, very short.
 	SoundInputHit: {Display: "Input Hit", Canonical: "input_hit",
@@ -97,6 +102,21 @@ var soundCues = [soundCount]soundCue{
 	// Heavier deep kick-drum thud with longer tail.
 	SoundEnemyDeath: {Display: "Enemy Death", Canonical: "enemy_death",
 		PCM: func() []int16 { return wavsynth.SynthClick(0.12, 140, 0.85, 0.2, 0.22) }},
+	// Triumphant win fanfare — a bright C-major chord (with the octave on
+	// top) rung longer than any combat cue so the victory reads as an event.
+	SoundVictory: {Display: "Victory", Canonical: "victory",
+		PCM: func() []int16 { return wavsynth.SynthChord(0.45, []float64{523, 659, 784, 1047}, 0.22) }},
+	// Level-up flourish — a quick rising sweep, tonally distinct from the
+	// win chord so a level-up stands out while the fanfare still rings.
+	SoundLevelUp: {Display: "Level Up", Canonical: "level_up",
+		PCM: func() []int16 { return wavsynth.SynthSweep(0.30, 440, 880, 0.20, 0.02, 0.10) }},
+	// Loot pickup — short bright pop as each spoils row cascades in.
+	SoundItemGet: {Display: "Item Get", Canonical: "item_get",
+		PCM: func() []int16 { return wavsynth.SynthClick(0.05, 1200, 0.4, 0.3, 0.20) }},
+	// Subtle count-up blip — very short, quiet, high; fires rapidly as the
+	// spoils XP bars fill so it reads as a soft tick rather than a tone.
+	SoundXPTick: {Display: "XP Tick", Canonical: "xp_tick",
+		PCM: func() []int16 { return wavsynth.SynthClick(0.014, 2600, 0.4, 0.1, 0.08) }},
 }
 
 // soundCues is an array of length soundCount, so a missing row reads
@@ -327,7 +347,14 @@ func ensureBankOnDisk() {
 // shared by loadBank (via loadCueFromDisk) and the assignments reload.
 func readOrSynthSound(name string, pcmFn func() []int16) (snd rl.Sound, fromFile bool) {
 	if data, err := os.ReadFile(UserSoundPath(name)); err == nil {
-		return bytesToSound(data), true
+		// File present, but a corrupt / non-WAV payload decodes to a zero Sound
+		// (nil stream buffer). Only honor the disk branch when the decode
+		// actually produced a playable Sound; otherwise fall through to the
+		// procedural synth so the cue can never go silent on a bad file — the
+		// same disk-or-synth promise that covers a missing file.
+		if snd := bytesToSound(data); snd.Stream.Buffer != nil {
+			return snd, true
+		}
 	}
 	if pcmFn == nil {
 		return rl.Sound{}, false

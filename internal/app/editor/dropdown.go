@@ -4,6 +4,7 @@ import (
 	"crawler/internal/app/core"
 	"crawler/internal/app/input"
 	"crawler/internal/app/render"
+	"fmt"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -29,12 +30,23 @@ import (
 type dropdownOwner int
 
 const (
-	ddNone       dropdownOwner = iota
-	ddPackAdd                  // pack editor: pick a builtin enemy kind to add
-	ddChestAdd                 // chest editor: pick an item kind to add
-	ddPackAI                   // pack editor: pick the pack's AI mode (replaces the cycle button)
-	ddFoeKind                  // foe visualizer: pick which enemy kind to tune (replaces < > arrows)
-	ddMenu                     // menu bar: the open top-level menu (File / Edit / View / …); see menus.go
+	ddNone                dropdownOwner = iota
+	ddPackAdd                           // pack editor: pick a builtin enemy kind to add
+	ddChestAdd                          // chest editor: pick an item kind to add
+	ddPackAI                            // pack editor: pick the pack's AI mode (replaces the cycle button)
+	ddFoeKind                           // foe visualizer: pick which enemy kind to tune (replaces < > arrows)
+	ddMenu                              // menu bar: the open top-level menu (File / Edit / View / …); see menus.go
+	ddDialogSpeaker                     // dialog node editor: pick the node's speaker
+	ddDialogCondKind                    // condition editor: pick the condition kind
+	ddDialogQuestStatus                 // condition editor: pick the required quest status (Active / Complete)
+	ddDialogCondFoe                     // condition editor: pick the foe kind for a foeKilled condition
+	ddDialogTriggerKind                 // trigger editor: pick the trigger kind (enter-tile / foe-killed)
+	ddDialogTriggerDialog               // trigger editor: pick which dialog the trigger starts
+	ddDialogTriggerFoe                  // trigger editor: pick the foe kind for a foeKilled trigger
+	ddDialogActionKind                  // action editor: pick the end-action (none / start / complete quest / event)
+
+	dropdownOwnerCount // sentinel — count of owners; keep last. Every owner in
+	// (ddNone, dropdownOwnerCount) must register a dropdownEntryBuilders entry.
 )
 
 // dropdownState is the editor's open-dropdown slot (one at a time). owner ==
@@ -104,19 +116,39 @@ type dropdownEntry struct {
 // disabledIn reports whether this entry is a disabled row (enabled set and false).
 func (e dropdownEntry) disabledIn(s *State) bool { return e.enabled != nil && !e.enabled(s) }
 
+// dropdownEntryBuilders maps each dropdown owner to the function that builds
+// its ordered rows. A map (asserted complete at init below) rather than a
+// switch with a silent default, so a new owner that forgets its builder is a
+// startup panic — not a dropdown that opens empty and dead. ddNone is the
+// "closed" sentinel and intentionally has no builder.
+var dropdownEntryBuilders = map[dropdownOwner]func(*State) []dropdownEntry{
+	ddPackAdd:             packAddEntries,
+	ddChestAdd:            chestAddEntries,
+	ddPackAI:              packAIEntries,
+	ddFoeKind:             foeKindEntries,
+	ddMenu:                menuEntries,
+	ddDialogSpeaker:       dialogSpeakerEntries,
+	ddDialogCondKind:      dialogCondKindEntries,
+	ddDialogQuestStatus:   dialogQuestStatusEntries,
+	ddDialogCondFoe:       dialogCondFoeEntries,
+	ddDialogTriggerKind:   dialogTriggerKindEntries,
+	ddDialogTriggerDialog: dialogTriggerDialogEntries,
+	ddDialogTriggerFoe:    dialogTriggerFoeEntries,
+	ddDialogActionKind:    dialogActionKindEntries,
+}
+
+func init() {
+	for owner := ddNone + 1; owner < dropdownOwnerCount; owner++ {
+		if dropdownEntryBuilders[owner] == nil {
+			panic(fmt.Sprintf("editor: dropdownOwner %d has no dropdownEntryBuilders entry — register its row builder", int(owner)))
+		}
+	}
+}
+
 // dropdownEntries builds the open dropdown's ordered rows for its owner.
 func dropdownEntries(s *State) []dropdownEntry {
-	switch s.dropdown.owner {
-	case ddPackAdd:
-		return packAddEntries(s)
-	case ddChestAdd:
-		return chestAddEntries(s)
-	case ddPackAI:
-		return packAIEntries(s)
-	case ddFoeKind:
-		return foeKindEntries(s)
-	case ddMenu:
-		return menuEntries(s)
+	if build := dropdownEntryBuilders[s.dropdown.owner]; build != nil {
+		return build(s)
 	}
 	return nil
 }
@@ -145,6 +177,9 @@ func foeKindEntries(s *State) []dropdownEntry {
 	return enemyKindEntries(func(s *State, kind core.EnemyKind) {
 		s.foeKind = kind
 		seedFoeVisual(s)
+		// Match cycleFoe: re-seed the Asset-tab cursor + rebuild the live preview
+		// for the newly-picked foe (the dropdown is the < > arrows' twin).
+		enterAssetEditing(s)
 	})
 }
 
@@ -350,6 +385,17 @@ func updateDropdown(s *State) bool {
 		s.dropdown.cursor = core.Clamp(s.dropdown.cursor-int(w), 0, len(entries)-1)
 	}
 
+	// Mouse hover drives the cursor so the per-row description caption (and a
+	// keyboard Enter) follow the pointer. Without this the desc stuck to the last
+	// KEYBOARD row, so hovering menu items showed the wrong/no tooltip — the
+	// "dropdown tooltips don't work" report.
+	for i, rr := range lay.rows {
+		if pointIn(mp, rr) {
+			s.dropdown.cursor = lay.topRow + i
+			break
+		}
+	}
+
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 		for i, rr := range lay.rows {
 			if pointIn(mp, rr) {
@@ -426,17 +472,17 @@ func drawDropdown(s *State, font rl.Font, theme render.Theme) {
 		render.DrawTextWithShadow(font, e.label, rr.X+6+lay.markerW, rr.Y+3, editorFontBody, col)
 		// Right-aligned accelerator hint (dim).
 		if e.hotkey != "" {
-			hw := rl.MeasureTextEx(font, e.hotkey, editorFontHint, 1).X
-			rl.DrawTextEx(font, e.hotkey, rl.NewVector2(rr.X+rr.Width-hw-6, rr.Y+4), editorFontHint, 1, theme.TextHint)
+			hw := render.MeasureRichText(font, e.hotkey, editorFontHint, 1).X
+			render.DrawRichText(font, e.hotkey, rl.NewVector2(rr.X+rr.Width-hw-6, rr.Y+4), editorFontHint, 1, theme.TextHint)
 		}
 	}
 
 	// ▲/▼ "more" affordances when the list is scrolled.
 	if lay.topRow > 0 {
-		rl.DrawTextEx(font, "▲", rl.NewVector2(lay.panel.X+lay.panel.Width-16, lay.panel.Y+2), editorFontHint, 1, theme.TextHint)
+		render.DrawRichText(font, "▲", rl.NewVector2(lay.panel.X+lay.panel.Width-16, lay.panel.Y+2), editorFontHint, 1, theme.TextHint)
 	}
 	if lay.topRow+len(lay.rows) < len(entries) {
-		rl.DrawTextEx(font, "▼", rl.NewVector2(lay.panel.X+lay.panel.Width-16, lay.panel.Y+lay.panel.Height-16), editorFontHint, 1, theme.TextHint)
+		render.DrawRichText(font, "▼", rl.NewVector2(lay.panel.X+lay.panel.Width-16, lay.panel.Y+lay.panel.Height-16), editorFontHint, 1, theme.TextHint)
 	}
 
 	// Menu rows carry a one-line explanation; show the cursored row's beneath the
@@ -453,7 +499,7 @@ func drawDropdown(s *State, font rl.Font, theme render.Theme) {
 // compact while still surfacing "what does this do" for every command.
 func drawMenuDesc(font rl.Font, theme render.Theme, panel rl.Rectangle, desc string) {
 	const pad = float32(6)
-	tw := rl.MeasureTextEx(font, desc, editorFontHint, 1).X
+	tw := render.MeasureRichText(font, desc, editorFontHint, 1).X
 	w := tw + 2*pad
 	sw, _ := render.ScreenSizeF()
 	x := panel.X
@@ -463,8 +509,8 @@ func drawMenuDesc(font rl.Font, theme render.Theme, panel rl.Rectangle, desc str
 	if x < 4 {
 		x = 4
 	}
-	y := panel.Y + panel.Height + 3
+	y := panel.Y + panel.Height + 12 // gap below the panel so the caption reads as separate
 	h := editorFontHint + 2*pad
 	render.DrawCard(int32(x), int32(y), int32(w), int32(h), theme.SurfacePrimary, theme.BorderSoft, theme.BorderSoft)
-	rl.DrawTextEx(font, desc, rl.NewVector2(x+pad, y+pad), editorFontHint, 1, theme.TextPrimary)
+	render.DrawRichText(font, desc, rl.NewVector2(x+pad, y+pad), editorFontHint, 1, theme.TextPrimary)
 }

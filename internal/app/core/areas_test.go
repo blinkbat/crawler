@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"path/filepath"
 	"testing"
 
@@ -149,6 +150,150 @@ func TestSelfDoorSurvivesRename(t *testing.T) {
 	}
 	if got := encoded.Doors[0].TargetMap; got != mapfile.SelfMapToken {
 		t.Fatalf("self door should re-serialize as %q after rename, got %q", mapfile.SelfMapToken, got)
+	}
+}
+
+// TestCrystalAuthoringAndValidation pins the editable-crystal contract end to
+// end: authored crystals round-trip, an explicit empty set means "zero" (no
+// fallback), a legacy map with no crystals section gets the default entrance
+// crystal, and a hand-edited crystal on a blocked / duplicate tile is rejected
+// at load.
+func TestCrystalAuthoringAndValidation(t *testing.T) {
+	base := func() mapfile.MapFile {
+		return mapfile.MapFile{
+			Name:      "Crystals",
+			Materials: "dungeon",
+			Width:     3,
+			Height:    3,
+			StartX:    1,
+			StartZ:    1,
+			StartFace: "east",
+			Walls:     []string{"###", "#.#", "###"},
+			Floor:     []string{"...", "...", "..."},
+			Decor:     []string{"...", "...", "..."},
+			Props:     []string{"...", "...", "..."},
+		}
+	}
+
+	// Authored crystal round-trips and is honored verbatim.
+	mf := base()
+	mf.CrystalsDefined = true
+	mf.Crystals = []mapfile.MapCrystal{{X: 1, Z: 1}}
+	area, err := AreaFromMapFile(mf, "maps/c.map")
+	if err != nil {
+		t.Fatalf("AreaFromMapFile (authored): %v", err)
+	}
+	if !area.CrystalsAuthored || len(area.CrystalSpawns) != 1 || area.CrystalSpawns[0] != (CrystalSpawn{TileX: 1, TileZ: 1}) {
+		t.Fatalf("authored crystal not carried through: %+v authored=%v", area.CrystalSpawns, area.CrystalsAuthored)
+	}
+	if got := placeCrystals(area); len(got) != 1 || !got[0].Charged {
+		t.Fatalf("authored crystal should place one charged crystal, got %+v", got)
+	}
+
+	// Explicit empty set = deliberately zero crystals (no entrance fallback).
+	empty := base()
+	empty.CrystalsDefined = true
+	areaEmpty, err := AreaFromMapFile(empty, "maps/c.map")
+	if err != nil {
+		t.Fatalf("AreaFromMapFile (empty authored): %v", err)
+	}
+	if got := placeCrystals(areaEmpty); len(got) != 0 {
+		t.Fatalf("an authored empty crystal set must place zero crystals, got %+v", got)
+	}
+
+	// Legacy map (no crystals section) falls back to the default entrance crystal.
+	legacy := base()
+	areaLegacy, err := AreaFromMapFile(legacy, "maps/c.map")
+	if err != nil {
+		t.Fatalf("AreaFromMapFile (legacy): %v", err)
+	}
+	if areaLegacy.CrystalsAuthored {
+		t.Fatal("a map with no crystals section must not read as authored")
+	}
+	if got := placeCrystals(areaLegacy); len(got) != 1 {
+		t.Fatalf("a legacy map should fall back to one entrance crystal, got %+v", got)
+	}
+
+	// A crystal on a wall tile is rejected at load.
+	onWall := base()
+	onWall.CrystalsDefined = true
+	onWall.Crystals = []mapfile.MapCrystal{{X: 0, Z: 0}} // corner is '#'
+	if _, err := AreaFromMapFile(onWall, "maps/c.map"); err == nil {
+		t.Fatal("expected error for crystal on a blocked tile, got nil")
+	}
+
+	// Duplicate crystal tiles are rejected at load.
+	dup := base()
+	dup.CrystalsDefined = true
+	dup.Crystals = []mapfile.MapCrystal{{X: 1, Z: 1}, {X: 1, Z: 1}}
+	if _, err := AreaFromMapFile(dup, "maps/c.map"); err == nil {
+		t.Fatal("expected error for duplicate crystal tile, got nil")
+	}
+}
+
+// TestDialogsAndTriggersDiskRoundTrip exercises the full authored dialog +
+// trigger path through the on-disk format: Area → MapFile → encode bytes →
+// parse → MapFile → Area, asserting a conditioned choice and an enter-tile
+// trigger survive intact. Guards the areas.go conversion + the mapfile
+// dialogs:/triggers: sections together (the seam the unit round-trips don't
+// cover end-to-end).
+func TestDialogsAndTriggersDiskRoundTrip(t *testing.T) {
+	foe := EnemyKinds()[0].Kind
+	area := AreaDefinition{
+		Path:        "maps/m.map",
+		Name:        "Round Trip",
+		Materials:   MaterialDungeon,
+		Width:       3,
+		Height:      3,
+		StartTileX:  1,
+		StartTileZ:  1,
+		StartFacing: East,
+		Walls:       []string{"...", "...", "..."},
+		Floor:       []string{"...", "...", "..."},
+		Decor:       []string{"...", "...", "..."},
+		Props:       []string{"...", "...", "..."},
+		Dialogs: []DialogDefinition{{
+			ID: "d1", StartNodeID: "s",
+			Nodes: []DialogNode{{ID: "s", SpeakerID: SpeakerStranger, Text: "Hi", Choices: []DialogChoice{
+				{ID: "c", Label: "Buy", Conditions: []DialogChoiceCondition{
+					{Kind: DialogCondGold, Gold: 25},
+					{Kind: DialogCondFoeKilled, FoeKind: foe, FoeKills: 3},
+				}},
+			}}},
+		}},
+		Triggers: []DialogTrigger{
+			{ID: "t1", Kind: DialogTriggerEnterTile, DialogID: "d1", TileX: 2, TileZ: 0, Once: true},
+			{ID: "t2", Kind: DialogTriggerFoeKilled, DialogID: "d1", FoeKind: foe, FoeKills: 2},
+		},
+	}
+
+	mf, err := MapFileFromArea(area)
+	if err != nil {
+		t.Fatalf("MapFileFromArea: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := mf.Encode(&buf); err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	parsed, err := mapfile.Parse(&buf)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	got, err := AreaFromMapFile(parsed, "maps/m.map")
+	if err != nil {
+		t.Fatalf("AreaFromMapFile: %v", err)
+	}
+
+	if len(got.Dialogs) != 1 || len(got.Dialogs[0].Nodes) != 1 {
+		t.Fatalf("dialog did not survive round-trip: %+v", got.Dialogs)
+	}
+	conds := got.Dialogs[0].Nodes[0].Choices[0].Conditions
+	if len(conds) != 2 || conds[0].Kind != DialogCondGold || conds[0].Gold != 25 ||
+		conds[1].Kind != DialogCondFoeKilled || conds[1].FoeKind != foe || conds[1].FoeKills != 3 {
+		t.Fatalf("choice conditions mangled in round-trip: %+v", conds)
+	}
+	if !slicesEqualTriggers(area.Triggers, got.Triggers) {
+		t.Fatalf("triggers mangled in round-trip:\n in=%+v\nout=%+v", area.Triggers, got.Triggers)
 	}
 }
 

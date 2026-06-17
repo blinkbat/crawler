@@ -1,5 +1,7 @@
 package core
 
+import "reflect"
+
 // Per-skill upgrade ladder + helpers that fold the tier modifiers into the
 // SkillEffect the battle code applies. Each player-castable skill has
 // MaxSkillTier possible upgrade slots. This is now LIVE: the Diablo-2-style
@@ -53,6 +55,18 @@ type SkillTierUpgrade struct {
 // existing field add a new row here + an apply step in
 // EffectiveSkillEffect; the UI and table-walker code don't need to
 // change.
+//
+// This struct hand-mirrors ~20 additive fields of SkillEffect (party.go)
+// and addSkillEffectDelta folds them one by one. Embedding a shared
+// SkillEffectAdditive struct into BOTH would be the tidier dedupe, but
+// SkillEffect / SkillEffectDelta are built with keyed composite literals
+// in ~80 sites across the registry, tests and battle code — promoted
+// (embedded) fields can't be set in an outer keyed literal, so embedding
+// would force a rewrite of every one of them. Instead the drift between
+// the three (the two structs + the fold) is pinned by an init-time
+// reflection assert below: a new additive field added to one but missed
+// in another panics at startup, so the lockstep edit can't be silently
+// half-done.
 type SkillEffectDelta struct {
 	Damage         int
 	Heal           int
@@ -228,7 +242,7 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	SkillSunder: {
 		{Tier: 1, Label: "+2 damage", Description: "+2 base damage on the sundering blow.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
 		{Tier: 2, Label: "+2 damage", Description: "Another +2 base damage.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
-		{Tier: 3, Label: "Harder shove", Description: "Knocks the target's turn even further back.", Cost: 1, Effect: SkillEffectDelta{ATBPush: 25}},
+		{Tier: 3, Label: "Harder shove", Description: "Knocks the target's turn even further back.", Cost: 1, Effect: SkillEffectDelta{ATBPush: SunderATBPushPerTier}},
 	},
 	SkillWarBanner: {
 		{Tier: 1, Label: "+1 turn", Description: "The banner stands one turn longer.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
@@ -367,35 +381,110 @@ func EffectiveSkillEffect(m *PartyMember, s SkillID) SkillEffect {
 		if !ok {
 			break
 		}
-		d := up.Effect
-		eff.Damage += d.Damage
-		eff.Heal += d.Heal
-		eff.StealChance += d.StealChance
-		eff.BurnChance += d.BurnChance
-		eff.BurnMinTurns += d.BurnMinTurns
-		eff.BurnMaxTurns += d.BurnMaxTurns
-		eff.PoisonChance += d.PoisonChance
-		eff.PoisonMinTurns += d.PoisonMinTurns
-		eff.PoisonMaxTurns += d.PoisonMaxTurns
-		eff.BleedChance += d.BleedChance
-		eff.BleedMinTurns += d.BleedMinTurns
-		eff.BleedMaxTurns += d.BleedMaxTurns
-		eff.StunChance += d.StunChance
-		eff.StunMinTurns += d.StunMinTurns
-		eff.StunMaxTurns += d.StunMaxTurns
-		eff.SleepMinTurns += d.SleepMinTurns
-		eff.SleepMaxTurns += d.SleepMaxTurns
-		eff.BuffStats = SumStats(eff.BuffStats, d.BuffStats)
-		eff.BuffTurns += d.BuffTurns
-		eff.RegenTurns += d.RegenTurns
-		eff.ArmorReduction += d.ArmorReduction
-		eff.ATBPush += d.ATBPush
-		eff.BuffArmor += d.BuffArmor
-		eff.BuffMDef += d.BuffMDef
-		eff.ShieldHP += d.ShieldHP
-		eff.IceArmorTurns += d.IceArmorTurns
+		addSkillEffectDelta(&eff, up.Effect)
 	}
 	return eff
+}
+
+// addSkillEffectDelta folds one purchased tier's delta into the accumulating
+// effect, field by field. Every summable SkillEffect field lives here so
+// EffectiveSkillEffect's per-tier loop stays a single call — add a new tier-able
+// field in one place, not at every fold site.
+func addSkillEffectDelta(eff *SkillEffect, d SkillEffectDelta) {
+	eff.Damage += d.Damage
+	eff.Heal += d.Heal
+	eff.StealChance += d.StealChance
+	eff.BurnChance += d.BurnChance
+	eff.BurnMinTurns += d.BurnMinTurns
+	eff.BurnMaxTurns += d.BurnMaxTurns
+	eff.PoisonChance += d.PoisonChance
+	eff.PoisonMinTurns += d.PoisonMinTurns
+	eff.PoisonMaxTurns += d.PoisonMaxTurns
+	eff.BleedChance += d.BleedChance
+	eff.BleedMinTurns += d.BleedMinTurns
+	eff.BleedMaxTurns += d.BleedMaxTurns
+	eff.StunChance += d.StunChance
+	eff.StunMinTurns += d.StunMinTurns
+	eff.StunMaxTurns += d.StunMaxTurns
+	eff.SleepMinTurns += d.SleepMinTurns
+	eff.SleepMaxTurns += d.SleepMaxTurns
+	eff.BuffStats = SumStats(eff.BuffStats, d.BuffStats)
+	eff.BuffTurns += d.BuffTurns
+	eff.RegenTurns += d.RegenTurns
+	eff.ArmorReduction += d.ArmorReduction
+	eff.ATBPush += d.ATBPush
+	eff.BuffArmor += d.BuffArmor
+	eff.BuffMDef += d.BuffMDef
+	eff.ShieldHP += d.ShieldHP
+	eff.IceArmorTurns += d.IceArmorTurns
+}
+
+// deltaTierOnlyFields are the SkillEffectDelta fields that have NO matching
+// SkillEffect field and ride SkillTierMod instead of addSkillEffectDelta —
+// the init drift-guard below skips them. Keep in sync with SkillTierMod's
+// fold and the SkillEffectDelta comment.
+var deltaTierOnlyFields = map[string]bool{
+	"StealBonusDamage":      true,
+	"CritDoubleOnExcellent": true,
+}
+
+// init pins SkillEffect, SkillEffectDelta and addSkillEffectDelta together so
+// the three can't drift. For every non-tier-only field of SkillEffectDelta it
+// asserts (1) SkillEffect carries a field of the same name and type, and (2)
+// addSkillEffectDelta actually folds it — by setting a lone sentinel on the
+// delta field, folding into a zero SkillEffect, and checking the matching
+// SkillEffect field moved. A new additive field added to one struct but missed
+// in the other (or in the fold) panics at process start, the same loud-on-drift
+// contract the skillTierTable coverage init uses. (The fold is hand-unrolled
+// rather than reflection-driven because EffectiveSkillEffect runs on the combat
+// path — see SumStats' hot-path note; this guard pays the reflection cost once
+// at startup instead.)
+func init() {
+	deltaType := reflect.TypeOf(SkillEffectDelta{})
+	effType := reflect.TypeOf(SkillEffect{})
+	for i := 0; i < deltaType.NumField(); i++ {
+		f := deltaType.Field(i)
+		if deltaTierOnlyFields[f.Name] {
+			continue
+		}
+		ef, ok := effType.FieldByName(f.Name)
+		if !ok {
+			panic("core: SkillEffectDelta." + f.Name + " has no matching SkillEffect field — add it to SkillEffect or list it in deltaTierOnlyFields")
+		}
+		if ef.Type != f.Type {
+			panic("core: SkillEffectDelta." + f.Name + " type differs from SkillEffect." + f.Name + " — the fields must mirror")
+		}
+		// Build a delta with only this field set to a non-zero sentinel.
+		var delta SkillEffectDelta
+		setDeltaSentinel(reflect.ValueOf(&delta).Elem().Field(i))
+		var eff SkillEffect
+		addSkillEffectDelta(&eff, delta)
+		if reflect.ValueOf(eff).FieldByName(f.Name).IsZero() {
+			panic("core: addSkillEffectDelta does not fold SkillEffectDelta." + f.Name + " — add an `eff." + f.Name + " += d." + f.Name + "` step")
+		}
+	}
+}
+
+// setDeltaSentinel writes a distinct non-zero value into a SkillEffectDelta
+// field so folding it provably moves the matching SkillEffect field. Mirrors
+// the test helper of the same shape; struct fields (BuffStats) seed their first
+// member, which is enough since SumStats folds every member uniformly.
+func setDeltaSentinel(v reflect.Value) {
+	switch v.Kind() {
+	case reflect.Int:
+		v.SetInt(7)
+	case reflect.Float64:
+		v.SetFloat(0.5)
+	case reflect.Bool:
+		v.SetBool(true)
+	case reflect.Struct:
+		if v.NumField() == 0 {
+			panic("core: setDeltaSentinel hit an empty struct field — extend it")
+		}
+		setDeltaSentinel(v.Field(0))
+	default:
+		panic("core: setDeltaSentinel unhandled SkillEffectDelta field kind " + v.Kind().String())
+	}
 }
 
 // SkillDamageFor is the tier-aware counterpart of SkillDamage. Returns

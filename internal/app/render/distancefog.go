@@ -54,7 +54,7 @@ func cacheLightingProfile(p lightingProfile) { cachedLightingProfile = p }
 // profile. Callers must come AFTER DrawWorld in the draw order;
 // see drawAdventureScene in run.go — billboard draws always
 // follow the world draw inside the same 3D pass.
-func resolvedLightingProfile(g core.GameState) lightingProfile {
+func resolvedLightingProfile(g *core.GameState) lightingProfile {
 	_ = g
 	return cachedLightingProfile
 }
@@ -68,7 +68,7 @@ func resolvedLightingProfile(g core.GameState) lightingProfile {
 // them to one. Centralising the begin/end pair also means a
 // future fourth billboard surface (NPCs, item drops) joins the
 // same seam without duplicating the uniform-upload boilerplate.
-func beginBillboardFogPass(camera rl.Camera3D, g core.GameState, assets Resources) func() {
+func beginBillboardFogPass(camera rl.Camera3D, g *core.GameState, assets Resources) func() {
 	profile := resolvedLightingProfile(g)
 	assets.billboardFog.applyUniforms(camera, profile)
 	rl.BeginShaderMode(assets.billboardFog.shader)

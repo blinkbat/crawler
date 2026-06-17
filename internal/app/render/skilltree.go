@@ -20,19 +20,33 @@ import (
 // then clamped down on a small screen.
 const (
 	skillTreeColW    = float32(248) // narrow tree column
-	skillTreeColGap  = float32(46)  // generous spacing between trees
-	skillTreeSidePad = float32(26)
+	skillTreeColGap  = float32(50)  // generous spacing between trees
+	skillTreeSidePad = float32(34)  // side gutter — kept roomy so columns never kiss the frame
 	// skillTreeCardInset is the modal's content gutter — the left/right margin
 	// the header balance, footer hints, and detail strip all inset by. One
 	// token so those uses (and the width derivation, 2× it) can't drift.
 	skillTreeCardInset = float32(24)
+	// Header left gutters: the class glyph sits in from the frame, the title
+	// past it (kept off the wood mitre — the "breathing room" pass).
+	skillTreeHeaderGlyphX = float32(34)
+	skillTreeHeaderTitleX = float32(58)
+	// Per-column node-ladder geometry (drawSkillTreeColumn). Named so a "nodes
+	// too tall / too cramped" tune is one edit, matching skillTreeColW/Gap above.
+	skillNodeColHeaderH = float32(32) // tree-name + gilt-rule header reserved above the ladder
+	skillNodeGap        = float32(12) // vertical gap between node plates
+	skillNodeMaxH       = float32(82) // node-plate height cap so short trees don't stretch
+	// Ornament size gates: a node plate earns corner pips only once it's at
+	// least this big, and a ranked plate earns the bottom fleuron only when wide.
+	skillNodePipMinW     = float32(96)
+	skillNodePipMinH     = float32(40)
+	skillNodeFleuronMinW = float32(130)
 )
 
 // DrawSkillTreeModal paints the skill-tree modal on top of the panels
 // overlay. No-op when the modal isn't open or the focused member is out of
 // range. Reads SkillTreeMember / SkillTreeCol / SkillTreeRow for the
 // cursor; the input side (explore/skilltree.go) drives those.
-func DrawSkillTreeModal(g core.GameState, assets Resources) {
+func DrawSkillTreeModal(g *core.GameState, assets Resources) {
 	if !g.SkillTreeOpen {
 		return
 	}
@@ -73,21 +87,25 @@ func DrawSkillTreeModal(g core.GameState, assets Resources) {
 	// Header: class crest + "<name> — Skill Trees" on the left, the
 	// spendable SkillPoint balance on the right.
 	classCol := classAccent(m.Class)
-	drawClassGlyph(card.X+30, card.Y+30, 12, m.Class, classCol)
-	drawEngravedText(font, m.Name+" — Skill Trees", card.X+54, card.Y+16, FontHeading, textPrimary)
+	// Header sits lower off the top frame (was +16/+30) so the title isn't
+	// crowding the wood mitre — part of the "more breathing room" pass.
+	drawClassGlyph(card.X+skillTreeHeaderGlyphX, card.Y+38, 12, m.Class, classCol)
+	drawEngravedText(font, m.Name+" — Skill Trees", card.X+skillTreeHeaderTitleX, card.Y+24, FontHeading, textPrimary)
 	spText := skillPointsLabel(m.SkillPoints)
 	spCol := textMuted
 	if m.SkillPoints > 0 {
 		spCol = inkAccent
 	}
-	drawTextRightAligned(font, spText, card.X+card.Width-skillTreeCardInset, card.Y+20, FontBody, spCol)
+	drawTextRightAligned(font, spText, card.X+card.Width-skillTreeCardInset, card.Y+28, FontBody, spCol)
 
 	// Body region for the tree columns, above the detail strip. Columns are
 	// a fixed narrow width, centered as a block so the spacing reads evenly.
+	// Deeper footer reserve + a wider gap above it keep the hint bar and the
+	// detail strip off the bottom frame (the "too tight / too cluttered" pass).
 	const detailH = float32(84)
-	const footerH = float32(30)
-	bodyTop := card.Y + 56
-	bodyBottom := card.Y + card.Height - detailH - footerH - 14
+	const footerH = float32(42)
+	bodyTop := card.Y + 74
+	bodyBottom := card.Y + card.Height - detailH - footerH - 22
 	blockW := colW*float32(n) + skillTreeColGap*float32(n-1)
 	startX := card.X + (card.Width-blockW)/2
 	for ti, tr := range trees {
@@ -109,7 +127,7 @@ func DrawSkillTreeModal(g core.GameState, assets Resources) {
 // rule header, then the node ladder with vertical connector lines (lit
 // when the upper node holds a rank). treeIdx is compared against the
 // cursor's column so the focused node in the active column draws its frame.
-func drawSkillTreeColumn(font rl.Font, g core.GameState, m *core.PartyMember, tr core.SkillTreeDef, treeIdx int, x, y, w, h float32) {
+func drawSkillTreeColumn(font rl.Font, g *core.GameState, m *core.PartyMember, tr core.SkillTreeDef, treeIdx int, x, y, w, h float32) {
 	drawTextWithShadow(font, tr.Name, x+6, y, FontBody, textPrimary)
 	drawGiltRule(int32(x+6), int32(y+24), int32(w-12), 2, 0.8)
 
@@ -118,11 +136,11 @@ func drawSkillTreeColumn(font rl.Font, g core.GameState, m *core.PartyMember, tr
 	if n == 0 {
 		return
 	}
-	nodesTop := y + 32
-	nodeGap := float32(12)
-	nodeH := (h - 32 - nodeGap*float32(n-1)) / float32(n)
-	if nodeH > 82 {
-		nodeH = 82
+	nodesTop := y + skillNodeColHeaderH
+	nodeGap := skillNodeGap
+	nodeH := (h - skillNodeColHeaderH - nodeGap*float32(n-1)) / float32(n)
+	if nodeH > skillNodeMaxH {
+		nodeH = skillNodeMaxH
 	}
 	step := nodeH + nodeGap
 
@@ -170,10 +188,7 @@ func drawSkillTreeNode(font rl.Font, m *core.PartyMember, node core.SkillTreeNod
 		rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, 3, giltBright)
 	}
 
-	nameCol := textPrimary
-	if !unlocked {
-		nameCol = textDim
-	}
+	nameCol := rowTextColor(unlocked, !unlocked, textDim)
 	drawTextWithShadow(font, node.Name, rect.X+10, rect.Y+8, FontSmall, nameCol)
 	drawSkillTierPips(rect.X+10, rect.Y+rect.Height-14, rank, node.MaxRank)
 
@@ -210,14 +225,14 @@ func drawSkillNodePlate(rect rl.Rectangle, bg rl.Color, rank int, unlocked, focu
 		outline = fadeColor(giltBright, 0.90)
 	}
 	rl.DrawRectangleLinesEx(rect, 1, outline)
-	if rect.Width >= 96 && rect.Height >= 40 {
+	if rect.Width >= skillNodePipMinW && rect.Height >= skillNodePipMinH {
 		pip := fadeColor(outline, 0.82)
 		drawDiamondPip(rect.X+8, rect.Y+8, 1.8, pip)
 		drawDiamondPip(rect.X+rect.Width-8, rect.Y+8, 1.8, pip)
 		drawDiamondPip(rect.X+8, rect.Y+rect.Height-8, 1.8, pip)
 		drawDiamondPip(rect.X+rect.Width-8, rect.Y+rect.Height-8, 1.8, pip)
 	}
-	if rank > 0 && rect.Width >= 130 {
+	if rank > 0 && rect.Width >= skillNodeFleuronMinW {
 		drawFleuron(rect.X+rect.Width/2, rect.Y+rect.Height-12, 2.1, fadeColor(giltDim, 0.42))
 	}
 }
@@ -225,7 +240,7 @@ func drawSkillNodePlate(rect rl.Rectangle, bg rl.Color, rank int, unlocked, focu
 // drawSkillTreeDetail paints the bottom strip describing the focused node:
 // its name + current rank on the top line, its full blurb below, and a
 // state footer (locked-because, fully-invested, or the invest prompt).
-func drawSkillTreeDetail(font rl.Font, g core.GameState, m *core.PartyMember, trees []core.SkillTreeDef, card rl.Rectangle, detailH, footerH float32) {
+func drawSkillTreeDetail(font rl.Font, g *core.GameState, m *core.PartyMember, trees []core.SkillTreeDef, card rl.Rectangle, detailH, footerH float32) {
 	col := g.SkillTreeCol
 	row := g.SkillTreeRow
 	if col < 0 || col >= len(trees) {

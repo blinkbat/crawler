@@ -185,6 +185,9 @@ func loadBillboardFogShader() billboardFogShaderPipe {
 		locNightMood:  rl.GetShaderLocation(shader, "nightMood"),
 	}
 	LogRenderInit("billboard fog locs: viewPos=%d fogColor=%d fogDensity=%d nightMood=%d", pipe.locViewPos, pipe.locFogColor, pipe.locFogDensity, pipe.locNightMood)
+	// Re-prime the uniform-upload memo against this (possibly fresh) shader — see
+	// the same reset in loadLightingShader for why an ID match isn't sufficient.
+	billboardFogPrimed = false
 	return pipe
 }
 
@@ -203,10 +206,32 @@ var (
 	uniformFloatBuf [1]float32
 )
 
+// billboardFog*Memo caches the last fog-uniform upload so beginBillboardFogPass
+// can skip the redundant ones. applyUniforms is called once per billboard group
+// (drawFieldPacks / drawBattlePack / DrawPartySprites) — up to 3× per frame with
+// IDENTICAL values, and across frames the three fog uniforms only shift when the
+// time-of-day profile changes (a step crossing a phase). Keyed on shader ID so a
+// shader reload (display toggle) re-primes; loadBillboardFogShader also clears
+// the primed flag in case GL reuses a program ID.
+var (
+	billboardFogViewPos  rl.Vector3
+	billboardFogProfile  lightingProfile
+	billboardFogShaderID uint32
+	billboardFogPrimed   bool
+)
+
 func (s billboardFogShaderPipe) applyUniforms(camera rl.Camera3D, profile lightingProfile) {
 	if s.shader.ID == 0 {
 		return
 	}
+	if billboardFogPrimed && billboardFogShaderID == s.shader.ID &&
+		camera.Position == billboardFogViewPos && profile == billboardFogProfile {
+		return
+	}
+	billboardFogPrimed = true
+	billboardFogShaderID = s.shader.ID
+	billboardFogViewPos = camera.Position
+	billboardFogProfile = profile
 	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = camera.Position.X, camera.Position.Y, camera.Position.Z
 	rl.SetShaderValue(s.shader, s.locViewPos, uniformVec3Buf[:], rl.ShaderUniformVec3)
 	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = profile.FogColor.X, profile.FogColor.Y, profile.FogColor.Z
@@ -394,6 +419,18 @@ var (
 	torchColorBuf [maxTorches * 3]float32
 )
 
+// torch upload memo. torchRange is a compile-time constant, so it's uploaded
+// once (not every frame). torchSlotsZeroed tracks whether the position/color
+// slots already hold an all-zero state, so a torchless field map — the common
+// outdoor case — skips the two per-frame SetShaderValueV uploads after the first
+// zeroing. Both are keyed on shader ID so a reload re-primes.
+var (
+	torchRangePrimed   bool
+	torchRangeShaderID uint32
+	torchSlotsZeroed   bool
+	torchSlotsShaderID uint32
+)
+
 func loadLightingShader() lightingShader {
 	shader := rl.LoadShaderFromMemory(lightingVertexShader, resolveShaderTokens(lightingFragmentShader))
 	if shader.ID == 0 {
@@ -422,16 +459,38 @@ func loadLightingShader() lightingShader {
 	}
 	LogRenderInit("lighting locs: viewPos=%d sunDir=%d sunCol=%d amb=%d fogCol=%d fogDens=%d spec=%d shadow=%d torchPos=%d torchCol=%d torchRange=%d",
 		s.locViewPos, s.locSunDirection, s.locSunColor, s.locAmbientColor, s.locFogColor, s.locFogDensity, s.locSpecStrength, s.locShadowStrength, s.locTorchPos, s.locTorchColor, s.locTorchRange)
+	// Force the uniform-upload memos to re-prime against this (possibly fresh)
+	// shader — GL can reuse a program ID after an unload/reload, so an ID match
+	// alone isn't proof the uniforms still hold our last values.
+	lightingUniformPrimed = false
+	torchRangePrimed = false
+	torchSlotsZeroed = false
 	return s
 }
 
 // uploadTorches pushes the active torch point lights to the shader.
-// Every slot is written each frame: active torches get their world
-// position + flickered colour, the remaining slots are zeroed so
-// their loop iteration contributes nothing. Call once per frame
-// before drawing the world geometry that should be torch-lit.
+// Active torches get their world position + flickered colour, the
+// remaining slots are zeroed so their loop iteration contributes
+// nothing. Call once per frame before drawing the world geometry
+// that should be torch-lit. The shared torchRange uniform is uploaded
+// once (it's constant), and a torchless area skips the slot upload
+// entirely once its slots are already zeroed.
 func (l lightingShader) uploadTorches(torches []torchLight) {
 	if l.shader.ID == 0 {
+		return
+	}
+	// torchRange never changes — upload once (re-primes if the shader reloads).
+	if !torchRangePrimed || torchRangeShaderID != l.shader.ID {
+		uniformFloatBuf[0] = torchRangeWorld
+		rl.SetShaderValue(l.shader, l.locTorchRange, uniformFloatBuf[:], rl.ShaderUniformFloat)
+		torchRangePrimed = true
+		torchRangeShaderID = l.shader.ID
+		torchSlotsZeroed = false // force a fresh slot upload after a reload
+	}
+	// Torchless field maps: once the slots are zeroed, leave them — the active
+	// torches' colours flicker per frame (so a lit area re-uploads every frame),
+	// but an empty area has nothing to refresh.
+	if len(torches) == 0 && torchSlotsZeroed && torchSlotsShaderID == l.shader.ID {
 		return
 	}
 	for i := 0; i < maxTorches; i++ {
@@ -449,8 +508,8 @@ func (l lightingShader) uploadTorches(torches []torchLight) {
 	}
 	rl.SetShaderValueV(l.shader, l.locTorchPos, torchPosBuf[:], rl.ShaderUniformVec3, maxTorches)
 	rl.SetShaderValueV(l.shader, l.locTorchColor, torchColorBuf[:], rl.ShaderUniformVec3, maxTorches)
-	uniformFloatBuf[0] = torchRangeWorld
-	rl.SetShaderValue(l.shader, l.locTorchRange, uniformFloatBuf[:], rl.ShaderUniformFloat)
+	torchSlotsZeroed = len(torches) == 0
+	torchSlotsShaderID = l.shader.ID
 }
 
 func (l lightingShader) unload() {
@@ -471,12 +530,33 @@ func normalizeVec3(v rl.Vector3) rl.Vector3 {
 	return rl.NewVector3(v.X/length, v.Y/length, v.Z/length)
 }
 
+// lightingUniform*Memo caches the last profile-derived upload. viewPos tracks
+// the free-moving camera and changes essentially every frame, so it always
+// uploads; but sunDirection is constant and the sun/ambient/fog/spec/shadow/mood
+// uniforms are pure functions of the time-of-day profile, which only shifts when
+// the step count crosses a phase — so those ~7 uploads are redundant on the vast
+// majority of frames. Keyed on shader ID so a reload re-primes; loadLightingShader
+// also clears the flag in case GL reuses a program ID.
+var (
+	lightingUniformProfile  lightingProfile
+	lightingUniformShaderID uint32
+	lightingUniformPrimed   bool
+)
+
 func (l lightingShader) applyUniforms(camera rl.Camera3D, ambient lightingProfile) {
 	if l.shader.ID == 0 {
 		return
 	}
 	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = camera.Position.X, camera.Position.Y, camera.Position.Z
 	rl.SetShaderValue(l.shader, l.locViewPos, uniformVec3Buf[:], rl.ShaderUniformVec3)
+	// The remaining uniforms are constant (sunDirection) or profile-derived; skip
+	// re-uploading them when the profile and shader are unchanged from last call.
+	if lightingUniformPrimed && lightingUniformShaderID == l.shader.ID && ambient == lightingUniformProfile {
+		return
+	}
+	lightingUniformProfile = ambient
+	lightingUniformShaderID = l.shader.ID
+	lightingUniformPrimed = true
 	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = sunDir.X, sunDir.Y, sunDir.Z
 	rl.SetShaderValue(l.shader, l.locSunDirection, uniformVec3Buf[:], rl.ShaderUniformVec3)
 	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = ambient.SunColor.X, ambient.SunColor.Y, ambient.SunColor.Z

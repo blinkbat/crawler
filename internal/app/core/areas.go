@@ -86,6 +86,17 @@ func LoadArea(path string) (AreaDefinition, error) {
 	return AreaFromMapFile(mf, path)
 }
 
+// inBoundsWH reports whether tile (x,z) lies inside a w×h grid. Used by
+// AreaFromMapFile to validate spawn tiles against the raw mapfile dimensions
+// (before the AreaDefinition — and its AreaDefinition.InBounds — exists).
+func inBoundsWH(x, z, w, h int) bool { return x >= 0 && x < w && z >= 0 && z < h }
+
+// oobErr is the shared "<what> is out of bounds" spawn-validation error, so
+// the pack / chest / door bounds guards in AreaFromMapFile phrase it once.
+func oobErr(what string, x, z, w, h int) error {
+	return fmt.Errorf("%s at (%d,%d) is out of bounds for %dx%d", what, x, z, w, h)
+}
+
 // AreaFromMapFile is the converter half of LoadArea, exposed so the editor
 // can build a runnable area from in-memory edits without touching disk.
 func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
@@ -109,10 +120,10 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		name string
 		rows []string
 	}{
-		{"walls", mf.Walls},
-		{"floor", mf.Floor},
-		{"decor", mf.Decor},
-		{"props", mf.Props},
+		{mapfile.SectionWalls, mf.Walls},
+		{mapfile.SectionFloor, mf.Floor},
+		{mapfile.SectionDecor, mf.Decor},
+		{mapfile.SectionProps, mf.Props},
 	}
 	for _, layer := range layers {
 		if len(layer.rows) != mf.Height {
@@ -135,8 +146,8 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		name string
 		rows []string
 	}{
-		{"ceiling", mf.Ceiling},
-		{"elevation", mf.Elevation},
+		{mapfile.SectionCeiling, mf.Ceiling},
+		{mapfile.SectionElevation, mf.Elevation},
 	}
 	for _, layer := range optional {
 		if len(layer.rows) == 0 {
@@ -151,7 +162,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 			}
 		}
 	}
-	if mf.StartX < 0 || mf.StartX >= mf.Width || mf.StartZ < 0 || mf.StartZ >= mf.Height {
+	if !inBoundsWH(mf.StartX, mf.StartZ, mf.Width, mf.Height) {
 		return AreaDefinition{}, fmt.Errorf("start position (%d,%d) is out of bounds for %dx%d", mf.StartX, mf.StartZ, mf.Width, mf.Height)
 	}
 	customs := make([]CustomEnemyDef, 0, len(mf.CustomEnemies))
@@ -164,25 +175,43 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	}
 	spawns := make([]PackSpawn, 0, len(mf.Packs))
 	for _, p := range mf.Packs {
+		if !inBoundsWH(p.X, p.Z, mf.Width, mf.Height) {
+			return AreaDefinition{}, oobErr("pack", p.X, p.Z, mf.Width, mf.Height)
+		}
 		if len(p.Members) == 0 {
 			return AreaDefinition{}, fmt.Errorf("pack at (%d,%d) has no members", p.X, p.Z)
 		}
 		members := make([]PackMemberRef, 0, len(p.Members))
 		for _, name := range p.Members {
-			if kind, ok := EnemyKindFromName(name); ok {
-				members = append(members, BuiltinPackMember(kind))
+			// Custom enemies win a name collision with a built-in kind: an
+			// author who names a custom foe "goblin" means THAT foe, with its
+			// overrides — resolving the built-in first would silently shadow it
+			// and drop the authored stats/skills/rewards.
+			if def, ok := CustomEnemyByName(customs, name); ok {
+				members = append(members, CustomPackMember(def))
 				continue
 			}
-			def, ok := CustomEnemyByName(customs, name)
+			kind, ok := EnemyKindFromName(name)
 			if !ok {
 				return AreaDefinition{}, fmt.Errorf("unknown enemy kind or custom enemy %q", name)
 			}
-			members = append(members, CustomPackMember(def))
+			members = append(members, BuiltinPackMember(kind))
 		}
 		spawns = append(spawns, PackSpawn{TileX: p.X, TileZ: p.Z, Members: members, AI: PackAIFromName(p.AI)})
 	}
 	chests := make([]ChestSpawn, 0, len(mf.Chests))
 	for _, c := range mf.Chests {
+		if !inBoundsWH(c.X, c.Z, mf.Width, mf.Height) {
+			return AreaDefinition{}, oobErr("chest", c.X, c.Z, mf.Width, mf.Height)
+		}
+		// A chest blocks movement onto its tile, so one on the player start
+		// would soft-lock the spawn — placeChests silently drops it at runtime,
+		// which hides the mistake from the author. Reject it loudly here (the
+		// editor's chestPlaceBlockers already forbids placing one there), so the
+		// on-disk file, the editor summary, and the runtime agree.
+		if c.X == mf.StartX && c.Z == mf.StartZ {
+			return AreaDefinition{}, fmt.Errorf("chest at (%d,%d) sits on the player start", c.X, c.Z)
+		}
 		kinds := make([]ItemKind, 0, len(c.Items))
 		for _, name := range c.Items {
 			kind := ItemKindByName(name)
@@ -203,6 +232,9 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	// area name.
 	doors := make([]DoorSpawn, 0, len(mf.Doors))
 	for _, d := range mf.Doors {
+		if !inBoundsWH(d.X, d.Z, mf.Width, mf.Height) {
+			return AreaDefinition{}, oobErr(fmt.Sprintf("door %q", d.Name), d.X, d.Z, mf.Width, mf.Height)
+		}
 		facing, ok := facingFromName(d.Facing)
 		if !ok {
 			return AreaDefinition{}, fmt.Errorf("door %q has bad facing %q", d.Name, d.Facing)
@@ -217,29 +249,64 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 			Style:      doorStyleFromName(d.Style),
 		})
 	}
+	crystals := make([]CrystalSpawn, 0, len(mf.Crystals))
+	for _, c := range mf.Crystals {
+		crystals = append(crystals, CrystalSpawn{TileX: c.X, TileZ: c.Z})
+	}
+	dialogs, err := DialogsFromLines(mf.Dialogs)
+	if err != nil {
+		return AreaDefinition{}, err
+	}
+	triggers, err := TriggersFromLines(mf.Triggers)
+	if err != nil {
+		return AreaDefinition{}, err
+	}
 	ceiling := mapfile.OptionalLayerOrBlank(mf.Ceiling, mf.Width, mf.Height, TileCeilingOpen)
 	elevation := mapfile.OptionalLayerOrBlank(mf.Elevation, mf.Width, mf.Height, ElevationGround)
-	return AreaDefinition{
-		Path:          path,
-		Name:          mf.Name,
-		Width:         mf.Width,
-		Height:        mf.Height,
-		Walls:         append([]string(nil), mf.Walls...),
-		Floor:         append([]string(nil), mf.Floor...),
-		Decor:         append([]string(nil), mf.Decor...),
-		Props:         append([]string(nil), mf.Props...),
-		Ceiling:       append([]string(nil), ceiling...),
-		Elevation:     append([]string(nil), elevation...),
-		Materials:     mat,
-		StartTileX:    mf.StartX,
-		StartTileZ:    mf.StartZ,
-		StartFacing:   face,
-		PackSpawns:    spawns,
-		ChestSpawns:   chests,
-		DoorSpawns:    doors,
-		CustomEnemies: customs,
-		QuietMessage:  mf.Quiet,
-	}, nil
+	area := AreaDefinition{
+		Path:             path,
+		Name:             mf.Name,
+		Width:            mf.Width,
+		Height:           mf.Height,
+		Walls:            append([]string(nil), mf.Walls...),
+		Floor:            append([]string(nil), mf.Floor...),
+		Decor:            append([]string(nil), mf.Decor...),
+		Props:            append([]string(nil), mf.Props...),
+		Ceiling:          append([]string(nil), ceiling...),
+		Elevation:        append([]string(nil), elevation...),
+		Materials:        mat,
+		StartTileX:       mf.StartX,
+		StartTileZ:       mf.StartZ,
+		StartFacing:      face,
+		PackSpawns:       spawns,
+		ChestSpawns:      chests,
+		DoorSpawns:       doors,
+		CrystalSpawns:    crystals,
+		CrystalsAuthored: mf.CrystalsDefined,
+		CustomEnemies:    customs,
+		QuietMessage:     mf.Quiet,
+		Dialogs:          dialogs,
+		Triggers:         triggers,
+	}
+	// Validate authored crystal tiles now that the area (and its BlockedAt
+	// geometry) is built: mapfile.validate already bounds-checks them, but a
+	// hand-edited crystal on a wall / prop / deep-water tile would render
+	// embedded and a duplicate tile would double-count. Reject loudly here —
+	// same philosophy as the pack/chest/door bounds guards — rather than ship
+	// a buried or stacked save point. (The editor's placement rules already
+	// prevent both, so this only fires on hand-edited maps.)
+	seenCrystal := make(map[[2]int]bool, len(area.CrystalSpawns))
+	for _, c := range area.CrystalSpawns {
+		if area.BlockedAt(c.TileX, c.TileZ) {
+			return AreaDefinition{}, fmt.Errorf("crystal at (%d,%d) sits on a blocked tile (wall/prop/deep water)", c.TileX, c.TileZ)
+		}
+		key := [2]int{c.TileX, c.TileZ}
+		if seenCrystal[key] {
+			return AreaDefinition{}, fmt.Errorf("duplicate crystal at (%d,%d)", c.TileX, c.TileZ)
+		}
+		seenCrystal[key] = true
+	}
+	return area, nil
 }
 
 // MapFileFromArea is the reverse converter — used by the editor to write the
@@ -320,6 +387,10 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 			Style:      DoorStyleName(d.Style),
 		})
 	}
+	crystals := make([]mapfile.MapCrystal, 0, len(a.CrystalSpawns))
+	for _, c := range a.CrystalSpawns {
+		crystals = append(crystals, mapfile.MapCrystal{X: c.TileX, Z: c.TileZ})
+	}
 	ceiling := mapfile.OptionalLayerOrBlank(a.Ceiling, a.Width, a.Height, TileCeilingOpen)
 	elevation := mapfile.OptionalLayerOrBlank(a.Elevation, a.Width, a.Height, ElevationGround)
 	customs := make([]mapfile.MapCustomEnemy, 0, len(a.CustomEnemies))
@@ -330,25 +401,37 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		}
 		customs = append(customs, mapCE)
 	}
+	dialogLines, err := DialogsToLines(a.Dialogs)
+	if err != nil {
+		return mapfile.MapFile{}, err
+	}
+	triggerLines, err := TriggersToLines(a.Triggers)
+	if err != nil {
+		return mapfile.MapFile{}, err
+	}
 	return mapfile.MapFile{
-		Name:          a.Name,
-		Materials:     matName,
-		Quiet:         a.QuietMessage,
-		Width:         a.Width,
-		Height:        a.Height,
-		StartX:        a.StartTileX,
-		StartZ:        a.StartTileZ,
-		StartFace:     faceName,
-		Walls:         append([]string(nil), a.Walls...),
-		Floor:         append([]string(nil), a.Floor...),
-		Decor:         append([]string(nil), a.Decor...),
-		Props:         append([]string(nil), a.Props...),
-		Ceiling:       append([]string(nil), ceiling...),
-		Elevation:     append([]string(nil), elevation...),
-		Packs:         packs,
-		Chests:        chests,
-		Doors:         doors,
-		CustomEnemies: customs,
+		Name:            a.Name,
+		Materials:       matName,
+		Quiet:           a.QuietMessage,
+		Width:           a.Width,
+		Height:          a.Height,
+		StartX:          a.StartTileX,
+		StartZ:          a.StartTileZ,
+		StartFace:       faceName,
+		Walls:           append([]string(nil), a.Walls...),
+		Floor:           append([]string(nil), a.Floor...),
+		Decor:           append([]string(nil), a.Decor...),
+		Props:           append([]string(nil), a.Props...),
+		Ceiling:         append([]string(nil), ceiling...),
+		Elevation:       append([]string(nil), elevation...),
+		Packs:           packs,
+		Chests:          chests,
+		Doors:           doors,
+		Crystals:        crystals,
+		CrystalsDefined: a.CrystalsAuthored,
+		CustomEnemies:   customs,
+		Dialogs:         dialogLines,
+		Triggers:        triggerLines,
 	}, nil
 }
 
@@ -361,27 +444,6 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 // edit instead of a "find the three switch statements" hunt — and an
 // unknown value returns ok=false instead of silently coercing to the first
 // option (which used to rewrite save data on the save path).
-
-// namedEnum is one row of a value↔canonical-name table. Shared by the
-// material and facing registries so their forward (value→name) scan lives
-// once in lookupName. (The enemy-kind table carries an extra aliases
-// field and keeps its own entry type + scan.)
-type namedEnum[V comparable] struct {
-	value V
-	name  string
-}
-
-// lookupName scans a namedEnum table for `target`, returning its
-// canonical name (ok=false on no match). The single forward-scan shared
-// by MaterialName and FacingName.
-func lookupName[V comparable](table []namedEnum[V], target V) (string, bool) {
-	for _, e := range table {
-		if e.value == target {
-			return e.name, true
-		}
-	}
-	return "", false
-}
 
 // indexByName scans a table for the first row whose name (extracted by `name`)
 // case-insensitively equals s, returning that row's index (ok=false on no
@@ -483,37 +545,77 @@ func MaterialIsIndoor(m MaterialSet) bool {
 	return d.indoor
 }
 
-var facingNameTable = []namedEnum[int]{
-	{North, mapfile.FacingNorthName},
-	{East, mapfile.FacingEastName},
-	{South, mapfile.FacingSouthName},
-	{West, mapfile.FacingWestName},
+// facingDef is one row of the facing registry: the enum value, its
+// canonical on-disk name, and the single-letter UI label. Bundling the
+// short label here (rather than a parallel FacingShortLabels literal that
+// had to be kept in step by hand) mirrors the doorStyleDefs slug+label
+// pattern, so adding or renaming a facing is one row edit. FacingShortLabels
+// is derived from this table below.
+type facingDef struct {
+	value int
+	name  string // canonical on-disk name (mapfile.Facing*Name)
+	short string // single-letter UI label
 }
 
-// FacingShortLabels returns the single-letter UI labels for the four
-// facings, indexed by core.North/East/South/West. Centralized so the
-// editor's metadata panel and door-edit modal don't each carry their
-// own []string{"N", "E", "S", "W"} literal — a future renaming
-// (localisation, glyph swap) is one edit instead of a grep.
-var FacingShortLabels = [FacingCount]string{
-	North: "N",
-	East:  "E",
-	South: "S",
-	West:  "W",
+var facingDefs = []facingDef{
+	{North, mapfile.FacingNorthName, "N"},
+	{East, mapfile.FacingEastName, "E"},
+	{South, mapfile.FacingSouthName, "S"},
+	{West, mapfile.FacingWestName, "W"},
 }
+
+// FacingShortLabels are the single-letter UI labels for the four facings,
+// indexed by core.North/East/South/West. Derived from facingDefs so the
+// editor's metadata panel and door-edit modal cite one source — a future
+// renaming (localisation, glyph swap) is a one-row edit, not a grep.
+var FacingShortLabels = func() [FacingCount]string {
+	var out [FacingCount]string
+	for _, d := range facingDefs {
+		out[d.value] = d.short
+	}
+	return out
+}()
 
 // FacingName returns the canonical on-disk name for a facing. ok=false
 // only when normalization produces a value out of range, which can't
 // happen for the four legitimate enum values.
 func FacingName(f int) (string, bool) {
-	return lookupName(facingNameTable, NormalizeFacing(f))
+	want := NormalizeFacing(f)
+	for _, d := range facingDefs {
+		if d.value == want {
+			return d.name, true
+		}
+	}
+	return "", false
 }
 
 func facingFromName(s string) (int, bool) {
-	if i, ok := indexByName(facingNameTable, s, func(e namedEnum[int]) string { return e.name }); ok {
-		return facingNameTable[i].value, true
+	if i, ok := indexByName(facingDefs, s, func(d facingDef) string { return d.name }); ok {
+		return facingDefs[i].value, true
 	}
 	return 0, false
+}
+
+// init asserts facingDefs covers every facing exactly once, in the same
+// order as mapfile.FacingNames, and carries a non-empty short label per
+// row. Mirrors the materialDefs / doorStyleDefs coverage asserts so a new
+// facing added to the enum without a facingDefs row (or with a blank label)
+// panics at startup rather than yielding a "" name / label at runtime.
+func init() {
+	if len(facingDefs) != FacingCount || len(mapfile.FacingNames) != FacingCount {
+		panic("core: facingDefs length must match FacingCount and mapfile.FacingNames — add a row when extending the facing enum")
+	}
+	for i, d := range facingDefs {
+		if d.value != i {
+			panic("core: facingDefs row order must match the North/East/South/West enum")
+		}
+		if d.name != mapfile.FacingNames[i] {
+			panic("core: facingDefs[" + d.name + "] disagrees with mapfile.FacingNames — keep them in sync")
+		}
+		if d.short == "" {
+			panic("core: facingDefs[" + d.name + "] has an empty short label")
+		}
+	}
 }
 
 // FacingAwayFromAdjacentWall scans the four cardinal neighbours of
@@ -718,8 +820,9 @@ func init() {
 // EnemyKindName returns the canonical on-disk name for the enemy kind,
 // plus ok=false on unknown values. MapFileFromArea propagates the failure
 // to caller — better to refuse a save than silently rewrite enemy types.
-// Keeps its own scan (rather than the shared lookupName) because the enemy
-// table's rows carry an extra `aliases` field, so it isn't a namedEnum.
+// Keeps its own forward (value→name) scan — the material / facing registries
+// inline the same tiny loop against their own def rows — because the enemy
+// table's rows carry an extra `aliases` field the others don't.
 func EnemyKindName(k EnemyKind) (string, bool) {
 	for _, e := range enemyKindNameTable {
 		if e.value == k {

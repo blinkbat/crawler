@@ -163,12 +163,33 @@ var (
 	textDim     = inkDim
 	textHint    = inkDim
 
-	barHPHigh  = mute(rl.NewColor(116, 200, 132, 255))
-	barHPMid   = mute(rl.NewColor(224, 184, 88, 255))
-	barHPLow   = mute(rl.NewColor(220, 88, 88, 255))
-	barMP      = mute(rl.NewColor(104, 152, 224, 255))
-	barEnemyHP = mute(rl.NewColor(204, 76, 76, 255))
-	barTrack   = rl.NewColor(8, 12, 22, 140) // near-black track, already muted
+	barHPHigh = mute(rl.NewColor(116, 200, 132, 255))
+	// xpGainColor fills the victory spoils screen's XP bars — a warm
+	// coin-gold that reads as treasure/reward (not the green of an HP gauge).
+	// Shares coinFace so the XP fill and the gold tally sit in one palette.
+	xpGainColor = coinFace
+	barHPMid    = mute(rl.NewColor(224, 184, 88, 255))
+	barHPLow    = mute(rl.NewColor(220, 88, 88, 255))
+	barMP       = mute(rl.NewColor(104, 152, 224, 255))
+	barEnemyHP  = mute(rl.NewColor(204, 76, 76, 255))
+	// Enemy wound-state ramp — the per-condition tint the roster's health
+	// label reads as, from unharmed green through to the near-death red.
+	// Pulled out of battle.go's enemyConditionColors table so the accent ramp
+	// lives in the palette beside the other bars instead of as bare NewColor
+	// literals. The near-death tone (condEnemyNearDeath) shares the "enemy is
+	// bleeding out" red intent with barEnemyHP / barHPLow; kept a touch hotter
+	// than the muted static bar so a small roster label still reads.
+	condEnemyUnharmed     = rl.NewColor(126, 231, 170, 255)
+	condEnemyScuffed      = rl.NewColor(208, 226, 128, 255)
+	condEnemyInjured      = rl.NewColor(246, 196, 91, 255)
+	condEnemyBadlyWounded = rl.NewColor(244, 126, 75, 255)
+	condEnemyNearDeath    = rl.NewColor(255, 78, 88, 255)
+	// partyDamagePopupColor is the floating-number tone for damage the PARTY
+	// takes. Brighter/hotter than barEnemyHP (which is muted for a static bar)
+	// so a fast-fading popup still reads against the formation; distinct from
+	// the timing-grade ramp the player's outgoing hits use.
+	partyDamagePopupColor = rl.NewColor(255, 100, 88, 255)
+	barTrack              = rl.NewColor(8, 12, 22, 140) // near-black track, already muted
 	// barMutedFill is the desaturated plum fill drawBar swaps in when a
 	// bar is muted (e.g. a downed member's gauges).
 	barMutedFill = rl.NewColor(96, 84, 92, 230)
@@ -203,6 +224,13 @@ var (
 	// statusPoison's sickly olive so the two greens don't confuse. Never
 	// flickers (it's good news).
 	statusRegen = mute(rl.NewColor(120, 224, 150, 240))
+	// statusShielded is the POSITIVE Aegis-ward accent — a luminous teal/cyan
+	// energy bubble, kept off the crowded light-blues (statusSleep / statusDefending)
+	// so the magic ward reads apart from the manual block. Never flickers.
+	statusShielded = mute(rl.NewColor(96, 222, 214, 240))
+	// statusIceArmor is the POSITIVE frost-ward accent — a pale icy blue-white,
+	// cooler/lighter than statusSleep so the two don't confuse. Never flickers.
+	statusIceArmor = mute(rl.NewColor(186, 226, 248, 240))
 	// Outline tints paired with the fills above for the enemy-pill
 	// silhouette. Lighter / more saturated than the fill so the pill
 	// reads as a "glow with a hard rim" against the panel.
@@ -235,6 +263,25 @@ var (
 	timingCommitColor = rl.NewColor(255, 168, 96, 200)
 	timingTickColor   = rl.NewColor(28, 32, 44, 235)
 
+	// Timing-grade accent ramps — the per-quality attack (warm: red→amber→
+	// cream) and defend (cool: red→blue→pale ice) tones the bar flashes when a
+	// hit lands, indexed Miss..Excellent by timing.go's qualityVisuals table.
+	// Pulled out of that table so the grade ramp lives with the other timing
+	// accents instead of as bare NewColor literals mid-file. Defined at full
+	// alpha and full saturation: this is a fast transient confirmation flash,
+	// so (like the gilt-family transients) it's NOT routed through mute() —
+	// the punch is the point.
+	timingGradeAtkMiss      = rl.NewColor(220, 76, 76, 255)
+	timingGradeAtkNice      = rl.NewColor(184, 96, 80, 255)
+	timingGradeAtkGood      = rl.NewColor(232, 144, 80, 255)
+	timingGradeAtkGreat     = rl.NewColor(255, 188, 88, 255)
+	timingGradeAtkExcellent = rl.NewColor(255, 244, 144, 255)
+	timingGradeDefMiss      = rl.NewColor(220, 76, 76, 255)
+	timingGradeDefNice      = rl.NewColor(56, 110, 184, 255)
+	timingGradeDefGood      = rl.NewColor(80, 152, 220, 255)
+	timingGradeDefGreat     = rl.NewColor(120, 200, 248, 255)
+	timingGradeDefExcellent = rl.NewColor(196, 240, 255, 255)
+
 	// Billboard tints for the in-world combatant markers — the warm
 	// off-white the player's target reads as, and the slightly redder
 	// pulse the currently-attacking enemy reads as. Pulled out here so
@@ -242,6 +289,16 @@ var (
 	// world.go's draw loop.
 	tintEnemyTargeted = rl.NewColor(255, 228, 190, 255)
 	tintEnemyAttacker = rl.NewColor(255, 196, 156, 255)
+	// Selector-pyramid colors for the same three combat states the billboard
+	// tints above cover — the bright marker over the targeted enemy, the
+	// friendly heal/item target, and the enemy's attack target. Kept in this
+	// block so the "what color is targeted" decision lives beside the tints
+	// (the marker is brighter / more saturated than the soft sprite wash by
+	// design — they're paired, not identical). world.go's markerStyle rows
+	// read these instead of inlining NewColor literals.
+	selectorEnemyTargetColor    = rl.NewColor(255, 224, 80, 255)
+	selectorFriendlyTargetColor = rl.NewColor(118, 235, 136, 245)
+	selectorEnemyAttackColor    = rl.NewColor(255, 96, 96, 245)
 	// Party-side billboard tints, the mirror of the enemy pair above: the
 	// desaturated gray a knocked-out member fades to, and the warm wash on
 	// the member whose turn it is. Named here so DrawPartySprites pulls from
@@ -260,7 +317,12 @@ var (
 	markerChestDim = rl.NewColor(160, 132, 78, 255)
 	markerDoor     = rl.NewColor(176, 132, 86, 255)
 	markerPack     = rl.NewColor(220, 76, 70, 255)
-	markerOutline  = rl.NewColor(0, 0, 0, 220)
+	// markerCrystal echoes the in-world charged-crystal cyan (see
+	// render/crystal.go's crystalColor) so the editor marker reads as the
+	// same entity the player sees, and stands clear of the amber chest /
+	// brown door / red pack / yellow start swatches.
+	markerCrystal = rl.NewColor(96, 214, 232, 255)
+	markerOutline = rl.NewColor(0, 0, 0, 220)
 
 	// mapTileFogColor is the dim fill drawn for cells that fall outside
 	// the area's bounds — the "fog" beyond the walkable map. Shared by
@@ -285,6 +347,16 @@ var (
 	shadowMid    = rl.NewColor(0, 0, 0, 180)
 	shadowStrong = rl.NewColor(0, 0, 0, 200)
 	shadowHeavy  = rl.NewColor(0, 0, 0, 220)
+	// shadowBase is the fully-transparent black drop-shadow base — the source
+	// color callers fade per-frame when the shadow alpha is dynamic (the splash
+	// title shadow and the timing-bar icon shadows track an animation). Named
+	// so those sites don't open-code rl.NewColor(0,0,0,…) with a per-call alpha.
+	shadowBase = rl.NewColor(0, 0, 0, 0)
+	// noAccent is the zero-alpha sentinel passed to drawCard's `accent`
+	// parameter to skip the optional left-spine stripe. Named so the intent
+	// ("this card has no accent stripe") reads at the call site instead of a
+	// bare transparent-black literal.
+	noAccent = rl.NewColor(0, 0, 0, 0)
 )
 
 const (
@@ -310,13 +382,17 @@ const (
 
 	// Font sizes — the FIVE permitted text sizes across the whole HUD,
 	// editor, and modal surface. See UI_STANDARDS.md "Type" section.
-	// Anything else is a bug. Picked as even divisions of the 64 pt
-	// atlas bake so every size renders sharp without subpixel sludge.
-	FontTiny    = float32(13)
-	FontSmall   = float32(16)
-	FontBody    = float32(20)
-	FontHeading = float32(26)
-	FontTitle   = float32(36)
+	// Anything else is a bug. All downsample from the high-res atlas bake
+	// (hudFontBake, resources.go) with mipmaps + trilinear, so each renders
+	// sharp without subpixel sludge. Bumped well up from the original
+	// 13/16/20/26/36 ladder (~30% larger) for the Della Respira face —
+	// bigger, more readable UI text; the bake is sized so even Title stays
+	// crisp, and the optional faux-bold (drawBoldText) has room when on.
+	FontTiny    = float32(17)
+	FontSmall   = float32(21)
+	FontBody    = float32(26)
+	FontHeading = float32(36)
+	FontTitle   = float32(48)
 
 	// Letter spacing per size. Wider tracking on titles to sell the
 	// "engraved on hardwood" feel. drawTextWithShadow (and the centered /
@@ -351,6 +427,16 @@ const (
 	barValuePadRight    = float32(10)
 	barLabelPadLeft     = float32(8)
 
+	// Canonical HP/MP gauge heights for the three contexts drawBar / drawBarLive
+	// render into: the full-height party-ribbon card gauge, the slightly shorter
+	// gauge on the panels Character tab, and the mini gauge on the dense item /
+	// target picker rows. Named here so the call sites stop carrying bare 32 / 28
+	// / 18 height literals and a "make all the bars a touch slimmer" pass is one
+	// edit per tier.
+	barHeightFull    = float32(32)
+	barHeightCompact = float32(28)
+	barHeightMini    = float32(18)
+
 	// World-popup horizontal slack: how many pixels past the screen edges a
 	// 3D-to-2D projected popup can drift before we cull it. Larger than zero
 	// so a popup whose anchor moves slightly off-screen still fades cleanly
@@ -371,8 +457,8 @@ const (
 	// The panels overlay used to run nearly edge-to-edge (0.95×0.93);
 	// pulled in so the Tome reads as a framed dashboard with breathing
 	// room around it rather than a full-screen takeover.
-	panelsOverlayWidthFrac  = float32(0.84)
-	panelsOverlayHeightFrac = float32(0.84)
+	panelsOverlayWidthFrac  = float32(0.80)
+	panelsOverlayHeightFrac = float32(0.80)
 	levelUpModalWidthFrac   = float32(0.60)
 	levelUpModalHeightFrac  = float32(0.85)
 
@@ -935,13 +1021,15 @@ func fixedRoundnessFor(w, h int32, target float32) float32 {
 	return r
 }
 
-// drawAccentStripe paints a thin colored bar inside a panel's left edge,
-// inset slightly so it reads as part of the card rather than its border.
+// drawAccentStripe paints a card's left-edge class rail, inset slightly so it
+// reads as part of the card rather than its border. Thin wrapper over the
+// shared drawClassRail (the one embellished-rail look) — just the card inset
+// geometry.
 func drawAccentStripe(panelX, panelY, panelH int32, col color.RGBA) {
 	if panelH < 16 {
 		return
 	}
-	rl.DrawRectangle(panelX+5, panelY+8, stripeWidth, panelH-16, col)
+	drawClassRail(panelX+5, panelY+8, stripeWidth, panelH-16, col)
 }
 
 // drawGiltRule paints a thin horizontal gilt separator — the hairline a
@@ -1082,15 +1170,16 @@ func drawCardInlay(x, y, w, h int32) {
 	roundness := fixedRoundnessFor(innerW, innerH, smallCornerRadius)
 	rl.DrawRectangleRoundedLinesEx(rect, roundness, 6, 1, woodInlay)
 
-	// A partial gilt line on the top and bottom reads like a recessed brass
-	// wire inlay without boxing in the content.
+	// A partial gilt line near the BOTTOM reads like a recessed brass wire
+	// inlay without boxing in the content. The former TOP hairline sat at the
+	// content's top edge and cut straight through panel/card titles (party-card
+	// class names, modal headings, the minimap area name) — it was removed; the
+	// bottom rule alone keeps the carved-cabinetry read without crossing text.
 	lineInset := int32(18)
 	if innerW > lineInset*2 {
-		topY := y + inset + 2
 		botY := y + h - inset - 3
 		lineX := x + inset + lineInset
 		lineW := innerW - lineInset*2
-		rl.DrawRectangle(lineX, topY, lineW, 1, fadeColor(giltDim, 0.42))
 		rl.DrawRectangle(lineX, botY, lineW, 1, fadeColor(giltDim, 0.28))
 	}
 
@@ -1358,7 +1447,12 @@ func (c *measureCache) measure(font rl.Font, text string, size, spacing float32)
 	if v, ok := c.entries[key]; ok {
 		return v
 	}
-	v := rl.MeasureTextEx(font, text, size, spacing)
+	// measureRichText so a string carrying a procedurally-drawn symbol
+	// (richtext.go) measures to its real on-screen width — otherwise centered
+	// / right-aligned labels with a symbol in them would drift by the missing
+	// glyph's (zero/notdef) advance. Symbol-free strings fall straight through
+	// to rl.MeasureTextEx.
+	v := measureRichText(font, text, size, spacing)
 	c.entries[key] = v
 	return v
 }
@@ -1512,7 +1606,22 @@ func clampBarPct(pct float32) float32 {
 // surfaces (the Tome's Stats tab) use this; live combat gauges go through
 // drawBarLive so the juice only plays where the stakes are.
 func drawBar(font rl.Font, x, y, width, height float32, label string, value, maxValue int, fill color.RGBA, muted bool) {
-	drawBarState(font, x, y, width, height, label, value, maxValue, fill, muted, -1, false)
+	mv := maxValue
+	if mv <= 0 {
+		mv = 1
+	}
+	drawBarState(font, x, y, width, height, label, clampBarPct(float32(value)/float32(mv)), formatBarValue(value, maxValue), fill, muted, -1, false, false)
+}
+
+// drawBarFraction draws a gauge at a CONTINUOUS fill fraction with a
+// caller-supplied label + value readout — for animated bars that shouldn't
+// step per integer unit (the victory XP gauge fills through it, smoothly).
+// No damage ghost or low-value heartbeat (those are HP-gauge treatments).
+func drawBarFraction(font rl.Font, x, y, width, height float32, label, valText string, frac float32, fill color.RGBA, muted bool) {
+	// gradientFill=true: the XP gauge fills left-to-right faint→rich and gains
+	// overall opacity as it nears full, so climbing toward the next level reads
+	// as building intensity.
+	drawBarState(font, x, y, width, height, label, frac, valText, fill, muted, -1, false, true)
 }
 
 // drawBarLive is drawBar plus the living-gauge treatments, keyed by a stable
@@ -1535,17 +1644,17 @@ func drawBarLive(font rl.Font, key string, x, y, width, height float32, label st
 	if !muted {
 		ghost = ghostPctFor(key, pct)
 	}
-	drawBarState(font, x, y, width, height, label, value, maxValue, fill, muted, ghost, !muted)
+	drawBarState(font, x, y, width, height, label, pct, formatBarValue(value, maxValue), fill, muted, ghost, !muted, false)
 }
 
 // drawBarState is the shared gauge body behind drawBar / drawBarLive.
 // ghostPct >= 0 draws the trailing damage segment from the fill edge out to
 // that level; heartbeat enables the low-value breathing treatment.
-func drawBarState(font rl.Font, x, y, width, height float32, label string, value, maxValue int, fill color.RGBA, muted bool, ghostPct float32, heartbeat bool) {
-	if maxValue <= 0 {
-		maxValue = 1
-	}
-	pct := clampBarPct(float32(value) / float32(maxValue))
+func drawBarState(font rl.Font, x, y, width, height float32, label string, pct float32, valText string, fill color.RGBA, muted bool, ghostPct float32, heartbeat, gradientFill bool) {
+	// pct arrives as a CONTINUOUS fraction (drawBar derives it from value/max;
+	// drawBarFraction passes a smoothly-animated one for the XP gauge), so the
+	// fill width moves sub-integer-smoothly rather than stepping per unit.
+	pct = clampBarPct(pct)
 	track := barTrack
 	outline := borderDim
 	if muted {
@@ -1575,7 +1684,16 @@ func drawBarState(font rl.Font, x, y, width, height float32, label string, value
 	if pct > 0 {
 		fillW := int32(float32(iw-2) * pct)
 		if fillW > 0 {
-			drawSmallPanel(ix+1, iy+1, fillW, ih-2, fill)
+			if gradientFill && !muted {
+				// Left-to-right faint→rich opacity, and the whole fill gains
+				// opacity as pct climbs — so the gauge "builds" toward the
+				// leading edge / the next level (the right end). The leading
+				// edge reaches full opacity only at a full bar.
+				lead := fadeColor(fill, core.Lerp(0.45, 1.0, pct))
+				rl.DrawRectangleGradientH(ix+1, iy+1, fillW, ih-2, fadeColor(fill, 0.32), lead)
+			} else {
+				drawSmallPanel(ix+1, iy+1, fillW, ih-2, fill)
+			}
 			drawGaugeFillDepth(ix+1, iy+1, fillW, ih-2, muted)
 			// Liquid meniscus — a bright hairline riding the fill's leading
 			// edge so the level reads as the surface of liquid in a glass
@@ -1644,10 +1762,6 @@ func drawBarState(font rl.Font, x, y, width, height float32, label string, value
 	rl.DrawTextEx(font, label, rl.NewVector2(labelX+1, labelY+1), labelSize, 1, shadowHeavy)
 	rl.DrawTextEx(font, label, rl.NewVector2(labelX, labelY), labelSize, 1, labelColor)
 
-	valText := ""
-	if maxValue > 0 {
-		valText = formatBarValue(value, maxValue)
-	}
 	if valText != "" {
 		// Value text is always FontSmall per UI_STANDARDS.md — the
 		// number is the bar's readable content and stays consistent
@@ -1726,6 +1840,32 @@ func drawGaugeBezel(x, y, w, h int32, muted bool) {
 		drawDiamondPip(float32(x+6), float32(y+h/2), 2, capCol)
 		drawDiamondPip(float32(x+w-6), float32(y+h/2), 2, capCol)
 	}
+}
+
+// drawClassRail paints THE shared embellished 3-D character-color rail — a
+// jeweled inlay sunk into the surface, not a flat bar. Layers back-to-front:
+// a recessed dark channel (reads inlaid); the rounded class-color core; a lit
+// left edge + shadowed right edge (rounded bevel); and a gilt diamond pip
+// capping each end like a brass terminal, breathing with the candlelight.
+// This is the ONE per-character colored tick/stripe look across the whole
+// UI — card accents (drawAccentStripe: party ribbon, action menu), the
+// panels member columns, the turn-order rows, the victory spoils rows — so
+// none of them drift. Callers pass explicit geometry (insets differ per
+// surface). `col` carries the intended alpha.
+func drawClassRail(x, y, w, h int32, col color.RGBA) {
+	if w <= 0 || h <= 0 {
+		return
+	}
+	chan_ := rl.NewRectangle(float32(x-1), float32(y-2), float32(w+2), float32(h+4))
+	rl.DrawRectangleRounded(chan_, 0.7, 5, fadeColor(shadowHeavy, 0.55))
+	core := rl.NewRectangle(float32(x), float32(y), float32(w), float32(h))
+	rl.DrawRectangleRounded(core, 0.7, 5, col)
+	rl.DrawRectangle(x, y+1, 1, h-2, fadeColor(rl.White, 0.32))        // lit left edge
+	rl.DrawRectangle(x+w-1, y+1, 1, h-2, fadeColor(shadowHeavy, 0.45)) // shadowed right edge
+	cx := float32(x) + float32(w)/2
+	g := candleFlicker() // brass terminals breathe with the candlelight
+	drawDiamondPip(cx, float32(y-1), 2.3, fadeColor(giltBright, 0.85*g))
+	drawDiamondPip(cx, float32(y+h+1), 2.1, fadeColor(giltDim, 0.7*g))
 }
 
 func formatBarValue(value, maxValue int) string {
@@ -1808,6 +1948,49 @@ func drawTextWithShadow(font rl.Font, text string, x, y, size float32, col color
 	drawTextWithShadowStyle(font, text, x, y, size, canonicalSpacing(size), col, shadowStrong, 1, 1)
 }
 
+// rowTextColor centralizes the focus/disable palette for list-row labels so the
+// {textPrimary, textMuted, disabled} tones aren't hand-picked (and prone to
+// drift) at each list. A disabled row takes disabledCol; otherwise a focused
+// row reads textPrimary and an unfocused one textMuted. Two-state lists that
+// convey focus with a selection plate rather than the text color (shop rows,
+// skill-tree node names) pass focused=enabled with their own disabled tone.
+func rowTextColor(focused, disabled bool, disabledCol color.RGBA) color.RGBA {
+	switch {
+	case disabled:
+		return disabledCol
+	case focused:
+		return textPrimary
+	}
+	return textMuted
+}
+
+// drawTextTabStrip paints a left-anchored row of simple FontBody text tabs
+// starting at (x, y): the active tab in activeCol (with an inkAccent underline
+// when underline is set), the rest textMuted, advancing by measured width +
+// gap. `label` formats tab i; `measure` returns a label's width so callers can
+// supply a cache-backed measurer where it matters (the Journal) or a direct one
+// (the shop). Returns the x just past the last tab. This is the shared rhythm
+// behind the shop's Buy/Sell header and the Journal's Quests/Bestiary sub-tabs;
+// the panels overlay's MAIN tab strip is a different visual (even-width glass
+// tiles, centered labels) and intentionally does not route through here.
+func drawTextTabStrip(font rl.Font, x, y float32, count, active int, label func(int) string, measure func(string) float32, activeCol color.RGBA, gap float32, underline bool) float32 {
+	cursorX := x
+	for i := 0; i < count; i++ {
+		txt := label(i)
+		col := textMuted
+		if i == active {
+			col = activeCol
+		}
+		drawTextWithShadow(font, txt, cursorX, y, FontBody, col)
+		w := measure(txt)
+		if underline && i == active {
+			rl.DrawRectangle(int32(cursorX), int32(y+FontBody+2), int32(w), 2, inkAccent)
+		}
+		cursorX += w + gap
+	}
+	return cursorX
+}
+
 // engravedMeasureCache backs drawEngravedText's band math — engraved labels
 // (panel headings, action verbs, menu titles) are stable strings redrawn
 // every frame their surface is up.
@@ -1840,20 +2023,28 @@ func drawEngravedText(font rl.Font, text string, x, y, size float32, base color.
 // timing-bar prompt's 1.5). Pair with a MeasureTextEx at the same spacing.
 func drawEngravedTextSpaced(font rl.Font, text string, x, y, size, spacing float32, base color.RGBA) {
 	m := engravedMeasureCache.measure(font, text, size, spacing)
-	rl.DrawTextEx(font, text, rl.NewVector2(x+2, y+2), size, spacing, shadowHeavy)
-	rl.DrawTextEx(font, text, rl.NewVector2(x, y), size, spacing, base)
+	// drawRichTextKnown (not raw DrawTextEx) so engraved labels carrying a
+	// symbol the font lacks — e.g. the pause-menu "Options ▸" / "Debug ▸" rows —
+	// get the procedural glyph (richtext.go) in every pass. The scissor bands
+	// clip the symbol shapes too, so they pick up the same top-light /
+	// deep-shade gradient as the letters. The has-symbol scan runs ONCE here,
+	// not per pass (this draws the string four times); symbol-free headings
+	// then take the fast path in all four.
+	hasSym := containsSymGlyph(text)
+	drawRichTextKnown(font, text, hasSym, x+2, y+2, size, spacing, shadowHeavy)
+	drawRichTextKnown(font, text, hasSym, x, y, size, spacing, base)
 	// Band rects pad ±2 px horizontally so antialiased glyph edges aren't
 	// shaved at the scissor boundary.
 	lit := core.MixColor(base, inkPrimary, 0.55)
 	lit.A = base.A
 	rl.BeginScissorMode(int32(x-2), int32(y), int32(m.X+4), int32(m.Y*0.45))
-	rl.DrawTextEx(font, text, rl.NewVector2(x, y), size, spacing, lit)
+	drawRichTextKnown(font, text, hasSym, x, y, size, spacing, lit)
 	rl.EndScissorMode()
 	deep := core.MixColor(base, rl.NewColor(0, 0, 0, base.A), 0.34)
 	deep.A = base.A
 	deepTop := y + m.Y*0.72
 	rl.BeginScissorMode(int32(x-2), int32(deepTop), int32(m.X+4), int32(m.Y-m.Y*0.72+2))
-	rl.DrawTextEx(font, text, rl.NewVector2(x, y), size, spacing, deep)
+	drawRichTextKnown(font, text, hasSym, x, y, size, spacing, deep)
 	rl.EndScissorMode()
 }
 
@@ -1866,8 +2057,15 @@ func drawEngravedTextSpaced(font rl.Font, text string, x, y, size, spacing float
 // the non-styled drawTextWithShadow for everything else so HUD shadows
 // stay consistent.
 func drawTextWithShadowStyle(font rl.Font, text string, x, y, size, spacing float32, col, shadowCol color.RGBA, offX, offY float32) {
-	rl.DrawTextEx(font, text, rl.NewVector2(x+offX, y+offY), size, spacing, shadowCol)
-	rl.DrawTextEx(font, text, rl.NewVector2(x, y), size, spacing, col)
+	// Route through drawRichTextKnown so any geometric/arrow/relational symbols
+	// the font lacks (▶ → ↑↓ ● ★ ✓ ≤ ≥ …) are drawn procedurally (richtext.go)
+	// instead of baking as missing-glyph boxes. The has-symbol scan runs ONCE
+	// here and is shared by the shadow + main pass — symbol-free strings (the
+	// vast majority) then take the single-DrawTextEx fast path in both, so this
+	// per-frame hot path adds only one cheap ASCII byte-scan per label.
+	hasSym := containsSymGlyph(text)
+	drawRichTextKnown(font, text, hasSym, x+offX, y+offY, size, spacing, shadowCol)
+	drawRichTextKnown(font, text, hasSym, x, y, size, spacing, col)
 }
 
 // drawHeading is the legacy panel-heading helper. Routes through

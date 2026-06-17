@@ -519,6 +519,12 @@ func (t TimingState) ReelSymbolAt(i int) int {
 		return r.Stop
 	}
 	steps := int(t.Elapsed * r.Speed)
+	if steps < 0 {
+		// Elapsed is only ever advanced by a non-negative dt today, but guard
+		// against a malformed/replayed negative so the modulo can't return a
+		// negative index that a symbol-art lookup would treat as out-of-range.
+		steps = 0
+	}
 	return (r.Offset + steps) % ReelSymbolCount
 }
 
@@ -629,7 +635,7 @@ func NewRecallState(rng *rand.Rand, duration float32, length int, reveal float32
 	// Reveal MUST end before the bar does, or RecallHidden never flips: there'd
 	// be no input window and the resolve-flash would paint the memorize branch
 	// (answer lit). Cap it to leave at least a fraction of the bar for input.
-	if maxReveal := duration * 0.8; reveal > maxReveal {
+	if maxReveal := duration * RecallMaxRevealFrac; reveal > maxReveal {
 		reveal = maxReveal
 	}
 	targets := randomDirectionRun(rng, length)
@@ -760,8 +766,11 @@ func (t *TimingState) Press() bool {
 // press outside both zones is a silent no-op (no penalty — the
 // rhythm-game vibe is "tap to the beat," not "punish off-beat").
 func (t *TimingState) pressTally() bool {
-	// Commit-zone press: end the bar early with the current tally.
+	// Commit-zone press: end the bar early with the current tally. Mark
+	// Pressed so a deliberate early commit registers as engagement even with
+	// zero hits — a walk-away (Tick timeout, no press) is the only !Pressed case.
 	if t.Elapsed >= t.CommitStart {
+		t.Pressed = true
 		t.resolveTally()
 		return true
 	}
@@ -800,7 +809,10 @@ func (t *TimingState) pressTally() bool {
 // lands without depending on Quality.
 func (t *TimingState) resolveTally() {
 	t.Resolved = true
-	t.Pressed = t.Hits > 0
+	// Don't clobber an already-set Pressed (a commit-zone press marks it true
+	// before calling here); otherwise infer engagement from landed hits so a
+	// Tick-timeout with no input stays !Pressed.
+	t.Pressed = t.Pressed || t.Hits > 0
 	switch {
 	case t.Hits == 0:
 		t.Quality = TimingQualityMiss
@@ -971,7 +983,7 @@ func chargeGradeUpToPeak(p float32) (grade int, pastPeak bool) {
 			distance = -distance
 		}
 		windowSize := ChargePeakEnd - ChargePeakStart
-		if windowSize <= 0 || distance/windowSize <= 0.30 {
+		if windowSize <= 0 || distance/windowSize <= ChargeExcellentBandFrac {
 			return TimingQualityExcellent, false
 		}
 		return TimingQualityGreat, false

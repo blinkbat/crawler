@@ -17,6 +17,10 @@ func openPanels(g *core.GameState) {
 	if g.PanelsMapZoom <= 0 {
 		g.PanelsMapZoom = core.PanelMapZoomDefault
 	}
+	// Re-center the Map tab on the player each open (pan is a transient inspect
+	// offset, not persistent state).
+	g.PanelsMapPanX = 0
+	g.PanelsMapPanZ = 0
 	// Snap the look yaw/pitch back to neutral so a half-rotated
 	// free-look doesn't bleed into the overlay's screen-space rendering.
 	g.Player.LookYaw = 0
@@ -165,17 +169,36 @@ func updatePanels(g *core.GameState) {
 		}
 		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, rows)
 	case core.PanelTabMap:
-		// Up/Down zooms the map by one cells-on-screen step per press;
-		// the bounds (core.PanelMapZoomMin/Max) are soft-clamped so holding
-		// the key doesn't run off the rails. (This is its own zoom model
-		// in cells-on-screen, distinct from the editor's float scale.)
+		// D-pad/stick PANS the map (the natural map-scroll control); Confirm (A)
+		// CYCLES zoom one step tighter, wrapping back to the most-zoomed-out at
+		// the floor — this frees all four directions for panning. Back (B) closes
+		// (global). The pan step scales with zoom so a tap scrolls a meaningful
+		// chunk at any scale.
+		step := g.PanelsMapZoom / core.PanelMapPanDivisor
+		if step < core.PanelMapPanStepMin {
+			step = core.PanelMapPanStepMin
+		}
+		if dx := input.CursorLeftRight(); dx != 0 {
+			g.PanelsMapPanX += dx * step
+		}
 		if input.UpPressed() {
-			g.PanelsMapZoom -= core.PanelMapZoomStep
+			g.PanelsMapPanZ -= step
 		}
 		if input.DownPressed() {
-			g.PanelsMapZoom += core.PanelMapZoomStep
+			g.PanelsMapPanZ += step
+		}
+		if input.ConfirmPressed() {
+			g.PanelsMapZoom -= core.PanelMapZoomStep
+			if g.PanelsMapZoom < core.PanelMapZoomMin {
+				g.PanelsMapZoom = core.PanelMapZoomMax
+			}
 		}
 		g.PanelsMapZoom = core.Clamp(g.PanelsMapZoom, core.PanelMapZoomMin, core.PanelMapZoomMax)
+		// Clamp the pan so the view center can't wander more than a map's span
+		// off the player — generous enough to inspect any explored corner, tight
+		// enough that you can't scroll into an endless void.
+		g.PanelsMapPanX = core.Clamp(g.PanelsMapPanX, -g.Area.Width, g.Area.Width)
+		g.PanelsMapPanZ = core.Clamp(g.PanelsMapPanZ, -g.Area.Height, g.Area.Height)
 	default:
 		// The render side is a compile-locked panelTabDrawers array; this
 		// input-side dispatch is hand-maintained, so a new tab without an
@@ -199,4 +222,8 @@ func setPanelTab(g *core.GameState, t core.PanelTab) {
 	render.ResetEquipPanelLayout()
 	g.PanelsTab = t
 	g.PanelsRowCursor = 0
+	// Re-center the Map view whenever it's (re)entered — pan is a transient
+	// inspect offset, so a previous visit's scroll shouldn't linger.
+	g.PanelsMapPanX = 0
+	g.PanelsMapPanZ = 0
 }

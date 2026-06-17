@@ -47,7 +47,7 @@ const (
 // Called after DrawWorld so chests draw under the lighting shader
 // still bound. The body / lid propModels live on Resources so the
 // meshes load once at startup and unload at game exit.
-func DrawChests(camera rl.Camera3D, g core.GameState, assets Resources) {
+func DrawChests(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	forward := horizontalForward(camera)
 	for _, ch := range g.Chests {
 		base := tileWorldPos(ch.TileX, ch.TileZ, g.Area.StandGroundY(ch.TileX, ch.TileZ))
@@ -123,7 +123,7 @@ func drawChestLidLooted(assets Resources, base rl.Vector3, lidCentreY float32) {
 // chest modal is open (the modal itself is the prompt) and skipped for
 // already-looted chests. Drawn AFTER rl.EndMode3D so the prompt text
 // renders in screen space — see drawAdventureScene for the call order.
-func DrawChestPrompt(camera rl.Camera3D, g core.GameState, assets Resources) {
+func DrawChestPrompt(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if g.ChestOpen >= 0 {
 		return
 	}
@@ -147,7 +147,7 @@ func DrawChestPrompt(camera rl.Camera3D, g core.GameState, assets Resources) {
 // list, a Take All row, and a hint footer. Rendered after the world so
 // it sits on top of everything. Cursor row uses the same selection
 // style as the pause menu.
-func DrawChestModal(g core.GameState, assets Resources) {
+func DrawChestModal(g *core.GameState, assets Resources) {
 	if g.ChestOpen < 0 || g.ChestOpen >= len(g.Chests) {
 		return
 	}

@@ -26,6 +26,34 @@ const (
 	EnemySkeleton
 )
 
+// init pins every EnemyKind's serialized integer value. EnemyKind is stored as
+// its int in save files — the Bestiary persists as map[EnemyKind]BestiaryEntry,
+// JSON-keyed by the int — so inserting a kind mid-enum renumbers every later
+// kind and silently mis-attributes saved bestiary entries (pruneBestiary can't
+// catch it: the renumbered keys are still "registered" kinds). These explicit
+// literals are the on-disk contract: a mid-enum insert shifts a kind's iota
+// value away from its pinned literal and trips this panic at startup, instead
+// of corrupting saves silently. APPENDING a new kind at the end is the only
+// safe edit — add the kind above, then one pinned line here. Mirrors the
+// identical guard ItemKind carries in items.go.
+func init() {
+	pinned := [...]struct {
+		kind EnemyKind
+		val  int
+	}{
+		{EnemyRat, 0}, {EnemyBat, 1}, {EnemyDiseasedRat, 2},
+		{EnemyGoblin, 3}, {EnemyGoblinMage, 4}, {EnemyAmoeba, 5},
+		{EnemyVenusMantrap, 6}, {EnemyCaveSpider, 7}, {EnemyVampireBat, 8},
+		{EnemyWisp, 9}, {EnemyStoneGolem, 10}, {EnemyNecromancer, 11},
+		{EnemySkeleton, 12},
+	}
+	for _, p := range pinned {
+		if int(p.kind) != p.val {
+			panic("core: EnemyKind serialization value drifted — never insert mid-enum (it renumbers saved bestiary entries); append new kinds at the end and pin them in enemies.go's init")
+		}
+	}
+}
+
 type EnemyDefinition struct {
 	Kind         EnemyKind
 	Name         string
@@ -298,7 +326,7 @@ var enemyDefinitions = []EnemyDefinition{
 		// An earlier 0.35 roll-to-cast made the mantrap bite ~2/3 of
 		// the time even when starving, which read as "doesn't
 		// prioritize ingest."
-		SkillCastChance: 1.0,
+		SkillCastChance: MantrapIngestCastChance,
 		GoldMin:         6,
 		GoldMax:         12,
 	},
@@ -467,13 +495,18 @@ var enemyDefinitions = []EnemyDefinition{
 
 // enemyByKind is the O(1) lookup map for enemyDefinitions, built once at
 // init. EnemyInfo is called per-frame from the renderer (roster, popups),
-// so the map matches the partyClassByID / skillByID pattern in party.go.
+// so it serves the same role as the partyClassByID / skillByID / itemByKind
+// registries in party.go / items.go.
 //
-// Values are POINTERS into the enemyDefinitions backing array (stable — a
-// package-level slice never reallocates) rather than copies, so the narrow
-// field accessors (enemyGoverningDef → EnemyName / EnemySingularName /
-// enemyBaseStats) read a single field through the pointer instead of copying
-// the ~200-byte EnemyDefinition out of the map on every per-frame call.
+// Unlike those, enemyByKind is hand-built rather than via the generic
+// BuildRegistry helper (util.go) because it stores POINTERS into the
+// enemyDefinitions backing array, not value copies. BuildRegistry is
+// map[K]V — copying each ~200-byte EnemyDefinition into the map — whereas
+// the narrow field accessors here (enemyGoverningDef → EnemyName /
+// EnemySingularName / enemyBaseStats) want to read a single field through a
+// stable pointer (a package-level slice never reallocates) instead of
+// copying the whole struct out on every per-frame call. A value registry
+// would defeat that, so this builder stays explicit.
 var enemyByKind = func() map[EnemyKind]*EnemyDefinition {
 	m := make(map[EnemyKind]*EnemyDefinition, len(enemyDefinitions))
 	for i := range enemyDefinitions {
@@ -485,15 +518,16 @@ var enemyByKind = func() map[EnemyKind]*EnemyDefinition {
 // Probability fields ride a [0, 1] contract — values past 1 roll
 // "always" which is usually a typo (a designer meant 0.5 and wrote 5).
 // Negative values would invert the gate silently. Panic at init so the
-// bad data never reaches the gameplay loop. Used to be inline in the
-// registry builder; lifted to a sibling init() block when the builder
-// folded into the generic BuildRegistry helper.
+// bad data never reaches the gameplay loop. Kept in a sibling init() block
+// (rather than inline in the enemyByKind builder above) so the builder
+// stays a clean map construction.
 func init() {
-	// Guard against a duplicate Kind in the registry. BuildRegistry above
-	// last-write-wins on a repeated key, so a copy-paste that duplicated a
-	// Kind would make EnemyInfo silently return the SECOND row while
-	// EnemyKinds() still lists both — a confusing data desync, not a crash.
-	// Panic at init like the name-table collision guard (buildEnemyKindByName).
+	// Guard against a duplicate Kind in the registry. The enemyByKind
+	// builder above last-write-wins on a repeated key, so a copy-paste that
+	// duplicated a Kind would make EnemyInfo silently return the SECOND row
+	// while EnemyKinds() still lists both — a confusing data desync, not a
+	// crash. Panic at init like the name-table collision guard
+	// (buildEnemyKindByName).
 	seenKind := make(map[EnemyKind]struct{}, len(enemyDefinitions))
 	for _, def := range enemyDefinitions {
 		if _, dup := seenKind[def.Kind]; dup {
@@ -690,7 +724,9 @@ func EnemyLevel(e Enemy) int {
 // to 0. The single seam behind "make foes harder": spawn HP, basic-attack damage,
 // and enemy spell damage all route through it (the last from the battle package).
 func ScaleEnemyDifficulty(n int) int {
-	scaled := (n*EnemyDifficultyNum + EnemyDifficultyDen/2) / EnemyDifficultyDen
+	// Compute in int64 so a large authored custom-enemy stat can't overflow the
+	// intermediate multiply (n*EnemyDifficultyNum) into a negative result.
+	scaled := int((int64(n)*int64(EnemyDifficultyNum) + int64(EnemyDifficultyDen)/2) / int64(EnemyDifficultyDen))
 	if n > 0 && scaled < 1 {
 		scaled = 1
 	}
@@ -720,10 +756,6 @@ func NewEnemy(kind EnemyKind) Enemy {
 		// SleepTurns, etc.) — eager allocation would single out one
 		// field without buying behaviour.
 	}
-}
-
-func EnemyDisplayName(enemy Enemy) string {
-	return enemyGoverningDef(&enemy).Name
 }
 
 func EnemySingularNoun(enemy Enemy) string {

@@ -129,6 +129,94 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
+// TestCrystalsRoundTrip pins the optional crystals: section — it parses the
+// position-only rows and re-encodes them byte-stably. Mirrors the doors /
+// chests sections' backward-compat shape (absent section ⇒ no crystals).
+func TestCrystalsRoundTrip(t *testing.T) {
+	withCrystals := sample + "crystals:\n1 1\n3 2\n"
+	mf, err := Parse(strings.NewReader(withCrystals))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(mf.Crystals) != 2 {
+		t.Fatalf("crystal count: %d, want 2 (%+v)", len(mf.Crystals), mf.Crystals)
+	}
+	if mf.Crystals[0] != (MapCrystal{X: 1, Z: 1}) || mf.Crystals[1] != (MapCrystal{X: 3, Z: 2}) {
+		t.Fatalf("crystal positions mismatch: %+v", mf.Crystals)
+	}
+	var buf bytes.Buffer
+	if err := mf.Encode(&buf); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	mf2, err := Parse(&buf)
+	if err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	if len(mf2.Crystals) != len(mf.Crystals) {
+		t.Fatalf("crystal count after round-trip: %d vs %d", len(mf2.Crystals), len(mf.Crystals))
+	}
+	for i := range mf.Crystals {
+		if mf.Crystals[i] != mf2.Crystals[i] {
+			t.Errorf("crystal %d differs: %+v vs %+v", i, mf.Crystals[i], mf2.Crystals[i])
+		}
+	}
+	// A map with no crystals must not emit a crystals: section (byte-stable
+	// with pre-crystal maps).
+	plain, err := Parse(strings.NewReader(sample))
+	if err != nil {
+		t.Fatalf("parse plain: %v", err)
+	}
+	var pbuf bytes.Buffer
+	if err := plain.Encode(&pbuf); err != nil {
+		t.Fatalf("encode plain: %v", err)
+	}
+	if strings.Contains(pbuf.String(), "crystals:") {
+		t.Fatal("a map with no crystals must not emit a crystals: section")
+	}
+}
+
+// TestCrystalsEmptySectionRoundTrips pins that an explicit but empty
+// crystals: section survives round-trip as "defined, zero rows" (the author
+// deliberately wants no crystals) rather than collapsing to the absent-section
+// legacy case.
+func TestCrystalsEmptySectionRoundTrips(t *testing.T) {
+	withEmpty := sample + "crystals:\n"
+	mf, err := Parse(strings.NewReader(withEmpty))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !mf.CrystalsDefined {
+		t.Fatal("an explicit crystals: section must set CrystalsDefined even with no rows")
+	}
+	if len(mf.Crystals) != 0 {
+		t.Fatalf("expected zero crystal rows, got %d", len(mf.Crystals))
+	}
+	var buf bytes.Buffer
+	if err := mf.Encode(&buf); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if !strings.Contains(buf.String(), "crystals:") {
+		t.Fatal("a defined-but-empty crystal set must still emit the crystals: section")
+	}
+	mf2, err := Parse(&buf)
+	if err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	if !mf2.CrystalsDefined || len(mf2.Crystals) != 0 {
+		t.Fatalf("empty crystal section lost across round-trip: defined=%v rows=%d", mf2.CrystalsDefined, len(mf2.Crystals))
+	}
+}
+
+// TestRejectCrystalOutOfBounds mirrors the pack/chest bounds guard: an
+// out-of-range crystal row fails validation at parse rather than silently
+// dropping at runtime.
+func TestRejectCrystalOutOfBounds(t *testing.T) {
+	bad := sample + "crystals:\n9 9\n"
+	if _, err := Parse(strings.NewReader(bad)); err == nil {
+		t.Fatal("expected error for out-of-bounds crystal, got nil")
+	}
+}
+
 func TestRejectMismatchedLayerSize(t *testing.T) {
 	bad := strings.Replace(sample, "size: 5x4", "size: 6x4", 1)
 	if _, err := Parse(strings.NewReader(bad)); err == nil {

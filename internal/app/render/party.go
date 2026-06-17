@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 	"image/color"
+	"math"
 
 	"crawler/internal/app/core"
 
@@ -41,6 +42,8 @@ var partyStatusVisuals = [core.PartyStatusCount]struct {
 	core.PartyStatusPoisoned:  {Col: statusPoison, Flicker: true, Glyph: drawStatusGlyphPoisoned},
 	core.PartyStatusBlessed:   {Col: statusBlessed, Glyph: drawStatusGlyphBlessed},
 	core.PartyStatusRegen:     {Col: statusRegen, Glyph: drawStatusGlyphRegen},
+	core.PartyStatusShielded:  {Col: statusShielded, Glyph: drawStatusGlyphShielded},
+	core.PartyStatusIceArmor:  {Col: statusIceArmor, Glyph: drawStatusGlyphIceArmor},
 	core.PartyStatusDefending: {Col: statusDefending, Glyph: drawStatusGlyphDefending},
 }
 
@@ -149,6 +152,21 @@ func partyNamePlusBadge(name string) string {
 	}
 	v := name + " +"
 	partyNamePlusLabels[name] = v
+	return v
+}
+
+// partyHPBarKeys memoizes the "hp:<Name>" bar-ghost key per member name, so
+// the always-visible ribbon's hot path (drawBarLive every frame, in battle AND
+// exploration) is a map lookup instead of a fresh concat per card per frame.
+// Same font-independent rationale as partyNamePlusLabels.
+var partyHPBarKeys = make(map[string]string, 8)
+
+func partyHPBarKey(name string) string {
+	if v, ok := partyHPBarKeys[name]; ok {
+		return v
+	}
+	v := "hp:" + name
+	partyHPBarKeys[name] = v
 	return v
 }
 
@@ -322,8 +340,8 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active,
 	// sub-quarter tank breathes red. MP stays static — spends are deliberate,
 	// not threats, and a trailing ghost there would read as a leak.
 	hpFill := hpFillColor(member.HP, member.MaxHP)
-	drawBarLive(font, "hp:"+member.Name, contentX, y+50, contentW, 32, "HP", member.HP, member.MaxHP, hpFill, down)
-	drawBar(font, contentX, y+90, contentW, 32, "MP", member.MP, member.MaxMP, barMP, down)
+	drawBarLive(font, partyHPBarKey(member.Name), contentX, y+50, contentW, barHeightFull, "HP", member.HP, member.MaxHP, hpFill, down)
+	drawBar(font, contentX, y+90, contentW, barHeightFull, "MP", member.MP, member.MaxMP, barMP, down)
 
 	// Dim wash over inactive cards (painted last, over everything) so the
 	// lifted active card pops. The active and the targeted-ally cards opt
@@ -437,6 +455,25 @@ func drawStatusGlyphDefending(cx, cy, r float32, col rl.Color) {
 	rl.DrawLineEx(rl.NewVector2(cx, cy-r*0.55), rl.NewVector2(cx, cy+r*0.55), 1.5, fadeColor(statusGlyphDark, 0.6))
 }
 
+func drawStatusGlyphShielded(cx, cy, r float32, col rl.Color) {
+	// Aegis ward: a glowing energy bubble — a bright ring with a soft inner
+	// fill, distinct from the Defending heraldic badge (a solid shield) so the
+	// magical ward reads apart from the manual block.
+	rl.DrawCircleV(rl.NewVector2(cx, cy), r*0.7, fadeColor(col, 0.28))
+	rl.DrawCircleLines(int32(cx), int32(cy), r*0.7, col)
+	rl.DrawCircleLines(int32(cx), int32(cy), r*0.46, fadeColor(col, 0.7))
+}
+
+func drawStatusGlyphIceArmor(cx, cy, r float32, col rl.Color) {
+	// Frost ward: a six-spoke snowflake/crystal — the universal ice mark.
+	for i := 0; i < 6; i++ {
+		ang := float64(i) * (math.Pi / 3)
+		dx := float32(math.Cos(ang)) * r * 0.68
+		dy := float32(math.Sin(ang)) * r * 0.68
+		rl.DrawLineEx(rl.NewVector2(cx, cy), rl.NewVector2(cx+dx, cy+dy), 1.5, col)
+	}
+}
+
 func drawStatusGlyphDown(cx, cy, r float32, col rl.Color) {
 	// Skull: dome + jaw + eye sockets.
 	rl.DrawCircleV(rl.NewVector2(cx, cy-r*0.12), r*0.78, col)
@@ -444,6 +481,23 @@ func drawStatusGlyphDown(cx, cy, r float32, col rl.Color) {
 	rl.DrawCircleV(rl.NewVector2(cx-r*0.3, cy-r*0.16), r*0.2, statusGlyphDark)
 	rl.DrawCircleV(rl.NewVector2(cx+r*0.3, cy-r*0.16), r*0.2, statusGlyphDark)
 	rl.DrawLineEx(rl.NewVector2(cx, cy+r*0.34), rl.NewVector2(cx, cy+r*0.72), 1, statusGlyphDark)
+}
+
+func drawStatusGlyphBurn(cx, cy, r float32, col rl.Color) {
+	// Flame: rounded base tapering to an upward tip, with a brighter inner
+	// core so it reads as fire rather than a plain droplet (distinct from the
+	// poison drop, which points up but carries a highlight bubble instead).
+	rl.DrawCircleV(rl.NewVector2(cx, cy+r*0.3), r*0.52, col)
+	rl.DrawPoly(rl.NewVector2(cx, cy-r*0.18), 3, r*0.6, -90, col)
+	rl.DrawCircleV(rl.NewVector2(cx, cy+r*0.34), r*0.2, fadeColor(rl.White, 0.45))
+}
+
+func drawStatusGlyphBleed(cx, cy, r float32, col rl.Color) {
+	// Blood drop: round body with a pointed tip at the BOTTOM (a falling
+	// drop) — the inverse orientation of the poison droplet (tip up), so the
+	// two DoT marks read apart even before their pill colors differ.
+	rl.DrawCircleV(rl.NewVector2(cx, cy-r*0.05), r*0.52, col)
+	rl.DrawPoly(rl.NewVector2(cx, cy+r*0.4), 3, r*0.5, 90, col)
 }
 
 func drawClassMedallion(cx, cy, r float32, col rl.Color, muted bool) {
@@ -465,7 +519,7 @@ func drawClassMedallion(cx, cy, r float32, col rl.Color, muted bool) {
 // DrawPartyRibbon renders the always-visible bottom party ribbon. Cards are
 // pinned at fixed positions so they stay readable through attack bumps and
 // victory dances. Active and selected states are surfaced from battle state.
-func DrawPartyRibbon(g core.GameState, assets Resources) {
+func DrawPartyRibbon(g *core.GameState, assets Resources) {
 	if len(g.Party) == 0 {
 		return
 	}
@@ -479,10 +533,10 @@ func DrawPartyRibbon(g core.GameState, assets Resources) {
 	}
 	y := screenH - partyCardH - ribbonBottom
 
-	activeIdx := core.ActiveActorIndex(&g)
+	activeIdx := core.ActiveActorIndex(g)
 	selectedIdx := -1
 	if targetingAlly(g) {
-		selectedIdx = core.HighlightedAllyIndex(&g)
+		selectedIdx = core.HighlightedAllyIndex(g)
 	}
 
 	// Dim the OTHER cards only when a party member is actually up

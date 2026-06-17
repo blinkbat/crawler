@@ -89,6 +89,31 @@ type MapFile struct {
 	// facing. Bidirectional pairs are author-authored (both ends
 	// reference each other); the engine doesn't infer pairs.
 	Doors []MapDoor
+	// Crystals is the authored healing-crystal list — one tile position per
+	// entry. Optional; older .map files without a `crystals:` section parse
+	// with an empty slice and round-trip back to disk without one, exactly
+	// like the doors / custom_enemies sections.
+	Crystals []MapCrystal
+	// CrystalsDefined records whether the parsed file carried a `crystals:`
+	// section header at all — distinguishing "section present but empty"
+	// (the author deliberately wants zero crystals) from "section absent"
+	// (a legacy map predating editable crystals, which the runtime fills with
+	// a default entrance crystal). Encode writes the section whenever this is
+	// set, so a zero-crystal map round-trips as zero rather than reverting to
+	// the legacy fallback.
+	CrystalsDefined bool
+	// Dialogs is the authored conversation list, stored as one OPAQUE
+	// JSON object per line in the optional `dialogs:` section. This leaf
+	// I/O package stays JSON-agnostic — it reads each line verbatim and
+	// writes it back unchanged; core (which already owns encoding/json)
+	// marshals DialogDefinition values to/from these strings. Older .map
+	// files without the section parse with an empty slice and round-trip
+	// without one, exactly like the custom_enemies / doors sections.
+	Dialogs []string
+	// Triggers is the authored dialog-trigger list, stored as one OPAQUE JSON
+	// object per line in the optional `triggers:` section — same verbatim,
+	// JSON-agnostic handling as Dialogs (core marshals DialogTrigger values).
+	Triggers []string
 }
 
 // MapPack is one authored pack at a tile. Members is a non-empty list of
@@ -151,11 +176,13 @@ type MapChest struct {
 	Z     int
 }
 
-// emptyChestToken is the single-field placeholder for a chest authored
+// EmptyChestToken is the single-field placeholder for a chest authored
 // with no items. Kept out of the item-name registry so it can never
 // shadow a real ItemDefinition.Name; the parser maps it back to an
 // empty Items slice and the encoder emits it when Items is empty.
-const emptyChestToken = "(empty)"
+// Exported so core's reserved-item-name guard cites this one source
+// instead of re-hardcoding the literal.
+const EmptyChestToken = "(empty)"
 
 // MapDoor is one authored door at a tile. On-disk format:
 //
@@ -177,6 +204,14 @@ type MapDoor struct {
 	Z          int
 	Facing     string
 	Style      string
+}
+
+// MapCrystal is one authored healing crystal at a tile. On-disk format is
+// just the two coordinates, "X Z" — a crystal carries no per-instance data
+// (its charge state is runtime-only), so the row needs nothing more.
+type MapCrystal struct {
+	X int
+	Z int
 }
 
 // DoorTargetComplete reports whether a door names both halves of a
@@ -305,7 +340,7 @@ type MapCustomEnemy struct {
 }
 
 // customEnemyNoSkillsToken is the single-field placeholder for a
-// custom enemy with no skills. Mirrors emptyChestToken — keeps the
+// custom enemy with no skills. Mirrors EmptyChestToken — keeps the
 // row well-formed at customEnemyFieldCount (18) whitespace-separated
 // fields without inventing an empty-column syntax.
 const customEnemyNoSkillsToken = "-"
@@ -325,24 +360,33 @@ const (
 	slotEnemies
 	slotChests
 	slotDoors
+	slotCrystals
 	slotCustomEnemies
+	slotDialogs
+	slotTriggers
 )
 
 // Section header names — the on-disk labels that introduce each part of
 // a .map file (the header line on disk is the name plus a colon, e.g.
 // "walls:"). Referenced by both sectionFor (parse) and Encode (write) so
-// the parser and encoder can't drift on a section spelling.
+// the parser and encoder can't drift on a section spelling. Exported so
+// core's Area↔MapFile converter (areas.go) cites these constants for its
+// own grid-layer dimension diagnostics instead of re-hardcoding the bare
+// "walls"/"floor"/… string literals.
 const (
-	sectionWalls         = "walls"
-	sectionFloor         = "floor"
-	sectionDecor         = "decor"
-	sectionProps         = "props"
-	sectionCeiling       = "ceiling"
-	sectionElevation     = "elevation"
-	sectionEnemies       = "enemies"
-	sectionChests        = "chests"
-	sectionDoors         = "doors"
-	sectionCustomEnemies = "custom_enemies"
+	SectionWalls         = "walls"
+	SectionFloor         = "floor"
+	SectionDecor         = "decor"
+	SectionProps         = "props"
+	SectionCeiling       = "ceiling"
+	SectionElevation     = "elevation"
+	SectionEnemies       = "enemies"
+	SectionChests        = "chests"
+	SectionDoors         = "doors"
+	SectionCrystals      = "crystals"
+	SectionCustomEnemies = "custom_enemies"
+	SectionDialogs       = "dialogs"
+	SectionTriggers      = "triggers"
 )
 
 // layerSection describes one .map section: its on-disk name, the parse
@@ -358,16 +402,19 @@ type layerSection struct {
 }
 
 var layerSections = []layerSection{
-	{sectionWalls, slotWalls, func(mf *MapFile) *[]string { return &mf.Walls }},
-	{sectionFloor, slotFloor, func(mf *MapFile) *[]string { return &mf.Floor }},
-	{sectionDecor, slotDecor, func(mf *MapFile) *[]string { return &mf.Decor }},
-	{sectionProps, slotProps, func(mf *MapFile) *[]string { return &mf.Props }},
-	{sectionCeiling, slotCeiling, func(mf *MapFile) *[]string { return &mf.Ceiling }},
-	{sectionElevation, slotElevation, func(mf *MapFile) *[]string { return &mf.Elevation }},
-	{sectionEnemies, slotEnemies, nil},
-	{sectionChests, slotChests, nil},
-	{sectionDoors, slotDoors, nil},
-	{sectionCustomEnemies, slotCustomEnemies, nil},
+	{SectionWalls, slotWalls, func(mf *MapFile) *[]string { return &mf.Walls }},
+	{SectionFloor, slotFloor, func(mf *MapFile) *[]string { return &mf.Floor }},
+	{SectionDecor, slotDecor, func(mf *MapFile) *[]string { return &mf.Decor }},
+	{SectionProps, slotProps, func(mf *MapFile) *[]string { return &mf.Props }},
+	{SectionCeiling, slotCeiling, func(mf *MapFile) *[]string { return &mf.Ceiling }},
+	{SectionElevation, slotElevation, func(mf *MapFile) *[]string { return &mf.Elevation }},
+	{SectionEnemies, slotEnemies, nil},
+	{SectionChests, slotChests, nil},
+	{SectionDoors, slotDoors, nil},
+	{SectionCrystals, slotCrystals, nil},
+	{SectionCustomEnemies, slotCustomEnemies, nil},
+	{SectionDialogs, slotDialogs, nil},
+	{SectionTriggers, slotTriggers, nil},
 }
 
 // init asserts layerSections covers every real slot (slotWalls..
@@ -382,7 +429,7 @@ func init() {
 		}
 		seen[s.slot] = true
 	}
-	for slot := slotWalls; slot <= slotCustomEnemies; slot++ {
+	for slot := slotWalls; slot <= slotTriggers; slot++ {
 		if !seen[slot] {
 			panic(fmt.Sprintf("mapfile: layerSections missing slot %d — add a row", slot))
 		}
@@ -405,10 +452,10 @@ type namedLayer struct {
 // checks and handles ceiling on its own afterward.
 func (mf MapFile) requiredLayers() []namedLayer {
 	return []namedLayer{
-		{sectionWalls, mf.Walls},
-		{sectionFloor, mf.Floor},
-		{sectionDecor, mf.Decor},
-		{sectionProps, mf.Props},
+		{SectionWalls, mf.Walls},
+		{SectionFloor, mf.Floor},
+		{SectionDecor, mf.Decor},
+		{SectionProps, mf.Props},
 	}
 }
 
@@ -427,6 +474,12 @@ func Parse(r io.Reader) (MapFile, error) {
 		// check before treating a line as content.
 		if next, ok := sectionFor(raw); ok {
 			state = next
+			// Remember that a crystals: section was present even if it turns
+			// out to hold no rows — an empty section means "zero crystals,"
+			// not "unspecified" (see MapFile.CrystalsDefined).
+			if next == slotCrystals {
+				mf.CrystalsDefined = true
+			}
 			continue
 		}
 
@@ -454,7 +507,7 @@ func Parse(r io.Reader) (MapFile, error) {
 			// 3 fields = legacy (AI defaults to "none"); 4 = AI column
 			// present. Same backward-compat shape doors use for the
 			// style column.
-			if len(fields) != 3 && len(fields) != 4 {
+			if len(fields) != packFieldsLegacy && len(fields) != packFields {
 				return mf, fmt.Errorf("line %d: expected '<kind[,kind...]> <x> <z> [ai]', got %q", lineNo, raw)
 			}
 			members := strings.Split(fields[0], ",")
@@ -474,7 +527,7 @@ func Parse(r io.Reader) (MapFile, error) {
 				return mf, err
 			}
 			ai := ""
-			if len(fields) == 4 {
+			if len(fields) == packFields {
 				ai = strings.ToLower(fields[3])
 				if !IsPackAIName(ai) {
 					return mf, fmt.Errorf("line %d: unknown pack AI %q (expected one of %v)", lineNo, fields[3], PackAINames)
@@ -489,7 +542,7 @@ func Parse(r io.Reader) (MapFile, error) {
 			// 6 fields = legacy row (style defaults to building); 7 = style
 			// column present. Keeping both shapes valid means older maps load
 			// untouched and only pick up a style column when re-saved.
-			if len(fields) != 6 && len(fields) != 7 {
+			if len(fields) != doorFieldsLegacy && len(fields) != doorFields {
 				return mf, fmt.Errorf("line %d: expected '<name> <target_map> <target_door> <x> <z> <facing> [style]', got %q", lineNo, raw)
 			}
 			x, err := parseIntField(fields[3], "door x", lineNo)
@@ -505,7 +558,7 @@ func Parse(r io.Reader) (MapFile, error) {
 				return mf, fmt.Errorf("line %d: door facing must be north/east/south/west, got %q", lineNo, fields[5])
 			}
 			style := DoorStyleBuildingName
-			if len(fields) == 7 {
+			if len(fields) == doorFields {
 				style = strings.ToLower(fields[6])
 				if !IsDoorStyleName(style) {
 					return mf, fmt.Errorf("line %d: door style must be building/cave/field, got %q", lineNo, fields[6])
@@ -530,7 +583,7 @@ func Parse(r io.Reader) (MapFile, error) {
 			// .map file is human-editable without an item-id lookup table
 			// in the head.
 			fields := strings.Fields(line)
-			if len(fields) < 3 {
+			if len(fields) < chestFieldsMin {
 				return mf, fmt.Errorf("line %d: expected '<item[,item...]> <x> <z>' or '(empty) <x> <z>', got %q", lineNo, raw)
 			}
 			// Item list can contain whitespace inside individual names
@@ -548,7 +601,7 @@ func Parse(r io.Reader) (MapFile, error) {
 				return mf, err
 			}
 			var items []string
-			if itemsToken != emptyChestToken {
+			if itemsToken != EmptyChestToken {
 				for _, name := range strings.Split(itemsToken, ",") {
 					name = strings.TrimSpace(name)
 					if name == "" {
@@ -561,12 +614,47 @@ func Parse(r io.Reader) (MapFile, error) {
 			continue
 		}
 
+		if state == slotCrystals {
+			// Crystal row: "X Z" — position only (charge state is runtime).
+			fields := strings.Fields(line)
+			if len(fields) != crystalFields {
+				return mf, fmt.Errorf("line %d: expected '<x> <z>', got %q", lineNo, raw)
+			}
+			x, err := parseIntField(fields[0], "crystal x", lineNo)
+			if err != nil {
+				return mf, err
+			}
+			z, err := parseIntField(fields[1], "crystal z", lineNo)
+			if err != nil {
+				return mf, err
+			}
+			mf.Crystals = append(mf.Crystals, MapCrystal{X: x, Z: z})
+			continue
+		}
+
 		if state == slotCustomEnemies {
 			ce, err := parseCustomEnemyLine(line, lineNo)
 			if err != nil {
 				return mf, err
 			}
 			mf.CustomEnemies = append(mf.CustomEnemies, ce)
+			continue
+		}
+
+		if state == slotDialogs {
+			// One opaque JSON object per line — stored verbatim. mapfile does
+			// not parse the JSON (core does on the way to DialogDefinition);
+			// it only preserves the line so the section round-trips. A JSON
+			// object ends with '}', so it can't be mistaken for a section
+			// header (which must end with ':').
+			mf.Dialogs = append(mf.Dialogs, line)
+			continue
+		}
+
+		if state == slotTriggers {
+			// Opaque JSON-per-line, identical handling to dialogs above (core
+			// marshals DialogTrigger values; mapfile only preserves the lines).
+			mf.Triggers = append(mf.Triggers, line)
 			continue
 		}
 
@@ -732,6 +820,14 @@ func (mf *MapFile) validate() error {
 			return fmt.Errorf("chest at (%d,%d) outside map %dx%d", c.X, c.Z, mf.Width, mf.Height)
 		}
 	}
+	// Crystals: same bounds guard as packs / chests so an out-of-range
+	// hand-edit surfaces here at load rather than as a silently dropped
+	// crystal at runtime.
+	for _, c := range mf.Crystals {
+		if c.X < 0 || c.X >= mf.Width || c.Z < 0 || c.Z >= mf.Height {
+			return fmt.Errorf("crystal at (%d,%d) outside map %dx%d", c.X, c.Z, mf.Width, mf.Height)
+		}
+	}
 	// Doors: validate bounds, non-empty name, non-empty target. Same
 	// philosophy as packs / chests — a hand-edit typo surfaces here
 	// instead of producing a silent "step on door, nothing happens"
@@ -844,6 +940,44 @@ func parseIntField(s, name string, lineNo int) (int, error) {
 	return v, nil
 }
 
+// Positional field counts for the non-custom-enemy entity sections.
+// Named (rather than inlined as bare integer literals in the parse
+// guards) so the parse-time width check and the matching encode-format
+// verb count cite one source — mirrors the customEnemyFieldCount /
+// customEnemyFieldCountLegacy pattern below. Sections with a backward-
+// compatible optional trailing column carry both a Legacy width (column
+// absent) and a current width (column present); the parser accepts both.
+const (
+	packFieldsLegacy = 3 // "kind[,kind...] X Z" (AI defaults to none)
+	packFields       = 4 // + trailing AI column
+	doorFieldsLegacy = 6 // "name target_map target_door X Z facing"
+	doorFields       = 7 // + trailing style column
+	chestFieldsMin   = 3 // "item[,item...] X Z" — item token may span fields, so >= not ==
+	crystalFields    = 2 // "X Z"
+)
+
+// Per-section encode format strings. Each is the fmt.Fprintf format the
+// encoder writes one row per; broken out as named constants so init()
+// can count their `%`-verbs and assert they stay in lockstep with the
+// field-count constants above — same guard the customEnemyEncodeFormat
+// assert provides, so a verb added/removed without bumping the count (or
+// vice versa) panics at startup instead of writing a row the parser then
+// rejects on the next load. packEncodeFormat / doorEncodeFormat cover the
+// current (trailing-column-present) widths; the legacy shorter rows are
+// emitted via their own narrower formats below.
+const (
+	// packFieldsLegacy verbs (default-AI packs) / packFields verbs (non-default AI).
+	packEncodeFormatLegacy = "%s %d %d\n"
+	packEncodeFormat       = "%s %d %d %s\n"
+	// chestFieldsMin verbs.
+	chestEncodeFormat = "%s %d %d\n"
+	// doorFields verbs (style is always written, so the legacy 6-field row
+	// is never emitted — older maps pick up the style column on re-save).
+	doorEncodeFormat = "%s %s %s %d %d %s %s\n"
+	// crystalFields verbs.
+	crystalEncodeFormat = "%d %d\n"
+)
+
 // customEnemyFieldCount is the positional column count for a current-
 // schema custom-enemy row (MDef column included). Older maps written
 // before MDef shipped use customEnemyFieldCountLegacy below — the
@@ -885,22 +1019,27 @@ var (
 // instead of producing a row the decoder rejects on the next load.
 const customEnemyEncodeFormat = "%s %s %d %d %d %d %d %d %d %d %d %d %d %d %d %g %d %s\n"
 
-func init() {
-	// Count the `%`-verbs (each consumes one argument). `%%` is a
-	// literal percent sign, not a verb — none today, but the loop is
-	// defensive so a future format with literal % doesn't double-count.
+// fprintfVerbCount counts the `%`-verbs in a fmt format string (each
+// consumes one argument). A literal `%%` is skipped, not counted. Shared
+// by every encode-format ↔ field-count assert below so the "does this
+// format emit the right number of columns" check lives in one place.
+func fprintfVerbCount(format string) int {
 	verbs := 0
-	for i := 0; i < len(customEnemyEncodeFormat); i++ {
-		if customEnemyEncodeFormat[i] != '%' {
+	for i := 0; i < len(format); i++ {
+		if format[i] != '%' {
 			continue
 		}
-		if i+1 < len(customEnemyEncodeFormat) && customEnemyEncodeFormat[i+1] == '%' {
+		if i+1 < len(format) && format[i+1] == '%' {
 			i++
 			continue
 		}
 		verbs++
 	}
-	if verbs != customEnemyFieldCount {
+	return verbs
+}
+
+func init() {
+	if verbs := fprintfVerbCount(customEnemyEncodeFormat); verbs != customEnemyFieldCount {
 		panic(fmt.Sprintf("mapfile: customEnemyEncodeFormat has %d verbs, customEnemyFieldCount is %d — they must match", verbs, customEnemyFieldCount))
 	}
 	// `skills` is the final positional column, so its index must be the
@@ -913,6 +1052,32 @@ func init() {
 	}
 	if customEnemyLegacySchema.skills != customEnemyFieldCountLegacy-1 {
 		panic(fmt.Sprintf("mapfile: customEnemyLegacySchema.skills is %d, expected customEnemyFieldCountLegacy-1 (%d)", customEnemyLegacySchema.skills, customEnemyFieldCountLegacy-1))
+	}
+}
+
+// init asserts every per-section encode format's `%`-verb count matches the
+// field-count constant the parser guards that section against. Same lockstep
+// guarantee customEnemyEncodeFormat gets: a verb added/removed without bumping
+// the matching field-count constant (or vice versa) panics at startup instead
+// of writing a row the parser rejects on the next load. (chestEncodeFormat is
+// checked against chestFieldsMin since a chest's item token may itself contain
+// spaces — the format always emits exactly chestFieldsMin whitespace groups.)
+func init() {
+	formatChecks := []struct {
+		name   string
+		format string
+		fields int
+	}{
+		{"packEncodeFormatLegacy", packEncodeFormatLegacy, packFieldsLegacy},
+		{"packEncodeFormat", packEncodeFormat, packFields},
+		{"chestEncodeFormat", chestEncodeFormat, chestFieldsMin},
+		{"doorEncodeFormat", doorEncodeFormat, doorFields},
+		{"crystalEncodeFormat", crystalEncodeFormat, crystalFields},
+	}
+	for _, fc := range formatChecks {
+		if verbs := fprintfVerbCount(fc.format); verbs != fc.fields {
+			panic(fmt.Sprintf("mapfile: %s has %d verbs, expected %d to match its field-count constant", fc.name, verbs, fc.fields))
+		}
 	}
 }
 
@@ -1017,13 +1182,13 @@ func (mf MapFile) Encode(w io.Writer) error {
 	fmt.Fprintf(bw, "start: %d %d %s\n", mf.StartX, mf.StartZ, mf.StartFace)
 	ceiling := OptionalLayerOrBlank(mf.Ceiling, mf.Width, mf.Height, CeilingOpenChar)
 	elevation := OptionalLayerOrBlank(mf.Elevation, mf.Width, mf.Height, ElevationGroundChar)
-	for _, layer := range append(mf.requiredLayers(), namedLayer{sectionCeiling, ceiling}, namedLayer{sectionElevation, elevation}) {
+	for _, layer := range append(mf.requiredLayers(), namedLayer{SectionCeiling, ceiling}, namedLayer{SectionElevation, elevation}) {
 		fmt.Fprintf(bw, "%s:\n", layer.name)
 		for _, row := range layer.rows {
 			fmt.Fprintln(bw, row)
 		}
 	}
-	fmt.Fprintln(bw, sectionEnemies+":")
+	fmt.Fprintln(bw, SectionEnemies+":")
 	for _, p := range mf.Packs {
 		// Single-member packs encode the same as the legacy "kind X Z" line
 		// so maps without grouped packs stay byte-identical across the
@@ -1033,25 +1198,25 @@ func (mf MapFile) Encode(w io.Writer) error {
 		members := strings.Join(p.Members, ",")
 		ai := strings.ToLower(strings.TrimSpace(p.AI))
 		if ai == "" || ai == PackAINoneName {
-			fmt.Fprintf(bw, "%s %d %d\n", members, p.X, p.Z)
+			fmt.Fprintf(bw, packEncodeFormatLegacy, members, p.X, p.Z)
 		} else {
-			fmt.Fprintf(bw, "%s %d %d %s\n", members, p.X, p.Z, ai)
+			fmt.Fprintf(bw, packEncodeFormat, members, p.X, p.Z, ai)
 		}
 	}
-	fmt.Fprintln(bw, sectionChests+":")
+	fmt.Fprintln(bw, SectionChests+":")
 	for _, c := range mf.Chests {
-		token := emptyChestToken
+		token := EmptyChestToken
 		if len(c.Items) > 0 {
 			token = strings.Join(c.Items, ",")
 		}
-		fmt.Fprintf(bw, "%s %d %d\n", token, c.X, c.Z)
+		fmt.Fprintf(bw, chestEncodeFormat, token, c.X, c.Z)
 	}
 	// doors: section is appended only when present. Older .map files
 	// without any doors stay byte-identical across the format change —
 	// the parser treats a missing section as zero-doors. Same rule as
 	// the pre-ceiling-section backwards compatibility above.
 	if len(mf.Doors) > 0 {
-		fmt.Fprintln(bw, sectionDoors+":")
+		fmt.Fprintln(bw, SectionDoors+":")
 		for _, d := range mf.Doors {
 			// Refuse to write a half-populated door (one of
 			// TargetMap/TargetDoor set, the other empty). The
@@ -1071,7 +1236,18 @@ func (mf MapFile) Encode(w io.Writer) error {
 			if style == "" {
 				style = DoorStyleBuildingName
 			}
-			fmt.Fprintf(bw, "%s %s %s %d %d %s %s\n", d.Name, d.TargetMap, d.TargetDoor, d.X, d.Z, d.Facing, style)
+			fmt.Fprintf(bw, doorEncodeFormat, d.Name, d.TargetMap, d.TargetDoor, d.X, d.Z, d.Facing, style)
+		}
+	}
+	// crystals: emits when the map defines crystals at all — either it has
+	// rows OR it was explicitly marked defined (an authored zero-crystal map).
+	// A legacy map that never carried the section (CrystalsDefined false, no
+	// rows) stays byte-identical, same backward-compat rule as doors. Rows are
+	// position-only; charge state lives in SaveData, not the map.
+	if mf.CrystalsDefined || len(mf.Crystals) > 0 {
+		fmt.Fprintln(bw, SectionCrystals+":")
+		for _, c := range mf.Crystals {
+			fmt.Fprintf(bw, crystalEncodeFormat, c.X, c.Z)
 		}
 	}
 	// custom_enemies: emits only when present so older maps stay
@@ -1081,7 +1257,7 @@ func (mf MapFile) Encode(w io.Writer) error {
 	// its `%`-verb count matches customEnemyFieldCount — keeps the
 	// encoder and decoder honest about how many columns a row has.
 	if len(mf.CustomEnemies) > 0 {
-		fmt.Fprintln(bw, sectionCustomEnemies+":")
+		fmt.Fprintln(bw, SectionCustomEnemies+":")
 		for _, ce := range mf.CustomEnemies {
 			skills := customEnemyNoSkillsToken
 			if len(ce.Skills) > 0 {
@@ -1095,6 +1271,22 @@ func (mf MapFile) Encode(w io.Writer) error {
 				ce.SkillCastChance, ce.SpellPower,
 				skills,
 			)
+		}
+	}
+	// dialogs: emits only when present so older maps stay byte-identical.
+	// Each entry is a pre-encoded JSON object written verbatim (core owns the
+	// marshalling), one per line.
+	if len(mf.Dialogs) > 0 {
+		fmt.Fprintln(bw, SectionDialogs+":")
+		for _, d := range mf.Dialogs {
+			fmt.Fprintln(bw, d)
+		}
+	}
+	// triggers: emits only when present (same byte-stable rule as dialogs).
+	if len(mf.Triggers) > 0 {
+		fmt.Fprintln(bw, SectionTriggers+":")
+		for _, t := range mf.Triggers {
+			fmt.Fprintln(bw, t)
 		}
 	}
 	return bw.Flush()

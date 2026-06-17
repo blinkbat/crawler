@@ -333,7 +333,7 @@ func updateEditorScene(state *appState, dt float32) {
 }
 
 func drawAdventureScene(game *core.GameState, assets render.Resources) {
-	camera := render.Camera(*game)
+	camera := render.Camera(game)
 	// Retro-filter capture (Debug ▸ Retro Filters): when any filter is
 	// active, the environment pass below renders into an off-screen texture
 	// that EndRetroCapture blits back through the filter shader — so the
@@ -350,7 +350,7 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 		// This clear doubles as the frame's backbuffer depth wipe for the
 		// crisp-sky arm (see the load-bearing-clear note below).
 		rl.ClearBackground(render.SkyClearColor)
-		render.DrawSkyBackground(assets, *game)
+		render.DrawSkyBackground(assets, game)
 	}
 	filtered := render.BeginRetroCapture(game)
 	// Explicit clear is REQUIRED — bisect confirmed that without it
@@ -372,15 +372,15 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 		rl.ClearBackground(rl.Blank)
 	} else if !skyCrisp {
 		rl.ClearBackground(render.SkyClearColor)
-		render.DrawSkyBackground(assets, *game)
+		render.DrawSkyBackground(assets, game)
 	}
 	// ENVIRONMENT pass — sky, world geometry, chests, doors. This is the
 	// half the retro filters apply to.
 	rl.BeginMode3D(camera)
-	render.DrawWorld(camera, *game, assets)
-	render.DrawChests(camera, *game, assets)
-	render.DrawDoors(camera, *game, assets)
-	render.DrawCrystals(camera, *game, assets)
+	render.DrawWorld(camera, game, assets)
+	render.DrawChests(camera, game, assets)
+	render.DrawDoors(camera, game, assets)
+	render.DrawCrystals(camera, game, assets)
 	rl.EndMode3D()
 	// Close the retro capture and blit the FILTERED environment to the
 	// backbuffer — opaquely in the normal arm, alpha-composited over the
@@ -397,10 +397,10 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	// and trees exactly as if they'd been drawn in one pass.
 	rl.BeginMode3D(camera)
 	if filtered {
-		render.RetroDepthPrepass(camera, *game, assets)
+		render.RetroDepthPrepass(camera, game, assets)
 	}
-	render.DrawEnemies(camera, *game, assets)
-	render.DrawPartySprites(camera, *game, assets)
+	render.DrawEnemies(camera, game, assets)
+	render.DrawPartySprites(camera, game, assets)
 	// VFX inside the 3D pass so billboard particles depth-sort with
 	// the rest of the scene. TickAndDrawVFX drains GameState.VFXQueue
 	// (mutating g), advances the render-side pool by raylib's frame
@@ -411,22 +411,26 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	// Ambient rain sits above the 3D world (darkening it) but below the
 	// world-space popups and HUD, so combat numbers, prompts, and menus
 	// stay readable through the storm. No-op when the weather is clear.
-	render.DrawWeather(*game)
+	render.DrawWeather(game)
 	// Danger vignette — claret edges breathing while an enemy is mid-swing
 	// (defend timing). Same layer slot as the weather wash: over the world,
 	// under every popup and HUD pane. No-op outside that phase.
-	render.DrawBattleDangerVignette(*game)
-	render.DrawChestPrompt(camera, *game, assets)
-	render.DrawCrystalPrompt(camera, *game, assets)
+	render.DrawBattleDangerVignette(game)
+	render.DrawChestPrompt(camera, game, assets)
+	render.DrawCrystalPrompt(camera, game, assets)
 	// Hit-glyph clarity shapes over struck targets — HUD pass (crisp 2D), but
 	// before the damage popups so the number floats on top of the glyph.
 	render.DrawHitGlyphs(camera)
-	render.DrawDamagePopups(camera, *game, assets)
-	render.DrawQualityPopup(camera, *game, assets)
-	render.DrawDebugOverlay(camera, *game, assets)
-	render.DrawOverlay(*game, assets)
-	render.DrawChestModal(*game, assets)
-	render.DrawLevelUpModal(*game, assets)
-	render.DrawPanelsOverlay(*game, assets)
-	render.DrawDoorPrompt(*game, assets)
+	render.DrawDamagePopups(camera, game, assets)
+	render.DrawQualityPopup(camera, game, assets)
+	render.DrawDebugOverlay(camera, game, assets)
+	render.DrawOverlay(game, assets)
+	render.DrawChestModal(game, assets)
+	render.DrawLevelUpModal(game, assets)
+	render.DrawPanelsOverlay(game, assets)
+	render.DrawDoorPrompt(game, assets)
+	// Dialog sits last so the conversation overlay paints on top of every
+	// other explore modal (it's the highest-priority modal — see
+	// core.ActiveModal / ModalDialog).
+	render.DrawDialogModal(game, assets)
 }

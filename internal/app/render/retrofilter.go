@@ -276,9 +276,11 @@ func EndRetroCapture(g *core.GameState, skyOnBackbuffer bool) {
 // locally — raylib doesn't export GL_* and these three are stable core-GL
 // values (glBlendFunc(GL_ZERO, GL_ONE) + glBlendEquation(GL_FUNC_ADD)).
 const (
-	glZero    = 0
-	glOne     = 1
-	glFuncAdd = 0x8006
+	glZero             = 0
+	glOne              = 1
+	glFuncAdd          = 0x8006
+	glSrcAlpha         = 0x0302
+	glOneMinusSrcAlpha = 0x0303
 )
 
 // RetroDepthPrepass re-renders the environment with a ZERO/ONE blend —
@@ -296,7 +298,7 @@ const (
 // re-collecting torches and re-uploading those uniforms — it only needs the
 // geometry re-rasterized to rebuild depth. (DrawChests / DrawDoors carry no
 // such per-frame lighting setup, so they re-run as-is.)
-func RetroDepthPrepass(camera rl.Camera3D, g core.GameState, assets Resources) {
+func RetroDepthPrepass(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	rl.SetBlendFactors(glZero, glOne, glFuncAdd)
 	rl.BeginBlendMode(rl.BlendCustom)
 	drawWorld(camera, g, assets, true)
@@ -304,6 +306,11 @@ func RetroDepthPrepass(camera rl.Camera3D, g core.GameState, assets Resources) {
 	DrawDoors(camera, g, assets)
 	DrawCrystals(camera, g, assets)
 	rl.EndBlendMode()
+	// EndBlendMode restores the previous blend MODE, but raylib's global custom
+	// blend FACTORS set above are sticky — they'd silently poison any later
+	// BlendCustom draw this frame with the color-killing ZERO/ONE pair. Reset
+	// them to the standard alpha pair so the custom slot is left in a sane state.
+	rl.SetBlendFactors(glSrcAlpha, glOneMinusSrcAlpha, glFuncAdd)
 }
 
 // UnloadRetroFilter frees the capture texture and shader. Called from

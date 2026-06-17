@@ -50,10 +50,12 @@ var editorMenus = []menuGroup{
 	{label: "Assets", items: []dropdownEntry{
 		{label: "Sounds…", apply: openSoundsModal, desc: "Create sound effects and bind them to game cues."},
 		{label: "Foe Visuals…", apply: openFoeViewModal, desc: "Tune a foe's sprite, placement, and tint — or import a PNG."},
+		{label: "Party Visuals…", apply: openPartyViewModal, desc: "Tune a party class's sprite, placement, and tint — or import a PNG."},
 		{label: "Hit Glyphs…", apply: openHitGlyphsModal, desc: "Preview the combat hit symbols (slash, impact, frost, …)."},
 		{label: "Object List…", apply: openEntityListModal, desc: "Jump to any pack, chest, or door on the map."},
 	}},
 	{label: "Map", items: []dropdownEntry{
+		{label: "Dialogs…", apply: openDialogListModal, desc: "Author the area's branching conversations."},
 		{label: "Validate", apply: openValidateModal, desc: "Check the map for reachability and setup problems."},
 		{label: "Playtest", apply: func(s *State) { s.testRequested = true }, desc: "Launch the map in-game from its start tile."},
 	}},

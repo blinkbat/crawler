@@ -42,8 +42,10 @@ func footprintPlaceable(s *State, x, z int, footprint []core.MultiTileOffset) bo
 		if s.area.StartTileX == fx && s.area.StartTileZ == fz {
 			return false
 		}
-		if s.layer == LayerDecor && core.IsPropChar(s.area.Props[fz][fx]) {
-			return false
+		if s.layer == LayerDecor {
+			if ch, ok := cellAt(s.area.Props, fx, fz); ok && core.IsPropChar(ch) {
+				return false
+			}
 		}
 	}
 	return true
@@ -291,6 +293,8 @@ func applyEntityBrush(s *State, x, z int, kind entityKind) {
 		placeChestAt(s, x, z)
 	case entityPlaceDoor:
 		placeDoorAt(s, x, z)
+	case entityPlaceCrystal:
+		placeCrystalAt(s, x, z)
 	}
 }
 
@@ -327,10 +331,12 @@ func blkWall(a *core.AreaDefinition, x, z int, noun string) blockerCheck {
 	return blockerCheck{a.WallAt(x, z), noun + " needs an open cell (remove the wall first)"}
 }
 func blkProp(a *core.AreaDefinition, x, z int) blockerCheck {
-	return blockerCheck{core.IsPropChar(a.Props[z][x]), "Cell already holds a prop — clear it first"}
+	ch, _ := cellAt(a.Props, x, z)
+	return blockerCheck{core.IsPropChar(ch), "Cell already holds a prop — clear it first"}
 }
 func blkDeepWater(a *core.AreaDefinition, x, z int, noun string) blockerCheck {
-	return blockerCheck{core.IsBlockingFloor(a.Floor[z][x]), noun + " can't sit on deep water"}
+	ch, _ := cellAt(a.Floor, x, z)
+	return blockerCheck{core.IsBlockingFloor(ch), noun + " can't sit on deep water"}
 }
 func blkPackHere(a *core.AreaDefinition, x, z int) blockerCheck {
 	return blockerCheck{core.PackSpawnIndexAt(a.PackSpawns, x, z) >= 0, "Cell already holds a pack — clear it first"}
@@ -345,6 +351,9 @@ func blkChestHere(a *core.AreaDefinition, x, z int, clear bool) blockerCheck {
 func blkDoorHere(a *core.AreaDefinition, x, z int) blockerCheck {
 	return blockerCheck{core.DoorSpawnIndexAt(a.DoorSpawns, x, z) >= 0, "Cell already holds a door"}
 }
+func blkCrystalHere(a *core.AreaDefinition, x, z int) blockerCheck {
+	return blockerCheck{core.CrystalSpawnIndexAt(a.CrystalSpawns, x, z) >= 0, "Cell already holds a crystal"}
+}
 
 // startBlockers is the player-start placement rule: no wall, no prop, no
 // deep water (anything that would soft-lock the player on spawn). Shared by
@@ -356,6 +365,12 @@ func startBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
 		blkWall(a, x, z, "Player start"),
 		blkProp(a, x, z),
 		blkDeepWater(a, x, z, "Player start"),
+		// Chests and doors block movement onto their tile at runtime, so a
+		// start sharing one would soft-lock the spawn / race the door
+		// transition. The drag-move-start path already refuses these; keep the
+		// entity-brush placement path in lockstep here (one rule, both paths).
+		blkChestHere(a, x, z, false),
+		blkDoorHere(a, x, z),
 	}
 }
 
@@ -380,6 +395,7 @@ func doorPlaceBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
 		blkPackHere(a, x, z),
 		blkChestHere(a, x, z, true),
 		blkDoorHere(a, x, z),
+		blkCrystalHere(a, x, z),
 	}
 }
 
@@ -391,6 +407,26 @@ func chestPlaceBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
 		blkDeepWater(a, x, z, "Chest"),
 		blkPackHere(a, x, z),
 		blkChestHere(a, x, z, false),
+		blkCrystalHere(a, x, z),
+	}
+}
+
+// crystalPlaceBlockers is the legality rule set for dropping a crystal at
+// (x,z). Mirrors chestPlaceBlockers — one entity per tile keeps the markers
+// legible and lets removeAllEntitiesAt / clearEntitiesAt treat the lists
+// uniformly. Crystals are non-blocking in play, but the editor still refuses
+// walls / props / deep water so the billboard always has a standable tile (or
+// at least a clear one) under it.
+func crystalPlaceBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
+	return []blockerCheck{
+		blkStart(a, x, z),
+		blkWall(a, x, z, "Crystal"),
+		blkProp(a, x, z),
+		blkDeepWater(a, x, z, "Crystal"),
+		blkPackHere(a, x, z),
+		blkChestHere(a, x, z, true),
+		blkDoorHere(a, x, z),
+		blkCrystalHere(a, x, z),
 	}
 }
 
@@ -515,6 +551,24 @@ func removeChestSpawnAt(spawns []core.ChestSpawn, x, z int) []core.ChestSpawn {
 	return removeSpawnsAt(spawns, x, z)
 }
 
+// placeCrystalAt drops a healing crystal at (x,z). Refuses (with a flash) when
+// the tile is illegal — see crystalPlaceBlockers. Crystals carry no per-tile
+// data, so there's nothing more to author after placement.
+func placeCrystalAt(s *State, x, z int) {
+	a := &s.area
+	if msg := firstBlocker(crystalPlaceBlockers(a, x, z)...); msg != "" {
+		s.flash(msg)
+		return
+	}
+	s.area.CrystalSpawns = append(s.area.CrystalSpawns, core.CrystalSpawn{TileX: x, TileZ: z})
+	s.dirty = true
+}
+
+// removeCrystalSpawnAt drops the crystal at (x, z) from spawns (if any).
+func removeCrystalSpawnAt(spawns []core.CrystalSpawn, x, z int) []core.CrystalSpawn {
+	return removeSpawnsAt(spawns, x, z)
+}
+
 // eraseAt is the right-click action. Behavior is per-layer:
 //   - Walls / Props : reset cell to '.'
 //   - Floor         : reset to FloorAuto
@@ -608,9 +662,9 @@ func clearEntitiesAt(s *State, x, z int) bool {
 		s.flash("Player start can't be erased; place it elsewhere instead")
 		return false
 	}
-	before := len(s.area.PackSpawns) + len(s.area.ChestSpawns) + len(s.area.DoorSpawns)
+	before := len(s.area.PackSpawns) + len(s.area.ChestSpawns) + len(s.area.DoorSpawns) + len(s.area.CrystalSpawns)
 	removeAllEntitiesAt(&s.area, x, z)
-	if len(s.area.PackSpawns)+len(s.area.ChestSpawns)+len(s.area.DoorSpawns) == before {
+	if len(s.area.PackSpawns)+len(s.area.ChestSpawns)+len(s.area.DoorSpawns)+len(s.area.CrystalSpawns) == before {
 		return false
 	}
 	s.dirty = true
@@ -629,6 +683,9 @@ func addPackMember(s *State, x, z int, kind core.EnemyKind) {
 		// would race the area-transition trigger against the encounter
 		// start when the player steps onto the shared tile.
 		blkDoorHere(a, x, z),
+		// And not with a crystal — keep one entity per tile so the markers
+		// stay legible and the clear paths stay uniform.
+		blkCrystalHere(a, x, z),
 	); msg != "" {
 		s.flash(msg)
 		return
@@ -656,6 +713,7 @@ func removeAllEntitiesAt(a *core.AreaDefinition, x, z int) {
 	a.PackSpawns = removePackAt(a.PackSpawns, x, z)
 	a.ChestSpawns = removeChestSpawnAt(a.ChestSpawns, x, z)
 	a.DoorSpawns = removeDoorAt(a.DoorSpawns, x, z)
+	a.CrystalSpawns = removeCrystalSpawnAt(a.CrystalSpawns, x, z)
 }
 
 func removePackAt(packs []core.PackSpawn, x, z int) []core.PackSpawn {
@@ -854,9 +912,11 @@ func resize(s *State, w, h int) {
 		s.area.StartTileZ = 1
 	}
 	packsBefore, chestsBefore, doorsBefore := len(s.area.PackSpawns), len(s.area.ChestSpawns), len(s.area.DoorSpawns)
+	crystalsBefore := len(s.area.CrystalSpawns)
 	s.area.PackSpawns = removePackSpawnsOutside(s.area.PackSpawns, w, h)
 	s.area.ChestSpawns = removeChestSpawnsOutside(s.area.ChestSpawns, w, h)
 	s.area.DoorSpawns = removeDoorSpawnsOutside(s.area.DoorSpawns, w, h)
+	s.area.CrystalSpawns = removeCrystalSpawnsOutside(s.area.CrystalSpawns, w, h)
 	// removeXOutside only drops spawns PAST the new bounds. A shrink can also
 	// leave a spawn on the tile that just BECAME the border ring (in-bounds, so
 	// kept above) — sealWallBorder then stamps a wall over it, burying a chest/
@@ -868,7 +928,7 @@ func resize(s *State, w, h int) {
 	// A shrink silently drops spawns past the new bounds or walled by them
 	// (undoable, but the author should know). Flash a count of what fell off so
 	// it's not a quiet data loss.
-	dropped := (packsBefore - len(s.area.PackSpawns)) + (chestsBefore - len(s.area.ChestSpawns)) + (doorsBefore - len(s.area.DoorSpawns))
+	dropped := (packsBefore - len(s.area.PackSpawns)) + (chestsBefore - len(s.area.ChestSpawns)) + (doorsBefore - len(s.area.DoorSpawns)) + (crystalsBefore - len(s.area.CrystalSpawns))
 	if dropped > 0 {
 		s.flash(fmt.Sprintf("Resize dropped %d spawn(s) outside or walled by the new bounds", dropped))
 	}
@@ -878,6 +938,12 @@ func resize(s *State, w, h int) {
 // removeDoorSpawnsOutside drops door entries whose tile sits past the
 // new bounds after a shrink. Mirrors removeChestSpawnsOutside.
 func removeDoorSpawnsOutside(spawns []core.DoorSpawn, w, h int) []core.DoorSpawn {
+	return removeSpawnsWhere(spawns, func(x, z int) bool { return x >= w || z >= h })
+}
+
+// removeCrystalSpawnsOutside drops crystal entries whose tile sits past the
+// new bounds after a shrink. Mirrors removeDoorSpawnsOutside.
+func removeCrystalSpawnsOutside(spawns []core.CrystalSpawn, w, h int) []core.CrystalSpawn {
 	return removeSpawnsWhere(spawns, func(x, z int) bool { return x >= w || z >= h })
 }
 
@@ -1066,6 +1132,14 @@ func floodFill(s *State, x, z int, b byte) {
 	if !s.area.InBounds(x, z) {
 		return
 	}
+	// InBounds checks the area's declared Width/Height, which can exceed the
+	// actual layer slice lengths for a ragged/partially-built area. Guard the
+	// seed read against the real row/col extents — the rest of the codebase
+	// reads grids through the bounds-safe layerByteAt; this seed is the one
+	// raw index, and an out-of-range sample would panic.
+	if z >= len(*layer) || x >= len((*layer)[z]) {
+		return
+	}
 	target := (*layer)[z][x]
 	if target == b {
 		return // no-op fill (cell already the brush color) — snapshot nothing
@@ -1139,6 +1213,7 @@ func pruneBlockedSpawns(a *core.AreaDefinition) {
 	a.PackSpawns = removeSpawnsWhere(a.PackSpawns, blocked)
 	a.ChestSpawns = removeSpawnsWhere(a.ChestSpawns, blocked)
 	a.DoorSpawns = removeSpawnsWhere(a.DoorSpawns, blocked)
+	a.CrystalSpawns = removeSpawnsWhere(a.CrystalSpawns, blocked)
 }
 
 // rewriteLayerRows clones the layer's row strings into a mutable
@@ -1618,6 +1693,79 @@ func crossMapDoorWarnings(a core.AreaDefinition) []string {
 	return out
 }
 
+// dialogWarnings reports authoring problems in the area's dialogs + triggers
+// that would silently no-op or dead-end at runtime: broken node / dialog
+// references, out-of-bounds tiles, and unregistered foe kinds. Empty slice =
+// clean. Surfaced in the Map ▸ Validate report alongside the reachability and
+// cross-map-door checks so a conversation that can never resolve is caught at
+// author time, not mid-playtest.
+func dialogWarnings(a core.AreaDefinition) []string {
+	var out []string
+	for _, d := range a.Dialogs {
+		if len(d.Nodes) == 0 {
+			out = append(out, fmt.Sprintf("dialog %q has no nodes", d.ID))
+			continue
+		}
+		if _, ok := d.NodeByID(d.StartNodeID); !ok {
+			out = append(out, fmt.Sprintf("dialog %q start node %q not found (runtime falls back to the first node)", d.ID, d.StartNodeID))
+		}
+		for _, n := range d.Nodes {
+			if n.NextNodeID != "" {
+				if _, ok := d.NodeByID(n.NextNodeID); !ok {
+					out = append(out, fmt.Sprintf("dialog %q node %q → next %q not found", d.ID, n.ID, n.NextNodeID))
+				}
+			}
+			for _, c := range n.Choices {
+				if c.NextNodeID != "" {
+					if _, ok := d.NodeByID(c.NextNodeID); !ok {
+						out = append(out, fmt.Sprintf("dialog %q node %q choice %q → next %q not found", d.ID, n.ID, c.ID, c.NextNodeID))
+					}
+				}
+				for _, cond := range c.Conditions {
+					if msg := dialogCondWarning(a, cond); msg != "" {
+						out = append(out, fmt.Sprintf("dialog %q node %q choice %q: %s", d.ID, n.ID, c.ID, msg))
+					}
+				}
+			}
+		}
+	}
+	for _, t := range a.Triggers {
+		if t.DialogID == "" {
+			out = append(out, fmt.Sprintf("trigger %q has no target dialog", t.ID))
+		} else if _, ok := core.DialogDefByID(a, t.DialogID); !ok {
+			out = append(out, fmt.Sprintf("trigger %q → dialog %q not found", t.ID, t.DialogID))
+		}
+		switch t.Kind {
+		case core.DialogTriggerEnterTile:
+			if !a.InBounds(t.TileX, t.TileZ) {
+				out = append(out, fmt.Sprintf("trigger %q enter-tile (%d,%d) is out of bounds", t.ID, t.TileX, t.TileZ))
+			}
+		case core.DialogTriggerFoeKilled:
+			if _, ok := core.EnemyInfoOk(t.FoeKind); !ok {
+				out = append(out, fmt.Sprintf("trigger %q references an unregistered foe kind", t.ID))
+			}
+		}
+	}
+	return out
+}
+
+// dialogCondWarning returns a one-line problem with a single choice condition,
+// or "" when it's well-formed. Only the world-referencing kinds can be checked
+// statically — gold/quest gates reference runtime state the editor can't see.
+func dialogCondWarning(a core.AreaDefinition, cond core.DialogChoiceCondition) string {
+	switch cond.Kind {
+	case core.DialogCondFoeKilled:
+		if _, ok := core.EnemyInfoOk(cond.FoeKind); !ok {
+			return "foe-killed condition references an unregistered foe kind"
+		}
+	case core.DialogCondTileVisited:
+		if !a.InBounds(cond.TileX, cond.TileZ) {
+			return fmt.Sprintf("tile-visited condition (%d,%d) is out of bounds", cond.TileX, cond.TileZ)
+		}
+	}
+	return ""
+}
+
 // mapHasDoor reports whether the given spawn list contains a door
 // named `name`. Linear scan (door counts are tiny, ~10/map) so a
 // map keyed by name isn't worth the allocation per check.
@@ -1639,7 +1787,7 @@ func mapHasDoor(spawns []core.DoorSpawn, name string) bool {
 func performNewMap(s *State, w, h int, floor byte) {
 	w = core.ClampMapDimension(w)
 	h = core.ClampMapDimension(h)
-	s.area = blankArea(w, h, floor)
+	s.area = materializeEntranceCrystal(blankArea(w, h, floor))
 	s.baseline = core.CloneArea(s.area)
 	s.undo = nil
 	s.redo = nil

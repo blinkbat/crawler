@@ -52,7 +52,9 @@ const layerCount = int(LayerEntities) + 1
 // numberRowKeys is the top-row 1..9 key codes. Package-level so the
 // brush-select hotkeys (1..9 / Shift+1..9, all nine) and the Alt+1..N
 // layer jump (first layerCount = 7 keys) don't rebuild the slice every
-// input frame. The first layerCount entries double as the per-layer jump keys.
+// input frame. The first layerCount entries double as the per-layer jump
+// keys — this assumes layerCount <= 9 (the number of numberRowKeys entries);
+// a 10th layer would silently lose its Alt-jump key without growing this row.
 var numberRowKeys = [9]int32{
 	rl.KeyOne, rl.KeyTwo, rl.KeyThree, rl.KeyFour, rl.KeyFive,
 	rl.KeySix, rl.KeySeven, rl.KeyEight, rl.KeyNine,
@@ -103,6 +105,11 @@ const (
 	// happens in the modalDoorEdit modal opened by clicking an existing
 	// door. Right-click clears the door.
 	entityPlaceDoor
+	// entityPlaceCrystal drops a healing crystal (Grimrock-style save/heal
+	// point) at the clicked tile. Crystals carry no per-instance authoring
+	// (charge state is runtime), so there's no edit modal — placement is the
+	// whole story. Right-click (or the Clear brush) removes it.
+	entityPlaceCrystal
 )
 
 // layerBrushes is the per-layer palette table. Index into the active
@@ -321,6 +328,16 @@ func buildEntityBrushes() []Brush {
 		Hotkey: doorHK,
 		Color:  render.MarkerDoor,
 	})
+	crystalHK := int32(0)
+	if slot := len(defs) + 3; slot-1 < len(entityBrushHotkeys) {
+		crystalHK = entityBrushHotkeys[slot-1]
+	}
+	brushes = append(brushes, Brush{
+		Name:   "Place Crystal",
+		Entity: entityPlaceCrystal,
+		Hotkey: crystalHK,
+		Color:  render.MarkerCrystal,
+	})
 	return brushes
 }
 
@@ -366,6 +383,33 @@ const (
 	focusDoorName
 	focusDoorTargetMap
 	focusDoorTargetDoor
+	// Dialog-editor text-field foci. The node editor (modalDialogNodeEdit)
+	// and choice editor (modalDialogChoiceEdit) pump these in their own
+	// update loops via pumpFocusField, mirroring the door modal. Each maps
+	// to a field of the active node/choice through dialogTextTarget.
+	focusDialogNodeText
+	focusDialogNodeNext
+	focusDialogNodeContinue
+	focusDialogChoiceLabel
+	focusDialogChoiceNext
+	// focusDialogActionID edits the quest-id / event-id of the action editor
+	// (modalDialogActionEdit), routed to the right field by the action's kind
+	// (see dialogActionIDTarget). Shared by the node- and choice-action editors.
+	focusDialogActionID
+	// Condition-editor foci (modalDialogCondEdit). String fields edit the
+	// active condition in place via currentDialogCond; numeric fields route
+	// through the shared dialogNumBuf (see dialogNumericTarget).
+	focusDialogCondQuestID
+	focusDialogCondMessage
+	focusDialogCondGold
+	focusDialogCondFoeKills
+	focusDialogCondTileX
+	focusDialogCondTileZ
+	// Trigger-editor numeric foci (modalDialogTriggerEdit) — share dialogNumBuf
+	// with the condition numerics (only one editor is open at a time).
+	focusDialogTrigTileX
+	focusDialogTrigTileZ
+	focusDialogTrigFoeKills
 )
 
 type modalKind int
@@ -429,11 +473,52 @@ const (
 	// straight into the game. Map-independent (it edits global per-kind look,
 	// not anything on the current area).
 	modalFoeView
+	// modalPartyView is the Party Visualizer: the party-side twin of
+	// modalFoeView. A live combat-preview pane for any party CLASS plus the same
+	// billboard placement / shadow / cursor / tint sliders + sprite-PNG strip,
+	// saving to maps/sprites/partyvisuals.json (core.PartyVisualOverride). Reuses
+	// the foe modal's geometry, field table, and sprite-edit engine. Also
+	// map-independent (per-class global look).
+	modalPartyView
 	// modalEntityList is the "Objects" index: a scrollable list of every
 	// pack / chest / door (plus the player start) in the map. Clicking a row
 	// recenters the view on that entity and opens its editor — so the author
 	// can manage placements without hunting tiles on a big map.
 	modalEntityList
+	// modalDialogList is the top of the dialog authoring flow: an entity-list
+	// of the area's conversations (modalDialogIdx selects one). Add creates a
+	// new dialog (auto-id'd) with one starter node; Edit opens its node list;
+	// Delete drops it.
+	modalDialogList
+	// modalDialogNodes lists the selected dialog's nodes (modalDialogNodeIdx
+	// selects one). Add / Delete / Set-Start manage the node set; Edit opens
+	// the node editor. Esc returns to modalDialogList.
+	modalDialogNodes
+	// modalDialogNodeEdit is the per-node editor: speaker (dropdown), text /
+	// next / continue-label / quest-complete (text fields), an Is-Menu toggle,
+	// and the node's choice list (Add / Edit / Delete). Esc returns to
+	// modalDialogNodes.
+	modalDialogNodeEdit
+	// modalDialogChoiceEdit edits one choice of the active node: its label,
+	// next-node target, an end-action (opens modalDialogActionEdit), and the
+	// choice's condition list (Add / Edit / Delete). Esc → modalDialogNodeEdit.
+	modalDialogChoiceEdit
+	// modalDialogActionEdit edits the end-action fired by the active NODE or
+	// CHOICE (kind dropdown: none / start-quest / complete-quest / event, plus
+	// the quest-id or event-id). modalDialogActionOnChoice selects which holder
+	// it targets; Esc returns to whichever editor opened it.
+	modalDialogActionEdit
+	// modalDialogCondEdit edits one selectability condition of the active
+	// choice: kind (dropdown) + the kind's params (gold / quest / foe-killed /
+	// tile-visited) + an optional disabled message. Esc returns to
+	// modalDialogChoiceEdit.
+	modalDialogCondEdit
+	// modalDialogTriggerList lists the area's dialog triggers (auto-start a
+	// conversation on enter-tile / foe-killed). Opened from the dialog list.
+	modalDialogTriggerList
+	// modalDialogTriggerEdit edits one trigger: kind + target dialog (both
+	// dropdowns) + a Once toggle + the kind's params. Esc returns to the list.
+	modalDialogTriggerEdit
 	// modalHitGlyphs is the read-only Hit Glyphs viewer: a looping gallery of the
 	// combat clarity glyphs (slash / impact / frost / spark / fire / holy / venom)
 	// drawn over a struck target. Pure preview so the author can see the symbols
@@ -615,6 +700,29 @@ type State struct {
 	// modalDoorIdx is the area.DoorSpawns index being edited when
 	// modal == modalDoorEdit. -1 outside the flow.
 	modalDoorIdx int
+	// Dialog-editor indices. modalDialogIdx selects the area.Dialogs entry
+	// the node list / node editor operate on; modalDialogNodeIdx selects the
+	// node within that dialog the node / choice editors operate on;
+	// modalDialogChoiceIdx selects the choice within that node the choice
+	// editor edits. All -1 outside their flows (reset by closeModal).
+	modalDialogIdx       int
+	modalDialogNodeIdx   int
+	modalDialogChoiceIdx int
+	// modalDialogCondIdx selects the condition within the active choice the
+	// condition editor edits; modalDialogTriggerIdx selects the area.Triggers
+	// entry the trigger editor edits. Both -1 outside their flows.
+	modalDialogCondIdx    int
+	modalDialogTriggerIdx int
+	// modalDialogActionOnChoice selects whose end-action the action editor
+	// (modalDialogActionEdit) targets: the current CHOICE's EndAction when true,
+	// the current NODE's when false. See currentDialogActionHolder.
+	modalDialogActionOnChoice bool
+	// dialogNumBuf is the shared edit buffer for whichever numeric dialog
+	// condition/trigger field is focused (gold / kills / tile X / tile Z).
+	// Seeded from the field when focus enters it (focusDialogNumeric) and
+	// parsed back on each keystroke (see dialogNumericTarget / pumpDialogNumeric)
+	// — one buffer suffices since only one numeric field is ever focused.
+	dialogNumBuf string
 	// New-map dialog state. modalNewWidth / modalNewHeight hold the
 	// in-progress dimensions (text-input commits write here, not the
 	// area); modalNewFloor is the chosen default floor char that
@@ -661,6 +769,34 @@ type State struct {
 	foeBaseline core.EnemyVisualOverride
 	foeCursor   int
 	foeInit     bool
+
+	// Party Visualizer (modalPartyView) state — the party-class twin of the foe
+	// fields above. partyClass is the class being tuned; partyVisual is the
+	// working override (= EnemyVisualOverride alias); partyBaseline snapshots for
+	// Reset; partyCursor is the focused slider row; partyInit gates first-open
+	// seeding so reopening returns to the last class.
+	partyClass    core.PartyClass
+	partyVisual   core.PartyVisualOverride
+	partyBaseline core.PartyVisualOverride
+	partyCursor   int
+	partyInit     bool
+
+	// foeViewTab selects which pane the Foe/Party Visualizer shows: 0 = Layout
+	// (the placement/shadow/cursor/glyph/tint slider stack), 1 = Asset (the
+	// sprite-PNG bake/import strip). Shared by both modals since only one is open
+	// at a time. See foeViewTabLabels.
+	foeViewTab int
+	// foeViewZoom is the visualizer preview's dolly factor (mouse wheel over the
+	// preview pane). 1 = default framing; clamped to render.FoePreviewZoom{Min,Max}.
+	// Shared by both visualizer modals; reset to 1 on open.
+	foeViewZoom float32
+	// Asset-tab state, shared by both visualizer modals. The non-destructive
+	// adjustment VALUES (Pixelate/Brightness/Contrast) live in the visual override
+	// (foeVisual/partyVisual), not here. assetCursor is the focused asset-slider
+	// row; assetPreviewStale requests a live-preview rebuild next frame (set on a
+	// slider change / Revert / foe cycle / open). See foeview.go's asset* helpers.
+	assetCursor       int
+	assetPreviewStale bool
 
 	pending pendingAction
 
@@ -871,23 +1007,47 @@ func NewFromArea(a core.AreaDefinition) State {
 	return freshState(a)
 }
 
+// materializeEntranceCrystal makes the entrance crystal an editable entity
+// rather than an invisible runtime ghost. A map that hasn't authored its
+// crystals (legacy maps, freshly-blanked new maps, and maps opened from disk
+// without a crystals: section) gets the same default entrance crystal the
+// runtime would synthesize — but as a real, movable, deletable CrystalSpawn —
+// and is marked authored so saving persists the author's exact set (including
+// zero, if they delete it). Already-authored maps are left untouched so an
+// intentional empty set survives a round-trip. Shared by every editor entry
+// point that swaps in a new area (freshState / performNewMap / openSelectedMap)
+// so none of them can drift back into the unauthored-ghost state.
+func materializeEntranceCrystal(a core.AreaDefinition) core.AreaDefinition {
+	if !a.CrystalsAuthored {
+		a.CrystalSpawns = core.DefaultEntranceCrystalSpawns(a)
+		a.CrystalsAuthored = true
+	}
+	return a
+}
+
 func freshState(a core.AreaDefinition) State {
+	a = materializeEntranceCrystal(a)
 	return State{
-		area:           a,
-		baseline:       core.CloneArea(a),
-		layer:          LayerWalls,
-		brushSize:      1,
-		zoom:           1,
-		gridCursorX:    -1,
-		gridCursorZ:    -1,
-		hoverX:         -1,
-		hoverZ:         -1,
-		dragPackIdx:    -1,
-		dragChestIdx:   -1,
-		dragDoorIdx:    -1,
-		modalPackIdx:   -1,
-		modalChestIdx:  -1,
-		modalDoorIdx:   -1,
+		area:                  a,
+		baseline:              core.CloneArea(a),
+		layer:                 LayerWalls,
+		brushSize:             1,
+		zoom:                  1,
+		gridCursorX:           -1,
+		gridCursorZ:           -1,
+		hoverX:                -1,
+		hoverZ:                -1,
+		dragPackIdx:           -1,
+		dragChestIdx:          -1,
+		dragDoorIdx:           -1,
+		modalPackIdx:          -1,
+		modalChestIdx:         -1,
+		modalDoorIdx:          -1,
+		modalDialogIdx:        -1,
+		modalDialogNodeIdx:    -1,
+		modalDialogChoiceIdx:  -1,
+		modalDialogCondIdx:    -1,
+		modalDialogTriggerIdx: -1,
 	}
 }
 

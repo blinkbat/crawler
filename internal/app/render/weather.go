@@ -40,6 +40,12 @@ const (
 	lightningG        = 224
 	lightningB        = 248
 	lightningMaxAlpha = 185
+
+	// weatherIntensityEpsilon is the "effectively off" cutoff for the rain
+	// intensity / lightning flash envelopes — below it there's nothing worth
+	// painting, so DrawWeather bails. One named threshold instead of the bare
+	// 0.001 repeated at each guard.
+	weatherIntensityEpsilon = float32(0.001)
 )
 
 // rainVisual is the per-kind peak strength of the overlay at full
@@ -74,7 +80,7 @@ func init() {
 // when the storm is fully clear. Stateless: rl.GetTime() drives the fall
 // and each streak's traits come from hash01(index), so nothing is
 // retained between frames.
-func DrawWeather(g core.GameState) {
+func DrawWeather(g *core.GameState) {
 	w := g.Weather
 	// Intensity and Flash are eased into [0,1] upstream (TickWeather/tickLightning);
 	// clamp at the consumption site so the uint8 alpha casts below can never wrap
@@ -83,13 +89,21 @@ func DrawWeather(g core.GameState) {
 	w.Flash = core.Clamp(w.Flash, 0, 1)
 	// A lightning flash can outlast the rain's fade by a blink, so it's
 	// checked independently of intensity. Nothing to paint otherwise.
-	if intensity <= 0.001 && w.Flash <= 0.001 {
+	if intensity <= weatherIntensityEpsilon && w.Flash <= weatherIntensityEpsilon {
 		return
 	}
 	sw, sh := screenSizeF()
 
-	if intensity > 0.001 {
-		vis := rainVisuals[w.Kind]
+	if intensity > weatherIntensityEpsilon {
+		// Defensive clamp: every other enum-keyed table in render guards its
+		// access. w.Kind is only ever set by rollRainKind today, but a corrupt
+		// save or future path with an out-of-range Kind would panic indexing
+		// the fixed-size table.
+		kind := w.Kind
+		if kind < 0 || int(kind) >= core.RainKindCount {
+			kind = core.RainLight
+		}
+		vis := rainVisuals[kind]
 		// Overcast wash over the world view — darkness scales with kind.
 		rl.DrawRectangle(0, 0, int32(sw), int32(sh),
 			rl.NewColor(rainWashR, rainWashG, rainWashB, uint8(intensity*vis.washAlpha)))
@@ -121,7 +135,7 @@ func DrawWeather(g core.GameState) {
 
 	// Lightning blink — painted last so it lights the rain it falls
 	// through. Flash is only ever non-zero during a heavy storm.
-	if w.Flash > 0.001 {
+	if w.Flash > weatherIntensityEpsilon {
 		rl.DrawRectangle(0, 0, int32(sw), int32(sh),
 			rl.NewColor(lightningR, lightningG, lightningB, uint8(w.Flash*lightningMaxAlpha)))
 	}

@@ -32,6 +32,7 @@ type Theme struct {
 	MarkerChest    rl.Color
 	MarkerChestDim rl.Color
 	MarkerDoor     rl.Color
+	MarkerCrystal  rl.Color
 	MarkerPack     rl.Color
 	MarkerOutline  rl.Color
 }
@@ -54,12 +55,17 @@ func (r Resources) Theme() Theme {
 		TextLabel:         textLabel,
 		TextDim:           textDim,
 		TextHint:          textHint,
-		MarkerStart:       markerStart,
-		MarkerChest:       markerChest,
-		MarkerChestDim:    markerChestDim,
-		MarkerDoor:        markerDoor,
-		MarkerPack:        markerPack,
-		MarkerOutline:     markerOutline,
+		// Marker colors derive from the exported Marker* vars below (the single
+		// source of truth) rather than re-listing the package-private theme vars
+		// a third time — so the struct field, the exported var, and the theme.go
+		// literal can't drift apart.
+		MarkerStart:    MarkerStart,
+		MarkerChest:    MarkerChest,
+		MarkerChestDim: MarkerChestDim,
+		MarkerDoor:     MarkerDoor,
+		MarkerCrystal:  MarkerCrystal,
+		MarkerPack:     MarkerPack,
+		MarkerOutline:  MarkerOutline,
 	}
 }
 
@@ -73,6 +79,7 @@ var (
 	MarkerChest    = markerChest
 	MarkerChestDim = markerChestDim
 	MarkerDoor     = markerDoor
+	MarkerCrystal  = markerCrystal
 	MarkerPack     = markerPack
 	MarkerOutline  = markerOutline
 )

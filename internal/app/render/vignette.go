@@ -23,12 +23,22 @@ const dangerVignetteDepth = float32(0.16)
 // it's noticed.
 const dangerVignetteAlpha = float32(34)
 
+// dangerVignettePulseBase / dangerVignettePulseSwing split the breathing
+// modulation applied to dangerVignetteAlpha: the alpha rides
+// base + swing*pulseFlicker(), so it never fully fades (base) and swings up to
+// base+swing at the flicker peak. Named so the resting/peak split is a
+// one-line tune rather than two bare multipliers.
+const (
+	dangerVignettePulseBase  = float32(0.62)
+	dangerVignettePulseSwing = float32(0.38)
+)
+
 // DrawBattleDangerVignette paints the edge vignette while the battle is in
 // the enemy attack-timing phase. No-op in every other phase, so the cost is
 // one branch outside combat. Breathes at the canonical status-flicker rate
 // (UI_STANDARDS "Pulse / breathing") — the same urgency rhythm the status
 // pills flicker with.
-func DrawBattleDangerVignette(g core.GameState) {
+func DrawBattleDangerVignette(g *core.GameState) {
 	if g.Battle.Phase != core.BattleEnemyTiming {
 		return
 	}
@@ -44,7 +54,7 @@ func DrawBattleDangerVignette(g core.GameState) {
 	if depth < 8 {
 		return
 	}
-	a := dangerVignetteAlpha * (0.62 + 0.38*pulseFlicker())
+	a := dangerVignetteAlpha * (dangerVignettePulseBase + dangerVignettePulseSwing*pulseFlicker())
 	edge := colorWithAlpha(borderDanger, uint8(a))
 	clear := colorWithAlpha(borderDanger, 0)
 	// Four edge gradients, each fading from the claret edge to transparent

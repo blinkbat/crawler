@@ -210,11 +210,12 @@ func Draw(s State, assets render.Resources) {
 	render.DrawCandlelitBackdrop(screenW, screenH)
 
 	title := "CRAWLER"
-	// Game-name splash — the documented exception to the five-size
-	// standard (see UI_STANDARDS.md). One-off, single-screen,
-	// rendered exactly once at game launch.
-	titleSize := float32(72)
-	titleSpacing := float32(4)
+	// Game-name splash — sizing is the documented exception to the five-size
+	// standard (see UI_STANDARDS.md), but the values still live in the named
+	// title-layout const block below (titleSplashSize / titleSplashSpacing)
+	// rather than as bare literals in Draw.
+	titleSize := titleSplashSize
+	titleSpacing := titleSplashSpacing
 	tm := rl.MeasureTextEx(font, title, titleSize, titleSpacing)
 	titleX := render.CenterXF(tm.X)
 	titleY := float32(screenH) * 0.18
@@ -291,6 +292,11 @@ func drawMapPicker(s State, font rl.Font, theme render.Theme, screenH int32) {
 // drawList / drawHint / drawError / drawMainMenu used to repeat so a
 // title-screen rebalance touches one block instead of half a dozen.
 const (
+	// Game-name wordmark sizing — the documented exception to the five-size
+	// standard (one-off launch splash), kept here with the other anchors so
+	// Draw carries no bare literal.
+	titleSplashSize        = float32(72)
+	titleSplashSpacing     = float32(4)
 	titleListAnchorFrac    = float32(0.42) // vertical anchor for the menu list (fraction of screenH)
 	titleListRowStride     = float32(44)   // gap between menu rows
 	titleListHeaderOffset  = float32(52)   // distance from list top up to the "Map:" header

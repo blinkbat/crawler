@@ -31,11 +31,36 @@ func editorTabPressed() bool {
 	return input.EditorTabPressed()
 }
 
+// runCardCmds is the shared tail of the modal updaters that only differ by
+// card size and Row-vs-Stack button layout: it centers a card of (w, h), lays
+// the cmd buttons across it (modalButtonRow when stack is false, modalButtonStack
+// when true), and dispatches the click/accelerator through runModalCmds. The six
+// confirm/menu modals route through here so the layout-then-dispatch boilerplate
+// lives in one place instead of being re-derived per updater.
+func runCardCmds(w, h float32, stack bool, cmds []modalCmd) (Action, bool) {
+	card := centeredCardRect(w, h)
+	var rects []rl.Rectangle
+	if stack {
+		rects = modalButtonStack(card, cmdLabels(cmds))
+	} else {
+		rects = modalButtonRow(card, cmdLabels(cmds))
+	}
+	return runModalCmds(cmds, rects)
+}
+
+// modifiers snapshots the held state of the three chord keys (either side of
+// the keyboard counts). Centralizes the left/right-OR triple so updateHotkeys,
+// updateMouse, and the layer-eye toggle can't drift on which sides they check.
+func modifiers() (ctrl, shift, alt bool) {
+	ctrl = rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
+	shift = rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
+	alt = rl.IsKeyDown(rl.KeyLeftAlt) || rl.IsKeyDown(rl.KeyRightAlt)
+	return ctrl, shift, alt
+}
+
 // updateHotkeys handles keyboard shortcuts when no text field is focused.
 func updateHotkeys(s *State) {
-	ctrl := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
-	shift := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
-	alt := rl.IsKeyDown(rl.KeyLeftAlt) || rl.IsKeyDown(rl.KeyRightAlt)
+	ctrl, shift, alt := modifiers()
 
 	// ALT tap-toggles the per-tile glyph overlay (off by default; when on
 	// it shows the ACTIVE layer's chars only). The detection is "key
@@ -66,7 +91,7 @@ func updateHotkeys(s *State) {
 	// Tab-cycling when the author knows which layer they want. Number row
 	// only; the keypad equivalents aren't bound to keep the binding compact.
 	if alt {
-		for i := 0; i < layerCount; i++ {
+		for i := 0; i < layerCount && i < len(numberRowKeys); i++ {
 			if rl.IsKeyPressed(numberRowKeys[i]) {
 				s.layer = Layer(i)
 				return
@@ -463,7 +488,7 @@ func updateMouse(s *State) {
 		if pointIn(mp, s.rect.layerTabs) {
 			for i := 0; i < layerCount; i++ {
 				if pointIn(mp, layerEyeRect(s, i)) {
-					alt := rl.IsKeyDown(rl.KeyLeftAlt) || rl.IsKeyDown(rl.KeyRightAlt)
+					_, _, alt := modifiers()
 					toggleLayerVisibility(s, i, alt)
 					return
 				}
@@ -510,9 +535,7 @@ func updateMouse(s *State) {
 	}
 
 	if pointIn(mp, s.rect.grid) && hx >= 0 {
-		ctrl := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
-		shift := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
-		alt := rl.IsKeyDown(rl.KeyLeftAlt) || rl.IsKeyDown(rl.KeyRightAlt)
+		ctrl, shift, alt := modifiers()
 
 		if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 			// Eyedropper: Alt+left-click on a grid layer samples the cell's
@@ -552,8 +575,11 @@ func updateMouse(s *State) {
 					return
 				}
 			}
-			pushUndo(s)
-			eraseAt(s, hx, hz)
+			// Route through keyboardMutate so an erase on an already-empty
+			// cell banks NO undo snapshot, doesn't clear the redo stack, and
+			// doesn't flip the dirty flag — matching the mouse-paint and
+			// keyboard mutation paths (eraseAt itself sets dirty unconditionally).
+			keyboardMutate(s, func() { eraseAt(s, hx, hz) })
 		}
 	}
 
@@ -740,10 +766,12 @@ func finishDrag(s *State) {
 	switch s.drag {
 	case dragStart:
 		if s.hoverX >= 0 && (s.hoverX != s.area.StartTileX || s.hoverZ != s.area.StartTileZ) {
-			if s.area.BlockedAt(s.hoverX, s.hoverZ) {
-				s.flash("Player start must be on an open cell")
-			} else if core.ChestSpawnIndexAt(s.area.ChestSpawns, s.hoverX, s.hoverZ) >= 0 {
-				s.flash("Player start can't share a tile with a chest")
+			// Route through the canonical startBlockers set (same as the
+			// entity-brush + right-click "Move start here" paths) so the
+			// drag path can't drift — it was missing the door check, which
+			// would let a dragged start race the area-transition trigger.
+			if msg := firstBlocker(startBlockers(&s.area, s.hoverX, s.hoverZ)...); msg != "" {
+				s.flash(msg)
 			} else {
 				pushUndo(s)
 				s.area.StartTileX = s.hoverX
@@ -765,6 +793,10 @@ func finishDrag(s *State) {
 					// Mirror placeDoorAt's door/pack exclusion on the drag path
 					// too — a pack sharing a door tile races the transition.
 					s.flash("Cell holds a door — clear it first")
+				} else if core.CrystalSpawnIndexAt(s.area.CrystalSpawns, s.hoverX, s.hoverZ) >= 0 {
+					// addPackMember refuses a pack on a crystal tile (one entity
+					// per tile); keep the drag-relocate path in lockstep.
+					s.flash("Cell holds a crystal — clear it first")
 				} else {
 					pushUndo(s)
 					// Drop any pack that was already at the destination cell
@@ -914,7 +946,11 @@ func sampleBrushAt(s *State, x, z int) {
 		return
 	}
 	if s.layer == LayerElevation {
-		lvl := clampLevel(int(s.area.Elevation[z][x]) - '0')
+		b, ok := cellAt(s.area.Elevation, x, z)
+		if !ok {
+			return
+		}
+		lvl := clampLevel(int(b) - '0')
 		s.editLevel = lvl
 		s.flash("Picked level " + strconv.Itoa(lvl))
 		return
@@ -934,23 +970,36 @@ func sampleBrushAt(s *State, x, z int) {
 	s.flash("No brush matches this tile")
 }
 
+// cellAt safely reads a grid layer ([]string rows) at (x,z). InBounds only
+// validates the declared Width/Height, which a ragged / mid-build area can
+// exceed (some rows shorter than Width, or fewer rows than Height) — so raw
+// layer[z][x] indexing after only an InBounds check can panic. ok is false when
+// the coordinate lands outside the actual backing rows. Mirrors the guard
+// floodFill already open-codes; the shared reader for editor-side layer reads.
+func cellAt(layer []string, x, z int) (byte, bool) {
+	if z < 0 || z >= len(layer) || x < 0 || x >= len(layer[z]) {
+		return 0, false
+	}
+	return layer[z][x], true
+}
+
 // activeLayerCharAt returns the raw char stored at (x,z) on the active grid
 // layer — including "empty"/sentinel chars, which the eyedropper can validly
 // sample. ok is false for the Entities layer, which has no per-tile char.
 func activeLayerCharAt(s *State, x, z int) (byte, bool) {
 	switch s.layer {
 	case LayerWalls:
-		return s.area.Walls[z][x], true
+		return cellAt(s.area.Walls, x, z)
 	case LayerFloor:
-		return s.area.Floor[z][x], true
+		return cellAt(s.area.Floor, x, z)
 	case LayerDecor:
-		return s.area.Decor[z][x], true
+		return cellAt(s.area.Decor, x, z)
 	case LayerProps:
-		return s.area.Props[z][x], true
+		return cellAt(s.area.Props, x, z)
 	case LayerCeiling:
-		return s.area.Ceiling[z][x], true
+		return cellAt(s.area.Ceiling, x, z)
 	case LayerElevation:
-		return s.area.Elevation[z][x], true
+		return cellAt(s.area.Elevation, x, z)
 	}
 	return 0, false
 }
@@ -1009,6 +1058,7 @@ func openSaveAsModal(s *State) {
 func openValidateModal(s *State) {
 	rows := append([]string{}, reachabilityWarnings(s.area)...)
 	rows = append(rows, crossMapDoorWarnings(s.area)...)
+	rows = append(rows, dialogWarnings(s.area)...)
 	s.modalValidateRows = rows
 	s.modal = modalValidate
 }
@@ -1046,10 +1096,42 @@ var textFieldConfigs = map[focusField]textFieldConfig{
 	// Door identifier fields reject spaces: the .map door row is
 	// space-delimited, so a space here would corrupt the round-trip
 	// (validate() also backstops this at save time).
-	focusDoorName:        {defaultTextFieldMaxLen, acceptPrintableNoSpace},
+	focusDoorName:       {defaultTextFieldMaxLen, acceptPrintableNoSpace},
 	focusDoorTargetMap:  {defaultTextFieldMaxLen, acceptPrintableNoSpace},
 	focusDoorTargetDoor: {defaultTextFieldMaxLen, acceptPrintableNoSpace},
+	// Dialog node / choice fields. Prose fields (text, label, continue label)
+	// take a generous cap and allow spaces; identifier fields (node-id
+	// targets, quest id) reject spaces — they reference auto-generated ids /
+	// quest keys that never contain whitespace.
+	focusDialogNodeText:     {dialogProseMaxLen, acceptPrintable},
+	focusDialogNodeNext:     {defaultTextFieldMaxLen, acceptPrintableNoSpace},
+	focusDialogNodeContinue: {defaultTextFieldMaxLen, acceptPrintable},
+	focusDialogChoiceLabel:  {dialogProseMaxLen, acceptPrintable},
+	focusDialogChoiceNext:   {defaultTextFieldMaxLen, acceptPrintableNoSpace},
+	// Action editor: a quest-id / event-id key (no spaces).
+	focusDialogActionID: {defaultTextFieldMaxLen, acceptPrintableNoSpace},
+	// Condition editor: a quest-id (no-space key) + a prose disabled message;
+	// the numeric foci pump the shared dialogNumBuf with the digit filter.
+	focusDialogCondQuestID:  {defaultTextFieldMaxLen, acceptPrintableNoSpace},
+	focusDialogCondMessage:  {dialogProseMaxLen, acceptPrintable},
+	focusDialogCondGold:     {dialogNumFieldMaxLen, acceptDigit},
+	focusDialogCondFoeKills: {dialogNumFieldMaxLen, acceptDigit},
+	focusDialogCondTileX:    {dialogNumFieldMaxLen, acceptDigit},
+	focusDialogCondTileZ:    {dialogNumFieldMaxLen, acceptDigit},
+	// Trigger editor numeric foci (share dialogNumBuf with the conditions).
+	focusDialogTrigTileX:    {dialogNumFieldMaxLen, acceptDigit},
+	focusDialogTrigTileZ:    {dialogNumFieldMaxLen, acceptDigit},
+	focusDialogTrigFoeKills: {dialogNumFieldMaxLen, acceptDigit},
 }
+
+// dialogNumFieldMaxLen caps the shared numeric edit buffer — six digits covers
+// gold gates and tile coords without an unbounded buffer.
+const dialogNumFieldMaxLen = 6
+
+// dialogProseMaxLen is the rune budget for a dialog node's body text and a
+// choice's label — longer than the general field cap so a line of
+// conversation isn't truncated mid-sentence.
+const dialogProseMaxLen = 280
 
 func configForFocus(f focusField) textFieldConfig {
 	if cfg, ok := textFieldConfigs[f]; ok {
@@ -1162,6 +1244,11 @@ func updateTextInput(s *State) {
 	}
 }
 
+// updateNumericInput is the SPECIAL-CASE numeric path for the map's width /
+// height fields (focusWidth/Height/NewWidth/NewHeight): it clamps to
+// ClampMapDimension and drives a live area resize, so it keeps its own focus
+// enums + numericBuf. For a plain int field (dialog conditions/triggers, future
+// numeric params) use the generic pumpDialogNumeric path in editor/dialog.go.
 func updateNumericInput(s *State) {
 	pumpPrintableASCII(&s.numericBuf, numericFieldMaxLen, acceptDigit, nil)
 	if editorTabPressed() {
@@ -1311,6 +1398,39 @@ func validateModalState(s *State) {
 		if s.modalDoorIdx < 0 || s.modalDoorIdx >= len(s.area.DoorSpawns) {
 			closeModal(s)
 		}
+	case modalDialogList:
+		// The dialog list itself is always valid (it indexes the whole
+		// slice); the cursor is clamped in the updater.
+	case modalDialogNodes:
+		if s.modalDialogIdx < 0 || s.modalDialogIdx >= len(s.area.Dialogs) {
+			closeModal(s)
+		}
+	case modalDialogNodeEdit:
+		if !dialogNodeInRange(s) {
+			closeModal(s)
+		}
+	case modalDialogChoiceEdit:
+		if !dialogChoiceInRange(s) {
+			closeModal(s)
+		}
+	case modalDialogCondEdit:
+		if !dialogCondInRange(s) {
+			closeModal(s)
+		}
+	case modalDialogActionEdit:
+		if currentDialogActionHolder(s) == nil {
+			closeModal(s)
+		}
+	case modalDialogTriggerList:
+		if s.modalDialogTriggerIdx >= len(s.area.Triggers) {
+			// The list itself is always valid (indexes the whole slice); only
+			// guard a stale remembered index, the cursor is clamped in the updater.
+			s.modalDialogTriggerIdx = -1
+		}
+	case modalDialogTriggerEdit:
+		if !dialogTriggerInRange(s) {
+			closeModal(s)
+		}
 	}
 }
 
@@ -1341,24 +1461,38 @@ func armOrConfirmDelete(s *State, token, msg string) bool {
 }
 
 func closeModal(s *State) {
-	// The Foe Visualizer caches an off-screen RenderTexture2D. Free it from
-	// this central seam (not only the modal's own Close/cancel buttons) so
-	// any path that dismisses a modal via closeModal can't leak the GPU
-	// handle across reopen. Idempotent when nothing is allocated.
-	if s.modal == modalFoeView {
+	// The Foe and Party Visualizers each cache an off-screen RenderTexture2D plus
+	// (on the Asset tab) a live-preview sprite texture. Free both from this central
+	// seam (not only the modal's own Close/cancel buttons) so any path that
+	// dismisses a modal via closeModal — e.g. validateModalState dropping a
+	// stale-index modal — can't leak a GPU handle across reopen. Idempotent when
+	// nothing is allocated.
+	switch s.modal {
+	case modalFoeView:
 		render.CloseFoePreview()
+		render.ClearAssetPreview()
+	case modalPartyView:
+		render.ClosePartyPreview()
+		render.ClearAssetPreview()
 	}
 	s.modal = modalNone
 	s.modalCursor = 0
 	s.modalPackIdx = -1
 	s.modalChestIdx = -1
 	s.modalDoorIdx = -1
+	s.modalDialogIdx = -1
+	s.modalDialogNodeIdx = -1
+	s.modalDialogChoiceIdx = -1
+	s.modalDialogCondIdx = -1
+	s.modalDialogTriggerIdx = -1
+	s.modalDialogActionOnChoice = false
+	clearDialogFocus(s)
 	closeDropdown(s) // a modal's picker dropdown must not survive its parent
 	s.modalValidateRows = nil
 	s.modalConfirmDelete = false
 	s.modalRenaming = ""
 	s.deleteArmed = ""
-	soundDrag.sliderIdx = -1
+	soundDrag = noSliderDrag
 	// Door-edit text focus survives outside the modal in pumpPrintableASCII's
 	// flow, so explicitly drop it here too. The new-map dialog's numeric
 	// foci are similarly modal-scoped — they must not carry over.
@@ -1992,8 +2126,7 @@ func updateOpenModal(s *State) Action {
 	}
 	// Action buttons + their keyboard accelerators.
 	cmds := openModalActionCmds(s)
-	rects := modalButtonRow(centeredCardRect(openModalW, openModalH), cmdLabels(cmds))
-	if act, ran := runModalCmds(cmds, rects); ran {
+	if act, ran := runCardCmds(openModalW, openModalH, false, cmds); ran {
 		return act
 	}
 	return ActionNone
@@ -2030,6 +2163,7 @@ func openSelectedMap(s *State) Action {
 		closeModal(s)
 		return ActionNone
 	}
+	area = materializeEntranceCrystal(area)
 	s.area = area
 	s.baseline = core.CloneArea(area)
 	s.undo = nil
@@ -2075,10 +2209,9 @@ func openDuplicateSelected(s *State) {
 }
 
 func updateOpenRename(s *State) Action {
-	pumpPrintableASCII(&s.modalRenaming, 64, acceptPrintable, nil)
+	pumpPrintableASCII(&s.modalRenaming, defaultTextFieldMaxLen, acceptPrintable, nil)
 	cmds := openRenameCmds(s)
-	rects := modalButtonRow(centeredCardRect(openModalW, openModalH), cmdLabels(cmds))
-	if act, ran := runModalCmds(cmds, rects); ran {
+	if act, ran := runCardCmds(openModalW, openModalH, false, cmds); ran {
 		return act
 	}
 	return ActionNone
@@ -2115,8 +2248,7 @@ func openRenameCommit(s *State) {
 
 func updateOpenConfirmDelete(s *State) Action {
 	cmds := openDeleteConfirmCmds(s)
-	rects := modalButtonRow(centeredCardRect(openModalW, openModalH), cmdLabels(cmds))
-	if act, ran := runModalCmds(cmds, rects); ran {
+	if act, ran := runCardCmds(openModalW, openModalH, false, cmds); ran {
 		return act
 	}
 	return ActionNone
@@ -2160,8 +2292,7 @@ func refreshOpenList(s *State) {
 func updateSaveAsModal(s *State) Action {
 	if s.awaitingOverwrite {
 		cmds := saveAsOverwriteCmds(s)
-		rects := modalButtonStack(centeredCardRect(saveAsModalW, saveAsModalH), cmdLabels(cmds))
-		if act, ran := runModalCmds(cmds, rects); ran {
+		if act, ran := runCardCmds(saveAsModalW, saveAsModalH, true, cmds); ran {
 			return act
 		}
 		return ActionNone
@@ -2210,8 +2341,7 @@ func saveAsOverwriteCmds(s *State) []modalCmd {
 //     same flow the old "Esc = exit" path used.
 func updateEscMenuModal(s *State) Action {
 	cmds := escMenuCmds(s)
-	rects := modalButtonStack(centeredCardRect(escMenuModalW, escMenuModalH), cmdLabels(cmds))
-	if act, ran := runModalCmds(cmds, rects); ran {
+	if act, ran := runCardCmds(escMenuModalW, escMenuModalH, true, cmds); ran {
 		return act
 	}
 	return ActionNone
@@ -2237,8 +2367,7 @@ func escMenuCmds(s *State) []modalCmd {
 
 func updateConfirmDirtyModal(s *State) Action {
 	cmds := confirmDirtyCmds(s)
-	rects := modalButtonStack(centeredCardRect(confirmDirtyModalW, confirmDirtyModalH), cmdLabels(cmds))
-	if act, ran := runModalCmds(cmds, rects); ran {
+	if act, ran := runCardCmds(confirmDirtyModalW, confirmDirtyModalH, true, cmds); ran {
 		return act
 	}
 	return ActionNone

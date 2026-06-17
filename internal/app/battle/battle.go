@@ -8,6 +8,18 @@ import (
 	"crawler/internal/app/input"
 )
 
+// Shared battle-prompt status strings. These short UI prompts were stringly
+// repeated across the action menu (menu.go) and the action-setup / apply
+// paths (actions.go); naming them keeps the wording (and any future tweak) in
+// one place. They stay distinct consts because they say distinct things —
+// only byte-identical literals were folded together.
+const (
+	msgChooseAction = "Choose an action."
+	msgChooseTarget = "Choose a target."
+	msgNoTarget     = "No target."
+	msgNoSkillReady = "No skill ready."
+)
+
 // Start engages the pack at packIndex. The entire pack roster becomes the
 // in-battle enemy list; no spatial clustering is involved.
 // Start begins a battle against the pack at packIndex. fleeReturnX/Z is the
@@ -88,18 +100,27 @@ func Update(g *core.GameState, dt float32) {
 	// — e.g. a culled enemy) routes through leaveBattle so residual queue /
 	// timing / attacker state doesn't linger across frames. Empty message so we
 	// don't overwrite the quiet-area message with a stale combat status.
-	members := core.BattleMembers(g)
-	if g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(members) {
-		leaveBattle(g, "")
-		return
-	}
 	// All enemies down but the per-action win paths didn't fire (a state
 	// desync). Route through winBattle, NOT leaveBattle — an all-enemies-dead
 	// pack is a WIN, and leaveBattle would silently forfeit the encounter's
 	// XP / gold / loot. winBattle sets Phase = BattleWon, so this guard can't
-	// re-enter. Mirrors checkEnemyWipeout.
-	if core.LivingBattleCount(g) == 0 && g.Battle.Phase != core.BattleWon {
+	// re-enter. Mirrors checkEnemyWipeout. This MUST run before the EnemyIndex
+	// desync leave below: a wiped pack is a win regardless of where the cursor
+	// points, so a stale/-1 EnemyIndex must not divert it to a spoils-forfeiting
+	// leave.
+	// Require a real engaged pack before trusting LivingBattleCount==0 as a
+	// win: BattleMembers reads through ActivePack and returns empty when
+	// ActivePack is stale/-1 (mid-teardown re-entry), which would otherwise
+	// look identical to "every enemy fell" and re-award spoils against a pack
+	// that no longer exists. Only an active combat phase can be won here.
+	if core.ActivePack(g) != nil && core.LivingBattleCount(g) == 0 &&
+		(g.Battle.Phase == core.BattlePlayer || g.Battle.Phase == core.BattleAttackTiming || g.Battle.Phase == core.BattleEnemyTiming) {
 		winBattle(g, core.LastBattleEnemyFallsMessage(g))
+		return
+	}
+	members := core.BattleMembers(g)
+	if g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(members) {
+		leaveBattle(g, "")
 		return
 	}
 	if g.Battle.Phase != core.BattleWon && g.Battle.Phase != core.BattleLost && core.ActivePartyCount(g.Party) == 0 {
@@ -121,10 +142,7 @@ func Update(g *core.GameState, dt float32) {
 	case core.BattleEnemyTiming:
 		updateEnemyTiming(g, dt)
 	case core.BattleWon:
-		g.Battle.Timer -= dt
-		if g.Battle.Timer <= 0 && !battleDeathFadeActive(g) {
-			leaveBattle(g, g.Area.QuietMessage)
-		}
+		updateVictorySpoils(g, dt)
 	case core.BattleLost:
 		if input.ConfirmPressed() {
 			recoverFromLoss(g)
@@ -307,9 +325,24 @@ func simulateTurnQueue(g *core.GameState, persist bool) []core.ActorRef {
 				bestIdx = i
 				continue
 			}
-			li := (threshold - actors[i].ready) * actors[bestIdx].spd
-			lb := (threshold - actors[bestIdx].ready) * actors[i].spd
-			if li < lb {
+			// Pick the actor reaching `threshold` in the fewest ticks. Floor
+			// each "need" at 0 first: persisted readiness carries OVER threshold
+			// across rounds (a fast actor's surplus is the whole point), so
+			// threshold-ready can be negative. Without the floor the negative
+			// extrapolation orders two already-ready actors by spd instead of by
+			// who is actually more ready. With the floor, both read as "0 ticks"
+			// and the tie-break below picks the larger surplus first.
+			ni := threshold - actors[i].ready
+			if ni < 0 {
+				ni = 0
+			}
+			nb := threshold - actors[bestIdx].ready
+			if nb < 0 {
+				nb = 0
+			}
+			li := ni * actors[bestIdx].spd
+			lb := nb * actors[i].spd
+			if li < lb || (li == lb && actors[i].ready > actors[bestIdx].ready) {
 				bestIdx = i
 			}
 		}
@@ -356,7 +389,7 @@ func actorSpeed(g *core.GameState, actor core.ActorRef) int {
 		if !actor.ValidPartyIndex(g.Party) {
 			return 0
 		}
-		spd := core.EffectiveStats(g.Party[actor.Index]).SPD
+		spd := core.EffectiveStatsPtr(&g.Party[actor.Index]).SPD
 		if g.Party[actor.Index].WebbedTurns > 0 {
 			spd /= 2
 		}
@@ -429,70 +462,83 @@ func actorAppearsBefore(queue []core.ActorRef, cursor int, ref core.ActorRef) bo
 // If the queue runs off the end, a fresh round starts (which may end the
 // battle if everyone on a side has died).
 func startActorTurn(g *core.GameState) {
-	for g.Battle.QueueCursor < len(g.Battle.Queue) {
-		skipped := g.Battle.Queue[g.Battle.QueueCursor]
-		if isActorAlive(g, skipped) {
-			break
+	// Loop rather than tail-recurse through the skip paths. Under ATB
+	// carry-over a single call can pass over many consecutive slots
+	// (dead/ingested skips, burn-kills, sleep/stun skips); recursing one
+	// stack frame per skipped slot would grow the stack with the queue
+	// length. Each skip `continue`s the loop; only a real turn, a round
+	// boundary, or a battle-ending transition returns.
+	for {
+		for g.Battle.QueueCursor < len(g.Battle.Queue) {
+			skipped := g.Battle.Queue[g.Battle.QueueCursor]
+			if isActorAlive(g, skipped) {
+				break
+			}
+			// A party member queued this round but ingested before their turn
+			// still owes their end-of-turn Poison tick — "Poison survives the
+			// lockout". Without this the DoT pauses for the swallow round and only
+			// resumes via tickPoisonForIngestedParty next round. The helper no-ops
+			// on dead members (HP<=0) and enemies, so it fires only for an alive,
+			// ingested, poisoned member. buildTurnQueue excludes members ingested
+			// at round start, so the queue can only hold a member ingested
+			// mid-round.
+			//
+			// Tick ONLY on the member's FIRST queue slot this round: under ATB
+			// carry-over a high-SPD member can hold several slots, and any earlier
+			// slot already accounted for one tick (a real turn before the ingest,
+			// via finishActorTurn, or this same first-slot guard). Without the
+			// guard a fast, mid-round-ingested member takes one poison tick per
+			// slot — double damage and double duration drain in a single round.
+			if !actorAppearsBefore(g.Battle.Queue, g.Battle.QueueCursor, skipped) {
+				tickPoisonAfterPartyTurn(g, skipped)
+			}
+			g.Battle.QueueCursor++
 		}
-		// A party member queued this round but ingested before their turn
-		// still owes their end-of-turn Poison tick — "Poison survives the
-		// lockout". Without this the DoT pauses for the swallow round and only
-		// resumes via tickPoisonForIngestedParty next round. The helper no-ops
-		// on dead members (HP<=0) and enemies, so it fires only for an alive,
-		// ingested, poisoned member. buildTurnQueue excludes members ingested
-		// at round start, so the queue can only hold a member ingested
-		// mid-round.
-		//
-		// Tick ONLY on the member's FIRST queue slot this round: under ATB
-		// carry-over a high-SPD member can hold several slots, and any earlier
-		// slot already accounted for one tick (a real turn before the ingest,
-		// via finishActorTurn, or this same first-slot guard). Without the
-		// guard a fast, mid-round-ingested member takes one poison tick per
-		// slot — double damage and double duration drain in a single round.
-		if !actorAppearsBefore(g.Battle.Queue, g.Battle.QueueCursor, skipped) {
-			tickPoisonAfterPartyTurn(g, skipped)
-		}
-		g.Battle.QueueCursor++
-	}
-	if g.Battle.QueueCursor >= len(g.Battle.Queue) {
-		beginNewRound(g)
-		return
-	}
-	actor := g.Battle.Queue[g.Battle.QueueCursor]
-
-	// Burn ticks at the start of the burning actor's own turn. If the burn
-	// kills them, skip their input action (and check win conditions in case
-	// the burn took out the last enemy).
-	if killed := tickBurnAtTurnStart(g, actor); killed {
-		if core.LivingBattleCount(g) == 0 {
-			winBattle(g, "The fire finishes them.")
+		if g.Battle.QueueCursor >= len(g.Battle.Queue) {
+			beginNewRound(g)
 			return
 		}
-		g.Battle.QueueCursor++
-		startActorTurn(g)
-		return
-	}
+		actor := g.Battle.Queue[g.Battle.QueueCursor]
 
-	// Sleep / Stun skip — both statuses cost the actor their turn,
-	// both tick at the start of their own turn, both fall through the
-	// same advance-and-restart path. Sleep clears on damage (handled
-	// in the damage helpers); Stun doesn't — the lockout runs its
-	// rolled duration regardless of damage in between. Sleep ticks
-	// first so a target that's both sleeping and stunned reads as
-	// "asleep" in the log.
-	if asleep := tickSleepAtTurnStart(g, actor); asleep {
-		advanceSkippedTurn(g, actor)
-		return
-	}
-	if stunned := tickStunAtTurnStart(g, actor); stunned {
-		advanceSkippedTurn(g, actor)
-		return
-	}
+		// Burn ticks at the start of the burning actor's own turn. If the burn
+		// kills them, skip their input action (and check win conditions in case
+		// the burn took out the last enemy).
+		if killed := tickBurnAtTurnStart(g, actor); killed {
+			if core.LivingBattleCount(g) == 0 {
+				winBattle(g, "The fire finishes them.")
+				return
+			}
+			g.Battle.QueueCursor++
+			continue
+		}
 
-	if actor.IsParty {
-		beginPartyTurn(g, actor.Index)
-	} else {
-		beginEnemyAttack(g, actor.Index)
+		// Sleep / Stun skip — both statuses cost the actor their turn,
+		// both tick at the start of their own turn, both fall through the
+		// same advance path. Sleep clears on damage (handled in the damage
+		// helpers); Stun doesn't — the lockout runs its rolled duration
+		// regardless of damage in between. Sleep ticks first so a target
+		// that's both sleeping and stunned reads as "asleep" in the log.
+		// advanceSkippedTurn returns true when its DoT tick ended the
+		// battle, in which case the transition already fired and we stop.
+		if asleep := tickSleepAtTurnStart(g, actor); asleep {
+			if advanceSkippedTurn(g, actor) {
+				return
+			}
+			continue
+		}
+		if stunned := tickStunAtTurnStart(g, actor); stunned {
+			if advanceSkippedTurn(g, actor) {
+				return
+			}
+			continue
+		}
+
+		if actor.IsParty {
+			beginPartyTurn(g, actor.Index)
+		} else {
+			beginEnemyAttack(g, actor.Index)
+		}
+		return
 	}
 }
 
@@ -506,7 +552,11 @@ func startActorTurn(g *core.GameState) {
 // the whole lockout, unlike every other status. The tick can kill, so win
 // conditions are checked before advancing — mirroring finishActorTurn and
 // the burn-at-turn-start path.
-func advanceSkippedTurn(g *core.GameState, actor core.ActorRef) {
+//
+// Returns true when the DoT tick ended the battle (a wipeout transition
+// already fired); the caller (startActorTurn's loop) must then stop. Returns
+// false after advancing QueueCursor, so the caller continues to the next slot.
+func advanceSkippedTurn(g *core.GameState, actor core.ActorRef) bool {
 	consumeDefendOnSkip(g, actor)
 	drainNonDamagingPartyStatuses(g, actor)
 	drainNonDamagingEnemyStatuses(g, actor)
@@ -517,10 +567,15 @@ func advanceSkippedTurn(g *core.GameState, actor core.ActorRef) {
 	// can't leak a stale figure into the next actor's Bloodthirst.
 	g.Battle.PhysDamageThisTurn = 0
 	if checkEnemyWipeout(g) || checkPartyWipeout(g) {
-		return
+		return true
 	}
+	// A poison/bleed tick above can kill the player's currently-targeted enemy
+	// during a slept/stunned enemy's skipped turn. Mirror finishActorTurn and
+	// move the cursor off the corpse so the next party turn doesn't open on a
+	// dead target.
+	repointEnemyCursorIfDead(g)
 	g.Battle.QueueCursor++
-	startActorTurn(g)
+	return false
 }
 
 // consumeDefendOnSkip clears a party member's Defend brace when their
@@ -594,8 +649,8 @@ func tickSkipStatusAtTurnStart(
 		setBattleMessage(g, fmt.Sprintf("%s %s.", m.Name, verb))
 		return true
 	}
-	enemy := core.BattleMemberAt(g, actor.Index)
-	if enemy == nil || !enemy.Alive {
+	enemy, ok := livingEnemyAt(g, actor.Index)
+	if !ok {
 		return false
 	}
 	c := counterRefEnemy(enemy)
@@ -750,6 +805,8 @@ func updatePlayerBattle(g *core.GameState) {
 		updateItemTarget(g)
 	case core.ActionSkillMenu:
 		updateSkillMenu(g)
+	case core.ActionFleeConfirm:
+		updateFleeConfirm(g)
 	default:
 		updateActionMenu(g)
 	}
@@ -1145,8 +1202,8 @@ func resolveAndFinishEnemyAttack(g *core.GameState) {
 // guard in actions.go asserts every EnemyCastable skill has a handler
 // here and vice-versa, so the dispatch can't silently fizzle.
 func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
-	enemy := core.BattleMemberAt(g, slot)
-	if enemy == nil || !enemy.Alive {
+	enemy, ok := livingEnemyAt(g, slot)
+	if !ok {
 		return
 	}
 	effect := core.SkillEffectFor(skill)
@@ -1192,7 +1249,24 @@ func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
 		setBattleMessage(g, fmt.Sprintf("%s mutters something (unhandled skill %d).", core.TheEnemy(def), int(skill)))
 		return
 	}
-	handler(ctx)
+	cast := handler(ctx)
+	// Stamp the per-battle cast counter on the LIVE caster, re-fetched by slot:
+	// a summon handler like Raise Bones appends to pack.Members (reallocating the
+	// backing array), so ctx.enemy may now dangle — BattleMemberAt re-derives the
+	// live pointer. Centralized HERE so every capped enemy skill is gated by
+	// usableEnemySkills' PerBattleCastLimit check, not just the ones whose handler
+	// remembers to self-count. A nil SkillCastCount map is lazily allocated.
+	// Only charge a cast that actually FIRED — a handler that cancelled (no
+	// reachable target, webbed-out Ingest, no pack to raise) returns false so a
+	// no-op can't burn a limited charge.
+	if cast && core.SkillCastLimitFor(skill) > 0 {
+		if caster := core.BattleMemberAt(g, slot); caster != nil {
+			if caster.SkillCastCount == nil {
+				caster.SkillCastCount = map[core.SkillID]int{}
+			}
+			caster.SkillCastCount[skill]++
+		}
+	}
 }
 
 // --- Win / lose / boilerplate ----------------------------------------------
@@ -1223,11 +1297,26 @@ func winBattle(g *core.GameState, message string) {
 	// 5-kills-to-identify threshold). Reads alongside the XP / loot
 	// awards below — all "the pack is dead, tally the spoils" bookkeeping.
 	core.RecordBattleKills(g)
+	// Snapshot every member's pre-award level/XP for the victory spoils
+	// screen the instant before AwardBattleXP mutates the totals — dead
+	// members included (they render greyed with no gain). The screen
+	// replays the same ProjectXP math AddXP runs to animate each bar
+	// filling from here across whatever thresholds the award crosses.
+	spoils := core.VictorySpoils{Members: make([]core.MemberSpoils, len(g.Party))}
+	for i := range g.Party {
+		spoils.Members[i] = core.MemberSpoils{
+			Slot:      i,
+			BeforeLvl: g.Party[i].Level,
+			BeforeXP:  g.Party[i].XP,
+		}
+	}
 	// XP award fires once, right after the kill is confirmed. Living
 	// members get the full pack value; dead members get nothing
 	// (incentive to keep your tank up). Level-ups queue stat points
-	// onto PendingLevelUps; the level-up modal opens on leaveBattle
-	// when those points are still unspent.
+	// onto PendingLevelUps + skill points onto SkillPoints; allocation
+	// is deferred — the player spends them from the Tome when ready (the
+	// party card's "+" badge flags the unspent points), so nothing
+	// auto-opens here.
 	perMember, leveled := core.AwardBattleXP(g)
 	if perMember > 0 {
 		// The kill line was already logged above; don't re-embed `message`
@@ -1235,6 +1324,13 @@ func winBattle(g *core.GameState, message string) {
 		setBattleMessage(g, fmt.Sprintf("Party gains %d XP each.", perMember))
 		for _, idx := range leveled {
 			setBattleMessage(g, fmt.Sprintf("%s reaches level %d!", g.Party[idx].Name, g.Party[idx].Level))
+		}
+	}
+	for i := range g.Party {
+		spoils.Members[i].AfterLvl = g.Party[i].Level
+		spoils.Members[i].AfterXP = g.Party[i].XP
+		if g.Party[i].HP > 0 {
+			spoils.Members[i].GainedXP = perMember
 		}
 	}
 	// Gold + item drops fire right after XP, off the same defeated pack.
@@ -1247,6 +1343,121 @@ func winBattle(g *core.GameState, message string) {
 	for _, kind := range drops {
 		setBattleMessage(g, fmt.Sprintf("Picked up %s.", core.ItemInfo(kind).Name))
 	}
+	// Arm the spoils screen: stash the payout snapshot, reset its timers,
+	// and ring the victory fanfare. The BattleWon handler (updateVictorySpoils)
+	// takes over from here; render/victory.go draws it. Active=true is what
+	// switches Update off the old timed auto-leave and onto the screen.
+	spoils.Gold = gold
+	spoils.Drops = aggregateDrops(drops)
+	spoils.Active = true
+	g.Battle.Spoils = spoils
+	g.Battle.VictoryElapsed = 0
+	g.Battle.VictoryLevelSfxCursor = 0
+	g.Battle.VictoryLootSfxCursor = 0
+	g.Battle.VictoryTickSfxCursor = 0
+	audio.Play(audio.SoundVictory)
+}
+
+// aggregateDrops folds the flat per-defeat ItemKind list AwardBattleLoot
+// returns into display stacks (kind→count), preserving first-seen order so
+// the spoils screen lists drops the way they fell.
+func aggregateDrops(drops []core.ItemKind) []core.ItemStack {
+	if len(drops) == 0 {
+		return nil
+	}
+	stacks := make([]core.ItemStack, 0, len(drops))
+	at := make(map[core.ItemKind]int, len(drops))
+	for _, k := range drops {
+		if i, ok := at[k]; ok {
+			stacks[i].Count++
+			continue
+		}
+		at[k] = len(stacks)
+		stacks = append(stacks, core.ItemStack{Kind: k, Count: 1})
+	}
+	return stacks
+}
+
+// updateVictorySpoils drives the BattleWon phase. With no spoils captured
+// (the debug skip-win path, which never showed a battle scene) it keeps the
+// original timed auto-leave. Otherwise it advances the spoils-screen clock,
+// rings SoundLevelUp once per threshold as the animating XP bars cross it,
+// and exits on Confirm — fast-forwarding the animation to its finished state
+// on the first press, then tearing the fight down on the next.
+func updateVictorySpoils(g *core.GameState, dt float32) {
+	if !g.Battle.Spoils.Active {
+		g.Battle.Timer -= dt
+		if g.Battle.Timer <= 0 && !battleDeathFadeActive(g) {
+			leaveBattle(g, g.Area.QuietMessage)
+			// Foe-killed dialog triggers fire once the won fight tears down and
+			// control returns to explore (bestiary kills were credited in
+			// winBattle). Starting it here, not mid-victory-dance, so the
+			// conversation overlays explore rather than the battle scene.
+			core.FireFoeKilledTriggers(g)
+		}
+		return
+	}
+	g.Battle.VictoryElapsed += dt
+	// Ring the level-up cue exactly as each animating bar crosses a
+	// threshold (VictoryLevelSfxCursor remembers how many have rung).
+	shownLevels := levelsShownAt(g, core.VictoryFillProgress(g.Battle.VictoryElapsed))
+	for g.Battle.VictoryLevelSfxCursor < shownLevels {
+		audio.Play(audio.SoundLevelUp)
+		g.Battle.VictoryLevelSfxCursor++
+	}
+	// Pop the loot cue as each row cascades in (VictoryLootSfxCursor mirrors
+	// the renderer's per-row reveal).
+	shownLoot := core.VictoryLootRevealed(g.Battle.VictoryElapsed, len(g.Battle.Spoils.Drops))
+	for g.Battle.VictoryLootSfxCursor < shownLoot {
+		audio.Play(audio.SoundItemGet)
+		g.Battle.VictoryLootSfxCursor++
+	}
+	// Subtle count-up blip — one tick each time the total shown XP climbs
+	// another VictoryXPPerTick. Tied to the eased fill, so ticks rush early
+	// and space out as the bars settle; capped to one Play per frame (shared
+	// channel) so a huge haul can't machine-gun.
+	if tickIdx := xpShownAt(g, core.VictoryFillProgress(g.Battle.VictoryElapsed)) / core.VictoryXPPerTick; tickIdx > g.Battle.VictoryTickSfxCursor {
+		audio.Play(audio.SoundXPTick)
+		g.Battle.VictoryTickSfxCursor = tickIdx
+	}
+	if input.ConfirmPressed() {
+		if !core.VictorySpoilsAnimDone(g.Battle.VictoryElapsed) {
+			// Skip: snap to the finished state and mark every cue rung so the
+			// skip doesn't fire a burst of level-up / loot / tick sounds next
+			// frame.
+			g.Battle.VictoryElapsed = core.VictorySpoilsAnimEnd()
+			g.Battle.VictoryLevelSfxCursor = levelsShownAt(g, 1)
+			g.Battle.VictoryLootSfxCursor = len(g.Battle.Spoils.Drops)
+			g.Battle.VictoryTickSfxCursor = xpShownAt(g, 1) / core.VictoryXPPerTick
+			return
+		}
+		leaveBattle(g, g.Area.QuietMessage)
+		core.FireFoeKilledTriggers(g)
+	}
+}
+
+// xpShownAt totals the XP visible across all members at fill fraction p — the
+// count-up tick cadence is keyed off it (one SoundXPTick per VictoryXPPerTick
+// of this total), so the blips track the bars' eased motion.
+func xpShownAt(g *core.GameState, p float32) int {
+	total := 0
+	for _, ms := range g.Battle.Spoils.Members {
+		total += int(ms.AddedAt(p))
+	}
+	return total
+}
+
+// levelsShownAt totals the level-ups visible across all members at fill
+// fraction p (0..1), via the shared MemberSpoils.ProjectAt the bars draw with —
+// the level-up cue counter and the renderer stay in lockstep through it.
+func levelsShownAt(g *core.GameState, p float32) int {
+	total := 0
+	for _, ms := range g.Battle.Spoils.Members {
+		if _, _, gained := ms.ProjectAt(p); gained > 0 {
+			total += gained
+		}
+	}
+	return total
 }
 
 // DebugSkipWin auto-resolves a pack as a win WITHOUT entering the battle
@@ -1272,6 +1483,9 @@ func DebugSkipWin(g *core.GameState, packIndex int) {
 	// leaveBattle's clearBattleResidual drops the pack (Phase == BattleWon) and
 	// resets all battle transients back to the explore-clean state.
 	leaveBattle(g, g.Area.QuietMessage)
+	// Same foe-killed trigger check the fought-win path runs (see Update's
+	// BattleWon case) so Skip Battles behaves identically for triggers.
+	core.FireFoeKilledTriggers(g)
 }
 
 func loseBattle(g *core.GameState, message string) {
@@ -1366,6 +1580,13 @@ func clearBattleResidual(g *core.GameState) {
 	g.Battle.EnemyAttackCursor = -1
 	g.Battle.EnemyPendingSkill = core.SkillNone
 	g.Battle.EnemyAttackMisses = false
+	// Drop the victory spoils snapshot + its animation clocks so the next
+	// fight's screen starts clean (and a fled / lost fight carries none).
+	g.Battle.Spoils = core.VictorySpoils{}
+	g.Battle.VictoryElapsed = 0
+	g.Battle.VictoryLevelSfxCursor = 0
+	g.Battle.VictoryLootSfxCursor = 0
+	g.Battle.VictoryTickSfxCursor = 0
 	resetBattleAction(g)
 }
 
@@ -1435,6 +1656,7 @@ func tickHitTimers(bump, flash, knockback *float32, dt float32) {
 func updateBattleEffects(g *core.GameState, dt float32) {
 	for i := range g.Party {
 		tickHitTimers(&g.Party[i].AttackBump, &g.Party[i].DamageFlash, &g.Party[i].HitKnockback, dt)
+		g.Party[i].DamagePopupTimer = core.ApproachZero(g.Party[i].DamagePopupTimer, dt)
 	}
 	members := core.BattleMembers(g)
 	for i := range members {

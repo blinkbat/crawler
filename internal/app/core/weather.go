@@ -57,7 +57,16 @@ func rollRainKind(rng *rand.Rand) RainKind {
 		}
 		r -= rainKindWeights[k]
 	}
-	return RainNormal
+	// Fall through to the last NON-ZERO-weight bucket: float32 rounding can
+	// leave a top-of-range roll just past the final threshold. Using the last
+	// non-zero weight (rather than a hardcoded last index) means zeroing a
+	// kind's weight — including the last one — never resurrects it here.
+	for k := RainKindCount - 1; k >= 0; k-- {
+		if rainKindWeights[k] > 0 {
+			return RainKind(k)
+		}
+	}
+	return RainLight
 }
 
 // WeatherState is the rain system's runtime state. It lives on GameState
@@ -131,17 +140,37 @@ func AreaIsOutdoor(m AreaDefinition) bool {
 var outdoorVerdictCache struct {
 	name          string
 	width, height int
+	rows          int
+	top, bot      string
 	primed        bool
 	outdoor       bool
 }
 
+// CeilingFingerprint is a cheap discriminator of an area's ceiling layer —
+// row count + first/last row — for the per-area "has a roof?" caches. Keyed
+// on TOP of name+dims, it stops two distinct same-named, same-sized areas
+// with different roofs from sharing a stale verdict (e.g. two still-"untitled"
+// editor maps of the same size). Comparing two short rows is far cheaper than
+// the full AreaIsOutdoor ceiling scan it gates. Shared by this package's
+// outdoorVerdictCache AND render's enclosure/torch caches so they can't drift.
+func CeilingFingerprint(m AreaDefinition) (rows int, top, bot string) {
+	rows = len(m.Ceiling)
+	if rows > 0 {
+		top, bot = m.Ceiling[0], m.Ceiling[rows-1]
+	}
+	return rows, top, bot
+}
+
 func areaIsOutdoorCached(m AreaDefinition) bool {
 	c := &outdoorVerdictCache
-	if c.primed && c.name == m.Name && c.width == m.Width && c.height == m.Height {
+	rows, top, bot := CeilingFingerprint(m)
+	if c.primed && c.name == m.Name && c.width == m.Width && c.height == m.Height &&
+		c.rows == rows && c.top == top && c.bot == bot {
 		return c.outdoor
 	}
 	c.outdoor = AreaIsOutdoor(m)
-	c.name, c.width, c.height, c.primed = m.Name, m.Width, m.Height, true
+	c.name, c.width, c.height = m.Name, m.Width, m.Height
+	c.rows, c.top, c.bot, c.primed = rows, top, bot, true
 	return c.outdoor
 }
 

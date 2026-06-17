@@ -49,6 +49,28 @@ func foePreviewCamera() rl.Camera3D {
 	}
 }
 
+// FoePreviewZoomMin / FoePreviewZoomMax bound the visualizer preview zoom (the
+// editor clamps the wheel-driven factor to this range). 1.0 = the default
+// framing; larger = closer in.
+const (
+	FoePreviewZoomMin = 0.5
+	FoePreviewZoomMax = 4.0
+)
+
+// zoomedPreviewCamera dollies the fixed diorama camera toward its target along
+// the view ray: zoom 1 = the default framing, >1 moves the eye closer (the
+// sprite fills more of the panel), <1 pulls back. Both visualizer previews share
+// it so foe and friend zoom identically.
+func zoomedPreviewCamera(zoom float32) rl.Camera3D {
+	cam := foePreviewCamera()
+	if zoom <= 0 {
+		zoom = 1
+	}
+	dir := rl.Vector3Subtract(cam.Position, cam.Target)
+	cam.Position = rl.Vector3Add(cam.Target, rl.Vector3Scale(dir, 1.0/zoom))
+	return cam
+}
+
 // LiveFoeOverride returns the currently-LOADED visual for kind as an override
 // — code defaults with any maps/sprites/visuals.json already overlaid at load
 // time. The editor seeds its working copy from this so opening a foe shows
@@ -87,12 +109,17 @@ func SetLiveFoeOverride(assets Resources, kind core.EnemyKind, ov core.EnemyVisu
 // same math drawBattlePack uses so the preview is faithful. Safe to call every
 // frame; the off-screen texture is cached and only reallocated when the panel
 // size changes.
-func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov core.EnemyVisualOverride) {
+func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov core.EnemyVisualOverride, zoom float32, showGizmos bool, previewTex rl.Texture2D) {
 	base, ok := enemyVisualFor(assets, kind)
 	if !ok {
 		return
 	}
 	v := applyEnemyVisualOverride(base, ov)
+	// Asset-tab live preview overrides the displayed texture (non-destructive
+	// filter result); zero ID falls back to the kind's real texture.
+	if previewTex.ID != 0 {
+		v.texture = previewTex
+	}
 	w, h := int32(rect.Width), int32(rect.Height)
 	if w <= 0 || h <= 0 {
 		return
@@ -100,7 +127,7 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 	if !ensureFoePreviewRT(w, h) {
 		return
 	}
-	cam := foePreviewCamera()
+	cam := zoomedPreviewCamera(zoom)
 
 	rl.BeginTextureMode(foePreviewRT)
 	rl.ClearBackground(foePreviewBG)
@@ -126,11 +153,20 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 	// pre-depthOffset formation center — nudged + sized by the same fields and
 	// helpers (cameraRelativeOffset, hitGlyphRise, effective*Scale) the live path
 	// uses, so what reads here reads in an encounter.
-	pAnchor := cameraRelativeOffset(cam, foeAnchor, v.particleXOffset, v.particleYOffset, v.particleZOffset)
-	drawAnchorGizmo(pAnchor, 0.16*v.effectiveParticleScale(), rl.NewColor(255, 168, 86, 210))
-	gAnchor := cameraRelativeOffset(cam, foeAnchor, v.glyphXOffset, v.glyphYOffset, 0)
-	gAnchor.Y += hitGlyphRise
-	drawAnchorGizmo(gAnchor, 0.13*v.effectiveGlyphScale(), rl.NewColor(176, 226, 255, 220))
+	// Gizmos are Layout-tab authoring aids; the Asset tab hides them so the bare
+	// sprite (and its baked tint / pixelation) reads clean.
+	if showGizmos {
+		pAnchor := cameraRelativeOffset(cam, foeAnchor, v.particleXOffset, v.particleYOffset, v.particleZOffset)
+		drawAnchorGizmo(pAnchor, 0.16*v.effectiveParticleScale(), rl.NewColor(255, 168, 86, 210))
+		gAnchor := cameraRelativeOffset(cam, foeAnchor, v.glyphXOffset, v.glyphYOffset, 0)
+		gAnchor.Y += hitGlyphRise
+		drawAnchorGizmo(gAnchor, 0.13*v.effectiveGlyphScale(), rl.NewColor(176, 226, 255, 220))
+		// Gold gizmo = floating damage-NUMBER spawn (Num X/Y). +0.6 Y matches the
+		// baked rise drawFloatingDamage adds, so the dot sits where the number does.
+		nAnchor := cameraRelativeOffset(cam, foeAnchor, v.popupXOffset, v.popupYOffset, 0)
+		nAnchor.Y += 0.6
+		drawAnchorGizmo(nAnchor, 0.10, rl.NewColor(255, 232, 120, 220))
+	}
 
 	rl.EndMode3D()
 	rl.EndTextureMode()

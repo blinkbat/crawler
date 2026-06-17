@@ -71,10 +71,10 @@ func drawHitGlyphsModal(s *State, font rl.Font, theme render.Theme) {
 		t := float32(math.Mod(now+float64(i)*hitGlyphStagger, hitGlyphLoopSecs) / hitGlyphLoopSecs)
 		render.EditorDrawHitGlyph(i, cx, cy, t, hitGlyphPreScale)
 
-		lw := rl.MeasureTextEx(font, name, editorFontLabel, 1).X
-		rl.DrawTextEx(font, name, rl.NewVector2(cx-lw/2, cellY+hitGlyphCellH+4), editorFontLabel, 1, theme.TextPrimary)
+		lw := render.MeasureRichText(font, name, editorFontLabel, 1).X
+		render.DrawRichText(font, name, rl.NewVector2(cx-lw/2, cellY+hitGlyphCellH+4), editorFontLabel, 1, theme.TextPrimary)
 	}
 
-	rl.DrawTextEx(font, "Each plays on a loop   ·   Esc / Enter / click   close",
+	render.DrawRichText(font, "Each plays on a loop   ·   Esc / Enter / click   close",
 		rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-24), editorFontHint, 1, theme.TextHint)
 }

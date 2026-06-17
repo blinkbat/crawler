@@ -13,6 +13,13 @@ func validEquipSlot(slot EquipSlotIndex) bool {
 	return slot >= 0 && slot < EquipSlotCount
 }
 
+// validPartyMember reports whether `member` indexes a live party slot. The
+// single bounds predicate the equip path shares so the "is this a real party
+// member" rule lives in one place.
+func validPartyMember(g *GameState, member int) bool {
+	return member >= 0 && member < len(g.Party)
+}
+
 // CanEquipInSlot reports whether `item` fits `slot`. SlotNone items
 // (cheese / jerky) never fit anywhere — they're inventory-only.
 // Cross-slot fit is decided by EquipmentSlotType: a Hand-typed item
@@ -144,19 +151,12 @@ func EffectiveArmor(m PartyMember) int {
 // buff Armor. The separate MDefBonus channel (equip + buff) and Ice Armor
 // add on top. Floor at 0.
 func EffectiveMDef(m PartyMember) int {
-	equipDelta, _, equipMDef := foldEquipment(&m)
-	// Active buffs (Stone Skin) fold their summed flat MDef in; Ice Armor's MDef
-	// rides its own separate IceArmorTurns counter — both add only while their
-	// respective ward stands, so an un-warded member adds nothing.
-	buffStats, _, buffMDef := SumStatusMods(m.Buffs)
-	eff := addStatsFloored(addStatsFloored(m.Stats, equipDelta), buffStats)
-	mdef := MagicDefense(eff) + equipMDef + buffMDef
-	if m.IceArmorTurns > 0 {
-		mdef += IceArmorMDef
-	}
-	if mdef < 0 {
-		mdef = 0
-	}
+	// Delegates to EffectiveDefenses (the combined Armor+MDef walk) so the
+	// WIS-derived + equip + buff + Ice-Armor MDef computation lives in exactly
+	// one place; the discarded armor half is one equip walk this caller didn't
+	// need, but a single source beats a duplicated formula that can silently
+	// drift from EffectiveDefenses.
+	_, mdef := EffectiveDefenses(m)
 	return mdef
 }
 
@@ -190,13 +190,22 @@ func EffectiveDefenses(m PartyMember) (armor, mdef int) {
 // spends always edit the base) while equipment effectively re-renders
 // the stat sheet.
 func EffectiveStats(m PartyMember) Stats {
+	return EffectiveStatsPtr(&m)
+}
+
+// EffectiveStatsPtr is the pointer-taking form of EffectiveStats, for hot-path
+// callers (e.g. actorSpeed in the per-round turn-queue build) that already hold
+// the member by reference and shouldn't pay to copy the whole PartyMember
+// (Equipped array + status counters + Buffs header) just to read its stats.
+// foldEquipment / SumStatusMods only READ m, so this never mutates the member.
+func EffectiveStatsPtr(m *PartyMember) Stats {
 	// Fold every equipped item's per-stat bonus into ONE delta (one Equipped
 	// walk via foldEquipment), then add it on top of the base via addStatsFloored
 	// — the same shared "sum stats, floor each at 0" fold the buff layer below
 	// uses. The floor (mirroring the 0-clamp AdjustStat applies to base edits)
 	// keeps a negative StatBonus (a cursed / debuff item) from driving an
 	// effective stat below zero into MaxHPFor / damage / accuracy math.
-	equipDelta, _, _ := foldEquipment(&m)
+	equipDelta, _, _ := foldEquipment(m)
 	out := addStatsFloored(m.Stats, equipDelta)
 	// Active stat buffs (Bless, War Banner, Smoke Bomb) fold on top of equipment,
 	// on the same per-stat floor-at-0 rule. Their summed deltas re-render the
@@ -246,7 +255,7 @@ func EquipPickerRowsInto(buf []EquipPickerRow, g *GameState, member int, slot Eq
 	if !validEquipSlot(slot) {
 		return buf
 	}
-	if member >= 0 && member < len(g.Party) && g.Party[member].Equipped[slot] != ItemNone {
+	if validPartyMember(g, member) && g.Party[member].Equipped[slot] != ItemNone {
 		buf = append(buf, EquipPickerRow{Unequip: true})
 	}
 	for _, st := range g.Inventory {
@@ -264,7 +273,7 @@ func EquipPickerRowsInto(buf []EquipPickerRow, g *GameState, member int, slot Eq
 // inventory. Centralizes the consume → equip → return-prev sequence the
 // Equipment-tab picker drives.
 func EquipFromInventory(g *GameState, member int, slot EquipSlotIndex, kind ItemKind) bool {
-	if g == nil || member < 0 || member >= len(g.Party) {
+	if g == nil || !validPartyMember(g, member) {
 		return false
 	}
 	if !CanEquipInSlot(kind, slot) {
@@ -306,7 +315,7 @@ func EquipFromInventory(g *GameState, member int, slot EquipSlotIndex, kind Item
 // in it back into the shared inventory. Returns false when the slot was
 // already empty (or the member is out of range).
 func UnequipToInventory(g *GameState, member int, slot EquipSlotIndex) bool {
-	if g == nil || member < 0 || member >= len(g.Party) {
+	if g == nil || !validPartyMember(g, member) {
 		return false
 	}
 	kind := UnequipItem(&g.Party[member], slot)

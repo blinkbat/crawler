@@ -223,19 +223,28 @@ type modalHandler struct {
 }
 
 var modalHandlers = map[modalKind]modalHandler{
-	modalOpen:          {draw: drawOpenModal, update: updateOpenModal},
-	modalSaveAs:        {draw: drawSaveAsModal, update: updateSaveAsModal},
-	modalConfirmDirty:  {draw: drawConfirmDirtyModal, update: updateConfirmDirtyModal},
-	modalPackEdit:      {draw: drawPackEditModal, update: updatePackEditModal},
-	modalChestEdit:     {draw: drawChestEditModal, update: updateChestEditModal},
-	modalSounds:        {draw: drawSoundsModal, update: updateSoundsModal},
-	modalDoorEdit:      {draw: drawDoorEditModal, update: updateDoorEditModal},
-	modalValidate:      {draw: drawValidateModal, update: updateValidateModal},
-	modalEntityList:    {draw: drawEntityListModal, update: updateEntityListModal},
-	modalNew:           {draw: drawNewMapModal, update: updateNewMapModal},
-	modalEscMenu:       {draw: drawEscMenuModal, update: updateEscMenuModal},
-	modalFoeView:       {draw: drawFoeViewModal, update: updateFoeViewModal},
-	modalHitGlyphs:     {draw: drawHitGlyphsModal, update: updateHitGlyphsModal},
+	modalOpen:              {draw: drawOpenModal, update: updateOpenModal},
+	modalSaveAs:            {draw: drawSaveAsModal, update: updateSaveAsModal},
+	modalConfirmDirty:      {draw: drawConfirmDirtyModal, update: updateConfirmDirtyModal},
+	modalPackEdit:          {draw: drawPackEditModal, update: updatePackEditModal},
+	modalChestEdit:         {draw: drawChestEditModal, update: updateChestEditModal},
+	modalSounds:            {draw: drawSoundsModal, update: updateSoundsModal},
+	modalDoorEdit:          {draw: drawDoorEditModal, update: updateDoorEditModal},
+	modalValidate:          {draw: drawValidateModal, update: updateValidateModal},
+	modalEntityList:        {draw: drawEntityListModal, update: updateEntityListModal},
+	modalNew:               {draw: drawNewMapModal, update: updateNewMapModal},
+	modalEscMenu:           {draw: drawEscMenuModal, update: updateEscMenuModal},
+	modalFoeView:           {draw: drawFoeViewModal, update: updateFoeViewModal},
+	modalPartyView:         {draw: drawPartyViewModal, update: updatePartyViewModal},
+	modalHitGlyphs:         {draw: drawHitGlyphsModal, update: updateHitGlyphsModal},
+	modalDialogList:        {draw: drawDialogListModal, update: updateDialogListModal},
+	modalDialogNodes:       {draw: drawDialogNodesModal, update: updateDialogNodesModal},
+	modalDialogNodeEdit:    {draw: drawDialogNodeEditModal, update: updateDialogNodeEditModal},
+	modalDialogChoiceEdit:  {draw: drawDialogChoiceEditModal, update: updateDialogChoiceEditModal},
+	modalDialogActionEdit:  {draw: drawDialogActionEditModal, update: updateDialogActionEditModal},
+	modalDialogCondEdit:    {draw: drawDialogCondEditModal, update: updateDialogCondEditModal},
+	modalDialogTriggerList: {draw: drawDialogTriggerListModal, update: updateDialogTriggerListModal},
+	modalDialogTriggerEdit: {draw: drawDialogTriggerEditModal, update: updateDialogTriggerEditModal},
 }
 
 // init asserts every dispatchable modalKind (modalNone and modalCount
@@ -293,10 +302,13 @@ type doorEditLayout struct {
 func doorEditLayoutFor() doorEditLayout {
 	r := centeredCardRect(doorEditModalW, doorEditModalH)
 	x := r.X + modalContentInset
-	fw := r.Width - 32
-	y := r.Y + 56
-	fieldH := float32(28)
-	rowGap := float32(48)
+	// Field-stack metrics shared with the dialog editors so this modal can't
+	// drift on field height / header inset / row pitch (it used to spell 32 /
+	// 56 / 28 / 48 inline — the 48 had drifted 2px off dialogRowGap).
+	fw := r.Width - 2*modalContentInset
+	y := r.Y + dialogHeaderInset
+	fieldH := dialogFieldH
+	rowGap := dialogRowGap
 	nameField := rl.NewRectangle(x, y, fw, fieldH)
 	y += rowGap
 	mapField := rl.NewRectangle(x, y, fw, fieldH)
@@ -521,8 +533,8 @@ func drawToolbar(s *State, font rl.Font, theme render.Theme) {
 			label += "  [RAMP]"
 		}
 		sz := editorFontLabel
-		m := rl.MeasureTextEx(font, label, sz, 1)
-		rl.DrawTextEx(font, label,
+		m := render.MeasureRichText(font, label, sz, 1)
+		render.DrawRichText(font, label,
 			rl.NewVector2(s.rect.toolbar.Width-m.X-12, s.rect.toolbar.Y+(toolbarH-sz)/2),
 			sz, 1, rl.NewColor(220, 210, 180, 255))
 	}
@@ -553,7 +565,7 @@ func drawToolbarTooltip(s *State, font rl.Font, theme render.Theme) {
 // canvas tile tooltip is the separate drawHoverTooltip.)
 func drawButtonTooltip(font rl.Font, theme render.Theme, text string, mp rl.Vector2) {
 	const pad = float32(6)
-	tw := rl.MeasureTextEx(font, text, editorFontHint, 1).X
+	tw := render.MeasureRichText(font, text, editorFontHint, 1).X
 	w := tw + 2*pad
 	h := editorFontHint + 2*pad
 	x, y := mp.X+14, mp.Y+18
@@ -565,7 +577,7 @@ func drawButtonTooltip(font rl.Font, theme render.Theme, text string, mp rl.Vect
 		y = mp.Y - 6 - h
 	}
 	render.DrawCard(int32(x), int32(y), int32(w), int32(h), theme.SurfacePrimary, theme.BorderSoft, theme.BorderActive)
-	rl.DrawTextEx(font, text, rl.NewVector2(x+pad, y+pad), editorFontHint, 1, theme.TextPrimary)
+	render.DrawRichText(font, text, rl.NewVector2(x+pad, y+pad), editorFontHint, 1, theme.TextPrimary)
 }
 
 // topbarButtonAt returns the index of the menu-bar label under p, or -1.
@@ -631,7 +643,7 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 			dirtyMark = " *"
 		}
 		topbarNameLabel = id + dirtyMark
-		topbarNameMeasure = rl.MeasureTextEx(font, topbarNameLabel, editorFontTopbar, 1)
+		topbarNameMeasure = render.MeasureRichText(font, topbarNameLabel, editorFontTopbar, 1)
 
 		coord := "—"
 		hoverDesc := ""
@@ -641,7 +653,7 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 		}
 		topbarInfoLabel = fmt.Sprintf("cell %s   %s   layer %s   brush %dx%d   zoom %.0f%%   phase %s (T)   undo %d/%d   redo %d",
 			coord, hoverDesc, layerName(s.layer), s.brushSize, s.brushSize, s.zoom*100, core.PhaseName(s.previewPhase), len(s.undo), undoLimit, len(s.redo))
-		topbarInfoMeasure = rl.MeasureTextEx(font, topbarInfoLabel, editorFontLabel, 1)
+		topbarInfoMeasure = render.MeasureRichText(font, topbarInfoLabel, editorFontLabel, 1)
 
 		topbarInfoKeyCache = key
 		topbarInfoReady = true
@@ -688,7 +700,7 @@ func buttonWidth(label string) float32 {
 	// editorFontBody plus padding, floored at 72 so short labels stay
 	// tidy. Deterministic from the string, so a modal's draw and its
 	// click hit-test (both via modalButtonRow) agree without measuring.
-	w := approxTextWidth(label, editorFontBody) + 28
+	w := approxTextWidth(label, editorFontBody) + buttonLabelPadX
 	if w < 72 {
 		w = 72
 	}
@@ -705,6 +717,7 @@ const (
 	modalBottomInset  = float32(14)  // gap from the card's bottom edge to the button block
 	tightBtnGap       = float32(6)   // gap for dense strips: the topbar/toolbar, the wrapped add grid, equal-width rows
 	modalWideBtnW     = float32(110) // width of the Delete / Close affordance shared by the door + custom-enemy modals
+	buttonLabelPadX   = float32(28)  // horizontal padding added around a measured label to size an auto-width button (buttonWidth + context menu)
 )
 
 // modalContentWidth is the usable inner width of a modal card.
@@ -919,12 +932,12 @@ func entityRowAt(lay entityModalLayout, p rl.Vector2) int {
 // indicators.
 func drawEntityListWindow(font rl.Font, theme render.Theme, lay entityModalLayout, count, cursor int, emptyText string, rowText func(int) string) {
 	if count == 0 {
-		rl.DrawTextEx(font, emptyText, rl.NewVector2(lay.card.X+modalContentInset, lay.listTop), editorFontLabel, 1, theme.TextHint)
+		render.DrawRichText(font, emptyText, rl.NewVector2(lay.card.X+modalContentInset, lay.listTop), editorFontLabel, 1, theme.TextHint)
 		return
 	}
 	y := lay.listTop
 	if lay.topRow > 0 {
-		rl.DrawTextEx(font, fmt.Sprintf("▲ %d more", lay.topRow), rl.NewVector2(lay.card.X+entityListTextInset, y-16), editorFontHint, 1, theme.TextHint)
+		render.DrawRichText(font, fmt.Sprintf("▲ %d more", lay.topRow), rl.NewVector2(lay.card.X+entityListTextInset, y-16), editorFontHint, 1, theme.TextHint)
 	}
 	for i := lay.topRow; i < lay.end; i++ {
 		text := rowText(i)
@@ -937,7 +950,7 @@ func drawEntityListWindow(font rl.Font, theme render.Theme, lay entityModalLayou
 		y += lay.rowH
 	}
 	if lay.end < count {
-		rl.DrawTextEx(font, fmt.Sprintf("▼ %d more", count-lay.end), rl.NewVector2(lay.card.X+entityListTextInset, y), editorFontHint, 1, theme.TextHint)
+		render.DrawRichText(font, fmt.Sprintf("▼ %d more", count-lay.end), rl.NewVector2(lay.card.X+entityListTextInset, y), editorFontHint, 1, theme.TextHint)
 	}
 }
 
@@ -966,8 +979,8 @@ func drawButton(font rl.Font, r rl.Rectangle, label string, active bool) {
 	if r.Width >= 44 && r.Height >= 24 {
 		rl.DrawCircleV(rl.NewVector2(r.X+r.Width-8, r.Y+8), 1.5, render.FadeColor(editorBorderActive, 0.55))
 	}
-	measure := rl.MeasureTextEx(font, label, editorFontBody, 1)
-	rl.DrawTextEx(font, label,
+	measure := render.MeasureRichText(font, label, editorFontBody, 1)
+	render.DrawRichText(font, label,
 		rl.NewVector2(r.X+(r.Width-measure.X)/2, r.Y+(r.Height-measure.Y)/2),
 		editorFontBody, 1, text)
 }
@@ -978,8 +991,8 @@ func drawButton(font rl.Font, r rl.Rectangle, label string, active bool) {
 func drawButtonDisabled(font rl.Font, r rl.Rectangle, label string) {
 	rl.DrawRectangleRec(r, render.FadeColor(bgButton, 0.45))
 	rl.DrawRectangleLinesEx(r, 1, render.FadeColor(editorBorderMid, 0.5))
-	measure := rl.MeasureTextEx(font, label, editorFontBody, 1)
-	rl.DrawTextEx(font, label,
+	measure := render.MeasureRichText(font, label, editorFontBody, 1)
+	render.DrawRichText(font, label,
 		rl.NewVector2(r.X+(r.Width-measure.X)/2, r.Y+(r.Height-measure.Y)/2),
 		editorFontBody, 1, render.FadeColor(textBright, 0.38))
 }
@@ -1052,17 +1065,6 @@ func drawDoorLinks(s *State, cell float32) {
 			rl.DrawCircleLines(int32(cx), int32(cy), cell*0.42, doorLinkExternalColor)
 		}
 	}
-}
-
-// clampF clamps a float to [lo, hi].
-func clampF(v, lo, hi float32) float32 {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
 }
 
 // minimapRect computes the on-screen rectangle of the overview minimap — the
@@ -1138,14 +1140,17 @@ func drawMinimap(s *State) {
 	for _, d := range s.area.DoorSpawns {
 		dot(d.TileX, d.TileZ, render.MarkerDoor)
 	}
+	for _, c := range s.area.CrystalSpawns {
+		dot(c.TileX, c.TileZ, render.MarkerCrystal)
+	}
 	dot(s.area.StartTileX, s.area.StartTileZ, render.MarkerStart)
 
 	// Viewport frame — the slice of the map currently visible in the grid pane.
 	w, h := float32(s.area.Width), float32(s.area.Height)
-	vx0 := clampF((s.rect.grid.X-s.rect.gridX)/s.rect.cellPx, 0, w)
-	vx1 := clampF((s.rect.grid.X+s.rect.grid.Width-s.rect.gridX)/s.rect.cellPx, 0, w)
-	vz0 := clampF((s.rect.grid.Y-s.rect.gridY)/s.rect.cellPx, 0, h)
-	vz1 := clampF((s.rect.grid.Y+s.rect.grid.Height-s.rect.gridY)/s.rect.cellPx, 0, h)
+	vx0 := core.Clamp((s.rect.grid.X-s.rect.gridX)/s.rect.cellPx, 0, w)
+	vx1 := core.Clamp((s.rect.grid.X+s.rect.grid.Width-s.rect.gridX)/s.rect.cellPx, 0, w)
+	vz0 := core.Clamp((s.rect.grid.Y-s.rect.gridY)/s.rect.cellPx, 0, h)
+	vz1 := core.Clamp((s.rect.grid.Y+s.rect.grid.Height-s.rect.gridY)/s.rect.cellPx, 0, h)
 	rl.DrawRectangleLinesEx(
 		rl.NewRectangle(mr.X+vx0*scale, mr.Y+vz0*scale, (vx1-vx0)*scale, (vz1-vz0)*scale),
 		1, rl.NewColor(255, 240, 180, 230))
@@ -1472,7 +1477,7 @@ func drawPalette(s *State, font rl.Font, theme render.Theme) {
 
 	y := s.rect.palette.Y + headerReserve + float32(len(palette))*paletteRowStride + 12 - s.paletteScroll[s.layer]
 	for _, h := range paletteHints {
-		rl.DrawTextEx(font, h, rl.NewVector2(s.rect.palette.X+12, y), editorFontAccent, 1, theme.TextHint)
+		render.DrawRichText(font, h, rl.NewVector2(s.rect.palette.X+12, y), editorFontAccent, 1, theme.TextHint)
 		y += 16
 	}
 }
@@ -1510,7 +1515,7 @@ func drawBrushSwatchRow(font rl.Font, r rl.Rectangle, label string, layer Layer,
 	if sentinel {
 		nameCol = rl.NewColor(190, 200, 220, 255)
 	}
-	rl.DrawTextEx(font, label,
+	render.DrawRichText(font, label,
 		rl.NewVector2(r.X+34, r.Y+(r.Height-labelSize)/2),
 		labelSize, 1, nameCol)
 }
@@ -1598,6 +1603,34 @@ type metaRect struct {
 	reachLabel, reachArea rl.Rectangle
 }
 
+// Metadata-sidebar row metrics. The panel stacks labeled controls at a fixed
+// rhythm; naming the strides (was bare 18 / 22 / 42 / 38 / 30 repeated down
+// metadataRects) keeps a "labels too cramped" retune to one edit.
+const (
+	metaLabelH     = float32(18) // field-caption height
+	metaLabelGap   = float32(22) // caption row → the field/control it labels
+	metaRowGap     = float32(42) // a labeled block → the next caption
+	metaStepperGap = float32(38) // between the stacked width / height steppers
+	metaFieldH     = float32(30) // text-field height (name / quiet / path)
+)
+
+// Per-cell zoom thresholds (pixels) below which a piece of grid chrome turns
+// off because it would no longer fit / would read as noise. Named so the three
+// don't drift into an unexplained 14/18/12 spread.
+const (
+	charOverlayMinCell    = float32(14) // active-layer per-tile glyph overlay
+	axisTickMinCell       = float32(18) // top/left axis tick-number labels
+	elevationDigitMinCell = float32(12) // the level digit in the elevation slice
+)
+
+// Shared entity-marker geometry fractions (of the cell size). The drag-ghost
+// outline reads the SAME fraction as the live marker so a relocated entity's
+// preview ring can't drift from the marker it stands in for.
+const (
+	packMarkerRadiusFrac  = float32(0.32) // pack circle radius — live marker + drag ghost
+	startMarkerRadiusFrac = float32(0.36) // player-start circle radius — live marker + drag ghost
+)
+
 func metadataRects(s *State) metaRect {
 	x := s.rect.metadata.X + 14
 	w := s.rect.metadata.Width - 28
@@ -1605,27 +1638,27 @@ func metadataRects(s *State) metaRect {
 
 	r := metaRect{}
 
-	r.nameLabel = rl.NewRectangle(x, y, w, 18)
-	y += 22
-	r.nameField = rl.NewRectangle(x, y, w, 30)
-	y += 42
+	r.nameLabel = rl.NewRectangle(x, y, w, metaLabelH)
+	y += metaLabelGap
+	r.nameField = rl.NewRectangle(x, y, w, metaFieldH)
+	y += metaRowGap
 
-	r.matLabel = rl.NewRectangle(x, y, w, 18)
-	y += 22
+	r.matLabel = rl.NewRectangle(x, y, w, metaLabelH)
+	y += metaLabelGap
 	r.matButtons = equalButtonRow(x, y, w, modalBtnH, len(core.MaterialOptions))
-	y += 42
+	y += metaRowGap
 
-	r.quietLabel = rl.NewRectangle(x, y, w, 18)
-	y += 22
-	r.quietField = rl.NewRectangle(x, y, w, 30)
-	y += 42
+	r.quietLabel = rl.NewRectangle(x, y, w, metaLabelH)
+	y += metaLabelGap
+	r.quietField = rl.NewRectangle(x, y, w, metaFieldH)
+	y += metaRowGap
 
-	r.dimsLabel = rl.NewRectangle(x, y, w, 18)
-	y += 22
+	r.dimsLabel = rl.NewRectangle(x, y, w, metaLabelH)
+	y += metaLabelGap
 	r.widthValue, r.widthMinus, r.widthPlus = stepperRow(x, y, 96, 6)
-	y += 38
+	y += metaStepperGap
 	r.heightValue, r.heightMinus, r.heightPlus = stepperRow(x, y, 96, 6)
-	y += 42
+	y += metaRowGap
 
 	// On-disk path readout. Player start tile + facing used to live
 	// here, but those are properties of the PlayerStart entity instance
@@ -1633,13 +1666,13 @@ func metadataRects(s *State) metaRect {
 	// settings — they're now edited from the right-click context menu
 	// on the entities layer. Path stays in the sidebar because the
 	// on-disk path IS area-wide.
-	r.pathLabel = rl.NewRectangle(x, y, w, 18)
-	r.pathValue = rl.NewRectangle(x, y+22, w, 30)
+	r.pathLabel = rl.NewRectangle(x, y, w, metaLabelH)
+	r.pathValue = rl.NewRectangle(x, y+metaLabelGap, w, metaFieldH)
 	// Reachability badge. Label sits a row below the path readout; the
 	// clickable badge region extends past the label to cover the
 	// "OK" / warning panel that follows underneath.
 	reachY := y + 64
-	r.reachLabel = rl.NewRectangle(x, reachY, w, 18)
+	r.reachLabel = rl.NewRectangle(x, reachY, w, metaLabelH)
 	r.reachArea = rl.NewRectangle(x, reachY, w, 140)
 	return r
 }
@@ -1845,7 +1878,7 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 		badgeValue := rl.NewRectangle(mr.reachArea.X, mr.reachArea.Y+22, mr.reachArea.Width, 30)
 		rl.DrawRectangleRec(badgeValue, rl.NewColor(14, 22, 18, 255))
 		rl.DrawRectangleLinesEx(badgeValue, 1, editorReachOK)
-		rl.DrawTextEx(font, "OK", rl.NewVector2(badgeValue.X+8, badgeValue.Y+(badgeValue.Height-16)/2), editorFontBody, 1, rl.NewColor(150, 220, 180, 255))
+		render.DrawRichText(font, "OK", rl.NewVector2(badgeValue.X+8, badgeValue.Y+(badgeValue.Height-16)/2), editorFontBody, 1, rl.NewColor(150, 220, 180, 255))
 	} else {
 		// Stack one row per warning so the author can read them all
 		// without hover/click. Red panel + outline so the badge pops
@@ -1859,20 +1892,20 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 		rl.DrawRectangleRec(box, rl.NewColor(38, 16, 18, 255))
 		rl.DrawRectangleLinesEx(box, 1, editorReachWarn)
 		for i, w := range rows {
-			rl.DrawTextEx(font, "! "+w,
+			render.DrawRichText(font, "! "+w,
 				rl.NewVector2(box.X+6, box.Y+5+float32(i)*22),
 				editorFontLabel, 1, rl.NewColor(240, 180, 180, 255))
 		}
 		if len(warnings) > len(rows) {
-			rl.DrawTextEx(font, fmt.Sprintf("(+%d more)", len(warnings)-len(rows)),
+			render.DrawRichText(font, fmt.Sprintf("(+%d more)", len(warnings)-len(rows)),
 				rl.NewVector2(box.X+6, box.Y+h-18),
-				13, 1, rl.NewColor(240, 180, 180, 220))
+				editorFontAccent, 1, rl.NewColor(240, 180, 180, 220))
 		}
 	}
 }
 
 func drawLabel(font rl.Font, text string, r rl.Rectangle) {
-	rl.DrawTextEx(font, text, rl.NewVector2(r.X, r.Y), editorFontLabel, 1, editorLabelColor)
+	render.DrawRichText(font, text, rl.NewVector2(r.X, r.Y), editorFontLabel, 1, editorLabelColor)
 }
 
 func drawTextField(font rl.Font, r rl.Rectangle, text string, focused bool) {
@@ -1891,13 +1924,13 @@ func drawTextField(font rl.Font, r rl.Rectangle, text string, focused bool) {
 			display += " "
 		}
 	}
-	rl.DrawTextEx(font, display, rl.NewVector2(r.X+8, r.Y+(r.Height-16)/2), editorFontBody, 1, textEntry)
+	render.DrawRichText(font, display, rl.NewVector2(r.X+8, r.Y+(r.Height-16)/2), editorFontBody, 1, textEntry)
 }
 
 func drawReadonlyValue(font rl.Font, r rl.Rectangle, text string) {
 	rl.DrawRectangleRec(r, bgFieldInset)
 	rl.DrawRectangleLinesEx(r, 1, editorBorderInactive)
-	rl.DrawTextEx(font, text, rl.NewVector2(r.X+8, r.Y+(r.Height-16)/2), editorFontBody, 1, textReadonly)
+	render.DrawRichText(font, text, rl.NewVector2(r.X+8, r.Y+(r.Height-16)/2), editorFontBody, 1, textReadonly)
 }
 
 // --- Grid ------------------------------------------------------------------
@@ -1958,7 +1991,6 @@ func drawGrid(s *State, font rl.Font) {
 	// Off by default; ALT-tap toggles it (see showTileGlyphs). Empty
 	// sentinels produce no glyph. Threshold matches the axis-tick label
 	// threshold so the chrome turns on together.
-	const charOverlayMinCell = float32(14)
 	showCharOverlay := cell >= charOverlayMinCell && s.showTileGlyphs && !s.layerHidden[s.layer]
 	charFontSize := cell * 0.55
 	charShadow := glyphShadow
@@ -2048,29 +2080,29 @@ func drawGrid(s *State, font rl.Font) {
 	// Axis tick labels every 5 cells. Only at zoom levels where cells are
 	// big enough to comfortably fit a tick digit — at very small zooms the
 	// labels would overlap and read as visual noise.
-	if cell >= 18 {
+	if cell >= axisTickMinCell {
 		tickCol := rl.NewColor(220, 224, 232, 180)
 		// Top axis: column numbers.
 		for x := (xMin / 5) * 5; x < lineXMax; x += 5 {
 			label := tickLabel(x)
-			m := rl.MeasureTextEx(font, label, editorFontTick, 1)
+			m := render.MeasureRichText(font, label, editorFontTick, 1)
 			px := s.rect.gridX + float32(x)*cell - m.X/2
 			py := s.rect.gridY - m.Y - 2
 			if py < s.rect.grid.Y+2 {
 				continue
 			}
-			rl.DrawTextEx(font, label, rl.NewVector2(px, py), editorFontTick, 1, tickCol)
+			render.DrawRichText(font, label, rl.NewVector2(px, py), editorFontTick, 1, tickCol)
 		}
 		// Left axis: row numbers.
 		for z := (zMin / 5) * 5; z < lineZMax; z += 5 {
 			label := tickLabel(z)
-			m := rl.MeasureTextEx(font, label, editorFontTick, 1)
+			m := render.MeasureRichText(font, label, editorFontTick, 1)
 			px := s.rect.gridX - m.X - 4
 			py := s.rect.gridY + float32(z)*cell - m.Y/2
 			if px < s.rect.grid.X+2 {
 				continue
 			}
-			rl.DrawTextEx(font, label, rl.NewVector2(px, py), editorFontTick, 1, tickCol)
+			render.DrawRichText(font, label, rl.NewVector2(px, py), editorFontTick, 1, tickCol)
 		}
 	}
 
@@ -2094,24 +2126,24 @@ func drawGrid(s *State, font rl.Font) {
 		leaderSlot := core.PackSpawnLeaderSlot(s.area, sp)
 		leader := packSpawnLeaderKind(s.area, sp)
 		col := fadeAlpha(packMarkerColor(leader), entityAlpha)
-		rl.DrawCircle(int32(cx), int32(cy), cell*0.32, col)
-		rl.DrawCircleLines(int32(cx), int32(cy), cell*0.32, fadeAlpha(entityMarkerOutline, entityAlpha))
+		rl.DrawCircle(int32(cx), int32(cy), cell*packMarkerRadiusFrac, col)
+		rl.DrawCircleLines(int32(cx), int32(cy), cell*packMarkerRadiusFrac, fadeAlpha(entityMarkerOutline, entityAlpha))
 		label := packMarkerInitial(core.PackMemberDisplayName(s.area, sp, leaderSlot))
-		measure := rl.MeasureTextEx(font, label, cell*0.42, 1)
-		rl.DrawTextEx(font, label,
+		measure := render.MeasureRichText(font, label, cell*0.42, 1)
+		render.DrawRichText(font, label,
 			rl.NewVector2(cx-measure.X/2, cy-measure.Y/2),
 			cell*0.42, 1, fadeAlpha(entityMarkerOutline, entityAlpha))
 		if len(sp.Members) > 1 {
 			badge := fmt.Sprintf("x%d", len(sp.Members))
 			bsize := cell * 0.28
-			bm := rl.MeasureTextEx(font, badge, bsize, 1)
+			bm := render.MeasureRichText(font, badge, bsize, 1)
 			bx := cx + cell*0.18
 			by := cy - cell*0.42
 			rl.DrawRectangleRounded(
 				rl.NewRectangle(bx-2, by-1, bm.X+6, bm.Y+2),
 				0.4, 4,
 				fadeAlpha(rl.NewColor(20, 20, 24, 230), entityAlpha))
-			rl.DrawTextEx(font, badge,
+			render.DrawRichText(font, badge,
 				rl.NewVector2(bx+1, by),
 				bsize, 1, fadeAlpha(rl.NewColor(240, 240, 240, 255), entityAlpha))
 		}
@@ -2160,12 +2192,25 @@ func drawGrid(s *State, font rl.Font) {
 		rl.DrawLineEx(rl.NewVector2(cx, cy), rl.NewVector2(tipX, tipY), 2, fadeAlpha(rl.NewColor(40, 24, 12, 255), entityAlpha))
 	}
 
+	// Crystal markers — a small diamond (a 45°-rotated square) in the cyan
+	// crystal tint, a silhouette distinct from chest squares, pack circles,
+	// and the tall door rectangles.
+	for _, c := range s.area.CrystalSpawns {
+		if !showEntities || !inCullWindow(c.TileX, c.TileZ) {
+			continue
+		}
+		cx, cy := s.rect.tileCenter(c.TileX, c.TileZ)
+		rad := cell * 0.30
+		rl.DrawPoly(rl.NewVector2(cx, cy), 4, rad, 45, fadeAlpha(render.MarkerCrystal, entityAlpha))
+		rl.DrawPolyLinesEx(rl.NewVector2(cx, cy), 4, rad, 45, 1, fadeAlpha(entityMarkerOutline, entityAlpha))
+	}
+
 	// Player start marker (part of the Entities layer, so it hides with it).
 	if showEntities {
 		sx, sy := s.rect.tileCenter(s.area.StartTileX, s.area.StartTileZ)
 		startCol := fadeAlpha(render.MarkerStart, entityAlpha)
-		rl.DrawCircle(int32(sx), int32(sy), cell*0.36, startCol)
-		rl.DrawCircleLines(int32(sx), int32(sy), cell*0.36, fadeAlpha(entityMarkerOutline, entityAlpha))
+		rl.DrawCircle(int32(sx), int32(sy), cell*startMarkerRadiusFrac, startCol)
+		rl.DrawCircleLines(int32(sx), int32(sy), cell*startMarkerRadiusFrac, fadeAlpha(entityMarkerOutline, entityAlpha))
 		dx, dz := core.FacingVector(s.area.StartFacing)
 		tx := sx + float32(dx)*cell*0.42
 		ty := sy + float32(dz)*cell*0.42
@@ -2269,11 +2314,11 @@ func drawGrid(s *State, font rl.Font) {
 	if s.drag == dragStart && s.hoverX >= 0 {
 		gx, gy := s.rect.tileCenter(s.hoverX, s.hoverZ)
 		ghost := withAlpha(render.MarkerStart, 220)
-		rl.DrawCircleLines(int32(gx), int32(gy), cell*0.36, ghost)
+		rl.DrawCircleLines(int32(gx), int32(gy), cell*startMarkerRadiusFrac, ghost)
 	}
 	if s.drag == dragPack && s.hoverX >= 0 && s.dragPackIdx >= 0 && s.dragPackIdx < len(s.area.PackSpawns) {
 		gx, gy := s.rect.tileCenter(s.hoverX, s.hoverZ)
-		rl.DrawCircleLines(int32(gx), int32(gy), cell*0.32, selectionOutline)
+		rl.DrawCircleLines(int32(gx), int32(gy), cell*packMarkerRadiusFrac, selectionOutline)
 	}
 	// Chest / door drag-move ghosts: a square outline at the hovered
 	// destination tile so the relocation reads before release (mirrors the
@@ -2316,7 +2361,7 @@ func drawHoverTooltip(s *State, font rl.Font) {
 		tooltipLines = tooltipLinesFor(s, x, z)
 		tooltipWidth = 0
 		for _, l := range tooltipLines {
-			m := rl.MeasureTextEx(font, l, 11, 1)
+			m := render.MeasureRichText(font, l, editorFontTiny, 1)
 			if m.X > tooltipWidth {
 				tooltipWidth = m.X
 			}
@@ -2350,9 +2395,9 @@ func drawHoverTooltip(s *State, font rl.Font) {
 		if i == 0 {
 			col = tooltipHeading
 		}
-		rl.DrawTextEx(font, l,
+		render.DrawRichText(font, l,
 			rl.NewVector2(r.X+padding, r.Y+padding+float32(i)*lineH),
-			11, 1, col)
+			editorFontTiny, 1, col)
 	}
 }
 
@@ -2427,6 +2472,9 @@ func tooltipLinesFor(s *State, x, z int) []string {
 		}
 		out = append(out, "  -> "+tgt+"/"+d.TargetDoor)
 		out = append(out, "  facing "+face)
+	}
+	if core.CrystalSpawnIndexAt(s.area.CrystalSpawns, x, z) >= 0 {
+		out = append(out, "Crystal")
 	}
 	// If nothing more than the coord line is present, skip the tooltip —
 	// noise on blank floor.
@@ -2597,7 +2645,7 @@ func drawElevationSlice(s *State, font rl.Font, r rl.Rectangle, cell float32, x,
 		drawTileGlyph(font, r, cell, cell*0.62, core.RampCharForFacing(facing), rl.NewColor(150, 240, 165, 245), shadow)
 		return
 	}
-	if cell >= 12 {
+	if cell >= elevationDigitMinCell {
 		drawTileGlyph(font, r, cell, cell*0.5, core.ElevationChar(lvl), rl.NewColor(245, 245, 250, 230), shadow)
 	}
 }
@@ -2675,15 +2723,44 @@ func currentLayerGlyph(s *State, x, z int) (byte, bool) {
 	return 0, false
 }
 
+// tileGlyphMeasure memoizes each single-char tile glyph's measured size at the
+// current cell font size. The grid can paint THOUSANDS of glyph tiles per
+// frame (zoomed-out map + the glyph overlay), so measuring each via a cgo
+// rl.MeasureTextEx was the editor's single biggest text cost. The glyph set is
+// the tiny ASCII tile-char registry, so caching by (char, fontSize) collapses
+// it to ~one measure per distinct char and holds across frames at a fixed
+// zoom. All cells in a frame share one fontSize, so a size change invalidates.
+var tileGlyphMeasure struct {
+	fontSize float32
+	w, h     [256]float32
+	done     [256]bool
+}
+
+func tileGlyphSize(font rl.Font, ch byte, fontSize float32) (w, h float32) {
+	c := &tileGlyphMeasure
+	if c.fontSize != fontSize {
+		c.fontSize = fontSize
+		c.done = [256]bool{}
+	}
+	if !c.done[ch] {
+		m := rl.MeasureTextEx(font, glyphStr[ch], fontSize, 1)
+		c.w[ch], c.h[ch], c.done[ch] = m.X, m.Y, true
+	}
+	return c.w[ch], c.h[ch]
+}
+
 // drawTileGlyph paints a single-character glyph centered in `r` with a
 // 1px-offset drop shadow for legibility against any cell color. Font
 // size is sized to the cell so the glyph scales with zoom; shadow stays
-// 1px so it doesn't blur out at small zooms.
+// 1px so it doesn't blur out at small zooms. Tile glyphs are single ASCII
+// chars from the layer registry (never a procedural symbol), so this draws
+// via rl.DrawTextEx directly and measures through the per-frame size cache —
+// no rich-text scan / uncached cgo measure per tile.
 func drawTileGlyph(font rl.Font, r rl.Rectangle, cell, fontSize float32, ch byte, fg, shadow rl.Color) {
 	text := glyphStr[ch]
-	m := rl.MeasureTextEx(font, text, fontSize, 1)
-	px := r.X + (cell-m.X)/2
-	py := r.Y + (cell-m.Y)/2
+	mx, my := tileGlyphSize(font, ch, fontSize)
+	px := r.X + (cell-mx)/2
+	py := r.Y + (cell-my)/2
 	rl.DrawTextEx(font, text, rl.NewVector2(px+1, py+1), fontSize, 1, shadow)
 	rl.DrawTextEx(font, text, rl.NewVector2(px, py), fontSize, 1, fg)
 }
@@ -2724,7 +2801,7 @@ func drawStatus(s *State, font rl.Font, theme render.Theme) {
 	const pad = 12
 	maxW := float32(0)
 	for _, e := range s.statusLog {
-		m := rl.MeasureTextEx(font, e.msg, editorFontLabel, 1)
+		m := render.MeasureRichText(font, e.msg, editorFontLabel, 1)
 		if m.X > maxW {
 			maxW = m.X
 		}
@@ -2837,8 +2914,8 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 	r := drawModalHeader(font, theme, openModalW, openModalH, header, theme.BorderStrong)
 
 	if len(s.modalPaths) == 0 {
-		rl.DrawTextEx(font, "(no .map files in maps/)", rl.NewVector2(r.X+modalContentInset, r.Y+50), editorFontLabel, 1, theme.TextMuted)
-		rl.DrawTextEx(font, "Esc / click outside to close", rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
+		render.DrawRichText(font, "(no .map files in maps/)", rl.NewVector2(r.X+modalContentInset, r.Y+50), editorFontLabel, 1, theme.TextMuted)
+		render.DrawRichText(font, "Esc / click outside to close", rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
 		return
 	}
 
@@ -2856,8 +2933,8 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 	// Scroll hint when the list extends past the visible window.
 	if topRow > 0 || end < len(s.modalPaths) {
 		more := fmt.Sprintf("(%d / %d)", s.modalCursor+1, len(s.modalPaths))
-		measure := rl.MeasureTextEx(font, more, editorFontHint, 1)
-		rl.DrawTextEx(font, more,
+		measure := render.MeasureRichText(font, more, editorFontHint, 1)
+		render.DrawRichText(font, more,
 			rl.NewVector2(r.X+r.Width-measure.X-16, r.Y+30),
 			editorFontHint, 1, theme.TextHint)
 	}
@@ -2871,7 +2948,7 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 	}
 	if s.modalConfirmDelete {
 		path := s.modalPaths[s.modalCursor]
-		rl.DrawTextEx(font, fmt.Sprintf("Delete %s? This is permanent.", core.MapIDFromPath(path)),
+		render.DrawRichText(font, fmt.Sprintf("Delete %s? This is permanent.", core.MapIDFromPath(path)),
 			rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-86), editorFontLabel, 1, theme.BorderDanger)
 		labels := cmdLabels(openDeleteConfirmCmds(s))
 		drawModalButtons(font, modalButtonRow(r, labels), labels)
@@ -2922,14 +2999,14 @@ func drawSaveAsModal(s *State, font rl.Font, theme render.Theme) {
 	r := drawModalHeader(font, theme, saveAsModalW, saveAsModalH, title, accent)
 
 	if s.awaitingOverwrite {
-		rl.DrawTextEx(font, fmt.Sprintf("Overwrite %s?", core.MapPath(s.modalFilename)),
+		render.DrawRichText(font, fmt.Sprintf("Overwrite %s?", core.MapPath(s.modalFilename)),
 			rl.NewVector2(r.X+modalContentInset, r.Y+44), editorFontLabel, 1, theme.TextPrimary)
 		labels := cmdLabels(saveAsOverwriteCmds(s))
 		drawModalButtons(font, modalButtonStack(r, labels), labels)
 		return
 	}
 
-	rl.DrawTextEx(font, "Filename (without .map):", rl.NewVector2(r.X+modalContentInset, r.Y+40), editorFontHint, 1, theme.TextLabel)
+	render.DrawRichText(font, "Filename (without .map):", rl.NewVector2(r.X+modalContentInset, r.Y+40), editorFontHint, 1, theme.TextLabel)
 
 	field := saveAsFieldRect(s)
 	drawTextField(font, field, s.modalFilename, true)
@@ -2939,13 +3016,13 @@ func drawSaveAsModal(s *State, font rl.Font, theme render.Theme) {
 	// flag any divergence between what they typed and what will land.
 	sanitized := sanitizeFilename(s.modalFilename)
 	previewPath := core.MapPath(sanitized)
-	rl.DrawTextEx(font, fmt.Sprintf("Will save to: %s", previewPath),
+	render.DrawRichText(font, fmt.Sprintf("Will save to: %s", previewPath),
 		rl.NewVector2(r.X+modalContentInset, r.Y+96), editorFontHint, 1, theme.TextMuted)
 	if sanitized != strings.TrimSuffix(strings.TrimSuffix(s.modalFilename, ".map"), ".MAP") {
-		rl.DrawTextEx(font, "(Punctuation and spaces are stripped)",
+		render.DrawRichText(font, "(Punctuation and spaces are stripped)",
 			rl.NewVector2(r.X+modalContentInset, r.Y+112), editorFontTiny, 1, theme.BorderDanger)
 	}
-	rl.DrawTextEx(font, "Enter save   Esc cancel",
+	render.DrawRichText(font, "Enter save   Esc cancel",
 		rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
 }
 
@@ -3022,18 +3099,15 @@ func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawModalHeaderAt(font, theme, l.card, header, theme.BorderActive)
 
 	// Name field.
-	drawLabel(font, "Name (unique on this map)",
-		rl.NewRectangle(l.nameField.X, l.nameField.Y-16, l.nameField.Width, 14))
+	drawLabel(font, "Name (unique on this map)", labelAbove(l.nameField))
 	drawTextField(font, l.nameField, door.Name, s.focus == focusDoorName)
 
 	// Target map field.
-	drawLabel(font, "Target map (bare id, or 'self')",
-		rl.NewRectangle(l.mapField.X, l.mapField.Y-16, l.mapField.Width, 14))
+	drawLabel(font, "Target map (bare id, or 'self')", labelAbove(l.mapField))
 	drawTextField(font, l.mapField, door.TargetMap, s.focus == focusDoorTargetMap)
 
 	// Target door field.
-	drawLabel(font, "Target door (Name on destination map)",
-		rl.NewRectangle(l.doorField.X, l.doorField.Y-16, l.doorField.Width, 14))
+	drawLabel(font, "Target door (Name on destination map)", labelAbove(l.doorField))
 	drawTextField(font, l.doorField, door.TargetDoor, s.focus == focusDoorTargetDoor)
 
 	// Facing row.
@@ -3060,9 +3134,9 @@ func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 
 	// Footer hint string mirrors the other modals' tiny hint row.
 	hint := "Tab cycle fields   N/E/S/W facing   1/2/3 style   X delete   Esc done"
-	rl.DrawTextEx(font, hint,
+	render.DrawRichText(font, hint,
 		rl.NewVector2(l.card.X+modalContentInset, l.card.Y+l.card.Height-72),
-		11, 1, theme.TextHint)
+		editorFontTiny, 1, theme.TextHint)
 }
 
 // drawValidateModal renders the full reachability + cross-map door
@@ -3081,17 +3155,17 @@ func drawValidateModal(s *State, font rl.Font, theme render.Theme) {
 	}
 	r := drawModalHeader(font, theme, pw, ph, "VALIDATE MAP", theme.BorderActive)
 	if len(rows) == 0 {
-		rl.DrawTextEx(font, "All checks pass.",
+		render.DrawRichText(font, "All checks pass.",
 			rl.NewVector2(r.X+modalContentInset, r.Y+50), editorFontBody, 1, theme.BorderStrong)
 	} else {
 		y := r.Y + 50
 		for _, line := range rows {
-			rl.DrawTextEx(font, "! "+line,
+			render.DrawRichText(font, "! "+line,
 				rl.NewVector2(r.X+modalContentInset, y), editorFontAccent, 1, theme.BorderDanger)
 			y += 22
 		}
 	}
-	rl.DrawTextEx(font, "Esc / Enter / click   close",
+	render.DrawRichText(font, "Esc / Enter / click   close",
 		rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
 }
 
@@ -3103,6 +3177,7 @@ const (
 	elPack
 	elChest
 	elDoor
+	elCrystal
 )
 
 // entityListRow is one row of the Objects index — a label plus the tile to
@@ -3154,6 +3229,12 @@ func entityListRows(s *State) []entityListRow {
 			x:     d.TileX, z: d.TileZ, kind: elDoor, idx: i,
 		})
 	}
+	for i, c := range s.area.CrystalSpawns {
+		rows = append(rows, entityListRow{
+			label: "Crystal  —  " + core.TileCoord(c.TileX, c.TileZ),
+			x:     c.TileX, z: c.TileZ, kind: elCrystal, idx: i,
+		})
+	}
 	return rows
 }
 
@@ -3165,6 +3246,8 @@ func entityRowColor(k entityKindRow) rl.Color {
 		return render.MarkerChest
 	case elDoor:
 		return render.MarkerDoor
+	case elCrystal:
+		return render.MarkerCrystal
 	default:
 		return render.MarkerStart
 	}
@@ -3200,7 +3283,7 @@ func drawEntityListModal(s *State, font rl.Font, theme render.Theme) {
 	card, listTop, rows, top, end := entityListGeom(s)
 	drawModalHeaderAt(font, theme, card, "OBJECTS", theme.BorderActive)
 	if len(rows) == 0 {
-		rl.DrawTextEx(font, "No objects placed.",
+		render.DrawRichText(font, "No objects placed.",
 			rl.NewVector2(card.X+modalContentInset, listTop), editorFontBody, 1, theme.TextMuted)
 	}
 	mp := frameMouse
@@ -3216,9 +3299,9 @@ func drawEntityListModal(s *State, font rl.Font, theme render.Theme) {
 		if i == s.modalCursor {
 			col = theme.TextPrimary
 		}
-		rl.DrawTextEx(font, rows[i].label, rl.NewVector2(rr.X+22, rr.Y+(rr.Height-16)/2), editorFontBody, 1, col)
+		render.DrawRichText(font, rows[i].label, rl.NewVector2(rr.X+22, rr.Y+(rr.Height-16)/2), editorFontBody, 1, col)
 	}
-	rl.DrawTextEx(font, fmt.Sprintf("%d objects   ·   Up/Down + Enter or click a row to jump + edit   ·   Esc close", len(rows)),
+	render.DrawRichText(font, fmt.Sprintf("%d objects   ·   Up/Down + Enter or click a row to jump + edit   ·   Esc close", len(rows)),
 		rl.NewVector2(card.X+modalContentInset, card.Y+card.Height-26), editorFontHint, 1, theme.TextHint)
 }
 
@@ -3267,7 +3350,7 @@ func drawConfirmDirtyModal(s *State, font rl.Font, theme render.Theme) {
 		discardLabel = "D  Discard then pick another map"
 	}
 
-	rl.DrawTextEx(font, body, rl.NewVector2(r.X+modalContentInset, r.Y+44), editorFontLabel, 1, theme.TextPrimary)
+	render.DrawRichText(font, body, rl.NewVector2(r.X+modalContentInset, r.Y+44), editorFontLabel, 1, theme.TextPrimary)
 	// Contextual hint above the buttons explains what Save/Discard do for
 	// this pending action (new map / open / exit); the buttons stay short.
 	render.DrawTextWithShadow(font, hintForPending(saveLabel, discardLabel), r.X+modalContentInset, r.Y+66, editorFontHint, theme.TextHint)

@@ -18,7 +18,7 @@ const (
 	timingHeadingStrike       = "STRIKE!"
 	timingHeadingDefend       = "DEFEND!"
 	timingHeadingCharge       = "CHARGE!"
-	timingHeadingPickpocket   = "PICKPOCKET!"
+	timingHeadingCombo        = "COMBO!"
 	timingHeadingReels        = "STOP THE REELS!"
 	timingHeadingRecallMemo   = "MEMORIZE!"
 	timingHeadingRecallRecall = "RECALL!"
@@ -27,7 +27,7 @@ const (
 // Per-mode heading + base-fill tints, paired with the timingHeading*
 // strings above. Named so the bar's signature hue lives next to its
 // label instead of as a bare rl.NewColor literal inside each draw
-// function — a palette pass touches one block. (Pickpocket derives its
+// function — a palette pass touches one block. (The Combo bar derives its
 // tint from seqOkColor and stays at its call site.)
 var (
 	timingHeadingStrikeColor       = mute(rl.NewColor(255, 232, 168, 240)) // warm gold
@@ -157,13 +157,7 @@ func barShake(timing core.TimingState, flashTimer float32) float32 {
 	if core.TimingFlashDuration <= 0 {
 		return 0
 	}
-	age := 1 - flashTimer/core.TimingFlashDuration
-	if age < 0 {
-		age = 0
-	}
-	if age > 1 {
-		age = 1
-	}
+	age := core.Clamp(1-flashTimer/core.TimingFlashDuration, 0, 1)
 	amp := (1 - age) * shakeAmplitudePx
 	return float32(math.Sin(float64(age)*math.Pi*float64(shakeCyclesPerFlash))) * amp
 }
@@ -177,11 +171,11 @@ var qualityVisuals = [...]struct {
 	AttackColor    rl.Color
 	DefendColor    rl.Color
 }{
-	core.TimingQualityMiss:      {ThrobIntensity: 0, AttackColor: rl.NewColor(220, 76, 76, 255), DefendColor: rl.NewColor(220, 76, 76, 255)},
-	core.TimingQualityNice:      {ThrobIntensity: 0.08, AttackColor: rl.NewColor(184, 96, 80, 255), DefendColor: rl.NewColor(56, 110, 184, 255)},
-	core.TimingQualityGood:      {ThrobIntensity: 0.12, AttackColor: rl.NewColor(232, 144, 80, 255), DefendColor: rl.NewColor(80, 152, 220, 255)},
-	core.TimingQualityGreat:     {ThrobIntensity: 0.16, AttackColor: rl.NewColor(255, 188, 88, 255), DefendColor: rl.NewColor(120, 200, 248, 255)},
-	core.TimingQualityExcellent: {ThrobIntensity: 0.22, AttackColor: rl.NewColor(255, 244, 144, 255), DefendColor: rl.NewColor(196, 240, 255, 255)},
+	core.TimingQualityMiss:      {ThrobIntensity: 0, AttackColor: timingGradeAtkMiss, DefendColor: timingGradeDefMiss},
+	core.TimingQualityNice:      {ThrobIntensity: 0.08, AttackColor: timingGradeAtkNice, DefendColor: timingGradeDefNice},
+	core.TimingQualityGood:      {ThrobIntensity: 0.12, AttackColor: timingGradeAtkGood, DefendColor: timingGradeDefGood},
+	core.TimingQualityGreat:     {ThrobIntensity: 0.16, AttackColor: timingGradeAtkGreat, DefendColor: timingGradeDefGreat},
+	core.TimingQualityExcellent: {ThrobIntensity: 0.22, AttackColor: timingGradeAtkExcellent, DefendColor: timingGradeDefExcellent},
 }
 
 // init asserts qualityVisuals covers every timing grade. Pairs with
@@ -243,7 +237,7 @@ func applyBarMotion(timing core.TimingState, flashTimer, barH float32) (xOffset,
 // drawTimingBar paints the active timed-hit bar above the party ribbon. The
 // bar dispatches by Kind: press-mode shows a sliding cursor over nested
 // quality zones; charge-mode shows three filling segments + peak + decay.
-func drawTimingBar(g core.GameState, assets Resources) {
+func drawTimingBar(g *core.GameState, assets Resources) {
 	if !g.Battle.Timing.Active {
 		return
 	}
@@ -334,9 +328,12 @@ func applyTimingFlashCursor(curX, y, barH, flashTimer float32, base rl.Color) (f
 }
 
 // timingTrackColor is the dark base fill behind every timing bar (press
-// and charge). Named so a palette pass touches one line instead of the
-// per-function literals it replaced.
-var timingTrackColor = rl.NewColor(14, 16, 26, 230)
+// and charge) — the SAME gauge body the HP/MP bars use, so it derives from
+// the shared barTrack hue rather than carrying its own near-black literal.
+// Only the alpha differs: the timing gauge sits more opaque (230 vs the
+// bar track's 140) so the recessed combat tube reads solid behind the
+// glowing quality light. Reconcile any base-hue retune in barTrack alone.
+var timingTrackColor = colorWithAlpha(barTrack, 230)
 
 // drawTimingTrack paints the recessed glass gauge body behind a timing bar:
 // a sunk gauge well, then the dark glass track the quality light glows
@@ -402,7 +399,7 @@ func drawExcellentShockwave(curX, drawY, drawnH, flashTimer float32, isDefend bo
 //     you before you commit
 //   - shockwave ring: Excellent flashes spawn an expanding ring from the
 //     frozen cursor position
-func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
+func drawPressBar(timing core.TimingState, g *core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
 	isDefend := g.Battle.Phase == core.BattleEnemyTiming
 
 	heading := timingHeadingStrike
@@ -488,7 +485,7 @@ func drawPressBar(timing core.TimingState, g core.GameState, assets Resources, x
 //
 // The cursor sweeps regardless of hold state — Elapsed counts up always — so
 // the player sees how close they are to the peak window even before pressing.
-func drawChargeBar(timing core.TimingState, g core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
+func drawChargeBar(timing core.TimingState, g *core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
 	heading := timingHeadingCharge
 	baseCol := timingHeadingChargeColor
 	// Intro-pause heading: while the player hasn't engaged yet (intro
@@ -605,8 +602,8 @@ func drawChargeTickWithFlash(timing core.TimingState, barX, barY, barW, barH flo
 // float over the 3D scene with drop shadows so they're readable against any
 // background. A thin line under the arrows dwindles left-to-right to
 // communicate the timer.
-func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
-	heading := timingHeadingPickpocket
+func drawSequenceBar(timing core.TimingState, g *core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
+	heading := timingHeadingCombo
 	baseCol := colorWithAlpha(seqOkColor, 240) // thief green
 
 	xOff, _, _ := applyBarMotion(timing, g.Battle.TimingFlash, barH)
@@ -655,7 +652,7 @@ func drawSequenceBar(timing core.TimingState, g core.GameState, assets Resources
 
 		// Drop shadow: same triangle drawn 3 px down-right in transparent
 		// black so the arrow stays readable over busy 3D backgrounds.
-		shadow := fadeForFlash(rl.NewColor(0, 0, 0, iconShadowAlpha), flashing, g.Battle.TimingFlash)
+		shadow := fadeForFlash(colorWithAlpha(shadowBase, iconShadowAlpha), flashing, g.Battle.TimingFlash)
 		drawArrow(cx+3, cy+3, slotSize, dir, shadow)
 		drawArrow(cx, cy, slotSize, dir, col)
 
@@ -685,7 +682,7 @@ var reelSymbolColors = []rl.Color{
 // stopped reel gilds its frame and shows the locked symbol solid. On the
 // resolve flash the symbols fade with the grade tint. Mirrors the other bars'
 // heading + bar-motion handling.
-func drawReelBar(timing core.TimingState, g core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
+func drawReelBar(timing core.TimingState, g *core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
 	xOff, _, _ := applyBarMotion(timing, g.Battle.TimingFlash, barH)
 	drawX := x + xOff
 	drawTimingHeading(assets.hudFont, timingHeadingReels, drawX, barW, y, timingHeadingReelsColor, flashing, qualityColor(timing.Quality, false))
@@ -722,7 +719,7 @@ func drawReelBar(timing core.TimingState, g core.GameState, assets Resources, x,
 		// the symbol fills are muted toward parchment tones.
 		sx := cellX + cellW*0.5
 		r := barH * 0.30
-		rl.DrawCircleV(rl.NewVector2(sx, cy), r+2, fadeForFlash(rl.NewColor(0, 0, 0, reelRimAlpha), flashing, g.Battle.TimingFlash))
+		rl.DrawCircleV(rl.NewVector2(sx, cy), r+2, fadeForFlash(colorWithAlpha(shadowBase, reelRimAlpha), flashing, g.Battle.TimingFlash))
 		rl.DrawCircleV(rl.NewVector2(sx, cy), r, col)
 
 		// Frame: a dim wood rail while spinning; a gilt frame breathing with
@@ -749,7 +746,7 @@ func drawReelBar(timing core.TimingState, g core.GameState, assets Resources, x,
 // landed slots reveal their answer tinted green (correct) or red (wrong) so
 // the player gets feedback as they go. Reuses the sequence bar's arrow icons,
 // cursor underline, and dwindling timer strip.
-func drawRecallBar(timing core.TimingState, g core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
+func drawRecallBar(timing core.TimingState, g *core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
 	hidden := timing.RecallHidden()
 	heading := timingHeadingRecallMemo
 	baseCol := timingHeadingRecallMemoColor
@@ -772,7 +769,7 @@ func drawRecallBar(timing core.TimingState, g core.GameState, assets Resources, 
 		if !hidden {
 			// Memorize phase: show every pattern arrow lit, with a drop shadow
 			// (matches the sequence bar) so it reads over busy 3D backgrounds.
-			drawArrow(cx+3, cy+3, arrowSize, timing.SequenceTargets[i], rl.NewColor(0, 0, 0, iconShadowAlpha))
+			drawArrow(cx+3, cy+3, arrowSize, timing.SequenceTargets[i], colorWithAlpha(shadowBase, iconShadowAlpha))
 			drawArrow(cx, cy, arrowSize, timing.SequenceTargets[i], colorWithAlpha(timingCursorColor, barHighlightAlpha))
 			continue
 		}
@@ -981,7 +978,10 @@ var (
 
 func makeTallyConsumedColor(isDefend bool) rl.Color {
 	c := qualityColor(core.TimingQualityGood, isDefend)
-	return rl.NewColor(c.R/3, c.G/3, c.B/3, 200)
+	// Dim the grade color to a third via the shared shadeColor helper, then
+	// pin the alpha to the tally's fixed 200 (shadeColor preserves the source
+	// alpha, which is 255 here).
+	return colorWithAlpha(shadeColor(c, 0.33), 200)
 }
 
 func drawTallyBar(t core.TimingState, barX, barY, barW, barH float32, isDefend bool) {
@@ -1092,7 +1092,7 @@ func popupOffScreenX(screenX, screenW float32) bool {
 // DrawQualityPopup floats the most recent quality result above the actor for
 // QualityResultDuration after each timing resolution. Punches in with a quick
 // scale-up for impact, then fades up and out.
-func DrawQualityPopup(camera rl.Camera3D, g core.GameState, assets Resources) {
+func DrawQualityPopup(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if g.Battle.LastQualityTimer <= 0 {
 		return
 	}
@@ -1134,7 +1134,7 @@ func DrawQualityPopup(camera rl.Camera3D, g core.GameState, assets Resources) {
 	x := screenPos.X - measure.X/2
 	y := screenPos.Y - measure.Y - rise
 
-	shadow := rl.NewColor(0, 0, 0, alpha)
+	shadow := colorWithAlpha(shadowBase, alpha)
 	drawTextWithShadowStyle(assets.hudFont, label, x, y, size, 1.5, col, shadow, 3, 3)
 }
 
@@ -1142,7 +1142,7 @@ func DrawQualityPopup(camera rl.Camera3D, g core.GameState, assets Resources) {
 // should hover above — the actor for attacks, the defender for blocks. Both
 // cases anchor to a party-member sprite, since enemies don't author quality
 // popups (only the damage-number popups, which use a separate path).
-func qualityPopupAnchor(camera rl.Camera3D, g core.GameState) (rl.Vector3, bool) {
+func qualityPopupAnchor(camera rl.Camera3D, g *core.GameState) (rl.Vector3, bool) {
 	idx := g.Battle.LastQualityIndex
 	if idx < 0 || idx >= len(g.Party) {
 		return rl.Vector3{}, false
@@ -1155,11 +1155,11 @@ func qualityPopupAnchor(camera rl.Camera3D, g core.GameState) (rl.Vector3, bool)
 // for QualityResultDuration. Color matches the timing quality (so a Great
 // reads as the same orange as the player's quality popup); an Excellent hit
 // gets a trailing "!" so the big damage spike reads at a glance.
-func DrawDamagePopups(camera rl.Camera3D, g core.GameState, assets Resources) {
+func DrawDamagePopups(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if !g.Battle.Active() {
 		return
 	}
-	members := core.BattleMembers(&g)
+	members := core.BattleMembers(g)
 	for i := range members {
 		enemy := &members[i] // index-range + pointer: no ~496-byte Enemy copy per member
 		if enemy.DamagePopupTimer <= 0 {
@@ -1170,36 +1170,69 @@ func DrawDamagePopups(camera rl.Camera3D, g core.GameState, assets Resources) {
 		// so for the killing blow we want the number to keep floating after
 		// the body fades. enemyDrawPosition still returns a valid spot since
 		// the member's slot is stable for the lifetime of the active pack.
-		pos := enemyDrawPosition(camera, &g, i, enemy)
-		pos.Y += 0.6
-		screenPos := rl.GetWorldToScreen(pos, camera)
-		sw, _ := screenSizeF()
-		if popupOffScreenX(screenPos.X, sw) {
+		pos := enemyDrawPosition(camera, g, i, enemy)
+		// Apply the per-kind authored number-spawn nudge (Num X/Y in the Foe
+		// Visualizer) on top of the default placement.
+		if v, ok := enemyVisualFor(assets, enemy.Kind); ok {
+			pos = cameraRelativeOffset(camera, pos, v.popupXOffset, v.popupYOffset, 0)
+		}
+		// Outgoing damage colors by the player's timing grade; an Excellent hit
+		// gets the trailing "!" via damagePopupLabel.
+		drawFloatingDamage(camera, assets, pos, enemy.DamagePopup, enemy.DamagePopupQuality,
+			enemy.DamagePopupTimer, qualityColor(enemy.DamagePopupQuality, false))
+	}
+	// Party side: every hit a member TAKES floats a number too (enemy attacks,
+	// casts, poison/DoT ticks, Overcharge recoil all funnel through
+	// applyPartyDamage). Incoming hits aren't graded, so they render in the
+	// fixed hurt tone rather than the timing-grade ramp.
+	for i := range g.Party {
+		m := &g.Party[i]
+		if m.DamagePopupTimer <= 0 {
 			continue
 		}
-
-		t := enemy.DamagePopupTimer / core.QualityResultDuration
-		scale, rise, alpha := popupAnimation(t)
-
-		label := damagePopupLabel(enemy.DamagePopup, enemy.DamagePopupQuality)
-		col := qualityColor(enemy.DamagePopupQuality, false)
-		col.A = alpha
-
-		// Damage popup uses FontHeading at the base size; Excellent
-		// gets a stronger throb via the `scale` factor rather than
-		// a separate larger size literal (so all popup text stays
-		// on the standardized size scale).
-		baseSize := FontHeading
-		size := baseSize * scale
-		// Measure at the fixed base size (cache hits) and scale; see DrawQualityPopup.
-		base := damagePopupMeasureCache.measure(assets.hudFont, label, baseSize, 1.2)
-		measure := rl.NewVector2(base.X*scale, base.Y*scale)
-		x := screenPos.X - measure.X/2
-		y := screenPos.Y - measure.Y - rise
-
-		shadow := rl.NewColor(0, 0, 0, alpha)
-		drawTextWithShadowStyle(assets.hudFont, label, x, y, size, 1.2, col, shadow, 2, 2)
+		pos := partySpritePosition(camera, i, m.Class, 0, 0, 0)
+		worldPos := rl.NewVector3(pos.X, pos.Y, pos.Z)
+		// Apply the per-class authored number-spawn nudge (Num X/Y in the Party
+		// Visualizer) on top of the default placement.
+		if v, ok := partyVisualFor(assets, m.Class); ok {
+			worldPos = cameraRelativeOffset(camera, worldPos, v.popupXOffset, v.popupYOffset, 0)
+		}
+		drawFloatingDamage(camera, assets, worldPos,
+			m.DamagePopup, m.DamagePopupQuality, m.DamagePopupTimer, partyDamagePopupColor)
 	}
+}
+
+// drawFloatingDamage renders one floating damage number above worldPos, shared
+// by the enemy and party popup loops so the animation/measure/draw can't drift
+// between the two sides. col is the base tint (timing-grade ramp for outgoing
+// hits, fixed hurt tone for damage the party takes); alpha is applied here.
+func drawFloatingDamage(camera rl.Camera3D, assets Resources, worldPos rl.Vector3, value, quality int, timer float32, col rl.Color) {
+	worldPos.Y += 0.6
+	screenPos := rl.GetWorldToScreen(worldPos, camera)
+	sw, _ := screenSizeF()
+	if popupOffScreenX(screenPos.X, sw) {
+		return
+	}
+
+	t := timer / core.QualityResultDuration
+	scale, rise, alpha := popupAnimation(t)
+
+	label := damagePopupLabel(value, quality)
+	col.A = alpha
+
+	// Damage popup uses FontHeading at the base size; Excellent gets a stronger
+	// throb via the `scale` factor rather than a separate larger size literal
+	// (so all popup text stays on the standardized size scale).
+	baseSize := FontHeading
+	size := baseSize * scale
+	// Measure at the fixed base size (cache hits) and scale; see DrawQualityPopup.
+	base := damagePopupMeasureCache.measure(assets.hudFont, label, baseSize, 1.2)
+	measure := rl.NewVector2(base.X*scale, base.Y*scale)
+	x := screenPos.X - measure.X/2
+	y := screenPos.Y - measure.Y - rise
+
+	shadow := colorWithAlpha(shadowBase, alpha)
+	drawTextWithShadowStyle(assets.hudFont, label, x, y, size, 1.2, col, shadow, 2, 2)
 }
 
 // damagePopupLabel formats the damage value, appending "!" on an

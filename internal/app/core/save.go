@@ -51,12 +51,18 @@ type SaveData struct {
 	// load with no entries — adding this optional field is save-compatible,
 	// so SaveVersion stays put.
 	Bestiary Bestiary `json:"bestiary,omitempty"`
-	// Crystals persists healing-crystal charge state, by index, parallel to the
+	// Crystals persists healing-crystal charge state, by tile, parallel to the
 	// crystals placeCrystals rebuilds for the map on load. omitempty + an index
 	// overlay (only when counts match) keeps it save-compatible: older saves load
 	// with fresh (charged) crystals, so SaveVersion stays put. Without this a
 	// reload would re-arm a spent crystal — a free heal+save fountain.
 	Crystals []CrystalSave `json:"crystals,omitempty"`
+	// TriggersFired persists which Once dialog triggers have fired (keyed by
+	// trigger ID — see core/dialogtrigger.go), so a save taken after an intro
+	// cutscene doesn't replay it on reload. Keys are area-scoped; a stale key
+	// for a since-renamed/removed trigger simply matches nothing and is inert.
+	// omitempty keeps older saves load-compatible, so SaveVersion stays put.
+	TriggersFired map[string]bool `json:"triggersFired,omitempty"`
 }
 
 // CrystalSave is the persisted charge state of one healing crystal.
@@ -70,6 +76,11 @@ type CrystalSave struct {
 	TileZ   int  `json:"tileZ,omitempty"`
 	Charge  int  `json:"charge"`
 	Charged bool `json:"charged"`
+	// Saved is always true on records written by the current build. It
+	// distinguishes a legitimate crystal at tile (0,0) from a legacy phantom:
+	// an intermediate save format wrote crystals without TileX/TileZ, decoding
+	// them as (0,0). A phantom decodes Saved as false and is ignored on load.
+	Saved bool `json:"saved,omitempty"`
 }
 
 // crystalSaves snapshots the live crystals' charge state for SaveData (nil when
@@ -80,7 +91,7 @@ func crystalSaves(crystals []Crystal) []CrystalSave {
 	}
 	out := make([]CrystalSave, len(crystals))
 	for i, c := range crystals {
-		out[i] = CrystalSave{TileX: c.TileX, TileZ: c.TileZ, Charge: c.Charge, Charged: c.Charged}
+		out[i] = CrystalSave{TileX: c.TileX, TileZ: c.TileZ, Charge: c.Charge, Charged: c.Charged, Saved: true}
 	}
 	return out
 }
@@ -114,8 +125,11 @@ func NewSaveData(g *GameState) SaveData {
 		// rationale as Inventory / Quests). BestiaryEntry is a value type,
 		// so maps.Clone fully decouples the snapshot; nil stays nil.
 		Bestiary: maps.Clone(g.Bestiary),
-		// Crystal charge state, by index (crystalSaves makes an independent copy).
+		// Crystal charge state, by tile (crystalSaves makes an independent copy).
 		Crystals: crystalSaves(g.Crystals),
+		// Fired Once-trigger set, detached from the live map (maps.Clone keeps
+		// nil nil, so a run that fired nothing stays omitempty-absent).
+		TriggersFired: maps.Clone(g.TriggersFired),
 	}
 }
 
@@ -128,12 +142,11 @@ func NewSaveData(g *GameState) SaveData {
 func saveSanitizedParty(party []PartyMember) []PartyMember {
 	out := make([]PartyMember, len(party))
 	copy(out, party)
-	ClearPartyTransientStatuses(out) // Sleep / Stun / Webbed / Confused / Defending
-	ReleaseAllIngested(out)          // Ingested / IngestedBy
+	// Strip the combat-only state (statuses, ingestion, anim timers) via the
+	// shared clearer — animation timers included so a save can't carry a
+	// mid-lunge offset.
+	clearPartyCombatTransients(out)
 	for i := range out {
-		// Animation timers aren't statuses, so they're not in the clearers
-		// above; zero them so a save can't carry a mid-lunge offset.
-		clearMemberAnimTimers(&out[i])
 		// copy() above is shallow, so the snapshot's progression maps still
 		// alias the live party's. Clone them so the sanitized copy is fully
 		// independent — today it's only marshalled (read-only), but an
@@ -267,6 +280,10 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 		g.Bestiary = pruned
 	}
 	g.StepCount = data.StepCount
+	// Overlay the saved fired-trigger set so a Once cutscene the player already
+	// saw doesn't replay on reload. Detached copy (the saved map may be aliased
+	// by a future caller); nil stays nil, which the fire path lazy-inits.
+	g.TriggersFired = maps.Clone(data.TriggersFired)
 	// Overlay saved crystal charge onto the freshly-placed crystals, matched by
 	// TILE rather than by index. placeCrystals is deterministic, but an edited
 	// map can change which start-neighbor is first-walkable, yielding the same
@@ -275,22 +292,38 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	// without a saved counterpart at its fresh charged default.
 	for i := range g.Crystals {
 		for j := range data.Crystals {
-			if data.Crystals[j].TileX == g.Crystals[i].TileX &&
-				data.Crystals[j].TileZ == g.Crystals[i].TileZ {
-				g.Crystals[i].Charge = data.Crystals[j].Charge
-				g.Crystals[i].Charged = data.Crystals[j].Charged
+			cs := data.Crystals[j]
+			// Skip legacy phantom records: an intermediate save format wrote
+			// crystals without TileX/TileZ, decoding them as (0,0). The Saved
+			// flag (always true on current saves) distinguishes a real crystal
+			// at the origin from such a phantom, so a legitimate (0,0) crystal's
+			// charge restores correctly instead of re-arming on reload.
+			if !cs.Saved && cs.TileX == 0 && cs.TileZ == 0 {
+				continue
+			}
+			if cs.TileX == g.Crystals[i].TileX && cs.TileZ == g.Crystals[i].TileZ {
+				// Clamp the saved charge to the valid [0, ceiling] range — every
+				// other loaded field is sanitized at this trust boundary, and a
+				// corrupt/hand-edited value would otherwise feed the per-step
+				// recharge math nonsense (a negative charge that never re-arms,
+				// or an over-cap one). Derive Charged from the clamped charge so
+				// the two can't disagree (charged iff at the ceiling).
+				g.Crystals[i].Charge = Clamp(cs.Charge, 0, CrystalRechargeSteps)
+				g.Crystals[i].Charged = g.Crystals[i].Charge >= CrystalRechargeSteps
 				break
 			}
 		}
 	}
 	// Place the player at the saved tile, but fall back to the map's
-	// authored start if that tile is now blocked — the map may have been
-	// edited (geometry changed, shrunk) between save and load, and a
-	// save-by-map-id reload must never drop the player inside a wall.
-	// NewGameState already seeded g.Player at the validated start, so the
-	// fallback just keeps that.
-	x := clampStartCoord(data.PlayerTileX, area.Width)
-	z := clampStartCoord(data.PlayerTileZ, area.Height)
+	// authored start if that tile is out of bounds or now blocked — the map
+	// may have been edited (geometry changed, shrunk) between save and load,
+	// and a save-by-map-id reload must never drop the player inside a wall.
+	// Check the RAW saved coords (BlockedAt reports out-of-bounds as blocked):
+	// clamping an out-of-range coord to an edge first would silently place the
+	// party at an arbitrary corner whenever that edge happened to be walkable,
+	// instead of taking the authored-start fallback. NewGameState already
+	// seeded g.Player at the validated start, so the fallback just keeps that.
+	x, z := data.PlayerTileX, data.PlayerTileZ
 	if area.BlockedAt(x, z) {
 		x, z = g.Player.TileX, g.Player.TileZ
 		g.Player = NewPlayer(x, z, area.StartFacing)
@@ -332,6 +365,14 @@ func overlaySavedParty(base, saved []PartyMember) {
 func sanitizeLoadedParty(party []PartyMember) {
 	for i := range party {
 		m := &party[i]
+		// MaxHP is fully derived from VIT (MaxHPFor) and kept in sync by every
+		// VIT level-up spend, so re-derive it from the loaded stat block rather
+		// than trusting the persisted number — a corrupt/edited save whose MaxHP
+		// drifted out of sync with VIT would otherwise load a permanently wrong
+		// HP cap. Floor at 1 for a zero/negative VIT. (MaxMP has no pure stat
+		// derivation — per-class base + additive INT spends — so it can only be
+		// clamped to a sane range, not recomputed.)
+		m.MaxHP = MaxHPFor(m.Stats)
 		if m.MaxHP < 1 {
 			m.MaxHP = 1
 		}
@@ -413,11 +454,28 @@ func sanitizeLoadedParty(party []PartyMember) {
 	// member (whose IngestedBy points at a pack slot the freshly-rebuilt area
 	// no longer has) or an asleep/stunned member can't load permanently
 	// locked out of combat with no enemy alive to ever release them.
-	ClearPartyTransientStatuses(party)
-	ReleaseAllIngested(party)
-	for i := range party {
-		clearMemberAnimTimers(&party[i])
+	clearPartyCombatTransients(party)
+}
+
+// pruneValid is the shared "filter a save-loaded slice" shape: empty/nil
+// input returns nil (so a cleared slice stays nil, not an empty non-nil),
+// otherwise it returns a fresh slice holding just the elements `keep`
+// accepts. The per-type validity rules (and any dedup bookkeeping) live in
+// the keep closure each caller passes, so the empty->nil guard + capacity
+// hint + filter loop aren't re-spelled at every prune site. (pruneBestiary
+// can't route through this — it's map-shaped, not a slice — so it keeps its
+// own range loop.)
+func pruneValid[T any](src []T, keep func(T) bool) []T {
+	if len(src) == 0 {
+		return nil
 	}
+	out := make([]T, 0, len(src))
+	for _, v := range src {
+		if keep(v) {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // pruneUnknownItems drops inventory stacks whose ItemKind isn't registered
@@ -425,46 +483,42 @@ func sanitizeLoadedParty(party []PartyMember) {
 // Such a stack would otherwise sit in the bag as un-usable "Unknown Item"
 // dead weight. Returns a fresh slice; nil/empty input returns nil.
 func pruneUnknownItems(inv []ItemStack) []ItemStack {
-	if len(inv) == 0 {
-		return nil
-	}
-	out := make([]ItemStack, 0, len(inv))
-	for _, st := range inv {
+	return pruneValid(inv, func(st ItemStack) bool {
 		if st.Count <= 0 || st.Kind == ItemNone {
-			continue
+			return false
 		}
-		if _, ok := ItemInfoOk(st.Kind); !ok {
-			continue
-		}
-		out = append(out, st)
-	}
-	return out
+		_, ok := ItemInfoOk(st.Kind)
+		return ok
+	})
 }
 
 // pruneQuests drops journal entries with an empty ID and collapses duplicate
 // IDs (keeping the first), so an older or hand-edited save can't seed the
 // journal with blank or doubled quests that QuestIndexByID would then resolve
 // inconsistently. Returns a fresh slice; nil/empty input returns nil. There is
-// no quest registry to validate IDs against yet (StarterQuests is empty); when
-// one ships, also drop unregistered IDs here, mirroring pruneUnknownItems.
+// no quest REGISTRY to validate IDs against yet (StarterQuests seeds only the
+// opening quest, and dialogs can start arbitrary ad-hoc ids); when a registry
+// ships, also drop unregistered IDs here, mirroring pruneUnknownItems.
 func pruneQuests(quests []Quest) []Quest {
-	if len(quests) == 0 {
-		return nil
-	}
+	// The validity rule (non-empty, first-of-duplicate-ID) is the keep
+	// closure; the seen-map dedup state is captured so pruneValid stays a
+	// pure filter. The Status clamp mutates kept entries, which a value-copy
+	// keep predicate can't do, so it runs as a second pass over the result.
 	seen := make(map[string]bool, len(quests))
-	out := make([]Quest, 0, len(quests))
-	for _, q := range quests {
+	out := pruneValid(quests, func(q Quest) bool {
 		if q.ID == "" || seen[q.ID] {
-			continue
+			return false
 		}
 		seen[q.ID] = true
+		return true
+	})
+	for i := range out {
 		// A hand-edited Status outside {Active, Complete} would be a
 		// "neither" entry both journal-header tallies skip. Clamp it to
 		// Active — the safe default for an entry we can't interpret.
-		if q.Status != QuestActive && q.Status != QuestComplete {
-			q.Status = QuestActive
+		if out[i].Status != QuestActive && out[i].Status != QuestComplete {
+			out[i].Status = QuestActive
 		}
-		out = append(out, q)
 	}
 	return out
 }

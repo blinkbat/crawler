@@ -17,13 +17,13 @@ import (
 // layer's enum value 3.
 type pauseMenuRow struct {
 	Item  core.PauseMenuItem
-	Label func(g core.GameState) string
+	Label func(g *core.GameState) string
 }
 
 var pauseMenuRows = []pauseMenuRow{
-	{Item: core.PauseMenuOptions, Label: func(core.GameState) string { return "Options ▸" }},
-	{Item: core.PauseMenuDebug, Label: func(core.GameState) string { return "Debug ▸" }},
-	{Item: core.PauseMenuQuit, Label: func(core.GameState) string { return "Quit" }},
+	{Item: core.PauseMenuOptions, Label: func(*core.GameState) string { return "Options ▸" }},
+	{Item: core.PauseMenuDebug, Label: func(*core.GameState) string { return "Debug ▸" }},
+	{Item: core.PauseMenuQuit, Label: func(*core.GameState) string { return "Quit" }},
 }
 
 // optionsMenuRow / debugMenuRow bind a submenu item enum to its label
@@ -32,62 +32,63 @@ var pauseMenuRows = []pauseMenuRow{
 // pause-menu rows above marks "descends into a submenu."
 type optionsMenuRow struct {
 	Item  core.OptionsMenuItem
-	Label func(g core.GameState) string
+	Label func(g *core.GameState) string
 }
 
 var optionsMenuRows = []optionsMenuRow{
-	{Item: core.OptionsMenuDisplay, Label: func(core.GameState) string { return DisplayMenuRowLabel() }},
-	{Item: core.OptionsMenuVibration, Label: func(g core.GameState) string { return "Vibration: " + onOff(g.RumbleEnabled) }},
-	{Item: core.OptionsMenuStats, Label: func(core.GameState) string { return "Party Stats" }},
-	{Item: core.OptionsMenuQuests, Label: func(core.GameState) string { return "Quests" }},
-	{Item: core.OptionsMenuSave, Label: func(core.GameState) string { return "Save Game" }},
-	{Item: core.OptionsMenuRestart, Label: func(core.GameState) string { return "Restart" }},
-	{Item: core.OptionsMenuClose, Label: func(core.GameState) string { return "Close" }},
+	{Item: core.OptionsMenuDisplay, Label: func(*core.GameState) string { return DisplayMenuRowLabel() }},
+	{Item: core.OptionsMenuVibration, Label: func(g *core.GameState) string { return "Vibration: " + onOff(g.RumbleEnabled) }},
+	{Item: core.OptionsMenuSave, Label: func(*core.GameState) string { return "Save Game" }},
+	{Item: core.OptionsMenuRestart, Label: func(*core.GameState) string { return "Restart" }},
+	{Item: core.OptionsMenuClose, Label: func(*core.GameState) string { return "Close" }},
 }
 
 type debugMenuRow struct {
 	Item  core.DebugMenuItem
-	Label func(g core.GameState) string
+	Label func(g *core.GameState) string
 }
 
 var debugMenuRows = []debugMenuRow{
-	{Item: core.DebugMenuToggle, Label: func(g core.GameState) string {
+	{Item: core.DebugMenuToggle, Label: func(g *core.GameState) string {
 		return "Debug Mode: " + onOff(g.DebugOverlay)
 	}},
-	{Item: core.DebugMenuEnemies, Label: func(g core.GameState) string {
+	{Item: core.DebugMenuEnemies, Label: func(g *core.GameState) string {
 		return "Enemies: " + onOff(!g.EnemiesDisabled)
 	}},
-	{Item: core.DebugMenuAdvanceTime, Label: func(g core.GameState) string {
+	{Item: core.DebugMenuAdvanceTime, Label: func(g *core.GameState) string {
 		phase, _ := core.PhaseAtStep(g.StepCount)
 		return "Advance Time (" + core.PhaseName(phase) + ")"
 	}},
-	{Item: core.DebugMenuEasyQuit, Label: func(g core.GameState) string {
+	{Item: core.DebugMenuEasyQuit, Label: func(g *core.GameState) string {
+		// Controller-first cue (gamepad-first contract): the in-battle quit is
+		// Select/Share (input.DebugFleePressed, also Backspace), not a key name.
 		if g.EasyBattleQuit {
-			return "Easy Battle Quit: On (Bksp)"
+			return "Easy Battle Quit: On (Select)"
 		}
 		return "Easy Battle Quit: Off"
 	}},
-	{Item: core.DebugMenuRenderLog, Label: func(g core.GameState) string {
+	{Item: core.DebugMenuRenderLog, Label: func(g *core.GameState) string {
 		return "Render Log: " + onOff(g.RenderLogEnabled)
 	}},
-	{Item: core.DebugMenuJukebox, Label: func(core.GameState) string { return JukeboxRowLabel() }},
-	{Item: core.DebugMenuAllSkills, Label: func(g core.GameState) string {
+	{Item: core.DebugMenuJukebox, Label: func(*core.GameState) string { return JukeboxRowLabel() }},
+	{Item: core.DebugMenuAllSkills, Label: func(g *core.GameState) string {
 		return "All Skills: " + onOff(g.DebugAllSkills)
 	}},
-	{Item: core.DebugMenuBoostStats, Label: func(core.GameState) string {
+	{Item: core.DebugMenuBoostStats, Label: func(*core.GameState) string {
 		return fmt.Sprintf("Boost Stats (+%d)", core.DebugStatBoost)
 	}},
-	{Item: core.DebugMenuSkipBattles, Label: func(g core.GameState) string {
+	{Item: core.DebugMenuSkipBattles, Label: func(g *core.GameState) string {
 		return "Skip Battles: " + onOff(g.DebugSkipBattles)
 	}},
-	{Item: core.DebugMenuTestRumble, Label: func(core.GameState) string { return "Test Rumble" }},
-	{Item: core.DebugMenuRetro, Label: func(g core.GameState) string {
+	{Item: core.DebugMenuTestRumble, Label: func(*core.GameState) string { return "Test Rumble" }},
+	{Item: core.DebugMenuRetro, Label: func(g *core.GameState) string {
 		if core.AnyRetroFilterActive(&g.RetroFilters) {
 			return "Retro Filters ▸ (On)"
 		}
 		return "Retro Filters ▸"
 	}},
-	{Item: core.DebugMenuClose, Label: func(core.GameState) string { return "Close" }},
+	{Item: core.DebugMenuStartDialog, Label: func(*core.GameState) string { return "Start Dialog" }},
+	{Item: core.DebugMenuClose, Label: func(*core.GameState) string { return "Close" }},
 }
 
 // retroMenuRowLabel formats one Retro Filters submenu row. Slider rows show
@@ -97,7 +98,7 @@ var debugMenuRows = []debugMenuRow{
 // can't fall out of the atlas and render as "?". Kept as a function (not a
 // row table) because the row set is positional — the first RetroFilterCount
 // cursor slots ARE the filter kinds, per core's contract.
-func retroMenuRowLabel(g core.GameState, i int) string {
+func retroMenuRowLabel(g *core.GameState, i int) string {
 	switch {
 	case i < int(core.RetroFilterCount):
 		name := core.RetroFilterName(core.RetroFilterKind(i))
@@ -142,9 +143,13 @@ func onOff(b bool) string {
 	return "Off"
 }
 
+// OnOffLabel is the exported twin of onOff for callers outside the render
+// package (e.g. the editor's dialog tooling) that need the same On/Off text.
+func OnOffLabel(b bool) string { return onOff(b) }
+
 // drawOptionsMenuOverlay paints the Options submenu via the shared
 // menu-card chrome, titled "OPTIONS".
-func drawOptionsMenuOverlay(g core.GameState, assets Resources) {
+func drawOptionsMenuOverlay(g *core.GameState, assets Resources) {
 	drawTitledMenuCard(assets, "OPTIONS", pauseMenuPanelW, len(optionsMenuRows),
 		func(i int) string { return optionsMenuRows[i].Label(g) },
 		func(i int) bool { return g.OptionsMenuIndex == int(optionsMenuRows[i].Item) })
@@ -152,7 +157,7 @@ func drawOptionsMenuOverlay(g core.GameState, assets Resources) {
 
 // drawDebugMenuOverlay paints the debug submenu via the shared menu-card
 // chrome, titled "DEBUG". The card height tracks the debug row count.
-func drawDebugMenuOverlay(g core.GameState, assets Resources) {
+func drawDebugMenuOverlay(g *core.GameState, assets Resources) {
 	drawTitledMenuCard(assets, "DEBUG", pauseMenuPanelW, len(debugMenuRows),
 		func(i int) string { return debugMenuRows[i].Label(g) },
 		func(i int) bool { return g.DebugMenuIndex == int(debugMenuRows[i].Item) })
@@ -175,29 +180,31 @@ const (
 // draws each slider row's intensity gauge (track + gilt fill + bezel ticks)
 // and, on the cursored slider row, candle-bright left/right arrow triangles
 // — the Left/Right-to-adjust affordance.
-func drawRetroMenuOverlay(g core.GameState, assets Resources) {
+func drawRetroMenuOverlay(g *core.GameState, assets Resources) {
 	panelX, panelY := drawTitledMenuCard(assets, "RETRO FILTERS", retroMenuPanelW, core.RetroMenuCount,
 		func(i int) string { return retroMenuRowLabel(g, i) },
 		func(i int) bool { return g.RetroMenuIndex == i })
 
-	stride := pauseMenuRowH + pauseMenuRowGap
 	rowX := panelX + pauseMenuRowInsetX
 	barX := rowX + menuRowInnerW(retroMenuPanelW) - retroBarW - 14
 	flick := candleFlicker()
 	for i := 0; i < int(core.RetroFilterCount); i++ {
-		rowTextY := panelY + pauseMenuHeaderH + stride*int32(i)
+		rowTextY := menuRowTop(panelY, i)
 		barY := rowTextY + retroBarTextDY - retroBarH/2
 		v := g.RetroFilters[i]
 		// Track + fill: the same dark-glass-tube language as the HP gauges,
-		// at chip scale. Fill is gilt — "how much of this dial is turned."
-		rl.DrawRectangle(barX, barY, retroBarW, retroBarH, barTrack)
+		// at chip scale — routed through the shared drawSmallPanel /
+		// drawSmallPanelOutline gauge primitives (rounded glass body + bevel +
+		// rounded outline) rather than bare rectangles. Fill is gilt — "how
+		// much of this dial is turned."
+		drawSmallPanel(barX, barY, retroBarW, retroBarH, barTrack)
 		if v > 0 {
 			fillW := int32(float64(retroBarW-2) * v)
 			if fillW > 0 {
 				rl.DrawRectangle(barX+1, barY+1, fillW, retroBarH-2, fadeColor(giltBright, 0.55+0.45*float32(v)))
 			}
 		}
-		rl.DrawRectangleLines(barX, barY, retroBarW, retroBarH, fadeColor(woodLight, 0.6))
+		drawSmallPanelOutline(barX, barY, retroBarW, retroBarH, fadeColor(woodLight, 0.6))
 		if g.RetroMenuIndex == i {
 			// Drawn ◂ ▸ affordance — triangles, not font runes.
 			cy := float32(barY + retroBarH/2)
@@ -233,6 +240,16 @@ func menuRowInnerW(panelW int32) int32 {
 	return panelW - pauseMenuRowInsetX - pauseMenuRowRightPad
 }
 
+// menuRowStride is the vertical pitch between menu rows; menuRowTop returns a
+// row's top-Y for a card whose top-left is at panelY. Both drawTitledMenuCard's
+// row loop AND the retro overlay's per-row intensity-bar placement go through
+// menuRowTop so the bar decorations can't drift from the rows (the retro
+// overlay used to re-derive the stride and the row-Y formula inline).
+func menuRowStride() int32 { return pauseMenuRowH + pauseMenuRowGap }
+func menuRowTop(panelY int32, i int) int32 {
+	return panelY + pauseMenuHeaderH + menuRowStride()*int32(i)
+}
+
 // retroMenuPanelW is the Retro Filters card width — wider than the standard
 // pause card so "Chroma Fringe: 100%" plus the right-aligned intensity bar
 // fit on one row without overlapping.
@@ -264,8 +281,7 @@ func drawCardTitle(font rl.Font, title string, panelX, panelY, panelW int32, top
 // overlays differ only in title string, row labels, and the cursor field,
 // which this captures via the closures.
 func drawTitledMenuCard(assets Resources, title string, panelW int32, rowCount int, label func(i int) string, selected func(i int) bool) (panelX, panelY int32) {
-	stride := pauseMenuRowH + pauseMenuRowGap
-	panelH := pauseMenuHeaderH + stride*int32(rowCount) + pauseMenuFootH
+	panelH := pauseMenuHeaderH + menuRowStride()*int32(rowCount) + pauseMenuFootH
 	rect := drawVeiledCard(panelW, panelH, borderSoft, borderSoft, giltDim)
 	panelX = int32(rect.X)
 	panelY = int32(rect.Y)
@@ -273,11 +289,9 @@ func drawTitledMenuCard(assets Resources, title string, panelW int32, rowCount i
 	drawCardTitle(assets.hudFont, title, panelX, panelY, panelW, 24)
 
 	rowInnerW := menuRowInnerW(panelW)
-	rowY := pauseMenuHeaderH
 	rowX := panelX + pauseMenuRowInsetX
 	for i := 0; i < rowCount; i++ {
-		drawMenuRow(assets.hudFont, label(i), rowX, panelY+rowY, rowInnerW, selected(i))
-		rowY += stride
+		drawMenuRow(assets.hudFont, label(i), rowX, menuRowTop(panelY, i), rowInnerW, selected(i))
 	}
 	// Geometry returned so a caller can overlay row decorations (the retro
 	// menu's drawn intensity bars / adjust arrows) without re-deriving —
@@ -299,7 +313,7 @@ func drawTitledCardHeader(assets Resources, title string, panelW, panelH int32) 
 	return panelX, panelY, belowTitleY
 }
 
-func drawMenuOverlay(g core.GameState, assets Resources) {
+func drawMenuOverlay(g *core.GameState, assets Resources) {
 	drawTitledMenuCard(assets, "MENU", pauseMenuPanelW, len(pauseMenuRows),
 		func(i int) string { return pauseMenuRows[i].Label(g) },
 		func(i int) bool { return g.MenuIndex == int(pauseMenuRows[i].Item) })

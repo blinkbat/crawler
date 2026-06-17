@@ -18,7 +18,7 @@ import (
 // identically before and after the player steps through. A future
 // "locked" state can add a closed-panel variant or recolor the brass
 // keystone.
-func DrawDoors(camera rl.Camera3D, g core.GameState, assets Resources) {
+func DrawDoors(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	forward := horizontalForward(camera)
 	for _, d := range g.Doors {
 		center := tileWorldPos(d.TileX, d.TileZ, 0)
@@ -43,7 +43,7 @@ func DrawDoors(camera rl.Camera3D, g core.GameState, assets Resources) {
 // when the player steps onto a door (g.DoorPrompt >= 0). Centered glass
 // card with the destination name and Enter/Cancel hints. No-op when no
 // prompt is active. Drawn as a 2D overlay after the world pass.
-func DrawDoorPrompt(g core.GameState, assets Resources) {
+func DrawDoorPrompt(g *core.GameState, assets Resources) {
 	if g.DoorPrompt < 0 || g.DoorPrompt >= len(g.Doors) {
 		return
 	}

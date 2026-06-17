@@ -1,0 +1,157 @@
+package render
+
+import (
+	"crawler/internal/app/core"
+
+	rl "github.com/gen2brain/raylib-go/raylib"
+)
+
+// Party Visualizer preview support — the party-side twin of foepreview.go. The
+// editor's Party Visualizer modal (editor/partyview.go) calls DrawPartyPreview
+// every frame to show the class it's tuning as a small combat-like diorama,
+// redrawn live as the author drags the placement / shadow / cursor / tint
+// sliders. It shares the foe preview's diorama camera, anchor, void/floor tints,
+// and authoring-gizmo helper (foePreviewCamera / foeAnchor / foePreviewBG /
+// foePreviewGround / drawAnchorGizmo) since both render the exact same billboard
+// pipeline; only the lookup (party class vs enemy kind) and the cached off-screen
+// render texture differ.
+
+var (
+	partyPreviewRT     rl.RenderTexture2D
+	partyPreviewRTW    int32
+	partyPreviewRTH    int32
+	partyPreviewRTInit bool
+)
+
+// LivePartyOverride returns the currently-LOADED visual for class as an override
+// — code defaults with any maps/sprites/partyvisuals.json already overlaid at
+// load time. The editor seeds its working copy from this so opening a class
+// shows exactly what the game draws right now. ok=false if the class has no
+// visual (defensive — every class is populated at load).
+func LivePartyOverride(assets Resources, class core.PartyClass) (core.PartyVisualOverride, bool) {
+	v, ok := partyVisualFor(assets, class)
+	if !ok {
+		return core.PartyVisualOverride{}, false
+	}
+	return enemyVisualOverride(v), true
+}
+
+// SetLivePartyOverride applies ov onto the in-memory visual for class so the
+// editor's just-saved tuning takes effect immediately without a reload. The
+// partyVisuals map is shared by reference through the (by-value) Resources, so
+// mutating an entry here updates the same map the editor's render loop and
+// LivePartyOverride read — otherwise a class-cycle would re-seed from the stale
+// loaded value and the save would look reverted. The texture is preserved.
+// No-op if the class is absent or the map is nil. Persisted separately to
+// partyvisuals.json by the caller; this is only the live in-memory mirror.
+func SetLivePartyOverride(assets Resources, class core.PartyClass, ov core.PartyVisualOverride) {
+	if assets.partyVisuals == nil {
+		return
+	}
+	base, ok := assets.partyVisuals[class]
+	if !ok {
+		return
+	}
+	assets.partyVisuals[class] = applyEnemyVisualOverride(base, ov)
+}
+
+// DrawPartyPreview renders class's billboard — with the in-progress override ov
+// applied on top of its code-default texture — into rect: ground, contact
+// shadow, the upright sprite, and the target chevron, arranged with the exact
+// same math drawBattlePack / DrawPartySprites use so the preview is faithful.
+// Safe to call every frame; the off-screen texture is cached and only
+// reallocated when the panel size changes.
+func DrawPartyPreview(rect rl.Rectangle, assets Resources, class core.PartyClass, ov core.PartyVisualOverride, zoom float32, showGizmos bool, previewTex rl.Texture2D) {
+	base, ok := partyVisualFor(assets, class)
+	if !ok {
+		return
+	}
+	v := applyEnemyVisualOverride(base, ov)
+	// Asset-tab live preview overrides the displayed texture (non-destructive
+	// filter result); zero ID falls back to the class's real texture.
+	if previewTex.ID != 0 {
+		v.texture = previewTex
+	}
+	w, h := int32(rect.Width), int32(rect.Height)
+	if w <= 0 || h <= 0 {
+		return
+	}
+	if !ensurePartyPreviewRT(w, h) {
+		return
+	}
+	cam := zoomedPreviewCamera(zoom)
+
+	rl.BeginTextureMode(partyPreviewRT)
+	rl.ClearBackground(foePreviewBG)
+	rl.BeginMode3D(cam)
+	rl.DrawPlane(rl.NewVector3(0, 0, 0), rl.NewVector2(14, 14), foePreviewGround)
+	rl.DrawGrid(14, 1)
+
+	place := resolveBillboardPlacement(cam, foeAnchor, v)
+	if v.shadowRadius > 0 {
+		drawGroundShadow(place.shadowX, place.shadowZ, v.shadowRadius)
+	}
+	drawFriendlyTargetMarker(cam, place.chevron, v.effectiveMarkerScale())
+	drawTextureBillboard(cam, v.texture, place.sprite, v.size, v.resolveTint())
+
+	// Authoring gizmos for the glyph/particle anchor sliders, identical to the
+	// foe preview (orange = particle burst origin, cyan = hit-glyph anchor) so
+	// enemy→party hit FX can be aligned to a member's sprite the same way.
+	// Gizmos are Layout-tab authoring aids; the Asset tab hides them so the bare
+	// sprite (and its baked tint / pixelation) reads clean.
+	if showGizmos {
+		pAnchor := cameraRelativeOffset(cam, foeAnchor, v.particleXOffset, v.particleYOffset, v.particleZOffset)
+		drawAnchorGizmo(pAnchor, 0.16*v.effectiveParticleScale(), rl.NewColor(255, 168, 86, 210))
+		gAnchor := cameraRelativeOffset(cam, foeAnchor, v.glyphXOffset, v.glyphYOffset, 0)
+		gAnchor.Y += hitGlyphRise
+		drawAnchorGizmo(gAnchor, 0.13*v.effectiveGlyphScale(), rl.NewColor(176, 226, 255, 220))
+		// Gold gizmo = floating damage-NUMBER spawn (Num X/Y); +0.6 Y matches the
+		// baked rise in drawFloatingDamage so the dot sits where the number floats.
+		nAnchor := cameraRelativeOffset(cam, foeAnchor, v.popupXOffset, v.popupYOffset, 0)
+		nAnchor.Y += 0.6
+		drawAnchorGizmo(nAnchor, 0.10, rl.NewColor(255, 232, 120, 220))
+	}
+
+	rl.EndMode3D()
+	rl.EndTextureMode()
+
+	// RenderTextures are stored flipped, so the source height is negated.
+	rl.DrawTextureRec(partyPreviewRT.Texture,
+		rl.NewRectangle(0, 0, float32(w), -float32(h)),
+		rl.NewVector2(rect.X, rect.Y),
+		rl.White)
+}
+
+// ensurePartyPreviewRT lazily (re)creates the cached off-screen texture when
+// missing or the requested size changed, unloading the old one first so the GPU
+// handle doesn't leak across window-size changes.
+func ensurePartyPreviewRT(w, h int32) bool {
+	if partyPreviewRTInit && partyPreviewRTW == w && partyPreviewRTH == h {
+		return true
+	}
+	if partyPreviewRTInit {
+		rl.UnloadRenderTexture(partyPreviewRT)
+		partyPreviewRTInit = false
+	}
+	rt := rl.LoadRenderTexture(w, h)
+	if rt.ID == 0 {
+		return false
+	}
+	partyPreviewRT = rt
+	rl.SetTextureFilter(partyPreviewRT.Texture, rl.FilterBilinear)
+	partyPreviewRTW, partyPreviewRTH = w, h
+	partyPreviewRTInit = true
+	return true
+}
+
+// ClosePartyPreview unloads the cached off-screen texture when the Party
+// Visualizer modal closes. Idempotent.
+func ClosePartyPreview() {
+	if !partyPreviewRTInit {
+		return
+	}
+	rl.UnloadRenderTexture(partyPreviewRT)
+	partyPreviewRT = rl.RenderTexture2D{}
+	partyPreviewRTW, partyPreviewRTH = 0, 0
+	partyPreviewRTInit = false
+}

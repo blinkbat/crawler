@@ -71,8 +71,11 @@ func updateChestModal(g *core.GameState) {
 		closeChest(g, chest)
 		return
 	}
-	if g.ChestMenuIndex >= len(remaining) {
-		g.ChestMenuIndex = len(remaining) - 1
+	// The Take-All row sits at index len(remaining), so the valid cursor
+	// range is 0..len(remaining) — clamp to that, not len-1, or a cursor
+	// resting on Take-All gets yanked onto an item row.
+	if g.ChestMenuIndex > len(remaining) {
+		g.ChestMenuIndex = len(remaining)
 	}
 }
 

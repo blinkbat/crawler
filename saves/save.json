@@ -4,8 +4,8 @@
   "playerTileX": 2,
   "playerTileZ": 2,
   "playerFacing": 3,
-  "stepCount": 34,
-  "gold": 17,
+  "stepCount": 316,
+  "gold": 44,
   "party": [
     {
       "Class": 0,
@@ -33,6 +33,9 @@
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
+      "DamagePopup": 1,
+      "DamagePopupQuality": 0,
+      "DamagePopupTimer": 0,
       "Defending": false,
       "PoisonTurns": 0,
       "SleepTurns": 0,
@@ -46,10 +49,10 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 1,
-      "XP": 40,
-      "PendingLevelUps": 0,
-      "SkillPoints": 0,
+      "Level": 2,
+      "XP": 2,
+      "PendingLevelUps": 3,
+      "SkillPoints": 1,
       "SkillTiers": {
         "1": 0
       },
@@ -84,6 +87,9 @@
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
+      "DamagePopup": 4,
+      "DamagePopupQuality": 0,
+      "DamagePopupTimer": 0,
       "Defending": false,
       "PoisonTurns": 0,
       "SleepTurns": 0,
@@ -135,6 +141,9 @@
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
+      "DamagePopup": 1,
+      "DamagePopupQuality": 0,
+      "DamagePopupTimer": 0,
       "Defending": false,
       "PoisonTurns": 0,
       "SleepTurns": 0,
@@ -148,10 +157,10 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 1,
-      "XP": 40,
-      "PendingLevelUps": 0,
-      "SkillPoints": 0,
+      "Level": 2,
+      "XP": 20,
+      "PendingLevelUps": 3,
+      "SkillPoints": 1,
       "SkillTiers": {
         "10": 0
       },
@@ -186,6 +195,9 @@
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
+      "DamagePopup": 4,
+      "DamagePopupQuality": 0,
+      "DamagePopupTimer": 0,
       "Defending": false,
       "PoisonTurns": 0,
       "SleepTurns": 0,
@@ -199,10 +211,10 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 1,
-      "XP": 40,
-      "PendingLevelUps": 0,
-      "SkillPoints": 0,
+      "Level": 2,
+      "XP": 20,
+      "PendingLevelUps": 3,
+      "SkillPoints": 1,
       "SkillTiers": {
         "12": 0
       },
@@ -225,13 +237,13 @@
   "quests": null,
   "bestiary": {
     "0": {
-      "kills": 4
+      "kills": 12
     },
     "1": {
-      "kills": 1
+      "kills": 3
     },
     "2": {
-      "kills": 1
+      "kills": 3
     }
   },
   "crystals": [

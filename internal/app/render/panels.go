@@ -34,22 +34,21 @@ func measurePanelStatValue(font rl.Font, text string, size float32) rl.Vector2 {
 	return panelStatMeasureCache.measure(font, text, size, canonicalSpacing(size))
 }
 
-// panelsMapFooterCache memoizes the "AreaName   zoom: N cells   ..."
-// footer string drawn on the Map tab. Both inputs change only on
-// user action (open the overlay, change zoom, transition area), so
-// rebuilding via fmt.Sprintf every frame is pure waste.
+// panelsMapFooterCache memoizes the "zoom: N cells" footer string drawn on the
+// Map tab. The zoom changes only on user action, so rebuilding via fmt.Sprintf
+// every frame is pure waste. (The area name is intentionally NOT in this footer
+// — it already shows in the overlay's top info strip, so repeating it here was
+// redundant.)
 var panelsMapFooterCache struct {
-	areaName string
-	zoom     int
-	text     string
+	zoom int
+	text string
 }
 
-func panelsMapFooterText(areaName string, zoom int) string {
-	if panelsMapFooterCache.areaName == areaName && panelsMapFooterCache.zoom == zoom {
+func panelsMapFooterText(zoom int) string {
+	if panelsMapFooterCache.text != "" && panelsMapFooterCache.zoom == zoom {
 		return panelsMapFooterCache.text
 	}
-	panelsMapFooterCache.text = fmt.Sprintf("%s   zoom: %d cells", areaName, zoom)
-	panelsMapFooterCache.areaName = areaName
+	panelsMapFooterCache.text = fmt.Sprintf("zoom: %d cells", zoom)
 	panelsMapFooterCache.zoom = zoom
 	return panelsMapFooterCache.text
 }
@@ -60,7 +59,7 @@ func panelsMapFooterText(areaName string, zoom int) string {
 // fixed at compile time, but a FORGOTTEN slot is a nil func (the zero value),
 // not a compile error — so the init below nil-checks every slot and panics at
 // startup, the same coverage guard statIconDrawers / actionIconDrawers use.
-var panelTabDrawers = [core.PanelTabCount]func(core.GameState, Resources, rl.Rectangle){
+var panelTabDrawers = [core.PanelTabCount]func(*core.GameState, Resources, rl.Rectangle){
 	core.PanelTabStats:     drawPanelsStats,
 	core.PanelTabEquipment: drawPanelsEquipment,
 	core.PanelTabItems:     drawPanelsItems,
@@ -145,7 +144,7 @@ func init() {
 // g.PanelsTab to the per-tab body drawer; the tab strip + footer hint
 // are drawn once around all of them so the chrome stays consistent.
 // No-op when the overlay isn't open.
-func DrawPanelsOverlay(g core.GameState, assets Resources) {
+func DrawPanelsOverlay(g *core.GameState, assets Resources) {
 	if !g.PanelsOpen {
 		return
 	}
@@ -285,8 +284,17 @@ func measureTabLabel(font rl.Font, label string) rl.Vector2 {
 // memberCardGutter is the single per-member-card layout unit: both the
 // gap between member columns and the content inset inside each card.
 // Centralized so the column layout, the card-content inset, and the card
-// header can't drift apart (they previously hardcoded 14 / 28 / 24).
-const memberCardGutter = float32(14)
+// header can't drift apart (they previously hardcoded 14 / 28 / 24). Bumped
+// to 20 to open up the multi-column "ledger of members" — more air between
+// columns (and more breathing room inside each) so the bigger type doesn't
+// read as a dense slab.
+const memberCardGutter = float32(20)
+
+// memberColumnBuf backs memberColumnLayout's returned slice so the per-frame
+// panel draw doesn't allocate a fresh slice each call. Only one tab (Stats /
+// Equipment / Skills) draws per frame and each consumes the result immediately
+// before returning, so a single shared scratch is safe (single-threaded render).
+var memberColumnBuf []rl.Rectangle
 
 // memberColumnLayout returns the per-member column rectangles for any
 // tab that paints one card per party member (Stats / Equipment /
@@ -298,7 +306,10 @@ func memberColumnLayout(body rl.Rectangle, count int) []rl.Rectangle {
 	}
 	total := body.Width - memberCardGutter*float32(count-1)
 	colW := total / float32(count)
-	cols := make([]rl.Rectangle, count)
+	if cap(memberColumnBuf) < count {
+		memberColumnBuf = make([]rl.Rectangle, count)
+	}
+	cols := memberColumnBuf[:count]
 	for i := 0; i < count; i++ {
 		cols[i] = rl.NewRectangle(body.X+float32(i)*(colW+memberCardGutter), body.Y, colW, body.Height)
 	}
@@ -337,11 +348,11 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 		cardBG = selectedGlassTint(glassMid, 0.9)
 	}
 	drawGlassPane(int32(col.X), int32(col.Y), int32(col.Width), int32(col.Height), cardBG)
-	// Class accent stripe, flush to the pane's left edge (not the inset
-	// drawAccentStripe layout, which sits a few px in from a full card's
-	// border). Shares stripeWidth so the bar weight tracks the rest of
-	// the accent stripes even though the inset differs.
-	rl.DrawRectangle(int32(col.X), int32(col.Y)+6, stripeWidth, int32(col.Height)-12, classCol)
+	// Class accent rail, flush to the pane's left edge (the inset differs from
+	// a full card's drawAccentStripe, so pass geometry explicitly). Shares the
+	// one embellished 3-D rail look (drawClassRail) with every other
+	// per-character tick instead of reading as a flat bar here.
+	drawClassRail(int32(col.X), int32(col.Y)+6, stripeWidth, int32(col.Height)-12, classCol)
 	if highlight {
 		// Bold gilt frame around the active card — the same "you're
 		// here" gilt the tab underline / armed-skill spine use, scaled
@@ -377,9 +388,9 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 	y += 30
 
 	hpFill := hpFillColor(m.HP, m.MaxHP)
-	drawBar(font, innerX, y, innerW, 28, "HP", m.HP, m.MaxHP, hpFill, m.HP <= 0)
+	drawBar(font, innerX, y, innerW, barHeightCompact, "HP", m.HP, m.MaxHP, hpFill, m.HP <= 0)
 	y += 36
-	drawBar(font, innerX, y, innerW, 28, "MP", m.MP, m.MaxMP, barMP, m.HP <= 0)
+	drawBar(font, innerX, y, innerW, barHeightCompact, "MP", m.MP, m.MaxMP, barMP, m.HP <= 0)
 	y += 42
 
 	return y
@@ -389,7 +400,7 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 // Each card stacks: class accent + name + level + HP/MP bars (shared
 // header) → 2-column stat grid (STR/DEX/INT/WIS/VIT/SPD) → armor / XP
 // row → status pill chip → allocate hints for the cursored member.
-func drawPanelsStats(g core.GameState, assets Resources, body rl.Rectangle) {
+func drawPanelsStats(g *core.GameState, assets Resources, body rl.Rectangle) {
 	font := assets.Font()
 	if len(g.Party) == 0 {
 		return
@@ -438,7 +449,7 @@ func drawPanelsStats(g core.GameState, assets Resources, body rl.Rectangle) {
 
 		// Status chip — bright pill in the per-status accent
 		// color so afflicted members read at a glance.
-		if kind, turns := core.PartyStatus(&m); kind != core.PartyStatusNone {
+		if kind, turns := core.PartyStatus(&g.Party[i]); kind != core.PartyStatusNone {
 			label := partyStatusTurnLabel(kind, turns)
 			lm := measurePanelStatValue(font, label, FontSmall)
 			chipW := lm.X + 20
@@ -459,8 +470,11 @@ func drawPanelsStats(g core.GameState, assets Resources, body rl.Rectangle) {
 		if highlight && (m.PendingLevelUps > 0 || m.SkillPoints > 0) {
 			hintY := cols[i].Y + cols[i].Height - 60
 			if m.PendingLevelUps > 0 {
-				hint := "Z   allocate " + strconv.Itoa(m.PendingLevelUps) + " stat pt" + plural(m.PendingLevelUps)
-				drawTextWithShadow(font, hint, innerX, hintY, FontSmall, inkAccent)
+				// Gamepad-first: the call-to-action reads as the Confirm glyph
+				// (A / Z opens the level-up modal for this member — see
+				// explore/panels.go), not a spelled-out key.
+				label := "allocate " + strconv.Itoa(m.PendingLevelUps) + " stat pt" + plural(m.PendingLevelUps)
+				drawHintSegs(font, []HintSeg{Hint(label, GlyphA)}, innerX, hintY, FontSmall, inkAccent, 1)
 				hintY += 24
 			}
 			if m.SkillPoints > 0 {
@@ -597,7 +611,7 @@ func EquipPanelClickOutsidePicker(pt rl.Vector2) bool {
 	return lastEquipLayout.PickerValid && !rl.CheckCollisionPointRec(pt, lastEquipLayout.PickerBounds)
 }
 
-func drawPanelsEquipment(g core.GameState, assets Resources, body rl.Rectangle) {
+func drawPanelsEquipment(g *core.GameState, assets Resources, body rl.Rectangle) {
 	font := assets.Font()
 	resetEquipLayoutKeepBufs() // reset every frame, retaining buffers
 	if len(g.Party) == 0 {
@@ -692,12 +706,12 @@ const (
 // pickerCardLeftInset is the shared left gutter for a picker sub-modal's
 // title + footer hint, so the three pickers stop each hardcoding card.X+18
 // / card.X+24 independently.
-const pickerCardLeftInset = float32(18)
+const pickerCardLeftInset = float32(26)
 
 // pickerTitleTopInset is the shared top inset for a picker sub-modal's
 // FontHeading title. Unifies the 14 / 16 the pickers had drifted to (a
 // 2px cosmetic difference inside each header band) onto one value.
-const pickerTitleTopInset = float32(16)
+const pickerTitleTopInset = float32(20)
 
 // drawPickerCard paints the shared picker sub-modal chrome (FINDING #12):
 // the veiled wood-and-glass card (same veil + borderActive frame +
@@ -717,8 +731,8 @@ func drawPickerCard(font rl.Font, cardW, cardH float32, title string) rl.Rectang
 // edges and leaves pickerRowGap of breathing room below itself inside its
 // rowH slot.
 const (
-	pickerRowInsetX = float32(10)
-	pickerRowGap    = float32(6)
+	pickerRowInsetX = float32(16)
+	pickerRowGap    = float32(8)
 )
 
 // pickerRowRect returns row i's rect in a picker list that starts at listY.
@@ -735,14 +749,14 @@ func pickerRowRect(card rl.Rectangle, listY float32, i int, rowH float32) rl.Rec
 // per option, the cursored row gilded. The row rects + card bounds are
 // cached on lastEquipLayout so a click can pick a row (or dismiss when
 // it lands outside the card).
-func drawEquipPicker(g core.GameState, assets Resources) {
+func drawEquipPicker(g *core.GameState, assets Resources) {
 	font := assets.Font()
 	member := g.PanelsRowCursor
 	if member < 0 || member >= len(g.Party) {
 		return
 	}
 	slot := core.EquipSlotIndex(g.EquipSlotCursor)
-	rows := core.EquipPickerRowsInto(equipPickerRowsDrawBuf, &g, member, slot)
+	rows := core.EquipPickerRowsInto(equipPickerRowsDrawBuf, g, member, slot)
 	equipPickerRowsDrawBuf = rows
 
 	const rowH = equipPickerRowH
@@ -769,7 +783,7 @@ func drawEquipPicker(g core.GameState, assets Resources) {
 	if curKind != core.ItemNone {
 		curText = "Equipped: " + core.ItemInfo(curKind).Name
 	}
-	drawTextWithShadow(font, curText, card.X+pickerCardLeftInset, card.Y+46, FontSmall, textMuted)
+	drawTextWithShadow(font, curText, card.X+pickerCardLeftInset, card.Y+52, FontSmall, textMuted)
 
 	lastEquipLayout.PickerRects = lastEquipLayout.PickerRects[:0]
 	lastEquipLayout.PickerBounds = card
@@ -813,7 +827,7 @@ func drawEquipPicker(g core.GameState, assets Resources) {
 // apply to. Title names what's being used. Keyboard/controller-driven
 // (UseTargetCursor) — no mouse hit rects, since nothing here was asked
 // to be clickable and the overlay stays controller-first.
-func drawUseTargetPicker(g core.GameState, assets Resources) {
+func drawUseTargetPicker(g *core.GameState, assets Resources) {
 	font := assets.Font()
 	living := core.LivingPartyIndicesInto(useTargetLivingDrawBuf, g.Party)
 	useTargetLivingDrawBuf = living
@@ -826,13 +840,18 @@ func drawUseTargetPicker(g core.GameState, assets Resources) {
 		title = "Cast " + core.SkillName(g.UsePendingSkill)
 	}
 
-	const rowH = pickerRowH
+	// Taller rows than the stock picker: each carries the member's name, a
+	// status pill, and live HP + MP bars (the same readout the party ribbon
+	// shows), so the player picks a heal target by the same cues they read
+	// elsewhere — not a bare "HP 7/10" string. Extra inset/spacing keeps it
+	// off the frame.
+	const rowH = float32(58)
 	const headerH = pickerHeaderH
 	visibleRows := len(living)
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
-	cardW := float32(380)
+	cardW := float32(430)
 	cardH := headerH + float32(visibleRows)*rowH + pickerFooterH
 	card := drawPickerCard(font, cardW, cardH, title)
 
@@ -843,12 +862,27 @@ func drawUseTargetPicker(g core.GameState, assets Resources) {
 	for i, mi := range living {
 		rect := pickerRowRect(card, listY, i, rowH)
 		drawFocusableRow(rect, i == g.UseTargetCursor)
-		m := g.Party[mi]
+		m := &g.Party[mi]
 		classCol := classAccent(m.Class)
-		drawClassGlyph(rect.X+20, rect.Y+rect.Height/2, 9, m.Class, classCol)
-		drawTextWithShadow(font, m.Name, rect.X+40, rect.Y+rect.Height/2-10, FontBody, textPrimary)
-		hp := "HP " + formatBarValue(m.HP, m.MaxHP)
-		drawTextRightAligned(font, hp, rect.X+rect.Width-12, rect.Y+rect.Height/2-8, FontSmall, hpFillColor(m.HP, m.MaxHP))
+		// Left column: class sigil + name, with breathing room from the edge.
+		drawClassGlyph(rect.X+24, rect.Y+22, 10, m.Class, classCol)
+		nameX := rect.X + 46
+		drawTextWithShadow(font, m.Name, nameX, rect.Y+8, FontBody, textPrimary)
+		// Status pill beside the name (poison etc. survive out of battle), same
+		// glyph + accent the party cards use so the cue reads consistently.
+		if kind, _ := core.PartyStatus(m); kind != core.PartyStatusNone {
+			col, flicker := partyStatusVisual(kind)
+			if flicker {
+				col = fadeColor(col, pulseFlicker())
+			}
+			drawPartyStatusIcon(nameX+8, rect.Y+38, 7, kind, col)
+		}
+		// Right column: compact HP over MP bars (live HP tint + breathing red on
+		// a low tank, via drawBarLive keyed by the stable member name).
+		barX := rect.X + rect.Width*0.46
+		barW := rect.Width*0.54 - 16
+		drawBarLive(font, "use:hp:"+m.Name, barX, rect.Y+8, barW, barHeightMini, "HP", m.HP, m.MaxHP, hpFillColor(m.HP, m.MaxHP), false)
+		drawBar(font, barX, rect.Y+30, barW, barHeightMini, "MP", m.MP, m.MaxMP, barMP, false)
 	}
 
 	drawModalFooterGlyphsLeft(font, card, card.X+pickerCardLeftInset, []HintSeg{
@@ -862,7 +896,7 @@ func drawUseTargetPicker(g core.GameState, assets Resources) {
 // Mass Mend) with their MP cost, the cursored row gilded. Raised only when a
 // member has more than one such heal (HealPickOpen); a single heal casts
 // directly without this step. Controller-driven (HealPickCursor).
-func drawHealPicker(g core.GameState, assets Resources) {
+func drawHealPicker(g *core.GameState, assets Resources) {
 	font := assets.Font()
 	caster := g.HealPickCaster
 	if caster < 0 || caster >= len(g.Party) {
@@ -1022,7 +1056,17 @@ func drawSlotIconRing(cx, cy, r float32, col rl.Color) {
 // allocating a fresh slice.
 var panelsItemStacksBuf []core.ItemStack
 
-func drawPanelsItems(g core.GameState, assets Resources, body rl.Rectangle) {
+// Items-tab list metrics, mirroring the Journal tab's journalRowH /
+// journalRowInsetX naming so the two list surfaces read alike. itemsRowH is
+// the per-row stride (generous so each row reads as its own ledger line, not
+// a cramped table cell); itemsRowInsetX is the left/right text inset off the
+// list rect's edges.
+const (
+	itemsRowH      = float32(46)
+	itemsRowInsetX = float32(14)
+)
+
+func drawPanelsItems(g *core.GameState, assets Resources, body rl.Rectangle) {
 	font := assets.Font()
 	panelsItemStacksBuf = core.LiveStacksInto(g.Inventory, panelsItemStacksBuf)
 	stacks := panelsItemStacksBuf
@@ -1041,8 +1085,8 @@ func drawPanelsItems(g core.GameState, assets Resources, body rl.Rectangle) {
 
 	// List rows. Generous padding so each row reads as its own
 	// ledger line, not a cramped table cell.
-	rowH := float32(46)
-	rowPad := float32(14)
+	rowH := itemsRowH
+	rowPad := itemsRowInsetX
 	cursor := g.PanelsRowCursor
 	if cursor < 0 {
 		cursor = 0
@@ -1195,7 +1239,7 @@ func panelsItemEffectLabel(info core.ItemDefinition) string {
 // invested/total rank read, and its theme blurb. Confirm on the cursored
 // member opens the full skill-tree modal (DrawSkillTreeModal) where points
 // are actually spent — this tab just gives the at-a-glance overview.
-func drawPanelsSkills(g core.GameState, assets Resources, body rl.Rectangle) {
+func drawPanelsSkills(g *core.GameState, assets Resources, body rl.Rectangle) {
 	font := assets.Font()
 	if len(g.Party) == 0 {
 		return
@@ -1270,7 +1314,7 @@ func drawSkillTierPips(x, y float32, filled, total int) {
 // paint at full color, unexplored at a heavy fade so the player can
 // see the silhouette of the area without ruining the discovery.
 // Enemy packs only show on explored tiles (don't spoil unseen rooms).
-func drawPanelsMap(g core.GameState, assets Resources, body rl.Rectangle) {
+func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 	font := assets.Font()
 	m := g.Area
 	if m.Width <= 0 || m.Height <= 0 {
@@ -1294,8 +1338,11 @@ func drawPanelsMap(g core.GameState, assets Resources, body rl.Rectangle) {
 	}
 	cellsX := int(body.Width / cellPx)
 	cellsY := int(body.Height / cellPx)
-	startX := g.Player.TileX - cellsX/2
-	startZ := g.Player.TileZ - cellsY/2
+	// Pan offset (PanelsMapPanX/Z, set by the d-pad on the Map tab) shifts the
+	// view center off the player so explored ground away from the party can be
+	// inspected. Zero = centered on the player.
+	startX := g.Player.TileX - cellsX/2 + g.PanelsMapPanX
+	startZ := g.Player.TileZ - cellsY/2 + g.PanelsMapPanZ
 
 	mapX := body.X + (body.Width-float32(cellsX)*cellPx)/2
 	mapY := body.Y + (body.Height-float32(cellsY)*cellPx)/2
@@ -1328,6 +1375,21 @@ func drawPanelsMap(g core.GameState, assets Resources, body rl.Rectangle) {
 			// can't drift on what lifts the fog.
 			rl.DrawRectangle(px, py, pw, ph, mapCellFillColor(m, g, mx, mz))
 		}
+	}
+
+	// Faint tile grid over the whole view — the graph-paper ruling of a
+	// dungeon map, so individual tiles read as cells rather than a smear of
+	// color. Kept low-alpha so it textures without fighting the terrain fills.
+	gridW := float32(cellsX) * cellPx
+	gridH := float32(cellsY) * cellPx
+	gridCol := fadeColor(woodAccent, 0.16)
+	for gx := 0; gx <= cellsX; gx++ {
+		px := int32(mapX + float32(gx)*cellPx)
+		rl.DrawRectangle(px, int32(mapY), 1, int32(gridH), gridCol)
+	}
+	for gz := 0; gz <= cellsY; gz++ {
+		py := int32(mapY + float32(gz)*cellPx)
+		rl.DrawRectangle(int32(mapX), py, int32(gridW), 1, gridCol)
 	}
 
 	// Pack markers are intentionally omitted: the map shows the
@@ -1384,24 +1446,33 @@ func drawPanelsMap(g core.GameState, assets Resources, body rl.Rectangle) {
 		rl.DrawRectangle(px, py, pw, ph, mapDoorMarkerColor)
 	}
 
-	// Player arrow at the center of the visible window.
+	// Player arrow — at the window center when un-panned, shifting off-center
+	// as the view pans. Drawn only while the player tile is inside the visible
+	// window (panning far enough scrolls the party off the map edge).
 	plx := g.Player.TileX - startX
 	plz := g.Player.TileZ - startZ
-	pcx := mapX + (float32(plx)+0.5)*cellPx
-	pcy := mapY + (float32(plz)+0.5)*cellPx
-	drawPanelsMapArrow(pcx, pcy, cellPx, g.Player.Facing)
+	if plx >= 0 && plz >= 0 && plx < cellsX && plz < cellsY {
+		pcx := mapX + (float32(plx)+0.5)*cellPx
+		pcy := mapY + (float32(plz)+0.5)*cellPx
+		drawPanelsMapArrow(pcx, pcy, cellPx, g.Player.Facing)
+	}
 
-	// Compass rose in the upper-right corner — the centerpiece D&D
-	// cartography ornament. Sized small enough not to dominate but
-	// large enough to read as 8-point.
-	drawCompassRose(body.X+body.Width-46, body.Y+10, 28, font)
+	// Compass rose, inset into the upper-right of the map (no longer hugging
+	// the frame) and enlarged so the 8-point rose reads as the cartography
+	// centerpiece. A faint dark backing disc keeps it legible over terrain.
+	crX := body.X + body.Width - 64
+	crY := body.Y + 30
+	rl.DrawCircleV(rl.NewVector2(crX, crY), 28, fadeColor(shadowHeavy, 0.34))
+	drawCompassRose(crX, crY, 42, font)
 
-	// Map footer — area name + zoom indicator, then the zoom glyph hint.
+	// Map footer — zoom indicator only (the area name already shows in the
+	// overlay's top info strip; showing it here too was redundant), then the
+	// control hint.
 	footerY := body.Y + body.Height - 20
-	footer := panelsMapFooterText(g.Area.Name, zoom)
+	footer := panelsMapFooterText(zoom)
 	drawTextWithShadow(font, footer, body.X, footerY, FontSmall, textHint)
 	footerW := rl.MeasureTextEx(font, footer, FontSmall, canonicalSpacing(FontSmall)).X
-	DrawHintBarLeft(font, []HintSeg{Hint("Zoom", GlyphUpDown)}, body.X+footerW+hintSegGap, footerY, FontSmall)
+	DrawHintBarLeft(font, []HintSeg{Hint("Pan", GlyphLeftRight, GlyphUpDown), Hint("Zoom", GlyphA)}, body.X+footerW+hintSegGap, footerY, FontSmall)
 }
 
 // drawCompassRose paints an 8-point compass rose at (cx, cy) within
@@ -1468,7 +1539,7 @@ func drawCompassRose(cx, cy float32, d float32, font rl.Font) {
 // visitedAt reports whether the player has stepped on this tile. Helper
 // so the map-panel markers don't open-code the bounds check at every
 // call.
-func visitedAt(g core.GameState, x, z int) bool {
+func visitedAt(g *core.GameState, x, z int) bool {
 	if g.Visited == nil || z < 0 || z >= len(g.Visited) {
 		return false
 	}
@@ -1483,7 +1554,7 @@ func visitedAt(g core.GameState, x, z int) bool {
 // once it's in bounds AND the player has stepped within reveal range of
 // it; otherwise it paints flat fog (the same fill as out-of-bounds).
 // Single source so the two map surfaces can't drift on what lifts the fog.
-func mapCellFillColor(m core.AreaDefinition, g core.GameState, x, z int) rl.Color {
+func mapCellFillColor(m core.AreaDefinition, g *core.GameState, x, z int) rl.Color {
 	if m.InBounds(x, z) && visitedAt(g, x, z) {
 		return minimapTileColor(m.Materials, m.TileAt(x, z))
 	}

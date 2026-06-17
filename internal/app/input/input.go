@@ -163,6 +163,25 @@ func stickEdgeX(dir int) bool {
 	return stickEdge(stickEdgeRight)
 }
 
+// stickHeldY / stickHeldX are the level (held-past-threshold) reads of the
+// left stick — the non-edge counterparts to stickEdgeY/X. They power the
+// hold-to-move step predicates: leaning the stick keeps the player walking,
+// rather than stepping once per re-cross. dir = -1 for up/left, +1 for
+// down/right.
+func stickHeldY(dir int) bool {
+	if dir < 0 {
+		return stickNow[stickEdgeUp]
+	}
+	return stickNow[stickEdgeDown]
+}
+
+func stickHeldX(dir int) bool {
+	if dir < 0 {
+		return stickNow[stickEdgeLeft]
+	}
+	return stickNow[stickEdgeRight]
+}
+
 // --- High-level semantic actions ---------------------------------------------
 // Every action accepts both keyboard and controller. Keep call sites using
 // these names so future remapping touches one file.
@@ -521,6 +540,41 @@ func StrafeLeftPressed() bool {
 
 func StrafeRightPressed() bool {
 	return rl.IsKeyPressed(rl.KeyD) || stickEdgeX(1)
+}
+
+// Held movement predicates: the level (key/button-down, stick-leaned) reads of
+// the four step directions and two turns. The exploration update gates the
+// move switch on the player being idle (animation finished), so a held key
+// re-fires the next step the instant the prior one lands — continuous
+// walking/turning paced by the step/turn animation, with no separate repeat
+// timer. A single tap still yields exactly one step. The edge *Pressed
+// variants above stay for menu/cursor nav, which must NOT auto-repeat.
+func StepForwardHeld() bool {
+	return rl.IsKeyDown(rl.KeyUp) || rl.IsKeyDown(rl.KeyW) ||
+		padDown(rl.GamepadButtonLeftFaceUp) || stickHeldY(-1)
+}
+
+func StepBackHeld() bool {
+	return rl.IsKeyDown(rl.KeyDown) || rl.IsKeyDown(rl.KeyS) ||
+		padDown(rl.GamepadButtonLeftFaceDown) || stickHeldY(1)
+}
+
+func StrafeLeftHeld() bool {
+	return rl.IsKeyDown(rl.KeyA) || stickHeldX(-1)
+}
+
+func StrafeRightHeld() bool {
+	return rl.IsKeyDown(rl.KeyD) || stickHeldX(1)
+}
+
+func TurnLeftHeld() bool {
+	return rl.IsKeyDown(rl.KeyLeft) || rl.IsKeyDown(rl.KeyQ) ||
+		padDown(rl.GamepadButtonLeftTrigger1)
+}
+
+func TurnRightHeld() bool {
+	return rl.IsKeyDown(rl.KeyRight) || rl.IsKeyDown(rl.KeyE) ||
+		padDown(rl.GamepadButtonRightTrigger1)
 }
 
 // ConfirmDown reports whether any "confirm" key is currently held this frame.

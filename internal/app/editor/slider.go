@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"crawler/internal/app/core"
 	"crawler/internal/app/render"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -25,7 +26,7 @@ type sliderField[T any] struct {
 
 func sliderSnap(min, max, step float64, trackX, trackW, mouseX float32) float64 {
 	if trackW <= 0 {
-		return clampRange(min, min, max)
+		return core.Clamp(min, min, max)
 	}
 	t := float64((mouseX - trackX) / trackW)
 	if t < 0 {
@@ -39,17 +40,7 @@ func sliderSnap(min, max, step float64, trackX, trackW, mouseX float32) float64 
 		steps := (raw - min) / step
 		raw = min + float64(int(steps+0.5))*step
 	}
-	return clampRange(raw, min, max)
-}
-
-func clampRange(v, lo, hi float64) float64 {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
+	return core.Clamp(raw, min, max)
 }
 
 func drawSlider(font rl.Font, theme render.Theme, label, valueText string, value, min, max float64, labelPos, valuePos rl.Vector2, fontSize float32, track rl.Rectangle, thumbRadius float32, focused bool) {
@@ -57,7 +48,7 @@ func drawSlider(font rl.Font, theme render.Theme, label, valueText string, value
 	if focused {
 		textCol = theme.BorderActive
 	}
-	rl.DrawTextEx(font, label, labelPos, fontSize, 1, textCol)
+	render.DrawRichText(font, label, labelPos, fontSize, 1, textCol)
 
 	rl.DrawRectangleRec(track, theme.SurfaceLog)
 	t := float32(0)
@@ -77,5 +68,5 @@ func drawSlider(font rl.Font, theme render.Theme, label, valueText string, value
 		thumbCol = theme.BorderActive
 	}
 	rl.DrawCircle(int32(track.X+fillW), int32(track.Y+track.Height/2), thumbRadius, thumbCol)
-	rl.DrawTextEx(font, valueText, valuePos, fontSize, 1, textCol)
+	render.DrawRichText(font, valueText, valuePos, fontSize, 1, textCol)
 }

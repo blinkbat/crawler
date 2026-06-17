@@ -94,13 +94,16 @@ func sellableStack(s ItemStack) bool { return s.Count > 0 && itemForSale(ItemInf
 // stacks whose item carries a positive Price. The shop's Sell list reads
 // this so cursor rows line up with drawn rows (mirrors LiveStacks).
 func SellableStacks(inv []ItemStack) []ItemStack {
-	out := make([]ItemStack, 0, len(inv))
-	for _, s := range inv {
-		if sellableStack(s) {
-			out = append(out, s)
-		}
-	}
-	return out
+	return SellableStacksInto(inv, nil)
+}
+
+// SellableStacksInto is the buffer-reusing form of SellableStacks (mirrors
+// LiveStacksInto): it filters into `buf` (truncated first) and returns it, so
+// the per-frame Sell-tab caller keeps one scratch slice across frames instead
+// of allocating each frame. Pass nil to allocate. The filtered content is
+// identical to SellableStacks, so cursor rows still line up with drawn rows.
+func SellableStacksInto(inv, buf []ItemStack) []ItemStack {
+	return filterInto(buf, inv, sellableStack)
 }
 
 // SellableCount is the no-alloc count of sellable stacks — same predicate

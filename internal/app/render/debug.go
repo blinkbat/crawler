@@ -50,7 +50,7 @@ type labelStack struct {
 // Off by default; toggled from the pause menu. No-op when DebugOverlay is
 // false OR when the pause menu is open (labels would just clutter the
 // pause UI), so calling unconditionally from the scene draw is free.
-func DrawDebugOverlay(camera rl.Camera3D, g core.GameState, assets Resources) {
+func DrawDebugOverlay(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if !g.DebugOverlay || g.MenuOpen {
 		return
 	}
@@ -137,17 +137,27 @@ func tileLabelLines(m core.AreaDefinition, x, z int, youHere bool) []string {
 	if youHere {
 		lines = append(lines, "YOU")
 	}
-	if m.Walls[z][x] == core.TileRock {
+	// Read through the bounds-safe accessors (NOT direct m.Walls[z][x] indexing):
+	// the caller only guarantees InBounds against Width/Height, but a struct-built
+	// or mid-edit area can have ragged/short layer rows, which a raw index panics
+	// on. WallAt already treats OOB/ragged as solid.
+	if m.WallAt(x, z) {
 		return append(lines, "Wall")
 	}
-	if f := core.TileLabel(core.TileLayerFloor, m.Floor[z][x]); f != "" {
-		lines = append(lines, f)
+	if c, ok := m.FloorCharAt(x, z); ok {
+		if f := core.TileLabel(core.TileLayerFloor, c); f != "" {
+			lines = append(lines, f)
+		}
 	}
-	if d := core.TileLabel(core.TileLayerDecor, m.Decor[z][x]); d != "" {
-		lines = append(lines, d)
+	if c, ok := m.DecorCharAt(x, z); ok {
+		if d := core.TileLabel(core.TileLayerDecor, c); d != "" {
+			lines = append(lines, d)
+		}
 	}
-	if p := core.TileLabel(core.TileLayerProps, m.Props[z][x]); p != "" {
-		lines = append(lines, p)
+	if c, ok := m.PropCharAt(x, z); ok {
+		if p := core.TileLabel(core.TileLayerProps, c); p != "" {
+			lines = append(lines, p)
+		}
 	}
 	return lines
 }

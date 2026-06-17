@@ -88,10 +88,17 @@ func measureHintSeg(font rl.Font, seg HintSeg, size float32) float32 {
 		if len(seg.Glyphs) > 0 {
 			w += glyphLabelGap
 		}
-		w += rl.MeasureTextEx(font, seg.Label, size, canonicalSpacing(size)).X
+		w += hintLabelMeasureCache.measure(font, seg.Label, size, canonicalSpacing(size)).X
 	}
 	return w
 }
+
+// hintLabelMeasureCache memoizes the hint-bar label widths. The label set is
+// a tiny fixed vocabulary ("Confirm"/"Back"/"Continue"/…) re-measured every
+// frame a footer is up — and a CENTERED DrawHintBar measures the whole bar
+// twice (once to center, once while drawing), so without the cache each footer
+// label is reshaped 2× per frame via cgo.
+var hintLabelMeasureCache measureCache
 
 func measureHintBar(font rl.Font, segs []HintSeg, size float32) float32 {
 	w := float32(0)
@@ -124,7 +131,7 @@ func drawHintSegs(font rl.Font, segs []HintSeg, x, y, size float32, labelCol col
 				cur += glyphLabelGap
 			}
 			drawTextWithShadow(font, s.Label, cur, y, size, fadeColor(labelCol, alpha))
-			cur += rl.MeasureTextEx(font, s.Label, size, canonicalSpacing(size)).X
+			cur += hintLabelMeasureCache.measure(font, s.Label, size, canonicalSpacing(size)).X
 		}
 	}
 	return cur

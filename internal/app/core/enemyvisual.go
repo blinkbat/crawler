@@ -50,10 +50,28 @@ type EnemyVisualOverride struct {
 	ParticleYOffset float32 `json:"particleY"`
 	ParticleZOffset float32 `json:"particleZ"`
 	ParticleScale   float32 `json:"particleScale"`
-	TintR           uint8   `json:"tintR"`
-	TintG           uint8   `json:"tintG"`
-	TintB           uint8   `json:"tintB"`
-	TintA           uint8   `json:"tintA"`
+	// Floating damage-NUMBER anchor nudge. PopupXOffset/PopupYOffset shift where
+	// the combat damage popup spawns above the sprite, along camera-right(+ =
+	// screen right) and world-up(+). This is ADDITIVE on top of the baked-in
+	// default rise, so zero = the historical spot (no migration needed for files
+	// written before these fields existed). Distinct from the hit-GLYPH anchor
+	// (GlyphX/Y, the clarity symbol) — these move the number itself.
+	PopupXOffset float32 `json:"popupX"`
+	PopupYOffset float32 `json:"popupY"`
+	TintR        uint8   `json:"tintR"`
+	TintG        uint8   `json:"tintG"`
+	TintB        uint8   `json:"tintB"`
+	TintA        uint8   `json:"tintA"`
+	// Non-destructive image adjustments applied to the sprite at texture-BUILD
+	// time (read from here at load), NOT baked into the PNG — so they persist in
+	// visuals.json, reload for further editing, and revert to none by zeroing.
+	// Pixelate is a 0..1 mosaic intensity (rendered point-sampled, so the blocks
+	// stay crisp); Brightness/Contrast are -1..1 (mapped to the engine's ±255 /
+	// ±100 ranges). Zero on all three = the untouched sprite (no migration needed
+	// for files written before these fields existed).
+	Pixelate   float32 `json:"pixelate"`
+	Brightness float32 `json:"brightness"`
+	Contrast   float32 `json:"contrast"`
 }
 
 // enemyVisualsFileName is the basename of the override file inside the sprites
@@ -114,7 +132,14 @@ func slugify(s string) string {
 // the caller can surface "your visuals.json is broken" rather than silently
 // reverting the author's saved tuning.
 func LoadEnemyVisualOverrides() (map[string]EnemyVisualOverride, error) {
-	blob, err := os.ReadFile(EnemyVisualsPath())
+	return loadVisualOverrides(EnemyVisualsPath())
+}
+
+// loadVisualOverrides reads a visual-override map (enemy or party — the structs
+// alias) from `path`. A missing file is NOT an error (empty map); a malformed
+// one IS. Shared body behind Load{Enemy,Party}VisualOverrides.
+func loadVisualOverrides(path string) (map[string]EnemyVisualOverride, error) {
+	blob, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]EnemyVisualOverride{}, nil
@@ -133,8 +158,15 @@ func LoadEnemyVisualOverrides() (map[string]EnemyVisualOverride, error) {
 // editor saving one foe never clobbers another foe's saved tuning. Creates the
 // sprites dir if it doesn't exist yet (first-author case).
 func SaveEnemyVisualOverride(slug string, ov EnemyVisualOverride) error {
+	return saveVisualOverride(EnemyVisualsPath(), slug, ov)
+}
+
+// saveVisualOverride writes (or replaces) a single slug's override in the file
+// at `path`, preserving every other entry. Shared body behind
+// Save{Enemy,Party}VisualOverride, including the corrupt-file .bak safety net.
+func saveVisualOverride(path, slug string, ov EnemyVisualOverride) error {
 	all := map[string]EnemyVisualOverride{}
-	blob, err := os.ReadFile(EnemyVisualsPath())
+	blob, err := os.ReadFile(path)
 	switch {
 	case err == nil:
 		// Merge into the existing file. A corrupt (unparseable) file shouldn't
@@ -145,7 +177,7 @@ func SaveEnemyVisualOverride(slug string, ov EnemyVisualOverride) error {
 		// can recover the rest, THEN start fresh. A genuine read error (locked
 		// file, bad permissions) is surfaced below instead of swallowed.
 		if uerr := json.Unmarshal(blob, &all); uerr != nil {
-			_ = os.WriteFile(EnemyVisualsPath()+".bak", blob, AssetFileMode)
+			_ = os.WriteFile(path+".bak", blob, AssetFileMode)
 			all = map[string]EnemyVisualOverride{}
 		}
 	case os.IsNotExist(err):
@@ -156,12 +188,19 @@ func SaveEnemyVisualOverride(slug string, ov EnemyVisualOverride) error {
 		return err
 	}
 	all[slug] = ov
-	return SaveEnemyVisualOverrides(all)
+	return saveVisualOverrides(path, all)
 }
 
 // SaveEnemyVisualOverrides writes the whole override map as indented JSON,
 // creating the sprites asset dir if needed.
 func SaveEnemyVisualOverrides(all map[string]EnemyVisualOverride) error {
+	return saveVisualOverrides(EnemyVisualsPath(), all)
+}
+
+// saveVisualOverrides writes the whole override map as indented JSON to `path`,
+// creating the sprites asset dir if needed. Shared body behind
+// Save{Enemy,Party}VisualOverrides.
+func saveVisualOverrides(path string, all map[string]EnemyVisualOverride) error {
 	blob, err := json.MarshalIndent(all, "", "  ")
 	if err != nil {
 		return err
@@ -169,5 +208,5 @@ func SaveEnemyVisualOverrides(all map[string]EnemyVisualOverride) error {
 	if err := os.MkdirAll(ResolveAssetDir(SpritesDirName), AssetDirMode); err != nil {
 		return err
 	}
-	return os.WriteFile(EnemyVisualsPath(), blob, AssetFileMode)
+	return os.WriteFile(path, blob, AssetFileMode)
 }

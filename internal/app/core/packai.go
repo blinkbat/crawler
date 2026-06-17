@@ -73,13 +73,21 @@ func PackStepIntoPlayer(tx, tz, px, pz int) bool {
 // FacingVector so the AI and the player-step code can't disagree on
 // what "south" means — a future facing-convention change is one switch
 // edit, not a manual table reshuffle.
-func cardinalSteps() [FacingCount][2]int {
+// cardinalStepsBase is the fixed [dx,dz] table for the four facings, derived
+// once from FacingVector. cardinalSteps returns a copy each call (it's a value
+// array), so wanderStep can shuffle it in place without recomputing the table
+// per wandering pack per step.
+var cardinalStepsBase = func() [FacingCount][2]int {
 	var out [FacingCount][2]int
 	for i := 0; i < FacingCount; i++ {
 		dx, dz := FacingVector(i)
 		out[i] = [2]int{dx, dz}
 	}
 	return out
+}()
+
+func cardinalSteps() [FacingCount][2]int {
+	return cardinalStepsBase
 }
 
 // packAIStep is one pack's per-step move plan. PackEngagePlayer is the
@@ -126,8 +134,23 @@ func PlanPackSteps(g *GameState) []packAIStep {
 	if g == nil {
 		return nil
 	}
-	plans := make([]packAIStep, 0, len(g.Packs))
+	// Reuse package-level scratch across steps rather than allocating a fresh
+	// plans slice + occupancy map on every landed player step. PlanPackSteps
+	// runs only on the single-threaded game loop and its result is consumed by
+	// ApplyPackSteps before the next call, so sharing the buffers is safe
+	// (mirrors render's torchCandidateBuf reuse).
+	// Fast path: if no alive pack has a mobile AI, there's nothing to plan — skip
+	// building the occupancy map and the per-pack loop entirely. The common
+	// all-PackAINone map (every map authored without an AI column, and any with
+	// only stationary packs) hits this every landed step instead of churning the
+	// occupancy map for moves that can never happen.
+	if !anyMobilePack(g.Packs) {
+		packPlanBuf = packPlanBuf[:0]
+		return packPlanBuf
+	}
+	plans := packPlanBuf[:0]
 	occupied := buildPackOccupancy(g.Packs, -1)
+	engagePlanned := false
 	for i := range g.Packs {
 		if !PackAlive(g.Packs[i]) {
 			continue
@@ -143,14 +166,47 @@ func PlanPackSteps(g *GameState) []packAIStep {
 		if !ok {
 			continue
 		}
+		// Only ONE engagement resolves per tick — ApplyPackSteps holds a
+		// second engager in place (its move is not applied). Mirror that rule
+		// here: skip the held plan entirely so we DON'T vacate its current
+		// tile in `occupied`. Otherwise a later pack would see the held pack's
+		// still-occupied tile as free and plan onto it, overlapping for a tick.
+		if plan.EngagePlayer && engagePlanned {
+			continue
+		}
 		// Reserve the destination so a later pack doesn't plan into
-		// the same square this frame.
+		// the same square this frame, and free the tile this pack vacates.
 		delete(occupied, [2]int{g.Packs[i].TileX, g.Packs[i].TileZ})
 		occupied[[2]int{plan.NextX, plan.NextZ}] = true
+		if plan.EngagePlayer {
+			engagePlanned = true
+		}
 		plans = append(plans, plan)
 	}
+	packPlanBuf = plans
 	return plans
 }
+
+// anyMobilePack reports whether at least one alive pack has a non-stationary
+// AI mode. A cheap O(packs) scan with no allocation — lets PlanPackSteps
+// short-circuit on all-stationary maps before it builds the occupancy map.
+func anyMobilePack(packs []Pack) bool {
+	for i := range packs {
+		if PackAlive(packs[i]) && packs[i].AI != PackAINone {
+			return true
+		}
+	}
+	return false
+}
+
+// packPlanBuf / packOccupancyBuf are reused across player steps so the
+// per-step pack planning doesn't allocate a fresh slice + map each time.
+// Single-threaded (game loop) and consumed before the next call — see
+// PlanPackSteps.
+var (
+	packPlanBuf      []packAIStep
+	packOccupancyBuf map[[2]int]bool
+)
 
 // ApplyPackSteps applies the moves PlanPackSteps produced: each chosen pack's
 // tile AND visual animation advance, patrol packs persist their pace direction,
@@ -420,7 +476,15 @@ func packCanMoveTo(g *GameState, p Pack, occupied map[[2]int]bool, tx, tz int, a
 // "where am I allowed to move to" check that shouldn't see the
 // moving pack's own tile as blocked).
 func buildPackOccupancy(packs []Pack, exclude int) map[[2]int]bool {
-	occ := make(map[[2]int]bool, len(packs))
+	// Reuse packOccupancyBuf (cleared, not re-made) across steps — see the
+	// buffer-reuse note on PlanPackSteps, the sole caller.
+	occ := packOccupancyBuf
+	if occ == nil {
+		occ = make(map[[2]int]bool, len(packs))
+		packOccupancyBuf = occ
+	} else {
+		clear(occ)
+	}
 	for i, p := range packs {
 		if i == exclude {
 			continue

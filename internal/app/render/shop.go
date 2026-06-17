@@ -35,7 +35,7 @@ type shopRow struct {
 // drawShopOverlay paints the pause-menu shop. Mirrors the menu-card chrome
 // (drawVeiledCard + flanking fleurons) but lays out a two-column row list
 // and a tab header rather than the plain submenu rows.
-func drawShopOverlay(g core.GameState, assets Resources) {
+func drawShopOverlay(g *core.GameState, assets Resources) {
 	font := assets.hudFont
 	rows := shopRows(g)
 	visibleRows := len(rows)
@@ -62,10 +62,7 @@ func drawShopOverlay(g core.GameState, assets Resources) {
 		if i == g.ShopCursor {
 			DrawSelectedRowI(rowX-12, rowY-2, innerW, shopRowH)
 		}
-		nameCol := textPrimary
-		if !r.affordable {
-			nameCol = textMuted
-		}
+		nameCol := rowTextColor(r.affordable, !r.affordable, textMuted)
 		drawTextWithShadow(font, r.name, float32(rowX), float32(rowY+4), FontBody, nameCol)
 		drawTextRightAligned(font, r.price, float32(rowX)+float32(innerW)-12, float32(rowY+4), FontBody, textLabel)
 		rowY += stride
@@ -82,7 +79,7 @@ func drawShopOverlay(g core.GameState, assets Resources) {
 // (affordability gated on current gold); Sell reads the player's priced
 // inventory at half value. The slices match the ones the input handler
 // walks (core.ShopCatalog / core.SellableStacks) so cursor and rows align.
-func shopRows(g core.GameState) []shopRow {
+func shopRows(g *core.GameState) []shopRow {
 	switch g.ShopTab {
 	case core.ShopTabSell:
 		stacks := core.SellableStacks(g.Inventory)
@@ -121,16 +118,11 @@ func shopEmptyLabel(tab core.ShopTab) string {
 }
 
 // drawShopTabs paints the "Buy   Sell" header, the active tab gilt and the
-// other muted. Anchored at (x, y); each label is laid out left-to-right.
+// other muted. Anchored at (x, y); shares the simple text-tab rhythm with the
+// Journal sub-tabs via drawTextTabStrip (no underline here).
 func drawShopTabs(font rl.Font, active core.ShopTab, x, y float32) {
-	cursorX := x
-	for tab := core.ShopTab(0); tab < core.ShopTabCount; tab++ {
-		label := core.ShopTabLabel(tab)
-		col := textMuted
-		if tab == active {
-			col = borderActive
-		}
-		drawTextWithShadow(font, label, cursorX, y, FontBody, col)
-		cursorX += rl.MeasureTextEx(font, label, FontBody, FontSpacingBody).X + 28
-	}
+	drawTextTabStrip(font, x, y, int(core.ShopTabCount), int(active),
+		func(i int) string { return core.ShopTabLabel(core.ShopTab(i)) },
+		func(s string) float32 { return rl.MeasureTextEx(font, s, FontBody, FontSpacingBody).X },
+		borderActive, 28, false)
 }

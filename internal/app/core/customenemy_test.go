@@ -2,6 +2,7 @@ package core
 
 import (
 	"crawler/internal/app/core/mapfile"
+	"reflect"
 	"testing"
 )
 
@@ -182,6 +183,111 @@ func TestCustomEnemyDefFromMapRejectsBadFields(t *testing.T) {
 				t.Fatalf("expected an error for %s, got nil", tc.name)
 			}
 		})
+	}
+}
+
+// TestCustomEnemyDefToRuntime guards the def->runtime half of the lockstep
+// chain that TestCustomEnemyDefMapRoundTrip does NOT cover. That test pins
+// the encode<->decode pair (sites 3 & 4); this one pins Definition() (site 5)
+// and Instantiate() (site 6): a fully-populated def is pushed through
+// MapCustomEnemyFromDef -> CustomEnemyDefFromMap (so the mapfile round trip
+// is also re-asserted on the way in) and then through Definition() and
+// Instantiate(), and every authored stat / override is checked on the
+// materialized runtime EnemyDefinition. So if a new field is added to the
+// struct + schema + encode/decode but forgotten in Definition()/Instantiate(),
+// it drops here instead of silently never reaching combat math.
+func TestCustomEnemyDefToRuntime(t *testing.T) {
+	orig := CustomEnemyDef{
+		Name:            "Runtime Test", // has whitespace -> sanitizes to Runtime_Test
+		BaseKind:        EnemyGoblin,
+		HP:              42, // must be > 0 (load rejects <= 0)
+		MP:              7,
+		Stats:           Stats{STR: 11, DEX: 12, INT: 13, WIS: 14, VIT: 15, SPD: 16},
+		Armor:           4,
+		MDef:            5,
+		XPValue:         88,
+		Tier:            6,
+		AttackDamage:    9,
+		SkillCastChance: 0.75,
+		SpellPower:      8,
+		Skills:          []SkillID{SkillFirebolt, SkillSleep},
+	}
+
+	// Belt-and-suspenders: confirm the fixture really sets every field to a
+	// non-zero value, so an assertion below can't pass only because both
+	// sides defaulted to the same zero (mirrors the round-trip test's guard).
+	rv := reflect.ValueOf(orig)
+	for i := 0; i < rv.NumField(); i++ {
+		if rv.Field(i).IsZero() {
+			t.Errorf("fixture leaves field %q at its zero value; set it to a distinct non-default value so the path actually covers it", rv.Type().Field(i).Name)
+		}
+	}
+
+	// Round-trip through the mapfile shape on the way in, so the def the
+	// runtime sees is the one that survives a save/load (not just the raw
+	// in-memory fixture). Name picks up SanitizeCustomEnemyName here.
+	row, err := MapCustomEnemyFromDef(orig)
+	if err != nil {
+		t.Fatalf("MapCustomEnemyFromDef: %v", err)
+	}
+	def, err := CustomEnemyDefFromMap(row)
+	if err != nil {
+		t.Fatalf("CustomEnemyDefFromMap: %v", err)
+	}
+
+	// Definition() (site 5): the authored stats/overrides must land on the
+	// synthesized EnemyDefinition battle and selectors read.
+	ed := def.Definition()
+	if ed.MaxHP != orig.HP {
+		t.Errorf("Definition MaxHP = %d, want authored %d", ed.MaxHP, orig.HP)
+	}
+	if ed.Stats != orig.Stats {
+		t.Errorf("Definition Stats = %+v, want %+v", ed.Stats, orig.Stats)
+	}
+	if ed.Armor != orig.Armor || ed.MDef != orig.MDef {
+		t.Errorf("Definition Armor/MDef = %d/%d, want %d/%d", ed.Armor, ed.MDef, orig.Armor, orig.MDef)
+	}
+	if ed.XPValue != orig.XPValue || ed.Tier != orig.Tier {
+		t.Errorf("Definition XPValue/Tier = %d/%d, want %d/%d", ed.XPValue, ed.Tier, orig.XPValue, orig.Tier)
+	}
+	if ed.AttackDamage != orig.AttackDamage || ed.SpellPower != orig.SpellPower {
+		t.Errorf("Definition AttackDamage/SpellPower = %d/%d, want %d/%d", ed.AttackDamage, ed.SpellPower, orig.AttackDamage, orig.SpellPower)
+	}
+	if ed.SkillCastChance != orig.SkillCastChance {
+		t.Errorf("Definition SkillCastChance = %v, want %v", ed.SkillCastChance, orig.SkillCastChance)
+	}
+	if !reflect.DeepEqual(ed.Skills, orig.Skills) {
+		t.Errorf("Definition Skills = %+v, want %+v", ed.Skills, orig.Skills)
+	}
+	// Display name derives from the (sanitized) authored name: underscores
+	// become spaces (SanitizeCustomEnemyName folded the typed space to "_").
+	if ed.SingularName != "Runtime Test" {
+		t.Errorf("Definition SingularName = %q, want %q", ed.SingularName, "Runtime Test")
+	}
+
+	// Instantiate() (site 6): the materialized Enemy must keep the base kind
+	// for renderer lookup, carry the override, and apply the authored HP
+	// scaled by the global difficulty dial (matching NewEnemy / the existing
+	// pack runtime test).
+	enemy := def.Instantiate()
+	if enemy.Kind != orig.BaseKind {
+		t.Errorf("Instantiate Kind = %v, want base kind %v", enemy.Kind, orig.BaseKind)
+	}
+	if !enemy.HasDefinitionOverride {
+		t.Fatalf("Instantiate should carry a definition override")
+	}
+	wantHP := ScaleEnemyDifficulty(orig.HP)
+	if enemy.HP != wantHP || enemy.MaxHP != wantHP {
+		t.Errorf("Instantiate HP/MaxHP = %d/%d, want %d", enemy.HP, enemy.MaxHP, wantHP)
+	}
+	if enemy.Armor != orig.Armor {
+		t.Errorf("Instantiate Armor = %d, want %d", enemy.Armor, orig.Armor)
+	}
+	// EnemyInfoFor overlays the per-instance override, so reading it back
+	// confirms the authored stats survive all the way to the combat reader.
+	got := EnemyInfoFor(enemy)
+	if got.AttackDamage != orig.AttackDamage || got.SpellPower != orig.SpellPower || got.Tier != orig.Tier {
+		t.Errorf("EnemyInfoFor override lost authored stats: %+v", got)
 	}
 }
 

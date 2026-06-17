@@ -2,36 +2,10 @@ package render
 
 import (
 	"image/color"
-	"strconv"
 
 	"crawler/internal/app/core"
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
-
-// stepCounterCache memoizes the formatted "step N / Total" string so
-// the HUD doesn't rebuild it every frame when nothing's changed. The
-// counter only advances when the player takes a tile-step (rare —
-// once every few hundred frames), but the minimap painted it through
-// fmt.Sprintf 60 Hz. Stash the last step and result.
-var stepCounterCache struct {
-	step    int
-	text    string
-	primed  bool
-	maxStep int
-}
-
-func stepCounterText(modStep int) string {
-	if stepCounterCache.primed &&
-		stepCounterCache.step == modStep &&
-		stepCounterCache.maxStep == core.StepsPerCycle {
-		return stepCounterCache.text
-	}
-	stepCounterCache.text = "step " + strconv.Itoa(modStep) + " / " + strconv.Itoa(core.StepsPerCycle)
-	stepCounterCache.step = modStep
-	stepCounterCache.maxStep = core.StepsPerCycle
-	stepCounterCache.primed = true
-	return stepCounterCache.text
-}
 
 // Minimap geometry. Width / height pre-computed so MinimapWidth /
 // MinimapBottomY (below) can be called by sibling HUD panels — the
@@ -61,7 +35,7 @@ func MinimapWidth() int32 { return minimapPanelW }
 // hudColumnGap so the two read as a single stacked column.
 func MinimapBottomY() int32 { return hudEdgePad + minimapPanelH }
 
-func drawMinimap(m core.AreaDefinition, g core.GameState, assets Resources) {
+func drawMinimap(m core.AreaDefinition, g *core.GameState, assets Resources) {
 	cell := minimapCell
 	viewCells := minimapViewCells
 	pad := hudEdgePad
@@ -147,18 +121,34 @@ func drawMinimapCartographerFrame(font rl.Font, x, y, size int32) {
 	drawDiamondPip(float32(x-3), float32(y+size+2), 2.6, pipCol)
 	drawDiamondPip(float32(x+size+2), float32(y+size+2), 2.6, pipCol)
 
-	// Compass initials are tiny and outside the cell area, so they don't
-	// consume map real estate but still make the inset feel authored.
-	nCol := fadeColor(inkAccent, 0.78)
+	// Compass initials sit JUST INSIDE the grid edges now (N/S used to float
+	// above/below the plate, reading as detached). Each gets a strong dark halo
+	// (drawCompassLabel) so it stays legible over both the dark walkable floor
+	// and the light blocker cells it may overlap.
+	nCol := fadeColor(inkAccent, 0.92)
 	nm := minimapMeasureCache.measure(font, "N", FontTiny, 1)
 	sm := minimapMeasureCache.measure(font, "S", FontTiny, 1)
 	wm := minimapMeasureCache.measure(font, "W", FontTiny, 1)
 	em := minimapMeasureCache.measure(font, "E", FontTiny, 1)
-	drawTextWithShadow(font, "N", float32(x)+float32(size)/2-nm.X/2, float32(y)-13, FontTiny, nCol)
-	drawTextWithShadow(font, "S", float32(x)+float32(size)/2-sm.X/2, float32(y+size)+4, FontTiny, nCol)
-	drawTextWithShadow(font, "W", float32(x)+3, float32(y)+float32(size)/2-wm.Y/2, FontTiny, nCol)
-	drawTextWithShadow(font, "E", float32(x+size)-em.X-4, float32(y)+float32(size)/2-em.Y/2, FontTiny, nCol)
+	drawCompassLabel(font, "N", float32(x)+float32(size)/2-nm.X/2, float32(y)+3, nCol)
+	drawCompassLabel(font, "S", float32(x)+float32(size)/2-sm.X/2, float32(y+size)-sm.Y-3, nCol)
+	drawCompassLabel(font, "W", float32(x)+4, float32(y)+float32(size)/2-wm.Y/2, nCol)
+	drawCompassLabel(font, "E", float32(x+size)-em.X-4, float32(y)+float32(size)/2-em.Y/2, nCol)
 }
+
+// drawCompassLabel paints a minimap compass initial with a strong dark halo —
+// a 6-way black offset under the colored glyph — so the letter reads over both
+// the dark floor and the bright blocker cells now that N/S sit inside the grid.
+// Heavier than drawTextWithShadow's single drop, which washed out over light cells.
+func drawCompassLabel(font rl.Font, s string, x, y float32, col rl.Color) {
+	halo := fadeColor(rl.Black, 0.85)
+	for _, d := range compassHaloOffsets {
+		rl.DrawTextEx(font, s, rl.NewVector2(x+d[0], y+d[1]), FontTiny, 1, halo)
+	}
+	rl.DrawTextEx(font, s, rl.NewVector2(x, y), FontTiny, 1, col)
+}
+
+var compassHaloOffsets = [6][2]float32{{-1, 0}, {1, 0}, {0, -1}, {0, 1}, {1, 1}, {-1, -1}}
 
 // minimapPropColors keys every prop-layer char to its minimap swatch.
 // Map-driven instead of a switch so a missing entry stands out at code
@@ -178,6 +168,16 @@ func init() {
 	for _, c := range core.PropTileChars() {
 		if _, ok := minimapPropColors[c]; !ok {
 			panic("render/minimap: missing color for prop tile " + string(c))
+		}
+	}
+	// Reverse coverage: a color keyed to a char core no longer (or never)
+	// recognises as a prop is dead data that the forward loop can't catch —
+	// it means minimapPropColors and core's prop set have drifted (a rename,
+	// a removed tile). Fail at startup so the two lists stay in lockstep both
+	// ways, not just "every core prop has a color."
+	for c := range minimapPropColors {
+		if !core.IsPropChar(c) {
+			panic("render/minimap: minimapPropColors has color for '" + string(c) + "' which is not a core prop tile — remove it or add it to core.PropTileChars")
 		}
 	}
 	for _, c := range core.BlockingFloorChars() {
@@ -278,11 +278,9 @@ var minimapMeasureCache measureCache
 func drawMinimapTimeOfDay(font rl.Font, stepCount int, x, y, width int32) {
 	phase, progress := core.PhaseAtStep(stepCount)
 	name := core.PhaseName(phase)
-	// Line 1: "DAWN  step 12 / 150" (left-aligned phase, right-aligned counter).
+	// Phase name only — the raw "step N / 150" counter was removed (it read as
+	// debug chrome); the bar + cursor below carry the through-the-day progress.
 	drawTextWithShadow(font, name, float32(x), float32(y), FontSmall, textPrimary)
-	counter := stepCounterText(stepCount % core.StepsPerCycle)
-	measure := minimapMeasureCache.measure(font, counter, FontTiny, 1)
-	drawTextWithShadow(font, counter, float32(x)+float32(width)-measure.X, float32(y)+1, FontTiny, textHint)
 	// Line 2: thin track, with the phase highlighted as a 1/N segment that
 	// fills as the player walks through it.
 	trackY := y + 18
@@ -291,13 +289,16 @@ func drawMinimapTimeOfDay(font rl.Font, stepCount int, x, y, width int32) {
 	rl.DrawRectangle(x-2, trackY-2, trackW+4, trackH+4, fadeColor(woodDark, 0.72))
 	rl.DrawRectangle(x, trackY, trackW, trackH, barTrack)
 	segW := trackW / int32(core.TimeOfDayCount)
-	// Past phases: solid color. Current phase: filled by progress.
+	// Past phases: warm wood fill. Current phase: bright gilt by progress. The
+	// fills are wood/brass tones (woodenPhaseColor mutes each phase's sky tint
+	// heavily toward woodAccent) so the strip reads as brass-on-wood cabinetry
+	// in line with the rest of the HUD, not a saturated rainbow.
 	for i := 0; i < int(phase); i++ {
-		rl.DrawRectangle(x+int32(i)*segW, trackY, segW-1, trackH, phaseColors[i])
+		rl.DrawRectangle(x+int32(i)*segW, trackY, segW-1, trackH, woodenPhaseColor(phaseColors[i]))
 	}
 	curW := int32(float32(segW) * progress)
 	if curW > 0 {
-		rl.DrawRectangle(x+int32(phase)*segW, trackY, curW, trackH, phaseColors[phase])
+		rl.DrawRectangle(x+int32(phase)*segW, trackY, curW, trackH, woodenPhaseColor(phaseColors[phase]))
 	}
 	// Tiny gilt cursor riding the current phase — a 3-px diamond
 	// pip parked above the bar at the exact progress position, like
@@ -319,6 +320,16 @@ func drawMinimapTimeOfDay(font rl.Font, stepCount int, x, y, width int32) {
 // phaseColors mirrors the rough sky tint of each lighting phase so the HUD
 // strip itself reads as a tiny day at a glance. Indexed by TimeOfDay; the
 // [core.TimeOfDayCount] array size is itself the compile-time length guard.
+// woodenPhaseColor blends a phase's bright sky tint heavily toward the HUD's
+// wood accent so the day/night strip reads as warm brass-on-wood cabinetry
+// rather than a saturated rainbow, while keeping a faint per-phase hue cue.
+func woodenPhaseColor(c rl.Color) rl.Color {
+	const k = 0.64 // pull toward wood
+	out := core.MixColor(c, woodAccent, k) // per-channel lerp lives in core, not a local re-roll
+	out.A = 255                            // strip always paints fully opaque regardless of input alphas
+	return out
+}
+
 var phaseColors = [core.TimeOfDayCount]rl.Color{
 	core.Dawn:      rl.NewColor(232, 168, 152, 255), // dawn — rose
 	core.Morning:   rl.NewColor(220, 224, 200, 255), // morning — pale gold

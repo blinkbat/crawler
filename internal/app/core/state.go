@@ -199,16 +199,42 @@ func placeChests(a AreaDefinition) []Chest {
 	return out
 }
 
-// placeCrystals drops the area's healing crystals. Today it synthesizes ONE
-// crystal on a walkable tile next to the start (a Grimrock-style save point by
-// the entrance), seeded CHARGED so the player can bank a save+heal on arrival.
-// It scans the four cardinal neighbors for a standable, non-door tile and falls
-// back to the start tile itself (crystals are non-blocking, so standing on one
-// is fine — the player just triggers it immediately). Runs for every area, so
-// each map's entrance gets a save crystal. (Editor-authored placement is a
-// future enhancement; the entity is runtime-only for now, but its charge state
-// persists via SaveData.)
+// placeCrystals drops the area's healing crystals, each seeded CHARGED so the
+// player can bank a save+heal on contact. The source of positions depends on
+// whether the map authored its crystals:
+//   - CrystalsAuthored (the map carried an explicit crystals: section, which
+//     the editor always writes) ⇒ use exactly a.CrystalSpawns. An authored but
+//     EMPTY list means the author deliberately wants zero crystals, and is
+//     honored as such — no fallback.
+//   - otherwise (a legacy map predating editable crystals) ⇒ synthesize the
+//     default entrance crystal via DefaultEntranceCrystalSpawns so those maps
+//     keep their Grimrock-style save point unchanged.
+//
+// Charge state persists per-tile via SaveData. Authored crystal tiles are
+// validated standable + duplicate-free at load (AreaFromMapFile) and guarded by
+// the editor's placement rules, so this conversion can trust them directly.
 func placeCrystals(a AreaDefinition) []Crystal {
+	spawns := a.CrystalSpawns
+	if !a.CrystalsAuthored && len(spawns) == 0 {
+		spawns = DefaultEntranceCrystalSpawns(a)
+	}
+	out := make([]Crystal, 0, len(spawns))
+	for _, c := range spawns {
+		out = append(out, Crystal{TileX: c.TileX, TileZ: c.TileZ, Charge: CrystalRechargeSteps, Charged: true})
+	}
+	return out
+}
+
+// DefaultEntranceCrystalSpawns returns the auto-placed entrance crystal's
+// position (a one-element slice, or nil when there's nowhere clear) — a
+// Grimrock-style save point next to the player start. It scans the four
+// cardinal neighbors for a standable, non-door tile and lands on the start tile
+// itself only if no neighbor is clear; if the start IS a door it prefers any
+// standable neighbor over planting a crystal on the door, giving up (nil) only
+// when nothing is clear. Shared by placeCrystals (the legacy-map fallback) and
+// the editor, which seeds this as a real, editable CrystalSpawn when an
+// unauthored map is opened so the entrance crystal can be moved or removed.
+func DefaultEntranceCrystalSpawns(a AreaDefinition) []CrystalSpawn {
 	sx := clampStartCoord(a.StartTileX, a.Width)
 	sz := clampStartCoord(a.StartTileZ, a.Height)
 	isDoorTile := func(x, z int) bool {
@@ -219,7 +245,20 @@ func placeCrystals(a AreaDefinition) []Crystal {
 		}
 		return false
 	}
-	neighbors := [...][2]int{{0, -1}, {0, 1}, {-1, 0}, {1, 0}}
+	// Cardinal neighbour offsets, derived from FacingVector so the step
+	// deltas can't drift from the canonical facing convention (the same
+	// source cardinalStepsBase in packai.go builds from). The scan ORDER is
+	// deliberately North, South, West, East — NOT FacingVector's N/E/S/W —
+	// because it determines which neighbour an entrance crystal prefers when
+	// several are clear, and this order preserves the historical pick. Build
+	// from FacingVector per direction (rather than reusing the N/E/S/W-ordered
+	// cardinalStepsBase) so the deltas stay canonical without disturbing that
+	// long-standing preference order.
+	step := func(facing int) [2]int {
+		dx, dz := FacingVector(facing)
+		return [2]int{dx, dz}
+	}
+	neighbors := [...][2]int{step(North), step(South), step(West), step(East)}
 	cx, cz, found := sx, sz, false
 	for _, d := range neighbors {
 		nx, nz := sx+d[0], sz+d[1]
@@ -237,12 +276,12 @@ func placeCrystals(a AreaDefinition) []Crystal {
 		for _, d := range neighbors {
 			nx, nz := sx+d[0], sz+d[1]
 			if a.InBounds(nx, nz) && !a.BlockedAt(nx, nz) {
-				return []Crystal{{TileX: nx, TileZ: nz, Charge: CrystalRechargeSteps, Charged: true}}
+				return []CrystalSpawn{{TileX: nx, TileZ: nz}}
 			}
 		}
 		return nil
 	}
-	return []Crystal{{TileX: cx, TileZ: cz, Charge: CrystalRechargeSteps, Charged: true}}
+	return []CrystalSpawn{{TileX: cx, TileZ: cz}}
 }
 
 // CrystalIndexAt returns the index of the crystal exactly on the tile, or -1.
@@ -314,18 +353,16 @@ func ResetGameState(g *GameState) {
 func resetPartyForFieldRecovery(party []PartyMember) []PartyMember {
 	out := make([]PartyMember, len(party))
 	copy(out, party)
-	// Delegate the "what's a combat-transient status" list to the canonical
-	// clearers (shared with the save sanitizer) rather than re-listing it.
-	ClearPartyTransientStatuses(out) // Sleep / Stun / Webbed / Confused / Defending
-	ReleaseAllIngested(out)          // Ingested / IngestedBy
+	// Delegate the "what's a combat-transient" list (statuses, ingestion, anim
+	// timers) to the shared clearer rather than re-listing it.
+	clearPartyCombatTransients(out)
 	for i := range out {
 		out[i].HP = out[i].MaxHP
 		out[i].MP = out[i].MaxMP
 		// Field recovery is a FULL restore, so it also clears Poison — which
-		// the battle-exit clearer deliberately preserves, hence the explicit
-		// line here on top of the shared clearers.
+		// the shared clearer deliberately preserves, hence the explicit line
+		// here on top of it.
 		out[i].PoisonTurns = 0
-		clearMemberAnimTimers(&out[i])
 	}
 	return out
 }

@@ -82,10 +82,18 @@ func (b Bestiary) Entry(kind EnemyKind) BestiaryEntry {
 // cursor indexes (render and input both call this, so the drawn rows and
 // the navigable count can't drift). Nil-safe; nil when nothing's been seen.
 func (b Bestiary) SeenKinds() []EnemyKind {
+	return b.SeenKindsInto(nil)
+}
+
+// SeenKindsInto is the buffer-reusing variant of SeenKinds: it truncates buf
+// and refills it, so a per-frame caller (the Bestiary tab draw) can hold one
+// scratch slice and avoid a fresh allocation every frame. Pass nil for the
+// allocating behaviour. Result order matches SeenKinds (canonical registry order).
+func (b Bestiary) SeenKindsInto(buf []EnemyKind) []EnemyKind {
+	out := buf[:0]
 	if len(b) == 0 {
-		return nil
+		return out
 	}
-	var out []EnemyKind
 	// Walk the registry slice directly rather than EnemyKinds(), whose
 	// defensive copy of every (large) EnemyDefinition would allocate on a
 	// per-frame draw path. We only read each def's Kind here.

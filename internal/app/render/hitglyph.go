@@ -204,6 +204,11 @@ func drawHitGlyph(kind hitGlyphKind, cx, cy, t, scale float32) {
 		drawGlyphHoly(cx, cy, t, r)
 	case glyphVenom:
 		drawGlyphVenom(cx, cy, t, r)
+	default:
+		// glyphNone (and any future unmapped kind) draws nothing — a hit with
+		// no clarity glyph. No-op rather than a panic: this is draw-time
+		// dispatch off a per-frame value, not a startup coverage assert, so a
+		// stray kind should silently skip its frame rather than crash the HUD.
 	}
 }
 

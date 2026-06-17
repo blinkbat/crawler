@@ -17,6 +17,16 @@ const (
 	DisplayWindowed
 )
 
+// displayModeNames indexes DisplayMode → menu label. A single table (rather
+// than an if/return pair) means a future third mode added to the iota block
+// surfaces a "?" label here instead of being silently folded into "Windowed",
+// matching how other label tables in the codebase derive their text from a
+// parallel slice indexed by the enum.
+var displayModeNames = []string{
+	DisplayFullscreen: "Fullscreen",
+	DisplayWindowed:   "Windowed",
+}
+
 // lastWindowedW/H snapshot the window's size at the moment we transition
 // AWAY from Windowed. Restored on the next transition back. Initialized to
 // core.InitialWindowWidth/Height so a fresh process that never sees a user
@@ -36,10 +46,8 @@ func CurrentDisplayMode() DisplayMode {
 	if !rl.IsWindowState(rl.FlagBorderlessWindowedMode) {
 		return DisplayWindowed
 	}
-	monitor := rl.GetCurrentMonitor()
-	mw := rl.GetMonitorWidth(monitor)
-	mh := rl.GetMonitorHeight(monitor)
-	if mw <= 0 || mh <= 0 {
+	mw, mh, ok := currentMonitorSize()
+	if !ok {
 		return DisplayWindowed
 	}
 	if rl.GetScreenWidth() >= mw && rl.GetScreenHeight() >= mh {
@@ -48,12 +56,29 @@ func CurrentDisplayMode() DisplayMode {
 	return DisplayWindowed
 }
 
-// DisplayModeLabel returns the menu-row label for the given mode.
+// DisplayModeLabel returns the menu-row label for the given mode. An
+// out-of-range mode returns a visible "?" sentinel rather than masquerading
+// as one of the real modes, so a missing displayModeNames entry reads as a
+// bug at the UI rather than a silent mislabel.
 func DisplayModeLabel(m DisplayMode) string {
-	if m == DisplayFullscreen {
-		return "Fullscreen"
+	if int(m) < 0 || int(m) >= len(displayModeNames) {
+		return "Display ?"
 	}
-	return "Windowed"
+	return displayModeNames[m]
+}
+
+// currentMonitorSize reports the active monitor's pixel dimensions, with ok
+// false when raylib can't report them (the <=0 guard the size-dependent
+// transitions all need). Centralizes the GetCurrentMonitor + width + height +
+// guard triple so the three call sites can't drift on the bounds check.
+func currentMonitorSize() (mw, mh int, ok bool) {
+	monitor := rl.GetCurrentMonitor()
+	mw = rl.GetMonitorWidth(monitor)
+	mh = rl.GetMonitorHeight(monitor)
+	if mw <= 0 || mh <= 0 {
+		return 0, 0, false
+	}
+	return mw, mh, true
 }
 
 // DisplayMenuRowLabel returns the full "Display: Fullscreen" / "Display:
@@ -81,13 +106,11 @@ func SetDisplayMode(m DisplayMode) {
 				lastWindowedH = h
 			}
 		}
-		monitor := rl.GetCurrentMonitor()
-		position := rl.GetMonitorPosition(monitor)
-		w := rl.GetMonitorWidth(monitor)
-		h := rl.GetMonitorHeight(monitor)
-		if w <= 0 || h <= 0 {
+		w, h, ok := currentMonitorSize()
+		if !ok {
 			return
 		}
+		position := rl.GetMonitorPosition(rl.GetCurrentMonitor())
 		// Set the borderless flag BEFORE the size/position so the OS doesn't
 		// transiently flash a title-bar windowed state at monitor size. Then
 		// SetWindowSize and SetWindowPosition land in the already-borderless
@@ -101,11 +124,8 @@ func SetDisplayMode(m DisplayMode) {
 	// default if never resized), and re-center on the active monitor.
 	rl.ClearWindowState(rl.FlagBorderlessWindowedMode)
 	rl.SetWindowSize(int(lastWindowedW), int(lastWindowedH))
-	monitor := rl.GetCurrentMonitor()
-	position := rl.GetMonitorPosition(monitor)
-	mw := rl.GetMonitorWidth(monitor)
-	mh := rl.GetMonitorHeight(monitor)
-	if mw > 0 && mh > 0 {
+	position := rl.GetMonitorPosition(rl.GetCurrentMonitor())
+	if mw, mh, ok := currentMonitorSize(); ok {
 		cx := int(position.X) + (mw-int(lastWindowedW))/2
 		cy := int(position.Y) + (mh-int(lastWindowedH))/2
 		rl.SetWindowPosition(cx, cy)

@@ -17,7 +17,7 @@ import (
 // minigame — so the player can keep reading the last few events while
 // they press. The action menu yields to the bar (it has nothing useful
 // to show during press/charge anyway).
-func drawBattleHUD(g core.GameState, assets Resources) {
+func drawBattleHUD(g *core.GameState, assets Resources) {
 	drawEnemyRoster(g, assets)
 	drawActionLogPanel(g, assets)
 	if !timingActive(g) {
@@ -27,7 +27,7 @@ func drawBattleHUD(g core.GameState, assets Resources) {
 
 // timingActive reports whether the timed-hit bar is currently the focus of
 // the HUD. Used to hide panels that share its strip.
-func timingActive(g core.GameState) bool {
+func timingActive(g *core.GameState) bool {
 	return g.Battle.Phase == core.BattleAttackTiming || g.Battle.Phase == core.BattleEnemyTiming
 }
 
@@ -36,7 +36,7 @@ func timingActive(g core.GameState) bool {
 // for the active actor + chosen target should persist through the bar so the
 // player keeps their bearings, instead of flickering off the moment the bar
 // arms and back on when it resolves.
-func inPlayerTurn(g core.GameState) bool {
+func inPlayerTurn(g *core.GameState) bool {
 	return g.Battle.Phase == core.BattlePlayer || g.Battle.Phase == core.BattleAttackTiming
 }
 
@@ -47,7 +47,7 @@ func inPlayerTurn(g core.GameState) bool {
 // on the targeted enemy: the in-world chevron and the enemy-roster
 // row highlight. Keeping the predicate in one place prevents them
 // from drifting when the targeting rule changes.
-func targetingEnemy(g core.GameState) bool {
+func targetingEnemy(g *core.GameState) bool {
 	return g.Battle.Phase == core.BattlePlayer && g.Battle.ActionMode == core.ActionEnemyTarget
 }
 
@@ -56,7 +56,7 @@ func targetingEnemy(g core.GameState) bool {
 // to gate the friendly selection marker so it appears in both modes
 // (audit-3 caught Item targeting silently dropping the marker because the
 // check was specific to ActionPartyTarget).
-func targetingAlly(g core.GameState) bool {
+func targetingAlly(g *core.GameState) bool {
 	return g.Battle.ActionMode == core.ActionPartyTarget || g.Battle.ActionMode == core.ActionItemTarget
 }
 
@@ -75,16 +75,19 @@ type enemyStatusPillVisual struct {
 	turns   func(*core.Enemy) int
 	fill    rl.Color
 	outline rl.Color
-	prefix  string
+	// glyph paints the status's symbol, reusing the SAME vector glyphs the
+	// party cards draw (drawStatusGlyph*) so both surfaces read with icons,
+	// not a per-side letter code. Dark ink on the bright pill fill.
+	glyph   func(cx, cy, r float32, col rl.Color)
 	flicker bool
 }
 
 var enemyStatusPillVisuals = [enemyStatusCount]enemyStatusPillVisual{
-	enemyStatusBurn:   {turns: func(e *core.Enemy) int { return e.BurnTurns }, fill: statusBurn, outline: statusBurnOutline, flicker: true},
-	enemyStatusSleep:  {turns: func(e *core.Enemy) int { return e.SleepTurns }, fill: statusSleep, outline: statusSleepOutline, prefix: "Z"},
-	enemyStatusPoison: {turns: func(e *core.Enemy) int { return e.PoisonTurns }, fill: statusPoison, outline: statusPoisonOutline, prefix: "P", flicker: true},
-	enemyStatusBleed:  {turns: func(e *core.Enemy) int { return e.BleedTurns }, fill: statusBleed, outline: statusBleedOutline, prefix: "B", flicker: true},
-	enemyStatusStun:   {turns: func(e *core.Enemy) int { return e.StunTurns }, fill: statusStun, outline: statusStunOutline, prefix: "S"},
+	enemyStatusBurn:   {turns: func(e *core.Enemy) int { return e.BurnTurns }, fill: statusBurn, outline: statusBurnOutline, glyph: drawStatusGlyphBurn, flicker: true},
+	enemyStatusSleep:  {turns: func(e *core.Enemy) int { return e.SleepTurns }, fill: statusSleep, outline: statusSleepOutline, glyph: drawStatusGlyphAsleep},
+	enemyStatusPoison: {turns: func(e *core.Enemy) int { return e.PoisonTurns }, fill: statusPoison, outline: statusPoisonOutline, glyph: drawStatusGlyphPoisoned, flicker: true},
+	enemyStatusBleed:  {turns: func(e *core.Enemy) int { return e.BleedTurns }, fill: statusBleed, outline: statusBleedOutline, glyph: drawStatusGlyphBleed, flicker: true},
+	enemyStatusStun:   {turns: func(e *core.Enemy) int { return e.StunTurns }, fill: statusStun, outline: statusStunOutline, glyph: drawStatusGlyphStunned},
 }
 
 func init() {
@@ -95,24 +98,23 @@ func init() {
 		if v.turns == nil {
 			panic(fmt.Sprintf("enemyStatusPillVisuals[%d] has no turns reader", i))
 		}
-		// Pre-format this pill prefix's turn labels so the per-frame roster draw
-		// never Sprintf's. Sourcing the keys from the pill table here means a new
-		// status's prefix is cached automatically — no parallel list to forget.
-		if _, ok := statusTurnsCache[v.prefix]; ok {
-			continue
+		if v.glyph == nil {
+			panic(fmt.Sprintf("enemyStatusPillVisuals[%d] has no glyph — add the row", i))
 		}
-		labels := make([]string, statusTurnsCacheMax)
-		for n := range labels {
-			labels[n] = fmt.Sprintf("%s%d", v.prefix, n)
-		}
-		statusTurnsCache[v.prefix] = labels
+	}
+	// Pre-format the bare turn-count strings the pills show beside the glyph so
+	// the per-frame roster draw never Sprintf's (up to 4 statuses × 6 enemies =
+	// 24 labels/frame in heavy combat). Numbers only now — the status itself is
+	// conveyed by the glyph + fill, not a letter prefix.
+	for n := range statusTurnNumLabels {
+		statusTurnNumLabels[n] = fmt.Sprintf("%d", n)
 	}
 }
 
 // drawEnemyRoster shows the active pack at the top of the screen.
 // Replaces the legacy floating target tooltip and the dense enemy info line
 // that used to sit atop the bottom panel.
-func drawEnemyRoster(g core.GameState, assets Resources) {
+func drawEnemyRoster(g *core.GameState, assets Resources) {
 	if g.Battle.Phase == core.BattleWon || g.Battle.Phase == core.BattleLost {
 		return
 	}
@@ -143,8 +145,8 @@ func drawEnemyRoster(g core.GameState, assets Resources) {
 	// when the timing bar arms (Phase → BattleAttackTiming), both go
 	// dark, honouring "yellow cursor only when targeting."
 	targetable := targetingEnemy(g)
-	members := core.BattleMembers(&g)
-	selectedSlot := core.SelectedEnemySlot(&g)
+	members := core.BattleMembers(g)
+	selectedSlot := core.SelectedEnemySlot(g)
 
 	for i, slot := range slots {
 		// &members[slot] — pass the enemy by pointer so the per-row draw
@@ -165,11 +167,11 @@ func drawEnemyRoster(g core.GameState, assets Resources) {
 // raylib's draw loop is single-threaded, so re-slicing this isn't racy.
 var rosterSlotsBuf = make([]int, 0, 16)
 
-func visibleRosterSlots(g core.GameState) []int {
+func visibleRosterSlots(g *core.GameState) []int {
 	rosterSlotsBuf = rosterSlotsBuf[:0]
 	// Index-range: Enemy embeds a full DefinitionOverride, so a value-range
 	// would copy ~496 bytes per member per frame just to read two bools.
-	members := core.BattleMembers(&g)
+	members := core.BattleMembers(g)
 	for i := range members {
 		if !members[i].Alive && members[i].DeathFade <= 0 {
 			continue
@@ -260,7 +262,7 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 		}
 		pillY := pillBaseY - float32(slot)*(pillH+4)
 		drawEnemyStatusPill(font, pillX, pillY, pillW, pillH,
-			fill, p.outline, statusTurnsLabel(p.prefix, turns))
+			fill, p.outline, p.glyph, statusTurnsLabel(turns))
 		slot++
 	}
 }
@@ -271,13 +273,11 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 // the common 1..9 range and ""+1..9 variants avoids the per-frame
 // fmt.Sprintf alloc on the enemy roster hot path (up to 4 statuses ×
 // 6 enemies = 24 strings/frame in heavy combat).
-func statusTurnsLabel(prefix string, turns int) string {
+func statusTurnsLabel(turns int) string {
 	if turns >= 0 && turns < statusTurnsCacheMax {
-		if labels, ok := statusTurnsCache[prefix]; ok {
-			return labels[turns]
-		}
+		return statusTurnNumLabels[turns]
 	}
-	return fmt.Sprintf("%s%d", prefix, turns)
+	return fmt.Sprintf("%d", turns)
 }
 
 // rosterCondMeasureCache memoizes rl.MeasureTextEx for the handful of
@@ -307,13 +307,11 @@ func enemyHPLabel(hp, max int) string {
 // status duration so a tuning bump doesn't drop the path back into Sprintf.
 const statusTurnsCacheMax = 20
 
-// statusTurnsCache holds pre-formatted "<prefix><turns>" labels per pill prefix
-// so the per-frame roster draw never fmt.Sprintf's per pill. Keyed by prefix and
-// BUILT FROM enemyStatusPillVisuals at init (see init above), so EVERY pill's
-// prefix — present and future — is cached automatically. (A hand-maintained
-// per-prefix switch previously let the new Bleed "B" pill fall through to a
-// per-frame Sprintf; sourcing the keys from the pill table removes that trap.)
-var statusTurnsCache = map[string][]string{}
+// statusTurnNumLabels holds the pre-formatted bare turn-count strings ("0".."19")
+// the pills show beside their glyph, so the per-frame roster draw never
+// fmt.Sprintf's per pill. Built in init. Status identity now reads from the
+// glyph + fill, so the labels no longer carry a per-status letter prefix.
+var statusTurnNumLabels [statusTurnsCacheMax]string
 
 // drawStatusPill paints the shared status-pill silhouette: a small
 // rounded fill pane + matching outline + a FontSmall single-line label.
@@ -335,16 +333,19 @@ func drawStatusPill(font rl.Font, x, y, w, h float32, fill, outline rl.Color, la
 	}
 }
 
-// drawEnemyStatusPill paints one rounded-rect status pill at the
-// given coords with a centered single-line label. Single helper so
-// every status (Burn / Sleep / Poison / Stun and future additions)
-// shares the same silhouette — earlier code repeated the
-// drawSmallPanel + drawSmallPanelOutline + drawTextCentered triple
-// inline per status, drifting on font size and outline tone. Thin
-// wrapper over drawStatusPill that pins the enemy pill's centered
-// inkPrimary label so its appearance is unchanged.
-func drawEnemyStatusPill(font rl.Font, x, y, w, h float32, fill, outline rl.Color, label string) {
-	drawStatusPill(font, x, y, w, h, fill, outline, label, inkPrimary, true)
+// drawEnemyStatusPill paints one rounded-rect status pill: the colored
+// fill + outline (status identity by color, unchanged silhouette), a vector
+// GLYPH on the left — the same drawStatusGlyph* symbol the party cards use, so
+// the two surfaces read alike instead of the roster spelling out letter codes —
+// and the bare turn count on the right. Glyph + number are drawn in the dark
+// glyph ink (statusGlyphDark) for contrast against the bright status fill.
+func drawEnemyStatusPill(font rl.Font, x, y, w, h float32, fill, outline rl.Color, glyph func(cx, cy, r float32, col rl.Color), turnsLabel string) {
+	drawSmallPanel(int32(x), int32(y), int32(w), int32(h), fill)
+	drawSmallPanelOutline(int32(x), int32(y), int32(w), int32(h), outline)
+	if glyph != nil {
+		glyph(x+w*0.30, y+h*0.5, h*0.28, statusGlyphDark)
+	}
+	drawTextCentered(font, turnsLabel, x+w*0.72, y+2, FontSmall, statusGlyphDark)
 }
 
 // actionLogTextPad is the horizontal inset between the action-log
@@ -355,6 +356,19 @@ func drawEnemyStatusPill(font rl.Font, x, y, w, h float32, fill, outline rl.Colo
 // with the coupling implicit.
 const actionLogTextPad = int32(10)
 
+// actionLogSpineInset is the symmetric top/bottom inset of the binding-edge
+// spine stripe from the action-log pane (the stripe runs panelH - 2×inset).
+// Named so the spine's vertical margin isn't a pair of bare 18 / 36 literals.
+const actionLogSpineInset = int32(18)
+
+// Wood-accent alphas for the action-log spine: the main binding stripe and the
+// dimmer "binding tie" cross-marks. Named so the spine's two fade levels tune
+// in one place instead of as inline fadeColor magic numbers.
+const (
+	actionLogSpineAlpha = float32(0.75)
+	actionLogTieAlpha   = float32(0.45)
+)
+
 // drawActionLogSpine paints the binding-edge ornament along the left
 // inside of the action log pane: a thin wood-accent stripe terminated
 // by gilt fleurons at both ends with a middle diamond pip flanked by
@@ -362,11 +376,10 @@ const actionLogTextPad = int32(10)
 // dressing that ties the rolling text to the rest of the
 // wood-and-glass HUD.
 func drawActionLogSpine(panelX, panelY, panelH int32) {
-	const inset = int32(10)
-	stripeX := panelX + inset
-	stripeY := panelY + 18
-	stripeH := panelH - 36
-	rl.DrawRectangle(stripeX, stripeY, 2, stripeH, fadeColor(woodAccent, 0.75))
+	stripeX := panelX + actionLogTextPad
+	stripeY := panelY + actionLogSpineInset
+	stripeH := panelH - 2*actionLogSpineInset
+	rl.DrawRectangle(stripeX, stripeY, 2, stripeH, fadeColor(woodAccent, actionLogSpineAlpha))
 	centreX := float32(stripeX) + 1
 	// Top + bottom fleurons mark the spine's termini — the
 	// chapter-divider sigils anchoring the ledger.
@@ -376,7 +389,7 @@ func drawActionLogSpine(panelX, panelY, panelH int32) {
 	// ties — reads as a leather thong wrapping the spine.
 	midY := float32(stripeY) + float32(stripeH)*0.5
 	drawDiamondPip(centreX, midY, 2.5, giltDim)
-	tieCol := fadeColor(woodAccent, 0.45)
+	tieCol := fadeColor(woodAccent, actionLogTieAlpha)
 	rl.DrawRectangle(stripeX-4, int32(midY), 4, 1, tieCol)
 	rl.DrawRectangle(stripeX+2, int32(midY), 4, 1, tieCol)
 }
@@ -405,7 +418,7 @@ var actionLogCache struct {
 // drawActionLogPanel paints the rolling ACTION LOG — the bottom-left HUD pane
 // shown both in combat and during exploration (g.ActionLog persists across the
 // two). The name is historical; it's no longer combat-only.
-func drawActionLogPanel(g core.GameState, assets Resources) {
+func drawActionLogPanel(g *core.GameState, assets Resources) {
 	// Bottom-left HUD pane: tall, soft-edged glass that the world bleeds
 	// through. No header label — the rolling text is self-evident. The pane's
 	// BOTTOM edge pins to the screen bottom (hudEdgePad margin); it stretches
@@ -605,7 +618,7 @@ func arrowPrompt(a, b string) string {
 	return arrowPromptCache.text
 }
 
-func drawActionMenuPanel(g core.GameState, assets Resources) {
+func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	if g.Battle.Phase != core.BattlePlayer {
 		return
 	}
@@ -689,6 +702,9 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 		}
 		drawTextWithShadow(assets.hudFont, arrowPrompt(itemName, targetName), float32(contentX), float32(contentY), FontBody, textPrimary)
 		drawTextWithShadow(assets.hudFont, "Choose an ally", float32(contentX), float32(subY), FontSmall, textLabel)
+	case core.ActionFleeConfirm:
+		drawEngravedText(assets.hudFont, "Flee", float32(contentX), float32(contentY), FontHeading, textPrimary)
+		drawTextWithShadow(assets.hudFont, "Retreat from this battle?", float32(contentX), float32(subY), FontSmall, textLabel)
 	default:
 		// Transient status line — populated by setBattleStatus to surface
 		// validation errors that aren't real action-log events (e.g.
@@ -719,7 +735,7 @@ func drawActionMenuPanel(g core.GameState, assets Resources) {
 // hasn't been logged yet (i.e. set via setBattleStatus, not setBattleMessage).
 // Returns "" when Message is empty or matches the most recent log entry, so
 // result/log messages don't render twice.
-func transientStatus(g core.GameState) string {
+func transientStatus(g *core.GameState) string {
 	msg := g.StatusMessage
 	if msg == "" {
 		return ""
@@ -730,7 +746,7 @@ func transientStatus(g core.GameState) string {
 	return msg
 }
 
-func drawActionMenuOptions(g core.GameState, assets Resources, x, y int32, member core.PartyMember) {
+func drawActionMenuOptions(g *core.GameState, assets Resources, x, y int32, member core.PartyMember) {
 	rowSpacing := int32(40)
 	cursor := core.ActionRow(g.Battle.MenuIndex)
 	// Push labels right so each row has a small icon column on the
@@ -911,7 +927,7 @@ func drawActionIconFlee(cx, cy, r float32, col rl.Color) {
 // itemMenuStacksBuf.
 var skillMenuSkillsBuf []core.SkillID
 
-func drawSkillMenuList(g core.GameState, assets Resources, x, y int32, member core.PartyMember) {
+func drawSkillMenuList(g *core.GameState, assets Resources, x, y int32, member core.PartyMember) {
 	rowSpacing := int32(32)
 	skillMenuSkillsBuf = core.LearnedSkillsInto(&member, skillMenuSkillsBuf)
 	skills := skillMenuSkillsBuf
@@ -939,7 +955,7 @@ func drawSkillMenuList(g core.GameState, assets Resources, x, y int32, member co
 // with updateItemMenu's LiveConsumables (equipment isn't usable in combat).
 var itemMenuStacksBuf []core.ItemStack
 
-func drawItemMenuList(g core.GameState, assets Resources, x, y int32) {
+func drawItemMenuList(g *core.GameState, assets Resources, x, y int32) {
 	// 32 (not 28) so each row's "key" plate (actionRowH=32, drawn by
 	// drawActionRow) has clearance and the plates don't overlap.
 	rowSpacing := int32(32)
@@ -993,11 +1009,11 @@ func measureActionRowSuffix(font rl.Font, suffix string) rl.Vector2 {
 // that the init assert below catches, rather than silently inheriting the
 // default green.
 var enemyConditionColors = [core.EnemyConditionCount]color.RGBA{
-	core.EnemyUnharmed:     rl.NewColor(126, 231, 170, 255),
-	core.EnemyScuffed:      rl.NewColor(208, 226, 128, 255),
-	core.EnemyInjured:      rl.NewColor(246, 196, 91, 255),
-	core.EnemyBadlyWounded: rl.NewColor(244, 126, 75, 255),
-	core.EnemyNearDeath:    rl.NewColor(255, 78, 88, 255),
+	core.EnemyUnharmed:     condEnemyUnharmed,
+	core.EnemyScuffed:      condEnemyScuffed,
+	core.EnemyInjured:      condEnemyInjured,
+	core.EnemyBadlyWounded: condEnemyBadlyWounded,
+	core.EnemyNearDeath:    condEnemyNearDeath,
 }
 
 func init() {
@@ -1009,14 +1025,35 @@ func init() {
 }
 
 func enemyHealthStyle(enemy *core.Enemy) (string, color.RGBA) {
-	condition := core.EnemyConditionFor(*enemy)
+	condition := core.EnemyConditionFor(enemy)
 	return core.EnemyConditionLabel(condition), enemyConditionColors[condition]
 }
 
+// splashBgColor is the near-black panel fill behind the battle-splash banner;
+// splashTitleColor is the warm cream the encounter title is engraved in. Both
+// are defined at full alpha here — the splash applies its fade-driven alpha
+// per-frame via colorWithAlpha so the banner can ease in / out. Named so the
+// banner's two signature tones aren't bare rl.NewColor literals at a drifting
+// alpha mid-function.
+var (
+	splashBgColor    = rl.NewColor(8, 10, 16, 255)
+	splashTitleColor = rl.NewColor(248, 232, 198, 255)
+)
+
+// Splash ease windows, in seconds, carved out of core.BattleSplashDuration:
+// splashEnterDur is the lead-in over which the banner eases + scales in from
+// the top; splashExitDur is the tail-out window (measured from remaining
+// Splash time) over which it fades back out. Named here rather than left as
+// bare 0.18 / 0.32 floats threaded through the entry/exit math below.
+const (
+	splashEnterDur = float32(0.18)
+	splashExitDur  = float32(0.32)
+)
+
 // drawBattleSplash slams a banner with the encounter title at the top of the
 // screen during the opening of a battle. Slides + scales in for impact.
-func drawBattleSplash(g core.GameState, assets Resources) {
-	members := core.BattleMembers(&g)
+func drawBattleSplash(g *core.GameState, assets Resources) {
+	members := core.BattleMembers(g)
 	if g.Battle.Splash <= 0 || g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(members) {
 		return
 	}
@@ -1024,18 +1061,18 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 	if progress < 0 {
 		progress = 0
 	}
-	enterT := progress / 0.18
+	enterT := progress / splashEnterDur
 	if enterT > 1 {
 		enterT = 1
 	}
 	exitT := float32(1)
-	if g.Battle.Splash < 0.32 {
-		exitT = g.Battle.Splash / 0.32
+	if g.Battle.Splash < splashExitDur {
+		exitT = g.Battle.Splash / splashExitDur
 	}
 	intro := easeOutBack(enterT)
 	overall := exitT
 
-	text := core.BattleEncounterTitle(&g)
+	text := core.BattleEncounterTitle(g)
 	subtitle := splashSubtitle(g)
 	// Battle splash uses FontTitle for the encounter name and
 	// FontBody for the subtitle — per UI_STANDARDS.md "Type" the
@@ -1044,10 +1081,16 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 	subSize := FontBody
 	spacing := FontSpacingTitle
 
-	titleMeasure := rl.MeasureTextEx(assets.hudFont, text, titleSize, spacing)
+	// The title/subtitle strings are stable for the splash's ~40-frame
+	// lifetime, so route both measures through measureCache rather than
+	// paying a cgo MeasureTextEx round-trip per frame (mirrors every other
+	// per-frame measure in the package). The scale animates the title, but
+	// we measure at the fixed base size and scale the result, like the
+	// damage-popup caches do.
+	titleMeasure := splashTitleMeasureCache.measure(assets.hudFont, text, titleSize, spacing)
 	subMeasure := rl.NewVector2(0, 0)
 	if subtitle != "" {
-		subMeasure = rl.MeasureTextEx(assets.hudFont, subtitle, subSize, 1)
+		subMeasure = splashSubMeasureCache.measure(assets.hudFont, subtitle, subSize, 1)
 	}
 
 	scale := 0.86 + 0.14*intro
@@ -1079,7 +1122,7 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 	titleAlpha := uint8(255 * overall)
 	subAlpha := uint8(220 * overall)
 
-	drawPanel(int32(bgX), int32(bgY), int32(bgW), int32(bgH), rl.NewColor(8, 10, 16, bgAlpha))
+	drawPanel(int32(bgX), int32(bgY), int32(bgW), int32(bgH), colorWithAlpha(splashBgColor, bgAlpha))
 	drawPanelOutline(int32(bgX), int32(bgY), int32(bgW), int32(bgH), fadeColor(borderEnemy, overall))
 
 	titleX := cx - titleW/2
@@ -1089,7 +1132,7 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 	// letter-spacing — drawTextWithShadowStyle takes all three (custom shadow
 	// color, offset, spacing), which is exactly what it documents itself for.
 	drawTextWithShadowStyle(assets.hudFont, text, titleX, titleY, titleSize*scale, spacing*scale,
-		rl.NewColor(248, 232, 198, titleAlpha), rl.NewColor(0, 0, 0, titleAlpha), 3, 3)
+		colorWithAlpha(splashTitleColor, titleAlpha), colorWithAlpha(shadowBase, titleAlpha), 3, 3)
 
 	if subtitle != "" {
 		subX := cx - subMeasure.X/2
@@ -1106,9 +1149,17 @@ func drawBattleSplash(g core.GameState, assets Resources) {
 		drawSplitRule(cx-ruleW/2, cx+ruleW/2, cx, ruleY, 8, ruleCol)
 		drawFleuron(cx, ruleY, 3, fadeColor(giltBright, overall))
 		drawTextWithShadowStyle(assets.hudFont, subtitle, subX, subY, subSize, 1,
-			colorWithAlpha(borderEnemy, subAlpha), rl.NewColor(0, 0, 0, subAlpha), 1, 1)
+			colorWithAlpha(borderEnemy, subAlpha), colorWithAlpha(shadowBase, subAlpha), 1, 1)
 	}
 }
+
+// splashTitleMeasureCache / splashSubMeasureCache memoize rl.MeasureTextEx for
+// the encounter title + subtitle, which are stable across the splash's ~40-frame
+// lifetime — same per-frame-measure pattern as rosterCondMeasureCache.
+var (
+	splashTitleMeasureCache measureCache
+	splashSubMeasureCache   measureCache
+)
 
 // splashSubtitleCache memoizes the formatted subtitle by (count, noun) so
 // the ~40 frames a splash is visible don't each pay a fmt.Sprintf — same
@@ -1119,12 +1170,12 @@ var splashSubtitleCache struct {
 	text  string
 }
 
-func splashSubtitle(g core.GameState) string {
-	count := len(core.BattleMembers(&g))
+func splashSubtitle(g *core.GameState) string {
+	count := len(core.BattleMembers(g))
 	if count <= 1 {
 		return "Hostile encounter"
 	}
-	def := core.BattleEnemyInfo(&g)
+	def := core.BattleEnemyInfo(g)
 	if splashSubtitleCache.count != count || splashSubtitleCache.noun != def.PluralNoun {
 		splashSubtitleCache.count = count
 		splashSubtitleCache.noun = def.PluralNoun

@@ -49,10 +49,30 @@ const (
 	// the recoil. Smaller than BumpOffset's lunge distance (0.20-
 	// 0.22) so the receiver doesn't moonwalk halfway across the
 	// arena on every hit — just a clear "they felt that" shove.
-	HitKnockbackDist     = float32(0.14)
-	DeathFadeDuration    = 0.55
+	HitKnockbackDist  = float32(0.14)
+	DeathFadeDuration = 0.55
+	// VictoryDanceDuration is the FULL victory-pose length — drives the party
+	// dance motion (render/world.go) and the debug skip-win timed auto-leave.
+	// NOT the same as VictoryDanceBeat below (the shorter spoils-card hold);
+	// don't conflate / "dedupe" them.
 	VictoryDanceDuration = 3.0
-	MouseSense           = 0.0024
+	// Victory spoils-screen pacing (see battle.go's BattleWon handler +
+	// render/victory.go). VictoryDanceBeat is how long the party victory
+	// pose plays solo before the spoils card animates in;
+	// VictoryBarFillDuration is the XP-bar fill sweep; VictoryLootStagger
+	// delays each loot row's slide-in so they cascade rather than pop in
+	// together; VictoryLootFadeDuration is each row's own fade-in window.
+	// All in seconds, driven off Battle.VictoryElapsed.
+	VictoryDanceBeat        = float32(0.9)
+	VictoryBarFillDuration  = float32(1.0)
+	VictoryLootStagger      = float32(0.15)
+	VictoryLootFadeDuration = float32(0.22)
+	// VictoryXPPerTick is how many points of shown XP each count-up blip
+	// (SoundXPTick) represents — the spoils screen rings one tick per this
+	// much XP as the bars fill, so the cadence tracks the eased fill (rapid
+	// early, sparse as it settles).
+	VictoryXPPerTick = 8
+	MouseSense       = 0.0024
 	// StickLookSense scales right-stick free-look. Unlike MouseSense
 	// (applied per raw mouse-delta) this is dt-scaled in updateFreeLook
 	// since an analog stick is a sustained hold — the unit is roughly
@@ -105,6 +125,10 @@ const (
 	// (party / enemy / no-target) — see battle.updateSkillMenu →
 	// beginPendingAction.
 	ActionSkillMenu
+	// ActionFleeConfirm is the yes/no gate the Flee row drops into so a
+	// stray Confirm can't burn the turn retreating by accident — Confirm
+	// commits the flee, Back returns to the action menu (battle.updateFleeConfirm).
+	ActionFleeConfirm
 )
 
 // ActionRow enumerates the in-battle action menu rows. The integer values
@@ -157,10 +181,15 @@ const (
 	// map." The default + min/max are all multiples of the step so every
 	// stop lands cleanly and the clamp can't strand the player on a
 	// fractional zoom.
-	PanelMapZoomDefault = 16
+	PanelMapZoomDefault = 48
 	PanelMapZoomMin     = 8
-	PanelMapZoomMax     = 48
+	PanelMapZoomMax     = 64
 	PanelMapZoomStep    = 8
+	// Pan step scales with the current zoom (PanelsMapZoom / PanelMapPanDivisor)
+	// so a tap scrolls a meaningful chunk at any scale, never less than
+	// PanelMapPanStepMin cells.
+	PanelMapPanDivisor = 6
+	PanelMapPanStepMin = 2
 
 	// --- Pack AI (junkyard-dog leash) -------------------------------------
 	//
@@ -297,6 +326,12 @@ const (
 	// Tied to the same literal so a balance edit can't open a grading gap.
 	ChargePeakStart = ChargeTick3Pct
 	ChargePeakEnd   = float32(0.85)
+	// ChargeExcellentBandFrac is the half-width (as a fraction of the peak
+	// window) of the dead-center Excellent zone: a release whose distance from
+	// the peak sweet-spot is within this fraction of the window grades
+	// Excellent, else Great. Lives with the other Charge* tunables so the
+	// sweet-spot split isn't a bare literal in chargeGradeUpToPeak (timing.go).
+	ChargeExcellentBandFrac = float32(0.30)
 
 	// Directional-sequence minigame: tap a randomized run of N directions in
 	// order before time runs out. Each correct tap holds the grade; each
@@ -322,9 +357,13 @@ const (
 	// directions shows for RecallRevealTime seconds, then hides; the player
 	// reproduces it from memory before RecallTimingDuration elapses. Duration
 	// must exceed the reveal so there's an input window after the hide.
-	RecallTimingDuration = float32(3.0)
+	RecallTimingDuration = float32(3.6)
 	RecallPatternLength  = 4
-	RecallRevealTime     = float32(1.2)
+	RecallRevealTime     = float32(1.8)
+	// RecallMaxRevealFrac caps the reveal phase to this fraction of the bar so
+	// the pattern always hides with input time left (an over-long reveal would
+	// leave no window and paint the answer at resolve). NewRecallState clamps to it.
+	RecallMaxRevealFrac = float32(0.8)
 
 	// Overcharge backfire — Firebolt's risk band. Releasing the charge PAST the
 	// peak overloads the bolt: it lands a guaranteed Excellent-tier hit PLUS
@@ -552,6 +591,14 @@ const (
 	StoneGolemSlamCastChance = 0.40 // Stone Golem: roll-to-Stoneslam vs single-target smash per turn.
 	NecromancerCastChance    = 0.55 // Necromancer: combined roll into Raise / Firebolt vs incant-melee.
 	NecromancerRaiseLimit    = 2    // Necromancer: hard cap on RaiseBones casts per battle.
+
+	// Guaranteed-apply gates. These read 1.0 today, but they go through a
+	// named seam for the same reason FrostLanceStunChance does — so a future
+	// "resist" stat can plug in at one place, and so the registry rows cite a
+	// const like every sibling chance instead of a bare literal.
+	MantrapIngestCastChance = 1.0 // Venus Mantrap: always attempts its Ingest when it casts (capped to one prey by MantrapHasPrey).
+	WebBindChance           = 1.0 // Cave Spider: Web always lands its bind once cast (the per-turn cast gate is SpiderWebCastChance).
+	WispConfuseApplyChance  = 1.0 // Wisp: Confuse always lands its disorient once cast (the per-turn cast gate is WispConfuseCastChance).
 
 	// Day/night cycle tuning. Six phases of StepsPerPhase player tile-steps
 	// make up one full loop (StepsPerCycle). Only landed exploration steps
@@ -1056,6 +1103,9 @@ const (
 	// on a landed hit. Expressed in the same units as ATBReadyThreshold so a
 	// push of ~half the threshold roughly delays the foe by half a turn.
 	SunderATBPush = 50
+	// SunderATBPushPerTier is the extra readiness the T3 Sunder tree upgrade
+	// ("Harder shove") adds to the base push.
+	SunderATBPushPerTier = 25
 )
 
 // Taunt (Warrior) tuning — forces the target to attack the Warrior on its next
@@ -1241,8 +1291,6 @@ type OptionsMenuItem int
 const (
 	OptionsMenuDisplay   OptionsMenuItem = iota // Fullscreen / Windowed toggle
 	OptionsMenuVibration                        // controller rumble On / Off
-	OptionsMenuStats                            // open the Tome on the Stats tab
-	OptionsMenuQuests                           // open the quest-journal overlay
 	OptionsMenuSave                             // write the run to the save file
 	OptionsMenuRestart
 	OptionsMenuClose
@@ -1298,6 +1346,11 @@ const (
 	// scanlines, dither, …). Filters layer: every non-zero intensity is
 	// applied in one shader pass, in a fixed pipeline order.
 	DebugMenuRetro
+	// DebugMenuStartDialog is a test launcher for the dialog system: confirm
+	// starts the current area's first authored conversation (or reports none).
+	// The in-world trigger (NPC / region) is a later layer; this lets the
+	// dialog overlay be exercised without one.
+	DebugMenuStartDialog
 	DebugMenuClose
 )
 

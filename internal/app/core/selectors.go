@@ -40,6 +40,23 @@ func indicesWhereInto[T any](buf []int, slice []T, pred func(T) bool) []int {
 	return buf
 }
 
+// filterInto copies every element of src matching `keep` into buf
+// (re-sliced to length 0) and returns it — the value-preserving sibling of
+// indicesWhereInto (which yields indices). The allocation-free filter shape
+// behind LiveStacksInto / LiveConsumablesInto / SellableStacksInto (items.go,
+// economy.go) and OutOfBattleHealsInto (party.go); pass nil to allocate. The
+// returned slice aliases buf's backing array and is valid until the caller's
+// next reuse of that buffer.
+func filterInto[T any](buf []T, src []T, keep func(T) bool) []T {
+	buf = buf[:0]
+	for _, v := range src {
+		if keep(v) {
+			buf = append(buf, v)
+		}
+	}
+	return buf
+}
+
 // countWhere returns the number of elements matching `pred`.
 func countWhere[T any](slice []T, pred func(T) bool) int {
 	n := 0
@@ -213,14 +230,34 @@ func ReleaseAllIngested(party []PartyMember) {
 	}
 }
 
-// ClearPartyTransientStatuses wipes the combat-only status effects off
-// every party member at battle exit — EXCEPT Poison, which lingers as a
-// lasting wound. It never touches HP, so the dead stay dead. Per the
-// current design call, only "dead" and "poisoned" survive a fight;
-// Sleep / Stun / Webbed / Confused, the Defending stance, and the positive
-// Bless buff + Renewal regen all clear the moment the battle ends. (Ingest is
-// released separately via ReleaseAllIngested, which also restores the
-// swallowed member.)
+// curableStatusCounterCount is the number of turn-counter statuses that BOTH
+// CureDebuffs and ClearPartyTransientStatuses clear — Sleep, Stun, Webbed,
+// Confused. The init assert below pins transientStatusCounters to this length
+// so a new status counter added to one clear-list (but forgotten in the other)
+// trips at startup instead of leaving Cleanse and battle-exit silently out of
+// sync on what a curable status is.
+const curableStatusCounterCount = 4
+
+// transientStatusCounters returns pointers to the shared curable status
+// counters on a member — Sleep, Stun, Webbed, Confused. Both CureDebuffs (which
+// also clears Poison) and ClearPartyTransientStatuses (which also clears the
+// stance / buff / shield / regen fields) route their counter-clearing through
+// this one list so the "what counts as a curable transient status" set can't
+// drift between the two. NOT Poison: it lingers past a fight as a wound, so it
+// rides CureDebuffs' own list, not this shared one.
+func transientStatusCounters(m *PartyMember) []*int {
+	return []*int{&m.SleepTurns, &m.StunTurns, &m.WebbedTurns, &m.ConfusedTurns}
+}
+
+func init() {
+	// Pin the shared list's length so a new counter status added to the clear
+	// path lands in transientStatusCounters (covering both callers) rather than
+	// being inlined into just one of them.
+	if got := len(transientStatusCounters(&PartyMember{})); got != curableStatusCounterCount {
+		panic("core: transientStatusCounters length must equal curableStatusCounterCount — add the new status counter here so CureDebuffs and ClearPartyTransientStatuses stay in sync")
+	}
+}
+
 // CureDebuffs clears the curable NEGATIVE combat statuses off a single member
 // — Poison, Sleep, Stun, Webbed, Confused — and returns how many were active
 // (so the caller can phrase "nothing to cure" vs "cured N"). It deliberately
@@ -228,13 +265,15 @@ func ReleaseAllIngested(party []PartyMember) {
 // and does NOT touch Ingested (a lockout, not a curable status — an ingested
 // member is untargetable anyway). The Cleric's Cleanse is the caller; kept
 // here beside ClearPartyTransientStatuses so the "what counts as a curable
-// debuff" set lives in one place.
+// debuff" set lives in one place — the four shared counters come from
+// transientStatusCounters, with Poison added on (a cure clears Poison; battle
+// exit does not).
 func CureDebuffs(m *PartyMember) int {
 	if m == nil {
 		return 0
 	}
 	cured := 0
-	for _, c := range []*int{&m.PoisonTurns, &m.SleepTurns, &m.StunTurns, &m.WebbedTurns, &m.ConfusedTurns} {
+	for _, c := range append(transientStatusCounters(m), &m.PoisonTurns) {
 		if *c > 0 {
 			cured++
 			*c = 0
@@ -243,18 +282,40 @@ func CureDebuffs(m *PartyMember) int {
 	return cured
 }
 
+// ClearPartyTransientStatuses wipes the combat-only status effects off
+// every party member at battle exit — EXCEPT Poison, which lingers as a
+// lasting wound. It never touches HP, so the dead stay dead. Per the
+// current design call, only "dead" and "poisoned" survive a fight;
+// Sleep / Stun / Webbed / Confused (the shared transientStatusCounters set),
+// the Defending stance, and the positive Bless buff + Renewal regen all clear
+// the moment the battle ends. (Ingest is released separately via
+// ReleaseAllIngested, which also restores the swallowed member.)
 func ClearPartyTransientStatuses(party []PartyMember) {
 	for i := range party {
-		party[i].SleepTurns = 0
-		party[i].StunTurns = 0
-		party[i].WebbedTurns = 0
-		party[i].ConfusedTurns = 0
-		party[i].Defending = false
-		party[i].Buffs = nil
-		party[i].ShieldHP = 0
-		party[i].IceArmorTurns = 0
-		party[i].RegenTurns = 0
-		party[i].RegenPerTurn = 0
+		m := &party[i]
+		for _, c := range transientStatusCounters(m) {
+			*c = 0
+		}
+		m.Defending = false
+		m.Buffs = nil
+		m.ShieldHP = 0
+		m.IceArmorTurns = 0
+		m.RegenTurns = 0
+		m.RegenPerTurn = 0
+	}
+}
+
+// clearPartyCombatTransients strips the combat-only state that must never
+// outlive a battle: transient statuses, ingestion links, and per-member
+// animation timers. The shared trio behind the save sanitizer, the load-path
+// scrub, and field recovery — adding a new battle-only field to one of the
+// underlying clearers covers all three callers at once. Note it deliberately
+// preserves Poison; the full-restore caller (field recovery) zeroes that itself.
+func clearPartyCombatTransients(party []PartyMember) {
+	ClearPartyTransientStatuses(party) // Sleep / Stun / Webbed / Confused / Defending
+	ReleaseAllIngested(party)          // Ingested / IngestedBy
+	for i := range party {
+		clearMemberAnimTimers(&party[i])
 	}
 }
 
@@ -277,6 +338,10 @@ const (
 	ModalChest
 	ModalPanels
 	ModalLevelUp
+	// ModalDialog is the branching-conversation overlay. Highest priority —
+	// a conversation in progress shouldn't be shadowed by any other overlay
+	// (it's triggered into and blocks explore until it ends or is skipped).
+	ModalDialog
 )
 
 // ActiveModal returns the highest-priority modal currently open in
@@ -297,6 +362,8 @@ func ActiveModal(g *GameState) ModalKind {
 	// actually an entry at that index, and an out-of-range sentinel is
 	// inert. Production still goes through NewGameState (which sets -1).
 	switch {
+	case g.DialogOpen:
+		return ModalDialog
 	case g.LevelUpOpen:
 		return ModalLevelUp
 	case g.PanelsOpen:
@@ -453,20 +520,31 @@ func leaderSlot(n int, tierAt func(int) int) int {
 	return bestSlot
 }
 
+// averageOverLiving returns the mean of valueAt(i) across the [0,n) slots
+// where aliveAt(i) is true, or 0 when none are alive. Sibling to leaderSlot's
+// two-closure shape — shared by PartyAverageLevel and PackAverageLevel so the
+// "average over the living, 0 when all down" rule (the flee-chance math) lives
+// in one place.
+func averageOverLiving(n int, aliveAt func(int) bool, valueAt func(int) int) float64 {
+	sum, count := 0, 0
+	for i := 0; i < n; i++ {
+		if aliveAt(i) {
+			sum += valueAt(i)
+			count++
+		}
+	}
+	if count == 0 {
+		return 0
+	}
+	return float64(sum) / float64(count)
+}
+
 // PartyAverageLevel returns the mean Level of LIVING party members (HP > 0),
 // or 0 when the whole party is down. The party side of the flee-chance math.
 func PartyAverageLevel(party []PartyMember) float64 {
-	sum, n := 0, 0
-	for i := range party {
-		if party[i].HP > 0 {
-			sum += party[i].Level
-			n++
-		}
-	}
-	if n == 0 {
-		return 0
-	}
-	return float64(sum) / float64(n)
+	return averageOverLiving(len(party),
+		func(i int) bool { return party[i].HP > 0 },
+		func(i int) int { return party[i].Level })
 }
 
 // PackAverageLevel returns the mean EnemyLevel of LIVING pack members, or 0 for
@@ -474,17 +552,9 @@ func PartyAverageLevel(party []PartyMember) float64 {
 // (not max) so a lone weak straggler is easy to flee and a fresh full pack is
 // hard.
 func PackAverageLevel(p Pack) float64 {
-	sum, n := 0, 0
-	for i := range p.Members {
-		if p.Members[i].Alive {
-			sum += EnemyLevel(p.Members[i])
-			n++
-		}
-	}
-	if n == 0 {
-		return 0
-	}
-	return float64(sum) / float64(n)
+	return averageOverLiving(len(p.Members),
+		func(i int) bool { return p.Members[i].Alive },
+		func(i int) int { return EnemyLevel(p.Members[i]) })
 }
 
 // FleeChance returns the [FleeFloor, FleeCap] probability of a successful flee,

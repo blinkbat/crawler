@@ -196,7 +196,8 @@ func MapCustomEnemyFromDef(ce CustomEnemyDef) (mapfile.MapCustomEnemy, error) {
 //  6. Instantiate() if the field affects the materialized Enemy.
 //
 // The encode<->decode pair (3 & 4) is guarded by
-// TestCustomEnemyDefMapRoundTrip, so a dropped field there fails loudly.
+// TestCustomEnemyDefMapRoundTrip; the def->runtime pair (5 & 6) is guarded by
+// TestCustomEnemyDefToRuntime — so a dropped field on either path fails loudly.
 func (d CustomEnemyDef) Definition() EnemyDefinition {
 	base := EnemyInfo(d.BaseKind)
 	display := strings.ReplaceAll(strings.TrimSpace(d.Name), "_", " ")

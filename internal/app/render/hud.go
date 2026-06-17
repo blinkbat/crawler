@@ -5,7 +5,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-func DrawOverlay(g core.GameState, assets Resources) {
+func DrawOverlay(g *core.GameState, assets Resources) {
 	if g.MenuOpen {
 		drawMenuOverlay(g, assets)
 		return
@@ -30,13 +30,17 @@ func DrawOverlay(g core.GameState, assets Resources) {
 		// Compute the turn forecast once per frame; TurnPanelBottomY
 		// (called from the action log) and drawTurnPanel both read
 		// the cached slice instead of re-running TurnForecast.
-		CacheTurnForecastForFrame(&g)
+		CacheTurnForecastForFrame(g)
 		drawBattleHUD(g, assets)
 		drawTurnPanel(g, assets)
 		drawMinimap(g.Area, g, assets)
 		DrawPartyRibbon(g, assets)
 		drawTimingBar(g, assets)
 		drawBattleSplash(g, assets)
+		// Post-victory spoils card draws on top of the dimmed battle scene.
+		// No-ops outside the won-battle results window (gates internally on
+		// phase + the dance beat), so it's safe to call every battle frame.
+		DrawVictorySpoils(g, assets)
 		return
 	}
 	drawMinimap(g.Area, g, assets)
@@ -66,7 +70,7 @@ var goldReadoutMeasureCache measureCache
 // during free exploration. A glass pane backs the "<n> G" label so it
 // reads over busy world geometry. Kept out of the battle / overlay paths —
 // the shop shows its own gold total, and combat has no spend.
-func drawGoldReadout(g core.GameState, assets Resources) {
+func drawGoldReadout(g *core.GameState, assets Resources) {
 	font := assets.hudFont
 	if g.Gold != goldReadout.last {
 		goldReadout.last = g.Gold
@@ -84,7 +88,10 @@ func drawGoldReadout(g core.GameState, assets Resources) {
 	if x+w > screenW-hudEdgePad {
 		x = screenW - hudEdgePad - w
 	}
-	drawCard(x, y, w, h, glassWarm, borderSoft, borderActive)
+	// Plain wood frame — no gilt accent stripe (the bright giltBright spine read
+	// as a "yellow highlight border" around the little chip). The coin glyph +
+	// gilt label already carry the gold theme; the frame stays neutral wood.
+	drawCard(x, y, w, h, glassWarm, borderSoft, noAccent)
 	cy := float32(y) + float32(h)/2
 	drawCoinGlyph(float32(x)+padX+10, cy, 8)
 	drawTextWithShadow(font, label, float32(x)+padX+iconW, float32(y)+padY, FontBody, borderActive)

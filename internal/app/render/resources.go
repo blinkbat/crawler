@@ -2,6 +2,7 @@ package render
 
 import (
 	"crawler/internal/app/core"
+	_ "embed"
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"image/color"
 	"os"
@@ -9,6 +10,17 @@ import (
 	"runtime"
 	"unsafe"
 )
+
+// uiFontTTF is the embedded UI face — Della Respira (SIL Open Font License
+// 1.1, bundled with its OFL.txt under fonts/). Embedding it makes the
+// typography identical on every machine and impossible to miss at runtime,
+// instead of depending on whatever serif a given OS happens to ship. It is
+// the ONE font the whole UI draws with (HUD, battle, title, editor); the
+// glyphs it doesn't carry (geometric/arrow symbols plus a few typographic
+// marks like … ’ ≈) are drawn procedurally — see richtext.go.
+//
+//go:embed fonts/DellaRespira-Regular.ttf
+var uiFontTTF []byte
 
 type Resources struct {
 	materials  map[core.MaterialSet]worldMaterialResources
@@ -25,7 +37,13 @@ type Resources struct {
 	// the renderer minted at load time; Unload walks that.
 	enemyVisuals  map[core.EnemyKind]enemyVisual
 	enemyTextures []rl.Texture2D
-	partyTexture  map[core.PartyClass]rl.Texture2D
+	// partyVisuals is the class→billboard lookup, symmetric with enemyVisuals:
+	// per-class size/placement/shadow/tint knobs authored in the editor's Party
+	// Visualizer and overlaid from maps/sprites/partyvisuals.json. Like
+	// enemyVisuals it does NOT own its textures (a class can alias the procedural
+	// fallback); partyTextures is the owning list Unload walks.
+	partyVisuals  map[core.PartyClass]enemyVisual
+	partyTextures []rl.Texture2D
 	hudFont       rl.Font
 	hudFontOwned  bool
 
@@ -171,12 +189,7 @@ func LoadResources() (r Resources) {
 
 	r.enemyVisuals, r.enemyTextures = loadEnemyVisuals()
 
-	r.partyTexture = make(map[core.PartyClass]rl.Texture2D)
-	for _, def := range core.PartyClasses() {
-		texture := loadTexture(makePartyPixels(64, 80, def.Class), 64, 80, rl.FilterPoint)
-		rl.SetTextureWrap(texture, rl.WrapClamp)
-		r.partyTexture[def.Class] = texture
-	}
+	r.partyVisuals, r.partyTextures = loadPartyVisuals()
 
 	r.hudFont, r.hudFontOwned = loadHUDFont()
 
@@ -603,8 +616,10 @@ func (r Resources) Unload() {
 	for _, tex := range r.enemyTextures {
 		rl.UnloadTexture(tex)
 	}
-	for _, texture := range r.partyTexture {
-		rl.UnloadTexture(texture)
+	// partyTextures is the owning list (partyVisuals aliases handles, like
+	// enemyVisuals) — walk it, not the map, to avoid a double-free.
+	for _, tex := range r.partyTextures {
+		rl.UnloadTexture(tex)
 	}
 	r.tree.unload()
 	r.rockProp.unload()
@@ -1035,10 +1050,75 @@ func loadEnemyVisuals() (visuals map[core.EnemyKind]enemyVisual, owned []rl.Text
 	// core.EnemySlug so this loader and the editor agree on the key. A
 	// malformed file is swallowed (defaults stand) rather than crashing the
 	// whole game on boot over a bad tuning file.
+	// Record each kind's PRISTINE base texture (the editor re-derives its FX
+	// preview from this, never the adjusted display texture, so slider drags don't
+	// compound). Done for every kind, not just overridden ones, so a freshly-edited
+	// kind has a pristine base.
+	for kind, v := range visuals {
+		v.pristineTexture = v.texture
+		visuals[kind] = v
+	}
 	if overrides, err := core.LoadEnemyVisualOverrides(); err == nil {
 		for kind, v := range visuals {
 			if ov, ok := overrides[core.EnemySlug(kind)]; ok {
-				visuals[kind] = applyEnemyVisualOverride(v, ov)
+				v = applyEnemyVisualOverride(v, ov)
+				// Bake the non-destructive image adjustments (pixelate/brightness/
+				// contrast) into the DISPLAY texture at load — point-sampled when
+				// pixelated so it reads crisp, not blurred.
+				if tex, ok := deriveAdjustedTexture(v.pristineTexture, ov, &owned); ok {
+					v.texture = tex
+				}
+				visuals[kind] = v
+			}
+		}
+	}
+	return visuals, owned
+}
+
+// loadPartyVisuals builds the per-class party billboard table, mirroring
+// loadEnemyVisuals: a code default (the uniform party billboard size, no shadow
+// / offset / tint), an authored PNG from maps/sprites/<class-slug>.png when one
+// exists (else the procedural makePartyPixels art), and an overlay of any author
+// tuning from maps/sprites/partyvisuals.json. Keyed by PartyClass; the returned
+// owned list owns the minted handles for Unload (partyVisuals aliases them, the
+// same ownership split enemyVisuals/enemyTextures uses). Reuses the foe-side
+// enemyVisual struct + apply helper since the party billboard shares the exact
+// same alignment knobs (PartyVisualOverride is an alias of EnemyVisualOverride).
+func loadPartyVisuals() (visuals map[core.PartyClass]enemyVisual, owned []rl.Texture2D) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			for _, t := range owned {
+				rl.UnloadTexture(t)
+			}
+			panic(rec)
+		}
+	}()
+	visuals = map[core.PartyClass]enemyVisual{}
+	for _, def := range core.PartyClasses() {
+		tex, ok := loadEnemySpriteFile(core.PartyClassSlug(def.Class)+".png", &owned)
+		if !ok {
+			tex = loadEnemySprite(makePartyPixels(64, 80, def.Class), 64, 80, &owned)
+		}
+		visuals[def.Class] = enemyVisual{
+			texture: tex,
+			size:    partyBillboardSize,
+		}
+	}
+	// Overlay author-tuned overrides from maps/sprites/partyvisuals.json. Missing
+	// file or class ⇒ the code default stands; a malformed file is swallowed
+	// (defaults stand) rather than crashing boot — same discipline as the foe side.
+	for class, v := range visuals {
+		v.pristineTexture = v.texture
+		visuals[class] = v
+	}
+	if overrides, err := core.LoadPartyVisualOverrides(); err == nil {
+		for class, v := range visuals {
+			if ov, ok := overrides[core.PartyClassSlug(class)]; ok {
+				v = applyEnemyVisualOverride(v, ov)
+				if tex, ok := deriveAdjustedTexture(v.pristineTexture, ov, &owned); ok {
+					v.texture = tex
+				}
+				visuals[class] = v
 			}
 		}
 	}
@@ -1077,6 +1157,7 @@ func buildHUDFontCodepoints() []rune {
 		'–', // en-dash (modal headers / range "1–10")
 		'—', // em-dash (long-form labels)
 		'…', // ellipsis (truncated names / "loading…")
+		'·', // middle dot — editor hint-bar separators ("Enter edit · A add · …")
 		'←', // editor pan / movement hints
 		'↑', // turn-order / list cursor
 		'→', // action arrows ("Attack → Rat")
@@ -1086,59 +1167,78 @@ func buildHUDFontCodepoints() []rune {
 		'−', // unicode minus (distinct from ASCII hyphen)
 		'≈', // approximate (timing-grade hints)
 		'≤', // less-than-or-equal (thresholds)
+		'≥', // greater-than-or-equal (dialog "Gold ≥ amount" condition)
 		'▲', // pack-edit reorder up, list arrows
 		'▶', // action-row submenu indicator
 		'▸', // small submenu chevron — pause-menu "Options ▸" / "Debug ▸" rows
 		'◂', // small left chevron (cushion for ▸'s mirror)
 		'▼', // pack-edit reorder down, list arrows
 		'●', // bullet / active marker
+		'★', // dialog start-node marker (editor node list)
+		'✓', // dropdown active-toggle check (editor menus)
+		'’', // right single quote — typographic apostrophe in editor menu copy ("foe's")
+		'‘', // left single quote (cushion for its mirror)
 	)
 	return runes
 }
 
+// hudFontBake is the glyph-atlas bake size in pixels. Generous (128) so the
+// five UI sizes (now 17/21/26/36/48) all DOWN-sample from a high-res master —
+// Della Respira's fine serif strokes stay crisp at the small sizes instead
+// of baking soft, and Title (48) keeps >2× headroom so it stays sharp on
+// high-DPI displays. Mipmaps + trilinear (sharpenFontAtlas) then kill the
+// minification jaggies/shimmer. Atlas memory cost is trivial (a single
+// ~1–2 K² texture).
+const hudFontBake = int32(128)
+
+// loadHUDFont builds the single UI face from the embedded Della Respira
+// TTF, baked once at hudFontBake over the full codepoint set. Embedding is
+// the point — the typography is identical everywhere and can't go missing.
+// The glyphs Della Respira omits (▶ → ↑ ↓ ● ★ ✓ ≤ ≥ … ’ ≈ …) are drawn
+// PROCEDURALLY at the text layer (richtext.go), so the game ships exactly
+// one font. The system-serif scan + raylib default remain only as a
+// defensive fallback for the (practically impossible) case where the
+// embedded bytes fail to load.
 func loadHUDFont() (rl.Font, bool) {
-	// Try a per-OS list of well-known system font paths. First valid hit wins.
-	// Fallback is raylib's bitmap default font, which has different metrics —
-	// good for "ran on a server with no fonts," not great as a target.
+	if font := rl.LoadFontFromMemory(".ttf", uiFontTTF, hudFontBake, hudFontCodepoints); rl.IsFontValid(font) {
+		sharpenFontAtlas(&font)
+		return font, true
+	}
 	for _, path := range systemFontCandidates() {
 		if _, err := os.Stat(path); err != nil {
 			continue
 		}
-		// 64 pt bake: the five UI_STANDARDS.md sizes (13/16/20/26/36)
-		// all downsample from this without subpixel mush. The previous
-		// 32 pt bake was sharp at Body (20) but slightly soft at
-		// Heading (26) and noticeably blurry at Title (36).
-		font := rl.LoadFontEx(path, 64, hudFontCodepoints)
+		font := rl.LoadFontEx(path, hudFontBake, hudFontCodepoints)
 		if rl.IsFontValid(font) {
-			// Mipmaps + trilinear so the small UI sizes (Tiny 13 / Small
-			// 16 / Body 20) downsample from the 64 pt atlas smoothly
-			// instead of aliasing into hard, "pixely" edges — plain
-			// bilinear only samples the base level's 2×2 neighbourhood,
-			// which shimmers and jaggies under heavy minification. Mirrors
-			// the sky texture's mipmap+trilinear setup above; the 64 pt
-			// bake's glyph padding absorbs the minor cross-glyph bleed the
-			// lower mips introduce.
-			rl.GenTextureMipmaps(&font.Texture)
-			rl.SetTextureFilter(font.Texture, rl.FilterTrilinear)
+			sharpenFontAtlas(&font)
 			return font, true
 		}
 	}
 	return rl.GetFontDefault(), false
 }
 
-// systemFontCandidates returns the per-OS preferred-font paths in
-// priority order. The Library aesthetic (see UI_STANDARDS.md "Type")
-// uses a refined SERIF face — Constantia is the first choice on
-// Windows because it was specifically designed for body copy at
-// small sizes; the rest of the chain falls back to other readable
-// serifs and finally to the platform's default sans if none exist.
-// LoadFontEx is called with a 64 pt bake so the five standard sizes
-// (Tiny/Small/Body/Heading/Title) all render sharp.
+// sharpenFontAtlas applies mipmaps + trilinear filtering so the small UI
+// sizes down-sample from the high-res atlas smoothly (sharp, not aliased)
+// rather than shimmering under heavy minification — plain bilinear only
+// samples the base level's 2×2 neighbourhood and jaggies. Mirrors the sky
+// texture's mipmap+trilinear setup; the bake's glyph padding absorbs the
+// minor cross-glyph bleed the lower mips introduce.
+func sharpenFontAtlas(font *rl.Font) {
+	rl.GenTextureMipmaps(&font.Texture)
+	rl.SetTextureFilter(font.Texture, rl.FilterTrilinear)
+}
+
+// systemFontCandidates returns the per-OS serif paths used ONLY as a
+// defensive fallback now that the UI face is the embedded Della Respira
+// (loadHUDFont). They're tried in priority order if the embedded bytes
+// somehow fail to load — readable serifs first (Constantia / Cambria /
+// Georgia on Windows), the platform default sans last. Baked at hudFontBake
+// like the primary so the five standard sizes still render sharp.
 func systemFontCandidates() []string {
 	switch runtime.GOOS {
 	case "windows":
 		return []string{
-			`C:\Windows\Fonts\constan.ttf`, // Constantia — refined serif, the headline choice
+			`C:\Windows\Fonts\constan.ttf`, // Constantia — refined serif, first fallback
 			`C:\Windows\Fonts\cambria.ttc`, // Cambria — second-best serif
 			`C:\Windows\Fonts\georgia.ttf`, // Georgia — classic web serif fallback
 			`C:\Windows\Fonts\pala.ttf`,    // Palatino Linotype — older alternate

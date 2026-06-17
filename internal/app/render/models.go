@@ -595,11 +595,18 @@ func (p propModel) draw(center rl.Vector3, scale, yaw float32) {
 			position.Z += swayZ * lean
 		}
 		drawScale := rl.NewVector3(part.scale.X*scale, part.scale.Y*scale, part.scale.Z*scale)
+		axis := partRotationAxis(part)
 		rotation := part.rotation
 		if isVerticalAxis(part.rotationAxis) {
 			rotation += yaw
+		} else {
+			// Tilted parts must yaw their tilt AXIS too, not just orbit the
+			// offset — otherwise the mesh keeps a world-fixed orientation while
+			// its position swings around, desyncing from the rest of the prop.
+			// Mirrors treeModel.draw / drawVaried.
+			axis = yawedTiltAxis(axis, yaw)
 		}
-		rl.DrawModelEx(p.models[part.modelIdx], position, partRotationAxis(part), rotation, drawScale, part.tint)
+		rl.DrawModelEx(p.models[part.modelIdx], position, axis, rotation, drawScale, part.tint)
 	}
 }
 

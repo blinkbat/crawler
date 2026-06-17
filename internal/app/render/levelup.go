@@ -13,7 +13,7 @@ import (
 // point row sits below the stats; a final Apply row commits the
 // staged changes. Nothing actually lands on the member's stat block
 // until Apply is confirmed.
-func DrawLevelUpModal(g core.GameState, assets Resources) {
+func DrawLevelUpModal(g *core.GameState, assets Resources) {
 	if !g.LevelUpOpen {
 		return
 	}
@@ -84,7 +84,7 @@ func DrawLevelUpModal(g core.GameState, assets Resources) {
 		// the row tells you what the point actually BUYS instead of
 		// just what stat it touches. Falls through to the static
 		// description when nothing is staged.
-		subText := core.StatPreviewLine(s, m.Stats, pending)
+		subText := core.StatPreviewLine(s, m.Stats, pending, core.WeaponAccuracyStat(core.EquippedWeapon(m)))
 		subCol := textHint
 		if subText != "" {
 			subCol = inkAccent

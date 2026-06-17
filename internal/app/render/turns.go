@@ -42,6 +42,30 @@ const (
 	turnPanelRowH      = int32(28)
 )
 
+// Per-row layout offsets inside the turn panel. turnRowInset is the left/right
+// margin from the panel edge to the row rect (the row width is the panel width
+// minus 2×inset); turnRowMarkerX seats the active-row arrow marker; the spine
+// pair places the inactive-row class-color tick; turnRowLabelX is the label's
+// left edge. Named so the row geometry tunes in one block instead of as bare
+// +N offsets scattered through drawTurnPanel.
+const (
+	turnRowInset   = int32(10)
+	turnRowMarkerX = int32(10)
+	turnRowSpineX  = int32(6)
+	turnRowSpineW  = int32(4)
+	turnRowLabelX  = int32(22)
+)
+
+// Per-row fill / outline alphas (uint8) for the turn panel. The active row
+// gets a translucent class-tinted glass fill under a near-opaque outline; the
+// inactive rows get a class-tinted spine tick. Named so the row chrome's
+// alpha intent reads at a glance.
+const (
+	turnRowActiveFillAlpha    = uint8(96)
+	turnRowActiveOutlineAlpha = uint8(235)
+	turnRowSpineAlpha         = uint8(220)
+)
+
 // turnPanelHeight is the panel's pixel height for n forecast rows. Shared by
 // the draw (drawTurnPanel) and the docked action-log's bottom-edge read
 // (TurnPanelBottomY) so the two can't drift on the row height / pad math.
@@ -59,7 +83,7 @@ func turnPanelHeight(n int) int32 {
 // likewise only painted in battle (drawTurnPanel runs from DrawOverlay's
 // battle branch), so when no battle is active there's no panel to dock
 // below — report the minimap bottom regardless of the stale buffer.
-func TurnPanelBottomY(g core.GameState) int32 {
+func TurnPanelBottomY(g *core.GameState) int32 {
 	turns := turnForecastBuf
 	if !g.Battle.Active() || len(turns) == 0 {
 		return MinimapBottomY()
@@ -67,7 +91,7 @@ func TurnPanelBottomY(g core.GameState) int32 {
 	return MinimapBottomY() + hudColumnGap + turnPanelHeight(len(turns))
 }
 
-func drawTurnPanel(g core.GameState, assets Resources) {
+func drawTurnPanel(g *core.GameState, assets Resources) {
 	turns := turnForecastBuf
 	if len(turns) == 0 {
 		return
@@ -87,7 +111,7 @@ func drawTurnPanel(g core.GameState, assets Resources) {
 	// these," not seven disconnected chips. Skipped for a single row (nothing
 	// to thread).
 	if len(turns) > 1 {
-		threadX := x + 10 + 7 // center of the per-row tick column
+		threadX := x + turnRowInset + turnRowSpineX + turnRowSpineW/2 // center of the per-row tick column
 		threadTop := y + turnPanelTopPad + rowH/2
 		threadH := int32(len(turns)-1) * rowH
 		rl.DrawRectangle(threadX, threadTop, 1, threadH, fadeColor(inkDim, 0.32))
@@ -98,21 +122,21 @@ func drawTurnPanel(g core.GameState, assets Resources) {
 		rowY := y + turnPanelTopPad + int32(i)*rowH
 		col := turnEntryColor(turn)
 
-		rowX := x + 10
-		rowW := w - 20
+		rowX := x + turnRowInset
+		rowW := w - 2*turnRowInset
 		rowInnerH := rowH - 4
 
 		if i == 0 {
-			drawGlassPane(rowX, rowY, rowW, rowInnerH, colorWithAlpha(col, 96))
-			drawSmallPanelOutline(rowX, rowY, rowW, rowInnerH, colorWithAlpha(col, 235))
-			cx := float32(rowX + 10)
+			drawGlassPane(rowX, rowY, rowW, rowInnerH, colorWithAlpha(col, turnRowActiveFillAlpha))
+			drawSmallPanelOutline(rowX, rowY, rowW, rowInnerH, colorWithAlpha(col, turnRowActiveOutlineAlpha))
+			cx := float32(rowX + turnRowMarkerX)
 			cy := float32(rowY) + float32(rowInnerH)/2
 			drawArrowMarker(rl.NewVector2(cx-2, cy), 8, 0, 6, col)
 		} else {
-			rl.DrawRectangle(rowX+6, rowY+4, 3, rowInnerH-8, colorWithAlpha(col, 220))
+			drawClassRail(rowX+turnRowSpineX, rowY+4, turnRowSpineW, rowInnerH-8, colorWithAlpha(col, turnRowSpineAlpha))
 		}
 
-		labelX := rowX + 22
+		labelX := rowX + turnRowLabelX
 		labelSize := FontSmall
 		labelMeasure := measureTurnLabel(assets.hudFont, turn.Label)
 		labelY := float32(rowY) + (float32(rowInnerH)-labelMeasure.Y)/2 - 1

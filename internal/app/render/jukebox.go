@@ -16,15 +16,27 @@ var jukeboxIndex int
 // menu's jukebox row. Names come from the audio package so adding a new
 // cue surfaces here automatically (provided audio.soundNames also gains
 // an entry — checked at compile time by the array size).
-func JukeboxRowLabel() string {
-	count := audio.SoundCount()
+// currentJukeboxIndex normalizes jukeboxIndex against the live sound count,
+// wrapping a stale/out-of-range cursor back to 0, and reports ok=false when
+// the bank is empty. Both the label and the play path read the cursor through
+// here so the clamp can't drift between them.
+func currentJukeboxIndex() (idx, count int, ok bool) {
+	count = audio.SoundCount()
 	if count <= 0 {
-		return "Jukebox: (empty)"
+		return 0, 0, false
 	}
 	if jukeboxIndex < 0 || jukeboxIndex >= count {
 		jukeboxIndex = 0
 	}
-	return "Jukebox: " + audio.SoundName(audio.Sound(jukeboxIndex))
+	return jukeboxIndex, count, true
+}
+
+func JukeboxRowLabel() string {
+	idx, _, ok := currentJukeboxIndex()
+	if !ok {
+		return "Jukebox: (empty)"
+	}
+	return "Jukebox: " + audio.SoundName(audio.Sound(idx))
 }
 
 // PlayJukebox plays the currently-advertised sound and advances the
@@ -32,13 +44,10 @@ func JukeboxRowLabel() string {
 // label re-reads jukeboxIndex on the next frame so the player sees what
 // they'll get on the next press.
 func PlayJukebox() {
-	count := audio.SoundCount()
-	if count <= 0 {
+	idx, count, ok := currentJukeboxIndex()
+	if !ok {
 		return
 	}
-	if jukeboxIndex < 0 || jukeboxIndex >= count {
-		jukeboxIndex = 0
-	}
-	audio.Play(audio.Sound(jukeboxIndex))
-	jukeboxIndex = (jukeboxIndex + 1) % count
+	audio.Play(audio.Sound(idx))
+	jukeboxIndex = (idx + 1) % count
 }

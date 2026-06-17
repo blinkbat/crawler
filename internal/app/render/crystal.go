@@ -14,7 +14,7 @@ import (
 // player can read its state at a glance. The lighting shader bound by DrawWorld
 // is still active here (same contract DrawChests / DrawDoors rely on), so the
 // gem picks up the area profile; callers must invoke this inside the 3D pass.
-func DrawCrystals(camera rl.Camera3D, g core.GameState, assets Resources) {
+func DrawCrystals(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if len(g.Crystals) == 0 {
 		return
 	}
@@ -48,7 +48,7 @@ func DrawCrystals(camera rl.Camera3D, g core.GameState, assets Resources) {
 // Only charged crystals are interactable, so a spent one shows no prompt. Drawn
 // AFTER rl.EndMode3D so the prompt text renders in screen space — see
 // drawAdventureScene for the call order.
-func DrawCrystalPrompt(camera rl.Camera3D, g core.GameState, assets Resources) {
+func DrawCrystalPrompt(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	idx := core.AdjacentChargedCrystalIndex(g.Crystals, g.Player.TileX, g.Player.TileZ)
 	if idx < 0 {
 		return

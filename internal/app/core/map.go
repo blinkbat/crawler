@@ -332,6 +332,17 @@ func (a AreaDefinition) layerByteAt(layer []string, x, z int) (byte, bool) {
 	return row[x], true
 }
 
+// FloorCharAt / DecorCharAt / PropCharAt return the raw authored char at (x, z)
+// for that grid layer, bounds-safe (ok=false for an out-of-range OR ragged-short
+// cell, exactly like layerByteAt). For callers that need the char itself rather
+// than a derived predicate — e.g. the debug overlay's per-tile labels — while
+// still tolerating a non-rectangular in-progress AreaDefinition (a struct-built
+// or mid-edit area whose layers aren't all Width×Height yet), which a direct
+// m.Floor[z][x] index would panic on.
+func (a AreaDefinition) FloorCharAt(x, z int) (byte, bool) { return a.layerByteAt(a.Floor, x, z) }
+func (a AreaDefinition) DecorCharAt(x, z int) (byte, bool) { return a.layerByteAt(a.Decor, x, z) }
+func (a AreaDefinition) PropCharAt(x, z int) (byte, bool)  { return a.layerByteAt(a.Props, x, z) }
+
 func (a AreaDefinition) WallAt(x, z int) bool {
 	if !a.InBounds(x, z) {
 		return true
@@ -693,6 +704,13 @@ func DoorSpawnIndexAt(spawns []DoorSpawn, x, z int) int {
 	return SpawnIndexAt(spawns, x, z)
 }
 
+// CrystalSpawnIndexAt returns the index of the crystal spawn at the given
+// tile, or -1 when none. Authored-list counterpart to runtime
+// CrystalIndexAt.
+func CrystalSpawnIndexAt(spawns []CrystalSpawn, x, z int) int {
+	return SpawnIndexAt(spawns, x, z)
+}
+
 // AreaTileSummary returns a compact human-readable description of
 // what's painted on the (x, z) tile across every layer + every
 // entity list. Empty layers are omitted so a clean grass cell reads
@@ -739,6 +757,9 @@ func AreaTileSummary(a AreaDefinition, x, z int) string {
 	}
 	if DoorSpawnIndexAt(a.DoorSpawns, x, z) >= 0 {
 		parts = append(parts, "Door")
+	}
+	if CrystalSpawnIndexAt(a.CrystalSpawns, x, z) >= 0 {
+		parts = append(parts, "Crystal")
 	}
 	if len(parts) == 0 {
 		return "(empty)"

@@ -457,13 +457,13 @@ var skillDefinitions = []skillDefinition{
 	// blocks Ingest until cleared. Duration carried in BindMin/Max
 	// (3-turn fixed today); a future enchant or party skill can reuse
 	// the field without touching the apply path.
-	{Skill: SkillWeb, Name: "Web", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{BindChance: 1.0, BindMinTurns: SpiderWebbedMinTurns, BindMaxTurns: SpiderWebbedMaxTurns}, EnemyCastable: true},
+	{Skill: SkillWeb, Name: "Web", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{BindChance: WebBindChance, BindMinTurns: SpiderWebbedMinTurns, BindMaxTurns: SpiderWebbedMaxTurns}, EnemyCastable: true},
 	// Confuse (Will-o'-Wisp): enemy-only, Magic-tagged, single party
 	// target. Applies the Confused status — per-action retarget roll
 	// when the afflicted member acts. WIS resists on the apply roll
 	// so a high-WIS Cleric is sturdier against it; duration is fixed
 	// in ConfuseMin/Max.
-	{Skill: SkillConfuse, Name: "Confuse", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{ConfuseChance: 1.0, ConfuseMinTurns: WispConfuseMinTurns, ConfuseMaxTurns: WispConfuseMaxTurns}, EnemyCastable: true},
+	{Skill: SkillConfuse, Name: "Confuse", Cost: 0, TargetMode: ActionPartyTarget, Kind: SkillKindUtility, Tag: SkillTagMagic, Minigame: MinigamePress, Effect: SkillEffect{ConfuseChance: WispConfuseApplyChance, ConfuseMinTurns: WispConfuseMinTurns, ConfuseMaxTurns: WispConfuseMaxTurns}, EnemyCastable: true},
 	// Stoneslam (Stone Golem): enemy-only, Phys-tagged, AoE. Damage
 	// hits every living party member; per-target armor applies
 	// because the tag is Phys. The slap value comes from caster
@@ -681,13 +681,9 @@ func OutOfBattleHeals(m PartyMember) []SkillID {
 // chooser's per-frame update/draw paths. The returned slice aliases buf's
 // backing array and is valid until the caller's next reuse of it.
 func OutOfBattleHealsInto(buf []SkillID, m PartyMember) []SkillID {
-	buf = buf[:0]
-	for _, s := range PartySkills(m) {
-		if s != SkillNone && SkillHealableOutOfBattle(s) {
-			buf = append(buf, s)
-		}
-	}
-	return buf
+	return filterInto(buf, PartySkills(m), func(s SkillID) bool {
+		return s != SkillNone && SkillHealableOutOfBattle(s)
+	})
 }
 
 // HealMember restores up to `amount` HP to a LIVING, non-ingested member,
@@ -1134,6 +1130,34 @@ func XPForLevel(level int) int {
 	return int(cost)
 }
 
+// ProjectXP walks a starting (level, within-level remainder) forward by
+// `added` XP and returns the resulting level, remainder, and the number of
+// level thresholds crossed — WITHOUT mutating anything. It's the pure core
+// of AddXP, shared with the victory spoils screen, which replays it at a
+// partial `added` each frame to animate an XP bar filling across level-ups.
+// startLvl is normalized to BaseLevel; negative `added` is treated as 0 so
+// a caller can't accidentally drain XP.
+func ProjectXP(startLvl, startXP, added int) (lvl, xp, gained int) {
+	lvl = startLvl
+	if lvl < BaseLevel {
+		lvl = BaseLevel
+	}
+	xp = startXP
+	if added > 0 {
+		xp += added
+	}
+	for {
+		need := XPForLevel(lvl)
+		if need <= 0 || xp < need {
+			break
+		}
+		xp -= need
+		lvl++
+		gained++
+	}
+	return lvl, xp, gained
+}
+
 // AddXP banks `amount` of experience onto a party member, processing
 // multiple level-ups if the running total crosses several thresholds.
 // Each level-up increments Level + queues a PendingLevelUps point-spend
@@ -1141,32 +1165,23 @@ func XPForLevel(level int) int {
 // the member just gained — callers use it for the "Warrior reaches
 // level 3!" log line. No-op for amount<=0 or a dead member (HP <= 0,
 // matching the "living members get XP" rule in AwardBattleXP).
+//
+// The level math is delegated to ProjectXP so the real award and the
+// victory screen's animated preview can never disagree on where a given
+// XP total lands. Each crossed level grants LevelStatPoints stat points
+// (default 3) for the level-up modal PLUS LevelSkillPoints skill points
+// (default 1) into the member's SkillPoints pool, spent later from the
+// Skills panel's tree UI.
 func AddXP(m *PartyMember, amount int) int {
 	if amount <= 0 || m == nil || m.HP <= 0 {
 		return 0
 	}
-	if m.Level < BaseLevel {
-		m.Level = BaseLevel
-	}
-	m.XP += amount
-	levels := 0
-	for {
-		need := XPForLevel(m.Level)
-		if need <= 0 || m.XP < need {
-			break
-		}
-		m.XP -= need
-		m.Level++
-		// Each level grants LevelStatPoints stat points (default 3)
-		// to spend in the level-up modal PLUS LevelSkillPoints skill
-		// points (default 1) that drop into the member's SkillPoints
-		// pool. Skill points are spent later from the Skills panel's
-		// tree UI; the level-up modal handles stat points only.
-		m.PendingLevelUps += LevelStatPoints
-		m.SkillPoints += LevelSkillPoints
-		levels++
-	}
-	return levels
+	lvl, xp, gained := ProjectXP(m.Level, m.XP, amount)
+	m.Level = lvl
+	m.XP = xp
+	m.PendingLevelUps += gained * LevelStatPoints
+	m.SkillPoints += gained * LevelSkillPoints
+	return gained
 }
 
 // FirstPendingLevelUp returns the index of the first party member
@@ -1223,6 +1238,12 @@ const (
 	// poison — and, like Defending, don't flicker (good news shouldn't alarm).
 	PartyStatusBlessed
 	PartyStatusRegen
+	// PartyStatusShielded / PartyStatusIceArmor are the POSITIVE defensive wards
+	// (Aegis ShieldHP / Ice Armor). They sit with Bless/Regen below every threat
+	// and above Defending, and don't flicker. Without these rows a member whose
+	// ONLY active status is a shield or ice ward showed no pill at all.
+	PartyStatusShielded
+	PartyStatusIceArmor
 	PartyStatusDefending
 	// PartyStatusCount is the length-assert sentinel for any render-side
 	// table indexed by PartyStatusKind. New status kinds slot in above
@@ -1247,28 +1268,17 @@ const (
 // status, or 0 for boolean statuses (Down / Ingested / Defending).
 // Takes *PartyMember to avoid copying the member struct on the per-card-per-
 // frame draw path; read-only.
+//
+// Both the priority resolution and the label read the single
+// partyStatusBands table below — they used to be two parallel switches that
+// could silently drift (a new kind added to the label switch but not the
+// resolver would never surface), the same hazard woundBands fixed for enemy
+// conditions.
 func PartyStatus(m *PartyMember) (kind PartyStatusKind, turns int) {
-	switch {
-	case m.HP <= 0:
-		return PartyStatusDown, 0
-	case m.Ingested:
-		return PartyStatusIngested, 0
-	case m.WebbedTurns > 0:
-		return PartyStatusWebbed, m.WebbedTurns
-	case m.ConfusedTurns > 0:
-		return PartyStatusConfused, m.ConfusedTurns
-	case m.StunTurns > 0:
-		return PartyStatusStunned, m.StunTurns
-	case m.SleepTurns > 0:
-		return PartyStatusAsleep, m.SleepTurns
-	case m.PoisonTurns > 0:
-		return PartyStatusPoisoned, m.PoisonTurns
-	case len(m.Buffs) > 0:
-		return PartyStatusBlessed, MaxStatusModTurns(m.Buffs)
-	case m.RegenTurns > 0:
-		return PartyStatusRegen, m.RegenTurns
-	case m.Defending:
-		return PartyStatusDefending, 0
+	for _, band := range partyStatusBands {
+		if active, t := band.Active(m); active {
+			return band.Kind, t
+		}
 	}
 	return PartyStatusNone, 0
 }
@@ -1278,29 +1288,41 @@ func PartyStatus(m *PartyMember) (kind PartyStatusKind, turns int) {
 // surface — never branch on the kind enum yourself at the call
 // site; that's how the two surfaces drifted before this helper.
 func PartyStatusLabel(kind PartyStatusKind) string {
-	switch kind {
-	case PartyStatusDown:
-		return "DOWN"
-	case PartyStatusIngested:
-		return "INGESTED"
-	case PartyStatusWebbed:
-		return "WEBBED"
-	case PartyStatusConfused:
-		return "CONFUSED"
-	case PartyStatusStunned:
-		return "STUNNED"
-	case PartyStatusAsleep:
-		return "ASLEEP"
-	case PartyStatusPoisoned:
-		return "POISONED"
-	case PartyStatusBlessed:
-		return "BLESSED"
-	case PartyStatusRegen:
-		return "REGEN"
-	case PartyStatusDefending:
-		return "DEFENDING"
+	for _, band := range partyStatusBands {
+		if band.Kind == kind {
+			return band.Label
+		}
 	}
 	return ""
+}
+
+// partyStatusBands is the priority-ordered source for both PartyStatus
+// (resolver) and PartyStatusLabel — walked top to bottom, the first band whose
+// Active predicate fires wins. Order is what surfaces when statuses stack:
+// Down beats everything (nothing else matters at 0 HP), Ingested next (most
+// disruptive — can't act, can't be hit), then the disabling lockout/DoT
+// statuses in descending "how much it wrecks the plan" order, then the
+// positive statuses, then Defending (lowest — a positive the player chose).
+// Adding a PartyStatusKind is ONE row here, asserted complete in init().
+var partyStatusBands = []struct {
+	Kind   PartyStatusKind
+	Label  string
+	Active func(m *PartyMember) (active bool, turns int)
+}{
+	{PartyStatusDown, "DOWN", func(m *PartyMember) (bool, int) { return m.HP <= 0, 0 }},
+	{PartyStatusIngested, "INGESTED", func(m *PartyMember) (bool, int) { return m.Ingested, 0 }},
+	{PartyStatusWebbed, "WEBBED", func(m *PartyMember) (bool, int) { return m.WebbedTurns > 0, m.WebbedTurns }},
+	{PartyStatusConfused, "CONFUSED", func(m *PartyMember) (bool, int) { return m.ConfusedTurns > 0, m.ConfusedTurns }},
+	{PartyStatusStunned, "STUNNED", func(m *PartyMember) (bool, int) { return m.StunTurns > 0, m.StunTurns }},
+	{PartyStatusAsleep, "ASLEEP", func(m *PartyMember) (bool, int) { return m.SleepTurns > 0, m.SleepTurns }},
+	{PartyStatusPoisoned, "POISONED", func(m *PartyMember) (bool, int) { return m.PoisonTurns > 0, m.PoisonTurns }},
+	{PartyStatusBlessed, "BLESSED", func(m *PartyMember) (bool, int) {
+		return len(m.Buffs) > 0 && StatusModsNetBeneficial(m.Buffs), MaxStatusModTurns(m.Buffs)
+	}},
+	{PartyStatusRegen, "REGEN", func(m *PartyMember) (bool, int) { return m.RegenTurns > 0, m.RegenTurns }},
+	{PartyStatusShielded, "SHIELD", func(m *PartyMember) (bool, int) { return m.ShieldHP > 0, m.ShieldHP }},
+	{PartyStatusIceArmor, "ICE ARMOR", func(m *PartyMember) (bool, int) { return m.IceArmorTurns > 0, m.IceArmorTurns }},
+	{PartyStatusDefending, "DEFENDING", func(m *PartyMember) (bool, int) { return m.Defending, 0 }},
 }
 
 // Stat enumerates the six spendable level-up stats in display order.
@@ -1475,6 +1497,22 @@ func MaxStatusModTurns(mods []StatusMod) int {
 	return longest
 }
 
+// StatusModsNetBeneficial reports whether the summed numeric effect of a
+// StatusMod slice is net-positive (stat points + Armor + MDef). PartyMember.Buffs
+// is the positive-buff channel, but StampPartyBuff stores ANY mod with Turns>0 —
+// gating the "Blessed" pill on this keeps a future net-negative self-mod (a debuff
+// authored with negative BuffStats) from mislabeling as a buff on the party card.
+func StatusModsNetBeneficial(mods []StatusMod) bool {
+	// Fold every mod into one (stats, armor, mdef) bundle through the shared
+	// SumStatusMods accumulator (which itself folds per-stat via SumStats), then
+	// total the aggregate's six stat points + armor + mdef once — instead of
+	// re-inlining the six-field stat sum per mod, which had to be edited in
+	// lockstep with SumStats whenever a Stat field was added.
+	stats, armor, mdef := SumStatusMods(mods)
+	sum := stats.STR + stats.DEX + stats.INT + stats.WIS + stats.VIT + stats.SPD + armor + mdef
+	return sum > 0
+}
+
 // StampPartyBuff adds or refreshes one skill's buff on a member: a StatusMod
 // keyed by source carrying the effect's BuffStats / BuffArmor / BuffMDef for
 // BuffTurns. STACKS with OTHER skills' buffs (they sum in EffectiveStats /
@@ -1515,11 +1553,20 @@ func AdjustStat(s *Stats, st Stat, delta int) {
 func DebugBoostParty(party []PartyMember, amount int) {
 	for i := range party {
 		m := &party[i]
+		// Grow MaxMP by the ACTUAL applied INT delta, not the raw amount:
+		// AdjustStat floors each stat at 0, so a negative boost can change INT
+		// by less than `amount`. Using the raw amount would drop MaxMP (and the
+		// MP=MaxMP that follows) below the floored-INT-justified value, even
+		// negative. Mirror MaxHP, which already recomputes authoritatively.
+		beforeINT := m.Stats.INT
 		for s := Stat(0); s < StatCount; s++ {
 			AdjustStat(&m.Stats, s, amount)
 		}
 		m.MaxHP = MaxHPFor(m.Stats)
-		m.MaxMP += amount * MPPerINT
+		m.MaxMP += (m.Stats.INT - beforeINT) * MPPerINT
+		if m.MaxMP < 0 {
+			m.MaxMP = 0
+		}
 		m.HP = m.MaxHP
 		m.MP = m.MaxMP
 	}
@@ -1554,7 +1601,7 @@ func StatDescription(s Stat) string {
 // %, heal, mdef, max HP, etc.) by applying `pending` clones of the
 // stat's Add to a working copy. Returns "" when pending <= 0 or stat
 // is out-of-range so the renderer can fall through to StatDescription.
-func StatPreviewLine(stat Stat, current Stats, pending int) string {
+func StatPreviewLine(stat Stat, current Stats, pending int, accuracyStat Stat) string {
 	if pending <= 0 || stat < 0 || int(stat) >= len(statTable) {
 		return ""
 	}
@@ -1564,10 +1611,17 @@ func StatPreviewLine(stat Stat, current Stats, pending int) string {
 	}
 	switch stat {
 	case StatSTR:
-		// STR drives both melee damage and melee hit chance.
-		h0 := MeleeAccuracy(current, TimingQualityMiss) * 100
-		h1 := MeleeAccuracy(after, TimingQualityMiss) * 100
-		return fmt.Sprintf("Melee %d→%d  Hit %.0f→%.0f%%", MeleeDamage(current, 0), MeleeDamage(after, 0), h0, h1)
+		// STR always drives melee DAMAGE. It only drives to-hit when STR is the
+		// member's weapon accuracy stat (unarmed / heavy weapon); a light or
+		// ranged weapon hits off DEX, so a STR spend wouldn't move its hit % —
+		// don't preview a Hit gain that won't materialize.
+		line := fmt.Sprintf("Melee %d→%d", MeleeDamage(current, 0), MeleeDamage(after, 0))
+		if accuracyStat == StatSTR {
+			h0 := MeleeAccuracy(current, TimingQualityMiss) * 100
+			h1 := MeleeAccuracy(after, TimingQualityMiss) * 100
+			line += fmt.Sprintf("  Hit %.0f→%.0f%%", h0, h1)
+		}
+		return line
 	case StatDEX:
 		// DEX's active effects are dodge + crit (ranged hit is dormant
 		// until a ranged attack ships, so it's left off the preview).
@@ -1637,18 +1691,19 @@ func init() {
 	// when a player happens to stage that stat mid-game.
 	var probe Stats
 	for i := Stat(0); i < StatCount; i++ {
-		if StatPreviewLine(i, probe, 1) == "" {
+		if StatPreviewLine(i, probe, 1, StatSTR) == "" {
 			panic(fmt.Sprintf("core: StatPreviewLine returned empty for stat index %d — add a preview case", int(i)))
 		}
 	}
-	// PartyStatusLabel is the same kind of switch-shaped parallel-to-enum table
-	// the length-asserts can't cover. Force its coverage so a new
-	// PartyStatusKind added to the enum but missed in the label switch panics
-	// at STARTUP instead of rendering a silent blank label. PartyStatusNone is
-	// the one kind with no label (the absence of a status), so skip it.
+	// partyStatusBands drives BOTH PartyStatus (resolver) and PartyStatusLabel,
+	// so asserting every kind has a label transitively guarantees the resolver
+	// can surface it too. Force coverage so a new PartyStatusKind added to the
+	// enum but missed in partyStatusBands panics at STARTUP instead of silently
+	// never surfacing. PartyStatusNone is the one kind with no row (the absence
+	// of a status), so skip it.
 	for k := PartyStatusNone + 1; k < PartyStatusCount; k++ {
 		if PartyStatusLabel(k) == "" {
-			panic(fmt.Sprintf("core: PartyStatusLabel returned empty for kind %d — add a label case", int(k)))
+			panic(fmt.Sprintf("core: partyStatusBands missing kind %d — add a row", int(k)))
 		}
 	}
 }
@@ -1743,7 +1798,7 @@ func (p PoisonEffect) RollDuration(rng *rand.Rand) int {
 //     by a mantrap (i.e. skipped from the per-turn queue). Without
 //     this third path, ingest would silently pause the poison DoT.
 //
-// All three drain PoisonTurns, deal PoisonTickDamage, and bypass
+// All three drain PoisonTurns, deal DefaultPoisonEffect.TickDamage, and bypass
 // armor (poison is magical decay). The HP-floor + damage-flash step is
 // now shared via ApplyFlatDamage, so a "Poison ticks for VIT% instead
 // of flat" change lands in one helper; what still legitimately differs
@@ -1765,7 +1820,11 @@ func TickPoisonStep(g *GameState) int {
 		// flash contract with the battle damage path via ApplyFlatDamage;
 		// the wake rule below is poison-specific (only a lethal tick wakes
 		// a sleeper out of battle, unlike the in-battle wake-on-any-hit).
-		if ApplyFlatDamage(&m.HP, &m.DamageFlash, PoisonTickDamage) {
+		// Per-tick damage reads through DefaultPoisonEffect.TickDamage so the
+		// PoisonEffect struct is the single source for poison numbers — a
+		// future trap/alchemist poison with a different TickDamage flows here
+		// without re-touching this loop.
+		if ApplyFlatDamage(&m.HP, &m.DamageFlash, DefaultPoisonEffect.TickDamage) {
 			m.SleepTurns = 0
 		}
 		ticks++

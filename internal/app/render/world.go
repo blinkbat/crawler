@@ -11,7 +11,14 @@ import (
 
 type enemyVisual struct {
 	texture rl.Texture2D
-	size    rl.Vector2
+	// pristineTexture is the UNADJUSTED base sprite (procedural art or authored
+	// PNG, before any non-destructive Pixelate/Brightness/Contrast override is
+	// applied). `texture` is what's drawn — derived from this plus the override's
+	// image adjustments at load. The editor re-derives its live preview from the
+	// pristine so dragging the FX sliders never compounds onto an already-adjusted
+	// image. Equals `texture` when the override has no image adjustments.
+	pristineTexture rl.Texture2D
+	size            rl.Vector2
 	// shadowRadius is the half-extent (world units) of the soft contact
 	// disc painted on the floor beneath this billboard, matching the
 	// prop grounding signature (see propShadowRadius). Zero = no shadow,
@@ -79,6 +86,12 @@ type enemyVisual struct {
 	particleYOffset float32
 	particleZOffset float32
 	particleScale   float32
+	// popupXOffset / popupYOffset nudge THIS kind's floating damage-NUMBER spawn
+	// from the sprite center along camera-right(+) and world-up(+), ADDITIVE on
+	// the baked default rise (zero = historical spot). Separate from the glyph
+	// anchor above — this moves the number, not the clarity symbol.
+	popupXOffset float32
+	popupYOffset float32
 	// tint is a per-kind base color multiplied (raylib ColorTint semantics:
 	// a*b/255 per channel) into the runtime billboard tint — darken with a
 	// gray, recolor with a hue, etc. It folds in AFTER the combat tint
@@ -87,6 +100,13 @@ type enemyVisual struct {
 	// value (A==0) means "untinted"; use A==255 when setting one. See
 	// resolveTint / the draw sites.
 	tint rl.Color
+	// Non-destructive image adjustments, mirroring the override fields so they
+	// round-trip through enemyVisualOverride/applyEnemyVisualOverride (the editor
+	// seeds its sliders from these). They drive how `texture` is derived from
+	// `pristineTexture` at build time — they do NOT alter the draw directly.
+	pixelate   float32
+	brightness float32
+	contrast   float32
 }
 
 // resolveTint returns the per-kind base tint, treating the zero-value Color
@@ -181,10 +201,15 @@ func enemyVisualOverride(v enemyVisual) core.EnemyVisualOverride {
 		ParticleYOffset: v.particleYOffset,
 		ParticleZOffset: v.particleZOffset,
 		ParticleScale:   v.effectiveParticleScale(),
+		PopupXOffset:    v.popupXOffset,
+		PopupYOffset:    v.popupYOffset,
 		TintR:           v.tint.R,
 		TintG:           v.tint.G,
 		TintB:           v.tint.B,
 		TintA:           v.tint.A,
+		Pixelate:        v.pixelate,
+		Brightness:      v.brightness,
+		Contrast:        v.contrast,
 	}
 }
 
@@ -212,7 +237,12 @@ func applyEnemyVisualOverride(v enemyVisual, ov core.EnemyVisualOverride) enemyV
 	v.particleYOffset = ov.ParticleYOffset
 	v.particleZOffset = ov.ParticleZOffset
 	v.particleScale = ov.ParticleScale
+	v.popupXOffset = ov.PopupXOffset
+	v.popupYOffset = ov.PopupYOffset
 	v.tint = rl.NewColor(ov.TintR, ov.TintG, ov.TintB, ov.TintA)
+	v.pixelate = ov.Pixelate
+	v.brightness = ov.Brightness
+	v.contrast = ov.Contrast
 	return v
 }
 
@@ -261,7 +291,7 @@ var currentFOV = exploreFOV
 // targetFOV returns the FOV the camera should be tweening toward this
 // frame. Split out so the tween logic in Camera doesn't have to
 // branch on `g.Battle.Active()` inline.
-func targetFOV(g core.GameState) float32 {
+func targetFOV(g *core.GameState) float32 {
 	if g.Battle.Active() {
 		return battleFOV
 	}
@@ -280,7 +310,7 @@ func targetFOV(g core.GameState) float32 {
 // pulls into view.
 const battlePitchOffset = float32(-0.18)
 
-func Camera(g core.GameState) rl.Camera3D {
+func Camera(g *core.GameState) rl.Camera3D {
 	p := g.Player
 	yaw := p.Yaw + p.LookYaw
 	pitch := p.LookPitch
@@ -334,7 +364,7 @@ func Camera(g core.GameState) rl.Camera3D {
 // scene's two clear arms rather than for its visible hue.
 var SkyClearColor = rl.NewColor(87, 172, 244, 255)
 
-func DrawSkyBackground(assets Resources, g core.GameState) {
+func DrawSkyBackground(assets Resources, g *core.GameState) {
 	m := g.Area
 	texW := float32(assets.skyTexture.Width)
 	texH := float32(assets.skyTexture.Height)
@@ -405,7 +435,7 @@ func behindCull(camPos, forward, p rl.Vector3) bool {
 }
 
 // DrawWorld draws the full lit environment pass — see drawWorld.
-func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
+func DrawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	drawWorld(camera, g, assets, false)
 }
 
@@ -428,7 +458,7 @@ func DrawWorld(camera rl.Camera3D, g core.GameState, assets Resources) {
 // per-pixel lighting shader still runs (it's attached to every model's
 // material, not switchable via BeginShaderMode), but the redundant CPU lighting
 // re-setup and the torch grid-scan are elided.
-func drawWorld(camera rl.Camera3D, g core.GameState, assets Resources, depthOnly bool) {
+func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnly bool) {
 	m := g.Area
 	material := assets.worldMaterial(m.Materials)
 	var profile lightingProfile
@@ -914,21 +944,30 @@ var propShadowRadiusTable = func() [256]float32 {
 	return t
 }()
 
-// areaKey identifies the area a per-area cache was built for, so the
-// cache rebuilds only when the player enters a different area (matched on
-// name + dimensions). Shared by enclosureCache and torchSiteCache so the
-// two "is this still the same area?" tests can't drift apart.
+// areaKey identifies the area a per-area cache was built for, so the cache
+// rebuilds only when the player enters a different area. Matched on name +
+// dimensions PLUS a ceiling fingerprint (core.CeilingFingerprint) — without
+// the fingerprint, two distinct same-named, same-sized areas with different
+// roofs would share a stale enclosure/torch verdict (the editor "untitled"
+// case). Shares the fingerprint with core's outdoorVerdictCache so the
+// lighting/torch gates and the rain gate can't drift. Used by enclosureCache
+// and torchSiteCache.
 type areaKey struct {
 	name          string
 	width, height int
+	rows          int
+	top, bot      string
 	primed        bool
 }
 
 func (k *areaKey) matches(m core.AreaDefinition) bool {
-	return k.primed && k.name == m.Name && k.width == m.Width && k.height == m.Height
+	rows, top, bot := core.CeilingFingerprint(m)
+	return k.primed && k.name == m.Name && k.width == m.Width && k.height == m.Height &&
+		k.rows == rows && k.top == top && k.bot == bot
 }
 
 func (k *areaKey) set(m core.AreaDefinition) {
+	k.rows, k.top, k.bot = core.CeilingFingerprint(m)
 	k.name, k.width, k.height, k.primed = m.Name, m.Width, m.Height, true
 }
 
@@ -1351,7 +1390,7 @@ func drawPebbleCluster(assets Resources, cx, cz float32, tileHash uint32) {
 	}
 }
 
-func DrawEnemies(camera rl.Camera3D, g core.GameState, assets Resources) {
+func DrawEnemies(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if g.Battle.Phase == core.BattleNone {
 		// Debug enemies-off hides field packs entirely. A battle in
 		// progress still draws (you'd only toggle mid-explore), but on
@@ -1391,12 +1430,19 @@ const enemyFieldLift = battleFormationCenterY - enemyBillboardY
 var (
 	partyBillboardSize       = rl.NewVector2(0.38, 0.68)
 	partyBillboardSizeActive = rl.NewVector2(0.42, 0.72)
+	// partyActiveScale is the per-axis bump the active member's billboard gets,
+	// expressed as a ratio of the active size to the idle size. DrawPartySprites
+	// multiplies the member's (possibly author-overridden) base size by this so
+	// the "your turn" emphasis scales the tuned sprite rather than snapping to a
+	// fixed constant — and reproduces partyBillboardSizeActive exactly when the
+	// base is the default partyBillboardSize.
+	partyActiveScale = rl.NewVector2(partyBillboardSizeActive.X/partyBillboardSize.X, partyBillboardSizeActive.Y/partyBillboardSize.Y)
 )
 
 // drawFieldPacks renders one billboard per pack — the highest-tier member,
 // at the pack's authored tile. Empty/all-dead packs are skipped (they're
 // cleaned up by the battle-win path anyway).
-func drawFieldPacks(camera rl.Camera3D, g core.GameState, assets Resources) {
+func drawFieldPacks(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	// Distance fog for billboards goes through a custom fragment
 	// shader — multiplicative tint (the only knob raylib's billboard
 	// draw exposes) can darken or color-filter but can't lerp
@@ -1478,11 +1524,11 @@ func resolveBillboardPlacement(camera rl.Camera3D, position rl.Vector3, v enemyV
 
 // drawBattlePack renders every member of the active pack in battle
 // formation: living and recently-defeated (still fading) alike.
-func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
+func drawBattlePack(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	// Same fog-shader gate as drawFieldPacks — billboards recede
 	// with the world geometry around them.
 	defer beginBillboardFogPass(camera, g, assets)()
-	members := core.BattleMembers(&g)
+	members := core.BattleMembers(g)
 	// Precompute the visible (alive-or-fading) member count once, and track
 	// each drawn member's visible-slot index incrementally below. This is what
 	// battleEnemySlot used to recompute per enemy (a re-walk of the whole pack
@@ -1509,7 +1555,7 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 		if !enemy.Alive && enemy.DeathFade <= 0 {
 			continue
 		}
-		position := enemyFormationPos(camera, &g, visibleSlot, visibleCount, enemy)
+		position := enemyFormationPos(camera, g, visibleSlot, visibleCount, enemy)
 		// Per-kind depth/marker/yOffset placement (depth push-back for the
 		// square Feral Rat PNG, the chevron anchor, the contact-shadow
 		// footprint, and the lowered sprite center) all derive from one shared
@@ -1518,20 +1564,17 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 		tint := rl.White
 		if !enemy.Alive {
 			alpha := uint8(220 * core.Clamp(float64(enemy.DeathFade/core.DeathFadeDuration), 0, 1))
-			tint = rl.NewColor(255, 255, 255, alpha)
+			tint = colorWithAlpha(rl.White, alpha)
 		}
 		// Yellow target chevron + tint render only while the player is
 		// in the enemy-target picker. targetingEnemy gates on
 		// Phase==BattlePlayer so the chevron drops the moment the
 		// timing bar arms — shared with the roster row's `targetable`
-		// flag so both yellow indicators behave identically.
-		if enemy.Alive && targetingEnemy(g) && i == g.Battle.EnemyIndex {
-			tint = tintEnemyTargeted
-			drawTargetChevron(camera, place.chevron, visual.effectiveMarkerScale())
-		} else if enemy.Alive && aoeEnemyTargetPreview(g) {
-			// AoE skill highlighted in the Skill submenu: every living
-			// enemy gets a chevron so the player sees the cast hits the
-			// whole line, not one target.
+		// flag so both yellow indicators behave identically. The AoE
+		// preview (an AoE skill highlighted in the Skill submenu) chevrons
+		// EVERY living enemy so the player sees the cast hits the whole
+		// line, not one target — same body, broader guard.
+		if enemy.Alive && ((targetingEnemy(g) && i == g.Battle.EnemyIndex) || aoeEnemyTargetPreview(g)) {
 			tint = tintEnemyTargeted
 			drawTargetChevron(camera, place.chevron, visual.effectiveMarkerScale())
 		}
@@ -1577,7 +1620,7 @@ func drawBattlePack(camera rl.Camera3D, g core.GameState, assets Resources) {
 // instead of allocating, mirroring skillMenuSkillsBuf.
 var aoePreviewSkillsBuf []core.SkillID
 
-func aoeEnemyTargetPreview(g core.GameState) bool {
+func aoeEnemyTargetPreview(g *core.GameState) bool {
 	if g.Battle.Phase != core.BattlePlayer || g.Battle.ActionMode != core.ActionSkillMenu {
 		return false
 	}
@@ -1595,7 +1638,7 @@ func aoeEnemyTargetPreview(g core.GameState) bool {
 
 // isEnemyAttackerSlot reports whether the given active-pack member slot
 // is the one currently lunging at the party (during BattleEnemyTiming).
-func isEnemyAttackerSlot(g core.GameState, slot int) bool {
+func isEnemyAttackerSlot(g *core.GameState, slot int) bool {
 	if g.Battle.Phase != core.BattleEnemyTiming {
 		return false
 	}
@@ -1613,11 +1656,11 @@ func isEnemyAttackerSlot(g core.GameState, slot int) bool {
 // allocation-free on the draw path; a future AoE enemy skill would change
 // this to a set + the caller's single `==` check back to a membership
 // test.
-func enemyAttackTarget(g core.GameState) (int, bool) {
+func enemyAttackTarget(g *core.GameState) (int, bool) {
 	if g.Battle.Phase != core.BattleEnemyTiming {
 		return -1, false
 	}
-	target := core.PeekNextEnemyTarget(&g)
+	target := core.PeekNextEnemyTarget(g)
 	if target < 0 {
 		return -1, false
 	}
@@ -1657,30 +1700,40 @@ var (
 		tipYOffset: 0.56,
 		height:     0.20,
 		baseRadius: 0.085,
-		color:      rl.NewColor(255, 224, 80, 255),
+		color:      selectorEnemyTargetColor,
 		phase:      0.0,
 	}
 	// markerFriendlyTarget is the player's currently-selected ally
 	// (heal / item targeting). Green, slightly smaller than the
 	// enemy markers since party billboards sit closer to the camera.
 	markerFriendlyTarget = markerStyle{
-		tipYOffset: 0.36,
-		height:     0.13,
-		baseRadius: 0.055,
-		color:      rl.NewColor(118, 235, 136, 245),
+		tipYOffset: smallMarkerTipYOffset,
+		height:     smallMarkerHeight,
+		baseRadius: smallMarkerBaseRadius,
+		color:      selectorFriendlyTargetColor,
 		phase:      0.3,
 	}
 	// markerEnemyAttackTarget tags the party member(s) the lunging enemy
 	// is about to hit — drawn above the threatened head while the defend
-	// bar is up. Sized identically to markerFriendlyTarget so the two
-	// indicators read as visually paired even when the colors differ.
+	// bar is up. Shares the small-marker dims with markerFriendlyTarget so
+	// the two indicators read as visually paired even when the colors differ.
 	markerEnemyAttackTarget = markerStyle{
-		tipYOffset: 0.36,
-		height:     0.13,
-		baseRadius: 0.055,
-		color:      rl.NewColor(255, 96, 96, 245),
+		tipYOffset: smallMarkerTipYOffset,
+		height:     smallMarkerHeight,
+		baseRadius: smallMarkerBaseRadius,
+		color:      selectorEnemyAttackColor,
 		phase:      0.9,
 	}
+)
+
+// Shared silhouette for the two party-side selector pyramids (friendly target
+// + enemy-attack target). They sit closer to the camera than the enemy-target
+// marker, so they're a touch smaller; pinning the dims here keeps the pair from
+// drifting when one is tuned.
+const (
+	smallMarkerTipYOffset = float32(0.36)
+	smallMarkerHeight     = float32(0.13)
+	smallMarkerBaseRadius = float32(0.055)
 )
 
 // drawMarkerOnTop draws a selector pyramid on a depth-disabled "overlay"
@@ -1795,7 +1848,7 @@ func shadeColor(c rl.Color, factor float32) rl.Color {
 	)
 }
 
-func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
+func DrawPartySprites(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if g.Battle.Phase == core.BattleNone {
 		return
 	}
@@ -1812,7 +1865,7 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 		if g.Party[i].Ingested {
 			continue
 		}
-		texture, ok := partyTextureFor(assets, g.Party[i])
+		visual, ok := partyVisualFor(assets, g.Party[i].Class)
 		if !ok {
 			continue
 		}
@@ -1821,13 +1874,17 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 			memberDance = victoryDance
 		}
 		position := partySpritePosition(camera, i, g.Party[i].Class, g.Party[i].AttackBump, memberDance, g.Party[i].HitKnockback)
-		size := partyBillboardSize
+		// Per-class depth / yOffset / marker / shadow placement all derive from
+		// the same shared helper the foe billboards and the Party Visualizer
+		// preview use, so authored alignment can't drift between battle and editor.
+		place := resolveBillboardPlacement(camera, position, visual)
+		size := visual.size
 		tint := rl.White
 		if g.Party[i].HP <= 0 {
 			tint = tintPartyDown
 		} else if inPlayerTurn(g) && i == g.Battle.CurrentParty {
 			tint = tintPartyActive
-			size = partyBillboardSizeActive
+			size = rl.NewVector2(size.X*partyActiveScale.X, size.Y*partyActiveScale.Y)
 		} else if memberDance > 0 {
 			_, _, _, scale := victoryDanceMotion(g.Party[i].Class, memberDance)
 			size.X *= scale
@@ -1836,6 +1893,16 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 		if g.Party[i].DamageFlash > 0 {
 			tint = core.FlashTint(tint, g.Party[i].DamageFlash)
 		}
+		// Fold in the per-class authored base tint last (untinted classes resolve
+		// to White = no-op), so a tinted member stays proportionally tinted in
+		// every combat state — symmetric with the foe-side tintMul.
+		tint = tintMul(tint, visual.resolveTint())
+		// Optional authored contact disc, drawn before the billboard like the
+		// foe side. Default party visual carries shadowRadius 0 (no disc), so the
+		// existing look is unchanged until an author opts one in.
+		if visual.shadowRadius > 0 {
+			drawGroundShadow(place.shadowX, place.shadowZ, visual.shadowRadius)
+		}
 		// Distance fog is applied by the active billboard-fog shader
 		// (BeginShaderMode at the top of this function). The "your turn"
 		// read lives in the party card now — lifted + brightened, others
@@ -1843,33 +1910,48 @@ func DrawPartySprites(camera rl.Camera3D, g core.GameState, assets Resources) {
 		// floating pyramid were removed: they read as noise over the
 		// sprite. The active fighter still gets the subtle warm tint + size
 		// bump applied above so it reads in 3D too.
-		drawTextureBillboard(camera, texture, position, size, tint)
+		drawTextureBillboard(camera, visual.texture, place.sprite, size, tint)
 		// Same gate as the enemy chevron: target marker only during the
 		// menu phase, NOT during the timing bar that follows the
 		// confirm. inPlayerTurn includes BattleAttackTiming and would
-		// linger the marker through the press.
+		// linger the marker through the press. Markers anchor to the authored
+		// chevron position (markerY/XOffset folded in by resolveBillboardPlacement).
 		if g.Battle.Phase == core.BattlePlayer && targetingAlly(g) && i == g.Battle.PartyTarget && g.Party[i].HP > 0 {
-			drawFriendlyTargetMarker(camera, position)
+			drawFriendlyTargetMarker(camera, place.chevron, visual.effectiveMarkerScale())
 		}
 		// Red "incoming hit" marker above the party member the lunging
 		// enemy is about to strike. Phase gating lives in
 		// enemyAttackTarget — it returns ok=false outside BattleEnemyTiming.
 		if g.Party[i].HP > 0 && hasIncoming && i == incomingSlot {
-			drawEnemyAttackTargetMarker(camera, position)
+			drawEnemyAttackTargetMarker(camera, place.chevron)
 		}
 	}
 }
 
-func partyTextureFor(assets Resources, member core.PartyMember) (rl.Texture2D, bool) {
-	texture, ok := assets.partyTexture[member.Class]
-	if !ok || texture.ID == 0 {
-		return rl.Texture2D{}, false
+// partyVisualFor returns the billboard visual for a class, false when the class
+// has no usable texture (mirrors enemyVisualFor's guard). The party table is
+// fully populated at load (every class gets at least the procedural fallback),
+// so the false branch is defensive.
+func partyVisualFor(assets Resources, class core.PartyClass) (enemyVisual, bool) {
+	v, ok := assets.partyVisuals[class]
+	if !ok || v.texture.ID == 0 {
+		return enemyVisual{}, false
 	}
-	return texture, true
+	return v, true
 }
 
-func drawFriendlyTargetMarker(camera rl.Camera3D, position rl.Vector3) {
-	drawMarkerOnTop(position, markerFriendlyTarget)
+// drawFriendlyTargetMarker draws the ally-target selector pyramid at position,
+// scaled by the member's per-class markerScale (1 = default size) — the
+// friendly twin of drawTargetChevron, so the Party Visualizer's "Cursor Sz"
+// slider is honored in battle as well as the preview instead of being a dead
+// knob. Folds the scale into a local copy of the shared style (kept per-role).
+func drawFriendlyTargetMarker(camera rl.Camera3D, position rl.Vector3, scale float32) {
+	style := markerFriendlyTarget
+	if scale > 0 && scale != 1 {
+		style.height *= scale
+		style.baseRadius *= scale
+	}
+	drawMarkerOnTop(position, style)
 }
 
 func drawEnemyAttackTargetMarker(camera rl.Camera3D, position rl.Vector3) {
@@ -1910,7 +1992,7 @@ func partySpritePosition(camera rl.Camera3D, index int, class core.PartyClass, b
 	)
 }
 
-func victoryDanceElapsed(g core.GameState) float32 {
+func victoryDanceElapsed(g *core.GameState) float32 {
 	if g.Battle.Phase != core.BattleWon {
 		return 0
 	}

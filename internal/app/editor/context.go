@@ -23,18 +23,20 @@ const (
 	ctxItemDeleteChest
 	ctxItemEditDoor
 	ctxItemDeleteDoor
+	// ctxItemDeleteCrystal removes the crystal at the right-clicked tile.
+	// There's no edit counterpart — crystals carry no per-instance data.
+	ctxItemDeleteCrystal
 	ctxItemMoveStartHere
-	// ctxItemStartFacing{N,E,S,W} set the PlayerStart instance's facing
-	// (stored as AreaDefinition.StartFacing). This is the fallback
-	// facing for initial spawn — per-door Facing on each DoorSpawn
-	// overrides it when the player arrives via a door. Surfaced only
-	// in the right-click menu on the start tile; the sidebar no longer
-	// exposes it since "where the player faces on spawn" is an instance
-	// attribute, not an area-wide setting.
-	ctxItemStartFacingN
-	ctxItemStartFacingE
-	ctxItemStartFacingS
-	ctxItemStartFacingW
+	// ctxItemStartFacing sets the PlayerStart instance's facing (stored as
+	// AreaDefinition.StartFacing). This is the fallback facing for initial
+	// spawn — per-door Facing on each DoorSpawn overrides it when the player
+	// arrives via a door. Surfaced only in the right-click menu on the start
+	// tile; the sidebar no longer exposes it since "where the player faces on
+	// spawn" is an instance attribute, not an area-wide setting. The specific
+	// facing (core.North/East/South/West) rides in ctxItem.facing — one kind,
+	// four rows — mirroring how doorEdit carries its facing as a payload
+	// rather than enumerating a kind per direction.
+	ctxItemStartFacing
 )
 
 // ctxItem is one row in the right-click context menu. Built fresh by
@@ -44,6 +46,10 @@ const (
 type ctxItem struct {
 	label string
 	kind  ctxItemKind
+	// facing is the payload for ctxItemStartFacing (core.North/East/South/West);
+	// ignored by every other kind. Lets one facing kind cover all four rows
+	// instead of a kind per direction.
+	facing int
 }
 
 // contextMenuState is the in-State data for an open right-click menu.
@@ -59,7 +65,7 @@ type contextMenuState struct {
 // isDelete reports whether a row is a destructive delete (drawn red so it can't
 // be mistaken for the Edit row sitting right above it).
 func (k ctxItemKind) isDelete() bool {
-	return k == ctxItemDeletePack || k == ctxItemDeleteChest || k == ctxItemDeleteDoor
+	return k == ctxItemDeletePack || k == ctxItemDeleteChest || k == ctxItemDeleteDoor || k == ctxItemDeleteCrystal
 }
 
 // contextItemsAt builds the menu's row list based on what occupies
@@ -89,6 +95,12 @@ func contextItemsAt(s *State, x, z int) []ctxItem {
 			ctxItem{label: "Delete door", kind: ctxItemDeleteDoor},
 		)
 	}
+	if core.CrystalSpawnIndexAt(s.area.CrystalSpawns, x, z) >= 0 {
+		// Crystals have no edit modal (no per-instance data), so only Delete.
+		items = append(items,
+			ctxItem{label: "Delete crystal", kind: ctxItemDeleteCrystal},
+		)
+	}
 	// Player-start tile: surface the facing controls here (the sidebar
 	// no longer carries them — facing is an instance attribute of this
 	// PlayerStart). Otherwise, offer "Move start here" so the author
@@ -97,19 +109,20 @@ func contextItemsAt(s *State, x, z int) []ctxItem {
 	// runContextItem; surfacing the row regardless lets the flash
 	// error explain why it didn't take.
 	if s.area.StartTileX == x && s.area.StartTileZ == z {
-		facingLabel := func(dir int) string {
+		// One row per facing, driven by core.FacingCount (mirrors the door-edit
+		// modal's facing loop) so a future facing scales the menu instead of
+		// needing a hand-added row + enum kind.
+		for dir := 0; dir < int(core.FacingCount); dir++ {
 			marker := "  "
 			if s.area.StartFacing == dir {
 				marker = "* "
 			}
-			return marker + "Face " + core.FacingShortLabels[dir]
+			items = append(items, ctxItem{
+				label:  marker + "Face " + core.FacingShortLabels[dir],
+				kind:   ctxItemStartFacing,
+				facing: dir,
+			})
 		}
-		items = append(items,
-			ctxItem{label: facingLabel(core.North), kind: ctxItemStartFacingN},
-			ctxItem{label: facingLabel(core.East), kind: ctxItemStartFacingE},
-			ctxItem{label: facingLabel(core.South), kind: ctxItemStartFacingS},
-			ctxItem{label: facingLabel(core.West), kind: ctxItemStartFacingW},
-		)
 	} else {
 		items = append(items,
 			ctxItem{label: "Move start here", kind: ctxItemMoveStartHere},
@@ -171,7 +184,7 @@ func contextMenuLayout(s *State) (rl.Rectangle, []rl.Rectangle) {
 	// drawContextMenu — we approximate width via a per-char average so
 	// the layout pass doesn't need the font handle here.
 	for _, it := range s.contextMenu.items {
-		w := approxTextWidth(it.label, editorFontLabel) + 28
+		w := approxTextWidth(it.label, editorFontLabel) + buttonLabelPadX
 		if w > width {
 			width = w
 		}
@@ -231,7 +244,7 @@ func drawContextMenu(s *State, font rl.Font, theme render.Theme) {
 		if s.contextMenu.items[i].kind.isDelete() {
 			col = theme.BorderDanger
 		}
-		rl.DrawTextEx(font, label,
+		render.DrawRichText(font, label,
 			rl.NewVector2(r.X+8, r.Y+(r.Height-editorFontLabel)/2),
 			editorFontLabel, 1, col)
 	}
@@ -254,7 +267,7 @@ func updateContextMenu(s *State) bool {
 		_, rows := contextMenuLayout(s)
 		for i, r := range rows {
 			if pointIn(mp, r) {
-				runContextItem(s, s.contextMenu.items[i].kind)
+				runContextItem(s, s.contextMenu.items[i])
 				closeContextMenu(s)
 				return true
 			}
@@ -266,7 +279,8 @@ func updateContextMenu(s *State) bool {
 	return true
 }
 
-func runContextItem(s *State, kind ctxItemKind) {
+func runContextItem(s *State, item ctxItem) {
+	kind := item.kind
 	x, z := s.contextMenu.tileX, s.contextMenu.tileZ
 	// The menu was built against an earlier snapshot of the area. If the
 	// map shrank in between (via the sidebar dim −/+ buttons or a numeric
@@ -281,37 +295,37 @@ func runContextItem(s *State, kind ctxItemKind) {
 			openPackEditModal(s, idx)
 		}
 	case ctxItemDeletePack:
-		pushUndo(s)
-		before := len(s.area.PackSpawns)
-		s.area.PackSpawns = removePackAt(s.area.PackSpawns, x, z)
-		if len(s.area.PackSpawns) != before {
-			s.dirty = true
-			s.flash("Deleted pack at " + core.TileCoord(x, z))
-		}
+		deleteSpawnAt(s, x, z, "pack", func() bool {
+			before := len(s.area.PackSpawns)
+			s.area.PackSpawns = removePackAt(s.area.PackSpawns, x, z)
+			return len(s.area.PackSpawns) != before
+		})
 	case ctxItemEditChest:
 		if idx := core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z); idx >= 0 {
 			openChestEditModal(s, idx)
 		}
 	case ctxItemDeleteChest:
-		pushUndo(s)
-		before := len(s.area.ChestSpawns)
-		s.area.ChestSpawns = removeChestSpawnAt(s.area.ChestSpawns, x, z)
-		if len(s.area.ChestSpawns) != before {
-			s.dirty = true
-			s.flash("Deleted chest at " + core.TileCoord(x, z))
-		}
+		deleteSpawnAt(s, x, z, "chest", func() bool {
+			before := len(s.area.ChestSpawns)
+			s.area.ChestSpawns = removeChestSpawnAt(s.area.ChestSpawns, x, z)
+			return len(s.area.ChestSpawns) != before
+		})
 	case ctxItemEditDoor:
 		if idx := core.DoorSpawnIndexAt(s.area.DoorSpawns, x, z); idx >= 0 {
 			openDoorEditModal(s, idx)
 		}
 	case ctxItemDeleteDoor:
-		pushUndo(s)
-		before := len(s.area.DoorSpawns)
-		s.area.DoorSpawns = removeDoorAt(s.area.DoorSpawns, x, z)
-		if len(s.area.DoorSpawns) != before {
-			s.dirty = true
-			s.flash("Deleted door at " + core.TileCoord(x, z))
-		}
+		deleteSpawnAt(s, x, z, "door", func() bool {
+			before := len(s.area.DoorSpawns)
+			s.area.DoorSpawns = removeDoorAt(s.area.DoorSpawns, x, z)
+			return len(s.area.DoorSpawns) != before
+		})
+	case ctxItemDeleteCrystal:
+		deleteSpawnAt(s, x, z, "crystal", func() bool {
+			before := len(s.area.CrystalSpawns)
+			s.area.CrystalSpawns = removeCrystalSpawnAt(s.area.CrystalSpawns, x, z)
+			return len(s.area.CrystalSpawns) != before
+		})
 	case ctxItemMoveStartHere:
 		// Shared player-start rule set (see ops.startBlockers) so this path
 		// and the entity-brush start tool can't drift on legality or wording.
@@ -323,19 +337,33 @@ func runContextItem(s *State, kind ctxItemKind) {
 		s.area.StartTileX = x
 		s.area.StartTileZ = z
 		s.dirty = true
-	case ctxItemStartFacingN:
-		setStartFacing(s, core.North)
-	case ctxItemStartFacingE:
-		setStartFacing(s, core.East)
-	case ctxItemStartFacingS:
-		setStartFacing(s, core.South)
-	case ctxItemStartFacingW:
-		setStartFacing(s, core.West)
+	case ctxItemStartFacing:
+		setStartFacing(s, item.facing)
 	default:
 		// Every ctxItemKind needs a case here (see the kind enum's doc).
 		// Fail closed like the layer switches (applyTool / activeGrid)
 		// rather than letting a new kind's menu row silently no-op.
 		panic(fmt.Sprintf("editor: runContextItem has no case for ctxItemKind %d", int(kind)))
+	}
+}
+
+// deleteSpawnAt is the shared delete protocol for every entity-spawn kind the
+// context menu removes (pack / chest / door / crystal): snapshot for undo, run
+// the kind-specific remove (passed as a closure that reports whether the slice
+// actually shrank), and on a real removal mark dirty + flash "Deleted <noun> at
+// <tile>". Centralizing it means the undo/dirty/flash bookkeeping can't drift
+// between the kinds — adding a new deletable spawn is one closure, not another
+// copy of this block.
+func deleteSpawnAt(s *State, x, z int, noun string, remove func() (changed bool)) {
+	// Snapshot first, commit the undo only if the remove actually shrank the
+	// slice — a no-op delete (the tile's entity vanished between menu-open and
+	// click) shouldn't bank an empty undo or wipe the redo stack. Mirrors
+	// keyboardMutate's capture-then-commit-if-changed protocol.
+	before := core.CloneArea(s.area)
+	if remove() {
+		commitUndoSnapshot(s, before)
+		s.dirty = true
+		s.flash("Deleted " + noun + " at " + core.TileCoord(x, z))
 	}
 }
 

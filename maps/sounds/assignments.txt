@@ -6,3 +6,7 @@ heal=heal
 input_great=input_great
 input_hit=input_hit
 input_miss=input_miss
+item_get=item_get
+level_up=level_up
+victory=victory
+xp_tick=xp_tick
