@@ -1324,10 +1324,11 @@ func drawLayerTabs(s *State, font rl.Font, theme render.Theme) {
 
 const maxVisibleLevelRows = 8
 
-// visibleLevelRows is how many level rows the panel shows: 0..topLevel, capped
-// so a tall stack can't push the palette off-screen.
+// visibleLevelRows is how many level rows the panel shows: the span
+// bottomLevel..topLevel, capped so a tall stack can't push the palette
+// off-screen (the window then scrolls — see levelScrollBase).
 func visibleLevelRows(s *State) int {
-	n := s.topLevel + 1
+	n := s.topLevel - s.bottomLevel + 1
 	if n < 1 {
 		n = 1
 	}
@@ -1342,22 +1343,21 @@ func levelsPanelHeight(s *State) float32 {
 	return float32(1+visibleLevelRows(s)) * layerTabH
 }
 
-// levelScrollBase is the level shown in the panel's FIRST row. When the map
-// has more levels than the panel can show (topLevel >= maxVisibleLevelRows),
-// the window scrolls to keep the active level (editLevel) on screen — so levels
-// 8..35 are reachable instead of stranded below the cap. Row i shows level
-// levelScrollBase()+i.
+// levelScrollBase is the stored level shown in the panel's FIRST row. Rows
+// ascend (row i shows base+i). The window spans bottomLevel..topLevel; when
+// that exceeds the visible-row cap it scrolls to keep the active level
+// (editLevel) on screen. Clamped so it never shows rows outside the span.
 func levelScrollBase(s *State) int {
 	rows := visibleLevelRows(s)
-	base := 0
-	if s.editLevel >= rows {
-		base = s.editLevel - rows + 1 // scroll just enough to reveal the active level
+	base := s.bottomLevel
+	if s.editLevel > base+rows-1 {
+		base = s.editLevel - rows + 1 // scroll up just enough to reveal the active level
 	}
-	if top := s.topLevel - rows + 1; base > top {
-		base = top
+	if hi := s.topLevel - rows + 1; base > hi {
+		base = hi
 	}
-	if base < 0 {
-		base = 0
+	if base < s.bottomLevel {
+		base = s.bottomLevel
 	}
 	return base
 }
@@ -1431,7 +1431,11 @@ func drawLevelsPanel(s *State, font rl.Font, theme render.Theme) {
 		inner := rl.NewRectangle(r.X+6, r.Y+3, r.Width-12, r.Height-6)
 		rl.DrawRectangleRec(inner, bg)
 		rl.DrawRectangleLinesEx(inner, 1, border)
-		render.DrawTextWithShadow(font, "Lv "+strconv.Itoa(lvl), inner.X+10, inner.Y+(inner.Height-16)/2, editorFontBody, text)
+		label := "Ground"
+		if lvl != core.ElevationBaseline {
+			label = "Level " + signedLevelLabel(lvl)
+		}
+		render.DrawTextWithShadow(font, label, inner.X+10, inner.Y+(inner.Height-16)/2, editorFontBody, text)
 		eye := levelEyeRect(s, i)
 		// The active level is always shown (it can't be hidden), so draw its eye
 		// locked-open and dimmed rather than as a live toggle that no-ops.

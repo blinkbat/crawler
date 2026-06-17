@@ -635,14 +635,21 @@ func init() {
 // Single source for the rule shared by the renderer's wall-torch
 // orientation and the editor's door auto-facing.
 func FacingAwayFromAdjacentWall(m AreaDefinition, x, z int) (facing int, found bool) {
+	// A neighbour is something to back against if it's a solid obstruction OR a
+	// cliff face — a tile raised above this one (walls are elevation now, so the
+	// old "adjacent wall" is an adjacent higher tile). Off-map counts via WallAt.
+	here := m.ElevationLevelAt(x, z)
+	wall := func(nx, nz int) bool {
+		return m.WallAt(nx, nz) || m.ElevationLevelAt(nx, nz) > here
+	}
 	switch {
-	case m.WallAt(x, z-1):
-		return South, true // wall north → face south, into the room
-	case m.WallAt(x+1, z):
+	case wall(x, z-1):
+		return South, true // wall/cliff north → face south, into the room
+	case wall(x+1, z):
 		return West, true
-	case m.WallAt(x, z+1):
+	case wall(x, z+1):
 		return North, true
-	case m.WallAt(x-1, z):
+	case wall(x-1, z):
 		return East, true
 	}
 	return 0, false

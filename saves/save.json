@@ -4,8 +4,8 @@
   "playerTileX": 13,
   "playerTileZ": 25,
   "playerFacing": 0,
-  "stepCount": 1348,
-  "gold": 98,
+  "stepCount": 1954,
+  "gold": 124,
   "party": [
     {
       "Class": 0,
@@ -15,11 +15,11 @@
         "DEX": 2,
         "INT": 1,
         "WIS": 1,
-        "VIT": 5,
-        "SPD": 3
+        "VIT": 9,
+        "SPD": 5
       },
-      "HP": 10,
-      "MaxHP": 10,
+      "HP": 18,
+      "MaxHP": 18,
       "MP": 4,
       "MaxMP": 4,
       "Armor": 0,
@@ -49,10 +49,10 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 2,
-      "XP": 122,
-      "PendingLevelUps": 3,
-      "SkillPoints": 1,
+      "Level": 3,
+      "XP": 2,
+      "PendingLevelUps": 0,
+      "SkillPoints": 2,
       "SkillTiers": {
         "1": 0
       },
@@ -69,11 +69,11 @@
         "DEX": 2,
         "INT": 2,
         "WIS": 6,
-        "VIT": 4,
+        "VIT": 7,
         "SPD": 4
       },
-      "HP": 8,
-      "MaxHP": 8,
+      "HP": 14,
+      "MaxHP": 14,
       "MP": 9,
       "MaxMP": 9,
       "Armor": 0,
@@ -104,8 +104,8 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 2,
-      "XP": 60,
-      "PendingLevelUps": 3,
+      "XP": 140,
+      "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
         "2": 1
@@ -120,14 +120,14 @@
       "Name": "Thief",
       "Stats": {
         "STR": 3,
-        "DEX": 6,
+        "DEX": 7,
         "INT": 2,
         "WIS": 1,
-        "VIT": 4,
-        "SPD": 6
+        "VIT": 7,
+        "SPD": 8
       },
-      "HP": 8,
-      "MaxHP": 8,
+      "HP": 14,
+      "MaxHP": 14,
       "MP": 5,
       "MaxMP": 5,
       "Armor": 0,
@@ -157,10 +157,10 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 2,
-      "XP": 140,
-      "PendingLevelUps": 3,
-      "SkillPoints": 1,
+      "Level": 3,
+      "XP": 20,
+      "PendingLevelUps": 0,
+      "SkillPoints": 2,
       "SkillTiers": {
         "10": 0
       },
@@ -175,15 +175,15 @@
       "Stats": {
         "STR": 1,
         "DEX": 2,
-        "INT": 6,
+        "INT": 10,
         "WIS": 2,
         "VIT": 4,
-        "SPD": 4
+        "SPD": 6
       },
       "HP": 8,
       "MaxHP": 8,
-      "MP": 10,
-      "MaxMP": 10,
+      "MP": 18,
+      "MaxMP": 18,
       "Armor": 0,
       "Equipped": [
         0,
@@ -195,7 +195,7 @@
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 1,
+      "DamagePopup": 2,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "Defending": false,
@@ -211,10 +211,10 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 2,
-      "XP": 140,
-      "PendingLevelUps": 3,
-      "SkillPoints": 1,
+      "Level": 3,
+      "XP": 20,
+      "PendingLevelUps": 0,
+      "SkillPoints": 2,
       "SkillTiers": {
         "12": 0
       },
@@ -237,13 +237,13 @@
   "quests": null,
   "bestiary": {
     "0": {
-      "kills": 24
+      "kills": 32
     },
     "1": {
-      "kills": 6
+      "kills": 8
     },
     "2": {
-      "kills": 6
+      "kills": 8
     }
   },
   "crystals": [

@@ -129,21 +129,17 @@ func DrawDebugOverlay(camera rl.Camera3D, g *core.GameState, assets Resources) {
 }
 
 // tileLabelLines returns the readable layer names for the tile at (x, z).
-// Walls short-circuit floor/decor/prop labels — there's no surface under a
-// solid wall to label separately. youHere prepends a "YOU" marker for the
-// tile the player is standing on.
+// youHere prepends a "YOU" marker for the tile the player is standing on. Walls
+// are gone (a tile is always a walkable surface, possibly raised), so every
+// tile shows its floor/decor/prop labels — no short-circuit.
 func tileLabelLines(m core.AreaDefinition, x, z int, youHere bool) []string {
 	var lines []string
 	if youHere {
 		lines = append(lines, "YOU")
 	}
-	// Read through the bounds-safe accessors (NOT direct m.Walls[z][x] indexing):
+	// Read through the bounds-safe accessors (NOT direct m.Floor[z][x] indexing):
 	// the caller only guarantees InBounds against Width/Height, but a struct-built
-	// or mid-edit area can have ragged/short layer rows, which a raw index panics
-	// on. WallAt already treats OOB/ragged as solid.
-	if m.WallAt(x, z) {
-		return append(lines, "Wall")
-	}
+	// or mid-edit area can have ragged/short layer rows, which a raw index panics on.
 	if c, ok := m.FloorCharAt(x, z); ok {
 		if f := core.TileLabel(core.TileLayerFloor, c); f != "" {
 			lines = append(lines, f)

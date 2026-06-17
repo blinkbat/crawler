@@ -429,11 +429,13 @@ func (a AreaDefinition) CeilingAt(x, z int) bool {
 	return ok && c == TileCeilingSolid
 }
 
-// ElevationLevelAt returns the ground LEVEL (0..9) of tile (x,z). Ramp tiles
-// store their LOW level here. Out-of-bounds, a missing/short elevation layer,
-// or a non-digit cell all read as level 0 — so maps without an elevation
-// layer (older .map files load as a blank all-'0' layer; struct-literal areas
-// leave it nil) are uniformly flat.
+// ElevationLevelAt returns the STORED ground level (0..MaxElevationLevel) of
+// tile (x,z); the walkable baseline is ElevationBaseline and the editor/render
+// treat stored−baseline as the signed display level (see ElevationWorldY). Ramp
+// tiles store their LOW level here. Out-of-bounds, a missing/short elevation
+// layer, or a non-digit cell all read as stored 0 — so a map without an
+// elevation layer reads as a flat sheet at the bottom of the range (legacy
+// flat maps predate the baseline and were authored at stored 0).
 func (a AreaDefinition) ElevationLevelAt(x, z int) int {
 	c, ok := a.layerByteAt(a.Elevation, x, z)
 	if !ok {
@@ -457,15 +459,17 @@ const (
 	MaxElevationLevel = 20
 )
 
-// ElevationLevelFromChar decodes an elevation cell byte to a level: '0'..'9' →
-// 0..9, 'A'..'Z' → 10..35. Anything else (blank, stray char) reads as flat
-// ground level 0, so maps without an elevation layer stay uniformly flat.
+// ElevationLevelFromChar decodes an elevation cell byte to a STORED level:
+// '0'..'9' → 0..9, 'A'.. → 10.. . The result is clamped to
+// [0, MaxElevationLevel] so a hand-edited / legacy char beyond the current
+// range (the encoder caps at MaxElevationLevel) can't feed an out-of-range
+// level into the renderer or ramp math. Anything else reads as stored 0.
 func ElevationLevelFromChar(c byte) int {
 	switch {
 	case c >= '0' && c <= '9':
-		return int(c - '0')
+		return Clamp(int(c-'0'), 0, MaxElevationLevel)
 	case c >= 'A' && c <= 'Z':
-		return int(c-'A') + 10
+		return Clamp(int(c-'A')+10, 0, MaxElevationLevel)
 	}
 	return 0
 }
@@ -537,12 +541,21 @@ func (a AreaDefinition) RampAt(x, z int) (facing int, ok bool) {
 	return RampAscentFacing(c)
 }
 
+// ElevationWorldY is the world-space Y of a tile's floor at the given stored
+// level. The walkable baseline (ElevationBaseline) renders at y=0, so a flat
+// map sits at the origin (matching where combat and every y~0 assumption
+// expects the ground) while walls rise to +N·LevelStep and pits drop to
+// negative Y. The single place the stored-level→world-Y offset lives.
+func ElevationWorldY(level int) float32 {
+	return float32(level-ElevationBaseline) * LevelStep
+}
+
 // StandGroundY returns the world-space Y of the ground at tile (x,z): the
 // resting height the player / a billboard sits at. Flat tiles read
-// level·LevelStep; a ramp reads its MID-slope height (low+0.5)·LevelStep,
+// ElevationWorldY(level); a ramp reads its MID-slope height (low+0.5 levels),
 // since a unit standing on the ramp tile rests at its center, halfway up.
 func (a AreaDefinition) StandGroundY(x, z int) float32 {
-	level := float32(a.ElevationLevelAt(x, z))
+	level := float32(a.ElevationLevelAt(x, z)) - float32(ElevationBaseline)
 	if _, ok := a.RampAt(x, z); ok {
 		level += 0.5
 	}

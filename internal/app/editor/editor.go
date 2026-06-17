@@ -9,6 +9,7 @@ import (
 	"crawler/internal/app/core"
 	"crawler/internal/app/render"
 	"fmt"
+	"strconv"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -704,7 +705,15 @@ type State struct {
 	// present in the map or the active level). The on-disk model stays one
 	// level per tile — this is a pure authoring view.
 	levelHidden [maxEditLevel + 1]bool
+	// topLevel / bottomLevel bound the level rows the panel exposes. They start
+	// equal (just the ground floor — no 1..N filler) and grow outward only as
+	// the author steps/paints/loads levels above or below ground, so the panel
+	// shows exactly the floors in play. The window scrolls when the span exceeds
+	// the visible-row cap. Levels are stored 0..maxEditLevel (ground =
+	// core.ElevationBaseline) but DISPLAYED signed (stored − baseline) so the
+	// author thinks in "0 = ground, + up, − down".
 	topLevel    int
+	bottomLevel int
 	// paletteScroll is the per-layer vertical scroll offset (in pixels)
 	// applied to the brush entries. Adjusted by mouse-wheel when the
 	// pointer is over the palette. Clamped in drawPalette so the bottom
@@ -1080,7 +1089,8 @@ func freshState(a core.AreaDefinition) State {
 		baseline:              core.CloneArea(a),
 		layer:                 LayerWalls,
 		editLevel:             core.ElevationBaseline,
-		topLevel:              core.ElevationBaseline + 1,
+		topLevel:              core.ElevationBaseline,
+		bottomLevel:           core.ElevationBaseline,
 		brushSize:             1,
 		zoom:                  1,
 		gridCursorX:           -1,
@@ -1176,9 +1186,22 @@ func (s *State) activeBrush() Brush {
 	return b
 }
 
-// clampLevel bounds a level into [0, maxEditLevel].
+// clampLevel bounds a STORED level into [0, maxEditLevel] (ground is
+// core.ElevationBaseline, so this is the signed display range [−baseline,
+// +(maxEditLevel−baseline)] = [−10, +10]).
 func clampLevel(l int) int {
 	return core.Clamp(l, 0, maxEditLevel)
+}
+
+// signedLevelLabel renders a stored level as its signed display value relative
+// to ground (core.ElevationBaseline): "0" for ground, "+3" for a wall three
+// up, "-2" for a pit two down.
+func signedLevelLabel(stored int) string {
+	d := stored - core.ElevationBaseline
+	if d > 0 {
+		return "+" + strconv.Itoa(d)
+	}
+	return strconv.Itoa(d) // strconv prints the leading '-' for negatives; "0" for ground
 }
 
 // Update advances the editor one frame. Returns the next action for the

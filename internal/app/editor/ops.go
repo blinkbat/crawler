@@ -603,6 +603,27 @@ func removeCrystalSpawnAt(spawns []core.CrystalSpawn, x, z int) []core.CrystalSp
 	return removeSpawnsAt(spawns, x, z)
 }
 
+// eraseSentinel is the "empty" char a layer resets to when erased — the value
+// flood-erase fills a region with (the per-cell eraseAt uses the same values).
+// Elevation resets to the ground baseline (level 0 is a deep pit, not "flat").
+func eraseSentinel(layer Layer) byte {
+	switch layer {
+	case LayerWalls:
+		return core.TileOpen
+	case LayerFloor:
+		return core.FloorAuto
+	case LayerDecor:
+		return core.DecorEmpty
+	case LayerProps:
+		return core.TilePropEmpty
+	case LayerCeiling:
+		return core.TileCeilingOpen
+	case LayerElevation:
+		return core.ElevationChar(core.ElevationBaseline)
+	}
+	return core.TileOpen
+}
+
 // eraseAt is the right-click action. Behavior is per-layer:
 //   - Walls / Props : reset cell to '.'
 //   - Floor         : reset to FloorAuto

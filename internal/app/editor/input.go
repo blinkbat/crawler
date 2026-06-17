@@ -273,18 +273,25 @@ func stepBrushSize(s *State, dir int) {
 // toolbar's Lvl -/+ buttons, and PgUp/PgDn.
 func stepEditLevel(s *State, dir int) {
 	s.editLevel = clampLevel(s.editLevel + dir)
+	// Grow the panel's range OUTWARD to include the new active level — up toward
+	// +10 or down toward −10 — so the floors in play (and only those) show.
 	if s.editLevel > s.topLevel {
 		s.topLevel = s.editLevel
 	}
+	if s.editLevel < s.bottomLevel {
+		s.bottomLevel = s.editLevel
+	}
 	s.levelHidden[s.editLevel] = false // the floor you step onto is always shown
-	s.flash("Active level " + strconv.Itoa(s.editLevel))
+	s.flash("Active level " + signedLevelLabel(s.editLevel))
 }
 
-// maxAreaLevel returns the highest elevation level any tile in the area uses,
-// clamped to the editor's range — so loading a map surfaces a Levels-panel row
-// for every floor it actually contains.
+// maxAreaLevel / minAreaLevel return the highest / lowest elevation level any
+// tile in the area uses, clamped to the editor's range — so loading a map
+// surfaces a Levels-panel row for every floor it actually contains (and no
+// empty filler rows beyond them). Both default to the ground baseline for a
+// flat map.
 func maxAreaLevel(a core.AreaDefinition) int {
-	hi := 0
+	hi := core.ElevationBaseline
 	for z := 0; z < a.Height; z++ {
 		for x := 0; x < a.Width; x++ {
 			if l := a.ElevationLevelAt(x, z); l > hi {
@@ -292,30 +299,36 @@ func maxAreaLevel(a core.AreaDefinition) int {
 			}
 		}
 	}
-	if hi > maxEditLevel {
-		hi = maxEditLevel
+	return clampLevel(hi)
+}
+
+func minAreaLevel(a core.AreaDefinition) int {
+	lo := core.ElevationBaseline
+	for z := 0; z < a.Height; z++ {
+		for x := 0; x < a.Width; x++ {
+			if l := a.ElevationLevelAt(x, z); l < lo {
+				lo = l
+			}
+		}
 	}
-	return hi
+	return clampLevel(lo)
 }
 
 // handleLevelsPanelClick dispatches a left-click inside the Levels panel: the
 // range steppers (− / +), a per-level visibility eye (Alt-click solos), or a
 // row-select that makes that level the active floor.
 func handleLevelsPanelClick(s *State, mp rl.Vector2) {
+	// The header −/+ step the ACTIVE level down / up (toward −10 / +10), growing
+	// the panel range and scrolling as needed — the same action as the toolbar
+	// Floor −/+ and PgDn/PgUp. (No more "shrink the range" stepper; the panel
+	// only shows floors actually in play.)
 	minus, plus := levelStepperRects(s)
 	if pointIn(mp, minus) {
-		if s.topLevel > 0 {
-			s.topLevel--
-			if s.editLevel > s.topLevel {
-				s.editLevel = s.topLevel
-			}
-		}
+		stepEditLevel(s, -1)
 		return
 	}
 	if pointIn(mp, plus) {
-		if s.topLevel < maxEditLevel {
-			s.topLevel++
-		}
+		stepEditLevel(s, +1)
 		return
 	}
 	// Eye toggles first so a click on the eye doesn't also re-select the level.
@@ -515,6 +528,15 @@ func updateMouse(s *State) {
 		w := rl.GetMouseWheelMove()
 		if w != 0 {
 			ScrollMetadata(s, -w*metadataRowStride)
+		}
+	} else if pointIn(mp, s.rect.levels) {
+		// Wheel over the Levels panel steps the active floor up / down (which
+		// grows + scrolls the level window), so the author can spin through
+		// −10..+10 without clicking the steppers.
+		if w := rl.GetMouseWheelMove(); w > 0 {
+			stepEditLevel(s, +1)
+		} else if w < 0 {
+			stepEditLevel(s, -1)
 		}
 	}
 
@@ -734,8 +756,15 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 		s.drag = dragNone
 	case toolFlood:
 		// floodFill snapshots undo itself (only when the fill changes cells),
-		// so a no-op leaves the undo stack alone.
-		floodFill(s, x, z, s.activeBrush().Char)
+		// so a no-op leaves the undo stack alone. The eraser brush carries no
+		// paint char (Char==0) — flooding with it would write NUL bytes, so
+		// resolve the layer's erase sentinel instead.
+		b := s.activeBrush()
+		fill := b.Char
+		if b.Erase {
+			fill = eraseSentinel(s.layer)
+		}
+		floodFill(s, x, z, fill)
 		s.drag = dragNone
 	case toolRect:
 		s.drag = dragRect
@@ -1027,12 +1056,21 @@ func sampleBrushAt(s *State, x, z int) {
 		if lvl > s.topLevel {
 			s.topLevel = lvl // surface a panel row for a level only this tile used
 		}
-		s.flash("Picked level " + strconv.Itoa(lvl))
+		if lvl < s.bottomLevel {
+			s.bottomLevel = lvl
+		}
+		s.flash("Picked level " + signedLevelLabel(lvl))
 		return
 	}
 	ch, ok := activeLayerCharAt(s, x, z)
 	if !ok {
 		return
+	}
+	// On the Faces layer the default/unskinned cell is stored as '.', which
+	// FaceSkinAt reads as plain rock — so eyedropping it picks the Rock brush
+	// rather than flashing "no brush matches" (there's no '.' brush anymore).
+	if s.layer == LayerWalls && ch == core.TileOpen {
+		ch = core.TileRock
 	}
 	for i, b := range layerBrushes[s.layer] {
 		if b.Char == ch {
@@ -2251,6 +2289,7 @@ func openSelectedMap(s *State) Action {
 	// the floor the player start sits on (the walkable baseline for a normal
 	// map) rather than level 0 — which is now a pit far below the baseline.
 	s.topLevel = maxAreaLevel(area)
+	s.bottomLevel = minAreaLevel(area)
 	s.editLevel = clampLevel(area.ElevationLevelAt(area.StartTileX, area.StartTileZ))
 	s.levelHidden = [maxEditLevel + 1]bool{}
 	// The area was replaced wholesale — invalidate the content-derived caches

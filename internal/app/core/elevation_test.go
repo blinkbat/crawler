@@ -49,13 +49,16 @@ func TestElevationReads(t *testing.T) {
 
 func TestStandGroundY(t *testing.T) {
 	a := elevTestArea()
-	if got, want := a.StandGroundY(0, 0), float32(0); got != want {
+	// Ground Y is offset so the baseline renders at y=0; the fixture's stored
+	// levels 0/1 sit below the baseline. Express expectations via the same
+	// ElevationWorldY offset so the test tracks the baseline constant.
+	if got, want := a.StandGroundY(0, 0), ElevationWorldY(0); got != want {
 		t.Errorf("StandGroundY flat L0 = %v, want %v", got, want)
 	}
-	if got, want := a.StandGroundY(1, 0), 1*LevelStep; got != want {
+	if got, want := a.StandGroundY(1, 0), ElevationWorldY(1); got != want {
 		t.Errorf("StandGroundY flat L1 = %v, want %v", got, want)
 	}
-	if got, want := a.StandGroundY(1, 1), 0.5*LevelStep; got != want {
+	if got, want := a.StandGroundY(1, 1), (float32(0-ElevationBaseline)+0.5)*LevelStep; got != want {
 		t.Errorf("StandGroundY ramp(low 0) = %v, want %v (mid-slope)", got, want)
 	}
 }

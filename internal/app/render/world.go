@@ -508,7 +508,7 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 			// vertical FACE of an elevation step (drawCliffFaces below), not a
 			// separate solid tile. A raised tile reads as a plateau/mesa; the
 			// faces on its lower-facing edges are its cliff.
-			elevY := float32(m.ElevationLevelAt(x, z)) * core.LevelStep
+			elevY := core.ElevationWorldY(m.ElevationLevelAt(x, z))
 			// Scenery (decor/props) rests on the WALKABLE surface, which on a
 			// ramp tile is the mid-slope height, not the low edge elevY that the
 			// floor wedge is drawn from. Anchor it at StandGroundY so a prop or
@@ -658,9 +658,10 @@ func drawCliffFaces(material worldMaterialResources, assets Resources, m core.Ar
 		dx, dz := core.FacingVector(d)
 		nx, nz := x+dx, z+dz
 		// Neighbour ground level across the shared edge: ramp-aware (EdgeLevel)
-		// when it presents a walkable edge, else its flat level; off-map reads
-		// as level 0 — a cliff down to the void.
-		nLevel := 0
+		// when it presents a walkable edge, else its flat level. Off-map reads
+		// as the baseline, so a raised border shows a clean lip at the map edge
+		// instead of a giant cliff plunging to the bottom of the range.
+		nLevel := core.ElevationBaseline
 		if m.InBounds(nx, nz) {
 			if l, ok := m.EdgeLevel(nx, nz, core.NormalizeFacing(d+2)); ok {
 				nLevel = l
@@ -671,7 +672,7 @@ func drawCliffFaces(material worldMaterialResources, assets Resources, m core.Ar
 		if myLevel <= nLevel {
 			continue
 		}
-		drawCliffFace(skin, cx, float32(nLevel)*core.LevelStep, cz, faceYaw(d), float32(myLevel-nLevel))
+		drawCliffFace(skin, cx, core.ElevationWorldY(nLevel), cz, faceYaw(d), float32(myLevel-nLevel))
 		drawn++
 	}
 	return drawn
