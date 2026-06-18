@@ -294,6 +294,18 @@ func LoadResources() (r Resources) {
 	r.faceVariants[core.TileWallRockIvyHeavy] = buildFaceQuadModel(makeRockIvyPixels(128, 128, true), r.lighting.shader)
 	r.faceVariants[core.TileWallRockCracked] = buildFaceQuadModel(makeRockCrackedPixels(128, 128), r.lighting.shader)
 	r.faceVariants[core.TileWallRockCrumbling] = buildFaceQuadModel(makeRockCrumblingPixels(128, 128), r.lighting.shader)
+	// Coverage: every non-rock skin in the shared core.FaceSkins roster needs a
+	// variant model here (plain Rock uses the per-material faceModel). Fail fast
+	// at load if a roster addition forgot its model — matches the parallel-table
+	// invariants in AGENTS.md.
+	for _, s := range core.FaceSkins {
+		if s.Char == core.TileRock {
+			continue
+		}
+		if _, ok := r.faceVariants[s.Char]; !ok {
+			panic("render: face skin '" + string(s.Char) + "' in core.FaceSkins has no faceVariants model")
+		}
+	}
 
 	// Earth-textured solid ramp wedge, shared by every ramp floor tile.
 	r.rampModel = buildRampWedgeModel(makeDirtPixels(128, 128), r.lighting.shader)

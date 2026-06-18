@@ -2228,7 +2228,7 @@ func drawGrid(s *State, font rl.Font) {
 				drawCeilingHash(r, cell, fadeAlpha(ceilingColor(), ceilingAlpha*levelFade))
 			}
 			if showCharOverlay {
-				if ch, ok := currentLayerGlyph(s, x, z); ok {
+				if ch, ok := currentLayerGlyph(s, x, z, lvl); ok {
 					drawTileGlyph(font, r, cell, charFontSize, ch, fadeAlpha(charFG, levelFade), fadeAlpha(charShadow, levelFade))
 				}
 			}
@@ -2237,7 +2237,7 @@ func drawGrid(s *State, font rl.Font) {
 			// panel carries the "which floor" read). A ramp touching the active
 			// level shows even when its own level is hidden (the visibility skip
 			// above lets it through), so transitions stay visible.
-			drawRampConnector(s, font, r, cell, x, z)
+			drawRampConnector(font, r, cell, s.area.Floor[z][x])
 		}
 	}
 
@@ -2738,22 +2738,35 @@ const (
 	levelFadeMin     = float32(0.4)
 )
 
+// levelFadeTable[d] is levelFadeFalloff^d (clamped to levelFadeMin), precomputed
+// for every possible level distance d (0..maxEditLevel). The canvas draw calls
+// levelDistanceFade once per VISIBLE TILE per frame; without this it ran a
+// math.Pow (transcendental) per tile — tens of thousands of Pow calls/frame on
+// a zoomed-out map. Built once from the two constants.
+var levelFadeTable = func() [maxEditLevel + 1]float32 {
+	var t [maxEditLevel + 1]float32
+	for d := range t {
+		f := float32(math.Pow(float64(levelFadeFalloff), float64(d)))
+		if f < levelFadeMin {
+			f = levelFadeMin
+		}
+		t[d] = f
+	}
+	return t
+}()
+
 // levelDistanceFade returns the opacity multiplier for a tile on elevation
 // level lvl: 1.0 on the active level, falling off geometrically with the
-// number of levels away from s.editLevel.
+// number of levels away from s.editLevel. Table lookup, no per-tile math.Pow.
 func levelDistanceFade(s *State, lvl int) float32 {
 	d := lvl - s.editLevel
 	if d < 0 {
 		d = -d
 	}
-	if d == 0 {
-		return 1
+	if d >= len(levelFadeTable) {
+		return levelFadeMin
 	}
-	f := float32(math.Pow(float64(levelFadeFalloff), float64(d)))
-	if f < levelFadeMin {
-		f = levelFadeMin
-	}
-	return f
+	return levelFadeTable[d]
 }
 
 // currentLevelOutlineColor is the silhouette stroke around active-level tile
@@ -2944,8 +2957,12 @@ func elevationLevelColor(level int) rl.Color {
 // transitions stay legible in the flat grid now that the per-tile elevation
 // digits and cool/warm slice tints are gone (the Levels panel + visibility
 // carry the "which floor" read). Non-ramp tiles draw nothing.
-func drawRampConnector(s *State, font rl.Font, r rl.Rectangle, cell float32, x, z int) {
-	facing, ok := s.area.RampAt(x, z)
+// drawRampConnector takes the tile's floor char directly (the caller already
+// has it) and uses the pure RampAscentFacing switch — avoiding RampAt's extra
+// InBounds + layer string-index that previously ran for EVERY visible tile just
+// to discover the 99% that aren't ramps.
+func drawRampConnector(font rl.Font, r rl.Rectangle, cell float32, floorChar byte) {
+	facing, ok := core.RampAscentFacing(floorChar)
 	if !ok {
 		return
 	}
@@ -2991,7 +3008,7 @@ func drawCeilingHash(r rl.Rectangle, cell float32, col color.RGBA) {
 // noisy. Empty sentinels (non-rock walls / FloorAuto / DecorAuto /
 // DecorEmpty / no-prop / no-ceiling) yield ok==false so blank cells
 // stay blank instead of dotting the grid.
-func currentLayerGlyph(s *State, x, z int) (byte, bool) {
+func currentLayerGlyph(s *State, x, z, lvl int) (byte, bool) {
 	switch s.layer {
 	case LayerWalls:
 		if w := s.area.Walls[z][x]; core.IsFaceSkinChar(w) {
@@ -3014,12 +3031,19 @@ func currentLayerGlyph(s *State, x, z int) (byte, bool) {
 			return s.area.Ceiling[z][x], true
 		}
 	case LayerElevation:
-		// Show each RAISED tile's level char ('1'..'9','A'..) so the author can
-		// read exact heights while editing elevation. Ground (level 0) is left
-		// blank so a mostly-flat map stays uncluttered.
-		if lvl := s.area.ElevationLevelAt(x, z); lvl > 0 {
+		// Show each off-GROUND tile's stored level char so the author can read
+		// heights while editing elevation; the ground baseline is left blank so a
+		// mostly-flat map stays uncluttered. Uses the level the caller already
+		// decoded (no re-read).
+		if lvl != core.ElevationBaseline {
 			return core.ElevationChar(lvl), true
 		}
+	case LayerEntities:
+		// Entities carry no per-tile char (drawn as markers) — no glyph.
+	default:
+		// Fail closed like the sibling layer switches so a new layer can't
+		// silently render no glyph.
+		panic("editor: currentLayerGlyph missing case for layer")
 	}
 	return 0, false
 }

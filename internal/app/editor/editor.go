@@ -132,6 +132,28 @@ const (
 var paletteLabels [layerCount][]string
 
 func init() {
+	// Build the Faces palette from the shared core.FaceSkins roster so adding a
+	// skin is one row in core, not a parallel palette edit. Label is "Name (c)";
+	// swatch + hotkey come from the editor-local tables above.
+	faces := make([]Brush, 0, len(core.FaceSkins))
+	for i, sk := range core.FaceSkins {
+		col, ok := faceSkinSwatch[sk.Char]
+		if !ok {
+			col = wallSwatch
+		}
+		var hk int32
+		if i < len(faceHotkeys) {
+			hk = faceHotkeys[i]
+		}
+		faces = append(faces, Brush{
+			Name:   fmt.Sprintf("%s (%c)", sk.Name, sk.Char),
+			Char:   sk.Char,
+			Hotkey: hk,
+			Color:  col,
+		})
+	}
+	layerBrushes[LayerWalls] = faces
+
 	// Append a dedicated Erase brush to every grid layer (Entities already has
 	// its own entityClear brush). Right-click is reserved for the context menu,
 	// so erasing is a selectable brush — and also lives on the context menu.
@@ -150,20 +172,26 @@ func init() {
 	}
 }
 
+// faceSkinSwatch maps a cliff-face skin char to its palette swatch — all in one
+// muted grey FAMILY (built off wallSwatch) with subtle per-variant tints so the
+// canvas reads them as uniform rock but they stay tellable apart. Default
+// (unmapped) skins fall back to plain wallSwatch, so a new core.FaceSkins entry
+// still gets a brush (just an untinted one until a tint is added here).
+var faceSkinSwatch = map[byte]rl.Color{
+	core.TileWallRockIvyLight:  tintSwatch(wallSwatch, -8, 6, -10),
+	core.TileWallRockIvyHeavy:  tintSwatch(wallSwatch, -20, 4, -22),
+	core.TileWallRockCracked:   tintSwatch(wallSwatch, -10, -10, -8),
+	core.TileWallRockCrumbling: tintSwatch(wallSwatch, -2, -12, -22),
+}
+
+// faceHotkeys assigns 1..N to the first few face skins (mouse-only past that).
+var faceHotkeys = []int32{rl.KeyOne, rl.KeyTwo, rl.KeyThree, rl.KeyFour, rl.KeyFive, rl.KeySix, rl.KeySeven, rl.KeyEight, rl.KeyNine}
+
+// The LayerWalls (Faces) palette is built in init from the shared
+// core.FaceSkins roster — see init(). Walls are elevation now; these brushes
+// only pick the SKIN a tile's exposed cliff faces use (the default '.' skin is
+// plain rock, so it isn't a palette entry — paint Rock explicitly or a variant).
 var layerBrushes = [layerCount][]Brush{
-	LayerWalls: {
-		// Cliff-face SKINS (the layer is "Faces" now — walls are elevation). These
-		// pick the texture a tile's exposed cliff faces use; they don't block. The
-		// default '.' skin is plain rock, so it isn't a palette entry — paint Rock
-		// explicitly or a variant. All stay in one muted grey FAMILY (built off
-		// wallSwatch) with subtle per-variant tints so they read as uniform rock
-		// but stay tellable apart.
-		{Name: "Rock (#)", Char: core.TileRock, Hotkey: rl.KeyOne, Color: wallSwatch},
-		{Name: "Light Ivy (+)", Char: core.TileWallRockIvyLight, Hotkey: rl.KeyTwo, Color: tintSwatch(wallSwatch, -8, 6, -10)},
-		{Name: "Heavy Ivy (=)", Char: core.TileWallRockIvyHeavy, Hotkey: rl.KeyThree, Color: tintSwatch(wallSwatch, -20, 4, -22)},
-		{Name: "Cracked (&)", Char: core.TileWallRockCracked, Hotkey: rl.KeyFour, Color: tintSwatch(wallSwatch, -10, -10, -8)},
-		{Name: "Crumbling ($)", Char: core.TileWallRockCrumbling, Hotkey: rl.KeyFive, Color: tintSwatch(wallSwatch, -2, -12, -22)},
-	},
 	LayerFloor: {
 		{Name: "Auto", Char: core.FloorAuto, Hotkey: rl.KeyOne, Color: floorAutoColor},
 		{Name: "Grass (g)", Char: core.FloorGrass, Hotkey: rl.KeyTwo, Color: rl.NewColor(120, 184, 110, 255)},
@@ -1123,7 +1151,7 @@ func blankArea(w, h int, floorChar byte) core.AreaDefinition {
 	// Face skins on the ring are explicit rock; the interior carries the default
 	// skin (only matters once the author carves elevation there).
 	baseChar := core.ElevationChar(core.ElevationBaseline)
-	wallChar := core.ElevationChar(core.ElevationBaseline + 1)
+	wallChar := core.ElevationChar(core.ElevationWallRingLevel)
 	for z := 0; z < h; z++ {
 		wb := make([]byte, w)
 		eb := make([]byte, w)

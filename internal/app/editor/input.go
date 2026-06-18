@@ -271,17 +271,23 @@ func stepBrushSize(s *State, dir int) {
 // panel range to include it. The active level is the floor every content paint
 // builds onto, so flash it for feedback. Shared by the Levels panel ±, the
 // toolbar's Lvl -/+ buttons, and PgUp/PgDn.
+// growLevelRange extends the Levels-panel span OUTWARD to include lvl (toward
+// +10 or −10) and reveals it, so stepping / eyedropping / selecting a level
+// outside the current span surfaces a row for it and never leaves it hidden.
+// The single home for the "make this level visible in the panel" step.
+func growLevelRange(s *State, lvl int) {
+	if lvl > s.topLevel {
+		s.topLevel = lvl
+	}
+	if lvl < s.bottomLevel {
+		s.bottomLevel = lvl
+	}
+	s.levelHidden[lvl] = false
+}
+
 func stepEditLevel(s *State, dir int) {
 	s.editLevel = clampLevel(s.editLevel + dir)
-	// Grow the panel's range OUTWARD to include the new active level — up toward
-	// +10 or down toward −10 — so the floors in play (and only those) show.
-	if s.editLevel > s.topLevel {
-		s.topLevel = s.editLevel
-	}
-	if s.editLevel < s.bottomLevel {
-		s.bottomLevel = s.editLevel
-	}
-	s.levelHidden[s.editLevel] = false // the floor you step onto is always shown
+	growLevelRange(s, s.editLevel)
 	s.flash("Active level " + signedLevelLabel(s.editLevel))
 }
 
@@ -368,7 +374,7 @@ func handleLevelsPanelClick(s *State, mp rl.Vector2) {
 	}
 	if i := levelRowAt(s, mp); i >= 0 {
 		s.editLevel = clampLevel(i)
-		s.levelHidden[s.editLevel] = false // selecting a floor reveals it
+		growLevelRange(s, s.editLevel) // selecting a floor reveals it
 	}
 }
 
@@ -1052,13 +1058,7 @@ func sampleBrushAt(s *State, x, z int) {
 		}
 		lvl := clampLevel(core.ElevationLevelFromChar(b))
 		s.editLevel = lvl
-		s.levelHidden[s.editLevel] = false // making it active reveals it (matches row-select / stepEditLevel)
-		if lvl > s.topLevel {
-			s.topLevel = lvl // surface a panel row for a level only this tile used
-		}
-		if lvl < s.bottomLevel {
-			s.bottomLevel = lvl
-		}
+		growLevelRange(s, lvl) // reveal + surface a panel row for a level this tile used
 		s.flash("Picked level " + signedLevelLabel(lvl))
 		return
 	}

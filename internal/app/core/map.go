@@ -41,20 +41,28 @@ const (
 	TileWallRockCrumbling = '$' // rock face in heavy disrepair
 )
 
-// faceSkinCharList is the canonical roster of explicit face-skin chars — the
-// plain rock plus every variant. IsFaceSkinChar reads the set built from it,
-// so adding a skin is one row here (plus its render/editor/label wiring).
-var faceSkinCharList = []byte{
-	TileRock,
-	TileWallRockIvyLight,
-	TileWallRockIvyHeavy,
-	TileWallRockCracked,
-	TileWallRockCrumbling,
+// FaceSkin pairs a cliff-face skin char with its short display name. FaceSkins
+// is THE canonical roster — the plain rock plus every variant — that the
+// face-skin char set, the editor's Faces palette, the right-click "Set face"
+// menu, the tile-label registry, and (by init assert) the renderer's variant
+// models all derive from. Adding a skin is one row here; the init asserts in
+// map.go / resources.go then fail fast if its label or model is missing.
+type FaceSkin struct {
+	Char byte
+	Name string
+}
+
+var FaceSkins = []FaceSkin{
+	{TileRock, "Rock"},
+	{TileWallRockIvyLight, "Light Ivy"},
+	{TileWallRockIvyHeavy, "Heavy Ivy"},
+	{TileWallRockCracked, "Cracked"},
+	{TileWallRockCrumbling, "Crumbling"},
 }
 
 var faceSkinCharSet = func() (set [256]bool) {
-	for _, c := range faceSkinCharList {
-		set[c] = true
+	for _, s := range FaceSkins {
+		set[s.Char] = true
 	}
 	return
 }()
@@ -457,6 +465,11 @@ func (a AreaDefinition) ElevationLevelAt(x, z int) int {
 const (
 	ElevationBaseline = 10
 	MaxElevationLevel = 20
+	// ElevationWallRingLevel is the level a default enclosing wall / sealed
+	// border sits at: one step above the walkable baseline, so it reads as a
+	// 1-high cliff you can't cross without a ramp. Shared by the editor's
+	// blankArea + sealWallBorder so "default wall height" has one home.
+	ElevationWallRingLevel = ElevationBaseline + 1
 )
 
 // ElevationLevelFromChar decodes an elevation cell byte to a STORED level:
@@ -562,34 +575,85 @@ func (a AreaDefinition) StandGroundY(x, z int) float32 {
 	return level * LevelStep
 }
 
-// EdgeLevel is the exported wrapper over edgeLevel — the elevation level at
-// tile (x,z)'s edge facing `dir`, ok=false for no walkable edge (off-map or a
-// ramp's sheer perpendicular side). The renderer's cliff-face pass uses it so
-// faces line up with the same edges StepElevationOK gates movement on.
-func (a AreaDefinition) EdgeLevel(x, z, dir int) (int, bool) { return a.edgeLevel(x, z, dir) }
+// NoRamp is the sentinel ramp facing for a flat (non-ramp) tile, passed to
+// EdgeLevelOf.
+const NoRamp = -1
+
+// EdgeLevelOf is the pure edge-level rule given a tile's stored `level` and
+// `rampFacing` (NoRamp for a flat tile). A flat tile presents its level on all
+// four edges; a ramp presents its HIGH level (low+1) on the edge it ascends
+// toward, its LOW level on the opposite edge, and NO walkable edge (ok=false)
+// on its two perpendicular sides (sheer). The single home for the rule — both
+// edgeLevel (which reads level+ramp off the area) and the renderer's cliff-face
+// pass (which reads them from a per-frame grid) call this, so the math can't
+// drift between movement and rendering.
+func EdgeLevelOf(level, rampFacing, dir int) (int, bool) {
+	if rampFacing == NoRamp {
+		return level, true
+	}
+	switch NormalizeFacing(dir) {
+	case NormalizeFacing(rampFacing):
+		return level + 1, true
+	case NormalizeFacing(rampFacing + 2):
+		return level, true
+	default:
+		return 0, false
+	}
+}
 
 // edgeLevel returns the elevation level at tile (x,z)'s edge facing `dir`, and
-// ok=false when there's no walkable edge there. A flat tile presents its level
-// on all four edges. A ramp presents its HIGH level (low+1) on the edge it
-// ascends toward, its LOW level on the opposite edge, and NO walkable edge on
-// its two perpendicular sides (those are sheer — you can't mount a ramp from
-// the side).
+// ok=false when there's no walkable edge there. Fetches the tile's level + ramp
+// and delegates the rule to EdgeLevelOf.
 func (a AreaDefinition) edgeLevel(x, z, dir int) (int, bool) {
 	if !a.InBounds(x, z) {
 		return 0, false
 	}
+	ramp := NoRamp
 	if f, ok := a.RampAt(x, z); ok {
-		low := a.ElevationLevelAt(x, z)
-		switch NormalizeFacing(dir) {
-		case f:
-			return low + 1, true
-		case NormalizeFacing(f + 2):
-			return low, true
-		default:
-			return 0, false
+		ramp = f
+	}
+	return EdgeLevelOf(a.ElevationLevelAt(x, z), ramp, dir)
+}
+
+// CardinalDirs is the canonical N→E→S→W neighbour order, shared by the
+// face/exposure walks (core.TileExposesFace, render.drawCliffFaces) so the
+// "for each cardinal neighbour" iteration isn't re-listed per call site.
+var CardinalDirs = [4]int{North, East, South, West}
+
+// NeighbourEdgeLevel returns the elevation level the neighbour at (nx,nz)
+// presents across the edge entered from `fromDir`: ramp-aware via edgeLevel
+// when it has a walkable edge, its flat level otherwise, and the baseline when
+// off-map (so a raised border shows a clean 1-high lip, not a plunge to the
+// bottom of the range). The single rule both the editor's face-menu gating and
+// the renderer's cliff-face pass agree on.
+func (a AreaDefinition) NeighbourEdgeLevel(nx, nz, fromDir int) int {
+	if !a.InBounds(nx, nz) {
+		return ElevationBaseline
+	}
+	if l, ok := a.edgeLevel(nx, nz, fromDir); ok {
+		return l
+	}
+	return a.ElevationLevelAt(nx, nz)
+}
+
+// TileExposesFace reports whether tile (x,z) renders at least one cliff face —
+// it's not a ramp (ramps draw their own wedge) and sits above some cardinal
+// neighbour (or the baseline at the map edge). The authority the editor's "Set
+// face" menu gates on; the renderer's drawCliffFaces mirrors this per-edge for
+// the actual draw (reading a per-frame grid for speed) so the two never
+// disagree about which tiles show faces.
+func TileExposesFace(a AreaDefinition, x, z int) bool {
+	if _, isRamp := a.RampAt(x, z); isRamp {
+		return false
+	}
+	my := a.ElevationLevelAt(x, z)
+	for _, d := range CardinalDirs {
+		dx, dz := FacingVector(d)
+		if my > a.NeighbourEdgeLevel(x+dx, z+dz, NormalizeFacing(d+2)) {
+			return true
 		}
 	}
-	return a.ElevationLevelAt(x, z), true
+	return false
 }
 
 // StepElevationOK reports whether a step from (fromX,fromZ) to the adjacent
@@ -1160,13 +1224,10 @@ const (
 // ceiling sets has an entry — adding a new tile const without a
 // label now panics at startup instead of returning "?" silently.
 var tileLabelTable = map[TileLayer]map[byte]string{
+	// Face-skin labels are populated from core.FaceSkins in init (below) so the
+	// roster lives in one place; only the blank default is hand-listed here.
 	TileLayerWalls: {
-		TileOpen:              "", // default rock skin — nothing to call out
-		TileRock:              "Rock Face",
-		TileWallRockIvyLight:  "Face (Light Ivy)",
-		TileWallRockIvyHeavy:  "Face (Heavy Ivy)",
-		TileWallRockCracked:   "Face (Cracked)",
-		TileWallRockCrumbling: "Face (Crumbling)",
+		TileOpen: "", // default rock skin — nothing to call out
 	},
 	TileLayerFloor: {
 		FloorAuto:      "",
@@ -1264,6 +1325,12 @@ var tileLabelTable = map[TileLayer]map[byte]string{
 // unregistered collision panics at startup so the author has to
 // confirm the overlap is deliberate.
 func init() {
+	// Derive the Faces layer's labels from the FaceSkins roster so a new skin
+	// is one row in FaceSkins, not a parallel label edit here.
+	faceLabels := tileLabelTable[TileLayerWalls]
+	for _, s := range FaceSkins {
+		faceLabels[s.Char] = s.Name + " Face"
+	}
 	floorLabels := tileLabelTable[TileLayerFloor]
 	for _, c := range floorTileCharList {
 		if _, ok := floorLabels[c]; !ok {

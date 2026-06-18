@@ -613,6 +613,9 @@ func eraseSentinel(layer Layer) byte {
 	case LayerFloor:
 		return core.FloorAuto
 	case LayerDecor:
+		// Erase means "no scatter here" (DecorEmpty), NOT "auto-scatter"
+		// (DecorAuto) — the Auto brush is the explicit "let the renderer pick"
+		// affordance, so erase suppresses rather than resets-to-random.
 		return core.DecorEmpty
 	case LayerProps:
 		return core.TilePropEmpty
@@ -621,14 +624,15 @@ func eraseSentinel(layer Layer) byte {
 	case LayerElevation:
 		return core.ElevationChar(core.ElevationBaseline)
 	}
-	return core.TileOpen
+	// Fail closed like the sibling layer switches (applyTool/eraseAt/activeGrid)
+	// so a new layer can't silently erase-to-TileOpen.
+	panic("editor: eraseSentinel missing case for layer")
 }
 
-// eraseAt is the right-click action. Behavior is per-layer:
-//   - Walls / Props : reset cell to '.'
-//   - Floor         : reset to FloorAuto
-//   - Decor         : reset to DecorAuto
-//   - Entities      : remove the pack at this cell, or refuse on the start
+// eraseAt resets the active layer's cell at (x,z): grid layers go to their
+// eraseSentinel (one source, shared with flood-erase), while Props
+// (footprint-aware clear), Elevation (ramp side-effect), and Entities need
+// bespoke handling.
 func eraseAt(s *State, x, z int) {
 	if !s.area.InBounds(x, z) {
 		return
@@ -637,25 +641,12 @@ func eraseAt(s *State, x, z int) {
 	// no-op (mirrors applyTool).
 	s.layerHidden[s.layer] = false
 	switch s.layer {
-	case LayerWalls:
-		setLayerCell(&s.area.Walls, x, z, core.TileOpen)
-	case LayerFloor:
-		setLayerCell(&s.area.Floor, x, z, core.FloorAuto)
-	case LayerDecor:
-		// Right-click on decor means "no scatter here" (DecorEmpty), not
-		// "auto-scatter" (DecorAuto). The Auto brush is the explicit "let
-		// the renderer pick" affordance; erase should suppress rather
-		// than reset-to-random.
-		setLayerCell(&s.area.Decor, x, z, core.DecorEmpty)
 	case LayerProps:
 		clearPropCell(&s.area, x, z)
-	case LayerCeiling:
-		setLayerCell(&s.area.Ceiling, x, z, core.TileCeilingOpen)
 	case LayerElevation:
-		// Reset the cell to the walkable baseline (level 0 is now a deep pit, not
-		// "flat"); if it carried a ramp, clear that too (a ramp with no step is
-		// meaningless).
-		setLayerCell(&s.area.Elevation, x, z, core.ElevationChar(core.ElevationBaseline))
+		// Reset to the walkable baseline (level 0 is now a deep pit, not "flat");
+		// if it carried a ramp, clear that too (a ramp with no step is meaningless).
+		setLayerCell(&s.area.Elevation, x, z, eraseSentinel(LayerElevation))
 		if _, ok := s.area.RampAt(x, z); ok {
 			setLayerCell(&s.area.Floor, x, z, core.FloorAuto)
 		}
@@ -664,7 +655,10 @@ func eraseAt(s *State, x, z int) {
 			return
 		}
 	default:
-		panic("editor: eraseAt missing case for layer — add it here, in applyTool, and in activeGrid")
+		// Plain grid layers (Walls/Floor/Decor/Ceiling): reset the active grid to
+		// its sentinel. eraseSentinel panics on an unknown layer, so this stays
+		// fail-closed without re-listing every case.
+		setLayerCell(activeGrid(s), x, z, eraseSentinel(s.layer))
 	}
 	s.dirty = true
 }
@@ -758,11 +752,10 @@ func addPackMember(s *State, x, z int, kind core.EnemyKind) {
 }
 
 // removeAllEntitiesAt strips every pack / chest / door spawn whose
-// tile equals (x,z). The triplet appears in applyWallBrush,
-// applyPropBrush (footprint + single-tile branches), and the runtime
-// resize path — five call sites that used to open-code the three
-// `removeXAt` calls. Centralized so a future fourth spawn category
-// is one edit, not five. Mutates the slices on the passed-in area.
+// tile equals (x,z). Used by applyPropBrush (footprint + single-tile branches)
+// and the runtime resize path — call sites that would otherwise open-code the
+// three `removeXAt` calls. Centralized so a future fourth spawn category is one
+// edit. Mutates the slices on the passed-in area.
 func removeAllEntitiesAt(a *core.AreaDefinition, x, z int) {
 	a.PackSpawns = removePackAt(a.PackSpawns, x, z)
 	a.ChestSpawns = removeChestSpawnAt(a.ChestSpawns, x, z)
@@ -1021,7 +1014,7 @@ func removeChestSpawnsOutside(spawns []core.ChestSpawn, w, h int) []core.ChestSp
 // blankArea's perimeter rule. Walls are elevation now, so this stamps the
 // Elevation layer (+ the Faces layer's rock skin), not a solid wall char.
 func sealWallBorder(a *core.AreaDefinition) {
-	wallChar := core.ElevationChar(core.ElevationBaseline + 1)
+	wallChar := core.ElevationChar(core.ElevationWallRingLevel)
 	for z := 0; z < a.Height; z++ {
 		var faceRow, elevRow []byte
 		if z < len(a.Walls) {
@@ -1254,10 +1247,10 @@ func floodFill(s *State, x, z int, b byte) {
 }
 
 // pruneBlockedSpawns drops any pack / chest / door spawn that now sits on a
-// blocked tile — the cleanup a wall flood/fill (and applyWallBrush per-cell)
-// owes after turning cells into '#'. Routed through the shared
-// removeSpawnsWhere over core.TileXZ so all three entity lists are pruned by
-// the same rule.
+// BlockedAt tile (a blocking prop or deep water — walls are elevation now and
+// don't block standing). Used by the resize path after a shrink. Routed through
+// the shared removeSpawnsWhere over core.TileXZ so all three entity lists are
+// pruned by the same rule.
 func pruneBlockedSpawns(a *core.AreaDefinition) {
 	blocked := func(x, z int) bool { return a.BlockedAt(x, z) }
 	a.PackSpawns = removeSpawnsWhere(a.PackSpawns, blocked)

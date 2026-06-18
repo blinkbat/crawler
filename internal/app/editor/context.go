@@ -62,47 +62,6 @@ type ctxItem struct {
 	skin byte
 }
 
-// faceSkinChoice pairs a cliff-face skin char with its menu label, driving the
-// "Set face" rows. Mirrors the editor's Faces palette.
-type faceSkinChoice struct {
-	char  byte
-	label string
-}
-
-var faceSkinChoices = []faceSkinChoice{
-	{core.TileRock, "Rock"},
-	{core.TileWallRockIvyLight, "Light Ivy"},
-	{core.TileWallRockIvyHeavy, "Heavy Ivy"},
-	{core.TileWallRockCracked, "Cracked"},
-	{core.TileWallRockCrumbling, "Crumbling"},
-}
-
-// tileExposesFace reports whether tile (x,z) sits above any cardinal neighbour
-// (or the map edge) — i.e. it renders at least one cliff face, so a face-skin
-// choice is meaningful there. Mirrors the renderer's drawCliffFaces test.
-func tileExposesFace(a core.AreaDefinition, x, z int) bool {
-	if _, isRamp := a.RampAt(x, z); isRamp {
-		return false // ramps draw their own wedge, no skinnable face
-	}
-	my := a.ElevationLevelAt(x, z)
-	for _, d := range []int{core.North, core.East, core.South, core.West} {
-		dx, dz := core.FacingVector(d)
-		nx, nz := x+dx, z+dz
-		n := 0
-		if a.InBounds(nx, nz) {
-			if l, ok := a.EdgeLevel(nx, nz, core.NormalizeFacing(d+2)); ok {
-				n = l
-			} else {
-				n = a.ElevationLevelAt(nx, nz)
-			}
-		}
-		if my > n {
-			return true
-		}
-	}
-	return false
-}
-
 // contextMenuState is the in-State data for an open right-click menu.
 // Empty (open=false) when no menu is up. Recomputed when the user
 // opens a new menu, dismissed on click-outside / Esc / item-pick.
@@ -181,14 +140,16 @@ func contextItemsAt(s *State, x, z int) []ctxItem {
 	}
 	// Cliff-face skin: when the tile rises above a neighbour it shows a face,
 	// so offer quick per-tile skin assignment (the current skin is marked).
-	if tileExposesFace(s.area, x, z) {
+	// Gated by the same core rule the renderer draws faces from, and driven by
+	// the shared core.FaceSkins roster.
+	if core.TileExposesFace(s.area, x, z) {
 		cur := s.area.FaceSkinAt(x, z)
-		for _, sk := range faceSkinChoices {
+		for _, sk := range core.FaceSkins {
 			marker := "  "
-			if cur == sk.char {
+			if cur == sk.Char {
 				marker = "* "
 			}
-			items = append(items, ctxItem{label: marker + "Face: " + sk.label, kind: ctxItemSetFaceSkin, skin: sk.char})
+			items = append(items, ctxItem{label: marker + "Face: " + sk.Name, kind: ctxItemSetFaceSkin, skin: sk.Char})
 		}
 	}
 	// Erase the active layer's cell here — always available (the eraser is also
@@ -205,8 +166,9 @@ func contextItemsAt(s *State, x, z int) []ctxItem {
 func openContextMenu(s *State, clickX, clickY float32, tileX, tileZ int) {
 	items := contextItemsAt(s, tileX, tileZ)
 	if len(items) == 0 {
-		// No actionable contents — fall back to a silent close so the
-		// user doesn't see a one-row "nothing here" placeholder menu.
+		// Only reachable for an out-of-bounds tile now (contextItemsAt always
+		// offers at least Erase/Move-start for an in-bounds cell) — close
+		// silently rather than pop an empty menu.
 		s.contextMenu = contextMenuState{}
 		return
 	}

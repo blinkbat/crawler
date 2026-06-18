@@ -489,6 +489,14 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 		stats.MapH = m.Height
 	}
 
+	// Decode the elevation + ramp + face-skin of every tile ONCE into a reused
+	// flat grid, instead of re-deriving each tile's (and its 4 neighbours')
+	// level/ramp through value-receiver string lookups inside the hot loop —
+	// which previously decoded each tile's level ~5× per pass. The loop and the
+	// cliff-face pass then read plain ints/bytes from this grid.
+	gw, gh := m.Width, m.Height
+	grid := elevGrid(&m, gw, gh)
+
 	rl.BeginShaderMode(assets.lighting.shader)
 	for z := 0; z < m.Height; z++ {
 		for x := 0; x < m.Width; x++ {
@@ -507,14 +515,20 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 			// its level. The world is a heightfield — a "wall" is the rendered
 			// vertical FACE of an elevation step (drawCliffFaces below), not a
 			// separate solid tile. A raised tile reads as a plateau/mesa; the
-			// faces on its lower-facing edges are its cliff.
-			elevY := core.ElevationWorldY(m.ElevationLevelAt(x, z))
+			// faces on its lower-facing edges are its cliff. Read level+ramp from
+			// the prebuilt grid (computed once, above) rather than re-decoding.
+			te := grid[z*gw+x]
+			elevY := core.ElevationWorldY(te.level)
 			// Scenery (decor/props) rests on the WALKABLE surface, which on a
 			// ramp tile is the mid-slope height, not the low edge elevY that the
-			// floor wedge is drawn from. Anchor it at StandGroundY so a prop or
-			// brazier on a ramp sits where a unit standing there would, instead
-			// of sinking to the low end. On flat tiles StandGroundY == elevY.
-			center := rl.NewVector3(cx, m.StandGroundY(x, z), cz)
+			// floor wedge is drawn from. Anchor it where a unit standing there
+			// would rest (StandGroundY, recomputed inline from the grid so the
+			// loop doesn't re-derive level+ramp). On flat tiles this == elevY.
+			standLevel := float32(te.level - core.ElevationBaseline)
+			if te.ramp != core.NoRamp {
+				standLevel += 0.5
+			}
+			center := rl.NewVector3(cx, standLevel*core.LevelStep, cz)
 			if m.CeilingAt(x, z) {
 				drawTileCube(material.ceilingModel, cx, core.LevelStep+elevY, cz, tileYawDeg(x, z))
 				if logActive {
@@ -527,7 +541,7 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 			}
 			// Cliff faces for every edge where this tile sits above its
 			// neighbour (or the map edge). Counted as WallsDrawn for the log.
-			if n := drawCliffFaces(material, assets, m, x, z, cx, cz); logActive {
+			if n := drawCliffFaces(camPos, material, assets, grid, gw, gh, x, z, cx, cz, te.level, te.ramp); logActive {
 				stats.WallsDrawn += n
 			}
 			drawDecor(assets, m.Decor[z][x], x, z, cx, cz, center)
@@ -644,33 +658,90 @@ func drawFloorTile(material worldMaterialResources, assets Resources, cell byte,
 // just these faces. Ramp tiles draw their own solid wedge (with side/back
 // walls) instead, so they're skipped here. Returns the number of faces drawn
 // (for the render-log's WallsDrawn tally).
-func drawCliffFaces(material worldMaterialResources, assets Resources, m core.AreaDefinition, x, z int, cx, cz float32) int {
-	if _, isRamp := m.RampAt(x, z); isRamp {
+// tileElev is the per-tile elevation data the world loop needs, decoded once
+// into elevGridBuf so the hot loop reads ints/bytes instead of re-running
+// value-receiver string lookups for every tile and its four neighbours.
+type tileElev struct {
+	level int
+	ramp  int  // ascent facing, or core.NoRamp on a flat tile
+	skin  byte // cliff-face skin char (core.FaceSkinAt)
+}
+
+// elevGridBuf is reused across frames + passes to avoid an allocation per draw.
+var elevGridBuf []tileElev
+
+// elevGrid decodes every tile's level/ramp/skin into the reused flat buffer.
+func elevGrid(m *core.AreaDefinition, w, h int) []tileElev {
+	n := w * h
+	if cap(elevGridBuf) < n {
+		elevGridBuf = make([]tileElev, n)
+	}
+	elevGridBuf = elevGridBuf[:n]
+	for z := 0; z < h; z++ {
+		for x := 0; x < w; x++ {
+			ramp := core.NoRamp
+			if f, ok := m.RampAt(x, z); ok {
+				ramp = f
+			}
+			elevGridBuf[z*w+x] = tileElev{
+				level: m.ElevationLevelAt(x, z),
+				ramp:  ramp,
+				skin:  m.FaceSkinAt(x, z),
+			}
+		}
+	}
+	return elevGridBuf
+}
+
+func drawCliffFaces(camPos rl.Vector3, material worldMaterialResources, assets Resources, grid []tileElev, w, h, x, z int, cx, cz float32, myLevel, myRamp int) int {
+	if myRamp != core.NoRamp {
 		return 0 // the ramp wedge supplies its own faces
 	}
-	myLevel := m.ElevationLevelAt(x, z)
-	skin := material.faceModel
-	if vm, ok := assets.faceVariants[m.FaceSkinAt(x, z)]; ok {
-		skin = vm
-	}
+	const half = float32(core.TileSize) / 2
 	drawn := 0
-	for _, d := range []int{core.North, core.East, core.South, core.West} {
+	skinResolved := false
+	var skin rl.Model
+	// Per-edge mirror of core.TileExposesFace (the editor gates its "Set face"
+	// menu on that authority) — kept inline here so it reads the per-frame grid
+	// instead of re-decoding the area, and resolves each edge's exact drop for
+	// the draw. Off-map default + EdgeLevelOf fallback match core.NeighbourEdgeLevel.
+	for _, d := range core.CardinalDirs {
 		dx, dz := core.FacingVector(d)
+		// CPU backface cull: a vertical cliff face is only visible from its
+		// outward (d) side. Skip issuing the DrawModelEx when the camera sits
+		// behind the face's plane — the GPU would discard those triangles
+		// anyway, but the per-call overhead is the real cost, and a dense
+		// heightfield generates one face per exposed edge. Pure win, no visual
+		// change (you can never stand on the solid side of a cliff face).
+		fdx, fdz := float32(dx), float32(dz)
+		if (camPos.X-(cx+fdx*half))*fdx+(camPos.Z-(cz+fdz*half))*fdz <= 0 {
+			continue
+		}
 		nx, nz := x+dx, z+dz
-		// Neighbour ground level across the shared edge: ramp-aware (EdgeLevel)
-		// when it presents a walkable edge, else its flat level. Off-map reads
-		// as the baseline, so a raised border shows a clean lip at the map edge
-		// instead of a giant cliff plunging to the bottom of the range.
+		// Neighbour ground level across the shared edge from the grid: ramp-
+		// aware (EdgeLevelOf) when it presents a walkable edge, else its flat
+		// level. Off-map reads as the baseline, so a raised border shows a clean
+		// lip at the map edge rather than a cliff plunging to the range bottom.
 		nLevel := core.ElevationBaseline
-		if m.InBounds(nx, nz) {
-			if l, ok := m.EdgeLevel(nx, nz, core.NormalizeFacing(d+2)); ok {
+		if nx >= 0 && nx < w && nz >= 0 && nz < h {
+			nt := grid[nz*w+nx]
+			if l, ok := core.EdgeLevelOf(nt.level, nt.ramp, core.NormalizeFacing(d+2)); ok {
 				nLevel = l
 			} else {
-				nLevel = m.ElevationLevelAt(nx, nz)
+				nLevel = nt.level
 			}
 		}
 		if myLevel <= nLevel {
 			continue
+		}
+		// Resolve the skin lazily — only once a face is actually drawn — so flat
+		// / interior tiles pay no faceVariants map lookup.
+		if !skinResolved {
+			skin = material.faceModel
+			if vm, ok := assets.faceVariants[grid[z*w+x].skin]; ok {
+				skin = vm
+			}
+			skinResolved = true
 		}
 		drawCliffFace(skin, cx, core.ElevationWorldY(nLevel), cz, faceYaw(d), float32(myLevel-nLevel))
 		drawn++
