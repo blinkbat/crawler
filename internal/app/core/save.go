@@ -445,7 +445,7 @@ func sanitizeLoadedParty(party []PartyMember) {
 		// cursor at read time, so this is hygiene, not a crash fix —
 		// but it keeps the persisted value honest for any future reader
 		// that indexes without the clamp.
-		if skills := PartySkills(*m); m.SkillCursor < 0 || m.SkillCursor >= len(skills) {
+		if skills := PartySkills(m); m.SkillCursor < 0 || m.SkillCursor >= len(skills) {
 			m.SkillCursor = 0
 		}
 	}

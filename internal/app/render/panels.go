@@ -905,7 +905,7 @@ func drawHealPicker(g *core.GameState, assets Resources) {
 	if caster < 0 || caster >= len(g.Party) {
 		return
 	}
-	heals := core.OutOfBattleHealsInto(healPickerHealsDrawBuf, g.Party[caster])
+	heals := core.OutOfBattleHealsInto(healPickerHealsDrawBuf, &g.Party[caster])
 	healPickerHealsDrawBuf = heals
 	if len(heals) == 0 {
 		return

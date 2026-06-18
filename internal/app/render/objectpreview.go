@@ -39,7 +39,18 @@ type ObjectPreviewItem struct {
 // mesh), so a tail thumbnail would be blank. Derived from the same char lists
 // the renderer asserts coverage against, so a newly-registered prop/decor shows
 // up here automatically.
+// objectPreviewItemsCache memoizes the (static) object list. The prop/decor
+// char lists and their TileLabels are compile-time constants, so the result
+// never changes for the process — but the Object Browser asks for it twice per
+// frame (modal update + draw), so building it fresh each time append-grew a new
+// slice 60+ times/sec. Built once, lazily. Callers MUST treat the returned
+// slice as read-only (the browser only indexes it).
+var objectPreviewItemsCache []ObjectPreviewItem
+
 func ObjectPreviewItems() []ObjectPreviewItem {
+	if objectPreviewItemsCache != nil {
+		return objectPreviewItemsCache
+	}
 	var out []ObjectPreviewItem
 	for _, c := range core.PropTileChars() {
 		if isFootprintTail(c) {
@@ -53,7 +64,8 @@ func ObjectPreviewItems() []ObjectPreviewItem {
 		}
 		out = append(out, ObjectPreviewItem{Char: c, Name: core.TileLabel(core.TileLayerDecor, c), IsProp: false})
 	}
-	return out
+	objectPreviewItemsCache = out
+	return objectPreviewItemsCache
 }
 
 // CloseObjectPreview frees the cached off-screen texture; the editor calls it

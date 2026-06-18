@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -32,10 +33,15 @@ const (
 )
 
 var (
-	renderLogMu      sync.Mutex
-	renderLogFile    *os.File
-	renderLogFrameNo int
-	renderLogTickCnt int
+	renderLogMu sync.Mutex
+	// renderLogActiveFlag mirrors "renderLogFile != nil" as a lock-free atomic
+	// so the per-frame IsRenderLogActive gate (drawWorld calls it EVERY frame,
+	// even when the log is off) is a single atomic load instead of a mutex
+	// round-trip. Written under renderLogMu in Open/CloseRenderLog so it can't
+	// disagree with renderLogFile; read lock-free everywhere else.
+	renderLogActiveFlag atomic.Bool
+	renderLogFile       *os.File
+	renderLogFrameNo    int
 	// renderLogPendingInit is the init banner that gets stamped once on
 	// open + every shader / resource load that fires while the log
 	// is closed (so a Resources rebuild between toggles still gets
@@ -53,6 +59,7 @@ func OpenRenderLog() {
 	if renderLogFile != nil {
 		_ = renderLogFile.Close()
 		renderLogFile = nil
+		renderLogActiveFlag.Store(false)
 	}
 	path := renderLogPath()
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -61,11 +68,8 @@ func OpenRenderLog() {
 		return
 	}
 	renderLogFile = f
+	renderLogActiveFlag.Store(true)
 	renderLogFrameNo = 0
-	// Reset the throttle counter too so the every-10th-tick flush gate starts
-	// from a known phase on each (re)open rather than at an arbitrary offset
-	// carried over from a previous session.
-	renderLogTickCnt = 0
 
 	// One-shot session banner + any pending init lines that fired
 	// while the log was closed (e.g., shader load during NewResources
@@ -96,23 +100,18 @@ func CloseRenderLog() {
 	_ = renderLogFile.Sync()
 	_ = renderLogFile.Close()
 	renderLogFile = nil
+	renderLogActiveFlag.Store(false)
 }
 
 // IsRenderLogActive reports whether the log file is currently open.
 // Per-frame call sites use this to short-circuit the snapshot work
-// (camera + counts) when logging is off.
-//
-// LOCKING CONTRACT: This function takes renderLogMu. Callers MUST
-// NOT hold renderLogMu when calling — sync.Mutex is not reentrant
-// and a "log if active" wrapper that called this from inside
-// LogRenderInit / LogRenderFrame would self-deadlock. If a future
-// helper needs the same predicate from inside a logging call, split
-// out an isRenderLogActiveLocked() that reads `renderLogFile`
-// directly.
+// (camera + counts) when logging is off. Reads the lock-free
+// renderLogActiveFlag rather than taking renderLogMu, so the
+// once-per-frame gate in drawWorld costs a single atomic load even
+// when the log is off — no mutex traffic on the hot path. Safe to
+// call from inside a logging call (no lock to self-deadlock on).
 func IsRenderLogActive() bool {
-	renderLogMu.Lock()
-	defer renderLogMu.Unlock()
-	return renderLogFile != nil
+	return renderLogActiveFlag.Load()
 }
 
 // renderLogPendingCap bounds the in-memory init/error backlog
@@ -185,6 +184,7 @@ func LogRenderError(format string, args ...interface{}) {
 // directly without touching the mutex per tile.
 type renderFrameStats struct {
 	MapW, MapH       int
+	FrameDT          float32 // raylib frame time (s); printed as ms + derived fps
 	TilesIterated    int
 	TilesCulled      int
 	WallsDrawn       int
@@ -196,9 +196,9 @@ type renderFrameStats struct {
 	CamPos           rl.Vector3
 	CamDir           rl.Vector3
 	CamFOV           float32
-	PlayerYaw       float32
-	PlayerLookYaw   float32
-	PlayerLookPitch float32
+	PlayerYaw        float32
+	PlayerLookYaw    float32
+	PlayerLookPitch  float32
 	StepCount        int
 	LightingShaderID uint32
 	BillboardFogID   uint32
@@ -224,9 +224,18 @@ func LogRenderFrame(stats renderFrameStats) {
 		return
 	}
 	t := time.Now().Format("15:04:05.000")
+	// dt is raylib's last-frame time; fps is its reciprocal. Both come straight
+	// from the stat snapshot — no clock call here — so the line cost is just the
+	// format + buffered write below.
+	dtMS := stats.FrameDT * 1000
+	fps := float32(0)
+	if stats.FrameDT > 0 {
+		fps = 1 / stats.FrameDT
+	}
 	fmt.Fprintf(renderLogFile,
-		"[%s f=%d] map=%dx%d iter=%d cull=%d walls=%d floor=%d ceil=%d decor=%d props=%d torches=%d cam=(%.2f,%.2f,%.2f) dir=(%.2f,%.2f,%.2f) fov=%.1f yaw=%.2f look=(%.2f,%.2f) step=%d shader=L%d/B%d fog=%.3f@(%.2f,%.2f,%.2f) amb=(%.2f,%.2f,%.2f) sun=(%.2f,%.2f,%.2f) battle=%v\n",
+		"[%s f=%d] dt=%.2fms fps=%.0f map=%dx%d iter=%d cull=%d walls=%d floor=%d ceil=%d decor=%d props=%d torches=%d cam=(%.2f,%.2f,%.2f) dir=(%.2f,%.2f,%.2f) fov=%.1f yaw=%.2f look=(%.2f,%.2f) step=%d shader=L%d/B%d fog=%.3f@(%.2f,%.2f,%.2f) amb=(%.2f,%.2f,%.2f) sun=(%.2f,%.2f,%.2f) battle=%v\n",
 		t, renderLogFrameNo,
+		dtMS, fps,
 		stats.MapW, stats.MapH, stats.TilesIterated, stats.TilesCulled,
 		stats.WallsDrawn, stats.FloorsDrawn, stats.CeilingsDrawn, stats.DecorDrawn, stats.PropsDrawn,
 		stats.TorchCount,
@@ -243,12 +252,12 @@ func LogRenderFrame(stats renderFrameStats) {
 		stats.SunColor.X, stats.SunColor.Y, stats.SunColor.Z,
 		stats.BattleActive,
 	)
-	// Flush every Nth throttled line so a crash or window-close still
-	// leaves the most recent context on disk.
-	renderLogTickCnt++
-	if renderLogTickCnt%10 == 0 {
-		_ = renderLogFile.Sync()
-	}
+	// No fsync here. Sync() is a disk flush that can stall the main render
+	// thread for ~ms — a hitch that would both cost frame time and corrupt the
+	// dt/fps numbers this line exists to measure. The Fprintf above is a cheap
+	// write() into the OS page cache, which already survives a process crash
+	// (only an OS crash / power loss could lose it, irrelevant for a debug log).
+	// Durable flush still happens on the graceful CloseRenderLog path.
 }
 
 // renderLogPath resolves the on-disk location for crawler-render.log.

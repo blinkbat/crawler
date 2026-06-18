@@ -546,7 +546,7 @@ func setupTargetedEnemy(g *core.GameState) bool {
 // or "potion grants free cast" change lands in one place rather
 // than the two places that previously inlined `actor.MP < cost`.
 func canAffordSkill(actor core.PartyMember, skill core.SkillID) bool {
-	return core.CanAffordSkill(actor, skill)
+	return core.CanAffordSkill(&actor, skill)
 }
 
 // chargeMP is the shared "spend the skill's MP cost or refuse" helper

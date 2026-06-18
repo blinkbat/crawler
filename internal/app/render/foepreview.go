@@ -139,18 +139,15 @@ func LiveFoeOverride(assets Resources, kind core.EnemyKind) (core.EnemyVisualOve
 
 // SetLiveFoeOverride applies ov onto the in-memory visual for kind, so the
 // editor's just-saved tuning takes effect immediately — without a reload. The
-// enemyVisuals map is shared by reference through the (by-value) Resources, so
-// mutating an entry here updates the same map the editor's render loop and
+// enemyVisuals slice is shared by reference through the (by-value) Resources, so
+// mutating an entry here updates the same slice the editor's render loop and
 // LiveFoeOverride read; otherwise the editor would re-seed from the stale loaded
 // value on the next foe-cycle and the save would look reverted. The texture is
-// preserved (applyEnemyVisualOverride keeps it). No-op if the kind is absent or
-// the map is nil. Persisted separately to visuals.json by the caller; this is
-// only the live in-memory mirror.
+// preserved (applyEnemyVisualOverride keeps it). No-op if the kind is out of
+// range. Persisted separately to visuals.json by the caller; this is only the
+// live in-memory mirror.
 func SetLiveFoeOverride(assets Resources, kind core.EnemyKind, ov core.EnemyVisualOverride) {
-	if assets.enemyVisuals == nil {
-		return
-	}
-	base, ok := assets.enemyVisuals[kind]
+	base, ok := visualAt(assets.enemyVisuals, int(kind))
 	if !ok {
 		return
 	}

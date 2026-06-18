@@ -79,7 +79,7 @@ func tryUseSkill(g *core.GameState) {
 	// caster can currently afford so the chooser never lists a cast beginHealCast
 	// would just refuse (and so an unaffordable two-heal Cleric falls through to
 	// the "no usable heal" miss ping instead of a dead-end chooser).
-	heals := affordableOutOfBattleHeals(*m)
+	heals := affordableOutOfBattleHeals(m)
 	switch len(heals) {
 	case 0:
 		audio.Play(audio.SoundInputMiss) // this member has no out-of-battle heal
@@ -105,7 +105,7 @@ var (
 	useTargetLivingBuf  []int
 )
 
-func affordableOutOfBattleHeals(m core.PartyMember) []core.SkillID {
+func affordableOutOfBattleHeals(m *core.PartyMember) []core.SkillID {
 	outOfBattleHealsBuf = core.OutOfBattleHealsInto(outOfBattleHealsBuf, m)
 	affordableHealsBuf = affordableHealsBuf[:0]
 	for _, h := range outOfBattleHealsBuf {
@@ -127,7 +127,7 @@ func beginHealCast(g *core.GameState, caster int, skill core.SkillID) {
 		audio.Play(audio.SoundInputMiss)
 		return
 	}
-	if !core.CanAffordSkill(*m, skill) {
+	if !core.CanAffordSkill(m, skill) {
 		audio.Play(audio.SoundInputMiss) // not enough MP
 		return
 	}
@@ -194,7 +194,7 @@ func updateHealPicker(g *core.GameState) {
 		closeHealPick(g)
 		return
 	}
-	heals := affordableOutOfBattleHeals(*m)
+	heals := affordableOutOfBattleHeals(m)
 	if len(heals) == 0 {
 		closeHealPick(g)
 		return

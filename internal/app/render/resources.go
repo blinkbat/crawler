@@ -30,19 +30,22 @@ type Resources struct {
 	// (timeProfile.StarAlpha), so the layer fades in through evening,
 	// peaks at midnight, and washes out through dawn.
 	starTexture rl.Texture2D
-	// enemyVisuals is the kind→billboard lookup. Multiple kinds can
-	// alias the same texture (placeholder sprites for new monsters),
-	// so it does NOT own the underlying handles — Unload would
-	// double-free them. enemyTextures is the canonical owning list
-	// the renderer minted at load time; Unload walks that.
-	enemyVisuals  map[core.EnemyKind]enemyVisual
+	// enemyVisuals is the kind→billboard lookup, a dense slice indexed by the
+	// EnemyKind iota (an array index, not a map hash, on the per-sprite draw
+	// path). Multiple kinds can alias the same texture (placeholder sprites for
+	// new monsters), so it does NOT own the underlying handles — Unload would
+	// double-free them. enemyTextures is the canonical owning list the renderer
+	// minted at load time; Unload walks that. Still a reference type (slice), so
+	// the editor's live-preview writes propagate across by-value Resources copies.
+	enemyVisuals  []enemyVisual
 	enemyTextures []rl.Texture2D
-	// partyVisuals is the class→billboard lookup, symmetric with enemyVisuals:
-	// per-class size/placement/shadow/tint knobs authored in the editor's Party
-	// Visualizer and overlaid from maps/sprites/partyvisuals.json. Like
-	// enemyVisuals it does NOT own its textures (a class can alias the procedural
-	// fallback); partyTextures is the owning list Unload walks.
-	partyVisuals  map[core.PartyClass]enemyVisual
+	// partyVisuals is the class→billboard lookup, symmetric with enemyVisuals: a
+	// dense slice indexed by the PartyClass iota holding the per-class
+	// size/placement/shadow/tint knobs authored in the editor's Party Visualizer
+	// and overlaid from maps/sprites/partyvisuals.json. Like enemyVisuals it does
+	// NOT own its textures (a class can alias the procedural fallback);
+	// partyTextures is the owning list Unload walks.
+	partyVisuals  []enemyVisual
 	partyTextures []rl.Texture2D
 	hudFont       rl.Font
 	hudFontOwned  bool
@@ -205,9 +208,11 @@ func LoadResources() (r Resources) {
 	r.starTexture = loadTexture(makeStarPixels(1024, 512), 1024, 512, rl.FilterPoint)
 	rl.SetTextureWrap(r.starTexture, rl.WrapClamp)
 
-	r.enemyVisuals, r.enemyTextures = loadEnemyVisuals()
+	enemyVis, enemyTex := loadEnemyVisuals()
+	r.enemyVisuals, r.enemyTextures = enemyVisualsToSlice(enemyVis), enemyTex
 
-	r.partyVisuals, r.partyTextures = loadPartyVisuals()
+	partyVis, partyTex := loadPartyVisuals()
+	r.partyVisuals, r.partyTextures = partyVisualsToSlice(partyVis), partyTex
 
 	r.hudFont, r.hudFontOwned = loadHUDFont()
 
@@ -681,15 +686,15 @@ func (r Resources) Unload() {
 	}
 	rl.UnloadTexture(r.skyTexture)
 	rl.UnloadTexture(r.starTexture)
-	// Walk enemyTextures (the owning list), NOT enemyVisuals — the map
-	// aliases the same handle at multiple keys (placeholder sprites for
+	// Walk enemyTextures (the owning list), NOT enemyVisuals — that slice
+	// aliases the same handle at multiple indices (placeholder sprites for
 	// the new monsters) and iterating it would double-free every shared
 	// texture at game exit.
 	for _, tex := range r.enemyTextures {
 		rl.UnloadTexture(tex)
 	}
 	// partyTextures is the owning list (partyVisuals aliases handles, like
-	// enemyVisuals) — walk it, not the map, to avoid a double-free.
+	// enemyVisuals) — walk it, not the slice, to avoid a double-free.
 	for _, tex := range r.partyTextures {
 		rl.UnloadTexture(tex)
 	}
@@ -997,6 +1002,33 @@ func loadEnemySpriteFile(name string, owned *[]rl.Texture2D) (rl.Texture2D, bool
 	rl.SetTextureWrap(tex, rl.WrapClamp)
 	*owned = append(*owned, tex)
 	return tex, true
+}
+
+// enemyVisualsToSlice / partyVisualsToSlice flatten the kind/class→visual maps
+// the loaders build into dense slices indexed by the EnemyKind / PartyClass
+// iota, so the per-sprite runtime lookup (enemyVisualFor / partyVisualFor) is an
+// array index instead of a map hash. The slice is a reference type like the map
+// it replaces, so the editor's live-preview writes still propagate across the
+// by-value Resources copies that share it. Every registered kind/class has an
+// entry (loadEnemyVisuals asserts coverage), so the dense slice has no holes.
+func enemyVisualsToSlice(m map[core.EnemyKind]enemyVisual) []enemyVisual {
+	out := make([]enemyVisual, core.EnemyKindCount())
+	for kind, v := range m {
+		if int(kind) >= 0 && int(kind) < len(out) {
+			out[kind] = v
+		}
+	}
+	return out
+}
+
+func partyVisualsToSlice(m map[core.PartyClass]enemyVisual) []enemyVisual {
+	out := make([]enemyVisual, len(core.PartyClasses()))
+	for class, v := range m {
+		if int(class) >= 0 && int(class) < len(out) {
+			out[class] = v
+		}
+	}
+	return out
 }
 
 func loadEnemyVisuals() (visuals map[core.EnemyKind]enemyVisual, owned []rl.Texture2D) {

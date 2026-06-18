@@ -38,6 +38,11 @@ func openObjectViewModal(s *State) {
 // click/paging input both read, so the painted cells and the hit-rects can't
 // drift. items is the full object list; the [start, end) window is the slice
 // shown on the clamped current page; thumbs[i] is the cell rect for items[start+i].
+// objViewThumbsBuf is the reused gallery-cell rect buffer (see
+// computeObjectViewLayout). Package-level because the Object Browser is a
+// single-instance modal on the single-threaded editor loop.
+var objViewThumbsBuf []rl.Rectangle
+
 type objectViewLayout struct {
 	card             rl.Rectangle
 	items            []render.ObjectPreviewItem
@@ -89,7 +94,10 @@ func computeObjectViewLayout(s *State) objectViewLayout {
 	}
 
 	thumbW := cellW - 16
-	thumbs := make([]rl.Rectangle, 0, end-start)
+	// Reuse a package-level buffer across the per-frame update+draw calls (the
+	// modal is single-instance, single-threaded, and the two calls don't overlap)
+	// so the gallery layout doesn't allocate a fresh rect slice twice per frame.
+	thumbs := objViewThumbsBuf[:0]
 	for i := start; i < end; i++ {
 		idx := i - start
 		col := idx % objViewCols
@@ -98,6 +106,7 @@ func computeObjectViewLayout(s *State) objectViewLayout {
 		cy := gridY + float32(row)*cellH
 		thumbs = append(thumbs, rl.NewRectangle(cx, cy, thumbW, objViewThumbH))
 	}
+	objViewThumbsBuf = thumbs // retain grown capacity for next frame
 
 	by := card.Y + card.Height - modalBtnH - modalBottomInset
 	prevBtn := rl.NewRectangle(gridX, by, objViewBtnW, modalBtnH)

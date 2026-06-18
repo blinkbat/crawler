@@ -36,17 +36,14 @@ func LivePartyOverride(assets Resources, class core.PartyClass) (core.PartyVisua
 
 // SetLivePartyOverride applies ov onto the in-memory visual for class so the
 // editor's just-saved tuning takes effect immediately without a reload. The
-// partyVisuals map is shared by reference through the (by-value) Resources, so
-// mutating an entry here updates the same map the editor's render loop and
+// partyVisuals slice is shared by reference through the (by-value) Resources, so
+// mutating an entry here updates the same slice the editor's render loop and
 // LivePartyOverride read — otherwise a class-cycle would re-seed from the stale
 // loaded value and the save would look reverted. The texture is preserved.
-// No-op if the class is absent or the map is nil. Persisted separately to
-// partyvisuals.json by the caller; this is only the live in-memory mirror.
+// No-op if the class is out of range. Persisted separately to partyvisuals.json
+// by the caller; this is only the live in-memory mirror.
 func SetLivePartyOverride(assets Resources, class core.PartyClass, ov core.PartyVisualOverride) {
-	if assets.partyVisuals == nil {
-		return
-	}
-	base, ok := assets.partyVisuals[class]
+	base, ok := visualAt(assets.partyVisuals, int(class))
 	if !ok {
 		return
 	}

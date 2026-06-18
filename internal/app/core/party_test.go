@@ -167,14 +167,14 @@ func TestPartySkill_UnlearnedThenLearned(t *testing.T) {
 	}
 	for class, c := range cases {
 		m := PartyMember{Class: class}
-		if got := PartySkill(m); got != SkillNone {
+		if got := PartySkill(&m); got != SkillNone {
 			t.Errorf("PartySkill(unlearned %v) = %v, want SkillNone", class, got)
 		}
 		m.SkillPoints = 1
 		if !BuySkillNode(&m, c.node) {
 			t.Fatalf("BuySkillNode(%v, %q) failed", class, c.node)
 		}
-		if got := PartySkill(m); got != c.want {
+		if got := PartySkill(&m); got != c.want {
 			t.Errorf("PartySkill(learned %v) = %v, want %v", class, got, c.want)
 		}
 	}

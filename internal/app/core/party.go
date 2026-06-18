@@ -566,7 +566,7 @@ func PartyClassName(class PartyClass) string {
 // in-battle Tab key cycles that index. Out-of-range cursors — a
 // corrupted save, or a skill un-learned since the cursor was last set —
 // clamp to 0; a member who has learned nothing yet returns SkillNone.
-func PartySkill(member PartyMember) SkillID {
+func PartySkill(member *PartyMember) SkillID {
 	skills := PartySkills(member)
 	if len(skills) == 0 {
 		return SkillNone
@@ -585,8 +585,8 @@ func PartySkill(member PartyMember) SkillID {
 // A member who has learned nothing yet returns an empty slice; every
 // caller already handles len == 0. Replaces the old fixed class loadout:
 // progression now flows entirely through the Tome's tree purchases.
-func PartySkills(member PartyMember) []SkillID {
-	return LearnedSkills(&member)
+func PartySkills(member *PartyMember) []SkillID {
+	return LearnedSkills(member)
 }
 
 func skillInfo(skill SkillID) (skillDefinition, bool) {
@@ -629,7 +629,7 @@ func SkillCost(skill SkillID) int {
 	return 0
 }
 
-func CanAffordSkill(m PartyMember, skill SkillID) bool {
+func CanAffordSkill(m *PartyMember, skill SkillID) bool {
 	return m.MP >= SkillCost(skill)
 }
 
@@ -640,7 +640,7 @@ func CanAffordSkill(m PartyMember, skill SkillID) bool {
 // future "refund on cancel" / "VIT raises the MP pool" rule is one edit, not
 // several inlined `MP -= SkillCost` sites.
 func SpendSkillMP(m *PartyMember, skill SkillID) bool {
-	if m == nil || !CanAffordSkill(*m, skill) {
+	if m == nil || !CanAffordSkill(m, skill) {
 		return false
 	}
 	m.MP -= SkillCost(skill)
@@ -696,7 +696,7 @@ func SkillHealableOutOfBattle(skill SkillID) bool {
 // to cast directly (one heal), pop a chooser (multiple), or refuse (none).
 // Allocates a small slice; per-frame callers (the chooser's update + draw
 // loops) use OutOfBattleHealsInto with a reusable buffer instead.
-func OutOfBattleHeals(m PartyMember) []SkillID {
+func OutOfBattleHeals(m *PartyMember) []SkillID {
 	return OutOfBattleHealsInto(nil, m)
 }
 
@@ -704,7 +704,7 @@ func OutOfBattleHeals(m PartyMember) []SkillID {
 // (re-sliced to length 0) — the allocation-free variant for the heal
 // chooser's per-frame update/draw paths. The returned slice aliases buf's
 // backing array and is valid until the caller's next reuse of it.
-func OutOfBattleHealsInto(buf []SkillID, m PartyMember) []SkillID {
+func OutOfBattleHealsInto(buf []SkillID, m *PartyMember) []SkillID {
 	return filterInto(buf, PartySkills(m), func(s SkillID) bool {
 		return s != SkillNone && SkillHealableOutOfBattle(s)
 	})

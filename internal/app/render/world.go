@@ -649,6 +649,7 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 	rl.EndShaderMode()
 
 	if logActive {
+		stats.FrameDT = rl.GetFrameTime()
 		stats.TorchCount = len(torches)
 		stats.CamPos = camera.Position
 		stats.CamDir = rl.NewVector3(camera.Target.X-camera.Position.X, camera.Target.Y-camera.Position.Y, camera.Target.Z-camera.Position.Z)
@@ -2031,11 +2032,25 @@ func drawMarker(unitPos rl.Vector3, style markerStyle) {
 }
 
 func enemyVisualFor(assets Resources, kind core.EnemyKind) (enemyVisual, bool) {
-	if visual, ok := assets.enemyVisuals[kind]; ok && visual.texture.ID != 0 {
-		return visual, true
+	if v, ok := visualAt(assets.enemyVisuals, int(kind)); ok && v.texture.ID != 0 {
+		return v, true
 	}
-	visual, ok := assets.enemyVisuals[core.EnemyRat]
-	return visual, ok && visual.texture.ID != 0
+	if v, ok := visualAt(assets.enemyVisuals, int(core.EnemyRat)); ok && v.texture.ID != 0 {
+		return v, true
+	}
+	return enemyVisual{}, false
+}
+
+// visualAt indexes a dense kind/class→visual slice (enemyVisuals / partyVisuals)
+// with a bounds guard, returning (zero, false) for an out-of-range index —
+// the slice-backed replacement for the old map comma-ok read, so the lookup is
+// an array index, not a hash. Shared by enemyVisualFor / partyVisualFor and the
+// editor's live-preview read/write sites.
+func visualAt(s []enemyVisual, idx int) (enemyVisual, bool) {
+	if idx < 0 || idx >= len(s) {
+		return enemyVisual{}, false
+	}
+	return s[idx], true
 }
 
 // drawTargetChevron draws the yellow enemy-target selector pyramid at position,
@@ -2198,11 +2213,10 @@ func DrawPartySprites(camera rl.Camera3D, g *core.GameState, assets Resources) {
 // fully populated at load (every class gets at least the procedural fallback),
 // so the false branch is defensive.
 func partyVisualFor(assets Resources, class core.PartyClass) (enemyVisual, bool) {
-	v, ok := assets.partyVisuals[class]
-	if !ok || v.texture.ID == 0 {
-		return enemyVisual{}, false
+	if v, ok := visualAt(assets.partyVisuals, int(class)); ok && v.texture.ID != 0 {
+		return v, true
 	}
-	return v, true
+	return enemyVisual{}, false
 }
 
 // drawFriendlyTargetMarker draws the ally-target selector pyramid at position,

@@ -488,15 +488,12 @@ func reloadSpriteTextureSlug(slug string) (rl.Texture2D, bool) {
 
 // ReloadFoeSprite re-reads kind's just-edited PNG into the live enemyVisuals
 // texture so the Foe Visualizer preview updates instantly (and the change shows
-// in-session, not only after a restart). The enemyVisuals map is shared by
+// in-session, not only after a restart). The enemyVisuals slice is shared by
 // reference through the by-value Resources, so writing the entry here updates the
-// same map the editor's preview and the in-game billboards read. No-op (false) if
-// the kind is absent or the PNG can't be loaded — the existing texture stays.
+// same slice the editor's preview and the in-game billboards read. No-op (false) if
+// the kind is out of range or the PNG can't be loaded — the existing texture stays.
 func ReloadFoeSprite(assets Resources, kind core.EnemyKind) bool {
-	if assets.enemyVisuals == nil {
-		return false
-	}
-	base, ok := assets.enemyVisuals[kind]
+	base, ok := visualAt(assets.enemyVisuals, int(kind))
 	if !ok {
 		return false
 	}
@@ -516,10 +513,7 @@ func ReloadFoeSprite(assets Resources, kind core.EnemyKind) bool {
 
 // ReloadPartySprite is the party-class twin of ReloadFoeSprite.
 func ReloadPartySprite(assets Resources, class core.PartyClass) bool {
-	if assets.partyVisuals == nil {
-		return false
-	}
-	base, ok := assets.partyVisuals[class]
+	base, ok := visualAt(assets.partyVisuals, int(class))
 	if !ok {
 		return false
 	}
