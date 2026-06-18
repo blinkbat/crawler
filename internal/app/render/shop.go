@@ -81,35 +81,75 @@ func drawShopOverlay(g *core.GameState, assets Resources) {
 	}, float32(panelX)+float32(shopPanelW)/2, float32(panelY+panelH-shopFootH+shopHintDrop), FontSmall)
 }
 
-// shopRows builds the active tab's drawable rows. Buy reads the catalog
-// (affordability gated on current gold); Sell reads the player's priced
-// inventory at half value. The slices match the ones the input handler
-// walks (core.ShopCatalog / core.SellableStacks) so cursor and rows align.
+// shopRowsCache memoizes the active tab's drawable rows so drawShopOverlay
+// doesn't make() a fresh slice + Sprintf every price label at 60 Hz while the
+// shop is open. Rebuilt only when an input that shapes the rows changes: the
+// active tab, the gold total (Buy affordability), or the inventory (Sell
+// contents, via a cheap O(stacks) fingerprint). Mirrors goldReadout's
+// single-entry HUD cache. Modal-only, but keeps the one remaining per-frame
+// Sprintf-in-a-loop out of the draw path.
+var shopRowsCache struct {
+	primed bool
+	tab    core.ShopTab
+	gold   int
+	invFP  uint64
+	rows   []shopRow
+}
+
+// inventoryFingerprint folds the bag's (kind, count) pairs into a single
+// uint64 (FNV-1a) so shopRows can detect a Sell-affecting inventory change
+// without rebuilding (and re-allocating) the row list every frame. No
+// allocation; the loop is over the handful of held stacks.
+func inventoryFingerprint(inv []core.ItemStack) uint64 {
+	h := uint64(1469598103934665603)
+	for _, s := range inv {
+		h = (h ^ uint64(s.Kind)) * 1099511628211
+		h = (h ^ uint64(uint32(s.Count))) * 1099511628211
+	}
+	return h
+}
+
+// shopRows returns the active tab's drawable rows, served from shopRowsCache
+// when the tab/gold/inventory are unchanged since the last build. The slices
+// match the ones the input handler walks (core.ShopCatalog /
+// core.SellableStacks) so cursor and rows align.
 func shopRows(g *core.GameState) []shopRow {
+	fp := inventoryFingerprint(g.Inventory)
+	c := &shopRowsCache
+	if c.primed && c.tab == g.ShopTab && c.gold == g.Gold && c.invFP == fp {
+		return c.rows
+	}
+	c.rows = buildShopRows(g, c.rows[:0])
+	c.tab, c.gold, c.invFP, c.primed = g.ShopTab, g.Gold, fp, true
+	return c.rows
+}
+
+// buildShopRows appends the active tab's rows into buf (the reused cache
+// buffer, already truncated). Buy reads the catalog (affordability gated on
+// current gold); Sell reads the player's priced inventory at half value.
+func buildShopRows(g *core.GameState, buf []shopRow) []shopRow {
 	switch g.ShopTab {
 	case core.ShopTabSell:
 		stacks := core.SellableStacks(g.Inventory)
-		rows := make([]shopRow, 0, len(stacks))
 		for _, s := range stacks {
 			def := core.ItemInfo(s.Kind)
-			rows = append(rows, shopRow{
+			buf = append(buf, shopRow{
 				name:       fmt.Sprintf("%s  x%d", def.Name, s.Count),
 				price:      fmt.Sprintf("%dg", core.ShopSellPrice(def.Price)),
 				affordable: true,
 			})
 		}
-		return rows
+		return buf
 	case core.ShopTabBuy:
 		catalog := core.ShopCatalog()
-		rows := make([]shopRow, 0, len(catalog))
 		for _, def := range catalog {
-			rows = append(rows, shopRow{
+			buf = append(buf, shopRow{
 				name:       def.Name,
 				price:      fmt.Sprintf("%dg", def.Price),
 				affordable: g.Gold >= def.Price,
 			})
 		}
-		return rows
+		return buf
 	default:
 		// A new ShopTab that forgets a rows case fails loudly instead of
 		// silently rendering the Buy list — mirrors core.ShopTabLabel.
@@ -133,6 +173,11 @@ func shopEmptyLabel(tab core.ShopTab) string {
 func drawShopTabs(font rl.Font, active core.ShopTab, x, y float32) {
 	drawTextTabStrip(font, x, y, int(core.ShopTabCount), int(active),
 		func(i int) string { return core.ShopTabLabel(core.ShopTab(i)) },
-		func(s string) float32 { return rl.MeasureTextEx(font, s, FontBody, FontSpacingBody).X },
+		func(s string) float32 { return shopTabMeasureCache.measure(font, s, FontBody, FontSpacingBody).X },
 		borderActive, 28, false)
 }
+
+// shopTabMeasureCache memoizes the Buy/Sell tab-label widths so the tab strip
+// doesn't re-shape them via cgo every frame the shop is open — mirroring the
+// Journal sub-tab strip's journalMeasureCache.
+var shopTabMeasureCache measureCache

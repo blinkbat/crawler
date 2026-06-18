@@ -374,7 +374,7 @@ func nearestOpenTile(a AreaDefinition, wantX, wantZ int, occupied map[[2]int]boo
 // AreaDefinition (test fixtures, a future builder) would otherwise panic on
 // index-out-of-range in the base-layer readers below — this lets them fall
 // back to a safe default instead, matching CeilingAt / ElevationLevelAt.
-func (a AreaDefinition) layerByteAt(layer []string, x, z int) (byte, bool) {
+func (a *AreaDefinition) layerByteAt(layer []string, x, z int) (byte, bool) {
 	if z < 0 || z >= len(layer) {
 		return 0, false
 	}
@@ -392,9 +392,9 @@ func (a AreaDefinition) layerByteAt(layer []string, x, z int) (byte, bool) {
 // still tolerating a non-rectangular in-progress AreaDefinition (a struct-built
 // or mid-edit area whose layers aren't all Width×Height yet), which a direct
 // m.Floor[z][x] index would panic on.
-func (a AreaDefinition) FloorCharAt(x, z int) (byte, bool) { return a.layerByteAt(a.Floor, x, z) }
-func (a AreaDefinition) DecorCharAt(x, z int) (byte, bool) { return a.layerByteAt(a.Decor, x, z) }
-func (a AreaDefinition) PropCharAt(x, z int) (byte, bool)  { return a.layerByteAt(a.Props, x, z) }
+func (a *AreaDefinition) FloorCharAt(x, z int) (byte, bool) { return a.layerByteAt(a.Floor, x, z) }
+func (a *AreaDefinition) DecorCharAt(x, z int) (byte, bool) { return a.layerByteAt(a.Decor, x, z) }
+func (a *AreaDefinition) PropCharAt(x, z int) (byte, bool)  { return a.layerByteAt(a.Props, x, z) }
 
 // WallAt reports whether the cell is a SOLID obstruction — off-map, a blocking
 // prop, or a blocking floor (deep water). Walls-as-tiles are gone; lateral
@@ -402,7 +402,7 @@ func (a AreaDefinition) PropCharAt(x, z int) (byte, bool)  { return a.layerByteA
 // consider. Kept for the few callers that mean "is there a solid thing here"
 // (prop/door auto-facing, the debug overlay, editor footprint guards). Out-of-
 // bounds reads as solid so callers don't have to range-check first.
-func (a AreaDefinition) WallAt(x, z int) bool {
+func (a *AreaDefinition) WallAt(x, z int) bool {
 	if !a.InBounds(x, z) {
 		return true
 	}
@@ -419,7 +419,7 @@ func (a AreaDefinition) WallAt(x, z int) bool {
 // renderer paints on any vertical face this tile exposes where it sits higher
 // than a neighbour (or the map edge). Blank / TileOpen / out-of-bounds default
 // to TileRock (plain rock). Authored from the editor's Faces palette.
-func (a AreaDefinition) FaceSkinAt(x, z int) byte {
+func (a *AreaDefinition) FaceSkinAt(x, z int) byte {
 	c, ok := a.layerByteAt(a.Walls, x, z)
 	if !ok || c == TileOpen {
 		return TileRock
@@ -432,7 +432,7 @@ func (a AreaDefinition) FaceSkinAt(x, z int) byte {
 // the map edge. Maps loaded from older .map files without a ceiling:
 // section get a blank ceiling layer at parse time, so this always
 // returns false for them.
-func (a AreaDefinition) CeilingAt(x, z int) bool {
+func (a *AreaDefinition) CeilingAt(x, z int) bool {
 	c, ok := a.layerByteAt(a.Ceiling, x, z)
 	return ok && c == TileCeilingSolid
 }
@@ -444,7 +444,7 @@ func (a AreaDefinition) CeilingAt(x, z int) bool {
 // layer, or a non-digit cell all read as stored 0 — so a map without an
 // elevation layer reads as a flat sheet at the bottom of the range (legacy
 // flat maps predate the baseline and were authored at stored 0).
-func (a AreaDefinition) ElevationLevelAt(x, z int) int {
+func (a *AreaDefinition) ElevationLevelAt(x, z int) int {
 	c, ok := a.layerByteAt(a.Elevation, x, z)
 	if !ok {
 		return 0
@@ -546,7 +546,7 @@ func RampCharForFacing(facing int) byte {
 // RampAt reports whether tile (x,z)'s floor is a ramp and, if so, the cardinal
 // facing it ascends toward. Convenience over reading Floor[z][x] +
 // RampAscentFacing at the call site; ok=false out of bounds or on flat floor.
-func (a AreaDefinition) RampAt(x, z int) (facing int, ok bool) {
+func (a *AreaDefinition) RampAt(x, z int) (facing int, ok bool) {
 	c, present := a.layerByteAt(a.Floor, x, z)
 	if !present {
 		return 0, false
@@ -567,7 +567,7 @@ func ElevationWorldY(level int) float32 {
 // resting height the player / a billboard sits at. Flat tiles read
 // ElevationWorldY(level); a ramp reads its MID-slope height (low+0.5 levels),
 // since a unit standing on the ramp tile rests at its center, halfway up.
-func (a AreaDefinition) StandGroundY(x, z int) float32 {
+func (a *AreaDefinition) StandGroundY(x, z int) float32 {
 	level := float32(a.ElevationLevelAt(x, z)) - float32(ElevationBaseline)
 	if _, ok := a.RampAt(x, z); ok {
 		level += 0.5
@@ -604,7 +604,7 @@ func EdgeLevelOf(level, rampFacing, dir int) (int, bool) {
 // edgeLevel returns the elevation level at tile (x,z)'s edge facing `dir`, and
 // ok=false when there's no walkable edge there. Fetches the tile's level + ramp
 // and delegates the rule to EdgeLevelOf.
-func (a AreaDefinition) edgeLevel(x, z, dir int) (int, bool) {
+func (a *AreaDefinition) edgeLevel(x, z, dir int) (int, bool) {
 	if !a.InBounds(x, z) {
 		return 0, false
 	}
@@ -626,7 +626,7 @@ var CardinalDirs = [4]int{North, East, South, West}
 // off-map (so a raised border shows a clean 1-high lip, not a plunge to the
 // bottom of the range). The single rule both the editor's face-menu gating and
 // the renderer's cliff-face pass agree on.
-func (a AreaDefinition) NeighbourEdgeLevel(nx, nz, fromDir int) int {
+func (a *AreaDefinition) NeighbourEdgeLevel(nx, nz, fromDir int) int {
 	if !a.InBounds(nx, nz) {
 		return ElevationBaseline
 	}
@@ -662,7 +662,7 @@ func TileExposesFace(a AreaDefinition, x, z int) bool {
 // honoring ramps (which bridge two levels). A mismatch is a cliff (blocked);
 // a perpendicular attempt to mount/dismount a ramp is also blocked (edgeLevel
 // returns ok=false there). Flat-to-flat at equal levels always passes.
-func (a AreaDefinition) StepElevationOK(fromX, fromZ, dir int) bool {
+func (a *AreaDefinition) StepElevationOK(fromX, fromZ, dir int) bool {
 	dx, dz := FacingVector(dir)
 	from, ok1 := a.edgeLevel(fromX, fromZ, dir)
 	to, ok2 := a.edgeLevel(fromX+dx, fromZ+dz, NormalizeFacing(dir+2))
@@ -674,7 +674,7 @@ func (a AreaDefinition) StepElevationOK(fromX, fromZ, dir int) bool {
 // over open. Used by the minimap and any callers that haven't switched to
 // explicit per-layer queries yet. (Walls are gone; barriers are elevation,
 // which the minimap reads separately via ElevationLevelAt.)
-func (a AreaDefinition) TileAt(x, z int) byte {
+func (a *AreaDefinition) TileAt(x, z int) byte {
 	if !a.InBounds(x, z) {
 		return TileOpen
 	}
@@ -698,7 +698,7 @@ func (a AreaDefinition) TileAt(x, z int) byte {
 // top of BlockedAt to avoid coupling the area definition to runtime
 // state, and so the editor (which only ever holds an AreaDefinition)
 // can still call BlockedAt without seeing a phantom block.
-func (a AreaDefinition) BlockedAt(x, z int) bool {
+func (a *AreaDefinition) BlockedAt(x, z int) bool {
 	if !a.InBounds(x, z) {
 		return true
 	}
@@ -955,13 +955,13 @@ func joinSummary(parts []string) string {
 }
 
 // FloorAt is the inverse of BlockedAt — true when the cell is walkable.
-func (a AreaDefinition) FloorAt(x, z int) bool {
+func (a *AreaDefinition) FloorAt(x, z int) bool {
 	return !a.BlockedAt(x, z)
 }
 
 // InBounds reports whether the (x, z) coordinate sits inside the area's
 // declared dimensions.
-func (a AreaDefinition) InBounds(x, z int) bool {
+func (a *AreaDefinition) InBounds(x, z int) bool {
 	return z >= 0 && z < a.Height && x >= 0 && x < a.Width
 }
 

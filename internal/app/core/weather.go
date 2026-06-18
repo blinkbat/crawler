@@ -108,7 +108,7 @@ type WeatherState struct {
 // its in-bounds tiles; a field or a roofless forest has few/no ceilings
 // and reads as outdoor. Scans the ceiling layer, so a per-frame caller
 // should memoize per area (render's enclosureCache does).
-func AreaIsOutdoor(m AreaDefinition) bool {
+func AreaIsOutdoor(m *AreaDefinition) bool {
 	covered, total := 0, 0
 	for z := 0; z < m.Height; z++ {
 		for x := 0; x < m.Width; x++ {
@@ -153,7 +153,7 @@ var outdoorVerdictCache struct {
 // editor maps of the same size). Comparing two short rows is far cheaper than
 // the full AreaIsOutdoor ceiling scan it gates. Shared by this package's
 // outdoorVerdictCache AND render's enclosure/torch caches so they can't drift.
-func CeilingFingerprint(m AreaDefinition) (rows int, top, bot string) {
+func CeilingFingerprint(m *AreaDefinition) (rows int, top, bot string) {
 	rows = len(m.Ceiling)
 	if rows > 0 {
 		top, bot = m.Ceiling[0], m.Ceiling[rows-1]
@@ -161,7 +161,7 @@ func CeilingFingerprint(m AreaDefinition) (rows int, top, bot string) {
 	return rows, top, bot
 }
 
-func areaIsOutdoorCached(m AreaDefinition) bool {
+func areaIsOutdoorCached(m *AreaDefinition) bool {
 	c := &outdoorVerdictCache
 	rows, top, bot := CeilingFingerprint(m)
 	if c.primed && c.name == m.Name && c.width == m.Width && c.height == m.Height &&
@@ -176,7 +176,7 @@ func areaIsOutdoorCached(m AreaDefinition) bool {
 
 func TickWeatherStep(g *GameState) {
 	w := &g.Weather
-	if !areaIsOutdoorCached(g.Area) {
+	if !areaIsOutdoorCached(&g.Area) {
 		// Roofed / underground: no rain here. A storm in progress drops
 		// to Clearing so the tint eases off via the per-frame follow.
 		if w.Phase == WeatherBuilding || w.Phase == WeatherRaining {

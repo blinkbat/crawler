@@ -439,6 +439,68 @@ func behindCullXZ(camPos, forward rl.Vector3, px, pz float32) bool {
 	return dx*forward.X+dz*forward.Z < behindCullSlack
 }
 
+// viewCull is the per-frame horizontal view-frustum test — camera position,
+// horizontal basis, and the side-plane half-tangent hoisted out of the per-item
+// loops. A point is culled when it sits behind the camera (the original
+// back-plane rule, behindCullSlack) OR outside the horizontal FOV wedge; both
+// are off-screen, so dropping them costs nothing visible. It extends behindCull
+// (which only checks the back plane) with the two side planes — on a wide map
+// the old test kept every tile abreast of and beside the camera even when it
+// projected far off the screen edge. Built once per draw via newViewCull; the
+// world tile loop and the chest/door/crystal draws share it so they cull
+// consistently.
+type viewCull struct {
+	pos     rl.Vector3
+	fwd     rl.Vector3
+	right   rl.Vector3
+	tanHalf float32
+}
+
+const (
+	// viewCullApexBack pushes the cone apex this far behind the camera, so near
+	// and just-off-to-the-side tiles (small forward component) stay well inside
+	// the wedge — the near-field half-width at the camera plane is
+	// viewCullApexBack*tanHalf. Kept >= |behindCullSlack| so the side test never
+	// fires inside the band the back-plane test deliberately keeps.
+	viewCullApexBack = float32(3.0)
+	// viewCullSlack widens the horizontal half-tangent so the cull boundary sits
+	// comfortably outside the true screen edge — margin for a tile whose center
+	// is just past the edge but whose 1-unit slab / overhanging prop is still
+	// partly visible. Conservative on purpose: a 30% wider cone never drops
+	// anything on screen.
+	viewCullSlack = float32(1.3)
+)
+
+func newViewCull(camera rl.Camera3D) viewCull {
+	fwd := horizontalForward(camera)
+	// camera.Fovy is the VERTICAL fov in degrees; the horizontal half-angle
+	// scales its tangent by the screen aspect (tan(Fovy/2)·aspect), then widens
+	// by viewCullSlack. Fovy*Pi/360 == (Fovy/2)·deg2rad.
+	sw, sh := screenSizeF()
+	aspect := float32(1)
+	if sh > 0 {
+		aspect = sw / sh
+	}
+	tanHalf := float32(math.Tan(float64(camera.Fovy)*math.Pi/360)) * aspect * viewCullSlack
+	return viewCull{pos: camera.Position, fwd: fwd, right: horizontalRight(fwd), tanHalf: tanHalf}
+}
+
+// cullXZ reports whether the world point (px,pz) is outside the view — behind
+// the camera or beyond the horizontal wedge — and can be skipped.
+func (v viewCull) cullXZ(px, pz float32) bool {
+	dx := px - v.pos.X
+	dz := pz - v.pos.Z
+	f := dx*v.fwd.X + dz*v.fwd.Z
+	if f < behindCullSlack {
+		return true // behind the camera
+	}
+	r := dx*v.right.X + dz*v.right.Z
+	halfWidth := (f + viewCullApexBack) * v.tanHalf
+	return r > halfWidth || r < -halfWidth
+}
+
+func (v viewCull) cull(p rl.Vector3) bool { return v.cullXZ(p.X, p.Z) }
+
 // DrawWorld draws the full lit environment pass — see drawWorld.
 func DrawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	drawWorld(camera, g, assets, false)
@@ -469,7 +531,7 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 	var profile lightingProfile
 	var torches []torchLight
 	if !depthOnly {
-		profile = applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(g.StepCount), areaIsEnclosed(m))
+		profile = applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(g.StepCount), areaIsEnclosed(&m))
 		cacheLightingProfile(profile)
 		assets.lighting.applyUniforms(camera, profile)
 		// Torch point lights — collect the brazier props nearest the
@@ -477,12 +539,12 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 		// walls / floors / props pick up the warm pools of light. Must
 		// run after applyUniforms (same shader) and before the tile
 		// loop's BeginShaderMode draws.
-		torches = collectTorches(m, camera)
+		torches = collectTorches(&m, camera)
 		assets.lighting.uploadTorches(torches)
 	}
 
 	camPos := camera.Position
-	forward := horizontalForward(camera)
+	vc := newViewCull(camera)
 
 	// Diagnostics: only collect counters when the render log is on,
 	// so the hot path stays a plain increment-free loop the rest of
@@ -512,7 +574,7 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 			}
 			cx := core.TileCenter(x)
 			cz := core.TileCenter(z)
-			if behindCullXZ(camPos, forward, cx, cz) {
+			if vc.cullXZ(cx, cz) {
 				if logActive {
 					stats.TilesCulled++
 				}
@@ -677,8 +739,53 @@ type tileElev struct {
 // elevGridBuf is reused across frames + passes to avoid an allocation per draw.
 var elevGridBuf []tileElev
 
-// elevGrid decodes every tile's level/ramp/skin into the reused flat buffer.
+// elevGridKey fingerprints the area elevGridBuf was last decoded for, so the
+// full Width×Height decode runs once per area entry instead of every frame (and
+// every depthOnly re-pass within a frame) — the same once-per-area idea as
+// torchSiteCache / enclosureCache. The grid derives from Floor (ramps),
+// Elevation (levels) and Walls (face skins); the key is a CONTENT HASH of all
+// three layers plus name+dims, so it rebuilds whenever any of them actually
+// changes and can never serve a stale grid. (The sibling caches sample only
+// boundary rows because they gate an invisible verdict; a stale elevation grid
+// would mis-render every wall/floor height, so it's worth hashing in full.)
+// Hashing is a plain allocation-free byte fold with no per-tile method calls or
+// struct copies, so validation stays far cheaper than the decode it guards —
+// and in-game these layers are static, so the decode runs once per area entry.
+var elevGridKey struct {
+	primed        bool
+	name          string
+	width, height int
+	hash          uint64
+}
+
+// layersHash folds the bytes of the given layers into one FNV-1a digest — the
+// content fingerprint elevGridKey validates against. Allocation-free; row and
+// layer separators keep ragged splits ([{"ab"},{"c"}] vs [{"a"},{"bc"}]) from
+// colliding.
+func layersHash(layers ...[]string) uint64 {
+	const prime = 1099511628211
+	h := uint64(1469598103934665603)
+	for _, layer := range layers {
+		for _, row := range layer {
+			for i := 0; i < len(row); i++ {
+				h = (h ^ uint64(row[i])) * prime
+			}
+			h = (h ^ 0xff) * prime // row separator
+		}
+		h = (h ^ 0xfe) * prime // layer separator
+	}
+	return h
+}
+
+// elevGrid decodes every tile's level/ramp/skin into the reused flat buffer,
+// rebuilding only when the Floor/Elevation/Walls content (or dims/name) change.
 func elevGrid(m *core.AreaDefinition, w, h int) []tileElev {
+	hash := layersHash(m.Floor, m.Elevation, m.Walls)
+	k := &elevGridKey
+	if k.primed && k.name == m.Name && k.width == w && k.height == h &&
+		k.hash == hash && cap(elevGridBuf) >= w*h {
+		return elevGridBuf[:w*h]
+	}
 	n := w * h
 	if cap(elevGridBuf) < n {
 		elevGridBuf = make([]tileElev, n)
@@ -697,6 +804,7 @@ func elevGrid(m *core.AreaDefinition, w, h int) []tileElev {
 			}
 		}
 	}
+	k.name, k.width, k.height, k.hash, k.primed = m.Name, w, h, hash, true
 	return elevGridBuf
 }
 
@@ -1100,13 +1208,13 @@ type areaKey struct {
 	primed        bool
 }
 
-func (k *areaKey) matches(m core.AreaDefinition) bool {
+func (k *areaKey) matches(m *core.AreaDefinition) bool {
 	rows, top, bot := core.CeilingFingerprint(m)
 	return k.primed && k.name == m.Name && k.width == m.Width && k.height == m.Height &&
 		k.rows == rows && k.top == top && k.bot == bot
 }
 
-func (k *areaKey) set(m core.AreaDefinition) {
+func (k *areaKey) set(m *core.AreaDefinition) {
 	k.rows, k.top, k.bot = core.CeilingFingerprint(m)
 	k.name, k.width, k.height, k.primed = m.Name, m.Width, m.Height, true
 }
@@ -1124,7 +1232,7 @@ var enclosureCache struct {
 // core.AreaIsOutdoor so the lighting gate and the rain gate share one
 // definition of "has a roof"; this just memoizes its result per area so
 // the scan runs once per area entry rather than once per frame.
-func areaIsEnclosed(m core.AreaDefinition) bool {
+func areaIsEnclosed(m *core.AreaDefinition) bool {
 	if enclosureCache.matches(m) {
 		return enclosureCache.enclosed
 	}
@@ -1211,7 +1319,7 @@ var torchSiteCache struct {
 	sites []torchSite
 }
 
-func rebuildTorchSites(m core.AreaDefinition) {
+func rebuildTorchSites(m *core.AreaDefinition) {
 	torchSiteCache.sites = torchSiteCache.sites[:0]
 	for z := 0; z < m.Height; z++ {
 		for x := 0; x < m.Width; x++ {
@@ -1237,7 +1345,7 @@ func rebuildTorchSites(m core.AreaDefinition) {
 			} else {
 				// Wall torch: light originates at the sconce, offset
 				// toward the wall + up at flame height.
-				fx, fz := wallTorchFacing(m, x, z)
+				fx, fz := wallTorchFacing(*m, x, z)
 				pos = rl.NewVector3(cx-fx*wallTorchLightInset, elevY+wallTorchLightY, cz-fz*wallTorchLightInset)
 			}
 			torchSiteCache.sites = append(torchSiteCache.sites, torchSite{
@@ -1248,7 +1356,7 @@ func rebuildTorchSites(m core.AreaDefinition) {
 	torchSiteCache.set(m)
 }
 
-func collectTorches(m core.AreaDefinition, camera rl.Camera3D) []torchLight {
+func collectTorches(m *core.AreaDefinition, camera rl.Camera3D) []torchLight {
 	if !torchSiteCache.matches(m) {
 		rebuildTorchSites(m)
 	}

@@ -263,8 +263,14 @@ const retroMenuPanelW = int32(560)
 // fleurons, differing ONLY by the title's top inset (+24 vs +18) — now the
 // `topInset` parameter. Returns the Y just below the title (titleY +
 // measured height) so the shop header can place its subtitle row.
+// cardTitleMeasureCache memoizes the (constant) card-title widths so the
+// centring measure isn't a per-frame cgo round-trip for every open titled
+// modal (pause/debug menu, shop header). Titles are fixed strings, so this is
+// a near-permanent cache — mirrors the engraved-text / panel-heading caches.
+var cardTitleMeasureCache measureCache
+
 func drawCardTitle(font rl.Font, title string, panelX, panelY, panelW int32, topInset float32) (belowTitleY float32) {
-	tm := rl.MeasureTextEx(font, title, FontTitle, FontSpacingTitle)
+	tm := cardTitleMeasureCache.measure(font, title, FontTitle, FontSpacingTitle)
 	titleX := float32(panelX) + float32(panelW)/2 - tm.X/2
 	titleY := float32(panelY) + topInset
 	// Engraved title-tier lettering. Centering above stays exact:

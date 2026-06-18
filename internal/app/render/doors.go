@@ -19,10 +19,10 @@ import (
 // "locked" state can add a closed-panel variant or recolor the brass
 // keystone.
 func DrawDoors(camera rl.Camera3D, g *core.GameState, assets Resources) {
-	forward := horizontalForward(camera)
+	vc := newViewCull(camera)
 	for _, d := range g.Doors {
 		center := tileWorldPos(d.TileX, d.TileZ, g.Area.StandGroundY(d.TileX, d.TileZ))
-		if behindCull(camera.Position, forward, center) {
+		if vc.cull(center) {
 			continue
 		}
 		yaw := doorYawDeg(d.Facing)

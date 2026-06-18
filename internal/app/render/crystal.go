@@ -39,11 +39,11 @@ func DrawCrystals(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if len(g.Crystals) == 0 {
 		return
 	}
-	forward := horizontalForward(camera)
+	vc := newViewCull(camera)
 	t := rl.GetTime()
 	for _, c := range g.Crystals {
 		base := tileWorldPos(c.TileX, c.TileZ, g.Area.StandGroundY(c.TileX, c.TileZ))
-		if behindCull(camera.Position, forward, base) {
+		if vc.cull(base) {
 			continue
 		}
 		// Float the gem above the floor with a slow vertical bob.
