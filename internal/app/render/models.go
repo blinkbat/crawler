@@ -9,6 +9,17 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+// textureAndShade is the uniform skin-and-shade loop most prop/decor loaders
+// share: apply the one diffuse texture to every model and bind the lighting
+// shader to each. Loaders that skin meshes individually (per-index bark/leaf,
+// or only a subset textured) keep their own loop and call attachShader directly.
+func textureAndShade(models []rl.Model, shader rl.Shader, tex rl.Texture2D) {
+	for i := range models {
+		setModelTexture(&models[i], tex)
+		attachShader(&models[i], shader)
+	}
+}
+
 // treeModel bundles the procedurally-generated meshes that make up a single
 // blocking tree. Unique meshes live in `models`; `parts` reference them by
 // index so a single mesh can be reused at multiple positions/tints without
@@ -846,17 +857,24 @@ func loadRockFormationProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 // renderer offsets by +0.5 tile east of the anchor). A keystone block
 // spans the top, completing the arch shape. Marble palette to match the
 // existing pillar/statue stonework.
+// Archway mesh indices into loadArchwayDecor's models slice. Named so the
+// parts list re-skins the right mesh if the slice is ever reordered — matching
+// the rockMesh*/treeMesh* convention the sibling loaders use.
+const (
+	archMeshShaft    = iota // pillar shaft
+	archMeshCapital         // pillar capital
+	archMeshKeystone        // arch keystone slab
+	archMeshPlinth          // base plinth
+)
+
 func loadArchwayDecor(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 	models := []rl.Model{
-		rl.LoadModelFromMesh(rl.GenMeshCube(0.42, 2.10, 0.42)), // pillar shaft
-		rl.LoadModelFromMesh(rl.GenMeshCube(0.58, 0.20, 0.58)), // pillar capital
-		rl.LoadModelFromMesh(rl.GenMeshCube(2.20, 0.38, 0.46)), // arch keystone slab
-		rl.LoadModelFromMesh(rl.GenMeshCube(0.48, 0.18, 0.48)), // base plinth
+		archMeshShaft:    rl.LoadModelFromMesh(rl.GenMeshCube(0.42, 2.10, 0.42)),
+		archMeshCapital:  rl.LoadModelFromMesh(rl.GenMeshCube(0.58, 0.20, 0.58)),
+		archMeshKeystone: rl.LoadModelFromMesh(rl.GenMeshCube(2.20, 0.38, 0.46)),
+		archMeshPlinth:   rl.LoadModelFromMesh(rl.GenMeshCube(0.48, 0.18, 0.48)),
 	}
-	for i := range models {
-		setModelTexture(&models[i], marbleTex)
-		attachShader(&models[i], shader)
-	}
+	textureAndShade(models, shader, marbleTex)
 	stone := rl.NewColor(220, 214, 198, 255)
 	stoneCool := rl.NewColor(204, 196, 174, 255)
 	stoneDark := rl.NewColor(178, 170, 152, 255)
@@ -864,15 +882,15 @@ func loadArchwayDecor(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 		models: models,
 		parts: []treePart{
 			// Left pillar: plinth, shaft, capital — stacked at -1 tile X.
-			{modelIdx: 3, offset: rl.NewVector3(-1.00, 0.09, 0), scale: rl.NewVector3(1, 1, 1), tint: stoneDark},
-			{modelIdx: 0, offset: rl.NewVector3(-1.00, 1.20, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
-			{modelIdx: 1, offset: rl.NewVector3(-1.00, 2.35, 0), scale: rl.NewVector3(1, 1, 1), tint: stoneCool},
+			{modelIdx: archMeshPlinth, offset: rl.NewVector3(-1.00, 0.09, 0), scale: rl.NewVector3(1, 1, 1), tint: stoneDark},
+			{modelIdx: archMeshShaft, offset: rl.NewVector3(-1.00, 1.20, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
+			{modelIdx: archMeshCapital, offset: rl.NewVector3(-1.00, 2.35, 0), scale: rl.NewVector3(1, 1, 1), tint: stoneCool},
 			// Right pillar: mirror at +1 tile X.
-			{modelIdx: 3, offset: rl.NewVector3(1.00, 0.09, 0), scale: rl.NewVector3(1, 1, 1), tint: stoneDark},
-			{modelIdx: 0, offset: rl.NewVector3(1.00, 1.20, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
-			{modelIdx: 1, offset: rl.NewVector3(1.00, 2.35, 0), scale: rl.NewVector3(1, 1, 1), tint: stoneCool},
+			{modelIdx: archMeshPlinth, offset: rl.NewVector3(1.00, 0.09, 0), scale: rl.NewVector3(1, 1, 1), tint: stoneDark},
+			{modelIdx: archMeshShaft, offset: rl.NewVector3(1.00, 1.20, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
+			{modelIdx: archMeshCapital, offset: rl.NewVector3(1.00, 2.35, 0), scale: rl.NewVector3(1, 1, 1), tint: stoneCool},
 			// Keystone slab spanning both pillars at the top.
-			{modelIdx: 2, offset: rl.NewVector3(0, 2.65, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
+			{modelIdx: archMeshKeystone, offset: rl.NewVector3(0, 2.65, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
 		},
 	}
 }
@@ -1117,10 +1135,7 @@ func loadCrateProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 		rl.LoadModelFromMesh(rl.GenMeshCube(0.92, 0.08, 0.92)),
 		rl.LoadModelFromMesh(rl.GenMeshCube(0.08, 0.86, 0.08)),
 	}
-	for i := range models {
-		setModelTexture(&models[i], woodTex)
-		attachShader(&models[i], shader)
-	}
+	textureAndShade(models, shader, woodTex)
 	// Pastel crate wood — soft pecan matching the bark texture,
 	// with warm-brown banding (not near-black) so the crate reads
 	// gently even in the spooky dungeon lighting.
@@ -1157,10 +1172,7 @@ func loadBarrelProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.45, 0.07, 20)),
 		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.44, 0.06, 18)),
 	}
-	for i := range models {
-		setModelTexture(&models[i], woodTex)
-		attachShader(&models[i], shader)
-	}
+	textureAndShade(models, shader, woodTex)
 	wood := rl.NewColor(192, 150, 104, 255)
 	hoop := rl.NewColor(110, 80, 52, 255)
 	return propModel{
@@ -1189,10 +1201,7 @@ func loadUrnProp(shader rl.Shader, terracottaTex rl.Texture2D) propModel {
 		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.23, 0.05, 18)), // rim flare
 		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.20, 0.06, 14)), // foot
 	}
-	for i := range models {
-		setModelTexture(&models[i], terracottaTex)
-		attachShader(&models[i], shader)
-	}
+	textureAndShade(models, shader, terracottaTex)
 	clay := rl.NewColor(196, 122, 80, 255)
 	clayDeep := rl.NewColor(140, 78, 52, 255)
 	rim := rl.NewColor(112, 60, 36, 255)
@@ -1222,10 +1231,7 @@ func loadStalagmiteProp(shader rl.Shader, stoneTex rl.Texture2D) propModel {
 		rl.LoadModelFromMesh(rl.GenMeshSphere(0.20, 5, 6)),
 		rl.LoadModelFromMesh(rl.GenMeshSphere(0.10, 5, 6)),
 	}
-	for i := range models {
-		setModelTexture(&models[i], stoneTex)
-		attachShader(&models[i], shader)
-	}
+	textureAndShade(models, shader, stoneTex)
 	baseTint := rl.NewColor(206, 200, 188, 255)
 	midTint := rl.NewColor(216, 210, 196, 255)
 	highTint := rl.NewColor(228, 222, 208, 255)
@@ -1253,10 +1259,7 @@ func loadPillarProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 		rl.LoadModelFromMesh(rl.GenMeshCube(0.62, 0.16, 0.62)),   // echinus
 		rl.LoadModelFromMesh(rl.GenMeshCube(0.74, 0.08, 0.74)),   // abacus
 	}
-	for i := range models {
-		setModelTexture(&models[i], marbleTex)
-		attachShader(&models[i], shader)
-	}
+	textureAndShade(models, shader, marbleTex)
 	baseTint := rl.NewColor(206, 200, 184, 255)
 	shaftTint := rl.NewColor(220, 214, 198, 255)
 	capTint := rl.NewColor(228, 222, 206, 255)
@@ -1282,10 +1285,7 @@ func loadBrokenPillarProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.26, 0.90, 18)),
 		rl.LoadModelFromMesh(rl.GenMeshCube(0.40, 0.18, 0.34)),
 	}
-	for i := range models {
-		setModelTexture(&models[i], marbleTex)
-		attachShader(&models[i], shader)
-	}
+	textureAndShade(models, shader, marbleTex)
 	baseTint := rl.NewColor(196, 188, 170, 255)
 	shaftTint := rl.NewColor(214, 206, 188, 255)
 	rubbleTint := rl.NewColor(168, 160, 144, 255)
@@ -1316,10 +1316,7 @@ func loadStatueProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 		rl.LoadModelFromMesh(rl.GenMeshCube(0.66, 0.14, 0.34)),   // shoulders
 		rl.LoadModelFromMesh(rl.GenMeshSphere(0.18, 10, 12)),     // head
 	}
-	for i := range models {
-		setModelTexture(&models[i], marbleTex)
-		attachShader(&models[i], shader)
-	}
+	textureAndShade(models, shader, marbleTex)
 	pedTint := rl.NewColor(192, 184, 168, 255)
 	bodyTint := rl.NewColor(220, 214, 198, 255)
 	headTint := rl.NewColor(228, 222, 206, 255)
@@ -1348,10 +1345,7 @@ func loadObeliskProp(shader rl.Shader, graniteTex rl.Texture2D) propModel {
 		rl.LoadModelFromMesh(rl.GenMeshSphere(0.40, 4, 6)),     // pyramid cap (low-slice)
 		rl.LoadModelFromMesh(rl.GenMeshSphere(0.08, 6, 6)),     // apex
 	}
-	for i := range models {
-		setModelTexture(&models[i], graniteTex)
-		attachShader(&models[i], shader)
-	}
+	textureAndShade(models, shader, graniteTex)
 	baseTint := rl.NewColor(70, 74, 86, 255)
 	shaftTint := rl.NewColor(92, 96, 110, 255)
 	capTint := rl.NewColor(126, 130, 146, 255)
@@ -2016,10 +2010,7 @@ func loadLeafPileProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
 	base := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.48, 0.10, 16))
 	mound := rl.LoadModelFromMesh(rl.GenMeshSphere(0.22, 10, 12))
 	models := []rl.Model{base, mound}
-	for i := range models {
-		setModelTexture(&models[i], leafTex)
-		attachShader(&models[i], shader)
-	}
+	textureAndShade(models, shader, leafTex)
 	leafA := rl.NewColor(196, 142, 80, 255)
 	leafB := rl.NewColor(168, 110, 64, 255)
 	leafC := rl.NewColor(220, 178, 96, 255)
@@ -2085,10 +2076,7 @@ func loadGravestoneProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 	cap := rl.LoadModelFromMesh(rl.GenMeshSphere(0.26, 8, 10))
 	mound := rl.LoadModelFromMesh(rl.GenMeshSphere(0.36, 8, 10))
 	models := []rl.Model{slab, cap, mound}
-	for i := range models {
-		setModelTexture(&models[i], rockTex)
-		attachShader(&models[i], shader)
-	}
+	textureAndShade(models, shader, rockTex)
 	stone := rl.NewColor(168, 162, 152, 255)
 	stoneDark := rl.NewColor(112, 108, 100, 255)
 	earth := rl.NewColor(86, 64, 48, 255)
@@ -2109,10 +2097,7 @@ func loadSignPostProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	post := rl.LoadModelFromMesh(rl.GenMeshCube(0.08, 1.10, 0.08))
 	board := rl.LoadModelFromMesh(rl.GenMeshCube(0.66, 0.34, 0.06))
 	models := []rl.Model{post, board}
-	for i := range models {
-		setModelTexture(&models[i], woodTex)
-		attachShader(&models[i], shader)
-	}
+	textureAndShade(models, shader, woodTex)
 	wood := rl.NewColor(150, 102, 60, 255)
 	woodDark := rl.NewColor(96, 64, 40, 255)
 	return propModel{
@@ -2197,10 +2182,7 @@ func loadBookshelfProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	shelf := rl.LoadModelFromMesh(rl.GenMeshCube(0.82, 0.04, 0.34))
 	books := rl.LoadModelFromMesh(rl.GenMeshCube(0.66, 0.32, 0.20))
 	models := []rl.Model{frame, shelf, books}
-	for i := range models {
-		setModelTexture(&models[i], woodTex)
-		attachShader(&models[i], shader)
-	}
+	textureAndShade(models, shader, woodTex)
 	wood := rl.NewColor(112, 78, 48, 255)
 	woodDark := rl.NewColor(72, 52, 32, 255)
 	bookRed := rl.NewColor(160, 64, 60, 255)
@@ -2228,10 +2210,7 @@ func loadTableProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	top := rl.LoadModelFromMesh(rl.GenMeshCube(0.90, 0.10, 0.60))
 	leg := rl.LoadModelFromMesh(rl.GenMeshCube(0.10, 0.60, 0.10))
 	models := []rl.Model{top, leg}
-	for i := range models {
-		setModelTexture(&models[i], woodTex)
-		attachShader(&models[i], shader)
-	}
+	textureAndShade(models, shader, woodTex)
 	wood := rl.NewColor(160, 116, 72, 255)
 	woodDark := rl.NewColor(110, 78, 50, 255)
 	return propModel{
@@ -2320,10 +2299,7 @@ func loadSarcophagusProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 	lid := rl.LoadModelFromMesh(rl.GenMeshCube(0.96, 0.10, 0.54))
 	carving := rl.LoadModelFromMesh(rl.GenMeshCube(0.30, 0.36, 0.04))
 	models := []rl.Model{base, lid, carving}
-	for i := range models {
-		setModelTexture(&models[i], rockTex)
-		attachShader(&models[i], shader)
-	}
+	textureAndShade(models, shader, rockTex)
 	stone := rl.NewColor(200, 192, 174, 255)
 	stoneDark := rl.NewColor(140, 132, 116, 255)
 	carved := rl.NewColor(108, 96, 84, 255)
@@ -2466,10 +2442,7 @@ func loadRootClusterProp(shader rl.Shader, barkTex rl.Texture2D) propModel {
 	arch := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.04, 0.30, 8))
 	knob := rl.LoadModelFromMesh(rl.GenMeshSphere(0.05, 6, 8))
 	models := []rl.Model{arch, knob}
-	for i := range models {
-		setModelTexture(&models[i], barkTex)
-		attachShader(&models[i], shader)
-	}
+	textureAndShade(models, shader, barkTex)
 	rootCol := rl.NewColor(92, 68, 44, 255)
 	rootDark := rl.NewColor(60, 44, 30, 255)
 	return propModel{

@@ -334,8 +334,15 @@ func drawDpadGlyph(g InputGlyph, x, cy, gh, alpha float32) float32 {
 	return gh
 }
 
+// glyphLetterMeasureCache memoizes the face-button letter widths ("A"/"B"/
+// "LB"/"RB"/…). drawGlyphLetter centers each letter per glyph per hint-bar
+// draw — the battle action footer draws every battle frame, in-world prompts
+// every explore frame near a chest/door — so the raw MeasureTextEx was a cgo
+// round-trip per glyph per frame. The letter set is tiny and constant.
+var glyphLetterMeasureCache measureCache
+
 // drawGlyphLetter centers a glyph's letter/label on (cx, cy).
 func drawGlyphLetter(font rl.Font, s string, cx, cy, size float32, col color.RGBA) {
-	m := rl.MeasureTextEx(font, s, size, canonicalSpacing(size))
+	m := glyphLetterMeasureCache.measure(font, s, size, canonicalSpacing(size))
 	drawTextWithShadow(font, s, cx-m.X/2, cy-m.Y/2, size, col)
 }

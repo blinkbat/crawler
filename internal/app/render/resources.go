@@ -68,6 +68,11 @@ type Resources struct {
 	// regardless of the area's material set. Built once on load and shared
 	// across materials.
 	specialFloors map[byte]rl.Model
+	// specialFloorTable is the char-indexed mirror of specialFloors, probed
+	// once per floor tile per frame (twice with the depth prepass) — an array
+	// index beats the map hash on that hot path. Built once after the map is
+	// populated; the map stays authoritative for Unload.
+	specialFloorTable *modelTable256
 
 	// Face variants — keyed by their face-layer skin char (ivy / cracked /
 	// crumbling). Each is a vertical cliff-face quad with its own rock-based
@@ -75,6 +80,10 @@ type Resources struct {
 	// TileRock is NOT here — it uses the material face so a dungeon vs field
 	// cliff still differs. Built once, shared across materials; Unload walks it.
 	faceVariants map[byte]rl.Model
+	// faceVariantTable is the char-indexed mirror of faceVariants, read when a
+	// cliff face is drawn — array index instead of a map hash. Built once after
+	// the map is populated; the map stays authoritative for Unload.
+	faceVariantTable *modelTable256
 
 	// rampModel is the solid wedge (triangular prism) drawn for ramp floor
 	// tiles — built once, earth-textured, drawn yaw-rotated per ascent
@@ -429,6 +438,8 @@ func LoadResources() (r Resources) {
 	// Unload + assertion paths.
 	r.decorModelTable = flattenModelTable(r.decorModels)
 	r.propModelTable = flattenModelTable(r.propModels)
+	r.specialFloorTable = flattenRLModelTable(r.specialFloors)
+	r.faceVariantTable = flattenRLModelTable(r.faceVariants)
 
 	LogRenderInit("resources loaded: propModels=%d decorModels=%d doorProps=%d inlineProps=%d inlineDecor=%d",
 		len(r.propModels), len(r.decorModels), len(r.doorProps), len(inlinePropHandlers), len(inlineDecorHandlers))
@@ -456,6 +467,28 @@ func flattenModelTable(src map[byte]propModel) *[256]propModel {
 	t := new([256]propModel)
 	for c, pm := range src {
 		t[c] = pm
+	}
+	return t
+}
+
+// modelTable256 is a char-indexed [256]rl.Model mirror of a byte-keyed model
+// map, with a parallel presence bitmap (rl.Model has no cheap "absent"
+// sentinel). It lets the per-tile floor / cliff-face lookups be an array index
+// instead of a map hash — the same rationale as decorModelTable, applied to the
+// specialFloors and faceVariants maps that the world hot loop probes per tile.
+type modelTable256 struct {
+	model   [256]rl.Model
+	present [256]bool
+}
+
+// flattenRLModelTable builds a modelTable256 from a byte-keyed model map. Held
+// by pointer on Resources so passing Resources by value stays cheap. The source
+// map stays authoritative for Unload iteration; this mirror is read-only.
+func flattenRLModelTable(src map[byte]rl.Model) *modelTable256 {
+	t := new(modelTable256)
+	for c, m := range src {
+		t.model[c] = m
+		t.present[c] = true
 	}
 	return t
 }

@@ -2882,7 +2882,11 @@ func brushPreviewColor(s *State) rl.Color {
 		return floorColor(b.Char)
 	case LayerDecor:
 		if b.Char == core.DecorAuto {
-			return rl.NewColor(180, 168, 140, 255)
+			// Auto has no single render color (it picks decor by context), so
+			// mirror its palette swatch tint directly off the brush — keeps the
+			// drag preview locked to the swatch instead of a separate literal
+			// that silently drifts (see the function doc).
+			return b.Color
 		}
 		return decorColor(b.Char)
 	case LayerProps:

@@ -638,7 +638,7 @@ func drawFoeViewModal(s *State, font rl.Font, theme render.Theme) {
 	// Live 3D preview pane (the diorama is blitted from an off-screen texture).
 	// Gizmos show only on the Layout tab so the Asset tab reads as a clean sprite;
 	// on the Asset tab the non-destructive bake preview texture overrides the sprite.
-	render.DrawFoePreview(l.preview, frameAssets, s.foeKind, s.foeVisual, s.foeViewZoom, s.foeViewTab == foeTabLayout, assetPreviewTexFor(s))
+	render.DrawFoePreview(l.preview, frameAssets, s.foeKind, s.foeVisual, s.foeViewZoom, s.foeViewTab == foeTabLayout, assetPreviewTexFor())
 	rl.DrawRectangleLinesEx(l.preview, 1, theme.BorderDim)
 
 	// Foe picker header: < Name >.
@@ -646,10 +646,9 @@ func drawFoeViewModal(s *State, font rl.Font, theme render.Theme) {
 	drawButton(font, l.nextFoeBtn, ">", false)
 	name := core.EnemyInfo(s.foeKind).Name + dropdownArrowSuffix // ▼ = click the name to pick from all kinds
 	nameSize := render.MeasureRichText(font, name, editorFontTopbar, 1)
-	nameSpanX := l.prevFoeBtn.X + l.prevFoeBtn.Width
-	nameSpanW := l.nextFoeBtn.X - nameSpanX
+	span := nameSpanBetween(l.prevFoeBtn, l.nextFoeBtn)
 	render.DrawRichText(font, name,
-		rl.NewVector2(nameSpanX+(nameSpanW-nameSize.X)/2, l.prevFoeBtn.Y+5),
+		rl.NewVector2(span.X+(span.Width-nameSize.X)/2, l.prevFoeBtn.Y+5),
 		editorFontTopbar, 1, theme.TextPrimary)
 
 	drawFoeViewTabs(font, l, s.foeViewTab)
@@ -686,7 +685,7 @@ func drawFoeViewTabs(font rl.Font, l foeViewLayout, active int) {
 // non-destructive FX (pixelate/bright/contrast) are part of the sprite's look, so
 // the adjusted texture shows on BOTH tabs (zero texture = no adjustments active,
 // the pane falls back to the real sprite).
-func assetPreviewTexFor(s *State) rl.Texture2D {
+func assetPreviewTexFor() rl.Texture2D {
 	return render.AssetPreviewTexture()
 }
 

@@ -2057,13 +2057,25 @@ func drawClassRail(x, y, w, h int32, col color.RGBA) {
 	drawDiamondPip(cx, float32(y+h+1), 2.1, fadeColor(giltDim, 0.7*g))
 }
 
+// barValueLabelCache memoizes the "value/max" bar readout per (value, max)
+// pair. drawBar/drawBarLive call formatBarValue once per visible bar per frame
+// (HP + MP on every party card, plus enemy roster bars — up to ~8 persistent
+// bars), so without the cache every one of those allocated a fresh string each
+// frame. Bounded: keys only span (value, max) pairs actually seen in play.
+// Mirrors enemyHPLabelCache in battle.go.
+var barValueLabelCache = map[[2]int]string{}
+
 func formatBarValue(value, maxValue int) string {
-	// Direct strconv concat avoids the fmt formatter machinery on a
-	// path that runs once per visible bar per frame (HP + MP on every
-	// party card, plus enemy roster bars). "%d/%d" via fmt.Sprintf
-	// allocates ~3× the bytes of the result; this routes to the
-	// minimal strconv.Itoa + concat.
-	return strconv.Itoa(value) + "/" + strconv.Itoa(maxValue)
+	k := [2]int{value, maxValue}
+	if s, ok := barValueLabelCache[k]; ok {
+		return s
+	}
+	// Direct strconv concat avoids the fmt formatter machinery: "%d/%d" via
+	// fmt.Sprintf allocates ~3× the bytes of the result. Only runs on a cache
+	// miss now (first time a given value/max pair is shown).
+	s := strconv.Itoa(value) + "/" + strconv.Itoa(maxValue)
+	barValueLabelCache[k] = s
+	return s
 }
 
 // drawTriangleCCW wraps rl.DrawTriangle with an explicit "vertices are in

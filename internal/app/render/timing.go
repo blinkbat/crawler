@@ -1103,7 +1103,7 @@ func DrawQualityPopup(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if !ok {
 		return
 	}
-	worldPos.Y += 0.6
+	worldPos.Y += popupWorldRise
 	screenPos := rl.GetWorldToScreen(worldPos, camera)
 	sw, _ := screenSizeF()
 	if popupOffScreenX(screenPos.X, sw) {
@@ -1203,7 +1203,7 @@ func DrawDamagePopups(camera rl.Camera3D, g *core.GameState, assets Resources) {
 // between the two sides. col is the base tint (timing-grade ramp for outgoing
 // hits, fixed hurt tone for damage the party takes); alpha is applied here.
 func drawFloatingDamage(camera rl.Camera3D, assets Resources, worldPos rl.Vector3, value, quality int, timer float32, col rl.Color) {
-	worldPos.Y += 0.6
+	worldPos.Y += popupWorldRise
 	screenPos := rl.GetWorldToScreen(worldPos, camera)
 	sw, _ := screenSizeF()
 	if popupOffScreenX(screenPos.X, sw) {
@@ -1258,6 +1258,13 @@ var damagePopupLabelCache = func() [200]struct{ plain, excellent string } {
 	}
 	return out
 }()
+
+// popupWorldRise is the baked world-unit lift applied to a popup's anchor
+// before projection, so floating damage numbers and the quality popup spawn at
+// torso height rather than the billboard's feet. The Layout-tab "Num" gizmo
+// anchors (foepreview/partypreview) add the same lift so the authoring dot
+// sits exactly where the number floats — keep all four sites on this const.
+const popupWorldRise = float32(0.6)
 
 // popupAnimation returns the scale/rise/alpha for a popup whose remaining
 // life ratio is t (1.0 = just spawned, 0.0 = expired). Punches in with a

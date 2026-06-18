@@ -215,10 +215,11 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 		gAnchor := cameraRelativeOffset(cam, foeAnchor, v.glyphXOffset, v.glyphYOffset, 0)
 		gAnchor.Y += hitGlyphRise
 		drawAnchorGizmo(gAnchor, 0.13*v.effectiveGlyphScale(), gizmoGlyphColor)
-		// Gold gizmo = floating damage-NUMBER spawn (Num X/Y). +0.6 Y matches the
-		// baked rise drawFloatingDamage adds, so the dot sits where the number does.
+		// Gold gizmo = floating damage-NUMBER spawn (Num X/Y). popupWorldRise
+		// matches the baked rise drawFloatingDamage adds, so the dot sits where
+		// the number does.
 		nAnchor := cameraRelativeOffset(cam, foeAnchor, v.popupXOffset, v.popupYOffset, 0)
-		nAnchor.Y += 0.6
+		nAnchor.Y += popupWorldRise
 		drawAnchorGizmo(nAnchor, 0.10, gizmoNumberColor)
 	}
 

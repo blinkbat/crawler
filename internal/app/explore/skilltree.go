@@ -50,12 +50,11 @@ func updateSkillTreeModal(g *core.GameState) {
 	g.SkillTreeCol = input.CursorLeftRightWrap(g.SkillTreeCol, len(trees))
 	nodes := trees[g.SkillTreeCol].Nodes
 	// Clamp the row into the (possibly shorter) column after a sideways move.
-	// Floor at 0 so an empty column (guarded against at init, but cheap to
-	// defend here too) can't leave the cursor at -1.
-	if g.SkillTreeRow >= len(nodes) {
-		g.SkillTreeRow = len(nodes) - 1
-	}
-	if g.SkillTreeRow < 0 {
+	// Guard the empty column first (init prevents it, but cheap to defend) so
+	// core.Clamp's max bound can't go negative and leave the cursor at -1.
+	if len(nodes) > 0 {
+		g.SkillTreeRow = core.Clamp(g.SkillTreeRow, 0, len(nodes)-1)
+	} else {
 		g.SkillTreeRow = 0
 	}
 	g.SkillTreeRow = input.CursorUpDown(g.SkillTreeRow, len(nodes))

@@ -4,8 +4,8 @@
   "playerTileX": 13,
   "playerTileZ": 25,
   "playerFacing": 0,
-  "stepCount": 1954,
-  "gold": 124,
+  "stepCount": 2344,
+  "gold": 139,
   "party": [
     {
       "Class": 0,
@@ -33,7 +33,7 @@
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 1,
+      "DamagePopup": 3,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "Defending": false,
@@ -50,14 +50,14 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 3,
-      "XP": 2,
+      "XP": 42,
       "PendingLevelUps": 0,
-      "SkillPoints": 2,
+      "SkillPoints": 0,
       "SkillTiers": {
-        "1": 0
+        "1": 2
       },
       "TreeRanks": {
-        "cleave": 1
+        "cleave": 3
       },
       "SkillCursor": 0
     },
@@ -104,7 +104,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 2,
-      "XP": 140,
+      "XP": 180,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
@@ -158,16 +158,19 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 3,
-      "XP": 20,
+      "XP": 60,
       "PendingLevelUps": 0,
-      "SkillPoints": 2,
+      "SkillPoints": 0,
       "SkillTiers": {
-        "10": 0
+        "10": 0,
+        "3": 0
       },
       "TreeRanks": {
+        "mug": 1,
+        "steal": 1,
         "venom-strike": 1
       },
-      "SkillCursor": 0
+      "SkillCursor": 1
     },
     {
       "Class": 3,
@@ -212,14 +215,15 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 3,
-      "XP": 20,
+      "XP": 60,
       "PendingLevelUps": 0,
-      "SkillPoints": 2,
+      "SkillPoints": 0,
       "SkillTiers": {
         "12": 0
       },
       "TreeRanks": {
-        "arc-bolt": 1
+        "arc-bolt": 1,
+        "chain-lightning": 2
       },
       "SkillCursor": 0
     }
@@ -237,13 +241,13 @@
   "quests": null,
   "bestiary": {
     "0": {
-      "kills": 32
+      "kills": 36
     },
     "1": {
-      "kills": 8
+      "kills": 9
     },
     "2": {
-      "kills": 8
+      "kills": 9
     }
   },
   "crystals": [

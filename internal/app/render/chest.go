@@ -35,6 +35,17 @@ const (
 	chestLidHingeZOffset = float32(-0.25)
 )
 
+// Chest modal geometry — matches the named-const layout convention the sibling
+// modals use (dialogChoiceRowH, shopRowH, victory*). Kept here so the chest
+// card's row height / insets aren't bare literals scattered through the drawer.
+const (
+	chestRowH       = int32(34) // item / Take All row height
+	chestCardTopPad = int32(48) // card top edge → first row baseline budget
+	chestCardBotPad = int32(32) // last row → card bottom budget
+	chestRowInsetX  = int32(20) // row left/right inset from the card edge
+	chestRowInsetY  = int32(28) // first row top inset from the card top
+)
+
 // DrawChests renders every chest as a two-piece painted prop —
 // wooden body with brass corner straps + hoop bands + lockplate +
 // jewel, capped by a wooden lid with corner caps + a hoop band.
@@ -163,12 +174,12 @@ func DrawChestModal(g *core.GameState, assets Resources) {
 	stacks := core.LiveStacks(chest.Items)
 
 	font := assets.Font()
-	rowH := int32(34)
+	rowH := chestRowH
 	// Header dropped — the chest model still sits behind the veil and
 	// the player walked up to it to open this; titling the modal
 	// "TREASURE" was tautological. Card height now budgets for rows +
 	// Take All + footer only.
-	cardH := int32(48 + rowH*(int32(len(stacks))+1) + 32)
+	cardH := chestCardTopPad + rowH*(int32(len(stacks))+1) + chestCardBotPad
 	if cardH < modalMinCardH {
 		cardH = modalMinCardH
 	}
@@ -176,9 +187,9 @@ func DrawChestModal(g *core.GameState, assets Resources) {
 	cardX, cardY := int32(card.X), int32(card.Y)
 	cardW := int32(card.Width)
 
-	rowY := cardY + 28
-	rowX := cardX + 20
-	rowW := cardW - 40
+	rowY := cardY + chestRowInsetY
+	rowX := cardX + chestRowInsetX
+	rowW := cardW - 2*chestRowInsetX
 	if len(stacks) == 0 {
 		drawTextWithShadow(font, "(empty)", float32(rowX), float32(rowY), FontBody, textMuted)
 		rowY += rowH

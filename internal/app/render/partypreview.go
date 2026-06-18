@@ -103,10 +103,11 @@ func DrawPartyPreview(rect rl.Rectangle, assets Resources, class core.PartyClass
 		gAnchor := cameraRelativeOffset(cam, foeAnchor, v.glyphXOffset, v.glyphYOffset, 0)
 		gAnchor.Y += hitGlyphRise
 		drawAnchorGizmo(gAnchor, 0.13*v.effectiveGlyphScale(), gizmoGlyphColor)
-		// Gold gizmo = floating damage-NUMBER spawn (Num X/Y); +0.6 Y matches the
-		// baked rise in drawFloatingDamage so the dot sits where the number floats.
+		// Gold gizmo = floating damage-NUMBER spawn (Num X/Y); popupWorldRise
+		// matches the baked rise in drawFloatingDamage so the dot sits where the
+		// number floats.
 		nAnchor := cameraRelativeOffset(cam, foeAnchor, v.popupXOffset, v.popupYOffset, 0)
-		nAnchor.Y += 0.6
+		nAnchor.Y += popupWorldRise
 		drawAnchorGizmo(nAnchor, 0.10, gizmoNumberColor)
 	}
 

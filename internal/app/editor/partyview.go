@@ -237,7 +237,7 @@ func drawPartyViewModal(s *State, font rl.Font, theme render.Theme) {
 
 	// Live 3D preview pane (blitted from an off-screen texture). Gizmos show only
 	// on the Layout tab; on the Asset tab the non-destructive bake preview overrides.
-	render.DrawPartyPreview(l.preview, frameAssets, s.partyClass, s.partyVisual, s.foeViewZoom, s.foeViewTab == foeTabLayout, assetPreviewTexFor(s))
+	render.DrawPartyPreview(l.preview, frameAssets, s.partyClass, s.partyVisual, s.foeViewZoom, s.foeViewTab == foeTabLayout, assetPreviewTexFor())
 	rl.DrawRectangleLinesEx(l.preview, 1, theme.BorderDim)
 
 	// Class picker header: < Name >.
@@ -245,10 +245,9 @@ func drawPartyViewModal(s *State, font rl.Font, theme render.Theme) {
 	drawButton(font, l.nextFoeBtn, ">", false)
 	name := core.PartyClassName(s.partyClass)
 	nameSize := render.MeasureRichText(font, name, editorFontTopbar, 1)
-	nameSpanX := l.prevFoeBtn.X + l.prevFoeBtn.Width
-	nameSpanW := l.nextFoeBtn.X - nameSpanX
+	span := nameSpanBetween(l.prevFoeBtn, l.nextFoeBtn)
 	render.DrawRichText(font, name,
-		rl.NewVector2(nameSpanX+(nameSpanW-nameSize.X)/2, l.prevFoeBtn.Y+5),
+		rl.NewVector2(span.X+(span.Width-nameSize.X)/2, l.prevFoeBtn.Y+5),
 		editorFontTopbar, 1, theme.TextPrimary)
 
 	drawFoeViewTabs(font, l, s.foeViewTab)

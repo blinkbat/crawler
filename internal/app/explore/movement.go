@@ -439,9 +439,19 @@ func updateFreeLook(p *core.Player, dt float32) {
 func updatePlayer(g *core.GameState, dt float32) {
 	p := &g.Player
 
+	// Mid-animation: advance it. When it COMPLETES with time to spare and a
+	// movement key is still held, fall through to arm the next step and spend
+	// the leftover on it this same frame. Without that carry, held movement
+	// loses up to a frame of motion at every tile boundary (the finishing frame
+	// snaps to center, the next frame only re-arms) — a periodic hitch that
+	// reads as "not smooth." updateAnimation returns 0 while still running, or
+	// when landing opened an overlay that should halt continued walking.
 	if p.Anim.Kind != core.AnimNone {
-		updateAnimation(g, dt)
-		return
+		leftover := updateAnimation(g, dt)
+		if leftover <= 0 || p.Anim.Kind != core.AnimNone {
+			return
+		}
+		dt = leftover
 	}
 
 	// Held (level) reads, not edge: the player completes one step/turn per
@@ -461,6 +471,15 @@ func updatePlayer(g *core.GameState, dt float32) {
 		startStep(p, g, -1, 0)
 	case input.StrafeRightHeld():
 		startStep(p, g, 1, 0)
+	}
+
+	// Advance a freshly-armed step/turn by dt on the SAME frame it starts:
+	// the full frame dt for a fresh press, or the carried-over remainder when
+	// continuing held movement across a tile boundary — so motion flows instead
+	// of resting a frame at FromX. startStep may start a battle instead (no Anim
+	// armed) or the move may be blocked (no Anim); the guard skips both.
+	if p.Anim.Kind != core.AnimNone {
+		updateAnimation(g, dt)
 	}
 }
 
@@ -619,7 +638,13 @@ func facingForTile(p *core.Player, tileX, tileZ int) (int, bool) {
 	return p.Facing, false
 }
 
-func updateAnimation(g *core.GameState, dt float32) {
+// updateAnimation advances the active step/turn by dt. It returns the leftover
+// time (Elapsed - Duration) once the animation COMPLETES so the caller can
+// spend that remainder arming the next step in the same frame — the carry that
+// keeps held movement continuous across tile boundaries. Returns 0 while the
+// animation is still running, and 0 when landing opened an overlay (door
+// prompt / enter-tile dialog) that should halt continued walking.
+func updateAnimation(g *core.GameState, dt float32) float32 {
 	p := &g.Player
 	p.Anim.Elapsed += dt
 	t := p.Anim.Elapsed / p.Anim.Duration
@@ -640,8 +665,9 @@ func updateAnimation(g *core.GameState, dt float32) {
 	}
 
 	if p.Anim.Elapsed < p.Anim.Duration {
-		return
+		return 0
 	}
+	leftover := p.Anim.Elapsed - p.Anim.Duration
 	if p.Anim.Kind == core.AnimStep {
 		core.SnapPlayerToTile(p)
 		p.GroundY = p.Anim.ToY
@@ -664,6 +690,13 @@ func updateAnimation(g *core.GameState, dt float32) {
 			core.FireEnterTileTriggers(g, g.Player.TileX, g.Player.TileZ)
 		}
 	}
+	// If landing opened an overlay (door prompt or an enter-tile dialog), the
+	// player shouldn't keep walking into it — swallow the remainder so the
+	// caller doesn't arm another step this frame.
+	if core.ActiveModal(g) != core.ModalNone {
+		return 0
+	}
+	return leftover
 }
 
 // tryQueueDoorTransition checks whether the player just stepped onto a

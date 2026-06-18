@@ -427,8 +427,15 @@ const behindCullSlack = float32(-2.5)
 // the DrawWorld tile loop, the chest draw, and the door draw all call it so
 // they cull consistently with the floor under them.
 func behindCull(camPos, forward, p rl.Vector3) bool {
-	dx := p.X - camPos.X
-	dz := p.Z - camPos.Z
+	return behindCullXZ(camPos, forward, p.X, p.Z)
+}
+
+// behindCullXZ is behindCull taking the point's X/Z as scalars — the tile loop
+// calls it per tile, so this avoids building a throwaway rl.Vector3 (with a
+// dummy Y) just to pass two floats through the hottest loop in the renderer.
+func behindCullXZ(camPos, forward rl.Vector3, px, pz float32) bool {
+	dx := px - camPos.X
+	dz := pz - camPos.Z
 	return dx*forward.X+dz*forward.Z < behindCullSlack
 }
 
@@ -505,7 +512,7 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 			}
 			cx := core.TileCenter(x)
 			cz := core.TileCenter(z)
-			if behindCull(camPos, forward, rl.NewVector3(cx, 0, cz)) {
+			if behindCullXZ(camPos, forward, cx, cz) {
 				if logActive {
 					stats.TilesCulled++
 				}
@@ -630,8 +637,8 @@ func drawFloorTile(material worldMaterialResources, assets Resources, cell byte,
 		drawRampWedge(assets.rampModel, cx, cz, elevY, facing)
 		return
 	}
-	if special, ok := assets.specialFloors[cell]; ok {
-		drawTileCube(special, cx, -0.03+elevY, cz, yaw)
+	if t := assets.specialFloorTable; t.present[cell] {
+		drawTileCube(t.model[cell], cx, -0.03+elevY, cz, yaw)
 		return
 	}
 	if !material.hasFloorVariant {
@@ -738,8 +745,8 @@ func drawCliffFaces(camPos rl.Vector3, material worldMaterialResources, assets R
 		// / interior tiles pay no faceVariants map lookup.
 		if !skinResolved {
 			skin = material.faceModel
-			if vm, ok := assets.faceVariants[grid[z*w+x].skin]; ok {
-				skin = vm
+			if sc := grid[z*w+x].skin; assets.faceVariantTable.present[sc] {
+				skin = assets.faceVariantTable.model[sc]
 			}
 			skinResolved = true
 		}
@@ -1439,6 +1446,11 @@ func floorVariantHash(x, z int) int {
 	}
 }
 
+// scatterOffsetDivisor maps a signed int8 hash byte (-128..127) into a sub-tile
+// offset of roughly [-0.55, 0.55] world units. Shared by the floor-decoration
+// and pebble-cluster scatterers so both jitter props by the same spread.
+const scatterOffsetDivisor = float32(230)
+
 // drawFloorDecoration scatters small props (rocks, bushes, mushrooms) on
 // plain floor tiles using a deterministic per-tile hash. ~16% of plain floor
 // tiles get a decoration; small rocks are weighted heavier than the others
@@ -1456,8 +1468,8 @@ func drawFloorDecoration(assets Resources, x, z int, cx, cz, groundY float32) {
 	kind := int((h >> 8) & 7)
 	// Sub-tile offset in [-0.55, 0.55] so the prop doesn't always sit dead-
 	// center. int8 conversion gives signed -128..127, scaled to ~tile.
-	offX := float32(int8(h>>16)) / 230
-	offZ := float32(int8(h>>24)) / 230
+	offX := float32(int8(h>>16)) / scatterOffsetDivisor
+	offZ := float32(int8(h>>24)) / scatterOffsetDivisor
 	pos := rl.NewVector3(cx+offX, groundY, cz+offZ)
 
 	// Reuse the orientation hash so floor decorations also pick up a stable
@@ -1513,8 +1525,8 @@ func drawPebbleCluster(assets Resources, cx, cz, groundY float32, tileHash uint3
 
 		// Sub-tile offset in [-0.55, 0.55] — pebbles spread across the tile,
 		// not bunched at the center.
-		ox := float32(int8(ih)) / 230
-		oz := float32(int8(ih>>8)) / 230
+		ox := float32(int8(ih)) / scatterOffsetDivisor
+		oz := float32(int8(ih>>8)) / scatterOffsetDivisor
 
 		// Footprint and height vary independently. Heights are ~1/3 of
 		// footprint so the pebbles sit flat — see drawFloorDecoration's

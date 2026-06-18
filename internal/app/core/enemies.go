@@ -591,13 +591,20 @@ func EnemyKindCount() int {
 // that wants a different article ("An Amoeba" / a proper-named boss)
 // is one method, not a grep across battle.go and actions.go.
 //
-// Sentence-start "The <noun>" uses route through here. The few phrasings
-// that FUSE the article with other words — the plural "The <plural> drive
-// …" and "The last <noun> falls." (see BattleLossMessage /
-// LastBattleEnemyFallsMessage) — keep their own format strings, since a
-// per-enemy article override would need a plural/quantified form too.
+// Sentence-start "The <singular>" uses route through here; the plural
+// "The <plural> …" form routes through ThePlural. The one phrasing that
+// FUSES the article with another word — "The last <noun> falls." (see
+// LastBattleEnemyFallsMessage) — keeps its own format string, since the
+// article binds to "last" rather than the bare noun.
 func TheEnemy(def EnemyDefinition) string {
 	return "The " + def.SingularNoun
+}
+
+// ThePlural is TheEnemy's plural sibling: "The <plural>" for multi-enemy
+// phrasings. Kept alongside TheEnemy so a future per-enemy article override
+// ("Some Amoebae") changes both article forms in one place.
+func ThePlural(def EnemyDefinition) string {
+	return "The " + def.PluralNoun
 }
 
 // EnemyInfoOk is the validating sibling of EnemyInfo (mirrors ItemInfoOk):
@@ -819,5 +826,5 @@ func BattleLossMessage(g *GameState) string {
 	if count <= 1 {
 		return fmt.Sprintf("%s drives the party back. Press to recover.", TheEnemy(def))
 	}
-	return fmt.Sprintf("The %s drive the party back. Press to recover.", def.PluralNoun)
+	return fmt.Sprintf("%s drive the party back. Press to recover.", ThePlural(def))
 }

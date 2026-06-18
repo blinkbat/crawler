@@ -35,31 +35,18 @@ func Start(g *core.GameState, packIndex, fleeReturnX, fleeReturnZ int) {
 	g.Battle.FleeReturnZ = fleeReturnZ
 	g.Battle.EnemyIndex = core.NextLivingBattleEnemy(g)
 	g.Battle.PartyTarget = core.FirstLivingPartyMember(g.Party)
-	g.Battle.EnemyAttackCursor = -1
 	g.Battle.Splash = core.BattleSplashDuration
 	// The ActionLog is a continuous in-and-out-of-combat buffer on GameState
 	// (LogMessage caps it), so a fight no longer resets it — entering combat
 	// just keeps appending to whatever exploration already logged.
-	g.Battle.ClearTiming()
-	g.Battle.TimingIntro = 0
-	g.Battle.HitStop = 0
-	g.Battle.ShakeTimer = 0
-	g.Battle.RumbleTimer = 0
-	g.Battle.SequencePulseTimer = 0
-	g.Battle.SequencePulseIndex = -1
-	g.Battle.EnemyAttacker = -1
-	// Belt-and-suspenders with the other transients above: clear any pending
-	// enemy cast so a Start that somehow followed an unclean exit can't make
-	// the first enemy turn skip its defend bar and fire a phantom spell. Both
-	// real entry paths (leaveBattle's clearBattleResidual, ResetGameState)
-	// already clear it, but every sibling transient is reset here too.
-	g.Battle.EnemyPendingSkill = core.SkillNone
-	g.Battle.EnemyAttackMisses = false
-	g.Battle.LastQualityTimer = 0
-	g.Battle.Queue = nil
-	g.Battle.QueueCursor = 0
-	g.Battle.NextRoundQueue = nil
-	g.Battle.Readiness = nil // fresh ATB gauges each battle
+	//
+	// resetBattleTransients clears every per-fight transient (timing/charge
+	// state, animation clocks, turn queue + fresh ATB gauges, the pending enemy
+	// cast, victory snapshot) so a Start that somehow followed an unclean exit
+	// can't make the first enemy turn skip its defend bar and fire a phantom
+	// spell, or otherwise leak stale combat state. EnemyIndex / EnemyAttackCursor
+	// / PartyTarget setup happens above and is intentionally left untouched.
+	resetBattleTransients(&g.Battle)
 	resetBattleAction(g)
 	setBattleMessage(g, core.BattleEncounterMessage(g))
 	beginNewRound(g)
@@ -974,16 +961,7 @@ func updateAttackTiming(g *core.GameState, dt float32) {
 		g.Battle.Timing.Tick(dt)
 	}
 
-	if !g.Battle.Timing.Resolved {
-		return
-	}
-	if g.Battle.Timing.Pressed {
-		g.Battle.TimingFlash = core.TimingFlashDuration
-		audio.Play(soundForGrade(g.Battle.Timing.Quality))
-		return
-	}
-	audio.Play(audio.SoundInputMiss)
-	applyPendingAction(g, g.Battle.Timing.Quality)
+	resolveTimingBar(g, func() { applyPendingAction(g, g.Battle.Timing.Quality) })
 }
 
 // gradeSounds is the per-grade audio cue table. Battle-side equivalent of
@@ -1014,6 +992,27 @@ func soundForGrade(q int) audio.Sound {
 		return gradeSounds[core.TimingQualityMiss]
 	}
 	return gradeSounds[q]
+}
+
+// resolveTimingBar runs the shared tail both the attack bar (updateAttackTiming)
+// and the defend bar (updateEnemyTiming) execute once their input phase is done:
+// nothing happens until the bar resolves; a registered press flashes + plays the
+// grade cue and holds (tickFlashHold drains the flash next frame); a clean miss
+// plays the miss cue and runs onResolve, the only branch the two bars differ on.
+// Returns true when the caller should stop this tick (bar unresolved, or holding
+// the flash) — mirrors tickFlashHold's shape.
+func resolveTimingBar(g *core.GameState, onResolve func()) bool {
+	if !g.Battle.Timing.Resolved {
+		return true
+	}
+	if g.Battle.Timing.Pressed {
+		g.Battle.TimingFlash = core.TimingFlashDuration
+		audio.Play(soundForGrade(g.Battle.Timing.Quality))
+		return true
+	}
+	audio.Play(audio.SoundInputMiss)
+	onResolve()
+	return false
 }
 
 // --- Enemy turn ------------------------------------------------------------
@@ -1163,16 +1162,7 @@ func updateEnemyTiming(g *core.GameState, dt float32) {
 	if !g.Battle.Timing.Resolved {
 		g.Battle.Timing.Tick(dt)
 	}
-	if !g.Battle.Timing.Resolved {
-		return
-	}
-	if g.Battle.Timing.Pressed {
-		g.Battle.TimingFlash = core.TimingFlashDuration
-		audio.Play(soundForGrade(g.Battle.Timing.Quality))
-		return
-	}
-	audio.Play(audio.SoundInputMiss)
-	resolveAndFinishEnemyAttack(g)
+	resolveTimingBar(g, func() { resolveAndFinishEnemyAttack(g) })
 }
 
 // resolveAndFinishEnemyAttack applies the current attacker's hit (scaled by
@@ -1565,28 +1555,10 @@ func clearBattleResidual(g *core.GameState) {
 	}
 	g.Battle.ActivePack = -1
 	g.Battle.EnemyIndex = -1
-	g.Battle.Queue = nil
-	g.Battle.QueueCursor = 0
-	g.Battle.NextRoundQueue = nil
-	g.Battle.Readiness = nil
-	g.Battle.PhysDamageThisTurn = 0
-	g.Battle.ClearTiming()
-	g.Battle.TimingIntro = 0
-	g.Battle.ChargeNeedsRelease = false
-	g.Battle.HitStop = 0
-	g.Battle.SequencePulseTimer = 0
-	g.Battle.SequencePulseIndex = -1
-	g.Battle.EnemyAttacker = -1
-	g.Battle.EnemyAttackCursor = -1
-	g.Battle.EnemyPendingSkill = core.SkillNone
-	g.Battle.EnemyAttackMisses = false
-	// Drop the victory spoils snapshot + its animation clocks so the next
-	// fight's screen starts clean (and a fled / lost fight carries none).
-	g.Battle.Spoils = core.VictorySpoils{}
-	g.Battle.VictoryElapsed = 0
-	g.Battle.VictoryLevelSfxCursor = 0
-	g.Battle.VictoryLootSfxCursor = 0
-	g.Battle.VictoryTickSfxCursor = 0
+	// resetBattleTransients drops the turn queue, timing/charge state, animation
+	// clocks, pending enemy cast, and the victory spoils snapshot + its clocks so
+	// the next fight's screen starts clean (a fled / lost fight carries none).
+	resetBattleTransients(&g.Battle)
 	resetBattleAction(g)
 }
 
@@ -1611,6 +1583,40 @@ func resetBattleAction(g *core.GameState) {
 	g.Battle.PendingSkill = core.SkillNone
 	g.Battle.PendingItem = core.ItemNone
 	g.Battle.ItemMenuIndex = 0
+}
+
+// resetBattleTransients zeroes every per-fight transient field to a clean
+// slate: timing/charge state, the impact animation clocks, the round queue +
+// ATB gauges, the pending enemy cast, and the victory spoils snapshot with its
+// playback cursors. Both battle entry (Start) and exit (clearBattleResidual)
+// call it so a newly added transient can't be cleared on one path and leaked
+// on the other. Setup fields the two paths assign differently — EnemyIndex,
+// ActivePack, Splash, PartyTarget — are intentionally NOT touched here; each
+// caller sets those itself before/after the reset.
+func resetBattleTransients(b *core.Battle) {
+	b.ClearTiming()
+	b.TimingIntro = 0
+	b.ChargeNeedsRelease = false
+	b.HitStop = 0
+	b.ShakeTimer = 0
+	b.RumbleTimer = 0
+	b.SequencePulseTimer = 0
+	b.SequencePulseIndex = -1
+	b.LastQualityTimer = 0
+	b.EnemyAttacker = -1
+	b.EnemyAttackCursor = -1
+	b.EnemyPendingSkill = core.SkillNone
+	b.EnemyAttackMisses = false
+	b.PhysDamageThisTurn = 0
+	b.Queue = nil
+	b.QueueCursor = 0
+	b.NextRoundQueue = nil
+	b.Readiness = nil
+	b.Spoils = core.VictorySpoils{}
+	b.VictoryElapsed = 0
+	b.VictoryLevelSfxCursor = 0
+	b.VictoryLootSfxCursor = 0
+	b.VictoryTickSfxCursor = 0
 }
 
 // setBattleStatus writes to the transient prompt slot. The renderer's
