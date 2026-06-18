@@ -6,6 +6,7 @@ import (
 	"crawler/internal/app/core"
 	"crawler/internal/app/input"
 	"crawler/internal/app/render"
+	"fmt"
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"math"
 )
@@ -71,6 +72,15 @@ func Update(g *core.GameState) {
 	case core.ModalPauseMenu:
 		updateMenu(g)
 		return
+	case core.ModalNone:
+		// No overlay is open — fall through to the panels-open shortcut,
+		// pause check, and movement below.
+	default:
+		// ActiveModal is a hand-maintained enum ladder; a new modal value
+		// without an arm here would silently fall through to movement
+		// (eating input the overlay should own). Fail loudly instead,
+		// matching updatePanels' missing-case panic.
+		panic(fmt.Sprintf("explore: Update missing dispatch case for modal %d", core.ActiveModal(g)))
 	}
 
 	// Panels-open shortcut. Sits between the modal dispatch and the
@@ -122,21 +132,43 @@ func Update(g *core.GameState) {
 	updatePlayer(g, dt)
 }
 
+// tryAdjacentInteraction is the shared Confirm-key adjacent-interaction gate
+// behind tryOpenAdjacentChest and tryUseAdjacentCrystal — the two were
+// byte-for-byte parallel (Confirm edge → find an in-reach target index → bail
+// if none → act). `find` resolves the adjacent target index for this
+// interaction (returns <0 when nothing is in reach); `act` performs the
+// interaction on the resolved index. Returns true when the interaction fired,
+// so the caller skips the rest of the explore tick (free-look, movement) this
+// frame; false (no-op) when Confirm wasn't pressed or no target is in reach, so
+// the press falls through to movement as usual. The chest/crystal finders take
+// different slice types, so each caller closes over its own slice and exposes
+// the same parameterless func() int shape here.
+func tryAdjacentInteraction(find func() int, act func(idx int)) bool {
+	if !input.ConfirmPressed() {
+		return false
+	}
+	idx := find()
+	if idx < 0 {
+		return false
+	}
+	act(idx)
+	return true
+}
+
 // tryOpenAdjacentChest is the Confirm-key interaction for chests. If
 // the player is one tile away from a non-looted chest, open its modal
 // and return true so the rest of the explore tick (free-look, movement)
 // skips this frame.
 func tryOpenAdjacentChest(g *core.GameState) bool {
-	if !input.ConfirmPressed() {
-		return false
-	}
-	idx := core.AdjacentInteractableChestIndex(g.Chests, g.Player.TileX, g.Player.TileZ)
-	if idx < 0 {
-		return false
-	}
-	g.ChestOpen = idx
-	g.ChestMenuIndex = 0
-	return true
+	return tryAdjacentInteraction(
+		func() int {
+			return core.AdjacentInteractableChestIndex(g.Chests, g.Player.TileX, g.Player.TileZ)
+		},
+		func(idx int) {
+			g.ChestOpen = idx
+			g.ChestMenuIndex = 0
+		},
+	)
 }
 
 // pauseAllowed reports whether the global pause menu can be opened right now.
@@ -354,15 +386,14 @@ func saveGame(g *core.GameState) {
 // frame. No-op (returns false) when no charged crystal is in reach or Confirm
 // wasn't pressed, so the press falls through to movement as usual.
 func tryUseAdjacentCrystal(g *core.GameState) bool {
-	if !input.ConfirmPressed() {
-		return false
-	}
-	idx := core.AdjacentChargedCrystalIndex(g.Crystals, g.Player.TileX, g.Player.TileZ)
-	if idx < 0 {
-		return false
-	}
-	fireHealingCrystal(g, idx)
-	return true
+	return tryAdjacentInteraction(
+		func() int {
+			return core.AdjacentChargedCrystalIndex(g.Crystals, g.Player.TileX, g.Player.TileZ)
+		},
+		func(idx int) {
+			fireHealingCrystal(g, idx)
+		},
+	)
 }
 
 // fireHealingCrystal restores the whole party to full HP+MP, puts the crystal

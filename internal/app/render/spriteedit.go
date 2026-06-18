@@ -343,10 +343,6 @@ func spriteHasBackupSlug(slug string) bool {
 	return err == nil
 }
 
-func spritePath(kind core.EnemyKind) string {
-	return spritePathSlug(core.EnemySlug(kind))
-}
-
 // spritePathSlug is the single sprite-PNG path source for any slug — the foe
 // kinds (EnemySlug) and the party classes (PartyClassSlug) both resolve their
 // <slug>.png here, so the two sprite editors can't drift on the on-disk layout.

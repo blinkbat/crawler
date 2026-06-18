@@ -94,12 +94,12 @@ var (
 	// ceilingFallbackColor is the muted brown that mirrors the indoor
 	// ceiling slab tone for any non-palette ceiling char (corrupted
 	// save, future char dropped from the brush list).
-	floorAutoColor       = rl.NewColor(160, 168, 140, 255)
+	floorAutoColor = rl.NewColor(160, 168, 140, 255)
 	// wallSwatch is the base grey for the wall brush FAMILY (plain rock +
 	// ivy/cracked/crumbling variants). Variants derive from it via tintSwatch
 	// so the editor canvas reads walls as one muted family — light enough to
 	// stay legible against the dark grid and distinct from the warm floor tan.
-	wallSwatch = rl.NewColor(128, 128, 142, 255)
+	wallSwatch           = rl.NewColor(128, 128, 142, 255)
 	editorFallbackColor  = rl.NewColor(200, 200, 200, 255)
 	ceilingFallbackColor = rl.NewColor(110, 96, 80, 255)
 	// entityFallbackColor is the neutral swatch for an enemy kind with
@@ -118,6 +118,11 @@ var (
 	// label color; named so it lives with the rest of the editor chrome
 	// instead of inline in draw.go.
 	editorLabelColor = rl.NewColor(138, 160, 188, 220)
+
+	// hiddenTabTextColor dims a layer/elevation tab's label when that layer
+	// is hidden, so the hidden state reads across the whole tab (not just the
+	// eye). Two tab draws used to declare this inline.
+	hiddenTabTextColor = rl.NewColor(112, 116, 126, 255)
 
 	// Hover-tooltip chrome: a near-opaque dark backing, light body text, and
 	// a gilt heading tint for the first line. Named here with the rest of the

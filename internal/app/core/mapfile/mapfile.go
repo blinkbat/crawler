@@ -809,13 +809,16 @@ func (mf *MapFile) validate() error {
 				return fmt.Errorf("elevation layer row %d has %d cols, size declares %d", i, len(row), mf.Width)
 			}
 			// Every elevation cell must be a level char — '0'..'9' for levels
-			// 0..9, then 'A'..'Z' for 10..35 (base-36, one char per cell).
-			// ElevationLevelAt reads anything else as ground level 0, so without
-			// this a stray char (hand-edit, wrong layer pasted in) loads as flat
-			// ground and silently desyncs the intended cliff / ramp geometry.
+			// 0..9, then 'A'..'K' for 10..20 (base-36, one char per cell). The
+			// upper bound is 'K' because core caps the encodable level at 20
+			// (MaxElevationLevel); chars past 'K' are unreachable through the
+			// encoder. ElevationLevelAt reads anything else as ground level 0,
+			// so without this a stray char (hand-edit, wrong layer pasted in)
+			// loads as flat ground and silently desyncs the intended cliff /
+			// ramp geometry.
 			for c := 0; c < len(row); c++ {
-				if b := row[c]; !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'Z')) {
-					return fmt.Errorf("elevation layer row %d col %d has bad level char %q (expected '0'..'9' or 'A'..'Z')", i, c, string(row[c]))
+				if b := row[c]; !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'K')) {
+					return fmt.Errorf("elevation layer row %d col %d has bad level char %q (expected '0'..'9' or 'A'..'K')", i, c, string(row[c]))
 				}
 			}
 		}

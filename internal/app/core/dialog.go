@@ -184,38 +184,55 @@ type DialogChoiceView struct {
 // pointing at the next) can't spin forever.
 const menuNodeChainLimit = 16
 
-// DialogsToLines marshals each dialog definition to a single-line JSON
-// object for the .map file's dialogs: section. Used by MapFileFromArea.
-func DialogsToLines(dialogs []DialogDefinition) ([]string, error) {
-	if len(dialogs) == 0 {
+// jsonObjectsToLines marshals each item to a single-line JSON object for a
+// .map file section. label names the kind for the error message; id pulls the
+// item's id for that message. Returns nil (not an empty slice) for no items so
+// an absent section round-trips to absent. Shared by the dialog / trigger
+// section writers.
+func jsonObjectsToLines[T any](items []T, label string, id func(T) string) ([]string, error) {
+	if len(items) == 0 {
 		return nil, nil
 	}
-	out := make([]string, 0, len(dialogs))
-	for _, d := range dialogs {
-		blob, err := json.Marshal(d)
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		blob, err := json.Marshal(item)
 		if err != nil {
-			return nil, fmt.Errorf("encode dialog %q: %w", d.ID, err)
+			return nil, fmt.Errorf("encode %s %q: %w", label, id(item), err)
 		}
 		out = append(out, string(blob))
 	}
 	return out, nil
 }
 
-// DialogsFromLines unmarshals the .map dialogs: section (one JSON object per
-// line) back into definitions. Used by AreaFromMapFile.
-func DialogsFromLines(lines []string) ([]DialogDefinition, error) {
+// jsonObjectsFromLines unmarshals a .map section (one JSON object per line)
+// back into a slice of T. label names the kind for the error message. Returns
+// nil for no lines, mirroring jsonObjectsToLines. Shared by the dialog /
+// trigger section readers.
+func jsonObjectsFromLines[T any](lines []string, label string) ([]T, error) {
 	if len(lines) == 0 {
 		return nil, nil
 	}
-	out := make([]DialogDefinition, 0, len(lines))
+	out := make([]T, 0, len(lines))
 	for i, line := range lines {
-		var d DialogDefinition
-		if err := json.Unmarshal([]byte(line), &d); err != nil {
-			return nil, fmt.Errorf("decode dialog line %d: %w", i+1, err)
+		var item T
+		if err := json.Unmarshal([]byte(line), &item); err != nil {
+			return nil, fmt.Errorf("decode %s line %d: %w", label, i+1, err)
 		}
-		out = append(out, d)
+		out = append(out, item)
 	}
 	return out, nil
+}
+
+// DialogsToLines marshals each dialog definition to a single-line JSON
+// object for the .map file's dialogs: section. Used by MapFileFromArea.
+func DialogsToLines(dialogs []DialogDefinition) ([]string, error) {
+	return jsonObjectsToLines(dialogs, "dialog", func(d DialogDefinition) string { return d.ID })
+}
+
+// DialogsFromLines unmarshals the .map dialogs: section (one JSON object per
+// line) back into definitions. Used by AreaFromMapFile.
+func DialogsFromLines(lines []string) ([]DialogDefinition, error) {
+	return jsonObjectsFromLines[DialogDefinition](lines, "dialog")
 }
 
 // DialogDefByID returns the area's dialog with the given id.
@@ -444,6 +461,10 @@ func applyDialogAction(g *GameState, action *DialogAction) {
 			})
 		case DialogQuestComplete:
 			CompleteQuest(g, action.QuestID)
+		default:
+			// Unknown quest op — an authoring typo. Do nothing rather than
+			// guess between seeding and completing a quest, mirroring how
+			// evalDialogCondition's default refuses to act on an unknown kind.
 		}
 	case DialogActionEvent:
 		// No event registry yet — the seam exists so a future system can

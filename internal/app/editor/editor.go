@@ -142,8 +142,8 @@ func init() {
 			col = wallSwatch
 		}
 		var hk int32
-		if i < len(faceHotkeys) {
-			hk = faceHotkeys[i]
+		if i < len(numberRowKeys) {
+			hk = numberRowKeys[i]
 		}
 		faces = append(faces, Brush{
 			Name:   fmt.Sprintf("%s (%c)", sk.Name, sk.Char),
@@ -184,8 +184,11 @@ var faceSkinSwatch = map[byte]rl.Color{
 	core.TileWallRockCrumbling: tintSwatch(wallSwatch, -2, -12, -22),
 }
 
-// faceHotkeys assigns 1..N to the first few face skins (mouse-only past that).
-var faceHotkeys = []int32{rl.KeyOne, rl.KeyTwo, rl.KeyThree, rl.KeyFour, rl.KeyFive, rl.KeySix, rl.KeySeven, rl.KeyEight, rl.KeyNine}
+// elevationPlaceholderChar is the Char the lone LayerElevation "Set Height"
+// brush carries in its palette declaration. It's only a placeholder: activeBrush
+// overwrites it with core.ElevationChar(editLevel) every frame, so the literal
+// value is never actually stamped — it just needs to be a fixed sentinel here.
+const elevationPlaceholderChar = 0
 
 // The LayerWalls (Faces) palette is built in init from the shared
 // core.FaceSkins roster — see init(). Walls are elevation now; these brushes
@@ -280,7 +283,7 @@ var layerBrushes = [layerCount][]Brush{
 	// frame, so flood-fill + the brush preview pick the level up for free).
 	// Ramp placement is the toolbar's Ramp tool-mode, not a brush.
 	LayerElevation: {
-		{Name: "Set Height", Char: 0, Hotkey: rl.KeyOne, Color: rl.NewColor(150, 140, 120, 255)},
+		{Name: "Set Height", Char: elevationPlaceholderChar, Hotkey: rl.KeyOne, Color: rl.NewColor(150, 140, 120, 255)},
 	},
 	LayerEntities: buildEntityBrushes(),
 }

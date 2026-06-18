@@ -371,7 +371,7 @@ var statusDizzyDots = [3][2]float32{{-0.62, -0.5}, {0, -0.78}, {0.62, -0.5}}
 // vertex order.
 func drawPartyStatusIcon(cx, cy, r float32, kind core.PartyStatusKind, col rl.Color) {
 	rl.DrawCircleV(rl.NewVector2(cx, cy+1), r+3, fadeColor(shadowHeavy, 0.30))
-	rl.DrawCircleV(rl.NewVector2(cx, cy), r+2, rl.NewColor(22, 19, 26, 235))
+	rl.DrawCircleV(rl.NewVector2(cx, cy), r+2, statusIconBacking)
 	if kind < 0 || int(kind) >= len(partyStatusVisuals) {
 		return
 	}

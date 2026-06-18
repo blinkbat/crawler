@@ -256,14 +256,25 @@ var modalHandlers = map[modalKind]modalHandler{
 
 // init asserts every dispatchable modalKind (modalNone and modalCount
 // excluded — the former is "no modal open," the latter is the count
-// sentinel) has a handler row. Mirrors the panic-at-init pattern
-// AGENTS.md mandates for skill / tile / prop registries — a new
-// modalFoo constant added to editor.go without a handler row now
-// panics at startup instead of silently no-op'ing the dispatch.
+// sentinel) has a handler row with BOTH a draw and an update function.
+// Mirrors the panic-at-init pattern AGENTS.md mandates for skill / tile /
+// prop registries — a new modalFoo constant added to editor.go without a
+// handler row now panics at startup instead of silently no-op'ing the
+// dispatch. The draw/update nil checks matter too: the dispatch sites guard
+// with `ok && h.draw != nil` / `ok && h.update != nil`, so a row with one
+// half nil would silently freeze that modal (draws but never updates, or
+// vice versa) rather than panic — catch it here instead.
 func init() {
 	for m := modalNone + 1; m < modalCount; m++ {
-		if _, ok := modalHandlers[m]; !ok {
+		h, ok := modalHandlers[m]
+		if !ok {
 			panic(fmt.Sprintf("editor: modalKind %d has no modalHandlers entry — register draw + update functions", int(m)))
+		}
+		if h.draw == nil {
+			panic(fmt.Sprintf("editor: modalKind %d has a nil draw func in its modalHandlers entry", int(m)))
+		}
+		if h.update == nil {
+			panic(fmt.Sprintf("editor: modalKind %d has a nil update func in its modalHandlers entry", int(m)))
 		}
 	}
 }
@@ -1301,7 +1312,7 @@ func drawLayerTabs(s *State, font rl.Font, theme render.Theme) {
 		if hidden {
 			// Dim the label so the hidden state reads across the whole tab,
 			// not just the eye.
-			text = rl.NewColor(112, 116, 126, 255)
+			text = hiddenTabTextColor
 		}
 		// Inset the tab so consecutive tabs don't share a border.
 		inner := rl.NewRectangle(r.X+6, r.Y+3, r.Width-12, r.Height-6)
@@ -1426,7 +1437,7 @@ func drawLevelsPanel(s *State, font rl.Font, theme render.Theme) {
 			bg = bgEntryHover
 		}
 		if hidden {
-			text = rl.NewColor(112, 116, 126, 255)
+			text = hiddenTabTextColor
 		}
 		inner := rl.NewRectangle(r.X+6, r.Y+3, r.Width-12, r.Height-6)
 		rl.DrawRectangleRec(inner, bg)
@@ -3300,7 +3311,7 @@ const (
 	doorEditModalH     = float32(424)
 	openModalW         = float32(460)
 	openModalH         = float32(460)
-	entityEditModalW   = float32(480) // pack-edit + chest-edit share this size
+	entityEditModalW   = float32(480) // shared by the entity + dialog list modals
 	entityEditModalH   = float32(440)
 	escMenuModalW      = float32(380)
 	escMenuModalH      = float32(178)

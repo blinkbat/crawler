@@ -44,7 +44,7 @@ var passiveNodeIDs = []string{
 func init() {
 	for _, id := range passiveNodeIDs {
 		found := false
-		for _, c := range []PartyClass{ClassWarrior, ClassCleric, ClassThief, ClassWizard} {
+		for _, c := range AllPartyClasses() {
 			n, ok := findTreeNode(c, id)
 			if !ok {
 				continue

@@ -628,7 +628,20 @@ func applyAoEDamage(g *core.GameState, skill core.SkillID, damage, quality int, 
 // instead of an inline core.VFX<Kind> literal scattered across the apply
 // functions. Callers still choose the enqueue direction (EnqueueEnemyVFX
 // for hits, EnqueuePartyVFX for heals / enemy casts landing on the party).
-// Unmapped skills return core.VFXNone (no particles).
+//
+// Unmapped skills return core.VFXNone (no particles) — and this is a
+// SUPPORTED, intentional outcome, NOT an error, so there is deliberately no
+// init-time "every handler skill maps to a VFX" assert (unlike the sibling
+// PlayerCastable / EnemyCastable / targetedSetupConfig guards in init() above).
+// Several registered handlers legitimately have no vfxKindFor row:
+//   - Taunt routes through vfxKindFor(SkillTaunt) and relies on VFXNone — it's
+//     a no-particle pull; EnqueueEnemyVFX(…, VFXNone, …) is a no-op.
+//   - Scan / Cripple / Corrosive Vial deliberately enqueue a hardcoded kind
+//     (VFXScan / VFXVenom) at their apply site rather than through this helper.
+//   - Smoke Bomb enqueues no VFX at all.
+// An "every handler maps to non-None" assert would false-positive on every one
+// of these. New skills that want a shared particle kind add a row above; ones
+// that don't simply fall through here.
 func vfxKindFor(skill core.SkillID) core.VFXKind {
 	switch skill {
 	case core.SkillSwipe, core.SkillWhirlwind, core.SkillCrushingBlow, core.SkillBackstab, core.SkillSunder, core.SkillRend, core.SkillLacerate:

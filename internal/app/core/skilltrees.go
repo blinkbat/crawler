@@ -206,7 +206,7 @@ var classSkillTrees = map[PartyClass][]SkillTreeDef{
 }
 
 func init() {
-	for _, c := range []PartyClass{ClassWarrior, ClassCleric, ClassThief, ClassWizard} {
+	for _, c := range AllPartyClasses() {
 		trees, ok := classSkillTrees[c]
 		if !ok || len(trees) != skillTreesPerClass {
 			panic("core: classSkillTrees must define exactly skillTreesPerClass trees per class")

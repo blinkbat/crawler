@@ -792,10 +792,13 @@ func updateDialogNodesModal(s *State) Action {
 // from a common header inset, so these live in one place rather than as a
 // repeated `float32(28)` / `r.Y + 56` literal in each.
 const (
-	dialogFieldH      = float32(28) // standard text-field / button row height
-	dialogHeaderInset = float32(56) // first row's offset below the card's title
-	dialogRowGap      = float32(46) // vertical pitch between stacked field rows (node + choice editors)
-	dialogListRowH    = float32(24) // height of one row in the scrollable choice / condition lists
+	dialogFieldH       = float32(28) // standard text-field / button row height
+	dialogHeaderInset  = float32(56) // first row's offset below the card's title
+	dialogRowGap       = float32(46) // vertical pitch between stacked field rows (node + choice editors)
+	dialogCondRowGap   = float32(54) // row pitch in the condition editor
+	dialogTrigRowGap   = float32(52) // row pitch in the trigger editor
+	dialogActionRowGap = float32(56) // row pitch in the action editor
+	dialogListRowH     = float32(24) // height of one row in the scrollable choice / condition lists
 )
 
 // ========================= modalDialogNodeEdit =============================
@@ -1283,7 +1286,7 @@ func dialogActionLayoutFor() dialogActionLayout {
 	fieldH := dialogFieldH
 	y := r.Y + dialogHeaderInset
 	kindBtn := rl.NewRectangle(x, y, fw, fieldH)
-	y += float32(56)
+	y += dialogActionRowGap
 	idField := rl.NewRectangle(x, y, fw, fieldH)
 	by := r.Y + r.Height - modalBtnH - modalBottomInset
 	backBtn := rl.NewRectangle(r.X+r.Width-modalWideBtnW-modalContentInset, by, modalWideBtnW, modalBtnH)
@@ -1354,8 +1357,16 @@ func dialogActionKindEntries(s *State) []dropdownEntry {
 	// action, so the picker text can't drift from the button text it sets.
 	sets := []func(*core.DialogAction){
 		nil,
-		func(a *core.DialogAction) { a.Kind = core.DialogActionQuest; a.QuestOp = core.DialogQuestStart; a.EventID = "" },
-		func(a *core.DialogAction) { a.Kind = core.DialogActionQuest; a.QuestOp = core.DialogQuestComplete; a.EventID = "" },
+		func(a *core.DialogAction) {
+			a.Kind = core.DialogActionQuest
+			a.QuestOp = core.DialogQuestStart
+			a.EventID = ""
+		},
+		func(a *core.DialogAction) {
+			a.Kind = core.DialogActionQuest
+			a.QuestOp = core.DialogQuestComplete
+			a.EventID = ""
+		},
 		func(a *core.DialogAction) { a.Kind = core.DialogActionEvent; a.QuestOp = ""; a.QuestID = "" },
 	}
 	out := make([]dropdownEntry, 0, len(sets))
@@ -1504,7 +1515,7 @@ func dialogCondLayoutFor() dialogCondLayout {
 	x := r.X + modalContentInset
 	fw := r.Width - 2*modalContentInset
 	fieldH := dialogFieldH
-	rowGap := float32(54)
+	rowGap := dialogCondRowGap
 	y := r.Y + dialogHeaderInset
 	kindBtn := rl.NewRectangle(x, y, fw, fieldH)
 	y += rowGap
@@ -1761,7 +1772,7 @@ func dialogTrigLayoutFor() dialogTrigLayout {
 	x := r.X + modalContentInset
 	fw := r.Width - 2*modalContentInset
 	fieldH := dialogFieldH
-	rowGap := float32(52)
+	rowGap := dialogTrigRowGap
 	y := r.Y + dialogHeaderInset
 	kindBtn := rl.NewRectangle(x, y, fw, fieldH)
 	y += rowGap

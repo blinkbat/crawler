@@ -42,15 +42,22 @@ func hashPhase(h uint32) float32 {
 // down. One knob: raise toward 1 for grayer, lower toward 0 for punchier.
 const paletteSaturationCut = 0.30
 
+// mapRGB applies f to each of c's R/G/B channels independently, preserving
+// alpha. The single seam for the "transform RGB, keep A" pattern that the
+// color derivers (mute below, shadeColor, adjust) each used to re-spell. f
+// owns any clamping/rounding so each caller keeps its exact prior math.
+func mapRGB(c rl.Color, f func(uint8) uint8) rl.Color {
+	return rl.NewColor(f(c.R), f(c.G), f(c.B), c.A)
+}
+
 // mute desaturates c toward its perceptual-luminance gray by
 // paletteSaturationCut, preserving alpha. Used on the bright accent tokens in
 // the palette below so the whole accent set tones down from a single knob.
 func mute(c rl.Color) rl.Color {
 	lum := float32(c.R)*0.30 + float32(c.G)*0.59 + float32(c.B)*0.11
-	toward := func(v uint8) uint8 {
+	return mapRGB(c, func(v uint8) uint8 {
 		return uint8(float32(v) + (lum-float32(v))*paletteSaturationCut)
-	}
-	return rl.NewColor(toward(c.R), toward(c.G), toward(c.B), c.A)
+	})
 }
 
 // The Library palette. See UI_STANDARDS.md for the full rationale and
@@ -145,6 +152,10 @@ var (
 	// dark on the bright pill fill). Cross-file (party.go glyphs + battle.go
 	// pills), so it lives here with the ink tokens.
 	statusGlyphDark = rl.NewColor(12, 10, 15, 255)
+	// statusIconBacking is the dark, slightly purple disc drawn behind a party
+	// status icon so its colored glyph reads against the HUD glass. Sits with
+	// statusGlyphDark since both are the status-icon ink tokens.
+	statusIconBacking = rl.NewColor(22, 19, 26, 235)
 	// statusNoneAccent is the neutral light-grey the PartyStatusNone row carries
 	// in partyStatusVisuals — the "no status" placeholder accent (no glyph). A
 	// named token so the table doesn't open-code a bare grey literal.
@@ -306,6 +317,39 @@ var (
 	timingGradeDefGood      = rl.NewColor(80, 152, 220, 255)
 	timingGradeDefGreat     = rl.NewColor(120, 200, 248, 255)
 	timingGradeDefExcellent = rl.NewColor(196, 240, 255, 255)
+
+	// Per-mode timing-bar heading + base-fill tints, paired with the
+	// timingHeading* label strings in timing.go. Each bar's signature hue lives
+	// here with the other timing accents instead of as a bare NewColor literal
+	// inside its draw function. (The Combo bar derives its tint from seqOkColor
+	// and stays at its call site.)
+	timingHeadingStrikeColor       = mute(rl.NewColor(255, 232, 168, 240)) // warm gold
+	timingHeadingDefendColor       = mute(rl.NewColor(168, 220, 255, 240)) // cool blue
+	timingHeadingChargeColor       = mute(rl.NewColor(255, 184, 96, 240))  // warm orange
+	timingHeadingReelsColor        = mute(rl.NewColor(255, 244, 144, 240)) // gold-yellow gamble
+	timingHeadingRecallMemoColor   = mute(rl.NewColor(255, 244, 144, 240)) // memorize: held-yellow
+	timingHeadingRecallRecallColor = mute(rl.NewColor(140, 232, 168, 240)) // recall: thief green
+
+	// reelSymbolColors are Steal's slot-symbol fill hues — well-separated colors
+	// so a "match" reads at a glance. Indexed by symbol modulo its length so it
+	// stays safe if core.ReelSymbolCount ever changes (symbols would just share
+	// hues rather than index out of range). Lives here with the other timing
+	// accents rather than as bare NewColor literals in timing.go.
+	reelSymbolColors = []rl.Color{
+		mute(rl.NewColor(255, 206, 84, 255)),  // gold
+		mute(rl.NewColor(96, 208, 255, 255)),  // cyan
+		mute(rl.NewColor(236, 120, 200, 255)), // magenta
+		mute(rl.NewColor(140, 232, 168, 255)), // green
+	}
+
+	// Battle-splash banner tones: splashBgColor is the near-black panel fill
+	// behind the banner; splashTitleColor is the warm cream the encounter title
+	// is engraved in. Both are defined at full alpha here — the splash applies
+	// its fade-driven alpha per-frame via colorWithAlpha so the banner can ease
+	// in / out. Lives here with the other battle accents rather than as bare
+	// NewColor literals in battle.go.
+	splashBgColor    = rl.NewColor(8, 10, 16, 255)
+	splashTitleColor = rl.NewColor(248, 232, 198, 255)
 
 	// Billboard tints for the in-world combatant markers — the warm
 	// off-white the player's target reads as, and the slightly redder

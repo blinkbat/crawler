@@ -24,19 +24,10 @@ const (
 	timingHeadingRecallRecall = "RECALL!"
 )
 
-// Per-mode heading + base-fill tints, paired with the timingHeading*
-// strings above. Named so the bar's signature hue lives next to its
-// label instead of as a bare rl.NewColor literal inside each draw
-// function — a palette pass touches one block. (The Combo bar derives its
-// tint from seqOkColor and stays at its call site.)
-var (
-	timingHeadingStrikeColor       = mute(rl.NewColor(255, 232, 168, 240)) // warm gold
-	timingHeadingDefendColor       = mute(rl.NewColor(168, 220, 255, 240)) // cool blue
-	timingHeadingChargeColor       = mute(rl.NewColor(255, 184, 96, 240))  // warm orange
-	timingHeadingReelsColor        = mute(rl.NewColor(255, 244, 144, 240)) // gold-yellow gamble
-	timingHeadingRecallMemoColor   = mute(rl.NewColor(255, 244, 144, 240)) // memorize: held-yellow
-	timingHeadingRecallRecallColor = mute(rl.NewColor(140, 232, 168, 240)) // recall: thief green
-)
+// Per-mode timing-bar heading + base-fill tints (timingHeading*Color) and the
+// reel-symbol hues (reelSymbolColors) now live in theme.go's palette block with
+// the other timing accents, paired by name to the timingHeading* label strings
+// above.
 
 // Shared timing-bar layout + alpha tunables. Every bar that lays out an arrow
 // row (sequence / recall) or a dwindling timer strip (sequence / recall) reads
@@ -680,17 +671,6 @@ func drawSequenceBar(timing core.TimingState, g *core.GameState, assets Resource
 	if !flashing && timing.Duration > 0 {
 		drawDwindlingTimerStrip(drawX, y, barW, barH, 1.0-timing.Progress())
 	}
-}
-
-// reelSymbolColors are the slot symbols' fill hues — well-separated colors so
-// a "match" reads at a glance. Indexed by symbol modulo its length, so it
-// stays safe if core.ReelSymbolCount ever changes (symbols would just share
-// hues rather than index out of range).
-var reelSymbolColors = []rl.Color{
-	mute(rl.NewColor(255, 206, 84, 255)),  // gold
-	mute(rl.NewColor(96, 208, 255, 255)),  // cyan
-	mute(rl.NewColor(236, 120, 200, 255)), // magenta
-	mute(rl.NewColor(140, 232, 168, 255)), // green
 }
 
 // drawReelBar paints Steal's slot-machine gamble: one framed cell per reel,

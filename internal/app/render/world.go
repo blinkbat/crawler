@@ -1576,7 +1576,7 @@ const enemyFieldLift = battleFormationCenterY - enemyBillboardY
 // timing.go (which reads partyBillboardSize indirectly through
 // partySpritePosition's y-anchor), and any future minimap badge.
 var (
-	partyBillboardSize       = rl.NewVector2(0.38, 0.68)
+	partyBillboardSize       = rl.NewVector2(0.38, enemyBillboardY)
 	partyBillboardSizeActive = rl.NewVector2(0.42, 0.72)
 	// partyActiveScale is the per-axis bump the active member's billboard gets,
 	// expressed as a ratio of the active size to the idle size. DrawPartySprites
@@ -1988,12 +1988,9 @@ func drawSelectorPyramid(tip rl.Vector3, height, baseRadius float32, col rl.Colo
 // preserving alpha. Used to derive shaded variants of a base tint without
 // authoring a new color per face.
 func shadeColor(c rl.Color, factor float32) rl.Color {
-	return rl.NewColor(
-		core.ClampByte(int(float32(c.R)*factor)),
-		core.ClampByte(int(float32(c.G)*factor)),
-		core.ClampByte(int(float32(c.B)*factor)),
-		c.A,
-	)
+	return mapRGB(c, func(v uint8) uint8 {
+		return core.ClampByte(int(float32(v) * factor))
+	})
 }
 
 func DrawPartySprites(camera rl.Camera3D, g *core.GameState, assets Resources) {

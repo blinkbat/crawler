@@ -1061,6 +1061,26 @@ func resizeLayer(old []string, oldW, oldH, newW, newH int, fill byte) []string {
 	return rows
 }
 
+// writeAreaTo serializes the current area and writes it to path, then resets
+// the dirty-tracking baseline (path → s.area.Path, baseline = clone, dirty =
+// false). It is the shared serialize/write/baseline core of saveTo,
+// saveCurrent, and confirmDirtySave; each caller keeps its own surrounding flow
+// (error flashes, modal close, pending clears, success flash). For the callers
+// that pass s.area.Path the path assignment is a harmless self-assign.
+func writeAreaTo(s *State, path string) error {
+	mf, err := core.MapFileFromArea(s.area)
+	if err != nil {
+		return err
+	}
+	if err := mapfile.Save(path, mf); err != nil {
+		return err
+	}
+	s.area.Path = path
+	s.baseline = core.CloneArea(s.area)
+	s.dirty = false
+	return nil
+}
+
 // saveCurrent writes to the area's existing path. If the area has never been
 // saved (Path == ""), open the Save As modal so the user can name it.
 func saveCurrent(s *State) {
@@ -1068,17 +1088,10 @@ func saveCurrent(s *State) {
 		openSaveAsModal(s)
 		return
 	}
-	mf, err := core.MapFileFromArea(s.area)
-	if err != nil {
+	if err := writeAreaTo(s, s.area.Path); err != nil {
 		s.flash("Save failed: " + err.Error())
 		return
 	}
-	if err := mapfile.Save(s.area.Path, mf); err != nil {
-		s.flash("Save failed: " + err.Error())
-		return
-	}
-	s.baseline = core.CloneArea(s.area)
-	s.dirty = false
 	// Saving no longer auto-flashes reachability warnings — reachability is an
 	// at-will check now (the Validate modal), not something forced on every
 	// save, since "can't reach X" is a design judgment, not a save error.

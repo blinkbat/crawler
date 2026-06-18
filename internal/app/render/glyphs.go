@@ -203,6 +203,45 @@ func drawInputGlyph(font rl.Font, g InputGlyph, x, y, size, alpha float32) float
 	}
 }
 
+// inputGlyphCoverage is the maintained set of every InputGlyph value, tagging
+// each as either explicitly handled by drawInputGlyph's switch (true) or
+// intentionally routed through its d-pad default (false). The init() guard
+// below asserts this set covers the whole iota run [GlyphA, glyphCount), so a
+// newly-added InputGlyph can't silently fall into the d-pad default — adding a
+// const without registering it here panics at startup. This is a coverage
+// ledger only; it does not affect runtime drawing.
+var inputGlyphCoverage = map[InputGlyph]bool{
+	GlyphA:         true,
+	GlyphB:         true,
+	GlyphX:         true,
+	GlyphY:         true,
+	GlyphLB:        true,
+	GlyphRB:        true,
+	GlyphStart:     true,
+	GlyphSelect:    true,
+	GlyphUp:        false, // d-pad default
+	GlyphDown:      false, // d-pad default
+	GlyphLeft:      false, // d-pad default
+	GlyphRight:     false, // d-pad default
+	GlyphUpDown:    false, // d-pad default
+	GlyphLeftRight: false, // d-pad default
+}
+
+// glyphCount is one past the last InputGlyph const; kept adjacent to the const
+// block's tail (GlyphLeftRight) so the init guard can walk the full iota run.
+const glyphCount = GlyphLeftRight + 1
+
+func init() {
+	if len(inputGlyphCoverage) != int(glyphCount) {
+		panic("render: inputGlyphCoverage size does not match the InputGlyph const run — a glyph is unregistered")
+	}
+	for g := InputGlyph(0); g < glyphCount; g++ {
+		if _, ok := inputGlyphCoverage[g]; !ok {
+			panic("render: InputGlyph value missing from inputGlyphCoverage — register it (explicit case or d-pad default)")
+		}
+	}
+}
+
 // drawFaceButton is the dark-disc / colored-letter style: a raised dark circle,
 // a colored ring, and the letter in the button's signature hue.
 func drawFaceButton(font rl.Font, letter string, col color.RGBA, x, cy, gh, alpha float32) float32 {

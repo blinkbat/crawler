@@ -531,6 +531,19 @@ func PartyClasses() []PartyClassDefinition {
 	return defs
 }
 
+// AllPartyClasses returns the bare PartyClass keys in canonical definition
+// order (Warrior, Cleric, Thief, Wizard), derived from partyClassDefinitions
+// rather than hand-listed so a new class only has to be appended in one place.
+// The single home for "iterate every class" loops (passives / skill-tree
+// init invariants, etc.).
+func AllPartyClasses() []PartyClass {
+	out := make([]PartyClass, len(partyClassDefinitions))
+	for i, d := range partyClassDefinitions {
+		out[i] = d.Class
+	}
+	return out
+}
+
 func partyClassInfo(class PartyClass) (PartyClassDefinition, bool) {
 	def, ok := partyClassByID[class]
 	return def, ok

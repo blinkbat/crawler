@@ -2516,21 +2516,12 @@ func confirmDirtySave(s *State) Action {
 		openSaveAsModal(s)
 		return ActionNone
 	}
-	mf, err := core.MapFileFromArea(s.area)
-	if err != nil {
+	if err := writeAreaTo(s, s.area.Path); err != nil {
 		s.flash("Save failed: " + err.Error())
 		closeModal(s)
 		s.pending = pendingNone
 		return ActionNone
 	}
-	if err := mapfile.Save(s.area.Path, mf); err != nil {
-		s.flash("Save failed: " + err.Error())
-		closeModal(s)
-		s.pending = pendingNone
-		return ActionNone
-	}
-	s.baseline = core.CloneArea(s.area)
-	s.dirty = false
 	closeModal(s)
 	return runPendingAction(s)
 }
@@ -2587,18 +2578,10 @@ func confirmModalForce(s *State) {
 }
 
 func saveTo(s *State, name, path string) {
-	mf, err := core.MapFileFromArea(s.area)
-	if err != nil {
+	if err := writeAreaTo(s, path); err != nil {
 		s.flash("Save failed: " + err.Error())
 		return
 	}
-	if err := mapfile.Save(path, mf); err != nil {
-		s.flash("Save failed: " + err.Error())
-		return
-	}
-	s.area.Path = path
-	s.baseline = core.CloneArea(s.area)
-	s.dirty = false
 	closeModal(s)
 	s.focus = focusNone
 	s.flash("Saved " + name)

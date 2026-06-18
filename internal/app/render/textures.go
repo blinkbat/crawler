@@ -2620,10 +2620,7 @@ func jitter(c color.RGBA, x, y, amount int) color.RGBA {
 }
 
 func adjust(c color.RGBA, delta int) color.RGBA {
-	return color.RGBA{
-		R: core.ClampByte(int(c.R) + delta),
-		G: core.ClampByte(int(c.G) + delta),
-		B: core.ClampByte(int(c.B) + delta),
-		A: c.A,
-	}
+	return mapRGB(c, func(v uint8) uint8 {
+		return core.ClampByte(int(v) + delta)
+	})
 }

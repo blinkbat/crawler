@@ -786,7 +786,3 @@ func drawParticle(camera rl.Camera3D, p *particle) {
 	}
 	_ = camera
 }
-
-// (lerpColor removed — callers route through core.MixColor with a
-// float64(t) cast. The render package no longer carries its own
-// per-channel-lerp duplicate.)

@@ -1049,16 +1049,7 @@ func enemyHealthStyle(enemy *core.Enemy) (string, color.RGBA) {
 	return core.EnemyConditionLabel(condition), enemyConditionColors[condition]
 }
 
-// splashBgColor is the near-black panel fill behind the battle-splash banner;
-// splashTitleColor is the warm cream the encounter title is engraved in. Both
-// are defined at full alpha here — the splash applies its fade-driven alpha
-// per-frame via colorWithAlpha so the banner can ease in / out. Named so the
-// banner's two signature tones aren't bare rl.NewColor literals at a drifting
-// alpha mid-function.
-var (
-	splashBgColor    = rl.NewColor(8, 10, 16, 255)
-	splashTitleColor = rl.NewColor(248, 232, 198, 255)
-)
+// splashBgColor / splashTitleColor now live in theme.go's palette block.
 
 // Splash ease windows, in seconds, carved out of core.BattleSplashDuration:
 // splashEnterDur is the lead-in over which the banner eases + scales in from

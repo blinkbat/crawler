@@ -1,10 +1,5 @@
 package core
 
-import (
-	"encoding/json"
-	"fmt"
-)
-
 // Dialog triggers — the world-event seam that auto-starts an authored
 // conversation (the bg2 "BAF"/area-script trigger, scoped to this crawler).
 // A trigger names a dialog id plus the event that fires it:
@@ -60,35 +55,13 @@ type DialogTrigger struct {
 // TriggersToLines marshals each trigger to a single-line JSON object for the
 // .map file's triggers: section (mirrors DialogsToLines).
 func TriggersToLines(triggers []DialogTrigger) ([]string, error) {
-	if len(triggers) == 0 {
-		return nil, nil
-	}
-	out := make([]string, 0, len(triggers))
-	for _, t := range triggers {
-		blob, err := json.Marshal(t)
-		if err != nil {
-			return nil, fmt.Errorf("encode trigger %q: %w", t.ID, err)
-		}
-		out = append(out, string(blob))
-	}
-	return out, nil
+	return jsonObjectsToLines(triggers, "trigger", func(t DialogTrigger) string { return t.ID })
 }
 
 // TriggersFromLines unmarshals the .map triggers: section (one JSON object per
 // line) back into triggers (mirrors DialogsFromLines).
 func TriggersFromLines(lines []string) ([]DialogTrigger, error) {
-	if len(lines) == 0 {
-		return nil, nil
-	}
-	out := make([]DialogTrigger, 0, len(lines))
-	for i, line := range lines {
-		var t DialogTrigger
-		if err := json.Unmarshal([]byte(line), &t); err != nil {
-			return nil, fmt.Errorf("decode trigger line %d: %w", i+1, err)
-		}
-		out = append(out, t)
-	}
-	return out, nil
+	return jsonObjectsFromLines[DialogTrigger](lines, "trigger")
 }
 
 // foeKillCountMet reports whether the bestiary records at least the required

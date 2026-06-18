@@ -218,39 +218,11 @@ func splitWords(s string) []string {
 	return out
 }
 
-// DrawFooterHint paints a centered hint string at the bottom of a
-// dialog. Three sites (sound modal, chest modal, title screen) drew
-// the same "measure + center-anchor + drop shadow" pattern with a
-// different size each; this helper keeps the centering + shadow rule
-// in one place. `cx` is the screen-space center X to anchor against
-// (`centerX(cardW) + cardW/2` for a centered card); `y` is the hint's
-// top y in screen space; `size` is one of the FontX size tokens the
-// callers pass (FontTiny / FontSmall per UI_STANDARDS.md's five-size scale).
-func DrawFooterHint(font rl.Font, text string, cx, y, size float32) {
-	m := rl.MeasureTextEx(font, text, size, canonicalSpacing(size))
-	drawTextWithShadow(font, text, cx-m.X/2, y, size, textHint)
-	// Tiny diamond termini flanking the hint — the footer's quiet stitch into
-	// the panel ornament language (heading rules and the info-strip rule end
-	// the same way). Kept at the hint's own dimness so the footer stays the
-	// most recessive line on the card.
-	pipCol := fadeColor(textHint, 0.65)
-	pipY := y + m.Y/2
-	drawDiamondPip(cx-m.X/2-14, pipY, 1.8, pipCol)
-	drawDiamondPip(cx+m.X/2+14, pipY, 1.8, pipCol)
-}
-
 // modalFooterTextOffset is the gap from a modal card's bottom edge up to
 // the footer-hint baseline. Sits inside overlayFooterReserve (the
 // reserved band) with a few pixels below for descenders. Named so the
 // chest / level-up / panels overlays don't each repeat the bare -22.
 const modalFooterTextOffset = float32(22)
-
-// drawModalFooter centers a footer hint inside the reserved footer band
-// of a modal card. Single seam for the card-center + bottom-offset math
-// the chest, level-up, and panels overlays used to repeat verbatim.
-func drawModalFooter(font rl.Font, card rl.Rectangle, text string) {
-	DrawFooterHint(font, text, card.X+card.Width/2, card.Y+card.Height-modalFooterTextOffset, FontTiny)
-}
 
 // pickerFooterTextOffset is the gap from a sub-modal picker card's bottom
 // edge up to its LEFT-aligned footer-hint baseline. Distinct from
@@ -260,14 +232,3 @@ func drawModalFooter(font rl.Font, card rl.Rectangle, text string) {
 // difference is the font size, not drift, hence its own named token.
 // Replaces the bare `-26` the four picker sub-modals each open-coded.
 const pickerFooterTextOffset = float32(26)
-
-// drawModalFooterLeft paints a LEFT-aligned footer hint at the bottom of a
-// sub-modal card — the mirror of the centered drawModalFooter. The four
-// picker sub-modals (equip / use-target / heal / skill-tree) each drew
-// their hint at `card.Y+card.Height-26` with a manual drawTextWithShadow;
-// this routes that through one seam (FINDING #13) so the left inset
-// (matching the title's card.X+24-ish gutter is passed by the caller) and
-// the bottom offset live in one place. `x` is the hint's left edge.
-func drawModalFooterLeft(font rl.Font, card rl.Rectangle, x float32, text string) {
-	drawTextWithShadow(font, text, x, card.Y+card.Height-pickerFooterTextOffset, FontSmall, textHint)
-}
