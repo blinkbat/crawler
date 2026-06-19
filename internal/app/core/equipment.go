@@ -131,13 +131,13 @@ func foldEquipment(m *PartyMember) (stats Stats, armor, mdef int) {
 // stacks on top of base — ApplyArmor never needs to know about the
 // Equipped array directly.
 func EffectiveArmor(m PartyMember) int {
-	_, equipArmor, _ := foldEquipment(&m)
-	armor := m.Armor + equipArmor
-	// Active buffs (Stone Skin, War Banner) fold their summed flat Armor on top —
-	// different buffs stack; an un-buffed member has no mods and skips the sum.
-	_, buffArmor, _ := SumStatusMods(m.Buffs)
-	armor += buffArmor
-	return floorInt(armor)
+	// Delegates to EffectiveDefenses (the combined Armor+MDef walk) so the
+	// base + equipped + buff (Stone Skin, War Banner) Armor fold lives in
+	// exactly one place; the discarded MDef half is one extra walk this caller
+	// didn't need, but a single source beats a duplicated formula that can
+	// silently drift from EffectiveDefenses — symmetric with EffectiveMDef.
+	armor, _ := EffectiveDefenses(m)
+	return armor
 }
 
 // EffectiveMDef returns the magic-defense value used by

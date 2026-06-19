@@ -510,9 +510,17 @@ func PlayerCastableSkills() []SkillID {
 // Pass nil to allocate. The set is static (registry-derived), so order is the
 // skillDefinitions order.
 func PlayerCastableSkillsInto(buf []SkillID) []SkillID {
+	return skillIDsWhereInto(buf, func(d skillDefinition) bool { return d.PlayerCastable })
+}
+
+// skillIDsWhereInto appends every SkillID whose registry entry satisfies pred
+// (nil pred = all) to buf re-sliced to length 0, in declaration order — the
+// shared shape behind PlayerCastableSkillsInto / AllSkillIDs / EnemyCastableSkills.
+// Pass nil buf to allocate; per-frame callers pass a scratch slice to reuse.
+func skillIDsWhereInto(buf []SkillID, pred func(skillDefinition) bool) []SkillID {
 	buf = buf[:0]
 	for _, def := range skillDefinitions {
-		if def.PlayerCastable {
+		if pred == nil || pred(def) {
 			buf = append(buf, def.Skill)
 		}
 	}
@@ -1587,7 +1595,7 @@ func DebugBoostParty(party []PartyMember, amount int) {
 			AdjustStat(&m.Stats, s, amount)
 		}
 		m.MaxHP = MaxHPFor(m.Stats)
-		m.MaxMP += (m.Stats.INT - beforeINT) * MPPerINT
+		m.MaxMP += MPForINTDelta(m.Stats.INT - beforeINT)
 		if m.MaxMP < 0 {
 			m.MaxMP = 0
 		}
@@ -1656,7 +1664,7 @@ func StatPreviewLine(stat Stat, current Stats, pending int, accuracyStat Stat) s
 		return fmt.Sprintf("Dodge %.0f→%.0f%%  Crit %.0f→%.0f%%", d0, d1, c0, c1)
 	case StatINT:
 		// INT drives magic damage and the MP pool (MPPerINT per point).
-		return fmt.Sprintf("Magic %d→%d  MaxMP +%d", MagicDamage(current, 0), MagicDamage(after, 0), (after.INT-current.INT)*MPPerINT)
+		return fmt.Sprintf("Magic %d→%d  MaxMP +%d", MagicDamage(current, 0), MagicDamage(after, 0), MPForINTDelta(after.INT-current.INT))
 	case StatWIS:
 		return fmt.Sprintf("Heal %d→%d  MDef %d→%d", HealAmount(current, 0), HealAmount(after, 0), MagicDefense(current), MagicDefense(after))
 	case StatVIT:

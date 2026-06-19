@@ -202,7 +202,7 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 		drawSmallPanelOutline(x, y, w, h, border)
 	}
 
-	leftPad := int32(22)
+	leftPad := hudContentInsetX
 	if targeted {
 		leftPad = 34
 		bx := float32(x) + 9
@@ -602,15 +602,17 @@ func itemMenuSuffix(total int) string {
 	return itemSuffixCache.text
 }
 
-// arrowPrompt caches the "A -> B" target prompt so the per-frame draw doesn't
+// arrowPrompt caches the "A → B" target prompt so the per-frame draw doesn't
 // fmt.Sprintf while the player cycles the target. The two target modes
-// (skill→ally, item→ally) share it since only one is active at a time.
+// (skill→ally, item→ally) share it since only one is active at a time. The
+// arrow is the → glyph (richtext.go's symGlyphs draws it procedurally via
+// drawTextWithShadow) rather than a spelled-out "->", per the glyph-first hints.
 var arrowPromptCache struct{ a, b, text string }
 
 func arrowPrompt(a, b string) string {
 	if a != arrowPromptCache.a || b != arrowPromptCache.b {
 		arrowPromptCache.a, arrowPromptCache.b = a, b
-		arrowPromptCache.text = a + " -> " + b
+		arrowPromptCache.text = a + " → " + b
 	}
 	return arrowPromptCache.text
 }
@@ -663,7 +665,7 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	classCol := classAccent(member.Class)
 	drawCard(x, y, w, h, surfacePrimary, borderActive, classCol)
 
-	contentX := x + 22
+	contentX := x + hudContentInsetX
 	// Active member's name as the panel header, in their class color, so
 	// whose turn it is is spelled out right where the player picks the
 	// action — reinforcing the lifted/haloed party card and the glowing
@@ -714,7 +716,7 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	// over a faint gilt rule, so the action surface reads as an input prompt.
 	// Skipped when the panel is shrunk on a short window (would collide with
 	// the rows). Submenu entry is already cued by the per-row "▸" suffix.
-	if h >= 260 {
+	if h >= actionMenuHintMinH {
 		hintY := y + h - 28
 		drawGiltRule(x+18, hintY-12, w-36, 1, 0.3)
 		DrawHintBarLeft(assets.hudFont, []HintSeg{

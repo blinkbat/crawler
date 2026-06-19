@@ -431,7 +431,7 @@ func drawPanelsStats(g *core.GameState, assets Resources, body rl.Rectangle) {
 			drawTextWithShadow(font, label, cellX+24, cellY, FontBody, textMuted)
 			// Value right-aligned within the cell so the column
 			// of numbers lines up no matter the label width.
-			drawTextRightAligned(font, value, cellX+statColW-14, cellY, FontBody, textPrimary)
+			drawTextRightAligned(font, value, cellX+statColW-statValueInsetX, cellY, FontBody, textPrimary)
 		}
 		contentY += float32(statRows) * rowH
 
@@ -440,7 +440,7 @@ func drawPanelsStats(g *core.GameState, assets Resources, body rl.Rectangle) {
 		contentY += 8
 		drawTextWithShadow(font, "ARM", innerX, contentY, FontSmall, textMuted)
 		armVal := smallIntLabel(m.Armor)
-		drawTextRightAligned(font, armVal, innerX+statColW-14, contentY, FontSmall, textPrimary)
+		drawTextRightAligned(font, armVal, innerX+statColW-statValueInsetX, contentY, FontSmall, textPrimary)
 
 		nextXP := core.XPForLevel(m.Level)
 		xpText := strconv.Itoa(m.XP) + " / " + strconv.Itoa(nextXP)
@@ -702,7 +702,16 @@ const (
 	equipPickerRowH    = float32(46)
 	equipPickerHeaderH = float32(70)
 	equipPickerFooterH = float32(34)
+	// equipPickerSubtitleDY is the "Equipped: …" sub-title baseline, inside the
+	// equipPickerHeaderH band below the pickerTitleTopInset title — named + kept
+	// next to the header tokens so it can't drift from them.
+	equipPickerSubtitleDY = float32(52)
 )
+
+// statValueInsetX is the right-edge inset for a right-aligned value inside a
+// Stats-tab cell (the stat grid and the ARM secondary row), so the number
+// column lines up on one gutter instead of a bare -14 at each draw.
+const statValueInsetX = float32(14)
 
 // pickerCardLeftInset is the shared left gutter for a picker sub-modal's
 // title + footer hint, so the three pickers stop each hardcoding card.X+18
@@ -784,7 +793,7 @@ func drawEquipPicker(g *core.GameState, assets Resources) {
 	if curKind != core.ItemNone {
 		curText = "Equipped: " + core.ItemInfo(curKind).Name
 	}
-	drawTextWithShadow(font, curText, card.X+pickerCardLeftInset, card.Y+52, FontSmall, textMuted)
+	drawTextWithShadow(font, curText, card.X+pickerCardLeftInset, card.Y+equipPickerSubtitleDY, FontSmall, textMuted)
 
 	lastEquipLayout.PickerRects = lastEquipLayout.PickerRects[:0]
 	lastEquipLayout.PickerBounds = card

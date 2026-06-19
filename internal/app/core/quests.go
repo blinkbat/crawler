@@ -4,8 +4,9 @@ package core
 // menu's Quests tab. Deliberately simple: each quest carries a title, a
 // one-line description, and an Active/Complete status. There's no
 // auto-completion engine — gameplay hooks call CompleteQuest / AddQuest when
-// a condition is met. The journal starts EMPTY (no seed quests yet); the
-// system is wired and save-persisted, ready for real objectives later.
+// a condition is met. A fresh game seeds the opening objective via
+// StarterQuests (so the Journal tab isn't empty); the system is wired and
+// save-persisted, ready for more objectives later.
 
 // QuestStatus is the lifecycle state of a quest entry.
 type QuestStatus int

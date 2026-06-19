@@ -76,11 +76,7 @@ func DrawPartyPreview(rect rl.Rectangle, assets Resources, class core.PartyClass
 	}
 	cam := zoomedPreviewCamera(zoom)
 
-	rl.BeginTextureMode(partyPreviewRT.rt)
-	rl.ClearBackground(foePreviewBG)
-	rl.BeginMode3D(cam)
-	rl.DrawPlane(rl.NewVector3(0, 0, 0), rl.NewVector2(14, 14), foePreviewGround)
-	rl.DrawGrid(14, 1)
+	partyPreviewRT.beginVisualizerScene(cam)
 
 	place := resolveBillboardPlacement(cam, foeAnchor, &v)
 	if v.shadowRadius > 0 {
@@ -101,11 +97,7 @@ func DrawPartyPreview(rect rl.Rectangle, assets Resources, class core.PartyClass
 	rl.EndMode3D()
 	rl.EndTextureMode()
 
-	// RenderTextures are stored flipped, so the source height is negated.
-	rl.DrawTextureRec(partyPreviewRT.rt.Texture,
-		rl.NewRectangle(0, 0, float32(w), -float32(h)),
-		rl.NewVector2(rect.X, rect.Y),
-		rl.White)
+	partyPreviewRT.blit(rect)
 }
 
 // ClosePartyPreview unloads the cached off-screen texture when the Party

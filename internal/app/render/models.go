@@ -676,6 +676,15 @@ var (
 	stonePaletteLight = rl.NewColor(232, 224, 210, 255)
 )
 
+// Wood-grain tints shared by the timber props (well, scarecrow, table,
+// bookshelf, etc.). Hoisted like the stone palette above so a retune touches
+// one place instead of the several prop loaders that each re-declared the same
+// two literals. (A loader needing an off-shade still declares its own local.)
+var (
+	woodPaletteWarm = rl.NewColor(110, 78, 50, 255) // warm timber brown
+	woodPaletteDark = rl.NewColor(72, 52, 32, 255)  // dark grain / bark
+)
+
 // loadRockProp builds a chunky polygonal boulder: a flat base with two or
 // three faceted lumps fused on top at varied angles, all in close-grouped
 // stone greys. The intent is "weathered rock outcrop you'd see in a
@@ -2048,7 +2057,7 @@ func loadWellProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 	stone := rl.NewColor(170, 168, 156, 255)
 	stoneDark := rl.NewColor(110, 108, 100, 255)
 	waterCol := rl.NewColor(56, 96, 138, 255)
-	wood := rl.NewColor(110, 78, 50, 255)
+	wood := woodPaletteWarm
 	woodDark := rl.NewColor(74, 52, 34, 255)
 	return propModel{
 		models: models,
@@ -2153,10 +2162,10 @@ func loadScarecrowProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	}
 	setModelTexture(&models[0], woodTex)
 	setModelTexture(&models[1], woodTex)
-	wood := rl.NewColor(110, 78, 50, 255)
+	wood := woodPaletteWarm
 	sack := rl.NewColor(196, 162, 96, 255)
 	sackDark := rl.NewColor(140, 110, 64, 255)
-	hatCol := rl.NewColor(72, 52, 32, 255)
+	hatCol := woodPaletteDark
 	return propModel{
 		models: models,
 		parts: []treePart{
@@ -2184,7 +2193,7 @@ func loadBookshelfProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	models := []rl.Model{frame, shelf, books}
 	textureAndShade(models, shader, woodTex)
 	wood := rl.NewColor(112, 78, 48, 255)
-	woodDark := rl.NewColor(72, 52, 32, 255)
+	woodDark := woodPaletteDark
 	bookRed := rl.NewColor(160, 64, 60, 255)
 	bookBlue := rl.NewColor(64, 96, 156, 255)
 	bookGreen := rl.NewColor(96, 132, 80, 255)
@@ -2212,7 +2221,7 @@ func loadTableProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	models := []rl.Model{top, leg}
 	textureAndShade(models, shader, woodTex)
 	wood := rl.NewColor(160, 116, 72, 255)
-	woodDark := rl.NewColor(110, 78, 50, 255)
+	woodDark := woodPaletteWarm
 	return propModel{
 		models: models,
 		parts: []treePart{

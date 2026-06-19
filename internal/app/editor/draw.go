@@ -3221,9 +3221,9 @@ func drawModalHeaderAt(font rl.Font, theme render.Theme, card rl.Rectangle, titl
 // and the click hit-rects line up.
 func openModalListGeom(s *State) (card rl.Rectangle, listTop, rowH float32, topRow, end int) {
 	card = centeredCardRect(openModalW, openModalH)
-	rowH = 22
-	listTop = card.Y + 50
-	listBottom := card.Y + card.Height - 52 // room for the action button row
+	rowH = entityListRowH
+	listTop = card.Y + openModalListTop
+	listBottom := card.Y + card.Height - openModalListBottomPad // room for the action button row
 	rowsVisible := int((listBottom - listTop) / rowH)
 	if rowsVisible < 1 {
 		rowsVisible = 1
@@ -3315,6 +3315,12 @@ const (
 	doorEditModalH     = float32(424)
 	openModalW         = float32(460)
 	openModalH         = float32(460)
+	// Open-map list: rows start openModalListTop below the card top; the bottom
+	// reserves openModalListBottomPad for the action button row. Row PITCH is the
+	// shared entityListRowH so the open-map list and the entity lists can't drift
+	// apart on row spacing.
+	openModalListTop       = float32(50)
+	openModalListBottomPad = float32(52)
 	entityEditModalW   = float32(480) // shared by the entity + dialog list modals
 	entityEditModalH   = float32(440)
 	escMenuModalW      = float32(380)

@@ -1024,7 +1024,7 @@ type PartyMember struct {
 	// Level and XP track per-character progression. XP is the running
 	// total toward the next level; XPForLevel(Level) is the threshold.
 	// PendingLevelUps queues completed level-ups whose stat points the
-	// player hasn't spent yet — populated by ApplyXP, drained by the
+	// player hasn't spent yet — populated by AddXP, drained by the
 	// level-up modal. Per-character (not pooled) so each member has
 	// their own pace; living members get the full encounter XP, dead
 	// members get nothing.
@@ -1071,6 +1071,14 @@ const HPPerVIT = 2
 // MaxHPFor returns the derived MaxHP from a Stats block.
 func MaxHPFor(s Stats) int {
 	return s.VIT * HPPerVIT
+}
+
+// MPForINTDelta returns the MaxMP change for an INT delta — the single home
+// for the per-point pool formula (MPPerINT each) that statTable[StatINT].Derive
+// applies at level-up, so the preview (StatPreviewLine) and god-mode boost
+// (DebugBoostParty) can't drift from it if it ever becomes non-linear.
+func MPForINTDelta(delta int) int {
+	return delta * MPPerINT
 }
 
 // MeleeDamage = STR + skill base. Used for Attack, Swipe, etc.

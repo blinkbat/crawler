@@ -53,14 +53,20 @@ func DefaultCustomEnemy(name string, base EnemyKind) CustomEnemyDef {
 
 // validateEnemyStatBounds checks the scalar combat-stat fields common to
 // the static registry (EnemyDefinition) and authored custom enemies
-// (CustomEnemyDef): SkillCastChance rides a [0,1] contract (a stray 5
-// would cast every turn) and the mitigation / reward / damage fields must
-// be non-negative. Returns a descriptive error (nil when clean) so the
-// registry init can panic on it while the map loader surfaces it to the
-// author — one set of bounds, two failure modes, no drift.
-func validateEnemyStatBounds(name string, skillCastChance float64, armor, mdef, attackDamage, xpValue, spellPower, tier int) error {
+// (CustomEnemyDef): the proc-chance fields (SkillCastChance, PoisonChance)
+// ride a [0,1] contract (a stray 5 would proc every turn) and the
+// mitigation / reward / damage fields must be non-negative. Returns a
+// descriptive error (nil when clean) so the registry init can panic on it
+// while the map loader surfaces it to the author — one set of bounds, two
+// failure modes, no drift. CustomEnemyDef has no PoisonChance field, so the
+// custom path passes 0 (always valid); keeping every [0,1] proc check here
+// means the static registry can't enforce the rule a second way.
+func validateEnemyStatBounds(name string, skillCastChance, poisonChance float64, armor, mdef, attackDamage, xpValue, spellPower, tier int) error {
 	if skillCastChance < 0 || skillCastChance > 1 {
 		return fmt.Errorf("enemy %q has SkillCastChance %v outside [0, 1]", name, skillCastChance)
+	}
+	if poisonChance < 0 || poisonChance > 1 {
+		return fmt.Errorf("enemy %q has PoisonChance %v outside [0, 1]", name, poisonChance)
 	}
 	// Tier is included so the editor save path (MapCustomEnemyFromDef →
 	// validateEnemyStatBounds) agrees with the map LOADER (parseCustomEnemyLine,
@@ -97,7 +103,7 @@ func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
 	// rows via the shared validateEnemyStatBounds so the two paths can't
 	// drift on bounds. Refuse bad data at load rather than letting it reach
 	// combat math.
-	if err := validateEnemyStatBounds(ce.Name, ce.SkillCastChance, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower, ce.Tier); err != nil {
+	if err := validateEnemyStatBounds(ce.Name, ce.SkillCastChance, 0, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower, ce.Tier); err != nil {
 		return CustomEnemyDef{}, err
 	}
 	skills := make([]SkillID, 0, len(ce.Skills))
@@ -139,7 +145,7 @@ func MapCustomEnemyFromDef(ce CustomEnemyDef) (mapfile.MapCustomEnemy, error) {
 	// persist a negative field that the loader would then refuse, yielding an
 	// unloadable map. MP isn't in the shared validator (the static registry has
 	// no MP pool), so it's checked here alongside.
-	if err := validateEnemyStatBounds(ce.Name, ce.SkillCastChance, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower, ce.Tier); err != nil {
+	if err := validateEnemyStatBounds(ce.Name, ce.SkillCastChance, 0, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower, ce.Tier); err != nil {
 		return mapfile.MapCustomEnemy{}, err
 	}
 	if ce.MP < 0 {
@@ -240,7 +246,7 @@ func (d CustomEnemyDef) Instantiate() Enemy {
 	// Scale spawn HP by the global difficulty dial, exactly as NewEnemy does for
 	// base kinds — otherwise custom foes would get scaled damage (via
 	// EnemyBasicDamage / enemySpellDamage, which read the override) but baseline
-	// HP, leaving them inconsistently squishy as EnemyDifficultyMul rises.
+	// HP, leaving them inconsistently squishy as the EnemyDifficulty scaling rises.
 	maxHP := ScaleEnemyDifficulty(def.MaxHP)
 	return Enemy{
 		Kind:                  d.BaseKind,
@@ -393,38 +399,39 @@ func SkillOnDiskName(s SkillID) string {
 	return strings.ToLower(strings.ReplaceAll(SkillName(s), " ", "_"))
 }
 
+// skillByOnDiskName is the O(1) reverse lookup for SkillIDFromOnDiskName,
+// built once at init from the registry (the same pattern as itemByName /
+// enemyKindByName) so decoding a mapfile skill list doesn't re-derive
+// SkillOnDiskName for every registry row on every call.
+var skillByOnDiskName = buildSkillByOnDiskName()
+
+func buildSkillByOnDiskName() map[string]SkillID {
+	m := make(map[string]SkillID, len(skillDefinitions))
+	for _, def := range skillDefinitions {
+		if name := SkillOnDiskName(def.Skill); name != "" {
+			m[name] = def.Skill
+		}
+	}
+	return m
+}
+
 // SkillIDFromOnDiskName is the inverse of SkillOnDiskName.
 func SkillIDFromOnDiskName(name string) (SkillID, bool) {
 	if name == "" {
 		return SkillNone, false
 	}
-	want := strings.ToLower(strings.TrimSpace(name))
-	for _, def := range skillDefinitions {
-		if SkillOnDiskName(def.Skill) == want {
-			return def.Skill, true
-		}
-	}
-	return SkillNone, false
+	id, ok := skillByOnDiskName[strings.ToLower(strings.TrimSpace(name))]
+	return id, ok
 }
 
 // AllSkillIDs returns every SkillID registered in declaration order.
 func AllSkillIDs() []SkillID {
-	out := make([]SkillID, 0, len(skillDefinitions))
-	for _, def := range skillDefinitions {
-		out = append(out, def.Skill)
-	}
-	return out
+	return skillIDsWhereInto(make([]SkillID, 0, len(skillDefinitions)), nil)
 }
 
 // EnemyCastableSkills returns every skill the enemy AI is allowed to cast.
 func EnemyCastableSkills() []SkillID {
-	out := make([]SkillID, 0, len(skillDefinitions))
-	for _, def := range skillDefinitions {
-		if def.EnemyCastable {
-			out = append(out, def.Skill)
-		}
-	}
-	return out
+	return skillIDsWhereInto(make([]SkillID, 0, len(skillDefinitions)), func(d skillDefinition) bool { return d.EnemyCastable })
 }
 
 // IsEnemyCastable reports whether a skill's registry entry has the
@@ -433,12 +440,8 @@ func EnemyCastableSkills() []SkillID {
 // by the battle package's init guard to walk its handler map and
 // catch handlers that linger after the flag is cleared.
 func IsEnemyCastable(s SkillID) bool {
-	for _, def := range skillDefinitions {
-		if def.Skill == s {
-			return def.EnemyCastable
-		}
-	}
-	return false
+	def, ok := skillInfo(s)
+	return ok && def.EnemyCastable
 }
 
 // ClampMapDimension clips v to the editor's playable range.

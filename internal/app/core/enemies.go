@@ -539,11 +539,8 @@ func init() {
 		// Shared with the custom-enemy loader (customenemy.go): SkillCastChance
 		// [0,1] + non-negative mitigation/reward/damage fields. Panic here
 		// since a bad static-registry row is a programmer error, not data.
-		if err := validateEnemyStatBounds(def.Name, def.SkillCastChance, def.Armor, def.MDef, def.AttackDamage, def.XPValue, def.SpellPower, def.Tier); err != nil {
+		if err := validateEnemyStatBounds(def.Name, def.SkillCastChance, def.PoisonChance, def.Armor, def.MDef, def.AttackDamage, def.XPValue, def.SpellPower, def.Tier); err != nil {
 			panic("core/enemies: " + err.Error())
-		}
-		if def.PoisonChance < 0 || def.PoisonChance > 1 {
-			panic("core/enemies: " + def.Name + " PoisonChance must be in [0, 1]")
 		}
 		// Gold bounds must be non-negative and ordered — AwardBattleLoot
 		// tolerates a slip at runtime, but a negative/inverted authored

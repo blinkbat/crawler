@@ -90,11 +90,10 @@ func crystalColor(charged bool, t float64) rl.Color {
 		return crystalDormantBody
 	}
 	// Pulse the brightness between ~0.75 and 1.0 so a charged crystal "breathes."
-	// R/G ride the shared crystalCyanBase (theme.go) so the gem and the editor
-	// marker can't drift; the blue channel stays pinned full + a fixed alpha for
-	// the bright cut-crystal read.
+	// The body tint (crystalChargedBody, theme.go) keeps R/G in lockstep with the
+	// editor marker and pins the blue/alpha; we modulate only its R/G here.
 	pulse := 0.75 + 0.25*float32(math.Sin(t*3.0)*0.5+0.5)
-	return rl.NewColor(uint8(float32(crystalCyanBase.R)*pulse), uint8(float32(crystalCyanBase.G)*pulse), 255, 235)
+	return rl.NewColor(uint8(float32(crystalChargedBody.R)*pulse), uint8(float32(crystalChargedBody.G)*pulse), crystalChargedBody.B, crystalChargedBody.A)
 }
 
 // crystalEdge is the faceted wire tint paired with crystalColor.

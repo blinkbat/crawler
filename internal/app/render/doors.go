@@ -59,22 +59,36 @@ func DrawDoorPrompt(g *core.GameState, assets Resources) {
 	panelY := int32(rect.Y)
 
 	title := "DOORWAY"
-	tm := rl.MeasureTextEx(assets.hudFont, title, FontHeading, FontSpacingHeading)
-	// Engraved header — the measure above is at the canonical heading
-	// spacing, exactly what drawEngravedText tracks at, so centering holds.
+	// Cache the title measure — it's a constant string drawn every frame the
+	// (held) prompt is open, so a per-frame cgo MeasureTextEx is wasted work;
+	// reuse the shared card-title cache the titled menus use. The measure is at
+	// the canonical heading spacing, exactly what drawEngravedText tracks at, so
+	// centering holds.
+	tm := cardTitleMeasureCache.measure(assets.hudFont, title, FontHeading, FontSpacingHeading)
 	drawEngravedText(assets.hudFont, title,
-		float32(panelX)+float32(panelW)/2-tm.X/2, float32(panelY+22),
+		float32(panelX)+float32(panelW)/2-tm.X/2, float32(panelY)+doorPromptHeaderInsetY,
 		FontHeading, textPrimary)
 
 	cardCenterX := float32(panelX) + float32(panelW)/2
 	drawTextCentered(assets.hudFont, "Travel to "+dest+"?",
-		cardCenterX, float32(panelY+78), FontBody, textMuted)
+		cardCenterX, float32(panelY)+doorPromptBodyInsetY, FontBody, textMuted)
 	// Controller-first affordances (no spelled-out keys).
 	DrawHintBar(assets.hudFont, []HintSeg{
 		Hint("Enter", GlyphA),
 		Hint("Stay", GlyphB),
-	}, cardCenterX, float32(panelY+panelH-40), FontSmall)
+	}, cardCenterX, float32(panelY+panelH)-doorPromptFooterInsetY, FontSmall)
 }
+
+// Door-prompt layout insets (Y offsets from the card's top edge, except the
+// footer which is from the bottom). The door prompt is a smaller, fleuron-free
+// confirm card with a FontHeading title — intentionally lighter than the
+// FontTitle drawTitledMenuCard/drawTitledCardHeader chrome — so it carries its
+// own tighter band rather than the shared modal tokens.
+const (
+	doorPromptHeaderInsetY = float32(22)
+	doorPromptBodyInsetY   = float32(78)
+	doorPromptFooterInsetY = float32(40)
+)
 
 // humanizeMapID turns a bare map id ("forgotten_plaza") into a display
 // label ("Forgotten Plaza") for the door prompt. Underscores become

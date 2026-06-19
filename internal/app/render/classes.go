@@ -93,46 +93,37 @@ func classAccent(class core.PartyClass) rl.Color {
 // `col` is the ink colour — callers typically pass the class accent
 // tint so the sigil reads as the class's own emblem.
 func drawClassGlyph(cx, cy, r float32, class core.PartyClass, col color.RGBA) {
-	switch class {
-	case core.ClassWarrior:
-		drawClassGlyphWarrior(cx, cy, r, col)
-	case core.ClassCleric:
-		drawClassGlyphCleric(cx, cy, r, col)
-	case core.ClassThief:
-		drawClassGlyphThief(cx, cy, r, col)
-	case core.ClassWizard:
-		drawClassGlyphWizard(cx, cy, r, col)
-	default:
+	draw, ok := classGlyphDrawers[class]
+	if !ok {
 		// Parallel to partyClassPresentations' init guard: a new class
 		// that forgets a glyph case fails loudly instead of drawing a
 		// blank sigil.
 		panic("render: drawClassGlyph missing case for party class")
 	}
+	draw(cx, cy, r, col)
 }
 
-// classGlyphCoverage is the maintained set of party classes that
-// drawClassGlyph above handles with an explicit case. It exists only so
-// the init() guard can assert this set matches partyClassPresentations'
-// keys — adding a class to the presentation table without giving it a
-// drawClassGlyph case (or vice versa) panics at startup instead of
-// silently hitting drawClassGlyph's panic default at draw time. Keep in
-// lockstep with the switch above.
-var classGlyphCoverage = map[core.PartyClass]struct{}{
-	core.ClassWarrior: {},
-	core.ClassCleric:  {},
-	core.ClassThief:   {},
-	core.ClassWizard:  {},
+// classGlyphDrawers maps each party class to the routine that paints its
+// sigil. The single source for BOTH the dispatch above and the init-time
+// coverage check below — no separate hand-synced coverage set to keep in
+// lockstep with a switch. Adding a class to partyClassPresentations without
+// a drawer here (or vice versa) panics at startup, not blank at draw time.
+var classGlyphDrawers = map[core.PartyClass]func(cx, cy, r float32, col color.RGBA){
+	core.ClassWarrior: drawClassGlyphWarrior,
+	core.ClassCleric:  drawClassGlyphCleric,
+	core.ClassThief:   drawClassGlyphThief,
+	core.ClassWizard:  drawClassGlyphWizard,
 }
 
 func init() {
 	for class := range partyClassPresentations {
-		if _, ok := classGlyphCoverage[class]; !ok {
+		if _, ok := classGlyphDrawers[class]; !ok {
 			panic("render: party class is in partyClassPresentations but missing a drawClassGlyph case")
 		}
 	}
-	for class := range classGlyphCoverage {
+	for class := range classGlyphDrawers {
 		if _, ok := partyClassPresentations[class]; !ok {
-			panic("render: classGlyphCoverage lists a class with no partyClassPresentations entry")
+			panic("render: classGlyphDrawers lists a class with no partyClassPresentations entry")
 		}
 	}
 }

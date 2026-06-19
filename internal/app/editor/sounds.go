@@ -950,20 +950,18 @@ func drawSoundsListCol(s *State, font rl.Font, theme render.Theme, l *soundLayou
 		drawButton(font, r.Play, ">", false)
 		drawButton(font, r.Delete, "X", false)
 	}
-	drawSoundColumnScrollHints(font, theme, l.listCol, l.listTopRow > 0, l.listEnd < len(names))
+	drawSoundColumnScrollHints(font, theme, l.listCol, l.listTopRow, len(names)-l.listEnd)
 }
 
-// drawSoundColumnScrollHints paints the "▲ more"/"▼ more" captions in a sounds
-// column's top-right / bottom-right when its row list has hidden rows above (up)
-// or below (down) the visible window. Shared by the saved-sounds and assignment
-// columns so the glyphs, inset, and offsets can't drift between the two.
-func drawSoundColumnScrollHints(font rl.Font, theme render.Theme, col rl.Rectangle, up, down bool) {
-	if up {
-		render.DrawRichText(font, "▲ more", rl.NewVector2(col.X+col.Width-70, col.Y+10), soundFontHint, 1, theme.TextHint)
-	}
-	if down {
-		render.DrawRichText(font, "▼ more", rl.NewVector2(col.X+col.Width-70, col.Y+col.Height-20), soundFontHint, 1, theme.TextHint)
-	}
+// drawSoundColumnScrollHints paints the "▲ N more"/"▼ N more" captions in a
+// sounds column's top-right / bottom-right when its row list has hiddenAbove /
+// hiddenBelow rows outside the visible window. Routes through the shared
+// drawScrollMoreHint so the glyph + "N more" format match every other
+// scrollable list in the editor (each call no-ops when its count is 0).
+func drawSoundColumnScrollHints(font rl.Font, theme render.Theme, col rl.Rectangle, hiddenAbove, hiddenBelow int) {
+	x := col.X + col.Width - 70
+	drawScrollMoreHint(font, theme, x, col.Y+10, hiddenAbove, true)
+	drawScrollMoreHint(font, theme, x, col.Y+col.Height-20, hiddenBelow, false)
 }
 
 func drawSoundsAssignCol(s *State, font rl.Font, theme render.Theme, l *soundLayout) {
@@ -989,7 +987,7 @@ func drawSoundsAssignCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 		drawButton(font, r.CycleLeft, "<", false)
 		drawButton(font, r.CycleRight, ">", false)
 	}
-	drawSoundColumnScrollHints(font, theme, l.assignCol, l.assignTopRow > 0, l.assignEnd < len(assignableCueList))
+	drawSoundColumnScrollHints(font, theme, l.assignCol, l.assignTopRow, len(assignableCueList)-l.assignEnd)
 }
 
 func drawSoundsColumnFrame(theme render.Theme, r rl.Rectangle, focused bool) {

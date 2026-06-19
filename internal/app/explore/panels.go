@@ -100,7 +100,7 @@ func updatePanels(g *core.GameState) {
 		setPanelTab(g, next)
 		return
 	}
-	// Direct-tab keyboard shortcuts (C / E / I / K / M). Pressing the
+	// Direct-tab keyboard shortcuts (C / E / I / K / J / M). Pressing the
 	// shortcut for the tab you're already on closes the overlay so
 	// the same key gesture that opens "Items" also clears "Items"
 	// — keeps the mnemonic keys feeling like real toggles.

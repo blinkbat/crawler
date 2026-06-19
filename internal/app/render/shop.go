@@ -20,6 +20,11 @@ const (
 	shopRowGap    = int32(8)
 	shopFootH     = int32(50)
 	shopRowInsetX = int32(40)
+	// shopRowTextDY is the baseline drop from a row's top edge to its text, shared
+	// by the empty-label / name / price columns so they sit on one line.
+	shopRowTextDY = int32(4)
+	// shopPriceInsetX is the right-edge inset of the price column inside the row.
+	shopPriceInsetX = int32(12)
 	// shopHintDrop nudges the footer hint down INTO the reserved shopFootH band
 	// (which starts at panelH-shopFootH) so the centered glyph strip seats in the
 	// middle of the footer rather than at its top edge. The shop hand-centers its
@@ -62,15 +67,15 @@ func drawShopOverlay(g *core.GameState, assets Resources) {
 	rowY := panelY + shopHeaderH
 	innerW := shopPanelW - shopRowInsetX*2
 	if len(rows) == 0 {
-		drawTextWithShadow(font, shopEmptyLabel(g.ShopTab), float32(rowX), float32(rowY+4), FontBody, textMuted)
+		drawTextWithShadow(font, shopEmptyLabel(g.ShopTab), float32(rowX), float32(rowY+shopRowTextDY), FontBody, textMuted)
 	}
 	for i, r := range rows {
 		if i == g.ShopCursor {
 			DrawSelectedRowI(rowX-focusPlateInsetX, rowY-focusPlateInsetY, innerW, shopRowH)
 		}
 		nameCol := rowTextColor(r.affordable, !r.affordable, textMuted)
-		drawTextWithShadow(font, r.name, float32(rowX), float32(rowY+4), FontBody, nameCol)
-		drawTextRightAligned(font, r.price, float32(rowX)+float32(innerW)-12, float32(rowY+4), FontBody, textLabel)
+		drawTextWithShadow(font, r.name, float32(rowX), float32(rowY+shopRowTextDY), FontBody, nameCol)
+		drawTextRightAligned(font, r.price, float32(rowX)+float32(innerW)-float32(shopPriceInsetX), float32(rowY+shopRowTextDY), FontBody, textLabel)
 		rowY += stride
 	}
 
@@ -173,7 +178,7 @@ func shopEmptyLabel(tab core.ShopTab) string {
 func drawShopTabs(font rl.Font, active core.ShopTab, x, y float32) {
 	drawTextTabStrip(font, x, y, int(core.ShopTabCount), int(active),
 		func(i int) string { return core.ShopTabLabel(core.ShopTab(i)) },
-		func(s string) float32 { return shopTabMeasureCache.measure(font, s, FontBody, FontSpacingBody).X },
+		tabLabelMeasurer(&shopTabMeasureCache, font),
 		borderActive, 28, false)
 }
 

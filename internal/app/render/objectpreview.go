@@ -116,11 +116,7 @@ func DrawObjectPreview(rect rl.Rectangle, assets Resources, item ObjectPreviewIt
 	rl.EndMode3D()
 	rl.EndTextureMode()
 
-	// RenderTextures are stored flipped, so the source height is negated.
-	rl.DrawTextureRec(objectPreviewRT.rt.Texture,
-		rl.NewRectangle(0, 0, float32(w), -float32(h)),
-		rl.NewVector2(rect.X, rect.Y),
-		rl.White)
+	objectPreviewRT.blit(rect)
 }
 
 // drawObjectPreviewModel draws one object centered at `center`, routing through

@@ -209,7 +209,7 @@ func applyTimeOfDay(base lightingProfile, t timeProfile, enclosed bool) lighting
 	// keeps the normal day-cycle lighting instead of being crushed
 	// to torchlit gloom. This is the fix for "forest dawn way
 	// darker than field dawn."
-	if base.FogDensity > 0.06 && enclosed {
+	if base.FogDensity > indoorFogThreshold && enclosed {
 		// Dark, but navigable. The directional sun is a low cool
 		// fill so walls read as silhouettes; ambient is dim but
 		// not pitch-black, so a dungeon with no torches is still

@@ -196,6 +196,16 @@ func closeContextMenu(s *State) {
 	s.contextMenu = contextMenuState{}
 }
 
+// Context-menu geometry. The right-click menu is the dropdown selector's
+// cousin (a vertical list of selectable labels, width-measured + screen-clamped)
+// and shares dropdownPad; its rows run a touch taller and wider than the
+// dropdown's (dropdownRowH 24 / dropdownMinWidth 170) because a right-click menu
+// wants bigger click targets — named here rather than left as bare literals.
+const (
+	contextMenuRowH     = float32(28)
+	contextMenuMinWidth = float32(180)
+)
+
 // contextMenuLayout returns the per-row rectangles + the full background
 // rectangle of the open menu. Recomputed each frame so a screen resize
 // or item-list edit (kinds rebuilt) reflows naturally.
@@ -203,9 +213,9 @@ func contextMenuLayout(s *State) (rl.Rectangle, []rl.Rectangle) {
 	if !s.contextMenu.open {
 		return rl.Rectangle{}, nil
 	}
-	const rowH = float32(28)
-	const padding = float32(6)
-	width := float32(180)
+	const rowH = contextMenuRowH
+	const padding = dropdownPad // same gutter as the dropdown selector
+	width := contextMenuMinWidth
 	// Measure widest label so a long "Move start here" doesn't get clipped.
 	// MeasureTextEx with the default font would force the renderer to
 	// reach for it; the editor draws with the loaded font handed into

@@ -163,7 +163,7 @@ func barShake(timing core.TimingState, flashTimer float32) float32 {
 // throb intensity both vary by quality, and both used to live in parallel
 // switches — collapsed here so a balance / palette pass touches one row.
 // Indexed by core.TimingQualityMiss..Excellent.
-var qualityVisuals = [...]struct {
+var qualityVisuals = [core.TimingQualityCount]struct {
 	ThrobIntensity float32
 	AttackColor    rl.Color
 	DefendColor    rl.Color
@@ -175,14 +175,17 @@ var qualityVisuals = [...]struct {
 	core.TimingQualityExcellent: {ThrobIntensity: 0.22, AttackColor: timingGradeAtkExcellent, DefendColor: timingGradeDefExcellent},
 }
 
-// init asserts qualityVisuals covers every timing grade. Pairs with
-// the analogous init() in core/config.go (timingGrades) and battle.go
-// (gradeSounds) so the three parallel tables stay in sync. The fixed-
-// size array form means a missing row produces a zero-valued entry,
-// not a length mismatch — so the assert pivots on TimingQualityCount.
+// init asserts qualityVisuals covers every timing grade. Pairs with the
+// analogous init() in core/config.go (timingGrades) and battle.go
+// (gradeSounds) so the three parallel tables stay in sync. The explicit
+// [TimingQualityCount] sizing pins the length at compile time (parity with
+// panelTabDrawers / statIconDrawers); this probes each slot has a real grade
+// color so a forgotten row trips at startup instead of drawing a clear bar.
 func init() {
-	if len(qualityVisuals) != int(core.TimingQualityCount) {
-		panic("render/timing: qualityVisuals length must match core.TimingQualityCount")
+	for q := 0; q < int(core.TimingQualityCount); q++ {
+		if qualityVisuals[q].AttackColor.A == 0 {
+			panic("render/timing: qualityVisuals missing a row for a timing grade")
+		}
 	}
 }
 
@@ -330,6 +333,23 @@ func applyTimingFlashCursor(curX, y, barH, flashTimer float32, base rl.Color) (f
 	return cursorW, flashCol
 }
 
+const (
+	// timingCursorWidth is the resting width (px) of the sliding cursor block
+	// on both the press and charge bars (the held charge cursor widens past it).
+	timingCursorWidth = float32(8)
+	// timingCursorBleed is how far the cursor block overhangs the bar top and
+	// bottom so it reads as a distinct slider rather than a fill.
+	timingCursorBleed = int32(6)
+)
+
+// drawTimingCursor paints the fat vertical cursor block centered at curX,
+// overhanging the bar body by timingCursorBleed top and bottom. Shared by the
+// press and charge bars (and the charge bar's held halo) so the cursor geometry
+// lives in one place instead of three open-coded DrawRectangle calls.
+func drawTimingCursor(curX, drawY, drawnH, cursorW float32, col rl.Color) {
+	rl.DrawRectangle(int32(curX-cursorW/2), int32(drawY)-timingCursorBleed, int32(cursorW), int32(drawnH)+timingCursorBleed*2, col)
+}
+
 // timingTrackColor is the dark base fill behind every timing bar (press
 // and charge) — the SAME gauge body the HP/MP bars use, so it derives from
 // the shared barTrack hue rather than carrying its own near-black literal.
@@ -459,7 +479,7 @@ func drawPressBar(timing core.TimingState, g *core.GameState, assets Resources, 
 	// Progress() naturally stays at 0 — no special-casing needed here.
 	curPct := timing.Progress()
 	curX := drawX + curPct*barW
-	cursorW := float32(8)
+	cursorW := timingCursorWidth
 	cursorCol := timingCursorColor
 	// Live grade preview: while the cursor's inside the acceptance window
 	// and the player hasn't pressed yet, tint it toward the grade it would
@@ -477,7 +497,7 @@ func drawPressBar(timing core.TimingState, g *core.GameState, assets Resources, 
 	if flashing {
 		cursorW, cursorCol = applyTimingFlashCursor(curX, drawY, drawnH, g.Battle.TimingFlash, qualityColor(timing.Quality, isDefend))
 	}
-	rl.DrawRectangle(int32(curX-cursorW/2), int32(drawY)-6, int32(cursorW), int32(drawnH)+12, cursorCol)
+	drawTimingCursor(curX, drawY, drawnH, cursorW, cursorCol)
 
 	// Excellent shockwave — an expanding ring from the frozen cursor
 	// position during the flash hold. Only on Excellent so the moment
@@ -569,7 +589,7 @@ func drawChargeBar(timing core.TimingState, g *core.GameState, assets Resources,
 	// Cursor — slides with Elapsed, brightens when held.
 	curPct := timing.Progress()
 	curX := drawX + curPct*barW
-	cursorW := float32(8)
+	cursorW := timingCursorWidth
 	cursorCol := colorWithAlpha(timingCursorColor, 220)
 	if timing.Pressed && !timing.Resolved {
 		// Held: punchy cursor with a small halo so the engaged state reads.
@@ -577,12 +597,12 @@ func drawChargeBar(timing core.TimingState, g *core.GameState, assets Resources,
 		cursorCol = timingHeldColor
 		halo := cursorCol
 		halo.A = 90
-		rl.DrawRectangle(int32(curX-cursorW), int32(drawY)-6, int32(cursorW*2), int32(drawnH)+12, halo)
+		drawTimingCursor(curX, drawY, drawnH, cursorW*2, halo)
 	}
 	if flashing {
 		cursorW, cursorCol = applyTimingFlashCursor(curX, drawY, drawnH, g.Battle.TimingFlash, qualityColor(timing.Quality, false))
 	}
-	rl.DrawRectangle(int32(curX-cursorW/2), int32(drawY)-6, int32(cursorW), int32(drawnH)+12, cursorCol)
+	drawTimingCursor(curX, drawY, drawnH, cursorW, cursorCol)
 
 	// Excellent shockwave on release — same treatment as the press bar so
 	// charge-graded Excellents read with the same flourish.

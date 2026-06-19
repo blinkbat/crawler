@@ -386,8 +386,14 @@ func randAngle() float32 {
 // burst down" is a one-function tune, as the section comment promised.
 type radialBurst struct {
 	count              int
-	speedMin, speedMax float32 // horizontal speed range
+	speedMin, speedMax float32 // horizontal speed range (radial mode)
 	horizScale         float32 // VX/VZ multiplier (treated as 1 when 0)
+	// vyOnly switches off the angular horizontal fling: VX/VZ become a small
+	// ± velJitter instead of speed-along-a-heading, so this skeleton also
+	// covers the plain "rise / fall in place" emitters (heal, smite pillar,
+	// sleep, web) that have no radial spread.
+	vyOnly             bool
+	velJitter          float32 // ± jitter on VX and VZ (vyOnly mode)
 	posJitter          float32 // ± jitter on X and Z
 	yBase, yJitter     float32 // Y = base + jitter (relative to origin unless groundY)
 	groundY            bool    // Y is absolute (ground-anchored) instead of o.Y-relative
@@ -414,8 +420,16 @@ func spawnRadialBurst(o rl.Vector3, b radialBurst) {
 		horiz = 1
 	}
 	for i := 0; i < b.count; i++ {
-		ang := randAngle()
-		speed := uniform(b.speedMin, b.speedMax)
+		var vx, vz float32
+		if b.vyOnly {
+			vx = vfxJitter(b.velJitter)
+			vz = vfxJitter(b.velJitter)
+		} else {
+			ang := randAngle()
+			speed := uniform(b.speedMin, b.speedMax)
+			vx = float32(math.Cos(float64(ang))) * speed * horiz
+			vz = float32(math.Sin(float64(ang))) * speed * horiz
+		}
 		y := b.yBase + vfxJitter(b.yJitter)
 		if !b.groundY {
 			y += o.Y
@@ -424,9 +438,9 @@ func spawnRadialBurst(o rl.Vector3, b radialBurst) {
 			X:          o.X + vfxJitter(b.posJitter),
 			Y:          y,
 			Z:          o.Z + vfxJitter(b.posJitter),
-			VX:         float32(math.Cos(float64(ang))) * speed * horiz,
+			VX:         vx,
 			VY:         uniform(b.vyMin, b.vyMax),
-			VZ:         float32(math.Sin(float64(ang))) * speed * horiz,
+			VZ:         vz,
 			GY:         b.gravityY,
 			Duration:   uniform(b.durMin, b.durMax),
 			SizeStart:  b.sizeStart,
@@ -493,36 +507,28 @@ func spawnEmber(o rl.Vector3) {
 func spawnHeal(o rl.Vector3) {
 	// Slow-rising green-gold motes. Stays light so the heal reads as
 	// gentle, not explosive.
-	for i := 0; i < 16; i++ {
-		pushParticle(particle{
-			X: o.X + vfxJitter(0.22), Y: o.Y - 0.2, Z: o.Z + vfxJitter(0.22),
-			VX:         vfxJitter(0.25),
-			VY:         0.6 + vfxRNG.Float32()*0.5,
-			VZ:         vfxJitter(0.25),
-			Duration:   0.9 + vfxRNG.Float32()*0.4,
-			SizeStart:  0.09,
-			SizeEnd:    0.14,
-			ColorStart: rl.NewColor(212, 248, 196, 255),
-			ColorEnd:   rl.NewColor(132, 200, 96, 0),
-			Shape:      shapeMote,
-		})
-	}
+	spawnRadialBurst(o, radialBurst{
+		count: 16, vyOnly: true, velJitter: 0.25,
+		posJitter: 0.22, yBase: -0.2,
+		vyMin: 0.6, vyMax: 1.1,
+		durMin: 0.9, durMax: 1.3, sizeStart: 0.09, sizeEnd: 0.14,
+		colorStart: rl.NewColor(212, 248, 196, 255),
+		colorEnd:   rl.NewColor(132, 200, 96, 0),
+		shape:      shapeMote,
+	})
 }
 
 func spawnSmite(o rl.Vector3) {
 	// Vertical pillar of light shards descending then bursting out.
-	for i := 0; i < 10; i++ {
-		pushParticle(particle{
-			X: o.X + vfxJitter(0.10), Y: o.Y + 0.9 + vfxJitter(0.20), Z: o.Z + vfxJitter(0.10),
-			VY:         -3.0,
-			Duration:   0.28 + vfxRNG.Float32()*0.10,
-			SizeStart:  0.18,
-			SizeEnd:    0.05,
-			ColorStart: rl.NewColor(255, 248, 196, 255),
-			ColorEnd:   rl.NewColor(232, 196, 112, 0),
-			Shape:      shapeShard,
-		})
-	}
+	spawnRadialBurst(o, radialBurst{
+		count: 10, vyOnly: true,
+		posJitter: 0.10, yBase: 0.9, yJitter: 0.20,
+		vyMin: -3.0, vyMax: -3.0,
+		durMin: 0.28, durMax: 0.38, sizeStart: 0.18, sizeEnd: 0.05,
+		colorStart: rl.NewColor(255, 248, 196, 255),
+		colorEnd:   rl.NewColor(232, 196, 112, 0),
+		shape:      shapeShard,
+	})
 	spawnRadialBurst(o, radialBurst{
 		count: 10, speedMin: 1.8, speedMax: 3.0,
 		yBase: 0.05, vyMin: 0.4, vyMax: 0.4, gravityY: -2.4,
@@ -628,36 +634,28 @@ func spawnStoneslam(o rl.Vector3) {
 
 func spawnSleep(o rl.Vector3) {
 	// Drifting indigo blobs that wobble side to side — sells "Zzz."
-	for i := 0; i < 8; i++ {
-		pushParticle(particle{
-			X: o.X + vfxJitter(0.18), Y: o.Y + 0.1, Z: o.Z + vfxJitter(0.18),
-			VX:         vfxJitter(0.20),
-			VY:         0.35 + vfxRNG.Float32()*0.25,
-			VZ:         vfxJitter(0.20),
-			Duration:   1.0 + vfxRNG.Float32()*0.4,
-			SizeStart:  0.10,
-			SizeEnd:    0.18,
-			ColorStart: rl.NewColor(168, 200, 240, 220),
-			ColorEnd:   rl.NewColor(96, 132, 192, 0),
-			Shape:      shapeMote,
-		})
-	}
+	spawnRadialBurst(o, radialBurst{
+		count: 8, vyOnly: true, velJitter: 0.20,
+		posJitter: 0.18, yBase: 0.1,
+		vyMin: 0.35, vyMax: 0.6,
+		durMin: 1.0, durMax: 1.4, sizeStart: 0.10, sizeEnd: 0.18,
+		colorStart: rl.NewColor(168, 200, 240, 220),
+		colorEnd:   rl.NewColor(96, 132, 192, 0),
+		shape:      shapeMote,
+	})
 }
 
 func spawnWeb(o rl.Vector3) {
 	// Dropping strands — short vertical streaks that fall and fade.
-	for i := 0; i < 12; i++ {
-		pushParticle(particle{
-			X: o.X + vfxJitter(0.20), Y: o.Y + 0.5 + vfxJitter(0.10), Z: o.Z + vfxJitter(0.20),
-			VY:         -1.2 - vfxRNG.Float32()*0.6,
-			Duration:   0.5 + vfxRNG.Float32()*0.2,
-			SizeStart:  0.10,
-			SizeEnd:    0.14,
-			ColorStart: rl.NewColor(220, 200, 240, 220),
-			ColorEnd:   rl.NewColor(150, 110, 200, 0),
-			Shape:      shapeStrand,
-		})
-	}
+	spawnRadialBurst(o, radialBurst{
+		count: 12, vyOnly: true,
+		posJitter: 0.20, yBase: 0.5, yJitter: 0.10,
+		vyMin: -1.8, vyMax: -1.2,
+		durMin: 0.5, durMax: 0.7, sizeStart: 0.10, sizeEnd: 0.14,
+		colorStart: rl.NewColor(220, 200, 240, 220),
+		colorEnd:   rl.NewColor(150, 110, 200, 0),
+		shape:      shapeStrand,
+	})
 }
 
 func spawnConfuse(o rl.Vector3) {

@@ -17,6 +17,7 @@ const (
 	msgChooseAction   = "Choose an action."
 	msgChooseTarget   = "Choose a target."
 	msgChooseItem     = "Choose an item."
+	msgChooseSkill    = "Choose a skill."
 	msgNoTarget       = "No target."
 	msgNoSkillReady   = "No skill ready."
 	msgNoItems        = "No items."

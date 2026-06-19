@@ -324,7 +324,7 @@ func drawList(items []string, cursor int, font rl.Font, theme render.Theme, scre
 	listY := float32(screenH) * titleListAnchorFrac
 	if header != "" {
 		sz := render.FontBody
-		m := rl.MeasureTextEx(font, header, sz, 1)
+		m := rl.MeasureTextEx(font, header, sz, render.FontSpacingBody)
 		render.DrawTextWithShadow(font, header, render.CenterXF(m.X), listY-titleListHeaderOffset, sz, theme.TextLabel)
 	}
 	for i, label := range items {
@@ -355,7 +355,7 @@ func drawHint(font rl.Font, segs []render.HintSeg, screenH int32) {
 
 func drawError(font rl.Font, theme render.Theme, msg string, screenH int32) {
 	size := render.FontSmall
-	m := rl.MeasureTextEx(font, msg, size, 1)
+	m := rl.MeasureTextEx(font, msg, size, render.FontSpacingBody)
 	y := float32(screenH) - titleErrorFooterOffset
 	render.DrawTextWithShadow(font, msg, render.CenterXF(m.X), y, size, theme.BorderDanger)
 }

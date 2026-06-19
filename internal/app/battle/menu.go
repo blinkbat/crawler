@@ -123,7 +123,7 @@ func openSkillMenu(g *core.GameState) {
 	}
 	g.Battle.SkillMenuIndex = idx
 	g.Battle.ActionMode = core.ActionSkillMenu
-	setBattleStatus(g, "Choose a skill.")
+	setBattleStatus(g, msgChooseSkill)
 }
 
 // updateSkillMenu drives the skill-picker submenu. Up/Down cycles the
@@ -196,7 +196,7 @@ func updateItemMenu(g *core.GameState) {
 		// Inventory ran dry between opening the menu and now — not actually
 		// reachable today (use is the only consumer), but defensively bail.
 		resetBattleAction(g)
-		setBattleStatus(g, "No items.")
+		setBattleStatus(g, msgNoItems)
 		return
 	}
 	g.Battle.ItemMenuIndex = input.CursorUpDown(g.Battle.ItemMenuIndex, count)

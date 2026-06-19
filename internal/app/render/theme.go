@@ -400,6 +400,11 @@ var (
 	crystalDormantBody = rl.NewColor(70, 92, 110, 190)   // dormant gem body (flat slate)
 	crystalEdgeCharged = rl.NewColor(210, 250, 255, 220) // charged faceted wire
 	crystalEdgeDormant = rl.NewColor(110, 130, 150, 150) // dormant faceted wire
+	// crystalChargedBody is the full charged gem-body tint: R/G ride
+	// crystalCyanBase (so the gem and editor marker stay in lockstep) with the
+	// blue pinned full and a fixed alpha for the bright cut-crystal read.
+	// crystalColor pulses only the R/G channels of this at render time.
+	crystalChargedBody = rl.NewColor(crystalCyanBase.R, crystalCyanBase.G, 255, 235)
 	// markerCrystal reads as the same charged-crystal cyan the player sees, and
 	// stands clear of the amber chest / brown door / red pack / yellow start
 	// swatches.
@@ -490,6 +495,14 @@ const (
 	actionLogH  = int32(300)
 	actionMenuW = int32(340)
 	actionMenuH = int32(312)
+	// hudContentInsetX is the left gutter from a combat HUD pane's edge to its
+	// content (enemy-card name, action-menu header/rows). Named so the roster
+	// and action-menu surfaces share one inset instead of a bare 22 at each.
+	hudContentInsetX = int32(22)
+	// actionMenuHintMinH is the panel-height floor below which the action menu
+	// drops its confirm/back hint footer (it would collide with the rows on a
+	// short window). Sits above the hudPanelMinH row-readability floor.
+	actionMenuHintMinH = int32(260)
 
 	// Corner radii. Smaller than the previous pass (10/6 → 4/3) so the
 	// frame reads as a hardwood mitre joint rather than a modern UI
@@ -2184,6 +2197,14 @@ func rowTextColor(focused, disabled bool, disabledCol color.RGBA) color.RGBA {
 		return textPrimary
 	}
 	return textMuted
+}
+
+// tabLabelMeasurer returns the FontBody label-width closure drawTextTabStrip
+// expects, backed by the given measure cache — the shared shape behind the
+// shop's and Journal's tab strips, instead of each hand-rolling the same
+// `func(s string) float32 { return cache.measure(font, s, FontBody, …).X }`.
+func tabLabelMeasurer(cache *measureCache, font rl.Font) func(string) float32 {
+	return func(s string) float32 { return cache.measure(font, s, FontBody, FontSpacingBody).X }
 }
 
 // drawTextTabStrip paints a left-anchored row of simple FontBody text tabs

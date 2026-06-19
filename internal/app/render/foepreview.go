@@ -63,6 +63,34 @@ func (p *previewRT) close() {
 	p.init = false
 }
 
+// blit draws the cached off-screen texture into rect on screen. RenderTextures
+// are stored y-flipped, so the source height is negated to draw it right-side
+// up — the one place that detail lives instead of three open-coded
+// DrawTextureRec calls (foe / party / object previews).
+func (p *previewRT) blit(rect rl.Rectangle) {
+	rl.DrawTextureRec(p.rt.Texture,
+		rl.NewRectangle(0, 0, float32(p.w), -float32(p.h)),
+		rl.NewVector2(rect.X, rect.Y),
+		rl.White)
+}
+
+// visualizerGroundSize is the diorama floor extent (and grid slice count) shared
+// by the Foe and Party visualizer scenes — one literal instead of a 14 hand-keyed
+// into each preview's DrawPlane + DrawGrid.
+const visualizerGroundSize = float32(14)
+
+// beginVisualizerScene opens the off-screen 3D pass for the Foe / Party
+// visualizers: bind the target, clear to the diorama void, enter 3D, and lay
+// the muted floor + grid. Pair with rl.EndMode3D / rl.EndTextureMode. The
+// object-thumbnail preview keeps its own setup (smaller floor, no grid, lit).
+func (p *previewRT) beginVisualizerScene(cam rl.Camera3D) {
+	rl.BeginTextureMode(p.rt)
+	rl.ClearBackground(foePreviewBG)
+	rl.BeginMode3D(cam)
+	rl.DrawPlane(rl.NewVector3(0, 0, 0), rl.NewVector2(visualizerGroundSize, visualizerGroundSize), foePreviewGround)
+	rl.DrawGrid(int32(visualizerGroundSize), 1)
+}
+
 var foePreviewRT previewRT
 
 // foeAnchor is the preview's formation-center anchor — the same vertical center
@@ -180,11 +208,7 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 	}
 	cam := zoomedPreviewCamera(zoom)
 
-	rl.BeginTextureMode(foePreviewRT.rt)
-	rl.ClearBackground(foePreviewBG)
-	rl.BeginMode3D(cam)
-	rl.DrawPlane(rl.NewVector3(0, 0, 0), rl.NewVector2(14, 14), foePreviewGround)
-	rl.DrawGrid(14, 1)
+	foePreviewRT.beginVisualizerScene(cam)
 
 	// Same per-kind placement as the battle roster, via the shared helper so
 	// the preview stays faithful to drawBattlePack's depth/shadow/chevron/
@@ -213,12 +237,8 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 	rl.EndMode3D()
 	rl.EndTextureMode()
 
-	// Blit the off-screen render into the panel. RenderTextures are stored
-	// flipped, so the source height is negated to draw it right-side up.
-	rl.DrawTextureRec(foePreviewRT.rt.Texture,
-		rl.NewRectangle(0, 0, float32(w), -float32(h)),
-		rl.NewVector2(rect.X, rect.Y),
-		rl.White)
+	// Blit the off-screen render into the panel.
+	foePreviewRT.blit(rect)
 }
 
 // drawPreviewGizmos paints the three authoring anchor gizmos shared by the Foe
@@ -248,13 +268,7 @@ func drawAnchorGizmo(p rl.Vector3, radius float32, col rl.Color) {
 	if radius <= 0 {
 		return
 	}
-	rl.DrawRenderBatchActive() // flush prior depth-tested geometry
-	rl.DisableDepthTest()
-	rl.DisableDepthMask()
-	rl.DrawSphereWires(p, radius, 6, 6, col)
-	rl.DrawRenderBatchActive() // flush the gizmo with depth off
-	rl.EnableDepthMask()
-	rl.EnableDepthTest()
+	drawDepthIndependent(func() { rl.DrawSphereWires(p, radius, 6, 6, col) })
 }
 
 // CloseFoePreview unloads the cached off-screen texture. The editor calls this

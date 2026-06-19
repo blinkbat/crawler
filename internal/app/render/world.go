@@ -1059,6 +1059,19 @@ var treePropScales = map[byte]float32{
 	core.TileTreeYoung: 0.92,
 }
 
+// foliageTrunkShadowFactor is the fraction of a foliage prop's scale its
+// ground-shadow disc spans before per-prop slack — shared by the tree props so
+// the disc tracks the trunk footprint consistently instead of each loader
+// re-deriving the 0.34 factor.
+const foliageTrunkShadowFactor = 0.34
+
+// foliageShadowRadius returns the ground-shadow disc radius for a foliage prop
+// at the given scale, plus a little slack so the painted disc sits a touch
+// wider than the trunk's projected footprint.
+func foliageShadowRadius(scale, slack float32) float32 {
+	return foliageTrunkShadowFactor*scale + slack
+}
+
 // drawPropTreeScaled draws assets.tree at the scale registered in
 // treePropScales for the given char. The inline-prop dispatcher binds
 // each per-char closure at init so the prop-renderer call site stays
@@ -1071,7 +1084,7 @@ func drawPropTreeScaled(char byte) inlinePropRenderer {
 		// Tree shadow scales with the tree's overall scale, plus
 		// a touch of slack so the painted disc sits a little wider
 		// than the trunk's projected footprint.
-		drawGroundShadowElev(center.X, center.Z, center.Y, 0.34*scale+0.10)
+		drawGroundShadowElev(center.X, center.Z, center.Y, foliageShadowRadius(scale, 0.10))
 		assets.tree.drawVaried(center, scale, propYaw, tileHash(x, z))
 	}
 }
@@ -1089,8 +1102,8 @@ func drawPropTreeTwin(assets Resources, _ *core.AreaDefinition, x, z int, center
 	seed := tileHash(x, z)
 	left := rl.NewVector3(center.X-offset, center.Y, center.Z-offset)
 	right := rl.NewVector3(center.X+offset, center.Y, center.Z+offset)
-	drawGroundShadowElev(left.X, left.Z, center.Y, 0.34*scaleBig+0.08)
-	drawGroundShadowElev(right.X, right.Z, center.Y, 0.34*scaleSmall+0.08)
+	drawGroundShadowElev(left.X, left.Z, center.Y, foliageShadowRadius(scaleBig, 0.08))
+	drawGroundShadowElev(right.X, right.Z, center.Y, foliageShadowRadius(scaleSmall, 0.08))
 	if seed&1 == 0 {
 		assets.tree.drawVaried(left, scaleBig, propYaw, seed)
 		assets.tree.drawVaried(right, scaleSmall, propYaw+1.1, seed^0x9E3779B9)
@@ -2082,11 +2095,21 @@ const (
 // depth WRITES are disabled too so the marker can't occlude billboards drawn
 // after it in the same pass. State is restored so later draws are unaffected.
 func drawMarkerOnTop(unitPos rl.Vector3, style markerStyle) {
+	drawDepthIndependent(func() { drawMarker(unitPos, style) })
+}
+
+// drawDepthIndependent runs draw with depth test AND depth writes disabled, so
+// whatever it paints renders above all world geometry and can't occlude later
+// draws in the same pass. rlgl batches, so the active batch is flushed before
+// AND after the toggle for it to land cleanly; state is restored afterward.
+// Shared by the selector pyramid (drawMarkerOnTop) and the visualizer anchor
+// gizmos (drawAnchorGizmo).
+func drawDepthIndependent(draw func()) {
 	rl.DrawRenderBatchActive() // flush prior depth-tested geometry
 	rl.DisableDepthTest()
 	rl.DisableDepthMask()
-	drawMarker(unitPos, style)
-	rl.DrawRenderBatchActive() // flush the marker with depth off
+	draw()
+	rl.DrawRenderBatchActive() // flush the overlay draw with depth off
 	rl.EnableDepthMask()
 	rl.EnableDepthTest()
 }

@@ -592,6 +592,13 @@ type lightingProfile struct {
 
 // Per-area lighting profiles, hoisted to package vars so we don't rebuild a
 // fresh struct every frame. Both areas reuse the same shader.
+// indoorFogThreshold straddles the two authored FogDensity profiles below
+// (dungeon 0.085 vs field 0.026): a profile fogger than this, in an area with
+// a real ceiling, gets the spooky-dungeon lighting override (daycycle.go).
+// Co-located with the profiles so nudging either one toward 0.06 doesn't
+// silently flip the indoor verdict from across the package.
+const indoorFogThreshold = 0.06
+
 var (
 	dungeonLighting = lightingProfile{
 		// Most fields here are overridden by applyTimeOfDay at

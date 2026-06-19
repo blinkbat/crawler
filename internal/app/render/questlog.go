@@ -33,7 +33,7 @@ func drawPanelsQuests(g *core.GameState, assets Resources, body rl.Rectangle) {
 func drawJournalSubtabHeader(font rl.Font, active core.JournalSubtab, body rl.Rectangle) float32 {
 	drawTextTabStrip(font, body.X+journalRowInsetX, body.Y+2, int(core.JournalSubtabCount), int(active),
 		func(i int) string { return core.JournalSubtabLabel(core.JournalSubtab(i)) },
-		func(s string) float32 { return journalMeasureCache.measure(font, s, FontBody, 1).X },
+		tabLabelMeasurer(&journalMeasureCache, font),
 		textPrimary, 22, true)
 	return FontBody + 14
 }
