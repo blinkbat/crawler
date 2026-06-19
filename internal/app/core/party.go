@@ -14,6 +14,12 @@ const (
 	ClassWizard
 )
 
+// PartyClassCount is the number of PartyClass values (ClassWarrior..ClassWizard),
+// so render can size a per-class array as [core.PartyClassCount] without the bare
+// 4. Equals PartyMemberCount today (one member per class); init() asserts the two
+// stay in lockstep.
+const PartyClassCount = 4
+
 type PartyClassDefinition struct {
 	Class PartyClass
 	Name  string
@@ -1705,6 +1711,9 @@ func CommitLevelUp(m *PartyMember, pendingStats [StatCount]int) bool {
 func init() {
 	if len(partyClassDefinitions) != PartyMemberCount {
 		panic("core: partyClassDefinitions length must match PartyMemberCount — append a class and bump PartyMemberCount together")
+	}
+	if PartyClassCount != PartyMemberCount {
+		panic("core: PartyClassCount must match PartyMemberCount — one party member per class; bump both together")
 	}
 	if len(statTable) != int(StatCount) {
 		panic("core: statTable length must match StatCount — add a row when adding a Stat enum value")

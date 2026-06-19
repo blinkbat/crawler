@@ -93,22 +93,15 @@ func classAccent(class core.PartyClass) rl.Color {
 // `col` is the ink colour — callers typically pass the class accent
 // tint so the sigil reads as the class's own emblem.
 func drawClassGlyph(cx, cy, r float32, class core.PartyClass, col color.RGBA) {
-	draw, ok := classGlyphDrawers[class]
-	if !ok {
-		// Parallel to partyClassPresentations' init guard: a new class
-		// that forgets a glyph case fails loudly instead of drawing a
-		// blank sigil.
-		panic("render: drawClassGlyph missing case for party class")
-	}
-	draw(cx, cy, r, col)
+	classGlyphDrawers[class](cx, cy, r, col)
 }
 
-// classGlyphDrawers maps each party class to the routine that paints its
-// sigil. The single source for BOTH the dispatch above and the init-time
-// coverage check below — no separate hand-synced coverage set to keep in
-// lockstep with a switch. Adding a class to partyClassPresentations without
-// a drawer here (or vice versa) panics at startup, not blank at draw time.
-var classGlyphDrawers = map[core.PartyClass]func(cx, cy, r float32, col color.RGBA){
+// classGlyphDrawers indexes each party class to the routine that paints its
+// sigil. A fixed-size array keyed by the PartyClass iota (mirrors
+// statIconDrawers / panelTabDrawers): adding a class bumps core.PartyClassCount,
+// which leaves a nil slot the init scan below trips on at startup rather than a
+// blank sigil at draw time.
+var classGlyphDrawers = [core.PartyClassCount]func(cx, cy, r float32, col color.RGBA){
 	core.ClassWarrior: drawClassGlyphWarrior,
 	core.ClassCleric:  drawClassGlyphCleric,
 	core.ClassThief:   drawClassGlyphThief,
@@ -116,14 +109,16 @@ var classGlyphDrawers = map[core.PartyClass]func(cx, cy, r float32, col color.RG
 }
 
 func init() {
-	for class := range partyClassPresentations {
-		if _, ok := classGlyphDrawers[class]; !ok {
-			panic("render: party class is in partyClassPresentations but missing a drawClassGlyph case")
+	for class := core.PartyClass(0); int(class) < len(classGlyphDrawers); class++ {
+		if classGlyphDrawers[class] == nil {
+			panic("render: party class has no classGlyphDrawers entry — add the row")
 		}
 	}
-	for class := range classGlyphDrawers {
+	// partyClassPresentations is still a map; keep the cross-coverage check so a
+	// class with a glyph but no presentation (or vice versa) fails at startup.
+	for class := core.PartyClass(0); int(class) < len(classGlyphDrawers); class++ {
 		if _, ok := partyClassPresentations[class]; !ok {
-			panic("render: classGlyphDrawers lists a class with no partyClassPresentations entry")
+			panic("render: party class has a glyph drawer but no partyClassPresentations entry")
 		}
 	}
 }

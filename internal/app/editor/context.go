@@ -221,6 +221,15 @@ func contextMenuLayout(s *State) (rl.Rectangle, []rl.Rectangle) {
 	// reach for it; the editor draws with the loaded font handed into
 	// drawContextMenu — we approximate width via a per-char average so
 	// the layout pass doesn't need the font handle here.
+	//
+	// NOTE: this width-measure + the screen-clamp below parallel
+	// computeDropdownLayout (dropdown.go ~395) but DON'T share a helper: the
+	// dropdown sizes on editorFontBody with a 2*dropdownPad+12+markerW pad and
+	// reserves room for per-row markers/hotkeys, while the context menu sizes on
+	// editorFontLabel + buttonLabelPadX with no markers — so a single shared
+	// width helper would change one surface's sizing. A real dedup wants a
+	// neutral measureMenuWidth(labels, fontSize, pad) living in dropdown.go,
+	// which this pass doesn't own (editor file split). Left as-is intentionally.
 	for _, it := range s.contextMenu.items {
 		w := approxTextWidth(it.label, editorFontLabel) + buttonLabelPadX
 		if w > width {

@@ -626,6 +626,83 @@ func removeDialogTriggerAt(s *State, idx int) {
 	clampModalCursor(s, len(s.area.Triggers))
 }
 
+// dialogListModalSpec parameterizes the three list-style dialog modals (the
+// dialog list, a dialog's node list, and the trigger list) so their draw +
+// update flow lives in one driver. They share the same skeleton — header, a
+// hint line, an Add/Action command set, the scrolling entity-list window, and
+// Up/Down + Enter/A/X handling — and differ only in the fields below.
+type dialogListModalSpec struct {
+	title    string                     // modal header
+	hint     string                     // hint line below the header
+	empty    string                     // placeholder when the list is empty
+	count    int                        // number of rows
+	rowLabel func(i int) string         // one row's label
+	cmds     func(*State) (adds, actions []modalCmd)
+	commit   func()                     // Enter / "Edit" (only when count > 0)
+	cancel   func()                     // Esc (step up / close)
+	add      func()                     // A / "+ Add"
+	del      func()                     // X / "Delete" (only when count > 0)
+	// extraKeys are per-modal extra shortcuts beyond Enter/A/X (e.g. T opens the
+	// trigger list, S sets the start node). guarded reports whether the key needs
+	// count > 0 before it runs.
+	extraKeys []dialogListKey
+}
+
+type dialogListKey struct {
+	key     int32
+	guarded bool
+	run     func()
+}
+
+// drawDialogListModalGeneric renders one list-style dialog modal from its spec.
+func drawDialogListModalGeneric(s *State, font rl.Font, theme render.Theme, spec dialogListModalSpec) {
+	r := drawModalHeader(font, theme, entityEditModalW, entityEditModalH, spec.title, theme.BorderActive)
+	render.DrawTextWithShadow(font, spec.hint, r.X+modalContentInset, r.Y+40, editorFontTiny, theme.TextHint)
+	adds, actions := spec.cmds(s)
+	lay := entityModalLayoutFor(s.modalCursor, spec.count, cmdLabels(adds), cmdLabels(actions))
+	drawEntityListWindow(font, theme, lay, spec.count, s.modalCursor, spec.empty, spec.rowLabel)
+	drawModalButtons(font, lay.actRects, cmdLabels(actions))
+	drawModalButtons(font, lay.addRects, cmdLabels(adds))
+}
+
+// updateDialogListModalGeneric drives one list-style dialog modal from its spec.
+func updateDialogListModalGeneric(s *State, spec dialogListModalSpec) Action {
+	count := spec.count
+	clampModalCursor(s, count)
+	if editorCancelPressed() {
+		spec.cancel()
+		return ActionNone
+	}
+	if count > 0 {
+		s.modalCursor = input.CursorUpDown(s.modalCursor, count)
+	}
+	if handleEntityModalClick(s, count, spec.cmds) {
+		return ActionNone
+	}
+	if editorCommitPressed() {
+		if count > 0 {
+			spec.commit()
+		}
+		return ActionNone
+	}
+	if rl.IsKeyPressed(rl.KeyA) {
+		spec.add()
+		return ActionNone
+	}
+	for _, k := range spec.extraKeys {
+		if rl.IsKeyPressed(k.key) {
+			if !k.guarded || count > 0 {
+				k.run()
+			}
+			return ActionNone
+		}
+	}
+	if count > 0 && rl.IsKeyPressed(rl.KeyX) {
+		spec.del()
+	}
+	return ActionNone
+}
+
 // =========================== modalDialogList ===============================
 
 func dialogListCmds(s *State) (adds, actions []modalCmd) {
@@ -645,18 +722,27 @@ func dialogListCmds(s *State) (adds, actions []modalCmd) {
 	return adds, actions
 }
 
+// dialogListSpec builds the spec for the top-level dialog list.
+func dialogListSpec(s *State) dialogListModalSpec {
+	return dialogListModalSpec{
+		title:    "DIALOGS",
+		hint:     "Enter edit · A add · X delete · T triggers · Esc close",
+		empty:    "(no dialogs — Add one)",
+		count:    len(s.area.Dialogs),
+		rowLabel: func(i int) string { return dialogListRowLabel(s.area.Dialogs[i]) },
+		cmds:     dialogListCmds,
+		commit:   func() { openDialogNodesModal(s, s.modalCursor) },
+		cancel:   func() { closeModal(s) },
+		add:      func() { addDialog(s) },
+		del:      func() { removeDialogAt(s, s.modalCursor) },
+		extraKeys: []dialogListKey{
+			{key: rl.KeyT, run: func() { openDialogTriggerListModal(s) }},
+		},
+	}
+}
+
 func drawDialogListModal(s *State, font rl.Font, theme render.Theme) {
-	r := drawModalHeader(font, theme, entityEditModalW, entityEditModalH, "DIALOGS", theme.BorderActive)
-	render.DrawTextWithShadow(font, "Enter edit · A add · X delete · T triggers · Esc close",
-		r.X+modalContentInset, r.Y+40, editorFontTiny, theme.TextHint)
-	adds, actions := dialogListCmds(s)
-	count := len(s.area.Dialogs)
-	lay := entityModalLayoutFor(s.modalCursor, count, cmdLabels(adds), cmdLabels(actions))
-	drawEntityListWindow(font, theme, lay, count, s.modalCursor,
-		"(no dialogs — Add one)",
-		func(i int) string { return dialogListRowLabel(s.area.Dialogs[i]) })
-	drawModalButtons(font, lay.actRects, cmdLabels(actions))
-	drawModalButtons(font, lay.addRects, cmdLabels(adds))
+	drawDialogListModalGeneric(s, font, theme, dialogListSpec(s))
 }
 
 func dialogListRowLabel(d core.DialogDefinition) string {
@@ -664,36 +750,7 @@ func dialogListRowLabel(d core.DialogDefinition) string {
 }
 
 func updateDialogListModal(s *State) Action {
-	count := len(s.area.Dialogs)
-	clampModalCursor(s, count)
-	if editorCancelPressed() {
-		closeModal(s)
-		return ActionNone
-	}
-	if count > 0 {
-		s.modalCursor = input.CursorUpDown(s.modalCursor, count)
-	}
-	if handleEntityModalClick(s, count, dialogListCmds) {
-		return ActionNone
-	}
-	if editorCommitPressed() {
-		if count > 0 {
-			openDialogNodesModal(s, s.modalCursor)
-		}
-		return ActionNone
-	}
-	if rl.IsKeyPressed(rl.KeyA) {
-		addDialog(s)
-		return ActionNone
-	}
-	if rl.IsKeyPressed(rl.KeyT) {
-		openDialogTriggerListModal(s)
-		return ActionNone
-	}
-	if count > 0 && rl.IsKeyPressed(rl.KeyX) {
-		removeDialogAt(s, s.modalCursor)
-	}
-	return ActionNone
+	return updateDialogListModalGeneric(s, dialogListSpec(s))
 }
 
 // =========================== modalDialogNodes ==============================
@@ -722,22 +779,31 @@ func dialogNodeCount(s *State) int {
 	return 0
 }
 
+// dialogNodesSpec builds the spec for one dialog's node list.
+func dialogNodesSpec(s *State, d *core.DialogDefinition) dialogListModalSpec {
+	return dialogListModalSpec{
+		title:    "DIALOG " + d.ID,
+		hint:     "Enter edit · A add · X delete · S set start · Esc back",
+		empty:    "(no nodes — Add one)",
+		count:    len(d.Nodes),
+		rowLabel: func(i int) string { return dialogNodeRowLabel(*d, i) },
+		cmds:     dialogNodesCmds,
+		commit:   func() { openDialogNodeEditModal(s, s.modalCursor) },
+		cancel:   func() { openDialogListModal(s) }, // step UP to the dialog list
+		add:      func() { addDialogNode(s) },
+		del:      func() { removeDialogNode(s, s.modalCursor) },
+		extraKeys: []dialogListKey{
+			{key: rl.KeyS, guarded: true, run: func() { setDialogStartNode(s, s.modalCursor) }},
+		},
+	}
+}
+
 func drawDialogNodesModal(s *State, font rl.Font, theme render.Theme) {
 	d := currentDialog(s)
 	if d == nil {
 		return
 	}
-	r := drawModalHeader(font, theme, entityEditModalW, entityEditModalH, "DIALOG "+d.ID, theme.BorderActive)
-	render.DrawTextWithShadow(font, "Enter edit · A add · X delete · S set start · Esc back",
-		r.X+modalContentInset, r.Y+40, editorFontTiny, theme.TextHint)
-	adds, actions := dialogNodesCmds(s)
-	count := len(d.Nodes)
-	lay := entityModalLayoutFor(s.modalCursor, count, cmdLabels(adds), cmdLabels(actions))
-	drawEntityListWindow(font, theme, lay, count, s.modalCursor,
-		"(no nodes — Add one)",
-		func(i int) string { return dialogNodeRowLabel(*d, i) })
-	drawModalButtons(font, lay.actRects, cmdLabels(actions))
-	drawModalButtons(font, lay.addRects, cmdLabels(adds))
+	drawDialogListModalGeneric(s, font, theme, dialogNodesSpec(s, d))
 }
 
 func dialogNodeRowLabel(d core.DialogDefinition, i int) string {
@@ -755,36 +821,7 @@ func updateDialogNodesModal(s *State) Action {
 		closeModal(s)
 		return ActionNone
 	}
-	count := len(d.Nodes)
-	clampModalCursor(s, count)
-	if editorCancelPressed() {
-		openDialogListModal(s) // step UP to the dialog list
-		return ActionNone
-	}
-	if count > 0 {
-		s.modalCursor = input.CursorUpDown(s.modalCursor, count)
-	}
-	if handleEntityModalClick(s, count, dialogNodesCmds) {
-		return ActionNone
-	}
-	if editorCommitPressed() {
-		if count > 0 {
-			openDialogNodeEditModal(s, s.modalCursor)
-		}
-		return ActionNone
-	}
-	if rl.IsKeyPressed(rl.KeyA) {
-		addDialogNode(s)
-		return ActionNone
-	}
-	if count > 0 && rl.IsKeyPressed(rl.KeyX) {
-		removeDialogNode(s, s.modalCursor)
-		return ActionNone
-	}
-	if count > 0 && rl.IsKeyPressed(rl.KeyS) {
-		setDialogStartNode(s, s.modalCursor)
-	}
-	return ActionNone
+	return updateDialogListModalGeneric(s, dialogNodesSpec(s, d))
 }
 
 // Shared field-layout metrics for the dialog edit modals (node / choice /
@@ -814,6 +851,22 @@ func stackRows(x, y, fw, fieldH, rowGap float32, n int) []rl.Rectangle {
 		rows[i] = rl.NewRectangle(x, y+float32(i)*rowGap, fw, fieldH)
 	}
 	return rows
+}
+
+// scrollRows lays out the VISIBLE rows of a scrolling, fixed-pitch list: it
+// resolves the scroll window over a `count`-item list keeping `cursor` in view
+// (at most `visible` rows tall, via scrollWindow) and stacks one rowH-tall rect
+// per visible item down from (x,y). It returns the window's top index and the
+// visible row rects (one per item in [top, top+len(rows))). The node editor's
+// choice list and the choice editor's condition list both build their scrolling
+// row stack this way, so they share it rather than re-spelling the loop.
+func scrollRows(x, y, fw, rowH float32, cursor, count, visible int) (top int, rows []rl.Rectangle) {
+	top, end := scrollWindow(cursor, count, visible)
+	rows = make([]rl.Rectangle, end-top)
+	for i := range rows {
+		rows[i] = rl.NewRectangle(x, y+float32(i)*rowH, fw, rowH)
+	}
+	return top, rows
 }
 
 // ========================= modalDialogNodeEdit =============================
@@ -865,13 +918,7 @@ func dialogNodeLayoutFor(cursor, choiceCount int) dialogNodeLayout {
 	// Choice list rows — a scroll window over the full choice list so a node
 	// with more than dialogChoiceVisible choices keeps the cursored row in
 	// view (and every choice reachable) instead of capping at the first few.
-	rowH := dialogListRowH
-	top, end := scrollWindow(cursor, choiceCount, dialogChoiceVisible)
-	rows := make([]rl.Rectangle, end-top)
-	for i := range rows {
-		rows[i] = rl.NewRectangle(x, y, fw, rowH)
-		y += rowH
-	}
+	top, rows := scrollRows(x, y, fw, dialogListRowH, cursor, choiceCount, dialogChoiceVisible)
 	// Choice action buttons + Back along the bottom.
 	by := r.Y + r.Height - modalBtnH - modalBottomInset
 	btns := equalButtonRow(x, by, fw, modalBtnH, 4)
@@ -919,22 +966,13 @@ func drawDialogNodeEditModal(s *State, font rl.Font, theme render.Theme) {
 
 	drawLabel(font, fmt.Sprintf("Choices (%d) — Up/Down select, Enter edit", len(n.Choices)),
 		rl.NewRectangle(l.card.X+modalContentInset, l.actionBtn.Y+l.actionBtn.Height+10, l.card.Width, 14))
+	upHintY := float32(0)
 	if len(l.choiceRows) > 0 {
-		drawScrollMoreHint(font, theme, l.card.X+entityListTextInset, l.choiceRows[0].Y-16, l.choiceTop, true)
+		upHintY = l.choiceRows[0].Y - 16
 	}
-	for i, row := range l.choiceRows {
-		idx := l.choiceTop + i
-		c := n.Choices[idx]
-		col := theme.TextMuted
-		text := c.Label
-		if idx == s.modalCursor {
-			col = theme.BorderActive
-			text = "> " + text
-		}
-		render.DrawTextWithShadow(font, truncateDialog(text, 52), row.X+entityListTextInset, row.Y, editorFontBody, col)
-	}
-	drawScrollMoreHint(font, theme, l.card.X+entityListTextInset, l.addChoiceBtn.Y-18,
-		len(n.Choices)-(l.choiceTop+len(l.choiceRows)), false)
+	drawScrollList(font, theme, l.choiceRows, l.choiceTop, len(n.Choices), s.modalCursor, 52,
+		l.card.X+entityListTextInset, upHintY, l.addChoiceBtn.Y-18,
+		func(idx int) string { return n.Choices[idx].Label })
 	drawButton(font, l.addChoiceBtn, "+ Choice", false)
 	drawButton(font, l.editChoiceBtn, "Edit Choice", false)
 	drawButton(font, l.delChoiceBtn, "Del Choice", false)
@@ -1119,13 +1157,7 @@ func dialogChoiceLayoutFor(cursor, condCount int) dialogChoiceLayout {
 	nextField := fields[1]
 	actionBtn := fields[2]
 	y += 3*rowGap + 8 // gap for the "Conditions (N)" header line
-	rowH := dialogListRowH
-	top, end := scrollWindow(cursor, condCount, dialogCondVisible)
-	rows := make([]rl.Rectangle, end-top)
-	for i := range rows {
-		rows[i] = rl.NewRectangle(x, y, fw, rowH)
-		y += rowH
-	}
+	top, rows := scrollRows(x, y, fw, dialogListRowH, cursor, condCount, dialogCondVisible)
 	by := r.Y + r.Height - modalBtnH - modalBottomInset
 	btns := equalButtonRow(x, by, fw, modalBtnH, 4)
 	return dialogChoiceLayout{
@@ -1154,21 +1186,13 @@ func drawDialogChoiceEditModal(s *State, font rl.Font, theme render.Theme) {
 
 	header := rl.NewRectangle(l.card.X+modalContentInset, l.actionBtn.Y+l.actionBtn.Height+8, l.card.Width, 14)
 	drawLabel(font, fmt.Sprintf("Conditions (%d) — gate selectability; Up/Down select, Enter edit", len(c.Conditions)), header)
+	upHintY := float32(0)
 	if len(l.condRows) > 0 {
-		drawScrollMoreHint(font, theme, l.card.X+entityListTextInset, l.condRows[0].Y-14, l.condTop, true)
+		upHintY = l.condRows[0].Y - 14
 	}
-	for i, row := range l.condRows {
-		idx := l.condTop + i
-		col := theme.TextMuted
-		text := condSummary(c.Conditions[idx])
-		if idx == s.modalCursor {
-			col = theme.BorderActive
-			text = "> " + text
-		}
-		render.DrawTextWithShadow(font, truncateDialog(text, 56), row.X+entityListTextInset, row.Y, editorFontBody, col)
-	}
-	drawScrollMoreHint(font, theme, l.card.X+entityListTextInset, l.addCondBtn.Y-16,
-		len(c.Conditions)-(l.condTop+len(l.condRows)), false)
+	drawScrollList(font, theme, l.condRows, l.condTop, len(c.Conditions), s.modalCursor, 56,
+		l.card.X+entityListTextInset, upHintY, l.addCondBtn.Y-16,
+		func(idx int) string { return condSummary(c.Conditions[idx]) })
 	drawButton(font, l.addCondBtn, "+ Cond", false)
 	drawButton(font, l.editCondBtn, "Edit Cond", false)
 	drawButton(font, l.delCondBtn, "Del Cond", false)
@@ -1298,8 +1322,7 @@ func dialogActionLayoutFor() dialogActionLayout {
 	fields := stackRows(x, y, fw, fieldH, dialogActionRowGap, 2)
 	kindBtn := fields[0]
 	idField := fields[1]
-	by := r.Y + r.Height - modalBtnH - modalBottomInset
-	backBtn := rl.NewRectangle(r.X+r.Width-modalWideBtnW-modalContentInset, by, modalWideBtnW, modalBtnH)
+	backBtn := bottomRightBtn(r)
 	return dialogActionLayout{card: r, kindBtn: kindBtn, idField: idField, backBtn: backBtn}
 }
 
@@ -1531,8 +1554,7 @@ func dialogCondLayoutFor() dialogCondLayout {
 	row1 := fields[1]
 	row2 := fields[2]
 	msgField := fields[3]
-	by := r.Y + r.Height - modalBtnH - modalBottomInset
-	backBtn := rl.NewRectangle(r.X+r.Width-modalWideBtnW-modalContentInset, by, modalWideBtnW, modalBtnH)
+	backBtn := bottomRightBtn(r)
 	return dialogCondLayout{card: r, kindBtn: kindBtn, row1: row1, row2: row2, msgField: msgField, backBtn: backBtn}
 }
 
@@ -1588,6 +1610,8 @@ func drawDialogCondEditModal(s *State, font rl.Font, theme render.Theme) {
 		drawTextField(font, l.row1, numFieldText(s.focus == focusDialogCondTileX, c.TileX, s.dialogNumBuf), s.focus == focusDialogCondTileX)
 		drawLabel(font, "Tile Z", labelAbove(l.row2))
 		drawTextField(font, l.row2, numFieldText(s.focus == focusDialogCondTileZ, c.TileZ, s.dialogNumBuf), s.focus == focusDialogCondTileZ)
+	default:
+		panic("editor: drawDialogCondEditModal has no case for dialog condition kind " + string(c.Kind))
 	}
 
 	drawLabel(font, "Disabled message (blank = auto reason)", labelAbove(l.msgField))
@@ -1652,6 +1676,8 @@ func updateDialogCondEditModal(s *State) Action {
 				focusDialogNumeric(s, focusDialogCondTileZ, c.TileZ)
 				return ActionNone
 			}
+		default:
+			panic("editor: updateDialogCondEditModal has no case for dialog condition kind " + string(c.Kind))
 		}
 		s.focus = focusNone
 	}
@@ -1714,47 +1740,28 @@ func openDialogTriggerListModal(s *State) {
 	clearDialogFocus(s)
 }
 
+// dialogTriggerListSpec builds the spec for the area's trigger list.
+func dialogTriggerListSpec(s *State) dialogListModalSpec {
+	return dialogListModalSpec{
+		title:    "DIALOG TRIGGERS",
+		hint:     "Auto-start a dialog on a world event · Enter edit · A add · X delete · Esc back",
+		empty:    "(no triggers — Add one)",
+		count:    len(s.area.Triggers),
+		rowLabel: func(i int) string { return triggerSummary(s.area.Triggers[i]) },
+		cmds:     dialogTriggerListCmds,
+		commit:   func() { openDialogTriggerEditModal(s, s.modalCursor) },
+		cancel:   func() { openDialogListModal(s) }, // step UP to the dialog list
+		add:      func() { addDialogTrigger(s) },
+		del:      func() { removeDialogTriggerAt(s, s.modalCursor) },
+	}
+}
+
 func drawDialogTriggerListModal(s *State, font rl.Font, theme render.Theme) {
-	r := drawModalHeader(font, theme, entityEditModalW, entityEditModalH, "DIALOG TRIGGERS", theme.BorderActive)
-	render.DrawTextWithShadow(font, "Auto-start a dialog on a world event · Enter edit · A add · X delete · Esc back",
-		r.X+modalContentInset, r.Y+40, editorFontTiny, theme.TextHint)
-	adds, actions := dialogTriggerListCmds(s)
-	count := len(s.area.Triggers)
-	lay := entityModalLayoutFor(s.modalCursor, count, cmdLabels(adds), cmdLabels(actions))
-	drawEntityListWindow(font, theme, lay, count, s.modalCursor,
-		"(no triggers — Add one)",
-		func(i int) string { return triggerSummary(s.area.Triggers[i]) })
-	drawModalButtons(font, lay.actRects, cmdLabels(actions))
-	drawModalButtons(font, lay.addRects, cmdLabels(adds))
+	drawDialogListModalGeneric(s, font, theme, dialogTriggerListSpec(s))
 }
 
 func updateDialogTriggerListModal(s *State) Action {
-	count := len(s.area.Triggers)
-	clampModalCursor(s, count)
-	if editorCancelPressed() {
-		openDialogListModal(s) // step UP to the dialog list
-		return ActionNone
-	}
-	if count > 0 {
-		s.modalCursor = input.CursorUpDown(s.modalCursor, count)
-	}
-	if handleEntityModalClick(s, count, dialogTriggerListCmds) {
-		return ActionNone
-	}
-	if editorCommitPressed() {
-		if count > 0 {
-			openDialogTriggerEditModal(s, s.modalCursor)
-		}
-		return ActionNone
-	}
-	if rl.IsKeyPressed(rl.KeyA) {
-		addDialogTrigger(s)
-		return ActionNone
-	}
-	if count > 0 && rl.IsKeyPressed(rl.KeyX) {
-		removeDialogTriggerAt(s, s.modalCursor)
-	}
-	return ActionNone
+	return updateDialogListModalGeneric(s, dialogTriggerListSpec(s))
 }
 
 // ========================= modalDialogTriggerEdit ==========================
@@ -1786,8 +1793,7 @@ func dialogTrigLayoutFor() dialogTrigLayout {
 	onceToggle := fields[2]
 	row1 := fields[3]
 	row2 := fields[4]
-	by := r.Y + r.Height - modalBtnH - modalBottomInset
-	backBtn := rl.NewRectangle(r.X+r.Width-modalWideBtnW-modalContentInset, by, modalWideBtnW, modalBtnH)
+	backBtn := bottomRightBtn(r)
 	return dialogTrigLayout{card: r, kindBtn: kindBtn, dialogBtn: dialogBtn, onceToggle: onceToggle, row1: row1, row2: row2, backBtn: backBtn}
 }
 
@@ -1837,6 +1843,8 @@ func drawDialogTriggerEditModal(s *State, font rl.Font, theme render.Theme) {
 		drawButton(font, l.row1, core.FoeKindName(t.FoeKind)+dropdownArrowSuffix, false)
 		drawLabel(font, "Kills required (0 = at least one)", labelAbove(l.row2))
 		drawTextField(font, l.row2, numFieldText(s.focus == focusDialogTrigFoeKills, t.FoeKills, s.dialogNumBuf), s.focus == focusDialogTrigFoeKills)
+	default:
+		panic("editor: drawDialogTriggerEditModal has no case for dialog trigger kind " + string(t.Kind))
 	}
 	drawButton(font, l.backBtn, "Back (Esc)", false)
 }
@@ -1887,6 +1895,8 @@ func updateDialogTriggerEditModal(s *State) Action {
 				focusDialogNumeric(s, focusDialogTrigFoeKills, t.FoeKills)
 				return ActionNone
 			}
+		default:
+			panic("editor: updateDialogTriggerEditModal has no case for dialog trigger kind " + string(t.Kind))
 		}
 		s.focus = focusNone
 	}
@@ -1927,6 +1937,15 @@ func labelAbove(field rl.Rectangle) rl.Rectangle {
 	return rl.NewRectangle(field.X, field.Y-16, field.Width, 14)
 }
 
+// bottomRightBtn returns the bottom-right "Back (Esc)" button rect for a modal
+// card — a wide button inset from the card's right edge and pinned above the
+// bottom inset. The action / condition / trigger edit modals all place their
+// Back button here, so they share this rather than re-spelling the geometry.
+func bottomRightBtn(card rl.Rectangle) rl.Rectangle {
+	by := card.Y + card.Height - modalBtnH - modalBottomInset
+	return rl.NewRectangle(card.X+card.Width-modalWideBtnW-modalContentInset, by, modalWideBtnW, modalBtnH)
+}
+
 // drawScrollMoreHint draws a "▲ N more" / "▼ N more" caption at (x,y) when a
 // scroll window hides `hidden` rows above (up=true) or below it. No-op when
 // nothing is hidden. Shared by the node editor's choice list and the choice
@@ -1940,6 +1959,33 @@ func drawScrollMoreHint(font rl.Font, theme render.Theme, x, y float32, hidden i
 		arrow = "▲"
 	}
 	render.DrawRichText(font, fmt.Sprintf("%s %d more", arrow, hidden), rl.NewVector2(x, y), editorFontHint, 1, theme.TextHint)
+}
+
+// drawScrollList draws a scrolling row list's body: the "▲ N more" hint above,
+// each visible row (the cursored row highlighted with a "> " prefix and the
+// active colour, others muted), and the "▼ N more" hint below. `rows` are the
+// visible row rects, `top` the index of the first visible item, `count` the
+// total item count (for the below-hint's hidden tally), and `cursor` the
+// selected item index. `hintX` positions both hints; `upHintY` / `downHintY`
+// place them. `rowText(idx)` yields the untruncated text for item idx, trimmed
+// to `truncLen` runes. Shared by the node editor's choice list and the choice
+// editor's condition list so their visuals can't drift apart.
+func drawScrollList(font rl.Font, theme render.Theme, rows []rl.Rectangle, top, count, cursor, truncLen int,
+	hintX, upHintY, downHintY float32, rowText func(idx int) string) {
+	if len(rows) > 0 {
+		drawScrollMoreHint(font, theme, hintX, upHintY, top, true)
+	}
+	for i, row := range rows {
+		idx := top + i
+		col := theme.TextMuted
+		text := rowText(idx)
+		if idx == cursor {
+			col = theme.BorderActive
+			text = "> " + text
+		}
+		render.DrawTextWithShadow(font, truncateDialog(text, truncLen), row.X+entityListTextInset, row.Y, editorFontBody, col)
+	}
+	drawScrollMoreHint(font, theme, hintX, downHintY, count-(top+len(rows)), false)
 }
 
 func truncateDialog(s string, max int) string {

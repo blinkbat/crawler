@@ -10,6 +10,26 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+// sharedStatusVisual holds the per-status accent + glyph that BOTH the
+// party cards (partyStatusVisuals) and the enemy roster pills
+// (enemyStatusPillVisuals, battle.go) paint identically — one source of
+// truth so a retune of a status that afflicts both sides edits a single
+// row. Only the fields that are byte-for-byte identical across the two
+// surfaces live here: the accent color and the vector glyph. The flicker
+// bit is deliberately NOT shared — Sleep and Stun pulse on party cards
+// but sit static on enemy pills, so each table keeps its own flicker
+// value (and the enemy table keeps its surface-specific outline + turns
+// reader). Keyed by core.PartyStatusKind; Burn / Bleed are enemy-only
+// (no party-side concept) and stay local to the enemy table.
+var sharedStatusVisuals = map[core.PartyStatusKind]struct {
+	Col   rl.Color
+	Glyph func(cx, cy, r float32, col rl.Color)
+}{
+	core.PartyStatusStunned:  {Col: statusStun, Glyph: drawStatusGlyphStunned},
+	core.PartyStatusAsleep:   {Col: statusSleep, Glyph: drawStatusGlyphAsleep},
+	core.PartyStatusPoisoned: {Col: statusPoison, Glyph: drawStatusGlyphPoisoned},
+}
+
 // partyStatusVisuals is the canonical per-status visual table. Indexed
 // by core.PartyStatusKind so render surfaces (party card label, Tome
 // Stats badge, panels overlay, etc.) read the color + flicker from a
@@ -37,9 +57,9 @@ var partyStatusVisuals = [core.PartyStatusCount]struct {
 	core.PartyStatusIngested:  {Col: statusIngested, Flicker: true, Glyph: drawStatusGlyphIngested},
 	core.PartyStatusWebbed:    {Col: statusWebbed, Flicker: true, Glyph: drawStatusGlyphWebbed},
 	core.PartyStatusConfused:  {Col: statusConfused, Flicker: true, Glyph: drawStatusGlyphConfused},
-	core.PartyStatusStunned:   {Col: statusStun, Flicker: true, Glyph: drawStatusGlyphStunned},
-	core.PartyStatusAsleep:    {Col: statusSleep, Flicker: true, Glyph: drawStatusGlyphAsleep},
-	core.PartyStatusPoisoned:  {Col: statusPoison, Flicker: true, Glyph: drawStatusGlyphPoisoned},
+	core.PartyStatusStunned:   {Col: sharedStatusVisuals[core.PartyStatusStunned].Col, Flicker: true, Glyph: sharedStatusVisuals[core.PartyStatusStunned].Glyph},
+	core.PartyStatusAsleep:    {Col: sharedStatusVisuals[core.PartyStatusAsleep].Col, Flicker: true, Glyph: sharedStatusVisuals[core.PartyStatusAsleep].Glyph},
+	core.PartyStatusPoisoned:  {Col: sharedStatusVisuals[core.PartyStatusPoisoned].Col, Flicker: true, Glyph: sharedStatusVisuals[core.PartyStatusPoisoned].Glyph},
 	core.PartyStatusBlessed:   {Col: statusBlessed, Glyph: drawStatusGlyphBlessed},
 	core.PartyStatusRegen:     {Col: statusRegen, Glyph: drawStatusGlyphRegen},
 	core.PartyStatusShielded:  {Col: statusShielded, Glyph: drawStatusGlyphShielded},

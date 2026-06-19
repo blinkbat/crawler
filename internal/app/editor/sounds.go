@@ -261,6 +261,38 @@ var assignableCueList = func() []audio.Sound {
 	return out
 }()
 
+// rowButtonSpec describes one button in a right-anchored per-row button group:
+// its width and the gap to the NEXT button on its right (gapAfter is ignored
+// for the rightmost spec). Used by rightButtonRow.
+type rowButtonSpec struct {
+	w        float32
+	gapAfter float32
+}
+
+// rightButtonRow lays the specs out left-to-right as a block right-anchored
+// inside `row`: the rightmost button's right edge sits rightInset px from the
+// row's right edge, each button is yOff px down from the row top with height h.
+// The per-row Edit/Play/Delete (saved-sounds list) and Play/◂/▸ (cue
+// assignments) groups were placed by hand-derived right-edge offsets that had
+// to stay in lockstep with their widths; this is the one placement formula for
+// both. Returns rects in spec (left-to-right) order.
+func rightButtonRow(row rl.Rectangle, yOff, h, rightInset float32, specs ...rowButtonSpec) []rl.Rectangle {
+	var total float32
+	for i, sp := range specs {
+		total += sp.w
+		if i < len(specs)-1 {
+			total += sp.gapAfter
+		}
+	}
+	x := row.X + row.Width - rightInset - total
+	rects := make([]rl.Rectangle, len(specs))
+	for i, sp := range specs {
+		rects[i] = rl.NewRectangle(x, row.Y+yOff, sp.w, h)
+		x += sp.w + sp.gapAfter
+	}
+	return rects
+}
+
 // soundListRowRect bundles the row + per-row buttons for one saved
 // sound. Replaces three parallel []rl.Rectangle slices that had to be
 // kept in lockstep — now drift between row count and button count is
@@ -414,11 +446,16 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, para
 	l.listRows = make([]soundListRowRect, len(savedSounds))
 	for i := l.listTopRow; i < l.listEnd; i++ {
 		row := listBaseRows[i]
+		btns := rightButtonRow(row, 2, row.Height-4, 8,
+			rowButtonSpec{38, 2}, // Edit
+			rowButtonSpec{32, 6}, // Play
+			rowButtonSpec{32, 0}, // Delete
+		)
 		l.listRows[i] = soundListRowRect{
 			Row:    row,
-			Edit:   rl.NewRectangle(row.X+row.Width-118, row.Y+2, 38, row.Height-4),
-			Play:   rl.NewRectangle(row.X+row.Width-78, row.Y+2, 32, row.Height-4),
-			Delete: rl.NewRectangle(row.X+row.Width-40, row.Y+2, 32, row.Height-4),
+			Edit:   btns[0],
+			Play:   btns[1],
+			Delete: btns[2],
 		}
 	}
 
@@ -434,11 +471,16 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, para
 	l.assignRows = make([]soundAssignRowRect, len(assignableCueList))
 	for i := l.assignTopRow; i < l.assignEnd; i++ {
 		row := assignBaseRows[i]
+		btns := rightButtonRow(row, 12, 24, 34,
+			rowButtonSpec{32, 4}, // Play
+			rowButtonSpec{24, 8}, // CycleLeft
+			rowButtonSpec{24, 0}, // CycleRight
+		)
 		l.assignRows[i] = soundAssignRowRect{
 			Row:        row,
-			Play:       rl.NewRectangle(row.X+row.Width-126, row.Y+12, 32, 24),
-			CycleLeft:  rl.NewRectangle(row.X+row.Width-90, row.Y+12, 24, 24),
-			CycleRight: rl.NewRectangle(row.X+row.Width-58, row.Y+12, 24, 24),
+			Play:       btns[0],
+			CycleLeft:  btns[1],
+			CycleRight: btns[2],
 		}
 	}
 
@@ -914,17 +956,11 @@ func drawSoundsParamsCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 }
 
 func drawSoundsSlider(font rl.Font, theme render.Theme, x, y, w float32, info sliderField[soundParamSet], p soundParamSet, track rl.Rectangle, focused bool) {
-	// Numeric readout to the right of the track. Display callback
-	// overrides the fmt.Sprintf path for rows that render a label
-	// instead of a number (the Wave row's "Sine"/"Square"/etc.).
-	value := info.Get(&p)
-	var val string
-	if info.Display != nil {
-		val = info.Display(value)
-	} else {
-		val = fmt.Sprintf(info.Format, value)
-	}
-	drawSlider(font, theme, info.Label, val, value, info.Min, info.Max,
+	// Display-aware row draw (shared drawSliderField): the Display callback
+	// overrides the fmt.Sprintf path for rows that render a label instead of a
+	// number (the Wave row's "Sine"/"Square"/etc.). The numeric readout sits to
+	// the right of the track.
+	drawSliderField(font, theme, info, &p,
 		rl.NewVector2(x, y), rl.NewVector2(x+w-78, y),
 		soundFontBody, track, 7, focused)
 }

@@ -83,11 +83,17 @@ type enemyStatusPillVisual struct {
 }
 
 var enemyStatusPillVisuals = [enemyStatusCount]enemyStatusPillVisual{
+	// Burn / Bleed are enemy-only (no party-side concept) so their fill +
+	// glyph stay local. Sleep / Poison / Stun share their fill + glyph with
+	// the party cards, so those two fields come from sharedStatusVisuals
+	// (party.go) — one source of truth. The flicker bit is NOT shared: Sleep
+	// and Stun sit static on enemy pills but pulse on party cards, so each
+	// table keeps its own flicker. The outline + turns reader are pill-only.
 	enemyStatusBurn:   {turns: func(e *core.Enemy) int { return e.BurnTurns }, fill: statusBurn, outline: statusBurnOutline, glyph: drawStatusGlyphBurn, flicker: true},
-	enemyStatusSleep:  {turns: func(e *core.Enemy) int { return e.SleepTurns }, fill: statusSleep, outline: statusSleepOutline, glyph: drawStatusGlyphAsleep},
-	enemyStatusPoison: {turns: func(e *core.Enemy) int { return e.PoisonTurns }, fill: statusPoison, outline: statusPoisonOutline, glyph: drawStatusGlyphPoisoned, flicker: true},
+	enemyStatusSleep:  {turns: func(e *core.Enemy) int { return e.SleepTurns }, fill: sharedStatusVisuals[core.PartyStatusAsleep].Col, outline: statusSleepOutline, glyph: sharedStatusVisuals[core.PartyStatusAsleep].Glyph},
+	enemyStatusPoison: {turns: func(e *core.Enemy) int { return e.PoisonTurns }, fill: sharedStatusVisuals[core.PartyStatusPoisoned].Col, outline: statusPoisonOutline, glyph: sharedStatusVisuals[core.PartyStatusPoisoned].Glyph, flicker: true},
 	enemyStatusBleed:  {turns: func(e *core.Enemy) int { return e.BleedTurns }, fill: statusBleed, outline: statusBleedOutline, glyph: drawStatusGlyphBleed, flicker: true},
-	enemyStatusStun:   {turns: func(e *core.Enemy) int { return e.StunTurns }, fill: statusStun, outline: statusStunOutline, glyph: drawStatusGlyphStunned},
+	enemyStatusStun:   {turns: func(e *core.Enemy) int { return e.StunTurns }, fill: sharedStatusVisuals[core.PartyStatusStunned].Col, outline: statusStunOutline, glyph: sharedStatusVisuals[core.PartyStatusStunned].Glyph},
 }
 
 func init() {
@@ -204,11 +210,11 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 
 	leftPad := hudContentInsetX
 	if targeted {
-		leftPad = 34
-		bx := float32(x) + 9
+		leftPad = rosterTargetedNameInset
+		bx := float32(x) + rosterArrowMarkerInsetX
 		cy := float32(y) + float32(h)/2
 		col := fadeColor(borderEnemy, pulseHalo())
-		drawArrowMarker(rl.NewVector2(bx, cy), 13, 0, 10, col)
+		drawArrowMarker(rl.NewVector2(bx, cy), rosterArrowMarkerTipDx, 0, rosterArrowMarkerHalf, col)
 	}
 
 	condition, condCol := enemyHealthStyle(enemy)
@@ -227,14 +233,14 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 	condY := float32(y) + float32(h) - condSize - 9
 	drawTextWithShadow(font, condition, nameX, condY, condSize, condCol)
 	if known {
-		condW := rosterCondMeasureCache.measure(font, condition, condSize, 1).X
+		condW := rosterCondMeasureCache.measure(font, condition, condSize, canonicalSpacing(condSize)).X
 		drawTextWithShadow(font, enemyHPLabel(enemy.HP, enemy.MaxHP), nameX+condW+12, condY, condSize, barEnemyHP)
 	}
 
 	// Status pills, anchored to the right edge (no HP bar to tuck beside).
-	pillW := float32(34)
-	pillH := float32(28)
-	rightEdge := float32(x+w) - 16
+	pillW := rosterStatusPillW
+	pillH := rosterStatusPillH
+	rightEdge := float32(x+w) - rosterStatusRightPad
 	pillX := rightEdge - pillW
 	pillBaseY := float32(y) + (float32(h)-pillH)/2
 
@@ -717,7 +723,7 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	// Skipped when the panel is shrunk on a short window (would collide with
 	// the rows). Submenu entry is already cued by the per-row "▸" suffix.
 	if h >= actionMenuHintMinH {
-		hintY := y + h - 28
+		hintY := y + h - actionMenuFooterOffset
 		drawGiltRule(x+18, hintY-12, w-36, 1, 0.3)
 		DrawHintBarLeft(assets.hudFont, []HintSeg{
 			Hint("Confirm", GlyphA),

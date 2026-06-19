@@ -217,7 +217,7 @@ func (a *AreaDefinition) ResolveStep(fromX, fromL, fromZ, dir int) (toL int, ok 
 	if !a.InBounds(nx, nz) {
 		return 0, false
 	}
-	fromDir := NormalizeFacing(dir + 2)
+	fromDir := OppositeFacing(dir)
 	h := a.SolidStackHeight()
 	for L := 0; L < h; L++ {
 		if !a.Standable(nx, L, nz) {

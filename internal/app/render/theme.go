@@ -196,8 +196,11 @@ var (
 	textPrimary = inkPrimary
 	textMuted   = inkMuted
 	textLabel   = inkAccent
-	textDim     = inkDim
-	textHint    = inkDim
+	// textDim (dimmed/secondary text) and textHint (control-hint text) both
+	// resolve to inkDim today, but are kept as separate tokens to mark distinct
+	// intents — so either can be retuned without dragging the other along.
+	textDim  = inkDim
+	textHint = inkDim
 
 	barHPHigh = mute(rl.NewColor(116, 200, 132, 255))
 	// xpGainColor fills the victory spoils screen's XP bars — a warm
@@ -489,6 +492,19 @@ const (
 	rosterW         = int32(560) // multi-enemy width
 	rosterWSingle   = int32(440) // single-enemy width (narrower)
 
+	// Targeted-row geometry — a roster row gets a left chevron marker and a
+	// wider name inset when it's the live target. Named so the marker / pill
+	// placement isn't a wall of bare literals at the draw site.
+	rosterTargetedNameInset = int32(34) // name gutter when the chevron is shown (wider than hudContentInsetX)
+	rosterArrowMarkerInsetX = float32(9) // chevron center X, in from the row's left edge
+	rosterArrowMarkerTipDx  = float32(13) // chevron tip reach (points right, toward the name)
+	rosterArrowMarkerHalf   = float32(10) // chevron half-height
+	// Status-pill geometry (anchored to the row's right edge). rosterStatusPillW
+	// is unrelated to rosterTargetedNameInset despite both being 34.
+	rosterStatusPillW    = float32(34) // status pill width
+	rosterStatusPillH    = float32(28) // status pill height
+	rosterStatusRightPad = float32(16) // gap from the row's right edge to the pill column
+
 	// Combat HUD panes (battle.go) — the bottom-left action log and the
 	// bottom-right action menu. Both share the hudPanelMinH collision floor.
 	actionLogW  = int32(320)
@@ -625,6 +641,12 @@ const (
 	// footer rendered by DrawFooterHint. Body rect = card minus this
 	// band minus the heading band at the top.
 	overlayFooterReserve = int32(28)
+	// actionMenuFooterOffset is the gap from the battle action-menu panel's
+	// bottom edge up to its confirm/back hint baseline (the gilt rule sits a
+	// touch above it). Its own token so the action menu doesn't open-code the
+	// bare -28; happens to match overlayFooterReserve today but names a
+	// distinct surface (the in-battle menu, not a DrawFooterHint overlay).
+	actionMenuFooterOffset = int32(28)
 )
 
 // drawModalScaffold paints the shared screen-veil + centered card +

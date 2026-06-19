@@ -435,7 +435,18 @@ func (a *AreaDefinition) FaceSkinAt(x, z int) byte {
 // vertical face, so faces are a per-tile property.
 type FaceOverride struct {
 	X, Z  int
-	Skins [4]byte
+	Skins [FacingCount]byte
+}
+
+// defaultFaceSkins returns a fresh per-face skin array with every face set to
+// the PropLevelAuto sentinel (not 0), so a newly-created override matches its
+// on-disk form ('.' per face) and the dirty check can't false-positive.
+func defaultFaceSkins() [FacingCount]byte {
+	var s [FacingCount]byte
+	for i := range s {
+		s[i] = PropLevelAuto
+	}
+	return s
 }
 
 func (a *AreaDefinition) faceOverrideAt(x, z int) (FaceOverride, bool) {
@@ -499,7 +510,7 @@ func (a *AreaDefinition) SetFaceDir(x, z, dir int, skin byte) {
 		}
 		// Init unset faces to the auto sentinel (not 0) so a new override matches
 		// its on-disk form ('.' per face) and the dirty check can't false-positive.
-		nf := FaceOverride{X: x, Z: z, Skins: [4]byte{PropLevelAuto, PropLevelAuto, PropLevelAuto, PropLevelAuto}}
+		nf := FaceOverride{X: x, Z: z, Skins: defaultFaceSkins()}
 		a.FaceOverrides = append(a.FaceOverrides, nf)
 		idx = len(a.FaceOverrides) - 1
 	}
@@ -708,7 +719,7 @@ func EdgeLevelOf(level, rampFacing, dir int) (int, bool) {
 	switch NormalizeFacing(dir) {
 	case NormalizeFacing(rampFacing):
 		return level + 1, true
-	case NormalizeFacing(rampFacing + 2):
+	case OppositeFacing(rampFacing):
 		return level, true
 	default:
 		return 0, false
@@ -729,10 +740,15 @@ func (a *AreaDefinition) edgeLevel(x, z, dir int) (int, bool) {
 	return EdgeLevelOf(a.ElevationLevelAt(x, z), ramp, dir)
 }
 
+// OppositeFacing returns the reverse cardinal of `f` (North↔South, East↔West) —
+// the wrap-safe "+2 around the compass" rule, named so the opposite-edge logic
+// isn't open-coded as NormalizeFacing(f+2) at each call site.
+func OppositeFacing(f int) int { return NormalizeFacing(f + 2) }
+
 // CardinalDirs is the canonical N→E→S→W neighbour order, shared by the
 // face/exposure walks (core.TileExposesFace, render.drawCliffFaces) so the
 // "for each cardinal neighbour" iteration isn't re-listed per call site.
-var CardinalDirs = [4]int{North, East, South, West}
+var CardinalDirs = [FacingCount]int{North, East, South, West}
 
 // NeighbourEdgeLevel returns the elevation level the neighbour at (nx,nz)
 // presents across the edge entered from `fromDir`: ramp-aware via edgeLevel
@@ -763,7 +779,7 @@ func TileExposesFace(a *AreaDefinition, x, z int) bool {
 	my := a.ElevationLevelAt(x, z)
 	for _, d := range CardinalDirs {
 		dx, dz := FacingVector(d)
-		if my > a.NeighbourEdgeLevel(x+dx, z+dz, NormalizeFacing(d+2)) {
+		if my > a.NeighbourEdgeLevel(x+dx, z+dz, OppositeFacing(d)) {
 			return true
 		}
 	}
@@ -779,7 +795,7 @@ func TileExposesFace(a *AreaDefinition, x, z int) bool {
 func (a *AreaDefinition) StepElevationOK(fromX, fromZ, dir int) bool {
 	dx, dz := FacingVector(dir)
 	from, ok1 := a.edgeLevel(fromX, fromZ, dir)
-	to, ok2 := a.edgeLevel(fromX+dx, fromZ+dz, NormalizeFacing(dir+2))
+	to, ok2 := a.edgeLevel(fromX+dx, fromZ+dz, OppositeFacing(dir))
 	return ok1 && ok2 && from == to
 }
 

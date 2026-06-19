@@ -39,9 +39,13 @@ var (
 	bgEntry       = rl.NewColor(36, 40, 52, 255)
 	bgEntryHover  = rl.NewColor(40, 46, 58, 255)
 	bgButton      = rl.NewColor(48, 54, 70, 255)
-	bgButtonHover = rl.NewColor(48, 56, 72, 255)
 	bgRowHover    = rl.NewColor(60, 70, 90, 255)
 	bgActive      = rl.NewColor(72, 88, 130, 255)
+	// panelBackingColor is the near-black backing drawn behind floating canvas
+	// overlays (the minimap frame, the brush-recents strip). The two sites tune
+	// only the alpha (214 / 205) for how much grid shows through — so the base RGB
+	// lives here once and each site applies its own opacity via withAlpha.
+	panelBackingColor = rl.NewColor(12, 14, 20, 255)
 
 	// Borders. dim is the resting state, active is the selection-outline
 	// color; outlineHard is the dark seam between panels. Prefixed with
@@ -124,6 +128,18 @@ var (
 	// eye). Two tab draws used to declare this inline.
 	hiddenTabTextColor = rl.NewColor(112, 116, 126, 255)
 
+	// Layer/level visibility-eye glyph tints (drawLayerEye): the resting lid
+	// tone, the dimmed tone when the layer is hidden, and the brighter hover
+	// tone. Named here so the eye widget's three states aren't inline literals.
+	layerEyeNormal = rl.NewColor(176, 182, 196, 255)
+	layerEyeDim    = rl.NewColor(98, 102, 112, 255)
+	layerEyeHover  = rl.NewColor(232, 236, 246, 255)
+
+	// editorActiveLevelText is the warm tan used for the "Active level" readout
+	// — both the toolbar readout and the sidebar/levels readout share it so they
+	// can't drift (was a hand-spelled rl.NewColor(220,210,180,255) at both).
+	editorActiveLevelText = rl.NewColor(220, 210, 180, 255)
+
 	// Hover-tooltip chrome: a near-opaque dark backing, light body text, and
 	// a gilt heading tint for the first line. Named here with the rest of the
 	// editor chrome rather than inline in draw.go's tooltip draw.
@@ -143,6 +159,13 @@ var (
 	editorReachWarn = rl.NewColor(180, 80, 80, 255)
 	editorPlaceOK   = rl.NewColor(120, 240, 140, 255)
 	editorPlaceWarn = rl.NewColor(240, 110, 110, 255)
+
+	// Reachability badge FILL text colors — the brighter green/red drawn INSIDE
+	// the editorReachOK / editorReachWarn outlined badges (the outline tones are
+	// too dark for legible body text). editorReachWarnText also paints the
+	// "(+N more)" overflow line via withAlpha(…, 220).
+	editorReachOKText   = rl.NewColor(150, 220, 180, 255)
+	editorReachWarnText = rl.NewColor(240, 180, 180, 255)
 )
 
 // tintSwatch nudges a base swatch by per-channel deltas (clamped to [0,255]),

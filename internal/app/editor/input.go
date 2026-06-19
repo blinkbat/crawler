@@ -440,24 +440,23 @@ func updateGridCursor(s *State) {
 	// Arrow keys / D-pad / left stick walk the grid cursor (input.Arrow*
 	// includes the pad + stick edges, so the canvas navigates with a
 	// controller too). Clamp-not-wrap: the cursor stops at the map edge.
-	if input.ArrowLeftPressed() {
+	// Table-driven like doorFacingKeys / numberRowKeys so the four directions
+	// share the activate→clamp→moved step (axis + sign are the only diff).
+	for _, dir := range []struct {
+		pressed bool
+		dx, dz  int
+	}{
+		{input.ArrowLeftPressed(), -1, 0},
+		{input.ArrowRightPressed(), 1, 0},
+		{input.ArrowUpPressed(), 0, -1},
+		{input.ArrowDownPressed(), 0, 1},
+	} {
+		if !dir.pressed {
+			continue
+		}
 		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
-		s.gridCursorX = core.Clamp(s.gridCursorX-1, 0, mw-1)
-		moved = true
-	}
-	if input.ArrowRightPressed() {
-		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
-		s.gridCursorX = core.Clamp(s.gridCursorX+1, 0, mw-1)
-		moved = true
-	}
-	if input.ArrowUpPressed() {
-		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
-		s.gridCursorZ = core.Clamp(s.gridCursorZ-1, 0, mh-1)
-		moved = true
-	}
-	if input.ArrowDownPressed() {
-		s.gridCursorX, s.gridCursorZ = activateCursor(s, mw, mh)
-		s.gridCursorZ = core.Clamp(s.gridCursorZ+1, 0, mh-1)
+		s.gridCursorX = core.Clamp(s.gridCursorX+dir.dx, 0, mw-1)
+		s.gridCursorZ = core.Clamp(s.gridCursorZ+dir.dz, 0, mh-1)
 		moved = true
 	}
 	if moved && s.gridCursorX >= 0 {
@@ -851,6 +850,33 @@ func paintLineBetween(s *State, x0, z0, x1, z1 int) {
 	})
 }
 
+// finishEntityDragRelease is the shared release path for the pack / chest / door
+// drag branches in finishDrag, which are structurally identical: release on the
+// pick-up tile opens that entity's edit modal; a release elsewhere runs the
+// entity's place-blockers (flashing the first blocker) and otherwise banks one
+// undo, moves the entity, and marks the area dirty. The four things that vary —
+// the index-bounds validity, the entity's current tile, its blocker set, its
+// edit-modal opener, and the actual move — come in as values/closures so each
+// branch keeps its own semantics (pack's move replaces any pack already at the
+// destination; chest/door write the index in place). No-op when the cursor is
+// off-map or the dragged index is stale.
+func finishEntityDragRelease(s *State, valid bool, curX, curZ int, blockers func() string, openModal func(), move func()) {
+	if s.hoverX < 0 || !valid {
+		return
+	}
+	if curX == s.hoverX && curZ == s.hoverZ {
+		openModal()
+		return
+	}
+	if msg := blockers(); msg != "" {
+		s.flash(msg)
+		return
+	}
+	pushUndo(s)
+	move()
+	s.dirty = true
+}
+
 func finishDrag(s *State) {
 	switch s.drag {
 	case dragStart:
@@ -869,67 +895,60 @@ func finishDrag(s *State) {
 			}
 		}
 	case dragPack:
-		if s.hoverX >= 0 && s.dragPackIdx >= 0 && s.dragPackIdx < len(s.area.PackSpawns) {
-			sp := s.area.PackSpawns[s.dragPackIdx]
-			if sp.TileX != s.hoverX || sp.TileZ != s.hoverZ {
-				// Same legality as the brush place path (packPlaceBlockers) so the
-				// two can't drift — this open-coded set previously missed deep
-				// water vs addPackMember, and added crystal/door at different times.
-				if msg := firstBlocker(packPlaceBlockers(&s.area, s.hoverX, s.hoverZ)...); msg != "" {
-					s.flash(msg)
-				} else {
-					pushUndo(s)
-					// Drop any pack that was already at the destination cell
-					// (dragging this one onto another replaces the existing).
-					// Then locate the dragged pack by its old coords and move
-					// it to the destination. The old-coords lookup works
-					// because addPackMember keeps at most one pack per cell.
-					s.area.PackSpawns = removePackAt(s.area.PackSpawns, s.hoverX, s.hoverZ)
-					idx := core.PackSpawnIndexAt(s.area.PackSpawns, sp.TileX, sp.TileZ)
-					if idx >= 0 {
-						s.area.PackSpawns[idx].TileX = s.hoverX
-						s.area.PackSpawns[idx].TileZ = s.hoverZ
-					}
-					s.dirty = true
-				}
-			} else {
-				// Click without drag (release on the same tile we picked
-				// up) → open the inline pack editor instead of silently
-				// no-op'ing. Lets the author manage member list /
-				// reorder / remove without the awkward "use the diseased
-				// rat brush to add to a rat pack" workaround.
-				openPackEditModal(s, s.dragPackIdx)
-			}
+		sp := core.PackSpawn{}
+		valid := s.dragPackIdx >= 0 && s.dragPackIdx < len(s.area.PackSpawns)
+		if valid {
+			sp = s.area.PackSpawns[s.dragPackIdx]
 		}
+		finishEntityDragRelease(s, valid, sp.TileX, sp.TileZ,
+			// Same legality as the brush place path (packPlaceBlockers) so the
+			// two can't drift — this open-coded set previously missed deep
+			// water vs addPackMember, and added crystal/door at different times.
+			func() string { return firstBlocker(packPlaceBlockers(&s.area, s.hoverX, s.hoverZ)...) },
+			// Click without drag (release on the same tile we picked up) → open
+			// the inline pack editor instead of silently no-op'ing. Lets the
+			// author manage member list / reorder / remove without the awkward
+			// "use the diseased rat brush to add to a rat pack" workaround.
+			func() { openPackEditModal(s, s.dragPackIdx) },
+			func() {
+				// Drop any pack that was already at the destination cell
+				// (dragging this one onto another replaces the existing).
+				// Then locate the dragged pack by its old coords and move
+				// it to the destination. The old-coords lookup works
+				// because addPackMember keeps at most one pack per cell.
+				s.area.PackSpawns = removePackAt(s.area.PackSpawns, s.hoverX, s.hoverZ)
+				if idx := core.PackSpawnIndexAt(s.area.PackSpawns, sp.TileX, sp.TileZ); idx >= 0 {
+					s.area.PackSpawns[idx].TileX = s.hoverX
+					s.area.PackSpawns[idx].TileZ = s.hoverZ
+				}
+			})
 	case dragChest:
-		if s.hoverX >= 0 && s.dragChestIdx >= 0 && s.dragChestIdx < len(s.area.ChestSpawns) {
-			c := s.area.ChestSpawns[s.dragChestIdx]
-			if c.TileX == s.hoverX && c.TileZ == s.hoverZ {
-				// Release in place → open the loot editor (the old click action).
-				openChestEditModal(s, s.dragChestIdx)
-			} else if msg := firstBlocker(chestPlaceBlockers(&s.area, s.hoverX, s.hoverZ)...); msg != "" {
-				s.flash(msg)
-			} else {
-				pushUndo(s)
+		valid := s.dragChestIdx >= 0 && s.dragChestIdx < len(s.area.ChestSpawns)
+		c := core.ChestSpawn{}
+		if valid {
+			c = s.area.ChestSpawns[s.dragChestIdx]
+		}
+		finishEntityDragRelease(s, valid, c.TileX, c.TileZ,
+			func() string { return firstBlocker(chestPlaceBlockers(&s.area, s.hoverX, s.hoverZ)...) },
+			// Release in place → open the loot editor (the old click action).
+			func() { openChestEditModal(s, s.dragChestIdx) },
+			func() {
 				s.area.ChestSpawns[s.dragChestIdx].TileX = s.hoverX
 				s.area.ChestSpawns[s.dragChestIdx].TileZ = s.hoverZ
-				s.dirty = true
-			}
-		}
+			})
 	case dragDoor:
-		if s.hoverX >= 0 && s.dragDoorIdx >= 0 && s.dragDoorIdx < len(s.area.DoorSpawns) {
-			d := s.area.DoorSpawns[s.dragDoorIdx]
-			if d.TileX == s.hoverX && d.TileZ == s.hoverZ {
-				openDoorEditModal(s, s.dragDoorIdx)
-			} else if msg := firstBlocker(doorPlaceBlockers(&s.area, s.hoverX, s.hoverZ)...); msg != "" {
-				s.flash(msg)
-			} else {
-				pushUndo(s)
+		valid := s.dragDoorIdx >= 0 && s.dragDoorIdx < len(s.area.DoorSpawns)
+		d := core.DoorSpawn{}
+		if valid {
+			d = s.area.DoorSpawns[s.dragDoorIdx]
+		}
+		finishEntityDragRelease(s, valid, d.TileX, d.TileZ,
+			func() string { return firstBlocker(doorPlaceBlockers(&s.area, s.hoverX, s.hoverZ)...) },
+			func() { openDoorEditModal(s, s.dragDoorIdx) },
+			func() {
 				s.area.DoorSpawns[s.dragDoorIdx].TileX = s.hoverX
 				s.area.DoorSpawns[s.dragDoorIdx].TileZ = s.hoverZ
-				s.dirty = true
-			}
-		}
+			})
 	case dragRect:
 		if s.hoverX >= 0 {
 			// Snapshot-then-compare instead of an eager pushUndo: an empty or
@@ -2369,7 +2388,7 @@ func updateOpenConfirmDelete(s *State) Action {
 func openDeleteConfirmCmds(s *State) []modalCmd {
 	return []modalCmd{
 		{label: "Delete", hot: keyHot(rl.KeyY), run: func() Action { openDeleteSelected(s); return ActionNone }},
-		{label: "Cancel", hot: func() bool { return editorCancelPressed() || rl.IsKeyPressed(rl.KeyN) },
+		{label: "Cancel", hot: cancelOr(rl.KeyN),
 			run: func() Action { s.modalConfirmDelete = false; return ActionNone }},
 	}
 }
@@ -2434,7 +2453,7 @@ func saveAsOverwriteCmds(s *State) []modalCmd {
 			}
 			return ActionNone
 		}},
-		{label: "Cancel", hot: func() bool { return rl.IsKeyPressed(rl.KeyN) || editorCancelPressed() },
+		{label: "Cancel", hot: cancelOr(rl.KeyN),
 			run: func() Action {
 				s.awaitingOverwrite = false
 				s.focus = focusFilename
@@ -2463,7 +2482,7 @@ func escMenuCmds(s *State) []modalCmd {
 	return []modalCmd{
 		{label: render.DisplayMenuRowLabel(), hot: keyHot(rl.KeyD),
 			run: func() Action { render.ToggleDisplayMode(); return ActionNone }},
-		{label: "Continue editing", hot: cancelHot,
+		{label: "Continue editing", hot: cancelOr(rl.KeyC),
 			run: func() Action { closeModal(s); return ActionNone }},
 		{label: "Exit to Title", hot: keyHot(rl.KeyE), run: func() Action {
 			closeModal(s)
@@ -2489,7 +2508,7 @@ func confirmDirtyCmds(s *State) []modalCmd {
 	return []modalCmd{
 		{label: "Save", hot: keyHot(rl.KeyS), run: func() Action { return confirmDirtySave(s) }},
 		{label: "Discard", hot: keyHot(rl.KeyD), run: func() Action { closeModal(s); return runPendingAction(s) }},
-		{label: "Cancel", hot: cancelHot, run: func() Action {
+		{label: "Cancel", hot: cancelOr(rl.KeyC), run: func() Action {
 			closeModal(s)
 			s.pending = pendingNone
 			return ActionNone
@@ -2515,11 +2534,14 @@ func confirmDirtySave(s *State) Action {
 	return runPendingAction(s)
 }
 
-// keyHot / cancelHot build modalCmd accelerator predicates. cancelHot is
-// the editor's "back" edge (Esc / pad B) plus the C key several confirm
-// modals also accept.
+// keyHot / cancelOr build modalCmd accelerator predicates. cancelOr is the
+// editor's "back" edge (Esc / pad B) plus one extra letter key a confirm modal
+// also accepts — cancelOr(rl.KeyC) for the "Continue/Cancel (C)" modals,
+// cancelOr(rl.KeyN) for the "No (N)" overwrite/delete prompts.
 func keyHot(k int32) func() bool { return func() bool { return rl.IsKeyPressed(k) } }
-func cancelHot() bool            { return editorCancelPressed() || rl.IsKeyPressed(rl.KeyC) }
+func cancelOr(k int32) func() bool {
+	return func() bool { return editorCancelPressed() || rl.IsKeyPressed(k) }
+}
 
 func runPendingAction(s *State) Action {
 	p := s.pending

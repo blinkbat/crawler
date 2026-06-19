@@ -36,6 +36,18 @@ const (
 	// 4 columns × 3 rows comfortably fits the 11 floor brushes; a 12th
 	// would tuck into the last cell without a layout change.
 	newMapSwatchCols = 4
+	// Modal layout metrics. The dimensions section and floor grid lay out by
+	// these offsets off card.Y (the dialog editors' dialogHeaderInset/RowGap/
+	// FieldH don't match these values, so they're named locally rather than
+	// reused). newMapSwatchW/H size each floor cell; H == modalBtnH and the
+	// gutter == modalBtnGap so the grid reuses the shared button metrics where
+	// they're equal, naming only the cell width + the section offsets here.
+	newMapDimsTop    = float32(64) // first dimensions row, below the card title
+	newMapDimsRowGap = float32(42) // pitch between the width and height rows
+	newMapFloorLabel = float32(170) // "Default floor" caption, off card.Y
+	newMapSwatchTop  = float32(196) // floor swatch grid top, off card.Y
+	newMapHintBottom = float32(24)  // footer hint, up from the card's bottom edge
+	newMapSwatchW    = float32(110) // floor swatch cell width
 )
 
 func newMapModalLayout() newMapLayout {
@@ -46,18 +58,18 @@ func newMapModalLayout() newMapLayout {
 	// Dimensions row: value field + −/+ buttons for width on one line,
 	// then the same for height. Anchors match the metadata panel's
 	// dimensions row so the modal reads as the same control family.
-	y := card.Y + 64
+	y := card.Y + newMapDimsTop
 	xLeft := card.X + 20
 	l.widthValue, l.widthMinus, l.widthPlus = stepperRow(xLeft+62, y, 96, 6)
-	y += 42
+	y += newMapDimsRowGap
 	l.heightValue, l.heightMinus, l.heightPlus = stepperRow(xLeft+62, y, 96, 6)
 
-	// Floor swatch grid. Each cell is 110x30 with 8px gutters so a 4×N
-	// layout still fits comfortably inside the 520-wide card.
-	swatchY := card.Y + 196
-	swatchW := float32(110)
-	swatchH := float32(30)
-	gut := float32(8)
+	// Floor swatch grid. Each cell is newMapSwatchW × modalBtnH with modalBtnGap
+	// gutters so a 4×N layout still fits comfortably inside the 520-wide card.
+	swatchY := card.Y + newMapSwatchTop
+	swatchW := newMapSwatchW
+	swatchH := modalBtnH
+	gut := modalBtnGap
 	brushes := layerBrushes[LayerFloor]
 	l.floorSwatches = make([]rl.Rectangle, len(brushes))
 	for i := range brushes {
@@ -120,7 +132,7 @@ func drawNewMapModal(s *State, font rl.Font, theme render.Theme) {
 
 	// Floor section header + swatches.
 	drawLabel(font, "Default floor",
-		rl.NewRectangle(l.card.X+20, l.card.Y+170, 200, 18))
+		rl.NewRectangle(l.card.X+20, l.card.Y+newMapFloorLabel, 200, 18))
 	brushes := layerBrushes[LayerFloor]
 	mp := rl.GetMousePosition()
 	for i, br := range brushes {
@@ -132,7 +144,7 @@ func drawNewMapModal(s *State, font rl.Font, theme render.Theme) {
 	// Footer buttons + hint row.
 	drawModalButtons(font, []rl.Rectangle{l.createBtn, l.cancelBtn}, newMapBtnLabels)
 	render.DrawRichText(font, "Click a swatch = floor   ·   Tab cycle fields   ·   Enter create   ·   Esc cancel",
-		rl.NewVector2(l.card.X+20, l.card.Y+l.card.Height-24),
+		rl.NewVector2(l.card.X+20, l.card.Y+l.card.Height-newMapHintBottom),
 		editorFontHint, 1, theme.TextHint)
 }
 

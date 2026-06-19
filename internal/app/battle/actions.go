@@ -2713,8 +2713,11 @@ func damagePartyMemberPoison(g *core.GameState, partyIndex int) (int, bool) {
 // positive (a soak, not free immunity); a hit already zeroed upstream by a
 // perfect timing block arrives as rawAmount<=0 and stays 0.
 func damagePartyMemberDefendable(g *core.GameState, partyIndex, rawAmount int, tag core.SkillTag) (int, bool) {
-	if rawAmount > 0 && partyIndex >= 0 && partyIndex < len(g.Party) && g.Party[partyIndex].Defending {
+	if rawAmount > 0 && partyIndexValid(g, partyIndex) && g.Party[partyIndex].Defending {
 		rawAmount = int(float32(rawAmount) * core.DefendingDamageMult)
+		// Floor a positive soak at 1 — the same floor-1 rule core.mitigate
+		// applies to armor/MDef; that helper is a flat subtractive soak, so it
+		// doesn't fit this multiplicative reduction, but the contract matches.
 		if rawAmount < 1 {
 			rawAmount = 1
 		}

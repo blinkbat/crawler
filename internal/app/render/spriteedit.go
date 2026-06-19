@@ -165,7 +165,7 @@ func writeSpritePNGSlug(slug string, img image.Image) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, buf.Bytes(), 0o644)
+	return os.WriteFile(path, buf.Bytes(), core.AssetFileMode)
 }
 
 // prepareSpriteWrite ensures the sprites dir exists, backs up any existing
@@ -176,7 +176,7 @@ func writeSpritePNGSlug(slug string, img image.Image) error {
 // calling so a later write failure can't truncate a sprite this already backed up.
 func prepareSpriteWrite(slug string) (path string, err error) {
 	dir := core.ResolveAssetDir(core.SpritesDirName)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, core.AssetDirMode); err != nil {
 		return "", err
 	}
 	path = spritePathSlug(slug)
@@ -726,7 +726,7 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, data, 0o644)
+	return os.WriteFile(dst, data, core.AssetFileMode)
 }
 
 // Party-side sprite editing — the class-keyed twins of the foe functions above,

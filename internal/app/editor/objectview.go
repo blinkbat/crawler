@@ -64,7 +64,7 @@ func computeObjectViewLayout(s *State) objectViewLayout {
 	gridX := card.X + pad
 	gridY := card.Y + objViewHeader
 	gridW := card.Width - 2*pad
-	gridBottom := card.Y + card.Height - modalBtnH - 2*modalBottomInset
+	gridBottom := modalGridBottom(card)
 
 	cellW := gridW / float32(objViewCols)
 	cellH := objViewThumbH + objViewLabelH + objViewRowGap
@@ -108,9 +108,9 @@ func computeObjectViewLayout(s *State) objectViewLayout {
 	}
 	objViewThumbsBuf = thumbs // retain grown capacity for next frame
 
-	by := card.Y + card.Height - modalBtnH - modalBottomInset
+	by := modalFooterButtonY(card)
 	prevBtn := rl.NewRectangle(gridX, by, objViewBtnW, modalBtnH)
-	nextBtn := rl.NewRectangle(prevBtn.X+objViewBtnW+8, by, objViewBtnW, modalBtnH)
+	nextBtn := rl.NewRectangle(prevBtn.X+objViewBtnW+modalBtnGap, by, objViewBtnW, modalBtnH)
 	closeBtn := rl.NewRectangle(card.X+card.Width-pad-objViewBtnW, by, objViewBtnW, modalBtnH)
 
 	return objectViewLayout{
@@ -127,28 +127,30 @@ func updateObjectViewModal(s *State) Action {
 		return ActionNone
 	}
 
-	// Wheel + arrow / page keys flip pages (a downward wheel / Right / PageDown
-	// advances). The editor is keyboard+mouse, so raw raylib reads are fine here
-	// (mirrors hitglyphs.go).
+	// All three paging inputs (wheel, Right/PgDn ⊕ Left/PgUp keys, prev/next
+	// button clicks) funnel through setObjectViewPage so the page step + clamp
+	// live in ONE place (a downward wheel / Right / PageDown / Next advances).
+	// The editor is keyboard+mouse, so raw raylib reads are fine here (mirrors
+	// hitglyphs.go).
 	if w := rl.GetMouseWheelMove(); w < 0 {
-		s.objectViewPage++
+		setObjectViewPage(s, s.objectViewPage+1, l.pageCount)
 	} else if w > 0 {
-		s.objectViewPage--
+		setObjectViewPage(s, s.objectViewPage-1, l.pageCount)
 	}
 	if rl.IsKeyPressed(rl.KeyRight) || rl.IsKeyPressed(rl.KeyPageDown) {
-		s.objectViewPage++
+		setObjectViewPage(s, s.objectViewPage+1, l.pageCount)
 	}
 	if rl.IsKeyPressed(rl.KeyLeft) || rl.IsKeyPressed(rl.KeyPageUp) {
-		s.objectViewPage--
+		setObjectViewPage(s, s.objectViewPage-1, l.pageCount)
 	}
 
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 		mp := rl.GetMousePosition()
 		switch {
 		case pointIn(mp, l.prevBtn):
-			s.objectViewPage--
+			setObjectViewPage(s, s.objectViewPage-1, l.pageCount)
 		case pointIn(mp, l.nextBtn):
-			s.objectViewPage++
+			setObjectViewPage(s, s.objectViewPage+1, l.pageCount)
 		case pointIn(mp, l.closeBtn):
 			closeModal(s)
 			return ActionNone
@@ -158,15 +160,21 @@ func updateObjectViewModal(s *State) Action {
 			return ActionNone
 		}
 	}
-
-	// Re-clamp after any page change so the next compute/draw is in range.
-	if s.objectViewPage < 0 {
-		s.objectViewPage = 0
-	}
-	if s.objectViewPage >= l.pageCount {
-		s.objectViewPage = l.pageCount - 1
-	}
 	return ActionNone
+}
+
+// setObjectViewPage stores the requested page clamped to [0, pageCount-1] — the
+// single page-write site so the three paging inputs (wheel / keys / buttons)
+// can't each re-derive the clamp. computeObjectViewLayout still clamps in place
+// as a backstop (a page count shrinking between frames self-heals there).
+func setObjectViewPage(s *State, page, pageCount int) {
+	if page < 0 {
+		page = 0
+	}
+	if page >= pageCount {
+		page = pageCount - 1
+	}
+	s.objectViewPage = page
 }
 
 func drawObjectViewModal(s *State, font rl.Font, theme render.Theme) {

@@ -538,7 +538,7 @@ func drawToolbar(s *State, font rl.Font, theme render.Theme) {
 		m := render.MeasureRichText(font, label, sz, 1)
 		render.DrawRichText(font, label,
 			rl.NewVector2(s.rect.toolbar.Width-m.X-12, s.rect.toolbar.Y+(toolbarH-sz)/2),
-			sz, 1, rl.NewColor(220, 210, 180, 255))
+			sz, 1, editorActiveLevelText)
 	}
 	// NB: the hover tooltip is drawn LATE in Draw (drawToolbarTooltip), not here —
 	// drawToolbar runs before the grid, so a tooltip drawn here would be painted
@@ -753,6 +753,21 @@ const (
 
 // modalContentWidth is the usable inner width of a modal card.
 func modalContentWidth(card rl.Rectangle) float32 { return card.Width - 2*modalContentInset }
+
+// modalFooterButtonY is the Y a modal's bottom button row anchors to: one
+// modalBottomInset up from the card's bottom edge. modalButtonRow / the gallery
+// modals (Object Browser, Foe Visualizer) all anchor their footer row here.
+func modalFooterButtonY(card rl.Rectangle) float32 {
+	return card.Y + card.Height - modalBtnH - modalBottomInset
+}
+
+// modalGridBottom is where a gallery modal's content grid stops so it clears
+// the footer button row: one modalBottomInset gap above the buttons. Derived
+// from modalFooterButtonY so the grid-bottom and the button-Y can't drift (they
+// used to be 2*modalBottomInset vs modalBottomInset off the bottom independently).
+func modalGridBottom(card rl.Rectangle) float32 {
+	return modalFooterButtonY(card) - modalBottomInset
+}
 
 // modalButtonRow lays buttons out left-to-right along the bottom-left of a
 // modal card (auto-width per label) and returns their rects in order.
@@ -1133,7 +1148,7 @@ func drawMinimap(s *State) {
 		return
 	}
 	scale := mr.Width / float32(s.area.Width)
-	rl.DrawRectangleRec(rl.NewRectangle(mr.X-4, mr.Y-4, mr.Width+8, mr.Height+8), rl.NewColor(12, 14, 20, 214))
+	rl.DrawRectangleRec(rl.NewRectangle(mr.X-4, mr.Y-4, mr.Width+8, mr.Height+8), withAlpha(panelBackingColor, 214))
 	rl.DrawRectangleLinesEx(rl.NewRectangle(mr.X-4, mr.Y-4, mr.Width+8, mr.Height+8), 1, editorBorderDim)
 	rl.DrawRectangleRec(mr, rl.NewColor(58, 56, 50, 255))
 
@@ -1224,7 +1239,7 @@ func drawBrushRecents(s *State, font rl.Font) {
 	first := brushRecentRect(s, 0)
 	last := brushRecentRect(s, n-1)
 	bg := rl.NewRectangle(first.X-4, first.Y-4, (last.X+last.Width)-first.X+8, first.Height+8)
-	rl.DrawRectangleRec(bg, rl.NewColor(12, 14, 20, 205))
+	rl.DrawRectangleRec(bg, withAlpha(panelBackingColor, 205))
 	rl.DrawRectangleLinesEx(bg, 1, editorBorderDim)
 	mp := frameMouse
 	for i, ref := range s.recentBrushes {
@@ -1256,12 +1271,12 @@ func eyeBoxRect(r rl.Rectangle) rl.Rectangle {
 func drawLayerEye(r rl.Rectangle, open, hover bool) {
 	cx := r.X + r.Width/2
 	cy := r.Y + r.Height/2
-	col := rl.NewColor(176, 182, 196, 255)
+	col := layerEyeNormal
 	if !open {
-		col = rl.NewColor(98, 102, 112, 255)
+		col = layerEyeDim
 	}
 	if hover {
-		col = rl.NewColor(232, 236, 246, 255)
+		col = layerEyeHover
 	}
 	hw := r.Width * 0.40 // half-width: each corner sits hw from center
 	h := r.Width * 0.26  // how far the lids bulge above/below the centerline
@@ -1438,7 +1453,7 @@ func drawLevelStepper(font rl.Font, r rl.Rectangle, label string, hover bool) {
 	rl.DrawRectangleRec(r, bg)
 	rl.DrawRectangleLinesEx(r, 1, editorBorderDim)
 	m := render.MeasureRichText(font, label, editorFontBody, 1)
-	render.DrawRichText(font, label, rl.NewVector2(r.X+(r.Width-m.X)/2, r.Y+(r.Height-float32(editorFontBody))/2), editorFontBody, 1, rl.NewColor(220, 224, 234, 255))
+	render.DrawRichText(font, label, rl.NewVector2(r.X+(r.Width-m.X)/2, r.Y+(r.Height-float32(editorFontBody))/2), editorFontBody, 1, tooltipText)
 }
 
 // --- Palette ---------------------------------------------------------------
@@ -1640,7 +1655,7 @@ func drawBrushSwatchRow(font rl.Font, r rl.Rectangle, label string, layer Layer,
 	if active {
 		bg = bgActive
 	} else if hovered {
-		bg = bgButtonHover
+		bg = bgRowHover
 	}
 	rl.DrawRectangleRec(r, bg)
 	border := editorBorderDim
@@ -2028,7 +2043,7 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 		badgeValue := rl.NewRectangle(mr.reachArea.X, mr.reachArea.Y+22, mr.reachArea.Width, 30)
 		rl.DrawRectangleRec(badgeValue, rl.NewColor(14, 22, 18, 255))
 		rl.DrawRectangleLinesEx(badgeValue, 1, editorReachOK)
-		render.DrawRichText(font, "OK", rl.NewVector2(badgeValue.X+8, badgeValue.Y+(badgeValue.Height-16)/2), editorFontBody, 1, rl.NewColor(150, 220, 180, 255))
+		render.DrawRichText(font, "OK", rl.NewVector2(badgeValue.X+8, badgeValue.Y+(badgeValue.Height-16)/2), editorFontBody, 1, editorReachOKText)
 	} else {
 		// Stack one row per warning so the author can read them all
 		// without hover/click. Red panel + outline so the badge pops
@@ -2044,12 +2059,12 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 		for i, w := range rows {
 			render.DrawRichText(font, "! "+w,
 				rl.NewVector2(box.X+6, box.Y+5+float32(i)*22),
-				editorFontLabel, 1, rl.NewColor(240, 180, 180, 255))
+				editorFontLabel, 1, editorReachWarnText)
 		}
 		if len(warnings) > len(rows) {
 			render.DrawRichText(font, fmt.Sprintf("(+%d more)", len(warnings)-len(rows)),
 				rl.NewVector2(box.X+6, box.Y+h-18),
-				editorFontAccent, 1, rl.NewColor(240, 180, 180, 220))
+				editorFontAccent, 1, withAlpha(editorReachWarnText, 220))
 		}
 	}
 }

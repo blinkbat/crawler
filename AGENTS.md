@@ -17,7 +17,7 @@ The controller is the primary input device; keyboard/mouse are secondary conveni
 
 - **Exemption:** the map editor (`internal/app/editor/`) is keyboard+mouse only. Do NOT add pad bindings there or flag it for "missing gamepad support."
 - All input reads route through the semantic `input` package (`ConfirmPressed`, `BackPressed`, `CursorUpDown`, `MenuTabPrev/NextPressed`, `LookStick`, …). Do NOT call `rl.IsKeyPressed` / `rl.IsGamepadButton*` / `rl.GetMouse*` at a battle/explore/render call site — add/extend a predicate in `input/input.go` so each binding lives in one remappable place. (Exception: render may read live pointer position at DRAW time for purely visual hover cues.)
-- Button vocabulary — don't invent chords: A/Cross = confirm · B/Circle = back · Y/Triangle = panels · Start/Options = pause · Select/Share = quit/debug-flee · L1/L2+R1/R2 = page tabs / cycle target · D-pad+left stick = navigate · right stick = free-look. **Square/X and L3/R3 are intentionally unbound — claim one before reaching for a combo.**
+- Button vocabulary — don't invent chords: A/Cross = confirm · B/Circle = back · Y/Triangle = panels · Start/Options = pause · Select/Share = quit/debug-flee · L1/L2+R1/R2 = page tabs / cycle target · D-pad+left stick = navigate · right stick = free-look. Square/X now carries Use (in-game) / Erase (editor); **L3/R3 are the only intentionally unbound buttons — claim one before reaching for a combo.**
 - On-screen hints read controller-first via the glyph system (`render/glyphs.go`) — never a bare "Press Z…".
 
 ## Init-time invariants (parallel tables that panic at startup)
@@ -27,7 +27,7 @@ Add a new "kind" of anything and forget a parallel table → the program won't s
 - **Skill handlers:** every `core.PlayerCastableSkills` entry needs a `skillActionHandlers` row (`battle/actions.go` init). Every tree node's `GrantSkill` must be `PlayerCastable` (`core/skilltrees.go` init) → transitively every learnable skill resolves to a handler.
 - **Tile labels:** every char in `PropTileChars`/`DecorTileChars`/`floorTileCharList` needs a `tileLabelTable` row (`core/map.go` init).
 - **Minimap colors:** every `PropTileChars` char → `minimapPropColors`; every `BlockingFloorChars` → explicit `minimapTileColor` case (`render/minimap.go` init).
-- **Decor/Prop/Door models:** every `DecorTileChars`/`PropTileChars` char → `decorModels`/`propModels` OR `inlineDecorHandlers`/`inlinePropHandlers`; door styles need a non-empty `doorProps` slot (`assertDecorCoverage`/`assertPropCoverage`/`assertDoorProps` at `NewResources`).
+- **Decor/Prop/Door models:** every `DecorTileChars`/`PropTileChars` char → `decorModels`/`propModels` OR `inlineDecorHandlers`/`inlinePropHandlers`; door styles need a non-empty `doorProps` slot (`assertDecorCoverage`/`assertPropCoverage`/`assertDoorProps` at `LoadResources`).
 - **Enemy gold/drops:** `GoldMin <= GoldMax`, both non-negative; every `Drops` entry `Chance` in [0,1] naming a registered `ItemKind` (`core/enemies.go` init).
 - **Enemy visuals:** every `core.EnemyKinds` kind → `enemyVisuals` entry with non-zero texture (end of `loadEnemyVisuals`).
 - **Editor entity colors:** every `core.EnemyKinds` kind → `entityBrushColors` (`editor/editor.go` init).

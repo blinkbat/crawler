@@ -185,9 +185,9 @@ func savedVisualFlash(name, slug string) string {
 // selects the override file the save writes (foes → visuals.json, classes →
 // partyvisuals.json) — and slug is that file's map key ("rat", "warrior").
 func visualizerFooterHint(noun, slug string) string {
-	file := "visuals.json"
+	file := core.EnemyVisualsFileName
 	if noun == "class" {
-		file = "partyvisuals.json"
+		file = core.PartyVisualsFileName
 	}
 	return "orange sphere = particle origin   ·   cyan = hit glyph   ·   saves to " + file + " as \"" + slug + "\""
 }
@@ -710,8 +710,7 @@ func drawAssetTab(font rl.Font, theme render.Theme, l foeViewLayout, ov *core.En
 	for i := range assetFields {
 		f := assetFields[i]
 		track := l.assetTracks[i]
-		value := f.Get(ov)
-		drawSlider(font, theme, f.Label, fmt.Sprintf(f.Format, value), value, f.Min, f.Max,
+		drawSliderField(font, theme, f, ov,
 			rl.NewVector2(track.X-foeLabelW, track.Y-4), rl.NewVector2(track.X+track.Width+8, track.Y-4),
 			editorFontAccent, track, 6, cursor == i)
 	}
@@ -734,12 +733,29 @@ func drawAssetTab(font rl.Font, theme render.Theme, l foeViewLayout, ov *core.En
 func drawVisualSlider(font rl.Font, theme render.Theme, l foeViewLayout, i int, ov *core.EnemyVisualOverride, cursor int) {
 	f := foeFields[i]
 	track := l.sliderTracks[i]
-	value := f.Get(ov)
-	drawSlider(font, theme, f.Label, fmt.Sprintf(f.Format, value), value, f.Min, f.Max,
+	drawSliderField(font, theme, f, ov,
 		rl.NewVector2(track.X-foeLabelW, track.Y-4), rl.NewVector2(track.X+track.Width+8, track.Y-4),
 		editorFontAccent, track, 6, cursor == i)
 }
 
 func drawFoeSlider(font rl.Font, theme render.Theme, l foeViewLayout, i int, s *State) {
 	drawVisualSlider(font, theme, l, i, &s.foeVisual, s.foeCursor)
+}
+
+// drawSliderField renders one sliderField row against the value read from `ov`,
+// at the given label/value positions, font size, and thumb radius. The single
+// slider-row draw shared by the Foe/Party Visualizer stacks (Layout + Asset
+// tabs) and the sound creator — Display-aware: a row with a custom Display
+// renderer (e.g. the Wave row's "Sine") shows that, otherwise fmt.Sprintf with
+// the row's Format. Centralizing it gave the foe path the Display behavior it
+// previously lacked (it had hard-coded the Format path).
+func drawSliderField[T any](font rl.Font, theme render.Theme, f sliderField[T], ov *T,
+	labelPos, valuePos rl.Vector2, fontSize float32, track rl.Rectangle, thumbRadius float32, focused bool) {
+	value := f.Get(ov)
+	val := fmt.Sprintf(f.Format, value)
+	if f.Display != nil {
+		val = f.Display(value)
+	}
+	drawSlider(font, theme, f.Label, val, value, f.Min, f.Max,
+		labelPos, valuePos, fontSize, track, thumbRadius, focused)
 }

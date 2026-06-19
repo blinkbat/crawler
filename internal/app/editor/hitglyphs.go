@@ -25,6 +25,11 @@ const (
 	hitGlyphPreScale = float32(1.6)  // gallery glyphs draw a bit larger than the in-combat size
 	hitGlyphLoopSecs = float64(1.4)  // pop → animate → fade → repeat, per cell
 	hitGlyphStagger  = float64(0.18) // per-cell phase offset so they don't all strike in unison
+	// Card header/footer bands sizing the modal height (sibling galleries name
+	// theirs too — objViewHeader, foeHeaderH — but they genuinely differ, so
+	// these stay local rather than forced onto a shared value).
+	hitGlyphHeaderH = float32(52) // header band above the glyph grid
+	hitGlyphFooterH = float32(34) // footer band below it (the hint row)
 )
 
 func openHitGlyphsModal(s *State) { openModal(s, modalHitGlyphs) }
@@ -45,7 +50,7 @@ func drawHitGlyphsModal(s *State, font rl.Font, theme render.Theme) {
 	rows := (len(names) + hitGlyphCols - 1) / hitGlyphCols
 	cellH := hitGlyphCellH + hitGlyphLabelH
 	pw := hitGlyphModalW
-	ph := 52 + float32(rows)*cellH + 34
+	ph := hitGlyphHeaderH + float32(rows)*cellH + hitGlyphFooterH
 	r := drawModalHeader(font, theme, pw, ph, "HIT GLYPHS", theme.BorderActive)
 
 	// Loop clock: each cell's life fraction t∈[0,1) runs off the wall clock,

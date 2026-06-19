@@ -17,14 +17,15 @@ import (
 // Absent file or absent class ⇒ the code default stands.
 type PartyVisualOverride = EnemyVisualOverride
 
-// partyVisualsFileName is the basename of the party override file inside the
-// sprites asset dir, beside the foe visuals.json and the authored PNGs.
-const partyVisualsFileName = "partyvisuals.json"
+// PartyVisualsFileName is the basename of the party override file inside the
+// sprites asset dir, beside the foe visuals.json and the authored PNGs. Exported
+// so the editor can reference it instead of hardcoding the string.
+const PartyVisualsFileName = "partyvisuals.json"
 
 // PartyVisualsPath resolves the party override file's on-disk path via the same
 // ResolveAssetDir machinery the sprite PNGs and foe visuals use.
 func PartyVisualsPath() string {
-	return filepath.Join(ResolveAssetDir(SpritesDirName), partyVisualsFileName)
+	return filepath.Join(ResolveAssetDir(SpritesDirName), PartyVisualsFileName)
 }
 
 // PartyClassSlug is the stable, filesystem-safe key for a party class: a

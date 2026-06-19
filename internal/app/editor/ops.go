@@ -25,30 +25,43 @@ func activeFootprint(s *State) []core.MultiTileOffset {
 	return nil
 }
 
+// footprintBlocker walks the footprint anchored at (x,z) and returns the
+// first cell-level blocker's user-facing message, or "" when every cell is
+// authorable. checkProp toggles the "cell already holds a prop" rule — on for
+// the decor brush + the props-layer hover preview (decor can't sit on a prop),
+// off for the prop brush itself (a multi-tile prop's own tail cells aren't
+// re-validated against props). The single source of truth for "does this
+// footprint fit?" — footprintPlaceable wraps it as a bool, while the decor /
+// prop brush anchor paths flash the returned message. Blocker precedence:
+// bounds → wall → prop → player start.
+func footprintBlocker(s *State, x, z int, footprint []core.MultiTileOffset, checkProp bool) string {
+	for _, off := range footprint {
+		fx, fz := x+off.DX, z+off.DZ
+		if !s.area.InBounds(fx, fz) {
+			return "Footprint extends off the map"
+		}
+		if s.area.WallAt(fx, fz) {
+			return "Footprint cell is a wall"
+		}
+		if checkProp {
+			if blkProp(&s.area, fx, fz).fail {
+				return "Footprint cell holds a prop"
+			}
+		}
+		if s.area.StartTileX == fx && s.area.StartTileZ == fz {
+			return "Footprint cell holds the player start"
+		}
+	}
+	return ""
+}
+
 // footprintPlaceable reports whether the active brush's footprint fits
 // at the (anchor) cell — every footprint cell must be in-bounds, not a
 // wall, not occupied by another prop (for the props layer), and not the
 // player start. The hover preview tints red when this is false so the
 // author sees the click will be refused.
 func footprintPlaceable(s *State, x, z int, footprint []core.MultiTileOffset) bool {
-	for _, off := range footprint {
-		fx, fz := x+off.DX, z+off.DZ
-		if !s.area.InBounds(fx, fz) {
-			return false
-		}
-		if s.area.WallAt(fx, fz) {
-			return false
-		}
-		if s.area.StartTileX == fx && s.area.StartTileZ == fz {
-			return false
-		}
-		if s.layer == LayerDecor {
-			if ch, ok := cellAt(s.area.Props, fx, fz); ok && core.IsPropChar(ch) {
-				return false
-			}
-		}
-	}
-	return true
+	return footprintBlocker(s, x, z, footprint, s.layer == LayerDecor) == ""
 }
 
 // applyTool runs the active layer's selected brush at (x,z). Behavior is
@@ -164,24 +177,9 @@ func applyDecorBrush(s *State, x, z int, c byte) {
 	// chars so the author doesn't have to drop them by hand.
 	if footprint := core.DecorFootprint(c); footprint != nil {
 		tail := core.DecorFootprintTail(c)
-		for _, off := range footprint {
-			fx, fz := x+off.DX, z+off.DZ
-			if !s.area.InBounds(fx, fz) {
-				s.flash("Footprint extends off the map")
-				return
-			}
-			if s.area.WallAt(fx, fz) {
-				s.flash("Footprint cell is a wall")
-				return
-			}
-			if ch, _ := cellAt(s.area.Props, fx, fz); core.IsPropChar(ch) {
-				s.flash("Footprint cell holds a prop")
-				return
-			}
-			if s.area.StartTileX == fx && s.area.StartTileZ == fz {
-				s.flash("Footprint cell holds the player start")
-				return
-			}
+		if msg := footprintBlocker(s, x, z, footprint, true); msg != "" {
+			s.flash(msg)
+			return
 		}
 		for _, off := range footprint {
 			fx, fz := x+off.DX, z+off.DZ
@@ -198,7 +196,7 @@ func applyDecorBrush(s *State, x, z int, c byte) {
 		s.flash("Decor needs an open cell")
 		return
 	}
-	if ch, _ := cellAt(s.area.Props, x, z); core.IsPropChar(ch) {
+	if blkProp(&s.area, x, z).fail {
 		s.flash("Decor cell is occupied by a prop")
 		return
 	}
@@ -245,20 +243,9 @@ func applyPropBrush(s *State, x, z int, c byte) {
 	// partial commits).
 	if footprint := core.PropFootprint(c); footprint != nil {
 		tail := core.PropFootprintTail(c)
-		for _, off := range footprint {
-			fx, fz := x+off.DX, z+off.DZ
-			if !s.area.InBounds(fx, fz) {
-				s.flash("Footprint extends off the map")
-				return
-			}
-			if s.area.WallAt(fx, fz) {
-				s.flash("Footprint cell is a wall")
-				return
-			}
-			if s.area.StartTileX == fx && s.area.StartTileZ == fz {
-				s.flash("Footprint cell holds the player start")
-				return
-			}
+		if msg := footprintBlocker(s, x, z, footprint, false); msg != "" {
+			s.flash(msg)
+			return
 		}
 		for _, off := range footprint {
 			fx, fz := x+off.DX, z+off.DZ
@@ -384,7 +371,7 @@ func applyEntityBrush(s *State, x, z int, kind entityKind) {
 		s.flash("Entities need an open cell")
 		return
 	}
-	if ch, _ := cellAt(s.area.Props, x, z); core.IsPropChar(ch) {
+	if blkProp(&s.area, x, z).fail {
 		s.flash("Cell is occupied by a prop")
 		return
 	}
@@ -812,9 +799,9 @@ func clearEntitiesAt(s *State, x, z int) bool {
 		s.flash("Player start can't be erased; place it elsewhere instead")
 		return false
 	}
-	before := len(s.area.PackSpawns) + len(s.area.ChestSpawns) + len(s.area.DoorSpawns) + len(s.area.CrystalSpawns)
+	before := totalEntityCount(&s.area)
 	removeAllEntitiesAt(&s.area, x, z)
-	if len(s.area.PackSpawns)+len(s.area.ChestSpawns)+len(s.area.DoorSpawns)+len(s.area.CrystalSpawns) == before {
+	if totalEntityCount(&s.area) == before {
 		return false
 	}
 	s.dirty = true
@@ -854,6 +841,14 @@ func removeAllEntitiesAt(a *core.AreaDefinition, x, z int) {
 	a.ChestSpawns = removeChestSpawnAt(a.ChestSpawns, x, z)
 	a.DoorSpawns = removeDoorAt(a.DoorSpawns, x, z)
 	a.CrystalSpawns = removeCrystalSpawnAt(a.CrystalSpawns, x, z)
+}
+
+// totalEntityCount sums the area's spawn-list lengths across all entity
+// categories. The single source for "how many spawns are there?" — used by the
+// clear-entity dirty check and the resize drop-count, so a fifth spawn category
+// is one edit here rather than a hunt for every open-coded len(...)+len(...) sum.
+func totalEntityCount(a *core.AreaDefinition) int {
+	return len(a.PackSpawns) + len(a.ChestSpawns) + len(a.DoorSpawns) + len(a.CrystalSpawns)
 }
 
 func removePackAt(packs []core.PackSpawn, x, z int) []core.PackSpawn {
@@ -1065,8 +1060,7 @@ func resize(s *State, w, h int) {
 	if s.area.StartTileZ < 1 {
 		s.area.StartTileZ = 1
 	}
-	packsBefore, chestsBefore, doorsBefore := len(s.area.PackSpawns), len(s.area.ChestSpawns), len(s.area.DoorSpawns)
-	crystalsBefore := len(s.area.CrystalSpawns)
+	entitiesBefore := totalEntityCount(&s.area)
 	s.area.PackSpawns = removePackSpawnsOutside(s.area.PackSpawns, w, h)
 	s.area.ChestSpawns = removeChestSpawnsOutside(s.area.ChestSpawns, w, h)
 	s.area.DoorSpawns = removeDoorSpawnsOutside(s.area.DoorSpawns, w, h)
@@ -1082,36 +1076,44 @@ func resize(s *State, w, h int) {
 	// A shrink silently drops spawns past the new bounds or walled by them
 	// (undoable, but the author should know). Flash a count of what fell off so
 	// it's not a quiet data loss.
-	dropped := (packsBefore - len(s.area.PackSpawns)) + (chestsBefore - len(s.area.ChestSpawns)) + (doorsBefore - len(s.area.DoorSpawns)) + (crystalsBefore - len(s.area.CrystalSpawns))
+	dropped := entitiesBefore - totalEntityCount(&s.area)
 	if dropped > 0 {
 		s.flash(fmt.Sprintf("Resize dropped %d spawn(s) outside or walled by the new bounds", dropped))
 	}
 	s.dirty = true
 }
 
+// outsideBounds is the shrink-prune predicate: a tile sits "outside" the new
+// (w,h) bounds when its column or row index has fallen past the new edge.
+// Shared by all four removeXSpawnsOutside helpers so the resize-prune rule
+// lives in one place.
+func outsideBounds(w, h int) func(x, z int) bool {
+	return func(x, z int) bool { return x >= w || z >= h }
+}
+
 // removeDoorSpawnsOutside drops door entries whose tile sits past the
 // new bounds after a shrink. Mirrors removeChestSpawnsOutside.
 func removeDoorSpawnsOutside(spawns []core.DoorSpawn, w, h int) []core.DoorSpawn {
-	return removeSpawnsWhere(spawns, func(x, z int) bool { return x >= w || z >= h })
+	return removeSpawnsWhere(spawns, outsideBounds(w, h))
 }
 
 // removeCrystalSpawnsOutside drops crystal entries whose tile sits past the
 // new bounds after a shrink. Mirrors removeDoorSpawnsOutside.
 func removeCrystalSpawnsOutside(spawns []core.CrystalSpawn, w, h int) []core.CrystalSpawn {
-	return removeSpawnsWhere(spawns, func(x, z int) bool { return x >= w || z >= h })
+	return removeSpawnsWhere(spawns, outsideBounds(w, h))
 }
 
 // removePackSpawnsOutside drops pack entries whose tile sits past the new
 // bounds after a shrink. Mirrors removeChestSpawnsOutside / removeDoorSpawnsOutside
 // so all three resize-prune paths share the generic removeSpawnsWhere helper.
 func removePackSpawnsOutside(spawns []core.PackSpawn, w, h int) []core.PackSpawn {
-	return removeSpawnsWhere(spawns, func(x, z int) bool { return x >= w || z >= h })
+	return removeSpawnsWhere(spawns, outsideBounds(w, h))
 }
 
 // removeChestSpawnsOutside drops chest entries whose tile sits past
 // the new bounds.
 func removeChestSpawnsOutside(spawns []core.ChestSpawn, w, h int) []core.ChestSpawn {
-	return removeSpawnsWhere(spawns, func(x, z int) bool { return x >= w || z >= h })
+	return removeSpawnsWhere(spawns, outsideBounds(w, h))
 }
 
 // sealWallBorder raises the outer ring one level above the walkable baseline

@@ -74,16 +74,17 @@ type EnemyVisualOverride struct {
 	Contrast   float32 `json:"contrast"`
 }
 
-// enemyVisualsFileName is the basename of the override file inside the sprites
+// EnemyVisualsFileName is the basename of the override file inside the sprites
 // asset dir. Lives beside the authored enemy PNGs (maps/sprites/<slug>.png) so
-// "where a foe's look is authored" is one folder.
-const enemyVisualsFileName = "visuals.json"
+// "where a foe's look is authored" is one folder. Exported so the editor can
+// reference it instead of hardcoding the string.
+const EnemyVisualsFileName = "visuals.json"
 
 // EnemyVisualsPath resolves the override file's on-disk path via the same
 // ResolveAssetDir machinery the sprite PNGs and sound overrides use (cwd-
 // relative for `go run`, next-to-exe for a portable copy).
 func EnemyVisualsPath() string {
-	return filepath.Join(ResolveAssetDir(SpritesDirName), enemyVisualsFileName)
+	return filepath.Join(ResolveAssetDir(SpritesDirName), EnemyVisualsFileName)
 }
 
 // SpritesDirName is the sprites asset folder (PNGs + visuals.json).
