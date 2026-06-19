@@ -36,16 +36,23 @@ func SavePath() string { return filepath.Join(SaveDir(), saveFileName) }
 // (a save is taken in exploration, where those are already cleared). The
 // world isn't stored — MapID names the .map and the rest rebuilds on load.
 type SaveData struct {
-	Version      int           `json:"version"`
-	MapID        string        `json:"mapID"`
-	PlayerTileX  int           `json:"playerTileX"`
-	PlayerTileZ  int           `json:"playerTileZ"`
-	PlayerFacing int           `json:"playerFacing"`
-	StepCount    int           `json:"stepCount"`
-	Gold         int           `json:"gold"`
-	Party        []PartyMember `json:"party"`
-	Inventory    []ItemStack   `json:"inventory"`
-	Quests       []Quest       `json:"quests"`
+	Version      int    `json:"version"`
+	MapID        string `json:"mapID"`
+	PlayerTileX  int    `json:"playerTileX"`
+	PlayerTileZ  int    `json:"playerTileZ"`
+	PlayerFacing int    `json:"playerFacing"`
+	// PlayerLevel persists the party's standing voxel level (the cube-top they
+	// stand on). omitempty + the standable-level fallback on load keeps it
+	// save-compatible: a pre-voxel save (or one on a heightfield map) has no
+	// playerLevel and loads onto the spawn tile's lowest standable surface, so
+	// SaveVersion stays put. Only matters on a voxel map where the saved tile
+	// has more than one walkable surface (under vs over a bridge).
+	PlayerLevel int           `json:"playerLevel,omitempty"`
+	StepCount   int           `json:"stepCount"`
+	Gold        int           `json:"gold"`
+	Party       []PartyMember `json:"party"`
+	Inventory   []ItemStack   `json:"inventory"`
+	Quests      []Quest       `json:"quests"`
 	// Bestiary persists foe knowledge (kill counts + scanned flags per
 	// kind). omitempty so saves written before the bestiary existed simply
 	// load with no entries — adding this optional field is save-compatible,
@@ -110,6 +117,7 @@ func NewSaveData(g *GameState) SaveData {
 		PlayerTileX:  g.Player.TileX,
 		PlayerTileZ:  g.Player.TileZ,
 		PlayerFacing: g.Player.Facing,
+		PlayerLevel:  g.Player.Level,
 		StepCount:    g.StepCount,
 		Gold:         g.Gold,
 		Party:        saveSanitizedParty(g.Party),
@@ -331,6 +339,16 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 		g.Player = NewPlayer(x, z, area.StartFacing)
 	} else {
 		g.Player = NewPlayer(x, z, data.PlayerFacing)
+	}
+	// Restore the standing level: honor the saved level only if it's still a
+	// standable surface (the map may have been edited), else snap to the tile's
+	// lowest standable surface (the ground) — never trust a raw level that would
+	// float or bury the party. NewPlayer left Level zero, so this is the one
+	// place the loaded party's level is established.
+	if area.Standable(x, data.PlayerLevel, z) {
+		g.Player.Level = data.PlayerLevel
+	} else {
+		g.Player.Level = spawnLevel(&area, x, z)
 	}
 	RevealRadius(&g, x, z, SightRadius)
 	return g, nil

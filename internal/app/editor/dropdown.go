@@ -44,6 +44,8 @@ const (
 	ddDialogTriggerDialog               // trigger editor: pick which dialog the trigger starts
 	ddDialogTriggerFoe                  // trigger editor: pick the foe kind for a foeKilled trigger
 	ddDialogActionKind                  // action editor: pick the end-action (none / start / complete quest / event)
+	ddLayer                             // top-bar layer picker: pick the active layer; each row carries a hide/show eye
+	ddFaceSkin                          // tile right-click: pick a cliff-face skin for one face (or all) of the tile
 
 	dropdownOwnerCount // sentinel — count of owners; keep last. Every owner in
 	// (ddNone, dropdownOwnerCount) must register a dropdownEntryBuilders entry.
@@ -116,6 +118,13 @@ type dropdownEntry struct {
 	desc    string
 	enabled func(*State) bool
 	active  func(*State) bool
+	// toggle/toggleOn give a row a clickable visibility EYE in the left gutter
+	// (the layer picker's hide/show): a click on the eye runs toggle and LEAVES
+	// the list open; a click on the rest of the row still selects via apply. nil =
+	// no eye. toggleOn reports the eye's open (visible) state. A row uses either
+	// the eye (toggle) or the ✓ (active) gutter marker, not both.
+	toggle   func(*State)
+	toggleOn func(*State) bool
 }
 
 // disabledIn reports whether this entry is a disabled row (enabled set and false).
@@ -140,6 +149,63 @@ var dropdownEntryBuilders = map[dropdownOwner]func(*State) []dropdownEntry{
 	ddDialogTriggerDialog: dialogTriggerDialogEntries,
 	ddDialogTriggerFoe:    dialogTriggerFoeEntries,
 	ddDialogActionKind:    dialogActionKindEntries,
+	ddLayer:               layerSelectEntries,
+	ddFaceSkin:            faceSkinEntries,
+}
+
+// faceSkinEntries builds the tile face-skin picker (opened by a "Set … face"
+// context row). Lists the FaceSkins roster; for a single direction it also
+// offers "Default" to clear that face's override back to the tile's base skin.
+// The target tile + direction live on State (faceTarget*), set when the row
+// opened the dropdown.
+func faceSkinEntries(s *State) []dropdownEntry {
+	out := make([]dropdownEntry, 0, len(core.FaceSkins)+1)
+	if s.faceTargetDir >= 0 {
+		out = append(out, dropdownEntry{label: "Default (base skin)", apply: func(s *State) { applyFaceSkin(s, core.PropLevelAuto) }})
+	}
+	for _, sk := range core.FaceSkins {
+		sk := sk
+		out = append(out, dropdownEntry{label: sk.Name, apply: func(s *State) { applyFaceSkin(s, sk.Char) }})
+	}
+	return out
+}
+
+// applyFaceSkin commits the picked skin to the remembered target: the tile's
+// base skin (Walls) for "all faces" (dir < 0), else that one face's override.
+func applyFaceSkin(s *State, skin byte) {
+	x, z, d := s.faceTargetX, s.faceTargetZ, s.faceTargetDir
+	if !s.area.InBounds(x, z) {
+		return
+	}
+	pushUndo(s)
+	if d < 0 {
+		if skin == core.PropLevelAuto {
+			skin = core.TileRock
+		}
+		setLayerCell(&s.area.Walls, x, z, skin)
+	} else {
+		s.area.SetFaceDir(x, z, d, skin)
+	}
+	s.dirty = true
+}
+
+// layerSelectEntries builds the top-bar layer picker: one row per editor layer,
+// label = the layer name, selecting sets the active layer. Each row carries a
+// hide/show eye in the left gutter (clicking it toggles that layer's visibility
+// and keeps the list open), so the per-layer visibility the tab strip used to
+// surface lives here now.
+func layerSelectEntries(s *State) []dropdownEntry {
+	out := make([]dropdownEntry, 0, layerCount)
+	for i := 0; i < layerCount; i++ {
+		i := i
+		out = append(out, dropdownEntry{
+			label:    layerName(Layer(i)),
+			apply:    func(s *State) { s.layer = Layer(i) },
+			toggle:   func(s *State) { toggleLayerVisibility(s, i, false) },
+			toggleOn: func(s *State) bool { return !s.layerHidden[i] },
+		})
+	}
+	return out
 }
 
 func init() {
@@ -310,7 +376,7 @@ func computeDropdownLayout(s *State, entries []dropdownEntry) dropdownLayout {
 	// pickers stay exactly as wide as before.
 	markerW := float32(0)
 	for _, e := range entries {
-		if e.active != nil {
+		if e.active != nil || e.toggle != nil {
 			markerW = 16
 			break
 		}
@@ -409,7 +475,15 @@ func updateDropdown(s *State) bool {
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 		for i, rr := range lay.rows {
 			if pointIn(mp, rr) {
-				chooseDropdownEntry(s, entries, lay.topRow+i) // disabled rows no-op, keep open
+				idx := lay.topRow + i
+				// A click on the eye gutter toggles that row's visibility and keeps
+				// the list open (the layer picker's hide/show); the rest selects.
+				if lay.markerW > 0 && idx >= 0 && idx < len(entries) &&
+					entries[idx].toggle != nil && mp.X <= rr.X+lay.markerW+4 {
+					entries[idx].toggle(s)
+					return true
+				}
+				chooseDropdownEntry(s, entries, idx) // disabled rows no-op, keep open
 				return true
 			}
 		}
@@ -475,8 +549,11 @@ func drawDropdown(s *State, font rl.Font, theme render.Theme) {
 		if disabled {
 			col = render.FadeColor(theme.TextMuted, 0.45)
 		}
-		// Active-toggle ✓ in the reserved left gutter (menus only).
-		if lay.markerW > 0 && e.active != nil && e.active(s) {
+		// Left gutter marker: a hide/show EYE (layer picker) or a ✓ for an active
+		// toggle (menus). A row uses one or the other.
+		if lay.markerW > 0 && e.toggle != nil {
+			drawLayerEye(rl.NewRectangle(rr.X+1, rr.Y+3, lay.markerW, rr.Height-6), e.toggleOn == nil || e.toggleOn(s), false)
+		} else if lay.markerW > 0 && e.active != nil && e.active(s) {
 			render.DrawTextWithShadow(font, "✓", rr.X+4, rr.Y+3, editorFontBody, theme.TextPrimary)
 		}
 		render.DrawTextWithShadow(font, e.label, rr.X+6+lay.markerW, rr.Y+3, editorFontBody, col)

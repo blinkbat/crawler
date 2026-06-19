@@ -992,6 +992,10 @@ type State struct {
 	// list of per-kind add-keys. Zero value (owner == ddNone) means closed.
 	// See dropdown.go.
 	dropdown dropdownState
+	// faceTarget* remember which tile + direction the open ddFaceSkin dropdown is
+	// editing (set when a "Set … face" context row opens it). faceTargetDir is a
+	// core direction (0=N..3=W), or -1 for "all faces" (the tile's base skin).
+	faceTargetX, faceTargetZ, faceTargetDir int
 
 	rect layoutRect
 }

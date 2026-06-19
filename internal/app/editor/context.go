@@ -41,6 +41,10 @@ const (
 	// (rock / ivy / cracked / crumbling). The chosen skin char rides in
 	// ctxItem.skin. Offered only on a tile that actually exposes a face.
 	ctxItemSetFaceSkin
+	// ctxItemSetFaceDir opens the skin dropdown for ONE of the tile's faces
+	// (ctxItem.facing = a core direction, or -1 for "all faces" = the base skin).
+	// Lets the author skin N/E/S/W independently from a top-down view.
+	ctxItemSetFaceDir
 	// ctxItemEraseTile resets the right-clicked cell on the ACTIVE layer (the
 	// same reset the eraser brush runs). Always offered.
 	ctxItemEraseTile
@@ -143,13 +147,16 @@ func contextItemsAt(s *State, x, z int) []ctxItem {
 	// Gated by the same core rule the renderer draws faces from, and driven by
 	// the shared core.FaceSkins roster.
 	if core.TileExposesFace(s.area, x, z) {
-		cur := s.area.FaceSkinAt(x, z)
-		for _, sk := range core.FaceSkins {
-			marker := "  "
-			if cur == sk.Char {
-				marker = "* "
-			}
-			items = append(items, ctxItem{label: marker + "Face: " + sk.Name, kind: ctxItemSetFaceSkin, skin: sk.Char})
+		// Faces are a per-tile property (top-down editor can't paint a vertical
+		// face): one row per direction (+ "all"), each opening a skin dropdown so
+		// N/E/S/W can be set independently.
+		items = append(items, ctxItem{label: "Set all faces…", kind: ctxItemSetFaceDir, facing: -1})
+		for d := 0; d < int(core.FacingCount); d++ {
+			items = append(items, ctxItem{
+				label:  "Set " + core.FacingShortLabels[d] + " face…",
+				kind:   ctxItemSetFaceDir,
+				facing: d,
+			})
 		}
 	}
 	// Erase the active layer's cell here — always available (the eraser is also
@@ -375,6 +382,13 @@ func runContextItem(s *State, item ctxItem) {
 		pushUndo(s)
 		setLayerCell(&s.area.Walls, x, z, item.skin)
 		s.dirty = true
+	case ctxItemSetFaceDir:
+		// Remember which tile + face the picker edits, then open the skin
+		// dropdown anchored at the (closing) context menu. faceSkinEntries applies.
+		s.faceTargetX, s.faceTargetZ, s.faceTargetDir = x, z, item.facing
+		anchor := rl.NewRectangle(s.contextMenu.x, s.contextMenu.y, 150, 20)
+		openDropdownBelow(s, ddFaceSkin, anchor)
+		return
 	case ctxItemEraseTile:
 		// Snapshot-then-commit-if-changed so a no-op erase banks no undo and
 		// doesn't clobber the redo stack (mirrors deleteSpawnAt / keyboardMutate).

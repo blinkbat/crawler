@@ -48,6 +48,23 @@ func AreaContentEqual(a, b AreaDefinition) bool {
 		}
 		return false
 	}
+	// Solids is a [][]string voxel stack, not one of the flat gridLayers, so
+	// it's compared explicitly (like the spawn/dialog lists). solidsEqual uses
+	// absent==derived-from-Elevation semantics so a heightfield map (Solids nil)
+	// doesn't read dirty against one whose stack was materialized.
+	if !solidsEqual(a, b) {
+		return false
+	}
+	// PropLevels is also compared explicitly (absent == all-auto) so a map with
+	// every prop on its ground surface doesn't read dirty whether the grid is
+	// omitted or filled with the auto sentinel.
+	if !optionalLayerEqual(a.PropLevels, b.PropLevels, a.Width, a.Height, PropLevelAuto) ||
+		!optionalLayerEqual(a.DecorLevels, b.DecorLevels, a.Width, a.Height, PropLevelAuto) {
+		return false
+	}
+	if !faceOverridesEqual(a.FaceOverrides, b.FaceOverrides) {
+		return false
+	}
 	if !packSpawnsEqual(a.PackSpawns, b.PackSpawns) ||
 		!chestSpawnsEqual(a.ChestSpawns, b.ChestSpawns) ||
 		!slices.Equal(a.DoorSpawns, b.DoorSpawns) ||
@@ -56,6 +73,25 @@ func AreaContentEqual(a, b AreaDefinition) bool {
 		!dialogsEqual(a.Dialogs, b.Dialogs) ||
 		!slices.Equal(a.Triggers, b.Triggers) {
 		return false
+	}
+	return true
+}
+
+// faceOverridesEqual compares two per-tile face-override lists order-insensitively
+// (the lists aren't kept sorted at mutation time; encode sorts them), so a map
+// that authored the same overrides in a different order isn't falsely dirty.
+func faceOverridesEqual(a, b []FaceOverride) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	m := make(map[[2]int][4]byte, len(a))
+	for _, o := range a {
+		m[[2]int{o.X, o.Z}] = o.Skins
+	}
+	for _, o := range b {
+		if s, ok := m[[2]int{o.X, o.Z}]; !ok || s != o.Skins {
+			return false
+		}
 	}
 	return true
 }
@@ -181,6 +217,26 @@ func CloneArea(a AreaDefinition) AreaDefinition {
 	src := a.gridLayers()
 	for i := range dst {
 		*dst[i] = append([]string(nil), *src[i]...)
+	}
+	// Solids isn't a gridLayers() member (it's a [][]string stack), so deep-copy
+	// it explicitly. string rows are immutable, so a per-plane slice copy is a
+	// full deep copy — same reasoning as the per-layer append above.
+	if len(a.Solids) > 0 {
+		out.Solids = make([][]string, len(a.Solids))
+		for L := range a.Solids {
+			out.Solids[L] = append([]string(nil), a.Solids[L]...)
+		}
+	}
+	// PropLevels (per-tile prop level) is its own optional grid, deep-copied like
+	// Solids — string rows are immutable, so a slice copy is a full copy.
+	if len(a.PropLevels) > 0 {
+		out.PropLevels = append([]string(nil), a.PropLevels...)
+	}
+	if len(a.DecorLevels) > 0 {
+		out.DecorLevels = append([]string(nil), a.DecorLevels...)
+	}
+	if len(a.FaceOverrides) > 0 {
+		out.FaceOverrides = append([]FaceOverride(nil), a.FaceOverrides...)
 	}
 	out.PackSpawns = make([]PackSpawn, len(a.PackSpawns))
 	for i, sp := range a.PackSpawns {

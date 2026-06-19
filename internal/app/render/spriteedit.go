@@ -664,7 +664,13 @@ func setAssetPreviewSlug(slug string, baseTex rl.Texture2D, f SpriteFilter) bool
 		return false
 	}
 	applySpriteDisplayFilter(tex, f) // point-sampled when pixelated → sharp preview
-	ClearAssetPreview()              // free the prior preview before replacing it
+	// Free only the prior preview TEXTURE before replacing it — NOT the cached
+	// pristine base image (ClearAssetPreview drops both). Keeping the base cached
+	// is what makes a slider drag a cheap ImageCopy instead of a per-frame disk
+	// PNG read; the base is freed on modal close via ClearAssetPreview.
+	if assetPreviewLoaded {
+		rl.UnloadTexture(assetPreviewTex)
+	}
 	assetPreviewTex = tex
 	assetPreviewLoaded = true
 	return true

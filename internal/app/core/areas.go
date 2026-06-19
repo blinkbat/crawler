@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -274,6 +275,10 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		Props:            append([]string(nil), mf.Props...),
 		Ceiling:          append([]string(nil), ceiling...),
 		Elevation:        append([]string(nil), elevation...),
+		Solids:           CloneSolids(mf.Solids),
+		PropLevels:       append([]string(nil), mf.PropLevels...),
+		DecorLevels:      append([]string(nil), mf.DecorLevels...),
+		FaceOverrides:    faceOverridesFromMap(mf.Faces),
 		Materials:        mat,
 		StartTileX:       mf.StartX,
 		StartTileZ:       mf.StartZ,
@@ -392,7 +397,22 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		crystals = append(crystals, mapfile.MapCrystal{X: c.TileX, Z: c.TileZ})
 	}
 	ceiling := mapfile.OptionalLayerOrBlank(a.Ceiling, a.Width, a.Height, TileCeilingOpen)
-	elevation := mapfile.OptionalLayerOrBlank(a.Elevation, a.Width, a.Height, ElevationGround)
+	// Elevation/solids encoding: a gapless area (every column solid from 0 up,
+	// the legacy heightfield case) writes ONLY the elevation: section and stays
+	// byte-identical to before this change. A gapped area (a floating cube over
+	// air) writes the voxel stack as solids: AND projects column tops into
+	// elevation: as a graceful downgrade for readers that ignore solids:.
+	var elevation, solids = a.Elevation, [][]string(nil)
+	if len(a.Solids) > 0 {
+		// A materialized stack is authoritative: project column tops into
+		// elevation: (the renderer/legacy readers' heightfield view), and emit
+		// solids: only when a gap makes the stack inexpressible as a heightfield.
+		elevation = ElevationRowsFromSolids(&a)
+		if !a.AllColumnsGapless() {
+			solids = CloneSolids(a.Solids)
+		}
+	}
+	elevation = mapfile.OptionalLayerOrBlank(elevation, a.Width, a.Height, ElevationGround)
 	customs := make([]mapfile.MapCustomEnemy, 0, len(a.CustomEnemies))
 	for _, ce := range a.CustomEnemies {
 		mapCE, err := MapCustomEnemyFromDef(ce)
@@ -424,6 +444,10 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		Props:           append([]string(nil), a.Props...),
 		Ceiling:         append([]string(nil), ceiling...),
 		Elevation:       append([]string(nil), elevation...),
+		Solids:          solids,
+		PropLevels:      levelsForEncode(a.PropLevels, a.Width, a.Height),
+		DecorLevels:     levelsForEncode(a.DecorLevels, a.Width, a.Height),
+		Faces:           mapFacesFromArea(a),
 		Packs:           packs,
 		Chests:          chests,
 		Doors:           doors,
@@ -433,6 +457,66 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		Dialogs:         dialogLines,
 		Triggers:        triggerLines,
 	}, nil
+}
+
+// levelsForEncode returns a per-tile level grid (PropLevels / DecorLevels) to
+// write to disk, or nil when every cell is on its auto surface (the common case)
+// — so the map omits the section and a pre-feature map stays byte-identical. A
+// grid is emitted as soon as one tile carries an explicit (non-auto) level.
+func levelsForEncode(layer []string, w, h int) []string {
+	explicit := false
+	for z := 0; z < h && z < len(layer) && !explicit; z++ {
+		row := layer[z]
+		for x := 0; x < w && x < len(row); x++ {
+			if row[x] != PropLevelAuto {
+				explicit = true
+				break
+			}
+		}
+	}
+	if !explicit {
+		return nil
+	}
+	return mapfile.OptionalLayerOrBlank(layer, w, h, PropLevelAuto)
+}
+
+// faceOverridesFromMap converts the on-disk per-tile face skins into the area's
+// FaceOverrides (nil when none, so a base-skin map carries no overrides).
+func faceOverridesFromMap(faces []mapfile.MapFace) []FaceOverride {
+	if len(faces) == 0 {
+		return nil
+	}
+	out := make([]FaceOverride, len(faces))
+	for i, f := range faces {
+		out[i] = FaceOverride{X: f.X, Z: f.Z, Skins: f.Skins}
+	}
+	return out
+}
+
+// mapFacesFromArea projects FaceOverrides to the on-disk form, normalizing unset
+// faces to the auto sentinel and sorting by (Z,X) so the faces: section is
+// deterministic (a re-save of an unchanged map is byte-identical).
+func mapFacesFromArea(a AreaDefinition) []mapfile.MapFace {
+	if len(a.FaceOverrides) == 0 {
+		return nil
+	}
+	out := make([]mapfile.MapFace, 0, len(a.FaceOverrides))
+	for _, o := range a.FaceOverrides {
+		sk := o.Skins
+		for d := range sk {
+			if sk[d] == 0 {
+				sk[d] = PropLevelAuto
+			}
+		}
+		out = append(out, mapfile.MapFace{X: o.X, Z: o.Z, Skins: sk})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Z != out[j].Z {
+			return out[i].Z < out[j].Z
+		}
+		return out[i].X < out[j].X
+	})
+	return out
 }
 
 // --- Table-driven name <-> enum lookups ---

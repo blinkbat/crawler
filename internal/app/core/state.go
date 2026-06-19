@@ -137,8 +137,24 @@ func NewGameState(area AreaDefinition) GameState {
 		// Rand here instead.
 		RNG: rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
+	// Seed the party's standing level to the spawn tile's lowest standable
+	// surface (the ground). On a heightfield that's the column top, matching the
+	// pre-voxel single-surface assumption; on a voxel map a player spawned under
+	// a bridge starts on the ground, not the deck.
+	g.Player.Level = spawnLevel(&area, startX, startZ)
 	RevealRadius(&g, startX, startZ, SightRadius)
 	return g
+}
+
+// spawnLevel picks the standing level a unit placed at (x,z) should occupy: the
+// lowest standable surface (the ground), falling back to the column top when no
+// surface is standable (a fully sealed / degenerate column) so the value is
+// always a sane level rather than -1.
+func spawnLevel(a *AreaDefinition, x, z int) int {
+	if lo := a.LowestStandableLevel(x, z); lo >= 0 {
+		return lo
+	}
+	return a.ElevationLevelAt(x, z)
 }
 
 // starterInventory returns the inventory the party spawns with. The

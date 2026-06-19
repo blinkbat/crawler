@@ -316,9 +316,38 @@ type AreaDefinition struct {
 	// same dimensions as Walls. A ramp floor tile stores its LOW level here.
 	// Older .map files without an elevation: section load as an all-'0' (flat)
 	// layer, so ElevationLevelAt reads 0 everywhere for them.
-	Elevation   []string
-	Materials   MaterialSet
-	StartTileX  int
+	Elevation []string
+	// Solids is the VOXEL occupancy stack that supersedes the single-height
+	// Elevation field: Solids[level][z] is a width-wide row of chars, one per x,
+	// where a non-SolidAir char means a solid cube at (x,level,z) (the char is
+	// the cube's material/skin, drawn from the Walls face-skin alphabet). Planes
+	// above the tallest column are implicitly all-air and not stored. A nil/empty
+	// Solids means "this area is a pure heightfield described by Elevation" — the
+	// loader materializes the stack on demand (BuildSolidsFromElevation), and a
+	// heightfield round-trips to disk as the legacy elevation: section so old
+	// maps stay byte-identical. Only a column with a GAP (a floating cube over
+	// air) forces the on-disk solids: section. See voxel.go.
+	Solids [][]string
+	// PropLevels is the optional per-tile prop LEVEL grid (one base-36 char per
+	// (x,z), or PropLevelAuto = '.' for "rest on the column's lowest standable
+	// surface"). A prop placed on a bridge deck stores that deck's level here so
+	// it renders + blocks at the deck, not the ground beneath. nil/empty = every
+	// prop is on its auto surface (the pre-voxel behavior), so old maps need no
+	// prop_levels: section. See PropLevelAt.
+	PropLevels []string
+	// DecorLevels is the decor analogue of PropLevels — the per-tile level a decor
+	// scatter sits on (deck vs ground), '.' = auto. Same optional/byte-stable
+	// semantics; nil = all decor on its auto surface. See DecorLevelAt.
+	DecorLevels []string
+	// FaceOverrides holds per-tile, per-direction cliff-face skin overrides set
+	// from a tile's right-click menu — so a tile can wear a different skin on its
+	// N/E/S/W faces (the top-down editor can't paint a vertical face, so faces are
+	// a tile property, not a layer). A tile with no entry uses its base FaceSkinAt
+	// skin on every face, so existing maps are unchanged and need no faces:
+	// section. Sorted by (Z,X) for deterministic encoding. See FaceSkinForDir.
+	FaceOverrides []FaceOverride
+	Materials     MaterialSet
+	StartTileX    int
 	StartTileZ  int
 	StartFacing int
 	PackSpawns  []PackSpawn
@@ -361,8 +390,16 @@ type AreaDefinition struct {
 }
 
 type Player struct {
-	TileX     int
-	TileZ     int
+	TileX int
+	TileZ int
+	// Level is the voxel level of the cube-top the party stands on — the
+	// vertical coordinate that lets a column hold more than one walkable surface
+	// (ground UNDER a bridge vs the deck OVER it). On a heightfield map every
+	// column has a single surface, so Level just tracks the column top and the
+	// movement/camera path stays on the original StandGroundY rule; it becomes
+	// load-bearing only on a voxel (Solids) map. Seeded to the lowest standable
+	// surface of the spawn tile and updated by ResolveStep on each step.
+	Level     int
 	Facing    int
 	X         float32
 	Z         float32
@@ -779,6 +816,12 @@ func (g *GameState) LogMessage(msg string) {
 type Pack struct {
 	TileX int
 	TileZ int
+	// Level is the pack's standing voxel level — the cube-top it stands on, the
+	// pack analogue of Player.Level. On a heightfield it tracks the column top
+	// (so field rendering is unchanged); on a voxel map it keeps a roaming pack
+	// on the right surface (under vs over a bridge). Seeded in placePacks and
+	// updated by the AI move-apply step via ResolveStep.
+	Level int
 	HomeX int
 	HomeZ int
 	// X, Z are the visible (interpolated) world coords used by the

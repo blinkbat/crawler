@@ -80,8 +80,10 @@ func (s *State) layout() {
 	// palette / metadata cascade automatically).
 	s.rect.toolbar = rl.NewRectangle(0, topbarH, w, toolbarH)
 	contentTop := topbarH + toolbarH
-	// Layer tabs sit at the top of the palette column.
-	tabsHeight := float32(layerCount) * layerTabH
+	// Layer selection moved to the prominent top-bar dropdown (drawTopbar), so the
+	// palette column no longer carries a tab strip — the levels panel starts at
+	// the top of the column (compresses the chrome the dropdown replaced).
+	tabsHeight := float32(0)
 	s.rect.layerTabs = rl.NewRectangle(0, contentTop, paletteW, tabsHeight)
 	// Levels panel directly beneath the layer tabs: a header row (label + −/+)
 	// then one row per level 0..topLevel (capped to maxVisibleLevelRows so a tall
@@ -188,7 +190,6 @@ func Draw(s *State, assets render.Resources) {
 	rl.ClearBackground(bgWindow)
 	drawTopbar(s, font, theme)
 	drawToolbar(s, font, theme)
-	drawLayerTabs(s, font, theme)
 	drawLevelsPanel(s, font, theme)
 	drawPalette(s, font, theme)
 	drawMetadata(s, font, theme)
@@ -531,7 +532,7 @@ func drawToolbar(s *State, font rl.Font, theme render.Theme) {
 	// tool-mode (only meaningful on the Elevation layer).
 	{
 		label := fmt.Sprintf("Active level: %d", s.editLevel)
-		if s.rampMode && s.layer == LayerElevation {
+		if s.layer == LayerElevation && s.rampMode {
 			label += "  [RAMP]"
 		}
 		sz := editorFontLabel
@@ -622,6 +623,7 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 	rl.DrawLineEx(rl.NewVector2(0, topbarH), rl.NewVector2(s.rect.topbar.Width, topbarH), 1, outlineHard)
 
 	drawButtonStrip(font, s, menuBarBtns, 6, topbarH-12)
+	drawLayerMenuButton(s, font, theme)
 
 	key := topbarInfoKey{
 		epoch:     s.contentEpoch,
@@ -670,6 +672,34 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 		editorFontTopbar, theme.TextMuted)
 	infoX := labelX - topbarInfoMeasure.X - 24
 	render.DrawTextWithShadow(font, topbarInfoLabel, infoX, (topbarH-topbarInfoMeasure.Y)/2, editorFontLabel, theme.TextHint)
+}
+
+// layerMenuBtnRect is the prominent active-layer dropdown button on the top bar,
+// placed just right of the menu-group strip. Single source for the draw + the
+// click hit-test + the dropdown anchor (so they can't drift).
+func layerMenuBtnRect(s *State) rl.Rectangle {
+	x := float32(6)
+	for i := range menuBarBtns {
+		x += buttonWidth(menuBarBtns[i].label) + tightBtnGap
+	}
+	x += 16 // gap separating it from the menu groups
+	return rl.NewRectangle(x, 5, 172, topbarH-10)
+}
+
+// drawLayerMenuButton paints the active-layer dropdown trigger — the editor's
+// primary "what am I editing" control, so it's an accent-bordered, bright button
+// (very obvious) rather than another flat menu label. Click opens ddLayer, whose
+// rows each carry the per-layer hide/show eye.
+func drawLayerMenuButton(s *State, font rl.Font, theme render.Theme) {
+	r := layerMenuBtnRect(s)
+	bg := bgActive
+	if pointIn(frameMouse, r) {
+		bg = bgEntryHover
+	}
+	rl.DrawRectangleRec(r, bg)
+	rl.DrawRectangleLinesEx(r, 2, editorBorderActive)
+	label := "Layer: " + layerName(s.layer) + dropdownArrowSuffix
+	render.DrawTextWithShadow(font, label, r.X+10, r.Y+(r.Height-16)/2, editorFontBody, theme.TextPrimary)
 }
 
 // topbarBtnWidths overrides the default 64-px topbar button width for
@@ -1212,42 +1242,12 @@ func drawBrushRecents(s *State, font rl.Font) {
 	}
 }
 
-// --- Layer tabs ------------------------------------------------------------
-
-func layerTabRect(s *State, i int) rl.Rectangle {
-	return rl.NewRectangle(
-		s.rect.layerTabs.X,
-		s.rect.layerTabs.Y+float32(i)*layerTabH,
-		s.rect.layerTabs.Width,
-		layerTabH,
-	)
-}
-
-func layerTabAt(s *State, p rl.Vector2) int {
-	if !pointIn(p, s.rect.layerTabs) {
-		return -1
-	}
-	for i := 0; i < layerCount; i++ {
-		if pointIn(p, layerTabRect(s, i)) {
-			return i
-		}
-	}
-	return -1
-}
-
 // eyeBoxRect is the small visibility-toggle box inset at the right edge of a
-// layer tab / level row. The layer and level panels share the identical
-// geometry, so both layerEyeRect and levelEyeRect derive from this.
+// Levels-panel row. (The layer tabs that also used it are gone — layer
+// visibility now lives on the top-bar layer dropdown's per-row eyes.)
 func eyeBoxRect(r rl.Rectangle) rl.Rectangle {
 	const eye = float32(20)
 	return rl.NewRectangle(r.X+r.Width-6-eye-6, r.Y+(r.Height-eye)/2, eye, eye)
-}
-
-// layerEyeRect is the visibility-toggle box for a layer tab. Clicking it toggles
-// the layer's hidden flag (Alt-click solos); it's hit-tested before the
-// tab-select so the eye doesn't also switch layers.
-func layerEyeRect(s *State, i int) rl.Rectangle {
-	return eyeBoxRect(layerTabRect(s, i))
 }
 
 // drawLayerEye paints the visibility toggle as an almond EYE glyph: two lids
@@ -1287,41 +1287,6 @@ func drawLayerEye(r rl.Rectangle, open, hover bool) {
 	} else {
 		// Strike-through corner to corner so the hidden state reads instantly.
 		rl.DrawLineEx(rl.NewVector2(cx-hw-2, cy-h-2), rl.NewVector2(cx+hw+2, cy+h+2), 2, col)
-	}
-}
-
-func drawLayerTabs(s *State, font rl.Font, theme render.Theme) {
-	rl.DrawRectangleRec(s.rect.layerTabs, bgWindow)
-	// Re-use the Draw()-cached frameMouse instead of calling
-	// rl.GetMousePosition per-tab — the call crosses CGo.
-	mp := frameMouse
-	for i := 0; i < layerCount; i++ {
-		r := layerTabRect(s, i)
-		active := Layer(i) == s.layer
-		hidden := s.layerHidden[i]
-		bg := bgPanel
-		border := editorBorderDim
-		text := theme.TextMuted
-		if active {
-			bg = bgActive
-			border = editorBorderActive
-			text = theme.TextPrimary
-		} else if pointIn(mp, r) {
-			bg = bgEntryHover
-		}
-		if hidden {
-			// Dim the label so the hidden state reads across the whole tab,
-			// not just the eye.
-			text = hiddenTabTextColor
-		}
-		// Inset the tab so consecutive tabs don't share a border.
-		inner := rl.NewRectangle(r.X+6, r.Y+3, r.Width-12, r.Height-6)
-		rl.DrawRectangleRec(inner, bg)
-		rl.DrawRectangleLinesEx(inner, 1, border)
-		label := fmt.Sprintf("%d %s", i+1, layerName(Layer(i)))
-		render.DrawTextWithShadow(font, label, inner.X+10, inner.Y+(inner.Height-16)/2, editorFontBody, text)
-		eye := layerEyeRect(s, i)
-		drawLayerEye(eye, !hidden, pointIn(mp, eye))
 	}
 }
 
@@ -2213,11 +2178,15 @@ func drawGrid(s *State, font rl.Font) {
 			if showFloor {
 				rl.DrawRectangleRec(r, fadeAlpha(floorColor(s.area.Floor[z][x]), floorAlpha*levelFade))
 			}
-			// While editing elevation, tint each raised cell by its level (dark
-			// low → light high) so the whole height map reads at a glance — even
-			// zoomed out below the per-tile glyph threshold. Ground stays untinted.
-			if s.layer == LayerElevation && lvl > 0 && lvl != s.editLevel {
-				rl.DrawRectangleRec(r, fadeAlpha(elevationLevelColor(lvl), 0.55*levelFade))
+			// Elevation is a voxel grid: show the slice at the ACTIVE level. A cell
+			// with a tile at (x, editLevel, z) fills tinted by the level; a cell
+			// with no tile there reads empty. Scrub the active level (Levels panel /
+			// PgUp-PgDn) to see each floor — so a land bridge reads as a tile at the
+			// deck level with nothing on the level below it.
+			if s.layer == LayerElevation {
+				if _, solid := s.area.SolidAt(x, s.editLevel, z); solid {
+					rl.DrawRectangleRec(r, fadeAlpha(elevationLevelColor(s.editLevel), 0.6))
+				}
 			}
 			if w := s.area.Walls[z][x]; showWalls && core.IsFaceSkinChar(w) {
 				// Show an overlay only where an explicit face skin is assigned
@@ -2226,10 +2195,15 @@ func drawGrid(s *State, font rl.Font) {
 				rl.DrawRectangleRec(r, fadeAlpha(tileColor(LayerWalls, w), wallAlpha*levelFade))
 			}
 			if d := s.area.Decor[z][x]; showDecor && d != core.DecorAuto {
-				rl.DrawRectangleRec(insetRect(r, cell*0.28), fadeAlpha(decorColor(d), decorAlpha*levelFade))
+				df := levelDistanceFade(s, s.area.DecorLevelAt(x, z))
+				rl.DrawRectangleRec(insetRect(r, cell*0.28), fadeAlpha(decorColor(d), decorAlpha*df))
 			}
 			if p := s.area.Props[z][x]; showProps && core.IsPropChar(p) {
-				rl.DrawCircle(int32(r.X+cell/2), int32(r.Y+cell/2), cell*0.36, fadeAlpha(propColor(p), propAlpha*levelFade))
+				// A prop fades by ITS OWN level (where it was placed), not the
+				// column top — so scrubbing levels shows a deck-mounted prop on the
+				// deck and a ground prop on the ground, the per-level read.
+				pf := levelDistanceFade(s, s.area.PropLevelAt(x, z))
+				rl.DrawCircle(int32(r.X+cell/2), int32(r.Y+cell/2), cell*0.36, fadeAlpha(propColor(p), propAlpha*pf))
 			}
 			// Ceiling hash overlay: shown only when the Ceiling layer is
 			// active or the cell holds a ceiling. Two diagonal stripes
@@ -2818,13 +2792,19 @@ func drawCurrentLevelOutline(s *State, xMin, xMax, zMin, zMax int, cell float32)
 	if zMax < s.area.Height {
 		zMax++
 	}
-	// offLevel reports whether (x,z) is off the active level — true when out of
-	// bounds (the map edge always bounds the group) or its elevation differs.
-	offLevel := func(x, z int) bool {
+	// onActive reports whether (x,z) has a tile on the active level — the voxel
+	// slice the outline hugs (matches the per-level fill in drawGrid).
+	onActive := func(x, z int) bool {
 		if x < 0 || z < 0 || x >= s.area.Width || z >= s.area.Height {
-			return true
+			return false
 		}
-		return s.area.ElevationLevelAt(x, z) != s.editLevel
+		_, solid := s.area.SolidAt(x, s.editLevel, z)
+		return solid
+	}
+	// offLevel reports whether (x,z) is off the active slice — true when out of
+	// bounds (the map edge always bounds the group) or it has no tile there.
+	offLevel := func(x, z int) bool {
+		return !onActive(x, z)
 	}
 	// edge strokes the underlay then the core for one cell edge (a..b).
 	edge := func(ax, ay, bx, by float32) {
@@ -2833,7 +2813,7 @@ func drawCurrentLevelOutline(s *State, xMin, xMax, zMin, zMax int, cell float32)
 	}
 	for z := zMin; z < zMax; z++ {
 		for x := xMin; x < xMax; x++ {
-			if s.area.ElevationLevelAt(x, z) != s.editLevel {
+			if !onActive(x, z) {
 				continue
 			}
 			r := s.rect.tileRect(x, z)

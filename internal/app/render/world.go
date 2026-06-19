@@ -328,6 +328,11 @@ func Camera(g *core.GameState) rl.Camera3D {
 	// the movement tick interpolates across a ramp (so the camera climbs
 	// smoothly instead of snapping a level at the tile boundary).
 	groundY := g.Area.StandGroundY(p.TileX, p.TileZ)
+	if len(g.Area.Solids) > 0 {
+		// Voxel map: ride the resolved standing level (under a deck vs on it),
+		// not the column top StandGroundY reports.
+		groundY = g.Area.StandGroundYAt(p.TileX, p.Level, p.TileZ)
+	}
 	if p.Anim.Kind == core.AnimStep {
 		groundY = p.GroundY
 	}
@@ -588,45 +593,57 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 			// the prebuilt grid (computed once, above) rather than re-decoding.
 			te := grid[z*gw+x]
 			elevY := core.ElevationWorldY(te.level)
-			// Scenery (decor/props) rests on the WALKABLE surface, which on a
-			// ramp tile is the mid-slope height, not the low edge elevY that the
-			// floor wedge is drawn from. Anchor it where a unit standing there
-			// would rest (StandGroundY, recomputed inline from the grid so the
-			// loop doesn't re-derive level+ramp). On flat tiles this == elevY.
-			standLevel := float32(te.level - core.ElevationBaseline)
-			if te.ramp != core.NoRamp {
-				standLevel += 0.5
-			}
-			center := rl.NewVector3(cx, standLevel*core.LevelStep, cz)
+			// Scenery anchors to the level it was PLACED on: props via PropLevelAt
+			// and decor via DecorLevelAt, each computed at their own draw call below
+			// (StandGroundYAt handles the ramp mid-slope + the voxel ground default).
 			if m.CeilingAt(x, z) {
 				drawTileCube(material.ceilingModel, cx, core.LevelStep+elevY, cz, tileYawDeg(x, z))
 				if logActive {
 					stats.CeilingsDrawn++
 				}
 			}
-			drawFloorTile(material, assets, m.Floor[z][x], x, z, cx, cz, elevY)
-			if logActive {
-				stats.FloorsDrawn++
+			if len(m.Solids) > 0 {
+				// Voxel path: floors on every standable surface, side faces per
+				// solid run, and floating-cube undersides. Only gapped maps take
+				// this branch — heightfields keep the original path below.
+				n := drawVoxelColumn(camPos, material, assets, &m, x, z, cx, cz)
+				if logActive {
+					stats.FloorsDrawn++
+					stats.WallsDrawn += n
+				}
+			} else {
+				drawFloorTile(material, assets, m.Floor[z][x], x, z, cx, cz, elevY)
+				if logActive {
+					stats.FloorsDrawn++
+				}
+				// Cliff faces for every edge where this tile sits above its
+				// neighbour (or the map edge). Counted as WallsDrawn for the log.
+				if n := drawCliffFaces(camPos, material, assets, &m, grid, gw, gh, x, z, cx, cz, te.level, te.ramp); logActive {
+					stats.WallsDrawn += n
+				}
 			}
-			// Cliff faces for every edge where this tile sits above its
-			// neighbour (or the map edge). Counted as WallsDrawn for the log.
-			if n := drawCliffFaces(camPos, material, assets, grid, gw, gh, x, z, cx, cz, te.level, te.ramp); logActive {
-				stats.WallsDrawn += n
-			}
-			drawDecor(assets, m.Decor[z][x], x, z, cx, cz, center)
+			// Decor sits on its placed level too (deck vs ground); on a heightfield
+			// column DecorLevelAt is the single surface, so flat maps are unchanged.
+			decorCenter := rl.NewVector3(cx, m.StandGroundYAt(x, m.DecorLevelAt(x, z), z), cz)
+			drawDecor(assets, m.Decor[z][x], x, z, cx, cz, decorCenter)
 			if logActive && m.Decor[z][x] != core.DecorEmpty {
 				// DecorAuto still counts — the floor scatter is decor.
 				stats.DecorDrawn++
 			}
 			if prop := m.Props[z][x]; prop != core.TilePropEmpty {
 				propYaw := propYawDeg(x, z)
+				// A prop sits on the level it was placed on (PropLevelAt) — the
+				// ground by default, but a deck/overhang level for a prop authored
+				// up there. On a heightfield column this equals `center` (the single
+				// surface), so flat maps are unchanged.
+				propCenter := rl.NewVector3(cx, m.StandGroundYAt(x, m.PropLevelAt(x, z), z), cz)
 				drawn := false
 				if handler := inlinePropTable[prop]; handler != nil {
-					handler(assets, m, x, z, center, propYaw)
+					handler(assets, m, x, z, propCenter, propYaw)
 					drawn = true
 				} else if footprint := core.PropFootprint(prop); footprint != nil {
 					if pm := &assets.propModelTable[prop]; len(pm.parts) > 0 {
-						anchor := footprintAnchor(center, footprint)
+						anchor := footprintAnchor(propCenter, footprint)
 						if r := propShadowRadiusTable[prop]; r > 0 {
 							drawGroundShadowElev(anchor.X, anchor.Z, anchor.Y, r)
 						}
@@ -635,9 +652,9 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 					}
 				} else if pm := &assets.propModelTable[prop]; len(pm.parts) > 0 {
 					if r := propShadowRadiusTable[prop]; r > 0 {
-						drawGroundShadowElev(center.X, center.Z, center.Y, r)
+						drawGroundShadowElev(propCenter.X, propCenter.Z, propCenter.Y, r)
 					}
-					pm.draw(center, 1.0, propYaw)
+					pm.draw(propCenter, 1.0, propYaw)
 					drawn = true
 				}
 				if logActive && drawn {
@@ -781,7 +798,9 @@ func layersHash(layers ...[]string) uint64 {
 // elevGrid decodes every tile's level/ramp/skin into the reused flat buffer,
 // rebuilding only when the Floor/Elevation/Walls content (or dims/name) change.
 func elevGrid(m *core.AreaDefinition, w, h int) []tileElev {
-	hash := layersHash(m.Floor, m.Elevation, m.Walls)
+	// Hash Floor/Elevation/Walls (the heightfield inputs) plus every Solids
+	// plane, so a runtime edit to the voxel stack invalidates the cache too.
+	hash := layersHash(append([][]string{m.Floor, m.Elevation, m.Walls}, m.Solids...)...)
 	k := &elevGridKey
 	if k.primed && k.name == m.Name && k.width == w && k.height == h &&
 		k.hash == hash && cap(elevGridBuf) >= w*h {
@@ -809,14 +828,12 @@ func elevGrid(m *core.AreaDefinition, w, h int) []tileElev {
 	return elevGridBuf
 }
 
-func drawCliffFaces(camPos rl.Vector3, material worldMaterialResources, assets Resources, grid []tileElev, w, h, x, z int, cx, cz float32, myLevel, myRamp int) int {
+func drawCliffFaces(camPos rl.Vector3, material worldMaterialResources, assets Resources, m *core.AreaDefinition, grid []tileElev, w, h, x, z int, cx, cz float32, myLevel, myRamp int) int {
 	if myRamp != core.NoRamp {
 		return 0 // the ramp wedge supplies its own faces
 	}
 	const half = float32(core.TileSize) / 2
 	drawn := 0
-	skinResolved := false
-	var skin rl.Model
 	// Per-edge mirror of core.TileExposesFace (the editor gates its "Set face"
 	// menu on that authority) — kept inline here so it reads the per-frame grid
 	// instead of re-decoding the area, and resolves each edge's exact drop for
@@ -850,14 +867,12 @@ func drawCliffFaces(camPos rl.Vector3, material worldMaterialResources, assets R
 		if myLevel <= nLevel {
 			continue
 		}
-		// Resolve the skin lazily — only once a face is actually drawn — so flat
-		// / interior tiles pay no faceVariants map lookup.
-		if !skinResolved {
-			skin = material.faceModel
-			if sc := grid[z*w+x].skin; assets.faceVariantTable.present[sc] {
-				skin = assets.faceVariantTable.model[sc]
-			}
-			skinResolved = true
+		// Per-DIRECTION skin: this edge's override (FaceSkinForDir) or the tile's
+		// base skin. Resolved only for a face actually drawn, so flat / interior
+		// tiles still pay no lookup.
+		skin := material.faceModel
+		if sc := m.FaceSkinForDir(x, z, d); assets.faceVariantTable.present[sc] {
+			skin = assets.faceVariantTable.model[sc]
 		}
 		drawCliffFace(skin, cx, core.ElevationWorldY(nLevel), cz, faceYaw(d), float32(myLevel-nLevel))
 		drawn++
@@ -1732,7 +1747,9 @@ func drawFieldPacks(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		// them mid-step, and engagement/win paths snap them. No
 		// fallback to tileWorldPos is needed; pack.X/Z is always
 		// authoritative for the field render.
-		groundY := g.Area.StandGroundY(pack.TileX, pack.TileZ)
+		// StandGroundYAt(pack.Level) keeps a pack on the surface it walks; on a
+		// heightfield pack.Level is the column top, so this equals StandGroundY.
+		groundY := g.Area.StandGroundYAt(pack.TileX, pack.Level, pack.TileZ)
 		position := rl.NewVector3(pack.X, enemyBillboardY+groundY, pack.Z)
 		if visual.shadowRadius > 0 {
 			sx, sz := shadowFootprint(camera, position, visual)

@@ -232,3 +232,79 @@ func TestRejectMissingLayer(t *testing.T) {
 		t.Fatal("expected error for missing props layer, got nil")
 	}
 }
+
+// TestSolidsRoundTrip pins the optional solids: voxel-stack section: a map with
+// a floating cube (a gap in a column) parses N stacked Height-row planes and
+// re-encodes them byte-stably. Mirrors the crystals/doors optional-section
+// backward-compat shape (absent section ⇒ heightfield).
+func TestSolidsRoundTrip(t *testing.T) {
+	const gapped = sample + `solids:
+00000
+00000
+00000
+00000
+00000
+0####
+0####
+00000
+00000
+00#00
+00000
+00000
+`
+	mf, err := Parse(strings.NewReader(gapped))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(mf.Solids) != 3 {
+		t.Fatalf("solids planes = %d, want 3", len(mf.Solids))
+	}
+	for L, plane := range mf.Solids {
+		if len(plane) != mf.Height {
+			t.Fatalf("plane %d has %d rows, want %d", L, len(plane), mf.Height)
+		}
+	}
+	if mf.Solids[1][1] != "0####" {
+		t.Fatalf("plane 1 row 1 = %q, want %q", mf.Solids[1][1], "0####")
+	}
+	if mf.Solids[2][1] != "00#00" {
+		t.Fatalf("plane 2 row 1 = %q, want %q", mf.Solids[2][1], "00#00")
+	}
+	var buf bytes.Buffer
+	if err := mf.Encode(&buf); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	mf2, err := Parse(&buf)
+	if err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	if len(mf2.Solids) != len(mf.Solids) {
+		t.Fatalf("re-parsed plane count %d, want %d", len(mf2.Solids), len(mf.Solids))
+	}
+	for L := range mf.Solids {
+		for i := range mf.Solids[L] {
+			if mf.Solids[L][i] != mf2.Solids[L][i] {
+				t.Errorf("plane %d row %d differs: %q vs %q", L, i, mf.Solids[L][i], mf2.Solids[L][i])
+			}
+		}
+	}
+}
+
+// TestHeightfieldOmitsSolids confirms a map with no solids: section round-trips
+// without one — the byte-identical guarantee for every existing map.
+func TestHeightfieldOmitsSolids(t *testing.T) {
+	mf, err := Parse(strings.NewReader(sample))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(mf.Solids) != 0 {
+		t.Fatalf("heightfield map parsed %d solids planes, want 0", len(mf.Solids))
+	}
+	var buf bytes.Buffer
+	if err := mf.Encode(&buf); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if strings.Contains(buf.String(), "solids:") {
+		t.Fatalf("heightfield map encoded a solids: section:\n%s", buf.String())
+	}
+}

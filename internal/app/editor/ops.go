@@ -82,9 +82,13 @@ func applyTool(s *State, x, z int) {
 	case LayerCeiling:
 		setLayerCell(&s.area.Ceiling, x, z, brush.Char)
 	case LayerElevation:
-		// brush.Char is '0'+editLevel (activeBrush rewrites it), so this
-		// stamps the height selector's current level onto the cell.
-		setLayerCell(&s.area.Elevation, x, z, brush.Char)
+		// Elevation is a voxel grid: a paint places ONE tile at the active level
+		// (x, editLevel, z). There's either a tile there or not — stacking tiles
+		// with a gap between is what makes a land bridge (tile below, none above
+		// it, tile above the gap). The erase brush removes the tile at the level.
+		s.area.SetCube(x, s.editLevel, z, s.area.FaceSkinAt(x, z))
+		s.dirty = true
+		return
 	case LayerEntities:
 		applyEntityBrush(s, x, z, brush.Entity)
 		return // entity branch sets dirty itself when it lands
@@ -128,7 +132,22 @@ func stampActiveLevel(s *State, x, z int) {
 	if !s.area.InBounds(x, z) {
 		return
 	}
-	setLayerCell(&s.area.Elevation, x, z, core.ElevationChar(s.editLevel))
+	setTileGroundLevel(s, x, z, s.editLevel)
+}
+
+// setTileGroundLevel raises column (x,z) to ground `level`, honoring voxel mode.
+// Once the area's Solids stack is materialized (any cube placement / Set Height
+// on a voxel map), render / movement / save all read the voxel stack and IGNORE
+// the legacy Elevation string — so a height write MUST go through SetColumnTop
+// (built for exactly this) or it silently desyncs. Heightfield maps (Solids nil)
+// keep the single-char Elevation write byte-for-byte. The shared home for every
+// editor "set this tile's ground level" path (stamp / flood / fill / ramp).
+func setTileGroundLevel(s *State, x, z, level int) {
+	if len(s.area.Solids) > 0 {
+		s.area.SetColumnTop(x, z, level)
+		return
+	}
+	setLayerCell(&s.area.Elevation, x, z, core.ElevationChar(level))
 }
 
 // applyFaceBrush sets the tile's cliff-face skin (the layer formerly known as
@@ -171,6 +190,7 @@ func applyDecorBrush(s *State, x, z int, c byte) {
 				ch = c
 			}
 			setLayerCell(&s.area.Decor, fx, fz, ch)
+			setTileLevel(s, &s.area.DecorLevels, fx, fz, s.editLevel)
 		}
 		return
 	}
@@ -187,6 +207,7 @@ func applyDecorBrush(s *State, x, z int, c byte) {
 		return
 	}
 	setLayerCell(&s.area.Decor, x, z, c)
+	setTileLevel(s, &s.area.DecorLevels, x, z, s.editLevel)
 }
 
 // clearPropCell clears the prop at (x,z). If that cell holds a multi-tile prop
@@ -214,6 +235,7 @@ func clearPropCell(a *core.AreaDefinition, x, z int) {
 func applyPropBrush(s *State, x, z int, c byte) {
 	if c == core.TilePropEmpty {
 		clearPropCell(&s.area, x, z)
+		clearTileLevel(&s.area.PropLevels, x, z)
 		return
 	}
 	// Multi-tile prop anchor: validate the whole footprint fits and is
@@ -245,6 +267,7 @@ func applyPropBrush(s *State, x, z int, c byte) {
 				ch = c
 			}
 			setLayerCell(&s.area.Props, fx, fz, ch)
+			setTileLevel(s, &s.area.PropLevels, fx, fz, s.editLevel)
 			setLayerCell(&s.area.Decor, fx, fz, core.DecorAuto)
 			removeAllEntitiesAt(&s.area, fx, fz)
 		}
@@ -259,10 +282,74 @@ func applyPropBrush(s *State, x, z int, c byte) {
 		return
 	}
 	setLayerCell(&s.area.Props, x, z, c)
+	setTileLevel(s, &s.area.PropLevels, x, z, s.editLevel)
 	// A prop occupies the floor square; auto-clear any decor on it
 	// and any pack / chest / door that would now be inside the prop.
 	setLayerCell(&s.area.Decor, x, z, core.DecorAuto)
 	removeAllEntitiesAt(&s.area, x, z)
+}
+
+// setTileLevel records the level the thing placed at (x,z) sits on (the editor's
+// active level) into a per-tile level grid (PropLevels / DecorLevels). It stores
+// PropLevelAuto when that equals the column's auto surface — so a ground-placed
+// thing adds no section and keeps the map lean — and an explicit base-36 level
+// otherwise (placed on a deck/overhang). Shared by the prop and decor brushes.
+func setTileLevel(s *State, grid *[]string, x, z, level int) {
+	if !s.area.InBounds(x, z) {
+		return
+	}
+	auto := s.area.LowestStandableLevel(x, z)
+	if auto < 0 {
+		auto = s.area.ElevationLevelAt(x, z)
+	}
+	c := byte(core.PropLevelAuto)
+	if level != auto {
+		c = core.ElevationChar(level)
+	}
+	ensureLevelGrid(grid, s.area.Width, s.area.Height)
+	row := []byte((*grid)[z])
+	row[x] = c
+	(*grid)[z] = string(row)
+}
+
+// clearTileLevel resets (x,z) back to the auto surface — paired with clearing the
+// prop/decor there so a removed deck item doesn't leave a stale level behind.
+func clearTileLevel(grid *[]string, x, z int) {
+	if z >= 0 && z < len(*grid) && x >= 0 && x < len((*grid)[z]) {
+		row := []byte((*grid)[z])
+		row[x] = core.PropLevelAuto
+		(*grid)[z] = string(row)
+	}
+}
+
+// ensureLevelGrid allocates a per-tile level grid (all auto) sized to the area
+// when it isn't already, so setTileLevel can index it.
+func ensureLevelGrid(grid *[]string, w, h int) {
+	sized := len(*grid) == h
+	if sized {
+		for _, r := range *grid {
+			if len(r) != w {
+				sized = false
+				break
+			}
+		}
+	}
+	if sized {
+		return
+	}
+	blank := make([]byte, w)
+	for i := range blank {
+		blank[i] = core.PropLevelAuto
+	}
+	out := make([]string, h)
+	for z := range out {
+		if z < len(*grid) && len((*grid)[z]) == w {
+			out[z] = (*grid)[z]
+		} else {
+			out[z] = string(blank)
+		}
+	}
+	*grid = out
 }
 
 func applyEntityBrush(s *State, x, z int, kind entityKind) {
@@ -643,10 +730,16 @@ func eraseAt(s *State, x, z int) {
 	switch s.layer {
 	case LayerProps:
 		clearPropCell(&s.area, x, z)
+		clearTileLevel(&s.area.PropLevels, x, z)
+	case LayerDecor:
+		setLayerCell(&s.area.Decor, x, z, eraseSentinel(LayerDecor))
+		clearTileLevel(&s.area.DecorLevels, x, z)
 	case LayerElevation:
-		// Reset to the walkable baseline (level 0 is now a deep pit, not "flat");
-		// if it carried a ramp, clear that too (a ramp with no step is meaningless).
-		setLayerCell(&s.area.Elevation, x, z, eraseSentinel(LayerElevation))
+		// Erase removes the tile at the active level (x, editLevel, z) — the
+		// voxel-grid inverse of a paint. Removing the tile under a higher one
+		// leaves the gap that makes a walk-under land bridge. If the cell carried
+		// a ramp, clear that too (a ramp with no step is meaningless).
+		s.area.ClearCube(x, s.editLevel, z)
 		if _, ok := s.area.RampAt(x, z); ok {
 			setLayerCell(&s.area.Floor, x, z, core.FloorAuto)
 		}
@@ -701,7 +794,7 @@ func placeRamp(s *State, x, z int) {
 		}
 		pushUndo(s)
 		setLayerCell(&s.area.Floor, x, z, core.RampCharForFacing(ascend))
-		setLayerCell(&s.area.Elevation, x, z, core.ElevationChar(low))
+		setTileGroundLevel(s, x, z, low)
 		s.dirty = true
 		return
 	}
@@ -932,6 +1025,20 @@ func resize(s *State, w, h int) {
 	s.area.Props = resizeLayer(s.area.Props, s.area.Width, s.area.Height, w, h, core.TilePropEmpty)
 	s.area.Ceiling = resizeLayer(s.area.Ceiling, s.area.Width, s.area.Height, w, h, core.TileCeilingOpen)
 	s.area.Elevation = resizeLayer(s.area.Elevation, s.area.Width, s.area.Height, w, h, core.ElevationChar(core.ElevationBaseline))
+	// Resize every voxel plane in lockstep so a gapped (Solids) map keeps its
+	// planes at the area dimensions — otherwise the stack desyncs and the
+	// per-cell reads would index past a short row. New cells default to air.
+	for L := range s.area.Solids {
+		s.area.Solids[L] = resizeLayer(s.area.Solids[L], s.area.Width, s.area.Height, w, h, core.SolidAir)
+	}
+	// Per-tile prop levels resize in lockstep too (auto-fill new cells), so a map
+	// with decked props keeps its level grid aligned to the new dimensions.
+	if len(s.area.PropLevels) > 0 {
+		s.area.PropLevels = resizeLayer(s.area.PropLevels, s.area.Width, s.area.Height, w, h, core.PropLevelAuto)
+	}
+	if len(s.area.DecorLevels) > 0 {
+		s.area.DecorLevels = resizeLayer(s.area.DecorLevels, s.area.Width, s.area.Height, w, h, core.PropLevelAuto)
+	}
 	s.area.Width = w
 	s.area.Height = h
 	clearSelection(s) // bounds changed — a stale marquee could outline off-grid
@@ -1039,6 +1146,17 @@ func sealWallBorder(a *core.AreaDefinition) {
 		}
 		if elevRow != nil {
 			a.Elevation[z] = string(elevRow)
+		}
+	}
+	// On a voxel map the renderer reads the stack, not the Elevation layer, so
+	// also raise the border columns through the stack to the wall-ring height.
+	if len(a.Solids) > 0 {
+		for z := 0; z < a.Height; z++ {
+			for x := 0; x < a.Width; x++ {
+				if x == 0 || z == 0 || x == a.Width-1 || z == a.Height-1 {
+					a.SetColumnTop(x, z, core.ElevationWallRingLevel)
+				}
+			}
 		}
 	}
 }
@@ -1244,17 +1362,25 @@ func floodFill(s *State, x, z int, b byte) {
 	// in applyTool, so Ctrl+click builds a floor the same way a stroke does
 	// (levels model is always on now). Walls are exempt (see stampActiveLevel).
 	if layerStampsActiveLevel(s.layer) {
-		// Batch the elevation lift of the flooded region into one row-set
-		// rewrite rather than per-cell stampActiveLevel string rebuilds.
-		ch := core.ElevationChar(s.editLevel)
-		rewriteLayerRows(&s.area.Elevation, func(rows [][]byte) {
+		if len(s.area.Solids) > 0 {
+			// Voxel map: the Elevation string is dead, so lift each flooded cell
+			// through the Solids-aware SetColumnTop (see setTileGroundLevel).
 			for _, c := range filled {
-				x, z := c[0], c[1]
-				if z >= 0 && z < len(rows) && x >= 0 && x < len(rows[z]) {
-					rows[z][x] = ch
-				}
+				setTileGroundLevel(s, c[0], c[1], s.editLevel)
 			}
-		})
+		} else {
+			// Heightfield: batch the elevation lift of the flooded region into one
+			// row-set rewrite rather than per-cell stampActiveLevel string rebuilds.
+			ch := core.ElevationChar(s.editLevel)
+			rewriteLayerRows(&s.area.Elevation, func(rows [][]byte) {
+				for _, c := range filled {
+					x, z := c[0], c[1]
+					if z >= 0 && z < len(rows) && x >= 0 && x < len(rows[z]) {
+						rows[z][x] = ch
+					}
+				}
+			})
+		}
 	}
 	s.dirty = true
 }
@@ -1322,18 +1448,28 @@ func fillEntireLayer(s *State) {
 	// Walls are exempt (see stampActiveLevel) so a wall fill can't flatten the
 	// whole height map.
 	if layerStampsActiveLevel(s.layer) {
-		// Batch the whole-map elevation lift into one row-set rewrite instead
-		// of a per-cell stampActiveLevel (each of which rebuilt a full row
-		// string) — same write as stampActiveLevel: ElevationChar(editLevel)
-		// into every in-bounds cell.
-		ch := core.ElevationChar(s.editLevel)
-		rewriteLayerRows(&s.area.Elevation, func(rows [][]byte) {
-			for z := 0; z < s.area.Height && z < len(rows); z++ {
-				for x := 0; x < s.area.Width && x < len(rows[z]); x++ {
-					rows[z][x] = ch
+		if len(s.area.Solids) > 0 {
+			// Voxel map: the Elevation string is dead — lift every column through
+			// the Solids-aware SetColumnTop (see setTileGroundLevel).
+			for z := 0; z < s.area.Height; z++ {
+				for x := 0; x < s.area.Width; x++ {
+					setTileGroundLevel(s, x, z, s.editLevel)
 				}
 			}
-		})
+		} else {
+			// Heightfield: batch the whole-map elevation lift into one row-set
+			// rewrite instead of a per-cell stampActiveLevel (each of which rebuilt
+			// a full row string) — same write as stampActiveLevel:
+			// ElevationChar(editLevel) into every in-bounds cell.
+			ch := core.ElevationChar(s.editLevel)
+			rewriteLayerRows(&s.area.Elevation, func(rows [][]byte) {
+				for z := 0; z < s.area.Height && z < len(rows); z++ {
+					for x := 0; x < s.area.Width && x < len(rows[z]); x++ {
+						rows[z][x] = ch
+					}
+				}
+			})
+		}
 	}
 	s.dirty = true
 	s.flash("Filled " + layerName(s.layer))

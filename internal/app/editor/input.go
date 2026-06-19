@@ -571,28 +571,18 @@ func updateMouse(s *State) {
 			menuBarBtns[hit].action(s) // opens that menu's pull-down (menus.go)
 			return
 		}
+		// Top-bar layer dropdown: open the active-layer picker (its rows carry the
+		// per-layer hide/show eye). Replaces the old palette-column tab strip.
+		if pointIn(mp, layerMenuBtnRect(s)) {
+			openDropdownBelow(s, ddLayer, layerMenuBtnRect(s))
+			return
+		}
 		if hit := toolbarButtonAt(s, mp); hit >= 0 {
 			// A context-disabled button is drawn grayed in place; swallow its click
 			// without firing (so the strip stays stable but inactive controls no-op).
 			if b := toolbarBtns[hit]; b.enabled == nil || b.enabled(s) {
 				b.action(s)
 			}
-			return
-		}
-		// Layer-tab eye toggles (visibility): check before tab-select so a
-		// click on the eye toggles the layer's hidden flag without also
-		// switching the active layer. Alt-click solos (hide all others).
-		if pointIn(mp, s.rect.layerTabs) {
-			for i := 0; i < layerCount; i++ {
-				if pointIn(mp, layerEyeRect(s, i)) {
-					_, _, alt := modifiers()
-					toggleLayerVisibility(s, i, alt)
-					return
-				}
-			}
-		}
-		if hit := layerTabAt(s, mp); hit >= 0 {
-			s.layer = Layer(hit)
 			return
 		}
 		// Levels panel: range steppers, per-level eye toggles, and row-select
@@ -1052,11 +1042,10 @@ func sampleBrushAt(s *State, x, z int) {
 		return
 	}
 	if s.layer == LayerElevation {
-		b, ok := cellAt(s.area.Elevation, x, z)
-		if !ok {
-			return
-		}
-		lvl := clampLevel(core.ElevationLevelFromChar(b))
+		// ElevationLevelAt is Solids-aware: on a voxel map it returns the column's
+		// top solid level, so the eyedropper picks the real height rather than the
+		// stale legacy Elevation char the renderer no longer reads.
+		lvl := clampLevel(s.area.ElevationLevelAt(x, z))
 		s.editLevel = lvl
 		growLevelRange(s, lvl) // reveal + surface a panel row for a level this tile used
 		s.flash("Picked level " + signedLevelLabel(lvl))

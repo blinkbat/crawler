@@ -223,6 +223,10 @@ func applyAreaTransition(g *core.GameState) error {
 		}
 		x, z := doorExitTile(g.Area, g.Doors, *dest)
 		g.Player = core.NewPlayer(x, z, dest.Facing)
+		// Seat the standing level on the exit tile so a door onto a voxel map
+		// lands the party on the ground, not absolute level 0 (no-op on a
+		// heightfield, where this is the column top).
+		g.Player.Level = g.Area.GroundSpawnLevel(x, z)
 		// Symmetry with the cross-map branch below (which rebuilds the
 		// whole GameState): close any open equipment picker and clear the
 		// particle pool so an in-map teleport can't leave the sub-modal
@@ -252,6 +256,7 @@ func applyAreaTransition(g *core.GameState) error {
 	}
 	x, z := doorExitTile(next.Area, next.Doors, *dest)
 	next.Player = core.NewPlayer(x, z, dest.Facing)
+	next.Player.Level = next.Area.GroundSpawnLevel(x, z)
 	*g = next
 	// Signal the render layer to drop any lingering particles —
 	// formation-relative VFX from a fight that ended just before

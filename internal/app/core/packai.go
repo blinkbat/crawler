@@ -239,6 +239,16 @@ func ApplyPackSteps(g *GameState, plans []packAIStep) int {
 		}
 		p := &g.Packs[plan.PackIdx]
 		StartPackStep(p, plan.NextX, plan.NextZ)
+		// On a voxel map, resolve which surface the pack lands on so it tracks
+		// under/over a bridge; on a heightfield ResolveStep returns the column
+		// top, leaving Level == ElevationLevelAt as before.
+		if len(g.Area.Solids) > 0 {
+			if dir, ok := FacingFromDelta(plan.NextX-p.TileX, plan.NextZ-p.TileZ); ok {
+				if toL, stepOK := g.Area.ResolveStep(p.TileX, p.Level, p.TileZ, dir); stepOK {
+					p.Level = toL
+				}
+			}
+		}
 		p.TileX = plan.NextX
 		p.TileZ = plan.NextZ
 		// Only patrol packs read PatrolDir; other modes leave it zero.
@@ -466,16 +476,33 @@ func packCanMoveTo(g *GameState, p Pack, occupied map[[2]int]bool, tx, tz int, a
 	// across a ramp. Without this, packs climb sheer cliffs the player can't —
 	// and now that raised tiles draw no support column, a chasing pack visibly
 	// floats up onto a plateau. Pack steps are always one cardinal tile.
-	if dir, ok := FacingFromDelta(tx-p.TileX, tz-p.TileZ); ok && !g.Area.StepElevationOK(p.TileX, p.TileZ, dir) {
-		return false
+	// On a voxel map, resolve the surface the pack would land on so the entry
+	// check can be level-aware (a tree blocks only its own levels). landLevel
+	// stays p.Level on a flat map, where CanEnterTile is used as before.
+	landLevel := p.Level
+	voxel := len(g.Area.Solids) > 0
+	if dir, ok := FacingFromDelta(tx-p.TileX, tz-p.TileZ); ok {
+		if voxel {
+			l, stepOK := g.Area.ResolveStep(p.TileX, p.Level, p.TileZ, dir)
+			if !stepOK {
+				return false
+			}
+			landLevel = l
+		} else if !g.Area.StepElevationOK(p.TileX, p.TileZ, dir) {
+			return false
+		}
 	}
-	return CanEnterTile(g, tx, tz, EnterOpts{
+	opts := EnterOpts{
 		AllowDoorTile:   false,
 		AllowPlayerTile: allowPlayer,
 		PlayerTileX:     px,
 		PlayerTileZ:     pz,
 		OccupiedPacks:   occupied,
-	})
+	}
+	if voxel {
+		return CanEnterTileAtLevel(g, tx, tz, landLevel, opts)
+	}
+	return CanEnterTile(g, tx, tz, opts)
 }
 
 // buildPackOccupancy returns the set of tiles currently held by alive

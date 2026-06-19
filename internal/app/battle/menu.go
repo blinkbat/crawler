@@ -393,6 +393,12 @@ func performFlee(g *core.GameState) {
 	if core.PackIndexAtTile(g.Packs, g.Battle.FleeReturnX, g.Battle.FleeReturnZ) < 0 {
 		g.Player.TileX = g.Battle.FleeReturnX
 		g.Player.TileZ = g.Battle.FleeReturnZ
+		// Re-seat the standing level on the return tile: on a voxel map the level
+		// carried out of the pre-combat step may not be standable here. Lowest
+		// standable == column top on a heightfield, so this is a no-op there.
+		if lo := g.Area.LowestStandableLevel(g.Player.TileX, g.Player.TileZ); lo >= 0 {
+			g.Player.Level = lo
+		}
 		core.SnapPlayerToTile(&g.Player)
 		g.Player.Anim = core.Animation{}
 	}

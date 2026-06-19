@@ -94,6 +94,13 @@ type Resources struct {
 	// floors flush (see buildRampWedgeModel).
 	rampModel rl.Model
 
+	// underModel is the downward-facing horizontal quad drawn as the UNDERSIDE
+	// of a floating cube (a deck/bridge with air beneath it) — geometry that
+	// only the voxel stack produces, since a heightfield column is always solid
+	// to the floor. One tile wide/deep, normal -Y, earth-textured like the ramp.
+	// See drawVoxelColumn in voxel.go.
+	underModel rl.Model
+
 	// New decor models keyed by decor-layer char (tall grass, flowers,
 	// clover, reeds, bones, scorch, blood, cobweb, stump, log, leaf pile).
 	// Authoring + Unload iteration uses the map; the per-tile-per-frame
@@ -323,6 +330,8 @@ func LoadResources() (r Resources) {
 
 	// Earth-textured solid ramp wedge, shared by every ramp floor tile.
 	r.rampModel = buildRampWedgeModel(makeDirtPixels(128, 128), r.lighting.shader)
+	// Earth-textured downward quad for floating-cube undersides (voxel maps).
+	r.underModel = buildUnderQuadModel(makeDirtPixels(128, 128), r.lighting.shader)
 
 	// Stone family textures for the new prop set. Each loader owns the
 	// texture handle outright via setModelTexture so unload-by-model is

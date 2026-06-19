@@ -505,7 +505,14 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	// normal blocked-move handling. No-op on flat maps (StepElevationOK is
 	// always true at equal levels).
 	engageDir, engageDirOK := facingForTile(p, targetX, targetZ)
-	engageReachable := !engageDirOK || g.Area.StepElevationOK(p.TileX, p.TileZ, engageDir)
+	engageReachable := true
+	if engageDirOK {
+		if len(g.Area.Solids) > 0 {
+			_, engageReachable = g.Area.ResolveStep(p.TileX, p.Level, p.TileZ, engageDir)
+		} else {
+			engageReachable = g.Area.StepElevationOK(p.TileX, p.TileZ, engageDir)
+		}
+	}
 	if idx := core.PackIndexAtTile(g.Packs, targetX, targetZ); idx >= 0 && !g.EnemiesDisabled && engageReachable {
 		if startTurnToTile(p, targetX, targetZ) {
 			return
@@ -523,26 +530,53 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 		battle.Start(g, idx, fleeFromX, fleeFromZ)
 		return
 	}
-	// Everything else (walls, props, deep water, chests, other packs)
-	// goes through CanEnterTile so the rule lives in one place.
-	// AllowDoorTile=true because the player stepping onto a door fires
-	// a transition; the engagement branch above already consumed the
-	// pack-tile case, so we don't need OccupiedPacks here.
-	if !core.CanEnterTile(g, targetX, targetZ, core.EnterOpts{AllowDoorTile: true}) {
+	// Elevation/voxel gate FIRST: resolve WHICH surface the party would land on
+	// (the ground under a floating deck vs the deck itself) and reject a cliff.
+	// Steps are orthogonal, so the tile delta resolves to a single cardinal dir.
+	// The entry check below then needs that level for level-aware prop blocking.
+	landLevel := p.Level
+	if dir, ok := facingForTile(p, targetX, targetZ); ok {
+		if len(g.Area.Solids) > 0 {
+			l, stepOK := g.Area.ResolveStep(p.TileX, p.Level, p.TileZ, dir)
+			if !stepOK {
+				return
+			}
+			landLevel = l
+		} else {
+			if !g.Area.StepElevationOK(p.TileX, p.TileZ, dir) {
+				return
+			}
+			landLevel = g.Area.ElevationLevelAt(targetX, targetZ)
+		}
+	} else {
+		// Non-cardinal step (shouldn't happen for orthogonal movement): keep the
+		// old no-gate behavior, landing on the destination column's surface.
+		if lo := g.Area.LowestStandableLevel(targetX, targetZ); lo >= 0 {
+			landLevel = lo
+		} else {
+			landLevel = g.Area.ElevationLevelAt(targetX, targetZ)
+		}
+	}
+	// Everything else (walls, props, deep water, chests, other packs) goes through
+	// CanEnterTile so the rule lives in one place. AllowDoorTile=true because the
+	// player stepping onto a door fires a transition; the engagement branch above
+	// already consumed the pack-tile case, so we don't need OccupiedPacks here. On
+	// a voxel map the level-aware variant lets a prop block only its own levels —
+	// so you can walk UNDER a deck past a ground-rooted tree.
+	if len(g.Area.Solids) > 0 {
+		if !core.CanEnterTileAtLevel(g, targetX, targetZ, landLevel, core.EnterOpts{AllowDoorTile: true}) {
+			return
+		}
+	} else if !core.CanEnterTile(g, targetX, targetZ, core.EnterOpts{AllowDoorTile: true}) {
 		return
 	}
-	// Elevation gate: the step must connect without a cliff (matching edge
-	// levels), honoring ramps. Steps are orthogonal, so the tile delta
-	// resolves to a single cardinal direction via facingForTile.
-	if dir, ok := facingForTile(p, targetX, targetZ); ok && !g.Area.StepElevationOK(p.TileX, p.TileZ, dir) {
-		return
-	}
-	// Ground height the player leaves from — captured before TileX/TileZ
-	// advance so a ramp step can ease the camera between levels.
-	fromGroundY := g.Area.StandGroundY(p.TileX, p.TileZ)
+	// Ground height the player leaves from — captured before TileX/TileZ/Level
+	// advance so a ramp / level change can ease the camera between heights.
+	fromGroundY := g.Area.StandGroundYAt(p.TileX, p.Level, p.TileZ)
 
 	p.TileX = targetX
 	p.TileZ = targetZ
+	p.Level = landLevel
 	g.StepCount++
 	// Out-of-battle poison tick: a fight-inflicted poison kept ticking
 	// counters down on every party turn during battle but had no hook in
@@ -584,7 +618,7 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 		ToX:      core.TileCenter(targetX),
 		ToZ:      core.TileCenter(targetZ),
 		FromY:    fromGroundY,
-		ToY:      g.Area.StandGroundY(targetX, targetZ),
+		ToY:      g.Area.StandGroundYAt(targetX, landLevel, targetZ),
 	}
 }
 

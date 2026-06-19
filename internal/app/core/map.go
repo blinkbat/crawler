@@ -303,6 +303,7 @@ func placePacks(a AreaDefinition) []Pack {
 		packs = append(packs, Pack{
 			TileX:     snap.TileX,
 			TileZ:     snap.TileZ,
+			Level:     spawnLevel(&a, snap.TileX, snap.TileZ),
 			HomeX:     snap.TileX,
 			HomeZ:     snap.TileZ,
 			X:         TileCenter(snap.TileX),
@@ -427,6 +428,81 @@ func (a *AreaDefinition) FaceSkinAt(x, z int) byte {
 	return c
 }
 
+// FaceOverride is a per-tile cliff-face skin override: Skins[dir] (0=North,
+// 1=East, 2=South, 3=West, matching the direction constants) names that face's
+// skin, or 0 / PropLevelAuto to fall back to the tile's base FaceSkinAt skin.
+// Authored from the tile right-click menu — the top-down editor can't paint a
+// vertical face, so faces are a per-tile property.
+type FaceOverride struct {
+	X, Z  int
+	Skins [4]byte
+}
+
+func (a *AreaDefinition) faceOverrideAt(x, z int) (FaceOverride, bool) {
+	for _, o := range a.FaceOverrides {
+		if o.X == x && o.Z == z {
+			return o, true
+		}
+	}
+	return FaceOverride{}, false
+}
+
+// FaceSkinForDir is the skin the renderer draws on tile (x,z)'s face toward
+// cardinal `dir`: the per-direction override when set, else the tile's base
+// skin. A tile with no override draws its base skin on every face, so any map
+// without faces: overrides renders exactly as before.
+func (a *AreaDefinition) FaceSkinForDir(x, z, dir int) byte {
+	if len(a.FaceOverrides) > 0 && dir >= 0 && dir < 4 {
+		if o, ok := a.faceOverrideAt(x, z); ok {
+			if sc := o.Skins[dir]; sc != 0 && sc != PropLevelAuto {
+				return sc
+			}
+		}
+	}
+	return a.FaceSkinAt(x, z)
+}
+
+// SetFaceDir sets tile (x,z)'s `dir` face skin (0=N,1=E,2=S,3=W). A skin equal to
+// the tile's base (or 0 / PropLevelAuto) clears that face's override; an entry
+// whose four faces are all default is dropped, so a tile reverts cleanly and the
+// map omits a faces: section when nothing is overridden.
+func (a *AreaDefinition) SetFaceDir(x, z, dir int, skin byte) {
+	if !a.InBounds(x, z) || dir < 0 || dir >= 4 {
+		return
+	}
+	if skin == a.FaceSkinAt(x, z) || skin == 0 {
+		skin = PropLevelAuto
+	}
+	idx := -1
+	for i, o := range a.FaceOverrides {
+		if o.X == x && o.Z == z {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		if skin == PropLevelAuto {
+			return
+		}
+		// Init unset faces to the auto sentinel (not 0) so a new override matches
+		// its on-disk form ('.' per face) and the dirty check can't false-positive.
+		nf := FaceOverride{X: x, Z: z, Skins: [4]byte{PropLevelAuto, PropLevelAuto, PropLevelAuto, PropLevelAuto}}
+		a.FaceOverrides = append(a.FaceOverrides, nf)
+		idx = len(a.FaceOverrides) - 1
+	}
+	a.FaceOverrides[idx].Skins[dir] = skin
+	allDefault := true
+	for _, s := range a.FaceOverrides[idx].Skins {
+		if s != 0 && s != PropLevelAuto {
+			allDefault = false
+			break
+		}
+	}
+	if allDefault {
+		a.FaceOverrides = append(a.FaceOverrides[:idx], a.FaceOverrides[idx+1:]...)
+	}
+}
+
 // CeilingAt reports whether the cell has a solid ceiling slab. Out-of-
 // bounds reads as no-ceiling so the renderer doesn't paint slabs past
 // the map edge. Maps loaded from older .map files without a ceiling:
@@ -445,6 +521,16 @@ func (a *AreaDefinition) CeilingAt(x, z int) bool {
 // elevation layer reads as a flat sheet at the bottom of the range (legacy
 // flat maps predate the baseline and were authored at stored 0).
 func (a *AreaDefinition) ElevationLevelAt(x, z int) int {
+	// With an explicit voxel stack, "the elevation" is the column's top solid
+	// level — the surface a heightfield-era caller means by it. (For a gapped
+	// column this is the floating cube's top, not the standable ground; those
+	// callers are migrated to take an explicit level in the movement pass.)
+	if len(a.Solids) > 0 {
+		if t := a.TopSolidLevel(x, z); t >= 0 {
+			return t
+		}
+		return 0
+	}
 	c, ok := a.layerByteAt(a.Elevation, x, z)
 	if !ok {
 		return 0
@@ -568,11 +654,21 @@ func ElevationWorldY(level int) float32 {
 // ElevationWorldY(level); a ramp reads its MID-slope height (low+0.5 levels),
 // since a unit standing on the ramp tile rests at its center, halfway up.
 func (a *AreaDefinition) StandGroundY(x, z int) float32 {
-	level := float32(a.ElevationLevelAt(x, z)) - float32(ElevationBaseline)
+	return a.StandGroundYAt(x, a.ElevationLevelAt(x, z), z)
+}
+
+// StandGroundYAt is StandGroundY for an EXPLICIT standing level — the world Y of
+// the surface a unit standing atop cube `level` in column (x,z) rests at. A ramp
+// tile still reads its mid-slope height (+0.5 level). The voxel movement/camera
+// path calls this with the unit's resolved level so a unit on a bridge deck and
+// one on the ground beneath it sit at their own heights, not a single per-column
+// value. StandGroundY is the special case level==ElevationLevelAt (column top).
+func (a *AreaDefinition) StandGroundYAt(x, level, z int) float32 {
+	y := float32(level - ElevationBaseline)
 	if _, ok := a.RampAt(x, z); ok {
-		level += 0.5
+		y += 0.5
 	}
-	return level * LevelStep
+	return y * LevelStep
 }
 
 // NoRamp is the sentinel ramp facing for a flat (non-ramp) tile, passed to
@@ -724,6 +820,66 @@ func PropIsNonBlocking(c byte) bool {
 	return false
 }
 
+// PropBlockHeight is how many voxel levels a blocking prop occupies upward from
+// the surface it stands on — its "tallness" for level-aware collision. A
+// non-blocking or empty cell is 0. Squat props (young tree, boulder, bush) block
+// their own level only (1); full trees / cairns / formations block 2. This is
+// what lets a tree rooted on the ground block the walk-under path beneath a deck
+// while leaving the deck (two levels up) walkable.
+func PropBlockHeight(c byte) int {
+	switch c {
+	case TileTreeYoung, TileRockLarge, TileBushLarge:
+		return 1
+	case TileTree, TileTreeTwin, TileRockCairn, TileRockFormation, TileRockFormationTail,
+		TileTreeTall, TileTreeXL:
+		return 2
+	}
+	return 0
+}
+
+// PropLevelAuto is the prop-level sentinel meaning "no explicit level — rest on
+// the column's lowest standable surface." Disjoint from the base-36 level chars
+// ('0'..'9','A'..) ElevationChar emits, so the auto case can't be confused with
+// an authored level. An absent PropLevels grid reads as all-auto.
+const PropLevelAuto = '.'
+
+// levelGridAt reads one of the optional per-tile level grids (PropLevels /
+// DecorLevels): the authored base-36 char when set, else the column's lowest
+// standable surface (the auto default — where the thing sat before per-level
+// placement existed). Shared so prop and decor placement can't drift on the rule.
+func (a *AreaDefinition) levelGridAt(layer []string, x, z int) int {
+	if c, ok := a.layerByteAt(layer, x, z); ok && c != PropLevelAuto {
+		return ElevationLevelFromChar(c)
+	}
+	if lo := a.LowestStandableLevel(x, z); lo >= 0 {
+		return lo
+	}
+	return a.ElevationLevelAt(x, z)
+}
+
+// PropLevelAt is the level the prop on tile (x,z) sits on (render + collision use
+// it). DecorLevelAt is the same for decor. See levelGridAt.
+func (a *AreaDefinition) PropLevelAt(x, z int) int  { return a.levelGridAt(a.PropLevels, x, z) }
+func (a *AreaDefinition) DecorLevelAt(x, z int) int { return a.levelGridAt(a.DecorLevels, x, z) }
+
+// PropBlocksStanding reports whether the blocking prop on tile (x,z) occupies the
+// given standing level — a unit trying to stand on surface `level` would be
+// inside the prop. The prop roots on PropLevelAt (where it was placed) and rises
+// PropBlockHeight levels. On a single-surface (heightfield) column this is just
+// "the prop blocks the tile"; on a gapped column it blocks only the levels the
+// prop fills, so you can walk under a deck past a ground-rooted tree (and can't
+// stand where the trunk is), or under a deck-mounted prop while the ground is
+// clear.
+func (a *AreaDefinition) PropBlocksStanding(x, level, z int) bool {
+	c, ok := a.layerByteAt(a.Props, x, z)
+	if !ok || !IsPropChar(c) || PropIsNonBlocking(c) {
+		return false
+	}
+	base := a.PropLevelAt(x, z)
+	h := PropBlockHeight(c)
+	return level >= base && level < base+h
+}
+
 // EnterOpts parameterizes CanEnterTile. The zero value forbids door
 // stepping, the player tile, and any pack-occupied tile — i.e. the
 // strictest set of runtime blockers a pack faces during wandering.
@@ -765,18 +921,44 @@ func CanEnterTile(g *GameState, tx, tz int, opts EnterOpts) bool {
 	if g.Area.BlockedAt(tx, tz) {
 		return false
 	}
+	return canEnterRuntimeBlockers(g, tx, tz, opts)
+}
+
+// CanEnterTileAtLevel is CanEnterTile with LEVEL-AWARE prop blocking — a prop
+// blocks only the levels it occupies (PropBlocksStanding) instead of the whole
+// column, so a unit can step UNDER a deck past a ground-rooted tree (and can't
+// stand where the trunk actually is). The voxel movement / pack-AI paths, which
+// resolve a destination standing level, use this; flat-map paths keep
+// CanEnterTile. Blocking floor (deep water) still blocks regardless of level.
+func CanEnterTileAtLevel(g *GameState, tx, tz, level int, opts EnterOpts) bool {
+	if g == nil || !g.Area.InBounds(tx, tz) {
+		return false
+	}
+	if f, ok := g.Area.layerByteAt(g.Area.Floor, tx, tz); ok && IsBlockingFloor(f) {
+		return false
+	}
+	if g.Area.PropBlocksStanding(tx, level, tz) {
+		return false
+	}
+	return canEnterRuntimeBlockers(g, tx, tz, opts)
+}
+
+// canEnterRuntimeBlockers is the shared runtime-blocker tail of the CanEnterTile
+// family: chests, doors, and the player/other-pack occupancy rules. Static
+// terrain (walls/props/floor) is checked by the caller first; this owns only the
+// GameState-side blockers so the two entry predicates can't drift.
+//
+// PlayerTileX/Z is only meaningful when the caller declared a player position —
+// either AllowPlayerTile (pack-chase "the player IS the destination") or
+// OccupiedPacks (pack-AI avoiding the player). Without that gate the zero-default
+// (0,0) would falsely block every step toward tile (0,0).
+func canEnterRuntimeBlockers(g *GameState, tx, tz int, opts EnterOpts) bool {
 	if ChestIndexAt(g.Chests, tx, tz) >= 0 {
 		return false
 	}
 	if !opts.AllowDoorTile && DoorIndexAt(g.Doors, tx, tz) >= 0 {
 		return false
 	}
-	// PlayerTileX/Z is only meaningful when the caller actually declared
-	// a player position — either by setting AllowPlayerTile (pack-chase
-	// "the player IS the destination" case) or by passing OccupiedPacks
-	// (any pack-AI path that needs to avoid stepping onto the player).
-	// Without this gate the zero-default PlayerTileX/Z=(0,0) would falsely
-	// block every caller's step toward tile (0, 0).
 	if opts.AllowPlayerTile || opts.OccupiedPacks != nil {
 		if tx == opts.PlayerTileX && tz == opts.PlayerTileZ {
 			return opts.AllowPlayerTile

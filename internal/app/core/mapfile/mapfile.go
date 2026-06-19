@@ -79,7 +79,28 @@ type MapFile struct {
 	// Elevation empty, which the loader fills with a blank all-'0' (flat)
 	// layer so older maps stay compatible with no manual edit.
 	Elevation []string
-	Packs     []MapPack
+	// Solids is the optional voxel-stack section: Solids[level] is a full
+	// Height×Width grid of cube/air chars ('0' = air, anything else = a solid
+	// cube's material char), planes stacked lowest-level-first. Written ONLY for
+	// a map that has a gap (a floating cube over air) that the single-height
+	// elevation: layer can't express; a pure heightfield omits it and stays
+	// byte-identical, exactly like the doors / crystals optional sections. When
+	// present, an elevation: section is still written (column tops) as a
+	// graceful downgrade for readers that ignore solids:.
+	Solids [][]string
+	// PropLevels is the optional per-tile prop-LEVEL grid: one base-36 char per
+	// (x,z) giving the voxel level the prop on that tile sits on, or '.' for
+	// "auto" (rest on the column's lowest standable surface). Written ONLY when
+	// some prop sits above its auto surface (a tree on a bridge deck); a map whose
+	// props all sit on the ground omits it and stays byte-identical, like solids:.
+	PropLevels []string
+	// DecorLevels is the decor analogue of PropLevels (per-tile decor level, '.' =
+	// auto). Optional / written only when some decor sits above its auto surface.
+	DecorLevels []string
+	// Faces holds per-tile cliff-face skin overrides (N/E/S/W); optional, one line
+	// per overridden tile. Empty for any map that uses only base/whole-tile skins.
+	Faces []MapFace
+	Packs []MapPack
 	// Chests is the authored chest list. Each entry's Items field is a
 	// comma-separated list of item names ("Morsel of Cheese,Bat Jerky")
 	// matching ItemDefinition.Name. Empty list = an empty chest (renders
@@ -221,6 +242,14 @@ type MapDoor struct {
 type MapCrystal struct {
 	X int
 	Z int
+}
+
+// MapFace is one tile's per-direction cliff-face skin override. Skins is indexed
+// 0=N,1=E,2=S,3=W; a '.' entry means "use the tile's base skin for that face."
+// On disk a face line is "x z NESW" (the 4 skin chars), one per overridden tile.
+type MapFace struct {
+	X, Z  int
+	Skins [4]byte
 }
 
 // DoorTargetComplete reports whether a door names both halves of a
@@ -373,6 +402,10 @@ const (
 	slotCustomEnemies
 	slotDialogs
 	slotTriggers
+	slotSolids
+	slotPropLevels
+	slotDecorLevels
+	slotFaces
 )
 
 // Section header names — the on-disk labels that introduce each part of
@@ -396,6 +429,10 @@ const (
 	SectionCustomEnemies = "custom_enemies"
 	SectionDialogs       = "dialogs"
 	SectionTriggers      = "triggers"
+	SectionSolids        = "solids"
+	SectionPropLevels    = "prop_levels"
+	SectionDecorLevels   = "decor_levels"
+	SectionFaces         = "faces"
 )
 
 // layerSection describes one .map section: its on-disk name, the parse
@@ -424,6 +461,19 @@ var layerSections = []layerSection{
 	{SectionCustomEnemies, slotCustomEnemies, nil},
 	{SectionDialogs, slotDialogs, nil},
 	{SectionTriggers, slotTriggers, nil},
+	// solids: carries a multi-plane voxel stack, not a single grid, so it has
+	// a nil field (parsed/encoded by bespoke code like the entity sections) and
+	// is excluded from GridLayerCount.
+	{SectionSolids, slotSolids, nil},
+	// prop_levels: is an OPTIONAL single grid (per-tile prop level) written only
+	// when a prop sits above its auto surface; nil field + bespoke encode keeps it
+	// from being emitted for every map (which would break byte-stable round-trips).
+	{SectionPropLevels, slotPropLevels, nil},
+	// decor_levels: same as prop_levels for the decor layer.
+	{SectionDecorLevels, slotDecorLevels, nil},
+	// faces: is a sparse entity-style section (one line per overridden tile), not
+	// a grid, so nil field + bespoke parse/encode.
+	{SectionFaces, slotFaces, nil},
 }
 
 // GridLayerCount is the number of grid (string-row) layers a .map carries —
@@ -450,7 +500,7 @@ func init() {
 			GridLayerCount++
 		}
 	}
-	for slot := slotWalls; slot <= slotTriggers; slot++ {
+	for slot := slotWalls; slot <= slotFaces; slot++ {
 		if !seen[slot] {
 			panic(fmt.Sprintf("mapfile: layerSections missing slot %d — add a row", slot))
 		}
@@ -679,6 +729,47 @@ func Parse(r io.Reader) (MapFile, error) {
 			continue
 		}
 
+		if state == slotSolids {
+			// The voxel stack is N planes of Height rows each, lowest level
+			// first. Blank separator lines were already skipped above, so rows
+			// arrive contiguously — start a new plane whenever the current one
+			// has filled to Height. (Height is set: size: precedes every grid.)
+			if len(mf.Solids) == 0 || len(mf.Solids[len(mf.Solids)-1]) >= mf.Height {
+				mf.Solids = append(mf.Solids, []string{})
+			}
+			last := len(mf.Solids) - 1
+			mf.Solids[last] = append(mf.Solids[last], raw)
+			continue
+		}
+
+		if state == slotPropLevels {
+			// A single Height-row grid of per-tile prop levels (base-36 char, or
+			// '.' = auto). Same row-collection shape as the other grids.
+			mf.PropLevels = append(mf.PropLevels, raw)
+			continue
+		}
+
+		if state == slotDecorLevels {
+			mf.DecorLevels = append(mf.DecorLevels, raw)
+			continue
+		}
+
+		if state == slotFaces {
+			// One overridden tile per line: "x z NESW" (the 4 face skin chars,
+			// '.' = use the tile's base skin for that face).
+			fields := strings.Fields(raw)
+			if len(fields) >= 3 && len(fields[2]) == 4 {
+				fx, err1 := strconv.Atoi(fields[0])
+				fz, err2 := strconv.Atoi(fields[1])
+				if err1 == nil && err2 == nil {
+					var sk [4]byte
+					copy(sk[:], fields[2])
+					mf.Faces = append(mf.Faces, MapFace{X: fx, Z: fz, Skins: sk})
+				}
+			}
+			continue
+		}
+
 		// Layer grid line. Once Height rows are collected, blank lines are
 		// tolerated (some editors auto-insert one before the next section
 		// header) but a non-blank overflow row is a structural error — the
@@ -824,6 +915,51 @@ func (mf *MapFile) validate() error {
 		}
 	default:
 		return fmt.Errorf("elevation layer has %d rows, size declares %d", len(mf.Elevation), mf.Height)
+	}
+	// solids: is the optional voxel stack. Each plane is a full Height×Width
+	// grid; planes stack lowest-level-first. Cell chars aren't constrained here
+	// (the walls/face-skin layer isn't char-validated either — that alphabet
+	// lives in core); only dimensions are checked, which is what protects the
+	// renderer/movement from a ragged plane.
+	for L, plane := range mf.Solids {
+		if len(plane) != mf.Height {
+			return fmt.Errorf("solids plane %d has %d rows, size declares %d", L, len(plane), mf.Height)
+		}
+		for i, row := range plane {
+			if len(row) != mf.Width {
+				return fmt.Errorf("solids plane %d row %d has %d cols, size declares %d", L, i, len(row), mf.Width)
+			}
+		}
+	}
+	// prop_levels: optional per-tile prop-level grid; dimension-check only (the
+	// char alphabet — base-36 level or '.' auto — is core's concern), same as the
+	// other grids, so a ragged plane can't reach the renderer/collision.
+	if n := len(mf.PropLevels); n != 0 {
+		if n != mf.Height {
+			return fmt.Errorf("prop_levels has %d rows, size declares %d", n, mf.Height)
+		}
+		for i, row := range mf.PropLevels {
+			if len(row) != mf.Width {
+				return fmt.Errorf("prop_levels row %d has %d cols, size declares %d", i, len(row), mf.Width)
+			}
+		}
+	}
+	if n := len(mf.DecorLevels); n != 0 {
+		if n != mf.Height {
+			return fmt.Errorf("decor_levels has %d rows, size declares %d", n, mf.Height)
+		}
+		for i, row := range mf.DecorLevels {
+			if len(row) != mf.Width {
+				return fmt.Errorf("decor_levels row %d has %d cols, size declares %d", i, len(row), mf.Width)
+			}
+		}
+	}
+	// faces: sparse per-tile overrides — bounds-check each so a stray line can't
+	// feed an off-map index to the renderer.
+	for _, f := range mf.Faces {
+		if f.X < 0 || f.X >= mf.Width || f.Z < 0 || f.Z >= mf.Height {
+			return fmt.Errorf("faces entry (%d,%d) outside map", f.X, f.Z)
+		}
 	}
 	if mf.StartX < 0 || mf.StartX >= mf.Width || mf.StartZ < 0 || mf.StartZ >= mf.Height {
 		return fmt.Errorf("start (%d,%d) outside map", mf.StartX, mf.StartZ)
@@ -1213,6 +1349,41 @@ func (mf MapFile) Encode(w io.Writer) error {
 		fmt.Fprintf(bw, "%s:\n", layer.name)
 		for _, row := range layer.rows {
 			fmt.Fprintln(bw, row)
+		}
+	}
+	// solids: appended only for a gapped map (a pure heightfield omits it and
+	// stays byte-identical, like doors / crystals). Planes emit lowest-level
+	// first as contiguous Height-row blocks; the parser re-splits by Height, so
+	// no separator is needed.
+	if len(mf.Solids) > 0 {
+		fmt.Fprintln(bw, SectionSolids+":")
+		for _, plane := range mf.Solids {
+			for _, row := range plane {
+				fmt.Fprintln(bw, row)
+			}
+		}
+	}
+	// prop_levels: appended only when some prop sits above its auto surface (a
+	// decked prop); a map whose props all rest on the ground omits it and stays
+	// byte-identical, like solids:.
+	if len(mf.PropLevels) > 0 {
+		fmt.Fprintln(bw, SectionPropLevels+":")
+		for _, row := range mf.PropLevels {
+			fmt.Fprintln(bw, row)
+		}
+	}
+	if len(mf.DecorLevels) > 0 {
+		fmt.Fprintln(bw, SectionDecorLevels+":")
+		for _, row := range mf.DecorLevels {
+			fmt.Fprintln(bw, row)
+		}
+	}
+	// faces: one line per overridden tile ("x z NESW"); omitted entirely when no
+	// tile overrides a face, so base-skin maps stay byte-identical.
+	if len(mf.Faces) > 0 {
+		fmt.Fprintln(bw, SectionFaces+":")
+		for _, f := range mf.Faces {
+			fmt.Fprintf(bw, "%d %d %s\n", f.X, f.Z, string(f.Skins[:]))
 		}
 	}
 	fmt.Fprintln(bw, SectionEnemies+":")

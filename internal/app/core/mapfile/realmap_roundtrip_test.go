@@ -1,0 +1,57 @@
+package mapfile
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// TestRealForestMapStable loads the shipped forest_path.map — which carries the
+// raised trail carved into a walk-under land bridge (a voxel gap) — and confirms
+// it round-trips byte-stably (Parse->Encode never rewrites an untouched map). It
+// also re-checks the heightfield backward-compat guarantee on the same data with
+// its stack stripped: a gapless map emits NO solids: section.
+func TestRealForestMapStable(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "..", "maps", "forest_path.map")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Skipf("map not present: %v", err)
+	}
+	mf, err := Parse(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(mf.Solids) == 0 {
+		t.Fatalf("forest map should carry a solids stack (the land bridge)")
+	}
+	var buf1 bytes.Buffer
+	if err := mf.Encode(&buf1); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	enc1 := append([]byte(nil), buf1.Bytes()...) // snapshot: Parse below drains the buffer
+	if !bytes.Equal(raw, enc1) {
+		t.Fatalf("re-encoding the shipped map changed its bytes (%d -> %d)", len(raw), len(enc1))
+	}
+	mf2, err := Parse(bytes.NewReader(enc1))
+	if err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	var buf2 bytes.Buffer
+	if err := mf2.Encode(&buf2); err != nil {
+		t.Fatalf("re-encode: %v", err)
+	}
+	if !bytes.Equal(enc1, buf2.Bytes()) {
+		t.Fatalf("Parse->Encode not idempotent on a real map")
+	}
+	// Heightfield backward-compat: stripped of its stack the map is a pure
+	// heightfield and must encode with NO solids: section.
+	mf.Solids = nil
+	var hf bytes.Buffer
+	if err := mf.Encode(&hf); err != nil {
+		t.Fatalf("encode heightfield: %v", err)
+	}
+	if bytes.Contains(hf.Bytes(), []byte("solids:")) {
+		t.Fatalf("a gapless (heightfield) map encoded a spurious solids: section")
+	}
+}
