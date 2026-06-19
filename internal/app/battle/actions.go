@@ -2109,7 +2109,7 @@ func rollSkillCrit(g *core.GameState, actor *core.PartyMember, skill core.SkillI
 	// crit curve (no-op for members without the node), so the one probabilistic
 	// crit path covers the passive too. Backstab's deterministic Excellent crit
 	// above is intentionally not boosted — it's already a guaranteed crit.
-	crit = core.MemberRollCrit(g.Rand(), *actor, quality)
+	crit = core.MemberRollCrit(g.Rand(), actor, quality)
 	if crit {
 		// Crits are the "big hit" moment — punch the camera harder than a
 		// plain well-timed press (overrides the subtle base shake).

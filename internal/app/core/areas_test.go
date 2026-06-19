@@ -96,7 +96,7 @@ func unreachablePacks(a AreaDefinition) int {
 		stack = append(stack, [2]int{x + 1, z}, [2]int{x - 1, z}, [2]int{x, z + 1}, [2]int{x, z - 1})
 	}
 	blocked := 0
-	for _, snap := range SnappedSpawnPositions(a) {
+	for _, snap := range SnappedSpawnPositions(&a) {
 		if !snap.Placed() {
 			blocked++
 			continue

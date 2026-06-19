@@ -101,7 +101,7 @@ func NewGameState(area AreaDefinition) GameState {
 		Area:       area,
 		Player:     NewPlayer(startX, startZ, area.StartFacing),
 		Party:      NewParty(),
-		Packs:      placePacks(area),
+		Packs:      placePacks(&area),
 		Chests:     placeChests(area),
 		Doors:      placeDoors(area),
 		Crystals:   placeCrystals(area),

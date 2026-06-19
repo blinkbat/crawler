@@ -139,7 +139,7 @@ func contextItemsAt(s *State, x, z int) []ctxItem {
 	// so offer quick per-tile skin assignment (the current skin is marked).
 	// Gated by the same core rule the renderer draws faces from, and driven by
 	// the shared core.FaceSkins roster.
-	if core.TileExposesFace(s.area, x, z) {
+	if core.TileExposesFace(&s.area, x, z) {
 		// Faces are a per-tile property (top-down editor can't paint a vertical
 		// face): one row per direction (+ "all"), each opening a skin dropdown so
 		// N/E/S/W can be set independently.

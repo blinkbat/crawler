@@ -653,7 +653,7 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 		hoverDesc := ""
 		if s.hoverX >= 0 {
 			coord = core.TileCoord(s.hoverX, s.hoverZ)
-			hoverDesc = core.AreaTileSummary(s.area, s.hoverX, s.hoverZ)
+			hoverDesc = core.AreaTileSummary(&s.area, s.hoverX, s.hoverZ)
 		}
 		topbarInfoLabel = fmt.Sprintf("cell %s   %s   layer %s   brush %dx%d   zoom %.0f%%   phase %s (T)   undo %d/%d   redo %d",
 			coord, hoverDesc, layerName(s.layer), s.brushSize, s.brushSize, s.zoom*100, core.PhaseName(s.previewPhase), len(s.undo), undoLimit, len(s.redo))

@@ -1753,7 +1753,7 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 	// map being too crowded ("no open tile"). Surfacing both separately
 	// gives the author a faster fix.
 	var unreachable, emptyRoster, noOpenTile int
-	for _, snap := range core.SnappedSpawnPositions(a) {
+	for _, snap := range core.SnappedSpawnPositions(&a) {
 		switch snap.Reason {
 		case core.SpawnSnapEmptyMembers:
 			emptyRoster++

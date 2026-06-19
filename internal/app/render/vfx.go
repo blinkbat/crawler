@@ -191,7 +191,7 @@ func resolveAnchor(camera rl.Camera3D, g *core.GameState, req core.VFXRequest) (
 		if req.SlotIdx < 0 || req.SlotIdx >= len(g.Party) {
 			return rl.Vector3{}, false
 		}
-		m := g.Party[req.SlotIdx]
+		m := &g.Party[req.SlotIdx]
 		return partySpritePosition(camera, req.SlotIdx, m.Class, m.AttackBump, 0, m.HitKnockback), true
 	case core.VFXAnchorTile:
 		return tileWorldPos(req.TileX, req.TileZ, 0.05), true

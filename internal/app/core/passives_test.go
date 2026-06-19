@@ -10,10 +10,10 @@ import (
 // DEX/timing baseline, and the result still respects CritCap.
 func TestMemberCritChance_LuckyStrikeAddsPerRank(t *testing.T) {
 	thief := PartyMember{Class: ClassThief, Stats: Stats{DEX: 6}}
-	base := MemberCritChance(thief, TimingQualityMiss)
+	base := MemberCritChance(&thief, TimingQualityMiss)
 
 	thief.TreeRanks = map[string]int{PassiveLuckyStrike: 3}
-	withRanks := MemberCritChance(thief, TimingQualityMiss)
+	withRanks := MemberCritChance(&thief, TimingQualityMiss)
 
 	wantDelta := 3 * LuckyStrikeCritPerRank
 	if got := withRanks - base; math.Abs(got-wantDelta) > 1e-9 {
@@ -29,7 +29,7 @@ func TestMemberCritChance_LuckyStrikeAddsPerRank(t *testing.T) {
 // stacking Lucky Strike ranks.
 func TestMemberCritChance_RespectsCap(t *testing.T) {
 	m := PartyMember{Class: ClassThief, Stats: Stats{DEX: 99}, TreeRanks: map[string]int{PassiveLuckyStrike: 3}}
-	if got := MemberCritChance(m, TimingQualityMiss); got > CritCap {
+	if got := MemberCritChance(&m, TimingQualityMiss); got > CritCap {
 		t.Errorf("MemberCritChance = %.4f, want <= CritCap %.4f", got, CritCap)
 	}
 }
@@ -41,11 +41,11 @@ func TestMemberCritChance_RespectsCap(t *testing.T) {
 // tests above can't catch).
 func TestMemberCritChance_ReadsEffectiveDEX(t *testing.T) {
 	thief := PartyMember{Class: ClassThief, Stats: Stats{DEX: 6}}
-	base := MemberCritChance(thief, TimingQualityMiss)
+	base := MemberCritChance(&thief, TimingQualityMiss)
 
 	const buffDEX = 5
 	StampPartyBuff(&thief, SkillBless, SkillEffect{BuffStats: Stats{DEX: buffDEX}, BuffTurns: 3})
-	withBuff := MemberCritChance(thief, TimingQualityMiss)
+	withBuff := MemberCritChance(&thief, TimingQualityMiss)
 
 	wantDelta := buffDEX * CritPerDEX
 	if got := withBuff - base; math.Abs(got-wantDelta) > 1e-9 {

@@ -75,15 +75,17 @@ func PassiveRank(m *PartyMember, nodeID string) int {
 // can't push past the ceiling the base DEX/timing curve already respects. The
 // member-aware sibling of CritChance (which takes bare Stats for enemies and
 // the equipment-preview readouts).
-func MemberCritChance(m PartyMember, quality int) float64 {
-	chance := CritChance(EffectiveStats(m), quality)
-	chance += float64(PassiveRank(&m, PassiveLuckyStrike)) * LuckyStrikeCritPerRank
+func MemberCritChance(m *PartyMember, quality int) float64 {
+	chance := CritChance(EffectiveStatsPtr(m), quality)
+	chance += float64(PassiveRank(m, PassiveLuckyStrike)) * LuckyStrikeCritPerRank
 	return Clamp(chance, 0, CritCap)
 }
 
 // MemberRollCrit rolls a crit for a party member, folding in Lucky Strike via
 // MemberCritChance. The member-aware sibling of RollCrit (which enemies and
-// stat-only call sites still use).
-func MemberRollCrit(rng *rand.Rand, m PartyMember, quality int) bool {
+// stat-only call sites still use). Takes m by pointer to avoid copying the
+// PartyMember (Stats embed + Equipped array + buff/status fields) on every
+// attack roll — EffectiveStatsPtr is the no-copy stats path.
+func MemberRollCrit(rng *rand.Rand, m *PartyMember, quality int) bool {
 	return RollChance(rng, MemberCritChance(m, quality))
 }

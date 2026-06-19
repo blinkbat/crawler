@@ -283,7 +283,7 @@ func (s SpawnSnap) Placed() bool { return s.Reason == SpawnSnapPlaced }
 // start tile is seeded as occupied so the snapping never lands on it.
 // Empty pack rosters are skipped — a pack with zero members has no field
 // representative to render or engage.
-func placePacks(a AreaDefinition) []Pack {
+func placePacks(a *AreaDefinition) []Pack {
 	packs := make([]Pack, 0, len(a.PackSpawns))
 	for i, snap := range SnappedSpawnPositions(a) {
 		if !snap.Placed() {
@@ -303,7 +303,7 @@ func placePacks(a AreaDefinition) []Pack {
 		packs = append(packs, Pack{
 			TileX:     snap.TileX,
 			TileZ:     snap.TileZ,
-			Level:     spawnLevel(&a, snap.TileX, snap.TileZ),
+			Level:     spawnLevel(a, snap.TileX, snap.TileZ),
 			HomeX:     snap.TileX,
 			HomeZ:     snap.TileZ,
 			X:         TileCenter(snap.TileX),
@@ -327,7 +327,7 @@ func placePacks(a AreaDefinition) []Pack {
 // positions — otherwise an author who places a pack on a wall would see a
 // false "unreachable" warning even though the game will silently relocate
 // the pack at runtime, and vice versa.
-func SnappedSpawnPositions(a AreaDefinition) []SpawnSnap {
+func SnappedSpawnPositions(a *AreaDefinition) []SpawnSnap {
 	out := make([]SpawnSnap, 0, len(a.PackSpawns))
 	occupied := map[[2]int]bool{{a.StartTileX, a.StartTileZ}: true}
 	for _, spawn := range a.PackSpawns {
@@ -346,7 +346,7 @@ func SnappedSpawnPositions(a AreaDefinition) []SpawnSnap {
 	return out
 }
 
-func nearestOpenTile(a AreaDefinition, wantX, wantZ int, occupied map[[2]int]bool) (int, int) {
+func nearestOpenTile(a *AreaDefinition, wantX, wantZ int, occupied map[[2]int]bool) (int, int) {
 	if a.FloorAt(wantX, wantZ) && !occupied[[2]int{wantX, wantZ}] {
 		return wantX, wantZ
 	}
@@ -439,10 +439,20 @@ type FaceOverride struct {
 }
 
 func (a *AreaDefinition) faceOverrideAt(x, z int) (FaceOverride, bool) {
-	for _, o := range a.FaceOverrides {
-		if o.X == x && o.Z == z {
-			return o, true
+	if len(a.FaceOverrides) == 0 {
+		return FaceOverride{}, false
+	}
+	// Build the (x,z)->index map on first use; the render path then resolves
+	// each face in O(1) instead of scanning the whole slice per cube-face per
+	// frame. Invalidated to nil by any mutation (SetFaceDir / CloneArea).
+	if a.faceOverrideIdx == nil {
+		a.faceOverrideIdx = make(map[[2]int]int, len(a.FaceOverrides))
+		for i, o := range a.FaceOverrides {
+			a.faceOverrideIdx[[2]int{o.X, o.Z}] = i
 		}
+	}
+	if i, ok := a.faceOverrideIdx[[2]int{x, z}]; ok {
+		return a.FaceOverrides[i], true
 	}
 	return FaceOverride{}, false
 }
@@ -470,6 +480,9 @@ func (a *AreaDefinition) SetFaceDir(x, z, dir int, skin byte) {
 	if !a.InBounds(x, z) || dir < 0 || dir >= 4 {
 		return
 	}
+	// Any edit to FaceOverrides invalidates the lazily-built lookup; it rebuilds
+	// on the next faceOverrideAt. Editor-only path, not hot.
+	a.faceOverrideIdx = nil
 	if skin == a.FaceSkinAt(x, z) || skin == 0 {
 		skin = PropLevelAuto
 	}
@@ -738,7 +751,7 @@ func (a *AreaDefinition) NeighbourEdgeLevel(nx, nz, fromDir int) int {
 // face" menu gates on; the renderer's drawCliffFaces mirrors this per-edge for
 // the actual draw (reading a per-frame grid for speed) so the two never
 // disagree about which tiles show faces.
-func TileExposesFace(a AreaDefinition, x, z int) bool {
+func TileExposesFace(a *AreaDefinition, x, z int) bool {
 	if _, isRamp := a.RampAt(x, z); isRamp {
 		return false
 	}
@@ -1088,7 +1101,7 @@ func CrystalSpawnIndexAt(spawns []CrystalSpawn, x, z int) int {
 // Used by the editor's hover-tile readout and reusable by any future
 // in-game tile inspector / debug overlay. Moved out of the editor
 // package so the per-layer label + entity walk lives in one place.
-func AreaTileSummary(a AreaDefinition, x, z int) string {
+func AreaTileSummary(a *AreaDefinition, x, z int) string {
 	if !a.InBounds(x, z) {
 		return ""
 	}
@@ -1135,13 +1148,26 @@ func AreaTileSummary(a AreaDefinition, x, z int) string {
 }
 
 // joinSummary concatenates AreaTileSummary parts with " / " — pulled
-// out so core/map.go doesn't pull in "strings" just for one call.
+// out so core/map.go doesn't pull in "strings" just for one call. Builds into
+// a single pre-sized byte buffer rather than repeated `out += …` concatenation
+// (which allocated one throwaway string per part), since the editor hover
+// readout calls this every frame.
 func joinSummary(parts []string) string {
-	out := parts[0]
-	for _, p := range parts[1:] {
-		out += " / " + p
+	if len(parts) == 1 {
+		return parts[0]
 	}
-	return out
+	const sep = " / "
+	n := len(sep) * (len(parts) - 1)
+	for _, p := range parts {
+		n += len(p)
+	}
+	buf := make([]byte, 0, n)
+	buf = append(buf, parts[0]...)
+	for _, p := range parts[1:] {
+		buf = append(buf, sep...)
+		buf = append(buf, p...)
+	}
+	return string(buf)
 }
 
 // FloorAt is the inverse of BlockedAt — true when the cell is walkable.

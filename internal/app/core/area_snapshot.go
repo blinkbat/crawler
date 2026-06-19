@@ -249,6 +249,9 @@ func CloneArea(a AreaDefinition) AreaDefinition {
 	if len(a.FaceOverrides) > 0 {
 		out.FaceOverrides = append([]FaceOverride(nil), a.FaceOverrides...)
 	}
+	// Drop the shared lazy face-override index so the clone rebuilds its own
+	// (the `out := a` copy aliased the source map pointer).
+	out.faceOverrideIdx = nil
 	out.PackSpawns = make([]PackSpawn, len(a.PackSpawns))
 	for i, sp := range a.PackSpawns {
 		out.PackSpawns[i] = PackSpawn{

@@ -346,7 +346,14 @@ type AreaDefinition struct {
 	// skin on every face, so existing maps are unchanged and need no faces:
 	// section. Sorted by (Z,X) for deterministic encoding. See FaceSkinForDir.
 	FaceOverrides []FaceOverride
-	Materials     MaterialSet
+	// faceOverrideIdx is a lazily-built (x,z)->FaceOverrides-index map so
+	// faceOverrideAt resolves in O(1) instead of linearly scanning FaceOverrides
+	// once per visible cube-face per frame on the voxel render path. Built on the
+	// first lookup, invalidated (nil) by SetFaceDir / CloneArea. Unexported, so
+	// it's excluded from mapfile encoding, AreaContentEqual, and round-trip
+	// equality — only the FaceOverrides slice is authoritative.
+	faceOverrideIdx map[[2]int]int
+	Materials       MaterialSet
 	StartTileX    int
 	StartTileZ  int
 	StartFacing int

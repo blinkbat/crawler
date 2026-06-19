@@ -457,6 +457,14 @@ func LivingBattleCount(g *GameState) int {
 	return countWhere(BattleMembers(g), enemyAlive)
 }
 
+// CountLivingEnemies counts the alive members in an already-resolved roster
+// slice — the allocation-free variant of LivingBattleCount for callers (the
+// per-frame battle Update) that have hoisted BattleMembers and want to avoid
+// re-deriving the pack each call.
+func CountLivingEnemies(members []Enemy) int {
+	return countWhere(members, enemyAlive)
+}
+
 func NextLivingBattleEnemy(g *GameState) int {
 	return nextWhere(BattleMembers(g), 0, enemyAlive)
 }

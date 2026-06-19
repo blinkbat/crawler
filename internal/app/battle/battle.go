@@ -81,7 +81,17 @@ func Update(g *core.GameState, dt float32) {
 		}
 		return
 	}
-	updateBattleEffects(g, dt)
+	// Resolve the engaged pack + roster ONCE per combat frame. The guards below
+	// (and updateBattleEffects) otherwise each re-derive the pack through
+	// ActivePack and re-scan the roster every frame for the whole fight.
+	// updateBattleEffects only decays per-actor timers — it never changes the
+	// roster length or Alive flags — so the hoisted slice stays valid past it.
+	pack := core.ActivePack(g)
+	var members []core.Enemy
+	if pack != nil {
+		members = pack.Members
+	}
+	updateBattleEffects(g, dt, members)
 	tickQualityPopup(g, dt)
 	// Defensive early-exit: a desynced EnemyIndex (points past the active pack
 	// — e.g. a culled enemy) routes through leaveBattle so residual queue /
@@ -100,12 +110,11 @@ func Update(g *core.GameState, dt float32) {
 	// ActivePack is stale/-1 (mid-teardown re-entry), which would otherwise
 	// look identical to "every enemy fell" and re-award spoils against a pack
 	// that no longer exists. Only an active combat phase can be won here.
-	if core.ActivePack(g) != nil && core.LivingBattleCount(g) == 0 &&
+	if pack != nil && core.CountLivingEnemies(members) == 0 &&
 		(g.Battle.Phase == core.BattlePlayer || g.Battle.Phase == core.BattleAttackTiming || g.Battle.Phase == core.BattleEnemyTiming) {
 		winBattle(g, core.LastBattleEnemyFallsMessage(g))
 		return
 	}
-	members := core.BattleMembers(g)
 	if g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(members) {
 		leaveBattle(g, "")
 		return
@@ -1393,9 +1402,12 @@ func updateVictorySpoils(g *core.GameState, dt float32) {
 		return
 	}
 	g.Battle.VictoryElapsed += dt
+	// Eased fill fraction for this frame — computed once and shared by the
+	// level-up and XP-tick cue checks below (both keyed off the same motion).
+	fill := core.VictoryFillProgress(g.Battle.VictoryElapsed)
 	// Ring the level-up cue exactly as each animating bar crosses a
 	// threshold (VictoryLevelSfxCursor remembers how many have rung).
-	shownLevels := levelsShownAt(g, core.VictoryFillProgress(g.Battle.VictoryElapsed))
+	shownLevels := levelsShownAt(g, fill)
 	for g.Battle.VictoryLevelSfxCursor < shownLevels {
 		audio.Play(audio.SoundLevelUp)
 		g.Battle.VictoryLevelSfxCursor++
@@ -1411,7 +1423,7 @@ func updateVictorySpoils(g *core.GameState, dt float32) {
 	// another VictoryXPPerTick. Tied to the eased fill, so ticks rush early
 	// and space out as the bars settle; capped to one Play per frame (shared
 	// channel) so a huge haul can't machine-gun.
-	if tickIdx := xpShownAt(g, core.VictoryFillProgress(g.Battle.VictoryElapsed)) / core.VictoryXPPerTick; tickIdx > g.Battle.VictoryTickSfxCursor {
+	if tickIdx := xpShownAt(g, fill) / core.VictoryXPPerTick; tickIdx > g.Battle.VictoryTickSfxCursor {
 		audio.Play(audio.SoundXPTick)
 		g.Battle.VictoryTickSfxCursor = tickIdx
 	}
@@ -1664,12 +1676,14 @@ func tickHitTimers(bump, flash, knockback *float32, dt float32) {
 	*knockback = core.ApproachZero(*knockback, dt)
 }
 
-func updateBattleEffects(g *core.GameState, dt float32) {
+// updateBattleEffects decays the per-actor hit-reaction timers each combat
+// frame. `members` is the already-resolved active-pack roster (hoisted by the
+// caller) so this doesn't re-derive the pack through BattleMembers every frame.
+func updateBattleEffects(g *core.GameState, dt float32, members []core.Enemy) {
 	for i := range g.Party {
 		tickHitTimers(&g.Party[i].AttackBump, &g.Party[i].DamageFlash, &g.Party[i].HitKnockback, dt)
 		g.Party[i].DamagePopupTimer = core.ApproachZero(g.Party[i].DamagePopupTimer, dt)
 	}
-	members := core.BattleMembers(g)
 	for i := range members {
 		tickHitTimers(&members[i].AttackBump, &members[i].DamageFlash, &members[i].HitKnockback, dt)
 		members[i].DeathFade = core.ApproachZero(members[i].DeathFade, dt)

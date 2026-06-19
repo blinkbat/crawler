@@ -428,7 +428,7 @@ func drawPanelsStats(g *core.GameState, assets Resources, body rl.Rectangle) {
 			cellX := innerX + float32(col)*statColW
 			cellY := contentY + float32(row)*rowH
 			label := core.StatLabel(s)
-			value := strconv.Itoa(core.StatValue(m.Stats, s))
+			value := smallIntLabel(core.StatValue(m.Stats, s))
 			drawStatIcon(s, cellX+9, cellY+13, 9, statIconCol)
 			drawTextWithShadow(font, label, cellX+24, cellY, FontBody, textMuted)
 			// Value right-aligned within the cell so the column
@@ -441,7 +441,7 @@ func drawPanelsStats(g *core.GameState, assets Resources, body rl.Rectangle) {
 		// don't compete with the stat grid above.
 		contentY += 8
 		drawTextWithShadow(font, "ARM", innerX, contentY, FontSmall, textMuted)
-		armVal := strconv.Itoa(m.Armor)
+		armVal := smallIntLabel(m.Armor)
 		drawTextRightAligned(font, armVal, innerX+statColW-14, contentY, FontSmall, textPrimary)
 
 		nextXP := core.XPForLevel(m.Level)
@@ -1116,7 +1116,7 @@ func drawPanelsItems(g *core.GameState, assets Resources, body rl.Rectangle) {
 		}
 		drawTextWithShadow(font, info.Name, listRect.X+rowPad, y+12, FontBody, nameCol)
 		// Count on the right edge of the row as a small chip.
-		countText := "x" + strconv.Itoa(stack.Count)
+		countText := panelsItemCountLabel(stack.Count)
 		drawTextRightAligned(font, countText, listRect.X+listRect.Width-rowPad, y+12, FontBody, inkAccent)
 	}
 
@@ -1214,6 +1214,57 @@ func panelsItemHealLabel(amount int) string {
 	return "+" + strconv.Itoa(amount) + " HP"
 }
 
+// smallIntLabel returns the decimal string for a small non-negative int from a
+// LUT — used by the Stats tab (stat values, armor) which would otherwise
+// strconv.Itoa each value per member every frame the overlay sits on it.
+var smallIntLabelCache = func() [256]string {
+	var out [256]string
+	for i := range out {
+		out[i] = strconv.Itoa(i)
+	}
+	return out
+}()
+
+func smallIntLabel(n int) string {
+	if n >= 0 && n < len(smallIntLabelCache) {
+		return smallIntLabelCache[n]
+	}
+	return strconv.Itoa(n)
+}
+
+// panelsItemCountLabel pre-formats the "xN" stack-count chips the Items tab
+// paints for every visible row each frame.
+var panelsItemCountLabelCache = func() [256]string {
+	var out [256]string
+	for i := range out {
+		out[i] = "x" + strconv.Itoa(i)
+	}
+	return out
+}()
+
+func panelsItemCountLabel(n int) string {
+	if n >= 0 && n < len(panelsItemCountLabelCache) {
+		return panelsItemCountLabelCache[n]
+	}
+	return "x" + strconv.Itoa(n)
+}
+
+// treeRatioLabel memoizes the Skills-tab "invested / total" ratio strings.
+// Both operands span a tiny bounded range (ranks per tree), so the memo can't
+// grow unbounded — and the tab no longer Itoa+concats per tree per member
+// every frame.
+var treeRatioLabelCache = map[[2]int]string{}
+
+func treeRatioLabel(invested, total int) string {
+	k := [2]int{invested, total}
+	if s, ok := treeRatioLabelCache[k]; ok {
+		return s
+	}
+	s := strconv.Itoa(invested) + " / " + strconv.Itoa(total)
+	treeRatioLabelCache[k] = s
+	return s
+}
+
 // panelsItemEffectLabel is the Items-tab detail line for a consumable's
 // restorative effect: the cached "+N HP" label, "+N MP", both (HP then MP),
 // or a "no effect" note. One home for the HP/MP composition so the draw site
@@ -1278,7 +1329,7 @@ func drawPanelsSkills(g *core.GameState, assets Resources, body rl.Rectangle) {
 
 			drawTextWithShadow(font, tr.Name, rect.X+12, rect.Y+8, FontBody, textPrimary)
 			invested := core.TreeInvestedRanks(&m, tr)
-			ratio := strconv.Itoa(invested) + " / " + strconv.Itoa(core.TreeMaxRanks(tr))
+			ratio := treeRatioLabel(invested, core.TreeMaxRanks(tr))
 			ratioCol := textMuted
 			if invested > 0 {
 				ratioCol = giltBright
@@ -1536,11 +1587,15 @@ func drawCompassRose(cx, cy float32, d float32, font rl.Font) {
 	// Centre disc + bright pip.
 	rl.DrawCircleV(rl.NewVector2(cx, cy), innerR, woodAccent)
 	rl.DrawCircleV(rl.NewVector2(cx, cy), innerR*0.5, giltBright)
-	// "N" letter just above the north point.
+	// "N" letter just above the north point. Measured through the shared
+	// measure cache so the constant glyph isn't re-measured (a cgo call) every
+	// Map-tab frame.
 	nLetter := "N"
-	nm := rl.MeasureTextEx(font, nLetter, FontTiny, 1)
+	nm := compassMeasureCache.measure(font, nLetter, FontTiny, 1)
 	drawTextWithShadow(font, nLetter, cx-nm.X/2, cy-outerR-nm.Y-2, FontTiny, inkAccent)
 }
+
+var compassMeasureCache measureCache
 
 // visitedAt reports whether the player has stepped on this tile. Helper
 // so the map-panel markers don't open-code the bounds check at every

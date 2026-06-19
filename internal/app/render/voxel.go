@@ -108,21 +108,17 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 	for L := 0; L < h; L++ {
 		_, solid[L] = m.SolidAt(x, L, z)
 	}
-	lowest := -1
-	for L := 0; L < h; L++ {
-		if solid[L] && (L+1 >= h || !solid[L+1]) {
-			lowest = L
-			break
-		}
-	}
-
-	// Floors on every standable surface.
+	// Floors on every standable surface. Walking ascending, the FIRST standable
+	// level is the column's lowest surface — fold that detection into this single
+	// pass instead of a separate pre-scan for `lowest`.
+	lowestDone := false
 	for L := 0; L < h; L++ {
 		if !(solid[L] && (L+1 >= h || !solid[L+1])) {
 			continue
 		}
 		topY := core.ElevationWorldY(L)
-		if L == lowest {
+		if !lowestDone {
+			lowestDone = true
 			// The authored ground surface keeps its floor char (grass/stone/
 			// water/ramp); reuse the heightfield floor path verbatim.
 			drawFloorTile(material, assets, m.Floor[z][x], x, z, cx, cz, topY)
@@ -145,14 +141,14 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 			continue
 		}
 		nx, nz := x+dx, z+dz
+		yaw := faceYaw(d)
 		// Per-DIRECTION skin: a tile can wear a different face skin on each side
 		// (FaceSkinForDir falls back to the base skin when no override), so the
-		// N/E/S/W faces of one cube can differ.
+		// N/E/S/W faces of one cube can differ. Resolved LAZILY on the first
+		// exposed level so a fully-buried edge (no visible face) pays neither the
+		// FaceSkinForDir lookup nor the variant-table probe.
 		skin := material.faceModel
-		if sc := m.FaceSkinForDir(x, z, d); assets.faceVariantTable.present[sc] {
-			skin = assets.faceVariantTable.model[sc]
-		}
-		yaw := faceYaw(d)
+		skinResolved := false
 		// One face quad PER LEVEL, each a single cube tall, so the wall texture
 		// TILES per voxel instead of stretching one copy across a multi-level run
 		// (drawCliffFace scales the model by its level count, which stretches the
@@ -160,6 +156,12 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 		for L := 0; L < h; L++ {
 			if !solid[L] || voxelNeighborSolid(m, nx, nz, L) {
 				continue
+			}
+			if !skinResolved {
+				skinResolved = true
+				if sc := m.FaceSkinForDir(x, z, d); assets.faceVariantTable.present[sc] {
+					skin = assets.faceVariantTable.model[sc]
+				}
 			}
 			drawCliffFace(skin, cx, core.ElevationWorldY(L-1), cz, yaw, 1)
 			drawn++
