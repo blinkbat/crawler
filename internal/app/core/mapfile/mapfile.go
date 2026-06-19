@@ -756,17 +756,24 @@ func Parse(r io.Reader) (MapFile, error) {
 
 		if state == slotFaces {
 			// One overridden tile per line: "x z NESW" (the 4 face skin chars,
-			// '.' = use the tile's base skin for that face).
+			// '.' = use the tile's base skin for that face). A malformed line is a
+			// loud error (like every other entity section) rather than a silent
+			// drop — a hand-edited typo here must not vanish without a diagnostic.
 			fields := strings.Fields(raw)
-			if len(fields) >= 3 && len(fields[2]) == 4 {
-				fx, err1 := strconv.Atoi(fields[0])
-				fz, err2 := strconv.Atoi(fields[1])
-				if err1 == nil && err2 == nil {
-					var sk [4]byte
-					copy(sk[:], fields[2])
-					mf.Faces = append(mf.Faces, MapFace{X: fx, Z: fz, Skins: sk})
-				}
+			if len(fields) < 3 || len(fields[2]) != 4 {
+				return mf, fmt.Errorf("line %d: expected '<x> <z> <NESW>' (4 face skin chars), got %q", lineNo, raw)
 			}
+			fx, err := parseIntField(fields[0], "face x", lineNo)
+			if err != nil {
+				return mf, err
+			}
+			fz, err := parseIntField(fields[1], "face z", lineNo)
+			if err != nil {
+				return mf, err
+			}
+			var sk [4]byte
+			copy(sk[:], fields[2])
+			mf.Faces = append(mf.Faces, MapFace{X: fx, Z: fz, Skins: sk})
 			continue
 		}
 

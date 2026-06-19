@@ -739,6 +739,17 @@ func transientStatus(g *core.GameState) string {
 	return msg
 }
 
+func init() {
+	// drawActionMenuOptions hand-lists exactly the five action rows because each
+	// paints a bespoke per-row icon (so it isn't a generic count-driven loop). If
+	// a new ActionRow is ever added, fail loudly at startup — the menu must be
+	// updated rather than silently omit the row. (Matches the parallel-table
+	// init-assert discipline used elsewhere in the codebase.)
+	if core.ActionRowCount != 5 {
+		panic(fmt.Sprintf("render: drawActionMenuOptions lists 5 rows but core.ActionRowCount == %d — add the new row to the menu", core.ActionRowCount))
+	}
+}
+
 func drawActionMenuOptions(g *core.GameState, assets Resources, x, y int32, member core.PartyMember) {
 	rowSpacing := int32(40)
 	cursor := core.ActionRow(g.Battle.MenuIndex)

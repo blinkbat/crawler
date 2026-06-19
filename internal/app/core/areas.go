@@ -160,12 +160,26 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	}{
 		{mapfile.SectionCeiling, mf.Ceiling},
 		{mapfile.SectionElevation, mf.Elevation},
+		// PropLevels / DecorLevels are optional per-tile level grids. mapfile.validate
+		// dimension-checks them on the disk path, but the editor calls AreaFromMapFile
+		// directly on an in-memory MapFile that never ran validate() — guard them here
+		// for parity so a ragged level grid can't slip past on that path.
+		{mapfile.SectionPropLevels, mf.PropLevels},
+		{mapfile.SectionDecorLevels, mf.DecorLevels},
 	}
 	for _, layer := range optional {
 		if len(layer.rows) == 0 {
-			continue // absent — blank-filled at the bottom of this function
+			continue // absent — blank-filled / defaulted by its reader
 		}
 		if err := validateLayerDims(layer.name, layer.rows, mf.Width, mf.Height); err != nil {
+			return AreaDefinition{}, err
+		}
+	}
+	// Solids is the optional voxel stack (N planes, each Height×Width). Same
+	// editor-path parity guard: validate present planes so a ragged plane can't
+	// reach SolidAt / the renderer (disk path is covered by mapfile.validate).
+	for L, plane := range mf.Solids {
+		if err := validateLayerDims(fmt.Sprintf("%s plane %d", mapfile.SectionSolids, L), plane, mf.Width, mf.Height); err != nil {
 			return AreaDefinition{}, err
 		}
 	}

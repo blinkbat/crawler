@@ -1388,6 +1388,12 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 	if cellPx*float32(zoom) > body.Height {
 		cellPx = body.Height / float32(zoom)
 	}
+	// Floor at 1px/cell. cellPx is normally well above this (zoom is input-clamped
+	// to PanelMapZoomMax), but the floor bounds cellsX/cellsY to the body's pixel
+	// extent so a future loosened zoom clamp can't drive a runaway DrawRectangle loop.
+	if cellPx < 1 {
+		cellPx = 1
+	}
 	cellsX := int(body.Width / cellPx)
 	cellsY := int(body.Height / cellPx)
 	// Pan offset (PanelsMapPanX/Z, set by the d-pad on the Map tab) shifts the

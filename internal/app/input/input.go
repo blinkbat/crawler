@@ -575,16 +575,6 @@ func DebugFleePressed() bool {
 	return rl.IsKeyPressed(rl.KeyBackspace) || padPressed(rl.GamepadButtonMiddleLeft) // Select / Share
 }
 
-func TurnLeftPressed() bool {
-	return rl.IsKeyPressed(rl.KeyLeft) || rl.IsKeyPressed(rl.KeyQ) ||
-		padPressed(rl.GamepadButtonLeftTrigger1) // LB
-}
-
-func TurnRightPressed() bool {
-	return rl.IsKeyPressed(rl.KeyRight) || rl.IsKeyPressed(rl.KeyE) ||
-		padPressed(rl.GamepadButtonRightTrigger1) // RB
-}
-
 // Held movement predicates: the level (key/button-down, stick-leaned) reads of
 // the four step directions and two turns. The exploration update gates the
 // move switch on the player being idle (animation finished), so a held key

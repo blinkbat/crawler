@@ -95,6 +95,12 @@ func drawDwindlingTimerStrip(drawX, y, barW, barH, remaining float32) {
 	if remaining < 0 {
 		remaining = 0
 	}
+	if remaining > 1 {
+		// Guard a pre-roll/intro caller passing 1-Progress() with a negative
+		// Progress(): without the upper clamp visW overruns the bar and stripX
+		// goes negative, drawing the strip wider than (and left of) the bar.
+		remaining = 1
+	}
 	stripH := float32(3)
 	stripY := y + barH + 10
 	stripCol := colorWithAlpha(seqOkColor, 230)

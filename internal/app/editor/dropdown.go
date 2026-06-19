@@ -364,6 +364,12 @@ type dropdownLayout struct {
 // same single-source discipline the modal button helpers use.
 func computeDropdownLayout(s *State, entries []dropdownEntry) dropdownLayout {
 	n := len(entries)
+	if n == 0 {
+		// No entries → no rows. Forcing visible up to 1 here would build a row
+		// rect for a zero-length slice; a hit-test/draw loop indexing entries[0]
+		// would then panic. Live callers guard len==0, but stay safe in isolation.
+		return dropdownLayout{panel: s.dropdown.anchor}
+	}
 	visible := n
 	if visible > dropdownMaxRows {
 		visible = dropdownMaxRows
