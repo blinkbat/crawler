@@ -583,7 +583,7 @@ func isDecorFootprintTail(c byte) bool {
 // pre-resolved. `x, z` are the tile coords so handlers can seed
 // per-tile shape variance (canopy fullness, scale jitter, tint walk)
 // from `tileHash(x, z)` without rederiving coordinates from `center`.
-type inlinePropRenderer func(assets Resources, m core.AreaDefinition, x, z int, center rl.Vector3, propYaw float32)
+type inlinePropRenderer func(assets Resources, m *core.AreaDefinition, x, z int, center rl.Vector3, propYaw float32)
 
 // inlinePropHandlers is the SINGLE source of truth for inline prop
 // dispatch — both world.go's drawWorld switch and assertPropCoverage

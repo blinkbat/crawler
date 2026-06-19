@@ -703,7 +703,7 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 		drawItemMenuList(g, assets, contentX, subY)
 	case core.ActionSkillMenu:
 		drawEngravedText(assets.hudFont, "Skills", float32(contentX), float32(contentY), FontHeading, textPrimary)
-		drawSkillMenuList(g, assets, contentX, subY, member)
+		drawSkillMenuList(g, assets, contentX, subY)
 	case core.ActionItemTarget:
 		itemName := core.ItemInfo(g.Battle.PendingItem).Name
 		targetName := "Ally"
@@ -949,17 +949,13 @@ func drawActionIconFlee(cx, cy, r float32, col rl.Color) {
 
 // drawSkillMenuList renders the skill submenu — one row per learned
 // skill with the MP cost on the right. Mirrors drawItemMenuList so the
-// two submenus read as the same widget family.
-// skillMenuSkillsBuf is the reused scratch slice for the in-battle skill
-// picker's learned-skill list — refilled each frame the menu is up via
-// LearnedSkillsInto instead of allocating a fresh slice + map, mirroring
-// itemMenuStacksBuf.
-var skillMenuSkillsBuf []core.SkillID
-
-func drawSkillMenuList(g *core.GameState, assets Resources, x, y int32, member core.PartyMember) {
+// two submenus read as the same widget family. The list itself is built
+// by the battle update path into g.Battle.SkillMenuList (the same frame,
+// before this draw); reading it here avoids re-walking the skill tree a
+// second time.
+func drawSkillMenuList(g *core.GameState, assets Resources, x, y int32) {
 	rowSpacing := int32(32)
-	skillMenuSkillsBuf = core.LearnedSkillsInto(&member, skillMenuSkillsBuf)
-	skills := skillMenuSkillsBuf
+	skills := g.Battle.SkillMenuList
 	if len(skills) == 0 {
 		drawTextWithShadow(assets.hudFont, "(no skills)", float32(x), float32(y), FontSmall, textDim)
 		return
@@ -977,19 +973,16 @@ func drawSkillMenuList(g *core.GameState, assets Resources, x, y int32, member c
 // drawItemMenuList renders the inventory picker as a vertical list of
 // "Name x Count" rows with the highlighted entry tinted by the selection
 // border. Empty inventory falls through to a single "(no items)" hint row
-// so the panel doesn't look broken if the player gets here somehow.
-// itemMenuStacksBuf is the reused scratch slice for the in-battle item
-// picker's live-consumable list — refilled each frame the menu is up
-// instead of allocating fresh. Filtered to consumables so it lines up
-// with updateItemMenu's LiveConsumables (equipment isn't usable in combat).
-var itemMenuStacksBuf []core.ItemStack
-
+// so the panel doesn't look broken if the player gets here somehow. The
+// live-consumable list is built by the battle update path into
+// g.Battle.ItemMenuList (the same frame, before this draw); reading it here
+// avoids a second inventory scan. Filtered to consumables there so it lines
+// up with updateItemMenu's picker (equipment isn't usable in combat).
 func drawItemMenuList(g *core.GameState, assets Resources, x, y int32) {
 	// 32 (not 28) so each row's "key" plate (actionRowH=32, drawn by
 	// drawActionRow) has clearance and the plates don't overlap.
 	rowSpacing := int32(32)
-	itemMenuStacksBuf = core.LiveConsumablesInto(g.Inventory, itemMenuStacksBuf)
-	living := itemMenuStacksBuf
+	living := g.Battle.ItemMenuList
 	if len(living) == 0 {
 		drawTextWithShadow(assets.hudFont, "(no items)", float32(x), float32(y), FontSmall, textDim)
 		return

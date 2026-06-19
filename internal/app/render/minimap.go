@@ -65,6 +65,9 @@ func drawMinimap(m *core.AreaDefinition, g *core.GameState, assets Resources) {
 	drawMinimapGridBacking(gridX, gridY, gridSize)
 	drawMinimapTimeOfDay(assets.hudFont, g.StepCount, pad+14, footerY, panelW-28)
 
+	// One MaterialIsIndoor lookup for the whole grid (a per-area constant),
+	// passed into each cell rather than recomputed per cell.
+	indoor := core.MaterialIsIndoor(m.Materials)
 	for localZ := int32(0); localZ < viewCells; localZ++ {
 		for localX := int32(0); localX < viewCells; localX++ {
 			mapX := startX + int(localX)
@@ -74,7 +77,7 @@ func drawMinimap(m *core.AreaDefinition, g *core.GameState, assets Resources) {
 			// the minimap is strictly "what you've walked on" until a
 			// step lands the tile inside the reveal radius. Shared fog
 			// rule with the panels Map tab via mapCellFillColor.
-			col := mapCellFillColor(m, g, mapX, mapZ)
+			col := mapCellFillColor(m, g, indoor, mapX, mapZ)
 			rl.DrawRectangle(gridX+localX*cell, gridY+localZ*cell, cell-1, cell-1, col)
 		}
 	}
@@ -180,9 +183,10 @@ func init() {
 			panic("render/minimap: minimapPropColors has color for '" + string(c) + "' which is not a core prop tile — remove it or add it to core.PropTileChars")
 		}
 	}
+	fieldIndoor := core.MaterialIsIndoor(core.MaterialField)
 	for _, c := range core.BlockingFloorChars() {
-		col := minimapTileColor(core.MaterialField, c)
-		fallback := minimapTileColor(core.MaterialField, core.TileOpen)
+		col := minimapTileColor(fieldIndoor, c)
+		fallback := minimapTileColor(fieldIndoor, core.TileOpen)
 		if col == fallback {
 			panic("render/minimap: blocking floor tile '" + string(c) + "' falls through to the open-tile color — add an explicit case in minimapTileColor")
 		}
@@ -225,6 +229,24 @@ var minimapPropColors = map[byte]rl.Color{
 	core.TilePropGrassTuft:     rl.NewColor(140, 178, 108, 240),
 }
 
+// minimapPropColorTable / minimapPropColorPresent mirror minimapPropColors into
+// a [256] array indexed by tile char, built once at init. The corner minimap
+// recolors viewCells×viewCells cells every frame (and the Map tab the whole
+// grid), so the per-cell lookup runs hundreds of times a frame — array indexing
+// skips the map hash, matching the inlinePropTable / faceVariantTable pattern
+// used elsewhere in the renderer. minimapPropColors stays the authored source of
+// truth (the init coverage checks read it); this is a generated read cache.
+var minimapPropColorTable, minimapPropColorPresent = buildMinimapPropColorTable()
+
+func buildMinimapPropColorTable() ([256]rl.Color, [256]bool) {
+	var t [256]rl.Color
+	var p [256]bool
+	for c, col := range minimapPropColors {
+		t[c], p[c] = col, true
+	}
+	return t, p
+}
+
 // minimapTileColor maps a composed tile char (from AreaDefinition.TileAt)
 // to its 2D-map swatch, following a strict legibility convention:
 // WALKABLE tiles are DARK and BLOCKING tiles (walls, deep water, props)
@@ -250,8 +272,10 @@ var (
 	minimapFloorOutdoor = rl.NewColor(38, 56, 40, 235)
 )
 
-func minimapTileColor(material core.MaterialSet, tile byte) color.RGBA {
-	indoor := core.MaterialIsIndoor(material)
+// minimapTileColor maps a tile char to its swatch. `indoor` is the area's
+// MaterialIsIndoor verdict, hoisted to the caller so the per-cell loop computes
+// it once per draw rather than re-running findMaterialDef for every cell.
+func minimapTileColor(indoor bool, tile byte) color.RGBA {
 	switch {
 	case tile == core.TileRock:
 		if indoor {
@@ -261,10 +285,10 @@ func minimapTileColor(material core.MaterialSet, tile byte) color.RGBA {
 	case tile == core.FloorDeepWater:
 		return minimapDeepWater
 	}
-	if col, ok := minimapPropColors[tile]; ok {
+	if minimapPropColorPresent[tile] {
 		// Props block; their identity hues all sit lighter than the dark
 		// walkable floor below, so they read as "stuff in the way."
-		return col
+		return minimapPropColorTable[tile]
 	}
 	if indoor {
 		return minimapFloorIndoor

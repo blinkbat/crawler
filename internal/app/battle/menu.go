@@ -8,16 +8,6 @@ import (
 	"slices"
 )
 
-// skillMenuBuf / itemMenuBuf are reused scratch slices for the skill and
-// item submenus, refilled each frame the menu is open (via the *Into
-// buffer-reusing helpers) instead of allocating a fresh list — and a map,
-// in the skill case — every frame. Mirror render's itemMenuStacksBuf. Only
-// valid for the duration of the frame they're filled; never aliased.
-var (
-	skillMenuBuf []core.SkillID
-	itemMenuBuf  []core.ItemStack
-)
-
 func updateActionMenu(g *core.GameState) {
 	// Debug easy-quit: bail out of the fight entirely. Only live when the
 	// debug toggle is on, so normal play has no flee shortcut here.
@@ -55,6 +45,7 @@ func updateActionMenu(g *core.GameState) {
 		}
 		g.Battle.ActionMode = core.ActionItemMenu
 		g.Battle.ItemMenuIndex = 0
+		refreshItemMenuBuf(g)
 		setBattleStatus(g, "Choose an item.")
 		return
 	case core.ActionRowSkill:
@@ -105,10 +96,19 @@ func currentMember(g *core.GameState) (*core.PartyMember, bool) {
 // this so the two can't diverge on which list they show.
 func refreshSkillMenuBuf(g *core.GameState, member *core.PartyMember) {
 	if g.DebugAllSkills {
-		skillMenuBuf = core.PlayerCastableSkillsInto(skillMenuBuf)
+		g.Battle.SkillMenuList = core.PlayerCastableSkillsInto(g.Battle.SkillMenuList)
 		return
 	}
-	skillMenuBuf = core.LearnedSkillsInto(member, skillMenuBuf)
+	g.Battle.SkillMenuList = core.LearnedSkillsInto(member, g.Battle.SkillMenuList)
+}
+
+// refreshItemMenuBuf repopulates the shared item-menu list with the live
+// consumable stacks — the battle Item picker's eligible set. Called on the
+// frame the menu opens (so the renderer has the list before updateItemMenu
+// first runs the following frame) and each frame it stays open, mirroring
+// refreshSkillMenuBuf.
+func refreshItemMenuBuf(g *core.GameState) {
+	g.Battle.ItemMenuList = core.LiveConsumablesInto(g.Inventory, g.Battle.ItemMenuList)
 }
 
 func openSkillMenu(g *core.GameState) {
@@ -118,7 +118,7 @@ func openSkillMenu(g *core.GameState) {
 	}
 	idx := member.SkillCursor
 	refreshSkillMenuBuf(g, member)
-	if idx < 0 || idx >= len(skillMenuBuf) {
+	if idx < 0 || idx >= len(g.Battle.SkillMenuList) {
 		idx = 0
 	}
 	g.Battle.SkillMenuIndex = idx
@@ -137,7 +137,7 @@ func updateSkillMenu(g *core.GameState) {
 		return
 	}
 	refreshSkillMenuBuf(g, member)
-	skills := skillMenuBuf
+	skills := g.Battle.SkillMenuList
 	if len(skills) == 0 {
 		resetBattleAction(g)
 		setBattleStatus(g, msgNoSkillReady)
@@ -189,8 +189,8 @@ func updateSkillMenu(g *core.GameState) {
 // to ally-target selection. Items only heal allies for now, so target mode
 // is always party.
 func updateItemMenu(g *core.GameState) {
-	itemMenuBuf = core.LiveConsumablesInto(g.Inventory, itemMenuBuf)
-	living := itemMenuBuf
+	refreshItemMenuBuf(g)
+	living := g.Battle.ItemMenuList
 	count := len(living)
 	if count == 0 {
 		// Inventory ran dry between opening the menu and now — not actually
@@ -255,6 +255,7 @@ func updateItemTarget(g *core.GameState) {
 // action menu — target-back cancels the target selection, not the whole action.
 func cancelTargetToItemMenu(g *core.GameState) {
 	g.Battle.ActionMode = core.ActionItemMenu
+	refreshItemMenuBuf(g)
 	setBattleStatus(g, "Choose an item.")
 }
 

@@ -1403,6 +1403,17 @@ type Battle struct {
 	// Persisted on the member as SkillCursor on confirm so the next
 	// turn's submenu opens on whichever skill they last picked.
 	SkillMenuIndex int
+	// SkillMenuList / ItemMenuList are the per-turn scratch lists backing the
+	// skill and item submenus — the learned-skill set (or every player-castable
+	// skill, in the debug all-skills mode) and the live-consumable set. Filled by
+	// the battle update path (refreshSkillMenuBuf / refreshItemMenuBuf) on the
+	// frame each submenu opens and refilled each frame it stays open, so the
+	// renderer can read them straight instead of re-walking the skill tree /
+	// re-scanning the inventory a second time the same frame. Reused buffers,
+	// never aliased; valid only for the frame they're filled. Not serialized —
+	// battle state never persists across a save/transition.
+	SkillMenuList []SkillID
+	ItemMenuList  []ItemStack
 
 	// Spoils + the two timers below drive the post-victory spoils screen
 	// (render/victory.go). Spoils is the before/after snapshot winBattle

@@ -1350,6 +1350,9 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 	mapX := body.X + (body.Width-float32(cellsX)*cellPx)/2
 	mapY := body.Y + (body.Height-float32(cellsY)*cellPx)/2
 
+	// One MaterialIsIndoor lookup for the whole grid (it's a per-area constant),
+	// passed into each cell rather than recomputed per cell.
+	indoor := core.MaterialIsIndoor(m.Materials)
 	for localZ := 0; localZ < cellsY; localZ++ {
 		for localX := 0; localX < cellsX; localX++ {
 			mx := startX + localX
@@ -1376,7 +1379,7 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 			// tiles show their material color. Shared fog rule with the
 			// corner minimap via mapCellFillColor so the two map surfaces
 			// can't drift on what lifts the fog.
-			rl.DrawRectangle(px, py, pw, ph, mapCellFillColor(m, g, mx, mz))
+			rl.DrawRectangle(px, py, pw, ph, mapCellFillColor(m, g, indoor, mx, mz))
 		}
 	}
 
@@ -1560,17 +1563,21 @@ func visitedAt(g *core.GameState, x, z int) bool {
 // mapCellFillColor takes the area by pointer: the minimap calls it once per cell
 // (viewCells² per frame) and the Map tab once per visible cell, so copying the
 // large AreaDefinition struct header per call would dominate the loop.
-func mapCellFillColor(m *core.AreaDefinition, g *core.GameState, x, z int) rl.Color {
+// mapCellFillColor resolves one tile's map swatch. `indoor` is the area's
+// MaterialIsIndoor verdict, passed in so the per-cell callers (the corner
+// minimap loop and the Map-tab grid) compute it once per draw instead of
+// per cell.
+func mapCellFillColor(m *core.AreaDefinition, g *core.GameState, indoor bool, x, z int) rl.Color {
 	if m.InBounds(x, z) && visitedAt(g, x, z) {
 		// Walls are elevation now: a tile raised above the walkable baseline
 		// reads as a wall/cliff on the map (matches the editor overview).
 		if m.ElevationLevelAt(x, z) > core.ElevationBaseline {
-			if core.MaterialIsIndoor(m.Materials) {
+			if indoor {
 				return minimapWallIndoor
 			}
 			return minimapWallOutdoor
 		}
-		return minimapTileColor(m.Materials, m.TileAt(x, z))
+		return minimapTileColor(indoor, m.TileAt(x, z))
 	}
 	return mapTileFogColor
 }

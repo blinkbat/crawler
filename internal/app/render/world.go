@@ -531,12 +531,12 @@ func DrawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 // material, not switchable via BeginShaderMode), but the redundant CPU lighting
 // re-setup and the torch grid-scan are elided.
 func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnly bool) {
-	m := g.Area
+	m := &g.Area
 	material := assets.worldMaterial(m.Materials)
 	var profile lightingProfile
 	var torches []torchLight
 	if !depthOnly {
-		profile = applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(g.StepCount), areaIsEnclosed(&m))
+		profile = applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(g.StepCount), areaIsEnclosed(m))
 		cacheLightingProfile(profile)
 		assets.lighting.applyUniforms(camera, profile)
 		// Torch point lights — collect the brazier props nearest the
@@ -544,7 +544,7 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 		// walls / floors / props pick up the warm pools of light. Must
 		// run after applyUniforms (same shader) and before the tile
 		// loop's BeginShaderMode draws.
-		torches = collectTorches(&m, camera)
+		torches = collectTorches(m, camera)
 		assets.lighting.uploadTorches(torches)
 	}
 
@@ -569,7 +569,7 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 	// which previously decoded each tile's level ~5× per pass. The loop and the
 	// cliff-face pass then read plain ints/bytes from this grid.
 	gw, gh := m.Width, m.Height
-	grid := elevGrid(&m, gw, gh)
+	grid := elevGrid(m, gw, gh)
 
 	rl.BeginShaderMode(assets.lighting.shader)
 	for z := 0; z < m.Height; z++ {
@@ -606,7 +606,7 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 				// Voxel path: floors on every standable surface, side faces per
 				// solid run, and floating-cube undersides. Only gapped maps take
 				// this branch — heightfields keep the original path below.
-				n := drawVoxelColumn(camPos, material, assets, &m, x, z, cx, cz)
+				n := drawVoxelColumn(camPos, material, assets, m, x, z, cx, cz)
 				if logActive {
 					stats.FloorsDrawn++
 					stats.WallsDrawn += n
@@ -618,7 +618,7 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 				}
 				// Cliff faces for every edge where this tile sits above its
 				// neighbour (or the map edge). Counted as WallsDrawn for the log.
-				if n := drawCliffFaces(camPos, material, assets, &m, grid, gw, gh, x, z, cx, cz, te.level, te.ramp); logActive {
+				if n := drawCliffFaces(camPos, material, assets, grid, gw, gh, x, z, cx, cz, te.level, te.ramp); logActive {
 					stats.WallsDrawn += n
 				}
 			}
@@ -757,6 +757,13 @@ type tileElev struct {
 	level int
 	ramp  int  // ascent facing, or core.NoRamp on a flat tile
 	skin  byte // cliff-face skin char (core.FaceSkinAt)
+	// faceSkins is the resolved cliff-face skin char per cardinal direction
+	// (index = direction constant N=0/E=1/S=2/W=3): the tile's per-direction
+	// override (FaceSkinForDir) when set, else its base skin. Cached here so the
+	// per-frame drawCliffFaces reads a byte instead of re-scanning the whole
+	// FaceOverrides slice for every exposed edge every frame on maps that use
+	// face overrides — the linear scan now runs once per area at decode time.
+	faceSkins [4]byte
 	// decorLevel / propLevel are the surfaces decor and props anchor to
 	// (DecorLevelAt / PropLevelAt). Cached here because on a VOXEL map an
 	// auto-level tile resolves through LowestStandableLevel — an O(stackHeight)
@@ -789,21 +796,32 @@ var elevGridKey struct {
 	hash          uint64
 }
 
-// layersHash folds the bytes of the given layers into one FNV-1a digest — the
-// content fingerprint elevGridKey validates against. Allocation-free; row and
-// layer separators keep ragged splits ([{"ab"},{"c"}] vs [{"a"},{"bc"}]) from
-// colliding.
-func layersHash(layers ...[]string) uint64 {
+// fnvOffsetBasis is the FNV-1a 64-bit offset basis the layer hash seeds from.
+const fnvOffsetBasis = uint64(1469598103934665603)
+
+// foldLayer folds one grid layer's bytes into the running FNV-1a digest h, with
+// a per-row separator and a trailing layer separator so ragged splits
+// ([{"ab"},{"c"}] vs [{"a"},{"bc"}]) can't collide. Pulled out of layersHash so
+// elevGrid can fold the heightfield layers plus every Solids plane in sequence
+// without allocating a wrapper [][]string each frame just to pass them
+// variadically. Allocation-free.
+func foldLayer(h uint64, layer []string) uint64 {
 	const prime = 1099511628211
-	h := uint64(1469598103934665603)
-	for _, layer := range layers {
-		for _, row := range layer {
-			for i := 0; i < len(row); i++ {
-				h = (h ^ uint64(row[i])) * prime
-			}
-			h = (h ^ 0xff) * prime // row separator
+	for _, row := range layer {
+		for i := 0; i < len(row); i++ {
+			h = (h ^ uint64(row[i])) * prime
 		}
-		h = (h ^ 0xfe) * prime // layer separator
+		h = (h ^ 0xff) * prime // row separator
+	}
+	return (h ^ 0xfe) * prime // layer separator
+}
+
+// layersHash folds the bytes of the given layers into one FNV-1a digest — the
+// content fingerprint elevGridKey validates against. Allocation-free.
+func layersHash(layers ...[]string) uint64 {
+	h := fnvOffsetBasis
+	for _, layer := range layers {
+		h = foldLayer(h, layer)
 	}
 	return h
 }
@@ -813,7 +831,12 @@ func layersHash(layers ...[]string) uint64 {
 func elevGrid(m *core.AreaDefinition, w, h int) []tileElev {
 	// Hash Floor/Elevation/Walls (the heightfield inputs) plus every Solids
 	// plane, so a runtime edit to the voxel stack invalidates the cache too.
-	hash := layersHash(append([][]string{m.Floor, m.Elevation, m.Walls}, m.Solids...)...)
+	// Folded in sequence (no wrapper slice) so the per-frame validity check
+	// allocates nothing.
+	hash := foldLayer(foldLayer(foldLayer(fnvOffsetBasis, m.Floor), m.Elevation), m.Walls)
+	for _, plane := range m.Solids {
+		hash = foldLayer(hash, plane)
+	}
 	k := &elevGridKey
 	if k.primed && k.name == m.Name && k.width == w && k.height == h &&
 		k.hash == hash && cap(elevGridBuf) >= w*h {
@@ -830,10 +853,20 @@ func elevGrid(m *core.AreaDefinition, w, h int) []tileElev {
 			if f, ok := m.RampAt(x, z); ok {
 				ramp = f
 			}
+			// Resolve each cardinal face's skin once here (override-or-base) so the
+			// per-frame cliff pass never re-scans FaceOverrides. Direction index
+			// matches the constants (N=0/E=1/S=2/W=3); FaceSkinForDir falls back to
+			// the base skin when there's no override, so flat/un-overridden tiles
+			// just carry their base skin on every face.
+			var faces [4]byte
+			for d := 0; d < 4; d++ {
+				faces[d] = m.FaceSkinForDir(x, z, d)
+			}
 			elevGridBuf[z*w+x] = tileElev{
 				level:      m.ElevationLevelAt(x, z),
 				ramp:       ramp,
 				skin:       m.FaceSkinAt(x, z),
+				faceSkins:  faces,
 				decorLevel: m.DecorLevelAt(x, z),
 				propLevel:  m.PropLevelAt(x, z),
 			}
@@ -843,7 +876,7 @@ func elevGrid(m *core.AreaDefinition, w, h int) []tileElev {
 	return elevGridBuf
 }
 
-func drawCliffFaces(camPos rl.Vector3, material worldMaterialResources, assets Resources, m *core.AreaDefinition, grid []tileElev, w, h, x, z int, cx, cz float32, myLevel, myRamp int) int {
+func drawCliffFaces(camPos rl.Vector3, material worldMaterialResources, assets Resources, grid []tileElev, w, h, x, z int, cx, cz float32, myLevel, myRamp int) int {
 	if myRamp != core.NoRamp {
 		return 0 // the ramp wedge supplies its own faces
 	}
@@ -882,11 +915,11 @@ func drawCliffFaces(camPos rl.Vector3, material worldMaterialResources, assets R
 		if myLevel <= nLevel {
 			continue
 		}
-		// Per-DIRECTION skin: this edge's override (FaceSkinForDir) or the tile's
-		// base skin. Resolved only for a face actually drawn, so flat / interior
-		// tiles still pay no lookup.
+		// Per-DIRECTION skin: this edge's override or the tile's base skin, both
+		// resolved once at decode into the grid's faceSkins, so the per-frame draw
+		// reads a byte instead of re-scanning FaceOverrides for every exposed edge.
 		skin := material.faceModel
-		if sc := m.FaceSkinForDir(x, z, d); assets.faceVariantTable.present[sc] {
+		if sc := grid[z*w+x].faceSkins[d]; assets.faceVariantTable.present[sc] {
 			skin = assets.faceVariantTable.model[sc]
 		}
 		drawCliffFace(skin, cx, core.ElevationWorldY(nLevel), cz, faceYaw(d), float32(myLevel-nLevel))
@@ -1030,7 +1063,7 @@ var treePropScales = map[byte]float32{
 // no longer reads as a stamped grid.
 func drawPropTreeScaled(char byte) inlinePropRenderer {
 	scale := treePropScales[char]
-	return func(assets Resources, _ core.AreaDefinition, x, z int, center rl.Vector3, propYaw float32) {
+	return func(assets Resources, _ *core.AreaDefinition, x, z int, center rl.Vector3, propYaw float32) {
 		// Tree shadow scales with the tree's overall scale, plus
 		// a touch of slack so the painted disc sits a little wider
 		// than the trunk's projected footprint.
@@ -1045,7 +1078,7 @@ func drawPropTreeScaled(char byte) inlinePropRenderer {
 // younger one beside it" rather than a mirrored pair. Yaw is staggered
 // and each gets its own variance seed. Pure visual variant — both
 // reuse assets.tree.
-func drawPropTreeTwin(assets Resources, _ core.AreaDefinition, x, z int, center rl.Vector3, propYaw float32) {
+func drawPropTreeTwin(assets Resources, _ *core.AreaDefinition, x, z int, center rl.Vector3, propYaw float32) {
 	const offset = 0.32
 	const scaleBig = 0.82
 	const scaleSmall = 0.58
@@ -1063,12 +1096,12 @@ func drawPropTreeTwin(assets Resources, _ core.AreaDefinition, x, z int, center 
 	}
 }
 
-func drawPropRockLarge(assets Resources, _ core.AreaDefinition, _, _ int, center rl.Vector3, propYaw float32) {
+func drawPropRockLarge(assets Resources, _ *core.AreaDefinition, _, _ int, center rl.Vector3, propYaw float32) {
 	drawGroundShadowElev(center.X, center.Z, center.Y, 0.42)
 	assets.rockProp.draw(center, 1.0, propYaw)
 }
 
-func drawPropBushLarge(assets Resources, _ core.AreaDefinition, _, _ int, center rl.Vector3, propYaw float32) {
+func drawPropBushLarge(assets Resources, _ *core.AreaDefinition, _, _ int, center rl.Vector3, propYaw float32) {
 	drawGroundShadowElev(center.X, center.Z, center.Y, 0.48)
 	assets.bushProp.draw(center, 1.3, propYaw)
 }
@@ -1091,7 +1124,7 @@ const (
 // emissive flame made of a few jittering fire-tinted spheres. The
 // point light itself is added by collectTorches; this is purely the
 // visible fixture + flame. Non-blocking: the floor tile stays clear.
-func drawWallTorch(assets Resources, m core.AreaDefinition, x, z int, center rl.Vector3, _ float32) {
+func drawWallTorch(assets Resources, m *core.AreaDefinition, x, z int, center rl.Vector3, _ float32) {
 	fx, fz := wallTorchFacing(m, x, z)
 	// Mount point: against the wall behind the torch, up at sconce
 	// height. The torch faces (fx,fz) into the room, so the wall is
@@ -1149,8 +1182,8 @@ func drawWallTorch(assets Resources, m core.AreaDefinition, x, z int, center rl.
 // away from the first adjacent wall found, checked N→E→S→W. Falls
 // back to facing south (toward the camera's usual approach) when the
 // tile has no adjacent wall (a torch placed in the open).
-func wallTorchFacing(m core.AreaDefinition, x, z int) (float32, float32) {
-	if f, ok := core.FacingAwayFromAdjacentWall(m, x, z); ok {
+func wallTorchFacing(m *core.AreaDefinition, x, z int) (float32, float32) {
+	if f, ok := core.FacingAwayFromAdjacentWall(*m, x, z); ok {
 		dx, dz := core.FacingVector(f)
 		return float32(dx), float32(dz)
 	}
@@ -1376,7 +1409,7 @@ func rebuildTorchSites(m *core.AreaDefinition) {
 			} else {
 				// Wall torch: light originates at the sconce, offset
 				// toward the wall + up at flame height.
-				fx, fz := wallTorchFacing(*m, x, z)
+				fx, fz := wallTorchFacing(m, x, z)
 				pos = rl.NewVector3(cx-fx*wallTorchLightInset, elevY+wallTorchLightY, cz-fz*wallTorchLightInset)
 			}
 			torchSiteCache.sites = append(torchSiteCache.sites, torchSite{

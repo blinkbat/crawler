@@ -134,7 +134,7 @@ func drawObjectPreviewModel(assets Resources, item ObjectPreviewItem, center rl.
 	char := item.Char
 	if item.IsProp {
 		if handler := inlinePropTable[char]; handler != nil {
-			handler(assets, core.AreaDefinition{}, 0, 0, center, 0)
+			handler(assets, &core.AreaDefinition{}, 0, 0, center, 0)
 			return
 		}
 		if pm := &assets.propModelTable[char]; len(pm.parts) > 0 {
