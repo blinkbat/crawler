@@ -528,6 +528,13 @@ const (
 	// together.
 	ATBQueueSlotMultiplier = 4
 
+	// WebbedSpeedDivisor is the factor a Webbed actor's effective SPD is
+	// divided by for the turn-queue sort — "you still act, but the world
+	// gets ahead of you." Untyped so it divides an int SPD cleanly
+	// (battle's actorSpeed: spd /= core.WebbedSpeedDivisor). Sits with the
+	// ATB tunables since it only bites in the readiness ordering.
+	WebbedSpeedDivisor = 2
+
 	// BurnTickDamage is the per-turn damage applied to a burning actor at
 	// the start of their own turn. Flat so the strategic value of burn
 	// stays predictable across enemy HP scales.

@@ -193,40 +193,48 @@ func init() {
 	}
 }
 
+// minimapPropAlpha is the opacity every prop swatch shares; minimapStructAlpha
+// is the slightly-less-opaque alpha the structural wall/water/floor tones use.
+// Named so the repeated byte isn't hand-keyed across each NewColor entry.
+const (
+	minimapPropAlpha   uint8 = 240
+	minimapStructAlpha uint8 = 235
+)
+
 var minimapPropColors = map[byte]rl.Color{
-	core.TileTree:              rl.NewColor(42, 132, 56, 240),
-	core.TileTreeXL:            rl.NewColor(28, 102, 44, 240),
-	core.TileTreeTall:          rl.NewColor(36, 118, 50, 240),
-	core.TileTreeTwin:          rl.NewColor(40, 124, 58, 240),
-	core.TileTreeYoung:         rl.NewColor(96, 168, 88, 240),
-	core.TileRockLarge:         rl.NewColor(120, 116, 108, 240),
-	core.TileBushLarge:         rl.NewColor(110, 168, 92, 240),
-	core.TileCrate:             rl.NewColor(168, 122, 72, 240),
-	core.TileBarrel:            rl.NewColor(148, 100, 60, 240),
-	core.TileUrn:               rl.NewColor(186, 112, 72, 240),
-	core.TileStalagmite:        rl.NewColor(196, 188, 174, 240),
-	core.TilePillar:            rl.NewColor(214, 206, 188, 240),
-	core.TileBrokenPillar:      rl.NewColor(180, 172, 156, 240),
-	core.TileStatue:            rl.NewColor(228, 220, 204, 240),
-	core.TileObelisk:           rl.NewColor(86, 90, 104, 240),
-	core.TileFountain:          rl.NewColor(96, 158, 208, 240),
-	core.TileRockCairn:         rl.NewColor(150, 138, 116, 240),
-	core.TileRockFormation:     rl.NewColor(118, 102, 86, 240),
-	core.TileRockFormationTail: rl.NewColor(118, 102, 86, 240),
-	core.TileWell:              rl.NewColor(132, 138, 142, 240),
-	core.TileGravestone:        rl.NewColor(168, 162, 152, 240),
-	core.TileSignPost:          rl.NewColor(160, 110, 64, 240),
-	core.TileHayBale:           rl.NewColor(216, 184, 110, 240),
-	core.TileScarecrow:         rl.NewColor(196, 162, 96, 240),
-	core.TileBookshelf:         rl.NewColor(132, 90, 56, 240),
-	core.TileTable:             rl.NewColor(160, 116, 72, 240),
-	core.TileBed:               rl.NewColor(176, 90, 96, 240),
-	core.TileBrazier:           rl.NewColor(220, 132, 64, 240),
-	core.TileTorch:             rl.NewColor(240, 168, 96, 240),
-	core.TileSarcophagus:       rl.NewColor(200, 192, 174, 240),
-	core.TilePropExoticFlower:  rl.NewColor(206, 110, 170, 240),
-	core.TilePropTallFern:      rl.NewColor(90, 146, 86, 240),
-	core.TilePropGrassTuft:     rl.NewColor(140, 178, 108, 240),
+	core.TileTree:              rl.NewColor(42, 132, 56, minimapPropAlpha),
+	core.TileTreeXL:            rl.NewColor(28, 102, 44, minimapPropAlpha),
+	core.TileTreeTall:          rl.NewColor(36, 118, 50, minimapPropAlpha),
+	core.TileTreeTwin:          rl.NewColor(40, 124, 58, minimapPropAlpha),
+	core.TileTreeYoung:         rl.NewColor(96, 168, 88, minimapPropAlpha),
+	core.TileRockLarge:         rl.NewColor(120, 116, 108, minimapPropAlpha),
+	core.TileBushLarge:         rl.NewColor(110, 168, 92, minimapPropAlpha),
+	core.TileCrate:             rl.NewColor(168, 122, 72, minimapPropAlpha),
+	core.TileBarrel:            rl.NewColor(148, 100, 60, minimapPropAlpha),
+	core.TileUrn:               rl.NewColor(186, 112, 72, minimapPropAlpha),
+	core.TileStalagmite:        rl.NewColor(196, 188, 174, minimapPropAlpha),
+	core.TilePillar:            rl.NewColor(214, 206, 188, minimapPropAlpha),
+	core.TileBrokenPillar:      rl.NewColor(180, 172, 156, minimapPropAlpha),
+	core.TileStatue:            rl.NewColor(228, 220, 204, minimapPropAlpha),
+	core.TileObelisk:           rl.NewColor(86, 90, 104, minimapPropAlpha),
+	core.TileFountain:          rl.NewColor(96, 158, 208, minimapPropAlpha),
+	core.TileRockCairn:         rl.NewColor(150, 138, 116, minimapPropAlpha),
+	core.TileRockFormation:     rl.NewColor(118, 102, 86, minimapPropAlpha),
+	core.TileRockFormationTail: rl.NewColor(118, 102, 86, minimapPropAlpha),
+	core.TileWell:              rl.NewColor(132, 138, 142, minimapPropAlpha),
+	core.TileGravestone:        rl.NewColor(168, 162, 152, minimapPropAlpha),
+	core.TileSignPost:          rl.NewColor(160, 110, 64, minimapPropAlpha),
+	core.TileHayBale:           rl.NewColor(216, 184, 110, minimapPropAlpha),
+	core.TileScarecrow:         rl.NewColor(196, 162, 96, minimapPropAlpha),
+	core.TileBookshelf:         rl.NewColor(132, 90, 56, minimapPropAlpha),
+	core.TileTable:             rl.NewColor(160, 116, 72, minimapPropAlpha),
+	core.TileBed:               rl.NewColor(176, 90, 96, minimapPropAlpha),
+	core.TileBrazier:           rl.NewColor(220, 132, 64, minimapPropAlpha),
+	core.TileTorch:             rl.NewColor(240, 168, 96, minimapPropAlpha),
+	core.TileSarcophagus:       rl.NewColor(200, 192, 174, minimapPropAlpha),
+	core.TilePropExoticFlower:  rl.NewColor(206, 110, 170, minimapPropAlpha),
+	core.TilePropTallFern:      rl.NewColor(90, 146, 86, minimapPropAlpha),
+	core.TilePropGrassTuft:     rl.NewColor(140, 178, 108, minimapPropAlpha),
 }
 
 // minimapPropColorTable / minimapPropColorPresent mirror minimapPropColors into
@@ -265,11 +273,11 @@ func buildMinimapPropColorTable() ([256]rl.Color, [256]bool) {
 // tint so indoor vs outdoor still distinguish without lifting into blocker
 // brightness.
 var (
-	minimapWallIndoor   = rl.NewColor(178, 176, 168, 235)
-	minimapWallOutdoor  = rl.NewColor(160, 158, 150, 235)
-	minimapDeepWater    = rl.NewColor(122, 172, 216, 235)
-	minimapFloorIndoor  = rl.NewColor(44, 46, 52, 235)
-	minimapFloorOutdoor = rl.NewColor(38, 56, 40, 235)
+	minimapWallIndoor   = rl.NewColor(178, 176, 168, minimapStructAlpha)
+	minimapWallOutdoor  = rl.NewColor(160, 158, 150, minimapStructAlpha)
+	minimapDeepWater    = rl.NewColor(122, 172, 216, minimapStructAlpha)
+	minimapFloorIndoor  = rl.NewColor(44, 46, 52, minimapStructAlpha)
+	minimapFloorOutdoor = rl.NewColor(38, 56, 40, minimapStructAlpha)
 )
 
 // minimapTileColor maps a tile char to its swatch. `indoor` is the area's
@@ -284,16 +292,17 @@ func minimapTileColor(indoor bool, tile byte) color.RGBA {
 		return minimapWallOutdoor
 	case tile == core.FloorDeepWater:
 		return minimapDeepWater
+	default:
+		if minimapPropColorPresent[tile] {
+			// Props block; their identity hues all sit lighter than the dark
+			// walkable floor below, so they read as "stuff in the way."
+			return minimapPropColorTable[tile]
+		}
+		if indoor {
+			return minimapFloorIndoor
+		}
+		return minimapFloorOutdoor
 	}
-	if minimapPropColorPresent[tile] {
-		// Props block; their identity hues all sit lighter than the dark
-		// walkable floor below, so they read as "stuff in the way."
-		return minimapPropColorTable[tile]
-	}
-	if indoor {
-		return minimapFloorIndoor
-	}
-	return minimapFloorOutdoor
 }
 
 // drawMinimapTimeOfDay paints the day/night cycle indicator under the

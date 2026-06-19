@@ -207,17 +207,7 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 	// Gizmos are Layout-tab authoring aids; the Asset tab hides them so the bare
 	// sprite (and its baked tint / pixelation) reads clean.
 	if showGizmos {
-		pAnchor := cameraRelativeOffset(cam, foeAnchor, v.particleXOffset, v.particleYOffset, v.particleZOffset)
-		drawAnchorGizmo(pAnchor, 0.16*v.effectiveParticleScale(), gizmoParticleColor)
-		gAnchor := cameraRelativeOffset(cam, foeAnchor, v.glyphXOffset, v.glyphYOffset, 0)
-		gAnchor.Y += hitGlyphRise
-		drawAnchorGizmo(gAnchor, 0.13*v.effectiveGlyphScale(), gizmoGlyphColor)
-		// Gold gizmo = floating damage-NUMBER spawn (Num X/Y). popupWorldRise
-		// matches the baked rise drawFloatingDamage adds, so the dot sits where
-		// the number does.
-		nAnchor := cameraRelativeOffset(cam, foeAnchor, v.popupXOffset, v.popupYOffset, 0)
-		nAnchor.Y += popupWorldRise
-		drawAnchorGizmo(nAnchor, 0.10, gizmoNumberColor)
+		drawPreviewGizmos(cam, v)
 	}
 
 	rl.EndMode3D()
@@ -229,6 +219,24 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 		rl.NewRectangle(0, 0, float32(w), -float32(h)),
 		rl.NewVector2(rect.X, rect.Y),
 		rl.White)
+}
+
+// drawPreviewGizmos paints the three authoring anchor gizmos shared by the Foe
+// and Party visualizers: the particle-burst origin (orange), the hit-glyph anchor
+// (cyan), and the floating damage-number spawn (gold). Each is nudged + sized by
+// the same override fields and helpers (cameraRelativeOffset, hitGlyphRise,
+// popupWorldRise, effective*Scale) the live battle VFX path uses, so what reads
+// in the diorama reads in an encounter. Anchored at foeAnchor to match the battle
+// VFX origin. The per-file chevron/marker painters stay separate.
+func drawPreviewGizmos(cam rl.Camera3D, v enemyVisual) {
+	pAnchor := cameraRelativeOffset(cam, foeAnchor, v.particleXOffset, v.particleYOffset, v.particleZOffset)
+	drawAnchorGizmo(pAnchor, 0.16*v.effectiveParticleScale(), gizmoParticleColor)
+	gAnchor := cameraRelativeOffset(cam, foeAnchor, v.glyphXOffset, v.glyphYOffset, 0)
+	gAnchor.Y += hitGlyphRise
+	drawAnchorGizmo(gAnchor, 0.13*v.effectiveGlyphScale(), gizmoGlyphColor)
+	nAnchor := cameraRelativeOffset(cam, foeAnchor, v.popupXOffset, v.popupYOffset, 0)
+	nAnchor.Y += popupWorldRise
+	drawAnchorGizmo(nAnchor, 0.10, gizmoNumberColor)
 }
 
 // drawAnchorGizmo paints a small wireframe sphere at p, drawn depth-independent

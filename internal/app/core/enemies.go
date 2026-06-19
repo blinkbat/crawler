@@ -600,6 +600,14 @@ func TheEnemy(def EnemyDefinition) string {
 	return "The " + def.SingularNoun
 }
 
+// EnemyDisplayName returns the "The <noun>" battle-log display string for a
+// live enemy instance — TheEnemy of the instance's resolved EnemyInfoFor. The
+// one home for "name this specific enemy in a sentence" so the battle package
+// doesn't re-thread EnemyInfoFor through TheEnemy at each call site.
+func EnemyDisplayName(e *Enemy) string {
+	return TheEnemy(EnemyInfoFor(*e))
+}
+
 // ThePlural is TheEnemy's plural sibling: "The <plural>" for multi-enemy
 // phrasings. Kept alongside TheEnemy so a future per-enemy article override
 // ("Some Amoebae") changes both article forms in one place.

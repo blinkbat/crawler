@@ -317,8 +317,7 @@ func PlayResult(ok bool) {
 // falls back to its freshly-synthesized PCM so Play(cue) never
 // silently breaks even when the filesystem misbehaves.
 func loadBank() {
-	ensureBankOnDisk()
-	assigns := userconfig.LoadAssignments()
+	assigns := ensureBankOnDisk()
 	forEachCue(func(cue Sound, row soundCue) {
 		fileName, _ := resolveAssignedFile(assigns, row.Canonical)
 		bank[cue] = loadCueFromDisk(fileName, row.PCM)
@@ -331,7 +330,11 @@ func loadBank() {
 // row in the action map — no implicit "default" anywhere. Errors
 // (read-only filesystem, no permission) are swallowed because the
 // in-memory PCM fallback in loadCueFromDisk still covers playback.
-func ensureBankOnDisk() {
+//
+// Returns the (possibly backfilled) assignments map it loaded so the
+// caller can build the bank from it without re-reading assignments.txt
+// from disk a second time.
+func ensureBankOnDisk() map[string]string {
 	assigns := userconfig.LoadAssignments()
 	assignsChanged := false
 	forEachCue(func(_ Sound, row soundCue) {
@@ -354,6 +357,7 @@ func ensureBankOnDisk() {
 	if assignsChanged {
 		_ = userconfig.SaveAssignments(assigns)
 	}
+	return assigns
 }
 
 // readOrSynthSound resolves one cue's rl.Sound: it reads the named .wav

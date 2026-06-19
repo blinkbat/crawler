@@ -98,6 +98,22 @@ func oobErr(what string, x, z, w, h int) error {
 	return fmt.Errorf("%s at (%d,%d) is out of bounds for %dx%d", what, x, z, w, h)
 }
 
+// validateLayerDims checks a grid layer's row count and per-row width against
+// the declared w×h, returning a descriptive error on the first mismatch (nil
+// when sound). Shared by AreaFromMapFile's required- and optional-layer loops
+// so the dimension-check phrasing lives in one place.
+func validateLayerDims(name string, rows []string, w, h int) error {
+	if len(rows) != h {
+		return fmt.Errorf("%s layer has %d rows, declared height %d", name, len(rows), h)
+	}
+	for i, row := range rows {
+		if len(row) != w {
+			return fmt.Errorf("%s layer row %d has width %d, want %d", name, i, len(row), w)
+		}
+	}
+	return nil
+}
+
 // AreaFromMapFile is the converter half of LoadArea, exposed so the editor
 // can build a runnable area from in-memory edits without touching disk.
 func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
@@ -127,13 +143,8 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		{mapfile.SectionProps, mf.Props},
 	}
 	for _, layer := range layers {
-		if len(layer.rows) != mf.Height {
-			return AreaDefinition{}, fmt.Errorf("%s layer has %d rows, declared height %d", layer.name, len(layer.rows), mf.Height)
-		}
-		for i, row := range layer.rows {
-			if len(row) != mf.Width {
-				return AreaDefinition{}, fmt.Errorf("%s layer row %d has width %d, want %d", layer.name, i, len(row), mf.Width)
-			}
+		if err := validateLayerDims(layer.name, layer.rows, mf.Width, mf.Height); err != nil {
+			return AreaDefinition{}, err
 		}
 	}
 	// Ceiling / elevation are OPTIONAL — absent ones blank-fill below via
@@ -154,17 +165,12 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		if len(layer.rows) == 0 {
 			continue // absent — blank-filled at the bottom of this function
 		}
-		if len(layer.rows) != mf.Height {
-			return AreaDefinition{}, fmt.Errorf("%s layer has %d rows, declared height %d", layer.name, len(layer.rows), mf.Height)
-		}
-		for i, row := range layer.rows {
-			if len(row) != mf.Width {
-				return AreaDefinition{}, fmt.Errorf("%s layer row %d has width %d, want %d", layer.name, i, len(row), mf.Width)
-			}
+		if err := validateLayerDims(layer.name, layer.rows, mf.Width, mf.Height); err != nil {
+			return AreaDefinition{}, err
 		}
 	}
 	if !inBoundsWH(mf.StartX, mf.StartZ, mf.Width, mf.Height) {
-		return AreaDefinition{}, fmt.Errorf("start position (%d,%d) is out of bounds for %dx%d", mf.StartX, mf.StartZ, mf.Width, mf.Height)
+		return AreaDefinition{}, oobErr("start position", mf.StartX, mf.StartZ, mf.Width, mf.Height)
 	}
 	customs := make([]CustomEnemyDef, 0, len(mf.CustomEnemies))
 	for _, ce := range mf.CustomEnemies {

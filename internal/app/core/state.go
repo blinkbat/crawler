@@ -295,12 +295,7 @@ func DefaultEntranceCrystalSpawns(a AreaDefinition) []CrystalSpawn {
 	sx := clampStartCoord(a.StartTileX, a.Width)
 	sz := clampStartCoord(a.StartTileZ, a.Height)
 	isDoorTile := func(x, z int) bool {
-		for _, d := range a.DoorSpawns {
-			if d.TileX == x && d.TileZ == z {
-				return true
-			}
-		}
-		return false
+		return DoorSpawnIndexAt(a.DoorSpawns, x, z) >= 0
 	}
 	// Cardinal neighbour offsets, derived from FacingVector so the step
 	// deltas can't drift from the canonical facing convention (the same

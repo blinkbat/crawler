@@ -716,6 +716,10 @@ func footprintAnchor(center rl.Vector3, footprint []core.MultiTileOffset) rl.Vec
 // tiles meet flush without visible seams.
 func drawFloorTile(material worldMaterialResources, assets Resources, cell byte, x, z int, cx, cz, elevY float32) {
 	yaw := tileYawDeg(x, z)
+	// Floor slabs sit a hair below the tile's elevation height so they meet the
+	// cliff faces flush without z-fighting; one offset shared by all three slab
+	// draws below.
+	floorY := elevY - 0.03
 	// Ramp tiles draw a solid earth wedge (their Elevation cell is the LOW
 	// level, so elevY is the low edge height) instead of a flat floor slab.
 	if facing, ok := core.RampAscentFacing(cell); ok {
@@ -723,11 +727,11 @@ func drawFloorTile(material worldMaterialResources, assets Resources, cell byte,
 		return
 	}
 	if t := assets.specialFloorTable; t.present[cell] {
-		drawTileCube(t.model[cell], cx, -0.03+elevY, cz, yaw)
+		drawTileCube(t.model[cell], cx, floorY, cz, yaw)
 		return
 	}
 	if !material.hasFloorVariant {
-		drawTileCube(material.floorModel, cx, -0.03+elevY, cz, yaw)
+		drawTileCube(material.floorModel, cx, floorY, cz, yaw)
 		return
 	}
 	// All explicit floor chars (grass, dirt, dark grass, stone, cobble,
@@ -741,7 +745,7 @@ func drawFloorTile(material worldMaterialResources, assets Resources, cell byte,
 	case 2:
 		model = material.floorDarkModel
 	}
-	drawTileCube(model, cx, -0.03+elevY, cz, yaw)
+	drawTileCube(model, cx, floorY, cz, yaw)
 }
 
 // drawCliffFaces renders the vertical rock faces of tile (x,z) — one per

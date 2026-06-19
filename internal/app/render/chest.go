@@ -202,10 +202,7 @@ func DrawChestModal(g *core.GameState, assets Resources) {
 		if focused {
 			DrawSelectedRow(rowRect(rowY))
 		}
-		col := textMuted
-		if focused {
-			col = textPrimary
-		}
+		col := rowTextColor(focused, false, textMuted)
 		label := core.ItemInfo(st.Kind).Name + "  x" + strconv.Itoa(st.Count)
 		drawTextWithShadow(font, label, float32(rowX), float32(rowY), FontBody, col)
 		rowY += rowH
@@ -219,10 +216,7 @@ func DrawChestModal(g *core.GameState, assets Resources) {
 		if focused {
 			DrawSelectedRow(rowRect(rowY))
 		}
-		col := textMuted
-		if focused {
-			col = textPrimary
-		}
+		col := rowTextColor(focused, false, textMuted)
 		drawTextWithShadow(font, "Take All", float32(rowX), float32(rowY), FontBody, col)
 	}
 	drawModalFooterGlyphs(font, card, []HintSeg{

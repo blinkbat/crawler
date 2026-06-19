@@ -2433,7 +2433,7 @@ func tickEnemyBuffAfterTurn(g *core.GameState, actor core.ActorRef) {
 	// "shakes off the affliction" line only fired when the LAST debuff cleared,
 	// silently dropping feedback when one of several stacked debuffs expired.
 	for _, s := range expired {
-		setBattleMessage(g, fmt.Sprintf("%s's %s wears off.", core.TheEnemy(core.EnemyInfoFor(*enemy)), core.SkillName(s)))
+		setBattleMessage(g, fmt.Sprintf("%s's %s wears off.", core.EnemyDisplayName(enemy), core.SkillName(s)))
 	}
 }
 
@@ -2523,7 +2523,7 @@ func tickEnemyDoTAfterTurn(g *core.GameState, actor core.ActorRef, counterOf fun
 		return false
 	}
 	dealt, defeated := applyEnemyDoTTick(g, actor.Index, counter, tickDamage)
-	setBattleMessage(g, msg(core.TheEnemy(core.EnemyInfoFor(*enemy)), dealt, defeated))
+	setBattleMessage(g, msg(core.EnemyDisplayName(enemy), dealt, defeated))
 	return defeated
 }
 

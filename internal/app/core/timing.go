@@ -337,6 +337,13 @@ func randomizedPressWindow(rng *rand.Rand, minStart, maxStart, width, maxEnd flo
 	return
 }
 
+// chargePeakSweet is the charge peak window's midpoint — the "Excellent"
+// sweet spot. Computed once from the ChargePeakStart/End config consts and
+// read by both NewChargeState (to invert it into an elapsed SweetSpot) and
+// chargeGradeUpToPeak (to grade closeness), so the midpoint can't drift
+// between arm and grade.
+const chargePeakSweet = (ChargePeakStart + ChargePeakEnd) * 0.5
+
 // chargeSegments is the piecewise-linear curve mapping a charge bar's
 // elapsed-time fraction [0, 1] to its visual cursor fraction [0, 1].
 // Each row is the (visual, elapsed) breakpoint at the end of a segment;
@@ -432,7 +439,7 @@ func NewChargeState(duration float32) TimingState {
 		Duration:    duration,
 		WindowStart: ChargeElapsedForVisual(ChargePeakStart, duration),
 		WindowEnd:   ChargeElapsedForVisual(ChargePeakEnd, duration),
-		SweetSpot:   ChargeElapsedForVisual((ChargePeakStart+ChargePeakEnd)*0.5, duration),
+		SweetSpot:   ChargeElapsedForVisual(chargePeakSweet, duration),
 	}
 }
 
@@ -977,11 +984,7 @@ func chargeGradeUpToPeak(p float32) (grade int, pastPeak bool) {
 		return TimingQualityGood, false
 	case p <= ChargePeakEnd:
 		// In the peak window — split Great vs Excellent on sweet-spot proximity.
-		sweet := (ChargePeakStart + ChargePeakEnd) * 0.5
-		distance := p - sweet
-		if distance < 0 {
-			distance = -distance
-		}
+		distance := AbsF(p - chargePeakSweet)
 		windowSize := ChargePeakEnd - ChargePeakStart
 		if windowSize <= 0 || distance/windowSize <= ChargeExcellentBandFrac {
 			return TimingQualityExcellent, false
@@ -1029,16 +1032,22 @@ func (t *TimingState) resolveChargeKind() {
 // (that path quietly returns Nice).
 func (t *TimingState) resolveInWindow(start, end, sweet float32) {
 	t.Resolved = true
-	distance := t.Elapsed - sweet
-	if distance < 0 {
-		distance = -distance
-	}
+	t.Quality = gradeWindow(t.Elapsed, start, end, sweet)
+}
+
+// gradeWindow grades a cursor at `elapsed` against a press acceptance window
+// [start, end] with its sweet spot at `sweet`: distance from the sweet spot,
+// normalized by the window width, picks a grade off pressGradeBands. A
+// non-positive window width returns Nice (the degenerate zero-width case the
+// callers' window-membership gate should make unreachable). Shared by
+// resolveInWindow (writes the result) and PreviewQuality (returns it) so the
+// live preview and the scored grade can't desync.
+func gradeWindow(elapsed, start, end, sweet float32) int {
 	windowSize := end - start
 	if windowSize <= 0 {
-		t.Quality = TimingQualityNice
-		return
+		return TimingQualityNice
 	}
-	t.Quality = gradeFromRatio(distance / windowSize)
+	return gradeFromRatio(AbsF(elapsed-sweet) / windowSize)
 }
 
 // Progress returns the current sweep position in [0, 1]. For charge bars
@@ -1061,14 +1070,23 @@ func (t TimingState) Progress() float32 {
 	return p
 }
 
+// timingGradeAt returns the timingGrades row for a quality, falling back to
+// the Miss row for any out-of-range index. Single home for the bounds guard
+// the grade readers (TimingBonusMult, TimingDefenseMult, HitStopFor,
+// CombatShakeFor, TimingQualityLabel) all share. timingGrades' element is an
+// anonymous struct (config.go), so this returns it via the slice index type.
+func timingGradeAt(quality int) int {
+	if quality < 0 || quality >= len(timingGrades) {
+		return TimingQualityMiss
+	}
+	return quality
+}
+
 // TimingBonusMult is the offensive damage multiplier for an attack quality.
 // Indexes into timingGrades (config.go); out-of-range qualities fall back
 // to the Miss multiplier (1.0×).
 func TimingBonusMult(quality int) float32 {
-	if quality < 0 || quality >= len(timingGrades) {
-		return timingGrades[TimingQualityMiss].Atk
-	}
-	return timingGrades[quality].Atk
+	return timingGrades[timingGradeAt(quality)].Atk
 }
 
 // QualityScaledChance scales a base probability by the timing-quality
@@ -1077,10 +1095,7 @@ func TimingBonusMult(quality int) float32 {
 // status-proc and steal-success rolls.
 func QualityScaledChance(base float64, quality int) float64 {
 	c := base * float64(TimingBonusMult(quality))
-	if c > 1 {
-		c = 1
-	}
-	return c
+	return Clamp(c, 0, 1)
 }
 
 // TimingDefenseMult is the incoming damage multiplier for a defend quality.
@@ -1088,10 +1103,7 @@ func QualityScaledChance(base float64, quality int) float64 {
 // hit. Indexes into timingGrades (config.go); out-of-range qualities fall
 // back to the Miss multiplier (1.0×).
 func TimingDefenseMult(quality int) float32 {
-	if quality < 0 || quality >= len(timingGrades) {
-		return timingGrades[TimingQualityMiss].Def
-	}
-	return timingGrades[quality].Def
+	return timingGrades[timingGradeAt(quality)].Def
 }
 
 // pressGradeBands maps the sweet-spot-distance ratio (in units of the
@@ -1137,15 +1149,7 @@ func (t TimingState) PreviewQuality() int {
 	if !ok {
 		return TimingQualityMiss
 	}
-	windowSize := end - start
-	if windowSize <= 0 {
-		return TimingQualityNice
-	}
-	distance := t.Elapsed - sweet
-	if distance < 0 {
-		distance = -distance
-	}
-	return gradeFromRatio(distance / windowSize)
+	return gradeWindow(t.Elapsed, start, end, sweet)
 }
 
 // HitStopFor returns the freeze-frame duration after a graded press lands.
@@ -1154,10 +1158,7 @@ func (t TimingState) PreviewQuality() int {
 // tickFlashHold) uses this to delay the apply step so the bar's flash hold
 // chains into a true world-pause before damage lands.
 func HitStopFor(quality int) float32 {
-	if quality < 0 || quality >= len(timingGrades) {
-		return 0
-	}
-	return timingGrades[quality].HitStop
+	return timingGrades[timingGradeAt(quality)].HitStop
 }
 
 // CombatShakeFor returns the BASE screen-shake (peak amplitude + duration) a
@@ -1166,10 +1167,7 @@ func HitStopFor(quality int) float32 {
 // the big shake (crits / AoE) is armed separately via TriggerCombatShake.
 // Mirrors HitStopFor so the two impact knobs sit together.
 func CombatShakeFor(quality int) (peak, dur float32) {
-	if quality < 0 || quality >= len(timingGrades) {
-		return 0, 0
-	}
-	g := timingGrades[quality]
+	g := timingGrades[timingGradeAt(quality)]
 	return g.ShakePeak, g.ShakeDur
 }
 
@@ -1205,9 +1203,7 @@ func TriggerRumble(b *Battle, strength, dur float32) {
 	if b == nil || strength <= 0 || dur <= 0 {
 		return
 	}
-	if strength > 1 {
-		strength = 1
-	}
+	strength = Clamp(strength, 0, 1)
 	if b.RumbleTimer > 0 && b.RumbleStrength > strength {
 		return
 	}
@@ -1232,23 +1228,14 @@ func TickRumble(b *Battle, dt float32) float32 {
 		return 0
 	}
 	level := b.RumbleStrength * (b.RumbleTimer / b.RumbleDur)
-	if level < 0 {
-		return 0
-	}
-	if level > 1 {
-		return 1
-	}
-	return level
+	return Clamp(level, 0, 1)
 }
 
 // TimingQualityLabel returns the popup text for a quality grade. Reads
 // from timingGrades (config.go); out-of-range values fall back to the
 // Miss label so a future grade addition is one table-row edit.
 func TimingQualityLabel(quality int) string {
-	if quality < 0 || quality >= len(timingGrades) {
-		return timingGrades[TimingQualityMiss].Label
-	}
-	return timingGrades[quality].Label
+	return timingGrades[timingGradeAt(quality)].Label
 }
 
 // ScaleDamage applies an attack quality's multiplier to a base damage amount.

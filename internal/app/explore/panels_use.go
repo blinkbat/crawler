@@ -32,16 +32,30 @@ func validMember(g *core.GameState, idx int) (*core.PartyMember, bool) {
 	return &g.Party[idx], true
 }
 
+// stackAtCursor is the materialized-list cursor guard shared by the panels
+// item-use, shop buy/sell, and chest paths: each first builds its row slice
+// (LiveStacks / ShopCatalog / SellableStacks — different element types, hence
+// the type param), bounds-checks the cursor, and indexes the row. It only
+// answers "is cursor a real row, and here it is" — callers keep their own
+// per-site bail (miss ping vs. silent return) since those differ.
+func stackAtCursor[T any](stacks []T, cursor int) (T, bool) {
+	if cursor < 0 || cursor >= len(stacks) {
+		var zero T
+		return zero, false
+	}
+	return stacks[cursor], true
+}
+
 // tryUseItem handles a use press on the Items tab. The cursored stack
 // must be a healing consumable; it opens the ally-target picker carrying
 // that item. Equipment / no-effect rows ping the miss cue.
 func tryUseItem(g *core.GameState) {
 	stacks := core.LiveStacks(g.Inventory)
-	idx := g.PanelsRowCursor
-	if idx < 0 || idx >= len(stacks) {
+	stack, ok := stackAtCursor(stacks, g.PanelsRowCursor)
+	if !ok {
 		return
 	}
-	kind := stacks[idx].Kind
+	kind := stack.Kind
 	def := core.ItemInfo(kind)
 	if !core.ItemIsRestorative(def) {
 		audio.Play(audio.SoundInputMiss) // equipment / no restorative effect

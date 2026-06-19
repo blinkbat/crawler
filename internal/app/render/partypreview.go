@@ -95,17 +95,7 @@ func DrawPartyPreview(rect rl.Rectangle, assets Resources, class core.PartyClass
 	// Gizmos are Layout-tab authoring aids; the Asset tab hides them so the bare
 	// sprite (and its baked tint / pixelation) reads clean.
 	if showGizmos {
-		pAnchor := cameraRelativeOffset(cam, foeAnchor, v.particleXOffset, v.particleYOffset, v.particleZOffset)
-		drawAnchorGizmo(pAnchor, 0.16*v.effectiveParticleScale(), gizmoParticleColor)
-		gAnchor := cameraRelativeOffset(cam, foeAnchor, v.glyphXOffset, v.glyphYOffset, 0)
-		gAnchor.Y += hitGlyphRise
-		drawAnchorGizmo(gAnchor, 0.13*v.effectiveGlyphScale(), gizmoGlyphColor)
-		// Gold gizmo = floating damage-NUMBER spawn (Num X/Y); popupWorldRise
-		// matches the baked rise in drawFloatingDamage so the dot sits where the
-		// number floats.
-		nAnchor := cameraRelativeOffset(cam, foeAnchor, v.popupXOffset, v.popupYOffset, 0)
-		nAnchor.Y += popupWorldRise
-		drawAnchorGizmo(nAnchor, 0.10, gizmoNumberColor)
+		drawPreviewGizmos(cam, v)
 	}
 
 	rl.EndMode3D()

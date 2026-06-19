@@ -661,6 +661,12 @@ func startTurnToTile(p *core.Player, tileX, tileZ int) bool {
 		startTurn(p, 2)
 	case 3:
 		startTurn(p, -1)
+	default:
+		// NormalizeFacing constrains diff to 0..3, so the cases above are
+		// exhaustive; a value outside that range means NormalizeFacing's
+		// contract changed underneath us. Fail loudly instead of silently
+		// no-op'ing the turn, matching Update's missing-case panic.
+		panic(fmt.Sprintf("explore: startTurnToTile got out-of-range facing diff %d", diff))
 	}
 	return true
 }

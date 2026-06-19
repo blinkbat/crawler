@@ -206,6 +206,16 @@ func AbsInt(v int) int {
 	return v
 }
 
+// AbsF is the float32 twin of AbsInt — the absolute value of a float32.
+// Sits beside AbsInt so the open-coded `if d < 0 { d = -d }` float idiom
+// (timing.go's window/charge grading) has one named home.
+func AbsF(x float32) float32 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
 // Sign returns -1, 0, or 1 depending on the sign of v. Sits next to
 // AbsInt / Clamp / Min / Max (the builtin generics) so callers find
 // the small spatial helpers in one place — the pack AI's chase step

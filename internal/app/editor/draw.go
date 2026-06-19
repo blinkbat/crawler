@@ -328,12 +328,11 @@ func doorEditLayoutFor() doorEditLayout {
 	y := r.Y + dialogHeaderInset
 	fieldH := dialogFieldH
 	rowGap := dialogRowGap
-	nameField := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap
-	mapField := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap
-	doorField := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap + 6
+	fields := stackRows(x, y, fw, fieldH, rowGap, 3)
+	nameField := fields[0]
+	mapField := fields[1]
+	doorField := fields[2]
+	y += 3*rowGap + 6
 	// Facing row: one equal-width button per Facing (mirrors the style row
 	// below so a new facing scales the layout instead of clipping past 4).
 	var facing [core.FacingCount]rl.Rectangle
@@ -3112,6 +3111,27 @@ func scrollWindow(cursor, total, rowsVisible int) (top, end int) {
 		end = total
 	}
 	return top, end
+}
+
+// windowedRowList lays out a scrolling, fixed-pitch list of `count` rows inside a
+// column whose row band starts at (x,y), is `w` wide and `areaH` tall, with each
+// row `rowH` tall at `pitch` vertical spacing. It derives the visible window from
+// `cursor` (scrollWindow), then returns a slice of length `count` where only the
+// on-window rows [topRow,end) carry real rects — off-window entries stay the zero
+// rect so they neither draw nor hit-test. The saved-sounds and assignment columns
+// both walk this same window scheme; sharing it keeps their scroll math identical
+// (each column then derives its per-row buttons from the returned row rect).
+func windowedRowList(x, y, w, rowH, pitch float32, cursor, count int, areaH float32) (topRow, end int, rects []rl.Rectangle) {
+	maxRows := int(areaH / pitch)
+	if maxRows < 1 {
+		maxRows = 1
+	}
+	topRow, end = scrollWindow(cursor, count, maxRows)
+	rects = make([]rl.Rectangle, count)
+	for i := topRow; i < end; i++ {
+		rects[i] = rl.NewRectangle(x, y+float32(i-topRow)*pitch, w, rowH)
+	}
+	return topRow, end, rects
 }
 
 // --- Status & modals -------------------------------------------------------

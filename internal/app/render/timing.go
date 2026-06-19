@@ -1266,6 +1266,18 @@ var damagePopupLabelCache = func() [200]struct{ plain, excellent string } {
 // sits exactly where the number floats — keep all four sites on this const.
 const popupWorldRise = float32(0.6)
 
+// popup punch-in curve breakpoints, named so the scale-overshoot peak and its
+// two phase durations aren't bare literals baked across the switch below (and so
+// the 0.6→peak→1.0 shape stays consistent between DrawQualityPopup and
+// drawFloatingDamage, which share this function). popupPeakEnd is the age the
+// shrink phase ends (popupGrowPhase + popupShrinkPhase).
+const (
+	popupPeakScale   = 2.15
+	popupGrowPhase   = 0.12
+	popupShrinkPhase = 0.10
+	popupPeakEnd     = 0.22
+)
+
 // popupAnimation returns the scale/rise/alpha for a popup whose remaining
 // life ratio is t (1.0 = just spawned, 0.0 = expired). Punches in with a
 // 0.6→2.15→1.0 scale curve, rises 36 px, fades alpha via Smoothstep.
@@ -1279,13 +1291,13 @@ func popupAnimation(t float32) (scale, rise float32, alpha uint8) {
 	age := 1 - t
 	scale = 1
 	switch {
-	case age < 0.12:
-		scale = 0.6 + 1.55*(age/0.12)
-		if scale > 2.15 {
-			scale = 2.15
+	case age < popupGrowPhase:
+		scale = 0.6 + 1.55*(age/popupGrowPhase)
+		if scale > popupPeakScale {
+			scale = popupPeakScale
 		}
-	case age < 0.22:
-		scale = 2.15 - 1.15*((age-0.12)/0.10)
+	case age < popupPeakEnd:
+		scale = popupPeakScale - 1.15*((age-popupGrowPhase)/popupShrinkPhase)
 	}
 	rise = (1 - t) * 36
 	alpha = uint8(255 * core.Smoothstep(t))

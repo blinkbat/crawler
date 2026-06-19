@@ -564,6 +564,11 @@ func (a *AreaDefinition) ElevationLevelAt(x, z int) int {
 const (
 	ElevationBaseline = 10
 	MaxElevationLevel = 20
+	// elevDigitSpan is the count of decimal-digit elevation codes ('0'..'9' =
+	// levels 0..9); levels at or above it spill into the letter run ('A'..).
+	// The base-36 pivot shared by ElevationLevelFromChar and ElevationChar so
+	// the digit/letter split has one home.
+	elevDigitSpan = 10
 	// ElevationWallRingLevel is the level a default enclosing wall / sealed
 	// border sits at: one step above the walkable baseline, so it reads as a
 	// 1-high cliff you can't cross without a ramp. Shared by the editor's
@@ -581,7 +586,7 @@ func ElevationLevelFromChar(c byte) int {
 	case c >= '0' && c <= '9':
 		return Clamp(int(c-'0'), 0, MaxElevationLevel)
 	case c >= 'A' && c <= 'Z':
-		return Clamp(int(c-'A')+10, 0, MaxElevationLevel)
+		return Clamp(int(c-'A')+elevDigitSpan, 0, MaxElevationLevel)
 	}
 	return 0
 }
@@ -592,10 +597,10 @@ func ElevationLevelFromChar(c byte) int {
 // conversion the editor uses at every height-stamp / ramp-placement site.
 func ElevationChar(level int) byte {
 	level = Clamp(level, 0, MaxElevationLevel)
-	if level < 10 {
+	if level < elevDigitSpan {
 		return byte('0' + level)
 	}
-	return byte('A' + (level - 10))
+	return byte('A' + (level - elevDigitSpan))
 }
 
 // IsRampChar reports whether a floor-layer char is one of the four directional

@@ -421,6 +421,18 @@ var actionLogCache struct {
 // per frame. Safe as package state because raylib draw is single-threaded.
 var statusLineScratch [1]string
 
+// shrinkPinnedToBottom resolves the height/top-edge for a bottom-pinned HUD pane
+// whose top would collide with topLimit: it shrinks the pane (floored at
+// hudPanelMinH) while keeping its bottom edge at bottomY. The two bottom HUD
+// panes (action log vs action menu) share this; only their top limit differs.
+func shrinkPinnedToBottom(bottomY, topLimit int32) (h, y int32) {
+	h = bottomY - topLimit
+	if h < hudPanelMinH {
+		h = hudPanelMinH
+	}
+	return h, bottomY - h
+}
+
 // drawActionLogPanel paints the rolling ACTION LOG — the bottom-left HUD pane
 // shown both in combat and during exploration (g.ActionLog persists across the
 // two). The name is historical; it's no longer combat-only.
@@ -441,12 +453,7 @@ func drawActionLogPanel(g *core.GameState, assets Resources) {
 	// overlap it, shrink height (floored at hudPanelMinH) while keeping the
 	// bottom edge pinned to the screen bottom.
 	if turnBottom := TurnPanelBottomY(g) + hudColumnGap; y < turnBottom {
-		shrunkH := bottomY - turnBottom
-		if shrunkH < hudPanelMinH {
-			shrunkH = hudPanelMinH
-		}
-		h = shrunkH
-		y = bottomY - h
+		h, y = shrinkPinnedToBottom(bottomY, turnBottom)
 	}
 
 	drawCard(x, y, w, h, surfacePrimary, borderSoft, borderSoft)
@@ -628,6 +635,20 @@ func arrowPrompt(a, b string) string {
 	return arrowPromptCache.text
 }
 
+// drawAllyTargetPrompt paints the "verb -> ally / Choose an ally" two-line
+// prompt shared by the skill-target and item-target action arms: it resolves the
+// selected ally's name (falling back to "Ally" when PartyTarget is out of range)
+// and renders the arrowPrompt headline above the sub-label. `verb` is the skill
+// or item name driving the arrow prompt.
+func drawAllyTargetPrompt(g *core.GameState, assets Resources, verb string, contentX, contentY, subY int32) {
+	targetName := "Ally"
+	if g.Battle.PartyTarget >= 0 && g.Battle.PartyTarget < len(g.Party) {
+		targetName = g.Party[g.Battle.PartyTarget].Name
+	}
+	drawTextWithShadow(assets.hudFont, arrowPrompt(verb, targetName), float32(contentX), float32(contentY), FontBody, textPrimary)
+	drawTextWithShadow(assets.hudFont, "Choose an ally", float32(contentX), float32(subY), FontSmall, textLabel)
+}
+
 func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	if g.Battle.Phase != core.BattlePlayer {
 		return
@@ -656,12 +677,7 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	// height while keeping the bottom edge pinned to the screen bottom. Floor
 	// height at hudPanelMinH so the action rows stay readable.
 	if y < hudEdgePad {
-		shrunkH := bottomY - hudEdgePad
-		if shrunkH < hudPanelMinH {
-			shrunkH = hudPanelMinH
-		}
-		h = shrunkH
-		y = bottomY - h
+		h, y = shrinkPinnedToBottom(bottomY, hudEdgePad)
 	}
 
 	classCol := classAccent(member.Class)
@@ -674,9 +690,7 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	// sprite. A thin gilt rule divides the header from the action rows.
 	drawEngravedText(assets.hudFont, member.Name, float32(contentX), float32(y+14), FontHeading, classCol)
 	ruleY := y + 48
-	drawGiltRule(x+18, ruleY, w-36, 1, 0.5)
-	drawDiamondPip(float32(x+18), float32(ruleY), 2.4, fadeColor(giltDim, 0.85))
-	drawDiamondPip(float32(x+w-18), float32(ruleY), 2.4, fadeColor(giltDim, 0.85))
+	drawPipCappedRule(x+18, ruleY, w-36, fadeColor(giltBright, 0.5), 2.4, fadeColor(giltDim, 0.85))
 	contentY := y + 58
 	// subY is the baseline for the sub-prompt / picker list under the
 	// mode's verb heading — one offset so the five action-mode arms below
@@ -692,12 +706,7 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 		drawEngravedText(assets.hudFont, actionLabel, float32(contentX), float32(contentY), FontHeading, textPrimary)
 		drawTextWithShadow(assets.hudFont, "Choose a target", float32(contentX), float32(subY), FontSmall, textLabel)
 	case core.ActionPartyTarget:
-		targetName := "Ally"
-		if g.Battle.PartyTarget >= 0 && g.Battle.PartyTarget < len(g.Party) {
-			targetName = g.Party[g.Battle.PartyTarget].Name
-		}
-		drawTextWithShadow(assets.hudFont, arrowPrompt(core.SkillName(g.Battle.PendingSkill), targetName), float32(contentX), float32(contentY), FontBody, textPrimary)
-		drawTextWithShadow(assets.hudFont, "Choose an ally", float32(contentX), float32(subY), FontSmall, textLabel)
+		drawAllyTargetPrompt(g, assets, core.SkillName(g.Battle.PendingSkill), contentX, contentY, subY)
 	case core.ActionItemMenu:
 		drawEngravedText(assets.hudFont, "Items", float32(contentX), float32(contentY), FontHeading, textPrimary)
 		drawItemMenuList(g, assets, contentX, subY)
@@ -705,13 +714,7 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 		drawEngravedText(assets.hudFont, "Skills", float32(contentX), float32(contentY), FontHeading, textPrimary)
 		drawSkillMenuList(g, assets, contentX, subY)
 	case core.ActionItemTarget:
-		itemName := core.ItemInfo(g.Battle.PendingItem).Name
-		targetName := "Ally"
-		if g.Battle.PartyTarget >= 0 && g.Battle.PartyTarget < len(g.Party) {
-			targetName = g.Party[g.Battle.PartyTarget].Name
-		}
-		drawTextWithShadow(assets.hudFont, arrowPrompt(itemName, targetName), float32(contentX), float32(contentY), FontBody, textPrimary)
-		drawTextWithShadow(assets.hudFont, "Choose an ally", float32(contentX), float32(subY), FontSmall, textLabel)
+		drawAllyTargetPrompt(g, assets, core.ItemInfo(g.Battle.PendingItem).Name, contentX, contentY, subY)
 	case core.ActionFleeConfirm:
 		drawEngravedText(assets.hudFont, "Flee", float32(contentX), float32(contentY), FontHeading, textPrimary)
 		drawTextWithShadow(assets.hudFont, "Retreat from this battle?", float32(contentX), float32(subY), FontSmall, textLabel)

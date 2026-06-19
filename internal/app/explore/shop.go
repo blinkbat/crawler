@@ -73,11 +73,11 @@ func shopRowCount(g *core.GameState) int {
 // list or short on gold).
 func buyShopItem(g *core.GameState) {
 	catalog := core.ShopCatalog()
-	if g.ShopCursor < 0 || g.ShopCursor >= len(catalog) {
+	def, ok := stackAtCursor(catalog, g.ShopCursor)
+	if !ok {
 		audio.Play(audio.SoundInputMiss)
 		return
 	}
-	def := catalog[g.ShopCursor]
 	if g.Gold < def.Price {
 		audio.Play(audio.SoundInputMiss)
 		return
@@ -93,11 +93,12 @@ func buyShopItem(g *core.GameState) {
 // a stack is sold and the list shrinks underneath it.
 func sellShopItem(g *core.GameState) {
 	stacks := core.SellableStacks(g.Inventory)
-	if g.ShopCursor < 0 || g.ShopCursor >= len(stacks) {
+	stack, ok := stackAtCursor(stacks, g.ShopCursor)
+	if !ok {
 		audio.Play(audio.SoundInputMiss)
 		return
 	}
-	kind := stacks[g.ShopCursor].Kind
+	kind := stack.Kind
 	inv, ok := core.ConsumeItem(g.Inventory, kind)
 	if !ok {
 		audio.Play(audio.SoundInputMiss)

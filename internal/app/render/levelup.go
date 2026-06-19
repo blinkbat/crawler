@@ -88,10 +88,7 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		} else {
 			drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), fadeColor(glassDeep, levelUpRowGlassAlpha))
 		}
-		col := textMuted
-		if focused {
-			col = textPrimary
-		}
+		col := rowTextColor(focused, false, textMuted)
 		label := core.StatLabel(s)
 		cur := core.StatValue(m.Stats, s)
 		pending := g.LevelUpPending[s]
@@ -143,10 +140,7 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		if focused {
 			DrawSelectedRow(rect)
 		}
-		col := textMuted
-		if focused {
-			col = textPrimary
-		}
+		col := rowTextColor(focused, false, textMuted)
 		label := "Apply changes"
 		if statRemaining > 0 {
 			label = "Apply changes — " + strconv.Itoa(statRemaining) + " unspent"

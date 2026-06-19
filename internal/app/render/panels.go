@@ -214,9 +214,7 @@ func DrawPanelsOverlay(g *core.GameState, assets Resources) {
 	// separated from whichever page is open below.
 	stripRuleY := infoY + panelsInfoStripH
 	stripRuleCol := fadeColor(woodAccent, 0.38)
-	rl.DrawRectangle(cardX+24, stripRuleY, cardW-48, 1, stripRuleCol)
-	drawDiamondPip(float32(cardX+24), float32(stripRuleY), 1.8, stripRuleCol)
-	drawDiamondPip(float32(cardX+cardW-24), float32(stripRuleY), 1.8, stripRuleCol)
+	drawPipCappedRule(cardX+24, stripRuleY, cardW-48, stripRuleCol, 1.8, stripRuleCol)
 
 	bodyY := infoY + panelsInfoStripH + 6
 	bodyRect := rl.NewRectangle(float32(cardX+22), float32(bodyY),

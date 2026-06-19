@@ -1230,6 +1230,18 @@ func drawGiltRule(x, y, w, h int32, alpha float32) {
 	rl.DrawRectangle(x, y, w, h, fadeColor(giltBright, alpha))
 }
 
+// drawPipCappedRule paints a 1px horizontal rule from x to x+w in ruleCol,
+// flanked by a diamond pip of radius pipR (in pipCol) seated on each end. This
+// is the "ruled divider with filigree termini" stamp the action-menu header and
+// the panels overlay's info-strip both draw; centralizing the rule + two end
+// pips keeps the two from drifting. (drawPanelHeading paints a richer multi-layer
+// rule with an extra brass glint and a trailing fleuron, so it stays bespoke.)
+func drawPipCappedRule(x, y, w int32, ruleCol color.RGBA, pipR float32, pipCol color.RGBA) {
+	rl.DrawRectangle(x, y, w, 1, ruleCol)
+	drawDiamondPip(float32(x), float32(y), pipR, pipCol)
+	drawDiamondPip(float32(x+w), float32(y), pipR, pipCol)
+}
+
 // drawSplitRule draws a 1px horizontal rule from leftX to rightX broken by a
 // `gap` on each side of cx (to seat a centre fleuron). The two-segment line is
 // shared by the title banner divider (DrawTitleRule, which adds end-cap +

@@ -206,6 +206,17 @@ func DisplayTogglePressed() bool {
 	return altDown() && (rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeyKpEnter))
 }
 
+// plainEnterPressed is the "commit on a bare main-Enter edge, but NOT
+// Alt+Enter" test shared by the two confirm predicates. Alt+Enter is the
+// global display toggle (DisplayTogglePressed), so both confirms exclude it
+// here rather than re-spelling the !altDown() guard. Covers only the main
+// Enter key; EditorConfirmPressed additionally accepts the keypad Enter
+// inline (ConfirmPressed deliberately does not), so that extra key stays at
+// the call site rather than inside this shared guard.
+func plainEnterPressed() bool {
+	return rl.IsKeyPressed(rl.KeyEnter) && !altDown()
+}
+
 // confirmChord is the single definition of the "confirm" button set —
 // Enter / Space / Z plus the pad's A/Cross face button. The edge/level/release
 // variants below differ only in which key-state and pad-state readers they pass
@@ -220,15 +231,25 @@ func ConfirmPressed() bool {
 	// menu row; the rest of the chord is the shared set.
 	return confirmChord(func(k int32) bool {
 		if k == rl.KeyEnter {
-			return rl.IsKeyPressed(k) && !altDown()
+			return plainEnterPressed()
 		}
 		return rl.IsKeyPressed(k)
 	}, padPressed)
 }
 
-func BackPressed() bool {
-	return rl.IsKeyPressed(rl.KeyEscape) || rl.IsKeyPressed(rl.KeyX) ||
+// backChord is the single definition of the shared "back / cancel" chord —
+// keyboard Escape plus the pad's B / Circle face button. BackPressed and
+// EditorCancelPressed both build on it; each adds its own extra key inline
+// (BackPressed also accepts X). EditorErasePressed deliberately does NOT use
+// this — it maps to Square / X (FaceLeft), not B / Circle, so the back press
+// can't both erase a tile and open the editor's Esc menu in one frame.
+func backChord() bool {
+	return rl.IsKeyPressed(rl.KeyEscape) ||
 		padPressed(rl.GamepadButtonRightFaceRight) // B / Circle
+}
+
+func BackPressed() bool {
+	return backChord() || rl.IsKeyPressed(rl.KeyX)
 }
 
 // padDirUp / padDirDown / padDirLeft / padDirRight are the controller half of
@@ -320,15 +341,15 @@ func CursorUpDownTextSafe(cursor, count int) int {
 // button.
 func EditorConfirmPressed() bool {
 	// Enter-with-Alt is the global display toggle (DisplayTogglePressed),
-	// not a commit — same guard as ConfirmPressed.
-	return ((rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeyKpEnter)) && !altDown()) ||
+	// not a commit — same guard as ConfirmPressed. The editor also accepts
+	// the keypad Enter, with the same Alt exclusion.
+	return plainEnterPressed() || (rl.IsKeyPressed(rl.KeyKpEnter) && !altDown()) ||
 		padPressed(rl.GamepadButtonRightFaceDown) // A / Cross
 }
 
 // EditorCancelPressed is the editor's cancel/back edge: Esc plus pad B.
 func EditorCancelPressed() bool {
-	return rl.IsKeyPressed(rl.KeyEscape) ||
-		padPressed(rl.GamepadButtonRightFaceRight) // B / Circle
+	return backChord()
 }
 
 // EditorTabPressed cycles text-field focus inside an editor modal. Tab is

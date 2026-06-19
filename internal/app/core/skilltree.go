@@ -368,15 +368,25 @@ func EffectiveSkillEffect(m *PartyMember, s SkillID) SkillEffect {
 	if m == nil {
 		return eff
 	}
+	forEachPurchasedTier(m, s, func(up SkillTierUpgrade) {
+		addSkillEffectDelta(&eff, up.Effect)
+	})
+	return eff
+}
+
+// forEachPurchasedTier invokes fn with each tier upgrade the member has
+// purchased for skill s, walking tiers 1..SkillTierOf and stopping at the
+// first tier with no upgrade row. The shared walk behind EffectiveSkillEffect
+// and SkillTierMod so the per-tier accumulation loop lives in one place.
+func forEachPurchasedTier(m *PartyMember, s SkillID, fn func(SkillTierUpgrade)) {
 	tier := SkillTierOf(m, s)
 	for i := 1; i <= tier; i++ {
 		up, ok := skillTierUpgradeFor(s, i)
 		if !ok {
 			break
 		}
-		addSkillEffectDelta(&eff, up.Effect)
+		fn(up)
 	}
-	return eff
 }
 
 // addSkillEffectDelta folds one purchased tier's delta into the accumulating
@@ -528,17 +538,12 @@ func SkillTierMod(m *PartyMember, s SkillID) SkillEffectDelta {
 	if m == nil {
 		return mod
 	}
-	tier := SkillTierOf(m, s)
-	for i := 1; i <= tier; i++ {
-		up, ok := skillTierUpgradeFor(s, i)
-		if !ok {
-			break
-		}
+	forEachPurchasedTier(m, s, func(up SkillTierUpgrade) {
 		d := up.Effect
 		mod.StealBonusDamage += d.StealBonusDamage
 		if d.CritDoubleOnExcellent {
 			mod.CritDoubleOnExcellent = true
 		}
-	}
+	})
 	return mod
 }

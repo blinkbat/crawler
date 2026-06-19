@@ -132,13 +132,24 @@ func reloadOneCue(cue Sound) (failed []string) {
 	}
 	assigns := userconfig.LoadAssignments()
 	row := soundCues[cue]
-	fileName, assigned := resolveAssignedFile(assigns, row.Canonical)
-	newSound, fromFile := readOrSynthSound(fileName, row.PCM)
-	if !fromFile && assigned {
+	if reloadCueSlot(cue, assigns) {
 		failed = append(failed, row.Canonical)
 	}
-	replaceSound(&bank[cue], newSound)
 	return failed
+}
+
+// reloadCueSlot rebuilds a single cue's bank slot from `assigns`: resolve the
+// assigned file, read it (or fall back to the procedural synth), and swap it
+// into bank[cue]. Returns true when the cue had an explicit assignment whose
+// file failed to load (the synth fallback covered playback, but the caller
+// should surface it). Shared body of reloadOneCue and ReloadUserAssignments so
+// the per-cue resolve→read→replace dance lives in one place.
+func reloadCueSlot(cue Sound, assigns map[string]string) (failed bool) {
+	row := soundCues[cue]
+	fileName, assigned := resolveAssignedFile(assigns, row.Canonical)
+	newSound, fromFile := readOrSynthSound(fileName, row.PCM)
+	replaceSound(&bank[cue], newSound)
+	return !fromFile && assigned
 }
 
 // CurrentAssignment returns the user-sound name currently assigned to a
@@ -181,14 +192,11 @@ func ReloadUserAssignments() (failed []string, err error) {
 	}
 	assigns := userconfig.LoadAssignments()
 	forEachCue(func(cue Sound, row soundCue) {
-		fileName, assigned := resolveAssignedFile(assigns, row.Canonical)
-		newSound, fromFile := readOrSynthSound(fileName, row.PCM)
-		if !fromFile && assigned {
+		if reloadCueSlot(cue, assigns) {
 			// An explicitly-assigned file failed to load (the synth
 			// fallback covered playback, but the player should know).
 			failed = append(failed, row.Canonical)
 		}
-		replaceSound(&bank[cue], newSound)
 	})
 	for cueName := range assigns {
 		if _, ok := soundIDByName[cueName]; !ok {

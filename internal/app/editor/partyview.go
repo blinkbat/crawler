@@ -186,12 +186,7 @@ func handlePartyViewClick(s *State, l *foeViewLayout, mp rl.Vector2) {
 			if !pointIn(mp, l.assetBtns[i]) {
 				continue
 			}
-			switch i {
-			case assetActionRevert:
-				clearVisualAdjustments(&s.partyVisual)
-				s.assetPreviewStale = true
-				s.flash("Reverted sprite FX (Pixelate / Bright / Contrast)")
-			}
+			applyAssetAction(s, &s.partyVisual, i)
 			return
 		}
 	}

@@ -387,7 +387,7 @@ func actorSpeed(g *core.GameState, actor core.ActorRef) int {
 		}
 		spd := core.EffectiveStatsPtr(&g.Party[actor.Index]).SPD
 		if g.Party[actor.Index].WebbedTurns > 0 {
-			spd /= 2
+			spd /= core.WebbedSpeedDivisor
 		}
 		// Floor at 1 for the same reason the enemy branch below documents: a 0
 		// SPD (a future party-side SPD debuff, Web on a 1-SPD member, or a
@@ -657,7 +657,7 @@ func tickSkipStatusAtTurnStart(
 		return false
 	}
 	*c--
-	setBattleMessage(g, fmt.Sprintf("%s %s.", core.TheEnemy(core.EnemyInfoFor(*enemy)), verb))
+	setBattleMessage(g, fmt.Sprintf("%s %s.", core.EnemyDisplayName(enemy), verb))
 	return true
 }
 
@@ -1230,7 +1230,7 @@ func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
 			// so the queue stays consistent — but don't let the enemy's whole
 			// turn elapse with a blank combat log; surface the no-op so the
 			// forecast advancing isn't mistaken for a frozen battle.
-			setBattleMessage(g, fmt.Sprintf("%s hesitates.", core.TheEnemy(core.EnemyInfoFor(*enemy))))
+			setBattleMessage(g, fmt.Sprintf("%s hesitates.", core.EnemyDisplayName(enemy)))
 			return
 		}
 	}

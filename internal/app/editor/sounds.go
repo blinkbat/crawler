@@ -409,14 +409,11 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, para
 	lw := listCol.Width - 24
 	ly := listCol.Y + 36
 	listAreaH := listCol.Y + listCol.Height - 12 - ly
-	maxListRows := int(listAreaH / soundListRowH)
-	if maxListRows < 1 {
-		maxListRows = 1
-	}
-	l.listTopRow, l.listEnd = scrollWindow(listCursor, len(savedSounds), maxListRows)
+	var listBaseRows []rl.Rectangle
+	l.listTopRow, l.listEnd, listBaseRows = windowedRowList(lx, ly, lw, soundListRowH-4, soundListRowH, listCursor, len(savedSounds), listAreaH)
 	l.listRows = make([]soundListRowRect, len(savedSounds))
 	for i := l.listTopRow; i < l.listEnd; i++ {
-		row := rl.NewRectangle(lx, ly+float32(i-l.listTopRow)*soundListRowH, lw, soundListRowH-4)
+		row := listBaseRows[i]
 		l.listRows[i] = soundListRowRect{
 			Row:    row,
 			Edit:   rl.NewRectangle(row.X+row.Width-118, row.Y+2, 38, row.Height-4),
@@ -432,14 +429,11 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, para
 	aw := assignCol.Width - 24
 	ay := assignCol.Y + 36
 	assignAreaH := assignCol.Y + assignCol.Height - 12 - ay
-	maxAssignRows := int(assignAreaH / soundAssignRowH)
-	if maxAssignRows < 1 {
-		maxAssignRows = 1
-	}
-	l.assignTopRow, l.assignEnd = scrollWindow(assignCursor, len(assignableCueList), maxAssignRows)
+	var assignBaseRows []rl.Rectangle
+	l.assignTopRow, l.assignEnd, assignBaseRows = windowedRowList(ax, ay, aw, soundAssignRowH-4, soundAssignRowH, assignCursor, len(assignableCueList), assignAreaH)
 	l.assignRows = make([]soundAssignRowRect, len(assignableCueList))
 	for i := l.assignTopRow; i < l.assignEnd; i++ {
-		row := rl.NewRectangle(ax, ay+float32(i-l.assignTopRow)*soundAssignRowH, aw, soundAssignRowH-4)
+		row := assignBaseRows[i]
 		l.assignRows[i] = soundAssignRowRect{
 			Row:        row,
 			Play:       rl.NewRectangle(row.X+row.Width-126, row.Y+12, 32, 24),
@@ -956,11 +950,19 @@ func drawSoundsListCol(s *State, font rl.Font, theme render.Theme, l *soundLayou
 		drawButton(font, r.Play, ">", false)
 		drawButton(font, r.Delete, "X", false)
 	}
-	if l.listTopRow > 0 {
-		render.DrawRichText(font, "▲ more", rl.NewVector2(l.listCol.X+l.listCol.Width-70, l.listCol.Y+10), soundFontHint, 1, theme.TextHint)
+	drawSoundColumnScrollHints(font, theme, l.listCol, l.listTopRow > 0, l.listEnd < len(names))
+}
+
+// drawSoundColumnScrollHints paints the "▲ more"/"▼ more" captions in a sounds
+// column's top-right / bottom-right when its row list has hidden rows above (up)
+// or below (down) the visible window. Shared by the saved-sounds and assignment
+// columns so the glyphs, inset, and offsets can't drift between the two.
+func drawSoundColumnScrollHints(font rl.Font, theme render.Theme, col rl.Rectangle, up, down bool) {
+	if up {
+		render.DrawRichText(font, "▲ more", rl.NewVector2(col.X+col.Width-70, col.Y+10), soundFontHint, 1, theme.TextHint)
 	}
-	if l.listEnd < len(names) {
-		render.DrawRichText(font, "▼ more", rl.NewVector2(l.listCol.X+l.listCol.Width-70, l.listCol.Y+l.listCol.Height-20), soundFontHint, 1, theme.TextHint)
+	if down {
+		render.DrawRichText(font, "▼ more", rl.NewVector2(col.X+col.Width-70, col.Y+col.Height-20), soundFontHint, 1, theme.TextHint)
 	}
 }
 
@@ -987,12 +989,7 @@ func drawSoundsAssignCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 		drawButton(font, r.CycleLeft, "<", false)
 		drawButton(font, r.CycleRight, ">", false)
 	}
-	if l.assignTopRow > 0 {
-		render.DrawRichText(font, "▲ more", rl.NewVector2(l.assignCol.X+l.assignCol.Width-70, l.assignCol.Y+10), soundFontHint, 1, theme.TextHint)
-	}
-	if l.assignEnd < len(assignableCueList) {
-		render.DrawRichText(font, "▼ more", rl.NewVector2(l.assignCol.X+l.assignCol.Width-70, l.assignCol.Y+l.assignCol.Height-20), soundFontHint, 1, theme.TextHint)
-	}
+	drawSoundColumnScrollHints(font, theme, l.assignCol, l.assignTopRow > 0, l.assignEnd < len(assignableCueList))
 }
 
 func drawSoundsColumnFrame(theme render.Theme, r rl.Rectangle, focused bool) {

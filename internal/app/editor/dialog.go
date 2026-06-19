@@ -801,6 +801,21 @@ const (
 	dialogListRowH     = float32(24) // height of one row in the scrollable choice / condition lists
 )
 
+// stackRows lays out n equal-height field rows stacked downward from (x,y) at a
+// fixed vertical pitch (rowGap). It is the shared preamble the dialog edit
+// modals (node / choice / action / cond / trigger) and the door editor all
+// spelled inline as a repeated `row := rl.NewRectangle(x, y, fw, fieldH); y +=
+// rowGap` — centralizing it keeps those hit-test rects byte-identical to the
+// per-row build they replace. Callers that continue stacking content below the
+// returned rows advance their own y by n*rowGap (the pitch this walked).
+func stackRows(x, y, fw, fieldH, rowGap float32, n int) []rl.Rectangle {
+	rows := make([]rl.Rectangle, n)
+	for i := range rows {
+		rows[i] = rl.NewRectangle(x, y+float32(i)*rowGap, fw, fieldH)
+	}
+	return rows
+}
+
 // ========================= modalDialogNodeEdit =============================
 
 const (
@@ -839,18 +854,14 @@ func dialogNodeLayoutFor(cursor, choiceCount int) dialogNodeLayout {
 	fieldH := dialogFieldH
 	rowGap := dialogRowGap
 	y := r.Y + dialogHeaderInset
-	speakerBtn := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap
-	textField := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap
-	nextField := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap
-	continueField := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap
-	menuToggle := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap
-	actionBtn := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap + 6
+	fields := stackRows(x, y, fw, fieldH, rowGap, 6)
+	speakerBtn := fields[0]
+	textField := fields[1]
+	nextField := fields[2]
+	continueField := fields[3]
+	menuToggle := fields[4]
+	actionBtn := fields[5]
+	y += 6*rowGap + 6
 	// Choice list rows — a scroll window over the full choice list so a node
 	// with more than dialogChoiceVisible choices keeps the cursored row in
 	// view (and every choice reachable) instead of capping at the first few.
@@ -1103,12 +1114,11 @@ func dialogChoiceLayoutFor(cursor, condCount int) dialogChoiceLayout {
 	fieldH := dialogFieldH
 	rowGap := dialogRowGap
 	y := r.Y + dialogHeaderInset
-	labelField := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap
-	nextField := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap
-	actionBtn := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap + 8 // gap for the "Conditions (N)" header line
+	fields := stackRows(x, y, fw, fieldH, rowGap, 3)
+	labelField := fields[0]
+	nextField := fields[1]
+	actionBtn := fields[2]
+	y += 3*rowGap + 8 // gap for the "Conditions (N)" header line
 	rowH := dialogListRowH
 	top, end := scrollWindow(cursor, condCount, dialogCondVisible)
 	rows := make([]rl.Rectangle, end-top)
@@ -1285,9 +1295,9 @@ func dialogActionLayoutFor() dialogActionLayout {
 	fw := r.Width - 2*modalContentInset
 	fieldH := dialogFieldH
 	y := r.Y + dialogHeaderInset
-	kindBtn := rl.NewRectangle(x, y, fw, fieldH)
-	y += dialogActionRowGap
-	idField := rl.NewRectangle(x, y, fw, fieldH)
+	fields := stackRows(x, y, fw, fieldH, dialogActionRowGap, 2)
+	kindBtn := fields[0]
+	idField := fields[1]
 	by := r.Y + r.Height - modalBtnH - modalBottomInset
 	backBtn := rl.NewRectangle(r.X+r.Width-modalWideBtnW-modalContentInset, by, modalWideBtnW, modalBtnH)
 	return dialogActionLayout{card: r, kindBtn: kindBtn, idField: idField, backBtn: backBtn}
@@ -1515,15 +1525,12 @@ func dialogCondLayoutFor() dialogCondLayout {
 	x := r.X + modalContentInset
 	fw := r.Width - 2*modalContentInset
 	fieldH := dialogFieldH
-	rowGap := dialogCondRowGap
 	y := r.Y + dialogHeaderInset
-	kindBtn := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap
-	row1 := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap
-	row2 := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap
-	msgField := rl.NewRectangle(x, y, fw, fieldH)
+	fields := stackRows(x, y, fw, fieldH, dialogCondRowGap, 4)
+	kindBtn := fields[0]
+	row1 := fields[1]
+	row2 := fields[2]
+	msgField := fields[3]
 	by := r.Y + r.Height - modalBtnH - modalBottomInset
 	backBtn := rl.NewRectangle(r.X+r.Width-modalWideBtnW-modalContentInset, by, modalWideBtnW, modalBtnH)
 	return dialogCondLayout{card: r, kindBtn: kindBtn, row1: row1, row2: row2, msgField: msgField, backBtn: backBtn}
@@ -1772,17 +1779,13 @@ func dialogTrigLayoutFor() dialogTrigLayout {
 	x := r.X + modalContentInset
 	fw := r.Width - 2*modalContentInset
 	fieldH := dialogFieldH
-	rowGap := dialogTrigRowGap
 	y := r.Y + dialogHeaderInset
-	kindBtn := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap
-	dialogBtn := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap
-	onceToggle := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap
-	row1 := rl.NewRectangle(x, y, fw, fieldH)
-	y += rowGap
-	row2 := rl.NewRectangle(x, y, fw, fieldH)
+	fields := stackRows(x, y, fw, fieldH, dialogTrigRowGap, 5)
+	kindBtn := fields[0]
+	dialogBtn := fields[1]
+	onceToggle := fields[2]
+	row1 := fields[3]
+	row2 := fields[4]
 	by := r.Y + r.Height - modalBtnH - modalBottomInset
 	backBtn := rl.NewRectangle(r.X+r.Width-modalWideBtnW-modalContentInset, by, modalWideBtnW, modalBtnH)
 	return dialogTrigLayout{card: r, kindBtn: kindBtn, dialogBtn: dialogBtn, onceToggle: onceToggle, row1: row1, row2: row2, backBtn: backBtn}

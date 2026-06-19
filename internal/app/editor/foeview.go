@@ -155,6 +155,24 @@ var assetActionLabels = []string{"Revert"}
 
 const assetActionRevert = 0
 
+// applyAssetAction runs the Asset tab's button action `i` (an assetActionLabels
+// index) against the override `ov` — the shared dispatch behind both the Foe and
+// Party visualizers (which differ only in passing &s.foeVisual vs &s.partyVisual;
+// PartyVisualOverride aliases EnemyVisualOverride). The default arm is an explicit
+// no-op: an index with no case does nothing (matching the prior behavior where the
+// caseless switch simply fell through) rather than silently firing Revert, so a
+// future label added without its case reads as a visible gap.
+func applyAssetAction(s *State, ov *core.EnemyVisualOverride, i int) {
+	switch i {
+	case assetActionRevert:
+		clearVisualAdjustments(ov)
+		s.assetPreviewStale = true
+		s.flash("Reverted sprite FX (Pixelate / Bright / Contrast)")
+	default:
+		// New assetActionLabels entry with no case here: do nothing (visible gap).
+	}
+}
+
 // savedVisualFlash is the shared save-confirmation toast for the Foe/Party
 // Visualizers: both persist a visual override the editor applies live but the
 // game only picks up on restart, so they show the identical message.
@@ -529,12 +547,7 @@ func handleFoeViewClick(s *State, l *foeViewLayout, mp rl.Vector2) {
 			if !pointIn(mp, l.assetBtns[i]) {
 				continue
 			}
-			switch i {
-			case assetActionRevert:
-				clearVisualAdjustments(&s.foeVisual)
-				s.assetPreviewStale = true
-				s.flash("Reverted sprite FX (Pixelate / Bright / Contrast)")
-			}
+			applyAssetAction(s, &s.foeVisual, i)
 			return
 		}
 	}

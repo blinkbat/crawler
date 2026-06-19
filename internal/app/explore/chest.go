@@ -49,10 +49,10 @@ func updateChestModal(g *core.GameState) {
 		closeChest(g, chest)
 		return
 	}
-	if g.ChestMenuIndex < 0 || g.ChestMenuIndex >= len(stacks) {
+	picked, ok := stackAtCursor(stacks, g.ChestMenuIndex)
+	if !ok {
 		return
 	}
-	picked := stacks[g.ChestMenuIndex]
 	updated, ok := core.ConsumeItem(chest.Items, picked.Kind)
 	if !ok {
 		// Defensive: `picked` comes from LiveStacks (positive count), so
