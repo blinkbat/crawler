@@ -178,6 +178,13 @@ const (
 	partyCardW   = float32(208)
 	partyCardH   = float32(134)
 	partyCardGap = float32(16)
+	// cardGlowMargin is the inset the active-card halo and the selected-card
+	// outline both grow by (rect expands by cardGlowMargin on each side, so
+	// width/height grow by 2×). Named so the two chrome layers can't drift.
+	cardGlowMargin = int32(3)
+	// partyCardContentY is the top inset of the card's header row — the class
+	// glyph center, the name text, and the "+" badge all sit on this baseline.
+	partyCardContentY = float32(12)
 	// activeCardLift raises the active member's card above the ribbon row
 	// so "whose turn is it" reads at a glance, on top of the bold halo.
 	// Raised from 14 → 24 so the lift is the primary turn cue now that the
@@ -239,10 +246,10 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active,
 		// Layered gilt halo — solid inner ring + pulsing wider outer ring — so
 		// the active card reads as unmistakably lit. Shared with the battle
 		// roster's targeted-row halo via drawSelectionHalo.
-		drawSelectionHalo(ix-3, iy-3, iw+6, ih+6, borderActive, pulseActiveActor(), false)
+		drawSelectionHalo(ix-cardGlowMargin, iy-cardGlowMargin, iw+2*cardGlowMargin, ih+2*cardGlowMargin, borderActive, pulseActiveActor(), false)
 	}
 	if selected {
-		drawPanelOutline(ix-3, iy-3, iw+6, ih+6, borderTarget)
+		drawPanelOutline(ix-cardGlowMargin, iy-cardGlowMargin, iw+2*cardGlowMargin, ih+2*cardGlowMargin, borderTarget)
 	}
 
 	drawCard(ix, iy, iw, ih, bg, border, accent)
@@ -278,7 +285,7 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active,
 	// class accent so it harmonises with the card's left stripe.
 	glyphR := float32(8)
 	glyphCX := contentX + glyphR
-	glyphCY := y + 12 + FontBody/2
+	glyphCY := y + partyCardContentY + FontBody/2
 	glyphCol := classCol
 	if down {
 		glyphCol = fadeColor(classCol, 0.45)
@@ -298,7 +305,7 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active,
 	if hasPoints {
 		nameText = partyNamePlusBadge(member.Name)
 	}
-	drawTextWithShadow(font, nameText, nameX, y+12, FontBody, nameCol)
+	drawTextWithShadow(font, nameText, nameX, y+partyCardContentY, FontBody, nameCol)
 	if hasPoints && !down {
 		// Re-paint just the "+" in the level-up accent color so the
 		// signal pops even when the name itself is in textPrimary.
@@ -306,7 +313,7 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active,
 		// so route through the per-member measurement cache.
 		nameMeasure := measurePartyNameWithSpace(font, member.Name)
 		plusX := nameX + nameMeasure.X
-		drawTextWithShadow(font, "+", plusX, y+12, FontBody, inkAccent)
+		drawTextWithShadow(font, "+", plusX, y+partyCardContentY, FontBody, inkAccent)
 	}
 
 	// Status label: walks the canonical PartyStatus priority ladder so

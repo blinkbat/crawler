@@ -1319,7 +1319,7 @@ func drawSkillTierPips(x, y float32, filled, total int) {
 // Enemy packs only show on explored tiles (don't spoil unseen rooms).
 func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 	font := assets.Font()
-	m := g.Area
+	m := &g.Area
 	if m.Width <= 0 || m.Height <= 0 {
 		return
 	}
@@ -1557,7 +1557,10 @@ func visitedAt(g *core.GameState, x, z int) bool {
 // once it's in bounds AND the player has stepped within reveal range of
 // it; otherwise it paints flat fog (the same fill as out-of-bounds).
 // Single source so the two map surfaces can't drift on what lifts the fog.
-func mapCellFillColor(m core.AreaDefinition, g *core.GameState, x, z int) rl.Color {
+// mapCellFillColor takes the area by pointer: the minimap calls it once per cell
+// (viewCells² per frame) and the Map tab once per visible cell, so copying the
+// large AreaDefinition struct header per call would dominate the loop.
+func mapCellFillColor(m *core.AreaDefinition, g *core.GameState, x, z int) rl.Color {
 	if m.InBounds(x, z) && visitedAt(g, x, z) {
 		// Walls are elevation now: a tile raised above the walkable baseline
 		// reads as a wall/cliff on the map (matches the editor overview).

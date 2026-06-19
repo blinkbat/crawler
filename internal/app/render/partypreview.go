@@ -82,7 +82,7 @@ func DrawPartyPreview(rect rl.Rectangle, assets Resources, class core.PartyClass
 	rl.DrawPlane(rl.NewVector3(0, 0, 0), rl.NewVector2(14, 14), foePreviewGround)
 	rl.DrawGrid(14, 1)
 
-	place := resolveBillboardPlacement(cam, foeAnchor, v)
+	place := resolveBillboardPlacement(cam, foeAnchor, &v)
 	if v.shadowRadius > 0 {
 		drawGroundShadow(place.shadowX, place.shadowZ, v.shadowRadius)
 	}

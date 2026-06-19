@@ -53,9 +53,3 @@ func LoadPartyVisualOverrides() (map[string]PartyVisualOverride, error) {
 func SavePartyVisualOverride(slug string, ov PartyVisualOverride) error {
 	return saveVisualOverride(PartyVisualsPath(), slug, ov)
 }
-
-// SavePartyVisualOverrides writes the whole party override map as indented
-// JSON, creating the sprites asset dir if needed.
-func SavePartyVisualOverrides(all map[string]PartyVisualOverride) error {
-	return saveVisualOverrides(PartyVisualsPath(), all)
-}

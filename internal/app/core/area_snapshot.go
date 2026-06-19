@@ -2,17 +2,32 @@ package core
 
 import "slices"
 
-// gridLayers returns pointers to the area's six authored grid-layer
-// slices in canonical order (walls, floor, decor, props, ceiling,
-// elevation). The single place that enumerates the grid layers for bulk
-// operations — CloneArea and AreaContentEqual walk this instead of
-// hand-listing the fields, so a new layer is one row here, not several
-// lockstep edits. (The MapFile↔Area converters still list the fields
-// explicitly: they pair each layer with the separate mapfile.MapFile type
-// and apply the ceiling / elevation blank-default, which this accessor
-// can't model.)
+// gridLayers returns pointers to the area's authored grid-layer slices in
+// canonical order (walls, floor, decor, props, ceiling, elevation). The single
+// place that enumerates the grid layers for bulk operations — CloneArea and
+// AreaContentEqual walk this instead of hand-listing the fields, so a new layer
+// is one row here, not several lockstep edits. (The MapFile↔Area converters
+// still list the fields explicitly: they pair each layer with the separate
+// mapfile.MapFile type and apply the ceiling / elevation blank-default, which
+// this accessor can't model.)
 func (a *AreaDefinition) gridLayers() []*[]string {
 	return []*[]string{&a.Walls, &a.Floor, &a.Decor, &a.Props, &a.Ceiling, &a.Elevation}
+}
+
+// layerBlank returns the canonical open/blank char the loader fills an absent or
+// short layer with: '.' (TileOpen) for most layers, and the ceiling-open /
+// elevation-ground sentinels for those two optional layers. The single home for
+// the per-layer blank, so paste-padding (PasteRegion) and the dirty-check
+// (AreaContentEqual) can't disagree on a layer's open char.
+func (a *AreaDefinition) layerBlank(lp *[]string) byte {
+	switch lp {
+	case &a.Ceiling:
+		return TileCeilingOpen
+	case &a.Elevation:
+		return ElevationGround
+	default:
+		return TileOpen
+	}
 }
 
 // AreaContentEqual reports whether two areas have identical authorable
@@ -36,13 +51,9 @@ func AreaContentEqual(a, b AreaDefinition) bool {
 		// absent one with a canonical blank, so an area with them omitted
 		// must not read as "dirty" vs one filled to that default. Identify
 		// them by pointer (reorder-safe vs gridLayers' order) and compare
-		// with absent==blank semantics.
-		if al[i] == &a.Ceiling {
-			if optionalLayerEqual(*al[i], *bl[i], a.Width, a.Height, TileCeilingOpen) {
-				continue
-			}
-		} else if al[i] == &a.Elevation {
-			if optionalLayerEqual(*al[i], *bl[i], a.Width, a.Height, ElevationGround) {
+		// with absent==blank semantics, using the shared per-layer blank.
+		if al[i] == &a.Ceiling || al[i] == &a.Elevation {
+			if optionalLayerEqual(*al[i], *bl[i], a.Width, a.Height, a.layerBlank(al[i])) {
 				continue
 			}
 		}

@@ -35,7 +35,7 @@ func MinimapWidth() int32 { return minimapPanelW }
 // hudColumnGap so the two read as a single stacked column.
 func MinimapBottomY() int32 { return hudEdgePad + minimapPanelH }
 
-func drawMinimap(m core.AreaDefinition, g *core.GameState, assets Resources) {
+func drawMinimap(m *core.AreaDefinition, g *core.GameState, assets Resources) {
 	cell := minimapCell
 	viewCells := minimapViewCells
 	pad := hudEdgePad

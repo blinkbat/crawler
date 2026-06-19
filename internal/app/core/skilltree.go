@@ -334,14 +334,7 @@ func SkillTierOf(m *PartyMember, s SkillID) int {
 	if m == nil || m.SkillTiers == nil {
 		return 0
 	}
-	t := m.SkillTiers[s]
-	if t < 0 {
-		return 0
-	}
-	if t > MaxSkillTier {
-		return MaxSkillTier
-	}
-	return t
+	return Clamp(m.SkillTiers[s], 0, MaxSkillTier)
 }
 
 // skillTierUpgradeFor returns the upgrade definition for a skill's

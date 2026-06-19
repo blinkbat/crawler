@@ -28,6 +28,13 @@ import (
 // solids plane never confuses a cube skin with empty space.
 const SolidAir = ElevationGround
 
+// IsVoxel reports whether the area carries a materialized voxel stack (a non-nil
+// Solids), as opposed to a pure heightfield that derives occupancy from
+// Elevation. The single home for the "is this a voxel map?" test that gates the
+// ResolveStep / PackIndexAtTileLevel paths against their heightfield fallbacks —
+// so changing how a voxel map is detected isn't a hunt across call sites.
+func (a *AreaDefinition) IsVoxel() bool { return len(a.Solids) > 0 }
+
 // SolidAt reports whether a solid cube occupies (x, level, z) and, if so, the
 // cube's material/skin char. THE single read path into the voxel stack: when
 // Solids is populated it indexes the plane directly; when Solids is nil (a pure
@@ -76,13 +83,10 @@ func (a *AreaDefinition) TopSolidLevel(x, z int) int {
 	return a.ElevationLevelAt(x, z)
 }
 
-// SolidStackHeight is the number of levels worth iterating for column walks
-// (rendering, reachability): the count of stored planes when Solids is set,
-// else one past the tallest heightfield column. Always >= 1.
-func (a *AreaDefinition) SolidStackHeight() int {
-	if len(a.Solids) > 0 {
-		return len(a.Solids)
-	}
+// maxElevationTop returns the tallest ElevationLevelAt across every column (0 if
+// the area is flat/empty). Shared by SolidStackHeight and BuildSolidsFromElevation
+// so the heightfield top scan lives in one place.
+func (a *AreaDefinition) maxElevationTop() int {
 	top := 0
 	for z := 0; z < a.Height; z++ {
 		for x := 0; x < a.Width; x++ {
@@ -91,7 +95,17 @@ func (a *AreaDefinition) SolidStackHeight() int {
 			}
 		}
 	}
-	return top + 1
+	return top
+}
+
+// SolidStackHeight is the number of levels worth iterating for column walks
+// (rendering, reachability): the count of stored planes when Solids is set,
+// else one past the tallest heightfield column. Always >= 1.
+func (a *AreaDefinition) SolidStackHeight() int {
+	if len(a.Solids) > 0 {
+		return len(a.Solids)
+	}
+	return a.maxElevationTop() + 1
 }
 
 // Standable reports whether a unit can stand atop level L in column (x,z): the
@@ -125,14 +139,7 @@ func (a *AreaDefinition) LowestStandableLevel(x, z int) int {
 // top plane always carries at least one cube, so there are no trailing all-air
 // planes.
 func BuildSolidsFromElevation(a *AreaDefinition) [][]string {
-	maxTop := 0
-	for z := 0; z < a.Height; z++ {
-		for x := 0; x < a.Width; x++ {
-			if t := a.ElevationLevelAt(x, z); t > maxTop {
-				maxTop = t
-			}
-		}
-	}
+	maxTop := a.maxElevationTop()
 	out := make([][]string, maxTop+1)
 	for L := 0; L <= maxTop; L++ {
 		rows := make([]string, a.Height)
@@ -265,7 +272,7 @@ func (a *AreaDefinition) growSolidsTo(n int) {
 // tallest cube (keeps round-trips and SolidStackHeight tight). Never trims
 // below one plane.
 func (a *AreaDefinition) trimTopAir() {
-	for len(a.Solids) > 1 && planeAllAir(a.Solids[len(a.Solids)-1], a.Width) {
+	for len(a.Solids) > 1 && planeAllAir(a.Solids[len(a.Solids)-1]) {
 		a.Solids = a.Solids[:len(a.Solids)-1]
 	}
 }
@@ -385,7 +392,7 @@ func canonicalSolids(a AreaDefinition) [][]string {
 	}
 	// Trim trailing all-air planes.
 	hi := len(stack)
-	for hi > 0 && planeAllAir(stack[hi-1], a.Width) {
+	for hi > 0 && planeAllAir(stack[hi-1]) {
 		hi--
 	}
 	stack = stack[:hi]
@@ -396,14 +403,13 @@ func canonicalSolids(a AreaDefinition) [][]string {
 	return out
 }
 
-func planeAllAir(rows []string, width int) bool {
+func planeAllAir(rows []string) bool {
 	for _, r := range rows {
 		for i := 0; i < len(r); i++ {
 			if r[i] != SolidAir {
 				return false
 			}
 		}
-		_ = width
 	}
 	return true
 }

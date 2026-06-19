@@ -1,13 +1,13 @@
 package core
 
 // region.go is the data transform behind the editor's region copy/paste: a
-// rectangular block of the six grid layers snapshotted from one place and
+// rectangular block of the grid layers snapshotted from one place and
 // stamped at another. Pure (raylib-free) so it's unit-tested in the core suite;
 // the editor owns the marquee selection + undo around these calls.
 //
-// Scope: the SIX grid layers only (walls/floor/decor/props/ceiling/elevation) —
-// the same set gridLayers() enumerates. Entities (packs/chests/doors/crystals)
-// live in separate spawn lists and are NOT part of a region copy.
+// Scope: the grid layers only — exactly the set gridLayers() enumerates (walls,
+// floor, decor, props, ceiling, elevation, …). Entities (packs/chests/doors/
+// crystals) live in separate spawn lists and are NOT part of a region copy.
 
 // TileRegion is a copied rectangle of the grid layers. Layers is indexed in
 // gridLayers() order (walls, floor, decor, props, ceiling, elevation); each is up
@@ -27,7 +27,7 @@ func (r TileRegion) Empty() bool { return r.W <= 0 || r.H <= 0 || len(r.Layers) 
 // fresh (Go string slicing shares backing bytes immutably), so the snapshot is
 // safe to hold across later edits to the source.
 func CopyRegion(a *AreaDefinition, x0, z0, x1, z1 int) TileRegion {
-	if a == nil {
+	if a == nil || a.Width <= 0 || a.Height <= 0 {
 		return TileRegion{}
 	}
 	if x0 > x1 {
@@ -36,18 +36,8 @@ func CopyRegion(a *AreaDefinition, x0, z0, x1, z1 int) TileRegion {
 	if z0 > z1 {
 		z0, z1 = z1, z0
 	}
-	if x0 < 0 {
-		x0 = 0
-	}
-	if z0 < 0 {
-		z0 = 0
-	}
-	if x1 >= a.Width {
-		x1 = a.Width - 1
-	}
-	if z1 >= a.Height {
-		z1 = a.Height - 1
-	}
+	x0, x1 = Clamp(x0, 0, a.Width-1), Clamp(x1, 0, a.Width-1)
+	z0, z1 = Clamp(z0, 0, a.Height-1), Clamp(z1, 0, a.Height-1)
 	if x1 < x0 || z1 < z0 {
 		return TileRegion{}
 	}
@@ -78,7 +68,7 @@ func CopyRegion(a *AreaDefinition, x0, z0, x1, z1 int) TileRegion {
 
 // PasteRegion stamps r with its top-left at (atX,atZ), overwriting every grid
 // layer cell that lands in bounds and skips the rest (so a paste near an edge
-// clips cleanly). Because a region carries ALL six layers, the stamped block is
+// clips cleanly). Because a region carries ALL grid layers, the stamped block is
 // internally consistent — it reproduces exactly the source cells, so it can't
 // create a wall+prop conflict the source didn't have. No-op on an empty region.
 func (a *AreaDefinition) PasteRegion(r TileRegion, atX, atZ int) {
@@ -89,12 +79,9 @@ func (a *AreaDefinition) PasteRegion(r TileRegion, atX, atZ int) {
 	for li := 0; li < len(layers) && li < len(r.Layers); li++ {
 		lp := layers[li]
 		// Per-layer blank for padding a short (ragged) destination row up to the
-		// area width. Every layer's open cell is '.' except elevation; identify it
-		// by pointer (reorder-safe vs gridLayers' order), mirroring AreaContentEqual.
-		blank := byte(TileOpen)
-		if lp == &a.Elevation {
-			blank = ElevationGround
-		}
+		// area width — the shared per-layer open char (reorder-safe vs gridLayers'
+		// order), the same mapping AreaContentEqual uses.
+		blank := a.layerBlank(lp)
 		for i, row := range r.Layers[li] {
 			z := atZ + i
 			if z < 0 || z >= len(*lp) {

@@ -191,12 +191,6 @@ func saveVisualOverride(path, slug string, ov EnemyVisualOverride) error {
 	return saveVisualOverrides(path, all)
 }
 
-// SaveEnemyVisualOverrides writes the whole override map as indented JSON,
-// creating the sprites asset dir if needed.
-func SaveEnemyVisualOverrides(all map[string]EnemyVisualOverride) error {
-	return saveVisualOverrides(EnemyVisualsPath(), all)
-}
-
 // saveVisualOverrides writes the whole override map as indented JSON to `path`,
 // creating the sprites asset dir if needed. Shared body behind
 // Save{Enemy,Party}VisualOverrides.

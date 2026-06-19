@@ -554,7 +554,7 @@ func PartyAverageLevel(party []PartyMember) float64 {
 func PackAverageLevel(p Pack) float64 {
 	return averageOverLiving(len(p.Members),
 		func(i int) bool { return p.Members[i].Alive },
-		func(i int) int { return EnemyLevel(p.Members[i]) })
+		func(i int) int { return EnemyLevel(&p.Members[i]) })
 }
 
 // FleeChance returns the [FleeFloor, FleeCap] probability of a successful flee,
@@ -569,7 +569,10 @@ func FleeChance(partyAvgLevel, packAvgLevel float64) float64 {
 // member, ties broken by member order. Empty packs return 0 (callers
 // should range-check before drawing).
 func PackLeaderSlot(p Pack) int {
-	return leaderSlot(len(p.Members), func(i int) int { return EnemyInfoFor(p.Members[i]).Tier })
+	// Read .Tier through enemyGoverningDef (pointer) rather than EnemyInfoFor,
+	// which copies the whole EnemyDefinition out per member — this runs once per
+	// member per pack per frame via PackLeaderKind in render.drawFieldPacks.
+	return leaderSlot(len(p.Members), func(i int) int { return enemyGoverningDef(&p.Members[i]).Tier })
 }
 
 // PackLeader returns the highest-Tier member of the pack, or a zero

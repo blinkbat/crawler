@@ -46,7 +46,8 @@ func TestAverageLevels_LivingOnly(t *testing.T) {
 // TestEnemyLevel_DefaultsWhenUnauthored guards the "default level, no per-row
 // wiring" contract — an unauthored definition reads DefaultEnemyLevel.
 func TestEnemyLevel_DefaultsWhenUnauthored(t *testing.T) {
-	if got := EnemyLevel(NewEnemy(EnemyRat)); got != DefaultEnemyLevel {
+	rat := NewEnemy(EnemyRat)
+	if got := EnemyLevel(&rat); got != DefaultEnemyLevel {
 		t.Errorf("EnemyLevel(rat) = %d, want default %d", got, DefaultEnemyLevel)
 	}
 }

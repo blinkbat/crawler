@@ -506,28 +506,37 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	// always true at equal levels).
 	engageDir, engageDirOK := facingForTile(p, targetX, targetZ)
 	engageReachable := true
+	engageLevel := p.Level
 	if engageDirOK {
-		if len(g.Area.Solids) > 0 {
-			_, engageReachable = g.Area.ResolveStep(p.TileX, p.Level, p.TileZ, engageDir)
+		if g.Area.IsVoxel() {
+			engageLevel, engageReachable = g.Area.ResolveStep(p.TileX, p.Level, p.TileZ, engageDir)
 		} else {
 			engageReachable = g.Area.StepElevationOK(p.TileX, p.TileZ, engageDir)
 		}
 	}
-	if idx := core.PackIndexAtTile(g.Packs, targetX, targetZ); idx >= 0 && !g.EnemiesDisabled && engageReachable {
+	// On a voxel map, only engage a pack sharing the surface the step lands on
+	// (engageLevel) — so a player walking UNDER a deck doesn't get ambushed by a
+	// pack standing on it, and vice versa. On a heightfield, fall back to the
+	// tile-only match (pack Level isn't tracked per-surface there).
+	packHit := core.PackIndexAtTile(g.Packs, targetX, targetZ)
+	if g.Area.IsVoxel() {
+		packHit = core.PackIndexAtTileLevel(g.Packs, targetX, targetZ, engageLevel)
+	}
+	if packHit >= 0 && !g.EnemiesDisabled && engageReachable {
 		if startTurnToTile(p, targetX, targetZ) {
 			return
 		}
 		// Snap the engaging pack to its tile so the battle splash
 		// doesn't show it mid-step. Mirrors the AI-side engagement
 		// snap inside tickPackAI.
-		core.SnapPackToTile(&g.Packs[idx])
+		core.SnapPackToTile(&g.Packs[packHit])
 		// Debug "Skip Battles": auto-resolve the pack as a win (kills + XP +
 		// loot) without entering the battle scene, then stay in explore.
 		if g.DebugSkipBattles {
-			battle.DebugSkipWin(g, idx)
+			battle.DebugSkipWin(g, packHit)
 			return
 		}
-		battle.Start(g, idx, fleeFromX, fleeFromZ)
+		battle.Start(g, packHit, fleeFromX, fleeFromZ)
 		return
 	}
 	// Elevation/voxel gate FIRST: resolve WHICH surface the party would land on
@@ -536,7 +545,7 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	// The entry check below then needs that level for level-aware prop blocking.
 	landLevel := p.Level
 	if dir, ok := facingForTile(p, targetX, targetZ); ok {
-		if len(g.Area.Solids) > 0 {
+		if g.Area.IsVoxel() {
 			l, stepOK := g.Area.ResolveStep(p.TileX, p.Level, p.TileZ, dir)
 			if !stepOK {
 				return
@@ -563,7 +572,7 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	// already consumed the pack-tile case, so we don't need OccupiedPacks here. On
 	// a voxel map the level-aware variant lets a prop block only its own levels —
 	// so you can walk UNDER a deck past a ground-rooted tree.
-	if len(g.Area.Solids) > 0 {
+	if g.Area.IsVoxel() {
 		if !core.CanEnterTileAtLevel(g, targetX, targetZ, landLevel, core.EnterOpts{AllowDoorTile: true}) {
 			return
 		}

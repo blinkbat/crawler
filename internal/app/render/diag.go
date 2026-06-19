@@ -137,15 +137,14 @@ func trimPending() {
 	renderLogPendingInit = renderLogPendingInit[:n-1]
 }
 
-// LogRenderInit records a one-off init line (shader compile result,
-// model load count, etc.). If the log file is open it writes
-// immediately; otherwise it stashes the line in renderLogPendingInit
-// to be flushed the next time OpenRenderLog runs. The pending
-// buffer is bounded by renderLogPendingCap — past that the oldest
-// gets dropped so a long session without the log toggled on can't
-// grow the buffer unboundedly.
-func LogRenderInit(format string, args ...interface{}) {
-	line := fmt.Sprintf("[init] "+format, args...)
+// logRenderLine is the shared write-or-stash body behind LogRenderInit /
+// LogRenderError. If the log file is open it writes the tagged line immediately;
+// otherwise it stashes the line in renderLogPendingInit to be flushed the next
+// time OpenRenderLog runs. The pending buffer is bounded by renderLogPendingCap —
+// past that the oldest gets dropped so a long session without the log toggled on
+// can't grow the buffer unboundedly.
+func logRenderLine(tag, format string, args ...interface{}) {
+	line := fmt.Sprintf(tag+format, args...)
 	renderLogMu.Lock()
 	defer renderLogMu.Unlock()
 	if renderLogFile != nil {
@@ -159,22 +158,17 @@ func LogRenderInit(format string, args ...interface{}) {
 	renderLogPendingInit = append(renderLogPendingInit, line)
 }
 
-// LogRenderError stamps a one-off error line. Same write-or-stash
-// semantics as LogRenderInit; tagged differently so a grep on the
-// resulting log can separate errors from init noise.
+// LogRenderInit records a one-off init line (shader compile result,
+// model load count, etc.).
+func LogRenderInit(format string, args ...interface{}) {
+	logRenderLine("[init] ", format, args...)
+}
+
+// LogRenderError stamps a one-off error line. Same write-or-stash semantics as
+// LogRenderInit; tagged differently so a grep on the resulting log can separate
+// errors from init noise.
 func LogRenderError(format string, args ...interface{}) {
-	line := fmt.Sprintf("[error] "+format, args...)
-	renderLogMu.Lock()
-	defer renderLogMu.Unlock()
-	if renderLogFile != nil {
-		fmt.Fprintln(renderLogFile, line)
-		_ = renderLogFile.Sync()
-		return
-	}
-	if len(renderLogPendingInit) >= renderLogPendingCap {
-		trimPending()
-	}
-	renderLogPendingInit = append(renderLogPendingInit, line)
+	logRenderLine("[error] ", format, args...)
 }
 
 // renderFrameStats is the per-frame snapshot recorded by DrawWorld

@@ -37,10 +37,6 @@ const (
 	// four rows — mirroring how doorEdit carries its facing as a payload
 	// rather than enumerating a kind per direction.
 	ctxItemStartFacing
-	// ctxItemSetFaceSkin assigns the right-clicked tile's cliff-face skin
-	// (rock / ivy / cracked / crumbling). The chosen skin char rides in
-	// ctxItem.skin. Offered only on a tile that actually exposes a face.
-	ctxItemSetFaceSkin
 	// ctxItemSetFaceDir opens the skin dropdown for ONE of the tile's faces
 	// (ctxItem.facing = a core direction, or -1 for "all faces" = the base skin).
 	// Lets the author skin N/E/S/W independently from a top-down view.
@@ -61,9 +57,6 @@ type ctxItem struct {
 	// ignored by every other kind. Lets one facing kind cover all four rows
 	// instead of a kind per direction.
 	facing int
-	// skin is the payload for ctxItemSetFaceSkin (a face-layer char). Ignored
-	// by every other kind.
-	skin byte
 }
 
 // contextMenuState is the in-State data for an open right-click menu.
@@ -374,14 +367,6 @@ func runContextItem(s *State, item ctxItem) {
 		s.dirty = true
 	case ctxItemStartFacing:
 		setStartFacing(s, item.facing)
-	case ctxItemSetFaceSkin:
-		// No-op (no undo) when the skin is already what's there.
-		if s.area.FaceSkinAt(x, z) == item.skin {
-			return
-		}
-		pushUndo(s)
-		setLayerCell(&s.area.Walls, x, z, item.skin)
-		s.dirty = true
 	case ctxItemSetFaceDir:
 		// Remember which tile + face the picker edits, then open the skin
 		// dropdown anchored at the (closing) context menu. faceSkinEntries applies.

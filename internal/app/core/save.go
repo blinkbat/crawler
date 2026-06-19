@@ -24,6 +24,10 @@ const (
 	// SaveVersion stamps the on-disk format. Bump when the SaveData shape
 	// changes incompatibly; LoadSave rejects a newer version it can't read.
 	SaveVersion = 1
+	// MinSaveVersion is the oldest on-disk version this build still reads.
+	// Every real save stamps Version >= MinSaveVersion via NewSaveData, so a
+	// lower value means a missing/corrupt version field, not legacy content.
+	MinSaveVersion = 1
 )
 
 // SaveDir resolves the save-file directory (cwd- or exe-relative, like the
@@ -215,7 +219,7 @@ func SaveExists() bool {
 // JSON — not v0 content. Pulled out of LoadSave so the gate is unit-testable
 // without touching the on-disk save file.
 func saveVersionSupported(v int) bool {
-	return v >= 1 && v <= SaveVersion
+	return v >= MinSaveVersion && v <= SaveVersion
 }
 
 // LoadSave reads and decodes the save file. Returns an error for a missing
@@ -575,5 +579,5 @@ type saveVersionError struct {
 }
 
 func (e *saveVersionError) Error() string {
-	return fmt.Sprintf("unsupported save file version %d (this build reads 1..%d)", e.got, e.max)
+	return fmt.Sprintf("unsupported save file version %d (this build reads %d..%d)", e.got, MinSaveVersion, e.max)
 }

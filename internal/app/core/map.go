@@ -851,6 +851,14 @@ func (a *AreaDefinition) levelGridAt(layer []string, x, z int) int {
 	if c, ok := a.layerByteAt(layer, x, z); ok && c != PropLevelAuto {
 		return ElevationLevelFromChar(c)
 	}
+	// Auto: rest on the column's lowest standable surface. On a heightfield (no
+	// explicit stack) that surface is exactly the column top, so read it directly
+	// — LowestStandableLevel would call SolidStackHeight, which scans the WHOLE
+	// map, and this runs per-tile per-frame in the render loop (drawWorld anchors
+	// every decor/prop through here). Only a gapped voxel column needs the walk.
+	if len(a.Solids) == 0 {
+		return a.ElevationLevelAt(x, z)
+	}
 	if lo := a.LowestStandableLevel(x, z); lo >= 0 {
 		return lo
 	}

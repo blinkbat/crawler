@@ -455,14 +455,6 @@ func LiveStackCount(inv []ItemStack) int {
 	return n
 }
 
-// InventoryEmpty is a convenience for the "Item" menu option's enabled
-// state: returns true when there are no usable items at all. Walks the
-// slice directly (cheaper than allocating via LiveStacks just to check
-// length) but shares the same "positive count wins" rule.
-func InventoryEmpty(inv []ItemStack) bool {
-	return LiveStackCount(inv) == 0
-}
-
 // isConsumable reports whether a kind is a battle-usable consumable: a
 // positive-count item with no equip slot (cheese, jerky). Equipment
 // (Slot != SlotNone) shares the global inventory but can't be "used" in

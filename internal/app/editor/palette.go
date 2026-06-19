@@ -13,8 +13,8 @@ import (
 // editorFontAccent/Tiny cover the dense list-row and sub-hint sizes;
 // sounds.go keeps its own soundFont* trio for the sound modal.
 const (
-	// Bumped one notch up (was 18/16/14/13/12/11/10) alongside the game's
-	// canonical sizes for the Della Respira face.
+	// Editor chrome font ladder, sized for the Della Respira face. Descending
+	// from the topbar label down to grid tick captions.
 	editorFontTopbar = float32(20) // topbar map-id label
 	editorFontBody   = float32(18) // buttons + primary panel text
 	editorFontLabel  = float32(16) // topbar info line / field labels

@@ -26,12 +26,12 @@ const (
 //	Recall:     memory — a directional pattern shows then hides; reproduce it.
 //	Overcharge: a charge bar with a post-peak OVERLOAD band (bonus + recoil).
 const (
-	TimingKindPress      = 0
-	TimingKindCharge     = 1
-	TimingKindSequence   = 2
-	TimingKindReels      = 3
-	TimingKindRecall     = 4
-	TimingKindOvercharge = 5
+	TimingKindPress = iota
+	TimingKindCharge
+	TimingKindSequence
+	TimingKindReels
+	TimingKindRecall
+	TimingKindOvercharge
 )
 
 func init() {
@@ -81,9 +81,9 @@ func init() {
 // Per-slot result for the sequence minigame. SequenceResults is a slice
 // parallel to SequenceTargets — one entry per arrow.
 const (
-	SeqResultPending = 0
-	SeqResultCorrect = 1
-	SeqResultWrong   = 2
+	SeqResultPending = iota
+	SeqResultCorrect
+	SeqResultWrong
 )
 
 // TimingState drives a single instance of the "timed hit" minigame. It owns

@@ -79,6 +79,11 @@ func voxelNeighborSolid(m *core.AreaDefinition, nx, nz, L int) bool {
 	return solid
 }
 
+// voxelSolidScratch is the reused per-column solidity buffer drawVoxelColumn
+// resolves once before its floors/faces/undersides passes. Safe as package state
+// because raylib draw is single-threaded.
+var voxelSolidScratch []bool
+
 // drawVoxelColumn renders column (x,z) from the voxel stack: a floor on every
 // standable surface (authored Floor on the lowest/ground surface, generic
 // material floor on raised decks), one stretched rock face per contiguous
@@ -87,11 +92,33 @@ func voxelNeighborSolid(m *core.AreaDefinition, nx, nz, L int) bool {
 func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets Resources, m *core.AreaDefinition, x, z int, cx, cz float32) int {
 	const half = float32(core.TileSize) / 2
 	h := m.SolidStackHeight()
-	lowest := m.LowestStandableLevel(x, z)
+
+	// Resolve each level's solidity ONCE into the reused scratch column. The three
+	// passes below (and the four per-direction face sub-passes) would otherwise
+	// each re-read SolidAt per level — the self-column re-read alone is ~5×h
+	// redundant reads per column per frame. standable(L) and the ground level then
+	// derive from the scratch instead of calling Standable / LowestStandableLevel
+	// (each its own stack walk). SolidAt stays the only read of the neighbour
+	// columns (genuinely per-direction). Equivalent to core.Standable: cube L
+	// solid AND L+1 air (a level past the top reads as air).
+	if cap(voxelSolidScratch) < h {
+		voxelSolidScratch = make([]bool, h)
+	}
+	solid := voxelSolidScratch[:h]
+	for L := 0; L < h; L++ {
+		_, solid[L] = m.SolidAt(x, L, z)
+	}
+	lowest := -1
+	for L := 0; L < h; L++ {
+		if solid[L] && (L+1 >= h || !solid[L+1]) {
+			lowest = L
+			break
+		}
+	}
 
 	// Floors on every standable surface.
 	for L := 0; L < h; L++ {
-		if !m.Standable(x, L, z) {
+		if !(solid[L] && (L+1 >= h || !solid[L+1])) {
 			continue
 		}
 		topY := core.ElevationWorldY(L)
@@ -131,7 +158,7 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 		// (drawCliffFace scales the model by its level count, which stretches the
 		// UVs). A run of three exposed cubes now reads as three stacked cubes.
 		for L := 0; L < h; L++ {
-			if _, solid := m.SolidAt(x, L, z); !solid || voxelNeighborSolid(m, nx, nz, L) {
+			if !solid[L] || voxelNeighborSolid(m, nx, nz, L) {
 				continue
 			}
 			drawCliffFace(skin, cx, core.ElevationWorldY(L-1), cz, yaw, 1)
@@ -143,10 +170,10 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 	// cube with air directly below it. L starts at 1 since a level-0 cube rests
 	// on the world floor and has no visible underside.
 	for L := 1; L < h; L++ {
-		if _, solid := m.SolidAt(x, L, z); !solid {
+		if !solid[L] {
 			continue
 		}
-		if _, below := m.SolidAt(x, L-1, z); below {
+		if solid[L-1] {
 			continue // resting on the cube beneath — not a floating bottom
 		}
 		rl.DrawModelEx(assets.underModel,

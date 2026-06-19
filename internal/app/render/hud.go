@@ -33,7 +33,7 @@ func DrawOverlay(g *core.GameState, assets Resources) {
 		CacheTurnForecastForFrame(g)
 		drawBattleHUD(g, assets)
 		drawTurnPanel(g, assets)
-		drawMinimap(g.Area, g, assets)
+		drawMinimap(&g.Area, g, assets)
 		DrawPartyRibbon(g, assets)
 		drawTimingBar(g, assets)
 		drawBattleSplash(g, assets)
@@ -43,7 +43,7 @@ func DrawOverlay(g *core.GameState, assets Resources) {
 		DrawVictorySpoils(g, assets)
 		return
 	}
-	drawMinimap(g.Area, g, assets)
+	drawMinimap(&g.Area, g, assets)
 	// The action log persists out of combat (bottom-left), so exploration shows
 	// the same rolling pane as battle — saves, crystal rests, the last fight's
 	// result, etc. Reads g.ActionLog, which is no longer reset between fights.

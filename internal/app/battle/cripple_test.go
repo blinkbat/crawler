@@ -28,7 +28,7 @@ func TestApplyCripple_LowersEnemySPD(t *testing.T) {
 	if got := enemyDebuffStats(enemy).SPD; got != -core.CrippleSPDReduction {
 		t.Errorf("debuff SPD = %d, want %d", got, -core.CrippleSPDReduction)
 	}
-	if got := core.EffectiveEnemyStats(enemy).SPD; got != baseSPD-core.CrippleSPDReduction {
+	if got := core.EffectiveEnemyStats(&enemy).SPD; got != baseSPD-core.CrippleSPDReduction {
 		t.Errorf("EffectiveEnemyStats.SPD = %d, want %d", got, baseSPD-core.CrippleSPDReduction)
 	}
 }
@@ -46,7 +46,7 @@ func TestTickEnemyBuffAfterTurn_DrainsDebuff(t *testing.T) {
 	if got := core.MaxStatusModTurns(g.Packs[0].Members[0].Debuffs); got != 1 {
 		t.Fatalf("after one tick debuff turns = %d, want 1", got)
 	}
-	if got := core.EffectiveEnemyStats(g.Packs[0].Members[0]).SPD; got != base-2 {
+	if got := core.EffectiveEnemyStats(&g.Packs[0].Members[0]).SPD; got != base-2 {
 		t.Errorf("debuff dropped early at 1 turn left: EffectiveEnemyStats.SPD = %d, want %d", got, base-2)
 	}
 
@@ -54,7 +54,7 @@ func TestTickEnemyBuffAfterTurn_DrainsDebuff(t *testing.T) {
 	if got := core.MaxStatusModTurns(g.Packs[0].Members[0].Debuffs); got != 0 {
 		t.Errorf("after second tick debuff turns = %d, want 0", got)
 	}
-	if got := core.EffectiveEnemyStats(g.Packs[0].Members[0]).SPD; got != base {
+	if got := core.EffectiveEnemyStats(&g.Packs[0].Members[0]).SPD; got != base {
 		t.Errorf("expired debuff still applying: EffectiveEnemyStats.SPD = %d, want base %d", got, base)
 	}
 }

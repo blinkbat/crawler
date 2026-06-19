@@ -486,7 +486,7 @@ var layerSections = []layerSection{
 var GridLayerCount int
 
 // init asserts layerSections covers every real slot (slotWalls..
-// slotCustomEnemies) exactly once, so a new layerSlot enum value added
+// slotFaces) exactly once, so a new layerSlot enum value added
 // without a table row panics at startup instead of silently parsing as
 // slotNone / encoding nothing. It also tallies GridLayerCount.
 func init() {
@@ -781,7 +781,12 @@ func Parse(r io.Reader) (MapFile, error) {
 		// 0x0 dims, which is correct.)
 		target := layerSlice(&mf, state)
 		if target == nil {
-			continue
+			// Reaching here means `state` is a section slot that is neither a grid
+			// layer (field != nil) nor handled by a bespoke arm above — i.e. a new
+			// layerSlot was added to layerSections (passing the init coverage
+			// assert) without a parse handler. Fail loudly rather than silently
+			// dropping every line of that section. Unreachable for any valid map.
+			panic(fmt.Sprintf("mapfile: section slot %d has no parse handler — add a bespoke arm or a grid field accessor", state))
 		}
 		if len(*target) >= mf.Height {
 			if strings.TrimSpace(raw) == "" {
@@ -854,6 +859,26 @@ func parseHeaderLine(mf *MapFile, line string, lineNo int) error {
 		mf.StartX, mf.StartZ, mf.StartFace = x, z, face
 	default:
 		return fmt.Errorf("line %d: unknown header key %q", lineNo, key)
+	}
+	return nil
+}
+
+// validateOptionalGrid dimension-checks an optional single-grid layer
+// (prop_levels / decor_levels): absent (0 rows) is fine, but a present grid must
+// be exactly Height×Width so a ragged plane can't reach the renderer/collision.
+// Shared by the two near-identical optional-level-grid checks.
+func (mf *MapFile) validateOptionalGrid(name string, rows []string) error {
+	n := len(rows)
+	if n == 0 {
+		return nil
+	}
+	if n != mf.Height {
+		return fmt.Errorf("%s has %d rows, size declares %d", name, n, mf.Height)
+	}
+	for i, row := range rows {
+		if len(row) != mf.Width {
+			return fmt.Errorf("%s row %d has %d cols, size declares %d", name, i, len(row), mf.Width)
+		}
 	}
 	return nil
 }
@@ -931,28 +956,14 @@ func (mf *MapFile) validate() error {
 			}
 		}
 	}
-	// prop_levels: optional per-tile prop-level grid; dimension-check only (the
-	// char alphabet — base-36 level or '.' auto — is core's concern), same as the
-	// other grids, so a ragged plane can't reach the renderer/collision.
-	if n := len(mf.PropLevels); n != 0 {
-		if n != mf.Height {
-			return fmt.Errorf("prop_levels has %d rows, size declares %d", n, mf.Height)
-		}
-		for i, row := range mf.PropLevels {
-			if len(row) != mf.Width {
-				return fmt.Errorf("prop_levels row %d has %d cols, size declares %d", i, len(row), mf.Width)
-			}
-		}
+	// prop_levels / decor_levels: optional per-tile level grids; dimension-check
+	// only (the char alphabet — base-36 level or '.' auto — is core's concern),
+	// same as the other grids, so a ragged plane can't reach the renderer/collision.
+	if err := mf.validateOptionalGrid(SectionPropLevels, mf.PropLevels); err != nil {
+		return err
 	}
-	if n := len(mf.DecorLevels); n != 0 {
-		if n != mf.Height {
-			return fmt.Errorf("decor_levels has %d rows, size declares %d", n, mf.Height)
-		}
-		for i, row := range mf.DecorLevels {
-			if len(row) != mf.Width {
-				return fmt.Errorf("decor_levels row %d has %d cols, size declares %d", i, len(row), mf.Width)
-			}
-		}
+	if err := mf.validateOptionalGrid(SectionDecorLevels, mf.DecorLevels); err != nil {
+		return err
 	}
 	// faces: sparse per-tile overrides — bounds-check each so a stray line can't
 	// feed an off-map index to the renderer.
@@ -1334,6 +1345,21 @@ func parseCustomEnemyLine(line string, lineNo int) (MapCustomEnemy, error) {
 	return ce, nil
 }
 
+// writeVerbatimSection emits an optional section as a "name:" header followed by
+// each row written verbatim — but ONLY when rows is non-empty, so a map without
+// the section stays byte-identical (the same backward-compat rule solids/doors/
+// crystals follow). Shared by the flat string-row sections (prop_levels,
+// decor_levels, dialogs, triggers); solids keeps its own nested plane loop.
+func writeVerbatimSection(bw *bufio.Writer, name string, rows []string) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Fprintln(bw, name+":")
+	for _, row := range rows {
+		fmt.Fprintln(bw, row)
+	}
+}
+
 // Encode writes mf in the canonical .map format. Layers are emitted in a
 // fixed order so encoded maps diff cleanly across edits.
 func (mf MapFile) Encode(w io.Writer) error {
@@ -1363,21 +1389,11 @@ func (mf MapFile) Encode(w io.Writer) error {
 			}
 		}
 	}
-	// prop_levels: appended only when some prop sits above its auto surface (a
-	// decked prop); a map whose props all rest on the ground omits it and stays
-	// byte-identical, like solids:.
-	if len(mf.PropLevels) > 0 {
-		fmt.Fprintln(bw, SectionPropLevels+":")
-		for _, row := range mf.PropLevels {
-			fmt.Fprintln(bw, row)
-		}
-	}
-	if len(mf.DecorLevels) > 0 {
-		fmt.Fprintln(bw, SectionDecorLevels+":")
-		for _, row := range mf.DecorLevels {
-			fmt.Fprintln(bw, row)
-		}
-	}
+	// prop_levels / decor_levels: appended only when some prop/decor sits above
+	// its auto surface (a decked entity); a map whose entities all rest on the
+	// ground omits them and stays byte-identical, like solids:.
+	writeVerbatimSection(bw, SectionPropLevels, mf.PropLevels)
+	writeVerbatimSection(bw, SectionDecorLevels, mf.DecorLevels)
 	// faces: one line per overridden tile ("x z NESW"); omitted entirely when no
 	// tile overrides a face, so base-skin maps stay byte-identical.
 	if len(mf.Faces) > 0 {
@@ -1471,22 +1487,11 @@ func (mf MapFile) Encode(w io.Writer) error {
 			)
 		}
 	}
-	// dialogs: emits only when present so older maps stay byte-identical.
-	// Each entry is a pre-encoded JSON object written verbatim (core owns the
-	// marshalling), one per line.
-	if len(mf.Dialogs) > 0 {
-		fmt.Fprintln(bw, SectionDialogs+":")
-		for _, d := range mf.Dialogs {
-			fmt.Fprintln(bw, d)
-		}
-	}
-	// triggers: emits only when present (same byte-stable rule as dialogs).
-	if len(mf.Triggers) > 0 {
-		fmt.Fprintln(bw, SectionTriggers+":")
-		for _, t := range mf.Triggers {
-			fmt.Fprintln(bw, t)
-		}
-	}
+	// dialogs: emits only when present so older maps stay byte-identical. Each
+	// entry is a pre-encoded JSON object written verbatim (core owns the
+	// marshalling), one per line. triggers: same byte-stable rule.
+	writeVerbatimSection(bw, SectionDialogs, mf.Dialogs)
+	writeVerbatimSection(bw, SectionTriggers, mf.Triggers)
 	return bw.Flush()
 }
 

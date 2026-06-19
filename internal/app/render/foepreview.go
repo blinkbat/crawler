@@ -189,7 +189,7 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 	// Same per-kind placement as the battle roster, via the shared helper so
 	// the preview stays faithful to drawBattlePack's depth/shadow/chevron/
 	// yOffset ordering by construction (not by a hand-synced comment).
-	place := resolveBillboardPlacement(cam, foeAnchor, v)
+	place := resolveBillboardPlacement(cam, foeAnchor, &v)
 	if v.shadowRadius > 0 {
 		drawGroundShadow(place.shadowX, place.shadowZ, v.shadowRadius)
 	}

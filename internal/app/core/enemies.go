@@ -685,11 +685,12 @@ func EnemySingularName(e *Enemy) string { return enemyGoverningDef(e).SingularNa
 // math. The base stats stay clean on the definition; combat reads (dodge / crit /
 // turn-rate / status-resist) route through here so every kind of stat delta lands.
 // Cheap fast-path when no debuff is active (the common case).
-func EffectiveEnemyStats(e Enemy) Stats {
+func EffectiveEnemyStats(e *Enemy) Stats {
 	// Read base Stats through the governing-def pointer rather than
 	// EnemyInfoFor's full-struct value copy — this runs per combat roll
 	// (dodge / crit / resist / SPD) and only needs the 24-byte Stats block.
-	out := enemyGoverningDef(&e).Stats
+	// Takes *Enemy so the caller doesn't copy the ~250-byte Enemy either.
+	out := enemyGoverningDef(e).Stats
 	if len(e.Debuffs) == 0 {
 		return out
 	}
@@ -719,8 +720,10 @@ func StampEnemyDebuff(e *Enemy, source SkillID, effect SkillEffect) bool {
 // DefaultEnemyLevel so every kind has a sane level without per-row authoring.
 // Read by the flee-chance math (party avg level vs pack avg level); no other
 // system reads enemy level yet.
-func EnemyLevel(e Enemy) int {
-	if l := EnemyInfoFor(e).Level; l > 0 {
+func EnemyLevel(e *Enemy) int {
+	// Read Level through the governing-def pointer (Level isn't override-adjusted
+	// like MaxHP/Armor) rather than EnemyInfoFor's full-struct value copy.
+	if l := enemyGoverningDef(e).Level; l > 0 {
 		return l
 	}
 	return DefaultEnemyLevel
@@ -746,8 +749,10 @@ func ScaleEnemyDifficulty(n int) int {
 	return scaled
 }
 
-func EnemyBasicDamage(e Enemy) int {
-	return ScaleEnemyDifficulty(EnemyInfoFor(e).AttackDamage)
+func EnemyBasicDamage(e *Enemy) int {
+	// AttackDamage isn't override-adjusted, so read it through the governing-def
+	// pointer rather than EnemyInfoFor's full-struct value copy.
+	return ScaleEnemyDifficulty(enemyGoverningDef(e).AttackDamage)
 }
 
 func NewEnemy(kind EnemyKind) Enemy {

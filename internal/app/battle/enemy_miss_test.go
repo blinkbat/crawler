@@ -35,7 +35,7 @@ func TestResolveEnemyMiss_DealsNoDamage(t *testing.T) {
 // for the test enemy's accuracy.
 func TestBeginEnemyAttack_MissSkipsDefendBar(t *testing.T) {
 	g := newTestState()
-	stats := core.EffectiveEnemyStats(core.BattleMembers(g)[0])
+	stats := core.EffectiveEnemyStats(&core.BattleMembers(g)[0])
 
 	// Find a seed whose first Float64 draw whiffs (>= hit chance). Accuracy caps
 	// below 1, so such a seed always exists; bound the search defensively.

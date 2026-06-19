@@ -145,7 +145,7 @@ func scaleOrDefault(s float32) float32 {
 // (depthOffset already folded into `position`) is what keeps "the shadow stays
 // under the feet" true no matter how the sprite is pushed around — the offsets
 // are an explicit extra placement, not a separate anchor that can drift.
-func shadowFootprint(camera rl.Camera3D, position rl.Vector3, v enemyVisual) (float32, float32) {
+func shadowFootprint(camera rl.Camera3D, position rl.Vector3, v *enemyVisual) (float32, float32) {
 	x, z := position.X, position.Z
 	if v.shadowOffsetX != 0 || v.shadowOffsetZ != 0 {
 		fwd := horizontalForward(camera)
@@ -624,11 +624,16 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 			}
 			// Decor sits on its placed level too (deck vs ground); on a heightfield
 			// column DecorLevelAt is the single surface, so flat maps are unchanged.
-			decorCenter := rl.NewVector3(cx, m.StandGroundYAt(x, m.DecorLevelAt(x, z), z), cz)
-			drawDecor(assets, m.Decor[z][x], x, z, cx, cz, decorCenter)
-			if logActive && m.Decor[z][x] != core.DecorEmpty {
-				// DecorAuto still counts — the floor scatter is decor.
-				stats.DecorDrawn++
+			// Guard on non-empty so the per-tile StandGroundYAt + DecorLevelAt anchor
+			// math is skipped for the (common) empty-decor tiles drawDecor would
+			// no-op on anyway.
+			if decor := m.Decor[z][x]; decor != core.DecorEmpty {
+				decorCenter := rl.NewVector3(cx, m.StandGroundYAt(x, te.decorLevel, z), cz)
+				drawDecor(assets, decor, x, z, cx, cz, decorCenter)
+				if logActive {
+					// DecorAuto still counts — the floor scatter is decor.
+					stats.DecorDrawn++
+				}
 			}
 			if prop := m.Props[z][x]; prop != core.TilePropEmpty {
 				propYaw := propYawDeg(x, z)
@@ -636,7 +641,7 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnl
 				// ground by default, but a deck/overhang level for a prop authored
 				// up there. On a heightfield column this equals `center` (the single
 				// surface), so flat maps are unchanged.
-				propCenter := rl.NewVector3(cx, m.StandGroundYAt(x, m.PropLevelAt(x, z), z), cz)
+				propCenter := rl.NewVector3(cx, m.StandGroundYAt(x, te.propLevel, z), cz)
 				drawn := false
 				if handler := inlinePropTable[prop]; handler != nil {
 					handler(assets, m, x, z, propCenter, propYaw)
@@ -752,6 +757,14 @@ type tileElev struct {
 	level int
 	ramp  int  // ascent facing, or core.NoRamp on a flat tile
 	skin  byte // cliff-face skin char (core.FaceSkinAt)
+	// decorLevel / propLevel are the surfaces decor and props anchor to
+	// (DecorLevelAt / PropLevelAt). Cached here because on a VOXEL map an
+	// auto-level tile resolves through LowestStandableLevel — an O(stackHeight)
+	// column rescan — which would otherwise run per visible decor/prop tile
+	// every frame. Decoded once with the rest of the grid; the cache key already
+	// hashes Solids, so a runtime cube edit rebuilds these too.
+	decorLevel int
+	propLevel  int
 }
 
 // elevGridBuf is reused across frames + passes to avoid an allocation per draw.
@@ -818,9 +831,11 @@ func elevGrid(m *core.AreaDefinition, w, h int) []tileElev {
 				ramp = f
 			}
 			elevGridBuf[z*w+x] = tileElev{
-				level: m.ElevationLevelAt(x, z),
-				ramp:  ramp,
-				skin:  m.FaceSkinAt(x, z),
+				level:      m.ElevationLevelAt(x, z),
+				ramp:       ramp,
+				skin:       m.FaceSkinAt(x, z),
+				decorLevel: m.DecorLevelAt(x, z),
+				propLevel:  m.PropLevelAt(x, z),
 			}
 		}
 	}
@@ -1752,7 +1767,7 @@ func drawFieldPacks(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		groundY := g.Area.StandGroundYAt(pack.TileX, pack.Level, pack.TileZ)
 		position := rl.NewVector3(pack.X, enemyBillboardY+groundY, pack.Z)
 		if visual.shadowRadius > 0 {
-			sx, sz := shadowFootprint(camera, position, visual)
+			sx, sz := shadowFootprint(camera, position, &visual)
 			drawGroundShadowAt(sx, groundY+groundShadowFloorClearance, sz, visual.shadowRadius)
 		}
 		billboardPos := position
@@ -1787,7 +1802,7 @@ type billboardPlacement struct {
 // forward) to position, then derives the contact-shadow footprint, the target-
 // chevron anchor (markerY/X), and the sprite center (yOffset) from that
 // adjusted base — the exact ordering drawBattlePack and DrawFoePreview share.
-func resolveBillboardPlacement(camera rl.Camera3D, position rl.Vector3, v enemyVisual) billboardPlacement {
+func resolveBillboardPlacement(camera rl.Camera3D, position rl.Vector3, v *enemyVisual) billboardPlacement {
 	base := position
 	if v.depthOffset != 0 {
 		fwd := horizontalForward(camera)
@@ -1846,7 +1861,7 @@ func drawBattlePack(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		// square Feral Rat PNG, the chevron anchor, the contact-shadow
 		// footprint, and the lowered sprite center) all derive from one shared
 		// helper so battle + the editor Foe Visualizer can't drift on ordering.
-		place := resolveBillboardPlacement(camera, position, visual)
+		place := resolveBillboardPlacement(camera, position, &visual)
 		tint := rl.White
 		if !enemy.Alive {
 			alpha := uint8(220 * core.Clamp(float64(enemy.DeathFade/core.DeathFadeDuration), 0, 1))
@@ -2174,7 +2189,7 @@ func DrawPartySprites(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		// Per-class depth / yOffset / marker / shadow placement all derive from
 		// the same shared helper the foe billboards and the Party Visualizer
 		// preview use, so authored alignment can't drift between battle and editor.
-		place := resolveBillboardPlacement(camera, position, visual)
+		place := resolveBillboardPlacement(camera, position, &visual)
 		size := visual.size
 		tint := rl.White
 		if g.Party[i].HP <= 0 {

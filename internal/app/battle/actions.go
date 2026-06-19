@@ -795,7 +795,7 @@ func beginSingleTargetSkill(g *core.GameState, skill core.SkillID, quality int) 
 	// resistWIS is the target's WIS, hoisted here so the status-proc callers
 	// don't each re-derive core.EnemyInfoFor(*enemy).Stats.WIS (it doesn't
 	// change mid-action).
-	resistWIS = core.EffectiveEnemyStats(target).WIS
+	resistWIS = core.EffectiveEnemyStats(&target).WIS
 	return actor, target, rawDamage, resistWIS, true
 }
 
@@ -1041,7 +1041,7 @@ func applyAttack(g *core.GameState, quality int) bool {
 	// nimble enemy. Symmetric with the party-side dodge in
 	// resolveEnemyAttacker. Skills are NOT dodgeable (mirrors
 	// MeleeAccuracy's basic-attack-only gate).
-	if core.RollDodge(g.Rand(), core.EffectiveEnemyStats(target)) {
+	if core.RollDodge(g.Rand(), core.EffectiveEnemyStats(&target)) {
 		setBattleMessage(g, fmt.Sprintf("%s%s lunges but the %s slips aside.", qualityTag(quality), attacker.Name, core.EnemySingularNoun(target)))
 		finishActorTurn(g)
 		return true
@@ -1663,7 +1663,7 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, hitVerb, emptyVe
 		_, defeated := damageEnemy(g, slot, damage, quality, tag)
 		core.EnqueueEnemyVFX(g, vfx, slot)
 		hits++
-		resistWIS := core.EffectiveEnemyStats(*enemy).WIS
+		resistWIS := core.EffectiveEnemyStats(enemy).WIS
 		// Count this foe as afflicted AT MOST ONCE even if multiple statuses
 		// land, so the "N afflicted" tally can't exceed the number of foes.
 		struck := false
@@ -3160,13 +3160,13 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 		tryRiposte(g, target, slot)
 		return true
 	}
-	rawDamage := core.EnemyBasicDamage(*enemy)
+	rawDamage := core.EnemyBasicDamage(enemy)
 	// Enemy crit on basic attacks — symmetric with the player side, but
 	// no timing-grade bonus (enemies don't press a bar). Pure
 	// DEX-driven CritChance via core.RollCrit at the Miss grade
 	// keeps enemies on a flat ~5-10% crit floor where the player can
 	// push 30%+ on Excellent.
-	enemyCrit := core.RollCrit(g.Rand(), core.EffectiveEnemyStats(*enemy), core.TimingQualityMiss)
+	enemyCrit := core.RollCrit(g.Rand(), core.EffectiveEnemyStats(enemy), core.TimingQualityMiss)
 	rawDamage = applyCritMultiplier(rawDamage, enemyCrit, false)
 	damage := core.ScaleIncomingDamage(rawDamage, defendQuality)
 	// Plain enemy melee is physically tagged so the party's Armor field

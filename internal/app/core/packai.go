@@ -68,6 +68,30 @@ func PackStepIntoPlayer(tx, tz, px, pz int) bool {
 	return tx == px && tz == pz
 }
 
+// PackEngagesPlayerAt reports whether pack p stepping onto (nx,nz) collides with
+// the player and should start a battle: the same tile, and — on a voxel map —
+// the same standing surface, so a pack crossing a bridge deck doesn't engage a
+// player on the ground beneath it (or vice versa). On a heightfield the level
+// check is skipped: a pack's Level isn't tracked per-surface there (it can drift
+// across a ramp), and engagement was always purely tile-based, so this stays
+// byte-identical. The voxel branch resolves the pack's landing surface the same
+// way ApplyPackSteps will, then requires it to match the player's standing level.
+func PackEngagesPlayerAt(g *GameState, p Pack, nx, nz int) bool {
+	if !PackStepIntoPlayer(nx, nz, g.Player.TileX, g.Player.TileZ) {
+		return false
+	}
+	if len(g.Area.Solids) == 0 {
+		return true
+	}
+	land := p.Level
+	if dir, ok := FacingFromDelta(nx-p.TileX, nz-p.TileZ); ok {
+		if l, stepOK := g.Area.ResolveStep(p.TileX, p.Level, p.TileZ, dir); stepOK {
+			land = l
+		}
+	}
+	return land == g.Player.Level
+}
+
 // cardinalSteps returns the four cardinal-direction (dx, dz) pairs in
 // FacingVector order (North, East, South, West). Builds from
 // FacingVector so the AI and the player-step code can't disagree on
@@ -242,7 +266,7 @@ func ApplyPackSteps(g *GameState, plans []packAIStep) int {
 		// On a voxel map, resolve which surface the pack lands on so it tracks
 		// under/over a bridge; on a heightfield ResolveStep returns the column
 		// top, leaving Level == ElevationLevelAt as before.
-		if len(g.Area.Solids) > 0 {
+		if g.Area.IsVoxel() {
 			if dir, ok := FacingFromDelta(plan.NextX-p.TileX, plan.NextZ-p.TileZ); ok {
 				if toL, stepOK := g.Area.ResolveStep(p.TileX, p.Level, p.TileZ, dir); stepOK {
 					p.Level = toL
@@ -281,7 +305,7 @@ func planJunkyardDogPack(g *GameState, idx int, occupied map[[2]int]bool) (packA
 		if !ok {
 			return packAIStep{}, false
 		}
-		engage := PackStepIntoPlayer(nx, nz, px, pz)
+		engage := PackEngagesPlayerAt(g, p, nx, nz)
 		return packAIStep{PackIdx: idx, NextX: nx, NextZ: nz, EngagePlayer: engage, Moved: true}, true
 	}
 
@@ -371,7 +395,7 @@ func planPatrolPack(g *GameState, idx int, occupied map[[2]int]bool) (packAIStep
 			PackIdx:      idx,
 			NextX:        nx,
 			NextZ:        nz,
-			EngagePlayer: PackStepIntoPlayer(nx, nz, px, pz),
+			EngagePlayer: PackEngagesPlayerAt(g, p, nx, nz),
 			Moved:        true,
 			PatrolDir:    d,
 		}, true
@@ -480,7 +504,7 @@ func packCanMoveTo(g *GameState, p Pack, occupied map[[2]int]bool, tx, tz int, a
 	// check can be level-aware (a tree blocks only its own levels). landLevel
 	// stays p.Level on a flat map, where CanEnterTile is used as before.
 	landLevel := p.Level
-	voxel := len(g.Area.Solids) > 0
+	voxel := g.Area.IsVoxel()
 	if dir, ok := FacingFromDelta(tx-p.TileX, tz-p.TileZ); ok {
 		if voxel {
 			l, stepOK := g.Area.ResolveStep(p.TileX, p.Level, p.TileZ, dir)
@@ -631,5 +655,16 @@ func RevealRadius(g *GameState, cx, cz, radius int) {
 func PackIndexAtTile(packs []Pack, x, z int) int {
 	return slices.IndexFunc(packs, func(p Pack) bool {
 		return PackAlive(p) && p.TileX == x && p.TileZ == z
+	})
+}
+
+// PackIndexAtTileLevel is the level-aware PackIndexAtTile: the alive pack on
+// (x,z) standing at `level`, or -1. The player-step engage path uses it on a
+// voxel map so a step that lands UNDER a deck engages only a pack sharing that
+// ground surface, not one standing on the deck above (whose Level differs). On a
+// heightfield, PackIndexAtTile is used instead (Level isn't tracked per-surface).
+func PackIndexAtTileLevel(packs []Pack, x, z, level int) int {
+	return slices.IndexFunc(packs, func(p Pack) bool {
+		return PackAlive(p) && p.TileX == x && p.TileZ == z && p.Level == level
 	})
 }

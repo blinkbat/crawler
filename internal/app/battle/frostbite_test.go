@@ -34,7 +34,7 @@ func TestApplyFrostbite_DamagesAndChillsSurvivor(t *testing.T) {
 	if got := enemyDebuffStats(enemy).SPD; got != -core.FrostbiteSPDReduction {
 		t.Errorf("chill SPD = %d, want %d", got, -core.FrostbiteSPDReduction)
 	}
-	if got := core.EffectiveEnemyStats(enemy).SPD; got != baseSPD-core.FrostbiteSPDReduction {
+	if got := core.EffectiveEnemyStats(&enemy).SPD; got != baseSPD-core.FrostbiteSPDReduction {
 		t.Errorf("EffectiveEnemyStats.SPD = %d, want %d", got, baseSPD-core.FrostbiteSPDReduction)
 	}
 }

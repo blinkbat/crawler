@@ -61,16 +61,21 @@ func (g *GameState) CarryProgressionFrom(prev *GameState) {
 	g.StepCount = prev.StepCount
 	g.Weather = prev.Weather
 	g.RNG = prev.RNG
-	g.DebugOverlay = prev.DebugOverlay
-	g.EnemiesDisabled = prev.EnemiesDisabled
-	g.EasyBattleQuit = prev.EasyBattleQuit
-	g.RenderLogEnabled = prev.RenderLogEnabled
-	// All-skills / skip-battles are the same class of runtime debug toggle as
-	// the four above — flipped from the same Debug submenu — so they travel
-	// with the run too. Without these, every door step silently reset them to
-	// off while their siblings persisted.
-	g.DebugAllSkills = prev.DebugAllSkills
-	g.DebugSkipBattles = prev.DebugSkipBattles
+	copyRunToggles(g, prev)
+}
+
+// copyRunToggles copies the runtime dev/debug preferences that travel with a run
+// (not world state) from src onto dst. Shared by CarryProgressionFrom (area
+// transitions) and ResetGameState (restart / loss recovery) so the toggle list
+// has ONE home: a new Debug-submenu toggle added here persists across both paths
+// instead of silently resetting on whichever call site forgot to list it.
+func copyRunToggles(dst, src *GameState) {
+	dst.DebugOverlay = src.DebugOverlay
+	dst.EnemiesDisabled = src.EnemiesDisabled
+	dst.EasyBattleQuit = src.EasyBattleQuit
+	dst.RenderLogEnabled = src.RenderLogEnabled
+	dst.DebugAllSkills = src.DebugAllSkills
+	dst.DebugSkipBattles = src.DebugSkipBattles
 }
 
 func NewGameState(area AreaDefinition) GameState {
@@ -365,6 +370,10 @@ func AdjacentChargedCrystalIndex(crystals []Crystal, x, z int) int {
 // so recovery cannot strand the player with an already-defeated party. Use
 // NewGameState for a full reset.
 func ResetGameState(g *GameState) {
+	// Snapshot the run-carried debug/render toggles before NewGameState reseeds
+	// them, so copyRunToggles can restore them below (same set, one home — see
+	// CarryProgressionFrom). The struct copy is cheap; only the toggles are read.
+	prev := *g
 	savedInventory := g.Inventory
 	savedParty := resetPartyForFieldRecovery(g.Party)
 	savedGold := g.Gold
@@ -373,16 +382,6 @@ func ResetGameState(g *GameState) {
 	savedRumble := g.RumbleEnabled
 	savedRetroFilters := g.RetroFilters
 	savedRetroSky := g.RetroFilterSky
-	// Debug toggles are runtime dev preferences, not world state — preserve them
-	// across a restart/loss-recovery the same way area transitions carry them
-	// (CarryProgressionFrom). Without this a tester loses every debug flag the
-	// moment they hit Restart.
-	savedDebugOverlay := g.DebugOverlay
-	savedEnemiesDisabled := g.EnemiesDisabled
-	savedEasyBattleQuit := g.EasyBattleQuit
-	savedRenderLog := g.RenderLogEnabled
-	savedAllSkills := g.DebugAllSkills
-	savedSkipBattles := g.DebugSkipBattles
 	*g = NewGameState(g.Area)
 	g.Inventory = savedInventory
 	g.Party = savedParty
@@ -404,12 +403,9 @@ func ResetGameState(g *GameState) {
 	g.RumbleEnabled = savedRumble
 	g.RetroFilters = savedRetroFilters
 	g.RetroFilterSky = savedRetroSky
-	g.DebugOverlay = savedDebugOverlay
-	g.EnemiesDisabled = savedEnemiesDisabled
-	g.EasyBattleQuit = savedEasyBattleQuit
-	g.RenderLogEnabled = savedRenderLog
-	g.DebugAllSkills = savedAllSkills
-	g.DebugSkipBattles = savedSkipBattles
+	// Debug toggles are runtime dev preferences, not world state — preserve them
+	// across a restart/loss-recovery the same way area transitions carry them.
+	copyRunToggles(g, &prev)
 	// Signal the render layer to drop any lingering particles. Restart can
 	// fire mid-battle (the pause menu's Restart row is reachable outside the
 	// two timing phases), so formation-relative battle particles would

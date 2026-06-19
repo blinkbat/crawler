@@ -430,12 +430,11 @@ func ClampDialogCursor(g *GameState) {
 		return
 	}
 	n := len(DialogChoiceViews(g))
-	if g.Dialog.ChoiceCursor >= n {
-		g.Dialog.ChoiceCursor = n - 1
-	}
-	if g.Dialog.ChoiceCursor < 0 {
+	if n == 0 {
 		g.Dialog.ChoiceCursor = 0
+		return
 	}
+	g.Dialog.ChoiceCursor = Clamp(g.Dialog.ChoiceCursor, 0, n-1)
 }
 
 // applyDialogAction performs a node/choice end action. nil is a no-op.

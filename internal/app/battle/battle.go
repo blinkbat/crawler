@@ -398,7 +398,7 @@ func actorSpeed(g *core.GameState, actor core.ActorRef) int {
 	// cross the ATB threshold, never take a turn, and so never tick the debuff
 	// down (it drains at end-of-turn): a permanent self-sustaining lockout. A
 	// crippled foe still acts, just rarely.
-	spd := core.EffectiveEnemyStats(*m).SPD
+	spd := core.EffectiveEnemyStats(m).SPD
 	if spd < 1 {
 		spd = 1
 	}
@@ -547,6 +547,9 @@ func advanceSkippedTurn(g *core.GameState, actor core.ActorRef) bool {
 	consumeDefendOnSkip(g, actor)
 	drainNonDamagingPartyStatuses(g, actor)
 	drainNonDamagingEnemyStatuses(g, actor)
+	// No actorAppearsBefore first-slot guard here (unlike startActorTurn's skip
+	// loop): this runs exactly once per real turn end, so the ingested-member
+	// double-tick the guard prevents can't happen on this path.
 	tickPoisonAfterPartyTurn(g, actor)
 	tickEnemyEndOfTurnDoTs(g, actor)
 	// Symmetry with finishActorTurn: a skipped turn deals no physical damage
@@ -712,6 +715,8 @@ func finishActorTurn(g *core.GameState) {
 		// DoTs (poison + bleed) via the one seam. Both run at end-of-actor-turn
 		// so the actor still gets their action in before the DoT lands. Each
 		// helper short-circuits on the wrong actor kind so dispatching is fine.
+		// No actorAppearsBefore first-slot guard here (unlike startActorTurn's
+		// skip loop): this runs once per real turn end, so no double-tick risk.
 		tickPoisonAfterPartyTurn(g, g.Battle.Queue[g.Battle.QueueCursor])
 		tickEnemyEndOfTurnDoTs(g, g.Battle.Queue[g.Battle.QueueCursor])
 		drainNonDamagingEnemyStatuses(g, g.Battle.Queue[g.Battle.QueueCursor])
@@ -1048,7 +1053,7 @@ func beginEnemyAttack(g *core.GameState, slot int) {
 	// entirely (same Timing.Resolved=true short-circuit the spell path uses)
 	// and let the intro beat elapse into the miss narration. Accuracy reads
 	// EffectiveEnemyStats so a future accuracy debuff (Blind) lowers it.
-	if enemy != nil && !core.RollEnemyHit(g.Rand(), core.EffectiveEnemyStats(*enemy)) {
+	if enemy != nil && !core.RollEnemyHit(g.Rand(), core.EffectiveEnemyStats(enemy)) {
 		g.Battle.EnemyAttackMisses = true
 		g.Battle.Timing = core.TimingState{Resolved: true}
 		return

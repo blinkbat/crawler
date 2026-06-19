@@ -27,6 +27,10 @@ const (
 	levelUpSubX       = int32(96)   // sub-text x from row left
 	levelUpSubY       = int32(36)   // sub-text baseline y from row top
 	levelUpValueInset = float32(12) // right-aligned value inset from row right edge
+	// levelUpRowGlassAlpha is the glass fill alpha shared by the unfocused stat
+	// rows and the Apply gate's tint, so the two surfaces stay in sync. Untyped
+	// so it satisfies fadeColor (float32) and selectedGlassTint (float64) alike.
+	levelUpRowGlassAlpha = 0.45
 )
 
 // DrawLevelUpModal paints the post-battle stat-spend dialog. Each
@@ -82,7 +86,7 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		if focused {
 			DrawSelectedRow(rect)
 		} else {
-			drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), fadeColor(glassDeep, 0.45))
+			drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), fadeColor(glassDeep, levelUpRowGlassAlpha))
 		}
 		col := textMuted
 		if focused {
@@ -134,7 +138,7 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		rowY += 6
 		focused := g.LevelUpRowCursor == core.LevelUpApplyRowIndex
 		rect := SelectionRowRect(rowX, rowY, rowW, rowH-6)
-		applyBG := selectedGlassTint(glassDeep, 0.45)
+		applyBG := selectedGlassTint(glassDeep, levelUpRowGlassAlpha)
 		drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), applyBG)
 		if focused {
 			DrawSelectedRow(rect)

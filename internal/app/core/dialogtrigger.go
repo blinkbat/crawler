@@ -123,19 +123,16 @@ func markTriggerFired(g *GameState, t DialogTrigger) {
 	g.TriggersFired[t.ID] = true
 }
 
-// FireEnterTileTriggers starts the first eligible enter-tile dialog for tile
-// (x,z) and returns true if one opened. No-op (false) when a dialog is already
-// open, so a trigger can't stomp an in-progress conversation. Only one dialog
-// starts per call.
-func FireEnterTileTriggers(g *GameState, x, z int) bool {
+// fireFirstMatchingTrigger starts the first not-yet-fired trigger that satisfies
+// pred and returns true if one opened. Shared body behind the per-kind Fire*
+// wrappers: no-op (false) when a dialog is already open, so a trigger can't stomp
+// an in-progress conversation, and only one dialog starts per call.
+func fireFirstMatchingTrigger(g *GameState, pred func(DialogTrigger) bool) bool {
 	if g == nil || g.DialogOpen {
 		return false
 	}
 	for _, t := range g.Area.Triggers {
-		if t.Kind != DialogTriggerEnterTile || t.TileX != x || t.TileZ != z {
-			continue
-		}
-		if triggerAlreadyFired(g, t) {
+		if !pred(t) || triggerAlreadyFired(g, t) {
 			continue
 		}
 		if StartDialog(g, t.DialogID) {
@@ -146,27 +143,19 @@ func FireEnterTileTriggers(g *GameState, x, z int) bool {
 	return false
 }
 
+// FireEnterTileTriggers starts the first eligible enter-tile dialog for tile
+// (x,z) and returns true if one opened.
+func FireEnterTileTriggers(g *GameState, x, z int) bool {
+	return fireFirstMatchingTrigger(g, func(t DialogTrigger) bool {
+		return t.Kind == DialogTriggerEnterTile && t.TileX == x && t.TileZ == z
+	})
+}
+
 // FireFoeKilledTriggers starts the first eligible foe-killed dialog whose
 // bestiary threshold is now met and returns true if one opened. Called once a
-// battle is won (bestiary kills already credited). No-op when a dialog is open.
+// battle is won (bestiary kills already credited).
 func FireFoeKilledTriggers(g *GameState) bool {
-	if g == nil || g.DialogOpen {
-		return false
-	}
-	for _, t := range g.Area.Triggers {
-		if t.Kind != DialogTriggerFoeKilled {
-			continue
-		}
-		if triggerAlreadyFired(g, t) {
-			continue
-		}
-		if !foeKillCountMet(g, t.FoeKind, t.FoeKills) {
-			continue
-		}
-		if StartDialog(g, t.DialogID) {
-			markTriggerFired(g, t)
-			return true
-		}
-	}
-	return false
+	return fireFirstMatchingTrigger(g, func(t DialogTrigger) bool {
+		return t.Kind == DialogTriggerFoeKilled && foeKillCountMet(g, t.FoeKind, t.FoeKills)
+	})
 }

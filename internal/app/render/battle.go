@@ -416,6 +416,11 @@ var actionLogCache struct {
 	lastMaxLines int
 }
 
+// statusLineScratch is the reusable 1-slot backing for the "show StatusMessage
+// when the log is empty" path, so drawActionLogPanel doesn't allocate a slice
+// per frame. Safe as package state because raylib draw is single-threaded.
+var statusLineScratch [1]string
+
 // drawActionLogPanel paints the rolling ACTION LOG — the bottom-left HUD pane
 // shown both in combat and during exploration (g.ActionLog persists across the
 // two). The name is historical; it's no longer combat-only.
@@ -479,7 +484,11 @@ func drawActionLogPanel(g *core.GameState, assets Resources) {
 
 	lines := g.ActionLog
 	if len(lines) == 0 && g.StatusMessage != "" {
-		lines = []string{g.StatusMessage}
+		// Reuse a package-level 1-slot buffer rather than allocating a new slice
+		// each frame the log is empty but a status prompt is up (draw is single-
+		// threaded, so the shared scratch is safe).
+		statusLineScratch[0] = g.StatusMessage
+		lines = statusLineScratch[:]
 	}
 	if len(lines) == 0 {
 		return

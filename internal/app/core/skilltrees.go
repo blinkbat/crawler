@@ -67,7 +67,7 @@ func nd(id, name, desc string, maxRank int) SkillTreeNode {
 // node's rank ladder is fixed: rank 1 learns the skill, and ranks
 // 2..MaxSkillTier+1 feed the per-skill upgrade ladder (see BuySkillNode), so
 // MaxRank is ALWAYS MaxSkillTier+1 (learn + every upgrade). Setting it here —
-// rather than passing it per call — keeps the 10 root authoring sites from
+// rather than passing it per call — keeps the grant-node authoring sites from
 // drifting away from MaxSkillTier. (Passive / novel nodes stay on nd, which
 // takes an explicit maxRank, until their effect is wired.)
 func act(id, name, desc string, grant SkillID) SkillTreeNode {
