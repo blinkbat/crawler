@@ -1146,7 +1146,7 @@ func multiPressPasses(t core.TimingState, quality int) int {
 // a future single-ally heal can't drift on the validation shape.
 func setupTargetedAllyAndPay(g *core.GameState, skill core.SkillID, deadMsg string) bool {
 	if !partyIndexValid(g, g.Battle.PartyTarget) {
-		setBattleStatus(g, "No ally selected.")
+		setBattleStatus(g, msgNoAllySelected)
 		return false
 	}
 	if g.Party[g.Battle.PartyTarget].HP <= 0 {

@@ -40,13 +40,13 @@ func updateActionMenu(g *core.GameState) {
 		return
 	case core.ActionRowItem:
 		if !core.HasConsumable(g.Inventory) {
-			setBattleStatus(g, "No items.")
+			setBattleStatus(g, msgNoItems)
 			return
 		}
 		g.Battle.ActionMode = core.ActionItemMenu
 		g.Battle.ItemMenuIndex = 0
 		refreshItemMenuBuf(g)
-		setBattleStatus(g, "Choose an item.")
+		setBattleStatus(g, msgChooseItem)
 		return
 	case core.ActionRowSkill:
 		openSkillMenu(g)
@@ -256,7 +256,7 @@ func updateItemTarget(g *core.GameState) {
 func cancelTargetToItemMenu(g *core.GameState) {
 	g.Battle.ActionMode = core.ActionItemMenu
 	refreshItemMenuBuf(g)
-	setBattleStatus(g, "Choose an item.")
+	setBattleStatus(g, msgChooseItem)
 }
 
 // applyItem consumes the pending item, heals the targeted ally by the
@@ -282,7 +282,7 @@ func applyItem(g *core.GameState) {
 	// and this confirm (mixed-initiative). Without this guard the stack is
 	// consumed and healPartyMember no-ops on the ingested member — item wasted.
 	if !partyIndexValid(g, target) || g.Party[target].HP <= 0 || g.Party[target].Ingested {
-		setBattleStatus(g, "Invalid target.")
+		setBattleStatus(g, msgInvalidTarget)
 		return
 	}
 	def := core.ItemInfo(kind)

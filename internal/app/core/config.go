@@ -1417,9 +1417,15 @@ func init() {
 	}
 }
 
+// validRetroFilter reports whether k indexes retroFilterNames / a filter slot.
+// The single bounds rule the filter lookups and mutators share.
+func validRetroFilter(k RetroFilterKind) bool {
+	return k >= 0 && k < RetroFilterCount
+}
+
 // RetroFilterName returns the display label for a filter kind ("" out of range).
 func RetroFilterName(k RetroFilterKind) string {
-	if k < 0 || k >= RetroFilterCount {
+	if !validRetroFilter(k) {
 		return ""
 	}
 	return retroFilterNames[k]
@@ -1474,7 +1480,7 @@ func AdjustRetroFilter(v *float64, dir int) {
 // RetroFilterToggleDefault (so Game Boy / Scanlines — default-off — still
 // toggle ON to something visible).
 func ToggleRetroFilter(filters *[RetroFilterCount]float64, k RetroFilterKind) {
-	if k < 0 || k >= RetroFilterCount {
+	if !validRetroFilter(k) {
 		return
 	}
 	if filters[k] > 0 {

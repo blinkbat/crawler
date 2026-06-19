@@ -102,13 +102,6 @@ func init() {
 			panic(fmt.Sprintf("enemyStatusPillVisuals[%d] has no glyph — add the row", i))
 		}
 	}
-	// Pre-format the bare turn-count strings the pills show beside the glyph so
-	// the per-frame roster draw never Sprintf's (up to 4 statuses × 6 enemies =
-	// 24 labels/frame in heavy combat). Numbers only now — the status itself is
-	// conveyed by the glyph + fill, not a letter prefix.
-	for n := range statusTurnNumLabels {
-		statusTurnNumLabels[n] = fmt.Sprintf("%d", n)
-	}
 }
 
 // drawEnemyRoster shows the active pack at the top of the screen.
@@ -267,17 +260,14 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 	}
 }
 
-// statusTurnsLabel returns the pill label string for a status with N
-// turns remaining. Burn / Sleep / Poison / Stun all render through
-// these labels each frame for every afflicted enemy; pre-formatting
-// the common 1..9 range and ""+1..9 variants avoids the per-frame
-// fmt.Sprintf alloc on the enemy roster hot path (up to 4 statuses ×
-// 6 enemies = 24 strings/frame in heavy combat).
+// statusTurnsLabel returns the bare turn-count pill label for a status with N
+// turns remaining. Burn / Sleep / Poison / Stun all render through this each
+// frame for every afflicted enemy (up to 4 statuses × 6 enemies = 24
+// strings/frame in heavy combat), so it reads the shared statusTurnDigit cache
+// rather than re-Sprintf'ing. Status identity is conveyed by the glyph + fill,
+// not a letter prefix, so the label is numbers only.
 func statusTurnsLabel(turns int) string {
-	if turns >= 0 && turns < statusTurnsCacheMax {
-		return statusTurnNumLabels[turns]
-	}
-	return fmt.Sprintf("%d", turns)
+	return statusTurnDigit(turns)
 }
 
 // rosterCondMeasureCache memoizes rl.MeasureTextEx for the handful of
@@ -302,16 +292,6 @@ func enemyHPLabel(hp, max int) string {
 	return s
 }
 
-// statusTurnsCacheMax is the turn-count ceiling the label cache covers; past it
-// statusTurnsLabel falls back to fmt.Sprintf. Generous slack over every real
-// status duration so a tuning bump doesn't drop the path back into Sprintf.
-const statusTurnsCacheMax = 20
-
-// statusTurnNumLabels holds the pre-formatted bare turn-count strings ("0".."19")
-// the pills show beside their glyph, so the per-frame roster draw never
-// fmt.Sprintf's per pill. Built in init. Status identity now reads from the
-// glyph + fill, so the labels no longer carry a per-status letter prefix.
-var statusTurnNumLabels [statusTurnsCacheMax]string
 
 // drawStatusPill paints the shared status-pill silhouette: a small
 // rounded fill pane + matching outline + a FontSmall single-line label.
@@ -456,7 +436,7 @@ func drawActionLogPanel(g *core.GameState, assets Resources) {
 		h, y = shrinkPinnedToBottom(bottomY, turnBottom)
 	}
 
-	drawCard(x, y, w, h, surfacePrimary, borderSoft, borderSoft)
+	drawPanelCard(x, y, w, h)
 	// Ledger spine — a thin wood-accent stripe down the left inside
 	// edge, dotted with three small pips. Reads as the bound-edge of
 	// a scribe's ledger, anchoring the rolling text against the

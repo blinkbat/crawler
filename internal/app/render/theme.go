@@ -1291,6 +1291,15 @@ func drawCard(x, y, w, h int32, fill, outline, accent color.RGBA) {
 	}
 }
 
+// drawPanelCard is the standard HUD panel: a drawCard with the default
+// surfacePrimary glass body and borderSoft frame, no accent spine. The
+// "neutral panel" most static surfaces (minimap frame, turn order, battle
+// log) draw, factored out so the (surfacePrimary, borderSoft, borderSoft)
+// triple lives in one place instead of being re-typed per call site.
+func drawPanelCard(x, y, w, h int32) {
+	drawCard(x, y, w, h, surfacePrimary, borderSoft, borderSoft)
+}
+
 // drawCardBevel carves the flat three-stroke frame into raised molding — the
 // chunky directionally-lit bevel 90s CRPG dialog frames wore. Two opposing
 // light reads, hairlines only (the strokes stay the structure):

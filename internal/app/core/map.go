@@ -462,7 +462,7 @@ func (a *AreaDefinition) faceOverrideAt(x, z int) (FaceOverride, bool) {
 // skin. A tile with no override draws its base skin on every face, so any map
 // without faces: overrides renders exactly as before.
 func (a *AreaDefinition) FaceSkinForDir(x, z, dir int) byte {
-	if len(a.FaceOverrides) > 0 && dir >= 0 && dir < 4 {
+	if len(a.FaceOverrides) > 0 && dir >= 0 && dir < FacingCount {
 		if o, ok := a.faceOverrideAt(x, z); ok {
 			if sc := o.Skins[dir]; sc != 0 && sc != PropLevelAuto {
 				return sc
@@ -477,7 +477,7 @@ func (a *AreaDefinition) FaceSkinForDir(x, z, dir int) byte {
 // whose four faces are all default is dropped, so a tile reverts cleanly and the
 // map omits a faces: section when nothing is overridden.
 func (a *AreaDefinition) SetFaceDir(x, z, dir int, skin byte) {
-	if !a.InBounds(x, z) || dir < 0 || dir >= 4 {
+	if !a.InBounds(x, z) || dir < 0 || dir >= FacingCount {
 		return
 	}
 	// Any edit to FaceOverrides invalidates the lazily-built lookup; it rebuilds

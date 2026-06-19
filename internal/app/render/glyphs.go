@@ -254,6 +254,15 @@ func drawFaceButton(font rl.Font, letter string, col color.RGBA, x, cy, gh, alph
 	return gh
 }
 
+// Glyph-pill roundness tokens — the only thing that differs between the
+// non-face glyph buttons that share drawGlyphPill. glyphPillRoundness is the
+// softer bumper/system-button radius (shoulders, start/select); glyphPadRoundness
+// is the tighter d-pad cap. Named so the two callers of each can't drift.
+const (
+	glyphPillRoundness = float32(0.6)
+	glyphPadRoundness  = float32(0.35)
+)
+
 // drawGlyphPill paints the shared controller-glyph backing: a rounded body fill
 // + a 1px rim, both faded by alpha. The shoulder, start/select, and d-pad
 // glyphs all sit on this same body/rim pairing (only the roundness differs), so
@@ -267,7 +276,7 @@ func drawGlyphPill(rect rl.Rectangle, roundness, alpha float32) {
 func drawShoulderButton(font rl.Font, label string, x, cy, gh, alpha float32) float32 {
 	w := gh * 1.55
 	h := gh * 0.82
-	drawGlyphPill(rl.NewRectangle(x, cy-h/2, w, h), 0.6, alpha)
+	drawGlyphPill(rl.NewRectangle(x, cy-h/2, w, h), glyphPillRoundness, alpha)
 	drawGlyphLetter(font, label, x+w/2, cy, gh*0.5, fadeColor(glyphInk, alpha))
 	return w
 }
@@ -277,7 +286,7 @@ func drawShoulderButton(font rl.Font, label string, x, cy, gh, alpha float32) fl
 func drawStartSelect(start bool, x, cy, gh, alpha float32) float32 {
 	w := gh * 1.3
 	h := gh * 0.82
-	drawGlyphPill(rl.NewRectangle(x, cy-h/2, w, h), 0.6, alpha)
+	drawGlyphPill(rl.NewRectangle(x, cy-h/2, w, h), glyphPillRoundness, alpha)
 	ink := fadeColor(glyphInk, alpha)
 	cx := x + w/2
 	if start {
@@ -301,7 +310,7 @@ func drawStartSelect(start bool, x, cy, gh, alpha float32) float32 {
 // reads as a d-pad.
 func drawDpadGlyph(g InputGlyph, x, cy, gh, alpha float32) float32 {
 	cx := x + gh/2
-	drawGlyphPill(rl.NewRectangle(x+1, cy-gh/2+1, gh-2, gh-2), 0.35, alpha)
+	drawGlyphPill(rl.NewRectangle(x+1, cy-gh/2+1, gh-2, gh-2), glyphPadRoundness, alpha)
 
 	up := g == GlyphUp || g == GlyphUpDown
 	down := g == GlyphDown || g == GlyphUpDown

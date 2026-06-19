@@ -48,7 +48,7 @@ func drawMinimap(m *core.AreaDefinition, g *core.GameState, assets Resources) {
 	panelW := minimapPanelW
 	panelH := minimapPanelH
 
-	drawCard(pad, pad, panelW, panelH, surfacePrimary, borderSoft, borderSoft)
+	drawPanelCard(pad, pad, panelW, panelH)
 	areaName := g.Area.Name
 	if areaName != "" {
 		// Area name reads as the panel's natural label — no "AREA"

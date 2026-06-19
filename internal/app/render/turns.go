@@ -102,7 +102,7 @@ func drawTurnPanel(g *core.GameState, assets Resources) {
 	rowH := turnPanelRowH
 	h := turnPanelHeight(len(turns))
 
-	drawCard(x, y, w, h, surfacePrimary, borderSoft, borderSoft)
+	drawPanelCard(x, y, w, h)
 
 	// Sequence thread — a faint vertical line stitched down through the row
 	// markers (under them), tying the forecast into one strand the way a

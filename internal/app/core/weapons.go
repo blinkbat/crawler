@@ -92,11 +92,17 @@ func init() {
 	}
 }
 
+// validWeaponType reports whether wt indexes weaponSpecs. The single bounds
+// rule the weapon lookups share so an out-of-range kind falls back uniformly.
+func validWeaponType(wt WeaponType) bool {
+	return wt >= 0 && wt < WeaponTypeCount
+}
+
 // WeaponAccuracyStat returns the stat that governs a weapon's to-hit and
 // basic-attack damage (StatSTR for heavy / unarmed, StatDEX for light +
 // ranged). Out-of-range falls back to STR (the unarmed default).
 func WeaponAccuracyStat(wt WeaponType) Stat {
-	if wt < 0 || wt >= WeaponTypeCount {
+	if !validWeaponType(wt) {
 		return StatSTR
 	}
 	return weaponSpecs[wt].Accuracy
@@ -107,7 +113,7 @@ func WeaponAccuracyStat(wt WeaponType) Stat {
 // CanReachFlying — a ranged weapon ignores the melee-vs-flyer penalty. Still
 // the seam for further ranged-only rules (line of sight, distinct VFX).
 func WeaponIsRanged(wt WeaponType) bool {
-	if wt < 0 || wt >= WeaponTypeCount {
+	if !validWeaponType(wt) {
 		return false
 	}
 	return weaponSpecs[wt].Ranged
@@ -148,7 +154,7 @@ func EquippedWeapon(m PartyMember) WeaponType {
 // of range falls back to VFXImpact (the unarmed default, matching
 // WeaponAccuracyStat's STR-fists fallback).
 func WeaponHitVFX(wt WeaponType) VFXKind {
-	if wt < 0 || wt >= WeaponTypeCount {
+	if !validWeaponType(wt) {
 		return VFXImpact
 	}
 	switch wt {

@@ -14,10 +14,14 @@ import (
 // one place. They stay distinct consts because they say distinct things —
 // only byte-identical literals were folded together.
 const (
-	msgChooseAction = "Choose an action."
-	msgChooseTarget = "Choose a target."
-	msgNoTarget     = "No target."
-	msgNoSkillReady = "No skill ready."
+	msgChooseAction   = "Choose an action."
+	msgChooseTarget   = "Choose a target."
+	msgChooseItem     = "Choose an item."
+	msgNoTarget       = "No target."
+	msgNoSkillReady   = "No skill ready."
+	msgNoItems        = "No items."
+	msgInvalidTarget  = "Invalid target."
+	msgNoAllySelected = "No ally selected."
 )
 
 // Start engages the pack at packIndex. The entire pack roster becomes the

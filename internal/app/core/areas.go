@@ -817,11 +817,17 @@ var packAIDefs = [PackAICount]packAIDef{
 	PackAISkittish:    {mapfile.PackAISkittishName, "Skittish (flees)"},
 }
 
+// validPackAI reports whether ai indexes packAIDefs. The single bounds rule
+// the PackAI lookups share so a corrupt value falls back uniformly.
+func validPackAI(ai PackAI) bool {
+	return ai >= 0 && int(ai) < len(packAIDefs)
+}
+
 // PackAIName returns the canonical on-disk string for a PackAI. Empty
 // or out-of-range falls back to the no-op mode so a corrupt value still
 // round-trips to a valid row.
 func PackAIName(ai PackAI) string {
-	if ai < 0 || int(ai) >= len(packAIDefs) {
+	if !validPackAI(ai) {
 		return mapfile.PackAINoneName
 	}
 	return packAIDefs[ai].name
@@ -840,7 +846,7 @@ func PackAIFromName(s string) PackAI {
 
 // PackAILabel returns the editor-facing display name for a PackAI.
 func PackAILabel(ai PackAI) string {
-	if ai < 0 || int(ai) >= len(packAIDefs) {
+	if !validPackAI(ai) {
 		return packAIDefs[PackAINone].label
 	}
 	return packAIDefs[ai].label

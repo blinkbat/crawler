@@ -80,18 +80,24 @@ func partyStatusVisual(kind core.PartyStatusKind) (col rl.Color, flicker bool) {
 // in the small turn-count range that covers realistic durations. The
 // card paints this label once per frame per afflicted member; without
 // the cache the path runs fmt.Sprintf each time.
-var partyStatusTurnLabelCache = func() [core.PartyStatusCount][partyStatusTurnLabelCacheSize]string {
-	var out [core.PartyStatusCount][partyStatusTurnLabelCacheSize]string
+var partyStatusTurnLabelCache = func() [core.PartyStatusCount][statusTurnCacheMax]string {
+	var out [core.PartyStatusCount][statusTurnCacheMax]string
 	for k := core.PartyStatusKind(0); k < core.PartyStatusCount; k++ {
 		base := core.PartyStatusLabel(k)
-		for n := 0; n < partyStatusTurnLabelCacheSize; n++ {
+		for n := 0; n < statusTurnCacheMax; n++ {
 			out[k][n] = fmt.Sprintf("%s %d", base, n)
 		}
 	}
 	return out
 }()
 
-const partyStatusTurnLabelCacheSize = 20
+// statusTurnCacheMax is the turn-count ceiling every status-turn cache covers
+// — the party "<LABEL> N" table (partyStatusTurnLabelCache), the shared bare
+// numeral cache (statusTurnDigits), and the enemy roster's pill labels
+// (statusTurnsLabel). Past it the caches fall back to fmt.Sprintf. Generous
+// slack over every real status duration so a tuning bump stays on the cached
+// path. One constant so the three caches can't size-drift.
+const statusTurnCacheMax = 20
 
 // partyStatusTurnLabel returns "<LABEL>" for boolean statuses (turns == 0)
 // or "<LABEL> N" for counted statuses. Reads the precomputed table for
@@ -102,7 +108,7 @@ func partyStatusTurnLabel(kind core.PartyStatusKind, turns int) string {
 	if turns <= 0 {
 		return base
 	}
-	if int(kind) >= 0 && int(kind) < int(core.PartyStatusCount) && turns < partyStatusTurnLabelCacheSize {
+	if int(kind) >= 0 && int(kind) < int(core.PartyStatusCount) && turns < statusTurnCacheMax {
 		return partyStatusTurnLabelCache[kind][turns]
 	}
 	return fmt.Sprintf("%s %d", base, turns)
@@ -118,19 +124,23 @@ func measurePartyStatusLabel(font rl.Font, label string) rl.Vector2 {
 	return partyStatusLabelMeasureCache.measure(font, label, FontTiny, 1)
 }
 
-// statusTurnDigits caches the small turns-remaining numerals drawn beside a
-// party status icon, so the per-frame card draw doesn't allocate a string via
-// fmt/strconv each frame. Sized to match partyStatusTurnLabelCacheSize.
-var statusTurnDigits = func() [partyStatusTurnLabelCacheSize]string {
-	var d [partyStatusTurnLabelCacheSize]string
+// statusTurnDigits caches the bare turns-remaining numerals ("0".."19") drawn
+// beside a status icon, so the per-frame draw doesn't allocate a string via
+// fmt/strconv each frame. Shared by the party card (statusTurnDigit) and the
+// enemy roster pill (statusTurnsLabel). Sized to statusTurnCacheMax.
+var statusTurnDigits = func() [statusTurnCacheMax]string {
+	var d [statusTurnCacheMax]string
 	for i := range d {
 		d[i] = fmt.Sprintf("%d", i)
 	}
 	return d
 }()
 
+// statusTurnDigit returns the cached bare numeral for n, falling back to
+// fmt.Sprintf past the cached window. The one numeral cache both the party
+// card and the enemy roster read through.
 func statusTurnDigit(n int) string {
-	if n >= 0 && n < partyStatusTurnLabelCacheSize {
+	if n >= 0 && n < statusTurnCacheMax {
 		return statusTurnDigits[n]
 	}
 	return fmt.Sprintf("%d", n)
