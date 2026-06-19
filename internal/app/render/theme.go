@@ -114,6 +114,24 @@ var (
 	woodAccent = rl.NewColor(184, 140, 92, 255)
 	woodInlay  = rl.NewColor(34, 22, 14, 175)
 
+	// ----- Wood-accent fades -----
+	// Single source for the wood rule / outline / icon tones that were bare
+	// fadeColor(woodAccent, X) literals scattered across panels / skilltree /
+	// minimap / level-up / timing. Each keeps its exact prior alpha; a retune
+	// now lands here instead of at a dozen draw sites. (battle.go's action-log
+	// spine/tie fades stay local — they're tuned against that surface.)
+	woodAccentGrid       = fadeColor(woodAccent, 0.16) // map-tab grid lines
+	woodAccentInlayLip   = fadeColor(woodAccent, 0.22) // card inlay bottom lip
+	woodAccentBevelSide  = fadeColor(woodAccent, 0.36) // card bevel side face
+	woodAccentRule       = fadeColor(woodAccent, 0.38) // info-strip hairline rule
+	woodAccentOutline    = fadeColor(woodAccent, 0.42) // glass-pane outline
+	woodAccentSeam       = fadeColor(woodAccent, 0.55) // small-panel outline
+	woodAccentIconSoft   = fadeColor(woodAccent, 0.70) // equipment-row icon
+	woodAccentBevelTop   = fadeColor(woodAccent, 0.80) // card bevel top face
+	woodAccentFrame      = fadeColor(woodAccent, 0.82) // minimap frame border
+	woodAccentIcon       = fadeColor(woodAccent, 0.85) // panel / tick icon
+	woodAccentIconBright = fadeColor(woodAccent, 0.90) // stat icon
+
 	// ----- Gilt accents (selection / focus) -----
 	giltDim    = rl.NewColor(160, 124, 64, 255)
 	giltBright = rl.NewColor(232, 196, 112, 255)
@@ -1363,8 +1381,8 @@ func drawCardBevel(x, y, w, h int32) {
 	if hw <= 0 || vh <= 0 {
 		return
 	}
-	hi := fadeColor(woodAccent, 0.80)
-	hiSide := fadeColor(woodAccent, 0.36)
+	hi := woodAccentBevelTop
+	hiSide := woodAccentBevelSide
 	lo := fadeColor(shadowHeavy, 0.62)
 	loSide := fadeColor(shadowHeavy, 0.34)
 	// Raised outer edge.
@@ -1376,7 +1394,7 @@ func drawCardBevel(x, y, w, h int32) {
 	// reads don't merge into stripes).
 	if h >= 56 {
 		rl.DrawRectangle(hx, y+ft, hw, 1, fadeColor(shadowHeavy, 0.42))
-		rl.DrawRectangle(hx, y+h-ft-1, hw, 1, fadeColor(woodAccent, 0.22))
+		rl.DrawRectangle(hx, y+h-ft-1, hw, 1, woodAccentInlayLip)
 	}
 }
 
@@ -1453,6 +1471,13 @@ func drawCardInlay(x, y, w, h int32) {
 // translucent body (sub-panes inside a card) reach for this directly.
 // drawSmallPanel — single-layer opaque-ish fill — stays the right
 // choice for actual small chrome (status pills, chips, gilt rails).
+// drawGlassPaneRect is the rl.Rectangle form of drawGlassPane — most callers
+// already hold a Rectangle and were spelling out the
+// int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height) cast quartet inline.
+func drawGlassPaneRect(r rl.Rectangle, fill color.RGBA) {
+	drawGlassPane(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height), fill)
+}
+
 func drawGlassPane(x, y, w, h int32, fill color.RGBA) {
 	if w <= 0 || h <= 0 {
 		return
@@ -1592,7 +1617,7 @@ func drawFocusableRow(rect rl.Rectangle, focused bool) {
 	if focused {
 		bg = fadeColor(glassWarm, 0.85)
 	}
-	drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), bg)
+	drawGlassPaneRect(rect, bg)
 	if !focused {
 		return
 	}
@@ -1965,7 +1990,7 @@ func drawBarState(font rl.Font, x, y, width, height float32, label string, pct f
 	// glass and any HP/MP tint. Skipped on tiny bars (<80 px wide
 	// or <12 px tall) so compact UI surfaces don't look busy.
 	if iw >= 80 && ih >= 12 && !muted {
-		tickCol := fadeColor(woodAccent, 0.85)
+		tickCol := woodAccentIcon
 		ticks := [3]struct {
 			t     float32
 			depth float32

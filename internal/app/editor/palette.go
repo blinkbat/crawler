@@ -46,6 +46,12 @@ var (
 	// only the alpha (214 / 205) for how much grid shows through — so the base RGB
 	// lives here once and each site applies its own opacity via withAlpha.
 	panelBackingColor = rl.NewColor(12, 14, 20, 255)
+	// Minimap pixel tones: the flat floor base and the lighter color a tile
+	// gets where its elevation rises into a wall. Named here so a minimap
+	// retune lands with the rest of the chrome instead of as bare literals in
+	// drawMinimap.
+	minimapFloorCol = rl.NewColor(58, 56, 50, 255)
+	minimapWallCol  = rl.NewColor(150, 152, 160, 255)
 
 	// Borders. dim is the resting state, active is the selection-outline
 	// color; outlineHard is the dark seam between panels. Prefixed with

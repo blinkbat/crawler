@@ -86,7 +86,7 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		if focused {
 			DrawSelectedRow(rect)
 		} else {
-			drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), fadeColor(glassDeep, levelUpRowGlassAlpha))
+			drawGlassPaneRect(rect, fadeColor(glassDeep, levelUpRowGlassAlpha))
 		}
 		col := rowTextColor(focused, false, textMuted)
 		label := core.StatLabel(s)
@@ -96,7 +96,7 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		// Stat sigil — small icon in the left gutter of the row.
 		// Brightens on focus so the focused row reads as "lit"
 		// without leaning entirely on the gilt selection chrome.
-		iconCol := fadeColor(woodAccent, 0.85)
+		iconCol := woodAccentIcon
 		if focused {
 			iconCol = giltBright
 		}
@@ -136,7 +136,7 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		focused := g.LevelUpRowCursor == core.LevelUpApplyRowIndex
 		rect := SelectionRowRect(rowX, rowY, rowW, rowH-6)
 		applyBG := selectedGlassTint(glassDeep, levelUpRowGlassAlpha)
-		drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), applyBG)
+		drawGlassPaneRect(rect, applyBG)
 		if focused {
 			DrawSelectedRow(rect)
 		}

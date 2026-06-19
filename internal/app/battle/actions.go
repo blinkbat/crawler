@@ -35,7 +35,7 @@ type actionHandlers struct {
 // contract in one place. Callers layer their own HP / Ingested / amount
 // checks on top of this — it only answers "is the index in range."
 func partyIndexValid(g *core.GameState, idx int) bool {
-	return idx >= 0 && idx < len(g.Party)
+	return core.PartyIndexInRange(g.Party, idx)
 }
 
 // livingEnemyAt resolves the enemy in battle slot `slot` to a live pointer,
@@ -2582,21 +2582,18 @@ func tickBurnAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
 }
 
 func healPartyMember(g *core.GameState, partyIndex, amount int) bool {
-	if !partyIndexValid(g, partyIndex) || amount <= 0 {
+	if !partyIndexValid(g, partyIndex) {
 		return false
 	}
+	// core.HealMember owns the amount / no-revive / ingest-skip guards (the
+	// latter matching the targeting cyclers, which already keep the player from
+	// picking a mantrapped ally — this covers apply-time edge cases). It returns
+	// false when none of those let the heal land, so we only flash / ping on a
+	// real heal.
 	member := &g.Party[partyIndex]
-	if member.HP <= 0 {
+	if !core.HealMember(member, amount) {
 		return false
 	}
-	// Sealed inside a mantrap — heal can't reach. Targeting cyclers
-	// (AvailablePartyTargets) already prevent the player from picking
-	// an ingested ally; this guards apply-time edge cases (item used
-	// via a future macro, etc.).
-	if member.Ingested {
-		return false
-	}
-	core.GainUpTo(&member.HP, member.MaxHP, amount)
 	member.DamageFlash = core.FlashDuration
 	audio.Play(audio.SoundHeal)
 	return true

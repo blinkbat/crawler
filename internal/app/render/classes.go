@@ -200,40 +200,62 @@ func drawClassGlyphCleric(cx, cy, r float32, col color.RGBA) {
 	rl.DrawCircleV(rl.NewVector2(cx, cy), r*0.16, giltBright)
 }
 
-// Thief — single down-pointing dagger: round pommel, broad
-// crossguard with downturned ends, tapered double-edged blade with a
-// visible centre fuller (a thinner stripe down the middle in a
-// darker tone). Reads as a finished weapon sigil rather than a
-// silhouette.
-func drawClassGlyphThief(cx, cy, r float32, col color.RGBA) {
+// daggerGlyphStyle captures the few per-call differences between the two
+// dagger sigils that share this shape — the Thief class glyph and the
+// equipment weapon-slot icon. They were near-identical copies that had already
+// drifted (min blade width 1.5 vs 1.6, the gilt pommel highlight, guard
+// thickness, fuller nudge); one body now draws both so the dagger art changes
+// in a single place.
+type daggerGlyphStyle struct {
+	minBladeHalfW float32 // clamp so the blade stays visible at small radii
+	guardH        float32 // crossguard bar thickness (also sets the blade top)
+	fullerXOff    int32   // fuller stripe x nudge from centre
+	pommelHi      bool    // bright gilt pommel highlight (class glyph only)
+}
+
+// drawDaggerGlyph renders a down-pointing dagger: round pommel, broad crossguard
+// with downturned ends, tapered double-edged blade with a centre fuller.
+func drawDaggerGlyph(cx, cy, r float32, col color.RGBA, st daggerGlyphStyle) {
 	bladeHalfW := r * 0.18
-	if bladeHalfW < 1.6 {
-		bladeHalfW = 1.6
+	if bladeHalfW < st.minBladeHalfW {
+		bladeHalfW = st.minBladeHalfW
 	}
-	// Pommel — disc at the top, bright highlight.
+	// Pommel — disc at the top, optional bright highlight.
 	pommelY := cy - r + 1
 	rl.DrawCircleV(rl.NewVector2(cx, pommelY), bladeHalfW*1.4, col)
-	rl.DrawCircleV(rl.NewVector2(cx, pommelY), bladeHalfW*0.6, giltBright)
+	if st.pommelHi {
+		rl.DrawCircleV(rl.NewVector2(cx, pommelY), bladeHalfW*0.6, giltBright)
+	}
 	// Crossguard — horizontal bar with small downturned tips, like
 	// a baselard / parrying dagger.
 	guardY := cy - r*0.55
 	guardHalfW := r * 0.75
-	guardH := float32(1.8)
-	rl.DrawRectangle(int32(cx-guardHalfW), int32(guardY), int32(guardHalfW*2), int32(guardH), col)
-	rl.DrawRectangle(int32(cx-guardHalfW), int32(guardY), int32(2), int32(guardH+2), col)        // left horn
-	rl.DrawRectangle(int32(cx+guardHalfW-2), int32(guardY), int32(2), int32(guardH+2), col)      // right horn
+	rl.DrawRectangle(int32(cx-guardHalfW), int32(guardY), int32(guardHalfW*2), int32(st.guardH), col)
+	rl.DrawRectangle(int32(cx-guardHalfW), int32(guardY), 2, 3, col)   // left horn
+	rl.DrawRectangle(int32(cx+guardHalfW-2), int32(guardY), 2, 3, col) // right horn
 	// Blade — body rectangle.
-	bladeTop := guardY + guardH
+	bladeTop := guardY + st.guardH
 	bladeBottom := cy + r*0.62
 	rl.DrawRectangle(int32(cx-bladeHalfW), int32(bladeTop), int32(bladeHalfW*2), int32(bladeBottom-bladeTop), col)
 	// Centre fuller — a thin darker stripe down the blade.
 	fuller := fadeColor(col, 0.5)
-	rl.DrawRectangle(int32(cx)-1, int32(bladeTop+2), 1, int32(bladeBottom-bladeTop-4), fuller)
+	rl.DrawRectangle(int32(cx)+st.fullerXOff, int32(bladeTop+2), 1, int32(bladeBottom-bladeTop-4), fuller)
 	// Tapered tip triangle.
 	tip := rl.NewVector2(cx, cy+r)
 	left := rl.NewVector2(cx-bladeHalfW, bladeBottom)
 	right := rl.NewVector2(cx+bladeHalfW, bladeBottom)
 	drawTriangleCCW(tip, right, left, col)
+}
+
+// Thief — single down-pointing dagger with a gilt-lit pommel. Reads as a
+// finished weapon sigil rather than a silhouette.
+func drawClassGlyphThief(cx, cy, r float32, col color.RGBA) {
+	drawDaggerGlyph(cx, cy, r, col, daggerGlyphStyle{
+		minBladeHalfW: 1.6,
+		guardH:        1.8,
+		fullerXOff:    -1,
+		pommelHi:      true,
+	})
 }
 
 // Wizard — five-pointed star with an inset pentagonal field and a

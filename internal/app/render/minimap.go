@@ -101,7 +101,7 @@ func drawMinimapGridBacking(x, y, size int32) {
 
 func drawMinimapCartographerFrame(font rl.Font, x, y, size int32) {
 	frame := rl.NewRectangle(float32(x-3), float32(y-3), float32(size+5), float32(size+5))
-	rl.DrawRectangleLinesEx(frame, 2, fadeColor(woodAccent, 0.82))
+	rl.DrawRectangleLinesEx(frame, 2, woodAccentFrame)
 	inner := rl.NewRectangle(float32(x), float32(y), float32(size-1), float32(size-1))
 	rl.DrawRectangleLinesEx(inner, 1, fadeColor(giltDim, 0.55))
 
@@ -201,40 +201,44 @@ const (
 	minimapStructAlpha uint8 = 235
 )
 
+// minimapProp builds a prop swatch at the shared minimapPropAlpha so each table
+// entry carries only its hue, not a hand-keyed fourth byte that could drift.
+func minimapProp(r, g, b uint8) rl.Color { return rl.NewColor(r, g, b, minimapPropAlpha) }
+
 var minimapPropColors = map[byte]rl.Color{
-	core.TileTree:              rl.NewColor(42, 132, 56, minimapPropAlpha),
-	core.TileTreeXL:            rl.NewColor(28, 102, 44, minimapPropAlpha),
-	core.TileTreeTall:          rl.NewColor(36, 118, 50, minimapPropAlpha),
-	core.TileTreeTwin:          rl.NewColor(40, 124, 58, minimapPropAlpha),
-	core.TileTreeYoung:         rl.NewColor(96, 168, 88, minimapPropAlpha),
-	core.TileRockLarge:         rl.NewColor(120, 116, 108, minimapPropAlpha),
-	core.TileBushLarge:         rl.NewColor(110, 168, 92, minimapPropAlpha),
-	core.TileCrate:             rl.NewColor(168, 122, 72, minimapPropAlpha),
-	core.TileBarrel:            rl.NewColor(148, 100, 60, minimapPropAlpha),
-	core.TileUrn:               rl.NewColor(186, 112, 72, minimapPropAlpha),
-	core.TileStalagmite:        rl.NewColor(196, 188, 174, minimapPropAlpha),
-	core.TilePillar:            rl.NewColor(214, 206, 188, minimapPropAlpha),
-	core.TileBrokenPillar:      rl.NewColor(180, 172, 156, minimapPropAlpha),
-	core.TileStatue:            rl.NewColor(228, 220, 204, minimapPropAlpha),
-	core.TileObelisk:           rl.NewColor(86, 90, 104, minimapPropAlpha),
-	core.TileFountain:          rl.NewColor(96, 158, 208, minimapPropAlpha),
-	core.TileRockCairn:         rl.NewColor(150, 138, 116, minimapPropAlpha),
-	core.TileRockFormation:     rl.NewColor(118, 102, 86, minimapPropAlpha),
-	core.TileRockFormationTail: rl.NewColor(118, 102, 86, minimapPropAlpha),
-	core.TileWell:              rl.NewColor(132, 138, 142, minimapPropAlpha),
-	core.TileGravestone:        rl.NewColor(168, 162, 152, minimapPropAlpha),
-	core.TileSignPost:          rl.NewColor(160, 110, 64, minimapPropAlpha),
-	core.TileHayBale:           rl.NewColor(216, 184, 110, minimapPropAlpha),
-	core.TileScarecrow:         rl.NewColor(196, 162, 96, minimapPropAlpha),
-	core.TileBookshelf:         rl.NewColor(132, 90, 56, minimapPropAlpha),
-	core.TileTable:             rl.NewColor(160, 116, 72, minimapPropAlpha),
-	core.TileBed:               rl.NewColor(176, 90, 96, minimapPropAlpha),
-	core.TileBrazier:           rl.NewColor(220, 132, 64, minimapPropAlpha),
-	core.TileTorch:             rl.NewColor(240, 168, 96, minimapPropAlpha),
-	core.TileSarcophagus:       rl.NewColor(200, 192, 174, minimapPropAlpha),
-	core.TilePropExoticFlower:  rl.NewColor(206, 110, 170, minimapPropAlpha),
-	core.TilePropTallFern:      rl.NewColor(90, 146, 86, minimapPropAlpha),
-	core.TilePropGrassTuft:     rl.NewColor(140, 178, 108, minimapPropAlpha),
+	core.TileTree:              minimapProp(42, 132, 56),
+	core.TileTreeXL:            minimapProp(28, 102, 44),
+	core.TileTreeTall:          minimapProp(36, 118, 50),
+	core.TileTreeTwin:          minimapProp(40, 124, 58),
+	core.TileTreeYoung:         minimapProp(96, 168, 88),
+	core.TileRockLarge:         minimapProp(120, 116, 108),
+	core.TileBushLarge:         minimapProp(110, 168, 92),
+	core.TileCrate:             minimapProp(168, 122, 72),
+	core.TileBarrel:            minimapProp(148, 100, 60),
+	core.TileUrn:               minimapProp(186, 112, 72),
+	core.TileStalagmite:        minimapProp(196, 188, 174),
+	core.TilePillar:            minimapProp(214, 206, 188),
+	core.TileBrokenPillar:      minimapProp(180, 172, 156),
+	core.TileStatue:            minimapProp(228, 220, 204),
+	core.TileObelisk:           minimapProp(86, 90, 104),
+	core.TileFountain:          minimapProp(96, 158, 208),
+	core.TileRockCairn:         minimapProp(150, 138, 116),
+	core.TileRockFormation:     minimapProp(118, 102, 86),
+	core.TileRockFormationTail: minimapProp(118, 102, 86),
+	core.TileWell:              minimapProp(132, 138, 142),
+	core.TileGravestone:        minimapProp(168, 162, 152),
+	core.TileSignPost:          minimapProp(160, 110, 64),
+	core.TileHayBale:           minimapProp(216, 184, 110),
+	core.TileScarecrow:         minimapProp(196, 162, 96),
+	core.TileBookshelf:         minimapProp(132, 90, 56),
+	core.TileTable:             minimapProp(160, 116, 72),
+	core.TileBed:               minimapProp(176, 90, 96),
+	core.TileBrazier:           minimapProp(220, 132, 64),
+	core.TileTorch:             minimapProp(240, 168, 96),
+	core.TileSarcophagus:       minimapProp(200, 192, 174),
+	core.TilePropExoticFlower:  minimapProp(206, 110, 170),
+	core.TilePropTallFern:      minimapProp(90, 146, 86),
+	core.TilePropGrassTuft:     minimapProp(140, 178, 108),
 }
 
 // minimapPropColorTable / minimapPropColorPresent mirror minimapPropColors into

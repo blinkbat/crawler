@@ -554,7 +554,7 @@ func init() {
 		// Drop chances ride the same [0, 1] contract as the proc fields,
 		// and a drop must name a real item kind.
 		for _, d := range def.Drops {
-			if d.Chance < 0 || d.Chance > 1 {
+			if !ValidChance(d.Chance) {
 				panic("core/enemies: " + def.Name + " drop Chance must be in [0, 1]")
 			}
 			if _, ok := ItemInfoOk(d.Kind); !ok {
@@ -594,7 +594,14 @@ func EnemyKindCount() int {
 // LastBattleEnemyFallsMessage) — keeps its own format string, since the
 // article binds to "last" rather than the bare noun.
 func TheEnemy(def EnemyDefinition) string {
-	return "The " + def.SingularNoun
+	return theNoun(def.SingularNoun)
+}
+
+// theNoun is the one place the definite article binds to a bare enemy noun, so
+// TheEnemy and ThePlural can't drift to different articles. A future per-enemy
+// article override ("An Amoeba") changes this single helper.
+func theNoun(noun string) string {
+	return "The " + noun
 }
 
 // EnemyDisplayName returns the "The <noun>" battle-log display string for a
@@ -609,7 +616,7 @@ func EnemyDisplayName(e *Enemy) string {
 // phrasings. Kept alongside TheEnemy so a future per-enemy article override
 // ("Some Amoebae") changes both article forms in one place.
 func ThePlural(def EnemyDefinition) string {
-	return "The " + def.PluralNoun
+	return theNoun(def.PluralNoun)
 }
 
 // EnemyInfoOk is the validating sibling of EnemyInfo (mirrors ItemInfoOk):

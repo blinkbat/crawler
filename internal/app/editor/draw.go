@@ -1150,9 +1150,9 @@ func drawMinimap(s *State) {
 	scale := mr.Width / float32(s.area.Width)
 	rl.DrawRectangleRec(rl.NewRectangle(mr.X-4, mr.Y-4, mr.Width+8, mr.Height+8), withAlpha(panelBackingColor, 214))
 	rl.DrawRectangleLinesEx(rl.NewRectangle(mr.X-4, mr.Y-4, mr.Width+8, mr.Height+8), 1, editorBorderDim)
-	rl.DrawRectangleRec(mr, rl.NewColor(58, 56, 50, 255))
+	rl.DrawRectangleRec(mr, minimapFloorCol)
 
-	wallCol := rl.NewColor(150, 152, 160, 255)
+	wallCol := minimapWallCol
 	wpx, hpx := int(mr.Width), int(mr.Height)
 	for py := 0; py < hpx; py++ {
 		tz := int(float32(py) / scale)

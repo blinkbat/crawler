@@ -757,7 +757,7 @@ func drawReelBar(timing core.TimingState, g *core.GameState, assets Resources, x
 			drawBrassStud(cellX+cellW-reelStudInset, y+barH-reelStudInset, reelStudR)
 		} else {
 			drawGaugeBezel(ix, iy, iw, ih, true)
-			drawSmallPanelOutline(ix, iy, iw, ih, fadeColor(woodAccent, 0.55))
+			drawSmallPanelOutline(ix, iy, iw, ih, woodAccentSeam)
 		}
 	}
 }

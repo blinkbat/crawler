@@ -835,7 +835,7 @@ const (
 	dialogCondRowGap   = float32(54) // row pitch in the condition editor
 	dialogTrigRowGap   = float32(52) // row pitch in the trigger editor
 	dialogActionRowGap = float32(56) // row pitch in the action editor
-	dialogListRowH     = float32(24) // height of one row in the scrollable choice / condition lists
+	dialogListRowH     = dropdownRowH // scrollable choice / condition list rows share the dropdown's row pitch
 )
 
 // stackRows lays out n equal-height field rows stacked downward from (x,y) at a

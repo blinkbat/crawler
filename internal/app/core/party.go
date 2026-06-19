@@ -730,11 +730,16 @@ func OutOfBattleHealsInto(buf []SkillID, m *PartyMember) []SkillID {
 // skips a member ingested by a mantrap (out of reach, untargetable —
 // matching applyMassMend's in-battle skip). Item / skill use routes
 // through this so the clamp + no-revive + ingest rules live in one place.
-func HealMember(m *PartyMember, amount int) {
+// Returns true when the member was a valid heal target (guards passed) so
+// callers can gate a flash / sound / "it worked" message on the heal landing
+// rather than re-checking the same HP / ingest rules; party-wide callers that
+// don't care simply ignore the result.
+func HealMember(m *PartyMember, amount int) bool {
 	if m == nil || amount <= 0 || !partyAvailable(*m) {
-		return
+		return false
 	}
 	GainUpTo(&m.HP, m.MaxHP, amount)
+	return true
 }
 
 // HealWholeParty applies HealMember(amount) to every LIVING (HP > 0) party

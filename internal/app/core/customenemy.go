@@ -62,10 +62,10 @@ func DefaultCustomEnemy(name string, base EnemyKind) CustomEnemyDef {
 // custom path passes 0 (always valid); keeping every [0,1] proc check here
 // means the static registry can't enforce the rule a second way.
 func validateEnemyStatBounds(name string, skillCastChance, poisonChance float64, armor, mdef, attackDamage, xpValue, spellPower, tier int) error {
-	if skillCastChance < 0 || skillCastChance > 1 {
+	if !ValidChance(skillCastChance) {
 		return fmt.Errorf("enemy %q has SkillCastChance %v outside [0, 1]", name, skillCastChance)
 	}
-	if poisonChance < 0 || poisonChance > 1 {
+	if !ValidChance(poisonChance) {
 		return fmt.Errorf("enemy %q has PoisonChance %v outside [0, 1]", name, poisonChance)
 	}
 	// Tier is included so the editor save path (MapCustomEnemyFromDef →

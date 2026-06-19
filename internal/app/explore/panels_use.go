@@ -26,7 +26,7 @@ const noCaster = -1
 // this only answers "is the index a real party seat" and hands back the
 // pointer so the caller doesn't re-index.
 func validMember(g *core.GameState, idx int) (*core.PartyMember, bool) {
-	if idx < 0 || idx >= len(g.Party) {
+	if !core.PartyIndexInRange(g.Party, idx) {
 		return nil, false
 	}
 	return &g.Party[idx], true

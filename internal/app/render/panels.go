@@ -213,7 +213,7 @@ func DrawPanelsOverlay(g *core.GameState, assets Resources) {
 	// the location/gold band reads as the ledger's ruled header, cleanly
 	// separated from whichever page is open below.
 	stripRuleY := infoY + panelsInfoStripH
-	stripRuleCol := fadeColor(woodAccent, 0.38)
+	stripRuleCol := woodAccentRule
 	drawPipCappedRule(cardX+24, stripRuleY, cardW-48, stripRuleCol, 1.8, stripRuleCol)
 
 	bodyY := infoY + panelsInfoStripH + 6
@@ -350,7 +350,7 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 	if highlight {
 		cardBG = selectedGlassTint(glassMid, 0.9)
 	}
-	drawGlassPane(int32(col.X), int32(col.Y), int32(col.Width), int32(col.Height), cardBG)
+	drawGlassPaneRect(col, cardBG)
 	// Class accent rail, flush to the pane's left edge (the inset differs from
 	// a full card's drawAccentStripe, so pass geometry explicitly). Shares the
 	// one embellished 3-D rail look (drawClassRail) with every other
@@ -419,7 +419,7 @@ func drawPanelsStats(g *core.GameState, assets Resources, body rl.Rectangle) {
 		statColW := innerW / 2
 		rowH := float32(30)
 		statRows := (core.StatCount + 1) / 2
-		statIconCol := fadeColor(woodAccent, 0.9)
+		statIconCol := woodAccentIconBright
 		for s := core.Stat(0); s < core.StatCount; s++ {
 			row := int(s) / 2
 			col := int(s) % 2
@@ -645,7 +645,7 @@ func drawPanelsEquipment(g *core.GameState, assets Resources, body rl.Rectangle)
 
 			equippedKind := m.Equipped[s]
 			filled := equippedKind != core.ItemNone
-			iconCol := fadeColor(woodAccent, 0.7)
+			iconCol := woodAccentIconSoft
 			if filled {
 				iconCol = giltBright
 			}
@@ -993,32 +993,17 @@ func equipBonusSummary(def core.ItemDefinition) string {
 	return out
 }
 
-// drawSlotIconSword paints a small upright longsword sigil for the
-// Weapon equipment slot. Built from a vertical blade (tapered tip
-// triangle + body rectangle + centre fuller stripe), a horizontal
-// crossguard, and a round pommel. Sized by `r` (the icon's
-// half-height).
+// drawSlotIconSword paints a small dagger sigil for the Weapon equipment slot —
+// the same shape as the Thief class glyph (drawDaggerGlyph), minus the gilt
+// pommel highlight and with a slightly thicker crossguard. Sized by `r` (the
+// icon's half-height).
 func drawSlotIconSword(cx, cy, r float32, col rl.Color) {
-	bladeHalfW := r * 0.18
-	if bladeHalfW < 1.5 {
-		bladeHalfW = 1.5
-	}
-	pommelY := cy - r + 1
-	rl.DrawCircleV(rl.NewVector2(cx, pommelY), bladeHalfW*1.4, col)
-	guardY := cy - r*0.55
-	guardHalfW := r * 0.75
-	rl.DrawRectangle(int32(cx-guardHalfW), int32(guardY), int32(guardHalfW*2), 2, col)
-	rl.DrawRectangle(int32(cx-guardHalfW), int32(guardY), 2, 3, col)
-	rl.DrawRectangle(int32(cx+guardHalfW-2), int32(guardY), 2, 3, col)
-	bladeTop := guardY + 2
-	bladeBottom := cy + r*0.62
-	rl.DrawRectangle(int32(cx-bladeHalfW), int32(bladeTop), int32(bladeHalfW*2), int32(bladeBottom-bladeTop), col)
-	fuller := fadeColor(col, 0.5)
-	rl.DrawRectangle(int32(cx), int32(bladeTop+2), 1, int32(bladeBottom-bladeTop-4), fuller)
-	tip := rl.NewVector2(cx, cy+r)
-	left := rl.NewVector2(cx-bladeHalfW, bladeBottom)
-	right := rl.NewVector2(cx+bladeHalfW, bladeBottom)
-	drawTriangleCCW(tip, right, left, col)
+	drawDaggerGlyph(cx, cy, r, col, daggerGlyphStyle{
+		minBladeHalfW: 1.5,
+		guardH:        2,
+		fullerXOff:    0,
+		pommelHi:      false,
+	})
 }
 
 // drawSlotIconShield paints a small heater-shield sigil for the
@@ -1129,7 +1114,7 @@ func drawPanelsItems(g *core.GameState, assets Resources, body rl.Rectangle) {
 
 	// Detail card: name, type/effect summary, count owned, description
 	// stub. Reads as the ledger's "current entry" pane.
-	drawGlassPane(int32(detailRect.X), int32(detailRect.Y), int32(detailRect.Width), int32(detailRect.Height), glassMid)
+	drawGlassPaneRect(detailRect, glassMid)
 	if cursor < len(stacks) {
 		stack := stacks[cursor]
 		info := core.ItemInfo(stack.Kind)
@@ -1332,7 +1317,7 @@ func drawPanelsSkills(g *core.GameState, assets Resources, body rl.Rectangle) {
 				break
 			}
 			rect := rl.NewRectangle(innerX, rowY, innerW, rowH-10)
-			drawGlassPane(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), glassMid)
+			drawGlassPaneRect(rect, glassMid)
 
 			drawTextWithShadow(font, tr.Name, rect.X+12, rect.Y+8, FontBody, textPrimary)
 			invested := core.TreeInvestedRanks(&m, tr)
@@ -1452,7 +1437,7 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 	// color. Kept low-alpha so it textures without fighting the terrain fills.
 	gridW := float32(cellsX) * cellPx
 	gridH := float32(cellsY) * cellPx
-	gridCol := fadeColor(woodAccent, 0.16)
+	gridCol := woodAccentGrid
 	for gx := 0; gx <= cellsX; gx++ {
 		px := int32(mapX + float32(gx)*cellPx)
 		rl.DrawRectangle(px, int32(mapY), 1, int32(gridH), gridCol)

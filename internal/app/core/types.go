@@ -1251,7 +1251,16 @@ type ActorRef struct {
 // once. Returns false for enemy-actor refs without needing a caller
 // short-circuit.
 func (a ActorRef) ValidPartyIndex(party []PartyMember) bool {
-	return a.IsParty && a.Index >= 0 && a.Index < len(party)
+	return a.IsParty && PartyIndexInRange(party, a.Index)
+}
+
+// PartyIndexInRange is the one place the bare slice-access rule `idx >= 0 &&
+// idx < len(party)` lives. ActorRef.ValidPartyIndex, battle's partyIndexValid,
+// and explore's validMember all defer to it so a future "ghost slot" / joinable
+// NPC gate changes the contract once. Callers layer their own HP / Ingested /
+// affordability checks on top — this only answers "is the index a real seat."
+func PartyIndexInRange(party []PartyMember, idx int) bool {
+	return idx >= 0 && idx < len(party)
 }
 
 // Battle owns every transient piece of state for an in-progress encounter.

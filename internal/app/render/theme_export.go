@@ -154,7 +154,7 @@ func SelectionRowRect(x, y, w, h int32) rl.Rectangle {
 func DrawSelectedRow(r rl.Rectangle) {
 	flick := candleFlicker()
 	drawPaneDropShadow(r)
-	drawGlassPane(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height), glassWarm)
+	drawGlassPaneRect(r, glassWarm)
 	rl.DrawRectangleLinesEx(r, 1, fadeColor(giltDim, 0.75*flick))
 	if r.Width > 24 && r.Height > 10 {
 		rl.DrawRectangleGradientV(

@@ -279,6 +279,14 @@ func Clamp[T cmp.Ordered](v, min, max T) T {
 	return v
 }
 
+// ValidChance reports whether p is a well-formed probability in [0, 1] — the
+// contract every proc / drop field (SkillCastChance, PoisonChance, drop Chance)
+// is init-asserted against. Centralizing it keeps the bounds in one place so a
+// new chance field can't validate against a subtly different range.
+func ValidChance(p float64) bool {
+	return p >= 0 && p <= 1
+}
+
 // GainUpTo adds delta to *cur, clamped so it never exceeds max — the
 // shared "restore a pool toward its ceiling" primitive behind heals, the
 // MP refund, lifesteal, and the level-up pool growth (VIT→HP, INT→MP).
