@@ -128,9 +128,8 @@ func updatePanels(g *core.GameState) {
 		// party-card name is the player's hint that allocation is
 		// available.
 		g.PanelsRowCursor = input.CursorLeftRightWrap(g.PanelsRowCursor, len(g.Party))
-		if input.ConfirmPressed() && g.PanelsRowCursor >= 0 && g.PanelsRowCursor < len(g.Party) {
-			m := g.Party[g.PanelsRowCursor]
-			if m.PendingLevelUps > 0 {
+		if input.ConfirmPressed() {
+			if m, ok := validMember(g, g.PanelsRowCursor); ok && m.PendingLevelUps > 0 {
 				closePanels(g)
 				openLevelUpFor(g, g.PanelsRowCursor)
 			}
@@ -142,9 +141,9 @@ func updatePanels(g *core.GameState) {
 		// again cancels. A swap keeps the party a clean 2×2 (the two trade places),
 		// so you can never end up with three in one row. Back also cancels a pickup
 		// (handled above). The change persists and shows in the next fight.
-		if input.UsePressed() && g.PanelsRowCursor >= 0 && g.PanelsRowCursor < len(g.Party) {
+		if input.UsePressed() && core.PartyIndexInRange(g.Party, g.PanelsRowCursor) {
 			switch {
-			case g.PanelSwapSource < 0 || g.PanelSwapSource >= len(g.Party):
+			case !core.PartyIndexInRange(g.Party, g.PanelSwapSource):
 				g.PanelSwapSource = g.PanelsRowCursor
 				g.SetStatusMessage("Swap " + g.Party[g.PanelsRowCursor].Name + " with whom?")
 			case g.PanelSwapSource == g.PanelsRowCursor:
@@ -169,7 +168,7 @@ func updatePanels(g *core.GameState) {
 		// still casts a Heal-tag skill out of battle — a separate button so
 		// opening the trees and casting a heal never collide.
 		g.PanelsRowCursor = input.CursorLeftRightWrap(g.PanelsRowCursor, len(g.Party))
-		if input.ConfirmPressed() && g.PanelsRowCursor >= 0 && g.PanelsRowCursor < len(g.Party) {
+		if input.ConfirmPressed() && core.PartyIndexInRange(g.Party, g.PanelsRowCursor) {
 			openSkillTreeFor(g, g.PanelsRowCursor)
 		}
 		if input.UsePressed() {

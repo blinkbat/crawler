@@ -2160,10 +2160,10 @@ func applyShadowStep(g *core.GameState, actor *core.PartyMember, raw int) int {
 }
 
 // appendCrit suffixes the combat-log message with " Critical!" when
-// crit landed. Used by every damaging player skill EXCEPT Backstab,
-// which already encodes the crit in its proc-arm copy ("lands a clean
+// crit landed. Used by every damaging attack EXCEPT Backstab, which
+// already encodes the crit in its proc-arm copy ("lands a clean
 // Backstab for X!"). Centralised so a future "crit color code" pass
-// touches one place instead of seven.
+// touches one place instead of every damaging-attack call site.
 func appendCrit(msg string, crit bool) string {
 	if !crit {
 		return msg
@@ -2891,12 +2891,12 @@ func fireboltMessage(name string, target core.Enemy, damage, quality int, defeat
 // whichever verbs it doesn't need without a "too many args" error.
 type procMessageArms struct{ defeated, proc, plain string }
 
-// procSkillMessage selects and formats the right arm. Collapses the five
-// near-identical 3-arm switch helpers (Crushing Blow / Smite / Backstab /
-// Venom Strike / Frost Lance) into one; each skill now supplies only its
-// copy via a procMessageArms table. A future "battle-log color codes"
-// pass lands here once instead of five times. (fireboltMessage keeps its
-// own 4-arm form — it has an extra "already burning" line.)
+// procSkillMessage selects and formats the right arm. Collapses the family of
+// near-identical 3-arm switch helpers (Crushing Blow / Smite / Backstab / Venom
+// Strike / Frost Lance / Frostbite / Rend / Lacerate) into one; each skill now
+// supplies only its copy via a procMessageArms table. A future "battle-log color
+// codes" pass lands here once instead of once per skill. (fireboltMessage keeps
+// its own 4-arm form — it has an extra "already burning" line.)
 func procSkillMessage(arms procMessageArms, name string, target core.Enemy, damage, quality int, defeated, proc bool) string {
 	f := arms.plain
 	switch {

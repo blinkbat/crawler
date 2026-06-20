@@ -227,24 +227,19 @@ func CloneArea(a AreaDefinition) AreaDefinition {
 	dst := out.gridLayers()
 	src := a.gridLayers()
 	for i := range dst {
-		*dst[i] = append([]string(nil), *src[i]...)
+		*dst[i] = cloneRows(*src[i])
 	}
-	// Solids isn't a gridLayers() member (it's a [][]string stack), so deep-copy
-	// it explicitly. string rows are immutable, so a per-plane slice copy is a
-	// full deep copy — same reasoning as the per-layer append above.
-	if len(a.Solids) > 0 {
-		out.Solids = make([][]string, len(a.Solids))
-		for L := range a.Solids {
-			out.Solids[L] = append([]string(nil), a.Solids[L]...)
-		}
-	}
-	// PropLevels (per-tile prop level) is its own optional grid, deep-copied like
-	// Solids — string rows are immutable, so a slice copy is a full copy.
+	// Solids isn't a gridLayers() member (it's a [][]string stack); CloneSolids is
+	// the canonical nil-safe deep copy (returns nil for an empty stack, so a
+	// heightfield area keeps Solids==nil).
+	out.Solids = CloneSolids(a.Solids)
+	// PropLevels / DecorLevels are their own optional row grids — cloneRows is the
+	// same immutable-string deep copy used for the grid layers above.
 	if len(a.PropLevels) > 0 {
-		out.PropLevels = append([]string(nil), a.PropLevels...)
+		out.PropLevels = cloneRows(a.PropLevels)
 	}
 	if len(a.DecorLevels) > 0 {
-		out.DecorLevels = append([]string(nil), a.DecorLevels...)
+		out.DecorLevels = cloneRows(a.DecorLevels)
 	}
 	if len(a.FaceOverrides) > 0 {
 		out.FaceOverrides = append([]FaceOverride(nil), a.FaceOverrides...)

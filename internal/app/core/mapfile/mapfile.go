@@ -190,16 +190,34 @@ var PackAINames = [...]string{
 	PackAISkittishName,
 }
 
-// IsPackAIName reports whether s names one of the canonical pack-AI
-// modes (case-insensitive).
-func IsPackAIName(s string) bool {
+// inBounds reports whether (x,z) lies inside a w×h map — the single home for the
+// bounds predicate validate() applies to every placed entity (start, packs,
+// chests, crystals, doors, face overrides) so the four-term comparison isn't
+// re-spelled per entity. (core has its own inBoundsWH; mapfile can't import core.)
+func inBounds(x, z, w, h int) bool {
+	return x >= 0 && x < w && z >= 0 && z < h
+}
+
+// nameInList reports whether s (case-insensitively) matches one of names. The
+// single home for the canonical on-disk name-membership check shared by the
+// pack-AI / door-style / facing validators, so they can't drift on case-fold
+// policy — facing was previously the lone case-SENSITIVE one, which made the
+// disk validator reject a hand-edited "North" that the converter (facingFromName,
+// itself case-insensitive) would have accepted.
+func nameInList(s string, names []string) bool {
 	low := strings.ToLower(s)
-	for _, name := range PackAINames {
+	for _, name := range names {
 		if name == low {
 			return true
 		}
 	}
 	return false
+}
+
+// IsPackAIName reports whether s names one of the canonical pack-AI
+// modes (case-insensitive).
+func IsPackAIName(s string) bool {
+	return nameInList(s, PackAINames[:])
 }
 
 // splitPackMembers parses a pack's member field. Members are comma-separated; an
@@ -364,13 +382,7 @@ var DoorStyleNames = [...]string{
 // IsDoorStyleName reports whether s names one of the canonical door
 // styles (case-insensitive).
 func IsDoorStyleName(s string) bool {
-	low := strings.ToLower(s)
-	for _, name := range DoorStyleNames {
-		if name == low {
-			return true
-		}
-	}
-	return false
+	return nameInList(s, DoorStyleNames[:])
 }
 
 // Ext is the canonical on-disk extension for map files. Lives in
@@ -1052,11 +1064,11 @@ func (mf *MapFile) validate() error {
 	// faces: sparse per-tile overrides — bounds-check each so a stray line can't
 	// feed an off-map index to the renderer.
 	for _, f := range mf.Faces {
-		if f.X < 0 || f.X >= mf.Width || f.Z < 0 || f.Z >= mf.Height {
+		if !inBounds(f.X, f.Z, mf.Width, mf.Height) {
 			return fmt.Errorf("faces entry (%d,%d) outside map", f.X, f.Z)
 		}
 	}
-	if mf.StartX < 0 || mf.StartX >= mf.Width || mf.StartZ < 0 || mf.StartZ >= mf.Height {
+	if !inBounds(mf.StartX, mf.StartZ, mf.Width, mf.Height) {
 		return fmt.Errorf("start (%d,%d) outside map", mf.StartX, mf.StartZ)
 	}
 	// StartFace must be a canonical facing — mirrors the per-door guard below.
@@ -1074,12 +1086,12 @@ func (mf *MapFile) validate() error {
 	// runtime placePacks / placeChests just skips the entry — a
 	// frustrating "where did my pack go?" debug.
 	for _, p := range mf.Packs {
-		if p.X < 0 || p.X >= mf.Width || p.Z < 0 || p.Z >= mf.Height {
+		if !inBounds(p.X, p.Z, mf.Width, mf.Height) {
 			return fmt.Errorf("pack at (%d,%d) outside map %dx%d", p.X, p.Z, mf.Width, mf.Height)
 		}
 	}
 	for _, c := range mf.Chests {
-		if c.X < 0 || c.X >= mf.Width || c.Z < 0 || c.Z >= mf.Height {
+		if !inBounds(c.X, c.Z, mf.Width, mf.Height) {
 			return fmt.Errorf("chest at (%d,%d) outside map %dx%d", c.X, c.Z, mf.Width, mf.Height)
 		}
 	}
@@ -1087,7 +1099,7 @@ func (mf *MapFile) validate() error {
 	// hand-edit surfaces here at load rather than as a silently dropped
 	// crystal at runtime.
 	for _, c := range mf.Crystals {
-		if c.X < 0 || c.X >= mf.Width || c.Z < 0 || c.Z >= mf.Height {
+		if !inBounds(c.X, c.Z, mf.Width, mf.Height) {
 			return fmt.Errorf("crystal at (%d,%d) outside map %dx%d", c.X, c.Z, mf.Width, mf.Height)
 		}
 	}
@@ -1098,7 +1110,7 @@ func (mf *MapFile) validate() error {
 	// rejected since runtime resolution by name would be ambiguous.
 	seenNames := make(map[string]struct{}, len(mf.Doors))
 	for _, d := range mf.Doors {
-		if d.X < 0 || d.X >= mf.Width || d.Z < 0 || d.Z >= mf.Height {
+		if !inBounds(d.X, d.Z, mf.Width, mf.Height) {
 			return fmt.Errorf("door %q at (%d,%d) outside map %dx%d", d.Name, d.X, d.Z, mf.Width, mf.Height)
 		}
 		if d.Name == "" {
@@ -1179,15 +1191,11 @@ func parseStart(val string) (int, int, string, error) {
 	return x, z, face, nil
 }
 
-// IsFacingName reports whether s is one of the four canonical facing
-// strings.
+// IsFacingName reports whether s is one of the four canonical facing strings
+// (case-insensitive, matching facingFromName's converter so the disk validator
+// and the in-memory conversion agree).
 func IsFacingName(s string) bool {
-	for _, name := range FacingNames {
-		if s == name {
-			return true
-		}
-	}
-	return false
+	return nameInList(s, FacingNames[:])
 }
 
 // parseIntField parses a numeric field with the canonical "line N:
@@ -1634,9 +1642,11 @@ func Save(path string, mf MapFile) error {
 	return err
 }
 
-// List returns the .map files in dir, sorted alphabetically. Missing dir
-// returns an empty slice (first-run convenience).
-func List(dir string) ([]string, error) {
+// mapDirEntries returns dir's non-directory entries whose name ends in the .map
+// extension (case-insensitive) — the shared dir-read + filter behind List and
+// ListByModTime, which differ only in how they sort the result. A missing dir is
+// NOT an error (returns nil, nil) for first-run convenience.
+func mapDirEntries(dir string) ([]os.DirEntry, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1644,7 +1654,7 @@ func List(dir string) ([]string, error) {
 		}
 		return nil, err
 	}
-	out := make([]string, 0, len(entries))
+	out := make([]os.DirEntry, 0, len(entries))
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -1652,6 +1662,20 @@ func List(dir string) ([]string, error) {
 		if !strings.HasSuffix(strings.ToLower(e.Name()), Ext) {
 			continue
 		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+// List returns the .map files in dir, sorted alphabetically. Missing dir
+// returns an empty slice (first-run convenience).
+func List(dir string) ([]string, error) {
+	entries, err := mapDirEntries(dir)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
 		out = append(out, filepath.Join(dir, e.Name()))
 	}
 	sort.Strings(out)
@@ -1663,11 +1687,8 @@ func List(dir string) ([]string, error) {
 // on lands at the top of the list. Stat failures on individual entries
 // drop those entries from the result rather than killing the whole list.
 func ListByModTime(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
+	entries, err := mapDirEntries(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
 	type entry struct {
@@ -1676,18 +1697,11 @@ func ListByModTime(dir string) ([]string, error) {
 	}
 	rows := make([]entry, 0, len(entries))
 	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		if !strings.HasSuffix(strings.ToLower(e.Name()), Ext) {
-			continue
-		}
-		path := filepath.Join(dir, e.Name())
 		info, ierr := e.Info()
 		if ierr != nil {
 			continue
 		}
-		rows = append(rows, entry{path: path, mod: info.ModTime().UnixNano()})
+		rows = append(rows, entry{path: filepath.Join(dir, e.Name()), mod: info.ModTime().UnixNano()})
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].mod > rows[j].mod })
 	out := make([]string, len(rows))

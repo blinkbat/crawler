@@ -1,6 +1,8 @@
 package explore
 
 import (
+	"fmt"
+
 	"crawler/internal/app/audio"
 	"crawler/internal/app/core"
 	"crawler/internal/app/input"
@@ -49,6 +51,11 @@ func updateShop(g *core.GameState) {
 			buyShopItem(g)
 		case core.ShopTabSell:
 			sellShopItem(g)
+		default:
+			// ShopTab is a hand-maintained enum; a new tab without a
+			// transaction arm here would silently confirm nothing. Fail loudly,
+			// matching updatePanels' / Update's missing-case panics.
+			panic(fmt.Sprintf("explore: updateShop missing confirm case for ShopTab %d", g.ShopTab))
 		}
 	}
 }
@@ -64,8 +71,9 @@ func shopRowCount(g *core.GameState) int {
 		// No-alloc count — updateShop calls this every frame the Sell tab
 		// is open and only needs the row count, not the materialized slice.
 		return core.SellableCount(g.Inventory)
+	default:
+		panic(fmt.Sprintf("explore: shopRowCount missing case for ShopTab %d", g.ShopTab))
 	}
-	return 0
 }
 
 // buyShopItem purchases one unit of the cursored catalog item when the

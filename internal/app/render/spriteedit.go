@@ -9,8 +9,10 @@ import (
 	_ "image/gif"  // register decoders so image.Decode handles common drops
 	_ "image/jpeg" //
 	"image/png"
+	"math"
 	"os"
 	"path/filepath"
+	"unsafe"
 
 	"crawler/internal/app/core"
 
@@ -51,13 +53,24 @@ type SpriteFilter struct {
 	// the chunking — that's how the author "adjusts" the strength. Baked (not a
 	// runtime shader), so it costs nothing in-game: the texture just loads coarser.
 	Pixelate int32
+	// Palette / retro passes (CPU per-pixel; they mirror the in-game retro
+	// post-shader's posterize/dither/Game-Boy math in render/retrofilter.go so a
+	// baked sprite and the screen filter agree). All apply on the post-tonal color.
+	// Posterize 0..1 crushes the palette (48 levels → 4); Saturation is -1..1
+	// (−1 = grayscale, +1 = double); Dither 0..1 lays an ordered Bayer dither;
+	// GameBoy 0..1 maps luminance onto the 4-shade green LCD ramp. 0 = skip each.
+	Posterize  float32
+	Saturation float32
+	Dither     float32
+	GameBoy    float32
 }
 
 // IsNoop reports whether the filter would change nothing — the UI uses it to
 // avoid writing an identical PNG (and a pointless .bak) on a stray click.
 func (f SpriteFilter) IsNoop() bool {
 	return !f.TintApply && f.Brightness == 0 && f.Contrast == 0 &&
-		!f.Grayscale && !f.Invert && !f.Gradient && f.Pixelate <= 1
+		!f.Grayscale && !f.Invert && !f.Gradient && f.Pixelate <= 1 &&
+		f.Posterize == 0 && f.Saturation == 0 && f.Dither == 0 && f.GameBoy == 0
 }
 
 // BakeSpriteFilter applies f to the foe's current sprite image and writes it to
@@ -413,6 +426,10 @@ func applySpriteFilter(img *rl.Image, f SpriteFilter) {
 			rl.UnloadImage(grad)
 		}
 	}
+	// Palette / retro passes, on the post-tonal color but BEFORE pixelate so the
+	// mosaic blocks carry the limited palette. One CPU pixel walk applies whichever
+	// of saturation/posterize/dither/Game-Boy are active.
+	applyPaletteFilter(img, f)
 	// Pixelate last so the mosaic rides on top of whatever color work ran above.
 	// Nearest-neighbor down to (w/block, h/block) then back up to the original
 	// size — the round-trip is what bakes the chunky blocks in. Clamp the small
@@ -429,6 +446,136 @@ func applySpriteFilter(img *rl.Image, f SpriteFilter) {
 		rl.ImageResizeNN(img, dw, dh)
 		rl.ImageResizeNN(img, w, h)
 	}
+}
+
+// Bayer 4×4 ordered-dither matrix and the classic 4-shade Game Boy green ramp,
+// the Go-side twins of the constants baked into retrofilter.go's shader so a
+// sprite baked here matches the in-game screen filter pixel-for-pixel.
+var (
+	bayer4x4 = [16]float32{
+		0, 8, 2, 10,
+		12, 4, 14, 6,
+		3, 11, 1, 9,
+		15, 7, 13, 5,
+	}
+	gbGreenRamp = [4][3]float32{
+		{0.055, 0.149, 0.055},
+		{0.188, 0.384, 0.188},
+		{0.545, 0.675, 0.059},
+		{0.741, 0.890, 0.420},
+	}
+)
+
+const ditherQuantLevels = 6.0
+
+// applyPaletteFilter runs the non-destructive palette/retro passes (saturation,
+// posterize, ordered dither, Game Boy) in one CPU pixel walk over img. Each pass
+// is skipped at zero, so an all-zero filter returns without touching a pixel.
+// Fully-transparent pixels are left alone so the matte cutout stays clean. The
+// math mirrors retrofilter.go's shader (operating in 0..1 float, written back to
+// 8-bit) so a baked sprite and the in-game retro filter look identical.
+func applyPaletteFilter(img *rl.Image, f SpriteFilter) {
+	sat, post, dith, gb := f.Saturation, f.Posterize, f.Dither, f.GameBoy
+	if sat == 0 && post == 0 && dith == 0 && gb == 0 {
+		return
+	}
+	mapImagePixels(img, func(x, y int, c color.RGBA) color.RGBA {
+		if c.A == 0 {
+			return c
+		}
+		r, g, b := float32(c.R)/255, float32(c.G)/255, float32(c.B)/255
+		// Saturation: lerp each channel around its luminance. -1 = grayscale, 0 =
+		// unchanged, +1 = double saturation.
+		if sat != 0 {
+			l := lumaf(r, g, b)
+			k := 1 + sat
+			r, g, b = l+(r-l)*k, l+(g-l)*k, l+(b-l)*k
+		}
+		// Posterize: crush color depth (48 levels at full-subtle → 4 at full).
+		if post > 0 {
+			levels := mixf(48, 4, post)
+			r, g, b = quantizeChannel(r, levels), quantizeChannel(g, levels), quantizeChannel(b, levels)
+		}
+		// Ordered Bayer dither toward a 6-level quantize, blended by intensity.
+		if dith > 0 {
+			t := (bayer4x4[(y%4)*4+(x%4)]+0.5)/16 - 0.5
+			off := t * (1.5 / ditherQuantLevels)
+			r = mixf(r, quantizeChannel(r+off, ditherQuantLevels), dith)
+			g = mixf(g, quantizeChannel(g+off, ditherQuantLevels), dith)
+			b = mixf(b, quantizeChannel(b+off, ditherQuantLevels), dith)
+		}
+		// Game Boy: luminance onto the 4-shade green LCD ramp, blended by intensity.
+		if gb > 0 {
+			step := int(clamp01f(lumaf(r, g, b)) * 4)
+			if step > 3 {
+				step = 3
+			}
+			r = mixf(r, gbGreenRamp[step][0], gb)
+			g = mixf(g, gbGreenRamp[step][1], gb)
+			b = mixf(b, gbGreenRamp[step][2], gb)
+		}
+		return color.RGBA{R: toByte(r), G: toByte(g), B: toByte(b), A: c.A}
+	})
+}
+
+// mapImagePixels applies fn to every pixel of img in place. img is normalized to
+// 32-bit RGBA first so its raw buffer is a tight 4-bytes-per-pixel block; fn gets
+// the pixel coords (for position-dependent passes like dither) and straight-alpha
+// color, returning the replacement. One cgo crossing (the format normalize); the
+// per-pixel work is pure Go over the image's own memory (same unsafe-buffer idiom
+// resources.go/voxel.go use for mesh data).
+func mapImagePixels(img *rl.Image, fn func(x, y int, c color.RGBA) color.RGBA) {
+	if img == nil || img.Width <= 0 || img.Height <= 0 {
+		return
+	}
+	rl.ImageFormat(img, rl.UncompressedR8g8b8a8)
+	if img.Data == nil {
+		return
+	}
+	w, h := int(img.Width), int(img.Height)
+	pix := unsafe.Slice((*uint8)(img.Data), w*h*4)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			o := (y*w + x) * 4
+			c := fn(x, y, color.RGBA{R: pix[o], G: pix[o+1], B: pix[o+2], A: pix[o+3]})
+			pix[o], pix[o+1], pix[o+2], pix[o+3] = c.R, c.G, c.B, c.A
+		}
+	}
+}
+
+// lumaf is the Rec.601 luminance of a 0..1 RGB triple (matches the shader's dot).
+func lumaf(r, g, b float32) float32 { return 0.299*r + 0.587*g + 0.114*b }
+
+// mixf linearly interpolates a→b by t (GLSL mix).
+func mixf(a, b, t float32) float32 { return a + (b-a)*t }
+
+// quantizeChannel snaps v to the nearest of `levels` evenly spaced steps (the
+// shader's floor(v*levels + 0.5)/levels). The result is clamped on write-back.
+func quantizeChannel(v, levels float32) float32 {
+	return float32(math.Floor(float64(v*levels)+0.5)) / levels
+}
+
+// clamp01f clamps v to [0,1].
+func clamp01f(v float32) float32 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+// toByte maps a 0..1 float to a rounded, clamped 0..255 byte.
+func toByte(v float32) uint8 {
+	v = v*255 + 0.5
+	if v <= 0 {
+		return 0
+	}
+	if v >= 255 {
+		return 255
+	}
+	return uint8(v)
 }
 
 // exportSpritePNG backs up any existing PNG, then writes img to <slug>.png.
@@ -544,6 +691,12 @@ func visualAdjustFilter(ov core.EnemyVisualOverride) SpriteFilter {
 	if ov.Contrast != 0 {
 		f.Contrast = ov.Contrast * 100
 	}
+	// Palette/retro knobs pass straight through — SpriteFilter shares the override's
+	// 0..1 (Posterize/Dither/GameBoy) and -1..1 (Saturation) ranges.
+	f.Posterize = ov.Posterize
+	f.Saturation = ov.Saturation
+	f.Dither = ov.Dither
+	f.GameBoy = ov.GameBoy
 	return f
 }
 

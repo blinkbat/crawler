@@ -17,6 +17,13 @@ func clampStartCoord(v, dim int) int {
 	return Clamp(v, 0, dim-1)
 }
 
+// ClampedStart returns the area's start tile snapped into [0,Width-1]×[0,Height-1]
+// — the single home for the "derive the spawn tile from StartTileX/Z" clamp that
+// NewGameState, placeChests, and DefaultEntranceCrystalSpawns all share.
+func (a AreaDefinition) ClampedStart() (x, z int) {
+	return clampStartCoord(a.StartTileX, a.Width), clampStartCoord(a.StartTileZ, a.Height)
+}
+
 func NewPlayer(tileX, tileZ, facing int) Player {
 	return Player{
 		TileX:  tileX,
@@ -83,8 +90,7 @@ func NewGameState(area AreaDefinition) GameState {
 	// but the editor's F5 path can build a GameState directly from in-memory
 	// edits — if a future editor bug leaves StartTileX/Z out of range, snap
 	// to the nearest valid cell so downstream Walls[Z][X] reads don't panic.
-	startX := clampStartCoord(area.StartTileX, area.Width)
-	startZ := clampStartCoord(area.StartTileZ, area.Height)
+	startX, startZ := area.ClampedStart()
 	visited := make([][]bool, area.Height)
 	for z := range visited {
 		visited[z] = make([]bool, area.Width)
@@ -238,8 +244,7 @@ func placeChests(a AreaDefinition) []Chest {
 	// NewGameState snaps an out-of-range authored start), not the raw StartTileX/Z,
 	// so a chest can't end up on the real spawn when the authored start was clamped.
 	// Same clamp placeCrystals / DefaultEntranceCrystalSpawns use.
-	sx := clampStartCoord(a.StartTileX, a.Width)
-	sz := clampStartCoord(a.StartTileZ, a.Height)
+	sx, sz := a.ClampedStart()
 	out := make([]Chest, 0, len(a.ChestSpawns))
 	for _, sp := range a.ChestSpawns {
 		if !a.InBounds(sp.TileX, sp.TileZ) {
@@ -298,8 +303,7 @@ func placeCrystals(a AreaDefinition) []Crystal {
 // the editor, which seeds this as a real, editable CrystalSpawn when an
 // unauthored map is opened so the entrance crystal can be moved or removed.
 func DefaultEntranceCrystalSpawns(a AreaDefinition) []CrystalSpawn {
-	sx := clampStartCoord(a.StartTileX, a.Width)
-	sz := clampStartCoord(a.StartTileZ, a.Height)
+	sx, sz := a.ClampedStart()
 	isDoorTile := func(x, z int) bool {
 		return DoorSpawnIndexAt(a.DoorSpawns, x, z) >= 0
 	}

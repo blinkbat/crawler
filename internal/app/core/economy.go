@@ -43,6 +43,16 @@ func ShopTabLabel(t ShopTab) string {
 	}
 }
 
+// init forces every ShopTab through ShopTabLabel at startup so a tab added
+// without a label panics here rather than only when that tab is first rendered
+// — the same force-call coverage party.go applies to StatPreviewLine and the
+// stat/panel-tab label tables.
+func init() {
+	for t := ShopTab(0); t < ShopTabCount; t++ {
+		_ = ShopTabLabel(t)
+	}
+}
+
 // ShopSellPrice is the gold recovered for selling one unit of an item:
 // its catalog Price / ShopSellDivisor, floored at 1 so a priced item is
 // always worth something. Items with no Price (Price <= 0) aren't sellable

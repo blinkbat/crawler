@@ -461,9 +461,14 @@ func dialogTriggerKindEntries(s *State) []dropdownEntry {
 	for _, k := range kinds {
 		k := k
 		out = append(out, dropdownEntry{label: triggerKindLabel(k), apply: func(s *State) {
-			if t := currentDialogTrigger(s); t != nil {
+			// Mirror dialogCondKindEntries: act only on a real kind CHANGE and
+			// reset to a clean trigger of the new kind so the params the previous
+			// kind owned (enterTile's TileX/TileZ vs foeKilled's FoeKind/FoeKills)
+			// can't linger on the struct and serialize. The kind-agnostic
+			// ID/DialogID/Once carry over.
+			if t := currentDialogTrigger(s); t != nil && t.Kind != k {
 				pushUndo(s)
-				t.Kind = k
+				*t = core.DialogTrigger{ID: t.ID, Kind: k, DialogID: t.DialogID, Once: t.Once}
 				s.dirty = true
 			}
 		}})

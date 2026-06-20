@@ -45,8 +45,15 @@ func tickLabel(c int) string {
 }
 
 const (
-	topbarH    = float32(48)
-	toolbarH   = float32(38) // action button row beneath the topbar
+	topbarH = float32(48)
+	// menuBarBtnY / menuBarBtnH are the menu-bar strip's vertical inset + height,
+	// shared by the topbar draw, its hit-test, the dropdown re-open hit-test, and
+	// the pull-down anchor rect (menuAnchorRect). Kept as named consts so those
+	// four sites can't drift — if they did, the open dropdown would detach from
+	// the button that spawned it.
+	menuBarBtnY = float32(6)
+	menuBarBtnH = topbarH - 12
+	toolbarH    = float32(38) // action button row beneath the topbar
 	paletteW   = float32(220)
 	metadataW  = float32(360)
 	gridMargin = float32(8)
@@ -596,7 +603,7 @@ func topbarButtonAt(s *State, p rl.Vector2) int {
 	if !pointIn(p, s.rect.topbar) {
 		return -1
 	}
-	return buttonStripHit(menuBarBtns, 6, topbarH-12, p)
+	return buttonStripHit(menuBarBtns, menuBarBtnY, menuBarBtnH, p)
 }
 
 // topbarInfoKey captures everything the topbar's name + info readouts are
@@ -628,7 +635,7 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 	rl.DrawRectangleRec(s.rect.topbar, theme.SurfacePrimary)
 	rl.DrawLineEx(rl.NewVector2(0, topbarH), rl.NewVector2(s.rect.topbar.Width, topbarH), 1, outlineHard)
 
-	drawButtonStrip(font, s, menuBarBtns, 6, topbarH-12)
+	drawButtonStrip(font, s, menuBarBtns, menuBarBtnY, menuBarBtnH)
 	drawLayerMenuButton(s, font, theme)
 
 	key := topbarInfoKey{

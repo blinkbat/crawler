@@ -234,22 +234,18 @@ func BeginRetroCapture(g *core.GameState) bool {
 	return true
 }
 
-// EndRetroCapture stops capturing and blits the captured environment to the
+// EndRetroCapture stops capturing and blits the captured scene to the
 // backbuffer through the filter shader. Pair with a true return from
 // BeginRetroCapture. skyOnBackbuffer reports that the caller already drew
 // the (crisp, filter-exempt) skybox to the backbuffer before the capture —
 // the capture was cleared TRANSPARENT, so the blit alpha-composites the
-// filtered environment over that sky.
+// filtered scene over that sky.
 //
-// When the sky is NOT on the backbuffer, the backbuffer is
-// ClearBackground'd first (before the blit): the frame's load-bearing depth
-// wipe happened inside the capture texture, so without this the backbuffer
-// would still carry LAST frame's depth — and the crisp-sprite pass that
-// follows (which re-renders the environment depth-only, then draws
-// billboards depth-tested against it) would z-fight history. The clear's
-// color is irrelevant; the blit overwrites every pixel. (In the
-// sky-on-backbuffer arm, run.go's own pre-sky ClearBackground performed
-// that same wipe.)
+// When the sky is NOT on the backbuffer, the backbuffer is ClearBackground'd
+// first — a cheap defensive wipe before the opaque full-screen blit. The
+// clear's color is irrelevant; the blit overwrites every pixel. (In the
+// sky-on-backbuffer arm, run.go's own pre-sky ClearBackground already wiped
+// the backbuffer, and the blit alpha-composites over the sky there.)
 func EndRetroCapture(g *core.GameState, skyOnBackbuffer bool) {
 	if g == nil {
 		// Defensive symmetry with BeginRetroCapture, which returns false (and
@@ -277,47 +273,6 @@ func EndRetroCapture(g *core.GameState, skyOnBackbuffer bool) {
 		rl.NewRectangle(0, 0, float32(retroRTW), -float32(retroRTH)),
 		rl.NewVector2(0, 0), rl.White)
 	rl.EndShaderMode()
-}
-
-// GL blend factors / equation for the depth-only re-render below. Named
-// locally — raylib doesn't export GL_* and these three are stable core-GL
-// values (glBlendFunc(GL_ZERO, GL_ONE) + glBlendEquation(GL_FUNC_ADD)).
-const (
-	glZero             = 0
-	glOne              = 1
-	glFuncAdd          = 0x8006
-	glSrcAlpha         = 0x0302
-	glOneMinusSrcAlpha = 0x0303
-)
-
-// RetroDepthPrepass re-renders the environment with a ZERO/ONE blend —
-// every fragment's color is discarded (dst keeps the filtered blit) but
-// DEPTH writes proceed normally. This rebuilds the backbuffer's depth so the
-// crisp sprite pass that follows is properly occluded by walls, trees, and
-// props even though the environment's COLOR came from the filtered texture.
-// The classic color-mask depth prepass, done with blend factors because the
-// raylib-go bindings don't expose rlColorMask. Only runs while filters are
-// active, so the environment double-draw costs nothing in normal play.
-//
-// The world geometry goes through drawWorld's depthOnly path: the full
-// DrawWorld that fed the capture already set this frame's lighting/torch/fog
-// uniforms (same shader, same camera, same time-of-day), so the prepass skips
-// re-collecting torches and re-uploading those uniforms — it only needs the
-// geometry re-rasterized to rebuild depth. (DrawChests / DrawDoors carry no
-// such per-frame lighting setup, so they re-run as-is.)
-func RetroDepthPrepass(camera rl.Camera3D, g *core.GameState, assets Resources) {
-	rl.SetBlendFactors(glZero, glOne, glFuncAdd)
-	rl.BeginBlendMode(rl.BlendCustom)
-	drawWorld(camera, g, assets, true)
-	DrawChests(camera, g, assets)
-	DrawDoors(camera, g, assets)
-	DrawCrystals(camera, g, assets)
-	rl.EndBlendMode()
-	// EndBlendMode restores the previous blend MODE, but raylib's global custom
-	// blend FACTORS set above are sticky — they'd silently poison any later
-	// BlendCustom draw this frame with the color-killing ZERO/ONE pair. Reset
-	// them to the standard alpha pair so the custom slot is left in a sane state.
-	rl.SetBlendFactors(glSrcAlpha, glOneMinusSrcAlpha, glFuncAdd)
 }
 
 // UnloadRetroFilter frees the capture texture and shader. Called from

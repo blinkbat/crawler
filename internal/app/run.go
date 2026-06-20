@@ -369,40 +369,34 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 		rl.ClearBackground(render.SkyClearColor)
 		render.DrawSkyBackground(assets, game)
 	}
-	// ENVIRONMENT pass — sky, world geometry, chests, doors. This is the
-	// half the retro filters apply to.
+	// 3D SCENE pass — sky, world geometry, chests, doors, AND the sprites
+	// (enemies, party, particles) in one pass. Drawing the sprites inside the
+	// capture means a retro filter crunches the WHOLE world uniformly: foes
+	// pixelate/scan/dither right along with the geometry they stand on instead
+	// of floating crisp on top of a filtered world. Per-foe look still comes
+	// from the editor's visuals.json FX baked into each sprite texture; the
+	// screen filter then rides over the lot. HUD, popups, weather, and menus
+	// draw later in screen space and stay crisp.
 	rl.BeginMode3D(camera)
 	render.DrawWorld(camera, game, assets)
 	render.DrawChests(camera, game, assets)
 	render.DrawDoors(camera, game, assets)
 	render.DrawCrystals(camera, game, assets)
+	render.DrawEnemies(camera, game, assets)
+	render.DrawPartySprites(camera, game, assets)
+	// VFX inside the 3D pass so billboard particles depth-sort with the rest of
+	// the scene. TickAndDrawVFX drains GameState.VFXQueue (mutating g), advances
+	// the render-side pool by raylib's frame dt, and emits draws for every live
+	// particle. Kept after the party draw so impact sparks paint over the sprite,
+	// not under.
+	render.TickAndDrawVFX(camera, game, assets)
 	rl.EndMode3D()
-	// Close the retro capture and blit the FILTERED environment to the
-	// backbuffer — opaquely in the normal arm, alpha-composited over the
-	// crisp sky in the exempt arm. Sprites are deliberately not in the
-	// capture — they stay crisp "on top" of the crunched world.
+	// Close the retro capture and blit the FILTERED scene to the backbuffer —
+	// opaquely in the normal arm, alpha-composited over the crisp sky in the
+	// skybox-exempt arm.
 	if filtered {
 		render.EndRetroCapture(game, skyCrisp)
 	}
-	// SPRITE pass — enemies, party, particles, always at full resolution.
-	// Unfiltered: the backbuffer still holds the environment pass's depth,
-	// so occlusion just works. Filtered: the blit was 2D (no depth), so
-	// RetroDepthPrepass re-renders the environment depth-only (ZERO/ONE
-	// blend — color untouched) and the billboards depth-test against walls
-	// and trees exactly as if they'd been drawn in one pass.
-	rl.BeginMode3D(camera)
-	if filtered {
-		render.RetroDepthPrepass(camera, game, assets)
-	}
-	render.DrawEnemies(camera, game, assets)
-	render.DrawPartySprites(camera, game, assets)
-	// VFX inside the 3D pass so billboard particles depth-sort with
-	// the rest of the scene. TickAndDrawVFX drains GameState.VFXQueue
-	// (mutating g), advances the render-side pool by raylib's frame
-	// dt, and emits draws for every live particle. Kept after the
-	// party draw so impact sparks paint over the sprite, not under.
-	render.TickAndDrawVFX(camera, game, assets)
-	rl.EndMode3D()
 	// Ambient rain sits above the 3D world (darkening it) but below the
 	// world-space popups and HUD, so combat numbers, prompts, and menus
 	// stay readable through the storm. No-op when the weather is clear.

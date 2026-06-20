@@ -25,7 +25,11 @@
     "tintA": 0,
     "pixelate": 0,
     "brightness": 0,
-    "contrast": 0
+    "contrast": 0,
+    "posterize": 0,
+    "saturation": 0,
+    "dither": 0,
+    "gameBoy": 0
   },
   "cave_spider": {
     "sizeX": 1.1,
@@ -53,7 +57,11 @@
     "tintA": 0,
     "pixelate": 0,
     "brightness": 0,
-    "contrast": 0
+    "contrast": 0,
+    "posterize": 0,
+    "saturation": 0,
+    "dither": 0,
+    "gameBoy": 0
   },
   "diseased_rat": {
     "sizeX": 0.92,
@@ -81,7 +89,11 @@
     "tintA": 0,
     "pixelate": 0,
     "brightness": 0,
-    "contrast": 0
+    "contrast": 0,
+    "posterize": 0,
+    "saturation": 0,
+    "dither": 0,
+    "gameBoy": 0
   },
   "feral_rat": {
     "sizeX": 0.75,
@@ -107,9 +119,13 @@
     "tintG": 0,
     "tintB": 0,
     "tintA": 0,
-    "pixelate": 0,
+    "pixelate": 0.65,
     "brightness": 0.05,
-    "contrast": 0.1
+    "contrast": 0.1,
+    "posterize": 1,
+    "saturation": 0,
+    "dither": 0,
+    "gameBoy": 0
   },
   "goblin": {
     "sizeX": 1.05,
@@ -137,7 +153,11 @@
     "tintA": 0,
     "pixelate": 0,
     "brightness": 0,
-    "contrast": 0
+    "contrast": 0,
+    "posterize": 0,
+    "saturation": 0,
+    "dither": 0,
+    "gameBoy": 0
   },
   "goblin_mage": {
     "sizeX": 1.1,
@@ -165,7 +185,11 @@
     "tintA": 0,
     "pixelate": 0,
     "brightness": 0,
-    "contrast": 0
+    "contrast": 0,
+    "posterize": 0,
+    "saturation": 0,
+    "dither": 0,
+    "gameBoy": 0
   },
   "necromancer": {
     "sizeX": 1.05,
@@ -193,7 +217,11 @@
     "tintA": 0,
     "pixelate": 0,
     "brightness": 0,
-    "contrast": 0
+    "contrast": 0,
+    "posterize": 0,
+    "saturation": 0,
+    "dither": 0,
+    "gameBoy": 0
   },
   "skeleton": {
     "sizeX": 0.95,
@@ -221,7 +249,11 @@
     "tintA": 0,
     "pixelate": 0,
     "brightness": 0,
-    "contrast": 0
+    "contrast": 0,
+    "posterize": 0,
+    "saturation": 0,
+    "dither": 0,
+    "gameBoy": 0
   },
   "stone_amoeba": {
     "sizeX": 1.2,
@@ -249,7 +281,11 @@
     "tintA": 0,
     "pixelate": 0,
     "brightness": 0,
-    "contrast": 0
+    "contrast": 0,
+    "posterize": 0,
+    "saturation": 0,
+    "dither": 0,
+    "gameBoy": 0
   },
   "stone_golem": {
     "sizeX": 1.55,
@@ -277,7 +313,11 @@
     "tintA": 0,
     "pixelate": 0,
     "brightness": 0,
-    "contrast": 0
+    "contrast": 0,
+    "posterize": 0,
+    "saturation": 0,
+    "dither": 0,
+    "gameBoy": 0
   },
   "vampire_bat": {
     "sizeX": 1.12,
@@ -305,7 +345,11 @@
     "tintA": 0,
     "pixelate": 0,
     "brightness": 0,
-    "contrast": 0
+    "contrast": 0,
+    "posterize": 0,
+    "saturation": 0,
+    "dither": 0,
+    "gameBoy": 0
   },
   "venus_mantrap": {
     "sizeX": 1.2,
@@ -333,7 +377,11 @@
     "tintA": 0,
     "pixelate": 0,
     "brightness": 0,
-    "contrast": 0
+    "contrast": 0,
+    "posterize": 0,
+    "saturation": 0,
+    "dither": 0,
+    "gameBoy": 0
   },
   "will_o_wisp": {
     "sizeX": 0.65,
@@ -361,6 +409,10 @@
     "tintA": 0,
     "pixelate": 0,
     "brightness": 0,
-    "contrast": 0
+    "contrast": 0,
+    "posterize": 0,
+    "saturation": 0,
+    "dither": 0,
+    "gameBoy": 0
   }
 }

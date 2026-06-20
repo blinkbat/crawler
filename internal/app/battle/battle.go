@@ -23,6 +23,11 @@ const (
 	msgNoItems        = "No items."
 	msgInvalidTarget  = "Invalid target."
 	msgNoAllySelected = "No ally selected."
+	// Back-row melee refusals. Two phrasings for two contexts (skill submenu vs
+	// basic-attack targeting); centralized here so the near-identical strings are
+	// maintained side-by-side and can't silently drift apart.
+	msgBackRowMeleeSkill  = "Can't reach from the back row — reposition or use a ranged/magic skill."
+	msgBackRowMeleeAttack = "Can't reach from the back row — reposition or use a ranged attack."
 )
 
 // Start engages the pack at packIndex. The entire pack roster becomes the

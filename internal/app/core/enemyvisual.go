@@ -72,6 +72,18 @@ type EnemyVisualOverride struct {
 	Pixelate   float32 `json:"pixelate"`
 	Brightness float32 `json:"brightness"`
 	Contrast   float32 `json:"contrast"`
+	// Palette / retro FX — also non-destructive, applied at texture-build time
+	// AFTER the tonal adjustments above. They mirror the in-game retro post-shader
+	// (render/retrofilter.go) so a sprite baked here and the screen filter agree.
+	// Posterize 0..1 limits the palette (crushes color depth, 48 levels → 4);
+	// Saturation -1..1 desaturates (−1 = grayscale) or boosts (+1 = double) color;
+	// Dither 0..1 lays an ordered 4×4 Bayer dither; GameBoy 0..1 maps luminance
+	// onto the classic 4-shade green LCD ramp. Zero on all four = the untouched
+	// sprite (no migration needed for files written before these fields existed).
+	Posterize  float32 `json:"posterize"`
+	Saturation float32 `json:"saturation"`
+	Dither     float32 `json:"dither"`
+	GameBoy    float32 `json:"gameBoy"`
 }
 
 // EnemyVisualsFileName is the basename of the override file inside the sprites

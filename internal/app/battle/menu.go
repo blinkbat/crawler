@@ -176,7 +176,7 @@ func updateSkillMenu(g *core.GameState) {
 	// skill submenu stays open (ActionMode unchanged) so the player can pick
 	// another skill or reposition.
 	if core.SkillAttackClassFor(skill).IsMelee() && !core.PartyInEffectiveFront(g.Party, g.Battle.CurrentParty) {
-		setBattleStatus(g, "Can't reach from the back row — reposition or use a ranged/magic skill.")
+		setBattleStatus(g, msgBackRowMeleeSkill)
 		return
 	}
 	// Persist the choice so next turn's submenu opens on this skill.
@@ -225,7 +225,7 @@ func battleEnemyTargets(g *core.GameState) []int {
 // the action is barred or no target is reachable.
 func enterEnemyTargeting(g *core.GameState, prompt string) bool {
 	if battlePendingAttackMelee(g) && !core.PartyInEffectiveFront(g.Party, g.Battle.CurrentParty) {
-		setBattleStatus(g, "Can't reach from the back row — reposition or use a ranged attack.")
+		setBattleStatus(g, msgBackRowMeleeAttack)
 		return false
 	}
 	targets := battleEnemyTargets(g)

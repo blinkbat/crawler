@@ -508,7 +508,7 @@ func updateDropdown(s *State) bool {
 			// the author needn't click twice (close, then open). Any other outside
 			// click dismisses.
 			if s.dropdown.owner == ddMenu {
-				if hit := buttonStripHit(menuBarBtns, 6, topbarH-12, mp); hit >= 0 && hit != s.dropdown.menu {
+				if hit := buttonStripHit(menuBarBtns, menuBarBtnY, menuBarBtnH, mp); hit >= 0 && hit != s.dropdown.menu {
 					openMenu(s, hit)
 					return true
 				}

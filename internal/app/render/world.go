@@ -1,13 +1,44 @@
 package render
 
 import (
+	"fmt"
 	"math"
+	"reflect"
 	"sort"
 
 	"crawler/internal/app/core"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
+
+// init pins the enemyVisual <-> core.EnemyVisualOverride field mirror: every
+// override field must survive applyEnemyVisualOverride followed by
+// enemyVisualOverride unchanged. It fills EVERY override field with a distinct
+// non-zero value via reflection, round-trips it, and panics on any drop — so a
+// field added to the override but forgotten in either half of the round-trip
+// (the hazard that silently zeroed the editor's saved palette FX before this
+// guard existed) crashes loudly at startup, matching this repo's other parallel-
+// table init asserts. Scale fields filled non-zero so the effective*Scale 0->1
+// fold is the identity and can't mask a genuine drop. (Render-package tests can't
+// run without raylib.dll, so this lives in init rather than a _test.go.)
+func init() {
+	var ov core.EnemyVisualOverride
+	rv := reflect.ValueOf(&ov).Elem()
+	for i := 0; i < rv.NumField(); i++ {
+		f := rv.Field(i)
+		switch f.Kind() {
+		case reflect.Float32:
+			f.SetFloat(float64(i + 1))
+		case reflect.Uint8:
+			f.SetUint(uint64(i%255 + 1))
+		default:
+			panic(fmt.Sprintf("render: EnemyVisualOverride field %s has unexpected kind %s — extend the round-trip init guard", rv.Type().Field(i).Name, f.Kind()))
+		}
+	}
+	if got := enemyVisualOverride(applyEnemyVisualOverride(enemyVisual{}, ov)); !reflect.DeepEqual(got, ov) {
+		panic(fmt.Sprintf("render: enemyVisual<->EnemyVisualOverride round-trip dropped a field — wire it into BOTH enemyVisualOverride and applyEnemyVisualOverride:\n  in:  %+v\n  out: %+v", ov, got))
+	}
+}
 
 type enemyVisual struct {
 	texture rl.Texture2D
@@ -107,6 +138,14 @@ type enemyVisual struct {
 	pixelate   float32
 	brightness float32
 	contrast   float32
+	// Palette / retro FX — same build-time-only role as the three above; carried
+	// here purely so the override round-trip stays lossless (the editor re-seeds
+	// its sliders from this snapshot, so a missing field would zero the saved FX
+	// on the next foe cycle). See visualAdjustFilter for how they bake the texture.
+	posterize  float32
+	saturation float32
+	dither     float32
+	gameBoy    float32
 }
 
 // resolveTint returns the per-kind base tint, treating the zero-value Color
@@ -210,6 +249,10 @@ func enemyVisualOverride(v enemyVisual) core.EnemyVisualOverride {
 		Pixelate:        v.pixelate,
 		Brightness:      v.brightness,
 		Contrast:        v.contrast,
+		Posterize:       v.posterize,
+		Saturation:      v.saturation,
+		Dither:          v.dither,
+		GameBoy:         v.gameBoy,
 	}
 }
 
@@ -243,6 +286,10 @@ func applyEnemyVisualOverride(v enemyVisual, ov core.EnemyVisualOverride) enemyV
 	v.pixelate = ov.Pixelate
 	v.brightness = ov.Brightness
 	v.contrast = ov.Contrast
+	v.posterize = ov.Posterize
+	v.saturation = ov.Saturation
+	v.dither = ov.Dither
+	v.gameBoy = ov.GameBoy
 	return v
 }
 
@@ -508,55 +555,33 @@ func (v viewCull) cull(p rl.Vector3) bool { return v.cullXZ(p.X, p.Z) }
 
 // DrawWorld draws the full lit environment pass — see drawWorld.
 func DrawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
-	drawWorld(camera, g, assets, false)
+	drawWorld(camera, g, assets)
 }
 
 // drawWorld rasterizes the environment geometry (sky-less: floors, walls,
-// ceilings, elevation columns, props, decor, ramps).
-//
-// depthOnly=false is the normal pass: recompute the lighting profile, upload
-// the sun/fog/torch uniforms, and (when the render log is on) gather per-tile
-// diagnostics.
-//
-// depthOnly=true is the retro-filter depth prepass (see RetroDepthPrepass). It
-// SKIPS all of that lighting CPU setup and the diagnostics, drawing only the
-// geometry. The prepass runs in the SAME frame immediately after a full
-// DrawWorld whose uniforms still bind the lighting shader, with the SAME camera
-// and time-of-day profile — so collectTorches / applyUniforms / uploadTorches /
-// cacheLightingProfile would recompute byte-identical values. The geometry
-// drawn (same models, same transforms, ground shadows and torch flames
-// included) is identical to the full pass, so the rebuilt depth buffer matches
-// the captured one exactly and the crisp sprite pass can't z-fight it. The
-// per-pixel lighting shader still runs (it's attached to every model's
-// material, not switchable via BeginShaderMode), but the redundant CPU lighting
-// re-setup and the torch grid-scan are elided.
-func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources, depthOnly bool) {
+// ceilings, elevation columns, props, decor, ramps). It recomputes the lighting
+// profile, uploads the sun/fog/torch uniforms, and (when the render log is on)
+// gathers per-tile diagnostics.
+func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	m := &g.Area
 	material := assets.worldMaterial(m.Materials)
-	var profile lightingProfile
-	var torches []torchLight
-	if !depthOnly {
-		profile = applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(g.StepCount), areaIsEnclosed(m))
-		cacheLightingProfile(profile)
-		assets.lighting.applyUniforms(camera, profile)
-		// Torch point lights — collect the brazier props nearest the
-		// camera, flicker them, and upload before the geometry pass so
-		// walls / floors / props pick up the warm pools of light. Must
-		// run after applyUniforms (same shader) and before the tile
-		// loop's BeginShaderMode draws.
-		torches = collectTorches(m, camera)
-		assets.lighting.uploadTorches(torches)
-	}
+	profile := applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(g.StepCount), areaIsEnclosed(m))
+	cacheLightingProfile(profile)
+	assets.lighting.applyUniforms(camera, profile)
+	// Torch point lights — collect the brazier props nearest the camera, flicker
+	// them, and upload before the geometry pass so walls / floors / props pick up
+	// the warm pools of light. Must run after applyUniforms (same shader) and
+	// before the tile loop's BeginShaderMode draws.
+	torches := collectTorches(m, camera)
+	assets.lighting.uploadTorches(torches)
 
 	camPos := camera.Position
 	vc := newViewCull(camera)
 
-	// Diagnostics: only collect counters when the render log is on,
-	// so the hot path stays a plain increment-free loop the rest of
-	// the time. logActive is a single function-call check. The depth
-	// prepass never logs — it's a duplicate of the full pass that ran
-	// this frame, so its counts would double-report.
-	logActive := IsRenderLogActive() && !depthOnly
+	// Diagnostics: only collect counters when the render log is on, so the hot
+	// path stays a plain increment-free loop the rest of the time. logActive is a
+	// single function-call check.
+	logActive := IsRenderLogActive()
 	var stats renderFrameStats
 	if logActive {
 		stats.MapW = m.Width
@@ -782,9 +807,9 @@ type tileElev struct {
 var elevGridBuf []tileElev
 
 // elevGridKey fingerprints the area elevGridBuf was last decoded for, so the
-// full Width×Height decode runs once per area entry instead of every frame (and
-// every depthOnly re-pass within a frame) — the same once-per-area idea as
-// torchSiteCache / enclosureCache. The grid derives from Floor (ramps),
+// full Width×Height decode runs once per area entry instead of every frame —
+// the same once-per-area idea as torchSiteCache / enclosureCache. The grid
+// derives from Floor (ramps),
 // Elevation (levels) and Walls (face skins); the key is a CONTENT HASH of all
 // three layers plus name+dims, so it rebuilds whenever any of them actually
 // changes and can never serve a stale grid. (The sibling caches sample only
@@ -2347,7 +2372,7 @@ func partySpritePosition(camera rl.Camera3D, party []core.PartyMember, index int
 	rowSpacing := float32(0.95) // front: tight pair
 	if visRow == core.RowBack {
 		rowForward = 1.12 // nearer the camera, but still well in frame (visible)
-		rowSpacing = 2.6  // back: wide pair flanking the front
+		rowSpacing = 1.5  // back: only a touch wider than the front (gentle trapezoid)
 	}
 	base := rl.NewVector3(
 		camera.Position.X+forward.X*rowForward,

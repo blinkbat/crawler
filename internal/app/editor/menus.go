@@ -96,7 +96,7 @@ func menuAnchorRect(i int) rl.Rectangle {
 	for j := 0; j < i && j < len(menuBarBtns); j++ {
 		x += buttonWidth(menuBarBtns[j].label) + tightBtnGap
 	}
-	return rl.NewRectangle(x, 6, buttonWidth(menuBarBtns[i].label), topbarH-12)
+	return rl.NewRectangle(x, menuBarBtnY, buttonWidth(menuBarBtns[i].label), menuBarBtnH)
 }
 
 // openMenu opens menu i's pull-down — or closes it if it's already the open one,

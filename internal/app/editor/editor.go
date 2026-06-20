@@ -53,10 +53,11 @@ const layerCount = int(LayerEntities) + 1
 
 // numberRowKeys is the top-row 1..9 key codes. Package-level so the
 // brush-select hotkeys (1..9 / Shift+1..9, all nine) and the Alt+1..N
-// layer jump (first layerCount = 7 keys) don't rebuild the slice every
-// input frame. The first layerCount entries double as the per-layer jump
-// keys — this assumes layerCount <= 9 (the number of numberRowKeys entries);
-// a 10th layer would silently lose its Alt-jump key without growing this row.
+// layer jump (one per SELECTABLE layer — len(selectableLayers), currently 6;
+// LayerWalls is not selectable) don't rebuild the slice every input frame. The
+// first len(selectableLayers) entries double as the per-layer jump keys — this
+// assumes len(selectableLayers) <= 9 (the number of numberRowKeys entries); a
+// 10th selectable layer would silently lose its Alt-jump key without growing this row.
 var numberRowKeys = [9]int32{
 	rl.KeyOne, rl.KeyTwo, rl.KeyThree, rl.KeyFour, rl.KeyFive,
 	rl.KeySix, rl.KeySeven, rl.KeyEight, rl.KeyNine,

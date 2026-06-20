@@ -87,9 +87,10 @@ func updateHotkeys(s *State) {
 		toggleTileGlyphs(s)
 	}
 
-	// Alt+1..7 jumps directly to a layer (one per layerCount layer) — saves
-	// Tab-cycling when the author knows which layer they want. Number row
-	// only; the keypad equivalents aren't bound to keep the binding compact.
+	// Alt+1..N jumps directly to a layer (one per SELECTABLE layer — see
+	// selectableLayers) — saves Tab-cycling when the author knows which layer
+	// they want. Number row only; the keypad equivalents aren't bound to keep
+	// the binding compact.
 	if alt {
 		for i := 0; i < len(selectableLayers) && i < len(numberRowKeys); i++ {
 			if rl.IsKeyPressed(numberRowKeys[i]) {

@@ -143,6 +143,10 @@ var assetFields = []sliderField[core.EnemyVisualOverride]{
 	{Label: "Pixelate", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.Pixelate) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.Pixelate = float32(v) }, Min: 0, Max: 1, Step: 0.05, Format: "%.2f"},
 	{Label: "Bright", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.Brightness) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.Brightness = float32(v) }, Min: -1, Max: 1, Step: 0.05, Format: "%.2f"},
 	{Label: "Contrast", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.Contrast) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.Contrast = float32(v) }, Min: -1, Max: 1, Step: 0.05, Format: "%.2f"},
+	{Label: "Posterize", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.Posterize) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.Posterize = float32(v) }, Min: 0, Max: 1, Step: 0.05, Format: "%.2f"},
+	{Label: "Saturate", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.Saturation) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.Saturation = float32(v) }, Min: -1, Max: 1, Step: 0.05, Format: "%.2f"},
+	{Label: "Dither", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.Dither) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.Dither = float32(v) }, Min: 0, Max: 1, Step: 0.05, Format: "%.2f"},
+	{Label: "GameBoy", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.GameBoy) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.GameBoy = float32(v) }, Min: 0, Max: 1, Step: 0.05, Format: "%.2f"},
 }
 
 // assetActionLabels is the Asset tab's button row; the slice index IS the
@@ -167,7 +171,7 @@ func applyAssetAction(s *State, ov *core.EnemyVisualOverride, i int) {
 	case assetActionRevert:
 		clearVisualAdjustments(ov)
 		s.assetPreviewStale = true
-		s.flash("Reverted sprite FX (Pixelate / Bright / Contrast)")
+		s.flash("Reverted sprite FX (" + assetFieldNames() + ")")
 	default:
 		// New assetActionLabels entry with no case here: do nothing (visible gap).
 	}
@@ -195,7 +199,22 @@ func visualizerFooterHint(noun, slug string) string {
 // clearVisualAdjustments zeroes the non-destructive image-adjustment fields of an
 // override (the Asset tab's Revert). Tint and the placement fields are untouched.
 func clearVisualAdjustments(ov *core.EnemyVisualOverride) {
-	ov.Pixelate, ov.Brightness, ov.Contrast = 0, 0, 0
+	// Drive Revert off assetFields itself (every FX slider reverts to 0 — the
+	// neutral value for all of them) so a new slider row clears automatically
+	// instead of needing a parallel zeroing list kept in lockstep here.
+	for _, f := range assetFields {
+		f.Set(ov, 0)
+	}
+}
+
+// assetFieldNames joins the Asset-tab slider labels for the Revert toast, so the
+// confirmation text tracks assetFields rather than re-spelling the field names.
+func assetFieldNames() string {
+	names := make([]string, len(assetFields))
+	for i, f := range assetFields {
+		names[i] = f.Label
+	}
+	return strings.Join(names, " / ")
 }
 
 type foeViewLayout struct {
