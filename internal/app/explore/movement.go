@@ -42,6 +42,9 @@ func Update(g *core.GameState) {
 	//   - PauseMenu: routes input through the menu; pause-key edges
 	//     toggle the menu from either state.
 	switch core.ActiveModal(g) {
+	case core.ModalQuitConfirm:
+		updateQuitConfirm(g)
+		return
 	case core.ModalDialog:
 		updateDialogModal(g)
 		return
@@ -193,7 +196,7 @@ func updateMenu(g *core.GameState) {
 		return
 	}
 	if input.QuitPressed() {
-		g.Quit = true
+		openQuitConfirm(g)
 		return
 	}
 	if input.ConfirmPressed() {
@@ -203,8 +206,32 @@ func updateMenu(g *core.GameState) {
 		case core.PauseMenuDebug:
 			openDebugMenu(g)
 		case core.PauseMenuQuit:
-			g.Quit = true
+			openQuitConfirm(g)
 		}
+	}
+}
+
+// openQuitConfirm swaps the pause menu for the quit-confirmation prompt
+// ("unsaved progress will be lost"). Mirrors openOptionsMenu's hand-off so the
+// pause menu doesn't shadow the confirm.
+func openQuitConfirm(g *core.GameState) {
+	g.MenuOpen = false
+	g.QuitConfirmOpen = true
+}
+
+// updateQuitConfirm drives the quit-confirmation prompt: Confirm quits the game
+// (the run loop sees g.Quit and exits), Back cancels and returns to the pause
+// menu. Quitting discards unsaved progress, so this gate stands between every
+// in-game quit trigger and the actual exit.
+func updateQuitConfirm(g *core.GameState) {
+	if input.BackPressed() {
+		g.QuitConfirmOpen = false
+		g.MenuOpen = true
+		return
+	}
+	if input.ConfirmPressed() {
+		g.QuitConfirmOpen = false
+		g.Quit = true
 	}
 }
 

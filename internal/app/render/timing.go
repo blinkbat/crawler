@@ -730,7 +730,10 @@ func drawReelBar(timing core.TimingState, g *core.GameState, assets Resources, x
 		drawSmallPanel(ix, iy, iw, ih, timingTrackColor)
 
 		sym := timing.ReelSymbolAt(i)
-		col := reelSymbolColors[sym%len(reelSymbolColors)]
+		// Euclidean mod so a (hypothetical) negative symbol id can't panic on a
+		// negative index — Go's % keeps the sign of the dividend.
+		n := len(reelSymbolColors)
+		col := reelSymbolColors[((sym%n)+n)%n]
 		if !stopped {
 			col = colorWithAlpha(col, 140) // dim while spinning
 		}

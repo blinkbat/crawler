@@ -1254,10 +1254,13 @@ func duplicateMapFile(srcPath string) (string, error) {
 			}
 			return path, nil
 		}
-		candidate = fmt.Sprintf("%s_copy%d", id, i)
-		if i > 99 {
+		// Cap BEFORE building the next candidate so the just-tested name was
+		// actually stat-checked — otherwise the final candidate is built and
+		// discarded untested. Tries _copy, _copy2 … _copy100, then gives up.
+		if i > 100 {
 			return "", fmt.Errorf("too many copies of %s", id)
 		}
+		candidate = fmt.Sprintf("%s_copy%d", id, i)
 	}
 }
 
@@ -1998,6 +2001,13 @@ func performNewMap(s *State, w, h int, floor byte) {
 	s.contentEpoch++
 	s.dirty = false
 	clearSelection(s) // new map — old selection coords no longer apply
+	// Reset the Levels-panel / active-floor state the same way openSelectedMap
+	// does — otherwise a stale editLevel from the previous map silently lifts
+	// the first paint onto a floor the blank map doesn't have.
+	s.topLevel = maxAreaLevel(s.area)
+	s.bottomLevel = minAreaLevel(s.area)
+	s.editLevel = clampLevel(s.area.ElevationLevelAt(s.area.StartTileX, s.area.StartTileZ))
+	s.levelHidden = [maxEditLevel + 1]bool{}
 	s.zoom = 1
 	s.panX, s.panY = 0, 0
 	s.flash("New map")

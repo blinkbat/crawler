@@ -22,6 +22,17 @@ const sqrt2Inv = float32(0.7071)
 // scattered across the torch-phase and particle-angle code.
 const tau = 6.2831853
 
+// degToRad converts degrees to radians (π/180). The render math constant for
+// the handful of model-yaw helpers that take degrees but feed raylib's
+// radian-based axis-angle rotate.
+const degToRad = float32(math.Pi / 180)
+
+// hashSalt is Knuth's multiplicative-hash constant ⌊φ·2³²⌋ = 2654435761 =
+// 0x9E3779B9 — the golden-ratio odd multiplier used to spread seeds across the
+// 32-bit hash space. One name for the value every seed mixer here multiplies or
+// XORs by (it appeared both as the decimal literal and as the 0x9E3779B9 hex).
+const hashSalt = uint32(2654435761)
+
 // hashPhase maps a 32-bit hash to a stable phase angle in [0, tau): the low 16
 // bits scaled across a full turn. Used to give each torch flame (and any other
 // hash-seeded oscillator) its own fixed starting phase so a field of them

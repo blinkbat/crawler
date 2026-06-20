@@ -35,6 +35,7 @@ const (
 	skillNodeColHeaderH = float32(32) // tree-name + gilt-rule header reserved above the ladder
 	skillNodeGap        = float32(12) // vertical gap between node plates
 	skillNodeMaxH       = float32(82) // node-plate height cap so short trees don't stretch
+	skillNodeMinH       = float32(8)  // node-plate height floor so a short body / many nodes can't go negative
 	// Ornament size gates: a node plate earns corner pips only once it's at
 	// least this big, and a ranked plate earns the bottom fleuron only when wide.
 	skillNodePipMinW     = float32(96)
@@ -154,6 +155,9 @@ func drawSkillTreeColumn(font rl.Font, g *core.GameState, m *core.PartyMember, t
 	if nodeH > skillNodeMaxH {
 		nodeH = skillNodeMaxH
 	}
+	if nodeH < skillNodeMinH {
+		nodeH = skillNodeMinH // floor so a short body / many nodes can't yield negative-height plates
+	}
 	step := nodeH + nodeGap
 
 	// Connector lines first so the node panes paint over their ends.
@@ -220,6 +224,23 @@ func drawSkillTreeNode(font rl.Font, m *core.PartyMember, node core.SkillTreeNod
 		}
 	}
 	drawTextRightAligned(font, chip, rect.X+rect.Width-10, rect.Y+rect.Height-16, FontTiny, chipCol)
+}
+
+// drawSkillTierPips paints `total` diamond pips left-to-right at
+// (x, y) — the first `filled` in bright gilt, the rest as dim hollows —
+// giving the Skills tab a compact "2 of 3 upgrades bought" read for a
+// skill's investment.
+func drawSkillTierPips(x, y float32, filled, total int) {
+	const pipR = float32(5)
+	const pipGap = float32(16)
+	for i := 0; i < total; i++ {
+		cx := x + pipR + float32(i)*pipGap
+		col := fadeColor(giltBright, 0.22)
+		if i < filled {
+			col = giltBright
+		}
+		drawDiamondPip(cx, y, pipR, col)
+	}
 }
 
 func drawSkillNodePlate(rect rl.Rectangle, bg rl.Color, rank int, unlocked, focused bool) {

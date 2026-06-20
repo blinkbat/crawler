@@ -27,51 +27,57 @@ const (
 	dialogMaxBodyLines = 10
 )
 
-// dialogModalCache memoizes the per-node wrapped body lines, choice views, and
-// formatted choice-row labels. DrawDialogModal paints over the live exploration
-// render EVERY frame, so without this it would re-run wrapTextLines' per-word
-// rl.MeasureTextEx cgo calls (plus the overflow ellipsis-trim loop) and rebuild
-// the choice slice + concat each row label 60×/sec for fixed text. The node body
-// and its choice set are stable for the life of a node — the player is locked in
-// the modal, so gating inputs can't change between frames — so the cache rebuilds
-// only when the node (id + body text) or inner width changes. Same rebuild-on-
-// change pattern as actionLogCache.
+// dialogModalCache memoizes the per-node wrapped body lines. DrawDialogModal
+// paints over the live exploration render EVERY frame, so without this it would
+// re-run wrapTextLines' per-word rl.MeasureTextEx cgo calls (plus the overflow
+// ellipsis-trim loop) 60×/sec for fixed text. The node body is stable for the
+// life of a node, so the cache rebuilds only when the node (id + body text) or
+// inner width changes. Same rebuild-on-change pattern as actionLogCache.
+//
+// The choice VIEWS/LABELS are deliberately NOT cached: DialogChoiceViews derives
+// each row's Disabled/Reason from live gold, quest status, foe-kill counts, and
+// visited-tile state, which can cross a condition threshold while the player
+// stays on the same node. They're a cheap slice walk + string concat, so we
+// rebuild them every frame rather than risk rendering a stale greyed/enabled
+// state or (reason) label against the wrong inputs.
 var dialogModalCache struct {
 	nodeID    string
 	text      string
 	innerW    float32
 	bodyLines []string
-	views     []core.DialogChoiceView
-	labels    []string
 }
 
 // dialogModalContent returns the wrapped body lines, choice views, and
-// preformatted row labels for the current node, rebuilding the cache only when
-// the node or width changes (see dialogModalCache).
+// preformatted row labels for the current node. Body lines are cached (rebuilt
+// only when the node or width changes); the views/labels are rebuilt every call
+// because they reflect live game state (see dialogModalCache).
 func dialogModalContent(g *core.GameState, font rl.Font, node core.DialogNode, innerW float32) (bodyLines []string, views []core.DialogChoiceView, labels []string) {
 	c := &dialogModalCache
-	if c.nodeID == g.Dialog.NodeID && c.text == node.Text && c.innerW == innerW &&
-		len(c.views) == len(node.Choices) {
-		return c.bodyLines, c.views, c.labels
-	}
-
-	bodyLines = wrapTextLines(font, node.Text, FontBody, innerW)
-	if len(bodyLines) == 0 {
-		bodyLines = []string{""}
-	}
-	if len(bodyLines) > dialogMaxBodyLines {
-		bodyLines = bodyLines[:dialogMaxBodyLines]
-		// Trim runes off the last kept line until it + the ellipsis fits the
-		// card's inner width — appending " …" to an already-full wrapped line
-		// would otherwise clip past the right edge.
-		const ellipsis = " …"
-		spacing := canonicalSpacing(FontBody)
-		last := bodyLines[dialogMaxBodyLines-1]
-		for last != "" && rl.MeasureTextEx(font, last+ellipsis, FontBody, spacing).X > innerW {
-			r := []rune(last)
-			last = strings.TrimRight(string(r[:len(r)-1]), " ")
+	if c.nodeID == g.Dialog.NodeID && c.text == node.Text && c.innerW == innerW {
+		bodyLines = c.bodyLines
+	} else {
+		bodyLines = wrapTextLines(font, node.Text, FontBody, innerW)
+		if len(bodyLines) == 0 {
+			bodyLines = []string{""}
 		}
-		bodyLines[dialogMaxBodyLines-1] = last + ellipsis
+		if len(bodyLines) > dialogMaxBodyLines {
+			bodyLines = bodyLines[:dialogMaxBodyLines]
+			// Trim runes off the last kept line until it + the ellipsis fits the
+			// card's inner width — appending " …" to an already-full wrapped line
+			// would otherwise clip past the right edge.
+			const ellipsis = " …"
+			spacing := canonicalSpacing(FontBody)
+			last := bodyLines[dialogMaxBodyLines-1]
+			for last != "" && rl.MeasureTextEx(font, last+ellipsis, FontBody, spacing).X > innerW {
+				r := []rune(last)
+				last = strings.TrimRight(string(r[:len(r)-1]), " ")
+			}
+			bodyLines[dialogMaxBodyLines-1] = last + ellipsis
+		}
+		c.nodeID = g.Dialog.NodeID
+		c.text = node.Text
+		c.innerW = innerW
+		c.bodyLines = bodyLines
 	}
 
 	views = core.DialogChoiceViews(g)
@@ -83,13 +89,6 @@ func dialogModalContent(g *core.GameState, font rl.Font, node core.DialogNode, i
 		}
 		labels[i] = label
 	}
-
-	c.nodeID = g.Dialog.NodeID
-	c.text = node.Text
-	c.innerW = innerW
-	c.bodyLines = bodyLines
-	c.views = views
-	c.labels = labels
 	return bodyLines, views, labels
 }
 

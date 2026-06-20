@@ -615,7 +615,7 @@ func PartyRibbonTopY() float32 {
 // Its callers (enemy status pills — up to ~24/frame in heavy combat — the
 // door prompt, the chest "Press Enter to open" cue) all re-draw stable
 // strings every frame their surface is up, so caching the measure here
-// covers those hot/stable sites for free (FINDING #15).
+// covers those hot/stable sites for free.
 var centeredMeasureCache measureCache
 
 func drawTextCentered(font rl.Font, text string, centerX, y, size float32, col color.RGBA) {
@@ -630,7 +630,7 @@ func drawTextCentered(font rl.Font, text string, centerX, y, size float32, col c
 // costs, stat values, shop prices) are stable strings re-drawn every
 // frame while their surface is open, so caching the measure here covers
 // the per-frame cgo cost for every site that routes through the helper
-// (FINDING #15). The shared measureCache keys on (text,size,spacing), so
+// The shared measureCache keys on (text,size,spacing), so
 // the FontSmall / FontBody / FontHeading / FontTiny callers coexist in
 // the one instance.
 var rightAlignMeasureCache measureCache
@@ -641,7 +641,7 @@ var rightAlignMeasureCache measureCache
 // edge - measure.X - pad" sites that each open-coded the same subtraction
 // (gold readouts, stat/ARM/XP values, SP/ratio reads, MP costs, shop
 // prices). Routes the measure through rightAlignMeasureCache so those
-// hot, stable-string sites stop re-shaping every frame (FINDING #15).
+// hot, stable-string sites stop re-shaping every frame.
 func drawTextRightAligned(font rl.Font, text string, rightX, y, size float32, col color.RGBA) {
 	// Same canonicalSpacing pairing as drawTextCentered — measured width
 	// must include the heading tracking or the right edge drifts.

@@ -458,7 +458,7 @@ func drawPanelsStats(g *core.GameState, assets Resources, body rl.Rectangle) {
 			chipX := innerX
 			col, _ := partyStatusVisual(kind)
 			// Shares drawStatusPill with the enemy-roster pill so the two
-			// silhouettes can't drift (FINDING #18); left-aligned + tinted
+			// silhouettes can't drift; left-aligned + tinted
 			// in the status color (its own anchoring, hence centered=false).
 			drawStatusPill(font, chipX, contentY, chipW, chipH,
 				fadeColor(col, 0.28), fadeColor(col, 0.85), label, col, false)
@@ -682,7 +682,7 @@ func drawPanelsEquipment(g *core.GameState, assets Resources, body rl.Rectangle)
 	// the overlay's centered hint and this one would both show.
 }
 
-// Shared picker sub-modal geometry tokens (FINDING #12). The
+// Shared picker sub-modal geometry tokens. The
 // use-target + heal pickers are visually identical, so they share these.
 // The equip picker keeps its OWN taller header (it carries an extra
 // "Equipped: …" sub-title line under the title) and slightly taller rows
@@ -723,7 +723,7 @@ const pickerCardLeftInset = float32(26)
 // 2px cosmetic difference inside each header band) onto one value.
 const pickerTitleTopInset = float32(20)
 
-// drawPickerCard paints the shared picker sub-modal chrome (FINDING #12):
+// drawPickerCard paints the shared picker sub-modal chrome:
 // the veiled wood-and-glass card (same veil + borderActive frame +
 // woodAccent filigree the four pickers all opened with) plus the
 // left-aligned FontHeading title at the shared inset, returning the card
@@ -764,6 +764,9 @@ func drawEquipPicker(g *core.GameState, assets Resources) {
 	member := g.PanelsRowCursor
 	if member < 0 || member >= len(g.Party) {
 		return
+	}
+	if g.EquipSlotCursor < 0 || g.EquipSlotCursor >= int(core.EquipSlotCount) {
+		return // caller-driven cursor indexes the fixed-size Equipped array — guard it like member
 	}
 	slot := core.EquipSlotIndex(g.EquipSlotCursor)
 	rows := core.EquipPickerRowsInto(equipPickerRowsDrawBuf, g, member, slot)
@@ -1156,7 +1159,7 @@ var skillCostMPLabelCache = func() [32]string {
 }()
 
 // goldLabelFull / goldLabelShort centralize the two gold-readout
-// formats so each visible format has ONE source (FINDING #16). The two
+// formats so each visible format has ONE source. The two
 // surfaces deliberately read differently: the Tome info strip + shop
 // header show the spelled-out "Gold: N", while the exploration HUD chip
 // shows the compact "N G" beside its coin glyph. Both wrap fmt.Sprintf
@@ -1168,7 +1171,7 @@ func goldLabelShort(n int) string { return fmt.Sprintf("%d G", n) }
 
 // skillPointsLabel returns "<n> SP" — the skill-point read shared by the
 // Skills-tab member balance, the skill-tree modal's balance + per-node
-// cost chips, and the invest prompt (FINDING #16). MP cost is centralized
+// cost chips, and the invest prompt. MP cost is centralized
 // as skillCostMPLabel; this is its SP sibling, LUT-cached over the small
 // range skill-point balances + node costs span (currently 1-3 per node,
 // a handful banked).
@@ -1335,23 +1338,6 @@ func drawPanelsSkills(g *core.GameState, assets Resources, body rl.Rectangle) {
 			hintY := cols[i].Y + cols[i].Height - 46
 			DrawHintBar(font, []HintSeg{Hint("Open skill trees", GlyphA)}, cols[i].X+cols[i].Width/2, hintY, FontSmall)
 		}
-	}
-}
-
-// drawSkillTierPips paints `total` diamond pips left-to-right at
-// (x, y) — the first `filled` in bright gilt, the rest as dim hollows —
-// giving the Skills tab a compact "2 of 3 upgrades bought" read for a
-// skill's investment.
-func drawSkillTierPips(x, y float32, filled, total int) {
-	const pipR = float32(5)
-	const pipGap = float32(16)
-	for i := 0; i < total; i++ {
-		cx := x + pipR + float32(i)*pipGap
-		col := fadeColor(giltBright, 0.22)
-		if i < filled {
-			col = giltBright
-		}
-		drawDiamondPip(cx, y, pipR, col)
 	}
 }
 

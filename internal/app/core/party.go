@@ -1026,8 +1026,10 @@ func ApplyMagicDefense(dmg int, tag SkillTag, mdef int) int {
 }
 
 // ApplyFlatDamage applies a pre-resolved (already-mitigated) flat
-// `amount` to an actor: stamps the standard damage flash and floors HP
-// at 0. Returns true if this hit dropped the actor to 0. Pointer-based
+// `amount` to an actor: stamps the standard damage flash (only on a
+// positive `amount`, so a fully-soaked/absorbed 0-damage hit doesn't
+// pulse the actor white — same real-hit gate as ApplyHitRecoil) and
+// floors HP at 0. Returns true if this hit dropped the actor to 0. Pointer-based
 // because Enemy and PartyMember are distinct structs that carry the
 // same HP / DamageFlash fields. The shared HP-floor + flash contract
 // behind the in-battle damage helpers AND the out-of-battle poison
@@ -1036,7 +1038,9 @@ func ApplyMagicDefense(dmg int, tag SkillTag, mdef int) int {
 // audio, and death-status cleanup stay with each caller because they
 // legitimately differ by context.
 func ApplyFlatDamage(hp *int, flash *float32, amount int) (died bool) {
-	*flash = FlashDuration
+	if amount > 0 {
+		*flash = FlashDuration
+	}
 	*hp -= amount
 	if *hp <= 0 {
 		*hp = 0
@@ -1453,6 +1457,14 @@ func SumStats(a, b Stats) Stats {
 	}
 }
 
+// Total returns the sum of the six stat fields. Single home for the
+// "add up every stat point" fold (StatusModsNetBeneficial uses it to weigh a
+// mod bundle), so a new Stat field is one line here rather than another
+// hand-enumerated STR+DEX+… expression to find and update.
+func (s Stats) Total() int {
+	return s.STR + s.DEX + s.INT + s.WIS + s.VIT + s.SPD
+}
+
 // applyStatusMod inserts or refreshes a timed modifier in mods, keyed by Source:
 // an existing entry from the same skill is REPLACED (a re-cast refreshes, never
 // double-stacks), a new source is appended. A non-positive Turns is a no-op
@@ -1552,7 +1564,7 @@ func StatusModsNetBeneficial(mods []StatusMod) bool {
 	// re-inlining the six-field stat sum per mod, which had to be edited in
 	// lockstep with SumStats whenever a Stat field was added.
 	stats, armor, mdef := SumStatusMods(mods)
-	sum := stats.STR + stats.DEX + stats.INT + stats.WIS + stats.VIT + stats.SPD + armor + mdef
+	sum := stats.Total() + armor + mdef
 	return sum > 0
 }
 
@@ -1871,7 +1883,10 @@ func TickPoisonStep(g *GameState) int {
 		// future trap/alchemist poison with a different TickDamage flows here
 		// without re-touching this loop.
 		if ApplyFlatDamage(&m.HP, &m.DamageFlash, DefaultPoisonEffect.TickDamage) {
-			m.SleepTurns = 0
+			// Lethal tick: scrub every combat-only status off the corpse (not
+			// just Sleep) so a member can't sit dead-with-status until the next
+			// battle-exit clear — matches the in-battle death cleanup.
+			ClearMemberTransientStatuses(m)
 		}
 		ticks++
 	}

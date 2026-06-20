@@ -83,10 +83,14 @@ func hitGlyphForVFX(k core.VFXKind) hitGlyphKind {
 // hitGlyph is one live overlay: a kind + the captured target world position
 // (the battle camera is static during a hit, so a fixed anchor projects to a
 // stable screen spot for the glyph's ~0.4s life) + a per-kind on-screen size
-// scale + its age.
+// scale + its age. X/Y/Z is the target's anchor WITHOUT the vertical lift; Rise
+// is the world-Y lift applied in SCREEN space at draw time (see DrawHitGlyphs)
+// so an off-center foe's glyph stays directly above it under the pitched battle
+// camera instead of drifting sideways toward the vertical vanishing point.
 type hitGlyph struct {
 	Kind     hitGlyphKind
 	X, Y, Z  float32
+	Rise     float32
 	Scale    float32
 	Elapsed  float32
 	Duration float32
@@ -100,17 +104,20 @@ var hitGlyphs = make([]hitGlyph, 0, hitGlyphCap)
 func resetHitGlyphs() { hitGlyphs = hitGlyphs[:0] }
 
 // spawnHitGlyph queues a glyph at the struck target's world position o (already
-// nudged by the kind's glyph anchor offsets at the call site), lifted to torso
-// height, sized by scale (the per-kind glyphScale; <=0 is treated as 1). No-op
-// for glyphNone or when the pool is at its cap.
-func spawnHitGlyph(kind hitGlyphKind, o rl.Vector3, scale float32) {
+// nudged by the kind's HORIZONTAL glyph anchor offset at the call site — the
+// vertical offsets arrive via extraRise). The base torso lift (hitGlyphRise)
+// plus extraRise are stored as a screen-space Rise applied at draw, not baked
+// into the world Y, so the glyph doesn't drift sideways for off-center foes
+// under the pitched battle camera. Sized by scale (per-kind glyphScale; <=0 →
+// 1). No-op for glyphNone or when the pool is at its cap.
+func spawnHitGlyph(kind hitGlyphKind, o rl.Vector3, extraRise, scale float32) {
 	if kind == glyphNone || len(hitGlyphs) >= hitGlyphCap {
 		return
 	}
 	if scale <= 0 {
 		scale = 1
 	}
-	hitGlyphs = append(hitGlyphs, hitGlyph{Kind: kind, X: o.X, Y: o.Y + hitGlyphRise, Z: o.Z, Scale: scale, Duration: hitGlyphDuration})
+	hitGlyphs = append(hitGlyphs, hitGlyph{Kind: kind, X: o.X, Y: o.Y, Z: o.Z, Rise: hitGlyphRise + extraRise, Scale: scale, Duration: hitGlyphDuration})
 }
 
 // DrawHitGlyphs projects each live glyph's world anchor to screen and draws its
@@ -124,15 +131,27 @@ func DrawHitGlyphs(camera rl.Camera3D) {
 	}
 	dt := clampFrameDelta(rl.GetFrameTime())
 	sw, _ := screenSizeF()
-	forward := horizontalForward(camera)
 	write := 0
 	for read := range hitGlyphs {
 		gph := &hitGlyphs[read]
 		anchor := rl.NewVector3(gph.X, gph.Y, gph.Z)
 		screen := rl.GetWorldToScreen(anchor, camera)
+		// Apply the vertical lift in SCREEN space, not world space: take the
+		// glyph's X from the un-lifted anchor (so it stays directly above the
+		// target) but its Y from the lifted anchor's projection. Under the pitched
+		// battle camera a world-Y rise projects diagonally, so baking it into the
+		// anchor made off-center foes' glyphs slide sideways toward the vanishing
+		// column — locking X to the base projection removes that drift.
+		if gph.Rise != 0 {
+			lifted := rl.GetWorldToScreen(rl.NewVector3(gph.X, gph.Y+gph.Rise, gph.Z), camera)
+			screen.Y = lifted.Y
+		}
 		// GetWorldToScreen mirrors points behind the camera to the wrong side of
 		// the screen, so skip a behind-camera anchor (it would draw a ghost glyph).
-		if !behindCull(camera.Position, forward, anchor) && !popupOffScreenX(screen.X, sw) {
+		// Use the strict <=0 gate (behindCamera), not behindCull's negative slack
+		// — the slack is for keeping world tiles abreast of the camera, and would
+		// let a glyph just behind the camera plane ghost through.
+		if !behindCamera(camera, anchor) && !popupOffScreenX(screen.X, sw) {
 			drawHitGlyph(gph.Kind, screen.X, screen.Y, gph.Elapsed/gph.Duration, gph.Scale)
 		}
 		gph.Elapsed += dt
@@ -236,7 +255,7 @@ func drawGlyphSlash(cx, cy, t, baseR float32) {
 // reduces to a plain even fan.
 func spokeBurst(cx, cy float32, n int, inner, outer, thick float32, col rl.Color) {
 	for i := 0; i < n; i++ {
-		ang := float64(i) * 2 * math.Pi / float64(n)
+		ang := float64(i) * tau / float64(n)
 		dx, dy := float32(math.Cos(ang)), float32(math.Sin(ang))
 		rl.DrawLineEx(rl.NewVector2(cx+dx*inner, cy+dy*inner), rl.NewVector2(cx+dx*outer, cy+dy*outer), thick, col)
 	}
@@ -256,7 +275,7 @@ func drawGlyphFrost(cx, cy, t, baseR float32) {
 	col := colorWithAlpha(glyphFrostColor, glyphFade(t))
 	r := glyphPopR(t, baseR)
 	for i := 0; i < 6; i++ {
-		ang := float64(i) * math.Pi / 3
+		ang := float64(i) * tau / 6
 		dx, dy := float32(math.Cos(ang)), float32(math.Sin(ang))
 		tipX, tipY := cx+dx*r, cy+dy*r
 		rl.DrawLineEx(rl.NewVector2(cx, cy), rl.NewVector2(tipX, tipY), 2, col)
@@ -326,7 +345,7 @@ func drawGlyphFire(cx, cy, t, baseR float32) {
 	r := baseR * (0.7 + 0.5*glyphGrow(t))
 	rl.DrawPoly(rl.NewVector2(cx, cy), 6, r*0.7, t*90, fadeColor(outer, 0.4))
 	for i := 0; i < 6; i++ {
-		ang := float64(i)*math.Pi/3 + float64(t)*1.4
+		ang := float64(i)*tau/6 + float64(t)*1.4
 		dx, dy := float32(math.Cos(ang)), float32(math.Sin(ang))
 		rl.DrawLineEx(rl.NewVector2(cx, cy), rl.NewVector2(cx+dx*r, cy+dy*r), 3, outer)
 	}

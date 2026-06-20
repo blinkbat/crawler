@@ -1,12 +1,12 @@
 {
   "version": 1,
   "mapID": "forest_path",
-  "playerTileX": 49,
-  "playerTileZ": 8,
+  "playerTileX": 11,
+  "playerTileZ": 7,
   "playerFacing": 3,
   "playerLevel": 10,
-  "stepCount": 3351,
-  "gold": 177,
+  "stepCount": 3454,
+  "gold": 193,
   "party": [
     {
       "Class": 0,
@@ -19,7 +19,7 @@
         "VIT": 9,
         "SPD": 5
       },
-      "HP": 15,
+      "HP": 11,
       "MaxHP": 18,
       "MP": 0,
       "MaxMP": 4,
@@ -34,7 +34,7 @@
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 1,
+      "DamagePopup": 3,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "Defending": false,
@@ -51,7 +51,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 3,
-      "XP": 162,
+      "XP": 202,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
@@ -75,7 +75,7 @@
       },
       "HP": 13,
       "MaxHP": 18,
-      "MP": 9,
+      "MP": 6,
       "MaxMP": 9,
       "Armor": 0,
       "Equipped": [
@@ -105,7 +105,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 3,
-      "XP": 100,
+      "XP": 140,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
@@ -161,7 +161,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 3,
-      "XP": 180,
+      "XP": 220,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
@@ -173,7 +173,7 @@
         "steal": 1,
         "venom-strike": 1
       },
-      "SkillCursor": 0
+      "SkillCursor": 1
     },
     {
       "Class": 3,
@@ -188,7 +188,7 @@
       },
       "HP": 8,
       "MaxHP": 8,
-      "MP": 18,
+      "MP": 12,
       "MaxMP": 18,
       "Armor": 0,
       "Equipped": [
@@ -218,7 +218,7 @@
       "RegenTurns": 0,
       "RegenPerTurn": 0,
       "Level": 3,
-      "XP": 180,
+      "XP": 220,
       "PendingLevelUps": 0,
       "SkillPoints": 0,
       "SkillTiers": {
@@ -239,18 +239,22 @@
     {
       "Kind": 15,
       "Count": 2
+    },
+    {
+      "Kind": 1,
+      "Count": 1
     }
   ],
   "quests": null,
   "bestiary": {
     "0": {
-      "kills": 48
+      "kills": 52
     },
     "1": {
-      "kills": 12
+      "kills": 13
     },
     "2": {
-      "kills": 12
+      "kills": 13
     }
   }
 }

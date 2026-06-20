@@ -176,8 +176,11 @@ var (
 // loadBank runs inside a panic-recover so a partial bank build (e.g. a
 // future cue that loads from disk and fails mid-way) doesn't leak the
 // entries that already loaded — the recovery path unloads what's there
-// and shuts the device down, leaving ready=false. Today's pure-synth
-// cues can't fail, but the guard is cheap and keeps the contract honest.
+// and shuts the device down, leaving ready=false. The panic is SWALLOWED
+// (not re-raised): Run() calls Init() with no recover, so re-panicking
+// would crash the whole game, contradicting the package's contract that
+// audio failures degrade to a silent fallback. Today's pure-synth cues
+// can't fail, but the guard is cheap and keeps the contract honest.
 func Init() {
 	if ready {
 		return
@@ -193,10 +196,12 @@ func Init() {
 	}
 	defer func() {
 		if r := recover(); r != nil {
+			// Clean up the half-built bank and shut the device down, then let
+			// Init return with ready=false so Play becomes a silent no-op
+			// rather than crashing the game. Do NOT re-panic (see doc above).
 			unloadBank()
 			rl.CloseAudioDevice()
 			ready = false
-			panic(r)
 		}
 	}()
 	// loadBank already reads assignments.txt and loads each cue from its

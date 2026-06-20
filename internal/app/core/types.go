@@ -493,6 +493,11 @@ type GameState struct {
 	// drops the pause menu, mirroring the Debug submenu flow.
 	OptionsMenuOpen  bool
 	OptionsMenuIndex int
+	// QuitConfirmOpen gates the "Quit — unsaved progress will be lost?" confirm
+	// modal. Opened from the pause menu (the Quit row or the Quit hotkey, both of
+	// which clear MenuOpen); confirming sets Quit, cancelling reopens the pause
+	// menu. Transient, like the door prompt — not part of SaveData.
+	QuitConfirmOpen bool
 	// Out-of-battle "use" target picker, shared by the panels overlay's
 	// Items tab (use a consumable on an ally) and Skills tab (cast a
 	// single-target heal on an ally). UseTargetOpen gates the ally-picker

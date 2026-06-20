@@ -19,8 +19,7 @@ func openPanels(g *core.GameState) {
 	}
 	// Re-center the Map tab on the player each open (pan is a transient inspect
 	// offset, not persistent state).
-	g.PanelsMapPanX = 0
-	g.PanelsMapPanZ = 0
+	recenterPanelMap(g)
 	// Snap the look yaw/pitch back to neutral so a half-rotated
 	// free-look doesn't bleed into the overlay's screen-space rendering.
 	g.Player.LookYaw = 0
@@ -217,6 +216,13 @@ func setPanelTab(g *core.GameState, t core.PanelTab) {
 	g.PanelsRowCursor = 0
 	// Re-center the Map view whenever it's (re)entered — pan is a transient
 	// inspect offset, so a previous visit's scroll shouldn't linger.
+	recenterPanelMap(g)
+}
+
+// recenterPanelMap clears the Map tab's pan offset so the view re-centers on
+// the player. The pan is a transient inspect offset, not persistent state, so
+// both the overlay open and a (re)entry of the Map tab reset it here.
+func recenterPanelMap(g *core.GameState) {
 	g.PanelsMapPanX = 0
 	g.PanelsMapPanZ = 0
 }

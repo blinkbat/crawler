@@ -899,7 +899,7 @@ func drawCliffFaces(camPos rl.Vector3, material worldMaterialResources, assets R
 		// heightfield generates one face per exposed edge. Pure win, no visual
 		// change (you can never stand on the solid side of a cliff face).
 		fdx, fdz := float32(dx), float32(dz)
-		if (camPos.X-(cx+fdx*half))*fdx+(camPos.Z-(cz+fdz*half))*fdz <= 0 {
+		if faceBackfaceCulled(camPos, cx, cz, fdx, fdz, half) {
 			continue
 		}
 		nx, nz := x+dx, z+dz
@@ -1106,10 +1106,10 @@ func drawPropTreeTwin(assets Resources, _ *core.AreaDefinition, x, z int, center
 	drawGroundShadowElev(right.X, right.Z, center.Y, foliageShadowRadius(scaleSmall, 0.08))
 	if seed&1 == 0 {
 		assets.tree.drawVaried(left, scaleBig, propYaw, seed)
-		assets.tree.drawVaried(right, scaleSmall, propYaw+1.1, seed^0x9E3779B9)
+		assets.tree.drawVaried(right, scaleSmall, propYaw+1.1, seed^hashSalt)
 	} else {
 		assets.tree.drawVaried(left, scaleSmall, propYaw, seed)
-		assets.tree.drawVaried(right, scaleBig, propYaw+1.1, seed^0x9E3779B9)
+		assets.tree.drawVaried(right, scaleBig, propYaw+1.1, seed^hashSalt)
 	}
 }
 
@@ -1546,6 +1546,16 @@ func drawDecorPebble(assets Resources, x, z int, cx, cz, groundY float32) {
 	drawPebbleCluster(assets, cx, cz, groundY, tileHash(x, z))
 }
 
+// faceBackfaceCulled reports whether a vertical tile face — centered at the
+// edge (cx+fdx*half, cz+fdz*half) with outward normal (fdx,fdz) — faces away
+// from the camera. A vertical cliff/voxel face is only visible from its outward
+// side, so the caller can skip issuing the DrawModelEx when the camera sits
+// behind the face's plane. Shared by drawCliffFaces and the voxel side-face
+// pass so the cull test can't drift between them.
+func faceBackfaceCulled(camPos rl.Vector3, cx, cz, fdx, fdz, half float32) bool {
+	return (camPos.X-(cx+fdx*half))*fdx+(camPos.Z-(cz+fdz*half))*fdz <= 0
+}
+
 // drawTileCube draws a square-footprint cube model at (cx,cy,cz) with a yaw
 // rotation around its vertical axis. Used for floor and wall tiles so each
 // instance can spin its texture by 90° steps without changing the cube's
@@ -1710,7 +1720,7 @@ func drawPebbleCluster(assets Resources, cx, cz, groundY float32, tileHash uint3
 	for i := 0; i < count; i++ {
 		// Salt the tile hash with the pebble index so each member looks
 		// independent. Same finalizer as the other render hashes (mix32).
-		ih := mix32(tileHash ^ uint32(i+1)*2654435761)
+		ih := mix32(tileHash ^ uint32(i+1)*hashSalt)
 
 		// Sub-tile offset in [-0.55, 0.55] — pebbles spread across the tile,
 		// not bunched at the center.
@@ -1853,21 +1863,9 @@ type billboardPlacement struct {
 // chevron anchor (markerY/X), and the sprite center (yOffset) from that
 // adjusted base — the exact ordering drawBattlePack and DrawFoePreview share.
 func resolveBillboardPlacement(camera rl.Camera3D, position rl.Vector3, v *enemyVisual) billboardPlacement {
-	base := position
-	if v.depthOffset != 0 {
-		fwd := horizontalForward(camera)
-		base.X += fwd.X * v.depthOffset
-		base.Z += fwd.Z * v.depthOffset
-	}
+	base := cameraRelativeOffset(camera, position, 0, 0, v.depthOffset)
 	sx, sz := shadowFootprint(camera, base, v)
-	chevron := base
-	chevron.Y += v.markerYOffset
-	if v.markerXOffset != 0 {
-		fwd := horizontalForward(camera)
-		right := horizontalRight(fwd)
-		chevron.X += right.X * v.markerXOffset
-		chevron.Z += right.Z * v.markerXOffset
-	}
+	chevron := cameraRelativeOffset(camera, base, v.markerXOffset, v.markerYOffset, 0)
 	sprite := base
 	sprite.Y += v.yOffset
 	return billboardPlacement{base: base, shadowX: sx, shadowZ: sz, chevron: chevron, sprite: sprite}
@@ -2152,7 +2150,15 @@ func visualAt(s []enemyVisual, idx int) (enemyVisual, bool) {
 // bigger cursor — only this enemy-side marker is kind-scaled; the friendly /
 // incoming-attack markers keep their fixed role sizes.
 func drawTargetChevron(camera rl.Camera3D, position rl.Vector3, scale float32) {
-	style := markerEnemyTarget
+	drawScaledMarker(position, markerEnemyTarget, scale)
+}
+
+// drawScaledMarker draws a marker-style cursor at position, optionally scaling a
+// copy of baseStyle's height/baseRadius by scale (scale 0 or 1 leaves it at the
+// role's default size). The shared body of drawTargetChevron and
+// drawFriendlyTargetMarker, which differ only by which markerStyle they pass.
+func drawScaledMarker(position rl.Vector3, baseStyle markerStyle, scale float32) {
+	style := baseStyle
 	if scale > 0 && scale != 1 {
 		style.height *= scale
 		style.baseRadius *= scale
@@ -2183,7 +2189,7 @@ func drawSelectorPyramid(tip rl.Vector3, height, baseRadius float32, col rl.Colo
 
 	var corners [4]rl.Vector3
 	for i := 0; i < 4; i++ {
-		a := yaw + float64(i)*math.Pi/2
+		a := yaw + float64(i)*tau/4
 		corners[i] = rl.NewVector3(
 			tip.X+float32(math.Cos(a))*baseRadius,
 			baseY,
@@ -2317,12 +2323,7 @@ func partyVisualFor(assets Resources, class core.PartyClass) (enemyVisual, bool)
 // slider is honored in battle as well as the preview instead of being a dead
 // knob. Folds the scale into a local copy of the shared style (kept per-role).
 func drawFriendlyTargetMarker(camera rl.Camera3D, position rl.Vector3, scale float32) {
-	style := markerFriendlyTarget
-	if scale > 0 && scale != 1 {
-		style.height *= scale
-		style.baseRadius *= scale
-	}
-	drawMarkerOnTop(position, style)
+	drawScaledMarker(position, markerFriendlyTarget, scale)
 }
 
 func drawEnemyAttackTargetMarker(camera rl.Camera3D, position rl.Vector3) {

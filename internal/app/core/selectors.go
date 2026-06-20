@@ -297,17 +297,25 @@ func CureDebuffs(m *PartyMember) int {
 // ReleaseAllIngested, which also restores the swallowed member.)
 func ClearPartyTransientStatuses(party []PartyMember) {
 	for i := range party {
-		m := &party[i]
-		for _, c := range transientStatusCounters(m) {
-			*c = 0
-		}
-		m.Defending = false
-		m.Buffs = nil
-		m.ShieldHP = 0
-		m.IceArmorTurns = 0
-		m.RegenTurns = 0
-		m.RegenPerTurn = 0
+		ClearMemberTransientStatuses(&party[i])
 	}
+}
+
+// ClearMemberTransientStatuses wipes the combat-only status effects off a
+// single member (the per-member body of ClearPartyTransientStatuses). Used both
+// at battle exit and when a member dies outside battle (e.g. a lethal poison
+// tick) so a corpse never lingers carrying Sleep/Stun/Webbed/Confused/buffs.
+// Like the party-wide version it never touches HP or Poison.
+func ClearMemberTransientStatuses(m *PartyMember) {
+	for _, c := range transientStatusCounters(m) {
+		*c = 0
+	}
+	m.Defending = false
+	m.Buffs = nil
+	m.ShieldHP = 0
+	m.IceArmorTurns = 0
+	m.RegenTurns = 0
+	m.RegenPerTurn = 0
 }
 
 // clearPartyCombatTransients strips the combat-only state that must never
@@ -343,10 +351,14 @@ const (
 	ModalChest
 	ModalPanels
 	ModalLevelUp
-	// ModalDialog is the branching-conversation overlay. Highest priority —
-	// a conversation in progress shouldn't be shadowed by any other overlay
-	// (it's triggered into and blocks explore until it ends or is skipped).
+	// ModalDialog is the branching-conversation overlay. A conversation in
+	// progress shouldn't be shadowed by any other overlay (it's triggered into
+	// and blocks explore until it ends or is skipped).
 	ModalDialog
+	// ModalQuitConfirm is the "Quit — unsaved progress will be lost?" prompt.
+	// Highest priority so nothing can shadow a pending quit decision; it's only
+	// reachable from the pause menu (which clears the other menu flags first).
+	ModalQuitConfirm
 )
 
 // ActiveModal returns the highest-priority modal currently open in
@@ -367,6 +379,8 @@ func ActiveModal(g *GameState) ModalKind {
 	// actually an entry at that index, and an out-of-range sentinel is
 	// inert. Production still goes through NewGameState (which sets -1).
 	switch {
+	case g.QuitConfirmOpen:
+		return ModalQuitConfirm
 	case g.DialogOpen:
 		return ModalDialog
 	case g.LevelUpOpen:

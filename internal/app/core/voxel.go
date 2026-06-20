@@ -332,6 +332,15 @@ func (a *AreaDefinition) SetColumnTop(x, z, top int) {
 	a.trimTopAir()
 }
 
+// cloneRows deep-copies a single grid layer's rows (nil-safe). string rows are
+// immutable, so copying the slice is a full deep copy. Mirrors CloneSolids one
+// dimension down, with the exact semantics of append([]string(nil), rows...):
+// nil in → nil out, empty non-nil in → empty non-nil out. The single home for
+// the per-layer clone the Area↔MapFile converters used to open-code ~14 times.
+func cloneRows(rows []string) []string {
+	return append([]string(nil), rows...)
+}
+
 // CloneSolids deep-copies a voxel stack (nil-safe). string rows are immutable,
 // so copying the plane slices is a full deep copy. Returns nil for an empty
 // stack so a heightfield area keeps Solids==nil.
@@ -341,7 +350,7 @@ func CloneSolids(in [][]string) [][]string {
 	}
 	out := make([][]string, len(in))
 	for L := range in {
-		out[L] = append([]string(nil), in[L]...)
+		out[L] = cloneRows(in[L])
 	}
 	return out
 }

@@ -78,6 +78,23 @@ func validateEnemyStatBounds(name string, skillCastChance, poisonChance float64,
 	return nil
 }
 
+// validateCustomEnemyExtras guards the two numeric fields that validateEnemyStatBounds
+// does NOT cover (the static registry has no HP/MP pool): HP must be positive — a
+// hand-edited row with HP <= 0 Instantiates to an Enemy{HP:0, Alive:true} "alive
+// corpse" enemyAlive() (keyed on Alive, not HP) counts as a live combatant, so the
+// encounter can never be won — and MP must be non-negative. Shared by the map LOADER
+// (CustomEnemyDefFromMap) and the encode-side writer (MapCustomEnemyFromDef) so the
+// two can't drift: a row the writer permits is exactly a row the loader accepts.
+func validateCustomEnemyExtras(name string, hp, mp int) error {
+	if hp <= 0 {
+		return fmt.Errorf("custom enemy %q has non-positive HP (%d)", name, hp)
+	}
+	if mp < 0 {
+		return fmt.Errorf("custom enemy %q has negative MP (%d)", name, mp)
+	}
+	return nil
+}
+
 // CustomEnemyDefFromMap converts one on-disk custom enemy row into the core
 // definition used by editor/runtime code.
 func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
@@ -85,19 +102,11 @@ func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
 	if !ok {
 		return CustomEnemyDef{}, fmt.Errorf("custom enemy %q references unknown base kind %q", ce.Name, ce.BaseKind)
 	}
-	// HP must be positive. A hand-edited row with hp <= 0 would Instantiate
-	// to an Enemy{HP:0, MaxHP:0, Alive:true} — an "alive corpse" that
-	// enemyAlive() (keyed on Alive, not HP) counts as a live combatant, so
-	// the encounter can never be won until the player manually whittles it
-	// negative. Refuse it at load instead, the same way AreaFromMapFile
-	// rejects bad dimensions.
-	if ce.HP <= 0 {
-		return CustomEnemyDef{}, fmt.Errorf("custom enemy %q has non-positive HP (%d)", ce.Name, ce.HP)
-	}
-	// Symmetric with MapCustomEnemyFromDef's encode-side guard: reject negative
-	// MP at load too, so a hand-edited row can't load yet be unsaveable.
-	if ce.MP < 0 {
-		return CustomEnemyDef{}, fmt.Errorf("custom enemy %q has negative MP (%d)", ce.Name, ce.MP)
+	// HP/MP bounds (shared with the encode-side writer so the two can't drift —
+	// see validateCustomEnemyExtras for the "alive corpse" rationale). Refuse a
+	// bad row at load, the same way AreaFromMapFile rejects bad dimensions.
+	if err := validateCustomEnemyExtras(ce.Name, ce.HP, ce.MP); err != nil {
+		return CustomEnemyDef{}, err
 	}
 	// Mirror the static-registry init guards (enemies.go) for hand-edited
 	// rows via the shared validateEnemyStatBounds so the two paths can't
@@ -148,15 +157,12 @@ func MapCustomEnemyFromDef(ce CustomEnemyDef) (mapfile.MapCustomEnemy, error) {
 	if err := validateEnemyStatBounds(ce.Name, ce.SkillCastChance, 0, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower, ce.Tier); err != nil {
 		return mapfile.MapCustomEnemy{}, err
 	}
-	if ce.MP < 0 {
-		return mapfile.MapCustomEnemy{}, fmt.Errorf("custom enemy %q has negative MP %d", ce.Name, ce.MP)
-	}
-	// HP isn't in validateEnemyStatBounds either, and the LOADER
-	// (CustomEnemyDefFromMap) rejects HP <= 0 to avoid an "alive corpse"
-	// Enemy{HP:0, Alive:true}. Check it here so a non-editor writer can't
-	// persist a row the loader would then refuse — same lockstep as MP/Tier.
-	if ce.HP <= 0 {
-		return mapfile.MapCustomEnemy{}, fmt.Errorf("custom enemy %q has non-positive HP %d", ce.Name, ce.HP)
+	// HP/MP aren't in validateEnemyStatBounds (the static registry has no pool).
+	// Check them here via the SAME helper the LOADER (CustomEnemyDefFromMap) uses,
+	// so a non-editor writer can't persist a row the loader would then refuse —
+	// same lockstep as the stat-bounds / Tier checks.
+	if err := validateCustomEnemyExtras(ce.Name, ce.HP, ce.MP); err != nil {
+		return mapfile.MapCustomEnemy{}, err
 	}
 	skillNames := make([]string, 0, len(ce.Skills))
 	for _, id := range ce.Skills {

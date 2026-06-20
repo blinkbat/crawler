@@ -164,7 +164,7 @@ func updateSkillMenu(g *core.GameState) {
 	// the rule matches chargeMP's deduct-time check. Two separate
 	// inlines of `actor.MP < cost` previously made a "potion of
 	// free cast" or "VIT-raises-MP-cap" feature a two-place edit.
-	if !g.DebugAllSkills && !canAffordSkill(g.Party[g.Battle.CurrentParty], skill) {
+	if !g.DebugAllSkills && !canAffordSkill(&g.Party[g.Battle.CurrentParty], skill) {
 		setBattleStatus(g, fmt.Sprintf("%s needs %d MP.", core.SkillName(skill), core.SkillCost(skill)))
 		return
 	}

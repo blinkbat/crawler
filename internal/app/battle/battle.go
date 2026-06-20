@@ -588,7 +588,7 @@ func advanceSkippedTurn(g *core.GameState, actor core.ActorRef) bool {
 // keeps the damage reduction every round they're out, instead of the
 // single round Defend is meant to last. Enemies don't use Defending.
 func consumeDefendOnSkip(g *core.GameState, actor core.ActorRef) {
-	if actor.IsParty && actor.Index >= 0 && actor.Index < len(g.Party) {
+	if actor.IsParty && actor.ValidPartyIndex(g.Party) {
 		g.Party[actor.Index].Defending = false
 	}
 }

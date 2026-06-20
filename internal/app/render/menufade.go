@@ -20,6 +20,13 @@ const menuFadeDur = float32(0.12) // seconds for a full HUD↔menu cross-fade
 
 var fadeRT previewRT
 
+// inFadeCapture guards against re-entering the fade render-target capture.
+// raylib's BeginTextureMode/EndTextureMode is not a real stack on this build —
+// a nested EndTextureMode pops to the backbuffer rather than the outer target.
+// Current callers never nest, but the guard makes a future nested call degrade
+// to a plain draw instead of silently breaking the outer capture.
+var inFadeCapture bool
+
 var menuFade struct {
 	progress float32                          // 0 = world HUD shown, 1 = menu shown
 	drawer   func(*core.GameState, Resources) // the open (or fading-out) top-level menu's drawer
@@ -92,16 +99,24 @@ func withFadeAlpha(alpha float32, draw func()) {
 	if alpha <= 0.001 {
 		return
 	}
+	if inFadeCapture {
+		// Already inside a fade capture — nesting would break the outer target's
+		// Begin/EndTextureMode pairing. Draw straight through instead.
+		draw()
+		return
+	}
 	sw, sh := screenSize()
 	if !fadeRT.ensure(sw, sh) {
 		draw() // allocation failed — a full-opacity draw beats a blank frame
 		return
 	}
+	inFadeCapture = true
 	rl.BeginTextureMode(fadeRT.rt)
 	rl.ClearBackground(rl.Blank) // transparent, so the blit composites over the world
 	draw()
 	rl.EndTextureMode()
-	tint := rl.NewColor(255, 255, 255, uint8(alpha*255))
+	inFadeCapture = false
+	tint := colorWithAlpha(rl.White, uint8(alpha*255))
 	// RenderTextures store rows bottom-up; negate the source height to blit
 	// upright (same idiom as previewRT.blit / the retro-filter blit).
 	rl.DrawTextureRec(fadeRT.rt.Texture,

@@ -307,8 +307,8 @@ func enemyHPLabel(hp, max int) string {
 // rounded fill pane + matching outline + a FontSmall single-line label.
 // The "fill + outline + label" core both status surfaces use — the
 // enemy-roster pill (drawEnemyStatusPill) and the Tome Stats-tab chip
-// (render/panels.go) — extracted so the two pill silhouettes can't drift
-// (FINDING #18). The two callers anchor + color the label differently
+// (render/panels.go) — extracted so the two pill silhouettes can't drift.
+// The two callers anchor + color the label differently
 // (enemy: centered inkPrimary; Stats chip: left-aligned status tint), so
 // the label placement is parameterized: `centered` true centers the
 // label (with the enemy pill's +2 top inset); false left-aligns it with

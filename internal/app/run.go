@@ -425,4 +425,7 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	// other explore modal (it's the highest-priority modal — see
 	// core.ActiveModal / ModalDialog).
 	render.DrawDialogModal(game, assets)
+	// Quit confirm is the top-priority modal (ModalQuitConfirm) — paint it over
+	// everything, including a dialog, so a pending quit decision is never hidden.
+	render.DrawQuitConfirm(game, assets)
 }

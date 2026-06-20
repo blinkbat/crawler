@@ -994,6 +994,41 @@ const (
 	SkillLacerate
 )
 
+// init pins every SkillID's serialized integer value. SkillID is a map key in
+// saved data (PartyMember.SkillTiers map[SkillID]int), so inserting a skill
+// mid-enum renumbers every later skill and silently misattributes purchased
+// tiers to the wrong skill on load (sanitizeLoadedParty only prunes keys whose
+// skillInfo lookup fails — a renumbered-but-still-valid key passes through and
+// applies to the wrong skill). These explicit literals are the on-disk
+// contract: a mid-enum insert trips this panic at startup instead of corrupting
+// saves silently. APPENDING a new skill at the end is the only safe edit — add
+// it above, then one pinned line here. (Same contract as ItemKind/EnemyKind.)
+func init() {
+	pinned := [...]struct {
+		id  SkillID
+		val int
+	}{
+		{SkillNone, 0}, {SkillSwipe, 1}, {SkillPrayer, 2}, {SkillSteal, 3},
+		{SkillFirebolt, 4}, {SkillCrushingBlow, 5}, {SkillWhirlwind, 6},
+		{SkillMassMend, 7}, {SkillSmite, 8}, {SkillBackstab, 9},
+		{SkillVenomStrike, 10}, {SkillFrostLance, 11}, {SkillArcBolt, 12},
+		{SkillSleep, 13}, {SkillIngest, 14}, {SkillWeb, 15}, {SkillConfuse, 16},
+		{SkillStoneslam, 17}, {SkillRaiseBones, 18}, {SkillScan, 19},
+		{SkillBless, 20}, {SkillFireball, 21}, {SkillPoisonCloud, 22},
+		{SkillCleanse, 23}, {SkillSecondWind, 24}, {SkillRenewal, 25},
+		{SkillCripple, 26}, {SkillFrostbite, 27}, {SkillCorrosiveVial, 28},
+		{SkillConeOfCold, 29}, {SkillSunder, 30}, {SkillTaunt, 31},
+		{SkillWarBanner, 32}, {SkillStoneSkin, 33}, {SkillBlind, 34},
+		{SkillAegis, 35}, {SkillSmokeBomb, 36}, {SkillIceArmor, 37},
+		{SkillRend, 38}, {SkillLacerate, 39},
+	}
+	for _, p := range pinned {
+		if int(p.id) != p.val {
+			panic("core: SkillID serialization value drifted — never insert mid-enum (it renumbers saved SkillTiers keys); append new skills at the end and pin them in config.go's init")
+		}
+	}
+}
+
 // SkillTag classifies a skill for damage-type interactions (armor,
 // future elemental resists) and for HUD color-coding. Phys damage
 // clips against the target's Armor; Magic / Heal / Buff bypass it.

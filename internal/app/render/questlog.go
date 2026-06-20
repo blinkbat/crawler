@@ -205,12 +205,15 @@ func drawJournalQuests(g *core.GameState, font rl.Font, body rl.Rectangle) {
 func forEachJournalRow(body rl.Rectangle, cursor, count int, fn func(i int, rowY float32)) {
 	listTop := body.Y + journalListTopDY
 	visible := int((body.Y + body.Height - listTop) / journalRowH)
+	if visible < 1 {
+		visible = 1 // always show at least the cursor row, even in a too-short body
+	}
 	first := journalScrollFirst(cursor, count, visible)
+	// Bound the loop by the SAME floored `visible` used for paging, so the two
+	// can't disagree — a too-short body where the old overflow guard tripped
+	// before drawing any row (hiding the cursor) now still renders one row.
 	rowY := listTop
-	for i := first; i < count; i++ {
-		if rowY+journalRowH > body.Y+body.Height {
-			break // don't overflow the body rect
-		}
+	for i := first; i < count && i < first+visible; i++ {
 		if i == cursor {
 			DrawSelectedRowI(int32(body.X), int32(rowY)-focusPlateInsetY, int32(body.Width), int32(journalRowH-6))
 		}
@@ -231,7 +234,7 @@ var bestiarySeenBuf []core.EnemyKind
 
 func drawJournalBestiary(g *core.GameState, font rl.Font, body rl.Rectangle) {
 	seen := g.Bestiary.SeenKindsInto(bestiarySeenBuf)
-	bestiarySeenBuf = seen[:0]
+	bestiarySeenBuf = seen
 	if len(seen) == 0 {
 		drawEmptyLedgerNote(font, body, "No foes recorded yet.",
 			"Defeat or Scan enemies to fill the bestiary.")

@@ -134,6 +134,15 @@ func init() {
 	if len(debugMenuRows) != core.DebugMenuCount {
 		panic(fmt.Sprintf("debugMenuRows length %d != DebugMenuCount %d", len(debugMenuRows), core.DebugMenuCount))
 	}
+	// retroMenuRowLabel is a positional switch (no slice to length-check): the
+	// first RetroFilterCount slots are filter kinds, then SkyToggle / ResetAll /
+	// AllOff, then Close via the default arm. This asserts the menu has exactly
+	// those four trailing slots, so inserting a new RetroMenu* enum value bumps
+	// RetroMenuCount and trips here at startup instead of silently rendering as
+	// "Close" through the default arm. Mirrors the row-slice asserts above.
+	if core.RetroMenuCount != int(core.RetroFilterCount)+4 {
+		panic(fmt.Sprintf("retroMenuRowLabel switch handles RetroFilterCount+4 slots but RetroMenuCount is %d (RetroFilterCount %d)", core.RetroMenuCount, core.RetroFilterCount))
+	}
 }
 
 func onOff(b bool) string {
@@ -258,7 +267,7 @@ const retroMenuPanelW = int32(560)
 // drawCardTitle paints the centred FontTitle card title with flanking gilt
 // fleurons on its vertical midline (~22px outside each text edge) — the
 // 90s grimoire ◆──── TITLE ────◆ look. The shared preamble extracted from
-// drawTitledMenuCard and drawTitledCardHeader (FINDING #17): both measured
+// drawTitledMenuCard and drawTitledCardHeader: both measured
 // the title, centred it across panelW, shadow-drew it, and flanked it with
 // fleurons, differing ONLY by the title's top inset (+24 vs +18) — now the
 // `topInset` parameter. Returns the Y just below the title (titleY +
@@ -343,4 +352,45 @@ func drawMenuRow(font rl.Font, text string, x, y, innerW int32, selected bool) {
 	// Engraved heading-tier rows — drawEngravedText's own +2 drop shadow
 	// supplies the weight the old hand-set (+2,+2) shadow carried.
 	drawEngravedText(font, text, float32(x+12), float32(y), FontHeading, textPrimary)
+}
+
+// Quit-confirm card layout — same veiled-card shape as the door prompt (a
+// lighter, fleuron-free confirm than the titled menu chrome), with its own band
+// so the two confirms can be tuned independently.
+const (
+	quitConfirmHeaderInsetY = float32(22)
+	quitConfirmBodyInsetY   = float32(78)
+	quitConfirmFooterInsetY = float32(40)
+)
+
+// DrawQuitConfirm paints the "Quit — unsaved progress will be lost?" confirm
+// modal (g.QuitConfirmOpen). Centered glass card with an engraved title, the
+// warning body, and controller-first Quit/Cancel hints. No-op when the prompt
+// isn't open. Drawn last in the explore overlay pass (highest-priority modal).
+func DrawQuitConfirm(g *core.GameState, assets Resources) {
+	if !g.QuitConfirmOpen {
+		return
+	}
+	panelW := int32(440)
+	panelH := int32(168)
+	rect := drawVeiledCard(panelW, panelH, borderSoft, borderSoft, giltDim)
+	panelX := float32(rect.X)
+	panelY := float32(rect.Y)
+
+	title := "QUIT GAME"
+	// Cache the constant title's measure (drawn every frame the prompt is open)
+	// at the canonical heading spacing so centering matches drawEngravedText.
+	tm := cardTitleMeasureCache.measure(assets.hudFont, title, FontHeading, FontSpacingHeading)
+	drawEngravedText(assets.hudFont, title,
+		panelX+float32(panelW)/2-tm.X/2, panelY+quitConfirmHeaderInsetY,
+		FontHeading, textPrimary)
+
+	cardCenterX := panelX + float32(panelW)/2
+	drawTextCentered(assets.hudFont, "Unsaved progress will be lost.",
+		cardCenterX, panelY+quitConfirmBodyInsetY, FontBody, textMuted)
+	// Controller-first affordances (no spelled-out keys).
+	DrawHintBar(assets.hudFont, []HintSeg{
+		Hint("Quit", GlyphA),
+		Hint("Cancel", GlyphB),
+	}, cardCenterX, panelY+float32(panelH)-quitConfirmFooterInsetY, FontSmall)
 }

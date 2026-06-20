@@ -81,7 +81,7 @@ func rotateOffsetY(offset rl.Vector3, scale, yawDeg float32) rl.Vector3 {
 	if yawDeg == 0 {
 		return scaled
 	}
-	return rl.Vector3RotateByAxisAngle(scaled, rl.NewVector3(0, 1, 0), yawDeg*float32(math.Pi)/180)
+	return rl.Vector3RotateByAxisAngle(scaled, rl.NewVector3(0, 1, 0), yawDeg*degToRad)
 }
 
 const (
@@ -259,7 +259,7 @@ func yawedTiltAxis(axis rl.Vector3, yaw float32) rl.Vector3 {
 	if yaw == 0 {
 		return axis
 	}
-	return rl.Vector3RotateByAxisAngle(axis, rl.NewVector3(0, 1, 0), yaw*float32(math.Pi)/180)
+	return rl.Vector3RotateByAxisAngle(axis, rl.NewVector3(0, 1, 0), yaw*degToRad)
 }
 
 // drawVaried renders the tree with per-tile shape variance seeded from
@@ -321,7 +321,7 @@ func (t treeModel) variance(seed uint32) treeVariance {
 	}
 	// Mix once so per-byte slices below are decorrelated even when
 	// neighboring tiles' seeds differ by only a few bits.
-	mix := seed*2654435761 ^ 0xC2B2AE3D
+	mix := seed*hashSalt ^ 0xC2B2AE3D
 	mix ^= mix >> 16
 	mix *= 0x85EBCA6B
 	mix ^= mix >> 13

@@ -435,6 +435,18 @@ const (
 	SectionFaces         = "faces"
 )
 
+// Header-line keys. The file preamble is "key: value" lines (not "key:" section
+// headers), so these live apart from the Section* constants but follow the same
+// "one spelling, both sides" rule: parseHeaderLine matches on them and Encode
+// writes them, so a rename can't drift the reader and writer out of step.
+const (
+	headerName      = "name"
+	headerMaterials = "materials"
+	headerQuiet     = "quiet"
+	headerSize      = "size"
+	headerStart     = "start"
+)
+
 // layerSection describes one .map section: its on-disk name, the parse
 // slot it maps to, and (for the six grid layers) a field accessor into
 // MapFile. Entity sections (enemies/chests/doors/custom_enemies) carry a
@@ -733,7 +745,13 @@ func Parse(r io.Reader) (MapFile, error) {
 			// The voxel stack is N planes of Height rows each, lowest level
 			// first. Blank separator lines were already skipped above, so rows
 			// arrive contiguously — start a new plane whenever the current one
-			// has filled to Height. (Height is set: size: precedes every grid.)
+			// has filled to Height. Height comes from size:, which the format
+			// requires before any grid; if it's still 0 here the header is
+			// misordered — fail with a pointed message rather than splitting
+			// every row into its own plane and erroring obscurely in validate().
+			if mf.Height == 0 {
+				return mf, fmt.Errorf("line %d: solids: section appears before size: (grid dimensions unknown)", lineNo)
+			}
 			if len(mf.Solids) == 0 || len(mf.Solids[len(mf.Solids)-1]) >= mf.Height {
 				mf.Solids = append(mf.Solids, []string{})
 			}
@@ -760,8 +778,8 @@ func Parse(r io.Reader) (MapFile, error) {
 			// loud error (like every other entity section) rather than a silent
 			// drop — a hand-edited typo here must not vanish without a diagnostic.
 			fields := strings.Fields(raw)
-			if len(fields) < 3 || len(fields[2]) != 4 {
-				return mf, fmt.Errorf("line %d: expected '<x> <z> <NESW>' (4 face skin chars), got %q", lineNo, raw)
+			if len(fields) < facesFieldCount || len(fields[2]) != faceSkinCount {
+				return mf, fmt.Errorf("line %d: expected '<x> <z> <NESW>' (%d face skin chars), got %q", lineNo, faceSkinCount, raw)
 			}
 			fx, err := parseIntField(fields[0], "face x", lineNo)
 			if err != nil {
@@ -846,19 +864,19 @@ func parseHeaderLine(mf *MapFile, line string, lineNo int) error {
 		return fmt.Errorf("line %d: expected 'key: value' or section header, got %q", lineNo, line)
 	}
 	switch key {
-	case "name":
+	case headerName:
 		mf.Name = val
-	case "materials":
+	case headerMaterials:
 		mf.Materials = val
-	case "quiet":
+	case headerQuiet:
 		mf.Quiet = val
-	case "size":
+	case headerSize:
 		w, h, err := parseSize(val)
 		if err != nil {
 			return fmt.Errorf("line %d: %w", lineNo, err)
 		}
 		mf.Width, mf.Height = w, h
-	case "start":
+	case headerStart:
 		x, z, face, err := parseStart(val)
 		if err != nil {
 			return fmt.Errorf("line %d: %w", lineNo, err)
@@ -1142,8 +1160,14 @@ const (
 	doorFields       = 7 // + trailing style column
 	chestFieldsMin   = 3 // "item[,item...] X Z" — item token may span fields, so >= not ==
 	crystalFields    = 2 // "X Z"
+	facesFieldCount  = 3 // "X Z NESW" (the NESW token is one field of faceSkinCount chars)
 	startFields      = 3 // header "start: X Z facing"
 )
+
+// faceSkinCount is the number of per-direction skin chars in a faces row's NESW
+// token (N,E,S,W), which equals len(MapFace.Skins). Named so the faces parse
+// width guard cites the array size rather than a bare 4.
+const faceSkinCount = len(MapFace{}.Skins)
 
 // Per-section encode format strings. Each is the fmt.Fprintf format the
 // encoder writes one row per; broken out as named constants so init()
@@ -1165,6 +1189,9 @@ const (
 	doorEncodeFormat = "%s %s %s %d %d %s %s\n"
 	// crystalFields verbs.
 	crystalEncodeFormat = "%d %d\n"
+	// facesFieldCount verbs ("X Z NESW"). The NESW token is one %s field of
+	// faceSkinCount chars, so this is 3 verbs, not 3+faceSkinCount.
+	facesEncodeFormat = "%d %d %s\n"
 )
 
 // customEnemyFieldCount is the positional column count for a current-
@@ -1262,6 +1289,7 @@ func init() {
 		{"chestEncodeFormat", chestEncodeFormat, chestFieldsMin},
 		{"doorEncodeFormat", doorEncodeFormat, doorFields},
 		{"crystalEncodeFormat", crystalEncodeFormat, crystalFields},
+		{"facesEncodeFormat", facesEncodeFormat, facesFieldCount},
 	}
 	for _, fc := range formatChecks {
 		if verbs := fprintfVerbCount(fc.format); verbs != fc.fields {
@@ -1379,11 +1407,11 @@ func writeVerbatimSection(bw *bufio.Writer, name string, rows []string) {
 // fixed order so encoded maps diff cleanly across edits.
 func (mf MapFile) Encode(w io.Writer) error {
 	bw := bufio.NewWriter(w)
-	fmt.Fprintf(bw, "name: %s\n", mf.Name)
-	fmt.Fprintf(bw, "materials: %s\n", mf.Materials)
-	fmt.Fprintf(bw, "quiet: %s\n", mf.Quiet)
-	fmt.Fprintf(bw, "size: %dx%d\n", mf.Width, mf.Height)
-	fmt.Fprintf(bw, "start: %d %d %s\n", mf.StartX, mf.StartZ, mf.StartFace)
+	fmt.Fprintf(bw, headerName+": %s\n", mf.Name)
+	fmt.Fprintf(bw, headerMaterials+": %s\n", mf.Materials)
+	fmt.Fprintf(bw, headerQuiet+": %s\n", mf.Quiet)
+	fmt.Fprintf(bw, headerSize+": %dx%d\n", mf.Width, mf.Height)
+	fmt.Fprintf(bw, headerStart+": %d %d %s\n", mf.StartX, mf.StartZ, mf.StartFace)
 	ceiling := OptionalLayerOrBlank(mf.Ceiling, mf.Width, mf.Height, CeilingOpenChar)
 	elevation := OptionalLayerOrBlank(mf.Elevation, mf.Width, mf.Height, ElevationGroundChar)
 	for _, layer := range append(mf.requiredLayers(), namedLayer{SectionCeiling, ceiling}, namedLayer{SectionElevation, elevation}) {
@@ -1414,7 +1442,7 @@ func (mf MapFile) Encode(w io.Writer) error {
 	if len(mf.Faces) > 0 {
 		fmt.Fprintln(bw, SectionFaces+":")
 		for _, f := range mf.Faces {
-			fmt.Fprintf(bw, "%d %d %s\n", f.X, f.Z, string(f.Skins[:]))
+			fmt.Fprintf(bw, facesEncodeFormat, f.X, f.Z, string(f.Skins[:]))
 		}
 	}
 	fmt.Fprintln(bw, SectionEnemies+":")

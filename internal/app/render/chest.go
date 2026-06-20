@@ -143,7 +143,10 @@ func DrawChestPrompt(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		return
 	}
 	ch := g.Chests[idx]
-	world := tileWorldPos(ch.TileX, ch.TileZ, chestGeo.BodyHeight+chestGeo.LidHeight+0.4)
+	// Anchor above the lid, on top of the chest's actual floor height — the body
+	// draws at StandGroundY (see DrawChests), so the prompt must add it too or it
+	// detaches and floats at a fixed height on raised tiles (matches DrawCrystalPrompt).
+	world := tileWorldPos(ch.TileX, ch.TileZ, g.Area.StandGroundY(ch.TileX, ch.TileZ)+chestGeo.BodyHeight+chestGeo.LidHeight+0.4)
 	drawFloatingInteractPrompt(camera, world, "Open", assets)
 }
 

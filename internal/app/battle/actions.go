@@ -545,8 +545,8 @@ func setupTargetedEnemy(g *core.GameState) bool {
 // with chargeMP via this helper means a future "VIT raises MP cap"
 // or "potion grants free cast" change lands in one place rather
 // than the two places that previously inlined `actor.MP < cost`.
-func canAffordSkill(actor core.PartyMember, skill core.SkillID) bool {
-	return core.CanAffordSkill(&actor, skill)
+func canAffordSkill(actor *core.PartyMember, skill core.SkillID) bool {
+	return core.CanAffordSkill(actor, skill)
 }
 
 // chargeMP is the shared "spend the skill's MP cost or refuse" helper
@@ -3274,12 +3274,12 @@ func enemyHitMessage(enemy core.Enemy, targetName string, damage, defendQuality 
 	def := core.EnemyInfoFor(enemy)
 	if defendQuality > core.TimingQualityMiss {
 		if damage <= 0 {
-			return fmt.Sprintf("%s blocks the %s!", targetName, def.SingularNoun)
+			return fmt.Sprintf("%s blocks the %s!", targetName, core.EnemySingularNoun(enemy))
 		}
-		return fmt.Sprintf("%s blocks the %s (%d).", targetName, def.SingularNoun, damage)
+		return fmt.Sprintf("%s blocks the %s (%d).", targetName, core.EnemySingularNoun(enemy), damage)
 	}
 	if defending {
-		return fmt.Sprintf("%s soaks the %s for %d.", targetName, def.SingularNoun, damage)
+		return fmt.Sprintf("%s soaks the %s for %d.", targetName, core.EnemySingularNoun(enemy), damage)
 	}
 	return fmt.Sprintf("%s %s %s for %d.", core.TheEnemy(def), def.AttackVerbSingular, targetName, damage)
 }

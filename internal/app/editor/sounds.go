@@ -746,6 +746,9 @@ func updateSoundsListKeys(s *State, names []string) {
 	if s.soundCursor >= len(names) {
 		s.soundCursor = len(names) - 1
 	}
+	if s.soundCursor < 0 {
+		s.soundCursor = 0 // guard both ends before indexing names[soundCursor] below
+	}
 	s.soundCursor = input.CursorUpDown(s.soundCursor, len(names))
 	if editorCommitPressed() || rl.IsKeyPressed(rl.KeySpace) {
 		audio.PreviewFile(names[s.soundCursor])

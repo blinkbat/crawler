@@ -12,7 +12,7 @@
     "markerScale": 1,
     "glyphX": 0,
     "glyphY": -0.48,
-    "glyphScale": 1,
+    "glyphScale": 1.85,
     "particleX": 0,
     "particleY": 0,
     "particleZ": 0,
@@ -22,7 +22,10 @@
     "tintR": 0,
     "tintG": 0,
     "tintB": 0,
-    "tintA": 0
+    "tintA": 0,
+    "pixelate": 0,
+    "brightness": 0,
+    "contrast": 0
   },
   "cave_spider": {
     "sizeX": 1.1,
@@ -37,7 +40,7 @@
     "markerScale": 1,
     "glyphX": 0,
     "glyphY": -0.6,
-    "glyphScale": 1,
+    "glyphScale": 2,
     "particleX": 0,
     "particleY": 0,
     "particleZ": 0,
@@ -47,7 +50,10 @@
     "tintR": 0,
     "tintG": 0,
     "tintB": 0,
-    "tintA": 0
+    "tintA": 0,
+    "pixelate": 0,
+    "brightness": 0,
+    "contrast": 0
   },
   "diseased_rat": {
     "sizeX": 0.92,
@@ -62,7 +68,7 @@
     "markerScale": 1,
     "glyphX": 0,
     "glyphY": -0.42,
-    "glyphScale": 1,
+    "glyphScale": 2.55,
     "particleX": 0,
     "particleY": 0,
     "particleZ": 0,
@@ -72,7 +78,10 @@
     "tintR": 0,
     "tintG": 0,
     "tintB": 0,
-    "tintA": 0
+    "tintA": 0,
+    "pixelate": 0,
+    "brightness": 0,
+    "contrast": 0
   },
   "feral_rat": {
     "sizeX": 1.05,
@@ -87,7 +96,7 @@
     "markerScale": 1,
     "glyphX": 0,
     "glyphY": -0.76,
-    "glyphScale": 1.8,
+    "glyphScale": 2.4,
     "particleX": 0,
     "particleY": -0.26,
     "particleZ": 0,
@@ -97,7 +106,10 @@
     "tintR": 184,
     "tintG": 178,
     "tintB": 174,
-    "tintA": 255
+    "tintA": 255,
+    "pixelate": 0,
+    "brightness": 0,
+    "contrast": 0
   },
   "goblin": {
     "sizeX": 1.05,
@@ -112,7 +124,7 @@
     "markerScale": 1,
     "glyphX": 0,
     "glyphY": -0.4,
-    "glyphScale": 1,
+    "glyphScale": 2.35,
     "particleX": 0,
     "particleY": 0,
     "particleZ": 0,
@@ -122,7 +134,10 @@
     "tintR": 0,
     "tintG": 0,
     "tintB": 0,
-    "tintA": 0
+    "tintA": 0,
+    "pixelate": 0,
+    "brightness": 0,
+    "contrast": 0
   },
   "goblin_mage": {
     "sizeX": 1.1,
@@ -137,7 +152,7 @@
     "markerScale": 1,
     "glyphX": 0,
     "glyphY": -0.56,
-    "glyphScale": 1,
+    "glyphScale": 2.35,
     "particleX": 0,
     "particleY": 0,
     "particleZ": 0,
@@ -147,7 +162,10 @@
     "tintR": 0,
     "tintG": 0,
     "tintB": 0,
-    "tintA": 0
+    "tintA": 0,
+    "pixelate": 0,
+    "brightness": 0,
+    "contrast": 0
   },
   "necromancer": {
     "sizeX": 1.05,
@@ -172,7 +190,10 @@
     "tintR": 0,
     "tintG": 0,
     "tintB": 0,
-    "tintA": 0
+    "tintA": 0,
+    "pixelate": 0,
+    "brightness": 0,
+    "contrast": 0
   },
   "skeleton": {
     "sizeX": 0.95,
@@ -197,7 +218,10 @@
     "tintR": 0,
     "tintG": 0,
     "tintB": 0,
-    "tintA": 0
+    "tintA": 0,
+    "pixelate": 0,
+    "brightness": 0,
+    "contrast": 0
   },
   "stone_amoeba": {
     "sizeX": 1.2,
@@ -211,8 +235,8 @@
     "markerXOffset": 0,
     "markerScale": 1,
     "glyphX": 0,
-    "glyphY": -0.44,
-    "glyphScale": 1,
+    "glyphY": -0.5,
+    "glyphScale": 2.45,
     "particleX": 0,
     "particleY": 0,
     "particleZ": 0,
@@ -222,7 +246,10 @@
     "tintR": 0,
     "tintG": 0,
     "tintB": 0,
-    "tintA": 0
+    "tintA": 0,
+    "pixelate": 0,
+    "brightness": 0,
+    "contrast": 0
   },
   "stone_golem": {
     "sizeX": 1.55,
@@ -247,7 +274,10 @@
     "tintR": 0,
     "tintG": 0,
     "tintB": 0,
-    "tintA": 0
+    "tintA": 0,
+    "pixelate": 0,
+    "brightness": 0,
+    "contrast": 0
   },
   "vampire_bat": {
     "sizeX": 1.12,
@@ -272,7 +302,10 @@
     "tintR": 0,
     "tintG": 0,
     "tintB": 0,
-    "tintA": 0
+    "tintA": 0,
+    "pixelate": 0,
+    "brightness": 0,
+    "contrast": 0
   },
   "venus_mantrap": {
     "sizeX": 1.2,
@@ -287,7 +320,7 @@
     "markerScale": 1,
     "glyphX": 0,
     "glyphY": -0.48,
-    "glyphScale": 1,
+    "glyphScale": 1.95,
     "particleX": 0,
     "particleY": 0,
     "particleZ": 0,
@@ -297,7 +330,10 @@
     "tintR": 0,
     "tintG": 0,
     "tintB": 0,
-    "tintA": 0
+    "tintA": 0,
+    "pixelate": 0,
+    "brightness": 0,
+    "contrast": 0
   },
   "will_o_wisp": {
     "sizeX": 0.65,
@@ -322,6 +358,9 @@
     "tintR": 0,
     "tintG": 0,
     "tintB": 0,
-    "tintA": 0
+    "tintA": 0,
+    "pixelate": 0,
+    "brightness": 0,
+    "contrast": 0
   }
 }

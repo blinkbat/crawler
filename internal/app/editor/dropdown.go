@@ -69,6 +69,14 @@ const (
 	dropdownMaxRows  = 9 // longer lists scroll rather than running off-screen
 	dropdownMinWidth = float32(170)
 	dropdownPad      = float32(6)
+	// dropdownMarkerW is the width of the left gutter reserved for a row's
+	// hide/show eye or ✓ toggle marker (0 when no row in the list has one).
+	// Referenced by the layout (reservation), the click hit-test, and the draw.
+	dropdownMarkerW = float32(16)
+	// dropdownEyeGutterSlop widens the eye's click hit-zone a few px past the
+	// marker gutter so a click just right of the glyph still toggles visibility
+	// rather than selecting the row.
+	dropdownEyeGutterSlop = float32(4)
 )
 
 // dropdownArrowSuffix is the "opens a picker" affordance appended to a button's
@@ -385,7 +393,7 @@ func computeDropdownLayout(s *State, entries []dropdownEntry) dropdownLayout {
 	markerW := float32(0)
 	for _, e := range entries {
 		if e.active != nil || e.toggle != nil {
-			markerW = 16
+			markerW = dropdownMarkerW
 			break
 		}
 	}
@@ -487,7 +495,7 @@ func updateDropdown(s *State) bool {
 				// A click on the eye gutter toggles that row's visibility and keeps
 				// the list open (the layer picker's hide/show); the rest selects.
 				if lay.markerW > 0 && idx >= 0 && idx < len(entries) &&
-					entries[idx].toggle != nil && mp.X <= rr.X+lay.markerW+4 {
+					entries[idx].toggle != nil && mp.X <= rr.X+lay.markerW+dropdownEyeGutterSlop {
 					entries[idx].toggle(s)
 					return true
 				}
@@ -593,9 +601,8 @@ func drawDropdown(s *State, font rl.Font, theme render.Theme) {
 // just below the dropdown panel (clamped to the screen). Keeps the dropdown rows
 // compact while still surfacing "what does this do" for every command.
 func drawMenuDesc(font rl.Font, theme render.Theme, panel rl.Rectangle, desc string) {
-	const pad = float32(6)
 	tw := render.MeasureRichText(font, desc, editorFontHint, 1).X
-	w := tw + 2*pad
+	w := tw + 2*dropdownPad
 	sw, _ := render.ScreenSizeF()
 	x := panel.X
 	if x+w > sw-4 {
@@ -605,7 +612,7 @@ func drawMenuDesc(font rl.Font, theme render.Theme, panel rl.Rectangle, desc str
 		x = 4
 	}
 	y := panel.Y + panel.Height + 12 // gap below the panel so the caption reads as separate
-	h := editorFontHint + 2*pad
+	h := editorFontHint + 2*dropdownPad
 	render.DrawCard(int32(x), int32(y), int32(w), int32(h), theme.SurfacePrimary, theme.BorderSoft, theme.BorderSoft)
-	render.DrawRichText(font, desc, rl.NewVector2(x+pad, y+pad), editorFontHint, 1, theme.TextPrimary)
+	render.DrawRichText(font, desc, rl.NewVector2(x+dropdownPad, y+dropdownPad), editorFontHint, 1, theme.TextPrimary)
 }

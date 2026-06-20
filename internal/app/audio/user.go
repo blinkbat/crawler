@@ -275,11 +275,23 @@ func playThroughRing(wavBytes []byte) {
 		// don't store or play it.
 		return
 	}
-	// replaceSound unloads the slot we're about to overwrite — its raylib
-	// buffer was allocated by a prior preview and would leak otherwise.
-	replaceSound(&previewRing[previewCursor], snd)
+	// Pick a slot whose prior clip has finished before reusing it: replaceSound
+	// unloads (frees) the slot's raylib buffer, and unloading one that's still
+	// streaming is a use-after-free on raylib's C side. Scan from the cursor for
+	// the first free (or empty) slot. Only when EVERY slot is still in flight —
+	// more overlapping previews than the ring holds — do we fall back to the
+	// oldest (cursor) and accept the cutoff.
+	slot := previewCursor
+	for i := 0; i < previewRingSize; i++ {
+		idx := (previewCursor + i) % previewRingSize
+		if s := previewRing[idx]; s.Stream.Buffer == nil || !rl.IsSoundPlaying(s) {
+			slot = idx
+			break
+		}
+	}
+	replaceSound(&previewRing[slot], snd)
 	rl.PlaySound(snd)
-	previewCursor = (previewCursor + 1) % previewRingSize
+	previewCursor = (slot + 1) % previewRingSize
 }
 
 // unloadPreviewRing releases every preview slot. Called by Close so the

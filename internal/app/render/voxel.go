@@ -137,7 +137,7 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 		fdx, fdz := float32(dx), float32(dz)
 		// CPU backface cull — a vertical face is only visible from its outward
 		// side (same test as drawCliffFaces).
-		if (camPos.X-(cx+fdx*half))*fdx+(camPos.Z-(cz+fdz*half))*fdz <= 0 {
+		if faceBackfaceCulled(camPos, cx, cz, fdx, fdz, half) {
 			continue
 		}
 		nx, nz := x+dx, z+dz
@@ -178,10 +178,7 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 		if solid[L-1] {
 			continue // resting on the cube beneath — not a floating bottom
 		}
-		rl.DrawModelEx(assets.underModel,
-			rl.NewVector3(cx, core.ElevationWorldY(L-1), cz),
-			rl.NewVector3(0, 1, 0), 0,
-			rl.NewVector3(1, 1, 1), rl.White)
+		drawTileCube(assets.underModel, cx, core.ElevationWorldY(L-1), cz, 0)
 	}
 	return drawn
 }
