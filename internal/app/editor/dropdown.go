@@ -189,20 +189,22 @@ func applyFaceSkin(s *State, skin byte) {
 	s.dirty = true
 }
 
-// layerSelectEntries builds the top-bar layer picker: one row per editor layer,
-// label = the layer name, selecting sets the active layer. Each row carries a
-// hide/show eye in the left gutter (clicking it toggles that layer's visibility
-// and keeps the list open), so the per-layer visibility the tab strip used to
-// surface lives here now.
+// layerSelectEntries builds the top-bar layer picker: one row per SELECTABLE
+// editor layer (LayerWalls/"Faces" is excluded — faces are set via the
+// right-click "Set wall faces…" modal, not a paint layer), label = the layer
+// name, selecting sets the active layer. Each row carries a hide/show eye in
+// the left gutter (clicking it toggles that layer's visibility and keeps the
+// list open), so the per-layer visibility the tab strip used to surface lives
+// here now.
 func layerSelectEntries(s *State) []dropdownEntry {
-	out := make([]dropdownEntry, 0, layerCount)
-	for i := 0; i < layerCount; i++ {
-		i := i
+	out := make([]dropdownEntry, 0, len(selectableLayers))
+	for _, l := range selectableLayers {
+		l := l
 		out = append(out, dropdownEntry{
-			label:    layerName(Layer(i)),
-			apply:    func(s *State) { s.layer = Layer(i) },
-			toggle:   func(s *State) { toggleLayerVisibility(s, i, false) },
-			toggleOn: func(s *State) bool { return !s.layerHidden[i] },
+			label:    layerName(l),
+			apply:    func(s *State) { s.layer = l },
+			toggle:   func(s *State) { toggleLayerVisibility(s, int(l), false) },
+			toggleOn: func(s *State) bool { return !s.layerHidden[l] },
 		})
 	}
 	return out

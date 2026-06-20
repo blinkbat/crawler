@@ -17,27 +17,31 @@ const (
 	turnPanelW = int32(220)
 )
 
+// turnForecastMax is how many upcoming turns the panel projects — the
+// lookahead depth. Shared by the buffer capacity and the forecast call so
+// the two can't drift.
+const turnForecastMax = 10
+
 // turnForecastBuf is reused across frames so the per-frame forecast
 // doesn't allocate. CacheTurnForecastForFrame populates it once at the
 // top of the battle HUD pass; TurnPanelBottomY and drawTurnPanel then
 // read the same slice, eliminating the duplicate TurnForecast call
 // (action-log layout used to invoke it via TurnPanelBottomY, and the
 // turn panel itself reinvoked it on the very next line).
-var turnForecastBuf = make([]core.TurnEntry, 0, 7)
+var turnForecastBuf = make([]core.TurnEntry, 0, turnForecastMax)
 
 // CacheTurnForecastForFrame computes the turn forecast once and stores
 // it for downstream HUD consumers. Called from DrawOverlay's battle
 // branch before either drawBattleHUD or drawTurnPanel runs.
 func CacheTurnForecastForFrame(g *core.GameState) {
-	turnForecastBuf = core.TurnForecastInto(g, turnForecastBuf, 7)
+	turnForecastBuf = core.TurnForecastInto(g, turnForecastBuf, turnForecastMax)
 }
 
-// turnPanelTopPad / turnPanelBottomPad bracket the rows inside the
-// panel. The old header band ("TURN ORDER" + underline) was dropped —
-// the class-tinted rows already name themselves; the title was just
-// tautological chrome.
+// turnPanelHeaderH is the title band ("Turn Order" + underline) atop the
+// rows. turnPanelTopPad / turnPanelBottomPad bracket the rows beneath it.
 const (
-	turnPanelTopPad    = int32(12)
+	turnPanelHeaderH   = int32(26)
+	turnPanelTopPad    = int32(10)
 	turnPanelBottomPad = int32(10)
 	turnPanelRowH      = int32(28)
 )
@@ -70,7 +74,7 @@ const (
 // the draw (drawTurnPanel) and the docked action-log's bottom-edge read
 // (TurnPanelBottomY) so the two can't drift on the row height / pad math.
 func turnPanelHeight(n int) int32 {
-	return turnPanelTopPad + int32(n)*turnPanelRowH + turnPanelBottomPad
+	return turnPanelHeaderH + turnPanelTopPad + int32(n)*turnPanelRowH + turnPanelBottomPad
 }
 
 // TurnPanelBottomY returns the Y screen coordinate of the bottom
@@ -104,6 +108,22 @@ func drawTurnPanel(g *core.GameState, assets Resources) {
 
 	drawPanelCard(x, y, w, h)
 
+	// Title band — "Turn Order" over a gilt hairline so the forecast names
+	// itself rather than relying on the reader to infer it from the rows.
+	drawTextWithShadow(assets.hudFont, "Turn Order", float32(x+turnRowInset), float32(y+5), FontSmall, textHint)
+	drawGiltRule(x+turnRowInset, y+turnPanelHeaderH-4, w-2*turnRowInset, 1, 0.4)
+
+	rowsTop := y + turnPanelHeaderH + turnPanelTopPad
+
+	// Which actor (if any) the player is currently aiming at, so the targeted
+	// enemy / ally lights up here too — not just on the roster / in the world.
+	targetEnemy, targetAlly := -1, -1
+	if targetingEnemy(g) {
+		targetEnemy = core.SelectedEnemySlot(g)
+	} else if targetingAlly(g) {
+		targetAlly = g.Battle.PartyTarget
+	}
+
 	// Sequence thread — a faint vertical line stitched down through the row
 	// markers (under them), tying the forecast into one strand the way a
 	// lineage chart threads its entries. Static chrome: it runs from the
@@ -112,14 +132,14 @@ func drawTurnPanel(g *core.GameState, assets Resources) {
 	// to thread).
 	if len(turns) > 1 {
 		threadX := x + turnRowInset + turnRowSpineX + turnRowSpineW/2 // center of the per-row tick column
-		threadTop := y + turnPanelTopPad + rowH/2
+		threadTop := rowsTop + rowH/2
 		threadH := int32(len(turns)-1) * rowH
 		rl.DrawRectangle(threadX, threadTop, 1, threadH, fadeColor(inkDim, 0.32))
 		drawDiamondPip(float32(threadX), float32(threadTop+threadH), 2, fadeColor(inkDim, 0.5))
 	}
 
 	for i, turn := range turns {
-		rowY := y + turnPanelTopPad + int32(i)*rowH
+		rowY := rowsTop + int32(i)*rowH
 		col := turnEntryColor(turn)
 
 		rowX := x + turnRowInset
@@ -134,6 +154,13 @@ func drawTurnPanel(g *core.GameState, assets Resources) {
 			drawArrowMarker(rl.NewVector2(cx-2, cy), 8, 0, 6, col)
 		} else {
 			drawClassRail(rowX+turnRowSpineX, rowY+4, turnRowSpineW, rowInnerH-8, colorWithAlpha(col, turnRowSpineAlpha))
+		}
+
+		// Aim cue: the actor the player is currently targeting gets a bright
+		// gilt ring + a right-edge marker, spotlighting them in the forecast.
+		if (turn.Enemy && turn.Index == targetEnemy) || (!turn.Enemy && turn.Index == targetAlly) {
+			drawSmallPanelOutline(rowX, rowY, rowW, rowInnerH, fadeColor(giltBright, pulseHalo()))
+			drawDiamondPip(float32(rowX+rowW)-7, float32(rowY)+float32(rowInnerH)/2, 3, giltBright)
 		}
 
 		labelX := rowX + turnRowLabelX

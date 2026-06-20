@@ -113,11 +113,11 @@ Document this as a known limitation; don't paper over it.
 ### Sizes — exactly five
 | Token | Pixels | Use |
 | --- | --- | --- |
-| **`FontTiny`** | 13 | Footers, axis tick labels, status pill counters, debug overlay subtleties |
-| **`FontSmall`** | 16 | List rows, bar value text, body copy in panels, modal body text |
-| **`FontBody`** | 20 | Panel titles, party-card name, action menu rows, level-up stat names |
-| **`FontHeading`** | 26 | Modal headers (e.g. "PACK AT (3, 7)", "EDITOR MENU"), pause menu rows |
-| **`FontTitle`** | 36 | Battle splash, victory / loss banner, title-screen options |
+| **`FontTiny`** | 17 | Footers, axis tick labels, status pill counters, debug overlay subtleties |
+| **`FontSmall`** | 21 | List rows, bar value text, body copy in panels, modal body text |
+| **`FontBody`** | 26 | Panel titles, party-card name, action menu rows, level-up stat names |
+| **`FontHeading`** | 36 | Modal headers (e.g. "PACK AT (3, 7)", "EDITOR MENU"), pause menu rows |
+| **`FontTitle`** | 48 | Battle splash, victory / loss banner, title-screen options |
 
 That's it. **No other sizes are permitted in rendered text.** When you
 need a "label between body and heading," choose Body. The atlas is
@@ -174,6 +174,53 @@ Every text call routes through `drawTextWithShadow` (1px offset,
 two `rl.DrawTextEx` calls. The shadow is non-negotiable: glass is
 translucent; without a shadow, parchment text disappears over a
 lit-floor tile.
+
+## Spacing
+
+> The gaps. One source for "how far is content from the edge / from a
+> heading / between rows / above the footer," so every surface breathes the
+> same instead of each draw site hand-tuning an offset (which is exactly how
+> the roster name overlapped its condition line, the battle submenus packed
+> their rows edge-to-edge, and three footers drifted to `-30 / -28 / -26`).
+
+### Tokens (`render/theme.go`)
+| Token | Value | Meaning |
+| --- | --- | --- |
+| **`hudContentInsetX`** | 22 | Window padding — edge of a card/panel to its content, both sides. The canonical inset; right edges mirror it. |
+| **`uiGapAfterTitle`** | 12 | Breathing space below a heading's **text** before its body begins (added on top of the heading's line height — see helper). |
+| **`uiRowH`** | 32 | Height of one interactive row plate. |
+| **`uiRowGap`** | 10 | Vertical gap between stacked row plates. |
+| **`uiRowPitch`** | 42 | Row center-to-center pitch = `uiRowH + uiRowGap`. Stacked lists step by this. |
+| **`uiFooterMargin`** | 14 | Visual gap below a footer hint's glyphs/text to the card's bottom edge. |
+
+### Helpers (`render/layout.go`) — use these, don't hand-roll offsets
+- **`bodyBelowHeading(headingTop, fontSize) int32`** — the Y where body
+  content starts under a heading. Returns `headingTop + lineHeight(fontSize)
+  + uiGapAfterTitle`, so the gap is correct whether the heading is
+  `FontHeading` or `FontSmall`. A bare constant can't track the font height —
+  that's what made the roster name and the action-menu heading graze their
+  bodies.
+- **`footerBaselineY(cardBottom, fontSize) int32`** — the Y (glyph/text TOP)
+  for a footer hint sitting `uiFooterMargin` above the card's bottom edge.
+  Subtracts the font's line height so a `FontTiny` centered footer and a
+  `FontSmall` left/picker footer keep the **same** visual gap off the bottom.
+  The `drawModalFooterGlyphs` / `…Left` wrappers and the battle action-menu
+  footer all route through it.
+
+### Rules
+- A card's content rect insets by `hudContentInsetX` on the left **and** right
+  (symmetric margins). Row plates that should reach the edge stretch to
+  `panelX + width - hudContentInsetX`, not a fixed plate width — a fixed width
+  leaves a dead gap when rows start at different x (the icon-gutter main menu
+  vs the flush-left submenu list).
+- Content under a heading starts at `bodyBelowHeading(...)`. Never a bare
+  `headingY + 34`.
+- Stacked rows step by `uiRowPitch`. Never a pitch equal to the row height
+  (plates touch).
+- Footers sit at `footerBaselineY(...)`. Never a per-surface bottom offset.
+- A fixed-height panel that hosts a variable-length list (the action menu's
+  skill/item submenus) must be tall enough for the realistic max, or scroll.
+  When you bound coverage, say so — don't silently clip.
 
 ## Surface composition
 

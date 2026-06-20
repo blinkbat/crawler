@@ -73,6 +73,20 @@ var faceSkinCharSet = func() (set [256]bool) {
 // recognized in one check but not another.
 func IsFaceSkinChar(c byte) bool { return faceSkinCharSet[c] }
 
+// FaceSkinName returns the display name for a cliff-face skin char — the
+// inverse of the FaceSkins roster. The blank/default skin (TileOpen, the
+// PropLevelAuto sentinel, or anything unrecognized) reads as "Rock", matching
+// FaceSkinAt's default. One source so the editor's face UI labels a skin the
+// same way the picker lists it.
+func FaceSkinName(c byte) string {
+	for _, s := range FaceSkins {
+		if s.Char == c {
+			return s.Name
+		}
+	}
+	return "Rock"
+}
+
 // Ceiling layer. Parallel grid to walls; chars share the wall convention
 // since both layers describe the same "solid block?" yes/no question (a
 // wall is a solid floor-to-ceiling column; a ceiling is a solid slab
@@ -1544,7 +1558,7 @@ var tileLabelTable = map[TileLayer]map[byte]string{
 		TileTorch:             "Wall Torch",
 		TilePropExoticFlower:  "Exotic Flower",
 		TilePropTallFern:      "Tall Fern",
-		TilePropGrassTuft:     "Tall Grass",
+		TilePropGrassTuft:     "Grass Tuft",
 	},
 }
 

@@ -423,6 +423,32 @@ func layerName(l Layer) string {
 	return layerDisplayNames[l]
 }
 
+// selectableLayers are the layers the author can make active (Tab-cycle,
+// Alt+N, the top-bar layer picker). LayerWalls — the cliff-FACE skin grid,
+// historically exposed as the "Faces" layer — is intentionally absent: faces
+// are no longer a paintable layer. A top-down editor can't paint a vertical
+// face, so a tile's wall faces are now a per-tile property set from the
+// right-click context menu ("Set wall faces…" → the wall-faces modal). The
+// Walls grid itself still exists (it's a map-format grid layer, and the
+// face-skin tint overlay reads it) — it just isn't a brush layer anymore.
+var selectableLayers = []Layer{LayerFloor, LayerDecor, LayerProps, LayerCeiling, LayerElevation, LayerEntities}
+
+// cycleSelectableLayer returns the next (dir +1) / previous (dir -1) selectable
+// layer from cur, wrapping. Replaces the bare core.WrapEnum over layerCount so
+// the Tab cycle skips the now-unselectable LayerWalls.
+func cycleSelectableLayer(cur Layer, dir int) Layer {
+	n := len(selectableLayers)
+	idx := 0
+	for i, l := range selectableLayers {
+		if l == cur {
+			idx = i
+			break
+		}
+	}
+	idx = ((idx+dir)%n + n) % n
+	return selectableLayers[idx]
+}
+
 type focusField int
 
 const (
@@ -589,6 +615,13 @@ const (
 	// shadowed, animated) so the author can spot-check the whole object set at a
 	// glance without stamping them onto a map. Pure preview. See objectview.go.
 	modalObjectView
+	// modalWallFaces is the per-tile cliff-face skin editor, opened from the
+	// right-click context menu's "Set wall faces…" row (faces are a per-tile
+	// property — the top-down editor can't paint a vertical face). One button-
+	// stack row per face (base + N/E/S/W); each opens the shared face-skin
+	// dropdown for that face. Targets the tile at wallFaceX/wallFaceZ. See
+	// wallfaces.go.
+	modalWallFaces
 	// modalCount is the count sentinel for the modalKind enum — used by
 	// the modalHandlers init assert in draw.go to walk every legal
 	// value and confirm the dispatch table is complete. Keep this row
@@ -993,9 +1026,12 @@ type State struct {
 	// See dropdown.go.
 	dropdown dropdownState
 	// faceTarget* remember which tile + direction the open ddFaceSkin dropdown is
-	// editing (set when a "Set … face" context row opens it). faceTargetDir is a
+	// editing (set when a wall-faces modal row opens it). faceTargetDir is a
 	// core direction (0=N..3=W), or -1 for "all faces" (the tile's base skin).
 	faceTargetX, faceTargetZ, faceTargetDir int
+	// wallFace{X,Z} is the tile the open modalWallFaces edits. Set by
+	// openWallFacesModal; read by the modal's draw/update. See wallfaces.go.
+	wallFaceX, wallFaceZ int
 
 	rect layoutRect
 }
@@ -1122,7 +1158,7 @@ func freshState(a core.AreaDefinition) State {
 	return State{
 		area:                  a,
 		baseline:              core.CloneArea(a),
-		layer:                 LayerWalls,
+		layer:                 LayerFloor, // Walls/"Faces" is no longer a selectable paint layer (see selectableLayers)
 		editLevel:             core.ElevationBaseline,
 		topLevel:              core.ElevationBaseline,
 		bottomLevel:           core.ElevationBaseline,

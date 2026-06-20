@@ -2216,7 +2216,11 @@ func damageEnemy(g *core.GameState, slot, rawDamage, quality int, tag core.Skill
 	// unarmored grunts still feels the same. The clamp-at-0 inside
 	// mitigateDamage keeps a future caller from accidentally healing an
 	// enemy by passing a signed stat delta.
-	damage := mitigateDamage(rawDamage, tag, enemy.Armor, core.EnemyInfoFor(*enemy).MDef)
+	// Effective Armor + MDef WITH the enemy's active debuffs folded in (the
+	// enemy-side mirror of EffectiveDefenses) — so an armor/MDef debuff actually
+	// softens mitigation instead of being summed into Debuffs and ignored here.
+	effArmor, effMDef := core.EffectiveEnemyDefenses(enemy)
+	damage := mitigateDamage(rawDamage, tag, effArmor, effMDef)
 	// Tally the acting member's physical output this turn for Warrior
 	// Bloodthirst. finishActorTurn converts it to lifesteal (only when the
 	// finishing actor is a party member with the node) and zeroes it. Off-turn

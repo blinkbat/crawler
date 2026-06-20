@@ -218,17 +218,22 @@ func splitWords(s string) []string {
 	return out
 }
 
-// modalFooterTextOffset is the gap from a modal card's bottom edge up to
-// the footer-hint baseline. Sits inside overlayFooterReserve (the
-// reserved band) with a few pixels below for descenders. Named so the
-// chest / level-up / panels overlays don't each repeat the bare -22.
-const modalFooterTextOffset = float32(22)
+// bodyBelowHeading returns the Y where body content should begin beneath a
+// heading whose TEXT TOP sits at headingTop, rendered at fontSize. It adds the
+// heading's own line height (≈ the font's pixel size on this bake) plus the
+// shared uiGapAfterTitle, so every "content under a header" surface keeps one
+// rhythm regardless of the heading's font size. See UI_STANDARDS.md "Spacing".
+func bodyBelowHeading(headingTop int32, fontSize float32) int32 {
+	return headingTop + int32(fontSize) + uiGapAfterTitle
+}
 
-// pickerFooterTextOffset is the gap from a sub-modal picker card's bottom
-// edge up to its LEFT-aligned footer-hint baseline. Distinct from
-// modalFooterTextOffset (22) because the picker hints render at FontSmall
-// (taller than the centered footer's FontTiny), so they sit a few pixels
-// higher to keep the larger glyphs clear of the card's bottom edge — the
-// difference is the font size, not drift, hence its own named token.
-// Replaces the bare `-26` the four picker sub-modals each open-coded.
-const pickerFooterTextOffset = float32(26)
+// footerBaselineY returns the Y (glyph/text TOP) for a footer hint that sits
+// uiFooterMargin above the bottom edge of a card at cardBottom, rendered at
+// fontSize. Because it subtracts the font's line height, every footer keeps
+// the SAME visual gap off the bottom edge whether it draws at FontTiny
+// (centered modal footer) or FontSmall (left-aligned picker / action-menu
+// footer) — the per-surface `-30 / -28 / -26` offsets that drifted before all
+// collapse into this one rule. See UI_STANDARDS.md "Spacing".
+func footerBaselineY(cardBottom int32, fontSize float32) int32 {
+	return cardBottom - int32(fontSize) - uiFooterMargin
+}

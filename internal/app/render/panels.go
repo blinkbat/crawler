@@ -143,16 +143,16 @@ func init() {
 	}
 }
 
-// DrawPanelsOverlay paints the game-panels modal — the six-tab overlay
+// drawPanelsBody paints the game-panels modal — the six-tab overlay
 // (Character / Equipment / Items / Skills / Quests / Map) raised by the
-// gamepad middle button / keyboard I. Routes by
-// g.PanelsTab to the per-tab body drawer; the tab strip + footer hint
-// are drawn once around all of them so the chrome stays consistent.
-// No-op when the overlay isn't open.
-func DrawPanelsOverlay(g *core.GameState, assets Resources) {
-	if !g.PanelsOpen {
-		return
-	}
+// gamepad middle button / keyboard I. Routes by g.PanelsTab to the per-tab
+// body drawer; the tab strip + footer hint are drawn once around all of them
+// so the chrome stays consistent.
+//
+// No open-gate: it's invoked only through the menu-fade drawer (menuFadeDrawer
+// returns it while g.PanelsOpen, and keeps calling it through a close-fade so
+// the Tome fades out instead of popping). The gate lives in menuFadeDrawer.
+func drawPanelsBody(g *core.GameState, assets Resources) {
 	font := assets.Font()
 	// Panels overlay skips drawModalScaffold's heading band — the tab
 	// strip IS the heading. We reuse the veil + centered card, sized
@@ -217,8 +217,8 @@ func DrawPanelsOverlay(g *core.GameState, assets Resources) {
 	drawPipCappedRule(cardX+24, stripRuleY, cardW-48, stripRuleCol, 1.8, stripRuleCol)
 
 	bodyY := infoY + panelsInfoStripH + 6
-	bodyRect := rl.NewRectangle(float32(cardX+22), float32(bodyY),
-		float32(cardW-44), float32(cardY+cardH-26-bodyY-overlayFooterReserve))
+	bodyRect := rl.NewRectangle(float32(cardX+hudContentInsetX), float32(bodyY),
+		float32(cardW-2*hudContentInsetX), float32(cardY+cardH-26-bodyY-overlayFooterReserve))
 
 	if int(g.PanelsTab) >= 0 && int(g.PanelsTab) < len(panelTabDrawers) {
 		panelTabDrawers[g.PanelsTab](g, assets, bodyRect)
@@ -501,7 +501,7 @@ func plural(n int) string {
 // The tab works like the Items menu — navigate slots, Confirm to open
 // the item picker — so there's no inventory strip or drag ghost to size
 // anymore; just the slot rows.
-const equipSlotRowHeight = float32(56)
+const equipSlotRowHeight = float32(66)
 
 // slotIconForType returns the icon-draw function for an EquipSlotIndex
 // — the per-slot row variant.
@@ -1332,8 +1332,8 @@ func drawPanelsSkills(g *core.GameState, assets Resources, body rl.Rectangle) {
 
 		// Call-to-action on the cursored member: Confirm opens the trees.
 		if highlight {
-			hintY := cols[i].Y + cols[i].Height - 30
-			DrawHintBarLeft(font, []HintSeg{Hint("Open skill trees", GlyphA)}, innerX, hintY, FontSmall)
+			hintY := cols[i].Y + cols[i].Height - 46
+			DrawHintBar(font, []HintSeg{Hint("Open skill trees", GlyphA)}, cols[i].X+cols[i].Width/2, hintY, FontSmall)
 		}
 	}
 }
@@ -1515,10 +1515,10 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 	// Compass rose, inset into the upper-right of the map (no longer hugging
 	// the frame) and enlarged so the 8-point rose reads as the cartography
 	// centerpiece. A faint dark backing disc keeps it legible over terrain.
-	crX := body.X + body.Width - 64
-	crY := body.Y + 30
-	rl.DrawCircleV(rl.NewVector2(crX, crY), 28, fadeColor(shadowHeavy, 0.34))
-	drawCompassRose(crX, crY, 42, font)
+	crX := body.X + body.Width - 66
+	crY := body.Y + 50
+	rl.DrawCircleV(rl.NewVector2(crX, crY), 31, fadeColor(shadowHeavy, 0.34))
+	drawCompassRose(crX, crY, 48, font)
 
 	// Map footer — zoom indicator only (the area name already shows in the
 	// overlay's top info strip; showing it here too was redundant), then the
@@ -1527,7 +1527,7 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 	footer := panelsMapFooterText(zoom)
 	drawTextWithShadow(font, footer, body.X, footerY, FontSmall, textHint)
 	footerW := panelsMapFooterMeasureCache.measure(font, footer, FontSmall, canonicalSpacing(FontSmall)).X
-	DrawHintBarLeft(font, []HintSeg{Hint("Pan", GlyphLeftRight, GlyphUpDown), Hint("Zoom", GlyphA)}, body.X+footerW+hintSegGap, footerY, FontSmall)
+	DrawHintBarLeft(font, []HintSeg{Hint("Pan", GlyphLeftRight), Hint("Zoom", GlyphUpDown)}, body.X+footerW+hintSegGap, footerY, FontSmall)
 }
 
 // drawCompassRose paints an 8-point compass rose at (cx, cy) within
@@ -1536,15 +1536,39 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 // the north tip. The classic D&D treasure-map crest.
 func drawCompassRose(cx, cy float32, d float32, font rl.Font) {
 	outerR := d / 2
-	innerR := outerR * 0.35
-	// Outer wood ring — a circle with a slightly-inset glass
-	// background so the rose sits inside its own medallion.
-	rl.DrawCircleV(rl.NewVector2(cx, cy), outerR+1, woodDark)
-	rl.DrawCircleV(rl.NewVector2(cx, cy), outerR, glassDeep)
+	innerR := outerR * 0.30
+	center := rl.NewVector2(cx, cy)
+	// Medallion: dark seat, recessed glass face, and a beveled rim drawn as
+	// two concentric gilt ring-lines so the rose sits in its own brass bezel.
+	rl.DrawCircleV(center, outerR+2, woodDark)
+	rl.DrawCircleV(center, outerR, glassDeep)
 	rl.DrawCircleLines(int32(cx), int32(cy), outerR, woodAccent)
+	rl.DrawCircleLines(int32(cx), int32(cy), outerR*0.72, fadeColor(woodAccent, 0.5))
 
-	// Four long cardinal points (N E S W). Each is a kite drawn as
-	// two triangles from the centre to the tip.
+	// Each point is split along its axis into a LIT half (toward bright gilt)
+	// and a SHADOW half (dimmer), so the star reads as a faceted, beveled brass
+	// rose catching a single light rather than a flat kite.
+	diagLit := fadeColor(woodAccent, 0.95)
+	diagShadow := fadeColor(woodDark, 0.9)
+
+	// Four short diagonal points (NE SE SW NW) first, under the cardinals.
+	diags := [4]struct{ ax, ay, px, py float32 }{
+		{ax: sqrt2Inv, ay: -sqrt2Inv, px: sqrt2Inv, py: sqrt2Inv},
+		{ax: sqrt2Inv, ay: sqrt2Inv, px: -sqrt2Inv, py: sqrt2Inv},
+		{ax: -sqrt2Inv, ay: sqrt2Inv, px: -sqrt2Inv, py: -sqrt2Inv},
+		{ax: -sqrt2Inv, ay: -sqrt2Inv, px: sqrt2Inv, py: -sqrt2Inv},
+	}
+	diagHalfW := outerR * 0.11
+	diagReach := outerR * 0.62
+	for _, c := range diags {
+		tip := rl.NewVector2(cx+c.ax*diagReach, cy+c.ay*diagReach)
+		leftBase := rl.NewVector2(cx+c.px*diagHalfW, cy+c.py*diagHalfW)
+		rightBase := rl.NewVector2(cx-c.px*diagHalfW, cy-c.py*diagHalfW)
+		drawTriangleCCW(center, tip, leftBase, diagLit)
+		drawTriangleCCW(center, rightBase, tip, diagShadow)
+	}
+
+	// Four long cardinal points (N E S W) — North fully bright (heraldic).
 	cardinals := [4]struct {
 		ax, ay, px, py float32
 	}{
@@ -1553,38 +1577,24 @@ func drawCompassRose(cx, cy float32, d float32, font rl.Font) {
 		{ax: 0, ay: 1, px: -1, py: 0},  // S
 		{ax: -1, ay: 0, px: 0, py: -1}, // W
 	}
-	pointHalfW := outerR * 0.18
+	pointHalfW := outerR * 0.17
 	for i, c := range cardinals {
-		tip := rl.NewVector2(cx+c.ax*outerR*0.95, cy+c.ay*outerR*0.95)
+		tip := rl.NewVector2(cx+c.ax*outerR*0.96, cy+c.ay*outerR*0.96)
 		leftBase := rl.NewVector2(cx+c.px*pointHalfW, cy+c.py*pointHalfW)
 		rightBase := rl.NewVector2(cx-c.px*pointHalfW, cy-c.py*pointHalfW)
-		col := giltDim
+		hi := fadeColor(giltBright, 0.82)
 		if i == 0 {
-			// North gets the bright point — the heraldic convention.
-			col = giltBright
+			hi = giltBright
 		}
-		drawTriangleCCW(rl.NewVector2(cx, cy), tip, leftBase, col)
-		drawTriangleCCW(rl.NewVector2(cx, cy), rightBase, tip, col)
+		lo := fadeColor(giltDim, 0.9)
+		drawTriangleCCW(center, tip, leftBase, hi)
+		drawTriangleCCW(center, rightBase, tip, lo)
 	}
-	// Four short diagonal points (NE SE SW NW), in soft wood tone.
-	diags := [4]struct{ ax, ay, px, py float32 }{
-		{ax: sqrt2Inv, ay: -sqrt2Inv, px: sqrt2Inv, py: sqrt2Inv},
-		{ax: sqrt2Inv, ay: sqrt2Inv, px: -sqrt2Inv, py: sqrt2Inv},
-		{ax: -sqrt2Inv, ay: sqrt2Inv, px: -sqrt2Inv, py: -sqrt2Inv},
-		{ax: -sqrt2Inv, ay: -sqrt2Inv, px: sqrt2Inv, py: -sqrt2Inv},
-	}
-	diagHalfW := outerR * 0.12
-	diagReach := outerR * 0.65
-	for _, c := range diags {
-		tip := rl.NewVector2(cx+c.ax*diagReach, cy+c.ay*diagReach)
-		leftBase := rl.NewVector2(cx+c.px*diagHalfW, cy+c.py*diagHalfW)
-		rightBase := rl.NewVector2(cx-c.px*diagHalfW, cy-c.py*diagHalfW)
-		drawTriangleCCW(rl.NewVector2(cx, cy), tip, leftBase, woodAccent)
-		drawTriangleCCW(rl.NewVector2(cx, cy), rightBase, tip, woodAccent)
-	}
-	// Centre disc + bright pip.
-	rl.DrawCircleV(rl.NewVector2(cx, cy), innerR, woodAccent)
-	rl.DrawCircleV(rl.NewVector2(cx, cy), innerR*0.5, giltBright)
+
+	// Centre hub — a socketed gilt boss (dark seat, wood ring, bright pip).
+	rl.DrawCircleV(center, innerR+1.5, woodDark)
+	rl.DrawCircleV(center, innerR, woodAccent)
+	rl.DrawCircleV(center, innerR*0.55, giltBright)
 	// "N" letter just above the north point. Measured through the shared
 	// measure cache so the constant glyph isn't re-measured (a cgo call) every
 	// Map-tab frame.

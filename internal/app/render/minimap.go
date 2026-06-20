@@ -19,7 +19,7 @@ const (
 	minimapCell      = int32(12)
 	minimapViewCells = int32(17) // odd so the player sits dead-center; wider window shows more surrounding area
 	minimapHeader    = int32(26)
-	minimapFooter    = int32(28) // time-of-day strip beneath the grid
+	minimapFooter    = int32(52) // time-of-day strip beneath the grid (label line + gap + bar + cursor pips)
 	minimapPanelW    = minimapViewCells*minimapCell + 16
 	minimapPanelH    = minimapViewCells*minimapCell + 16 + minimapHeader + minimapFooter
 )
@@ -61,7 +61,7 @@ func drawMinimap(m *core.AreaDefinition, g *core.GameState, assets Resources) {
 
 	gridX := pad + 8
 	gridY := pad + 8 + header
-	footerY := gridY + gridSize + 6
+	footerY := gridY + gridSize + 12
 	drawMinimapGridBacking(gridX, gridY, gridSize)
 	drawMinimapTimeOfDay(assets.hudFont, g.StepCount, pad+14, footerY, panelW-28)
 
@@ -330,35 +330,39 @@ func drawMinimapTimeOfDay(font rl.Font, stepCount int, x, y, width int32) {
 	drawTextWithShadow(font, name, float32(x), float32(y), FontSmall, textPrimary)
 	// Line 2: thin track, with the phase highlighted as a 1/N segment that
 	// fills as the player walks through it.
-	trackY := y + 18
+	trackY := y + 30
 	trackH := int32(4)
 	trackW := width
 	rl.DrawRectangle(x-2, trackY-2, trackW+4, trackH+4, fadeColor(woodDark, 0.72))
 	rl.DrawRectangle(x, trackY, trackW, trackH, barTrack)
-	segW := trackW / int32(core.TimeOfDayCount)
+	// Segment edges via truncated-difference (x + trackW*i/count) so the
+	// rounding remainder is spread across segments instead of pooling at the
+	// right end — the final phase now reaches the right edge exactly, with no
+	// unfilled sliver.
+	count := int32(core.TimeOfDayCount)
+	segEdge := func(i int32) int32 { return x + trackW*i/count }
+	ph := int32(phase)
 	// Past phases: warm wood fill. Current phase: bright gilt by progress. The
 	// fills are wood/brass tones (woodenPhaseColor mutes each phase's sky tint
 	// heavily toward woodAccent) so the strip reads as brass-on-wood cabinetry
 	// in line with the rest of the HUD, not a saturated rainbow.
-	for i := 0; i < int(phase); i++ {
-		rl.DrawRectangle(x+int32(i)*segW, trackY, segW-1, trackH, woodenPhaseColor(phaseColors[i]))
+	for i := int32(0); i < ph; i++ {
+		e0, e1 := segEdge(i), segEdge(i+1)
+		rl.DrawRectangle(e0, trackY, e1-e0-1, trackH, woodenPhaseColor(phaseColors[i]))
 	}
-	curW := int32(float32(segW) * progress)
+	segL, segR := segEdge(ph), segEdge(ph+1)
+	curW := int32(float32(segR-segL) * progress)
 	if curW > 0 {
-		rl.DrawRectangle(x+int32(phase)*segW, trackY, curW, trackH, woodenPhaseColor(phaseColors[phase]))
+		rl.DrawRectangle(segL, trackY, curW, trackH, woodenPhaseColor(phaseColors[phase]))
 	}
 	// Tiny gilt cursor riding the current phase — a 3-px diamond
 	// pip parked above the bar at the exact progress position, like
 	// a sextant's needle on a brass scale. Reads as "the time of day
 	// is here" at a glance, more legible than the colour wash alone.
-	cursorX := float32(x+int32(phase)*segW) + float32(segW)*progress
+	cursorX := float32(segL) + float32(segR-segL)*progress
 	cursorY := float32(trackY) + float32(trackH)/2 - 5
-	for i := int32(0); i <= int32(core.TimeOfDayCount); i++ {
-		tx := x + i*segW
-		if i == int32(core.TimeOfDayCount) {
-			tx = x + trackW
-		}
-		rl.DrawRectangle(tx, trackY-3, 1, trackH+6, fadeColor(giltDim, 0.42))
+	for i := int32(0); i <= count; i++ {
+		rl.DrawRectangle(segEdge(i), trackY-3, 1, trackH+6, fadeColor(giltDim, 0.42))
 	}
 	drawDiamondPip(cursorX, cursorY, 3, giltBright)
 	drawDiamondPip(cursorX, float32(trackY+trackH)+5, 2, fadeColor(giltDim, 0.70))

@@ -37,10 +37,11 @@ const (
 	// four rows — mirroring how doorEdit carries its facing as a payload
 	// rather than enumerating a kind per direction.
 	ctxItemStartFacing
-	// ctxItemSetFaceDir opens the skin dropdown for ONE of the tile's faces
-	// (ctxItem.facing = a core direction, or -1 for "all faces" = the base skin).
-	// Lets the author skin N/E/S/W independently from a top-down view.
-	ctxItemSetFaceDir
+	// ctxItemSetWallFaces opens the per-tile wall-faces modal (base skin +
+	// N/E/S/W overrides). Faces are a per-tile property — the top-down editor
+	// can't paint a vertical face — so this is the sole entry point now that
+	// "Faces" is no longer a paint layer.
+	ctxItemSetWallFaces
 	// ctxItemEraseTile resets the right-clicked cell on the ACTIVE layer (the
 	// same reset the eraser brush runs). Always offered.
 	ctxItemEraseTile
@@ -135,22 +136,14 @@ func contextItemsAt(s *State, x, z int) []ctxItem {
 			ctxItem{label: "Move start here", kind: ctxItemMoveStartHere},
 		)
 	}
-	// Cliff-face skin: when the tile rises above a neighbour it shows a face,
-	// so offer quick per-tile skin assignment (the current skin is marked).
-	// Gated by the same core rule the renderer draws faces from, and driven by
-	// the shared core.FaceSkins roster.
+	// Cliff-face skin: when the tile rises above a neighbour it shows a vertical
+	// face, so offer the wall-faces modal (base skin + per-direction overrides).
+	// Faces are a per-tile property — the top-down editor can't paint a vertical
+	// face — so this modal is the sole way to set them. Gated by the same core
+	// rule the renderer draws faces from, so a flat tile with no exposed face
+	// doesn't offer a no-op row.
 	if core.TileExposesFace(&s.area, x, z) {
-		// Faces are a per-tile property (top-down editor can't paint a vertical
-		// face): one row per direction (+ "all"), each opening a skin dropdown so
-		// N/E/S/W can be set independently.
-		items = append(items, ctxItem{label: "Set all faces…", kind: ctxItemSetFaceDir, facing: -1})
-		for d := 0; d < int(core.FacingCount); d++ {
-			items = append(items, ctxItem{
-				label:  "Set " + core.FacingShortLabels[d] + " face…",
-				kind:   ctxItemSetFaceDir,
-				facing: d,
-			})
-		}
+		items = append(items, ctxItem{label: "Set wall faces…", kind: ctxItemSetWallFaces})
 	}
 	// Erase the active layer's cell here — always available (the eraser is also
 	// a selectable brush).
@@ -386,12 +379,10 @@ func runContextItem(s *State, item ctxItem) {
 		s.dirty = true
 	case ctxItemStartFacing:
 		setStartFacing(s, item.facing)
-	case ctxItemSetFaceDir:
-		// Remember which tile + face the picker edits, then open the skin
-		// dropdown anchored at the (closing) context menu. faceSkinEntries applies.
-		s.faceTargetX, s.faceTargetZ, s.faceTargetDir = x, z, item.facing
-		anchor := rl.NewRectangle(s.contextMenu.x, s.contextMenu.y, 150, 20)
-		openDropdownBelow(s, ddFaceSkin, anchor)
+	case ctxItemSetWallFaces:
+		// Open the per-tile wall-faces modal (base + N/E/S/W). The modal's rows
+		// each open the shared face-skin dropdown against this tile.
+		openWallFacesModal(s, x, z)
 		return
 	case ctxItemEraseTile:
 		// Snapshot-then-commit-if-changed so a no-op erase banks no undo and

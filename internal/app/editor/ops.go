@@ -1319,7 +1319,7 @@ func requestOpen(s *State) {
 // b, on the active layer's grid only. 4-connected. No-op if (x,z) already
 // holds b. For LayerEntities the operation is a no-op since entities
 // aren't grid-stored.
-func floodFill(s *State, x, z int, b byte) {
+func floodFill(s *State, x, z int, b byte, erase bool) {
 	layer := activeGrid(s)
 	if layer == nil {
 		return
@@ -1360,10 +1360,23 @@ func floodFill(s *State, x, z int, b byte) {
 			stack = append(stack, [2]int{px + 1, pz}, [2]int{px - 1, pz}, [2]int{px, pz + 1}, [2]int{px, pz - 1})
 		}
 	})
-	// The flooded region joins the active floor — mirror of the per-cell stamp
-	// in applyTool, so Ctrl+click builds a floor the same way a stroke does
-	// (levels model is always on now). Walls are exempt (see stampActiveLevel).
-	if layerStampsActiveLevel(s.layer) {
+	switch {
+	case erase && s.layer == LayerElevation && len(s.area.Solids) > 0:
+		// Voxel-map elevation flood-ERASE: the Elevation string is dead, so clear
+		// each flooded cell's cube at the edit level — the flood mirror of the
+		// per-cell eraser (eraseAt → ClearCube). Without this, flood-erase on a
+		// voxel map only rewrote the ignored string and nothing changed on screen.
+		for _, c := range filled {
+			s.area.ClearCube(c[0], s.editLevel, c[1])
+		}
+	case erase:
+		// Any other flood-erase: the sentinel char flooded above IS the cleared
+		// state. Do NOT fall through to the active-level lift below — erasing must
+		// not RAISE the ground to editLevel (the per-cell eraser doesn't either).
+	case layerStampsActiveLevel(s.layer):
+		// PAINT: the flooded region joins the active floor — mirror of the
+		// per-cell stamp in applyTool, so Ctrl+click builds a floor the same way a
+		// stroke does (levels model is always on now). Walls are exempt.
 		if len(s.area.Solids) > 0 {
 			// Voxel map: the Elevation string is dead, so lift each flooded cell
 			// through the Solids-aware SetColumnTop (see setTileGroundLevel).

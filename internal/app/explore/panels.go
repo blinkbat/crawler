@@ -169,9 +169,8 @@ func updatePanels(g *core.GameState) {
 		}
 		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, rows)
 	case core.PanelTabMap:
-		// D-pad/stick PANS the map (the natural map-scroll control); Confirm (A)
-		// CYCLES zoom one step tighter, wrapping back to the most-zoomed-out at
-		// the floor — this frees all four directions for panning. Back (B) closes
+		// Up/Down ZOOM the map (Up = closer / fewer cells on screen, Down =
+		// farther / more cells); Left/Right PAN horizontally. Back (B) closes
 		// (global). The pan step scales with zoom so a tap scrolls a meaningful
 		// chunk at any scale.
 		step := g.PanelsMapZoom / core.PanelMapPanDivisor
@@ -182,16 +181,10 @@ func updatePanels(g *core.GameState) {
 			g.PanelsMapPanX += dx * step
 		}
 		if input.UpPressed() {
-			g.PanelsMapPanZ -= step
+			g.PanelsMapZoom -= core.PanelMapZoomStep
 		}
 		if input.DownPressed() {
-			g.PanelsMapPanZ += step
-		}
-		if input.ConfirmPressed() {
-			g.PanelsMapZoom -= core.PanelMapZoomStep
-			if g.PanelsMapZoom < core.PanelMapZoomMin {
-				g.PanelsMapZoom = core.PanelMapZoomMax
-			}
+			g.PanelsMapZoom += core.PanelMapZoomStep
 		}
 		g.PanelsMapZoom = core.Clamp(g.PanelsMapZoom, core.PanelMapZoomMin, core.PanelMapZoomMax)
 		// Clamp the pan so the view center can't wander more than a map's span

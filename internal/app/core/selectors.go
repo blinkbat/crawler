@@ -4,6 +4,11 @@ type TurnEntry struct {
 	Label string
 	Class PartyClass
 	Enemy bool
+	// Index is the actor's index in its own list: the party slot for a
+	// party entry, or the BattleMembers slot for an enemy entry. Lets the
+	// turn-order panel match a row to the currently-targeted actor (so the
+	// targeted enemy/ally also highlights in the forecast).
+	Index int
 }
 
 // --- Generic walking primitives ----------------------------------------
@@ -713,7 +718,7 @@ func turnEntryFor(g *GameState, actor ActorRef) (TurnEntry, bool) {
 			return TurnEntry{}, false
 		}
 		p := g.Party[actor.Index]
-		return TurnEntry{Label: p.Name, Class: p.Class}, true
+		return TurnEntry{Label: p.Name, Class: p.Class, Index: actor.Index}, true
 	}
 	members := BattleMembers(g)
 	if actor.Index < 0 || actor.Index >= len(members) {
@@ -727,5 +732,5 @@ func turnEntryFor(g *GameState, actor ActorRef) (TurnEntry, bool) {
 	if !enemy.Alive {
 		return TurnEntry{}, false
 	}
-	return TurnEntry{Label: EnemySingularName(enemy), Enemy: true}, true
+	return TurnEntry{Label: EnemySingularName(enemy), Enemy: true, Index: actor.Index}, true
 }

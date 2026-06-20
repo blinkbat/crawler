@@ -139,7 +139,12 @@ func AwardBattleLoot(g *GameState) (gold int, drops []ItemKind) {
 	}
 	rng := g.Rand()
 	for _, m := range members {
-		if m.Alive {
+		// Pay out anything that's dead by EITHER measure. Death normally clears
+		// Alive (the canonical flag), and the custom-enemy loader refuses HP<=0
+		// rows, so the HP guard is belt-and-suspenders: it ensures a degenerate
+		// "alive corpse" (HP<=0 yet Alive) still yields its gold/drops on a win
+		// rather than being silently skipped as if it were a living survivor.
+		if m.Alive && m.HP > 0 {
 			continue
 		}
 		def := EnemyInfoFor(m)

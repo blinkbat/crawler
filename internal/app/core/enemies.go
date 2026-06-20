@@ -710,6 +710,25 @@ func EffectiveEnemyStats(e *Enemy) Stats {
 	return addStatsFloored(out, delta)
 }
 
+// EffectiveEnemyDefenses returns the enemy's effective Armor and MDef with its
+// active debuffs folded in — the enemy-side mirror of EffectiveDefenses. Armor
+// starts from the per-instance e.Armor (Corrosive Vial strips that field
+// directly); MDef from the governing definition (enemies carry no per-instance
+// MDef field). Both then add the StatusMod Armor/MDef deltas (a skill's
+// effect.BuffArmor/BuffMDef, negative for a debuff) and floor at 0 — so an
+// enemy-side armor/MDef debuff softens mitigation the same way the party's
+// does, instead of being summed into e.Debuffs and silently ignored by the
+// per-hit damage path. Reads the def through enemyGoverningDef (a pointer, no
+// full-Enemy copy) since this runs per mitigated hit.
+func EffectiveEnemyDefenses(e *Enemy) (armor, mdef int) {
+	baseMDef := enemyGoverningDef(e).MDef
+	if len(e.Debuffs) == 0 {
+		return floorInt(e.Armor), floorInt(baseMDef)
+	}
+	_, armorDelta, mdefDelta := SumStatusMods(e.Debuffs)
+	return floorInt(e.Armor + armorDelta), floorInt(baseMDef + mdefDelta)
+}
+
 // StampEnemyDebuff adds or refreshes a skill's stat debuff (its negative
 // BuffStats) on the enemy for effect.BuffTurns of the enemy's turns — the single
 // home for the enemy-side stamp that Cripple, Blind, Frostbite, Cone of Cold,

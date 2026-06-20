@@ -71,11 +71,14 @@ func updateChestModal(g *core.GameState) {
 		closeChest(g, chest)
 		return
 	}
-	// The Take-All row sits at index len(remaining), so the valid cursor
-	// range is 0..len(remaining) — clamp to that, not len-1, or a cursor
-	// resting on Take-All gets yanked onto an item row.
-	if g.ChestMenuIndex > len(remaining) {
-		g.ChestMenuIndex = len(remaining)
+	// We just took from an ITEM row (the Take-All row was handled above), so
+	// keep the cursor on an item: if taking the bottom stack emptied it, its old
+	// index now lands on the Take-All row — pull it back to the new last item so
+	// a take never yanks the cursor onto Take-All. Taking a middle stack leaves
+	// the cursor in place, where it now rests on the item that slid up (the
+	// natural "keep taking down the list" position).
+	if g.ChestMenuIndex >= len(remaining) {
+		g.ChestMenuIndex = len(remaining) - 1
 	}
 }
 

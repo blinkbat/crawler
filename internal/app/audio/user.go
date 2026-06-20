@@ -61,23 +61,6 @@ func NoteHz(i int) float64            { return wavsynth.NoteHz(i) }
 func NoteName(i int) string           { return wavsynth.NoteName(i) }
 func NearestNoteIndex(hz float64) int { return wavsynth.NearestNoteIndex(hz) }
 
-// soundIDByName maps the canonical slug ("input_hit") to its Sound enum
-// value. Derived from soundCues at init so adding a new Sound enum
-// entry automatically picks up here too — no parallel table to keep
-// in lockstep.
-var soundIDByName = buildSoundIDByName()
-
-func buildSoundIDByName() map[string]Sound {
-	m := make(map[string]Sound, len(soundCues))
-	for i, cue := range soundCues {
-		if cue.Canonical == "" {
-			continue
-		}
-		m[cue.Canonical] = Sound(i)
-	}
-	return m
-}
-
 // SoundCanonicalName returns the assignments-file key for a built-in
 // cue. Reads directly from soundCues — the canonical slug for
 // SoundInputHit is "input_hit", etc. Out-of-range values return "".
@@ -198,11 +181,11 @@ func ReloadUserAssignments() (failed []string, err error) {
 			failed = append(failed, row.Canonical)
 		}
 	})
-	for cueName := range assigns {
-		if _, ok := soundIDByName[cueName]; !ok {
-			failed = append(failed, cueName)
-		}
-	}
+	// `failed` is contracted as "cue slugs whose assigned FILE failed to load"
+	// (the loop above). A hand-edited assignments.txt line with an unrecognized
+	// cue key is NOT a load failure — it's an inert orphan (only known cues are
+	// read, via forEachCue), so it's skipped silently like every other
+	// malformed line in LoadAssignments rather than surfaced as a false warning.
 	return failed, nil
 }
 

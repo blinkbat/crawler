@@ -91,9 +91,9 @@ func updateHotkeys(s *State) {
 	// Tab-cycling when the author knows which layer they want. Number row
 	// only; the keypad equivalents aren't bound to keep the binding compact.
 	if alt {
-		for i := 0; i < layerCount && i < len(numberRowKeys); i++ {
+		for i := 0; i < len(selectableLayers) && i < len(numberRowKeys); i++ {
 			if rl.IsKeyPressed(numberRowKeys[i]) {
-				s.layer = Layer(i)
+				s.layer = selectableLayers[i]
 				return
 			}
 		}
@@ -156,13 +156,14 @@ func updateHotkeys(s *State) {
 		centerViewOnTile(s, s.area.StartTileX, s.area.StartTileZ)
 	}
 
-	// Tab cycles to the next layer (Shift+Tab to the previous).
+	// Tab cycles to the next selectable layer (Shift+Tab to the previous).
+	// Skips LayerWalls/"Faces" — faces are set via the right-click modal now.
 	if !ctrl && editorTabPressed() {
 		dir := 1
 		if shift {
 			dir = -1
 		}
-		s.layer = core.WrapEnum(s.layer, dir, layerCount)
+		s.layer = cycleSelectableLayer(s.layer, dir)
 	}
 
 	// F5: launch a playtest of the current in-memory area without saving.
@@ -759,7 +760,7 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 		if b.Erase {
 			fill = eraseSentinel(s.layer)
 		}
-		floodFill(s, x, z, fill)
+		floodFill(s, x, z, fill, b.Erase)
 		s.drag = dragNone
 	case toolRect:
 		s.drag = dragRect
@@ -2142,7 +2143,16 @@ func removeModalListItem[T any](items []T, idx int) []T {
 	if idx < 0 || idx >= len(items) {
 		return items
 	}
-	return append(items[:idx], items[idx+1:]...)
+	// Copy-on-delete into a fresh slice rather than the in-place
+	// append(items[:idx], items[idx+1:]...) shift. The in-place form mutates
+	// the shared backing array, which would corrupt an undo snapshot that
+	// aliased it; callers happen to deep-clone (pushUndo → CloneArea) first
+	// today, but this keeps the helper safe no matter who calls it. These
+	// modal lists are tiny, so the allocation is negligible.
+	out := make([]T, 0, len(items)-1)
+	out = append(out, items[:idx]...)
+	out = append(out, items[idx+1:]...)
+	return out
 }
 
 // updateChestEditModal drives the inline chest editor: Up/Down navigate the

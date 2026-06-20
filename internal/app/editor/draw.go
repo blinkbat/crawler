@@ -245,6 +245,7 @@ var modalHandlers = map[modalKind]modalHandler{
 	modalPartyView:         {draw: drawPartyViewModal, update: updatePartyViewModal},
 	modalHitGlyphs:         {draw: drawHitGlyphsModal, update: updateHitGlyphsModal},
 	modalObjectView:        {draw: drawObjectViewModal, update: updateObjectViewModal},
+	modalWallFaces:         {draw: drawWallFacesModal, update: updateWallFacesModal},
 	modalDialogList:        {draw: drawDialogListModal, update: updateDialogListModal},
 	modalDialogNodes:       {draw: drawDialogNodesModal, update: updateDialogNodesModal},
 	modalDialogNodeEdit:    {draw: drawDialogNodeEditModal, update: updateDialogNodeEditModal},

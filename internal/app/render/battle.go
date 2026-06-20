@@ -220,8 +220,9 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 	condition, condCol := enemyHealthStyle(enemy)
 
 	nameX := float32(x + leftPad)
+	nameY := y + 10
 	displayName := core.EnemyName(enemy)
-	drawEngravedText(font, displayName, nameX, float32(y+10), FontHeading, nameCol)
+	drawEngravedText(font, displayName, nameX, float32(nameY), FontHeading, nameCol)
 
 	// Health reads from the qualitative wound-state word by default —
 	// exact enemy HP stays hidden until the kind is identified in the
@@ -230,7 +231,10 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 	// foes show the word alone. So: no HP bar; the condition word, plus the
 	// revealed number once the party has earned (or scanned) the knowledge.
 	condSize := FontSmall
-	condY := float32(y) + float32(h) - condSize - 9
+	// Stack the condition BELOW the name (name top + its line height + a small
+	// gap), not bottom-anchored to the row — at FontHeading the name fills most
+	// of the row, so a bottom-anchored condition used to land on top of it.
+	condY := float32(nameY) + FontHeading + 2
 	drawTextWithShadow(font, condition, nameX, condY, condSize, condCol)
 	if known {
 		condW := rosterCondMeasureCache.measure(font, condition, condSize, canonicalSpacing(condSize)).X
@@ -577,36 +581,13 @@ func wrappedActionLogLines(font rl.Font, lines []string, innerW int32, maxLines 
 	return reversed
 }
 
-// actionMenuSubLabelGap is the vertical gap (px) from a mode's verb
-// heading to the sub-prompt / picker list beneath it in the action-menu
-// panel. Named so the five action-mode arms share one offset.
-const actionMenuSubLabelGap = 34
-
-// Action-row geometry — the key-plate size + selection inset shared by the
-// action menu and the skill/item picker rows so the two row styles align.
-const (
-	actionRowW = int32(284)
-	actionRowH = int32(32)
-)
-
-// itemMenuSuffix caches the "x<N>  >" badge on the action menu's Item row,
-// rebuilt only when the consumable count changes — not every frame the player
-// sits in the (steady-state) action menu. Returns ">" when empty.
-var itemSuffixCache struct {
-	total int
-	text  string
-}
-
-func itemMenuSuffix(total int) string {
-	if total <= 0 {
-		return ">"
-	}
-	if total != itemSuffixCache.total {
-		itemSuffixCache.total = total
-		itemSuffixCache.text = "x" + strconv.Itoa(total) + "  >"
-	}
-	return itemSuffixCache.text
-}
+// Action-row plate height + selection inset shared by the action menu and the
+// skill/item picker rows. Height + inter-row pitch come from the spacing
+// system (uiRowH / uiRowPitch, theme.go); the heading→body gap and footer
+// baseline come from the bodyBelowHeading / footerBaselineY helpers. The plate
+// WIDTH is no longer a constant — each row stretches to a right-edge X passed
+// by the panel, so the selection highlight reaches the panel edge whether the
+// row sits in the icon-gutter main menu or the flush-left submenu list.
 
 // arrowPrompt caches the "A → B" target prompt so the per-frame draw doesn't
 // fmt.Sprintf while the player cycles the target. The two target modes
@@ -672,6 +653,11 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	drawCard(x, y, w, h, surfacePrimary, borderActive, classCol)
 
 	contentX := x + hudContentInsetX
+	// rightX is the screen X the row plates / suffixes stretch to: a content
+	// inset in from the panel's right edge, mirroring contentX on the left. Rows
+	// pass it to drawActionRow so the selection highlight reaches the same edge
+	// whether the row sits in the icon-gutter main menu or the flush-left list.
+	rightX := x + w - hudContentInsetX
 	// Active member's name as the panel header, in their class color, so
 	// whose turn it is is spelled out right where the player picks the
 	// action — reinforcing the lifted/haloed party card and the glowing
@@ -680,10 +666,11 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	ruleY := y + 48
 	drawPipCappedRule(x+18, ruleY, w-36, fadeColor(giltBright, 0.5), 2.4, fadeColor(giltDim, 0.85))
 	contentY := y + 58
-	// subY is the baseline for the sub-prompt / picker list under the
-	// mode's verb heading — one offset so the five action-mode arms below
-	// can't drift on the heading-to-sublabel gap.
-	subY := contentY + actionMenuSubLabelGap
+	// subY is where the sub-prompt / picker list starts beneath the mode's verb
+	// heading. Through bodyBelowHeading so the heading→body gap matches every
+	// other "content under a header" surface (and accounts for the FontHeading
+	// line height instead of a hand-tuned offset that used to graze the title).
+	subY := bodyBelowHeading(contentY, FontHeading)
 
 	switch g.Battle.ActionMode {
 	case core.ActionEnemyTarget:
@@ -697,10 +684,10 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 		drawAllyTargetPrompt(g, assets, core.SkillName(g.Battle.PendingSkill), contentX, contentY, subY)
 	case core.ActionItemMenu:
 		drawEngravedText(assets.hudFont, "Items", float32(contentX), float32(contentY), FontHeading, textPrimary)
-		drawItemMenuList(g, assets, contentX, subY)
+		drawItemMenuList(g, assets, contentX, subY, rightX)
 	case core.ActionSkillMenu:
 		drawEngravedText(assets.hudFont, "Skills", float32(contentX), float32(contentY), FontHeading, textPrimary)
-		drawSkillMenuList(g, assets, contentX, subY)
+		drawSkillMenuList(g, assets, contentX, subY, rightX)
 	case core.ActionItemTarget:
 		drawAllyTargetPrompt(g, assets, core.ItemInfo(g.Battle.PendingItem).Name, contentX, contentY, subY)
 	case core.ActionFleeConfirm:
@@ -715,15 +702,16 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 			drawTextWithShadow(assets.hudFont, status, float32(contentX), float32(contentY), FontSmall, classCol)
 			contentY += 26
 		}
-		drawActionMenuOptions(g, assets, contentX, contentY, member)
+		drawActionMenuOptions(g, assets, contentX, contentY, rightX, member)
 	}
 
 	// Input-hint footer (gamepad-first): the confirm/back affordances seated
 	// over a faint gilt rule, so the action surface reads as an input prompt.
 	// Skipped when the panel is shrunk on a short window (would collide with
-	// the rows). Submenu entry is already cued by the per-row "▸" suffix.
+	// the rows). Footer baseline comes from the shared footerBaselineY so its
+	// gap off the bottom edge matches every modal/picker footer.
 	if h >= actionMenuHintMinH {
-		hintY := y + h - actionMenuFooterOffset
+		hintY := footerBaselineY(y+h, FontSmall)
 		drawGiltRule(x+18, hintY-12, w-36, 1, 0.3)
 		DrawHintBarLeft(assets.hudFont, []HintSeg{
 			Hint("Confirm", GlyphA),
@@ -758,20 +746,19 @@ func init() {
 	}
 }
 
-func drawActionMenuOptions(g *core.GameState, assets Resources, x, y int32, member core.PartyMember) {
-	rowSpacing := int32(40)
+func drawActionMenuOptions(g *core.GameState, assets Resources, x, y, rightX int32, member core.PartyMember) {
 	cursor := core.ActionRow(g.Battle.MenuIndex)
 	// Push labels right so each row has a small icon column on the
 	// left — the action-sigil that names what the row does without
-	// reading the text.
+	// reading the text. Rows pitch by the shared uiRowPitch and stretch to
+	// rightX so the highlight reaches the panel edge.
 	labelX := x + 26
-	drawActionMenuRow(assets.hudFont, core.ActionRowAttack, x, labelX, y+int32(core.ActionRowAttack)*rowSpacing, "Attack", "", cursor == core.ActionRowAttack)
+	drawActionMenuRow(assets.hudFont, core.ActionRowAttack, x, labelX, y+int32(core.ActionRowAttack)*uiRowPitch, rightX, "Attack", "", cursor == core.ActionRowAttack)
 	_ = member
-	drawActionMenuRow(assets.hudFont, core.ActionRowSkill, x, labelX, y+int32(core.ActionRowSkill)*rowSpacing, "Skill", ">", cursor == core.ActionRowSkill)
-	itemSuffix := itemMenuSuffix(core.ConsumableCount(g.Inventory))
-	drawActionMenuRow(assets.hudFont, core.ActionRowItem, x, labelX, y+int32(core.ActionRowItem)*rowSpacing, "Item", itemSuffix, cursor == core.ActionRowItem)
-	drawActionMenuRow(assets.hudFont, core.ActionRowDefend, x, labelX, y+int32(core.ActionRowDefend)*rowSpacing, "Defend", "", cursor == core.ActionRowDefend)
-	drawActionMenuRow(assets.hudFont, core.ActionRowFlee, x, labelX, y+int32(core.ActionRowFlee)*rowSpacing, "Flee", "", cursor == core.ActionRowFlee)
+	drawActionMenuRow(assets.hudFont, core.ActionRowSkill, x, labelX, y+int32(core.ActionRowSkill)*uiRowPitch, rightX, "Skill", "", cursor == core.ActionRowSkill)
+	drawActionMenuRow(assets.hudFont, core.ActionRowItem, x, labelX, y+int32(core.ActionRowItem)*uiRowPitch, rightX, "Item", "", cursor == core.ActionRowItem)
+	drawActionMenuRow(assets.hudFont, core.ActionRowDefend, x, labelX, y+int32(core.ActionRowDefend)*uiRowPitch, rightX, "Defend", "", cursor == core.ActionRowDefend)
+	drawActionMenuRow(assets.hudFont, core.ActionRowFlee, x, labelX, y+int32(core.ActionRowFlee)*uiRowPitch, rightX, "Flee", "", cursor == core.ActionRowFlee)
 }
 
 // drawActionMenuRow wraps drawActionRow with an action-specific icon
@@ -779,12 +766,12 @@ func drawActionMenuOptions(g *core.GameState, assets Resources, x, y int32, memb
 // corresponding sigil — crossed blades (Attack), starburst (Skill),
 // potion flask (Item), tower shield (Defend). Icon glyphs are
 // procedural (no asset dependency) so they read crisp at any DPI.
-func drawActionMenuRow(font rl.Font, row core.ActionRow, iconX, labelX, y int32, label, suffix string, selected bool) {
+func drawActionMenuRow(font rl.Font, row core.ActionRow, iconX, labelX, y, rightX int32, label, suffix string, selected bool) {
 	// The "key" plate + label + suffix come from the shared drawActionRow (also
 	// used by the skill/item submenu lists, so the whole action-input surface
 	// reads as one stack-of-keys family). This row adds the icon medallion on
 	// top, in the left gutter — the action sigil seated in a gilt-ringed rivet.
-	drawActionRow(font, labelX, y, label, suffix, selected)
+	drawActionRow(font, labelX, y, rightX, label, suffix, selected)
 	iconCX := float32(iconX) + 9
 	iconCY := float32(y) + 13
 	drawIconMedallion(iconCX, iconCY, selected)
@@ -955,8 +942,7 @@ func drawActionIconFlee(cx, cy, r float32, col rl.Color) {
 // by the battle update path into g.Battle.SkillMenuList (the same frame,
 // before this draw); reading it here avoids re-walking the skill tree a
 // second time.
-func drawSkillMenuList(g *core.GameState, assets Resources, x, y int32) {
-	rowSpacing := int32(32)
+func drawSkillMenuList(g *core.GameState, assets Resources, x, y, rightX int32) {
 	skills := g.Battle.SkillMenuList
 	if len(skills) == 0 {
 		drawTextWithShadow(assets.hudFont, "(no skills)", float32(x), float32(y), FontSmall, textDim)
@@ -968,7 +954,7 @@ func drawSkillMenuList(g *core.GameState, assets Resources, x, y int32) {
 		if cost := core.SkillCost(s); cost > 0 {
 			suffix = skillCostMPLabel(cost)
 		}
-		drawActionRow(assets.hudFont, x, y+int32(i)*rowSpacing, label, suffix, g.Battle.SkillMenuIndex == i)
+		drawActionRow(assets.hudFont, x, y+int32(i)*uiRowPitch, rightX, label, suffix, g.Battle.SkillMenuIndex == i)
 	}
 }
 
@@ -980,10 +966,7 @@ func drawSkillMenuList(g *core.GameState, assets Resources, x, y int32) {
 // g.Battle.ItemMenuList (the same frame, before this draw); reading it here
 // avoids a second inventory scan. Filtered to consumables there so it lines
 // up with updateItemMenu's picker (equipment isn't usable in combat).
-func drawItemMenuList(g *core.GameState, assets Resources, x, y int32) {
-	// 32 (not 28) so each row's "key" plate (actionRowH=32, drawn by
-	// drawActionRow) has clearance and the plates don't overlap.
-	rowSpacing := int32(32)
+func drawItemMenuList(g *core.GameState, assets Resources, x, y, rightX int32) {
 	living := g.Battle.ItemMenuList
 	if len(living) == 0 {
 		drawTextWithShadow(assets.hudFont, "(no items)", float32(x), float32(y), FontSmall, textDim)
@@ -993,26 +976,30 @@ func drawItemMenuList(g *core.GameState, assets Resources, x, y int32) {
 		def := core.ItemInfo(slot.Kind)
 		label := def.Name
 		suffix := "x" + strconv.Itoa(slot.Count)
-		drawActionRow(assets.hudFont, x, y+int32(i)*rowSpacing, label, suffix, g.Battle.ItemMenuIndex == i)
+		drawActionRow(assets.hudFont, x, y+int32(i)*uiRowPitch, rightX, label, suffix, g.Battle.ItemMenuIndex == i)
 	}
 }
 
-func drawActionRow(font rl.Font, x, y int32, label, suffix string, selected bool) {
-	// Every action / skill / item row is an engraved "key" plate so the whole
-	// action-input surface reads as one stack-of-keys family: the selected one
-	// gets the warm gilt selection plate (gilt spine + underline via
-	// DrawSelectedRow), the rest a dark glass key with a soft wood rim.
+// drawActionRow paints one "key" plate (the action-input row family): the
+// selected row gets the warm gilt selection plate (gilt spine + underline via
+// DrawSelectedRow), the rest a dark glass key with a soft wood rim. The plate
+// spans from x-8 to rightX, so the highlight reaches the panel's content edge
+// no matter where the row's text starts (icon-gutter main menu vs flush-left
+// submenu list) — the fixed-width plate left a dead gap at the right before.
+func drawActionRow(font rl.Font, x, y, rightX int32, label, suffix string, selected bool) {
+	plateX := x - 8
+	plateW := rightX - plateX
 	if selected {
-		DrawSelectedRowI(x-8, y-4, actionRowW, actionRowH)
+		DrawSelectedRowI(plateX, y-4, plateW, uiRowH)
 	} else {
-		drawGlassPane(x-8, y-4, actionRowW, actionRowH, fadeColor(glassDeep, 0.5))
-		drawSmallPanelOutline(x-8, y-4, actionRowW, actionRowH, fadeColor(woodMid, 0.45))
+		drawGlassPane(plateX, y-4, plateW, uiRowH, fadeColor(glassDeep, 0.5))
+		drawSmallPanelOutline(plateX, y-4, plateW, uiRowH, fadeColor(woodMid, 0.45))
 	}
 	drawTextWithShadow(font, label, float32(x), float32(y), FontBody, textPrimary)
 	if suffix != "" {
 		size := FontSmall
 		measure := measureActionRowSuffix(font, suffix)
-		sx := float32(x) + float32(actionRowW) - measure.X - 22
+		sx := float32(rightX) - measure.X - 12
 		sy := float32(y) + 5
 		drawTextWithShadow(font, suffix, sx, sy, size, textLabel)
 	}

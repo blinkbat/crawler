@@ -504,7 +504,7 @@ const (
 	// Enemy roster card (battle.go) — the top-center pane listing the foes.
 	// Named here with the other HUD geometry so a "rows too cramped" retune is
 	// one edit rather than bare literals at the draw site.
-	rosterRowH      = int32(60)  // per-enemy row height
+	rosterRowH      = int32(82)  // per-enemy row height (fits the FontHeading name stacked over the condition line)
 	rosterTopPad    = int32(18)  // inset above the first row
 	rosterBottomPad = int32(18)  // inset below the last row
 	rosterW         = int32(560) // multi-enemy width
@@ -527,12 +527,28 @@ const (
 	// bottom-right action menu. Both share the hudPanelMinH collision floor.
 	actionLogW  = int32(320)
 	actionLogH  = int32(300)
-	actionMenuW = int32(340)
-	actionMenuH = int32(312)
+	actionMenuW = int32(360)
+	actionMenuH = int32(404)
 	// hudContentInsetX is the left gutter from a combat HUD pane's edge to its
 	// content (enemy-card name, action-menu header/rows). Named so the roster
 	// and action-menu surfaces share one inset instead of a bare 22 at each.
+	// Also the canonical window-padding token of the spacing system below.
 	hudContentInsetX = int32(22)
+
+	// --- Spacing system (see UI_STANDARDS.md "Spacing") -----------------
+	// The gaps every menu/panel surface shares, so content under a heading,
+	// stacked rows, and footer hints line up the SAME everywhere instead of
+	// each surface inventing its own numbers (the source of "spacing is wrong
+	// here" drift). Window padding is hudContentInsetX above. Header→body and
+	// footer gaps are font-aware via the layout.go helpers (bodyBelowHeading /
+	// footerBaselineY) because they must clear a text line whose height scales
+	// with the font size — a bare constant offset can't, which is exactly how
+	// the roster name/condition overlap and the cramped submenus crept in.
+	uiGapAfterTitle = int32(12)         // breathing space below a heading's TEXT before its body
+	uiRowH          = int32(32)         // standard interactive row-plate height
+	uiRowGap        = int32(10)         // vertical gap between stacked row plates
+	uiRowPitch      = uiRowH + uiRowGap // row center-to-center pitch (42)
+	uiFooterMargin  = int32(14)         // visual gap below a footer hint's glyphs/text to the card bottom edge
 	// actionMenuHintMinH is the panel-height floor below which the action menu
 	// drops its confirm/back hint footer (it would collide with the rows on a
 	// short window). Sits above the hudPanelMinH row-readability floor.
@@ -658,13 +674,7 @@ const (
 	// overlay card reserved for the "Esc close / L1 R1 tabs" hint
 	// footer rendered by DrawFooterHint. Body rect = card minus this
 	// band minus the heading band at the top.
-	overlayFooterReserve = int32(28)
-	// actionMenuFooterOffset is the gap from the battle action-menu panel's
-	// bottom edge up to its confirm/back hint baseline (the gilt rule sits a
-	// touch above it). Its own token so the action menu doesn't open-code the
-	// bare -28; happens to match overlayFooterReserve today but names a
-	// distinct surface (the in-battle menu, not a DrawFooterHint overlay).
-	actionMenuFooterOffset = int32(28)
+	overlayFooterReserve = int32(38)
 )
 
 // drawModalScaffold paints the shared screen-veil + centered card +

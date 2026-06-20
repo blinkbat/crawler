@@ -982,6 +982,14 @@ func (mf *MapFile) validate() error {
 	if mf.StartX < 0 || mf.StartX >= mf.Width || mf.StartZ < 0 || mf.StartZ >= mf.Height {
 		return fmt.Errorf("start (%d,%d) outside map", mf.StartX, mf.StartZ)
 	}
+	// StartFace must be a canonical facing — mirrors the per-door guard below.
+	// Without this, a MapFile built directly (bypassing Parse, which validates
+	// the token) with an empty/garbage StartFace passes validate(), and Save
+	// then writes a "start: X Z <bad>" line that Parse rejects on reload — a
+	// silent Save/Parse asymmetry.
+	if !IsFacingName(mf.StartFace) {
+		return fmt.Errorf("start facing %q invalid", mf.StartFace)
+	}
 	// Pack and chest spawns are validated against bounds here rather
 	// than in the parser so a single-row malformed entry surfaces with
 	// the same "outside map" diagnostic as a malformed start. Without

@@ -673,6 +673,9 @@ func (r Resources) Unload() {
 	// Retro-filter pass (shader + capture RT) is a package-level lazy
 	// singleton, not a Resources field — free it alongside everything else.
 	UnloadRetroFilter()
+	// Menu-fade cross-fade capture RT — same package-level lazy-singleton
+	// lifecycle as the retro filter; free it here too.
+	closeFadeRT()
 	// NOTE: raylib's UnloadModel frees the model's meshes + the materials' maps
 	// array, but NOT the GL textures bound into those maps (rmodels.c). So the
 	// wall/floor/ceiling textures (and the prop textures freed via .unload()

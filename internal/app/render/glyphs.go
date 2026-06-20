@@ -160,11 +160,13 @@ func DrawHintBarLeft(font rl.Font, segs []HintSeg, x, y, size float32) {
 // drawModalFooterLeft, so a modal swaps its hint string for a []HintSeg with a
 // one-line change and the card-geometry math stays in one place.
 func drawModalFooterGlyphs(font rl.Font, card rl.Rectangle, segs []HintSeg) {
-	DrawHintBar(font, segs, card.X+card.Width/2, card.Y+card.Height-modalFooterTextOffset, FontTiny)
+	y := float32(footerBaselineY(int32(card.Y+card.Height), FontTiny))
+	DrawHintBar(font, segs, card.X+card.Width/2, y, FontTiny)
 }
 
 func drawModalFooterGlyphsLeft(font rl.Font, card rl.Rectangle, x float32, segs []HintSeg) {
-	DrawHintBarLeft(font, segs, x, card.Y+card.Height-pickerFooterTextOffset, FontSmall)
+	y := float32(footerBaselineY(int32(card.Y+card.Height), FontSmall))
+	DrawHintBarLeft(font, segs, x, y, FontSmall)
 }
 
 // drawGlyphPrompt centers a single "[glyph] Verb" cue (the in-world chest /

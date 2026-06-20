@@ -62,8 +62,8 @@ var timeProfiles = [core.TimeOfDayCount]timeProfile{
 	// the directional light SHADES the pastel base rather than
 	// pushing it past white. Any higher and the meadow sears.
 	core.Morning: {
-		SunColor:       rl.NewVector3(0.66, 0.64, 0.57),
-		AmbientColor:   rl.NewVector3(0.40, 0.44, 0.52),
+		SunColor:       rl.NewVector3(0.60, 0.58, 0.52),
+		AmbientColor:   rl.NewVector3(0.36, 0.40, 0.47),
 		FogColor:       rl.NewVector3(0.84, 0.88, 0.92),
 		ShadowStrength: 0.26,
 		SkyTint:        rl.NewVector3(0.84, 0.86, 0.90),
@@ -74,8 +74,8 @@ var timeProfiles = [core.TimeOfDayCount]timeProfile{
 	// still lands close to 1.0 to keep the pastel field from
 	// blowing out at the brightest point.
 	core.Afternoon: {
-		SunColor:       rl.NewVector3(0.70, 0.68, 0.60),
-		AmbientColor:   rl.NewVector3(0.42, 0.46, 0.54),
+		SunColor:       rl.NewVector3(0.63, 0.61, 0.54),
+		AmbientColor:   rl.NewVector3(0.38, 0.41, 0.48),
 		FogColor:       rl.NewVector3(0.86, 0.90, 0.94),
 		ShadowStrength: 0.24,
 		SkyTint:        rl.NewVector3(0.88, 0.90, 0.94),

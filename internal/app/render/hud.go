@@ -5,27 +5,27 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+// DrawOverlay paints the 2D overlay layer: the world/battle HUD and any open
+// top-level menu, cross-faded by tickMenuFade so opening a menu fades the HUD
+// out while the menu fades in (and the reverse on close). When nothing is
+// fading (progress 0 or 1) each surface draws at full opacity straight to the
+// backbuffer — the no-fade steady state costs no render target.
 func DrawOverlay(g *core.GameState, assets Resources) {
-	if g.MenuOpen {
-		drawMenuOverlay(g, assets)
-		return
+	tickMenuFade(g)
+	hudAlpha := 1 - menuFade.progress
+	menuAlpha := menuFade.progress
+	if hudAlpha > 0.001 {
+		withFadeAlpha(hudAlpha, func() { drawSceneHUD(g, assets) })
 	}
-	if g.OptionsMenuOpen {
-		drawOptionsMenuOverlay(g, assets)
-		return
+	if menuAlpha > 0.001 && menuFade.drawer != nil {
+		withFadeAlpha(menuAlpha, func() { menuFade.drawer(g, assets) })
 	}
-	if g.ShopOpen {
-		drawShopOverlay(g, assets)
-		return
-	}
-	if g.RetroMenuOpen {
-		drawRetroMenuOverlay(g, assets)
-		return
-	}
-	if g.DebugMenuOpen {
-		drawDebugMenuOverlay(g, assets)
-		return
-	}
+}
+
+// drawSceneHUD paints the in-world HUD (battle or free-exploration) with no
+// top-level menu — the surface that fades out when a menu opens. Split from
+// DrawOverlay so withFadeAlpha can capture it as one layer.
+func drawSceneHUD(g *core.GameState, assets Resources) {
 	if g.Battle.Active() {
 		// Compute the turn forecast once per frame; TurnPanelBottomY
 		// (called from the action log) and drawTurnPanel both read

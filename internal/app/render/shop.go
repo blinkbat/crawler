@@ -58,7 +58,8 @@ func drawShopOverlay(g *core.GameState, assets Resources) {
 	panelX, panelY, belowTitleY := drawTitledCardHeader(assets, "SHOP", shopPanelW, panelH)
 
 	// Gold readout (right) and Buy/Sell tabs (left) share the sub-title row.
-	subY := belowTitleY + 12
+	// The gap below the title is the shared spacing-system token.
+	subY := belowTitleY + float32(uiGapAfterTitle)
 	drawTextRightAligned(font, goldLabelFull(g.Gold), float32(panelX+shopPanelW)-float32(shopRowInsetX), subY, FontBody, borderActive)
 	drawShopTabs(font, g.ShopTab, float32(panelX+shopRowInsetX), subY)
 

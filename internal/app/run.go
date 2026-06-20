@@ -414,10 +414,12 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	render.DrawDamagePopups(camera, game, assets)
 	render.DrawQualityPopup(camera, game, assets)
 	render.DrawDebugOverlay(camera, game, assets)
+	// DrawOverlay paints the HUD AND any open top-level menu (incl. the Tome /
+	// character panels), cross-fading between them — so the panels overlay is no
+	// longer a separate call here; it's drawn through DrawOverlay's fade path.
 	render.DrawOverlay(game, assets)
 	render.DrawChestModal(game, assets)
 	render.DrawLevelUpModal(game, assets)
-	render.DrawPanelsOverlay(game, assets)
 	render.DrawDoorPrompt(game, assets)
 	// Dialog sits last so the conversation overlay paints on top of every
 	// other explore modal (it's the highest-priority modal — see
