@@ -63,11 +63,12 @@ func updateDialogModal(g *core.GameState) {
 		core.MoveDialogCursor(g, 1)
 	}
 	if input.ConfirmPressed() {
-		// SelectDialogChoice ignores a disabled / out-of-range pick, so a
-		// Confirm on a greyed-out choice is a harmless no-op.
+		// Only act on an in-range, ENABLED choice — don't rely on
+		// SelectDialogChoice to silently ignore a disabled / out-of-range pick.
+		// A Confirm on a greyed-out choice is a no-op (no sound, no select).
 		if g.Dialog.ChoiceCursor >= 0 && g.Dialog.ChoiceCursor < len(views) && !views[g.Dialog.ChoiceCursor].Disabled {
 			audio.Play(audio.SoundInputHit)
+			core.SelectDialogChoice(g, g.Dialog.ChoiceCursor)
 		}
-		core.SelectDialogChoice(g, g.Dialog.ChoiceCursor)
 	}
 }

@@ -76,6 +76,11 @@ func PassiveRank(m *PartyMember, nodeID string) int {
 // member-aware sibling of CritChance (which takes bare Stats for enemies and
 // the equipment-preview readouts).
 func MemberCritChance(m *PartyMember, quality int) float64 {
+	// Nil-safe like the PassiveRank/TreeNodeRank siblings: EffectiveStatsPtr →
+	// foldEquipment dereferences m.Equipped, so a nil member would crash here.
+	if m == nil {
+		return 0
+	}
 	chance := CritChance(EffectiveStatsPtr(m), quality)
 	chance += float64(PassiveRank(m, PassiveLuckyStrike)) * LuckyStrikeCritPerRank
 	return Clamp(chance, 0, CritCap)

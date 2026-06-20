@@ -81,14 +81,17 @@ type soundCue struct {
 //	SynthChord(duration, freqs, volume)
 //	SynthChime(noteDuration, firstHz, secondHz, volume)
 //	SynthSweep(duration, startHz, endHz, volume, attack, release)
+//	SynthWhistleTrill(duration, startHz, endHz, volume)
 var soundCues = [soundCount]soundCue{
 	// Bright UI tick — high pitch, large noise mix, very short.
 	SoundInputHit: {Display: "Input Hit", Canonical: "input_hit",
 		PCM: func() []int16 { return wavsynth.SynthClick(0.025, 1800, 0.5, 0.6, 0.22) }},
-	// Rare reward — keeps tonality so Excellent stands apart from a
-	// regular Nice. Stacked harmonics under a quick bell envelope.
+	// Rare reward — an SMRPG-style little trill whistle: a pure sine sweeping
+	// up from ~D6 to ~A6 with a fast vibrato shimmer, so a Great reads as a
+	// pleasing "tweet!" that stands apart from a regular Nice without the old
+	// stacked-harmonic chord that grew grating on repeat.
 	SoundInputGreat: {Display: "Input Great", Canonical: "input_great",
-		PCM: func() []int16 { return wavsynth.SynthChord(0.10, []float64{660, 990, 1320}, 0.20) }},
+		PCM: func() []int16 { return wavsynth.SynthWhistleTrill(0.16, 1200, 1800, 0.2) }},
 	// Low dull thud — failure registers as weight, not absence.
 	SoundInputMiss: {Display: "Input Miss", Canonical: "input_miss",
 		PCM: func() []int16 { return wavsynth.SynthClick(0.045, 220, 0.7, 0.25, 0.20) }},

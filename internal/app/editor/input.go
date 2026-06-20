@@ -166,6 +166,12 @@ func updateHotkeys(s *State) {
 		s.layer = cycleSelectableLayer(s.layer, dir)
 	}
 
+	// I toggles the isometric block preview (read-only) vs the top-down grid.
+	// (Tab is taken by layer-cycle above, so the view toggle is `I` for Iso.)
+	if !ctrl && !alt && rl.IsKeyPressed(rl.KeyI) {
+		toggleIsoView(s)
+	}
+
 	// F5: launch a playtest of the current in-memory area without saving.
 	// Ctrl+F5: same, but temporarily set StartTileX/Z to the grid cursor
 	// (or hover) so the playtest drops you AT the cursor instead of the

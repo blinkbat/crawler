@@ -234,12 +234,18 @@ func placeChests(a AreaDefinition) []Chest {
 	if len(a.ChestSpawns) == 0 {
 		return nil
 	}
+	// Compare against the CLAMPED start (the tile the player actually spawns on —
+	// NewGameState snaps an out-of-range authored start), not the raw StartTileX/Z,
+	// so a chest can't end up on the real spawn when the authored start was clamped.
+	// Same clamp placeCrystals / DefaultEntranceCrystalSpawns use.
+	sx := clampStartCoord(a.StartTileX, a.Width)
+	sz := clampStartCoord(a.StartTileZ, a.Height)
 	out := make([]Chest, 0, len(a.ChestSpawns))
 	for _, sp := range a.ChestSpawns {
 		if !a.InBounds(sp.TileX, sp.TileZ) {
 			continue
 		}
-		if sp.TileX == a.StartTileX && sp.TileZ == a.StartTileZ {
+		if sp.TileX == sx && sp.TileZ == sz {
 			continue
 		}
 		var stacks []ItemStack

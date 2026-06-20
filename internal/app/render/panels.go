@@ -1388,10 +1388,22 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 	// One MaterialIsIndoor lookup for the whole grid (it's a per-area constant),
 	// passed into each cell rather than recomputed per cell.
 	indoor := core.MaterialIsIndoor(m.Materials)
-	for localZ := 0; localZ < cellsY; localZ++ {
-		for localX := 0; localX < cellsX; localX++ {
-			mx := startX + localX
-			mz := startZ + localZ
+	// One mapSliceCell pass over the window PLUS a one-cell border, recording the
+	// slice/seenWall grids the seen-wall outline reads below. Shared classifier +
+	// outline with the corner minimap so the two map surfaces can't drift on the
+	// fog rule, the level slice, the wall suppression, or the border.
+	gw := cellsX + 2
+	slice := make([]bool, gw*(cellsY+2))
+	seen := make([]bool, gw*(cellsY+2))
+	ramp := make([]int8, gw*(cellsY+2))
+	for localZ := -1; localZ <= cellsY; localZ++ {
+		for localX := -1; localX <= cellsX; localX++ {
+			col, onSlice, seenWall, rampDir := mapSliceCell(m, g, indoor, startX+localX, startZ+localZ)
+			i := (localZ+1)*gw + (localX + 1)
+			slice[i], seen[i], ramp[i] = onSlice, seenWall, rampDir
+			if localX < 0 || localX >= cellsX || localZ < 0 || localZ >= cellsY {
+				continue
+			}
 			// Derive each cell's pixel rect from the difference of
 			// consecutive truncated edges (this cell's left, the next
 			// cell's left) rather than truncating origin AND size
@@ -1410,11 +1422,7 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 			if ph < 1 {
 				ph = 1
 			}
-			// Unvisited / out-of-bounds tiles render flat fog; revealed
-			// tiles show their material color. Shared fog rule with the
-			// corner minimap via mapCellFillColor so the two map surfaces
-			// can't drift on what lifts the fog.
-			rl.DrawRectangle(px, py, pw, ph, mapCellFillColor(m, g, indoor, mx, mz))
+			rl.DrawRectangle(px, py, pw, ph, col)
 		}
 	}
 
@@ -1432,6 +1440,11 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 		py := int32(mapY + float32(gz)*cellPx)
 		rl.DrawRectangle(int32(mapX), py, int32(gridW), 1, gridCol)
 	}
+	// Seen-wall border over the grid lines (same rule + look as the corner
+	// minimap): a muted line only where explored floor abuts a wall you've seen.
+	drawMapLevelOutline(slice, seen, gw, cellsX, cellsY, mapX, mapY, cellPx, cellPx)
+	// Up/down stair glyphs on ramp cells.
+	drawMapStairIcons(ramp, gw, cellsX, cellsY, mapX, mapY, cellPx, cellPx)
 
 	// Pack markers are intentionally omitted: the map shows the
 	// terrain you've seen, not who's standing on it. Enemies stay a
@@ -1602,33 +1615,6 @@ func visitedAt(g *core.GameState, x, z int) bool {
 		return false
 	}
 	return g.Visited[z][x]
-}
-
-// mapCellFillColor is the shared fog-of-war fill rule for both the corner
-// minimap and the panels Map tab: a tile reveals its material color only
-// once it's in bounds AND the player has stepped within reveal range of
-// it; otherwise it paints flat fog (the same fill as out-of-bounds).
-// Single source so the two map surfaces can't drift on what lifts the fog.
-// mapCellFillColor takes the area by pointer: the minimap calls it once per cell
-// (viewCells² per frame) and the Map tab once per visible cell, so copying the
-// large AreaDefinition struct header per call would dominate the loop.
-// mapCellFillColor resolves one tile's map swatch. `indoor` is the area's
-// MaterialIsIndoor verdict, passed in so the per-cell callers (the corner
-// minimap loop and the Map-tab grid) compute it once per draw instead of
-// per cell.
-func mapCellFillColor(m *core.AreaDefinition, g *core.GameState, indoor bool, x, z int) rl.Color {
-	if m.InBounds(x, z) && visitedAt(g, x, z) {
-		// Walls are elevation now: a tile raised above the walkable baseline
-		// reads as a wall/cliff on the map (matches the editor overview).
-		if m.ElevationLevelAt(x, z) > core.ElevationBaseline {
-			if indoor {
-				return minimapWallIndoor
-			}
-			return minimapWallOutdoor
-		}
-		return minimapTileColor(indoor, m.TileAt(x, z))
-	}
-	return mapTileFogColor
 }
 
 // drawPanelsMapArrow paints the player marker on the Map tab — a small

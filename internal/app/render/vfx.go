@@ -215,19 +215,25 @@ func spawnFromRequest(camera rl.Camera3D, g *core.GameState, req core.VFXRequest
 	// glyph offsets); `origin` is then rebound to the particle anchor so the
 	// per-kind dispatch switch below stays untouched and scaleBurst scales the
 	// burst around its own center.
-	// glyphOrigin keeps only the HORIZONTAL glyph offset (X along camera-right);
+	// glyphXOffset keeps only the HORIZONTAL glyph offset (X along camera-right);
 	// every VERTICAL offset (per-kind glyphYOffset, party head-lift) is folded
 	// into glyphRise, a world-Y amount the glyph applies in SCREEN space at draw.
 	// Doing the lift in screen space keeps the glyph directly above an off-center
 	// foe under the pitched battle camera (see spawnHitGlyph / DrawHitGlyphs).
-	glyphOrigin, glyphScale := origin, float32(1)
+	// Neither is baked into a world position here: the glyph stores the anchor
+	// identity + these offsets and re-resolves its live position each frame, so it
+	// tracks the target as it recoils/lunges (a frozen anchor drifted off
+	// off-center foes — see hitGlyph).
+	glyphXOffset, glyphScale := float32(0), float32(1)
 	glyphRise := float32(0)
+	glyphDepth := float32(0)
 	particleScale := float32(1)
 	switch req.Anchor {
 	case core.VFXAnchorEnemy:
 		if v, ok := enemyVisualForVFX(g, assets, req.SlotIdx); ok {
-			glyphOrigin = cameraRelativeOffset(camera, origin, v.glyphXOffset, 0, 0)
+			glyphXOffset = v.glyphXOffset
 			glyphRise = v.glyphYOffset
+			glyphDepth = v.depthOffset
 			glyphScale = v.effectiveGlyphScale()
 			origin = cameraRelativeOffset(camera, origin, v.particleXOffset, v.particleYOffset, v.particleZOffset)
 			particleScale = v.effectiveParticleScale()
@@ -244,8 +250,9 @@ func spawnFromRequest(camera rl.Camera3D, g *core.GameState, req core.VFXRequest
 		// live FX, so tuning them "didn't seem to save."
 		if req.SlotIdx >= 0 && req.SlotIdx < len(g.Party) {
 			if v, ok := partyVisualFor(assets, g.Party[req.SlotIdx].Class); ok {
-				glyphOrigin = cameraRelativeOffset(camera, origin, v.glyphXOffset, 0, 0)
+				glyphXOffset = v.glyphXOffset
 				glyphRise += v.glyphYOffset
+				glyphDepth = v.depthOffset
 				glyphScale = v.effectiveGlyphScale()
 				origin = cameraRelativeOffset(camera, origin, v.particleXOffset, v.particleYOffset, v.particleZOffset)
 				particleScale = v.effectiveParticleScale()
@@ -316,7 +323,7 @@ func spawnFromRequest(camera rl.Camera3D, g *core.GameState, req core.VFXRequest
 	// is a no-op, so only damaging hits get one — and every existing impact VFX
 	// gets it for free (player→foe and enemy→party alike). Anchored + sized by
 	// the kind's glyph offsets/scale.
-	spawnHitGlyph(hitGlyphForVFX(req.Kind), glyphOrigin, glyphRise, glyphScale)
+	spawnHitGlyph(hitGlyphForVFX(req.Kind), req, glyphXOffset, glyphDepth, glyphRise, glyphScale)
 }
 
 // enemyVisualForVFX resolves the per-kind enemyVisual for the enemy occupying

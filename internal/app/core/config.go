@@ -37,15 +37,20 @@ const (
 	TurnDuration  = 0.14
 	BumpDuration  = 0.18
 	FlashDuration = 0.16
-	// MoveRepeatDelay / TurnRepeatDelay throttle HELD movement: after a step or
-	// turn animation lands, a held key waits this long before re-firing the
-	// next one. The step/turn animation itself is unchanged (movement stays as
-	// snappy as ever) and a tap is unaffected — the delay only paces auto-repeat
-	// so holding a key can't machine-gun steps or blow past the facing you meant
-	// to stop on. Turns wait longer than steps: overshooting a facing is more
-	// disorienting (and easier to do) than over-stepping a tile.
+	// TurnRepeatDelay throttles HELD turning: after a turn animation lands, a
+	// still-held turn key waits this long before re-firing the next turn (wired in
+	// explore/movement.go's updatePlayer). The turn animation itself is unchanged
+	// (a single turn stays as snappy as ever) and a fresh tap/press is unaffected
+	// — the delay only paces AUTO-REPEAT so holding a turn key doesn't spin you
+	// like a turntable; you have to keep holding to keep rotating, which makes it
+	// far harder to blow past the facing you meant to stop on. The rest period is
+	// purely additive (the cooldown only counts down between turns, not during the
+	// turn animation), so this is the actual hold-to-continue gap in seconds.
+	// MoveRepeatDelay is the step counterpart; it is reserved (not currently gated
+	// — stepping re-fires immediately on land) since over-stepping a tile is far
+	// less disorienting than over-spinning a facing.
 	MoveRepeatDelay = float32(0.07)
-	TurnRepeatDelay = float32(0.15)
+	TurnRepeatDelay = float32(0.25)
 	// FlashTintStrength is the peak fraction a flash washes a sprite toward
 	// white (FlashTint): both the cap and the per-frame scale ramp to it.
 	FlashTintStrength = 0.86

@@ -379,6 +379,7 @@ func updateRetroMenu(g *core.GameState) {
 
 func restartGame(g *core.GameState) {
 	core.ResetGameState(g)
+	ResetTurnRepeat()
 }
 
 // saveGame writes the run to disk from the Options submenu. Closes the
@@ -463,8 +464,43 @@ func updateFreeLook(p *core.Player, dt float32) {
 	p.LookPitch = core.Approach(p.LookPitch, 0, core.FreeLookReturnSpeed*dt)
 }
 
+// Turn auto-repeat pacing. A FRESH turn-key press turns once immediately; while
+// the key stays HELD, the next turn waits core.TurnRepeatDelay after the prior
+// turn lands before re-firing (see updatePlayer). Without this a held turn key
+// re-armed the instant the ~0.14s turn animation finished, so the player spun
+// continuously the moment they touched the key. turnHeldLast tracks the held
+// state across frames so a tap is distinguishable from a sustained hold;
+// turnRepeatCooldown is the remaining rest before the next auto-repeat turn.
+var (
+	turnHeldLast       bool
+	turnRepeatCooldown float32
+)
+
+// ResetTurnRepeat clears the held-turn auto-repeat state. updatePlayer doesn't
+// run during a battle or an area swap, so a turn key held UNINTERRUPTED across
+// one of those (never releasing to self-clear) would otherwise carry a stale
+// cooldown — and a stale "still held" edge — into the next area. Called on area
+// transition (run.go) and game restart so the first turn there is honest.
+func ResetTurnRepeat() {
+	turnHeldLast = false
+	turnRepeatCooldown = 0
+}
+
 func updatePlayer(g *core.GameState, dt float32) {
 	p := &g.Player
+
+	// Detect a fresh turn press (not-held → held) before any early return so the
+	// held-edge stays tracked every frame, even while a turn animation plays. A
+	// deliberate new press clears the cooldown so it turns THIS frame; only a
+	// sustained hold has to wait out core.TurnRepeatDelay between turns. Releasing
+	// the key also clears the cooldown so it's self-clearing — no stale value can
+	// linger across a release or a scene change (battle / area transition, where
+	// updatePlayer isn't ticked) into the next held turn.
+	turnHeld := input.TurnLeftHeld() || input.TurnRightHeld()
+	if !turnHeld || !turnHeldLast {
+		turnRepeatCooldown = 0
+	}
+	turnHeldLast = turnHeld
 
 	// Mid-animation: advance it. When it COMPLETES with time to spare and a
 	// movement key is still held, fall through to arm the next step and spend
@@ -485,11 +521,25 @@ func updatePlayer(g *core.GameState, dt float32) {
 	// animation, and holding the key re-fires the next as soon as this one
 	// lands — continuous movement paced by the animation. A tap still steps
 	// exactly once.
+	//
+	// Turning is the exception: a held turn waits out turnRepeatCooldown before
+	// re-firing (set to core.TurnRepeatDelay on each turn) so holding doesn't spin
+	// continuously. The cooldown counts down HERE — past the mid-animation early
+	// return above — so it only ticks while at rest between turns, never during
+	// the turn animation; the rest gap is thus exactly core.TurnRepeatDelay. A
+	// fresh press zeroed it at the top, so taps and deliberate re-presses are
+	// instant.
+	if turnRepeatCooldown > 0 {
+		turnRepeatCooldown -= dt
+	}
+	canTurn := turnRepeatCooldown <= 0
 	switch {
-	case input.TurnLeftHeld():
+	case canTurn && input.TurnLeftHeld():
 		startTurn(p, -1)
-	case input.TurnRightHeld():
+		turnRepeatCooldown = core.TurnRepeatDelay
+	case canTurn && input.TurnRightHeld():
 		startTurn(p, 1)
+		turnRepeatCooldown = core.TurnRepeatDelay
 	case input.StepForwardHeld():
 		startStep(p, g, 0, 1)
 	case input.StepBackHeld():

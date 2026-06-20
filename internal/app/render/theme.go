@@ -1301,7 +1301,7 @@ func drawAccentStripe(panelX, panelY, panelH int32, col color.RGBA) {
 // rect and the alpha to fade giltBright by. (The battle splash's
 // fleuron-flanked divider is a distinct ornament and stays bespoke.)
 func drawGiltRule(x, y, w, h int32, alpha float32) {
-	rl.DrawRectangle(x, y, w, h, fadeColor(giltBright, alpha))
+	speckleHairline(x, y, w, h, fadeColor(giltBright, alpha))
 }
 
 // drawPipCappedRule paints a 1px horizontal rule from x to x+w in ruleCol,
@@ -1311,7 +1311,7 @@ func drawGiltRule(x, y, w, h int32, alpha float32) {
 // pips keeps the two from drifting. (drawPanelHeading paints a richer multi-layer
 // rule with an extra brass glint and a trailing fleuron, so it stays bespoke.)
 func drawPipCappedRule(x, y, w int32, ruleCol color.RGBA, pipR float32, pipCol color.RGBA) {
-	rl.DrawRectangle(x, y, w, 1, ruleCol)
+	speckleHairline(x, y, w, 1, ruleCol)
 	drawDiamondPip(float32(x), float32(y), pipR, pipCol)
 	drawDiamondPip(float32(x+w), float32(y), pipR, pipCol)
 }
@@ -1322,8 +1322,8 @@ func drawPipCappedRule(x, y, w int32, ruleCol color.RGBA, pipR float32, pipCol c
 // centre fleurons over it) and the battle-splash divider (which fades it with
 // the splash) so the segment math isn't hand-written in both.
 func drawSplitRule(leftX, rightX, cx, y, gap float32, col color.RGBA) {
-	rl.DrawRectangle(int32(leftX), int32(y), int32(cx-gap-leftX), 1, col)
-	rl.DrawRectangle(int32(cx+gap), int32(y), int32(rightX-(cx+gap)), 1, col)
+	speckleHairline(int32(leftX), int32(y), int32(cx-gap-leftX), 1, col)
+	speckleHairline(int32(cx+gap), int32(y), int32(rightX-(cx+gap)), 1, col)
 }
 
 // drawCard renders a wood-framed glass pane — the library aesthetic
@@ -1389,6 +1389,53 @@ func drawPanelCard(x, y, w, h int32) {
 //
 // Lines stop short of the corners (cornerClear) so they never fight the
 // rounded mitres; small chips skip the treatment entirely.
+// speckleHairlineDrop is the maximum fraction a hairline pixel's alpha is
+// dithered DOWN by the painterly speckle. Some pixels stay full, some thin out
+// toward (1-drop) of their alpha, so a 1px highlight reads as a hand-laid rule
+// rather than a mechanically uniform stroke. Kept modest so the line still reads
+// as continuous — raise toward 1 for a chalkier, more broken look.
+const speckleHairlineDrop = float32(0.4)
+
+// speckleAlpha scales base down by a deterministic [1-drop, 1] factor hashed
+// from the pixel position, giving a hairline stable per-pixel opacity variance
+// (some pixels lighter) that doesn't shimmer frame-to-frame. Position-hashed, so
+// the same pixel always lands on the same alpha.
+func speckleAlpha(px, py int32, base uint8) uint8 {
+	h := uint32(px)*73856093 ^ uint32(py)*19349663
+	h ^= h >> 13
+	h *= 0x5bd1e995
+	frac := float32(h&1023) / 1023 // 0..1
+	return uint8(float32(base) * (1 - speckleHairlineDrop*frac))
+}
+
+// speckleHairline draws a 1px axis-aligned line (exactly one of w/h must be 1)
+// in col, dithering each pixel's alpha via speckleAlpha so the highlight reads
+// as a subtle, painterly rule instead of a uniform 1px stroke. Geometry stays
+// EXACTLY straight — only alpha varies (this is opacity speckle, NOT positional
+// waver). A non-1px or degenerate rect falls back to a plain fill so callers can
+// route any hairline through here safely.
+func speckleHairline(x, y, w, h int32, col color.RGBA) {
+	n, horizontal := w, true
+	if h != 1 {
+		n, horizontal = h, false
+	}
+	if (w != 1 && h != 1) || n <= 0 {
+		rl.DrawRectangle(x, y, w, h, col)
+		return
+	}
+	for i := int32(0); i < n; i++ {
+		px, py := x, y
+		if horizontal {
+			px += i
+		} else {
+			py += i
+		}
+		c := col
+		c.A = speckleAlpha(px, py, col.A)
+		rl.DrawRectangle(px, py, 1, 1, c)
+	}
+}
+
 func drawCardBevel(x, y, w, h int32) {
 	if w < 56 || h < 34 {
 		return
@@ -1406,16 +1453,17 @@ func drawCardBevel(x, y, w, h int32) {
 	hiSide := woodAccentBevelSide
 	lo := fadeColor(shadowHeavy, 0.62)
 	loSide := fadeColor(shadowHeavy, 0.34)
-	// Raised outer edge.
-	rl.DrawRectangle(hx, y+1, hw, 1, hi)
-	rl.DrawRectangle(hx, y+h-2, hw, 1, lo)
-	rl.DrawRectangle(x+1, vy, 1, vh, hiSide)
-	rl.DrawRectangle(x+w-2, vy, 1, vh, loSide)
+	// Raised outer edge — the 1px highlight/shadow hairlines are speckled so the
+	// bevel reads as a hand-laid painterly edge rather than four mechanical rules.
+	speckleHairline(hx, y+1, hw, 1, hi)
+	speckleHairline(hx, y+h-2, hw, 1, lo)
+	speckleHairline(x+1, vy, 1, vh, hiSide)
+	speckleHairline(x+w-2, vy, 1, vh, loSide)
 	// Recessed inner lip (only when the pane is tall enough that the two
 	// reads don't merge into stripes).
 	if h >= 56 {
-		rl.DrawRectangle(hx, y+ft, hw, 1, fadeColor(shadowHeavy, 0.42))
-		rl.DrawRectangle(hx, y+h-ft-1, hw, 1, woodAccentInlayLip)
+		speckleHairline(hx, y+ft, hw, 1, fadeColor(shadowHeavy, 0.42))
+		speckleHairline(hx, y+h-ft-1, hw, 1, woodAccentInlayLip)
 	}
 }
 
@@ -1464,7 +1512,7 @@ func drawCardInlay(x, y, w, h int32) {
 		botY := y + h - inset - 3
 		lineX := x + inset + lineInset
 		lineW := innerW - lineInset*2
-		rl.DrawRectangle(lineX, botY, lineW, 1, fadeColor(giltDim, 0.28))
+		speckleHairline(lineX, botY, lineW, 1, fadeColor(giltDim, 0.28))
 	}
 
 	corners := [4]rl.Vector2{

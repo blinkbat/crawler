@@ -2,6 +2,7 @@ package render
 
 import (
 	"image/color"
+	"math"
 
 	"crawler/internal/app/core"
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -68,19 +69,31 @@ func drawMinimap(m *core.AreaDefinition, g *core.GameState, assets Resources) {
 	// One MaterialIsIndoor lookup for the whole grid (a per-area constant),
 	// passed into each cell rather than recomputed per cell.
 	indoor := core.MaterialIsIndoor(m.Materials)
-	for localZ := int32(0); localZ < viewCells; localZ++ {
-		for localX := int32(0); localX < viewCells; localX++ {
-			mapX := startX + int(localX)
-			mapZ := startZ + int(localZ)
-			// Unrevealed tiles paint the same flat fog as out-of-bounds
-			// so the player can't read the layout through the haze —
-			// the minimap is strictly "what you've walked on" until a
-			// step lands the tile inside the reveal radius. Shared fog
-			// rule with the panels Map tab via mapCellFillColor.
-			col := mapCellFillColor(m, g, indoor, mapX, mapZ)
-			rl.DrawRectangle(gridX+localX*cell, gridY+localZ*cell, cell-1, cell-1, col)
+	// Single mapSliceCell pass over the window PLUS a one-cell border, recorded
+	// into the slice/seenWall grids. The fill draws the window cells; the outline
+	// below reads the grids (including the border ring) for O(1) neighbour tests —
+	// so MapSurfaceAt runs once per window+border cell instead of once for the fill
+	// and again ~5× per cell for the outline's self+neighbour lookups.
+	vc := int(viewCells)
+	gw := vc + 2
+	slice := make([]bool, gw*gw)
+	seen := make([]bool, gw*gw)
+	ramp := make([]int8, gw*gw)
+	for localZ := -1; localZ <= vc; localZ++ {
+		for localX := -1; localX <= vc; localX++ {
+			col, onSlice, seenWall, rampDir := mapSliceCell(m, g, indoor, startX+localX, startZ+localZ)
+			i := (localZ+1)*gw + (localX + 1)
+			slice[i], seen[i], ramp[i] = onSlice, seenWall, rampDir
+			if localX >= 0 && localX < vc && localZ >= 0 && localZ < vc {
+				rl.DrawRectangle(gridX+int32(localX)*cell, gridY+int32(localZ)*cell, cell-1, cell-1, col)
+			}
 		}
 	}
+	// Editor-style silhouette: a border ONLY where explored current-level floor
+	// abuts a seen wall — drawn over the cell fills.
+	drawMapLevelOutline(slice, seen, gw, vc, vc, float32(gridX), float32(gridY), float32(cell), float32(cell))
+	// Up/down stair glyphs on ramp cells, drawn over the fill + outline.
+	drawMapStairIcons(ramp, gw, vc, vc, float32(gridX), float32(gridY), float32(cell), float32(cell))
 
 	// Pack markers intentionally omitted from the corner minimap too:
 	// matches the Map panel's fog-of-war rule (terrain only, enemies
@@ -254,9 +267,30 @@ func buildMinimapPropColorTable() ([256]rl.Color, [256]bool) {
 	var t [256]rl.Color
 	var p [256]bool
 	for c, col := range minimapPropColors {
-		t[c], p[c] = col, true
+		// Normalize toward a common light "blocker" tone as the cache is built —
+		// the authored hues stay the source of truth, but the rendered map reads
+		// as dark=walkable / light=blocked rather than a rainbow of props.
+		t[c], p[c] = normalizeMapProp(col), true
 	}
 	return t, p
+}
+
+// mapPropBase is the common light tone every prop swatch is pulled toward so the
+// map reads as a clean walkable/blocked contrast; mapPropTint is how much of the
+// authored hue survives over it. Tuned for "slightly distinguishable, not a
+// rainbow" — enough tint to tell foliage from masonry, not enough to fight the
+// floor/wall legibility convention. One knob each, in one place.
+var mapPropBase = rl.NewColor(150, 146, 136, minimapPropAlpha)
+
+const mapPropTint = 0.30 // fraction of the authored hue retained over the base
+
+// normalizeMapProp blends an authored prop swatch toward mapPropBase, keeping
+// mapPropTint of its original hue so props vary slightly without returning to a
+// per-prop rainbow.
+func normalizeMapProp(c rl.Color) rl.Color {
+	out := core.MixColor(mapPropBase, c, mapPropTint)
+	out.A = minimapPropAlpha
+	return out
 }
 
 // minimapTileColor maps a composed tile char (from AreaDefinition.TileAt)
@@ -266,8 +300,7 @@ func buildMinimapPropColorTable() ([256]rl.Color, [256]bool) {
 // and every solid thing pops brighter against it, so "where can I walk"
 // is obvious at a glance. Tones stay above the near-black fog
 // (mapTileFogColor) so explored-but-walkable never reads as unrevealed.
-// Shared by the corner minimap and the panels Map tab via
-// mapCellFillColor.
+// Shared by the corner minimap and the panels Map tab via mapSliceCell.
 // minimap floor/wall/water tones. Hoisted out of minimapTileColor (like the
 // prop hues above and the time-of-day / player-arrow tints below) so the
 // structural-tile palette lives in one named block rather than as inline
@@ -284,10 +317,20 @@ var (
 	minimapFloorOutdoor = rl.NewColor(38, 56, 40, minimapStructAlpha)
 )
 
+// mapNonBlockingPropTint is how much of a non-blocking prop's hue survives over
+// the floor tone on the map. Small on purpose: a torch / flower / fern / grass
+// tuft is walk-through, so it should read ALMOST as floor — only props that
+// actually block your path get their full bright swatch.
+const mapNonBlockingPropTint = 0.22
+
 // minimapTileColor maps a tile char to its swatch. `indoor` is the area's
 // MaterialIsIndoor verdict, hoisted to the caller so the per-cell loop computes
 // it once per draw rather than re-running findMaterialDef for every cell.
 func minimapTileColor(indoor bool, tile byte) color.RGBA {
+	floor := minimapFloorOutdoor
+	if indoor {
+		floor = minimapFloorIndoor
+	}
 	switch {
 	case tile == core.TileRock:
 		if indoor {
@@ -298,14 +341,232 @@ func minimapTileColor(indoor bool, tile byte) color.RGBA {
 		return minimapDeepWater
 	default:
 		if minimapPropColorPresent[tile] {
-			// Props block; their identity hues all sit lighter than the dark
-			// walkable floor below, so they read as "stuff in the way."
+			if core.PropIsNonBlocking(tile) {
+				// Walk-through props (torch, flower, fern, grass) read ALMOST as
+				// floor — just a faint hint of their hue — so they don't masquerade
+				// as obstacles. Only blocking props keep their full bright swatch.
+				out := core.MixColor(floor, minimapPropColorTable[tile], mapNonBlockingPropTint)
+				out.A = minimapStructAlpha
+				return out
+			}
+			// Blocking props sit lighter than the dark walkable floor below, so
+			// they read as "stuff in the way."
 			return minimapPropColorTable[tile]
 		}
-		if indoor {
-			return minimapFloorIndoor
+		return floor
+	}
+}
+
+// mapRampColor is the swatch for a ramp connecting to/from the current level —
+// a warm brass that reads as "the way up/down," distinct from the dark walkable
+// floor and the light wall/cliff tones so connections between levels stand out.
+var mapRampColor = rl.NewColor(198, 168, 104, minimapStructAlpha)
+
+// Level-slice fade: a floor below the observer recedes geometrically toward the
+// fog so it reads as "down there" context without competing with the current
+// level — the in-game mirror of the editor canvas's levelDistanceFade. Clamped
+// so even the deepest visible floor keeps a faint read. The map recolors many
+// cells per frame, so the falloff is a precomputed table (no per-cell math.Pow).
+const (
+	mapLevelFadeFalloff = 0.55
+	mapLevelFadeMin     = float32(0.18)
+)
+
+var mapLevelFadeTable = func() [core.MaxElevationLevel + 1]float32 {
+	var t [core.MaxElevationLevel + 1]float32
+	for d := range t {
+		f := float32(math.Pow(mapLevelFadeFalloff, float64(d)))
+		if f < mapLevelFadeMin {
+			f = mapLevelFadeMin
 		}
-		return minimapFloorOutdoor
+		t[d] = f
+	}
+	return t
+}()
+
+func mapLevelFadeFor(d int) float32 {
+	if d < 0 {
+		d = -d
+	}
+	if d >= len(mapLevelFadeTable) {
+		return mapLevelFadeMin
+	}
+	return mapLevelFadeTable[d]
+}
+
+// mapSurfaceColor turns an observer-relative column classification (core's level
+// slice) into its map swatch: the current level at full strength, walls/cliffs
+// light, ramps brass, and floors below faded toward the fog by their depth. Void
+// reads as fog (same as unrevealed) so an open shaft doesn't paint a phantom
+// floor. Shared by the corner minimap and the Map tab via mapSliceCell.
+// (The Map tab no longer fills MapSurfaceWall — see mapSliceCell — but this still
+// resolves every other kind for both surfaces.)
+func mapSurfaceColor(m *core.AreaDefinition, indoor bool, x, z int, surf core.MapSurface) rl.Color {
+	switch surf.Kind {
+	case core.MapSurfaceWall:
+		if indoor {
+			return minimapWallIndoor
+		}
+		return minimapWallOutdoor
+	case core.MapSurfaceRamp:
+		return mapRampColor
+	case core.MapSurfaceBelow:
+		base := minimapTileColor(indoor, m.TileAt(x, z))
+		return core.MixColor(base, mapTileFogColor, float64(1-mapLevelFadeFor(surf.Depth)))
+	case core.MapSurfaceFloor:
+		return minimapTileColor(indoor, m.TileAt(x, z))
+	default: // MapSurfaceVoid
+		return mapTileFogColor
+	}
+}
+
+// minimapLevelOutlineColor / Underlay are the SEEN-WALL border: a muted brass
+// line over a faint dark halo. Deliberately dim (low alpha) so it reads as a
+// quiet pen line tracing the walls you've actually seen, not a bright highlight.
+// Shared by the corner minimap and the panels Map tab via drawMapLevelOutline.
+var (
+	minimapLevelOutlineColor    = rl.NewColor(176, 146, 86, 150)
+	minimapLevelOutlineUnderlay = rl.NewColor(12, 12, 18, 130)
+)
+
+// minimapOutlineCoreThick / UnderThick are the seen-boundary border stroke
+// widths (px): a brass core over a slightly wider dark halo. Tune both to make
+// the wall/cliff outline heavier or lighter.
+const (
+	minimapOutlineCoreThick  = float32(2.5)
+	minimapOutlineUnderThick = float32(4)
+)
+
+// mapSliceCell classifies and colors one cell for the level-sliced in-game maps
+// (corner minimap + panels Map tab). Returns the fog-of-war fill with the
+// next-elevation wall suppressed to fog (the outline marks seen walls instead of
+// filling them as whole tiles), plus whether the cell is on the current-level
+// walkable slice (floor/ramp) and whether it is a SEEN BOUNDARY — a wall (a
+// next-elevation cube) OR a cliff edge (a drop to a revealed lower level). Both
+// bound the current level, so both earn an outline. Unrevealed / out-of-bounds
+// cells are fog with both flags false. Exactly one MapSurfaceAt per call —
+// callers cache the flags in a window+border grid.
+// rampDir reports a ramp cell's travel direction relative to the player's level:
+// +1 = stairs UP, -1 = stairs DOWN, 0 = not a ramp. drawMapStairIcons keys the
+// up/down stair glyph off it.
+func mapSliceCell(m *core.AreaDefinition, g *core.GameState, indoor bool, x, z int) (col rl.Color, onSlice, seenWall bool, rampDir int8) {
+	col = mapTileFogColor
+	if !m.InBounds(x, z) || !visitedAt(g, x, z) {
+		return col, false, false, 0
+	}
+	surf := m.MapSurfaceAt(x, z, g.Player.Level)
+	switch surf.Kind {
+	case core.MapSurfaceFloor, core.MapSurfaceRamp:
+		onSlice = true
+		if surf.Kind == core.MapSurfaceRamp {
+			// A ramp stores its LOW level; MapSurfaceAt only returns Ramp when that
+			// low is the player's level (L → ascends to L+1, stairs UP) or one
+			// below it (L-1 → its high end is L, stairs DOWN from here).
+			if m.ElevationLevelAt(x, z) >= g.Player.Level {
+				rampDir = 1
+			} else {
+				rampDir = -1
+			}
+		}
+	case core.MapSurfaceWall, core.MapSurfaceBelow:
+		// Wall = a next-elevation cube (a cliff/wall face rising into eyeline);
+		// Below = a drop to a lower level (a cliff EDGE you'd fall off). Both
+		// bound the floor you're on, so both get the border. (Below still fills
+		// its faded lower-level swatch — only Wall is suppressed to fog.)
+		seenWall = true
+	}
+	if surf.Kind != core.MapSurfaceWall {
+		col = mapSurfaceColor(m, indoor, x, z, surf)
+	}
+	return col, onSlice, seenWall, rampDir
+}
+
+// drawMapLevelOutline strokes a border ONLY where an explored current-level cell
+// (floor/ramp) abuts a SEEN BOUNDARY — a revealed wall (next-elevation cube) or a
+// cliff edge (a drop to a revealed lower level). It deliberately does NOT outline
+// the fog frontier (an explored floor next to unexplored space): that terrain
+// might still be walkable, so a border there would imply a boundary that hasn't
+// been seen. slice/seenWall are window+border grids (gw == cols+2, indexed with a
+// +1 border offset), so neighbour tests one step outside the window are O(1)
+// reads. Geometry is float so the integer-celled corner minimap and the
+// fractional-celled Map tab share it. The grids must be sized gw*(rows+2).
+func drawMapLevelOutline(slice, seenWall []bool, gw, cols, rows int, originX, originY, cellW, cellH float32) {
+	in := func(lx, lz int) bool { return lx >= -1 && lz >= -1 && lx <= cols && lz <= rows }
+	isSlice := func(lx, lz int) bool { return in(lx, lz) && slice[(lz+1)*gw+(lx+1)] }
+	isWall := func(lx, lz int) bool { return in(lx, lz) && seenWall[(lz+1)*gw+(lx+1)] }
+	// Double-stroke (faint dark halo under a muted brass core) so the line stays
+	// legible over both the dark walkable floor and the fog.
+	edge := func(ax, ay, bx, by float32) {
+		rl.DrawLineEx(rl.NewVector2(ax, ay), rl.NewVector2(bx, by), minimapOutlineUnderThick, minimapLevelOutlineUnderlay)
+		rl.DrawLineEx(rl.NewVector2(ax, ay), rl.NewVector2(bx, by), minimapOutlineCoreThick, minimapLevelOutlineColor)
+	}
+	for lz := 0; lz < rows; lz++ {
+		for lx := 0; lx < cols; lx++ {
+			if !isSlice(lx, lz) {
+				continue
+			}
+			px := originX + float32(lx)*cellW
+			py := originY + float32(lz)*cellH
+			if isWall(lx-1, lz) { // left edge abuts a seen wall
+				edge(px, py, px, py+cellH)
+			}
+			if isWall(lx+1, lz) { // right
+				edge(px+cellW, py, px+cellW, py+cellH)
+			}
+			if isWall(lx, lz-1) { // top
+				edge(px, py, px+cellW, py)
+			}
+			if isWall(lx, lz+1) { // bottom
+				edge(px, py+cellH, px+cellW, py+cellH)
+			}
+		}
+	}
+}
+
+// stairIconColor is the dark ink the stair silhouette is drawn in — dark so the
+// steps read crisply over the brass ramp fill on both maps.
+var stairIconColor = rl.NewColor(34, 24, 12, 240)
+
+// drawMapStairIcons stamps a staircase glyph on every ramp cell in the window:
+// rampDir > 0 → stairs UP, < 0 → stairs DOWN, 0 → no ramp. rampDir is the same
+// window+border grid the fill pass built (gw == cols+2, +1 border offset); only
+// the in-window cells are iterated. Geometry matches drawMapLevelOutline so the
+// corner minimap and the Map tab share it.
+func drawMapStairIcons(rampDir []int8, gw, cols, rows int, originX, originY, cellW, cellH float32) {
+	r := min(cellW, cellH) * 0.34
+	if r < 2 {
+		return // cells too small to read a stair glyph — skip rather than draw mush
+	}
+	for lz := 0; lz < rows; lz++ {
+		for lx := 0; lx < cols; lx++ {
+			d := rampDir[(lz+1)*gw+(lx+1)]
+			if d == 0 {
+				continue
+			}
+			cx := originX + (float32(lx)+0.5)*cellW
+			cy := originY + (float32(lz)+0.5)*cellH
+			drawStairIcon(cx, cy, r, d > 0)
+		}
+	}
+}
+
+// drawStairIcon draws a staircase silhouette centered at (cx,cy) with half-extent
+// r: three steps whose tops ASCEND left→right for up-stairs and DESCEND for
+// down-stairs, so a ramp reads as "stairs up" vs "stairs down". The stepped top
+// edge is the "stairs" cue; the slope direction is the up/down cue.
+func drawStairIcon(cx, cy, r float32, up bool) {
+	const steps = 3
+	w, h := r*2, r*2
+	left, bottom := cx-r, cy+r
+	stepW := w / steps
+	unit := h / steps
+	for i := 0; i < steps; i++ {
+		n := i + 1 // ascending step count from the left
+		if !up {
+			n = steps - i // descending for down-stairs
+		}
+		bh := unit * float32(n)
+		rl.DrawRectangleRec(rl.NewRectangle(left+float32(i)*stepW, bottom-bh, stepW, bh), stairIconColor)
 	}
 }
 
@@ -375,7 +636,7 @@ func drawMinimapTimeOfDay(font rl.Font, stepCount int, x, y, width int32) {
 // wood accent so the day/night strip reads as warm brass-on-wood cabinetry
 // rather than a saturated rainbow, while keeping a faint per-phase hue cue.
 func woodenPhaseColor(c rl.Color) rl.Color {
-	const k = 0.64 // pull toward wood
+	const k = 0.64                         // pull toward wood
 	out := core.MixColor(c, woodAccent, k) // per-channel lerp lives in core, not a local re-roll
 	out.A = 255                            // strip always paints fully opaque regardless of input alphas
 	return out

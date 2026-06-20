@@ -16,7 +16,7 @@ import (
 // Presentation-only state, render-side — same convention as the particle /
 // bar-ghost / hit-glyph pools (no GameState field; ticked once per frame from
 // DrawOverlay via rl.GetFrameTime, clamped through clampFrameDelta).
-const menuFadeDur = float32(0.12) // seconds for a full HUD↔menu cross-fade
+const menuFadeDur = float32(0.08) // seconds for a full HUD↔menu cross-fade
 
 var fadeRT previewRT
 
@@ -116,12 +116,31 @@ func withFadeAlpha(alpha float32, draw func()) {
 	draw()
 	rl.EndTextureMode()
 	inFadeCapture = false
-	tint := colorWithAlpha(rl.White, uint8(alpha*255))
+	// Premultiplied-alpha blit. Content drawn into the RT over a transparent
+	// (Blank) clear with standard alpha blending is stored PREMULTIPLIED (color
+	// already scaled by coverage). Blitting that back with normal alpha blend
+	// would multiply the translucent pixels by their alpha a SECOND time, so the
+	// see-through card body / veil darkened and vanished faster than the opaque
+	// frame strokes — the "bg fades before the border" artifact. Premultiplied
+	// blend (out = src.rgb + dst·(1−src.a)) composites both proportionally, so the
+	// whole card (body AND border) fades as one. Only the transition frames hit
+	// this path (full opacity draws straight to the backbuffer), so the
+	// steady-state look is unchanged.
+	//
+	// The fade tint must scale ALL FOUR channels by `alpha`: premultiplied rgb is
+	// folded into the color, so a (255,255,255,alpha) tint would leave rgb at full
+	// and an opaque pixel would resolve to menu + dst·(1−alpha·a) — i.e. ADD the
+	// menu over the world instead of fading it out. A uniform gray (alpha in every
+	// channel) scales the premultiplied rgb and the coverage together.
+	g := uint8(alpha * 255)
+	tint := rl.NewColor(g, g, g, g)
+	rl.BeginBlendMode(rl.BlendAlphaPremultiply)
 	// RenderTextures store rows bottom-up; negate the source height to blit
 	// upright (same idiom as previewRT.blit / the retro-filter blit).
 	rl.DrawTextureRec(fadeRT.rt.Texture,
 		rl.NewRectangle(0, 0, float32(fadeRT.w), -float32(fadeRT.h)),
 		rl.NewVector2(0, 0), tint)
+	rl.EndBlendMode()
 }
 
 // closeFadeRT frees the fade capture texture. Wired into Resources.Unload.

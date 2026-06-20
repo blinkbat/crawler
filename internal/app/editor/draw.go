@@ -143,6 +143,12 @@ func (s *State) cellAt(p rl.Vector2) (int, int) {
 	if s.rect.cellPx <= 0 {
 		return -1, -1
 	}
+	// Isometric preview is read-only: the top-down screen→tile math doesn't
+	// hold under the iso projection, so report "no tile" — this suppresses
+	// hover, paint, and the cursor-driven actions while iso is on.
+	if s.isoView {
+		return -1, -1
+	}
 	// Reject points outside the grid VIEWPORT, not just the grid origin.
 	// When the map is panned/zoomed its tiles can extend visually under the
 	// metadata panel; without this gate a mouse over that panel resolves to a
@@ -2108,6 +2114,13 @@ func drawReadonlyValue(font rl.Font, r rl.Rectangle, text string) {
 // props → ceiling (hash) → entities.
 func drawGrid(s *State, font rl.Font) {
 	rl.DrawRectangleRec(s.rect.grid, bgFieldInset)
+	// Isometric preview takes over the whole canvas (read-only — see iso.go).
+	// It computes its own sizing from the panel, so it runs before the top-down
+	// cellPx gate and returns without drawing any of the flat-grid overlays.
+	if s.isoView {
+		drawGridIso(s, font)
+		return
+	}
 	if s.rect.cellPx <= 0 {
 		return
 	}

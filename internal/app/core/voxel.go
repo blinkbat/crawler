@@ -132,6 +132,69 @@ func (a *AreaDefinition) LowestStandableLevel(x, z int) int {
 	return -1
 }
 
+// MapSurfaceKind classifies what an observer standing on `observerLevel` sees at
+// a column once the world is flattened to a top-down map: the floor of their own
+// level, a wall/cliff rising into their eyeline, a floor some levels below them,
+// a ramp connecting to/from their level, or nothing at or below them (an open
+// shaft). It's the shared rule behind the in-game map's level slice — show the
+// current level, fade levels below, drop decks above — so the corner minimap and
+// the Map tab can't drift on how the slice is computed.
+type MapSurfaceKind int
+
+const (
+	MapSurfaceVoid  MapSurfaceKind = iota // no solid at or below the observer
+	MapSurfaceFloor                       // walkable floor at the observer's level
+	MapSurfaceWall                        // solid rising into the observer's eyeline (cliff/wall)
+	MapSurfaceBelow                       // floor below the observer (Depth >= 1 levels down)
+	MapSurfaceRamp                        // ramp connecting to/from the observer's level
+)
+
+// MapSurface is the classified column plus, for MapSurfaceBelow, how many levels
+// beneath the observer the visible floor sits (Depth >= 1; 0 for every other
+// kind).
+type MapSurface struct {
+	Kind  MapSurfaceKind
+	Depth int
+}
+
+// MapSurfaceAt classifies column (x,z) as seen from observer level L for the
+// top-down map. The rule is voxel-aware and reduces exactly to the heightfield
+// "raised = wall, lower = faded" behaviour on a nil-Solids map:
+//
+//   - a ramp whose low edge touches the observer's level (low == L or L-1) →
+//     Ramp, so the way up/down stays on the map;
+//   - a cube at the observer's eyeline (level L+1) → Wall (a cliff/wall face);
+//   - a cube at the observer's own level with air above → Floor (current level);
+//   - else the highest solid strictly below L → Below{Depth};
+//   - else (nothing at or below L) → Void.
+//
+// A deck ABOVE the observer (solid higher than L+1 with air at L and L+1) is
+// never reported — the floor beneath it is — so upper decks can't paint over the
+// level the party is standing on.
+func (a *AreaDefinition) MapSurfaceAt(x, z, L int) MapSurface {
+	if !a.InBounds(x, z) {
+		return MapSurface{Kind: MapSurfaceVoid}
+	}
+	if _, ok := a.RampAt(x, z); ok {
+		low := a.ElevationLevelAt(x, z) // ramp tiles store their LOW level
+		if low == L || low == L-1 {
+			return MapSurface{Kind: MapSurfaceRamp}
+		}
+	}
+	if _, solid := a.SolidAt(x, L+1, z); solid {
+		return MapSurface{Kind: MapSurfaceWall}
+	}
+	if _, solid := a.SolidAt(x, L, z); solid {
+		return MapSurface{Kind: MapSurfaceFloor}
+	}
+	for d := 1; L-d >= 0; d++ {
+		if _, solid := a.SolidAt(x, L-d, z); solid {
+			return MapSurface{Kind: MapSurfaceBelow, Depth: d}
+		}
+	}
+	return MapSurface{Kind: MapSurfaceVoid}
+}
+
 // BuildSolidsFromElevation materializes the voxel stack for a heightfield area:
 // column (x,z) becomes solid from level 0 up to ElevationLevelAt(x,z), each cube
 // skinned by FaceSkinAt so cliff faces look identical. The inverse of reading

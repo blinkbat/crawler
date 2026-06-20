@@ -80,20 +80,42 @@ func hitGlyphForVFX(k core.VFXKind) hitGlyphKind {
 	return glyphNone
 }
 
-// hitGlyph is one live overlay: a kind + the captured target world position
-// (the battle camera is static during a hit, so a fixed anchor projects to a
-// stable screen spot for the glyph's ~0.4s life) + a per-kind on-screen size
-// scale + its age. X/Y/Z is the target's anchor WITHOUT the vertical lift; Rise
-// is the world-Y lift applied in SCREEN space at draw time (see DrawHitGlyphs)
-// so an off-center foe's glyph stays directly above it under the pitched battle
-// camera instead of drifting sideways toward the vertical vanishing point.
+// hitGlyph is one live overlay: a kind + the ANCHOR IDENTITY of the struck
+// target (so its world position is re-resolved against the live game state every
+// frame) + the per-kind glyph tuning + its age. We store the anchor (not a
+// frozen XYZ) because the target physically MOVES during the glyph's ~0.4s life
+// — HitKnockback shoves it backward and AttackBump lunges it forward, both along
+// the camera-forward (depth) axis. A depth shift moves a billboard's screen-X in
+// proportion to how far off the view axis it sits, so a frozen anchor let an
+// off-center foe's glyph slide out from under it (centered foes looked fine,
+// foes to the left/right drifted). Re-resolving keeps the glyph glued to the
+// moving sprite. GlyphXOffset is the horizontal nudge applied along camera-right
+// at draw (the per-kind authored glyph offset); Rise is the world-Y lift applied
+// in SCREEN space (see DrawHitGlyphs) so the glyph stays directly above the
+// target under the pitched battle camera instead of drifting toward the vertical
+// vanishing point. DepthOffset pushes the anchor back along camera-forward to
+// match the billboard's depthOffset (resolveBillboardPlacement) — without it an
+// off-center foe whose sprite is pushed back (the Feral Rat's square PNG) gets a
+// glyph at the wrong depth, which projects to a sideways shift that slides the
+// glyph OUTWARD (e.g. a left-side rat's glyph drifts further left).
 type hitGlyph struct {
-	Kind     hitGlyphKind
-	X, Y, Z  float32
-	Rise     float32
-	Scale    float32
-	Elapsed  float32
-	Duration float32
+	Kind         hitGlyphKind
+	Anchor       core.VFXAnchor
+	SlotIdx      int
+	TileX, TileZ int
+	GlyphXOffset float32
+	DepthOffset  float32
+	Rise         float32
+	Scale        float32
+	Elapsed      float32
+	Duration     float32
+	// lastX/Y/Z is the most recent successfully-resolved world anchor (post
+	// X/depth offset). If the anchor stops resolving mid-life — e.g. the struck
+	// enemy fully fades out of BattleMembers — the glyph finishes its ~0.4s life
+	// at this frozen spot instead of popping out, while a live anchor keeps
+	// updating it each frame. haveLast guards the never-resolved case.
+	lastX, lastY, lastZ float32
+	haveLast            bool
 }
 
 var hitGlyphs = make([]hitGlyph, 0, hitGlyphCap)
@@ -103,29 +125,43 @@ var hitGlyphs = make([]hitGlyph, 0, hitGlyphCap)
 // next scene.
 func resetHitGlyphs() { hitGlyphs = hitGlyphs[:0] }
 
-// spawnHitGlyph queues a glyph at the struck target's world position o (already
-// nudged by the kind's HORIZONTAL glyph anchor offset at the call site — the
-// vertical offsets arrive via extraRise). The base torso lift (hitGlyphRise)
-// plus extraRise are stored as a screen-space Rise applied at draw, not baked
-// into the world Y, so the glyph doesn't drift sideways for off-center foes
-// under the pitched battle camera. Sized by scale (per-kind glyphScale; <=0 →
-// 1). No-op for glyphNone or when the pool is at its cap.
-func spawnHitGlyph(kind hitGlyphKind, o rl.Vector3, extraRise, scale float32) {
+// spawnHitGlyph queues a glyph bound to the struck target's ANCHOR (req's
+// Anchor + slot/tile), so DrawHitGlyphs re-resolves the live world position
+// every frame and the glyph tracks the target as it recoils/lunges. glyphXOffset
+// is the kind's HORIZONTAL glyph nudge (applied along camera-right at draw); the
+// vertical offsets arrive via extraRise. The base torso lift (hitGlyphRise) plus
+// extraRise are stored as a screen-space Rise applied at draw, not baked into the
+// world Y, so the glyph doesn't drift sideways for off-center foes under the
+// pitched battle camera. Sized by scale (per-kind glyphScale; <=0 → 1). No-op
+// for glyphNone or when the pool is at its cap.
+func spawnHitGlyph(kind hitGlyphKind, req core.VFXRequest, glyphXOffset, depthOffset, extraRise, scale float32) {
 	if kind == glyphNone || len(hitGlyphs) >= hitGlyphCap {
 		return
 	}
 	if scale <= 0 {
 		scale = 1
 	}
-	hitGlyphs = append(hitGlyphs, hitGlyph{Kind: kind, X: o.X, Y: o.Y, Z: o.Z, Rise: hitGlyphRise + extraRise, Scale: scale, Duration: hitGlyphDuration})
+	hitGlyphs = append(hitGlyphs, hitGlyph{
+		Kind:         kind,
+		Anchor:       req.Anchor,
+		SlotIdx:      req.SlotIdx,
+		TileX:        req.TileX,
+		TileZ:        req.TileZ,
+		GlyphXOffset: glyphXOffset,
+		DepthOffset:  depthOffset,
+		Rise:         hitGlyphRise + extraRise,
+		Scale:        scale,
+		Duration:     hitGlyphDuration,
+	})
 }
 
-// DrawHitGlyphs projects each live glyph's world anchor to screen and draws its
-// animated shape, then ages + culls the pool. Call in the HUD pass (after
-// EndMode3D) so the crisp 2D art layers over the world — but BEFORE the damage
-// popups so the number reads on top. Mirrors the particle sweep's
-// draw-before-advance so a freshly-spawned glyph always gets one visible frame.
-func DrawHitGlyphs(camera rl.Camera3D) {
+// DrawHitGlyphs re-resolves each live glyph's anchor against the live game state,
+// projects it to screen, and draws its animated shape, then ages + culls the
+// pool. Call in the HUD pass (after EndMode3D) so the crisp 2D art layers over
+// the world — but BEFORE the damage popups so the number reads on top. Mirrors
+// the particle sweep's draw-before-advance so a freshly-spawned glyph always gets
+// one visible frame.
+func DrawHitGlyphs(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if len(hitGlyphs) == 0 {
 		return
 	}
@@ -134,25 +170,49 @@ func DrawHitGlyphs(camera rl.Camera3D) {
 	write := 0
 	for read := range hitGlyphs {
 		gph := &hitGlyphs[read]
-		anchor := rl.NewVector3(gph.X, gph.Y, gph.Z)
-		screen := rl.GetWorldToScreen(anchor, camera)
-		// Apply the vertical lift in SCREEN space, not world space: take the
-		// glyph's X from the un-lifted anchor (so it stays directly above the
-		// target) but its Y from the lifted anchor's projection. Under the pitched
-		// battle camera a world-Y rise projects diagonally, so baking it into the
-		// anchor made off-center foes' glyphs slide sideways toward the vanishing
-		// column — locking X to the base projection removes that drift.
-		if gph.Rise != 0 {
-			lifted := rl.GetWorldToScreen(rl.NewVector3(gph.X, gph.Y+gph.Rise, gph.Z), camera)
-			screen.Y = lifted.Y
+		// Re-resolve the target's world position EVERY frame from its anchor
+		// identity (not a frozen XYZ) so the glyph tracks the sprite as it recoils
+		// (HitKnockback) and lunges (AttackBump) during its life — a frozen anchor
+		// let an off-center foe's glyph slide sideways while the foe moved in depth.
+		// If the anchor stops resolving mid-life (e.g. the enemy fully fades out of
+		// BattleMembers), fall back to the last good anchor so the glyph finishes
+		// its life in place rather than popping out; a never-resolved glyph just
+		// skips drawing this frame and ages out.
+		var anchor rl.Vector3
+		draw := true
+		if origin, ok := resolveAnchor(camera, g, core.VFXRequest{Anchor: gph.Anchor, SlotIdx: gph.SlotIdx, TileX: gph.TileX, TileZ: gph.TileZ}); ok {
+			// Re-apply the horizontal glyph nudge (camera-right) AND the depth
+			// push-back (camera-forward) so the anchor sits at the billboard's
+			// depthOffset depth, then project. Matching the depth is what keeps an
+			// off-center, pushed-back sprite (Feral Rat) from projecting its glyph
+			// sideways.
+			anchor = cameraRelativeOffset(camera, origin, gph.GlyphXOffset, 0, gph.DepthOffset)
+			gph.lastX, gph.lastY, gph.lastZ, gph.haveLast = anchor.X, anchor.Y, anchor.Z, true
+		} else if gph.haveLast {
+			anchor = rl.NewVector3(gph.lastX, gph.lastY, gph.lastZ)
+		} else {
+			draw = false
 		}
-		// GetWorldToScreen mirrors points behind the camera to the wrong side of
-		// the screen, so skip a behind-camera anchor (it would draw a ghost glyph).
-		// Use the strict <=0 gate (behindCamera), not behindCull's negative slack
-		// — the slack is for keeping world tiles abreast of the camera, and would
-		// let a glyph just behind the camera plane ghost through.
-		if !behindCamera(camera, anchor) && !popupOffScreenX(screen.X, sw) {
-			drawHitGlyph(gph.Kind, screen.X, screen.Y, gph.Elapsed/gph.Duration, gph.Scale)
+		if draw {
+			screen := rl.GetWorldToScreen(anchor, camera)
+			// Apply the vertical lift in SCREEN space, not world space: take the
+			// glyph's X from the un-lifted anchor (so it stays directly above the
+			// target) but its Y from the lifted anchor's projection. Under the
+			// pitched battle camera a world-Y rise projects diagonally, so baking it
+			// into the anchor made off-center foes' glyphs slide sideways toward the
+			// vanishing column — locking X to the base projection removes that drift.
+			if gph.Rise != 0 {
+				lifted := rl.GetWorldToScreen(rl.NewVector3(anchor.X, anchor.Y+gph.Rise, anchor.Z), camera)
+				screen.Y = lifted.Y
+			}
+			// GetWorldToScreen mirrors points behind the camera to the wrong side of
+			// the screen, so skip a behind-camera anchor (it would draw a ghost
+			// glyph). Use the strict <=0 gate (behindCamera), not behindCull's
+			// negative slack — the slack is for keeping world tiles abreast of the
+			// camera, and would let a glyph just behind the camera plane ghost through.
+			if !behindCamera(camera, anchor) && !popupOffScreenX(screen.X, sw) {
+				drawHitGlyph(gph.Kind, screen.X, screen.Y, gph.Elapsed/gph.Duration, gph.Scale)
+			}
 		}
 		gph.Elapsed += dt
 		if gph.Elapsed < gph.Duration {

@@ -999,6 +999,11 @@ type State struct {
 	// warning rings on doors whose target_door doesn't resolve.
 	showDoorLinks bool
 
+	// isoView swaps the canvas from the top-down grid to a read-only isometric
+	// block preview (View ▸ Isometric View / `I`). Painting + hover are
+	// suppressed while it's on (cellAt early-returns) — see iso.go.
+	isoView bool
+
 	// Ctrl+F5 "test from cursor" override: when testStartOverride is true,
 	// the run loop consumes testStartOverrideX/Z as the playtest's
 	// starting tile instead of area.StartTileX/Z. Reset by the run loop

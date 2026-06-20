@@ -1231,10 +1231,11 @@ func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
 		if target < 0 {
 			// No living, non-ingested party target for a single-target cast
 			// (e.g. the last reachable ally just got swallowed mid-round).
-			// pickEnemyAttackTarget already advanced the round-robin cursor,
-			// so the queue stays consistent — but don't let the enemy's whole
-			// turn elapse with a blank combat log; surface the no-op so the
-			// forecast advancing isn't mistaken for a frozen battle.
+			// pickEnemyAttackTarget leaves the round-robin cursor untouched when
+			// it returns -1 (there's nothing to advance toward), so the queue
+			// stays consistent — but don't let the enemy's whole turn elapse with
+			// a blank combat log; surface the no-op so the forecast advancing
+			// isn't mistaken for a frozen battle.
 			setBattleMessage(g, fmt.Sprintf("%s hesitates.", core.EnemyDisplayName(enemy)))
 			return
 		}

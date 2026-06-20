@@ -155,6 +155,10 @@ func updateAdventureScene(state *appState) {
 			// Common cause: target map file missing, or the named door
 			// doesn't exist in the destination.
 			state.game.LogMessage("Door failed: " + err.Error())
+		} else {
+			// New area — drop any held-turn auto-repeat carry so a turn key held
+			// through the door doesn't start the next area mid-cooldown.
+			explore.ResetTurnRepeat()
 		}
 		state.game.PendingTransition = core.AreaTransition{}
 	}
@@ -410,7 +414,7 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	render.DrawCrystalPrompt(camera, game, assets)
 	// Hit-glyph clarity shapes over struck targets — HUD pass (crisp 2D), but
 	// before the damage popups so the number floats on top of the glyph.
-	render.DrawHitGlyphs(camera)
+	render.DrawHitGlyphs(camera, game, assets)
 	render.DrawDamagePopups(camera, game, assets)
 	render.DrawQualityPopup(camera, game, assets)
 	render.DrawDebugOverlay(camera, game, assets)

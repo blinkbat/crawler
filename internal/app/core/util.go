@@ -96,12 +96,16 @@ func TileCenter(tile int) float32 {
 	return (float32(tile) + 0.5) * TileSize
 }
 
-// ClampFrameTime clips a per-frame delta time to MaxFrameStep so a long
-// stall can't advance the simulation by an unbounded leap. Shared by
-// explore.Update and battle.Update so the floor can't drift between them.
+// ClampFrameTime clips a per-frame delta time to [0, MaxFrameStep] so a long
+// stall can't advance the simulation by an unbounded leap, and a (theoretical)
+// negative delta can't step it BACKWARD. Shared by explore.Update and
+// battle.Update so the floor can't drift between them.
 func ClampFrameTime(dt float32) float32 {
 	if dt > MaxFrameStep {
 		return MaxFrameStep
+	}
+	if dt < 0 {
+		return 0
 	}
 	return dt
 }

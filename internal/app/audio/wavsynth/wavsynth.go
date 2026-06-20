@@ -396,6 +396,31 @@ func SynthChord(duration float64, freqs []float64, volume float64) []int16 {
 	return pcm
 }
 
+// SynthWhistleTrill is a short, bright "trill whistle" — a pure sine that
+// sweeps UPWARD while a fast vibrato warbles it, under a soft attack and a
+// singing release, so it reads as a rewarding little tweet (the SMRPG-style
+// success whistle) rather than a flat beep. The sine keeps it smooth and
+// pleasing (no harsh harmonics); the fast shallow vibrato is what gives it the
+// trill shimmer; the upward sweep is what makes it feel like a reward. Used by
+// the "Great" timing cue.
+func SynthWhistleTrill(duration, startHz, endHz, volume float64) []int16 {
+	return SynthShapeParams(ShapeParams{
+		Duration:   duration,
+		StartHz:    startHz,
+		EndHz:      endHz,
+		Volume:     volume,
+		Attack:     0.006,           // quick, soft onset — no click
+		Decay:      0,               //
+		Sustain:    1,               //
+		Release:    duration * 0.45, // long tail so the whistle "sings" out
+		Wave:       WaveSine,        // pure tone = clean whistle
+		PulseWidth: 0.5,
+		VibHz:      42,    // fast warble = the trill
+		VibDepth:   0.035, // shallow shimmer, not a siren
+		Cutoff:     1,     // filter open
+	})
+}
+
 // SynthClick generates a short percussive transient — a pitched sine
 // body that drops in frequency over the note's lifetime, blended with
 // a white-noise burst for the "click" texture, under a hard-attack +
