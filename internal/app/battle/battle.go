@@ -31,13 +31,19 @@ const (
 // tile the player retreats to on a successful Flee — the square they were on
 // before the engaging step (the caller passes its pre-step tile so a pack
 // ambush steps the player back rather than leaving them on the pack's tile).
-func Start(g *core.GameState, packIndex, fleeReturnX, fleeReturnZ int) {
+func Start(g *core.GameState, packIndex, fleeReturnX, fleeReturnZ int, engageSide core.EngageSide) {
 	if packIndex < 0 || packIndex >= len(g.Packs) || !core.PackAlive(g.Packs[packIndex]) {
 		return
 	}
 	g.Battle.ActivePack = packIndex
 	g.Battle.FleeReturnX = fleeReturnX
 	g.Battle.FleeReturnZ = fleeReturnZ
+	// Rotate the party's home formation into live rows for this fight: a head-on
+	// engage keeps the standing slots; a side/back ambush turns the attacked rank
+	// to the front (exposed), which the player fixes with Reposition.
+	for i := range g.Party {
+		g.Party[i].Row = core.AmbushLiveRow(g.Party[i].HomeRow, g.Party[i].HomeCol, engageSide)
+	}
 	g.Battle.EnemyIndex = core.NextLivingBattleEnemy(g)
 	g.Battle.PartyTarget = core.FirstLivingPartyMember(g.Party)
 	g.Battle.Splash = core.BattleSplashDuration
@@ -1227,7 +1233,10 @@ func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
 	// a target.
 	target := -1
 	if !effect.AppliesAOEParty && !effect.AppliesSummonSkeleton {
-		target = pickEnemyAttackTarget(g)
+		// Single-target enemy casts are magic (any row); a melee enemy SKILL would
+		// be AoE (Stoneslam), which ignores rows above. So this path is never
+		// front-gated.
+		target = pickEnemyAttackTarget(g, false)
 		if target < 0 {
 			// No living, non-ingested party target for a single-target cast
 			// (e.g. the last reachable ally just got swallowed mid-round).

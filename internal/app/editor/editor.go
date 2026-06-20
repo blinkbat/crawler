@@ -999,10 +999,23 @@ type State struct {
 	// warning rings on doors whose target_door doesn't resolve.
 	showDoorLinks bool
 
-	// isoView swaps the canvas from the top-down grid to a read-only isometric
-	// block preview (View ▸ Isometric View / `I`). Painting + hover are
-	// suppressed while it's on (cellAt early-returns) — see iso.go.
+	// isoView swaps the canvas from the top-down grid to a rotatable 3D block
+	// view (View ▸ Isometric View / `I`). The top-down screen→tile path is
+	// suppressed while it's on (cellAt early-returns); the 3D view runs its own
+	// camera + ray-pick + elevation editing — see iso.go.
 	isoView bool
+	// 3D-view camera + pick state (all iso.go). isoYaw is one of four 45°-offset
+	// orbit angles (Q/E cycle it); isoZoom dollies the fit-to-map distance;
+	// isoTargetX/Z pan the look-at across the map (middle-drag); isoHoverX/Z is
+	// the ray-picked column under the cursor (-1 when off-canvas / no hit). isoRT
+	// is the off-screen target the 3D scene renders into before blitting to the
+	// grid panel; isoRTW/H track its current size for lazy reallocation.
+	isoYaw                 int
+	isoZoom                float32
+	isoTargetX, isoTargetZ float32
+	isoHoverX, isoHoverZ   int
+	isoRT                  rl.RenderTexture2D
+	isoRTW, isoRTH         int32
 
 	// Ctrl+F5 "test from cursor" override: when testStartOverride is true,
 	// the run loop consumes testStartOverrideX/Z as the playtest's
@@ -1173,6 +1186,9 @@ func freshState(a core.AreaDefinition) State {
 		gridCursorZ:           -1,
 		hoverX:                -1,
 		hoverZ:                -1,
+		isoZoom:               1,
+		isoHoverX:             -1,
+		isoHoverZ:             -1,
 		dragPackIdx:           -1,
 		dragChestIdx:          -1,
 		dragDoorIdx:           -1,

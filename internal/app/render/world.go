@@ -1878,25 +1878,8 @@ func drawBattlePack(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	// with the world geometry around them.
 	defer beginBillboardFogPass(camera, g, assets)()
 	members := core.BattleMembers(g)
-	// Precompute the visible (alive-or-fading) member count once, and track
-	// each drawn member's visible-slot index incrementally below. This is what
-	// battleEnemySlot used to recompute per enemy (a re-walk of the whole pack
-	// inside the loop = O(n²)); doing it once keeps the loop O(n) with no extra
-	// allocation. The increment mirrors battleEnemySlot's "found = visible;
-	// visible++" so the formation layout is identical.
-	visibleCount := 0
-	for i := range members {
-		if members[i].Alive || members[i].DeathFade > 0 {
-			visibleCount++
-		}
-	}
-	visibleSlot := -1
 	for i := range members {
 		enemy := &members[i]
-		fading := enemy.Alive || enemy.DeathFade > 0
-		if fading {
-			visibleSlot++
-		}
 		visual, ok := enemyVisualFor(assets, enemy.Kind)
 		if !ok {
 			continue
@@ -1904,7 +1887,10 @@ func drawBattlePack(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		if !enemy.Alive && enemy.DeathFade <= 0 {
 			continue
 		}
-		position := enemyFormationPos(camera, g, visibleSlot, visibleCount, enemy)
+		// Lay the enemy out by its formation row (front 3 / back 4 staggered),
+		// resolving its slot among the visible members of that row.
+		row, slot, rowCount := enemyRowSlot(members, i)
+		position := enemyFormationPos(camera, g, row, slot, rowCount, enemy)
 		// Per-kind depth/marker/yOffset placement (depth push-back for the
 		// square Feral Rat PNG, the chevron anchor, the contact-shadow
 		// footprint, and the lowered sprite center) all derive from one shared
@@ -2226,6 +2212,11 @@ func shadeColor(c rl.Color, factor float32) rl.Color {
 	})
 }
 
+// ShadeColor is the exported form of shadeColor for the editor's 3D view, which
+// can't reach the unexported helper. Multiplies RGB by factor (clamped),
+// preserving alpha — the one shading primitive for the render + editor surface.
+func ShadeColor(c rl.Color, factor float32) rl.Color { return shadeColor(c, factor) }
+
 func DrawPartySprites(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if g.Battle.Phase == core.BattleNone {
 		return
@@ -2251,7 +2242,7 @@ func DrawPartySprites(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		if g.Party[i].HP > 0 {
 			memberDance = victoryDance
 		}
-		position := partySpritePosition(camera, i, g.Party[i].Class, g.Party[i].AttackBump, memberDance, g.Party[i].HitKnockback)
+		position := partySpritePosition(camera, g.Party, i, g.Party[i].AttackBump, memberDance, g.Party[i].HitKnockback)
 		// Per-class depth / yOffset / marker / shadow placement all derive from
 		// the same shared helper the foe billboards and the Party Visualizer
 		// preview use, so authored alignment can't drift between battle and editor.
@@ -2330,25 +2321,63 @@ func drawEnemyAttackTargetMarker(camera rl.Camera3D, position rl.Vector3) {
 	drawMarkerOnTop(position, markerEnemyAttackTarget)
 }
 
-func partySpritePosition(camera rl.Camera3D, index int, class core.PartyClass, bump, victoryDance float32, knockback float32) rl.Vector3 {
+// partyRowSlot resolves party member `index`'s formation placement: its row
+// (front/back), its left-to-right slot WITHIN that row, and how many members
+// share the row — so the billboard layout reflects the front/back formation.
+func partyRowSlot(party []core.PartyMember, index int) (row core.Row, slot, count int) {
+	if index < 0 || index >= len(party) {
+		return core.RowFront, 0, 1
+	}
+	row = party[index].Row
+	for j := range party {
+		if party[j].Row == row {
+			if j == index {
+				slot = count
+			}
+			count++
+		}
+	}
+	if count == 0 {
+		count = 1
+	}
+	return row, slot, count
+}
+
+func partySpritePosition(camera rl.Camera3D, party []core.PartyMember, index int, bump, victoryDance float32, knockback float32) rl.Vector3 {
 	forward := horizontalForward(camera)
 	right := horizontalRight(forward)
-	// Party billboards pushed FURTHER from the camera (0.96 → 1.45)
-	// so they sit visibly inside the arena instead of pressed up
-	// against the lens. Pairs with the battle-FOV zoom + the
-	// downward camera pitch — together the party reads as a row
-	// of fighters standing on the floor of the arena rather than
-	// a HUD strip pasted onto a sky shot.
-	base := rl.NewVector3(
-		camera.Position.X+forward.X*1.45,
-		0.62,
-		camera.Position.Z+forward.Z*1.45,
-	)
-	offset := (float32(index) - 1.5) * 0.42
-	depth := float32(0.02)
-	if index == 1 || index == 2 {
-		depth = -0.04
+	class := core.PartyClass(0)
+	if index >= 0 && index < len(party) {
+		class = party[index].Class
 	}
+	row, slot, count := partyRowSlot(party, index)
+	// Two-rank formation, viewed from behind/above. Both rows sit well back off
+	// the foes (low rowForward) and low in frame (baseY). The FRONT row is a touch
+	// nearer the foes and packs TIGHTER; the BACK row sits nearer the camera,
+	// lifted slightly to peek over the front, and spreads WIDE — a trapezoid that
+	// widens toward the viewer:
+	//       x  x      (front, tight)
+	//     x      x    (back, wide)
+	baseY := float32(0.42)      // sit low in frame (was riding too high)
+	rowForward := float32(1.5)  // front rank — off the foes
+	rowSpacing := float32(0.95) // front: spread out (was cramped)
+	rowLift := float32(0)
+	if row == core.RowBack {
+		// BIG depth gap from the front (0.7 vs 1.5) so the two rows clearly STACK
+		// under the pitched camera instead of reading as one inline x x x x — the
+		// back rank is much nearer the lens, projecting lower + larger. Its wide
+		// spacing puts the front pair between the back pair (staggered trapezoid).
+		rowForward = 0.7
+		rowSpacing = 2.6
+	}
+	base := rl.NewVector3(
+		camera.Position.X+forward.X*rowForward,
+		baseY+rowLift,
+		camera.Position.Z+forward.Z*rowForward,
+	)
+	// Centre the row's members left-to-right around the formation axis.
+	offset := (float32(slot) - float32(count-1)/2) * rowSpacing
+	depth := float32(0)
 	danceSide, danceDepth, danceHeight, _ := victoryDanceMotion(class, victoryDance)
 	bumpDepth := core.BumpOffset(bump, 0.22)
 	// Reactionary knockback: push the member TOWARD the camera (i.e.
@@ -2397,8 +2426,8 @@ func enemyDrawPosition(camera rl.Camera3D, g *core.GameState, slot int, enemy *c
 		}
 		return pack
 	}
-	visibleSlot, count := battleEnemySlot(g, slot)
-	return enemyFormationPos(camera, g, visibleSlot, count, enemy)
+	row, rowSlot, rowCount := enemyRowSlot(core.BattleMembers(g), slot)
+	return enemyFormationPos(camera, g, row, rowSlot, rowCount, enemy)
 }
 
 // enemyFormationPos is the formation-placement math for one enemy given its
@@ -2406,84 +2435,80 @@ func enemyDrawPosition(camera rl.Camera3D, g *core.GameState, slot int, enemy *c
 // per-frame battle loop can compute the slot mapping ONCE (a single O(n) pass)
 // and call this per member, instead of each call re-walking the pack to find
 // its slot — turning a per-frame O(n²) into O(n).
-func enemyFormationPos(camera rl.Camera3D, g *core.GameState, visibleSlot, count int, enemy *core.Enemy) rl.Vector3 {
+// enemyRowSlot resolves enemy `index`'s formation placement among the VISIBLE
+// (alive or death-fading) pack members: its row, left-to-right slot within that
+// row, and the row's visible count. The foe-side mirror of partyRowSlot.
+func enemyRowSlot(members []core.Enemy, index int) (row core.Row, slot, count int) {
+	if index < 0 || index >= len(members) {
+		return core.RowFront, 0, 1
+	}
+	row = members[index].Row
+	for j := range members {
+		if !(members[j].Alive || members[j].DeathFade > 0) || members[j].Row != row {
+			continue
+		}
+		if j == index {
+			slot = count
+		}
+		count++
+	}
+	if count == 0 {
+		count = 1 // the queried member isn't visible; place it solo rather than /0
+	}
+	return row, slot, count
+}
+
+func enemyFormationPos(camera rl.Camera3D, g *core.GameState, row core.Row, slot, count int, enemy *core.Enemy) rl.Vector3 {
 	if count <= 0 {
-		// ActivePack is >= 0 here (first guard), but re-check the upper
-		// bound before indexing — same defensive form as the fallback
-		// above — so a malformed (Phase!=None, ActivePack out of range)
-		// state can't panic with an out-of-range index.
+		// Defensive: re-check the ActivePack bound before indexing so a malformed
+		// (Phase!=None, ActivePack out of range) state can't panic.
 		if g.Battle.ActivePack >= len(g.Packs) {
 			return rl.NewVector3(0, enemyBillboardY, 0)
 		}
 		p := g.Packs[g.Battle.ActivePack]
 		return tileWorldPos(p.TileX, p.TileZ, enemyBillboardY)
 	}
-	// A fully-faded member (DeathFade elapsed) whose damage popup still lingers
-	// resolves to visibleSlot -1 from battleEnemySlot; without this clamp the
-	// offset math (visibleSlot - (count-1)/2) drives the popup off to the left
-	// of the formation. Anchor it to the first slot instead.
-	if visibleSlot < 0 {
-		visibleSlot = 0
+	if slot < 0 {
+		slot = 0
 	}
 	forward := horizontalForward(camera)
 	right := horizontalRight(forward)
-	// Formation center.Y lifted from 0.7 → 1.0 so enemy billboards
-	// sit centered vertically in the screen instead of hugging the
-	// bottom third under the narrower battle FOV. Pairs with the
-	// shrunken targeting markers (markerEnemyTarget etc.) so the
-	// roster reads at the same vertical band as the party ribbon's
-	// HP bars.
 	center := rl.NewVector3(
 		camera.Position.X+forward.X*2.55,
 		battleFormationCenterY,
 		camera.Position.Z+forward.Z*2.55,
 	)
-	// Adaptive spacing: a tile is ~2.05 world units wide, so a six-
-	// enemy formation at the old 1.12 spacing was 5*1.12 = 5.6 units
-	// across — well past two tiles, clipping any encounter in a
-	// corridor or small room. The new rule caps the TOTAL formation
-	// width at formationMaxWidth and packs slots inside that cap,
-	// while preserving the original generous spacing for small packs
-	// where there's no width concern.
+	// Per-row width cap (the front holds 3, the back 4): pack the row's slots
+	// inside formationMaxWidth so a full back row doesn't spill across the arena,
+	// keeping the generous spacing for small rows.
 	const baseSpacing = float32(1.12)
-	const formationMaxWidth = float32(2.6) // a touch wider than one tile
+	const formationMaxWidth = float32(2.9)
 	spacing := baseSpacing
 	if count > 1 {
-		fit := formationMaxWidth / float32(count-1)
-		if fit < spacing {
+		if fit := formationMaxWidth / float32(count-1); fit < spacing {
 			spacing = fit
 		}
 	}
-	offset := (float32(visibleSlot) - float32(count-1)/2) * spacing
-	// Depth stagger: a slight forward-back offset on the middle
-	// slot(s) so enemies don't render in a perfectly flat line. The
-	// previous code only staggered the middle of a 3-pack; extend it
-	// to anything 3+ so denser formations get readable depth too.
-	depth := float32(0)
-	if count >= 3 {
-		// Push slots in the interior third forward by a small amount;
-		// edge slots stay flat. The middle reads as a "front rank"
-		// in the now-tighter formation.
-		mid := float32(count-1) / 2
-		dist := float32(visibleSlot) - mid
-		if dist < 0 {
-			dist = -dist
-		}
-		if dist < mid/2 {
-			depth = 0.22
-		}
+	offset := (float32(slot) - float32(count-1)/2) * spacing
+	// Two ranks: the FRONT row stands nearer the party (pulled toward the camera
+	// along forward); the BACK row sits deeper in the arena, lifted so it reads
+	// over the front, and staggered half a slot so it peeks between the front
+	// fighters (the classic 3-over / 4-under formation).
+	rowDepth := float32(-0.45)
+	rowLift := float32(0)
+	if row == core.RowBack {
+		rowDepth = 0.55
+		rowLift = 0.28
+		offset += spacing * 0.5
 	}
 	bump := core.BumpOffset(enemy.AttackBump, 0.2)
-	// Reactionary knockback: when the enemy just took damage, push
-	// it AWAY from the camera (further into the arena). AttackBump
-	// subtracts from depth (lunge forward toward party); knockback
-	// adds (recoil backward) — opposite signs so a hit visibly
-	// snaps the enemy in the opposite direction of its lunge.
+	// Reactionary knockback pushes AWAY from the camera; AttackBump lunges toward
+	// the party — opposite signs so a hit snaps the enemy opposite its lunge.
 	knock := core.KnockbackOffset(enemy.HitKnockback, core.HitKnockbackDist)
 	return rl.NewVector3(
-		center.X+right.X*offset+forward.X*(depth-bump+knock),
-		center.Y,
-		center.Z+right.Z*offset+forward.Z*(depth-bump+knock),
+		center.X+right.X*offset+forward.X*(rowDepth-bump+knock),
+		center.Y+rowLift,
+		center.Z+right.Z*offset+forward.Z*(rowDepth-bump+knock),
 	)
 }
 
@@ -2524,26 +2549,3 @@ func horizontalForward(camera rl.Camera3D) rl.Vector3 {
 	return result
 }
 
-// battleEnemySlot maps a member slot to (visible slot, total visible
-// count) — visible meaning alive or still death-fading. Returns -1 for the
-// visible slot when the queried member isn't currently visible.
-func battleEnemySlot(g *core.GameState, memberSlot int) (int, int) {
-	visible := 0
-	count := 0
-	found := -1
-	// Index-range (not value-range): Enemy embeds a full
-	// DefinitionOverride, so `for _, m := range` would copy that whole
-	// struct per iteration — wasteful when we only read two fields.
-	members := core.BattleMembers(g)
-	for i := range members {
-		if !members[i].Alive && members[i].DeathFade <= 0 {
-			continue
-		}
-		if i == memberSlot {
-			found = visible
-		}
-		visible++
-		count++
-	}
-	return found, count
-}

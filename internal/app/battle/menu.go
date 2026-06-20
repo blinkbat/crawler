@@ -26,11 +26,13 @@ func updateActionMenu(g *core.GameState) {
 	switch core.ActionRow(g.Battle.MenuIndex) {
 	case core.ActionRowAttack:
 		g.Battle.PendingSkill = core.SkillNone
-		g.Battle.ActionMode = core.ActionEnemyTarget
-		setBattleStatus(g, msgChooseTarget)
+		enterEnemyTargeting(g, msgChooseTarget) // gates back-row melee; snaps cursor to a reachable foe
 		return
 	case core.ActionRowDefend:
 		performDefend(g)
+		return
+	case core.ActionRowReposition:
+		performReposition(g)
 		return
 	case core.ActionRowFlee:
 		// Gate the retreat behind a yes/no — a stray Confirm on this row
@@ -168,6 +170,15 @@ func updateSkillMenu(g *core.GameState) {
 		setBattleStatus(g, fmt.Sprintf("%s needs %d MP.", core.SkillName(skill), core.SkillCost(skill)))
 		return
 	}
+	// A melee skill (single-target OR AoE cleave) can't be used from the back row
+	// — back-row melee reaches nothing. Gate here, before any target selection /
+	// AoE dispatch, so the back-row check covers every melee skill path. The
+	// skill submenu stays open (ActionMode unchanged) so the player can pick
+	// another skill or reposition.
+	if core.SkillAttackClassFor(skill).IsMelee() && !core.PartyInEffectiveFront(g.Party, g.Battle.CurrentParty) {
+		setBattleStatus(g, "Can't reach from the back row — reposition or use a ranged/magic skill.")
+		return
+	}
 	// Persist the choice so next turn's submenu opens on this skill.
 	g.Party[g.Battle.CurrentParty].SkillCursor = g.Battle.SkillMenuIndex
 	g.Battle.PendingSkill = skill
@@ -177,11 +188,57 @@ func updateSkillMenu(g *core.GameState) {
 		g.Battle.PartyTarget = g.Battle.CurrentParty
 		setBattleStatus(g, fmt.Sprintf("Choose who receives %s.", core.SkillName(skill)))
 	case core.ActionEnemyTarget:
-		g.Battle.ActionMode = core.ActionEnemyTarget
-		setBattleStatus(g, fmt.Sprintf("Choose a target for %s.", core.SkillName(skill)))
+		// Shared entry snaps the cursor to a reachable foe (front row for a melee
+		// skill, any for ranged/magic). The back-row gate above already passed.
+		enterEnemyTargeting(g, fmt.Sprintf("Choose a target for %s.", core.SkillName(skill)))
 	default:
 		beginPendingAction(g)
 	}
+}
+
+// battlePendingAttackMelee reports whether the action the player is about to
+// target is a MELEE attack (front-gated): a basic attack keys off the actor's
+// equipped weapon, a skill off its reach class.
+func battlePendingAttackMelee(g *core.GameState) bool {
+	if g.Battle.PendingSkill == core.SkillNone {
+		if m, ok := currentMember(g); ok {
+			return core.BasicAttackClass(core.EquippedWeapon(*m)).IsMelee()
+		}
+		return false
+	}
+	return core.SkillAttackClassFor(g.Battle.PendingSkill).IsMelee()
+}
+
+// battleEnemyTargets returns the selectable enemy slots for the pending action:
+// the effective front row for a melee attack, every living enemy for ranged/magic.
+func battleEnemyTargets(g *core.GameState) []int {
+	if battlePendingAttackMelee(g) {
+		return core.MeleeReachableBattleEnemyIndices(g)
+	}
+	return core.LivingBattleEnemyIndices(g)
+}
+
+// enterEnemyTargeting transitions into the enemy target picker for the pending
+// action, enforcing melee reach: a melee attacker in the back row can't reach
+// (refused), and the cursor is snapped to a reachable foe (front row for melee,
+// any row otherwise). Returns false (leaving the caller's menu state intact) when
+// the action is barred or no target is reachable.
+func enterEnemyTargeting(g *core.GameState, prompt string) bool {
+	if battlePendingAttackMelee(g) && !core.PartyInEffectiveFront(g.Party, g.Battle.CurrentParty) {
+		setBattleStatus(g, "Can't reach from the back row — reposition or use a ranged attack.")
+		return false
+	}
+	targets := battleEnemyTargets(g)
+	if len(targets) == 0 {
+		setBattleStatus(g, "No reachable target.")
+		return false
+	}
+	if !slices.Contains(targets, g.Battle.EnemyIndex) {
+		g.Battle.EnemyIndex = targets[0]
+	}
+	g.Battle.ActionMode = core.ActionEnemyTarget
+	setBattleStatus(g, prompt)
+	return true
 }
 
 // updateItemMenu drives the inventory picker. Up/Down cycles entries; Back
@@ -361,6 +418,24 @@ func performDefend(g *core.GameState) {
 	finishActorTurn(g)
 }
 
+// performReposition flips the actor between the front and back formation row,
+// spending their turn. The per-character cost is the whole reposition economy:
+// a scrambled party costs at most two turns to fix.
+func performReposition(g *core.GameState) {
+	member, ok := currentMember(g)
+	if !ok {
+		return
+	}
+	if member.Row == core.RowBack {
+		member.Row = core.RowFront
+		setBattleMessage(g, fmt.Sprintf("%s moves up to the front.", member.Name))
+	} else {
+		member.Row = core.RowBack
+		setBattleMessage(g, fmt.Sprintf("%s falls back.", member.Name))
+	}
+	finishActorTurn(g)
+}
+
 // performFlee attempts to escape the fight. The chance scales the party's
 // average living level against the pack's (core.FleeChance). On success the
 // battle ends and the party retreats to the pre-combat tile (Battle.FleeReturn)
@@ -448,8 +523,10 @@ func cycleTargetSelection(
 }
 
 func cycleBattleTarget(g *core.GameState, delta int) {
+	// Reach-aware candidate list: a melee attack cycles only the effective front
+	// row; ranged/magic cycles every living foe.
 	cycleTargetSelection(g, &g.Battle.EnemyIndex, delta,
-		func() []int { return core.LivingBattleEnemyIndices(g) },
+		func() []int { return battleEnemyTargets(g) },
 		func(g *core.GameState, slot, total int) string {
 			return core.BattleEnemyTargetStatus(g, slot, total)
 		})

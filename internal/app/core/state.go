@@ -434,8 +434,24 @@ func resetPartyForFieldRecovery(party []PartyMember) []PartyMember {
 
 func NewParty() []PartyMember {
 	party := make([]PartyMember, 0, len(partyClassDefinitions))
+	// Pack columns within each row so the default reads as a proper 2×2: the
+	// first member of a row takes the left column, the second the right.
+	frontCount, backCount := 0, 0
 	for _, def := range partyClassDefinitions {
 		maxHP := MaxHPFor(def.Stats)
+		row := DefaultPartyRow(def.Class)
+		col := ColLeft
+		if row == RowFront {
+			if frontCount%2 == 1 {
+				col = ColRight
+			}
+			frontCount++
+		} else {
+			if backCount%2 == 1 {
+				col = ColRight
+			}
+			backCount++
+		}
 		party = append(party, PartyMember{
 			Class: def.Class,
 			Name:  def.Name,
@@ -444,6 +460,11 @@ func NewParty() []PartyMember {
 			MaxHP: maxHP,
 			MP:    def.MaxMP,
 			MaxMP: def.MaxMP,
+			// Default formation: front-line classes up front, casters in back.
+			// Row is the live row (seeded to the home row; battle start rotates it).
+			Row:     row,
+			HomeRow: row,
+			HomeCol: col,
 			// Every fresh PartyMember starts at BaseLevel with no XP
 			// banked and no pending point-allocations. XPForLevel(1)
 			// is the threshold to reach level 2.

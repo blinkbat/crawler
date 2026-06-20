@@ -3425,14 +3425,16 @@ func drawPackEditModal(s *State, font rl.Font, theme render.Theme) {
 		}
 	}
 	render.DrawTextWithShadow(font, leaderText, r.X+modalContentInset, r.Y+38, editorFontHint, theme.TextMuted)
-	render.DrawTextWithShadow(font, "Up/Down select · Enter add · X remove · K/J reorder · A cycle AI · Esc close",
+	render.DrawTextWithShadow(font, "Up/Down select · Enter add · X remove · K/J reorder · R row · A cycle AI · Esc close",
 		r.X+modalContentInset, r.Y+54, editorFontTiny, theme.TextHint)
 
 	adds, actions := packEditCmds(s)
 	lay := entityModalLayoutFor(s.modalCursor, len(pack.Members), cmdLabels(adds), cmdLabels(actions))
 	drawEntityListWindow(font, theme, lay, len(pack.Members), s.modalCursor,
 		"(empty — close to drop)",
-		func(i int) string { return core.PackMemberDisplayName(s.area, pack, i) })
+		func(i int) string {
+			return core.PackMemberDisplayName(s.area, pack, i) + " · " + core.RowLabel(pack.Members[i].Row)
+		})
 	drawModalButtons(font, lay.actRects, cmdLabels(actions))
 	drawModalButtons(font, lay.addRects, cmdLabels(adds))
 }

@@ -306,13 +306,15 @@ func placePacks(a *AreaDefinition) []Pack {
 		spawn := a.PackSpawns[i]
 		members := make([]Enemy, 0, len(spawn.Members))
 		for _, member := range spawn.Members {
+			e := NewEnemy(member.Kind)
 			if name := member.CustomName; name != "" {
 				if def, ok := CustomEnemyByName(a.CustomEnemies, name); ok {
-					members = append(members, def.Instantiate())
-					continue
+					e = def.Instantiate()
 				}
 			}
-			members = append(members, NewEnemy(member.Kind))
+			// Carry the authored formation rank onto the live enemy (front/back).
+			e.Row = member.Row
+			members = append(members, e)
 		}
 		packs = append(packs, Pack{
 			TileX:     snap.TileX,

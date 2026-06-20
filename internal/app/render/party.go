@@ -205,21 +205,24 @@ func measurePartyNameWithSpace(font rl.Font, name string) rl.Vector2 {
 }
 
 const (
-	partyCardW   = float32(208)
-	partyCardH   = float32(134)
-	partyCardGap = float32(16)
+	// Cards are WIDE and SHORT now, tiled in a 2×2 grid (two rows). The left half
+	// holds the class sigil + name + status; the right half stacks the HP/MP bars.
+	partyCardW   = float32(300)
+	partyCardH   = float32(72)
+	partyCardGap = float32(14)
+	partyRowGap  = float32(10) // vertical gap between the two card rows
+	partyCardCols = 2
+	// partyCardBarH is the (shorter) gauge height that lets HP + MP stack inside
+	// the compact card's right column.
+	partyCardBarH = float32(22)
 	// cardGlowMargin is the inset the active-card halo and the selected-card
 	// outline both grow by (rect expands by cardGlowMargin on each side, so
 	// width/height grow by 2×). Named so the two chrome layers can't drift.
 	cardGlowMargin = int32(3)
-	// partyCardContentY is the top inset of the card's header row — the class
-	// glyph center, the name text, and the "+" badge all sit on this baseline.
-	partyCardContentY = float32(12)
-	// activeCardLift raises the active member's card above the ribbon row
-	// so "whose turn is it" reads at a glance, on top of the bold halo.
-	// Raised from 14 → 24 so the lift is the primary turn cue now that the
-	// in-world pyramid + glow were removed (see DrawPartySprites).
-	activeCardLift = float32(24)
+	// activeCardLift raises the active member's card so "whose turn is it" reads
+	// at a glance, on top of the gilt halo. Small now that the cards tile in a
+	// 2×2 grid (a big lift would overlap the row above).
+	activeCardLift = float32(8)
 	// ribbonBottom is the bottom-edge margin for the party ribbon.
 	// Routed through hudEdgePad so the bottom margin matches the
 	// minimap's top margin (and every other HUD panel's edge
@@ -284,73 +287,42 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active,
 
 	drawCard(ix, iy, iw, ih, bg, border, accent)
 
-	// Class-sigil watermark — the member's crest ghosted LARGE into the
-	// card's lower-right glass, the way an illuminated ledger watermarks its
-	// owner's mark into the page. Painted right after the card body so the
-	// name, status icon, and both gauges layer over it; whisper-faint (and
-	// fainter still when downed) so it reads as depth in the glass, never as
-	// content. Sized/placed so the sigil peeks between the bars and the
-	// card's right frame instead of fighting the bar text.
-	wmCol := fadeColor(classCol, 0.11)
-	if down {
-		wmCol = fadeColor(classCol, 0.05)
-	}
-	drawClassGlyph(x+partyCardW-38, y+partyCardH-42, 30, member.Class, wmCol)
-
 	if selected {
 		centerX := x + partyCardW/2
 		drawArrowMarker(rl.NewVector2(centerX, y+2), 0, -12, 10, borderTarget)
 	}
 	if active && !down {
-		cx := x + partyCardW - 16
-		cy := y + 12
-		drawArrowMarker(rl.NewVector2(cx, cy), 0, 10, 7, borderActive)
+		drawArrowMarker(rl.NewVector2(x+partyCardW-14, y+12), 0, 10, 7, borderActive)
 	}
 
-	contentX := x + 16
-	contentW := partyCardW - 28
-
-	// Class glyph immediately left of the name — the small gilt
-	// sigil 90s D&D box-art used as a class shorthand. Drawn in the
-	// class accent so it harmonises with the card's left stripe.
-	glyphR := float32(8)
-	glyphCX := contentX + glyphR
-	glyphCY := y + partyCardContentY + FontBody/2
+	// LEFT column: class sigil + name on top, status icon (+ turns) below.
+	leftX := x + 14
+	glyphR := float32(9)
+	glyphCX := leftX + glyphR
+	glyphCY := y + 18
 	glyphCol := classCol
 	if down {
 		glyphCol = fadeColor(classCol, 0.45)
 	}
 	drawClassMedallion(glyphCX, glyphCY, glyphR+4, glyphCol, down)
 	drawClassGlyph(glyphCX, glyphCY, glyphR, member.Class, glyphCol)
-	nameX := contentX + glyphR*2 + 8
+	nameX := glyphCX + glyphR + 10
 
-	// Append a soft "+" badge to the name when the member has
-	// unspent stat OR skill points. Tinted yellow to draw the eye
-	// to the Tome menu — that's where the player goes to allocate.
-	// Routes through core.HasUnspentPoints so a future contract
-	// change (free respec, refund-on-death, etc.) updates the
-	// badge automatically.
+	// Soft "+" badge on the name when the member has unspent stat/skill points.
 	hasPoints := core.HasUnspentPoints(member)
 	nameText := member.Name
 	if hasPoints {
 		nameText = partyNamePlusBadge(member.Name)
 	}
-	drawTextWithShadow(font, nameText, nameX, y+partyCardContentY, FontBody, nameCol)
+	drawTextWithShadow(font, nameText, nameX, y+10, FontBody, nameCol)
 	if hasPoints && !down {
-		// Re-paint just the "+" in the level-up accent color so the
-		// signal pops even when the name itself is in textPrimary.
-		// Width of "name " (no plus) only changes when the name does,
-		// so route through the per-member measurement cache.
 		nameMeasure := measurePartyNameWithSpace(font, member.Name)
-		plusX := nameX + nameMeasure.X
-		drawTextWithShadow(font, "+", plusX, y+partyCardContentY, FontBody, inkAccent)
+		drawTextWithShadow(font, "+", nameX+nameMeasure.X, y+10, FontBody, inkAccent)
 	}
 
-	// Status label: walks the canonical PartyStatus priority ladder so
-	// the card never disagrees with the Tome's Stats-tab badge. Both
-	// surfaces resolve through core.PartyStatus; only the per-status
-	// COLOR and flicker live render-side (those are visual choices
-	// the core layer shouldn't carry).
+	// Status icon + turn count BELOW the name, in the left column. Resolves
+	// through the canonical core.PartyStatus ladder so the card agrees with the
+	// Tome badge; only the color/flicker are render-side choices.
 	kind, turns := core.PartyStatus(member)
 	if kind != core.PartyStatusNone {
 		col, flicker := partyStatusVisual(kind)
@@ -359,26 +331,22 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active,
 			iconCol = fadeColor(col, pulseFlicker())
 		}
 		const statusIconR = float32(7)
-		icx := x + partyCardW - 12 - statusIconR
-		icy := y + 22
+		icx := nameX + statusIconR
+		icy := y + partyCardH - 16
 		drawPartyStatusIcon(icx, icy, statusIconR, kind, iconCol)
-		// Counted statuses keep a compact turns-remaining numeral tucked LEFT of
-		// the glyph — the status WORD is now the drawn icon, but the turn count
-		// is gameplay-relevant so it stays (a number, not a word).
 		if turns > 0 {
 			num := statusTurnDigit(turns)
-			m := measurePartyStatusLabel(font, num)
-			drawTextWithShadow(font, num, icx-statusIconR-4-m.X, icy-FontTiny/2, FontTiny, iconCol)
+			drawTextWithShadow(font, num, icx+statusIconR+4, icy-FontTiny/2, FontTiny, iconCol)
 		}
 	}
 
-	// HP rides the LIVE gauge: a hot trailing ghost marks each hit's bite
-	// before draining (barghost.go, keyed by the stable member name), and a
-	// sub-quarter tank breathes red. MP stays static — spends are deliberate,
-	// not threats, and a trailing ghost there would read as a leak.
+	// RIGHT column: HP over MP. HP rides the LIVE gauge (trailing hit-ghost +
+	// low-HP breathing); MP is static (deliberate spends, not threats).
+	barX := x + partyCardW*0.5
+	barW := x + partyCardW - 14 - barX
 	hpFill := hpFillColor(member.HP, member.MaxHP)
-	drawBarLive(font, partyHPBarKey(member.Name), contentX, y+50, contentW, barHeightFull, "HP", member.HP, member.MaxHP, hpFill, down)
-	drawBar(font, contentX, y+90, contentW, barHeightFull, "MP", member.MP, member.MaxMP, barMP, down)
+	drawBarLive(font, partyHPBarKey(member.Name), barX, y+10, barW, partyCardBarH, "HP", member.HP, member.MaxHP, hpFill, down)
+	drawBar(font, barX, y+partyCardH-10-partyCardBarH, barW, partyCardBarH, "MP", member.MP, member.MaxMP, barMP, down)
 
 	// Dim wash over inactive cards (painted last, over everything) so the
 	// lifted active card pops. The active and the targeted-ally cards opt
@@ -556,14 +524,12 @@ func DrawPartyRibbon(g *core.GameState, assets Resources) {
 		return
 	}
 	_, screenH := screenSizeF()
-	count := float32(len(g.Party))
-
-	totalW := partyCardW*count + partyCardGap*(count-1)
+	totalW := partyCardW*partyCardCols + partyCardGap*(partyCardCols-1)
 	startX := centerXF(totalW)
 	if startX < float32(hudEdgePad) {
 		startX = float32(hudEdgePad)
 	}
-	y := screenH - partyCardH - ribbonBottom
+	topY := screenH - partyRibbonHeight(len(g.Party)) - ribbonBottom
 
 	activeIdx := core.ActiveActorIndex(g)
 	selectedIdx := -1
@@ -578,7 +544,10 @@ func DrawPartyRibbon(g *core.GameState, assets Resources) {
 
 	for i := range g.Party {
 		member := &g.Party[i]
-		x := startX + (partyCardW+partyCardGap)*float32(i)
+		col := i % partyCardCols
+		row := i / partyCardCols
+		x := startX + (partyCardW+partyCardGap)*float32(col)
+		y := topY + (partyCardH+partyRowGap)*float32(row)
 		// Active / selected glow only paints on a member who can act
 		// AND be targeted this turn — i.e. not ingested. The turn queue
 		// already skips ingested actors and the targeting cyclers route
@@ -606,9 +575,21 @@ func DrawPartyRibbon(g *core.GameState, assets Resources) {
 
 // PartyRibbonTopY reports the screen Y coordinate of the top of the party
 // ribbon, so other panels can stack cleanly above it.
+// partyRibbonHeight is the total height of the tiled party ribbon for a roster
+// of memberCount, in 2-wide rows. Single source for the geometry so DrawPartyRibbon
+// and PartyRibbonTopY (which stacks the timing bar above the ribbon) can't drift.
+func partyRibbonHeight(memberCount int) float32 {
+	rows := (memberCount + partyCardCols - 1) / partyCardCols
+	if rows < 1 {
+		rows = 1
+	}
+	return partyCardH*float32(rows) + partyRowGap*float32(rows-1)
+}
+
 func PartyRibbonTopY() float32 {
 	_, h := screenSizeF()
-	return h - partyCardH - ribbonBottom
+	// Standard fixed-size roster (a 2×2 of four); other panels stack above.
+	return h - partyRibbonHeight(core.PartyMemberCount) - ribbonBottom
 }
 
 // centeredMeasureCache memoizes the MeasureTextEx backing drawTextCentered.

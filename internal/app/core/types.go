@@ -13,6 +13,9 @@ type MaterialSet int
 type PackMemberRef struct {
 	Kind       EnemyKind
 	CustomName string
+	// Row is the member's authored formation rank (front/back). Zero value
+	// RowFront, so packs authored before rows existed read as all-front.
+	Row Row
 }
 
 // PackSpawn is one authored pack on the map: a tile position and the roster
@@ -914,6 +917,19 @@ type PartyMember struct {
 	// recompute base stats — the readers always pull from Equipped.
 	Equipped [EquipSlotCount]ItemKind
 
+	// Row is the member's LIVE combat formation rank (front/back) — what melee
+	// reach checks read and what Reposition flips mid-fight. It's recomputed from
+	// the home slot (below) at battle start via AmbushLiveRow, so a side/back
+	// ambush can rotate it for that fight without disturbing the standing
+	// formation. Zero value RowFront.
+	Row Row
+	// HomeRow/HomeCol are the STANDING 2×2 formation slot — the player's set
+	// arrangement (party-screen toggle / class defaults), persisted across fights.
+	// Battle start rotates these into the live Row by engage side; Reposition is a
+	// per-fight tactical move that changes Row only, not the home slot.
+	HomeRow Row
+	HomeCol Col
+
 	AttackBump  float32
 	DamageFlash float32
 	// HitKnockback is the reaction timer for taking a hit — the
@@ -1168,6 +1184,12 @@ type Enemy struct {
 	// Stored per-instance so a future "amoeba splits, halving its
 	// armor" mechanic can mutate it without changing the definition.
 	Armor int
+
+	// Row is the enemy's combat formation rank (front/back). Seeded at spawn by
+	// the formation fill (front-first) and updated by the per-death shunt that
+	// pulls a back enemy up to keep the front packed. Gates melee reach like the
+	// party side (see formation.go). Zero value RowFront.
+	Row Row
 
 	AttackBump  float32
 	DamageFlash float32

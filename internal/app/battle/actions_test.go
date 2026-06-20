@@ -505,7 +505,7 @@ func TestPickEnemyAttackTarget_SkipsDeadPartyMembers(t *testing.T) {
 	g := newTestState()
 	g.Party[1].HP = 0
 	g.Battle.EnemyAttackCursor = 0 // last hit Vex; next pick should skip Mira
-	pick := pickEnemyAttackTarget(g)
+	pick := pickEnemyAttackTarget(g, false)
 	if pick == 1 {
 		t.Fatalf("pickEnemyAttackTarget shouldn't pick a dead member")
 	}

@@ -467,9 +467,46 @@ func BattleEnemyAlive(g *GameState, slot int) bool {
 }
 
 // LivingBattleEnemyIndices returns the slot indices of every alive member
-// in the active pack — used by the player's target cycler.
+// in the active pack — used by the player's target cycler for RANGED/MAGIC
+// attacks (which reach any row).
 func LivingBattleEnemyIndices(g *GameState) []int {
 	return indicesWhere(BattleMembers(g), enemyAlive)
+}
+
+// MeleeReachableBattleEnemyIndices returns the alive enemy slots a MELEE attack
+// can hit — the effective front row only (the back row is protected until the
+// front falls, EnemyInEffectiveFront). The melee counterpart to
+// LivingBattleEnemyIndices for the player's target cycler.
+func MeleeReachableBattleEnemyIndices(g *GameState) []int {
+	members := BattleMembers(g)
+	out := make([]int, 0, len(members))
+	for i := range members {
+		if members[i].Alive && EnemyInEffectiveFront(members, i) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// PeekNextMeleeEnemyTarget is PeekNextEnemyTarget for a MELEE enemy attack:
+// the first available party member after the cursor that sits in the effective
+// front row (melee can't reach the back row until the front falls). Returns -1
+// when no front-row target is available. Does NOT advance the cursor.
+func PeekNextMeleeEnemyTarget(g *GameState) int {
+	n := len(g.Party)
+	if n == 0 {
+		return -1
+	}
+	for off := 0; off < n; off++ {
+		i := (g.Battle.EnemyAttackCursor + 1 + off) % n
+		if i < 0 {
+			i += n
+		}
+		if partyAvailable(g.Party[i]) && PartyInEffectiveFront(g.Party, i) {
+			return i
+		}
+	}
+	return -1
 }
 
 func LivingBattleCount(g *GameState) int {

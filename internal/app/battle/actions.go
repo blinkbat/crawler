@@ -2268,6 +2268,10 @@ func damageEnemy(g *core.GameState, slot, rawDamage, quality int, tag core.Skill
 	for _, idx := range core.ReleaseIngestedBy(g.Party, slot) {
 		setBattleMessage(g, fmt.Sprintf("%s tumbles free.", g.Party[idx].Name))
 	}
+	// Repack the front row: a back-row enemy slides up to fill the gap this death
+	// opened, keeping the front packed (and melee-reachable) while enough enemies
+	// live.
+	core.ShuntEnemyFormation(core.BattleMembers(g))
 	return damage, true
 }
 
@@ -3128,7 +3132,7 @@ func resolveEnemyMiss(g *core.GameState, slot int) {
 	if !ok {
 		return
 	}
-	target := pickEnemyAttackTarget(g)
+	target := pickEnemyAttackTarget(g, true) // basic attack = melee → front row only
 	if target < 0 {
 		return
 	}
@@ -3144,7 +3148,7 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	if !ok {
 		return false
 	}
-	target := pickEnemyAttackTarget(g)
+	target := pickEnemyAttackTarget(g, true) // basic attack = melee → front row only
 	if target < 0 {
 		return false
 	}
@@ -3254,16 +3258,22 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 // one the enemy side targeted. Uses EnemyAttackCursor (separate from
 // PartyTarget) so the player's heal/item ally cycling doesn't shift who
 // enemies attack next.
-func pickEnemyAttackTarget(g *core.GameState) int {
-	// Taunt override: a live pull forces the acting enemy onto the taunter, as
-	// long as that ally is still reachable. Falls through to the round-robin
-	// otherwise (taunter died / got ingested / the taunt lapsed). The cursor is
-	// still advanced to the forced slot so post-taunt targeting resumes from there.
+// pickEnemyAttackTarget chooses (and commits the cursor to) the party member the
+// acting enemy will hit. melee=true restricts the choice to the party's effective
+// front row — a melee enemy can't reach the back row until the front falls;
+// ranged/magic (melee=false) reaches any row. A live Taunt still overrides
+// regardless of row (the pull drags the enemy onto the taunter).
+func pickEnemyAttackTarget(g *core.GameState, melee bool) int {
 	if forced, ok := forcedTauntTarget(g); ok {
 		g.Battle.EnemyAttackCursor = forced
 		return forced
 	}
-	target := core.PeekNextEnemyTarget(g)
+	var target int
+	if melee {
+		target = core.PeekNextMeleeEnemyTarget(g) // melee: front row only
+	} else {
+		target = core.PeekNextEnemyTarget(g) // ranged/magic: any row
+	}
 	if target >= 0 {
 		g.Battle.EnemyAttackCursor = target
 	}

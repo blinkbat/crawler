@@ -1,6 +1,9 @@
 package core
 
-import "math/rand"
+import (
+	"math"
+	"math/rand"
+)
 
 const (
 	TimingQualityMiss = iota
@@ -525,14 +528,35 @@ func (t TimingState) ReelSymbolAt(i int) int {
 	if r.Stop >= 0 {
 		return r.Stop
 	}
-	steps := int(t.Elapsed * r.Speed)
-	if steps < 0 {
-		// Elapsed is only ever advanced by a non-negative dt today, but guard
-		// against a malformed/replayed negative so the modulo can't return a
-		// negative index that a symbol-art lookup would treat as out-of-range.
-		steps = 0
+	// The stoppable symbol is the one NEAREST the centre pay-line, i.e. round
+	// (not floor) of the continuous scroll phase — so the symbol the render
+	// shows centred is exactly the one a press locks (a real reel snaps to the
+	// nearest symbol when you stop it). Euclidean mod keeps a (guarded-against)
+	// negative phase from indexing symbol art out of range.
+	sym := int(math.Round(float64(t.reelPhase(r))))
+	return ((sym % ReelSymbolCount) + ReelSymbolCount) % ReelSymbolCount
+}
+
+// reelPhase is reel r's continuous scroll position in SYMBOLS: starting offset
+// plus elapsed spin distance (never negative under normal play). The integer
+// part is how many symbols have rolled past the pay-line; the fractional part is
+// how far between symbols it currently sits.
+func (t TimingState) reelPhase(r Reel) float32 {
+	p := float32(r.Offset) + t.Elapsed*r.Speed
+	if p < 0 {
+		return 0
 	}
-	return (r.Offset + steps) % ReelSymbolCount
+	return p
+}
+
+// ReelPhaseAt returns reel i's continuous scroll phase (see reelPhase) for the
+// render's scrolling-strip draw. Meaningless for a stopped reel (it has locked
+// onto Stop) — callers gate on Reels[i].Stop < 0.
+func (t TimingState) ReelPhaseAt(i int) float32 {
+	if i < 0 || i >= len(t.Reels) {
+		return 0
+	}
+	return t.reelPhase(t.Reels[i])
 }
 
 // StopNextReel locks the next still-spinning reel onto its current symbol.

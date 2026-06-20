@@ -89,12 +89,23 @@ func footerHintMemberTabs() []HintSeg {
 	}
 }
 
+// footerHintCharacterTab adds the formation row toggle (Use / □) to the member
+// tab hints — the out-of-combat counterpart to the in-battle Reposition action.
+func footerHintCharacterTab() []HintSeg {
+	return []HintSeg{
+		Hint("Tabs", GlyphLB, GlyphRB),
+		Hint("Member", GlyphLeftRight),
+		Hint("Front/Back row", GlyphX),
+		Hint("Close", GlyphB),
+	}
+}
+
 // panelTabFooterHints is parallel to panelTabDrawers and sized [PanelTabCount],
 // so adding a tab forces a hint slot. Functions (not values) so each call
 // rebuilds its glyph segs fresh — they're cheap literals and this avoids shared
 // mutable slice state. init asserts none is nil.
 var panelTabFooterHints = [core.PanelTabCount]func() []HintSeg{
-	core.PanelTabStats: footerHintMemberTabs,
+	core.PanelTabStats: footerHintCharacterTab,
 	core.PanelTabEquipment: func() []HintSeg {
 		return []HintSeg{
 			Hint("Tabs", GlyphLB, GlyphRB),

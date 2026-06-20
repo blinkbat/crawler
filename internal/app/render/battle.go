@@ -741,8 +741,8 @@ func init() {
 	// a new ActionRow is ever added, fail loudly at startup — the menu must be
 	// updated rather than silently omit the row. (Matches the parallel-table
 	// init-assert discipline used elsewhere in the codebase.)
-	if core.ActionRowCount != 5 {
-		panic(fmt.Sprintf("render: drawActionMenuOptions lists 5 rows but core.ActionRowCount == %d — add the new row to the menu", core.ActionRowCount))
+	if core.ActionRowCount != 6 {
+		panic(fmt.Sprintf("render: drawActionMenuOptions lists 6 rows but core.ActionRowCount == %d — add the new row to the menu", core.ActionRowCount))
 	}
 }
 
@@ -758,6 +758,7 @@ func drawActionMenuOptions(g *core.GameState, assets Resources, x, y, rightX int
 	drawActionMenuRow(assets.hudFont, core.ActionRowSkill, x, labelX, y+int32(core.ActionRowSkill)*uiRowPitch, rightX, "Skill", "", cursor == core.ActionRowSkill)
 	drawActionMenuRow(assets.hudFont, core.ActionRowItem, x, labelX, y+int32(core.ActionRowItem)*uiRowPitch, rightX, "Item", "", cursor == core.ActionRowItem)
 	drawActionMenuRow(assets.hudFont, core.ActionRowDefend, x, labelX, y+int32(core.ActionRowDefend)*uiRowPitch, rightX, "Defend", "", cursor == core.ActionRowDefend)
+	drawActionMenuRow(assets.hudFont, core.ActionRowReposition, x, labelX, y+int32(core.ActionRowReposition)*uiRowPitch, rightX, "Reposition", "", cursor == core.ActionRowReposition)
 	drawActionMenuRow(assets.hudFont, core.ActionRowFlee, x, labelX, y+int32(core.ActionRowFlee)*uiRowPitch, rightX, "Flee", "", cursor == core.ActionRowFlee)
 }
 
@@ -821,11 +822,12 @@ func drawIconMedallion(cx, cy float32, selected bool) {
 // startup, instead of a switch that silently draws a blank icon. Attack
 // reuses the warrior class glyph ("strike" without text).
 var actionIconDrawers = [core.ActionRowCount]func(cx, cy, r float32, col rl.Color){
-	core.ActionRowAttack: drawClassGlyphWarrior,
-	core.ActionRowSkill:  drawActionIconSkill,
-	core.ActionRowItem:   drawActionIconItem,
-	core.ActionRowDefend: drawActionIconDefend,
-	core.ActionRowFlee:   drawActionIconFlee,
+	core.ActionRowAttack:     drawClassGlyphWarrior,
+	core.ActionRowSkill:      drawActionIconSkill,
+	core.ActionRowItem:       drawActionIconItem,
+	core.ActionRowDefend:     drawActionIconDefend,
+	core.ActionRowReposition: drawActionIconReposition,
+	core.ActionRowFlee:       drawActionIconFlee,
 }
 
 func init() {
@@ -924,6 +926,21 @@ func drawActionIconDefend(cx, cy, r float32, col rl.Color) {
 // (>>), reading as "break away / exit fast." Thick line segments so it stays
 // crisp at any DPI, matching the procedural-glyph family; the leading chevron is
 // brighter for a sense of motion.
+// drawActionIconReposition paints a vertical swap sigil — an up arrow and a
+// down arrow side by side — for the Reposition action (flip front/back row).
+func drawActionIconReposition(cx, cy, r float32, col rl.Color) {
+	thick := r * 0.3
+	head := r * 0.42
+	// Left shaft with an UP arrowhead; right shaft with a DOWN arrowhead.
+	lx, rx := cx-r*0.42, cx+r*0.42
+	rl.DrawLineEx(rl.NewVector2(lx, cy+r), rl.NewVector2(lx, cy-r), thick, col)
+	rl.DrawLineEx(rl.NewVector2(lx, cy-r), rl.NewVector2(lx-head, cy-r+head), thick, col)
+	rl.DrawLineEx(rl.NewVector2(lx, cy-r), rl.NewVector2(lx+head, cy-r+head), thick, col)
+	rl.DrawLineEx(rl.NewVector2(rx, cy-r), rl.NewVector2(rx, cy+r), thick, col)
+	rl.DrawLineEx(rl.NewVector2(rx, cy+r), rl.NewVector2(rx-head, cy+r-head), thick, col)
+	rl.DrawLineEx(rl.NewVector2(rx, cy+r), rl.NewVector2(rx+head, cy+r-head), thick, col)
+}
+
 func drawActionIconFlee(cx, cy, r float32, col rl.Color) {
 	thick := r * 0.34
 	h := r * 0.62

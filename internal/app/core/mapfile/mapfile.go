@@ -147,13 +147,20 @@ type MapFile struct {
 }
 
 // MapPack is one authored pack at a tile. Members is a non-empty list of
-// enemy-kind names; on-disk format is "kind[,kind...] X Z [ai]" — three
-// fields stay the legacy form (AI defaults to "none"), an optional fourth
-// AI field names a non-default movement style.
+// enemy-kind names, ordered FRONT row first then BACK row; on-disk format is
+// "kind[,kind...] X Z [ai]" — three fields stay the legacy form (AI defaults to
+// "none"), an optional fourth AI field names a non-default movement style. A
+// ';' inside the member field splits the front group from the back group
+// ("f,f;b,b"); no ';' = all front (the legacy shape).
 type MapPack struct {
 	Members []string
-	X       int
-	Z       int
+	// BackCount is how many of Members (which are ordered front-first) stand in
+	// the BACK row — the last BackCount entries. Zero (the default / zero value)
+	// means every member is front row, so legacy packs and any MapPack built
+	// without rows read as all-front and round-trip byte-identically.
+	BackCount int
+	X         int
+	Z         int
 	// AI is the on-disk name of the pack's movement style (see
 	// PackAINames). Empty means "use the default" — the loader maps
 	// that to PackAINone, the stationary mode.
@@ -193,6 +200,59 @@ func IsPackAIName(s string) bool {
 		}
 	}
 	return false
+}
+
+// splitPackMembers parses a pack's member field. Members are comma-separated; an
+// optional single ';' splits the FRONT row (before) from the BACK row (after).
+// Returns the flat member list ordered front-first and how many trailing entries
+// are back row. No ';' = all front (the legacy shape), so BackCount is 0.
+func splitPackMembers(field string) (members []string, backCount int, err error) {
+	frontStr, backStr := field, ""
+	if i := strings.IndexByte(field, ';'); i >= 0 {
+		frontStr, backStr = field[:i], field[i+1:]
+	}
+	front, err := parsePackGroup(frontStr)
+	if err != nil {
+		return nil, 0, err
+	}
+	back, err := parsePackGroup(backStr)
+	if err != nil {
+		return nil, 0, err
+	}
+	return append(front, back...), len(back), nil
+}
+
+// parsePackGroup splits one comma-separated member group, trimming each token
+// and rejecting an empty one. An empty/whitespace group yields no members (a
+// pack with no ';' has an empty back group; an all-back pack has an empty front).
+func parsePackGroup(s string) ([]string, error) {
+	if strings.TrimSpace(s) == "" {
+		return nil, nil
+	}
+	parts := strings.Split(s, ",")
+	for i, m := range parts {
+		m = strings.TrimSpace(m)
+		if m == "" {
+			return nil, fmt.Errorf("empty pack member")
+		}
+		parts[i] = m
+	}
+	return parts, nil
+}
+
+// encodePackMembers is the inverse of splitPackMembers: members ordered
+// front-first with the last backCount in the back row. backCount<=0 writes the
+// plain comma list (legacy shape, byte-identical for row-less packs); otherwise
+// it emits "front;back" (front may be empty for an all-back pack).
+func encodePackMembers(members []string, backCount int) string {
+	if backCount <= 0 {
+		return strings.Join(members, ",")
+	}
+	if backCount > len(members) {
+		backCount = len(members)
+	}
+	split := len(members) - backCount
+	return strings.Join(members[:split], ",") + ";" + strings.Join(members[split:], ",")
 }
 
 // MapChest is one authored chest at a tile. On-disk format mirrors
@@ -593,13 +653,12 @@ func Parse(r io.Reader) (MapFile, error) {
 			if len(fields) != packFieldsLegacy && len(fields) != packFields {
 				return mf, fmt.Errorf("line %d: expected '<kind[,kind...]> <x> <z> [ai]', got %q", lineNo, raw)
 			}
-			members := strings.Split(fields[0], ",")
-			for i, m := range members {
-				m = strings.TrimSpace(m)
-				if m == "" {
-					return mf, fmt.Errorf("line %d: empty pack member at position %d", lineNo, i)
-				}
-				members[i] = m
+			members, backCount, err := splitPackMembers(fields[0])
+			if err != nil {
+				return mf, fmt.Errorf("line %d: %v", lineNo, err)
+			}
+			if len(members) == 0 {
+				return mf, fmt.Errorf("line %d: pack has no members", lineNo)
 			}
 			x, err := parseIntField(fields[1], "pack x", lineNo)
 			if err != nil {
@@ -616,7 +675,7 @@ func Parse(r io.Reader) (MapFile, error) {
 					return mf, fmt.Errorf("line %d: unknown pack AI %q (expected one of %v)", lineNo, fields[3], PackAINames)
 				}
 			}
-			mf.Packs = append(mf.Packs, MapPack{Members: members, X: x, Z: z, AI: ai})
+			mf.Packs = append(mf.Packs, MapPack{Members: members, BackCount: backCount, X: x, Z: z, AI: ai})
 			continue
 		}
 
@@ -1452,7 +1511,7 @@ func (mf MapFile) Encode(w io.Writer) error {
 		// format change. The AI column is appended only when non-default
 		// (anything other than "none" / empty) so default-stationary
 		// packs round-trip to the same 3-field shape.
-		members := strings.Join(p.Members, ",")
+		members := encodePackMembers(p.Members, p.BackCount)
 		ai := strings.ToLower(strings.TrimSpace(p.AI))
 		if ai == "" || ai == PackAINoneName {
 			fmt.Fprintf(bw, packEncodeFormatLegacy, members, p.X, p.Z)

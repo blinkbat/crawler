@@ -127,6 +127,20 @@ func updatePanels(g *core.GameState) {
 				openLevelUpFor(g, g.PanelsRowCursor)
 			}
 		}
+		// Use (□ / F) flips the selected member's combat formation row out of
+		// battle — the free out-of-combat counterpart to the in-battle Reposition
+		// action. The change persists (Row is a standing choice) and shows in the
+		// next fight's formation.
+		if input.UsePressed() && g.PanelsRowCursor >= 0 && g.PanelsRowCursor < len(g.Party) {
+			m := &g.Party[g.PanelsRowCursor]
+			if m.HomeRow == core.RowBack {
+				m.HomeRow = core.RowFront
+			} else {
+				m.HomeRow = core.RowBack
+			}
+			m.Row = m.HomeRow // keep the live row in sync out of combat
+			g.SetStatusMessage(m.Name + " moves to the " + core.RowLabel(m.HomeRow) + " row.")
+		}
 	case core.PanelTabEquipment:
 		// Equipment tab: a 2-D cursor over members × slots; Confirm or a
 		// mouse click on a slot opens that slot's item picker — see

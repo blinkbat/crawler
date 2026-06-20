@@ -218,6 +218,8 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 			}
 			members = append(members, BuiltinPackMember(kind))
 		}
+		// Members decode front-first; stamp rows from the trailing back count.
+		ApplyMemberRows(members, p.BackCount)
 		spawns = append(spawns, PackSpawn{TileX: p.X, TileZ: p.Z, Members: members, AI: PackAIFromName(p.AI)})
 	}
 	chests := make([]ChestSpawn, 0, len(mf.Chests))
@@ -350,8 +352,11 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 	}
 	packs := make([]mapfile.MapPack, 0, len(a.PackSpawns))
 	for _, s := range a.PackSpawns {
-		names := make([]string, 0, len(s.Members))
-		for _, member := range s.Members {
+		// Reorder front-first (shared invariant) so the on-disk member list and
+		// its ';' split reflect each member's row; the trailing BackCount are back.
+		ordered, backCount := PartitionMembersByRow(s.Members)
+		names := make([]string, 0, len(ordered))
+		for _, member := range ordered {
 			if customName := member.CustomName; customName != "" {
 				safeName := SanitizeCustomEnemyName(customName)
 				if safeName == "" {
@@ -363,17 +368,18 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 				names = append(names, safeName)
 				continue
 			}
-			name, ok := EnemyKindName(member.Kind)
+			kindName, ok := EnemyKindName(member.Kind)
 			if !ok {
 				return mapfile.MapFile{}, fmt.Errorf("unknown enemy kind %d in pack at (%d,%d)", int(member.Kind), s.TileX, s.TileZ)
 			}
-			names = append(names, name)
+			names = append(names, kindName)
 		}
 		packs = append(packs, mapfile.MapPack{
-			Members: names,
-			X:       s.TileX,
-			Z:       s.TileZ,
-			AI:      PackAIName(s.AI),
+			Members:   names,
+			BackCount: backCount,
+			X:         s.TileX,
+			Z:         s.TileZ,
+			AI:        PackAIName(s.AI),
 		})
 	}
 	chests := make([]mapfile.MapChest, 0, len(a.ChestSpawns))

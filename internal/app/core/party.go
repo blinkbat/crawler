@@ -977,6 +977,17 @@ func SkillTagFor(skill SkillID) SkillTag {
 	return SkillTagNone
 }
 
+// SkillAttackClassFor returns a skill's reach class (melee/ranged/magic) for the
+// formation row rules — only melee is front-gated. Derives from the skill's Kind
+// via SkillAttackClass; an unknown skill defaults to ranged (any-row), the safe
+// non-gated fallback.
+func SkillAttackClassFor(skill SkillID) AttackClass {
+	if def, ok := skillInfo(skill); ok {
+		return SkillAttackClass(def.Kind)
+	}
+	return AttackRanged
+}
+
 // ApplyArmor clamps physical damage down by the target's armor, never
 // below 1 (every connection deals at least 1 — armor is a damp, not an
 // immunity). Magic / Heal / Buff tagged actions bypass armor entirely:

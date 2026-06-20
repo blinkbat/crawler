@@ -514,6 +514,16 @@ func updateMouse(s *State) {
 	hx, hz := s.cellAt(mp)
 	s.hoverX, s.hoverZ = hx, hz
 
+	// 3D view owns the canvas: it runs its own orbit/zoom/pan + elevation editing
+	// and ray-pick (cellAt above already returned -1 in iso, keeping every
+	// top-down paint path inert). Side panels are mouse-inert in 3D mode — press
+	// `I` (handled in updateHotkeys, which runs first) to return to top-down for
+	// the flat layers / panels.
+	if s.isoView {
+		updateIsoCanvas(s, mp)
+		return
+	}
+
 	// Context menu absorbs all mouse / keyboard input while open so a
 	// stray click on the grid behind the menu doesn't double-act.
 	if updateContextMenu(s) {
@@ -1980,6 +1990,10 @@ func updatePackEditModal(s *State) Action {
 		if rl.IsKeyPressed(rl.KeyJ) {
 			packMoveSelected(s, pack, +1)
 		}
+		if rl.IsKeyPressed(rl.KeyR) {
+			packToggleSelectedRow(s, pack)
+			return ActionNone
+		}
 	}
 	if rl.IsKeyPressed(rl.KeyA) {
 		pushUndo(s)
@@ -2039,9 +2053,37 @@ func packEditCmds(s *State) (adds, actions []modalCmd) {
 		{label: "Remove", run: func() Action { packRemoveSelected(s, pack); return ActionNone }},
 		{label: "Up", run: func() Action { packMoveSelected(s, pack, -1); return ActionNone }},
 		{label: "Down", run: func() Action { packMoveSelected(s, pack, +1); return ActionNone }},
+		{label: "Row: " + packRowLabel(pack, s.modalCursor), run: func() Action { packToggleSelectedRow(s, pack); return ActionNone }},
 		{label: "AI: " + core.PackAILabel(pack.AI) + dropdownArrowSuffix, run: func() Action { openPackAIDropdown(s); return ActionNone }},
 	}
 	return adds, actions
+}
+
+// packRowLabel is the Row action button's caption for the selected member —
+// "Front"/"Back", or "—" when the list is empty.
+func packRowLabel(pack *core.PackSpawn, idx int) string {
+	if idx < 0 || idx >= len(pack.Members) {
+		return "—"
+	}
+	return core.RowLabel(pack.Members[idx].Row)
+}
+
+// packToggleSelectedRow flips the cursored member between the front and back
+// formation rows (the foe-side mirror of the party's reposition). Snapshots undo
+// and marks dirty so the authored arrangement saves.
+func packToggleSelectedRow(s *State, pack *core.PackSpawn) {
+	if s.modalCursor < 0 || s.modalCursor >= len(pack.Members) {
+		return
+	}
+	pushUndo(s)
+	m := &pack.Members[s.modalCursor]
+	if m.Row == core.RowBack {
+		m.Row = core.RowFront
+	} else {
+		m.Row = core.RowBack
+	}
+	s.dirty = true
+	s.flash(core.PackMemberDisplayName(s.area, *pack, s.modalCursor) + " → " + packRowLabel(pack, s.modalCursor) + " row")
 }
 
 // openPackAIDropdown arms the AI-mode dropdown anchored on the pack editor's

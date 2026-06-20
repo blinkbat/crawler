@@ -719,33 +719,66 @@ func drawReelBar(timing core.TimingState, g *core.GameState, assets Resources, x
 	}
 	cellW := available / float32(n)
 	cy := y + barH*0.5
+	// symStep is the vertical gap between adjacent symbols on a reel; ~the cell
+	// half-height so the centre symbol sits on the pay-line while the symbols
+	// before/after it show clearly above and below — the read of a real reel
+	// drum mid-spin (smaller symbols so the neighbours fit in the window).
+	symStep := barH * 0.5
+	r := barH * 0.2
+	ncol := len(reelSymbolColors)
+	flash := g.Battle.TimingFlash
 	for i := 0; i < n; i++ {
 		cellX := drawX + barRowPadPx + (cellW+barCellGapPx)*float32(i)
 		stopped := timing.Reels[i].Stop >= 0
 		ix, iy, iw, ih := int32(cellX), int32(y), int32(cellW), int32(barH)
+		sx := cellX + cellW*0.5
 
 		// Recessed glass window per reel — the same gauge body the press /
 		// charge tracks use, so a reel reads as a lit cabinet pane.
 		drawGaugeWell(ix, iy, iw, ih)
 		drawSmallPanel(ix, iy, iw, ih, timingTrackColor)
 
-		sym := timing.ReelSymbolAt(i)
-		// Euclidean mod so a (hypothetical) negative symbol id can't panic on a
-		// negative index — Go's % keeps the sign of the dividend.
-		n := len(reelSymbolColors)
-		col := reelSymbolColors[((sym%n)+n)%n]
-		if !stopped {
-			col = colorWithAlpha(col, 140) // dim while spinning
+		// Clip the scrolling symbol strip to the reel window so off-centre
+		// symbols slide in/out of view instead of spilling over the frame.
+		rl.BeginScissorMode(ix, iy, iw, ih)
+		if stopped {
+			sym := timing.Reels[i].Stop
+			col := reelSymbolColors[((sym%ncol)+ncol)%ncol]
+			drawReelSymbol(sx, cy, r, col, flashing, flash)
+		} else {
+			// Continuous scroll: symbols ride the reel's phase past the centre
+			// pay-line. The symbol NEAREST the line is the one a press locks
+			// (ReelSymbolAt rounds to it), so it's drawn brightest and the rest
+			// fade with distance — telegraphing "what you'll get" as it spins.
+			phase := timing.ReelPhaseAt(i)
+			center := int(math.Round(float64(phase)))
+			for d := -2; d <= 2; d++ {
+				k := center + d
+				sy := cy + (float32(k)-phase)*symStep
+				if sy < y-r || sy > y+barH+r {
+					continue
+				}
+				// Softer falloff (denominator ~2 symbols) so the before/after
+				// symbols stay clearly visible instead of fading to a sliver — the
+				// centre symbol is still brightest at the pay-line.
+				a := 1 - float32(math.Abs(float64(sy-cy)))/(symStep*2.1)
+				if a < 0 {
+					a = 0
+				} else if a > 1 {
+					a = 1
+				}
+				// Reduce the scroll index to a SYMBOL identity (mod ReelSymbolCount)
+				// before picking the hue — otherwise the strip cycles through all
+				// len(reelSymbolColors) hues and the centred symbol's colour wouldn't
+				// match the colour it locks to (ReelSymbolAt rounds to the same mod).
+				sym := ((k % core.ReelSymbolCount) + core.ReelSymbolCount) % core.ReelSymbolCount
+				col := colorWithAlpha(reelSymbolColors[sym%ncol], uint8(90+165*a))
+				drawReelSymbol(sx, sy, r, col, flashing, flash)
+			}
+			// Faint gilt pay-line across the window centre — where a stop locks.
+			rl.DrawRectangle(ix+4, int32(cy)-1, iw-8, 2, fadeForFlash(colorWithAlpha(giltBright, 70), flashing, flash))
 		}
-		col = fadeForFlash(col, flashing, g.Battle.TimingFlash)
-		// Dark rim behind the symbol so it reads crisply (etched) over the
-		// translucent glass cell — same "definition over glass" logic as the
-		// mandatory text drop-shadow (UI_STANDARDS.md). Matters more now that
-		// the symbol fills are muted toward parchment tones.
-		sx := cellX + cellW*0.5
-		r := barH * 0.30
-		rl.DrawCircleV(rl.NewVector2(sx, cy), r+2, fadeForFlash(colorWithAlpha(shadowBase, reelRimAlpha), flashing, g.Battle.TimingFlash))
-		rl.DrawCircleV(rl.NewVector2(sx, cy), r, col)
+		rl.EndScissorMode()
 
 		// Frame: a dim wood rail while spinning; a gilt frame breathing with
 		// the candle flame plus corner studs once the reel locks — so a stopped
@@ -753,7 +786,7 @@ func drawReelBar(timing core.TimingState, g *core.GameState, assets Resources, x
 		if stopped {
 			flick := candleFlicker()
 			drawGaugeBezel(ix, iy, iw, ih, false)
-			drawSmallPanelOutline(ix, iy, iw, ih, fadeForFlash(fadeColor(giltBright, 0.6+0.3*flick), flashing, g.Battle.TimingFlash))
+			drawSmallPanelOutline(ix, iy, iw, ih, fadeForFlash(fadeColor(giltBright, 0.6+0.3*flick), flashing, flash))
 			drawBrassStud(cellX+reelStudInset, y+reelStudInset, reelStudR)
 			drawBrassStud(cellX+cellW-reelStudInset, y+reelStudInset, reelStudR)
 			drawBrassStud(cellX+reelStudInset, y+barH-reelStudInset, reelStudR)
@@ -763,6 +796,17 @@ func drawReelBar(timing core.TimingState, g *core.GameState, assets Resources, x
 			drawSmallPanelOutline(ix, iy, iw, ih, woodAccentSeam)
 		}
 	}
+}
+
+// drawReelSymbol paints one slot symbol: a dark rim (definition over the
+// translucent glass cell, same "etched" logic as the mandatory text shadow)
+// under the colored fill. The rim alpha tracks the fill's so faded (off-centre,
+// scrolling) symbols don't carry a full-strength halo. col carries the desired
+// alpha; both layers are flash-tinted on the resolve flash.
+func drawReelSymbol(sx, sy, r float32, col rl.Color, flashing bool, flash float32) {
+	rimA := uint8(int(col.A) * int(reelRimAlpha) / 255)
+	rl.DrawCircleV(rl.NewVector2(sx, sy), r+2, fadeForFlash(colorWithAlpha(shadowBase, rimA), flashing, flash))
+	rl.DrawCircleV(rl.NewVector2(sx, sy), r, fadeForFlash(col, flashing, flash))
 }
 
 // drawRecallBar paints Arc Bolt's memory minigame. During the reveal phase it
@@ -1172,7 +1216,7 @@ func qualityPopupAnchor(camera rl.Camera3D, g *core.GameState) (rl.Vector3, bool
 	if idx < 0 || idx >= len(g.Party) {
 		return rl.Vector3{}, false
 	}
-	pos := partySpritePosition(camera, idx, g.Party[idx].Class, 0, 0, 0)
+	pos := partySpritePosition(camera, g.Party, idx, 0, 0, 0)
 	return rl.NewVector3(pos.X, pos.Y, pos.Z), true
 }
 
@@ -1215,7 +1259,7 @@ func DrawDamagePopups(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		if m.DamagePopupTimer <= 0 {
 			continue
 		}
-		pos := partySpritePosition(camera, i, m.Class, 0, 0, 0)
+		pos := partySpritePosition(camera, g.Party, i, 0, 0, 0)
 		worldPos := rl.NewVector3(pos.X, pos.Y, pos.Z)
 		// Apply the per-class authored number-spawn nudge (Num X/Y in the Party
 		// Visualizer) on top of the default placement.

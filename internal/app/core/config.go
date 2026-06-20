@@ -158,8 +158,12 @@ const (
 	ActionRowSkill
 	ActionRowItem
 	ActionRowDefend
-	// ActionRowFlee is the LAST row (below Defend): roll to escape the fight and
-	// retreat to the pre-combat tile. See performFlee / FleeChance.
+	// ActionRowReposition flips the actor between the front and back formation
+	// row, spending their turn (see formation rules). Lets a member shift out of
+	// melee reach (or up into it) mid-fight.
+	ActionRowReposition
+	// ActionRowFlee is the LAST row: roll to escape the fight and retreat to the
+	// pre-combat tile. See performFlee / FleeChance.
 	ActionRowFlee
 )
 
@@ -363,11 +367,18 @@ const (
 	// reels; matching symbols pay off (3 = jackpot/Excellent, 2 = Good, all
 	// distinct = Miss). Reels spin between ReelSpinMin..ReelSpinMax symbols/sec,
 	// rolled per-reel so they desync (no single beat stops all three matched).
-	ReelTimingDuration = float32(2.4)
+	// Speeds are slow enough that the scrolling symbols stay readable (so a stop
+	// is a real timing call, not a blur-gamble), while the per-reel desync keeps
+	// a guaranteed jackpot out of reach. Longer duration than the press bars so
+	// there's time to stop all three deliberately.
+	ReelTimingDuration = float32(3.2)
 	ReelCount          = 3
-	ReelSymbolCount    = 4
-	ReelSpinMin        = float32(7)
-	ReelSpinMax        = float32(11)
+	// 3 symbols (was 4) so matches land far more often — with 4 the desynced
+	// reels made even a 2-of-3 feel like a fluke; 3 keeps a real whiff possible
+	// while rewarding a deliberate stop.
+	ReelSymbolCount = 3
+	ReelSpinMin     = float32(2.0)
+	ReelSpinMax     = float32(3.25)
 
 	// Recall (memory) minigame — Arc Bolt's pattern. A run of RecallPatternLength
 	// directions shows for RecallRevealTime seconds, then hides; the player

@@ -613,7 +613,8 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 			battle.DebugSkipWin(g, packHit)
 			return
 		}
-		battle.Start(g, packHit, fleeFromX, fleeFromZ)
+		// The player stepped INTO the pack — a head-on engage, home formation stands.
+		battle.Start(g, packHit, fleeFromX, fleeFromZ, core.EngageFront)
 		return
 	}
 	// Elevation/voxel gate FIRST: resolve WHICH surface the party would land on
@@ -693,7 +694,9 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	// engagement — battle takes the camera over immediately anyway.
 	if engagedPack := tickPackAI(g); engagedPack >= 0 {
 		core.SnapPlayerToTile(p) // p.TileX/Z were advanced to targetX/Z above
-		battle.Start(g, engagedPack, fleeFromX, fleeFromZ)
+		// The pack stepped onto the player — an ambush from behind; the party's
+		// back rank is shoved to the exposed front until they reposition.
+		battle.Start(g, engagedPack, fleeFromX, fleeFromZ, core.EngageBack)
 		return
 	}
 	p.Anim = core.Animation{

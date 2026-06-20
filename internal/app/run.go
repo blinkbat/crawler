@@ -302,6 +302,7 @@ func errDoorNotFound(mapID, doorName string) error {
 func updateEditorScene(state *appState, dt float32) {
 	switch editor.Update(&state.editor, dt) {
 	case editor.ActionExitToTitle:
+		state.editor.Close() // free the 3D-view render target if it was open
 		returnToTitleScene(state)
 	case editor.ActionTest:
 		// Build a runtime GameState from the in-memory area without
