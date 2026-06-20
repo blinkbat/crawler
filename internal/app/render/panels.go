@@ -89,13 +89,14 @@ func footerHintMemberTabs() []HintSeg {
 	}
 }
 
-// footerHintCharacterTab adds the formation row toggle (Use / □) to the member
-// tab hints — the out-of-combat counterpart to the in-battle Reposition action.
+// footerHintCharacterTab adds the formation swap (Use / □) to the member tab
+// hints — the out-of-combat counterpart to the in-battle Swap action: pick a
+// member, then pick who to trade formation slots with.
 func footerHintCharacterTab() []HintSeg {
 	return []HintSeg{
 		Hint("Tabs", GlyphLB, GlyphRB),
 		Hint("Member", GlyphLeftRight),
-		Hint("Front/Back row", GlyphX),
+		Hint("Swap", GlyphX),
 		Hint("Close", GlyphB),
 	}
 }
@@ -393,9 +394,11 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 	drawEngravedText(font, m.Name, innerX+nameOffset, y, FontHeading, nameCol)
 	y += 36
 
-	// PartyMember.Name doubles as the class label in this build, so the
-	// sub-line just carries the level — no need to repeat the class.
-	sub := "Lv " + strconv.Itoa(m.Level)
+	// PartyMember.Name doubles as the class label in this build, so the sub-line
+	// carries the level plus the standing formation row (Front/Back) — the latter
+	// so the player can read + arrange the 2×2 from this tab (the swap tool lives
+	// here, and the overlay covers the ribbon that otherwise shows the formation).
+	sub := "Lv " + strconv.Itoa(m.Level) + " · " + core.RowLabel(m.HomeRow)
 	drawTextWithShadow(font, sub, innerX, y, FontBody, textMuted)
 	y += 30
 
@@ -421,6 +424,12 @@ func drawPanelsStats(g *core.GameState, assets Resources, body rl.Rectangle) {
 	for i, m := range g.Party {
 		highlight := i == g.PanelsRowCursor
 		contentY := drawPartyMemberCardHeader(font, m, cols[i], highlight)
+		// Formation-swap source: the "picked-up" member awaiting a partner pick
+		// gets a distinct green outline (the cursor still wears the gilt focus
+		// ring), so the held tile reads apart from the one you're hovering.
+		if i == g.PanelSwapSource {
+			drawPanelOutline(int32(cols[i].X)-2, int32(cols[i].Y)-2, int32(cols[i].Width)+4, int32(cols[i].Height)+4, borderTarget)
+		}
 		innerX, innerW := memberCardInner(cols[i])
 
 		// Stat grid: 2 columns, ceil(StatCount/2) rows. Each cell paints

@@ -31,8 +31,8 @@ func updateActionMenu(g *core.GameState) {
 	case core.ActionRowDefend:
 		performDefend(g)
 		return
-	case core.ActionRowReposition:
-		performReposition(g)
+	case core.ActionRowSwap:
+		enterSwapTargeting(g)
 		return
 	case core.ActionRowFlee:
 		// Gate the retreat behind a yes/no — a stray Confirm on this row
@@ -418,21 +418,72 @@ func performDefend(g *core.GameState) {
 	finishActorTurn(g)
 }
 
-// performReposition flips the actor between the front and back formation row,
-// spending their turn. The per-character cost is the whole reposition economy:
-// a scrambled party costs at most two turns to fix.
-func performReposition(g *core.GameState) {
-	member, ok := currentMember(g)
-	if !ok {
+// swapCandidates returns the party indices the acting member can swap formation
+// slots with — every OTHER member (living or downed; a slot exists regardless of
+// HP). Built fresh into the caller's scratch each call; the list is tiny (≤3).
+func swapCandidates(g *core.GameState) []int {
+	out := make([]int, 0, len(g.Party))
+	for i := range g.Party {
+		if i != g.Battle.CurrentParty {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// enterSwapTargeting opens the Swap tile picker: the actor stays the source (its
+// card keeps the active halo) and the cursor highlights a partner to trade
+// formation slots with. Confirm performs the swap and ends the actor's turn;
+// the per-turn cost is the whole swap economy (a scrambled party costs at most
+// two turns to fix). Snaps the cursor to a valid partner before entering.
+func enterSwapTargeting(g *core.GameState) {
+	if _, ok := currentMember(g); !ok {
 		return
 	}
-	if member.Row == core.RowBack {
-		member.Row = core.RowFront
-		setBattleMessage(g, fmt.Sprintf("%s moves up to the front.", member.Name))
-	} else {
-		member.Row = core.RowBack
-		setBattleMessage(g, fmt.Sprintf("%s falls back.", member.Name))
+	cands := swapCandidates(g)
+	if len(cands) == 0 {
+		setBattleStatus(g, msgChooseAction)
+		return
 	}
+	if g.Battle.PartyTarget == g.Battle.CurrentParty || !slices.Contains(cands, g.Battle.PartyTarget) {
+		g.Battle.PartyTarget = cands[0]
+	}
+	g.Battle.ActionMode = core.ActionSwapTarget
+	setBattleStatus(g, fmt.Sprintf("Swap with %s?", g.Party[g.Battle.PartyTarget].Name))
+}
+
+// updateSwapTarget drives the Swap tile picker: Next/Previous cycle the partner
+// cursor, Back returns to the action menu, Confirm trades slots.
+func updateSwapTarget(g *core.GameState) {
+	updateTargetPicker(g, cycleSwapTarget, cancelTargetToActionMenu, performSwap)
+}
+
+// cycleSwapTarget walks the partner cursor across the swap candidates.
+func cycleSwapTarget(g *core.GameState, delta int) {
+	cycleTargetSelection(g, &g.Battle.PartyTarget, delta,
+		func() []int { return swapCandidates(g) },
+		func(g *core.GameState, _, _ int) string {
+			return fmt.Sprintf("Swap with %s?", g.Party[g.Battle.PartyTarget].Name)
+		})
+}
+
+// performSwap exchanges the actor's formation slot with the cursored partner's
+// and ends the actor's turn. The swap keeps the party a clean 2×2 (the two
+// members trade positions), so it can never leave three in one row.
+func performSwap(g *core.GameState) {
+	actor, ok := currentMember(g)
+	if !ok {
+		resetBattleAction(g)
+		return
+	}
+	partner := g.Battle.PartyTarget
+	if partner == g.Battle.CurrentParty || !partyIndexValid(g, partner) {
+		setBattleStatus(g, msgInvalidTarget)
+		return
+	}
+	actorName, partnerName := actor.Name, g.Party[partner].Name
+	core.SwapFormationSlots(g.Party, g.Battle.CurrentParty, partner)
+	setBattleMessage(g, fmt.Sprintf("%s and %s swap places.", actorName, partnerName))
 	finishActorTurn(g)
 }
 

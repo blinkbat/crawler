@@ -479,6 +479,12 @@ func sanitizeLoadedParty(party []PartyMember) {
 	// no longer has) or an asleep/stunned member can't load permanently
 	// locked out of combat with no enemy alive to ever release them.
 	clearPartyCombatTransients(party)
+	// Repair the standing 2×2 formation if the loaded slots aren't a valid grid
+	// — most importantly a pre-formation save, where HomeRow/HomeCol decode to
+	// the zero value (all front-left). The ribbon and 3D battlefield now position
+	// members BY their formation slot, so an unrepaired layout would stack every
+	// card in one spot. A valid (incl. custom-swapped) layout is left as-is.
+	NormalizePartyFormation(party)
 }
 
 // pruneValid is the shared "filter a save-loaded slice" shape: empty/nil

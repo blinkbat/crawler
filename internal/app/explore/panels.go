@@ -38,6 +38,7 @@ func resetPanelSubmodals(g *core.GameState) {
 	closeUseTarget(g)
 	closeSkillTree(g)
 	closeHealPick(g)
+	g.PanelSwapSource = -1 // clear any half-started Character-tab formation swap
 }
 
 // closePanels takes the overlay down. Tab + zoom + cursor state stays
@@ -83,8 +84,15 @@ func updatePanels(g *core.GameState) {
 		updateEquipPicker(g)
 		return
 	}
-	// Back closes the overlay. The toggle button always closes outright.
+	// Back closes the overlay — UNLESS a Character-tab formation swap is half-
+	// started, in which case Back just cancels the pickup (so the player can back
+	// out of a swap without dropping the whole overlay). The toggle button always
+	// closes outright (handled below).
 	if input.BackPressed() {
+		if g.PanelsTab == core.PanelTabCharacter && g.PanelSwapSource >= 0 {
+			g.PanelSwapSource = -1
+			return
+		}
 		closePanels(g)
 		return
 	}
@@ -127,19 +135,27 @@ func updatePanels(g *core.GameState) {
 				openLevelUpFor(g, g.PanelsRowCursor)
 			}
 		}
-		// Use (□ / F) flips the selected member's combat formation row out of
-		// battle — the free out-of-combat counterpart to the in-battle Reposition
-		// action. The change persists (Row is a standing choice) and shows in the
-		// next fight's formation.
+		// Use (□ / F) drives the free out-of-combat formation SWAP — the
+		// counterpart to the in-battle Swap action. First press "picks up" the
+		// cursored member (its tile shows the source outline); a second press on a
+		// DIFFERENT member trades their formation slots; pressing on the held member
+		// again cancels. A swap keeps the party a clean 2×2 (the two trade places),
+		// so you can never end up with three in one row. Back also cancels a pickup
+		// (handled above). The change persists and shows in the next fight.
 		if input.UsePressed() && g.PanelsRowCursor >= 0 && g.PanelsRowCursor < len(g.Party) {
-			m := &g.Party[g.PanelsRowCursor]
-			if m.HomeRow == core.RowBack {
-				m.HomeRow = core.RowFront
-			} else {
-				m.HomeRow = core.RowBack
+			switch {
+			case g.PanelSwapSource < 0 || g.PanelSwapSource >= len(g.Party):
+				g.PanelSwapSource = g.PanelsRowCursor
+				g.SetStatusMessage("Swap " + g.Party[g.PanelsRowCursor].Name + " with whom?")
+			case g.PanelSwapSource == g.PanelsRowCursor:
+				g.PanelSwapSource = -1 // re-picked the held member → cancel
+			default:
+				a, b := g.PanelSwapSource, g.PanelsRowCursor
+				nameA, nameB := g.Party[a].Name, g.Party[b].Name
+				core.SwapFormationSlots(g.Party, a, b)
+				g.PanelSwapSource = -1
+				g.SetStatusMessage(nameA + " and " + nameB + " swap places.")
 			}
-			m.Row = m.HomeRow // keep the live row in sync out of combat
-			g.SetStatusMessage(m.Name + " moves to the " + core.RowLabel(m.HomeRow) + " row.")
 		}
 	case core.PanelTabEquipment:
 		// Equipment tab: a 2-D cursor over members × slots; Confirm or a

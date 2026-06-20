@@ -1084,44 +1084,12 @@ func loadEnemyVisuals() (visuals map[core.EnemyKind]enemyVisual, owned []rl.Text
 	visuals = map[core.EnemyKind]enemyVisual{
 		core.EnemyRat: {
 			texture: ratTexture,
-			// Square size: the authored PNG is a 1:1 canvas (the old
-			// procedural sprite was a 72×96 portrait), so a square world
-			// size keeps the art from stretching. Dropped 1.35 → 1.05: at
-			// 1.35 the rat dwarfed every other enemy (peers are ~0.9–1.3)
-			// and so read as standing far in FRONT of the formation even
-			// though all sprites share the same battle depth — it just
-			// took more screen. 1.05 sits it in line with the others while
-			// still reading as a chunky rat. Tune this single value if the
-			// rat reads too big/small.
-			size: rl.NewVector2(1.05, 1.05),
-			// Contact shadow so the rat reads as planted rather than
-			// floating — opt-in per kind (see enemyVisual.shadowRadius).
-			// Wider than the sprite's footprint so it grounds the chunky
-			// body without looking like a tight pin-spot. Scaled down with
-			// the smaller sprite (0.60 → 0.46).
-			shadowRadius: 0.46,
-			// The PNG sits high in its square box (a transparent strip below
-			// the rat's feet), so a center-anchored billboard floats the
-			// visible feet above the floor-anchored contact shadow. Bracketing
-			// the gap: at -0.42 the feet float ~0.13 above the floor, while the
-			// previously-rejected -0.60 sank them ~0.05 below it. -0.55 lands
-			// the feet on the shadow (just inside the "too sunk" boundary).
-			// Tune alongside size/depthOffset — or live in the editor's Foe
-			// Visualizer (Y-offset slider → Save) — if grounding shifts.
-			yOffset: -0.55,
-			// Push the rat BACK into the arena so its square box doesn't loom
-			// at the camera — sits it in line with the procedural roster.
-			depthOffset: 0.7,
-			// The target chevron anchors to the (un-lowered) formation center,
-			// so it tracks the raised head (markerYOffset) plus a slight
-			// screen-right nudge so it sits over the head, not dead-center.
-			markerYOffset: -0.30,
-			markerXOffset: 0.10,
-			// Somewhat darker than the source PNG — a near-neutral gray
-			// (~0.72×) with a faint warm bias so the brown/orange read
-			// survives. Multiplies into the runtime tint; raise toward 255
-			// for lighter, lower for darker.
-			tint: rl.NewColor(184, 178, 174, 255),
+			// Reset to neutral defaults pending a new authored PNG: no contact
+			// shadow, no y/depth offset, no tint or image adjustments — just the
+			// sprite at a square 1×1 world size. Re-tune in the editor's Foe
+			// Visualizer (which writes maps/sprites/visuals.json) once the new
+			// art lands.
+			size: rl.NewVector2(1.0, 1.0),
 		},
 		core.EnemyBat: {
 			texture: batTexture,

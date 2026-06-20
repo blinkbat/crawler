@@ -51,13 +51,17 @@ func targetingEnemy(g *core.GameState) bool {
 	return g.Battle.Phase == core.BattlePlayer && g.Battle.ActionMode == core.ActionEnemyTarget
 }
 
-// targetingAlly is true when the player is choosing a party member to act
-// on — either a heal-skill target or an item target. Used by the renderer
-// to gate the friendly selection marker so it appears in both modes
-// (audit-3 caught Item targeting silently dropping the marker because the
-// check was specific to ActionPartyTarget).
+// targetingAlly is true when the player is pointing a cursor at a party member —
+// a heal-skill target, an item target, or the partner tile of a formation Swap.
+// Used by the renderer to gate the friendly selection marker so it appears in
+// every such mode (audit-3 caught Item targeting silently dropping the marker
+// because the check was specific to ActionPartyTarget; the Swap partner cursor
+// reuses the same marker path so the highlighted candidate reads consistently
+// on the ribbon, the turn panel, and the 3D sprite).
 func targetingAlly(g *core.GameState) bool {
-	return g.Battle.ActionMode == core.ActionPartyTarget || g.Battle.ActionMode == core.ActionItemTarget
+	return g.Battle.ActionMode == core.ActionPartyTarget ||
+		g.Battle.ActionMode == core.ActionItemTarget ||
+		g.Battle.ActionMode == core.ActionSwapTarget
 }
 
 type enemyStatusKind int
@@ -758,7 +762,7 @@ func drawActionMenuOptions(g *core.GameState, assets Resources, x, y, rightX int
 	drawActionMenuRow(assets.hudFont, core.ActionRowSkill, x, labelX, y+int32(core.ActionRowSkill)*uiRowPitch, rightX, "Skill", "", cursor == core.ActionRowSkill)
 	drawActionMenuRow(assets.hudFont, core.ActionRowItem, x, labelX, y+int32(core.ActionRowItem)*uiRowPitch, rightX, "Item", "", cursor == core.ActionRowItem)
 	drawActionMenuRow(assets.hudFont, core.ActionRowDefend, x, labelX, y+int32(core.ActionRowDefend)*uiRowPitch, rightX, "Defend", "", cursor == core.ActionRowDefend)
-	drawActionMenuRow(assets.hudFont, core.ActionRowReposition, x, labelX, y+int32(core.ActionRowReposition)*uiRowPitch, rightX, "Reposition", "", cursor == core.ActionRowReposition)
+	drawActionMenuRow(assets.hudFont, core.ActionRowSwap, x, labelX, y+int32(core.ActionRowSwap)*uiRowPitch, rightX, "Swap", "", cursor == core.ActionRowSwap)
 	drawActionMenuRow(assets.hudFont, core.ActionRowFlee, x, labelX, y+int32(core.ActionRowFlee)*uiRowPitch, rightX, "Flee", "", cursor == core.ActionRowFlee)
 }
 
@@ -826,7 +830,7 @@ var actionIconDrawers = [core.ActionRowCount]func(cx, cy, r float32, col rl.Colo
 	core.ActionRowSkill:      drawActionIconSkill,
 	core.ActionRowItem:       drawActionIconItem,
 	core.ActionRowDefend:     drawActionIconDefend,
-	core.ActionRowReposition: drawActionIconReposition,
+	core.ActionRowSwap:       drawActionIconSwap,
 	core.ActionRowFlee:       drawActionIconFlee,
 }
 
@@ -922,13 +926,9 @@ func drawActionIconDefend(cx, cy, r float32, col rl.Color) {
 	rl.DrawCircleV(rl.NewVector2(cx, cy-r*0.05), r*0.12, giltBright)
 }
 
-// drawActionIconFlee draws a "dash away" sigil — a double chevron pointing right
-// (>>), reading as "break away / exit fast." Thick line segments so it stays
-// crisp at any DPI, matching the procedural-glyph family; the leading chevron is
-// brighter for a sense of motion.
-// drawActionIconReposition paints a vertical swap sigil — an up arrow and a
-// down arrow side by side — for the Reposition action (flip front/back row).
-func drawActionIconReposition(cx, cy, r float32, col rl.Color) {
+// drawActionIconSwap paints a swap sigil — an up arrow and a down arrow side by
+// side — for the Swap action (two members trade formation slots).
+func drawActionIconSwap(cx, cy, r float32, col rl.Color) {
 	thick := r * 0.3
 	head := r * 0.42
 	// Left shaft with an UP arrowhead; right shaft with a DOWN arrowhead.
@@ -941,6 +941,10 @@ func drawActionIconReposition(cx, cy, r float32, col rl.Color) {
 	rl.DrawLineEx(rl.NewVector2(rx, cy+r), rl.NewVector2(rx+head, cy+r-head), thick, col)
 }
 
+// drawActionIconFlee draws a "dash away" sigil — a double chevron pointing right
+// (>>), reading as "break away / exit fast." Thick line segments so it stays
+// crisp at any DPI, matching the procedural-glyph family; the leading chevron is
+// brighter for a sense of motion.
 func drawActionIconFlee(cx, cy, r float32, col rl.Color) {
 	thick := r * 0.34
 	h := r * 0.62

@@ -145,6 +145,12 @@ const (
 	// stray Confirm can't burn the turn retreating by accident — Confirm
 	// commits the flee, Back returns to the action menu (battle.updateFleeConfirm).
 	ActionFleeConfirm
+	// ActionSwapTarget is the tile-selection mode the Swap row drops into: the
+	// acting member is the source (their card carries the active halo), and the
+	// player cycles a cursor over the OTHER party tiles to pick a partner to
+	// trade formation slots with. Confirm performs the swap and ends the turn;
+	// Back returns to the action menu (battle.updateSwapTarget).
+	ActionSwapTarget
 )
 
 // ActionRow enumerates the in-battle action menu rows. The integer values
@@ -158,10 +164,12 @@ const (
 	ActionRowSkill
 	ActionRowItem
 	ActionRowDefend
-	// ActionRowReposition flips the actor between the front and back formation
-	// row, spending their turn (see formation rules). Lets a member shift out of
-	// melee reach (or up into it) mid-fight.
-	ActionRowReposition
+	// ActionRowSwap trades the actor's formation slot with another party member's,
+	// spending the actor's turn. A swap (two units exchange slots) is the only way
+	// to rearrange the formation, so it always stays a clean 2-front/2-back grid —
+	// you can never end up with three in one row. Used to pull a caster out of
+	// melee reach, or push a fighter up into it, mid-fight.
+	ActionRowSwap
 	// ActionRowFlee is the LAST row: roll to escape the fight and retreat to the
 	// pre-combat tile. See performFlee / FleeChance.
 	ActionRowFlee

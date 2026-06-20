@@ -158,6 +158,91 @@ func TestNewPartyFormationIs2x2(t *testing.T) {
 	}
 }
 
+func TestSwapFormationSlots(t *testing.T) {
+	party := NewParty() // a clean 2×2 to start
+	// Find one front and one back member to swap across rows.
+	front, back := -1, -1
+	for i := range party {
+		if party[i].HomeRow == RowFront && front < 0 {
+			front = i
+		}
+		if party[i].HomeRow == RowBack && back < 0 {
+			back = i
+		}
+	}
+	if front < 0 || back < 0 {
+		t.Fatal("default party should have both a front and a back member")
+	}
+	fRow, fCol := party[front].HomeRow, party[front].HomeCol
+	bRow, bCol := party[back].HomeRow, party[back].HomeCol
+	SwapFormationSlots(party, front, back)
+	if party[front].HomeRow != bRow || party[front].HomeCol != bCol {
+		t.Error("front member should take the back member's slot")
+	}
+	if party[back].HomeRow != fRow || party[back].HomeCol != fCol {
+		t.Error("back member should take the front member's slot")
+	}
+	// Live reach Row resyncs to the swapped home row.
+	if party[front].Row != party[front].HomeRow || party[back].Row != party[back].HomeRow {
+		t.Error("live Row should resync to HomeRow after a swap")
+	}
+	// Still a clean 2×2 — never three in one row.
+	if !formationSlotsValid(party) {
+		t.Error("formation should remain a valid 2×2 after a swap")
+	}
+	frontCount := 0
+	for i := range party {
+		if party[i].HomeRow == RowFront {
+			frontCount++
+		}
+	}
+	if frontCount != 2 {
+		t.Errorf("front count = %d after swap, want 2 (a swap can never put three up front)", frontCount)
+	}
+	// No-op guards: self, and out-of-range indices, must not panic or mutate.
+	SwapFormationSlots(party, 1, 1)
+	SwapFormationSlots(party, -1, 2)
+	SwapFormationSlots(party, 0, 99)
+	if !formationSlotsValid(party) {
+		t.Error("no-op swaps should leave the formation valid")
+	}
+}
+
+func TestNormalizePartyFormation(t *testing.T) {
+	// A pre-formation save: every slot decoded to the zero value (front-left).
+	party := NewParty()
+	for i := range party {
+		party[i].HomeRow, party[i].HomeCol = RowFront, ColLeft
+	}
+	if formationSlotsValid(party) {
+		t.Fatal("an all-front-left layout should read as invalid")
+	}
+	NormalizePartyFormation(party)
+	if !formationSlotsValid(party) {
+		t.Error("normalize should repair an invalid layout into a clean 2×2")
+	}
+	// Repaired layout must match the fresh default (default row by class).
+	for i := range party {
+		want := DefaultPartyRow(party[i].Class)
+		if party[i].HomeRow != want || party[i].Row != want {
+			t.Errorf("member %d row = %d/%d, want %d (default by class)", i, party[i].HomeRow, party[i].Row, want)
+		}
+	}
+	// A VALID custom layout (e.g. a swap) must be preserved untouched.
+	custom := NewParty()
+	SwapFormationSlots(custom, 0, len(custom)-1)
+	snapshot := make([][2]Row, len(custom))
+	for i := range custom {
+		snapshot[i] = [2]Row{custom[i].HomeRow, Row(custom[i].HomeCol)}
+	}
+	NormalizePartyFormation(custom)
+	for i := range custom {
+		if custom[i].HomeRow != snapshot[i][0] || Row(custom[i].HomeCol) != snapshot[i][1] {
+			t.Errorf("normalize must not disturb a valid custom layout at member %d", i)
+		}
+	}
+}
+
 func TestShuntEnemyFormation(t *testing.T) {
 	// 3 front + 2 back; kill a front enemy → a back one is promoted to keep the
 	// front packed at 3 (while ≥3 alive).

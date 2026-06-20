@@ -2321,28 +2321,6 @@ func drawEnemyAttackTargetMarker(camera rl.Camera3D, position rl.Vector3) {
 	drawMarkerOnTop(position, markerEnemyAttackTarget)
 }
 
-// partyRowSlot resolves party member `index`'s formation placement: its row
-// (front/back), its left-to-right slot WITHIN that row, and how many members
-// share the row — so the billboard layout reflects the front/back formation.
-func partyRowSlot(party []core.PartyMember, index int) (row core.Row, slot, count int) {
-	if index < 0 || index >= len(party) {
-		return core.RowFront, 0, 1
-	}
-	row = party[index].Row
-	for j := range party {
-		if party[j].Row == row {
-			if j == index {
-				slot = count
-			}
-			count++
-		}
-	}
-	if count == 0 {
-		count = 1
-	}
-	return row, slot, count
-}
-
 func partySpritePosition(camera rl.Camera3D, party []core.PartyMember, index int, bump, victoryDance float32, knockback float32) rl.Vector3 {
 	forward := horizontalForward(camera)
 	right := horizontalRight(forward)
@@ -2350,33 +2328,38 @@ func partySpritePosition(camera rl.Camera3D, party []core.PartyMember, index int
 	if index >= 0 && index < len(party) {
 		class = party[index].Class
 	}
-	row, slot, count := partyRowSlot(party, index)
-	// Two-rank formation, viewed from behind/above. Both rows sit well back off
-	// the foes (low rowForward) and low in frame (baseY). The FRONT row is a touch
-	// nearer the foes and packs TIGHTER; the BACK row sits nearer the camera,
-	// lifted slightly to peek over the front, and spreads WIDE — a trapezoid that
-	// widens toward the viewer:
-	//       x  x      (front, tight)
-	//     x      x    (back, wide)
-	baseY := float32(0.42)      // sit low in frame (was riding too high)
-	rowForward := float32(1.5)  // front rank — off the foes
-	rowSpacing := float32(0.95) // front: spread out (was cramped)
-	rowLift := float32(0)
-	if row == core.RowBack {
-		// BIG depth gap from the front (0.7 vs 1.5) so the two rows clearly STACK
-		// under the pitched camera instead of reading as one inline x x x x — the
-		// back rank is much nearer the lens, projecting lower + larger. Its wide
-		// spacing puts the front pair between the back pair (staggered trapezoid).
-		rowForward = 0.7
-		rowSpacing = 2.6
+	// Layout is driven by the member's STANDING home slot (HomeRow/HomeCol), NOT
+	// the live combat row — so the party always renders as a stable 2×2 trapezoid.
+	// In-battle Reposition / ambush change the *gameplay* row (reach) only; they
+	// don't reflow the sprites, so a row never collapses to an inline x x x x.
+	visRow, visCol := core.RowFront, core.ColLeft
+	if index >= 0 && index < len(party) {
+		visRow, visCol = party[index].HomeRow, party[index].HomeCol
+	}
+	// 2×2 trapezoid that widens toward the viewer. The shape comes mainly from the
+	// WIDTH difference (front pair tight, back pair wide) so it reads clearly even
+	// at a modest depth gap — which keeps both ranks at sane, ON-SCREEN distances
+	// (the back rank must not crowd the lens or it clips out of view):
+	//       x  x      (front: tight, slightly higher/further)
+	//     x      x    (back: wide, slightly lower/nearer)
+	baseY := float32(0.58)
+	rowForward := float32(1.55) // front rank — off the foes
+	rowSpacing := float32(0.95) // front: tight pair
+	if visRow == core.RowBack {
+		rowForward = 1.12 // nearer the camera, but still well in frame (visible)
+		rowSpacing = 2.6  // back: wide pair flanking the front
 	}
 	base := rl.NewVector3(
 		camera.Position.X+forward.X*rowForward,
-		baseY+rowLift,
+		baseY,
 		camera.Position.Z+forward.Z*rowForward,
 	)
-	// Centre the row's members left-to-right around the formation axis.
-	offset := (float32(slot) - float32(count-1)/2) * rowSpacing
+	// Left/right column around the formation axis (the home slot is a true 2×2).
+	colSign := float32(-0.5)
+	if visCol == core.ColRight {
+		colSign = 0.5
+	}
+	offset := colSign * rowSpacing
 	depth := float32(0)
 	danceSide, danceDepth, danceHeight, _ := victoryDanceMotion(class, victoryDance)
 	bumpDepth := core.BumpOffset(bump, 0.22)
@@ -2437,7 +2420,8 @@ func enemyDrawPosition(camera rl.Camera3D, g *core.GameState, slot int, enemy *c
 // its slot — turning a per-frame O(n²) into O(n).
 // enemyRowSlot resolves enemy `index`'s formation placement among the VISIBLE
 // (alive or death-fading) pack members: its row, left-to-right slot within that
-// row, and the row's visible count. The foe-side mirror of partyRowSlot.
+// row, and the row's visible count. Foes lay out by their live row (the shunt
+// keeps the front packed); the party instead uses its stable home 2×2 slot.
 func enemyRowSlot(members []core.Enemy, index int) (row core.Row, slot, count int) {
 	if index < 0 || index >= len(members) {
 		return core.RowFront, 0, 1

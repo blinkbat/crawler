@@ -38,11 +38,12 @@ func Start(g *core.GameState, packIndex, fleeReturnX, fleeReturnZ int, engageSid
 	g.Battle.ActivePack = packIndex
 	g.Battle.FleeReturnX = fleeReturnX
 	g.Battle.FleeReturnZ = fleeReturnZ
-	// Rotate the party's home formation into live rows for this fight: a head-on
-	// engage keeps the standing slots; a side/back ambush turns the attacked rank
-	// to the front (exposed), which the player fixes with Reposition.
+	// The party fights in its STANDING formation (set out of combat): the live
+	// reach row mirrors the home row, so the 2×2 the player arranged is exactly
+	// what they fight in. (No in-battle repositioning / ambush re-shuffle.)
+	_ = engageSide
 	for i := range g.Party {
-		g.Party[i].Row = core.AmbushLiveRow(g.Party[i].HomeRow, g.Party[i].HomeCol, engageSide)
+		g.Party[i].Row = g.Party[i].HomeRow
 	}
 	g.Battle.EnemyIndex = core.NextLivingBattleEnemy(g)
 	g.Battle.PartyTarget = core.FirstLivingPartyMember(g.Party)
@@ -819,6 +820,8 @@ func updatePlayerBattle(g *core.GameState) {
 		updateSkillMenu(g)
 	case core.ActionFleeConfirm:
 		updateFleeConfirm(g)
+	case core.ActionSwapTarget:
+		updateSwapTarget(g)
 	default:
 		updateActionMenu(g)
 	}

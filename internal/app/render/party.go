@@ -544,8 +544,13 @@ func DrawPartyRibbon(g *core.GameState, assets Resources) {
 
 	for i := range g.Party {
 		member := &g.Party[i]
-		col := i % partyCardCols
-		row := i / partyCardCols
+		// Tile by FORMATION slot, not array index: front row on top, back row
+		// below; left/right columns left/right. So the ribbon mirrors the 2×2 the
+		// party fights in (and the 3D battlefield), and a Swap visibly moves a
+		// card between rows/columns. HomeRow/HomeCol are a clean 2×2 by invariant
+		// (NewParty seeds it, SwapFormationSlots preserves it).
+		col := int(member.HomeCol)
+		row := int(member.HomeRow)
 		x := startX + (partyCardW+partyCardGap)*float32(col)
 		y := topY + (partyCardH+partyRowGap)*float32(row)
 		// Active / selected glow only paints on a member who can act

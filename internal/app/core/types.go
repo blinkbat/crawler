@@ -663,6 +663,13 @@ type GameState struct {
 	PanelsOpen      bool
 	PanelsTab       PanelTab
 	PanelsRowCursor int
+	// PanelSwapSource is the Character tab's formation-swap "held" member: -1
+	// when no swap is in progress, otherwise the party index the player picked
+	// up (its tile shows the source outline). A second pick on another member
+	// swaps their formation slots; picking the held member again cancels. Reset
+	// to -1 on every overlay open / close / tab switch (resetPanelSubmodals), so
+	// a half-started swap can't leak across tabs. A UI cursor, not save state.
+	PanelSwapSource int
 	// JournalTab selects which view the Journal tab shows — the quest log
 	// (JournalQuests, default) or the bestiary. Toggled with Left/Right
 	// while the Journal tab is active; PanelsRowCursor then scrolls the

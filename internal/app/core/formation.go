@@ -66,6 +66,73 @@ func ShuntEnemyFormation(members []Enemy) {
 	}
 }
 
+// SwapFormationSlots exchanges two party members' standing 2×2 slot — their
+// HomeRow/HomeCol AND the live combat Row that mirrors it. Because the two
+// members trade positions (rather than one moving independently), the formation
+// always stays a clean 2-front/2-back grid: a swap can never leave three units
+// in one row. This is the ONLY formation-rearrange path (the in-battle Swap
+// action and the out-of-combat Character-tab swap both route through it). No-op
+// on an out-of-range or self pairing.
+func SwapFormationSlots(party []PartyMember, i, j int) {
+	if i < 0 || j < 0 || i >= len(party) || j >= len(party) || i == j {
+		return
+	}
+	party[i].HomeRow, party[j].HomeRow = party[j].HomeRow, party[i].HomeRow
+	party[i].HomeCol, party[j].HomeCol = party[j].HomeCol, party[i].HomeCol
+	// Resync the live reach row to the (now swapped) home slot for both.
+	party[i].Row = party[i].HomeRow
+	party[j].Row = party[j].HomeRow
+}
+
+// formationSlotsValid reports whether the party's standing slots form a clean
+// grid: every (HomeRow, HomeCol) in bounds and unique. A valid layout is left
+// untouched by NormalizePartyFormation so the player's custom swaps persist.
+func formationSlotsValid(party []PartyMember) bool {
+	var seen [2][2]bool
+	for i := range party {
+		r, c := party[i].HomeRow, party[i].HomeCol
+		if r < RowFront || r > RowBack || c < ColLeft || c > ColRight || seen[r][c] {
+			return false
+		}
+		seen[r][c] = true
+	}
+	return true
+}
+
+// NormalizePartyFormation guarantees the party's standing 2×2 slots are valid.
+// A party whose HomeRow/HomeCol already form a clean grid keeps them (custom
+// swaps survive a save/load round-trip). An INVALID layout — most importantly a
+// pre-formation save, where every slot decoded to the zero value (front-left) —
+// is re-seeded to the default formation: each member's default row by class,
+// columns packed left-to-right in array order (mirrors NewParty), with the live
+// Row resynced to the home row. Without this, a stale save would stack every
+// party card in one slot now that the ribbon and 3D battlefield key off the
+// formation slot.
+func NormalizePartyFormation(party []PartyMember) {
+	if formationSlotsValid(party) {
+		return
+	}
+	frontCount, backCount := 0, 0
+	for i := range party {
+		row := DefaultPartyRow(party[i].Class)
+		col := ColLeft
+		if row == RowFront {
+			if frontCount%2 == 1 {
+				col = ColRight
+			}
+			frontCount++
+		} else {
+			if backCount%2 == 1 {
+				col = ColRight
+			}
+			backCount++
+		}
+		party[i].HomeRow = row
+		party[i].HomeCol = col
+		party[i].Row = row
+	}
+}
+
 // RowLabel is the human label for a formation row — the single source for UI
 // captions/tags (the editor's Row button, the pack-member list tag, any future
 // readout) so wording can't drift across call sites.
