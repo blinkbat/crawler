@@ -17,7 +17,7 @@ func validEquipSlot(slot EquipSlotIndex) bool {
 // single bounds predicate the equip path shares so the "is this a real party
 // member" rule lives in one place.
 func validPartyMember(g *GameState, member int) bool {
-	return member >= 0 && member < len(g.Party)
+	return PartyIndexInRange(g.Party, member)
 }
 
 // CanEquipInSlot reports whether `item` fits `slot`. SlotNone items

@@ -63,6 +63,16 @@ var numberRowKeys = [9]int32{
 	rl.KeySix, rl.KeySeven, rl.KeyEight, rl.KeyNine,
 }
 
+func init() {
+	// The first len(selectableLayers) numberRowKeys double as Alt+N layer-jump
+	// keys (see numberRowKeys' doc). A selectable layer past the 9th would
+	// silently lose its jump key; trip it loudly at startup instead — matching the
+	// editor's other coverage panics (entityBrushColors, modalHandlers).
+	if len(selectableLayers) > len(numberRowKeys) {
+		panic("editor: more selectable layers than numberRowKeys — grow numberRowKeys to keep Alt+N layer jumps")
+	}
+}
+
 // Brush is one entry in a layer's palette. For grid layers, char is the
 // byte written into that layer at the painted cell. For LayerEntities,
 // Entity names which placement tool fires on click; EnemyKind carries
@@ -352,11 +362,13 @@ func buildEntityBrushes() []Brush {
 		{Name: "Player Start", Entity: entityPlayerStart, Hotkey: rl.KeyTwo, Color: render.MarkerStart},
 	}
 	defs := core.EnemyKinds()
-	for i, def := range defs {
-		hk := int32(0)
-		if i < len(entityBrushHotkeys) {
-			hk = entityBrushHotkeys[i]
-		}
+	// slot runs across entityBrushHotkeys: enemies take 0..len(defs)-1, then each
+	// trailing entity brush (chest/door/crystal) consumes the next slot. A single
+	// running counter + bounds-checked accessor (entityHotkeyAt) so adding a
+	// trailing brush is one more `entityHotkeyAt(slot)` line, not a copy-pasted
+	// `len(defs)+N` block to get the off-by-one right.
+	slot := 0
+	for _, def := range defs {
 		col, ok := entityBrushColors[def.Kind]
 		if !ok {
 			col = entityFallbackColor
@@ -365,41 +377,42 @@ func buildEntityBrushes() []Brush {
 			Name:      "Add " + def.SingularName,
 			Entity:    entityAddEnemy,
 			EnemyKind: def.Kind,
-			Hotkey:    hk,
+			Hotkey:    entityHotkeyAt(slot),
 			Color:     col,
 		})
-	}
-	chestHK := int32(0)
-	if slot := len(defs) + 1; slot-1 < len(entityBrushHotkeys) {
-		chestHK = entityBrushHotkeys[slot-1]
+		slot++
 	}
 	brushes = append(brushes, Brush{
 		Name:   "Place Chest",
 		Entity: entityPlaceChest,
-		Hotkey: chestHK,
+		Hotkey: entityHotkeyAt(slot),
 		Color:  render.MarkerChest,
 	})
-	doorHK := int32(0)
-	if slot := len(defs) + 2; slot-1 < len(entityBrushHotkeys) {
-		doorHK = entityBrushHotkeys[slot-1]
-	}
+	slot++
 	brushes = append(brushes, Brush{
 		Name:   "Place Door",
 		Entity: entityPlaceDoor,
-		Hotkey: doorHK,
+		Hotkey: entityHotkeyAt(slot),
 		Color:  render.MarkerDoor,
 	})
-	crystalHK := int32(0)
-	if slot := len(defs) + 3; slot-1 < len(entityBrushHotkeys) {
-		crystalHK = entityBrushHotkeys[slot-1]
-	}
+	slot++
 	brushes = append(brushes, Brush{
 		Name:   "Place Crystal",
 		Entity: entityPlaceCrystal,
-		Hotkey: crystalHK,
+		Hotkey: entityHotkeyAt(slot),
 		Color:  render.MarkerCrystal,
 	})
 	return brushes
+}
+
+// entityHotkeyAt returns the entity-brush hotkey for slot i, or 0 (no hotkey)
+// when i runs past entityBrushHotkeys. The single bounds-checked accessor the
+// enemy brushes and the trailing chest/door/crystal brushes share.
+func entityHotkeyAt(i int) int32 {
+	if i >= 0 && i < len(entityBrushHotkeys) {
+		return entityBrushHotkeys[i]
+	}
+	return 0
 }
 
 // layerDisplayNames is the Layer→label table powering layerName.

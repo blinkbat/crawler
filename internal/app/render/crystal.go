@@ -53,7 +53,7 @@ func DrawCrystals(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		top := rl.NewVector3(base.X, midY+crystalGeo.HalfHeight, base.Z)
 		bot := rl.NewVector3(base.X, midY-crystalGeo.HalfHeight, base.Z)
 
-		col := crystalColor(c.Charged, t)
+		col := crystalColor(c.Charged)
 		r := crystalGeo.WaistRadius
 		// Two stacked cones tip-to-tip form the gem: upper point (full radius at
 		// the waist → 0 at the top), lower point (0 at the bottom → full radius).
@@ -83,17 +83,23 @@ func DrawCrystalPrompt(camera rl.Camera3D, g *core.GameState, assets Resources) 
 	drawFloatingInteractPrompt(camera, world, "Rest", assets)
 }
 
+// crystalPulseHz is the breathe rate of a charged crystal's body tint — the
+// legacy sin(t*3.0) angular rate (3 rad/s) expressed in Hz for the shared pulse()
+// helper, ≈0.48 Hz.
+const crystalPulseHz = 3.0 / (2 * math.Pi)
+
 // crystalColor is the gem body tint: a pulsing bright cyan while charged, a flat
 // dim slate while dormant.
-func crystalColor(charged bool, t float64) rl.Color {
+func crystalColor(charged bool) rl.Color {
 	if !charged {
 		return crystalDormantBody
 	}
-	// Pulse the brightness between ~0.75 and 1.0 so a charged crystal "breathes."
-	// The body tint (crystalChargedBody, theme.go) keeps R/G in lockstep with the
-	// editor marker and pins the blue/alpha; we modulate only its R/G here.
-	pulse := 0.75 + 0.25*float32(math.Sin(t*3.0)*0.5+0.5)
-	return rl.NewColor(uint8(float32(crystalChargedBody.R)*pulse), uint8(float32(crystalChargedBody.G)*pulse), crystalChargedBody.B, crystalChargedBody.A)
+	// Pulse the brightness between 0.75 and 1.0 so a charged crystal "breathes" —
+	// the same 0.75 + 0.25*pulse() idiom the timing-bar throb uses. The body tint
+	// (crystalChargedBody, theme.go) keeps R/G in lockstep with the editor marker
+	// and pins the blue/alpha; we modulate only its R/G here.
+	breathe := 0.75 + 0.25*pulse(crystalPulseHz)
+	return rl.NewColor(uint8(float32(crystalChargedBody.R)*breathe), uint8(float32(crystalChargedBody.G)*breathe), crystalChargedBody.B, crystalChargedBody.A)
 }
 
 // crystalEdge is the faceted wire tint paired with crystalColor.

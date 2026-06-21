@@ -576,24 +576,50 @@ func drawToolbarTooltip(s *State, font rl.Font, theme render.Theme) {
 	}
 }
 
+// drawTooltipCard paints a hover help bubble of one or more lines near mp,
+// clamped inside `clamp`, styled with the shared tooltip* tokens (first line
+// tooltipHeading, the rest tooltipText). The single home for the editor's hover
+// bubbles — both the toolbar-button tooltip and the canvas tile tooltip route
+// through it so they read as one widget instead of two differently-styled cards.
+func drawTooltipCard(font rl.Font, lines []string, fontSize, lineH float32, mp rl.Vector2, clamp rl.Rectangle) {
+	if len(lines) == 0 {
+		return
+	}
+	const pad = float32(6)
+	var tw float32
+	for _, l := range lines {
+		if m := render.MeasureRichText(font, l, fontSize, 1).X; m > tw {
+			tw = m
+		}
+	}
+	w := tw + 2*pad
+	h := float32(len(lines))*lineH + 2*pad
+	x, y := mp.X+14, mp.Y+14
+	if x+w > clamp.X+clamp.Width-4 {
+		x = mp.X - w - 8
+	}
+	if y+h > clamp.Y+clamp.Height-4 {
+		y = mp.Y - h - 8
+	}
+	r := rl.NewRectangle(x, y, w, h)
+	rl.DrawRectangleRec(r, tooltipBG)
+	rl.DrawRectangleLinesEx(r, 1, editorBorderActive)
+	for i, l := range lines {
+		col := tooltipText
+		if i == 0 {
+			col = tooltipHeading
+		}
+		render.DrawRichText(font, l, rl.NewVector2(r.X+pad, r.Y+pad+float32(i)*lineH), fontSize, 1, col)
+	}
+}
+
 // drawButtonTooltip paints a one-line help bubble near the cursor (below-right,
 // clamped to the screen) — the toolbar's hover explanation for a button. (The
-// canvas tile tooltip is the separate drawHoverTooltip.)
+// canvas tile tooltip is the separate drawHoverTooltip; both share drawTooltipCard.)
 func drawButtonTooltip(font rl.Font, theme render.Theme, text string, mp rl.Vector2) {
-	const pad = float32(6)
-	tw := render.MeasureRichText(font, text, editorFontHint, 1).X
-	w := tw + 2*pad
-	h := editorFontHint + 2*pad
-	x, y := mp.X+14, mp.Y+18
+	_ = theme // styled with the shared tooltip* tokens, not the passed theme
 	sw, sh := render.ScreenSizeF()
-	if x+w > sw-4 {
-		x = sw - 4 - w
-	}
-	if y+h > sh-4 {
-		y = mp.Y - 6 - h
-	}
-	render.DrawCard(int32(x), int32(y), int32(w), int32(h), theme.SurfacePrimary, theme.BorderSoft, theme.BorderActive)
-	render.DrawRichText(font, text, rl.NewVector2(x+pad, y+pad), editorFontHint, 1, theme.TextPrimary)
+	drawTooltipCard(font, []string{text}, editorFontHint, editorFontHint, mp, rl.NewRectangle(0, 0, sw, sh))
 }
 
 // topbarButtonAt returns the index of the menu-bar label under p, or -1.
@@ -2572,53 +2598,20 @@ var (
 	tooltipKeyZ     int = -1
 	tooltipReady    bool
 	tooltipLines    []string
-	tooltipWidth    float32
 )
 
 func drawHoverTooltip(s *State, font rl.Font) {
 	x, z := s.hoverX, s.hoverZ
+	// Memo the line slice (rebuilding it allocates maps + slices) so a cursor
+	// resting on an entity tile doesn't re-derive it every frame. drawTooltipCard
+	// re-measures the (now-cached) lines, which is cheap in this dev-only editor.
 	if !tooltipReady || tooltipKeyEpoch != s.contentEpoch || tooltipKeyX != x || tooltipKeyZ != z {
 		tooltipLines = tooltipLinesFor(s, x, z)
-		tooltipWidth = 0
-		for _, l := range tooltipLines {
-			m := render.MeasureRichText(font, l, editorFontTiny, 1)
-			if m.X > tooltipWidth {
-				tooltipWidth = m.X
-			}
-		}
 		tooltipKeyEpoch = s.contentEpoch
 		tooltipKeyX, tooltipKeyZ = x, z
 		tooltipReady = true
 	}
-	lines := tooltipLines
-	if len(lines) == 0 {
-		return
-	}
-	const padding = float32(6)
-	const lineH = float32(14)
-	w := tooltipWidth + padding*2
-	h := float32(len(lines))*lineH + padding*2
-	mp := frameMouse
-	tx := mp.X + 14
-	ty := mp.Y + 14
-	if tx+w > s.rect.grid.X+s.rect.grid.Width {
-		tx = mp.X - w - 8
-	}
-	if ty+h > s.rect.grid.Y+s.rect.grid.Height {
-		ty = mp.Y - h - 8
-	}
-	r := rl.NewRectangle(tx, ty, w, h)
-	rl.DrawRectangleRec(r, tooltipBG)
-	rl.DrawRectangleLinesEx(r, 1, editorBorderActive)
-	for i, l := range lines {
-		col := tooltipText
-		if i == 0 {
-			col = tooltipHeading
-		}
-		render.DrawRichText(font, l,
-			rl.NewVector2(r.X+padding, r.Y+padding+float32(i)*lineH),
-			editorFontTiny, 1, col)
-	}
+	drawTooltipCard(font, tooltipLines, editorFontTiny, 14, frameMouse, s.rect.grid)
 }
 
 // tooltipLinesFor builds the hover tooltip body for tile (x, z). Returns

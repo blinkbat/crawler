@@ -1348,10 +1348,12 @@ func areaIsEnclosed(m *core.AreaDefinition) bool {
 	return enclosed
 }
 
-// Wall-torch fixture + flame palette. Iron tones are lit by the
-// world shader; the flame tints are applied to the unlit
-// torchFlameModel so they glow. Three flame tints (hot core →
-// mid → tip) layer the bobbing blobs into a teardrop fire.
+// Shared iron-fixture + flame palette for every torch/brazier in the world.
+// Iron tones are lit by the world shader; the flame tints are applied to unlit
+// models so they glow. Three flame tints (hot core → mid → tip) layer the
+// bobbing blobs into a teardrop fire. Both the wall-torch (this file) and the
+// standing-brazier prop (loadBrazierProp, models.go) draw from these so the iron
+// and fire stay one palette instead of two that drift apart.
 var (
 	torchIron       = rl.NewColor(54, 50, 46, 255)
 	torchIronLight  = rl.NewColor(92, 84, 76, 255)

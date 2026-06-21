@@ -123,6 +123,15 @@ type SkillEffectDelta struct {
 	IceArmorTurns int
 }
 
+// tier builds one SkillTierUpgrade row with Cost defaulting to the standard
+// 1 SkillPoint — the only cost any current rung uses. Centralizing the default
+// here means a future "expensive elite tier" reprices in one place (add a
+// tierCost variant) instead of editing ~90 literal `Cost: 1` fields. Mirrors
+// the nd()/act() row constructors skilltrees.go uses for the same reason.
+func tier(t int, label, description string, effect SkillEffectDelta) SkillTierUpgrade {
+	return SkillTierUpgrade{Tier: t, Label: label, Description: description, Cost: 1, Effect: effect}
+}
+
 // skillTierTable is the source of truth for every player-castable
 // skill's upgrade ladder. Three rows per skill, in tier order. The
 // init guard below asserts every PlayerCastable skill has exactly
@@ -131,162 +140,162 @@ type SkillEffectDelta struct {
 var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	// ── Warrior ──────────────────────────────────────────────
 	SkillSwipe: {
-		{Tier: 1, Label: "+2 damage", Description: "+2 base damage to every hit in the cleave.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
-		{Tier: 2, Label: "+2 damage", Description: "+2 more base damage to the whole cleave.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
-		{Tier: 3, Label: "+2 damage", Description: "Another +2 base damage. Whole pack feels it.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
+		tier(1, "+2 damage", "+2 base damage to every hit in the cleave.", SkillEffectDelta{Damage: 2}),
+		tier(2, "+2 damage", "+2 more base damage to the whole cleave.", SkillEffectDelta{Damage: 2}),
+		tier(3, "+2 damage", "Another +2 base damage. Whole pack feels it.", SkillEffectDelta{Damage: 2}),
 	},
 	SkillCrushingBlow: {
-		{Tier: 1, Label: "+3 damage", Description: "+3 base damage on the heavy hit.", Cost: 1, Effect: SkillEffectDelta{Damage: 3}},
-		{Tier: 2, Label: "+15% stun", Description: "Stun roll gets +15% chance on a landed Great/Excellent.", Cost: 1, Effect: SkillEffectDelta{StunChance: 0.15}},
-		{Tier: 3, Label: "Excellent crits", Description: "An Excellent timing hit deals double damage.", Cost: 1, Effect: SkillEffectDelta{CritDoubleOnExcellent: true}},
+		tier(1, "+3 damage", "+3 base damage on the heavy hit.", SkillEffectDelta{Damage: 3}),
+		tier(2, "+15% stun", "Stun roll gets +15% chance on a landed Great/Excellent.", SkillEffectDelta{StunChance: 0.15}),
+		tier(3, "Excellent crits", "An Excellent timing hit deals double damage.", SkillEffectDelta{CritDoubleOnExcellent: true}),
 	},
 	SkillWhirlwind: {
-		{Tier: 1, Label: "+2 damage", Description: "+2 base damage per target on the spin.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
-		{Tier: 2, Label: "+2 damage", Description: "+2 more base damage per target on the spin.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
-		{Tier: 3, Label: "+2 damage", Description: "Another +2 base damage. Excellent timing eviscerates the pack.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
+		tier(1, "+2 damage", "+2 base damage per target on the spin.", SkillEffectDelta{Damage: 2}),
+		tier(2, "+2 damage", "+2 more base damage per target on the spin.", SkillEffectDelta{Damage: 2}),
+		tier(3, "+2 damage", "Another +2 base damage. Excellent timing eviscerates the pack.", SkillEffectDelta{Damage: 2}),
 	},
 	SkillSecondWind: {
-		{Tier: 1, Label: "+3 heal", Description: "+3 to the flat self-heal.", Cost: 1, Effect: SkillEffectDelta{Heal: 3}},
-		{Tier: 2, Label: "+3 heal", Description: "Another +3 to the breather.", Cost: 1, Effect: SkillEffectDelta{Heal: 3}},
-		{Tier: 3, Label: "+3 heal", Description: "A third +3 — a maxed Second Wind is a real comeback.", Cost: 1, Effect: SkillEffectDelta{Heal: 3}},
+		tier(1, "+3 heal", "+3 to the flat self-heal.", SkillEffectDelta{Heal: 3}),
+		tier(2, "+3 heal", "Another +3 to the breather.", SkillEffectDelta{Heal: 3}),
+		tier(3, "+3 heal", "A third +3 — a maxed Second Wind is a real comeback.", SkillEffectDelta{Heal: 3}),
 	},
 	// ── Cleric ───────────────────────────────────────────────
 	SkillPrayer: {
-		{Tier: 1, Label: "+3 heal", Description: "+3 base heal on the target.", Cost: 1, Effect: SkillEffectDelta{Heal: 3}},
-		{Tier: 2, Label: "+3 heal", Description: "Another +3 heal. Tank-grade recovery in one cast.", Cost: 1, Effect: SkillEffectDelta{Heal: 3}},
-		{Tier: 3, Label: "+3 heal", Description: "A third +3 heal — Prayer alone can top off a tank.", Cost: 1, Effect: SkillEffectDelta{Heal: 3}},
+		tier(1, "+3 heal", "+3 base heal on the target.", SkillEffectDelta{Heal: 3}),
+		tier(2, "+3 heal", "Another +3 heal. Tank-grade recovery in one cast.", SkillEffectDelta{Heal: 3}),
+		tier(3, "+3 heal", "A third +3 heal — Prayer alone can top off a tank.", SkillEffectDelta{Heal: 3}),
 	},
 	SkillMassMend: {
-		{Tier: 1, Label: "+2 heal", Description: "+2 base heal across every alive party member.", Cost: 1, Effect: SkillEffectDelta{Heal: 2}},
-		{Tier: 2, Label: "+2 heal", Description: "Another +2 heal across the whole party.", Cost: 1, Effect: SkillEffectDelta{Heal: 2}},
-		{Tier: 3, Label: "+2 heal", Description: "A third +2 heal — full-party sustain in one cast.", Cost: 1, Effect: SkillEffectDelta{Heal: 2}},
+		tier(1, "+2 heal", "+2 base heal across every alive party member.", SkillEffectDelta{Heal: 2}),
+		tier(2, "+2 heal", "Another +2 heal across the whole party.", SkillEffectDelta{Heal: 2}),
+		tier(3, "+2 heal", "A third +2 heal — full-party sustain in one cast.", SkillEffectDelta{Heal: 2}),
 	},
 	SkillSmite: {
-		{Tier: 1, Label: "+2 damage", Description: "+2 base damage on the press tap.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
-		{Tier: 2, Label: "+2 damage", Description: "Another +2 base damage.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
-		{Tier: 3, Label: "+25% stun", Description: "Lands a Stun roll with 25% chance on Great/Excellent timing.", Cost: 1, Effect: SkillEffectDelta{StunChance: 0.25, StunMinTurns: StunTurnStep, StunMaxTurns: StunTurnStep}},
+		tier(1, "+2 damage", "+2 base damage on the press tap.", SkillEffectDelta{Damage: 2}),
+		tier(2, "+2 damage", "Another +2 base damage.", SkillEffectDelta{Damage: 2}),
+		tier(3, "+25% stun", "Lands a Stun roll with 25% chance on Great/Excellent timing.", SkillEffectDelta{StunChance: 0.25, StunMinTurns: StunTurnStep, StunMaxTurns: StunTurnStep}),
 	},
 	SkillBless: {
-		{Tier: 1, Label: "+1 turn", Description: "The blessing lingers one turn longer on the whole party.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
-		{Tier: 2, Label: "+1 to blessed stats", Description: "+1 more to STR, DEX, INT and WIS for every blessed ally.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{STR: 1, DEX: 1, INT: 1, WIS: 1}}},
-		{Tier: 3, Label: "+1 to blessed stats", Description: "Another +1 to all four blessed stats — a maxed blessing is a sweeping party buff.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{STR: 1, DEX: 1, INT: 1, WIS: 1}}},
+		tier(1, "+1 turn", "The blessing lingers one turn longer on the whole party.", SkillEffectDelta{BuffTurns: 1}),
+		tier(2, "+1 to blessed stats", "+1 more to STR, DEX, INT and WIS for every blessed ally.", SkillEffectDelta{BuffStats: Stats{STR: 1, DEX: 1, INT: 1, WIS: 1}}),
+		tier(3, "+1 to blessed stats", "Another +1 to all four blessed stats — a maxed blessing is a sweeping party buff.", SkillEffectDelta{BuffStats: Stats{STR: 1, DEX: 1, INT: 1, WIS: 1}}),
 	},
 	SkillRenewal: {
-		{Tier: 1, Label: "+1 turn", Description: "The regen ticks one more turn.", Cost: 1, Effect: SkillEffectDelta{RegenTurns: 1}},
-		{Tier: 2, Label: "+1 heal/turn", Description: "+1 to the per-turn heal (before WIS scaling).", Cost: 1, Effect: SkillEffectDelta{Heal: 1}},
-		{Tier: 3, Label: "+1 turn", Description: "Another turn of regen — a maxed Renewal sustains an ally for the whole fight.", Cost: 1, Effect: SkillEffectDelta{RegenTurns: 1}},
+		tier(1, "+1 turn", "The regen ticks one more turn.", SkillEffectDelta{RegenTurns: 1}),
+		tier(2, "+1 heal/turn", "+1 to the per-turn heal (before WIS scaling).", SkillEffectDelta{Heal: 1}),
+		tier(3, "+1 turn", "Another turn of regen — a maxed Renewal sustains an ally for the whole fight.", SkillEffectDelta{RegenTurns: 1}),
 	},
 	// ── Thief ────────────────────────────────────────────────
 	SkillSteal: {
-		{Tier: 1, Label: "+15% chance", Description: "Steal succeeds 15% more often.", Cost: 1, Effect: SkillEffectDelta{StealChance: 0.15}},
-		{Tier: 2, Label: "+15% chance", Description: "Another +15% steal chance.", Cost: 1, Effect: SkillEffectDelta{StealChance: 0.15}},
-		{Tier: 3, Label: "Cuts on lift", Description: "A successful steal also deals STR damage.", Cost: 1, Effect: SkillEffectDelta{StealBonusDamage: 1}},
+		tier(1, "+15% chance", "Steal succeeds 15% more often.", SkillEffectDelta{StealChance: 0.15}),
+		tier(2, "+15% chance", "Another +15% steal chance.", SkillEffectDelta{StealChance: 0.15}),
+		tier(3, "Cuts on lift", "A successful steal also deals STR damage.", SkillEffectDelta{StealBonusDamage: 1}),
 	},
 	SkillBackstab: {
-		{Tier: 1, Label: "+2 damage", Description: "+2 base damage on the dagger thrust.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
-		{Tier: 2, Label: "Excellent crits harder", Description: "Excellent timing's existing double-damage stacks an additional damage tier.", Cost: 1, Effect: SkillEffectDelta{CritDoubleOnExcellent: true}},
-		{Tier: 3, Label: "+3 damage", Description: "Another +3 base damage. Backstab carries.", Cost: 1, Effect: SkillEffectDelta{Damage: 3}},
+		tier(1, "+2 damage", "+2 base damage on the dagger thrust.", SkillEffectDelta{Damage: 2}),
+		tier(2, "Excellent crits harder", "Excellent timing's existing double-damage stacks an additional damage tier.", SkillEffectDelta{CritDoubleOnExcellent: true}),
+		tier(3, "+3 damage", "Another +3 base damage. Backstab carries.", SkillEffectDelta{Damage: 3}),
 	},
 	SkillVenomStrike: {
-		{Tier: 1, Label: "+15% Poison", Description: "Poison-apply chance bumped by 15%.", Cost: 1, Effect: SkillEffectDelta{PoisonChance: 0.15}},
-		{Tier: 2, Label: "+1 Poison turn", Description: "Poison's max-roll duration extends by one turn.", Cost: 1, Effect: SkillEffectDelta{PoisonMaxTurns: 1}},
-		{Tier: 3, Label: "+2 damage", Description: "+2 base damage on the strike itself.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
+		tier(1, "+15% Poison", "Poison-apply chance bumped by 15%.", SkillEffectDelta{PoisonChance: 0.15}),
+		tier(2, "+1 Poison turn", "Poison's max-roll duration extends by one turn.", SkillEffectDelta{PoisonMaxTurns: 1}),
+		tier(3, "+2 damage", "+2 base damage on the strike itself.", SkillEffectDelta{Damage: 2}),
 	},
 	SkillCripple: {
-		{Tier: 1, Label: "+1 turn", Description: "The cripple lingers one of the target's turns longer.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
-		{Tier: 2, Label: "-1 more SPD", Description: "Saps another point of SPD while it lasts.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{SPD: -1}}},
-		{Tier: 3, Label: "-1 more SPD", Description: "Another point of SPD — a maxed Cripple drags a slow foe to a crawl.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{SPD: -1}}},
+		tier(1, "+1 turn", "The cripple lingers one of the target's turns longer.", SkillEffectDelta{BuffTurns: 1}),
+		tier(2, "-1 more SPD", "Saps another point of SPD while it lasts.", SkillEffectDelta{BuffStats: Stats{SPD: -1}}),
+		tier(3, "-1 more SPD", "Another point of SPD — a maxed Cripple drags a slow foe to a crawl.", SkillEffectDelta{BuffStats: Stats{SPD: -1}}),
 	},
 	SkillCorrosiveVial: {
-		{Tier: 1, Label: "+2 Armor break", Description: "Strips 2 more Armor per vial.", Cost: 1, Effect: SkillEffectDelta{ArmorReduction: 2}},
-		{Tier: 2, Label: "+2 Armor break", Description: "Another +2 Armor stripped.", Cost: 1, Effect: SkillEffectDelta{ArmorReduction: 2}},
-		{Tier: 3, Label: "+3 Armor break", Description: "A maxed vial melts even a heavy carapace.", Cost: 1, Effect: SkillEffectDelta{ArmorReduction: 3}},
+		tier(1, "+2 Armor break", "Strips 2 more Armor per vial.", SkillEffectDelta{ArmorReduction: 2}),
+		tier(2, "+2 Armor break", "Another +2 Armor stripped.", SkillEffectDelta{ArmorReduction: 2}),
+		tier(3, "+3 Armor break", "A maxed vial melts even a heavy carapace.", SkillEffectDelta{ArmorReduction: 3}),
 	},
 	SkillPoisonCloud: {
-		{Tier: 1, Label: "+15% Poison", Description: "Every enemy in the cloud rolls a 15% higher Poison chance.", Cost: 1, Effect: SkillEffectDelta{PoisonChance: 0.15}},
-		{Tier: 2, Label: "+1 Poison turn", Description: "The cloud's Poison lingers one extra turn on its max roll.", Cost: 1, Effect: SkillEffectDelta{PoisonMaxTurns: 1}},
-		{Tier: 3, Label: "+1 damage", Description: "+1 base damage to every enemy caught in the cloud.", Cost: 1, Effect: SkillEffectDelta{Damage: 1}},
+		tier(1, "+15% Poison", "Every enemy in the cloud rolls a 15% higher Poison chance.", SkillEffectDelta{PoisonChance: 0.15}),
+		tier(2, "+1 Poison turn", "The cloud's Poison lingers one extra turn on its max roll.", SkillEffectDelta{PoisonMaxTurns: 1}),
+		tier(3, "+1 damage", "+1 base damage to every enemy caught in the cloud.", SkillEffectDelta{Damage: 1}),
 	},
 	// ── Wizard ───────────────────────────────────────────────
 	SkillFirebolt: {
-		{Tier: 1, Label: "+2 damage", Description: "+2 base damage on the bolt.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
-		{Tier: 2, Label: "+20% Burn", Description: "Burn-apply chance bumped by 20%.", Cost: 1, Effect: SkillEffectDelta{BurnChance: 0.20}},
-		{Tier: 3, Label: "+1 Burn turn", Description: "Burn lasts one turn longer on min and max rolls.", Cost: 1, Effect: SkillEffectDelta{BurnMinTurns: 1, BurnMaxTurns: 1}},
+		tier(1, "+2 damage", "+2 base damage on the bolt.", SkillEffectDelta{Damage: 2}),
+		tier(2, "+20% Burn", "Burn-apply chance bumped by 20%.", SkillEffectDelta{BurnChance: 0.20}),
+		tier(3, "+1 Burn turn", "Burn lasts one turn longer on min and max rolls.", SkillEffectDelta{BurnMinTurns: 1, BurnMaxTurns: 1}),
 	},
 	SkillFrostLance: {
-		{Tier: 1, Label: "+2 damage", Description: "+2 base damage on the lance.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
-		{Tier: 2, Label: "+15% Stun", Description: "Stun roll gets +15% chance on Great/Excellent.", Cost: 1, Effect: SkillEffectDelta{StunChance: 0.15}},
-		{Tier: 3, Label: "+1 Stun turn", Description: "Stun lasts an extra turn when it lands.", Cost: 1, Effect: SkillEffectDelta{StunMinTurns: StunTurnStep, StunMaxTurns: StunTurnStep}},
+		tier(1, "+2 damage", "+2 base damage on the lance.", SkillEffectDelta{Damage: 2}),
+		tier(2, "+15% Stun", "Stun roll gets +15% chance on Great/Excellent.", SkillEffectDelta{StunChance: 0.15}),
+		tier(3, "+1 Stun turn", "Stun lasts an extra turn when it lands.", SkillEffectDelta{StunMinTurns: StunTurnStep, StunMaxTurns: StunTurnStep}),
 	},
 	SkillFrostbite: {
-		{Tier: 1, Label: "+2 damage", Description: "+2 base frost damage.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
-		{Tier: 2, Label: "+1 chill turn", Description: "The chill lingers one of the target's turns longer.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
-		{Tier: 3, Label: "-1 more SPD", Description: "Saps another point of SPD — a maxed Frostbite nearly freezes its mark.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{SPD: -1}}},
+		tier(1, "+2 damage", "+2 base frost damage.", SkillEffectDelta{Damage: 2}),
+		tier(2, "+1 chill turn", "The chill lingers one of the target's turns longer.", SkillEffectDelta{BuffTurns: 1}),
+		tier(3, "-1 more SPD", "Saps another point of SPD — a maxed Frostbite nearly freezes its mark.", SkillEffectDelta{BuffStats: Stats{SPD: -1}}),
 	},
 	SkillConeOfCold: {
-		{Tier: 1, Label: "+1 damage", Description: "+1 base frost damage to every enemy in the cone.", Cost: 1, Effect: SkillEffectDelta{Damage: 1}},
-		{Tier: 2, Label: "+1 chill turn", Description: "The pack-wide chill lasts one extra turn.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
-		{Tier: 3, Label: "-1 more SPD", Description: "Saps another point of SPD from every chilled foe.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{SPD: -1}}},
+		tier(1, "+1 damage", "+1 base frost damage to every enemy in the cone.", SkillEffectDelta{Damage: 1}),
+		tier(2, "+1 chill turn", "The pack-wide chill lasts one extra turn.", SkillEffectDelta{BuffTurns: 1}),
+		tier(3, "-1 more SPD", "Saps another point of SPD from every chilled foe.", SkillEffectDelta{BuffStats: Stats{SPD: -1}}),
 	},
 	SkillArcBolt: {
-		{Tier: 1, Label: "+1 damage", Description: "+1 base damage per arc target.", Cost: 1, Effect: SkillEffectDelta{Damage: 1}},
-		{Tier: 2, Label: "+1 damage", Description: "Another +1 damage per target.", Cost: 1, Effect: SkillEffectDelta{Damage: 1}},
-		{Tier: 3, Label: "+15% Burn", Description: "Every arc target rolls a 15% burn chance.", Cost: 1, Effect: SkillEffectDelta{BurnChance: 0.15, BurnMinTurns: 1, BurnMaxTurns: 2}},
+		tier(1, "+1 damage", "+1 base damage per arc target.", SkillEffectDelta{Damage: 1}),
+		tier(2, "+1 damage", "Another +1 damage per target.", SkillEffectDelta{Damage: 1}),
+		tier(3, "+15% Burn", "Every arc target rolls a 15% burn chance.", SkillEffectDelta{BurnChance: 0.15, BurnMinTurns: 1, BurnMaxTurns: 2}),
 	},
 	SkillFireball: {
-		{Tier: 1, Label: "+2 damage", Description: "+2 base magic damage to every enemy in the blast.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
-		{Tier: 2, Label: "+20% Burn", Description: "Per-target Burn-apply chance bumped by 20%.", Cost: 1, Effect: SkillEffectDelta{BurnChance: 0.20}},
-		{Tier: 3, Label: "+1 Burn turn", Description: "Burn lasts one turn longer on min and max rolls.", Cost: 1, Effect: SkillEffectDelta{BurnMinTurns: 1, BurnMaxTurns: 1}},
+		tier(1, "+2 damage", "+2 base magic damage to every enemy in the blast.", SkillEffectDelta{Damage: 2}),
+		tier(2, "+20% Burn", "Per-target Burn-apply chance bumped by 20%.", SkillEffectDelta{BurnChance: 0.20}),
+		tier(3, "+1 Burn turn", "Burn lasts one turn longer on min and max rolls.", SkillEffectDelta{BurnMinTurns: 1, BurnMaxTurns: 1}),
 	},
 	// ── Warrior (tree-node skills) ───────────────────────────
 	SkillSunder: {
-		{Tier: 1, Label: "+2 damage", Description: "+2 base damage on the sundering blow.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
-		{Tier: 2, Label: "+2 damage", Description: "Another +2 base damage.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
-		{Tier: 3, Label: "Harder shove", Description: "Knocks the target's turn even further back.", Cost: 1, Effect: SkillEffectDelta{ATBPush: SunderATBPushPerTier}},
+		tier(1, "+2 damage", "+2 base damage on the sundering blow.", SkillEffectDelta{Damage: 2}),
+		tier(2, "+2 damage", "Another +2 base damage.", SkillEffectDelta{Damage: 2}),
+		tier(3, "Harder shove", "Knocks the target's turn even further back.", SkillEffectDelta{ATBPush: SunderATBPushPerTier}),
 	},
 	SkillWarBanner: {
-		{Tier: 1, Label: "+1 turn", Description: "The banner stands one turn longer.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
-		{Tier: 2, Label: "+1 STR/Armor", Description: "+1 more to the rallied STR and Armor for every ally.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{STR: 1}, BuffArmor: 1}},
-		{Tier: 3, Label: "+1 STR/Armor", Description: "Another +1 to both — a maxed banner is a sweeping party buff.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{STR: 1}, BuffArmor: 1}},
+		tier(1, "+1 turn", "The banner stands one turn longer.", SkillEffectDelta{BuffTurns: 1}),
+		tier(2, "+1 STR/Armor", "+1 more to the rallied STR and Armor for every ally.", SkillEffectDelta{BuffStats: Stats{STR: 1}, BuffArmor: 1}),
+		tier(3, "+1 STR/Armor", "Another +1 to both — a maxed banner is a sweeping party buff.", SkillEffectDelta{BuffStats: Stats{STR: 1}, BuffArmor: 1}),
 	},
 	SkillStoneSkin: {
-		{Tier: 1, Label: "+2 Armor", Description: "+2 more Armor on the ward.", Cost: 1, Effect: SkillEffectDelta{BuffArmor: 2}},
-		{Tier: 2, Label: "+2 MDef", Description: "+2 more MDef on the ward.", Cost: 1, Effect: SkillEffectDelta{BuffMDef: 2}},
-		{Tier: 3, Label: "+1 turn", Description: "The ward lasts one of the ally's turns longer.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
+		tier(1, "+2 Armor", "+2 more Armor on the ward.", SkillEffectDelta{BuffArmor: 2}),
+		tier(2, "+2 MDef", "+2 more MDef on the ward.", SkillEffectDelta{BuffMDef: 2}),
+		tier(3, "+1 turn", "The ward lasts one of the ally's turns longer.", SkillEffectDelta{BuffTurns: 1}),
 	},
 	// ── Cleric (tree-node skills) ────────────────────────────
 	SkillBlind: {
-		{Tier: 1, Label: "+1 turn", Description: "The blindness lingers one of the target's turns longer.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
-		{Tier: 2, Label: "-1 more DEX", Description: "Saps another point of accuracy while it lasts.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{DEX: -1}}},
-		{Tier: 3, Label: "-1 more DEX", Description: "Another point of accuracy — a maxed Blind nearly closes a foe's eyes.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{DEX: -1}}},
+		tier(1, "+1 turn", "The blindness lingers one of the target's turns longer.", SkillEffectDelta{BuffTurns: 1}),
+		tier(2, "-1 more DEX", "Saps another point of accuracy while it lasts.", SkillEffectDelta{BuffStats: Stats{DEX: -1}}),
+		tier(3, "-1 more DEX", "Another point of accuracy — a maxed Blind nearly closes a foe's eyes.", SkillEffectDelta{BuffStats: Stats{DEX: -1}}),
 	},
 	SkillAegis: {
-		{Tier: 1, Label: "+4 shield", Description: "+4 to the absorb pool.", Cost: 1, Effect: SkillEffectDelta{ShieldHP: 4}},
-		{Tier: 2, Label: "+4 shield", Description: "Another +4 absorb.", Cost: 1, Effect: SkillEffectDelta{ShieldHP: 4}},
-		{Tier: 3, Label: "+6 shield", Description: "A maxed Aegis turns aside a heavy blow outright.", Cost: 1, Effect: SkillEffectDelta{ShieldHP: 6}},
+		tier(1, "+4 shield", "+4 to the absorb pool.", SkillEffectDelta{ShieldHP: 4}),
+		tier(2, "+4 shield", "Another +4 absorb.", SkillEffectDelta{ShieldHP: 4}),
+		tier(3, "+6 shield", "A maxed Aegis turns aside a heavy blow outright.", SkillEffectDelta{ShieldHP: 6}),
 	},
 	// ── Thief (tree-node skills) ─────────────────────────────
 	SkillSmokeBomb: {
-		{Tier: 1, Label: "+1 turn", Description: "The smoke hangs one turn longer.", Cost: 1, Effect: SkillEffectDelta{BuffTurns: 1}},
-		{Tier: 2, Label: "+1 DEX swing", Description: "Another point of party evasion and enemy accuracy loss.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{DEX: 1}}},
-		{Tier: 3, Label: "+1 DEX swing", Description: "A maxed Smoke Bomb blinds the room and slips the party clear.", Cost: 1, Effect: SkillEffectDelta{BuffStats: Stats{DEX: 1}}},
+		tier(1, "+1 turn", "The smoke hangs one turn longer.", SkillEffectDelta{BuffTurns: 1}),
+		tier(2, "+1 DEX swing", "Another point of party evasion and enemy accuracy loss.", SkillEffectDelta{BuffStats: Stats{DEX: 1}}),
+		tier(3, "+1 DEX swing", "A maxed Smoke Bomb blinds the room and slips the party clear.", SkillEffectDelta{BuffStats: Stats{DEX: 1}}),
 	},
 	// ── Wizard (tree-node skills) ────────────────────────────
 	SkillIceArmor: {
-		{Tier: 1, Label: "+1 turn", Description: "The frost ward stands one turn longer.", Cost: 1, Effect: SkillEffectDelta{IceArmorTurns: 1}},
-		{Tier: 2, Label: "+1 turn", Description: "Another turn of ward.", Cost: 1, Effect: SkillEffectDelta{IceArmorTurns: 1}},
-		{Tier: 3, Label: "+2 turns", Description: "A maxed Ice Armor sheathes the caster for most of a fight.", Cost: 1, Effect: SkillEffectDelta{IceArmorTurns: 2}},
+		tier(1, "+1 turn", "The frost ward stands one turn longer.", SkillEffectDelta{IceArmorTurns: 1}),
+		tier(2, "+1 turn", "Another turn of ward.", SkillEffectDelta{IceArmorTurns: 1}),
+		tier(3, "+2 turns", "A maxed Ice Armor sheathes the caster for most of a fight.", SkillEffectDelta{IceArmorTurns: 2}),
 	},
 	// ── Bleed strikes (Warrior Rend / Thief Lacerate) ────────
 	SkillRend: {
-		{Tier: 1, Label: "+2 damage", Description: "+2 base damage on the opening cut.", Cost: 1, Effect: SkillEffectDelta{Damage: 2}},
-		{Tier: 2, Label: "+1 Bleed turn", Description: "The wound bleeds one turn longer on min and max rolls.", Cost: 1, Effect: SkillEffectDelta{BleedMinTurns: 1, BleedMaxTurns: 1}},
-		{Tier: 3, Label: "+15% Bleed", Description: "Bleed-apply chance bumped by 15% — a maxed Rend almost always draws blood.", Cost: 1, Effect: SkillEffectDelta{BleedChance: 0.15}},
+		tier(1, "+2 damage", "+2 base damage on the opening cut.", SkillEffectDelta{Damage: 2}),
+		tier(2, "+1 Bleed turn", "The wound bleeds one turn longer on min and max rolls.", SkillEffectDelta{BleedMinTurns: 1, BleedMaxTurns: 1}),
+		tier(3, "+15% Bleed", "Bleed-apply chance bumped by 15% — a maxed Rend almost always draws blood.", SkillEffectDelta{BleedChance: 0.15}),
 	},
 	SkillLacerate: {
-		{Tier: 1, Label: "+1 damage", Description: "+1 base damage on the cut.", Cost: 1, Effect: SkillEffectDelta{Damage: 1}},
-		{Tier: 2, Label: "+1 Bleed turn", Description: "The wound bleeds one turn longer on min and max rolls.", Cost: 1, Effect: SkillEffectDelta{BleedMinTurns: 1, BleedMaxTurns: 1}},
-		{Tier: 3, Label: "+15% Bleed", Description: "Bleed-apply chance bumped by 15%.", Cost: 1, Effect: SkillEffectDelta{BleedChance: 0.15}},
+		tier(1, "+1 damage", "+1 base damage on the cut.", SkillEffectDelta{Damage: 1}),
+		tier(2, "+1 Bleed turn", "The wound bleeds one turn longer on min and max rolls.", SkillEffectDelta{BleedMinTurns: 1, BleedMaxTurns: 1}),
+		tier(3, "+15% Bleed", "Bleed-apply chance bumped by 15%.", SkillEffectDelta{BleedChance: 0.15}),
 	},
 }
 

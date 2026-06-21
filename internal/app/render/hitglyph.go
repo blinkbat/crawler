@@ -55,29 +55,43 @@ const (
 	partyGlyphExtraRise = float32(0.42)
 )
 
-// hitGlyphForVFX maps an impact VFX kind to its clarity glyph. Heal / status /
-// utility VFX (Heal, Steal, Scan, Sleep, Web, Confuse, Ingest, Death) return
-// glyphNone — they aren't damaging hits, so they get no glyph. Single source
-// for the kind→glyph mapping; a new attack VFX lights a glyph by adding a row
-// here plus a drawHitGlyph case.
-func hitGlyphForVFX(k core.VFXKind) hitGlyphKind {
-	switch k {
-	case core.VFXSlash:
-		return glyphSlash
-	case core.VFXImpact, core.VFXStoneslam:
-		return glyphImpact
-	case core.VFXFrost:
-		return glyphFrost
-	case core.VFXArc:
-		return glyphSpark
-	case core.VFXEmber:
-		return glyphFire
-	case core.VFXSmite:
-		return glyphHoly
-	case core.VFXVenom:
-		return glyphVenom
+// vfxGlyphs maps every VFXKind to its clarity glyph. Heal / status / utility
+// VFX (Heal, Steal, Scan, Sleep, Web, Confuse, Ingest, Death — and VFXNone)
+// map to glyphNone — they aren't damaging hits, so they get no glyph. EVERY
+// kind must appear: the init below asserts len(vfxGlyphs) == core.VFXKindCount,
+// so a newly appended VFX kind can't silently inherit glyphNone the way the old
+// switch's fallthrough allowed. A new attack VFX lights a glyph by adding its
+// row here (plus a drawHitGlyph case).
+var vfxGlyphs = map[core.VFXKind]hitGlyphKind{
+	core.VFXNone:      glyphNone,
+	core.VFXSlash:     glyphSlash,
+	core.VFXImpact:    glyphImpact,
+	core.VFXStoneslam: glyphImpact,
+	core.VFXFrost:     glyphFrost,
+	core.VFXArc:       glyphSpark,
+	core.VFXEmber:     glyphFire,
+	core.VFXSmite:     glyphHoly,
+	core.VFXVenom:     glyphVenom,
+	core.VFXHeal:      glyphNone,
+	core.VFXSteal:     glyphNone,
+	core.VFXDeath:     glyphNone,
+	core.VFXSleep:     glyphNone,
+	core.VFXWeb:       glyphNone,
+	core.VFXConfuse:   glyphNone,
+	core.VFXIngest:    glyphNone,
+	core.VFXScan:      glyphNone,
+}
+
+func init() {
+	if len(vfxGlyphs) != int(core.VFXKindCount) {
+		panic("render: vfxGlyphs must map every VFXKind — add the new kind's clarity glyph (glyphNone for non-impact VFX)")
 	}
-	return glyphNone
+}
+
+// hitGlyphForVFX returns the clarity glyph for an impact VFX kind, glyphNone for
+// non-damaging VFX. Single source for the kind→glyph mapping (vfxGlyphs).
+func hitGlyphForVFX(k core.VFXKind) hitGlyphKind {
+	return vfxGlyphs[k]
 }
 
 // hitGlyph is one live overlay: a kind + the ANCHOR IDENTITY of the struck
@@ -389,10 +403,11 @@ func drawLightningTendril(cx, cy float32, ang float64, r float32, col rl.Color, 
 }
 
 // glyphJitter is a cheap deterministic pseudo-random in [-1, 1) from a seed —
-// the fract(sin·k) hash — used to twitch the spark glyph's lightning per frame
-// step without pulling a real RNG into the render hot path.
+// the fract(sin·k) hash (constants named in theme.go) — used to twitch the spark
+// glyph's lightning per frame step without pulling a real RNG into the render hot
+// path.
 func glyphJitter(seed float64) float32 {
-	v := math.Sin(seed*12.9898) * 43758.5453
+	v := math.Sin(seed*fractSinHashA) * fractSinHashB
 	return float32((v-math.Floor(v))*2 - 1)
 }
 

@@ -33,6 +33,16 @@ const degToRad = float32(math.Pi / 180)
 // XORs by (it appeared both as the decimal literal and as the 0x9E3779B9 hex).
 const hashSalt = uint32(2654435761)
 
+// fractSinHashA / fractSinHashB are the classic GLSL fract(sin(x)·k) pseudo-random
+// constants. Used by glyphJitter for a cheap hash of a CONTINUOUS float seed (e.g.
+// a time-driven arc twitch) where the integer mix32/hash01 family doesn't fit.
+// Named here so the magic pair lives in one place instead of being re-spelled at
+// the call site (the rule the rest of the package's hashing follows).
+const (
+	fractSinHashA = 12.9898
+	fractSinHashB = 43758.5453
+)
+
 // hashPhase maps a 32-bit hash to a stable phase angle in [0, tau): the low 16
 // bits scaled across a full turn. Used to give each torch flame (and any other
 // hash-seeded oscillator) its own fixed starting phase so a field of them

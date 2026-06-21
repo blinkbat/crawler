@@ -1461,6 +1461,7 @@ const (
 	RetroFilterDither                           // 4×4 Bayer ordered dithering
 	RetroFilterGameBoy                          // 4-shade green LCD palette remap
 	RetroFilterScanlines                        // CRT horizontal line darkening
+	RetroFilterPalette                          // snap each pixel to the nearest color in a fixed limited palette
 	RetroFilterCount
 )
 
@@ -1473,6 +1474,7 @@ var retroFilterNames = [RetroFilterCount]string{
 	RetroFilterDither:    "Dither",
 	RetroFilterGameBoy:   "Game Boy",
 	RetroFilterScanlines: "Scanlines",
+	RetroFilterPalette:   "Palette",
 }
 
 func init() {

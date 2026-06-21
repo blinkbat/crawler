@@ -16,6 +16,14 @@ type partyClassPresentation struct {
 	dance       func(float32) (float32, float32, float32, float32)
 }
 
+// classRobeGold is the gilt trim painted on the party robe sprites (Cleric sash,
+// Wizard robe/hat trim). The sprite-side cousin of the HUD gilt accent family
+// (giltBright/giltDim, theme.go) — kept as one color.RGBA so the robe trim tunes
+// in a single place instead of each draw function carrying its own near-identical
+// gold literal. (Warrior's gold is its HUD slot accent, turnColor, a separate
+// source by design.)
+var classRobeGold = color.RGBA{R: 226, G: 196, B: 93, A: 255}
+
 var partyClassPresentations = map[core.PartyClass]partyClassPresentation{
 	// turnColor is the member's accent "slot color" — the single source
 	// for every HUD/UI/log tint keyed to a class (turn-order panel, party
@@ -109,18 +117,15 @@ var classGlyphDrawers = [core.PartyClassCount]func(cx, cy, r float32, col color.
 }
 
 func init() {
-	for class := core.PartyClass(0); int(class) < len(classGlyphDrawers); class++ {
-		if classGlyphDrawers[class] == nil {
-			panic("render: party class has no classGlyphDrawers entry — add the row")
-		}
-	}
+	assertTableComplete("classGlyphDrawers", len(classGlyphDrawers), func(i int) bool {
+		return classGlyphDrawers[i] == nil
+	})
 	// partyClassPresentations is still a map; keep the cross-coverage check so a
 	// class with a glyph but no presentation (or vice versa) fails at startup.
-	for class := core.PartyClass(0); int(class) < len(classGlyphDrawers); class++ {
-		if _, ok := partyClassPresentations[class]; !ok {
-			panic("render: party class has a glyph drawer but no partyClassPresentations entry")
-		}
-	}
+	assertTableComplete("partyClassPresentations", len(classGlyphDrawers), func(i int) bool {
+		_, ok := partyClassPresentations[core.PartyClass(i)]
+		return !ok
+	})
 }
 
 // Warrior — two crossed longswords: blades tapered, crossguards
@@ -300,7 +305,7 @@ func drawWarriorPartyPixels(pixels []color.RGBA, w, h int) {
 func drawClericPartyPixels(pixels []color.RGBA, w, h int) {
 	robe := color.RGBA{R: 218, G: 219, B: 202, A: 255}
 	robeDark := color.RGBA{R: 151, G: 151, B: 139, A: 255}
-	gold := color.RGBA{R: 222, G: 184, B: 86, A: 255}
+	gold := classRobeGold
 	hood := color.RGBA{R: 238, G: 234, B: 214, A: 255}
 	fillEllipsePixels(pixels, w, h, 32, 48, 19, 23, robeDark)
 	fillRectPixels(pixels, w, h, 17, 35, 30, 31, robe)
@@ -331,7 +336,7 @@ func drawWizardPartyPixels(pixels []color.RGBA, w, h int) {
 	robe := color.RGBA{R: 64, G: 78, B: 155, A: 255}
 	robeDark := color.RGBA{R: 34, G: 43, B: 90, A: 255}
 	hat := color.RGBA{R: 86, G: 74, B: 172, A: 255}
-	trim := color.RGBA{R: 226, G: 196, B: 93, A: 255}
+	trim := classRobeGold
 	fillEllipsePixels(pixels, w, h, 32, 49, 18, 24, robeDark)
 	fillTrianglePixels(pixels, w, h, 16, 66, 48, 66, 32, 34, robe)
 	fillRectPixels(pixels, w, h, 20, 37, 24, 27, robe)

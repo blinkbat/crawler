@@ -219,7 +219,7 @@ func MapCustomEnemyFromDef(ce CustomEnemyDef) (mapfile.MapCustomEnemy, error) {
 // TestCustomEnemyDefToRuntime — so a dropped field on either path fails loudly.
 func (d CustomEnemyDef) Definition() EnemyDefinition {
 	base := EnemyInfo(d.BaseKind)
-	display := strings.ReplaceAll(strings.TrimSpace(d.Name), "_", " ")
+	display := CustomEnemyDisplayName(d.Name)
 	if display == "" {
 		display = base.SingularName
 	}
@@ -394,6 +394,14 @@ func PackSpawnLeaderKind(a AreaDefinition, sp PackSpawn) EnemyKind {
 // another; each owns a different on-disk format.
 func SanitizeCustomEnemyName(name string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(name)), "_")
+}
+
+// CustomEnemyDisplayName is the inverse of SanitizeCustomEnemyName: it turns the
+// on-disk lower-snake form back into a player-facing display string. Paired with
+// the sanitizer so the "_" word separator is defined in one place — change the
+// separator and both ends track it.
+func CustomEnemyDisplayName(name string) string {
+	return strings.ReplaceAll(strings.TrimSpace(name), "_", " ")
 }
 
 // SkillOnDiskName is the canonical lower-snake-case identifier used in

@@ -100,18 +100,24 @@ var enemyStatusPillVisuals = [enemyStatusCount]enemyStatusPillVisual{
 	enemyStatusStun:   {turns: func(e *core.Enemy) int { return e.StunTurns }, fill: sharedStatusVisuals[core.PartyStatusStunned].Col, outline: statusStunOutline, glyph: sharedStatusVisuals[core.PartyStatusStunned].Glyph},
 }
 
+// assertTableComplete panics if isMissing reports a gap at any index in
+// [0, count). The shared init-time coverage check behind the package's
+// parallel-table invariants (status visuals, class glyphs, action rows, …): a
+// newly added enum value with no row trips this at startup instead of drawing a
+// blank/zero entry. name + the offending index are quoted in the panic.
+func assertTableComplete(name string, count int, isMissing func(i int) bool) {
+	for i := 0; i < count; i++ {
+		if isMissing(i) {
+			panic(fmt.Sprintf("render: %s has no entry for index %d — add the row", name, i))
+		}
+	}
+}
+
 func init() {
-	if len(enemyStatusPillVisuals) != int(enemyStatusCount) {
-		panic(fmt.Sprintf("enemyStatusPillVisuals length %d != enemyStatusCount %d", len(enemyStatusPillVisuals), enemyStatusCount))
-	}
-	for i, v := range enemyStatusPillVisuals {
-		if v.turns == nil {
-			panic(fmt.Sprintf("enemyStatusPillVisuals[%d] has no turns reader", i))
-		}
-		if v.glyph == nil {
-			panic(fmt.Sprintf("enemyStatusPillVisuals[%d] has no glyph — add the row", i))
-		}
-	}
+	assertTableComplete("enemyStatusPillVisuals", int(enemyStatusCount), func(i int) bool {
+		v := enemyStatusPillVisuals[i]
+		return v.turns == nil || v.glyph == nil
+	})
 }
 
 // drawEnemyRoster shows the active pack at the top of the screen.
@@ -739,31 +745,18 @@ func transientStatus(g *core.GameState) string {
 	return msg
 }
 
-func init() {
-	// drawActionMenuOptions hand-lists exactly the five action rows because each
-	// paints a bespoke per-row icon (so it isn't a generic count-driven loop). If
-	// a new ActionRow is ever added, fail loudly at startup — the menu must be
-	// updated rather than silently omit the row. (Matches the parallel-table
-	// init-assert discipline used elsewhere in the codebase.)
-	if core.ActionRowCount != 6 {
-		panic(fmt.Sprintf("render: drawActionMenuOptions lists 6 rows but core.ActionRowCount == %d — add the new row to the menu", core.ActionRowCount))
-	}
-}
-
 func drawActionMenuOptions(g *core.GameState, assets Resources, x, y, rightX int32, member core.PartyMember) {
-	cursor := core.ActionRow(g.Battle.MenuIndex)
-	// Push labels right so each row has a small icon column on the
-	// left — the action-sigil that names what the row does without
-	// reading the text. Rows pitch by the shared uiRowPitch and stretch to
-	// rightX so the highlight reaches the panel edge.
-	labelX := x + 26
-	drawActionMenuRow(assets.hudFont, core.ActionRowAttack, x, labelX, y+int32(core.ActionRowAttack)*uiRowPitch, rightX, "Attack", "", cursor == core.ActionRowAttack)
 	_ = member
-	drawActionMenuRow(assets.hudFont, core.ActionRowSkill, x, labelX, y+int32(core.ActionRowSkill)*uiRowPitch, rightX, "Skill", "", cursor == core.ActionRowSkill)
-	drawActionMenuRow(assets.hudFont, core.ActionRowItem, x, labelX, y+int32(core.ActionRowItem)*uiRowPitch, rightX, "Item", "", cursor == core.ActionRowItem)
-	drawActionMenuRow(assets.hudFont, core.ActionRowDefend, x, labelX, y+int32(core.ActionRowDefend)*uiRowPitch, rightX, "Defend", "", cursor == core.ActionRowDefend)
-	drawActionMenuRow(assets.hudFont, core.ActionRowSwap, x, labelX, y+int32(core.ActionRowSwap)*uiRowPitch, rightX, "Swap", "", cursor == core.ActionRowSwap)
-	drawActionMenuRow(assets.hudFont, core.ActionRowFlee, x, labelX, y+int32(core.ActionRowFlee)*uiRowPitch, rightX, "Flee", "", cursor == core.ActionRowFlee)
+	cursor := core.ActionRow(g.Battle.MenuIndex)
+	// Push labels right so each row has a small icon column on the left — the
+	// action-sigil that names what the row does without reading the text. Rows
+	// pitch by the shared uiRowPitch and stretch to rightX so the highlight
+	// reaches the panel edge. Driven by the init-asserted actionRowLabels table
+	// so a new ActionRow renders automatically.
+	labelX := x + 26
+	for row := core.ActionRow(0); int(row) < core.ActionRowCount; row++ {
+		drawActionMenuRow(assets.hudFont, row, x, labelX, y+int32(row)*uiRowPitch, rightX, actionRowLabels[row], "", cursor == row)
+	}
 }
 
 // drawActionMenuRow wraps drawActionRow with an action-specific icon
@@ -826,18 +819,34 @@ func drawIconMedallion(cx, cy float32, selected bool) {
 // startup, instead of a switch that silently draws a blank icon. Attack
 // reuses the warrior class glyph ("strike" without text).
 var actionIconDrawers = [core.ActionRowCount]func(cx, cy, r float32, col rl.Color){
-	core.ActionRowAttack:     drawClassGlyphWarrior,
-	core.ActionRowSkill:      drawActionIconSkill,
-	core.ActionRowItem:       drawActionIconItem,
-	core.ActionRowDefend:     drawActionIconDefend,
-	core.ActionRowSwap:       drawActionIconSwap,
-	core.ActionRowFlee:       drawActionIconFlee,
+	core.ActionRowAttack: drawClassGlyphWarrior,
+	core.ActionRowSkill:  drawActionIconSkill,
+	core.ActionRowItem:   drawActionIconItem,
+	core.ActionRowDefend: drawActionIconDefend,
+	core.ActionRowSwap:   drawActionIconSwap,
+	core.ActionRowFlee:   drawActionIconFlee,
+}
+
+// actionRowLabels is the player-facing label for each action-menu row. A fixed
+// [core.ActionRowCount] array (init-asserted non-empty below) so drawActionMenuOptions
+// can loop over the rows instead of hand-listing each — a new ActionRow forces a
+// label slot rather than silently rendering an empty row.
+var actionRowLabels = [core.ActionRowCount]string{
+	core.ActionRowAttack: "Attack",
+	core.ActionRowSkill:  "Skill",
+	core.ActionRowItem:   "Item",
+	core.ActionRowDefend: "Defend",
+	core.ActionRowSwap:   "Swap",
+	core.ActionRowFlee:   "Flee",
 }
 
 func init() {
 	for row := core.ActionRow(0); int(row) < core.ActionRowCount; row++ {
 		if actionIconDrawers[row] == nil {
 			panic(fmt.Sprintf("render: ActionRow %d has no actionIconDrawers entry", int(row)))
+		}
+		if actionRowLabels[row] == "" {
+			panic(fmt.Sprintf("render: ActionRow %d has no actionRowLabels entry", int(row)))
 		}
 	}
 }

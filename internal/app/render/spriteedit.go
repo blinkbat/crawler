@@ -449,8 +449,11 @@ func applySpriteFilter(img *rl.Image, f SpriteFilter) {
 }
 
 // Bayer 4×4 ordered-dither matrix and the classic 4-shade Game Boy green ramp,
-// the Go-side twins of the constants baked into retrofilter.go's shader so a
-// sprite baked here matches the in-game screen filter pixel-for-pixel.
+// the Go-side twins of the constants in retrofilter.go's shader (bayer / gbRamp).
+// These are duplicated by necessity — GLSL arrays can't be shared with Go — so a
+// change to one MUST be mirrored in the other. They back the posterize/dither/
+// Game-Boy passes, the three passes whose math the bake and the shader share (see
+// applyPaletteFilter for which passes are shared vs. shader-only).
 var (
 	bayer4x4 = [16]float32{
 		0, 8, 2, 10,
@@ -471,9 +474,17 @@ const ditherQuantLevels = 6.0
 // applyPaletteFilter runs the non-destructive palette/retro passes (saturation,
 // posterize, ordered dither, Game Boy) in one CPU pixel walk over img. Each pass
 // is skipped at zero, so an all-zero filter returns without touching a pixel.
-// Fully-transparent pixels are left alone so the matte cutout stays clean. The
-// math mirrors retrofilter.go's shader (operating in 0..1 float, written back to
-// 8-bit) so a baked sprite and the in-game retro filter look identical.
+// Fully-transparent pixels are left alone so the matte cutout stays clean.
+//
+// SHARED vs. DIVERGENT with the in-game retro shader (retrofilter.go): the
+// posterize, ordered-dither, and Game-Boy passes here use the SAME math (0..1
+// float, written back to 8-bit) as the shader's fPosterize/fDither/fGameBoy, so
+// those three baked passes match the screen filter pixel-for-pixel. They do NOT
+// otherwise produce identical output: the shader also has chroma-fringe, DB16
+// palette-snap, and scanline passes that are screen-space CRT effects (not per
+// sprite), and this bake has a Saturation pass with no shader counterpart. A
+// sprite carrying only posterize/dither/Game-Boy agrees with the live filter;
+// any other pass on either side diverges by design.
 func applyPaletteFilter(img *rl.Image, f SpriteFilter) {
 	sat, post, dith, gb := f.Saturation, f.Posterize, f.Dither, f.GameBoy
 	if sat == 0 && post == 0 && dith == 0 && gb == 0 {

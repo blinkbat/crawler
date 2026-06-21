@@ -185,7 +185,12 @@ func applyFaceSkin(s *State, skin byte) {
 	if !s.area.InBounds(x, z) {
 		return
 	}
-	pushUndo(s)
+	// Mutate against a pre-edit snapshot, then bank undo / set dirty only when
+	// the edit actually changed something — SetFaceDir normalizes a base-equal
+	// skin to PropLevelAuto and can drop the whole override, so re-picking the
+	// current skin is a no-op that must not pollute the undo stack or dirty flag
+	// (same lazy-snapshot guard as setStartFacing / the context-menu deletes).
+	before := core.CloneArea(s.area)
 	if d < 0 {
 		if skin == core.PropLevelAuto {
 			skin = core.TileRock
@@ -194,6 +199,10 @@ func applyFaceSkin(s *State, skin byte) {
 	} else {
 		s.area.SetFaceDir(x, z, d, skin)
 	}
+	if core.AreaContentEqual(before, s.area) {
+		return
+	}
+	commitUndoSnapshot(s, before)
 	s.dirty = true
 }
 

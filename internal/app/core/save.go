@@ -543,10 +543,10 @@ func pruneQuests(quests []Quest) []Quest {
 		return true
 	})
 	for i := range out {
-		// A hand-edited Status outside {Active, Complete} would be a
+		// A hand-edited Status outside the recognized set would be a
 		// "neither" entry both journal-header tallies skip. Clamp it to
 		// Active — the safe default for an entry we can't interpret.
-		if out[i].Status != QuestActive && out[i].Status != QuestComplete {
+		if !out[i].Status.Valid() {
 			out[i].Status = QuestActive
 		}
 	}

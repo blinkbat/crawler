@@ -127,9 +127,10 @@ func Update(g *core.GameState, dt float32) {
 	// ActivePack is stale/-1 (mid-teardown re-entry), which would otherwise
 	// look identical to "every enemy fell" and re-award spoils against a pack
 	// that no longer exists. Only an active combat phase can be won here.
-	if pack != nil && core.CountLivingEnemies(members) == 0 &&
-		(g.Battle.Phase == core.BattlePlayer || g.Battle.Phase == core.BattleAttackTiming || g.Battle.Phase == core.BattleEnemyTiming) {
-		winBattle(g, core.LastBattleEnemyFallsMessage(g))
+	// Only an active combat phase can be won here (the phase guard must gate the
+	// win side-effect, so it short-circuits before checkEnemyWipeoutFor runs).
+	inCombatPhase := g.Battle.Phase == core.BattlePlayer || g.Battle.Phase == core.BattleAttackTiming || g.Battle.Phase == core.BattleEnemyTiming
+	if inCombatPhase && checkEnemyWipeoutFor(g, pack, members) {
 		return
 	}
 	if g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(members) {
@@ -174,11 +175,21 @@ func Update(g *core.GameState, dt float32) {
 // flavor messages (e.g. "The fire finishes them." on a burn-kill) still
 // inline `winBattle` directly — this helper is for the canonical case.
 func checkEnemyWipeout(g *core.GameState) bool {
-	if core.LivingBattleCount(g) == 0 {
-		winBattle(g, core.LastBattleEnemyFallsMessage(g))
-		return true
+	return checkEnemyWipeoutFor(g, core.ActivePack(g), core.BattleMembers(g))
+}
+
+// checkEnemyWipeoutFor is checkEnemyWipeout against an already-resolved pack +
+// roster, so the per-frame Update (which hoists ActivePack/BattleMembers once)
+// shares the exact count + win-message seam instead of re-deriving it through
+// LivingBattleCount. A nil pack never wins: BattleMembers reads through a
+// stale/-1 ActivePack as empty, which must NOT look like "every enemy fell" and
+// re-award spoils against a pack that no longer exists.
+func checkEnemyWipeoutFor(g *core.GameState, pack *core.Pack, members []core.Enemy) bool {
+	if pack == nil || core.CountLivingEnemies(members) != 0 {
+		return false
 	}
-	return false
+	winBattle(g, core.LastBattleEnemyFallsMessage(g))
+	return true
 }
 
 // checkPartyWipeout fires the standard "no available party member" loss

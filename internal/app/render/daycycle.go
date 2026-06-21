@@ -164,19 +164,10 @@ func timeProfileAt(steps int) timeProfile {
 
 // skyColor converts a SkyTint vector to a clamped 0–255 RGBA color usable
 // by rl.DrawTexturePro. Mirrors how the lighting shader clamps inside the
-// fragment program.
+// fragment program. Uses the shared toByte (rounded, clamped 0..1→byte) so the
+// float→byte conversion matches every other color path in the package.
 func skyColor(tint rl.Vector3) rl.Color {
-	clamp := func(v float32) uint8 {
-		v *= 255
-		if v < 0 {
-			return 0
-		}
-		if v > 255 {
-			return 255
-		}
-		return uint8(v)
-	}
-	return rl.NewColor(clamp(tint.X), clamp(tint.Y), clamp(tint.Z), 255)
+	return rl.NewColor(toByte(tint.X), toByte(tint.Y), toByte(tint.Z), 255)
 }
 
 // applyTimeOfDay overlays the time-of-day overrides onto a base area

@@ -77,9 +77,7 @@ func updateChestModal(g *core.GameState) {
 	// a take never yanks the cursor onto Take-All. Taking a middle stack leaves
 	// the cursor in place, where it now rests on the item that slid up (the
 	// natural "keep taking down the list" position).
-	if g.ChestMenuIndex >= len(remaining) {
-		g.ChestMenuIndex = len(remaining) - 1
-	}
+	g.ChestMenuIndex = clampCursorToLen(g.ChestMenuIndex, len(remaining))
 }
 
 // closeChest dismisses the modal and marks the chest looted if its

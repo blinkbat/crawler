@@ -215,7 +215,7 @@ func forEachJournalRow(body rl.Rectangle, cursor, count int, fn func(i int, rowY
 	rowY := listTop
 	for i := first; i < count && i < first+visible; i++ {
 		if i == cursor {
-			DrawSelectedRowI(int32(body.X), int32(rowY)-focusPlateInsetY, int32(body.Width), int32(journalRowH-6))
+			DrawSelectedRowI(int32(body.X), int32(rowY)-focusPlateInsetY, int32(body.Width), int32(journalRowH)-selectionPlateShrinkY)
 		}
 		fn(i, rowY)
 		rowY += journalRowH

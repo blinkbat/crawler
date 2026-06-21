@@ -135,11 +135,9 @@ func withFadeAlpha(alpha float32, draw func()) {
 	g := uint8(alpha * 255)
 	tint := rl.NewColor(g, g, g, g)
 	rl.BeginBlendMode(rl.BlendAlphaPremultiply)
-	// RenderTextures store rows bottom-up; negate the source height to blit
-	// upright (same idiom as previewRT.blit / the retro-filter blit).
-	rl.DrawTextureRec(fadeRT.rt.Texture,
-		rl.NewRectangle(0, 0, float32(fadeRT.w), -float32(fadeRT.h)),
-		rl.NewVector2(0, 0), tint)
+	// blitTinted flips the bottom-up RenderTexture upright and applies the
+	// premultiplied gray fade tint.
+	fadeRT.blitTinted(rl.NewRectangle(0, 0, 0, 0), tint)
 	rl.EndBlendMode()
 }
 

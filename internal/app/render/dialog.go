@@ -148,7 +148,6 @@ func DrawDialogModal(g *core.GameState, assets Resources) {
 
 	rowX := cardX + dialogTextPadX
 	rowW := cardW - 2*dialogTextPadX
-	rowRect := func(ry int32) rl.Rectangle { return SelectionRowRect(rowX, ry, rowW, dialogChoiceRowH) }
 
 	if len(views) == 0 {
 		// No-choice node: a single Continue row (always focused).
@@ -160,16 +159,17 @@ func DrawDialogModal(g *core.GameState, assets Resources) {
 				label = "Continue"
 			}
 		}
-		DrawSelectedRow(rowRect(y))
-		drawTextWithShadow(font, label, float32(rowX), float32(y), FontBody, textPrimary)
+		drawModalListRow(rowX, y, rowW, dialogChoiceRowH, true, func() {
+			drawTextWithShadow(font, label, float32(rowX), float32(y), FontBody, textPrimary)
+		})
 	} else {
 		for i, v := range views {
 			focused := g.Dialog.ChoiceCursor == i
-			if focused && !v.Disabled {
-				DrawSelectedRow(rowRect(y))
-			}
 			col := rowTextColor(focused, v.Disabled, textDim)
-			drawTextWithShadow(font, labels[i], float32(rowX), float32(y), FontBody, col)
+			ry := y
+			drawModalListRow(rowX, ry, rowW, dialogChoiceRowH, focused && !v.Disabled, func() {
+				drawTextWithShadow(font, labels[i], float32(rowX), float32(ry), FontBody, col)
+			})
 			y += dialogChoiceRowH
 		}
 	}

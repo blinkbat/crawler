@@ -130,6 +130,34 @@ func DrawEngravedText(font rl.Font, text string, x, y, size float32, col color.R
 	drawEngravedText(font, text, x, y, size, col)
 }
 
+// selectionPlateShrinkY is how much shorter than its row a selection plate is
+// drawn (callers pass rowH - selectionPlateShrinkY to SelectionRowRect) so the
+// gilt highlight floats inside the row band instead of filling it edge to edge.
+// One name shared by the level-up rows and the quest journal so they stay in
+// visual lockstep.
+const selectionPlateShrinkY = int32(6)
+
+// SelectionRowRect insets a row's (x, y, w) by the canonical
+// DrawSelectedRow highlight padding (−6 x, −4 y, +12 w) so the gilt
+// spine + underline sit just outside the row content. Height passes
+// through unchanged — callers wanting the highlight shorter than the
+// row (level-up) pass a reduced h. Shared by the level-up and chest
+// modals so the inset can't drift between them.
+func SelectionRowRect(x, y, w, h int32) rl.Rectangle {
+	return rl.NewRectangle(float32(x-6), float32(y-4), float32(w+12), float32(h))
+}
+
+// drawModalListRow paints the gilt selection plate for one modal list row when
+// focused, then runs fn to draw the row's content (label, value, etc.). The
+// single home for the "SelectionRowRect → DrawSelectedRow if focused" sequence the
+// chest and dialog choice modals each open-coded as a local rowRect closure.
+func drawModalListRow(x, y, w, h int32, focused bool, fn func()) {
+	if focused {
+		DrawSelectedRow(SelectionRowRect(x, y, w, h))
+	}
+	fn()
+}
+
 // DrawSelectedRow paints the standard "cursor is on this row"
 // highlight per UI_STANDARDS.md "Row > Selected": warm glass fill,
 // gilt left spine (3 px), and a thin gilt-dim underline along the
@@ -141,16 +169,6 @@ func DrawEngravedText(font rl.Font, text string, x, y, size float32, col color.R
 // menu and party card paint their own variant inline; the panels
 // Items/Skills/Equipment rows route through drawFocusableRow (theme.go),
 // which owns both focused and unfocused row states.
-// SelectionRowRect insets a row's (x, y, w) by the canonical
-// DrawSelectedRow highlight padding (−6 x, −4 y, +12 w) so the gilt
-// spine + underline sit just outside the row content. Height passes
-// through unchanged — callers wanting the highlight shorter than the
-// row (level-up) pass a reduced h. Shared by the level-up and chest
-// modals so the inset can't drift between them.
-func SelectionRowRect(x, y, w, h int32) rl.Rectangle {
-	return rl.NewRectangle(float32(x-6), float32(y-4), float32(w+12), float32(h))
-}
-
 func DrawSelectedRow(r rl.Rectangle) {
 	flick := candleFlicker()
 	drawPaneDropShadow(r)
@@ -188,12 +206,6 @@ func DrawSelectedRow(r rl.Rectangle) {
 	drawDiamondPip(float32(underX+underW), float32(underY), 1.5, giltDim)
 }
 
-// DrawSelectedRowI is the int32-coords variant of DrawSelectedRow for
-// callers that already work in pixel-snapped int32 layouts (pause menu,
-// battle action row). Same visual contract — the two helpers exist
-// only because raylib's rect-fill takes a float Rectangle while its
-// rect-fill-i takes int32 directly, and converting at every call site
-// added noise without changing the surface/border combo we want shared.
 // DrawFleuron is the exported wrapper around the package-private
 // drawFleuron — the four-direction gilt sigil used as ornamental
 // punctuation (menu titles, banner dividers, commit-row marks).
@@ -223,6 +235,12 @@ func DrawTitleRule(x, y, w float32) {
 	drawFleuron(cx, y, midFlR, giltBright)
 }
 
+// DrawSelectedRowI is the int32-coords variant of DrawSelectedRow for
+// callers that already work in pixel-snapped int32 layouts (pause menu,
+// battle action row). Same visual contract — the two helpers exist
+// only because raylib's rect-fill takes a float Rectangle while its
+// rect-fill-i takes int32 directly, and converting at every call site
+// added noise without changing the surface/border combo we want shared.
 func DrawSelectedRowI(x, y, w, h int32) {
 	DrawSelectedRow(rl.NewRectangle(float32(x), float32(y), float32(w), float32(h)))
 }

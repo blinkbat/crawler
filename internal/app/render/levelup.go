@@ -18,8 +18,7 @@ const (
 	levelUpHeaderSubY = int32(76)   // skill-point reminder baseline from card top
 	levelUpRowTop     = int32(112)  // first stat row's top from card top
 	levelUpRowH       = int32(64)   // per-stat row height
-	levelUpRowX       = int32(24)   // row inset from card left
-	levelUpRowMargin  = int32(48)   // total horizontal row margin (2× the inset)
+	levelUpRowX       = int32(24)   // row inset from card left (row margin is 2× this)
 	levelUpIconX      = float32(16) // stat sigil x from row left
 	levelUpIconY      = float32(24) // stat sigil y from row top
 	levelUpLabelX     = int32(44)   // label x from row left
@@ -79,10 +78,10 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 	rowY := cardY + levelUpRowTop
 	rowH := levelUpRowH
 	rowX := cardX + levelUpRowX
-	rowW := cardW - levelUpRowMargin
+	rowW := cardW - 2*levelUpRowX // symmetric inset on both sides
 	for s := core.Stat(0); s < core.StatCount; s++ {
 		focused := g.LevelUpRowCursor == int(s)
-		rect := SelectionRowRect(rowX, rowY, rowW, rowH-6)
+		rect := SelectionRowRect(rowX, rowY, rowW, rowH-selectionPlateShrinkY)
 		if focused {
 			DrawSelectedRow(rect)
 		} else {
@@ -134,7 +133,7 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 	{
 		rowY += 6
 		focused := g.LevelUpRowCursor == core.LevelUpApplyRowIndex
-		rect := SelectionRowRect(rowX, rowY, rowW, rowH-6)
+		rect := SelectionRowRect(rowX, rowY, rowW, rowH-selectionPlateShrinkY)
 		applyBG := selectedGlassTint(glassDeep, levelUpRowGlassAlpha)
 		drawGlassPaneRect(rect, applyBG)
 		if focused {

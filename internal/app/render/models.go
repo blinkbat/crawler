@@ -2279,10 +2279,13 @@ func loadBrazierProp(shader rl.Shader) propModel {
 	// trick the ground-shadow disc uses to stay unlit.)
 	attachShader(&models[0], shader)
 	attachShader(&models[1], shader)
-	iron := rl.NewColor(60, 56, 52, 255)
-	ironLight := rl.NewColor(98, 92, 84, 255)
-	fire := rl.NewColor(248, 150, 64, 255)
-	fireBright := rl.NewColor(255, 230, 150, 255)
+	// Shared torch/flame palette (world.go) so the brazier's iron + fire track
+	// the wall torch instead of drifting as a separate copy. fireBright is the
+	// hot core tint; fire is the mid orange.
+	iron := torchIron
+	ironLight := torchIronLight
+	fire := torchFlameTints[1]
+	fireBright := torchFlameTints[0]
 	return propModel{
 		models: models,
 		parts: []treePart{

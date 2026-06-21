@@ -46,6 +46,20 @@ func stackAtCursor[T any](stacks []T, cursor int) (T, bool) {
 	return stacks[cursor], true
 }
 
+// clampCursorToLen keeps a list cursor in range after the list shrank under it:
+// a cursor at/past the new end is pulled back to the last row, and floored at 0
+// for an empty list. Shared by the shop-sell and chest-take paths so the
+// post-mutation clamp reads identically instead of each open-coding it.
+func clampCursorToLen(cursor, n int) int {
+	if cursor >= n {
+		cursor = n - 1
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	return cursor
+}
+
 // tryUseItem handles a use press on the Items tab. The cursored stack
 // must be a healing consumable; it opens the ally-target picker carrying
 // that item. Equipment / no-effect rows ping the miss cue.
@@ -61,11 +75,7 @@ func tryUseItem(g *core.GameState) {
 		audio.Play(audio.SoundInputMiss) // equipment / no restorative effect
 		return
 	}
-	g.UseTargetOpen = true
-	g.UseTargetCursor = 0
-	g.UsePendingItem = kind
-	g.UsePendingSkill = core.SkillNone
-	g.UsePendingCaster = noCaster
+	openUseTargetForItem(g, kind)
 }
 
 // tryUseSkill handles a Use press on the Skills tab. The cursored skill
@@ -147,11 +157,7 @@ func beginHealCast(g *core.GameState, caster int, skill core.SkillID) {
 	}
 	if core.SkillTargetMode(skill) == core.ActionPartyTarget {
 		// Single-target heal (Prayer): pick the recipient.
-		g.UseTargetOpen = true
-		g.UseTargetCursor = 0
-		g.UsePendingItem = core.ItemNone
-		g.UsePendingSkill = skill
-		g.UsePendingCaster = caster
+		openUseTargetForSkill(g, caster, skill)
 		return
 	}
 	// Party-wide heal (Mass Mend): no target step. Refuse the cast if no
@@ -292,6 +298,28 @@ func applyUseToMember(g *core.GameState, member int) {
 		audio.Play(audio.SoundHeal)
 	}
 	closeUseTarget(g)
+}
+
+// openUseTargetForItem opens the ally-target picker carrying a pending item.
+// The inverse of closeUseTarget — both set the same five UseTarget*/UsePending*
+// fields in one place so a new pending field can't be set on one open path but
+// missed on the other.
+func openUseTargetForItem(g *core.GameState, kind core.ItemKind) {
+	g.UseTargetOpen = true
+	g.UseTargetCursor = 0
+	g.UsePendingItem = kind
+	g.UsePendingSkill = core.SkillNone
+	g.UsePendingCaster = noCaster
+}
+
+// openUseTargetForSkill opens the ally-target picker carrying a pending single-
+// target heal cast by `caster`. Mirror of openUseTargetForItem / closeUseTarget.
+func openUseTargetForSkill(g *core.GameState, caster int, skill core.SkillID) {
+	g.UseTargetOpen = true
+	g.UseTargetCursor = 0
+	g.UsePendingItem = core.ItemNone
+	g.UsePendingSkill = skill
+	g.UsePendingCaster = caster
 }
 
 // closeUseTarget dismisses the ally-target picker and clears its pending

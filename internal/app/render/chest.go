@@ -197,17 +197,14 @@ func DrawChestModal(g *core.GameState, assets Resources) {
 		drawTextWithShadow(font, "(empty)", float32(rowX), float32(rowY), FontBody, textMuted)
 		rowY += rowH
 	}
-	rowRect := func(y int32) rl.Rectangle {
-		return SelectionRowRect(rowX, y, rowW, rowH)
-	}
 	for i, st := range stacks {
 		focused := g.ChestMenuIndex == i
-		if focused {
-			DrawSelectedRow(rowRect(rowY))
-		}
 		col := rowTextColor(focused, false, textMuted)
 		label := core.ItemInfo(st.Kind).Name + "  x" + strconv.Itoa(st.Count)
-		drawTextWithShadow(font, label, float32(rowX), float32(rowY), FontBody, col)
+		y := rowY
+		drawModalListRow(rowX, y, rowW, rowH, focused, func() {
+			drawTextWithShadow(font, label, float32(rowX), float32(y), FontBody, col)
+		})
 		rowY += rowH
 	}
 	// "Take All" row sits below the items. Always present even when the
@@ -216,11 +213,10 @@ func DrawChestModal(g *core.GameState, assets Resources) {
 	// value means "Take All."
 	{
 		focused := g.ChestMenuIndex == core.ChestTakeAllRow(len(stacks))
-		if focused {
-			DrawSelectedRow(rowRect(rowY))
-		}
 		col := rowTextColor(focused, false, textMuted)
-		drawTextWithShadow(font, "Take All", float32(rowX), float32(rowY), FontBody, col)
+		drawModalListRow(rowX, rowY, rowW, rowH, focused, func() {
+			drawTextWithShadow(font, "Take All", float32(rowX), float32(rowY), FontBody, col)
+		})
 	}
 	drawModalFooterGlyphs(font, card, []HintSeg{
 		Hint("Move", GlyphUpDown),

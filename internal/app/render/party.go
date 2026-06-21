@@ -71,14 +71,10 @@ func init() {
 	// PartyStatusNone is the absence of a status (no glyph); every other kind
 	// must carry one. A missing table row leaves a nil Glyph — caught here at
 	// startup rather than as a silent bare-disc draw.
-	for k := core.PartyStatusKind(0); k < core.PartyStatusCount; k++ {
-		if k == core.PartyStatusNone {
-			continue
-		}
-		if partyStatusVisuals[k].Glyph == nil {
-			panic(fmt.Sprintf("partyStatusVisuals[%d] has no Glyph — add the row", int(k)))
-		}
-	}
+	assertTableComplete("partyStatusVisuals", int(core.PartyStatusCount), func(i int) bool {
+		k := core.PartyStatusKind(i)
+		return k != core.PartyStatusNone && partyStatusVisuals[k].Glyph == nil
+	})
 }
 
 // partyStatusVisual returns the per-status text color and a flicker

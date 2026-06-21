@@ -117,7 +117,5 @@ func sellShopItem(g *core.GameState) {
 	audio.Play(audio.SoundInputGreat)
 	// Selling the last unit shrinks the list; keep the cursor in range so
 	// it lands on the next row (or the new last row) instead of off the end.
-	if n := len(core.SellableStacks(g.Inventory)); g.ShopCursor >= n && n > 0 {
-		g.ShopCursor = n - 1
-	}
+	g.ShopCursor = clampCursorToLen(g.ShopCursor, len(core.SellableStacks(g.Inventory)))
 }

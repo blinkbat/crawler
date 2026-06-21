@@ -78,6 +78,12 @@ func CloseObjectPreview() { objectPreviewRT.close() }
 // object reads as a 3D form rather than a flat front elevation.
 var objectPreviewDir = normalizeVec3(rl.NewVector3(0.55, 0.62, 1.0))
 
+// objectPreviewGroundSize is the thumbnail floor extent — deliberately tighter
+// than the foe/party visualizers' visualizerGroundSize (the object sits alone in
+// a small cell, not on an arena floor). Named so the bare literal isn't read as
+// an arbitrary number.
+const objectPreviewGroundSize = float32(12)
+
 // DrawObjectPreview renders item's object — lit, ground-shadowed, and animated
 // (foliage sway, torch flame, fountain water) exactly as in the world — into
 // rect, auto-framed to the object's bounds and dollied by zoom (1 = fit,
@@ -102,7 +108,7 @@ func DrawObjectPreview(rect rl.Rectangle, assets Resources, item ObjectPreviewIt
 	rl.BeginTextureMode(objectPreviewRT.rt)
 	rl.ClearBackground(foePreviewBG)
 	rl.BeginMode3D(cam)
-	rl.DrawPlane(rl.NewVector3(0, 0, 0), rl.NewVector2(12, 12), foePreviewGround)
+	rl.DrawPlane(rl.NewVector3(0, 0, 0), rl.NewVector2(objectPreviewGroundSize, objectPreviewGroundSize), foePreviewGround)
 
 	// Light the diorama with the bright outdoor profile and no torches, then
 	// draw the object through the world's lighting shader so its painted look
@@ -155,7 +161,7 @@ func drawObjectPreviewModel(assets Resources, item ObjectPreviewItem, center rl.
 // objectPreviewDir far enough that the bounding sphere fits the vertical FOV,
 // with a margin. zoom>1 dollies closer.
 func objectPreviewCamera(bb rl.BoundingBox, zoom float32) rl.Camera3D {
-	const fovy = float32(46)
+	const fovy = previewFovy
 	center := rl.Vector3Scale(rl.Vector3Add(bb.Min, bb.Max), 0.5)
 	radius := 0.5 * rl.Vector3Length(rl.Vector3Subtract(bb.Max, bb.Min))
 	if radius < 0.35 {

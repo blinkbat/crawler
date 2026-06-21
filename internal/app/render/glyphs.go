@@ -156,9 +156,10 @@ func DrawHintBarLeft(font rl.Font, segs []HintSeg, x, y, size float32) {
 	drawHintSegs(font, segs, x, y, size, textHint, 1)
 }
 
-// drawModalFooterGlyphs / ...Left are the glyph mirrors of drawModalFooter /
-// drawModalFooterLeft, so a modal swaps its hint string for a []HintSeg with a
-// one-line change and the card-geometry math stays in one place.
+// drawModalFooterGlyphs / ...Left paint a modal's footer hint bar from a
+// []HintSeg (controller-glyph segments), centring or left-anchoring it on the
+// card. The card-geometry / footer-baseline math stays in one place so every
+// modal positions its footer hints identically.
 func drawModalFooterGlyphs(font rl.Font, card rl.Rectangle, segs []HintSeg) {
 	y := float32(footerBaselineY(int32(card.Y+card.Height), FontTiny))
 	DrawHintBar(font, segs, card.X+card.Width/2, y, FontTiny)

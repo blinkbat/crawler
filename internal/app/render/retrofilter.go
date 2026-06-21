@@ -19,10 +19,7 @@ import (
 // Package-level singleton lifecycle, same pattern as the foe-preview RT.
 
 var (
-	retroRT      rl.RenderTexture2D
-	retroRTW     int32
-	retroRTH     int32
-	retroRTInit  bool
+	retroRT      previewRT // capture texture; shares the foe-preview RT lifecycle
 	retroShader  rl.Shader
 	retroLoaded  bool
 	retroFailed  bool // shader failed to compile — disable the pass for the session
@@ -52,6 +49,7 @@ var retroUniformNames = [core.RetroFilterCount]string{
 	core.RetroFilterDither:    "fDither",
 	core.RetroFilterGameBoy:   "fGameBoy",
 	core.RetroFilterScanlines: "fScanlines",
+	core.RetroFilterPalette:   "fPalette",
 }
 
 func init() {
@@ -65,8 +63,8 @@ func init() {
 // retroFilterFragmentShader is the combined filter pipeline. Order matters
 // and is deliberate: sampling effects first (pixelate quantizes the UV,
 // chroma fringes the fetch), then palette work on the fetched color
-// (posterize → dither → Game Boy), then screen-space scanlines last so the
-// CRT lines ride on top of whatever palette the pipeline produced.
+// (posterize → dither → Game Boy → Palette), then screen-space scanlines last
+// so the CRT lines ride on top of whatever palette the pipeline produced.
 const retroFilterFragmentShader = `
 #version 330
 in vec2 fragTexCoord;
@@ -80,6 +78,7 @@ uniform float fPosterize;
 uniform float fDither;
 uniform float fGameBoy;
 uniform float fScanlines;
+uniform float fPalette;
 out vec4 finalColor;
 
 // 4x4 Bayer matrix, normalized to (0,1) thresholds at +0.5/16 centers.
@@ -95,6 +94,18 @@ const vec3 gbRamp[4] = vec3[4](
     vec3(0.188, 0.384, 0.188),
     vec3(0.545, 0.675, 0.059),
     vec3(0.741, 0.890, 0.420));
+
+// DawnBringer 16 — a balanced general-purpose 16-color pixel-art palette.
+// The Palette filter snaps each pixel to the nearest of these (RGB distance).
+const vec3 db16[16] = vec3[16](
+    vec3(0.078, 0.047, 0.110), vec3(0.267, 0.141, 0.204),
+    vec3(0.188, 0.204, 0.427), vec3(0.306, 0.290, 0.306),
+    vec3(0.522, 0.298, 0.188), vec3(0.204, 0.396, 0.141),
+    vec3(0.816, 0.275, 0.282), vec3(0.459, 0.443, 0.380),
+    vec3(0.349, 0.490, 0.808), vec3(0.824, 0.490, 0.173),
+    vec3(0.522, 0.584, 0.631), vec3(0.427, 0.667, 0.173),
+    vec3(0.824, 0.667, 0.600), vec3(0.427, 0.761, 0.792),
+    vec3(0.855, 0.831, 0.369), vec3(0.871, 0.933, 0.839));
 
 void main()
 {
@@ -148,6 +159,22 @@ void main()
         col = mix(col, gbRamp[step], fGameBoy);
     }
 
+    // Palette: snap to the nearest color in a fixed 16-color palette
+    // (nearest-neighbor in RGB space), then blend by intensity. This is the
+    // hard "limited palette" pixel-art look — far fewer, hand-picked colors
+    // than posterize's per-channel banding. Layered after Game Boy so an
+    // explicit palette choice wins when both are on.
+    if (fPalette > 0.0) {
+        vec3 best = db16[0];
+        float bestD = dot(col - db16[0], col - db16[0]);
+        for (int i = 1; i < 16; i++) {
+            vec3 d = col - db16[i];
+            float dist = dot(d, d);
+            if (dist < bestD) { bestD = dist; best = db16[i]; }
+        }
+        col = mix(col, best, fPalette);
+    }
+
     // Scanlines: soft CRT line darkening on alternating screen rows.
     if (fScanlines > 0.0) {
         float s = 0.5 + 0.5*sin(gl_FragCoord.y*3.14159265);
@@ -192,26 +219,12 @@ func ensureRetroShader() bool {
 }
 
 // ensureRetroRT lazily (re)creates the capture texture at the current screen
-// size — same resize discipline as the foe-preview RT.
+// size, reusing the foe-preview RT's allocate-on-resize discipline.
 func ensureRetroRT(w, h int32) bool {
-	if retroRTInit && retroRTW == w && retroRTH == h {
-		return true
-	}
-	if retroRTInit {
-		rl.UnloadRenderTexture(retroRT)
-		retroRTInit = false
-	}
 	if w <= 0 || h <= 0 {
 		return false
 	}
-	rt := rl.LoadRenderTexture(w, h)
-	if rt.ID == 0 {
-		return false
-	}
-	retroRT = rt
-	retroRTW, retroRTH = w, h
-	retroRTInit = true
-	return true
+	return retroRT.ensure(w, h)
 }
 
 // BeginRetroCapture redirects subsequent drawing into the capture texture
@@ -230,7 +243,7 @@ func BeginRetroCapture(g *core.GameState) bool {
 	if !ensureRetroRT(sw, sh) {
 		return false
 	}
-	rl.BeginTextureMode(retroRT)
+	rl.BeginTextureMode(retroRT.rt)
 	return true
 }
 
@@ -258,7 +271,7 @@ func EndRetroCapture(g *core.GameState, skyOnBackbuffer bool) {
 	if !skyOnBackbuffer {
 		rl.ClearBackground(rl.Black)
 	}
-	retroResBuf[0], retroResBuf[1] = float32(retroRTW), float32(retroRTH)
+	retroResBuf[0], retroResBuf[1] = float32(retroRT.w), float32(retroRT.h)
 	rl.SetShaderValue(retroShader, retroLocRes, retroResBuf[:], rl.ShaderUniformVec2)
 	retroTimeBuf[0] = float32(rl.GetTime())
 	rl.SetShaderValue(retroShader, retroLocTime, retroTimeBuf[:], rl.ShaderUniformFloat)
@@ -267,11 +280,9 @@ func EndRetroCapture(g *core.GameState, skyOnBackbuffer bool) {
 		rl.SetShaderValue(retroShader, retroLocs[k], retroValBuf[:], rl.ShaderUniformFloat)
 	}
 	rl.BeginShaderMode(retroShader)
-	// RenderTextures store rows bottom-up; the negative source height flips
-	// the blit right-side up (same idiom as the foe-preview blit).
-	rl.DrawTextureRec(retroRT.Texture,
-		rl.NewRectangle(0, 0, float32(retroRTW), -float32(retroRTH)),
-		rl.NewVector2(0, 0), rl.White)
+	// blit flips the bottom-up RenderTexture upright; the shader mode applies
+	// the filter as it composites.
+	retroRT.blit(rl.NewRectangle(0, 0, 0, 0))
 	rl.EndShaderMode()
 }
 
@@ -288,10 +299,10 @@ func EndRetroCapture(g *core.GameState, skyOnBackbuffer bool) {
 // sprite-exempt arm, with the SAME camera the environment pass used (so the depth
 // the sprites test against lines up). No-op if the capture RT was never built.
 func DrawCrispSpritePass(camera rl.Camera3D, g *core.GameState, assets Resources) {
-	if !retroRTInit {
+	if !retroRT.init {
 		return
 	}
-	rl.BeginTextureMode(retroRT)
+	rl.BeginTextureMode(retroRT.rt)
 	// Wipe COLOR to transparent but keep DEPTH: disable blending (so the blank
 	// writes straight through instead of alpha-compositing to a no-op) and the
 	// depth mask (so the environment depth from the capture pass survives). Flush
@@ -300,7 +311,7 @@ func DrawCrispSpritePass(camera rl.Camera3D, g *core.GameState, assets Resources
 	rl.DisableColorBlend()
 	rl.DisableDepthMask()
 	rl.DisableDepthTest()
-	rl.DrawRectangle(0, 0, retroRTW, retroRTH, rl.Blank)
+	rl.DrawRectangle(0, 0, retroRT.w, retroRT.h, rl.Blank)
 	rl.DrawRenderBatchActive()
 	rl.EnableColorBlend()
 	rl.EnableDepthMask()
@@ -316,21 +327,14 @@ func DrawCrispSpritePass(camera rl.Camera3D, g *core.GameState, assets Resources
 	rl.EndTextureMode()
 	// Crisp blit (NO filter shader): the transparent background lets the sprites
 	// alpha-composite over the filtered environment already on the backbuffer.
-	// Negative source height flips the bottom-up RenderTexture upright.
-	rl.DrawTextureRec(retroRT.Texture,
-		rl.NewRectangle(0, 0, float32(retroRTW), -float32(retroRTH)),
-		rl.NewVector2(0, 0), rl.White)
+	// blit flips the bottom-up RenderTexture upright.
+	retroRT.blit(rl.NewRectangle(0, 0, 0, 0))
 }
 
 // UnloadRetroFilter frees the capture texture and shader. Called from
 // Resources.Unload at shutdown; idempotent and safe when nothing loaded.
 func UnloadRetroFilter() {
-	if retroRTInit {
-		rl.UnloadRenderTexture(retroRT)
-		retroRT = rl.RenderTexture2D{}
-		retroRTInit = false
-		retroRTW, retroRTH = 0, 0
-	}
+	retroRT.close()
 	if retroLoaded {
 		rl.UnloadShader(retroShader)
 		retroShader = rl.Shader{}

@@ -16,6 +16,14 @@ const (
 	QuestComplete
 )
 
+// Valid reports whether s is a recognized QuestStatus. The single source of
+// truth for the legal status set — save-load's clamp defers to it so adding a
+// third status (e.g. QuestFailed) is a one-line edit here, not a hunt for every
+// hand-rolled `!= QuestActive && != QuestComplete` check.
+func (s QuestStatus) Valid() bool {
+	return s == QuestActive || s == QuestComplete
+}
+
 // Quest is one journal entry. ID is a stable string key for CompleteQuest /
 // QuestIndexByID lookups (so gameplay code references a quest without a
 // fragile slice index); Title / Desc are the player-facing text.

@@ -318,6 +318,14 @@ func planJunkyardDogPack(g *GameState, idx int, occupied map[[2]int]bool) (packA
 	return packAIStep{PackIdx: idx, NextX: nx, NextZ: nz, Moved: true}, true
 }
 
+// withinLeash reports whether tile (tx,tz) sits inside the pack's leash radius
+// around its home. The single leash-gate predicate chaseStep / fleeStep /
+// wanderStep all share so the "don't get dragged past PackLeashRadius from home"
+// rule lives in one place.
+func withinLeash(p Pack, tx, tz int) bool {
+	return ChebyshevDistance(tx, tz, p.HomeX, p.HomeZ) <= PackLeashRadius
+}
+
 func chaseStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int, int, bool) {
 	dx := px - p.TileX
 	dz := pz - p.TileZ
@@ -349,10 +357,10 @@ func chaseStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int,
 		// Stay on the leash even while chasing. A dog already at its leash
 		// edge must not be dragged further from home by a passing player —
 		// that's the "hostile escort across the map" behavior the mode
-		// docstring promises to avoid. Mirrors the leash gate wanderStep /
-		// fleeStep apply (PackChaseRadius < PackLeashRadius, so a player can
-		// still be chased while inside the leash, just not beyond it).
-		if ChebyshevDistance(tx, tz, p.HomeX, p.HomeZ) > PackLeashRadius {
+		// docstring promises to avoid. Shares the leash gate with wanderStep /
+		// fleeStep (PackChaseRadius < PackLeashRadius, so a player can still be
+		// chased while inside the leash, just not beyond it).
+		if !withinLeash(p, tx, tz) {
 			continue
 		}
 		if !packCanMoveTo(g, p, occupied, tx, tz, true /* allow player tile */, px, pz) {
@@ -454,7 +462,7 @@ func fleeStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int, 
 	}
 	for _, s := range steps {
 		nx, nz := p.TileX+s[0], p.TileZ+s[1]
-		if ChebyshevDistance(nx, nz, p.HomeX, p.HomeZ) > PackLeashRadius {
+		if !withinLeash(p, nx, nz) {
 			continue
 		}
 		if !packCanMoveTo(g, p, occupied, nx, nz, false /* never onto the player */, px, pz) {
@@ -475,7 +483,7 @@ func wanderStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int
 	}
 	for _, c := range cardinals {
 		tx, tz := p.TileX+c[0], p.TileZ+c[1]
-		if ChebyshevDistance(tx, tz, p.HomeX, p.HomeZ) > PackLeashRadius {
+		if !withinLeash(p, tx, tz) {
 			continue
 		}
 		if !packCanMoveTo(g, p, occupied, tx, tz, false /* refuse player tile */, px, pz) {

@@ -710,39 +710,40 @@ func updateDialogListModalGeneric(s *State, spec dialogListModalSpec) Action {
 
 // =========================== modalDialogList ===============================
 
-func dialogListCmds(s *State) (adds, actions []modalCmd) {
-	adds = []modalCmd{
-		{label: "+ Add dialog  (A)", run: func() Action { addDialog(s); return ActionNone }},
-	}
-	actions = []modalCmd{
-		{label: "Edit  (Enter)", run: func() Action {
-			if len(s.area.Dialogs) > 0 {
-				openDialogNodesModal(s, s.modalCursor)
-			}
-			return ActionNone
-		}},
-		{label: "Delete  (X)", run: func() Action { removeDialogAt(s, s.modalCursor); return ActionNone }},
-		{label: "Triggers  (T)", run: func() Action { openDialogTriggerListModal(s); return ActionNone }},
-	}
-	return adds, actions
-}
-
-// dialogListSpec builds the spec for the top-level dialog list.
+// dialogListSpec builds the spec for the top-level dialog list. Each action's
+// handler is declared ONCE as a shared closure and fed to both the button cmds
+// (click + on-screen label) and the spec's keyboard fields (commit/add/del/
+// extraKeys), so the two paths can't drift — adding a command can't wire its
+// button but forget its key (or vice-versa).
 func dialogListSpec(s *State) dialogListModalSpec {
+	edit := func() {
+		if len(s.area.Dialogs) > 0 {
+			openDialogNodesModal(s, s.modalCursor)
+		}
+	}
+	add := func() { addDialog(s) }
+	del := func() { removeDialogAt(s, s.modalCursor) }
+	triggers := func() { openDialogTriggerListModal(s) }
 	return dialogListModalSpec{
 		title:    "DIALOGS",
 		hint:     "Enter edit · A add · X delete · T triggers · Esc close",
 		empty:    "(no dialogs — Add one)",
 		count:    len(s.area.Dialogs),
 		rowLabel: func(i int) string { return dialogListRowLabel(s.area.Dialogs[i]) },
-		cmds:     dialogListCmds,
-		commit:   func() { openDialogNodesModal(s, s.modalCursor) },
-		cancel:   func() { closeModal(s) },
-		add:      func() { addDialog(s) },
-		del:      func() { removeDialogAt(s, s.modalCursor) },
-		extraKeys: []dialogListKey{
-			{key: rl.KeyT, run: func() { openDialogTriggerListModal(s) }},
+		cmds: func(*State) (adds, actions []modalCmd) {
+			return []modalCmd{
+					{label: "+ Add dialog  (A)", run: func() Action { add(); return ActionNone }},
+				}, []modalCmd{
+					{label: "Edit  (Enter)", run: func() Action { edit(); return ActionNone }},
+					{label: "Delete  (X)", run: func() Action { del(); return ActionNone }},
+					{label: "Triggers  (T)", run: func() Action { triggers(); return ActionNone }},
+				}
 		},
+		commit:    edit,
+		cancel:    func() { closeModal(s) },
+		add:       add,
+		del:       del,
+		extraKeys: []dialogListKey{{key: rl.KeyT, run: triggers}},
 	}
 }
 

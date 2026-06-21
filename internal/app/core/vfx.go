@@ -67,6 +67,11 @@ const (
 	// Scan — a quick pale-cyan "reveal" ring rising off the target as the
 	// Thief identifies it. Information cue, no impact feel.
 	VFXScan
+	// VFXKindCount is the number of VFX kinds (including VFXNone). Render-side
+	// tables that must cover every kind (the spawn dispatch, the hit-glyph map)
+	// length-check against this so a newly appended kind that's missed in one of
+	// them fails loudly instead of silently dropping its effect/glyph.
+	VFXKindCount
 )
 
 // VFXAnchor names what target's world position the renderer should

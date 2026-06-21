@@ -68,16 +68,28 @@ func (p *previewRT) close() {
 // up — the one place that detail lives instead of three open-coded
 // DrawTextureRec calls (foe / party / object previews).
 func (p *previewRT) blit(rect rl.Rectangle) {
+	p.blitTinted(rect, rl.White)
+}
+
+// blitTinted is blit with a caller-supplied tint applied to the flipped capture.
+// The menu-fade pass (premultiplied gray) and the retro-filter blits route
+// through it so the bottom-up source-height flip lives only on blit/blitTinted
+// instead of being open-coded at each DrawTextureRec call site.
+func (p *previewRT) blitTinted(rect rl.Rectangle, tint rl.Color) {
 	rl.DrawTextureRec(p.rt.Texture,
 		rl.NewRectangle(0, 0, float32(p.w), -float32(p.h)),
 		rl.NewVector2(rect.X, rect.Y),
-		rl.White)
+		tint)
 }
 
 // visualizerGroundSize is the diorama floor extent (and grid slice count) shared
 // by the Foe and Party visualizer scenes — one literal instead of a 14 hand-keyed
 // into each preview's DrawPlane + DrawGrid.
 const visualizerGroundSize = float32(14)
+
+// previewFovy is the vertical FOV shared by every off-screen preview camera (foe,
+// party, object thumbnail) so the dioramas frame consistently from one knob.
+const previewFovy = float32(46)
 
 // beginVisualizerScene opens the off-screen 3D pass for the Foe / Party
 // visualizers: bind the target, clear to the diorama void, enter 3D, and lay
@@ -126,7 +138,7 @@ func foePreviewCamera() rl.Camera3D {
 		Position:   rl.NewVector3(0, 1.45, 4.4),
 		Target:     rl.NewVector3(0, 0.85, 0),
 		Up:         rl.NewVector3(0, 1, 0),
-		Fovy:       46,
+		Fovy:       previewFovy,
 		Projection: rl.CameraPerspective,
 	}
 }
