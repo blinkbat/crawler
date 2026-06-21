@@ -562,7 +562,18 @@ func DrawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 // ceilings, elevation columns, props, decor, ramps). It recomputes the lighting
 // profile, uploads the sun/fog/torch uniforms, and (when the render log is on)
 // gathers per-tile diagnostics.
+// worldFrameClock is rl.GetTime() sampled once at the top of the world render
+// (drawWorld, and DrawObjectPreview for the editor gallery) and read by the
+// per-tile sway/flicker math (drawVaried, propModel.draw, drawWallTorch) instead
+// of each tree/prop/torch making its own rl.GetTime() cgo call. A heavy field
+// can draw hundreds of swaying props per frame; collapsing those to one sample
+// removes the per-item cgo crossings for a value that's identical frame-wide.
+// Set before any prop draw on every path that reaches one (drawWorld runs first
+// in the adventure frame, before DrawChests/DrawDoors), so it's never stale.
+var worldFrameClock float32
+
 func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
+	worldFrameClock = float32(rl.GetTime())
 	m := &g.Area
 	material := assets.worldMaterial(m.Materials)
 	profile := applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(g.StepCount), areaIsEnclosed(m))
@@ -1199,7 +1210,7 @@ func drawWallTorch(assets Resources, m *core.AreaDefinition, x, z int, center rl
 	if !torchFlameReady {
 		return
 	}
-	t := float32(rl.GetTime())
+	t := worldFrameClock
 	phase := hashPhase(tileHash(x, z))
 	flameBaseX := cupX
 	flameBaseZ := cupZ
@@ -1905,6 +1916,10 @@ func drawBattlePack(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	// with the world geometry around them.
 	defer beginBillboardFogPass(camera, g, assets)()
 	members := core.BattleMembers(g)
+	// Resolve every member's formation slot in one O(n) pass, then index it in
+	// the draw loop — instead of calling enemyRowSlot per member (which re-walked
+	// the whole pack each time, making this loop O(n²)).
+	placements := enemyRowPlacements(members)
 	for i := range members {
 		enemy := &members[i]
 		visual, ok := enemyVisualFor(assets, enemy.Kind)
@@ -1916,8 +1931,8 @@ func drawBattlePack(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		}
 		// Lay the enemy out by its formation row (front 3 / back 4 staggered),
 		// resolving its slot among the visible members of that row.
-		row, slot, rowCount := enemyRowSlot(members, i)
-		position := enemyFormationPos(camera, g, row, slot, rowCount, enemy)
+		p := placements[i]
+		position := enemyFormationPos(camera, g, p.row, p.slot, p.count, enemy)
 		// Per-kind depth/marker/yOffset placement (depth push-back for the
 		// square Feral Rat PNG, the chevron anchor, the contact-shadow
 		// footprint, and the lowered sprite center) all derive from one shared
@@ -2468,6 +2483,61 @@ func enemyRowSlot(members []core.Enemy, index int) (row core.Row, slot, count in
 		count = 1 // the queried member isn't visible; place it solo rather than /0
 	}
 	return row, slot, count
+}
+
+// enemyPlacement is one member's resolved formation placement: its row, its
+// left-to-right slot within that row's visible members, and the row's visible
+// count. Matches the (row, slot, count) enemyRowSlot returns for a single index.
+type enemyPlacement struct {
+	row   core.Row
+	slot  int
+	count int
+}
+
+// enemyPlacementsBuf backs enemyRowPlacements so the per-frame precompute reuses
+// one slice instead of allocating. Single-threaded render path.
+var enemyPlacementsBuf []enemyPlacement
+
+// enemyRowPlacements resolves EVERY member's placement in a single O(n) pass —
+// the batch form of enemyRowSlot. drawBattlePack calls this once per frame and
+// indexes the result, replacing a per-member enemyRowSlot call that re-walked
+// the whole pack each time (an O(n²) loop the old comment wrongly claimed was
+// precomputed). The returned slice aliases a reused buffer — valid only until
+// the next call. Two rows (front/back); visibility = alive or death-fading,
+// exactly as enemyRowSlot tests it.
+func enemyRowPlacements(members []core.Enemy) []enemyPlacement {
+	n := len(members)
+	if cap(enemyPlacementsBuf) < n {
+		enemyPlacementsBuf = make([]enemyPlacement, n)
+	}
+	out := enemyPlacementsBuf[:n]
+	rowIdx := func(r core.Row) int {
+		if r == core.RowBack {
+			return 1
+		}
+		return 0
+	}
+	var counts [2]int
+	for j := range members {
+		if members[j].Alive || members[j].DeathFade > 0 {
+			counts[rowIdx(members[j].Row)]++
+		}
+	}
+	var running [2]int
+	for j := range members {
+		ri := rowIdx(members[j].Row)
+		cnt := counts[ri]
+		if cnt == 0 {
+			cnt = 1 // not visible; place solo rather than /0 (matches enemyRowSlot)
+		}
+		slot := 0
+		if members[j].Alive || members[j].DeathFade > 0 {
+			slot = running[ri]
+			running[ri]++
+		}
+		out[j] = enemyPlacement{row: members[j].Row, slot: slot, count: cnt}
+	}
+	return out
 }
 
 func enemyFormationPos(camera rl.Camera3D, g *core.GameState, row core.Row, slot, count int, enemy *core.Enemy) rl.Vector3 {

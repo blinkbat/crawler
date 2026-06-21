@@ -103,6 +103,11 @@ func DrawObjectPreview(rect rl.Rectangle, assets Resources, item ObjectPreviewIt
 	if !objectPreviewRT.ensure(w, h) {
 		return
 	}
+	// Feed the shared per-frame sway/flicker clock — the gallery draws props,
+	// trees, and the wall torch through the same helpers as the world, which now
+	// read worldFrameClock instead of calling rl.GetTime() themselves. Without
+	// this the thumbnails' foliage sway and torch flame would freeze.
+	worldFrameClock = float32(rl.GetTime())
 	cam := objectPreviewCamera(objectPreviewBounds(assets, item), zoom)
 
 	rl.BeginTextureMode(objectPreviewRT.rt)

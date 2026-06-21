@@ -25,6 +25,17 @@ const (
 	minimapPanelH    = minimapViewCells*minimapCell + 16 + minimapHeader + minimapFooter
 )
 
+// minimapSliceBuf / minimapSeenBuf / minimapRampBuf back drawMinimap's
+// per-cell classifier grids. drawMinimap runs every frame on the always-on
+// HUD; these reused buffers replace three per-frame make() calls. Touched only
+// from the single-threaded render path; each frame fully overwrites the window+
+// border range it slices, so no clearing is needed between frames.
+var (
+	minimapSliceBuf []bool
+	minimapSeenBuf  []bool
+	minimapRampBuf  []int8
+)
+
 // MinimapWidth is the on-screen width of the corner minimap card.
 // Used by the turn-order / action-log panels (which sit beneath the
 // minimap on the same left edge) so they can match its width
@@ -76,9 +87,19 @@ func drawMinimap(m *core.AreaDefinition, g *core.GameState, assets Resources) {
 	// and again ~5× per cell for the outline's self+neighbour lookups.
 	vc := int(viewCells)
 	gw := vc + 2
-	slice := make([]bool, gw*gw)
-	seen := make([]bool, gw*gw)
-	ramp := make([]int8, gw*gw)
+	// Reused scratch grids (slice/seen/ramp) — drawMinimap runs every frame on
+	// the always-on HUD, so a fresh make() here is ~1 KB of garbage per frame
+	// (~200 KB/s). The loop below writes every index of the window+border each
+	// pass, so reuse needs no clearing. Same cap-grow pattern as memberColumnBuf.
+	n := gw * gw
+	if cap(minimapSliceBuf) < n {
+		minimapSliceBuf = make([]bool, n)
+		minimapSeenBuf = make([]bool, n)
+		minimapRampBuf = make([]int8, n)
+	}
+	slice := minimapSliceBuf[:n]
+	seen := minimapSeenBuf[:n]
+	ramp := minimapRampBuf[:n]
 	for localZ := -1; localZ <= vc; localZ++ {
 		for localX := -1; localX <= vc; localX++ {
 			col, onSlice, seenWall, rampDir := mapSliceCell(m, g, indoor, startX+localX, startZ+localZ)

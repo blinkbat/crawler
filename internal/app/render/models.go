@@ -313,9 +313,9 @@ type treeVariance struct {
 // growth is bounded by the number of distinct tree tiles ever drawn.
 // Touched only from the single-threaded render path. (One treeModel —
 // assets.tree — feeds drawVaried, so keying on seed alone is safe.)
-var treeVarianceCache = map[uint32]treeVariance{}
+var treeVarianceCache = map[uint32]*treeVariance{}
 
-func (t treeModel) variance(seed uint32) treeVariance {
+func (t treeModel) variance(seed uint32) *treeVariance {
 	if v, ok := treeVarianceCache[seed]; ok {
 		return v
 	}
@@ -404,8 +404,8 @@ func (t treeModel) variance(seed uint32) treeVariance {
 		v.parts[i] = pv
 	}
 
-	treeVarianceCache[seed] = v
-	return v
+	treeVarianceCache[seed] = &v
+	return &v
 }
 
 func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32) {
@@ -422,7 +422,7 @@ func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32
 	// so the silhouette reads as "leaves drifting in a breeze" not
 	// "the tree is about to fall." Trunks are NOT swayed — only
 	// the foliage rides the wind, the way Wind Waker trees do.
-	swayTime := float32(rl.GetTime())
+	swayTime := worldFrameClock
 	swayX := float32(math.Sin(float64(swayTime*0.85+v.swayPhase))) * 0.05
 	swayZ := float32(math.Sin(float64(swayTime*0.72+v.swayPhase+1.3))) * 0.04
 	swayY := float32(math.Sin(float64(swayTime*1.05+v.swayPhase*0.7))) * 0.025
@@ -574,30 +574,26 @@ func (p propModel) draw(center rl.Vector3, scale, yaw float32) {
 	if scale <= 0 {
 		scale = 1
 	}
-	// Compute the wind sway only when at least one part actually sways.
-	// Rigid props (statues, pillars, crates — the bulk of a dungeon) then
-	// skip the GetTime + Mod + two Sin calls entirely; a short compare
-	// over the handful of parts is far cheaper than the transcendentals.
+	// Wind sway is computed lazily inside the single draw loop, the first time a
+	// part with sway>0 is hit, so rigid props (statues, pillars, crates — the
+	// bulk of a dungeon) never touch the Mod + two Sin calls and we avoid a
+	// separate pre-scan pass over the parts. swayTime comes from the once-per-
+	// frame worldFrameClock rather than a per-prop rl.GetTime() cgo call.
 	var swayX, swayZ float32
-	swaying := false
-	for _, part := range p.parts {
-		if part.sway > 0 {
-			swaying = true
-			break
-		}
-	}
-	if swaying {
-		swayTime := float32(rl.GetTime())
-		// Position-derived phase: hash the rounded tile coords so each
-		// prop tile lands on a different point in the sway cycle.
-		posPhase := float32(math.Mod(float64(center.X)*0.73+float64(center.Z)*1.31, tau))
-		swayX = float32(math.Sin(float64(swayTime*1.10+posPhase))) * 0.035
-		swayZ = float32(math.Sin(float64(swayTime*0.95+posPhase+1.4))) * 0.030
-	}
+	swayReady := false
 	for _, part := range p.parts {
 		offset := rotateOffsetY(part.offset, scale, yaw)
 		position := rl.NewVector3(center.X+offset.X, center.Y+offset.Y, center.Z+offset.Z)
 		if part.sway > 0 {
+			if !swayReady {
+				swayTime := worldFrameClock
+				// Position-derived phase: hash the rounded tile coords so each
+				// prop tile lands on a different point in the sway cycle.
+				posPhase := float32(math.Mod(float64(center.X)*0.73+float64(center.Z)*1.31, tau))
+				swayX = float32(math.Sin(float64(swayTime*1.10+posPhase))) * 0.035
+				swayZ = float32(math.Sin(float64(swayTime*0.95+posPhase+1.4))) * 0.030
+				swayReady = true
+			}
 			// Lean scales with Y so taller parts of a clump drift
 			// further than the base — natural "grass bending in
 			// the wind" shape.

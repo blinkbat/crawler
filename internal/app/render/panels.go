@@ -305,6 +305,16 @@ func measureTabLabel(font rl.Font, label string) rl.Vector2 {
 // read as a dense slab.
 const memberCardGutter = float32(20)
 
+// panelsMapSliceBuf / panelsMapSeenBuf / panelsMapRampBuf back drawPanelsMap's
+// per-cell classifier grids, replacing three per-frame make() calls while the
+// Map tab is open. Single-threaded render path; each frame fully overwrites the
+// range it slices, so no clearing is needed.
+var (
+	panelsMapSliceBuf []bool
+	panelsMapSeenBuf  []bool
+	panelsMapRampBuf  []int8
+)
+
 // memberColumnBuf backs memberColumnLayout's returned slice so the per-frame
 // panel draw doesn't allocate a fresh slice each call. Only one tab (Stats /
 // Equipment / Skills) draws per frame and each consumes the result immediately
@@ -1413,9 +1423,19 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 	// outline with the corner minimap so the two map surfaces can't drift on the
 	// fog rule, the level slice, the wall suppression, or the border.
 	gw := cellsX + 2
-	slice := make([]bool, gw*(cellsY+2))
-	seen := make([]bool, gw*(cellsY+2))
-	ramp := make([]int8, gw*(cellsY+2))
+	// Reused scratch grids — drawPanelsMap runs every frame the Map tab is open;
+	// the loop writes every window+border index each pass, so reuse needs no
+	// clearing. Same cap-grow pattern as memberColumnBuf. (Held separate from the
+	// corner minimap's buffers so a cross-fade frame that draws both can't clash.)
+	n := gw * (cellsY + 2)
+	if cap(panelsMapSliceBuf) < n {
+		panelsMapSliceBuf = make([]bool, n)
+		panelsMapSeenBuf = make([]bool, n)
+		panelsMapRampBuf = make([]int8, n)
+	}
+	slice := panelsMapSliceBuf[:n]
+	seen := panelsMapSeenBuf[:n]
+	ramp := panelsMapRampBuf[:n]
 	for localZ := -1; localZ <= cellsY; localZ++ {
 		for localX := -1; localX <= cellsX; localX++ {
 			col, onSlice, seenWall, rampDir := mapSliceCell(m, g, indoor, startX+localX, startZ+localZ)

@@ -119,13 +119,13 @@
     "tintG": 0,
     "tintB": 0,
     "tintA": 0,
-    "pixelate": 0.4,
-    "brightness": 0.1,
-    "contrast": 0.25,
-    "posterize": 0,
-    "saturation": -0.25,
-    "dither": 0,
-    "gameBoy": 0
+    "pixelate": 0.3,
+    "brightness": 0.05,
+    "contrast": 0,
+    "posterize": 0.65,
+    "saturation": 0.4,
+    "dither": 0.5,
+    "gameBoy": 0.15
   },
   "goblin": {
     "sizeX": 1.05,
