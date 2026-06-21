@@ -51,7 +51,7 @@ Add a new "kind" of anything and forget a parallel table → the program won't s
 
 ## Conventions
 
-- Keep behavior repo-native and procedural unless asked. Visual assets are generated in `textures.go`; the exception is authored billboard PNGs under `maps/sprites/` (procedural fallback retained).
+- Keep behavior repo-native and procedural unless asked. Visual assets are generated in `textures.go`; the exception is authored billboard PNGs under `maps/sprites/` (procedural fallback retained). Scan→extract→editor-tune workflow for those PNGs: see `ASSET_PIPELINE.md` (`tools/extract_sprite.py`).
 - All on-disk assets resolve through `core.ResolveAssetDir(rel)` (cwd-relative first, then beside the exe). Never raw paths; add new asset folders through that helper.
 - Respect real Go package boundaries — add behavior in the relevant directory, don't create prefixed files in `internal/app`.
 - Reuse existing raylib drawing helpers before introducing a new abstraction. Keep HUD surfaces rounded, slightly translucent, readable borders + text shadows.

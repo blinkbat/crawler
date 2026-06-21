@@ -178,10 +178,11 @@ func applyAssetAction(s *State, ov *core.EnemyVisualOverride, i int) {
 }
 
 // savedVisualFlash is the shared save-confirmation toast for the Foe/Party
-// Visualizers: both persist a visual override the editor applies live but the
-// game only picks up on restart, so they show the identical message.
+// Visualizers: both persist a visual override AND re-bake its FX into the live
+// display texture (SetLive*Override), so the change applies in-session — the
+// editor world and the in-process playtest both show it without a restart.
 func savedVisualFlash(name, slug string) string {
-	return "Saved " + name + " → " + slug + " (live in editor; restart game to apply)"
+	return "Saved " + name + " → " + slug + " (applied live)"
 }
 
 // visualizerFooterHint is the shared orange-sphere/cyan-glyph persistence note

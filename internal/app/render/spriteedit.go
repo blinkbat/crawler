@@ -745,6 +745,54 @@ func applySpriteDisplayFilter(tex rl.Texture2D, f SpriteFilter) {
 	rl.SetTextureWrap(tex, rl.WrapClamp)
 }
 
+// editorFXTextures holds DISPLAY textures the editor re-derived from a sprite's
+// pristine base + its live visuals.json FX (Pixelate/Posterize/Dither/GameBoy/
+// Brightness/Contrast/Saturation) after an in-session Save, so the change shows
+// in the running game immediately instead of only after a restart. Keyed by
+// sprite slug; the prior derive for a slug is freed when a Save replaces it (and
+// when the FX go neutral), so re-saving never holds more than one extra texture
+// per sprite. Boot textures (owned by Resources) are never stored or unloaded
+// here, so this can't double-free at shutdown; the OS reclaims these at exit and
+// the count is bounded by the distinct sprites an author edits in one session.
+var editorFXTextures = map[string]rl.Texture2D{}
+
+// displayTextureForSlug returns the texture the live billboard should draw for a
+// sprite whose non-destructive FX just changed: a freshly re-baked display
+// texture (pristine readback → filter → upload, point-sampled when pixelated)
+// when any FX is active, or the unfiltered pristine when they're neutral. Any
+// prior editor-derived texture for the slug is freed first (covering both the
+// replace and the back-to-neutral cases). The in-session twin of the boot
+// deriveAdjustedTexture, but it tracks the handle in editorFXTextures rather than
+// the Resources `owned` list, so freeing the previous derive can't double-free a
+// boot texture. Always derives from the PRISTINE base so repeated saves don't
+// compound the FX.
+func displayTextureForSlug(slug string, pristine rl.Texture2D, ov core.EnemyVisualOverride) rl.Texture2D {
+	if old, ok := editorFXTextures[slug]; ok {
+		rl.UnloadTexture(old)
+		delete(editorFXTextures, slug)
+	}
+	f := visualAdjustFilter(ov)
+	if f.IsNoop() || pristine.ID == 0 {
+		return pristine
+	}
+	img := rl.LoadImageFromTexture(pristine)
+	if img == nil || img.Width <= 0 || img.Height <= 0 {
+		if img != nil {
+			rl.UnloadImage(img)
+		}
+		return pristine
+	}
+	defer rl.UnloadImage(img)
+	applySpriteFilter(img, f)
+	tex := rl.LoadTextureFromImage(img)
+	if tex.ID == 0 {
+		return pristine
+	}
+	applySpriteDisplayFilter(tex, f)
+	editorFXTextures[slug] = tex
+	return tex
+}
+
 // Asset-tab LIVE PREVIEW. The visualizer's Asset tab drives Pixelate/Brightness/
 // Contrast as non-destructive sliders; the editor renders the preview by applying
 // the SpriteFilter (derived from the override) to a COPY of the sprite's PRISTINE

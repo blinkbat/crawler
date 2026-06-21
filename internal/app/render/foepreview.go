@@ -179,7 +179,14 @@ func SetLiveFoeOverride(assets Resources, kind core.EnemyKind, ov core.EnemyVisu
 	if !ok {
 		return
 	}
-	assets.enemyVisuals[kind] = applyEnemyVisualOverride(base, ov)
+	v := applyEnemyVisualOverride(base, ov)
+	// Re-bake the non-destructive FX (Pixelate/Posterize/Dither/…) onto the
+	// pristine base into the live DISPLAY texture, so a Save shows in the running
+	// game immediately instead of only after a restart. Positional/tint overrides
+	// already apply live (they're read at draw time); the FX are the one knob
+	// baked into the texture, so they alone need the re-derive.
+	v.texture = displayTextureForSlug(core.EnemySlug(kind), pristineOrTexture(v), ov)
+	assets.enemyVisuals[kind] = v
 }
 
 // DrawFoePreview renders kind's billboard — with the in-progress override ov

@@ -47,7 +47,11 @@ func SetLivePartyOverride(assets Resources, class core.PartyClass, ov core.Party
 	if !ok {
 		return
 	}
-	assets.partyVisuals[class] = applyEnemyVisualOverride(base, ov)
+	v := applyEnemyVisualOverride(base, ov)
+	// Re-bake the non-destructive FX onto the pristine base into the live display
+	// texture (same as the foe side) so a Save applies in-session, not on restart.
+	v.texture = displayTextureForSlug(core.PartyClassSlug(class), pristineOrTexture(v), ov)
+	assets.partyVisuals[class] = v
 }
 
 // DrawPartyPreview renders class's billboard — with the in-progress override ov
