@@ -120,8 +120,9 @@ func NewGameState(area AreaDefinition) GameState {
 		// Out-of-the-box retro post-process mix (Debug ▸ Retro Filters) —
 		// same preference class as RumbleEnabled: runtime, not in SaveData,
 		// preserved across Restart. Sky stays crisp by default.
-		RetroFilters:   DefaultRetroFilters(),
-		RetroFilterSky: DefaultRetroFilterSky,
+		RetroFilters:       DefaultRetroFilters(),
+		RetroFilterSky:     DefaultRetroFilterSky,
+		RetroFilterSprites: DefaultRetroFilterSprites,
 		// Starting bag: rations only, no equipment — see starterInventory.
 		Inventory: starterInventory(),
 		Quests:    StarterQuests(),
@@ -387,6 +388,7 @@ func ResetGameState(g *GameState) {
 	savedRumble := g.RumbleEnabled
 	savedRetroFilters := g.RetroFilters
 	savedRetroSky := g.RetroFilterSky
+	savedRetroSprites := g.RetroFilterSprites
 	*g = NewGameState(g.Area)
 	g.Inventory = savedInventory
 	g.Party = savedParty
@@ -408,6 +410,7 @@ func ResetGameState(g *GameState) {
 	g.RumbleEnabled = savedRumble
 	g.RetroFilters = savedRetroFilters
 	g.RetroFilterSky = savedRetroSky
+	g.RetroFilterSprites = savedRetroSprites
 	// Debug toggles are runtime dev preferences, not world state — preserve them
 	// across a restart/loss-recovery the same way area transitions carry them.
 	copyRunToggles(g, &prev)

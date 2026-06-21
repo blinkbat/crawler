@@ -1500,14 +1500,15 @@ func RetroFilterName(k RetroFilterKind) string {
 }
 
 // Retro Filters submenu rows: one slider row per filter, then the Filter
-// Skybox toggle, Reset to Default, All Off, and Close. The first
-// RetroFilterCount cursor positions ARE the filter kinds.
+// Skybox toggle, the Filter Sprites toggle, Reset to Default, All Off, and
+// Close. The first RetroFilterCount cursor positions ARE the filter kinds.
 const (
-	RetroMenuSkyToggle = int(RetroFilterCount)
-	RetroMenuResetAll  = int(RetroFilterCount) + 1
-	RetroMenuAllOff    = int(RetroFilterCount) + 2
-	RetroMenuClose     = int(RetroFilterCount) + 3
-	RetroMenuCount     = int(RetroFilterCount) + 4
+	RetroMenuSkyToggle    = int(RetroFilterCount)
+	RetroMenuSpriteToggle = int(RetroFilterCount) + 1
+	RetroMenuResetAll     = int(RetroFilterCount) + 2
+	RetroMenuAllOff       = int(RetroFilterCount) + 3
+	RetroMenuClose        = int(RetroFilterCount) + 4
+	RetroMenuCount        = int(RetroFilterCount) + 5
 )
 
 // RetroFilterStep is the Left/Right intensity increment, and
@@ -1537,6 +1538,11 @@ func DefaultRetroFilters() [RetroFilterCount]float64 {
 // DefaultRetroFilterSky is the out-of-the-box skybox treatment: NOT filtered
 // — the dithered/pixelated environment composites over a clean sky.
 const DefaultRetroFilterSky = false
+
+// DefaultRetroFilterSprites is the out-of-the-box sprite treatment: NOT filtered
+// — enemy/party billboards keep their authored visuals.json FX crisp on top of
+// the crunched environment instead of having the screen filter stack over them.
+const DefaultRetroFilterSprites = false
 
 // AdjustRetroFilter nudges an intensity by dir (±1) steps, clamped to [0, 1].
 func AdjustRetroFilter(v *float64, dir int) {

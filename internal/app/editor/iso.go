@@ -233,7 +233,14 @@ func drawGridIso(s *State, font rl.Font) {
 // highlight when hovered.
 func (s *State) drawIsoColumn(x, z, minL int, floorHidden, hovered bool) {
 	center, size := s.isoColumnBox(x, z, minL)
-	top := rl.Color(floorColor(s.area.Floor[z][x]))
+	// Route the floor read through the bounds-safe cellAt (not raw Floor[z][x]):
+	// a loaded/ragged area can have rows shorter than Width or fewer rows than
+	// Height, and the raw index would panic on entering 3D view. Missing cells
+	// fall back to the empty-top color.
+	top := isoEmptyTop
+	if fb, ok := cellAt(s.area.Floor, x, z); ok {
+		top = rl.Color(floorColor(fb))
+	}
 	if floorHidden {
 		top = isoEmptyTop
 	}
@@ -288,6 +295,12 @@ func updateIsoCanvas(s *State, mp rl.Vector2) {
 	}
 
 	if wheel := rl.GetMouseWheelMove(); wheel != 0 {
+		// Guard a zero seed: a multiplicative zoom stuck at 0 would never recover
+		// (0 × factor = 0) and the camera's dist/isoZoom would freeze. Clamp the
+		// base into range before scaling so the wheel always responds.
+		if s.isoZoom <= 0 {
+			s.isoZoom = 1
+		}
 		s.isoZoom *= 1 + 0.12*wheel
 		s.isoZoom = core.Clamp(s.isoZoom, float32(0.3), float32(6))
 	}

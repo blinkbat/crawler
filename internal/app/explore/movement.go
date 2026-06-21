@@ -359,9 +359,12 @@ func updateRetroMenu(g *core.GameState) {
 			core.ToggleRetroFilter(&g.RetroFilters, core.RetroFilterKind(item))
 		case item == core.RetroMenuSkyToggle:
 			g.RetroFilterSky = !g.RetroFilterSky
+		case item == core.RetroMenuSpriteToggle:
+			g.RetroFilterSprites = !g.RetroFilterSprites
 		case item == core.RetroMenuResetAll:
 			g.RetroFilters = core.DefaultRetroFilters()
 			g.RetroFilterSky = core.DefaultRetroFilterSky
+			g.RetroFilterSprites = core.DefaultRetroFilterSprites
 		case item == core.RetroMenuAllOff:
 			g.RetroFilters = [core.RetroFilterCount]float64{}
 		case item == core.RetroMenuClose:

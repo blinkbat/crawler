@@ -91,7 +91,9 @@ func formationSlotsValid(party []PartyMember) bool {
 	var seen [2][2]bool
 	for i := range party {
 		r, c := party[i].HomeRow, party[i].HomeCol
-		if r < RowFront || r > RowBack || c < ColLeft || c > ColRight || seen[r][c] {
+		// Row/Col are unsigned, so the lower bound (>= RowFront/ColLeft) holds by
+		// type — only the upper bound and the uniqueness check can fail.
+		if r > RowBack || c > ColRight || seen[r][c] {
 			return false
 		}
 		seen[r][c] = true

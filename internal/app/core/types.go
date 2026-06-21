@@ -490,6 +490,14 @@ type GameState struct {
 	// or drawn crisp to the backbuffer with the filtered environment
 	// alpha-blitted over it (false — pixelated ruins against a clean sky).
 	RetroFilterSky bool
+	// RetroFilterSprites chooses whether enemy/party billboards are captured
+	// inside the filter pass (true — sprites crunch along with the world) or
+	// drawn crisp on top of the filtered environment (false, the default — the
+	// per-asset visuals.json FX baked into each sprite shows through without the
+	// screen filter stacking on top of it). Same preference class as
+	// RetroFilterSky; the render layer draws the crisp overlay so sprites still
+	// occlude correctly against world geometry.
+	RetroFilterSprites bool
 	// OptionsMenuOpen is true while the Options submenu is showing (opened
 	// from the pause menu's Options row). OptionsMenuIndex is its cursor.
 	// Mutually exclusive with MenuOpen / DebugMenuOpen — opening a submenu

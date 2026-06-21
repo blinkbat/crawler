@@ -1801,8 +1801,10 @@ func applyStoneSkin(g *core.GameState, quality int) bool {
 	eff.BuffTurns += selfCastTurnBonus(g, g.Battle.PartyTarget)
 	core.StampPartyBuff(target, core.SkillStoneSkin, eff)
 	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillStoneSkin), g.Battle.PartyTarget)
+	// Report the STAMPED duration (eff, which carries the self-cast +1), not the
+	// base effect — a self-ward grants the +1 and the log must match what landed.
 	setBattleMessage(g, fmt.Sprintf("%s%s wards %s in stone (+%d Armor, +%d MDef, %d turns).",
-		qualityTag(quality), actor.Name, target.Name, effect.BuffArmor, effect.BuffMDef, effect.BuffTurns))
+		qualityTag(quality), actor.Name, target.Name, eff.BuffArmor, eff.BuffMDef, eff.BuffTurns))
 	finishActorTurn(g)
 	return true
 }
@@ -1890,10 +1892,12 @@ func applyIceArmor(g *core.GameState, quality int) bool {
 	// Self-only ward: the caster is the target, so selfCastTurnBonus always
 	// returns 1 here — the +1 offsets finishActorTurn's immediate end-of-turn
 	// tick (the shared self-cast correction; Bless rule).
-	actor.IceArmorTurns = effect.IceArmorTurns + selfCastTurnBonus(g, g.Battle.CurrentParty)
+	turns := effect.IceArmorTurns + selfCastTurnBonus(g, g.Battle.CurrentParty)
+	actor.IceArmorTurns = turns
 	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillIceArmor), g.Battle.CurrentParty)
+	// Log the stamped duration (turns, incl. the self-cast +1), not the base.
 	setBattleMessage(g, fmt.Sprintf("%s%s sheathes in ice — +%d MDef, attackers chilled for %d turns.",
-		qualityTag(quality), actor.Name, core.IceArmorMDef, effect.IceArmorTurns))
+		qualityTag(quality), actor.Name, core.IceArmorMDef, turns))
 	finishActorTurn(g)
 	return true
 }
@@ -2140,7 +2144,7 @@ func applyCritMultiplier(raw int, crit, double bool) int {
 // (and is queued again later under the ATB carry-over) counts as having acted,
 // so the bonus rewards genuinely getting the jump on a foe, not re-hitting one.
 func targetActsLater(g *core.GameState, enemySlot int) bool {
-	return !actorAppearsBefore(g.Battle.Queue, g.Battle.QueueCursor, core.ActorRef{Index: enemySlot})
+	return !actorAppearsBefore(g.Battle.Queue, g.Battle.QueueCursor, core.ActorRef{IsParty: false, Index: enemySlot})
 }
 
 // applyShadowStep folds the Thief's Shadow Step passive into an outgoing

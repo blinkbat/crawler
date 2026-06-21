@@ -219,10 +219,12 @@ const (
 	// outline both grow by (rect expands by cardGlowMargin on each side, so
 	// width/height grow by 2×). Named so the two chrome layers can't drift.
 	cardGlowMargin = int32(3)
-	// activeCardLift raises the active member's card so "whose turn is it" reads
-	// at a glance, on top of the gilt halo. Small now that the cards tile in a
-	// 2×2 grid (a big lift would overlap the row above).
-	activeCardLift = float32(8)
+	// activeCardJut nudges the active member's card sideways (OUTWARD from the
+	// 2×2 grid: left column pokes left, right column pokes right) so "whose turn
+	// is it" reads at a glance on top of the gilt halo. Sideways rather than up so
+	// the lift can't overlap the row above; outward so it can't overlap the
+	// neighbouring column either.
+	activeCardJut = float32(8)
 	// ribbonBottom is the bottom-edge margin for the party ribbon.
 	// Routed through hudEdgePad so the bottom margin matches the
 	// minimap's top margin (and every other HUD panel's edge
@@ -267,9 +269,15 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active,
 		border = borderActive
 	}
 
-	// Raise the active card above the row so it physically stands out.
+	// Jut the active card sideways (out of the row) so it physically stands out
+	// without lifting into the row above. Outward by column: left pokes left,
+	// right pokes right — so it can't collide with the neighbouring card either.
 	if active && !down {
-		y -= activeCardLift
+		if member.HomeCol == core.ColRight {
+			x += activeCardJut
+		} else {
+			x -= activeCardJut
+		}
 	}
 
 	ix, iy := int32(x), int32(y)

@@ -109,6 +109,8 @@ func retroMenuRowLabel(g *core.GameState, i int) string {
 		return fmt.Sprintf("%s: %.0f%%", name, v*100)
 	case i == core.RetroMenuSkyToggle:
 		return "Filter Skybox: " + onOff(g.RetroFilterSky)
+	case i == core.RetroMenuSpriteToggle:
+		return "Filter Sprites: " + onOff(g.RetroFilterSprites)
 	case i == core.RetroMenuResetAll:
 		return "Reset to Default"
 	case i == core.RetroMenuAllOff:
@@ -135,13 +137,13 @@ func init() {
 		panic(fmt.Sprintf("debugMenuRows length %d != DebugMenuCount %d", len(debugMenuRows), core.DebugMenuCount))
 	}
 	// retroMenuRowLabel is a positional switch (no slice to length-check): the
-	// first RetroFilterCount slots are filter kinds, then SkyToggle / ResetAll /
-	// AllOff, then Close via the default arm. This asserts the menu has exactly
-	// those four trailing slots, so inserting a new RetroMenu* enum value bumps
-	// RetroMenuCount and trips here at startup instead of silently rendering as
-	// "Close" through the default arm. Mirrors the row-slice asserts above.
-	if core.RetroMenuCount != int(core.RetroFilterCount)+4 {
-		panic(fmt.Sprintf("retroMenuRowLabel switch handles RetroFilterCount+4 slots but RetroMenuCount is %d (RetroFilterCount %d)", core.RetroMenuCount, core.RetroFilterCount))
+	// first RetroFilterCount slots are filter kinds, then SkyToggle / SpriteToggle
+	// / ResetAll / AllOff, then Close via the default arm. This asserts the menu
+	// has exactly those five trailing slots, so inserting a new RetroMenu* enum
+	// value bumps RetroMenuCount and trips here at startup instead of silently
+	// rendering as "Close" through the default arm. Mirrors the row-slice asserts above.
+	if core.RetroMenuCount != int(core.RetroFilterCount)+5 {
+		panic(fmt.Sprintf("retroMenuRowLabel switch handles RetroFilterCount+5 slots but RetroMenuCount is %d (RetroFilterCount %d)", core.RetroMenuCount, core.RetroFilterCount))
 	}
 }
 

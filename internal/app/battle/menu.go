@@ -418,58 +418,135 @@ func performDefend(g *core.GameState) {
 	finishActorTurn(g)
 }
 
-// swapCandidates returns the party indices the acting member can swap formation
-// slots with — every OTHER member (living or downed; a slot exists regardless of
-// HP). Built fresh into the caller's scratch each call; the list is tiny (≤3).
-func swapCandidates(g *core.GameState) []int {
-	out := make([]int, 0, len(g.Party))
-	for i := range g.Party {
-		if i != g.Battle.CurrentParty {
-			out = append(out, i)
-		}
+// flipRow / flipCol return the other rank / column of the 2×2 — the single
+// source for "the orthogonal neighbour along this axis" so the picker and the
+// default-partner pick can't disagree on what "the other slot" is.
+func flipRow(r core.Row) core.Row {
+	if r == core.RowFront {
+		return core.RowBack
 	}
-	return out
+	return core.RowFront
 }
 
-// enterSwapTargeting opens the Swap tile picker: the actor stays the source (its
-// card keeps the active halo) and the cursor highlights a partner to trade
-// formation slots with. Confirm performs the swap and ends the actor's turn;
-// the per-turn cost is the whole swap economy (a scrambled party costs at most
-// two turns to fix). Snaps the cursor to a valid partner before entering.
+func flipCol(c core.Col) core.Col {
+	if c == core.ColLeft {
+		return core.ColRight
+	}
+	return core.ColLeft
+}
+
+// memberAtSlot returns the party index whose home 2×2 slot is (row,col), other
+// than the acting member, and ok=false if none. The formation is a clean 2×2 by
+// invariant (NormalizePartyFormation), so at most one member sits per slot.
+func memberAtSlot(g *core.GameState, row core.Row, col core.Col) (int, bool) {
+	for i := range g.Party {
+		if i == g.Battle.CurrentParty {
+			continue
+		}
+		if g.Party[i].HomeRow == row && g.Party[i].HomeCol == col {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// defaultSwapPartner is the slot the Swap picker opens on: the acting member's
+// horizontal neighbour (same row, other column) if present, else the vertical
+// neighbour (same column, other row). Both are ORTHOGONAL — never the diagonal —
+// so confirming without steering still trades with an adjacent slot. -1 when the
+// actor has no orthogonal neighbour (a degenerate sub-2×2 party).
+func defaultSwapPartner(g *core.GameState) int {
+	actor := g.Battle.CurrentParty
+	if actor < 0 || actor >= len(g.Party) {
+		return -1
+	}
+	row, col := g.Party[actor].HomeRow, g.Party[actor].HomeCol
+	if idx, ok := memberAtSlot(g, row, flipCol(col)); ok {
+		return idx
+	}
+	if idx, ok := memberAtSlot(g, flipRow(row), col); ok {
+		return idx
+	}
+	return -1
+}
+
+// enterSwapTargeting opens the Swap picker: the actor stays the source (its card
+// keeps the active halo) and the cursor highlights an ADJACENT slot to trade
+// with. The D-pad then steers the cursor to the neighbour in that direction (no
+// diagonal); Confirm performs the swap and ends the actor's turn. Opens on the
+// default orthogonal partner.
 func enterSwapTargeting(g *core.GameState) {
 	if _, ok := currentMember(g); !ok {
 		return
 	}
-	cands := swapCandidates(g)
-	if len(cands) == 0 {
+	partner := defaultSwapPartner(g)
+	if partner < 0 {
 		setBattleStatus(g, msgChooseAction)
 		return
 	}
-	if g.Battle.PartyTarget == g.Battle.CurrentParty || !slices.Contains(cands, g.Battle.PartyTarget) {
-		g.Battle.PartyTarget = cands[0]
-	}
+	g.Battle.PartyTarget = partner
 	g.Battle.ActionMode = core.ActionSwapTarget
-	setBattleStatus(g, fmt.Sprintf("Swap with %s?", g.Party[g.Battle.PartyTarget].Name))
+	setBattleStatus(g, fmt.Sprintf("Swap with %s?", g.Party[partner].Name))
 }
 
-// updateSwapTarget drives the Swap tile picker: Next/Previous cycle the partner
-// cursor, Back returns to the action menu, Confirm trades slots.
+// updateSwapTarget drives the Swap picker: the D-pad picks the orthogonal
+// neighbour to trade with (Up/Down = front/back, Left/Right = the other column).
+// The diagonal slot is unreachable by a single direction, so a diagonal swap
+// can't be selected. Back returns to the action menu, Confirm trades slots.
 func updateSwapTarget(g *core.GameState) {
-	updateTargetPicker(g, cycleSwapTarget, cancelTargetToActionMenu, performSwap)
+	if input.BackPressed() {
+		cancelTargetToActionMenu(g)
+		return
+	}
+	if idx, ok := swapTargetForDirection(g); ok {
+		g.Battle.PartyTarget = idx
+		setBattleStatus(g, fmt.Sprintf("Swap with %s?", g.Party[idx].Name))
+	}
+	if input.ConfirmPressed() {
+		performSwap(g)
+	}
 }
 
-// cycleSwapTarget walks the partner cursor across the swap candidates.
-func cycleSwapTarget(g *core.GameState, delta int) {
-	cycleTargetSelection(g, &g.Battle.PartyTarget, delta,
-		func() []int { return swapCandidates(g) },
-		func(g *core.GameState, _, _ int) string {
-			return fmt.Sprintf("Swap with %s?", g.Party[g.Battle.PartyTarget].Name)
-		})
+// swapTargetForDirection maps the frame's D-pad direction to the acting member's
+// orthogonal neighbour in that direction, or ok=false when no direction is
+// pressed or the actor already sits at that edge. Vertical (front/back) is
+// resolved first so a diagonal stick reading collapses to a single axis rather
+// than ambiguously straddling two.
+func swapTargetForDirection(g *core.GameState) (int, bool) {
+	actor := g.Battle.CurrentParty
+	if actor < 0 || actor >= len(g.Party) {
+		return 0, false
+	}
+	row, col := g.Party[actor].HomeRow, g.Party[actor].HomeCol
+	switch {
+	case input.UpPressed():
+		if row == core.RowBack {
+			return memberAtSlot(g, core.RowFront, col)
+		}
+	case input.DownPressed():
+		if row == core.RowFront {
+			return memberAtSlot(g, core.RowBack, col)
+		}
+	default:
+		switch input.CursorLeftRight() {
+		case -1:
+			if col == core.ColRight {
+				return memberAtSlot(g, row, core.ColLeft)
+			}
+		case 1:
+			if col == core.ColLeft {
+				return memberAtSlot(g, row, core.ColRight)
+			}
+		}
+	}
+	return 0, false
 }
 
 // performSwap exchanges the actor's formation slot with the cursored partner's
 // and ends the actor's turn. The swap keeps the party a clean 2×2 (the two
-// members trade positions), so it can never leave three in one row.
+// members trade positions), so it can never leave three in one row. A diagonal
+// pairing is rejected defensively — the picker only ever selects orthogonal
+// neighbours, but the trade must never cross both axes at once.
 func performSwap(g *core.GameState) {
 	actor, ok := currentMember(g)
 	if !ok {
@@ -477,12 +554,17 @@ func performSwap(g *core.GameState) {
 		return
 	}
 	partner := g.Battle.PartyTarget
-	if partner == g.Battle.CurrentParty || !partyIndexValid(g, partner) {
+	a := g.Battle.CurrentParty
+	if partner == a || !partyIndexValid(g, partner) {
 		setBattleStatus(g, msgInvalidTarget)
 		return
 	}
+	if g.Party[a].HomeRow != g.Party[partner].HomeRow && g.Party[a].HomeCol != g.Party[partner].HomeCol {
+		setBattleStatus(g, msgInvalidTarget) // diagonal — not a legal single-step swap
+		return
+	}
 	actorName, partnerName := actor.Name, g.Party[partner].Name
-	core.SwapFormationSlots(g.Party, g.Battle.CurrentParty, partner)
+	core.SwapFormationSlots(g.Party, a, partner)
 	setBattleMessage(g, fmt.Sprintf("%s and %s swap places.", actorName, partnerName))
 	finishActorTurn(g)
 }

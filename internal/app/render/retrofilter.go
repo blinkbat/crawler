@@ -275,6 +275,53 @@ func EndRetroCapture(g *core.GameState, skyOnBackbuffer bool) {
 	rl.EndShaderMode()
 }
 
+// DrawCrispSpritePass draws the enemy/party billboards (and their VFX) UNFILTERED
+// over the already-blitted, already-filtered environment — the "Filter Sprites:
+// Off" path. It re-opens the capture RT (whose depth buffer still holds the
+// environment geometry from the just-finished EndRetroCapture pass), wipes only
+// the COLOR to transparent while preserving that depth, draws the sprites so they
+// depth-test against the real world (correct wall occlusion), then blits just the
+// sprite layer crisp on top of the backbuffer. No geometry is re-drawn — the cost
+// is one full-screen color wipe plus one extra blit.
+//
+// Caller contract: invoke ONLY right after a true-returning EndRetroCapture in the
+// sprite-exempt arm, with the SAME camera the environment pass used (so the depth
+// the sprites test against lines up). No-op if the capture RT was never built.
+func DrawCrispSpritePass(camera rl.Camera3D, g *core.GameState, assets Resources) {
+	if !retroRTInit {
+		return
+	}
+	rl.BeginTextureMode(retroRT)
+	// Wipe COLOR to transparent but keep DEPTH: disable blending (so the blank
+	// writes straight through instead of alpha-compositing to a no-op) and the
+	// depth mask (so the environment depth from the capture pass survives). Flush
+	// the batch while blending is still off, before re-enabling — otherwise the
+	// clear quad would be deferred and replayed with blending back on.
+	rl.DisableColorBlend()
+	rl.DisableDepthMask()
+	rl.DisableDepthTest()
+	rl.DrawRectangle(0, 0, retroRTW, retroRTH, rl.Blank)
+	rl.DrawRenderBatchActive()
+	rl.EnableColorBlend()
+	rl.EnableDepthMask()
+	rl.EnableDepthTest()
+	// Sprites now render against the retained environment depth — billboards
+	// behind walls fail the depth test and stay transparent, so the crisp blit
+	// below carries only the sprites the player can actually see.
+	rl.BeginMode3D(camera)
+	DrawEnemies(camera, g, assets)
+	DrawPartySprites(camera, g, assets)
+	TickAndDrawVFX(camera, g, assets)
+	rl.EndMode3D()
+	rl.EndTextureMode()
+	// Crisp blit (NO filter shader): the transparent background lets the sprites
+	// alpha-composite over the filtered environment already on the backbuffer.
+	// Negative source height flips the bottom-up RenderTexture upright.
+	rl.DrawTextureRec(retroRT.Texture,
+		rl.NewRectangle(0, 0, float32(retroRTW), -float32(retroRTH)),
+		rl.NewVector2(0, 0), rl.White)
+}
+
 // UnloadRetroFilter frees the capture texture and shader. Called from
 // Resources.Unload at shutdown; idempotent and safe when nothing loaded.
 func UnloadRetroFilter() {

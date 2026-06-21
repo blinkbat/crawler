@@ -369,33 +369,48 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 		rl.ClearBackground(render.SkyClearColor)
 		render.DrawSkyBackground(assets, game)
 	}
-	// 3D SCENE pass — sky, world geometry, chests, doors, AND the sprites
-	// (enemies, party, particles) in one pass. Drawing the sprites inside the
-	// capture means a retro filter crunches the WHOLE world uniformly: foes
-	// pixelate/scan/dither right along with the geometry they stand on instead
-	// of floating crisp on top of a filtered world. Per-foe look still comes
-	// from the editor's visuals.json FX baked into each sprite texture; the
-	// screen filter then rides over the lot. HUD, popups, weather, and menus
-	// draw later in screen space and stay crisp.
+	// Sprite exemption (the menu's "Filter Sprites" toggle): when filters are
+	// active and sprites are exempt, the enemy/party billboards are held OUT of
+	// the captured environment pass and drawn crisp on top afterward (see
+	// DrawCrispSpritePass) so the per-asset visuals.json FX baked into each
+	// sprite shows through without the screen filter stacking over it. When
+	// sprites are NOT exempt (or no filter is active), they draw inline here and
+	// crunch with the world.
+	exemptSprites := filtered && !game.RetroFilterSprites
+	// 3D SCENE pass — sky, world geometry, chests, doors, and (unless exempt) the
+	// sprites in one pass. Drawing the sprites inside the capture means a retro
+	// filter crunches the WHOLE world uniformly; exempting them keeps them crisp.
+	// Per-foe look comes from the editor's visuals.json FX baked into each sprite
+	// texture either way. HUD, popups, weather, and menus draw later in screen
+	// space and stay crisp.
 	rl.BeginMode3D(camera)
 	render.DrawWorld(camera, game, assets)
 	render.DrawChests(camera, game, assets)
 	render.DrawDoors(camera, game, assets)
 	render.DrawCrystals(camera, game, assets)
-	render.DrawEnemies(camera, game, assets)
-	render.DrawPartySprites(camera, game, assets)
-	// VFX inside the 3D pass so billboard particles depth-sort with the rest of
-	// the scene. TickAndDrawVFX drains GameState.VFXQueue (mutating g), advances
-	// the render-side pool by raylib's frame dt, and emits draws for every live
-	// particle. Kept after the party draw so impact sparks paint over the sprite,
-	// not under.
-	render.TickAndDrawVFX(camera, game, assets)
+	if !exemptSprites {
+		render.DrawEnemies(camera, game, assets)
+		render.DrawPartySprites(camera, game, assets)
+		// VFX inside the 3D pass so billboard particles depth-sort with the rest of
+		// the scene. TickAndDrawVFX drains GameState.VFXQueue (mutating g), advances
+		// the render-side pool by raylib's frame dt, and emits draws for every live
+		// particle. Kept after the party draw so impact sparks paint over the sprite,
+		// not under.
+		render.TickAndDrawVFX(camera, game, assets)
+	}
 	rl.EndMode3D()
-	// Close the retro capture and blit the FILTERED scene to the backbuffer —
-	// opaquely in the normal arm, alpha-composited over the crisp sky in the
+	// Close the retro capture and blit the FILTERED environment to the backbuffer
+	// — opaquely in the normal arm, alpha-composited over the crisp sky in the
 	// skybox-exempt arm.
 	if filtered {
 		render.EndRetroCapture(game, skyCrisp)
+		// Then lay the crisp, unfiltered sprites over the filtered environment,
+		// re-using the capture's depth so they still occlude behind walls. The
+		// VFX tick (state-mutating) runs exactly once per frame — here in the
+		// exempt arm, inline above otherwise.
+		if exemptSprites {
+			render.DrawCrispSpritePass(camera, game, assets)
+		}
 	}
 	// Ambient rain sits above the 3D world (darkening it) but below the
 	// world-space popups and HUD, so combat numbers, prompts, and menus
