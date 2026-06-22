@@ -6,9 +6,7 @@ import (
 	"crawler/internal/app/core"
 )
 
-// TestApplyCripple_LowersEnemySPD verifies the first enemy-side debuff: the
-// negative-SPD BuffStats lands on the target and EffectiveEnemyStats folds it
-// into the foe's combat SPD while the counter runs.
+// TestApplyCripple_LowersEnemySPD: the negative-SPD debuff lands and EffectiveEnemyStats folds it in while the counter runs.
 func TestApplyCripple_LowersEnemySPD(t *testing.T) {
 	g := newTestState()
 	g.Battle.CurrentParty = 2 // thief casts
@@ -33,8 +31,7 @@ func TestApplyCripple_LowersEnemySPD(t *testing.T) {
 	}
 }
 
-// TestTickEnemyBuffAfterTurn_DrainsDebuff confirms the debuff counts down one
-// per the enemy's own turn and the SPD reduction stays live until it expires.
+// TestTickEnemyBuffAfterTurn_DrainsDebuff: the debuff counts down one per enemy turn; SPD reduction stays live until expiry.
 func TestTickEnemyBuffAfterTurn_DrainsDebuff(t *testing.T) {
 	g := newTestState()
 	core.StampEnemyDebuff(&g.Packs[0].Members[0], core.SkillCripple, core.SkillEffect{BuffStats: core.Stats{SPD: -2}, BuffTurns: 2})
@@ -59,13 +56,12 @@ func TestTickEnemyBuffAfterTurn_DrainsDebuff(t *testing.T) {
 	}
 }
 
-// TestActorSpeed_CrippleNeverZero guards the soft-lock fix: even a debuff deeper
-// than the enemy's base SPD floors the ATB speed at 1, so a crippled foe still
-// eventually acts (and thus ticks the debuff down) instead of locking out.
+// TestActorSpeed_CrippleNeverZero: a debuff deeper than base SPD still floors ATB speed at 1,
+// so a crippled foe eventually acts (and ticks the debuff down) instead of locking out.
 func TestActorSpeed_CrippleNeverZero(t *testing.T) {
 	g := newTestState()
 	base := core.EnemyInfoFor(g.Packs[0].Members[0]).Stats.SPD
-	core.StampEnemyDebuff(&g.Packs[0].Members[0], core.SkillCripple, core.SkillEffect{BuffStats: core.Stats{SPD: -(base + 5)}, BuffTurns: 3}) // over-deep debuff
+	core.StampEnemyDebuff(&g.Packs[0].Members[0], core.SkillCripple, core.SkillEffect{BuffStats: core.Stats{SPD: -(base + 5)}, BuffTurns: 3})
 	actor := core.ActorRef{IsParty: false, Index: 0}
 
 	if got := actorSpeed(g, actor); got < 1 {

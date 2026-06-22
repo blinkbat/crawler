@@ -8,37 +8,22 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// selectedGlassTint is the cursored / active glass wash used across the HUD:
-// a blend from a `base` glass color toward glassWarm by `t`. Most panel
-// surfaces wash from glassMid; the member-card-active and level-up surfaces
-// wash from the deeper glassDeep/surfacePrimary. Centralized so every
-// "highlighted glass surface" shares one warm target instead of open-coding
-// MixColor(…, glassWarm, …) and drifting apart.
+// selectedGlassTint is the active glass wash: base blended toward glassWarm by t.
+// Centralized so every highlighted glass surface shares one warm target.
 func selectedGlassTint(base rl.Color, t float64) rl.Color {
 	return core.MixColor(base, glassWarm, t)
 }
 
-// panelStatMeasureCache memoizes rl.MeasureTextEx for the Stats-tab's
-// right-aligned value strings (stat values, ARM, XP, status chip). These
-// change only on level-up / HP-spend / status change — not 60 Hz — but
-// drawPanelsStats was re-shaping ~8 strings per member every frame the
-// Stats tab is open (~32 cgo calls for a 4-member party). Keyed by
-// the tab mixes FontBody and FontSmall values (the shared measureCache
-// keys on size, so both coexist).
+// panelStatMeasureCache memoizes the Stats-tab right-aligned value measures (stat values, ARM, XP, chip),
+// which change only on level-up/HP-spend/status, not 60 Hz.
 var panelStatMeasureCache measureCache
 
 func measurePanelStatValue(font rl.Font, text string, size float32) rl.Vector2 {
-	// canonicalSpacing pairs this measure with drawTextWithShadow's tracking
-	// (identity for today's FontBody/FontSmall callers; stays correct if a
-	// heading-size value ever routes through).
+	// canonicalSpacing pairs this with drawTextWithShadow's tracking.
 	return panelStatMeasureCache.measure(font, text, size, canonicalSpacing(size))
 }
 
-// panelsMapFooterCache memoizes the "zoom: N cells" footer string drawn on the
-// Map tab. The zoom changes only on user action, so rebuilding via fmt.Sprintf
-// every frame is pure waste. (The area name is intentionally NOT in this footer
-// — it already shows in the overlay's top info strip, so repeating it here was
-// redundant.)
+// panelsMapFooterCache memoizes the Map-tab "zoom: N cells" footer (zoom changes only on user action).
 var panelsMapFooterCache struct {
 	zoom int
 	text string
@@ -53,17 +38,10 @@ func panelsMapFooterText(zoom int) string {
 	return panelsMapFooterCache.text
 }
 
-// panelsMapFooterMeasureCache memoizes the footer string's width so the hint
-// bar's start X doesn't re-shape the text every frame the Map tab is open —
-// matching the rest of the package's per-frame measures.
+// panelsMapFooterMeasureCache memoizes the footer width so the hint bar's start X isn't re-shaped per frame.
 var panelsMapFooterMeasureCache measureCache
 
-// panelTabDrawers dispatches by tab index to the per-tab body drawer.
-// Indexed array (not a map) sized [PanelTabCount], so adding a 6th tab is a
-// single new PanelTab const + a new drawer + its slot here. The array SIZE is
-// fixed at compile time, but a FORGOTTEN slot is a nil func (the zero value),
-// not a compile error — so the init below nil-checks every slot and panics at
-// startup, the same coverage guard statIconDrawers / actionIconDrawers use.
+// panelTabDrawers dispatches by tab index to the per-tab body drawer (init nil-checks every slot).
 var panelTabDrawers = [core.PanelTabCount]func(*core.GameState, Resources, rl.Rectangle){
 	core.PanelTabStats:     drawPanelsStats,
 	core.PanelTabEquipment: drawPanelsEquipment,
@@ -73,14 +51,7 @@ var panelTabDrawers = [core.PanelTabCount]func(*core.GameState, Resources, rl.Re
 	core.PanelTabMap:       drawPanelsMap,
 }
 
-// panelTabFooterHints is the control-hint strip shown along the bottom of
-// the overlay, per active tab. Parallel to panelTabDrawers and sized
-// [PanelTabCount], so adding a tab forces a hint slot (compile error if
-// missed) instead of silently inheriting a generic hint via a switch's
-// fall-through. init asserts none is empty.
-// footerHintMemberTabs is the shared control hint for tabs whose only
-// interaction is the member-column cursor (Stats / Quests / Map). Controller
-// glyphs only (gamepad-first) — no spelled-out keys. See render/glyphs.go.
+// footerHintMemberTabs is the shared hint for member-cursor-only tabs (Stats/Quests/Map).
 func footerHintMemberTabs() []HintSeg {
 	return []HintSeg{
 		Hint("Tabs", GlyphLB, GlyphRB),
@@ -89,9 +60,7 @@ func footerHintMemberTabs() []HintSeg {
 	}
 }
 
-// footerHintCharacterTab adds the formation swap (Use / □) to the member tab
-// hints — the out-of-combat counterpart to the in-battle Swap action: pick a
-// member, then pick who to trade formation slots with.
+// footerHintCharacterTab adds the formation Swap to the member-tab hints.
 func footerHintCharacterTab() []HintSeg {
 	return []HintSeg{
 		Hint("Tabs", GlyphLB, GlyphRB),
@@ -101,10 +70,8 @@ func footerHintCharacterTab() []HintSeg {
 	}
 }
 
-// panelTabFooterHints is parallel to panelTabDrawers and sized [PanelTabCount],
-// so adding a tab forces a hint slot. Functions (not values) so each call
-// rebuilds its glyph segs fresh — they're cheap literals and this avoids shared
-// mutable slice state. init asserts none is nil.
+// panelTabFooterHints is the per-tab footer hint, parallel to panelTabDrawers (init asserts none nil).
+// Functions, not values, so each call rebuilds fresh segs (avoids shared mutable slice state).
 var panelTabFooterHints = [core.PanelTabCount]func() []HintSeg{
 	core.PanelTabStats: footerHintCharacterTab,
 	core.PanelTabEquipment: func() []HintSeg {
@@ -155,31 +122,17 @@ func init() {
 	}
 }
 
-// drawPanelsBody paints the game-panels modal — the six-tab overlay
-// (Character / Equipment / Items / Skills / Quests / Map) raised by the
-// gamepad middle button / keyboard I. Routes by g.PanelsTab to the per-tab
-// body drawer; the tab strip + footer hint are drawn once around all of them
-// so the chrome stays consistent.
-//
-// No open-gate: it's invoked only through the menu-fade drawer (menuFadeDrawer
-// returns it while g.PanelsOpen, and keeps calling it through a close-fade so
-// the Tome fades out instead of popping). The gate lives in menuFadeDrawer.
+// drawPanelsBody paints the six-tab game-panels overlay (Character/Equipment/Items/Skills/Quests/Map),
+// routing by g.PanelsTab. The open-gate lives in menuFadeDrawer (which fades the Tome out).
 func drawPanelsBody(g *core.GameState, assets Resources) {
 	font := assets.Font()
-	// Panels overlay skips drawModalScaffold's heading band — the tab
-	// strip IS the heading. We reuse the veil + centered card, sized
-	// screen-relative so the character menus fill most of the display and
-	// each per-member column has room for body-size text.
+	// Skips the heading band — the tab strip IS the heading. Screen-relative card.
 	card := drawScreenFractionScaffold(font, panelsOverlayWidthFrac, panelsOverlayHeightFrac, "")
 	cardX, cardY := int32(card.X), int32(card.Y)
 	cardW, cardH := int32(card.Width), int32(card.Height)
 	drawTomeBinding(cardX, cardY, cardW, cardH)
 
-	// Tab strip across the top. Each tab is a flat label on a soft
-	// glass tile; the active tab gets a brighter glass + a thick gilt
-	// underline so the eye lands on it before the body content. No
-	// wood frame per tab — they read as ledger dividers, not nested
-	// panels-in-a-panel.
+	// Tab strip: flat glass-tile labels; the active tab gets brighter glass + a gilt underline.
 	tabH := overlayTabHeight + 4
 	tabRowY := cardY + 14
 	tabPad := overlayTabPadding
@@ -195,9 +148,7 @@ func drawPanelsBody(g *core.GameState, assets Resources) {
 		}
 		drawGlassPane(tx, tabRowY, tabW, tabH, bg)
 		if active {
-			// Gilt underline strip at the bottom of the active tab —
-			// the same "you're here" mark the list rows use, scaled
-			// to the tab width.
+			// Gilt underline — the "you're here" mark, scaled to the tab width.
 			drawGiltRule(tx+8, tabRowY+tabH-3, tabW-16, 2, 1.0)
 		}
 		label := core.PanelTabLabel(t)
@@ -208,10 +159,7 @@ func drawPanelsBody(g *core.GameState, assets Resources) {
 			FontBody, txt)
 	}
 
-	// Persistent info strip, shown on EVERY tab: current location (area
-	// name) on the left, party gold on the right. Drawn here in the shared
-	// chrome (not per-tab) so it's always visible regardless of the active
-	// tab, and the body is pushed below it.
+	// Info strip on every tab: area name left, gold right. In the shared chrome so it's always visible.
 	const panelsInfoStripH = int32(22)
 	infoY := tabRowY + tabH + 4
 	areaName := g.Area.Name
@@ -220,10 +168,7 @@ func drawPanelsBody(g *core.GameState, assets Resources) {
 	}
 	drawTextWithShadow(font, areaName, float32(cardX+24), float32(infoY), FontSmall, textPrimary)
 	drawTextRightAligned(font, goldLabelFull(g.Gold), float32(cardX+cardW-24), float32(infoY), FontSmall, borderActive)
-	// Header rule under the info strip — a faint wood-accent hairline with
-	// diamond termini (the same dialect as the panel-heading underline) so
-	// the location/gold band reads as the ledger's ruled header, cleanly
-	// separated from whichever page is open below.
+	// Header rule under the info strip — a wood-accent hairline with diamond termini.
 	stripRuleY := infoY + panelsInfoStripH
 	stripRuleCol := woodAccentRule
 	drawPipCappedRule(cardX+24, stripRuleY, cardW-48, stripRuleCol, 1.8, stripRuleCol)
@@ -242,8 +187,7 @@ func drawPanelsBody(g *core.GameState, assets Resources) {
 	}
 	drawModalFooterGlyphs(font, card, footerHint())
 
-	// Sub-modals painted on top of the whole overlay (frame + footer) so
-	// they read as "above" everything.
+	// Sub-modals painted on top of the whole overlay so they read as "above" everything.
 	if g.PanelsTab == core.PanelTabEquipment && g.EquipPickerOpen {
 		drawEquipPicker(g, assets)
 	}
@@ -288,43 +232,29 @@ func drawTomeBinding(cardX, cardY, cardW, cardH int32) {
 	}
 }
 
-// tabLabelMeasureCache memoizes panel-tab label measurements (fixed core
-// registry, fills once and stays warm).
+// tabLabelMeasureCache memoizes panel-tab label measurements (fills once, stays warm).
 var tabLabelMeasureCache measureCache
 
 func measureTabLabel(font rl.Font, label string) rl.Vector2 {
 	return tabLabelMeasureCache.measure(font, label, FontBody, 1)
 }
 
-// memberCardGutter is the single per-member-card layout unit: both the
-// gap between member columns and the content inset inside each card.
-// Centralized so the column layout, the card-content inset, and the card
-// header can't drift apart (they previously hardcoded 14 / 28 / 24). Bumped
-// to 20 to open up the multi-column "ledger of members" — more air between
-// columns (and more breathing room inside each) so the bigger type doesn't
-// read as a dense slab.
+// memberCardGutter is the single per-member-card layout unit: both the inter-column gap and the
+// content inset inside each card, so the three can't drift apart.
 const memberCardGutter = float32(20)
 
-// panelsMapSliceBuf / panelsMapSeenBuf / panelsMapRampBuf back drawPanelsMap's
-// per-cell classifier grids, replacing three per-frame make() calls while the
-// Map tab is open. Single-threaded render path; each frame fully overwrites the
-// range it slices, so no clearing is needed.
+// panelsMapSliceBuf / panelsMapSeenBuf / panelsMapRampBuf are reused per-cell classifier grids
+// for drawPanelsMap (single-threaded; each frame overwrites the range it slices).
 var (
 	panelsMapSliceBuf []bool
 	panelsMapSeenBuf  []bool
 	panelsMapRampBuf  []int8
 )
 
-// memberColumnBuf backs memberColumnLayout's returned slice so the per-frame
-// panel draw doesn't allocate a fresh slice each call. Only one tab (Stats /
-// Equipment / Skills) draws per frame and each consumes the result immediately
-// before returning, so a single shared scratch is safe (single-threaded render).
+// memberColumnBuf backs memberColumnLayout's returned slice (one consuming tab per frame, single-threaded).
 var memberColumnBuf []rl.Rectangle
 
-// memberColumnLayout returns the per-member column rectangles for any
-// tab that paints one card per party member (Stats / Equipment /
-// Skills). Equal-width columns with a small gap so the grid reads as
-// "ledger of party members" rather than a single dense slab.
+// memberColumnLayout returns the per-member column rects for the Stats/Equipment/Skills tabs.
 func memberColumnLayout(body rl.Rectangle, count int) []rl.Rectangle {
 	if count <= 0 {
 		return nil
@@ -341,48 +271,26 @@ func memberColumnLayout(body rl.Rectangle, count int) []rl.Rectangle {
 	return cols
 }
 
-// memberCardInner returns the inner content inset (X origin + width) for
-// a per-member card column — the writable region inside the gutter the
-// Stats / Equipment / Skills body drawers paint into. Single seam for the
-// gutter the three used to hardcode as `col.X + 14` / `colW - 28`.
+// memberCardInner returns the writable inner region (X origin + width) of a member card column.
 func memberCardInner(col rl.Rectangle) (innerX, innerW float32) {
 	return col.X + memberCardGutter, col.Width - 2*memberCardGutter
 }
 
-// drawPartyMemberCardHeader paints the shared header chrome every
-// per-member tab card uses: class accent stripe on the left edge, the
-// member's name, a "Class · Lv N" sub-label, and the HP+MP bars. The
-// returned float32 is the Y coordinate immediately below the bars —
-// where tab-specific content (stat grid, equipment slots, skill list)
-// should start drawing.
-//
-// `highlight` is true for the currently-cursored column; it brightens
-// the name and tints the card body so the active member pops without
-// adding a heavy second selection chrome.
+// drawPartyMemberCardHeader paints the shared per-member card header (class rail, name,
+// "Lv N · row" sub-label, HP+MP bars) and returns the Y just below the bars where tab content starts.
+// highlight (the cursored column) brightens the name and washes the body.
 func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangle, highlight bool) float32 {
 	classCol := classAccent(m.Class)
 
-	// Soft inset glass body. We don't paint a full wood-framed card per
-	// member (would compete with the outer modal's frame); a small
-	// rounded panel + a class stripe gives enough separation. The
-	// SELECTED member gets a much stronger treatment (warm wash + bold
-	// gilt frame below) — the old faint tint read as "nothing selected"
-	// across the Character / Skills / Equipment tabs.
 	cardBG := glassMid
 	if highlight {
 		cardBG = selectedGlassTint(glassMid, 0.9)
 	}
 	drawGlassPaneRect(col, cardBG)
-	// Class accent rail, flush to the pane's left edge (the inset differs from
-	// a full card's drawAccentStripe, so pass geometry explicitly). Shares the
-	// one embellished 3-D rail look (drawClassRail) with every other
-	// per-character tick instead of reading as a flat bar here.
+	// Class accent rail flush to the left edge (geometry passed explicitly; shares drawClassRail).
 	drawClassRail(int32(col.X), int32(col.Y)+6, stripeWidth, int32(col.Height)-12, classCol)
 	if highlight {
-		// Bold gilt frame around the active card — the same "you're
-		// here" gilt the tab underline / armed-skill spine use, scaled
-		// up to an unmistakable full-card border. Rounded to match the
-		// glass body's own corner radius so it hugs the pane.
+		// Gilt focus ring around the active card, rounded to hug the pane.
 		drawGiltFocusRing(rl.NewRectangle(col.X, col.Y, col.Width, col.Height))
 	}
 
@@ -393,9 +301,7 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 	if !highlight {
 		nameCol = textMuted
 	}
-	// Class sigil flanks the name — same iconography as the party
-	// ribbon's card, but at a larger radius so it reads as a banner
-	// crest in this fuller pane.
+	// Class sigil flanks the name (party-ribbon iconography at a larger radius).
 	glyphR := float32(12)
 	glyphCX := innerX + glyphR
 	glyphCY := y + FontHeading/2
@@ -404,10 +310,8 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 	drawEngravedText(font, m.Name, innerX+nameOffset, y, FontHeading, nameCol)
 	y += 36
 
-	// PartyMember.Name doubles as the class label in this build, so the sub-line
-	// carries the level plus the standing formation row (Front/Back) — the latter
-	// so the player can read + arrange the 2×2 from this tab (the swap tool lives
-	// here, and the overlay covers the ribbon that otherwise shows the formation).
+	// Name doubles as the class label, so the sub-line carries level + formation row (Front/Back),
+	// the latter so the player can arrange the 2×2 from this tab (the swap tool lives here).
 	sub := "Lv " + strconv.Itoa(m.Level) + " · " + core.RowLabel(m.HomeRow)
 	drawTextWithShadow(font, sub, innerX, y, FontBody, textMuted)
 	y += 30
@@ -421,10 +325,8 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 	return y
 }
 
-// drawPanelsStats renders the Stats tab as one card per party member.
-// Each card stacks: class accent + name + level + HP/MP bars (shared
-// header) → 2-column stat grid (STR/DEX/INT/WIS/VIT/SPD) → armor / XP
-// row → status pill chip → allocate hints for the cursored member.
+// drawPanelsStats renders the Stats tab: one card per member — header → 2-col stat grid →
+// armor/XP row → status chip → allocate hints for the cursored member.
 func drawPanelsStats(g *core.GameState, assets Resources, body rl.Rectangle) {
 	font := assets.Font()
 	if len(g.Party) == 0 {
@@ -434,18 +336,13 @@ func drawPanelsStats(g *core.GameState, assets Resources, body rl.Rectangle) {
 	for i, m := range g.Party {
 		highlight := i == g.PanelsRowCursor
 		contentY := drawPartyMemberCardHeader(font, m, cols[i], highlight)
-		// Formation-swap source: the "picked-up" member awaiting a partner pick
-		// gets a distinct green outline (the cursor still wears the gilt focus
-		// ring), so the held tile reads apart from the one you're hovering.
+		// Swap source (picked-up member awaiting a partner) gets a green outline, distinct from the cursor's gilt ring.
 		if i == g.PanelSwapSource {
 			drawPanelOutline(int32(cols[i].X)-2, int32(cols[i].Y)-2, int32(cols[i].Width)+4, int32(cols[i].Height)+4, borderTarget)
 		}
 		innerX, innerW := memberCardInner(cols[i])
 
-		// Stat grid: 2 columns, ceil(StatCount/2) rows. Each cell paints
-		// "[icon] LBL  value" with the icon in soft gilt to the left of
-		// the label, the label muted, and the value bright so the eye
-		// scans the numbers without losing the sigil row anchor.
+		// Stat grid: 2 cols, ceil(StatCount/2) rows. Each cell: "[icon] LBL  value".
 		statColW := innerW / 2
 		rowH := float32(30)
 		statRows := (core.StatCount + 1) / 2
@@ -459,14 +356,12 @@ func drawPanelsStats(g *core.GameState, assets Resources, body rl.Rectangle) {
 			value := smallIntLabel(core.StatValue(m.Stats, s))
 			drawStatIcon(s, cellX+9, cellY+13, 9, statIconCol)
 			drawTextWithShadow(font, label, cellX+24, cellY, FontBody, textMuted)
-			// Value right-aligned within the cell so the column
-			// of numbers lines up no matter the label width.
+			// Value right-aligned so the number column lines up regardless of label width.
 			drawTextRightAligned(font, value, cellX+statColW-statValueInsetX, cellY, FontBody, textPrimary)
 		}
 		contentY += float32(statRows) * rowH
 
-		// Armor + XP secondary row, slightly muted so they
-		// don't compete with the stat grid above.
+		// Armor + XP secondary row, muted.
 		contentY += 8
 		drawTextWithShadow(font, "ARM", innerX, contentY, FontSmall, textMuted)
 		armVal := smallIntLabel(m.Armor)
@@ -478,8 +373,7 @@ func drawPanelsStats(g *core.GameState, assets Resources, body rl.Rectangle) {
 		drawTextRightAligned(font, xpText, innerX+innerW, contentY, FontSmall, textPrimary)
 		contentY += 28
 
-		// Status chip — bright pill in the per-status accent
-		// color so afflicted members read at a glance.
+		// Status chip — pill in the per-status accent color.
 		if kind, turns := core.PartyStatus(&g.Party[i]); kind != core.PartyStatusNone {
 			label := partyStatusTurnLabel(kind, turns)
 			lm := measurePanelStatValue(font, label, FontSmall)
@@ -487,9 +381,7 @@ func drawPanelsStats(g *core.GameState, assets Resources, body rl.Rectangle) {
 			chipH := float32(26)
 			chipX := innerX
 			col, _ := partyStatusVisual(kind)
-			// Shares drawStatusPill with the enemy-roster pill so the two
-			// silhouettes can't drift; left-aligned + tinted
-			// in the status color (its own anchoring, hence centered=false).
+			// Shares drawStatusPill with the enemy-roster pill; left-aligned (centered=false).
 			drawStatusPill(font, chipX, contentY, chipW, chipH,
 				fadeColor(col, 0.28), fadeColor(col, 0.85), label, col, false)
 			contentY += chipH + 8

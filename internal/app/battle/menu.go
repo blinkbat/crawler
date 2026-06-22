@@ -1,6 +1,7 @@
 package battle
 
 import (
+	"crawler/internal/app/audio"
 	"crawler/internal/app/core"
 	"crawler/internal/app/input"
 	"fmt"
@@ -9,8 +10,7 @@ import (
 )
 
 func updateActionMenu(g *core.GameState) {
-	// Debug easy-quit: bail out of the fight entirely. Only live when the
-	// debug toggle is on, so normal play has no flee shortcut here.
+	// Debug easy-quit, gated on the toggle so normal play has no flee shortcut.
 	if g.EasyBattleQuit && input.DebugFleePressed() {
 		fleeBattle(g)
 		return
@@ -35,8 +35,7 @@ func updateActionMenu(g *core.GameState) {
 		enterSwapTargeting(g)
 		return
 	case core.ActionRowFlee:
-		// Gate the retreat behind a yes/no — a stray Confirm on this row
-		// shouldn't burn the turn fleeing by accident.
+		// Yes/no gate so a stray Confirm doesn't burn the turn fleeing.
 		g.Battle.ActionMode = core.ActionFleeConfirm
 		setBattleStatus(g, "Flee this battle?")
 		return
@@ -54,16 +53,12 @@ func updateActionMenu(g *core.GameState) {
 		openSkillMenu(g)
 		return
 	default:
-		// A new ActionRow added to the enum without a case here would
-		// otherwise make Confirm on that row a silent no-op. Surface it
-		// instead of swallowing the press.
+		// Surface an unhandled ActionRow rather than swallow the press as a no-op.
 		setBattleStatus(g, msgChooseAction)
 	}
 }
 
-// updateFleeConfirm runs the Flee yes/no gate (ActionFleeConfirm): Confirm
-// commits the retreat, Back returns to the action menu. Keeps an accidental
-// Confirm on the Flee row from spending the turn fleeing.
+// updateFleeConfirm runs the Flee yes/no gate: Confirm commits, Back returns.
 func updateFleeConfirm(g *core.GameState) {
 	if input.BackPressed() {
 		g.Battle.ActionMode = core.ActionMenu
@@ -75,11 +70,8 @@ func updateFleeConfirm(g *core.GameState) {
 	}
 }
 
-// currentMember returns the acting party member (the CurrentParty slot) and
-// whether the slot index is valid. The "is CurrentParty in range?" guard was
-// open-coded at every action entry point; this is the single accessor so the
-// bounds rule lives in one place. Callers handle the !ok case their own way
-// (some resetBattleAction, some just return).
+// currentMember returns the acting party member (CurrentParty slot) and whether
+// the index is in range. Callers handle !ok their own way.
 func currentMember(g *core.GameState) (*core.PartyMember, bool) {
 	if !partyIndexValid(g, g.Battle.CurrentParty) {
 		return nil, false
@@ -87,15 +79,9 @@ func currentMember(g *core.GameState) (*core.PartyMember, bool) {
 	return &g.Party[g.Battle.CurrentParty], true
 }
 
-// openSkillMenu transitions the action menu into the skill-picker
-// submenu. Seeds the cursor from the member's persisted SkillCursor so
-// the submenu opens on their last-used skill instead of always jumping
-// back to slot 0.
-// refreshSkillMenuBuf repopulates the shared skill-menu buffer for `member`:
-// the learned-skill list normally, or EVERY player-castable skill when the
-// debug "all skills" toggle (g.DebugAllSkills) is on, so any skill can be
-// tested without learning it. Both the open and the per-frame update path call
-// this so the two can't diverge on which list they show.
+// refreshSkillMenuBuf repopulates the skill-menu buffer for `member`: learned
+// skills normally, or every player-castable skill under DebugAllSkills. Both the
+// open and per-frame update paths call it so they can't diverge on the list.
 func refreshSkillMenuBuf(g *core.GameState, member *core.PartyMember) {
 	if g.DebugAllSkills {
 		g.Battle.SkillMenuList = core.PlayerCastableSkillsInto(g.Battle.SkillMenuList)
@@ -104,11 +90,9 @@ func refreshSkillMenuBuf(g *core.GameState, member *core.PartyMember) {
 	g.Battle.SkillMenuList = core.LearnedSkillsInto(member, g.Battle.SkillMenuList)
 }
 
-// refreshItemMenuBuf repopulates the shared item-menu list with the live
-// consumable stacks — the battle Item picker's eligible set. Called on the
-// frame the menu opens (so the renderer has the list before updateItemMenu
-// first runs the following frame) and each frame it stays open, mirroring
-// refreshSkillMenuBuf.
+// refreshItemMenuBuf repopulates the item-menu list with live consumable stacks.
+// Called on the open frame (renderer needs the list before updateItemMenu runs)
+// and each frame it stays open.
 func refreshItemMenuBuf(g *core.GameState) {
 	g.Battle.ItemMenuList = core.LiveConsumablesInto(g.Inventory, g.Battle.ItemMenuList)
 }
@@ -128,10 +112,8 @@ func openSkillMenu(g *core.GameState) {
 	setBattleStatus(g, msgChooseSkill)
 }
 
-// updateSkillMenu drives the skill-picker submenu. Up/Down cycles the
-// learned-skill list; Back returns to the action menu; Confirm arms
-// the chosen skill and transitions into its target mode (or arms the
-// timing bar directly when the skill is self-cast / AoE).
+// updateSkillMenu drives the skill-picker: Confirm arms the skill and enters its
+// target mode (or arms the timing bar directly for self-cast / AoE).
 func updateSkillMenu(g *core.GameState) {
 	member, ok := currentMember(g)
 	if !ok {
@@ -162,19 +144,13 @@ func updateSkillMenu(g *core.GameState) {
 		setBattleStatus(g, msgNoSkillReady)
 		return
 	}
-	// MP gate routed through the shared canAffordSkill predicate so
-	// the rule matches chargeMP's deduct-time check. Two separate
-	// inlines of `actor.MP < cost` previously made a "potion of
-	// free cast" or "VIT-raises-MP-cap" feature a two-place edit.
+	// MP gate via canAffordSkill so it matches chargeMP's deduct-time check.
 	if !g.DebugAllSkills && !canAffordSkill(&g.Party[g.Battle.CurrentParty], skill) {
 		setBattleStatus(g, fmt.Sprintf("%s needs %d MP.", core.SkillName(skill), core.SkillCost(skill)))
 		return
 	}
-	// A melee skill (single-target OR AoE cleave) can't be used from the back row
-	// — back-row melee reaches nothing. Gate here, before any target selection /
-	// AoE dispatch, so the back-row check covers every melee skill path. The
-	// skill submenu stays open (ActionMode unchanged) so the player can pick
-	// another skill or reposition.
+	// Back-row melee (single-target or AoE cleave) reaches nothing — gate before
+	// any target selection / AoE dispatch. Submenu stays open to re-pick.
 	if core.SkillAttackClassFor(skill).IsMelee() && !core.PartyInEffectiveFront(g.Party, g.Battle.CurrentParty) {
 		setBattleStatus(g, msgBackRowMeleeSkill)
 		return
@@ -188,17 +164,15 @@ func updateSkillMenu(g *core.GameState) {
 		g.Battle.PartyTarget = g.Battle.CurrentParty
 		setBattleStatus(g, fmt.Sprintf("Choose who receives %s.", core.SkillName(skill)))
 	case core.ActionEnemyTarget:
-		// Shared entry snaps the cursor to a reachable foe (front row for a melee
-		// skill, any for ranged/magic). The back-row gate above already passed.
+		// Snaps the cursor to a reachable foe (front for melee, any for ranged/magic).
 		enterEnemyTargeting(g, fmt.Sprintf("Choose a target for %s.", core.SkillName(skill)))
 	default:
 		beginPendingAction(g)
 	}
 }
 
-// battlePendingAttackMelee reports whether the action the player is about to
-// target is a MELEE attack (front-gated): a basic attack keys off the actor's
-// equipped weapon, a skill off its reach class.
+// battlePendingAttackMelee reports whether the pending action is a melee attack
+// (front-gated): basic attack keys off the equipped weapon, a skill off its reach class.
 func battlePendingAttackMelee(g *core.GameState) bool {
 	if g.Battle.PendingSkill == core.SkillNone {
 		if m, ok := currentMember(g); ok {
@@ -209,8 +183,8 @@ func battlePendingAttackMelee(g *core.GameState) bool {
 	return core.SkillAttackClassFor(g.Battle.PendingSkill).IsMelee()
 }
 
-// battleEnemyTargets returns the selectable enemy slots for the pending action:
-// the effective front row for a melee attack, every living enemy for ranged/magic.
+// battleEnemyTargets returns selectable enemy slots: effective front row for melee,
+// every living enemy for ranged/magic.
 func battleEnemyTargets(g *core.GameState) []int {
 	if battlePendingAttackMelee(g) {
 		return core.MeleeReachableBattleEnemyIndices(g)
@@ -218,11 +192,9 @@ func battleEnemyTargets(g *core.GameState) []int {
 	return core.LivingBattleEnemyIndices(g)
 }
 
-// enterEnemyTargeting transitions into the enemy target picker for the pending
-// action, enforcing melee reach: a melee attacker in the back row can't reach
-// (refused), and the cursor is snapped to a reachable foe (front row for melee,
-// any row otherwise). Returns false (leaving the caller's menu state intact) when
-// the action is barred or no target is reachable.
+// enterEnemyTargeting opens the enemy target picker, enforcing melee reach (a
+// back-row melee attacker is refused) and snapping the cursor to a reachable foe.
+// Returns false (menu state intact) when barred or no target is reachable.
 func enterEnemyTargeting(g *core.GameState, prompt string) bool {
 	if battlePendingAttackMelee(g) && !core.PartyInEffectiveFront(g.Party, g.Battle.CurrentParty) {
 		setBattleStatus(g, msgBackRowMeleeAttack)
@@ -241,17 +213,14 @@ func enterEnemyTargeting(g *core.GameState, prompt string) bool {
 	return true
 }
 
-// updateItemMenu drives the inventory picker. Up/Down cycles entries; Back
-// returns to the action menu; Confirm picks the highlighted item and moves
-// to ally-target selection. Items only heal allies for now, so target mode
-// is always party.
+// updateItemMenu drives the inventory picker; Confirm moves to ally-target
+// selection. Items only heal allies for now, so target mode is always party.
 func updateItemMenu(g *core.GameState) {
 	refreshItemMenuBuf(g)
 	living := g.Battle.ItemMenuList
 	count := len(living)
 	if count == 0 {
-		// Inventory ran dry between opening the menu and now — not actually
-		// reachable today (use is the only consumer), but defensively bail.
+		// Inventory ran dry since open — not reachable today, but bail defensively.
 		resetBattleAction(g)
 		setBattleStatus(g, msgNoItems)
 		return
@@ -275,17 +244,9 @@ func updateItemMenu(g *core.GameState) {
 	setBattleStatus(g, fmt.Sprintf("Use %s on whom?", core.ItemInfo(picked).Name))
 }
 
-// updateTargetPicker is the shared input loop for every target-selection
-// mode: Next/Previous cycle the cursor via cycle, Back runs onBack (and
-// stops), Confirm runs onConfirm. updateEnemyTargeting /
-// updatePartyTargeting / updateItemTarget used to repeat this exact block,
-// differing only in which cycle / back / confirm functions they bound.
-//
-// The hooks take *core.GameState directly (rather than pre-bound zero-arg
-// closures) so the three callers can pass top-level function values — which are
-// static and DON'T allocate — instead of fresh closures capturing g every
-// frame the picker is up. This runs per frame while the player hovers a target,
-// so the closures were pure per-frame garbage.
+// updateTargetPicker is the shared input loop for every target-selection mode.
+// Hooks take *core.GameState directly so callers pass non-allocating top-level
+// functions rather than fresh per-frame closures capturing g.
 func updateTargetPicker(g *core.GameState, cycle func(*core.GameState, int), onBack, onConfirm func(*core.GameState)) {
 	if input.TargetNextPressed() {
 		cycle(g, 1)
@@ -302,24 +263,21 @@ func updateTargetPicker(g *core.GameState, cycle func(*core.GameState, int), onB
 	}
 }
 
-// updateItemTarget picks the ally to receive the pending item. Mirrors
-// updatePartyTargeting but routes through applyItem.
+// updateItemTarget picks the ally to receive the pending item, routing through applyItem.
 func updateItemTarget(g *core.GameState) {
 	updateTargetPicker(g, cyclePartyTarget, cancelTargetToItemMenu, applyItem)
 }
 
-// cancelTargetToItemMenu steps back to the item picker, NOT all the way to the
-// action menu — target-back cancels the target selection, not the whole action.
+// cancelTargetToItemMenu steps back to the item picker, not the action menu —
+// target-back cancels the target selection, not the whole action.
 func cancelTargetToItemMenu(g *core.GameState) {
 	g.Battle.ActionMode = core.ActionItemMenu
 	refreshItemMenuBuf(g)
 	setBattleStatus(g, msgChooseItem)
 }
 
-// applyItem consumes the pending item, heals the targeted ally by the
-// item's HealAmount, and ends the actor's turn. The item action doesn't
-// run a timing minigame — the player already invested a turn and used a
-// finite resource, no need to extract a third demand on top.
+// applyItem consumes the pending item, heals the targeted ally, and ends the
+// turn. No timing minigame — the turn + finite resource are demand enough.
 func applyItem(g *core.GameState) {
 	kind := g.Battle.PendingItem
 	if kind == core.ItemNone {
@@ -327,42 +285,31 @@ func applyItem(g *core.GameState) {
 		return
 	}
 	if _, ok := currentMember(g); !ok {
-		// Defensive: the live caller (updatePlayerBattle) guards this, but
-		// don't index g.Party with a stale CurrentParty if a future path
-		// reaches an item-target confirm mid-transition. Mirrors performDefend.
+		// Defensive: don't index g.Party with a stale CurrentParty mid-transition.
 		resetBattleAction(g)
 		return
 	}
 	target := g.Battle.PartyTarget
-	// Ingested is checked alongside HP<=0: the target picker excludes ingested
-	// allies, but a mantrap can swallow the chosen ally between target-select
-	// and this confirm (mixed-initiative). Without this guard the stack is
-	// consumed and healPartyMember no-ops on the ingested member — item wasted.
+	// Re-check Ingested (a mantrap can swallow the chosen ally between target-select
+	// and confirm): without it the stack is consumed and the heal no-ops — item wasted.
 	if !partyIndexValid(g, target) || g.Party[target].HP <= 0 || g.Party[target].Ingested {
 		setBattleStatus(g, msgInvalidTarget)
 		return
 	}
 	def := core.ItemInfo(kind)
-	// Don't spend a restorative on a target it can't help — the shared rule
-	// (refuse only when full on every axis the item restores) lives in
-	// core.ItemHelpsTarget, used by the out-of-battle path too.
+	// Don't spend a restorative on a target it can't help (core.ItemHelpsTarget
+	// refuses only when full on every axis the item restores).
 	if !core.ItemHelpsTarget(def, g.Party[target]) {
 		setBattleStatus(g, g.Party[target].Name+" doesn't need that right now.")
 		return
 	}
-	// A confused actor may fumble the item onto a random living ally — the same
-	// per-action retarget a confused heal cast gets (AGENTS: "Confused =
-	// per-action random retarget"). Deferred until AFTER the validity/help gates
-	// above so it fires exactly once on the path that commits the turn: running
-	// it first let a re-confirm (after an "invalid"/"doesn't need that" bounce,
-	// neither of which ends the turn) re-roll the fumble on every press and spam
-	// the log. Mirrors beginPendingAction, which retargets only after setup
-	// succeeds. A no-op when the actor isn't confused.
+	// Confused fumble onto a random living ally. Deferred until AFTER the
+	// validity/help gates so it fires once on the turn-committing path — running it
+	// first let a re-confirm (after a non-turn-ending bounce) re-roll and spam the log.
 	maybeConfuseRetarget(g)
 	target = g.Battle.PartyTarget
 	tgt := &g.Party[target]
-	// Try to consume from inventory first — bail without using the action's
-	// turn if the stack disappeared (defensive; shouldn't happen).
+	// Consume first; bail without spending the turn if the stack vanished (defensive).
 	updated, ok := core.ConsumeItem(g.Inventory, kind)
 	if !ok {
 		setBattleStatus(g, "Item not in inventory.")
@@ -388,10 +335,8 @@ func applyItem(g *core.GameState) {
 	finishActorTurn(g)
 }
 
-// itemUseMessage formats the combat-log line for a consumed item by what it
-// actually restored: HP (food — "eats"), MP (phial — "drinks"), both, or a
-// plain "uses" for a no-restore item. Both hp and mp are the ACTUAL amounts
-// gained (post-clamp), so the log can't claim "+8 HP" when only 1 landed.
+// itemUseMessage formats the consumed-item log line by what it restored (HP/MP/
+// both/neither). hp and mp are ACTUAL post-clamp amounts so the log can't overclaim.
 func itemUseMessage(actorName, targetName string, def core.ItemDefinition, healed bool, hp, mp int) string {
 	switch {
 	case healed && hp > 0 && mp > 0:
@@ -405,9 +350,8 @@ func itemUseMessage(actorName, targetName string, def core.ItemDefinition, heale
 	}
 }
 
-// performDefend marks the current member as defending and ends their turn.
-// No timing minigame — the boost is the whole reward, and showing a bar would
-// imply an opportunity for a better outcome that doesn't exist.
+// performDefend marks the current member defending and ends their turn. No timing
+// minigame — the boost is the whole reward, a bar would imply a nonexistent better outcome.
 func performDefend(g *core.GameState) {
 	member, ok := currentMember(g)
 	if !ok {
@@ -418,9 +362,8 @@ func performDefend(g *core.GameState) {
 	finishActorTurn(g)
 }
 
-// flipRow / flipCol return the other rank / column of the 2×2 — the single
-// source for "the orthogonal neighbour along this axis" so the picker and the
-// default-partner pick can't disagree on what "the other slot" is.
+// flipRow / flipCol return the other rank / column of the 2×2 — the single source
+// for the orthogonal neighbour, so picker and default-partner can't disagree.
 func flipRow(r core.Row) core.Row {
 	if r == core.RowFront {
 		return core.RowBack
@@ -435,9 +378,8 @@ func flipCol(c core.Col) core.Col {
 	return core.ColLeft
 }
 
-// memberAtSlot returns the party index whose home 2×2 slot is (row,col), other
-// than the acting member, and ok=false if none. The formation is a clean 2×2 by
-// invariant (NormalizePartyFormation), so at most one member sits per slot.
+// memberAtSlot returns the party index (other than the actor) whose home 2×2 slot
+// is (row,col). Formation is a clean 2×2 by invariant, so at most one per slot.
 func memberAtSlot(g *core.GameState, row core.Row, col core.Col) (int, bool) {
 	for i := range g.Party {
 		if i == g.Battle.CurrentParty {
@@ -450,11 +392,8 @@ func memberAtSlot(g *core.GameState, row core.Row, col core.Col) (int, bool) {
 	return 0, false
 }
 
-// defaultSwapPartner is the slot the Swap picker opens on: the acting member's
-// horizontal neighbour (same row, other column) if present, else the vertical
-// neighbour (same column, other row). Both are ORTHOGONAL — never the diagonal —
-// so confirming without steering still trades with an adjacent slot. -1 when the
-// actor has no orthogonal neighbour (a degenerate sub-2×2 party).
+// defaultSwapPartner is the slot the Swap picker opens on: the actor's horizontal
+// neighbour else vertical — both orthogonal, never diagonal. -1 if none (sub-2×2 party).
 func defaultSwapPartner(g *core.GameState) int {
 	actor := g.Battle.CurrentParty
 	if actor < 0 || actor >= len(g.Party) {
@@ -470,11 +409,8 @@ func defaultSwapPartner(g *core.GameState) int {
 	return -1
 }
 
-// enterSwapTargeting opens the Swap picker: the actor stays the source (its card
-// keeps the active halo) and the cursor highlights an ADJACENT slot to trade
-// with. The D-pad then steers the cursor to the neighbour in that direction (no
-// diagonal); Confirm performs the swap and ends the actor's turn. Opens on the
-// default orthogonal partner.
+// enterSwapTargeting opens the Swap picker on the default orthogonal partner; the
+// actor stays the source and the D-pad steers to an adjacent slot (no diagonal).
 func enterSwapTargeting(g *core.GameState) {
 	if _, ok := currentMember(g); !ok {
 		return
@@ -490,9 +426,7 @@ func enterSwapTargeting(g *core.GameState) {
 }
 
 // updateSwapTarget drives the Swap picker: the D-pad picks the orthogonal
-// neighbour to trade with (Up/Down = front/back, Left/Right = the other column).
-// The diagonal slot is unreachable by a single direction, so a diagonal swap
-// can't be selected. Back returns to the action menu, Confirm trades slots.
+// neighbour (diagonal unreachable by a single direction), Confirm trades slots.
 func updateSwapTarget(g *core.GameState) {
 	if input.BackPressed() {
 		cancelTargetToActionMenu(g)
@@ -507,11 +441,9 @@ func updateSwapTarget(g *core.GameState) {
 	}
 }
 
-// swapTargetForDirection maps the frame's D-pad direction to the acting member's
-// orthogonal neighbour in that direction, or ok=false when no direction is
-// pressed or the actor already sits at that edge. Vertical (front/back) is
-// resolved first so a diagonal stick reading collapses to a single axis rather
-// than ambiguously straddling two.
+// swapTargetForDirection maps the frame's D-pad direction to the actor's orthogonal
+// neighbour, ok=false if none pressed or at that edge. Vertical resolves first so a
+// diagonal stick reading collapses to one axis.
 func swapTargetForDirection(g *core.GameState) (int, bool) {
 	actor := g.Battle.CurrentParty
 	if actor < 0 || actor >= len(g.Party) {
@@ -542,11 +474,8 @@ func swapTargetForDirection(g *core.GameState) (int, bool) {
 	return 0, false
 }
 
-// performSwap exchanges the actor's formation slot with the cursored partner's
-// and ends the actor's turn. The swap keeps the party a clean 2×2 (the two
-// members trade positions), so it can never leave three in one row. A diagonal
-// pairing is rejected defensively — the picker only ever selects orthogonal
-// neighbours, but the trade must never cross both axes at once.
+// performSwap exchanges the actor's formation slot with the cursored partner's and
+// ends the turn. Diagonal pairings are rejected defensively (trade must not cross both axes).
 func performSwap(g *core.GameState) {
 	actor, ok := currentMember(g)
 	if !ok {
@@ -569,12 +498,9 @@ func performSwap(g *core.GameState) {
 	finishActorTurn(g)
 }
 
-// performFlee attempts to escape the fight. The chance scales the party's
-// average living level against the pack's (core.FleeChance). On success the
-// battle ends and the party retreats to the pre-combat tile (Battle.FleeReturn)
-// — the pack STAYS on the field (you fled, you didn't kill it; clearBattleResidual
-// keeps an alive pack). On failure the attempt burns the actor's turn, so the
-// enemies get their swing.
+// performFlee attempts escape (core.FleeChance scales party vs pack level). On
+// success the party retreats to the pre-combat tile and the pack STAYS on the
+// field; on failure the attempt burns the turn.
 func performFlee(g *core.GameState) {
 	member, ok := currentMember(g)
 	if !ok {
@@ -590,24 +516,15 @@ func performFlee(g *core.GameState) {
 		finishActorTurn(g)
 		return
 	}
-	// Escaped: snap the party back to the pre-combat tile (clearing any step
-	// animation) and leave combat. The pack survives, so the player lands where
-	// they started and is free to walk off. The retreat tile is always walkable
-	// (the player legitimately stood on it and terrain can't change mid-battle),
-	// so the only dynamic hazard is a pack having moved onto it — in a
-	// pack-into-player ambush, the engaging tick can (rarely) step ANOTHER pack
-	// onto the just-vacated tile. Guard against that: only reposition when no
-	// pack occupies the tile, otherwise escape combat in place rather than
-	// teleporting on top of a pack.
+	// Escaped: snap back to the pre-combat tile. That tile is always walkable; the
+	// only hazard is another pack having ambush-stepped onto it — only reposition
+	// when no pack occupies it, else escape in place rather than land on a pack.
 	if core.PackIndexAtTile(g.Packs, g.Battle.FleeReturnX, g.Battle.FleeReturnZ) < 0 {
 		g.Player.TileX = g.Battle.FleeReturnX
 		g.Player.TileZ = g.Battle.FleeReturnZ
-		// Re-seat the standing level on the return tile: keep the level carried
-		// out of the pre-combat step when it's still a standable surface (so a
-		// player who fought on a bridge deck flees back onto the deck, not the
-		// ground beneath it), and only snap to the lowest standable surface when
-		// it isn't. Same rule the save loader uses. No-op on a heightfield, where
-		// the single surface is both the carried level and the lowest standable.
+		// Re-seat the standing level: keep the carried level if still standable
+		// (flee back onto the bridge deck, not the ground below), else snap to the
+		// lowest standable. Same rule the save loader uses; no-op on a heightfield.
 		if !g.Area.Standable(g.Player.TileX, g.Player.Level, g.Player.TileZ) {
 			if lo := g.Area.LowestStandableLevel(g.Player.TileX, g.Player.TileZ); lo >= 0 {
 				g.Player.Level = lo
@@ -620,25 +537,34 @@ func performFlee(g *core.GameState) {
 }
 
 func updateEnemyTargeting(g *core.GameState) {
-	updateTargetPicker(g, cycleBattleTarget, cancelTargetToActionMenu, beginPendingAction)
+	updateTargetPicker(g, cycleBattleTarget, cancelTargetToActionMenu, confirmEnemyTarget)
+}
+
+// confirmEnemyTarget commits the pending action on the cursor's foe — an
+// unreachable one (greyed back-row) buzzes + logs rather than burning the turn.
+// Top-level (not a closure) so updateTargetPicker stays alloc-free.
+func confirmEnemyTarget(g *core.GameState) {
+	if !core.BattleEnemyTargetReachable(g, g.Battle.EnemyIndex) {
+		audio.Play(audio.SoundInputMiss)
+		setBattleMessage(g, msgBackRowMeleeTarget)
+		return
+	}
+	beginPendingAction(g)
 }
 
 func updatePartyTargeting(g *core.GameState) {
 	updateTargetPicker(g, cyclePartyTarget, cancelTargetToActionMenu, beginPendingAction)
 }
 
-// cancelTargetToActionMenu is the shared Back handler for the
-// enemy/party target pickers — drop the pending action and return to the
-// action menu prompt.
+// cancelTargetToActionMenu is the shared Back handler for the target pickers —
+// drop the pending action and return to the action menu.
 func cancelTargetToActionMenu(g *core.GameState) {
 	resetBattleAction(g)
 	setBattleStatus(g, msgChooseAction)
 }
 
-// cycleTargetSelection is the shared body for the enemy / party target
-// cyclers: fetch the live target indices, wrap the cursor by delta, and
-// commit + announce the new pick. The two cycle helpers used to be
-// near-identical apart from selector, state field, and status formatter.
+// cycleTargetSelection is the shared body for the enemy / party target cyclers:
+// fetch live indices, wrap the cursor by delta, commit + announce the new pick.
 func cycleTargetSelection(
 	g *core.GameState,
 	current *int,
@@ -656,10 +582,10 @@ func cycleTargetSelection(
 }
 
 func cycleBattleTarget(g *core.GameState, delta int) {
-	// Reach-aware candidate list: a melee attack cycles only the effective front
-	// row; ranged/magic cycles every living foe.
+	// Cycle EVERY living foe, including greyed back-row ones a melee weapon can't
+	// reach — the cursor can land on one to aim; confirmEnemyTarget gates the hit.
 	cycleTargetSelection(g, &g.Battle.EnemyIndex, delta,
-		func() []int { return battleEnemyTargets(g) },
+		func() []int { return core.LivingBattleEnemyIndices(g) },
 		func(g *core.GameState, slot, total int) string {
 			return core.BattleEnemyTargetStatus(g, slot, total)
 		})
@@ -673,18 +599,9 @@ func cyclePartyTarget(g *core.GameState, delta int) {
 		})
 }
 
-// cycleTarget returns the targets-slot the cursor should move to when the
-// player presses left/right on a target picker. `current` is expected to be
-// one of the values in `targets` — callers (cycleBattleTarget,
-// cyclePartyTarget) maintain that invariant by sourcing both the current
-// selection AND the living-target list from the same selectors.
-//
-// If `current` isn't found in `targets`, the wrap falls back to "slot 0 +
-// delta" so the game keeps running, but the invariant break is logged so
-// the regression surfaces to whoever is debugging. Previously this was a
-// silent fallback — if a future steal removes the targeted enemy mid-list
-// or a heal target dies between frames, the cursor would jump to the
-// front with no diagnostic trail.
+// cycleTarget returns the targets-slot the cursor moves to on a left/right press.
+// `current` is expected to be in `targets`; if not, it falls back to slot 0 and
+// logs the broken selection invariant rather than failing silently.
 func cycleTarget(current int, targets []int, delta int) int {
 	currentSlot := slices.Index(targets, current)
 	if currentSlot < 0 {

@@ -7,12 +7,8 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// sliderField describes one row in a slider-stack modal: a labelled,
-// bounded scalar on the edited value T, bridged through Get/Set so the
-// slider's float64 world can read and write typed fields. The single
-// descriptor shape shared by the sound creator (T = soundParamSet) and
-// the Foe Visualizer (T = core.EnemyVisualOverride) — table-driven, no
-// reflection; adding a slider to either modal is one row.
+// sliderField describes one row in a slider-stack modal: a bounded scalar on
+// value T, bridged through Get/Set. Shared by the sound creator and Foe Visualizer.
 type sliderField[T any] struct {
 	Label   string
 	Min     float64
@@ -21,7 +17,7 @@ type sliderField[T any] struct {
 	Get     func(*T) float64
 	Set     func(*T, float64)
 	Format  string               // fmt verb / suffix — used when Display is nil
-	Display func(float64) string // optional custom value renderer (e.g. the Wave row's "Sine"/"Square")
+	Display func(float64) string // optional custom value renderer; nil uses Format
 }
 
 func sliderSnap(min, max, step float64, trackX, trackW, mouseX float32) float64 {

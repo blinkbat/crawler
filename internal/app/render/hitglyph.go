@@ -8,25 +8,15 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Hit glyphs: short-lived 2D VECTOR shapes drawn over a struck target during an
-// attack — a clarity cue (what kind of blow landed) layered on top of the 3D
-// particle burst. Unlike the particles (3D billboards, depth-sorted in the
-// world pass), a glyph is crisp screen-space line/arc/ring art drawn in the HUD
-// pass, projected from the target's world position.
+// Hit glyphs: short-lived 2D vector shapes drawn over a struck target — a
+// clarity cue (what kind of blow landed) layered on the 3D particle burst, drawn
+// crisp in the HUD pass projected from the target's world position.
 //
-// Glyphs are presentation-only (like the particle pool) — they live here in the
-// render package, NOT on GameState. They're spawned from the SAME VFX requests
-// the apply handlers already emit (spawnFromRequest → spawnHitGlyph), with the
-// glyph style derived from the VFX kind, so every existing damaging hit
-// (player→foe and enemy→party) lights one up with zero apply-handler wiring.
-//
-// NOTE: a basic attack's glyph now keys off the weapon class — edged weapons
-// emit VFXSlash (slash glyph), while unarmed fists / blunt club+hammer / ranged
-// strikes emit VFXImpact (impact glyph), via core.WeaponHitVFX at the apply
-// site. Enemy basic melee (claw/bite/slam) emits VFXImpact on the struck party
-// member, and the Stone Golem's slam uses VFXStoneslam — all three share the
-// impact glyph. The bladed melee SKILLS (Swipe/Backstab/Whirlwind/Crushing
-// Blow) still emit VFXSlash via vfxKindFor.
+// Presentation-only (like the particle pool): they live here, NOT on GameState,
+// spawned from the same VFX requests the apply handlers emit (spawnFromRequest →
+// spawnHitGlyph) with the style derived from the VFX kind, so every damaging hit
+// lights one up with no apply-handler wiring. The glyph→VFX mapping keys off the
+// weapon/attack at the apply site (core.WeaponHitVFX / vfxKindFor).
 
 type hitGlyphKind uint8
 
@@ -44,24 +34,17 @@ const (
 const (
 	hitGlyphCap      = 32
 	hitGlyphDuration = float32(0.42)
-	hitGlyphRise     = float32(0.5) // world-unit lift from the anchor to torso height
+	hitGlyphRise     = float32(0.5) // world-unit lift from anchor to torso height
 	hitGlyphRadius   = float32(26)  // base screen radius in px
-	// partyGlyphExtraRise lifts a party-anchored glyph above the base torso rise.
-	// Party billboards sit low and near the camera (partySpritePosition Y≈0.62),
-	// so they project into the lower screen where the battle HUD ribbon sits;
-	// the extra lift floats the glyph above the member's head, clear of the HUD,
-	// so an incoming-hit cue on the party is actually visible (enemy glyphs sit
-	// high already and need no extra lift).
+	// partyGlyphExtraRise floats a party-anchored glyph above the member's head,
+	// clear of the HUD ribbon (party billboards sit low; enemy glyphs sit high
+	// already and need none).
 	partyGlyphExtraRise = float32(0.42)
 )
 
-// vfxGlyphs maps every VFXKind to its clarity glyph. Heal / status / utility
-// VFX (Heal, Steal, Scan, Sleep, Web, Confuse, Ingest, Death — and VFXNone)
-// map to glyphNone — they aren't damaging hits, so they get no glyph. EVERY
-// kind must appear: the init below asserts len(vfxGlyphs) == core.VFXKindCount,
-// so a newly appended VFX kind can't silently inherit glyphNone the way the old
-// switch's fallthrough allowed. A new attack VFX lights a glyph by adding its
-// row here (plus a drawHitGlyph case).
+// vfxGlyphs maps every VFXKind to its clarity glyph (non-damaging VFX → glyphNone).
+// init asserts len == core.VFXKindCount so a new kind can't silently inherit
+// glyphNone; add a row here + a drawHitGlyph case to light a glyph.
 var vfxGlyphs = map[core.VFXKind]hitGlyphKind{
 	core.VFXNone:      glyphNone,
 	core.VFXSlash:     glyphSlash,
@@ -88,30 +71,19 @@ func init() {
 	}
 }
 
-// hitGlyphForVFX returns the clarity glyph for an impact VFX kind, glyphNone for
-// non-damaging VFX. Single source for the kind→glyph mapping (vfxGlyphs).
+// hitGlyphForVFX returns the clarity glyph for a VFX kind (glyphNone for non-damaging).
 func hitGlyphForVFX(k core.VFXKind) hitGlyphKind {
 	return vfxGlyphs[k]
 }
 
-// hitGlyph is one live overlay: a kind + the ANCHOR IDENTITY of the struck
-// target (so its world position is re-resolved against the live game state every
-// frame) + the per-kind glyph tuning + its age. We store the anchor (not a
-// frozen XYZ) because the target physically MOVES during the glyph's ~0.4s life
-// — HitKnockback shoves it backward and AttackBump lunges it forward, both along
-// the camera-forward (depth) axis. A depth shift moves a billboard's screen-X in
-// proportion to how far off the view axis it sits, so a frozen anchor let an
-// off-center foe's glyph slide out from under it (centered foes looked fine,
-// foes to the left/right drifted). Re-resolving keeps the glyph glued to the
-// moving sprite. GlyphXOffset is the horizontal nudge applied along camera-right
-// at draw (the per-kind authored glyph offset); Rise is the world-Y lift applied
-// in SCREEN space (see DrawHitGlyphs) so the glyph stays directly above the
-// target under the pitched battle camera instead of drifting toward the vertical
-// vanishing point. DepthOffset pushes the anchor back along camera-forward to
-// match the billboard's depthOffset (resolveBillboardPlacement) — without it an
-// off-center foe whose sprite is pushed back (the Feral Rat's square PNG) gets a
-// glyph at the wrong depth, which projects to a sideways shift that slides the
-// glyph OUTWARD (e.g. a left-side rat's glyph drifts further left).
+// hitGlyph is one live overlay: kind + the target's ANCHOR IDENTITY (re-resolved
+// every frame, not a frozen XYZ, because the target moves in depth during the
+// glyph's ~0.4s life via HitKnockback/AttackBump — a frozen anchor let an
+// off-center foe's glyph slide sideways). GlyphXOffset nudges along camera-right;
+// Rise is the world-Y lift applied in SCREEN space (see DrawHitGlyphs) so the
+// glyph stays directly above under the pitched camera; DepthOffset pushes the
+// anchor back to match the billboard's depthOffset (else a pushed-back off-center
+// sprite gets its glyph at the wrong depth and it slides outward).
 type hitGlyph struct {
 	Kind         hitGlyphKind
 	Anchor       core.VFXAnchor
@@ -123,31 +95,23 @@ type hitGlyph struct {
 	Scale        float32
 	Elapsed      float32
 	Duration     float32
-	// lastX/Y/Z is the most recent successfully-resolved world anchor (post
-	// X/depth offset). If the anchor stops resolving mid-life — e.g. the struck
-	// enemy fully fades out of BattleMembers — the glyph finishes its ~0.4s life
-	// at this frozen spot instead of popping out, while a live anchor keeps
-	// updating it each frame. haveLast guards the never-resolved case.
+	// lastX/Y/Z is the last resolved world anchor (post offsets); if the anchor
+	// stops resolving mid-life (enemy fades out of BattleMembers) the glyph
+	// finishes in place rather than popping out. haveLast guards never-resolved.
 	lastX, lastY, lastZ float32
 	haveLast            bool
 }
 
 var hitGlyphs = make([]hitGlyph, 0, hitGlyphCap)
 
-// resetHitGlyphs drops every live glyph — called alongside ResetParticles on a
-// VFX reset (battle exit, area transition) so a glyph can't linger into the
-// next scene.
+// resetHitGlyphs drops every live glyph (alongside ResetParticles on a VFX reset)
+// so a glyph can't linger into the next scene.
 func resetHitGlyphs() { hitGlyphs = hitGlyphs[:0] }
 
-// spawnHitGlyph queues a glyph bound to the struck target's ANCHOR (req's
-// Anchor + slot/tile), so DrawHitGlyphs re-resolves the live world position
-// every frame and the glyph tracks the target as it recoils/lunges. glyphXOffset
-// is the kind's HORIZONTAL glyph nudge (applied along camera-right at draw); the
-// vertical offsets arrive via extraRise. The base torso lift (hitGlyphRise) plus
-// extraRise are stored as a screen-space Rise applied at draw, not baked into the
-// world Y, so the glyph doesn't drift sideways for off-center foes under the
-// pitched battle camera. Sized by scale (per-kind glyphScale; <=0 → 1). No-op
-// for glyphNone or when the pool is at its cap.
+// spawnHitGlyph queues a glyph bound to the target's ANCHOR so DrawHitGlyphs
+// re-resolves and tracks it. The torso lift + extraRise are stored as a
+// screen-space Rise (not baked into world Y) so off-center foes don't drift.
+// scale <=0 → 1. No-op for glyphNone or a full pool.
 func spawnHitGlyph(kind hitGlyphKind, req core.VFXRequest, glyphXOffset, depthOffset, extraRise, scale float32) {
 	if kind == glyphNone || len(hitGlyphs) >= hitGlyphCap {
 		return
@@ -169,12 +133,10 @@ func spawnHitGlyph(kind hitGlyphKind, req core.VFXRequest, glyphXOffset, depthOf
 	})
 }
 
-// DrawHitGlyphs re-resolves each live glyph's anchor against the live game state,
-// projects it to screen, and draws its animated shape, then ages + culls the
-// pool. Call in the HUD pass (after EndMode3D) so the crisp 2D art layers over
-// the world — but BEFORE the damage popups so the number reads on top. Mirrors
-// the particle sweep's draw-before-advance so a freshly-spawned glyph always gets
-// one visible frame.
+// DrawHitGlyphs re-resolves each glyph's anchor, projects it, draws its shape,
+// then ages + culls the pool. Call in the HUD pass (after EndMode3D) but BEFORE
+// damage popups so the number reads on top. Draw-before-advance so a fresh glyph
+// gets one visible frame.
 func DrawHitGlyphs(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if len(hitGlyphs) == 0 {
 		return
@@ -184,22 +146,15 @@ func DrawHitGlyphs(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	write := 0
 	for read := range hitGlyphs {
 		gph := &hitGlyphs[read]
-		// Re-resolve the target's world position EVERY frame from its anchor
-		// identity (not a frozen XYZ) so the glyph tracks the sprite as it recoils
-		// (HitKnockback) and lunges (AttackBump) during its life — a frozen anchor
-		// let an off-center foe's glyph slide sideways while the foe moved in depth.
-		// If the anchor stops resolving mid-life (e.g. the enemy fully fades out of
-		// BattleMembers), fall back to the last good anchor so the glyph finishes
-		// its life in place rather than popping out; a never-resolved glyph just
-		// skips drawing this frame and ages out.
+		// Re-resolve from the anchor identity each frame so the glyph tracks the
+		// recoiling/lunging sprite; fall back to the last good anchor if it stops
+		// resolving mid-life, or skip drawing if never resolved.
 		var anchor rl.Vector3
 		draw := true
 		if origin, ok := resolveAnchor(camera, g, core.VFXRequest{Anchor: gph.Anchor, SlotIdx: gph.SlotIdx, TileX: gph.TileX, TileZ: gph.TileZ}); ok {
-			// Re-apply the horizontal glyph nudge (camera-right) AND the depth
-			// push-back (camera-forward) so the anchor sits at the billboard's
-			// depthOffset depth, then project. Matching the depth is what keeps an
-			// off-center, pushed-back sprite (Feral Rat) from projecting its glyph
-			// sideways.
+			// Re-apply the X nudge + depth push-back so the anchor sits at the
+			// billboard's depth (matching depth keeps a pushed-back off-center
+			// sprite from projecting its glyph sideways).
 			anchor = cameraRelativeOffset(camera, origin, gph.GlyphXOffset, 0, gph.DepthOffset)
 			gph.lastX, gph.lastY, gph.lastZ, gph.haveLast = anchor.X, anchor.Y, anchor.Z, true
 		} else if gph.haveLast {
@@ -209,21 +164,16 @@ func DrawHitGlyphs(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		}
 		if draw {
 			screen := rl.GetWorldToScreen(anchor, camera)
-			// Apply the vertical lift in SCREEN space, not world space: take the
-			// glyph's X from the un-lifted anchor (so it stays directly above the
-			// target) but its Y from the lifted anchor's projection. Under the
-			// pitched battle camera a world-Y rise projects diagonally, so baking it
-			// into the anchor made off-center foes' glyphs slide sideways toward the
-			// vanishing column — locking X to the base projection removes that drift.
+			// Lift in SCREEN space: X from the un-lifted anchor, Y from the lifted
+			// one. A world-Y rise projects diagonally under the pitched camera, so
+			// baking it in made off-center glyphs slide sideways.
 			if gph.Rise != 0 {
 				lifted := rl.GetWorldToScreen(rl.NewVector3(anchor.X, anchor.Y+gph.Rise, anchor.Z), camera)
 				screen.Y = lifted.Y
 			}
-			// GetWorldToScreen mirrors points behind the camera to the wrong side of
-			// the screen, so skip a behind-camera anchor (it would draw a ghost
-			// glyph). Use the strict <=0 gate (behindCamera), not behindCull's
-			// negative slack — the slack is for keeping world tiles abreast of the
-			// camera, and would let a glyph just behind the camera plane ghost through.
+			// GetWorldToScreen mirrors behind-camera points to the wrong side, so
+			// skip a behind-camera anchor. Use the strict behindCamera gate, not
+			// behindCull's slack (which would let a just-behind glyph ghost through).
 			if !behindCamera(camera, anchor) && !popupOffScreenX(screen.X, sw) {
 				drawHitGlyph(gph.Kind, screen.X, screen.Y, gph.Elapsed/gph.Duration, gph.Scale)
 			}
@@ -240,7 +190,7 @@ func DrawHitGlyphs(camera rl.Camera3D, g *core.GameState, assets Resources) {
 }
 
 // glyphFade maps life fraction t∈[0,1] to an alpha that holds bright early then
-// eases out — so the shape pops in clearly and fades, never lingering flat.
+// eases out.
 func glyphFade(t float32) uint8 {
 	if t <= 0 {
 		return 255
@@ -251,8 +201,7 @@ func glyphFade(t float32) uint8 {
 	return uint8(255 * (1 - t*t))
 }
 
-// glyphGrow is an ease-out 0→1 used by the expanding glyphs (impact ring, fire,
-// holy) so they punch outward fast then settle.
+// glyphGrow is an ease-out 0→1 for the expanding glyphs (impact, fire, holy).
 func glyphGrow(t float32) float32 {
 	if t < 0 {
 		t = 0
@@ -262,9 +211,8 @@ func glyphGrow(t float32) float32 {
 	return 1 - (1-t)*(1-t)
 }
 
-// glyphPopR is a quick pop-in radius: scales to full over the first ~30% of
-// life then holds — for the "drawn instantly, then fades" glyphs (frost, venom).
-// baseR is the already-scaled base radius (hitGlyphRadius × per-kind glyphScale).
+// glyphPopR is a quick pop-in radius (full over the first ~30% of life, then
+// holds) for the pop-then-fade glyphs (frost, venom). baseR is already scaled.
 func glyphPopR(t, baseR float32) float32 {
 	s := t / 0.3
 	if s > 1 {
@@ -274,10 +222,8 @@ func glyphPopR(t, baseR float32) float32 {
 }
 
 func drawHitGlyph(kind hitGlyphKind, cx, cy, t, scale float32) {
-	// Fold the per-kind size scale into the base screen radius once, then hand
-	// the scaled radius to each painter (which used to read the hitGlyphRadius
-	// const directly). scale<=0 collapses to 1× so an unset value draws full
-	// size, matching effectiveGlyphScale.
+	// Fold the per-kind scale into the base radius once, then hand it to each
+	// painter. scale<=0 → 1× (unset draws full size).
 	if scale <= 0 {
 		scale = 1
 	}
@@ -298,15 +244,13 @@ func drawHitGlyph(kind hitGlyphKind, cx, cy, t, scale float32) {
 	case glyphVenom:
 		drawGlyphVenom(cx, cy, t, r)
 	default:
-		// glyphNone (and any future unmapped kind) draws nothing — a hit with
-		// no clarity glyph. No-op rather than a panic: this is draw-time
-		// dispatch off a per-frame value, not a startup coverage assert, so a
-		// stray kind should silently skip its frame rather than crash the HUD.
+		// glyphNone / unmapped kind draws nothing. No-op (not panic): this is
+		// per-frame draw dispatch, so a stray kind skips rather than crashing the HUD.
 	}
 }
 
-// drawGlyphSlash — a diagonal blade stroke that sweeps top-right → bottom-left,
-// with a thinner trailing edge, then fades. Reads as a quick cut.
+// drawGlyphSlash — a diagonal blade stroke sweeping top-right → bottom-left with
+// a thinner trailing edge.
 func drawGlyphSlash(cx, cy, t, baseR float32) {
 	col := colorWithAlpha(glyphSlashColor, glyphFade(t))
 	r := baseR * 1.2
@@ -321,12 +265,9 @@ func drawGlyphSlash(cx, cy, t, baseR float32) {
 	rl.DrawLineEx(rl.NewVector2(x1-off, y1-off*0.25), rl.NewVector2(x2-off, y2-off*0.25), 2, fadeColor(col, 0.6))
 }
 
-// spokeBurst draws n evenly-spaced radial spokes from radius `inner` out to
-// `outer`, each `thick` px wide, in `col`. The shared body of the impact + holy
-// glyph bursts (both 8 evenly-spaced spokes differing only in radii/thickness/
-// color) so the two can't drift. The frost/fire bursts keep their own loops —
-// frost's spokes carry tip branches and fire's angle sweeps with t, so neither
-// reduces to a plain even fan.
+// spokeBurst draws n evenly-spaced radial spokes from `inner` to `outer`, each
+// `thick` px wide. Shared body of the impact + holy bursts (frost/fire keep
+// their own loops — branches / t-swept angles don't reduce to a plain fan).
 func spokeBurst(cx, cy float32, n int, inner, outer, thick float32, col rl.Color) {
 	for i := 0; i < n; i++ {
 		ang := float64(i) * tau / float64(n)
@@ -360,8 +301,7 @@ func drawGlyphFrost(cx, cy, t, baseR float32) {
 		rl.DrawLineEx(rl.NewVector2(bx, by), rl.NewVector2(bx+(dx*0.5+px*0.7)*bl, by+(dy*0.5+py*0.7)*bl), 2, col)
 		rl.DrawLineEx(rl.NewVector2(bx, by), rl.NewVector2(bx+(dx*0.5-px*0.7)*bl, by+(dy*0.5-py*0.7)*bl), 2, col)
 	}
-	// Center hub scaled to baseR (≈2.5px at the default radius) so it tracks the
-	// glyph's size instead of sitting at a fixed pixel radius like the arms do.
+	// Center hub scaled to baseR so it tracks the glyph's size.
 	rl.DrawCircleV(rl.NewVector2(cx, cy), baseR*0.096, col)
 }
 
@@ -371,29 +311,26 @@ func drawGlyphSpark(cx, cy, t, baseR float32) {
 	a := glyphFade(t)
 	bolt := colorWithAlpha(glyphSparkBolt, a)
 	r := baseR * 1.25
-	// Step the wall clock into ~18 discrete frames/sec so the bolts SNAP to new
-	// jagged positions rather than sliding smoothly — that staccato is what
-	// reads as lightning twitch. Each tendril jitters off its own seed.
+	// Step the clock into ~18 frames/sec so the bolts SNAP rather than slide —
+	// that staccato reads as lightning twitch.
 	step := math.Floor(rl.GetTime() * 18)
 	for i, ang := range []float64{-1.4, 0.35, 2.05} {
 		drawLightningTendril(cx, cy, ang, r, bolt, step*3+float64(i))
 	}
-	// Bright core scaled to baseR (≈3px at the default radius) so it tracks the
-	// glyph's size rather than sitting at a fixed pixel radius.
+	// Bright core scaled to baseR so it tracks the glyph's size.
 	rl.DrawCircleV(rl.NewVector2(cx, cy), baseR*0.115, colorWithAlpha(glyphSparkCore, a))
 }
 
-// drawLightningTendril draws a 3-segment zigzag outward along `ang`. seed feeds
-// the per-segment twitch so each redraw frame jags a little differently.
+// drawLightningTendril draws a 3-segment zigzag along `ang`; seed feeds the
+// per-segment twitch so each frame jags differently.
 func drawLightningTendril(cx, cy float32, ang float64, r float32, col rl.Color, seed float64) {
 	dx, dy := float32(math.Cos(ang)), float32(math.Sin(ang))
 	px, py := -dy, dx // perpendicular jitter axis
 	steps := [...]struct{ along, perp float32 }{{0.38, 0.2}, {0.72, -0.16}, {1.0, 0.04}}
 	prevX, prevY := cx, cy
 	for si, s := range steps {
-		// Twitch the perpendicular offset by a stepped pseudo-random nudge so
-		// the bolt jitters like a live arc; kept small ("a bit") so it still
-		// aims along ang.
+		// Stepped pseudo-random perp nudge so the bolt jitters; kept small so it
+		// still aims along ang.
 		perp := s.perp + glyphJitter(seed+float64(si)*7.13)*0.16
 		nx := cx + dx*r*s.along + px*r*perp
 		ny := cy + dy*r*s.along + py*r*perp
@@ -402,10 +339,8 @@ func drawLightningTendril(cx, cy float32, ang float64, r float32, col rl.Color, 
 	}
 }
 
-// glyphJitter is a cheap deterministic pseudo-random in [-1, 1) from a seed —
-// the fract(sin·k) hash (constants named in theme.go) — used to twitch the spark
-// glyph's lightning per frame step without pulling a real RNG into the render hot
-// path.
+// glyphJitter is a cheap deterministic pseudo-random in [-1, 1) (the fract(sin·k)
+// hash, constants in theme.go) — twitches the spark glyph without a real RNG.
 func glyphJitter(seed float64) float32 {
 	v := math.Sin(seed*fractSinHashA) * fractSinHashB
 	return float32((v-math.Floor(v))*2 - 1)
@@ -451,15 +386,12 @@ func drawGlyphVenom(cx, cy, t, baseR float32) {
 }
 
 // --- Editor gallery export -------------------------------------------------
-// The hit glyphs flash for ~0.4s mid-attack, so the author never gets a good
-// look. The editor's Hit Glyphs viewer (editor/hitglyphs.go) plays each one on a
-// loop; these two symbols are the only window it needs into this otherwise
-// render-private art.
+// The editor's Hit Glyphs viewer (editor/hitglyphs.go) loops each glyph (they
+// flash for only ~0.4s mid-attack); these two symbols are its only window in.
 
-// EditorHitGlyphNames lists the clarity-glyph styles for that viewer, in the
-// order EditorDrawHitGlyph indexes them — parallel to the glyphSlash..glyphVenom
-// enum (gallery index i → kind i+1, skipping glyphNone). The init below asserts
-// the count matches the enum so a new glyph can't silently drop out of the gallery.
+// EditorHitGlyphNames lists the glyph styles for that viewer, parallel to the
+// glyphSlash..glyphVenom enum (gallery index i → kind i+1, skipping glyphNone).
+// init asserts the count so a new glyph can't drop out of the gallery.
 var EditorHitGlyphNames = []string{"Slash", "Impact", "Frost", "Spark", "Fire", "Holy", "Venom"}
 
 func init() {
@@ -469,8 +401,7 @@ func init() {
 }
 
 // EditorDrawHitGlyph draws gallery glyph i (0-based, parallel to
-// EditorHitGlyphNames) at screen (cx,cy) with life fraction t∈[0,1] and size
-// scale — the editor loops t to animate the preview. Out-of-range i is a no-op.
+// EditorHitGlyphNames) at (cx,cy), life fraction t, size scale. Out-of-range i is a no-op.
 func EditorDrawHitGlyph(i int, cx, cy, t, scale float32) {
 	if i < 0 || i >= len(EditorHitGlyphNames) {
 		return

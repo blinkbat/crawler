@@ -6,9 +6,8 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Theme is the shared HUD palette. Returned from (Resources).Theme() so
-// scenes outside the render package (title, editor) draw with the same
-// surface/border/text colors as the in-game HUD.
+// Theme is the shared HUD palette, returned from (Resources).Theme() so scenes
+// outside the render package draw with the same surface/border/text colors.
 type Theme struct {
 	SurfacePrimary    rl.Color
 	SurfaceLog        rl.Color
@@ -24,10 +23,7 @@ type Theme struct {
 	TextLabel         rl.Color
 	TextDim           rl.Color
 	TextHint          rl.Color
-	// Entity-marker colors shared by the editor canvas and the in-game
-	// minimap. Both surfaces draw the same notion of "this tile holds
-	// a chest / door / start / pack" so the colors live in the theme
-	// rather than as private literals on each side.
+	// Entity-marker colors shared by the editor canvas and the in-game minimap.
 	MarkerStart    rl.Color
 	MarkerChest    rl.Color
 	MarkerChestDim rl.Color
@@ -37,8 +33,7 @@ type Theme struct {
 	MarkerOutline  rl.Color
 }
 
-// Theme returns the HUD's color palette. The values mirror the package-
-// internal vars in theme.go; this is the single seam external scenes use.
+// Theme returns the HUD's color palette, mirroring the package-internal vars in theme.go.
 func (r Resources) Theme() Theme {
 	return Theme{
 		SurfacePrimary:    surfacePrimary,
@@ -55,10 +50,7 @@ func (r Resources) Theme() Theme {
 		TextLabel:         textLabel,
 		TextDim:           textDim,
 		TextHint:          textHint,
-		// Marker colors derive from the exported Marker* vars below (the single
-		// source of truth) rather than re-listing the package-private theme vars
-		// a third time — so the struct field, the exported var, and the theme.go
-		// literal can't drift apart.
+		// Marker colors derive from the exported Marker* vars (single source of truth).
 		MarkerStart:    MarkerStart,
 		MarkerChest:    MarkerChest,
 		MarkerChestDim: MarkerChestDim,
@@ -69,11 +61,8 @@ func (r Resources) Theme() Theme {
 	}
 }
 
-// Exported entity-marker color vars. Mirror the package-private theme
-// vars so non-Resources callers (the editor's init-time brush palette)
-// can read them without first constructing a Resources. Initialized in
-// theme.go's var block, so editor init (which runs after render init,
-// since editor imports render) sees the populated values.
+// Exported entity-marker color vars, mirroring the package-private theme vars so
+// non-Resources callers (editor brush palette) can read them without a Resources.
 var (
 	MarkerStart    = markerStart
 	MarkerChest    = markerChest
@@ -84,22 +73,17 @@ var (
 	MarkerOutline  = markerOutline
 )
 
-// FadeColor returns col with its existing alpha scaled by the 0..1
-// multiplier (clamped). Public alias for fadeColor so non-render scenes
-// (the editor) fade palette colors through the same helper the HUD uses.
+// FadeColor scales col's alpha by the 0..1 multiplier (clamped). Alias for fadeColor.
 func FadeColor(col color.RGBA, alpha float32) color.RGBA {
 	return fadeColor(col, alpha)
 }
 
-// ColorWithAlpha returns col with its alpha channel replaced by byteAlpha
-// (0-255). Public alias for colorWithAlpha — the "set, don't scale" form,
-// shared with the editor.
+// ColorWithAlpha replaces col's alpha with byteAlpha (set, don't scale). Alias for colorWithAlpha.
 func ColorWithAlpha(col color.RGBA, byteAlpha uint8) color.RGBA {
 	return colorWithAlpha(col, byteAlpha)
 }
 
-// DrawCard fills + outlines a rounded panel with the standard corner radius
-// and adds the left accent stripe. Public alias for drawCard.
+// DrawCard fills + outlines a rounded panel with a left accent stripe. Alias for drawCard.
 func DrawCard(x, y, w, h int32, fill, outline, accent color.RGBA) {
 	drawCard(x, y, w, h, fill, outline, accent)
 }
@@ -109,11 +93,8 @@ func DrawHeading(font rl.Font, text string, x, y int32, accent color.RGBA) {
 	drawHeading(font, text, x, y, accent)
 }
 
-// DrawSubHeading writes the second-tier heading style used inside modal
-// columns ("Synth params", "Saved sounds", etc.) — a drop-shadowed label
-// at FontBody in the accent color. Lighter than DrawHeading, no underline.
-// Centralized here so modal authors don't reach for DrawTextWithShadow at
-// an ad-hoc size and drift the visual tier.
+// DrawSubHeading writes the second-tier modal-column heading: a drop-shadowed
+// FontBody label in the accent color, lighter than DrawHeading, no underline.
 func DrawSubHeading(font rl.Font, text string, x, y float32, accent color.RGBA) {
 	drawTextWithShadow(font, text, x, y, FontBody, accent)
 }
@@ -123,34 +104,24 @@ func DrawTextWithShadow(font rl.Font, text string, x, y, size float32, col color
 	drawTextWithShadow(font, text, x, y, size, col)
 }
 
-// DrawEngravedText is the exported top-lit gradient lettering (see
-// drawEngravedText) for scenes outside render — the title screen's menu
-// rows. Heading-tier and up only, same contract as the internal form.
+// DrawEngravedText is the exported top-lit gradient lettering (see drawEngravedText).
+// Heading-tier and up only.
 func DrawEngravedText(font rl.Font, text string, x, y, size float32, col color.RGBA) {
 	drawEngravedText(font, text, x, y, size, col)
 }
 
-// selectionPlateShrinkY is how much shorter than its row a selection plate is
-// drawn (callers pass rowH - selectionPlateShrinkY to SelectionRowRect) so the
-// gilt highlight floats inside the row band instead of filling it edge to edge.
-// One name shared by the level-up rows and the quest journal so they stay in
-// visual lockstep.
+// selectionPlateShrinkY is how much shorter than its row a selection plate draws
+// so the gilt highlight floats inside the row band. Shared by level-up + journal.
 const selectionPlateShrinkY = int32(6)
 
-// SelectionRowRect insets a row's (x, y, w) by the canonical
-// DrawSelectedRow highlight padding (−6 x, −4 y, +12 w) so the gilt
-// spine + underline sit just outside the row content. Height passes
-// through unchanged — callers wanting the highlight shorter than the
-// row (level-up) pass a reduced h. Shared by the level-up and chest
-// modals so the inset can't drift between them.
+// SelectionRowRect insets a row's (x, y, w) by the canonical DrawSelectedRow
+// padding (−6 x, −4 y, +12 w); height passes through unchanged.
 func SelectionRowRect(x, y, w, h int32) rl.Rectangle {
 	return rl.NewRectangle(float32(x-6), float32(y-4), float32(w+12), float32(h))
 }
 
-// drawModalListRow paints the gilt selection plate for one modal list row when
-// focused, then runs fn to draw the row's content (label, value, etc.). The
-// single home for the "SelectionRowRect → DrawSelectedRow if focused" sequence the
-// chest and dialog choice modals each open-coded as a local rowRect closure.
+// drawModalListRow paints the gilt selection plate when focused, then runs fn to
+// draw the row content. Shared by the chest and dialog-choice modals.
 func drawModalListRow(x, y, w, h int32, focused bool, fn func()) {
 	if focused {
 		DrawSelectedRow(SelectionRowRect(x, y, w, h))
@@ -158,17 +129,8 @@ func drawModalListRow(x, y, w, h int32, focused bool, fn func()) {
 	fn()
 }
 
-// DrawSelectedRow paints the standard "cursor is on this row"
-// highlight per UI_STANDARDS.md "Row > Selected": warm glass fill,
-// gilt left spine (3 px), and a thin gilt-dim underline along the
-// bottom edge. Replaces the older blue-purple "active-tint" fill
-// so every list-style surface speaks the library aesthetic.
-//
-// Used by modal pickers (chest, dialog choices, level-up, and the
-// editor's sound editor) for the cursor-on-row highlight. The action
-// menu and party card paint their own variant inline; the panels
-// Items/Skills/Equipment rows route through drawFocusableRow (theme.go),
-// which owns both focused and unfocused row states.
+// DrawSelectedRow paints the standard cursor-on-row highlight per UI_STANDARDS.md
+// "Row > Selected": warm glass fill, 3px gilt left spine, thin gilt-dim underline.
 func DrawSelectedRow(r rl.Rectangle) {
 	flick := candleFlicker()
 	drawPaneDropShadow(r)
@@ -182,10 +144,7 @@ func DrawSelectedRow(r rl.Rectangle) {
 		)
 	}
 	drawRowSheen(r, flick)
-	// Gilt left spine — 3 px, vertically inset 5 px top/bottom so it
-	// reads as a marker rather than the entire left edge. Termini
-	// pips at each end of the spine give it the "illuminated
-	// manuscript marker bead" feel rather than a bare strip.
+	// Gilt left spine — 3px, inset 5px top/bottom, with terminus pips.
 	spineX := int32(r.X) + 4
 	spineTop := int32(r.Y) + 5
 	spineH := int32(r.Height) - 10
@@ -196,8 +155,7 @@ func DrawSelectedRow(r rl.Rectangle) {
 	if r.Width >= 96 && r.Height >= 28 {
 		drawFleuron(r.X+r.Width-16, r.Y+r.Height/2, 2.4, fadeColor(giltDim, 0.55))
 	}
-	// Underline along the bottom edge, capped by tiny pips so the
-	// underline doesn't read as a bare line.
+	// Underline along the bottom edge, capped by tiny pips.
 	underY := int32(r.Y+r.Height) - 3
 	underX := int32(r.X) + 12
 	underW := int32(r.Width) - 24
@@ -206,27 +164,19 @@ func DrawSelectedRow(r rl.Rectangle) {
 	drawDiamondPip(float32(underX+underW), float32(underY), 1.5, giltDim)
 }
 
-// DrawFleuron is the exported wrapper around the package-private
-// drawFleuron — the four-direction gilt sigil used as ornamental
-// punctuation (menu titles, banner dividers, commit-row marks).
-// Title screen and other non-render packages reach for it through
-// this seam.
+// DrawFleuron is the exported wrapper around drawFleuron — the four-direction
+// gilt sigil used as ornamental punctuation.
 func DrawFleuron(cx, cy, r float32, col rl.Color) {
 	drawFleuron(cx, cy, r, col)
 }
 
-// DrawTitleRule paints a heraldic banner divider — a gilt rule with a
-// centred fleuron and flanking fleurons at each terminus. The
-// "ornamental punctuation under the game title" 90s D&D box art used
-// between the wordmark and the menu list. Width `w` covers the entire
-// rule from end-fleuron centre to end-fleuron centre; the line itself
-// is broken in three to make room for the centre and end fleurons.
+// DrawTitleRule paints a heraldic banner divider — a gilt rule with a centred
+// fleuron and flanking end fleurons. Width w spans end-fleuron centre to centre.
 func DrawTitleRule(x, y, w float32) {
 	endFlR := float32(5)
 	midFlR := float32(4)
 	cx := x + w/2
-	// Inset the line from the end fleurons so they read as caps
-	// rather than as pips on a continuous line.
+	// Inset the line from the end fleurons so they read as caps.
 	leftStart := x + endFlR + 4
 	rightEnd := x + w - endFlR - 4
 	drawSplitRule(leftStart, rightEnd, cx, y, midFlR+6, giltDim)
@@ -235,12 +185,7 @@ func DrawTitleRule(x, y, w float32) {
 	drawFleuron(cx, y, midFlR, giltBright)
 }
 
-// DrawSelectedRowI is the int32-coords variant of DrawSelectedRow for
-// callers that already work in pixel-snapped int32 layouts (pause menu,
-// battle action row). Same visual contract — the two helpers exist
-// only because raylib's rect-fill takes a float Rectangle while its
-// rect-fill-i takes int32 directly, and converting at every call site
-// added noise without changing the surface/border combo we want shared.
+// DrawSelectedRowI is the int32-coords variant of DrawSelectedRow.
 func DrawSelectedRowI(x, y, w, h int32) {
 	DrawSelectedRow(rl.NewRectangle(float32(x), float32(y), float32(w), float32(h)))
 }

@@ -7,8 +7,7 @@ import (
 	"crawler/internal/app/core"
 )
 
-// forceFleeSeed returns an RNG whose first Float64 draw makes the flee roll
-// (RollChance against `chance`) land on `success`.
+// forceFleeSeed returns an RNG whose first flee roll (RollChance vs `chance`) lands on `success`.
 func forceFleeSeed(chance float64, success bool) *rand.Rand {
 	for seed := int64(1); seed < 100000; seed++ {
 		if (rand.New(rand.NewSource(seed)).Float64() < chance) == success {
@@ -18,13 +17,11 @@ func forceFleeSeed(chance float64, success bool) *rand.Rand {
 	return rand.New(rand.NewSource(1))
 }
 
-// TestPerformFlee_SuccessRetreatsAndKeepsPack: a successful flee ends the battle,
-// snaps the party to the pre-combat tile, and leaves the pack on the field (you
-// fled, you didn't kill it).
+// TestPerformFlee_SuccessRetreatsAndKeepsPack: a successful flee ends the battle, snaps the party to the pre-combat tile, leaves the pack.
 func TestPerformFlee_SuccessRetreatsAndKeepsPack(t *testing.T) {
 	g := newTestState()
 	for i := range g.Party {
-		g.Party[i].Level = 5 // advantage over the level-1 rats → high flee chance
+		g.Party[i].Level = 5 // high flee chance vs level-1 rats
 	}
 	g.Player.TileX, g.Player.TileZ = 2, 2
 	g.Battle.FleeReturnX, g.Battle.FleeReturnZ = 5, 6
@@ -45,10 +42,7 @@ func TestPerformFlee_SuccessRetreatsAndKeepsPack(t *testing.T) {
 	}
 }
 
-// TestPerformFlee_SuccessSkipsRepositionWhenTileOccupied: if a pack sits on the
-// pre-combat tile (a multi-pack ambush filled it), a successful flee still ends
-// the battle but does NOT teleport the party on top of that pack — it escapes in
-// place instead.
+// TestPerformFlee_SuccessSkipsRepositionWhenTileOccupied: if a pack occupies the retreat tile, the flee succeeds but escapes in place.
 func TestPerformFlee_SuccessSkipsRepositionWhenTileOccupied(t *testing.T) {
 	g := newTestState()
 	for i := range g.Party {
@@ -56,7 +50,7 @@ func TestPerformFlee_SuccessSkipsRepositionWhenTileOccupied(t *testing.T) {
 	}
 	g.Player.TileX, g.Player.TileZ = 2, 2
 	g.Battle.FleeReturnX, g.Battle.FleeReturnZ = 5, 6
-	// A second pack now occupies the retreat tile.
+	// Second pack occupies the retreat tile.
 	g.Packs = append(g.Packs, core.Pack{TileX: 5, TileZ: 6, Members: []core.Enemy{core.NewEnemy(core.EnemyRat)}})
 
 	chance := core.FleeChance(core.PartyAverageLevel(g.Party), core.PackAverageLevel(*core.ActivePack(g)))
@@ -75,12 +69,11 @@ func TestPerformFlee_SuccessSkipsRepositionWhenTileOccupied(t *testing.T) {
 	}
 }
 
-// TestPerformFlee_FailureKeepsBattleAndPosition: a failed flee burns the turn —
-// the battle continues and the party hasn't moved.
+// TestPerformFlee_FailureKeepsBattleAndPosition: a failed flee burns the turn — battle continues, party unmoved.
 func TestPerformFlee_FailureKeepsBattleAndPosition(t *testing.T) {
 	g := newTestState()
 	for i := range g.Party {
-		g.Party[i].Level = 1 // even with the rats → mid flee chance
+		g.Party[i].Level = 1
 	}
 	g.Player.TileX, g.Player.TileZ = 2, 2
 	g.Battle.FleeReturnX, g.Battle.FleeReturnZ = 5, 6

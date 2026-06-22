@@ -7,11 +7,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Level-up modal layout — header positions and the per-stat row grid.
-// Named (mirrors shop.go's shop* block) so a "rows too cramped" retune is
-// one edit here instead of bare offsets scattered through the draw loop.
-// Header/row offsets are relative to the card; column/baseline offsets are
-// relative to each row's origin.
+// Level-up modal layout. Header/row offsets are relative to the card; column/baseline offsets to each row's origin.
 const (
 	levelUpHeaderX    = int32(22)   // header text inset from card left
 	levelUpHeaderY    = int32(46)   // primary readout baseline from card top
@@ -26,18 +22,12 @@ const (
 	levelUpSubX       = int32(96)   // sub-text x from row left
 	levelUpSubY       = int32(36)   // sub-text baseline y from row top
 	levelUpValueInset = float32(12) // right-aligned value inset from row right edge
-	// levelUpRowGlassAlpha is the glass fill alpha shared by the unfocused stat
-	// rows and the Apply gate's tint, so the two surfaces stay in sync. Untyped
-	// so it satisfies fadeColor (float32) and selectedGlassTint (float64) alike.
+	// levelUpRowGlassAlpha: glass fill shared by unfocused stat rows and the Apply tint. Untyped to satisfy both fadeColor (float32) and selectedGlassTint (float64).
 	levelUpRowGlassAlpha = 0.45
 )
 
-// DrawLevelUpModal paints the post-battle stat-spend dialog. Each
-// stat row shows label + description + the running "current → new"
-// preview that reflects the player's staged pending picks. A skill-
-// point row sits below the stats; a final Apply row commits the
-// staged changes. Nothing actually lands on the member's stat block
-// until Apply is confirmed.
+// DrawLevelUpModal paints the post-battle stat-spend dialog. Staged picks show a "current → new"
+// preview per stat; nothing lands on the member's stats until the Apply row is confirmed.
 func DrawLevelUpModal(g *core.GameState, assets Resources) {
 	if !g.LevelUpOpen {
 		return
@@ -49,15 +39,12 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 
 	font := assets.Font()
 	header := "LEVEL UP — " + m.Name
-	// Screen-relative so the stat-allocation menu reads large like the
-	// rest of the character menus (matches the panels overlay's sizing).
+	// Screen-relative so it reads large like the other character menus.
 	card := drawScreenFractionScaffold(font, levelUpModalWidthFrac, levelUpModalHeightFrac, header)
 	cardX, cardY := int32(card.X), int32(card.Y)
 	cardW := int32(card.Width)
 
-	// Sub-header: a single bright readout of the stat-point budget,
-	// with the skill-point reminder dimmed to a second line so the
-	// primary action (spend stats) stays the loudest signal.
+	// Sub-header: bright stat-point budget; skill-point reminder dimmed to a second line.
 	staged := core.SumStatPending(g.LevelUpPending)
 	statRemaining := m.PendingLevelUps - staged
 	primary := "Stat points: " + strconv.Itoa(statRemaining) + " remaining"
@@ -70,15 +57,11 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		drawTextWithShadow(font, secondary, float32(cardX+levelUpHeaderX), float32(cardY+levelUpHeaderSubY), FontSmall, inkAccent)
 	}
 
-	// Stat rows. Each row is taller (64px) so the label, description,
-	// and preview don't collide at smaller widths. Layout per row:
-	//   left: LABEL (FontBody)
-	//   left + indent: description (FontTiny, dim)
-	//   right: current → new (FontBody, bright when staged)
+	// Stat rows. Per row: left LABEL, indented description, right "current → new".
 	rowY := cardY + levelUpRowTop
 	rowH := levelUpRowH
 	rowX := cardX + levelUpRowX
-	rowW := cardW - 2*levelUpRowX // symmetric inset on both sides
+	rowW := cardW - 2*levelUpRowX
 	for s := core.Stat(0); s < core.StatCount; s++ {
 		focused := g.LevelUpRowCursor == int(s)
 		rect := SelectionRowRect(rowX, rowY, rowW, rowH-selectionPlateShrinkY)
@@ -92,20 +75,14 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		cur := core.StatValue(m.Stats, s)
 		pending := g.LevelUpPending[s]
 
-		// Stat sigil — small icon in the left gutter of the row.
-		// Brightens on focus so the focused row reads as "lit"
-		// without leaning entirely on the gilt selection chrome.
+		// Stat sigil in the left gutter; brightens on focus.
 		iconCol := woodAccentIcon
 		if focused {
 			iconCol = giltBright
 		}
 		drawStatIcon(s, float32(rowX)+levelUpIconX, float32(rowY)+levelUpIconY, 12, iconCol)
 		drawEngravedText(font, label, float32(rowX+levelUpLabelX), float32(rowY+levelUpLabelY), FontHeading, col)
-		// When the player has staged a spend on this row, swap the
-		// static description for the computed before→after preview so
-		// the row tells you what the point actually BUYS instead of
-		// just what stat it touches. Falls through to the static
-		// description when nothing is staged.
+		// Staged: show the before→after preview (what the point buys); else the static description.
 		subText := core.StatPreviewLine(s, m.Stats, pending, core.WeaponAccuracyStat(core.EquippedWeapon(m)))
 		subCol := textHint
 		if subText != "" {
@@ -129,7 +106,7 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		rowY += rowH
 	}
 
-	// Apply button row. Tinted warm to read as a commit action.
+	// Apply button row.
 	{
 		rowY += 6
 		focused := g.LevelUpRowCursor == core.LevelUpApplyRowIndex
@@ -144,10 +121,7 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		if statRemaining > 0 {
 			label = "Apply changes — " + strconv.Itoa(statRemaining) + " unspent"
 		}
-		// Fleuron sits on each side of the Apply row label — the
-		// "this is the commit gate" cue. Drawn in gilt so the
-		// player's eye lands on it even when the row isn't
-		// focused.
+		// Fleurons flank the Apply label as the "commit gate" cue, gilt even when unfocused.
 		labelW := rl.MeasureTextEx(font, label, FontHeading, FontSpacingHeading).X
 		labelX := float32(rowX + 6)
 		labelY := float32(rowY + 14)
@@ -156,10 +130,7 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		drawFleuronsFlanking(labelX, labelW, 18, flCY, 5, giltDim)
 	}
 
-	// VIT note removed — the per-stat description column already
-	// surfaces "Max HP (+2 per point)" on the VIT row itself.
-	// Confirm both stages a stat point (on a stat row) and applies (on the
-	// Apply row); Back undoes a staged point. Controller glyphs only.
+	// A stages (stat row) or applies (Apply row); B undoes a staged point.
 	drawModalFooterGlyphs(font, card, []HintSeg{
 		Hint("Pick", GlyphUpDown),
 		Hint("Stage / Apply", GlyphA),
@@ -167,10 +138,5 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 	})
 }
 
-// levelUpStagedTotal retired — core.SumStatPending is the single seam
-// shared with explore.updateLevelUpModal.
-
-// (DrawPartyStatsScreen was retired in favor of the panels overlay's
-// Stats tab — DrawPanelsOverlay handles the multi-tab dashboard,
-// including the same per-member Stats / Level / HP / MP / XP layout
-// plus Equipment / Items / Skills / Map.)
+// levelUpStagedTotal retired — core.SumStatPending is the single shared seam.
+// DrawPartyStatsScreen retired in favor of the panels overlay's Stats tab.

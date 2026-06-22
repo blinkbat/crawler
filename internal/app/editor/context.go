@@ -223,8 +223,16 @@ func contextMenuLayout(s *State) (rl.Rectangle, []rl.Rectangle) {
 	// width helper would change one surface's sizing. A real dedup wants a
 	// neutral measureMenuWidth(labels, fontSize, pad) living in dropdown.go,
 	// which this pass doesn't own (editor file split). Left as-is intentionally.
-	for _, it := range s.contextMenu.items {
-		w := approxTextWidth(it.label, editorFontLabel) + buttonLabelPadX
+	for i, it := range s.contextMenu.items {
+		// Row 0 gets the tile-coord suffix appended at draw time, so measure THAT
+		// widened string here — otherwise the coord runs past the panel's right
+		// edge (there's no scissor clipping the menu). Must mirror drawContextMenu's
+		// row-0 format exactly.
+		label := it.label
+		if i == 0 {
+			label = fmt.Sprintf("%s  (%s)", label, core.TileCoord(s.contextMenu.tileX, s.contextMenu.tileZ))
+		}
+		w := approxTextWidth(label, editorFontLabel) + buttonLabelPadX
 		if w > width {
 			width = w
 		}

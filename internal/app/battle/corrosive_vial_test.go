@@ -6,12 +6,10 @@ import (
 	"crawler/internal/app/core"
 )
 
-// TestApplyCorrosiveVial_StripsArmor verifies the armor break: the target's
-// per-instance Armor drops by the skill's ArmorReduction (the live field the
-// damageEnemy mitigation chain reads), floored at 0, with no damage dealt.
+// TestApplyCorrosiveVial_StripsArmor: Armor drops by ArmorReduction (the field damageEnemy reads), floored at 0, no damage.
 func TestApplyCorrosiveVial_StripsArmor(t *testing.T) {
 	g := newTestState()
-	g.Battle.CurrentParty = 2 // thief casts
+	g.Battle.CurrentParty = 2
 	g.Battle.EnemyIndex = 0
 	g.Packs[0].Members[0].Armor = 10
 	hpBefore := g.Packs[0].Members[0].HP
@@ -29,13 +27,12 @@ func TestApplyCorrosiveVial_StripsArmor(t *testing.T) {
 	}
 }
 
-// TestApplyCorrosiveVial_FloorsAtZero confirms re-casting / a deep strip can't
-// drive Armor negative (which would turn the mitigation "subtract" into a heal).
+// TestApplyCorrosiveVial_FloorsAtZero: a deep strip can't drive Armor negative (which would turn mitigation into a heal).
 func TestApplyCorrosiveVial_FloorsAtZero(t *testing.T) {
 	g := newTestState()
 	g.Battle.CurrentParty = 2
 	g.Battle.EnemyIndex = 0
-	g.Packs[0].Members[0].Armor = 1 // less than CorrosiveArmorReduction
+	g.Packs[0].Members[0].Armor = 1 // < CorrosiveArmorReduction
 
 	if !applyCorrosiveVial(g, core.TimingQualityMiss) {
 		t.Fatal("applyCorrosiveVial reported not-landed")

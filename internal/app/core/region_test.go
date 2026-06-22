@@ -14,9 +14,8 @@ func testRegionArea() AreaDefinition {
 	}
 }
 
-// TestCopyPasteRegion pins the core transform: a copied rectangle stamps its
-// cells at the paste anchor across the grid layers, clips at edges, and never
-// mutates the source snapshot.
+// TestCopyPasteRegion: a copied rectangle stamps at the paste anchor across
+// layers, clips at edges, and never mutates the source snapshot.
 func TestCopyPasteRegion(t *testing.T) {
 	a := testRegionArea()
 	r := CopyRegion(&a, 0, 0, 1, 1) // top-left 2x2: floor "ab"/"ef"
@@ -31,19 +30,18 @@ func TestCopyPasteRegion(t *testing.T) {
 	if a.Floor[2] != "ijab" || a.Floor[3] != "mnef" {
 		t.Fatalf("paste floor rows = %q / %q, want ijab / mnef", a.Floor[2], a.Floor[3])
 	}
-	// Rows above the paste are untouched.
+	// Rows above the paste untouched.
 	if a.Floor[0] != "abcd" || a.Floor[1] != "efgh" {
 		t.Fatalf("paste leaked above the anchor: %q / %q", a.Floor[0], a.Floor[1])
 	}
 
-	// The snapshot is independent of the source after the copy.
+	// Snapshot is independent of the source after the copy.
 	if r.Layers[1][0] != "ab" {
 		t.Fatalf("copied floor row = %q, want ab", r.Layers[1][0])
 	}
 }
 
-// TestPasteRegion_ClipsAtEdge confirms a paste straddling the edge writes only
-// the in-bounds cells and leaves the rest.
+// TestPasteRegion_ClipsAtEdge: a paste straddling the edge writes only in-bounds cells.
 func TestPasteRegion_ClipsAtEdge(t *testing.T) {
 	a := testRegionArea()
 	r := CopyRegion(&a, 0, 0, 1, 1) // 2x2

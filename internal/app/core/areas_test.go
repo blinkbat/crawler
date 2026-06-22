@@ -8,21 +8,13 @@ import (
 	"crawler/internal/app/core/mapfile"
 )
 
-// repoRoot returns the project root from the test working dir (Go runs
-// tests with cwd = package dir, so we walk up to the repo root where
-// maps/ lives).
+// repoRoot walks up from the package dir (test cwd) to the repo root where maps/ lives.
 func repoRoot() string {
 	return filepath.Join("..", "..", "..")
 }
 
-// TestBundledMapsLoad sanity-checks every .map file shipped under maps/.
-// Strict per-map assertions about prop placement, materials, and enemy
-// counts were removed once the editor became the source of truth — they were
-// brittle against any hand edit (and against adding/removing maps). The test
-// now DISCOVERS the maps on disk via glob rather than naming them, so renaming
-// or deleting a map can't make this go stale. The loose checks below catch the
-// failures we actually care about: malformed files, bad starts, unreadable
-// headers, unreachable packs.
+// TestBundledMapsLoad sanity-checks every .map under maps/. Discovers maps via
+// glob (not by name) so adding/removing/renaming maps can't make it stale.
 func TestBundledMapsLoad(t *testing.T) {
 	paths, err := filepath.Glob(filepath.Join(repoRoot(), "maps", "*"+mapfile.Ext))
 	if err != nil {
@@ -54,10 +46,7 @@ func TestBundledMapsLoad(t *testing.T) {
 			if isStartBlocked(area) {
 				t.Errorf("start tile is a blocking tile — player would spawn inside geometry")
 			}
-			// Every pack should be reachable from the player start after the
-			// runtime snap pass. A pack the player can't walk up to means the
-			// encounter never fires; catching this in CI is cheaper than
-			// noticing it in playtest.
+			// Unreachable pack after snap = encounter never fires.
 			if blocked := unreachablePacks(area); blocked > 0 {
 				t.Errorf("%d/%d packs unreachable from start after snap", blocked, len(area.PackSpawns))
 			}
@@ -65,10 +54,8 @@ func TestBundledMapsLoad(t *testing.T) {
 	}
 }
 
-// unreachablePacks runs the same reachability shape as the editor's
-// warning: BFS from the player start under BlockedAt, then count packs
-// whose snapped runtime position falls outside the visited set. Lives in
-// the test file so the runtime stays editor-agnostic.
+// unreachablePacks mirrors the editor's reachability warning: BFS from start
+// under BlockedAt, then count packs whose snapped position isn't visited.
 func unreachablePacks(a AreaDefinition) int {
 	if a.StartTileZ < 0 || a.StartTileZ >= a.Height ||
 		a.StartTileX < 0 || a.StartTileX >= a.Width {
@@ -113,11 +100,8 @@ func unreachablePacks(a AreaDefinition) int {
 	return blocked
 }
 
-// TestSelfDoorSurvivesRename guards the self-portal round-trip. A door whose
-// TargetMap is the SelfMapToken must keep that placeholder through
-// load → (rename area path) → save; otherwise a same-map portal silently
-// re-serializes as an explicit (now-wrong) cross-map target after a rename,
-// because the runtime door still held the OLD expanded map id.
+// TestSelfDoorSurvivesRename: a SelfMapToken door must keep the placeholder
+// through load → rename path → save, else it re-serializes as a wrong cross-map target.
 func TestSelfDoorSurvivesRename(t *testing.T) {
 	mf := mapfile.MapFile{
 		Name:      "Self Door",
@@ -142,7 +126,7 @@ func TestSelfDoorSurvivesRename(t *testing.T) {
 	if got := area.DoorSpawns[0].TargetMap; got != mapfile.SelfMapToken {
 		t.Fatalf("self door should keep the %q placeholder at load (not the expanded id), got %q", mapfile.SelfMapToken, got)
 	}
-	// Rename: the area is now saved under a different path than it loaded from.
+	// Rename: saved under a different path than loaded from.
 	area.Path = "maps/renamed.map"
 	encoded, err := MapFileFromArea(area)
 	if err != nil {
@@ -153,11 +137,9 @@ func TestSelfDoorSurvivesRename(t *testing.T) {
 	}
 }
 
-// TestCrystalAuthoringAndValidation pins the editable-crystal contract end to
-// end: authored crystals round-trip, an explicit empty set means "zero" (no
-// fallback), a legacy map with no crystals section gets the default entrance
-// crystal, and a hand-edited crystal on a blocked / duplicate tile is rejected
-// at load.
+// TestCrystalAuthoringAndValidation: authored crystals round-trip, explicit
+// empty = zero (no fallback), legacy map gets the default entrance crystal,
+// and a crystal on a blocked/duplicate tile is rejected at load.
 func TestCrystalAuthoringAndValidation(t *testing.T) {
 	base := func() mapfile.MapFile {
 		return mapfile.MapFile{
@@ -175,7 +157,7 @@ func TestCrystalAuthoringAndValidation(t *testing.T) {
 		}
 	}
 
-	// Authored crystal round-trips and is honored verbatim.
+	// Authored crystal round-trips, honored verbatim.
 	mf := base()
 	mf.CrystalsDefined = true
 	mf.Crystals = []mapfile.MapCrystal{{X: 1, Z: 1}}
@@ -214,9 +196,8 @@ func TestCrystalAuthoringAndValidation(t *testing.T) {
 		t.Fatalf("a legacy map should fall back to one entrance crystal, got %+v", got)
 	}
 
-	// A crystal on a blocked tile is rejected at load. Walls are gone (the
-	// faces layer no longer blocks), so block with deep water — the sole
-	// blocking floor — at (0,0) and try to place a crystal there.
+	// Crystal on a blocked tile is rejected at load. Walls no longer block, so
+	// use deep water (the sole blocking floor) at (0,0).
 	onBlocked := base()
 	onBlocked.Floor = []string{"W..", "...", "..."} // 'W' deep water blocks
 	onBlocked.CrystalsDefined = true
@@ -234,12 +215,9 @@ func TestCrystalAuthoringAndValidation(t *testing.T) {
 	}
 }
 
-// TestDialogsAndTriggersDiskRoundTrip exercises the full authored dialog +
-// trigger path through the on-disk format: Area → MapFile → encode bytes →
-// parse → MapFile → Area, asserting a conditioned choice and an enter-tile
-// trigger survive intact. Guards the areas.go conversion + the mapfile
-// dialogs:/triggers: sections together (the seam the unit round-trips don't
-// cover end-to-end).
+// TestDialogsAndTriggersDiskRoundTrip exercises the full dialog+trigger path
+// through disk (Area→MapFile→bytes→parse→Area), checking a conditioned choice
+// and enter-tile trigger survive — the end-to-end seam unit tests don't cover.
 func TestDialogsAndTriggersDiskRoundTrip(t *testing.T) {
 	foe := EnemyKinds()[0].Kind
 	area := AreaDefinition{
@@ -300,11 +278,9 @@ func TestDialogsAndTriggersDiskRoundTrip(t *testing.T) {
 	}
 }
 
-// TestAreaFromMapFile_ValidatesOptionalLayerDimensions guards that a PRESENT
-// ceiling/elevation layer is dimension-checked like the required layers — a
-// truncated one must be rejected at load rather than silently reading as the
-// default (e.g. a short ceiling reads "no roof", flipping AreaIsOutdoor →
-// wrong weather/lighting). Absent and full-dimension layers still load clean.
+// TestAreaFromMapFile_ValidatesOptionalLayerDimensions: a PRESENT ceiling/
+// elevation layer is dimension-checked like required layers; a truncated one
+// is rejected, not read as default (short ceiling → "no roof" → wrong weather).
 func TestAreaFromMapFile_ValidatesOptionalLayerDimensions(t *testing.T) {
 	base := func() mapfile.MapFile {
 		return mapfile.MapFile{
@@ -345,13 +321,11 @@ func TestAreaFromMapFile_ValidatesOptionalLayerDimensions(t *testing.T) {
 	}
 }
 
-// TestPackMember_CustomNameShadowsBuiltin guards the resolution-order fix: a
-// custom enemy whose name collides with a built-in kind ("goblin") must resolve
-// to the CUSTOM def (carrying its overrides), not be silently shadowed by the
-// built-in. Pack-member resolution checks the map's CustomEnemies before the
-// built-in registry.
+// TestPackMember_CustomNameShadowsBuiltin: a custom enemy whose name collides
+// with a built-in ("goblin") must resolve to the CUSTOM def — pack resolution
+// checks the map's CustomEnemies before the built-in registry.
 func TestPackMember_CustomNameShadowsBuiltin(t *testing.T) {
-	// Sanity: the name really does collide with a built-in kind.
+	// Sanity: the name really collides with a built-in kind.
 	if _, ok := EnemyKindFromName("goblin"); !ok {
 		t.Fatal("precondition: \"goblin\" should name a built-in kind")
 	}
@@ -389,10 +363,8 @@ func TestPackMember_CustomNameShadowsBuiltin(t *testing.T) {
 	}
 }
 
-// TestChestOnStartTileRejected guards the load-time validation fix: a chest
-// authored on the player-start tile blocks movement onto the spawn, so the
-// runtime silently dropped it (hiding the mistake). It must now be rejected at
-// load, where the editor's placement rules already forbid it.
+// TestChestOnStartTileRejected: a chest on the player-start tile blocks the
+// spawn, so it must be rejected at load rather than silently dropped at runtime.
 func TestChestOnStartTileRejected(t *testing.T) {
 	mf := mapfile.MapFile{
 		Name: "ChestOnStart", Materials: "dungeon", Width: 3, Height: 3,
@@ -407,7 +379,7 @@ func TestChestOnStartTileRejected(t *testing.T) {
 		t.Fatal("expected a chest on the player-start tile to be rejected at load, got nil")
 	}
 
-	// A chest on a DIFFERENT tile still loads clean (the rule is start-tile-only).
+	// A chest off the start tile loads clean (rule is start-tile-only).
 	mf.Chests = []mapfile.MapChest{{Items: []string{"Crust of Bread"}, X: 0, Z: 0}}
 	if _, err := AreaFromMapFile(mf, "maps/chest.map"); err != nil {
 		t.Fatalf("a chest off the start tile should load: %v", err)

@@ -9,26 +9,17 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// fogCeilingToken is the placeholder string both fragment shaders
-// carry where they would otherwise inline the `0.85` clamp ceiling.
-// resolveShaderTokens substitutes the Go fogCeiling constant in
-// before LoadShaderFromMemory, so the GLSL source has the literal
-// value once it reaches the compiler. Keeps the ceiling tuned from
-// one place — see fogCeiling in distancefog.go.
+// fogCeilingToken: placeholder both shaders carry for the fog clamp ceiling;
+// resolveShaderTokens substitutes fogCeiling (distancefog.go) at load time.
 const fogCeilingToken = "{{FOG_CEILING}}"
 
-// painterlyGradeToken is the placeholder both fragment shaders carry where the
-// shared color-grade ("the filter") goes. resolveShaderTokens substitutes
-// painterlyGradeGLSL in at shader-load time so the grade — and its tuning
-// knobs — live in exactly ONE place across Go + both shaders, instead of two
-// hand-synced copies.
+// painterlyGradeToken: placeholder both shaders carry for the shared color grade;
+// resolveShaderTokens substitutes painterlyGradeGLSL at load time.
 const painterlyGradeToken = "{{PAINTERLY_GRADE}}"
 
-// painterlyGradeGLSL is the shared day→night color grade injected into BOTH
-// fragment shaders so the world and billboards grade identically and can't
-// drift. Operates on the vec3 `lit` using the `nightMood` uniform (0 = serene
-// day, 1 = spooky night). Temp locals are wrapped in a block so they can't
-// collide with the host shader's scope. The four tuning KNOBS live here.
+// painterlyGradeGLSL is the shared day→night grade injected into BOTH shaders so
+// they can't drift. Operates on vec3 `lit` via `nightMood` (0 day, 1 night);
+// temp locals blocked off to avoid scope collision. The four KNOBS live here.
 const painterlyGradeGLSL = `
     // (1) Soft highlight shoulder — roll bright pastels off instead of clipping.
     lit = lit / (1.0 + 0.16 * max(max(lit.r, lit.g), lit.b));
@@ -44,8 +35,8 @@ const painterlyGradeGLSL = `
     }
 `
 
-// resolveShaderTokens substitutes every shared Go-owned value into a fragment
-// shader's source at load time: the fog clamp ceiling and the painterly grade.
+// resolveShaderTokens substitutes the fog ceiling + painterly grade into a
+// shader's source at load time.
 func resolveShaderTokens(src string) string {
 	src = strings.ReplaceAll(src, fogCeilingToken, fmt.Sprintf("%.4f", fogCeiling))
 	src = strings.ReplaceAll(src, painterlyGradeToken, painterlyGradeGLSL)
@@ -77,14 +68,8 @@ void main() {
 }
 `
 
-// billboardFogVertexShader is the shared vertex shader for the
-// distance-fogged billboard pass. Same shape as the lighting
-// vertex shader, but without the normal pipe — raylib's billboard
-// draw doesn't supply vertex normals so the lighting shader's
-// `normalize(matNormal * vertexNormal)` would feed garbage into
-// the fragment's lighting math. We only need fragPosition (to
-// compute distance to camera) and fragTexCoord (to sample the
-// sprite atlas).
+// billboardFogVertexShader: the fogged billboard vertex shader. No normal pipe —
+// raylib's billboard draw supplies none, which would feed garbage into lighting.
 const billboardFogVertexShader = `#version 330
 
 in vec3 vertexPosition;
@@ -106,18 +91,8 @@ void main() {
 }
 `
 
-// billboardFogFragmentShader is the minimal billboard pass: sample
-// the texture, mix toward fogColor by the same exponential fog
-// curve the world shader uses, output. No directional lighting —
-// billboards face the camera so a single-direction sun would just
-// flatten them anyway; the world shader does its lighting compute
-// for mesh geometry, and this leaves billboards as colored sprite
-// silhouettes that nevertheless fade into the fog like everything
-// else around them.
-//
-// {{FOG_CEILING}} is substituted at shader-load time from the Go
-// `fogCeiling` constant via resolveShaderTokens, so the
-// ceiling lives in exactly one place across Go + both shaders.
+// billboardFogFragmentShader: sample, mix toward fogColor by the world's fog
+// curve, output. No directional lighting (billboards face the camera).
 const billboardFogFragmentShader = `#version 330
 
 in vec2 fragTexCoord;
@@ -185,8 +160,8 @@ func loadBillboardFogShader() billboardFogShaderPipe {
 		locNightMood:  rl.GetShaderLocation(shader, "nightMood"),
 	}
 	LogRenderInit("billboard fog locs: viewPos=%d fogColor=%d fogDensity=%d nightMood=%d", pipe.locViewPos, pipe.locFogColor, pipe.locFogDensity, pipe.locNightMood)
-	// Re-prime the uniform-upload memo against this (possibly fresh) shader — see
-	// the same reset in loadLightingShader for why an ID match isn't sufficient.
+	// Re-prime the uniform-upload memo (an ID match isn't sufficient — see
+	// loadLightingShader).
 	billboardFogPrimed = false
 	return pipe
 }
@@ -197,22 +172,15 @@ func (s billboardFogShaderPipe) unload() {
 	}
 }
 
-// uniformVec3Buf / uniformFloatBuf are reused across every shader-
-// uniform upload so the per-frame applyUniforms paths don't allocate
-// fresh []float32{...} slice literals for each Vec3 / Float. Renderer
-// is single-threaded; one shared scratch per shape is safe.
+// uniformVec3Buf / uniformFloatBuf are reused across every uniform upload so the
+// per-frame paths don't allocate fresh slice literals. Renderer is single-threaded.
 var (
 	uniformVec3Buf  [3]float32
 	uniformFloatBuf [1]float32
 )
 
-// billboardFog*Memo caches the last fog-uniform upload so beginBillboardFogPass
-// can skip the redundant ones. applyUniforms is called once per billboard group
-// (drawFieldPacks / drawBattlePack / DrawPartySprites) — up to 3× per frame with
-// IDENTICAL values, and across frames the three fog uniforms only shift when the
-// time-of-day profile changes (a step crossing a phase). Keyed on shader ID so a
-// shader reload (display toggle) re-primes; loadBillboardFogShader also clears
-// the primed flag in case GL reuses a program ID.
+// billboardFog* memoize the last fog-uniform upload to skip redundant ones (the
+// uniforms only shift on a phase crossing). Keyed on shader ID so a reload re-primes.
 var (
 	billboardFogViewPos  rl.Vector3
 	billboardFogProfile  lightingProfile
@@ -242,13 +210,9 @@ func (s billboardFogShaderPipe) applyUniforms(camera rl.Camera3D, profile lighti
 	rl.SetShaderValue(s.shader, s.locNightMood, uniformFloatBuf[:], rl.ShaderUniformFloat)
 }
 
-// Cast shadows used to live here as a separate depth pass + PCF lookup. They
-// were removed because the multi-pass setup was fragile against raylib's
-// implicit texture-binding behavior (DrawMesh ignores SetShaderValueTexture
-// registrations, so the shadow sampler kept reading garbage). Lighting is
-// now a single forward pass: directional sun + hemisphere ambient + a
-// pseudo-AO term + exponential fog. Good enough for the chunky look the
-// game's going for, and a lot easier to maintain.
+// Lighting is a single forward pass: sun + hemisphere ambient + pseudo-AO + fog.
+// Cast shadows were removed (the multi-pass depth/PCF setup was fragile against
+// raylib's implicit texture binding — DrawMesh ignores SetShaderValueTexture).
 const lightingFragmentShader = `#version 330
 
 in vec2 fragTexCoord;
@@ -393,37 +357,29 @@ type lightingShader struct {
 	locTorchRange     int32
 }
 
-// maxTorches mirrors MAX_TORCHES in the fragment shader — the fixed
-// upper bound on simultaneously-lit torches. The Go side picks the
-// closest N braziers to the camera and disables the rest by zeroing
-// their colour.
+// maxTorches mirrors MAX_TORCHES in the shader. The Go side picks the closest N
+// and zeroes the rest.
 const maxTorches = 12
 
-// torchRangeWorld is the world-unit reach of every torch's light
-// pool, shared by all torches via the torchRange uniform. ~7 units ≈
-// 3.5 tiles, so a torch lights its own room without bleeding far
-// down a corridor — keeps the dungeon dark between torches.
+// torchRangeWorld is every torch's reach (torchRange uniform) — ~9 units, so a
+// torch lights its room without bleeding down a corridor.
 const torchRangeWorld = float32(9.0)
 
-// torchLight is one active torch's world position + (already
-// flickered) RGB colour, handed to uploadTorches.
+// torchLight is one active torch's world position + (already flickered) color.
 type torchLight struct {
 	Pos   rl.Vector3
 	Color rl.Vector3
 }
 
-// Reused flat upload buffers so the per-frame torch upload doesn't
-// allocate. Indexed as [i*3 + channel].
+// Reused flat upload buffers so the per-frame torch upload doesn't allocate.
+// Indexed as [i*3 + channel].
 var (
 	torchPosBuf   [maxTorches * 3]float32
 	torchColorBuf [maxTorches * 3]float32
 )
 
-// torch upload memo. torchRange is a compile-time constant, so it's uploaded
-// once (not every frame). torchSlotsZeroed tracks whether the position/color
-// slots already hold an all-zero state, so a torchless field map — the common
-// outdoor case — skips the two per-frame SetShaderValueV uploads after the first
-// zeroing. Both are keyed on shader ID so a reload re-primes.
+// Torch upload memo. torchRange is constant → uploaded once; torchSlotsZeroed
+// lets a torchless area skip the per-frame uploads. Keyed on shader ID.
 var (
 	torchRangePrimed   bool
 	torchRangeShaderID uint32
@@ -434,9 +390,8 @@ var (
 func loadLightingShader() lightingShader {
 	shader := rl.LoadShaderFromMemory(lightingVertexShader, resolveShaderTokens(lightingFragmentShader))
 	if shader.ID == 0 {
-		// Compile/link failure leaves shader.ID == 0; raylib's BeginShaderMode
-		// will silently no-op past that point, so the world draws unlit with
-		// no other warning. One-line startup log so we don't lose the signal.
+		// ID==0 (compile/link fail) makes BeginShaderMode silently no-op and the
+		// world draws unlit; log so we don't lose the signal.
 		log.Println("render: lighting shader failed to compile; rendering will fall back to raylib's default shader")
 		LogRenderError("lighting shader compile FAILED (shader.ID==0); the world will draw with raylib's default shader, NO sun/ambient/fog/torch lighting")
 	} else {
@@ -459,22 +414,17 @@ func loadLightingShader() lightingShader {
 	}
 	LogRenderInit("lighting locs: viewPos=%d sunDir=%d sunCol=%d amb=%d fogCol=%d fogDens=%d spec=%d shadow=%d torchPos=%d torchCol=%d torchRange=%d",
 		s.locViewPos, s.locSunDirection, s.locSunColor, s.locAmbientColor, s.locFogColor, s.locFogDensity, s.locSpecStrength, s.locShadowStrength, s.locTorchPos, s.locTorchColor, s.locTorchRange)
-	// Force the uniform-upload memos to re-prime against this (possibly fresh)
-	// shader — GL can reuse a program ID after an unload/reload, so an ID match
-	// alone isn't proof the uniforms still hold our last values.
+	// Re-prime the uniform memos: GL can reuse a program ID after a reload, so an
+	// ID match alone isn't proof the uniforms still hold our last values.
 	lightingUniformPrimed = false
 	torchRangePrimed = false
 	torchSlotsZeroed = false
 	return s
 }
 
-// uploadTorches pushes the active torch point lights to the shader.
-// Active torches get their world position + flickered colour, the
-// remaining slots are zeroed so their loop iteration contributes
-// nothing. Call once per frame before drawing the world geometry
-// that should be torch-lit. The shared torchRange uniform is uploaded
-// once (it's constant), and a torchless area skips the slot upload
-// entirely once its slots are already zeroed.
+// uploadTorches pushes the active torch point lights to the shader (remaining
+// slots zeroed). Call once per frame before drawing torch-lit geometry. A
+// torchless area skips the slot upload once its slots are already zeroed.
 func (l lightingShader) uploadTorches(torches []torchLight) {
 	if l.shader.ID == 0 {
 		return
@@ -487,9 +437,8 @@ func (l lightingShader) uploadTorches(torches []torchLight) {
 		torchRangeShaderID = l.shader.ID
 		torchSlotsZeroed = false // force a fresh slot upload after a reload
 	}
-	// Torchless field maps: once the slots are zeroed, leave them — the active
-	// torches' colours flicker per frame (so a lit area re-uploads every frame),
-	// but an empty area has nothing to refresh.
+	// Torchless area: once the slots are zeroed, leave them (a lit area flickers
+	// and re-uploads each frame, but an empty area has nothing to refresh).
 	if len(torches) == 0 && torchSlotsZeroed && torchSlotsShaderID == l.shader.ID {
 		return
 	}
@@ -518,8 +467,8 @@ func (l lightingShader) unload() {
 	}
 }
 
-// sunDir is the world-space direction the sun shines toward, pre-normalized
-// at init time. Used as the directional light vector for the lighting shader.
+// sunDir is the pre-normalized world-space direction the sun shines toward (the
+// lighting shader's directional vector).
 var sunDir = normalizeVec3(rl.NewVector3(0.42, -0.78, 0.32))
 
 func normalizeVec3(v rl.Vector3) rl.Vector3 {
@@ -530,13 +479,9 @@ func normalizeVec3(v rl.Vector3) rl.Vector3 {
 	return rl.NewVector3(v.X/length, v.Y/length, v.Z/length)
 }
 
-// lightingUniform*Memo caches the last profile-derived upload. viewPos tracks
-// the free-moving camera and changes essentially every frame, so it always
-// uploads; but sunDirection is constant and the sun/ambient/fog/spec/shadow/mood
-// uniforms are pure functions of the time-of-day profile, which only shifts when
-// the step count crosses a phase — so those ~7 uploads are redundant on the vast
-// majority of frames. Keyed on shader ID so a reload re-primes; loadLightingShader
-// also clears the flag in case GL reuses a program ID.
+// lightingUniform* memoize the last profile-derived upload. viewPos always
+// uploads; the ~7 profile-derived uniforms only shift on a phase crossing. Keyed
+// on shader ID so a reload re-primes.
 var (
 	lightingUniformProfile  lightingProfile
 	lightingUniformShaderID uint32
@@ -549,8 +494,7 @@ func (l lightingShader) applyUniforms(camera rl.Camera3D, ambient lightingProfil
 	}
 	uniformVec3Buf[0], uniformVec3Buf[1], uniformVec3Buf[2] = camera.Position.X, camera.Position.Y, camera.Position.Z
 	rl.SetShaderValue(l.shader, l.locViewPos, uniformVec3Buf[:], rl.ShaderUniformVec3)
-	// The remaining uniforms are constant (sunDirection) or profile-derived; skip
-	// re-uploading them when the profile and shader are unchanged from last call.
+	// Remaining uniforms are constant or profile-derived; skip when profile + shader unchanged.
 	if lightingUniformPrimed && lightingUniformShaderID == l.shader.ID && ambient == lightingUniformProfile {
 		return
 	}
@@ -582,29 +526,21 @@ type lightingProfile struct {
 	FogDensity       float32
 	SpecularStrength float32
 	ShadowStrength   float32
-	// Mood is the day→night dial that drives the painterly grade in both
-	// fragment shaders: 0 = bright airy serene daylight, 1 = drained spooky
-	// night. Set per frame by applyTimeOfDay (outdoors it tracks the star
-	// alpha; enclosed dungeons are pinned high so they read uneasy at any
-	// hour). The grade reads it as the `nightMood` uniform.
+	// Mood is the day→night dial driving the painterly grade (0 = day, 1 = night),
+	// set per frame by applyTimeOfDay (outdoors tracks star alpha; enclosed
+	// dungeons pinned high). Read by the shaders as the `nightMood` uniform.
 	Mood float32
 }
 
-// Per-area lighting profiles, hoisted to package vars so we don't rebuild a
-// fresh struct every frame. Both areas reuse the same shader.
-// indoorFogThreshold straddles the two authored FogDensity profiles below
-// (dungeon 0.085 vs field 0.026): a profile fogger than this, in an area with
-// a real ceiling, gets the spooky-dungeon lighting override (daycycle.go).
-// Co-located with the profiles so nudging either one toward 0.06 doesn't
-// silently flip the indoor verdict from across the package.
+// Per-area lighting profiles (reused, not rebuilt per frame). indoorFogThreshold
+// straddles the two FogDensity values below; a fogger profile in a ceilinged area
+// gets the spooky-dungeon override (daycycle.go). Co-located to keep the verdict aligned.
 const indoorFogThreshold = 0.06
 
 var (
 	dungeonLighting = lightingProfile{
-		// Most fields here are overridden by applyTimeOfDay at
-		// render time; only FogDensity and SpecularStrength
-		// survive. Specular dimmed so dungeon stone doesn't
-		// catch hot highlights.
+		// Most fields overridden by applyTimeOfDay; only FogDensity + Specular
+		// survive (specular dimmed so dungeon stone doesn't catch hot highlights).
 		SunColor:         rl.NewVector3(0.95, 0.86, 0.72),
 		AmbientColor:     rl.NewVector3(0.22, 0.24, 0.30),
 		FogColor:         rl.NewVector3(0.06, 0.07, 0.09),
@@ -613,11 +549,8 @@ var (
 		ShadowStrength:   0.45,
 	}
 	fieldLighting = lightingProfile{
-		// Field fog density bumped from 0.018 → 0.026 so distant
-		// trees / walls fade into atmospheric haze the way they
-		// do in painted storybook spreads, instead of all sitting
-		// in sharp focus. Specular dropped so leaves and grass
-		// don't shimmer.
+		// Fog at 0.026 so distant trees/walls fade into storybook haze; specular
+		// dropped so leaves/grass don't shimmer.
 		SunColor:         rl.NewVector3(1.05, 0.99, 0.86),
 		AmbientColor:     rl.NewVector3(0.46, 0.52, 0.62),
 		FogColor:         rl.NewVector3(0.74, 0.86, 0.96),
@@ -627,10 +560,9 @@ var (
 	}
 )
 
-// attachShader binds the lighting shader to every material on the model so the
-// model is rendered through it (instead of raylib's default flat shader).
-// GetMaterials returns a slice that aliases the model's underlying material
-// memory, so mutating the slice elements writes back through the C pointer.
+// attachShader binds the lighting shader to every material on the model.
+// GetMaterials aliases the model's underlying material memory, so mutating the
+// slice elements writes back through the C pointer.
 func attachShader(model *rl.Model, shader rl.Shader) {
 	if model == nil || shader.ID == 0 {
 		return

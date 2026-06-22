@@ -6,8 +6,7 @@ import (
 	"crawler/internal/app/core"
 )
 
-// TestDamageEnemy_TalliesPhysicalOnly checks the Bloodthirst feed: physical
-// hits accumulate into PhysDamageThisTurn, magic hits don't.
+// TestDamageEnemy_TalliesPhysicalOnly: physical hits feed PhysDamageThisTurn, magic don't.
 func TestDamageEnemy_TalliesPhysicalOnly(t *testing.T) {
 	g := newTestState()
 	g.Packs[0].Members[0].HP = 100
@@ -23,9 +22,7 @@ func TestDamageEnemy_TalliesPhysicalOnly(t *testing.T) {
 	}
 }
 
-// TestApplyBloodthirst_HealsShareOfTally verifies the Warrior heals
-// BloodthirstHealPerRank of the turn's physical damage per rank, and that the
-// passive no-ops without the node.
+// TestApplyBloodthirst_HealsShareOfTally: Warrior heals a per-rank share of the turn's phys damage; no-ops without the node.
 func TestApplyBloodthirst_HealsShareOfTally(t *testing.T) {
 	g := newTestState()
 	g.Party[0].TreeRanks = map[string]int{core.PassiveBloodthirst: 3}
@@ -34,13 +31,13 @@ func TestApplyBloodthirst_HealsShareOfTally(t *testing.T) {
 	g.Battle.PhysDamageThisTurn = 20
 
 	applyBloodthirst(g, core.ActorRef{IsParty: true, Index: 0})
-	want := 1 + int(20*3*core.BloodthirstHealPerRank) // 1 + 6
+	want := 1 + int(20*3*core.BloodthirstHealPerRank)
 	if g.Party[0].HP != want {
 		t.Errorf("Bloodthirst HP = %d, want %d", g.Party[0].HP, want)
 	}
 
-	// No node → no heal.
-	g2 := newTestState()
+	g2 := newTestState() // no node → no heal
+
 	g2.Party[0].HP = 1
 	g2.Party[0].MaxHP = 100
 	g2.Battle.PhysDamageThisTurn = 20
@@ -50,8 +47,7 @@ func TestApplyBloodthirst_HealsShareOfTally(t *testing.T) {
 	}
 }
 
-// TestApplyBloodthirst_EnemyActorNoOp confirms an enemy actor never lifesteals
-// off the tally (the reflect/counter-discard guarantee).
+// TestApplyBloodthirst_EnemyActorNoOp: an enemy actor never lifesteals off the tally.
 func TestApplyBloodthirst_EnemyActorNoOp(t *testing.T) {
 	g := newTestState()
 	g.Party[0].TreeRanks = map[string]int{core.PassiveBloodthirst: 3}
@@ -64,22 +60,20 @@ func TestApplyBloodthirst_EnemyActorNoOp(t *testing.T) {
 	}
 }
 
-// TestApplyShadowStep_BonusGatedOnInitiative checks the +damage only lands when
-// the target hasn't acted yet this round, and only for a member with the node.
+// TestApplyShadowStep_BonusGatedOnInitiative: +damage only when the target hasn't acted yet this round, and only with the node.
 func TestApplyShadowStep_BonusGatedOnInitiative(t *testing.T) {
 	g := newTestState()
-	g.Party[2].TreeRanks = map[string]int{core.PassiveShadowStep: 2} // Nyx, the Thief
+	g.Party[2].TreeRanks = map[string]int{core.PassiveShadowStep: 2}
 	g.Battle.EnemyIndex = 0
 
-	// Default queue: [party0], cursor 0 — enemy 0 isn't before the cursor, so it
-	// still acts this round → bonus applies.
+	// Enemy 0 isn't before the cursor → still acts this round → bonus applies.
 	got := applyShadowStep(g, &g.Party[2], 100)
-	want := 100 + int(100*2*core.ShadowStepBonusPerRank) // 100 + 30
+	want := 100 + int(100*2*core.ShadowStepBonusPerRank)
 	if got != want {
 		t.Errorf("Shadow Step (target acts later) = %d, want %d", got, want)
 	}
 
-	// Enemy already acted this round (sits before the cursor) → no bonus.
+	// Enemy already acted (before the cursor) → no bonus.
 	g.Battle.Queue = []core.ActorRef{{IsParty: false, Index: 0}, {IsParty: true, Index: 2}}
 	g.Battle.QueueCursor = 1
 	if got := applyShadowStep(g, &g.Party[2], 100); got != 100 {
@@ -94,8 +88,7 @@ func TestApplyShadowStep_BonusGatedOnInitiative(t *testing.T) {
 	}
 }
 
-// TestTryRiposte_CountersAttacker confirms the dodge counter deals damage to the
-// attacker for a Warrior with the node, and nothing without it.
+// TestTryRiposte_CountersAttacker: the dodge counter damages the attacker with the node, nothing without.
 func TestTryRiposte_CountersAttacker(t *testing.T) {
 	g := newTestState()
 	g.Party[0].TreeRanks = map[string]int{core.PassiveRiposte: 1}
@@ -110,18 +103,16 @@ func TestTryRiposte_CountersAttacker(t *testing.T) {
 	g2 := newTestState()
 	g2.Packs[0].Members[0].HP = 100
 	g2.Packs[0].Members[0].MaxHP = 100
-	tryRiposte(g2, 0, 0) // no node
+	tryRiposte(g2, 0, 0)
 	if g2.Packs[0].Members[0].HP != 100 {
 		t.Errorf("Riposte fired without the node: enemy HP = %d, want 100", g2.Packs[0].Members[0].HP)
 	}
 }
 
-// TestTryRiposte_FeedsBloodthirst is the fix-1 guard: a Warrior holding both
-// Riposte and Bloodthirst lifesteals off the counter, even though it lands on
-// the enemy's turn (so the end-of-turn tally never sees it).
+// TestTryRiposte_FeedsBloodthirst: both nodes lifesteal off the counter even though it lands on the enemy's turn (tally never sees it).
 func TestTryRiposte_FeedsBloodthirst(t *testing.T) {
 	g := newTestState()
-	g.Party[0].Stats.STR = 20 // ensure the counter deals enough to round a heal > 0
+	g.Party[0].Stats.STR = 20 // counter big enough to round a heal > 0
 	g.Party[0].TreeRanks = map[string]int{core.PassiveRiposte: 1, core.PassiveBloodthirst: 3}
 	g.Party[0].HP = 1
 	g.Party[0].MaxHP = 100
@@ -134,12 +125,11 @@ func TestTryRiposte_FeedsBloodthirst(t *testing.T) {
 	}
 }
 
-// TestTryRetribution_NoReflectWhenDefenderDowned is the fix-2 guard: a hit that
-// downed the warded member draws no dying-corpse reflection.
+// TestTryRetribution_NoReflectWhenDefenderDowned: a hit that downed the warded member draws no reflection.
 func TestTryRetribution_NoReflectWhenDefenderDowned(t *testing.T) {
 	g := newTestState()
 	g.Party[1].TreeRanks = map[string]int{core.PassiveRetribution: 3}
-	g.Party[1].HP = 0 // the blow killed the Cleric
+	g.Party[1].HP = 0
 	g.Packs[0].Members[0].HP = 100
 	g.Packs[0].Members[0].MaxHP = 100
 	tryRetribution(g, 0, 1, 10)
@@ -148,13 +138,12 @@ func TestTryRetribution_NoReflectWhenDefenderDowned(t *testing.T) {
 	}
 }
 
-// TestTryRetribution_ReflectsShare confirms the reflect scales with rank, no-ops
-// without the node, and never touches a dead attacker.
+// TestTryRetribution_ReflectsShare: reflect scales with rank, no-ops without the node, never touches a dead attacker.
 func TestTryRetribution_ReflectsShare(t *testing.T) {
 	dropFor := func(rank int) int {
 		g := newTestState()
 		if rank > 0 {
-			g.Party[1].TreeRanks = map[string]int{core.PassiveRetribution: rank} // Mira, the Cleric
+			g.Party[1].TreeRanks = map[string]int{core.PassiveRetribution: rank}
 		}
 		g.Packs[0].Members[0].HP = 100
 		g.Packs[0].Members[0].MaxHP = 100

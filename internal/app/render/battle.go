@@ -11,12 +11,8 @@ import (
 )
 
 // drawBattleHUD orchestrates the in-combat HUD. Each panel owns one screen
-// region (top-center roster, bottom-left log, bottom-center action, left column
-// turn order) so they never compete for the same real estate. The action
-// log is pinned bottom-left through every phase — including the timing
-// minigame — so the player can keep reading the last few events while
-// they press. The action menu yields to the bar (it has nothing useful
-// to show during press/charge anyway).
+// region so they never overlap. The action log stays pinned through the timing
+// minigame; the action menu yields to the bar.
 func drawBattleHUD(g *core.GameState, assets Resources) {
 	drawEnemyRoster(g, assets)
 	drawActionLogPanel(g, assets)
@@ -25,39 +21,25 @@ func drawBattleHUD(g *core.GameState, assets Resources) {
 	}
 }
 
-// timingActive reports whether the timed-hit bar is currently the focus of
-// the HUD. Used to hide panels that share its strip.
+// timingActive reports whether the timed-hit bar is the HUD focus (hides panels sharing its strip).
 func timingActive(g *core.GameState) bool {
 	return g.Battle.Phase == core.BattleAttackTiming || g.Battle.Phase == core.BattleEnemyTiming
 }
 
-// inPlayerTurn reports whether the current phase is "the player is acting" —
-// either the menu/target picker or the resolving timing bar. Visual indicators
-// for the active actor + chosen target should persist through the bar so the
-// player keeps their bearings, instead of flickering off the moment the bar
-// arms and back on when it resolves.
+// inPlayerTurn reports whether the player is acting (menu/picker or timing bar) — kept true
+// through the bar so active-actor/target indicators persist instead of flickering.
 func inPlayerTurn(g *core.GameState) bool {
 	return g.Battle.Phase == core.BattlePlayer || g.Battle.Phase == core.BattleAttackTiming
 }
 
-// targetingEnemy reports whether the player is currently in the
-// "choose an enemy" target phase — Phase MUST be BattlePlayer (drops
-// the moment the timing bar arms) and ActionMode == ActionEnemyTarget.
-// Single source for the two render gates that overlay a "yellow cursor"
-// on the targeted enemy: the in-world chevron and the enemy-roster
-// row highlight. Keeping the predicate in one place prevents them
-// from drifting when the targeting rule changes.
+// targetingEnemy reports the "choose an enemy" phase (BattlePlayer + ActionEnemyTarget).
+// Single source for the yellow-cursor gates (in-world chevron + roster highlight).
 func targetingEnemy(g *core.GameState) bool {
 	return g.Battle.Phase == core.BattlePlayer && g.Battle.ActionMode == core.ActionEnemyTarget
 }
 
-// targetingAlly is true when the player is pointing a cursor at a party member —
-// a heal-skill target, an item target, or the partner tile of a formation Swap.
-// Used by the renderer to gate the friendly selection marker so it appears in
-// every such mode (audit-3 caught Item targeting silently dropping the marker
-// because the check was specific to ActionPartyTarget; the Swap partner cursor
-// reuses the same marker path so the highlighted candidate reads consistently
-// on the ribbon, the turn panel, and the 3D sprite).
+// targetingAlly is true when cursoring a party member (heal/item target, or Swap partner).
+// Gates the friendly selection marker across all three modes.
 func targetingAlly(g *core.GameState) bool {
 	return g.Battle.ActionMode == core.ActionPartyTarget ||
 		g.Battle.ActionMode == core.ActionItemTarget ||
@@ -79,20 +61,15 @@ type enemyStatusPillVisual struct {
 	turns   func(*core.Enemy) int
 	fill    rl.Color
 	outline rl.Color
-	// glyph paints the status's symbol, reusing the SAME vector glyphs the
-	// party cards draw (drawStatusGlyph*) so both surfaces read with icons,
-	// not a per-side letter code. Dark ink on the bright pill fill.
+	// glyph reuses the party cards' drawStatusGlyph* so both surfaces share icons.
 	glyph   func(cx, cy, r float32, col rl.Color)
 	flicker bool
 }
 
 var enemyStatusPillVisuals = [enemyStatusCount]enemyStatusPillVisual{
-	// Burn / Bleed are enemy-only (no party-side concept) so their fill +
-	// glyph stay local. Sleep / Poison / Stun share their fill + glyph with
-	// the party cards, so those two fields come from sharedStatusVisuals
-	// (party.go) — one source of truth. The flicker bit is NOT shared: Sleep
-	// and Stun sit static on enemy pills but pulse on party cards, so each
-	// table keeps its own flicker. The outline + turns reader are pill-only.
+	// Burn/Bleed are enemy-only (local fill+glyph). Sleep/Poison/Stun draw fill+glyph from
+	// sharedStatusVisuals (party.go). flicker is NOT shared (static on pills, pulses on cards);
+	// outline + turns reader are pill-only.
 	enemyStatusBurn:   {turns: func(e *core.Enemy) int { return e.BurnTurns }, fill: statusBurn, outline: statusBurnOutline, glyph: drawStatusGlyphBurn, flicker: true},
 	enemyStatusSleep:  {turns: func(e *core.Enemy) int { return e.SleepTurns }, fill: sharedStatusVisuals[core.PartyStatusAsleep].Col, outline: statusSleepOutline, glyph: sharedStatusVisuals[core.PartyStatusAsleep].Glyph},
 	enemyStatusPoison: {turns: func(e *core.Enemy) int { return e.PoisonTurns }, fill: sharedStatusVisuals[core.PartyStatusPoisoned].Col, outline: statusPoisonOutline, glyph: sharedStatusVisuals[core.PartyStatusPoisoned].Glyph, flicker: true},
@@ -100,11 +77,8 @@ var enemyStatusPillVisuals = [enemyStatusCount]enemyStatusPillVisual{
 	enemyStatusStun:   {turns: func(e *core.Enemy) int { return e.StunTurns }, fill: sharedStatusVisuals[core.PartyStatusStunned].Col, outline: statusStunOutline, glyph: sharedStatusVisuals[core.PartyStatusStunned].Glyph},
 }
 
-// assertTableComplete panics if isMissing reports a gap at any index in
-// [0, count). The shared init-time coverage check behind the package's
-// parallel-table invariants (status visuals, class glyphs, action rows, …): a
-// newly added enum value with no row trips this at startup instead of drawing a
-// blank/zero entry. name + the offending index are quoted in the panic.
+// assertTableComplete panics if isMissing reports a gap in [0, count). Shared init-time
+// coverage check for the package's parallel tables — a new enum value with no row trips it.
 func assertTableComplete(name string, count int, isMissing func(i int) bool) {
 	for i := 0; i < count; i++ {
 		if isMissing(i) {
@@ -121,8 +95,6 @@ func init() {
 }
 
 // drawEnemyRoster shows the active pack at the top of the screen.
-// Replaces the legacy floating target tooltip and the dense enemy info line
-// that used to sit atop the bottom panel.
 func drawEnemyRoster(g *core.GameState, assets Resources) {
 	if g.Battle.Phase == core.BattleWon || g.Battle.Phase == core.BattleLost {
 		return
@@ -133,9 +105,6 @@ func drawEnemyRoster(g *core.GameState, assets Resources) {
 	}
 
 	rowH := rosterRowH
-	// Inner pad replaces the old header band — the row content names
-	// the enemies and shows their wound state; a tautological "GOBLINS 3/5"
-	// title above them was just chrome.
 	topPad := rosterTopPad
 	padBottom := rosterBottomPad
 	w := rosterW
@@ -148,38 +117,30 @@ func drawEnemyRoster(g *core.GameState, assets Resources) {
 
 	drawCard(x, y, w, h, surfacePrimary, borderSoft, borderEnemy)
 
-	// `targetable` controls the per-row yellow highlight in the enemy
-	// roster. Shares the targetingEnemy predicate with the in-world
-	// chevron so both yellow indicators turn on and off together —
-	// when the timing bar arms (Phase → BattleAttackTiming), both go
-	// dark, honouring "yellow cursor only when targeting."
+	// targetable gates the per-row yellow highlight (shares targetingEnemy with the chevron).
 	targetable := targetingEnemy(g)
 	members := core.BattleMembers(g)
 	selectedSlot := core.SelectedEnemySlot(g)
+	// While picking a melee target, out-of-reach foes (back row, front still up) grey out;
+	// the cursor can land on them but confirming buzzes. Ranged/magic reaches everyone.
+	meleeTargeting := targetable && core.BattlePendingAttackIsMelee(g)
 
 	for i, slot := range slots {
-		// &members[slot] — pass the enemy by pointer so the per-row draw
-		// doesn't copy the 496-byte Enemy (it embeds a full DefinitionOverride)
-		// once per roster row per frame.
-		enemy := &members[slot]
+		enemy := &members[slot] // pointer: avoid copying the 496-byte Enemy per row per frame
 		rowY := y + topPad + int32(i)*rowH
-		// HP is revealed once the kind is identified in the bestiary (5
-		// kills or a Scan) — a kind-level fact, so every instance of a
-		// known kind shows its numbers, not just the one that was scanned.
+		// HP shows once the kind is identified (5 kills or a Scan) — a kind-level fact.
 		known := g.Bestiary.Knows(enemy.Kind)
-		drawEnemyRosterRow(assets.hudFont, enemy, x+14, rowY, w-28, rowH-8, targetable && slot == selectedSlot, !enemy.Alive, known)
+		reachable := !meleeTargeting || core.EnemyInEffectiveFront(members, slot)
+		drawEnemyRosterRow(assets.hudFont, enemy, x+14, rowY, w-28, rowH-8, targetable && slot == selectedSlot, !enemy.Alive, known, reachable)
 	}
 }
 
-// rosterSlotsBuf is a package-private reusable buffer for visibleRosterSlots
-// so the per-frame roster draw doesn't allocate a fresh slice every tick.
-// raylib's draw loop is single-threaded, so re-slicing this isn't racy.
+// rosterSlotsBuf is the reused buffer for visibleRosterSlots (single-threaded draw).
 var rosterSlotsBuf = make([]int, 0, 16)
 
 func visibleRosterSlots(g *core.GameState) []int {
 	rosterSlotsBuf = rosterSlotsBuf[:0]
-	// Index-range: Enemy embeds a full DefinitionOverride, so a value-range
-	// would copy ~496 bytes per member per frame just to read two bools.
+	// Index-range: value-range would copy ~496 bytes per member just to read two bools.
 	members := core.BattleMembers(g)
 	for i := range members {
 		if !members[i].Alive && members[i].DeathFade <= 0 {
@@ -190,29 +151,25 @@ func visibleRosterSlots(g *core.GameState) []int {
 	return rosterSlotsBuf
 }
 
-func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targeted, fading, known bool) {
-	// Roster row tints follow the glass-token family — translucent
-	// glass over the (also translucent) outer card body, so the
-	// world hints through.
+func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targeted, fading, known, reachable bool) {
 	bg := surfaceRosterRow
 	border := borderRosterRow
 	nameCol := textPrimary
-	if fading {
+	// A living-but-unreachable foe greys out like a dying one, so "can't hit this" reads.
+	if fading || !reachable {
 		bg = surfaceRosterRowFaded
 		border = borderDim
 		nameCol = textDim
 	}
-	if targeted {
-		// Brighter enemy-tinted fill than before so the current target
-		// clearly stands apart from the idle rows.
+	// Bright target fill + halo only for a REACHABLE selected foe; an unreachable one
+	// keeps its grey look but shows a dim cursor arrow below.
+	if targeted && reachable {
 		bg = core.MixColor(bg, surfaceEnemyTint, 0.9)
 		border = borderEnemy
 	}
 	drawGlassPane(x, y, w, h, bg)
-	if targeted {
-		// Solid inner ring + pulsing wider ring — the same "this is the live
-		// selection" treatment the party ribbon's active card uses, shared via
-		// drawSelectionHalo so the two can't drift.
+	if targeted && reachable {
+		// Shared drawSelectionHalo with the party ribbon's active card.
 		drawSelectionHalo(x, y, w, h, borderEnemy, pulseHalo(), true)
 	} else {
 		drawSmallPanelOutline(x, y, w, h, border)
@@ -224,6 +181,9 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 		bx := float32(x) + rosterArrowMarkerInsetX
 		cy := float32(y) + float32(h)/2
 		col := fadeColor(borderEnemy, pulseHalo())
+		if !reachable {
+			col = borderDim // muted cursor on an unreachable foe
+		}
 		drawArrowMarker(rl.NewVector2(bx, cy), rosterArrowMarkerTipDx, 0, rosterArrowMarkerHalf, col)
 	}
 
@@ -234,16 +194,9 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 	displayName := core.EnemyName(enemy)
 	drawEngravedText(font, displayName, nameX, float32(nameY), FontHeading, nameCol)
 
-	// Health reads from the qualitative wound-state word by default —
-	// exact enemy HP stays hidden until the kind is identified in the
-	// bestiary (5 kills or a Scan), which the caller passes as `known`. A
-	// known foe shows its real HP in claret just after the word; unknown
-	// foes show the word alone. So: no HP bar; the condition word, plus the
-	// revealed number once the party has earned (or scanned) the knowledge.
+	// Wound-state word always; real HP in claret only when known. No HP bar.
 	condSize := FontSmall
-	// Stack the condition BELOW the name (name top + its line height + a small
-	// gap), not bottom-anchored to the row — at FontHeading the name fills most
-	// of the row, so a bottom-anchored condition used to land on top of it.
+	// Stack the condition below the name (bottom-anchoring collided with the tall name).
 	condY := float32(nameY) + FontHeading + 2
 	drawTextWithShadow(font, condition, nameX, condY, condSize, condCol)
 	if known {
@@ -258,11 +211,7 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 	pillX := rightEdge - pillW
 	pillBaseY := float32(y) + (float32(h)-pillH)/2
 
-	// Slot-stacked status pills. Walking the init-asserted visual table is what
-	// lets a new enemy status land as one appended row without re-tuning any
-	// per-pill geometry. Pills stack upward from pillBaseY; in practice an enemy
-	// shows 1-2 at once (the five kinds rarely co-occur — Sleep/Stun skip turns,
-	// so a fully-stacked Burn+Sleep+Poison+Bleed+Stun is unreachable in play).
+	// Status pills stack upward from pillBaseY, walking the init-asserted visual table.
 	slot := 0
 	for _, p := range enemyStatusPillVisuals {
 		turns := p.turns(enemy)
@@ -280,26 +229,16 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 	}
 }
 
-// statusTurnsLabel returns the bare turn-count pill label for a status with N
-// turns remaining. Burn / Sleep / Poison / Stun all render through this each
-// frame for every afflicted enemy (up to 4 statuses × 6 enemies = 24
-// strings/frame in heavy combat), so it reads the shared statusTurnDigit cache
-// rather than re-Sprintf'ing. Status identity is conveyed by the glyph + fill,
-// not a letter prefix, so the label is numbers only.
+// statusTurnsLabel returns the bare turn-count pill label (numbers only; identity is glyph+fill).
+// Reads the shared statusTurnDigit cache to avoid per-frame Sprintf.
 func statusTurnsLabel(turns int) string {
 	return statusTurnDigit(turns)
 }
 
-// rosterCondMeasureCache memoizes rl.MeasureTextEx for the handful of
-// wound-state condition words an identified enemy's HP readout offsets
-// against — without it every known enemy costs a cgo measure round-trip
-// per roster frame.
+// rosterCondMeasureCache memoizes MeasureTextEx for the wound-state words the HP readout offsets against.
 var rosterCondMeasureCache measureCache
 
-// enemyHPLabelCache memoizes the identified-enemy "HP/MaxHP" roster string
-// per (hp, max) pair so the readout doesn't fmt.Sprintf per enemy per
-// battle frame. Bounded: keys only span (0..MaxHP, MaxHP) pairs actually
-// seen in play — a few hundred tiny strings across all kinds.
+// enemyHPLabelCache memoizes "HP/MaxHP" per (hp,max). Bounded to pairs seen in play.
 var enemyHPLabelCache = map[[2]int]string{}
 
 func enemyHPLabel(hp, max int) string {
@@ -313,16 +252,9 @@ func enemyHPLabel(hp, max int) string {
 }
 
 
-// drawStatusPill paints the shared status-pill silhouette: a small
-// rounded fill pane + matching outline + a FontSmall single-line label.
-// The "fill + outline + label" core both status surfaces use — the
-// enemy-roster pill (drawEnemyStatusPill) and the Tome Stats-tab chip
-// (render/panels.go) — extracted so the two pill silhouettes can't drift.
-// The two callers anchor + color the label differently
-// (enemy: centered inkPrimary; Stats chip: left-aligned status tint), so
-// the label placement is parameterized: `centered` true centers the
-// label (with the enemy pill's +2 top inset); false left-aligns it with
-// the Stats chip's +10/+4 inset. `labelCol` lets each pick its tone.
+// drawStatusPill paints the shared status-pill silhouette (fill + outline + FontSmall label),
+// used by the enemy roster and the Stats-tab chip. centered true centers the label (+2 top);
+// false left-aligns it (+10/+4). labelCol picks the tone.
 func drawStatusPill(font rl.Font, x, y, w, h float32, fill, outline rl.Color, label string, labelCol rl.Color, centered bool) {
 	drawSmallPanel(int32(x), int32(y), int32(w), int32(h), fill)
 	drawSmallPanelOutline(int32(x), int32(y), int32(w), int32(h), outline)
@@ -333,15 +265,10 @@ func drawStatusPill(font rl.Font, x, y, w, h float32, fill, outline rl.Color, la
 	}
 }
 
-// drawEnemyStatusPill paints one rounded-rect status pill: the colored
-// fill + outline (status identity by color, unchanged silhouette), a vector
-// GLYPH on the left — the same drawStatusGlyph* symbol the party cards use, so
-// the two surfaces read alike instead of the roster spelling out letter codes —
-// and the bare turn count on the right. Glyph + number are drawn in the dark
-// glyph ink (statusGlyphDark) for contrast against the bright status fill.
+// drawEnemyStatusPill paints one status pill: fill + outline, a left glyph (shared
+// drawStatusGlyph*), and the turn count on the right, both in dark glyph ink.
 func drawEnemyStatusPill(font rl.Font, x, y, w, h float32, fill, outline rl.Color, glyph func(cx, cy, r float32, col rl.Color), turnsLabel string) {
-	// Fill + outline silhouette comes from the shared drawStatusPill core (empty
-	// label — this pill anchors its glyph + turn count itself, not centered).
+	// Silhouette from drawStatusPill (empty label — glyph + count anchored below).
 	drawStatusPill(font, x, y, w, h, fill, outline, "", statusGlyphDark, true)
 	if glyph != nil {
 		glyph(x+w*0.30, y+h*0.5, h*0.28, statusGlyphDark)
@@ -349,45 +276,29 @@ func drawEnemyStatusPill(font rl.Font, x, y, w, h float32, fill, outline rl.Colo
 	drawTextCentered(font, turnsLabel, x+w*0.72, y+2, FontSmall, statusGlyphDark)
 }
 
-// actionLogTextPad is the horizontal inset between the action-log
-// inner panel edge and the rendered text. Both the wrap width
-// (subtracts 2× pad) and the per-line text X (adds 1× pad) read
-// this so the inset can't drift between the two seams — earlier
-// the wrap used `innerW - 20` and the draw used `innerX + 10`
-// with the coupling implicit.
+// actionLogTextPad is the text inset for the action-log; the wrap width and per-line X
+// both read it so the inset can't drift between the two seams.
 const actionLogTextPad = int32(10)
 
-// actionLogSpineInset is the symmetric top/bottom inset of the binding-edge
-// spine stripe from the action-log pane (the stripe runs panelH - 2×inset).
-// Named so the spine's vertical margin isn't a pair of bare 18 / 36 literals.
+// actionLogSpineInset is the spine stripe's top/bottom inset (stripe runs panelH - 2×inset).
 const actionLogSpineInset = int32(18)
 
-// Wood-accent alphas for the action-log spine: the main binding stripe and the
-// dimmer "binding tie" cross-marks. Named so the spine's two fade levels tune
-// in one place instead of as inline fadeColor magic numbers.
+// Action-log spine wood-accent alphas: main binding stripe and dimmer binding ties.
 const (
 	actionLogSpineAlpha = float32(0.75)
 	actionLogTieAlpha   = float32(0.45)
 )
 
-// drawActionLogSpine paints the binding-edge ornament along the left
-// inside of the action log pane: a thin wood-accent stripe terminated
-// by gilt fleurons at both ends with a middle diamond pip flanked by
-// horizontal "binding ties". Reads as a scribe's ledger spine — the
-// dressing that ties the rolling text to the rest of the
-// wood-and-glass HUD.
+// drawActionLogSpine paints the ledger-spine ornament down the left inside edge of the
+// action-log pane: a wood-accent stripe, gilt fleurons at both ends, a mid pip with binding ties.
 func drawActionLogSpine(panelX, panelY, panelH int32) {
 	stripeX := panelX + actionLogTextPad
 	stripeY := panelY + actionLogSpineInset
 	stripeH := panelH - 2*actionLogSpineInset
 	rl.DrawRectangle(stripeX, stripeY, 2, stripeH, fadeColor(woodAccent, actionLogSpineAlpha))
 	centreX := float32(stripeX) + 1
-	// Top + bottom fleurons mark the spine's termini — the
-	// chapter-divider sigils anchoring the ledger.
 	drawFleuron(centreX, float32(stripeY)-2, 3, giltDim)
 	drawFleuron(centreX, float32(stripeY+stripeH)+2, 3, giltDim)
-	// Mid-stripe diamond pip flanked by short horizontal binding
-	// ties — reads as a leather thong wrapping the spine.
 	midY := float32(stripeY) + float32(stripeH)*0.5
 	drawDiamondPip(centreX, midY, 2.5, giltDim)
 	tieCol := fadeColor(woodAccent, actionLogTieAlpha)
@@ -395,19 +306,14 @@ func drawActionLogSpine(panelX, panelY, panelH int32) {
 	rl.DrawRectangle(stripeX+2, int32(midY), 4, 1, tieCol)
 }
 
-// actionLogVisualLine is the wrapped+styled product of one source log
-// line. Lifted to package scope so the persistent cache can hold it
-// across frames.
+// actionLogVisualLine is one wrapped+styled source log line (package-scope for the cache).
 type actionLogVisualLine struct {
 	text  string
 	fresh bool
 }
 
-// actionLogCache memoizes the wrapped action log between frames. The
-// log only changes on setBattleMessage; without this cache,
-// drawActionLogPanel re-runs wrapTextLines + MeasureTextEx every
-// frame even when nothing's new. Invalidates on log length change,
-// last-line content change, or panel-geometry change.
+// actionLogCache memoizes the wrapped log between frames. Invalidates on log length,
+// last-line content, or panel-geometry change.
 var actionLogCache struct {
 	visible      []actionLogVisualLine
 	lastLogLen   int
@@ -416,15 +322,11 @@ var actionLogCache struct {
 	lastMaxLines int
 }
 
-// statusLineScratch is the reusable 1-slot backing for the "show StatusMessage
-// when the log is empty" path, so drawActionLogPanel doesn't allocate a slice
-// per frame. Safe as package state because raylib draw is single-threaded.
+// statusLineScratch is the reused 1-slot backing for the empty-log StatusMessage path.
 var statusLineScratch [1]string
 
-// shrinkPinnedToBottom resolves the height/top-edge for a bottom-pinned HUD pane
-// whose top would collide with topLimit: it shrinks the pane (floored at
-// hudPanelMinH) while keeping its bottom edge at bottomY. The two bottom HUD
-// panes (action log vs action menu) share this; only their top limit differs.
+// shrinkPinnedToBottom shrinks a bottom-pinned pane (floored at hudPanelMinH) to clear
+// topLimit while keeping its bottom edge at bottomY. Shared by the two bottom HUD panes.
 func shrinkPinnedToBottom(bottomY, topLimit int32) (h, y int32) {
 	h = bottomY - topLimit
 	if h < hudPanelMinH {
@@ -433,15 +335,9 @@ func shrinkPinnedToBottom(bottomY, topLimit int32) (h, y int32) {
 	return h, bottomY - h
 }
 
-// drawActionLogPanel paints the rolling ACTION LOG — the bottom-left HUD pane
-// shown both in combat and during exploration (g.ActionLog persists across the
-// two). The name is historical; it's no longer combat-only.
+// drawActionLogPanel paints the rolling ACTION LOG (bottom-left, in combat and exploration).
 func drawActionLogPanel(g *core.GameState, assets Resources) {
-	// Bottom-left HUD pane: tall, soft-edged glass that the world bleeds
-	// through. No header label — the rolling text is self-evident. The pane's
-	// BOTTOM edge pins to the screen bottom (hudEdgePad margin); it stretches
-	// up toward the turn panel, then floors at 160 px so it stays usable on
-	// very short windows.
+	// Bottom edge pins to the screen bottom; stretches up toward the turn panel, floored at 160px.
 	w := actionLogW
 	h := actionLogH
 	_, screenH := screenSize()
@@ -449,25 +345,15 @@ func drawActionLogPanel(g *core.GameState, assets Resources) {
 	bottomY := screenH - hudEdgePad
 	y := bottomY - h
 
-	// Top collision guard against the turn panel above: if the pane would
-	// overlap it, shrink height (floored at hudPanelMinH) while keeping the
-	// bottom edge pinned to the screen bottom.
+	// Top collision guard against the turn panel: shrink to clear it, bottom edge pinned.
 	if turnBottom := TurnPanelBottomY(g) + hudColumnGap; y < turnBottom {
 		h, y = shrinkPinnedToBottom(bottomY, turnBottom)
 	}
 
 	drawPanelCard(x, y, w, h)
-	// Ledger spine — a thin wood-accent stripe down the left inside
-	// edge, dotted with three small pips. Reads as the bound-edge of
-	// a scribe's ledger, anchoring the rolling text against the
-	// world bleed-through.
 	drawActionLogSpine(x, y, h)
 
-	// Without the header band the inner content fills the full pane
-	// minus a small symmetric inset. Wood frame eats ~6 px on each
-	// edge; an extra 8 px keeps text off the bevel; the spine on the
-	// left adds another 6 px so the first column of text doesn't
-	// collide with it.
+	// Inner inset: frame ~6px + 8px off the bevel; +6px on the left clears the spine.
 	innerInset := int32(14)
 	innerX := x + innerInset + 6
 	innerY := y + innerInset
@@ -477,12 +363,8 @@ func drawActionLogPanel(g *core.GameState, assets Resources) {
 	lineH := int32(22)
 	lineSize := FontSmall
 
-	// Ruled-parchment lines — a whisper-faint hairline at the BOTTOM of each
-	// line slot, so the pane reads as a scribe's ruled ledger page even before
-	// (and after) text fills it. Bottom-anchored at the same -6 footing the
-	// text loop uses, so entries always sit exactly ON their rule no matter
-	// how many lines are visible. Inset a touch from both edges so the rules
-	// read as page ruling, not frame strokes.
+	// Ruled-parchment hairlines at each line slot's bottom, on the same -6 footing as
+	// the text loop so entries sit on their rule. Inset from both edges.
 	ruleX := innerX + 2
 	ruleW := innerW - 10
 	for ry := innerY + innerH - 6; ry > innerY+lineH/2; ry -= lineH {
@@ -491,9 +373,7 @@ func drawActionLogPanel(g *core.GameState, assets Resources) {
 
 	lines := g.ActionLog
 	if len(lines) == 0 && g.StatusMessage != "" {
-		// Reuse a package-level 1-slot buffer rather than allocating a new slice
-		// each frame the log is empty but a status prompt is up (draw is single-
-		// threaded, so the shared scratch is safe).
+		// Reuse the package 1-slot buffer rather than allocating per frame.
 		statusLineScratch[0] = g.StatusMessage
 		lines = statusLineScratch[:]
 	}
@@ -510,10 +390,7 @@ func drawActionLogPanel(g *core.GameState, assets Resources) {
 	startY := innerY + innerH - int32(len(visible))*lineH - 6
 	n := len(visible)
 	for i, vl := range visible {
-		// Fade-to-top: bottom line (newest) at full alpha, oldest line at 0.5.
-		// Gentle linear ramp so older entries recede into the glass without
-		// becoming unreadable — the floor was 0.18, which faded the top lines
-		// nearly to nothing (they "fade too much").
+		// Fade-to-top: newest at full alpha, oldest at 0.5 (0.18 floor faded too much).
 		var alpha float32 = 1
 		if n > 1 {
 			posT := float32(i) / float32(n-1) // 0 at top, 1 at bottom
@@ -528,12 +405,8 @@ func drawActionLogPanel(g *core.GameState, assets Resources) {
 	}
 }
 
-// wrappedActionLogLines returns the visible wrapped log lines for the
-// given source slice, reusing the cached result when the inputs are
-// unchanged. The cache invalidates on (length, last-line, innerW,
-// maxLines) — covering the two ways a log mutates (append, or
-// trim+append on overflow) and any panel-geometry shift caused by the
-// turn-panel collision guard at the top of drawActionLogPanel.
+// wrappedActionLogLines returns the visible wrapped log lines, reusing the cache when
+// (length, last-line, innerW, maxLines) are unchanged.
 func wrappedActionLogLines(font rl.Font, lines []string, innerW int32, maxLines int, lineSize, wrapW float32) []actionLogVisualLine {
 	lastLine := ""
 	if len(lines) > 0 {
@@ -546,13 +419,8 @@ func wrappedActionLogLines(font rl.Font, lines []string, innerW int32, maxLines 
 		return actionLogCache.visible
 	}
 
-	// Wrap each source line to the inner content width. We walk from
-	// the NEWEST entry backward, building wraps in reverse, and stop
-	// once we have enough visual lines to fill the panel. This avoids
-	// re-wrapping older log lines that would just be sliced away —
-	// with ActionLogMaxLines=40 sources averaging ~10 words, the old
-	// "wrap-everything-then-slice" path made ~400 MeasureTextEx calls
-	// per frame; this caps the work at ~maxLines × per-source words.
+	// Walk from the newest entry backward, wrapping in reverse, stopping once the panel
+	// is full — caps work at ~maxLines instead of wrapping all 40 sources then slicing.
 	reversed := actionLogCache.visible[:0]
 	if cap(reversed) < maxLines {
 		reversed = make([]actionLogVisualLine, 0, maxLines)
@@ -562,13 +430,11 @@ func wrappedActionLogLines(font rl.Font, lines []string, innerW int32, maxLines 
 		src := lines[i]
 		wraps := wrapTextLines(font, src, lineSize, wrapW)
 		if len(wraps) == 0 {
-			// Empty source line — preserve as a blank gap so logged
-			// "" entries (if any) still take a row.
+			// Empty source line preserved as a blank row.
 			reversed = append(reversed, actionLogVisualLine{text: "", fresh: fresh})
 			continue
 		}
-		// Append wraps in REVERSE so reversed[] stays "newest first."
-		// Final reverse pass below restores chronological order.
+		// Append in reverse (reversed[] stays newest-first); the pass below restores order.
 		for j := len(wraps) - 1; j >= 0; j-- {
 			reversed = append(reversed, actionLogVisualLine{text: wraps[j], fresh: fresh})
 			if len(reversed) >= maxLines {
@@ -576,10 +442,7 @@ func wrappedActionLogLines(font rl.Font, lines []string, innerW int32, maxLines 
 			}
 		}
 	}
-	// Reverse in place into chronological order for top-to-bottom
-	// rendering. Doing this in place avoids a second slice allocation
-	// (the prior code allocated `visible := make([]visualLine, len)`
-	// just to reverse).
+	// Reverse in place into chronological order (avoids a second slice alloc).
 	for i, j := 0, len(reversed)-1; i < j; i, j = i+1, j-1 {
 		reversed[i], reversed[j] = reversed[j], reversed[i]
 	}
@@ -591,19 +454,8 @@ func wrappedActionLogLines(font rl.Font, lines []string, innerW int32, maxLines 
 	return reversed
 }
 
-// Action-row plate height + selection inset shared by the action menu and the
-// skill/item picker rows. Height + inter-row pitch come from the spacing
-// system (uiRowH / uiRowPitch, theme.go); the heading→body gap and footer
-// baseline come from the bodyBelowHeading / footerBaselineY helpers. The plate
-// WIDTH is no longer a constant — each row stretches to a right-edge X passed
-// by the panel, so the selection highlight reaches the panel edge whether the
-// row sits in the icon-gutter main menu or the flush-left submenu list.
-
-// arrowPrompt caches the "A → B" target prompt so the per-frame draw doesn't
-// fmt.Sprintf while the player cycles the target. The two target modes
-// (skill→ally, item→ally) share it since only one is active at a time. The
-// arrow is the → glyph (richtext.go's symGlyphs draws it procedurally via
-// drawTextWithShadow) rather than a spelled-out "->", per the glyph-first hints.
+// arrowPrompt caches the "A → B" target prompt to avoid per-frame Sprintf as the player
+// cycles targets. Shared by both target modes (only one is active at a time).
 var arrowPromptCache struct{ a, b, text string }
 
 func arrowPrompt(a, b string) string {
@@ -614,11 +466,8 @@ func arrowPrompt(a, b string) string {
 	return arrowPromptCache.text
 }
 
-// drawAllyTargetPrompt paints the "verb -> ally / Choose an ally" two-line
-// prompt shared by the skill-target and item-target action arms: it resolves the
-// selected ally's name (falling back to "Ally" when PartyTarget is out of range)
-// and renders the arrowPrompt headline above the sub-label. `verb` is the skill
-// or item name driving the arrow prompt.
+// drawAllyTargetPrompt paints the "verb → ally / Choose an ally" prompt shared by the
+// skill- and item-target arms. verb is the skill/item name; ally falls back to "Ally".
 func drawAllyTargetPrompt(g *core.GameState, assets Resources, verb string, contentX, contentY, subY int32) {
 	targetName := "Ally"
 	if g.Battle.PartyTarget >= 0 && g.Battle.PartyTarget < len(g.Party) {
@@ -642,19 +491,12 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 
 	screenW, screenH := screenSize()
 	w := actionMenuW
-	// Taller panel — a name header now sits atop 4 action rows
-	// (Attack/Skill/Defend/Item), and the item picker mode reuses this
-	// same panel for its list. Pins to the bottom-RIGHT corner: right edge at
-	// hudEdgePad from the screen edge, bottom edge at hudEdgePad from the
-	// screen bottom.
+	// Pins to the bottom-right corner, hudEdgePad from each edge.
 	h := actionMenuH
 	x := screenW - w - hudEdgePad
 	bottomY := screenH - hudEdgePad
 	y := bottomY - h
-	// Vertical collision guard: on a short-window resolution the panel might
-	// slip behind the top edge. Floor the top edge at hudEdgePad and shrink
-	// height while keeping the bottom edge pinned to the screen bottom. Floor
-	// height at hudPanelMinH so the action rows stay readable.
+	// Short-window guard: shrink to clear the top edge, bottom pinned.
 	if y < hudEdgePad {
 		h, y = shrinkPinnedToBottom(bottomY, hudEdgePad)
 	}
@@ -663,23 +505,14 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	drawCard(x, y, w, h, surfacePrimary, borderActive, classCol)
 
 	contentX := x + hudContentInsetX
-	// rightX is the screen X the row plates / suffixes stretch to: a content
-	// inset in from the panel's right edge, mirroring contentX on the left. Rows
-	// pass it to drawActionRow so the selection highlight reaches the same edge
-	// whether the row sits in the icon-gutter main menu or the flush-left list.
+	// rightX: content inset from the right edge; rows stretch their highlight to it.
 	rightX := x + w - hudContentInsetX
-	// Active member's name as the panel header, in their class color, so
-	// whose turn it is is spelled out right where the player picks the
-	// action — reinforcing the lifted/haloed party card and the glowing
-	// sprite. A thin gilt rule divides the header from the action rows.
+	// Active member's name as the header, in class color, over a gilt divider rule.
 	drawEngravedText(assets.hudFont, member.Name, float32(contentX), float32(y+14), FontHeading, classCol)
 	ruleY := y + 48
 	drawPipCappedRule(x+18, ruleY, w-36, fadeColor(giltBright, 0.5), 2.4, fadeColor(giltDim, 0.85))
 	contentY := y + 58
-	// subY is where the sub-prompt / picker list starts beneath the mode's verb
-	// heading. Through bodyBelowHeading so the heading→body gap matches every
-	// other "content under a header" surface (and accounts for the FontHeading
-	// line height instead of a hand-tuned offset that used to graze the title).
+	// subY: sub-prompt/list start, via bodyBelowHeading for a consistent heading→body gap.
 	subY := bodyBelowHeading(contentY, FontHeading)
 
 	switch g.Battle.ActionMode {
@@ -704,10 +537,7 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 		drawEngravedText(assets.hudFont, "Flee", float32(contentX), float32(contentY), FontHeading, textPrimary)
 		drawTextWithShadow(assets.hudFont, "Retreat from this battle?", float32(contentX), float32(subY), FontSmall, textLabel)
 	default:
-		// Transient status line — populated by setBattleStatus to surface
-		// validation errors that aren't real action-log events (e.g.
-		// "Swipe needs more MP."). Picker modes use their own hardcoded
-		// prompt so we only render this in the action menu itself.
+		// Transient status line (setBattleStatus) for validation errors, e.g. "Swipe needs more MP."
 		if status := transientStatus(g); status != "" {
 			drawTextWithShadow(assets.hudFont, status, float32(contentX), float32(contentY), FontSmall, classCol)
 			contentY += 26
@@ -715,11 +545,7 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 		drawActionMenuOptions(g, assets, contentX, contentY, rightX, member)
 	}
 
-	// Input-hint footer (gamepad-first): the confirm/back affordances seated
-	// over a faint gilt rule, so the action surface reads as an input prompt.
-	// Skipped when the panel is shrunk on a short window (would collide with
-	// the rows). Footer baseline comes from the shared footerBaselineY so its
-	// gap off the bottom edge matches every modal/picker footer.
+	// Confirm/Back hint footer over a gilt rule; skipped when the panel is shrunk short.
 	if h >= actionMenuHintMinH {
 		hintY := footerBaselineY(y+h, FontSmall)
 		drawGiltRule(x+18, hintY-12, w-36, 1, 0.3)
@@ -730,10 +556,8 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	}
 }
 
-// transientStatus returns StatusMessage when it's a "status" string that
-// hasn't been logged yet (i.e. set via setBattleStatus, not setBattleMessage).
-// Returns "" when Message is empty or matches the most recent log entry, so
-// result/log messages don't render twice.
+// transientStatus returns StatusMessage when it's unlogged (set via setBattleStatus);
+// "" when empty or matching the last log entry, so messages don't render twice.
 func transientStatus(g *core.GameState) string {
 	msg := g.StatusMessage
 	if msg == "" {
@@ -748,27 +572,16 @@ func transientStatus(g *core.GameState) string {
 func drawActionMenuOptions(g *core.GameState, assets Resources, x, y, rightX int32, member core.PartyMember) {
 	_ = member
 	cursor := core.ActionRow(g.Battle.MenuIndex)
-	// Push labels right so each row has a small icon column on the left — the
-	// action-sigil that names what the row does without reading the text. Rows
-	// pitch by the shared uiRowPitch and stretch to rightX so the highlight
-	// reaches the panel edge. Driven by the init-asserted actionRowLabels table
-	// so a new ActionRow renders automatically.
+	// Labels pushed right for the left icon column; rows pitch by uiRowPitch and stretch
+	// to rightX. Driven by the init-asserted actionRowLabels table.
 	labelX := x + 26
 	for row := core.ActionRow(0); int(row) < core.ActionRowCount; row++ {
 		drawActionMenuRow(assets.hudFont, row, x, labelX, y+int32(row)*uiRowPitch, rightX, actionRowLabels[row], "", cursor == row)
 	}
 }
 
-// drawActionMenuRow wraps drawActionRow with an action-specific icon
-// painted in a small left-side column. The icon picks the
-// corresponding sigil — crossed blades (Attack), starburst (Skill),
-// potion flask (Item), tower shield (Defend). Icon glyphs are
-// procedural (no asset dependency) so they read crisp at any DPI.
+// drawActionMenuRow wraps drawActionRow with a per-action sigil medallion in the left gutter.
 func drawActionMenuRow(font rl.Font, row core.ActionRow, iconX, labelX, y, rightX int32, label, suffix string, selected bool) {
-	// The "key" plate + label + suffix come from the shared drawActionRow (also
-	// used by the skill/item submenu lists, so the whole action-input surface
-	// reads as one stack-of-keys family). This row adds the icon medallion on
-	// top, in the left gutter — the action sigil seated in a gilt-ringed rivet.
 	drawActionRow(font, labelX, y, rightX, label, suffix, selected)
 	iconCX := float32(iconX) + 9
 	iconCY := float32(y) + 13
@@ -780,15 +593,9 @@ func drawActionMenuRow(font rl.Font, row core.ActionRow, iconX, labelX, y, right
 	drawActionIcon(row, iconCX, iconCY, 7, iconCol)
 }
 
-// drawMedallion paints the shared socketed-medallion primitive both the action
-// sigil rivet (drawIconMedallion) and the party class badge (drawClassMedallion)
-// are built on: an optional contact-shadow disc, a dark woodDark outer seat, a
-// gilt ring, and a recessed glass face the caller draws its sigil onto. The
-// three band radii are passed explicitly so each caller keeps its own
-// proportions; a shadowR > 0 paints a contact-shadow disc at that radius first;
-// `pip`, if non-nil, runs last for caller-specific embellishment (the class
-// badge's highlight + corner pip). Built from stacked filled discs (no thin
-// outline) so it reads as a solid fixture.
+// drawMedallion paints the shared socketed-medallion primitive (used by the action rivet and
+// the class badge): optional shadow disc, dark outer seat, gilt ring, recessed face. shadowR>0
+// paints a contact shadow first; pip, if non-nil, runs last for caller embellishment.
 func drawMedallion(cx, cy, outerR, ringR, faceR float32, outerCol, ringCol, faceCol rl.Color, shadowR float32, pip func()) {
 	if shadowR > 0 {
 		rl.DrawCircleV(rl.NewVector2(cx+1, cy+2), shadowR, fadeColor(shadowHeavy, 0.24))
@@ -801,9 +608,7 @@ func drawMedallion(cx, cy, outerR, ringR, faceR float32, outerCol, ringCol, face
 	}
 }
 
-// drawIconMedallion paints a small socketed medallion behind an action sigil:
-// a dark seat, a gilt ring (candle-lit when selected), and a recessed dark face
-// the icon draws onto — the "rivet with an engraved badge" look.
+// drawIconMedallion paints the action-sigil rivet (gilt ring candle-lit when selected).
 func drawIconMedallion(cx, cy float32, selected bool) {
 	ring := fadeColor(giltDim, 0.85)
 	if selected {
@@ -813,11 +618,8 @@ func drawIconMedallion(cx, cy float32, selected bool) {
 		fadeColor(woodDark, 0.95), ring, fadeColor(glassDeep, 0.96), 0, nil)
 }
 
-// actionIconDrawers dispatches each action-menu row to its sigil
-// drawer. A fixed [core.ActionRowCount] array (not a switch) so adding
-// a row forces a slot and the init below panics on a nil entry at
-// startup, instead of a switch that silently draws a blank icon. Attack
-// reuses the warrior class glyph ("strike" without text).
+// actionIconDrawers maps each action-menu row to its sigil drawer. Fixed-size array (init
+// asserts no nil entry). Attack reuses the warrior class glyph.
 var actionIconDrawers = [core.ActionRowCount]func(cx, cy, r float32, col rl.Color){
 	core.ActionRowAttack: drawClassGlyphWarrior,
 	core.ActionRowSkill:  drawActionIconSkill,
@@ -827,10 +629,7 @@ var actionIconDrawers = [core.ActionRowCount]func(cx, cy, r float32, col rl.Colo
 	core.ActionRowFlee:   drawActionIconFlee,
 }
 
-// actionRowLabels is the player-facing label for each action-menu row. A fixed
-// [core.ActionRowCount] array (init-asserted non-empty below) so drawActionMenuOptions
-// can loop over the rows instead of hand-listing each — a new ActionRow forces a
-// label slot rather than silently rendering an empty row.
+// actionRowLabels is the player-facing label per action-menu row. Fixed-size, init-asserted non-empty.
 var actionRowLabels = [core.ActionRowCount]string{
 	core.ActionRowAttack: "Attack",
 	core.ActionRowSkill:  "Skill",
@@ -851,20 +650,13 @@ func init() {
 	}
 }
 
-// drawActionIcon dispatches to the per-action sigil drawer. Each glyph
-// is sized by `r` (its half-extent) and tinted by `col` so the
-// selection state propagates without duplicating a switch. row indexes
-// the init-asserted [ActionRowCount] table directly — an out-of-range
-// row panics on the bounds check (loud, like slotIconForKind) rather
-// than silently drawing nothing.
+// drawActionIcon dispatches to the per-action sigil drawer (sized by r, tinted by col).
 func drawActionIcon(row core.ActionRow, cx, cy, r float32, col rl.Color) {
 	actionIconDrawers[row](cx, cy, r, col)
 }
 
-// drawActionIconSkill paints a four-rayed starburst with a bright
-// inner pip — the "arcane spark" sigil for the Skill action.
+// drawActionIconSkill paints the Skill action's arcane-spark starburst.
 func drawActionIconSkill(cx, cy, r float32, col rl.Color) {
-	// Four cardinal rays — thin diamond shards from centre.
 	rayHalf := r * 0.22
 	// Vertical ray.
 	drawTriangleCCW(rl.NewVector2(cx, cy-r), rl.NewVector2(cx-rayHalf, cy), rl.NewVector2(cx+rayHalf, cy), col)
@@ -872,7 +664,7 @@ func drawActionIconSkill(cx, cy, r float32, col rl.Color) {
 	// Horizontal ray.
 	drawTriangleCCW(rl.NewVector2(cx-r, cy), rl.NewVector2(cx, cy+rayHalf), rl.NewVector2(cx, cy-rayHalf), col)
 	drawTriangleCCW(rl.NewVector2(cx+r, cy), rl.NewVector2(cx, cy-rayHalf), rl.NewVector2(cx, cy+rayHalf), col)
-	// Diagonal short rays — fainter, in the same colour but smaller.
+	// Diagonal short rays.
 	dr := r * 0.55
 	for _, sign := range [4][2]float32{{1, 1}, {1, -1}, {-1, 1}, {-1, -1}} {
 		dx := sign[0] * sqrt2Inv * dr
@@ -882,65 +674,52 @@ func drawActionIconSkill(cx, cy, r float32, col rl.Color) {
 	rl.DrawCircleV(rl.NewVector2(cx, cy), r*0.22, giltBright)
 }
 
-// drawActionIconItem paints a small apothecary-flask silhouette: a
-// rectangular body, a tapered neck, and a stopper cap. Reads as
-// "consumable" without needing a label.
+// drawActionIconItem paints the Item action's apothecary-flask silhouette.
 func drawActionIconItem(cx, cy, r float32, col rl.Color) {
 	// Stopper at top.
 	stopperHalfW := r * 0.32
 	rl.DrawRectangle(int32(cx-stopperHalfW), int32(cy-r), int32(stopperHalfW*2), int32(2), col)
-	// Neck — narrower than the body, sitting under the stopper.
+	// Neck.
 	neckHalfW := r * 0.22
 	neckTop := cy - r + 2
 	neckBottom := cy - r*0.45
 	rl.DrawRectangle(int32(cx-neckHalfW), int32(neckTop), int32(neckHalfW*2), int32(neckBottom-neckTop), col)
-	// Body — wider rounded rectangle (drawn as a square + caps via
-	// triangles for the shoulders so the flask reads bulbous).
+	// Body.
 	bodyHalfW := r * 0.65
 	bodyTop := neckBottom
 	bodyBottom := cy + r*0.85
 	rl.DrawRectangle(int32(cx-bodyHalfW), int32(bodyTop+3), int32(bodyHalfW*2), int32(bodyBottom-bodyTop-3), col)
-	// Shoulders — two triangles smoothing the neck-to-body
-	// transition.
+	// Shoulders.
 	drawTriangleCCW(rl.NewVector2(cx-bodyHalfW, bodyTop+3), rl.NewVector2(cx-neckHalfW, bodyTop), rl.NewVector2(cx-neckHalfW, bodyTop+3), col)
 	drawTriangleCCW(rl.NewVector2(cx+bodyHalfW, bodyTop+3), rl.NewVector2(cx+neckHalfW, bodyTop+3), rl.NewVector2(cx+neckHalfW, bodyTop), col)
-	// Liquid line — a small bright cap inside the flask so it
-	// reads as "potion" not "empty bottle."
+	// Liquid line.
 	rl.DrawRectangle(int32(cx-bodyHalfW+2), int32(bodyBottom-r*0.35), int32(bodyHalfW*2-4), 2, giltBright)
 }
 
-// drawActionIconDefend paints a small tower-shield silhouette: a
-// kite shape with a thicker top and a tapered point, plus a centre
-// boss. Distinct from the equipment-slot heater so the action menu
-// and the equipment screen don't read as the same sigil.
+// drawActionIconDefend paints the Defend action's tower-shield sigil (distinct from the
+// equipment-slot heater so the two surfaces don't read alike).
 func drawActionIconDefend(cx, cy, r float32, col rl.Color) {
-	// Slightly taller than the equipment heater. Top edge curves
-	// inward via two small notches; the body tapers to a tip.
 	topW := r * 1.2
 	topH := r * 0.5
-	// Top rectangle with notched corners (small triangle bites on
-	// each top corner so the shield reads as "decorated").
 	rl.DrawRectangle(int32(cx-topW/2), int32(cy-r), int32(topW), int32(topH), col)
 	// Body taper.
 	tip := rl.NewVector2(cx, cy+r*0.95)
 	left := rl.NewVector2(cx-topW/2, cy-r+topH)
 	right := rl.NewVector2(cx+topW/2, cy-r+topH)
 	drawTriangleCCW(tip, right, left, col)
-	// Vertical band running down the centre of the shield — gives
-	// the silhouette structure beyond a plain heater.
+	// Centre band.
 	bandHalfW := r * 0.10
 	rl.DrawRectangle(int32(cx-bandHalfW), int32(cy-r+topH-1), int32(bandHalfW*2), int32(r*1.05), fadeColor(col, 0.6))
-	// Centre boss + bright pip.
+	// Boss + pip.
 	rl.DrawCircleV(rl.NewVector2(cx, cy-r*0.05), r*0.26, fadeColor(col, 0.6))
 	rl.DrawCircleV(rl.NewVector2(cx, cy-r*0.05), r*0.12, giltBright)
 }
 
-// drawActionIconSwap paints a swap sigil — an up arrow and a down arrow side by
-// side — for the Swap action (two members trade formation slots).
+// drawActionIconSwap paints the Swap action's up+down arrow pair.
 func drawActionIconSwap(cx, cy, r float32, col rl.Color) {
 	thick := r * 0.3
 	head := r * 0.42
-	// Left shaft with an UP arrowhead; right shaft with a DOWN arrowhead.
+	// Left shaft UP, right shaft DOWN.
 	lx, rx := cx-r*0.42, cx+r*0.42
 	rl.DrawLineEx(rl.NewVector2(lx, cy+r), rl.NewVector2(lx, cy-r), thick, col)
 	rl.DrawLineEx(rl.NewVector2(lx, cy-r), rl.NewVector2(lx-head, cy-r+head), thick, col)
@@ -950,10 +729,7 @@ func drawActionIconSwap(cx, cy, r float32, col rl.Color) {
 	rl.DrawLineEx(rl.NewVector2(rx, cy+r), rl.NewVector2(rx+head, cy+r-head), thick, col)
 }
 
-// drawActionIconFlee draws a "dash away" sigil — a double chevron pointing right
-// (>>), reading as "break away / exit fast." Thick line segments so it stays
-// crisp at any DPI, matching the procedural-glyph family; the leading chevron is
-// brighter for a sense of motion.
+// drawActionIconFlee draws the Flee action's double-chevron dash sigil (leading chevron brighter).
 func drawActionIconFlee(cx, cy, r float32, col rl.Color) {
 	thick := r * 0.34
 	h := r * 0.62
@@ -962,16 +738,12 @@ func drawActionIconFlee(cx, cy, r float32, col rl.Color) {
 		rl.DrawLineEx(rl.NewVector2(tipX-h, cy-h), tip, thick, c)
 		rl.DrawLineEx(tip, rl.NewVector2(tipX-h, cy+h), thick, c)
 	}
-	chevron(cx-r*0.15, fadeColor(col, 0.6)) // trailing chevron, dimmer
-	chevron(cx+r*0.5, col)                  // leading chevron
+	chevron(cx-r*0.15, fadeColor(col, 0.6)) // trailing, dimmer
+	chevron(cx+r*0.5, col)                  // leading
 }
 
-// drawSkillMenuList renders the skill submenu — one row per learned
-// skill with the MP cost on the right. Mirrors drawItemMenuList so the
-// two submenus read as the same widget family. The list itself is built
-// by the battle update path into g.Battle.SkillMenuList (the same frame,
-// before this draw); reading it here avoids re-walking the skill tree a
-// second time.
+// drawSkillMenuList renders the skill submenu (one row per learned skill, MP cost right).
+// Reads the prebuilt g.Battle.SkillMenuList.
 func drawSkillMenuList(g *core.GameState, assets Resources, x, y, rightX int32) {
 	skills := g.Battle.SkillMenuList
 	if len(skills) == 0 {
@@ -988,14 +760,8 @@ func drawSkillMenuList(g *core.GameState, assets Resources, x, y, rightX int32) 
 	}
 }
 
-// drawItemMenuList renders the inventory picker as a vertical list of
-// "Name x Count" rows with the highlighted entry tinted by the selection
-// border. Empty inventory falls through to a single "(no items)" hint row
-// so the panel doesn't look broken if the player gets here somehow. The
-// live-consumable list is built by the battle update path into
-// g.Battle.ItemMenuList (the same frame, before this draw); reading it here
-// avoids a second inventory scan. Filtered to consumables there so it lines
-// up with updateItemMenu's picker (equipment isn't usable in combat).
+// drawItemMenuList renders the inventory picker ("Name xCount" rows). Reads the prebuilt
+// g.Battle.ItemMenuList (consumables only, matching updateItemMenu).
 func drawItemMenuList(g *core.GameState, assets Resources, x, y, rightX int32) {
 	living := g.Battle.ItemMenuList
 	if len(living) == 0 {
@@ -1010,12 +776,8 @@ func drawItemMenuList(g *core.GameState, assets Resources, x, y, rightX int32) {
 	}
 }
 
-// drawActionRow paints one "key" plate (the action-input row family): the
-// selected row gets the warm gilt selection plate (gilt spine + underline via
-// DrawSelectedRow), the rest a dark glass key with a soft wood rim. The plate
-// spans from x-8 to rightX, so the highlight reaches the panel's content edge
-// no matter where the row's text starts (icon-gutter main menu vs flush-left
-// submenu list) — the fixed-width plate left a dead gap at the right before.
+// drawActionRow paints one key-plate row (selected gets the gilt plate, else dark glass).
+// The plate spans x-8 to rightX so the highlight reaches the content edge regardless of text start.
 func drawActionRow(font rl.Font, x, y, rightX int32, label, suffix string, selected bool) {
 	plateX := x - 8
 	plateW := rightX - plateX
@@ -1035,20 +797,15 @@ func drawActionRow(font rl.Font, x, y, rightX int32, label, suffix string, selec
 	}
 }
 
-// actionRowSuffixMeasureCache memoizes the right-side suffix measurements
-// drawActionRow takes on every menu row every frame ("▶", "5 MP", stack
-// counts).
+// actionRowSuffixMeasureCache memoizes drawActionRow's right-side suffix measurements.
 var actionRowSuffixMeasureCache measureCache
 
 func measureActionRowSuffix(font rl.Font, suffix string) rl.Vector2 {
 	return actionRowSuffixMeasureCache.measure(font, suffix, FontSmall, 1)
 }
 
-// enemyConditionColors is the wound-state tint for the enemy roster's
-// condition label, indexed by core.EnemyCondition. A table (not a switch)
-// so a newly-added condition surfaces as a zero-alpha (invisible) entry
-// that the init assert below catches, rather than silently inheriting the
-// default green.
+// enemyConditionColors is the roster wound-state tint, indexed by core.EnemyCondition
+// (init asserts no zero-alpha gap).
 var enemyConditionColors = [core.EnemyConditionCount]color.RGBA{
 	core.EnemyUnharmed:     condEnemyUnharmed,
 	core.EnemyScuffed:      condEnemyScuffed,
@@ -1072,18 +829,13 @@ func enemyHealthStyle(enemy *core.Enemy) (string, color.RGBA) {
 
 // splashBgColor / splashTitleColor now live in theme.go's palette block.
 
-// Splash ease windows, in seconds, carved out of core.BattleSplashDuration:
-// splashEnterDur is the lead-in over which the banner eases + scales in from
-// the top; splashExitDur is the tail-out window (measured from remaining
-// Splash time) over which it fades back out. Named here rather than left as
-// bare 0.18 / 0.32 floats threaded through the entry/exit math below.
+// Splash ease windows (seconds, within core.BattleSplashDuration): enter lead-in, exit tail-out.
 const (
 	splashEnterDur = float32(0.18)
 	splashExitDur  = float32(0.32)
 )
 
-// drawBattleSplash slams a banner with the encounter title at the top of the
-// screen during the opening of a battle. Slides + scales in for impact.
+// drawBattleSplash slams the encounter-title banner in at the top on battle start.
 func drawBattleSplash(g *core.GameState, assets Resources) {
 	members := core.BattleMembers(g)
 	if g.Battle.Splash <= 0 || g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(members) {
@@ -1106,19 +858,12 @@ func drawBattleSplash(g *core.GameState, assets Resources) {
 
 	text := core.BattleEncounterTitle(g)
 	subtitle := splashSubtitle(g)
-	// Battle splash uses FontTitle for the encounter name and
-	// FontBody for the subtitle — per UI_STANDARDS.md "Type" the
-	// splash banner is the highest-emphasis transient surface.
+	// FontTitle name / FontBody subtitle (highest-emphasis transient surface, UI_STANDARDS.md).
 	titleSize := FontTitle
 	subSize := FontBody
 	spacing := FontSpacingTitle
 
-	// The title/subtitle strings are stable for the splash's ~40-frame
-	// lifetime, so route both measures through measureCache rather than
-	// paying a cgo MeasureTextEx round-trip per frame (mirrors every other
-	// per-frame measure in the package). The scale animates the title, but
-	// we measure at the fixed base size and scale the result, like the
-	// damage-popup caches do.
+	// Strings stable across the ~40-frame splash, so measure once (at base size) and scale.
 	titleMeasure := splashTitleMeasureCache.measure(assets.hudFont, text, titleSize, spacing)
 	subMeasure := rl.NewVector2(0, 0)
 	if subtitle != "" {
@@ -1159,22 +904,14 @@ func drawBattleSplash(g *core.GameState, assets Resources) {
 
 	titleX := cx - titleW/2
 	titleY := bgY + padY
-	// Splash needs fade-driven shadow alphas (titleAlpha/subAlpha track the
-	// banner's overall opacity) plus a heavier 3px drop offset and the title
-	// letter-spacing — drawTextWithShadowStyle takes all three (custom shadow
-	// color, offset, spacing), which is exactly what it documents itself for.
+	// Fade-driven shadow alpha + heavier 3px drop + title spacing via drawTextWithShadowStyle.
 	drawTextWithShadowStyle(assets.hudFont, text, titleX, titleY, titleSize*scale, spacing*scale,
 		colorWithAlpha(splashTitleColor, titleAlpha), colorWithAlpha(shadowBase, titleAlpha), 3, 3)
 
 	if subtitle != "" {
 		subX := cx - subMeasure.X/2
 		subY := titleY + titleH + gap
-		// Gilt rule with a centred fleuron between the encounter
-		// title and the subtitle — the chapter-divider flourish
-		// 90s D&D PC RPGs used between an event banner and its
-		// body line. Width = 60 % of the subtitle for taste; alpha
-		// rides the splash's overall fade so it disappears with
-		// the rest of the banner.
+		// Gilt rule + centred fleuron between title and subtitle; width 60% of subtitle, alpha rides the fade.
 		ruleW := subMeasure.X * 0.6
 		ruleY := subY - 4
 		ruleCol := fadeColor(giltDim, overall)
@@ -1185,17 +922,13 @@ func drawBattleSplash(g *core.GameState, assets Resources) {
 	}
 }
 
-// splashTitleMeasureCache / splashSubMeasureCache memoize rl.MeasureTextEx for
-// the encounter title + subtitle, which are stable across the splash's ~40-frame
-// lifetime — same per-frame-measure pattern as rosterCondMeasureCache.
+// splashTitleMeasureCache / splashSubMeasureCache memoize the title + subtitle measures.
 var (
 	splashTitleMeasureCache measureCache
 	splashSubMeasureCache   measureCache
 )
 
-// splashSubtitleCache memoizes the formatted subtitle by (count, noun) so
-// the ~40 frames a splash is visible don't each pay a fmt.Sprintf — same
-// rebuild-on-change pattern as hud.go's goldReadout cache.
+// splashSubtitleCache memoizes the subtitle by (count, noun) to skip per-frame Sprintf.
 var splashSubtitleCache struct {
 	count int
 	noun  string

@@ -84,6 +84,16 @@ type EnemyVisualOverride struct {
 	Saturation float32 `json:"saturation"`
 	Dither     float32 `json:"dither"`
 	GameBoy    float32 `json:"gameBoy"`
+	// MaxColors caps the sprite's palette to at most this many distinct colors,
+	// derived from the sprite itself via median-cut quantization (each pixel then
+	// snaps to its nearest cap color). Unlike Posterize (which crushes each RGB
+	// channel independently on a fixed grid), this picks the N colors that best
+	// represent THIS sprite — the classic pixel-art "limit palette" operation. A
+	// fractional value is rounded; 0 (or <2) = no cap, the untouched sprite (so no
+	// migration is needed for files written before this field existed). Stored as
+	// a float32 so it rides the same override round-trip + slider plumbing as the
+	// other palette knobs.
+	MaxColors float32 `json:"maxColors"`
 }
 
 // EnemyVisualsFileName is the basename of the override file inside the sprites

@@ -7,19 +7,9 @@ import (
 	"math/rand"
 )
 
-// BuildRegistry collapses the four "build O(1) lookup map from a
-// definition slice" helpers (partyClassByID, skillByID, enemyByKind,
-// itemByKind) into one generic builder. The registry slice stays the
-// source of truth (iteration order matters for the editor's listings
-// and for stable test fixtures); the map is just a read cache for
-// per-frame ItemInfo / EnemyInfo / SkillInfo lookups.
-//
-// New registries pass the slice plus a key extractor:
-//
-//	var skillByID = BuildRegistry(skillDefinitions, func(d skillDefinition) SkillID { return d.Skill })
-//
-// Additional validation (e.g. enemies.go's [0, 1] probability gate)
-// lives in a sibling init() block — keeping the builder shape clean.
+// BuildRegistry builds an O(1) lookup map from a definition slice + key
+// extractor. The slice stays the source of truth (iteration order matters for
+// editor listings + test fixtures); the map is a read cache.
 func BuildRegistry[K comparable, V any](defs []V, key func(V) K) map[K]V {
 	m := make(map[K]V, len(defs))
 	for _, def := range defs {
@@ -36,11 +26,9 @@ func FlashTint(base color.RGBA, timer float32) color.RGBA {
 	return MixColor(base, color.RGBA{R: 255, G: 255, B: 255, A: base.A}, strength)
 }
 
-// sinePulse maps a countdown `timer` (running from `duration` down to 0)
-// onto a single half-sine arc scaled by `distance`: 0 at the start, peak
-// `distance` at the midpoint, back to 0 at the end. The shared shape
-// behind BumpOffset (lunge) and KnockbackOffset (recoil) so the recoil
-// curve can't drift between attacker and receiver.
+// sinePulse maps a countdown timer (duration→0) onto a half-sine arc scaled by
+// distance: 0 at start, peak distance at midpoint, 0 at end. Shared by
+// BumpOffset (lunge) and KnockbackOffset (recoil) so they can't drift.
 func sinePulse(timer, duration, distance float32) float32 {
 	if timer <= 0 {
 		return 0
@@ -53,12 +41,8 @@ func BumpOffset(timer, distance float32) float32 {
 	return sinePulse(timer, BumpDuration, distance)
 }
 
-// KnockbackOffset returns the per-frame world-units offset for a
-// receiver's hit-recoil. Same sine-curve shape as BumpOffset but
-// scaled by HitKnockbackDuration so the recoil plays its own
-// timing. Distance is the peak displacement at the curve's apex.
-// Used by the renderer to push the hit sprite AWAY from its
-// attacker — sign of the application is the caller's choice.
+// KnockbackOffset returns the per-frame recoil offset (world units). Same shape
+// as BumpOffset but scaled by HitKnockbackDuration. Sign is the caller's choice.
 func KnockbackOffset(timer, distance float32) float32 {
 	return sinePulse(timer, HitKnockbackDuration, distance)
 }
@@ -96,10 +80,8 @@ func TileCenter(tile int) float32 {
 	return (float32(tile) + 0.5) * TileSize
 }
 
-// ClampFrameTime clips a per-frame delta time to [0, MaxFrameStep] so a long
-// stall can't advance the simulation by an unbounded leap, and a (theoretical)
-// negative delta can't step it BACKWARD. Shared by explore.Update and
-// battle.Update so the floor can't drift between them.
+// ClampFrameTime clips a per-frame dt to [0, MaxFrameStep] so a stall can't
+// leap the sim forward and a negative dt can't step it backward.
 func ClampFrameTime(dt float32) float32 {
 	if dt > MaxFrameStep {
 		return MaxFrameStep
@@ -110,12 +92,8 @@ func ClampFrameTime(dt float32) float32 {
 	return dt
 }
 
-// facingTable carries the per-direction unit vector + camera yaw used
-// by FacingVector / FacingYaw. Indexed by NormalizeFacing(facing) so
-// the two helpers below stay in lockstep — earlier passes had two
-// parallel switch statements on the same enum that could drift when a
-// new direction was added. One row per direction; the helpers are
-// one-line lookups.
+// facingTable: per-direction unit vector + camera yaw, indexed by
+// NormalizeFacing(facing) so FacingVector / FacingYaw stay in lockstep.
 var facingTable = [FacingCount]struct {
 	DX, DZ int
 	Yaw    float32
@@ -135,9 +113,8 @@ func FacingYaw(facing int) float32 {
 	return facingTable[NormalizeFacing(facing)].Yaw
 }
 
-// FacingFromDelta returns the cardinal facing for a unit step (dx,dz) — the
-// inverse of FacingVector for single-tile cardinal moves. ok=false for a zero
-// or non-cardinal (diagonal / multi-tile) delta.
+// FacingFromDelta returns the cardinal facing for a unit step (dx,dz) — inverse
+// of FacingVector. ok=false for a zero or non-cardinal delta.
 func FacingFromDelta(dx, dz int) (int, bool) {
 	switch {
 	case dx == 0 && dz == -1:
@@ -171,10 +148,8 @@ func WrapIndex(index, count int) int {
 	return index
 }
 
-// WrapEnum shifts an enum-typed index by delta and wraps it into [0, count)
-// via WrapIndex. Single home for "advance a tab/cursor enum with wraparound"
-// (panel tabs, shop tabs) so the modular arithmetic isn't re-inlined per
-// call site / per direction. Returns v unchanged when count <= 0.
+// WrapEnum shifts an enum-typed index by delta and wraps it into [0, count) via
+// WrapIndex. Returns v unchanged when count <= 0.
 func WrapEnum[T ~int](v T, delta, count int) T {
 	if count <= 0 {
 		return v
@@ -182,20 +157,10 @@ func WrapEnum[T ~int](v T, delta, count int) T {
 	return T(WrapIndex(int(v)+delta, count))
 }
 
-// RandRangeI returns a uniform int in [lo, hi] (inclusive) from rng — the
-// integer twin of (*GameState).RandRangeF. Single home for the
-// "lo + rng.Intn(hi-lo+1)" body shared by rollGold / rollDuration and the
-// weather step/cooldown rolls. Callers that need degenerate-bounds tolerance
-// (inverted / negative) layer their own guard on top; this is defensive only
-// in that hi <= lo returns lo (so a misuse can't panic Intn with a
-// non-positive argument).
-//
-// Degenerate-bounds policy: hi <= lo RETURNS LO (clamp toward the low bound).
-// The two callers that wrap this deliberately differ — rollGold (economy.go)
-// SWAPS inverted bounds then clamps to >= 0, and rollDuration (party.go)
-// RETURNS 0 on min <= 0 || max < min. Don't "unify" them; the policies are
-// intentional (a loot amount can't be negative, a status duration fails open
-// to "no effect").
+// RandRangeI returns a uniform int in [lo, hi] (inclusive) from rng — integer
+// twin of (*GameState).RandRangeF. Degenerate-bounds policy: hi <= lo RETURNS
+// LO (so Intn can't panic). Callers wrapping this (rollGold, rollDuration) layer
+// their own intentional guards on top — don't unify them.
 func RandRangeI(rng *rand.Rand, lo, hi int) int {
 	if hi <= lo {
 		return lo
@@ -210,9 +175,7 @@ func AbsInt(v int) int {
 	return v
 }
 
-// AbsF is the float32 twin of AbsInt — the absolute value of a float32.
-// Sits beside AbsInt so the open-coded `if d < 0 { d = -d }` float idiom
-// (timing.go's window/charge grading) has one named home.
+// AbsF is the float32 twin of AbsInt.
 func AbsF(x float32) float32 {
 	if x < 0 {
 		return -x
@@ -220,11 +183,7 @@ func AbsF(x float32) float32 {
 	return x
 }
 
-// Sign returns -1, 0, or 1 depending on the sign of v. Sits next to
-// AbsInt / Clamp / Min / Max (the builtin generics) so callers find
-// the small spatial helpers in one place — the pack AI's chase step
-// picks a direction with this, and any future spatial helper that
-// needs a step vector should too.
+// Sign returns -1, 0, or 1 for the sign of v.
 func Sign(v int) int {
 	switch {
 	case v > 0:
@@ -236,11 +195,8 @@ func Sign(v int) int {
 	}
 }
 
-// ChebyshevDistance returns the king-move distance between two tiles —
-// the max of the per-axis absolute deltas. Used by leash / chase /
-// AoE radius checks where diagonal-equivalent steps should count the
-// same as cardinal ones. ManhattanDistance is the diamond-shaped
-// sibling for grid-step counts (adjacency, nearest-free-tile).
+// ChebyshevDistance returns the king-move distance (max per-axis delta) — for
+// leash / chase / AoE radius. ManhattanDistance is the L1 sibling.
 func ChebyshevDistance(ax, az, bx, bz int) int {
 	dx := AbsInt(ax - bx)
 	dz := AbsInt(az - bz)
@@ -250,11 +206,8 @@ func ChebyshevDistance(ax, az, bx, bz int) int {
 	return dz
 }
 
-// ManhattanDistance returns the grid-step (L1) distance between two
-// tiles — the sum of the per-axis absolute deltas. Used where a step
-// counts the same in any cardinal direction (nearest-free-tile search,
-// adjacency == 1 checks). Sibling to ChebyshevDistance (diamond vs
-// square).
+// ManhattanDistance returns the L1 grid-step distance (sum of per-axis deltas)
+// — for adjacency / nearest-free-tile. Sibling to ChebyshevDistance.
 func ManhattanDistance(ax, az, bx, bz int) int {
 	return AbsInt(ax-bx) + AbsInt(az-bz)
 }
@@ -267,12 +220,8 @@ func Lerp(a, b, t float32) float32 {
 	return a + (b-a)*t
 }
 
-// Clamp keeps v inside [min, max] for any cmp.Ordered type. Replaces
-// the three typed variants (Clamp float32, ClampInt int, ClampFloat64
-// float64) that used to live here with one generic. ClampByte and
-// ClampMapDimension intentionally remain — they're not "keep v in a
-// caller-supplied range" clamps but type-converting / fixed-bound
-// clippers, which the generic can't model cleanly.
+// Clamp keeps v inside [min, max] for any cmp.Ordered type. (ClampByte /
+// ClampMapDimension stay separate — they're type-converting / fixed-bound.)
 func Clamp[T cmp.Ordered](v, min, max T) T {
 	if v < min {
 		return min
@@ -283,19 +232,14 @@ func Clamp[T cmp.Ordered](v, min, max T) T {
 	return v
 }
 
-// ValidChance reports whether p is a well-formed probability in [0, 1] — the
-// contract every proc / drop field (SkillCastChance, PoisonChance, drop Chance)
-// is init-asserted against. Centralizing it keeps the bounds in one place so a
-// new chance field can't validate against a subtly different range.
+// ValidChance reports whether p is a probability in [0, 1] — the contract every
+// proc / drop field is init-asserted against.
 func ValidChance(p float64) bool {
 	return p >= 0 && p <= 1
 }
 
-// GainUpTo adds delta to *cur, clamped so it never exceeds max — the
-// shared "restore a pool toward its ceiling" primitive behind heals, the
-// MP refund, lifesteal, and the level-up pool growth (VIT→HP, INT→MP).
-// Keeps the add-then-clamp in one place. Negative delta just lowers cur;
-// callers needing a 0 floor clamp that separately.
+// GainUpTo adds delta to *cur, clamped so it never exceeds max. Negative delta
+// just lowers cur; callers needing a 0 floor clamp that separately.
 func GainUpTo(cur *int, max, delta int) {
 	*cur += delta
 	if *cur > max {

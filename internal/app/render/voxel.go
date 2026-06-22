@@ -9,31 +9,16 @@ import (
 	"crawler/internal/app/core"
 )
 
-// Voxel-stack rendering — the draw path for a map whose AreaDefinition carries
-// an explicit Solids stack (a gapped column: a floating cube/deck over air). A
-// pure heightfield (Solids nil) never reaches here; it keeps the original
-// per-tile floor+cliff path in world.go unchanged, so existing maps render
-// pixel-identically. This file draws the extra geometry the heightfield model
-// can't: multiple walkable floors per column, side faces per solid run, and the
-// undersides of floating cubes.
+// Voxel-stack rendering — draw path for a map with an explicit Solids stack (gapped columns: floating cubes/decks over air). Pure heightfield (Solids nil) never reaches here. Draws what the heightfield can't: multiple floors per column, per-run side faces, and floating-cube undersides.
 //
-// Cube convention (matches the heightfield's face math): a cube whose top
-// surface is at level L occupies world Y ∈ [ElevationWorldY(L-1), ElevationWorldY(L)].
-// So a contiguous exposed solid run [Lbot..Ltop] draws ONE stretched face quad
-// with its base at ElevationWorldY(Lbot-1) and height (Ltop-Lbot+1) levels —
-// identical to drawCliffFace for the single-run heightfield case.
+// Cube convention (matches the heightfield face math): a cube with top at level L occupies world Y ∈ [ElevationWorldY(L-1), ElevationWorldY(L)].
 
 var underQuadPins [][]float32
 
-// buildUnderQuadModel builds a horizontal quad (TileSize × TileSize) in the XZ
-// plane at model-space y=0, wound so its normal faces -Y (downward) — the
-// underside of a floating cube, visible to a player standing beneath it.
-// drawVoxelColumn translates it to (cx, bottomY, cz); no rotation/scale.
+// buildUnderQuadModel builds a TileSize×TileSize XZ quad at model y=0, normal facing -Y (a floating cube's underside). drawVoxelColumn translates it to (cx, bottomY, cz).
 func buildUnderQuadModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
 	const half = float32(core.TileSize) / 2
-	// CCW as seen from BELOW (-Y side) so the downward face survives back-face
-	// culling. Looking up the -Y axis, +X right and +Z down, CCW is
-	// (-x,-z)->(+x,-z)->(+x,+z).
+	// CCW seen from below (-Y) so the downward face survives back-face culling.
 	a := rl.NewVector3(-half, 0, -half)
 	b := rl.NewVector3(half, 0, -half)
 	c := rl.NewVector3(half, 0, half)
@@ -65,12 +50,7 @@ func buildUnderQuadModel(pixels []color.RGBA, shader rl.Shader) rl.Model {
 	return model
 }
 
-// voxelNeighborSolid reports whether the neighbour column presents solid
-// material at level L across a shared edge — the per-level analogue of
-// core.NeighbourEdgeLevel's off-map rule. Off-map reads as solid up to the
-// baseline (so an above-baseline cube shows a clean 1-high lip at the map edge
-// rather than a face plunging to the bottom of the range), matching the
-// heightfield renderer's off-map==baseline convention.
+// voxelNeighborSolid reports whether the neighbour column is solid at level L. Off-map reads solid up to the baseline (clean 1-high lip at map edges), matching the heightfield's off-map==baseline rule.
 func voxelNeighborSolid(m *core.AreaDefinition, nx, nz, L int) bool {
 	if !m.InBounds(nx, nz) {
 		return L <= core.ElevationBaseline
@@ -79,28 +59,15 @@ func voxelNeighborSolid(m *core.AreaDefinition, nx, nz, L int) bool {
 	return solid
 }
 
-// voxelSolidScratch is the reused per-column solidity buffer drawVoxelColumn
-// resolves once before its floors/faces/undersides passes. Safe as package state
-// because raylib draw is single-threaded.
+// voxelSolidScratch is the reused per-column solidity buffer. Safe as package state because raylib draw is single-threaded.
 var voxelSolidScratch []bool
 
-// drawVoxelColumn renders column (x,z) from the voxel stack: a floor on every
-// standable surface (authored Floor on the lowest/ground surface, generic
-// material floor on raised decks), one stretched rock face per contiguous
-// exposed solid run on each visible edge, and a downward face under every
-// floating run. Returns the face count for the render-log tally.
+// drawVoxelColumn renders column (x,z): a floor on each standable surface, one face quad per exposed level on each visible edge, and a downward face under each floating run. Returns the face count.
 func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets Resources, m *core.AreaDefinition, x, z int, cx, cz float32) int {
 	const half = float32(core.TileSize) / 2
 	h := m.SolidStackHeight()
 
-	// Resolve each level's solidity ONCE into the reused scratch column. The three
-	// passes below (and the four per-direction face sub-passes) would otherwise
-	// each re-read SolidAt per level — the self-column re-read alone is ~5×h
-	// redundant reads per column per frame. standable(L) and the ground level then
-	// derive from the scratch instead of calling Standable / LowestStandableLevel
-	// (each its own stack walk). SolidAt stays the only read of the neighbour
-	// columns (genuinely per-direction). Equivalent to core.Standable: cube L
-	// solid AND L+1 air (a level past the top reads as air).
+	// Resolve each level's solidity ONCE into scratch; the passes below would otherwise re-read SolidAt per level (~5×h redundant self-column reads/frame). standable(L) = cube L solid AND L+1 air.
 	if cap(voxelSolidScratch) < h {
 		voxelSolidScratch = make([]bool, h)
 	}
@@ -108,9 +75,7 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 	for L := 0; L < h; L++ {
 		_, solid[L] = m.SolidAt(x, L, z)
 	}
-	// Floors on every standable surface. Walking ascending, the FIRST standable
-	// level is the column's lowest surface — fold that detection into this single
-	// pass instead of a separate pre-scan for `lowest`.
+	// Floors on every standable surface; ascending, the first standable level is the column's lowest surface.
 	lowestDone := false
 	for L := 0; L < h; L++ {
 		if !(solid[L] && (L+1 >= h || !solid[L+1])) {
@@ -119,40 +84,29 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 		topY := core.ElevationWorldY(L)
 		if !lowestDone {
 			lowestDone = true
-			// The authored ground surface keeps its floor char (grass/stone/
-			// water/ramp); reuse the heightfield floor path verbatim.
+			// Authored ground surface keeps its floor char; reuse the heightfield floor path.
 			drawFloorTile(material, assets, m.Floor[z][x], x, z, cx, cz, topY)
 		} else {
-			// Raised decks are generic material floor (scope cap: upper surfaces
-			// have no authored floor type — see voxel plan).
+			// Raised decks are generic material floor (upper surfaces have no authored floor type).
 			drawTileCube(material.floorModel, cx, -0.03+topY, cz, tileYawDeg(x, z))
 		}
 	}
 
 	drawn := 0
-	// Side faces: per visible edge, one stretched quad per contiguous exposed
-	// solid run.
+	// Side faces, per visible edge.
 	for _, d := range core.CardinalDirs {
 		dx, dz := core.FacingVector(d)
 		fdx, fdz := float32(dx), float32(dz)
-		// CPU backface cull — a vertical face is only visible from its outward
-		// side (same test as drawCliffFaces).
+		// CPU backface cull — a vertical face is only visible from its outward side.
 		if faceBackfaceCulled(camPos, cx, cz, fdx, fdz, half) {
 			continue
 		}
 		nx, nz := x+dx, z+dz
 		yaw := faceYaw(d)
-		// Per-DIRECTION skin: a tile can wear a different face skin on each side
-		// (FaceSkinForDir falls back to the base skin when no override), so the
-		// N/E/S/W faces of one cube can differ. Resolved LAZILY on the first
-		// exposed level so a fully-buried edge (no visible face) pays neither the
-		// FaceSkinForDir lookup nor the variant-table probe.
+		// Per-direction skin (FaceSkinForDir falls back to base), resolved lazily so a fully-buried edge pays no lookup.
 		skin := material.faceModel
 		skinResolved := false
-		// One face quad PER LEVEL, each a single cube tall, so the wall texture
-		// TILES per voxel instead of stretching one copy across a multi-level run
-		// (drawCliffFace scales the model by its level count, which stretches the
-		// UVs). A run of three exposed cubes now reads as three stacked cubes.
+		// One quad PER LEVEL (one cube tall) so the texture tiles per voxel instead of stretching across a multi-level run.
 		for L := 0; L < h; L++ {
 			if !solid[L] || voxelNeighborSolid(m, nx, nz, L) {
 				continue
@@ -168,15 +122,13 @@ func drawVoxelColumn(camPos rl.Vector3, material worldMaterialResources, assets 
 		}
 	}
 
-	// Undersides: a downward quad beneath every floating run bottom — a solid
-	// cube with air directly below it. L starts at 1 since a level-0 cube rests
-	// on the world floor and has no visible underside.
+	// Undersides: a downward quad under each floating run bottom. L starts at 1 (level-0 cubes rest on the world floor).
 	for L := 1; L < h; L++ {
 		if !solid[L] {
 			continue
 		}
 		if solid[L-1] {
-			continue // resting on the cube beneath — not a floating bottom
+			continue // resting on the cube beneath — not floating
 		}
 		drawTileCube(assets.underModel, cx, core.ElevationWorldY(L-1), cz, 0)
 	}

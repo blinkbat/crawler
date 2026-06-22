@@ -6,15 +6,12 @@ import (
 	"crawler/internal/app/core"
 )
 
-// TestApplyFrostbite_DamagesAndChillsSurvivor verifies the "damage + debuff"
-// pattern: a surviving target takes damage AND always gets the SPD chill (the
-// enemy BuffStats mirror), with EffectiveEnemyStats folding the slow in.
+// TestApplyFrostbite_DamagesAndChillsSurvivor: a survivor takes damage AND gets the SPD chill folded into EffectiveEnemyStats.
 func TestApplyFrostbite_DamagesAndChillsSurvivor(t *testing.T) {
 	g := newTestState()
-	g.Battle.CurrentParty = 3 // wizard casts
+	g.Battle.CurrentParty = 3
 	g.Battle.EnemyIndex = 0
-	// Tanky target so the frost hit can't kill it — we need a survivor to
-	// observe the chill.
+	// Tanky so the hit can't kill — need a survivor to observe the chill.
 	g.Packs[0].Members[0].HP = 999
 	g.Packs[0].Members[0].MaxHP = 999
 
@@ -39,13 +36,12 @@ func TestApplyFrostbite_DamagesAndChillsSurvivor(t *testing.T) {
 	}
 }
 
-// TestApplyFrostbite_NoChillOnKill confirms a killing hit stamps no debuff —
-// the chill only lands on a surviving target (no dangling buff on a corpse).
+// TestApplyFrostbite_NoChillOnKill: a killing hit stamps no debuff (no dangling chill on a corpse).
 func TestApplyFrostbite_NoChillOnKill(t *testing.T) {
 	g := newTestState()
 	g.Battle.CurrentParty = 3
 	g.Battle.EnemyIndex = 0
-	g.Packs[0].Members[0].HP = 1 // any damage kills
+	g.Packs[0].Members[0].HP = 1
 
 	if !applyFrostbite(g, core.TimingQualityExcellent) {
 		t.Fatal("applyFrostbite reported not-landed")

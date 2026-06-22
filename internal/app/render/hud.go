@@ -5,11 +5,8 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// DrawOverlay paints the 2D overlay layer: the world/battle HUD and any open
-// top-level menu, cross-faded by tickMenuFade so opening a menu fades the HUD
-// out while the menu fades in (and the reverse on close). When nothing is
-// fading (progress 0 or 1) each surface draws at full opacity straight to the
-// backbuffer — the no-fade steady state costs no render target.
+// DrawOverlay paints the 2D overlay: HUD and any open top-level menu, cross-faded
+// by tickMenuFade. The no-fade steady state (progress 0 or 1) costs no render target.
 func DrawOverlay(g *core.GameState, assets Resources) {
 	tickMenuFade(g)
 	hudAlpha := 1 - menuFade.progress
@@ -22,14 +19,11 @@ func DrawOverlay(g *core.GameState, assets Resources) {
 	}
 }
 
-// drawSceneHUD paints the in-world HUD (battle or free-exploration) with no
-// top-level menu — the surface that fades out when a menu opens. Split from
-// DrawOverlay so withFadeAlpha can capture it as one layer.
+// drawSceneHUD paints the in-world HUD (battle or exploration) with no menu;
+// split from DrawOverlay so withFadeAlpha captures it as one layer.
 func drawSceneHUD(g *core.GameState, assets Resources) {
 	if g.Battle.Active() {
-		// Compute the turn forecast once per frame; TurnPanelBottomY
-		// (called from the action log) and drawTurnPanel both read
-		// the cached slice instead of re-running TurnForecast.
+		// Cache the turn forecast once per frame; TurnPanelBottomY and drawTurnPanel both read it.
 		CacheTurnForecastForFrame(g)
 		drawBattleHUD(g, assets)
 		drawTurnPanel(g, assets)
@@ -37,39 +31,27 @@ func drawSceneHUD(g *core.GameState, assets Resources) {
 		DrawPartyRibbon(g, assets)
 		drawTimingBar(g, assets)
 		drawBattleSplash(g, assets)
-		// Post-victory spoils card draws on top of the dimmed battle scene.
-		// No-ops outside the won-battle results window (gates internally on
-		// phase + the dance beat), so it's safe to call every battle frame.
+		// Spoils card gates internally on the won-battle window; safe to call every frame.
 		DrawVictorySpoils(g, assets)
 		return
 	}
 	drawMinimap(&g.Area, g, assets)
-	// The action log persists out of combat (bottom-left), so exploration shows
-	// the same rolling pane as battle — saves, crystal rests, the last fight's
-	// result, etc. Reads g.ActionLog, which is no longer reset between fights.
+	// Action log persists out of combat; g.ActionLog is no longer reset between fights.
 	drawActionLogPanel(g, assets)
 	DrawPartyRibbon(g, assets)
 	drawGoldReadout(g, assets)
 }
 
-// goldReadout caches the formatted "<n> G" label so the per-frame
-// exploration draw doesn't re-Sprintf an unchanged gold total. Gold only
-// changes on loot / shop transactions, so the string is rebuilt rarely.
+// goldReadout caches the formatted "<n> G" label so the per-frame draw doesn't re-Sprintf an unchanged total.
 var goldReadout = struct {
 	last int
 	str  string
 }{last: -1}
 
-// goldReadoutMeasureCache memoizes the gold label's MeasureTextEx. The label
-// string is already cached above; this caches its measurement too so the
-// per-frame exploration HUD doesn't make a CGO measure call for an unchanged
-// width. Keyed on the label text, so it refreshes when the gold total does.
+// goldReadoutMeasureCache memoizes the gold label's MeasureTextEx (avoids a per-frame CGO call).
 var goldReadoutMeasureCache measureCache
 
-// drawGoldReadout paints a small gilt gold chip in the top-left corner
-// during free exploration. A glass pane backs the "<n> G" label so it
-// reads over busy world geometry. Kept out of the battle / overlay paths —
-// the shop shows its own gold total, and combat has no spend.
+// drawGoldReadout paints the gilt gold chip in the top-left during exploration.
 func drawGoldReadout(g *core.GameState, assets Resources) {
 	font := assets.hudFont
 	if g.Gold != goldReadout.last {
@@ -88,9 +70,7 @@ func drawGoldReadout(g *core.GameState, assets Resources) {
 	if x+w > screenW-hudEdgePad {
 		x = screenW - hudEdgePad - w
 	}
-	// Plain wood frame — no gilt accent stripe (the bright giltBright spine read
-	// as a "yellow highlight border" around the little chip). The coin glyph +
-	// gilt label already carry the gold theme; the frame stays neutral wood.
+	// Plain wood frame, no gilt accent stripe (it read as a yellow highlight border on the chip).
 	drawCard(x, y, w, h, glassWarm, borderSoft, noAccent)
 	cy := float32(y) + float32(h)/2
 	drawCoinGlyph(float32(x)+padX+10, cy, 8)

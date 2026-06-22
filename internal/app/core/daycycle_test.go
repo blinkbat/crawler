@@ -18,7 +18,7 @@ func TestPhaseAtStepBoundaries(t *testing.T) {
 		{100, Evening, 0},
 		{125, Midnight, 0},
 		{149, Midnight, 24.0 / 25.0},
-		// Wrap around — step 150 lands on Dawn again.
+		// Wrap: step 150 lands on Dawn again.
 		{150, Dawn, 0},
 		{151, Dawn, 1.0 / 25.0},
 		{300, Dawn, 0},

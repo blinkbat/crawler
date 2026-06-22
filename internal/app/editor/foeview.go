@@ -147,6 +147,10 @@ var assetFields = []sliderField[core.EnemyVisualOverride]{
 	{Label: "Saturate", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.Saturation) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.Saturation = float32(v) }, Min: -1, Max: 1, Step: 0.05, Format: "%.2f"},
 	{Label: "Dither", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.Dither) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.Dither = float32(v) }, Min: 0, Max: 1, Step: 0.05, Format: "%.2f"},
 	{Label: "GameBoy", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.GameBoy) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.GameBoy = float32(v) }, Min: 0, Max: 1, Step: 0.05, Format: "%.2f"},
+	// Colors caps the palette to the sprite's own best N colors (median-cut); 0 =
+	// off, 2..64 active (a value of 1 is treated as off by the engine). Integer
+	// step + "%.0f" so it reads as a color count, not a 0..1 intensity.
+	{Label: "Colors", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.MaxColors) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.MaxColors = float32(v) }, Min: 0, Max: 64, Step: 1, Format: "%.0f"},
 }
 
 // assetActionLabels is the Asset tab's button row; the slice index IS the
@@ -279,15 +283,23 @@ func computeFoeViewLayout() foeViewLayout {
 		tracks[i] = rl.NewRectangle(colX+foeLabelW, y, colTrackW, foeTrackH)
 	}
 
-	// Asset tab: a single-column slider stack (the gradable bake params) at
-	// contentTop, then the action buttons in two rows of three below it.
+	// Asset tab: a TWO-column slider stack (same split as the Layout tab) so the
+	// full FX set — Pixelate/Bright/Contrast/Posterize/Saturate/Dither/GameBoy/
+	// Colors — shows compactly without a tall single column burying the lower
+	// sliders past the fold. Left column gets the ceil half (odd count → extra on
+	// the left); the action buttons sit below the taller column.
+	assetFirstColRows := (len(assetFields) + 1) / 2
 	assetTracks := make([]rl.Rectangle, len(assetFields))
-	assetTrackW := rightW - foeLabelW - foeValueW
 	for i := range assetFields {
-		y := contentTop + float32(i)*foeSliderRowH + (foeSliderRowH-foeTrackH)/2
-		assetTracks[i] = rl.NewRectangle(rightX+foeLabelW, y, assetTrackW, foeTrackH)
+		col, row := 0, i
+		if i >= assetFirstColRows {
+			col, row = 1, i-assetFirstColRows
+		}
+		colX := rightX + float32(col)*(colW+foeColGap)
+		y := contentTop + float32(row)*foeSliderRowH + (foeSliderRowH-foeTrackH)/2
+		assetTracks[i] = rl.NewRectangle(colX+foeLabelW, y, colTrackW, foeTrackH)
 	}
-	assetBtnY := contentTop + float32(len(assetFields))*foeSliderRowH + 16
+	assetBtnY := contentTop + float32(assetFirstColRows)*foeSliderRowH + 16
 	assetBtns := buttonRowAt(rightX, assetBtnY, assetActionLabels)
 
 	btns := buttonRowAt(rightX, card.Y+card.Height-modalBtnH-modalBottomInset, foeViewBtnLabels)

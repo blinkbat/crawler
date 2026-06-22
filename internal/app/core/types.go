@@ -7,94 +7,66 @@ import (
 
 type MaterialSet int
 
-// PackMemberRef is one authored pack member. Built-ins carry only Kind;
-// custom enemies carry their base Kind for visual fallback plus CustomName
-// for lookup in AreaDefinition.CustomEnemies.
+// PackMemberRef is one authored pack member. Built-ins carry only Kind; custom
+// enemies carry their base Kind (visual fallback) plus CustomName for lookup.
 type PackMemberRef struct {
 	Kind       EnemyKind
 	CustomName string
-	// Row is the member's authored formation rank (front/back). Zero value
-	// RowFront, so packs authored before rows existed read as all-front.
+	// Row is the authored formation rank. Zero value RowFront, so pre-rows
+	// packs read as all-front.
 	Row Row
 }
 
-// PackSpawn is one authored pack on the map: a tile position and the roster
-// of enemy references that make up the pack. Single-member packs are the
-// common case and read back from the on-disk format the same as the old
-// single-enemy spawn line. The field renders one figure per pack (the
-// highest-tier member); the rest are revealed when the battle starts.
+// PackSpawn is one authored pack: a tile position + its enemy roster. The field
+// renders one figure (highest-tier member); the rest reveal at battle start.
 type PackSpawn struct {
 	TileX   int
 	TileZ   int
 	Members []PackMemberRef
-	// AI selects the per-pack movement behavior. Zero value PackAINone
-	// is the default — the pack sits at its spawn tile until the player
-	// walks into it, the behavior every pack used to have implicitly.
-	// The author opts a pack into an active mode via the pack-edit
-	// modal in the editor.
+	// AI selects per-pack movement. Zero value PackAINone = stationary until
+	// stepped into.
 	AI PackAI
 }
 
-// PackAI is the movement style applied to one pack. Authored on the
-// PackSpawn so different packs on the same map can use different modes.
+// PackAI is the movement style for one pack, authored on the PackSpawn.
 type PackAI int
 
 const (
-	// PackAINone is the default — the pack is stationary, waiting for
-	// the player to step into it. No per-step planning runs.
+	// PackAINone: stationary, waits for the player. No per-step planning.
 	PackAINone PackAI = iota
-	// PackAIJunkyardDog is the wander-near-spawn / chase-when-close
-	// behavior described in packai.go. Was the only mode in the
-	// codebase before per-pack AI landed; now opt-in per pack.
+	// PackAIJunkyardDog: wander-near-spawn / chase-when-close (see packai.go).
 	PackAIJunkyardDog
-	// PackAIPatrol paces a fixed line along the X axis around the spawn
-	// tile (out to PatrolRadius, bouncing at the ends and at walls),
-	// ignoring the player until it paces into their tile — a sentry on a
-	// beat, not a hunter. Tracks its current pace direction in
-	// Pack.PatrolDir.
+	// PackAIPatrol paces a fixed X-axis line around the spawn (out to
+	// PatrolRadius, bouncing at ends/walls), engaging only by pacing into the
+	// player. Pace direction in Pack.PatrolDir.
 	PackAIPatrol
-	// PackAISkittish flees: when the player is within SkittishFleeRadius
-	// it steps directly away (never onto the player, so it can't engage);
-	// otherwise it wanders its leash like the junkyard dog's idle branch.
-	// Prey that runs rather than fights.
+	// PackAISkittish flees: steps directly away within SkittishFleeRadius (never
+	// onto the player), else wanders its leash.
 	PackAISkittish
-	// PackAICount sizes name / label tables. Bump by adding a mode
-	// above this line; init guards (areas.go's packAIDefs,
-	// editor's modal row) catch the missing wiring at startup.
+	// PackAICount sizes name/label tables. Bump by adding a mode above; init
+	// guards catch missing wiring at startup.
 	PackAICount = int(PackAISkittish) + 1
 )
 
-// ChestSpawn is one authored chest on the map: a tile position and the
-// loot the chest holds. The runtime form (Chest) carries an additional
-// Looted flag so re-opening an already-emptied chest is a cheap no-op
-// instead of regenerating the items.
+// ChestSpawn is one authored chest: a tile position + its loot. (Runtime Chest
+// adds a Looted flag.)
 type ChestSpawn struct {
 	TileX int
 	TileZ int
 	Items []ItemKind
 }
 
-// DoorSpawn is one authored door on the map: a tile position, the
-// door's identifier (unique within this map), the destination map id
-// + door name to step into, and the post-transition facing the player
-// should adopt. Same shape as the on-disk MapDoor — a same-map portal
-// keeps the SelfMapToken ("self") placeholder END-TO-END (load preserves
-// it, see AreaFromMapFile; the transition + render layers resolve it to
-// the current map id at use time, see run.go and render/doors.go) so a
-// map rename can't strand a self-referencing door.
-// DoorStyle picks the visual fixture a door renders as. The destination /
-// transition behavior is identical across styles — this is purely how the
-// doorway looks so an author can match a door to its surroundings (a
-// timber frame in a town, a stone arch in a cave, a freestanding gateway
-// in the open field).
+// DoorStyle picks the visual fixture a door renders as. Transition behavior is
+// identical across styles — purely cosmetic so an author can match surroundings.
+// (A same-map portal keeps the "self" placeholder end-to-end so a map rename
+// can't strand a self-referencing door; resolved at use time.)
 type DoorStyle int
 
 const (
 	DoorStyleBuilding DoorStyle = iota // timber-framed door (the original)
 	DoorStyleCave                      // rough stone archway
 	DoorStyleField                     // open gateway / trail arch
-	// DoorStyleCount is the wrap modulus for cycling styles in the editor
-	// and the size of the per-style model table in the renderer.
+	// DoorStyleCount is the style-cycle wrap modulus + render model-table size.
 	DoorStyleCount
 )
 
@@ -108,31 +80,21 @@ type DoorSpawn struct {
 	Style      DoorStyle
 }
 
-// HasTarget reports whether this door names a destination it can
-// actually resolve. An empty TargetMap or TargetDoor means the door
-// was authored but never finished — every "should this door fire?"
-// predicate (runtime trigger, editor validator, parse-time check)
-// goes through here so the rule lives in one place.
+// HasTarget reports whether this door names a resolvable destination (empty
+// TargetMap/TargetDoor = authored but unfinished). Single home for the rule.
 func (d DoorSpawn) HasTarget() bool {
 	return mapfile.DoorTargetComplete(d.TargetMap, d.TargetDoor)
 }
 
-// CrystalSpawn is one authored healing crystal on the map: just a tile
-// position (a Grimrock-style save/heal point). The runtime form (Crystal)
-// adds the live Charge/Charged state, seeded charged at placement (see
-// placeCrystals) and persisted per-tile in SaveData. A map with no authored
-// crystals falls back to the auto entrance crystal, so pre-crystal maps are
-// unchanged.
+// CrystalSpawn is one authored healing crystal (Grimrock-style save/heal point):
+// just a tile position. (Runtime Crystal adds live Charge/Charged state.)
 type CrystalSpawn struct {
 	TileX int
 	TileZ int
 }
 
-// TileXZ is implemented by the authored spawn types (PackSpawn /
-// ChestSpawn / DoorSpawn / CrystalSpawn), all of which carry a TileX/TileZ
-// position. Generic "find / remove the spawn on this tile" helpers in core
-// and the editor range over it instead of re-typing the coordinate read per
-// spawn slice.
+// TileXZ is implemented by the authored spawn types (PackSpawn / ChestSpawn /
+// DoorSpawn / CrystalSpawn) so generic "spawn on this tile" helpers range over it.
 type TileXZ interface {
 	Tile() (int, int)
 }
@@ -142,59 +104,39 @@ func (s ChestSpawn) Tile() (int, int)   { return s.TileX, s.TileZ }
 func (s DoorSpawn) Tile() (int, int)    { return s.TileX, s.TileZ }
 func (s CrystalSpawn) Tile() (int, int) { return s.TileX, s.TileZ }
 
-// Door is one runtime door on the field. Built from AreaDefinition.
-// DoorSpawns by NewGameState (placeDoors). Doors block neither movement
-// nor vision: stepping onto a door's tile fires the area transition,
-// resolved by the explore loop against the door's TargetMap + TargetDoor.
+// Door is one runtime door (from DoorSpawns via placeDoors). Blocks neither
+// movement nor vision: stepping onto its tile fires the area transition.
 type Door struct {
 	TileX int
 	TileZ int
 	Name  string
-	// TargetMap names the destination map id (the bare name, e.g.
-	// "dungeon" for dungeon.map). The literal "self" placeholder is
-	// resolved to the local map id by AreaFromMapFile.
+	// TargetMap is the destination map id (bare name); "self" is resolved to the
+	// local map id by AreaFromMapFile.
 	TargetMap string
-	// TargetDoor is the destination door's Name. Resolution lookup
-	// is DoorByName(destination.Doors, TargetDoor).
+	// TargetDoor is the destination door's Name (DoorByName lookup).
 	TargetDoor string
-	// Facing has two related uses, both honored by doorExitTile in
-	// run.go:
-	//   1. The player's post-transition look direction — the camera
-	//      yaw is set from this when they emerge.
-	//   2. The offset vector for the exit tile: the player is placed
-	//      one step in this direction from the door tile, so the
-	//      destination door sits behind them and they don't
-	//      immediately re-trigger the transition.
-	// Both readings collapse to the same value: "which way is the
-	// player facing when they walk out of this doorway." Authors
-	// should set it accordingly; the engine doesn't infer either
-	// reading separately.
+	// Facing is "which way the player faces walking out": sets post-transition
+	// camera yaw AND offsets the exit tile one step that way (so they don't
+	// re-trigger the transition). See doorExitTile in run.go.
 	Facing int
-	// Style is the visual fixture (timber / cave / field). Render-only;
-	// the transition behavior is identical across styles.
+	// Style is the visual fixture (render-only).
 	Style DoorStyle
 }
 
-// HasTarget reports whether this runtime door names a resolvable
-// destination. Sibling of DoorSpawn.HasTarget — same rule applied to
-// the runtime list.
+// HasTarget reports whether this runtime door names a resolvable destination.
 func (d Door) HasTarget() bool {
 	return mapfile.DoorTargetComplete(d.TargetMap, d.TargetDoor)
 }
 
-// AreaTransition is the queued "swap to this area next frame" request
-// the explore movement loop hands off to the run loop when the player
-// steps onto a door. Empty TargetMap is the zero / "no transition"
-// marker — the run loop only swaps when TargetMap != "".
+// AreaTransition is the queued "swap area next frame" request from the explore
+// loop to the run loop. Empty TargetMap = no transition.
 type AreaTransition struct {
 	TargetMap  string
 	TargetDoor string
 }
 
-// PanelTab indexes the game-panels overlay tabs. Order is the on-screen
-// left-to-right tab order; switching tabs cycles through this enum with
-// the L1/R1 shoulders or arrow keys. Adding a new tab is one enum row
-// + one row in render/panels.go's drawer table.
+// PanelTab indexes the game-panels overlay tabs, in left-to-right order. Adding
+// a tab = one enum row + one row in render/panels.go's drawer table.
 type PanelTab int
 
 const (
@@ -207,15 +149,10 @@ const (
 	PanelTabCount
 )
 
-// PanelTabCharacter is the new spelling of the former PanelTabStats —
-// the tab covers level, XP, stats, armor, skill points, and the
-// allocate-level-up entry point, so "Character" reads truer than
-// "Stats." Aliased for backwards compat with any save / replay
-// state that already had the old name.
+// PanelTabCharacter aliases PanelTabStats (the tab now reads "Character").
 const PanelTabCharacter = PanelTabStats
 
-// PanelTabLabel returns the short human label for a tab — used for the
-// tab strip header in the overlay.
+// PanelTabLabel returns the short label for a tab (the tab-strip header).
 func PanelTabLabel(t PanelTab) string {
 	switch t {
 	case PanelTabStats:
@@ -227,23 +164,18 @@ func PanelTabLabel(t PanelTab) string {
 	case PanelTabSkills:
 		return "Skills"
 	case PanelTabQuests:
-		// Hosts two sub-tabs (Quests + Bestiary), so the top-level tab
-		// reads "Journal" — the quest log is one view within it.
+		// Hosts Quests + Bestiary sub-tabs, so the top-level tab reads "Journal".
 		return "Journal"
 	case PanelTabMap:
 		return "Map"
 	default:
-		// Parallel to the PanelTabCount-locked render.panelTabDrawers
-		// array: a new tab that forgets a label here fails loudly instead
-		// of showing "?" in the tab strip.
+		// Fail loudly if a new tab forgets its label.
 		panic("core: PanelTabLabel missing case for PanelTab")
 	}
 }
 
-// JournalSubtab selects which view the Journal tab (PanelTabQuests) shows —
-// the quest log or the bestiary. The two are toggled with Left/Right inside
-// the tab (the journal has no member column to spend the horizontal axis
-// on); the active view is stored on GameState.JournalTab.
+// JournalSubtab selects the Journal tab's view (quest log or bestiary), toggled
+// Left/Right. Active view is GameState.JournalTab.
 type JournalSubtab int
 
 const (
@@ -252,8 +184,7 @@ const (
 	JournalSubtabCount
 )
 
-// JournalSubtabLabel returns the short label for a journal sub-tab, shown in
-// the sub-tab header strip.
+// JournalSubtabLabel returns the short label for a journal sub-tab.
 func JournalSubtabLabel(s JournalSubtab) string {
 	switch s {
 	case JournalQuests:
@@ -265,12 +196,9 @@ func JournalSubtabLabel(s JournalSubtab) string {
 	}
 }
 
-// Chest is one runtime chest on the field. Items is the stack-counted
-// loot the player can withdraw via the chest-open modal; Looted goes
-// true once every stack is drained (or Take All fires), at which point
-// the chest renders open and ignores further interactions. Chests block
-// movement onto their tile — the player walks up to an adjacent square
-// and opens with the Confirm key.
+// Chest is one runtime chest. Looted goes true once every stack is drained, at
+// which point it renders open and ignores interaction. Blocks movement onto its
+// tile — opened from an adjacent square.
 type Chest struct {
 	TileX  int
 	TileZ  int
@@ -278,13 +206,10 @@ type Chest struct {
 	Looted bool
 }
 
-// Crystal is a Legend-of-Grimrock-style healing crystal placed in the world.
-// While Charged, stepping onto or beside it fully restores the party's HP+MP
-// AND autosaves the game, then it goes dormant (Charged=false, Charge=0). It
-// recharges slowly over the player's steps (Charge climbs by 1 per landed step
-// until it reaches CrystalRechargeSteps, which re-arms it). Non-blocking: the
-// player can stand on its tile. Runtime-only entity (placed near the start by
-// placeCrystals); the Charge/Charged state persists in SaveData like StepCount.
+// Crystal is a Grimrock-style healing crystal. While Charged, stepping onto/beside
+// it fully restores HP+MP AND autosaves, then goes dormant. Recharges +1 per
+// landed step up to CrystalRechargeSteps (re-arms). Non-blocking. Charge state
+// persists in SaveData.
 type Crystal struct {
 	TileX   int
 	TileZ   int
@@ -292,15 +217,10 @@ type Crystal struct {
 	Charged bool
 }
 
-// AreaDefinition is the runtime form of a map. Built from a mapfile.MapFile
-// via AreaFromMapFile (see areas.go). Path is the source disk location and
-// is empty for unsaved maps the editor is still working on.
-//
-// Geometry is layered into parallel ASCII grids of the same dimensions: the
-// four required layers (Walls / Floor / Decor / Props) plus two optional ones
-// (Ceiling / Elevation, documented on their fields below). Width and Height
-// are stored explicitly so blank layers can be reconstructed without
-// inferring from any single grid (an empty .map gets blank layers).
+// AreaDefinition is the runtime form of a map (from AreaFromMapFile). Path is the
+// disk source, empty for unsaved maps. Geometry is parallel ASCII grids of equal
+// dimensions: required Walls/Floor/Decor/Props plus optional layers below. Width
+// and Height are stored explicitly so blank layers reconstruct.
 type AreaDefinition struct {
 	Path   string
 	Name   string
@@ -310,105 +230,68 @@ type AreaDefinition struct {
 	Floor  []string
 	Decor  []string
 	Props  []string
-	// Ceiling is the fifth geometry layer: same dimensions as Walls, but
-	// only TileCeilingSolid cells get an overhead slab rendered. Empty
-	// rows here are normalized into a blank layer at load time so older
-	// .map files (pre-ceiling) keep working without a re-save.
+	// Ceiling: same dims as Walls; only TileCeilingSolid cells render an overhead
+	// slab. Empty rows normalize to a blank layer at load so pre-ceiling maps work.
 	Ceiling []string
-	// Elevation is the sixth geometry layer: per-tile ground LEVEL ('0'..'9'),
-	// same dimensions as Walls. A ramp floor tile stores its LOW level here.
-	// Older .map files without an elevation: section load as an all-'0' (flat)
-	// layer, so ElevationLevelAt reads 0 everywhere for them.
+	// Elevation: per-tile ground LEVEL ('0'..'9'); a ramp stores its LOW level.
+	// Maps without an elevation: section load all-'0' (flat).
 	Elevation []string
-	// Solids is the VOXEL occupancy stack that supersedes the single-height
-	// Elevation field: Solids[level][z] is a width-wide row of chars, one per x,
-	// where a non-SolidAir char means a solid cube at (x,level,z) (the char is
-	// the cube's material/skin, drawn from the Walls face-skin alphabet). Planes
-	// above the tallest column are implicitly all-air and not stored. A nil/empty
-	// Solids means "this area is a pure heightfield described by Elevation" — the
-	// loader materializes the stack on demand (BuildSolidsFromElevation), and a
-	// heightfield round-trips to disk as the legacy elevation: section so old
-	// maps stay byte-identical. Only a column with a GAP (a floating cube over
-	// air) forces the on-disk solids: section. See voxel.go.
+	// Solids is the VOXEL occupancy stack superseding Elevation: Solids[level][z]
+	// is a width-wide row, one char per x; non-SolidAir = a solid cube at
+	// (x,level,z) (char = material/skin). nil/empty = pure heightfield from
+	// Elevation (materialized on demand, round-trips as the legacy elevation:
+	// section). Only a column with a GAP forces the solids: section. See voxel.go.
 	Solids [][]string
-	// PropLevels is the optional per-tile prop LEVEL grid (one base-36 char per
-	// (x,z), or PropLevelAuto = '.' for "rest on the column's lowest standable
-	// surface"). A prop placed on a bridge deck stores that deck's level here so
-	// it renders + blocks at the deck, not the ground beneath. nil/empty = every
-	// prop is on its auto surface (the pre-voxel behavior), so old maps need no
-	// prop_levels: section. See PropLevelAt.
+	// PropLevels: optional per-tile prop LEVEL (one base-36 char, or
+	// PropLevelAuto='.' = lowest standable surface), so a prop on a deck renders +
+	// blocks at the deck. nil = all auto (pre-voxel). See PropLevelAt.
 	PropLevels []string
-	// DecorLevels is the decor analogue of PropLevels — the per-tile level a decor
-	// scatter sits on (deck vs ground), '.' = auto. Same optional/byte-stable
-	// semantics; nil = all decor on its auto surface. See DecorLevelAt.
+	// DecorLevels: decor analogue of PropLevels, '.' = auto. nil = all auto. See
+	// DecorLevelAt.
 	DecorLevels []string
-	// FaceOverrides holds per-tile, per-direction cliff-face skin overrides set
-	// from a tile's right-click menu — so a tile can wear a different skin on its
-	// N/E/S/W faces (the top-down editor can't paint a vertical face, so faces are
-	// a tile property, not a layer). A tile with no entry uses its base FaceSkinAt
-	// skin on every face, so existing maps are unchanged and need no faces:
-	// section. Sorted by (Z,X) for deterministic encoding. See FaceSkinForDir.
+	// FaceOverrides holds per-tile, per-direction cliff-face skin overrides (the
+	// top-down editor can't paint a vertical face, so faces are a tile property).
+	// No entry = base FaceSkinAt skin on every face. Sorted by (Z,X) for
+	// deterministic encoding. See FaceSkinForDir.
 	FaceOverrides []FaceOverride
-	// faceOverrideIdx is a lazily-built (x,z)->FaceOverrides-index map so
-	// faceOverrideAt resolves in O(1) instead of linearly scanning FaceOverrides
-	// once per visible cube-face per frame on the voxel render path. Built on the
-	// first lookup, invalidated (nil) by SetFaceDir / CloneArea. Unexported, so
-	// it's excluded from mapfile encoding, AreaContentEqual, and round-trip
-	// equality — only the FaceOverrides slice is authoritative.
+	// faceOverrideIdx is a lazily-built (x,z)->index map so faceOverrideAt is O(1)
+	// instead of scanning FaceOverrides per cube-face per frame. Built on first
+	// lookup, invalidated (nil) by SetFaceDir / CloneArea. Unexported, so excluded
+	// from encoding + equality — only FaceOverrides is authoritative.
 	faceOverrideIdx map[[2]int]int
 	Materials       MaterialSet
 	StartTileX    int
 	StartTileZ  int
 	StartFacing int
 	PackSpawns  []PackSpawn
-	// ChestSpawns is the authored chest list. Converted to runtime
-	// Chests in NewGameState; the field-render and interact paths read
-	// the runtime list, not this one.
+	// ChestSpawns is the authored chest list → runtime Chests in NewGameState.
 	ChestSpawns []ChestSpawn
-	// DoorSpawns is the authored door list. Converted to runtime
-	// g.Doors in NewGameState; the explore movement loop reads the
-	// runtime list to detect "stepped onto a door tile" transitions.
+	// DoorSpawns is the authored door list → runtime g.Doors in NewGameState.
 	DoorSpawns []DoorSpawn
-	// CrystalSpawns is the authored healing-crystal list. Converted to
-	// runtime Crystals (each seeded charged) by placeCrystals.
+	// CrystalSpawns is the authored crystal list → runtime Crystals (placeCrystals).
 	CrystalSpawns []CrystalSpawn
-	// CrystalsAuthored reports whether this map explicitly defines its
-	// crystals — true when the .map carried a `crystals:` section (which the
-	// editor always writes once it has touched a map). It lets an EMPTY
-	// CrystalSpawns mean "deliberately no crystals" rather than "unspecified":
-	// placeCrystals only synthesizes the default entrance crystal for maps
-	// where this is false (legacy maps predating editable crystals), so an
-	// authored map's exact crystal set — including zero — is honored.
+	// CrystalsAuthored is true when the .map carried a `crystals:` section, so an
+	// EMPTY CrystalSpawns means "deliberately none" — placeCrystals only
+	// synthesizes the default entrance crystal when this is false (legacy maps).
 	CrystalsAuthored bool
-	// CustomEnemies are author-defined enemy templates scoped to this
-	// area. The editor's modalCustomEnemies CRUDs them; pack spawns
-	// reference them by Name; battle instantiates an Enemy via
-	// CustomEnemyDef.Instantiate. Empty for built-in-only maps.
+	// CustomEnemies are area-scoped author-defined enemy templates; pack spawns
+	// reference them by Name, instantiated via CustomEnemyDef.Instantiate.
 	CustomEnemies []CustomEnemyDef
 	QuietMessage  string
-	// Dialogs are the area's authored branching conversations (see
-	// core/dialog.go). Authored in the editor's Dialogs modal, persisted in
-	// the .map file's optional dialogs: section as one JSON object per line,
-	// and started at runtime by StartDialog (by id). Empty for maps with no
-	// conversations.
+	// Dialogs are the area's authored branching conversations (see dialog.go),
+	// started by StartDialog (by id).
 	Dialogs []DialogDefinition
-	// Triggers auto-start a dialog on a world event (step onto a tile / a foe
-	// killed) — see core/dialogtrigger.go. Authored in the editor's Dialogs
-	// modal, persisted in the .map file's optional triggers: section. Empty
-	// for maps that only start dialogs by an explicit (debug) launcher.
+	// Triggers auto-start a dialog on a world event (step / foe killed) — see
+	// dialogtrigger.go.
 	Triggers []DialogTrigger
 }
 
 type Player struct {
 	TileX int
 	TileZ int
-	// Level is the voxel level of the cube-top the party stands on — the
-	// vertical coordinate that lets a column hold more than one walkable surface
-	// (ground UNDER a bridge vs the deck OVER it). On a heightfield map every
-	// column has a single surface, so Level just tracks the column top and the
-	// movement/camera path stays on the original StandGroundY rule; it becomes
-	// load-bearing only on a voxel (Solids) map. Seeded to the lowest standable
-	// surface of the spawn tile and updated by ResolveStep on each step.
+	// Level is the voxel level of the cube-top the party stands on (ground under a
+	// bridge vs deck over it). On a heightfield it just tracks the column top;
+	// load-bearing only on a voxel map. Updated by ResolveStep each step.
 	Level     int
 	Facing    int
 	X         float32
@@ -416,11 +299,9 @@ type Player struct {
 	Yaw       float32
 	LookYaw   float32
 	LookPitch float32
-	// GroundY is the world-space height of the ground under the player,
-	// eased during a step animation (see updateAnimation). Only meaningful
-	// while Anim.Kind == AnimStep; at rest the camera derives the ground
-	// height from the tile via AreaDefinition.StandGroundY, so this needs no
-	// initialization on spawn / load / transition.
+	// GroundY is the eased world-space ground height under the player, only
+	// meaningful while Anim.Kind == AnimStep; at rest the camera uses
+	// AreaDefinition.StandGroundY, so this needs no init on spawn/load.
 	GroundY float32
 	Anim    Animation
 }
@@ -435,348 +316,218 @@ type Animation struct {
 	ToZ      float32
 	FromYaw  float32
 	ToYaw    float32
-	// FromY / ToY ease the player's ground height across a step when the
-	// from-tile and to-tile sit at different elevation levels (walking a
-	// ramp). Both are AreaDefinition.StandGroundY values; zero for flat
-	// steps, so a level map never moves the camera vertically.
+	// FromY / ToY ease ground height across a step between tiles at different
+	// levels (a ramp). Both StandGroundY values; zero for flat steps.
 	FromY float32
 	ToY   float32
 }
 
 type GameState struct {
 	Area AreaDefinition
-	// StepCount is the total number of player tile-steps taken in this
-	// session. Drives the day/night cycle: every StepsPerCycle steps is
-	// one full loop through the six time-of-day phases. Incremented by the
-	// explore package when a step actually lands (not when blocked).
+	// StepCount is total player tile-steps this session (landed, not blocked).
+	// Drives the day/night cycle: StepsPerCycle steps = one full phase loop.
 	StepCount int
-	// Weather is the ambient-rain state (outdoor-only, purely atmospheric).
-	// Advances on landed steps + eases per frame; see core/weather.go. Zero
-	// value is WeatherClear with no cooldown, so a fresh session starts dry
-	// and the per-step roll governs the first storm.
+	// Weather is the ambient-rain state (outdoor-only, atmospheric); see
+	// weather.go. Zero value WeatherClear, so a fresh session starts dry.
 	Weather WeatherState
 	Player  Player
 	Party   []PartyMember
-	// Packs is the field roster — each pack occupies one tile and holds
-	// the enemies revealed if it's engaged. Only the highest-tier member
-	// of a pack is rendered on the field; the rest appear at battle start.
+	// Packs is the field roster — one tile each, holding the enemies revealed
+	// on engage. Only the highest-tier member renders on the field.
 	Packs     []Pack
 	Battle    Battle
 	MenuOpen  bool
 	MenuIndex int
-	// DebugOverlay shows in-world tile labels and a player-coord readout.
-	// Toggled from the pause menu. Off by default so a fresh session looks
-	// clean. It also doubles as the "debug mode" master gate: the Debug
-	// submenu (and its toggles below) is only reachable while this is on.
+	// DebugOverlay shows in-world tile labels + a coord readout. Off by default.
+	// Doubles as the master debug gate: the Debug submenu is only reachable while on.
 	DebugOverlay bool
-	// DebugMenuOpen is true while the debug submenu is showing. Opened
-	// from the pause menu's Debug row (always reachable now — the master
-	// "Debug Mode" on/off toggle lives inside the submenu). DebugMenuIndex
-	// is its row cursor.
+	// DebugMenuOpen: debug submenu showing (opened from the pause menu's Debug
+	// row). DebugMenuIndex is its row cursor.
 	DebugMenuOpen  bool
 	DebugMenuIndex int
-	// RetroMenuOpen is true while the Retro Filters sub-submenu (opened from
-	// the Debug submenu's Retro Filters row) is showing; RetroMenuIndex is
-	// its row cursor. RetroFilters holds the per-filter 0..1 intensities the
-	// render layer's post-process pass reads each frame — all zeros (the
-	// default) means the pass is skipped entirely. Preserved across Restart
-	// like RumbleEnabled (a presentation preference, not world state); not
-	// part of SaveData.
+	// RetroMenuOpen: Retro Filters sub-submenu showing; RetroMenuIndex its cursor.
+	// RetroFilters holds per-filter 0..1 intensities the post-process pass reads;
+	// all zeros = pass skipped. Runtime preference (not in SaveData), kept across
+	// Restart.
 	RetroMenuOpen  bool
 	RetroMenuIndex int
 	RetroFilters   [RetroFilterCount]float64
-	// RetroFilterSky chooses whether the skybox is captured inside the
-	// filter pass (true, the default — the whole vista crunches together)
-	// or drawn crisp to the backbuffer with the filtered environment
-	// alpha-blitted over it (false — pixelated ruins against a clean sky).
+	// RetroFilterSky: true (default) captures the skybox inside the filter pass;
+	// false draws it crisp with the filtered environment blitted over.
 	RetroFilterSky bool
-	// RetroFilterSprites chooses whether enemy/party billboards are captured
-	// inside the filter pass (true — sprites crunch along with the world) or
-	// drawn crisp on top of the filtered environment (false, the default — the
-	// per-asset visuals.json FX baked into each sprite shows through without the
-	// screen filter stacking on top of it). Same preference class as
-	// RetroFilterSky; the render layer draws the crisp overlay so sprites still
-	// occlude correctly against world geometry.
+	// RetroFilterSprites: true captures billboards inside the filter pass; false
+	// (default) draws them crisp over the filtered environment so per-asset
+	// visuals.json FX show through. Render layer keeps occlusion correct.
 	RetroFilterSprites bool
-	// OptionsMenuOpen is true while the Options submenu is showing (opened
-	// from the pause menu's Options row). OptionsMenuIndex is its cursor.
-	// Mutually exclusive with MenuOpen / DebugMenuOpen — opening a submenu
-	// drops the pause menu, mirroring the Debug submenu flow.
+	// OptionsMenuOpen: Options submenu showing; OptionsMenuIndex its cursor.
+	// Mutually exclusive with MenuOpen / DebugMenuOpen.
 	OptionsMenuOpen  bool
 	OptionsMenuIndex int
-	// QuitConfirmOpen gates the "Quit — unsaved progress will be lost?" confirm
-	// modal. Opened from the pause menu (the Quit row or the Quit hotkey, both of
-	// which clear MenuOpen); confirming sets Quit, cancelling reopens the pause
-	// menu. Transient, like the door prompt — not part of SaveData.
+	// QuitConfirmOpen gates the "Quit — unsaved progress lost?" modal. Confirm
+	// sets Quit; cancel reopens the pause menu. Transient (not in SaveData).
 	QuitConfirmOpen bool
-	// Out-of-battle "use" target picker, shared by the panels overlay's
-	// Items tab (use a consumable on an ally) and Skills tab (cast a
-	// single-target heal on an ally). UseTargetOpen gates the ally-picker
-	// sub-modal; UseTargetCursor indexes the LIVING-member list it shows.
-	// Exactly one of UsePendingItem / UsePendingSkill is set (the other is
-	// its None sentinel) to say what the chosen ally receives; the skill
-	// path also remembers UsePendingCaster (the member paying the MP).
+	// Out-of-battle "use" target picker, shared by the Items tab (consumable on
+	// ally) and Skills tab (single-target heal). UseTargetCursor indexes the
+	// LIVING-member list. Exactly one of UsePendingItem / UsePendingSkill is set;
+	// the skill path also remembers UsePendingCaster (pays the MP).
 	UseTargetOpen    bool
 	UseTargetCursor  int
 	UsePendingItem   ItemKind
 	UsePendingSkill  SkillID
 	UsePendingCaster int
-	// Out-of-battle heal-skill chooser (Skills tab Use). Raised only when the
-	// cursored member has MORE THAN ONE out-of-battle heal (today just the
-	// Cleric: Prayer + Mass Mend) — a single heal casts directly, none refuses.
-	// HealPickCaster is the member; HealPickCursor indexes core.OutOfBattleHeals
-	// for that member. On confirm it routes into the same cast path (ally picker
-	// for a single-target heal, immediate party-wide apply for Mass Mend).
+	// Out-of-battle heal-skill chooser (Skills tab), raised only when the member
+	// has >1 out-of-battle heal (today the Cleric: Prayer + Mass Mend); one heal
+	// casts directly. HealPickCursor indexes core.OutOfBattleHeals for the member.
 	HealPickOpen   bool
 	HealPickCaster int
 	HealPickCursor int
-	// EnemiesDisabled (debug) removes field packs from play: they stop
-	// rendering and neither the step-into nor the wander AI can start a
-	// battle. Lets the player walk a map freely to inspect it.
+	// EnemiesDisabled (debug) removes field packs entirely (no render, no battle).
 	EnemiesDisabled bool
-	// EasyBattleQuit (debug) lets the player abandon an active battle
-	// instantly from the action menu (drops the engaged pack and returns
-	// to explore). Off by default so normal play can't trivially flee.
+	// EasyBattleQuit (debug) lets the player abandon an active battle from the
+	// action menu. Off by default.
 	EasyBattleQuit bool
-	// RenderLogEnabled (debug) turns on per-frame diagnostics dumped to
-	// crawler-render.log. Used to inspect the world-draw path
-	// (camera state, lighting profile, tile/prop counts, shader IDs)
-	// when chasing flicker / invisibility bugs that don't reproduce
-	// in the editor.
+	// RenderLogEnabled (debug) dumps per-frame world-draw diagnostics to
+	// crawler-render.log for chasing flicker / invisibility bugs.
 	RenderLogEnabled bool
-	// DebugAllSkills (debug) makes the battle skill menu list EVERY
-	// player-castable skill (not just the ones a member has learned) and makes
-	// casts free (chargeMP skips the MP deduction, and the menu's affordability
-	// gate is bypassed). For testing any skill without grinding the tree or MP.
+	// DebugAllSkills (debug) lists EVERY player-castable skill in the battle menu
+	// and makes casts free (skips MP deduction + affordability gate).
 	DebugAllSkills bool
-	// DebugSkipBattles (debug) auto-resolves an engaged pack as a win — kills +
-	// XP + loot awarded via the normal win path — WITHOUT entering the battle
-	// scene. Distinct from EnemiesDisabled, which removes encounters entirely
-	// (no reward); skip-battles still pays out so the player can clear/level a
-	// map fast. See battle.DebugSkipWin.
+	// DebugSkipBattles (debug) auto-resolves an engaged pack as a win (kills + XP
+	// + loot via the normal path) WITHOUT entering the scene. Unlike
+	// EnemiesDisabled it still pays out. See battle.DebugSkipWin.
 	DebugSkipBattles bool
-	// RumbleEnabled is the player-facing controller-vibration setting (Options
-	// menu → "Vibration"). Defaults true (set in NewParty/state seeding);
-	// when false, input.ApplyRumble forces the motor level to 0 so combat
-	// rumble is fully muted. Runtime preference (not persisted in SaveData,
-	// like the display-mode toggle).
+	// RumbleEnabled is the controller-vibration setting (Options → "Vibration",
+	// default true); false forces the motor to 0. Runtime preference (not in SaveData).
 	RumbleEnabled bool
-	// Inventory is shared across the party — single global stack list.
-	// Stocked by Steal pickups and consumed by the in-battle Item action.
+	// Inventory is the party's single shared stack list. Stocked by Steal,
+	// consumed by the Item action.
 	Inventory []ItemStack
-	// Gold is the party's shared currency. Earned from battle loot
-	// (AwardBattleLoot) and will be spent at an in-universe shop once openShop
-	// is wired to a merchant / tile (the pause-menu shop entry was removed).
-	// Persisted in the save file. Single pool, like Inventory.
+	// Gold is the party's shared currency (earned via AwardBattleLoot). Persisted.
 	Gold int
-	// Shop overlay. Opened IN-UNIVERSE (by a merchant / shop tile in the
-	// world — entry point not yet wired; never a menu row). ShopOpen gates it;
-	// ShopTab picks the Buy / Sell column; ShopCursor is the highlighted row
-	// within the active tab's list. All three reset on open (openShop).
-	// Mutually exclusive with the other overlays via core.ActiveModal's ladder.
+	// Shop overlay, opened IN-UNIVERSE (entry point not yet wired). ShopTab picks
+	// Buy/Sell; ShopCursor the row. All reset on open. Mutually exclusive via
+	// core.ActiveModal.
 	ShopOpen   bool
 	ShopTab    ShopTab
 	ShopCursor int
-	// Quests is the journal — a save-persisted list of objectives the
-	// player reads from the char menu's Quests tab. Carried across area
-	// transitions / restarts like Party / Inventory / Gold. Empty for now
-	// (no seed quests); the Quests tab uses PanelsRowCursor for its row.
+	// Quests is the save-persisted journal, carried across transitions/restarts.
+	// Empty for now; the Quests tab uses PanelsRowCursor for its row.
 	Quests []Quest
-	// Bestiary is the party's accumulated foe knowledge (kill counts +
-	// scanned flags per enemy kind), shown in the journal's Bestiary
-	// sub-tab. Save-persisted and carried across transitions / restart
-	// like Quests. A kind becomes "known" (its HP revealed in the battle
-	// roster) after BestiaryIDKills defeats or one Scan. See bestiary.go.
+	// Bestiary is accumulated foe knowledge (kill counts + scanned flags),
+	// save-persisted and carried like Quests. A kind becomes "known" (HP revealed)
+	// after BestiaryIDKills defeats or one Scan. See bestiary.go.
 	Bestiary Bestiary
-	// Chests is the runtime list of on-field chests. Built from
-	// AreaDefinition.ChestSpawns by NewGameState. Looted chests stay in
-	// the slice (so their open-lid sprite keeps rendering); the explore
-	// loop just refuses interaction on them.
+	// Chests is the runtime chest list (from ChestSpawns). Looted chests stay
+	// (open-lid sprite); the explore loop refuses interaction on them.
 	Chests []Chest
-	// Doors is the runtime list of area-transition doors on the field.
-	// Built from AreaDefinition.DoorSpawns by NewGameState. The explore
-	// movement loop checks this slice on every step-land to detect
-	// "stepped onto a door" and fire the transition.
+	// Doors is the runtime transition-door list (from DoorSpawns); checked on
+	// every step-land to fire transitions.
 	Doors []Door
-	// Crystals is the runtime list of healing crystals (see Crystal). Placed
-	// near the start by placeCrystals; the explore step-land loop recharges them
-	// per step and fires the heal+autosave when the player lands on/beside a
-	// charged one. Charge state persists across save/load via SaveData.
+	// Crystals is the runtime healing-crystal list (placeCrystals); recharged per
+	// step, fires heal+autosave on/beside a charged one. Charge persists via SaveData.
 	Crystals []Crystal
-	// ActionLog is the rolling log of notable ACTIONS, in and out of combat —
-	// attacks/skills/results during a fight, and saves / crystal rests / failed
-	// door transitions while exploring. One continuous buffer (NOT reset per
-	// battle and NOT a step counter) so the bottom-left HUD pane reads the same
-	// whether or not a fight is on. Capped at ActionLogMaxLines; written via
-	// LogMessage (consecutive duplicates coalesced). StatusMessage is the latest
-	// single line — the transient status / "quiet" cue shown under the HUD, also
-	// the freshest ActionLog entry. Both were formerly Battle.Log / Battle.Message,
-	// which misnamed an in-and-out-of-combat log as battle-only.
+	// ActionLog is the rolling log of notable actions in AND out of combat (one
+	// continuous buffer, capped at ActionLogMaxLines; written via LogMessage,
+	// consecutive dupes coalesced). StatusMessage is the latest single line shown
+	// under the HUD, also the freshest ActionLog entry.
 	ActionLog     []string
 	StatusMessage string
-	// DoorPrompt is the index into Doors of the door the player just
-	// stepped onto and is being asked to confirm, or -1 when no prompt is
-	// showing. Stepping onto a door opens this confirm modal instead of
-	// transitioning immediately; confirming sets PendingTransition, and
-	// cancelling clears it (the player stays on the tile and can walk off).
+	// DoorPrompt is the Doors index of the door being confirmed, or -1. Stepping
+	// onto a door opens this modal; confirm sets PendingTransition, cancel clears it.
 	DoorPrompt int
-	// PendingTransition is set when the player confirms the door prompt.
-	// The run loop consumes this on the frame after movement settles to
-	// swap in the new GameState. Empty TargetMap means "no transition
-	// queued."
+	// PendingTransition is set on door-prompt confirm; the run loop consumes it
+	// the frame after movement settles. Empty TargetMap = none queued.
 	PendingTransition AreaTransition
-	// ChestOpen is the index into Chests of the currently-open chest, or
-	// -1 when no chest UI is showing. ChestMenuIndex is the cursor row
-	// inside the open chest (which item is highlighted). Both live in
-	// GameState (not a transient overlay slice) so the pause menu and
-	// the renderer can branch on "is a chest modal showing right now?"
-	// without reaching into explore.
+	// ChestOpen is the Chests index of the open chest, or -1; ChestMenuIndex is
+	// the highlighted row. On GameState (not a transient slice) so pause/render
+	// can branch on "chest modal showing?" without reaching into explore.
 	ChestOpen      int
 	ChestMenuIndex int
-	// LevelUpOpen is true while the stat-allocation modal is showing.
-	// The modal is NO LONGER auto-opened post-battle — battle wins now
-	// accrue PendingLevelUps + SkillPoints on the member, and the
-	// player chooses when to allocate by opening the modal from the
-	// Tome panels overlay's Character / Stats tab. LevelUpMember is
-	// the index into Party of the member currently allocating stat
-	// points; the modal walks pending members in slice order and
-	// closes when no member has unspent points left. core.ActiveModal
-	// surfaces LevelUp above the panels / chest / pause priorities so
-	// the dispatch ladder lives in one helper. The row cursor lives
-	// on LevelUpRowCursor below; the retired LevelUpStat field was
-	// redundant with it (cursor < StatCount already names the stat).
+	// LevelUpOpen gates the stat-allocation modal (no longer auto-opened
+	// post-battle — wins accrue PendingLevelUps + SkillPoints, the player opens
+	// it from the Character tab). LevelUpMember is the Party index allocating; the
+	// modal walks pending members in slice order. core.ActiveModal surfaces it
+	// above panels/chest/pause.
 	LevelUpOpen   bool
 	LevelUpMember int
-	// LevelUpPending is the per-stat staged increment count. The
-	// player accumulates picks inside the modal; nothing commits to
-	// the underlying member until they confirm the Apply row. Lets
-	// them see the resulting stat block before locking it in.
+	// LevelUpPending is the per-stat staged increment count; nothing commits to
+	// the member until they confirm Apply.
 	LevelUpPending [StatCount]int
-	// LevelUpRowCursor is the modal's row cursor. Covers stat rows
-	// (0..StatCount-1) and the Apply button (StatCount). Skill points
-	// no longer ride this modal — they're spent from the Skills
-	// panel's tree UI.
+	// LevelUpRowCursor covers stat rows (0..StatCount-1) and the Apply button
+	// (StatCount). Skill points are spent from the Skills tree, not here.
 	LevelUpRowCursor int
-	// PanelsOpen is true while the game panels overlay is up (Stats /
-	// Equipment / Items / Skills / Map tabs). Triggered by the "big
-	// start" button — gamepad middle / keyboard I — and gated above
-	// the pause-menu / battle priorities in explore.Update so the
-	// overlay can't co-exist with combat input. PanelsTab is the
-	// currently-shown tab; PanelsRowCursor is the per-tab vertical
-	// cursor — its semantic is "selected row within the active tab,"
-	// so it indexes a party member on Stats/Equipment/Skills, an
-	// inventory stack on Items, and is unused on Map (the Map tab
-	// uses PanelsMapZoom instead). Resets to 0 on every tab switch
-	// so each tab opens at the top.
+	// PanelsOpen gates the panels overlay (Stats/Equipment/Items/Skills/Map),
+	// gated above pause/battle so it can't coexist with combat input. PanelsTab is
+	// the shown tab; PanelsRowCursor is the per-tab row (member on
+	// Stats/Equipment/Skills, inventory stack on Items, unused on Map). Resets to
+	// 0 on tab switch.
 	PanelsOpen      bool
 	PanelsTab       PanelTab
 	PanelsRowCursor int
-	// PanelSwapSource is the Character tab's formation-swap "held" member: -1
-	// when no swap is in progress, otherwise the party index the player picked
-	// up (its tile shows the source outline). A second pick on another member
-	// swaps their formation slots; picking the held member again cancels. Reset
-	// to -1 on every overlay open / close / tab switch (resetPanelSubmodals), so
-	// a half-started swap can't leak across tabs. A UI cursor, not save state.
+	// PanelSwapSource is the Character tab's formation-swap "held" member, or -1.
+	// A second pick swaps slots; re-picking the held one cancels. Reset to -1 on
+	// every open/close/tab switch (resetPanelSubmodals). UI cursor, not save state.
 	PanelSwapSource int
-	// JournalTab selects which view the Journal tab shows — the quest log
-	// (JournalQuests, default) or the bestiary. Toggled with Left/Right
-	// while the Journal tab is active; PanelsRowCursor then scrolls the
-	// rows of whichever sub-view is showing. Not save-persisted (a UI
-	// cursor, like PanelsTab itself).
+	// JournalTab selects the Journal view (JournalQuests default / bestiary),
+	// toggled Left/Right; PanelsRowCursor scrolls the active sub-view. Not persisted.
 	JournalTab JournalSubtab
-	// Skill-tree modal: a Diablo-2-style sub-dialog raised from the Skills
-	// tab (Confirm on a member) showing that member's three trees. While
-	// SkillTreeOpen the modal owns panel input — SkillTreeCol picks the
-	// tree column (Left/Right), SkillTreeRow picks the node within it
-	// (Up/Down), Confirm invests a SkillPoint, Back closes just the modal.
-	// SkillTreeMember is the member the trees belong to (the cursored party
-	// column at open time). All reset when the modal opens; SkillTreeOpen
-	// is forced false on overlay close / tab switch so it can't strand.
+	// Skill-tree modal (Confirm on a Skills-tab member): SkillTreeCol picks the
+	// tree (Left/Right), SkillTreeRow the node (Up/Down), Confirm invests a point.
+	// SkillTreeMember is the member; all reset on open, SkillTreeOpen forced false
+	// on overlay close / tab switch so it can't strand.
 	SkillTreeOpen   bool
 	SkillTreeMember int
 	SkillTreeCol    int
 	SkillTreeRow    int
-	// Equipment tab (no drag-and-drop — it works like the Items menu).
-	// EquipSlotCursor is the focused equip slot row (0..EquipSlotCount-1)
-	// on the cursored member (PanelsRowCursor picks the member column).
-	// Confirm/click on a slot opens the item picker: a smaller sub-modal
-	// listing the inventory items eligible for that slot. EquipPickerOpen
-	// gates that sub-modal and EquipPickerCursor is the row inside it.
-	// All three reset on overlay open / tab switch (ResetEquipPanels).
+	// Equipment tab (works like the Items menu). EquipSlotCursor is the focused
+	// slot row on the cursored member; Confirm opens the item picker
+	// (EquipPickerOpen gates it, EquipPickerCursor its row). All reset on
+	// open/tab switch (ResetEquipPanels).
 	EquipSlotCursor   int
 	EquipPickerOpen   bool
 	EquipPickerCursor int
-	// PanelsMapZoom is the cells-on-screen value for the Map tab. Saved
-	// separately from PanelsScroll so cycling between tabs preserves
-	// each tab's cursor state. Initialized lazily on first Map view.
+	// PanelsMapZoom is the Map tab's cells-on-screen value, kept separate so tabs
+	// preserve their own cursor state. Lazy-init on first Map view.
 	PanelsMapZoom int
-	// PanelsMapPanX / PanelsMapPanZ offset the Map tab's view center (in
-	// tiles) from the player, so the d-pad/stick can scroll the map around to
-	// inspect explored ground away from the party. Reset to 0 (re-centered on
-	// the player) whenever the overlay opens or the Map tab is (re)entered.
+	// PanelsMapPanX/Z offset the Map view center (in tiles) from the player for
+	// scrolling. Reset to 0 (re-centered) on overlay open / Map (re)entry.
 	PanelsMapPanX int
 	PanelsMapPanZ int
-	// Visited tracks which tiles the player has stepped on for the
-	// fog-of-war reveal in the Map panel. Width matches Area.Width;
-	// indexed as Visited[z][x]. Built by NewGameState (start tile pre-
-	// marked) and updated on every successful step in explore.
+	// Visited tracks stepped-on tiles for the Map fog-of-war reveal; indexed
+	// Visited[z][x]. Start tile pre-marked; updated on every successful step.
 	Visited [][]bool
-	// DialogOpen gates the branching-conversation overlay (see core/dialog.go);
-	// Dialog holds the live conversation (a copy of the area definition being
-	// played + the current node + the choice cursor). Highest-priority modal
-	// in the explore ladder — opened by StartDialog (a debug launcher today;
-	// an NPC/region trigger later) and dismissed by CloseDialog. Not part of
-	// SaveData — a conversation is transient, like a chest modal being open.
+	// DialogOpen gates the conversation overlay (see dialog.go); Dialog holds the
+	// live conversation. Highest-priority explore modal, opened by StartDialog,
+	// dismissed by CloseDialog. Transient (not in SaveData).
 	DialogOpen bool
 	Dialog     DialogState
-	// TriggersFired records which Once dialog triggers have fired (keyed by
-	// DialogTrigger.ID) so they don't repeat — see core/dialogtrigger.go.
-	// NewGameState starts it nil and an area transition rebuilds a fresh
-	// GameState, so (like the Visited fog grid) it resets per area visit.
-	// UNLIKE the fog grid it IS persisted: SaveData.TriggersFired carries the
-	// current area's set through save/load and GameStateFromSave overlays it
-	// back, so a Once intro cutscene saved past doesn't replay on reload.
+	// TriggersFired records fired Once dialog triggers (keyed by DialogTrigger.ID)
+	// so they don't repeat. Resets per area visit, but IS persisted
+	// (SaveData.TriggersFired) so a saved-past Once cutscene doesn't replay on reload.
 	TriggersFired map[string]bool
 	Quit          bool
-	// VFXQueue holds visual-effect spawn intents emitted by the battle
-	// and explore layers. The render layer drains it each frame and
-	// materialises particles in its private pool — keeping VFX data
-	// in core (rather than in render) means battle code can emit FX
-	// without taking a raylib import. See core/vfx.go for the request
-	// type and enqueue helpers; render/vfx.go owns the pool + tick +
-	// draw. Cleared on area transition + on battle exit so stale
-	// particles don't render in the new scene.
+	// VFXQueue holds VFX spawn intents from battle/explore; the render layer
+	// drains it each frame into its private pool. Keeping the data in core lets
+	// battle emit FX without a raylib import. See vfx.go. Cleared on transition + battle exit.
 	VFXQueue []VFXRequest
-	// vfxQueueSpare is the back-buffer DrainVFXQueue swaps in so the drained
-	// slice it returns is never aliased by the live VFXQueue (a spawn handler
-	// that re-enqueues mid-drain appends to the fresh buffer, not the one the
-	// caller is iterating). The two buffers ping-pong, reusing capacity.
+	// vfxQueueSpare is the back-buffer DrainVFXQueue swaps in so a handler
+	// re-enqueuing mid-drain appends to the fresh buffer, not the one being
+	// iterated. The two ping-pong, reusing capacity.
 	vfxQueueSpare []VFXRequest
-	// VFXResetRequested is a one-shot signal to the render layer:
-	// when true, drop every live particle BEFORE processing the next
-	// frame's VFXQueue. The bool is the only seam battle code can
-	// use to invalidate the render-side pool without importing
-	// render (which would create a cycle). The renderer consumes the
-	// flag — reads, acts, clears — once per frame. Battle's
-	// clearBattleResidual sets it on every battle exit so the
-	// formation-relative particles from the fight don't drift into
-	// the explore camera's view at random world positions.
+	// VFXResetRequested is a one-shot signal: drop every live particle before the
+	// next frame's VFXQueue. The only seam battle can use to invalidate the
+	// render pool without importing render. Renderer reads/acts/clears once per
+	// frame. Set on every battle exit so formation-relative particles don't drift.
 	VFXResetRequested bool
-	// RNG is the per-state random source for all gameplay rolls (accuracy,
-	// steal, burn duration, press-window placement, etc.). Per-state means
-	// two GameStates (e.g. a fresh playtest after an editor change) don't
-	// share a stream — and a future "Restart from seed N" can drop a
-	// deterministic Rand in here instead of seeding from the wall clock.
-	// Always non-nil after NewGameState; Rand() lazily initializes if a
-	// caller built a GameState by struct literal (tests).
+	// RNG is the per-state random source for all gameplay rolls. Per-state so two
+	// GameStates don't share a stream (and a future seeded Restart can drop a
+	// deterministic Rand here). Always non-nil after NewGameState; Rand()
+	// lazily inits for struct-literal construction (tests).
 	RNG *rand.Rand
 }
 
-// Rand returns the GameState's RNG, lazily initializing it with a
-// wall-clock seed if a caller built the GameState by struct literal
-// (mostly tests). Production paths go through NewGameState which seeds
-// the RNG eagerly; this helper is the safety net for direct
-// construction.
+// Rand returns the GameState's RNG, lazily wall-clock-seeding it for
+// struct-literal construction (tests); NewGameState seeds it eagerly.
 func (g *GameState) Rand() *rand.Rand {
 	if g.RNG == nil {
 		g.RNG = rand.New(rand.NewSource(rand.Int63()))
@@ -785,27 +536,21 @@ func (g *GameState) Rand() *rand.Rand {
 }
 
 // RandRangeF returns a uniform float32 in [lo, hi) from the GameState RNG
-// (nil-safe via Rand). Single home for the "lo + rand*(hi-lo)" range roll
-// so the expression can't drift between call sites (weather lightning, etc.).
+// (nil-safe via Rand).
 func (g *GameState) RandRangeF(lo, hi float32) float32 {
 	return lo + g.Rand().Float32()*(hi-lo)
 }
 
-// SetStatusMessage writes the transient status line shown under the HUD WITHOUT
-// recording it in the ActionLog. For prompts that aren't actions in their own
-// right — "Choose a target", "Can't save during a battle" — so the rolling log
-// isn't polluted with UI cues. For a real action/result that should persist in
-// the log, call LogMessage instead.
+// SetStatusMessage writes the transient HUD status line WITHOUT logging it —
+// for UI prompts ("Choose a target") that shouldn't pollute the ActionLog. Use
+// LogMessage for real actions/results.
 func (g *GameState) SetStatusMessage(msg string) {
 	g.StatusMessage = msg
 }
 
-// LogMessage sets the status line AND records msg in the rolling ActionLog (the
-// bottom-left HUD pane, shown in combat AND exploration). Consecutive duplicates
-// are coalesced and the buffer is capped at ActionLogMaxLines. An empty msg
-// clears the status line without logging. This is the path for actions/results
-// (combat hits, saves, crystal rests, door failures); UI prompts use
-// SetStatusMessage so they don't accrete in the log.
+// LogMessage sets the status line AND records msg in the ActionLog (consecutive
+// dupes coalesced, capped at ActionLogMaxLines). Empty msg clears the status
+// line without logging. For actions/results; UI prompts use SetStatusMessage.
 func (g *GameState) LogMessage(msg string) {
 	g.StatusMessage = msg
 	if msg == "" {
@@ -820,67 +565,42 @@ func (g *GameState) LogMessage(msg string) {
 	}
 }
 
-// Pack is one runtime enemy pack on the field. Members carries the per-
-// instance battle state for every enemy in the pack; their TileX/TileZ
-// fields aren't used while the pack is whole (the pack's tile is the
-// authority). When a battle is active and this is the engaged pack, the
-// renderer reshuffles members into battle formation by slot.
+// Pack is one runtime enemy pack on the field. Members carries per-instance
+// battle state; their TileX/TileZ are unused while whole (the pack's tile is the
+// authority). On engage, the renderer reshuffles members into battle formation.
 //
-// Three (X, Z) pairs are now in play across the pack lifecycle and
-// each names a different concept — kept distinct on purpose so a
-// future per-tile pack lookup doesn't have to guess which one to key
-// on:
-//
-//   - PackSpawn.TileX/TileZ (authoring layer, in AreaDefinition):
-//     the tile the author dropped the pack on in the editor. Read by
-//     the editor's reachability / placement check and the snapper.
-//   - Pack.TileX/TileZ (runtime, this struct): the tile the pack is
-//     standing on right NOW. Updated by the wander/chase AI; this is
-//     the field-render position and the engagement target.
-//   - Pack.HomeX/HomeZ (runtime, this struct): the leash anchor for
-//     the junkyard-dog AI — the pack will roam, but never further
-//     than PackLeashRadius (Chebyshev) from this point. Seeded from
-//     the snapped spawn tile in placePacks so authored placement is
-//     the leash center. Never reassigned — packs leash to their
-//     birth tile for the run.
+// Three (X,Z) pairs name distinct concepts: PackSpawn.TileX/TileZ (authored
+// tile), Pack.TileX/TileZ (current tile, AI-updated, render+engage position),
+// Pack.HomeX/HomeZ (junkyard-dog leash anchor — never roams >PackLeashRadius
+// Chebyshev from it; seeded from the spawn tile, never reassigned).
 type Pack struct {
 	TileX int
 	TileZ int
-	// Level is the pack's standing voxel level — the cube-top it stands on, the
-	// pack analogue of Player.Level. On a heightfield it tracks the column top
-	// (so field rendering is unchanged); on a voxel map it keeps a roaming pack
-	// on the right surface (under vs over a bridge). Seeded in placePacks and
-	// updated by the AI move-apply step via ResolveStep.
+	// Level is the pack's standing voxel level (analogue of Player.Level). On a
+	// heightfield it tracks the column top; on a voxel map it keeps a roaming
+	// pack on the right surface. Updated by the AI via ResolveStep.
 	Level int
 	HomeX int
 	HomeZ int
-	// X, Z are the visible (interpolated) world coords used by the
-	// field renderer. They track the tile center when the pack is at
-	// rest and ease toward the destination tile while Anim is active.
-	// Seeded in placePacks to the snapped tile center and snapped to
-	// the target on Anim completion or battle engagement.
+	// X, Z are the interpolated world coords for the field renderer: tile center
+	// at rest, easing toward the destination while Anim is active.
 	X float32
 	Z float32
-	// Anim is the pack's step animation state. While Anim.Kind is
-	// AnimStep the renderer lerps X/Z between FromX/Z and ToX/Z;
-	// TickPackAnimations clears it when Elapsed >= Duration.
+	// Anim is the step animation; while AnimStep the renderer lerps X/Z,
+	// TickPackAnimations clears it at Elapsed >= Duration.
 	Anim    Animation
 	Members []Enemy
-	// AI mirrors the authoring PackSpawn.AI for this pack's runtime
-	// behavior — propagated by placePacks so the per-step planner can
-	// dispatch on the per-pack mode without crossing back to the area.
+	// AI mirrors PackSpawn.AI (propagated by placePacks) so the planner dispatches
+	// without crossing back to the area.
 	AI PackAI
-	// PatrolDir is the PackAIPatrol pace direction along the X axis
-	// (+1 east / -1 west). Runtime-only (not authored or saved — packs
-	// rebuild fresh): placePacks seeds it to +1; the patrol planner flips
-	// it at the leash boundary / a wall, and the explore step-applier
-	// writes the chosen direction back. Unused by the other AI modes.
+	// PatrolDir is the PackAIPatrol X-axis pace direction (+1 east / -1 west).
+	// Runtime-only: seeded +1, flipped at the leash boundary / a wall. Unused by
+	// other modes.
 	PatrolDir int
 }
 
-// Stats is the per-actor attribute block. Drives derived values (HP from VIT)
-// and damage formulas (STR for melee, INT for magic, WIS for heal, DEX for
-// thief precision, SPD for turn order).
+// Stats is the per-actor attribute block: HP from VIT; STR melee, INT magic, WIS
+// heal, DEX thief precision, SPD turn order.
 type Stats struct {
 	STR int
 	DEX int
@@ -890,15 +610,12 @@ type Stats struct {
 	SPD int
 }
 
-// StatusMod is one active timed stat/defense modifier on a combatant — the unit
-// of the STACKABLE buff/debuff system. Multiple mods coexist and SUM: a party
-// member can hold Bless (STR/DEX/INT/WIS) and War Banner (STR + Armor) at once,
-// an enemy can hold Cripple (SPD) and Blind (DEX) at once. Keyed by Source, so
-// re-casting the SAME skill REFRESHES its entry (no double-stack) while DIFFERENT
-// skills add independent entries. Turns ticks down at the bearer's end-of-turn
-// and the mod is dropped at 0. Stats deltas are additive (negative = debuff);
-// Armor / MDef are flat defensive grants (Stone Skin / War Banner). Combat-only:
-// the party side is wiped on battle exit, the enemy side dies with the enemy.
+// StatusMod is one active timed stat/defense modifier — the unit of the
+// STACKABLE buff/debuff system. Mods coexist and SUM; keyed by Source, so
+// re-casting the SAME skill REFRESHES (no double-stack), different skills add
+// independent entries. Turns ticks down at the bearer's end-of-turn, dropped at
+// 0. Stats deltas additive (negative = debuff); Armor/MDef flat defensive
+// grants. Combat-only.
 type StatusMod struct {
 	Source SkillID
 	Stats  Stats
@@ -915,193 +632,122 @@ type PartyMember struct {
 	MaxHP int // derived from Stats.VIT
 	MP    int
 	MaxMP int
-	// Armor lives outside Stats so it isn't a spendable level-up stat —
-	// it's defensive scaffolding for future equipment. Defaults to 0 for
-	// every party member at character creation; enemies set non-zero
-	// values in their EnemyDefinition (amoeba is the headline tanky
-	// foe). Clipped against phys-tagged incoming damage in ApplyArmor.
-	// EffectiveArmor (party.go) sums this with bonuses from Equipped.
+	// Armor lives outside Stats so it isn't a spendable level-up stat. Defaults 0
+	// for party; enemies set it in EnemyDefinition. Clipped against phys damage in
+	// ApplyArmor; EffectiveArmor sums this with Equipped bonuses.
 	Armor int
 
-	// Equipped is the per-slot equipment, indexed by EquipSlotIndex
-	// (RightHand / LeftHand / Armor / Accessory1 / Accessory2).
-	// ItemNone means the slot is empty. Equipment stat bonuses /
-	// armor bonuses are read through EffectiveStats / EffectiveArmor
-	// / EffectiveMDef rather than baked into Stats directly, so a
-	// future "swap your sword mid-battle" path doesn't need to
-	// recompute base stats — the readers always pull from Equipped.
+	// Equipped is per-slot equipment (EquipSlotIndex), ItemNone = empty. Bonuses
+	// are read through EffectiveStats/Armor/MDef, not baked into Stats, so a
+	// mid-battle swap needs no base-stat recompute.
 	Equipped [EquipSlotCount]ItemKind
 
-	// Row is the member's LIVE combat formation rank (front/back) — what melee
-	// reach checks read and what Reposition flips mid-fight. It's recomputed from
-	// the home slot (below) at battle start via AmbushLiveRow, so a side/back
-	// ambush can rotate it for that fight without disturbing the standing
-	// formation. Zero value RowFront.
+	// Row is the LIVE combat rank (what melee reach + Reposition read), recomputed
+	// from the home slot at battle start via AmbushLiveRow so an ambush can rotate
+	// it without disturbing the standing formation. Zero value RowFront.
 	Row Row
-	// HomeRow/HomeCol are the STANDING 2×2 formation slot — the player's set
-	// arrangement (party-screen toggle / class defaults), persisted across fights.
-	// Battle start rotates these into the live Row by engage side; Reposition is a
-	// per-fight tactical move that changes Row only, not the home slot.
+	// HomeRow/HomeCol are the STANDING 2×2 slot, persisted across fights. Battle
+	// start rotates them into Row by engage side; Reposition changes Row only.
 	HomeRow Row
 	HomeCol Col
 
 	AttackBump  float32
 	DamageFlash float32
-	// HitKnockback is the reaction timer for taking a hit — the
-	// renderer pushes the sprite AWAY from the attacker (toward
-	// the camera, for the party) for the timer's duration, peaking
-	// mid-curve via BumpOffset. Mirrors AttackBump in shape but
-	// represents the receiver's recoil rather than the attacker's
-	// lunge. Set in damagePartyMember whenever real damage lands.
+	// HitKnockback is the take-a-hit recoil timer; the renderer pushes the sprite
+	// AWAY from the attacker (toward the camera) over its duration via BumpOffset.
+	// Set in damagePartyMember on real damage.
 	HitKnockback float32
 
-	// Floating damage popup state, mirroring the Enemy side so every
-	// damage source the party TAKES (enemy hits, casts, poison ticks,
-	// Overcharge recoil) floats a number above the sprite. Value is the
-	// number, Quality the timing grade (party-received hits aren't graded,
-	// so they pass TimingQualityMiss → no "!"), Timer counts down from
-	// QualityResultDuration. Set in applyPartyDamage on real damage.
+	// Floating damage popup, mirroring the Enemy side. Quality is the timing grade
+	// (party-received hits pass TimingQualityMiss → no "!"); Timer counts down from
+	// QualityResultDuration. Set in applyPartyDamage.
 	DamagePopup        int
 	DamagePopupQuality int
 	DamagePopupTimer   float32
 
-	// Defending is set when the member chose the Defend action on their last
-	// turn. It cuts incoming damage. The flag is cleared at the start of the
-	// member's *next* turn, so its lifetime is "every queue position between
-	// this member's defend and their next action." A slow defender soaks more
-	// enemy turns than a fast one — by design: tanks tend to be slow, and the
-	// SPD interaction makes Defend more valuable in their hands.
+	// Defending (set by the Defend action) cuts incoming damage, cleared at the
+	// start of the member's NEXT turn — so a slow defender soaks more enemy turns
+	// (by design: tanks are slow, making Defend more valuable for them).
 	Defending bool
 
-	// PoisonTurns counts down each time the member's own turn resolves
-	// (immediately AFTER their action), dealing PoisonTickDamage per tick.
-	// Inflicted by the Diseased Rat's bite; cannot stack onto an already-
-	// poisoned member (mirrors the Burn rule for enemies).
+	// PoisonTurns ticks AFTER the member's own action, dealing PoisonTickDamage.
+	// Inflicted by the Diseased Rat; does not stack.
 	PoisonTurns int
 
-	// SleepTurns counts down at the start of the member's own turn (like
-	// Burn). While > 0, the turn skips entirely. Any incoming damage > 0
-	// wakes the sleeper and zeroes the counter. Doesn't stack onto an
-	// already-sleeping target. Inflicted by SkillSleep (goblin mage).
+	// SleepTurns ticks at the start of the member's turn (skips it entirely);
+	// incoming damage >0 wakes them. Does not stack. Inflicted by SkillSleep.
 	SleepTurns int
 
-	// StunTurns mirrors the enemy-side field — counts down at the
-	// start of the stunned member's own turn, target skips their
-	// action until it hits zero. No wake-on-damage (Sleep's job).
-	// No party-facing skill inflicts Stun yet, but the field exists
-	// so the helper in battle.go has a symmetric path against
-	// PartyMember and Enemy.
+	// StunTurns mirrors the enemy field — ticks at turn-start, skips the action,
+	// no wake-on-damage. No party skill inflicts it yet; field exists for the
+	// symmetric battle.go helper.
 	StunTurns int
 
-	// Ingested is true while a Venus Mantrap has the member swallowed.
-	// While set: the member is removed from the turn queue, can't be
-	// targeted by friend or foe, and can't be damaged (the prey is
-	// effectively invulnerable inside the plant — see actions.go's
-	// damagePartyMember / healPartyMember short-circuits). IngestedBy
-	// is the active-pack slot of the mantrap currently holding them;
-	// the prey is released when that slot's enemy dies or the battle
-	// ends. Inflicted by SkillIngest.
+	// Ingested: a Venus Mantrap has swallowed the member — removed from the queue,
+	// untargetable + undamageable (see damagePartyMember/healPartyMember). IngestedBy
+	// is the holding mantrap's pack slot; released when it dies or battle ends.
+	// Inflicted by SkillIngest.
 	Ingested   bool
 	IngestedBy int
 
-	// WebbedTurns counts the Cave Spider's web. While > 0 the member's
-	// effective SPD is halved (in battle.actorSpeed) and Ingest refuses
-	// to land on them. Ticks at the END of the webbed member's own
-	// turn (like Poison). Inflicted by SkillWeb; expires when the
-	// counter ticks to 0. Does not stack — re-applying replaces the
-	// counter only if the incoming duration is higher.
+	// WebbedTurns (Cave Spider): halves effective SPD and blocks Ingest. Ticks at
+	// END of turn (like Poison). Does not stack (re-apply only raises the counter).
 	WebbedTurns int
 
-	// ConfusedTurns counts the Will-o'-Wisp's mind-twist. While > 0,
-	// the member's chosen action has WispConfuseRetargetRoll chance
-	// to retarget randomly (any living friend OR foe) at apply
-	// time. Ticks at the END of the confused member's own turn.
-	// WIS-resistible at apply roll; does not stack.
+	// ConfusedTurns (Will-o'-Wisp): WispConfuseRetargetRoll chance to retarget the
+	// action randomly (any friend OR foe). Ticks at END of turn. WIS-resistible;
+	// does not stack.
 	ConfusedTurns int
 
-	// BuffTurns / BuffStats carry an active stat buff (the Cleric's Bless is
-	// Buffs holds the member's active STACKABLE buffs (Bless, War Banner, Stone
-	// Skin, Smoke Bomb) as keyed StatusMod entries — see StatusMod. DIFFERENT
-	// skills coexist and SUM; re-casting the SAME skill refreshes its entry. The
-	// summed Stats fold into EffectiveStats (every stat-driven roll), Armor into
-	// EffectiveArmor, MDef into EffectiveMDef, all only while live. Each entry
-	// ticks at the END of the buffed member's own turn (like Webbed / Confused)
-	// via drainNonDamagingPartyStatuses and is dropped at 0. Combat-only —
-	// ClearPartyTransientStatuses wipes the slice on battle exit. Positive, not a
-	// threat, so any active buff paints the low-priority PartyStatusBlessed pill.
+	// Buffs holds the member's STACKABLE buffs (Bless, War Banner, Stone Skin,
+	// Smoke Bomb) as keyed StatusMod entries. Summed Stats/Armor/MDef fold into
+	// the Effective* readers while live; each ticks at END of turn
+	// (drainNonDamagingPartyStatuses), dropped at 0. Combat-only. Any active buff
+	// paints PartyStatusBlessed.
 	Buffs []StatusMod
 
-	// ShieldHP is a damage-absorbing pool (the Cleric's Aegis). The party damage
-	// path spends it BEFORE HP — incoming damage eats the shield first, and only
-	// the overflow reaches HP. Lasts until the pool is depleted or the battle
-	// ends (cleared by ClearPartyTransientStatuses); not turn-counted, unlike the
-	// buff bundle. Independent of BuffTurns, so Aegis coexists with Bless.
+	// ShieldHP (Cleric's Aegis) is a pool spent BEFORE HP — only overflow reaches
+	// HP. Not turn-counted; cleared on battle exit. Coexists with Bless.
 	ShieldHP int
 
-	// IceArmorTurns is the Wizard's reactive frost ward (Ice Armor). While > 0 the
-	// member gains IceArmorMDef (folded by EffectiveMDef) AND any enemy that lands
-	// a basic attack on them is chilled (an SPD debuff stamped on the attacker).
-	// Ticks at the END of the warded member's own turn like the buff bundle, but
-	// is a SEPARATE counter (so Ice Armor coexists with Bless / Stone Skin).
-	// Cleared on battle exit by ClearPartyTransientStatuses.
+	// IceArmorTurns (Wizard's Ice Armor): grants IceArmorMDef AND chills any enemy
+	// landing a basic attack. Ticks at END of turn; SEPARATE counter so it coexists
+	// with Bless / Stone Skin. Cleared on battle exit.
 	IceArmorTurns int
 
-	// RegenTurns / RegenPerTurn carry an active heal-over-time (the Cleric's
-	// Renewal — the game's first HoT). While RegenTurns > 0, the member heals
-	// RegenPerTurn at the END of their own turn (the positive mirror of
-	// Poison), then the counter decrements. RegenPerTurn is snapshotted at cast
-	// (caster's WIS-scaled per-turn heal) so a later WIS change doesn't retune
-	// an in-flight regen. Combat-only — ClearPartyTransientStatuses wipes it on
-	// battle exit; surfaces as the low-priority positive PartyStatusRegen. Does
-	// not stack: re-applying replaces both fields.
+	// RegenTurns / RegenPerTurn (Cleric's Renewal HoT): heals RegenPerTurn at END
+	// of turn, then decrements. RegenPerTurn is snapshotted at cast so a later WIS
+	// change can't retune it. Combat-only; surfaces as PartyStatusRegen. Does not
+	// stack (re-apply replaces both).
 	RegenTurns   int
 	RegenPerTurn int
 
-	// Level and XP track per-character progression. XP is the running
-	// total toward the next level; XPForLevel(Level) is the threshold.
-	// PendingLevelUps queues completed level-ups whose stat points the
-	// player hasn't spent yet — populated by AddXP, drained by the
-	// level-up modal. Per-character (not pooled) so each member has
-	// their own pace; living members get the full encounter XP, dead
-	// members get nothing.
+	// Level/XP track per-character progression; XPForLevel(Level) is the next
+	// threshold. PendingLevelUps queues unspent level-ups (AddXP fills, modal
+	// drains). Per-character; dead members earn no encounter XP.
 	Level int
 	XP    int
-	// PendingLevelUps is the unspent stat-point counter. Each level
-	// grants LevelStatPoints (default 3) which the level-up modal
-	// walks down via SpendStatPoint.
+	// PendingLevelUps is the unspent stat-point counter; each level grants
+	// LevelStatPoints, spent via SpendStatPoint.
 	PendingLevelUps int
-	// SkillPoints is the spendable pool used to purchase tier upgrades
-	// in the Skills panel's tree UI. Earned at level-up (one per level
-	// via LevelSkillPoints), saved across levels — the player decides
-	// when and where to invest. Replaces the legacy PendingSkillPoints
-	// flow that auto-spent into MaxMP at the level-up modal.
+	// SkillPoints is the spendable pool for tier upgrades in the Skills tree,
+	// earned one per level (LevelSkillPoints) and saved across levels.
 	SkillPoints int
-	// SkillTiers tracks the purchased upgrade tier per skill (0 = base
-	// skill, 1..MaxSkillTier = progressively-upgraded). nil-safe: an
-	// unspent skill returns 0 via SkillTierOf. Per-member so a Wizard's
-	// Firebolt and a Cleric's same skill (if a future class shared one)
-	// can level independently.
+	// SkillTiers tracks the purchased tier per skill (0 = base). nil-safe via
+	// SkillTierOf. Per-member so shared skills level independently.
 	SkillTiers map[SkillID]int
-	// TreeRanks tracks ranks invested per Diablo-2-style skill-tree node
-	// (see core/skilltrees.go), keyed by node ID. nil-safe: an
-	// un-invested node reads 0 via TreeNodeRank. Spent from SkillPoints
-	// in the Skills-tab tree modal. Ranks DO drive combat: a node's first
-	// rank learns its GrantSkill (LearnedSkills → the battle Skill menu)
-	// and each further rank advances SkillTiers so EffectiveSkillEffect
-	// applies the upgrade. Serializes with the rest of PartyMember in the
-	// save file; old saves load it as nil.
+	// TreeRanks tracks ranks per skill-tree node (see skilltrees.go), keyed by
+	// node ID. nil-safe via TreeNodeRank. First rank learns the node's GrantSkill;
+	// further ranks advance SkillTiers (EffectiveSkillEffect applies the upgrade).
+	// Serialized; old saves load nil.
 	TreeRanks map[string]int
-	// SkillCursor is the index into the member's LEARNED skills (see
-	// LearnedSkills / PartySkills) that the action menu's "Skill" row
-	// casts. In-battle Tab cycles it; the renderer reads it via PartySkill
-	// so the row label matches what Enter will actually fire. Clamps to 0
-	// when out of range (e.g. a skill un-learned since it was last set).
+	// SkillCursor indexes the member's LEARNED skills for the action menu's
+	// "Skill" row (Tab cycles it). Clamps to 0 when out of range.
 	SkillCursor int
 }
 
-// HPPerVIT is the MaxHP granted per point of VIT. Kept small so the
-// numbers stay readable on the party-card bars. Single source of truth
-// for both MaxHPFor and the VIT stat description shown in the level-up UI.
+// HPPerVIT is the MaxHP granted per point of VIT — source of truth for MaxHPFor
+// and the VIT level-up description.
 const HPPerVIT = 2
 
 // MaxHPFor returns the derived MaxHP from a Stats block.
@@ -1109,10 +755,8 @@ func MaxHPFor(s Stats) int {
 	return s.VIT * HPPerVIT
 }
 
-// MPForINTDelta returns the MaxMP change for an INT delta — the single home
-// for the per-point pool formula (MPPerINT each) that statTable[StatINT].Derive
-// applies at level-up, so the preview (StatPreviewLine) and god-mode boost
-// (DebugBoostParty) can't drift from it if it ever becomes non-linear.
+// MPForINTDelta returns the MaxMP change for an INT delta (MPPerINT each) —
+// single home for the formula so preview + god-mode boost can't drift.
 func MPForINTDelta(delta int) int {
 	return delta * MPPerINT
 }
@@ -1132,12 +776,9 @@ func HealAmount(s Stats, base int) int {
 	return s.WIS + base
 }
 
-// accuracyFrom is the shared hit-chance curve [0, 1]: a stat-driven
-// baseline plus the timing grade's bonus, clamped. The governing stat
-// differs by attack type — MeleeAccuracy passes STR, RangedAccuracy
-// passes DEX — but the curve shape is identical so the two can't drift.
-// An Excellent press pushes the result past 1.0 before the clamp, so a
-// perfectly-timed hit always lands regardless of stat.
+// accuracyFrom is the shared hit-chance curve [0, 1]: stat-driven baseline +
+// timing-grade bonus, clamped. Governing stat varies by caller (STR/DEX). An
+// Excellent press exceeds 1.0 pre-clamp, so a perfect hit always lands.
 func accuracyFrom(stat int, quality int) float64 {
 	base := AccuracyBaseline + AccuracyPerStat*float64(stat)
 	bonus := 0.0
@@ -1147,27 +788,20 @@ func accuracyFrom(stat int, quality int) float64 {
 	return Clamp(base+bonus, 0, 1)
 }
 
-// MeleeAccuracy is the per-swing hit chance of a MELEE attack — STR is
-// the governing stat (a strong fighter lands their swings; a frail caster
-// flails). The basic attack is melee, so it rolls this. Skills aren't
-// accuracy-gated (they pay MP, shouldn't be double-jeopardied).
+// MeleeAccuracy is the per-swing melee hit chance (governing stat STR). The
+// basic attack rolls this; skills aren't accuracy-gated (they pay MP).
 func MeleeAccuracy(s Stats, quality int) float64 {
 	return accuracyFrom(s.STR, quality)
 }
 
-// RangedAccuracy is the per-shot hit chance of a RANGED attack — DEX is
-// the governing stat. The seam for ranged attacks; no current attack is
-// flagged ranged, so DEX's live offensive roles stay dodge + crit until
-// a ranged attack rolls this.
+// RangedAccuracy is the per-shot ranged hit chance (governing stat DEX). Seam
+// for ranged attacks; none are flagged ranged yet.
 func RangedAccuracy(s Stats, quality int) float64 {
 	return accuracyFrom(s.DEX, quality)
 }
 
-// StealChance clamps the (tier-augmented) base steal chance to [0, 1].
-// Steal no longer scales with DEX — it's a flat base chance, modified
-// only by timing quality at the call site (applySteal). Kept as a
-// function so the clamp + the "base can exceed 1 via Steal tier bonuses"
-// contract live in one place.
+// StealChance clamps the (tier-augmented) base steal chance to [0, 1]. Steal is
+// a flat base (no DEX scaling), modified only by timing at applySteal.
 func StealChance(base float64) float64 {
 	return Clamp(base, 0, 1)
 }
@@ -1177,218 +811,152 @@ type Enemy struct {
 	HP    int
 	MaxHP int
 	Alive bool
-	// CustomName is non-empty for enemies instantiated from an area's
-	// CustomEnemies list. Kind remains the base kind so renderers can reuse
-	// the built-in sprite, while DefinitionOverride holds the authored combat
-	// stats and display text.
+	// CustomName is non-empty for area CustomEnemies; Kind stays the base kind
+	// (reuses the sprite) while DefinitionOverride holds the authored stats/text.
 	CustomName            string
 	DefinitionOverride    EnemyDefinition
 	HasDefinitionOverride bool
-	// Item is the steal loot kind. Seeded from EnemyDefinition.Item at
-	// spawn time and reset to ItemNone once stolen, so the same enemy
-	// can't be looted twice in one battle. ItemKind (not a name string)
-	// so the steal path adds it to inventory without a name→kind lookup.
-	// Per-enemy overrides aren't currently authored anywhere — if/when
-	// the editor grows per-spawn loot, the Name + custom MaxHP fields can
-	// follow in the same pass.
+	// Item is the steal loot kind (from EnemyDefinition.Item), reset to ItemNone
+	// once stolen so an enemy can't be looted twice.
 	Item ItemKind
 
-	// Armor is the per-instance damage damp seeded from
-	// EnemyDefinition.Armor at NewEnemy time. Phys-tagged damage clips
-	// by this amount (floor 1); magic / heal / buff bypass entirely.
-	// Stored per-instance so a future "amoeba splits, halving its
-	// armor" mechanic can mutate it without changing the definition.
+	// Armor is the per-instance phys-damage damp (from EnemyDefinition.Armor);
+	// clips phys damage (floor 1), bypassed by magic/heal/buff. Per-instance so a
+	// future split-and-halve mechanic can mutate it.
 	Armor int
 
-	// Row is the enemy's combat formation rank (front/back). Seeded at spawn by
-	// the formation fill (front-first) and updated by the per-death shunt that
-	// pulls a back enemy up to keep the front packed. Gates melee reach like the
-	// party side (see formation.go). Zero value RowFront.
+	// Row is the enemy's combat rank, seeded front-first at spawn and updated by
+	// the per-death shunt that keeps the front packed. Gates melee reach (see
+	// formation.go). Zero value RowFront.
 	Row Row
 
 	AttackBump  float32
 	DamageFlash float32
-	// HitKnockback is the reaction recoil timer. The renderer pushes
-	// the enemy sprite AWAY from the camera (deeper into the arena)
-	// for the timer's duration. Mirrors AttackBump in shape but
-	// represents the receiver's flinch rather than the attacker's
-	// lunge. Set in damageEnemy whenever real damage lands.
+	// HitKnockback is the recoil timer; the renderer pushes the sprite AWAY from
+	// the camera (deeper into the arena) over its duration. Set in damageEnemy.
 	HitKnockback float32
 	DeathFade    float32
 	BurnTurns    int
-	// SleepTurns counts down at the start of the enemy's own turn (same
-	// shape as BurnTurns). Currently the goblin mage only inflicts
-	// sleep on the party, but the field exists so a future "Lullaby"
-	// party skill against enemies plugs into the same machinery.
+	// SleepTurns ticks at turn-start (like BurnTurns). No party skill inflicts it
+	// on enemies yet; field exists for a future Lullaby.
 	SleepTurns int
-	// StunTurns is the skip-next-turn counter applied by quality-
-	// conditional procs (Crushing Blow on Great+, Frost Lance on
-	// Great+). Unlike SleepTurns, damage does NOT clear it — the
-	// enemy stays locked out until the counter decrements to zero
-	// on its own turn-start tick.
+	// StunTurns (skip-next-turn) from quality-conditional procs (Crushing Blow /
+	// Frost Lance on Great+). Unlike Sleep, damage does NOT clear it.
 	StunTurns int
-	// PoisonTurns mirrors the party-side field — the Thief's Venom
-	// Strike applies it. Decrements at the end of the enemy's turn
-	// (tickPoisonAfterEnemyTurn) for symmetry with the party-side
-	// tick. Per-instance because it's inflicted in combat, not part
-	// of the enemy's static definition.
+	// PoisonTurns (Thief's Venom Strike) ticks at END of the enemy's turn
+	// (tickPoisonAfterEnemyTurn). Per-instance (inflicted in combat).
 	PoisonTurns int
 
-	// BleedTurns is the player-applied Bleed DoT (Warrior Rend / Thief
-	// Lacerate) — a SEPARATE counter from PoisonTurns so Bleed STACKS alongside
-	// Poison rather than clobbering it. Decrements at the end of the enemy's own
-	// turn (tickBleedAfterEnemyTurn) dealing BleedTickDamage, the same cadence as
-	// Poison; cleared on death by clearEnemyStatusesOnDeath.
+	// BleedTurns (Warrior Rend / Thief Lacerate) is a SEPARATE counter from
+	// PoisonTurns so Bleed STACKS with Poison. Ticks at END of turn
+	// (tickBleedAfterEnemyTurn) dealing BleedTickDamage; cleared on death.
 	BleedTurns int
 
-	// Debuffs holds the enemy's active STACKABLE debuffs (Cripple SPD, Blind DEX,
-	// Smoke Bomb DEX, Frostbite / Cone of Cold / Ice Armor chill SPD) as keyed
-	// StatusMod entries — see StatusMod. The enemy-side mirror of PartyMember.Buffs:
-	// DIFFERENT skills coexist and SUM, the same refreshes. The summed Stats fold
-	// into EffectiveEnemyStats (player debuffs stamp NEGATIVE deltas) while live;
-	// each entry ticks at the end of the enemy's own turn (tickEnemyBuffAfterTurn)
-	// and is dropped at 0, all cleared on death by clearEnemyStatusesOnDeath.
+	// Debuffs holds the enemy's STACKABLE debuffs (Cripple, Blind, Smoke Bomb,
+	// chill) as keyed StatusMod entries — enemy mirror of PartyMember.Buffs. Summed
+	// Stats fold into EffectiveEnemyStats (NEGATIVE deltas) while live; each ticks
+	// at END of turn (tickEnemyBuffAfterTurn), dropped at 0, cleared on death.
 	Debuffs []StatusMod
 
-	// TauntTurns / TauntedBy force this enemy's basic-attack target (the
-	// Warrior's Taunt). While TauntTurns > 0, pickEnemyAttackTarget returns
-	// TauntedBy (the taunter's party slot) instead of the round-robin pick, as
-	// long as that ally is still a living available target. Drains at the enemy's
-	// end-of-turn (tickEnemyTauntAfterTurn), cleared on death. A lapsed or
-	// unreachable taunt falls back to normal targeting.
+	// TauntTurns / TauntedBy force this enemy's basic-attack target (Warrior's
+	// Taunt) to TauntedBy's party slot while that ally is a living target. Drains
+	// at END of turn (tickEnemyTauntAfterTurn), cleared on death; a lapsed taunt
+	// falls back to normal targeting.
 	TauntTurns int
 	TauntedBy  int
 
-	// SkillCastCount tracks per-battle uses of any skill whose
-	// definition carries a non-zero PerBattleCastLimit. Read by
-	// usableEnemySkills to filter the AI's pick list — once a
-	// capped skill hits its limit, it's dropped from the cast set
-	// for the rest of the encounter. Lazy-init on first cast so
-	// the common (uncapped) case stays a single nil-map allocation.
-	// The Necromancer's RaiseBones is the headline user; future
-	// "boss has 3 ultimates" patterns plug in for free.
+	// SkillCastCount tracks per-battle uses of any skill with a non-zero
+	// PerBattleCastLimit; usableEnemySkills drops a capped skill once it hits the
+	// limit. Lazy-init on first cast (Necromancer's RaiseBones is the headline user).
 	SkillCastCount map[SkillID]int
 
-	// Floating damage popup state. Value is the number to show, Quality is
-	// the timing grade (drives color + the trailing "!" on Excellent), Timer
-	// counts down to zero from QualityResultDuration.
+	// Floating damage popup. Quality drives color + trailing "!"; Timer counts
+	// down from QualityResultDuration.
 	DamagePopup        int
 	DamagePopupQuality int
 	DamagePopupTimer   float32
 }
 
-// ActorRef points at one slot in the turn queue. IsParty=true means Index is
-// an index into Party; IsParty=false means Index is a slot into the active
-// pack's Members (g.Packs[Battle.ActivePack].Members).
+// ActorRef points at one turn-queue slot: IsParty=true → Index into Party, else
+// into the active pack's Members.
 type ActorRef struct {
 	IsParty bool
 	Index   int
 }
 
-// ValidPartyIndex reports whether this actor references a real party
-// slot — IsParty=true AND Index is in [0, len(party)). Used by every
-// party-side tick/lookup that used to inline the "Index < 0 || Index
-// >= len(g.Party)" guard; the helper keeps the bounds rule in one
-// place so a future "ghost party slot" or "joinable NPC" gate lands
-// once. Returns false for enemy-actor refs without needing a caller
-// short-circuit.
+// ValidPartyIndex reports whether this actor is a real party slot (IsParty AND
+// Index in range). Returns false for enemy refs.
 func (a ActorRef) ValidPartyIndex(party []PartyMember) bool {
 	return a.IsParty && PartyIndexInRange(party, a.Index)
 }
 
-// PartyIndexInRange is the one place the bare slice-access rule `idx >= 0 &&
-// idx < len(party)` lives. ActorRef.ValidPartyIndex, battle's partyIndexValid,
-// and explore's validMember all defer to it so a future "ghost slot" / joinable
-// NPC gate changes the contract once. Callers layer their own HP / Ingested /
-// affordability checks on top — this only answers "is the index a real seat."
+// PartyIndexInRange is the one home for the `idx >= 0 && idx < len(party)` rule.
+// Answers only "is the index a real seat"; callers layer HP/Ingested checks on top.
 func PartyIndexInRange(party []PartyMember, idx int) bool {
 	return idx >= 0 && idx < len(party)
 }
 
-// Battle owns every transient piece of state for an in-progress encounter.
-// The struct has grown a lot — the lifetimes of its fields are deliberate
-// and don't all reset on the same boundary, so it's worth knowing which
-// bucket each field falls into:
+// Battle owns all transient encounter state. Field lifetimes reset on different
+// boundaries:
 //
-//   - Battle-lifetime (set by Start, cleared by leaveBattle): ActivePack,
-//     EnemyIndex, Log, Splash, Queue, NextRoundQueue.
-//   - Round-lifetime (rebuilt by beginNewRound): Queue, NextRoundQueue,
-//     EnemyAttackCursor, plus the QueueCursor that walks Queue.
-//   - Turn-lifetime (set per actor's turn): CurrentParty, ActionMode,
-//     MenuIndex, PendingSkill, PendingItem, ItemMenuIndex, PartyTarget,
-//     EnemyAttacker, plus all Timing* fields.
-//   - Animation-lifetime (visible-feedback timers — counted down in
-//     updateBattleEffects): TimingFlash, TimingIntro, LastQualityTimer,
-//     SequencePulseTimer.
-//   - Hit-stop (counted down in tickFlashHold, since it pauses every
-//     other animation ticker including updateBattleEffects): HitStop.
+//   - Battle-lifetime (Start → leaveBattle): ActivePack, EnemyIndex, Splash,
+//     Queue, NextRoundQueue.
+//   - Round-lifetime (beginNewRound): Queue, NextRoundQueue, EnemyAttackCursor,
+//     QueueCursor.
+//   - Turn-lifetime (per actor): CurrentParty, ActionMode, MenuIndex,
+//     PendingSkill, PendingItem, ItemMenuIndex, PartyTarget, EnemyAttacker, Timing*.
+//   - Animation-lifetime (updateBattleEffects): TimingFlash, TimingIntro,
+//     LastQualityTimer, SequencePulseTimer.
+//   - Hit-stop (tickFlashHold, since it pauses other tickers): HitStop.
 //
-// finishActorTurn and leaveBattle are the two hand-offs; clearBattleResidual
-// is the canonical "reset everything transient" centerpiece.
+// clearBattleResidual is the canonical "reset everything transient".
 type Battle struct {
-	// ActivePack is the index into g.Packs of the engaged pack. -1 = no
-	// battle in progress. The pack's Members slice is the in-battle enemy
-	// roster; EnemyIndex addresses members in that slice.
+	// ActivePack is the engaged pack's g.Packs index; -1 = no battle. Its Members
+	// slice is the enemy roster, addressed by EnemyIndex.
 	ActivePack   int
 	EnemyIndex   int
 	CurrentParty int
 	ActionMode   ActionMode
 	MenuIndex    int
 	PendingSkill SkillID
-	// PartyTarget is the player's currently-highlighted ally (heal skills,
-	// item targets). Independent of the enemy attack cursor — cycling the
-	// player's ally selection no longer shifts who enemies hit next.
+	// PartyTarget is the player's highlighted ally (heal/item targets),
+	// independent of EnemyAttackCursor.
 	PartyTarget int
-	// EnemyAttackCursor is the round-robin pointer enemies advance through
-	// when picking who to swing at. Lives separately from PartyTarget so the
-	// player's ally cycling doesn't perturb enemy targeting.
+	// EnemyAttackCursor is the enemies' round-robin target pointer, separate from
+	// PartyTarget so ally cycling doesn't perturb enemy targeting.
 	EnemyAttackCursor int
 	Phase             BattlePhase
 	Timer             float32
 	Splash            float32
 
-	// Mixed-initiative turn queue. Built once at the start of each round
-	// (sorted by SPD descending, ties broken by side then index), consumed
-	// front-to-back. Cursor exhausted → start a new round (resolve burns,
-	// rebuild queue). Dead actors are skipped on advance.
+	// Mixed-initiative turn queue, built per round (SPD desc, ties by side then
+	// index), consumed front-to-back; cursor exhausted → new round. Dead actors
+	// skipped on advance.
 	Queue       []ActorRef
 	QueueCursor int
-	// NextRoundQueue is the projected SPD-sorted queue for the round after
-	// the current one — built alongside Queue at round start so the turn-
-	// forecast HUD doesn't have to re-sort every frame. May go stale during
-	// the round if actors die; render-time death-skip handles that gracefully.
+	// NextRoundQueue is the projected next-round queue, built alongside Queue so
+	// the forecast HUD doesn't re-sort per frame. May go stale on deaths;
+	// render-time death-skip handles it.
 	NextRoundQueue []ActorRef
-	// Readiness carries each actor's leftover ATB gauge ACROSS rounds,
-	// keyed by ActorRef. buildTurnQueue seeds from it and writes back the
-	// remainder each round, so SPD increases an actor's turn RATE (a
-	// faster actor's surplus accumulates into extra turns over time), not
-	// just turn order within a round. Reset at battle Start; new actors
-	// (raised skeletons) default to 0.
+	// Readiness carries each actor's leftover ATB gauge ACROSS rounds, so SPD
+	// raises turn RATE (surplus accumulates into extra turns), not just order.
+	// Reset at Start; new actors default 0.
 	Readiness map[ActorRef]int
 
-	// PhysDamageThisTurn tallies the physical damage the actor at the queue
-	// cursor has dealt to enemies during their CURRENT turn. finishActorTurn
-	// converts it to Warrior Bloodthirst lifesteal (only for a party actor
-	// holding that passive) and then zeroes it, so it never leaks across turns.
-	// Only SkillTagPhys hits in damageEnemy feed it — magic / heal / DoT-tick
-	// damage and reflect/counter damage dealt on an enemy's turn are discarded.
-	// Turn-lifetime despite sitting by the round-lifetime queue fields.
+	// PhysDamageThisTurn tallies phys damage the cursor actor dealt this turn;
+	// finishActorTurn converts it to Warrior Bloodthirst lifesteal then zeroes it.
+	// Only SkillTagPhys hits feed it. Turn-lifetime despite sitting here.
 	PhysDamageThisTurn int
 
-	// Timed-hit minigame state. Timing drives the bar; TimingFlash holds the
-	// bar visible for a beat after a press; TimingIntro is a pre-bar pause so
-	// the prompt reads. EnemyAttacker tracks the queue slot of an attacking
-	// enemy. LastQuality* drives the floating popup over the actor.
+	// Timed-hit minigame: Timing drives the bar; TimingFlash holds it visible a
+	// beat after a press; TimingIntro is a pre-bar pause. LastQuality* drives the
+	// floating popup.
 	Timing      TimingState
 	TimingFlash float32
 	TimingIntro float32
-	// ChargeNeedsRelease is set when a charge bar arms to gate the
-	// engage check until the player has RELEASED the confirm key from
-	// menu confirmation. Without it, the same Enter that confirmed the
-	// target would bleed into the bar's held-state check and engage
-	// the charge immediately. Cleared on first frame where
-	// AttackTimingHeld() is false after the bar arms; thereafter
-	// fresh presses engage the charge normally.
+	// ChargeNeedsRelease gates the charge-engage check until the player RELEASES
+	// the confirm key, so the same Enter that confirmed the target doesn't engage
+	// the charge immediately. Cleared on the first not-held frame after the bar arms.
 	ChargeNeedsRelease bool
 	EnemyAttacker      int
 	LastQuality        int
@@ -1396,103 +964,68 @@ type Battle struct {
 	LastQualityIndex   int
 	LastQualityIsBlock bool
 
-	// EnemyPendingSkill is the skill the currently-attacking enemy is
-	// casting this turn (goblin mage Firebolt / Sleep). SkillNone means
-	// "plain melee" — the existing defend-timing path runs. When set,
-	// updateEnemyTiming skips the defend bar and routes to
-	// resolveEnemySpell instead of resolveEnemyAttacker. Cleared on
-	// turn end by resolveAndFinishEnemyAttack.
+	// EnemyPendingSkill is the attacking enemy's skill this turn (mage Firebolt /
+	// Sleep). SkillNone = plain melee. When set, updateEnemyTiming skips the
+	// defend bar and routes to resolveEnemySpell. Cleared on turn end.
 	EnemyPendingSkill SkillID
 
-	// EnemyAttackMisses is set when a plain-melee enemy turn rolled a clean
-	// miss (RollEnemyHit failed in beginEnemyAttack). Like EnemyPendingSkill it
-	// suppresses the defend bar — there's nothing to defend against a whiff —
-	// and routes resolveAndFinishEnemyAttack to the no-damage miss narration.
-	// Only meaningful for basic attacks (skills aren't accuracy-gated). Cleared
-	// on turn end by resolveAndFinishEnemyAttack.
+	// EnemyAttackMisses is set when a plain-melee enemy turn rolled a clean miss;
+	// suppresses the defend bar and routes to the miss narration. Basic attacks
+	// only. Cleared on turn end.
 	EnemyAttackMisses bool
 
-	// FleeReturnX / FleeReturnZ are the tile the player retreats to on a
-	// successful Flee — the square they occupied BEFORE the engaging step (so a
-	// pack-ambush flee steps back off the pack's tile rather than co-locating).
-	// Seeded by Start from the engage site's pre-step tile.
+	// FleeReturnX/Z are the tile the player retreats to on a successful Flee — the
+	// pre-engage-step square (so a pack-ambush flee steps off the pack's tile).
 	FleeReturnX int
 	FleeReturnZ int
 
-	// HitStop is the post-flash freeze on Great/Excellent grades — see
-	// HitStopFor in core/timing.go. While >0, battle Update returns early
-	// and the bar's apply step is deferred. Pauses every transient ticker
-	// (popup, sprite bumps, damage flashes) so the moment punctuates.
+	// HitStop is the post-flash freeze on Great/Excellent (see HitStopFor). While
+	// >0, battle Update returns early and the apply step is deferred, pausing every
+	// transient ticker so the moment punctuates.
 	HitStop float32
 
-	// ShakeTimer / ShakePeak / ShakeDur drive the combat screen-shake.
-	// ShakeTimer is the countdown (decayed in updateBattleEffects);
-	// ShakePeak is the peak camera offset in world units; ShakeDur is the
-	// duration it was armed with (the normalizer for the ease-out). The
-	// render camera offsets by ShakePeak·(ShakeTimer/ShakeDur). All three
-	// are armed together by core.TriggerCombatShake — a small base on a
-	// well-timed press, a bigger one on crits / AoE casts (which override
-	// the base). The wall-clock-driven oscillation means the screen shakes
-	// even while HitStop freezes the sim. Reset at Start / clearBattleResidual.
+	// ShakeTimer / ShakePeak / ShakeDur drive the combat screen-shake (camera
+	// offset = ShakePeak·(ShakeTimer/ShakeDur)). Armed together by
+	// TriggerCombatShake. Wall-clock oscillation, so it shakes even during
+	// HitStop. Reset at Start / clearBattleResidual.
 	ShakeTimer float32
 	ShakePeak  float32
 	ShakeDur   float32
 
-	// RumbleStrength / RumbleTimer / RumbleDur drive the controller vibration —
-	// the haptic half of impact feedback, armed alongside the shake by
-	// TriggerCombatShake (and directly on taking a hit). RumbleStrength is the
-	// peak motor level in [0,1]; RumbleTimer counts down; RumbleDur normalizes
-	// the ease-out. core.TickRumble decays them per frame (scene-independently,
-	// in the main loop) and returns the level the run loop hands to
-	// input.ApplyRumble — keeping the rl.SetGamepadVibration call out of core.
-	// Reset at Start; decays to 0 on its own so it can't stick on.
+	// RumbleStrength / RumbleTimer / RumbleDur drive controller vibration, armed
+	// alongside the shake. Strength is the [0,1] motor peak. core.TickRumble
+	// decays them per frame and returns the level for input.ApplyRumble (keeping
+	// the raylib call out of core). Decays to 0 so it can't stick on.
 	RumbleStrength float32
 	RumbleTimer    float32
 	RumbleDur      float32
 
-	// SequencePulseTimer + Index drive the brief scale-up animation on the
-	// arrow that just landed correctly during the pickpocket sequence. The
-	// renderer reads these to single out one slot per tap. Index is -1
-	// when no pulse is in flight.
+	// SequencePulseTimer/Index drive the scale-up on the pickpocket arrow that
+	// just landed. Index is -1 when no pulse is in flight.
 	SequencePulseTimer float32
 	SequencePulseIndex int
 
-	// PendingItem is set when the player picks an item out of the inventory
-	// menu and is choosing the ally to use it on. Reset to ItemNone after
-	// the use applies (or the player backs out). The picker state itself —
-	// which inventory row is highlighted — is ItemMenuIndex.
+	// PendingItem is the item picked and awaiting an ally target, reset to
+	// ItemNone after use/back-out. ItemMenuIndex is the highlighted picker row.
 	PendingItem   ItemKind
 	ItemMenuIndex int
-	// SkillMenuIndex is the cursor inside the Skill submenu (opens
-	// when the player picks the "Skill" action row). Indexes into the
-	// current member's learned skills (LearnedSkills / PartySkills).
-	// Persisted on the member as SkillCursor on confirm so the next
-	// turn's submenu opens on whichever skill they last picked.
+	// SkillMenuIndex is the Skill submenu cursor (into the member's learned
+	// skills), persisted to the member's SkillCursor on confirm.
 	SkillMenuIndex int
-	// SkillMenuList / ItemMenuList are the per-turn scratch lists backing the
-	// skill and item submenus — the learned-skill set (or every player-castable
-	// skill, in the debug all-skills mode) and the live-consumable set. Filled by
-	// the battle update path (refreshSkillMenuBuf / refreshItemMenuBuf) on the
-	// frame each submenu opens and refilled each frame it stays open, so the
-	// renderer can read them straight instead of re-walking the skill tree /
-	// re-scanning the inventory a second time the same frame. Reused buffers,
-	// never aliased; valid only for the frame they're filled. Not serialized —
-	// battle state never persists across a save/transition.
+	// SkillMenuList / ItemMenuList are per-turn scratch buffers backing the skill
+	// and item submenus, refilled each open frame (refreshSkillMenuBuf /
+	// refreshItemMenuBuf) so the renderer reads them straight. Reused, never
+	// aliased; valid only for the fill frame. Not serialized.
 	SkillMenuList []SkillID
 	ItemMenuList  []ItemStack
 
-	// Spoils + the two timers below drive the post-victory spoils screen
-	// (render/victory.go). Spoils is the before/after snapshot winBattle
-	// captures the moment it awards XP/gold/loot; VictoryElapsed counts up
-	// from 0 once the BattleWon phase begins (the spoils card eases in after
-	// VictoryDanceBeat, then fills bars over VictoryBarFillDuration);
-	// VictoryLevelSfxCursor / VictoryLootSfxCursor / VictoryTickSfxCursor
-	// record how many level-up, loot-pickup, and XP count-up cues have rung
-	// so the update loop fires SoundLevelUp / SoundItemGet / SoundXPTick
-	// exactly as each animating bar crosses a threshold / each loot row
-	// reveals / the shown XP climbs another VictoryXPPerTick. All reset in
-	// clearBattleResidual. When Spoils.Active is false (e.g. the debug
-	// skip-battle path) the old timer auto-leave runs instead of the screen.
+	// Spoils + timers drive the victory spoils screen (render/victory.go). Spoils
+	// is the before/after snapshot winBattle captures on award; VictoryElapsed
+	// counts up from BattleWon (card eases in after VictoryDanceBeat, bars fill
+	// over VictoryBarFillDuration); the *SfxCursor fields track how many level-up
+	// / loot / XP-tick cues have rung so the loop fires each as its bar crosses a
+	// threshold. All reset in clearBattleResidual. Spoils.Active false (debug
+	// skip-win) falls back to the timed auto-leave.
 	Spoils                VictorySpoils
 	VictoryElapsed        float32
 	VictoryLevelSfxCursor int
@@ -1500,12 +1033,9 @@ type Battle struct {
 	VictoryTickSfxCursor  int
 }
 
-// MemberSpoils is one party member's before→after XP snapshot for the
-// victory spoils screen. winBattle records Before* the instant before it
-// awards XP and After*/GainedXP straight after, so the screen can animate
-// the bar filling from the pre-battle state across any level thresholds the
-// real AwardBattleXP crossed. Dead members carry GainedXP == 0 (they earn
-// nothing — see AwardBattleXP) and render greyed.
+// MemberSpoils is one member's before→after XP snapshot for the spoils screen,
+// recorded by winBattle around the award so the bar can animate across level
+// thresholds. Dead members carry GainedXP == 0 and render greyed.
 type MemberSpoils struct {
 	Slot      int
 	BeforeLvl int
@@ -1515,12 +1045,9 @@ type MemberSpoils struct {
 	GainedXP  int
 }
 
-// VictorySpoils is the full payout of a won battle, captured by winBattle
-// for the spoils screen to replay as animation. The award math itself
-// (AwardBattleXP / AwardBattleLoot) is unchanged — this is a read-only
-// mirror of what those returned. Drops is the per-defeat item list folded
-// into kind→count stacks for display. Active gates the screen: false means
-// "no screen, fall back to the timed auto-leave" (debug skip-win).
+// VictorySpoils is a won battle's full payout, a read-only mirror captured by
+// winBattle for the spoils screen. Drops is the per-defeat items folded into
+// kind→count stacks. Active gates the screen (false → timed auto-leave).
 type VictorySpoils struct {
 	Members []MemberSpoils
 	Gold    int
@@ -1528,19 +1055,14 @@ type VictorySpoils struct {
 	Active  bool
 }
 
-// Active reports whether a battle is currently in progress (any phase
-// other than BattleNone). Single source for the "are we in combat?"
-// predicate so explore / render / HUD gates don't drift on what counts
-// as active — a future "BattleWon shouldn't count for input gating"
-// tweak is one method, not a grep.
+// Active reports whether a battle is in progress (any phase but BattleNone) —
+// single source for the "in combat?" predicate.
 func (b Battle) Active() bool {
 	return b.Phase != BattleNone
 }
 
-// ClearTiming drops the timing-bar minigame state and its flash hold
-// back to zero. Used by every seam that ends a turn / battle so the
-// next phase opens with a clean bar. Promoted to a method so the
-// "drop Timing and TimingFlash together" rule lives in one spot.
+// ClearTiming zeroes the timing-bar state + flash hold together, so every
+// turn/battle-end seam opens the next phase with a clean bar.
 func (b *Battle) ClearTiming() {
 	b.Timing = TimingState{}
 	b.TimingFlash = 0

@@ -6,32 +6,23 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Foe Visualizer preview support. The editor's Foe Visualizer modal
-// (editor/foeview.go) calls DrawFoePreview every frame to show the foe it's
-// tuning as a small combat-like diorama, redrawn live as the author drags the
-// placement / shadow / cursor / tint sliders. The 3D pass is rendered to a
-// cached off-screen texture sized to the panel and then blitted into it, so the
-// world geometry lands inside the panel rect instead of the full window (raylib
-// has no public sub-rect 3D viewport, so a RenderTexture is the clean route).
+// Foe Visualizer preview support: DrawFoePreview shows the foe as a small combat
+// diorama. The 3D pass renders to a cached off-screen texture sized to the panel
+// then blits into it (raylib has no sub-rect 3D viewport, so a RenderTexture is
+// the clean route).
 
-// previewRT is a cached off-screen render target sized to a visualizer
-// preview panel. Both the Foe and Party visualizers keep their own instance
-// (foePreviewRT / partyPreviewRT) — the diorama 3D pass renders into it and
-// is then blitted into the panel rect. The (re)allocation + teardown logic is
-// identical for both, so it lives on this struct instead of being duplicated
-// per file.
+// previewRT is a cached off-screen render target sized to a preview panel. Both
+// the Foe and Party visualizers keep their own instance; the (re)alloc + teardown
+// logic lives here once.
 type previewRT struct {
 	rt   rl.RenderTexture2D
 	w, h int32
 	init bool
 }
 
-// ensure lazily (re)creates the cached off-screen texture when it's missing or
-// the requested size changed. The old texture is unloaded before a resize so
-// the GPU handle doesn't leak across window-size changes. Returns false when
-// the allocation fails (e.g. GPU OOM) so the caller skips drawing and retries
-// next frame, rather than driving BeginTextureMode/BeginMode3D against an
-// invalid render target.
+// ensure lazily (re)creates the texture when missing or resized, unloading the
+// old handle first so it can't leak. false on alloc failure (caller skips drawing
+// rather than driving BeginTextureMode against an invalid target).
 func (p *previewRT) ensure(w, h int32) bool {
 	if p.init && p.w == w && p.h == h {
 		return true
@@ -51,8 +42,7 @@ func (p *previewRT) ensure(w, h int32) bool {
 	return true
 }
 
-// close unloads the cached off-screen texture. Idempotent — safe to call when
-// nothing is allocated.
+// close unloads the cached texture. Idempotent.
 func (p *previewRT) close() {
 	if !p.init {
 		return
@@ -63,18 +53,14 @@ func (p *previewRT) close() {
 	p.init = false
 }
 
-// blit draws the cached off-screen texture into rect on screen. RenderTextures
-// are stored y-flipped, so the source height is negated to draw it right-side
-// up — the one place that detail lives instead of three open-coded
-// DrawTextureRec calls (foe / party / object previews).
+// blit draws the cached texture into rect, negating the source height to undo the
+// y-flip RenderTextures are stored with. The one place that flip detail lives.
 func (p *previewRT) blit(rect rl.Rectangle) {
 	p.blitTinted(rect, rl.White)
 }
 
-// blitTinted is blit with a caller-supplied tint applied to the flipped capture.
-// The menu-fade pass (premultiplied gray) and the retro-filter blits route
-// through it so the bottom-up source-height flip lives only on blit/blitTinted
-// instead of being open-coded at each DrawTextureRec call site.
+// blitTinted is blit with a caller-supplied tint (menu-fade + retro-filter blits
+// route through it so the flip lives only here).
 func (p *previewRT) blitTinted(rect rl.Rectangle, tint rl.Color) {
 	rl.DrawTextureRec(p.rt.Texture,
 		rl.NewRectangle(0, 0, float32(p.w), -float32(p.h)),
@@ -82,19 +68,16 @@ func (p *previewRT) blitTinted(rect rl.Rectangle, tint rl.Color) {
 		tint)
 }
 
-// visualizerGroundSize is the diorama floor extent (and grid slice count) shared
-// by the Foe and Party visualizer scenes — one literal instead of a 14 hand-keyed
-// into each preview's DrawPlane + DrawGrid.
+// visualizerGroundSize is the diorama floor extent + grid slice count shared by
+// the Foe and Party scenes.
 const visualizerGroundSize = float32(14)
 
-// previewFovy is the vertical FOV shared by every off-screen preview camera (foe,
-// party, object thumbnail) so the dioramas frame consistently from one knob.
+// previewFovy is the vertical FOV shared by every preview camera so the dioramas
+// frame consistently.
 const previewFovy = float32(46)
 
-// beginVisualizerScene opens the off-screen 3D pass for the Foe / Party
-// visualizers: bind the target, clear to the diorama void, enter 3D, and lay
-// the muted floor + grid. Pair with rl.EndMode3D / rl.EndTextureMode. The
-// object-thumbnail preview keeps its own setup (smaller floor, no grid, lit).
+// beginVisualizerScene opens the off-screen 3D pass for the Foe/Party visualizers:
+// bind, clear, enter 3D, lay the floor + grid. Pair with EndMode3D/EndTextureMode.
 func (p *previewRT) beginVisualizerScene(cam rl.Camera3D) {
 	rl.BeginTextureMode(p.rt)
 	rl.ClearBackground(foePreviewBG)
@@ -105,34 +88,28 @@ func (p *previewRT) beginVisualizerScene(cam rl.Camera3D) {
 
 var foePreviewRT previewRT
 
-// foeAnchor is the preview's formation-center anchor — the same vertical center
-// (battleFormationCenterY) battle billboards use, so a foe that sits right in
-// the preview sits right in an actual encounter. The contact shadow lands on
-// the ground plane at y≈0 and the billboard centers here, exactly as
-// drawBattlePack arranges them.
+// foeAnchor is the preview's formation-center anchor — the same
+// battleFormationCenterY battle billboards use, so the preview matches an encounter.
 var foeAnchor = rl.NewVector3(0, battleFormationCenterY, 0)
 
-// foePreviewBG / foePreviewGround tint the diorama: a dark neutral void behind
-// the foe and a muted floor so the contact shadow reads.
+// foePreviewBG / foePreviewGround tint the diorama (dark void + muted floor so
+// the contact shadow reads).
 var (
 	foePreviewBG     = rl.NewColor(26, 28, 34, 255)
 	foePreviewGround = rl.NewColor(54, 58, 66, 255)
 )
 
-// Authoring-gizmo tints shared by both visualizer previews (foe + party): the
-// orange particle-burst anchor, the cyan hit-glyph anchor, and the gold
-// floating-damage-number anchor. Hoisted here so the two preview draws read the
-// same three colors instead of re-typing the NewColor literals per file.
+// Authoring-gizmo tints shared by both previews: orange particle anchor, cyan
+// hit-glyph anchor, gold damage-number anchor.
 var (
 	gizmoParticleColor = rl.NewColor(255, 168, 86, 210)
 	gizmoGlyphColor    = rl.NewColor(176, 226, 255, 220)
 	gizmoNumberColor   = rl.NewColor(255, 232, 120, 220)
 )
 
-// foePreviewCamera is the fixed three-quarter camera the diorama is viewed
-// through: pulled back along +Z and slightly up, looking at the foe's mid
-// height. Forward points into −Z, so a positive depthOffset pushes the sprite
-// AWAY from the viewer — matching the battle "back into the arena" read.
+// foePreviewCamera is the fixed three-quarter diorama camera (back along +Z,
+// slightly up). Forward points into −Z, so a positive depthOffset pushes the
+// sprite away, matching the battle "back into the arena" read.
 func foePreviewCamera() rl.Camera3D {
 	return rl.Camera3D{
 		Position:   rl.NewVector3(0, 1.45, 4.4),
@@ -143,18 +120,15 @@ func foePreviewCamera() rl.Camera3D {
 	}
 }
 
-// FoePreviewZoomMin / FoePreviewZoomMax bound the visualizer preview zoom (the
-// editor clamps the wheel-driven factor to this range). 1.0 = the default
-// framing; larger = closer in.
+// FoePreviewZoomMin / FoePreviewZoomMax bound the preview zoom (1.0 = default
+// framing, larger = closer).
 const (
 	FoePreviewZoomMin = 0.5
 	FoePreviewZoomMax = 4.0
 )
 
-// zoomedPreviewCamera dollies the fixed diorama camera toward its target along
-// the view ray: zoom 1 = the default framing, >1 moves the eye closer (the
-// sprite fills more of the panel), <1 pulls back. Both visualizer previews share
-// it so foe and friend zoom identically.
+// zoomedPreviewCamera dollies the diorama camera toward its target (zoom 1 =
+// default, >1 closer). Shared by both previews so they zoom identically.
 func zoomedPreviewCamera(zoom float32) rl.Camera3D {
 	cam := foePreviewCamera()
 	if zoom <= 0 {
@@ -165,10 +139,9 @@ func zoomedPreviewCamera(zoom float32) rl.Camera3D {
 	return cam
 }
 
-// LiveFoeOverride returns the currently-LOADED visual for kind as an override
-// — code defaults with any maps/sprites/visuals.json already overlaid at load
-// time. The editor seeds its working copy from this so opening a foe shows
-// exactly what the game draws right now. ok=false if the kind has no visual.
+// LiveFoeOverride returns the currently-loaded visual for kind as an override
+// (defaults + any visuals.json overlay). The editor seeds its working copy from
+// this. ok=false if the kind has no visual.
 func LiveFoeOverride(assets Resources, kind core.EnemyKind) (core.EnemyVisualOverride, bool) {
 	v, ok := enemyVisualFor(assets, kind)
 	if !ok {
@@ -177,44 +150,34 @@ func LiveFoeOverride(assets Resources, kind core.EnemyKind) (core.EnemyVisualOve
 	return enemyVisualOverride(v), true
 }
 
-// SetLiveFoeOverride applies ov onto the in-memory visual for kind, so the
-// editor's just-saved tuning takes effect immediately — without a reload. The
-// enemyVisuals slice is shared by reference through the (by-value) Resources, so
-// mutating an entry here updates the same slice the editor's render loop and
-// LiveFoeOverride read; otherwise the editor would re-seed from the stale loaded
-// value on the next foe-cycle and the save would look reverted. The texture is
-// preserved (applyEnemyVisualOverride keeps it). No-op if the kind is out of
-// range. Persisted separately to visuals.json by the caller; this is only the
-// live in-memory mirror.
+// SetLiveFoeOverride applies ov onto the in-memory visual for kind so a save
+// takes effect without a reload. enemyVisuals is shared by reference through the
+// by-value Resources, so the write reaches what the editor and LiveFoeOverride
+// read (else the next foe-cycle re-seeds stale). No-op if out of range; the
+// caller persists to visuals.json separately.
 func SetLiveFoeOverride(assets Resources, kind core.EnemyKind, ov core.EnemyVisualOverride) {
 	base, ok := visualAt(assets.enemyVisuals, int(kind))
 	if !ok {
 		return
 	}
 	v := applyEnemyVisualOverride(base, ov)
-	// Re-bake the non-destructive FX (Pixelate/Posterize/Dither/…) onto the
-	// pristine base into the live DISPLAY texture, so a Save shows in the running
-	// game immediately instead of only after a restart. Positional/tint overrides
-	// already apply live (they're read at draw time); the FX are the one knob
-	// baked into the texture, so they alone need the re-derive.
+	// Re-bake the FX into the live display texture so a Save shows immediately.
+	// Positional/tint overrides already apply live (read at draw time); only the
+	// texture-baked FX need the re-derive.
 	v.texture = displayTextureForSlug(core.EnemySlug(kind), pristineOrTexture(v), ov)
 	assets.enemyVisuals[kind] = v
 }
 
-// DrawFoePreview renders kind's billboard — with the in-progress override ov
-// applied on top of its code-default texture — into rect: ground, contact
-// shadow, the upright sprite, and the target chevron, arranged with the exact
-// same math drawBattlePack uses so the preview is faithful. Safe to call every
-// frame; the off-screen texture is cached and only reallocated when the panel
-// size changes.
+// DrawFoePreview renders kind's billboard (with override ov applied) into rect:
+// ground, shadow, sprite, chevron, using the same math drawBattlePack does so the
+// preview is faithful. Safe per-frame; the texture is cached, reallocated on resize.
 func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov core.EnemyVisualOverride, zoom float32, showGizmos bool, previewTex rl.Texture2D) {
 	base, ok := enemyVisualFor(assets, kind)
 	if !ok {
 		return
 	}
 	v := applyEnemyVisualOverride(base, ov)
-	// Asset-tab live preview overrides the displayed texture (non-destructive
-	// filter result); zero ID falls back to the kind's real texture.
+	// Asset-tab live preview overrides the texture; zero ID falls back to the real one.
 	if previewTex.ID != 0 {
 		v.texture = previewTex
 	}
@@ -229,9 +192,8 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 
 	foePreviewRT.beginVisualizerScene(cam)
 
-	// Same per-kind placement as the battle roster, via the shared helper so
-	// the preview stays faithful to drawBattlePack's depth/shadow/chevron/
-	// yOffset ordering by construction (not by a hand-synced comment).
+	// Same per-kind placement as the battle roster via the shared helper, so the
+	// preview matches drawBattlePack's ordering by construction.
 	place := resolveBillboardPlacement(cam, foeAnchor, &v)
 	if v.shadowRadius > 0 {
 		drawGroundShadow(place.shadowX, place.shadowZ, v.shadowRadius)
@@ -239,16 +201,9 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 	drawTargetChevron(cam, place.chevron, v.effectiveMarkerScale())
 	drawTextureBillboard(cam, v.texture, place.sprite, v.size, v.resolveTint())
 
-	// Authoring gizmos: small wireframe spheres at the combat anchor of this
-	// kind's particle burst (orange) and hit glyph (cyan), so the glyph/particle
-	// anchor + size sliders have live feedback even though the real glyph/
-	// particle systems don't run in this static diorama. Anchored at foeAnchor
-	// (NOT place.base) to match the battle VFX origin — resolveAnchor uses the
-	// pre-depthOffset formation center — nudged + sized by the same fields and
-	// helpers (cameraRelativeOffset, hitGlyphRise, effective*Scale) the live path
-	// uses, so what reads here reads in an encounter.
-	// Gizmos are Layout-tab authoring aids; the Asset tab hides them so the bare
-	// sprite (and its baked tint / pixelation) reads clean.
+	// Layout-tab authoring gizmos (Asset tab hides them). Anchored at foeAnchor,
+	// NOT place.base, to match the battle VFX origin (resolveAnchor uses the
+	// pre-depthOffset formation center). See drawPreviewGizmos.
 	if showGizmos {
 		drawPreviewGizmos(cam, v)
 	}
@@ -256,17 +211,13 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 	rl.EndMode3D()
 	rl.EndTextureMode()
 
-	// Blit the off-screen render into the panel.
 	foePreviewRT.blit(rect)
 }
 
-// drawPreviewGizmos paints the three authoring anchor gizmos shared by the Foe
-// and Party visualizers: the particle-burst origin (orange), the hit-glyph anchor
-// (cyan), and the floating damage-number spawn (gold). Each is nudged + sized by
-// the same override fields and helpers (cameraRelativeOffset, hitGlyphRise,
-// popupWorldRise, effective*Scale) the live battle VFX path uses, so what reads
-// in the diorama reads in an encounter. Anchored at foeAnchor to match the battle
-// VFX origin. The per-file chevron/marker painters stay separate.
+// drawPreviewGizmos paints the three authoring anchor gizmos (particle = orange,
+// hit-glyph = cyan, damage-number = gold), each nudged + sized by the same
+// override fields and helpers the live VFX path uses, anchored at foeAnchor, so
+// the diorama reads like an encounter.
 func drawPreviewGizmos(cam rl.Camera3D, v enemyVisual) {
 	pAnchor := cameraRelativeOffset(cam, foeAnchor, v.particleXOffset, v.particleYOffset, v.particleZOffset)
 	drawAnchorGizmo(pAnchor, 0.16*v.effectiveParticleScale(), gizmoParticleColor)
@@ -278,11 +229,8 @@ func drawPreviewGizmos(cam rl.Camera3D, v enemyVisual) {
 	drawAnchorGizmo(nAnchor, 0.10, gizmoNumberColor)
 }
 
-// drawAnchorGizmo paints a small wireframe sphere at p, drawn depth-independent
-// (like the selector pyramid in drawMarkerOnTop) so it's never hidden behind the
-// opaque billboard. Foe Visualizer authoring aid only — radius tracks the
-// effect's size slider so the gizmo doubles as a rough size readout. State is
-// restored so the blit and any later draw are unaffected.
+// drawAnchorGizmo paints a wireframe sphere at p, depth-independent so it's never
+// hidden behind the opaque billboard. Radius tracks the effect's size slider.
 func drawAnchorGizmo(p rl.Vector3, radius float32, col rl.Color) {
 	if radius <= 0 {
 		return
@@ -290,9 +238,7 @@ func drawAnchorGizmo(p rl.Vector3, radius float32, col rl.Color) {
 	drawDepthIndependent(func() { rl.DrawSphereWires(p, radius, 6, 6, col) })
 }
 
-// CloseFoePreview unloads the cached off-screen texture. The editor calls this
-// when the Foe Visualizer modal closes so the GPU handle isn't held for the
-// rest of the session. Idempotent — safe to call when nothing is allocated.
+// CloseFoePreview unloads the cached texture when the Foe Visualizer closes. Idempotent.
 func CloseFoePreview() {
 	foePreviewRT.close()
 }

@@ -8,10 +8,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// chestGeometry bundles the world-unit dimensions DrawChestPrompt
-// uses to anchor its floating prompt — these match the painted
-// chest meshes built in loadChestBodyProp / loadChestLidProp so the
-// "Press Enter" cue floats above the chest's actual silhouette.
+// chestGeometry — world-unit dims for anchoring the floating prompt; must match the meshes in loadChestBodyProp/loadChestLidProp.
 type chestGeometry struct {
 	BodyHeight float32
 	LidHeight  float32
@@ -22,22 +19,15 @@ var chestGeo = chestGeometry{
 	LidHeight:  0.18,
 }
 
-// chestLidLootedLift is how far above the body top a looted chest's
-// lid drifts. The lid also tilts backward to read as "thrown open"
-// rather than "lifted off and floating."
+// Looted-lid pose: lift above body top + backward tilt to read as "thrown open".
 const (
 	chestLidLootedLift    = float32(0.34)
 	chestLidLootedTiltDeg = float32(-58)
-	// chestLidHingeZOffset is the Z of the lid's pivot relative to the
-	// chest centre. The looted-lid rotation references it twice (the
-	// hinge anchor and the per-part relative-Z); a single const keeps
-	// the two in lockstep so the lid can't pivot around the wrong line.
+	// chestLidHingeZOffset: lid pivot Z relative to chest centre. Referenced twice (hinge anchor + per-part Z); one const keeps them in lockstep.
 	chestLidHingeZOffset = float32(-0.25)
 )
 
-// Chest modal geometry — matches the named-const layout convention the sibling
-// modals use (dialogChoiceRowH, shopRowH, victory*). Kept here so the chest
-// card's row height / insets aren't bare literals scattered through the drawer.
+// Chest modal geometry.
 const (
 	chestRowH       = int32(34) // item / Take All row height
 	chestCardTopPad = int32(48) // card top edge → first row baseline budget
@@ -46,35 +36,19 @@ const (
 	chestRowInsetY  = int32(28) // first row top inset from the card top
 )
 
-// DrawChests renders every chest as a two-piece painted prop —
-// wooden body with brass corner straps + hoop bands + lockplate +
-// jewel, capped by a wooden lid with corner caps + a hoop band.
-// Closed chests stack the lid flush on the body; looted chests
-// hinge the lid back around its rear edge so it reads as "thrown
-// open" rather than "lid floating in the air." Bark texture +
-// lighting shader give the whole prop the painted-storybook feel
-// of the trees and bushes around it.
-//
-// Called after DrawWorld so chests draw under the lighting shader
-// still bound. The body / lid propModels live on Resources so the
-// meshes load once at startup and unload at game exit.
+// DrawChests renders each chest as a two-piece prop (body + lid; closed = flush, looted = hinged open).
+// Must be called after DrawWorld so the lighting shader is still bound.
 func DrawChests(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	vc := newViewCull(camera)
 	for _, ch := range g.Chests {
 		base := tileWorldPos(ch.TileX, ch.TileZ, g.Area.StandGroundY(ch.TileX, ch.TileZ))
-		// Skip chests outside the view — same generous frustum the world tile
-		// loop uses, so a chest you just turned from doesn't pop out.
 		if vc.cull(base) {
 			continue
 		}
 		drawGroundShadowAt(base.X, base.Y+groundShadowFloorClearance, base.Z, 0.40)
 
-		// Body — sits at floor level. propModel.draw owns the
-		// per-part offsets, scales, and tints.
 		assets.chestBody.draw(base, 1.0, 0)
 
-		// Lid — flush atop the body when closed; hinge-tilted
-		// backward off the rear edge when looted.
 		lidCentreY := base.Y + chestGeo.BodyHeight
 		if ch.Looted {
 			drawChestLidLooted(assets, base, lidCentreY)
@@ -85,55 +59,29 @@ func DrawChests(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	}
 }
 
-// drawChestLidLooted paints the lid in its "thrown open" pose —
-// pivoted around the rear top edge of the body so the lid reads as
-// hinged backward, not floating off. Each lid part is positioned
-// relative to the hinge, rotated by chestLidLootedTiltDeg around the
-// world-X axis, then drawn through the lighting shader. The same
-// chestLid propModel parts list drives the rendering; only the
-// per-part transform differs.
+// drawChestLidLooted paints the lid pivoted around the body's rear top edge ("thrown open"), each part tilted by chestLidLootedTiltDeg about world-X.
 func drawChestLidLooted(assets Resources, base rl.Vector3, lidCentreY float32) {
 	hingeZ := base.Z + chestLidHingeZOffset
 	tiltRad := float64(chestLidLootedTiltDeg) * math.Pi / 180
 	cosT := float32(math.Cos(tiltRad))
 	sinT := float32(math.Sin(tiltRad))
 	for _, part := range assets.chestLid.parts {
-		// Authored offset relative to the lid's own centre, lifted
-		// to the body top + the looted lift.
 		offX := part.offset.X
 		offY := part.offset.Y
 		offZ := part.offset.Z
-		// Relative-to-hinge coords (subtract hinge Z; lid centre Y
-		// becomes the hinge Y after adding the lift).
 		relY := offY + chestLidLootedLift
-		relZ := offZ - chestLidHingeZOffset // hinge sits at chestLidHingeZOffset relative to chest centre, so the part's authored Z already lines up
-		// Rotate around X axis through the hinge: (y, z) → (y',
-		// z') = (y·cos − z·sin, y·sin + z·cos). With our negative
-		// tilt the lid pivots backward (z grows negative as y
-		// climbs), tipping the front of the lid up and away from
-		// the player.
+		relZ := offZ - chestLidHingeZOffset
+		// Rotate (y,z) around X through the hinge; negative tilt pivots the lid backward.
 		ry := relY*cosT - relZ*sinT
 		rz := relY*sinT + relZ*cosT
-		// World position: hinge centre + rotated offset.
 		position := rl.NewVector3(base.X+offX, lidCentreY+ry, hingeZ+rz)
 		drawScale := part.scale
-		// drawModelEx with the part's own rotation axis still
-		// applies (e.g. for parts spun around Y); the tilt around
-		// X applies on top via a second pass — but to keep the
-		// math simple we let raylib's rotation apply only the
-		// per-part rotation, and bake the lid-tilt into the
-		// position via the offset rotation above. The visible
-		// result is the lid hinge-open with corner caps and band
-		// rotating in lockstep with the wood.
+		// raylib's rotation applies only the per-part rotation; the lid tilt is baked into position above.
 		rl.DrawModelEx(assets.chestLid.models[part.modelIdx], position, partRotationAxis(part), part.rotation, drawScale, part.tint)
 	}
 }
 
-// DrawChestPrompt paints the floating "press Enter to open" cue over
-// the chest the player is currently adjacent to. Skipped while the
-// chest modal is open (the modal itself is the prompt) and skipped for
-// already-looted chests. Drawn AFTER rl.EndMode3D so the prompt text
-// renders in screen space — see drawAdventureScene for the call order.
+// DrawChestPrompt paints the floating "open" cue over an adjacent unlooted chest. Must be called after rl.EndMode3D (screen space).
 func DrawChestPrompt(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if g.ChestOpen >= 0 {
 		return
@@ -143,19 +91,12 @@ func DrawChestPrompt(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		return
 	}
 	ch := g.Chests[idx]
-	// Anchor above the lid, on top of the chest's actual floor height — the body
-	// draws at StandGroundY (see DrawChests), so the prompt must add it too or it
-	// detaches and floats at a fixed height on raised tiles (matches DrawCrystalPrompt).
+	// Anchor above the lid; must add StandGroundY (body draws there) or it detaches on raised tiles.
 	world := tileWorldPos(ch.TileX, ch.TileZ, g.Area.StandGroundY(ch.TileX, ch.TileZ)+chestGeo.BodyHeight+chestGeo.LidHeight+0.4)
 	drawFloatingInteractPrompt(camera, world, "Open", assets)
 }
 
-// drawFloatingInteractPrompt projects a world-space anchor to the screen and
-// paints the controller-first "[A] verb" cue just above it — the shared body of
-// the chest / crystal floating prompts (gamepad-first per UI_STANDARDS.md, no
-// spelled-out keys). `world` already encodes the per-entity anchor height; the
-// caller is skipped if the anchor falls behind the camera. Must be called after
-// rl.EndMode3D so the text lands in screen space.
+// drawFloatingInteractPrompt projects world to screen and paints the "[A] verb" cue above it (shared by chest/crystal prompts). Must run after rl.EndMode3D.
 func drawFloatingInteractPrompt(camera rl.Camera3D, world rl.Vector3, verb string, assets Resources) {
 	if behindCamera(camera, world) {
 		return
@@ -165,10 +106,7 @@ func drawFloatingInteractPrompt(camera rl.Camera3D, world rl.Vector3, verb strin
 	drawGlyphPrompt(assets.Font(), GlyphA, verb, screen.X, y, FontBody)
 }
 
-// DrawChestModal paints the chest-open dialog: a card with the item
-// list, a Take All row, and a hint footer. Rendered after the world so
-// it sits on top of everything. Cursor row uses the same selection
-// style as the pause menu.
+// DrawChestModal paints the chest-open dialog: item list, Take All row, hint footer.
 func DrawChestModal(g *core.GameState, assets Resources) {
 	if g.ChestOpen < 0 || g.ChestOpen >= len(g.Chests) {
 		return
@@ -178,10 +116,7 @@ func DrawChestModal(g *core.GameState, assets Resources) {
 
 	font := assets.Font()
 	rowH := chestRowH
-	// Header dropped — the chest model still sits behind the veil and
-	// the player walked up to it to open this; titling the modal
-	// "TREASURE" was tautological. Card height now budgets for rows +
-	// Take All + footer only.
+	// No header; card height budgets rows + Take All + footer only.
 	cardH := chestCardTopPad + rowH*(int32(len(stacks))+1) + chestCardBotPad
 	if cardH < modalMinCardH {
 		cardH = modalMinCardH
@@ -207,10 +142,7 @@ func DrawChestModal(g *core.GameState, assets Resources) {
 		})
 		rowY += rowH
 	}
-	// "Take All" row sits below the items. Always present even when the
-	// list is empty so the keyboard never lands on an unselectable row.
-	// ChestTakeAllRow keeps render + explore in sync on which cursor
-	// value means "Take All."
+	// "Take All" row, always present so the cursor never lands on an unselectable row. ChestTakeAllRow keeps render + explore in sync.
 	{
 		focused := g.ChestMenuIndex == core.ChestTakeAllRow(len(stacks))
 		col := rowTextColor(focused, false, textMuted)

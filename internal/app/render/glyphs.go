@@ -6,17 +6,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Controller-input glyphs — the on-screen button ICONS that replace
-// spelled-out key names everywhere in the UI. The game is gamepad-first
-// (AGENTS.md / UI_STANDARDS.md), so every hint reads as a controller prompt:
-// a colored face button, a bumper pill, a start/select pictogram, or a d-pad
-// direction. We draw the CONTROLLER set only for now; a later pass can switch
-// to keyboard glyphs by device.
-//
-// All hint surfaces build a []HintSeg (a glyph or two plus an action word) and
-// hand it to DrawHintBar / DrawHintBarLeft (or the modal-footer wrappers). The
-// glyphs are procedural raylib primitives in the library palette — see the
-// glyph* tokens in theme.go — so there are no PNG assets to load or free.
+// InputGlyph — controller button icons that replace spelled-out keys (gamepad-first). Procedural raylib primitives, no PNG assets.
 type InputGlyph int
 
 const (
@@ -36,34 +26,28 @@ const (
 	GlyphLeftRight                   // d-pad horizontal pair
 )
 
-// HintSeg is one control affordance: the button glyph(s) plus the action word
-// they perform (e.g. {GlyphA} + "Confirm", or {GlyphLB, GlyphRB} + "Tabs").
-// A seg with no glyphs is plain text (used for the Map footer's area/zoom
-// preamble); a seg with no label is icon-only.
+// HintSeg is one control affordance: button glyph(s) plus an action word. No glyphs = plain text; no label = icon-only.
 type HintSeg struct {
 	Glyphs []InputGlyph
 	Label  string
 }
 
-// Hint is the terse constructor used at every call site: Hint("Confirm", GlyphA).
+// Hint constructs a HintSeg: Hint("Confirm", GlyphA).
 func Hint(label string, glyphs ...InputGlyph) HintSeg {
 	return HintSeg{Glyphs: glyphs, Label: label}
 }
 
-// Hint-bar layout tunables. Glyphs in one seg ([LB][RB]) sit nearly flush; the
-// label trails its glyph(s) by glyphLabelGap; segments are spaced hintSegGap.
+// Hint-bar layout: glyphs in a seg sit nearly flush; label trails by glyphLabelGap; segs spaced by hintSegGap.
 const (
 	glyphInnerGap = float32(3)
 	glyphLabelGap = float32(6)
 	hintSegGap    = float32(18)
 )
 
-// glyphBoxH is a glyph's drawn height for a given hint font size — a touch
-// taller than the text so the icon reads as a raised button beside the word.
+// glyphBoxH is a glyph's drawn height, slightly taller than the text.
 func glyphBoxH(size float32) float32 { return size * 1.4 }
 
-// glyphWidth reports a single glyph's advance width. Face buttons + d-pad are
-// square; bumpers and start/select are wider to fit their pictograms.
+// glyphWidth reports a glyph's advance width. Face/d-pad square; bumpers + start/select wider.
 func glyphWidth(g InputGlyph, size float32) float32 {
 	gh := glyphBoxH(size)
 	switch g {
@@ -93,11 +77,7 @@ func measureHintSeg(font rl.Font, seg HintSeg, size float32) float32 {
 	return w
 }
 
-// hintLabelMeasureCache memoizes the hint-bar label widths. The label set is
-// a tiny fixed vocabulary ("Confirm"/"Back"/"Continue"/…) re-measured every
-// frame a footer is up — and a CENTERED DrawHintBar measures the whole bar
-// twice (once to center, once while drawing), so without the cache each footer
-// label is reshaped 2× per frame via cgo.
+// hintLabelMeasureCache memoizes hint-bar label widths; a centered DrawHintBar measures the bar twice/frame, so this avoids 2× cgo reshapes per label.
 var hintLabelMeasureCache measureCache
 
 func measureHintBar(font rl.Font, segs []HintSeg, size float32) float32 {
@@ -111,9 +91,7 @@ func measureHintBar(font rl.Font, segs []HintSeg, size float32) float32 {
 	return w
 }
 
-// drawHintSegs paints the segments left-anchored at x and returns the end x.
-// Glyphs keep their full button color (the icon is the point); the label rides
-// labelCol, and the whole run fades by alpha so callers can dim/animate it.
+// drawHintSegs paints segments left-anchored at x, returns the end x. Labels ride labelCol; whole run fades by alpha.
 func drawHintSegs(font rl.Font, segs []HintSeg, x, y, size float32, labelCol color.RGBA, alpha float32) float32 {
 	cur := x
 	for i, s := range segs {
@@ -137,9 +115,7 @@ func drawHintSegs(font rl.Font, segs []HintSeg, x, y, size float32, labelCol col
 	return cur
 }
 
-// DrawHintBar centers a controller-hint strip at screen-x cx, with the same
-// diamond termini DrawFooterHint stitches so the glyph footers read as part of
-// the panel-ornament language. Use for centered modal footers and HUD hints.
+// DrawHintBar centers a hint strip at cx with diamond termini. For centered modal footers and HUD hints.
 func DrawHintBar(font rl.Font, segs []HintSeg, cx, y, size float32) {
 	w := measureHintBar(font, segs, size)
 	x := cx - w/2
@@ -150,16 +126,12 @@ func DrawHintBar(font rl.Font, segs []HintSeg, cx, y, size float32) {
 	drawDiamondPip(x+w+14, pipY, 1.8, pipCol)
 }
 
-// DrawHintBarLeft paints the strip left-anchored at x (no termini) — the
-// left-aligned mirror used by the picker sub-modals and the skill-tree footer.
+// DrawHintBarLeft paints the strip left-anchored at x (no termini).
 func DrawHintBarLeft(font rl.Font, segs []HintSeg, x, y, size float32) {
 	drawHintSegs(font, segs, x, y, size, textHint, 1)
 }
 
-// drawModalFooterGlyphs / ...Left paint a modal's footer hint bar from a
-// []HintSeg (controller-glyph segments), centring or left-anchoring it on the
-// card. The card-geometry / footer-baseline math stays in one place so every
-// modal positions its footer hints identically.
+// drawModalFooterGlyphs / ...Left paint a modal's footer hint bar, centred or left-anchored on the card.
 func drawModalFooterGlyphs(font rl.Font, card rl.Rectangle, segs []HintSeg) {
 	y := float32(footerBaselineY(int32(card.Y+card.Height), FontTiny))
 	DrawHintBar(font, segs, card.X+card.Width/2, y, FontTiny)
@@ -170,17 +142,14 @@ func drawModalFooterGlyphsLeft(font rl.Font, card rl.Rectangle, x float32, segs 
 	DrawHintBarLeft(font, segs, x, y, FontSmall)
 }
 
-// drawGlyphPrompt centers a single "[glyph] Verb" cue (the in-world chest /
-// crystal / door affordances). Brighter than a footer (borderActive label, no
-// termini) so it reads as an actionable call-to-press over the 3D scene.
+// drawGlyphPrompt centers a single "[glyph] Verb" in-world cue; brighter than a footer (borderActive, no termini).
 func drawGlyphPrompt(font rl.Font, glyph InputGlyph, label string, cx, y, size float32) {
 	segs := []HintSeg{Hint(label, glyph)}
 	w := measureHintBar(font, segs, size)
 	drawHintSegs(font, segs, cx-w/2, y, size, borderActive, 1)
 }
 
-// drawInputGlyph paints one button icon with its top-left at (x, y), vertically
-// centered on the text line (height ~size), and returns its advance width.
+// drawInputGlyph paints one button icon (top-left at x,y) centered on the text line and returns its advance width.
 func drawInputGlyph(font rl.Font, g InputGlyph, x, y, size, alpha float32) float32 {
 	gh := glyphBoxH(size)
 	cy := y + size/2
@@ -206,13 +175,7 @@ func drawInputGlyph(font rl.Font, g InputGlyph, x, y, size, alpha float32) float
 	}
 }
 
-// inputGlyphCoverage is the maintained set of every InputGlyph value, tagging
-// each as either explicitly handled by drawInputGlyph's switch (true) or
-// intentionally routed through its d-pad default (false). The init() guard
-// below asserts this set covers the whole iota run [GlyphA, glyphCount), so a
-// newly-added InputGlyph can't silently fall into the d-pad default — adding a
-// const without registering it here panics at startup. This is a coverage
-// ledger only; it does not affect runtime drawing.
+// inputGlyphCoverage tags each glyph as explicitly handled (true) or routed through the d-pad default (false). The init() guard asserts full iota coverage so a new glyph can't silently fall through. Ledger only; no runtime effect.
 var inputGlyphCoverage = map[InputGlyph]bool{
 	GlyphA:         true,
 	GlyphB:         true,
@@ -230,8 +193,7 @@ var inputGlyphCoverage = map[InputGlyph]bool{
 	GlyphLeftRight: false, // d-pad default
 }
 
-// glyphCount is one past the last InputGlyph const; kept adjacent to the const
-// block's tail (GlyphLeftRight) so the init guard can walk the full iota run.
+// glyphCount is one past the last InputGlyph const, for the init coverage guard.
 const glyphCount = GlyphLeftRight + 1
 
 func init() {
@@ -245,8 +207,7 @@ func init() {
 	}
 }
 
-// drawFaceButton is the dark-disc / colored-letter style: a raised dark circle,
-// a colored ring, and the letter in the button's signature hue.
+// drawFaceButton: dark disc + colored ring + colored letter.
 func drawFaceButton(font rl.Font, letter string, col color.RGBA, x, cy, gh, alpha float32) float32 {
 	cx := x + gh/2
 	r := gh/2 - 1
@@ -257,19 +218,13 @@ func drawFaceButton(font rl.Font, letter string, col color.RGBA, x, cy, gh, alph
 	return gh
 }
 
-// Glyph-pill roundness tokens — the only thing that differs between the
-// non-face glyph buttons that share drawGlyphPill. glyphPillRoundness is the
-// softer bumper/system-button radius (shoulders, start/select); glyphPadRoundness
-// is the tighter d-pad cap. Named so the two callers of each can't drift.
+// Glyph-pill roundness: glyphPillRoundness = softer bumper/system radius; glyphPadRoundness = tighter d-pad cap.
 const (
 	glyphPillRoundness = float32(0.6)
 	glyphPadRoundness  = float32(0.35)
 )
 
-// drawGlyphPill paints the shared controller-glyph backing: a rounded body fill
-// + a 1px rim, both faded by alpha. The shoulder, start/select, and d-pad
-// glyphs all sit on this same body/rim pairing (only the roundness differs), so
-// the token pair lives here instead of being re-typed per glyph.
+// drawGlyphPill paints the shared rounded body fill + 1px rim for shoulder/start-select/d-pad glyphs.
 func drawGlyphPill(rect rl.Rectangle, roundness, alpha float32) {
 	rl.DrawRectangleRounded(rect, roundness, 6, fadeColor(glyphBody, alpha))
 	rl.DrawRectangleRoundedLinesEx(rect, roundness, 6, 1, fadeColor(glyphRim, alpha))
@@ -284,8 +239,7 @@ func drawShoulderButton(font rl.Font, label string, x, cy, gh, alpha float32) fl
 	return w
 }
 
-// drawStartSelect draws the two system-button pictograms inside a rounded pill:
-// Start = the three-line "menu" icon; Select = two overlapping "view" panes.
+// drawStartSelect: Start = three-line menu icon; Select = two overlapping view panes.
 func drawStartSelect(start bool, x, cy, gh, alpha float32) float32 {
 	w := gh * 1.3
 	h := gh * 0.82
@@ -293,14 +247,14 @@ func drawStartSelect(start bool, x, cy, gh, alpha float32) float32 {
 	ink := fadeColor(glyphInk, alpha)
 	cx := x + w/2
 	if start {
-		// Three stacked horizontal lines (hamburger / "menu").
+		// Hamburger menu.
 		lw := w * 0.42
 		for i := -1; i <= 1; i++ {
 			ly := cy + float32(i)*h*0.22
 			rl.DrawLineEx(rl.NewVector2(cx-lw/2, ly), rl.NewVector2(cx+lw/2, ly), 1.5, ink)
 		}
 	} else {
-		// Two overlapping panes ("view" / share).
+		// Two overlapping panes.
 		s := h * 0.30
 		rl.DrawRectangleLinesEx(rl.NewRectangle(cx-s*0.9, cy-s*0.7, s*1.2, s*1.2), 1.4, ink)
 		rl.DrawRectangleLinesEx(rl.NewRectangle(cx-s*0.2, cy-s*0.1, s*1.2, s*1.2), 1.4, ink)
@@ -308,9 +262,7 @@ func drawStartSelect(start bool, x, cy, gh, alpha float32) float32 {
 	return w
 }
 
-// drawDpadGlyph draws a rounded d-pad tile with chevrons on each arm — the
-// requested direction(s) bright (giltBright), the rest dim so the cross still
-// reads as a d-pad.
+// drawDpadGlyph draws a d-pad tile with chevrons; requested direction(s) bright, the rest dim.
 func drawDpadGlyph(g InputGlyph, x, cy, gh, alpha float32) float32 {
 	cx := x + gh/2
 	drawGlyphPill(rl.NewRectangle(x+1, cy-gh/2+1, gh-2, gh-2), glyphPadRoundness, alpha)
@@ -331,26 +283,22 @@ func drawDpadGlyph(g InputGlyph, x, cy, gh, alpha float32) float32 {
 		}
 		return dim
 	}
-	// Up chevron (apex toward top).
+	// Up
 	rl.DrawLineEx(rl.NewVector2(cx-cw, cy-off), rl.NewVector2(cx, cy-tip), 1.6, chevCol(up))
 	rl.DrawLineEx(rl.NewVector2(cx, cy-tip), rl.NewVector2(cx+cw, cy-off), 1.6, chevCol(up))
-	// Down chevron.
+	// Down
 	rl.DrawLineEx(rl.NewVector2(cx-cw, cy+off), rl.NewVector2(cx, cy+tip), 1.6, chevCol(down))
 	rl.DrawLineEx(rl.NewVector2(cx, cy+tip), rl.NewVector2(cx+cw, cy+off), 1.6, chevCol(down))
-	// Left chevron.
+	// Left
 	rl.DrawLineEx(rl.NewVector2(cx-off, cy-cw), rl.NewVector2(cx-tip, cy), 1.6, chevCol(left))
 	rl.DrawLineEx(rl.NewVector2(cx-tip, cy), rl.NewVector2(cx-off, cy+cw), 1.6, chevCol(left))
-	// Right chevron.
+	// Right
 	rl.DrawLineEx(rl.NewVector2(cx+off, cy-cw), rl.NewVector2(cx+tip, cy), 1.6, chevCol(right))
 	rl.DrawLineEx(rl.NewVector2(cx+tip, cy), rl.NewVector2(cx+off, cy+cw), 1.6, chevCol(right))
 	return gh
 }
 
-// glyphLetterMeasureCache memoizes the face-button letter widths ("A"/"B"/
-// "LB"/"RB"/…). drawGlyphLetter centers each letter per glyph per hint-bar
-// draw — the battle action footer draws every battle frame, in-world prompts
-// every explore frame near a chest/door — so the raw MeasureTextEx was a cgo
-// round-trip per glyph per frame. The letter set is tiny and constant.
+// glyphLetterMeasureCache memoizes face-button letter widths to avoid a per-glyph per-frame cgo MeasureTextEx.
 var glyphLetterMeasureCache measureCache
 
 // drawGlyphLetter centers a glyph's letter/label on (cx, cy).

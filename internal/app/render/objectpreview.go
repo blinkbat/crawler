@@ -8,43 +8,21 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Object Browser preview support. The editor's Object Browser modal
-// (editor/objectview.go) calls DrawObjectPreview per visible cell to show a
-// live 3D thumbnail of every decor/prop object the map can place, so the
-// author can spot-check the whole prop/decor set at a glance — the same
-// off-screen-RenderTexture trick the Foe/Party Visualizers use, but driven by
-// the world's OWN dispatch tables (propModelTable / decorModelTable /
-// inlinePropTable / inlineDecorTable) so a thumbnail draws exactly what the
-// world draws, with no parallel object list to keep in sync.
+// Object Browser preview support: per-cell 3D thumbnails for the editor's Object Browser.
+// Driven by the world's own dispatch tables (propModelTable/decorModelTable/inlineProp/Decor) so a thumbnail matches the in-game look exactly.
 
-// objectPreviewRT is the cached off-screen target shared by every thumbnail —
-// all cells in a gallery are the same size, so it (re)allocates once per modal
-// session and is reused for each cell's render-and-blit.
+// objectPreviewRT is the cached off-screen target shared by every thumbnail (one size per gallery).
 var objectPreviewRT previewRT
 
-// ObjectPreviewItem names one placeable object for the gallery: its layer char,
-// human label (from core.TileLabel), and whether it lives on the props layer
-// (vs the decor layer). The Char + IsProp pair is all DrawObjectPreview needs
-// to route through the same tables the world renderer uses.
+// ObjectPreviewItem names one placeable object: layer char, label, and props-vs-decor layer. Char + IsProp is all DrawObjectPreview needs to route.
 type ObjectPreviewItem struct {
 	Char   byte
 	Name   string
 	IsProp bool
 }
 
-// ObjectPreviewItems enumerates every renderable object the editor can place:
-// the blocking props first (trees, pillars, furniture, …), then the floor
-// decor (grass, flowers, blood, rugs, …). Multi-tile footprint TAILS are
-// skipped — they render nothing on their own (the anchor draws the spanning
-// mesh), so a tail thumbnail would be blank. Derived from the same char lists
-// the renderer asserts coverage against, so a newly-registered prop/decor shows
-// up here automatically.
-// objectPreviewItemsCache memoizes the (static) object list. The prop/decor
-// char lists and their TileLabels are compile-time constants, so the result
-// never changes for the process — but the Object Browser asks for it twice per
-// frame (modal update + draw), so building it fresh each time append-grew a new
-// slice 60+ times/sec. Built once, lazily. Callers MUST treat the returned
-// slice as read-only (the browser only indexes it).
+// ObjectPreviewItems enumerates every placeable object (props then decor). Footprint TAILS are skipped (they draw nothing alone). Derived from the renderer's char lists, so new props/decor appear automatically.
+// objectPreviewItemsCache: lazily built once. Returned slice is read-only.
 var objectPreviewItemsCache []ObjectPreviewItem
 
 func ObjectPreviewItems() []ObjectPreviewItem {
@@ -68,45 +46,29 @@ func ObjectPreviewItems() []ObjectPreviewItem {
 	return objectPreviewItemsCache
 }
 
-// CloseObjectPreview frees the cached off-screen texture; the editor calls it
-// when the Object Browser closes so the GPU handle isn't held for the session.
-// Idempotent.
+// CloseObjectPreview frees the cached off-screen texture. Idempotent.
 func CloseObjectPreview() { objectPreviewRT.close() }
 
-// objectPreviewDir is the fixed three-quarter view direction every thumbnail is
-// framed from (eye = target + dir*distance). A gentle elevation + offset so the
-// object reads as a 3D form rather than a flat front elevation.
+// objectPreviewDir is the fixed three-quarter view direction (eye = target + dir*distance).
 var objectPreviewDir = normalizeVec3(rl.NewVector3(0.55, 0.62, 1.0))
 
-// objectPreviewGroundSize is the thumbnail floor extent — deliberately tighter
-// than the foe/party visualizers' visualizerGroundSize (the object sits alone in
-// a small cell, not on an arena floor). Named so the bare literal isn't read as
-// an arbitrary number.
+// objectPreviewGroundSize is the thumbnail floor extent (tighter than visualizerGroundSize).
 const objectPreviewGroundSize = float32(12)
 
-// DrawObjectPreview renders item's object — lit, ground-shadowed, and animated
-// (foliage sway, torch flame, fountain water) exactly as in the world — into
-// rect, auto-framed to the object's bounds and dollied by zoom (1 = fit,
-// >1 closer). Safe to call every frame: the off-screen texture is cached and
-// only reallocated when the cell size changes.
+// DrawObjectPreview renders item's object (lit, shadowed, animated as in-world) into rect, auto-framed and dollied by zoom (1=fit, >1 closer). Safe per frame; texture is cached.
 func DrawObjectPreview(rect rl.Rectangle, assets Resources, item ObjectPreviewItem, zoom float32) {
 	w, h := int32(rect.Width), int32(rect.Height)
 	if w <= 0 || h <= 0 {
 		return
 	}
 	if assets.lighting.shader.ID == 0 {
-		// Lighting shader not built (zero-value Resources): the diorama draws
-		// through it, so bail rather than BeginShaderMode(0) and write uniforms
-		// to invalid locations. Mirrors DrawFoePreview gating its shader work.
+		// No lighting shader (zero-value Resources): bail rather than BeginShaderMode(0).
 		return
 	}
 	if !objectPreviewRT.ensure(w, h) {
 		return
 	}
-	// Feed the shared per-frame sway/flicker clock — the gallery draws props,
-	// trees, and the wall torch through the same helpers as the world, which now
-	// read worldFrameClock instead of calling rl.GetTime() themselves. Without
-	// this the thumbnails' foliage sway and torch flame would freeze.
+	// Feed the shared sway/flicker clock; without this thumbnails' foliage sway and torch flame freeze.
 	worldFrameClock = float32(rl.GetTime())
 	cam := objectPreviewCamera(objectPreviewBounds(assets, item), zoom)
 
@@ -115,9 +77,7 @@ func DrawObjectPreview(rect rl.Rectangle, assets Resources, item ObjectPreviewIt
 	rl.BeginMode3D(cam)
 	rl.DrawPlane(rl.NewVector3(0, 0, 0), rl.NewVector2(objectPreviewGroundSize, objectPreviewGroundSize), foePreviewGround)
 
-	// Light the diorama with the bright outdoor profile and no torches, then
-	// draw the object through the world's lighting shader so its painted look
-	// matches an actual field map.
+	// Bright outdoor profile, no torches, through the world's lighting shader to match a field map.
 	assets.lighting.applyUniforms(cam, fieldLighting)
 	assets.lighting.uploadTorches(nil)
 	rl.BeginShaderMode(assets.lighting.shader)
@@ -130,13 +90,7 @@ func DrawObjectPreview(rect rl.Rectangle, assets Resources, item ObjectPreviewIt
 	objectPreviewRT.blit(rect)
 }
 
-// drawObjectPreviewModel draws one object centered at `center`, routing through
-// the SAME tables the world's drawWorld/drawDecor use (inlinePropTable /
-// propModelTable / inlineDecorTable / decorModelTable) so a thumbnail can't
-// drift from the in-game look. Footprint props/decor draw at the origin (not
-// their multi-tile anchor offset) so they sit centered in the cell. Inline
-// props that need an area (the wall torch) get an empty AreaDefinition, which
-// makes the torch face south toward the camera.
+// drawObjectPreviewModel draws one object at center via the same tables drawWorld/drawDecor use. Footprints draw at origin; area-needing inline props get an empty AreaDefinition (torch faces south).
 func drawObjectPreviewModel(assets Resources, item ObjectPreviewItem, center rl.Vector3) {
 	char := item.Char
 	if item.IsProp {
@@ -161,10 +115,7 @@ func drawObjectPreviewModel(assets Resources, item ObjectPreviewItem, center rl.
 	}
 }
 
-// objectPreviewCamera frames bb (the object's world-space bounds) in a
-// three-quarter view: target the bounds center, then pull the eye back along
-// objectPreviewDir far enough that the bounding sphere fits the vertical FOV,
-// with a margin. zoom>1 dollies closer.
+// objectPreviewCamera frames bb in three-quarter view: eye pulled back along objectPreviewDir so the bounding sphere fits the FOV with margin. zoom>1 dollies closer.
 func objectPreviewCamera(bb rl.BoundingBox, zoom float32) rl.Camera3D {
 	const fovy = previewFovy
 	center := rl.Vector3Scale(rl.Vector3Add(bb.Min, bb.Max), 0.5)
@@ -186,11 +137,7 @@ func objectPreviewCamera(bb rl.BoundingBox, zoom float32) rl.Camera3D {
 	}
 }
 
-// objectPreviewBounds returns the world-space bounds used to frame an object's
-// thumbnail. Table-dispatched props/decor measure their own meshes; the
-// inline-handled ones (trees at their per-char scale, the big rock/bush, the
-// small bush/mushroom, the wall torch, the pebble scatter) map to the model the
-// handler actually draws so the framing matches. Falls back to a unit box.
+// objectPreviewBounds returns world-space bounds for framing. Inline-handled objects map to the model the handler draws; falls back to a unit box.
 func objectPreviewBounds(assets Resources, item ObjectPreviewItem) rl.BoundingBox {
 	char := item.Char
 	unit := rl.NewBoundingBox(rl.NewVector3(-0.5, 0, -0.5), rl.NewVector3(0.5, 1, 0.5))
@@ -199,8 +146,7 @@ func objectPreviewBounds(assets Resources, item ObjectPreviewItem) rl.BoundingBo
 		case core.TileTree, core.TileTreeXL, core.TileTreeTall, core.TileTreeYoung:
 			return partsBoundsOr(assets.tree.models, assets.tree.parts, treePropScales[char], unit)
 		case core.TileTreeTwin:
-			// Two offset instances; the bigger (0.82) dominates — widen the box
-			// horizontally to cover the ±0.32 diagonal spread of the pair.
+			// Two offset instances; widen horizontally to cover the pair's diagonal spread.
 			bb := partsBoundsOr(assets.tree.models, assets.tree.parts, 0.82, unit)
 			bb.Min.X, bb.Min.Z = bb.Min.X-0.4, bb.Min.Z-0.4
 			bb.Max.X, bb.Max.Z = bb.Max.X+0.4, bb.Max.Z+0.4
@@ -231,12 +177,7 @@ func objectPreviewBounds(assets Resources, item ObjectPreviewItem) rl.BoundingBo
 	return unit
 }
 
-// partsBoundsOr returns the union AABB of a multi-mesh model's parts (each
-// part's mesh bounds scaled by the part scale, translated by its offset, then
-// the whole scaled by `scale`), or `fallback` when the part list is empty.
-// Part rotation is ignored — an axis-aligned approximation is fine for framing,
-// and the camera margin absorbs the small slack. Shared by every object family
-// (treeModel and propModel use the same {models, parts} shape).
+// partsBoundsOr returns the union AABB of a model's parts (offset + per-part scale, then whole-scaled), or fallback if empty. Part rotation ignored — the camera margin absorbs the slack.
 func partsBoundsOr(models []rl.Model, parts []treePart, scale float32, fallback rl.BoundingBox) rl.BoundingBox {
 	if scale <= 0 {
 		scale = 1

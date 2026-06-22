@@ -7,9 +7,7 @@ import (
 	"crawler/internal/app/core"
 )
 
-// TestResolveEnemyMiss_DealsNoDamage confirms a whiffed enemy attack leaves the
-// whole party's HP untouched (no damage, no status) while still resolving the
-// turn cleanly.
+// TestResolveEnemyMiss_DealsNoDamage: a whiffed enemy attack leaves all party HP untouched while resolving cleanly.
 func TestResolveEnemyMiss_DealsNoDamage(t *testing.T) {
 	g := newTestState()
 	g.Battle.EnemyAttacker = 0
@@ -28,17 +26,13 @@ func TestResolveEnemyMiss_DealsNoDamage(t *testing.T) {
 	}
 }
 
-// TestBeginEnemyAttack_MissSkipsDefendBar drives a forced-miss enemy turn and
-// asserts the defend bar is suppressed (Timing pre-resolved, the miss flag set)
-// — the player never enters the input minigame for a swing that can't land. The
-// miss is forced by re-seeding the battle RNG until the first RollEnemyHit fails
-// for the test enemy's accuracy.
+// TestBeginEnemyAttack_MissSkipsDefendBar: a forced-miss enemy turn suppresses the defend
+// bar (Timing pre-resolved, miss flag set) so the player never plays the input minigame.
 func TestBeginEnemyAttack_MissSkipsDefendBar(t *testing.T) {
 	g := newTestState()
 	stats := core.EffectiveEnemyStats(&core.BattleMembers(g)[0])
 
-	// Find a seed whose first Float64 draw whiffs (>= hit chance). Accuracy caps
-	// below 1, so such a seed always exists; bound the search defensively.
+	// Find a seed whose first draw whiffs; accuracy caps below 1 so one always exists.
 	seed := int64(1)
 	for ; seed < 10000; seed++ {
 		if !core.RollEnemyHit(rand.New(rand.NewSource(seed)), stats) {

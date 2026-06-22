@@ -45,7 +45,7 @@ func TestHealAmount_AddsWIS(t *testing.T) {
 }
 
 func TestStealChance_PassesBaseThrough(t *testing.T) {
-	// Steal no longer scales with DEX — the base passes through unchanged.
+	// Steal no longer scales with DEX — base passes through unchanged.
 	got := StealChance(0.40)
 	want := 0.40
 	if absFloat(got-want) > 1e-9 {
@@ -54,7 +54,6 @@ func TestStealChance_PassesBaseThrough(t *testing.T) {
 }
 
 func TestStealChance_CapsAtOne(t *testing.T) {
-	// A tier-augmented base over 1 should clamp to 1.
 	got := StealChance(1.8)
 	if got != 1 {
 		t.Errorf("StealChance over 1 should clamp, got %v", got)
@@ -62,7 +61,6 @@ func TestStealChance_CapsAtOne(t *testing.T) {
 }
 
 func TestStealChance_ClampsNegativeToZero(t *testing.T) {
-	// Pathological negative base — guard returns 0, not a negative chance.
 	got := StealChance(-0.5)
 	if got != 0 {
 		t.Errorf("StealChance with negative base should clamp to 0, got %v", got)
@@ -83,7 +81,6 @@ func TestSkillDamage_DispatchesByKind(t *testing.T) {
 	if got := SkillDamage(wizard, SkillFirebolt); got != 7 {
 		t.Errorf("SkillDamage(wizard, Firebolt) = %d, want 7", got)
 	}
-	// Steal is utility — no stat scaling.
 	if got := SkillDamage(wizard, SkillSteal); got != 0 {
 		t.Errorf("SkillDamage(*, Steal) = %d, want 0 (utility)", got)
 	}
@@ -101,7 +98,6 @@ func TestSkillHeal_OnlyHealKindAddsWIS(t *testing.T) {
 	if got := SkillHeal(cleric, SkillPrayer); got != 7 {
 		t.Errorf("SkillHeal(cleric, Prayer) = %d, want 7", got)
 	}
-	// Non-heal skills return their flat heal base (typically 0).
 	if got := SkillHeal(cleric, SkillSwipe); got != 0 {
 		t.Errorf("SkillHeal(*, Swipe) = %d, want 0", got)
 	}
@@ -153,9 +149,8 @@ func TestSkillTargetMode_MatchesRegistry(t *testing.T) {
 }
 
 func TestPartySkill_UnlearnedThenLearned(t *testing.T) {
-	// New model: every member starts UNLEARNED — PartySkill returns
-	// SkillNone until a granting node is bought, then resolves to the
-	// learned skill at SkillCursor. (root node id → skill it grants.)
+	// Every member starts UNLEARNED — PartySkill is SkillNone until a granting
+	// node is bought, then resolves to the skill at SkillCursor. (node id → skill.)
 	cases := map[PartyClass]struct {
 		node string
 		want SkillID
@@ -192,14 +187,7 @@ func TestBurnDuration_WithinRange(t *testing.T) {
 }
 
 func TestBurnDuration_InvertedReturnsZero(t *testing.T) {
-	// Degenerate case: max < min returns 0 (no burn). This matches the
-	// shared rollDuration semantics used by every other duration helper
-	// (Sleep / Stun / Bind / Confuse / Poison) — the contract is "fail
-	// open as no status" so a non-burn skill that picks up the
-	// SkillEffect by accident can't roll a phantom DoT. Earlier the
-	// test asserted "return min" on the inverted path, which made
-	// BurnDuration the only helper with that behaviour; consolidating
-	// onto rollDuration aligned the contract.
+	// max < min returns 0 (fail open as no status), matching rollDuration.
 	e := SkillEffect{BurnMinTurns: 4, BurnMaxTurns: 2}
 	if got := e.BurnDuration(nil); got != 0 {
 		t.Errorf("BurnDuration on inverted range = %d, want 0", got)
@@ -207,9 +195,7 @@ func TestBurnDuration_InvertedReturnsZero(t *testing.T) {
 }
 
 func TestBurnDuration_DegenerateMinZero(t *testing.T) {
-	// min <= 0 also returns 0. Matches the shared rollDuration rule
-	// — a non-burn skill picking up the effect won't accidentally
-	// roll a status from a zero-base.
+	// min <= 0 also returns 0 (rollDuration rule).
 	e := SkillEffect{BurnMinTurns: 0, BurnMaxTurns: 0}
 	if got := e.BurnDuration(nil); got != 0 {
 		t.Errorf("BurnDuration on zero range = %d, want 0", got)
@@ -235,9 +221,8 @@ func absFloat(f float64) float64 {
 	return f
 }
 
-// TestProjectXP_Cases pins the pure level-projection used by both AddXP and
-// the victory spoils animation. Curve is geometric: XPForLevel(1)=100,
-// (2)=200, (3)=400 (LevelXPBase=100, LevelXPRatio=2).
+// TestProjectXP_Cases pins the pure level-projection. Geometric curve:
+// XPForLevel(1)=100, (2)=200, (3)=400.
 func TestProjectXP_Cases(t *testing.T) {
 	cases := []struct {
 		startLvl, startXP, added    int
@@ -263,9 +248,8 @@ func TestProjectXP_Cases(t *testing.T) {
 	}
 }
 
-// TestAddXP_MatchesProjectXP locks AddXP's mutation to ProjectXP's pure
-// result (so the spoils screen's animated preview and the real award can't
-// drift) AND that each crossed level grants the right point payouts.
+// TestAddXP_MatchesProjectXP locks AddXP's mutation to ProjectXP's pure result
+// and the per-level point payouts.
 func TestAddXP_MatchesProjectXP(t *testing.T) {
 	cases := []struct{ startLvl, startXP, amount int }{
 		{1, 0, 50}, {1, 0, 150}, {1, 0, 350}, {2, 150, 100}, {1, 90, 1000},
@@ -290,8 +274,7 @@ func TestAddXP_MatchesProjectXP(t *testing.T) {
 	}
 }
 
-// TestAddXP_DeadMemberNoop confirms a downed member earns nothing (the
-// "living members get XP" rule the spoils snapshot relies on for GainedXP).
+// TestAddXP_DeadMemberNoop confirms a downed member earns nothing.
 func TestAddXP_DeadMemberNoop(t *testing.T) {
 	m := PartyMember{Level: 2, XP: 80, HP: 0}
 	if got := AddXP(&m, 500); got != 0 || m.Level != 2 || m.XP != 80 || m.PendingLevelUps != 0 {
@@ -299,19 +282,16 @@ func TestAddXP_DeadMemberNoop(t *testing.T) {
 	}
 }
 
-// TestRestoreMP_ClampsAndReportsDelta locks the Magic Phial's MP-restore
-// helper: it tops up toward MaxMP, returns the actual amount restored, and
-// no-ops on a downed member (mirroring HealMember).
+// TestRestoreMP_ClampsAndReportsDelta: tops toward MaxMP, returns the restored
+// amount, no-ops on a downed member.
 func TestRestoreMP_ClampsAndReportsDelta(t *testing.T) {
 	m := &PartyMember{MP: 2, MaxMP: 10, HP: 5, MaxHP: 5}
 	if got := RestoreMP(m, 5); got != 5 || m.MP != 7 {
 		t.Fatalf("RestoreMP(5): delta %d, MP %d; want 5, 7", got, m.MP)
 	}
-	// Over-fill clamps at MaxMP and reports only what fit.
 	if got := RestoreMP(m, 99); got != 3 || m.MP != 10 {
 		t.Fatalf("RestoreMP overfill: delta %d, MP %d; want 3, 10", got, m.MP)
 	}
-	// Already full → no-op, zero delta.
 	if got := RestoreMP(m, 5); got != 0 {
 		t.Fatalf("RestoreMP at full should restore 0, got %d", got)
 	}

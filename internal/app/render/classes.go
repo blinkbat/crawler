@@ -16,21 +16,13 @@ type partyClassPresentation struct {
 	dance       func(float32) (float32, float32, float32, float32)
 }
 
-// classRobeGold is the gilt trim painted on the party robe sprites (Cleric sash,
-// Wizard robe/hat trim). The sprite-side cousin of the HUD gilt accent family
-// (giltBright/giltDim, theme.go) — kept as one color.RGBA so the robe trim tunes
-// in a single place instead of each draw function carrying its own near-identical
-// gold literal. (Warrior's gold is its HUD slot accent, turnColor, a separate
-// source by design.)
+// classRobeGold is the gilt trim on party robe sprites (Cleric sash, Wizard trim).
+// (Warrior's gold is its HUD slot accent, turnColor, a separate source by design.)
 var classRobeGold = color.RGBA{R: 226, G: 196, B: 93, A: 255}
 
 var partyClassPresentations = map[core.PartyClass]partyClassPresentation{
-	// turnColor is the member's accent "slot color" — the single source
-	// for every HUD/UI/log tint keyed to a class (turn-order panel, party
-	// stat cards, panels member cards, action-log names, target markers).
-	// Per-class hues: Warrior gold, Cleric off-white, Thief purple,
-	// Wizard pale blue. Tuned bright enough to read on the dark glass HUD
-	// and mutually distinct at a glance.
+	// turnColor is the member's accent "slot color" — single source for every
+	// HUD/UI/log tint keyed to a class. Tuned distinct on the dark glass HUD.
 	core.ClassWarrior: {
 		turnColor:   color.RGBA{R: 232, G: 184, B: 82, A: 255}, // gold
 		textureSeed: 1,
@@ -57,12 +49,8 @@ var partyClassPresentations = map[core.PartyClass]partyClassPresentation{
 	},
 }
 
-// init asserts every core.PartyClass has a partyClassPresentations
-// entry — mirrors the panic-at-init pattern AGENTS.md documents for
-// the skill handler / tile label / prop coverage tables. Adding a
-// PartyClass without registering its presentation now panics at
-// startup instead of silently rendering a default sprite with the
-// wrong turn color.
+// init: every core.PartyClass must have a partyClassPresentations entry, else
+// it would render a default sprite with the wrong turn color. Panic at startup.
 func init() {
 	for _, def := range core.PartyClasses() {
 		if _, ok := partyClassPresentations[def.Class]; !ok {
@@ -79,36 +67,20 @@ func partyClassPresentationFor(class core.PartyClass) partyClassPresentation {
 	return presentation
 }
 
-// classAccent is the per-class accent color (the class's turn color) used for
-// card spines, name ticks, and the turn-order panel. One accessor so the six
-// draw sites don't each two-hop through partyClassPresentationFor(...).turnColor
-// — a single seam if the accent ever stops being the turn color.
+// classAccent is the per-class accent color (its turn color); single seam if the
+// accent ever stops being the turn color.
 func classAccent(class core.PartyClass) rl.Color {
 	return partyClassPresentationFor(class).turnColor
 }
 
-// drawClassGlyph paints a small sigil identifying a party-class — the
-// kind of pictograph 90s D&D box art used to flank a character name.
-// Glyphs are geometric (no per-class texture asset) so they render
-// crisp at any DPI:
-//
-//   - Warrior: crossed swords (an X of two narrow rotated bars)
-//   - Cleric:  Greek cross (centred + symbol)
-//   - Thief:   downward dagger silhouette (long shaft + crossguard)
-//   - Wizard:  five-pointed star sigil
-//
-// (cx, cy) is the glyph centre; `r` is the glyph's half-extent.
-// `col` is the ink colour — callers typically pass the class accent
-// tint so the sigil reads as the class's own emblem.
+// drawClassGlyph paints a small per-class sigil. Geometric (no texture asset) so
+// it stays crisp at any DPI. (cx,cy) is the centre, r the half-extent, col the ink.
 func drawClassGlyph(cx, cy, r float32, class core.PartyClass, col color.RGBA) {
 	classGlyphDrawers[class](cx, cy, r, col)
 }
 
-// classGlyphDrawers indexes each party class to the routine that paints its
-// sigil. A fixed-size array keyed by the PartyClass iota (mirrors
-// statIconDrawers / panelTabDrawers): adding a class bumps core.PartyClassCount,
-// which leaves a nil slot the init scan below trips on at startup rather than a
-// blank sigil at draw time.
+// classGlyphDrawers maps each PartyClass iota to its sigil painter. A new class
+// bumps core.PartyClassCount, leaving a nil slot the init scan trips on at startup.
 var classGlyphDrawers = [core.PartyClassCount]func(cx, cy, r float32, col color.RGBA){
 	core.ClassWarrior: drawClassGlyphWarrior,
 	core.ClassCleric:  drawClassGlyphCleric,
@@ -120,28 +92,19 @@ func init() {
 	assertTableComplete("classGlyphDrawers", len(classGlyphDrawers), func(i int) bool {
 		return classGlyphDrawers[i] == nil
 	})
-	// partyClassPresentations is still a map; keep the cross-coverage check so a
-	// class with a glyph but no presentation (or vice versa) fails at startup.
+	// Cross-coverage: a class with a glyph but no presentation (or vice versa) fails at startup.
 	assertTableComplete("partyClassPresentations", len(classGlyphDrawers), func(i int) bool {
 		_, ok := partyClassPresentations[core.PartyClass(i)]
 		return !ok
 	})
 }
 
-// Warrior — two crossed longswords: blades tapered, crossguards
-// thicker than the blades, round pommels on the hilt ends, plus a
-// central knot pip where the swords meet. Built from triangle pairs
-// (blades) + filled circles (pommels) + small rectangles
-// (crossguards). The pommels and the meeting-knot use giltBright so
-// they catch the eye as cast-metal highlights against the duller
-// blade body.
+// Warrior — two crossed longswords with gilt pommels and a central knot pip.
 func drawClassGlyphWarrior(cx, cy, r float32, col color.RGBA) {
 	highlight := giltBright
 
-	// Each sword has: pommel (top-end), crossguard, tapered blade.
-	// Diagonal axes point top-left→bottom-right (sword A) and
-	// top-right→bottom-left (sword B). For each, define unit vector
-	// along blade (`ax`,`ay`) and perpendicular (`px`,`py`).
+	// Per sword: unit vector along blade (ax,ay), perpendicular (px,py).
+	// Sword A points top-left→bottom-right, sword B top-right→bottom-left.
 	swords := [2]struct {
 		ax, ay, px, py float32
 	}{
@@ -149,20 +112,19 @@ func drawClassGlyphWarrior(cx, cy, r float32, col color.RGBA) {
 		{ax: -sqrt2Inv, ay: sqrt2Inv, px: -sqrt2Inv, py: -sqrt2Inv},
 	}
 	for _, s := range swords {
-		hiltEndX := cx - s.ax*r // sword pointing "inward" tip → outward hilt
+		hiltEndX := cx - s.ax*r // inward tip → outward hilt
 		hiltEndY := cy - s.ay*r
 		bladeTipX := cx + s.ax*r
 		bladeTipY := cy + s.ay*r
-		// Tapered blade: start half-width 1.6 near the guard, taper to 0 at the tip.
+		// Tapered blade: half-width near the guard, taper to a point.
 		guardBaseX := hiltEndX + s.ax*r*0.30
 		guardBaseY := hiltEndY + s.ay*r*0.30
 		halfW := float32(1.5)
 		gL := rl.NewVector2(guardBaseX+s.px*halfW, guardBaseY+s.py*halfW)
 		gR := rl.NewVector2(guardBaseX-s.px*halfW, guardBaseY-s.py*halfW)
 		tip := rl.NewVector2(bladeTipX, bladeTipY)
-		// Two triangles per blade (taper from guard width to a point).
 		drawTriangleCCW(gL, tip, gR, col)
-		// Crossguard: a thin perpendicular bar sitting just above the guard base.
+		// Crossguard: thin perpendicular bar above the guard base.
 		guardHalf := r * 0.55
 		guardThick := float32(1.4)
 		gcL := rl.NewVector2(guardBaseX+s.px*guardHalf, guardBaseY+s.py*guardHalf)
@@ -171,26 +133,17 @@ func drawClassGlyphWarrior(cx, cy, r float32, col color.RGBA) {
 		gcRi := rl.NewVector2(gcR.X-s.ax*guardThick, gcR.Y-s.ay*guardThick)
 		drawTriangleCCW(gcL, gcLi, gcRi, col)
 		drawTriangleCCW(gcL, gcRi, gcR, col)
-		// Pommel: small bright disc at the hilt end.
-		rl.DrawCircleV(rl.NewVector2(hiltEndX, hiltEndY), 1.8, highlight)
+		rl.DrawCircleV(rl.NewVector2(hiltEndX, hiltEndY), 1.8, highlight) // pommel
 	}
-	// Central knot — bright pip where the two swords cross.
-	rl.DrawCircleV(rl.NewVector2(cx, cy), 1.6, highlight)
+	rl.DrawCircleV(rl.NewVector2(cx, cy), 1.6, highlight) // central knot
 }
 
-// Cleric — fleur-tipped Greek cross with a centre disc, like the
-// altar emblem on a 90s D&D paladin sigil. The arms flare slightly
-// at their tips (small caps wider than the arm) and the centre
-// catches a bright pip. Reads as "holy symbol" at any size down to
-// ~12 px without depending on an italic font asset.
+// Cleric — fleur-tipped Greek cross with a centre disc and bright pip.
 func drawClassGlyphCleric(cx, cy, r float32, col color.RGBA) {
 	armHalf := r * 0.32
-	// Vertical bar.
-	rl.DrawRectangle(int32(cx-armHalf), int32(cy-r), int32(armHalf*2), int32(r*2), col)
-	// Horizontal bar.
-	rl.DrawRectangle(int32(cx-r), int32(cy-armHalf), int32(r*2), int32(armHalf*2), col)
-	// Flared tip caps — slightly wider than the arms, near each
-	// arm's outer end.
+	rl.DrawRectangle(int32(cx-armHalf), int32(cy-r), int32(armHalf*2), int32(r*2), col) // vertical bar
+	rl.DrawRectangle(int32(cx-r), int32(cy-armHalf), int32(r*2), int32(armHalf*2), col) // horizontal bar
+	// Flared tip caps — slightly wider than the arms.
 	capHalf := r * 0.5
 	capThick := r * 0.18
 	if capThick < 1.5 {
@@ -205,12 +158,8 @@ func drawClassGlyphCleric(cx, cy, r float32, col color.RGBA) {
 	rl.DrawCircleV(rl.NewVector2(cx, cy), r*0.16, giltBright)
 }
 
-// daggerGlyphStyle captures the few per-call differences between the two
-// dagger sigils that share this shape — the Thief class glyph and the
-// equipment weapon-slot icon. They were near-identical copies that had already
-// drifted (min blade width 1.5 vs 1.6, the gilt pommel highlight, guard
-// thickness, fuller nudge); one body now draws both so the dagger art changes
-// in a single place.
+// daggerGlyphStyle is the per-call difference between the two dagger sigils
+// sharing this shape (Thief class glyph and equipment weapon-slot icon).
 type daggerGlyphStyle struct {
 	minBladeHalfW float32 // clamp so the blade stays visible at small radii
 	guardH        float32 // crossguard bar thickness (also sets the blade top)
@@ -225,35 +174,31 @@ func drawDaggerGlyph(cx, cy, r float32, col color.RGBA, st daggerGlyphStyle) {
 	if bladeHalfW < st.minBladeHalfW {
 		bladeHalfW = st.minBladeHalfW
 	}
-	// Pommel — disc at the top, optional bright highlight.
+	// Pommel — disc at the top, optional highlight.
 	pommelY := cy - r + 1
 	rl.DrawCircleV(rl.NewVector2(cx, pommelY), bladeHalfW*1.4, col)
 	if st.pommelHi {
 		rl.DrawCircleV(rl.NewVector2(cx, pommelY), bladeHalfW*0.6, giltBright)
 	}
-	// Crossguard — horizontal bar with small downturned tips, like
-	// a baselard / parrying dagger.
+	// Crossguard — horizontal bar with small downturned tips.
 	guardY := cy - r*0.55
 	guardHalfW := r * 0.75
 	rl.DrawRectangle(int32(cx-guardHalfW), int32(guardY), int32(guardHalfW*2), int32(st.guardH), col)
 	rl.DrawRectangle(int32(cx-guardHalfW), int32(guardY), 2, 3, col)   // left horn
 	rl.DrawRectangle(int32(cx+guardHalfW-2), int32(guardY), 2, 3, col) // right horn
-	// Blade — body rectangle.
 	bladeTop := guardY + st.guardH
 	bladeBottom := cy + r*0.62
 	rl.DrawRectangle(int32(cx-bladeHalfW), int32(bladeTop), int32(bladeHalfW*2), int32(bladeBottom-bladeTop), col)
-	// Centre fuller — a thin darker stripe down the blade.
+	// Centre fuller — thin darker stripe down the blade.
 	fuller := fadeColor(col, 0.5)
 	rl.DrawRectangle(int32(cx)+st.fullerXOff, int32(bladeTop+2), 1, int32(bladeBottom-bladeTop-4), fuller)
-	// Tapered tip triangle.
 	tip := rl.NewVector2(cx, cy+r)
 	left := rl.NewVector2(cx-bladeHalfW, bladeBottom)
 	right := rl.NewVector2(cx+bladeHalfW, bladeBottom)
 	drawTriangleCCW(tip, right, left, col)
 }
 
-// Thief — single down-pointing dagger with a gilt-lit pommel. Reads as a
-// finished weapon sigil rather than a silhouette.
+// Thief — single down-pointing dagger with a gilt-lit pommel.
 func drawClassGlyphThief(cx, cy, r float32, col color.RGBA) {
 	drawDaggerGlyph(cx, cy, r, col, daggerGlyphStyle{
 		minBladeHalfW: 1.6,
@@ -263,27 +208,18 @@ func drawClassGlyphThief(cx, cy, r float32, col color.RGBA) {
 	})
 }
 
-// Wizard — five-pointed star with an inset pentagonal field and a
-// bright centre pip, like a scryer's sigil pressed into a brass
-// medallion. The inner field reads as the negative space inside the
-// star's five "rays" so the silhouette doesn't go solid at small
-// sizes.
+// Wizard — five-pointed star with an inset pentagon hub and bright centre pip.
 func drawClassGlyphWizard(cx, cy, r float32, col color.RGBA) {
 	const points = 5
-	// Shared star primitive (reused scratch buffer, no per-frame alloc — this
-	// glyph draws every frame on the always-visible party ribbon's Wizard card).
+	// starVerts reuses a scratch buffer (no per-frame alloc — draws every frame).
 	verts := starVerts(cx, cy, r, r*0.45, points)
 	centre := rl.NewVector2(cx, cy)
 	for i := 0; i < len(verts); i++ {
 		next := (i + 1) % len(verts)
 		drawTriangleCCW(centre, verts[next], verts[i], col)
 	}
-	// Inset darker pentagon — a centre disc that visually pulls the
-	// five rays out from a "hub" instead of letting the star sit as
-	// a solid silhouette.
-	rl.DrawCircleV(centre, r*0.22, fadeColor(col, 0.5))
-	// Bright cast-metal pip at the very centre.
-	rl.DrawCircleV(centre, r*0.12, giltBright)
+	rl.DrawCircleV(centre, r*0.22, fadeColor(col, 0.5)) // inset hub
+	rl.DrawCircleV(centre, r*0.12, giltBright)          // centre pip
 }
 
 func drawWarriorPartyPixels(pixels []color.RGBA, w, h int) {

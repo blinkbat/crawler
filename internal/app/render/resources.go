@@ -11,13 +11,9 @@ import (
 	"unsafe"
 )
 
-// uiFontTTF is the embedded UI face — Della Respira (SIL Open Font License
-// 1.1, bundled with its OFL.txt under fonts/). Embedding it makes the
-// typography identical on every machine and impossible to miss at runtime,
-// instead of depending on whatever serif a given OS happens to ship. It is
-// the ONE font the whole UI draws with (HUD, battle, title, editor); the
-// glyphs it doesn't carry (geometric/arrow symbols plus a few typographic
-// marks like … ’ ≈) are drawn procedurally — see richtext.go.
+// uiFontTTF is the embedded UI face — Della Respira (SIL OFL 1.1, OFL.txt under
+// fonts/). The ONE font the whole UI draws with; glyphs it lacks (arrows, …, etc.)
+// are drawn procedurally (richtext.go).
 //
 //go:embed fonts/DellaRespira-Regular.ttf
 var uiFontTTF []byte
@@ -25,26 +21,17 @@ var uiFontTTF []byte
 type Resources struct {
 	materials  map[core.MaterialSet]worldMaterialResources
 	skyTexture rl.Texture2D
-	// starTexture is a transparent overlay sampled by DrawSkyBackground
-	// on top of skyTexture. Alpha varies with the time-of-day curve
-	// (timeProfile.StarAlpha), so the layer fades in through evening,
-	// peaks at midnight, and washes out through dawn.
+	// starTexture is the night overlay sampled by DrawSkyBackground; its alpha
+	// follows the time-of-day curve (timeProfile.StarAlpha).
 	starTexture rl.Texture2D
-	// enemyVisuals is the kind→billboard lookup, a dense slice indexed by the
-	// EnemyKind iota (an array index, not a map hash, on the per-sprite draw
-	// path). Multiple kinds can alias the same texture (placeholder sprites for
-	// new monsters), so it does NOT own the underlying handles — Unload would
-	// double-free them. enemyTextures is the canonical owning list the renderer
-	// minted at load time; Unload walks that. Still a reference type (slice), so
-	// the editor's live-preview writes propagate across by-value Resources copies.
+	// enemyVisuals is the kind→billboard lookup, a dense slice indexed by EnemyKind
+	// (array index, not map hash, on the hot path). Kinds can alias one texture, so
+	// it does NOT own the handles; enemyTextures is the owning list Unload walks.
+	// Still a slice, so editor live-preview writes propagate across by-value copies.
 	enemyVisuals  []enemyVisual
 	enemyTextures []rl.Texture2D
-	// partyVisuals is the class→billboard lookup, symmetric with enemyVisuals: a
-	// dense slice indexed by the PartyClass iota holding the per-class
-	// size/placement/shadow/tint knobs authored in the editor's Party Visualizer
-	// and overlaid from maps/sprites/partyvisuals.json. Like enemyVisuals it does
-	// NOT own its textures (a class can alias the procedural fallback);
-	// partyTextures is the owning list Unload walks.
+	// partyVisuals is the class→billboard lookup, symmetric with enemyVisuals;
+	// partyTextures is its owning list.
 	partyVisuals  []enemyVisual
 	partyTextures []rl.Texture2D
 	hudFont       rl.Font
@@ -54,108 +41,70 @@ type Resources struct {
 	billboardFog billboardFogShaderPipe
 	tree         treeModel
 
-	// Field-only props. Boulders / bushes / mushrooms are scattered as
-	// blockers (large) or procedural decorations (small/tiny) when the
-	// active area is the field.
+	// Field-only props, scattered as blockers (large) or decoration (small).
 	rockProp     propModel
 	bushProp     propModel
 	mushroomProp propModel
-	// chestBody / chestLid are the painted-wood chest pieces. Drawn
-	// in DrawChests as two parts so the looted-chest path can lift
-	// the lid straight up + tilt back without re-posing the body.
+	// chestBody / chestLid — drawn as two parts so the looted path can lift+tilt
+	// the lid without re-posing the body.
 	chestBody propModel
 	chestLid  propModel
 
-	// Universal floor variants — keyed by their floor-layer char so the
-	// renderer can swap in a cobblestone, plank, water, sand or snow tile
-	// regardless of the area's material set. Built once on load and shared
-	// across materials.
+	// Universal floor variants keyed by floor-layer char, shared across materials.
 	specialFloors map[byte]rl.Model
-	// specialFloorTable is the char-indexed mirror of specialFloors, probed
-	// once per floor tile per frame (twice with the depth prepass) — an array
-	// index beats the map hash on that hot path. Built once after the map is
-	// populated; the map stays authoritative for Unload.
+	// specialFloorTable is the char-indexed mirror, probed per floor tile per
+	// frame (array index beats the map hash). The map stays authoritative for Unload.
 	specialFloorTable *modelTable256
 
-	// Face variants — keyed by their face-layer skin char (ivy / cracked /
-	// crumbling). Each is a vertical cliff-face quad with its own rock-based
-	// skin, drawn in place of the area material's faceModel for that cell. Plain
-	// TileRock is NOT here — it uses the material face so a dungeon vs field
-	// cliff still differs. Built once, shared across materials; Unload walks it.
+	// Face variants keyed by face-skin char (ivy / cracked / crumbling). Plain
+	// TileRock is NOT here — it uses the per-material face. Shared across materials.
 	faceVariants map[byte]rl.Model
-	// faceVariantTable is the char-indexed mirror of faceVariants, read when a
-	// cliff face is drawn — array index instead of a map hash. Built once after
-	// the map is populated; the map stays authoritative for Unload.
+	// faceVariantTable is the char-indexed mirror; map stays authoritative for Unload.
 	faceVariantTable *modelTable256
 
-	// rampModel is the solid wedge (triangular prism) drawn for ramp floor
-	// tiles — built once, earth-textured, drawn yaw-rotated per ascent
-	// direction. Sized to one tile × LevelStep so it meets the low and high
-	// floors flush (see buildRampWedgeModel).
+	// rampModel is the solid wedge for ramp tiles, earth-textured, drawn yaw-
+	// rotated. Sized one tile × LevelStep so it meets both floors flush.
 	rampModel rl.Model
 
-	// underModel is the downward-facing horizontal quad drawn as the UNDERSIDE
-	// of a floating cube (a deck/bridge with air beneath it) — geometry that
-	// only the voxel stack produces, since a heightfield column is always solid
-	// to the floor. One tile wide/deep, normal -Y, earth-textured like the ramp.
-	// See drawVoxelColumn in voxel.go.
+	// underModel is the downward -Y quad for floating-cube undersides (voxel
+	// maps only). One tile, earth-textured. See drawVoxelColumn in voxel.go.
 	underModel rl.Model
 
-	// New decor models keyed by decor-layer char (tall grass, flowers,
-	// clover, reeds, bones, scorch, blood, cobweb, stump, log, leaf pile).
-	// Authoring + Unload iteration uses the map; the per-tile-per-frame
-	// renderer reads decorModelTable below for array-indexed dispatch.
+	// decorModels keyed by decor-layer char. The map drives authoring + Unload;
+	// decorModelTable below is the hot-path mirror.
 	decorModels map[byte]propModel
-	// decorModelTable is the [256]propModel mirror of decorModels,
-	// held by pointer so passing Resources by value (drawDecor,
-	// DrawWorld, ...) stays cheap — we'd otherwise copy ~12KB of
-	// table per call. The world-draw hot path reads it once per
-	// tile per frame; an array index is cheaper than the map hash.
-	// "Registered" check is len(parts) > 0 — every load* helper builds
-	// at least one part, so an empty slice means "not registered for
-	// this char." The map stays as the authored source and as the
-	// Unload iteration target so freeing handles is map-safe.
+	// decorModelTable is the [256]propModel mirror, held by pointer so passing
+	// Resources by value stays cheap. "Registered" = len(parts) > 0. The map
+	// stays authoritative for Unload.
 	decorModelTable *[256]propModel
 
-	// New blocking props keyed by props-layer char (crate, barrel, urn,
-	// stalagmite, pillar, broken pillar, statue, obelisk, fountain). Same
-	// dispatch shape as decorModels — the renderer falls back to the
-	// existing tree/boulder/bush cases when a char isn't here.
+	// propModels keyed by props-layer char. Same dispatch shape as decorModels;
+	// the renderer falls back to tree/boulder/bush cases when a char isn't here.
 	propModels map[byte]propModel
-	// propModelTable is the [256]propModel mirror of propModels, by
-	// pointer for the same Resources-pass-by-value reason as
-	// decorModelTable. Indexed dispatch on the hot path; map remains
-	// for authoring and Unload.
+	// propModelTable is the [256]propModel mirror, by pointer for the same reason
+	// as decorModelTable. Map remains for authoring and Unload.
 	propModelTable *[256]propModel
 
-	// doorProps holds one model per core.DoorStyle (building / cave /
-	// field). DrawDoors indexes by the door's Style and rotates the chosen
-	// model by the authored facing so the opening points the right way.
+	// doorProps holds one model per core.DoorStyle; DrawDoors indexes by Style
+	// and rotates by the authored facing.
 	doorProps [core.DoorStyleCount]propModel
 }
 
 type worldMaterialResources struct {
-	// Each model owns its own diffuse texture via its material. Unload via
-	// rl.UnloadModel only — don't keep separate texture handles.
-	faceModel    rl.Model // per-material plain-rock cliff-face quad (dungeon brick vs field rock)
+	// Each model owns its diffuse texture via its material; Unload via UnloadModel only.
+	faceModel    rl.Model // per-material plain-rock cliff-face quad
 	floorModel   rl.Model
-	ceilingModel rl.Model // thin slab textured with the wall pixels, drawn over ceiling-flagged tiles
-	// Optional secondary floor variants for the field (dirt + dark grass).
-	// Picked per-tile by hash so the field reads as varied terrain instead
-	// of one uniform grass texture. Empty for the dungeon material.
+	ceilingModel rl.Model // thin wall-textured slab over ceiling-flagged tiles
+	// Field-only secondary floor variants, picked per-tile by hash. Empty for dungeon.
 	floorDirtModel  rl.Model
 	floorDarkModel  rl.Model
 	hasFloorVariant bool
 }
 
-// LoadResources builds every procedural texture/model/font/shader the
-// renderer needs. Staged cleanup: each handle is committed to `r` as it's
-// created, and a deferred recover() calls r.Unload() if construction
-// panics partway. That way a mid-load failure (texture upload OOM, prop
-// builder panic) doesn't leak the handles that DID make it onto the GPU.
-//
-// On success we re-panic after cleanup so the caller still sees the
-// failure — this isn't a graceful degradation, just a leak-safe abort.
+// LoadResources builds every procedural texture/model/font/shader. Staged
+// cleanup: each handle is committed to `r` as created; a deferred recover()
+// calls r.Unload() then re-panics if construction fails partway, so a mid-load
+// failure doesn't leak handles already on the GPU.
 func LoadResources() (r Resources) {
 	committed := false
 	defer func() {
@@ -163,10 +112,8 @@ func LoadResources() (r Resources) {
 			return
 		}
 		if rec := recover(); rec != nil {
-			// Walk every field we managed to populate and unload it. r.Unload
-			// is tolerant of zero values: ranging nil maps is a no-op, and
-			// raylib's UnloadModel/UnloadTexture on a zero-ID handle skips
-			// cleanly (the underlying GL deleters guard on id == 0).
+			// r.Unload tolerates zero values (nil-map ranges no-op; UnloadModel/
+			// Texture skip on id == 0).
 			r.Unload()
 			panic(rec)
 		}
@@ -175,31 +122,23 @@ func LoadResources() (r Resources) {
 	r.lighting = loadLightingShader()
 	r.billboardFog = loadBillboardFogShader()
 
-	// Commit each base material the instant it's built — a panic in a LATER
-	// load (the next material or a variant) must find every earlier model in
-	// r.materials so the recover-path Unload can free it. Building both before
-	// the first commit would orphan dungeonMat if fieldMat's load panicked.
+	// Commit each material the instant it's built so the recover-path Unload can
+	// find every earlier model if a later load panics.
 	dungeonMat := loadWorldMaterial(makeStoneBrickPixels(128, 128), makeStoneFloorPixels(128, 128), r.lighting.shader)
 	r.materials = map[core.MaterialSet]worldMaterialResources{
 		core.MaterialDungeon: dungeonMat,
 	}
 	fieldMat := loadWorldMaterial(makeRockWallPixels(128, 128), makeGrassPixels(128, 128), r.lighting.shader)
 	r.materials[core.MaterialField] = fieldMat
-	// Field gets two extra floor variants (dirt + dark grass), procedurally
-	// chosen per tile by hash for terrain variation. Built using the same
-	// path as the primary floor so they share filter / mipmap settings.
-	// Commit after EACH variant load so a panic in the second one leaves
-	// the first in r.materials for the recover-path Unload to free. (Unload
-	// frees the variant handles unconditionally, so the variant-less commit
-	// at line ~130 wouldn't have freed a half-built pair on its own.)
+	// Field's two extra floor variants (dirt + dark grass), per-tile by hash.
+	// Commit after EACH so a panic in the second leaves the first for Unload.
 	fieldMat.floorDirtModel = loadFloorModel(makeDirtPixels(128, 128), r.lighting.shader)
 	r.materials[core.MaterialField] = fieldMat
 	fieldMat.floorDarkModel = loadFloorModel(makeDarkGrassPixels(128, 128), r.lighting.shader)
 	fieldMat.hasFloorVariant = true
 	r.materials[core.MaterialField] = fieldMat
-	// Parallel to assertDecorCoverage / assertPropCoverage: every
-	// core.MaterialSet must have a loaded worldMaterial. Without this a
-	// new material would silently fall back to Field in worldMaterial().
+	// Every core.MaterialSet must have a loaded worldMaterial, else it silently
+	// falls back to Field in worldMaterial().
 	assertMaterialCoverage(r.materials)
 
 	r.skyTexture = loadTexture(makeSkyPixels(1024, 512), 1024, 512, rl.FilterTrilinear)
@@ -207,11 +146,8 @@ func LoadResources() (r Resources) {
 	rl.SetTextureFilter(r.skyTexture, rl.FilterTrilinear)
 	rl.SetTextureWrap(r.skyTexture, rl.WrapClamp)
 
-	// Star overlay: same dimensions as the sky so source-rect math
-	// in DrawSkyBackground works on either texture without a per-call
-	// branch. Point filter (no mipmaps, no trilinear) keeps the
-	// pinpoint stars from blurring into wide smudges at small dest
-	// scales — a star is a 1- or 2-pixel highlight by design.
+	// Star overlay: same dimensions as the sky (shared source-rect math).
+	// Point filter so the pinpoint stars don't blur at small dest scales.
 	r.starTexture = loadTexture(makeStarPixels(1024, 512), 1024, 512, rl.FilterPoint)
 	rl.SetTextureWrap(r.starTexture, rl.WrapClamp)
 
@@ -223,72 +159,47 @@ func LoadResources() (r Resources) {
 
 	r.hudFont, r.hudFontOwned = loadHUDFont()
 
-	// Bark and leaf textures are authored at non-tile sizes (64×128 and 96×96)
-	// so they go through loadRepeatTexture; the rock-wall pixels live at
-	// the standard 128×128 tile size and use the mipmapped pipeline.
-	// These textures are about to be handed to loadTreeModel, which assumes
-	// ownership via the model (setModelTexture → UnloadModel frees them).
-	// There's a small leak window: a panic between minting a texture here and
-	// the model taking ownership would orphan it (the recover-path r.Unload
-	// can't see it yet). This is deliberately NOT fixed by also tracking these
-	// in an owned []Texture2D (the way enemyTextures are) — those billboard
-	// textures aren't model-owned, but these ARE, so an owned list would
-	// double-free them on the normal teardown. The window only matters on a
-	// load-time panic (the process is already crashing), so the orphan is an
-	// accepted trade-off rather than risking a double-free in the happy path.
+	// Bark (64×128) and leaf (96×96) are non-tile sizes → loadRepeatTexture.
+	// loadTreeModel takes ownership via the model (UnloadModel frees them), so
+	// they're NOT tracked in an owned list (that would double-free on teardown).
+	// A panic before the model takes ownership orphans them — accepted, since the
+	// process is already crashing.
 	barkTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
 	leafTex := loadRepeatTexture(makeLeafPixels(96, 96), 96, 96)
 	r.tree = loadTreeModel(r.lighting.shader, barkTex, leafTex)
 
-	// Field props each get their OWN texture instance (no cross-prop sharing).
-	// NOTE: raylib's UnloadModel frees the materials' maps array but NOT the
-	// GL textures bound into them (rmodels.c: "the user is responsible for
-	// freeing models shaders and textures"), so propModel.unload() does not
-	// reclaim these. They're effectively held until process exit, where the
-	// driver frees all GPU memory — acceptable because Resources has a single
-	// process-lifetime (Unload runs once, run.go). The per-prop instancing
-	// keeps that exit-time release free of the alias double-free a shared
-	// texture would invite; if Resources ever becomes recreatable mid-run,
-	// these need explicit UnloadTexture tracking to avoid a real leak.
+	// Each field prop gets its OWN texture instance (no sharing). UnloadModel
+	// frees meshes but NOT bound GL textures, so these are held until process
+	// exit (acceptable: Unload runs once). Per-prop instancing avoids the alias
+	// double-free a shared texture would invite.
 	rockTex := loadTiledTexture(makeRockWallPixels(128, 128))
 	bushTex := loadRepeatTexture(makeLeafPixels(96, 96), 96, 96)
 
 	r.rockProp = loadRockProp(r.lighting.shader, rockTex)
 	r.bushProp = loadBushProp(r.lighting.shader, bushTex)
 	r.mushroomProp = loadMushroomProp(r.lighting.shader)
-	// Chest props share the bark texture family but mint two
-	// distinct atlas instances so each model owns its texture
-	// outright (setModelTexture → unload-with-model contract).
+	// Chest body + lid mint distinct bark instances so each model owns its texture.
 	chestBodyWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
 	chestLidWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
 	r.chestBody = loadChestBodyProp(r.lighting.shader, chestBodyWoodTex)
 	r.chestLid = loadChestLidProp(r.lighting.shader, chestLidWoodTex)
 
-	// Soft ground-shadow disc — a flat plane textured with the
-	// radial-gradient shadow sprite, drawn UNLIT (default material
-	// shader) so the lighting pass never touches it. Stored as a
-	// package singleton (groundShadowModel) because drawGroundShadow
-	// is called from many free-function prop draws.
+	// Soft ground-shadow disc, drawn UNLIT (default shader). Package singleton
+	// since drawGroundShadow is called from many free-function prop draws.
 	groundShadowModel = loadGroundShadowModel()
 	groundShadowReady = true
 
-	// HUD material grain — a tiny transparent speckle/fiber overlay tiled over
-	// every glass panel body (drawGlassRelief) so the UI reads as real leaded
-	// glass rather than a flat fill. Package singleton like groundShadowModel:
-	// the theme draw helpers are free functions with no Resources handle.
+	// HUD glass-grain overlay (drawGlassRelief). Package singleton like the
+	// shadow disc — the theme helpers are free functions.
 	hudGrainTex = loadTexture(makeHudGrainPixels(64, 64), 64, 64, rl.FilterBilinear)
 	hudGrainReady = true
 
-	// Wall-torch flame blob — a small unlit emissive sphere (default
-	// material shader, like the ground-shadow disc) tinted to fire
-	// colours and animated per-frame by drawWallTorch.
+	// Wall-torch flame — unlit emissive sphere (default shader), animated by drawWallTorch.
 	torchFlameModel = rl.LoadModelFromMesh(rl.GenMeshSphere(1, 8, 10))
 	torchFlameReady = true
 
-	// Universal floor variants — built once and shared across every material
-	// set so a cobblestone path through a dungeon and one across a field
-	// read identically. Initialize the map first so a panic mid-way still
-	// unloads the variants that did land.
+	// Universal floor variants, shared across material sets. Init the map first
+	// so a panic mid-way still unloads what landed.
 	r.specialFloors = make(map[byte]rl.Model)
 	r.specialFloors[core.FloorCobble] = loadFloorModel(makeCobblePixels(128, 128), r.lighting.shader)
 	r.specialFloors[core.FloorPlank] = loadFloorModel(makePlankPixels(128, 128), r.lighting.shader)
@@ -297,28 +208,22 @@ func LoadResources() (r Resources) {
 	r.specialFloors[core.FloorSand] = loadFloorModel(makeSandPixels(128, 128), r.lighting.shader)
 	r.specialFloors[core.FloorSnow] = loadFloorModel(makeSnowPixels(128, 128), r.lighting.shader)
 	// Grass / dirt / dark grass / stone are also universal — without these,
-	// painting "Grass" or "Stone" inside a dungeon-material map silently
-	// reuses the material's base floorModel and looks identical to default,
-	// because the per-material variant switch in drawFloorTile only kicks
-	// in when hasFloorVariant is true (field-only).
+	// painting them in a dungeon map silently reuses the base floorModel (the
+	// per-material variant switch only fires when hasFloorVariant, field-only).
 	r.specialFloors[core.FloorGrass] = loadFloorModel(makeGrassPixels(128, 128), r.lighting.shader)
 	r.specialFloors[core.FloorDirt] = loadFloorModel(makeDirtPixels(128, 128), r.lighting.shader)
 	r.specialFloors[core.FloorDarkGrass] = loadFloorModel(makeDarkGrassPixels(128, 128), r.lighting.shader)
 	r.specialFloors[core.FloorStone] = loadFloorModel(makeStoneFloorPixels(128, 128), r.lighting.shader)
-	// Face variants — vertical cliff-face quads with per-char rock skins (ivy /
-	// cracked / crumbling), shared across material sets like specialFloors. The
-	// cracked / crumbling variants are now flat quads carrying their damaged
-	// TEXTURE (the old deformed-cube geometry is gone with the wall cubes).
-	// Initialize first so a panic mid-way still unloads what landed.
+	// Face variants — cliff-face quads with per-char rock skins (ivy / cracked /
+	// crumbling), flat quads carrying their damaged texture. Init first for the
+	// panic-cleanup path.
 	r.faceVariants = make(map[byte]rl.Model)
 	r.faceVariants[core.TileWallRockIvyLight] = buildFaceQuadModel(makeRockIvyPixels(128, 128, false), r.lighting.shader)
 	r.faceVariants[core.TileWallRockIvyHeavy] = buildFaceQuadModel(makeRockIvyPixels(128, 128, true), r.lighting.shader)
 	r.faceVariants[core.TileWallRockCracked] = buildFaceQuadModel(makeRockCrackedPixels(128, 128), r.lighting.shader)
 	r.faceVariants[core.TileWallRockCrumbling] = buildFaceQuadModel(makeRockCrumblingPixels(128, 128), r.lighting.shader)
-	// Coverage: every non-rock skin in the shared core.FaceSkins roster needs a
-	// variant model here (plain Rock uses the per-material faceModel). Fail fast
-	// at load if a roster addition forgot its model — matches the parallel-table
-	// invariants in AGENTS.md.
+	// Coverage: every non-rock skin in core.FaceSkins needs a variant model here
+	// (plain Rock uses the per-material faceModel). Fail fast at load.
 	for _, s := range core.FaceSkins {
 		if s.Char == core.TileRock {
 			continue
@@ -333,17 +238,12 @@ func LoadResources() (r Resources) {
 	// Earth-textured downward quad for floating-cube undersides (voxel maps).
 	r.underModel = buildUnderQuadModel(makeDirtPixels(128, 128), r.lighting.shader)
 
-	// Stone family textures for the new prop set. Each loader owns the
-	// texture handle outright via setModelTexture so unload-by-model is
-	// enough — no separate UnloadTexture call required here.
+	// Stone family textures; each loader owns its handle via setModelTexture.
 	marbleTex := loadTiledTexture(makeMarblePixels(128, 128))
 	graniteTex := loadTiledTexture(makeGranitePixels(128, 128))
 	terracottaTex := loadTiledTexture(makeTerracottaPixels(128, 128))
-	// Crates and barrels reuse the bark wood-grain palette. Stumps and
-	// logs do too; leaf piles reuse the existing leaf texture. We mint
-	// fresh texture instances per loader since each propModel owns its
-	// textures via setModelTexture and unloads them when the model unloads
-	// — sharing would double-unload.
+	// Wood/leaf props mint fresh texture instances per loader (each propModel
+	// owns its textures; sharing would double-unload).
 	crateWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
 	barrelWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
 	stumpBarkTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
@@ -351,8 +251,7 @@ func LoadResources() (r Resources) {
 	logMossTex := loadRepeatTexture(makeLeafPixels(96, 96), 96, 96)
 	leafPileTex := loadRepeatTexture(makeLeafPixels(96, 96), 96, 96)
 
-	// Commit propModels incrementally so each prop is owned by r before
-	// the next one starts loading.
+	// Commit propModels incrementally so each is owned by r before the next loads.
 	r.propModels = make(map[byte]propModel)
 	r.propModels[core.TileCrate] = loadCrateProp(r.lighting.shader, crateWoodTex)
 	r.propModels[core.TileBarrel] = loadBarrelProp(r.lighting.shader, barrelWoodTex)
@@ -364,17 +263,13 @@ func LoadResources() (r Resources) {
 	r.propModels[core.TileObelisk] = loadObeliskProp(r.lighting.shader, graniteTex)
 	r.propModels[core.TileFountain] = loadFountainProp(r.lighting.shader, marbleTex)
 
-	// Larger rock formations. Each owns its own rock texture instance for
-	// the same single-ownership reason as the field props above.
+	// Larger rock formations, each with its own rock texture instance.
 	cairnRockTex := loadTiledTexture(makeRockWallPixels(128, 128))
 	formationRockTex := loadTiledTexture(makeRockWallPixels(128, 128))
 	r.propModels[core.TileRockCairn] = loadRockCairnProp(r.lighting.shader, cairnRockTex)
 	r.propModels[core.TileRockFormation] = loadRockFormationProp(r.lighting.shader, formationRockTex)
 
-	// Turn B outdoor batch — well/gravestone use the rock texture
-	// family; signpost/scarecrow use the bark wood-grain. Each prop
-	// owns its texture so propModel.unload() in Resources.Unload
-	// frees them.
+	// Turn B outdoor batch — well/gravestone use rock, signpost/scarecrow bark.
 	wellRockTex := loadTiledTexture(makeRockWallPixels(128, 128))
 	graveRockTex := loadTiledTexture(makeRockWallPixels(128, 128))
 	signWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
@@ -385,9 +280,8 @@ func LoadResources() (r Resources) {
 	r.propModels[core.TileHayBale] = loadHayBaleProp(r.lighting.shader)
 	r.propModels[core.TileScarecrow] = loadScarecrowProp(r.lighting.shader, scarecrowWoodTex)
 
-	// Turn B dungeon-interior batch — bookshelf/table/bed share the
-	// wood texture family; brazier is shader-only metal; sarcophagus
-	// uses marble.
+	// Turn B dungeon-interior batch — bookshelf/table/bed wood, brazier shader-
+	// only, sarcophagus marble.
 	bookshelfWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
 	tableWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
 	bedWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
@@ -398,9 +292,8 @@ func LoadResources() (r Resources) {
 	r.propModels[core.TileBrazier] = loadBrazierProp(r.lighting.shader)
 	r.propModels[core.TileSarcophagus] = loadSarcophagusProp(r.lighting.shader, sarcoMarbleTex)
 
-	// Non-blocking decorative plant props (shader-only color, no textures).
-	// Registered here so assertPropCoverage is satisfied; they don't block
-	// movement (core.PropIsNonBlocking).
+	// Non-blocking decorative plant props (shader-only). Registered for
+	// assertPropCoverage; don't block movement (core.PropIsNonBlocking).
 	r.propModels[core.TilePropExoticFlower] = loadExoticFlowerProp(r.lighting.shader)
 	r.propModels[core.TilePropTallFern] = loadTallFernProp(r.lighting.shader)
 	r.propModels[core.TilePropGrassTuft] = loadGrassTuftProp(r.lighting.shader)
@@ -418,13 +311,11 @@ func LoadResources() (r Resources) {
 	r.decorModels[core.DecorLog] = loadLogProp(r.lighting.shader, logBarkTex, logMossTex)
 	r.decorModels[core.DecorLeafPile] = loadLeafPileProp(r.lighting.shader, leafPileTex)
 	r.decorModels[core.DecorLilypad] = loadLilypadProp(r.lighting.shader)
-	// Archway uses marble palette to match the existing pillars/statues.
+	// Archway uses marble to match the pillars/statues.
 	archMarbleTex := loadTiledTexture(makeMarblePixels(128, 128))
 	r.decorModels[core.DecorArchway] = loadArchwayDecor(r.lighting.shader, archMarbleTex)
 
-	// Turn B atmospheric decor batch. Rug / candle / footprints /
-	// ash heap / puddle have no textures (procedural color only);
-	// rootCluster uses bark so it picks up the wood-grain shading.
+	// Turn B atmospheric decor — most are shader-only; rootCluster uses bark.
 	rootBarkTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
 	r.decorModels[core.DecorRug] = loadRugProp(r.lighting.shader)
 	r.decorModels[core.DecorCandle] = loadCandleProp(r.lighting.shader)
@@ -433,9 +324,7 @@ func LoadResources() (r Resources) {
 	r.decorModels[core.DecorPuddle] = loadPuddleProp(r.lighting.shader)
 	r.decorModels[core.DecorRootCluster] = loadRootClusterProp(r.lighting.shader, rootBarkTex)
 
-	// Door props — one model per style, drawn at every g.Doors entry and
-	// rotated by authored facing. Each owns its texture via setModelTexture;
-	// freed by the doorProps unload loop in Resources.Unload below.
+	// Door props — one per style, rotated by authored facing. Each owns its texture.
 	doorWoodTex := loadRepeatTexture(makeBarkPixels(64, 128), 64, 128)
 	doorStoneTex := loadRepeatTexture(makeRockWallPixels(64, 64), 64, 64)
 	r.doorProps[core.DoorStyleBuilding] = loadDoorProp(r.lighting.shader, doorWoodTex)
@@ -446,10 +335,8 @@ func LoadResources() (r Resources) {
 	assertPropCoverage(r.propModels)
 	assertDoorProps(r.doorProps)
 
-	// Flatten the maps into [256]propModel tables so the per-tile draw
-	// path is an array index instead of a map hash. Built once after
-	// the maps are fully populated; the maps remain authoritative for
-	// Unload + assertion paths.
+	// Flatten the maps into [256] tables for array-indexed per-tile dispatch.
+	// Maps remain authoritative for Unload + assertions.
 	r.decorModelTable = flattenModelTable(r.decorModels)
 	r.propModelTable = flattenModelTable(r.propModels)
 	r.specialFloorTable = flattenRLModelTable(r.specialFloors)
@@ -472,11 +359,8 @@ func LoadResources() (r Resources) {
 	return r
 }
 
-// flattenModelTable copies every (char, propModel) pair from the
-// authored map into a heap-allocated [256]propModel and returns a
-// pointer to it. Callers store the pointer on Resources so passing
-// Resources by value remains cheap; the underlying array doesn't move
-// after this returns.
+// flattenModelTable copies the authored map into a heap-allocated [256]propModel.
+// Stored by pointer so passing Resources by value stays cheap.
 func flattenModelTable(src map[byte]propModel) *[256]propModel {
 	t := new([256]propModel)
 	for c, pm := range src {
@@ -485,11 +369,9 @@ func flattenModelTable(src map[byte]propModel) *[256]propModel {
 	return t
 }
 
-// modelTable256 is a char-indexed [256]rl.Model mirror of a byte-keyed model
-// map, with a parallel presence bitmap (rl.Model has no cheap "absent"
-// sentinel). It lets the per-tile floor / cliff-face lookups be an array index
-// instead of a map hash — the same rationale as decorModelTable, applied to the
-// specialFloors and faceVariants maps that the world hot loop probes per tile.
+// modelTable256 is a char-indexed [256]rl.Model mirror with a parallel presence
+// bitmap (rl.Model has no cheap "absent" sentinel), for array-indexed floor /
+// cliff-face lookups.
 type modelTable256 struct {
 	model   [256]rl.Model
 	present [256]bool

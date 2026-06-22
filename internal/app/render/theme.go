@@ -10,70 +10,44 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// sqrt2Inv is 1/√2 — the unit-diagonal component shared by every glyph
-// drawn on a 45° axis (DEX arrow, warrior cross-swords, skill icons, the
-// compass rose). One package-level const instead of a per-function local
-// in four draw helpers.
+// sqrt2Inv is 1/√2 — the unit-diagonal component shared by every 45°-axis glyph.
 const sqrt2Inv = float32(0.7071)
 
-// tau is one full turn in radians (2π) — the magnitude a "spread phase / angle
-// evenly over a full circle" computation multiplies a normalized [0,1) value
-// by. Named so the full-turn constant isn't a bare 6.2831853 / 2*math.Pi
-// scattered across the torch-phase and particle-angle code.
+// tau is one full turn in radians (2π).
 const tau = 6.2831853
 
-// degToRad converts degrees to radians (π/180). The render math constant for
-// the handful of model-yaw helpers that take degrees but feed raylib's
-// radian-based axis-angle rotate.
+// degToRad converts degrees to radians (π/180).
 const degToRad = float32(math.Pi / 180)
 
-// hashSalt is Knuth's multiplicative-hash constant ⌊φ·2³²⌋ = 2654435761 =
-// 0x9E3779B9 — the golden-ratio odd multiplier used to spread seeds across the
-// 32-bit hash space. One name for the value every seed mixer here multiplies or
-// XORs by (it appeared both as the decimal literal and as the 0x9E3779B9 hex).
+// hashSalt is Knuth's multiplicative-hash constant (golden-ratio odd multiplier,
+// 0x9E3779B9) for spreading seeds across the 32-bit hash space.
 const hashSalt = uint32(2654435761)
 
-// fractSinHashA / fractSinHashB are the classic GLSL fract(sin(x)·k) pseudo-random
-// constants. Used by glyphJitter for a cheap hash of a CONTINUOUS float seed (e.g.
-// a time-driven arc twitch) where the integer mix32/hash01 family doesn't fit.
-// Named here so the magic pair lives in one place instead of being re-spelled at
-// the call site (the rule the rest of the package's hashing follows).
+// fractSinHashA / fractSinHashB are the classic GLSL fract(sin(x)·k) constants,
+// used by glyphJitter for a cheap hash of a CONTINUOUS float seed.
 const (
 	fractSinHashA = 12.9898
 	fractSinHashB = 43758.5453
 )
 
-// hashPhase maps a 32-bit hash to a stable phase angle in [0, tau): the low 16
-// bits scaled across a full turn. Used to give each torch flame (and any other
-// hash-seeded oscillator) its own fixed starting phase so a field of them
-// flickers out of sync. Replaces the verbatim
-// float32(h&0xFFFF)/65535.0*6.2831853 idiom.
+// hashPhase maps a 32-bit hash to a stable phase in [0,tau) (low 16 bits) so
+// hash-seeded oscillators (torch flames) flicker out of sync.
 func hashPhase(h uint32) float32 {
 	return float32(h&0xFFFF) / 65535.0 * tau
 }
 
-// paletteSaturationCut pulls every BRIGHT accent token a fraction of the way
-// toward its own luminance gray, taming the palette toward the muted
-// "library" look (parchment + waxed wood, not neon). It's applied via mute()
-// to the saturated accents only — the HP/MP/enemy bars, status pills + their
-// outlines, the turn-order enemy red, the timing-bar accents, and the
-// sequence pass/fail greens. The earthy base tokens (glass / wood / ink /
-// veil) are already low-saturation and are NOT routed through mute(), so the
-// frame-and-parchment identity is preserved while the colorful bits calm
-// down. One knob: raise toward 1 for grayer, lower toward 0 for punchier.
+// paletteSaturationCut pulls every BRIGHT accent (via mute()) toward its
+// luminance gray for the muted library look; earthy base tokens skip mute().
+// One knob: toward 1 = grayer, toward 0 = punchier.
 const paletteSaturationCut = 0.30
 
-// mapRGB applies f to each of c's R/G/B channels independently, preserving
-// alpha. The single seam for the "transform RGB, keep A" pattern that the
-// color derivers (mute below, shadeColor, adjust) each used to re-spell. f
-// owns any clamping/rounding so each caller keeps its exact prior math.
+// mapRGB applies f to c's R/G/B, preserving alpha — the single "transform RGB,
+// keep A" seam (f owns any clamping).
 func mapRGB(c rl.Color, f func(uint8) uint8) rl.Color {
 	return rl.NewColor(f(c.R), f(c.G), f(c.B), c.A)
 }
 
-// mute desaturates c toward its perceptual-luminance gray by
-// paletteSaturationCut, preserving alpha. Used on the bright accent tokens in
-// the palette below so the whole accent set tones down from a single knob.
+// mute desaturates c toward its luminance gray by paletteSaturationCut.
 func mute(c rl.Color) rl.Color {
 	lum := float32(c.R)*0.30 + float32(c.G)*0.59 + float32(c.B)*0.11
 	return mapRGB(c, func(v uint8) uint8 {
@@ -81,51 +55,27 @@ func mute(c rl.Color) rl.Color {
 	})
 }
 
-// The Library palette. See UI_STANDARDS.md for the full rationale and
-// the rule "no new rl.NewColor literals for any surface that already
-// has a token." Every persistent HUD pane is dark glass framed in
-// hardwood; every selection highlight is gilt.
-//
-// Two parallel naming families exist for historical reasons:
-//   - The UI_STANDARDS.md tokens (`glassDeep` / `woodMid` /
-//     `inkPrimary` / etc.) are the canonical names — use these in
-//     new code.
-//   - Older semantic aliases (`surfacePrimary` / `borderSoft` /
-//     `textPrimary` / etc., grouped below) resolve to the same
-//     RGB values but predate the library aesthetic doc. They're
-//     treated as first-class — neither set is "deprecated" —
-//     because the codebase reads cleanly with either, and a full
-//     rename would touch 200+ call sites without changing pixels.
-//     New uses are fine either way; pick the name that reads best
-//     in context (e.g. `textPrimary` for body copy, `inkPrimary`
-//     when the parchment metaphor is load-bearing).
+// The Library palette (see UI_STANDARDS.md; "no new rl.NewColor literals for a
+// surface that already has a token"). Dark glass framed in hardwood, gilt
+// highlights. Two naming families coexist (canonical glassDeep/woodMid/inkPrimary
+// + older surfacePrimary/borderSoft/textPrimary aliases below, same RGBs); both
+// first-class — pick whichever reads best.
 var (
 	// ----- Glass surfaces (panel fills) -----
-	// Two-layer composition: drawCard paints `glassBaseWash` (a
-	// dark wash that anchors the pane as dark glass) first, then
-	// the glass tint over it. Both layers are translucent — the
-	// world composes through both. Cumulative effective opacity is
-	// roughly 1 - (1-wash)(1-tint), which lands the pane near
-	// 55-62 % apparent opacity at the alphas below — thinned from an
-	// earlier ~70 % so the dungeon genuinely glows through every pane
-	// (the BG-era "UI floats over the world" read). The mandatory text
-	// drop shadows are what keep parchment ink legible at this
-	// thinness; if a future pass thins further, check the action log
-	// over a lit floor first.
+	// Two-layer: drawCard paints glassBaseWash then the glass tint, both
+	// translucent (world composes through). Lands ~55-62% apparent opacity; the
+	// mandatory text drop shadows keep ink legible at this thinness.
 	glassBaseWash = rl.NewColor(8, 6, 10, 88)
 	glassDeep     = rl.NewColor(14, 12, 18, 100)
 	glassMid      = rl.NewColor(22, 18, 24, 84)
 	glassWarm     = rl.NewColor(28, 22, 16, 118)
 	glassDanger   = rl.NewColor(36, 16, 18, 112)
 	veil          = rl.NewColor(0, 0, 0, 130)
-	// surfaceCardBackdrop is an OPAQUE dark panel fill (glass-family tone at
-	// full alpha) for modals that must fully hide the world behind them — it's
-	// painted UNDER the glass body so the frame + filigree still composite on
-	// top. The skill-tree modal uses it; reuse it for any future opaque modal.
+	// surfaceCardBackdrop is an OPAQUE dark panel fill for modals that must hide
+	// the world; painted UNDER the glass body so frame + filigree composite on top.
 	surfaceCardBackdrop = rl.NewColor(24, 20, 29, 255)
-	// surfaceDimScrim is the translucent dark wash laid over inactive elements
-	// to recede them beneath a lit selection (the non-active party ribbon
-	// cards). Close to glassBaseWash but its own alpha so the two stay tunable.
+	// surfaceDimScrim is the dark wash receding inactive elements (non-active party
+	// cards). Own alpha so it stays tunable apart from glassBaseWash.
 	surfaceDimScrim = rl.NewColor(6, 8, 14, 105)
 
 	// ----- Wood frames -----
@@ -136,11 +86,8 @@ var (
 	woodInlay  = rl.NewColor(34, 22, 14, 175)
 
 	// ----- Wood-accent fades -----
-	// Single source for the wood rule / outline / icon tones that were bare
-	// fadeColor(woodAccent, X) literals scattered across panels / skilltree /
-	// minimap / level-up / timing. Each keeps its exact prior alpha; a retune
-	// now lands here instead of at a dozen draw sites. (battle.go's action-log
-	// spine/tie fades stay local — they're tuned against that surface.)
+	// Single source for the wood rule/outline/icon fade tones (were scattered
+	// fadeColor(woodAccent, X) literals).
 	woodAccentGrid       = fadeColor(woodAccent, 0.16) // map-tab grid lines
 	woodAccentInlayLip   = fadeColor(woodAccent, 0.22) // card inlay bottom lip
 	woodAccentBevelSide  = fadeColor(woodAccent, 0.36) // card bevel side face
@@ -156,26 +103,19 @@ var (
 	// ----- Gilt accents (selection / focus) -----
 	giltDim    = rl.NewColor(160, 124, 64, 255)
 	giltBright = rl.NewColor(232, 196, 112, 255)
-	// Coin sigil tones (the gold HUD coin glyph): a brighter face and a darker
-	// inner shade than the gilt selection accents. Named here with the rest of
-	// the gilt family so a palette retune reaches the coin glyph too, instead
-	// of leaving two bare literals in hud.go's drawCoinGlyph.
+	// Coin sigil tones (gold HUD coin glyph): brighter face, darker inner shade.
 	coinFace  = rl.NewColor(218, 168, 78, 255)
 	coinShade = rl.NewColor(152, 104, 42, 255)
 
 	// ----- Controller glyphs (on-screen button icons) -----
-	// Modern-game face-button hues, drawn as the letter + ring on a dark
-	// button body (the dark-button / colored-letter style that reads cleanest
-	// over the library's dark glass). mute()-wrapped like every other bright
-	// accent so the icons calm to the library palette while staying instantly
-	// recognizable (A green / B red / X blue / Y amber). See render/glyphs.go.
+	// Face-button hues (letter + ring on a dark body), mute()-wrapped like every
+	// bright accent but still recognizable (A green/B red/X blue/Y amber).
 	glyphAColor = mute(rl.NewColor(60, 168, 74, 255))  // confirm
 	glyphBColor = mute(rl.NewColor(206, 66, 58, 255))  // back / cancel
 	glyphXColor = mute(rl.NewColor(58, 124, 206, 255)) // use
 	glyphYColor = mute(rl.NewColor(228, 178, 52, 255)) // panels / Tome
-	// glyphBody is the dark raised button fill behind every glyph; glyphRim is
-	// the light bevel stroke around the non-face buttons (shoulders / start /
-	// select / d-pad); glyphInk is the neutral label/icon ink on those.
+	// glyphBody: dark raised button fill; glyphRim: light bevel on non-face
+	// buttons; glyphInk: neutral label ink.
 	glyphBody = rl.NewColor(34, 30, 40, 235)
 	glyphRim  = rl.NewColor(150, 140, 150, 220)
 	glyphInk  = rl.NewColor(232, 226, 214, 255)
@@ -185,24 +125,16 @@ var (
 	inkMuted   = rl.NewColor(184, 172, 144, 240)
 	inkDim     = rl.NewColor(132, 122, 100, 220)
 	inkAccent  = rl.NewColor(232, 196, 112, 255)
-	// statusGlyphDark is the near-black used for cut-out details inside a few
-	// status glyphs (the skull's sockets/jaw, the ingest prey dot, the shield's
-	// center spine) AND for the enemy roster pill's glyph + turn count (drawn
-	// dark on the bright pill fill). Cross-file (party.go glyphs + battle.go
-	// pills), so it lives here with the ink tokens.
+	// statusGlyphDark is the near-black for cut-out details in status glyphs and
+	// the enemy roster pill's glyph/turn count (dark on the bright fill).
 	statusGlyphDark = rl.NewColor(12, 10, 15, 255)
-	// statusIconBacking is the dark, slightly purple disc drawn behind a party
-	// status icon so its colored glyph reads against the HUD glass. Sits with
-	// statusGlyphDark since both are the status-icon ink tokens.
+	// statusIconBacking is the dark disc behind a party status icon so its glyph
+	// reads against the glass.
 	statusIconBacking = rl.NewColor(22, 19, 26, 235)
-	// statusNoneAccent is the neutral light-grey the PartyStatusNone row carries
-	// in partyStatusVisuals — the "no status" placeholder accent (no glyph). A
-	// named token so the table doesn't open-code a bare grey literal.
+	// statusNoneAccent is the neutral grey the PartyStatusNone row carries.
 	statusNoneAccent = rl.NewColor(220, 220, 220, 220)
 
-	// ----- Semantic aliases of the library palette (use freely) -----
-	// These names predate the wood/glass/gilt nomenclature but resolve
-	// to the same RGB values — pick whichever reads best in context.
+	// ----- Semantic aliases (same RGBs, predate the wood/glass/gilt names) -----
 	surfacePrimary    = glassDeep
 	surfaceLog        = glassMid
 	surfaceVeil       = veil
@@ -212,18 +144,14 @@ var (
 	accentPartyDown   = rl.NewColor(120, 110, 116, 200) // knocked-down party card accent (name tick / edge)
 	surfaceEnemyTint  = glassDanger
 
-	// Enemy-roster row tints (drawEnemyRosterRow): the live row's glass
-	// fill + warm border, and the dimmed pair used while a defeated enemy
-	// fades out. Named here so the row chrome shares the palette's source
-	// of truth instead of carrying its own NewColor literals.
+	// Enemy-roster row tints (drawEnemyRosterRow): live row fill + border, plus
+	// the dimmed pair used while a defeated enemy fades.
 	surfaceRosterRow      = rl.NewColor(20, 14, 22, 130)
 	borderRosterRow       = rl.NewColor(96, 60, 64, 140)
 	surfaceRosterRowFaded = rl.NewColor(28, 20, 24, 95)
 
-	// Border aliases — used by drawCard as the OUTERMOST frame
-	// stroke. Default panels use woodDark (deepest band); active /
-	// danger panels swap in a saturated tint so the focused surface
-	// reads first.
+	// Border aliases — drawCard's OUTERMOST stroke. Default = woodDark; active/
+	// danger panels swap in a saturated tint so the focused surface reads first.
 	borderDim    = rl.NewColor(60, 48, 36, 130) // dim hardwood, for disabled panels
 	borderSoft   = woodDark                     // default outer stroke
 	borderStrong = woodAccent                   // heading underline accent
@@ -235,53 +163,38 @@ var (
 	textPrimary = inkPrimary
 	textMuted   = inkMuted
 	textLabel   = inkAccent
-	// textDim (dimmed/secondary text) and textHint (control-hint text) both
-	// resolve to inkDim today, but are kept as separate tokens to mark distinct
-	// intents — so either can be retuned without dragging the other along.
+	// textDim + textHint both resolve to inkDim but stay separate so either can
+	// be retuned alone.
 	textDim  = inkDim
 	textHint = inkDim
 
 	barHPHigh = mute(rl.NewColor(116, 200, 132, 255))
-	// xpGainColor fills the victory spoils screen's XP bars — a warm
-	// coin-gold that reads as treasure/reward (not the green of an HP gauge).
-	// Shares coinFace so the XP fill and the gold tally sit in one palette.
+	// xpGainColor fills the victory XP bars — coin-gold (reward, not HP green).
 	xpGainColor = coinFace
 	barHPMid    = mute(rl.NewColor(224, 184, 88, 255))
 	barHPLow    = mute(rl.NewColor(220, 88, 88, 255))
 	barMP       = mute(rl.NewColor(104, 152, 224, 255))
 	barEnemyHP  = mute(rl.NewColor(204, 76, 76, 255))
-	// Enemy wound-state ramp — the per-condition tint the roster's health
-	// label reads as, from unharmed green through to the near-death red.
-	// Pulled out of battle.go's enemyConditionColors table so the accent ramp
-	// lives in the palette beside the other bars instead of as bare NewColor
-	// literals. The near-death tone (condEnemyNearDeath) shares the "enemy is
-	// bleeding out" red intent with barEnemyHP / barHPLow; kept a touch hotter
-	// than the muted static bar so a small roster label still reads.
+	// Enemy wound-state ramp — the roster health-label tint from unharmed green to
+	// near-death red (near-death hotter than the muted bar so a small label reads).
 	condEnemyUnharmed     = rl.NewColor(126, 231, 170, 255)
 	condEnemyScuffed      = rl.NewColor(208, 226, 128, 255)
 	condEnemyInjured      = rl.NewColor(246, 196, 91, 255)
 	condEnemyBadlyWounded = rl.NewColor(244, 126, 75, 255)
 	condEnemyNearDeath    = rl.NewColor(255, 78, 88, 255)
-	// partyDamagePopupColor is the floating-number tone for damage the PARTY
-	// takes. Brighter/hotter than barEnemyHP (which is muted for a static bar)
-	// so a fast-fading popup still reads against the formation; distinct from
-	// the timing-grade ramp the player's outgoing hits use.
+	// partyDamagePopupColor is the floating-number tone for PARTY damage — hotter
+	// than barEnemyHP so a fast popup reads against the formation.
 	partyDamagePopupColor = rl.NewColor(255, 100, 88, 255)
 	barTrack              = rl.NewColor(8, 12, 22, 140) // near-black track, already muted
-	// barMutedFill is the desaturated plum fill drawBar swaps in when a
-	// bar is muted (e.g. a downed member's gauges).
+	// barMutedFill is the plum fill drawBar swaps in for a muted (downed) gauge.
 	barMutedFill = rl.NewColor(96, 84, 92, 230)
-	// barGhostHot is the trailing "damage ghost" segment a live gauge leaves
-	// behind when its value drops (see barghost.go) — hot parchment-gold so
-	// the just-lost slice reads as a burn against any fill tone. Gilt-family
-	// transient, so NOT routed through mute() (matches the gilt accents).
+	// barGhostHot is the trailing "damage ghost" segment (barghost.go) — hot
+	// parchment-gold; gilt-family transient, NOT muted.
 	barGhostHot = rl.NewColor(255, 226, 168, 235)
 
-	// ----- Per-status accents (UI_STANDARDS.md "Per-status accents") -----
-	// Indexed by core.PartyStatusKind via partyStatusVisuals below; the
-	// raw tokens are exported here so non-party surfaces (enemy pills,
-	// future field-status overlays) can pull the same hue without
-	// re-typing the RGBs.
+	// ----- Per-status accents (UI_STANDARDS.md) -----
+	// Indexed by core.PartyStatusKind via partyStatusVisuals; exported so non-party
+	// surfaces (enemy pills) can pull the same hue.
 	statusPoison    = mute(rl.NewColor(148, 200, 96, 240))
 	statusBleed     = mute(rl.NewColor(200, 56, 56, 240))
 	statusBurn      = mute(rl.NewColor(240, 144, 72, 240))
@@ -292,63 +205,44 @@ var (
 	statusIngested  = mute(rl.NewColor(200, 132, 220, 240))
 	statusDefending = mute(rl.NewColor(132, 196, 255, 240))
 	statusDown      = mute(rl.NewColor(220, 102, 102, 235))
-	// statusBlessed is a POSITIVE buff accent — a warm holy gilt that reads as
-	// a blessing rather than the green/amber threat hues. Distinct from
-	// statusStun's flatter yellow by its warmer, gilt-leaning tone (and it
-	// never flickers).
+	// statusBlessed: POSITIVE buff — warm holy gilt, distinct from statusStun's
+	// flatter yellow. Never flickers.
 	statusBlessed = mute(rl.NewColor(244, 212, 128, 240))
-	// statusRegen is the POSITIVE heal-over-time accent (Renewal) — a fresh
-	// mint green that reads as "healing," kept cleaner/brighter than
-	// statusPoison's sickly olive so the two greens don't confuse. Never
-	// flickers (it's good news).
+	// statusRegen: POSITIVE heal-over-time (Renewal) — mint green, cleaner than
+	// statusPoison's olive. Never flickers.
 	statusRegen = mute(rl.NewColor(120, 224, 150, 240))
-	// statusShielded is the POSITIVE Aegis-ward accent — a luminous teal/cyan
-	// energy bubble, kept off the crowded light-blues (statusSleep / statusDefending)
-	// so the magic ward reads apart from the manual block. Never flickers.
+	// statusShielded: POSITIVE Aegis ward — teal/cyan, off the light-blues
+	// (statusSleep/statusDefending). Never flickers.
 	statusShielded = mute(rl.NewColor(96, 222, 214, 240))
-	// statusIceArmor is the POSITIVE frost-ward accent — a pale icy blue-white,
-	// cooler/lighter than statusSleep so the two don't confuse. Never flickers.
+	// statusIceArmor: POSITIVE frost ward — pale icy blue-white, cooler than
+	// statusSleep. Never flickers.
 	statusIceArmor = mute(rl.NewColor(186, 226, 248, 240))
-	// Outline tints paired with the fills above for the enemy-pill
-	// silhouette. Lighter / more saturated than the fill so the pill
-	// reads as a "glow with a hard rim" against the panel.
+	// Outline tints paired with the fills above for the enemy-pill silhouette
+	// (lighter/more saturated = "glow with a hard rim").
 	statusBurnOutline   = mute(rl.NewColor(255, 200, 120, 220))
 	statusSleepOutline  = mute(rl.NewColor(190, 220, 244, 220))
 	statusPoisonOutline = mute(rl.NewColor(180, 232, 132, 220))
 	statusBleedOutline  = mute(rl.NewColor(248, 120, 120, 220))
 	statusStunOutline   = mute(rl.NewColor(248, 232, 160, 230))
 
-	// Turn-order panel: the danger red an enemy row reads as. Named so
-	// it isn't a bare literal buried in turnEntryColor's getter.
+	// Turn-order panel: the danger red an enemy row reads as.
 	turnEnemyColor = mute(rl.NewColor(245, 100, 92, 255))
 
-	// Timing-bar accent tokens. The bright cursor white, the "held /
-	// RELEASE" gold, and the sequence-bar pass/fail greens & reds used
-	// to recur as bare NewColor literals at drifting alphas across the
-	// press / charge / sequence draws. Defined once at full alpha; the
-	// few sites that want a softer alpha wrap these in colorWithAlpha.
+	// Timing-bar accents (cursor white, held/RELEASE gold, sequence pass/fail).
+	// Full alpha; softer sites wrap in colorWithAlpha.
 	timingCursorColor = rl.NewColor(248, 248, 252, 255)
 	timingHeldColor   = rl.NewColor(255, 244, 144, 255)
 	seqOkColor        = mute(rl.NewColor(140, 232, 168, 255))
 	seqFailColor      = mute(rl.NewColor(228, 96, 96, 255))
-	// timingWarnColor is the "running low on time" amber the sequence
-	// strip fades through before it goes red. timingCommitColor is the
-	// multi-press bar's late commit-zone orange. timingTickColor is the
-	// near-black vertical separator between charge-bar segments. Named
-	// here with the other timing accents so the bars don't carry bare
-	// NewColor literals at drifting alphas.
+	// timingWarnColor: low-time amber before red; timingCommitColor: late
+	// commit-zone orange; timingTickColor: charge-segment separator.
 	timingWarnColor   = rl.NewColor(232, 196, 92, 235)
 	timingCommitColor = rl.NewColor(255, 168, 96, 200)
 	timingTickColor   = rl.NewColor(28, 32, 44, 235)
 
-	// Timing-grade accent ramps — the per-quality attack (warm: red→amber→
-	// cream) and defend (cool: red→blue→pale ice) tones the bar flashes when a
-	// hit lands, indexed Miss..Excellent by timing.go's qualityVisuals table.
-	// Pulled out of that table so the grade ramp lives with the other timing
-	// accents instead of as bare NewColor literals mid-file. Defined at full
-	// alpha and full saturation: this is a fast transient confirmation flash,
-	// so (like the gilt-family transients) it's NOT routed through mute() —
-	// the punch is the point.
+	// Timing-grade ramps — attack (warm red→cream) and defend (cool red→ice)
+	// flash tones, indexed Miss..Excellent by qualityVisuals. NOT muted (the
+	// punch is the point).
 	timingGradeAtkMiss      = rl.NewColor(220, 76, 76, 255)
 	timingGradeAtkNice      = rl.NewColor(184, 96, 80, 255)
 	timingGradeAtkGood      = rl.NewColor(232, 144, 80, 255)
@@ -360,11 +254,8 @@ var (
 	timingGradeDefGreat     = rl.NewColor(120, 200, 248, 255)
 	timingGradeDefExcellent = rl.NewColor(196, 240, 255, 255)
 
-	// Per-mode timing-bar heading + base-fill tints, paired with the
-	// timingHeading* label strings in timing.go. Each bar's signature hue lives
-	// here with the other timing accents instead of as a bare NewColor literal
-	// inside its draw function. (The Combo bar derives its tint from seqOkColor
-	// and stays at its call site.)
+	// Per-mode timing-bar heading tints, paired with the timingHeading* labels.
+	// (The Combo bar derives its from seqOkColor at its call site.)
 	timingHeadingStrikeColor       = mute(rl.NewColor(255, 232, 168, 240)) // warm gold
 	timingHeadingDefendColor       = mute(rl.NewColor(168, 220, 255, 240)) // cool blue
 	timingHeadingChargeColor       = mute(rl.NewColor(255, 184, 96, 240))  // warm orange
@@ -372,11 +263,8 @@ var (
 	timingHeadingRecallMemoColor   = mute(rl.NewColor(255, 244, 144, 240)) // memorize: held-yellow
 	timingHeadingRecallRecallColor = mute(rl.NewColor(140, 232, 168, 240)) // recall: thief green
 
-	// reelSymbolColors are Steal's slot-symbol fill hues — well-separated colors
-	// so a "match" reads at a glance. Indexed by symbol modulo its length so it
-	// stays safe if core.ReelSymbolCount ever changes (symbols would just share
-	// hues rather than index out of range). Lives here with the other timing
-	// accents rather than as bare NewColor literals in timing.go.
+	// reelSymbolColors are Steal's slot-symbol fill hues (well-separated so a match
+	// reads). Indexed by symbol modulo length, so safe if ReelSymbolCount changes.
 	reelSymbolColors = []rl.Color{
 		mute(rl.NewColor(255, 206, 84, 255)),  // gold
 		mute(rl.NewColor(96, 208, 255, 255)),  // cyan
@@ -384,80 +272,51 @@ var (
 		mute(rl.NewColor(140, 232, 168, 255)), // green
 	}
 
-	// Battle-splash banner tones: splashBgColor is the near-black panel fill
-	// behind the banner; splashTitleColor is the warm cream the encounter title
-	// is engraved in. Both are defined at full alpha here — the splash applies
-	// its fade-driven alpha per-frame via colorWithAlpha so the banner can ease
-	// in / out. Lives here with the other battle accents rather than as bare
-	// NewColor literals in battle.go.
+	// Battle-splash banner tones (near-black fill + warm cream title). Full alpha;
+	// the splash applies its fade per-frame via colorWithAlpha.
 	splashBgColor    = rl.NewColor(8, 10, 16, 255)
 	splashTitleColor = rl.NewColor(248, 232, 198, 255)
 
-	// Billboard tints for the in-world combatant markers — the warm
-	// off-white the player's target reads as, and the slightly redder
-	// pulse the currently-attacking enemy reads as. Pulled out here so
-	// future palette passes don't have to chase NewColor literals across
-	// world.go's draw loop.
+	// Billboard tints for in-world combatant markers: warm off-white target,
+	// redder attacker pulse.
 	tintEnemyTargeted = rl.NewColor(255, 228, 190, 255)
 	tintEnemyAttacker = rl.NewColor(255, 196, 156, 255)
-	// Selector-pyramid colors for the same three combat states the billboard
-	// tints above cover — the bright marker over the targeted enemy, the
-	// friendly heal/item target, and the enemy's attack target. Kept in this
-	// block so the "what color is targeted" decision lives beside the tints
-	// (the marker is brighter / more saturated than the soft sprite wash by
-	// design — they're paired, not identical). world.go's markerStyle rows
-	// read these instead of inlining NewColor literals.
+	// Selector-pyramid colors for the same three states (brighter than the soft
+	// sprite wash by design — paired, not identical).
 	selectorEnemyTargetColor    = rl.NewColor(255, 224, 80, 255)
 	selectorFriendlyTargetColor = rl.NewColor(118, 235, 136, 245)
 	selectorEnemyAttackColor    = rl.NewColor(255, 96, 96, 245)
-	// Party-side billboard tints, the mirror of the enemy pair above: the
-	// desaturated gray a knocked-out member fades to, and the warm wash on
-	// the member whose turn it is. Named here so DrawPartySprites pulls from
-	// the same palette block instead of inlining NewColor literals.
+	// Party-side billboard tints (mirror of the enemy pair): downed gray + your-
+	// turn warm wash.
 	tintPartyDown   = rl.NewColor(110, 110, 120, 190)
 	tintPartyActive = rl.NewColor(255, 245, 204, 255)
 
-	// Editor + minimap entity-marker colors. Centralised here so the
-	// in-grid markers (editor's draw.go), the on-disk-list swatches
-	// (editor's brush palette), and the minimap dots all share one
-	// source of truth — moving the door tone or chest tone is now one
-	// edit instead of three NewColor literals. Exported via theme.go
-	// as theme.MarkerXxx fields for external scenes.
+	// Editor + minimap entity-marker colors, shared by the editor markers/swatches
+	// and the minimap dots. Exported via theme.MarkerXxx.
 	markerStart    = rl.NewColor(255, 220, 124, 255)
 	markerChest    = rl.NewColor(232, 180, 92, 255)
 	markerChestDim = rl.NewColor(160, 132, 78, 255)
 	markerDoor     = rl.NewColor(176, 132, 86, 255)
 	markerPack     = rl.NewColor(220, 76, 70, 255)
 	markerPlayer   = rl.NewColor(132, 240, 148, 255) // player facing arrow (minimap + panels Map tab)
-	// crystalCyanBase is the shared charged-crystal cyan — the single source of
-	// truth for both the editor/minimap marker (markerCrystal) and the in-world
-	// gem body (crystal.go's crystalColor pulses this base's R/G channels). Keeps
-	// the marker and the entity the player sees in lockstep instead of two
-	// hand-synced literals.
+	// crystalCyanBase is the shared charged-crystal cyan for both the editor/minimap
+	// marker (markerCrystal) and the in-world gem (crystal.go pulses its R/G).
 	crystalCyanBase = rl.NewColor(96, 214, 232, 255)
-	// Companion crystal tints — the dormant gem body and the charged/dormant
-	// faceted-edge wires. Live beside crystalCyanBase so the whole gem palette
-	// (charged body + dormant body + both edge states) tunes in one place
-	// instead of as scattered literals in crystal.go.
+	// Companion crystal tints (dormant body + both edge-wire states), beside
+	// crystalCyanBase so the whole gem palette tunes in one place.
 	crystalDormantBody = rl.NewColor(70, 92, 110, 190)   // dormant gem body (flat slate)
 	crystalEdgeCharged = rl.NewColor(210, 250, 255, 220) // charged faceted wire
 	crystalEdgeDormant = rl.NewColor(110, 130, 150, 150) // dormant faceted wire
-	// crystalChargedBody is the full charged gem-body tint: R/G ride
-	// crystalCyanBase (so the gem and editor marker stay in lockstep) with the
-	// blue pinned full and a fixed alpha for the bright cut-crystal read.
-	// crystalColor pulses only the R/G channels of this at render time.
+	// crystalChargedBody: charged gem body — R/G ride crystalCyanBase (lockstep),
+	// blue pinned full. crystalColor pulses only R/G at render time.
 	crystalChargedBody = rl.NewColor(crystalCyanBase.R, crystalCyanBase.G, 255, 235)
-	// markerCrystal reads as the same charged-crystal cyan the player sees, and
-	// stands clear of the amber chest / brown door / red pack / yellow start
+	// markerCrystal reads as the charged cyan, clear of the chest/door/pack/start
 	// swatches.
 	markerCrystal = crystalCyanBase
 	markerOutline = rl.NewColor(0, 0, 0, 220)
 
-	// Hit-glyph clarity colors (render/hitglyph.go) — the signature hue of
-	// each attack glyph. Named here so the hues can be matched to their VFX
-	// particle bursts instead of living as scattered rl.NewColor literals per
-	// painter. Painters override the alpha per frame via
-	// colorWithAlpha(_, glyphFade(t)); the alpha below is a placeholder.
+	// Hit-glyph clarity colors (hitglyph.go) — each attack glyph's signature hue.
+	// Painters override alpha per frame; the alpha below is a placeholder.
 	glyphSlashColor  = rl.NewColor(245, 248, 255, 255)
 	glyphImpactColor = rl.NewColor(255, 236, 150, 255)
 	glyphFrostColor  = rl.NewColor(170, 224, 255, 255)
@@ -468,72 +327,47 @@ var (
 	glyphHolyColor   = rl.NewColor(255, 232, 150, 255)
 	glyphVenomColor  = rl.NewColor(150, 230, 110, 255)
 
-	// mapTileFogColor is the dim fill drawn for cells that fall outside
-	// the area's bounds — the "fog" beyond the walkable map. Shared by
-	// both map surfaces (the corner minimap window and the panels-overlay
-	// Map tab) so the out-of-bounds tone is one source of truth instead
-	// of two near-identical literals that drift by a couple RGB units.
+	// mapTileFogColor is the dim out-of-bounds fill, shared by both map surfaces
+	// (corner minimap + panels Map tab).
 	mapTileFogColor = rl.NewColor(8, 10, 14, 235)
 
-	// chestColors govern the chest billboard — body color and lid color.
-	// Pulled out here rather than open-coded in DrawChests so the palette
-	// can be tuned without hunting through world-render code. The interact
-	// prompt reuses borderActive (the global "draw the player's eye here"
-	// yellow) so adding a new prompt color isn't needed.
+	// chestColors — chest billboard body + lid. (The interact prompt reuses
+	// borderActive.)
 	chestBodyColor = rl.NewColor(168, 116, 70, 255)
 	chestLidColor  = rl.NewColor(196, 148, 92, 255)
 
-	// Shadow tints for drop-shadowed text and overlay scrims. Pre-named so
-	// callers don't open-code rl.NewColor(0,0,0,…) with a drifting alpha.
-	// Strength runs Light (background hints) → Mid (HUD body) → Strong
-	// (large titles / debug pills) → Heavy (top-of-stack labels).
+	// Shadow tints for text + scrims, Light → Mid → Strong → Heavy.
 	shadowLight  = rl.NewColor(0, 0, 0, 160)
 	shadowMid    = rl.NewColor(0, 0, 0, 180)
 	shadowStrong = rl.NewColor(0, 0, 0, 200)
 	shadowHeavy  = rl.NewColor(0, 0, 0, 220)
-	// shadowBase is the fully-transparent black drop-shadow base — the source
-	// color callers fade per-frame when the shadow alpha is dynamic (the splash
-	// title shadow and the timing-bar icon shadows track an animation). Named
-	// so those sites don't open-code rl.NewColor(0,0,0,…) with a per-call alpha.
+	// shadowBase is the transparent-black base callers fade per-frame for dynamic
+	// shadow alpha (splash title, timing-bar icons).
 	shadowBase = rl.NewColor(0, 0, 0, 0)
-	// noAccent is the zero-alpha sentinel passed to drawCard's `accent`
-	// parameter to skip the optional left-spine stripe. Named so the intent
-	// ("this card has no accent stripe") reads at the call site instead of a
-	// bare transparent-black literal.
+	// noAccent is the zero-alpha sentinel skipping drawCard's left-spine stripe.
 	noAccent = rl.NewColor(0, 0, 0, 0)
 )
 
 const (
-	// hudEdgePad is the canonical distance every always-on HUD panel
-	// keeps from the screen edges. Pulled into theme so the minimap,
-	// turn panel, action log, action menu, and party ribbon all
-	// honour the same margin without each one picking its own.
-	// 16 reads "comfortable margin" at 1080p without wasting too much
-	// real estate on smaller windows.
+	// hudEdgePad is the canonical screen-edge margin every always-on HUD panel
+	// keeps; 16 reads comfortable at 1080p.
 	hudEdgePad = int32(16)
-	// hudColumnGap is the vertical spacing between stacked HUD
-	// panels in the left/right column (minimap → turn panel →
-	// action log). Smaller than hudEdgePad so adjacent panels feel
-	// grouped rather than scattered.
+	// hudColumnGap is the vertical spacing between stacked HUD panels (smaller than
+	// hudEdgePad so they feel grouped).
 	hudColumnGap = int32(10)
-	// hudPanelMinH is the height floor a short-window collision guard shrinks a
-	// pinned HUD pane to (the action log + the action menu) — below this the
-	// pane's rows stop being readable, so it stays this tall even if that means
-	// overlapping a neighbor on a very small window.
+	// hudPanelMinH is the height floor the short-window collision guard shrinks a
+	// pinned pane to (below this rows stop being readable).
 	hudPanelMinH = int32(160)
 
-	// Enemy roster card (battle.go) — the top-center pane listing the foes.
-	// Named here with the other HUD geometry so a "rows too cramped" retune is
-	// one edit rather than bare literals at the draw site.
+	// Enemy roster card (battle.go) — the top-center foe-list pane.
 	rosterRowH      = int32(82)  // per-enemy row height (fits the FontHeading name stacked over the condition line)
 	rosterTopPad    = int32(18)  // inset above the first row
 	rosterBottomPad = int32(18)  // inset below the last row
 	rosterW         = int32(560) // multi-enemy width
 	rosterWSingle   = int32(440) // single-enemy width (narrower)
 
-	// Targeted-row geometry — a roster row gets a left chevron marker and a
-	// wider name inset when it's the live target. Named so the marker / pill
-	// placement isn't a wall of bare literals at the draw site.
+	// Targeted-row geometry — a live-target row gets a left chevron and wider
+	// name inset.
 	rosterTargetedNameInset = int32(34) // name gutter when the chevron is shown (wider than hudContentInsetX)
 	rosterArrowMarkerInsetX = float32(9) // chevron center X, in from the row's left edge
 	rosterArrowMarkerTipDx  = float32(13) // chevron tip reach (points right, toward the name)
@@ -544,180 +378,117 @@ const (
 	rosterStatusPillH    = float32(28) // status pill height
 	rosterStatusRightPad = float32(16) // gap from the row's right edge to the pill column
 
-	// Combat HUD panes (battle.go) — the bottom-left action log and the
-	// bottom-right action menu. Both share the hudPanelMinH collision floor.
+	// Combat HUD panes (battle.go) — bottom-left action log + bottom-right action
+	// menu. Both share the hudPanelMinH floor.
 	actionLogW  = int32(320)
 	actionLogH  = int32(300)
 	actionMenuW = int32(360)
 	actionMenuH = int32(404)
-	// hudContentInsetX is the left gutter from a combat HUD pane's edge to its
-	// content (enemy-card name, action-menu header/rows). Named so the roster
-	// and action-menu surfaces share one inset instead of a bare 22 at each.
-	// Also the canonical window-padding token of the spacing system below.
+	// hudContentInsetX is the left gutter from a combat pane edge to its content;
+	// also the spacing system's canonical window-padding token.
 	hudContentInsetX = int32(22)
 
 	// --- Spacing system (see UI_STANDARDS.md "Spacing") -----------------
-	// The gaps every menu/panel surface shares, so content under a heading,
-	// stacked rows, and footer hints line up the SAME everywhere instead of
-	// each surface inventing its own numbers (the source of "spacing is wrong
-	// here" drift). Window padding is hudContentInsetX above. Header→body and
-	// footer gaps are font-aware via the layout.go helpers (bodyBelowHeading /
-	// footerBaselineY) because they must clear a text line whose height scales
-	// with the font size — a bare constant offset can't, which is exactly how
-	// the roster name/condition overlap and the cramped submenus crept in.
+	// Shared gaps so headings/rows/footers line up the same everywhere. Header→
+	// body and footer gaps are font-aware via layout.go (bodyBelowHeading /
+	// footerBaselineY) since they must clear a text line whose height scales.
 	uiGapAfterTitle = int32(12)         // breathing space below a heading's TEXT before its body
 	uiRowH          = int32(32)         // standard interactive row-plate height
 	uiRowGap        = int32(10)         // vertical gap between stacked row plates
 	uiRowPitch      = uiRowH + uiRowGap // row center-to-center pitch (42)
 	uiFooterMargin  = int32(14)         // visual gap below a footer hint's glyphs/text to the card bottom edge
-	// actionMenuHintMinH is the panel-height floor below which the action menu
-	// drops its confirm/back hint footer (it would collide with the rows on a
-	// short window). Sits above the hudPanelMinH row-readability floor.
+	// actionMenuHintMinH is the height floor below which the action menu drops its
+	// hint footer (it would collide with rows). Above the hudPanelMinH floor.
 	actionMenuHintMinH = int32(260)
 
-	// Corner radii. Smaller than the previous pass (10/6 → 4/3) so the
-	// frame reads as a hardwood mitre joint rather than a modern UI
-	// rounded tile. See UI_STANDARDS.md "Panel" section.
+	// Corner radii — small (4/3) so the frame reads as a hardwood mitre, not a
+	// modern rounded tile. See UI_STANDARDS.md "Panel".
 	cornerRadius      = float32(4)
 	smallCornerRadius = float32(3)
 	stripeWidth       = int32(3)
 
-	// Font sizes — the FIVE permitted text sizes across the whole HUD,
-	// editor, and modal surface. See UI_STANDARDS.md "Type" section.
-	// Anything else is a bug. All downsample from the high-res atlas bake
-	// (hudFontBake, resources.go) with mipmaps + trilinear, so each renders
-	// sharp without subpixel sludge. Bumped well up from the original
-	// 13/16/20/26/36 ladder (~30% larger) for the Della Respira face —
-	// bigger, more readable UI text; the bake is sized so even Title stays
-	// crisp, and the optional faux-bold (drawBoldText) has room when on.
+	// Font sizes — the FIVE permitted text sizes (UI_STANDARDS.md "Type"); anything
+	// else is a bug. All downsample from the high-res atlas bake with mipmaps.
 	FontTiny    = float32(17)
 	FontSmall   = float32(21)
 	FontBody    = float32(26)
 	FontHeading = float32(36)
 	FontTitle   = float32(48)
 
-	// Letter spacing per size. Wider tracking on titles to sell the
-	// "engraved on hardwood" feel. drawTextWithShadow (and the centered /
-	// right-aligned / footer helpers built on it) applies these
-	// AUTOMATICALLY via canonicalSpacing(size) — heading-size text tracks
-	// at 2, title-size at 3, everything smaller at 1 — so plain call sites
-	// conform without remembering the Style variant. Pass them explicitly
-	// only through drawTextWithShadowStyle when pairing with a manual
-	// MeasureTextEx. (FontTiny/FontSmall/FontBody all track at 1 —
-	// FontSpacingBody covers the trio.)
+	// Letter spacing per size (wider on titles). Applied automatically via
+	// canonicalSpacing(size): heading=2, title=3, smaller=1. Pass explicitly only
+	// through drawTextWithShadowStyle.
 	FontSpacingBody    = float32(1)
 	FontSpacingHeading = float32(2)
 	FontSpacingTitle   = float32(3)
 
-	// woodFrameOuter / woodFrameInner are the stroke widths of the
-	// outer dark band and the inner highlight pinstripe inside the
-	// wood-panel border. Tuned so the frame reads at 1080p without
-	// dominating; modest panels still feel substantial.
+	// woodFrame* are the stroke widths of the wood-panel border bands.
 	woodFrameOuter = int32(2)
 	woodFrameBand  = int32(3)
 	woodFrameInner = int32(1)
-	// cardFrameThick is the total wood-frame band width (outer + band + inner).
-	// drawCard's stroke width, drawCardFiligree's corner inset (+5), and
-	// drawCardInlay's inset (+4) all derive from this so bumping any frame band
-	// keeps the three frame decorations aligned.
+	// cardFrameThick is the total band width; drawCard's stroke + drawCardFiligree
+	// (+5) + drawCardInlay (+4) insets all derive from it so they stay aligned.
 	cardFrameThick = woodFrameOuter + woodFrameBand + woodFrameInner
 
-	// Focus-plate insets: how far the gilt selection plate (DrawSelectedRowI)
-	// bleeds out past the row's text origin so the plate frames the row rather
-	// than sitting flush behind it. focusPlateInsetX/Y are the standard pair the
-	// shop + journal rows share; the pause menu sits its larger heading-tier rows
-	// on a deeper plate (menuRowInsetX/Y) so the wider gilt margin matches the
-	// bigger type. Named so none of the three carries a bare -12/-2 / -18/-6.
+	// Focus-plate insets: how far the gilt selection plate bleeds past the row's
+	// text origin. focusPlateInsetX/Y for shop/journal rows; menuRowInsetX/Y for
+	// the pause menu's larger heading-tier rows.
 	focusPlateInsetX = int32(12)
 	focusPlateInsetY = int32(2)
 	menuRowInsetX    = int32(18)
 	menuRowInsetY    = int32(6)
 
-	// Heading tick markers (drawHeading underline) have a minimum width so
-	// short headings still read as labelled. Bar value text inset is the
-	// constant pad on the right edge of drawBar.
+	// Heading underline minimum width (so short headings still read as labelled)
+	// + drawBar value/label pads.
 	headingTickMinWidth = int32(28)
 	barValuePadRight    = float32(10)
 	barLabelPadLeft     = float32(8)
 
-	// Canonical HP/MP gauge heights for the three contexts drawBar / drawBarLive
-	// render into: the full-height party-ribbon card gauge, the slightly shorter
-	// gauge on the panels Character tab, and the mini gauge on the dense item /
-	// target picker rows. Named here so the call sites stop carrying bare 32 / 28
-	// / 18 height literals and a "make all the bars a touch slimmer" pass is one
-	// edit per tier.
+	// Canonical HP/MP gauge heights for the three drawBar contexts: full ribbon
+	// card, shorter Character tab, mini picker row.
 	barHeightFull    = float32(32)
 	barHeightCompact = float32(28)
 	barHeightMini    = float32(18)
 
-	// World-popup horizontal slack: how many pixels past the screen edges a
-	// 3D-to-2D projected popup can drift before we cull it. Larger than zero
-	// so a popup whose anchor moves slightly off-screen still fades cleanly
-	// instead of snapping to invisible mid-animation.
+	// World-popup horizontal slack: pixels past the screen edge a projected popup
+	// can drift before culling, so it fades cleanly instead of snapping off.
 	offscreenPopupSlack = float32(200)
 
-	// Overlay (modal card) dimensions. Each modal surface used to
-	// hard-code its own cardW / cardH literals; centralizing them keeps
-	// a future "shrink all modals on small screens" pass in one edit.
-	// The dimensions are sized to the modal's CONTENT — a chest with
-	// fewer items renders shorter via cardH expansion at the call site,
-	// but the WIDTH stays standardized.
+	// Overlay (modal card) dimensions, centralized for a future "shrink on small
+	// screens" pass. Sized to content (height expands at the call site, WIDTH
+	// standardized).
 	overlayCardWidthSmall = int32(360) // chest modal (item list)
-	// modalMinCardH floors a content-sized modal card's height so a short
-	// node/list still reads as a card. Shared by the dialog and chest modals
-	// (both previously floored at an independent bare 200).
+	// modalMinCardH floors a content-sized modal height so a short list still
+	// reads as a card. Shared by the dialog + chest modals.
 	modalMinCardH = int32(200)
-	// The level-up modal and game-panels overlay size themselves
-	// screen-relative (drawScreenFractionScaffold) rather than off fixed
-	// widths, so the character menus scale with the window and stay
-	// readable. Clamped to the screen by overlayCardMarginScreen below.
-	// The panels overlay used to run nearly edge-to-edge (0.95×0.93);
-	// pulled in so the Tome reads as a framed dashboard with breathing
-	// room around it rather than a full-screen takeover.
+	// The level-up modal + game-panels overlay size screen-relative
+	// (drawScreenFractionScaffold), clamped by overlayCardMarginScreen.
 	panelsOverlayWidthFrac  = float32(0.80)
 	panelsOverlayHeightFrac = float32(0.80)
 	levelUpModalWidthFrac   = float32(0.60)
 	levelUpModalHeightFrac  = float32(0.85)
-	// victoryWidthFrac is the post-battle spoils card's screen-relative WIDTH
-	// (its height is content-sized; see DrawVictorySpoils). Lives here with the
-	// other modal-width fractions rather than in victory.go.
+	// victoryWidthFrac is the spoils card's screen-relative WIDTH (height is
+	// content-sized; see DrawVictorySpoils).
 	victoryWidthFrac = float32(0.5)
 
 	overlayCardMarginScreen = int32(40) // minimum margin between card and screen edges
 
-	// Panels-overlay tab strip geometry. Shared by the panels surface
-	// only today — moved here so future tab-strip surfaces (a future
-	// equipment swap modal, a settings panel) can reuse the heights.
+	// Panels-overlay tab strip geometry.
 	overlayTabHeight  = int32(46)
 	overlayTabPadding = int32(12)
 
-	// overlayFooterReserve is the vertical band at the bottom of every
-	// overlay card reserved for the "Esc close / L1 R1 tabs" hint
-	// footer rendered by DrawFooterHint. Body rect = card minus this
-	// band minus the heading band at the top.
+	// overlayFooterReserve is the bottom band reserved for the hint footer
+	// (DrawFooterHint). Body = card minus this band minus the heading band.
 	overlayFooterReserve = int32(38)
 )
 
-// drawModalScaffold paints the shared screen-veil + centered card +
-// heading band for every modal overlay (chest, level-up, the panels
-// overlay — Party Stats now lives in the panels Character tab, not a
-// standalone modal). Returns the card rect so the caller can lay out its
-// body inside without redoing the centering math. Pass an empty heading
-// to skip the header band — the caller still gets the right card
-// rect.
-//
-// The older overlays (chest / levelup) used to open-code
-// rl.DrawRectangle(0,0,…,surfaceVeil) + drawCard + drawHeading each in
-// slightly different orders. This helper plus the
-// overlayCardWidth* / overlayCardHeight* constants in this file are
-// the seam where future "shrink for small screens" or "fade-in"
-// behaviour lands once.
-// modalHeadingInsetY is the Y offset from a modal card's top edge to its
-// heading baseline. Shared by drawModalScaffold's built-in heading and the
-// dialog overlay's hand-drawn speaker nameplate (which passes an empty heading
-// to the scaffold and stamps its own at the same band) so the two stay aligned.
+// modalHeadingInsetY is the Y offset from a modal card's top edge to its heading
+// baseline. Shared by drawModalScaffold and the dialog overlay's nameplate so the
+// two align.
 const modalHeadingInsetY = int32(14)
 
+// drawModalScaffold paints the shared veil + centered card + heading band for
+// every modal overlay, returning the card rect. Empty heading skips the band.
 func drawModalScaffold(font rl.Font, cardW, cardH int32, heading string) rl.Rectangle {
 	screenW, screenH := screenSize()
 	// Soft clamp so a tiny window doesn't push the card off-screen.
@@ -734,15 +505,9 @@ func drawModalScaffold(font rl.Font, cardW, cardH int32, heading string) rl.Rect
 	return rect
 }
 
-// drawVeiledCard paints the full-screen veil, a centered wood-framed
-// card at the given size, and its gilt corner filigree, returning the
-// card rect for the caller to title + fill. The bare composition shared
-// by drawModalScaffold (left-aligned heading) and the centered-title
-// overlays (drawTitledMenuCard, DrawDoorPrompt) so the veil+card+filigree
-// triple isn't maintained in three places. No screen clamp here —
-// drawModalScaffold clamps before calling; the fixed-size menu/door
-// cards don't need it. `outline`/`accent` are the drawCard strokes and
-// `filigree` the corner-bracket tone.
+// drawVeiledCard paints the veil + centered wood-framed card + gilt filigree,
+// returning the card rect. Shared by drawModalScaffold and the centered-title
+// overlays. No clamp here (callers that need it clamp first).
 func drawVeiledCard(cardW, cardH int32, outline, accent, filigree color.RGBA) rl.Rectangle {
 	screenW, screenH := screenSize()
 	cardX := centerX(cardW)
@@ -768,23 +533,17 @@ func drawCandleVeil(screenW, screenH int32) {
 	flick := candleFlicker()
 	cx := screenW / 2
 	cy := screenH / 2
-	// Warm candlelight pool blooming from the center where the card will sit —
-	// a soft radial wash that breathes with the flame. Darkens the periphery by
-	// contrast so the eye is drawn inward to the lit dialog.
+	// Warm candlelight pool blooming from center, breathing with the flame.
 	poolR := float32(min(int(screenW), int(screenH))) * 0.66
 	rl.DrawCircleGradient(cx, cy, poolR,
 		fadeColor(rl.NewColor(78, 50, 24, 255), 0.11*flick),
 		rl.NewColor(0, 0, 0, 0))
-	// Drifting dust motes catching the candlelight — stateless, hash-seeded,
-	// slowly falling and wrapping. Few enough (per drawDustMotes) to be free.
+	// Drifting dust motes catching the candlelight (stateless, hash-seeded).
 	drawDustMotes(screenW, screenH, flick)
 }
 
-// drawDustMotes scatters a handful of faint warm motes that drift slowly
-// downward (wrapping at the bottom) with a gentle horizontal sway — the
-// floating dust you only notice in a shaft of candlelight. Stateless: position
-// and twinkle derive from a per-mote hash plus rl.GetTime(), so no pool to
-// retain and nothing to reset between modals.
+// drawDustMotes scatters faint warm motes drifting down with a gentle sway.
+// Stateless: position/twinkle derive from a per-mote hash + rl.GetTime().
 func drawDustMotes(screenW, screenH int32, flick float32) {
 	const motes = 16
 	t := rl.GetTime()
@@ -798,21 +557,16 @@ func drawDustMotes(screenW, screenH int32, flick float32) {
 		sway := float32(math.Sin(t*0.35+float64(i)*1.7)) * 22
 		mx := hx*fw + sway
 		my := fall
-		// Twinkle inline from the already-captured t instead of pulse() (which
-		// would re-cross cgo for rl.GetTime() once per mote).
+		// Twinkle inline from the captured t (avoids a per-mote pulse() cgo call).
 		tw := 0.5 + 0.5*float32(math.Sin(t*(0.25+float64(i)*0.04)*math.Pi*2))
 		a := (0.06 + 0.07*tw) * flick
 		rl.DrawCircleV(rl.NewVector2(mx, my), 1.2, fadeColor(warm, a))
 	}
 }
 
-// DrawCandlelitBackdrop paints a full-screen candlelit background: a deep
-// vertical gradient (near-black indigo at the top settling to warm brown at the
-// base), a wide radial pool of candlelight blooming from the upper third and
-// breathing with the flame, drifting dust motes, and a faint material grain
-// over everything. The title screen uses it so the launch screen reads as a
-// grimoire opened by candlelight instead of a flat fill. Exported because the
-// title package lives outside render.
+// DrawCandlelitBackdrop paints a full-screen candlelit background (gradient +
+// radial pool + dust motes + grain) for the title screen. Exported for the title
+// package.
 func DrawCandlelitBackdrop(screenW, screenH int32) {
 	if screenW <= 0 || screenH <= 0 {
 		return
@@ -829,30 +583,15 @@ func DrawCandlelitBackdrop(screenW, screenH int32) {
 	drawHudGrain(0, 0, screenW, screenH, 0.5)
 }
 
-// drawScreenFractionScaffold sizes a modal card as a fraction of the
-// current screen (wFrac × hFrac), then defers to drawModalScaffold for
-// centering + clamping. The two screen-relative overlays (game panels,
-// level-up) share it so the screenSize() read + multiply + int32-cast
-// boilerplate lives in one place.
+// drawScreenFractionScaffold sizes a modal card as a screen fraction (wFrac×hFrac),
+// then defers to drawModalScaffold. Shared by the game-panels + level-up overlays.
 func drawScreenFractionScaffold(font rl.Font, wFrac, hFrac float32, heading string) rl.Rectangle {
 	sw, sh := screenSize()
 	return drawModalScaffold(font, int32(float32(sw)*wFrac), int32(float32(sh)*hFrac), heading)
 }
 
-// drawCardFiligree paints multi-stroke gilt corner brackets on a
-// wood-framed card — the illuminated-manuscript bezel 90s AD&D PC
-// RPGs used to dress dialog boxes. Each corner gets:
-//
-//   - outer L bracket (14 px arms, 2 px thick)
-//   - inner secondary L bracket (8 px arms, 1 px thick, ~4 px inset)
-//     in a softer gilt tone so it reads as a parallel cast line
-//   - joint diamond pip (3 px) at the meeting point of the outer arms
-//   - tip diamond pips (2 px) at the far ends of the outer arms
-//   - centre highlight pip inside the joint diamond (1 px in bright
-//     gilt) — the cast-metal speculum
-//
-// Skipped on panes too small to receive the ornament cleanly
-// (< 80×80) so the corner minimap / turn panel stay simple.
+// drawCardFiligree paints gilt corner brackets (outer + inner L, joint/tip pips,
+// a bright speculum) on a wood-framed card. Skipped under 80×80.
 func drawCardFiligree(x, y, w, h int32, col color.RGBA) {
 	if w < 80 || h < 80 {
 		return
@@ -877,9 +616,8 @@ func drawCardFiligree(x, y, w, h int32, col color.RGBA) {
 		if i == 2 || i == 3 {
 			dy = -1
 		}
-		// Outer L — 14 px arms, 2 px thick. A 1px dark offset copy is laid
-		// first so the bracket reads as cast metal RAISED off the frame
-		// (the BG-era corner brace), not gilt paint flush with the wood.
+		// Outer L — 14px arms; a 1px dark offset copy first so it reads as raised
+		// cast metal, not flush paint.
 		outerHX := c[0]
 		if dx < 0 {
 			outerHX = c[0] - outerArm
@@ -893,9 +631,7 @@ func drawCardFiligree(x, y, w, h int32, col color.RGBA) {
 		rl.DrawRectangle(c[0]+1, outerVY+1, 2, outerArm, braceShadow)
 		rl.DrawRectangle(outerHX, c[1], outerArm, 2, col)
 		rl.DrawRectangle(c[0], outerVY, 2, outerArm, col)
-		// Inner L — shorter and thinner, offset diagonally inward
-		// from the outer bracket. Reads as the second cast line
-		// of a Gothic frame.
+		// Inner L — shorter/thinner, offset diagonally inward.
 		innerOriginX := c[0] + dx*innerInset
 		innerOriginY := c[1] + dy*innerInset
 		innerHX := innerOriginX
@@ -919,11 +655,8 @@ func drawCardFiligree(x, y, w, h int32, col color.RGBA) {
 	}
 }
 
-// statIconDrawers dispatches each Stat to its sigil drawer. A fixed
-// [core.StatCount] array (not a switch) so a new Stat forces a slot and
-// the init below panics on a nil entry at startup — the same coverage
-// contract the other render registries use, instead of a switch that
-// silently draws nothing for an unmapped Stat.
+// statIconDrawers dispatches each Stat to its sigil drawer. A fixed array (not a
+// switch) so a new Stat forces a slot and the init below panics on a nil entry.
 var statIconDrawers = [core.StatCount]func(cx, cy, r float32, col color.RGBA){
 	core.StatSTR: drawStatIconSTR,
 	core.StatDEX: drawStatIconDEX,
@@ -941,10 +674,7 @@ func init() {
 	}
 }
 
-// drawStatIcon dispatches to the per-stat sigil drawer. One small glyph
-// per Stat enum value, used on the level-up modal's stat rows and the
-// panels overlay's Stats tab so each row reads at a glance without
-// leaning on the 3-letter label.
+// drawStatIcon dispatches to the per-stat sigil drawer (level-up + Stats tab rows).
 func drawStatIcon(s core.Stat, cx, cy, r float32, col color.RGBA) {
 	if int(s) < 0 || int(s) >= len(statIconDrawers) {
 		return
@@ -952,27 +682,23 @@ func drawStatIcon(s core.Stat, cx, cy, r float32, col color.RGBA) {
 	statIconDrawers[s](cx, cy, r, col)
 }
 
-// STR — short-shafted hammer: rectangular head on top, narrow
-// handle hanging below, with a thin gilt band where head meets
-// handle. The "strength of arms" sigil.
+// STR — hammer sigil (head + haft + gilt band).
 func drawStatIconSTR(cx, cy, r float32, col color.RGBA) {
 	headHalfW := r * 0.85
 	headH := r * 0.55
 	rl.DrawRectangle(int32(cx-headHalfW), int32(cy-r), int32(headHalfW*2), int32(headH), col)
-	// Head face band — a brighter inner stripe along the bottom of
-	// the head reads as a steel rim against the haft.
+	// Head face band — brighter inner stripe reading as a steel rim.
 	rl.DrawRectangle(int32(cx-headHalfW), int32(cy-r+headH-2), int32(headHalfW*2), 1, giltBright)
-	// Haft running down from the head.
+	// Haft.
 	haftHalfW := r * 0.16
 	rl.DrawRectangle(int32(cx-haftHalfW), int32(cy-r+headH), int32(haftHalfW*2), int32(r*1.35), col)
-	// Pommel knob at the haft's foot.
+	// Pommel knob.
 	rl.DrawCircleV(rl.NewVector2(cx, cy+r*0.45), haftHalfW*1.4, fadeColor(col, 0.85))
 }
 
-// DEX — arrow pointing up-right: tip triangle, shaft rectangle,
-// fletching V at the tail. The classic "agility / precision" sigil.
+// DEX — NE arrow sigil (tip + shaft + fletching).
 func drawStatIconDEX(cx, cy, r float32, col color.RGBA) {
-	// Arrow axis points NE. Direction unit vector + perpendicular.
+	// Arrow axis NE: direction unit vector + perpendicular.
 	ax, ay := sqrt2Inv, -sqrt2Inv
 	px, py := sqrt2Inv, sqrt2Inv
 	// Tip triangle.
@@ -982,17 +708,14 @@ func drawStatIconDEX(cx, cy, r float32, col color.RGBA) {
 	tipL := rl.NewVector2(tipBack.X+px*tipBaseW, tipBack.Y+py*tipBaseW)
 	tipR := rl.NewVector2(tipBack.X-px*tipBaseW, tipBack.Y-py*tipBaseW)
 	drawTriangleCCW(tip, tipR, tipL, col)
-	// Shaft.
+	// Shaft — tiny discs per sample give a rotated-rect look without the primitive.
 	shaftHalfW := r * 0.12
 	for t := float32(-r * 0.85); t < r*0.55; t += 1 {
 		px2 := cx + ax*t
 		py2 := cy + ay*t
-		// Tiny disc per sample — produces a rotated rectangle look
-		// without depending on a rotated-rect primitive. Cheap
-		// enough at r ~ 10 (samples ~25).
 		rl.DrawCircleV(rl.NewVector2(px2, py2), shaftHalfW, col)
 	}
-	// Fletching V at the tail — two short diagonal strokes.
+	// Fletching V at the tail.
 	tail := rl.NewVector2(cx-ax*r, cy-ay*r)
 	fl1 := rl.NewVector2(tail.X+px*r*0.45, tail.Y+py*r*0.45)
 	fl2 := rl.NewVector2(tail.X-px*r*0.45, tail.Y-py*r*0.45)
@@ -1000,83 +723,63 @@ func drawStatIconDEX(cx, cy, r float32, col color.RGBA) {
 	drawTriangleCCW(tail, rl.NewVector2(tail.X+ax*r*0.35, tail.Y+ay*r*0.35), fl2, col)
 }
 
-// INT — open book: two rectangular leaves meeting at a centre
-// spine, with a small bookmark hanging off the side. The "lore /
-// arcane study" sigil.
+// INT — open-book sigil (two leaves + spine + bookmark).
 func drawStatIconINT(cx, cy, r float32, col color.RGBA) {
 	pageHalfW := r * 0.7
 	pageH := r * 1.3
-	// Spine in centre.
+	// Spine.
 	rl.DrawRectangle(int32(cx)-1, int32(cy-pageH/2), 2, int32(pageH), fadeColor(col, 0.7))
-	// Left page (slight tilt via two triangles for the top-edge
-	// curl, but flat-rect body for legibility).
+	// Left + right page.
 	rl.DrawRectangle(int32(cx-pageHalfW), int32(cy-pageH/2), int32(pageHalfW)-1, int32(pageH), col)
-	// Right page.
 	rl.DrawRectangle(int32(cx)+1, int32(cy-pageH/2), int32(pageHalfW)-1, int32(pageH), col)
-	// Page-line hatching — two thin horizontal pencil marks on
-	// each page so the book reads as written-in, not blank.
+	// Page-line hatching so the book reads as written-in.
 	hatch := fadeColor(col, 0.4)
 	rl.DrawRectangle(int32(cx-pageHalfW+2), int32(cy-pageH/4), int32(pageHalfW-4), 1, hatch)
 	rl.DrawRectangle(int32(cx-pageHalfW+2), int32(cy+1), int32(pageHalfW-4), 1, hatch)
 	rl.DrawRectangle(int32(cx+3), int32(cy-pageH/4), int32(pageHalfW-4), 1, hatch)
 	rl.DrawRectangle(int32(cx+3), int32(cy+1), int32(pageHalfW-4), 1, hatch)
-	// Bookmark — a thin gilt ribbon hanging off the right page.
+	// Bookmark ribbon.
 	bmHalfW := float32(1)
 	rl.DrawRectangle(int32(cx+pageHalfW*0.55), int32(cy-pageH/2), int32(bmHalfW*2), int32(pageH+3), giltBright)
 }
 
-// WIS — eye with iris: lens-shaped outline + centre pupil + bright
-// catchlight. The "perception / divine sight" sigil.
+// WIS — eye sigil (lens + iris + pupil + catchlight).
 func drawStatIconWIS(cx, cy, r float32, col color.RGBA) {
-	// Lens: two triangles meeting along the horizontal axis make
-	// a diamond, then we round it visually with a smaller circle
-	// sitting inside.
+	// Lens: two triangles forming a diamond.
 	lensHalfW := r * 0.95
 	lensHalfH := r * 0.55
-	// Top half — triangle from left point through top arc to right
-	// point. Approximate the arc with a single triangle (eye reads
-	// at small size).
 	left := rl.NewVector2(cx-lensHalfW, cy)
 	right := rl.NewVector2(cx+lensHalfW, cy)
 	top := rl.NewVector2(cx, cy-lensHalfH)
 	bot := rl.NewVector2(cx, cy+lensHalfH)
 	drawTriangleCCW(left, top, right, col)
 	drawTriangleCCW(left, right, bot, col)
-	// Iris — filled inner disc.
+	// Iris.
 	rl.DrawCircleV(rl.NewVector2(cx, cy), lensHalfH*0.7, fadeColor(col, 0.55))
-	// Pupil — dark centre dot.
+	// Pupil.
 	rl.DrawCircleV(rl.NewVector2(cx, cy), lensHalfH*0.3, fadeColor(col, 0.25))
-	// Catchlight — bright pip slightly off-centre, like the gleam
-	// in a painted portrait.
+	// Catchlight.
 	rl.DrawCircleV(rl.NewVector2(cx-lensHalfH*0.18, cy-lensHalfH*0.18), 1.4, giltBright)
 }
 
-// VIT — heart shape: two lobes (filled discs) up top, a V-point at
-// the bottom (triangle), with a bright inner pip. The "vitality"
-// sigil.
+// VIT — heart sigil (two lobes + V-point + pip).
 func drawStatIconVIT(cx, cy, r float32, col color.RGBA) {
 	lobeR := r * 0.42
 	lobeY := cy - r*0.2
 	lobeOffset := lobeR * 0.85
 	rl.DrawCircleV(rl.NewVector2(cx-lobeOffset, lobeY), lobeR, col)
 	rl.DrawCircleV(rl.NewVector2(cx+lobeOffset, lobeY), lobeR, col)
-	// V-point — triangle from each lobe's outer edge down to the
-	// chin.
+	// V-point down to the chin.
 	leftAnchor := rl.NewVector2(cx-lobeOffset-lobeR*0.85, lobeY+lobeR*0.25)
 	rightAnchor := rl.NewVector2(cx+lobeOffset+lobeR*0.85, lobeY+lobeR*0.25)
 	chin := rl.NewVector2(cx, cy+r*0.95)
 	drawTriangleCCW(leftAnchor, chin, rightAnchor, col)
-	// Inner highlight — bright pip slightly above centre for the
-	// "alive and beating" feel.
+	// Inner highlight.
 	rl.DrawCircleV(rl.NewVector2(cx-lobeOffset*0.4, lobeY-lobeR*0.2), 1.4, giltBright)
 }
 
-// SPD — lightning bolt: a zigzag polygon drawn as a strip of
-// triangles. Reads as "speed / initiative" without needing a label.
+// SPD — lightning-bolt sigil (zigzag polygon, triangle-fanned).
 func drawStatIconSPD(cx, cy, r float32, col color.RGBA) {
-	// Define the bolt as a closed 6-vertex polygon, then triangle-
-	// fan from the first vertex. Vertices walk top-down across the
-	// zigzag.
 	verts := []rl.Vector2{
 		{X: cx - r*0.05, Y: cy - r},     // top spike
 		{X: cx + r*0.5, Y: cy - r*0.1},  // upper right notch
@@ -1085,22 +788,17 @@ func drawStatIconSPD(cx, cy, r float32, col color.RGBA) {
 		{X: cx - r*0.5, Y: cy + r*0.1},  // lower left notch
 		{X: cx - r*0.05, Y: cy + r*0.1}, // inner step
 	}
-	// Fan: (v0, v1, v2), (v0, v2, v3), (v0, v3, v4), (v0, v4, v5).
+	// Triangle-fan from v0.
 	for i := 1; i < len(verts)-1; i++ {
 		drawTriangleCCW(verts[0], verts[i+1], verts[i], col)
 	}
-	// Bright inner highlight along the bolt's mid-axis — a tiny
-	// gilt pip at the kink so the bolt has a "live" centre.
+	// Gilt pip at the kink for a "live" centre.
 	rl.DrawCircleV(rl.NewVector2(cx, cy), 1.4, giltBright)
 }
 
-// drawEmptyLedgerNote is the standard "this page is blank" treatment for an
-// empty list surface (no quests, no recorded foes, an empty bag): a dim gilt
-// fleuron with short flanking hairlines — the unfilled-entry mark a scribe
-// rules into a ledger — over the centered message in muted ink. Sits in the
-// upper third of the body rect so it reads as the page's letterhead, not a
-// modal. One composable so every empty state speaks the same dialect instead
-// of each tab left-aligning bare text at its own inset.
+// drawEmptyLedgerNote is the standard empty-list treatment: a dim gilt fleuron
+// with flanking hairlines over a centered muted message, in the body's upper
+// third. Shared so every empty state matches.
 func drawEmptyLedgerNote(font rl.Font, body rl.Rectangle, text, sub string) {
 	cx := body.X + body.Width/2
 	ornY := body.Y + body.Height*0.26
@@ -1113,27 +811,19 @@ func drawEmptyLedgerNote(font rl.Font, body rl.Rectangle, text, sub string) {
 	drawDiamondPip(cx-gap-lineW, ornY, 1.5, lineCol)
 	drawDiamondPip(cx+gap+lineW, ornY, 1.5, lineCol)
 	drawTextCentered(font, text, cx, ornY+18, FontBody, textMuted)
-	// Optional second line — the "what fills this page" hint, a step dimmer
-	// and smaller so the note keeps one clear voice.
+	// Optional second hint line, dimmer + smaller.
 	if sub != "" {
 		drawTextCentered(font, sub, cx, ornY+18+FontBody+10, FontSmall, textHint)
 	}
 }
 
-// starVertsBuf backs starVerts so the per-frame star draws (the Wizard class
-// glyph on the always-visible party ribbon, the ★ rich-text glyph) reuse one
-// slice instead of escaping a fresh one to the heap each call. The render path
-// is single-threaded, so sharing the buffer is safe — same scratch pattern as
-// the status-glyph spoke tables. Sized for the 5-point star (10 verts); grows
-// if a caller ever asks for more points.
+// starVertsBuf backs starVerts (reused, single-threaded path). Sized for the
+// 5-point star; grows on demand.
 var starVertsBuf = make([]rl.Vector2, 0, 10)
 
-// starVerts returns the 2×points alternating outer/inner vertices of a regular
-// star centered at (cx, cy), the first vertex pointing straight up (-90°) and
-// stepping by π/points. Shared by the Wizard class glyph and the ★ rich-text
-// glyph so the two star silhouettes are built from one place. The returned
-// slice aliases a reused package buffer — copy it if it must outlive the next
-// call.
+// starVerts returns the 2×points alternating outer/inner vertices of a star at
+// (cx,cy), first vertex up (-90°). The returned slice aliases a reused buffer —
+// copy it if it must outlive the next call.
 func starVerts(cx, cy, outer, inner float32, points int) []rl.Vector2 {
 	n := points * 2
 	if cap(starVertsBuf) < n {
@@ -1156,9 +846,7 @@ func starVerts(cx, cy, outer, inner float32, points int) []rl.Vector2 {
 	return verts
 }
 
-// drawDiamondPip paints a small filled diamond centered on (cx, cy)
-// with half-extent r. Used at filigree corner joints and as the
-// fleuron sigil flanking the pause-menu title.
+// drawDiamondPip paints a small filled diamond centered on (cx,cy), half-extent r.
 func drawDiamondPip(cx, cy, r float32, col color.RGBA) {
 	top := rl.NewVector2(cx, cy-r)
 	right := rl.NewVector2(cx+r, cy)
@@ -1168,18 +856,9 @@ func drawDiamondPip(cx, cy, r float32, col color.RGBA) {
 	drawTriangleCCW(right, left, bottom, col)
 }
 
-// drawFleuron paints a four-direction gilt fleuron — a centre
-// diamond flanked by teardrop leaves on all four compass points, with
-// a bright inner pip at the heart. The classic "chapter divider"
-// sigil illuminated manuscripts and 90s PC RPGs used as ornamental
-// punctuation. Sized by `r` (the centre diamond's half-extent);
-// flanking leaves scale to ~0.85 r so the whole motif fits in a
-// roughly 6r square.
-//
-// The bright inner pip uses giltBright regardless of the caller's
-// requested colour so the centre catches a highlight against a
-// duller bracket tone — gives the fleuron a tiny "cast metal"
-// reflection instead of reading as a flat silhouette.
+// drawFleuron paints a gilt fleuron — a centre diamond flanked by teardrop leaves
+// on the four compass points, with a bright inner pip. Sized by `r`. The pip uses
+// giltBright regardless of `col` so the centre catches a highlight.
 func drawFleuron(cx, cy, r float32, col color.RGBA) {
 	drawDiamondPip(cx, cy, r, col)
 	leafR := r * 0.85
@@ -1204,16 +883,14 @@ func drawFleuron(cx, cy, r float32, col color.RGBA) {
 	sLeft := rl.NewVector2(cx-leafR*0.55, cy+leafOffset)
 	sRight := rl.NewVector2(cx+leafR*0.55, cy+leafOffset)
 	drawTriangleCCW(sTip, sRight, sLeft, col)
-	// Bright speculum at the heart of the diamond.
+	// Bright speculum at the heart.
 	if r >= 3 {
 		drawDiamondPip(cx, cy, r*0.35, giltBright)
 	}
 }
 
-// drawFleuronsFlanking paints a gilt fleuron `gap` px outside each end of
-// a centered label — the ◆ label ◆ motif shared by the menu titles and
-// the level-up Apply gate. leftX is the label's left edge, w its measured
-// width, cy the vertical midline.
+// drawFleuronsFlanking paints a fleuron `gap` px outside each end of a centered
+// label (the ◆ label ◆ motif). leftX = label left edge, w = width, cy = midline.
 func drawFleuronsFlanking(leftX, w, gap, cy, r float32, col color.RGBA) {
 	drawFleuron(leftX-gap, cy, r, col)
 	drawFleuron(leftX+w+gap, cy, r, col)
@@ -1272,11 +949,8 @@ func drawSmallPanelOutline(x, y, w, h int32, col color.RGBA) {
 	rl.DrawRectangleRoundedLinesEx(rect, fixedRoundnessFor(w, h, smallCornerRadius), 6, 1, col)
 }
 
-// drawGiltFocusRing paints the bold 3px gilt "you're here" frame around a
-// focused/active rounded surface, with corners matching the glass body radius.
-// Shared by the active party member card (panels.go) and the focused skill-tree
-// node plate (skilltree.go) — both want the identical giltBright ring, so the
-// roundness + thickness + color triple lives in one place.
+// drawGiltFocusRing paints the bold 3px gilt focus frame, corners matching the
+// glass body radius. Shared by the active party card + focused skill-tree node.
 func drawGiltFocusRing(rect rl.Rectangle) {
 	roundness := fixedRoundnessFor(int32(rect.Width), int32(rect.Height), cornerRadius)
 	rl.DrawRectangleRoundedLinesEx(rect, roundness, 8, 3, giltBright)
@@ -1294,10 +968,8 @@ func fixedRoundnessFor(w, h int32, target float32) float32 {
 	return r
 }
 
-// drawAccentStripe paints a card's left-edge class rail, inset slightly so it
-// reads as part of the card rather than its border. Thin wrapper over the
-// shared drawClassRail (the one embellished-rail look) — just the card inset
-// geometry.
+// drawAccentStripe paints a card's left-edge class rail, slightly inset. Thin
+// wrapper over drawClassRail with the card inset geometry.
 func drawAccentStripe(panelX, panelY, panelH int32, col color.RGBA) {
 	if panelH < 16 {
 		return
@@ -1305,61 +977,36 @@ func drawAccentStripe(panelX, panelY, panelH int32, col color.RGBA) {
 	drawClassRail(panelX+5, panelY+8, stripeWidth, panelH-16, col)
 }
 
-// drawGiltRule paints a thin horizontal gilt separator — the hairline a
-// panel heading or tab strip draws under itself. One primitive so the
-// "thin brass divider" stamp lives in a single place; callers pass the
-// rect and the alpha to fade giltBright by. (The battle splash's
-// fleuron-flanked divider is a distinct ornament and stays bespoke.)
+// drawGiltRule paints a thin horizontal gilt separator (giltBright faded by
+// alpha) — the brass-divider stamp under a heading/tab strip.
 func drawGiltRule(x, y, w, h int32, alpha float32) {
 	speckleHairline(x, y, w, h, fadeColor(giltBright, alpha))
 }
 
-// drawPipCappedRule paints a 1px horizontal rule from x to x+w in ruleCol,
-// flanked by a diamond pip of radius pipR (in pipCol) seated on each end. This
-// is the "ruled divider with filigree termini" stamp the action-menu header and
-// the panels overlay's info-strip both draw; centralizing the rule + two end
-// pips keeps the two from drifting. (drawPanelHeading paints a richer multi-layer
-// rule with an extra brass glint and a trailing fleuron, so it stays bespoke.)
+// drawPipCappedRule paints a 1px rule from x to x+w with a diamond pip on each
+// end — the divider-with-termini stamp for the action-menu header + info-strip.
 func drawPipCappedRule(x, y, w int32, ruleCol color.RGBA, pipR float32, pipCol color.RGBA) {
 	speckleHairline(x, y, w, 1, ruleCol)
 	drawDiamondPip(float32(x), float32(y), pipR, pipCol)
 	drawDiamondPip(float32(x+w), float32(y), pipR, pipCol)
 }
 
-// drawSplitRule draws a 1px horizontal rule from leftX to rightX broken by a
-// `gap` on each side of cx (to seat a centre fleuron). The two-segment line is
-// shared by the title banner divider (DrawTitleRule, which adds end-cap +
-// centre fleurons over it) and the battle-splash divider (which fades it with
-// the splash) so the segment math isn't hand-written in both.
+// drawSplitRule draws a 1px rule from leftX to rightX broken by `gap` around cx
+// (to seat a centre fleuron). Shared by the title + battle-splash dividers.
 func drawSplitRule(leftX, rightX, cx, y, gap float32, col color.RGBA) {
 	speckleHairline(int32(leftX), int32(y), int32(cx-gap-leftX), 1, col)
 	speckleHairline(int32(cx+gap), int32(y), int32(rightX-(cx+gap)), 1, col)
 }
 
-// drawCard renders a wood-framed glass pane — the library aesthetic
-// every panel-shaped surface uses. Owns the four-layer composition
-// from UI_STANDARDS.md "Panel": outer woodDark stroke, woodMid band,
-// woodLight inner highlight, glass tint body. The `accent` parameter
-// is preserved as the optional left-spine stripe (for class-tinted
-// active actor panels, etc.); pass a zero-alpha color to skip.
-//
-// `fill` should be one of the glass tokens (glassDeep / glassMid /
-// glassWarm / glassDanger). `outline` is used as the OUTERMOST
-// stroke; callers can pass `woodDark` for the standard frame or
-// borderActive / borderDanger to tint the frame for state. The
-// woodMid band + woodLight highlight are always painted between
-// the outline and the glass body — the structural feel of the
-// frame doesn't degrade for state changes.
+// drawCard renders a wood-framed glass pane (UI_STANDARDS.md "Panel"): outer
+// stroke, woodMid band, woodLight highlight, glass body. `accent` is the optional
+// left-spine stripe (zero-alpha skips). `fill` = a glass token; `outline` = the
+// outermost stroke (woodDark default, borderActive/Danger for state).
 func drawCard(x, y, w, h int32, fill, outline, accent color.RGBA) {
 	if w <= 0 || h <= 0 {
 		return
 	}
-	// Outer wood-framed card composition:
-	//   1. Translucent glass body filling the whole pane (via
-	//      drawGlassPane — the shared dark-wash + tint pair every
-	//      translucent surface in the HUD uses).
-	//   2. Three concentric hardwood frame strokes painted ON TOP
-	//      as outlines, so the body underneath stays glass.
+	// Glass body first, then three concentric hardwood frame strokes on top.
 	drawCardDropShadow(x, y, w, h)
 	drawGlassPane(x, y, w, h, fill)
 	rect := rl.NewRectangle(float32(x), float32(y), float32(w), float32(h))
@@ -1375,41 +1022,18 @@ func drawCard(x, y, w, h int32, fill, outline, accent color.RGBA) {
 	}
 }
 
-// drawPanelCard is the standard HUD panel: a drawCard with the default
-// surfacePrimary glass body and borderSoft frame, no accent spine. The
-// "neutral panel" most static surfaces (minimap frame, turn order, battle
-// log) draw, factored out so the (surfacePrimary, borderSoft, borderSoft)
-// triple lives in one place instead of being re-typed per call site.
+// drawPanelCard is the standard neutral HUD panel: drawCard with surfacePrimary +
+// borderSoft, no accent.
 func drawPanelCard(x, y, w, h int32) {
 	drawCard(x, y, w, h, surfacePrimary, borderSoft, borderSoft)
 }
 
-// drawCardBevel carves the flat three-stroke frame into raised molding — the
-// chunky directionally-lit bevel 90s CRPG dialog frames wore. Two opposing
-// light reads, hairlines only (the strokes stay the structure):
-//
-//   - RAISED outer edge: a warm highlight along the frame's top (and a dimmer
-//     one down the left) where overhead candlelight catches the molding, and
-//     a deep shadow along the bottom (dimmer up the right) where it falls
-//     away — the frame stands proud of the world.
-//   - RECESSED inner lip: the opposite pair where the frame meets the glass —
-//     shadow under the top lip (the molding overhangs the pane) and a faint
-//     light at the bottom lip (light pooling on the sill) — the glass sits
-//     sunk INTO the frame.
-//
-// Lines stop short of the corners (cornerClear) so they never fight the
-// rounded mitres; small chips skip the treatment entirely.
-// speckleHairlineDrop is the maximum fraction a hairline pixel's alpha is
-// dithered DOWN by the painterly speckle. Some pixels stay full, some thin out
-// toward (1-drop) of their alpha, so a 1px highlight reads as a hand-laid rule
-// rather than a mechanically uniform stroke. Kept modest so the line still reads
-// as continuous — raise toward 1 for a chalkier, more broken look.
+// speckleHairlineDrop is the max fraction a hairline pixel's alpha is dithered
+// down by the painterly speckle (modest so the line still reads continuous).
 const speckleHairlineDrop = float32(0.4)
 
-// speckleAlpha scales base down by a deterministic [1-drop, 1] factor hashed
-// from the pixel position, giving a hairline stable per-pixel opacity variance
-// (some pixels lighter) that doesn't shimmer frame-to-frame. Position-hashed, so
-// the same pixel always lands on the same alpha.
+// speckleAlpha scales base by a deterministic [1-drop, 1] factor hashed from the
+// pixel position, so the per-pixel variance is stable frame-to-frame.
 func speckleAlpha(px, py int32, base uint8) uint8 {
 	h := uint32(px)*73856093 ^ uint32(py)*19349663
 	h ^= h >> 13
@@ -1418,12 +1042,9 @@ func speckleAlpha(px, py int32, base uint8) uint8 {
 	return uint8(float32(base) * (1 - speckleHairlineDrop*frac))
 }
 
-// speckleHairline draws a 1px axis-aligned line (exactly one of w/h must be 1)
-// in col, dithering each pixel's alpha via speckleAlpha so the highlight reads
-// as a subtle, painterly rule instead of a uniform 1px stroke. Geometry stays
-// EXACTLY straight — only alpha varies (this is opacity speckle, NOT positional
-// waver). A non-1px or degenerate rect falls back to a plain fill so callers can
-// route any hairline through here safely.
+// speckleHairline draws a 1px axis-aligned line (one of w/h must be 1), dithering
+// alpha via speckleAlpha. Geometry stays EXACTLY straight — only alpha varies
+// (opacity speckle, NOT waver). Non-1px/degenerate rects fall back to a fill.
 func speckleHairline(x, y, w, h int32, col color.RGBA) {
 	n, horizontal := w, true
 	if h != 1 {
@@ -1446,6 +1067,9 @@ func speckleHairline(x, y, w, h int32, col color.RGBA) {
 	}
 }
 
+// drawCardBevel carves the flat frame into raised molding: a lit top/left
+// highlight + shadowed bottom/right outer edge, and (on tall panes) a recessed
+// inner lip. Hairlines only; stop short of the corners so they don't fight the mitres.
 func drawCardBevel(x, y, w, h int32) {
 	if w < 56 || h < 34 {
 		return
@@ -1463,14 +1087,12 @@ func drawCardBevel(x, y, w, h int32) {
 	hiSide := woodAccentBevelSide
 	lo := fadeColor(shadowHeavy, 0.62)
 	loSide := fadeColor(shadowHeavy, 0.34)
-	// Raised outer edge — the 1px highlight/shadow hairlines are speckled so the
-	// bevel reads as a hand-laid painterly edge rather than four mechanical rules.
+	// Raised outer edge — speckled so it reads hand-laid, not mechanical.
 	speckleHairline(hx, y+1, hw, 1, hi)
 	speckleHairline(hx, y+h-2, hw, 1, lo)
 	speckleHairline(x+1, vy, 1, vh, hiSide)
 	speckleHairline(x+w-2, vy, 1, vh, loSide)
-	// Recessed inner lip (only when the pane is tall enough that the two
-	// reads don't merge into stripes).
+	// Recessed inner lip, only on tall panes (else the reads merge into stripes).
 	if h >= 56 {
 		speckleHairline(hx, y+ft, hw, 1, fadeColor(shadowHeavy, 0.42))
 		speckleHairline(hx, y+h-ft-1, hw, 1, woodAccentInlayLip)
@@ -1482,9 +1104,7 @@ func drawCardDropShadow(x, y, w, h int32) {
 		return
 	}
 	roundness := fixedRoundnessFor(w, h, cornerRadius)
-	// Three stacked, offset copies — widest+faintest first — so the card casts
-	// a soft graduated shadow that lifts it convincingly off the world behind
-	// it rather than a single hard drop.
+	// Three stacked offset copies (widest+faintest first) for a soft graduated lift.
 	wide := rl.NewRectangle(float32(x+10), float32(y+14), float32(w), float32(h))
 	soft := rl.NewRectangle(float32(x+6), float32(y+8), float32(w), float32(h))
 	near := rl.NewRectangle(float32(x+2), float32(y+3), float32(w), float32(h))
@@ -1493,11 +1113,8 @@ func drawCardDropShadow(x, y, w, h int32) {
 	rl.DrawRectangleRounded(near, roundness, 8, fadeColor(shadowStrong, 0.28))
 }
 
-// drawCardInlay adds the small carved details that make a HUD pane read
-// like old CRPG cabinetry rather than a flat overlay: an inner dark groove,
-// a soft gilt hairline just inside it, and tiny brass pips at the mitered
-// corners. Skips narrow/tiny panes so chips and small row highlights stay
-// crisp instead of over-ornamented.
+// drawCardInlay adds carved cabinetry details: an inner groove, a gilt hairline,
+// and brass corner pips. Skips narrow/tiny panes.
 func drawCardInlay(x, y, w, h int32) {
 	if w < 96 || h < 52 {
 		return
@@ -1512,11 +1129,8 @@ func drawCardInlay(x, y, w, h int32) {
 	roundness := fixedRoundnessFor(innerW, innerH, smallCornerRadius)
 	rl.DrawRectangleRoundedLinesEx(rect, roundness, 6, 1, woodInlay)
 
-	// A partial gilt line near the BOTTOM reads like a recessed brass wire
-	// inlay without boxing in the content. The former TOP hairline sat at the
-	// content's top edge and cut straight through panel/card titles (party-card
-	// class names, modal headings, the minimap area name) — it was removed; the
-	// bottom rule alone keeps the carved-cabinetry read without crossing text.
+	// A partial gilt line near the BOTTOM only — a top hairline cut through panel
+	// titles, so it's gone.
 	lineInset := int32(18)
 	if innerW > lineInset*2 {
 		botY := y + h - inset - 3
@@ -1531,40 +1145,25 @@ func drawCardInlay(x, y, w, h int32) {
 		rl.NewVector2(float32(x+inset), float32(y+h-inset)),
 		rl.NewVector2(float32(x+w-inset), float32(y+h-inset)),
 	}
-	// Domed brass rivets at the inner corners — the carved-cabinet hardware
-	// detail. Replaces the old flat diamond pips with lit half-spheres.
+	// Domed brass rivets at the inner corners.
 	for _, c := range corners {
 		drawBrassStud(c.X, c.Y, 2.3)
 	}
 }
 
-// drawGlassPane paints the canonical translucent glass body — a dark
-// `glassBaseWash` underlay plus the family `fill` tint on top — with
-// no wood frame. Use this for nested sub-panels inside a card (member
-// cards, equipment slot bezels, skill rows, items detail card, tab
-// tiles) so every translucent surface in the UI composites the same
-// way against the world content behind it.
-//
-// drawCard internally calls this for its body. Callers that need a
-// framed pane reach for drawCard; callers that need a frame-less
-// translucent body (sub-panes inside a card) reach for this directly.
-// drawSmallPanel — single-layer opaque-ish fill — stays the right
-// choice for actual small chrome (status pills, chips, gilt rails).
-// drawGlassPaneRect is the rl.Rectangle form of drawGlassPane — most callers
-// already hold a Rectangle and were spelling out the
-// int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height) cast quartet inline.
+// drawGlassPaneRect is the rl.Rectangle form of drawGlassPane.
 func drawGlassPaneRect(r rl.Rectangle, fill color.RGBA) {
 	drawGlassPane(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height), fill)
 }
 
+// drawGlassPane paints the frame-less translucent glass body (glassBaseWash + fill
+// tint) for nested sub-panels; drawCard calls it for its own body.
 func drawGlassPane(x, y, w, h int32, fill color.RGBA) {
 	if w <= 0 || h <= 0 {
 		return
 	}
 	rect := rl.NewRectangle(float32(x), float32(y), float32(w), float32(h))
-	// cornerRadius (4) for big card bodies; small sub-panes still
-	// look round at this radius and the unified curvature makes
-	// nested panes harmonise with their parent's frame.
+	// One cornerRadius for all so nested panes harmonise with their frame.
 	roundness := fixedRoundnessFor(w, h, cornerRadius)
 	rl.DrawRectangleRounded(rect, roundness, 8, glassBaseWash)
 	rl.DrawRectangleRounded(rect, roundness, 8, fill)
@@ -1594,27 +1193,20 @@ func drawGlassGradientWash(x, y, w, h int32) {
 }
 
 // ---- Skeuomorphic relief: grain, candlelight, glass depth -----------------
-// (The "wet dream by candlelight" pass — real material tooth, recessed glass,
-// lit hardwood, and a living flame breathing over the gilt.)
 
-// hudGrainTex is the tileable transparent grain overlay (specks + fibers) minted
-// once in NewResources and tiled over every glass body by drawGlassRelief. A
-// package singleton because the theme draw helpers are free functions with no
-// Resources handle (same reason groundShadowModel is). hudGrainReady guards the
-// pre-init / headless window (tests) so the draw is a clean no-op.
+// hudGrainTex is the tileable grain overlay tiled over every glass body by
+// drawGlassRelief. A package singleton (free-function helpers, no Resources);
+// hudGrainReady guards the pre-init/headless window.
 var (
 	hudGrainTex   rl.Texture2D
 	hudGrainReady bool
 )
 
-// hudGrainAlpha is the white-tint alpha the grain overlay is drawn at. The
-// texels are already low-alpha, so this is a master "tooth" knob — raise for a
-// rougher, more antique surface, lower toward 0 to silence it.
+// hudGrainAlpha is the master "tooth" knob for the grain overlay.
 const hudGrainAlpha = float32(0.85)
 
-// drawHudGrain tiles hudGrainTex across (x,y,w,h) at the given alpha. WrapRepeat
-// on the texture means a source rect the size of the destination tiles it in a
-// single draw. No-op until the texture exists.
+// drawHudGrain tiles hudGrainTex across (x,y,w,h) (WrapRepeat → one draw). No-op
+// until the texture exists.
 func drawHudGrain(x, y, w, h int32, alpha float32) {
 	if !hudGrainReady || w <= 0 || h <= 0 {
 		return
@@ -1624,23 +1216,17 @@ func drawHudGrain(x, y, w, h int32, alpha float32) {
 	rl.DrawTexturePro(hudGrainTex, src, dst, rl.NewVector2(0, 0), 0, fadeColor(rl.White, alpha))
 }
 
-// candleFlicker returns a slow, organic 0.86..1.0 multiplier — the breath of a
-// candle flame. Three incommensurate sines summed so it never reads as a clean
-// loop; multiply gilt accent brightness/alpha by it on the ornaments that
-// should feel lit (frame speculum, brass studs, heading rule) for the
-// "by candlelight" shimmer. Deliberately shallow — it should register
-// subliminally, never strobe.
-// flickerCache memoizes candleFlicker within a frame. rl.GetTime() is constant
-// across a single frame, so the (3-sin) flicker value is identical for every
-// ornament that asks for it that frame — it was being recomputed dozens of
-// times per frame (4 brass studs per card, frame sheen, heading, etc.). Keyed
-// on the frame's time so it auto-refreshes next frame.
+// flickerCache memoizes candleFlicker within a frame (rl.GetTime() is frame-
+// constant, but ornaments ask for it dozens of times). Keyed on time so it
+// refreshes next frame.
 var flickerCache struct {
 	t      float64
 	value  float32
 	primed bool
 }
 
+// candleFlicker returns a slow organic ~0.86..1.0 multiplier (three summed sines)
+// to ride gilt-ornament brightness for a "by candlelight" shimmer.
 func candleFlicker() float32 {
 	t := rl.GetTime()
 	if flickerCache.primed && t == flickerCache.t {
@@ -1652,13 +1238,9 @@ func candleFlicker() float32 {
 	return v
 }
 
-// drawGlassRelief layers the depth cues over a translucent glass body: the
-// material grain, a soft inner shadow bleeding down from the top inner edge
-// (the pane sits recessed behind its frame), and a thin warm rim-light along
-// the bottom inner edge (light pooling at the base of lit cabinet glass). Kept
-// faint so the world still reads through. Called at the tail of drawGlassPane,
-// so EVERY glass surface in the UI — cards, sub-panes, focusable rows — gains
-// the same physically-consistent depth at once.
+// drawGlassRelief lays the material grain over a glass body (sheen comes from
+// drawGlassGradientWash, lift from drawCardDropShadow). Called at the tail of
+// drawGlassPane so every glass surface gains it.
 func drawGlassRelief(x, y, w, h int32) {
 	if w < 22 || h < 16 {
 		return
@@ -1669,16 +1251,11 @@ func drawGlassRelief(x, y, w, h int32) {
 	if iw <= 0 || ih <= 0 {
 		return
 	}
-	// Just the material grain — the glass sheen comes from drawGlassGradientWash
-	// and the lift from drawCardDropShadow. The earlier inner-shadow + rim-light
-	// hairlines read as ambiguous "lines on glass" noise, so they're gone.
 	drawHudGrain(x+inset, y+inset, iw, ih, hudGrainAlpha)
 }
 
-// drawBrassStud paints a small domed rivet — the cabinet-hardware detail at
-// frame corners: a dark seat ring, a gilt dome, and a bright upper-left
-// speculum (candle-modulated) so it reads as a polished metal half-sphere
-// catching the light rather than a flat dot.
+// drawBrassStud paints a domed rivet (dark seat, gilt dome, candle-modulated
+// upper-left speculum).
 func drawBrassStud(cx, cy, r float32) {
 	rl.DrawCircleV(rl.NewVector2(cx, cy), r+1, fadeColor(woodDark, 0.9))
 	rl.DrawCircleV(rl.NewVector2(cx, cy), r, giltDim)
@@ -1686,11 +1263,8 @@ func drawBrassStud(cx, cy, r float32) {
 		fadeColor(giltBright, 0.92*candleFlicker()))
 }
 
-// drawFocusableRow paints a selectable list row: a glass body that
-// warm-tints when focused, plus a gilt selection outline on the focused
-// row. One definition of the "cursored row" look shared by the panels
-// overlay's Skills list, Equipment slot rows, and the equip-slot
-// picker, so the three can't drift on fill tone or outline weight.
+// drawFocusableRow paints a selectable list row (glass body, warm-tinting + gilt
+// outline when focused). The shared "cursored row" look.
 func drawFocusableRow(rect rl.Rectangle, focused bool) {
 	bg := fadeColor(glassDeep, 0.55)
 	if focused {
@@ -1710,13 +1284,9 @@ func drawFocusableRow(rect rl.Rectangle, focused bool) {
 	}
 }
 
-// drawSelectionHalo paints the shared "this is the live selection" emphasis: a
-// solid inner ring around (x,y,w,h) plus a wider, pulsing outer ring in the
-// same tint. `pulseV` is the caller's breathing-curve sample (pulseActiveActor
-// for the party ribbon's active card, pulseHalo for the battle roster's
-// targeted row) so each surface keeps its own cadence; `small` picks the
-// small-radius outline for compact surfaces. Both call sites route through this
-// so their halo geometry + pulse→alpha mapping can't drift.
+// drawSelectionHalo paints the live-selection emphasis: a solid inner ring + a
+// wider pulsing outer ring. pulseV is the caller's breathing sample; small picks
+// the compact outline.
 func drawSelectionHalo(x, y, w, h int32, tint color.RGBA, pulseV float32, small bool) {
 	outline := drawPanelOutline
 	if small {
@@ -1726,24 +1296,15 @@ func drawSelectionHalo(x, y, w, h int32, tint color.RGBA, pulseV float32, small 
 	outline(x-3, y-3, w+6, h+6, fadeColor(tint, 0.30+0.55*pulseV))
 }
 
-// drawPaneDropShadow stamps the cheap offset drop shadow under a selectable
-// glass pane (the menu/list selected row + the skill-tree node plate) — one
-// offset + alpha so the two can't drift apart by a couple alpha points.
+// drawPaneDropShadow stamps the cheap offset drop shadow under a selectable pane.
 func drawPaneDropShadow(r rl.Rectangle) {
 	rl.DrawRectangle(int32(r.X+2), int32(r.Y+3), int32(r.Width), int32(r.Height), fadeColor(shadowHeavy, 0.20))
 }
 
-// drawPanelHeading paints a FontHeading title with the standard
-// wood-accent tick mark underline. Replaces the older drawHeading
-// helper (kept as an alias below). Use this for every persistent
-// HUD panel title and every modal heading.
-//
-// `accent` is the underline color — pass woodAccent for resting
-// panels, borderActive for the focused / active panel, borderDanger
-// for danger modals, etc. Header text is always inkPrimary.
+// drawPanelHeading paints a FontHeading title (engraved) with the wood-accent
+// underline. `accent` is the underline color (woodAccent resting, borderActive/
+// Danger for state); text is always inkPrimary.
 func drawPanelHeading(font rl.Font, text string, x, y float32, accent color.RGBA) {
-	// Engraved (top-lit gradient) lettering — the heading tier wears the
-	// 90s-CRPG metal-leaf treatment everywhere via this one seam.
 	drawEngravedText(font, text, x, y, FontHeading, inkPrimary)
 	measure := measurePanelHeading(font, text)
 	tickW := int32(measure.X)
@@ -1756,8 +1317,7 @@ func drawPanelHeading(font rl.Font, text string, x, y float32, accent color.RGBA
 	flick := candleFlicker()
 	rl.DrawRectangle(ruleX+6, ruleY, ruleW-12, 2, fadeColor(accent, 0.85))
 	rl.DrawRectangle(ruleX+18, ruleY+4, ruleW-36, 1, fadeColor(accent, 0.35))
-	// Polished-brass speculum: a short bright glint riding the left of the rule,
-	// breathing with the candle so the heading underline reads as lit metal.
+	// Brass speculum: a short glint on the left of the rule, candle-breathing.
 	if ruleW > 28 {
 		rl.DrawRectangle(ruleX+6, ruleY, 12, 1, fadeColor(giltBright, 0.6*flick))
 	}
@@ -1766,22 +1326,15 @@ func drawPanelHeading(font rl.Font, text string, x, y float32, accent color.RGBA
 	drawFleuron(float32(ruleX+ruleW+8), float32(ruleY+1), 3.2, fadeColor(accent, 0.65*flick))
 }
 
-// measureKey identifies a cached text measurement: the string plus the
-// size + spacing it was shaped at. (The same text can be measured at
-// different sizes — e.g. the panels Stats tab uses both FontBody and
-// FontSmall, the timing heading flips FontHeading↔FontTitle.)
+// measureKey identifies a cached measurement: the string + the size/spacing it
+// was shaped at (the same text can be measured at different sizes).
 type measureKey struct {
 	text          string
 	size, spacing float32
 }
 
-// measureCache memoizes rl.MeasureTextEx, flushing when the font atlas
-// changes (font.Texture.ID shifts after a settings flip / font reload).
-// MeasureTextEx is a cgo round-trip that re-shapes the string; the HUD
-// re-measures the same labels every frame, so every per-frame measure
-// call site shares this ONE implementation instead of re-hand-rolling
-// the map + font-ID guard (there were ~11 near-identical copies). The
-// zero value is ready to use.
+// measureCache memoizes rl.MeasureTextEx (a cgo round-trip), flushing when the
+// font atlas changes (font.Texture.ID shifts). Zero value ready to use.
 type measureCache struct {
 	entries map[measureKey]rl.Vector2
 	fontID  uint32
@@ -1796,30 +1349,22 @@ func (c *measureCache) measure(font rl.Font, text string, size, spacing float32)
 	if v, ok := c.entries[key]; ok {
 		return v
 	}
-	// measureRichText so a string carrying a procedurally-drawn symbol
-	// (richtext.go) measures to its real on-screen width — otherwise centered
-	// / right-aligned labels with a symbol in them would drift by the missing
-	// glyph's (zero/notdef) advance. Symbol-free strings fall straight through
-	// to rl.MeasureTextEx.
+	// measureRichText so a string with a procedural symbol (richtext.go) measures
+	// to its real width; symbol-free strings fall through to rl.MeasureTextEx.
 	v := measureRichText(font, text, size, spacing)
 	c.entries[key] = v
 	return v
 }
 
-// qualityPopupMeasureCache / damagePopupMeasureCache back the floating combat
-// popups, which animate their font size via a throb `scale`. The draw paths
-// measure at the FIXED base size (cache-friendly — few distinct labels) and
-// scale the result linearly, so the per-frame cgo MeasureTextEx round-trip a
-// size-keyed cache would never hit is avoided. The spacing term doesn't scale
-// with size, but for the short popup strings the error is sub-pixel and the
-// text is centered, so it's invisible.
+// qualityPopupMeasureCache / damagePopupMeasureCache back the throbbing combat
+// popups: they measure at the FIXED base size and scale the result, so the
+// size-keyed cache stays useful.
 var (
 	qualityPopupMeasureCache measureCache
 	damagePopupMeasureCache  measureCache
 )
 
-// panelHeadingMeasureCache backs drawPanelHeading, which runs every frame
-// for every visible HUD panel ("COMBAT LOG", "TURN ORDER", "PAUSED", …).
+// panelHeadingMeasureCache backs drawPanelHeading (every visible HUD panel/frame).
 var panelHeadingMeasureCache measureCache
 
 func measurePanelHeading(font rl.Font, text string) rl.Vector2 {
@@ -1831,18 +1376,13 @@ func pulse(speed float64) float32 {
 	return 0.5 + 0.5*float32(math.Sin(rl.GetTime()*speed*math.Pi*2))
 }
 
-// rowSheenPeriod is the seconds one full sheen sweep takes to cross a
-// selected row (drawRowSheen). Slow — the band drifts like candlelight
-// caught on lacquer, it doesn't "scan."
+// rowSheenPeriod is the seconds for one sheen sweep across a selected row (slow,
+// drifting — it doesn't "scan").
 const rowSheenPeriod = 3.8
 
-// drawRowSheen sweeps a soft gilt light-band across a selection plate — the
-// candle catching the polished brass as it breathes. Scissor-clipped to the
-// rect so the band never paints outside the row; the band position derives
-// from wall-clock time, so every selected row in the UI shares one drifting
-// light source (they don't strobe independently). Skipped on rows too small
-// to read the gradient. Layered ABOVE the warm glass body and BELOW the
-// spine/pips/underline so the ornaments stay crisp under the moving light.
+// drawRowSheen sweeps a soft gilt band across a selection plate, scissor-clipped
+// to the rect and wall-clock-driven (every row shares one light source). Skipped
+// on tiny rows.
 func drawRowSheen(r rl.Rectangle, flick float32) {
 	if r.Width < 48 || r.Height < 12 {
 		return
@@ -1854,8 +1394,7 @@ func drawRowSheen(r rl.Rectangle, flick float32) {
 	if band > 110 {
 		band = 110
 	}
-	// 0..1 sweep phase; the band starts fully off the left edge and exits
-	// fully off the right so there's a beat of "no sheen" between passes.
+	// Sweep phase, starting/ending fully off-edge so there's a beat between passes.
 	t, _ := math.Modf(rl.GetTime() / rowSheenPeriod)
 	x := r.X - band + float32(t)*(r.Width+2*band)
 	peak := fadeColor(giltBright, 0.13*flick)
@@ -1866,14 +1405,10 @@ func drawRowSheen(r rl.Rectangle, flick float32) {
 	rl.EndScissorMode()
 }
 
-// pulseActiveActor / pulseHalo / pulseFlicker are the three canonical
-// breathing curves from UI_STANDARDS.md ("Pulse / breathing"). They are
-// the single source of truth so the active-actor frame, the selection
-// halo (cursor / target chevron), and the status flicker can't drift
-// apart into bespoke per-call-site amplitudes + frequencies. Each
-// re-expresses the documented `base + amp·sin(t·π·f)` in terms of
-// pulse(speed) (= 0.5 + 0.5·sin(t·speed·2π)), so speed = f/2 and the
-// offset/scale fold the documented base/amp:
+// pulseActiveActor / pulseHalo / pulseFlicker are the canonical breathing curves
+// (UI_STANDARDS.md "Pulse"), the single source for the active-actor frame, the
+// selection halo, and the status flicker. Each re-expresses base+amp·sin(t·π·f)
+// via pulse(speed=f/2):
 //
 //	active-actor: 0.70 + 0.30·sin(t·π·1.4)
 //	halo:         0.60 + 0.40·sin(t·π·2.0)
@@ -1894,13 +1429,8 @@ func fadeColor(col color.RGBA, alpha float32) color.RGBA {
 	return col
 }
 
-// colorWithAlpha replaces col's alpha channel with `byteAlpha` (0-255).
-// Differs from fadeColor which multiplies the existing alpha by a
-// normalized 0..1 factor — colorWithAlpha is the "I know exactly what
-// alpha I want, regardless of the source color's alpha" form. Used by
-// turn-order panel tints (per-class color at varying transparencies
-// based on row state) where the source colors already encode the hue
-// and the alpha is a UI-state knob.
+// colorWithAlpha replaces col's alpha with byteAlpha (0-255) — the "exact alpha"
+// form, vs fadeColor which multiplies the existing alpha.
 func colorWithAlpha(col color.RGBA, byteAlpha uint8) color.RGBA {
 	col.A = byteAlpha
 	return col
@@ -1922,9 +1452,8 @@ func hpFillColor(value, maxValue int) color.RGBA {
 	}
 }
 
-// barLabelMeasureCache backs the short constant bar labels ("HP"/"MP");
-// barValueMeasureCache backs the "10/20" value strings on the right edge.
-// drawBar runs ~16×/frame across the party ribbon + enemy roster.
+// barLabelMeasureCache backs the bar labels ("HP"/"MP"); barValueMeasureCache the
+// "10/20" value strings. drawBar runs ~16×/frame.
 var barLabelMeasureCache measureCache
 var barValueMeasureCache measureCache
 
@@ -1936,9 +1465,8 @@ func measureBarValue(font rl.Font, valText string) rl.Vector2 {
 	return barValueMeasureCache.measure(font, valText, FontSmall, 1)
 }
 
-// clampBarPct clips a fill fraction to [0, 1] — shared by the gauge body and
-// the live-state wrappers so over/underflowing values (temp HP, debug boosts)
-// can't draw outside the track.
+// clampBarPct clips a fill fraction to [0,1] so over/underflow can't draw outside
+// the track.
 func clampBarPct(pct float32) float32 {
 	if pct < 0 {
 		return 0
@@ -1949,11 +1477,9 @@ func clampBarPct(pct float32) float32 {
 	return pct
 }
 
-// drawBar renders a track + filled portion + thin outline, all rounded.
-// label is drawn as a small uppercase tag at the bar's left, value text on right.
-// Static form — no trailing damage ghost, no low-value heartbeat. Dashboard
-// surfaces (the Tome's Stats tab) use this; live combat gauges go through
-// drawBarLive so the juice only plays where the stakes are.
+// drawBar renders the static gauge (track + fill + outline + label/value). No
+// damage ghost or heartbeat — dashboard surfaces use this; live gauges use
+// drawBarLive.
 func drawBar(font rl.Font, x, y, width, height float32, label string, value, maxValue int, fill color.RGBA, muted bool) {
 	mv := maxValue
 	if mv <= 0 {
@@ -1962,28 +1488,17 @@ func drawBar(font rl.Font, x, y, width, height float32, label string, value, max
 	drawBarState(font, x, y, width, height, label, clampBarPct(float32(value)/float32(mv)), formatBarValue(value, maxValue), fill, muted, -1, false, false)
 }
 
-// drawBarFraction draws a gauge at a CONTINUOUS fill fraction with a
-// caller-supplied label + value readout — for animated bars that shouldn't
-// step per integer unit (the victory XP gauge fills through it, smoothly).
-// No damage ghost or low-value heartbeat (those are HP-gauge treatments).
+// drawBarFraction draws a gauge at a CONTINUOUS fill with a caller-supplied label
+// + value (animated bars like the victory XP gauge). No ghost/heartbeat.
 func drawBarFraction(font rl.Font, x, y, width, height float32, label, valText string, frac float32, fill color.RGBA, muted bool) {
-	// gradientFill=true: the XP gauge fills left-to-right faint→rich and gains
-	// overall opacity as it nears full, so climbing toward the next level reads
-	// as building intensity.
+	// gradientFill: fills faint→rich and gains opacity toward full (building read).
 	drawBarState(font, x, y, width, height, label, frac, valText, fill, muted, -1, false, true)
 }
 
-// drawBarLive is drawBar plus the living-gauge treatments, keyed by a stable
-// identity string (e.g. "hp:Warrior") that owns the trailing state:
-//   - damage ghost: a hot gilt segment marks the just-lost slice, holding a
-//     beat then draining into the fill edge (barghost.go) — the size of a hit
-//     reads from the ribbon even when the eye was on the timing bar;
-//   - heartbeat: when the value sits at or under a quarter, the fill breathes
-//     at the status-flicker rate and the value text turns danger-red, so a
-//     critical member reads peripherally without a popup.
-//
-// The party ribbon's HP gauges use both; its MP gauge stays static (spends
-// are deliberate, not threats). Muted (downed) gauges suppress both.
+// drawBarLive is drawBar plus living-gauge treatments, keyed by a stable identity
+// string (e.g. "hp:Warrior"): a damage ghost marking the just-lost slice
+// (barghost.go), and a low-value heartbeat (fill breathes + value reddens at ≤¼).
+// HP gauges use both; MP stays static; muted gauges suppress both.
 func drawBarLive(font rl.Font, key string, x, y, width, height float32, label string, value, maxValue int, fill color.RGBA, muted bool) {
 	if maxValue <= 0 {
 		maxValue = 1
@@ -1996,22 +1511,17 @@ func drawBarLive(font rl.Font, key string, x, y, width, height float32, label st
 	drawBarState(font, x, y, width, height, label, pct, formatBarValue(value, maxValue), fill, muted, ghost, !muted, false)
 }
 
-// drawBarState is the shared gauge body behind drawBar / drawBarLive.
-// ghostPct >= 0 draws the trailing damage segment from the fill edge out to
-// that level; heartbeat enables the low-value breathing treatment.
+// drawBarState is the shared gauge body. ghostPct >= 0 draws the trailing damage
+// segment; heartbeat enables the low-value breathing.
 func drawBarState(font rl.Font, x, y, width, height float32, label string, pct float32, valText string, fill color.RGBA, muted bool, ghostPct float32, heartbeat, gradientFill bool) {
-	// pct arrives as a CONTINUOUS fraction (drawBar derives it from value/max;
-	// drawBarFraction passes a smoothly-animated one for the XP gauge), so the
-	// fill width moves sub-integer-smoothly rather than stepping per unit.
 	pct = clampBarPct(pct)
 	track := barTrack
 	outline := borderDim
 	if muted {
 		fill = barMutedFill
 	}
-	// Low-value heartbeat: the fill itself breathes at the canonical status-
-	// flicker rate. Gated on heartbeat (live gauges only) so dashboard bars
-	// and muted (downed) gauges stay still.
+	// Low-value heartbeat: fill breathes at the status-flicker rate (live gauges
+	// only).
 	lowPulse := heartbeat && pct > 0 && pct <= 0.25
 	if lowPulse {
 		fill = fadeColor(fill, 0.70+0.30*pulseFlicker())
@@ -2019,10 +1529,8 @@ func drawBarState(font rl.Font, x, y, width, height float32, label string, pct f
 	ix, iy, iw, ih := int32(x), int32(y), int32(width), int32(height)
 	drawGaugeWell(ix, iy, iw, ih)
 	drawSmallPanel(ix, iy, iw, ih, track)
-	// Trailing damage ghost — painted UNDER the live fill, spanning from the
-	// fill edge out to the held level, so the drain visibly sweeps toward the
-	// real value. Slightly translucent: the track grain reads through, which
-	// keeps it "afterimage," not "second fill."
+	// Trailing damage ghost UNDER the live fill, from the edge out to the held
+	// level. Translucent so it reads as afterimage, not a second fill.
 	if ghostPct > pct {
 		gp := clampBarPct(ghostPct)
 		ghostW := int32(float32(iw-2) * gp)
@@ -2034,21 +1542,15 @@ func drawBarState(font rl.Font, x, y, width, height float32, label string, pct f
 		fillW := int32(float32(iw-2) * pct)
 		if fillW > 0 {
 			if gradientFill && !muted {
-				// Left-to-right faint→rich opacity, and the whole fill gains
-				// opacity as pct climbs — so the gauge "builds" toward the
-				// leading edge / the next level (the right end). The leading
-				// edge reaches full opacity only at a full bar.
+				// Faint→rich left-to-right, whole fill gaining opacity toward full.
 				lead := fadeColor(fill, core.Lerp(0.45, 1.0, pct))
 				rl.DrawRectangleGradientH(ix+1, iy+1, fillW, ih-2, fadeColor(fill, 0.32), lead)
 			} else {
 				drawSmallPanel(ix+1, iy+1, fillW, ih-2, fill)
 			}
 			drawGaugeFillDepth(ix+1, iy+1, fillW, ih-2, muted)
-			// Liquid meniscus — a bright hairline riding the fill's leading
-			// edge so the level reads as the surface of liquid in a glass
-			// tube, and any motion (drain, regen tick, ghost catch-up)
-			// glints. Skipped at the extremes (nothing to mark) and on
-			// muted gauges.
+			// Liquid meniscus — bright hairline on the leading edge (glints on
+			// motion). Skipped at the extremes and on muted gauges.
 			if !muted && pct < 1 && fillW >= 6 && ih > 8 {
 				menX := ix + 1 + fillW - 1
 				menCol := fadeColor(core.MixColor(fill, inkPrimary, 0.65), 0.85)
@@ -2059,15 +1561,8 @@ func drawBarState(font rl.Font, x, y, width, height float32, label string, pct f
 	drawSmallPanelOutline(ix, iy, iw, ih, outline)
 	drawGaugeBezel(ix, iy, iw, ih, muted)
 
-	// Tape-measure ticks — small triangular notches biting in from
-	// the top and bottom edges of the bar at the 25/50/75 % marks.
-	// The 50 % mark gets a deeper notch (the cardinal index on a
-	// brass scale); the 25 / 75 marks are shorter (secondary
-	// graduations). Notches read as cast-metal cutouts against
-	// both the fill and the empty track because they're triangles
-	// pointing inward in a wood-accent tone, distinct from both
-	// glass and any HP/MP tint. Skipped on tiny bars (<80 px wide
-	// or <12 px tall) so compact UI surfaces don't look busy.
+	// Tape-measure ticks — inward triangular notches at 25/50/75% (50% deeper).
+	// Skipped on tiny bars so compact surfaces don't look busy.
 	if iw >= 80 && ih >= 12 && !muted {
 		tickCol := woodAccentIcon
 		ticks := [3]struct {
@@ -2081,12 +1576,12 @@ func drawBarState(font rl.Font, x, y, width, height float32, label string, pct f
 		}
 		for _, tk := range ticks {
 			tx := float32(ix) + 1 + float32(iw-2)*tk.t
-			// Top notch — triangle pointing DOWN into the bar.
+			// Top notch (points down).
 			topApex := rl.NewVector2(tx, float32(iy)+tk.depth)
 			topL := rl.NewVector2(tx-tk.width/2, float32(iy))
 			topR := rl.NewVector2(tx+tk.width/2, float32(iy))
 			drawTriangleCCW(topL, topApex, topR, tickCol)
-			// Bottom notch — triangle pointing UP into the bar.
+			// Bottom notch (points up).
 			botApex := rl.NewVector2(tx, float32(iy+ih)-tk.depth)
 			botL := rl.NewVector2(tx-tk.width/2, float32(iy+ih))
 			botR := rl.NewVector2(tx+tk.width/2, float32(iy+ih))
@@ -2094,16 +1589,13 @@ func drawBarState(font rl.Font, x, y, width, height float32, label string, pct f
 		}
 	}
 
-	// Bar labels (HP / MP / etc.) — always FontTiny per UI_STANDARDS.md
-	// (the bar IS small, the value text is what reads at a glance).
-	// Cream-bright color + heavy shadow so the tag pops on any fill.
+	// Bar labels — always FontTiny (UI_STANDARDS.md); the value text reads at a
+	// glance. Cream + heavy shadow so the tag pops on any fill.
 	labelSize := FontTiny
 	labelColor := inkPrimary
 	if muted {
 		labelColor = textDim
 	}
-	// labelSize stays FontTiny throughout; the measurement is keyed on
-	// it inside measureBarLabel for cgo-call avoidance.
 	labelMeasure := measureBarLabel(font, label)
 	labelY := y + (float32(ih)-labelMeasure.Y)/2 - 1
 	labelX := x + barLabelPadLeft
@@ -2112,24 +1604,16 @@ func drawBarState(font rl.Font, x, y, width, height float32, label string, pct f
 	rl.DrawTextEx(font, label, rl.NewVector2(labelX, labelY), labelSize, 1, labelColor)
 
 	if valText != "" {
-		// Value text is always FontSmall per UI_STANDARDS.md — the
-		// number is the bar's readable content and stays consistent
-		// regardless of bar height. Bright by default; faded only
-		// when muted. Double-offset drop shadow for contrast on
-		// any fill.
+		// Value text always FontSmall (UI_STANDARDS.md). Bright, faded when muted.
 		valSize := FontSmall
 		valColor := textPrimary
 		if muted {
 			valColor = textDim
 		}
-		// Critical gauge: the number itself turns danger-red alongside the
-		// breathing fill, so "someone's about to drop" reads even at a
-		// glance that only catches the text.
+		// Critical gauge: the number turns danger-red with the breathing fill.
 		if lowPulse {
 			valColor = barHPLow
 		}
-		// Value text size is locked at FontSmall inside measureBarValue;
-		// valSize stays in scope below for the draw calls.
 		valMeasure := measureBarValue(font, valText)
 		valY := y + (float32(ih)-valMeasure.Y)/2 - 1
 		valX := x + width - valMeasure.X - barValuePadRight
@@ -2159,9 +1643,7 @@ func drawGaugeFillDepth(x, y, w, h int32, muted bool) {
 	}
 	if w > 4 && h > 5 {
 		rl.DrawRectangleGradientV(x+2, y+2, w-4, h-4, hi, lo)
-		// Glass-tube specular cap — a bright hairline riding the top of the
-		// fill so the gauge reads as a curved, light-catching tube of liquid
-		// rather than a flat bar. Brighter when not muted.
+		// Glass-tube specular cap — bright hairline on top of the fill.
 		spec := fadeColor(inkPrimary, 0.34)
 		if muted {
 			spec = fadeColor(inkDim, 0.16)
@@ -2191,16 +1673,9 @@ func drawGaugeBezel(x, y, w, h int32, muted bool) {
 	}
 }
 
-// drawClassRail paints THE shared embellished 3-D character-color rail — a
-// jeweled inlay sunk into the surface, not a flat bar. Layers back-to-front:
-// a recessed dark channel (reads inlaid); the rounded class-color core; a lit
-// left edge + shadowed right edge (rounded bevel); and a gilt diamond pip
-// capping each end like a brass terminal, breathing with the candlelight.
-// This is the ONE per-character colored tick/stripe look across the whole
-// UI — card accents (drawAccentStripe: party ribbon, action menu), the
-// panels member columns, the turn-order rows, the victory spoils rows — so
-// none of them drift. Callers pass explicit geometry (insets differ per
-// surface). `col` carries the intended alpha.
+// drawClassRail paints THE shared embellished 3-D class-color rail (recessed
+// channel + color core + beveled edges + gilt end pips). The one per-character
+// tick/stripe look across the UI. Callers pass geometry; `col` carries the alpha.
 func drawClassRail(x, y, w, h int32, col color.RGBA) {
 	if w <= 0 || h <= 0 {
 		return
@@ -2217,12 +1692,8 @@ func drawClassRail(x, y, w, h int32, col color.RGBA) {
 	drawDiamondPip(cx, float32(y+h+1), 2.1, fadeColor(giltDim, 0.7*g))
 }
 
-// barValueLabelCache memoizes the "value/max" bar readout per (value, max)
-// pair. drawBar/drawBarLive call formatBarValue once per visible bar per frame
-// (HP + MP on every party card, plus enemy roster bars — up to ~8 persistent
-// bars), so without the cache every one of those allocated a fresh string each
-// frame. Bounded: keys only span (value, max) pairs actually seen in play.
-// Mirrors enemyHPLabelCache in battle.go.
+// barValueLabelCache memoizes the "value/max" readout per pair so the ~8
+// per-frame bars don't each allocate a fresh string. Mirrors enemyHPLabelCache.
 var barValueLabelCache = map[[2]int]string{}
 
 func formatBarValue(value, maxValue int) string {
@@ -2230,35 +1701,22 @@ func formatBarValue(value, maxValue int) string {
 	if s, ok := barValueLabelCache[k]; ok {
 		return s
 	}
-	// Direct strconv concat avoids the fmt formatter machinery: "%d/%d" via
-	// fmt.Sprintf allocates ~3× the bytes of the result. Only runs on a cache
-	// miss now (first time a given value/max pair is shown).
+	// strconv concat over fmt.Sprintf (which allocates ~3×); only on a cache miss.
 	s := strconv.Itoa(value) + "/" + strconv.Itoa(maxValue)
 	barValueLabelCache[k] = s
 	return s
 }
 
-// drawTriangleCCW wraps rl.DrawTriangle with an explicit "vertices are in
-// counter-clockwise order in screen-Y-down coords" contract. raylib's 2D
-// pipeline has GL_CULL_FACE enabled on some drivers (Intel/AMD have been
-// observed culling CW-wound triangles silently — the triangle just doesn't
-// appear). Use this helper at every 2D triangle call site so the winding
-// requirement is named at the call, not buried in a comment somewhere.
-//
-// "CCW in screen-Y-down" means the signed cross product of (b-a)×(c-b) is
-// NEGATIVE — that's the inverted convention vs the y-up math-textbook one
-// because screen Y increases downward.
+// drawTriangleCCW wraps rl.DrawTriangle with the "CCW in screen-Y-down" winding
+// contract: some drivers silently cull CW-wound 2D triangles. CCW here means the
+// (b-a)×(c-b) cross product is NEGATIVE (screen Y points down).
 func drawTriangleCCW(a, b, c rl.Vector2, col color.RGBA) {
 	rl.DrawTriangle(a, b, c, col)
 }
 
-// drawArrowMarker paints a small triangle chevron. The base sits at `center`
-// perpendicular to the direction; the apex is `center + (tipDx, tipDy)`.
-// Base width is 2*halfWidth. Used by HUD selection / target / active-actor
-// indicators where a tiny arrow reads better than a label — saves party,
-// battle, and item-target panels from each computing their own three
-// rl.Vector2 corners by hand. Goes through drawTriangleCCW so the winding
-// constraint stays visible.
+// drawArrowMarker paints a small chevron: base at `center` perpendicular to the
+// direction, apex at center+(tipDx,tipDy), base width 2*halfWidth. Via
+// drawTriangleCCW for the winding contract.
 func drawArrowMarker(center rl.Vector2, tipDx, tipDy, halfWidth float32, col color.RGBA) {
 	tipLen := float32(math.Sqrt(float64(tipDx*tipDx + tipDy*tipDy)))
 	if tipLen == 0 {
@@ -2266,9 +1724,7 @@ func drawArrowMarker(center rl.Vector2, tipDx, tipDy, halfWidth float32, col col
 	}
 	px := -tipDy / tipLen * halfWidth
 	py := tipDx / tipLen * halfWidth
-	// Apex → base1 → base2 is CCW in screen-Y-down for any tipDx/tipDy
-	// because px/py is the (tipDx,tipDy) vector rotated +90° in screen
-	// space (which is -90° in math space → CCW).
+	// Apex → base1 → base2 is CCW in screen-Y-down (px/py is the dir rotated +90°).
 	drawTriangleCCW(
 		rl.NewVector2(center.X+tipDx, center.Y+tipDy),
 		rl.NewVector2(center.X-px, center.Y-py),
@@ -2277,15 +1733,9 @@ func drawArrowMarker(center rl.Vector2, tipDx, tipDy, halfWidth float32, col col
 	)
 }
 
-// canonicalSpacing maps a font size to its standard letter spacing from
-// UI_STANDARDS.md "Type": Tiny/Small/Body track at 1, Heading at 2
-// (FontSpacingHeading), Title and up at 3 (FontSpacingTitle). The single
-// source the plain text helpers (drawTextWithShadow, drawTextCentered,
-// drawTextRightAligned, DrawFooterHint, the wrap/fit helpers) consult, so
-// heading-size text drawn through the convenience path gets its engraved
-// tracking automatically and draw + measure can never disagree on width.
-// Sites with a genuinely load-bearing ad-hoc spacing still use
-// drawTextWithShadowStyle, which takes spacing explicitly.
+// canonicalSpacing maps a font size to its standard letter spacing
+// (UI_STANDARDS.md "Type"): Tiny/Small/Body=1, Heading=2, Title+=3. The single
+// source the plain text helpers consult so draw + measure can't disagree on width.
 func canonicalSpacing(size float32) float32 {
 	switch {
 	case size >= FontTitle:
@@ -2297,24 +1747,15 @@ func canonicalSpacing(size float32) float32 {
 	}
 }
 
-// drawTextWithShadow paints text twice: once offset by (1,1) at shadowStrong,
-// once at the requested color. The single +1 offset reads as a clean drop
-// shadow under most HUD sizes; callers that want a heavier shadow for large
-// titles (menu rows, debug pills) go through drawTextWithShadowStyle. Letter
-// spacing follows canonicalSpacing(size) — the UI_STANDARDS tracking ladder —
-// so FontHeading text through this path engraves at spacing 2 without every
-// call site having to remember the Style variant. Lives here alongside the
-// shadowLight/Mid/Strong/Heavy palette it consumes.
+// drawTextWithShadow paints text twice: a (1,1) shadowStrong drop, then the
+// color. Letter spacing follows canonicalSpacing(size). Heavier shadows go through
+// drawTextWithShadowStyle.
 func drawTextWithShadow(font rl.Font, text string, x, y, size float32, col color.RGBA) {
 	drawTextWithShadowStyle(font, text, x, y, size, canonicalSpacing(size), col, shadowStrong, 1, 1)
 }
 
-// rowTextColor centralizes the focus/disable palette for list-row labels so the
-// {textPrimary, textMuted, disabled} tones aren't hand-picked (and prone to
-// drift) at each list. A disabled row takes disabledCol; otherwise a focused
-// row reads textPrimary and an unfocused one textMuted. Two-state lists that
-// convey focus with a selection plate rather than the text color (shop rows,
-// skill-tree node names) pass focused=enabled with their own disabled tone.
+// rowTextColor picks the list-row label tone: disabled→disabledCol, else
+// focused→textPrimary, else textMuted.
 func rowTextColor(focused, disabled bool, disabledCol color.RGBA) color.RGBA {
 	switch {
 	case disabled:
@@ -2326,22 +1767,15 @@ func rowTextColor(focused, disabled bool, disabledCol color.RGBA) color.RGBA {
 }
 
 // tabLabelMeasurer returns the FontBody label-width closure drawTextTabStrip
-// expects, backed by the given measure cache — the shared shape behind the
-// shop's and Journal's tab strips, instead of each hand-rolling the same
-// `func(s string) float32 { return cache.measure(font, s, FontBody, …).X }`.
+// expects, backed by the given cache.
 func tabLabelMeasurer(cache *measureCache, font rl.Font) func(string) float32 {
 	return func(s string) float32 { return cache.measure(font, s, FontBody, FontSpacingBody).X }
 }
 
-// drawTextTabStrip paints a left-anchored row of simple FontBody text tabs
-// starting at (x, y): the active tab in activeCol (with an inkAccent underline
-// when underline is set), the rest textMuted, advancing by measured width +
-// gap. `label` formats tab i; `measure` returns a label's width so callers can
-// supply a cache-backed measurer where it matters (the Journal) or a direct one
-// (the shop). Returns the x just past the last tab. This is the shared rhythm
-// behind the shop's Buy/Sell header and the Journal's Quests/Bestiary sub-tabs;
-// the panels overlay's MAIN tab strip is a different visual (even-width glass
-// tiles, centered labels) and intentionally does not route through here.
+// drawTextTabStrip paints a left-anchored row of FontBody text tabs: active in
+// activeCol (inkAccent underline when set), rest textMuted, advancing by measured
+// width + gap. Returns the x past the last tab. Shared by the shop + Journal
+// sub-tabs (the panels overlay's main strip is a different visual).
 func drawTextTabStrip(font rl.Font, x, y float32, count, active int, label func(int) string, measure func(string) float32, activeCol color.RGBA, gap float32, underline bool) float32 {
 	cursorX := x
 	for i := 0; i < count; i++ {
@@ -2360,50 +1794,28 @@ func drawTextTabStrip(font rl.Font, x, y float32, count, active int, label func(
 	return cursorX
 }
 
-// engravedMeasureCache backs drawEngravedText's band math — engraved labels
-// (panel headings, action verbs, menu titles) are stable strings redrawn
-// every frame their surface is up.
+// engravedMeasureCache backs drawEngravedText's band math.
 var engravedMeasureCache measureCache
 
-// drawEngravedText paints large text as top-lit engraved metal — the gradient
-// lettering 90s CRPG dialog headers wore. Four passes over one string:
-//
-//	heavy drop shadow (+2,+2) → full-height body in `base` → a bright
-//	top-light band (upper ~45 %, base mixed toward parchment-white) → a
-//	deep band at the baseline (lower ~28 %, base mixed toward black)
-//
-// The two bands are scissor-clipped re-draws of the SAME string, so the
-// gradient rides the letterforms exactly (counters and serifs shade
-// correctly) — no texture, no per-glyph work. Spacing follows
-// canonicalSpacing(size), same as drawTextWithShadow, so engraved and plain
-// text of the same size always measure identically — callers can center
-// against a plain MeasureTextEx at the canonical spacing.
-//
-// Reserve it for the heading tier and up (panel/modal headings, action
-// verbs, menu titles): at body sizes the bands collapse into noise, and the
-// four passes are priced for the handful of large labels on screen, not for
-// list rows.
+// drawEngravedText paints large text as top-lit engraved metal in four passes:
+// shadow → body → a scissor-clipped bright top band → a scissor-clipped deep
+// baseline band (bands re-draw the same string so the gradient rides the glyphs).
+// Spacing follows canonicalSpacing(size). Heading tier and up only.
 func drawEngravedText(font rl.Font, text string, x, y, size float32, base color.RGBA) {
 	drawEngravedTextSpaced(font, text, x, y, size, canonicalSpacing(size), base)
 }
 
-// drawEngravedTextSpaced is the explicit-spacing core of drawEngravedText,
-// for the few engraved surfaces whose tracking is load-bearing (the
-// timing-bar prompt's 1.5). Pair with a MeasureTextEx at the same spacing.
+// drawEngravedTextSpaced is the explicit-spacing core of drawEngravedText, for
+// surfaces whose tracking is load-bearing. Pair with a MeasureTextEx at the same
+// spacing.
 func drawEngravedTextSpaced(font rl.Font, text string, x, y, size, spacing float32, base color.RGBA) {
 	m := engravedMeasureCache.measure(font, text, size, spacing)
-	// drawRichTextKnown (not raw DrawTextEx) so engraved labels carrying a
-	// symbol the font lacks — e.g. the pause-menu "Options ▸" / "Debug ▸" rows —
-	// get the procedural glyph (richtext.go) in every pass. The scissor bands
-	// clip the symbol shapes too, so they pick up the same top-light /
-	// deep-shade gradient as the letters. The has-symbol scan runs ONCE here,
-	// not per pass (this draws the string four times); symbol-free headings
-	// then take the fast path in all four.
+	// drawRichTextKnown so symbol-bearing labels get the procedural glyph in every
+	// pass; the has-symbol scan runs once (this draws four times).
 	hasSym := containsSymGlyph(text)
 	drawRichTextKnown(font, text, hasSym, x+2, y+2, size, spacing, shadowHeavy)
 	drawRichTextKnown(font, text, hasSym, x, y, size, spacing, base)
-	// Band rects pad ±2 px horizontally so antialiased glyph edges aren't
-	// shaved at the scissor boundary.
+	// Band rects pad ±2px so antialiased glyph edges aren't shaved at the scissor.
 	lit := core.MixColor(base, inkPrimary, 0.55)
 	lit.A = base.A
 	rl.BeginScissorMode(int32(x-2), int32(y), int32(m.X+4), int32(m.Y*0.45))
@@ -2417,31 +1829,18 @@ func drawEngravedTextSpaced(font rl.Font, text string, x, y, size, spacing float
 	rl.EndScissorMode()
 }
 
-// drawTextWithShadowStyle is the parametric form of drawTextWithShadow.
-// shadowCol picks the drop color (shadowLight/Mid/Strong/Heavy above);
-// offX/offY pick the drop offset in pixels; `spacing` is the letter
-// spacing passed through to rl.DrawTextEx. Use this when an ad-hoc
-// shadow alpha, offset, or letter spacing is actually load-bearing
-// (splash titles, menu rows, the debug overlay's 1.2 spacing); prefer
-// the non-styled drawTextWithShadow for everything else so HUD shadows
-// stay consistent.
+// drawTextWithShadowStyle is the parametric form of drawTextWithShadow: shadowCol
+// + offX/offY pick the drop, `spacing` the letter spacing. Use when an ad-hoc
+// shadow/offset/spacing is load-bearing; else use drawTextWithShadow.
 func drawTextWithShadowStyle(font rl.Font, text string, x, y, size, spacing float32, col, shadowCol color.RGBA, offX, offY float32) {
-	// Route through drawRichTextKnown so any geometric/arrow/relational symbols
-	// the font lacks (▶ → ↑↓ ● ★ ✓ ≤ ≥ …) are drawn procedurally (richtext.go)
-	// instead of baking as missing-glyph boxes. The has-symbol scan runs ONCE
-	// here and is shared by the shadow + main pass — symbol-free strings (the
-	// vast majority) then take the single-DrawTextEx fast path in both, so this
-	// per-frame hot path adds only one cheap ASCII byte-scan per label.
+	// drawRichTextKnown so missing-font symbols draw procedurally; the scan runs
+	// once and is shared by both passes (symbol-free strings take the fast path).
 	hasSym := containsSymGlyph(text)
 	drawRichTextKnown(font, text, hasSym, x+offX, y+offY, size, spacing, shadowCol)
 	drawRichTextKnown(font, text, hasSym, x, y, size, spacing, col)
 }
 
-// drawHeading is the legacy panel-heading helper. Routes through
-// drawPanelHeading so the heading size is the standardized FontHeading
-// across every call site — the old hand-tuned 20pt is gone. Kept as
-// an alias because dozens of call sites pass int32 coords; over time
-// they should adopt drawPanelHeading directly.
+// drawHeading is the legacy int32-coord alias for drawPanelHeading.
 func drawHeading(font rl.Font, text string, x, y int32, accent color.RGBA) {
 	drawPanelHeading(font, text, float32(x), float32(y), accent)
 }

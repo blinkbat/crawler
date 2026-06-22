@@ -7,7 +7,7 @@ import (
 )
 
 func TestAttackClassification(t *testing.T) {
-	// Basic attacks: ranged weapon → Ranged, everything else (incl. unarmed) → Melee.
+	// Basic attacks: ranged weapon → Ranged, else (incl. unarmed) → Melee.
 	if got := BasicAttackClass(WeaponSword); got != AttackMelee {
 		t.Errorf("sword basic = %d, want Melee", got)
 	}
@@ -17,7 +17,7 @@ func TestAttackClassification(t *testing.T) {
 	if got := BasicAttackClass(WeaponBow); got != AttackRanged {
 		t.Errorf("bow basic = %d, want Ranged", got)
 	}
-	// Skills classify by kind: melee front-gated, magic/heal = magic, utility = ranged.
+	// Skills classify by kind: melee→melee, magic/heal→magic, utility→ranged.
 	cases := []struct {
 		k    SkillKind
 		want AttackClass
@@ -50,7 +50,6 @@ func TestNewPartyDefaultRows(t *testing.T) {
 }
 
 func TestPartyEffectiveFront(t *testing.T) {
-	// FL, FR front (alive); BL, BR back (alive).
 	party := []PartyMember{
 		{HP: 10, Row: RowFront},
 		{HP: 10, Row: RowFront},
@@ -77,8 +76,7 @@ func TestPartyEffectiveFront(t *testing.T) {
 }
 
 func TestPackMemberRowRoundTrip(t *testing.T) {
-	// A pack authored with a back-row member should decode with that row, and
-	// re-encode with BackCount intact (back members ordered last).
+	// A back-row member decodes with that row and re-encodes with BackCount intact.
 	mf := mapfile.MapFile{
 		Name: "Row Test", Materials: "dungeon", Width: 4, Height: 4,
 		StartX: 0, StartZ: 0, StartFace: "east",
@@ -110,7 +108,6 @@ func TestPackMemberRowRoundTrip(t *testing.T) {
 	if got[len(got)-1].Row != RowBack {
 		t.Error("the back member should be ordered last")
 	}
-	// Re-encode and confirm the row count survives.
 	enc, err := MapFileFromArea(area)
 	if err != nil {
 		t.Fatalf("encode: %v", err)
@@ -131,12 +128,10 @@ func TestAmbushLiveRow(t *testing.T) {
 		AmbushLiveRow(RowBack, ColLeft, EngageBack) != RowFront {
 		t.Error("back ambush should flip the rows")
 	}
-	// Right ambush: the right column becomes the front, regardless of home row.
 	if AmbushLiveRow(RowBack, ColRight, EngageRight) != RowFront ||
 		AmbushLiveRow(RowFront, ColLeft, EngageRight) != RowBack {
 		t.Error("right ambush should bring the right column to the front")
 	}
-	// Left ambush: the left column becomes the front.
 	if AmbushLiveRow(RowBack, ColLeft, EngageLeft) != RowFront ||
 		AmbushLiveRow(RowFront, ColRight, EngageLeft) != RowBack {
 		t.Error("left ambush should bring the left column to the front")
@@ -144,7 +139,6 @@ func TestAmbushLiveRow(t *testing.T) {
 }
 
 func TestNewPartyFormationIs2x2(t *testing.T) {
-	// Default party should form a proper 2×2: each row has one left + one right.
 	seen := map[[2]int]int{}
 	for _, m := range NewParty() {
 		seen[[2]int{int(m.HomeRow), int(m.HomeCol)}]++
@@ -160,7 +154,6 @@ func TestNewPartyFormationIs2x2(t *testing.T) {
 
 func TestSwapFormationSlots(t *testing.T) {
 	party := NewParty() // a clean 2×2 to start
-	// Find one front and one back member to swap across rows.
 	front, back := -1, -1
 	for i := range party {
 		if party[i].HomeRow == RowFront && front < 0 {
@@ -182,11 +175,9 @@ func TestSwapFormationSlots(t *testing.T) {
 	if party[back].HomeRow != fRow || party[back].HomeCol != fCol {
 		t.Error("back member should take the front member's slot")
 	}
-	// Live reach Row resyncs to the swapped home row.
 	if party[front].Row != party[front].HomeRow || party[back].Row != party[back].HomeRow {
 		t.Error("live Row should resync to HomeRow after a swap")
 	}
-	// Still a clean 2×2 — never three in one row.
 	if !formationSlotsValid(party) {
 		t.Error("formation should remain a valid 2×2 after a swap")
 	}
@@ -199,7 +190,7 @@ func TestSwapFormationSlots(t *testing.T) {
 	if frontCount != 2 {
 		t.Errorf("front count = %d after swap, want 2 (a swap can never put three up front)", frontCount)
 	}
-	// No-op guards: self, and out-of-range indices, must not panic or mutate.
+	// No-op guards: self + out-of-range must not panic or mutate.
 	SwapFormationSlots(party, 1, 1)
 	SwapFormationSlots(party, -1, 2)
 	SwapFormationSlots(party, 0, 99)
@@ -221,14 +212,13 @@ func TestNormalizePartyFormation(t *testing.T) {
 	if !formationSlotsValid(party) {
 		t.Error("normalize should repair an invalid layout into a clean 2×2")
 	}
-	// Repaired layout must match the fresh default (default row by class).
 	for i := range party {
 		want := DefaultPartyRow(party[i].Class)
 		if party[i].HomeRow != want || party[i].Row != want {
 			t.Errorf("member %d row = %d/%d, want %d (default by class)", i, party[i].HomeRow, party[i].Row, want)
 		}
 	}
-	// A VALID custom layout (e.g. a swap) must be preserved untouched.
+	// A valid custom layout (a swap) must be preserved untouched.
 	custom := NewParty()
 	SwapFormationSlots(custom, 0, len(custom)-1)
 	snapshot := make([][2]Row, len(custom))
@@ -244,8 +234,7 @@ func TestNormalizePartyFormation(t *testing.T) {
 }
 
 func TestShuntEnemyFormation(t *testing.T) {
-	// 3 front + 2 back; kill a front enemy → a back one is promoted to keep the
-	// front packed at 3 (while ≥3 alive).
+	// 3 front + 2 back; killing a front enemy promotes a back one (front packed at 3 while ≥3 alive).
 	members := []Enemy{
 		{Alive: true, Row: RowFront},
 		{Alive: true, Row: RowFront},
@@ -285,7 +274,6 @@ func TestPeekNextMeleeEnemyTarget(t *testing.T) {
 		{HP: 10, Row: RowFront},
 	}}
 	g.Battle.EnemyAttackCursor = -1
-	// First melee target after the cursor must be a front-row member (skip back).
 	if got := PeekNextMeleeEnemyTarget(g); got != 0 {
 		t.Errorf("melee target = %d, want 0 (front)", got)
 	}

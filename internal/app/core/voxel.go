@@ -5,50 +5,35 @@ import (
 	"strings"
 )
 
-// Voxel occupancy — the cube model that supersedes the single-height Elevation
-// heightfield. A column (x,z) is a stack of cells, each SOLID (a cube, whose
-// char is its material/skin) or AIR. This is what lets a map express a floating
-// box / bridge / overhang: solid@0, AIR@1, solid@2 is a deck you walk UNDER at
-// level 0 and OVER at level 2 — geometry the one-height-per-tile model could
-// never hold.
+// Voxel occupancy — cube model superseding the single-height Elevation
+// heightfield. A column (x,z) is a stack of cells, each SOLID (cube, char =
+// material/skin) or AIR. Expresses floating decks/bridges/overhangs (solid@0,
+// air@1, solid@2 = walk UNDER at 0, OVER at 2).
 //
-// Migration discipline (see voxel staging in the plan): AreaDefinition.Solids
-// stays NIL for a pure heightfield. Every accessor here then DERIVES occupancy
-// from the legacy Elevation layer (a column is solid from level 0 up to its
-// stored top), so a flat/legacy map answers exactly as it did before — and the
-// editor's elevation brush, which writes Elevation, stays authoritative. Solids
-// is non-nil only for a map that actually has a gap (loaded from a solids:
-// section, or authored with the cube tool). This keeps the conversion staged:
-// nothing changes for existing maps until a gap is introduced.
+// Migration discipline: Solids stays NIL for a pure heightfield, and every
+// accessor DERIVES occupancy from the Elevation layer (solid from 0 up to the
+// stored top) so legacy maps answer unchanged and the editor's elevation brush
+// stays authoritative. Solids is non-nil only once a map has a gap.
 
-// SolidAir is the cell char meaning "no cube here" (empty air). It coincides
-// with ElevationGround ('0') — a blank elevation cell and an air voxel share the
-// sentinel — and is deliberately disjoint from the face-skin alphabet
-// ('#','+','=','&','$', see FaceSkins) that marks a solid cube's material, so a
-// solids plane never confuses a cube skin with empty space.
+// SolidAir is the "no cube" (air) char. Coincides with ElevationGround ('0') and
+// is disjoint from the face-skin alphabet (FaceSkins) marking a cube's material.
 const SolidAir = ElevationGround
 
-// IsVoxel reports whether the area carries a materialized voxel stack (a non-nil
-// Solids), as opposed to a pure heightfield that derives occupancy from
-// Elevation. The single home for the "is this a voxel map?" test that gates the
-// ResolveStep / PackIndexAtTileLevel paths against their heightfield fallbacks —
-// so changing how a voxel map is detected isn't a hunt across call sites.
+// IsVoxel reports whether the area has a materialized voxel stack (non-nil
+// Solids) vs. a pure heightfield. Gates ResolveStep / PackIndexAtTileLevel.
 func (a *AreaDefinition) IsVoxel() bool { return len(a.Solids) > 0 }
 
-// SolidAt reports whether a solid cube occupies (x, level, z) and, if so, the
-// cube's material/skin char. THE single read path into the voxel stack: when
-// Solids is populated it indexes the plane directly; when Solids is nil (a pure
-// heightfield) it derives occupancy from Elevation — solid from level 0 up to
-// ElevationLevelAt inclusive, skinned by FaceSkinAt — so callers get identical
-// answers whether or not the stack has been materialized. Out-of-bounds (x,z),
-// a negative level, or a level above the tallest stored plane read as air.
+// SolidAt reports whether a cube occupies (x, level, z) and its skin char. THE
+// single read path into the stack: indexes Solids when set, else derives from
+// Elevation (solid 0..ElevationLevelAt, skinned by FaceSkinAt) for identical
+// answers. OOB, negative level, or above the tallest stored plane read as air.
 func (a *AreaDefinition) SolidAt(x, level, z int) (skin byte, solid bool) {
 	if level < 0 || !a.InBounds(x, z) {
 		return 0, false
 	}
 	if len(a.Solids) > 0 {
 		if level >= len(a.Solids) {
-			return 0, false // above the tallest stored plane: implicit air
+			return 0, false // above tallest plane: implicit air
 		}
 		c, ok := a.layerByteAt(a.Solids[level], x, z)
 		if !ok || c == SolidAir {
@@ -56,18 +41,16 @@ func (a *AreaDefinition) SolidAt(x, level, z int) (skin byte, solid bool) {
 		}
 		return c, true
 	}
-	// Heightfield fallback: a column is solid from 0 up to its stored top. Ramp
-	// tiles store their LOW level (the wedge above is drawn separately), so the
-	// solid block ends at the low level — identical to today's render/movement.
+	// Heightfield fallback: solid from 0 up to the stored top. Ramp tiles store
+	// their LOW level, so the solid block ends there (wedge drawn separately).
 	if level <= a.ElevationLevelAt(x, z) {
 		return a.FaceSkinAt(x, z), true
 	}
 	return 0, false
 }
 
-// TopSolidLevel returns the highest level with a solid cube in column (x,z), or
-// -1 for a wholly empty column (only reachable in explicit-Solids mode). In
-// heightfield mode it is exactly ElevationLevelAt.
+// TopSolidLevel returns the highest solid level in column (x,z), or -1 for a
+// wholly empty column (explicit-Solids only). Heightfield mode = ElevationLevelAt.
 func (a *AreaDefinition) TopSolidLevel(x, z int) int {
 	if !a.InBounds(x, z) {
 		return -1
@@ -83,9 +66,7 @@ func (a *AreaDefinition) TopSolidLevel(x, z int) int {
 	return a.ElevationLevelAt(x, z)
 }
 
-// maxElevationTop returns the tallest ElevationLevelAt across every column (0 if
-// the area is flat/empty). Shared by SolidStackHeight and BuildSolidsFromElevation
-// so the heightfield top scan lives in one place.
+// maxElevationTop returns the tallest ElevationLevelAt across all columns (0 if flat).
 func (a *AreaDefinition) maxElevationTop() int {
 	top := 0
 	for z := 0; z < a.Height; z++ {
@@ -98,9 +79,8 @@ func (a *AreaDefinition) maxElevationTop() int {
 	return top
 }
 
-// SolidStackHeight is the number of levels worth iterating for column walks
-// (rendering, reachability): the count of stored planes when Solids is set,
-// else one past the tallest heightfield column. Always >= 1.
+// SolidStackHeight is the level count to iterate for column walks: stored plane
+// count when Solids is set, else one past the tallest column. Always >= 1.
 func (a *AreaDefinition) SolidStackHeight() int {
 	if len(a.Solids) > 0 {
 		return len(a.Solids)
@@ -108,9 +88,8 @@ func (a *AreaDefinition) SolidStackHeight() int {
 	return a.maxElevationTop() + 1
 }
 
-// Standable reports whether a unit can stand atop level L in column (x,z): the
-// cube at L is solid AND L+1 is air (headroom for the body). The unit rests on
-// cube L's top face and occupies L+1's air.
+// Standable reports whether a unit can stand atop level L in column (x,z): L
+// solid AND L+1 air (body headroom).
 func (a *AreaDefinition) Standable(x, L, z int) bool {
 	if _, solid := a.SolidAt(x, L, z); !solid {
 		return false
@@ -119,9 +98,8 @@ func (a *AreaDefinition) Standable(x, L, z int) bool {
 	return !above
 }
 
-// LowestStandableLevel returns the lowest level a unit can stand on in column
-// (x,z), or -1 if none. Used to seed a unit's level when only its (x,z) is
-// known (legacy save without a stored level, authored start tile).
+// LowestStandableLevel returns the lowest standable level in column (x,z), or -1.
+// Seeds a unit's level when only (x,z) is known (legacy save, authored start).
 func (a *AreaDefinition) LowestStandableLevel(x, z int) int {
 	h := a.SolidStackHeight()
 	for L := 0; L < h; L++ {
@@ -132,13 +110,8 @@ func (a *AreaDefinition) LowestStandableLevel(x, z int) int {
 	return -1
 }
 
-// MapSurfaceKind classifies what an observer standing on `observerLevel` sees at
-// a column once the world is flattened to a top-down map: the floor of their own
-// level, a wall/cliff rising into their eyeline, a floor some levels below them,
-// a ramp connecting to/from their level, or nothing at or below them (an open
-// shaft). It's the shared rule behind the in-game map's level slice — show the
-// current level, fade levels below, drop decks above — so the corner minimap and
-// the Map tab can't drift on how the slice is computed.
+// MapSurfaceKind classifies what an observer at observerLevel sees at a column on
+// the top-down map. Shared rule behind the in-game map's level slice (minimap + Map tab).
 type MapSurfaceKind int
 
 const (
@@ -149,34 +122,24 @@ const (
 	MapSurfaceRamp                        // ramp connecting to/from the observer's level
 )
 
-// MapSurface is the classified column plus, for MapSurfaceBelow, how many levels
-// beneath the observer the visible floor sits (Depth >= 1; 0 for every other
-// kind).
+// MapSurface is the classified column; Depth (>=1) is levels below the observer
+// for MapSurfaceBelow, 0 otherwise.
 type MapSurface struct {
 	Kind  MapSurfaceKind
 	Depth int
 }
 
-// MapSurfaceAt classifies column (x,z) as seen from observer level L for the
-// top-down map. The rule is voxel-aware and reduces exactly to the heightfield
-// "raised = wall, lower = faded" behaviour on a nil-Solids map:
-//
-//   - a ramp whose low edge touches the observer's level (low == L or L-1) →
-//     Ramp, so the way up/down stays on the map;
-//   - a cube at the observer's eyeline (level L+1) → Wall (a cliff/wall face);
-//   - a cube at the observer's own level with air above → Floor (current level);
-//   - else the highest solid strictly below L → Below{Depth};
-//   - else (nothing at or below L) → Void.
-//
-// A deck ABOVE the observer (solid higher than L+1 with air at L and L+1) is
-// never reported — the floor beneath it is — so upper decks can't paint over the
-// level the party is standing on.
+// MapSurfaceAt classifies column (x,z) from observer level L. Voxel-aware,
+// reducing to heightfield "raised = wall, lower = faded" on a nil-Solids map:
+// ramp low edge at L or L-1 → Ramp; cube at L+1 (eyeline) → Wall; cube at L with
+// air above → Floor; else highest solid below L → Below{Depth}; else Void.
+// A deck above the observer is never reported (the floor beneath it is).
 func (a *AreaDefinition) MapSurfaceAt(x, z, L int) MapSurface {
 	if !a.InBounds(x, z) {
 		return MapSurface{Kind: MapSurfaceVoid}
 	}
 	if _, ok := a.RampAt(x, z); ok {
-		low := a.ElevationLevelAt(x, z) // ramp tiles store their LOW level
+		low := a.ElevationLevelAt(x, z) // ramps store their LOW level
 		if low == L || low == L-1 {
 			return MapSurface{Kind: MapSurfaceRamp}
 		}
@@ -195,12 +158,9 @@ func (a *AreaDefinition) MapSurfaceAt(x, z, L int) MapSurface {
 	return MapSurface{Kind: MapSurfaceVoid}
 }
 
-// BuildSolidsFromElevation materializes the voxel stack for a heightfield area:
-// column (x,z) becomes solid from level 0 up to ElevationLevelAt(x,z), each cube
-// skinned by FaceSkinAt so cliff faces look identical. The inverse of reading
-// tops back out (see ElevationRowsFromSolids). Returns planes 0..maxTop; the
-// top plane always carries at least one cube, so there are no trailing all-air
-// planes.
+// BuildSolidsFromElevation materializes the voxel stack from a heightfield:
+// each column solid 0..ElevationLevelAt, skinned by FaceSkinAt. Inverse of
+// ElevationRowsFromSolids. Returns planes 0..maxTop, no trailing all-air planes.
 func BuildSolidsFromElevation(a *AreaDefinition) [][]string {
 	maxTop := a.maxElevationTop()
 	out := make([][]string, maxTop+1)
@@ -222,11 +182,9 @@ func BuildSolidsFromElevation(a *AreaDefinition) [][]string {
 	return out
 }
 
-// ElevationRowsFromSolids projects an explicit voxel stack down to the legacy
-// single-height elevation layer (the TOP solid level per column, as a base-36
-// char). Written alongside an authored solids: section as a graceful-downgrade
-// elevation: section, so a build that ignores solids: still sees the column
-// tops as a heightfield rather than a flat floor. An empty column writes ground.
+// ElevationRowsFromSolids projects a voxel stack down to the legacy elevation
+// layer (top solid level per column, base-36 char) as a graceful downgrade for
+// readers that ignore solids:. Empty column writes ground.
 func ElevationRowsFromSolids(a *AreaDefinition) []string {
 	rows := make([]string, a.Height)
 	for z := 0; z < a.Height; z++ {
@@ -243,13 +201,10 @@ func ElevationRowsFromSolids(a *AreaDefinition) []string {
 	return rows
 }
 
-// surfaceEdgeLevel returns the elevation level a unit standing atop level L in
-// column (x,z) presents across its edge toward `dir`, and ok=false when that
-// edge isn't walkable (a ramp's sheer perpendicular side). A flat surface
-// presents L on every edge; a ramp ground tile presents its high/low edges via
-// the shared EdgeLevelOf rule (ramps stay ground-only, so L is the ramp's stored
-// low level). The single rule ResolveStep uses on both the leaving and entering
-// side, so the cliff/ramp math can't drift from the heightfield edgeLevel.
+// surfaceEdgeLevel returns the level a unit atop L in column (x,z) presents at
+// its `dir` edge; ok=false on a ramp's sheer perpendicular side. Flat presents L
+// everywhere; a ramp uses EdgeLevelOf (L = its stored low level). ResolveStep
+// uses this on both leave and enter sides.
 func (a *AreaDefinition) surfaceEdgeLevel(x, L, z, dir int) (int, bool) {
 	if f, ok := a.RampAt(x, z); ok {
 		return EdgeLevelOf(L, f, dir)
@@ -257,19 +212,12 @@ func (a *AreaDefinition) surfaceEdgeLevel(x, L, z, dir int) (int, bool) {
 	return L, true
 }
 
-// ResolveStep resolves a step from standing on level `fromL` in column
-// (fromX,fromZ) heading cardinal `dir`: it returns the destination standing
-// level in the neighbour column, or ok=false if the step is blocked (a cliff,
-// the side of a cube = a wall, no reachable surface, or a sheer ramp side).
-//
-// The rule generalizes StepElevationOK to a column with MORE THAN ONE walkable
-// surface: you land on the neighbour's standable surface whose entry edge level
-// equals the edge level you leave from. Standable surfaces in a column are
-// separated by an air gap (>= 2 levels apart), so at most one matches — which
-// is what makes "ground under a bridge vs the bridge deck" unambiguous: from the
-// ground you match the neighbour's ground (walk UNDER the deck); from the deck
-// you match the deck. For a heightfield column (one surface = the top) this is
-// provably identical to StepElevationOK.
+// ResolveStep resolves a step from level `fromL` in (fromX,fromZ) heading `dir`,
+// returning the destination standing level, or ok=false if blocked (cliff, cube
+// side, no surface, sheer ramp side). Generalizes StepElevationOK to multi-surface
+// columns: you land on the neighbour surface whose entry edge equals your exit
+// edge. Surfaces are >=2 levels apart so at most one matches (ground-under-bridge
+// vs deck is unambiguous). Identical to StepElevationOK on a heightfield column.
 func (a *AreaDefinition) ResolveStep(fromX, fromL, fromZ, dir int) (toL int, ok bool) {
 	exitEdge, exitOK := a.surfaceEdgeLevel(fromX, fromL, fromZ, dir)
 	if !exitOK {
@@ -293,22 +241,19 @@ func (a *AreaDefinition) ResolveStep(fromX, fromL, fromZ, dir int) (toL int, ok 
 	return 0, false
 }
 
-// GroundSpawnLevel is the exported wrapper over spawnLevel: the standing level a
-// unit placed at (x,z) should occupy (lowest standable surface, else the column
-// top). Used by out-of-package placement paths (door transitions) that build a
-// player without a saved level — the heightfield case returns the column top, so
-// it's a no-op there.
+// GroundSpawnLevel is the standing level a unit placed at (x,z) should occupy
+// (lowest standable surface, else column top). For out-of-package placement
+// (door transitions) building a player without a saved level.
 func (a *AreaDefinition) GroundSpawnLevel(x, z int) int {
 	return spawnLevel(a, x, z)
 }
 
 // --- Editor authoring primitives -------------------------------------------
 
-// EnsureSolids materializes the voxel stack from the heightfield Elevation layer
-// if it isn't already explicit, so an editor cube edit has a stack to write
-// into. No-op when Solids is already present. After this, ElevationLevelAt reads
-// the stack, so the editor's elevation edits must route through the Solids-aware
-// helpers (SetColumnTop / SetCube / ClearCube) rather than the Elevation layer.
+// EnsureSolids materializes the voxel stack from Elevation if not already
+// explicit, giving an editor cube edit a stack to write into. No-op when Solids
+// is present. After this, edits must route through SetColumnTop / SetCube /
+// ClearCube, not the Elevation layer (which ElevationLevelAt no longer reads).
 func EnsureSolids(a *AreaDefinition) {
 	if len(a.Solids) == 0 {
 		a.Solids = BuildSolidsFromElevation(a)
@@ -331,17 +276,16 @@ func (a *AreaDefinition) growSolidsTo(n int) {
 	}
 }
 
-// trimTopAir drops trailing all-air planes so the stack height tracks the
-// tallest cube (keeps round-trips and SolidStackHeight tight). Never trims
-// below one plane.
+// trimTopAir drops trailing all-air planes so height tracks the tallest cube.
+// Never trims below one plane.
 func (a *AreaDefinition) trimTopAir() {
 	for len(a.Solids) > 1 && planeAllAir(a.Solids[len(a.Solids)-1]) {
 		a.Solids = a.Solids[:len(a.Solids)-1]
 	}
 }
 
-// setSolidCell writes char c at (x,level,z), materializing + growing the stack
-// and normalizing the affected row to Width first.
+// setSolidCell writes c at (x,level,z), materializing + growing the stack and
+// padding the affected row to Width first.
 func (a *AreaDefinition) setSolidCell(x, level, z int, c byte) {
 	if level < 0 || !a.InBounds(x, z) {
 		return
@@ -356,9 +300,8 @@ func (a *AreaDefinition) setSolidCell(x, level, z int, c byte) {
 	a.Solids[level][z] = string(row)
 }
 
-// SetCube places a solid cube at (x,level,z), skinned by `skin` (an air char is
-// coerced to plain rock so a placed cube is always solid). The editor's "place a
-// floating cube" primitive — this is what authors a bridge/overhang.
+// SetCube places a cube at (x,level,z) skinned by `skin` (air coerced to rock so
+// a placed cube is always solid). The editor's floating-cube primitive (bridge/overhang).
 func (a *AreaDefinition) SetCube(x, level, z int, skin byte) {
 	if skin == SolidAir {
 		skin = TileRock
@@ -366,18 +309,14 @@ func (a *AreaDefinition) SetCube(x, level, z int, skin byte) {
 	a.setSolidCell(x, level, z, skin)
 }
 
-// ClearCube removes the cube at (x,level,z) (sets it to air), trimming any
-// trailing all-air planes the removal exposed.
+// ClearCube sets (x,level,z) to air, trimming any trailing all-air planes exposed.
 func (a *AreaDefinition) ClearCube(x, level, z int) {
 	a.setSolidCell(x, level, z, SolidAir)
 	a.trimTopAir()
 }
 
-// SetColumnTop sets column (x,z) solid from level 0 up to `top` and air above —
-// the voxel-aware "Set Height" the editor uses once a map has a stack (so a
-// height edit can't desync from the Elevation layer the renderer no longer
-// reads). Any floating cube above `top` in this column is cleared, matching the
-// heightfield "set the ground height" intent. The cube skin is FaceSkinAt.
+// SetColumnTop sets column (x,z) solid 0..top, air above — the voxel-aware "Set
+// Height". Clears any floating cube above `top`. Cube skin is FaceSkinAt.
 func (a *AreaDefinition) SetColumnTop(x, z, top int) {
 	if !a.InBounds(x, z) || top < 0 {
 		return
@@ -395,18 +334,14 @@ func (a *AreaDefinition) SetColumnTop(x, z, top int) {
 	a.trimTopAir()
 }
 
-// cloneRows deep-copies a single grid layer's rows (nil-safe). string rows are
-// immutable, so copying the slice is a full deep copy. Mirrors CloneSolids one
-// dimension down, with the exact semantics of append([]string(nil), rows...):
-// nil in → nil out, empty non-nil in → empty non-nil out. The single home for
-// the per-layer clone the Area↔MapFile converters used to open-code ~14 times.
+// cloneRows deep-copies a grid layer's rows (nil-safe; string rows immutable).
+// Semantics of append([]string(nil), rows...): nil→nil, empty→empty.
 func cloneRows(rows []string) []string {
 	return append([]string(nil), rows...)
 }
 
-// CloneSolids deep-copies a voxel stack (nil-safe). string rows are immutable,
-// so copying the plane slices is a full deep copy. Returns nil for an empty
-// stack so a heightfield area keeps Solids==nil.
+// CloneSolids deep-copies a voxel stack (nil-safe; string rows immutable).
+// Returns nil for an empty stack so a heightfield area keeps Solids==nil.
 func CloneSolids(in [][]string) [][]string {
 	if len(in) == 0 {
 		return nil
@@ -418,9 +353,8 @@ func CloneSolids(in [][]string) [][]string {
 	return out
 }
 
-// columnGapless reports whether column (x,z) is a pure heightfield run — solid
-// from 0 up to its top with no air gap (so it can be encoded by a single
-// elevation char). An empty column is trivially gapless.
+// columnGapless reports whether column (x,z) is solid 0..top with no air gap
+// (encodable as a single elevation char). Empty column is trivially gapless.
 func (a *AreaDefinition) columnGapless(x, z int) bool {
 	top := a.TopSolidLevel(x, z)
 	if top < 0 {
@@ -434,10 +368,8 @@ func (a *AreaDefinition) columnGapless(x, z int) bool {
 	return true
 }
 
-// AllColumnsGapless reports whether every column is gapless — i.e. the whole
-// area is expressible as a heightfield and can round-trip to disk as the legacy
-// elevation: section (keeping existing maps byte-identical). A nil Solids is a
-// heightfield by definition.
+// AllColumnsGapless reports whether the area is expressible as a heightfield and
+// can round-trip as the legacy elevation: section. Nil Solids is gapless by definition.
 func (a *AreaDefinition) AllColumnsGapless() bool {
 	if len(a.Solids) == 0 {
 		return true
@@ -452,11 +384,9 @@ func (a *AreaDefinition) AllColumnsGapless() bool {
 	return true
 }
 
-// canonicalSolids returns the area's voxel stack normalized for comparison:
-// the stored Solids when present, else the stack derived from Elevation, with
-// trailing all-air planes trimmed and every row padded to Width. So a
-// heightfield map (Solids nil) and the same map with its stack materialized
-// compare equal rather than dirty — the absent==derived rule for AreaContentEqual.
+// canonicalSolids normalizes the voxel stack for comparison: stored Solids, else
+// derived from Elevation, with trailing all-air planes trimmed and rows padded to
+// Width — the absent==derived rule so a heightfield and its materialized form compare equal.
 func canonicalSolids(a AreaDefinition) [][]string {
 	stack := a.Solids
 	if len(stack) == 0 {
@@ -488,9 +418,8 @@ func planeAllAir(rows []string) bool {
 
 // solidsEqual compares two areas' voxel stacks with absent==derived semantics.
 func solidsEqual(a, b AreaDefinition) bool {
-	// Fast path: two pure heightfields are fully described by their Elevation
-	// layer, which AreaContentEqual already compares in the gridLayers() walk —
-	// so there's nothing extra to check and no need to materialize either stack.
+	// Fast path: two heightfields are fully described by Elevation, already
+	// compared in AreaContentEqual's gridLayers() walk.
 	if len(a.Solids) == 0 && len(b.Solids) == 0 {
 		return true
 	}

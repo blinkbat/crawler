@@ -9,29 +9,19 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// The debug overlay used to be gated behind a `debug` build tag so its
-// tile-label sort/walk and per-frame label buffer wouldn't ship in release
-// — but `g.DebugOverlay` is false by default, and every line below is
-// inside an early-return guard against that flag, so the overhead in
-// release-with-overlay-off is zero. Making the overlay always-available
-// means the pause-menu toggle now does what the player expects in any
-// build, without forcing a `go build -tags debug` rebuild.
+// Overlay is always-available (not build-tag gated): g.DebugOverlay is false by default and every
+// line is behind an early-return guard, so release overhead with it off is zero.
 
-// debugLabelRange is how many tiles around the player get labelled. 4 covers
-// the immediate "what am I standing next to" question without flooding the
-// screen — the labels overlap badly past ~25 tiles even sorted by depth.
+// debugLabelRange: tiles around the player to label. Past ~25 labels overlap badly even depth-sorted.
 const debugLabelRange = 4
 
-// Debug-overlay text tints — named so the two near-identical greens
-// (the coord heading vs the in-world tile labels) aren't inline literals.
+// Debug-overlay text tints (coord heading vs in-world tile labels).
 var (
 	debugHeadingColor = rl.NewColor(186, 240, 186, 245)
 	debugLabelColor   = rl.NewColor(220, 240, 220, 245)
 )
 
-// debugLabelsBuf reuses the per-tile label slice across frames so the
-// overlay's hot loop doesn't allocate a fresh slice every draw when
-// enabled. Renderer is single-threaded, so re-slicing is safe.
+// debugLabelsBuf reuses the per-tile label slice across frames (renderer is single-threaded).
 var debugLabelsBuf = make([]labelStack, 0, (2*debugLabelRange+1)*(2*debugLabelRange+1))
 
 type labelStack struct {
@@ -40,16 +30,9 @@ type labelStack struct {
 	dist   float32
 }
 
-// DrawDebugOverlay paints the in-world tile labels and a coord readout when
-// g.DebugOverlay is on. Each visible tile within debugLabelRange of the
-// player gets a screen-space label stack identifying its floor / decor /
-// prop and (x,z) coords so the author can verify what they're looking at.
-// The top-left corner shows the player's own (x,z), facing, step count,
-// and map name.
-//
-// Off by default; toggled from the pause menu. No-op when DebugOverlay is
-// false OR when the pause menu is open (labels would just clutter the
-// pause UI), so calling unconditionally from the scene draw is free.
+// DrawDebugOverlay paints in-world tile labels (floor/decor/prop + coords within debugLabelRange)
+// and a top-left player readout (x,z / facing / step / map). No-op when DebugOverlay is off or the
+// pause menu is open, so calling it unconditionally is free.
 func DrawDebugOverlay(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if !g.DebugOverlay || g.MenuOpen {
 		return
@@ -66,7 +49,7 @@ func DrawDebugOverlay(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		drawTextWithShadowStyle(assets.hudFont, line, x, y, FontBody, FontSpacingBody, debugHeadingColor, shadowHeavy, 1, 1)
 	}
 
-	// Pre-compute forward so we can cheaply drop tiles behind the camera.
+	// Pre-compute forward to drop tiles behind the camera.
 	forward := horizontalForward(camera)
 	camPos := camera.Position
 	pX := g.Player.TileX
@@ -86,9 +69,7 @@ func DrawDebugOverlay(camera rl.Camera3D, g *core.GameState, assets Resources) {
 			cz := core.TileCenter(z)
 			wdx := cx - camPos.X
 			wdz := cz - camPos.Z
-			// Drop tiles behind the camera. GetWorldToScreen mis-projects
-			// behind-camera points into the visible range, so the dot
-			// product check is the reliable filter.
+			// Drop tiles behind the camera; GetWorldToScreen mis-projects them into the visible range, so dot-product is the reliable filter.
 			if wdx*forward.X+wdz*forward.Z < -1.5 {
 				continue
 			}
@@ -97,8 +78,7 @@ func DrawDebugOverlay(camera rl.Camera3D, g *core.GameState, assets Resources) {
 				continue
 			}
 			lines = append(lines, fmt.Sprintf("(%d,%d)", x, z))
-			// Float the label ~1.6 units above the floor so it sits above
-			// the tile's prop instead of inside it.
+			// Float the label ~1.6 units above the floor so it sits above the tile's prop.
 			screen := rl.GetWorldToScreen(rl.NewVector3(cx, 1.6, cz), camera)
 			if screen.X < -120 || screen.X > screenW+120 || screen.Y < -80 || screen.Y > screenH+80 {
 				continue
@@ -111,9 +91,7 @@ func DrawDebugOverlay(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		}
 	}
 
-	// Paint far labels first so near labels overdraw — without a depth
-	// buffer for 2D text, this is the only way to keep nearby tiles
-	// readable when many labels stack.
+	// Paint far labels first so near labels overdraw (no depth buffer for 2D text).
 	sort.Slice(labels, func(i, j int) bool {
 		return labels[i].dist > labels[j].dist
 	})
@@ -128,18 +106,13 @@ func DrawDebugOverlay(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	debugLabelsBuf = labels
 }
 
-// tileLabelLines returns the readable layer names for the tile at (x, z).
-// youHere prepends a "YOU" marker for the tile the player is standing on. Walls
-// are gone (a tile is always a walkable surface, possibly raised), so every
-// tile shows its floor/decor/prop labels — no short-circuit.
+// tileLabelLines returns the readable layer names for the tile at (x, z); youHere prepends "YOU".
 func tileLabelLines(m core.AreaDefinition, x, z int, youHere bool) []string {
 	var lines []string
 	if youHere {
 		lines = append(lines, "YOU")
 	}
-	// Read through the bounds-safe accessors (NOT direct m.Floor[z][x] indexing):
-	// the caller only guarantees InBounds against Width/Height, but a struct-built
-	// or mid-edit area can have ragged/short layer rows, which a raw index panics on.
+	// Use bounds-safe accessors, not m.Floor[z][x]: ragged/short layer rows would panic a raw index.
 	if c, ok := m.FloorCharAt(x, z); ok {
 		if f := core.TileLabel(core.TileLayerFloor, c); f != "" {
 			lines = append(lines, f)
@@ -158,9 +131,7 @@ func tileLabelLines(m core.AreaDefinition, x, z int, youHere bool) []string {
 	return lines
 }
 
-// drawDebugLabel paints one line of a debug label stack — black-translucent
-// pill behind, two-pass text (shadow + foreground) on top so the label
-// reads cleanly over any 3D background.
+// drawDebugLabel paints one debug-label line: translucent pill behind, two-pass text on top.
 func drawDebugLabel(font rl.Font, text string, x, y float32) {
 	if text == "" {
 		return

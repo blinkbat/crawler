@@ -11,16 +11,11 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// init pins the enemyVisual <-> core.EnemyVisualOverride field mirror: every
-// override field must survive applyEnemyVisualOverride followed by
-// enemyVisualOverride unchanged. It fills EVERY override field with a distinct
-// non-zero value via reflection, round-trips it, and panics on any drop — so a
-// field added to the override but forgotten in either half of the round-trip
-// (the hazard that silently zeroed the editor's saved palette FX before this
-// guard existed) crashes loudly at startup, matching this repo's other parallel-
-// table init asserts. Scale fields filled non-zero so the effective*Scale 0->1
-// fold is the identity and can't mask a genuine drop. (Render-package tests can't
-// run without raylib.dll, so this lives in init rather than a _test.go.)
+// init guards the enemyVisual<->core.EnemyVisualOverride round-trip: fills every
+// override field non-zero, round-trips it, and panics on any dropped field (a
+// field added to one half but not the other). Scale fields non-zero so the
+// effective*Scale 0->1 fold can't mask a real drop. In init not _test.go because
+// render tests can't run without raylib.dll.
 func init() {
 	var ov core.EnemyVisualOverride
 	rv := reflect.ValueOf(&ov).Elem()
@@ -42,117 +37,74 @@ func init() {
 
 type enemyVisual struct {
 	texture rl.Texture2D
-	// pristineTexture is the UNADJUSTED base sprite (procedural art or authored
-	// PNG, before any non-destructive Pixelate/Brightness/Contrast override is
-	// applied). `texture` is what's drawn — derived from this plus the override's
-	// image adjustments at load. The editor re-derives its live preview from the
-	// pristine so dragging the FX sliders never compounds onto an already-adjusted
-	// image. Equals `texture` when the override has no image adjustments.
+	// pristineTexture is the UNADJUSTED base sprite; `texture` is derived from it
+	// plus the override's image adjustments at load. The editor re-derives its
+	// preview from pristine so dragging FX sliders never compounds.
 	pristineTexture rl.Texture2D
 	size            rl.Vector2
-	// shadowRadius is the half-extent (world units) of the soft contact
-	// disc painted on the floor beneath this billboard, matching the
-	// prop grounding signature (see propShadowRadius). Zero = no shadow,
-	// which is every procedural sprite's default — only kinds that opt in
-	// (currently the file-textured Feral Rat) get a disc so the existing
-	// roster's look is unchanged.
+	// shadowRadius is the contact-disc half-extent (world units). Zero = no
+	// shadow (every procedural sprite's default; only opt-in kinds get a disc).
 	shadowRadius float32
-	// yOffset shifts THIS billboard up (+) or down (−) from the shared
-	// enemyBillboardY center-anchor, in world units. The contact shadow
-	// stays anchored to the unaltered tile position; the selector pyramid
-	// is nudged separately via markerYOffset (below). A negative offset
-	// lowers a sprite that floats without dragging the shadow with it.
-	// Zero for every procedural sprite (their art is already
-	// bottom-weighted); only center-weighted authored PNGs need it (the
-	// Feral Rat). NOTE: yOffset is calibrated against the BATTLE formation
-	// center (battleFormationCenterY); drawFieldPacks adds the framing-lift
-	// delta back so a grounded sprite plants on the floor in both views.
+	// yOffset shifts this billboard up(+)/down(−) from enemyBillboardY (world
+	// units); the shadow stays anchored to the tile. Zero for procedural sprites.
+	// Calibrated against the BATTLE center (battleFormationCenterY); drawFieldPacks
+	// adds the framing-lift delta back so a grounded sprite plants in both views.
 	yOffset float32
-	// markerYOffset / markerXOffset nudge THIS kind's selector pyramid from
-	// the default anchor (formation center + markerStyle.tipYOffset), in
-	// world units. Y is up(+)/down(−); X is along the camera-right axis
-	// (screen right(+)/left(−)) so the nudge reads the same regardless of
-	// which way the battle camera faces. Per-unit-type so a sprite whose
-	// visible head sits off the billboard center (a yOffset-lowered or
-	// asymmetric PNG) can place its cursor cleanly. Zero = the shared
-	// default, unchanged for every procedural kind.
+	// markerYOffset/markerXOffset nudge the selector pyramid from its default
+	// anchor (world units). X is camera-right so it reads the same whichever way
+	// the camera faces. Zero = shared default.
 	markerYOffset float32
 	markerXOffset float32
-	// depthOffset pushes THIS kind's BATTLE billboard further from the camera
-	// (+ = back into the arena) along the camera-forward axis. Lets a sprite
-	// whose authored art sits forward in its box (the square Feral Rat PNG)
-	// sit back in line with the procedural roster instead of looming. Zero for
-	// every procedural kind. Battle-only; the field render is world-anchored.
+	// depthOffset pushes the BATTLE billboard back into the arena (camera-forward),
+	// for a sprite whose art sits forward in its box. Battle-only; zero = default.
 	depthOffset float32
-	// shadowOffsetX / shadowOffsetZ nudge the contact disc from the sprite's
-	// FINAL footprint (after depthOffset), along the camera-right(+ = screen
-	// right) and camera-forward(+ = into the arena) axes respectively. The disc
-	// always rides the sprite's drawn XZ — these are an extra welded nudge so
-	// an author can park the shadow exactly under the visible feet of an
-	// off-center PNG without it drifting when the sprite is moved. Zero = dead
-	// under the billboard. World units; camera-relative so the nudge reads the
-	// same regardless of which way the battle camera faces.
+	// shadowOffsetX/shadowOffsetZ nudge the contact disc from the sprite's final
+	// footprint along camera-right(+)/camera-forward(+). Zero = dead under it.
 	shadowOffsetX float32
 	shadowOffsetZ float32
-	// markerScale multiplies the selector-pyramid silhouette (height + base
-	// radius) for THIS kind's target chevron, so a big foe can wear a bigger
-	// cursor and a small one a daintier cursor. Zero = unset → 1.0 (see
-	// effectiveMarkerScale); the position is still tuned by markerY/XOffset.
+	// markerScale multiplies the target-chevron silhouette. Zero = unset → 1.0
+	// (effectiveMarkerScale).
 	markerScale float32
-	// glyphXOffset / glyphYOffset nudge THIS kind's hit-clarity glyph from the
-	// struck sprite's center along camera-right(+ = screen right) and world-up(+)
-	// before it projects to screen, so the glyph sits over the visible body of an
-	// off-center PNG. glyphScale multiplies its on-screen radius. Zero offsets =
-	// centered (plus the shared hitGlyphRise lift); zero scale = unset → 1.0.
+	// glyphXOffset/glyphYOffset nudge the hit-clarity glyph from sprite center
+	// (camera-right(+)/world-up(+)); glyphScale multiplies its radius. Zero scale
+	// = unset → 1.0.
 	glyphXOffset float32
 	glyphYOffset float32
 	glyphScale   float32
-	// particleXOffset / particleYOffset / particleZOffset nudge THIS kind's
-	// impact particle burst origin along camera-right(+), world-up(+), and
-	// camera-forward(+ = into the arena); particleScale uniformly scales the
-	// burst's spread + dot size around that origin. Lets a tiny rat get a tight
-	// little puff and a Stone Golem a big slam. Zero offsets = at the sprite
-	// center; zero scale = unset → 1.0 (see effectiveParticleScale).
+	// particleXOffset/Y/Z nudge the impact-burst origin (camera-right/world-up/
+	// camera-forward); particleScale scales spread + dot size. Zero scale = unset
+	// → 1.0 (effectiveParticleScale).
 	particleXOffset float32
 	particleYOffset float32
 	particleZOffset float32
 	particleScale   float32
-	// popupXOffset / popupYOffset nudge THIS kind's floating damage-NUMBER spawn
-	// from the sprite center along camera-right(+) and world-up(+), ADDITIVE on
-	// the baked default rise (zero = historical spot). Separate from the glyph
-	// anchor above — this moves the number, not the clarity symbol.
+	// popupXOffset/popupYOffset nudge the floating damage-number spawn
+	// (camera-right(+)/world-up(+)), additive on the baked default rise.
 	popupXOffset float32
 	popupYOffset float32
-	// tint is a per-kind base color multiplied (raylib ColorTint semantics:
-	// a*b/255 per channel) into the runtime billboard tint — darken with a
-	// gray, recolor with a hue, etc. It folds in AFTER the combat tint
-	// branches (death fade / targeting / attacker / damage flash), so a
-	// tinted sprite stays proportionally tinted in every state. The zero
-	// value (A==0) means "untinted"; use A==255 when setting one. See
-	// resolveTint / the draw sites.
+	// tint is a per-kind base color multiplied (ColorTint: a*b/255 per channel)
+	// into the runtime tint AFTER the combat branches, so a tinted sprite stays
+	// proportionally tinted in every state. Zero value (A==0) = untinted; set
+	// A==255 for a real tint. See resolveTint.
 	tint rl.Color
-	// Non-destructive image adjustments, mirroring the override fields so they
-	// round-trip through enemyVisualOverride/applyEnemyVisualOverride (the editor
-	// seeds its sliders from these). They drive how `texture` is derived from
-	// `pristineTexture` at build time — they do NOT alter the draw directly.
+	// Non-destructive image adjustments mirroring the override fields (round-trip
+	// lossless; editor seeds sliders from these). They drive how `texture` derives
+	// from `pristineTexture` at build time — they don't alter the draw directly.
 	pixelate   float32
 	brightness float32
 	contrast   float32
-	// Palette / retro FX — same build-time-only role as the three above; carried
-	// here purely so the override round-trip stays lossless (the editor re-seeds
-	// its sliders from this snapshot, so a missing field would zero the saved FX
-	// on the next foe cycle). See visualAdjustFilter for how they bake the texture.
+	// Palette / retro FX — same build-time-only role; carried for lossless
+	// round-trip. See visualAdjustFilter.
 	posterize  float32
 	saturation float32
 	dither     float32
 	gameBoy    float32
+	// maxColors mirrors the override's palette cap (median-cut quantization).
+	maxColors float32
 }
 
 // resolveTint returns the per-kind base tint, treating the zero-value Color
-// (A==0, what an unset `tint` field is) as White so untinted kinds draw at
-// full texture color. Any real tint sets A==255, so the alpha test cleanly
-// separates "unset" from a deliberate color — and folding it in never
-// reduces the runtime tint's own alpha (death fade) since White's A is 255.
+// (A==0, unset) as White so untinted kinds draw at full color.
 func (v enemyVisual) resolveTint() rl.Color {
 	if v.tint.A == 0 {
 		return rl.White
@@ -160,13 +112,8 @@ func (v enemyVisual) resolveTint() rl.Color {
 	return v.tint
 }
 
-// effectiveMarkerScale / effectiveGlyphScale / effectiveParticleScale resolve a
-// per-kind size multiplier, treating the zero value (an unset field, or a
-// missing field in a visuals.json written before these existed) as 1.0 — full
-// size. Mirrors resolveTint's "zero = sensible default" handling so the code
-// defaults never need to spell out a 1.0 for every kind, and a non-negative
-// authored value (the editor's slider floor is 0.1) is honored verbatim. A
-// negative value can't be authored but is clamped up to 1.0 defensively.
+// effective*Scale resolve a per-kind size multiplier, treating the zero value
+// (unset, or absent in an old visuals.json) as 1.0.
 func (v enemyVisual) effectiveMarkerScale() float32   { return scaleOrDefault(v.markerScale) }
 func (v enemyVisual) effectiveGlyphScale() float32    { return scaleOrDefault(v.glyphScale) }
 func (v enemyVisual) effectiveParticleScale() float32 { return scaleOrDefault(v.particleScale) }
@@ -178,12 +125,9 @@ func scaleOrDefault(s float32) float32 {
 	return s
 }
 
-// shadowFootprint returns the world XZ where THIS visual's contact disc should
-// land: the sprite's drawn footprint plus the visual's camera-relative
-// shadowOffset nudge. Welding the disc to the same XZ the billboard draws at
-// (depthOffset already folded into `position`) is what keeps "the shadow stays
-// under the feet" true no matter how the sprite is pushed around — the offsets
-// are an explicit extra placement, not a separate anchor that can drift.
+// shadowFootprint returns the world XZ for the contact disc: the sprite's drawn
+// footprint (depthOffset already in `position`) plus the camera-relative
+// shadowOffset nudge, so the disc tracks the sprite however it's moved.
 func shadowFootprint(camera rl.Camera3D, position rl.Vector3, v *enemyVisual) (float32, float32) {
 	x, z := position.X, position.Z
 	if v.shadowOffsetX != 0 || v.shadowOffsetZ != 0 {
@@ -195,12 +139,9 @@ func shadowFootprint(camera rl.Camera3D, position rl.Vector3, v *enemyVisual) (f
 	return x, z
 }
 
-// cameraRelativeOffset nudges world point p by dx along camera-right(+ = screen
-// right), dy along world-up(+), and dz along camera-forward(+ = into the scene).
-// Camera-relative XZ (same basis as shadowFootprint / markerXOffset) so the
-// nudge reads identically regardless of which way the battle camera faces. A
-// zero nudge returns p untouched (and skips the trig). Used to place the
-// per-kind hit-glyph and particle-burst anchors over a struck enemy.
+// cameraRelativeOffset nudges p by dx (camera-right), dy (world-up), dz
+// (camera-forward), so the nudge reads the same whichever way the camera faces.
+// Zero nudge returns p untouched (skips the trig).
 func cameraRelativeOffset(camera rl.Camera3D, p rl.Vector3, dx, dy, dz float32) rl.Vector3 {
 	if dx == 0 && dy == 0 && dz == 0 {
 		return p
@@ -213,11 +154,9 @@ func cameraRelativeOffset(camera rl.Camera3D, p rl.Vector3, dx, dy, dz float32) 
 	return p
 }
 
-// enemyVisualOverride snapshots the tunable fields of an enemyVisual into the
-// raylib-free core.EnemyVisualOverride the editor edits and the save file
-// stores. The texture is intentionally excluded — it always comes from the
-// sprite asset, never the override. The inverse (applying an override onto a
-// visual) is applyEnemyVisualOverride.
+// enemyVisualOverride snapshots an enemyVisual's tunable fields into the
+// raylib-free core.EnemyVisualOverride. Texture excluded (always from the asset).
+// Inverse: applyEnemyVisualOverride.
 func enemyVisualOverride(v enemyVisual) core.EnemyVisualOverride {
 	return core.EnemyVisualOverride{
 		SizeX:         v.size.X,
@@ -229,9 +168,8 @@ func enemyVisualOverride(v enemyVisual) core.EnemyVisualOverride {
 		ShadowOffsetZ: v.shadowOffsetZ,
 		MarkerYOffset: v.markerYOffset,
 		MarkerXOffset: v.markerXOffset,
-		// Snapshot the EFFECTIVE scale (resolves an unset 0 → 1.0) so the editor
-		// seeds its sliders at full size, not a confusing 0. Offsets snapshot raw
-		// (0 = no nudge, which is also their default).
+		// Snapshot the EFFECTIVE scale (unset 0 → 1.0) so the editor seeds sliders
+		// at full size. Offsets snapshot raw (0 = no nudge).
 		MarkerScale:     v.effectiveMarkerScale(),
 		GlyphXOffset:    v.glyphXOffset,
 		GlyphYOffset:    v.glyphYOffset,
@@ -253,13 +191,13 @@ func enemyVisualOverride(v enemyVisual) core.EnemyVisualOverride {
 		Saturation:      v.saturation,
 		Dither:          v.dither,
 		GameBoy:         v.gameBoy,
+		MaxColors:       v.maxColors,
 	}
 }
 
 // applyEnemyVisualOverride returns v with every tunable field replaced by the
-// override's value, preserving the texture (and any non-overridable internals).
-// Used both by loadEnemyVisuals (overlay the save file onto code defaults) and
-// by the editor's live preview (draw the in-progress edit without a reload).
+// override's value, preserving the texture. Used by loadEnemyVisuals and the
+// editor's live preview.
 func applyEnemyVisualOverride(v enemyVisual, ov core.EnemyVisualOverride) enemyVisual {
 	v.size = rl.NewVector2(ov.SizeX, ov.SizeY)
 	v.yOffset = ov.YOffset
@@ -269,9 +207,8 @@ func applyEnemyVisualOverride(v enemyVisual, ov core.EnemyVisualOverride) enemyV
 	v.shadowOffsetZ = ov.ShadowOffsetZ
 	v.markerYOffset = ov.MarkerYOffset
 	v.markerXOffset = ov.MarkerXOffset
-	// Scales direct-assign; the effective*Scale accessors fold an unset 0 (or a
-	// pre-existing visuals.json that lacks these fields) back to 1.0 at the draw
-	// site, so a 0 here never means "invisible."
+	// Scales direct-assign; effective*Scale folds an unset 0 back to 1.0 at the
+	// draw site, so a 0 here never means "invisible."
 	v.markerScale = ov.MarkerScale
 	v.glyphXOffset = ov.GlyphXOffset
 	v.glyphYOffset = ov.GlyphYOffset
@@ -290,12 +227,11 @@ func applyEnemyVisualOverride(v enemyVisual, ov core.EnemyVisualOverride) enemyV
 	v.saturation = ov.Saturation
 	v.dither = ov.Dither
 	v.gameBoy = ov.GameBoy
+	v.maxColors = ov.MaxColors
 	return v
 }
 
-// tintMul multiplies two colors channel-wise (raylib's ColorTint: a*b/255
-// per channel, alpha included). Used to fold a sprite's per-kind base tint
-// into the runtime billboard tint without a shader.
+// tintMul multiplies two colors channel-wise (ColorTint: a*b/255, alpha included).
 func tintMul(a, b rl.Color) rl.Color {
 	return rl.NewColor(
 		uint8(int(a.R)*int(b.R)/255),
@@ -305,39 +241,23 @@ func tintMul(a, b rl.Color) rl.Color {
 	)
 }
 
-// exploreFOV is the wide field-of-view used while walking the world.
-// 112° trades some perspective distortion at the edges for situational
-// awareness — corridor turns and adjacent props are visible without
-// having to free-look around.
+// exploreFOV is the wide walking FOV; 112° favors situational awareness over
+// edge perspective distortion.
 const exploreFOV = float32(112)
 
-// battleFOV is the narrower FOV used the moment battle becomes active.
-// "Zooms in" by reducing the angle subtended, which (a) makes enemy
-// billboards take up more screen pixels at the same world distance,
-// and (b) packs the formation into a smaller projected width so the
-// arena reads as a focused stage instead of a wide open field. The
-// narrower the angle, the bigger the enemies appear; tuned so a
-// six-enemy pack still fits comfortably without horizontal scroll.
+// battleFOV is the narrower combat FOV: enemies fill more pixels and the
+// formation packs into a focused stage. Tuned so a six-enemy pack still fits.
 const battleFOV = float32(72)
 
-// fovTweenRate sets how fast the camera eases between exploreFOV and
-// battleFOV, in degrees per second. 80°/s lands the full 40° swing in
-// about half a second — slightly faster than BattleSplashDuration so
-// the zoom feels like part of the encounter's "drop into combat"
-// punctuation without lagging the splash banner.
+// fovTweenRate eases the camera between explore/battle FOV (deg/sec). 80°/s
+// lands the 40° swing in ~half a second, slightly ahead of BattleSplashDuration.
 const fovTweenRate = float32(80)
 
-// currentFOV is the visible FOV right now, eased toward the target
-// each frame. Package-local so the tween survives across draw calls
-// without leaking visual state onto GameState — a fresh game starts
-// at exploreFOV thanks to the var init, and the lerp converges
-// quickly enough that a reset mid-battle (which is rare) settles in
-// the next two-three frames.
+// currentFOV is the eased FOV; package-local so the tween survives across draws
+// without leaking onto GameState.
 var currentFOV = exploreFOV
 
-// targetFOV returns the FOV the camera should be tweening toward this
-// frame. Split out so the tween logic in Camera doesn't have to
-// branch on `g.Battle.Active()` inline.
+// targetFOV returns the FOV to tween toward this frame.
 func targetFOV(g *core.GameState) float32 {
 	if g.Battle.Active() {
 		return battleFOV
@@ -345,16 +265,9 @@ func targetFOV(g *core.GameState) float32 {
 	return exploreFOV
 }
 
-// Camera builds the per-frame perspective camera. FOV smoothly tweens
-// toward exploreFOV or battleFOV (see targetFOV) so dropping into and
-// out of combat reads as a deliberate zoom rather than a snap. The
-// tween uses rl.GetFrameTime so it's framerate-independent.
-// battlePitchOffset tilts the camera downward when battle is active so
-// the arena floor takes up more of the lower half of the screen and
-// the combat ribbon doesn't feel like it's pasted onto a sky shot.
-// Applied additively to the player's LookPitch — small enough (-0.18
-// rad ≈ -10°) that the enemy sprites stay visible while the floor
-// pulls into view.
+// battlePitchOffset tilts the camera down in battle (added to LookPitch) so the
+// arena floor fills more of the lower screen; -0.18 rad ≈ -10°, small enough that
+// enemy sprites stay visible.
 const battlePitchOffset = float32(-0.18)
 
 func Camera(g *core.GameState) rl.Camera3D {
@@ -370,35 +283,27 @@ func Camera(g *core.GameState) rl.Camera3D {
 		float32(math.Sin(float64(pitch))),
 		cp*float32(math.Sin(float64(yaw))),
 	)
-	// Elevation: the eye rides the ground height of the tile underfoot. At
-	// rest that's StandGroundY(tile); mid-step it's the eased Player.GroundY
-	// the movement tick interpolates across a ramp (so the camera climbs
-	// smoothly instead of snapping a level at the tile boundary).
+	// Eye rides the ground height underfoot: StandGroundY at rest, the eased
+	// Player.GroundY mid-step so the climb is smooth across a ramp.
 	groundY := g.Area.StandGroundY(p.TileX, p.TileZ)
 	if len(g.Area.Solids) > 0 {
-		// Voxel map: ride the resolved standing level (under a deck vs on it),
-		// not the column top StandGroundY reports.
+		// Voxel map: ride the resolved standing level, not the column top.
 		groundY = g.Area.StandGroundYAt(p.TileX, p.Level, p.TileZ)
 	}
 	if p.Anim.Kind == core.AnimStep {
 		groundY = p.GroundY
 	}
 	position := rl.NewVector3(p.X, core.EyeHeight+groundY, p.Z)
-	// Combat screen shake: a small positional jitter on a well-timed hit,
-	// scaled by the remaining ShakeTimer so it eases out. Oscillation is
-	// wall-clock-driven (two incommensurate frequencies so it wobbles rather
-	// than sliding) so the shake is visible even while hit-stop freezes the
-	// sim. Battle-only — never perturbs the exploration camera.
+	// Combat screen shake: positional jitter eased out by ShakeTimer. Wall-clock-
+	// driven (two incommensurate freqs) so it's visible even while hit-stop freezes
+	// the sim. Battle-only.
 	if g.Battle.Active() && g.Battle.ShakeTimer > 0 && g.Battle.ShakeDur > 0 {
 		amp := g.Battle.ShakePeak * core.Clamp(g.Battle.ShakeTimer/g.Battle.ShakeDur, 0, 1)
 		t := rl.GetTime()
 		position.X += float32(math.Sin(t*47.0)) * amp
 		position.Y += float32(math.Sin(t*61.0)) * amp
 	}
-	// Frame-time-driven approach: each frame, push currentFOV toward
-	// the target by at most fovTweenRate*dt degrees. The Approach
-	// helper from core stops at the target without overshooting, so a
-	// long frame doesn't whip past the destination.
+	// Push currentFOV toward target by ≤ fovTweenRate*dt; Approach won't overshoot.
 	currentFOV = core.Approach(currentFOV, targetFOV(g), fovTweenRate*rl.GetFrameTime())
 	return rl.NewCamera3D(
 		position,
@@ -409,98 +314,71 @@ func Camera(g *core.GameState) rl.Camera3D {
 	)
 }
 
-// SkyClearColor is the backdrop ClearBackground color the adventure scene wipes
-// to before DrawSkyBackground paints over it. The color is overdrawn
-// immediately — the clear is load-bearing for the DEPTH wipe that rides with it
-// (see run.go) — so this exists mainly to single-source the literal across the
-// scene's two clear arms rather than for its visible hue.
+// SkyClearColor is the ClearBackground color before DrawSkyBackground paints
+// over it. The hue is overdrawn immediately — the clear is load-bearing for the
+// DEPTH wipe that rides with it (see run.go). Single-sources the literal.
 var SkyClearColor = rl.NewColor(87, 172, 244, 255)
 
 func DrawSkyBackground(assets Resources, g *core.GameState) {
 	texW := float32(assets.skyTexture.Width)
 	texH := float32(assets.skyTexture.Height)
 	screenW, screenH := screenSizeF()
-	// Crop the source rect to the screen's aspect ratio so the sky doesn't
-	// stretch when the window isn't a 2:1 letterbox. The sky texture is 2:1
-	// (1024×512); on a typical 16:10 screen we sample a centered slice that
-	// matches the screen's aspect, so clouds stay round instead of squashed.
+	// Crop the source to the screen aspect so the 2:1 sky texture doesn't stretch
+	// (clouds stay round).
 	srcX, srcW := float32(0), texW
 	srcY, srcH := float32(0), texH
 	screenAspect := screenW / screenH
 	texAspect := texW / texH
 	if texAspect > screenAspect {
-		// Texture wider than screen: crop the sides.
+		// Wider than screen: crop the sides.
 		srcW = texH * screenAspect
 		srcX = (texW - srcW) / 2
 	} else if texAspect < screenAspect {
-		// Texture taller (in aspect terms) than screen: crop top/bottom.
-		// The horizon usually sits in the lower-middle of the sky texture,
-		// so we crop more off the top to keep the cloud band in view.
+		// Taller than screen: crop more off the top to keep the cloud band in view.
 		srcH = texW / screenAspect
 		srcY = (texH - srcH) * 0.35
 	}
 	source := rl.NewRectangle(srcX, srcY, srcW, srcH)
 	dest := rl.NewRectangle(0, 0, screenW, screenH)
-	// Sky tint follows the time-of-day profile for every material.
-	// Even "indoor" maps (dungeon-walled forests, roofless ruins on the
-	// stone palette) want the sunset / sunrise / starfield arc — the
-	// CeilingAt slabs render an opaque cap above tiles that should
-	// block the sky entirely, so painting a varying backdrop for an
-	// actually-roofed dungeon room is invisible to the player anyway.
-	// Removing the old `MaterialIsIndoor` gate fixes a foot-gun where
-	// a forest map authored on the dungeon palette had a static slate
-	// sky and no stars at night.
+	// Sky tint follows the time-of-day profile for every material — no indoor
+	// gate, since CeilingAt slabs cap roofed rooms so a varying sky is invisible
+	// there anyway (and the old gate left forest-on-dungeon maps starless).
 	profile := timeProfileAt(g.StepCount)
 	tint := skyColor(profile.SkyTint)
 	rl.DrawTexturePro(assets.skyTexture, source, dest, rl.NewVector2(0, 0), 0, tint)
-	// Star layer rides the same source/dest as the sky so the stars
-	// crop with the same aspect logic. Alpha = profile.StarAlpha *
-	// the texture's per-pixel alpha (mostly transparent, so the
-	// resulting blend is sparse pinpoints). Same "ceiling caps the
-	// view anyway" rationale applies here — no indoor gate.
+	// Star layer rides the same source/dest. Alpha = StarAlpha * per-pixel alpha
+	// (sparse pinpoints).
 	if profile.StarAlpha > 0 {
 		alpha := uint8(profile.StarAlpha * 255)
 		rl.DrawTexturePro(assets.starTexture, source, dest, rl.NewVector2(0, 0), 0, rl.NewColor(255, 255, 255, alpha))
 	}
 }
 
-// behindCullSlack is how far behind the camera a tile's center can project
-// before we skip it. Set generously enough that the tile we're standing on
-// (dot ≈ 0) and tiles half-behind us (dot ≈ -tile/2) stay drawn through any
-// reasonable rotation. The fog handles distance falloff on the far side, so
-// we deliberately don't add a hard distance cap — pop-in there would be very
-// visible against the fog's gentle tail (which clamps at 85% saturation).
+// behindCullSlack is how far behind the camera a tile center can project before
+// it's skipped. Generous so the tile underfoot and half-behind tiles stay drawn
+// through any rotation. No hard distance cap — fog handles far falloff and pop-in
+// would show against its 85%-clamped tail.
 const behindCullSlack = float32(-2.5)
 
-// behindCull reports whether world point p sits far enough behind the camera
-// to skip drawing it. `camPos` is the camera position and `forward` the
-// caller's already-computed horizontal forward — both hoisted out of per-item
-// loops so this stays a cheap dot per call. The single home for the cull rule:
-// the DrawWorld tile loop, the chest draw, and the door draw all call it so
-// they cull consistently with the floor under them.
+// behindCull reports whether p sits far enough behind the camera to skip. camPos
+// + forward are hoisted out of per-item loops so this stays a cheap dot. Shared by
+// the tile/chest/door draws so they cull consistently.
 func behindCull(camPos, forward, p rl.Vector3) bool {
 	return behindCullXZ(camPos, forward, p.X, p.Z)
 }
 
-// behindCullXZ is behindCull taking the point's X/Z as scalars — the tile loop
-// calls it per tile, so this avoids building a throwaway rl.Vector3 (with a
-// dummy Y) just to pass two floats through the hottest loop in the renderer.
+// behindCullXZ is behindCull with X/Z as scalars, avoiding a throwaway Vector3 in
+// the hottest loop.
 func behindCullXZ(camPos, forward rl.Vector3, px, pz float32) bool {
 	dx := px - camPos.X
 	dz := pz - camPos.Z
 	return dx*forward.X+dz*forward.Z < behindCullSlack
 }
 
-// viewCull is the per-frame horizontal view-frustum test — camera position,
-// horizontal basis, and the side-plane half-tangent hoisted out of the per-item
-// loops. A point is culled when it sits behind the camera (the original
-// back-plane rule, behindCullSlack) OR outside the horizontal FOV wedge; both
-// are off-screen, so dropping them costs nothing visible. It extends behindCull
-// (which only checks the back plane) with the two side planes — on a wide map
-// the old test kept every tile abreast of and beside the camera even when it
-// projected far off the screen edge. Built once per draw via newViewCull; the
-// world tile loop and the chest/door/crystal draws share it so they cull
-// consistently.
+// viewCull is the per-frame horizontal view-frustum test: camera basis + side-
+// plane half-tangent hoisted out of per-item loops. Culls points behind the
+// camera (behindCullSlack) OR outside the horizontal FOV wedge. Built once per
+// draw via newViewCull; shared by the tile loop and the chest/door/crystal draws.
 type viewCull struct {
 	pos     rl.Vector3
 	fwd     rl.Vector3
@@ -509,25 +387,19 @@ type viewCull struct {
 }
 
 const (
-	// viewCullApexBack pushes the cone apex this far behind the camera, so near
-	// and just-off-to-the-side tiles (small forward component) stay well inside
-	// the wedge — the near-field half-width at the camera plane is
-	// viewCullApexBack*tanHalf. Kept >= |behindCullSlack| so the side test never
-	// fires inside the band the back-plane test deliberately keeps.
+	// viewCullApexBack pushes the cone apex behind the camera so near/side tiles
+	// stay inside the wedge. Kept >= |behindCullSlack| so the side test never fires
+	// inside the band the back-plane test keeps.
 	viewCullApexBack = float32(3.0)
-	// viewCullSlack widens the horizontal half-tangent so the cull boundary sits
-	// comfortably outside the true screen edge — margin for a tile whose center
-	// is just past the edge but whose 1-unit slab / overhanging prop is still
-	// partly visible. Conservative on purpose: a 30% wider cone never drops
-	// anything on screen.
+	// viewCullSlack widens the half-tangent so the boundary sits outside the screen
+	// edge (margin for a tile center just off-screen with a still-visible slab/prop).
 	viewCullSlack = float32(1.3)
 )
 
 func newViewCull(camera rl.Camera3D) viewCull {
 	fwd := horizontalForward(camera)
-	// camera.Fovy is the VERTICAL fov in degrees; the horizontal half-angle
-	// scales its tangent by the screen aspect (tan(Fovy/2)·aspect), then widens
-	// by viewCullSlack. Fovy*Pi/360 == (Fovy/2)·deg2rad.
+	// Fovy is VERTICAL fov (deg); horizontal half-tangent = tan(Fovy/2)·aspect,
+	// widened by viewCullSlack. Fovy*Pi/360 == (Fovy/2)·deg2rad.
 	sw, sh := screenSizeF()
 	aspect := float32(1)
 	if sh > 0 {
@@ -537,8 +409,7 @@ func newViewCull(camera rl.Camera3D) viewCull {
 	return viewCull{pos: camera.Position, fwd: fwd, right: horizontalRight(fwd), tanHalf: tanHalf}
 }
 
-// cullXZ reports whether the world point (px,pz) is outside the view — behind
-// the camera or beyond the horizontal wedge — and can be skipped.
+// cullXZ reports whether (px,pz) is behind the camera or beyond the wedge.
 func (v viewCull) cullXZ(px, pz float32) bool {
 	dx := px - v.pos.X
 	dz := pz - v.pos.Z
@@ -558,20 +429,14 @@ func DrawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	drawWorld(camera, g, assets)
 }
 
-// drawWorld rasterizes the environment geometry (sky-less: floors, walls,
-// ceilings, elevation columns, props, decor, ramps). It recomputes the lighting
-// profile, uploads the sun/fog/torch uniforms, and (when the render log is on)
-// gathers per-tile diagnostics.
 // worldFrameClock is rl.GetTime() sampled once at the top of the world render
-// (drawWorld, and DrawObjectPreview for the editor gallery) and read by the
-// per-tile sway/flicker math (drawVaried, propModel.draw, drawWallTorch) instead
-// of each tree/prop/torch making its own rl.GetTime() cgo call. A heavy field
-// can draw hundreds of swaying props per frame; collapsing those to one sample
-// removes the per-item cgo crossings for a value that's identical frame-wide.
-// Set before any prop draw on every path that reaches one (drawWorld runs first
-// in the adventure frame, before DrawChests/DrawDoors), so it's never stale.
+// (drawWorld, DrawObjectPreview) and read by all per-tile sway/flicker math, so
+// hundreds of props don't each make their own GetTime() cgo call. Set before any
+// prop draw on every path, so it's never stale.
 var worldFrameClock float32
 
+// drawWorld rasterizes the sky-less environment geometry, uploads lighting
+// uniforms, and (when the render log is on) gathers per-tile diagnostics.
 func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	worldFrameClock = float32(rl.GetTime())
 	m := &g.Area
@@ -579,19 +444,16 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	profile := applyTimeOfDay(lightingFor(m.Materials), timeProfileAt(g.StepCount), areaIsEnclosed(m))
 	cacheLightingProfile(profile)
 	assets.lighting.applyUniforms(camera, profile)
-	// Torch point lights — collect the brazier props nearest the camera, flicker
-	// them, and upload before the geometry pass so walls / floors / props pick up
-	// the warm pools of light. Must run after applyUniforms (same shader) and
-	// before the tile loop's BeginShaderMode draws.
+	// Torch point lights: collect nearest braziers, flicker, upload. Must run
+	// after applyUniforms (same shader) and before the tile loop draws.
 	torches := collectTorches(m, camera)
 	assets.lighting.uploadTorches(torches)
 
 	camPos := camera.Position
 	vc := newViewCull(camera)
 
-	// Diagnostics: only collect counters when the render log is on, so the hot
-	// path stays a plain increment-free loop the rest of the time. logActive is a
-	// single function-call check.
+	// Diagnostics: collect counters only when the render log is on, so the hot
+	// path stays increment-free otherwise.
 	logActive := IsRenderLogActive()
 	var stats renderFrameStats
 	if logActive {
@@ -599,11 +461,8 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		stats.MapH = m.Height
 	}
 
-	// Decode the elevation + ramp + face-skin of every tile ONCE into a reused
-	// flat grid, instead of re-deriving each tile's (and its 4 neighbours')
-	// level/ramp through value-receiver string lookups inside the hot loop —
-	// which previously decoded each tile's level ~5× per pass. The loop and the
-	// cliff-face pass then read plain ints/bytes from this grid.
+	// Decode every tile's elevation/ramp/face-skin ONCE into a reused flat grid,
+	// so the hot loop reads ints/bytes instead of re-decoding ~5× per tile per pass.
 	gw, gh := m.Width, m.Height
 	grid := elevGrid(m, gw, gh)
 
@@ -621,17 +480,11 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 				}
 				continue
 			}
-			// Elevation: this tile's floor (and everything on it) rides up by
-			// its level. The world is a heightfield — a "wall" is the rendered
-			// vertical FACE of an elevation step (drawCliffFaces below), not a
-			// separate solid tile. A raised tile reads as a plateau/mesa; the
-			// faces on its lower-facing edges are its cliff. Read level+ramp from
-			// the prebuilt grid (computed once, above) rather than re-decoding.
+			// Elevation: the tile's floor rides up by its level. The world is a
+			// heightfield — a "wall" is the rendered vertical FACE of an elevation
+			// step (drawCliffFaces), not a solid tile.
 			te := grid[z*gw+x]
 			elevY := core.ElevationWorldY(te.level)
-			// Scenery anchors to the level it was PLACED on: props via PropLevelAt
-			// and decor via DecorLevelAt, each computed at their own draw call below
-			// (StandGroundYAt handles the ramp mid-slope + the voxel ground default).
 			if m.CeilingAt(x, z) {
 				drawTileCube(material.ceilingModel, cx, core.LevelStep+elevY, cz, tileYawDeg(x, z))
 				if logActive {
@@ -639,9 +492,8 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 				}
 			}
 			if len(m.Solids) > 0 {
-				// Voxel path: floors on every standable surface, side faces per
-				// solid run, and floating-cube undersides. Only gapped maps take
-				// this branch — heightfields keep the original path below.
+				// Voxel path (gapped maps only): floors per standable surface, side
+				// faces per solid run, floating-cube undersides.
 				n := drawVoxelColumn(camPos, material, assets, m, x, z, cx, cz)
 				if logActive {
 					stats.FloorsDrawn++
@@ -652,31 +504,23 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 				if logActive {
 					stats.FloorsDrawn++
 				}
-				// Cliff faces for every edge where this tile sits above its
-				// neighbour (or the map edge). Counted as WallsDrawn for the log.
+				// Cliff faces for every edge above the neighbour/map edge.
 				if n := drawCliffFaces(camPos, material, assets, grid, gw, gh, x, z, cx, cz, te.level, te.ramp); logActive {
 					stats.WallsDrawn += n
 				}
 			}
-			// Decor sits on its placed level too (deck vs ground); on a heightfield
-			// column DecorLevelAt is the single surface, so flat maps are unchanged.
-			// Guard on non-empty so the per-tile StandGroundYAt + DecorLevelAt anchor
-			// math is skipped for the (common) empty-decor tiles drawDecor would
-			// no-op on anyway.
+			// Decor anchors to its placed level (DecorLevelAt). Guard on non-empty
+			// so the anchor math is skipped for the common empty tiles.
 			if decor := m.Decor[z][x]; decor != core.DecorEmpty {
 				decorCenter := rl.NewVector3(cx, m.StandGroundYAt(x, te.decorLevel, z), cz)
 				drawDecor(assets, decor, x, z, cx, cz, decorCenter)
 				if logActive {
-					// DecorAuto still counts — the floor scatter is decor.
 					stats.DecorDrawn++
 				}
 			}
 			if prop := m.Props[z][x]; prop != core.TilePropEmpty {
 				propYaw := propYawDeg(x, z)
-				// A prop sits on the level it was placed on (PropLevelAt) — the
-				// ground by default, but a deck/overhang level for a prop authored
-				// up there. On a heightfield column this equals `center` (the single
-				// surface), so flat maps are unchanged.
+				// Prop anchors to its placed level (PropLevelAt).
 				propCenter := rl.NewVector3(cx, m.StandGroundYAt(x, te.propLevel, z), cz)
 				drawn := false
 				if handler := inlinePropTable[prop]; handler != nil {
@@ -727,37 +571,22 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	}
 }
 
-// drawFloorTile picks a floor variant for the given tile and draws it.
-// footprintAnchor returns the world position of the centroid of a
-// multi-tile footprint, given the anchor tile's center. Wraps
-// core.FootprintWorldOffset so the per-call-site addition + Vector3
-// construction lives in one place — both the props branch and the
-// decor branch of the world renderer would otherwise repeat the same
-// `center + (offX, 0, offZ)` arithmetic.
+// footprintAnchor returns the world centroid of a multi-tile footprint given the
+// anchor tile's center. Wraps core.FootprintWorldOffset.
 func footprintAnchor(center rl.Vector3, footprint []core.MultiTileOffset) rl.Vector3 {
 	ox, oz := core.FootprintWorldOffset(footprint)
 	return rl.NewVector3(center.X+ox, center.Y, center.Z+oz)
 }
 
-// `cell` is the floor-layer character. Resolution order:
-//
-//  1. Universal floor variants (cobble, plank, water, sand, snow) live
-//     in assets.specialFloors and apply to any material set.
-//  2. Material-specific variants (dirt / dark grass on the field) come
-//     from the material's worldMaterialResources.
-//  3. Auto/unrecognized chars fall back to the per-tile hash for variant
-//     selection on materials that support it; otherwise the base floor.
-//
-// Universal variants render at the same y as the base floor so adjacent
-// tiles meet flush without visible seams.
+// drawFloorTile draws the floor variant for `cell`. Resolution order: universal
+// special floors (any material) → material-specific dirt/dark-grass → per-tile
+// hash variant / base floor. All render at the base-floor y so tiles meet flush.
 func drawFloorTile(material worldMaterialResources, assets Resources, cell byte, x, z int, cx, cz, elevY float32) {
 	yaw := tileYawDeg(x, z)
-	// Floor slabs sit a hair below the tile's elevation height so they meet the
-	// cliff faces flush without z-fighting; one offset shared by all three slab
-	// draws below.
+	// Slabs sit a hair below the elevation height to meet cliff faces without
+	// z-fighting; shared by all three slab draws below.
 	floorY := elevY - 0.03
-	// Ramp tiles draw a solid earth wedge (their Elevation cell is the LOW
-	// level, so elevY is the low edge height) instead of a flat floor slab.
+	// Ramp tiles draw a solid earth wedge (elevY is their LOW edge) instead of a slab.
 	if facing, ok := core.RampAscentFacing(cell); ok {
 		drawRampWedge(assets.rampModel, cx, cz, elevY, facing)
 		return
@@ -770,10 +599,7 @@ func drawFloorTile(material worldMaterialResources, assets Resources, cell byte,
 		drawTileCube(material.floorModel, cx, floorY, cz, yaw)
 		return
 	}
-	// All explicit floor chars (grass, dirt, dark grass, stone, cobble,
-	// plank, water, sand, snow) route through specialFloors above. What
-	// reaches here is FloorAuto (or anything unrecognized) — pick a
-	// per-tile variant by hash so the field reads as varied terrain.
+	// What reaches here is FloorAuto/unrecognized — pick a per-tile variant by hash.
 	model := material.floorModel
 	switch floorVariantHash(x, z) {
 	case 1:
@@ -784,32 +610,20 @@ func drawFloorTile(material worldMaterialResources, assets Resources, cell byte,
 	drawTileCube(model, cx, floorY, cz, yaw)
 }
 
-// drawCliffFaces renders the vertical rock faces of tile (x,z) — one per
-// cardinal edge where this tile's ground sits ABOVE the neighbour's (or the
-// map edge), which is exactly where StepElevationOK forbids a step. A wall is
-// just these faces. Ramp tiles draw their own solid wedge (with side/back
-// walls) instead, so they're skipped here. Returns the number of faces drawn
-// (for the render-log's WallsDrawn tally).
 // tileElev is the per-tile elevation data the world loop needs, decoded once
-// into elevGridBuf so the hot loop reads ints/bytes instead of re-running
-// value-receiver string lookups for every tile and its four neighbours.
+// into elevGridBuf so the hot loop reads ints/bytes instead of re-running string
+// lookups for every tile and its four neighbours.
 type tileElev struct {
 	level int
 	ramp  int  // ascent facing, or core.NoRamp on a flat tile
 	skin  byte // cliff-face skin char (core.FaceSkinAt)
-	// faceSkins is the resolved cliff-face skin char per cardinal direction
-	// (index = direction constant N=0/E=1/S=2/W=3): the tile's per-direction
-	// override (FaceSkinForDir) when set, else its base skin. Cached here so the
-	// per-frame drawCliffFaces reads a byte instead of re-scanning the whole
-	// FaceOverrides slice for every exposed edge every frame on maps that use
-	// face overrides — the linear scan now runs once per area at decode time.
+	// faceSkins is the resolved skin char per cardinal direction (N=0/E=1/S=2/W=3):
+	// the per-direction override (FaceSkinForDir) or base skin. Cached so the
+	// FaceOverrides scan runs once per area, not per exposed edge per frame.
 	faceSkins [4]byte
-	// decorLevel / propLevel are the surfaces decor and props anchor to
-	// (DecorLevelAt / PropLevelAt). Cached here because on a VOXEL map an
-	// auto-level tile resolves through LowestStandableLevel — an O(stackHeight)
-	// column rescan — which would otherwise run per visible decor/prop tile
-	// every frame. Decoded once with the rest of the grid; the cache key already
-	// hashes Solids, so a runtime cube edit rebuilds these too.
+	// decorLevel/propLevel are the surfaces decor/props anchor to. Cached because
+	// on a VOXEL map an auto-level tile resolves through an O(stackHeight) column
+	// rescan that would otherwise run per visible tile per frame.
 	decorLevel int
 	propLevel  int
 }
@@ -817,18 +631,11 @@ type tileElev struct {
 // elevGridBuf is reused across frames + passes to avoid an allocation per draw.
 var elevGridBuf []tileElev
 
-// elevGridKey fingerprints the area elevGridBuf was last decoded for, so the
-// full Width×Height decode runs once per area entry instead of every frame —
-// the same once-per-area idea as torchSiteCache / enclosureCache. The grid
-// derives from Floor (ramps),
-// Elevation (levels) and Walls (face skins); the key is a CONTENT HASH of all
-// three layers plus name+dims, so it rebuilds whenever any of them actually
-// changes and can never serve a stale grid. (The sibling caches sample only
-// boundary rows because they gate an invisible verdict; a stale elevation grid
-// would mis-render every wall/floor height, so it's worth hashing in full.)
-// Hashing is a plain allocation-free byte fold with no per-tile method calls or
-// struct copies, so validation stays far cheaper than the decode it guards —
-// and in-game these layers are static, so the decode runs once per area entry.
+// elevGridKey fingerprints the area elevGridBuf was decoded for so the full
+// decode runs once per area, not per frame. Key is a CONTENT HASH of Floor +
+// Elevation + Walls (+ Solids) plus name/dims — hashed in full (unlike the
+// boundary-sampling sibling caches) since a stale grid would mis-render every
+// height. The hash is an allocation-free byte fold, far cheaper than the decode.
 var elevGridKey struct {
 	primed        bool
 	name          string
@@ -839,12 +646,8 @@ var elevGridKey struct {
 // fnvOffsetBasis is the FNV-1a 64-bit offset basis the layer hash seeds from.
 const fnvOffsetBasis = uint64(1469598103934665603)
 
-// foldLayer folds one grid layer's bytes into the running FNV-1a digest h, with
-// a per-row separator and a trailing layer separator so ragged splits
-// ([{"ab"},{"c"}] vs [{"a"},{"bc"}]) can't collide. Pulled out of layersHash so
-// elevGrid can fold the heightfield layers plus every Solids plane in sequence
-// without allocating a wrapper [][]string each frame just to pass them
-// variadically. Allocation-free.
+// foldLayer folds one layer's bytes into FNV-1a digest h with row + layer
+// separators so ragged splits can't collide. Allocation-free.
 func foldLayer(h uint64, layer []string) uint64 {
 	const prime = 1099511628211
 	for _, row := range layer {
@@ -856,8 +659,7 @@ func foldLayer(h uint64, layer []string) uint64 {
 	return (h ^ 0xfe) * prime // layer separator
 }
 
-// layersHash folds the bytes of the given layers into one FNV-1a digest — the
-// content fingerprint elevGridKey validates against. Allocation-free.
+// layersHash folds the given layers into one FNV-1a digest. Allocation-free.
 func layersHash(layers ...[]string) uint64 {
 	h := fnvOffsetBasis
 	for _, layer := range layers {
@@ -869,10 +671,8 @@ func layersHash(layers ...[]string) uint64 {
 // elevGrid decodes every tile's level/ramp/skin into the reused flat buffer,
 // rebuilding only when the Floor/Elevation/Walls content (or dims/name) change.
 func elevGrid(m *core.AreaDefinition, w, h int) []tileElev {
-	// Hash Floor/Elevation/Walls (the heightfield inputs) plus every Solids
-	// plane, so a runtime edit to the voxel stack invalidates the cache too.
-	// Folded in sequence (no wrapper slice) so the per-frame validity check
-	// allocates nothing.
+	// Hash Floor/Elevation/Walls plus every Solids plane (so a voxel edit
+	// invalidates the cache), folded in sequence so the check allocates nothing.
 	hash := foldLayer(foldLayer(foldLayer(fnvOffsetBasis, m.Floor), m.Elevation), m.Walls)
 	for _, plane := range m.Solids {
 		hash = foldLayer(hash, plane)
@@ -893,11 +693,8 @@ func elevGrid(m *core.AreaDefinition, w, h int) []tileElev {
 			if f, ok := m.RampAt(x, z); ok {
 				ramp = f
 			}
-			// Resolve each cardinal face's skin once here (override-or-base) so the
-			// per-frame cliff pass never re-scans FaceOverrides. Direction index
-			// matches the constants (N=0/E=1/S=2/W=3); FaceSkinForDir falls back to
-			// the base skin when there's no override, so flat/un-overridden tiles
-			// just carry their base skin on every face.
+			// Resolve each face's skin once (override-or-base) so the cliff pass
+			// never re-scans FaceOverrides. Index = direction (N=0/E=1/S=2/W=3).
 			var faces [4]byte
 			for d := 0; d < 4; d++ {
 				faces[d] = m.FaceSkinForDir(x, z, d)
@@ -916,33 +713,27 @@ func elevGrid(m *core.AreaDefinition, w, h int) []tileElev {
 	return elevGridBuf
 }
 
+// drawCliffFaces renders the vertical faces of tile (x,z) — one per cardinal
+// edge where this tile sits above its neighbour (or the map edge). Ramp tiles
+// draw their own wedge and are skipped. Returns the face count (WallsDrawn tally).
 func drawCliffFaces(camPos rl.Vector3, material worldMaterialResources, assets Resources, grid []tileElev, w, h, x, z int, cx, cz float32, myLevel, myRamp int) int {
 	if myRamp != core.NoRamp {
 		return 0 // the ramp wedge supplies its own faces
 	}
 	const half = float32(core.TileSize) / 2
 	drawn := 0
-	// Per-edge mirror of core.TileExposesFace (the editor gates its "Set face"
-	// menu on that authority) — kept inline here so it reads the per-frame grid
-	// instead of re-decoding the area, and resolves each edge's exact drop for
-	// the draw. Off-map default + EdgeLevelOf fallback match core.NeighbourEdgeLevel.
 	for _, d := range core.CardinalDirs {
 		dx, dz := core.FacingVector(d)
-		// CPU backface cull: a vertical cliff face is only visible from its
-		// outward (d) side. Skip issuing the DrawModelEx when the camera sits
-		// behind the face's plane — the GPU would discard those triangles
-		// anyway, but the per-call overhead is the real cost, and a dense
-		// heightfield generates one face per exposed edge. Pure win, no visual
-		// change (you can never stand on the solid side of a cliff face).
+		// CPU backface cull: a face is only visible from its outward side, and a
+		// dense heightfield issues one per exposed edge — skipping the DrawModelEx
+		// saves the per-call cost.
 		fdx, fdz := float32(dx), float32(dz)
 		if faceBackfaceCulled(camPos, cx, cz, fdx, fdz, half) {
 			continue
 		}
 		nx, nz := x+dx, z+dz
-		// Neighbour ground level across the shared edge from the grid: ramp-
-		// aware (EdgeLevelOf) when it presents a walkable edge, else its flat
-		// level. Off-map reads as the baseline, so a raised border shows a clean
-		// lip at the map edge rather than a cliff plunging to the range bottom.
+		// Neighbour edge level: ramp-aware (EdgeLevelOf) else flat level; off-map
+		// = baseline so a raised border shows a clean lip, not a deep cliff.
 		nLevel := core.ElevationBaseline
 		if nx >= 0 && nx < w && nz >= 0 && nz < h {
 			nt := grid[nz*w+nx]
@@ -955,9 +746,7 @@ func drawCliffFaces(camPos rl.Vector3, material worldMaterialResources, assets R
 		if myLevel <= nLevel {
 			continue
 		}
-		// Per-DIRECTION skin: this edge's override or the tile's base skin, both
-		// resolved once at decode into the grid's faceSkins, so the per-frame draw
-		// reads a byte instead of re-scanning FaceOverrides for every exposed edge.
+		// Per-direction skin from the prebuilt grid (override or base).
 		skin := material.faceModel
 		if sc := grid[z*w+x].faceSkins[d]; assets.faceVariantTable.present[sc] {
 			skin = assets.faceVariantTable.model[sc]
@@ -968,10 +757,8 @@ func drawCliffFaces(camPos rl.Vector3, material worldMaterialResources, assets R
 	return drawn
 }
 
-// faceYaw maps the dropping-edge direction to the Y-rotation that turns the
-// face-quad model (built on the +Z / south edge, normal +Z) so it sits on that
-// edge with its skin pointing outward toward the lower neighbour. From raylib's
-// Y-rotation +Z → (sinθ,0,cosθ): θ=0→+Z(S), 90→+X(E), 180→-Z(N), 270→-X(W).
+// faceYaw maps the dropping-edge direction to the Y-rotation orienting the
+// face-quad (built on +Z/south) outward. +Z→(sinθ,cosθ): 0=S, 90=E, 180=N, 270=W.
 func faceYaw(d int) float32 {
 	switch d {
 	case core.South:
@@ -996,8 +783,8 @@ func drawCliffFace(model rl.Model, cx, baseY, cz, yaw, levels float32) {
 		rl.NewVector3(1, levels, 1), rl.White)
 }
 
-// triNormal returns the unit normal of triangle (a,b,c) by the right-hand
-// rule (CCW → outward). Used by the ramp-wedge mesh builder to orient faces.
+// triNormal returns the unit normal of triangle (a,b,c) by the right-hand rule
+// (CCW → outward).
 func triNormal(a, b, c rl.Vector3) rl.Vector3 {
 	ux, uy, uz := b.X-a.X, b.Y-a.Y, b.Z-a.Z
 	vx, vy, vz := c.X-a.X, c.Y-a.Y, c.Z-a.Z
@@ -1009,9 +796,8 @@ func triNormal(a, b, c rl.Vector3) rl.Vector3 {
 	return rl.NewVector3(nx, ny, nz)
 }
 
-// rampFacingYaw maps a ramp's ascent facing to the Y-rotation (degrees) that
-// turns the wedge model (built ascending toward -Z / north) to face that way.
-// Verified against the FacingVector convention (North 0,-1; East 1,0; etc.).
+// rampFacingYaw maps a ramp's ascent facing to the Y-rotation orienting the
+// wedge (built ascending toward -Z/north) that way.
 func rampFacingYaw(facing int) float32 {
 	switch facing {
 	case core.North:
@@ -1026,10 +812,8 @@ func rampFacingYaw(facing int) float32 {
 	return 0
 }
 
-// drawRampWedge draws the shared solid ramp wedge at tile (cx,cz) with its low
-// edge resting at lowY (= lowLevel·LevelStep), yaw-rotated to ascend toward
-// `facing`. The model's geometry guarantees the high edge lands one LevelStep
-// up — flush with the higher floor — and the footprint fills the tile.
+// drawRampWedge draws the solid ramp wedge at (cx,cz) with its low edge at lowY,
+// ascending toward `facing`; the high edge lands one LevelStep up, flush.
 func drawRampWedge(model rl.Model, cx, cz, lowY float32, facing int) {
 	rl.DrawModelEx(model,
 		rl.NewVector3(cx, lowY, cz),
@@ -1037,16 +821,9 @@ func drawRampWedge(model rl.Model, cx, cz, lowY float32, facing int) {
 		rl.NewVector3(1, 1, 1), rl.White)
 }
 
-// drawDecor renders the floor-layer decoration for a tile. '.' falls through
-// to the existing auto-scatter (hash decides whether to draw and what);
-// '_' suppresses the auto-scatter entirely; explicit chars draw a specific
-// small prop centered on the tile.
-//
-// The new decor set (tall grass, flowers, clover, reeds, bones, scorch,
-// blood, cobweb, stump, log, leaf pile) lives in assets.decorModels keyed
-// by char. The legacy bush / mushroom / pebble cases stay inline so their
-// per-call scales and the pebble-cluster scatter helper keep their hand
-// tuning.
+// drawDecor renders a tile's floor-layer decoration. DecorAuto hash-scatters;
+// explicit chars draw a specific prop. Bush/mushroom/pebble stay inline to keep
+// their hand-tuned scales; the rest dispatch through decorModelTable.
 func drawDecor(assets Resources, cell byte, x, z int, cx, cz float32, center rl.Vector3) {
 	switch cell {
 	case core.DecorEmpty:
@@ -1055,10 +832,8 @@ func drawDecor(assets Resources, cell byte, x, z int, cx, cz float32, center rl.
 		drawFloorDecoration(assets, x, z, cx, cz, center.Y)
 		return
 	}
-	// Inline-handled decor (bush / mushroom / pebble) dispatches
-	// through the inlineDecorTable in resources.go — a [256] array
-	// mirror of inlineDecorHandlers so the per-tile-per-frame hot path
-	// is an array index instead of a map hash.
+	// Inline decor (bush/mushroom/pebble) via inlineDecorTable — a [256] array so
+	// the hot path is an index, not a map hash.
 	if handler := inlineDecorTable[cell]; handler != nil {
 		handler(assets, x, z, cx, cz, center.Y)
 		return
@@ -1074,20 +849,9 @@ func drawDecor(assets Resources, cell byte, x, z int, cx, cz float32, center rl.
 	}
 }
 
-// drawPropTreeScaled / drawPropTreeTwin / drawPropRockLarge / drawPropBushLarge
-// are the inline-prop implementations registered in inlinePropHandlers. The
-// four scaled-tree chars share assets.tree through drawPropTreeScaled (see
-// treePropScales below); the other two wrap dedicated propModel fields.
-// Pre-resolved propYaw is passed in by the caller so all handlers stay uniform.
-// treePropScales is the scale-per-char table for tree variants that
-// share assets.tree at different sizes. Four of the five tree props
-// differ only in their scale factor — Tree / TreeXL / TreeTall /
-// TreeYoung — so they all dispatch through drawPropTreeScaled keyed
-// by char rather than each having a one-line wrapper. TileTreeTwin
-// stays separate because it draws two instances per tile.
-//
-// Young trees used to read as bonsai at 0.65 — bumped to 0.92 so they
-// still feel smaller than a grown tree but actually occupy their tile.
+// treePropScales is the scale-per-char table for tree variants that share
+// assets.tree at different sizes (Tree/TreeXL/TreeTall/TreeYoung dispatch through
+// drawPropTreeScaled; TileTreeTwin is separate, drawing two per tile).
 var treePropScales = map[byte]float32{
 	core.TileTree:      1.00,
 	core.TileTreeXL:    1.75,
@@ -1096,41 +860,28 @@ var treePropScales = map[byte]float32{
 }
 
 // foliageTrunkShadowFactor is the fraction of a foliage prop's scale its
-// ground-shadow disc spans before per-prop slack — shared by the tree props so
-// the disc tracks the trunk footprint consistently instead of each loader
-// re-deriving the 0.34 factor.
+// ground-shadow disc spans (before per-prop slack); shared by the tree props.
 const foliageTrunkShadowFactor = 0.34
 
-// foliageShadowRadius returns the ground-shadow disc radius for a foliage prop
-// at the given scale, plus a little slack so the painted disc sits a touch
-// wider than the trunk's projected footprint.
+// foliageShadowRadius returns a foliage prop's ground-shadow radius at the given
+// scale plus slack.
 func foliageShadowRadius(scale, slack float32) float32 {
 	return foliageTrunkShadowFactor*scale + slack
 }
 
-// drawPropTreeScaled draws assets.tree at the scale registered in
-// treePropScales for the given char. The inline-prop dispatcher binds
-// each per-char closure at init so the prop-renderer call site stays
-// "table lookup → invoke" with no branch on char. Per-tile shape
-// variance is seeded from tileHash so a stand of identical-char trees
-// no longer reads as a stamped grid.
+// drawPropTreeScaled draws assets.tree at the char's treePropScales scale.
+// Per-tile shape variance is seeded from tileHash so a stand of identical-char
+// trees doesn't read as a stamped grid.
 func drawPropTreeScaled(char byte) inlinePropRenderer {
 	scale := treePropScales[char]
 	return func(assets Resources, _ *core.AreaDefinition, x, z int, center rl.Vector3, propYaw float32) {
-		// Tree shadow scales with the tree's overall scale, plus
-		// a touch of slack so the painted disc sits a little wider
-		// than the trunk's projected footprint.
 		drawGroundShadowElev(center.X, center.Z, center.Y, foliageShadowRadius(scale, 0.10))
 		assets.tree.drawVaried(center, scale, propYaw, tileHash(x, z))
 	}
 }
 
-// drawPropTreeTwin renders two trees stacked into one tile, offset
-// diagonally so neither sits in the dead center. The two instances
-// use different scales so the silhouette reads as "big tree with a
-// younger one beside it" rather than a mirrored pair. Yaw is staggered
-// and each gets its own variance seed. Pure visual variant — both
-// reuse assets.tree.
+// drawPropTreeTwin renders two diagonally-offset trees of different scales in one
+// tile ("big tree with a younger one beside it"). Both reuse assets.tree.
 func drawPropTreeTwin(assets Resources, _ *core.AreaDefinition, x, z int, center rl.Vector3, propYaw float32) {
 	const offset = 0.32
 	const scaleBig = 0.82
@@ -1159,11 +910,8 @@ func drawPropBushLarge(assets Resources, _ *core.AreaDefinition, _, _ int, cente
 	assets.bushProp.draw(center, 1.3, propYaw)
 }
 
-// Wall-torch fixture geometry — shared by drawWallTorch (the visible
-// bracket/sconce) and rebuildTorchSites (the light-pool origin) so the
-// fixture height and its light source can't silently drift apart on a
-// retune. The light origin sits a touch above the sconce cup (where the
-// flame burns) and is inset toward the wall like the bracket.
+// Wall-torch fixture geometry — shared by drawWallTorch and rebuildTorchSites so
+// the visible fixture and its light origin can't drift apart on a retune.
 const (
 	wallTorchMount      = float32(0.40) // bracket distance from tile center toward the wall
 	wallTorchSconceY    = float32(1.30) // bracket/sconce height
@@ -1171,28 +919,18 @@ const (
 	wallTorchLightInset = float32(0.30) // light origin offset from tile center toward the wall
 )
 
-// drawWallTorch is the inline handler for TileTorch. It auto-orients
-// the torch to the adjacent wall (facing away from it into the room),
-// draws an unlit iron bracket + sconce on the wall, and an animated
-// emissive flame made of a few jittering fire-tinted spheres. The
-// point light itself is added by collectTorches; this is purely the
-// visible fixture + flame. Non-blocking: the floor tile stays clear.
+// drawWallTorch is the inline handler for TileTorch: auto-orients to the adjacent
+// wall (facing into the room), draws an unlit iron bracket/sconce and an animated
+// emissive flame. The point light itself comes from collectTorches. Non-blocking.
 func drawWallTorch(assets Resources, m *core.AreaDefinition, x, z int, center rl.Vector3, _ float32) {
 	fx, fz := wallTorchFacing(m, x, z)
-	// Mount point: against the wall behind the torch, up at sconce
-	// height. The torch faces (fx,fz) into the room, so the wall is
-	// in the opposite direction.
+	// Mount against the wall behind the torch (opposite the facing direction).
 	wallX := center.X - fx*wallTorchMount
 	wallZ := center.Z - fz*wallTorchMount
-	// All fixture heights ride the tile's elevation floor (center.Y) so a
-	// torch on a raised tile stays mounted to its wall instead of hanging at
-	// world-ground height.
+	// Heights ride the tile's elevation floor so a raised torch stays wall-mounted.
 	baseY := center.Y
 
-	// Iron bracket — a small dark cube flush on the wall, plus a
-	// short arm reaching out toward the room holding the sconce.
-	// Drawn lit (immediate mode under the world shader); the torch's
-	// own light pool keeps it visible.
+	// Iron bracket: dark cube flush on the wall + a short arm holding the sconce.
 	bracket := rl.NewVector3(wallX, baseY+wallTorchSconceY-0.12, wallZ)
 	rl.DrawCube(bracket, 0.10, 0.22, 0.10, torchIron)
 	armX := wallX + fx*0.10
@@ -1203,10 +941,8 @@ func drawWallTorch(assets Resources, m *core.AreaDefinition, x, z int, center rl
 	cupZ := wallZ + fz*0.16
 	rl.DrawCube(rl.NewVector3(cupX, baseY+wallTorchSconceY+0.04, cupZ), 0.16, 0.08, 0.16, torchIronLight)
 
-	// Animated flame — three emissive blobs above the cup, each
-	// bobbing on its own time offset so the flame flickers and
-	// dances. Drawn via the unlit flame model (default shader) so
-	// they glow regardless of the near-black dungeon ambient.
+	// Animated flame: three emissive blobs above the cup, each bobbing on its own
+	// offset. Unlit model (default shader) so they glow against the dark ambient.
 	if !torchFlameReady {
 		return
 	}
@@ -1218,8 +954,7 @@ func drawWallTorch(assets Resources, m *core.AreaDefinition, x, z int, center rl
 		fp := phase + float32(i)*2.1
 		bob := float32(math.Sin(float64(t*7.0+fp))) * 0.04
 		swayA := float32(math.Sin(float64(t*5.3+fp*1.4))) * 0.05
-		// Higher blobs are smaller and lean more — a teardrop
-		// flame shape that wavers.
+		// Higher blobs are smaller and lean more — a wavering teardrop.
 		y := baseY + wallTorchSconceY + 0.09 + float32(i)*0.07 + bob
 		lean := float32(i) * 0.03
 		px := flameBaseX + fx*lean + swayA*fz
@@ -1231,10 +966,8 @@ func drawWallTorch(assets Resources, m *core.AreaDefinition, x, z int, center rl
 	}
 }
 
-// wallTorchFacing returns the unit (x,z) direction the torch faces —
-// away from the first adjacent wall found, checked N→E→S→W. Falls
-// back to facing south (toward the camera's usual approach) when the
-// tile has no adjacent wall (a torch placed in the open).
+// wallTorchFacing returns the unit (x,z) the torch faces — away from the first
+// adjacent wall (N→E→S→W), or south when the tile has no adjacent wall.
 func wallTorchFacing(m *core.AreaDefinition, x, z int) (float32, float32) {
 	if f, ok := core.FacingAwayFromAdjacentWall(*m, x, z); ok {
 		dx, dz := core.FacingVector(f)
@@ -1243,34 +976,18 @@ func wallTorchFacing(m *core.AreaDefinition, x, z int) (float32, float32) {
 	return 0, 1 // no adjacent wall → face south (toward the usual approach)
 }
 
-// groundShadowModel is the soft radial-gradient disc painted under
-// every prop. A flat XZ plane textured with makeSoftShadowPixels'
-// dark-centre / transparent-edge sprite, drawn UNLIT (it keeps the
-// default material shader, so the lighting pass bound around the
-// world draw never touches it) and alpha-blended over the floor.
-// Set once by NewResources; drawGroundShadow reads it as a package
-// singleton because shadows are painted from many free-function
-// call sites (tree handlers, the prop branch, DrawChests) that don't
-// thread Resources through. groundShadowReady guards the pre-init
-// window so an early draw is a no-op rather than a crash.
+// groundShadowModel is the soft disc painted under every prop: an UNLIT XZ plane
+// (keeps the default shader, untouched by the lighting pass) alpha-blended over
+// the floor. A package singleton because many free-function call sites paint
+// shadows without a Resources handle. groundShadowReady guards the pre-init window.
 var (
 	groundShadowModel rl.Model
 	groundShadowReady bool
 )
 
-// propShadowRadius is the per-prop ground-shadow half-extent (world
-// units). drawWorld's prop branch looks each prop up here and paints
-// a soft dark disc at the prop's base before drawing the prop itself —
-// the Wind-Waker grounding signature so every painted prop reads as
-// planted in the floor instead of floating on the lighting gradient.
-// Inline-handled props (trees, big bushes, big rocks, small mushrooms,
-// small bushes) paint their own shadows directly inside their
-// handlers; only the table-dispatched props live here.
-//
-// Sizes are roughly the prop's projected footprint plus a touch of
-// slack so the painted disc reads slightly wider than the silhouette.
-// 2x2 footprint props (rock formation) get a wider radius matched to
-// their multi-tile span.
+// propShadowRadius is the per-prop ground-shadow half-extent (world units) for
+// table-dispatched props (inline-handled props paint their own). Roughly the
+// prop's footprint plus slack; 2×2 props get a wider radius.
 var propShadowRadius = map[byte]float32{
 	core.TileCrate:             0.42,
 	core.TileBarrel:            0.36,
@@ -1296,11 +1013,8 @@ var propShadowRadius = map[byte]float32{
 	core.TileSarcophagus:       0.50,
 }
 
-// propShadowRadiusTable is the [256]float32 mirror of propShadowRadius,
-// indexed by tile char so the per-tile world loop does an O(1) array
-// index instead of a map hash for every prop tile every frame (mirrors
-// inlinePropTable / decorModelTable). Built once at init; chars with no
-// entry read 0 (no shadow). propShadowRadius stays the authoring source.
+// propShadowRadiusTable is the [256]float32 mirror of propShadowRadius so the
+// world loop does an O(1) index, not a map hash. Chars with no entry read 0.
 var propShadowRadiusTable = func() [256]float32 {
 	var t [256]float32
 	for ch, r := range propShadowRadius {
@@ -1309,14 +1023,10 @@ var propShadowRadiusTable = func() [256]float32 {
 	return t
 }()
 
-// areaKey identifies the area a per-area cache was built for, so the cache
-// rebuilds only when the player enters a different area. Matched on name +
-// dimensions PLUS a ceiling fingerprint (core.CeilingFingerprint) — without
-// the fingerprint, two distinct same-named, same-sized areas with different
-// roofs would share a stale enclosure/torch verdict (the editor "untitled"
-// case). Shares the fingerprint with core's outdoorVerdictCache so the
-// lighting/torch gates and the rain gate can't drift. Used by enclosureCache
-// and torchSiteCache.
+// areaKey identifies the area a per-area cache was built for. Matched on name +
+// dims PLUS a ceiling fingerprint, so two same-named/sized areas with different
+// roofs can't share a stale verdict (the editor "untitled" case). Used by
+// enclosureCache and torchSiteCache.
 type areaKey struct {
 	name          string
 	width, height int
@@ -1336,19 +1046,15 @@ func (k *areaKey) set(m *core.AreaDefinition) {
 	k.name, k.width, k.height, k.primed = m.Name, m.Width, m.Height, true
 }
 
-// enclosureCache memoizes the last area's enclosure result so the
-// ceiling-coverage scan runs once per area, not once per frame.
+// enclosureCache memoizes the enclosure result so the ceiling scan runs once per
+// area, not per frame.
 var enclosureCache struct {
 	areaKey
 	enclosed bool
 }
 
-// areaIsEnclosed reports whether the area is a roofed interior — used to
-// gate the spooky-dungeon lighting override. The ceiling-coverage rule
-// (and the OutdoorCeilingThreshold it tests against) lives in
-// core.AreaIsOutdoor so the lighting gate and the rain gate share one
-// definition of "has a roof"; this just memoizes its result per area so
-// the scan runs once per area entry rather than once per frame.
+// areaIsEnclosed reports whether the area is a roofed interior (gates the
+// dungeon lighting override), memoizing core.AreaIsOutdoor per area.
 func areaIsEnclosed(m *core.AreaDefinition) bool {
 	if enclosureCache.matches(m) {
 		return enclosureCache.enclosed
@@ -1359,12 +1065,9 @@ func areaIsEnclosed(m *core.AreaDefinition) bool {
 	return enclosed
 }
 
-// Shared iron-fixture + flame palette for every torch/brazier in the world.
-// Iron tones are lit by the world shader; the flame tints are applied to unlit
-// models so they glow. Three flame tints (hot core → mid → tip) layer the
-// bobbing blobs into a teardrop fire. Both the wall-torch (this file) and the
-// standing-brazier prop (loadBrazierProp, models.go) draw from these so the iron
-// and fire stay one palette instead of two that drift apart.
+// Shared iron-fixture + flame palette for every torch/brazier. Iron is lit by the
+// world shader; flame tints (hot core → mid → tip) are applied to unlit models so
+// they glow. Shared by drawWallTorch and the brazier prop so they don't drift.
 var (
 	torchIron       = rl.NewColor(54, 50, 46, 255)
 	torchIronLight  = rl.NewColor(92, 84, 76, 255)
@@ -1375,24 +1078,19 @@ var (
 	}
 )
 
-// torchFlameModel is the unlit emissive sphere used for wall-torch
-// flame blobs. Default material shader (like groundShadowModel) so
-// it renders at full tint colour, glowing against the near-black
-// dungeon. Set by NewResources.
+// torchFlameModel is the unlit emissive sphere for flame blobs (default shader so
+// it glows at full tint against the dark dungeon). Set by NewResources.
 var (
 	torchFlameModel rl.Model
 	torchFlameReady bool
 )
 
-// torchFlameHeight is the world Y at which a brazier's torch point
-// light sits — up at the fire bowl, not the floor, so the light
-// pool radiates outward and down across the surrounding tiles.
+// torchFlameHeight is the world Y a brazier's point light sits at — up at the
+// fire bowl so the pool radiates outward and down.
 const torchFlameHeight = float32(1.05)
 
-// torchBaseColor is the warm flame tint at full brightness, before
-// per-torch flicker. Deliberately bright (R well over 1) so a
-// torch-lit wall reads as a strong warm-orange pool against the
-// dim dungeon while the space between torches falls into shadow.
+// torchBaseColor is the warm flame tint at full brightness, before flicker.
+// Deliberately bright (R > 1) so a torch-lit wall reads as a strong pool.
 var torchBaseColor = rl.NewVector3(2.3, 1.35, 0.7)
 
 type torchCandidate struct {
@@ -1402,26 +1100,16 @@ type torchCandidate struct {
 	bright float32 // brightness multiplier — braziers > wall torches
 }
 
-// torchCandidateBuf / torchResultBuf are reused across frames so the
-// per-frame brazier scan + torch build don't allocate.
+// torchCandidateBuf / torchResultBuf are reused so the per-frame scan + build
+// don't allocate.
 var (
 	torchCandidateBuf []torchCandidate
 	torchResultBuf    []torchLight
 )
 
-// collectTorches scans the area's props for brazier tiles, keeps the
-// maxTorches nearest the camera, and returns them as flickering torch
-// point lights for the lighting shader. Braziers beyond the cap are
-// dropped — they'd be fog-swallowed in the dark anyway. Flicker is a
-// per-torch pair of desynced sines seeded from the tile hash so
-// neighbouring torches wobble independently instead of pulsing in
-// lockstep. Returns an empty slice on areas with no braziers (every
-// field map), so the shader's torch loop contributes nothing.
-// torchSite is the static (camera- and time-independent) data for one
-// brazier/torch tile: its light origin, the tile center used for camera
-// ranking, the flicker seed, and base brightness. All of it is fixed for
-// the lifetime of an area, so it's cached rather than rediscovered by a
-// full-grid scan every frame.
+// torchSite is the static (camera/time-independent) data for one brazier/torch
+// tile: light origin, tile center for ranking, flicker seed, base brightness.
+// Fixed for the area's lifetime, so it's cached rather than rescanned per frame.
 type torchSite struct {
 	pos    rl.Vector3
 	cx, cz float32
@@ -1429,10 +1117,8 @@ type torchSite struct {
 	bright float32
 }
 
-// torchSiteCache memoizes the brazier/torch tile list for the current
-// area so the Width×Height grid scan runs once per area, not per frame
-// (mirrors enclosureCache). Per-frame work then reduces to distance +
-// flicker over the cached handful of sites.
+// torchSiteCache memoizes the brazier/torch tile list so the grid scan runs once
+// per area; per-frame work is then just distance + flicker over the cached sites.
 var torchSiteCache struct {
 	areaKey
 	sites []torchSite
@@ -1450,10 +1136,8 @@ func rebuildTorchSites(m *core.AreaDefinition) {
 			}
 			cx := core.TileCenter(x)
 			cz := core.TileCenter(z)
-			// Light origin rides the tile's elevation so a raised torch/brazier
-			// lights at its actual flame height, matching the visible fixture.
-			// Use the walkable-surface height (mid-slope on a ramp tile, same as
-			// the fixture's scenery anchor) rather than the low-edge level.
+			// Light origin rides the walkable-surface height so a raised torch
+			// lights at its actual flame height.
 			elevY := m.StandGroundY(x, z)
 			var pos rl.Vector3
 			bright := float32(0.85) // wall torch — dimmer
@@ -1462,8 +1146,7 @@ func rebuildTorchSites(m *core.AreaDefinition) {
 				pos = rl.NewVector3(cx, elevY+torchFlameHeight, cz)
 				bright = 1.45
 			} else {
-				// Wall torch: light originates at the sconce, offset
-				// toward the wall + up at flame height.
+				// Wall torch: light at the sconce, offset toward the wall + up.
 				fx, fz := wallTorchFacing(m, x, z)
 				pos = rl.NewVector3(cx-fx*wallTorchLightInset, elevY+wallTorchLightY, cz-fz*wallTorchLightInset)
 			}
@@ -1475,6 +1158,9 @@ func rebuildTorchSites(m *core.AreaDefinition) {
 	torchSiteCache.set(m)
 }
 
+// collectTorches returns the maxTorches braziers/torches nearest the camera as
+// flickering point lights (the rest are fog-swallowed). Flicker is per-torch
+// desynced sines so neighbours don't pulse in lockstep. Empty slice if none.
 func collectTorches(m *core.AreaDefinition, camera rl.Camera3D) []torchLight {
 	if !torchSiteCache.matches(m) {
 		rebuildTorchSites(m)
@@ -1494,8 +1180,7 @@ func collectTorches(m *core.AreaDefinition, camera rl.Camera3D) []torchLight {
 	if len(torchCandidateBuf) == 0 {
 		return torchResultBuf
 	}
-	// Only sort when there are more braziers than slots — most
-	// dungeons have a handful, so the common path skips the sort.
+	// Sort only when over the cap — most dungeons skip it.
 	if len(torchCandidateBuf) > maxTorches {
 		sort.Slice(torchCandidateBuf, func(a, b int) bool {
 			return torchCandidateBuf[a].dist < torchCandidateBuf[b].dist
@@ -1526,22 +1211,18 @@ func collectTorches(m *core.AreaDefinition, camera rl.Camera3D) []torchLight {
 	return torchResultBuf
 }
 
-// drawGroundShadow paints a soft radial-gradient disc on the floor —
-// the Wind-Waker grounding signature that anchors a tree / bush /
-// rock / statue / chest to the ground. The disc is the shared
-// groundShadowModel plane (dark centre fading to transparent at the
-// rim) scaled to `radius` and laid just above the floor at y=0.02 so
-// it composites over the floor texture without z-fighting. `radius`
-// is the half-extent in world units (a tile is 1.0 across).
+// groundShadowFloorClearance lifts the contact disc just above the floor so it
+// composites without z-fighting.
 const groundShadowFloorClearance = float32(0.02)
 
+// drawGroundShadow paints the soft contact disc on the ground plane at `radius`
+// half-extent (world units), anchoring a prop so it reads as planted.
 func drawGroundShadow(cx, cz, radius float32) {
 	drawGroundShadowAt(cx, groundShadowFloorClearance, cz, radius)
 }
 
-// drawGroundShadowAt is drawGroundShadow with an explicit Y, so a contact disc
-// can sit on a raised tile's floor (a pack/chest on an elevation plateau)
-// instead of the world ground plane.
+// drawGroundShadowAt is drawGroundShadow with an explicit Y, for a disc on a
+// raised tile's floor.
 func drawGroundShadowAt(cx, cy, cz, radius float32) {
 	if !groundShadowReady || radius <= 0 {
 		return
@@ -1555,21 +1236,14 @@ func drawGroundShadowAt(cx, cy, cz, radius float32) {
 	)
 }
 
-// drawGroundShadowElev draws a contact disc on a tile whose floor sits at
-// groundY (its elevation), keeping the same small floor clearance as the
-// ground-plane drawGroundShadow. Without this, props/decor/trees on a raised
-// tile cast their shadow on the world floor below — a shadow floating in the
-// gap under the plateau now that raised tiles draw no support column.
+// drawGroundShadowElev draws a contact disc on a tile whose floor sits at groundY
+// (its elevation), so props on a raised tile don't cast onto the floor below.
 func drawGroundShadowElev(cx, cz, groundY, radius float32) {
 	drawGroundShadowAt(cx, groundY+groundShadowFloorClearance, cz, radius)
 }
 
-// drawDecorBush / drawDecorMushroom / drawDecorPebble are the
-// inline-decor implementations registered in inlineDecorHandlers.
-// Each one is a thin wrapper around the dedicated propModel field /
-// scatter helper on Resources so the dispatch signature stays uniform
-// across every handler. groundY is the tile's elevation floor height so
-// decoration rides a raised tile instead of sinking to the world floor.
+// drawDecorBush / drawDecorMushroom / drawDecorPebble are the inline-decor
+// handlers (uniform signature). groundY is the tile's elevation floor.
 func drawDecorBush(assets Resources, x, z int, cx, cz, groundY float32) {
 	drawGroundShadowElev(cx, cz, groundY, 0.36)
 	assets.bushProp.draw(rl.NewVector3(cx, groundY, cz), 0.75, propYawDeg(x, z))
@@ -1584,21 +1258,16 @@ func drawDecorPebble(assets Resources, x, z int, cx, cz, groundY float32) {
 	drawPebbleCluster(assets, cx, cz, groundY, tileHash(x, z))
 }
 
-// faceBackfaceCulled reports whether a vertical tile face — centered at the
-// edge (cx+fdx*half, cz+fdz*half) with outward normal (fdx,fdz) — faces away
-// from the camera. A vertical cliff/voxel face is only visible from its outward
-// side, so the caller can skip issuing the DrawModelEx when the camera sits
-// behind the face's plane. Shared by drawCliffFaces and the voxel side-face
-// pass so the cull test can't drift between them.
+// faceBackfaceCulled reports whether a vertical face (edge center cx+fdx*half,
+// cz+fdz*half, outward normal fdx,fdz) faces away from the camera. Shared by
+// drawCliffFaces and the voxel side-face pass.
 func faceBackfaceCulled(camPos rl.Vector3, cx, cz, fdx, fdz, half float32) bool {
 	return (camPos.X-(cx+fdx*half))*fdx+(camPos.Z-(cz+fdz*half))*fdz <= 0
 }
 
-// drawTileCube draws a square-footprint cube model at (cx,cy,cz) with a yaw
-// rotation around its vertical axis. Used for floor and wall tiles so each
-// instance can spin its texture by 90° steps without changing the cube's
-// silhouette (the x and z extents are equal). Breaks up obvious tiling
-// patterns in the texture without needing per-tile mesh variants.
+// drawTileCube draws a square-footprint cube at (cx,cy,cz) yaw-rotated about its
+// vertical axis — 90° steps spin the texture to break tiling without changing the
+// silhouette.
 func drawTileCube(model rl.Model, cx, cy, cz, yawDeg float32) {
 	rl.DrawModelEx(model,
 		rl.NewVector3(cx, cy, cz),
@@ -1608,11 +1277,9 @@ func drawTileCube(model rl.Model, cx, cy, cz, yawDeg float32) {
 		rl.White)
 }
 
-// tileHash is the per-tile uint32 mixer used by orientation/variant
-// selectors. Stable for a given (x,z) so the same tile always reads the
-// same way between frames. Stronger avalanche than hashXY — three rounds
-// of xorshift+multiply with widely-spaced primes — for cases where
-// neighboring tiles need to feel independent.
+// tileHash is the stable per-tile uint32 mixer for orientation/variant selection.
+// Stronger avalanche than hashXY (three xorshift+multiply rounds) so neighbouring
+// tiles feel independent.
 func tileHash(x, z int) uint32 {
 	h := uint32(x*374761393) ^ uint32(z*668265263)
 	h ^= h >> 16
@@ -1623,18 +1290,14 @@ func tileHash(x, z int) uint32 {
 	return h
 }
 
-// hashXY is the cheaper per-tile hash used where tileHash's stronger
-// avalanche is overkill — texture-gen pixel jitter, region-bucketed
-// variant picks, etc. Same shape across all callers (textures.go,
-// floorVariantHash, drawFloorDecoration) so they sample one mixer.
+// hashXY is the cheaper per-tile hash where tileHash's avalanche is overkill
+// (pixel jitter, region-bucketed variant picks).
 func hashXY(x, y int) uint32 {
 	return mix32(uint32(x*73856093) ^ uint32(y*19349663))
 }
 
-// mix32 finalizes a uint32 into a well-distributed bit pattern with one
-// round of xorshift + odd-prime multiply. Sufficient for visual variation
-// at our texture/tile scales; tileHash uses three rounds when stronger
-// avalanche is needed.
+// mix32 finalizes a uint32 with one xorshift + odd-prime multiply round —
+// enough for visual variation (tileHash uses three).
 func mix32(n uint32) uint32 {
 	n ^= n >> 13
 	n *= 1274126177
@@ -1642,35 +1305,26 @@ func mix32(n uint32) uint32 {
 	return n
 }
 
-// hash01 maps an index to a stable pseudo-random float in [0, 1) by
-// finalizing it through mix32 and normalizing the low 24 bits. The
-// single-uint sibling of textures.go's hashFloat (which normalizes the
-// two-int hashXY) — used where a per-item deterministic [0,1) is wanted
-// without a particle pool (the rain streaks' per-streak traits).
+// hash01 maps an index to a stable pseudo-random [0,1) via mix32 + low-24-bit
+// normalize.
 func hash01(n uint32) float32 {
 	return float32(mix32(n)&0xffffff) / float32(0x1000000)
 }
 
-// tileYawDeg returns 0/90/180/270 for floor and wall tiles. Square-footprint
-// cubes look identical at any of those rotations; what changes is the
-// texture, which kills the visible tiling pattern from same-orientation
-// repeats.
+// tileYawDeg returns 0/90/180/270 for a tile — spins the texture to kill the
+// tiling pattern (the square cube looks identical at any of these).
 func tileYawDeg(x, z int) float32 {
 	return float32(tileHash(x, z)&0x03) * 90
 }
 
-// propYawDeg returns a per-tile yaw in 30° steps, in [0, 360). Stepped
-// rather than fully continuous so each prop reads as having a deliberate
-// facing instead of looking like jittered noise.
+// propYawDeg returns a per-tile yaw in 30° steps, in [0,360) — stepped so each
+// prop reads as a deliberate facing rather than noise.
 func propYawDeg(x, z int) float32 {
 	return float32(((tileHash(x, z) >> 3) % 12) * 30)
 }
 
-// floorVariantHash picks 0 (grass) / 1 (dirt) / 2 (dark grass) for a given
-// tile. Uses a region-bucketed hash (every 3 tiles snap to the same bucket)
-// so variants form patches rather than per-tile speckle. Two independent
-// byte samples drive dirt vs dark-grass selection so they don't perfectly
-// mask each other.
+// floorVariantHash picks 0 (grass) / 1 (dirt) / 2 (dark grass), region-bucketed
+// (every 3 tiles) so variants form patches, not per-tile speckle.
 func floorVariantHash(x, z int) int {
 	region := hashXY(x/3, z/3)
 	switch {
@@ -1683,35 +1337,27 @@ func floorVariantHash(x, z int) int {
 	}
 }
 
-// scatterOffsetDivisor maps a signed int8 hash byte (-128..127) into a sub-tile
-// offset of roughly [-0.55, 0.55] world units. Shared by the floor-decoration
-// and pebble-cluster scatterers so both jitter props by the same spread.
+// scatterOffsetDivisor maps a signed int8 hash byte into a sub-tile offset of
+// ~[-0.55, 0.55] world units. Shared by the floor-decoration + pebble scatterers.
 const scatterOffsetDivisor = float32(230)
 
-// drawFloorDecoration scatters small props (rocks, bushes, mushrooms) on
-// plain floor tiles using a deterministic per-tile hash. ~16% of plain floor
-// tiles get a decoration; small rocks are weighted heavier than the others
-// so the field reads as pebble-strewn ground. Props are passable (don't
-// update BlockedAt) and small rocks are squashed in Y so they look walkable.
+// drawFloorDecoration scatters small passable props (rocks/bushes/mushrooms) on
+// ~16% of plain floor tiles by per-tile hash; rocks weighted heaviest so the
+// floor reads as pebble-strewn.
 func drawFloorDecoration(assets Resources, x, z int, cx, cz, groundY float32) {
 	h := hashXY(x, z)
 	chance := byte(h)
 	if chance > 42 { // ~16.5% rate
 		return
 	}
-	// Weighted kind dispatch: 4/8 small rocks (low-profile pebbles), 1/8 small
-	// bush, 2/8 mushrooms (split tiny / small), 1/8 small bush variant. Rocks
-	// dominate so the floor looks pebble-strewn rather than mushroom-spotted.
+	// Weighted kind dispatch: 4/8 pebbles, 1/8 + 1/8 bush, 2/8 mushrooms.
 	kind := int((h >> 8) & 7)
-	// Sub-tile offset in [-0.55, 0.55] so the prop doesn't always sit dead-
-	// center. int8 conversion gives signed -128..127, scaled to ~tile.
+	// Sub-tile offset so the prop isn't dead-center.
 	offX := float32(int8(h>>16)) / scatterOffsetDivisor
 	offZ := float32(int8(h>>24)) / scatterOffsetDivisor
 	pos := rl.NewVector3(cx+offX, groundY, cz+offZ)
 
-	// Reuse the orientation hash so floor decorations also pick up a stable
-	// yaw — keeps clusters of small props from looking aligned when a few
-	// land in the same neighborhood.
+	// Stable yaw from the same hash so clustered props aren't aligned.
 	decoYaw := float32(((h >> 12) % 12) * 30)
 	switch kind {
 	case 0, 1, 2, 3: // pebble cluster — see drawPebbleCluster comment
@@ -1727,15 +1373,8 @@ func drawFloorDecoration(assets Resources, x, z int, cx, cz, groundY float32) {
 	}
 }
 
-// drawPebbleCluster paints a small grouping of low-profile pebbles distributed
-// across the given tile. Each pebble is just the boulder mesh's base cube
-// drawn with a scattered position, slight size jitter, random yaw, and a
-// lighter "weathered surface stone" tint than the chunky-boulder palette so
-// the cluster reads as ground detail rather than dropped boulders. A
-// per-pebble hash gives every member its own footprint/height/rotation.
-// pebblePaletteTints is the light "weathered surface stone" palette for
-// ground pebble scatter, indexed by per-pebble hash. Package-level so the
-// four colors aren't reconstructed on every drawPebbleCluster call.
+// pebblePaletteTints is the light "weathered surface stone" palette for ground
+// pebble scatter, indexed by per-pebble hash.
 var pebblePaletteTints = [4]rl.Color{
 	rl.NewColor(228, 224, 214, 255),
 	rl.NewColor(216, 212, 202, 255),
@@ -1743,6 +1382,9 @@ var pebblePaletteTints = [4]rl.Color{
 	rl.NewColor(220, 216, 208, 255),
 }
 
+// drawPebbleCluster paints a 2..4 low-profile pebble scatter (boulder base cube,
+// lighter "surface stone" tint), each member's footprint/height/yaw from a
+// per-pebble hash so it reads as ground detail, not dropped boulders.
 func drawPebbleCluster(assets Resources, cx, cz, groundY float32, tileHash uint32) {
 	if len(assets.rockProp.models) == 0 {
 		return
@@ -1750,36 +1392,25 @@ func drawPebbleCluster(assets Resources, cx, cz, groundY float32, tileHash uint3
 	baseModel := assets.rockProp.models[0]
 	rotationAxis := rl.NewVector3(0, 1, 0)
 
-	// 2..4 pebbles per cluster — small enough to read as a scatter, not a pile.
-	// Sum of two independent hash bits gives a 25% / 50% / 25% distribution
-	// for 2 / 3 / 4 — center-weighted so most clusters feel balanced.
+	// 2..4 per cluster, 25/50/25 center-weighted.
 	count := 2 + int(tileHash&0x01) + int((tileHash>>1)&0x01)
 
 	for i := 0; i < count; i++ {
-		// Salt the tile hash with the pebble index so each member looks
-		// independent. Same finalizer as the other render hashes (mix32).
+		// Salt with the index so each member looks independent.
 		ih := mix32(tileHash ^ uint32(i+1)*hashSalt)
 
-		// Sub-tile offset in [-0.55, 0.55] — pebbles spread across the tile,
-		// not bunched at the center.
 		ox := float32(int8(ih)) / scatterOffsetDivisor
 		oz := float32(int8(ih>>8)) / scatterOffsetDivisor
 
-		// Footprint and height vary independently. Heights are ~1/3 of
-		// footprint so the pebbles sit flat — see drawFloorDecoration's
-		// original comment about reading as walkable.
+		// Height ~1/3 of footprint so pebbles sit flat / walkable.
 		foot := 0.18 + float32((ih>>16)&0x07)*0.012   // 0.18 .. 0.27
 		hght := 0.07 + float32((ih>>20)&0x03)*0.012   // 0.07 .. 0.106
 		rot := float32((ih>>24)&0xff) * (360.0 / 256) // 0..360°
-		// Slight x/z asymmetry so each pebble's silhouette breaks alignment
-		// with its neighbors. Sourcing from a different hash bit keeps the
-		// asymmetry uncorrelated to size.
+		// x/z asymmetry from a different hash bit so it's uncorrelated to size.
 		stretch := 0.85 + float32((ih>>4)&0x07)*0.04 // 0.85 .. 1.13
 
-		// Y placement: the underlying cube is RockMeshBaseHeight tall and
-		// propModel's base part offsets it half its height to clear the
-		// ground. We draw the mesh directly, not via the prop, so we
-		// replicate that math: RockMeshBaseHalfHeight * hght.
+		// Replicate propModel's half-height ground offset since we draw the mesh
+		// directly: RockMeshBaseHalfHeight * hght.
 		pos := rl.NewVector3(cx+ox, groundY+RockMeshBaseHalfHeight*hght, cz+oz)
 		scale := rl.NewVector3(foot, hght, foot*stretch)
 		tint := pebblePaletteTints[(ih>>28)&0x03]
@@ -1789,9 +1420,7 @@ func drawPebbleCluster(assets Resources, cx, cz, groundY float32, tileHash uint3
 
 func DrawEnemies(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if g.Battle.Phase == core.BattleNone {
-		// Debug enemies-off hides field packs entirely. A battle in
-		// progress still draws (you'd only toggle mid-explore), but on
-		// the field the packs vanish so the map can be walked clean.
+		// Debug enemies-off hides field packs so the map can be walked clean.
 		if g.EnemiesDisabled {
 			return
 		}
@@ -1801,51 +1430,33 @@ func DrawEnemies(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	drawBattlePack(camera, g, assets)
 }
 
-// enemyBillboardY is the y-anchor for every enemy/pack billboard — an
-// empirically-tuned footing height (matches the billboard's half-height,
-// partyBillboardSize.Y below) so the sprite's bottom edge meets the floor
-// rather than floating or sinking. Named so the four call sites that used
-// to inline 0.68 can't drift.
+// enemyBillboardY is the y-anchor for every enemy/pack billboard — its
+// half-height so the sprite's bottom meets the floor.
 const enemyBillboardY = float32(0.68)
 
-// battleFormationCenterY is the vertical center enemy billboards render at
-// during battle — lifted above the walking-field enemyBillboardY so the
-// roster sits screen-centered under the narrow battle FOV (see the comment
-// in enemyDrawPosition). enemyFieldLift is the delta between the two; the
-// field draw adds it back for yOffset-grounded sprites whose yOffset was
-// calibrated against this battle center, so they plant on the floor in the
-// field instead of sinking by the lift amount.
+// battleFormationCenterY is the vertical center enemy billboards render at in
+// battle, lifted above enemyBillboardY so the roster sits screen-centered under
+// the narrow FOV. enemyFieldLift is the delta the field draw adds back for
+// yOffset-grounded sprites (calibrated against the battle center).
 const battleFormationCenterY = float32(1.0)
 const enemyFieldLift = battleFormationCenterY - enemyBillboardY
 
-// Party billboard sizes. partyBillboardSize is the idle silhouette; the
-// active actor bumps up to partyBillboardSizeActive for a soft "your
-// turn" emphasis. Named so the size and the active-state highlight
-// stay tunable in one place instead of grepping across world.go,
-// timing.go (which reads partyBillboardSize indirectly through
-// partySpritePosition's y-anchor), and any future minimap badge.
+// Party billboard sizes: idle silhouette + the active-actor "your turn" bump.
 var (
 	partyBillboardSize       = rl.NewVector2(0.38, enemyBillboardY)
 	partyBillboardSizeActive = rl.NewVector2(0.42, 0.72)
-	// partyActiveScale is the per-axis bump the active member's billboard gets,
-	// expressed as a ratio of the active size to the idle size. DrawPartySprites
-	// multiplies the member's (possibly author-overridden) base size by this so
-	// the "your turn" emphasis scales the tuned sprite rather than snapping to a
-	// fixed constant — and reproduces partyBillboardSizeActive exactly when the
-	// base is the default partyBillboardSize.
+	// partyActiveScale is the active/idle size ratio; DrawPartySprites multiplies
+	// the (possibly overridden) base size by it so the bump scales the tuned
+	// sprite and reproduces partyBillboardSizeActive when the base is default.
 	partyActiveScale = rl.NewVector2(partyBillboardSizeActive.X/partyBillboardSize.X, partyBillboardSizeActive.Y/partyBillboardSize.Y)
 )
 
-// drawFieldPacks renders one billboard per pack — the highest-tier member,
-// at the pack's authored tile. Empty/all-dead packs are skipped (they're
-// cleaned up by the battle-win path anyway).
+// drawFieldPacks renders one billboard per pack (the highest-tier member, at the
+// pack's tile). Empty/all-dead packs are skipped.
 func drawFieldPacks(camera rl.Camera3D, g *core.GameState, assets Resources) {
-	// Distance fog for billboards goes through a custom fragment
-	// shader — multiplicative tint (the only knob raylib's billboard
-	// draw exposes) can darken or color-filter but can't lerp
-	// toward the fog color. beginBillboardFogPass uploads the fog
-	// uniforms and switches into the shader; the returned func is
-	// the matching EndShaderMode.
+	// Billboard distance fog needs a custom shader — multiplicative tint (raylib's
+	// only billboard knob) can't lerp toward the fog color. beginBillboardFogPass
+	// uploads the uniforms; the returned func is the matching EndShaderMode.
 	defer beginBillboardFogPass(camera, g, assets)()
 	for _, pack := range g.Packs {
 		if !core.PackAlive(pack) {
@@ -1855,13 +1466,8 @@ func drawFieldPacks(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		if !ok {
 			continue
 		}
-		// Read the interpolated visual coords directly — placePacks
-		// seeds them to the tile center, TickPackAnimations eases
-		// them mid-step, and engagement/win paths snap them. No
-		// fallback to tileWorldPos is needed; pack.X/Z is always
-		// authoritative for the field render.
-		// StandGroundYAt(pack.Level) keeps a pack on the surface it walks; on a
-		// heightfield pack.Level is the column top, so this equals StandGroundY.
+		// pack.X/Z is always authoritative (seeded + eased + snapped elsewhere).
+		// StandGroundYAt(pack.Level) keeps a pack on the surface it walks.
 		groundY := g.Area.StandGroundYAt(pack.TileX, pack.Level, pack.TileZ)
 		position := rl.NewVector3(pack.X, enemyBillboardY+groundY, pack.Z)
 		if visual.shadowRadius > 0 {
@@ -1870,12 +1476,8 @@ func drawFieldPacks(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		}
 		billboardPos := position
 		billboardPos.Y += visual.yOffset
-		// yOffset is calibrated against the lifted battle formation center;
-		// the field anchor sits enemyFieldLift lower, so a grounded sprite
-		// would sink by that delta here. Add it back (only matters when
-		// yOffset is set — procedural sprites keep yOffset 0 and are
-		// unaffected) so the rat plants on the field floor exactly as it
-		// does in battle.
+		// yOffset is calibrated against the lifted battle center; the field anchor
+		// sits enemyFieldLift lower, so add it back (only when yOffset is set).
 		if visual.yOffset != 0 {
 			billboardPos.Y += enemyFieldLift
 		}
@@ -1883,11 +1485,9 @@ func drawFieldPacks(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	}
 }
 
-// billboardPlacement bundles the derived draw positions for a per-kind enemy
-// billboard once depthOffset / markerOffset / yOffset are applied. Shared by
-// the battle roster draw (drawBattlePack) and the editor Foe Visualizer preview
-// (DrawFoePreview) so the placement SEQUENCE both depend on lives in one place.
-// (drawFieldPacks uses a different ground-anchored, no-chevron path.)
+// billboardPlacement bundles the derived draw positions for a per-kind billboard
+// once depthOffset/markerOffset/yOffset are applied. Shared by drawBattlePack and
+// the editor Foe Visualizer so the placement sequence lives in one place.
 type billboardPlacement struct {
 	base    rl.Vector3 // formation position after the depthOffset push-back
 	shadowX float32    // contact-disc footprint (camera-relative shadowOffset folded in)
@@ -1896,10 +1496,9 @@ type billboardPlacement struct {
 	sprite  rl.Vector3 // billboard center (yOffset applied)
 }
 
-// resolveBillboardPlacement applies v.depthOffset (push back along camera-
-// forward) to position, then derives the contact-shadow footprint, the target-
-// chevron anchor (markerY/X), and the sprite center (yOffset) from that
-// adjusted base — the exact ordering drawBattlePack and DrawFoePreview share.
+// resolveBillboardPlacement applies depthOffset, then derives the shadow
+// footprint, chevron anchor (markerY/X), and sprite center (yOffset) — the
+// ordering drawBattlePack and DrawFoePreview share.
 func resolveBillboardPlacement(camera rl.Camera3D, position rl.Vector3, v *enemyVisual) billboardPlacement {
 	base := cameraRelativeOffset(camera, position, 0, 0, v.depthOffset)
 	sx, sz := shadowFootprint(camera, base, v)
@@ -1912,13 +1511,10 @@ func resolveBillboardPlacement(camera rl.Camera3D, position rl.Vector3, v *enemy
 // drawBattlePack renders every member of the active pack in battle
 // formation: living and recently-defeated (still fading) alike.
 func drawBattlePack(camera rl.Camera3D, g *core.GameState, assets Resources) {
-	// Same fog-shader gate as drawFieldPacks — billboards recede
-	// with the world geometry around them.
 	defer beginBillboardFogPass(camera, g, assets)()
 	members := core.BattleMembers(g)
-	// Resolve every member's formation slot in one O(n) pass, then index it in
-	// the draw loop — instead of calling enemyRowSlot per member (which re-walked
-	// the whole pack each time, making this loop O(n²)).
+	// Resolve every slot in one O(n) pass and index it, vs a per-member
+	// enemyRowSlot that re-walked the pack (O(n²)).
 	placements := enemyRowPlacements(members)
 	for i := range members {
 		enemy := &members[i]
@@ -1929,71 +1525,45 @@ func drawBattlePack(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		if !enemy.Alive && enemy.DeathFade <= 0 {
 			continue
 		}
-		// Lay the enemy out by its formation row (front 3 / back 4 staggered),
-		// resolving its slot among the visible members of that row.
 		p := placements[i]
 		position := enemyFormationPos(camera, g, p.row, p.slot, p.count, enemy)
-		// Per-kind depth/marker/yOffset placement (depth push-back for the
-		// square Feral Rat PNG, the chevron anchor, the contact-shadow
-		// footprint, and the lowered sprite center) all derive from one shared
-		// helper so battle + the editor Foe Visualizer can't drift on ordering.
+		// Per-kind depth/marker/yOffset placement via the shared helper.
 		place := resolveBillboardPlacement(camera, position, &visual)
 		tint := rl.White
 		if !enemy.Alive {
 			alpha := uint8(220 * core.Clamp(float64(enemy.DeathFade/core.DeathFadeDuration), 0, 1))
 			tint = colorWithAlpha(rl.White, alpha)
 		}
-		// Yellow target chevron + tint render only while the player is
-		// in the enemy-target picker. targetingEnemy gates on
-		// Phase==BattlePlayer so the chevron drops the moment the
-		// timing bar arms — shared with the roster row's `targetable`
-		// flag so both yellow indicators behave identically. The AoE
-		// preview (an AoE skill highlighted in the Skill submenu) chevrons
-		// EVERY living enemy so the player sees the cast hits the whole
-		// line, not one target — same body, broader guard.
+		// Yellow chevron + tint only in the enemy-target picker (targetingEnemy
+		// gates on Phase==BattlePlayer so it drops when the timing bar arms). The
+		// AoE preview chevrons EVERY living enemy so the line read is clear.
 		if enemy.Alive && ((targetingEnemy(g) && i == g.Battle.EnemyIndex) || aoeEnemyTargetPreview(g)) {
 			tint = tintEnemyTargeted
 			drawTargetChevron(camera, place.chevron, visual.effectiveMarkerScale())
 		}
-		// During BattleEnemyTiming the warm tint on the attacker carries
-		// the "this one is swinging" read; the red pyramid moved over to
-		// the targeted party member (drawEnemyAttackTargetMarker) so the
-		// player sees "they're hitting ME" instead of "they're acting."
+		// In BattleEnemyTiming the warm attacker tint reads "this one is swinging";
+		// the red pyramid moved to the targeted party member.
 		if enemy.Alive && isEnemyAttackerSlot(g, i) {
 			tint = tintEnemyAttacker
 		}
 		if enemy.DamageFlash > 0 {
 			tint = core.FlashTint(tint, enemy.DamageFlash)
 		}
-		// Fold in the per-kind base tint last, so a tinted sprite stays
-		// proportionally tinted in every combat state (idle / targeted /
-		// attacking / flashing). Untinted kinds resolve to White (no-op).
+		// Fold in the per-kind base tint last (untinted = White, no-op).
 		tint = tintMul(tint, visual.resolveTint())
-		// Soft contact disc under the billboard so the sprite reads as
-		// planted rather than floating on the lighting gradient. Drawn
-		// before the billboard (ground first, then the upright sprite
-		// over it) and only for kinds that opt in via shadowRadius. The
-		// disc keeps the default material shader, so the active
-		// billboard-fog BeginShaderMode doesn't tint it — same unlit
-		// behaviour the prop shadows rely on under the world lighting pass.
+		// Contact disc before the billboard, only for opt-in kinds. Keeps the
+		// default shader so the billboard-fog pass doesn't tint it.
 		if visual.shadowRadius > 0 {
 			drawGroundShadow(place.shadowX, place.shadowZ, visual.shadowRadius)
 		}
-		// Distance fog is applied by the active billboard-fog shader
-		// (BeginShaderMode at the top of this function), not by a
-		// CPU tint pass — multiplicative tint can't lerp toward the
-		// fog color, only darken or color-filter the texture.
+		// Distance fog comes from the billboard-fog shader, not a CPU tint.
 		drawTextureBillboard(camera, visual.texture, place.sprite, visual.size, tint)
 	}
 }
 
-// aoeEnemyTargetPreview reports whether the player is highlighting an
-// all-enemy AoE skill in the Skill submenu — the cue to fan the target
-// chevron across every living enemy so the AoE reads before it fires.
-// Gated on Phase==BattlePlayer + ActionMode==ActionSkillMenu so it only
-// previews during selection, not once the timing bar arms. Reads the live
-// g.Battle.SkillMenuList (no scratch buffer of its own) so it can't diverge from
-// the cursor's list.
+// aoeEnemyTargetPreview reports whether an all-enemy AoE skill is highlighted in
+// the Skill submenu (the cue to chevron every living enemy). Gated on
+// Phase==BattlePlayer + ActionSkillMenu, reading the live SkillMenuList.
 func aoeEnemyTargetPreview(g *core.GameState) bool {
 	if g.Battle.Phase != core.BattlePlayer || g.Battle.ActionMode != core.ActionSkillMenu {
 		return false
@@ -2001,11 +1571,9 @@ func aoeEnemyTargetPreview(g *core.GameState) bool {
 	if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
 		return false
 	}
-	// Index the SAME list the menu cursor walks (g.Battle.SkillMenuList): when the
-	// DebugAllSkills toggle is on, refreshSkillMenuBuf builds that list from
-	// PlayerCastableSkills, not the member's learned set — re-deriving via
-	// LearnedSkillsInto here would index a different-length/ordered list and
-	// preview the wrong skill (or read out of range and silently bail).
+	// Index the SAME list the cursor walks (SkillMenuList) — re-deriving the
+	// learned set here would index a different list (DebugAllSkills) and preview
+	// the wrong skill.
 	skills := g.Battle.SkillMenuList
 	idx := g.Battle.SkillMenuIndex
 	if idx < 0 || idx >= len(skills) {
@@ -2014,8 +1582,8 @@ func aoeEnemyTargetPreview(g *core.GameState) bool {
 	return core.SkillTargetsAllEnemies(skills[idx])
 }
 
-// isEnemyAttackerSlot reports whether the given active-pack member slot
-// is the one currently lunging at the party (during BattleEnemyTiming).
+// isEnemyAttackerSlot reports whether `slot` is the one lunging at the party
+// (during BattleEnemyTiming).
 func isEnemyAttackerSlot(g *core.GameState, slot int) bool {
 	if g.Battle.Phase != core.BattleEnemyTiming {
 		return false
@@ -2023,17 +1591,10 @@ func isEnemyAttackerSlot(g *core.GameState, slot int) bool {
 	return g.Battle.EnemyAttacker == slot
 }
 
-// enemyAttackTarget returns the party-member slot the currently lunging
-// enemy will hit when the defend bar resolves, plus ok=false when no
-// marker should show. Drives the red "incoming hit" marker above the
-// threatened head during BattleEnemyTiming. Every current enemy action
-// (plain melee, Firebolt, Sleep, Ingest) is single-target and shares
-// core.PeekNextEnemyTarget — the same non-mutating peek the battle side
-// commits via pickEnemyAttackTarget — so the marker can't drift from who
-// actually gets hit. Returns a scalar (not a per-frame []int) to stay
-// allocation-free on the draw path; a future AoE enemy skill would change
-// this to a set + the caller's single `==` check back to a membership
-// test.
+// enemyAttackTarget returns the party slot the lunging enemy will hit (ok=false
+// when no marker should show), driving the red "incoming hit" marker during
+// BattleEnemyTiming. Shares core.PeekNextEnemyTarget with the commit path so the
+// marker can't drift from who's actually hit.
 func enemyAttackTarget(g *core.GameState) (int, bool) {
 	if g.Battle.Phase != core.BattleEnemyTiming {
 		return -1, false
@@ -2045,12 +1606,9 @@ func enemyAttackTarget(g *core.GameState) (int, bool) {
 	return target, true
 }
 
-// markerStyle bundles every parameter that distinguishes one selector
-// pyramid from another: where to anchor its tip relative to the unit's
-// billboard, its silhouette (height + base radius), tint, and rotation
-// phase offset (so two markers on screen at once don't lock-step). One
-// row per gameplay role keeps the three call sites visually consistent
-// — change "the enemy attacker marker is too tall" in one place.
+// markerStyle bundles the parameters distinguishing one selector pyramid: tip
+// anchor, silhouette (height + base radius), tint, and rotation phase (so two
+// don't lock-step). One row per gameplay role.
 type markerStyle struct {
 	tipYOffset float32
 	height     float32
@@ -2059,31 +1617,20 @@ type markerStyle struct {
 	phase      float32
 }
 
-// Marker sizes resized for the narrower battle FOV (72° vs 112°
-// exploration). At the wider FOV the pyramids needed to be a real
-// silhouette to read at a distance; the battle FOV magnifies them
-// ~1.5× so the old sizes overpowered the sprite. New sizes target
-// roughly 25% the height of a party/enemy billboard — readable as
-// a cursor, not a billboard accessory.
+// Marker sizes target ~25% of a billboard's height — readable as a cursor under
+// the magnifying battle FOV, not a billboard accessory.
 var (
-	// markerEnemyTarget is the player's currently-selected enemy.
-	// Yellow — paired with the in-roster row highlight via
-	// targetingEnemy().
+	// markerEnemyTarget: the selected enemy (yellow, paired with the roster row).
 	markerEnemyTarget = markerStyle{
-		// Sits lower (nearer the enemy's head, not floating high above)
-		// and a touch bigger + fully opaque so the current target reads
-		// at a glance — but kept modest so it doesn't overpower the
-		// sprite. Per-kind nudges (markerYOffset / markerXOffset on
-		// enemyVisual) fine-tune where it lands over each enemy.
+		// Sits low + fully opaque so the target reads, but modest. Per-kind
+		// markerY/XOffset fine-tune where it lands.
 		tipYOffset: 0.56,
 		height:     0.20,
 		baseRadius: 0.085,
 		color:      selectorEnemyTargetColor,
 		phase:      0.0,
 	}
-	// markerFriendlyTarget is the player's currently-selected ally
-	// (heal / item targeting). Green, slightly smaller than the
-	// enemy markers since party billboards sit closer to the camera.
+	// markerFriendlyTarget: the selected ally (green, smaller — closer to camera).
 	markerFriendlyTarget = markerStyle{
 		tipYOffset: smallMarkerTipYOffset,
 		height:     smallMarkerHeight,
@@ -2091,10 +1638,8 @@ var (
 		color:      selectorFriendlyTargetColor,
 		phase:      0.3,
 	}
-	// markerEnemyAttackTarget tags the party member(s) the lunging enemy
-	// is about to hit — drawn above the threatened head while the defend
-	// bar is up. Shares the small-marker dims with markerFriendlyTarget so
-	// the two indicators read as visually paired even when the colors differ.
+	// markerEnemyAttackTarget tags the party member the lunging enemy will hit
+	// while the defend bar is up. Shares the small-marker dims (paired look).
 	markerEnemyAttackTarget = markerStyle{
 		tipYOffset: smallMarkerTipYOffset,
 		height:     smallMarkerHeight,
@@ -2104,33 +1649,23 @@ var (
 	}
 )
 
-// Shared silhouette for the two party-side selector pyramids (friendly target
-// + enemy-attack target). They sit closer to the camera than the enemy-target
-// marker, so they're a touch smaller; pinning the dims here keeps the pair from
-// drifting when one is tuned.
+// Shared silhouette for the two party-side selector pyramids (closer to camera,
+// so a touch smaller); pinned here so the pair can't drift.
 const (
 	smallMarkerTipYOffset = float32(0.36)
 	smallMarkerHeight     = float32(0.13)
 	smallMarkerBaseRadius = float32(0.055)
 )
 
-// drawMarkerOnTop draws a selector pyramid on a depth-disabled "overlay"
-// layer so it ALWAYS renders above world geometry and billboards — it can
-// never clip into the unit it hovers over or scenery between it and the
-// camera. rlgl batches draws, so the depth-state toggle only lands cleanly
-// when the active batch is flushed before AND after (DrawRenderBatchActive);
-// depth WRITES are disabled too so the marker can't occlude billboards drawn
-// after it in the same pass. State is restored so later draws are unaffected.
+// drawMarkerOnTop draws a selector pyramid on a depth-disabled overlay layer so
+// it always renders above world geometry and never clips.
 func drawMarkerOnTop(unitPos rl.Vector3, style markerStyle) {
 	drawDepthIndependent(func() { drawMarker(unitPos, style) })
 }
 
-// drawDepthIndependent runs draw with depth test AND depth writes disabled, so
-// whatever it paints renders above all world geometry and can't occlude later
-// draws in the same pass. rlgl batches, so the active batch is flushed before
-// AND after the toggle for it to land cleanly; state is restored afterward.
-// Shared by the selector pyramid (drawMarkerOnTop) and the visualizer anchor
-// gizmos (drawAnchorGizmo).
+// drawDepthIndependent runs draw with depth test AND writes disabled so it paints
+// above all geometry and can't occlude later draws. rlgl batches, so the active
+// batch is flushed before AND after the toggle; state is restored.
 func drawDepthIndependent(draw func()) {
 	rl.DrawRenderBatchActive() // flush prior depth-tested geometry
 	rl.DisableDepthTest()
@@ -2141,10 +1676,8 @@ func drawDepthIndependent(draw func()) {
 	rl.EnableDepthTest()
 }
 
-// drawMarker is the single entry point for every selector-pyramid call
-// site. `unitPos` is the unit's billboard center; the helper anchors
-// the pyramid tip according to the style's tipYOffset and forwards the
-// rest to drawSelectorPyramid.
+// drawMarker anchors the pyramid tip at unitPos + style.tipYOffset and forwards
+// to drawSelectorPyramid.
 func drawMarker(unitPos rl.Vector3, style markerStyle) {
 	tip := rl.NewVector3(unitPos.X, unitPos.Y+style.tipYOffset, unitPos.Z)
 	drawSelectorPyramid(tip, style.height, style.baseRadius, style.color, style.phase)
@@ -2160,11 +1693,8 @@ func enemyVisualFor(assets Resources, kind core.EnemyKind) (enemyVisual, bool) {
 	return enemyVisual{}, false
 }
 
-// visualAt indexes a dense kind/class→visual slice (enemyVisuals / partyVisuals)
-// with a bounds guard, returning (zero, false) for an out-of-range index —
-// the slice-backed replacement for the old map comma-ok read, so the lookup is
-// an array index, not a hash. Shared by enemyVisualFor / partyVisualFor and the
-// editor's live-preview read/write sites.
+// visualAt indexes a dense kind/class→visual slice with a bounds guard, returning
+// (zero, false) out of range.
 func visualAt(s []enemyVisual, idx int) (enemyVisual, bool) {
 	if idx < 0 || idx >= len(s) {
 		return enemyVisual{}, false
@@ -2172,20 +1702,14 @@ func visualAt(s []enemyVisual, idx int) (enemyVisual, bool) {
 	return s[idx], true
 }
 
-// drawTargetChevron draws the yellow enemy-target selector pyramid at position,
-// scaled by the struck kind's per-kind markerScale (1 = default size). Folding
-// the scale into a local copy of the shared markerEnemyTarget style keeps the
-// style table itself per-role (not per-kind) while letting a big foe wear a
-// bigger cursor — only this enemy-side marker is kind-scaled; the friendly /
-// incoming-attack markers keep their fixed role sizes.
+// drawTargetChevron draws the yellow enemy-target pyramid, scaled by the kind's
+// markerScale (1 = default). Only this enemy-side marker is kind-scaled.
 func drawTargetChevron(camera rl.Camera3D, position rl.Vector3, scale float32) {
 	drawScaledMarker(position, markerEnemyTarget, scale)
 }
 
-// drawScaledMarker draws a marker-style cursor at position, optionally scaling a
-// copy of baseStyle's height/baseRadius by scale (scale 0 or 1 leaves it at the
-// role's default size). The shared body of drawTargetChevron and
-// drawFriendlyTargetMarker, which differ only by which markerStyle they pass.
+// drawScaledMarker draws a marker at position, scaling a copy of baseStyle by
+// scale (0 or 1 = default size). Shared by drawTargetChevron + the friendly one.
 func drawScaledMarker(position rl.Vector3, baseStyle markerStyle, scale float32) {
 	style := baseStyle
 	if scale > 0 && scale != 1 {
@@ -2195,19 +1719,11 @@ func drawScaledMarker(position rl.Vector3, baseStyle markerStyle, scale float32)
 	drawMarkerOnTop(position, style)
 }
 
-// drawSelectorPyramid renders the JRPG-classic floating cursor: a square-
-// base pyramid hanging tip-down over the unit, slowly spinning around the
-// vertical axis through its tip. The tip is anchored at `tip`; the base
-// (4 corners forming a square) sits `height` above the tip, `baseRadius`
-// out from the tip's vertical axis. `phase` offsets the rotation so two
-// markers on screen at once don't lock-step.
-//
-// Each face gets its own shade so the pyramid reads as a 3D solid instead
-// of a flat silhouette: top cap brightest (it's the "lit from above" face),
-// side faces walk a brighter→dimmer→brighter→dimmer pattern around the
-// pyramid so the spin gives a "rotating shaded crystal" feel. All faces
-// are wound CCW-from-outside so backface culling stays on — without that
-// the back faces overdraw the front and z-fight produced flicker.
+// drawSelectorPyramid renders the floating tip-down cursor over a unit, slowly
+// spinning. Base sits `height` above `tip`, `baseRadius` out; `phase` offsets the
+// rotation so two markers don't lock-step. Per-face shading reads as a 3D solid;
+// all faces are wound CCW-from-outside so backface culling stays on (else the back
+// faces z-fight the front).
 func drawSelectorPyramid(tip rl.Vector3, height, baseRadius float32, col rl.Color, phase float32) {
 	t := rl.GetTime()
 	yaw := t*0.9 + float64(phase) // gentler spin than before
@@ -2226,54 +1742,39 @@ func drawSelectorPyramid(tip rl.Vector3, height, baseRadius float32, col rl.Colo
 		)
 	}
 
-	// Per-face shading. Sides walk light→mid→dim→mid as you go around the
-	// base, and the cap is the brightest face. The pattern rotates with the
-	// pyramid (since the corners are recomputed from yaw each frame), so a
-	// fixed camera sees a rotating shaded solid rather than a flat blob.
+	// Per-face shading: sides walk light→mid→dim→mid, cap brightest. Rotates with
+	// the pyramid so a fixed camera sees a shaded solid.
 	sideShades := [4]float32{1.05, 0.85, 0.65, 0.85}
 	for i := 0; i < 4; i++ {
 		j := (i + 1) % 4
-		// Side face viewed from outside: tip at bottom, c[i] upper-left,
-		// c[i+1] upper-right relative to that view. tip → c[i+1] → c[i]
-		// is CCW from outside (front face for OpenGL with +Y up).
+		// tip → c[i+1] → c[i] is CCW from outside (front face, +Y up).
 		rl.DrawTriangle3D(tipP, corners[j], corners[i], shadeColor(col, sideShades[i]))
 	}
-	// Top cap (square base, normal +Y). Corners go CCW around +Y when
-	// listed 0,1,2,3 (cos/sin sweep), so 0→1→2 and 0→2→3 are CCW from
-	// above — front faces.
+	// Top cap (normal +Y); 0→1→2 / 0→2→3 are CCW from above.
 	capCol := shadeColor(col, 1.18)
 	rl.DrawTriangle3D(corners[0], corners[1], corners[2], capCol)
 	rl.DrawTriangle3D(corners[0], corners[2], corners[3], capCol)
 }
 
-// shadeColor multiplies a color's RGB by factor (clamped 0..255) while
-// preserving alpha. Used to derive shaded variants of a base tint without
-// authoring a new color per face.
+// shadeColor multiplies a color's RGB by factor (clamped), preserving alpha.
 func shadeColor(c rl.Color, factor float32) rl.Color {
 	return mapRGB(c, func(v uint8) uint8 {
 		return core.ClampByte(int(float32(v) * factor))
 	})
 }
 
-// ShadeColor is the exported form of shadeColor for the editor's 3D view, which
-// can't reach the unexported helper. Multiplies RGB by factor (clamped),
-// preserving alpha — the one shading primitive for the render + editor surface.
+// ShadeColor is the exported form of shadeColor for the editor's 3D view.
 func ShadeColor(c rl.Color, factor float32) rl.Color { return shadeColor(c, factor) }
 
 func DrawPartySprites(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if g.Battle.Phase == core.BattleNone {
 		return
 	}
-	// Same fog-shader gate as drawBattlePack so the party
-	// billboards receive the same distance fog the enemies they
-	// face do.
 	defer beginBillboardFogPass(camera, g, assets)()
 	victoryDance := victoryDanceElapsed(g)
 	incomingSlot, hasIncoming := enemyAttackTarget(g)
 	for i := range g.Party {
-		// Ingested members are tucked away inside a mantrap — don't
-		// draw their billboard on the field. The status badge on the
-		// party card is the player's "where did they go?" signal.
+		// Ingested members are tucked inside a mantrap — don't draw them.
 		if g.Party[i].Ingested {
 			continue
 		}
@@ -2286,9 +1787,7 @@ func DrawPartySprites(camera rl.Camera3D, g *core.GameState, assets Resources) {
 			memberDance = victoryDance
 		}
 		position := partySpritePosition(camera, g.Party, i, g.Party[i].AttackBump, memberDance, g.Party[i].HitKnockback)
-		// Per-class depth / yOffset / marker / shadow placement all derive from
-		// the same shared helper the foe billboards and the Party Visualizer
-		// preview use, so authored alignment can't drift between battle and editor.
+		// Per-class placement via the shared helper (no battle/editor drift).
 		place := resolveBillboardPlacement(camera, position, &visual)
 		size := visual.size
 		tint := rl.White
@@ -2305,45 +1804,29 @@ func DrawPartySprites(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		if g.Party[i].DamageFlash > 0 {
 			tint = core.FlashTint(tint, g.Party[i].DamageFlash)
 		}
-		// Fold in the per-class authored base tint last (untinted classes resolve
-		// to White = no-op), so a tinted member stays proportionally tinted in
-		// every combat state — symmetric with the foe-side tintMul.
+		// Fold in the per-class base tint last (untinted = White, no-op).
 		tint = tintMul(tint, visual.resolveTint())
-		// Optional authored contact disc, drawn before the billboard like the
-		// foe side. Default party visual carries shadowRadius 0 (no disc), so the
-		// existing look is unchanged until an author opts one in.
+		// Optional authored contact disc before the billboard (default radius 0).
 		if visual.shadowRadius > 0 {
 			drawGroundShadow(place.shadowX, place.shadowZ, visual.shadowRadius)
 		}
-		// Distance fog is applied by the active billboard-fog shader
-		// (BeginShaderMode at the top of this function). The "your turn"
-		// read lives in the party card now — lifted + brightened, others
-		// dimmed (see DrawPartyRibbon). The in-world additive glow and the
-		// floating pyramid were removed: they read as noise over the
-		// sprite. The active fighter still gets the subtle warm tint + size
-		// bump applied above so it reads in 3D too.
+		// Distance fog comes from the billboard-fog shader; the "your turn" read
+		// lives in the party card now (plus the warm tint + bump above).
 		drawTextureBillboard(camera, visual.texture, place.sprite, size, tint)
-		// Same gate as the enemy chevron: target marker only during the
-		// menu phase, NOT during the timing bar that follows the
-		// confirm. inPlayerTurn includes BattleAttackTiming and would
-		// linger the marker through the press. Markers anchor to the authored
-		// chevron position (markerY/XOffset folded in by resolveBillboardPlacement).
+		// Friendly marker only in the menu phase, not the timing bar that follows
+		// (inPlayerTurn includes BattleAttackTiming and would linger it).
 		if g.Battle.Phase == core.BattlePlayer && targetingAlly(g) && i == g.Battle.PartyTarget && g.Party[i].HP > 0 {
 			drawFriendlyTargetMarker(camera, place.chevron, visual.effectiveMarkerScale())
 		}
-		// Red "incoming hit" marker above the party member the lunging
-		// enemy is about to strike. Phase gating lives in
-		// enemyAttackTarget — it returns ok=false outside BattleEnemyTiming.
+		// Red "incoming hit" marker; enemyAttackTarget gates the phase.
 		if g.Party[i].HP > 0 && hasIncoming && i == incomingSlot {
 			drawEnemyAttackTargetMarker(camera, place.chevron)
 		}
 	}
 }
 
-// partyVisualFor returns the billboard visual for a class, false when the class
-// has no usable texture (mirrors enemyVisualFor's guard). The party table is
-// fully populated at load (every class gets at least the procedural fallback),
-// so the false branch is defensive.
+// partyVisualFor returns the billboard visual for a class (false when no usable
+// texture — defensive, the table is fully populated at load).
 func partyVisualFor(assets Resources, class core.PartyClass) (enemyVisual, bool) {
 	if v, ok := visualAt(assets.partyVisuals, int(class)); ok && v.texture.ID != 0 {
 		return v, true
@@ -2351,11 +1834,8 @@ func partyVisualFor(assets Resources, class core.PartyClass) (enemyVisual, bool)
 	return enemyVisual{}, false
 }
 
-// drawFriendlyTargetMarker draws the ally-target selector pyramid at position,
-// scaled by the member's per-class markerScale (1 = default size) — the
-// friendly twin of drawTargetChevron, so the Party Visualizer's "Cursor Sz"
-// slider is honored in battle as well as the preview instead of being a dead
-// knob. Folds the scale into a local copy of the shared style (kept per-role).
+// drawFriendlyTargetMarker draws the ally-target pyramid scaled by the class's
+// markerScale — the friendly twin of drawTargetChevron.
 func drawFriendlyTargetMarker(camera rl.Camera3D, position rl.Vector3, scale float32) {
 	drawScaledMarker(position, markerFriendlyTarget, scale)
 }
@@ -2371,33 +1851,28 @@ func partySpritePosition(camera rl.Camera3D, party []core.PartyMember, index int
 	if index >= 0 && index < len(party) {
 		class = party[index].Class
 	}
-	// Layout is driven by the member's STANDING home slot (HomeRow/HomeCol), NOT
-	// the live combat row — so the party always renders as a stable 2×2 trapezoid.
-	// In-battle Reposition / ambush change the *gameplay* row (reach) only; they
-	// don't reflow the sprites, so a row never collapses to an inline x x x x.
+	// Layout uses the STANDING home slot (HomeRow/HomeCol), not the live combat
+	// row, so the party always renders as a stable 2×2 trapezoid (Reposition/ambush
+	// change reach only, not the sprites).
 	visRow, visCol := core.RowFront, core.ColLeft
 	if index >= 0 && index < len(party) {
 		visRow, visCol = party[index].HomeRow, party[index].HomeCol
 	}
-	// 2×2 trapezoid that widens toward the viewer. The shape comes mainly from the
-	// WIDTH difference (front pair tight, back pair wide) so it reads clearly even
-	// at a modest depth gap — which keeps both ranks at sane, ON-SCREEN distances
-	// (the back rank must not crowd the lens or it clips out of view):
-	//       x  x      (front: tight, slightly higher/further)
-	//     x      x    (back: wide, slightly lower/nearer)
+	// 2×2 trapezoid widening toward the viewer (mostly via width so both ranks
+	// stay on-screen): front tight/further, back wide/nearer.
 	baseY := float32(0.58)
 	rowForward := float32(1.55) // front rank — off the foes
 	rowSpacing := float32(0.95) // front: tight pair
 	if visRow == core.RowBack {
-		rowForward = 1.12 // nearer the camera, but still well in frame (visible)
-		rowSpacing = 1.5  // back: only a touch wider than the front (gentle trapezoid)
+		rowForward = 1.12 // nearer the camera, still in frame
+		rowSpacing = 1.5  // back: only a touch wider (gentle trapezoid)
 	}
 	base := rl.NewVector3(
 		camera.Position.X+forward.X*rowForward,
 		baseY,
 		camera.Position.Z+forward.Z*rowForward,
 	)
-	// Left/right column around the formation axis (the home slot is a true 2×2).
+	// Left/right column around the formation axis.
 	colSign := float32(-0.5)
 	if visCol == core.ColRight {
 		colSign = 0.5
@@ -2406,11 +1881,8 @@ func partySpritePosition(camera rl.Camera3D, party []core.PartyMember, index int
 	depth := float32(0)
 	danceSide, danceDepth, danceHeight, _ := victoryDanceMotion(class, victoryDance)
 	bumpDepth := core.BumpOffset(bump, 0.22)
-	// Reactionary knockback: push the member TOWARD the camera (i.e.
-	// SUBTRACT forward) when they just took a hit. AttackBump adds
-	// forward (lunge into the enemy); HitKnockback subtracts forward
-	// (recoil away from the enemy). The two timers shouldn't overlap
-	// in practice — a member is either swinging or being swung at.
+	// AttackBump adds forward (lunge); HitKnockback subtracts (recoil toward the
+	// camera). The two timers don't overlap in practice.
 	knockDepth := core.KnockbackOffset(knockback, core.HitKnockbackDist)
 	return rl.NewVector3(
 		base.X+right.X*(offset+danceSide)+forward.X*(depth+bumpDepth-knockDepth+danceDepth),
@@ -2434,17 +1906,12 @@ func victoryDanceMotion(class core.PartyClass, elapsed float32) (float32, float3
 	return partyClassPresentationFor(class).dance(elapsed)
 }
 
-// enemyDrawPosition returns the 3D position to render the given member of
-// the active pack at, resolving its visible slot from g. This is the
-// single-shot path used by popup / VFX anchors; the per-frame battle draw
-// loop (drawBattlePack) precomputes the slot mapping once and calls
-// enemyFormationPos directly so it doesn't re-walk the pack per enemy
-// (which made the loop O(n²)). Takes g by pointer so the per-enemy call
-// doesn't copy the whole GameState.
+// enemyDrawPosition returns where to render a pack member, resolving its slot
+// from g. The single-shot path for popup/VFX anchors; the battle loop precomputes
+// slots and calls enemyFormationPos directly. g by pointer to avoid a copy.
 func enemyDrawPosition(camera rl.Camera3D, g *core.GameState, slot int, enemy *core.Enemy) rl.Vector3 {
 	if g.Battle.Phase == core.BattleNone || g.Battle.ActivePack < 0 {
-		// Fallback for any stray caller during a phase transition; use the
-		// active pack's tile if we still know it.
+		// Fallback during a phase transition.
 		pack := rl.NewVector3(0, enemyBillboardY, 0)
 		if g.Battle.ActivePack >= 0 && g.Battle.ActivePack < len(g.Packs) {
 			p := g.Packs[g.Battle.ActivePack]
@@ -2456,15 +1923,9 @@ func enemyDrawPosition(camera rl.Camera3D, g *core.GameState, slot int, enemy *c
 	return enemyFormationPos(camera, g, row, rowSlot, rowCount, enemy)
 }
 
-// enemyFormationPos is the formation-placement math for one enemy given its
-// already-resolved (visibleSlot, count). Split out of enemyDrawPosition so the
-// per-frame battle loop can compute the slot mapping ONCE (a single O(n) pass)
-// and call this per member, instead of each call re-walking the pack to find
-// its slot — turning a per-frame O(n²) into O(n).
-// enemyRowSlot resolves enemy `index`'s formation placement among the VISIBLE
-// (alive or death-fading) pack members: its row, left-to-right slot within that
-// row, and the row's visible count. Foes lay out by their live row (the shunt
-// keeps the front packed); the party instead uses its stable home 2×2 slot.
+// enemyRowSlot resolves enemy `index`'s placement among the VISIBLE (alive or
+// death-fading) members: its row, left-to-right slot, and the row's visible count.
+// Foes lay out by their live row (the shunt keeps the front packed).
 func enemyRowSlot(members []core.Enemy, index int) (row core.Row, slot, count int) {
 	if index < 0 || index >= len(members) {
 		return core.RowFront, 0, 1
@@ -2485,26 +1946,20 @@ func enemyRowSlot(members []core.Enemy, index int) (row core.Row, slot, count in
 	return row, slot, count
 }
 
-// enemyPlacement is one member's resolved formation placement: its row, its
-// left-to-right slot within that row's visible members, and the row's visible
-// count. Matches the (row, slot, count) enemyRowSlot returns for a single index.
+// enemyPlacement is one member's resolved (row, slot, count) — the same triple
+// enemyRowSlot returns.
 type enemyPlacement struct {
 	row   core.Row
 	slot  int
 	count int
 }
 
-// enemyPlacementsBuf backs enemyRowPlacements so the per-frame precompute reuses
-// one slice instead of allocating. Single-threaded render path.
+// enemyPlacementsBuf backs enemyRowPlacements (reused, single-threaded path).
 var enemyPlacementsBuf []enemyPlacement
 
-// enemyRowPlacements resolves EVERY member's placement in a single O(n) pass —
-// the batch form of enemyRowSlot. drawBattlePack calls this once per frame and
-// indexes the result, replacing a per-member enemyRowSlot call that re-walked
-// the whole pack each time (an O(n²) loop the old comment wrongly claimed was
-// precomputed). The returned slice aliases a reused buffer — valid only until
-// the next call. Two rows (front/back); visibility = alive or death-fading,
-// exactly as enemyRowSlot tests it.
+// enemyRowPlacements resolves EVERY member's placement in one O(n) pass — the
+// batch form of enemyRowSlot, replacing a per-member O(n²) call. The returned
+// slice aliases a reused buffer (valid until the next call).
 func enemyRowPlacements(members []core.Enemy) []enemyPlacement {
 	n := len(members)
 	if cap(enemyPlacementsBuf) < n {
@@ -2542,8 +1997,7 @@ func enemyRowPlacements(members []core.Enemy) []enemyPlacement {
 
 func enemyFormationPos(camera rl.Camera3D, g *core.GameState, row core.Row, slot, count int, enemy *core.Enemy) rl.Vector3 {
 	if count <= 0 {
-		// Defensive: re-check the ActivePack bound before indexing so a malformed
-		// (Phase!=None, ActivePack out of range) state can't panic.
+		// Defensive: re-check the ActivePack bound so a malformed state can't panic.
 		if g.Battle.ActivePack >= len(g.Packs) {
 			return rl.NewVector3(0, enemyBillboardY, 0)
 		}
@@ -2560,9 +2014,8 @@ func enemyFormationPos(camera rl.Camera3D, g *core.GameState, row core.Row, slot
 		battleFormationCenterY,
 		camera.Position.Z+forward.Z*2.55,
 	)
-	// Per-row width cap (the front holds 3, the back 4): pack the row's slots
-	// inside formationMaxWidth so a full back row doesn't spill across the arena,
-	// keeping the generous spacing for small rows.
+	// Per-row width cap: pack slots inside formationMaxWidth so a full back row
+	// doesn't spill, keeping generous spacing for small rows.
 	const baseSpacing = float32(1.12)
 	const formationMaxWidth = float32(2.9)
 	spacing := baseSpacing
@@ -2572,10 +2025,8 @@ func enemyFormationPos(camera rl.Camera3D, g *core.GameState, row core.Row, slot
 		}
 	}
 	offset := (float32(slot) - float32(count-1)/2) * spacing
-	// Two ranks: the FRONT row stands nearer the party (pulled toward the camera
-	// along forward); the BACK row sits deeper in the arena, lifted so it reads
-	// over the front, and staggered half a slot so it peeks between the front
-	// fighters (the classic 3-over / 4-under formation).
+	// Two ranks: front nearer the party; back deeper, lifted to read over the
+	// front and staggered half a slot to peek between them.
 	rowDepth := float32(-0.45)
 	rowLift := float32(0)
 	if row == core.RowBack {
@@ -2584,8 +2035,8 @@ func enemyFormationPos(camera rl.Camera3D, g *core.GameState, row core.Row, slot
 		offset += spacing * 0.5
 	}
 	bump := core.BumpOffset(enemy.AttackBump, 0.2)
-	// Reactionary knockback pushes AWAY from the camera; AttackBump lunges toward
-	// the party — opposite signs so a hit snaps the enemy opposite its lunge.
+	// Knockback pushes away from the camera; AttackBump lunges toward the party
+	// (opposite signs).
 	knock := core.KnockbackOffset(enemy.HitKnockback, core.HitKnockbackDist)
 	return rl.NewVector3(
 		center.X+right.X*offset+forward.X*(rowDepth-bump+knock),
@@ -2594,22 +2045,17 @@ func enemyFormationPos(camera rl.Camera3D, g *core.GameState, row core.Row, slot
 	)
 }
 
-// horizForwardCache memoizes the last horizontalForward result. The
-// camera is identical across every billboard / marker draw within a
-// frame (and usually across still frames), so this turns the ~6
-// per-frame Hypot/normalize calls into one — the rest hit the cache via
-// a 2-float compare. Single-threaded render path; exact float compare is
-// fine because the inputs are recomputed identically each call.
+// horizForwardCache memoizes horizontalForward — the camera is identical across
+// every billboard/marker draw in a frame, so the ~6 Hypot/normalize calls collapse
+// to one (rest hit a 2-float compare). Single-threaded; exact compare is fine.
 var horizForwardCache struct {
 	dx, dz float32
 	result rl.Vector3
 	primed bool
 }
 
-// horizontalRight is the camera's right vector projected onto the XZ plane —
-// perpendicular to horizontalForward. Billboard formation layout and the
-// per-kind marker nudge both derive screen-right from this, so the
-// (-fwd.Z, 0, fwd.X) expression lives in exactly one place.
+// horizontalRight is the camera right vector on the XZ plane, perpendicular to
+// horizontalForward — the single home for the (-fwd.Z, 0, fwd.X) expression.
 func horizontalRight(forward rl.Vector3) rl.Vector3 {
 	return rl.NewVector3(-forward.Z, 0, forward.X)
 }

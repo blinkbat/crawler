@@ -10,17 +10,11 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// sharedStatusVisual holds the per-status accent + glyph that BOTH the
-// party cards (partyStatusVisuals) and the enemy roster pills
-// (enemyStatusPillVisuals, battle.go) paint identically — one source of
-// truth so a retune of a status that afflicts both sides edits a single
-// row. Only the fields that are byte-for-byte identical across the two
-// surfaces live here: the accent color and the vector glyph. The flicker
-// bit is deliberately NOT shared — Sleep and Stun pulse on party cards
-// but sit static on enemy pills, so each table keeps its own flicker
-// value (and the enemy table keeps its surface-specific outline + turns
-// reader). Keyed by core.PartyStatusKind; Burn / Bleed are enemy-only
-// (no party-side concept) and stay local to the enemy table.
+// sharedStatusVisuals holds the per-status accent + glyph that BOTH the party
+// cards and enemy roster pills (battle.go) paint identically — one source of
+// truth. Only the byte-identical fields live here (color + glyph); flicker is NOT
+// shared (Sleep/Stun pulse on party cards but sit static on enemy pills). Burn/
+// Bleed are enemy-only and stay local to the enemy table.
 var sharedStatusVisuals = map[core.PartyStatusKind]struct {
 	Col   rl.Color
 	Glyph func(cx, cy, r float32, col rl.Color)
@@ -30,26 +24,15 @@ var sharedStatusVisuals = map[core.PartyStatusKind]struct {
 	core.PartyStatusPoisoned: {Col: statusPoison, Glyph: drawStatusGlyphPoisoned},
 }
 
-// partyStatusVisuals is the canonical per-status visual table. Indexed
-// by core.PartyStatusKind so render surfaces (party card label, Tome
-// Stats badge, panels overlay, etc.) read the color + flicker from a
-// single registry instead of each switching on the enum by hand.
-// Length-asserted at init against core.PartyStatusCount so a future
-// status kind without a row trips the program at startup, not silently
-// in a draw call.
-//
-// Color tokens come from UI_STANDARDS.md "Per-status accents"; the
-// flicker bit marks "something is wrong" statuses (Ingested / DoTs /
-// lockouts) so the bad news pulses, off for static states (Down /
-// Defending / None).
+// partyStatusVisuals is the canonical per-status visual table, indexed by
+// core.PartyStatusKind so every surface reads color + flicker from one registry.
+// init asserts every non-None kind carries a Glyph. Color tokens: UI_STANDARDS.md
+// "Per-status accents"; flicker marks "something is wrong" statuses.
 var partyStatusVisuals = [core.PartyStatusCount]struct {
 	Col     rl.Color
 	Flicker bool
-	// Glyph paints the status's symbol centered at (cx,cy) radius r in the
-	// accent col. Every kind EXCEPT PartyStatusNone carries one; the init below
-	// asserts that, so a status added to the enum but missed here can't render
-	// as a bare disc (and, unlike a plain length check on a fixed-size array,
-	// the nil-Glyph probe actually catches a missing table row).
+	// Glyph paints the symbol at (cx,cy) radius r. Every kind except None carries
+	// one (init-asserted, so a missed row can't render as a bare disc).
 	Glyph func(cx, cy, r float32, col rl.Color)
 }{
 	core.PartyStatusNone:      {Col: statusNoneAccent},
@@ -68,20 +51,16 @@ var partyStatusVisuals = [core.PartyStatusCount]struct {
 }
 
 func init() {
-	// PartyStatusNone is the absence of a status (no glyph); every other kind
-	// must carry one. A missing table row leaves a nil Glyph — caught here at
-	// startup rather than as a silent bare-disc draw.
+	// Every kind except None must carry a Glyph; a missing row leaves nil — caught
+	// here at startup rather than as a silent bare-disc draw.
 	assertTableComplete("partyStatusVisuals", int(core.PartyStatusCount), func(i int) bool {
 		k := core.PartyStatusKind(i)
 		return k != core.PartyStatusNone && partyStatusVisuals[k].Glyph == nil
 	})
 }
 
-// partyStatusVisual returns the per-status text color and a flicker
-// flag for the party card / panels Stats badge. Thin wrapper over the
-// partyStatusVisuals table so callers don't dereference the array
-// directly. Out-of-range kinds (only possible if a caller forges a
-// PartyStatusKind value outside the enum) fall back to the None row.
+// partyStatusVisual returns the per-status color + flicker flag. Out-of-range
+// kinds fall back to the None row.
 func partyStatusVisual(kind core.PartyStatusKind) (col rl.Color, flicker bool) {
 	if kind < 0 || int(kind) >= len(partyStatusVisuals) {
 		v := partyStatusVisuals[core.PartyStatusNone]
@@ -91,11 +70,8 @@ func partyStatusVisual(kind core.PartyStatusKind) (col rl.Color, flicker bool) {
 	return v.Col, v.Flicker
 }
 
-// partyStatusTurnLabelCache pre-formats every "<LABEL> N" combination
-// that the party card row can show — one entry per (kind, turns) pair
-// in the small turn-count range that covers realistic durations. The
-// card paints this label once per frame per afflicted member; without
-// the cache the path runs fmt.Sprintf each time.
+// partyStatusTurnLabelCache pre-formats every "<LABEL> N" combination the card
+// row can show, so the per-frame draw isn't an fmt.Sprintf.
 var partyStatusTurnLabelCache = func() [core.PartyStatusCount][statusTurnCacheMax]string {
 	var out [core.PartyStatusCount][statusTurnCacheMax]string
 	for k := core.PartyStatusKind(0); k < core.PartyStatusCount; k++ {
@@ -107,18 +83,13 @@ var partyStatusTurnLabelCache = func() [core.PartyStatusCount][statusTurnCacheMa
 	return out
 }()
 
-// statusTurnCacheMax is the turn-count ceiling every status-turn cache covers
-// — the party "<LABEL> N" table (partyStatusTurnLabelCache), the shared bare
-// numeral cache (statusTurnDigits), and the enemy roster's pill labels
-// (statusTurnsLabel). Past it the caches fall back to fmt.Sprintf. Generous
-// slack over every real status duration so a tuning bump stays on the cached
-// path. One constant so the three caches can't size-drift.
+// statusTurnCacheMax is the turn-count ceiling shared by all three status-turn
+// caches (partyStatusTurnLabelCache, statusTurnDigits, the enemy pill labels), so
+// they can't size-drift; past it they fall back to fmt.Sprintf.
 const statusTurnCacheMax = 20
 
-// partyStatusTurnLabel returns "<LABEL>" for boolean statuses (turns == 0)
-// or "<LABEL> N" for counted statuses. Reads the precomputed table for
-// the common turn range; falls back to fmt.Sprintf only when turns
-// exceed the cached window.
+// partyStatusTurnLabel returns "<LABEL>" for turns==0 else "<LABEL> N", reading
+// the precomputed table and falling back to fmt.Sprintf past the cached window.
 func partyStatusTurnLabel(kind core.PartyStatusKind, turns int) string {
 	base := core.PartyStatusLabel(kind)
 	if turns <= 0 {
@@ -130,20 +101,16 @@ func partyStatusTurnLabel(kind core.PartyStatusKind, turns int) string {
 	return fmt.Sprintf("%s %d", base, turns)
 }
 
-// partyStatusLabelMeasureCache memoizes MeasureTextEx for the small set
-// of party-status label strings produced by partyStatusTurnLabel. Each
-// card with an active status would otherwise re-measure the same label
-// every frame.
+// partyStatusLabelMeasureCache memoizes MeasureTextEx for the party-status
+// labels, which each afflicted card would otherwise re-measure every frame.
 var partyStatusLabelMeasureCache measureCache
 
 func measurePartyStatusLabel(font rl.Font, label string) rl.Vector2 {
 	return partyStatusLabelMeasureCache.measure(font, label, FontTiny, 1)
 }
 
-// statusTurnDigits caches the bare turns-remaining numerals ("0".."19") drawn
-// beside a status icon, so the per-frame draw doesn't allocate a string via
-// fmt/strconv each frame. Shared by the party card (statusTurnDigit) and the
-// enemy roster pill (statusTurnsLabel). Sized to statusTurnCacheMax.
+// statusTurnDigits caches the bare turns-remaining numerals drawn beside a status
+// icon, so the per-frame draw allocates no string. Shared by party card + enemy pill.
 var statusTurnDigits = func() [statusTurnCacheMax]string {
 	var d [statusTurnCacheMax]string
 	for i := range d {
@@ -153,8 +120,7 @@ var statusTurnDigits = func() [statusTurnCacheMax]string {
 }()
 
 // statusTurnDigit returns the cached bare numeral for n, falling back to
-// fmt.Sprintf past the cached window. The one numeral cache both the party
-// card and the enemy roster read through.
+// fmt.Sprintf past the cached window.
 func statusTurnDigit(n int) string {
 	if n >= 0 && n < statusTurnCacheMax {
 		return statusTurnDigits[n]
@@ -162,14 +128,11 @@ func statusTurnDigit(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
-// partyNamePlusLabels memoizes the "<Name> +" badge string per member
-// name so the always-visible ribbon's hot path is a map lookup instead
-// of a fresh concat. Font-independent (it's just the string), so unlike
-// a measure cache it needs no font-ID invalidation.
+// partyNamePlusLabels memoizes the "<Name> +" badge string so the ribbon hot
+// path is a map lookup, not a concat. Font-independent, so no measure-cache invalidation.
 var partyNamePlusLabels = make(map[string]string, 8)
 
-// partyNameSpaceWidth measures "<Name> " at FontBody (for positioning the
-// "+" overlay), sharing the generic measureCache machinery.
+// partyNameSpaceWidth measures "<Name> " at FontBody (positions the "+" overlay).
 var partyNameSpaceWidth measureCache
 
 func partyNamePlusBadge(name string) string {
@@ -181,10 +144,8 @@ func partyNamePlusBadge(name string) string {
 	return v
 }
 
-// partyHPBarKeys memoizes the "hp:<Name>" bar-ghost key per member name, so
-// the always-visible ribbon's hot path (drawBarLive every frame, in battle AND
-// exploration) is a map lookup instead of a fresh concat per card per frame.
-// Same font-independent rationale as partyNamePlusLabels.
+// partyHPBarKeys memoizes the "hp:<Name>" bar-ghost key so drawBarLive's
+// per-frame ribbon path is a map lookup, not a concat.
 var partyHPBarKeys = make(map[string]string, 8)
 
 func partyHPBarKey(name string) string {
@@ -201,48 +162,36 @@ func measurePartyNameWithSpace(font rl.Font, name string) rl.Vector2 {
 }
 
 const (
-	// Cards are WIDE and SHORT now, tiled in a 2×2 grid (two rows). The left half
-	// holds the class sigil + name + status; the right half stacks the HP/MP bars.
+	// Wide, short cards in a 2×2 grid: left half = class sigil + name + status,
+	// right half = stacked HP/MP bars.
 	partyCardW   = float32(300)
 	partyCardH   = float32(72)
 	partyCardGap = float32(14)
 	partyRowGap  = float32(10) // vertical gap between the two card rows
 	partyCardCols = 2
-	// partyCardBarH is the (shorter) gauge height that lets HP + MP stack inside
-	// the compact card's right column.
-	partyCardBarH = float32(22)
-	// cardGlowMargin is the inset the active-card halo and the selected-card
-	// outline both grow by (rect expands by cardGlowMargin on each side, so
-	// width/height grow by 2×). Named so the two chrome layers can't drift.
+	partyCardBarH = float32(22) // shorter gauge so HP+MP stack in the right column
+	// cardGlowMargin is the per-side inset shared by the active halo and selected
+	// outline (so the two chrome layers can't drift).
 	cardGlowMargin = int32(3)
-	// activeCardJut nudges the active member's card sideways (OUTWARD from the
-	// 2×2 grid: left column pokes left, right column pokes right) so "whose turn
-	// is it" reads at a glance on top of the gilt halo. Sideways rather than up so
-	// the lift can't overlap the row above; outward so it can't overlap the
-	// neighbouring column either.
-	activeCardJut = float32(8)
-	// ribbonBottom is the bottom-edge margin for the party ribbon.
-	// Routed through hudEdgePad so the bottom margin matches the
-	// minimap's top margin (and every other HUD panel's edge
-	// distance). Earlier passes used 20 which was four pixels off
-	// the rest of the HUD's edge convention.
+	// activeCardJut nudges the active card OUTWARD by column (left pokes left,
+	// right pokes right) so "whose turn" reads without overlapping the row above
+	// or the neighbouring column.
+	activeCardJut = float32(28)
+	// ribbonBottom is the ribbon's bottom margin, via hudEdgePad so it matches
+	// every other HUD panel's edge distance.
 	ribbonBottom = float32(hudEdgePad)
 )
 
-// drawCardScrim paints the shared dim wash (theme's surfaceDimScrim) over a
-// card's rounded rect, matching drawCard's corner radius so the dim hugs the
-// card body. Used to recede NON-active party cards during a member's turn so
-// the lifted active card reads as "whose turn" at a glance; the targeted ally
-// is skipped so heal/item targeting stays legible (see DrawPartyRibbon).
+// drawCardScrim paints the dim wash over a card's rounded rect (matching
+// drawCard's radius) to recede non-active cards during a member's turn.
 func drawCardScrim(x, y, w, h int32) {
 	rect := rl.NewRectangle(float32(x), float32(y), float32(w), float32(h))
 	roundness := fixedRoundnessFor(w, h, cornerRadius)
 	rl.DrawRectangleRounded(rect, roundness, 8, surfaceDimScrim)
 }
 
-// drawPartyCard renders a single party member card. The class accent stripe
-// keeps members recognizable at a glance even when names are short. `dim`
-// requests the inactive-member wash (applied last, over the whole card).
+// drawPartyCard renders one party member card. `dim` requests the inactive-member
+// wash (applied last, over the whole card).
 func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active, selected, down, dim bool) {
 	classCol := classAccent(member.Class)
 	accent := classCol
@@ -265,9 +214,8 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active,
 		border = borderActive
 	}
 
-	// Jut the active card sideways (out of the row) so it physically stands out
-	// without lifting into the row above. Outward by column: left pokes left,
-	// right pokes right — so it can't collide with the neighbouring card either.
+	// Jut the active card outward by column so it stands out without colliding
+	// with the row above or the neighbouring card.
 	if active && !down {
 		if member.HomeCol == core.ColRight {
 			x += activeCardJut
@@ -280,9 +228,8 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active,
 	iw, ih := int32(partyCardW), int32(partyCardH)
 
 	if active && !down {
-		// Layered gilt halo — solid inner ring + pulsing wider outer ring — so
-		// the active card reads as unmistakably lit. Shared with the battle
-		// roster's targeted-row halo via drawSelectionHalo.
+		// Layered gilt halo (solid inner + pulsing outer ring), shared with the
+		// battle roster's targeted-row halo via drawSelectionHalo.
 		drawSelectionHalo(ix-cardGlowMargin, iy-cardGlowMargin, iw+2*cardGlowMargin, ih+2*cardGlowMargin, borderActive, pulseActiveActor(), false)
 	}
 	if selected {
@@ -324,9 +271,8 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active,
 		drawTextWithShadow(font, "+", nameX+nameMeasure.X, y+10, FontBody, inkAccent)
 	}
 
-	// Status icon + turn count BELOW the name, in the left column. Resolves
-	// through the canonical core.PartyStatus ladder so the card agrees with the
-	// Tome badge; only the color/flicker are render-side choices.
+	// Status icon + turn count below the name. Resolves through core.PartyStatus
+	// so the card agrees with the Tome badge; only color/flicker are render-side.
 	kind, turns := core.PartyStatus(member)
 	if kind != core.PartyStatusNone {
 		col, flicker := partyStatusVisual(kind)
@@ -344,17 +290,15 @@ func drawPartyCard(font rl.Font, member *core.PartyMember, x, y float32, active,
 		}
 	}
 
-	// RIGHT column: HP over MP. HP rides the LIVE gauge (trailing hit-ghost +
-	// low-HP breathing); MP is static (deliberate spends, not threats).
+	// RIGHT column: HP over MP. HP rides the live gauge (hit-ghost + low-HP
+	// breathing); MP is static.
 	barX := x + partyCardW*0.5
 	barW := x + partyCardW - 14 - barX
 	hpFill := hpFillColor(member.HP, member.MaxHP)
 	drawBarLive(font, partyHPBarKey(member.Name), barX, y+10, barW, partyCardBarH, "HP", member.HP, member.MaxHP, hpFill, down)
 	drawBar(font, barX, y+partyCardH-10-partyCardBarH, barW, partyCardBarH, "MP", member.MP, member.MaxMP, barMP, down)
 
-	// Dim wash over inactive cards (painted last, over everything) so the
-	// lifted active card pops. The active and the targeted-ally cards opt
-	// out — DrawPartyRibbon only sets dim for the rest.
+	// Dim wash over inactive cards, painted last (active + targeted-ally opt out).
 	if dim {
 		drawCardScrim(ix, iy, iw, ih)
 	}
@@ -369,15 +313,10 @@ var statusWebSpokes = [6][2]float32{
 // statusDizzyDots are the offsets (×r) for the Stunned icon's orbiting star-dots.
 var statusDizzyDots = [3][2]float32{{-0.62, -0.5}, {0, -0.78}, {0.62, -0.5}}
 
-// drawPartyStatusIcon draws a small procedural status glyph centered at
-// (cx,cy) with radius r — the party card's status indicator. A dark token disc
-// backs it for legibility over the wood card; col is the per-status accent
-// (already flickered by the caller). The per-kind symbol is dispatched from
-// the partyStatusVisuals table's Glyph func (init-asserted present for every
-// non-None kind) rather than a switch, so a new status can't be missed. Every
-// glyph shape is a winding-safe primitive (circles / rings / sectors / lines /
-// DrawPoly / rounded rects) so nothing depends on hand-wound DrawTriangle
-// vertex order.
+// drawPartyStatusIcon draws the status glyph at (cx,cy) radius r over a dark
+// backing disc. col is the per-status accent (already flickered by the caller).
+// The symbol dispatches from partyStatusVisuals.Glyph (init-asserted) not a
+// switch, so a new status can't be missed.
 func drawPartyStatusIcon(cx, cy, r float32, kind core.PartyStatusKind, col rl.Color) {
 	rl.DrawCircleV(rl.NewVector2(cx, cy+1), r+3, fadeColor(shadowHeavy, 0.30))
 	rl.DrawCircleV(rl.NewVector2(cx, cy), r+2, statusIconBacking)
@@ -389,9 +328,7 @@ func drawPartyStatusIcon(cx, cy, r float32, kind core.PartyStatusKind, col rl.Co
 	}
 }
 
-// drawStatusGlyph* paint one status symbol each; they're the rows of
-// partyStatusVisuals.Glyph (bodies are the former drawPartyStatusIcon switch
-// cases, unchanged).
+// drawStatusGlyph* paint one status symbol each (the rows of partyStatusVisuals.Glyph).
 
 func drawStatusGlyphPoisoned(cx, cy, r float32, col rl.Color) {
 	// Toxic droplet: round body + pointed tip + a highlight bubble.
@@ -401,7 +338,7 @@ func drawStatusGlyphPoisoned(cx, cy, r float32, col rl.Color) {
 }
 
 func drawStatusGlyphAsleep(cx, cy, r float32, col rl.Color) {
-	// A drawn "Z" (three strokes) — the universal sleep mark, no font.
+	// A drawn "Z" (three strokes) — sleep mark, no font.
 	t := float32(2)
 	rl.DrawLineEx(rl.NewVector2(cx-r*0.5, cy-r*0.5), rl.NewVector2(cx+r*0.5, cy-r*0.5), t, col)
 	rl.DrawLineEx(rl.NewVector2(cx+r*0.5, cy-r*0.5), rl.NewVector2(cx-r*0.5, cy+r*0.5), t, col)
@@ -459,9 +396,8 @@ func drawStatusGlyphDefending(cx, cy, r float32, col rl.Color) {
 }
 
 func drawStatusGlyphShielded(cx, cy, r float32, col rl.Color) {
-	// Aegis ward: a glowing energy bubble — a bright ring with a soft inner
-	// fill, distinct from the Defending heraldic badge (a solid shield) so the
-	// magical ward reads apart from the manual block.
+	// Aegis ward: glowing energy bubble (ring + soft fill), distinct from the
+	// Defending solid-shield badge so magical ward reads apart from manual block.
 	rl.DrawCircleV(rl.NewVector2(cx, cy), r*0.7, fadeColor(col, 0.28))
 	rl.DrawCircleLines(int32(cx), int32(cy), r*0.7, col)
 	rl.DrawCircleLines(int32(cx), int32(cy), r*0.46, fadeColor(col, 0.7))
@@ -487,18 +423,16 @@ func drawStatusGlyphDown(cx, cy, r float32, col rl.Color) {
 }
 
 func drawStatusGlyphBurn(cx, cy, r float32, col rl.Color) {
-	// Flame: rounded base tapering to an upward tip, with a brighter inner
-	// core so it reads as fire rather than a plain droplet (distinct from the
-	// poison drop, which points up but carries a highlight bubble instead).
+	// Flame: rounded base, upward tip, bright inner core — reads as fire, not the
+	// poison drop (which points up but carries a highlight bubble instead).
 	rl.DrawCircleV(rl.NewVector2(cx, cy+r*0.3), r*0.52, col)
 	rl.DrawPoly(rl.NewVector2(cx, cy-r*0.18), 3, r*0.6, -90, col)
 	rl.DrawCircleV(rl.NewVector2(cx, cy+r*0.34), r*0.2, fadeColor(rl.White, 0.45))
 }
 
 func drawStatusGlyphBleed(cx, cy, r float32, col rl.Color) {
-	// Blood drop: round body with a pointed tip at the BOTTOM (a falling
-	// drop) — the inverse orientation of the poison droplet (tip up), so the
-	// two DoT marks read apart even before their pill colors differ.
+	// Blood drop: tip at the BOTTOM (falling) — inverse of the poison droplet's
+	// tip-up, so the two DoT marks read apart before pill colors differ.
 	rl.DrawCircleV(rl.NewVector2(cx, cy-r*0.05), r*0.52, col)
 	rl.DrawPoly(rl.NewVector2(cx, cy+r*0.4), 3, r*0.5, 90, col)
 }
@@ -510,9 +444,8 @@ func drawClassMedallion(cx, cy, r float32, col rl.Color, muted bool) {
 		rim = fadeColor(rim, 0.45)
 		inner = fadeColor(inner, 0.45)
 	}
-	// Shared medallion stack (shadow + woodDark seat + gilt ring + glass face);
-	// the pip callback adds the class-badge embellishment — a soft top-left
-	// highlight glint and a class-tinted corner diamond.
+	// Shared medallion stack; the pip callback adds the class-badge glint + a
+	// class-tinted corner diamond.
 	drawMedallion(cx, cy, r+1.5, r, r-2.5,
 		fadeColor(woodDark, 0.88), rim, inner, r+1, func() {
 			rl.DrawCircleV(rl.NewVector2(cx-r*0.25, cy-r*0.25), 1.6, fadeColor(inkPrimary, 0.32))
@@ -521,8 +454,7 @@ func drawClassMedallion(cx, cy, r float32, col rl.Color, muted bool) {
 }
 
 // DrawPartyRibbon renders the always-visible bottom party ribbon. Cards are
-// pinned at fixed positions so they stay readable through attack bumps and
-// victory dances. Active and selected states are surfaced from battle state.
+// pinned at fixed positions so they stay readable through attack bumps/dances.
 func DrawPartyRibbon(g *core.GameState, assets Resources) {
 	if len(g.Party) == 0 {
 		return
@@ -541,34 +473,26 @@ func DrawPartyRibbon(g *core.GameState, assets Resources) {
 		selectedIdx = core.HighlightedAllyIndex(g)
 	}
 
-	// Dim the OTHER cards only when a party member is actually up
-	// (ActiveActorIndex is -1 on enemy turns / between turns, so the ribbon
-	// stays at full brightness then rather than greying out wholesale).
+	// Dim other cards only when a member is actually up (ActiveActorIndex is -1 on
+	// enemy/between turns, so the ribbon stays full-bright then).
 	dimOthers := activeIdx >= 0 && activeIdx < len(g.Party) && core.PartyMemberAvailable(g.Party, activeIdx)
 
 	for i := range g.Party {
 		member := &g.Party[i]
-		// Tile by FORMATION slot, not array index: front row on top, back row
-		// below; left/right columns left/right. So the ribbon mirrors the 2×2 the
-		// party fights in (and the 3D battlefield), and a Swap visibly moves a
-		// card between rows/columns. HomeRow/HomeCol are a clean 2×2 by invariant
-		// (NewParty seeds it, SwapFormationSlots preserves it).
+		// Tile by FORMATION slot, not array index, so the ribbon mirrors the 2×2
+		// the party fights in and a Swap visibly moves a card. HomeRow/HomeCol are
+		// a clean 2×2 by invariant (NewParty seeds, SwapFormationSlots preserves).
 		col := int(member.HomeCol)
 		row := int(member.HomeRow)
 		x := startX + (partyCardW+partyCardGap)*float32(col)
 		y := topY + (partyCardH+partyRowGap)*float32(row)
-		// Active / selected glow only paints on a member who can act
-		// AND be targeted this turn — i.e. not ingested. The turn queue
-		// already skips ingested actors and the targeting cyclers route
-		// through AvailablePartyTargets, so neither indicator should
-		// land on an ingested member organically; this gates defensively
-		// in case a stale PartyTarget gets left pointing at someone the
-		// mantrap swallowed mid-action.
+		// Active/selected glow only on a member who can act AND be targeted (not
+		// ingested) — defensive against a stale PartyTarget on a swallowed member.
 		available := core.PartyMemberAvailable(g.Party, i)
 		active := i == activeIdx && available
 		selected := i == selectedIdx && available
-		// Dim every non-active card except the one being targeted (its
-		// green highlight must stay legible during heal/item targeting).
+		// Dim every non-active card except the targeted one (its green highlight
+		// must stay legible during heal/item targeting).
 		dim := dimOthers && !active && !selected
 		drawPartyCard(
 			assets.hudFont,
@@ -582,11 +506,8 @@ func DrawPartyRibbon(g *core.GameState, assets Resources) {
 	}
 }
 
-// PartyRibbonTopY reports the screen Y coordinate of the top of the party
-// ribbon, so other panels can stack cleanly above it.
-// partyRibbonHeight is the total height of the tiled party ribbon for a roster
-// of memberCount, in 2-wide rows. Single source for the geometry so DrawPartyRibbon
-// and PartyRibbonTopY (which stacks the timing bar above the ribbon) can't drift.
+// partyRibbonHeight is the total height of the tiled ribbon for memberCount, in
+// 2-wide rows. Single source so DrawPartyRibbon and PartyRibbonTopY can't drift.
 func partyRibbonHeight(memberCount int) float32 {
 	rows := (memberCount + partyCardCols - 1) / partyCardCols
 	if rows < 1 {
@@ -595,46 +516,33 @@ func partyRibbonHeight(memberCount int) float32 {
 	return partyCardH*float32(rows) + partyRowGap*float32(rows-1)
 }
 
+// PartyRibbonTopY reports the screen Y of the ribbon's top so other panels can
+// stack above it.
 func PartyRibbonTopY() float32 {
 	_, h := screenSizeF()
-	// Standard fixed-size roster (a 2×2 of four); other panels stack above.
 	return h - partyRibbonHeight(core.PartyMemberCount) - ribbonBottom
 }
 
-// centeredMeasureCache memoizes the MeasureTextEx backing drawTextCentered.
-// Its callers (enemy status pills — up to ~24/frame in heavy combat — the
-// door prompt, the chest "Press Enter to open" cue) all re-draw stable
-// strings every frame their surface is up, so caching the measure here
-// covers those hot/stable sites for free.
+// centeredMeasureCache memoizes the MeasureTextEx backing drawTextCentered, whose
+// callers re-draw stable strings every frame.
 var centeredMeasureCache measureCache
 
 func drawTextCentered(font rl.Font, text string, centerX, y, size float32, col color.RGBA) {
-	// Measure at the same canonicalSpacing drawTextWithShadow renders with,
-	// so heading-size text centers on its true (tracked) width.
+	// canonicalSpacing matches drawTextWithShadow so heading text centers on its
+	// true tracked width.
 	measure := centeredMeasureCache.measure(font, text, size, canonicalSpacing(size))
 	drawTextWithShadow(font, text, centerX-measure.X/2, y, size, col)
 }
 
-// rightAlignMeasureCache memoizes the MeasureTextEx call backing
-// drawTextRightAligned. Most right-aligned readouts (gold totals, SP/MP
-// costs, stat values, shop prices) are stable strings re-drawn every
-// frame while their surface is open, so caching the measure here covers
-// the per-frame cgo cost for every site that routes through the helper
-// The shared measureCache keys on (text,size,spacing), so
-// the FontSmall / FontBody / FontHeading / FontTiny callers coexist in
-// the one instance.
+// rightAlignMeasureCache memoizes the MeasureTextEx backing drawTextRightAligned,
+// whose right-aligned readouts are stable strings re-drawn every frame.
 var rightAlignMeasureCache measureCache
 
-// drawTextRightAligned draws `text` so its RIGHT edge sits at rightX
-// (the text occupies [rightX-width, rightX]). The right-aligned mirror
-// of drawTextCentered — consolidates the ~14 "measure.X then draw at
-// edge - measure.X - pad" sites that each open-coded the same subtraction
-// (gold readouts, stat/ARM/XP values, SP/ratio reads, MP costs, shop
-// prices). Routes the measure through rightAlignMeasureCache so those
-// hot, stable-string sites stop re-shaping every frame.
+// drawTextRightAligned draws text so its RIGHT edge sits at rightX. The mirror of
+// drawTextCentered, consolidating the open-coded "edge - measure.X - pad" sites.
 func drawTextRightAligned(font rl.Font, text string, rightX, y, size float32, col color.RGBA) {
-	// Same canonicalSpacing pairing as drawTextCentered — measured width
-	// must include the heading tracking or the right edge drifts.
+	// canonicalSpacing as in drawTextCentered, or the measured width misses the
+	// heading tracking and the right edge drifts.
 	measure := rightAlignMeasureCache.measure(font, text, size, canonicalSpacing(size))
 	drawTextWithShadow(font, text, rightX-measure.X, y, size, col)
 }

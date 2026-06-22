@@ -7,34 +7,23 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Procedural symbol glyphs. The UI font (embedded Della Respira, see
-// resources.go) carries Latin + most punctuation but NOT the geometric/
-// arrow/relational symbols the HUD prints (▶ → ↑ ↓ ● ★ ✓ ≤ ≥) nor a few
-// typographic marks it happens to drop (… ’ ≈).
-// Rather than bundle a second "symbol" font, we DRAW those glyphs as crisp
-// vector shapes here, so the game ships exactly one font and we keep full
-// control over how each symbol looks (matching the gamepad-glyph approach in
-// glyphs.go). drawRichText / measureRichText splice these into normal text
-// runs; the central text helpers (drawTextWithShadowStyle, the measure
-// caches) route through them, so every HUD/battle/menu label that mixes text
-// and a symbol renders correctly with no per-call-site change.
-//
-// Extending coverage is one map row + one drawer — the path to "draw every
-// symbol procedurally." Editor-only surfaces draw via rl.DrawTextEx directly
-// and don't pass through here yet; routing them is a later step.
+// Procedural symbol glyphs. The UI font (Della Respira) lacks the geometric/
+// arrow/relational symbols the HUD prints (▶ → ↑ ↓ ● ★ ✓ ≤ ≥) and a few marks it
+// drops (… ’ ≈), so we draw them as vector shapes here rather than bundle a
+// second font. drawRichText / measureRichText splice these into text runs, so
+// every label that mixes text + symbol renders with no per-call-site change.
+// Extending coverage is one map row + one drawer.
 
 // symGlyph is one procedurally-drawn symbol: adv is its advance width as a
-// fraction of the font size (so it scales with the text it sits in); draw
-// paints it within the box glyphBoxFor computes.
+// fraction of font size; draw paints it within the box glyphBoxFor computes.
 type symGlyph struct {
 	adv  float32
 	draw func(b glyphBox, col color.RGBA)
 }
 
-// glyphBox is the inline drawing region for one symbol, sized to the
-// surrounding text. top/bot bracket the glyph vertically around the text's
-// visual center; left/right bracket it horizontally within its advance; t is
-// a stroke thickness scaled to the size (floored so it never vanishes).
+// glyphBox is the inline drawing region for one symbol, sized to the text.
+// top/bot bracket it vertically around the text's visual center; left/right
+// horizontally within its advance; t is a size-scaled stroke thickness (floored).
 type glyphBox struct {
 	left, right, top, bot, cx, cy, t float32
 }
@@ -44,13 +33,10 @@ func glyphBoxFor(x, y, size, adv float32) glyphBox {
 	padX := w * 0.12
 	left := x + padX
 	right := x + w - padX
-	// Center on the text's visual middle (~0.50·size below the top-left
-	// origin rl.DrawTextEx draws from), with a cap-ish half-height.
+	// Center on the text's visual middle (~0.50·size below DrawTextEx's top-left origin).
 	cy := y + size*0.50
 	hh := size * 0.30
-	// Stroke thickness matches the text weight: heavier when the optional
-	// faux-bold is on (so symbols don't read thin beside emboldened text),
-	// normal otherwise. Floored so it never vanishes at tiny sizes.
+	// Stroke matches text weight: heavier under faux-bold, floored at tiny sizes.
 	strokeFrac := float32(0.085)
 	if fauxBoldEnabled {
 		strokeFrac = 0.105
@@ -62,9 +48,8 @@ func glyphBoxFor(x, y, size, adv float32) glyphBox {
 	return glyphBox{left: left, right: right, top: cy - hh, bot: cy + hh, cx: (left + right) / 2, cy: cy, t: t}
 }
 
-// triRadius is the in-box radius for the equilateral-triangle indicators —
-// the smaller of the box's half-extents so a tight advance (▸) reads smaller
-// than a wide one (▶) without separate tuning.
+// triRadius is the in-box triangle radius — the smaller half-extent, so a tight
+// advance (▸) reads smaller than a wide one (▶) without separate tuning.
 func (b glyphBox) triRadius() float32 {
 	rx := (b.right - b.left) / 2
 	ry := (b.bot - b.top) / 2
@@ -74,10 +59,8 @@ func (b glyphBox) triRadius() float32 {
 	return ry
 }
 
-// symGlyphs maps each font-absent rune to its advance + drawer. DrawPoly /
-// DrawLineEx / DrawCircleV are used throughout so winding never matters and
-// the shapes stay crisp (vector) at any size. Rotations are in raylib's
-// y-down convention: 0°=right, 90°=down, 180°=left, 270°/-90°=up.
+// symGlyphs maps each font-absent rune to its advance + drawer. Rotations are in
+// raylib's y-down convention: 0°=right, 90°=down, 180°=left, -90°=up.
 var symGlyphs = map[rune]symGlyph{
 	'→': {1.00, glyphArrowRight},
 	'←': {1.00, glyphArrowLeft},
@@ -100,24 +83,19 @@ var symGlyphs = map[rune]symGlyph{
 	'≈': {0.74, glyphApprox},
 }
 
-// fauxBoldEnabled gates the synthetic semibold (drawBoldText). OFF by
-// default — the UI renders Della Respira at its true regular weight. The
-// font has no bold file, so "bold" can only be faked by over-stamping;
-// callers flip it on via SetFauxBold (e.g. wired to a display option).
-// Package-level is fine: UI text draws are single-threaded on the raylib loop.
+// fauxBoldEnabled gates the synthetic semibold (drawBoldText). Off by default;
+// the font has no bold file, so bold is faked by over-stamping. Callers flip it
+// via SetFauxBold. Package-level is fine — UI text draws are single-threaded.
 var fauxBoldEnabled = false
 
-// SetFauxBold toggles the synthetic semibold weight applied to ALL UI text.
-// Off by default. Exposed so an Options toggle / persisted setting can drive
-// it without the render internals leaking out.
+// SetFauxBold toggles the synthetic semibold applied to all UI text.
 func SetFauxBold(on bool) { fauxBoldEnabled = on }
 
 // FauxBoldEnabled reports the current faux-bold setting.
 func FauxBoldEnabled() bool { return fauxBoldEnabled }
 
-// boldStampOffset is the sub-pixel rightward over-stamp that fakes a semibold
-// weight from the regular-only UI font. Scales with size — floored so small
-// text still thickens — so body copy and titles read equally heavier.
+// boldStampOffset is the rightward over-stamp that fakes semibold. Scales with
+// size (floored so small text still thickens).
 func boldStampOffset(size float32) float32 {
 	if o := size * 0.03; o > 0.5 {
 		return o
@@ -125,12 +103,9 @@ func boldStampOffset(size float32) float32 {
 	return 0.5
 }
 
-// drawBoldText draws a text run, optionally faking semibold by stamping it a
-// second time nudged boldStampOffset to the right — but ONLY when
-// fauxBoldEnabled. The glyph ADVANCE is unchanged either way, so
-// measurement/layout stay exact; the extra stamp just thickens stems. All
-// font runs in drawRichText route through here, so this one toggle governs
-// the whole UI's weight.
+// drawBoldText draws a text run, faking semibold (a second stamp nudged right)
+// only when fauxBoldEnabled. The advance is unchanged, so layout stays exact.
+// All drawRichText font runs route here, so this one toggle governs UI weight.
 func drawBoldText(font rl.Font, text string, x, y, size, spacing float32, col color.RGBA) {
 	rl.DrawTextEx(font, text, rl.NewVector2(x, y), size, spacing, col)
 	if fauxBoldEnabled {
@@ -138,13 +113,9 @@ func drawBoldText(font rl.Font, text string, x, y, size, spacing float32, col co
 	}
 }
 
-// containsSymGlyph reports whether text has any procedurally-drawn symbol.
-// This runs on EVERY label draw (the drawRichText fast-path gate), so the
-// symbol-free common case must be cheap: every symGlyph rune is non-ASCII, so
-// a string with no high byte can't contain one — a tight byte scan (no UTF-8
-// decode, no map probe) rejects the ASCII majority. Only a string that
-// actually has a non-ASCII byte pays the precise rune+map check, and only from
-// that byte onward.
+// containsSymGlyph reports whether text has any procedural symbol. Runs on every
+// label draw, so the common case is cheap: every symGlyph rune is non-ASCII, so a
+// byte scan rejects the ASCII majority; only a high byte pays the rune+map check.
 func containsSymGlyph(text string) bool {
 	for i := 0; i < len(text); i++ {
 		if text[i] >= 0x80 {
@@ -163,29 +134,23 @@ func hasSymGlyphRune(text string) bool {
 	return false
 }
 
-// DrawRichText is the exported, procedural-symbol-aware drop-in for
-// rl.DrawTextEx, for packages outside render that draw the shared UI font
-// directly — the map editor, which otherwise renders symbols (▼ ▲ → ≥ ★ ✓ …)
-// as missing-glyph boxes since Della Respira lacks them. Same signature as
-// rl.DrawTextEx so the swap is mechanical; every editor label then matches
-// the game's symbol drawing (and the faux-bold weight, when that's enabled).
+// DrawRichText is the exported, symbol-aware drop-in for rl.DrawTextEx, for
+// packages outside render (the editor, which otherwise renders symbols as
+// missing-glyph boxes). Same signature so the swap is mechanical.
 func DrawRichText(font rl.Font, text string, position rl.Vector2, fontSize, spacing float32, tint color.RGBA) {
 	drawRichText(font, text, position.X, position.Y, fontSize, spacing, tint)
 }
 
-// MeasureRichText is the exported, procedural-symbol-aware drop-in for
-// rl.MeasureTextEx — pairs with DrawRichText so editor layout (button
-// auto-width, tooltip / dropdown sizing) measures symbol-bearing labels to
-// their real drawn width instead of the font's missing-glyph advance.
+// MeasureRichText is the exported, symbol-aware drop-in for rl.MeasureTextEx,
+// pairing with DrawRichText so editor layout measures symbol-bearing labels to
+// their real drawn width.
 func MeasureRichText(font rl.Font, text string, fontSize, spacing float32) rl.Vector2 {
 	return measureRichText(font, text, fontSize, spacing)
 }
 
-// walkRichText splits text into ordered segments — maximal runs of font
-// glyphs and the procedural symbols between them — invoking onRun(seg) /
-// onSym(g) for each in order. THE single splice model behind drawRichText and
-// measureRichText, so the two can't disagree on what's a run vs a symbol or
-// where the boundaries fall.
+// walkRichText splits text into ordered segments (font-glyph runs + the symbols
+// between them), invoking onRun/onSym in order. The single splice model behind
+// drawRichText and measureRichText so they can't disagree on the boundaries.
 func walkRichText(text string, onRun func(seg string), onSym func(g symGlyph)) {
 	runStart := 0
 	emit := func(end int) {
@@ -207,21 +172,18 @@ func walkRichText(text string, onRun func(seg string), onSym func(g symGlyph)) {
 	emit(len(text))
 }
 
-// drawRichText draws text that may interleave font glyphs and procedural
-// symbols, laying segments left-to-right with `spacing` between them so the
-// mix tracks like one line. Symbol-free strings take the direct fast path.
+// drawRichText draws text interleaving font glyphs and symbols, laying segments
+// left-to-right with `spacing` between. Symbol-free strings take the fast path.
 func drawRichText(font rl.Font, text string, x, y, size, spacing float32, col color.RGBA) {
 	drawRichTextKnown(font, text, containsSymGlyph(text), x, y, size, spacing, col)
 }
 
-// richRunMeasureCache memoizes the per-run width the symbol-path draw uses to
-// advance the cursor, so an on-screen symbol-bearing label (pause-menu ▸ rows,
-// a log line with →) doesn't re-shape its text runs via cgo every frame.
+// richRunMeasureCache memoizes the per-run width the symbol path uses to advance
+// the cursor, so a symbol-bearing label doesn't re-shape its runs every frame.
 var richRunMeasureCache measureCache
 
-// drawRichTextKnown is drawRichText with the has-symbol bit already decided, so
-// a caller drawing the SAME string several times (drop shadow + main pass, the
-// engraved gradient bands) pays containsSymGlyph ONCE rather than per pass.
+// drawRichTextKnown is drawRichText with the has-symbol bit decided, so a caller
+// drawing the SAME string several times (shadow + main pass) pays containsSymGlyph once.
 func drawRichTextKnown(font rl.Font, text string, hasSym bool, x, y, size, spacing float32, col color.RGBA) {
 	if !hasSym {
 		drawBoldText(font, text, x, y, size, spacing, col)
@@ -248,8 +210,7 @@ func drawRichTextKnown(font rl.Font, text string, hasSym bool, x, y, size, spaci
 		})
 }
 
-// measureRichText is drawRichText's measure twin — same segment+gap model so
-// centered / right-aligned callers place mixed strings correctly.
+// measureRichText is drawRichText's measure twin (same segment+gap model).
 func measureRichText(font rl.Font, text string, size, spacing float32) rl.Vector2 {
 	if !containsSymGlyph(text) {
 		return rl.MeasureTextEx(font, text, size, spacing)
@@ -271,10 +232,8 @@ func measureRichText(font rl.Font, text string, size, spacing float32) rl.Vector
 			gap()
 			width += g.adv * size
 		})
-	// Height is the true single-line height the font reports (NOT the raw
-	// `size`), matching the symbol-free fast path's rl.MeasureTextEx so
-	// callers that vertically center on measure.Y don't shift symbol-bearing
-	// labels by the font's ascent/descent slack.
+	// Height is the font's reported single-line height (not raw `size`), matching
+	// the fast path so vertical-centering callers don't shift symbol-bearing labels.
 	return rl.NewVector2(width, rl.MeasureTextEx(font, "X", size, spacing).Y)
 }
 
@@ -298,16 +257,14 @@ func glyphBullet(b glyphBox, col color.RGBA) {
 }
 
 // Arrow shaft/head placement as fractions of the head radius, shared by every
-// line-arrow drawer so they stay mutually aligned: the shaft stops at
-// arrowShaftStopFrac (tucked just under the head) and the head triangle is
-// centered at arrowHeadCenterFrac.
+// line-arrow drawer: shaft stops at arrowShaftStopFrac, head centered at arrowHeadCenterFrac.
 const (
 	arrowShaftStopFrac  = float32(0.7)
 	arrowHeadCenterFrac = float32(0.55)
 )
 
-// arrowHead draws a small filled triangle pointing along rotation (raylib
-// y-down degrees) centered at (hx,hy); shared by the line arrows.
+// arrowHead draws a filled triangle at (hx,hy) pointing along rotation; shared
+// by the line arrows.
 func arrowHead(hx, hy, r, rotation float32, col color.RGBA) {
 	rl.DrawPoly(rl.NewVector2(hx, hy), 3, r, rotation, col)
 }
@@ -346,15 +303,12 @@ func glyphCheck(b glyphBox, col color.RGBA) {
 	rl.DrawLineEx(knee, rl.NewVector2(b.right, b.top), b.t, col)
 }
 
-// glyphStarFanBuf backs glyphStar's triangle-fan vertex list (centre + the 10
-// star points + a repeat of the first point to close the fan). Reused so the ★
-// glyph doesn't allocate per draw; copied off the shared starVerts buffer since
-// the fan needs the centre + closing vertex too.
+// glyphStarFanBuf backs glyphStar's triangle-fan vertices (centre + 10 points +
+// closing repeat). Reused so the ★ glyph doesn't allocate per draw.
 var glyphStarFanBuf = make([]rl.Vector2, 0, 12)
 
 func glyphStar(b glyphBox, col color.RGBA) {
-	// Five-point star as a triangle fan over alternating outer/inner radii,
-	// built from the shared starVerts primitive.
+	// Five-point star as a triangle fan over alternating radii (shared starVerts).
 	cx, cy := b.cx, b.cy
 	outer := b.triRadius()
 	verts := starVerts(cx, cy, outer, outer*0.42, 5)
@@ -387,14 +341,11 @@ func glyphGreaterEqual(b glyphBox, col color.RGBA) {
 	rl.DrawLineEx(rl.NewVector2(b.left, b.bot), rl.NewVector2(b.right, b.bot), b.t, col)
 }
 
-// glyphEllipsis draws three baseline dots (…) — Della Respira drops the
-// precomposed ellipsis, so we stamp it from the same dots a font would.
+// glyphEllipsis draws three baseline dots (…), which Della Respira drops.
 func glyphEllipsis(b glyphBox, col color.RGBA) {
 	r := b.t * 0.7
-	// Cap so three dots + gaps always fit the box width (centers at left+r,
-	// mid, right-r need >=2r spacing → r <= width/6); guards against overlap /
-	// spill past the advance if the glyph's advance is ever tightened or the
-	// stroke widened. Floor so the dots never vanish at tiny sizes.
+	// Cap r at width/6 so three dots + gaps always fit (no overlap/spill); floor
+	// so they never vanish at tiny sizes.
 	if maxR := (b.right - b.left) / 6; r > maxR {
 		r = maxR
 	}
@@ -408,16 +359,14 @@ func glyphEllipsis(b glyphBox, col color.RGBA) {
 	rl.DrawCircleV(rl.NewVector2(xR, dy), r, col)
 }
 
-// glyphApostrophe draws a short, slightly back-leaning tick high in the box —
-// the typographic right single quote (’) the font omits.
+// glyphApostrophe draws the right single quote (’) the font omits.
 func glyphApostrophe(b glyphBox, col color.RGBA) {
 	x := (b.left + b.right) / 2
 	h := (b.bot - b.top) * 0.34
 	rl.DrawLineEx(rl.NewVector2(x+b.t*0.25, b.top), rl.NewVector2(x-b.t*0.15, b.top+h), b.t, col)
 }
 
-// glyphApprox draws the two stacked strokes of ≈ (approximately-equal), which
-// Della Respira also drops.
+// glyphApprox draws the two strokes of ≈, which the font also drops.
 func glyphApprox(b glyphBox, col color.RGBA) {
 	dy := (b.bot - b.top) * 0.16
 	rl.DrawLineEx(rl.NewVector2(b.left, b.cy-dy), rl.NewVector2(b.right, b.cy-dy), b.t, col)

@@ -12,50 +12,31 @@ import (
 const (
 	MaterialDungeon MaterialSet = iota
 	MaterialField
-	// MaterialCount is the number of material sets. The init guard in
-	// this file asserts materialDefs covers every value below it, and
-	// render's NewResources asserts a worldMaterial exists for each.
+	// MaterialCount is the number of material sets; init asserts materialDefs covers each.
 	MaterialCount
 )
 
-// mapsDirName is the on-disk folder name where .map files live. Single
-// source so renames are a one-line edit; MapsDir resolves it to an
-// absolute or cwd-relative path at runtime.
+// mapsDirName is the on-disk folder name where .map files live.
 const mapsDirName = "maps"
 
-// AssetDirMode / AssetFileMode are the os mode bits for every auto-created
-// asset directory (maps/, maps/sounds/, …) and asset file write (.map
-// files, user .wav sounds, assignments.txt). They alias the canonical
-// definitions in the leaf mapfile package so the I/O layer can use them
-// without importing core; a project-wide permissions change is one edit.
+// AssetDirMode / AssetFileMode are the os mode bits for auto-created asset dirs
+// and file writes. Alias mapfile's defs so the I/O layer needn't import core.
 const (
 	AssetDirMode  = mapfile.AssetDirMode
 	AssetFileMode = mapfile.AssetFileMode
 )
 
-// SelfMapToken is the door TargetMap placeholder meaning "this same map".
-// Re-exported from mapfile so runtime/render callers can recognize a
-// self-portal without importing the leaf I/O package.
+// SelfMapToken is the door TargetMap placeholder for "this same map".
 const SelfMapToken = mapfile.SelfMapToken
 
-// MapsDir returns the directory where .map files live. Thin wrapper
-// over ResolveAssetDir so the asset-folder lookup story is consistent
-// with maps/sounds/ and any future asset directory.
+// MapsDir returns the directory where .map files live.
 func MapsDir() string {
 	return ResolveAssetDir(mapsDirName)
 }
 
-// ResolveAssetDir resolves a relative asset folder name (e.g. "maps" or
-// "maps/sounds") to a usable on-disk path. Resolution order: prefer the
-// cwd-relative form (so `go run` from the repo root works) → fall back
-// to the same path next to the running executable (so a portable copy
-// of the binary works from any cwd) → fall back to the cwd-relative
-// form for the first-run case so the caller's first write creates it
-// where the user is.
-//
-// Used by core.MapsDir, audio/userconfig.SoundsDir, and any future
-// asset-folder helper so the resolution machinery isn't duplicated
-// per asset type.
+// ResolveAssetDir resolves a relative asset folder name to a usable path:
+// cwd-relative (repo-root `go run`) → next to the executable (portable binary)
+// → cwd-relative again (first-run case, where the caller's first write creates it).
 func ResolveAssetDir(rel string) string {
 	if DirExists(rel) {
 		return rel
@@ -69,9 +50,7 @@ func ResolveAssetDir(rel string) string {
 	return rel
 }
 
-// DirExists is the canonical "is `path` an existing directory?" check.
-// Shared by the asset-dir resolvers so they don't each carry their own
-// private dirExists helper.
+// DirExists reports whether `path` is an existing directory.
 func DirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
@@ -87,21 +66,17 @@ func LoadArea(path string) (AreaDefinition, error) {
 	return AreaFromMapFile(mf, path)
 }
 
-// inBoundsWH reports whether tile (x,z) lies inside a w×h grid. Used by
-// AreaFromMapFile to validate spawn tiles against the raw mapfile dimensions
-// (before the AreaDefinition — and its AreaDefinition.InBounds — exists).
+// inBoundsWH reports whether tile (x,z) lies inside a w×h grid (used before the
+// AreaDefinition — and its InBounds — exists).
 func inBoundsWH(x, z, w, h int) bool { return x >= 0 && x < w && z >= 0 && z < h }
 
-// oobErr is the shared "<what> is out of bounds" spawn-validation error, so
-// the pack / chest / door bounds guards in AreaFromMapFile phrase it once.
+// oobErr is the shared "<what> is out of bounds" spawn-validation error.
 func oobErr(what string, x, z, w, h int) error {
 	return fmt.Errorf("%s at (%d,%d) is out of bounds for %dx%d", what, x, z, w, h)
 }
 
-// validateLayerDims checks a grid layer's row count and per-row width against
-// the declared w×h, returning a descriptive error on the first mismatch (nil
-// when sound). Shared by AreaFromMapFile's required- and optional-layer loops
-// so the dimension-check phrasing lives in one place.
+// validateLayerDims checks a layer's row count and per-row width against w×h,
+// returning a descriptive error on the first mismatch.
 func validateLayerDims(name string, rows []string, w, h int) error {
 	if len(rows) != h {
 		return fmt.Errorf("%s layer has %d rows, declared height %d", name, len(rows), h)
@@ -125,11 +100,8 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	if !ok {
 		return AreaDefinition{}, fmt.Errorf("unknown facing %q", mf.StartFace)
 	}
-	// Dimensions and start position must be in-bounds before the rest of
-	// the runtime trusts them. Without this, a corrupt .map file (zero
-	// width, OOB start) reaches the renderer / WallAt / movement and
-	// panics on the first index. The editor's reachability check guards
-	// the F5 path; this guards Load-from-disk.
+	// Dimensions must be positive before the runtime trusts them, else a corrupt
+	// .map (zero width, OOB start) panics on first index in renderer/movement.
 	if mf.Width <= 0 || mf.Height <= 0 {
 		return AreaDefinition{}, fmt.Errorf("map dimensions must be positive (got %dx%d)", mf.Width, mf.Height)
 	}
@@ -147,37 +119,31 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 			return AreaDefinition{}, err
 		}
 	}
-	// Ceiling / elevation are OPTIONAL — absent ones blank-fill below via
-	// OptionalLayerOrBlank. But a PRESENT one must still match the declared
-	// dimensions, exactly like the required layers above: OptionalLayerOrBlank
-	// only substitutes a blank grid when the section is entirely empty, so a
-	// truncated / hand-edited layer would otherwise slip through unvalidated
-	// and silently read as the default for its missing cells (a short ceiling
-	// layer reads as "no roof", flipping AreaIsOutdoor → wrong weather/lighting).
+	// Ceiling/elevation are OPTIONAL (absent → blank-filled below), but a PRESENT
+	// one must match dimensions: OptionalLayerOrBlank only substitutes for an
+	// entirely-empty section, so a truncated layer would else default its missing
+	// cells (a short ceiling reads as "no roof", flipping AreaIsOutdoor).
 	optional := []struct {
 		name string
 		rows []string
 	}{
 		{mapfile.SectionCeiling, mf.Ceiling},
 		{mapfile.SectionElevation, mf.Elevation},
-		// PropLevels / DecorLevels are optional per-tile level grids. mapfile.validate
-		// dimension-checks them on the disk path, but the editor calls AreaFromMapFile
-		// directly on an in-memory MapFile that never ran validate() — guard them here
-		// for parity so a ragged level grid can't slip past on that path.
+		// PropLevels/DecorLevels: optional per-tile level grids. Guarded here for
+		// parity with the editor's direct-AreaFromMapFile path, which skips validate().
 		{mapfile.SectionPropLevels, mf.PropLevels},
 		{mapfile.SectionDecorLevels, mf.DecorLevels},
 	}
 	for _, layer := range optional {
 		if len(layer.rows) == 0 {
-			continue // absent — blank-filled / defaulted by its reader
+			continue // absent — defaulted by its reader
 		}
 		if err := validateLayerDims(layer.name, layer.rows, mf.Width, mf.Height); err != nil {
 			return AreaDefinition{}, err
 		}
 	}
-	// Solids is the optional voxel stack (N planes, each Height×Width). Same
-	// editor-path parity guard: validate present planes so a ragged plane can't
-	// reach SolidAt / the renderer (disk path is covered by mapfile.validate).
+	// Solids: optional voxel stack. Same editor-path parity guard so a ragged
+	// plane can't reach SolidAt / the renderer.
 	for L, plane := range mf.Solids {
 		if err := validateLayerDims(fmt.Sprintf("%s plane %d", mapfile.SectionSolids, L), plane, mf.Width, mf.Height); err != nil {
 			return AreaDefinition{}, err
@@ -204,10 +170,8 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		}
 		members := make([]PackMemberRef, 0, len(p.Members))
 		for _, name := range p.Members {
-			// Custom enemies win a name collision with a built-in kind: an
-			// author who names a custom foe "goblin" means THAT foe, with its
-			// overrides — resolving the built-in first would silently shadow it
-			// and drop the authored stats/skills/rewards.
+			// Custom enemies win a name collision with a built-in kind, else the
+			// author's overrides (stats/skills/rewards) would be silently dropped.
 			if def, ok := CustomEnemyByName(customs, name); ok {
 				members = append(members, CustomPackMember(def))
 				continue
@@ -218,7 +182,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 			}
 			members = append(members, BuiltinPackMember(kind))
 		}
-		// Members decode front-first; stamp rows from the trailing back count.
+		// Members decode front-first; stamp rows from trailing back count.
 		ApplyMemberRows(members, p.BackCount)
 		spawns = append(spawns, PackSpawn{TileX: p.X, TileZ: p.Z, Members: members, AI: PackAIFromName(p.AI)})
 	}
@@ -227,11 +191,8 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		if !inBoundsWH(c.X, c.Z, mf.Width, mf.Height) {
 			return AreaDefinition{}, oobErr("chest", c.X, c.Z, mf.Width, mf.Height)
 		}
-		// A chest blocks movement onto its tile, so one on the player start
-		// would soft-lock the spawn — placeChests silently drops it at runtime,
-		// which hides the mistake from the author. Reject it loudly here (the
-		// editor's chestPlaceBlockers already forbids placing one there), so the
-		// on-disk file, the editor summary, and the runtime agree.
+		// A chest on the player start would soft-lock the spawn (blocks the tile).
+		// Reject loudly here; placeChests silently drops it at runtime.
 		if c.X == mf.StartX && c.Z == mf.StartZ {
 			return AreaDefinition{}, fmt.Errorf("chest at (%d,%d) sits on the player start", c.X, c.Z)
 		}
@@ -245,14 +206,9 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		}
 		chests = append(chests, ChestSpawn{TileX: c.X, TileZ: c.Z, Items: kinds})
 	}
-	// Doors round-trip. A same-map portal keeps SelfMapToken in the runtime
-	// rather than being expanded to the concrete map id here — the transition
-	// resolver (run.applyAreaTransition) and the editor validator both
-	// understand the placeholder, and keeping it means the self-link survives
-	// a map rename. Expanding it used to leave a stale id behind after a
-	// rename, which then re-serialized as an explicit (now-wrong) cross-map
-	// target. Display sites (the door prompt) resolve "self" to the current
-	// area name.
+	// A same-map portal keeps SelfMapToken (not the concrete map id) so the
+	// self-link survives a rename; expanding it would re-serialize a stale,
+	// now-wrong cross-map target. Display sites resolve "self" to the area name.
 	doors := make([]DoorSpawn, 0, len(mf.Doors))
 	for _, d := range mf.Doors {
 		if !inBoundsWH(d.X, d.Z, mf.Width, mf.Height) {
@@ -315,13 +271,9 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		Dialogs:          dialogs,
 		Triggers:         triggers,
 	}
-	// Validate authored crystal tiles now that the area (and its BlockedAt
-	// geometry) is built: mapfile.validate already bounds-checks them, but a
-	// hand-edited crystal on a wall / prop / deep-water tile would render
-	// embedded and a duplicate tile would double-count. Reject loudly here —
-	// same philosophy as the pack/chest/door bounds guards — rather than ship
-	// a buried or stacked save point. (The editor's placement rules already
-	// prevent both, so this only fires on hand-edited maps.)
+	// Validate crystals now the area's BlockedAt geometry is built: reject a
+	// hand-edited crystal on a blocked tile (renders embedded) or a duplicate
+	// (double-counts). Only fires on hand-edited maps.
 	seenCrystal := make(map[[2]int]bool, len(area.CrystalSpawns))
 	for _, c := range area.CrystalSpawns {
 		if area.BlockedAt(c.TileX, c.TileZ) {
@@ -336,11 +288,9 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	return area, nil
 }
 
-// MapFileFromArea is the reverse converter — used by the editor to write the
-// current in-memory area back to disk. Returns an error rather than silently
-// substituting a default name when an enum value falls outside the registry:
-// a corrupted material / facing / enemy kind in memory is far more useful as
-// a refused save than as a silent rewrite to "dungeon" / "east" / "rat".
+// MapFileFromArea is the reverse converter (editor save-to-disk). Returns an
+// error rather than silently substituting a default when an enum value is out
+// of registry — a refused save beats a silent rewrite to "dungeon"/"east"/"rat".
 func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 	matName, ok := MaterialName(a.Materials)
 	if !ok {
@@ -352,8 +302,8 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 	}
 	packs := make([]mapfile.MapPack, 0, len(a.PackSpawns))
 	for _, s := range a.PackSpawns {
-		// Reorder front-first (shared invariant) so the on-disk member list and
-		// its ';' split reflect each member's row; the trailing BackCount are back.
+		// Reorder front-first so the on-disk list reflects each member's row;
+		// the trailing BackCount are back.
 		ordered, backCount := PartitionMembersByRow(s.Members)
 		names := make([]string, 0, len(ordered))
 		for _, member := range ordered {
@@ -400,10 +350,8 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		if !ok {
 			return mapfile.MapFile{}, fmt.Errorf("door %q has bad facing %d", d.Name, d.Facing)
 		}
-		// Encode same-map portals back to SelfMapToken so a moved/renamed
-		// map keeps its internal links intact. Cross-map targets stay as
-		// their explicit map id. (A target already equal to SelfMapToken is
-		// itself a self-portal, so this normalizes it to itself — a no-op.)
+		// Encode same-map portals back to SelfMapToken so a renamed map keeps its
+		// internal links. Cross-map targets stay as their explicit map id.
 		target := d.TargetMap
 		if IsSelfPortal(a, target) {
 			target = mapfile.SelfMapToken
@@ -423,16 +371,13 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		crystals = append(crystals, mapfile.MapCrystal{X: c.TileX, Z: c.TileZ})
 	}
 	ceiling := mapfile.OptionalLayerOrBlank(a.Ceiling, a.Width, a.Height, TileCeilingOpen)
-	// Elevation/solids encoding: a gapless area (every column solid from 0 up,
-	// the legacy heightfield case) writes ONLY the elevation: section and stays
-	// byte-identical to before this change. A gapped area (a floating cube over
-	// air) writes the voxel stack as solids: AND projects column tops into
-	// elevation: as a graceful downgrade for readers that ignore solids:.
+	// Elevation/solids encoding: a gapless area writes ONLY elevation: (byte-
+	// identical to legacy). A gapped area writes solids: AND projects column tops
+	// into elevation: as a graceful downgrade for readers that ignore solids:.
 	var elevation, solids = a.Elevation, [][]string(nil)
 	if len(a.Solids) > 0 {
-		// A materialized stack is authoritative: project column tops into
-		// elevation: (the renderer/legacy readers' heightfield view), and emit
-		// solids: only when a gap makes the stack inexpressible as a heightfield.
+		// A materialized stack is authoritative: project tops into elevation:,
+		// emit solids: only when a gap makes it inexpressible as a heightfield.
 		elevation = ElevationRowsFromSolids(&a)
 		if !a.AllColumnsGapless() {
 			solids = CloneSolids(a.Solids)
@@ -485,10 +430,8 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 	}, nil
 }
 
-// levelsForEncode returns a per-tile level grid (PropLevels / DecorLevels) to
-// write to disk, or nil when every cell is on its auto surface (the common case)
-// — so the map omits the section and a pre-feature map stays byte-identical. A
-// grid is emitted as soon as one tile carries an explicit (non-auto) level.
+// levelsForEncode returns a per-tile level grid to write, or nil when every cell
+// is auto (so the map omits the section and stays byte-identical pre-feature).
 func levelsForEncode(layer []string, w, h int) []string {
 	explicit := false
 	for z := 0; z < h && z < len(layer) && !explicit; z++ {
@@ -506,8 +449,8 @@ func levelsForEncode(layer []string, w, h int) []string {
 	return mapfile.OptionalLayerOrBlank(layer, w, h, PropLevelAuto)
 }
 
-// faceOverridesFromMap converts the on-disk per-tile face skins into the area's
-// FaceOverrides (nil when none, so a base-skin map carries no overrides).
+// faceOverridesFromMap converts on-disk per-tile face skins into FaceOverrides
+// (nil when none).
 func faceOverridesFromMap(faces []mapfile.MapFace) []FaceOverride {
 	if len(faces) == 0 {
 		return nil
@@ -519,9 +462,8 @@ func faceOverridesFromMap(faces []mapfile.MapFace) []FaceOverride {
 	return out
 }
 
-// mapFacesFromArea projects FaceOverrides to the on-disk form, normalizing unset
-// faces to the auto sentinel and sorting by (Z,X) so the faces: section is
-// deterministic (a re-save of an unchanged map is byte-identical).
+// mapFacesFromArea projects FaceOverrides to on-disk form: unset faces → auto
+// sentinel, sorted by (Z,X) so a re-save is deterministic/byte-identical.
 func mapFacesFromArea(a AreaDefinition) []mapfile.MapFace {
 	if len(a.FaceOverrides) == 0 {
 		return nil
@@ -546,20 +488,12 @@ func mapFacesFromArea(a AreaDefinition) []mapfile.MapFace {
 }
 
 // --- Table-driven name <-> enum lookups ---
-//
-// Each registry is a single slice of (enum, primary-name, alias-names...)
-// tuples. The Name function looks up by enum; the FromName function looks
-// up by case-folded name (matching any primary or alias). Both directions
-// share the same source of truth, so adding a new enum value is a one-line
-// edit instead of a "find the three switch statements" hunt — and an
-// unknown value returns ok=false instead of silently coercing to the first
-// option (which used to rewrite save data on the save path).
+// Each registry is a slice of (enum, primary-name, aliases...) tuples; Name
+// looks up by enum, FromName by case-folded name. Unknown → ok=false, never a
+// silent coerce to the first option (which used to rewrite save data).
 
-// indexByName scans a table for the first row whose name (extracted by `name`)
-// case-insensitively equals s, returning that row's index (ok=false on no
-// match). The single reverse (name→enum) scan the material / facing /
-// door-style / pack-AI decoders share — each used to open-code the same
-// strings.ToLower + linear-loop body.
+// indexByName returns the index of the first row whose name case-insensitively
+// equals s (ok=false on no match). Shared by the material/facing/style/AI decoders.
 func indexByName[T any](table []T, s string, name func(T) string) (int, bool) {
 	want := strings.ToLower(s)
 	for i, row := range table {
@@ -570,13 +504,9 @@ func indexByName[T any](table []T, s string, name func(T) string) (int, bool) {
 	return 0, false
 }
 
-// materialDef is one row of the material registry: the canonical on-disk
-// name plus per-material traits. indoor marks an enclosed interior (stone
-// walls, ceiling slabs by default) vs. an outdoor biome — minimap tone,
-// the world/wall pass, lighting profiles, and resource fallbacks branch on
-// it, so a future cave/crypt material is one row here, not a grep for
-// `== MaterialDungeon`. Single source for name lookup, editor dropdown
-// order, and the indoor predicate so they can't drift.
+// materialDef is one material registry row: on-disk name + traits. `indoor`
+// (enclosed interior vs. outdoor biome) drives minimap tone, lighting, and
+// resource fallbacks — a new material is one row, not a `== MaterialDungeon` grep.
 type materialDef struct {
 	value  MaterialSet
 	name   string
@@ -589,12 +519,9 @@ var materialDefs = []materialDef{
 }
 
 func init() {
-	// Keep the grid-layer enumeration in lockstep with the on-disk format.
-	// gridLayers() (area_snapshot.go) drives CloneArea/AreaContentEqual/region,
-	// while AreaFromMapFile/MapFileFromArea hand-list the same six layer fields;
-	// if a 7th layer is added on one side but not the converters, it silently
-	// fails to round-trip. This panic forces the count to stay aligned with
-	// mapfile's grid-layer set, prompting a check of the converter pair.
+	// Keep gridLayers() (drives Clone/Equal/region) in lockstep with the
+	// converters, which hand-list the same layer fields; a layer added on one
+	// side but not the other silently fails to round-trip.
 	if got := len((&AreaDefinition{}).gridLayers()); got != mapfile.GridLayerCount {
 		panic(fmt.Sprintf("core: gridLayers() has %d layers but mapfile has %d grid layers — update the Area↔MapFile converters (AreaFromMapFile / MapFileFromArea) too", got, mapfile.GridLayerCount))
 	}
@@ -613,10 +540,8 @@ func init() {
 	}
 }
 
-// findMaterialDef is the single forward scan over the material registry,
-// shared by MaterialName / MaterialIsIndoor so they can't drift on lookup
-// logic (materialFromName scans by name instead). Returns ok=false when
-// the value is out of range.
+// findMaterialDef is the forward (enum→row) scan, shared by MaterialName /
+// MaterialIsIndoor. ok=false when out of range.
 func findMaterialDef(m MaterialSet) (materialDef, bool) {
 	for _, d := range materialDefs {
 		if d.value == m {
@@ -626,10 +551,8 @@ func findMaterialDef(m MaterialSet) (materialDef, bool) {
 	return materialDef{}, false
 }
 
-// MaterialName returns the canonical on-disk name for the material set,
-// plus ok=false when the value is out of range. Callers that write to
-// .map files should propagate the failure rather than silently committing
-// a wrong material name.
+// MaterialName returns the on-disk name for the material set; ok=false when out
+// of range (save-path callers must propagate the failure).
 func MaterialName(m MaterialSet) (string, bool) {
 	d, ok := findMaterialDef(m)
 	return d.name, ok
@@ -642,10 +565,8 @@ func materialFromName(s string) (MaterialSet, bool) {
 	return 0, false
 }
 
-// MaterialOptions is the editor's dropdown order, derived from
-// materialDefs so the two can't drift — a material added to the registry
-// shows up in the editor dropdown automatically, in the same (stable)
-// order so palette colors stay associated with the right material.
+// MaterialOptions is the editor's dropdown order, derived from materialDefs (so
+// a new material shows up automatically, in a stable order for palette colors).
 var MaterialOptions = buildMaterialOptions()
 
 func buildMaterialOptions() []MaterialSet {
@@ -656,20 +577,14 @@ func buildMaterialOptions() []MaterialSet {
 	return opts
 }
 
-// MaterialIsIndoor reports whether the material set represents an
-// enclosed interior (stone walls, ceiling slabs by default) vs. an
-// outdoor biome, reading the trait off the material registry row.
+// MaterialIsIndoor reports whether the material set is an enclosed interior.
 func MaterialIsIndoor(m MaterialSet) bool {
 	d, _ := findMaterialDef(m)
 	return d.indoor
 }
 
-// facingDef is one row of the facing registry: the enum value, its
-// canonical on-disk name, and the single-letter UI label. Bundling the
-// short label here (rather than a parallel FacingShortLabels literal that
-// had to be kept in step by hand) mirrors the doorStyleDefs slug+label
-// pattern, so adding or renaming a facing is one row edit. FacingShortLabels
-// is derived from this table below.
+// facingDef is one facing registry row: enum value, on-disk name, and the
+// single-letter UI label (FacingShortLabels derives from it).
 type facingDef struct {
 	value int
 	name  string // canonical on-disk name (mapfile.Facing*Name)
@@ -683,10 +598,8 @@ var facingDefs = []facingDef{
 	{West, mapfile.FacingWestName, "W"},
 }
 
-// FacingShortLabels are the single-letter UI labels for the four facings,
-// indexed by core.North/East/South/West. Derived from facingDefs so the
-// editor's metadata panel and door-edit modal cite one source — a future
-// renaming (localisation, glyph swap) is a one-row edit, not a grep.
+// FacingShortLabels are the single-letter UI labels indexed by North/East/South/
+// West, derived from facingDefs.
 var FacingShortLabels = func() [FacingCount]string {
 	var out [FacingCount]string
 	for _, d := range facingDefs {
@@ -695,9 +608,8 @@ var FacingShortLabels = func() [FacingCount]string {
 	return out
 }()
 
-// FacingName returns the canonical on-disk name for a facing. ok=false
-// only when normalization produces a value out of range, which can't
-// happen for the four legitimate enum values.
+// FacingName returns the on-disk name for a facing (ok=false only on an
+// out-of-range value, impossible for the four legit enum values).
 func FacingName(f int) (string, bool) {
 	want := NormalizeFacing(f)
 	for _, d := range facingDefs {
@@ -715,11 +627,8 @@ func facingFromName(s string) (int, bool) {
 	return 0, false
 }
 
-// init asserts facingDefs covers every facing exactly once, in the same
-// order as mapfile.FacingNames, and carries a non-empty short label per
-// row. Mirrors the materialDefs / doorStyleDefs coverage asserts so a new
-// facing added to the enum without a facingDefs row (or with a blank label)
-// panics at startup rather than yielding a "" name / label at runtime.
+// init asserts facingDefs covers every facing once, in mapfile.FacingNames order,
+// with a non-empty short label — so a missing/blank row panics at startup.
 func init() {
 	if len(facingDefs) != FacingCount || len(mapfile.FacingNames) != FacingCount {
 		panic("core: facingDefs length must match FacingCount and mapfile.FacingNames — add a row when extending the facing enum")
@@ -737,24 +646,19 @@ func init() {
 	}
 }
 
-// FacingAwayFromAdjacentWall scans the four cardinal neighbours of
-// (x, z) in N→E→S→W order and returns the facing pointing AWAY from the
-// first wall found — the direction something mounted on that wall (a wall
-// torch, a door set into it) should face into the room. found=false when
-// the cell has no adjacent wall, so each caller picks its own fallback.
-// Single source for the rule shared by the renderer's wall-torch
-// orientation and the editor's door auto-facing.
+// FacingAwayFromAdjacentWall returns the facing AWAY from the first wall found
+// scanning (x,z)'s cardinal neighbours N→E→S→W — the way a wall-mounted thing
+// (torch, door) faces into the room. found=false when no adjacent wall.
 func FacingAwayFromAdjacentWall(m AreaDefinition, x, z int) (facing int, found bool) {
-	// A neighbour is something to back against if it's a solid obstruction OR a
-	// cliff face — a tile raised above this one (walls are elevation now, so the
-	// old "adjacent wall" is an adjacent higher tile). Off-map counts via WallAt.
+	// A neighbour to back against is a solid obstruction OR a higher tile (walls
+	// are elevation now). Off-map counts via WallAt.
 	here := m.ElevationLevelAt(x, z)
 	wall := func(nx, nz int) bool {
 		return m.WallAt(nx, nz) || m.ElevationLevelAt(nx, nz) > here
 	}
 	switch {
 	case wall(x, z-1):
-		return South, true // wall/cliff north → face south, into the room
+		return South, true // wall north → face south
 	case wall(x+1, z):
 		return West, true
 	case wall(x, z+1):
@@ -765,11 +669,8 @@ func FacingAwayFromAdjacentWall(m AreaDefinition, x, z int) (facing int, found b
 	return 0, false
 }
 
-// doorStyleDef bundles a DoorStyle's on-disk slug and editor button label in
-// ONE row so the two can't drift apart per style (was two parallel arrays).
-// Indexed by DoorStyle; the name matches mapfile.DoorStyleNames row-for-row
-// (init asserts the alignment). Both name directions go through this instead
-// of the hand-mirrored switches that used to drift.
+// doorStyleDef bundles a DoorStyle's on-disk slug and editor label in one row,
+// indexed by DoorStyle; name matches mapfile.DoorStyleNames row-for-row (init asserts).
 type doorStyleDef struct {
 	name  string // canonical on-disk slug
 	label string // editor button label
@@ -781,9 +682,7 @@ var doorStyleDefs = [DoorStyleCount]doorStyleDef{
 	DoorStyleField:    {mapfile.DoorStyleFieldName, "Field"},
 }
 
-// DoorStyleName maps a DoorStyle to its canonical on-disk string. An
-// out-of-range style (shouldn't happen) falls back to building so a
-// corrupt value still round-trips to a valid row.
+// DoorStyleName maps a DoorStyle to its on-disk string; out-of-range falls back to building.
 func DoorStyleName(s DoorStyle) string {
 	if s < 0 || int(s) >= len(doorStyleDefs) {
 		return mapfile.DoorStyleBuildingName
@@ -791,8 +690,7 @@ func DoorStyleName(s DoorStyle) string {
 	return doorStyleDefs[s].name
 }
 
-// DoorStyleLabel returns the editor button label for a door style. An
-// out-of-range style falls back to the building row's label.
+// DoorStyleLabel returns the editor button label; out-of-range falls back to building.
 func DoorStyleLabel(s DoorStyle) string {
 	if s < 0 || int(s) >= len(doorStyleDefs) {
 		return doorStyleDefs[DoorStyleBuilding].label
@@ -800,9 +698,7 @@ func DoorStyleLabel(s DoorStyle) string {
 	return doorStyleDefs[s].label
 }
 
-// doorStyleFromName maps an on-disk style string to a DoorStyle. Empty or
-// unrecognized resolves to building (the parser already validates names,
-// so this is the load-time default for a missing column).
+// doorStyleFromName maps an on-disk style string to a DoorStyle; empty/unknown → building.
 func doorStyleFromName(s string) DoorStyle {
 	if i, ok := indexByName(doorStyleDefs[:], s, func(d doorStyleDef) string { return d.name }); ok {
 		return DoorStyle(i)
@@ -821,10 +717,8 @@ func init() {
 	}
 }
 
-// packAIDef bundles a PackAI's on-disk slug and editor-facing display label in
-// ONE row (mirrors doorStyleDef) so the slug and player-facing label share a
-// position and can't drift. Indexed by PackAI; the name matches
-// mapfile.PackAINames row-for-row (init below asserts it).
+// packAIDef bundles a PackAI's on-disk slug and editor label in one row, indexed
+// by PackAI; name matches mapfile.PackAINames row-for-row (init asserts).
 type packAIDef struct {
 	name  string // canonical on-disk slug
 	label string // editor pack-edit modal label
@@ -837,15 +731,12 @@ var packAIDefs = [PackAICount]packAIDef{
 	PackAISkittish:    {mapfile.PackAISkittishName, "Skittish (flees)"},
 }
 
-// validPackAI reports whether ai indexes packAIDefs. The single bounds rule
-// the PackAI lookups share so a corrupt value falls back uniformly.
+// validPackAI reports whether ai indexes packAIDefs.
 func validPackAI(ai PackAI) bool {
 	return ai >= 0 && int(ai) < len(packAIDefs)
 }
 
-// PackAIName returns the canonical on-disk string for a PackAI. Empty
-// or out-of-range falls back to the no-op mode so a corrupt value still
-// round-trips to a valid row.
+// PackAIName returns the on-disk string for a PackAI; out-of-range falls back to none.
 func PackAIName(ai PackAI) string {
 	if !validPackAI(ai) {
 		return mapfile.PackAINoneName
@@ -853,10 +744,7 @@ func PackAIName(ai PackAI) string {
 	return packAIDefs[ai].name
 }
 
-// PackAIFromName maps an on-disk name (case-insensitive) to a PackAI.
-// Empty or unrecognized resolves to PackAINone (the editor's default
-// for a freshly-placed pack), so the loader doesn't need a separate
-// "missing column" branch.
+// PackAIFromName maps an on-disk name to a PackAI; empty/unknown → PackAINone.
 func PackAIFromName(s string) PackAI {
 	if i, ok := indexByName(packAIDefs[:], s, func(d packAIDef) string { return d.name }); ok {
 		return PackAI(i)
@@ -892,16 +780,12 @@ type enemyKindNameEntry struct {
 var enemyKindNameTable = []enemyKindNameEntry{
 	{EnemyRat, "rat", nil},
 	{EnemyBat, "bat", nil},
-	// "diseasedrat" is accepted as a legacy alias for files saved before
-	// the underscore-separated form became canonical.
+	// aliases cover the no-underscore form for legacy/hand-edited maps.
 	{EnemyDiseasedRat, "diseased_rat", []string{"diseasedrat"}},
 	{EnemyGoblin, "goblin", nil},
 	{EnemyGoblinMage, "goblin_mage", []string{"goblinmage"}},
 	{EnemyAmoeba, "amoeba", nil},
 	{EnemyVenusMantrap, "venus_mantrap", []string{"mantrap", "venusmantrap"}},
-	// Roster expansion. Canonical names use the snake_case convention
-	// the parser already enforces; aliases cover the no-underscore form
-	// for hand-edited maps.
 	{EnemyCaveSpider, "cave_spider", []string{"spider", "cavespider"}},
 	{EnemyVampireBat, "vampire_bat", []string{"vampirebat"}},
 	{EnemyWisp, "wisp", []string{"will_o_wisp", "willowisp"}},
@@ -910,18 +794,15 @@ var enemyKindNameTable = []enemyKindNameEntry{
 	{EnemySkeleton, "skeleton", nil},
 }
 
-// enemyKindByName flattens enemyKindNameTable into a single primary+alias
-// lookup so EnemyKindFromName doesn't double-loop. Keys are pre-lowercased
-// since callers always normalize.
+// enemyKindByName flattens enemyKindNameTable into one primary+alias lookup.
+// Keys are pre-lowercased.
 var enemyKindByName = buildEnemyKindByName()
 
 func buildEnemyKindByName() map[string]EnemyKind {
 	m := make(map[string]EnemyKind, len(enemyKindNameTable))
 	add := func(key string, v EnemyKind) {
 		// Collision assert: two DIFFERENT kinds claiming the same name/alias
-		// would silently last-write-wins and mis-route EnemyKindFromName. The
-		// missing-row assert in init() can't catch this; guard it here at
-		// build time. (A kind repeating its own alias is harmless — same value.)
+		// would last-write-wins and mis-route EnemyKindFromName.
 		if existing, dup := m[key]; dup && existing != v {
 			panic("core: enemyKindNameTable name/alias collision on " + key)
 		}
@@ -936,11 +817,8 @@ func buildEnemyKindByName() map[string]EnemyKind {
 	return m
 }
 
-// Coverage assert: every registered EnemyKind must have a name row in
-// enemyKindNameTable. Without this a new kind silently fails EnemyKindName
-// (returning ok=false), which only surfaces when a map placing it is saved —
-// not at startup. Mirrors the materialDefs / packAIDefs / doorStyleDefs
-// asserts above so the enemy table can't drift out of sync with the enum.
+// Coverage assert: every registered EnemyKind must have a name row, else a new
+// kind silently fails EnemyKindName until a map placing it is saved.
 func init() {
 	for _, def := range EnemyKinds() {
 		if _, ok := EnemyKindName(def.Kind); !ok {
@@ -949,12 +827,8 @@ func init() {
 	}
 }
 
-// EnemyKindName returns the canonical on-disk name for the enemy kind,
-// plus ok=false on unknown values. MapFileFromArea propagates the failure
-// to caller — better to refuse a save than silently rewrite enemy types.
-// Keeps its own forward (value→name) scan — the material / facing registries
-// inline the same tiny loop against their own def rows — because the enemy
-// table's rows carry an extra `aliases` field the others don't.
+// EnemyKindName returns the on-disk name for an enemy kind; ok=false on unknown
+// (MapFileFromArea refuses the save rather than rewriting enemy types).
 func EnemyKindName(k EnemyKind) (string, bool) {
 	for _, e := range enemyKindNameTable {
 		if e.value == k {
@@ -969,20 +843,11 @@ func EnemyKindFromName(s string) (EnemyKind, bool) {
 	return kind, ok
 }
 
-// SanitizeFilename normalizes a user-provided string into a safe on-disk
-// filename stem — lowercase ASCII letters, digits, underscore, hyphen
-// only. Spaces fold to underscore; everything else strips. If `fallback`
-// is non-empty it's returned when the input has nothing usable left;
-// otherwise the empty string comes back so the caller can refuse the
-// save. Shared by the editor's map-save flow and audio's user-sound
-// save so both apply the same character-class contract.
-//
-// On-disk contract: a user-facing FILENAME stem (.map / .wav). KEEPS hyphens
-// (so "cave-1" stays "cave-1") and offers a fallback when nothing usable
-// remains. Intentionally NOT the same as slugify (enemyvisual.go — folds
-// hyphens into underscores, no fallback) or SanitizeCustomEnemyName
-// (customenemy.go — preserves case + punctuation, only collapses whitespace).
-// Don't substitute one for another; each owns a distinct on-disk format.
+// SanitizeFilename normalizes a string into a safe filename stem: lowercase
+// ASCII letters/digits/underscore/hyphen only, spaces → underscore, rest stripped.
+// Returns `fallback` (or "" so the caller can refuse) when nothing usable remains.
+// KEEPS hyphens — distinct from slugify (folds hyphens, no fallback) and
+// SanitizeCustomEnemyName (preserves case+punctuation); don't substitute.
 func SanitizeFilename(name, fallback string) string {
 	out := strings.ToLower(strings.TrimSpace(name))
 	out = strings.ReplaceAll(out, " ", "_")
@@ -1004,10 +869,8 @@ func SanitizeFilename(name, fallback string) string {
 	return string(cleaned)
 }
 
-// MapPath returns the canonical save path for a map ID under MapsDir.
-// Strips a trailing extension (case-insensitive) from the id before
-// reappending mapfile.Ext — so a user typing "test.map" in the Save
-// As field writes to maps/test.map, not maps/test.map.map.
+// MapPath returns the save path for a map ID under MapsDir, stripping a trailing
+// .map first so "test.map" writes to maps/test.map, not maps/test.map.map.
 func MapPath(id string) string {
 	if n := len(mapfile.Ext); len(id) >= n && strings.EqualFold(id[len(id)-n:], mapfile.Ext) {
 		id = id[:len(id)-n]
@@ -1021,12 +884,9 @@ func MapIDFromPath(path string) string {
 	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
-// IsSelfPortal reports whether a door's TargetMap refers to the area `a`
-// itself — either the explicit SelfMapToken placeholder or `a`'s own map id
-// (derived from its Path). An unsaved area (empty Path) has no id, so only the
-// token counts. Centralizes the "is this door same-map?" test the editor's
-// door validator (crossMapDoorWarnings) and the save encoder (MapFileFromArea)
-// both need, so the two can't drift on the comparison.
+// IsSelfPortal reports whether a door's TargetMap refers to area `a` itself
+// (SelfMapToken or a's own map id from Path). An unsaved area (empty Path) has
+// no id, so only the token counts.
 func IsSelfPortal(a AreaDefinition, target string) bool {
 	if target == SelfMapToken {
 		return true

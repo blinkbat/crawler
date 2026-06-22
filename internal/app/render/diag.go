@@ -12,46 +12,32 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Render diagnostics log. Toggle from the pause-menu Debug submenu
-// (DebugMenuRenderLog row). When on, every DrawWorld appends a one-
-// line frame snapshot to crawler-render.log; OpenRenderLog also
-// dumps a one-shot init banner (raylib version, GPU info, shader
-// IDs, resource counts) so the log captures both startup state and
-// per-frame behaviour.
-//
-// The log lives in the user's chosen cache dir (so a packaged build
-// doesn't pollute Program Files). Falls back to the cwd if cache
-// resolution fails. The path is logged to stdout on open so the
-// user can find it.
+// Render diagnostics log. Toggle from the pause-menu Debug submenu. When on,
+// every DrawWorld appends a frame snapshot to crawler-render.log; OpenRenderLog
+// also dumps a one-shot init banner. Lives in the user's cache dir, falls back
+// to cwd; path is logged to stdout on open.
 
 const (
 	renderLogFilename = "crawler-render.log"
-	// renderLogFrameStride throttles the per-frame line so a 60-Hz
-	// session doesn't generate a 60-line/sec wall of text. 6 means
-	// one snapshot every ~100ms at 60 Hz; tunable here in one place.
+	// renderLogFrameStride throttles the per-frame line: 6 ≈ one snapshot/100ms at 60Hz.
 	renderLogFrameStride = 6
 )
 
 var (
 	renderLogMu sync.Mutex
-	// renderLogActiveFlag mirrors "renderLogFile != nil" as a lock-free atomic
-	// so the per-frame IsRenderLogActive gate (drawWorld calls it EVERY frame,
-	// even when the log is off) is a single atomic load instead of a mutex
-	// round-trip. Written under renderLogMu in Open/CloseRenderLog so it can't
-	// disagree with renderLogFile; read lock-free everywhere else.
+	// renderLogActiveFlag mirrors "renderLogFile != nil" as a lock-free atomic so
+	// the per-frame IsRenderLogActive gate is one load, not a mutex round-trip.
+	// Written under renderLogMu in Open/CloseRenderLog; read lock-free elsewhere.
 	renderLogActiveFlag atomic.Bool
 	renderLogFile       *os.File
 	renderLogFrameNo    int
-	// renderLogPendingInit is the init banner that gets stamped once on
-	// open + every shader / resource load that fires while the log
-	// is closed (so a Resources rebuild between toggles still gets
-	// captured the next time the user reopens the log).
+	// renderLogPendingInit holds init lines that fired while the log was closed,
+	// flushed on the next OpenRenderLog so a between-toggles rebuild is captured.
 	renderLogPendingInit []string
 )
 
-// OpenRenderLog (re-)opens the diagnostics file in append mode and
-// stamps the init banner. Safe to call multiple times: the second
-// call closes the previous file first.
+// OpenRenderLog (re-)opens the diagnostics file in append mode and stamps the
+// init banner. Safe to call repeatedly: a second call closes the previous file.
 func OpenRenderLog() {
 	renderLogMu.Lock()
 	defer renderLogMu.Unlock()
@@ -71,10 +57,7 @@ func OpenRenderLog() {
 	renderLogActiveFlag.Store(true)
 	renderLogFrameNo = 0
 
-	// One-shot session banner + any pending init lines that fired
-	// while the log was closed (e.g., shader load during NewResources
-	// before the first toggle). Banner uses Fprintln so the file is
-	// written even if the user never enables the per-frame log.
+	// One-shot session banner + any pending init lines that fired while closed.
 	stamp := time.Now().Format("2006-01-02 15:04:05.000")
 	fmt.Fprintf(renderLogFile, "\n=== render log opened %s ===\n", stamp)
 	fmt.Fprintf(renderLogFile, "go=%s os=%s arch=%s gpu=%q glsl=%q\n",
@@ -103,30 +86,18 @@ func CloseRenderLog() {
 	renderLogActiveFlag.Store(false)
 }
 
-// IsRenderLogActive reports whether the log file is currently open.
-// Per-frame call sites use this to short-circuit the snapshot work
-// (camera + counts) when logging is off. Reads the lock-free
-// renderLogActiveFlag rather than taking renderLogMu, so the
-// once-per-frame gate in drawWorld costs a single atomic load even
-// when the log is off — no mutex traffic on the hot path. Safe to
-// call from inside a logging call (no lock to self-deadlock on).
+// IsRenderLogActive reports whether the log file is open. Reads the lock-free
+// renderLogActiveFlag so the per-frame drawWorld gate costs a single atomic load.
 func IsRenderLogActive() bool {
 	return renderLogActiveFlag.Load()
 }
 
-// renderLogPendingCap bounds the in-memory init/error backlog
-// retained while the log file is closed. Sized comfortably above
-// the actual startup line count (~6 init lines today: lighting
-// shader + locs + billboard fog + locs + resources + flat tables)
-// with headroom for future texture/material init dumps. Smaller
-// caps risked silently dropping the very lines the log is designed
-// to capture for render-bug bisection.
+// renderLogPendingCap bounds the in-memory init/error backlog kept while the log
+// is closed, sized well above the ~6 startup lines so nothing is silently dropped.
 const renderLogPendingCap = 512
 
-// trimPending evicts the oldest pending entry in place (copy +
-// re-slice the same array) so the dropped string headers actually
-// release for GC — `buf = buf[1:]` would advance the header but
-// leave the discarded element anchored in the underlying array.
+// trimPending evicts the oldest pending entry in place (copy + re-slice + nil the
+// tail) so the dropped string releases for GC — buf[1:] would leave it anchored.
 func trimPending() {
 	n := len(renderLogPendingInit)
 	if n == 0 {
@@ -137,12 +108,8 @@ func trimPending() {
 	renderLogPendingInit = renderLogPendingInit[:n-1]
 }
 
-// logRenderLine is the shared write-or-stash body behind LogRenderInit /
-// LogRenderError. If the log file is open it writes the tagged line immediately;
-// otherwise it stashes the line in renderLogPendingInit to be flushed the next
-// time OpenRenderLog runs. The pending buffer is bounded by renderLogPendingCap —
-// past that the oldest gets dropped so a long session without the log toggled on
-// can't grow the buffer unboundedly.
+// logRenderLine is the shared write-or-stash body behind LogRenderInit/Error.
+// Writes immediately if the file is open, else stashes (bounded by renderLogPendingCap).
 func logRenderLine(tag, format string, args ...interface{}) {
 	line := fmt.Sprintf(tag+format, args...)
 	renderLogMu.Lock()
@@ -158,24 +125,18 @@ func logRenderLine(tag, format string, args ...interface{}) {
 	renderLogPendingInit = append(renderLogPendingInit, line)
 }
 
-// LogRenderInit records a one-off init line (shader compile result,
-// model load count, etc.).
+// LogRenderInit records a one-off init line (shader compile, model load count).
 func LogRenderInit(format string, args ...interface{}) {
 	logRenderLine("[init] ", format, args...)
 }
 
-// LogRenderError stamps a one-off error line. Same write-or-stash semantics as
-// LogRenderInit; tagged differently so a grep on the resulting log can separate
-// errors from init noise.
+// LogRenderError stamps a one-off error line; tagged distinctly for grep.
 func LogRenderError(format string, args ...interface{}) {
 	logRenderLine("[error] ", format, args...)
 }
 
-// renderFrameStats is the per-frame snapshot recorded by DrawWorld
-// when the log is on. Captured by the world loop, written via
-// logRenderFrame at the bottom of the draw call. Splitting "collect"
-// from "write" lets the DrawWorld hot path increment counters
-// directly without touching the mutex per tile.
+// renderFrameStats is the per-frame snapshot DrawWorld records when the log is
+// on. Separating collect from write lets the hot path increment without the mutex.
 type renderFrameStats struct {
 	MapW, MapH       int
 	FrameDT          float32 // raylib frame time (s); printed as ms + derived fps
@@ -203,10 +164,8 @@ type renderFrameStats struct {
 	BattleActive     bool
 }
 
-// LogRenderFrame writes one frame snapshot to the log file (if open).
-// Throttled by renderLogFrameStride so a 60Hz session writes ~10
-// lines/sec. Caller passes a populated renderFrameStats — most
-// fields come from the world draw, the rest from the GameState.
+// LogRenderFrame writes one frame snapshot to the log (if open), throttled by
+// renderLogFrameStride.
 func LogRenderFrame(stats renderFrameStats) {
 	renderLogMu.Lock()
 	defer renderLogMu.Unlock()
@@ -218,9 +177,7 @@ func LogRenderFrame(stats renderFrameStats) {
 		return
 	}
 	t := time.Now().Format("15:04:05.000")
-	// dt is raylib's last-frame time; fps is its reciprocal. Both come straight
-	// from the stat snapshot — no clock call here — so the line cost is just the
-	// format + buffered write below.
+	// dt is raylib's last-frame time; fps its reciprocal. Both from the snapshot.
 	dtMS := stats.FrameDT * 1000
 	fps := float32(0)
 	if stats.FrameDT > 0 {
@@ -246,18 +203,12 @@ func LogRenderFrame(stats renderFrameStats) {
 		stats.SunColor.X, stats.SunColor.Y, stats.SunColor.Z,
 		stats.BattleActive,
 	)
-	// No fsync here. Sync() is a disk flush that can stall the main render
-	// thread for ~ms — a hitch that would both cost frame time and corrupt the
-	// dt/fps numbers this line exists to measure. The Fprintf above is a cheap
-	// write() into the OS page cache, which already survives a process crash
-	// (only an OS crash / power loss could lose it, irrelevant for a debug log).
-	// Durable flush still happens on the graceful CloseRenderLog path.
+	// No fsync here: it would stall the render thread for ~ms and corrupt the very
+	// dt/fps it measures. The write() survives a process crash; CloseRenderLog flushes.
 }
 
-// renderLogPath resolves the on-disk location for crawler-render.log.
-// Prefers the user's cache dir; falls back to cwd if that fails so
-// the log is always somewhere predictable. Returns the absolute
-// path so the stdout banner the user sees on toggle is copy-pastable.
+// renderLogPath resolves crawler-render.log's location: user cache dir, else cwd.
+// Returns an absolute path so the stdout banner is copy-pastable.
 func renderLogPath() string {
 	if cache, err := os.UserCacheDir(); err == nil {
 		dir := filepath.Join(cache, "crawler")
@@ -265,15 +216,14 @@ func renderLogPath() string {
 			return filepath.Join(dir, renderLogFilename)
 		}
 	}
-	// Fallback: cwd. Best-effort absolute path so the banner reads cleanly.
+	// Fallback: cwd.
 	if abs, err := filepath.Abs(renderLogFilename); err == nil {
 		return abs
 	}
 	return renderLogFilename
 }
 
-// safeStr coerces a possibly-empty raylib string into something the
-// log line can print without breaking.
+// safeStr coerces a possibly-empty raylib string for the log line.
 func safeStr(s string) string {
 	if s == "" {
 		return "(unknown)"

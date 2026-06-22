@@ -8,19 +8,14 @@ import (
 	"crawler/internal/app/core"
 )
 
-// seedGameRNG replaces the GameState's RNG with a deterministic one so the
-// Steal and Firebolt-burn rolls become reproducible inside a test. The
-// previous global-swap pattern is gone: each test now owns its own RNG via
-// its own GameState.
+// seedGameRNG gives the GameState a deterministic RNG for reproducible rolls.
 func seedGameRNG(t *testing.T, g *core.GameState, seed int64) {
 	t.Helper()
 	g.RNG = rand.New(rand.NewSource(seed))
 }
 
-// newTestState builds a minimal GameState with a 4-class party and one pack
-// of two rats. CurrentParty/EnemyIndex are pre-pointed at slot 0/0. The
-// battle isn't run through Start — phase is BattlePlayer so apply*'s
-// finishActorTurn doesn't surprise tests with queue plumbing.
+// newTestState builds a minimal GameState: 4-class party, one pack of two rats,
+// cursors at 0/0. Phase is BattlePlayer (not run through Start) to avoid queue plumbing surprises.
 func newTestState() *core.GameState {
 	party := []core.PartyMember{
 		{Class: core.ClassWarrior, Name: "Vex", Stats: core.Stats{STR: 6, DEX: 2, INT: 1, WIS: 1, VIT: 5, SPD: 3}, HP: 10, MaxHP: 10, MP: 5, MaxMP: 5},
@@ -37,23 +32,16 @@ func newTestState() *core.GameState {
 		Packs:  []core.Pack{pack},
 		Battle: core.Battle{ActivePack: 0, EnemyIndex: 0, CurrentParty: 0, Phase: core.BattlePlayer, PartyTarget: 1, EnemyAttackCursor: -1},
 	}
-	// Deterministic RNG by default. Without this, g.Rand() lazily seeds
-	// from the auto-seeded global rand (core/types.go), making any
-	// RNG-driven path built on newTestState flaky run-to-run. Tests that
-	// need a specific roll still override via seedGameRNG.
+	// Deterministic by default; without it g.Rand() lazily seeds from global rand and goes flaky.
 	g.RNG = rand.New(rand.NewSource(1))
-	// Pre-build a one-actor queue so finishActorTurn can run cursor++ without
-	// hitting an empty queue and triggering beginNewRound.
+	// One-actor queue so finishActorTurn's cursor++ doesn't hit an empty queue / beginNewRound.
 	g.Battle.Queue = []core.ActorRef{{IsParty: true, Index: 0}}
 	g.Battle.QueueCursor = 0
 	return g
 }
 
-// TestSkippedTurnTicksPoison is the regression guard for the DoT-freeze bug:
-// a turn skipped by Sleep/Stun must still elapse the actor's Poison (damage +
-// duration), exactly as a normal turn does, on BOTH sides. Previously the
-// skip path ticked only Webbed/Confused, so a poisoned-and-incapacitated
-// actor paused its poison for the whole lockout.
+// TestSkippedTurnTicksPoison: a turn skipped by Sleep/Stun must still tick Poison
+// (damage + duration) on both sides; the skip path once ticked only Webbed/Confused.
 func TestSkippedTurnTicksPoison(t *testing.T) {
 	// Party side.
 	g := newTestState()
@@ -68,7 +56,7 @@ func TestSkippedTurnTicksPoison(t *testing.T) {
 		t.Errorf("party poison dealt no damage on skipped turn: HP %d, was %d", g.Party[0].HP, startHP)
 	}
 
-	// Enemy side (a stunned, poisoned enemy).
+	// Enemy side.
 	g2 := newTestState()
 	enHP := g2.Packs[0].Members[0].HP
 	g2.Packs[0].Members[0].PoisonTurns = 2
@@ -81,27 +69,22 @@ func TestSkippedTurnTicksPoison(t *testing.T) {
 	}
 }
 
-// TestBuildTurnQueue_SPDIncreasesTurnRate locks the contract that SPD
-// drives turn RATE (how often an actor acts over many rounds), not just
-// order within one round. A SPD-6 actor against a SPD-2 actor should take
-// roughly 3× the turns over a long run — only possible because readiness
-// now persists across rounds (the old per-round reset capped the fast
-// actor at ~2× and discarded its surplus at each round boundary).
+// TestBuildTurnQueue_SPDIncreasesTurnRate: SPD drives turn RATE over many rounds, not
+// just order within one. SPD-6 vs SPD-2 ≈ 3× turns, only because readiness persists across rounds.
 func TestBuildTurnQueue_SPDIncreasesTurnRate(t *testing.T) {
 	g := &core.GameState{
 		Party: []core.PartyMember{
 			{Name: "Fast", Stats: core.Stats{SPD: 6}, HP: 10, MaxHP: 10},
 			{Name: "Slow", Stats: core.Stats{SPD: 2}, HP: 10, MaxHP: 10},
 		},
-		// One dead enemy so BattleMembers is non-empty but contributes no
-		// queue actor — isolates the two party SPDs.
+		// One dead enemy: BattleMembers non-empty but no queue actor, isolating the two party SPDs.
 		Packs:  []core.Pack{{Members: []core.Enemy{{Kind: core.EnemyRat, Alive: false}}}},
 		Battle: core.Battle{ActivePack: 0, EnemyIndex: 0, Phase: core.BattlePlayer},
 	}
 	fast, slow := 0, 0
 	const rounds = 300
 	for r := 0; r < rounds; r++ {
-		for _, ref := range buildTurnQueue(g) { // persists readiness across rounds
+		for _, ref := range buildTurnQueue(g) {
 			if !ref.IsParty {
 				continue
 			}
@@ -125,12 +108,8 @@ func TestApplyAttack_DealsSTRDamageAndPopup(t *testing.T) {
 	g := newTestState()
 	startHP := g.Packs[0].Members[0].HP
 	applyAttack(g, core.TimingQualityExcellent)
-	// STR 6, base 0, Excellent doubles → 12 base damage. The crit roll can
-	// double AGAIN to 24; appendCrit suffixes " Critical!" to the log line
-	// exactly when it fires. Rather than accept either value (which would
-	// pass even if the popup ignored the crit), tie the popup to the actual
-	// crit outcome so a bug that doubled without a crit — or failed to
-	// double on one — is caught. Deterministic under the seed-1 RNG.
+	// STR 6 × Excellent = 12; a crit doubles again to 24. Tie popup to actual crit
+	// outcome (seed-1 deterministic) so a double-without-crit bug is caught.
 	crit := strings.Contains(g.StatusMessage, "Critical")
 	want := 12
 	if crit {
@@ -139,9 +118,7 @@ func TestApplyAttack_DealsSTRDamageAndPopup(t *testing.T) {
 	if got := g.Packs[0].Members[0].DamagePopup; got != want {
 		t.Fatalf("popup should be %d (crit=%v), got %d", want, crit, got)
 	}
-	// HP drops by the dealt damage (clamped at 0) — asserted relative to the
-	// spawn HP rather than a hardcoded 0, so the global EnemyDifficultyMul (which
-	// scales the rat's spawn HP) can't make this brittle.
+	// Relative to spawn HP, not a hardcoded value, so EnemyDifficultyMul scaling can't make it brittle.
 	expHP := startHP - want
 	if expHP < 0 {
 		expHP = 0
@@ -156,8 +133,7 @@ func TestApplyAttack_DealsSTRDamageAndPopup(t *testing.T) {
 
 func TestApplyAttack_NoTargetBailsCleanly(t *testing.T) {
 	g := newTestState()
-	// Only the targeted enemy is dead — leave the second alive so the action
-	// doesn't trigger winBattle (which would overwrite the status message).
+	// Leave the second enemy alive so the action doesn't trigger winBattle (overwrites the message).
 	g.Packs[0].Members[0].Alive = false
 	g.Packs[0].Members[0].HP = 0
 	g.Battle.EnemyIndex = 0
@@ -171,7 +147,6 @@ func TestApplyAttack_NoTargetBailsCleanly(t *testing.T) {
 
 func TestApplySwipe_HitsAllLivingMembersAndSpendsMP(t *testing.T) {
 	g := newTestState()
-	// Move to Warrior — already at slot 0. Pre-pay nothing; setup will deduct.
 	if !setupSwipe(g) {
 		t.Fatalf("setupSwipe should succeed with 5/5 MP")
 	}
@@ -181,7 +156,6 @@ func TestApplySwipe_HitsAllLivingMembersAndSpendsMP(t *testing.T) {
 	startA := g.Packs[0].Members[0].HP
 	startB := g.Packs[0].Members[1].HP
 	applySwipe(g, core.TimingQualityGood)
-	// Swipe is melee, base 0, STR 6 → 6 damage × 1.5 (Good) = 9 per enemy.
 	if g.Packs[0].Members[0].HP >= startA {
 		t.Fatalf("rat 0 should have taken damage")
 	}
@@ -192,13 +166,13 @@ func TestApplySwipe_HitsAllLivingMembersAndSpendsMP(t *testing.T) {
 
 func TestSetupPrayer_RequiresValidLivingAlly(t *testing.T) {
 	g := newTestState()
-	g.Battle.CurrentParty = 1 // Mira (cleric)
-	g.Battle.PartyTarget = 0  // Vex, alive
+	g.Battle.CurrentParty = 1
+	g.Battle.PartyTarget = 0 // alive
 	if !setupPrayer(g) {
 		t.Fatalf("setupPrayer on living target should succeed")
 	}
 
-	// Refresh and set target to a dead member.
+	// Dead target.
 	g = newTestState()
 	g.Battle.CurrentParty = 1
 	g.Battle.PartyTarget = 2
@@ -222,11 +196,11 @@ func TestSetupPrayer_RejectsIfNotEnoughMP(t *testing.T) {
 
 func TestApplyPrayer_HealsAndClampsAtMax(t *testing.T) {
 	g := newTestState()
-	g.Battle.CurrentParty = 1 // Mira
-	g.Battle.PartyTarget = 0  // Vex at full HP
-	g.Party[0].HP = 5         // wound them so we can verify the bump
+	g.Battle.CurrentParty = 1
+	g.Battle.PartyTarget = 0
+	g.Party[0].HP = 5 // wound to verify the bump
 	applyPrayer(g, core.TimingQualityGood)
-	// WIS 6 + base 1 = 7, × Good (1.5) = 10. Vex MaxHP=10 → caps at 10.
+	// WIS 6 + base 1 = 7 × Good (1.5) = 10, clamped at MaxHP 10.
 	if g.Party[0].HP != 10 {
 		t.Fatalf("expected Vex healed to 10 (clamped), got %d", g.Party[0].HP)
 	}
@@ -246,14 +220,13 @@ func TestApplyPrayer_DoesNotReviveFallenAlly(t *testing.T) {
 func TestApplyFirebolt_DamagesAndCanBurn(t *testing.T) {
 	g := newTestState()
 	seedGameRNG(t, g, 1)
-	g.Battle.CurrentParty = 3 // Sol
+	g.Battle.CurrentParty = 3
 	startMP := g.Party[3].MP
 	startHP := g.Packs[0].Members[0].HP
 	if !setupFirebolt(g) {
 		t.Fatalf("setupFirebolt should succeed")
 	}
-	// MP is deducted in setup (uniform policy across all skills); apply
-	// only spends MP when called via the setup→apply chain in beginPendingAction.
+	// MP is deducted in setup (uniform policy); apply never debits.
 	if g.Party[3].MP != startMP-core.SkillCost(core.SkillFirebolt) {
 		t.Fatalf("setupFirebolt should debit cost, got %d (was %d)", g.Party[3].MP, startMP)
 	}
@@ -270,10 +243,7 @@ func TestApplyFirebolt_DamagesAndCanBurn(t *testing.T) {
 func TestApplyFirebolt_TargetDiedBetweenConfirmAndApply(t *testing.T) {
 	g := newTestState()
 	g.Battle.CurrentParty = 3
-	// Pretend the bar resolved but the rat is already gone (e.g. another
-	// burn-tick killed it before this apply ran). apply doesn't deduct MP
-	// (setup did, in the live flow), so calling apply directly without
-	// setup leaves MP untouched.
+	// Target already gone before apply ran; apply doesn't deduct MP so direct call leaves it untouched.
 	g.Packs[0].Members[0].Alive = false
 	g.Packs[0].Members[0].HP = 0
 	g.Packs[0].Members[1].Alive = false
@@ -294,27 +264,23 @@ func TestApplyFirebolt_DoesNotStackBurnOnAlreadyBurning(t *testing.T) {
 	g.Packs[0].Members[0].BurnTurns = 2
 	preBurn := g.Packs[0].Members[0].BurnTurns
 	applyFirebolt(g, core.TimingQualityExcellent)
-	// HP drops, but BurnTurns shouldn't grow from a fresh roll —
-	// it can only decrement at turn start.
+	// BurnTurns can't grow from a fresh roll — it only decrements at turn start.
 	if g.Packs[0].Members[0].BurnTurns > preBurn {
 		t.Fatalf("burn shouldn't stack: was %d, now %d", preBurn, g.Packs[0].Members[0].BurnTurns)
 	}
 }
 
 func TestApplySteal_LandsItemAndClearsLoot(t *testing.T) {
-	// Seed picks a roll that lands under the success chance. Verified by trying
-	// several seeds until landing on one that produces success — kept here so
-	// the test is deterministic without depending on fragile RNG internals.
+	// Seed 1 lands the steal deterministically.
 	g := newTestState()
 	seedGameRNG(t, g, 1)
-	g.Battle.CurrentParty = 2 // Nyx (thief)
+	g.Battle.CurrentParty = 2 // thief
 	preItem := g.Packs[0].Members[0].Item
 	if preItem == core.ItemNone {
 		t.Fatalf("expected rat to start with stealable item")
 	}
-	// DEX 6 + Excellent quality → very high chance; for seed=1 this lands.
 	applySteal(g, core.TimingQualityExcellent)
-	// On success Item is cleared; on failure the message says fail.
+	// Success clears Item; failure sets the fail message.
 	if g.Packs[0].Members[0].Item == core.ItemNone {
 		if g.Inventory == nil || len(g.Inventory) == 0 {
 			t.Fatalf("success should add item to inventory")
@@ -334,7 +300,7 @@ func TestApplySteal_EmptyEnemyMessages(t *testing.T) {
 	g.Battle.CurrentParty = 2
 	g.Packs[0].Members[0].Item = core.ItemNone
 	if !applySteal(g, core.TimingQualityGood) {
-		t.Fatalf("steal on empty enemy still 'lands' (gesture happens)")
+		t.Fatalf("steal on empty enemy still 'lands'")
 	}
 	if !strings.Contains(g.StatusMessage, "nothing to steal") {
 		t.Fatalf("expected 'nothing to steal', got %q", g.StatusMessage)
@@ -381,7 +347,6 @@ func TestHealPartyMember_ClampsAtMaxAndRejectsCorpse(t *testing.T) {
 	if g.Party[0].HP != g.Party[0].MaxHP {
 		t.Fatalf("heal should clamp at MaxHP; got %d, want %d", g.Party[0].HP, g.Party[0].MaxHP)
 	}
-	// Dead members can't be healed.
 	g.Party[2].HP = 0
 	if healPartyMember(g, 2, 4) {
 		t.Fatalf("heal must not revive fallen ally")
@@ -391,19 +356,13 @@ func TestHealPartyMember_ClampsAtMaxAndRejectsCorpse(t *testing.T) {
 	}
 }
 
-// TestDamageEnemy_AmoebaArmor regression-checks the amoeba's flagship
-// "phys whiffs to 1, magic shreds" contract. The pre-fix bug: armor
-// math was correct but the combat-log message reported the pre-armor
-// damage figure, making armor look broken from the player's
-// perspective. The fix routes the post-armor `dealt` value out to the
-// caller; this test pins both the math AND the return value.
+// TestDamageEnemy_AmoebaArmor pins the "phys whiffs to 1, magic shreds" contract AND
+// that the returned `dealt` is the post-armor figure (the log once reported pre-armor).
 func TestDamageEnemy_AmoebaArmor(t *testing.T) {
 	g := newTestState()
-	// Replace the first enemy in the pack with an amoeba so we hit
-	// the armored case without rewiring placePacks.
 	g.Packs[0].Members[0] = core.NewEnemy(core.EnemyAmoeba)
 	amoebaHP := g.Packs[0].Members[0].HP
-	// Phys hit of 12 vs armor 8 → 4 dealt.
+	// Phys 12 vs armor 8 → 4 dealt.
 	dealt, defeated := damageEnemy(g, 0, 12, core.TimingQualityExcellent, core.SkillTagPhys)
 	if dealt != 4 {
 		t.Fatalf("phys 12 vs armor 8 should deal 4, got %d", dealt)
@@ -414,13 +373,13 @@ func TestDamageEnemy_AmoebaArmor(t *testing.T) {
 	if g.Packs[0].Members[0].HP != amoebaHP-4 {
 		t.Fatalf("amoeba HP should drop by post-armor amount; got %d (was %d)", g.Packs[0].Members[0].HP, amoebaHP)
 	}
-	// Magic hit of 12 vs armor 8 → 12 dealt (armor bypassed).
+	// Magic 12 bypasses armor → 12 dealt.
 	g.Packs[0].Members[0] = core.NewEnemy(core.EnemyAmoeba)
 	dealt, _ = damageEnemy(g, 0, 12, core.TimingQualityExcellent, core.SkillTagMagic)
 	if dealt != 12 {
 		t.Fatalf("magic 12 should bypass armor and deal 12, got %d", dealt)
 	}
-	// Phys 1 vs armor 8 → floor-1 contract.
+	// Phys 1 vs armor 8 → floor-1.
 	g.Packs[0].Members[0] = core.NewEnemy(core.EnemyAmoeba)
 	dealt, _ = damageEnemy(g, 0, 1, core.TimingQualityMiss, core.SkillTagPhys)
 	if dealt != 1 {
@@ -447,7 +406,7 @@ func TestDamagePartyMember_GuardsAndKills(t *testing.T) {
 func TestTickBurnAtTurnStart_TicksAndKills(t *testing.T) {
 	g := newTestState()
 	g.Packs[0].Members[0].BurnTurns = 2
-	g.Packs[0].Members[0].HP = core.BurnTickDamage // exactly enough to die this tick
+	g.Packs[0].Members[0].HP = core.BurnTickDamage // exact lethal
 	killed := tickBurnAtTurnStart(g, core.ActorRef{IsParty: false, Index: 0})
 	if !killed {
 		t.Fatalf("burn tick should kill at exact-HP")
@@ -466,17 +425,13 @@ func TestTickBurnAtTurnStart_PartyActorIsNoOp(t *testing.T) {
 
 func TestResolveEnemyAttacker_DefendingHalvesDamage(t *testing.T) {
 	g := newTestState()
-	// newTestState seeds the RNG deterministically (seed 1) — the rat
-	// neither dodges nor crits, isolating the Defending soak.
-	// Set Vex defending and arm a rat to hit him next.
+	// Seed 1: the rat neither dodges nor crits, isolating the Defending soak.
 	g.Party[0].Defending = true
 	g.Battle.EnemyAttackCursor = -1
 	startHP := g.Party[0].HP
 	if !resolveEnemyAttacker(g, 0, core.TimingQualityMiss) {
 		t.Fatalf("rat attack should land")
 	}
-	// Rat AttackDamage = 3, no defend timing bonus, but Defending halves to 1
-	// (with the 1-floor when scaled <=0).
 	if g.Party[0].HP >= startHP {
 		t.Fatalf("Vex should have taken some damage")
 	}
@@ -488,10 +443,7 @@ func TestResolveEnemyAttacker_DefendingHalvesDamage(t *testing.T) {
 
 func TestResolveEnemyAttacker_ExcellentBlockCanZeroDamage(t *testing.T) {
 	g := newTestState()
-	// Use a Wisp (AttackDamage 1) so the Excellent block reaches 0 regardless of
-	// the global EnemyDifficultyMul: 1 scales to 1, and 1 × 0.25 (Excellent
-	// defense) truncates to 0 — even a crit (×2 → 2 × 0.25 = 0) still zeroes, so
-	// the assertion holds without depending on the seed avoiding a crit/dodge.
+	// Wisp (AttackDamage 1): 1 × 0.25 truncates to 0 even on a crit, so the block always zeroes.
 	g.Packs[0].Members[0] = core.NewEnemy(core.EnemyWisp)
 	startHP := g.Party[0].HP
 	resolveEnemyAttacker(g, 0, core.TimingQualityExcellent)
@@ -504,7 +456,7 @@ func TestResolveEnemyAttacker_ExcellentBlockCanZeroDamage(t *testing.T) {
 func TestPickEnemyAttackTarget_SkipsDeadPartyMembers(t *testing.T) {
 	g := newTestState()
 	g.Party[1].HP = 0
-	g.Battle.EnemyAttackCursor = 0 // last hit Vex; next pick should skip Mira
+	g.Battle.EnemyAttackCursor = 0 // next pick should skip the dead slot 1
 	pick := pickEnemyAttackTarget(g, false)
 	if pick == 1 {
 		t.Fatalf("pickEnemyAttackTarget shouldn't pick a dead member")
@@ -528,9 +480,7 @@ func TestQualityTag_HidesLowGrades(t *testing.T) {
 
 // --- Poison status ---------------------------------------------------------
 
-// newPoisonState returns a state with the Diseased Rat as the only pack
-// member and a healthy party. PoisonChance is 60% — seed-pinned so the
-// inflict roll is deterministic.
+// newPoisonState: a single Diseased Rat (60% PoisonChance) and a healthy party.
 func newPoisonState() *core.GameState {
 	g := newTestState()
 	g.Packs[0].Members = []core.Enemy{core.NewEnemy(core.EnemyDiseasedRat)}
@@ -540,13 +490,12 @@ func newPoisonState() *core.GameState {
 }
 
 func TestResolveEnemyAttacker_DiseasedRatCanInflictPoison(t *testing.T) {
-	// Try several seeds; with PoisonChance=0.60 most should land.
+	// Try several seeds; at 60% most should land.
 	landed := false
 	for seed := int64(1); seed <= 5 && !landed; seed++ {
 		g := newPoisonState()
 		seedGameRNG(t, g, seed)
 		resolveEnemyAttacker(g, 0, core.TimingQualityMiss)
-		// Find any poisoned party member.
 		for _, p := range g.Party {
 			if p.PoisonTurns > 0 {
 				landed = true
@@ -563,15 +512,14 @@ func TestResolveEnemyAttacker_DiseasedRatCanInflictPoison(t *testing.T) {
 	}
 }
 
-// TestTickBleedAfterEnemyTurn_DamagesAndStacksWithPoison pins the third DoT:
-// the bleed tick drains its OWN counter and deals damage, leaving any Poison
-// counter untouched — proving Bleed and Poison run independently (stack).
+// TestTickBleedAfterEnemyTurn_DamagesAndStacksWithPoison: the bleed tick drains its
+// OWN counter and deals damage, leaving Poison untouched — Bleed and Poison stack independently.
 func TestTickBleedAfterEnemyTurn_DamagesAndStacksWithPoison(t *testing.T) {
 	g := newTestState()
 	e := &g.Packs[0].Members[0]
 	e.HP, e.MaxHP = 50, 50
 	e.BleedTurns = 2
-	e.PoisonTurns = 2 // a coexisting DoT the bleed tick must not touch
+	e.PoisonTurns = 2 // bleed tick must not touch this
 	startHP := e.HP
 
 	if tickBleedAfterEnemyTurn(g, core.ActorRef{IsParty: false, Index: 0}) {
@@ -588,8 +536,8 @@ func TestTickBleedAfterEnemyTurn_DamagesAndStacksWithPoison(t *testing.T) {
 	}
 }
 
-// TestApplyRend_OpensBleed confirms a connecting Rend stamps the Bleed counter
-// with a sane duration. Seed-looped since the apply is an 85% quality-scaled proc.
+// TestApplyRend_OpensBleed: a connecting Rend stamps a sane-duration Bleed.
+// Seed-looped since the proc is 85% quality-scaled.
 func TestApplyRend_OpensBleed(t *testing.T) {
 	landed := false
 	for seed := int64(1); seed <= 8 && !landed; seed++ {
@@ -621,18 +569,16 @@ func TestResolveEnemyAttacker_PlainRatNeverPoisons(t *testing.T) {
 		if g.Party[0].PoisonTurns > 0 {
 			t.Fatalf("plain rat should not inflict poison")
 		}
-		// Reset HP so we don't drop the target below 0 mid-loop.
-		g.Party[0].HP = g.Party[0].MaxHP
+		g.Party[0].HP = g.Party[0].MaxHP // keep target above 0 mid-loop
+
 	}
 }
 
 func TestResolveEnemyAttacker_PoisonDoesNotStack(t *testing.T) {
 	g := newPoisonState()
 	seedGameRNG(t, g, 1)
-	// Pre-poison the front-line target and remember the duration.
 	g.Party[0].PoisonTurns = 4
 	preDuration := g.Party[0].PoisonTurns
-	// Pin the attack to slot 0 specifically by forcing the cursor.
 	g.Battle.EnemyAttackCursor = -1
 	resolveEnemyAttacker(g, 0, core.TimingQualityMiss)
 	if g.Party[0].PoisonTurns != preDuration {
@@ -680,21 +626,15 @@ func TestTickPoisonAfterPartyTurn_NoPoisonIsNoOp(t *testing.T) {
 
 func TestTickPoisonAfterPartyTurn_EnemyActorIsNoOp(t *testing.T) {
 	g := newTestState()
-	// Even with a poison-flagged party slot, an enemy ActorRef must skip.
-	g.Party[0].PoisonTurns = 3
+	g.Party[0].PoisonTurns = 3 // enemy ActorRef must still skip
 	if tickPoisonAfterPartyTurn(g, core.ActorRef{IsParty: false, Index: 0}) {
 		t.Fatalf("enemy actor should be a no-op for poison tick")
 	}
 }
 
 // --- Hit-stop chain (TimingFlash → HitStop → onResolve) -------------------
-//
-// These tests drive tickFlashHold directly to verify the two-phase decay:
-// the flash counts down first, then HitStop kicks in (only on high grades),
-// and only when both have drained does onResolve fire. The chain is the
-// single most load-bearing piece of the JUICE pass — if it ever fires
-// onResolve too early or twice, the damage popup/audio/apply step all
-// land at the wrong moment.
+// Two-phase decay: flash drains first, then HitStop (high grades only); onResolve
+// fires once both drain. Firing early or twice mistimes the popup/audio/apply step.
 
 func TestResolveAndFinishEnemyAttack_TicksEnemyPoison(t *testing.T) {
 	g := newTestState()
@@ -736,10 +676,8 @@ func TestResolveAndFinishEnemyAttack_PoisonKillWinsBattle(t *testing.T) {
 	}
 }
 
-// TestResolveEnemyAttacker_IceArmorChillsAttacker pins the Ice Armor reprisal:
-// a connecting basic attack on a frost-warded party member stamps an SPD chill
-// onto the attacker via the enemy debuff mirror. Every member's DEX is zeroed so
-// RollDodge can never void the swing — we need a guaranteed connecting hit.
+// TestResolveEnemyAttacker_IceArmorChillsAttacker: a connecting attack on a frost-warded
+// member stamps an SPD chill on the attacker. DEX is zeroed so the swing can't be dodged.
 func TestResolveEnemyAttacker_IceArmorChillsAttacker(t *testing.T) {
 	g := newTestState()
 	g.Battle.EnemyAttacker = 0
@@ -762,8 +700,7 @@ func TestResolveEnemyAttacker_IceArmorChillsAttacker(t *testing.T) {
 	}
 }
 
-// enemyDebuffStats / partyBuffStats sum the stackable mod slices for test reads —
-// the post-refactor replacement for poking the old single BuffStats field.
+// enemyDebuffStats / partyBuffStats sum the stackable mod slices for test reads.
 func enemyDebuffStats(e core.Enemy) core.Stats     { s, _, _ := core.SumStatusMods(e.Debuffs); return s }
 func partyBuffStats(m core.PartyMember) core.Stats { s, _, _ := core.SumStatusMods(m.Buffs); return s }
 
@@ -772,14 +709,14 @@ func TestTickFlashHold_LowGradeFiresImmediatelyAtFlashZero(t *testing.T) {
 	g.Battle.Timing.Quality = core.TimingQualityGood
 	g.Battle.TimingFlash = core.TimingFlashDuration
 	resolved := 0
-	// First tick: drains flash but doesn't quite zero it.
+	// First tick: drains flash but doesn't zero it.
 	if !tickFlashHold(g, core.TimingFlashDuration*0.5, func() { resolved++ }) {
 		t.Fatalf("flash still running, tickFlashHold should report busy")
 	}
 	if resolved != 0 {
 		t.Fatalf("Good grade with flash still active shouldn't fire onResolve")
 	}
-	// Second tick: drains the rest. No hit-stop for Good, so onResolve fires.
+	// Second tick zeroes it; no hit-stop for Good, so onResolve fires.
 	if !tickFlashHold(g, core.TimingFlashDuration, func() { resolved++ }) {
 		t.Fatalf("flash expiring tick should still report busy")
 	}
@@ -796,8 +733,7 @@ func TestTickFlashHold_ExcellentGradeChainsIntoHitStop(t *testing.T) {
 	g.Battle.Timing.Quality = core.TimingQualityExcellent
 	g.Battle.TimingFlash = core.TimingFlashDuration
 	resolved := 0
-	// Drain the flash entirely in one tick.
-	tickFlashHold(g, core.TimingFlashDuration*2, func() { resolved++ })
+	tickFlashHold(g, core.TimingFlashDuration*2, func() { resolved++ }) // drain flash in one tick
 	if resolved != 0 {
 		t.Fatalf("Excellent grade should NOT fire onResolve at flash zero — it should arm HitStop instead")
 	}
@@ -807,7 +743,7 @@ func TestTickFlashHold_ExcellentGradeChainsIntoHitStop(t *testing.T) {
 	if g.Battle.HitStop != core.HitStopExcellent {
 		t.Fatalf("HitStop should equal HitStopExcellent (%v), got %v", core.HitStopExcellent, g.Battle.HitStop)
 	}
-	// Drain the hit-stop. Now onResolve should fire.
+	// Drain the hit-stop → onResolve fires.
 	tickFlashHold(g, core.HitStopExcellent*2, func() { resolved++ })
 	if resolved != 1 {
 		t.Fatalf("onResolve should fire exactly once after HitStop drains, got %d calls", resolved)
@@ -837,7 +773,7 @@ func TestTickFlashHold_GreatGradeUsesGreatHitStop(t *testing.T) {
 
 func TestTickFlashHold_NoFlashNoOp(t *testing.T) {
 	g := newTestState()
-	// No flash armed → returns false (caller should NOT bail).
+	// No flash armed → returns false.
 	called := false
 	if tickFlashHold(g, 0.1, func() { called = true }) {
 		t.Fatalf("idle tickFlashHold should report not-busy")

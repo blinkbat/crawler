@@ -6,10 +6,8 @@ import (
 	"crawler/internal/app/core"
 )
 
-// TestDebugSkipWin_AwardsAndRemovesPack verifies the skip-battles auto-resolve:
-// the engaged pack is felled, XP is awarded to living members, kills are
-// recorded, the pack is removed from the field, and the battle state resets to
-// the explore-clean BattleNone.
+// TestDebugSkipWin_AwardsAndRemovesPack: the pack is felled and removed, living members get
+// XP, and the battle resets to BattleNone.
 func TestDebugSkipWin_AwardsAndRemovesPack(t *testing.T) {
 	g := newTestState()
 	packCount := len(g.Packs)
@@ -35,7 +33,7 @@ func TestDebugSkipWin_AwardsAndRemovesPack(t *testing.T) {
 func TestDebugSkipWin_NoOpOnInvalidPack(t *testing.T) {
 	g := newTestState()
 	packCount := len(g.Packs)
-	DebugSkipWin(g, 99) // out of range
+	DebugSkipWin(g, 99)
 	if len(g.Packs) != packCount {
 		t.Errorf("invalid pack index mutated the field: %d packs, want %d", len(g.Packs), packCount)
 	}

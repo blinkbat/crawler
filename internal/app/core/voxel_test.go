@@ -2,13 +2,11 @@ package core
 
 import "testing"
 
-// gappedArea is a 3×3 map with a floating cube: column (1,1) is solid at level
-// 0 (ground), AIR at level 1, solid at level 2 — a deck you walk UNDER at L0 and
-// OVER at L2. Every other column is plain ground at level 0.
+// gappedArea: 3×3 map, column (1,1) solid at L0, AIR at L1, solid at L2 (a deck walked UNDER at L0, OVER at L2); other columns plain ground.
 func gappedArea() AreaDefinition {
 	air := "000"
 	a := AreaDefinition{Width: 3, Height: 3}
-	plane0 := []string{"###", "###", "###"} // all ground solid
+	plane0 := []string{"###", "###", "###"}
 	plane1 := []string{air, "0" + string(SolidAir) + "0", air}
 	plane2 := []string{air, "0#0", air}
 	a.Solids = [][]string{plane0, plane1, plane2}
@@ -17,20 +15,15 @@ func gappedArea() AreaDefinition {
 
 func TestSolidAtAndStandable(t *testing.T) {
 	a := gappedArea()
-	// Ground everywhere at L0.
 	if _, solid := a.SolidAt(1, 0, 1); !solid {
 		t.Errorf("(1,0,1) should be solid ground")
 	}
-	// The gap at L1 in the floating column.
 	if _, solid := a.SolidAt(1, 1, 1); solid {
 		t.Errorf("(1,1,1) should be AIR (the gap)")
 	}
-	// The floating cube at L2.
 	if _, solid := a.SolidAt(1, 2, 1); !solid {
 		t.Errorf("(1,2,1) should be the floating cube")
 	}
-	// Standable: ground under the box (air above at L1) and the deck top (air
-	// above at L3) are both standable; the gap is not.
 	if !a.Standable(1, 0, 1) {
 		t.Errorf("ground under the box should be standable (air above)")
 	}
@@ -40,7 +33,6 @@ func TestSolidAtAndStandable(t *testing.T) {
 	if !a.Standable(1, 2, 1) {
 		t.Errorf("the deck top should be standable")
 	}
-	// A plain ground column: standable at L0 only.
 	if !a.Standable(0, 0, 0) || a.Standable(0, 1, 0) {
 		t.Errorf("plain column should be standable only at L0")
 	}
@@ -52,9 +44,7 @@ func TestSolidAtAndStandable(t *testing.T) {
 	}
 }
 
-// TestHeightfieldStackIdentity proves the migration is lossless: building the
-// voxel stack from a heightfield and reading column tops back out is the
-// identity for a gapless map, and such a map reports AllColumnsGapless.
+// TestHeightfieldStackIdentity: migration is lossless — stack-from-heightfield then read tops back is identity for a gapless map, which reports AllColumnsGapless.
 func TestHeightfieldStackIdentity(t *testing.T) {
 	a := AreaDefinition{
 		Width: 3, Height: 3,
@@ -75,7 +65,6 @@ func TestHeightfieldStackIdentity(t *testing.T) {
 			}
 		}
 	}
-	// ElevationRowsFromSolids reconstructs the original elevation rows.
 	rows := ElevationRowsFromSolids(&b)
 	for z := range rows {
 		if rows[z] != a.Elevation[z] {
@@ -84,9 +73,7 @@ func TestHeightfieldStackIdentity(t *testing.T) {
 	}
 }
 
-// TestSolidsEqualAbsentVsMaterialized is the subtle dirty-check guard: a
-// heightfield area (Solids nil) must compare EQUAL to the same area with its
-// stack materialized — otherwise every save reads dirty.
+// TestSolidsEqualAbsentVsMaterialized: dirty-check guard — a heightfield area (Solids nil) must compare EQUAL to the same area with its stack materialized, else every save reads dirty.
 func TestSolidsEqualAbsentVsMaterialized(t *testing.T) {
 	a := AreaDefinition{Width: 3, Height: 3, Elevation: []string{"010", "000", "000"}}
 	b := a
@@ -112,14 +99,11 @@ func TestGappedColumnNotGapless(t *testing.T) {
 	}
 }
 
-// TestEditorAuthoringPrimitives exercises the cube-placement helpers the editor
-// uses: placing a floating cube over air materializes a gapped stack, clearing
-// it trims back, and SetColumnTop sets a gapless column height.
+// TestEditorAuthoringPrimitives: editor cube-placement helpers — floating cube over air materializes a gapped stack, clearing trims back, SetColumnTop sets a gapless height.
 func TestEditorAuthoringPrimitives(t *testing.T) {
 	a := AreaDefinition{Width: 3, Height: 3, Elevation: []string{"AAA", "AAA", "AAA"}}
 	const base = ElevationBaseline // 10
-	// Place a floating cube two levels above the ground at (1,1): materializes
-	// the stack and creates a gap (air at base+1).
+	// Floating cube two levels above ground at (1,1): materializes the stack, creates a gap (air at base+1).
 	a.SetCube(1, base+2, 1, TileRock)
 	if len(a.Solids) == 0 {
 		t.Fatalf("SetCube should materialize the stack")
@@ -136,12 +120,10 @@ func TestEditorAuthoringPrimitives(t *testing.T) {
 	if !a.Standable(1, base+2, 1) {
 		t.Errorf("the placed cube top should be standable")
 	}
-	// Clearing it returns the map to a pure heightfield (gapless).
 	a.ClearCube(1, base+2, 1)
 	if !a.AllColumnsGapless() {
 		t.Errorf("clearing the floating cube should restore a gapless map")
 	}
-	// SetColumnTop raises a column to a new solid height with no gap.
 	a.SetColumnTop(0, 0, base+3)
 	if got := a.TopSolidLevel(0, 0); got != base+3 {
 		t.Errorf("SetColumnTop top = %d, want %d", got, base+3)

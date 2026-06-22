@@ -6,38 +6,25 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Battle danger vignette — a soft claret breathing at the screen edges while
-// an enemy is mid-swing (the defend-timing window). The whole frame leans
-// threatening for exactly the beat the player must react to, the same way the
-// rumble and the red incoming-attack marker do — peripheral pressure, not a
-// new HUD element. Screen-space, drawn after the world + weather and below
-// the HUD so panels and the defend bar stay clean over it.
+// Battle danger vignette: soft claret breathing at the screen edges during the
+// defend-timing window. Screen-space, drawn after world+weather and below the HUD.
 
-// dangerVignetteDepth is the fraction of the screen's smaller dimension each
-// edge gradient reaches inward. Shallow — the center stays untinted so the
-// enemy formation and the timing bar keep full contrast.
+// dangerVignetteDepth: fraction of the smaller screen dimension each edge gradient
+// reaches inward. Shallow so the center keeps full contrast.
 const dangerVignetteDepth = float32(0.16)
 
-// dangerVignetteAlpha is the peak edge alpha (0-255 scale) before the
-// breathing modulation. Deliberately faint: the cue should be felt before
-// it's noticed.
+// dangerVignetteAlpha: peak edge alpha (0-255) before breathing. Deliberately faint.
 const dangerVignetteAlpha = float32(34)
 
-// dangerVignettePulseBase / dangerVignettePulseSwing split the breathing
-// modulation applied to dangerVignetteAlpha: the alpha rides
-// base + swing*pulseFlicker(), so it never fully fades (base) and swings up to
-// base+swing at the flicker peak. Named so the resting/peak split is a
-// one-line tune rather than two bare multipliers.
+// dangerVignettePulseBase/Swing split the breathing: alpha rides
+// base + swing*pulseFlicker(), never fully fading (base), peaking at base+swing.
 const (
 	dangerVignettePulseBase  = float32(0.62)
 	dangerVignettePulseSwing = float32(0.38)
 )
 
-// DrawBattleDangerVignette paints the edge vignette while the battle is in
-// the enemy attack-timing phase. No-op in every other phase, so the cost is
-// one branch outside combat. Breathes at the canonical status-flicker rate
-// (UI_STANDARDS "Pulse / breathing") — the same urgency rhythm the status
-// pills flicker with.
+// DrawBattleDangerVignette paints the edge vignette during the enemy attack-timing
+// phase (no-op otherwise). Breathes at the canonical status-flicker rate.
 func DrawBattleDangerVignette(g *core.GameState) {
 	if g.Battle.Phase != core.BattleEnemyTiming {
 		return
@@ -57,9 +44,8 @@ func DrawBattleDangerVignette(g *core.GameState) {
 	a := dangerVignetteAlpha * (dangerVignettePulseBase + dangerVignettePulseSwing*pulseFlicker())
 	edge := colorWithAlpha(borderDanger, uint8(a))
 	clear := colorWithAlpha(borderDanger, 0)
-	// Four edge gradients, each fading from the claret edge to transparent
-	// toward the center. Corners double-cover (left/right bands span the full
-	// height), which reads as a natural corner darkening rather than a seam.
+	// Four edge gradients fading to transparent toward center; left/right bands
+	// span full height so corners double-cover into natural darkening, not a seam.
 	rl.DrawRectangleGradientV(0, 0, sw, depth, edge, clear)        // top
 	rl.DrawRectangleGradientV(0, sh-depth, sw, depth, clear, edge) // bottom
 	rl.DrawRectangleGradientH(0, 0, depth, sh, edge, clear)        // left

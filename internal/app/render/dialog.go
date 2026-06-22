@@ -9,8 +9,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// dialog modal geometry. Wider than the chest card so a paragraph of
-// conversation text wraps to a readable measure.
+// dialog modal geometry. Wider than the chest card for a readable text measure.
 const (
 	dialogCardWidth   = int32(600)
 	dialogTextPadX    = int32(24)
@@ -21,25 +20,14 @@ const (
 	dialogBodyGap     = int32(16)  // gap between the body text block and the row list
 	dialogBottomPad   = int32(40)  // padding below the row list down to the card's bottom edge
 	dialogMinCardH    = modalMinCardH // floor so a short one-line node still reads as a card
-	// dialogMaxBodyLines bounds how many wrapped text lines the card shows so
-	// a pathologically long node body can't grow the card past the screen.
-	// Authored lines are short; a longer beat should be split across nodes.
+	// dialogMaxBodyLines caps wrapped lines so a long body can't grow the card past the screen.
 	dialogMaxBodyLines = 10
 )
 
-// dialogModalCache memoizes the per-node wrapped body lines. DrawDialogModal
-// paints over the live exploration render EVERY frame, so without this it would
-// re-run wrapTextLines' per-word rl.MeasureTextEx cgo calls (plus the overflow
-// ellipsis-trim loop) 60×/sec for fixed text. The node body is stable for the
-// life of a node, so the cache rebuilds only when the node (id + body text) or
-// inner width changes. Same rebuild-on-change pattern as actionLogCache.
-//
-// The choice VIEWS/LABELS are deliberately NOT cached: DialogChoiceViews derives
-// each row's Disabled/Reason from live gold, quest status, foe-kill counts, and
-// visited-tile state, which can cross a condition threshold while the player
-// stays on the same node. They're a cheap slice walk + string concat, so we
-// rebuild them every frame rather than risk rendering a stale greyed/enabled
-// state or (reason) label against the wrong inputs.
+// dialogModalCache memoizes the per-node wrapped body lines so DrawDialogModal doesn't re-run
+// wrapTextLines' per-word MeasureTextEx every frame; rebuilt only when the node id/text or width changes.
+// Choice views/labels are NOT cached — DialogChoiceViews derives Disabled/Reason from live state
+// that can cross a threshold on the same node, so they're rebuilt every frame.
 var dialogModalCache struct {
 	nodeID    string
 	text      string
@@ -47,10 +35,8 @@ var dialogModalCache struct {
 	bodyLines []string
 }
 
-// dialogModalContent returns the wrapped body lines, choice views, and
-// preformatted row labels for the current node. Body lines are cached (rebuilt
-// only when the node or width changes); the views/labels are rebuilt every call
-// because they reflect live game state (see dialogModalCache).
+// dialogModalContent returns wrapped body lines (cached), choice views, and row labels (rebuilt
+// every call, live state). See dialogModalCache.
 func dialogModalContent(g *core.GameState, font rl.Font, node core.DialogNode, innerW float32) (bodyLines []string, views []core.DialogChoiceView, labels []string) {
 	c := &dialogModalCache
 	if c.nodeID == g.Dialog.NodeID && c.text == node.Text && c.innerW == innerW {
@@ -62,9 +48,7 @@ func dialogModalContent(g *core.GameState, font rl.Font, node core.DialogNode, i
 		}
 		if len(bodyLines) > dialogMaxBodyLines {
 			bodyLines = bodyLines[:dialogMaxBodyLines]
-			// Trim runes off the last kept line until it + the ellipsis fits the
-			// card's inner width — appending " …" to an already-full wrapped line
-			// would otherwise clip past the right edge.
+			// Trim the last kept line until it + ellipsis fits, else " …" clips past the right edge.
 			const ellipsis = " …"
 			spacing := canonicalSpacing(FontBody)
 			last := bodyLines[dialogMaxBodyLines-1]
@@ -92,12 +76,8 @@ func dialogModalContent(g *core.GameState, font rl.Font, node core.DialogNode, i
 	return bodyLines, views, labels
 }
 
-// DrawDialogModal paints the branching-conversation overlay: the current
-// speaker's name (in their nameplate tint), the wrapped line of text, and
-// either the selectable choice rows or a Continue affordance. Gamepad-first:
-// Up/Down move the choice cursor, A confirms (pick a choice / continue), B
-// skips the whole conversation. Rendered after the world like the other
-// explore modals; no-ops when no dialog is open.
+// DrawDialogModal paints the branching-conversation overlay: speaker nameplate, wrapped text, and
+// either choice rows or a Continue affordance. A confirms, B skips. No-op when no dialog is open.
 func DrawDialogModal(g *core.GameState, assets Resources) {
 	if !g.DialogOpen {
 		return
@@ -108,9 +88,7 @@ func DrawDialogModal(g *core.GameState, assets Resources) {
 	}
 	font := assets.Font()
 
-	// Body text wrapped to the card's inner width + the choice rows; memoized
-	// per node so this per-frame overlay doesn't re-wrap / re-measure / rebuild
-	// the choice slice every frame (see dialogModalCache).
+	// Body lines memoized per node (see dialogModalCache).
 	innerW := float32(dialogCardWidth - 2*dialogTextPadX)
 	bodyLines, views, labels := dialogModalContent(g, font, node, innerW)
 	bodyH := int32(len(bodyLines)) * dialogLineH

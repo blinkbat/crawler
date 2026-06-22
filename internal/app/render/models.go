@@ -9,10 +9,8 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// textureAndShade is the uniform skin-and-shade loop most prop/decor loaders
-// share: apply the one diffuse texture to every model and bind the lighting
-// shader to each. Loaders that skin meshes individually (per-index bark/leaf,
-// or only a subset textured) keep their own loop and call attachShader directly.
+// textureAndShade applies one diffuse texture to every model and binds the
+// lighting shader. Loaders that skin meshes individually keep their own loop.
 func textureAndShade(models []rl.Model, shader rl.Shader, tex rl.Texture2D) {
 	for i := range models {
 		setModelTexture(&models[i], tex)
@@ -20,9 +18,8 @@ func textureAndShade(models []rl.Model, shader rl.Shader, tex rl.Texture2D) {
 	}
 }
 
-// treeModel bundles the procedurally-generated meshes that make up a single
-// blocking tree. Unique meshes live in `models`; `parts` reference them by
-// index so a single mesh can be reused at multiple positions/tints without
+// treeModel bundles the meshes for one blocking tree. Unique meshes live in
+// `models`; `parts` reference them by index so a mesh can be reused without
 // double-freeing on unload.
 type treeModel struct {
 	models []rl.Model
@@ -34,26 +31,17 @@ type treePart struct {
 	offset   rl.Vector3
 	scale    rl.Vector3
 	rotation float32
-	// rotationAxis lets a part tilt off the default vertical axis. Zero
-	// vector means "use world up (0,1,0)" so existing parts that don't set
-	// it keep their old behavior. Set to e.g. {1, 4, 0} to tilt a crystal
-	// toward +X while still mostly pointing up.
+	// rotationAxis tilts a part off vertical. Zero vector means world up (0,1,0).
 	rotationAxis rl.Vector3
 	tint         color.RGBA
-	// sway is the per-part wind-displacement factor (0..1). Default 0
-	// means the part is rigid — used for stems / trunks / statue
-	// bases that should stay planted. Upper foliage parts of
-	// tall-grass, flowers, bushes, reeds, ferns, and clover set
-	// sway >= 1 so they ride the global wind animation. propModel.draw
-	// adds a time-based horizontal offset proportional to this value
-	// so foliage breathes while statues stay still.
+	// sway is the per-part wind-displacement factor (0..1); 0 = rigid. Foliage
+	// parts set sway >= 1 to ride the global wind animation (propModel.draw adds
+	// a time-based horizontal offset proportional to this).
 	sway float32
 }
 
-// partRotationAxis is an internal helper: returns the axis a part rotates
-// around for its DrawModelEx call, falling back to world-up when the part
-// left rotationAxis at the zero value. Package-internal — propModel.draw
-// and treeModel.draw are the only callers.
+// partRotationAxis returns a part's rotation axis, defaulting to world-up
+// when rotationAxis is the zero value.
 func partRotationAxis(p treePart) rl.Vector3 {
 	if p.rotationAxis.X == 0 && p.rotationAxis.Y == 0 && p.rotationAxis.Z == 0 {
 		return rl.NewVector3(0, 1, 0)
@@ -61,11 +49,9 @@ func partRotationAxis(p treePart) rl.Vector3 {
 	return p.rotationAxis
 }
 
-// isVerticalAxis reports whether a part rotates around the world-up axis
-// (either explicitly or via the zero-vector default). Used by the prop /
-// tree draw paths to decide whether the prop's overall yaw can be folded
-// into the part's own rotation by simple addition (only valid when the
-// two rotations share an axis).
+// isVerticalAxis reports whether a part rotates around world-up. When true, the
+// prop's yaw can be folded into the part's rotation by addition (only valid when
+// the two rotations share an axis).
 func isVerticalAxis(axis rl.Vector3) bool {
 	if axis.X == 0 && axis.Y == 0 && axis.Z == 0 {
 		return true
@@ -73,9 +59,7 @@ func isVerticalAxis(axis rl.Vector3) bool {
 	return axis.X == 0 && axis.Z == 0 && axis.Y != 0
 }
 
-// rotateOffsetY scales an offset and rotates it around the world-up axis
-// by `yawDeg` degrees. Used to reorient a prop's parts around its own
-// vertical centerline when the whole prop is yawed.
+// rotateOffsetY scales an offset and rotates it around world-up by yawDeg degrees.
 func rotateOffsetY(offset rl.Vector3, scale, yawDeg float32) rl.Vector3 {
 	scaled := rl.NewVector3(offset.X*scale, offset.Y*scale, offset.Z*scale)
 	if yawDeg == 0 {
@@ -85,43 +69,32 @@ func rotateOffsetY(offset rl.Vector3, scale, yawDeg float32) rl.Vector3 {
 }
 
 const (
-	treeMeshRoot = iota // tapering cone at the trunk's foot — the root flare
+	treeMeshRoot = iota // root flare cone at the trunk's foot
 	treeMeshTrunk
 	treeMeshCanopyLow
 	treeMeshCanopyHigh
 	treeMeshCanopySide
 	treeMeshCanopyAccent
-	// treeMeshBranch is the tapering bough cone that bridges trunk → canopy.
-	// A BARK part — the variance pass must exclude it from canopy
-	// jitter/species-tint the same way it excludes root + trunk.
+	// treeMeshBranch is the bough cone bridging trunk → canopy. A BARK part —
+	// the variance pass excludes it from canopy jitter/species-tint like root+trunk.
 	treeMeshBranch
 )
 
 func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 	models := []rl.Model{
-		// Flare cone hugging the very base — the bole's swell at the soil
-		// line, merging the root toes into one mass.
+		// Root flare cone hugging the base, merging the root toes into one mass.
 		treeMeshRoot: rl.LoadModelFromMesh(rl.GenMeshCone(0.30, 0.40, 10)),
-		// Trunk: ONE tall cone. A cone IS a continuously tapering trunk —
-		// no stacked segments, so no end-cap ledges catching the sun as
-		// bright rings (the failure of the earlier telescoped version).
-		// Its point is buried deep in the canopy (tip 3.4 vs dome center
-		// 2.55), so the visible run tapers 0.20 → ~0.11 smoothly. The
-		// part tilts the whole cone ~3° off plumb, pivoting at the GROUND
-		// (cone base sits at the origin), which is how real trees lean.
+		// Trunk: ONE tall cone (continuous taper, no end-cap ledges catching sun
+		// as bright rings). Tip buried deep in the canopy; tilted ~3° at the
+		// GROUND (cone base at origin) like a real tree leans.
 		treeMeshTrunk: rl.LoadModelFromMesh(rl.GenMeshCone(0.20, 3.4, 12)),
-		// Canopy lumps enlarged from the prior 0.92/0.78/0.55/0.38
-		// pass — pushes the silhouette toward a Wind-Waker storybook
-		// "puff" dome. The Low lump is now the dominant base mass;
-		// High sits over it as a brighter crown; Side lumps spread
-		// laterally; Accent gives the gilt highlights.
+		// Canopy lumps: Low is the dominant base mass, High the brighter crown,
+		// Side spread laterally, Accent the gilt highlights.
 		treeMeshCanopyLow:    rl.LoadModelFromMesh(rl.GenMeshSphere(1.18, 14, 18)),
 		treeMeshCanopyHigh:   rl.LoadModelFromMesh(rl.GenMeshSphere(0.96, 14, 18)),
 		treeMeshCanopySide:   rl.LoadModelFromMesh(rl.GenMeshSphere(0.68, 12, 16)),
 		treeMeshCanopyAccent: rl.LoadModelFromMesh(rl.GenMeshSphere(0.46, 10, 14)),
-		// Bough segment — a CONE, because limbs taper. Each bough chains
-		// two of these (thick steep lower + thin shallower upper) into a
-		// visible elbow, the articulation a single straight stick can't give.
+		// Bough segment — a CONE (limbs taper). Each bough chains two into an elbow.
 		treeMeshBranch: rl.LoadModelFromMesh(rl.GenMeshCone(0.082, 0.55, 7)),
 	}
 	for i := range models {
@@ -133,10 +106,7 @@ func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 		attachShader(&models[i], shader)
 	}
 
-	// Pastel-but-saturated canopy — soft spring green with cream
-	// and lemon-gold accents, matched to the leaf texture's
-	// bumped chroma so the puffy dome reads lush against the
-	// blue sky.
+	// Pastel-saturated canopy — spring green with cream and lemon-gold accents.
 	leafBase := color.RGBA{R: 146, G: 204, B: 114, A: 255}
 	leafMid := color.RGBA{R: 124, G: 188, B: 106, A: 255}
 	leafDeep := color.RGBA{R: 98, G: 160, B: 96, A: 255}
@@ -146,75 +116,48 @@ func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 	return treeModel{
 		models: models,
 		parts: []treePart{
-			// Trunk — one continuously-tapering cone, tilted ~3° at the
-			// ground so the tree leans like a grown thing (the tilt axis
-			// rotates with per-tile yaw, so every tree leans its own way).
+			// Trunk — tapering cone tilted ~3° at the ground; the tilt axis rotates
+			// with per-tile yaw so every tree leans its own way.
 			{modelIdx: treeMeshTrunk, offset: rl.NewVector3(0, 0.01, 0), scale: rl.NewVector3(1, 1, 1), rotation: 3, rotationAxis: rl.NewVector3(1, 0, 0.4), tint: rl.White},
-			// Dominant low canopy — broad mass anchoring the dome, nudged
-			// a touch toward the trunk's lean so the crown loads over the
-			// bole's top, not over its base.
+			// Dominant low canopy, nudged toward the trunk's lean so the crown
+			// loads over the bole's top.
 			{modelIdx: treeMeshCanopyLow, offset: rl.NewVector3(0.06, 2.55, 0.01), scale: rl.NewVector3(1, 0.95, 1), tint: leafMid},
-			// Crown — slightly offset upward, brighter, catches the
-			// sky tint.
+			// Crown — brighter, catches the sky tint.
 			{modelIdx: treeMeshCanopyHigh, offset: rl.NewVector3(-0.05, 3.20, 0.05), scale: rl.NewVector3(1, 1, 1), tint: leafBase},
-			// Side lumps spreading wide — the painterly puff
-			// shoulders.
+			// Side lumps spreading wide.
 			{modelIdx: treeMeshCanopySide, offset: rl.NewVector3(0.55, 2.90, 0.18), scale: rl.NewVector3(1, 1, 1), tint: leafDeep},
 			{modelIdx: treeMeshCanopySide, offset: rl.NewVector3(-0.50, 2.72, -0.18), scale: rl.NewVector3(1, 1, 1), tint: leafMid},
-			// Top bloom — bright cream lump kissing the very top.
-			// This is the Wind Waker "sunlight catches the crown"
-			// signature highlight.
+			// Top bloom — bright cream lump at the very top.
 			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(0.08, 3.62, -0.06), scale: rl.NewVector3(1, 0.9, 1), tint: leafBloom},
-			// Two gold accents scattered around the canopy as
-			// sun-dappled gilt highlights.
+			// Two gold sun-dapple accents.
 			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(0.30, 3.40, -0.22), scale: rl.NewVector3(1, 1, 1), tint: leafGold},
 			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(-0.26, 3.26, 0.28), scale: rl.NewVector3(1, 1, 1), tint: leafGold},
 
 			// ---- FORM PASS (appended so the canopy lumps above keep their
-			// established per-index variance) ----
-			//
-			// NOTE: no separate under-canopy "occlusion ball" — an earlier
-			// attempt drew a wide dark flattened sphere under the dome and
-			// its equator poked past the canopy as a dark saucer ring
-			// (worse under per-part jitter). The under-shadow comes from
-			// the sun shader's NdotL on each lump's normals, which is
-			// orientation-correct and can't poke.
-			//
-			// Every limb below is a CONE (taper toward the tip) and every
-			// bough is TWO cones meeting at an elbow — the articulation
-			// that separates "grown" from "assembled from pipes." Joint
-			// and tip positions are computed from the axis-angle rotation
-			// (cone +Y rotated θ around the given axis), not eyeballed,
-			// with upper segments seated ~0.08 BACK along the lower
-			// segment so the elbows stay closed across the ±28 % height
-			// stretch (the small authored overlap absorbs the joint slip).
+			// per-index variance) ----
+			// No under-canopy occlusion ball — its equator poked past the canopy
+			// as a dark saucer ring. The under-shadow comes from the sun shader's
+			// NdotL, which is orientation-correct. Each bough is TWO cones meeting
+			// at an elbow; joint/tip positions are computed from the axis-angle
+			// rotation, with upper segments seated ~0.08 BACK so elbows stay closed
+			// across the ±28% height stretch.
 
-			// Base flare — the bole's swell at the soil line. The ONLY
-			// root geometry: a single smooth tapering cone the trunk rises
-			// through. (Earlier passes tried radiating root cones — both
-			// long buttresses and stubby toes read as spikes from the
-			// player's low approach angle, so the ground grip is carried
-			// entirely by this swell + the contact shadow.)
+			// Base flare — the ONLY root geometry (radiating root cones read as
+			// spikes from the player's low angle); ground grip is this + the shadow.
 			{modelIdx: treeMeshRoot, offset: rl.NewVector3(0, 0, 0), scale: rl.NewVector3(1, 1, 1), tint: rl.White},
 
-			// Bough A — toward +Z. Lower segment leaves the mid-trunk at a
-			// steep 30°; the upper continues from the elbow at 58°, thinner.
-			// Elbow at (−0.03, 1.78, 0.28); tip at (−0.17, 2.04, 0.75).
+			// Bough A — toward +Z. Lower segment at 30°, upper at 58°, thinner.
 			{modelIdx: treeMeshBranch, offset: rl.NewVector3(0.05, 1.30, 0.02), scale: rl.NewVector3(1, 1, 1), rotation: 30, rotationAxis: rl.NewVector3(1, 0, 0.3), tint: rl.White},
 			{modelIdx: treeMeshBranch, offset: rl.NewVector3(-0.02, 1.71, 0.25), scale: rl.NewVector3(0.73, 1.13, 0.73), rotation: 58, rotationAxis: rl.NewVector3(1, 0, 0.3), tint: color.RGBA{R: 234, G: 224, B: 212, A: 255}},
-			// Bough B — toward +X, higher on the trunk, mirrored arc.
-			// Elbow at (0.17, 1.93, −0.07); tip at (0.60, 2.20, −0.17).
+			// Bough B — toward +X, higher, mirrored arc.
 			{modelIdx: treeMeshBranch, offset: rl.NewVector3(-0.04, 1.48, -0.02), scale: rl.NewVector3(0.98, 0.91, 0.98), rotation: -26, rotationAxis: rl.NewVector3(0.25, 0, 1), tint: rl.White},
 			{modelIdx: treeMeshBranch, offset: rl.NewVector3(0.14, 1.86, -0.06), scale: rl.NewVector3(0.67, 1.05, 0.67), rotation: -54, rotationAxis: rl.NewVector3(0.25, 0, 1), tint: color.RGBA{R: 230, G: 220, B: 208, A: 255}},
-			// Back stub — a third short bough toward −Z so the crotch
-			// reads from every approach (phyllotaxis, cheaply). Base seated
-			// on the trunk AXIS (the 3° lean carries the upper trunk +Z;
-			// an off-axis −Z base would exit the tapered cone up here).
+			// Back stub toward −Z so the crotch reads from every approach. Base
+			// seated on the trunk AXIS (an off-axis −Z base would exit the cone).
 			{modelIdx: treeMeshBranch, offset: rl.NewVector3(0, 1.58, 0), scale: rl.NewVector3(0.73, 0.78, 0.73), rotation: -38, rotationAxis: rl.NewVector3(1, 0, -0.2), tint: color.RGBA{R: 226, G: 216, B: 202, A: 255}},
 
-			// Leaf tufts seated on each bough's computed tip — canopy
-			// family (sway + species tint), so no bough ends in a naked
-			// spike and the foliage visibly hangs OFF the branch structure.
+			// Leaf tufts on each bough's tip — canopy family (sway + species tint)
+			// so no bough ends in a naked spike.
 			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(-0.17, 2.06, 0.74), scale: rl.NewVector3(0.78, 0.70, 0.78), tint: leafDeep},
 			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(0.60, 2.22, -0.17), scale: rl.NewVector3(0.72, 0.66, 0.72), tint: leafMid},
 			{modelIdx: treeMeshCanopyAccent, offset: rl.NewVector3(-0.05, 1.94, -0.27), scale: rl.NewVector3(0.55, 0.50, 0.55), tint: leafDeep},
@@ -222,15 +165,9 @@ func loadTreeModel(shader rl.Shader, barkTex, leafTex rl.Texture2D) treeModel {
 	}
 }
 
-// draw renders the tree at center, scaled, with `yaw` degrees of rotation
-// around the vertical axis through the tree's trunk. Yaw rotates each part's
-// offset around the prop center so the whole canopy/lump arrangement
-// reorients with the prop. Parts whose own rotationAxis is the default
-// vertical have yaw added to their part.rotation; TILTED parts compose via
-// yawedTiltAxis — rotating the tilt AXIS by yaw equals yaw∘tilt for our
-// rotationally-symmetric meshes — so a tilted bough and the (vertical-axis)
-// leaf tuft glued to its tip swing together under per-tile yaw instead of
-// the tuft orbiting away from a world-fixed branch.
+// draw renders the tree at center, scaled, yawed around the trunk's vertical
+// axis. Vertical-axis parts get yaw added to their rotation; tilted parts
+// compose via yawedTiltAxis so a bough and its glued-on tuft swing together.
 func (t treeModel) draw(center rl.Vector3, scale, yaw float32) {
 	if scale <= 0 {
 		scale = 1
@@ -251,10 +188,9 @@ func (t treeModel) draw(center rl.Vector3, scale, yaw float32) {
 }
 
 // yawedTiltAxis rotates a part's tilt axis around world-up by yaw degrees.
-// For a mesh that's rotationally symmetric about its own +Y (every cylinder,
-// cone, and sphere in this file), R_y(yaw)·R_axis(θ) == R_{R_y(yaw)·axis}(θ)
-// up to an invisible pre-spin — so this IS the correct yaw composition for
-// tilted parts, done with one vector rotate instead of matrix stacking.
+// For meshes rotationally symmetric about +Y (every mesh here), this equals
+// yaw∘tilt up to an invisible pre-spin — the correct yaw composition with one
+// vector rotate instead of matrix stacking.
 func yawedTiltAxis(axis rl.Vector3, yaw float32) rl.Vector3 {
 	if yaw == 0 {
 		return axis
@@ -262,31 +198,9 @@ func yawedTiltAxis(axis rl.Vector3, yaw float32) rl.Vector3 {
 	return rl.Vector3RotateByAxisAngle(axis, rl.NewVector3(0, 1, 0), yaw*degToRad)
 }
 
-// drawVaried renders the tree with per-tile shape variance seeded from
-// `seed` so a grove of identical-char tiles no longer stamps the same
-// silhouette across the field. Variance is bounded so the difference
-// reads as "this tree grew a little differently" — not "this is a
-// different species" — and stays inside the tile footprint:
-//
-//   - Overall scale walks ±10% off `scale`.
-//   - Canopy parts get an independent per-part scale jitter (±14% per
-//     axis) plus a small horizontal nudge so foliage lumps sit in
-//     different relative positions tree-to-tree.
-//   - Each canopy lump's tint walks ±14 in R/G/B (alpha preserved) so
-//     leaf color shifts per tile without authoring extra materials.
-//   - One side-canopy lump is dropped at random (~25%) so some trees
-//     read fuller and others sparser.
-//   - Trunk parts ride the overall scale jitter only — kept plumb so
-//     they read as varied, not broken.
-//
-// seed==0 still produces deterministic output, so callers that don't
-// care about per-tile variance can pass 0 and get a stable tree. The
-// legacy treeModel.draw is preserved for menu/title/preview call sites
-// that aren't tile-positioned.
-// treePartVariance is the per-part static jitter for one seed: the
-// canopy scale wobble, nudge offset, and final (species + jitter) tint.
-// All of it is seed-derived and frame-invariant, so it's computed once
-// and cached rather than re-derived per tree per frame.
+// treePartVariance is the per-part static jitter for one seed: canopy scale
+// wobble, nudge offset, and final (species + jitter) tint. Seed-derived and
+// frame-invariant, so computed once and cached.
 type treePartVariance struct {
 	sx, sy, sz     float32
 	nudgeX, nudgeZ float32
@@ -294,12 +208,9 @@ type treePartVariance struct {
 	isCanopy       bool
 }
 
-// treeVariance is everything in a tree's shape that depends only on its
-// seed — NOT on the tile's scale (folded in via scaleFactor at draw),
-// its yaw (applied by the final rotate), or the per-frame wind sway.
-// Cached by seed so a forest doesn't re-run the hash mix + per-part frac
-// jitter + species tint every frame; only the 3 sway sines and the
-// cheap rotate/scale stay per-frame.
+// treeVariance is the seed-dependent part of a tree's shape — NOT scale, yaw,
+// or per-frame wind sway. Cached by seed so a forest doesn't re-derive the hash
+// mix + per-part jitter + species tint every frame.
 type treeVariance struct {
 	scaleFactor   float32 // overall = tileScale * scaleFactor
 	heightStretch float32
@@ -308,19 +219,16 @@ type treeVariance struct {
 	parts         []treePartVariance
 }
 
-// treeVarianceCache memoizes treeVariance by seed. seed is tileHash(x,z)
-// — deterministic and permanent, so entries never need invalidation;
-// growth is bounded by the number of distinct tree tiles ever drawn.
-// Touched only from the single-threaded render path. (One treeModel —
-// assets.tree — feeds drawVaried, so keying on seed alone is safe.)
+// treeVarianceCache memoizes treeVariance by seed (tileHash(x,z) — deterministic,
+// so entries never need invalidation). Touched only from the single-threaded
+// render path; one treeModel feeds drawVaried, so keying on seed alone is safe.
 var treeVarianceCache = map[uint32]*treeVariance{}
 
 func (t treeModel) variance(seed uint32) *treeVariance {
 	if v, ok := treeVarianceCache[seed]; ok {
 		return v
 	}
-	// Mix once so per-byte slices below are decorrelated even when
-	// neighboring tiles' seeds differ by only a few bits.
+	// Mix once so per-byte slices decorrelate even for near-identical seeds.
 	mix := seed*hashSalt ^ 0xC2B2AE3D
 	mix ^= mix >> 16
 	mix *= 0x85EBCA6B
@@ -328,23 +236,18 @@ func (t treeModel) variance(seed uint32) *treeVariance {
 	frac := func(b byte) float32 { return (float32(int(b)) - 128) / 128 }
 
 	v := treeVariance{
-		// Overall girth wobble (±10%). Multiplied by the tile's scale
-		// at draw time to produce `overall`.
+		// Overall girth wobble (±10%), multiplied by tile scale at draw.
 		scaleFactor: 1 + frac(byte(mix))*0.10,
-		// Height-only stretch: independent of overall scale so some trees
-		// read as noticeably taller / shorter than their neighbors even
-		// when the trunk girth is similar. Range ±28% — wide enough to be
-		// readable from the player's POV but bounded so a stretched canopy
-		// doesn't punch through the ceiling on indoor maps.
+		// Height-only stretch (±28%), independent of girth. Bounded so a
+		// stretched canopy doesn't punch through the ceiling on indoor maps.
 		heightStretch: 1 + frac(byte(mix>>4))*0.28,
 		dropIdx:       -1,
 		swayPhase:     frac(byte(mix>>22)) * tau,
 		parts:         make([]treePartVariance, len(t.parts)),
 	}
 
-	// Drop one side-canopy lump ~25% of the time. dropIdx == -1 means
-	// "draw everything." Walks parts to locate side canopies so this
-	// rule survives part-list reshuffles in loadTreeModel.
+	// Drop one side-canopy lump ~25% of the time (dropIdx == -1 = draw all).
+	// Walks parts to locate side canopies so it survives part-list reshuffles.
 	if byte(mix>>8) < 64 {
 		nthSide := int(byte(mix>>16)) % 2
 		seen := 0
@@ -359,12 +262,8 @@ func (t treeModel) variance(seed uint32) *treeVariance {
 		}
 	}
 
-	// Per-tile tree species pick. ~10 % of trees render with a soft
-	// painted-pink "blossom" canopy, ~10 % with a warm autumn
-	// rust-gold canopy, the rest stay in the muted green family.
-	// All three families come from the same leaf texture so we get
-	// variety without authoring extra atlases — only the tint
-	// changes through speciesCanopyTint below.
+	// Per-tile species: ~10% blossom (pink), ~10% autumn (rust-gold), rest green.
+	// All share one leaf texture; only the tint changes (speciesCanopyTint).
 	speciesRoll := byte(mix >> 20)
 	species := treeSpeciesGreen
 	switch {
@@ -375,30 +274,23 @@ func (t treeModel) variance(seed uint32) *treeVariance {
 	}
 
 	for i, part := range t.parts {
-		// Bark parts (root flare, trunk, boughs) are rigid wood: no canopy
-		// jitter, no wind lean, and crucially no species remap — a blossom
-		// tree's BRANCHES don't turn pink.
+		// Bark parts (root, trunk, boughs) are rigid: no jitter, lean, or
+		// species remap — a blossom tree's branches don't turn pink.
 		isBark := part.modelIdx == treeMeshRoot || part.modelIdx == treeMeshTrunk ||
 			part.modelIdx == treeMeshBranch
 		isCanopy := !isBark
 		pv := treePartVariance{sx: 1, sy: 1, sz: 1, tint: part.tint, isCanopy: isCanopy}
 		if isCanopy {
-			// Shift amounts wrap mod 25 so they stay inside the uint32 —
-			// the old unwrapped `i*11`-style shifts overflowed for part
-			// index ≥ 2 (Go defines >>33 on uint32 as 0), which silently
-			// froze every higher-index lump's jitter at the SAME constant
-			// (frac(0) = −1 → fixed −0.20 nudges, fixed 0.86 scales) on
-			// every tree. Wrapping restores genuine per-seed variety for
-			// the whole part list, tip tufts included.
+			// Shifts wrap mod 25 to stay inside the uint32 — unwrapped i*11
+			// shifts overflowed (>>33 is 0 in Go), freezing every higher-index
+			// lump's jitter at the same constant on every tree.
 			pv.sx = 1 + frac(byte(mix>>uint((3+i*5)%25)))*0.14
 			pv.sy = 1 + frac(byte(mix>>uint((7+i*9)%25)))*0.14
 			pv.sz = 1 + frac(byte(mix>>uint((11+i*13)%25)))*0.14
 			pv.nudgeX = frac(byte(mix>>uint((5+i*11)%25))) * 0.20
 			pv.nudgeZ = frac(byte(mix>>uint((13+i*17)%25))) * 0.20
-			// Pick the species palette first (green / blossom / autumn),
-			// then apply the standard ±14 per-channel jitter on top so
-			// lumps within one tree still walk in tone but the family
-			// colour is preserved.
+			// Species palette first, then ±14 per-channel jitter on top so lumps
+			// walk in tone while the family colour is preserved.
 			pv.tint = jitterTint(speciesCanopyTint(part.tint, species), mix>>uint((7+i*4)%23), 14)
 		}
 		v.parts[i] = pv
@@ -415,13 +307,8 @@ func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32
 	v := t.variance(seed)
 	overall := scale * v.scaleFactor
 
-	// Canopy sway — gentle wind animation. Each tree gets a unique
-	// phase offset from its seed so a stand of trees breathes
-	// asynchronously instead of stamping the same rocking motion
-	// across the grid. Amplitude stays small (~0.05 world units)
-	// so the silhouette reads as "leaves drifting in a breeze" not
-	// "the tree is about to fall." Trunks are NOT swayed — only
-	// the foliage rides the wind, the way Wind Waker trees do.
+	// Canopy sway — per-seed phase offset so a stand breathes asynchronously.
+	// Small amplitude (~0.05); trunks are not swayed, only foliage.
 	swayTime := worldFrameClock
 	swayX := float32(math.Sin(float64(swayTime*0.85+v.swayPhase))) * 0.05
 	swayZ := float32(math.Sin(float64(swayTime*0.72+v.swayPhase+1.3))) * 0.04
@@ -433,11 +320,8 @@ func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32
 		}
 		pv := v.parts[i]
 
-		// Height stretch lifts canopy parts proportionally to their
-		// authored Y offset so the foliage rides on top of the
-		// stretched trunk, and stretches the trunk mesh itself so the
-		// bark cylinder fills the gap. Trunk Y scale and canopy lift
-		// use the same factor so they grow / shrink in lockstep.
+		// Height stretch lifts canopy Y offsets and scales the trunk mesh by the
+		// same factor so foliage rides on top of the stretched trunk.
 		yOffset := part.offset.Y * v.heightStretch
 		trunkYScale := float32(1.0)
 		if part.modelIdx == treeMeshTrunk {
@@ -446,12 +330,8 @@ func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32
 
 		offX := part.offset.X + pv.nudgeX
 		offZ := part.offset.Z + pv.nudgeZ
-		// Canopy lumps lean in the wind; higher lumps lean more
-		// than lower lumps (the `lean` factor below scales the sway by
-		// the part's Y offset, capped at 1.4) so the crown drifts
-		// further than the under-canopy mass — the "tree breathing in a
-		// breeze" feel rather than the whole silhouette sliding
-		// sideways. Trunk and root are skipped.
+		// Canopy lumps lean in the wind, higher lumps more (lean scales sway by
+		// Y offset, capped at 1.4) so the crown drifts further. Trunk/root skipped.
 		offsetY := yOffset
 		if pv.isCanopy {
 			lean := part.offset.Y / 3.0
@@ -470,20 +350,16 @@ func (t treeModel) drawVaried(center rl.Vector3, scale, yaw float32, seed uint32
 		if isVerticalAxis(part.rotationAxis) {
 			rotation += yaw
 		} else {
-			// Tilted parts (boughs, surface roots) compose with the
-			// per-tile yaw via the rotated tilt axis — see yawedTiltAxis —
-			// so they swing with the tree instead of pointing the same
-			// world direction in every grove (and the tip tufts stay
-			// glued to their boughs).
+			// Tilted parts compose yaw via the rotated tilt axis (yawedTiltAxis)
+			// so they swing with the tree and tip tufts stay glued to their boughs.
 			axis = yawedTiltAxis(axis, yaw)
 		}
 		rl.DrawModelEx(t.models[part.modelIdx], position, axis, rotation, drawScale, pv.tint)
 	}
 }
 
-// treeSpecies labels a per-tile painted-canopy palette. The seed bit
-// pick in drawVaried rolls one of three options so a forest reads as
-// mixed-species rather than a monoculture.
+// treeSpecies labels a per-tile painted-canopy palette (drawVaried rolls one
+// of three so a forest reads as mixed-species).
 type treeSpecies int
 
 const (
@@ -492,25 +368,17 @@ const (
 	treeSpeciesAutumn
 )
 
-// speciesCanopyTint returns the per-species painted-canopy colour for
-// a given authored leaf tint. Green leaves pass through unchanged
-// (the muted forest palette); blossom remaps to a soft painted-pink
-// family; autumn remaps to a warm rust-gold family. Brightness of the
-// original tint is broadly preserved so highlight lumps stay
-// highlight-bright and shadow lumps stay shadow-deep, just hue-shifted.
+// speciesCanopyTint hue-shifts a leaf tint per species (green passes through),
+// preserving brightness so highlight/shadow lumps stay relatively bright/deep.
 func speciesCanopyTint(orig color.RGBA, species treeSpecies) color.RGBA {
 	if species == treeSpeciesGreen {
 		return orig
 	}
-	// Brightness key — average of the green channel (which carries
-	// most of the original leaf-luminance) with a touch of R for
-	// the highlight lumps.
+	// Brightness key — green channel (most of the leaf luminance) plus a touch of R.
 	key := (int(orig.G)*2 + int(orig.R)) / 3
 	switch species {
 	case treeSpeciesBlossom:
-		// Soft painted blossom — rose pink. Cream-leaning highlights,
-		// rosier midtones, dusky maroon shadows. R lifted slightly,
-		// G dropped, B nudged toward warm.
+		// Rose pink: R up, G down, B toward warm.
 		return color.RGBA{
 			R: core.ClampByte(key + 56),
 			G: core.ClampByte(key - 22),
@@ -518,9 +386,7 @@ func speciesCanopyTint(orig color.RGBA, species treeSpecies) color.RGBA {
 			A: orig.A,
 		}
 	case treeSpeciesAutumn:
-		// Warm rust-gold — autumn-foliage palette. R bumped, G
-		// pulled toward amber, B dropped so the canopy reads as
-		// burnt orange against the muted green field.
+		// Rust-gold: R up, G toward amber, B down for burnt orange.
 		return color.RGBA{
 			R: core.ClampByte(key + 52),
 			G: core.ClampByte(key - 6),
@@ -531,9 +397,7 @@ func speciesCanopyTint(orig color.RGBA, species treeSpecies) color.RGBA {
 	return orig
 }
 
-// jitterTint shifts an RGBA's R/G/B channels by up to ±amp using bytes
-// pulled from `bits`. Alpha is preserved. Channel clamping goes through
-// core.ClampByte so the [0, 255] rule lives in one place.
+// jitterTint shifts R/G/B by up to ±amp using bytes from bits; alpha preserved.
 func jitterTint(c color.RGBA, bits uint32, amp int) color.RGBA {
 	shift := func(v byte, b byte) byte {
 		delta := int(b)%(2*amp+1) - amp
@@ -553,32 +417,22 @@ func (t treeModel) unload() {
 	}
 }
 
-// propModel is a generic multi-mesh prop (boulders, bushes, mushrooms) built
-// from a small set of unique meshes referenced by index. Same shape as
-// treeModel, just decoupled so each prop family can own its texture/tint set
-// without entangling.
+// propModel is a generic multi-mesh prop (boulders, bushes, mushrooms). Same
+// shape as treeModel, decoupled so each prop family owns its texture/tint set.
 type propModel struct {
 	models []rl.Model
-	parts  []treePart // reuse the same per-part record (modelIdx, offset, scale, tint)
+	parts  []treePart // reuse the per-part record
 }
 
-// draw renders the prop with a uniform scale and a yaw rotation around its
-// vertical axis. See treeModel.draw for the rationale on yaw composition.
-//
-// Parts that carry a non-zero `sway` get a small time-based horizontal
-// offset added to their position so foliage props breathe in the wind
-// while rigid props (statues, pillars, crates) stay planted. Phase is
-// hashed from the prop's world position so a row of grass clumps
-// doesn't ripple in lockstep — adjacent tiles drift independently.
+// draw renders the prop with uniform scale and yaw (see treeModel.draw for yaw
+// composition). Parts with non-zero sway get a time-based horizontal offset;
+// phase is hashed from world position so adjacent tiles drift independently.
 func (p propModel) draw(center rl.Vector3, scale, yaw float32) {
 	if scale <= 0 {
 		scale = 1
 	}
-	// Wind sway is computed lazily inside the single draw loop, the first time a
-	// part with sway>0 is hit, so rigid props (statues, pillars, crates — the
-	// bulk of a dungeon) never touch the Mod + two Sin calls and we avoid a
-	// separate pre-scan pass over the parts. swayTime comes from the once-per-
-	// frame worldFrameClock rather than a per-prop rl.GetTime() cgo call.
+	// Sway is computed lazily the first time a sway>0 part is hit, so rigid props
+	// never touch the Mod + two Sin calls. swayTime is the once-per-frame clock.
 	var swayX, swayZ float32
 	swayReady := false
 	for _, part := range p.parts {
@@ -587,16 +441,14 @@ func (p propModel) draw(center rl.Vector3, scale, yaw float32) {
 		if part.sway > 0 {
 			if !swayReady {
 				swayTime := worldFrameClock
-				// Position-derived phase: hash the rounded tile coords so each
-				// prop tile lands on a different point in the sway cycle.
+				// Position-derived phase so each prop tile lands on a different
+				// point in the sway cycle.
 				posPhase := float32(math.Mod(float64(center.X)*0.73+float64(center.Z)*1.31, tau))
 				swayX = float32(math.Sin(float64(swayTime*1.10+posPhase))) * 0.035
 				swayZ = float32(math.Sin(float64(swayTime*0.95+posPhase+1.4))) * 0.030
 				swayReady = true
 			}
-			// Lean scales with Y so taller parts of a clump drift
-			// further than the base — natural "grass bending in
-			// the wind" shape.
+			// Lean scales with Y so taller parts drift further than the base.
 			lean := part.sway * (0.4 + part.offset.Y*1.5)
 			position.X += swayX * lean
 			position.Z += swayZ * lean
@@ -607,10 +459,8 @@ func (p propModel) draw(center rl.Vector3, scale, yaw float32) {
 		if isVerticalAxis(part.rotationAxis) {
 			rotation += yaw
 		} else {
-			// Tilted parts must yaw their tilt AXIS too, not just orbit the
-			// offset — otherwise the mesh keeps a world-fixed orientation while
-			// its position swings around, desyncing from the rest of the prop.
-			// Mirrors treeModel.draw / drawVaried.
+			// Tilted parts must yaw their tilt AXIS too, else the mesh keeps a
+			// world-fixed orientation while its position swings. Mirrors treeModel.
 			axis = yawedTiltAxis(axis, yaw)
 		}
 		rl.DrawModelEx(p.models[part.modelIdx], position, axis, rotation, drawScale, part.tint)
@@ -623,48 +473,33 @@ func (p propModel) unload() {
 	}
 }
 
-// Rock prop mesh indices. The boulder is built from two sizes of low-poly
-// faceted spheres — the low slice/ring counts give a jagged polygonal
-// silhouette that reads as a chunky stone rather than a smooth river
-// pebble. rockMeshBase still exists as models[0] because world.go's
-// drawPebbleCluster consumes it directly for ground scatter, but the
-// boulder itself no longer draws a cube base under the lumps (it looked
-// like a pedestal — see the parts list below).
+// Rock prop mesh indices. rockMeshBase exists as models[0] for world.go's
+// drawPebbleCluster (ground scatter); the boulder itself doesn't draw it.
 const (
-	rockMeshBase  = iota // flat cube — used by the pebble drawer, not the boulder
+	rockMeshBase  = iota // flat cube — pebble drawer only, not the boulder
 	rockMeshLump         // medium faceted lump (5 rings × 6 slices)
 	rockMeshChunk        // small faceted chunk (4 rings × 5 slices)
-	rockMeshMoss         // untextured moss cushion (tinted green at the part level)
+	rockMeshMoss         // untextured moss cushion (tinted at part level)
 )
 
-// mossPaletteBright / mossPaletteDeep are the moss-cushion tints shared by
-// every mossy rock prop — kept adjacent to the stone palette so the pair
-// retunes together. Bright sits on sun-side caps, deep in crevice patches.
+// mossPaletteBright/Deep are the moss-cushion tints shared by every mossy rock
+// prop. Bright sits on sun-side caps, deep in crevice patches.
 var (
 	mossPaletteBright = rl.NewColor(122, 160, 100, 255)
 	mossPaletteDeep   = rl.NewColor(96, 138, 90, 255)
 )
 
-// RockMeshBaseHeight is the Y dimension passed to GenMeshCube for the
-// rockMeshBase model (line below). Exported so drawPebbleCluster in
-// world.go can compute its y-anchor as RockMeshBaseHeight/2 * hght —
-// "lift the cube half its scaled height so it sits flat on the
-// ground" — without baking the literal twice. Changing the cube's
-// mesh height now requires editing this constant only.
+// RockMeshBaseHeight is the GenMeshCube Y dimension for rockMeshBase. Exported
+// so drawPebbleCluster computes its y-anchor without baking the literal twice.
 const RockMeshBaseHeight = float32(0.36)
 
-// RockMeshBaseHalfHeight is the y-anchor scale used by ground-scatter
-// draws of rockMeshBase. drawPebbleCluster multiplies it by the
-// pebble's per-instance height scale (`hght`) so the cube's bottom
-// face lands flush with the floor regardless of the height jitter.
+// RockMeshBaseHalfHeight is the y-anchor scale for ground-scatter draws of
+// rockMeshBase, multiplied by per-instance height so the bottom face lands flush.
 const RockMeshBaseHalfHeight = RockMeshBaseHeight / 2
 
-// stonePalette* are the shared faceted-rock tints used by every rock
-// prop (boulder, cairn, 2×2 formation). Close-grouped pale greys with
-// slight warm/cool variation so multi-lump rocks read as one stone
-// broken at fault lines. Hoisted to package vars so a palette retune
-// touches one place instead of three loaders that previously each
-// re-declared the same four literals.
+// stonePalette* are the shared faceted-rock tints (boulder, cairn, formation):
+// close-grouped greys with warm/cool variation so multi-lump rocks read as one
+// stone broken at fault lines.
 var (
 	stonePaletteWarm  = rl.NewColor(214, 204, 188, 255)
 	stonePaletteCool  = rl.NewColor(196, 198, 202, 255)
@@ -672,33 +507,22 @@ var (
 	stonePaletteLight = rl.NewColor(232, 224, 210, 255)
 )
 
-// Wood-grain tints shared by the timber props (well, scarecrow, table,
-// bookshelf, etc.). Hoisted like the stone palette above so a retune touches
-// one place instead of the several prop loaders that each re-declared the same
-// two literals. (A loader needing an off-shade still declares its own local.)
+// Wood-grain tints shared by the timber props (well, scarecrow, table, etc.).
 var (
 	woodPaletteWarm = rl.NewColor(110, 78, 50, 255) // warm timber brown
 	woodPaletteDark = rl.NewColor(72, 52, 32, 255)  // dark grain / bark
 )
 
-// loadRockProp builds a chunky polygonal boulder: a flat base with two or
-// three faceted lumps fused on top at varied angles, all in close-grouped
-// stone greys. The intent is "weathered rock outcrop you'd see in a
-// fantasy field map" — low silhouette, jagged facets, no upward spires.
-// Slice/ring counts are kept low (4–6) so the lumps look polygonal rather
-// than billiard-ball smooth.
+// loadRockProp builds a chunky polygonal boulder: faceted lumps fused at varied
+// angles in close-grouped stone greys. Low slice/ring counts (4–6) keep the
+// lumps polygonal, not billiard-ball smooth.
 func loadRockProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 	models := []rl.Model{
 		rockMeshBase: rl.LoadModelFromMesh(rl.GenMeshCube(1.10, RockMeshBaseHeight, 0.95)),
-		// Sphere with low ring/slice count: each face is large enough to
-		// catch a distinct lighting value, which is what reads as "rock"
-		// vs "ball." 5×6 and 4×5 are the sweet spot — fewer looks like a
-		// die, more smooths into a pillow.
+		// Low ring/slice spheres: 5×6 and 4×5 read as rock, not ball.
 		rockMeshLump:  rl.LoadModelFromMesh(rl.GenMeshSphere(0.55, 5, 6)),
 		rockMeshChunk: rl.LoadModelFromMesh(rl.GenMeshSphere(0.36, 4, 5)),
-		// Moss cushion — UNtextured (the rock grain would read as lichen-
-		// on-granite, not growth), tinted meadow-green at the part level.
-		// Low-facet so the cushion stays in the chunky-stone language.
+		// Moss cushion — UNtextured (grain would read as granite), tinted at part level.
 		rockMeshMoss: rl.LoadModelFromMesh(rl.GenMeshSphere(0.30, 5, 7)),
 	}
 	for i := range models {
@@ -708,55 +532,39 @@ func loadRockProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 		attachShader(&models[i], shader)
 	}
 
-	// Shared stone palette (see stonePalette* package vars).
 	warm, cool, dark, light := stonePaletteWarm, stonePaletteCool, stonePaletteDark, stonePaletteLight
 
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Main mass: biggest lump, sitting directly on the ground.
-			// Squashed vertically (y scale 0.85) so the silhouette reads
-			// as a stout stone. Tilted on a (1,4,1) axis so facets don't
-			// align to world axes — looks naturally weathered.
+			// Main mass: biggest lump, squashed (y 0.85), tilted off world axes.
 			{modelIdx: rockMeshLump, offset: rl.NewVector3(-0.10, 0.40, 0.05), scale: rl.NewVector3(1.25, 0.85, 1.20), rotation: 17, rotationAxis: rl.NewVector3(1, 4, 1), tint: warm},
 
-			// Side mass fused into the main lump: smaller, rotated on a
-			// different tilted axis so its facets break the main lump's.
+			// Side mass, different tilt axis so its facets break the main lump's.
 			{modelIdx: rockMeshLump, offset: rl.NewVector3(0.38, 0.32, -0.22), scale: rl.NewVector3(1.0, 0.75, 1.10), rotation: -28, rotationAxis: rl.NewVector3(2, 5, 1), tint: cool},
 
-			// Top chunk: gives the boulder an asymmetric peak. Modest
-			// height keeps the silhouette earthbound — no spires.
+			// Top chunk — asymmetric peak, low so the silhouette stays earthbound.
 			{modelIdx: rockMeshChunk, offset: rl.NewVector3(-0.22, 0.62, 0.12), scale: rl.NewVector3(1.15, 0.7, 1.15), rotation: 41, rotationAxis: rl.NewVector3(1, 5, 0), tint: dark},
 
-			// Back chip: breaks the silhouette on the +Z side so the
-			// boulder reads differently from each angle.
+			// Back chip — breaks the +Z silhouette.
 			{modelIdx: rockMeshChunk, offset: rl.NewVector3(0.06, 0.26, 0.42), scale: rl.NewVector3(1.05, 0.75, 1.05), rotation: 11, rotationAxis: rl.NewVector3(0, 6, 1), tint: dark},
 
-			// Broken-off pebble at the base flank — visual interest at
-			// ground level, makes the boulder feel weathered (eroded
-			// chunks settling at its foot) instead of freshly placed.
+			// Broken-off pebble at the base flank for weathered ground interest.
 			{modelIdx: rockMeshChunk, offset: rl.NewVector3(-0.52, 0.13, 0.08), scale: rl.NewVector3(0.65, 0.45, 0.65), rotation: 65, rotationAxis: rl.NewVector3(1, 3, 0), tint: light},
 
-			// Moss cushions — flattened green caps draped over the upper
-			// faces. Age in two strokes: a bright pad catching the sun on
-			// the main mass's shoulder, a deeper patch tucked into the
-			// crevice between lumps. The boulder reads as having SAT here
-			// for decades, not been placed this morning.
+			// Moss cushions — bright pad on the sun-side shoulder, deeper patch in
+			// the crevice between lumps.
 			{modelIdx: rockMeshMoss, offset: rl.NewVector3(-0.18, 0.74, 0.10), scale: rl.NewVector3(1.15, 0.34, 1.10), rotation: 24, rotationAxis: rl.NewVector3(1, 6, 0), tint: mossPaletteBright},
 			{modelIdx: rockMeshMoss, offset: rl.NewVector3(0.26, 0.54, -0.10), scale: rl.NewVector3(0.85, 0.30, 0.80), rotation: -38, rotationAxis: rl.NewVector3(0, 6, 1), tint: mossPaletteDeep},
 		},
 	}
 }
 
-// loadRockCairnProp builds a 1-tile stacked-stone cairn — three faceted
-// lumps fused on top of each other, taller than the squat boulder so the
-// silhouette reads as "built by hands" rather than "natural rock." Same
-// stone palette as the boulder so they sit comfortably together in the
-// plaza.
+// loadRockCairnProp builds a 1-tile stacked-stone cairn — three faceted lumps,
+// taller than the boulder so it reads as built rather than natural.
 func loadRockCairnProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
-	// Local mesh indices into models below — named (and used as keyed slice
-	// indices) so reordering a mesh re-skins the parts in lockstep instead of
-	// silently shifting the moss-skip onto a stone.
+	// Named mesh indices so reordering re-skins parts in lockstep (the moss-skip
+	// stays on the moss mesh).
 	const (
 		cairnMeshBottom = iota
 		cairnMeshMiddle
@@ -782,30 +590,20 @@ func loadRockCairnProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 			{modelIdx: cairnMeshBottom, offset: rl.NewVector3(0, 0.34, 0), scale: rl.NewVector3(1.1, 0.85, 1.1), rotation: 13, rotationAxis: rl.NewVector3(1, 4, 1), tint: warm},
 			{modelIdx: cairnMeshMiddle, offset: rl.NewVector3(0.04, 0.78, -0.06), scale: rl.NewVector3(1.0, 0.95, 1.0), rotation: -22, rotationAxis: rl.NewVector3(2, 5, 1), tint: cool},
 			{modelIdx: cairnMeshTop, offset: rl.NewVector3(-0.05, 1.10, 0.04), scale: rl.NewVector3(1.0, 0.95, 1.0), rotation: 38, rotationAxis: rl.NewVector3(1, 5, 0), tint: dark},
-			// Old growth on an old marker: a moss bonnet draped over the
-			// middle stone's shoulder (cairns weather from the joints out).
+			// Moss bonnet on the middle stone's shoulder (cairns weather at joints).
 			{modelIdx: cairnMeshMoss, offset: rl.NewVector3(-0.10, 0.92, 0.06), scale: rl.NewVector3(0.80, 0.28, 0.75), rotation: 31, rotationAxis: rl.NewVector3(1, 6, 0), tint: mossPaletteDeep},
-			// Settled contact pebbles at the foot — a stacked marker
-			// presses into the soil; the spill of small stones reads as
-			// "placed long ago," and grounds the column the way the
-			// boulder's flank pebble grounds it.
+			// Settled contact pebbles at the foot — grounds the column.
 			{modelIdx: cairnMeshTop, offset: rl.NewVector3(0.34, 0.09, 0.16), scale: rl.NewVector3(0.50, 0.35, 0.50), rotation: 57, rotationAxis: rl.NewVector3(1, 3, 0), tint: light},
 			{modelIdx: cairnMeshTop, offset: rl.NewVector3(-0.30, 0.07, -0.20), scale: rl.NewVector3(0.42, 0.30, 0.42), rotation: -19, rotationAxis: rl.NewVector3(0, 4, 1), tint: cool},
 		},
 	}
 }
 
-// loadRockFormationProp builds a 2×2 footprint rock formation — a knot of
-// several large lumps fused together to span four tiles. Offsets put the
-// model's origin at the CENTER of the 2×2 footprint, which means the
-// renderer draws this at (anchorX+0.5, anchorZ+0.5) tile-space (= one
-// TileSize east + south of the anchor's tile center). Lumps spread ~1.6
-// world units (~0.8 tile widths each direction) so the silhouette fills
-// the 2-tile span comfortably.
+// loadRockFormationProp builds a 2×2 footprint rock formation. Offsets put the
+// origin at the CENTER of the 2×2 footprint, so the renderer draws it at
+// (anchorX+0.5, anchorZ+0.5). Lumps spread ~1.6 world units to fill the span.
 func loadRockFormationProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
-	// Local mesh indices into models below — named (and used as keyed slice
-	// indices) so reordering a mesh re-skins the parts in lockstep instead of
-	// silently shifting the moss-skip onto a stone.
+	// Named mesh indices so reordering re-skins parts in lockstep.
 	const (
 		formationMeshCore = iota
 		formationMeshShoulder
@@ -844,11 +642,8 @@ func loadRockFormationProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 			{modelIdx: formationMeshCrown, offset: rl.NewVector3(0.05, 1.18, -0.08), scale: rl.NewVector3(1.0, 0.85, 1.0), rotation: 65, rotationAxis: rl.NewVector3(1, 4, 0), tint: light},
 			// Cap accent — slight asymmetric peak.
 			{modelIdx: formationMeshCrown, offset: rl.NewVector3(-0.18, 1.32, 0.10), scale: rl.NewVector3(0.8, 0.75, 0.8), rotation: -25, rotationAxis: rl.NewVector3(2, 4, 1), tint: dark},
-			// Moss colonising the joints — growth concentrates where rain
-			// channels between fused lumps, so the cushions sit IN the
-			// crevices (not perched on peaks): one over the main/NE seam,
-			// one in the SW shadow pocket, one high where the crown meets
-			// the central mass.
+			// Moss in the joint crevices (not on peaks): main/NE seam, SW pocket,
+			// high where the crown meets the central mass.
 			{modelIdx: formationMeshMoss, offset: rl.NewVector3(0.36, 0.92, 0.30), scale: rl.NewVector3(1.05, 0.32, 1.00), rotation: 18, rotationAxis: rl.NewVector3(1, 6, 0), tint: mossPaletteBright},
 			{modelIdx: formationMeshMoss, offset: rl.NewVector3(-0.42, 0.66, -0.30), scale: rl.NewVector3(0.90, 0.28, 0.85), rotation: -44, rotationAxis: rl.NewVector3(0, 6, 1), tint: mossPaletteDeep},
 			{modelIdx: formationMeshMoss, offset: rl.NewVector3(-0.06, 1.24, 0.02), scale: rl.NewVector3(0.70, 0.26, 0.66), rotation: 52, rotationAxis: rl.NewVector3(1, 5, 1), tint: mossPaletteDeep},
@@ -856,15 +651,10 @@ func loadRockFormationProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 	}
 }
 
-// loadArchwayDecor builds a stone archway whose footprint spans 1×2 tiles
-// along +X. Two vertical pillars sit at (−1, 0) and (+1, 0) relative to
-// the model origin (so the model origin lands BETWEEN the two tiles — the
-// renderer offsets by +0.5 tile east of the anchor). A keystone block
-// spans the top, completing the arch shape. Marble palette to match the
-// existing pillar/statue stonework.
-// Archway mesh indices into loadArchwayDecor's models slice. Named so the
-// parts list re-skins the right mesh if the slice is ever reordered — matching
-// the rockMesh*/treeMesh* convention the sibling loaders use.
+// loadArchwayDecor builds a stone archway spanning 1×2 tiles along +X. Pillars
+// sit at (−1,0) and (+1,0) so the origin lands BETWEEN the tiles (renderer
+// offsets +0.5 tile east). Marble palette to match the pillars/statues.
+// Named mesh indices so reordering the slice re-skins the right mesh.
 const (
 	archMeshShaft    = iota // pillar shaft
 	archMeshCapital         // pillar capital
@@ -900,17 +690,13 @@ func loadArchwayDecor(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 	}
 }
 
-// loadBushProp builds a leaf-cluster bush with tiny flower blooms
-// dotted across the top. Leaves share the tree's leaf texture; bloom
-// spheres use the default white material tinted with the flower
-// palette so the bush reads as a small, lively shrub catching
-// wildflowers. Scale 1.0 = "large" (blocks); ~0.5 = "small."
+// loadBushProp builds a leaf-cluster bush with flower blooms across the top.
+// Scale 1.0 = large (blocks); ~0.5 = small.
 func loadBushProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
 	leafLump := rl.LoadModelFromMesh(rl.GenMeshSphere(0.62, 12, 16))
 	leafLumpSm := rl.LoadModelFromMesh(rl.GenMeshSphere(0.46, 10, 14))
 	bloom := rl.LoadModelFromMesh(rl.GenMeshSphere(0.085, 8, 10))
-	// Twig core — a stubby untextured cylinder visible only in the gaps
-	// between the low lumps; sells "grown from a woody heart" at a glance.
+	// Twig core — visible in the gaps between low lumps, sells a woody heart.
 	twig := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.07, 0.34, 7))
 	models := []rl.Model{leafLump, leafLumpSm, bloom, twig}
 	setModelTexture(&models[0], leafTex)
@@ -918,8 +704,7 @@ func loadBushProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
 	for i := range models {
 		attachShader(&models[i], shader)
 	}
-	// Pastel-but-saturated bush — spring-green leaf lumps with
-	// soft colourful blooms.
+	// Pastel-saturated bush — spring-green lumps with soft blooms.
 	leafBase := color.RGBA{R: 142, G: 200, B: 112, A: 255}
 	leafDeep := color.RGBA{R: 102, G: 164, B: 100, A: 255}
 	leafGold := color.RGBA{R: 224, G: 230, B: 152, A: 255}
@@ -931,27 +716,18 @@ func loadBushProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Woody heart first: rigid twig trunk, then a deep-shadow inner
-			// lump — the painter's core shadow that makes the bright lumps
-			// over it read as one shrub with an interior, not three balloons.
+			// Woody heart first: rigid twig, then a deep-shadow inner lump (core
+			// shadow so the bright lumps read as one shrub, not three balloons).
 			{modelIdx: 3, offset: rl.NewVector3(0, 0, 0), scale: rl.NewVector3(1, 1, 1), tint: twigBrown},
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.40, 0), scale: rl.NewVector3(1.25, 0.85, 1.25), tint: leafShadow, sway: 0.40},
-			// Three overlapping leaf lumps — a dominant base with
-			// two side lumps for the painterly "cluster of round
-			// bunches" silhouette. Sway is modest so the bush
-			// breathes without losing its rooted feel.
+			// Three overlapping leaf lumps — dominant base + two sides.
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.52, 0), scale: rl.NewVector3(1, 0.92, 1), tint: leafBase, sway: 0.55},
 			{modelIdx: 1, offset: rl.NewVector3(0.34, 0.68, 0.20), scale: rl.NewVector3(1, 1, 1), tint: leafDeep, sway: 0.65},
 			{modelIdx: 1, offset: rl.NewVector3(-0.32, 0.64, -0.18), scale: rl.NewVector3(1, 1, 1), tint: leafGold, sway: 0.65},
-			// Ground skirt — two low flattened lumps spilling outward at the
-			// base, so the silhouette widens toward the soil the way real
-			// shrubs pool instead of balancing on a point.
+			// Ground skirt — two flattened lumps so the silhouette pools at the soil.
 			{modelIdx: 1, offset: rl.NewVector3(0.26, 0.24, -0.28), scale: rl.NewVector3(0.95, 0.55, 0.95), tint: leafDeep, sway: 0.30},
 			{modelIdx: 1, offset: rl.NewVector3(-0.30, 0.22, 0.24), scale: rl.NewVector3(0.90, 0.50, 0.90), tint: leafShadow, sway: 0.30},
-			// Wildflower blooms dotted across the upper hemisphere
-			// of the bush. Three colours so the patch reads as
-			// mixed wildflowers, not a costume bouquet. Blooms
-			// sway slightly more than the leaves below them.
+			// Wildflower blooms — three colours, sway more than the leaves.
 			{modelIdx: 2, offset: rl.NewVector3(0.08, 0.96, 0.10), scale: rl.NewVector3(1, 1, 1), tint: bloomYellow, sway: 0.85},
 			{modelIdx: 2, offset: rl.NewVector3(-0.22, 0.84, 0.04), scale: rl.NewVector3(1, 1, 1), tint: bloomWhite, sway: 0.85},
 			{modelIdx: 2, offset: rl.NewVector3(0.20, 0.88, -0.18), scale: rl.NewVector3(1, 1, 1), tint: bloomPink, sway: 0.85},
@@ -959,20 +735,16 @@ func loadBushProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
 	}
 }
 
-// loadMushroomProp builds a small mushroom trio: one prominent storybook
-// toadstool (red cap + paper-white spots) plus two smaller companion
-// caps in pale cream and apricot so the patch reads as a forest-floor
-// fairy-ring rather than a single solitary fungus. All parts ride on
-// raylib's default white material and rely on tint colour.
+// loadMushroomProp builds a mushroom trio: one red-cap toadstool plus two
+// smaller cream/apricot companions for a fairy-ring read. Tint-only (no texture).
 func loadMushroomProp(shader rl.Shader) propModel {
 	stem := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.05, 0.16, 8))
 	capDome := rl.LoadModelFromMesh(rl.GenMeshSphere(0.15, 10, 12))
 	spot := rl.LoadModelFromMesh(rl.GenMeshSphere(0.028, 6, 8))
 	smallStem := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.03, 0.10, 8))
 	smallCap := rl.LoadModelFromMesh(rl.GenMeshSphere(0.085, 8, 10))
-	// Gill plate — a thin wide disc tucked under the main cap's rim. From
-	// the player's low approach angle the UNDERSIDE of a toadstool is half
-	// of what you see; without it the cap floated on a bare stick.
+	// Gill plate under the cap rim — the underside is half of what the player
+	// sees at their low angle; without it the cap floats on a bare stick.
 	gill := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.125, 0.035, 12))
 	models := []rl.Model{stem, capDome, spot, smallStem, smallCap, gill}
 	for i := range models {
@@ -988,9 +760,8 @@ func loadMushroomProp(shader rl.Shader) propModel {
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Main toadstool — tall stem, gill plate, domed red cap (tilted
-			// a few degrees so it reads as grown toward the light, not
-			// machined), four painted-white spots across the upper dome.
+			// Main toadstool — stem, gill plate, domed red cap (tilted a few
+			// degrees), four white spots across the dome.
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.02, 0), scale: rl.NewVector3(1, 1, 1), tint: stemTint},
 			{modelIdx: 5, offset: rl.NewVector3(0, 0.155, 0), scale: rl.NewVector3(1, 1, 1), rotation: 7, rotationAxis: rl.NewVector3(1, 8, 0), tint: gillShade},
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.19, 0), scale: rl.NewVector3(1, 0.72, 1), rotation: 7, rotationAxis: rl.NewVector3(1, 8, 0), tint: capRed},
@@ -998,8 +769,7 @@ func loadMushroomProp(shader rl.Shader) propModel {
 			{modelIdx: 2, offset: rl.NewVector3(-0.04, 0.24, 0.05), scale: rl.NewVector3(1, 1, 1), tint: spotWhite},
 			{modelIdx: 2, offset: rl.NewVector3(0.02, 0.255, -0.06), scale: rl.NewVector3(1, 1, 1), tint: spotWhite},
 			{modelIdx: 2, offset: rl.NewVector3(-0.06, 0.23, -0.03), scale: rl.NewVector3(1, 1, 1), tint: spotWhite},
-			// Companion 1 — small cream cap nestled to the side, its own
-			// little gill disc under the rim.
+			// Companion 1 — small cream cap with its own gill disc.
 			{modelIdx: 3, offset: rl.NewVector3(0.18, 0.01, 0.12), scale: rl.NewVector3(1, 1, 1), tint: stemDarker},
 			{modelIdx: 5, offset: rl.NewVector3(0.18, 0.085, 0.12), scale: rl.NewVector3(0.60, 0.8, 0.60), tint: gillShade},
 			{modelIdx: 4, offset: rl.NewVector3(0.18, 0.11, 0.12), scale: rl.NewVector3(1, 0.74, 1), rotation: -6, rotationAxis: rl.NewVector3(0, 8, 1), tint: capCream},
@@ -1011,28 +781,17 @@ func loadMushroomProp(shader rl.Shader) propModel {
 	}
 }
 
-// chestMetalDark / chestMetalBright are the muted-brass band tint and
-// the brighter lockplate tint shared by the chest body and lid. The two
-// loaders build one physical object, so the bands MUST stay in sync —
-// the literals live here once rather than re-declared per loader.
+// chestMetalDark/Bright are the band + lockplate tints shared by the chest body
+// and lid; they MUST stay in sync, so the literals live here once.
 var (
 	chestMetalDark   = rl.NewColor(140, 108, 64, 255)
 	chestMetalBright = rl.NewColor(182, 148, 86, 255)
 )
 
-// loadChestBodyProp builds the wooden chest body with painted metal
-// hardware: four vertical corner straps, two horizontal hoop bands
-// (top + bottom), a lockplate centred on the front face, and a small
-// jewel pip at the centre of the lockplate. Bark texture for the
-// wood; raylib's default material on the metal parts so the tint
-// reads as cast bronze rather than wood-grain.
-//
-// Designed to read as a Wind-Waker treasure chest at any approach
-// angle — the corner straps and hoop bands sell the "ironbound
-// wooden box" silhouette; the lockplate + jewel sells "this is
-// loot, come open me." Dimensions roughly match the prior raw-cube
-// chest so the existing prompt anchor / shadow radius / collision
-// don't need to retune.
+// loadChestBodyProp builds the wooden chest body: corner straps, two hoop
+// bands, a front lockplate, and a jewel pip. Bark texture on wood; default
+// material on metal parts so they read as cast bronze. Dimensions match the
+// prior raw-cube chest so prompt anchor / shadow / collision don't retune.
 func loadChestBodyProp(shader rl.Shader, barkTex rl.Texture2D) propModel {
 	wood := rl.LoadModelFromMesh(rl.GenMeshCube(0.62, 0.46, 0.50))
 	setModelTexture(&wood, barkTex)
@@ -1045,49 +804,34 @@ func loadChestBodyProp(shader rl.Shader, barkTex rl.Texture2D) propModel {
 		attachShader(&models[i], shader)
 	}
 	woodTint := chestBodyColor
-	// Muted brass / bronze for the iron banding (shared with the lid via
-	// the chestMetal* package vars so the two pieces can't drift).
+	// Brass banding shared with the lid via chestMetal* so the pieces can't drift.
 	metalDark := chestMetalDark
 	metalBright := chestMetalBright
 	jewelTint := rl.NewColor(198, 92, 80, 255)
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Wood body — sits at y = bodyHeight/2 so its base
-			// flushes against the floor.
+			// Wood body — base flush against the floor.
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.23, 0), scale: rl.NewVector3(1, 1, 1), tint: woodTint},
-			// Four vertical corner straps at the body's vertical
-			// edges. Slightly proud of the wood so they read as
-			// raised ironwork.
+			// Four corner straps, slightly proud so they read as raised ironwork.
 			{modelIdx: 1, offset: rl.NewVector3(0.31, 0.24, 0.26), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
 			{modelIdx: 1, offset: rl.NewVector3(-0.31, 0.24, 0.26), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
 			{modelIdx: 1, offset: rl.NewVector3(0.31, 0.24, -0.26), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
 			{modelIdx: 1, offset: rl.NewVector3(-0.31, 0.24, -0.26), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
-			// Bottom + top hoop bands hugging the body's
-			// horizontal edges. The top hoop catches the lid
-			// seam visually.
+			// Bottom + top hoop bands; the top catches the lid seam.
 			{modelIdx: 2, offset: rl.NewVector3(0, 0.05, 0), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
 			{modelIdx: 2, offset: rl.NewVector3(0, 0.43, 0), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
-			// Front-face lockplate — bright brass, sits just
-			// proud of the wood so it reads as a mounted plate.
+			// Front lockplate.
 			{modelIdx: 3, offset: rl.NewVector3(0, 0.28, 0.27), scale: rl.NewVector3(1, 1, 1), tint: metalBright},
-			// Lock jewel — small bright pip on the lockplate.
-			// The "treasure inside" cue.
+			// Lock jewel — the "treasure inside" cue.
 			{modelIdx: 4, offset: rl.NewVector3(0, 0.30, 0.30), scale: rl.NewVector3(1, 1, 1), tint: jewelTint},
 		},
 	}
 }
 
-// loadChestLidProp builds the wooden chest lid with painted metal
-// hardware: four corner caps, a single bottom hoop where the lid
-// meets the body, and the lid wood itself (slightly wider than the
-// body so the lip overshoots the corner straps).
-//
-// Drawn separately from the body so the looted-chest path can lift
-// the lid straight up + tilt it backward without disturbing the
-// body's pose. Centre is at the lid's vertical midpoint (y = lid
-// half-height) so the caller positions it by passing the body top
-// as the centre Y.
+// loadChestLidProp builds the chest lid (corner caps, a bottom hoop, lid wood
+// wider than the body). Drawn separately so the looted path can lift+tilt it.
+// Centre is at the lid's vertical midpoint, positioned by passing the body top Y.
 func loadChestLidProp(shader rl.Shader, barkTex rl.Texture2D) propModel {
 	wood := rl.LoadModelFromMesh(rl.GenMeshCube(0.68, 0.18, 0.56))
 	setModelTexture(&wood, barkTex)
@@ -1102,38 +846,26 @@ func loadChestLidProp(shader rl.Shader, barkTex rl.Texture2D) propModel {
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Wood lid — centred so passing the body-top Y as
-			// the position centres the lid on the seam.
+			// Wood lid — centred so the body-top Y centres it on the seam.
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.09, 0), scale: rl.NewVector3(1, 1, 1), tint: woodTint},
-			// Four corner caps at the lid's vertical edges.
+			// Four corner caps.
 			{modelIdx: 1, offset: rl.NewVector3(0.31, 0.10, 0.25), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
 			{modelIdx: 1, offset: rl.NewVector3(-0.31, 0.10, 0.25), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
 			{modelIdx: 1, offset: rl.NewVector3(0.31, 0.10, -0.25), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
 			{modelIdx: 1, offset: rl.NewVector3(-0.31, 0.10, -0.25), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
-			// Bottom hoop band — hugs the lid's bottom edge,
-			// catches the body's top hoop visually so the two
-			// pieces read as ringed together.
+			// Bottom hoop — catches the body's top hoop so they read as ringed.
 			{modelIdx: 2, offset: rl.NewVector3(0, 0.025, 0), scale: rl.NewVector3(1, 1, 1), tint: metalDark},
 		},
 	}
 }
 
 // --- Inhabited / ruined props ---------------------------------------------
-//
-// The next nine loaders cover the "this place wasn't always empty" set:
-// crates, barrels, urns, stalagmites, pillars (intact and broken), statues,
-// obelisks, and fountains. They share three goals:
-//
-//   - Read at a glance from across the room — silhouette first, detail second.
-//   - Use the existing low-poly, faceted vocabulary (cubes, cylinders, low-
-//     slice spheres) so they fit the boulder/tree aesthetic.
-//   - Take their diffuse textures as parameters so resources.go owns the
-//     texture lifetime — no model holds a borrowed texture handle.
+// Crates, barrels, urns, stalagmites, pillars, statues, obelisks, fountains.
+// Low-poly faceted vocabulary; diffuse textures passed in so resources.go owns
+// the texture lifetime.
 
-// loadCrateProp builds a wooden crate: chunky main cube wrapped in thin
-// darker trim cubes along the top, bottom, and corner edges so it reads as
-// banded boards instead of a solid block. Bark texture stands in for wood
-// grain — the existing bark already has the right palette.
+// loadCrateProp builds a wooden crate: main cube wrapped in darker trim cubes
+// (top/bottom/corner edges) so it reads as banded boards. Bark texture for grain.
 func loadCrateProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	models := []rl.Model{
 		rl.LoadModelFromMesh(rl.GenMeshCube(0.86, 0.86, 0.86)),
@@ -1141,25 +873,20 @@ func loadCrateProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 		rl.LoadModelFromMesh(rl.GenMeshCube(0.08, 0.86, 0.08)),
 	}
 	textureAndShade(models, shader, woodTex)
-	// Pastel crate wood — soft pecan matching the bark texture,
-	// with warm-brown banding (not near-black) so the crate reads
-	// gently even in the spooky dungeon lighting.
+	// Pastel pecan crate wood with warm-brown banding (not near-black) so it
+	// reads gently in spooky dungeon lighting.
 	wood := rl.NewColor(184, 144, 102, 255)
 	band := rl.NewColor(124, 92, 60, 255)
 	corner := rl.NewColor(104, 76, 50, 255)
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Main box: sits flush on the ground (its half-height equals
-			// its y offset).
+			// Main box, flush on the ground.
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.43, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
-			// Top and bottom rim — the wide thin cube sticks proud of the
-			// crate's faces by 0.03 so it reads as raised iron banding.
+			// Top + bottom rim, proud of the faces so it reads as raised banding.
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.84, 0), scale: rl.NewVector3(1, 1, 1), tint: band},
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.04, 0), scale: rl.NewVector3(1, 1, 1), tint: band},
-			// Four vertical corner straps. The corner cube is intentionally
-			// taller than the main box so its ends overshoot the rim banding
-			// — reads as a corner reinforcement bracket.
+			// Four corner straps, taller than the box so they read as brackets.
 			{modelIdx: 2, offset: rl.NewVector3(0.43, 0.43, 0.43), scale: rl.NewVector3(1, 1, 1), tint: corner},
 			{modelIdx: 2, offset: rl.NewVector3(-0.43, 0.43, 0.43), scale: rl.NewVector3(1, 1, 1), tint: corner},
 			{modelIdx: 2, offset: rl.NewVector3(0.43, 0.43, -0.43), scale: rl.NewVector3(1, 1, 1), tint: corner},
@@ -1168,9 +895,8 @@ func loadCrateProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	}
 }
 
-// loadBarrelProp builds a banded barrel: a tall cylinder with three
-// dark hoop bands and a slightly proud top/bottom cap so the silhouette
-// reads as a wooden barrel rather than a smooth canister.
+// loadBarrelProp builds a banded barrel: a tall cylinder with three hoop bands
+// and proud top/bottom caps so it reads as a barrel, not a smooth canister.
 func loadBarrelProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	models := []rl.Model{
 		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.42, 1.0, 18)),
@@ -1184,7 +910,7 @@ func loadBarrelProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 		models: models,
 		parts: []treePart{
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.05, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
-			// Top cap and bottom cap — slightly wider, dark, reads as lid + base ring.
+			// Top + bottom caps — lid + base ring.
 			{modelIdx: 1, offset: rl.NewVector3(0, 1.04, 0), scale: rl.NewVector3(1, 1, 1), tint: hoop},
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.02, 0), scale: rl.NewVector3(1, 1, 1), tint: hoop},
 			// Three hoop bands climbing the staves.
@@ -1195,10 +921,8 @@ func loadBarrelProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	}
 }
 
-// loadUrnProp builds a belly-shouldered ceramic urn: a flattened sphere
-// body sitting on a small foot, with a narrow cylinder neck and a wider
-// rim cylinder so the silhouette reads "amphora" rather than "vase."
-// Terracotta texture warms the clay tone.
+// loadUrnProp builds a belly-shouldered ceramic urn (flattened sphere body,
+// foot, neck, rim flare) reading as "amphora" not "vase". Terracotta texture.
 func loadUrnProp(shader rl.Shader, terracottaTex rl.Texture2D) propModel {
 	models := []rl.Model{
 		rl.LoadModelFromMesh(rl.GenMeshSphere(0.36, 10, 14)),     // belly
@@ -1213,22 +937,20 @@ func loadUrnProp(shader rl.Shader, terracottaTex rl.Texture2D) propModel {
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Foot first (sits flush to ground).
+			// Foot, flush to ground.
 			{modelIdx: 3, offset: rl.NewVector3(0, 0.02, 0), scale: rl.NewVector3(1, 1, 1), tint: clayDeep},
-			// Belly: scaled vertically just under 1 so the silhouette is
-			// chubby-shouldered rather than perfectly round.
+			// Belly, squashed (y 0.92) for chubby shoulders.
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.44, 0), scale: rl.NewVector3(1, 0.92, 1), tint: clay},
-			// Neck cylinder.
+			// Neck.
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.78, 0), scale: rl.NewVector3(1, 1, 1), tint: clayDeep},
-			// Rim flare at the top of the neck — the small "lip" of an amphora.
+			// Rim flare — the amphora lip.
 			{modelIdx: 2, offset: rl.NewVector3(0, 0.97, 0), scale: rl.NewVector3(1, 1, 1), tint: rim},
 		},
 	}
 }
 
-// loadStalagmiteProp builds a tapered stone spire: four faceted spheres
-// stacked with shrinking radius so the silhouette narrows to a point.
-// Low slice counts keep the facets visible — the boulder/rock aesthetic.
+// loadStalagmiteProp builds a tapered stone spire: four faceted spheres of
+// shrinking radius narrowing to a point.
 func loadStalagmiteProp(shader rl.Shader, stoneTex rl.Texture2D) propModel {
 	models := []rl.Model{
 		rl.LoadModelFromMesh(rl.GenMeshSphere(0.45, 5, 7)),
@@ -1252,10 +974,8 @@ func loadStalagmiteProp(shader rl.Shader, stoneTex rl.Texture2D) propModel {
 	}
 }
 
-// loadPillarProp builds a full Doric-ish column: square base + cylindrical
-// shaft + square capital + thin abacus slab. Marble texture sells the
-// "weathered temple stone" read; the slight tint walk from base to capital
-// implies dust settled toward the bottom.
+// loadPillarProp builds a Doric-ish column: base, cylindrical shaft, capital,
+// abacus slab. Marble texture; tint walks base→capital (dust settles low).
 func loadPillarProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 	models := []rl.Model{
 		rl.LoadModelFromMesh(rl.GenMeshCube(0.72, 0.18, 0.72)),   // plinth
@@ -1280,10 +1000,8 @@ func loadPillarProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 	}
 }
 
-// loadBrokenPillarProp builds a toppled / broken pillar stub. Same plinth
-// as the intact pillar so adjacent pairs read as "this used to be a row,"
-// but the shaft is cut chest-high and topped with a small jagged rubble
-// cube tilted off-axis.
+// loadBrokenPillarProp builds a broken pillar stub: same plinth as the intact
+// pillar, shaft cut chest-high, topped with an off-axis rubble cube.
 func loadBrokenPillarProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 	models := []rl.Model{
 		rl.LoadModelFromMesh(rl.GenMeshCube(0.72, 0.18, 0.72)),
@@ -1299,19 +1017,14 @@ func loadBrokenPillarProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 		parts: []treePart{
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.09, 0), scale: rl.NewVector3(1, 1, 1), tint: baseTint},
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.22, 0), scale: rl.NewVector3(1, 1, 1), tint: shaftTint},
-			// Jagged break: a thin cube tilted off vertical so the silhouette
-			// reads as a sheared top, not a clean cut.
+			// Jagged break — off-vertical cube so the top reads as sheared.
 			{modelIdx: 2, offset: rl.NewVector3(0.04, 1.18, 0.03), scale: rl.NewVector3(1, 1, 1), rotation: 12, rotationAxis: rl.NewVector3(1, 0, 2), tint: rubbleTint},
 		},
 	}
 }
 
-// loadStatueProp builds a roughed-in humanoid statue on a pedestal:
-// pedestal + boots + legs + torso + shoulders + head. No arms cast as
-// separate parts — the shoulders slab covers the silhouette enough at
-// the camera's distance, and adding arm cylinders that don't read at
-// scale just adds clutter. Marble texture so adjacent pillars and the
-// statue share a stone family.
+// loadStatueProp builds a humanoid statue on a pedestal. No separate arms —
+// the shoulders slab covers the silhouette at camera distance. Marble texture.
 func loadStatueProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 	models := []rl.Model{
 		rl.LoadModelFromMesh(rl.GenMeshCube(0.92, 0.24, 0.92)),   // pedestal
@@ -1338,11 +1051,8 @@ func loadStatueProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 	}
 }
 
-// loadObeliskProp builds a tall, narrow four-sided shaft capped by a
-// pyramid. The pyramid uses a low-slice sphere — 4 slices makes a
-// rotational silhouette that reads as a four-sided peak from any angle.
-// Granite texture distinguishes it from the marble of the pillars and
-// statue: an obelisk should feel like a different stone class.
+// loadObeliskProp builds a four-sided shaft capped by a pyramid (4-slice sphere
+// reads as a four-sided peak). Granite texture sets it apart from the marble props.
 func loadObeliskProp(shader rl.Shader, graniteTex rl.Texture2D) propModel {
 	models := []rl.Model{
 		rl.LoadModelFromMesh(rl.GenMeshCube(0.88, 0.14, 0.88)), // base step
@@ -1360,18 +1070,15 @@ func loadObeliskProp(shader rl.Shader, graniteTex rl.Texture2D) propModel {
 		parts: []treePart{
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.07, 0), scale: rl.NewVector3(1, 1, 1), tint: baseTint},
 			{modelIdx: 1, offset: rl.NewVector3(0, 1.22, 0), scale: rl.NewVector3(1, 1, 1), tint: shaftTint},
-			// Pyramid cap: flatten vertically just slightly so it reads as a
-			// tall pyramid (height ~0.55) rather than a hemispherical lid.
+			// Pyramid cap, flattened so it reads as a tall pyramid not a lid.
 			{modelIdx: 2, offset: rl.NewVector3(0, 2.55, 0), scale: rl.NewVector3(0.85, 0.65, 0.85), rotation: 45, tint: capTint},
 			{modelIdx: 3, offset: rl.NewVector3(0, 2.86, 0), scale: rl.NewVector3(1, 1, 1), tint: apexTint},
 		},
 	}
 }
 
-// loadFountainProp builds a round stone fountain: outer basin, water disc,
-// and a central spout column with a small splash sphere. Uses the marble
-// texture for the stone parts and leaves the water disc on raylib's
-// default texture so the water tint reads cleanly.
+// loadFountainProp builds a round stone fountain: basin, water disc, spout
+// column, splash sphere. Marble on stone; water disc stays default-textured.
 func loadFountainProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 	models := []rl.Model{
 		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.78, 0.42, 24)), // outer basin
@@ -1380,8 +1087,7 @@ func loadFountainProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 		rl.LoadModelFromMesh(rl.GenMeshSphere(0.18, 10, 12)),     // splash bowl
 		rl.LoadModelFromMesh(rl.GenMeshCylinder(0.82, 0.10, 24)), // rim coping
 	}
-	// Marble texture on all stone parts; water disc stays raylib-default so
-	// its tint stays unmuddied by stone grain.
+	// Marble on stone parts; water disc stays default so its tint isn't muddied.
 	for _, i := range []int{0, 2, 3, 4} {
 		setModelTexture(&models[i], marbleTex)
 	}
@@ -1405,16 +1111,9 @@ func loadFountainProp(shader rl.Shader, marbleTex rl.Texture2D) propModel {
 }
 
 // --- Soft decor (non-blocking) --------------------------------------------
-//
-// Decor props are small (well under a tile), passable, and built from the
-// cheapest possible primitive set. The renderer scatters auto-decor onto
-// roughly 16% of plain floor tiles already; these new pieces are author-
-// placed via the decor layer.
+// Small (sub-tile), passable, cheapest primitives. Author-placed via the decor layer.
 
-// loadTallGrassProp builds a clump of upright grass blades from five thin
-// tall cubes spread across the tile and tilted outward at varied angles.
-// Bright green at the tips, deeper green at the base — only one tint per
-// blade since the slabs are too thin for per-vertex shading to matter.
+// loadTallGrassProp builds a clump of five thin tall cubes tilted outward.
 func loadTallGrassProp(shader rl.Shader) propModel {
 	blade := rl.LoadModelFromMesh(rl.GenMeshCube(0.04, 0.34, 0.04))
 	attachShader(&blade, shader)
@@ -1436,20 +1135,14 @@ func loadTallGrassProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadFlowerProp builds a wildflower clump: four stems each carrying a
-// bigger painted bloom over a wider petal halo, with a yellow pistil
-// pip on top. Three ground leaves anchor the cluster. The bloom palette
-// (sun-yellow, rose-pink, paper-white, lilac) stays in a tight warm
-// range so the patch reads as Wind-Waker wildflowers rather than a
-// costume jewelry case.
+// loadFlowerProp builds a wildflower clump: four stems with blooms over petal
+// halos, pistil pips, and three ground leaves. Tight warm palette.
 func loadFlowerProp(shader rl.Shader) propModel {
 	stem := rl.LoadModelFromMesh(rl.GenMeshCube(0.026, 0.24, 0.026))
-	// Petal halo — flattened disc that sits under the bloom. Cube
-	// scaled flat reads as the painted "open palm" of petals.
+	// Petal halo — flat cube reading as the open palm of petals under the bloom.
 	petal := rl.LoadModelFromMesh(rl.GenMeshCube(0.12, 0.018, 0.12))
 	bloom := rl.LoadModelFromMesh(rl.GenMeshSphere(0.075, 10, 12))
-	// Pistil — tiny gold pip on top of each bloom catching the
-	// "sunkissed" highlight.
+	// Pistil — gold pip on top of each bloom.
 	pistil := rl.LoadModelFromMesh(rl.GenMeshSphere(0.022, 6, 8))
 	leaf := rl.LoadModelFromMesh(rl.GenMeshCube(0.055, 0.022, 0.075))
 	models := []rl.Model{stem, petal, bloom, pistil, leaf}
@@ -1470,10 +1163,8 @@ func loadFlowerProp(shader rl.Shader) propModel {
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Bloom 1 — yellow. Stems take a light sway, blooms +
-			// petals take a heavier one so the flower head nods in
-			// the wind above an only-slightly-bending stalk. Ground
-			// leaves stay rigid.
+			// Bloom 1 — yellow. Stems sway lightly, heads heavier so they nod
+			// above a barely-bending stalk; ground leaves stay rigid.
 			{modelIdx: 0, offset: rl.NewVector3(0.10, 0.12, 0.06), scale: rl.NewVector3(1, 1, 1), tint: stemTint, sway: 0.6},
 			{modelIdx: 1, offset: rl.NewVector3(0.10, 0.23, 0.06), scale: rl.NewVector3(1, 1, 1), rotation: 12, tint: yellowPetal, sway: 1.0},
 			{modelIdx: 2, offset: rl.NewVector3(0.10, 0.26, 0.06), scale: rl.NewVector3(1, 1, 1), tint: yellow, sway: 1.0},
@@ -1493,8 +1184,7 @@ func loadFlowerProp(shader rl.Shader) propModel {
 			{modelIdx: 1, offset: rl.NewVector3(-0.14, 0.23, -0.04), scale: rl.NewVector3(1, 1, 1), rotation: 8, tint: lilacPetal, sway: 1.0},
 			{modelIdx: 2, offset: rl.NewVector3(-0.14, 0.26, -0.04), scale: rl.NewVector3(1, 1, 1), tint: lilac, sway: 1.0},
 			{modelIdx: 3, offset: rl.NewVector3(-0.14, 0.295, -0.04), scale: rl.NewVector3(1, 1, 1), tint: pistilGold, sway: 1.0},
-			// Ground leaves — three of them now, rotated so the
-			// patch reads as a deliberate clump.
+			// Three ground leaves, rotated so the patch reads as a clump.
 			{modelIdx: 4, offset: rl.NewVector3(0.02, 0.012, 0.01), scale: rl.NewVector3(1.4, 1, 1.4), rotation: 20, tint: leafTint},
 			{modelIdx: 4, offset: rl.NewVector3(-0.06, 0.012, -0.08), scale: rl.NewVector3(1.2, 1, 1.6), rotation: -45, tint: leafTint},
 			{modelIdx: 4, offset: rl.NewVector3(0.10, 0.012, -0.12), scale: rl.NewVector3(1.1, 1, 1.4), rotation: 60, tint: leafTint},
@@ -1502,9 +1192,7 @@ func loadFlowerProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadCloverProp builds a low ground-hugging clover patch: six flattened
-// spheres tightly clustered at floor level. Bright green so it pops
-// against a darker grass floor.
+// loadCloverProp builds a ground-hugging clover patch: six flattened spheres.
 func loadCloverProp(shader rl.Shader) propModel {
 	leaf := rl.LoadModelFromMesh(rl.GenMeshSphere(0.10, 8, 10))
 	models := []rl.Model{leaf}
@@ -1525,9 +1213,8 @@ func loadCloverProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadReedProp builds a cluster of tall water reeds: six narrow tall cubes
-// with very slight outward tilts. Used by water tiles and damp edges;
-// the cooler olive tints distinguish them from the warmer tall grass.
+// loadReedProp builds a cluster of tall water reeds. Cooler olive tints than
+// the warmer tall grass; for water tiles and damp edges.
 func loadReedProp(shader rl.Shader) propModel {
 	reed := rl.LoadModelFromMesh(rl.GenMeshCube(0.025, 0.62, 0.025))
 	tip := rl.LoadModelFromMesh(rl.GenMeshCube(0.04, 0.07, 0.04))
@@ -1554,12 +1241,9 @@ func loadReedProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadExoticFlowerProp builds a large funky bloom on a tall stalk: a single
-// stem topped by two offset square petal rings (so the head reads as an
-// 8-point star from above), a domed center and a bold pistil pip, with a pair
-// of ground leaves anchoring it. Vivid out-of-palette colors (magenta / orange
-// / teal / gold) make it pop as the "exotic" oddball among the muted flora.
-// Non-blocking — registered in core.PropIsNonBlocking.
+// loadExoticFlowerProp builds a funky bloom on a tall stalk: two offset petal
+// rings (8-point star from above), domed center, pistil, two ground leaves.
+// Vivid out-of-palette colors. Non-blocking (core.PropIsNonBlocking).
 func loadExoticFlowerProp(shader rl.Shader) propModel {
 	stem := rl.LoadModelFromMesh(rl.GenMeshCube(0.04, 0.5, 0.04))
 	petalOuter := rl.LoadModelFromMesh(rl.GenMeshCube(0.26, 0.02, 0.26))
@@ -1582,9 +1266,8 @@ func loadExoticFlowerProp(shader rl.Shader) propModel {
 		models: models,
 		parts: []treePart{
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.25, 0), scale: rl.NewVector3(1, 1, 1), tint: stemTint, sway: 0.5},
-			// Two petal rings, the second rotated 45° so the eight corners
-			// interleave into a starburst. Heavier sway than the stem so the
-			// head nods over a barely-bending stalk.
+			// Two petal rings, second rotated 45° into a starburst. Head sways
+			// heavier than the stem.
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.50, 0), scale: rl.NewVector3(1, 1, 1), rotation: 12, rotationAxis: yAxis, tint: magenta, sway: 1.0},
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.515, 0), scale: rl.NewVector3(0.82, 1, 0.82), rotation: 45, rotationAxis: yAxis, tint: orange, sway: 1.0},
 			{modelIdx: 2, offset: rl.NewVector3(0, 0.53, 0), scale: rl.NewVector3(1, 1, 1), rotation: 22, rotationAxis: yAxis, tint: teal, sway: 1.0},
@@ -1596,9 +1279,8 @@ func loadExoticFlowerProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadTallFernProp builds a clump of tall arching fronds: several flat tall
-// boxes fanned outward at varied tilts so the silhouette reads as a fern bush.
-// Cool layered greens, gentle sway. Non-blocking.
+// loadTallFernProp builds a clump of arching fronds (flat boxes fanned at varied
+// tilts). Cool layered greens, gentle sway. Non-blocking.
 func loadTallFernProp(shader rl.Shader) propModel {
 	frond := rl.LoadModelFromMesh(rl.GenMeshCube(0.05, 0.55, 0.16))
 	models := []rl.Model{frond}
@@ -1621,9 +1303,8 @@ func loadTallFernProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadGrassTuftProp builds a tall grass tuft — a fuller, taller cousin of the
-// flat decor tall-grass scatter, meant as a placeable prop for visual variance.
-// A fan of tall blades in warm grass greens with a few gold tips, full sway.
+// loadGrassTuftProp builds a tall grass tuft: a fan of blades in warm greens
+// with gold tips, full sway. A placeable cousin of the tall-grass scatter.
 // Non-blocking.
 func loadGrassTuftProp(shader rl.Shader) propModel {
 	blade := rl.LoadModelFromMesh(rl.GenMeshCube(0.045, 0.5, 0.045))
@@ -1651,9 +1332,8 @@ func loadGrassTuftProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadBoneProp builds a small bone scatter: a skull-ish sphere and three
-// long-bone cylinders lying across each other on the ground. White-yellow
-// tints with deeper accents at the joints sell the "old, weathered" read.
+// loadBoneProp builds a bone scatter: a skull sphere and long-bone cylinders
+// lying across each other. Weathered white-yellow tints.
 func loadBoneProp(shader rl.Shader) propModel {
 	skull := rl.LoadModelFromMesh(rl.GenMeshSphere(0.09, 8, 10))
 	jaw := rl.LoadModelFromMesh(rl.GenMeshCube(0.10, 0.05, 0.07))
@@ -1671,9 +1351,8 @@ func loadBoneProp(shader rl.Shader) propModel {
 			// Skull and detached jaw.
 			{modelIdx: 0, offset: rl.NewVector3(-0.08, 0.08, -0.08), scale: rl.NewVector3(1, 0.85, 1), tint: bone},
 			{modelIdx: 1, offset: rl.NewVector3(-0.04, 0.04, -0.04), scale: rl.NewVector3(1, 1, 1), tint: stain},
-			// Three long bones lying flat at varied angles. rotationAxis is
-			// non-vertical so the cylinder tips onto its side (cylinders are
-			// vertical at scale (1,1,1)).
+			// Three long bones flat at varied angles (non-vertical axis tips the
+			// cylinder onto its side).
 			{modelIdx: 2, offset: rl.NewVector3(0.10, 0.025, 0.06), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: rl.NewVector3(1, 0, 0), tint: bone},
 			{modelIdx: 3, offset: rl.NewVector3(0.10, 0.045, 0.22), scale: rl.NewVector3(1, 1, 1), tint: bone},
 			{modelIdx: 2, offset: rl.NewVector3(0.02, 0.025, -0.10), scale: rl.NewVector3(1, 1, 1), rotation: 70, rotationAxis: rl.NewVector3(0, 0, 1), tint: stain},
@@ -1682,10 +1361,8 @@ func loadBoneProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadScorchProp builds a flat dark disc — a burn mark on the floor. One
-// thin cylinder at near-ground height with a faded inner cylinder for the
-// ring effect. Almost invisible from a distance, but unmistakable when you
-// walk over it; pairs well with bone piles for telling stories.
+// loadScorchProp builds a flat floor burn mark: a thin cylinder with a faded
+// inner ring.
 func loadScorchProp(shader rl.Shader) propModel {
 	outer := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.42, 0.02, 20))
 	inner := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.24, 0.02, 18))
@@ -1704,9 +1381,8 @@ func loadScorchProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadBloodProp builds a dried-bloodstain decal: an irregular cluster of
-// flat low cylinders in tarnished red. The slight tint walk between the
-// three discs reads as a smear rather than a perfect circle.
+// loadBloodProp builds a dried-bloodstain decal: three flat low cylinders in
+// tarnished red, tint-walked so they read as a smear.
 func loadBloodProp(shader rl.Shader) propModel {
 	disc := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.18, 0.015, 18))
 	models := []rl.Model{disc}
@@ -1724,10 +1400,8 @@ func loadBloodProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadCobwebProp builds a small corner cobweb: a single thin slanted slab
-// off-center on the tile, suggesting a web stretched between an unseen
-// wall corner and the floor. Very low contrast — the eye finds it without
-// being shouted at.
+// loadCobwebProp builds a corner cobweb: a slanted slab plus two strands,
+// off-center and low-contrast.
 func loadCobwebProp(shader rl.Shader) propModel {
 	panel := rl.LoadModelFromMesh(rl.GenMeshCube(0.42, 0.012, 0.42))
 	strand := rl.LoadModelFromMesh(rl.GenMeshCube(0.34, 0.008, 0.020))
@@ -1740,20 +1414,17 @@ func loadCobwebProp(shader rl.Shader) propModel {
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Main slanted disc — tilt around z so the silhouette reads as
-			// a web caught at an angle, not a floor sticker.
+			// Main slanted disc — tilted so it reads as a web at an angle.
 			{modelIdx: 0, offset: rl.NewVector3(-0.28, 0.16, -0.28), scale: rl.NewVector3(1, 1, 1), rotation: 35, rotationAxis: rl.NewVector3(1, 0, 1), tint: web},
-			// Two thinner strands radiating out.
+			// Two thinner strands.
 			{modelIdx: 1, offset: rl.NewVector3(-0.10, 0.12, -0.18), scale: rl.NewVector3(1, 1, 1), rotation: 30, rotationAxis: rl.NewVector3(0, 1, 0), tint: wisp},
 			{modelIdx: 1, offset: rl.NewVector3(-0.20, 0.08, -0.30), scale: rl.NewVector3(1, 1, 1), rotation: -20, rotationAxis: rl.NewVector3(0, 1, 0), tint: wisp},
 		},
 	}
 }
 
-// loadStumpProp builds a weathered tree stump: a short fat cylinder for
-// the trunk and a slightly darker disc on top for the cut growth-ring
-// face. Bark texture wraps the sides so a stump next to a tree reads as
-// belonging to the same family of wood.
+// loadStumpProp builds a tree stump: a fat cylinder trunk with a cut-ring disc
+// on top. Bark texture shares the wood family with the trees.
 func loadStumpProp(shader rl.Shader, barkTex rl.Texture2D) propModel {
 	body := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.34, 0.34, 14))
 	face := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.32, 0.04, 14))
@@ -1774,10 +1445,8 @@ func loadStumpProp(shader rl.Shader, barkTex rl.Texture2D) propModel {
 	}
 }
 
-// loadLogProp builds a fallen log lying on its side. The trunk is a
-// cylinder tipped 90° around X so its long axis runs along the tile's
-// world Z. Two end-cap discs cover the cut faces. Mossy patches read as
-// "this log has been here a while."
+// loadLogProp builds a fallen log on its side: cylinder tipped 90° around X so
+// its long axis runs along world Z, with end-cap discs and moss patches.
 func loadLogProp(shader rl.Shader, barkTex, leafTex rl.Texture2D) propModel {
 	trunk := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.20, 1.05, 14))
 	cap := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.20, 0.02, 14))
@@ -1795,10 +1464,8 @@ func loadLogProp(shader rl.Shader, barkTex, leafTex rl.Texture2D) propModel {
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Trunk lying on its side: cylinder's native axis is +Y, so a
-			// 90° rotation around +X tips it onto -Z. Then the cylinder's
-			// length runs along z and its center sits ~half its radius
-			// above the ground.
+			// Trunk on its side: 90° around +X tips the +Y cylinder onto -Z, so
+			// its length runs along z, center ~half its radius above ground.
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.20, 0), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: rl.NewVector3(1, 0, 0), tint: bark},
 			// End caps at z = ±half-length.
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.20, 0.52), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: rl.NewVector3(1, 0, 0), tint: cut},
@@ -1810,13 +1477,9 @@ func loadLogProp(shader rl.Shader, barkTex, leafTex rl.Texture2D) propModel {
 	}
 }
 
-// loadDoorProp builds an area-transition door frame: two vertical
-// wooden posts, a lintel across the top, and a darker rectangular
-// "doorway" panel between them. The tile underneath stays walkable —
-// stepping onto it triggers the transition in the explore loop. The
-// frame is centered on the tile and faces along world Z by default;
-// the renderer rotates it by the door's authored facing so the player
-// always sees the opening from the side they approach.
+// loadDoorProp builds an area-transition door frame (posts, lintel, panel).
+// The tile stays walkable; stepping on it triggers the transition. Faces world
+// Z by default; the renderer rotates it by the door's authored facing.
 func loadDoorProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	post := rl.LoadModelFromMesh(rl.GenMeshCube(0.10, 1.40, 0.10))
 	lintel := rl.LoadModelFromMesh(rl.GenMeshCube(0.84, 0.14, 0.12))
@@ -1835,9 +1498,7 @@ func loadDoorProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	for i := range models {
 		attachShader(&models[i], shader)
 	}
-	// Muted wood family — matches the bark / crate / stump palette
-	// so the door sits in the same painted material world as the
-	// trees around it.
+	// Muted wood family matching the bark/crate/stump palette.
 	wood := rl.NewColor(118, 84, 56, 255)
 	woodDark := rl.NewColor(84, 60, 42, 255)
 	doorPanel := rl.NewColor(98, 70, 50, 255)
@@ -1847,45 +1508,37 @@ func loadDoorProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Two posts flanking a doorway.
+			// Two posts flanking the doorway.
 			{modelIdx: 0, offset: rl.NewVector3(-0.35, 0.70, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
 			{modelIdx: 0, offset: rl.NewVector3(0.35, 0.70, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
-			// Lintel across the top — slightly wider than the post spread.
+			// Lintel across the top.
 			{modelIdx: 1, offset: rl.NewVector3(0, 1.44, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
-			// Threshold stone at the base — reads as the worn
-			// step you walk over on the way through.
+			// Threshold step at the base.
 			{modelIdx: 8, offset: rl.NewVector3(0, 0.03, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
-			// Recessed plank-faced door panel between the posts.
+			// Recessed plank-faced door panel.
 			{modelIdx: 2, offset: rl.NewVector3(0, 0.65, 0), scale: rl.NewVector3(1, 1, 1), tint: doorPanel},
-			// Horizontal plank ridges across the door panel —
-			// reads as boarded construction instead of a slab.
+			// Horizontal plank ridges so it reads as boarded, not a slab.
 			{modelIdx: 3, offset: rl.NewVector3(0, 0.32, 0.025), scale: rl.NewVector3(1, 1, 1), tint: plankDark},
 			{modelIdx: 3, offset: rl.NewVector3(0, 0.66, 0.025), scale: rl.NewVector3(1, 1, 1), tint: plankDark},
 			{modelIdx: 3, offset: rl.NewVector3(0, 1.00, 0.025), scale: rl.NewVector3(1, 1, 1), tint: plankDark},
-			// Brass corner studs on the panel — four small domes
-			// catching the gilt highlight.
+			// Four brass corner studs.
 			{modelIdx: 5, offset: rl.NewVector3(-0.24, 0.16, 0.045), scale: rl.NewVector3(1, 1, 1), tint: brassBright},
 			{modelIdx: 5, offset: rl.NewVector3(0.24, 0.16, 0.045), scale: rl.NewVector3(1, 1, 1), tint: brassBright},
 			{modelIdx: 5, offset: rl.NewVector3(-0.24, 1.14, 0.045), scale: rl.NewVector3(1, 1, 1), tint: brassBright},
 			{modelIdx: 5, offset: rl.NewVector3(0.24, 1.14, 0.045), scale: rl.NewVector3(1, 1, 1), tint: brassBright},
-			// Two iron hinges flanking the left edge of the panel.
+			// Two iron hinges on the panel's left edge.
 			{modelIdx: 6, offset: rl.NewVector3(-0.30, 0.32, 0.045), scale: rl.NewVector3(1, 1, 1), tint: brass},
 			{modelIdx: 6, offset: rl.NewVector3(-0.30, 0.98, 0.045), scale: rl.NewVector3(1, 1, 1), tint: brass},
-			// Brass doorknob on the right side, mid-height — the
-			// "this is interactive" cue.
+			// Brass doorknob — the interactive cue.
 			{modelIdx: 7, offset: rl.NewVector3(0.20, 0.62, 0.07), scale: rl.NewVector3(1, 1, 1), tint: brassBright},
-			// Keystone / lintel crown — slightly forward of the
-			// lintel for sculpted relief.
+			// Keystone crown, forward of the lintel for relief.
 			{modelIdx: 4, offset: rl.NewVector3(0, 1.52, 0.02), scale: rl.NewVector3(1, 1, 1), tint: brass},
 		},
 	}
 }
 
-// loadCaveDoorProp builds a rough stone archway: two chunky rock jambs,
-// a thick stone lintel slab, a few irregular boulders stacked at the
-// jamb feet, and a dark recessed opening — reads as a mouth hewn / fallen
-// into the rock rather than a built timber frame. Same footprint and
-// facing convention as loadDoorProp so it drops into the door table.
+// loadCaveDoorProp builds a rough stone archway: rock jambs, lintel slab,
+// boulders at the feet, dark recessed opening. Same footprint/facing as loadDoorProp.
 func loadCaveDoorProp(shader rl.Shader, stoneTex rl.Texture2D) propModel {
 	jamb := rl.LoadModelFromMesh(rl.GenMeshCube(0.22, 1.45, 0.22))
 	lintel := rl.LoadModelFromMesh(rl.GenMeshCube(0.96, 0.26, 0.26))
@@ -1893,8 +1546,7 @@ func loadCaveDoorProp(shader rl.Shader, stoneTex rl.Texture2D) propModel {
 	boulder := rl.LoadModelFromMesh(rl.GenMeshSphere(0.18, 8, 8))
 	threshold := rl.LoadModelFromMesh(rl.GenMeshCube(0.86, 0.08, 0.24))
 	models := []rl.Model{jamb, lintel, opening, boulder, threshold}
-	// Stone-textured parts: jambs, lintel, boulders, threshold (not the
-	// dark opening, which is a flat unlit-looking void).
+	// Stone-textured: jambs, lintel, boulders, threshold (not the dark opening).
 	for _, i := range []int{0, 1, 3, 4} {
 		setModelTexture(&models[i], stoneTex)
 	}
@@ -1908,8 +1560,7 @@ func loadCaveDoorProp(shader rl.Shader, stoneTex rl.Texture2D) propModel {
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Two rough jambs, splayed slightly out at the top by tint
-			// banding (the boulders below sell the lean visually).
+			// Two rough jambs.
 			{modelIdx: 0, offset: rl.NewVector3(-0.37, 0.72, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
 			{modelIdx: 0, offset: rl.NewVector3(0.37, 0.72, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
 			// Heavy lintel slab bridging the jambs.
@@ -1918,8 +1569,7 @@ func loadCaveDoorProp(shader rl.Shader, stoneTex rl.Texture2D) propModel {
 			{modelIdx: 4, offset: rl.NewVector3(0, 0.04, 0), scale: rl.NewVector3(1, 1, 1), tint: stoneShade},
 			// Dark recessed opening between the jambs.
 			{modelIdx: 2, offset: rl.NewVector3(0, 0.64, 0), scale: rl.NewVector3(1, 1, 1), tint: mouth},
-			// Tumbled boulders clustered at the jamb feet — breaks the
-			// clean rectangle so it reads as natural rock.
+			// Boulders at the jamb feet — breaks the clean rectangle.
 			{modelIdx: 3, offset: rl.NewVector3(-0.42, 0.16, 0.10), scale: rl.NewVector3(1, 0.9, 1), tint: stoneDark},
 			{modelIdx: 3, offset: rl.NewVector3(-0.30, 0.12, -0.12), scale: rl.NewVector3(0.7, 0.7, 0.7), tint: stoneShade},
 			{modelIdx: 3, offset: rl.NewVector3(0.44, 0.18, -0.08), scale: rl.NewVector3(1.1, 0.95, 1.1), tint: stoneDark},
@@ -1930,11 +1580,8 @@ func loadCaveDoorProp(shader rl.Shader, stoneTex rl.Texture2D) propModel {
 	}
 }
 
-// loadFieldDoorProp builds an open trail gateway: two slender leaning
-// posts, a light crossbeam, no solid door panel (you can see "through"
-// it), with a small hanging sign plank and a couple of grass tufts at
-// the base — reads as a way-marker between open areas rather than a
-// sealed door. Same footprint + facing convention as loadDoorProp.
+// loadFieldDoorProp builds an open trail gateway: leaning posts, a crossbeam,
+// no solid panel, a hanging sign, grass tufts. Same footprint/facing as loadDoorProp.
 func loadFieldDoorProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	post := rl.LoadModelFromMesh(rl.GenMeshCube(0.09, 1.30, 0.09))
 	beam := rl.LoadModelFromMesh(rl.GenMeshCube(0.92, 0.10, 0.10))
@@ -1959,30 +1606,28 @@ func loadFieldDoorProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Two leaning posts (slight outward splay via offset).
+			// Two leaning posts.
 			{modelIdx: 0, offset: rl.NewVector3(-0.40, 0.65, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
 			{modelIdx: 0, offset: rl.NewVector3(0.40, 0.65, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
-			// Crossbeam across the top — the open lintel.
+			// Crossbeam — the open lintel.
 			{modelIdx: 1, offset: rl.NewVector3(0, 1.28, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
-			// Short diagonal-feel braces under each beam end.
+			// Braces under each beam end.
 			{modelIdx: 2, offset: rl.NewVector3(-0.26, 1.16, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
 			{modelIdx: 2, offset: rl.NewVector3(0.26, 1.16, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
 			// Post caps.
 			{modelIdx: 4, offset: rl.NewVector3(-0.40, 1.32, 0), scale: rl.NewVector3(1, 1, 1), tint: capTint},
 			{modelIdx: 4, offset: rl.NewVector3(0.40, 1.32, 0), scale: rl.NewVector3(1, 1, 1), tint: capTint},
-			// Hanging trail sign under the beam center.
+			// Hanging trail sign.
 			{modelIdx: 3, offset: rl.NewVector3(0, 1.04, 0.02), scale: rl.NewVector3(1, 1, 1), tint: signWood},
-			// Grass tufts at the post feet so it sits in the meadow.
+			// Grass tufts at the post feet.
 			{modelIdx: 5, offset: rl.NewVector3(-0.44, 0.09, 0.06), scale: rl.NewVector3(1, 1, 1), tint: grass},
 			{modelIdx: 5, offset: rl.NewVector3(0.46, 0.09, -0.05), scale: rl.NewVector3(0.8, 0.8, 0.8), tint: grassDark},
 		},
 	}
 }
 
-// loadLilypadProp builds a flat floating lilypad: a thin wide disc for
-// the pad, a smaller offset disc to suggest a partner leaf, and a tiny
-// pink bloom at the center. Pure decor — sits just above floor level so
-// it reads as floating on water without z-fighting the floor tile.
+// loadLilypadProp builds a floating lilypad: a wide disc, a smaller partner
+// disc, a pink bloom. Sits just above floor level to avoid z-fighting.
 func loadLilypadProp(shader rl.Shader) propModel {
 	pad := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.42, 0.015, 16))
 	smallPad := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.22, 0.015, 14))
@@ -2007,10 +1652,8 @@ func loadLilypadProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadLeafPileProp builds a low pile of fallen leaves: a flat fat
-// cylinder for the main heap with two smaller domes sitting on top for
-// volume. The leaf texture from the tree model carries the leaf vein
-// noise, so a leaf pile and a tree canopy share the same surface family.
+// loadLeafPileProp builds a leaf pile: a flat cylinder heap with two domes on
+// top. Shares the tree's leaf texture.
 func loadLeafPileProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
 	base := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.48, 0.10, 16))
 	mound := rl.LoadModelFromMesh(rl.GenMeshSphere(0.22, 10, 12))
@@ -2029,16 +1672,10 @@ func loadLeafPileProp(shader rl.Shader, leafTex rl.Texture2D) propModel {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Outdoor / field tileset additions (Turn B).
-// All single-tile blockers. Each builder allocates its own model handles and
-// the propModel.unload() call in Resources.Unload frees them.
-// ---------------------------------------------------------------------------
+// --- Outdoor / field tileset additions (Turn B). Single-tile blockers. ---
 
-// loadWellProp builds a stone-ringed well: a fat short cylinder rim
-// with a dark water disc inset and a small pole/winch above. Reads as
-// "village well" silhouette from any angle. Uses the rock texture for
-// the ring so it blends with stone walls.
+// loadWellProp builds a stone-ringed well: rim cylinder, water disc, pole/winch.
+// Rock texture on the ring.
 func loadWellProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 	rim := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.42, 0.40, 18))
 	water := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.34, 0.04, 16))
@@ -2060,22 +1697,20 @@ func loadWellProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 		parts: []treePart{
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.20, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.36, 0), scale: rl.NewVector3(1, 1, 1), tint: waterCol},
-			// Posts on each side hold up the winch beam.
+			// Posts holding the winch beam.
 			{modelIdx: 2, offset: rl.NewVector3(-0.30, 0.80, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
 			{modelIdx: 2, offset: rl.NewVector3(0.30, 0.80, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
 			{modelIdx: 3, offset: rl.NewVector3(0, 1.20, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
-			// Bucket dangling on a rope (no rope geom — bucket alone).
+			// Bucket (no rope geom).
 			{modelIdx: 4, offset: rl.NewVector3(0.18, 0.95, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
-			// Rim shading accent — dark base ring near the floor.
+			// Dark base ring near the floor.
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.04, 0), scale: rl.NewVector3(1.02, 0.18, 1.02), tint: stoneDark},
 		},
 	}
 }
 
-// loadGravestoneProp builds a weathered tombstone: a thick flat slab
-// tilted slightly forward with a rounded top, plus a smaller mound at
-// the base to read as the grave proper. Cool grey palette so it
-// stands apart from the warmer well rim.
+// loadGravestoneProp builds a tombstone: a slab tilted forward with a rounded
+// top, plus a base mound. Cool grey palette.
 func loadGravestoneProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 	slab := rl.LoadModelFromMesh(rl.GenMeshCube(0.50, 0.85, 0.12))
 	cap := rl.LoadModelFromMesh(rl.GenMeshSphere(0.26, 8, 10))
@@ -2095,9 +1730,7 @@ func loadGravestoneProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 	}
 }
 
-// loadSignPostProp builds a wooden sign: a tall thin post with a
-// horizontal plank near the top, slightly off-axis so it reads from
-// any angle.
+// loadSignPostProp builds a wooden sign: a post with an off-axis plank near the top.
 func loadSignPostProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	post := rl.LoadModelFromMesh(rl.GenMeshCube(0.08, 1.10, 0.08))
 	board := rl.LoadModelFromMesh(rl.GenMeshCube(0.66, 0.34, 0.06))
@@ -2110,14 +1743,13 @@ func loadSignPostProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 		parts: []treePart{
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.55, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
 			{modelIdx: 1, offset: rl.NewVector3(0.18, 0.95, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
-			// Lighter front-face on the board so it reads as carved.
+			// Lighter front-face so the board reads as carved.
 			{modelIdx: 1, offset: rl.NewVector3(0.18, 0.95, 0.04), scale: rl.NewVector3(0.92, 0.85, 0.4), tint: wood},
 		},
 	}
 }
 
-// loadHayBaleProp builds a fat short cylinder of bound straw lying on
-// its side. Warm yellow tones with subtle darker bands for the binding.
+// loadHayBaleProp builds a fat straw cylinder on its side with binding bands.
 func loadHayBaleProp(shader rl.Shader) propModel {
 	bale := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.45, 0.70, 14))
 	band := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.47, 0.04, 14))
@@ -2131,21 +1763,19 @@ func loadHayBaleProp(shader rl.Shader) propModel {
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Lay the cylinder on its side: rotate 90° around X so its
-			// length runs along world Z.
+			// Cylinder on its side (90° around X, length along world Z).
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.45, 0), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: rl.NewVector3(1, 0, 0), tint: straw},
-			// Darker shading hint underneath.
+			// Darker shading underneath.
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.45, 0), scale: rl.NewVector3(0.92, 0.98, 0.92), rotation: 90, rotationAxis: rl.NewVector3(1, 0, 0), tint: strawDark},
-			// Two binding rings around the bale.
+			// Two binding rings.
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.45, -0.22), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: rl.NewVector3(1, 0, 0), tint: cord},
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.45, 0.22), scale: rl.NewVector3(1, 1, 1), rotation: 90, rotationAxis: rl.NewVector3(1, 0, 0), tint: cord},
 		},
 	}
 }
 
-// loadScarecrowProp builds a cross-frame scarecrow: a vertical pole, a
-// horizontal arm beam, a sackcloth head sphere, and an angular torso
-// blob suggesting layered shirt/straw stuffing.
+// loadScarecrowProp builds a cross-frame scarecrow: pole, arm beam, sackcloth
+// head, torso blob.
 func loadScarecrowProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	pole := rl.LoadModelFromMesh(rl.GenMeshCube(0.08, 1.55, 0.08))
 	arm := rl.LoadModelFromMesh(rl.GenMeshCube(0.90, 0.07, 0.07))
@@ -2175,13 +1805,9 @@ func loadScarecrowProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Dungeon-interior tileset additions (Turn B).
-// ---------------------------------------------------------------------------
+// --- Dungeon-interior tileset additions (Turn B). ---
 
-// loadBookshelfProp builds a tall thin shelf with three book-row bands.
-// Stone-grey backing with multicolored book bands so each shelf reads
-// distinctly.
+// loadBookshelfProp builds a tall shelf with three multicolored book-row bands.
 func loadBookshelfProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	frame := rl.LoadModelFromMesh(rl.GenMeshCube(0.78, 1.50, 0.30))
 	shelf := rl.LoadModelFromMesh(rl.GenMeshCube(0.82, 0.04, 0.34))
@@ -2197,7 +1823,7 @@ func loadBookshelfProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 		models: models,
 		parts: []treePart{
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.75, 0), scale: rl.NewVector3(1, 1, 1), tint: wood},
-			// Three shelves with book rows perched on top of each.
+			// Three shelves with book rows.
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.30, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
 			{modelIdx: 2, offset: rl.NewVector3(0, 0.48, 0.04), scale: rl.NewVector3(1, 1, 1), tint: bookRed},
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.74, 0), scale: rl.NewVector3(1, 1, 1), tint: woodDark},
@@ -2208,9 +1834,7 @@ func loadBookshelfProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	}
 }
 
-// loadTableProp builds a wooden table: a flat rectangular top on four
-// shorter legs. Sized so the player reads it as "you could rest a mug
-// on this."
+// loadTableProp builds a wooden table: a flat top on four legs.
 func loadTableProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	top := rl.LoadModelFromMesh(rl.GenMeshCube(0.90, 0.10, 0.60))
 	leg := rl.LoadModelFromMesh(rl.GenMeshCube(0.10, 0.60, 0.10))
@@ -2230,8 +1854,7 @@ func loadTableProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	}
 }
 
-// loadBedProp builds a wood-frame bed with a pillow and bedding.
-// Single-tile but visibly bedlike from the side.
+// loadBedProp builds a wood-frame bed with pillow and bedding.
 func loadBedProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	frame := rl.LoadModelFromMesh(rl.GenMeshCube(0.84, 0.20, 0.50))
 	mattress := rl.LoadModelFromMesh(rl.GenMeshCube(0.78, 0.14, 0.46))
@@ -2259,25 +1882,18 @@ func loadBedProp(shader rl.Shader, woodTex rl.Texture2D) propModel {
 	}
 }
 
-// loadBrazierProp builds a metal brazier on a tripod with a flame.
-// Three legs, an open bowl, and a flickery flame sphere/cone on top.
+// loadBrazierProp builds a metal brazier on a tripod: three legs, a bowl, flame.
 func loadBrazierProp(shader rl.Shader) propModel {
 	leg := rl.LoadModelFromMesh(rl.GenMeshCube(0.06, 0.60, 0.06))
 	bowl := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.28, 0.18, 14))
 	flame := rl.LoadModelFromMesh(rl.GenMeshSphere(0.18, 8, 10))
 	tip := rl.LoadModelFromMesh(rl.GenMeshSphere(0.10, 6, 8))
 	models := []rl.Model{leg, bowl, flame, tip}
-	// Iron stand (legs + bowl) is lit by the world shader. The
-	// flame + tip are LEFT on raylib's default material shader so
-	// they render emissive — full fire colour, unaffected by the
-	// near-black dungeon ambient — and read as the glowing source
-	// the torch point light pours out of. (Same default-shader
-	// trick the ground-shadow disc uses to stay unlit.)
+	// Stand (legs + bowl) lit by the world shader; flame + tip stay on the
+	// default shader so they render emissive (unaffected by dungeon ambient).
 	attachShader(&models[0], shader)
 	attachShader(&models[1], shader)
-	// Shared torch/flame palette (world.go) so the brazier's iron + fire track
-	// the wall torch instead of drifting as a separate copy. fireBright is the
-	// hot core tint; fire is the mid orange.
+	// Shared torch/flame palette (world.go) so iron + fire track the wall torch.
 	iron := torchIron
 	ironLight := torchIronLight
 	fire := torchFlameTints[1]
@@ -2285,23 +1901,21 @@ func loadBrazierProp(shader rl.Shader) propModel {
 	return propModel{
 		models: models,
 		parts: []treePart{
-			// Three legs splayed out.
+			// Three legs.
 			{modelIdx: 0, offset: rl.NewVector3(-0.18, 0.30, -0.10), scale: rl.NewVector3(1, 1, 1), rotation: 15, rotationAxis: rl.NewVector3(0, 0, 1), tint: iron},
 			{modelIdx: 0, offset: rl.NewVector3(0.18, 0.30, -0.10), scale: rl.NewVector3(1, 1, 1), rotation: -15, rotationAxis: rl.NewVector3(0, 0, 1), tint: iron},
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.30, 0.20), scale: rl.NewVector3(1, 1, 1), rotation: 15, rotationAxis: rl.NewVector3(1, 0, 0), tint: iron},
 			// Bowl rim.
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.66, 0), scale: rl.NewVector3(1, 1, 1), tint: iron},
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.72, 0), scale: rl.NewVector3(0.94, 0.2, 0.94), tint: ironLight},
-			// Flame stack — broad base, smaller bright tip.
+			// Flame stack — broad base, bright tip.
 			{modelIdx: 2, offset: rl.NewVector3(0, 0.90, 0), scale: rl.NewVector3(1, 1.4, 1), tint: fire},
 			{modelIdx: 3, offset: rl.NewVector3(0, 1.10, 0), scale: rl.NewVector3(1, 1.6, 1), tint: fireBright},
 		},
 	}
 }
 
-// loadSarcophagusProp builds a stone sarcophagus: a heavy rectangular
-// base with a lid sitting flush on top. Authored as a single-tile prop
-// (cramped for a real burial chamber, but reads at this scale).
+// loadSarcophagusProp builds a stone sarcophagus: base with a lid flush on top.
 func loadSarcophagusProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 	base := rl.LoadModelFromMesh(rl.GenMeshCube(0.92, 0.46, 0.50))
 	lid := rl.LoadModelFromMesh(rl.GenMeshCube(0.96, 0.10, 0.54))
@@ -2317,19 +1931,15 @@ func loadSarcophagusProp(shader rl.Shader, rockTex rl.Texture2D) propModel {
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.23, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.23, 0), scale: rl.NewVector3(0.96, 1.04, 0.96), tint: stoneDark},
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.51, 0), scale: rl.NewVector3(1, 1, 1), tint: stone},
-			// Faux carving on the lid (humanoid silhouette suggestion).
+			// Faux carving on the lid.
 			{modelIdx: 2, offset: rl.NewVector3(0, 0.40, 0.28), scale: rl.NewVector3(1, 1, 1), tint: carved},
 		},
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Decor additions (Turn B). All single-tile, non-blocking. Each builder
-// lives in decorModels and is dispatched by drawDecor's char switch.
-// ---------------------------------------------------------------------------
+// --- Decor additions (Turn B). Single-tile, non-blocking, in decorModels. ---
 
-// loadRugProp builds a flat woven rug: a thin wide cube laid flush
-// on the floor with a tasseled border. Pure decor — never blocks.
+// loadRugProp builds a flat woven rug: a thin wide cube with a tasseled border.
 func loadRugProp(shader rl.Shader) propModel {
 	pad := rl.LoadModelFromMesh(rl.GenMeshCube(0.78, 0.02, 0.58))
 	border := rl.LoadModelFromMesh(rl.GenMeshCube(0.84, 0.025, 0.64))
@@ -2345,14 +1955,13 @@ func loadRugProp(shader rl.Shader) propModel {
 		parts: []treePart{
 			{modelIdx: 1, offset: rl.NewVector3(0, 0.012, 0), scale: rl.NewVector3(1, 1, 1), tint: trim},
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.020, 0), scale: rl.NewVector3(1, 1, 1), tint: rug},
-			// Inner darker stripe so the rug isn't a flat slab.
+			// Inner darker stripe.
 			{modelIdx: 0, offset: rl.NewVector3(0, 0.024, 0), scale: rl.NewVector3(0.6, 0.5, 0.6), tint: rugDark},
 		},
 	}
 }
 
-// loadCandleProp builds a stubby candle with a small flame tip,
-// sitting in a tiny pool of melted wax. Reads from any angle.
+// loadCandleProp builds a stubby candle with a flame tip in a wax pool.
 func loadCandleProp(shader rl.Shader) propModel {
 	puddle := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.10, 0.02, 10))
 	candle := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.05, 0.16, 8))
@@ -2377,9 +1986,7 @@ func loadCandleProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadBootprintsProp builds two small flat impressions on the floor.
-// Each "print" is a tiny shallow cube; pair them in a forward-stride
-// layout to suggest someone walked past.
+// loadBootprintsProp builds two flat floor impressions in a forward-stride layout.
 func loadBootprintsProp(shader rl.Shader) propModel {
 	print := rl.LoadModelFromMesh(rl.GenMeshCube(0.10, 0.015, 0.18))
 	heel := rl.LoadModelFromMesh(rl.GenMeshCube(0.10, 0.015, 0.06))
@@ -2400,9 +2007,8 @@ func loadBootprintsProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadAshHeapProp builds a small cool-grey ash mound. Distinct from
-// DecorScorch (a flat black ring) — the heap has volume so it reads as
-// "campfire site remnant" rather than "burn mark."
+// loadAshHeapProp builds a cool-grey ash mound. Unlike DecorScorch (a flat
+// ring) it has volume, reading as a campfire-site remnant.
 func loadAshHeapProp(shader rl.Shader) propModel {
 	heap := rl.LoadModelFromMesh(rl.GenMeshSphere(0.16, 8, 8))
 	dust := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.22, 0.02, 12))
@@ -2423,8 +2029,7 @@ func loadAshHeapProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadPuddleProp builds a shallow water puddle: an irregular flat
-// cylinder with a brighter rim suggesting wet stone reflection.
+// loadPuddleProp builds a shallow puddle: a flat cylinder with a brighter rim.
 func loadPuddleProp(shader rl.Shader) propModel {
 	disc := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.26, 0.015, 14))
 	highlight := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.18, 0.02, 12))
@@ -2443,9 +2048,8 @@ func loadPuddleProp(shader rl.Shader) propModel {
 	}
 }
 
-// loadRootClusterProp builds gnarled roots poking from the floor: a
-// few low arches of brown cylinders at varied tilts. Reads as
-// "something grew through the floor here" without blocking.
+// loadRootClusterProp builds gnarled roots poking from the floor: brown
+// cylinder arches at varied tilts.
 func loadRootClusterProp(shader rl.Shader, barkTex rl.Texture2D) propModel {
 	arch := rl.LoadModelFromMesh(rl.GenMeshCylinder(0.04, 0.30, 8))
 	knob := rl.LoadModelFromMesh(rl.GenMeshSphere(0.05, 6, 8))

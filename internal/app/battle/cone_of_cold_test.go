@@ -6,14 +6,11 @@ import (
 	"crawler/internal/app/core"
 )
 
-// TestApplyConeOfCold_ChillsWholePack verifies the AoE chill: every living,
-// surviving enemy takes damage AND gets the SPD chill stamped (the multi-target
-// mirror of Frostbite), via the shared applyAoEStatusSkill body.
+// TestApplyConeOfCold_ChillsWholePack: every surviving enemy takes damage AND gets the SPD chill (AoE mirror of Frostbite).
 func TestApplyConeOfCold_ChillsWholePack(t *testing.T) {
 	g := newTestState()
 	g.Battle.CurrentParty = 3 // wizard casts
-	// Two tanky targets so the frost sweep can't kill them — we need survivors
-	// to observe the chill on each.
+	// Tanky so the sweep can't kill — need survivors to observe each chill.
 	g.Packs[0].Members = []core.Enemy{core.NewEnemy(core.EnemyRat), core.NewEnemy(core.EnemyRat)}
 	for i := range g.Packs[0].Members {
 		g.Packs[0].Members[i].HP = 999
@@ -37,13 +34,12 @@ func TestApplyConeOfCold_ChillsWholePack(t *testing.T) {
 	}
 }
 
-// TestApplyConeOfCold_NoChillOnKilledTarget confirms a target the sweep kills
-// carries no dangling chill (mirrors the single-target Frostbite guard).
+// TestApplyConeOfCold_NoChillOnKilledTarget: a killed target carries no dangling chill.
 func TestApplyConeOfCold_NoChillOnKilledTarget(t *testing.T) {
 	g := newTestState()
 	g.Battle.CurrentParty = 3
 	g.Packs[0].Members = []core.Enemy{core.NewEnemy(core.EnemyRat)}
-	g.Packs[0].Members[0].HP = 1 // sweep kills it
+	g.Packs[0].Members[0].HP = 1
 
 	if !applyConeOfCold(g, core.TimingQualityExcellent) {
 		t.Fatal("applyConeOfCold reported not-landed")

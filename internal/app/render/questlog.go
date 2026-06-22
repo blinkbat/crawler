@@ -8,12 +8,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// drawPanelsQuests renders the Journal tab inside the char menu. The journal
-// hosts two sub-views — the quest log and the bestiary — switched with
-// Left/Right (g.JournalTab). The panels overlay supplies the card chrome +
-// top tab strip; this draws the sub-tab header strip, then fills the rest of
-// the body with the active sub-view. Both views are read-only; PanelsRowCursor
-// scrolls whichever list is showing.
+// drawPanelsQuests renders the Journal tab: a sub-tab header (Quests/Bestiary, switched via g.JournalTab) then the active read-only sub-view.
 func drawPanelsQuests(g *core.GameState, assets Resources, body rl.Rectangle) {
 	font := assets.hudFont
 	headerH := drawJournalSubtabHeader(font, g.JournalTab, body)
@@ -26,10 +21,7 @@ func drawPanelsQuests(g *core.GameState, assets Resources, body rl.Rectangle) {
 	}
 }
 
-// drawJournalSubtabHeader paints the "Quests | Bestiary" sub-tab strip at the
-// top of the Journal body — active label in primary ink with an accent
-// underline, the other muted. Returns the vertical space it consumed so the
-// caller can place the sub-view below it.
+// drawJournalSubtabHeader paints the "Quests | Bestiary" sub-tab strip and returns the vertical space it consumed.
 func drawJournalSubtabHeader(font rl.Font, active core.JournalSubtab, body rl.Rectangle) float32 {
 	drawTextTabStrip(font, body.X+journalRowInsetX, body.Y+2, int(core.JournalSubtabCount), int(active),
 		func(i int) string { return core.JournalSubtabLabel(core.JournalSubtab(i)) },
@@ -38,34 +30,18 @@ func drawJournalSubtabHeader(font rl.Font, active core.JournalSubtab, body rl.Re
 	return FontBody + 14
 }
 
-// Journal list rhythm — ONE set of metrics shared by both sub-views (Quests
-// and Bestiary). Both lists draw the identical two-line row anatomy (FontBody
-// title at +2, FontSmall detail at journalRowDetailDY) under the same sub-tab
-// header, so they must page at the same stride; they had drifted apart on
-// copy-tuned literals (rowH 56 vs 48, listTop +30 vs +28, detail +26 vs +24),
-// which made flipping between Quests and Bestiary subtly "jump." Title spans
-// 2..22, detail 26..42, leaving 10px of air under the 46px selection plate
-// (journalRowH - 6).
+// Journal list rhythm — ONE metric set shared by both sub-views so they page at the same stride and don't "jump" when flipping.
 const (
 	journalRowH        = float32(52)
 	journalListTopDY   = float32(30) // tally line is FontSmall at +4; list starts below it
 	journalRowDetailDY = float32(26)
-	// journalRowInsetX is the left inset shared by the sub-tab header, the tally
-	// line, the row text, and the selection plate so they all align on one edge
-	// (was a bare body.X+8 repeated across the sub-views).
-	journalRowInsetX = float32(8)
+	journalRowInsetX   = float32(8) // shared left inset for header, tally, rows, selection plate
 )
 
-// The Journal tab re-measures the same handful of stable strings and
-// re-fmt.Sprintf's the same tally / row text every frame it's open. These
-// caches mirror the package's measureCache + enemyHPLabelCache conventions so
-// the open panel doesn't burn a cgo text-measure and two heap-allocating
-// Sprintfs per visible row per frame; all change only on quest/bestiary events.
+// Caches so the open Journal tab doesn't re-measure stable strings / re-Sprintf tally + row text every frame; all change only on quest/bestiary events.
 var journalMeasureCache measureCache
 
-// journalTally memoizes the two tally-header strings ("N active M complete" /
-// "S of T kinds recorded") per count pair, keyed by (a, b, bestiary) so the two
-// formats can't collide. Bounded by the small set of count pairs seen in play.
+// journalTallyCache memoizes the two tally-header strings, keyed (a, b, bestiary) so the formats can't collide.
 var journalTallyCache = map[[3]int]string{}
 
 func journalTally(a, b int, bestiary bool) string {
@@ -87,11 +63,7 @@ func journalTally(a, b int, bestiary bool) string {
 	return s
 }
 
-// bestiaryRowText holds a bestiary row's pre-formatted detail strings. `hp` is
-// drawn first (claret when identified, muted "HP ???" when not); `segs` are the
-// muted follow-on facts, each drawn after a small DRAWN diamond pip separator
-// (the old inline "•" bullets fell out of the procedural font atlas and rendered
-// as "?", so the separators are now pixel symbols, not glyphs).
+// bestiaryRowText holds a row's pre-formatted detail strings: hp first, then muted segs separated by drawn diamond pips ("•" glyphs render as "?" in the font atlas).
 type bestiaryRowText struct {
 	hp   string
 	segs []string
@@ -104,15 +76,10 @@ type bestiaryRowKey struct {
 	known   bool
 }
 
-// bestiaryRowStrings memoizes a row's formatted strings per (kind, kills,
-// scanned, known) so the per-row fmt.Sprintf calls don't run every frame the
-// Bestiary sub-tab is open. Bounded: enemy kinds × kill counts actually seen.
+// bestiaryRowCache memoizes a row's strings per (kind, kills, scanned, known) so the per-row Sprintfs don't run every frame.
 var bestiaryRowCache = map[bestiaryRowKey]bestiaryRowText{}
 
-// drawBestiaryRowDetail paints a row's HP value (in hpCol) followed by each meta
-// segment in muted type, each preceded by a small DRAWN diamond pip — the pixel-
-// symbol replacement for the old "•" bullets that the font atlas couldn't render
-// (they showed as "?"). Pips are font-independent, so they always read.
+// drawBestiaryRowDetail paints HP (hpCol) then each muted seg preceded by a drawn diamond pip (font-independent, unlike "•").
 func drawBestiaryRowDetail(font rl.Font, t bestiaryRowText, x, y float32, hpCol rl.Color) {
 	drawTextWithShadow(font, t.hp, x, y, FontSmall, hpCol)
 	cursor := x + journalMeasureCache.measure(font, t.hp, FontSmall, 1).X
@@ -151,10 +118,7 @@ func bestiaryRowStrings(kind core.EnemyKind, maxHP, kills int, scanned, known bo
 	return t
 }
 
-// journalScrollFirst returns the index of the first row a journal list
-// should draw so the cursored row stays inside a window of `visible` rows —
-// the input side walks the full list, so without this the highlight scrolls
-// off the bottom of the body rect.
+// journalScrollFirst returns the first row index to draw so the cursor stays inside a window of `visible` rows.
 func journalScrollFirst(cursor, count, visible int) int {
 	if visible < 1 {
 		visible = 1
@@ -169,10 +133,7 @@ func journalScrollFirst(cursor, count, visible int) int {
 	return first
 }
 
-// drawJournalQuests fills the journal body with the quest log: a tally header
-// then a two-line row per quest (title + muted description), the cursor row
-// highlighted; completed quests render muted with a "— Complete" suffix. The
-// journal is empty for now, so the common case is the placeholder line.
+// drawJournalQuests fills the body with the quest log: tally header then a two-line row per quest; completed quests are muted with a "— Complete" suffix.
 func drawJournalQuests(g *core.GameState, font rl.Font, body rl.Rectangle) {
 	quests := g.Quests
 	if len(quests) == 0 {
@@ -197,21 +158,15 @@ func drawJournalQuests(g *core.GameState, font rl.Font, body rl.Rectangle) {
 	})
 }
 
-// forEachJournalRow walks the visible window of a journal list — the Quests
-// and Bestiary sub-views share it — painting the selection plate on the cursor
-// row and calling fn(i, rowY) to draw each row's content. Centralizes the
-// paging math, the body-overflow guard, and the -2/-6 selection-plate insets
-// so the two sub-views can't drift on copy-tuned literals.
+// forEachJournalRow walks the visible window (shared by both sub-views), painting the cursor row's selection plate and calling fn(i, rowY) per row.
 func forEachJournalRow(body rl.Rectangle, cursor, count int, fn func(i int, rowY float32)) {
 	listTop := body.Y + journalListTopDY
 	visible := int((body.Y + body.Height - listTop) / journalRowH)
 	if visible < 1 {
-		visible = 1 // always show at least the cursor row, even in a too-short body
+		visible = 1 // always show at least the cursor row
 	}
 	first := journalScrollFirst(cursor, count, visible)
-	// Bound the loop by the SAME floored `visible` used for paging, so the two
-	// can't disagree — a too-short body where the old overflow guard tripped
-	// before drawing any row (hiding the cursor) now still renders one row.
+	// Bound the loop by the same floored `visible` used for paging so a too-short body still renders one row.
 	rowY := listTop
 	for i := first; i < count && i < first+visible; i++ {
 		if i == cursor {
@@ -222,14 +177,8 @@ func forEachJournalRow(body rl.Rectangle, cursor, count int, fn func(i int, rowY
 	}
 }
 
-// drawJournalBestiary fills the journal body with the bestiary: one row per
-// foe the party has SEEN (defeated at least once or scanned — never-met kinds
-// stay hidden so the list isn't a spoiler). A known kind (5 kills or scanned)
-// shows its real HP in claret and an "identified" tag; an unidentified kind
-// shows "HP ???" and progress toward the 5-kill threshold. Read-only;
-// PanelsRowCursor highlights the focused row.
-// bestiarySeenBuf is the reused scratch slice for the per-frame Bestiary tab
-// draw, so SeenKindsInto doesn't allocate a fresh []EnemyKind every frame.
+// drawJournalBestiary fills the body with one row per SEEN foe (never-met kinds stay hidden, no spoilers). Known kinds show real HP + tag; unidentified show "HP ???" and kill progress.
+// bestiarySeenBuf is reused scratch so SeenKindsInto doesn't allocate per frame.
 var bestiarySeenBuf []core.EnemyKind
 
 func drawJournalBestiary(g *core.GameState, font rl.Font, body rl.Rectangle) {

@@ -8,16 +8,9 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// DrawDoors paints every authored door in the current area as a wooden
-// doorframe at its tile center, rotated to face the player's
-// post-transition direction. The lighting shader is bound by DrawWorld
-// before this call so the door picks up the same per-area profile;
-// callers must invoke DrawDoors inside the same rl.BeginMode3D pass.
-//
-// Doors don't have a "looted" or "open" state today — they render
-// identically before and after the player steps through. A future
-// "locked" state can add a closed-panel variant or recolor the brass
-// keystone.
+// DrawDoors paints every authored door as a doorframe at its tile center, rotated to face the
+// player's post-transition direction. Must be called inside the same rl.BeginMode3D pass as DrawWorld
+// (shares its bound lighting shader).
 func DrawDoors(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	vc := newViewCull(camera)
 	for _, d := range g.Doors {
@@ -26,9 +19,7 @@ func DrawDoors(camera rl.Camera3D, g *core.GameState, assets Resources) {
 			continue
 		}
 		yaw := doorYawDeg(d.Facing)
-		// doorProps is a fixed-size [DoorStyleCount]propModel, so any in-range
-		// style indexes safely; an out-of-range style falls back to Building (0,
-		// always present). No second guard needed — the array is never empty.
+		// Out-of-range style falls back to Building (index 0, always present).
 		style := d.Style
 		if style < 0 || int(style) >= len(assets.doorProps) {
 			style = core.DoorStyleBuilding
@@ -37,18 +28,15 @@ func DrawDoors(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	}
 }
 
-// DrawDoorPrompt paints the "enter this doorway?" confirm modal that opens
-// when the player steps onto a door (g.DoorPrompt >= 0). Centered glass
-// card with the destination name and Enter/Cancel hints. No-op when no
-// prompt is active. Drawn as a 2D overlay after the world pass.
+// DrawDoorPrompt paints the "enter this doorway?" confirm modal (active when g.DoorPrompt >= 0).
+// 2D overlay drawn after the world pass; no-op when no prompt is active.
 func DrawDoorPrompt(g *core.GameState, assets Resources) {
 	if g.DoorPrompt < 0 || g.DoorPrompt >= len(g.Doors) {
 		return
 	}
 	target := g.Doors[g.DoorPrompt].TargetMap
 	if target == core.SelfMapToken {
-		// Same-map portal carries the "self" placeholder; show the current
-		// area's own name rather than humanizing "self" into "Self".
+		// Same-map portal: show the current area's own name, not "Self".
 		target = core.MapIDFromPath(g.Area.Path)
 	}
 	dest := humanizeMapID(target)
@@ -59,11 +47,7 @@ func DrawDoorPrompt(g *core.GameState, assets Resources) {
 	panelY := int32(rect.Y)
 
 	title := "DOORWAY"
-	// Cache the title measure — it's a constant string drawn every frame the
-	// (held) prompt is open, so a per-frame cgo MeasureTextEx is wasted work;
-	// reuse the shared card-title cache the titled menus use. The measure is at
-	// the canonical heading spacing, exactly what drawEngravedText tracks at, so
-	// centering holds.
+	// Cache the title measure (constant string, drawn every held-prompt frame) to skip per-frame cgo MeasureTextEx.
 	tm := cardTitleMeasureCache.measure(assets.hudFont, title, FontHeading, FontSpacingHeading)
 	drawEngravedText(assets.hudFont, title,
 		float32(panelX)+float32(panelW)/2-tm.X/2, float32(panelY)+doorPromptHeaderInsetY,
@@ -72,34 +56,23 @@ func DrawDoorPrompt(g *core.GameState, assets Resources) {
 	cardCenterX := float32(panelX) + float32(panelW)/2
 	drawTextCentered(assets.hudFont, "Travel to "+dest+"?",
 		cardCenterX, float32(panelY)+doorPromptBodyInsetY, FontBody, textMuted)
-	// Controller-first affordances (no spelled-out keys).
 	DrawHintBar(assets.hudFont, []HintSeg{
 		Hint("Enter", GlyphA),
 		Hint("Stay", GlyphB),
 	}, cardCenterX, float32(panelY+panelH)-doorPromptFooterInsetY, FontSmall)
 }
 
-// Door-prompt layout insets (Y offsets from the card's top edge, except the
-// footer which is from the bottom). The door prompt is a smaller, fleuron-free
-// confirm card with a FontHeading title — intentionally lighter than the
-// FontTitle drawTitledMenuCard/drawTitledCardHeader chrome — so it carries its
-// own tighter band rather than the shared modal tokens.
+// Door-prompt layout insets (Y from card top; footer from bottom). Its own tighter band rather
+// than the shared modal tokens — a smaller fleuron-free FontHeading confirm card.
 const (
 	doorPromptHeaderInsetY = float32(22)
 	doorPromptBodyInsetY   = float32(78)
 	doorPromptFooterInsetY = float32(40)
 )
 
-// humanizeMapID turns a bare map id ("forgotten_plaza") into a display
-// label ("Forgotten Plaza") for the door prompt. Underscores become
-// spaces and each word is title-cased; an empty id falls back to "the
-// next area" so the prompt always reads as a sentence.
-//
-// DrawDoorPrompt calls this every frame the (held) prompt is open with the
-// same id, and the FieldsFunc + per-word slicing + Join allocate three times
-// per call. A single-entry memo on the input collapses that to one allocation
-// the frame the prompt opens — same shape as the goldReadout / stepCounter
-// caches elsewhere in the HUD.
+// humanizeMapID turns a bare map id ("forgotten_plaza") into a display label ("Forgotten Plaza");
+// empty id falls back to "the next area". Single-entry memo skips the FieldsFunc/Join allocs on
+// the per-frame held-prompt calls.
 var (
 	humanizeCacheIn  string
 	humanizeCacheOut string
@@ -121,19 +94,14 @@ func humanizeMapID(id string) string {
 	}
 	out := strings.Join(words, " ")
 	if out == "" {
-		// id was all separators ("_", "-") — FieldsFunc yielded no words.
-		// Fall back to the same sentence the empty-id case uses rather than
-		// rendering "Travel to ?", and cache that so the memo stays consistent.
+		// id was all separators — FieldsFunc yielded no words; reuse the empty-id fallback.
 		out = "the next area"
 	}
 	humanizeCacheIn, humanizeCacheOut = id, out
 	return out
 }
 
-// doorYawDeg maps a core.Facing direction to the degree rotation the
-// doorframe's mesh needs so the opening points in that direction. The
-// mesh is authored facing +Z (south), so North needs a 180° flip,
-// East/West get 90°/270°.
+// doorYawDeg maps a facing to the doorframe mesh's yaw. Mesh is authored facing +Z (south).
 func doorYawDeg(facing int) float32 {
 	switch core.NormalizeFacing(facing) {
 	case core.North:

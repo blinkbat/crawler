@@ -9,15 +9,9 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Ambient-rain overlay tuning. Purely presentation — the storm's state
-// (whether it rains, how hard, the fade) is owned by core.WeatherState;
-// here we just paint it. A bluegray wash darkens the world view and
-// animated streaks fall over it, both scaled by Weather.Intensity so the
-// effect thickens as the storm peaks and thins as it lifts.
+// Ambient-rain overlay tuning. Storm state owned by core.WeatherState; this only paints it.
 const (
-	// Wash + streak colors are shared across rain kinds; the per-kind table
-	// (rainVisuals) supplies the peak wash alpha, streak count, and streak
-	// alpha that distinguish a faint shower from a heavy downpour.
+	// Wash + streak colors shared across rain kinds; rainVisuals supplies the per-kind strengths.
 	rainWashR = 44
 	rainWashG = 56
 	rainWashB = 80
@@ -34,44 +28,32 @@ const (
 	rainFallMin   = float32(820)  // px/sec slowest streak
 	rainFallMax   = float32(1320) // px/sec fastest streak
 
-	// Lightning flash (heavy storms) — a near-white, faintly blue blanking
-	// layer over the world view whose alpha tracks Weather.Flash.
+	// Lightning flash (heavy storms): near-white blanking layer, alpha tracks Weather.Flash.
 	lightningR        = 212
 	lightningG        = 224
 	lightningB        = 248
 	lightningMaxAlpha = 185
 
-	// weatherIntensityEpsilon is the "effectively off" cutoff for the rain
-	// intensity / lightning flash envelopes — below it there's nothing worth
-	// painting, so DrawWeather bails. One named threshold instead of the bare
-	// 0.001 repeated at each guard.
+	// weatherIntensityEpsilon: "effectively off" cutoff for intensity/flash; below it DrawWeather bails.
 	weatherIntensityEpsilon = float32(0.001)
 )
 
-// rainVisual is the per-kind peak strength of the overlay at full
-// Intensity: how dark the wash gets, how many streaks fall, and how
-// visible each streak is. Scaled down by the live Intensity envelope so
-// the same row drives the fade-in / fade-out too.
+// rainVisual is the per-kind peak overlay strength at full Intensity; scaled by the live envelope.
 type rainVisual struct {
 	washAlpha   float32 // peak wash alpha (0..255)
 	streaks     float32 // peak streak count
 	streakAlpha float32 // peak per-streak alpha (0..255)
 }
 
-// rainVisuals indexed by core.RainKind — a light shower reads as a faint
-// mist with the lightest filter, a heavy storm as a dense, darker
-// downpour. Sized by core.RainKindCount and asserted full at init.
+// rainVisuals indexed by core.RainKind; asserted full at init.
 var rainVisuals = [core.RainKindCount]rainVisual{
 	core.RainLight:  {washAlpha: 40, streaks: 75, streakAlpha: 40},
 	core.RainNormal: {washAlpha: 72, streaks: 175, streakAlpha: 55},
 	core.RainHeavy:  {washAlpha: 112, streaks: 300, streakAlpha: 82},
 }
 
-// rainStreakTrait holds one streak's screen- and time-independent traits.
-// All five are pure functions of the streak index, so they're baked once at
-// init into rainStreakTraits and reused every frame — the draw loop used to
-// recompute 5 hash01s + derived math per streak per frame (up to 300 streaks
-// at RainHeavy → ~1500 hash calls/frame avoided).
+// rainStreakTrait holds one streak's screen/time-independent traits — pure functions of the
+// streak index, baked once at init into rainStreakTraits to avoid per-frame hash recompute.
 type rainStreakTrait struct {
 	colFrac float32
 	length  float32
@@ -80,8 +62,7 @@ type rainStreakTrait struct {
 	thick   float32
 }
 
-// rainStreakTraits is sized to the largest rainVisuals streak count so every
-// rain kind indexes within it. Built in init (after the table is validated).
+// rainStreakTraits sized to the largest rainVisuals streak count so every kind indexes within it.
 var rainStreakTraits []rainStreakTrait
 
 func init() {
@@ -107,36 +88,27 @@ func init() {
 	}
 }
 
-// DrawWeather paints the ambient-rain overlay in screen space, above the
-// 3D world but below the HUD (so menus / combat text stay crisp). No-op
-// when the storm is fully clear. Stateless: rl.GetTime() drives the fall
-// and each streak's traits come from hash01(index), so nothing is
-// retained between frames.
+// DrawWeather paints the ambient-rain overlay in screen space, above the 3D world but below the
+// HUD. No-op when clear. Stateless: rl.GetTime() drives the fall, traits come from hash01(index).
 func DrawWeather(g *core.GameState) {
 	w := g.Weather
-	// Intensity and Flash are eased into [0,1] upstream (TickWeather/tickLightning);
-	// clamp at the consumption site so the uint8 alpha casts below can never wrap
-	// even if that invariant ever drifts (a >1 value would alias to near-zero alpha).
+	// Clamp at the consumption site so the uint8 alpha casts can't wrap if the [0,1] invariant drifts.
 	intensity := core.Clamp(w.Intensity, 0, 1)
 	w.Flash = core.Clamp(w.Flash, 0, 1)
-	// A lightning flash can outlast the rain's fade by a blink, so it's
-	// checked independently of intensity. Nothing to paint otherwise.
+	// Flash can outlast the rain's fade, so it's checked independently of intensity.
 	if intensity <= weatherIntensityEpsilon && w.Flash <= weatherIntensityEpsilon {
 		return
 	}
 	sw, sh := screenSizeF()
 
 	if intensity > weatherIntensityEpsilon {
-		// Defensive clamp: every other enum-keyed table in render guards its
-		// access. w.Kind is only ever set by rollRainKind today, but a corrupt
-		// save or future path with an out-of-range Kind would panic indexing
-		// the fixed-size table.
+		// Defensive clamp: an out-of-range Kind (corrupt save) would panic indexing the fixed table.
 		kind := w.Kind
 		if kind < 0 || int(kind) >= core.RainKindCount {
 			kind = core.RainLight
 		}
 		vis := rainVisuals[kind]
-		// Overcast wash over the world view — darkness scales with kind.
+		// Overcast wash over the world view.
 		rl.DrawRectangle(0, 0, int32(sw), int32(sh),
 			rl.NewColor(rainWashR, rainWashG, rainWashB, uint8(intensity*vis.washAlpha)))
 
@@ -148,9 +120,7 @@ func DrawWeather(g *core.GameState) {
 			streakCol := rl.NewColor(rainStreakR, rainStreakG, rainStreakB, uint8(intensity*vis.streakAlpha))
 			for i := 0; i < n; i++ {
 				tr := rainStreakTraits[i]
-				// y wraps from above the top to below the bottom over `span`;
-				// the per-streak phase offsets each so they don't fall in lockstep.
-				// Only y/x depend on time + screen size; the rest is precomputed.
+				// y wraps over `span`; per-streak phase offsets each so they don't fall in lockstep.
 				span := sh + tr.length
 				y := float32(math.Mod(float64(t*tr.speed+tr.phase*span), float64(span))) - tr.length
 				x := tr.colFrac * sw
@@ -164,8 +134,7 @@ func DrawWeather(g *core.GameState) {
 		}
 	}
 
-	// Lightning blink — painted last so it lights the rain it falls
-	// through. Flash is only ever non-zero during a heavy storm.
+	// Lightning blink — painted last so it lights the rain it falls through.
 	if w.Flash > weatherIntensityEpsilon {
 		rl.DrawRectangle(0, 0, int32(sw), int32(sh),
 			rl.NewColor(lightningR, lightningG, lightningB, uint8(w.Flash*lightningMaxAlpha)))

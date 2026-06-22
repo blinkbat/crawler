@@ -9,10 +9,7 @@ import (
 	"crawler/internal/app/core/mapfile"
 )
 
-// TestGappedMapLoadsAndRoundTrips loads the shipped forest_path.map (its raised
-// trail carved into a walk-under land bridge), confirms the gap survives into the
-// area's Solids stack, that you can walk under it, and that the converter
-// round-trip preserves it.
+// TestGappedMapLoadsAndRoundTrips: shipped forest_path.map (land-bridge) keeps its gap into the Solids stack, lets you walk under, and survives a converter round-trip.
 func TestGappedMapLoadsAndRoundTrips(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "maps", "forest_path.map")
 	raw, err := os.ReadFile(path)
@@ -33,8 +30,7 @@ func TestGappedMapLoadsAndRoundTrips(t *testing.T) {
 	if area.AllColumnsGapless() {
 		t.Fatalf("land-bridge map should NOT be all-gapless")
 	}
-	// The bridge at column (48,10): ground standable under the deck, gap above,
-	// deck on top.
+	// Bridge at column (48,10): ground standable under the deck, gap above, deck on top.
 	const base = ElevationBaseline
 	const bx, bz = 48, 10
 	if !area.Standable(bx, base, bz) {
@@ -46,7 +42,7 @@ func TestGappedMapLoadsAndRoundTrips(t *testing.T) {
 	if !area.Standable(bx, base+2, bz) {
 		t.Errorf("the deck at (%d,%d,%d) should be standable", bx, base+2, bz)
 	}
-	// You can walk UNDER the bridge east-west along the ground.
+	// Walk UNDER the bridge east-west along the ground.
 	if l, ok := area.ResolveStep(bx-1, base, bz, East); !ok || l != base {
 		t.Errorf("walk under the bridge (west->east) = (%d,%v), want (%d,true)", l, ok, base)
 	}

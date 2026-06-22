@@ -1,107 +1,63 @@
 package core
 
 const (
-	// InitialWindowWidth/Height seed rl.InitWindow at startup. The window is
-	// immediately resized to the monitor by render.SetDisplayMode(DisplayFullscreen),
-	// so these are NOT the runtime screen dimensions — never use them for
-	// HUD layout (render code reads rl.GetScreenWidth/Height via screenSize()
-	// in the render package). They also double as the default size the
-	// Windowed display mode snaps to on the first Fullscreen→Windowed toggle.
+	// Window seeds for rl.InitWindow only — NOT runtime screen dims (the window
+	// resizes to the monitor at startup; HUD layout reads rl.GetScreenWidth/Height).
+	// Also the default size Windowed mode snaps to on first toggle.
 	InitialWindowWidth  = 1180
 	InitialWindowHeight = 820
 
-	// TargetFPS is the render frame cap fed to rl.SetTargetFPS at boot.
-	// Co-located with the window-size seeds so all startup tuning lives
-	// in one place rather than as a bare literal in run.go.
 	TargetFPS = 120
 
-	// MaxFrameStep clamps the per-frame delta time the update loops act
-	// on, so a stall (alt-tab, breakpoint, GC pause) can't teleport the
-	// player through a wall or fast-forward animations. Both explore.Update
-	// and battle.Update pass their dt through ClampFrameTime. 1/15s = a
-	// 15 FPS floor on simulation stepping.
+	// MaxFrameStep clamps per-frame dt (via ClampFrameTime) so a stall can't
+	// teleport the player through walls / fast-forward animations. 1/15s floor.
 	MaxFrameStep = float32(1.0 / 15.0)
 
 	TileSize  = 2.05
 	EyeHeight = 1.32
-	// LevelStep is the world-space height of one elevation level (the
-	// Elevation grid layer) and the single vertical unit the whole world is
-	// built from. A tile at level N renders its floor at N·LevelStep; a ramp
-	// slopes one LevelStep over its tile; a cliff face between two tiles is
-	// (levelDelta)·LevelStep tall. There is no separate "wall height" — a wall
-	// IS the rendered face of an elevation step. Tunable: larger = more
-	// dramatic verticality + steeper ramps. 2.4 over a 2.05 tile is a ~49°
-	// ramp — one level reads as a full story up.
+	// LevelStep is the world height of one elevation level — the sole vertical
+	// unit. A wall IS the rendered face of an elevation step (no separate wall
+	// height). 2.4 over a 2.05 tile is a ~49° ramp.
 	LevelStep     = float32(2.4)
 	StepDuration  = 0.18
 	TurnDuration  = 0.14
 	BumpDuration  = 0.18
 	FlashDuration = 0.16
-	// TurnRepeatDelay throttles HELD turning: after a turn animation lands, a
-	// still-held turn key waits this long before re-firing the next turn (wired in
-	// explore/movement.go's updatePlayer). The turn animation itself is unchanged
-	// (a single turn stays as snappy as ever) and a fresh tap/press is unaffected
-	// — the delay only paces AUTO-REPEAT so holding a turn key doesn't spin you
-	// like a turntable; you have to keep holding to keep rotating, which makes it
-	// far harder to blow past the facing you meant to stop on. The rest period is
-	// purely additive (the cooldown only counts down between turns, not during the
-	// turn animation), so this is the actual hold-to-continue gap in seconds.
-	// MoveRepeatDelay is the step counterpart; it is reserved (not currently gated
-	// — stepping re-fires immediately on land) since over-stepping a tile is far
-	// less disorienting than over-spinning a facing.
+	// TurnRepeatDelay paces HELD turn AUTO-REPEAT only (additive rest between
+	// turns, not during the turn animation); a single tap/press is unaffected.
+	// MoveRepeatDelay is the step counterpart, reserved (stepping re-fires on land).
 	MoveRepeatDelay = float32(0.07)
 	TurnRepeatDelay = float32(0.25)
-	// FlashTintStrength is the peak fraction a flash washes a sprite toward
-	// white (FlashTint): both the cap and the per-frame scale ramp to it.
+	// FlashTintStrength is the peak fraction a flash washes a sprite toward white.
 	FlashTintStrength = 0.86
-	// HitKnockbackDuration is how long the receiver's recoil offset
-	// lasts after taking damage. A touch longer than BumpDuration so
-	// the impact reads as "the hit shoved them" — the attacker has
-	// already pulled their swing back by the time the receiver
-	// finishes flinching. Magnitude is governed by HitKnockbackDist
-	// + the BumpOffset sine curve, same shape as the lunge bump.
+	// HitKnockbackDuration: receiver recoil after taking damage. Longer than
+	// BumpDuration so the hit reads as a shove. Magnitude = HitKnockbackDist + BumpOffset curve.
 	HitKnockbackDuration = float32(0.24)
-	// HitKnockbackDist is the peak world-units displacement during
-	// the recoil. Smaller than BumpOffset's lunge distance (0.20-
-	// 0.22) so the receiver doesn't moonwalk halfway across the
-	// arena on every hit — just a clear "they felt that" shove.
+	// HitKnockbackDist is the peak recoil displacement (world units); smaller
+	// than BumpOffset's lunge so the receiver doesn't moonwalk on every hit.
 	HitKnockbackDist  = float32(0.14)
 	DeathFadeDuration = 0.55
-	// VictoryDanceDuration is the FULL victory-pose length — drives the party
-	// dance motion (render/world.go) and the debug skip-win timed auto-leave.
-	// NOT the same as VictoryDanceBeat below (the shorter spoils-card hold);
-	// don't conflate / "dedupe" them.
+	// VictoryDanceDuration is the FULL victory-pose length; NOT VictoryDanceBeat
+	// (the shorter spoils-card hold) — don't conflate them.
 	VictoryDanceDuration = 3.0
-	// Victory spoils-screen pacing (see battle.go's BattleWon handler +
-	// render/victory.go). VictoryDanceBeat is how long the party victory
-	// pose plays solo before the spoils card animates in;
-	// VictoryBarFillDuration is the XP-bar fill sweep; VictoryLootStagger
-	// delays each loot row's slide-in so they cascade rather than pop in
-	// together; VictoryLootFadeDuration is each row's own fade-in window.
-	// All in seconds, driven off Battle.VictoryElapsed.
+	// Victory spoils-screen pacing, driven off Battle.VictoryElapsed: solo-pose
+	// hold, XP-bar fill sweep, per-row slide-in stagger, per-row fade window.
 	VictoryDanceBeat        = float32(0.9)
 	VictoryBarFillDuration  = float32(1.0)
 	VictoryLootStagger      = float32(0.15)
 	VictoryLootFadeDuration = float32(0.22)
-	// VictoryXPPerTick is how many points of shown XP each count-up blip
-	// (SoundXPTick) represents — the spoils screen rings one tick per this
-	// much XP as the bars fill, so the cadence tracks the eased fill (rapid
-	// early, sparse as it settles).
+	// VictoryXPPerTick: XP per count-up blip (SoundXPTick) on the spoils screen.
 	VictoryXPPerTick = 8
 	MouseSense       = 0.0024
-	// StickLookSense scales right-stick free-look. Unlike MouseSense
-	// (applied per raw mouse-delta) this is dt-scaled in updateFreeLook
-	// since an analog stick is a sustained hold — the unit is roughly
-	// "radians per second at full tilt." Tuned so a full push reaches
-	// the yaw clamp in ~0.35s, matching the mouse path's feel.
+	// StickLookSense scales right-stick free-look; dt-scaled (unlike per-delta
+	// MouseSense). Roughly radians/sec at full tilt.
 	StickLookSense      = 2.2
 	MaxLookYaw          = 0.78
 	MaxLookPitch        = 0.62
 	FreeLookReturnSpeed = 3.4
 )
 
-// AnimKind tags Player.Anim so the renderer/updater can dispatch by kind
-// instead of poking at duration/elapsed alone.
+// AnimKind tags Player.Anim for dispatch by kind.
 type AnimKind int
 
 const (
@@ -110,9 +66,8 @@ const (
 	AnimTurn
 )
 
-// BattlePhase is the top-level state of the battle FSM. Values are
-// internal-only (no save file format depends on the integers), so the
-// historical gaps are gone and the enum walks via iota.
+// BattlePhase is the top-level battle FSM state. Internal-only (no save depends
+// on the integers).
 type BattlePhase int
 
 const (
@@ -124,8 +79,7 @@ const (
 	BattleEnemyTiming
 )
 
-// ActionMode is the sub-state of BattlePlayer — which input mode the action
-// menu is currently in (action picker, target picker, item picker, etc.).
+// ActionMode is the BattlePlayer sub-state — which input mode the action menu is in.
 type ActionMode int
 
 const (
@@ -134,29 +88,18 @@ const (
 	ActionPartyTarget
 	ActionItemMenu
 	ActionItemTarget
-	// ActionSkillMenu is the skill-selection submenu — opens when the
-	// player picks the "Skill" row, lets them choose which of the
-	// class's 3 learned skills to cast. Confirming a row in this menu
-	// arms the chosen skill and transitions into its target mode
-	// (party / enemy / no-target) — see battle.updateSkillMenu →
-	// beginPendingAction.
+	// ActionSkillMenu is the skill-selection submenu; confirming arms the skill
+	// and transitions to its target mode (see battle.updateSkillMenu).
 	ActionSkillMenu
-	// ActionFleeConfirm is the yes/no gate the Flee row drops into so a
-	// stray Confirm can't burn the turn retreating by accident — Confirm
-	// commits the flee, Back returns to the action menu (battle.updateFleeConfirm).
+	// ActionFleeConfirm is the yes/no gate so a stray Confirm can't burn the turn fleeing.
 	ActionFleeConfirm
-	// ActionSwapTarget is the tile-selection mode the Swap row drops into: the
-	// acting member is the source (their card carries the active halo), and the
-	// player cycles a cursor over the OTHER party tiles to pick a partner to
-	// trade formation slots with. Confirm performs the swap and ends the turn;
-	// Back returns to the action menu (battle.updateSwapTarget).
+	// ActionSwapTarget: pick another party tile to trade formation slots with;
+	// Confirm swaps and ends the turn.
 	ActionSwapTarget
 )
 
-// ActionRow enumerates the in-battle action menu rows. The integer values
-// double as g.Battle.MenuIndex cursor positions; reordering this enum
-// reorders the menu. Typed so a free `int` can't accidentally stand in
-// where a row label is expected.
+// ActionRow enumerates the in-battle action menu rows; values double as the
+// g.Battle.MenuIndex cursor, so reordering reorders the menu.
 type ActionRow int
 
 const (
@@ -164,14 +107,11 @@ const (
 	ActionRowSkill
 	ActionRowItem
 	ActionRowDefend
-	// ActionRowSwap trades the actor's formation slot with another party member's,
-	// spending the actor's turn. A swap (two units exchange slots) is the only way
-	// to rearrange the formation, so it always stays a clean 2-front/2-back grid —
-	// you can never end up with three in one row. Used to pull a caster out of
-	// melee reach, or push a fighter up into it, mid-fight.
+	// ActionRowSwap trades the actor's formation slot with another member's,
+	// spending the turn. Only way to rearrange formation; keeps the 2-front/2-back grid.
 	ActionRowSwap
-	// ActionRowFlee is the LAST row: roll to escape the fight and retreat to the
-	// pre-combat tile. See performFlee / FleeChance.
+	// ActionRowFlee is the LAST row: roll to escape and retreat to the pre-combat
+	// tile. See performFlee / FleeChance.
 	ActionRowFlee
 )
 
@@ -179,113 +119,62 @@ const (
 const ActionRowCount = int(ActionRowFlee) + 1
 
 const (
-	// SightRadius is the Chebyshev fog-of-war reveal radius around
-	// the player. 1 = the 3×3 window centered on the player tile is
-	// marked Visited on every successful step. The corner minimap and
-	// the panels Map tab both read Visited to fade unexplored tiles
-	// (panels also hides entity markers on fogged tiles).
-	//
-	// NOTE: this radius CONSTANT is SightRadius; RevealRadius is the
-	// FUNCTION (packai.go) that consumes it to paint the window. Docs
-	// that say "RevealRadius 3×3 fog" mean SightRadius=1 fed through the
-	// RevealRadius() call — don't mistake the function for the radius.
+	// SightRadius is the Chebyshev fog-of-war reveal radius. 1 = the 3×3 window
+	// around the player is marked Visited per step. NOTE: this is the CONSTANT;
+	// RevealRadius (packai.go) is the FUNCTION that consumes it.
 	SightRadius = 1
 
-	// --- Panels Map-tab zoom (cells-on-screen) ----------------------------
-	//
-	// The zoomable Map tab measures zoom as "how many tiles fit across the
-	// view." Lives in config alongside the other UI tunables so the explore
-	// input handler (clamp + step) and the render draw (default fallback for
-	// struct-literal GameStates that didn't seed PanelsMapZoom) read one
-	// source instead of each package re-declaring the literal 14.
-	//
-	//   PanelMapZoomDefault — initial cells-on-screen (fits a ~16-wide map).
-	//   PanelMapZoomMin/Max — soft-clamp bounds for the Up/Down zoom.
-	//   PanelMapZoomStep    — cells-on-screen change per zoom press.
-	//
-	// Step is deliberately coarse so the range resolves to just a handful
-	// of distinct stops (8 / 16 / 24 / 32 / 40 / 48) rather than the old
-	// 22-stop crawl — a couple of presses takes you from "room" to "whole
-	// map." The default + min/max are all multiples of the step so every
-	// stop lands cleanly and the clamp can't strand the player on a
-	// fractional zoom.
+	// Panels Map-tab zoom, measured in cells-on-screen. Step is coarse (stops at
+	// 8/16/.../48); default + min/max are step multiples so the clamp lands cleanly.
 	PanelMapZoomDefault = 48
 	PanelMapZoomMin     = 8
 	PanelMapZoomMax     = 64
 	PanelMapZoomStep    = 8
-	// Pan step scales with the current zoom (PanelsMapZoom / PanelMapPanDivisor)
-	// so a tap scrolls a meaningful chunk at any scale, never less than
+	// Pan step scales with zoom (PanelsMapZoom / PanelMapPanDivisor), floored at
 	// PanelMapPanStepMin cells.
 	PanelMapPanDivisor = 6
 	PanelMapPanStepMin = 2
 
-	// --- Pack AI (junkyard-dog leash) -------------------------------------
-	//
-	// Packs wander when the player steps. They never leave their leash
-	// (Chebyshev distance from Pack.HomeX/HomeZ ≤ PackLeashRadius), they
-	// don't move every step (only PackStepChance of the time, rolled per
-	// pack independently), and they pick a direction by a simple rule:
-	// if the player is inside the leash radius, step closer; otherwise
-	// pick a random cardinal that stays inside the leash.
-	//
-	//   PackLeashRadius  — Chebyshev radius around the spawn tile.
-	//   PackStepChance   — 0..1 chance to even attempt a move per player
-	//                      step. Lower = sleepier dogs.
-	//   PackChaseRadius  — Chebyshev distance at which a pack abandons
-	//                      wander for the "lazy chase" branch. Smaller
-	//                      than PackLeashRadius so far-away wanderers
-	//                      stay random until the player draws close.
+	// Pack AI (junkyard-dog leash). Packs wander on player steps, never leaving
+	// their leash; step closer if the player is inside it, else a random in-leash cardinal.
+	//   PackLeashRadius — Chebyshev radius around the spawn tile.
+	//   PackStepChance  — chance to attempt a move per player step (lower = sleepier).
+	//   PackChaseRadius — range at which wander gives way to lazy chase (< leash).
 	PackLeashRadius = 4
 	PackStepChance  = 0.35
 	PackChaseRadius = 3
 
-	// PackAIPatrol tuning. A patrolling pack paces along the X axis out
-	// to PatrolRadius tiles from its home, bouncing at the ends and at
-	// walls. PatrolStepChance is higher than PackStepChance so a sentry
-	// keeps a steady, readable beat rather than idling like a dog.
+	// Patrol AI: paces the X axis out to PatrolRadius, bouncing at ends/walls.
+	// PatrolStepChance > PackStepChance for a steady sentry beat.
 	PatrolRadius     = 4
 	PatrolStepChance = 0.6
 
-	// PackAISkittish tuning. A skittish pack flees when the player is
-	// within SkittishFleeRadius (Chebyshev), stepping directly away; past
-	// that it wanders its leash. Matched to PackChaseRadius so prey starts
-	// running at the same range a junkyard dog would start chasing.
+	// Skittish AI: flees directly away within SkittishFleeRadius, else wanders.
+	// Matched to PackChaseRadius.
 	SkittishFleeRadius = 3
 
-	// BattleSplashDuration is how long the encounter banner sits on screen at
-	// the start of a battle. The battle code seeds Battle.Splash with this and
-	// the renderer uses it for ease-in/ease-out math, so they stay in sync.
+	// BattleSplashDuration: how long the encounter banner shows. Seeds
+	// Battle.Splash; the renderer reads it for ease math.
 	BattleSplashDuration = float32(1.15)
 
 	AttackTimingDuration = float32(1.4)
 	DefendTimingDuration = float32(1.3)
 
 	TimingFlashDuration = float32(0.32)
-	// TallyHitFlashDuration is the per-window feedback hold on a
-	// multi-press tally bar. Shorter than TimingFlashDuration so
-	// each hit in a rapid-fire sequence reads as a distinct pop
-	// instead of running together into one long bloom.
+	// TallyHitFlashDuration: per-window hold on a multi-press tally bar. Shorter
+	// than TimingFlashDuration so rapid hits read as distinct pops.
 	TallyHitFlashDuration = float32(0.18)
 	QualityResultDuration = float32(0.70)
 
-	// Hit-stop is the brief world-pause inserted between the timing flash and
-	// the action's apply step on Great/Excellent grades. The bar's already
-	// frozen at the press; this freezes EVERYTHING else (sprite bumps, popup
-	// floats, enemy bars) so the moment punctuates. Tuned short — under 200ms
-	// — to feel like a satisfying punch, not a stutter.
+	// Hit-stop: brief world-pause between the timing flash and apply on
+	// Great/Excellent. Freezes everything except the already-frozen bar. <200ms.
 	HitStopGreat     = float32(0.10)
 	HitStopExcellent = float32(0.16)
 
-	// Combat screen shake — the camera-punch juice on a well-timed hit.
-	// Each tier carries its own PEAK amplitude (world-unit camera offset)
-	// and DURATION; the render camera offsets by peak·(ShakeTimer/ShakeDur),
-	// oscillation driven off the wall clock so the screen visibly shakes
-	// even through the impact freeze (hit-stop). Armed via TriggerCombatShake.
-	//
-	// Philosophy: a normal well-timed hit shakes only SUBTLY — the screen
-	// shouldn't lurch on every press. The BIG shake is reserved for the
-	// high-impact moments (crits and AoE casts), which arm it explicitly and
-	// override the small grade-based base. Set any peak to 0 to mute that tier.
+	// Combat screen shake (camera punch on a well-timed hit). Each tier has a
+	// PEAK (world-unit offset) and DURATION; oscillation runs off the wall clock
+	// so it shakes through hit-stop. Armed via TriggerCombatShake. Big shake is
+	// reserved for crits/AoE (armed explicitly, overrides the grade base); peak 0 mutes a tier.
 	CombatShakeGreatPeak     = float32(0.016) // subtle normal Great
 	CombatShakeGreatDur      = float32(0.10)
 	CombatShakeExcellentPeak = float32(0.026) // a touch more for Excellent
@@ -293,341 +182,209 @@ const (
 	CombatShakeBigPeak       = float32(0.055) // crits + AoE casts: the real punch
 	CombatShakeBigDur        = float32(0.30)
 
-	// Controller rumble — the haptic half of "impact feedback", armed
-	// alongside the camera shake (see TriggerCombatShake). RumblePerShakePeak
-	// maps a shake's world-unit peak to a motor strength in [0,1] (clamped), so
-	// rumble grades automatically with the shake: a subtle Great press buzzes
-	// lightly (~0.24), a crit/AoE punch buzzes hard (~0.83). One knob.
+	// Controller rumble — haptic half of impact feedback, armed with the shake.
+	// RumblePerShakePeak maps a shake's world-unit peak to motor strength [0,1],
+	// so rumble grades with the shake automatically.
 	RumblePerShakePeak = float32(15.0)
-	// Taking a hit buzzes too (the "ouch" — it doesn't shake the camera, so it
-	// arms rumble directly in damagePartyMember). A flat medium pulse.
+	// Taking a hit buzzes too (no camera shake — armed directly in damagePartyMember).
 	RumbleHurtStrength = float32(0.45)
 	RumbleHurtDur      = float32(0.18)
-	// The Debug menu's "Test Rumble" pulse — strong + long enough to be
-	// unmistakable when verifying vibration works.
+	// Debug menu "Test Rumble" — strong + long enough to be unmistakable.
 	RumbleTestStrength = float32(0.8)
 	RumbleTestDur      = float32(0.5)
 
-	// Sequence arrow pulse: how long an arrow scales up after landing a
-	// correct tap. Slightly less than the flash duration so the pulse decays
-	// before the bar fades, keeping each tap visually punctuated.
+	// SequencePulseDuration: arrow scale-up after a correct tap. Slightly less
+	// than the flash duration so the pulse decays before the bar fades.
 	SequencePulseDuration = float32(0.22)
 	EnemyTurnIntro        = float32(0.85)
-	// Charge bars get a longer pre-arm pause so the player has time to read
-	// the prompt. The bar arms early if the player presses/holds the input,
-	// see updateAttackTiming for the skip logic.
+	// AttackTimingIntro: longer pre-arm pause so the player can read the prompt;
+	// arms early on press/hold (see updateAttackTiming).
 	AttackTimingIntro = float32(0.35)
-	// ChargeTimingIntro is the auto-arm timeout for charge bars: the
-	// bar waits this long for the player to engage their input before
-	// arming on its own. Pressing/holding during the wait skips
-	// straight into the bar (see updateAttackTiming). 3s is the
-	// "wait for the player, but don't softlock if they're afk" sweet
-	// spot — long enough to read the prompt and breathe, short enough
-	// that a missed cue doesn't burn the whole turn.
+	// ChargeTimingIntro: auto-arm timeout for charge bars — waits this long for
+	// the player to engage before arming itself (press/hold skips straight in).
 	ChargeTimingIntro = float32(3.0)
-	// BlockBumpDuration is intentionally LONGER than BumpDuration (0.22 vs
-	// 0.18). The hit landing on an enemy gets its own DamageFlash + popup
-	// to read the impact; a successful block has none of that — the defender
-	// just doesn't lose much HP. The longer recoil sells the block visually
-	// when the damage number is "1" or "0."
+	// BlockBumpDuration is LONGER than BumpDuration: a block has no DamageFlash/popup,
+	// so the longer recoil sells it when the damage number is 1 or 0.
 	BlockBumpDuration = float32(0.22)
 
-	// Charge minigame: hold the input through three ticks, then release at
-	// the peak. ChargeTick1Pct..ChargeTick3Pct / ChargePeakStart / ChargePeakEnd
-	// are VISUAL positions on the bar — tick lines are evenly spaced at
-	// quarters, with a 10%-wide peak band tucked in after the third tick.
-	//
-	// The cursor's elapsed→visual mapping is non-linear (see
-	// chargeSegments in timing.go). Each tick segment runs at a strictly
-	// faster slope than the previous one, so the cursor visibly
-	// accelerates with every notch it crosses — start slow, fast by the
-	// peak. resolveCharge grades off the cursor's visual position; the
-	// segment table is the single source of truth for both render and
-	// grade so they can't drift.
+	// Charge minigame: hold through three ticks, release at the peak.
+	// ChargeTick*Pct / ChargePeak* are VISUAL bar positions (ticks at quarters,
+	// a 10%-wide peak band after tick 3). The elapsed→visual mapping is non-linear
+	// and accelerates per tick (chargeSegments, timing.go — the single source for
+	// both render and grade).
 	ChargeTimingDuration = float32(1.8)
 	ChargeTick1Pct       = float32(0.25)
 	ChargeTick2Pct       = float32(0.50)
 	ChargeTick3Pct       = float32(0.75)
-	// ChargePeakStart MUST equal ChargeTick3Pct: resolveCharge treats
-	// "past tick 3" and "entering the peak window" as the same boundary,
-	// so the charge-grade bands are only contiguous when they match.
-	// Tied to the same literal so a balance edit can't open a grading gap.
+	// ChargePeakStart MUST equal ChargeTick3Pct: resolveCharge treats "past tick 3"
+	// and "entering the peak window" as one boundary, so the grade bands stay contiguous.
 	ChargePeakStart = ChargeTick3Pct
 	ChargePeakEnd   = float32(0.85)
-	// ChargeExcellentBandFrac is the half-width (as a fraction of the peak
-	// window) of the dead-center Excellent zone: a release whose distance from
-	// the peak sweet-spot is within this fraction of the window grades
-	// Excellent, else Great. Lives with the other Charge* tunables so the
-	// sweet-spot split isn't a bare literal in chargeGradeUpToPeak (timing.go).
+	// ChargeExcellentBandFrac: half-width (fraction of the peak window) of the
+	// dead-center Excellent zone; outside it grades Great.
 	ChargeExcellentBandFrac = float32(0.30)
 
-	// Directional-sequence minigame: tap a randomized run of N directions in
-	// order before time runs out. Each correct tap holds the grade; each
-	// miss (wrong key OR a slot that timed out unfilled) drops it one notch.
-	// Finishing all-correct under SequenceFastThreshold keeps the top grade.
-	// Used by Venom Strike (and the shared Recall bar, which opts out of the
-	// speed clause). Named generically since Steal moved to the Reels bar.
+	// Directional-sequence minigame: tap a random run of N directions in order;
+	// each correct tap holds the grade, each miss drops it one notch. All-correct
+	// under SequenceFastThreshold keeps the top grade. Used by Venom Strike (and
+	// the Recall bar, which opts out of the speed clause).
 	SequenceTimingDuration = float32(1.8)
 	SequenceLength         = 5
 	SequenceFastThreshold  = float32(1.0)
 
-	// Reels (slot) minigame — Steal's gamble. Stop each of ReelCount spinning
-	// reels; matching symbols pay off (3 = jackpot/Excellent, 2 = Good, all
-	// distinct = Miss). Reels spin between ReelSpinMin..ReelSpinMax symbols/sec,
-	// rolled per-reel so they desync (no single beat stops all three matched).
-	// Speeds are slow enough that the scrolling symbols stay readable (so a stop
-	// is a real timing call, not a blur-gamble), while the per-reel desync keeps
-	// a guaranteed jackpot out of reach. Longer duration than the press bars so
-	// there's time to stop all three deliberately.
+	// Reels (slot) minigame — Steal's gamble. Stop ReelCount reels; 3 match =
+	// jackpot, 2 = Good, all distinct = Miss. Spin at ReelSpinMin..Max symbols/sec,
+	// rolled per-reel so they desync (no guaranteed jackpot, but symbols stay readable).
 	ReelTimingDuration = float32(3.2)
 	ReelCount          = 3
-	// 3 symbols (was 4) so matches land far more often — with 4 the desynced
-	// reels made even a 2-of-3 feel like a fluke; 3 keeps a real whiff possible
-	// while rewarding a deliberate stop.
+	// 3 symbols (was 4) so matches land far more often while a real whiff stays possible.
 	ReelSymbolCount = 3
 	ReelSpinMin     = float32(2.0)
 	ReelSpinMax     = float32(3.25)
 
-	// Recall (memory) minigame — Arc Bolt's pattern. A run of RecallPatternLength
-	// directions shows for RecallRevealTime seconds, then hides; the player
-	// reproduces it from memory before RecallTimingDuration elapses. Duration
-	// must exceed the reveal so there's an input window after the hide.
+	// Recall (memory) minigame — Arc Bolt's pattern. RecallPatternLength
+	// directions show for RecallRevealTime, then hide; reproduce before
+	// RecallTimingDuration. Duration MUST exceed the reveal so there's an input window.
 	RecallTimingDuration = float32(3.6)
 	RecallPatternLength  = 4
 	RecallRevealTime     = float32(1.8)
-	// RecallMaxRevealFrac caps the reveal phase to this fraction of the bar so
-	// the pattern always hides with input time left (an over-long reveal would
-	// leave no window and paint the answer at resolve). NewRecallState clamps to it.
+	// RecallMaxRevealFrac caps the reveal to this fraction of the bar so the
+	// pattern always hides with input time left (NewRecallState clamps to it).
 	RecallMaxRevealFrac = float32(0.8)
 
-	// Overcharge backfire — Firebolt's risk band. Releasing the charge PAST the
-	// peak overloads the bolt: it lands a guaranteed Excellent-tier hit PLUS
-	// OverchargeDamageBonus flat extra damage, but recoils OverchargeRecoil
-	// flat self-damage onto the caster. The bonus is what makes the greedy
-	// late release worth the burn over a clean peak release.
+	// Overcharge backfire — Firebolt's risk band. Releasing PAST the peak: a
+	// guaranteed Excellent hit + OverchargeDamageBonus extra damage, but
+	// OverchargeRecoil self-damage onto the caster.
 	OverchargeDamageBonus = 4
 	OverchargeRecoil      = 3
 
-	// DefendingDamageMult scales incoming damage when the target picked the
-	// Defend action on their previous turn. Stacks multiplicatively with the
-	// defend timing quality, so a perfectly-blocked hit on a defending member
-	// is reduced even further.
+	// DefendingDamageMult scales incoming damage when the target Defended last
+	// turn. Stacks multiplicatively with defend timing quality.
 	DefendingDamageMult = float32(0.5)
 
-	// Attack accuracy curve. MeleeAccuracy / RangedAccuracy in types.go
-	// compute per-swing hit chance as:
-	//     AccuracyBaseline + AccuracyPerStat*stat + timingBonus
-	// then clamp to [0, 1]. The governing stat depends on the attack:
-	// MELEE accuracy is driven by STR, RANGED by DEX. timingBonus comes
-	// from timingGrades.AccuracyBonus below. With this pair, a STR-6
-	// Warrior melee-hits 0.79 on a Miss timing; a STR-2 caster hits 0.63.
+	// Attack accuracy curve: AccuracyBaseline + AccuracyPerStat*stat + timingBonus,
+	// clamped [0,1]. Governing stat is STR (melee) / DEX (ranged); timingBonus from
+	// timingGrades.AccuracyBonus.
 	AccuracyBaseline = 0.55
 	AccuracyPerStat  = 0.04
 
-	// FlyingMeleeAccuracyPenalty is subtracted from a basic attack's hit
-	// chance when the target is Flying and the wielder's weapon strikes in
-	// melee (not WeaponIsRanged). The scaffold for "bring a bow to fight
-	// bats" — a ranged weapon shrugs the penalty entirely. Applied to the
-	// post-clamp accuracy, so unlike the stat/timing curve it can pull even
-	// an Excellent press below a guaranteed hit: melee-vs-flyer is meant to
-	// be unreliable. Tunable; 0 disables the scaffold. Only the basic attack
-	// reads this (skills aren't accuracy-gated).
+	// FlyingMeleeAccuracyPenalty: subtracted from a basic MELEE attack's hit chance
+	// vs a Flying target (a ranged weapon shrugs it). Applied post-clamp, so it can
+	// pull even an Excellent press below a sure hit. 0 disables; skills aren't gated.
 	FlyingMeleeAccuracyPenalty = 0.30
 
-	// DodgeChance curve. A party member rolls a dodge against every
-	// incoming enemy basic attack: dodge succeeds → no damage, no status
-	// proc. DEX is the only driver, scaled linearly with a saturating
-	// cap so a future high-DEX rogue can't ever be untouchable.
-	// Warrior/Cleric/Wizard at DEX 2 dodge ~4%; Thief at DEX 6 dodges
-	// ~12%; cap kicks in at DEX 15.
+	// DodgeChance curve: DEX-driven, linear with a saturating cap (cap bites at DEX 15)
+	// so no one is ever untouchable. Dodge = no damage, no status proc.
 	DodgePerDEX = 0.02
 	DodgeCap    = 0.30
 
-	// Enemy basic-attack accuracy. An enemy melee swing rolls to-hit BEFORE the
-	// player's defend bar arms — a clean miss skips the input minigame entirely
-	// (there's nothing to defend). DEX-driven (read through EffectiveEnemyStats,
-	// so a future accuracy debuff like Blind lowers it), clamped to
-	// [Floor, Cap]: even a sharp foe occasionally whiffs, and a heavily-debuffed
-	// one still lands sometimes (never a soft-lock of a harmless enemy). Enemy
-	// SKILLS are NOT accuracy-gated — same rule as player skills. Tuned modest:
-	// DEX 3 ≈ 86%, DEX 6 ≈ 92%, so ~8–14% of swings whiff at typical stats.
+	// Enemy basic-attack accuracy: rolled BEFORE the player's defend bar arms (a
+	// miss skips the minigame). DEX-driven via EffectiveEnemyStats (so Blind etc.
+	// lowers it), clamped [Floor, Cap]. Enemy SKILLS are NOT gated.
 	EnemyAccuracyBaseline = 0.80
 	EnemyAccuracyPerDEX   = 0.02
 	EnemyAccuracyFloor    = 0.30
 	EnemyAccuracyCap      = 0.95
 
-	// EnemyDifficulty{Num,Den} is the GLOBAL "make foes harder" dial, expressed
-	// as a num/den rational so the scaling stays integer-exact (no float / math
-	// import): 7/5 = 1.4× the authored baseline. ScaleEnemyDifficulty applies it
-	// at three seams — spawn HP (NewEnemy), basic-attack damage (EnemyBasicDamage),
-	// and enemy spell/AoE damage (battle.enemySpellDamage) — so one edit retunes
-	// the whole roster's lethality without touching the per-kind authored numbers
-	// (or their init validators). Deliberately leaves accuracy / crit / XP / gold
-	// alone: foes hit HARDER and survive longer, but don't whiff less or pay more.
+	// EnemyDifficulty{Num,Den}: global "harder foes" dial as a rational (integer-exact,
+	// no float import). 7/5 = 1.4×. ScaleEnemyDifficulty applies it at three seams —
+	// spawn HP, basic-attack damage, enemy spell damage. Leaves accuracy/crit/XP/gold alone.
 	EnemyDifficultyNum = 7
 	EnemyDifficultyDen = 5
 
-	// ShopSellDivisor is the sell-back ratio: an item resells for its catalog
-	// Price / ShopSellDivisor (floored at 1 by ShopSellPrice). The economy's
-	// one sell-value lever, here with the other balance dials rather than
-	// inlined as a bare "/ 2" in economy.go.
+	// ShopSellDivisor: resale ratio (catalog Price / this, floored at 1 by ShopSellPrice).
 	ShopSellDivisor = 2
 
-	// Flee (combat menu, last row). Success ends the fight and retreats the
-	// party to the pre-combat tile; failure costs the actor's turn. Chance is
-	// driven by the party's average living level vs the pack's average living
-	// level: even-level ≈ BaseFleeChance, each level of advantage shifts it by
-	// FleePerLevelStep, clamped to [FleeFloor, FleeCap] so escape is never
-	// guaranteed and never impossible. So +3 levels over the pack ≈ 80%, −3
-	// under ≈ 20%.
+	// Flee chance: party avg living level vs pack's — even ≈ BaseFleeChance, each
+	// level of advantage shifts by FleePerLevelStep, clamped [FleeFloor, FleeCap].
 	BaseFleeChance   = 0.50
 	FleePerLevelStep = 0.10
 	FleeFloor        = 0.10
 	FleeCap          = 0.95
 
-	// DefaultEnemyLevel is the level every foe reads at when its definition
-	// doesn't author one (EnemyDefinition.Level == 0). Used by the flee math;
-	// no other system reads enemy level yet (no XP/scaling wiring).
+	// DefaultEnemyLevel: level a foe reads when its definition authors none.
+	// Used only by the flee math (no XP/scaling wiring yet).
 	DefaultEnemyLevel = 1
 
-	// Crit curve. Every connecting damage roll has a chance to crit;
-	// crits multiply the post-armor damage by CritMultiplier. Base
-	// chance + DEX scaling + a per-grade bonus pulled from
-	// timingGrades.CritBonus. CritPerDEX is intentionally LOW so timing
-	// (the player skill) is the dominant lever — DEX is a sweetener,
-	// not the main dial. Warrior (DEX 2) at Good ≈ 12%; Thief (DEX 6)
-	// at Excellent ≈ 36%. Doubling DEX from 2 → 4 lifts crit by ~2pp;
-	// chasing an Excellent press lifts it by ~20pp.
+	// Crit curve: CritBaseline + CritPerDEX*DEX + per-grade timingGrades.CritBonus,
+	// capped at CritCap; crit multiplies post-armor damage by CritMultiplier.
+	// CritPerDEX is LOW so timing is the dominant lever, DEX a sweetener.
 	CritBaseline   = 0.05
 	CritPerDEX     = 0.008
 	CritCap        = 0.6
 	CritMultiplier = 2
 
-	// TierDamageDoubler is the ×N a skill-tier "doubles damage" bonus applies
-	// (Backstab T2's crit stacker and Crushing Blow T3's Excellent doubler).
-	// Named so the two doubling sites in battle/actions.go don't each inline a
-	// bare 2; it stacks on top of CritMultiplier where both fire.
+	// TierDamageDoubler: the ×N a "doubles damage" skill tier applies (Backstab T2,
+	// Crushing Blow T3). Stacks on top of CritMultiplier where both fire.
 	TierDamageDoubler = 2
 
-	// Passive skill-tree tuning. The five passive nodes (GrantSkill==SkillNone)
-	// fold a per-RANK effect into combat rather than learning a castable skill;
-	// these dials set the per-rank magnitude. core/passives.go reads the node
-	// rank through PassiveRank; the battle pipeline applies the effect at the
-	// matching hook (crit roll, dodge, incoming-hit, single-target damage head,
-	// end-of-turn). All are shares of an existing figure so they scale with the
-	// rest of combat instead of needing their own balance pass.
-	//
-	// LuckyStrikeCritPerRank   — Thief Cutpurse: +crit chance per rank, added to
-	//   the DEX/timing curve and re-clamped at CritCap (3 ranks = +15pp, but the
-	//   cap still bites a high-DEX Thief on Excellent).
-	// BloodthirstHealPerRank   — Warrior Fury: heal this share of the physical
-	//   damage dealt across the whole turn, per rank (3 ranks = 30%).
-	// RetributionReflectPerRank— Cleric Conviction: reflect this share of the
-	//   damage TAKEN back at the attacker, per rank (3 ranks = 60%).
-	// ShadowStepBonusPerRank   — Thief Shadow Arts: +this share of a single-
-	//   target hit's damage per rank when striking before the target acts.
-	// RiposteDamageMult        — Warrior Battle Sense: a dodge counter deals this
-	//   share of the dodger's basic-attack damage (single-rank node, no ladder).
+	// Passive skill-tree per-rank magnitudes (GrantSkill==SkillNone nodes; applied
+	// at the matching battle hook). All are shares of an existing figure so they
+	// scale with combat:
+	//   LuckyStrikeCritPerRank    — Thief Cutpurse: +crit/rank (re-clamped at CritCap).
+	//   BloodthirstHealPerRank    — Warrior Fury: heal this share of phys damage dealt/turn.
+	//   RetributionReflectPerRank — Cleric Conviction: reflect this share of damage taken.
+	//   ShadowStepBonusPerRank    — Thief Shadow Arts: +single-target damage when striking first.
+	//   RiposteDamageMult         — Warrior Battle Sense: dodge counter damage (single rank).
 	LuckyStrikeCritPerRank    = 0.05
 	BloodthirstHealPerRank    = 0.10
 	RetributionReflectPerRank = 0.20
 	ShadowStepBonusPerRank    = 0.15
 	RiposteDamageMult         = 0.75
 
-	// StatusShortenDivisor controls how much WIS shaves off the rolled
-	// duration of an enemy-applied status (Sleep / Poison / Webbed /
-	// Confuse). Each StatusShortenDivisor points of WIS removes one
-	// turn from the roll. Floor is 1 — high WIS shortens but doesn't
-	// outright skip. Cleric (WIS 6) loses 2 turns; everyone else (WIS
-	// 1-2) loses nothing or one turn.
+	// StatusShortenDivisor: each this-many WIS shaves one turn off a rolled
+	// enemy-applied status duration. Floor 1 (shortens, never skips).
 	StatusShortenDivisor = 3
 
-	// ATBReadyThreshold is the readiness gate an actor must cross to
-	// take a turn under the tick-based scheduler. Each tick every alive
-	// actor's readiness gains its SPD; whoever crosses first acts (then
-	// keeps the overflow). Higher SPD → reaches the gate sooner AND
-	// more often. This is a continuous weight, not a per-round bonus —
-	// a SPD 6 actor takes ~2 turns for every 1 turn a SPD 3 actor
-	// takes, with the slots naturally interleaved by who hits the gate
-	// next instead of clumped at round boundaries.
+	// ATBReadyThreshold: readiness gate to take a turn. Each tick an alive actor's
+	// readiness gains its SPD; first to cross acts and keeps the overflow. Higher
+	// SPD = sooner and more often (continuous weight, not a per-round bonus).
 	ATBReadyThreshold = 100
 
-	// ATBQueueSlotMultiplier caps the per-round queue length at
-	// target × this multiplier — the runaway-fast actor safety net.
-	// With target = count of alive actors with SPD>0, a value of 4
-	// means a single 8× faster actor still can't act more than 4
-	// times per round and the slow actors all get their one turn.
-	// Sibling of ATBReadyThreshold so both ATB tuning knobs sit
-	// together.
+	// ATBQueueSlotMultiplier caps the per-round queue at target × this — the
+	// runaway-fast-actor safety net (slow actors still get their turn).
 	ATBQueueSlotMultiplier = 4
 
-	// WebbedSpeedDivisor is the factor a Webbed actor's effective SPD is
-	// divided by for the turn-queue sort — "you still act, but the world
-	// gets ahead of you." Untyped so it divides an int SPD cleanly
-	// (battle's actorSpeed: spd /= core.WebbedSpeedDivisor). Sits with the
-	// ATB tunables since it only bites in the readiness ordering.
+	// WebbedSpeedDivisor: a Webbed actor's effective SPD is divided by this for the
+	// turn-queue sort. Untyped so it divides an int SPD cleanly.
 	WebbedSpeedDivisor = 2
 
-	// BurnTickDamage is the per-turn damage applied to a burning actor at
-	// the start of their own turn. Flat so the strategic value of burn
-	// stays predictable across enemy HP scales.
+	// BurnTickDamage: per-turn damage to a burning actor at the START of its turn. Flat.
 	BurnTickDamage = 2
 
-	// PoisonTickDamage is the per-turn damage applied to a poisoned party
-	// member, ticked immediately AFTER their action resolves (vs. burn,
-	// which ticks at the start of the actor's turn). The "after the act"
-	// timing means the player still gets their action in, but bleeds out
-	// faster than they can heal it back without dedicated cleansing.
+	// PoisonTickDamage: per-turn damage to a poisoned member, ticked AFTER its
+	// action (vs Burn at the start) — the act lands but bleeds out faster than self-heal.
 	PoisonTickDamage = 1
 
-	// BleedTickDamage is the per-turn damage applied to a bleeding enemy at the
-	// END of its own turn (same cadence as Poison). Flat like Burn/Poison; set
-	// to 2 — a martial wound bites harder than the Diseased Rat's 1-per-turn
-	// poison, the trade-off being Bleed is player-applied only (Rend / Lacerate)
-	// and ticks on its OWN counter so it can run alongside Poison.
+	// BleedTickDamage: per-turn damage to a bleeding enemy at END of its turn.
+	// Player-applied only (Rend/Lacerate); own counter, so it runs alongside Poison.
 	BleedTickDamage = 2
 
-	// Status duration bounds. Every (Poison / Sleep / Stun / Webbed /
-	// Confuse / Burn) status rolls a uniform duration in
-	// [Min, Max] inclusive when it lands. Co-located so a balance
-	// pass touches one block — earlier passes had Poison here,
-	// Sleep + Stun in their own blocks lower in the file, and the
-	// new Webbed / Confuse in the roster-expansion section, which
-	// made "how long does X last?" a three-place search.
+	// Status duration bounds — each status rolls uniform in [Min, Max] inclusive.
+	// Co-located so a balance pass touches one block.
 	PoisonMinTurns = 3
 	PoisonMaxTurns = 5
 	SleepMinTurns  = 2
 	SleepMaxTurns  = 5
 	StunMinTurns   = 1
 	StunMaxTurns   = 2
-	// FrostLanceStunTurns is Frost Lance's fixed 1-turn freeze (min ==
-	// max, a hard lock rather than the variable StunMinTurns..MaxTurns
-	// window Crushing Blow rolls). Lives here with the other
-	// status-duration tunables; its proc gate (FrostLanceStunChance)
-	// stays with the other cast chances below.
+	// FrostLanceStunTurns: Frost Lance's fixed 1-turn freeze (min==max hard lock).
+	// Its proc gate (FrostLanceStunChance) is with the cast chances below.
 	FrostLanceStunTurns = 1
-	// StunTurnStep is one turn of stun — the unit a skill-tree tier grants
-	// (Smite T3's fresh stun) or extends a stun by (Frost Lance T3). Named so
-	// a tier's stun delta reads as "+1 turn" instead of a bare literal,
-	// matching how the base stun skills cite StunMinTurns / FrostLanceStunTurns.
+	// StunTurnStep: one turn of stun — the unit a skill tier grants/extends (Smite T3, Frost Lance T3).
 	StunTurnStep         = 1
 	SpiderWebbedMinTurns = 3
 	SpiderWebbedMaxTurns = 3
 	WispConfuseMinTurns  = 2
 	WispConfuseMaxTurns  = 2
-	// Bleed duration bounds — the Rend / Lacerate DoT (BleedTickDamage/turn on
-	// Enemy.BleedTurns). Rolls uniform in [Min, Max] like the others; the proc
-	// gates (RendBleedChance / LacerateBleedChance) live with the cast chances.
+	// Bleed duration bounds (Rend/Lacerate DoT on Enemy.BleedTurns); proc gates
+	// (Rend/LacerateBleedChance) are with the cast chances.
 	BleedMinTurns = 3
 	BleedMaxTurns = 4
-	// (Burn min/max travel on SkillEffect.Burn fields per skill —
-	// no global default since only the Wizard's Firebolt sets it
-	// today, and the registry value is the canonical source.)
+	// (Burn min/max travel on SkillEffect.Burn per skill — no global default; only Firebolt sets it.)
 
-	// Skill / enemy proc chances. Lifted out of the per-entry registry
-	// literals (party.go skillDefinitions, enemies.go enemyDefinitions) so
-	// a balance pass touches one file. The registry still owns the
-	// per-entry binding; these constants are the values it cites.
+	// Skill / enemy proc chances — lifted out of the registry literals so a balance
+	// pass touches one file. The registry still owns the per-entry binding.
 	StealBaseChance          = 0.40 // Thief: Steal base success before timing-quality scaling.
 	FireboltBurnChance       = 0.45 // Wizard: Firebolt burn inflict before quality scaling.
 	DiseasedRatPoisonChance  = 0.60 // Diseased Rat: per-bite poison inflict.
@@ -640,102 +397,66 @@ const (
 	NecromancerCastChance    = 0.55 // Necromancer: combined roll into Raise / Firebolt vs incant-melee.
 	NecromancerRaiseLimit    = 2    // Necromancer: hard cap on RaiseBones casts per battle.
 
-	// Guaranteed-apply gates. These read 1.0 today, but they go through a
-	// named seam for the same reason FrostLanceStunChance does — so a future
-	// "resist" stat can plug in at one place, and so the registry rows cite a
-	// const like every sibling chance instead of a bare literal.
-	MantrapIngestCastChance = 1.0 // Venus Mantrap: always attempts its Ingest when it casts (capped to one prey by MantrapHasPrey).
-	WebBindChance           = 1.0 // Cave Spider: Web always lands its bind once cast (the per-turn cast gate is SpiderWebCastChance).
-	WispConfuseApplyChance  = 1.0 // Wisp: Confuse always lands its disorient once cast (the per-turn cast gate is WispConfuseCastChance).
+	// Guaranteed-apply gates: read 1.0 today but go through a named seam so a
+	// future "resist" stat can plug in at one place.
+	MantrapIngestCastChance = 1.0 // Venus Mantrap: always attempts Ingest when it casts (one prey, MantrapHasPrey).
+	WebBindChance           = 1.0 // Cave Spider: Web always binds once cast (cast gate is SpiderWebCastChance).
+	WispConfuseApplyChance  = 1.0 // Wisp: Confuse always lands once cast (cast gate is WispConfuseCastChance).
 
-	// Day/night cycle tuning. Six phases of StepsPerPhase player tile-steps
-	// make up one full loop (StepsPerCycle). Only landed exploration steps
-	// advance the cycle (battles don't tick it), so combat preserves the
-	// phase the player walked into.
+	// Day/night cycle: TimeOfDayCount phases of StepsPerPhase steps per loop.
+	// Only landed exploration steps advance it (battles preserve the phase).
 	StepsPerPhase = 25
 	StepsPerCycle = StepsPerPhase * TimeOfDayCount
 
-	// CrystalRechargeSteps is how many landed exploration steps a dormant
-	// healing crystal needs to re-arm (Charge climbs 1/step to this ceiling).
-	// ~2.4 day-phases of walking — long enough that the heal+autosave is a
-	// deliberate resource, not a free fountain you camp on.
+	// CrystalRechargeSteps: landed steps a dormant healing crystal needs to re-arm
+	// (Charge climbs 1/step). Long enough that the heal+autosave is a deliberate resource.
 	CrystalRechargeSteps = 60
 
-	// OutdoorCeilingThreshold is the ceiling-coverage fraction above which
-	// an area counts as an enclosed interior (roofed, no sky) rather than
-	// outdoor. One definition of "has a roof" shared by the spooky-dungeon
-	// lighting override (render) and the rain gate (core.AreaIsOutdoor) so
-	// the two can't drift. A field or roofless forest scores near 0; a real
-	// dungeon roofs most of its tiles.
+	// OutdoorCeilingThreshold: ceiling-coverage fraction above which an area counts
+	// as roofed interior (no sky). Shared by the dungeon lighting override and the
+	// rain gate (core.AreaIsOutdoor) so they can't drift.
 	OutdoorCeilingThreshold = 0.30
 
-	// Ambient rain (outdoor weather) tuning — purely atmospheric, see
-	// core/weather.go. A bluegray wash eases in and darkens the open-sky
-	// view, then rain falls for a spell before lifting. The state machine
-	// advances on landed player steps (trigger roll / downpour length /
-	// cooldown); the tint Intensity eases per frame so it fades rather than
-	// snaps. Rain only happens outdoors and never indoors.
-	//
-	// Durations are framed against the day/night cycle (StepsPerCycle = 150
-	// steps = one full day, StepsPerPhase = 25): a storm is short — under a
-	// phase to a couple phases — and the cooldown spans roughly half a day to
-	// ~1.2 days so rain is a recurring event without being constant.
-	RainStartChance          = 0.012 // per outdoor step (once off cooldown): chance a storm begins
-	RainMinSteps             = 18    // shortest downpour, in player steps (~0.7 phases)
-	RainMaxSteps             = 50    // longest downpour, in player steps (~2 phases)
-	RainCooldownMin          = 70    // min clear steps after a storm (~half a day) before rain may roll again
-	RainCooldownMax          = 180   // max of that random cooldown span (~1.2 days)
-	WeatherRampSpeed         = 0.40  // Intensity (0..1) eased per second — full tint ramp ≈ 2.5s
-	WeatherRainStartLevel    = 0.85  // Intensity the darkening must reach before the rain actually falls
+	// Ambient rain tuning (outdoor only, atmospheric — see core/weather.go). State
+	// machine advances on landed steps; tint Intensity eases per frame.
+	RainStartChance          = 0.012 // per outdoor step off cooldown: chance a storm begins
+	RainMinSteps             = 18    // shortest downpour, in player steps
+	RainMaxSteps             = 50    // longest downpour, in player steps
+	RainCooldownMin          = 70    // min clear steps after a storm before rain may roll again
+	RainCooldownMax          = 180   // max of that random cooldown span
+	WeatherRampSpeed         = 0.40  // Intensity (0..1) eased per second — full ramp ≈ 2.5s
+	WeatherRainStartLevel    = 0.85  // Intensity the darkening must reach before rain falls
 	WeatherIntensityNearZero = 0.01  // Intensity at/below which a Clearing storm snaps to Clear
 
-	// Lightning (heavy storms only). A bolt blanks the world view bright
-	// for a blink, then the flash decays; bolts are scheduled at random
-	// gaps (one RNG draw per bolt, never per frame). All in seconds.
+	// Lightning (heavy storms only). Bolts scheduled at random gaps (one RNG draw
+	// per bolt). All in seconds.
 	LightningIntervalMin = 4.0  // shortest gap between bolts
 	LightningIntervalMax = 13.0 // longest gap between bolts
 	LightningDecayPerSec = 3.6  // flash brightness lost per second (≈0.28s blink)
 
-	// ActionLogMaxLines caps the rolling action log buffer so a long fight
-	// doesn't grow it unbounded. The renderer reads len(Log) to draw the
-	// last-N visible lines; this cap is the ceiling for any scrollback
-	// feature that might land later.
+	// ActionLogMaxLines caps the rolling action log buffer.
 	ActionLogMaxLines = 40
 
-	// MaxMapDimension caps editor map width/height. Used by both the typed
-	// numeric input and the +/- resize buttons so they share one ceiling.
+	// MaxMapDimension caps editor map width/height (shared by typed input + resize buttons).
 	MaxMapDimension = 200
 
-	// MinMapDimension is the smallest playable map. Border walls take 2
-	// cells in each axis; 4×4 leaves a 2×2 interior — the tightest you
-	// can put a player start and one pack on without overlap.
+	// MinMapDimension: smallest playable map. Border walls take 2 cells/axis; 4×4
+	// leaves a 2×2 interior — the tightest fitting a player start + one pack.
 	MinMapDimension = 4
-	// DefaultNewMapDimension is the seed width / height the editor's
-	// "New" modal arms with. Shared so the title-screen editor.New()
-	// path and the in-editor New modal can't drift apart on what a
-	// "fresh map" looks like.
+	// DefaultNewMapDimension: seed width/height for the editor's New modal (shared
+	// by editor.New() and the in-editor modal).
 	DefaultNewMapDimension = 16
 
-	// LevelUpApplyRowIndex is the cursor slot of the "Apply changes"
-	// row in the level-up modal — sits one past the last stat row
-	// (StatSTR..StatSPD). LevelUpRowCount is the total row count
-	// (StatCount stat rows + 1 Apply row). Owned by core so the input
-	// handler in explore/levelup.go and the renderer in
-	// render/levelup.go share one truth; the modal's "row 6 is Apply"
-	// rule used to live as a private constant in explore and a magic
-	// `int(core.StatCount)` literal in render, which drifted twice
-	// during the skill-point row's removal.
+	// LevelUpApplyRowIndex: cursor slot of the "Apply changes" row (one past the
+	// last stat row). LevelUpRowCount = StatCount stat rows + 1. Shared by explore
+	// input and render so the row index can't drift.
 	LevelUpApplyRowIndex = int(StatCount)
 	LevelUpRowCount      = int(StatCount) + 1
 )
 
-// PressWindow groups the press-bar window geometry. Values are fractions
-// of the bar's duration. At construction time the window's position is
-// randomized within [Min, Max] so two consecutive bars don't land in the
-// same place — but it never starts before Min so the player can't get hit
-// with a window that opens immediately. Width is fixed; MaxEnd clamps the
-// tail so a window can't run into the last sliver of the bar (slides back
-// to fit, see NewTimingState).
+// PressWindow: press-bar window geometry, as fractions of the bar duration.
+// Start is randomized in [MinStart, MaxStart] (never before MinStart). Width is
+// fixed; MaxEnd clamps the tail (slides back to fit, see NewTimingState).
 var PressWindow = struct {
 	MinStart float32
 	MaxStart float32
@@ -748,15 +469,10 @@ var PressWindow = struct {
 	MaxEnd:   0.96,
 }
 
-// MultiPressWindow is the per-fraction geometry config for tally-mode
-// press bars (Swipe today, future N-hit skills). Layout is
-// derived from the hit count rather than a fixed zone block:
-// LeadInFrac is where the first window opens, WindowWidthFrac is
-// each accept zone's width, CommitZoneFrac is the late "press
-// here to end" tail. NewMultiPressState reads these values and
-// distributes `count` windows evenly across the gap between the
-// lead-in and the commit zone. Sibling of PressWindow above so a
-// balance pass on either bar lands in one file.
+// MultiPressWindow: per-fraction geometry for tally-mode press bars. Layout is
+// derived from the hit count: LeadInFrac (first window), WindowWidthFrac (each
+// accept zone), CommitZoneFrac (late commit tail). NewMultiPressState distributes
+// `count` windows evenly between the lead-in and the commit zone.
 var MultiPressWindow = struct {
 	LeadInFrac      float32
 	WindowWidthFrac float32
@@ -767,34 +483,15 @@ var MultiPressWindow = struct {
 	CommitZoneFrac:  0.15,
 }
 
-// SwipeHitFracs are the two hand-placed tally-window centers for
-// Swipe's press bar (fractions of the bar duration): one around the
-// middle and one just before the commit tail — a "wind up, then the
-// big swing" rhythm rather than two evenly-spread beats. Passed to
-// core.NewTallyStateAtCenters; kept here beside MultiPressWindow so a
-// Swipe-feel balance pass lands in one file.
+// SwipeHitFracs: Swipe's two hand-placed tally-window centers (bar fractions) —
+// a "wind up, then big swing" rhythm. Passed to core.NewTallyStateAtCenters.
 var SwipeHitFracs = []float32{0.5, 0.78}
 
-// timingGrades is the single per-grade attribute table for the timed-hit
-// minigame. Every core-side function that varies by TimingQuality reads
-// from this slice — Label, attack/defense multipliers, and the
-// accuracy-roll bonus all live in one row per grade so a balance pass
-// touches one place instead of four parallel switches.
-//
-// Render-side (color, throb intensity) and battle-side (audio cue) attrs
-// live in their own per-package tables (qualityVisuals in render/timing.go,
-// gradeSounds in battle/battle.go) — package layering keeps audio out of
-// core and rl.Color out of core, so we get one table per layer.
-//
-// Defense multipliers are <1 (lower incoming damage); attack multipliers
-// are >=1 (higher outgoing damage); the accuracy bonus is added to the
-// stat-driven baseline and clamped at 1.0 (see MeleeAccuracy / RangedAccuracy).
-// The HitStop / ShakePeak / ShakeDur columns are the per-grade IMPACT knobs
-// HitStopFor / CombatShakeFor read — only Great / Excellent earn a freeze +
-// camera punch (Miss/Nice/Good leave them zero so the action just flows). They
-// moved into this table from two parallel switches so adding a grade tier is
-// one row, not three edits. The named constants below stay the source values
-// so the impact tuning still reads in one block.
+// timingGrades is the single per-grade attribute table for the timed-hit minigame
+// (Label, atk/def multipliers, accuracy & crit bonuses, impact knobs). Render
+// (color/throb) and battle (audio) keep their own tables for package layering.
+// Def < 1 (less incoming), Atk >= 1 (more outgoing); AccuracyBonus is added then
+// clamped at 1.0. Only Great/Excellent get a non-zero HitStop/ShakePeak/ShakeDur.
 var timingGrades = []struct {
 	Label         string
 	Atk           float32
@@ -812,20 +509,15 @@ var timingGrades = []struct {
 	TimingQualityExcellent: {Label: "Excellent!", Atk: 2.0, Def: 0.25, AccuracyBonus: 0.45, CritBonus: 0.25, HitStop: HitStopExcellent, ShakePeak: CombatShakeExcellentPeak, ShakeDur: CombatShakeExcellentDur},
 }
 
-// init asserts timingGrades covers every TimingQualityXxx grade. The
-// other two parallel tables (qualityVisuals in render, gradeSounds in
-// battle) carry their own length-check inits against TimingQualityCount.
-// Adding a new grade is now: extend the iota in timing.go, add a row
-// here, add a row in qualityVisuals, add a row in gradeSounds — any
-// one missing panics at startup.
+// init asserts timingGrades covers every grade (qualityVisuals + gradeSounds
+// carry their own length-check inits).
 func init() {
 	if len(timingGrades) != int(TimingQualityCount) {
 		panic("core: timingGrades length must match TimingQualityCount — add a row when extending the grade enum")
 	}
 }
 
-// SkillID identifies a learned skill. Stored on Battle.PendingSkill and
-// used as the map key for action handlers.
+// SkillID identifies a learned skill (Battle.PendingSkill; action-handler map key).
 type SkillID int
 
 const (
@@ -834,199 +526,109 @@ const (
 	SkillPrayer
 	SkillSteal
 	SkillFirebolt
-	// The rest of the player-castable skills, grouped by class. There is
-	// no fixed per-class loadout: a member learns skills by ranking up
-	// tree nodes (GrantSkill in core/skilltrees.go) and the battle Skill
-	// menu cycles whatever they've learned. See skillDefinitions for
-	// handler-shaping notes and skillActionHandlers for the setup/apply
-	// registrations.
+	// Player-castable skills, grouped by class. No fixed per-class loadout: members
+	// learn skills by ranking tree nodes (GrantSkill, core/skilltrees.go). See
+	// skillDefinitions for handler notes. NOTE: all entries below SkillArcBolt are
+	// APPENDED in serialization order — SkillID is a saved-map key (SkillTiers), so
+	// a mid-enum insert renumbers later skills (same contract as ItemKind/EnemyKind).
 	//
-	// Warrior: Crushing Blow (charge phys, stun proc), Whirlwind
-	// (charge AoE phys).
+	// Warrior: Crushing Blow (charge phys, stun proc), Whirlwind (charge AoE phys).
 	SkillCrushingBlow
 	SkillWhirlwind
 	// Cleric: Mass Mend (charge AoE heal), Smite (press magic damage).
 	SkillMassMend
 	SkillSmite
-	// Thief: Backstab (charge phys, double damage on Excellent),
-	// Venom Strike (sequence phys + Poison apply).
+	// Thief: Backstab (charge phys, double on Excellent), Venom Strike (sequence phys + Poison).
 	SkillBackstab
 	SkillVenomStrike
-	// Wizard: Frost Lance (charge magic, stun on Great+), Arc Bolt
-	// (sequence multi-target magic).
+	// Wizard: Frost Lance (charge magic, stun on Great+), Arc Bolt (sequence multi-target magic).
 	SkillFrostLance
 	SkillArcBolt
-	// SkillSleep is the goblin-mage's status-inflict cast — single
-	// target, puts a party member to sleep for SleepMin..SleepMaxTurns.
-	// Wakes on any incoming damage. Tagged Magic so it bypasses armor.
+	// SkillSleep (Goblin Mage): single-target sleep for SleepMin..MaxTurns; wakes on
+	// any damage. Magic (bypasses armor).
 	SkillSleep
-	// SkillIngest is the Venus Mantrap's signature swallow — single
-	// target, removes the party member from combat (skipped in the turn
-	// queue, untargetable by friend or foe) until the mantrap that
-	// swallowed them is defeated. Each mantrap holds at most one
-	// prisoner; a mantrap with prey can still bite-attack but won't
-	// ingest a second target. Tagged Magic so the cast itself bypasses
-	// armor (it doesn't deal damage anyway).
+	// SkillIngest (Venus Mantrap): swallows one target out of combat until the
+	// mantrap dies; one prey per mantrap. Magic.
 	SkillIngest
-	// SkillWeb is the Cave Spider's tempo-control cast — applies the
-	// Webbed status (half-SPD, can't be ingested while webbed) for
-	// SpiderWebbedTurns turns. Tagged Magic so the apply bypasses
-	// armor; no damage component.
+	// SkillWeb (Cave Spider): Webbed (half-SPD, can't be ingested) for SpiderWebbedTurns. Magic, no damage.
 	SkillWeb
-	// SkillConfuse is the Will-o'-Wisp's status cast — applies the
-	// Confused status (a 50/50 retarget roll on the afflicted
-	// member's next two turns, friend or foe at random). Tagged
-	// Magic, no damage component, WIS-resistible at apply time.
+	// SkillConfuse (Will-o'-Wisp): Confused (50/50 retarget over the next two turns).
+	// Magic, no damage, WIS-resistible.
 	SkillConfuse
-	// SkillStoneslam is the Stone Golem's AoE phys cast — hits every
-	// living party member for STR + SpellPower scaled by quality.
-	// Phys-tagged so the player's Armor / Defending applies; the
-	// Wizard takes the full slap, the Warrior eats it well.
+	// SkillStoneslam (Stone Golem): AoE phys to every member (STR+SpellPower);
+	// Phys-tagged so Armor/Defending applies.
 	SkillStoneslam
-	// SkillRaiseBones is the Necromancer's signature add-summon —
-	// inserts one Skeleton into the active pack mid-battle. Capped
-	// per battle via the skill definition's PerBattleCastLimit field
-	// (not a per-cast counter on the enemy). Tagged Magic; no
-	// targeting (the summon lands in the necromancer's own pack).
+	// SkillRaiseBones (Necromancer): summons a Skeleton into the active pack;
+	// capped via PerBattleCastLimit. Magic, no targeting.
 	SkillRaiseBones
-	// SkillScan is the party-side inspect/scout cast — single enemy
-	// target, deals no damage and applies no status. A successful cast
-	// marks the target's KIND scanned in the persistent bestiary
-	// (g.Bestiary.MarkScanned), which identifies the kind: the battle
-	// roster and the journal's Bestiary tab then reveal its exact HP
-	// (otherwise health shows only as the qualitative wound-state
-	// word). Knowledge is kind-level, not per-instance, and survives
-	// the battle. Appended at the END of the
-	// enum: SkillID is a map key in saved SkillTiers, so a mid-enum
-	// insert would renumber later skills (same contract as ItemKind).
+	// SkillScan: single enemy, no damage/status — marks the KIND scanned in the
+	// persistent bestiary (reveals exact HP). Kind-level, survives the battle.
 	SkillScan
-	// SkillBless is the Cleric's party-wide stat buff (the Conviction tree's
-	// "Blessing" root). No damage, no target pick — it stamps a temporary
-	// STR/DEX/INT/WIS boost on every living member for BlessBuffTurns of their
-	// turns. Tagged Buff (the first SkillTagBuff user). Player-castable;
-	// appended at the END of the enum for the same saved-map-key reason as
-	// SkillScan above.
+	// SkillBless (Cleric, Conviction): party-wide temporary STR/DEX/INT/WIS boost
+	// for BlessBuffTurns. First SkillTagBuff user.
 	SkillBless
-	// SkillFireball is the Wizard's AoE fire (Pyromancy tree's "Fireball" node,
-	// learned after Firebolt). INT-scaled magic damage to EVERY living enemy
-	// plus a per-target Burn roll — the pack-clearing counterpart to Firebolt's
-	// single bolt. Appended at the END of the enum (saved-map-key contract).
+	// SkillFireball (Wizard, Pyromancy): INT-scaled magic to every enemy + per-target
+	// Burn roll — pack counterpart to Firebolt.
 	SkillFireball
-	// SkillPoisonCloud is the Thief's AoE toxin (Venomancy tree's "Poison Cloud"
-	// node, learned after Venom Strike). Light STR-scaled damage to every living
-	// enemy plus a per-target Poison roll — turns the single-target DoT into a
-	// whole-pack one. Appended at the END (saved-map-key contract).
+	// SkillPoisonCloud (Thief, Venomancy): light STR-scaled damage to every enemy +
+	// per-target Poison — pack counterpart to Venom Strike.
 	SkillPoisonCloud
-	// SkillCleanse is the Cleric's status cure (Mercy tree's "Cleanse" node,
-	// learned after Prayer). Single ally target, no damage: clears the curable
-	// combat debuffs (Poison/Sleep/Stun/Webbed/Confused) via core.CureDebuffs,
-	// leaving the Bless buff and Defending intact. NoUpgrades (single rank, like
-	// Scan). Appended at the END (saved-map-key contract).
+	// SkillCleanse (Cleric, Mercy): clears curable debuffs (Poison/Sleep/Stun/Webbed/
+	// Confused) via CureDebuffs, leaving Bless + Defending. NoUpgrades.
 	SkillCleanse
-	// SkillSecondWind is the Warrior's self-heal (Ancestral Call tree's "Second
-	// Wind" root). No target pick — heals the caster a flat amount (Utility
-	// kind, so the Warrior's dump WIS doesn't gate it). The Warrior's only
-	// heal; battle-only. Appended at the END (saved-map-key contract).
+	// SkillSecondWind (Warrior, Ancestral Call): flat self-heal, Utility-kind (not
+	// WIS-gated). The Warrior's only heal; battle-only.
 	SkillSecondWind
-	// SkillRenewal is the Cleric's heal-over-time (Mercy tree's "Renewal" node,
-	// learned after Prayer). Single ally target: it stamps a regen (RegenTurns
-	// / RegenPerTurn) that ticks healing at the end of the ally's turns. The
-	// game's first HoT. Appended at the END (saved-map-key contract).
+	// SkillRenewal (Cleric, Mercy): stamps a regen (RegenTurns/RegenPerTurn) ticking
+	// at the ally's end-of-turn. The first HoT.
 	SkillRenewal
-	// SkillCripple is the Thief's SPD debuff (Subterfuge tree's "Cripple" node) —
-	// the FIRST enemy-side debuff. Single enemy target, no damage: it stamps a
-	// negative SPD onto the target's BuffStats/BuffTurns (the enemy-side mirror of
-	// the party buff fields), folded by EffectiveEnemyStats so the foe's ATB
-	// turn-rate drops while the counter runs. Appended at the END (saved-map-key
-	// contract).
+	// SkillCripple (Thief, Subterfuge): FIRST enemy-side debuff — negative SPD on the
+	// enemy BuffStats/BuffTurns mirror (folded by EffectiveEnemyStats), no damage.
 	SkillCripple
-	// SkillFrostbite is the Wizard's chilling frost (Cryomancy tree's "Frostbite"
-	// node, learned after Frost Lance). INT-scaled magic damage that ALWAYS
-	// chills — it stamps the same SPD debuff as Cripple (the enemy BuffStats
-	// mirror) on a surviving target, so it's the "damage + debuff" counterpart to
-	// Cripple's pure-utility slow. Appended at the END (saved-map-key contract).
+	// SkillFrostbite (Wizard, Cryomancy): INT-scaled magic that ALWAYS chills (same
+	// SPD debuff as Cripple) — the "damage + debuff" counterpart.
 	SkillFrostbite
-	// SkillCorrosiveVial is the Thief's armor break (Subterfuge tree's "Corrosive
-	// Vial" node). Single enemy target, no damage: it strips the target's
-	// per-instance Armor (floored at 0) for the rest of the battle so every
-	// subsequent phys hit lands harder. A permanent break, not a turn-counted
-	// status — it mutates Enemy.Armor directly. Appended at the END
-	// (saved-map-key contract).
+	// SkillCorrosiveVial (Thief, Subterfuge): strips the target's Armor (floored 0)
+	// for the battle by mutating Enemy.Armor — permanent, not turn-counted.
 	SkillCorrosiveVial
-	// SkillConeOfCold is the Wizard's AoE chill (Cryomancy tree's "Cone of Cold"
-	// node, learned after Frostbite). INT-scaled frost damage to EVERY living
-	// enemy plus a guaranteed per-target SPD chill — the pack-wide counterpart to
-	// Frostbite's single bolt, routed through applyAoEStatusSkill. Appended at the
-	// END (saved-map-key contract).
+	// SkillConeOfCold (Wizard, Cryomancy): INT-scaled frost to every enemy + guaranteed
+	// per-target chill — pack counterpart to Frostbite, via applyAoEStatusSkill.
 	SkillConeOfCold
-	// SkillSunder is the Warrior's tempo strike (Battle Sense tree's "Sunder"
-	// node). A STR-scaled phys hit that ALSO shoves the target's ATB readiness
-	// back (effect.ATBPush) so its next turn comes later — the offensive
-	// counterpart to the Thief's Cripple, delivered with damage. Appended at the
-	// END (saved-map-key contract).
+	// SkillSunder (Warrior, Battle Sense): STR-scaled phys that also shoves the target's
+	// ATB readiness back (effect.ATBPush) — the offensive Cripple.
 	SkillSunder
-	// SkillTaunt is the Warrior's aggro pull (Battle Sense tree's "Taunt" node).
-	// Single enemy target, no damage: it forces that enemy to attack the casting
-	// Warrior on its next turn (Enemy.TauntedBy / TauntTurns, honored by
-	// pickEnemyAttackTarget). A single-rank utility (NoUpgrades, like Scan).
-	// Appended at the END (saved-map-key contract).
+	// SkillTaunt (Warrior, Battle Sense): forces the enemy to attack the caster next
+	// turn (Enemy.TauntedBy/TauntTurns). Single-rank utility.
 	SkillTaunt
-	// SkillWarBanner is the Warrior's rally (Ancestral Call tree's "War Banner"
-	// node). No target — it stamps a party-wide STR/VIT-flavored stat buff (the
-	// martial counterpart to the Cleric's Bless), using the shared party buff
-	// bundle (BuffStats/BuffTurns). Appended at the END (saved-map-key contract).
+	// SkillWarBanner (Warrior, Ancestral Call): party-wide STR + Armor buff via the
+	// shared party buff bundle — martial mirror of Bless.
 	SkillWarBanner
-	// SkillStoneSkin is the Warrior's ward (Ancestral Call tree's "Stone Skin"
-	// node). Single ally target, no damage: it grants temporary Armor + MDef via
-	// the party buff bundle's BuffArmor/BuffMDef fields (folded by
-	// EffectiveArmor/EffectiveMDef while BuffTurns runs). Appended at the END
-	// (saved-map-key contract).
+	// SkillStoneSkin (Warrior, Ancestral Call): temporary Armor + MDef on one ally via
+	// the buff bundle (BuffArmor/BuffMDef).
 	SkillStoneSkin
-	// SkillBlind is the Cleric's accuracy debuff (Radiance tree's "Blind" node).
-	// Single enemy target, no damage: it saps the foe's DEX (the stat
-	// EnemyHitChance reads) via the enemy BuffStats debuff mirror, so the blinded
-	// enemy whiffs more often. The DEX-flavored sibling of the Thief's Cripple.
-	// Appended at the END (saved-map-key contract).
+	// SkillBlind (Cleric, Radiance): saps the enemy's DEX (the stat EnemyHitChance
+	// reads) via the BuffStats mirror — the DEX sibling of Cripple.
 	SkillBlind
-	// SkillAegis is the Cleric's shield (Conviction tree's "Aegis" node). Single
-	// ally target, no damage: it grants a damage-absorbing shield (PartyMember
-	// .ShieldHP) that soaks incoming hits before HP until depleted or the battle
-	// ends. Appended at the END (saved-map-key contract).
+	// SkillAegis (Cleric, Conviction): damage-absorbing shield (PartyMember.ShieldHP)
+	// that soaks hits before HP until spent or battle end.
 	SkillAegis
-	// SkillSmokeBomb is the Thief's screen (Shadow Arts tree's "Smoke Bomb" node).
-	// No target — it buffs the whole party's DEX (evasion) AND saps every living
-	// enemy's DEX (accuracy) by the same magnitude for a short duration: one
-	// symmetric BuffStats.DEX value drives both sides. Appended at the END
-	// (saved-map-key contract).
+	// SkillSmokeBomb (Thief, Shadow Arts): one symmetric DEX magnitude — +DEX party
+	// (evasion), -DEX every enemy (accuracy).
 	SkillSmokeBomb
-	// SkillIceArmor is the Wizard's frost ward (Cryomancy tree's "Ice Armor"
-	// node). Self-buff, no target: while it lasts (PartyMember.IceArmorTurns) the
-	// caster gains MDef AND chills any enemy that lands a basic attack on them
-	// (the reactive counterpart to Frostbite's chill). Appended at the END
-	// (saved-map-key contract).
+	// SkillIceArmor (Wizard, Cryomancy): self-buff (PartyMember.IceArmorTurns) granting
+	// MDef + chilling any enemy that basic-attacks the caster.
 	SkillIceArmor
-	// SkillRend is the Warrior's bleed strike (Fury tree's "Rend" node). A
-	// STR-scaled phys hit that applies Bleed — the game's third damage-over-time
-	// (after Burn and Poison), a flat-tick DoT on its own Enemy.BleedTurns
-	// counter so it STACKS alongside Poison. Appended at the END (saved-map-key
-	// contract).
+	// SkillRend (Warrior, Fury): STR-scaled phys applying Bleed — the third DoT, on its
+	// own Enemy.BleedTurns counter so it stacks with Poison.
 	SkillRend
-	// SkillLacerate is the Thief's bleed strike (Venomancy tree's "Lacerate"
-	// node). The same Bleed DoT as Rend, flavored as a toxin-tree cut that
-	// deliberately stacks alongside the tree's Poison (separate counters).
-	// Appended at the END (saved-map-key contract).
+	// SkillLacerate (Thief, Venomancy): same Bleed DoT as Rend, flavored to stack with
+	// the tree's Poison (separate counters).
 	SkillLacerate
 )
 
-// init pins every SkillID's serialized integer value. SkillID is a map key in
-// saved data (PartyMember.SkillTiers map[SkillID]int), so inserting a skill
-// mid-enum renumbers every later skill and silently misattributes purchased
-// tiers to the wrong skill on load (sanitizeLoadedParty only prunes keys whose
-// skillInfo lookup fails — a renumbered-but-still-valid key passes through and
-// applies to the wrong skill). These explicit literals are the on-disk
-// contract: a mid-enum insert trips this panic at startup instead of corrupting
-// saves silently. APPENDING a new skill at the end is the only safe edit — add
-// it above, then one pinned line here. (Same contract as ItemKind/EnemyKind.)
+// init pins every SkillID's serialized value (SkillTiers is a saved map[SkillID]int).
+// A mid-enum insert renumbers later skills and silently misattributes saved tiers;
+// this panics at startup instead. APPEND only, then add one pinned line here.
 func init() {
 	pinned := [...]struct {
 		id  SkillID
@@ -1053,11 +655,9 @@ func init() {
 	}
 }
 
-// SkillTag classifies a skill for damage-type interactions (armor,
-// future elemental resists) and for HUD color-coding. Phys damage
-// clips against the target's Armor; Magic / Heal / Buff bypass it.
-// Independent of SkillKind: Kind controls the stat-scaling formula
-// (STR vs INT vs WIS), Tag controls the defensive interaction.
+// SkillTag classifies a skill for damage-type interaction + HUD color. Phys clips
+// against Armor; Magic/Heal/Buff bypass it. Independent of SkillKind (Kind = stat
+// scaling, Tag = defensive interaction).
 type SkillTag int
 
 const (
@@ -1068,270 +668,153 @@ const (
 	SkillTagBuff
 )
 
-// Stun-related cast chances. The Sleep/Stun duration constants moved
-// up to the "Status duration bounds" block earlier in this file so
-// every status-duration tunable sits together; only the proc-chance
-// gates remain here. Stun is the "skip your next turn" status:
-// unlike Sleep, it does NOT clear on incoming damage — the target
-// is locked for the full rolled duration. Tuned short (1–2 turns)
-// because it's strictly upside for the player; the proc gate
-// (quality) controls frequency, not the duration.
+// Proc-chance gates for status/DoT skills. (Durations live in the "Status duration
+// bounds" block.) Stun does NOT clear on damage (unlike Sleep).
 const (
-	// CrushingBlowStunChance gates the Warrior's signature heavy hit.
-	// Tuned high because the cost (3 MP) and damage (+4 base) are both
-	// aggressive — a Great-or-better landing should reliably lock the
-	// target down.
+	// CrushingBlowStunChance: Warrior's heavy hit. High — its MP/damage cost is aggressive.
 	CrushingBlowStunChance = 0.50
-	// FrostLanceStunChance gates the Wizard's freeze. ALWAYS lands on
-	// Great/Excellent (1.0 base) but the apply handler still goes
-	// through the same probability seam so a future "magic resist"
-	// stat can plug in at one place. (Its fixed duration,
-	// FrostLanceStunTurns, lives in the "Status duration bounds" block.)
+	// FrostLanceStunChance: Wizard freeze, always lands on Great/Excellent, but
+	// still routes through this seam for a future magic-resist stat.
 	FrostLanceStunChance = 1.0
-	// VenomStrikePoisonChance gates the Thief's Poison apply. Tuned
-	// high so a clean sequence reliably lands the DoT; a Miss timing
-	// scales it down through the standard TimingBonusMult curve.
+	// VenomStrikePoisonChance: Thief Poison apply (Miss timing scales it via TimingBonusMult).
 	VenomStrikePoisonChance = 0.75
-	// FireballBurnChance gates the Wizard AoE fire's per-target Burn roll.
-	// Lower than the single-target FireboltBurnChance — Fireball hits the whole
-	// pack, so a more modest per-target chance keeps "burn the entire room"
-	// from being a guaranteed every-cast outcome.
+	// FireballBurnChance: per-target Burn for the AoE; lower than single-target FireboltBurnChance.
 	FireballBurnChance = 0.30
-	// FireBurnMinTurns / FireBurnMaxTurns are the Burn duration bounds shared by
-	// the Wizard's fire skills (Firebolt + Fireball). Named here now that two
-	// skills set the same 2–3, instead of inlining the literals at each
-	// registry row (the poison side already centralizes via PoisonMin/MaxTurns).
+	// FireBurnMin/MaxTurns: Burn duration shared by Firebolt + Fireball.
 	FireBurnMinTurns = 2
 	FireBurnMaxTurns = 3
-	// PoisonCloudPoisonChance gates the Thief AoE toxin's per-target Poison
-	// roll. Lower than the single-target VenomStrikePoisonChance for the same
-	// whole-pack reason as FireballBurnChance.
+	// PoisonCloudPoisonChance: per-target Poison for the AoE; lower than single-target VenomStrikePoisonChance.
 	PoisonCloudPoisonChance = 0.45
 )
 
-// Bless (Cleric) tuning. The buff is party-wide and always lands (no proc
-// roll — like Scan, the timing grade is cosmetic), so its strength is purely
-// these magnitudes plus the tree's tier ladder. BlessBuffPerStat lifts each
-// of STR/DEX/INT/WIS; VIT and SPD are intentionally left out (VIT would
-// desync MaxHP, SPD would perturb the ATB turn order). Numbers are
-// deliberately modest — a 4-MP support cast that the player tops up via the
-// Conviction tree's tier upgrades.
+// Bless (Cleric) tuning — party-wide, always lands (timing cosmetic). Lifts
+// STR/DEX/INT/WIS; VIT/SPD excluded (VIT desyncs MaxHP, SPD perturbs ATB order).
 const (
-	// BlessBuffPerStat is the base per-stat boost (tier 0) applied to each of
-	// the four buffed stats.
-	BlessBuffPerStat = 1
-	// BlessBuffTurns is the base duration (tier 0) in the recipient's own
-	// turns. Fixed, not rolled — a support buff the player invests skill
-	// points into shouldn't gamble its duration.
-	BlessBuffTurns = 3
+	BlessBuffPerStat = 1 // base per-stat boost (tier 0)
+	BlessBuffTurns   = 3 // base duration (fixed, not rolled)
 )
 
-// Cripple (Thief) tuning — the first enemy-side debuff. Like Bless, the timing
-// grade is cosmetic and the effect always lands; strength is these magnitudes
-// plus the Subterfuge tree's tier ladder. Saps SPD only (the read site with a
-// clean, visible payoff — the enemy's ATB turn-rate slows); a negative BuffStats
-// delta folded by EffectiveEnemyStats. Modest so a maxed Cripple slows but
-// doesn't trivially freeze a fast foe (the ATB read floors effective SPD at 1).
+// Cripple (Thief) tuning — first enemy-side debuff, always lands. Negative
+// BuffStats.SPD folded by EffectiveEnemyStats (which floors effective SPD at 1).
 const (
-	// CrippleSPDReduction is the base SPD sapped (tier 0); stored as a negative
-	// BuffStats.SPD on the target.
-	CrippleSPDReduction = 2
-	// CrippleTurns is the base duration in the target's own turns. Fixed, not
-	// rolled — mirrors Bless.
-	CrippleTurns = 3
+	CrippleSPDReduction = 2 // base SPD sapped (tier 0), as a negative BuffStats.SPD
+	CrippleTurns        = 3 // base duration (fixed)
 )
 
-// Frostbite (Wizard) tuning — INT-scaled frost damage that always chills (the
-// SPD-debuff counterpart to Cripple, delivered with a damaging hit). The damage
-// rolls/scales like any magic skill; the chill is guaranteed on a surviving
-// target (timing only scales the damage), stored as a negative BuffStats.SPD.
+// Frostbite (Wizard) tuning — INT-scaled magic that always chills (Cripple's
+// SPD debuff delivered with damage; timing scales only the damage).
 const (
-	// FrostbiteDamageBase is the tier-0 base damage (INT-scaled by SkillKindMagic).
-	FrostbiteDamageBase = 2
-	// FrostbiteSPDReduction is the base SPD sapped by the chill (negative BuffStats.SPD).
-	FrostbiteSPDReduction = 2
-	// FrostbiteChillTurns is the base chill duration in the target's own turns.
-	FrostbiteChillTurns = 3
+	FrostbiteDamageBase   = 2 // tier-0 base damage (INT-scaled)
+	FrostbiteSPDReduction = 2 // SPD sapped by the chill (negative BuffStats.SPD)
+	FrostbiteChillTurns   = 3 // base chill duration
 )
 
-// Corrosive Vial (Thief) tuning — a permanent (battle-duration) armor break, not
-// a turn-counted status. Strips the target's per-instance Armor (floored at 0);
-// re-casting strips further. Distinct from the Stats-debuff mirror — it mutates
-// Enemy.Armor, which the damageEnemy phys-mitigation chain reads live.
+// Corrosive Vial (Thief) tuning — permanent (battle-duration) armor break:
+// mutates Enemy.Armor directly (floored 0), re-casting strips further.
 const (
-	// CorrosiveArmorReduction is the tier-0 Armor stripped per cast.
-	CorrosiveArmorReduction = 4
+	CorrosiveArmorReduction = 4 // tier-0 Armor stripped per cast
 )
 
-// Cone of Cold (Wizard) tuning — the AoE counterpart to Frostbite. Lower
-// per-target damage and a shallower/shorter chill than the single-target bolt,
-// since it hits the whole pack. Same guaranteed-chill rule (no proc roll).
+// Cone of Cold (Wizard) tuning — AoE counterpart to Frostbite (lower damage +
+// shorter chill, guaranteed per-target).
 const (
-	// ConeOfColdDamageBase is the tier-0 per-target damage (INT-scaled).
-	ConeOfColdDamageBase = 1
-	// ConeOfColdSPDReduction is the per-target SPD sapped by the chill.
-	ConeOfColdSPDReduction = 1
-	// ConeOfColdChillTurns is the per-target chill duration in the target's turns.
-	ConeOfColdChillTurns = 2
+	ConeOfColdDamageBase   = 1 // tier-0 per-target damage (INT-scaled)
+	ConeOfColdSPDReduction = 1 // per-target SPD sapped
+	ConeOfColdChillTurns   = 2 // per-target chill duration
 )
 
-// Sunder (Warrior) tuning — a STR-scaled phys hit that also shoves the target's
-// ATB readiness back so its next turn lands later. The damage rolls/scales like
-// any melee skill; the push is a one-shot subtraction from the enemy's carry-over
-// readiness gauge (g.Battle.Readiness), distinct from Cripple's persistent SPD
-// debuff. Modest base damage — the tempo swing is the point, not the numbers.
+// Sunder (Warrior) tuning — STR-scaled phys + a one-shot ATB readiness push
+// (g.Battle.Readiness), distinct from Cripple's persistent SPD debuff.
 const (
-	// SunderDamageBase is the tier-0 base damage (STR-scaled by SkillKindMelee).
-	SunderDamageBase = 1
-	// SunderATBPush is the tier-0 readiness knocked off the target's ATB gauge
-	// on a landed hit. Expressed in the same units as ATBReadyThreshold so a
-	// push of ~half the threshold roughly delays the foe by half a turn.
-	SunderATBPush = 50
-	// SunderATBPushPerTier is the extra readiness the T3 Sunder tree upgrade
-	// ("Harder shove") adds to the base push.
-	SunderATBPushPerTier = 25
+	SunderDamageBase     = 1  // tier-0 base damage (STR-scaled)
+	SunderATBPush        = 50 // readiness knocked off (ATBReadyThreshold units; ~half a turn)
+	SunderATBPushPerTier = 25 // extra push from the T3 upgrade
 )
 
-// Taunt (Warrior) tuning — forces the target to attack the Warrior on its next
-// turn. Single-rank utility (no damage, no tier ladder).
+// Taunt (Warrior) tuning — forces the target to attack the caster. Single-rank.
 const (
-	// TauntTurns is how many of the taunted enemy's turns the forced-target
-	// holds. 1 = "attack the Warrior next turn"; the counter drains at the
-	// enemy's end-of-turn so the pull lasts exactly that window.
-	TauntTurns = 1
+	TauntTurns = 1 // taunted-enemy turns the forced-target holds; drains at end-of-turn
 )
 
-// War Banner (Warrior) tuning — a party-wide STR + Armor rally (the martial
-// mirror of Bless). Uses the shared party buff bundle, so it overwrites / is
-// overwritten by any other party buff on a member (no-stack rule). STR sharpens
-// the party's blows; the flat Armor (BuffArmor, folded by EffectiveArmor while
-// BuffTurns runs) steels them against phys hits. VIT is deliberately NOT used —
-// MaxHP is a stored field that buffs don't re-derive, so a VIT buff would lift
-// no live roll; Armor is the working stand-in for the banner's "toughness".
+// War Banner (Warrior) tuning — party-wide STR + Armor rally via the shared buff
+// bundle (no-stack). VIT unused (buffs don't re-derive MaxHP); Armor stands in for toughness.
 const (
-	// WarBannerPerStat is the base STR boost (tier 0).
-	WarBannerPerStat = 1
-	// WarBannerArmor is the base flat Armor granted to every ally (tier 0).
-	WarBannerArmor = 2
-	// WarBannerTurns is the base duration (tier 0) in each ally's own turns.
-	WarBannerTurns = 4
+	WarBannerPerStat = 1 // base STR boost (tier 0)
+	WarBannerArmor   = 2 // base flat Armor per ally (tier 0)
+	WarBannerTurns   = 4 // base duration (tier 0)
 )
 
-// Stone Skin (Warrior) tuning — temporary Armor + MDef on one ally via the party
-// buff bundle's BuffArmor/BuffMDef fields, gated by the shared BuffTurns counter.
+// Stone Skin (Warrior) tuning — temporary Armor + MDef on one ally via the buff
+// bundle's BuffArmor/BuffMDef.
 const (
-	// StoneSkinArmor / StoneSkinMDef are the tier-0 flat Armor / MDef granted.
-	StoneSkinArmor = 3
-	StoneSkinMDef  = 2
-	// StoneSkinTurns is the base duration in the recipient's own turns.
-	StoneSkinTurns = 3
+	StoneSkinArmor = 3 // tier-0 flat Armor
+	StoneSkinMDef  = 2 // tier-0 flat MDef
+	StoneSkinTurns = 3 // base duration
 )
 
-// Blind (Cleric) tuning — saps the target enemy's DEX (the stat EnemyHitChance
-// reads) so it whiffs more often. The DEX-flavored sibling of Cripple; stored as
-// a negative BuffStats.DEX on the enemy debuff mirror.
+// Blind (Cleric) tuning — saps the enemy's DEX (the stat EnemyHitChance reads)
+// via the BuffStats mirror; DEX sibling of Cripple.
 const (
-	// BlindDEXReduction is the base DEX sapped (tier 0); a negative BuffStats.DEX.
-	BlindDEXReduction = 3
-	// BlindTurns is the base duration in the target's own turns.
-	BlindTurns = 3
+	BlindDEXReduction = 3 // base DEX sapped (tier 0), a negative BuffStats.DEX
+	BlindTurns        = 3 // base duration
 )
 
-// Aegis (Cleric) tuning — a damage-absorbing shield on one ally. The pool soaks
-// post-mitigation damage before HP until it's spent or the battle ends.
+// Aegis (Cleric) tuning — absorb pool that soaks post-mitigation damage before HP.
 const (
-	// AegisShieldBase is the tier-0 absorb pool (HP-equivalent points).
-	AegisShieldBase = 8
+	AegisShieldBase = 8 // tier-0 absorb pool (HP-equivalent points)
 )
 
-// Smoke Bomb (Thief) tuning — one symmetric DEX magnitude drives both sides: the
-// whole party gains it (evasion via DEX-driven RollDodge) and every living enemy
-// loses it (accuracy via DEX-driven EnemyHitChance), for a short duration.
+// Smoke Bomb (Thief) tuning — one symmetric DEX magnitude: +DEX party (evasion),
+// -DEX every enemy (accuracy).
 const (
-	// SmokeBombDEX is the base DEX swing (tier 0): +DEX on the party, -DEX on
-	// each enemy.
-	SmokeBombDEX = 2
-	// SmokeBombTurns is the base duration in turns (each side ticks on its own
-	// turns). Short — it's a getaway screen, not a standing buff.
-	SmokeBombTurns = 2
+	SmokeBombDEX   = 2 // base DEX swing (tier 0)
+	SmokeBombTurns = 2 // base duration (each side ticks on its own turns)
 )
 
-// Ice Armor (Wizard) tuning — a self-buff that grants MDef and chills any enemy
-// that lands a basic attack on the warded caster. The reactive counterpart to
-// Frostbite's chill; tracked by PartyMember.IceArmorTurns.
+// Ice Armor (Wizard) tuning — self-buff (PartyMember.IceArmorTurns) granting MDef
+// + chilling any enemy that basic-attacks the caster.
 const (
-	// IceArmorMDef is the flat MDef granted while the ward stands.
-	IceArmorMDef = 3
-	// IceArmorTurnsBase is the base duration (tier 0) in the caster's own turns.
-	IceArmorTurnsBase = 3
-	// IceArmorChillSPD / IceArmorChillTurns are the SPD chill stamped on an
-	// attacker that strikes the warded caster (the enemy BuffStats debuff mirror,
-	// same shape as Cone of Cold's per-target chill).
+	IceArmorMDef      = 3 // flat MDef while warded
+	IceArmorTurnsBase = 3 // base duration (tier 0)
+	// Chill stamped on an attacker (enemy BuffStats mirror, like Cone of Cold's).
 	IceArmorChillSPD   = 1
 	IceArmorChillTurns = 2
 )
 
-// Rend (Warrior) + Lacerate (Thief) tuning — the two Bleed strikes. A phys hit
-// that applies the Bleed DoT (BleedTickDamage/turn for BleedMin..MaxTurns on
-// Enemy.BleedTurns) on a connecting hit. The bleed apply is a quality-scaled
-// proc (like Venom Strike's Poison) gated by *BleedChance; the no-stack +
-// WIS-shorten rules ride the shared tryProcStatus path. Rend hits harder (STR
-// Warrior); Lacerate is the lighter Thief cut whose draw is stacking onto Poison.
+// Rend (Warrior) + Lacerate (Thief) tuning — phys hits applying the Bleed DoT
+// (BleedTickDamage/turn for BleedMin..MaxTurns on Enemy.BleedTurns). Quality-scaled
+// proc via *BleedChance, no-stack + WIS-shorten through tryProcStatus.
 const (
-	// RendDamageBase / LacerateDamageBase are the tier-0 base damage (stat-scaled
-	// by SkillKindMelee).
-	RendDamageBase     = 2
+	RendDamageBase     = 2 // tier-0 base damage (SkillKindMelee-scaled)
 	LacerateDamageBase = 1
-	// RendBleedChance / LacerateBleedChance gate the Bleed apply before timing
-	// scaling — high, so "applies a Bleed" reads reliable on a good hit.
+	// Gate the Bleed apply before timing scaling — high, so it reads reliable.
 	RendBleedChance     = 0.85
 	LacerateBleedChance = 0.85
 )
 
-// Second Wind (Warrior) + Renewal (Cleric) heal tuning. Both base values fold
-// the skill-tier ladder on top via skillTierTable.
+// Second Wind (Warrior) + Renewal (Cleric) heal tuning (tier ladder via skillTierTable).
 const (
-	// SecondWindHealBase is the flat self-heal (tier 0). Utility-kind, so it
-	// is NOT WIS-scaled — a fixed amount appropriate for the low-WIS Warrior.
-	SecondWindHealBase = 6
-	// RenewalRegenBase is the base per-turn heal (tier 0); Renewal is Heal-kind
-	// so the actual per-turn amount snapshots the caster's WIS-scaled value at
-	// cast time. RenewalRegenTurns is the base duration (fixed, not rolled).
-	RenewalRegenBase  = 2
-	RenewalRegenTurns = 3
+	SecondWindHealBase = 6 // flat self-heal (tier 0), Utility-kind so NOT WIS-scaled
+	// Renewal is Heal-kind: the per-turn amount snapshots WIS-scaled value at cast.
+	RenewalRegenBase  = 2 // base per-turn heal (tier 0)
+	RenewalRegenTurns = 3 // base duration (fixed)
 )
 
-// XP / level constants. Per-character XP and levels (one pool + one
-// counter per PartyMember) with a geometric per-level cost: each level
-// costs LevelXPBase × LevelXPRatio^(level-1) — 100, 200, 400, 800.
-// LevelStatPoints is the number of points the player allocates on each
-// level-up — small enough that one level is a noticeable bump, not a
-// respec. BaseLevel is the level every member starts at (1, not 0, so
-// the cost formula works out).
+// XP / level constants. Per-character, geometric per-level cost: LevelXPBase ×
+// LevelXPRatio^(level-1) — 100, 200, 400, 800. BaseLevel is 1 (not 0) so the formula works.
 const (
 	LevelXPBase  = 100
 	LevelXPRatio = 2.0
-	// MaxLevelXPCost saturates the geometric per-level cost so XPForLevel
-	// always returns a sane positive int instead of overflowing to +Inf
-	// (and an unspecified int conversion) at absurd levels. 1<<30 (~1.07e9
-	// XP) is far past any reachable total, so it acts as an effective soft
-	// level cap without ever producing a garbage cost.
+	// MaxLevelXPCost saturates the geometric cost so XPForLevel can't overflow at
+	// absurd levels (~1.07e9 XP — an effective soft cap, past any reachable total).
 	MaxLevelXPCost  = 1 << 30
 	LevelStatPoints = 3
-	// LevelSkillPoints is the number of skill points granted per
-	// level-up. Land on PartyMember.SkillPoints; the player spends
-	// them later from the Skills panel's tree UI via BuySkillNode.
-	// Default 1 — each level reliably unlocks one tier somewhere in
-	// the tree, with no pressure to spend it immediately.
+	// LevelSkillPoints granted per level-up (PartyMember.SkillPoints, spent via BuySkillNode).
 	LevelSkillPoints = 1
 	BaseLevel        = 1
 
-	// MPPerINT is the MaxMP gained per point of INT spent at level-up.
-	// INT thus feeds the MP pool (casters who invest in INT both hit
-	// harder AND cast more often), mirroring how VIT spends grow MaxHP.
-	// The class's starting MaxMP is the authored base; INT grows it from
-	// there. Spending INT tops off current MP by the same delta so the
-	// bump feels immediately usable, the same way a VIT spend heals.
+	// MPPerINT: MaxMP gained per INT spent at level-up (mirrors VIT→MaxHP).
+	// Spending INT also tops off current MP by the same delta.
 	MPPerINT = 2
 )
 
@@ -1340,20 +823,13 @@ const (
 	East  = 1
 	South = 2
 	West  = 3
-	// FacingCount is the number of cardinal facings — the wrap modulus for
-	// NormalizeFacing and the size of facingTable. Named so the bare `4`
-	// doesn't recur at each rotation site. (Facing is still a bare int
-	// rather than a typed enum: Player.Facing and the +1 turn arithmetic
-	// thread raw ints through too many call sites to retype safely here.)
+	// FacingCount: number of cardinal facings — wrap modulus for NormalizeFacing,
+	// size of facingTable. (Facing stays a bare int, not a typed enum.)
 	FacingCount = 4
 )
 
-// PauseMenuItem enumerates the rows in the top-level pause menu. The
-// integer values double as menu cursor positions (g.MenuIndex), so
-// reordering this enum reorders the menu. The top level is intentionally
-// minimal — Options and Debug each descend into their own submenu, Quit
-// exits. Single source of truth shared by explore (cursor dispatch) and
-// render (row drawing) — neither side reinvents the count.
+// PauseMenuItem enumerates the top-level pause menu rows; values double as the
+// g.MenuIndex cursor, so reordering reorders the menu.
 type PauseMenuItem int
 
 const (
@@ -1362,14 +838,11 @@ const (
 	PauseMenuQuit
 )
 
-// PauseMenuCount is the wrap modulus for the pause menu cursor. Bump by
-// adding a PauseMenuItem enum constant above this line.
+// PauseMenuCount is the wrap modulus for the pause menu cursor.
 const PauseMenuCount = int(PauseMenuQuit) + 1
 
-// OptionsMenuItem enumerates the rows in the Options submenu (opened from
-// the pause menu's Options row). Player-facing settings/actions live here:
-// the display-mode toggle, a jump to the party-stats dashboard, and a
-// run restart. Integer values double as the cursor (g.OptionsMenuIndex).
+// OptionsMenuItem enumerates the Options submenu rows; values double as the
+// g.OptionsMenuIndex cursor.
 type OptionsMenuItem int
 
 const (
@@ -1383,75 +856,47 @@ const (
 // OptionsMenuCount is the wrap modulus for the Options submenu cursor.
 const OptionsMenuCount = int(OptionsMenuClose) + 1
 
-// DebugMenuItem enumerates the rows in the Debug submenu (opened from the
-// pause menu's Debug row — now always reachable; the master "Debug Mode"
-// on/off toggle lives INSIDE the submenu rather than gating access to it).
-// Audio tools (the jukebox sound tester) live here too. Integer values
-// double as the cursor position (g.DebugMenuIndex).
+// DebugMenuItem enumerates the Debug submenu rows; values double as the
+// g.DebugMenuIndex cursor.
 type DebugMenuItem int
 
 const (
-	// DebugMenuToggle flips DebugOverlay ("debug mode" — in-world tile
-	// labels + coord readout). The submenu itself is always reachable now,
-	// so this is an in-place toggle, not an access gate.
+	// DebugMenuToggle flips DebugOverlay (in-world tile labels + coord readout).
 	DebugMenuToggle DebugMenuItem = iota
 	DebugMenuEnemies
 	DebugMenuAdvanceTime
 	DebugMenuEasyQuit
-	// DebugMenuRenderLog toggles the render-pass diagnostics log file
-	// (crawler-render.log). When on, each DrawWorld writes a one-line
-	// snapshot of camera + tile counts + shader IDs to disk so a
-	// flicker/invisibility issue can be inspected from the resulting
-	// log even when reproducing the bug from outside the editor.
+	// DebugMenuRenderLog toggles crawler-render.log — a per-DrawWorld snapshot of
+	// camera + tile counts + shader IDs for diagnosing flicker/invisibility.
 	DebugMenuRenderLog
-	// DebugMenuJukebox is the audio sound-tester: confirm cycles through
-	// and plays the sound bank. Moved here from the top-level pause menu.
+	// DebugMenuJukebox: audio sound-tester (confirm cycles the sound bank).
 	DebugMenuJukebox
-	// DebugMenuAllSkills toggles g.DebugAllSkills: the battle skill menu lists
-	// every player-castable skill and casts are free.
+	// DebugMenuAllSkills toggles g.DebugAllSkills: skill menu lists every skill, casts are free.
 	DebugMenuAllSkills
-	// DebugMenuBoostStats is a one-shot ACTION (not a toggle): adds
-	// DebugStatBoost to every base stat of every party member and refreshes
-	// their HP/MP pools (god-mode for testing). Confirming it again stacks
-	// another boost.
+	// DebugMenuBoostStats: one-shot ACTION — adds DebugStatBoost to every stat and
+	// refreshes HP/MP (stacks on repeat).
 	DebugMenuBoostStats
-	// DebugMenuSkipBattles toggles g.DebugSkipBattles: engaging a pack instantly
-	// resolves it as a win (kills + XP + loot) without entering the battle
-	// scene. Distinct from DebugMenuEnemies (which disables encounters
-	// entirely, with no reward).
+	// DebugMenuSkipBattles toggles g.DebugSkipBattles: engaging a pack instant-wins
+	// (kills + XP + loot). Distinct from DebugMenuEnemies (no encounters, no reward).
 	DebugMenuSkipBattles
-	// DebugMenuTestRumble fires a one-shot controller-rumble pulse so vibration
-	// can be felt/verified outside combat (the rumble path is hard to confirm
-	// otherwise — raylib's GLFW backend has no vibration, so it runs through the
-	// XInput driver on Windows).
+	// DebugMenuTestRumble: one-shot rumble pulse (raylib's GLFW has no vibration; runs via XInput on Windows).
 	DebugMenuTestRumble
-	// DebugMenuRetro opens the Retro Filters sub-submenu — per-filter
-	// intensity sliders for the 3D world's post-process stack (pixelate,
-	// scanlines, dither, …). Filters layer: every non-zero intensity is
-	// applied in one shader pass, in a fixed pipeline order.
+	// DebugMenuRetro opens the Retro Filters sub-submenu (per-filter intensity sliders).
 	DebugMenuRetro
-	// DebugMenuStartDialog is a test launcher for the dialog system: confirm
-	// starts the current area's first authored conversation (or reports none).
-	// The in-world trigger (NPC / region) is a later layer; this lets the
-	// dialog overlay be exercised without one.
+	// DebugMenuStartDialog: test launcher — starts the area's first authored conversation.
 	DebugMenuStartDialog
 	DebugMenuClose
 )
 
-// DebugMenuCount is the wrap modulus for the debug submenu cursor. Bump by
-// adding a DebugMenuItem constant above this line.
+// DebugMenuCount is the wrap modulus for the debug submenu cursor.
 const DebugMenuCount = int(DebugMenuClose) + 1
 
-// DebugStatBoost is the amount DebugMenuBoostStats adds to every base stat of
-// every party member per activation. Large enough to trivialize fights for
-// testing (and, via the INT/VIT pool refresh, to bankroll free-cast testing).
+// DebugStatBoost: amount DebugMenuBoostStats adds to every base stat per activation.
 const DebugStatBoost = 100
 
-// RetroFilterKind enumerates the retro post-process filters applicable to the
-// 3D world (Debug ▸ Retro Filters). Each has an independent 0..1 intensity on
-// GameState.RetroFilters; every non-zero filter applies in ONE combined shader
-// pass in this fixed pipeline order (sampling effects first, palette work in
-// the middle, screen-space scanlines last), so filters layer freely.
+// RetroFilterKind enumerates the 3D-world post-process filters. Each has an
+// independent 0..1 intensity on GameState.RetroFilters; every non-zero filter
+// applies in ONE shader pass in this fixed pipeline order.
 type RetroFilterKind int
 
 const (
@@ -1465,8 +910,7 @@ const (
 	RetroFilterCount
 )
 
-// retroFilterNames is the display-label registry, indexed by RetroFilterKind
-// and length-locked to the enum so a new filter can't ship unlabeled.
+// retroFilterNames: display labels, indexed by RetroFilterKind, length-locked to the enum.
 var retroFilterNames = [RetroFilterCount]string{
 	RetroFilterPixelate:  "Pixelate",
 	RetroFilterChroma:    "Chroma Fringe",
@@ -1480,15 +924,12 @@ var retroFilterNames = [RetroFilterCount]string{
 func init() {
 	for k := RetroFilterKind(0); k < RetroFilterCount; k++ {
 		if retroFilterNames[k] == "" {
-			// config.go is deliberately import-free; a static message is
-			// enough — the enum is small and the zero row is obvious.
 			panic("core: retroFilterNames has an empty entry — label every RetroFilterKind")
 		}
 	}
 }
 
-// validRetroFilter reports whether k indexes retroFilterNames / a filter slot.
-// The single bounds rule the filter lookups and mutators share.
+// validRetroFilter reports whether k indexes a filter slot (shared bounds rule).
 func validRetroFilter(k RetroFilterKind) bool {
 	return k >= 0 && k < RetroFilterCount
 }
@@ -1501,9 +942,8 @@ func RetroFilterName(k RetroFilterKind) string {
 	return retroFilterNames[k]
 }
 
-// Retro Filters submenu rows: one slider row per filter, then the Filter
-// Skybox toggle, the Filter Sprites toggle, Reset to Default, All Off, and
-// Close. The first RetroFilterCount cursor positions ARE the filter kinds.
+// Retro Filters submenu rows: first RetroFilterCount positions ARE the filter
+// kinds, then the toggles, Reset, All Off, Close.
 const (
 	RetroMenuSkyToggle    = int(RetroFilterCount)
 	RetroMenuSpriteToggle = int(RetroFilterCount) + 1
@@ -1513,21 +953,15 @@ const (
 	RetroMenuCount        = int(RetroFilterCount) + 5
 )
 
-// RetroFilterStep is the Left/Right intensity increment, and
-// RetroFilterToggleDefault is the intensity a Confirm-toggle turns a filter
-// ON at when its authored default is zero (Confirm on a non-zero filter
-// zeroes it; Confirm on a zero filter restores its DefaultRetroFilters level
-// when one exists).
+// RetroFilterStep: Left/Right intensity increment. RetroFilterToggleDefault: the
+// ON level a Confirm-toggle uses when the filter's authored default is zero.
 const (
 	RetroFilterStep          = 0.1
 	RetroFilterToggleDefault = 0.7
 )
 
-// DefaultRetroFilters is the out-of-the-box filter mix — a faint pixelate /
-// posterize wash with a touch more chroma fringe under a moderate ordered
-// dither: "90s CD-ROM FMV" rather than any single effect at full blast.
-// Pairs with DefaultRetroFilterSky (the sky stays crisp behind the crunched
-// world by default). New games start here; Reset to Default restores it.
+// DefaultRetroFilters is the out-of-the-box filter mix ("90s CD-ROM FMV" wash).
+// New games start here; Reset to Default restores it.
 func DefaultRetroFilters() [RetroFilterCount]float64 {
 	var f [RetroFilterCount]float64
 	f[RetroFilterPixelate] = 0.1
@@ -1537,13 +971,10 @@ func DefaultRetroFilters() [RetroFilterCount]float64 {
 	return f
 }
 
-// DefaultRetroFilterSky is the out-of-the-box skybox treatment: NOT filtered
-// — the dithered/pixelated environment composites over a clean sky.
+// DefaultRetroFilterSky: skybox NOT filtered by default (clean sky behind the crunched world).
 const DefaultRetroFilterSky = false
 
-// DefaultRetroFilterSprites is the out-of-the-box sprite treatment: NOT filtered
-// — enemy/party billboards keep their authored visuals.json FX crisp on top of
-// the crunched environment instead of having the screen filter stack over them.
+// DefaultRetroFilterSprites: billboards NOT filtered by default (FX stays crisp).
 const DefaultRetroFilterSprites = false
 
 // AdjustRetroFilter nudges an intensity by dir (±1) steps, clamped to [0, 1].
@@ -1551,10 +982,8 @@ func AdjustRetroFilter(v *float64, dir int) {
 	*v = Clamp(*v+float64(dir)*RetroFilterStep, 0, 1)
 }
 
-// ToggleRetroFilter flips filters[k] between off and its "on" level: the
-// filter's DefaultRetroFilters intensity when it has one, else the shared
-// RetroFilterToggleDefault (so Game Boy / Scanlines — default-off — still
-// toggle ON to something visible).
+// ToggleRetroFilter flips filters[k] between off and its "on" level: its
+// DefaultRetroFilters intensity if it has one, else RetroFilterToggleDefault.
 func ToggleRetroFilter(filters *[RetroFilterCount]float64, k RetroFilterKind) {
 	if !validRetroFilter(k) {
 		return

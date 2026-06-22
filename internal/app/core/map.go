@@ -7,46 +7,30 @@ import (
 	"slices"
 )
 
-// TileCoord formats a (x, z) tile coordinate as a human-readable string
-// for UI labels and editor diagnostics ("(3, 7)"). Centralized so the
-// spacing convention stays consistent across modal headers, debug
-// overlays, and status messages. Error-message formatters keep their
-// own compact form inline — they're a different audience.
+// TileCoord formats (x, z) as "(3, 7)" for UI labels and editor diagnostics.
 func TileCoord(x, z int) string {
 	return fmt.Sprintf("(%d, %d)", x, z)
 }
 
-// Tile characters. Grouped by the layer that owns them. The .map on-disk
-// format uses these literal bytes; the editor's brush palettes paint them.
+// Tile characters, grouped by owning layer. The .map format uses these bytes.
 
-// Face-skin layer (legacy on-disk name "walls"). These chars NO LONGER block
-// movement — a wall is now the rendered vertical FACE of an elevation step
-// (see StepElevationOK + the renderer's cliff faces). This layer only selects
-// which texture skins a tile's exposed cliff faces: TileOpen is the blank
-// default (plain rock), TileRock is explicit rock, and the variants swap the
-// rock skin for ivy / cracked / crumbling. Authored from the editor's Faces
-// palette; legacy maps' wall chars load straight in as skins, and their old
-// solid tiles are migrated up one elevation level so they still read as walls.
-// Chars are symbols free on every grid layer (no cross-layer overlap to
-// register).
+// Face-skin layer (on-disk name "walls"). These chars NO LONGER block movement —
+// a wall is the rendered vertical FACE of an elevation step (StepElevationOK +
+// renderer cliff faces). This layer only selects which texture skins a tile's
+// exposed cliff faces. Authored from the editor's Faces palette.
 const (
-	TileOpen = '.' // blank cell — default (plain rock) cliff-face skin
-	TileRock = '#' // explicit plain-rock cliff-face skin
-	// Face-skin VARIANTS — purely cosmetic, change only how a tile's cliff
-	// faces are textured. IsFaceSkinChar treats every entry here as a known
-	// skin. Authored from the editor's Faces palette.
+	TileOpen = '.' // blank — default (plain rock) cliff-face skin
+	TileRock = '#' // explicit plain-rock skin
+	// Face-skin VARIANTS — cosmetic; IsFaceSkinChar treats each as a known skin.
 	TileWallRockIvyLight  = '+' // rock face with sparse green ivy
 	TileWallRockIvyHeavy  = '=' // rock face blanketed in ivy
 	TileWallRockCracked   = '&' // rock face fractured with cracks
 	TileWallRockCrumbling = '$' // rock face in heavy disrepair
 )
 
-// FaceSkin pairs a cliff-face skin char with its short display name. FaceSkins
-// is THE canonical roster — the plain rock plus every variant — that the
-// face-skin char set, the editor's Faces palette, the right-click "Set face"
-// menu, the tile-label registry, and (by init assert) the renderer's variant
-// models all derive from. Adding a skin is one row here; the init asserts in
-// map.go / resources.go then fail fast if its label or model is missing.
+// FaceSkin pairs a cliff-face skin char with its display name. FaceSkins is THE
+// canonical roster every face-skin consumer derives from; adding a skin is one
+// row here, with init asserts in map.go/resources.go catching a missing label/model.
 type FaceSkin struct {
 	Char byte
 	Name string
@@ -67,17 +51,11 @@ var faceSkinCharSet = func() (set [256]bool) {
 	return
 }()
 
-// IsFaceSkinChar reports whether a face-layer byte is an explicit cliff-face
-// skin (plain rock or a variant). The blank TileOpen is NOT a member — it reads
-// as the default rock skin via FaceSkinAt. Single source so a new skin can't be
-// recognized in one check but not another.
+// IsFaceSkinChar reports whether a byte is an explicit cliff-face skin. Blank
+// TileOpen is NOT a member — it reads as default rock via FaceSkinAt.
 func IsFaceSkinChar(c byte) bool { return faceSkinCharSet[c] }
 
-// FaceSkinName returns the display name for a cliff-face skin char — the
-// inverse of the FaceSkins roster. The blank/default skin (TileOpen, the
-// PropLevelAuto sentinel, or anything unrecognized) reads as "Rock", matching
-// FaceSkinAt's default. One source so the editor's face UI labels a skin the
-// same way the picker lists it.
+// FaceSkinName returns the display name for a skin char; blank/unrecognized → "Rock".
 func FaceSkinName(c byte) string {
 	for _, s := range FaceSkins {
 		if s.Char == c {
@@ -87,95 +65,67 @@ func FaceSkinName(c byte) string {
 	return "Rock"
 }
 
-// Ceiling layer. Parallel grid to walls; chars share the wall convention
-// since both layers describe the same "solid block?" yes/no question (a
-// wall is a solid floor-to-ceiling column; a ceiling is a solid slab
-// covering the cell from above). A cell with no ceiling (TileCeilingOpen)
-// shows the skybox above; one with TileCeilingSolid renders an opaque
-// quad at wall height, turning that tile into roofed interior space —
-// the visual cue for "you are inside a dungeon room."
+// Ceiling layer. TileCeilingOpen shows the skybox; TileCeilingSolid renders an
+// opaque slab at wall height (roofed interior — "you are inside a dungeon room").
 const (
 	TileCeilingOpen  = mapfile.CeilingOpenChar  // '.' no ceiling — sky shows through
 	TileCeilingSolid = mapfile.CeilingSolidChar // '#' solid ceiling slab at wall height
 )
 
-// Floor layer. Walkable surfaces — material-keyed variants (grass / dirt /
-// dark grass / stone) read against the material's own floor pixels;
-// universal variants (path / planks / water / sand / snow) load their own
-// textures and apply in any material. FloorDeepWater is the sole blocking
-// floor tile: it renders flat (you can see across it) but BlockedAt
-// reports it as impassable, modeling water too deep to wade through.
+// Floor layer. Walkable surfaces — material-keyed variants read the material's
+// floor pixels; universal variants load their own textures and apply anywhere.
+// FloorDeepWater is the sole blocking floor tile (renders flat, BlockedAt impassable).
 const (
 	FloorAuto      = '.' // pick a variant by per-tile hash (back-compat default)
 	FloorGrass     = 'g'
 	FloorDirt      = 'd'
 	FloorDarkGrass = 'k'
 	FloorStone     = 's'
-	// Universal floor variants — render the same in any material set so an
-	// author can lay a stone path through a forest or a wooden plank floor
-	// across a cave. None of these block movement EXCEPT FloorDeepWater.
+	// Universal floor variants — render the same in any material. None block
+	// movement EXCEPT FloorDeepWater.
 	FloorCobble    = 'c' // mortared cobblestone path
 	FloorPlank     = 'w' // wooden planks
 	FloorWater     = '~' // shallow water — walkable, just a different look
 	FloorDeepWater = 'W' // deep water — blocks movement, vision passes over
 	FloorSand      = 'n' // pale sand
 	FloorSnow      = 'i' // packed snow
-	// Ramp floor tiles — walkable slopes that bridge the tile's elevation
-	// LEVEL (stored in the Elevation layer) to one level higher in the
-	// arrow's direction. The arrow points UPHILL: '^' rises north, '>' east,
-	// 'v' south, '<' west. Walking up a ramp from a level-N tile lands on a
-	// level-(N+1) tile; the reverse descends. ('v' deliberately overlaps the
-	// 'v' clover decor char — registered in crossLayerCharOverlaps; per-layer
-	// dispatch keeps them distinct.)
+	// Ramp floor tiles — walkable slopes bridging the tile's stored level to one
+	// higher in the arrow's UPHILL direction (^ north, > east, v south, < west).
+	// 'v' overlaps the clover decor char (registered in crossLayerCharOverlaps).
 	FloorRampNorth = '^'
 	FloorRampEast  = '>'
 	FloorRampSouth = 'v'
 	FloorRampWest  = '<'
 )
 
-// ElevationGround is the runtime alias of mapfile.ElevationGroundChar — the
-// elevation-layer char for the lowest level (0). Blank/legacy maps seed to it
-// so they read as flat. Kept in sync via the init assert in areas.go's
-// sibling consts (TileCeilingOpen mirrors CeilingOpenChar the same way).
+// ElevationGround is the elevation-layer char for the lowest level (0); blank/
+// legacy maps seed to it so they read as flat.
 const ElevationGround = mapfile.ElevationGroundChar
 
-// Decor layer. '.' means "let the renderer's auto-scatter decide"; '_'
-// suppresses any auto decor; explicit chars force a specific small prop.
-// Decor is purely cosmetic — it never blocks movement.
+// Decor layer (cosmetic, never blocks). '.' = auto-scatter, '_' = suppress,
+// explicit chars force a specific small prop.
 const (
 	DecorAuto     = '.'
 	DecorEmpty    = '_'
 	DecorBush     = 'b'
 	DecorMushroom = 'm'
 	DecorPebble   = 'p'
-	// Soft-ground details: visual breakup for fields and plazas.
 	DecorTallGrass = ',' // upright blades of grass
 	DecorFlowers   = 'f' // mixed wildflowers
 	DecorClover    = 'v' // low clover patch
 	DecorReeds     = 'r' // tall reed cluster
-	// Atmospheric markers: tell a story about what happened on this tile.
 	DecorBones  = 'o' // skull + scattered bones
 	DecorScorch = 'x' // black scorch ring
 	DecorBlood  = '!' // dried bloodstain
 	DecorCobweb = '*' // corner cobweb
-	// Forest leftovers: dead wood that breaks up grass without blocking.
 	DecorStump    = 't' // weathered tree stump
 	DecorLog      = 'l' // mossy fallen log
 	DecorLeafPile = 'L' // pile of fallen leaves
-	// Multi-tile structures (walkable — decor doesn't block). DecorArchway
-	// is the anchor at the left/west tile of a 2-tile (1×2 along +X)
-	// archway; DecorArchwayTail must be placed at the matching east tile
-	// or the renderer falls back to drawing the anchor solo. The arch
-	// passes overhead — both tiles stay walkable.
+	// 2-tile archway (1×2 along +X, walkable): anchor at left tile, DecorArchwayTail
+	// at the matching east tile or the renderer draws the anchor solo.
 	DecorArchway     = 'A' // archway anchor (left tile)
 	DecorArchwayTail = 'a' // archway tail   (right tile)
-	// DecorLilypad is the swamp dressing for water tiles — a flat floating
-	// pad with a small bloom. Pure decor (does not block); intended to be
-	// painted on FloorWater / FloorDeepWater for the swamp aesthetic but
-	// works on any floor.
-	DecorLilypad = 'y'
-	// Atmospheric / interior dressings — none block. Authors can layer
-	// these on any walkable tile to add story / texture.
+	DecorLilypad = 'y' // floating pad+bloom; intended for water tiles, works on any
 	DecorRug         = 'u' // woven floor rug, warm tones
 	DecorCandle      = 'c' // stubby candle on a small puddle of wax
 	DecorBootprints  = 'i' // pair of stamped boot prints
@@ -184,25 +134,17 @@ const (
 	DecorRootCluster = 'k' // gnarled root stubs poking from the floor
 )
 
-// Props layer. TilePropEmpty marks an open cell; every other char listed
-// here is a blocker. Mirrors FloorAuto / DecorAuto on the other layers so
-// callers don't open-code '.' for "no prop here."
+// Props layer. TilePropEmpty marks an open cell; every other char is a blocker.
 const (
 	TilePropEmpty = '.' // open cell, no prop
 	TileTree      = 'T' // regular tree, blocks
 	TileTreeXL    = 'X' // extra-large tree, blocks
-	// Tree shape variants — all 1-tile, all blocking. Designed to
-	// break up the visual monotony of long forest stretches without
-	// adding new content rules (same blocking, same minimap color
-	// family). The renderer reuses assets.tree at different scales
-	// and offsets via drawPropTreeTall / drawPropTreeTwin /
-	// drawPropTreeYoung in render/world.go.
+	// Tree shape variants — all 1-tile, all blocking; visual variance only.
 	TileTreeTall  = '|' // tall narrow pine, slimmer + taller than Tree
 	TileTreeTwin  = '@' // two trees crammed into one tile, offset
 	TileTreeYoung = '/' // young / smaller tree, scrubby thicket
 	TileRockLarge = 'O' // boulder, blocks
 	TileBushLarge = 'B' // dense bush, blocks
-	// Inhabited / ruined props: read as "someone lived here."
 	TileCrate        = 'C' // wooden crate
 	TileBarrel       = 'R' // banded barrel
 	TileUrn          = 'U' // belly-shouldered urn
@@ -212,91 +154,61 @@ const (
 	TileStatue       = 'M' // weathered humanoid statue
 	TileObelisk      = 'Q' // tall four-sided pyramid-capped obelisk
 	TileFountain     = 'F' // low fountain with a central plume
-	// Larger rock formations. TileRockCairn is a 1-tile prop — a taller
-	// stacked-stone column distinct from the squat TileRockLarge boulder.
-	// TileRockFormation occupies a 2×2 footprint: place the anchor at the
-	// top-left tile of the square and TileRockFormationTail at the other
-	// three tiles. The renderer skips drawing tails; the anchor's mesh
-	// covers the whole footprint. All four tiles block movement.
+	// TileRockFormation is a 2×2 footprint: anchor at top-left, TileRockFormationTail
+	// at the other three (renderer skips tails; anchor mesh covers all). All block.
 	TileRockCairn         = 'K' // tall stacked-stone cairn (1 tile, blocks)
 	TileRockFormation     = 'J' // 2×2 rock formation anchor (top-left)
 	TileRockFormationTail = 'j' // 2×2 rock formation footprint shadow
-	// Outdoor / field tileset — stoneworked + agricultural props. All
-	// single-tile blockers; the editor's brush palette and the
-	// renderer's propModels map pick them up via the canonical list +
-	// init-time coverage asserts.
-	TileWell       = 'W' // stone-ringed well (cross-layer with FloorDeepWater; layers dispatch independently)
+	// Outdoor / field tileset — single-tile blockers.
+	TileWell       = 'W' // stone-ringed well (cross-layer with FloorDeepWater)
 	TileGravestone = 'G' // weathered tombstone
 	TileSignPost   = 'N' // wooden sign on a post
 	TileHayBale    = 'H' // round bound straw bale
 	TileScarecrow  = 'Y' // cross + sackcloth scarecrow
-	// Indoor / dungeon tileset — furniture and crypt props. All
-	// single-tile blockers, same registry pattern.
+	// Indoor / dungeon tileset — single-tile blockers.
 	TileBookshelf   = 'V' // tall wooden shelf with books
 	TileTable       = 'E' // wooden table with legs
 	TileBed         = 'D' // wood-frame bed with bedding
 	TileBrazier     = 'Z' // metal brazier on a tripod with flame (floor, BLOCKS, bright light)
 	TileSarcophagus = 'A' // stone sarcophagus with lid (cross-layer with DecorArchway)
-	// TileTorch is a wall-mounted torch — NON-blocking (sits on the
-	// wall, leaves the floor clear) so it can line dungeon corridors
-	// freely. The renderer auto-orients it to face away from the
-	// adjacent wall and gives it an animated particle flame + a
-	// (dimmer-than-brazier) point light. Place it on a floor tile
-	// next to a wall.
+	// TileTorch is a wall-mounted torch — NON-blocking (leaves the floor clear, so
+	// it can line corridors). Renderer auto-orients it away from the adjacent wall.
 	TileTorch = 'z' // wall torch (non-blocking, animated flame, dim light)
-	// Non-blocking decorative plant props — vertical greenery with more
-	// presence than the flat decor-layer scatter, but the player/packs walk
-	// straight through them (registered in PropIsNonBlocking). Chars are
-	// symbols free on every layer.
+	// Non-blocking decorative plants — player/packs walk through (PropIsNonBlocking).
 	TilePropExoticFlower = 'e' // large funky bloom on a tall stalk
 	TilePropTallFern     = '(' // cluster of tall arching fronds
 	TilePropGrassTuft    = ')' // tall grass tuft (visual variance)
 )
 
-// Doors are modeled as entities (like chests), not as a tile char on
-// any layer. The renderer reads g.Doors and draws a doorframe billboard
-// at each door's tile; movement checks "is there a door under my new
-// position?" on step landing. The tile underneath stays a regular
-// walkable floor — no grid-layer character is needed.
+// Doors are entities (g.Doors), not a tile char; the tile underneath stays
+// walkable floor. Movement checks for a door on step landing.
 
-// SpawnSnapReason tags why a SnappedSpawnPositions entry exists in the
-// shape it does. Replaces the older "{-1, -1}" sentinel which conflated
-// two distinct outcomes ("the author left this pack empty" and "the
-// snap search couldn't find an open tile near the authored position").
-// Callers that want to surface a useful diagnostic (the editor's
-// reachability warning) can now distinguish them.
+// SpawnSnapReason tags why a SnappedSpawnPositions entry has its shape, so
+// callers (the editor's reachability warning) can distinguish drop causes.
 type SpawnSnapReason int
 
 const (
 	// SpawnSnapPlaced means the pack will be rendered at TileX/TileZ.
 	SpawnSnapPlaced SpawnSnapReason = iota
-	// SpawnSnapEmptyMembers means the authored spawn has no enemies; the
-	// runtime drops it, no field representative gets drawn.
+	// SpawnSnapEmptyMembers means the authored spawn has no enemies; runtime drops it.
 	SpawnSnapEmptyMembers
-	// SpawnSnapNoOpenTile means the nearest-open-tile search came up
-	// empty (every cell on the map is blocked or already taken).
+	// SpawnSnapNoOpenTile means the nearest-open-tile search came up empty.
 	SpawnSnapNoOpenTile
 )
 
-// SpawnSnap is the result of one PackSpawn's runtime placement pass.
-// Reason == SpawnSnapPlaced is the success case; everything else means
-// TileX/TileZ should be treated as undefined.
+// SpawnSnap is one PackSpawn's placement result; TileX/TileZ are undefined
+// unless Reason == SpawnSnapPlaced.
 type SpawnSnap struct {
 	TileX  int
 	TileZ  int
 	Reason SpawnSnapReason
 }
 
-// Placed reports whether this snap successfully positioned the pack —
-// callers that only care about the success case should branch on this.
+// Placed reports whether this snap successfully positioned the pack.
 func (s SpawnSnap) Placed() bool { return s.Reason == SpawnSnapPlaced }
 
-// placePacks converts the area's pack-spawn placeholders into runtime
-// Packs, snapping each pack's tile to the nearest open square so the
-// author doesn't have to perfect placement against geometry. The player's
-// start tile is seeded as occupied so the snapping never lands on it.
-// Empty pack rosters are skipped — a pack with zero members has no field
-// representative to render or engage.
+// placePacks converts pack-spawn placeholders into runtime Packs, snapping each
+// to the nearest open square (start tile seeded occupied). Empty rosters skipped.
 func placePacks(a *AreaDefinition) []Pack {
 	packs := make([]Pack, 0, len(a.PackSpawns))
 	for i, snap := range SnappedSpawnPositions(a) {
@@ -312,8 +224,7 @@ func placePacks(a *AreaDefinition) []Pack {
 					e = def.Instantiate()
 				}
 			}
-			// Carry the authored formation rank onto the live enemy (front/back).
-			e.Row = member.Row
+			e.Row = member.Row // carry authored formation rank (front/back)
 			members = append(members, e)
 		}
 		packs = append(packs, Pack{
@@ -326,23 +237,16 @@ func placePacks(a *AreaDefinition) []Pack {
 			Z:         TileCenter(snap.TileZ),
 			Members:   members,
 			AI:        spawn.AI,
-			PatrolDir: 1, // east by default; only PackAIPatrol reads/flips it
+			PatrolDir: 1, // east; only PackAIPatrol reads/flips it
 		})
 	}
 	return packs
 }
 
-// SnappedSpawnPositions returns, for each PackSpawn on `a`, the runtime
-// tile coords the pack will actually occupy after placePacks' snap pass.
-// Index in the output matches index in a.PackSpawns. A spawn that gets
-// dropped reports its Reason so callers (e.g. the editor's reachability
-// warning) can describe WHY a pack was dropped instead of treating
-// every drop as the same case.
-//
-// Exposed so the editor's reachability check can use the *snapped*
-// positions — otherwise an author who places a pack on a wall would see a
-// false "unreachable" warning even though the game will silently relocate
-// the pack at runtime, and vice versa.
+// SnappedSpawnPositions returns the runtime tile each PackSpawn occupies after
+// placePacks' snap (output index matches a.PackSpawns), with a Reason per drop.
+// Exposed so the editor's reachability check uses the *snapped* positions and
+// doesn't false-warn on a pack the game would silently relocate at runtime.
 func SnappedSpawnPositions(a *AreaDefinition) []SpawnSnap {
 	out := make([]SpawnSnap, 0, len(a.PackSpawns))
 	occupied := map[[2]int]bool{{a.StartTileX, a.StartTileZ}: true}
@@ -383,14 +287,9 @@ func nearestOpenTile(a *AreaDefinition, wantX, wantZ int, occupied map[[2]int]bo
 	return bestX, bestZ
 }
 
-// WallAt returns true if the cell holds a wall in the walls layer. Out-of-
-// bounds reads as a wall so callers don't have to range-check first.
-// layerByteAt safely reads layer[z][x], returning ok=false when the layer
-// is short or ragged (missing rows / a short row). Loaded / edited maps are
-// always full-rectangular, but a hand-built or partially-populated
-// AreaDefinition (test fixtures, a future builder) would otherwise panic on
-// index-out-of-range in the base-layer readers below — this lets them fall
-// back to a safe default instead, matching CeilingAt / ElevationLevelAt.
+// layerByteAt safely reads layer[z][x], ok=false when ragged/short. Lets the
+// base-layer readers tolerate a non-rectangular hand-built AreaDefinition
+// (test fixtures) instead of panicking on index-out-of-range.
 func (a *AreaDefinition) layerByteAt(layer []string, x, z int) (byte, bool) {
 	if z < 0 || z >= len(layer) {
 		return 0, false
@@ -402,23 +301,16 @@ func (a *AreaDefinition) layerByteAt(layer []string, x, z int) (byte, bool) {
 	return row[x], true
 }
 
-// FloorCharAt / DecorCharAt / PropCharAt return the raw authored char at (x, z)
-// for that grid layer, bounds-safe (ok=false for an out-of-range OR ragged-short
-// cell, exactly like layerByteAt). For callers that need the char itself rather
-// than a derived predicate — e.g. the debug overlay's per-tile labels — while
-// still tolerating a non-rectangular in-progress AreaDefinition (a struct-built
-// or mid-edit area whose layers aren't all Width×Height yet), which a direct
-// m.Floor[z][x] index would panic on.
+// FloorCharAt / DecorCharAt / PropCharAt return the raw authored char at (x, z),
+// bounds-safe (ok=false out-of-range or ragged), for callers wanting the char
+// itself rather than a derived predicate.
 func (a *AreaDefinition) FloorCharAt(x, z int) (byte, bool) { return a.layerByteAt(a.Floor, x, z) }
 func (a *AreaDefinition) DecorCharAt(x, z int) (byte, bool) { return a.layerByteAt(a.Decor, x, z) }
 func (a *AreaDefinition) PropCharAt(x, z int) (byte, bool)  { return a.layerByteAt(a.Props, x, z) }
 
-// WallAt reports whether the cell is a SOLID obstruction — off-map, a blocking
-// prop, or a blocking floor (deep water). Walls-as-tiles are gone; lateral
-// barriers now come from elevation steps (StepElevationOK), which this does NOT
-// consider. Kept for the few callers that mean "is there a solid thing here"
-// (prop/door auto-facing, the debug overlay, editor footprint guards). Out-of-
-// bounds reads as solid so callers don't have to range-check first.
+// WallAt reports whether the cell is a SOLID obstruction (off-map, blocking
+// prop, or deep water). Does NOT consider elevation steps (StepElevationOK).
+// Out-of-bounds reads as solid.
 func (a *AreaDefinition) WallAt(x, z int) bool {
 	if !a.InBounds(x, z) {
 		return true
@@ -432,10 +324,8 @@ func (a *AreaDefinition) WallAt(x, z int) bool {
 	return false
 }
 
-// FaceSkinAt returns the cliff-face skin char for tile (x,z) — the texture the
-// renderer paints on any vertical face this tile exposes where it sits higher
-// than a neighbour (or the map edge). Blank / TileOpen / out-of-bounds default
-// to TileRock (plain rock). Authored from the editor's Faces palette.
+// FaceSkinAt returns the cliff-face skin char for tile (x,z); blank/TileOpen/OOB
+// default to TileRock.
 func (a *AreaDefinition) FaceSkinAt(x, z int) byte {
 	c, ok := a.layerByteAt(a.Walls, x, z)
 	if !ok || c == TileOpen {
@@ -444,19 +334,15 @@ func (a *AreaDefinition) FaceSkinAt(x, z int) byte {
 	return c
 }
 
-// FaceOverride is a per-tile cliff-face skin override: Skins[dir] (0=North,
-// 1=East, 2=South, 3=West, matching the direction constants) names that face's
-// skin, or 0 / PropLevelAuto to fall back to the tile's base FaceSkinAt skin.
-// Authored from the tile right-click menu — the top-down editor can't paint a
-// vertical face, so faces are a per-tile property.
+// FaceOverride is a per-tile cliff-face skin override: Skins[dir] (0=N,1=E,2=S,
+// 3=W) names that face's skin, or 0/PropLevelAuto to fall back to FaceSkinAt.
 type FaceOverride struct {
 	X, Z  int
 	Skins [FacingCount]byte
 }
 
-// defaultFaceSkins returns a fresh per-face skin array with every face set to
-// the PropLevelAuto sentinel (not 0), so a newly-created override matches its
-// on-disk form ('.' per face) and the dirty check can't false-positive.
+// defaultFaceSkins returns a per-face array all set to PropLevelAuto (not 0), so
+// a new override matches its on-disk form ('.' per face) and won't false-dirty.
 func defaultFaceSkins() [FacingCount]byte {
 	var s [FacingCount]byte
 	for i := range s {
@@ -469,9 +355,8 @@ func (a *AreaDefinition) faceOverrideAt(x, z int) (FaceOverride, bool) {
 	if len(a.FaceOverrides) == 0 {
 		return FaceOverride{}, false
 	}
-	// Build the (x,z)->index map on first use; the render path then resolves
-	// each face in O(1) instead of scanning the whole slice per cube-face per
-	// frame. Invalidated to nil by any mutation (SetFaceDir / CloneArea).
+	// Lazy (x,z)->index map for O(1) render-path lookup; nil'd by any mutation
+	// (SetFaceDir / CloneArea).
 	if a.faceOverrideIdx == nil {
 		a.faceOverrideIdx = make(map[[2]int]int, len(a.FaceOverrides))
 		for i, o := range a.FaceOverrides {
@@ -484,10 +369,8 @@ func (a *AreaDefinition) faceOverrideAt(x, z int) (FaceOverride, bool) {
 	return FaceOverride{}, false
 }
 
-// FaceSkinForDir is the skin the renderer draws on tile (x,z)'s face toward
-// cardinal `dir`: the per-direction override when set, else the tile's base
-// skin. A tile with no override draws its base skin on every face, so any map
-// without faces: overrides renders exactly as before.
+// FaceSkinForDir returns the skin for tile (x,z)'s `dir` face: the override when
+// set, else the base FaceSkinAt skin.
 func (a *AreaDefinition) FaceSkinForDir(x, z, dir int) byte {
 	if len(a.FaceOverrides) > 0 && dir >= 0 && dir < FacingCount {
 		if o, ok := a.faceOverrideAt(x, z); ok {
@@ -499,17 +382,13 @@ func (a *AreaDefinition) FaceSkinForDir(x, z, dir int) byte {
 	return a.FaceSkinAt(x, z)
 }
 
-// SetFaceDir sets tile (x,z)'s `dir` face skin (0=N,1=E,2=S,3=W). A skin equal to
-// the tile's base (or 0 / PropLevelAuto) clears that face's override; an entry
-// whose four faces are all default is dropped, so a tile reverts cleanly and the
-// map omits a faces: section when nothing is overridden.
+// SetFaceDir sets tile (x,z)'s `dir` face skin (0=N,1=E,2=S,3=W). A skin equal
+// to the base (or 0/PropLevelAuto) clears that face; an all-default entry is dropped.
 func (a *AreaDefinition) SetFaceDir(x, z, dir int, skin byte) {
 	if !a.InBounds(x, z) || dir < 0 || dir >= FacingCount {
 		return
 	}
-	// Any edit to FaceOverrides invalidates the lazily-built lookup; it rebuilds
-	// on the next faceOverrideAt. Editor-only path, not hot.
-	a.faceOverrideIdx = nil
+	a.faceOverrideIdx = nil // invalidate lazy lookup (editor-only path)
 	if skin == a.FaceSkinAt(x, z) || skin == 0 {
 		skin = PropLevelAuto
 	}
@@ -524,8 +403,7 @@ func (a *AreaDefinition) SetFaceDir(x, z, dir int, skin byte) {
 		if skin == PropLevelAuto {
 			return
 		}
-		// Init unset faces to the auto sentinel (not 0) so a new override matches
-		// its on-disk form ('.' per face) and the dirty check can't false-positive.
+		// Unset faces init to the auto sentinel so a new override won't false-dirty.
 		nf := FaceOverride{X: x, Z: z, Skins: defaultFaceSkins()}
 		a.FaceOverrides = append(a.FaceOverrides, nf)
 		idx = len(a.FaceOverrides) - 1
@@ -543,28 +421,19 @@ func (a *AreaDefinition) SetFaceDir(x, z, dir int, skin byte) {
 	}
 }
 
-// CeilingAt reports whether the cell has a solid ceiling slab. Out-of-
-// bounds reads as no-ceiling so the renderer doesn't paint slabs past
-// the map edge. Maps loaded from older .map files without a ceiling:
-// section get a blank ceiling layer at parse time, so this always
-// returns false for them.
+// CeilingAt reports whether the cell has a solid ceiling slab. OOB reads as
+// no-ceiling; maps without a ceiling: section get a blank layer (always false).
 func (a *AreaDefinition) CeilingAt(x, z int) bool {
 	c, ok := a.layerByteAt(a.Ceiling, x, z)
 	return ok && c == TileCeilingSolid
 }
 
 // ElevationLevelAt returns the STORED ground level (0..MaxElevationLevel) of
-// tile (x,z); the walkable baseline is ElevationBaseline and the editor/render
-// treat stored−baseline as the signed display level (see ElevationWorldY). Ramp
-// tiles store their LOW level here. Out-of-bounds, a missing/short elevation
-// layer, or a non-digit cell all read as stored 0 — so a map without an
-// elevation layer reads as a flat sheet at the bottom of the range (legacy
-// flat maps predate the baseline and were authored at stored 0).
+// tile (x,z). Ramp tiles store their LOW level. OOB / missing layer / non-digit
+// read as 0 (a map without an elevation layer reads as flat at the bottom).
 func (a *AreaDefinition) ElevationLevelAt(x, z int) int {
-	// With an explicit voxel stack, "the elevation" is the column's top solid
-	// level — the surface a heightfield-era caller means by it. (For a gapped
-	// column this is the floating cube's top, not the standable ground; those
-	// callers are migrated to take an explicit level in the movement pass.)
+	// With an explicit stack, this is the column's top solid level (for a gapped
+	// column, the floating cube's top, not the standable ground).
 	if len(a.Solids) > 0 {
 		if t := a.TopSolidLevel(x, z); t >= 0 {
 			return t
@@ -578,36 +447,22 @@ func (a *AreaDefinition) ElevationLevelAt(x, z int) int {
 	return ElevationLevelFromChar(c)
 }
 
-// Elevation range. The whole world is now built from elevation: walls rise
-// above the baseline, holes/pits drop below it. ElevationBaseline is where the
-// default walkable floor sits, giving authors headroom in BOTH directions
-// (raise for walls/cliffs, lower for pits). New maps fill their elevation layer
-// at the baseline; the editor's height selector opens there.
-//
-// MaxElevationLevel is the highest addressable ground level. Levels 0..9 use
-// the digits '0'..'9'; 10..20 extend into 'A'..'K' (base-36 encoding, one char
-// per cell — see ElevationChar). The single char keeps every grid operation
-// (resize, copy/paste, cell-write, snapshot compare) at 1 char = 1 cell.
+// Elevation range. ElevationBaseline is where the default walkable floor sits,
+// giving headroom in both directions (raise for walls/cliffs, lower for pits).
+// Levels 0..9 use '0'..'9', 10..20 extend into 'A'.. (base-36, one char/cell —
+// see ElevationChar), keeping every grid op at 1 char = 1 cell.
 const (
 	ElevationBaseline = 10
 	MaxElevationLevel = 20
-	// elevDigitSpan is the count of decimal-digit elevation codes ('0'..'9' =
-	// levels 0..9); levels at or above it spill into the letter run ('A'..).
-	// The base-36 pivot shared by ElevationLevelFromChar and ElevationChar so
-	// the digit/letter split has one home.
+	// elevDigitSpan is the base-36 digit/letter pivot ('0'..'9' = 0..9, then 'A'..).
 	elevDigitSpan = 10
-	// ElevationWallRingLevel is the level a default enclosing wall / sealed
-	// border sits at: one step above the walkable baseline, so it reads as a
-	// 1-high cliff you can't cross without a ramp. Shared by the editor's
-	// blankArea + sealWallBorder so "default wall height" has one home.
+	// ElevationWallRingLevel is the default enclosing-wall level: one step above
+	// the baseline so it reads as a 1-high cliff. Shared by blankArea + sealWallBorder.
 	ElevationWallRingLevel = ElevationBaseline + 1
 )
 
-// ElevationLevelFromChar decodes an elevation cell byte to a STORED level:
-// '0'..'9' → 0..9, 'A'.. → 10.. . The result is clamped to
-// [0, MaxElevationLevel] so a hand-edited / legacy char beyond the current
-// range (the encoder caps at MaxElevationLevel) can't feed an out-of-range
-// level into the renderer or ramp math. Anything else reads as stored 0.
+// ElevationLevelFromChar decodes a cell byte to a STORED level ('0'..'9'→0..9,
+// 'A'..→10..), clamped to [0, MaxElevationLevel]; anything else reads as 0.
 func ElevationLevelFromChar(c byte) int {
 	switch {
 	case c >= '0' && c <= '9':
@@ -618,10 +473,8 @@ func ElevationLevelFromChar(c byte) int {
 	return 0
 }
 
-// ElevationChar encodes a level back to its single grid byte — the inverse of
-// ElevationLevelFromChar. Clamped to [0, MaxElevationLevel] so it always yields
-// a valid cell ('0'..'9' then 'A'..'Z'). The one home for the level→char
-// conversion the editor uses at every height-stamp / ramp-placement site.
+// ElevationChar encodes a level to its grid byte (inverse of ElevationLevelFromChar),
+// clamped to [0, MaxElevationLevel].
 func ElevationChar(level int) byte {
 	level = Clamp(level, 0, MaxElevationLevel)
 	if level < elevDigitSpan {
@@ -630,8 +483,7 @@ func ElevationChar(level int) byte {
 	return byte('A' + (level - elevDigitSpan))
 }
 
-// IsRampChar reports whether a floor-layer char is one of the four directional
-// ramp tiles.
+// IsRampChar reports whether a floor char is one of the four ramp tiles.
 func IsRampChar(c byte) bool {
 	switch c {
 	case FloorRampNorth, FloorRampEast, FloorRampSouth, FloorRampWest:
@@ -640,8 +492,7 @@ func IsRampChar(c byte) bool {
 	return false
 }
 
-// RampAscentFacing maps a ramp floor char to the cardinal facing it rises
-// toward (uphill), as a North/East/South/West int usable with FacingVector.
+// RampAscentFacing maps a ramp char to the cardinal facing it rises toward;
 // ok=false for non-ramp chars.
 func RampAscentFacing(c byte) (int, bool) {
 	switch c {
@@ -657,9 +508,8 @@ func RampAscentFacing(c byte) (int, bool) {
 	return 0, false
 }
 
-// RampCharForFacing returns the ramp floor char that ascends toward the given
-// cardinal facing — the inverse of RampAscentFacing. Used by the editor's
-// smart ramp tool to stamp the right arrow once it knows which way is uphill.
+// RampCharForFacing returns the ramp char ascending toward `facing` (inverse of
+// RampAscentFacing).
 func RampCharForFacing(facing int) byte {
 	switch NormalizeFacing(facing) {
 	case North:
@@ -674,9 +524,8 @@ func RampCharForFacing(facing int) byte {
 	return FloorRampNorth
 }
 
-// RampAt reports whether tile (x,z)'s floor is a ramp and, if so, the cardinal
-// facing it ascends toward. Convenience over reading Floor[z][x] +
-// RampAscentFacing at the call site; ok=false out of bounds or on flat floor.
+// RampAt reports whether tile (x,z)'s floor is a ramp and its ascent facing;
+// ok=false OOB or on flat floor.
 func (a *AreaDefinition) RampAt(x, z int) (facing int, ok bool) {
 	c, present := a.layerByteAt(a.Floor, x, z)
 	if !present {
@@ -685,29 +534,22 @@ func (a *AreaDefinition) RampAt(x, z int) (facing int, ok bool) {
 	return RampAscentFacing(c)
 }
 
-// ElevationWorldY is the world-space Y of a tile's floor at the given stored
-// level. The walkable baseline (ElevationBaseline) renders at y=0, so a flat
-// map sits at the origin (matching where combat and every y~0 assumption
-// expects the ground) while walls rise to +N·LevelStep and pits drop to
-// negative Y. The single place the stored-level→world-Y offset lives.
+// ElevationWorldY is the world-space Y of a floor at the given stored level.
+// ElevationBaseline renders at y=0 (flat map sits at the origin, where combat
+// and y~0 assumptions expect ground); the one home for stored-level→world-Y.
 func ElevationWorldY(level int) float32 {
 	return float32(level-ElevationBaseline) * LevelStep
 }
 
-// StandGroundY returns the world-space Y of the ground at tile (x,z): the
-// resting height the player / a billboard sits at. Flat tiles read
-// ElevationWorldY(level); a ramp reads its MID-slope height (low+0.5 levels),
-// since a unit standing on the ramp tile rests at its center, halfway up.
+// StandGroundY returns the world-space Y a unit rests at on tile (x,z). Flat =
+// ElevationWorldY(level); a ramp reads its MID-slope height (low+0.5 levels).
 func (a *AreaDefinition) StandGroundY(x, z int) float32 {
 	return a.StandGroundYAt(x, a.ElevationLevelAt(x, z), z)
 }
 
-// StandGroundYAt is StandGroundY for an EXPLICIT standing level — the world Y of
-// the surface a unit standing atop cube `level` in column (x,z) rests at. A ramp
-// tile still reads its mid-slope height (+0.5 level). The voxel movement/camera
-// path calls this with the unit's resolved level so a unit on a bridge deck and
-// one on the ground beneath it sit at their own heights, not a single per-column
-// value. StandGroundY is the special case level==ElevationLevelAt (column top).
+// StandGroundYAt is StandGroundY for an EXPLICIT standing level, so a unit on a
+// bridge deck and one on the ground beneath it sit at their own heights. A ramp
+// still reads +0.5 level. StandGroundY is the level==column-top special case.
 func (a *AreaDefinition) StandGroundYAt(x, level, z int) float32 {
 	y := float32(level - ElevationBaseline)
 	if _, ok := a.RampAt(x, z); ok {
@@ -716,18 +558,14 @@ func (a *AreaDefinition) StandGroundYAt(x, level, z int) float32 {
 	return y * LevelStep
 }
 
-// NoRamp is the sentinel ramp facing for a flat (non-ramp) tile, passed to
-// EdgeLevelOf.
+// NoRamp is the sentinel ramp facing for a flat tile, passed to EdgeLevelOf.
 const NoRamp = -1
 
-// EdgeLevelOf is the pure edge-level rule given a tile's stored `level` and
-// `rampFacing` (NoRamp for a flat tile). A flat tile presents its level on all
-// four edges; a ramp presents its HIGH level (low+1) on the edge it ascends
-// toward, its LOW level on the opposite edge, and NO walkable edge (ok=false)
-// on its two perpendicular sides (sheer). The single home for the rule — both
-// edgeLevel (which reads level+ramp off the area) and the renderer's cliff-face
-// pass (which reads them from a per-frame grid) call this, so the math can't
-// drift between movement and rendering.
+// EdgeLevelOf is the pure edge-level rule for a tile's stored `level` and
+// `rampFacing` (NoRamp = flat). Flat presents `level` on all edges; a ramp
+// presents HIGH (low+1) on the edge it ascends toward, LOW on the opposite, and
+// no walkable edge (ok=false) on its sheer perpendicular sides. Shared by
+// edgeLevel and the renderer's cliff-face pass so movement and render can't drift.
 func EdgeLevelOf(level, rampFacing, dir int) (int, bool) {
 	if rampFacing == NoRamp {
 		return level, true
@@ -742,9 +580,8 @@ func EdgeLevelOf(level, rampFacing, dir int) (int, bool) {
 	}
 }
 
-// edgeLevel returns the elevation level at tile (x,z)'s edge facing `dir`, and
-// ok=false when there's no walkable edge there. Fetches the tile's level + ramp
-// and delegates the rule to EdgeLevelOf.
+// edgeLevel returns the level at tile (x,z)'s `dir` edge (ok=false if no walkable
+// edge), delegating the rule to EdgeLevelOf.
 func (a *AreaDefinition) edgeLevel(x, z, dir int) (int, bool) {
 	if !a.InBounds(x, z) {
 		return 0, false
@@ -756,22 +593,16 @@ func (a *AreaDefinition) edgeLevel(x, z, dir int) (int, bool) {
 	return EdgeLevelOf(a.ElevationLevelAt(x, z), ramp, dir)
 }
 
-// OppositeFacing returns the reverse cardinal of `f` (North↔South, East↔West) —
-// the wrap-safe "+2 around the compass" rule, named so the opposite-edge logic
-// isn't open-coded as NormalizeFacing(f+2) at each call site.
+// OppositeFacing returns the reverse cardinal of `f` (the wrap-safe +2 rule).
 func OppositeFacing(f int) int { return NormalizeFacing(f + 2) }
 
 // CardinalDirs is the canonical N→E→S→W neighbour order, shared by the
-// face/exposure walks (core.TileExposesFace, render.drawCliffFaces) so the
-// "for each cardinal neighbour" iteration isn't re-listed per call site.
+// face/exposure walks (TileExposesFace, render.drawCliffFaces).
 var CardinalDirs = [FacingCount]int{North, East, South, West}
 
-// NeighbourEdgeLevel returns the elevation level the neighbour at (nx,nz)
-// presents across the edge entered from `fromDir`: ramp-aware via edgeLevel
-// when it has a walkable edge, its flat level otherwise, and the baseline when
-// off-map (so a raised border shows a clean 1-high lip, not a plunge to the
-// bottom of the range). The single rule both the editor's face-menu gating and
-// the renderer's cliff-face pass agree on.
+// NeighbourEdgeLevel returns the level the neighbour at (nx,nz) presents across
+// the edge entered from `fromDir`: ramp-aware edgeLevel, else flat level, else
+// the baseline off-map (so a raised border shows a clean 1-high lip).
 func (a *AreaDefinition) NeighbourEdgeLevel(nx, nz, fromDir int) int {
 	if !a.InBounds(nx, nz) {
 		return ElevationBaseline
@@ -782,12 +613,9 @@ func (a *AreaDefinition) NeighbourEdgeLevel(nx, nz, fromDir int) int {
 	return a.ElevationLevelAt(nx, nz)
 }
 
-// TileExposesFace reports whether tile (x,z) renders at least one cliff face —
-// it's not a ramp (ramps draw their own wedge) and sits above some cardinal
-// neighbour (or the baseline at the map edge). The authority the editor's "Set
-// face" menu gates on; the renderer's drawCliffFaces mirrors this per-edge for
-// the actual draw (reading a per-frame grid for speed) so the two never
-// disagree about which tiles show faces.
+// TileExposesFace reports whether tile (x,z) renders >=1 cliff face — not a ramp
+// and above some cardinal neighbour (or the baseline at the edge). The editor's
+// "Set face" menu gates on this; renderer.drawCliffFaces mirrors it per-edge.
 func TileExposesFace(a *AreaDefinition, x, z int) bool {
 	if _, isRamp := a.RampAt(x, z); isRamp {
 		return false
@@ -802,12 +630,9 @@ func TileExposesFace(a *AreaDefinition, x, z int) bool {
 	return false
 }
 
-// StepElevationOK reports whether a step from (fromX,fromZ) to the adjacent
-// tile in cardinal direction `dir` connects without a cliff — i.e. the edge
-// the player leaves and the edge they enter sit at the same elevation level,
-// honoring ramps (which bridge two levels). A mismatch is a cliff (blocked);
-// a perpendicular attempt to mount/dismount a ramp is also blocked (edgeLevel
-// returns ok=false there). Flat-to-flat at equal levels always passes.
+// StepElevationOK reports whether a step from (fromX,fromZ) toward `dir` connects
+// without a cliff — leave-edge and enter-edge levels match (ramp-aware). A
+// mismatch or a perpendicular ramp mount/dismount is blocked.
 func (a *AreaDefinition) StepElevationOK(fromX, fromZ, dir int) bool {
 	dx, dz := FacingVector(dir)
 	from, ok1 := a.edgeLevel(fromX, fromZ, dir)
@@ -815,11 +640,8 @@ func (a *AreaDefinition) StepElevationOK(fromX, fromZ, dir int) bool {
 	return ok1 && ok2 && from == to
 }
 
-// TileAt returns a "compositing" character for code that just wants to
-// know what's most-significantly at a cell — props win over deep water win
-// over open. Used by the minimap and any callers that haven't switched to
-// explicit per-layer queries yet. (Walls are gone; barriers are elevation,
-// which the minimap reads separately via ElevationLevelAt.)
+// TileAt returns a composite char for "what's most-significantly here" — props
+// > deep water > open. Used by the minimap; elevation is read separately.
 func (a *AreaDefinition) TileAt(x, z int) byte {
 	if !a.InBounds(x, z) {
 		return TileOpen
@@ -833,17 +655,10 @@ func (a *AreaDefinition) TileAt(x, z int) byte {
 	return TileOpen
 }
 
-// BlockedAt reports whether a tile is impossible to STAND on — a blocking prop
-// or a blocking floor (deep water). It does NOT consider elevation: a raised
-// tile is perfectly standable, you just can't STEP onto it across a cliff
-// without a ramp (that lateral rule lives in StepElevationOK). Out-of-bounds
-// reads as blocked so callers don't have to range-check first.
-//
-// Runtime blockers like chests sit on a separate slice (GameState.Chests)
-// and are NOT considered here — explore.go layers a ChestAt check on
-// top of BlockedAt to avoid coupling the area definition to runtime
-// state, and so the editor (which only ever holds an AreaDefinition)
-// can still call BlockedAt without seeing a phantom block.
+// BlockedAt reports whether a tile is impossible to STAND on (blocking prop or
+// deep water). Does NOT consider elevation (the lateral cliff rule is in
+// StepElevationOK); OOB reads as blocked. Runtime blockers (chests) are layered
+// on by explore.go, not here, so the editor can call this without runtime state.
 func (a *AreaDefinition) BlockedAt(x, z int) bool {
 	if !a.InBounds(x, z) {
 		return true
@@ -857,11 +672,8 @@ func (a *AreaDefinition) BlockedAt(x, z int) bool {
 	return false
 }
 
-// PropIsNonBlocking reports whether a prop char, despite being a valid
-// prop (IsPropChar true), should NOT block movement. Wall-mounted
-// torches sit on the wall and leave the floor clear, so the player
-// (and packs) can walk through their tile — letting torches line a
-// corridor without sealing it. Every other prop blocks.
+// PropIsNonBlocking reports whether a valid prop char should NOT block movement
+// (wall torches, decorative plants — walkable). Every other prop blocks.
 func PropIsNonBlocking(c byte) bool {
 	switch c {
 	case TileTorch, TilePropExoticFlower, TilePropTallFern, TilePropGrassTuft:
@@ -870,12 +682,10 @@ func PropIsNonBlocking(c byte) bool {
 	return false
 }
 
-// PropBlockHeight is how many voxel levels a blocking prop occupies upward from
-// the surface it stands on — its "tallness" for level-aware collision. A
-// non-blocking or empty cell is 0. Squat props (young tree, boulder, bush) block
-// their own level only (1); full trees / cairns / formations block 2. This is
-// what lets a tree rooted on the ground block the walk-under path beneath a deck
-// while leaving the deck (two levels up) walkable.
+// PropBlockHeight is how many voxel levels a blocking prop occupies upward (its
+// "tallness" for level-aware collision); 0 if non-blocking/empty. Squat props
+// block 1, full trees/cairns/formations block 2 — so a ground tree blocks the
+// walk-under path while leaving the deck above walkable.
 func PropBlockHeight(c byte) int {
 	switch c {
 	case TileTreeYoung, TileRockLarge, TileBushLarge:
@@ -887,25 +697,19 @@ func PropBlockHeight(c byte) int {
 	return 0
 }
 
-// PropLevelAuto is the prop-level sentinel meaning "no explicit level — rest on
-// the column's lowest standable surface." Disjoint from the base-36 level chars
-// ('0'..'9','A'..) ElevationChar emits, so the auto case can't be confused with
-// an authored level. An absent PropLevels grid reads as all-auto.
+// PropLevelAuto is the "no explicit level — rest on the column's lowest
+// standable surface" sentinel, disjoint from the base-36 level chars. Absent
+// PropLevels grid reads as all-auto.
 const PropLevelAuto = '.'
 
-// levelGridAt reads one of the optional per-tile level grids (PropLevels /
-// DecorLevels): the authored base-36 char when set, else the column's lowest
-// standable surface (the auto default — where the thing sat before per-level
-// placement existed). Shared so prop and decor placement can't drift on the rule.
+// levelGridAt reads a per-tile level grid (PropLevels / DecorLevels): the
+// authored char when set, else the column's lowest standable surface.
 func (a *AreaDefinition) levelGridAt(layer []string, x, z int) int {
 	if c, ok := a.layerByteAt(layer, x, z); ok && c != PropLevelAuto {
 		return ElevationLevelFromChar(c)
 	}
-	// Auto: rest on the column's lowest standable surface. On a heightfield (no
-	// explicit stack) that surface is exactly the column top, so read it directly
-	// — LowestStandableLevel would call SolidStackHeight, which scans the WHOLE
-	// map, and this runs per-tile per-frame in the render loop (drawWorld anchors
-	// every decor/prop through here). Only a gapped voxel column needs the walk.
+	// Heightfield auto = column top, read directly: LowestStandableLevel scans the
+	// whole map, and this runs per-tile per-frame in drawWorld. Only gapped columns walk.
 	if len(a.Solids) == 0 {
 		return a.ElevationLevelAt(x, z)
 	}
@@ -915,19 +719,13 @@ func (a *AreaDefinition) levelGridAt(layer []string, x, z int) int {
 	return a.ElevationLevelAt(x, z)
 }
 
-// PropLevelAt is the level the prop on tile (x,z) sits on (render + collision use
-// it). DecorLevelAt is the same for decor. See levelGridAt.
+// PropLevelAt / DecorLevelAt are the level the prop/decor on tile (x,z) sits on.
 func (a *AreaDefinition) PropLevelAt(x, z int) int  { return a.levelGridAt(a.PropLevels, x, z) }
 func (a *AreaDefinition) DecorLevelAt(x, z int) int { return a.levelGridAt(a.DecorLevels, x, z) }
 
-// PropBlocksStanding reports whether the blocking prop on tile (x,z) occupies the
-// given standing level — a unit trying to stand on surface `level` would be
-// inside the prop. The prop roots on PropLevelAt (where it was placed) and rises
-// PropBlockHeight levels. On a single-surface (heightfield) column this is just
-// "the prop blocks the tile"; on a gapped column it blocks only the levels the
-// prop fills, so you can walk under a deck past a ground-rooted tree (and can't
-// stand where the trunk is), or under a deck-mounted prop while the ground is
-// clear.
+// PropBlocksStanding reports whether the prop on tile (x,z) occupies standing
+// `level` — it roots at PropLevelAt and rises PropBlockHeight. On a gapped column
+// it blocks only those levels, so you can walk under a deck past a ground tree.
 func (a *AreaDefinition) PropBlocksStanding(x, level, z int) bool {
 	c, ok := a.layerByteAt(a.Props, x, z)
 	if !ok || !IsPropChar(c) || PropIsNonBlocking(c) {
@@ -938,24 +736,14 @@ func (a *AreaDefinition) PropBlocksStanding(x, level, z int) bool {
 	return level >= base && level < base+h
 }
 
-// EnterOpts parameterizes CanEnterTile. The zero value forbids door
-// stepping, the player tile, and any pack-occupied tile — i.e. the
-// strictest set of runtime blockers a pack faces during wandering.
-// Callers flip the booleans for their context:
-//   - Player step: AllowDoorTile=true (steps onto doors trigger area
-//     transitions), AllowPlayerTile is meaningless (the player isn't
-//     on the destination tile yet anyway), OccupiedPacks=nil (the
-//     pack-collision rule is owned by the caller, which has the
-//     separate "step into pack → engage" branch).
-//   - Pack chase: AllowPlayerTile=true (the chase tile IS the player —
-//     that's the engagement signal), AllowDoorTile=false, supply
-//     OccupiedPacks to skip squares held by other packs.
-//   - Pack wander: AllowPlayerTile=false (a passive wander shouldn't
-//     accidentally engage), AllowDoorTile=false, OccupiedPacks set.
+// EnterOpts parameterizes CanEnterTile. Zero value = strictest (forbid doors,
+// the player tile, pack-occupied tiles), the pack-wander set. Callers flip:
+//   - Player step: AllowDoorTile=true, OccupiedPacks=nil (caller owns the
+//     step-into-pack→engage branch).
+//   - Pack chase: AllowPlayerTile=true (the chase tile IS the player), OccupiedPacks set.
+//   - Pack wander: all false, OccupiedPacks set.
 //
-// PlayerTileX/Z is only consulted when OccupiedPacks is non-nil OR
-// AllowPlayerTile is set — saves callers from having to fish out the
-// player's tile when their context doesn't care.
+// PlayerTileX/Z is consulted only when OccupiedPacks!=nil OR AllowPlayerTile.
 type EnterOpts struct {
 	AllowDoorTile   bool
 	AllowPlayerTile bool
@@ -964,14 +752,8 @@ type EnterOpts struct {
 	OccupiedPacks   map[[2]int]bool
 }
 
-// CanEnterTile is the single-source-of-truth predicate for "can an
-// actor legally step onto (tx, tz) right now." Composes the area's
-// static BlockedAt (walls, props, deep water) with the runtime
-// blockers (chests, doors, packs, player). Centralizes a rule that
-// used to live in both packai.go and explore/movement.go's startStep —
-// future balance tweaks (packs-block-player, packs-walk-through-doors,
-// chests-don't-block-packs) are a one-line flip of EnterOpts at the
-// call site instead of forking the predicate.
+// CanEnterTile is the single predicate for "can an actor legally step onto
+// (tx,tz) now": static BlockedAt + runtime blockers (chests, doors, packs, player).
 func CanEnterTile(g *GameState, tx, tz int, opts EnterOpts) bool {
 	if g == nil || !g.Area.InBounds(tx, tz) {
 		return false
@@ -982,12 +764,9 @@ func CanEnterTile(g *GameState, tx, tz int, opts EnterOpts) bool {
 	return canEnterRuntimeBlockers(g, tx, tz, opts)
 }
 
-// CanEnterTileAtLevel is CanEnterTile with LEVEL-AWARE prop blocking — a prop
-// blocks only the levels it occupies (PropBlocksStanding) instead of the whole
-// column, so a unit can step UNDER a deck past a ground-rooted tree (and can't
-// stand where the trunk actually is). The voxel movement / pack-AI paths, which
-// resolve a destination standing level, use this; flat-map paths keep
-// CanEnterTile. Blocking floor (deep water) still blocks regardless of level.
+// CanEnterTileAtLevel is CanEnterTile with LEVEL-AWARE prop blocking
+// (PropBlocksStanding), so a unit can step UNDER a deck past a ground tree. Used
+// by voxel movement / pack-AI; deep water still blocks regardless of level.
 func CanEnterTileAtLevel(g *GameState, tx, tz, level int, opts EnterOpts) bool {
 	if g == nil || !g.Area.InBounds(tx, tz) {
 		return false
@@ -1001,14 +780,9 @@ func CanEnterTileAtLevel(g *GameState, tx, tz, level int, opts EnterOpts) bool {
 	return canEnterRuntimeBlockers(g, tx, tz, opts)
 }
 
-// canEnterRuntimeBlockers is the shared runtime-blocker tail of the CanEnterTile
-// family: chests, doors, and the player/other-pack occupancy rules. Static
-// terrain (walls/props/floor) is checked by the caller first; this owns only the
-// GameState-side blockers so the two entry predicates can't drift.
-//
-// PlayerTileX/Z is only meaningful when the caller declared a player position —
-// either AllowPlayerTile (pack-chase "the player IS the destination") or
-// OccupiedPacks (pack-AI avoiding the player). Without that gate the zero-default
+// canEnterRuntimeBlockers is the shared runtime-blocker tail (chests, doors,
+// player/pack occupancy); static terrain is checked by the caller first.
+// PlayerTileX/Z is gated on AllowPlayerTile/OccupiedPacks, else the zero-default
 // (0,0) would falsely block every step toward tile (0,0).
 func canEnterRuntimeBlockers(g *GameState, tx, tz int, opts EnterOpts) bool {
 	if ChestIndexAt(g.Chests, tx, tz) >= 0 {
@@ -1028,19 +802,12 @@ func canEnterRuntimeBlockers(g *GameState, tx, tz int, opts EnterOpts) bool {
 	return true
 }
 
-// ChestTakeAllRow is the synthetic row index that sits one past the
-// last live-stack row in the chest-open modal — selecting it drains
-// every remaining stack. Both the input loop (explore/chest.go) and
-// the renderer (render/chest.go) pivot on this index, so the convention
-// lives in core where neither package "owns" it. `stackCount` is
-// len(LiveStacks(chest.Items)).
+// ChestTakeAllRow is the synthetic row one past the last live-stack row in the
+// chest modal (selecting it drains all). `stackCount` is len(LiveStacks(chest.Items)).
 func ChestTakeAllRow(stackCount int) int { return stackCount }
 
-// MarkChestLootedIfEmpty flips the chest's Looted flag (and clears any
-// zero-count stack residue) when every stack has been drained. Single
-// source of truth for "is this chest empty enough to render with the
-// lid open?" — replaces the small empty-check duplicated between the
-// chest-modal's Take-All path and its close path.
+// MarkChestLootedIfEmpty flips Looted (and clears zero-count residue) once every
+// stack is drained.
 func MarkChestLootedIfEmpty(c *Chest) {
 	if c == nil {
 		return
@@ -1051,21 +818,14 @@ func MarkChestLootedIfEmpty(c *Chest) {
 	}
 }
 
-// ChestIndexAt returns the index of the chest on the given tile, or -1
-// when no chest is there. Linear scan; chest counts per map are tiny
-// (<10 typical) so a map keyed by [2]int isn't worth the allocation.
-// DoorIndexAt and PackIndexAtTile follow the same pattern via
-// slices.IndexFunc — three linear "find spawn at tile" lookups sharing
-// the stdlib idiom.
+// ChestIndexAt returns the index of the chest on (x,z), or -1. Linear scan
+// (chest counts per map are tiny); DoorIndexAt / PackIndexAtTile share the idiom.
 func ChestIndexAt(chests []Chest, x, z int) int {
 	return slices.IndexFunc(chests, func(c Chest) bool { return c.TileX == x && c.TileZ == z })
 }
 
-// AdjacentChestIndex returns the index of a chest the player can reach
-// from (x, z) via a one-tile step in any cardinal direction, or -1 when
-// none. Used by movement and rendering paths that need ANY adjacent
-// chest (including looted ones — the lid model still blocks the tile).
-// Diagonals don't count — the player can't step diagonally either.
+// AdjacentChestIndex returns the index of a chest one cardinal step from (x,z),
+// or -1. Includes looted chests (lid still blocks the tile); no diagonals.
 func AdjacentChestIndex(chests []Chest, x, z int) int {
 	for i, c := range chests {
 		if ManhattanDistance(c.TileX, c.TileZ, x, z) == 1 {
@@ -1075,11 +835,7 @@ func AdjacentChestIndex(chests []Chest, x, z int) int {
 	return -1
 }
 
-// AdjacentInteractableChestIndex is the openable-only variant: skips
-// chests that have already been looted, since their dialog can't be
-// re-opened. Both the Confirm-key interaction (explore) and the
-// adjacent-chest prompt (render) want this filtered form, so the
-// "is there an openable chest next to me?" rule lives in one place.
+// AdjacentInteractableChestIndex is the openable-only variant (skips looted chests).
 func AdjacentInteractableChestIndex(chests []Chest, x, z int) int {
 	idx := AdjacentChestIndex(chests, x, z)
 	if idx < 0 || chests[idx].Looted {
@@ -1088,10 +844,8 @@ func AdjacentInteractableChestIndex(chests []Chest, x, z int) int {
 	return idx
 }
 
-// SpawnIndexAt is the shared "find the authored spawn on this tile" scan,
-// generic over any TileXZ spawn type. Matches the slices.IndexFunc idiom
-// the runtime ChestIndexAt / DoorIndexAt helpers use, so all the tile
-// lookups share one shape.
+// SpawnIndexAt is the shared "find the authored spawn at (x,z)" scan, generic
+// over any TileXZ spawn type.
 func SpawnIndexAt[T TileXZ](spawns []T, x, z int) int {
 	return slices.IndexFunc(spawns, func(s T) bool {
 		tx, tz := s.Tile()
@@ -1099,45 +853,28 @@ func SpawnIndexAt[T TileXZ](spawns []T, x, z int) int {
 	})
 }
 
-// PackSpawnIndexAt returns the index of the pack spawn at the given
-// tile, or -1 when none. Authored-list mirror of the in-pack ChestIndexAt
-// helper; the editor's hover summary uses it and a future "tile
-// inspector" anywhere else can reuse it.
+// PackSpawnIndexAt returns the index of the pack spawn at (x,z), or -1.
 func PackSpawnIndexAt(spawns []PackSpawn, x, z int) int {
 	return SpawnIndexAt(spawns, x, z)
 }
 
-// ChestSpawnIndexAt returns the index of the chest spawn at the given
-// tile, or -1 when none. Authored-list counterpart to runtime
-// ChestIndexAt.
+// ChestSpawnIndexAt returns the index of the chest spawn at (x,z), or -1.
 func ChestSpawnIndexAt(spawns []ChestSpawn, x, z int) int {
 	return SpawnIndexAt(spawns, x, z)
 }
 
-// DoorSpawnIndexAt returns the index of the door spawn at the given
-// tile, or -1 when none. Authored-list counterpart to runtime
-// DoorIndexAt.
+// DoorSpawnIndexAt returns the index of the door spawn at (x,z), or -1.
 func DoorSpawnIndexAt(spawns []DoorSpawn, x, z int) int {
 	return SpawnIndexAt(spawns, x, z)
 }
 
-// CrystalSpawnIndexAt returns the index of the crystal spawn at the given
-// tile, or -1 when none. Authored-list counterpart to runtime
-// CrystalIndexAt.
+// CrystalSpawnIndexAt returns the index of the crystal spawn at (x,z), or -1.
 func CrystalSpawnIndexAt(spawns []CrystalSpawn, x, z int) int {
 	return SpawnIndexAt(spawns, x, z)
 }
 
-// AreaTileSummary returns a compact human-readable description of
-// what's painted on the (x, z) tile across every layer + every
-// entity list. Empty layers are omitted so a clean grass cell reads
-// as just "Grass" rather than "Open / Grass / — / —". Returns
-// "(empty)" only when the cell holds nothing. Returns "" for an
-// out-of-bounds tile.
-//
-// Used by the editor's hover-tile readout and reusable by any future
-// in-game tile inspector / debug overlay. Moved out of the editor
-// package so the per-layer label + entity walk lives in one place.
+// AreaTileSummary describes what's painted on (x,z) across every layer + entity
+// list, omitting empty layers. "(empty)" when nothing, "" when OOB.
 func AreaTileSummary(a *AreaDefinition, x, z int) string {
 	if !a.InBounds(x, z) {
 		return ""
@@ -1184,11 +921,8 @@ func AreaTileSummary(a *AreaDefinition, x, z int) string {
 	return joinSummary(parts)
 }
 
-// joinSummary concatenates AreaTileSummary parts with " / " — pulled
-// out so core/map.go doesn't pull in "strings" just for one call. Builds into
-// a single pre-sized byte buffer rather than repeated `out += …` concatenation
-// (which allocated one throwaway string per part), since the editor hover
-// readout calls this every frame.
+// joinSummary concatenates parts with " / " into one pre-sized buffer (called
+// every frame by the editor hover readout; avoids per-part allocations).
 func joinSummary(parts []string) string {
 	if len(parts) == 1 {
 		return parts[0]
@@ -1212,28 +946,18 @@ func (a *AreaDefinition) FloorAt(x, z int) bool {
 	return !a.BlockedAt(x, z)
 }
 
-// InBounds reports whether the (x, z) coordinate sits inside the area's
-// declared dimensions.
+// InBounds reports whether (x, z) is inside the area's dimensions.
 func (a *AreaDefinition) InBounds(x, z int) bool {
 	return z >= 0 && z < a.Height && x >= 0 && x < a.Width
 }
 
-// MultiTileOffset is one cell of a multi-tile prop's footprint, expressed
-// as a (dx, dz) offset from the anchor tile.
+// MultiTileOffset is one footprint cell as a (dx, dz) offset from the anchor.
 type MultiTileOffset struct {
 	DX, DZ int
 }
 
-// FootprintCentroid returns the (dx, dz) offset from the anchor tile's
-// center to the geometric center of the whole footprint, expressed in
-// tile-space units (one unit = TileSize). For a 2×2 footprint anchored
-// at the top-left the centroid sits at (+0.5, +0.5); for a 1×2 anchored
-// on the left it sits at (+0.5, 0). Returns (0, 0) for a single-tile
-// footprint or an empty slice — caller can multiply by TileSize for
-// world-space offsets.
-//
-// Used by the renderer's multi-tile prop / decor dispatch so the
-// per-anchor "+TileSize*0.5" literals stay out of the call site.
+// FootprintCentroid returns the (dx, dz) offset (tile-space units) from the
+// anchor center to the footprint's geometric center; (0,0) for single-tile/empty.
 func FootprintCentroid(offsets []MultiTileOffset) (dx, dz float32) {
 	if len(offsets) <= 1 {
 		return 0, 0
@@ -1247,53 +971,34 @@ func FootprintCentroid(offsets []MultiTileOffset) (dx, dz float32) {
 	return sx / n, sz / n
 }
 
-// FootprintWorldOffset returns the world-space (X, Z) offset from the
-// anchor tile's center to the centroid of the footprint — i.e.
-// FootprintCentroid scaled by TileSize. Drops the per-call-site
-// `cdx*core.TileSize, cdz*core.TileSize` arithmetic the renderer was
-// repeating once for props and once for decor.
+// FootprintWorldOffset is FootprintCentroid scaled by TileSize (world-space).
 func FootprintWorldOffset(offsets []MultiTileOffset) (x, z float32) {
 	cdx, cdz := FootprintCentroid(offsets)
 	return cdx * TileSize, cdz * TileSize
 }
 
-// PropFootprint returns the cells occupied by the prop anchored at the
-// given anchor char, including the anchor itself at (0,0). Single-tile
-// props return a single-element slice. Returns nil for non-anchor or
-// unknown chars — callers should treat that as "single-tile".
-//
-// The returned slice is SHARED + read-only (the offsets are constant per
-// anchor) — callers must not mutate it. It used to return a fresh literal,
-// but the world-draw loop calls this per visible multi-tile anchor every
-// frame, so a shared backing array avoids a per-frame heap allocation.
-//
-// Used by the editor to auto-fill footprint shadow chars when painting a
-// multi-tile anchor, and to validate the footprint fits in-bounds before
-// the click commits.
+// PropFootprint returns the cells (incl. anchor at (0,0)) occupied by the prop
+// at `anchor`; nil for non-anchor/unknown (treat as single-tile). The returned
+// slice is SHARED + read-only — must not be mutated (avoids per-frame allocation).
 func PropFootprint(anchor byte) []MultiTileOffset {
 	return propFootprints[anchor].offsets
 }
 
-// footprintDef bundles a multi-tile anchor's footprint offsets with the tail
-// char stamped on every non-anchor cell of that footprint. Pairing them in one
-// row (instead of two parallel switches keyed on the same anchor) means adding
-// a multi-tile anchor is one table entry and the offsets + tail can't drift.
+// footprintDef bundles a multi-tile anchor's offsets with the tail char stamped
+// on every non-anchor cell, so adding an anchor is one table entry.
 type footprintDef struct {
 	offsets []MultiTileOffset
 	tail    byte
 }
 
-// Shared, read-only footprint offset slices. Package-level so the per-frame
-// draw path returns them without allocating a fresh literal each call.
+// Shared, read-only footprint offset slices (package-level to avoid per-frame allocation).
 var (
 	rockFormationFootprint = []MultiTileOffset{{0, 0}, {1, 0}, {0, 1}, {1, 1}}
 	archwayFootprint       = []MultiTileOffset{{0, 0}, {1, 0}}
 )
 
-// propFootprints / decorFootprints map a multi-tile anchor char to its
-// footprint + tail. A miss returns the zero footprintDef (nil offsets, tail 0),
-// matching "single-tile or unknown anchor." The four accessors below read these
-// so the offsets and tail for one anchor stay defined together.
+// propFootprints / decorFootprints map an anchor char to its footprint + tail;
+// a miss returns the zero footprintDef ("single-tile or unknown anchor").
 var (
 	propFootprints = map[byte]footprintDef{
 		TileRockFormation: {offsets: rockFormationFootprint, tail: TileRockFormationTail},
@@ -1303,17 +1008,13 @@ var (
 	}
 )
 
-// PropFootprintTail returns the char that should be written to the tail
-// cells of a multi-tile prop's footprint (every cell except the anchor).
-// Returns 0 if the anchor is single-tile or unknown.
+// PropFootprintTail returns the tail char for a multi-tile prop's non-anchor
+// cells; 0 if single-tile/unknown.
 func PropFootprintTail(anchor byte) byte {
 	return propFootprints[anchor].tail
 }
 
-// DecorFootprint mirrors PropFootprint for the decor layer. Decor doesn't
-// block, but multi-tile decor (archways) still needs to mark its
-// footprint so the renderer's anchor draws the spanning mesh and the
-// tail draws nothing.
+// DecorFootprint mirrors PropFootprint for the decor layer.
 func DecorFootprint(anchor byte) []MultiTileOffset {
 	return decorFootprints[anchor].offsets
 }
@@ -1323,31 +1024,21 @@ func DecorFootprintTail(anchor byte) byte {
 	return decorFootprints[anchor].tail
 }
 
-// propTileCharList is the canonical list of every prop-layer char that
-// blocks movement. IsPropChar dispatches against it via a set; the
-// renderer's minimap walks PropTileChars() to assert its color map
-// covers every entry. Kept package-private so external callers can't
-// mutate the slice — use the PropTileChars() accessor for read-only
-// access, which returns a defensive copy.
+// propTileCharList is the canonical list of every blocking prop-layer char
+// (IsPropChar dispatches via a set; PropTileChars() exposes a defensive copy).
 var propTileCharList = []byte{
 	TileTree, TileTreeXL, TileTreeTall, TileTreeTwin, TileTreeYoung,
 	TileRockLarge, TileBushLarge,
 	TileCrate, TileBarrel, TileUrn, TileStalagmite,
 	TilePillar, TileBrokenPillar, TileStatue, TileObelisk, TileFountain,
 	TileRockCairn, TileRockFormation, TileRockFormationTail,
-	// Outdoor batch.
 	TileWell, TileGravestone, TileSignPost, TileHayBale, TileScarecrow,
-	// Dungeon-interior batch.
 	TileBookshelf, TileTable, TileBed, TileBrazier, TileSarcophagus,
-	// Wall torch — a prop char for rendering/editor/registry, but
-	// exempted from blocking in BlockedAt (it mounts on the wall).
-	TileTorch,
-	// Non-blocking decorative plants (also exempted in PropIsNonBlocking).
-	TilePropExoticFlower, TilePropTallFern, TilePropGrassTuft,
+	TileTorch, // prop char, but non-blocking in BlockedAt (mounts on wall)
+	TilePropExoticFlower, TilePropTallFern, TilePropGrassTuft, // non-blocking plants
 }
 
-// propTileCharSet is the O(1) lookup for IsPropChar, built once at
-// init from propTileCharList so neither list can drift from the other.
+// propTileCharSet is the O(1) lookup for IsPropChar, derived from propTileCharList.
 var propTileCharSet = buildPropTileCharSet()
 
 func buildPropTileCharSet() map[byte]struct{} {
@@ -1358,29 +1049,22 @@ func buildPropTileCharSet() map[byte]struct{} {
 	return m
 }
 
-// PropTileChars returns the list of every blocking prop-layer char as
-// a defensive copy. Read-only seam — the underlying list lives package-
-// private so callers can't mutate it and desync propTileCharSet. Used
-// by the renderer's minimap init to assert color coverage.
+// PropTileChars returns a defensive copy of every blocking prop-layer char.
 func PropTileChars() []byte {
 	out := make([]byte, len(propTileCharList))
 	copy(out, propTileCharList)
 	return out
 }
 
-// IsPropChar returns true if c names a known blocking prop. Open-prop
-// cells use '.'; future props (chests, doors) get added to propTileCharList.
+// IsPropChar reports whether c names a known blocking prop.
 func IsPropChar(c byte) bool {
 	_, ok := propTileCharSet[c]
 	return ok
 }
 
-// decorTileCharList is the canonical list of every explicit decor-layer
-// char that has a renderable model. '.' (auto-scatter) and '_' (force-
-// empty) are deliberately excluded — they're sentinels handled by the
-// renderer's dispatch, not entries in decorModels. The renderer asserts
-// at init that every entry here has a registered model; the editor
-// derives its brush palette from layerBrushes which mirrors this set.
+// decorTileCharList is the canonical list of every explicit decor char with a
+// renderable model. '.' (auto) and '_' (force-empty) are excluded sentinels.
+// The renderer asserts each entry has a model.
 var decorTileCharList = []byte{
 	DecorBush, DecorMushroom, DecorPebble,
 	DecorTallGrass, DecorFlowers, DecorClover, DecorReeds,
@@ -1388,34 +1072,23 @@ var decorTileCharList = []byte{
 	DecorStump, DecorLog, DecorLeafPile,
 	DecorArchway, DecorArchwayTail,
 	DecorLilypad,
-	// Atmospheric batch — interior dressings, weather, foliage.
 	DecorRug, DecorCandle, DecorBootprints,
 	DecorAshHeap, DecorPuddle, DecorRootCluster,
 }
 
-// DecorTileChars returns the list of every renderable decor-layer char
-// as a defensive copy. Used by the renderer's init to assert coverage
-// of decorModels — adding a DecorXxx const without a loader panics at
-// startup instead of silently no-op'ing in drawDecor.
+// DecorTileChars returns a defensive copy of every renderable decor char.
 func DecorTileChars() []byte {
 	out := make([]byte, len(decorTileCharList))
 	copy(out, decorTileCharList)
 	return out
 }
 
-// blockingFloorChars is the single source of truth for floor-layer
-// chars that block movement. BlockedAt (the gate), IsBlockingFloor (the
-// per-char rule), and BlockingFloorChars (the registry the minimap +
-// init asserts read) all derive from it, so a future blocker (lava,
-// void) is one append here rather than three hand-synced sites.
+// blockingFloorChars is the single source of truth for blocking floor chars; a
+// future blocker (lava, void) is one append here.
 var blockingFloorChars = []byte{FloorDeepWater}
 
-// blockingFloorCharSet is the O(1) lookup mirror of blockingFloorChars, built
-// once at init — same pattern as propTileCharSet behind IsPropChar. BlockedAt
-// runs on every movement / pack-AI / nearest-open-tile query (the last is an
-// O(Width×Height) sweep per spawn), so the per-char rule is a set membership
-// test rather than a linear scan that would grow with each future blocker.
-// blockingFloorChars stays the single authoring source; this derives from it.
+// blockingFloorCharSet is the O(1) lookup mirror (BlockedAt runs on every
+// movement / pack-AI / nearest-open-tile query, so set membership beats a scan).
 var blockingFloorCharSet = func() map[byte]struct{} {
 	m := make(map[byte]struct{}, len(blockingFloorChars))
 	for _, b := range blockingFloorChars {
@@ -1424,27 +1097,19 @@ var blockingFloorCharSet = func() map[byte]struct{} {
 	return m
 }()
 
-// IsBlockingFloor reports whether a floor-layer char blocks movement.
-// Shared by BlockedAt and the editor placement checks so the gate and
-// the registry can't drift.
+// IsBlockingFloor reports whether a floor char blocks movement.
 func IsBlockingFloor(c byte) bool {
 	_, ok := blockingFloorCharSet[c]
 	return ok
 }
 
-// BlockingFloorChars returns every floor-layer char that BlockedAt
-// reports true for (today just FloorDeepWater). Returns a fresh copy so
-// callers (minimap color coverage, init asserts) can't mutate the
-// canonical set.
+// BlockingFloorChars returns a fresh copy of every blocking floor char.
 func BlockingFloorChars() []byte {
 	return append([]byte(nil), blockingFloorChars...)
 }
 
-// floorTileCharList enumerates every floor-layer char with a defined
-// visual (universal variants + material-keyed variants). Excludes the
-// sentinel FloorAuto. Adding a new floor char here automatically
-// extends TileLabel coverage (via the label table below) and feeds
-// any future "list all floor types" UI.
+// floorTileCharList enumerates every floor char with a defined visual (excludes
+// the FloorAuto sentinel); feeds TileLabel coverage.
 var floorTileCharList = []byte{
 	FloorGrass, FloorDirt, FloorDarkGrass, FloorStone,
 	FloorCobble, FloorPlank, FloorWater, FloorDeepWater,
@@ -1452,14 +1117,9 @@ var floorTileCharList = []byte{
 	FloorRampNorth, FloorRampEast, FloorRampSouth, FloorRampWest,
 }
 
-// TileLayer enumerates the four authored grid layers that carry a
-// tile char (walls / floor / decor / props). The editor's `Layer`
-// enum adds Ceiling and Entities on top: Ceiling has its own grid
-// but reuses '.' / '#' from the walls registry rather than declaring
-// new chars (so TileLabel's per-layer dispatch doesn't add a row for
-// it), and Entities aren't tile chars at all — they live in the
-// spawn slices. If a future surface needs to walk all SIX of the
-// editor's layers, it should keep that asymmetry in mind.
+// TileLayer enumerates the four char-carrying grid layers (walls/floor/decor/
+// props). The editor's Layer enum adds Ceiling (reuses '.'/'#' from walls, no
+// own row) and Entities (spawn slices, not tile chars).
 type TileLayer int
 
 const (
@@ -1469,18 +1129,13 @@ const (
 	TileLayerProps
 )
 
-// tileLabelTable is the per-(layer, char) human label registry that
-// powers TileLabel. Sentinels (empty/auto chars) map to "" so the
-// debug overlay can skip them without an extra branch at the call
-// site. The init() block below asserts that every char in the
-// canonical floorTileCharList / DecorTileChars / PropTileChars / walls /
-// ceiling sets has an entry — adding a new tile const without a
-// label now panics at startup instead of returning "?" silently.
+// tileLabelTable is the per-(layer, char) label registry powering TileLabel.
+// Sentinels map to "". init() below asserts every canonical char has an entry,
+// so a new tile const without a label panics at startup instead of returning "?".
 var tileLabelTable = map[TileLayer]map[byte]string{
-	// Face-skin labels are populated from core.FaceSkins in init (below) so the
-	// roster lives in one place; only the blank default is hand-listed here.
+	// Face-skin labels are populated from FaceSkins in init; only the blank default is here.
 	TileLayerWalls: {
-		TileOpen: "", // default rock skin — nothing to call out
+		TileOpen: "", // default rock skin
 	},
 	TileLayerFloor: {
 		FloorAuto:      "",
@@ -1564,22 +1219,12 @@ var tileLabelTable = map[TileLayer]map[byte]string{
 	},
 }
 
-// init asserts every authored tile char has a TileLabel entry. The
-// walks below mirror the existing minimap-color and entityBrushColors
-// inits — adding a new floor/decor/prop const without a label panics
-// at startup instead of returning "?" from a debug overlay later.
-//
-// Additionally, asserts that any byte appearing on multiple grid
-// layers is registered as an INTENDED cross-layer overlap in
-// crossLayerCharOverlaps. The per-layer dispatch in
-// world.go / map.go / TileLabel makes overlaps safe today, but the
-// editor's hoverTileSummary and any future "what's at this tile?"
-// surface would render two different labels for the same char. An
-// unregistered collision panics at startup so the author has to
-// confirm the overlap is deliberate.
+// init asserts every authored tile char has a TileLabel entry, and that any byte
+// shared across layers is registered as an INTENDED overlap in
+// crossLayerCharOverlaps (per-layer dispatch makes it safe, but a "what's here?"
+// surface would render two labels). An unregistered collision panics at startup.
 func init() {
-	// Derive the Faces layer's labels from the FaceSkins roster so a new skin
-	// is one row in FaceSkins, not a parallel label edit here.
+	// Derive Faces-layer labels from FaceSkins so a new skin is one row there.
 	faceLabels := tileLabelTable[TileLayerWalls]
 	for _, s := range FaceSkins {
 		faceLabels[s.Char] = s.Name + " Face"
@@ -1605,10 +1250,8 @@ func init() {
 	assertNoUnregisteredCrossLayerOverlaps()
 }
 
-// crossLayerOverlap pairs the two layers that share a byte AND the
-// label each layer assigns to it. Both are recorded so a future
-// reader can see WHY the overlap is intentional ("water on floor and
-// a well prop happen to spell the same char").
+// crossLayerOverlap records the two layers sharing a byte, each layer's label,
+// and why the overlap is intentional.
 type crossLayerOverlap struct {
 	A, B   TileLayer
 	Char   byte
@@ -1617,13 +1260,8 @@ type crossLayerOverlap struct {
 	Reason string
 }
 
-// crossLayerCharOverlaps is the registry of deliberately-shared byte
-// values across grid layers. Each pair was vetted at the time of
-// authoring: per-layer dispatch keeps the overlap safe AND no surface
-// reads "what's at this tile?" without specifying the layer (the
-// editor's hoverTileSummary walks every layer separately and labels
-// them with the layer name, so two labels for the same char are fine).
-// A new overlap must register here or the init assert below panics.
+// crossLayerCharOverlaps is the registry of deliberately-shared bytes across
+// layers; a new overlap must register here or the init assert panics.
 var crossLayerCharOverlaps = []crossLayerOverlap{
 	{
 		A: TileLayerFloor, B: TileLayerProps, Char: 'W',
@@ -1662,20 +1300,14 @@ var crossLayerCharOverlaps = []crossLayerOverlap{
 	},
 }
 
-// assertNoUnregisteredCrossLayerOverlaps walks every (layer, char)
-// pair in tileLabelTable and pairs them up by char. Any char appearing
-// on >1 layer that isn't covered by crossLayerCharOverlaps panics.
-// Sentinel chars ('.' / '_' / '#') are skipped — those are shared by
-// design across layers (e.g. '.' means "open" everywhere).
+// assertNoUnregisteredCrossLayerOverlaps panics if any char on >1 layer isn't in
+// crossLayerCharOverlaps. Sentinels ('.'/'_'/'#') are skipped (shared by design).
 func assertNoUnregisteredCrossLayerOverlaps() {
-	// Built from the named sentinel constants so a sentinel rename can't
-	// silently desync this skip-set from the chars it's meant to cover:
-	// TileOpen ('.') = open everywhere, DecorEmpty ('_') = suppress decor,
-	// TileRock ('#') = solid in walls/ceiling.
+	// Built from the named sentinel consts so a rename can't desync the skip-set.
 	sentinels := map[byte]struct{}{
 		TileOpen: {}, DecorEmpty: {}, TileRock: {},
 	}
-	// chars[c] -> list of layers where it's a registered tile.
+	// chars[c] -> layers where it's a registered tile.
 	chars := make(map[byte][]TileLayer)
 	for layer, labels := range tileLabelTable {
 		for c := range labels {
@@ -1700,11 +1332,8 @@ func assertNoUnregisteredCrossLayerOverlaps() {
 	}
 }
 
-// TileLabel returns a short human-readable name for a tile char on the
-// given layer. Empty cells and "auto" sentinels return the empty string
-// so the debug overlay can skip them without an extra check at the call
-// site. Unknown chars return "?". Table-driven from tileLabelTable so
-// adding a new tile is one row, not three switches.
+// TileLabel returns a short name for a tile char on a layer; sentinels → "",
+// unknown → "?". Table-driven from tileLabelTable.
 func TileLabel(layer TileLayer, c byte) string {
 	if labels, ok := tileLabelTable[layer]; ok {
 		if label, ok := labels[c]; ok {

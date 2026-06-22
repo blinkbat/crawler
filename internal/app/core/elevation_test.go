@@ -2,15 +2,7 @@ package core
 
 import "testing"
 
-// elevTestArea is a 3×3 map with a ramp ascending North at (1,1):
-//
-//	elevation     floor
-//	  0 1 0       . . .
-//	  0 0 0       . ^ .
-//	  0 0 0       . . .
-//
-// So (1,0) is a level-1 plateau, the ramp at (1,1) (low level 0) bridges the
-// level-0 ground at (1,2) up to it, and (1,1)'s east/west sides are sheer.
+// elevTestArea: 3×3 map; (1,0) level-1 plateau, ramp North at (1,1) (low 0) bridges level-0 ground up to it, (1,1) east/west sheer.
 func elevTestArea() AreaDefinition {
 	return AreaDefinition{
 		Width:  3,
@@ -49,9 +41,7 @@ func TestElevationReads(t *testing.T) {
 
 func TestStandGroundY(t *testing.T) {
 	a := elevTestArea()
-	// Ground Y is offset so the baseline renders at y=0; the fixture's stored
-	// levels 0/1 sit below the baseline. Express expectations via the same
-	// ElevationWorldY offset so the test tracks the baseline constant.
+	// Express expectations via ElevationWorldY so the test tracks the baseline constant.
 	if got, want := a.StandGroundY(0, 0), ElevationWorldY(0); got != want {
 		t.Errorf("StandGroundY flat L0 = %v, want %v", got, want)
 	}

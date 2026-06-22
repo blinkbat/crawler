@@ -12,10 +12,8 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// glyphStr maps a byte to its one-character string. Built once so
-// drawTileGlyph doesn't allocate `string([]byte{ch})` per visible tile per
-// frame — on a zoomed-out big map with the glyph overlay / Floors lens on,
-// that was thousands of heap allocations every frame.
+// glyphStr maps a byte to its one-char string. Built once so drawTileGlyph
+// doesn't allocate per visible tile per frame (thousands/frame zoomed out).
 var glyphStr = func() [256]string {
 	var t [256]string
 	for i := range t {
@@ -24,9 +22,8 @@ var glyphStr = func() [256]string {
 	return t
 }()
 
-// tickLabels holds pre-formatted decimal labels for every 5th grid
-// coordinate, up to the max map dimension. Built once so the axis-tick draw
-// indexes coord/5 instead of fmt.Sprintf-ing each visible tick every frame.
+// tickLabels holds pre-formatted labels for every 5th grid coordinate. Built
+// once so the axis-tick draw indexes coord/5 instead of Sprintf'ing each frame.
 var tickLabels = func() []string {
 	t := make([]string, core.MaxMapDimension/5+2)
 	for i := range t {
@@ -35,8 +32,8 @@ var tickLabels = func() []string {
 	return t
 }()
 
-// tickLabel returns the pre-formatted label for coordinate c (a multiple of
-// 5), falling back to a fresh format if c somehow lands past the table.
+// tickLabel returns the pre-formatted label for coordinate c, formatting fresh
+// if c lands past the table.
 func tickLabel(c int) string {
 	if i := c / 5; i >= 0 && i < len(tickLabels) {
 		return tickLabels[i]
@@ -46,11 +43,9 @@ func tickLabel(c int) string {
 
 const (
 	topbarH = float32(48)
-	// menuBarBtnY / menuBarBtnH are the menu-bar strip's vertical inset + height,
-	// shared by the topbar draw, its hit-test, the dropdown re-open hit-test, and
-	// the pull-down anchor rect (menuAnchorRect). Kept as named consts so those
-	// four sites can't drift — if they did, the open dropdown would detach from
-	// the button that spawned it.
+	// menuBarBtnY/H are the menu-bar strip's vertical inset + height, shared by
+	// the draw, hit-test, dropdown re-open hit-test, and pull-down anchor so they
+	// can't drift (else the open dropdown detaches from its button).
 	menuBarBtnY = float32(6)
 	menuBarBtnH = topbarH - 12
 	toolbarH    = float32(38) // action button row beneath the topbar
@@ -60,41 +55,29 @@ const (
 	layerTabH  = float32(32)
 )
 
-// Entity-list (chest/pack contents) geometry, used by entityModalLayoutFor
-// and drawEntityListWindow so the painted rows and the click hit-rects
-// can't drift: rows start entityListTop px below the card's top and step
-// entityListRowH px apart.
+// Entity-list (chest/pack contents) geometry, shared by entityModalLayoutFor
+// and drawEntityListWindow so painted rows and hit-rects can't drift.
 const (
 	entityListTop  = float32(52)
 	entityListRowH = float32(22)
-	// entityListTextInset is where a row's TEXT starts — the card gutter
-	// (modalContentInset) plus a few px so the "> " cursor caret has room.
-	// Derived from modalContentInset (defined lower in this file) so a gutter
-	// change carries the row text with it instead of stranding a bare 24.
+	// entityListTextInset: row text start — modalContentInset plus room for "> ".
 	entityListTextInset = modalContentInset + 8
 )
 
-// layout recomputes screen rectangles each frame from the current window
-// size. Cell pixel size is the auto-fit size scaled by s.zoom; pan offsets
-// nudge the plot off-center so users can drag around large maps.
+// layout recomputes screen rectangles each frame from the window size. Cell px
+// is the auto-fit size scaled by s.zoom; pan offsets drag the plot off-center.
 func (s *State) layout() {
 	w, h := render.ScreenSizeF()
 
 	s.rect.topbar = rl.NewRectangle(0, 0, w, topbarH)
-	// Action toolbar row directly beneath the topbar menu bar; everything
-	// below starts at contentTop so adding the row just pushes the work
-	// area down (all regions derive from this baseline, so the grid /
-	// palette / metadata cascade automatically).
+	// Action toolbar beneath the menu bar; everything below derives from contentTop.
 	s.rect.toolbar = rl.NewRectangle(0, topbarH, w, toolbarH)
 	contentTop := topbarH + toolbarH
-	// Layer selection moved to the prominent top-bar dropdown (drawTopbar), so the
-	// palette column no longer carries a tab strip — the levels panel starts at
-	// the top of the column (compresses the chrome the dropdown replaced).
+	// Layer selection lives on the top-bar dropdown now, so no tab strip.
 	tabsHeight := float32(0)
 	s.rect.layerTabs = rl.NewRectangle(0, contentTop, paletteW, tabsHeight)
-	// Levels panel directly beneath the layer tabs: a header row (label + −/+)
-	// then one row per level 0..topLevel (capped to maxVisibleLevelRows so a tall
-	// stack can't shove the palette off-screen).
+	// Levels panel: a header row (label + −/+) then one row per level 0..topLevel
+	// (capped to maxVisibleLevelRows).
 	levelsY := contentTop + tabsHeight
 	s.rect.levels = rl.NewRectangle(0, levelsY, paletteW, levelsPanelHeight(s))
 	paletteY := levelsY + s.rect.levels.Height
@@ -125,12 +108,9 @@ func (s *State) layout() {
 	totalH := cell * float32(mh)
 	s.rect.gridW = totalW
 	s.rect.gridH = totalH
-	// baseX/baseY are gridX/gridY at pan==0 — the map centered in the grid
-	// viewport. Clamp the pan against these so a drag (or a stale pan left
-	// over from a higher zoom) can't fling the map off-screen: when the map
-	// fits it's kept fully inside; when it overflows, panning reaches each
-	// edge plus a little overscroll. This self-heals on zoom-out, where an
-	// old large pan would otherwise shove the now-smaller map into a corner.
+	// baseX/baseY are gridX/gridY at pan==0 (map centered). Clamp the pan against
+	// these so a drag or a stale pan can't fling the map off-screen; self-heals on
+	// zoom-out. Fits-inside when small, edge+overscroll when overflowing.
 	baseX := s.rect.grid.X + (s.rect.grid.Width-totalW)/2
 	baseY := s.rect.grid.Y + (s.rect.grid.Height-totalH)/2
 	s.panX = core.ClampPanAxis(s.panX, baseX, s.rect.grid.X, s.rect.grid.Width, totalW, panOverscroll)
@@ -139,29 +119,22 @@ func (s *State) layout() {
 	s.rect.gridY = baseY + s.panY
 }
 
-// panOverscroll is how far past a map edge the canvas pan may push when the
-// map overflows the viewport — a small slack so edge tiles aren't jammed flush
-// against the palette / metadata panels.
+// panOverscroll is how far past a map edge the pan may push when the map
+// overflows, so edge tiles aren't jammed against the panels.
 const panOverscroll = float32(48)
 
-// cellAt converts a screen-space mouse position into a (x,z) tile, or -1,-1
-// if the position is outside the grid plot.
+// cellAt converts a screen mouse position into a (x,z) tile, or -1,-1 if outside.
 func (s *State) cellAt(p rl.Vector2) (int, int) {
 	if s.rect.cellPx <= 0 {
 		return -1, -1
 	}
-	// Isometric preview is read-only: the top-down screen→tile math doesn't
-	// hold under the iso projection, so report "no tile" — this suppresses
-	// hover, paint, and the cursor-driven actions while iso is on.
+	// Iso preview is read-only: top-down screen→tile math doesn't hold under iso.
 	if s.isoView {
 		return -1, -1
 	}
-	// Reject points outside the grid VIEWPORT, not just the grid origin.
-	// When the map is panned/zoomed its tiles can extend visually under the
-	// metadata panel; without this gate a mouse over that panel resolves to a
-	// valid hidden tile, and the hover-driven paths that read hoverX/hoverZ
-	// without their own rect gate (paste-at-cursor, test-from-cursor) would
-	// act on a tile the user can't see.
+	// Reject points outside the grid VIEWPORT, not just the origin: panned/zoomed
+	// tiles can extend under the metadata panel, and hover-driven paths
+	// (paste-at-cursor, test-from-cursor) lack their own rect gate.
 	if !pointIn(p, s.rect.grid) {
 		return -1, -1
 	}
@@ -176,22 +149,13 @@ func (s *State) cellAt(p rl.Vector2) (int, int) {
 	return x, z
 }
 
-// Draw paints the editor view. Must be called inside Begin/EndDrawing.
-// frameMouse caches rl.GetMousePosition() for the duration of a single
-// Draw() pass. Helpers like drawButton fire many hover checks per
-// frame; reading from this var keeps the CGo poll cost at one call per
-// frame instead of one per widget. Safe because the editor draw path
-// is single-threaded and the value is rewritten at the top of every
-// Draw() before anything reads it.
+// frameMouse caches rl.GetMousePosition() for one Draw() pass so per-widget
+// hover checks don't each cross the CGo boundary. Rewritten at the top of Draw.
 var frameMouse rl.Vector2
 
-// frameAssets stashes the current frame's render.Resources so modal handlers
-// (whose signatures only carry *State / font / theme) can reach the loaded
-// enemy textures the Foe Visualizer's live 3D preview needs. Same single-
-// threaded, rewritten-at-top-of-Draw discipline as frameMouse. Update runs
-// before Draw, so an Update-phase reader sees the PREVIOUS frame's bundle —
-// fine, because Resources is the immutable loaded-asset set, stable across
-// frames.
+// frameAssets stashes the frame's render.Resources so modal handlers (whose
+// signatures lack it) can reach loaded enemy textures. Same rewritten-at-top-of-
+// Draw discipline; an Update-phase reader sees the previous frame's (stable) bundle.
 var frameAssets render.Resources
 
 func Draw(s *State, assets render.Resources) {
@@ -207,36 +171,27 @@ func Draw(s *State, assets render.Resources) {
 	drawPalette(s, font, theme)
 	drawMetadata(s, font, theme)
 	drawGrid(s, font)
-	// Overview minimap sits in the grid's bottom-right corner, on top of the
-	// grid but below scrollbars / status / modals.
+	// Overview minimap: grid bottom-right, below scrollbars/status/modals.
 	drawMinimap(s)
 	// Recent-brush quick-pick row, bottom-left of the grid.
 	drawBrushRecents(s, font)
-	// Scrollbars paint on top of the panels + grid they scroll, but below
-	// status toasts and modals.
+	// Scrollbars: over panels + grid, below status toasts and modals.
 	drawScrollbars(s)
 	if len(s.statusLog) > 0 {
 		drawStatus(s, font, theme)
 	}
-	// Toolbar hover tooltip: drawn here (late, over the canvas) rather than inside
-	// drawToolbar (early, under it). Self-suppresses when a modal/menu is up.
+	// Toolbar hover tooltip: late (over the canvas), not inside drawToolbar.
 	drawToolbarTooltip(s, font, theme)
 	if h, ok := modalHandlers[s.modal]; ok && h.draw != nil {
 		h.draw(s, font, theme)
 	}
-	// A modal's picker dropdown paints on top of it — once, here, so no modal
-	// repeats the call. No-op when no dropdown is open.
+	// A modal's picker dropdown paints on top, once here. No-op when none open.
 	drawDropdown(s, font, theme)
-	// Right-click context menu paints last so it sits over the grid and
-	// any modal that happens to coexist with it (today the menu closes
-	// before a modal opens — but cheap to keep this order future-proof).
+	// Right-click context menu paints last, over grid and any modal.
 	drawContextMenu(s, font, theme)
 }
 
-// modalHandler bundles a modal's draw + update functions. Replaces
-// the prior parallel modalDrawers / modalUpdaters maps that had to
-// stay in lockstep — adding a modal used to be two edits in two
-// files. One table now: one row, both halves required.
+// modalHandler bundles a modal's draw + update functions in one table row.
 type modalHandler struct {
 	draw   func(*State, rl.Font, render.Theme)
 	update func(*State) Action
@@ -269,16 +224,9 @@ var modalHandlers = map[modalKind]modalHandler{
 	modalDialogTriggerEdit: {draw: drawDialogTriggerEditModal, update: updateDialogTriggerEditModal},
 }
 
-// init asserts every dispatchable modalKind (modalNone and modalCount
-// excluded — the former is "no modal open," the latter is the count
-// sentinel) has a handler row with BOTH a draw and an update function.
-// Mirrors the panic-at-init pattern AGENTS.md mandates for skill / tile /
-// prop registries — a new modalFoo constant added to editor.go without a
-// handler row now panics at startup instead of silently no-op'ing the
-// dispatch. The draw/update nil checks matter too: the dispatch sites guard
-// with `ok && h.draw != nil` / `ok && h.update != nil`, so a row with one
-// half nil would silently freeze that modal (draws but never updates, or
-// vice versa) rather than panic — catch it here instead.
+// init asserts every dispatchable modalKind (excluding modalNone/modalCount) has
+// a handler row with BOTH draw and update set, so a new modal without one panics
+// at startup instead of silently no-op'ing or freezing.
 func init() {
 	for m := modalNone + 1; m < modalCount; m++ {
 		h, ok := modalHandlers[m]
@@ -294,9 +242,7 @@ func init() {
 	}
 }
 
-// doorEditHitTarget enumerates the clickable regions of the door edit
-// modal. Mirrors the soundLayout hit-test shape but inline as an enum
-// because the door modal only has a handful of stable targets.
+// doorEditHitTarget enumerates the door edit modal's clickable regions.
 type doorEditHitTarget int
 
 const (
@@ -310,17 +256,15 @@ const (
 	doorHitClose
 )
 
-// doorEditHit pairs the hit kind with optional payload (the facing value
-// when kind == doorHitFacing, the style value when kind == doorHitStyle).
+// doorEditHit pairs the hit kind with optional payload (facing/style value).
 type doorEditHit struct {
 	kind   doorEditHitTarget
 	facing int
 	style  core.DoorStyle
 }
 
-// doorEditLayout returns the rectangles for every clickable region of
-// the door edit modal so update and draw stay in sync. Pure function of
-// screen size + position.
+// doorEditLayout holds the rects for the door edit modal's clickable regions
+// so update and draw stay in sync.
 type doorEditLayout struct {
 	card      rl.Rectangle
 	nameField rl.Rectangle
@@ -335,9 +279,8 @@ type doorEditLayout struct {
 func doorEditLayoutFor() doorEditLayout {
 	r := centeredCardRect(doorEditModalW, doorEditModalH)
 	x := r.X + modalContentInset
-	// Field-stack metrics shared with the dialog editors so this modal can't
-	// drift on field height / header inset / row pitch (it used to spell 32 /
-	// 56 / 28 / 48 inline — the 48 had drifted 2px off dialogRowGap).
+	// Field-stack metrics shared with the dialog editors so field height / header
+	// inset / row pitch can't drift.
 	fw := r.Width - 2*modalContentInset
 	y := r.Y + dialogHeaderInset
 	fieldH := dialogFieldH
@@ -347,8 +290,7 @@ func doorEditLayoutFor() doorEditLayout {
 	mapField := fields[1]
 	doorField := fields[2]
 	y += 3*rowGap + 6
-	// Facing row: one equal-width button per Facing (mirrors the style row
-	// below so a new facing scales the layout instead of clipping past 4).
+	// Facing row: one equal-width button per Facing.
 	var facing [core.FacingCount]rl.Rectangle
 	copy(facing[:], equalButtonRow(x, y, fw, fieldH, int(core.FacingCount)))
 	y += rowGap
@@ -370,9 +312,7 @@ func doorEditLayoutFor() doorEditLayout {
 	}
 }
 
-// doorEditHitTest reports which region the mouse position p falls in.
-// Used by updateDoorEditModal; doorHitOutside is the default so the
-// caller can branch on it explicitly.
+// doorEditHitTest reports which region p falls in (doorHitOutside default).
 func doorEditHitTest(s *State, p rl.Vector2) doorEditHit {
 	l := doorEditLayoutFor()
 	if !pointIn(p, l.card) {
@@ -403,63 +343,36 @@ func doorEditHitTest(s *State, p rl.Vector2) doorEditHit {
 	if pointIn(p, l.closeBtn) {
 		return doorEditHit{kind: doorHitClose}
 	}
-	// Click inside card but not on a clickable region — treat as a no-op
-	// so a stray click inside the card doesn't dismiss the modal.
+	// Click inside the card but on no region: no-op (don't dismiss).
 	return doorEditHit{kind: doorHitOutside}
 }
 
 // --- Top bar ---------------------------------------------------------------
 
-// topbarBtn pairs the displayed label with the action func to run on
-// click. Replaces the prior string-id + separate `switch name` dispatch
-// in handleTopbarButton — that pattern had to stay in lockstep across
-// draw.go and input.go (adding a button took two edits, and a typo
-// in the id was silent). Now the action lives on the row.
+// topbarBtn pairs a label with the action to run on click.
 type topbarBtn struct {
 	label  string
 	action func(*State)
-	// activeFn, when set, draws the button highlighted while it returns
-	// true — used for toggle actions (e.g. the glyph overlay) so the
-	// button reads as "on" without a separate indicator.
+	// active, when set, draws the button highlighted while it returns true (toggles).
 	active func(*State) bool
-	// enabled, when set, gates a context-sensitive control: the button is always
-	// DRAWN (in its fixed position, so the row never reflows) but renders grayed
-	// and ignores clicks unless enabled returns true. Used so elevation controls
-	// are live only on the Elevation layer, etc. — present-but-inactive, which
-	// reads as "this exists, not here" without the buttons sliding around as the
-	// layer changes. nil = always enabled. The dispatch checks it before firing.
+	// enabled, when set, gates a context-sensitive control: always DRAWN in place
+	// (row never reflows) but grayed + click-ignored unless it returns true. nil = always.
 	enabled func(*State) bool
-	// help, when set, is a one-line explanation shown as a hover tooltip — the
-	// toolbar uses it so terse tool names (Box / Flood / Pick / Select) and the
-	// brush/elevation steppers explain themselves. "" = no tooltip.
+	// help, when set, is a one-line hover tooltip. "" = none.
 	help string
 }
 
-// The top menu bar (File / Edit / View / Assets / Map) lives in menus.go as
-// menuBarBtns — each label opens a pull-down of grouped commands. It replaced a
-// flat 10-button strip; the per-command actions moved into the menu rows there.
+// The top menu bar (File/Edit/View/Assets/Map) lives in menus.go as menuBarBtns.
 
-// toolbarBtns is the action row beneath the topbar — the editing
-// commands that used to be keyboard-only (the hotkeys still work as
-// accelerators, but every one now has a button so the editor is
-// navigable by mouse alone). Each action reuses the same handler the
-// hotkey calls, so the two can't drift. Layer switching lives in the
-// left layer-tabs column and brush selection in the palette, so those
-// aren't repeated here.
-// Context-visibility predicates (see topbarBtn.enabled): grid-painting controls
-// are dead on the Entities layer; the elevation cluster only does anything on
-// the Elevation layer. Graying them on the wrong layer declutters the toolbar to
-// what the active layer can actually use.
+// Context-visibility predicates (topbarBtn.enabled): grid-painting controls are
+// dead on Entities; the elevation cluster only acts on Elevation. Graying on the
+// wrong layer declutters the toolbar.
 func onGridLayer(s *State) bool      { return s.layer != LayerEntities }
 func onElevationLayer(s *State) bool { return s.layer == LayerElevation }
 
-// toolbarActionBtns are the SECOND-ROW controls kept OUT of the menus because
-// you reach for them constantly while painting: undo/redo, the brush-size
-// steppers, and the contextual elevation cluster (Floor± / Floors lens / Ramp).
-// Everything rarer — file ops, view toggles, validate/playtest, the asset
-// editors — moved into the menu bar (menus.go). The full toolbar (toolbarBtns)
-// is the tool-select group followed by these. Undo/Redo gray out when their
-// stack is empty; the rest gate on the active layer via the predicates above.
+// toolbarActionBtns are the constant-reach controls kept out of the menus:
+// undo/redo, brush-size steppers, and the elevation cluster. Undo/Redo gray out
+// on an empty stack; the rest gate on the active layer.
 var toolbarActionBtns = []topbarBtn{
 	{label: "Undo", action: undoOne, enabled: func(s *State) bool { return len(s.undo) > 0 }, help: "Step back one change (Ctrl+Z)."},
 	{label: "Redo", action: redoOne, enabled: func(s *State) bool { return len(s.redo) > 0 }, help: "Re-apply the last undone change (Ctrl+Y)."},
@@ -474,10 +387,8 @@ var toolbarActionBtns = []topbarBtn{
 		help:    "Ramp mode: paint sloped transitions between elevation levels."},
 }
 
-// toolbarBtns is the full action row: the tool-select group (Brush / Line /
-// Rect / Box / Flood / Pick, highlighted to show the active tool) followed by
-// the editing commands. Assembled once at init from toolModeLabels so adding a
-// tool is one enum row + label — no button wiring.
+// toolbarBtns is the full action row: the tool-select group then the editing
+// commands. Assembled at init from toolModeLabels.
 var toolbarBtns []topbarBtn
 
 func init() {
@@ -493,11 +404,8 @@ func init() {
 	toolbarBtns = append(toolbarBtns, toolbarActionBtns...)
 }
 
-// toolbarButtonAt returns the index of the toolbar button under p, or
-// buttonStripHit / drawButtonStrip are the shared left-to-right button
-// walk for the topbar (menu bar) and the toolbar (action row) — both are
-// `[]topbarBtn` strips at a fixed Y/height, so one walk keeps their draw
-// and hit-test in lockstep instead of four hand-maintained copies.
+// buttonStripHit / drawButtonStrip are the shared left-to-right button walk for
+// the menu bar and toolbar, keeping their draw and hit-test in lockstep.
 const buttonStripStartX = float32(8)
 
 func buttonStripHit(btns []topbarBtn, y, h float32, p rl.Vector2) int {
@@ -518,7 +426,7 @@ func drawButtonStrip(font rl.Font, s *State, btns []topbarBtn, y, h float32) {
 		w := buttonWidth(b.label)
 		r := rl.NewRectangle(x, y, w, h)
 		if b.enabled != nil && !b.enabled(s) {
-			drawButtonDisabled(font, r, b.label) // context-inactive: drawn grayed, in place
+			drawButtonDisabled(font, r, b.label) // context-inactive: grayed in place
 		} else {
 			drawButton(font, r, b.label, b.active != nil && b.active(s))
 		}
@@ -540,9 +448,8 @@ func drawToolbar(s *State, font rl.Font, theme render.Theme) {
 		rl.NewVector2(s.rect.toolbar.Width, s.rect.toolbar.Y+toolbarH),
 		1, outlineHard)
 	drawButtonStrip(font, s, toolbarBtns, s.rect.toolbar.Y+6, toolbarH-12)
-	// Active-level readout (right-aligned): the floor every content paint builds
-	// onto. Always shown — the levels model is always on. [RAMP] flags ramp
-	// tool-mode (only meaningful on the Elevation layer).
+	// Active-level readout (right-aligned): the floor paints build onto. [RAMP]
+	// flags ramp tool-mode (only meaningful on Elevation).
 	{
 		label := fmt.Sprintf("Active level: %d", s.editLevel)
 		if s.layer == LayerElevation && s.rampMode {
@@ -554,15 +461,11 @@ func drawToolbar(s *State, font rl.Font, theme render.Theme) {
 			rl.NewVector2(s.rect.toolbar.Width-m.X-12, s.rect.toolbar.Y+(toolbarH-sz)/2),
 			sz, 1, editorActiveLevelText)
 	}
-	// NB: the hover tooltip is drawn LATE in Draw (drawToolbarTooltip), not here —
-	// drawToolbar runs before the grid, so a tooltip drawn here would be painted
-	// over by the canvas (only its border peeked out below the bar).
+	// NB: hover tooltip is drawn LATE (drawToolbarTooltip); here it'd be overdrawn by the canvas.
 }
 
-// drawToolbarTooltip paints the hovered toolbar button's help bubble. It's
-// called near the END of Draw — NOT inside drawToolbar, which runs before the
-// grid/panels — so the tooltip layers on top of the canvas instead of being
-// overdrawn by it. Suppressed while a modal or menu owns the screen.
+// drawToolbarTooltip paints the hovered toolbar button's help bubble, late in
+// Draw so it layers over the canvas. Suppressed while a modal/menu is up.
 func drawToolbarTooltip(s *State, font rl.Font, theme render.Theme) {
 	if s.modal != modalNone || s.dropdownOpen() {
 		return
@@ -576,11 +479,8 @@ func drawToolbarTooltip(s *State, font rl.Font, theme render.Theme) {
 	}
 }
 
-// drawTooltipCard paints a hover help bubble of one or more lines near mp,
-// clamped inside `clamp`, styled with the shared tooltip* tokens (first line
-// tooltipHeading, the rest tooltipText). The single home for the editor's hover
-// bubbles — both the toolbar-button tooltip and the canvas tile tooltip route
-// through it so they read as one widget instead of two differently-styled cards.
+// drawTooltipCard paints a hover bubble of lines near mp, clamped inside clamp
+// (first line tooltipHeading, rest tooltipText). Shared by both editor tooltips.
 func drawTooltipCard(font rl.Font, lines []string, fontSize, lineH float32, mp rl.Vector2, clamp rl.Rectangle) {
 	if len(lines) == 0 {
 		return
@@ -613,18 +513,14 @@ func drawTooltipCard(font rl.Font, lines []string, fontSize, lineH float32, mp r
 	}
 }
 
-// drawButtonTooltip paints a one-line help bubble near the cursor (below-right,
-// clamped to the screen) — the toolbar's hover explanation for a button. (The
-// canvas tile tooltip is the separate drawHoverTooltip; both share drawTooltipCard.)
+// drawButtonTooltip paints a one-line help bubble near the cursor for a toolbar button.
 func drawButtonTooltip(font rl.Font, theme render.Theme, text string, mp rl.Vector2) {
-	_ = theme // styled with the shared tooltip* tokens, not the passed theme
+	_ = theme // styled with the shared tooltip* tokens
 	sw, sh := render.ScreenSizeF()
 	drawTooltipCard(font, []string{text}, editorFontHint, editorFontHint, mp, rl.NewRectangle(0, 0, sw, sh))
 }
 
 // topbarButtonAt returns the index of the menu-bar label under p, or -1.
-// Integer index pairs with menuBarBtns so the caller can open that menu
-// directly without a stringly-typed indirection.
 func topbarButtonAt(s *State, p rl.Vector2) int {
 	if !pointIn(p, s.rect.topbar) {
 		return -1
@@ -632,10 +528,8 @@ func topbarButtonAt(s *State, p rl.Vector2) int {
 	return buttonStripHit(menuBarBtns, menuBarBtnY, menuBarBtnH, p)
 }
 
-// topbarInfoKey captures everything the topbar's name + info readouts are
-// derived from. When it's unchanged frame-to-frame, drawTopbar reuses the
-// cached strings + measures instead of re-running MapIDFromPath, AreaTileSummary
-// (which allocates), several Sprintfs, and three MeasureTextEx every frame.
+// topbarInfoKey captures everything the topbar readouts derive from; unchanged
+// frame-to-frame, drawTopbar reuses the cached strings + measures.
 type topbarInfoKey struct {
 	epoch          uint64
 	hoverX, hoverZ int
@@ -702,9 +596,8 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 		topbarInfoReady = true
 	}
 
-	// Positioning re-reads the live window width each frame (it can change on
-	// resize without invalidating the cached strings); only the strings +
-	// their measured sizes are memoized.
+	// Positioning re-reads the live window width each frame; only the strings +
+	// their measures are memoized.
 	labelX := s.rect.topbar.Width - topbarNameMeasure.X - 10
 	render.DrawTextWithShadow(font, topbarNameLabel,
 		labelX, (topbarH-topbarNameMeasure.Y)/2,
@@ -713,22 +606,19 @@ func drawTopbar(s *State, font rl.Font, theme render.Theme) {
 	render.DrawTextWithShadow(font, topbarInfoLabel, infoX, (topbarH-topbarInfoMeasure.Y)/2, editorFontLabel, theme.TextHint)
 }
 
-// layerMenuBtnRect is the prominent active-layer dropdown button on the top bar,
-// placed just right of the menu-group strip. Single source for the draw + the
-// click hit-test + the dropdown anchor (so they can't drift).
+// layerMenuBtnRect is the active-layer dropdown button, right of the menu strip.
+// Single source for draw + hit-test + dropdown anchor.
 func layerMenuBtnRect(s *State) rl.Rectangle {
 	x := float32(6)
 	for i := range menuBarBtns {
 		x += buttonWidth(menuBarBtns[i].label) + tightBtnGap
 	}
-	x += 16 // gap separating it from the menu groups
+	x += 16 // gap from the menu groups
 	return rl.NewRectangle(x, 5, 172, topbarH-10)
 }
 
-// drawLayerMenuButton paints the active-layer dropdown trigger — the editor's
-// primary "what am I editing" control, so it's an accent-bordered, bright button
-// (very obvious) rather than another flat menu label. Click opens ddLayer, whose
-// rows each carry the per-layer hide/show eye.
+// drawLayerMenuButton paints the active-layer dropdown trigger (accent-bordered).
+// Click opens ddLayer, whose rows carry the per-layer hide/show eye.
 func drawLayerMenuButton(s *State, font rl.Font, theme render.Theme) {
 	r := layerMenuBtnRect(s)
 	bg := bgActive
@@ -741,9 +631,8 @@ func drawLayerMenuButton(s *State, font rl.Font, theme render.Theme) {
 	render.DrawTextWithShadow(font, label, r.X+10, r.Y+(r.Height-16)/2, editorFontBody, theme.TextPrimary)
 }
 
-// topbarBtnWidths overrides the default 64-px topbar button width for
-// labels that need extra space. Adding a wider button is a one-row
-// edit; missing entries fall through to the default.
+// topbarBtnWidths overrides the default button width for wider labels; missing
+// entries fall through to the default.
 var topbarBtnWidths = map[string]float32{
 	"Save As":    90,
 	"Validate":   90,
@@ -753,11 +642,9 @@ var topbarBtnWidths = map[string]float32{
 	"Brush +":    78,
 }
 
-// approxTextWidth estimates a label's pixel width without a font handle —
-// ~0.5px per character per font point (so editorFontBody=16 ⇒ 8px/char).
-// The button and context-menu sizers lay out before they have the loaded
-// font, so both share this one heuristic instead of two disagreeing
-// per-char constants.
+// approxTextWidth estimates a label's pixel width without a font handle (~0.5px
+// per char per point). Shared by the button + context-menu sizers, which lay out
+// before the font is loaded.
 func approxTextWidth(label string, fontSize float32) float32 {
 	return float32(len(label)) * fontSize * 0.5
 }
@@ -766,11 +653,8 @@ func buttonWidth(label string) float32 {
 	if w, ok := topbarBtnWidths[label]; ok {
 		return w
 	}
-	// Auto-size to the label so long captions ("Discard", "Overwrite",
-	// "Exit to Title") don't overflow a fixed-width button. ~8px/char at
-	// editorFontBody plus padding, floored at 72 so short labels stay
-	// tidy. Deterministic from the string, so a modal's draw and its
-	// click hit-test (both via modalButtonRow) agree without measuring.
+	// Auto-size to the label so long captions don't overflow, floored at 72.
+	// Deterministic from the string, so a modal's draw and hit-test agree.
 	w := approxTextWidth(label, editorFontBody) + buttonLabelPadX
 	if w < 72 {
 		w = 72
@@ -778,9 +662,7 @@ func buttonWidth(label string) float32 {
 	return w
 }
 
-// Modal button-layout tunables, shared by every modal's button helpers so
-// the card padding / button size is one source instead of bare literals
-// repeated across the row / stack / grid layouts and their hit-tests.
+// Modal button-layout tunables, shared by every modal's button helpers.
 const (
 	modalBtnH         = float32(30)  // action button height
 	modalContentInset = float32(16)  // left/right card padding (body width = card.Width - 2*inset)
@@ -794,34 +676,26 @@ const (
 // modalContentWidth is the usable inner width of a modal card.
 func modalContentWidth(card rl.Rectangle) float32 { return card.Width - 2*modalContentInset }
 
-// modalFooterButtonY is the Y a modal's bottom button row anchors to: one
-// modalBottomInset up from the card's bottom edge. modalButtonRow / the gallery
-// modals (Object Browser, Foe Visualizer) all anchor their footer row here.
+// modalFooterButtonY is the bottom button row's Y: modalBottomInset up from the
+// card bottom. Shared by modalButtonRow + the gallery modals.
 func modalFooterButtonY(card rl.Rectangle) float32 {
 	return card.Y + card.Height - modalBtnH - modalBottomInset
 }
 
-// modalGridBottom is where a gallery modal's content grid stops so it clears
-// the footer button row: one modalBottomInset gap above the buttons. Derived
-// from modalFooterButtonY so the grid-bottom and the button-Y can't drift (they
-// used to be 2*modalBottomInset vs modalBottomInset off the bottom independently).
+// modalGridBottom is where a gallery grid stops to clear the footer row: one
+// modalBottomInset above the buttons. Derived from modalFooterButtonY so they can't drift.
 func modalGridBottom(card rl.Rectangle) float32 {
 	return modalFooterButtonY(card) - modalBottomInset
 }
 
-// modalButtonRow lays buttons out left-to-right along the bottom-left of a
-// modal card (auto-width per label) and returns their rects in order.
-// Used where a few short actions fit one line (e.g. the open-map modal's
-// Open / Rename / Delete / Duplicate).
+// modalButtonRow lays auto-width buttons left-to-right along a card's
+// bottom-left, returning their rects in order.
 func modalButtonRow(card rl.Rectangle, labels []string) []rl.Rectangle {
 	return buttonRowAt(card.X+modalContentInset, card.Y+card.Height-modalBtnH-modalBottomInset, labels)
 }
 
-// buttonRowAt lays a row of auto-width modal buttons left-to-right from
-// (x, y) using the shared modalBtnH / modalBtnGap spec. modalButtonRow
-// anchors it to a card's bottom-left; callers with a bespoke anchor (the
-// Foe Visualizer's right column, the new-map modal's right-aligned pair)
-// place the same row shape elsewhere without re-deriving size/gap math.
+// buttonRowAt lays a row of auto-width modal buttons left-to-right from (x, y).
+// Callers with a bespoke anchor place the same row shape without re-deriving math.
 func buttonRowAt(x, y float32, labels []string) []rl.Rectangle {
 	rects := make([]rl.Rectangle, len(labels))
 	for i, lbl := range labels {
@@ -832,8 +706,7 @@ func buttonRowAt(x, y float32, labels []string) []rl.Rectangle {
 	return rects
 }
 
-// buttonRowWidth is the total horizontal span buttonRowAt would occupy
-// for labels — used to right-anchor a row against a card edge.
+// buttonRowWidth is the total span buttonRowAt occupies — for right-anchoring.
 func buttonRowWidth(labels []string) float32 {
 	var w float32
 	for i, lbl := range labels {
@@ -845,10 +718,8 @@ func buttonRowWidth(labels []string) float32 {
 	return w
 }
 
-// modalButtonStack lays full-width buttons out vertically, anchored to the
-// bottom of the card (so header + body text own the top) and returns them
-// in top-to-bottom order. Full-width means they can never overflow the
-// card horizontally — the robust choice for menus / confirm dialogs.
+// modalButtonStack lays full-width buttons vertically, bottom-anchored, returned
+// top-to-bottom. Full-width can't overflow — used for menus / confirm dialogs.
 func modalButtonStack(card rl.Rectangle, labels []string) []rl.Rectangle {
 	n := len(labels)
 	rects := make([]rl.Rectangle, n)
@@ -863,11 +734,8 @@ func modalButtonStack(card rl.Rectangle, labels []string) []rl.Rectangle {
 	return rects
 }
 
-// modalButtonRow, modalButtonStack, and buttonGrid (the wrapped variant
-// the entity modals use) are the geometry sources a modal's draw and its
-// click handler share so the two can't drift — the same role
-// doorEditLayoutFor plays for the door modal. drawModalButtons paints a
-// computed rect set; modalButtonHit returns the clicked index.
+// drawModalButtons paints a computed rect set; modalButtonHit returns the
+// clicked index. (Geometry comes from modalButtonRow/Stack/buttonGrid.)
 func drawModalButtons(font rl.Font, rects []rl.Rectangle, labels []string) {
 	for i, r := range rects {
 		drawButton(font, r, labels[i], false)
@@ -887,24 +755,17 @@ func modalButtonHit(rects []rl.Rectangle) int {
 	return -1
 }
 
-// modalCmd is a labeled action for a modal's buttons. The same builder
-// produces the cmds for both draw (reads .label) and the click handler
-// (runs .run), so a button's caption and its action live on one row and
-// can't drift — this is what lets the confirm/menu modals drop their
-// fragile "hit==2 means Cancel" index switches. `hot` is an optional
-// keyboard accelerator (Esc / Y / D …) that fires the same .run; `run`
-// returns the editor Action to propagate (ActionNone for most).
+// modalCmd is a labeled action for a modal's buttons: label + action on one row,
+// so caption and action can't drift. hot is an optional accelerator firing .run;
+// run returns the editor Action to propagate.
 type modalCmd struct {
 	label string
 	hot   func() bool
 	run   func() Action
 }
 
-// runModalCmds fires the cmd under a left-click (rects come from
-// modalButtonStack/Row over the same labels) OR whose `hot` accelerator
-// is pressed, and returns its Action plus true. The label↔action pairing
-// lives in the cmd row, so there's no index-to-meaning switch to keep in
-// lockstep with the label order.
+// runModalCmds fires the cmd under a left-click or whose hot accelerator is
+// pressed, returning its Action plus true.
 func runModalCmds(cmds []modalCmd, rects []rl.Rectangle) (Action, bool) {
 	click := modalButtonHit(rects)
 	for i, c := range cmds {
@@ -923,11 +784,8 @@ func cmdLabels(cmds []modalCmd) []string {
 	return out
 }
 
-// buttonGrid lays auto-width buttons left-to-right within [x, x+maxW],
-// wrapping to a new row when the next would exceed maxW, growing downward
-// from y. Returns rects in label order — the geometry source shared by an
-// entity modal's draw and click hit-test. (A short label set that fits one
-// line simply doesn't wrap.)
+// buttonGrid lays auto-width buttons left-to-right within [x, x+maxW], wrapping
+// to a new row when the next exceeds maxW. Returns rects in label order.
 func buttonGrid(x, y, maxW float32, labels []string) []rl.Rectangle {
 	rects := make([]rl.Rectangle, len(labels))
 	cx, cy := x, y
@@ -944,10 +802,7 @@ func buttonGrid(x, y, maxW float32, labels []string) []rl.Rectangle {
 }
 
 // equalButtonRow splits width w into n equal-width button rects at (x, y),
-// height h, with tightBtnGap between them. The "divide a row into N equal
-// buttons + a gap" math was hand-rolled at the door facing/style rows, the
-// metadata material buttons, and the custom-enemy base-sprite row — this
-// is the one source for all of them.
+// height h, with tightBtnGap between them.
 func equalButtonRow(x, y, w, h float32, n int) []rl.Rectangle {
 	if n <= 0 {
 		return nil
@@ -960,8 +815,7 @@ func equalButtonRow(x, y, w, h float32, n int) []rl.Rectangle {
 	return rects
 }
 
-// buttonGridHeight is the total vertical span buttonGrid uses for labels
-// at the given width (0 for an empty set).
+// buttonGridHeight is the total vertical span buttonGrid uses for labels (0 if empty).
 func buttonGridHeight(maxW float32, labels []string) float32 {
 	if len(labels) == 0 {
 		return 0
@@ -971,9 +825,8 @@ func buttonGridHeight(maxW float32, labels []string) float32 {
 	return last.Y + last.Height
 }
 
-// entityModalLayout is the shared geometry for the pack/chest editors: the
-// scrolled list window plus the action-button row and the wrapped add
-// grid, all derived once so draw and the click handler agree.
+// entityModalLayout is the shared geometry for the pack/chest editors: scrolled
+// list window, action-button row, and wrapped add grid, derived once.
 type entityModalLayout struct {
 	card          rl.Rectangle
 	listTop, rowH float32
@@ -1013,17 +866,15 @@ func entityRowAt(lay entityModalLayout, p rl.Vector2) int {
 	return -1
 }
 
-// drawEntityListWindow paints the pack/chest list rows for a precomputed
-// layout window, highlighting the cursor row, with ▲/▼ "N more" clip
-// indicators.
+// drawEntityListWindow paints the pack/chest list rows for a layout window,
+// highlighting the cursor row, with ▲/▼ "N more" clip indicators.
 func drawEntityListWindow(font rl.Font, theme render.Theme, lay entityModalLayout, count, cursor int, emptyText string, rowText func(int) string) {
 	if count == 0 {
 		render.DrawRichText(font, emptyText, rl.NewVector2(lay.card.X+modalContentInset, lay.listTop), editorFontLabel, 1, theme.TextHint)
 		return
 	}
 	y := lay.listTop
-	// Shared "▲ N more" / "▼ N more" clip indicators (no-op when nothing is
-	// hidden) so this list's affordance can't drift from the dialog lists'.
+	// Shared "▲/▼ N more" clip indicators (no-op when nothing is hidden).
 	drawScrollMoreHint(font, theme, lay.card.X+entityListTextInset, y-16, lay.topRow, true)
 	for i := lay.topRow; i < lay.end; i++ {
 		text := rowText(i)
@@ -1070,8 +921,7 @@ func drawButton(font rl.Font, r rl.Rectangle, label string, active bool) {
 }
 
 // drawButtonDisabled paints a context-inactive toolbar button: same footprint
-// (so the strip never reflows) but a flat, dimmed fill + faded text and no hover
-// response — reads as "this control exists, just not on this layer."
+// (no reflow), dimmed fill + faded text, no hover.
 func drawButtonDisabled(font rl.Font, r rl.Rectangle, label string) {
 	rl.DrawRectangleRec(r, render.FadeColor(bgButton, 0.45))
 	rl.DrawRectangleLinesEx(r, 1, render.FadeColor(editorBorderMid, 0.5))
@@ -1081,21 +931,15 @@ func drawButtonDisabled(font rl.Font, r rl.Rectangle, label string) {
 		editorFontBody, 1, render.FadeColor(textBright, 0.38))
 }
 
-// drawStepperButtons paints the shared "−" / "+" adjuster pair for a
-// numeric stepper row (sidebar dims, new-map dims, custom-enemy stats).
-// The value cell differs per caller — an editable drawTextField vs a
-// drawReadonlyValue — so only the button pair, which was hand-repeated
-// at every stepper, is shared here.
+// drawStepperButtons paints the shared "−"/"+" adjuster pair for a numeric
+// stepper row (the value cell differs per caller).
 func drawStepperButtons(font rl.Font, minus, plus rl.Rectangle) {
 	drawButton(font, minus, "-", false)
 	drawButton(font, plus, "+", false)
 }
 
-// stepperRow lays out a numeric stepper at (x,y): a value cell of width
-// valueW, then two modalBtnH-square "−"/"+" buttons each preceded by gap.
-// Parallels drawStepperButtons (which paints the pair) so the three stepper
-// modals (sidebar dims, new-map dims, custom-enemy stats) share one
-// placement formula instead of each hand-deriving the +offsets.
+// stepperRow lays out a numeric stepper at (x,y): a value cell of width valueW,
+// then two square "−"/"+" buttons each preceded by gap.
 func stepperRow(x, y, valueW, gap float32) (value, minus, plus rl.Rectangle) {
 	value = rl.NewRectangle(x, y, valueW, modalBtnH)
 	minus = rl.NewRectangle(value.X+value.Width+gap, y, modalBtnH, modalBtnH)
@@ -1110,13 +954,11 @@ var (
 	doorLinkExternalColor = rl.NewColor(186, 162, 255, 205) // cross-map link (target in another file)
 )
 
-// markerPackDot is the flat pack color for the small dots in the Objects list
-// and the minimap (distinct from the per-kind packMarkerColor used on the
-// canvas). One source so the two dot sites can't drift.
+// markerPackDot is the flat pack color for the Objects list + minimap dots
+// (distinct from the per-kind packMarkerColor on the canvas).
 var markerPackDot = rl.NewColor(222, 92, 80, 255)
 
-// doorSpawnByName finds the door spawn with the given name in this map's
-// spawn list. Used by the door-link overlay to resolve same-map targets.
+// doorSpawnByName finds the door spawn with the given name.
 func doorSpawnByName(spawns []core.DoorSpawn, name string) (core.DoorSpawn, bool) {
 	for _, d := range spawns {
 		if d.Name == name {
@@ -1126,14 +968,11 @@ func doorSpawnByName(spawns []core.DoorSpawn, name string) (core.DoorSpawn, bool
 	return core.DoorSpawn{}, false
 }
 
-// drawDoorLinks renders the door-link diagnostic overlay (the "Links" toolbar
-// toggle): a connector from each door to its same-map target door, a warning
-// ring on doors whose target_door doesn't resolve in this map, and a neutral
-// ring on cross-map doors (their target lives in another file — the Validate
-// modal checks those). Doors are few, so this isn't culled.
+// drawDoorLinks renders the door-link diagnostic overlay: a connector to each
+// door's same-map target, a warning ring on unresolved targets, a neutral ring
+// on cross-map doors. Doors are few, so this isn't culled.
 func drawDoorLinks(s *State, cell float32) {
-	// An empty target is an unset door (drawn as a self-link); otherwise defer
-	// to the canonical self-portal test (SelfMapToken or this map's own id).
+	// Empty target = unset (self-link); otherwise use the self-portal test.
 	sameMap := func(target string) bool { return target == "" || core.IsSelfPortal(s.area, target) }
 	for _, d := range s.area.DoorSpawns {
 		cx, cy := s.rect.tileCenter(d.TileX, d.TileZ)
@@ -1151,11 +990,9 @@ func drawDoorLinks(s *State, cell float32) {
 	}
 }
 
-// minimapRect computes the on-screen rectangle of the overview minimap — the
-// downscaled whole-map thumbnail pinned to the grid pane's bottom-right corner
-// — and whether it should show (hidden when there's no map or the grid pane is
-// too small to spare the room). Shared by the draw and the click-to-jump
-// hit-test so they can't drift.
+// minimapRect computes the overview minimap's on-screen rect (bottom-right of
+// the grid) and whether it shows (hidden when no map / grid too small). Shared
+// by draw and click-to-jump.
 func minimapRect(s *State) (rl.Rectangle, bool) {
 	if s.area.Width == 0 || s.area.Height == 0 || s.rect.cellPx <= 0 {
 		return rl.Rectangle{}, false
@@ -1164,8 +1001,7 @@ func minimapRect(s *State) (rl.Rectangle, bool) {
 		return rl.Rectangle{}, false
 	}
 	const maxDim = float32(150)
-	// pad ≥ scrollbarThickness (+ backing slack) so the minimap clears the
-	// canvas scrollbar gutters on the grid's right + bottom edges when zoomed in.
+	// pad ≥ scrollbarThickness so the minimap clears the canvas scrollbar gutters.
 	const pad = float32(16)
 	aw, ah := float32(s.area.Width), float32(s.area.Height)
 	scale := maxDim / aw
@@ -1178,10 +1014,9 @@ func minimapRect(s *State) (rl.Rectangle, bool) {
 	return rl.NewRectangle(gx, gy, mw, mh), true
 }
 
-// drawMinimap paints the overview minimap: a floor base, wall pixels, entity
-// dots, and a frame marking the slice of the map currently visible in the grid
-// pane. Pixel-space iteration bounds the cost to the minimap's own area
-// (~150² max), independent of map size. Click-to-jump is in updateMouse.
+// drawMinimap paints the overview: floor base, wall pixels, entity dots, and a
+// viewport frame. Pixel-space iteration bounds cost to ~150² regardless of map
+// size. Click-to-jump is in updateMouse.
 func drawMinimap(s *State) {
 	mr, ok := minimapRect(s)
 	if !ok {
@@ -1204,9 +1039,8 @@ func drawMinimap(s *State) {
 			if tx >= s.area.Width {
 				break
 			}
-			// Walls are elevation now: paint a pixel where a tile rises above
-			// the walkable baseline (a cliff/wall reads as structure on the
-			// overview). Pits below the baseline stay blank.
+			// Paint a pixel where a tile rises above the walkable baseline
+			// (cliff/wall = structure); pits below stay blank.
 			if s.area.ElevationLevelAt(tx, tz) > core.ElevationBaseline {
 				rl.DrawPixel(int32(mr.X)+int32(px), int32(mr.Y)+int32(py), wallCol)
 			}
@@ -1232,7 +1066,7 @@ func drawMinimap(s *State) {
 	}
 	dot(s.area.StartTileX, s.area.StartTileZ, render.MarkerStart)
 
-	// Viewport frame — the slice of the map currently visible in the grid pane.
+	// Viewport frame — the slice currently visible in the grid pane.
 	w, h := float32(s.area.Width), float32(s.area.Height)
 	vx0 := core.Clamp((s.rect.grid.X-s.rect.gridX)/s.rect.cellPx, 0, w)
 	vx1 := core.Clamp((s.rect.grid.X+s.rect.grid.Width-s.rect.gridX)/s.rect.cellPx, 0, w)
@@ -1248,12 +1082,10 @@ func brushRecentsVisible(s *State) bool {
 	return len(s.recentBrushes) > 0 && s.rect.grid.Width >= 260 && s.rect.grid.Height >= 200
 }
 
-// brushRecentRect is the i-th recent-brush swatch rectangle, laid out left to
-// right in the grid pane's bottom-left corner. Shared by draw + click hit-test
-// so they can't drift.
+// brushRecentRect is the i-th recent-brush swatch rect (grid bottom-left).
+// Shared by draw + click hit-test.
 func brushRecentRect(s *State, i int) rl.Rectangle {
-	// pad ≥ scrollbarThickness (+ slack) so the row clears the bottom canvas
-	// scrollbar gutter when zoomed in.
+	// pad ≥ scrollbarThickness so the row clears the bottom scrollbar gutter.
 	const sw, pad, gap = float32(26), float32(16), float32(4)
 	x0 := s.rect.grid.X + pad
 	y := s.rect.grid.Y + s.rect.grid.Height - sw - pad
@@ -1269,8 +1101,7 @@ func recentSwatchColor(ref brushRef) rl.Color {
 }
 
 // drawBrushRecents paints the recent-brush quick-pick row (newest at left).
-// Each swatch shows the brush color + its layer's initial; clicking one (see
-// updateMouse) jumps to that layer + brush.
+// Each swatch shows the brush color + layer initial; clicking jumps to it.
 func drawBrushRecents(s *State, font rl.Font) {
 	if !brushRecentsVisible(s) {
 		return
@@ -1296,18 +1127,14 @@ func drawBrushRecents(s *State, font rl.Font) {
 	}
 }
 
-// eyeBoxRect is the small visibility-toggle box inset at the right edge of a
-// Levels-panel row. (The layer tabs that also used it are gone — layer
-// visibility now lives on the top-bar layer dropdown's per-row eyes.)
+// eyeBoxRect is the visibility-toggle box at the right edge of a Levels-panel row.
 func eyeBoxRect(r rl.Rectangle) rl.Rectangle {
 	const eye = float32(20)
 	return rl.NewRectangle(r.X+r.Width-6-eye-6, r.Y+(r.Height-eye)/2, eye, eye)
 }
 
-// drawLayerEye paints the visibility toggle as an almond EYE glyph: two lids
-// that meet at the left/right corners, with a pupil when shown or a diagonal
-// strike-through when hidden. Shared by the layer tabs and the Levels-panel
-// rows. (Was a ring + center dot, which read more like a target than an eye.)
+// drawLayerEye paints the visibility toggle as an almond eye: two lids meeting
+// at the corners, with a pupil when shown or a strike-through when hidden.
 func drawLayerEye(r rl.Rectangle, open, hover bool) {
 	cx := r.X + r.Width/2
 	cy := r.Y + r.Height/2
@@ -1318,11 +1145,10 @@ func drawLayerEye(r rl.Rectangle, open, hover bool) {
 	if hover {
 		col = layerEyeHover
 	}
-	hw := r.Width * 0.40 // half-width: each corner sits hw from center
-	h := r.Width * 0.26  // how far the lids bulge above/below the centerline
+	hw := r.Width * 0.40 // half-width: corners sit hw from center
+	h := r.Width * 0.26  // lid bulge above/below the centerline
 	const seg = 10
-	// The two lids are symmetric sine arcs: zero offset at the corners, peak at
-	// the middle. Walk t from the left corner to the right, stroking both lids.
+	// Lids are symmetric sine arcs (zero at corners, peak at middle).
 	var prevTop, prevBot rl.Vector2
 	for i := 0; i <= seg; i++ {
 		t := float32(i) / float32(seg)
@@ -1339,24 +1165,21 @@ func drawLayerEye(r rl.Rectangle, open, hover bool) {
 	if open {
 		rl.DrawCircleV(rl.NewVector2(cx, cy), r.Width*0.15, col) // pupil
 	} else {
-		// Strike-through corner to corner so the hidden state reads instantly.
+		// Strike-through corner to corner = hidden.
 		rl.DrawLineEx(rl.NewVector2(cx-hw-2, cy-h-2), rl.NewVector2(cx+hw+2, cy+h+2), 2, col)
 	}
 }
 
 // --- Levels panel ----------------------------------------------------------
 //
-// The Photoshop-style elevation-level panel: a header (label + −/+ to shrink /
-// grow the range) then one row per level 0..topLevel, each with a visibility
-// eye and an active-level highlight. Clicking a row makes that level active
-// (the floor content paints build onto); clicking its eye hides/shows every
-// tile on that level in the grid. Mirrors the layer-tab geometry/visuals.
+// Elevation-level panel: a header (label + −/+ range steppers) then one row per
+// level 0..topLevel, each with a visibility eye + active-level highlight.
+// Clicking a row makes that level active; clicking its eye hides/shows it.
 
 const maxVisibleLevelRows = 8
 
-// visibleLevelRows is how many level rows the panel shows: the span
-// bottomLevel..topLevel, capped so a tall stack can't push the palette
-// off-screen (the window then scrolls — see levelScrollBase).
+// visibleLevelRows is how many level rows the panel shows: bottomLevel..topLevel,
+// capped at maxVisibleLevelRows (the window then scrolls — see levelScrollBase).
 func visibleLevelRows(s *State) int {
 	n := s.topLevel - s.bottomLevel + 1
 	if n < 1 {
@@ -1373,15 +1196,13 @@ func levelsPanelHeight(s *State) float32 {
 	return float32(1+visibleLevelRows(s)) * layerTabH
 }
 
-// levelScrollBase is the stored level shown in the panel's FIRST row. Rows
-// ascend (row i shows base+i). The window spans bottomLevel..topLevel; when
-// that exceeds the visible-row cap it scrolls to keep the active level
-// (editLevel) on screen. Clamped so it never shows rows outside the span.
+// levelScrollBase is the level in the panel's FIRST row (row i shows base+i).
+// Scrolls to keep the active level on screen; clamped to the span.
 func levelScrollBase(s *State) int {
 	rows := visibleLevelRows(s)
 	base := s.bottomLevel
 	if s.editLevel > base+rows-1 {
-		base = s.editLevel - rows + 1 // scroll up just enough to reveal the active level
+		base = s.editLevel - rows + 1 // scroll up to reveal the active level
 	}
 	if hi := s.topLevel - rows + 1; base > hi {
 		base = hi
@@ -1396,7 +1217,7 @@ func levelHeaderRect(s *State) rl.Rectangle {
 	return rl.NewRectangle(s.rect.levels.X, s.rect.levels.Y, s.rect.levels.Width, layerTabH)
 }
 
-// levelMinusRect / levelPlusRect are the small range steppers in the header.
+// levelStepperRects returns the header's range steppers.
 func levelStepperRects(s *State) (minus, plus rl.Rectangle) {
 	h := levelHeaderRect(s)
 	const bw = float32(22)
@@ -1418,9 +1239,8 @@ func levelEyeRect(s *State, i int) rl.Rectangle {
 	return eyeBoxRect(levelRowRect(s, i))
 }
 
-// levelRowAt returns the LEVEL for a point in the panel's row area, or -1.
-// Maps the visible row index through levelScrollBase so a scrolled panel
-// selects the right level.
+// levelRowAt returns the LEVEL under p in the panel's row area, or -1
+// (mapped through levelScrollBase so a scrolled panel selects right).
 func levelRowAt(s *State, p rl.Vector2) int {
 	base := levelScrollBase(s)
 	for i := 0; i < visibleLevelRows(s); i++ {
@@ -1467,16 +1287,13 @@ func drawLevelsPanel(s *State, font rl.Font, theme render.Theme) {
 		}
 		render.DrawTextWithShadow(font, label, inner.X+10, inner.Y+(inner.Height-16)/2, editorFontBody, text)
 		eye := levelEyeRect(s, i)
-		// The active level is always shown (it can't be hidden), so draw its eye
-		// locked-open and dimmed rather than as a live toggle that no-ops.
+		// The active level is always shown, so its eye is locked-open.
 		drawLevelEye(eye, !hidden, pointIn(mp, eye) && !active, active)
 	}
 }
 
-// drawLevelEye draws a Levels-panel row's visibility eye. The active level's
-// eye is LOCKED (the active floor is always shown and can't be hidden), so it's
-// drawn open and non-hover — it doesn't pretend to be a live toggle that
-// silently no-ops on click.
+// drawLevelEye draws a Levels-panel row's visibility eye. The active level's eye
+// is LOCKED (always shown), drawn open + non-hover.
 func drawLevelEye(r rl.Rectangle, open, hover, locked bool) {
 	if locked {
 		drawLayerEye(r, true, false)
@@ -1502,10 +1319,8 @@ func paletteToolAt(s *State, p rl.Vector2) int {
 	if !pointIn(p, s.rect.palette) {
 		return -1
 	}
-	// Reject clicks in the heading band. drawPalette scissor-clips the entry
-	// list to below palette.Y+headerReserve, so a scrolled entry whose rect
-	// overlaps the heading is visually hidden yet would otherwise still
-	// hit-test here. Mirrors handleMetadataClick's header-band guard.
+	// Reject clicks in the heading band: drawPalette scissor-clips entries below
+	// it, so a scrolled entry overlapping the heading is hidden but would still hit-test.
 	if p.Y < s.rect.palette.Y+headerReserve {
 		return -1
 	}
@@ -1519,25 +1334,16 @@ func paletteToolAt(s *State, p rl.Vector2) int {
 	return -1
 }
 
-// paletteRowStride is rowH + the vertical spacing between rows. Used for
-// both hit-testing (paletteEntryRect) and laying out the hint block below
-// the palette so they stay in sync.
 const (
 	paletteRowH      = float32(32)
-	paletteRowStride = paletteRowH + 4
-	// headerReserve is the vertical space inside the panel reserved for
-	// the panel heading (BRUSHES / MAP); body content sits below this
-	// band and the scissor clip below the heading uses it so scrolled
-	// content can't paint into the heading row. Must clear the heading
-	// underline tick painted by render.DrawHeading.
+	paletteRowStride = paletteRowH + 4 // rowH + row spacing
+	// headerReserve is the panel heading band (BRUSHES / MAP); body + scissor clip
+	// sit below it. Must clear the heading underline tick from render.DrawHeading.
 	headerReserve = float32(40)
 )
 
-// paletteHints is the keyboard-shortcut cheat sheet rendered below
-// the brush list. Promoted from a hand-counted const + open-coded
-// slice literal to a single source of truth: paletteContentHeight
-// computes scroll bounds from len(paletteHints), so adding or
-// removing a hint can never drift from the layout math.
+// paletteHints is the keyboard-shortcut cheat sheet below the brush list.
+// paletteContentHeight reads len(paletteHints), so the layout can't drift.
 var paletteHints = []string{
 	"L-drag: paint",
 	"R-click: erase",
@@ -1571,13 +1377,9 @@ func paletteEntryRect(s *State, i int) rl.Rectangle {
 	return rl.NewRectangle(s.rect.palette.X+8, y, s.rect.palette.Width-16, paletteRowH)
 }
 
-// visiblePaletteRange returns the half-open index range [start, end)
-// of palette entries whose rect intersects the visible band of the
-// palette panel. Lets drawPalette iterate only the rows that will
-// actually render instead of every entry. Clamped to [0, n] so an
-// out-of-range scroll value during a transient resize can't index past
-// the slice. Pure arithmetic — no raylib calls, safe to compute once
-// per frame.
+// visiblePaletteRange returns the [start, end) index range of palette entries
+// whose rect intersects the visible band, so drawPalette iterates only those.
+// Clamped to [0, n].
 func visiblePaletteRange(s *State, n int) (int, int) {
 	if n <= 0 {
 		return 0, 0
@@ -1585,8 +1387,7 @@ func visiblePaletteRange(s *State, n int) (int, int) {
 	scroll := s.paletteScroll[s.layer]
 	top := s.rect.palette.Y + headerReserve
 	bot := s.rect.palette.Y + s.rect.palette.Height
-	// Each entry starts at top + i*stride - scroll. Solving for the
-	// first i where (start + paletteRowH) >= top gives:
+	// First i where (entryStart + paletteRowH) >= top:
 	startF := (scroll - paletteRowH) / paletteRowStride
 	endF := (scroll + (bot - top)) / paletteRowStride
 	start := int(startF)
@@ -1603,21 +1404,15 @@ func visiblePaletteRange(s *State, n int) (int, int) {
 	return start, end
 }
 
-// paletteContentHeight returns the pixel height required to render the
-// active layer's full brush list (including the top/bottom padding and
-// the hint footer). Used by ScrollPalette to clamp the scroll offset
-// so the last row stays visible. Reads len(paletteHints) directly so
-// adding a shortcut row updates both the rendered list AND the
-// scroll bound in one edit.
+// paletteContentHeight is the pixel height to render the active layer's full
+// brush list + hint footer. Used by ScrollPalette to clamp the offset.
 func paletteContentHeight(s *State) float32 {
 	palette := layerBrushes[s.layer]
 	return headerReserve + float32(len(palette))*paletteRowStride + 12 + float32(len(paletteHints))*16 + 16
 }
 
-// ScrollPalette adjusts the active layer's palette scroll offset by
-// dy pixels (positive = scroll down / show later entries). Clamps to
-// [0, max] where max keeps the content end visible. Exposed for
-// updateMouse / hotkey wheel handlers in input.go.
+// ScrollPalette adjusts the active layer's palette scroll by dy px (positive =
+// down), clamped to [0, max].
 func ScrollPalette(s *State, dy float32) {
 	if s.rect.palette.Height <= 0 {
 		return
@@ -1644,29 +1439,19 @@ func drawPalette(s *State, font rl.Font, theme render.Theme) {
 
 	render.DrawHeading(font, "BRUSHES", int32(s.rect.palette.X+12), int32(s.rect.palette.Y+8), theme.BorderStrong)
 
-	// Clamp scroll to current content bounds — entry count can change
-	// between frames (a brush table reload would be unusual, but the
-	// clamp keeps us honest about not scrolling past the last entry).
+	// Reclamp scroll (entry count can change between frames).
 	ScrollPalette(s, 0)
 
-	// Clip the palette region so off-screen entries (above and below)
-	// don't draw over the topbar/tabs or the grid panel. The clip lives
-	// for the duration of this call; the BeginScissorMode/End pair
-	// also catches the hint footer that follows the entries.
+	// Clip the palette region so off-screen entries (and the hint footer) don't
+	// paint over the topbar or grid panel.
 	rl.BeginScissorMode(int32(s.rect.palette.X), int32(s.rect.palette.Y+headerReserve),
 		int32(s.rect.palette.Width), int32(s.rect.palette.Height-headerReserve))
 	defer rl.EndScissorMode()
 
 	palette := layerBrushes[s.layer]
 	labels := paletteLabels[s.layer]
-	// Re-use the Draw()-cached frameMouse instead of crossing the CGo
-	// boundary per palette entry — long brush lists call this loop
-	// every frame the editor is open.
-	mp := frameMouse
-	// Window the iteration to rows that can actually render. The old
-	// code walked every entry and culled by Y; on a long palette
-	// (props is ~30) that's wasted entryRect + pointIn work for rows
-	// the scissor clips anyway.
+	mp := frameMouse // Draw()-cached; avoids a per-entry CGo poll
+	// Window iteration to rows that can actually render (props is ~30 entries).
 	visStart, visEnd := visiblePaletteRange(s, len(palette))
 	for i := visStart; i < visEnd; i++ {
 		b := palette[i]
@@ -1683,13 +1468,8 @@ func drawPalette(s *State, font rl.Font, theme render.Theme) {
 	}
 }
 
-// drawBrushSwatchRow renders one selectable brush entry: row background
-// with active / hover highlight, the brush's colored swatch box (with
-// the sentinel hatch overlay when applicable), and a label string at
-// the configurable text size. Replaces the open-coded rect+fill+
-// border+hatch+label block that the palette list and the new-map
-// floor picker each carried — adding a third call site (the custom-
-// enemy modal's base-sprite picker) would have made it three.
+// drawBrushSwatchRow renders one selectable brush entry: row bg (active/hover),
+// the colored swatch box (sentinel hatch when applicable), and a label.
 func drawBrushSwatchRow(font rl.Font, r rl.Rectangle, label string, layer Layer, brush Brush, active, hovered bool, labelSize float32) {
 	bg := bgEntry
 	if active {
@@ -1721,14 +1501,10 @@ func drawBrushSwatchRow(font rl.Font, r rl.Rectangle, label string, layer Layer,
 		labelSize, 1, nameCol)
 }
 
-// isSentinelBrush reports whether (layer, char) is a "semantic" brush —
-// Auto / Force-empty / None — that doesn't paint a visible tile. Used by
-// the palette to render those swatches distinctly so the author doesn't
-// confuse "let the renderer scatter" with "paint THIS particular look".
-// Every authored layer must be enumerated below so a future ceiling
-// sentinel (or another new layer) gets a real answer instead of falling
-// through to false — silent "not a sentinel" would render the swatch
-// without hatching and mislead the author about what the brush does.
+// isSentinelBrush reports whether (layer, char) is a "semantic" brush (Auto /
+// Force-empty / None) that paints no visible tile — the palette hatches those.
+// Every layer must be enumerated (panics on a missing case) so a new layer can't
+// silently fall through to false and mislead the author.
 func isSentinelBrush(layer Layer, char byte) bool {
 	switch layer {
 	case LayerFloor:
@@ -1740,25 +1516,20 @@ func isSentinelBrush(layer Layer, char byte) bool {
 	case LayerWalls:
 		return char == core.TileOpen
 	case LayerCeiling:
-		// Ceiling uses '.' for "no slab" — the same TileOpen char the
-		// walls layer reads, but conceptually a sentinel (let sky
-		// show through), not a paintable look.
+		// '.' = "no slab" (sky shows through) — a sentinel, not a paintable look.
 		return char == core.TileCeilingOpen
 	case LayerElevation:
-		// Ground level ('0') is the implicit "flat" default; treat it as a
-		// sentinel so it reads as the no-op level in the palette.
+		// Ground ('0') is the implicit flat default — the palette no-op level.
 		return char == core.ElevationGround
 	case LayerEntities:
-		// Entities aren't tile chars — no sentinel concept applies.
+		// Entities aren't tile chars.
 		return false
 	}
 	panic(fmt.Sprintf("editor: isSentinelBrush missing case for layer %d", int(layer)))
 }
 
-// drawSentinelHatch overlays a diagonal stripe pattern onto a swatch
-// rectangle so the swatch reads as "semantic" rather than literal. Five
-// thin stripes at 45° catch the eye without obscuring the underlying
-// color (which still hints at what auto-scatter would land on).
+// drawSentinelHatch overlays diagonal stripes onto a swatch so it reads as
+// "semantic" rather than a literal color.
 func drawSentinelHatch(r rl.Rectangle) {
 	stripe := rl.NewColor(0, 0, 0, 110)
 	steps := int(r.Width + r.Height)
@@ -1767,10 +1538,7 @@ func drawSentinelHatch(r rl.Rectangle) {
 		y1 := r.Y
 		x2 := r.X
 		y2 := r.Y + float32(i)
-		// Clip to swatch bounds — rl.DrawLineEx doesn't itself clip but
-		// the stripes that fall past the corners just get cropped at the
-		// next round when raylib paints outside the swatch... so we
-		// inline a quick clamp.
+		// Clip to swatch bounds (DrawLineEx doesn't clip).
 		if x1 > r.X+r.Width {
 			y1 += x1 - (r.X + r.Width)
 			x1 = r.X + r.Width
@@ -1797,16 +1565,12 @@ type metaRect struct {
 	widthValue, widthMinus, widthPlus    rl.Rectangle
 	heightValue, heightMinus, heightPlus rl.Rectangle
 	pathLabel, pathValue                 rl.Rectangle
-	// reachLabel + reachArea bound the clickable reachability badge.
-	// reachArea covers the badge fill region (not just the label) so
-	// the metadata click handler can route any click in that zone to
-	// the Validate modal. drawMetadata renders inside reachArea.
+	// reachLabel + reachArea bound the clickable reachability badge; reachArea
+	// covers the whole fill so any click there opens the Validate modal.
 	reachLabel, reachArea rl.Rectangle
 }
 
-// Metadata-sidebar row metrics. The panel stacks labeled controls at a fixed
-// rhythm; naming the strides (was bare 18 / 22 / 42 / 38 / 30 repeated down
-// metadataRects) keeps a "labels too cramped" retune to one edit.
+// Metadata-sidebar row metrics — the strides metadataRects stacks controls at.
 const (
 	metaLabelH     = float32(18) // field-caption height
 	metaLabelGap   = float32(22) // caption row → the field/control it labels
@@ -1815,18 +1579,16 @@ const (
 	metaFieldH     = float32(30) // text-field height (name / quiet / path)
 )
 
-// Per-cell zoom thresholds (pixels) below which a piece of grid chrome turns
-// off because it would no longer fit / would read as noise. Named so the three
-// don't drift into an unexplained 14/18/12 spread.
+// Per-cell zoom thresholds (px) below which a piece of grid chrome turns off
+// (would no longer fit / reads as noise).
 const (
 	charOverlayMinCell    = float32(14) // active-layer per-tile glyph overlay
 	axisTickMinCell       = float32(18) // top/left axis tick-number labels
 	elevationDigitMinCell = float32(12) // the level digit in the elevation slice
 )
 
-// Shared entity-marker geometry fractions (of the cell size). The drag-ghost
-// outline reads the SAME fraction as the live marker so a relocated entity's
-// preview ring can't drift from the marker it stands in for.
+// Shared entity-marker radius fractions (of cell size); the drag ghost reads the
+// SAME fraction as the live marker so the preview ring can't drift.
 const (
 	packMarkerRadiusFrac  = float32(0.32) // pack circle radius — live marker + drag ghost
 	startMarkerRadiusFrac = float32(0.36) // player-start circle radius — live marker + drag ghost
@@ -1861,31 +1623,21 @@ func metadataRects(s *State) metaRect {
 	r.heightValue, r.heightMinus, r.heightPlus = stepperRow(x, y, 96, 6)
 	y += metaRowGap
 
-	// On-disk path readout. Player start tile + facing used to live
-	// here, but those are properties of the PlayerStart entity instance
-	// (and the per-door Facing on each DoorSpawn), not area-wide
-	// settings — they're now edited from the right-click context menu
-	// on the entities layer. Path stays in the sidebar because the
-	// on-disk path IS area-wide.
+	// On-disk path readout (area-wide; player start + door facing are per-entity now).
 	r.pathLabel = rl.NewRectangle(x, y, w, metaLabelH)
 	r.pathValue = rl.NewRectangle(x, y+metaLabelGap, w, metaFieldH)
-	// Reachability badge. Label sits a row below the path readout; the
-	// clickable badge region extends past the label to cover the
-	// "OK" / warning panel that follows underneath.
+	// Reachability badge: label a row below the path; the clickable region covers
+	// the OK/warning panel below it.
 	reachY := y + 64
 	r.reachLabel = rl.NewRectangle(x, reachY, w, metaLabelH)
 	r.reachArea = rl.NewRectangle(x, reachY, w, 140)
 	return r
 }
 
-// metadataContentHeight returns the pixel height required to render the
-// full metadata panel (heading reserve + every laid-out row through the
-// reachability badge). Used by ScrollMetadata to clamp the scroll offset
-// so the bottom of the panel can scroll into view but no further.
+// metadataContentHeight is the pixel height to render the full metadata panel.
+// Used by ScrollMetadata to clamp the offset.
 func metadataContentHeight(s *State) float32 {
-	// Recompute against an unscrolled metadataRects by temporarily
-	// zeroing the scroll. Avoids hand-summing every stride above and
-	// keeps this in lockstep with the actual layout.
+	// Measure an unscrolled metadataRects so this stays in lockstep with layout.
 	save := s.metadataScroll
 	s.metadataScroll = 0
 	mr := metadataRects(s)
@@ -1893,14 +1645,11 @@ func metadataContentHeight(s *State) float32 {
 	return mr.reachArea.Y + mr.reachArea.Height + 16 - s.rect.metadata.Y
 }
 
-// metadataRowStride is the approximate pixel height of one metadata-panel
-// field row — the wheel-scroll step so one notch moves about one field.
+// metadataRowStride is the wheel-scroll step (~one field per notch).
 const metadataRowStride = float32(42)
 
-// ScrollMetadata adjusts the metadata panel's vertical scroll offset by
-// dy pixels (positive = scroll down). Clamps to [0, max] so the bottom
-// of the content stays reachable but can't scroll past it. Mirrors
-// ScrollPalette.
+// ScrollMetadata adjusts the metadata panel's scroll by dy px (positive = down),
+// clamped to [0, max].
 func ScrollMetadata(s *State, dy float32) {
 	if s.rect.metadata.Height <= 0 {
 		return
@@ -1922,18 +1671,13 @@ func handleMetadataClick(s *State, p rl.Vector2) bool {
 	if !pointIn(p, s.rect.metadata) {
 		return false
 	}
-	// Reject clicks landing inside the MAP heading band so a field
-	// scrolled up behind the heading isn't activated by clicking the
-	// header. Matches the scissor used in drawMetadata.
+	// Reject clicks in the MAP heading band (matches the drawMetadata scissor).
 	if p.Y < s.rect.metadata.Y+headerReserve {
 		return true
 	}
 	mr := metadataRects(s)
-	// Reachability badge: clicking anywhere on the label + warning
-	// list region opens the full validate modal. Keep this BEFORE the
-	// field-focus checks so a click on the badge reliably opens
-	// validate even if the badge happens to overlap a future field
-	// added below.
+	// Reachability badge: any click in the region opens the validate modal.
+	// BEFORE the field-focus checks so it wins even if a future field overlaps.
 	if pointIn(p, mr.reachArea) {
 		openValidateModal(s)
 		return true
@@ -2015,12 +1759,10 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 
 	render.DrawHeading(font, "MAP", int32(s.rect.metadata.X+12), int32(s.rect.metadata.Y+8), theme.BorderStrong)
 
-	// Clamp scroll to current content bounds — content height varies with
-	// the reachability badge's per-frame row count, so reclamp each frame.
+	// Reclamp scroll (content height varies with the badge's row count).
 	ScrollMetadata(s, 0)
 
-	// Clip the metadata body so scrolled content can't paint into the MAP
-	// heading band or below the panel. Mirrors the palette scissor.
+	// Clip the body so scrolled content can't paint into the MAP heading or below.
 	rl.BeginScissorMode(int32(s.rect.metadata.X), int32(s.rect.metadata.Y+headerReserve),
 		int32(s.rect.metadata.Width), int32(s.rect.metadata.Height-headerReserve))
 	defer rl.EndScissorMode()
@@ -2033,10 +1775,8 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 	drawLabel(font, "Materials", mr.matLabel)
 	for i, br := range mr.matButtons {
 		active := s.area.Materials == core.MaterialOptions[i]
-		// MaterialName is total over MaterialOptions (which is the registry's
-		// own enum list), so the ok=false branch is unreachable here — we
-		// fall back to an empty string rather than panicking inside the
-		// per-frame draw loop.
+		// MaterialName is total over MaterialOptions, so ok=false is unreachable;
+		// fall back to "" rather than panic in the per-frame draw loop.
 		name, _ := core.MaterialName(core.MaterialOptions[i])
 		drawButton(font, br, name, active)
 	}
@@ -2058,14 +1798,10 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 	drawTextField(font, mr.heightValue, hText, s.focus == focusHeight)
 	drawStepperButtons(font, mr.heightMinus, mr.heightPlus)
 
-	// Player start coord + facing intentionally live on the PlayerStart
-	// entity instance now, not in the area-wide sidebar. Right-click the
-	// start tile on the Entities layer to edit; per-door facing on each
-	// DoorSpawn overrides this fallback when the player arrives via a
-	// door.
+	// Player start coord + facing live on the PlayerStart entity now (right-click
+	// the start tile on the Entities layer); per-door facing overrides it.
 
-	// Path readout — readonly. Shows "(unsaved)" before the first save,
-	// or the relative on-disk path once known.
+	// Path readout (readonly): "(unsaved)" before the first save, else the path.
 	drawLabel(font, "On-disk path", mr.pathLabel)
 	pathText := s.area.Path
 	if pathText == "" {
@@ -2073,10 +1809,8 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 	}
 	drawReadonlyValue(font, mr.pathValue, pathText)
 
-	// Reachability warnings badge: latches red whenever the area would
-	// fail a save-time reachability check (unreachable packs, empty
-	// rosters, packs that don't fit). Updates per-frame so the badge
-	// reflects the current edit without waiting for a save.
+	// Reachability badge: red whenever the area would fail a save-time check
+	// (updated per-frame so it reflects the current edit).
 	warnings := s.ReachabilityWarnings()
 	drawLabel(font, "Reachability (click to validate)", mr.reachLabel)
 	if len(warnings) == 0 {
@@ -2085,12 +1819,10 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 		rl.DrawRectangleLinesEx(badgeValue, 1, editorReachOK)
 		render.DrawRichText(font, "OK", rl.NewVector2(badgeValue.X+8, badgeValue.Y+(badgeValue.Height-16)/2), editorFontBody, 1, editorReachOKText)
 	} else {
-		// Stack one row per warning so the author can read them all
-		// without hover/click. Red panel + outline so the badge pops
-		// against the metadata column's neutral background.
+		// One row per warning, red panel + outline.
 		rows := warnings
 		if len(rows) > 4 {
-			rows = rows[:4] // cap so we don't reflow the panel
+			rows = rows[:4] // cap so the panel doesn't reflow
 		}
 		h := float32(10 + 22*len(rows))
 		box := rl.NewRectangle(mr.reachArea.X, mr.reachArea.Y+22, mr.reachArea.Width, h)
@@ -2140,16 +1872,12 @@ func drawReadonlyValue(font rl.Font, r rl.Rectangle, text string) {
 
 // --- Grid ------------------------------------------------------------------
 
-// drawGrid paints the four flat-color grid layers (floor → walls → decor →
-// props) stacked, then the ceiling hash overlay and the entity overlays
-// (start + spawns). Layers other than the active one are dimmed so the focus
-// is on what the next click will affect. Order: floor → walls → decor →
-// props → ceiling (hash) → entities.
+// drawGrid paints the flat-color layers stacked (floor → walls → decor → props →
+// ceiling hash → entities), non-active layers dimmed.
 func drawGrid(s *State, font rl.Font) {
 	rl.DrawRectangleRec(s.rect.grid, bgFieldInset)
-	// Isometric preview takes over the whole canvas (read-only — see iso.go).
-	// It computes its own sizing from the panel, so it runs before the top-down
-	// cellPx gate and returns without drawing any of the flat-grid overlays.
+	// Iso preview takes over the whole canvas (read-only — see iso.go), sizing
+	// itself before the top-down cellPx gate.
 	if s.isoView {
 		drawGridIso(s, font)
 		return
@@ -2166,12 +1894,8 @@ func drawGrid(s *State, font rl.Font) {
 	ceilingAlpha := layerAlpha(s, LayerCeiling)
 	entityAlpha := layerAlpha(s, LayerEntities)
 
-	// Frustum-cull tiles outside the visible grid panel. A 200×200
-	// map would be 40k iterations × ~6 raylib draws per cell without
-	// this — fine at small maps but a frame-rate cliff at MaxMapDimension.
-	// Compute the [zMin, zMax) × [xMin, xMax) window from gridX/gridY +
-	// cellPx and the panel's screen rect, then iterate only cells whose
-	// projected rect intersects the panel.
+	// Frustum-cull tiles outside the visible grid panel (a 200×200 map is 40k
+	// cells × ~6 draws otherwise). Compute the visible [xMin,xMax)×[zMin,zMax) window.
 	panelX0, panelY0 := s.rect.grid.X, s.rect.grid.Y
 	panelX1, panelY1 := s.rect.grid.X+s.rect.grid.Width, s.rect.grid.Y+s.rect.grid.Height
 	xMin := int((panelX0 - s.rect.gridX) / cell)
@@ -2190,27 +1914,20 @@ func drawGrid(s *State, font rl.Font) {
 	if zMax > s.area.Height {
 		zMax = s.area.Height
 	}
-	// inCullWindow reports whether a tile is inside the visible grid window —
-	// the shared test the entity-marker loops use to skip off-screen spawns.
+	// inCullWindow: is a tile inside the visible window (entity loops skip off-screen).
 	inCullWindow := func(tx, tz int) bool {
 		return tx >= xMin && tx < xMax && tz >= zMin && tz < zMax
 	}
 
-	// Active-layer char overlay: at zooms where a glyph fits, paint the
-	// tile-char of the CURRENTLY SELECTED layer on each cell so the author
-	// can read what's authored on the layer they're editing without every
-	// other layer's chars competing for attention (which read as noise).
-	// Off by default; ALT-tap toggles it (see showTileGlyphs). Empty
-	// sentinels produce no glyph. Threshold matches the axis-tick label
-	// threshold so the chrome turns on together.
+	// Active-layer char overlay: when a glyph fits, paint the active layer's
+	// tile-char per cell (only the active layer, to avoid noise). ALT-tap toggles
+	// it; empty sentinels produce no glyph.
 	showCharOverlay := cell >= charOverlayMinCell && s.showTileGlyphs && !s.layerHidden[s.layer]
 	charFontSize := cell * 0.55
 	charShadow := glyphShadow
 	charFG := rl.NewColor(248, 250, 252, 235)
 
-	// Per-layer visibility (the layer-tab eye toggles): hidden layers are
-	// skipped in the cell + marker draws so the author can isolate what they're
-	// working on. Hoisted out of the inner loop so it's a cheap bool per cell.
+	// Per-layer visibility, hoisted out of the inner loop (cheap bool per cell).
 	showFloor := !s.layerHidden[LayerFloor]
 	showWalls := !s.layerHidden[LayerWalls]
 	showDecor := !s.layerHidden[LayerDecor]
@@ -2221,8 +1938,8 @@ func drawGrid(s *State, font rl.Font) {
 	for z := zMin; z < zMax; z++ {
 		for x := xMin; x < xMax; x++ {
 			r := s.rect.tileRect(x, z)
-			// Level visibility (Photoshop-style): a tile whose elevation level is
-			// hidden in the Levels panel isn't drawn at all — EXCEPT the ACTIVE
+			// Level visibility: a tile on a hidden level isn't drawn — EXCEPT the
+			// ACTIVE level (always shown) and a ramp connecting to it.
 			// level (you always see the floor you're editing, so a paint can never
 			// vanish behind its own hidden toggle) and a ramp that connects to the
 			// active level (so transitions across a hidden floor stay routable).
@@ -2231,28 +1948,22 @@ func drawGrid(s *State, font rl.Font) {
 				s.levelHidden[lvl] && !rampTouchesActiveLevel(s, x, z) {
 				continue
 			}
-			// Visible off-level tiles fade with distance from the active level so
-			// the floor being edited stands out while neighbours read as context.
+			// Off-level tiles fade with distance from the active level (context).
 			levelFade := levelDistanceFade(s, lvl)
-			// Floor is the base — always painted (except under a wall, where
-			// the wall covers it).
+			// Floor is the base, always painted.
 			if showFloor {
 				rl.DrawRectangleRec(r, fadeAlpha(floorColor(s.area.Floor[z][x]), floorAlpha*levelFade))
 			}
-			// Elevation is a voxel grid: show the slice at the ACTIVE level. A cell
-			// with a tile at (x, editLevel, z) fills tinted by the level; a cell
-			// with no tile there reads empty. Scrub the active level (Levels panel /
-			// PgUp-PgDn) to see each floor — so a land bridge reads as a tile at the
-			// deck level with nothing on the level below it.
+			// Elevation is a voxel grid: fill cells solid at the active level.
+			// Scrub levels (Levels panel / PgUp-PgDn) to see each floor.
 			if s.layer == LayerElevation {
 				if _, solid := s.area.SolidAt(x, s.editLevel, z); solid {
 					rl.DrawRectangleRec(r, fadeAlpha(elevationLevelColor(s.editLevel), 0.6))
 				}
 			}
 			if w := s.area.Walls[z][x]; showWalls && core.IsFaceSkinChar(w) {
-				// Show an overlay only where an explicit face skin is assigned
-				// (rock/ivy/cracked/crumbling); the default '.' skin draws nothing
-				// since it only matters once elevation exposes a face.
+				// Overlay only where an explicit face skin is assigned; '.' draws
+				// nothing (matters only once elevation exposes a face).
 				rl.DrawRectangleRec(r, fadeAlpha(tileColor(LayerWalls, w), wallAlpha*levelFade))
 			}
 			if d := s.area.Decor[z][x]; showDecor && d != core.DecorAuto {
@@ -2260,16 +1971,11 @@ func drawGrid(s *State, font rl.Font) {
 				rl.DrawRectangleRec(insetRect(r, cell*0.28), fadeAlpha(decorColor(d), decorAlpha*df))
 			}
 			if p := s.area.Props[z][x]; showProps && core.IsPropChar(p) {
-				// A prop fades by ITS OWN level (where it was placed), not the
-				// column top — so scrubbing levels shows a deck-mounted prop on the
-				// deck and a ground prop on the ground, the per-level read.
+				// A prop fades by ITS OWN level, not the column top.
 				pf := levelDistanceFade(s, s.area.PropLevelAt(x, z))
 				rl.DrawCircle(int32(r.X+cell/2), int32(r.Y+cell/2), cell*0.36, fadeAlpha(propColor(p), propAlpha*pf))
 			}
-			// Ceiling hash overlay: shown only when the Ceiling layer is
-			// active or the cell holds a ceiling. Two diagonal stripes
-			// inside the cell so it reads as "covered" without obscuring
-			// the layer underneath.
+			// Ceiling hash overlay: diagonal stripes so the cell reads as "covered".
 			if showCeiling && s.area.CeilingAt(x, z) {
 				drawCeilingHash(r, cell, fadeAlpha(ceilingColor(), ceilingAlpha*levelFade))
 			}
@@ -2278,20 +1984,13 @@ func drawGrid(s *State, font rl.Font) {
 					drawTileGlyph(font, r, cell, charFontSize, ch, fadeAlpha(charFG, levelFade), fadeAlpha(charShadow, levelFade))
 				}
 			}
-			// Ramp connector arrow — drawn on every ramp tile (the per-tile
-			// elevation digits + cool/warm slice tints are gone now; the Levels
-			// panel carries the "which floor" read). A ramp touching the active
-			// level shows even when its own level is hidden (the visibility skip
-			// above lets it through), so transitions stay visible.
+			// Ramp connector arrow on every ramp tile (the Levels panel carries the
+			// "which floor" read). Ramps touching the active level show even when hidden.
 			drawRampConnector(font, r, cell, s.area.Floor[z][x])
 		}
 	}
 
-	// Grid lines. Every 5 cells draws a slightly darker line (gridLineMajor)
-	// so the author can eyeball coordinates at a glance — matches the
-	// "tick every 5" convention common in tile editors. Same cull
-	// window as the cell loop so a big map doesn't draw lines outside
-	// the visible panel.
+	// Grid lines, every 5th darker (gridLineMajor). Same cull window as the cells.
 	lineXMax := xMax + 1
 	if lineXMax > s.area.Width+1 {
 		lineXMax = s.area.Width + 1
@@ -2317,15 +2016,10 @@ func drawGrid(s *State, font rl.Font) {
 		rl.DrawLineEx(rl.NewVector2(s.rect.gridX, py), rl.NewVector2(s.rect.gridX+s.rect.gridW, py), 1, col)
 	}
 
-	// Outline around every group of current-level tiles: trace the perimeter
-	// where an active-level tile borders a different level (or the map edge),
-	// so the floor being edited reads as a clear silhouette over the faded
-	// neighbours. Drawn after the grid lines so it sits on top of them.
+	// Outline around current-level tile groups (after grid lines, on top).
 	drawCurrentLevelOutline(s, xMin, xMax, zMin, zMax, cell)
 
-	// Axis tick labels every 5 cells. Only at zoom levels where cells are
-	// big enough to comfortably fit a tick digit — at very small zooms the
-	// labels would overlap and read as visual noise.
+	// Axis tick labels every 5 cells, only when cells fit a digit.
 	if cell >= axisTickMinCell {
 		tickCol := rl.NewColor(220, 224, 232, 180)
 		// Top axis: column numbers.
@@ -2352,19 +2046,13 @@ func drawGrid(s *State, font rl.Font) {
 		}
 	}
 
-	// Pack markers. Each pack draws one circle tinted by the leader's
-	// brush color (from entityBrushColors so editor swatch and field marker
-	// match) plus an initial letter from the leader's SingularName so the
-	// author can tell Rat from Goblin from Mantrap at a glance. The "xN"
-	// badge shows the pack size — matching the field-render contract that
-	// the player only sees the leader from afar.
+	// Pack markers: a circle tinted by the leader's brush color + its initial,
+	// with an "xN" pack-size badge.
 	for _, sp := range s.area.PackSpawns {
 		if len(sp.Members) == 0 {
 			continue
 		}
-		// Cull spawns outside the visible grid window (same window the tile
-		// loop uses) so a big map with many packs doesn't pay leader-lookup +
-		// string-format + MeasureTextEx for markers panned off-screen.
+		// Cull spawns outside the visible window (skip off-screen leader-lookup + measure).
 		if !showEntities || !inCullWindow(sp.TileX, sp.TileZ) {
 			continue
 		}
@@ -2395,9 +2083,7 @@ func drawGrid(s *State, font rl.Font) {
 		}
 	}
 
-	// Chest markers — a small filled square inset into the tile, distinct
-	// from the round enemy-pack circles so the author can tell at a
-	// glance which entity sits where.
+	// Chest markers: a small filled square (distinct from pack circles).
 	for _, c := range s.area.ChestSpawns {
 		if !showEntities || !inCullWindow(c.TileX, c.TileZ) {
 			continue
@@ -2412,10 +2098,7 @@ func drawGrid(s *State, font rl.Font) {
 			1, fadeAlpha(entityMarkerOutline, entityAlpha))
 	}
 
-	// Door markers — a tall thin rectangle in the warm wood tone, with a
-	// small arrowhead indicating the post-transition facing so the
-	// author can verify pairing at a glance. Distinct silhouette from
-	// chests (door = tall + arrow, chest = small square + lid).
+	// Door markers: a tall rectangle + a facing arrowhead (distinct from chests).
 	for _, d := range s.area.DoorSpawns {
 		if !showEntities || !inCullWindow(d.TileX, d.TileZ) {
 			continue
@@ -2438,9 +2121,7 @@ func drawGrid(s *State, font rl.Font) {
 		rl.DrawLineEx(rl.NewVector2(cx, cy), rl.NewVector2(tipX, tipY), 2, fadeAlpha(rl.NewColor(40, 24, 12, 255), entityAlpha))
 	}
 
-	// Crystal markers — a small diamond (a 45°-rotated square) in the cyan
-	// crystal tint, a silhouette distinct from chest squares, pack circles,
-	// and the tall door rectangles.
+	// Crystal markers: a small cyan diamond (distinct from the other markers).
 	for _, c := range s.area.CrystalSpawns {
 		if !showEntities || !inCullWindow(c.TileX, c.TileZ) {
 			continue
@@ -2463,10 +2144,7 @@ func drawGrid(s *State, font rl.Font) {
 		rl.DrawLineEx(rl.NewVector2(sx, sy), rl.NewVector2(tx, ty), 3, fadeAlpha(rl.NewColor(20, 14, 0, 255), entityAlpha))
 	}
 
-	// Door-link overlay: when toggled on, draw a connector from each door to
-	// its same-map target door, and ring doors whose target_door doesn't
-	// resolve. Drawn above markers so the links read clearly. Independent of
-	// the entities-layer hide (it's its own diagnostic toggle).
+	// Door-link overlay (its own toggle, above markers).
 	if s.showDoorLinks {
 		drawDoorLinks(s, cell)
 	}
@@ -2478,11 +2156,8 @@ func drawGrid(s *State, font rl.Font) {
 		hoverPx, hoverPz = s.gridCursorX, s.gridCursorZ
 	}
 	if hoverPx >= 0 {
-		// Multi-tile brush footprint preview: when the active brush is a
-		// J/A anchor, outline EVERY footprint cell tinted by whether it
-		// can actually be placed there. Green = clear, red = blocked.
-		// This way the author sees the full 2×2 / 1×2 shape before clicking
-		// and never lands on a half-painted footprint.
+		// Multi-tile footprint preview: outline every cell tinted by placeability
+		// (green = clear, red = blocked) so the full shape shows before clicking.
 		if fp := activeFootprint(s); fp != nil {
 			ok := footprintPlaceable(s, hoverPx, hoverPz, fp)
 			outline := withAlpha(editorPlaceOK, 220)
@@ -2526,16 +2201,15 @@ func drawGrid(s *State, font rl.Font) {
 		}
 		cx, cy := s.rect.tileCorner(x0, z0)
 		r := rl.NewRectangle(cx, cy, float32(x1-x0+1)*cell, float32(z1-z0+1)*cell)
-		// Box tool previews as an outline only; Rect tool fills.
+		// Box previews outline-only; Rect fills.
 		if !s.rectHollow {
 			rl.DrawRectangleRec(r, withAlpha(brushPreviewColor(s), 110))
 		}
 		rl.DrawRectangleLinesEx(r, 2, selectionOutline)
 	}
 
-	// Region marquee (Select tool): the live drag (dragSelect) and, when not
-	// dragging, the committed selection that Ctrl+C / Ctrl+V act on. Amber so it
-	// reads apart from the white brush / rectangle-drag ghost above.
+	// Region marquee (Select tool): live drag, else the committed selection.
+	// Amber to read apart from the white ghost above.
 	if s.drag == dragSelect && s.hoverX >= 0 {
 		x0, x1 := min(s.rectAnchorX, s.hoverX), max(s.rectAnchorX, s.hoverX)
 		z0, z1 := min(s.rectAnchorZ, s.hoverZ), max(s.rectAnchorZ, s.hoverZ)
@@ -2550,7 +2224,7 @@ func drawGrid(s *State, font rl.Font) {
 		rl.DrawRectangleLinesEx(r, 2, marqueeOutline)
 	}
 
-	// Line drag preview — a segment from the anchor tile to the hovered tile.
+	// Line drag preview: anchor tile to hovered tile.
 	if s.drag == dragLine && s.hoverX >= 0 {
 		ax, ay := s.rect.tileCenter(s.rectAnchorX, s.rectAnchorZ)
 		hx, hy := s.rect.tileCenter(s.hoverX, s.hoverZ)
@@ -2566,32 +2240,22 @@ func drawGrid(s *State, font rl.Font) {
 		gx, gy := s.rect.tileCenter(s.hoverX, s.hoverZ)
 		rl.DrawCircleLines(int32(gx), int32(gy), cell*packMarkerRadiusFrac, selectionOutline)
 	}
-	// Chest / door drag-move ghosts: a square outline at the hovered
-	// destination tile so the relocation reads before release (mirrors the
-	// pack circle).
+	// Chest/door drag-move ghosts: a square outline at the destination tile.
 	if (s.drag == dragChest || s.drag == dragDoor) && s.hoverX >= 0 {
 		gx, gy := s.rect.tileCorner(s.hoverX, s.hoverZ)
 		inset := cell * 0.22
 		rl.DrawRectangleLinesEx(rl.NewRectangle(gx+inset, gy+inset, cell-2*inset, cell-2*inset), 2, selectionOutline)
 	}
 
-	// Rich hover tooltip: when the cursor is over a tile that holds a
-	// pack / chest / door / start, render a small card near the mouse
-	// listing what's inside. Layer labels alone (in the topbar) don't
-	// say which enemies are in a pack or which items in a chest — that
-	// information was modal-only before this card.
+	// Hover tooltip: a card listing what's on the hovered entity tile.
 	if s.hoverX >= 0 && s.drag == dragNone {
 		drawHoverTooltip(s, font)
 	}
 }
 
-// drawHoverTooltip paints a small panel near the mouse with the entity
-// contents at (hoverX, hoverZ). No-op when the tile is empty so cursor
-// noise doesn't follow the mouse across blank floor.
-// Hover-tooltip memo: the contents + measured width only change when the map
-// mutates (contentEpoch) or the cursor moves to a different tile, so we don't
-// rebuild the line slice (which allocates maps + slices) and re-measure every
-// frame the cursor merely rests on an entity tile.
+// drawHoverTooltip paints the entity contents at (hoverX, hoverZ) near the
+// mouse; no-op on an empty tile. Memoizes the line slice by (contentEpoch, x, z)
+// so it isn't rebuilt every frame the cursor rests on a tile.
 var (
 	tooltipKeyEpoch uint64
 	tooltipKeyX     int = -1
@@ -2602,9 +2266,7 @@ var (
 
 func drawHoverTooltip(s *State, font rl.Font) {
 	x, z := s.hoverX, s.hoverZ
-	// Memo the line slice (rebuilding it allocates maps + slices) so a cursor
-	// resting on an entity tile doesn't re-derive it every frame. drawTooltipCard
-	// re-measures the (now-cached) lines, which is cheap in this dev-only editor.
+	// Memo the line slice (rebuilding it allocates) so it isn't re-derived per frame.
 	if !tooltipReady || tooltipKeyEpoch != s.contentEpoch || tooltipKeyX != x || tooltipKeyZ != z {
 		tooltipLines = tooltipLinesFor(s, x, z)
 		tooltipKeyEpoch = s.contentEpoch
@@ -2614,9 +2276,7 @@ func drawHoverTooltip(s *State, font rl.Font) {
 	drawTooltipCard(font, tooltipLines, editorFontTiny, 14, frameMouse, s.rect.grid)
 }
 
-// tooltipLinesFor builds the hover tooltip body for tile (x, z). Returns
-// nil when nothing interesting sits there — the caller short-circuits in
-// that case.
+// tooltipLinesFor builds the hover tooltip body for tile (x, z), nil if empty.
 func tooltipLinesFor(s *State, x, z int) []string {
 	if !s.area.InBounds(x, z) {
 		return nil
@@ -2689,18 +2349,15 @@ func tooltipLinesFor(s *State, x, z int) []string {
 	if core.CrystalSpawnIndexAt(s.area.CrystalSpawns, x, z) >= 0 {
 		out = append(out, "Crystal")
 	}
-	// If nothing more than the coord line is present, skip the tooltip —
-	// noise on blank floor.
+	// Only the coord line → skip (noise on blank floor).
 	if len(out) <= 1 {
 		return nil
 	}
 	return out
 }
 
-// packMarkerColor returns the grid color used for a pack's marker on
-// the canvas — leader's entityBrushColors entry if known, else the
-// neutral grey fallback. Keeps the editor swatch column and the
-// in-grid marker color in lockstep.
+// packMarkerColor returns a pack marker's canvas color: the leader's
+// entityBrushColors entry, else the grey fallback.
 func packMarkerColor(kind core.EnemyKind) rl.Color {
 	if col, ok := entityBrushColors[kind]; ok {
 		return col
@@ -2708,11 +2365,7 @@ func packMarkerColor(kind core.EnemyKind) rl.Color {
 	return entityFallbackColor
 }
 
-// packMarkerInitial returns the single uppercase letter drawn at the
-// center of a pack's marker. Sources from EnemyKindName so it stays in
-// sync with the canonical short name. Strips a "diseased_" / "venus_"
-// prefix when picking the letter so "Diseased Rat" reads as "D" rather
-// than colliding with a future "Demon."
+// packMarkerInitial returns the uppercase letter for a pack's marker center.
 func packMarkerInitial(name string) string {
 	if len(name) == 0 {
 		return "?"
@@ -2724,8 +2377,7 @@ func packMarkerInitial(name string) string {
 	return string(c)
 }
 
-// layerAlpha returns the per-layer rendering opacity given the active
-// layer. Active layer is fully visible; others are dimmed to ~55%.
+// layerAlpha returns a layer's opacity: 1 if active, else ~0.55.
 func layerAlpha(s *State, l Layer) float32 {
 	if s.layer == l {
 		return 1
@@ -2733,29 +2385,15 @@ func layerAlpha(s *State, l Layer) float32 {
 	return 0.55
 }
 
-// Level-distance fade tunables. A VISIBLE tile whose elevation level differs
-// from the active edit level is dimmed so the floor being edited stands out
-// while neighbouring floors stay legible as context. Each level of distance
-// multiplies opacity by levelFadeFalloff; the result is floored at
-// levelFadeMin so far floors remain a faint ghost rather than vanishing
-// (hidden levels are skipped entirely upstream — this only governs visible
-// off-level tiles).
+// Level-distance fade tunables. Each level away multiplies opacity by
+// levelFadeFalloff, floored at levelFadeMin so far floors stay legible context.
 const (
-	// Off-level tiles dim with distance from the active floor so it stands out,
-	// but not so hard they become unreadable — the earlier 0.4 falloff / 0.1
-	// floor faded neighbours into near-invisible ghosts, which read as "the map
-	// keeps disappearing." A gentler 0.6 falloff and a 0.4 floor keep off-level
-	// context clearly legible while the active floor still pops (full alpha + the
-	// gold outline).
 	levelFadeFalloff = float32(0.6)
 	levelFadeMin     = float32(0.4)
 )
 
-// levelFadeTable[d] is levelFadeFalloff^d (clamped to levelFadeMin), precomputed
-// for every possible level distance d (0..maxEditLevel). The canvas draw calls
-// levelDistanceFade once per VISIBLE TILE per frame; without this it ran a
-// math.Pow (transcendental) per tile — tens of thousands of Pow calls/frame on
-// a zoomed-out map. Built once from the two constants.
+// levelFadeTable[d] is levelFadeFalloff^d (floored at levelFadeMin), precomputed
+// so levelDistanceFade is a table lookup, not a per-tile math.Pow.
 var levelFadeTable = func() [maxEditLevel + 1]float32 {
 	var t [maxEditLevel + 1]float32
 	for d := range t {
@@ -2768,9 +2406,8 @@ var levelFadeTable = func() [maxEditLevel + 1]float32 {
 	return t
 }()
 
-// levelDistanceFade returns the opacity multiplier for a tile on elevation
-// level lvl: 1.0 on the active level, falling off geometrically with the
-// number of levels away from s.editLevel. Table lookup, no per-tile math.Pow.
+// levelDistanceFade returns the opacity multiplier for a tile on level lvl
+// (1.0 on the active level, falling off with distance). Table lookup.
 func levelDistanceFade(s *State, lvl int) float32 {
 	d := lvl - s.editLevel
 	if d < 0 {
@@ -2782,32 +2419,22 @@ func levelDistanceFade(s *State, lvl int) float32 {
 	return levelFadeTable[d]
 }
 
-// currentLevelOutlineColor is the silhouette stroke around active-level tile
-// groups — a bright warm gold so it reads over both the faded off-level cells
-// and the grid lines.
+// currentLevelOutlineColor is the gold stroke around active-level tile groups.
 var currentLevelOutlineColor = rl.NewColor(255, 224, 130, 235)
 
-// currentLevelOutlineUnderlay is the dark halo drawn just under the gold core
-// so the outline keeps its contrast over pale, full-bright active-level floors
-// (where a lone gold line washed out and read as "vanishing").
+// currentLevelOutlineUnderlay is the dark halo under the gold core, for contrast
+// over pale active-level floors.
 var currentLevelOutlineUnderlay = rl.NewColor(20, 20, 26, 220)
 
-// drawCurrentLevelOutline traces the perimeter of every connected group of
-// active-level (s.editLevel) tiles within the cull window: for each such tile
-// it strokes the cell edges that face a neighbour on a DIFFERENT level (or the
-// map edge). Interior edges between two active-level tiles are shared by both
-// and skipped, so what remains is a clean outline around each group. Each
-// boundary edge is drawn exactly once — only the active-level side strokes it.
+// drawCurrentLevelOutline strokes the perimeter of each active-level tile group:
+// for each active tile, the edges facing a different-level neighbour (or map
+// edge). Each boundary edge is drawn once (only the active side strokes it).
 func drawCurrentLevelOutline(s *State, xMin, xMax, zMin, zMax int, cell float32) {
-	// Double-stroke: a dark underlay under a bright gold core so the outline
-	// reads over BOTH light full-bright active floors and dark backgrounds —
-	// a single thin gold line washed out over pale floors, which is why the
-	// border "sometimes vanished." Underlay is a touch thicker so it haloes.
+	// Double-stroke: dark underlay (thicker, haloes) under a gold core.
 	const coreThick = float32(2)
 	const underThick = float32(4)
-	// Scan one tile beyond the visible cull window (clamped) so a group edge
-	// sitting exactly at the viewport boundary still gets its border stroked
-	// instead of being dropped with the off-window neighbour.
+	// Scan one tile past the cull window so a group edge at the viewport boundary
+	// still gets stroked.
 	if xMin > 0 {
 		xMin--
 	}
@@ -2820,8 +2447,7 @@ func drawCurrentLevelOutline(s *State, xMin, xMax, zMin, zMax int, cell float32)
 	if zMax < s.area.Height {
 		zMax++
 	}
-	// onActive reports whether (x,z) has a tile on the active level — the voxel
-	// slice the outline hugs (matches the per-level fill in drawGrid).
+	// onActive: does (x,z) have a tile on the active level.
 	onActive := func(x, z int) bool {
 		if x < 0 || z < 0 || x >= s.area.Width || z >= s.area.Height {
 			return false
@@ -2829,12 +2455,11 @@ func drawCurrentLevelOutline(s *State, xMin, xMax, zMin, zMax int, cell float32)
 		_, solid := s.area.SolidAt(x, s.editLevel, z)
 		return solid
 	}
-	// offLevel reports whether (x,z) is off the active slice — true when out of
-	// bounds (the map edge always bounds the group) or it has no tile there.
+	// offLevel: (x,z) off the active slice (out of bounds or no tile there).
 	offLevel := func(x, z int) bool {
 		return !onActive(x, z)
 	}
-	// edge strokes the underlay then the core for one cell edge (a..b).
+	// edge strokes underlay then core for one cell edge.
 	edge := func(ax, ay, bx, by float32) {
 		rl.DrawLineEx(rl.NewVector2(ax, ay), rl.NewVector2(bx, by), underThick, currentLevelOutlineUnderlay)
 		rl.DrawLineEx(rl.NewVector2(ax, ay), rl.NewVector2(bx, by), coreThick, currentLevelOutlineColor)
@@ -2861,10 +2486,7 @@ func drawCurrentLevelOutline(s *State, xMin, xMax, zMin, zMax int, cell float32)
 	}
 }
 
-// fadeAlpha scales c's existing alpha by the 0..1 multiplier (clamped).
-// Thin alias over render.FadeColor so the multiply-and-clamp lives once in
-// render/theme.go — the editor canvas fades brush / marker colors through
-// the same helper the HUD uses (rl.Color is a color.RGBA alias).
+// fadeAlpha scales c's alpha by a 0..1 multiplier. Thin alias over render.FadeColor.
 func fadeAlpha(c rl.Color, alpha float32) rl.Color {
 	return render.FadeColor(c, alpha)
 }
@@ -2873,11 +2495,9 @@ func insetRect(r rl.Rectangle, inset float32) rl.Rectangle {
 	return rl.NewRectangle(r.X+inset, r.Y+inset, r.Width-2*inset, r.Height-2*inset)
 }
 
-// brushPreviewColor returns a representative tint for the active brush so
-// the rectangle drag preview hints at what's about to be painted. Covers
-// every Layer the editor exposes — silent grey fallback for a missing
-// case mismatches the palette swatch and confuses the drag preview, so
-// new layers must register a real preview tint here.
+// brushPreviewColor returns a tint for the active brush so the rect-drag preview
+// hints at what's painted. Panics on a missing layer case (a silent fallback
+// would mismatch the palette swatch).
 func brushPreviewColor(s *State) rl.Color {
 	b := s.activeBrush()
 	switch s.layer {
@@ -2890,10 +2510,7 @@ func brushPreviewColor(s *State) rl.Color {
 		return floorColor(b.Char)
 	case LayerDecor:
 		if b.Char == core.DecorAuto {
-			// Auto has no single render color (it picks decor by context), so
-			// mirror its palette swatch tint directly off the brush — keeps the
-			// drag preview locked to the swatch instead of a separate literal
-			// that silently drifts (see the function doc).
+			// Auto has no single render color; mirror its palette swatch tint.
 			return b.Color
 		}
 		return decorColor(b.Char)
@@ -2905,28 +2522,19 @@ func brushPreviewColor(s *State) rl.Color {
 	case LayerCeiling:
 		return ceilingColor()
 	case LayerElevation:
-		// Tint the drag-rect preview by the selected level so a region paint
-		// reads as "this height."
+		// Tint by the selected level so a region paint reads as "this height."
 		return elevationLevelColor(s.editLevel)
 	case LayerEntities:
-		// Entity layer paints a marker, not a tile char — use the
-		// fallback so the drag-rect preview reads as neutral. The
-		// entity layer doesn't currently support rect-drag painting
-		// anyway; this is for the future.
+		// Entities paint markers, not tile chars — neutral fallback.
 		return editorFallbackColor
 	}
 	panic(fmt.Sprintf("editor: brushPreviewColor missing case for layer %d", int(s.layer)))
 }
 
-// tileColorByChar is the per-layer, per-tile-char swatch color for the editor
-// grid, flattened to a [layerCount][256] array (was a map[Layer]map[byte]) so
-// the per-cell lookup in drawGrid is a single indexed read instead of two map
-// hashes — the grid repaints every visible cell every frame. Built once at
-// init from layerBrushes (editor.go) so the palette UI and the grid preview
-// can't drift on color; adding a tile char stays one row in layerBrushes.
-// Each layer's row is pre-filled with that layer's fallback (tileColorFallback),
-// then palette chars overwrite — so an unrecognized char reads as the fallback
-// with no per-cell branch.
+// tileColorByChar is the per-layer per-char swatch color, a [layerCount][256]
+// array so the per-cell lookup is one indexed read. Built at init from
+// layerBrushes; each row pre-filled with the layer fallback, then palette chars
+// overwrite (so an unknown char reads as fallback with no branch).
 var tileColorByChar = buildTileColorTable()
 
 func buildTileColorTable() [layerCount][256]rl.Color {
@@ -2948,10 +2556,7 @@ func buildTileColorTable() [layerCount][256]rl.Color {
 	return out
 }
 
-// tileColorFallback is the swatch color used when a layer holds a char
-// that isn't in the brush palette (corrupt save, future char dropped from
-// the palette). Floor/decor share a desaturated tan; props use neutral
-// grey to read as "unrecognized prop."
+// tileColorFallback is the swatch for a char not in the brush palette.
 var tileColorFallback = map[Layer]rl.Color{
 	LayerFloor:   floorAutoColor,
 	LayerDecor:   floorAutoColor,
@@ -2963,27 +2568,20 @@ func tileColor(layer Layer, c byte) rl.Color {
 	if layer < 0 || int(layer) >= layerCount {
 		return editorFallbackColor
 	}
-	// Fallback is pre-baked into every row, so this single index covers both
-	// palette chars and unrecognized ones — no map hash, no branch.
+	// Fallback is pre-baked into every row, so this index covers all chars.
 	return tileColorByChar[layer][c]
 }
 
-// elevationLevelColor maps an elevation level to an earthy swatch (dark low →
-// light high) for the brush preview + the height-selector label.
+// elevationLevelColor maps a level to an earthy swatch (dark low → light high).
 func elevationLevelColor(level int) rl.Color {
 	level = clampLevel(level)
 	t := float32(level) / float32(maxEditLevel)
 	return rl.NewColor(uint8(92+t*120), uint8(72+t*108), uint8(56+t*66), 255)
 }
 
-// drawRampConnector highlights a ramp tile's connective arrow so level
-// transitions stay legible in the flat grid now that the per-tile elevation
-// digits and cool/warm slice tints are gone (the Levels panel + visibility
-// carry the "which floor" read). Non-ramp tiles draw nothing.
-// drawRampConnector takes the tile's floor char directly (the caller already
-// has it) and uses the pure RampAscentFacing switch — avoiding RampAt's extra
-// InBounds + layer string-index that previously ran for EVERY visible tile just
-// to discover the 99% that aren't ramps.
+// drawRampConnector draws a ramp tile's connective arrow (non-ramp tiles draw
+// nothing). Takes the floor char directly + uses the pure RampAscentFacing switch
+// to avoid RampAt's per-tile InBounds + layer index.
 func drawRampConnector(font rl.Font, r rl.Rectangle, cell float32, floorChar byte) {
 	facing, ok := core.RampAscentFacing(floorChar)
 	if !ok {
@@ -2994,10 +2592,8 @@ func drawRampConnector(font rl.Font, r rl.Rectangle, cell float32, floorChar byt
 }
 
 // rampTouchesActiveLevel reports whether the ramp at (x,z) connects the active
-// level (editLevel) to an adjacent one — i.e. its LOW level is the active level
-// (ascending up out of it) or one below it (ascending up into it). Such ramps
-// stay visible even when their own level is hidden, so connections to the floor
-// you're editing are never lost behind a hidden-level toggle.
+// level (its low level is editLevel or editLevel-1). Such ramps stay visible
+// even when their own level is hidden.
 func rampTouchesActiveLevel(s *State, x, z int) bool {
 	if _, ok := s.area.RampAt(x, z); !ok {
 		return false
@@ -3012,25 +2608,16 @@ func decorColor(c byte) color.RGBA { return tileColor(LayerDecor, c) }
 func propColor(c byte) color.RGBA  { return tileColor(LayerProps, c) }
 func ceilingColor() color.RGBA     { return tileColor(LayerCeiling, core.TileCeilingSolid) }
 
-// drawCeilingHash paints two diagonal stripes inside the tile so a
-// ceiling-flagged cell reads as "roofed" without fully hiding the
-// floor/wall/prop underneath. Width is a fixed fraction of cell so the
-// stripe stays visible at small zoom levels.
+// drawCeilingHash paints two diagonal stripes so a ceiling cell reads as "roofed".
 func drawCeilingHash(r rl.Rectangle, cell float32, col color.RGBA) {
 	t := cell * 0.10
-	// Top-left → bottom-right and top-right → bottom-left diagonals.
+	// Both diagonals.
 	rl.DrawLineEx(rl.NewVector2(r.X, r.Y), rl.NewVector2(r.X+cell, r.Y+cell), t, col)
 	rl.DrawLineEx(rl.NewVector2(r.X+cell, r.Y), rl.NewVector2(r.X, r.Y+cell), t, col)
 }
 
-// currentLayerGlyph returns the tile char to overlay for the ACTIVE
-// layer's cell at (x, z), or ok==false when the cell is empty (or the
-// active layer carries no per-tile chars — Entities, whose content is
-// drawn as markers). Showing only the active layer keeps the overlay
-// readable; the old "topmost char across every layer" version was too
-// noisy. Empty sentinels (non-rock walls / FloorAuto / DecorAuto /
-// DecorEmpty / no-prop / no-ceiling) yield ok==false so blank cells
-// stay blank instead of dotting the grid.
+// currentLayerGlyph returns the char to overlay for the active layer's cell at
+// (x, z), ok==false when empty or the layer has no per-tile chars (Entities).
 func currentLayerGlyph(s *State, x, z, lvl int) (byte, bool) {
 	switch s.layer {
 	case LayerWalls:
@@ -3054,30 +2641,23 @@ func currentLayerGlyph(s *State, x, z, lvl int) (byte, bool) {
 			return s.area.Ceiling[z][x], true
 		}
 	case LayerElevation:
-		// Show each off-GROUND tile's stored level char so the author can read
-		// heights while editing elevation; the ground baseline is left blank so a
-		// mostly-flat map stays uncluttered. Uses the level the caller already
-		// decoded (no re-read).
+		// Show off-ground tiles' level char; ground baseline stays blank.
 		if lvl != core.ElevationBaseline {
 			return core.ElevationChar(lvl), true
 		}
 	case LayerEntities:
-		// Entities carry no per-tile char (drawn as markers) — no glyph.
+		// Entities are drawn as markers — no glyph.
 	default:
-		// Fail closed like the sibling layer switches so a new layer can't
-		// silently render no glyph.
+		// Fail closed so a new layer can't silently render no glyph.
 		panic("editor: currentLayerGlyph missing case for layer")
 	}
 	return 0, false
 }
 
-// tileGlyphMeasure memoizes each single-char tile glyph's measured size at the
-// current cell font size. The grid can paint THOUSANDS of glyph tiles per
-// frame (zoomed-out map + the glyph overlay), so measuring each via a cgo
-// rl.MeasureTextEx was the editor's single biggest text cost. The glyph set is
-// the tiny ASCII tile-char registry, so caching by (char, fontSize) collapses
-// it to ~one measure per distinct char and holds across frames at a fixed
-// zoom. All cells in a frame share one fontSize, so a size change invalidates.
+// tileGlyphMeasure memoizes each tile glyph's measured size at the current cell
+// font size — the grid can paint thousands of glyphs/frame, so the cgo
+// MeasureTextEx was the biggest text cost. Caches by (char, fontSize); a size
+// change invalidates.
 var tileGlyphMeasure struct {
 	fontSize float32
 	w, h     [256]float32
@@ -3097,13 +2677,8 @@ func tileGlyphSize(font rl.Font, ch byte, fontSize float32) (w, h float32) {
 	return c.w[ch], c.h[ch]
 }
 
-// drawTileGlyph paints a single-character glyph centered in `r` with a
-// 1px-offset drop shadow for legibility against any cell color. Font
-// size is sized to the cell so the glyph scales with zoom; shadow stays
-// 1px so it doesn't blur out at small zooms. Tile glyphs are single ASCII
-// chars from the layer registry (never a procedural symbol), so this draws
-// via rl.DrawTextEx directly and measures through the per-frame size cache —
-// no rich-text scan / uncached cgo measure per tile.
+// drawTileGlyph paints a glyph centered in r with a 1px drop shadow. Draws via
+// rl.DrawTextEx + the size cache (no rich-text scan / uncached measure per tile).
 func drawTileGlyph(font rl.Font, r rl.Rectangle, cell, fontSize float32, ch byte, fg, shadow rl.Color) {
 	text := glyphStr[ch]
 	mx, my := tileGlyphSize(font, ch, fontSize)
@@ -3113,15 +2688,9 @@ func drawTileGlyph(font rl.Font, r rl.Rectangle, cell, fontSize float32, ch byte
 	rl.DrawTextEx(font, text, rl.NewVector2(px, py), fontSize, 1, fg)
 }
 
-// scrollWindow clamps a cursor-in-range to a visible window of size
-// `rowsVisible` over `total` entries. Returns the [top, end) slice
-// bounds that keep cursor in view: end == top+rowsVisible when there's
-// enough content; both are 0 when the list is empty.
-//
-// Used by the Open modal's path list today; lifted out as a shared
-// helper so the pack-edit member list and the sound modal's saved-
-// sound list can plug into the same scroll semantics when they grow
-// past their visible windows.
+// scrollWindow returns the [top, end) bounds of a visible window of rowsVisible
+// over total entries that keeps cursor in view (both 0 when empty). Shared scroll
+// helper for the modal lists.
 func scrollWindow(cursor, total, rowsVisible int) (top, end int) {
 	if total <= 0 || rowsVisible <= 0 {
 		return 0, 0
@@ -3142,14 +2711,9 @@ func scrollWindow(cursor, total, rowsVisible int) (top, end int) {
 	return top, end
 }
 
-// windowedRowList lays out a scrolling, fixed-pitch list of `count` rows inside a
-// column whose row band starts at (x,y), is `w` wide and `areaH` tall, with each
-// row `rowH` tall at `pitch` vertical spacing. It derives the visible window from
-// `cursor` (scrollWindow), then returns a slice of length `count` where only the
-// on-window rows [topRow,end) carry real rects — off-window entries stay the zero
-// rect so they neither draw nor hit-test. The saved-sounds and assignment columns
-// both walk this same window scheme; sharing it keeps their scroll math identical
-// (each column then derives its per-row buttons from the returned row rect).
+// windowedRowList lays out a scrolling fixed-pitch list of count rows in a band
+// at (x,y), w wide, areaH tall. Returns a length-count slice where only on-window
+// rows [topRow,end) carry real rects (off-window stay zero, so they don't draw/hit).
 func windowedRowList(x, y, w, rowH, pitch float32, cursor, count int, areaH float32) (topRow, end int, rects []rl.Rectangle) {
 	maxRows := int(areaH / pitch)
 	if maxRows < 1 {
@@ -3202,11 +2766,7 @@ func drawModalVeil(theme render.Theme) {
 	rl.DrawRectangle(0, 0, w, h, theme.SurfaceVeil)
 }
 
-// centeredCardRect returns the screen-centered rect for a modal card of
-// the given size. The (screen − card)/2 centering math lived in a
-// half-dozen modal layout helpers (each of which needs the rect before
-// drawing, for hit-testing); one helper keeps them from drifting and
-// recenters cleanly on window resize.
+// centeredCardRect returns the screen-centered rect for a modal card.
 func centeredCardRect(pw, ph float32) rl.Rectangle {
 	w, h := render.ScreenSizeF()
 	return rl.NewRectangle((w-pw)/2, (h-ph)/2, pw, ph)
@@ -3219,24 +2779,16 @@ func drawModalCard(theme render.Theme, pw, ph float32, accent rl.Color) rl.Recta
 	return r
 }
 
-// drawModalHeader is the standard modal opening: veil the screen, paint
-// the card, and stamp a heading at the top-left inset. Returns the card
-// rect so the caller can lay out body content. Replaces the three-call
-// `drawModalVeil → drawModalCard → render.DrawHeading` boilerplate that
-// every modal opened with; keeping the trio atomic means a missing veil
-// or a drifted heading offset can't slip in modal-by-modal.
+// drawModalHeader is the standard modal opening (veil + card + heading),
+// returning the card rect for body layout.
 func drawModalHeader(font rl.Font, theme render.Theme, pw, ph float32, title string, accent rl.Color) rl.Rectangle {
 	r := centeredCardRect(pw, ph)
 	drawModalHeaderAt(font, theme, r, title, accent)
 	return r
 }
 
-// drawModalHeaderAt is drawModalHeader for callers that already computed
-// the card rect — the custom-layout modals (door / new-map / custom-
-// enemies) that need the rect for hit-testing before drawing. Same
-// veil → card → heading trio, just with a caller-supplied rect instead
-// of a freshly-centered one, so those modals can't open-code (and drift
-// on) the trio.
+// drawModalHeaderAt is drawModalHeader for callers that already computed the card
+// rect (custom-layout modals that need it for hit-testing first).
 func drawModalHeaderAt(font rl.Font, theme render.Theme, card rl.Rectangle, title string, accent rl.Color) {
 	drawModalVeil(theme)
 	render.DrawCard(int32(card.X), int32(card.Y), int32(card.Width), int32(card.Height),
@@ -3244,15 +2796,13 @@ func drawModalHeaderAt(font rl.Font, theme render.Theme, card rl.Rectangle, titl
 	render.DrawHeading(font, title, int32(card.X+modalContentInset), int32(card.Y+12), accent)
 }
 
-// openModalListGeom returns the open-map list geometry — the card, the
-// first visible row's Y, the row height, and the visible [topRow, end)
-// window — shared by drawOpenModal and openModalRowAt so the painted rows
-// and the click hit-rects line up.
+// openModalListGeom returns the open-map list geometry (card, first row Y, row
+// height, visible window), shared by draw and hit-test.
 func openModalListGeom(s *State) (card rl.Rectangle, listTop, rowH float32, topRow, end int) {
 	card = centeredCardRect(openModalW, openModalH)
 	rowH = entityListRowH
 	listTop = card.Y + openModalListTop
-	listBottom := card.Y + card.Height - openModalListBottomPad // room for the action button row
+	listBottom := card.Y + card.Height - openModalListBottomPad // room for the button row
 	rowsVisible := int((listBottom - listTop) / rowH)
 	if rowsVisible < 1 {
 		rowsVisible = 1
@@ -3299,7 +2849,7 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 		}
 		render.DrawTextWithShadow(font, text, r.X+18, listTop+float32(i-topRow)*rowH, editorFontBody, col)
 	}
-	// Scroll hint when the list extends past the visible window.
+	// Scroll hint when the list overflows.
 	if topRow > 0 || end < len(s.modalPaths) {
 		more := fmt.Sprintf("(%d / %d)", s.modalCursor+1, len(s.modalPaths))
 		measure := render.MeasureRichText(font, more, editorFontHint, 1)
@@ -3324,18 +2874,13 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 		return
 	}
 
-	// Main view: click a row to select, then an action button (or the
-	// keyboard accelerators) to act.
+	// Main view: click a row to select, then an action button.
 	labels := cmdLabels(openModalActionCmds(s))
 	drawModalButtons(font, modalButtonRow(r, labels), labels)
 }
 
-// Modal card dimensions. saveAs is named because its field-rect helper
-// and draw call BOTH need the exact size (they must stay in lockstep, or
-// the input field lands off the card); the rest are named so the modal
-// sizes live with the other chrome constants instead of as bare literals
-// scattered across the draw functions. The Validate modal sizes its
-// height dynamically from the row count, so only its width is a const.
+// Modal card dimensions. (Validate sizes its height from the row count, so only
+// its width is a const.)
 const (
 	saveAsModalW = float32(420)
 	saveAsModalH = float32(160)
@@ -3344,10 +2889,8 @@ const (
 	doorEditModalH     = float32(424)
 	openModalW         = float32(460)
 	openModalH         = float32(460)
-	// Open-map list: rows start openModalListTop below the card top; the bottom
-	// reserves openModalListBottomPad for the action button row. Row PITCH is the
-	// shared entityListRowH so the open-map list and the entity lists can't drift
-	// apart on row spacing.
+	// Open-map list: rows start openModalListTop below the card top, with
+	// openModalListBottomPad reserved for the button row. Pitch is entityListRowH.
 	openModalListTop       = float32(50)
 	openModalListBottomPad = float32(52)
 	entityEditModalW   = float32(480) // shared by the entity + dialog list modals
@@ -3355,7 +2898,7 @@ const (
 	escMenuModalW      = float32(380)
 	escMenuModalH      = float32(178)
 	confirmDirtyModalW = float32(460)
-	confirmDirtyModalH = float32(212) // tall enough that the contextual hint clears the bottom-anchored button stack
+	confirmDirtyModalH = float32(212) // clears the hint above the button stack
 	validateModalW     = float32(560)
 )
 
@@ -3385,10 +2928,8 @@ func drawSaveAsModal(s *State, font rl.Font, theme render.Theme) {
 
 	field := saveAsFieldRect(s)
 	drawTextField(font, field, s.modalFilename, true)
-	// Preview the sanitized path: MapPath strips a trailing .map, and the
-	// disk store goes through sanitizeFilename on commit. Show the
-	// final-form path so the user knows what they'll actually get — and
-	// flag any divergence between what they typed and what will land.
+	// Preview the sanitized final path so the user sees what they'll get, and
+	// flag divergence from what they typed.
 	sanitized := sanitizeFilename(s.modalFilename)
 	previewPath := core.MapPath(sanitized)
 	render.DrawRichText(font, fmt.Sprintf("Will save to: %s", previewPath),
@@ -3401,11 +2942,8 @@ func drawSaveAsModal(s *State, font rl.Font, theme render.Theme) {
 		rl.NewVector2(r.X+modalContentInset, r.Y+r.Height-26), editorFontHint, 1, theme.TextHint)
 }
 
-// drawPackEditModal renders the inline pack editor: header with pack
-// coords, scrollable member list with the cursor highlighting one entry,
-// and a hint row of keyboard shortcuts at the bottom. The member kind
-// names come from core.EnemyKindName so adding a new EnemyKind appears
-// here for free.
+// drawPackEditModal renders the inline pack editor: header, scrollable member
+// list, and a shortcut hint row.
 func drawPackEditModal(s *State, font rl.Font, theme render.Theme) {
 	if s.modalPackIdx < 0 || s.modalPackIdx >= len(s.area.PackSpawns) {
 		return
@@ -3415,8 +2953,7 @@ func drawPackEditModal(s *State, font rl.Font, theme render.Theme) {
 		"PACK AT "+core.TileCoord(pack.TileX, pack.TileZ),
 		theme.BorderActive)
 
-	// Leader hint near the top: the rendered field icon is the highest-
-	// Tier member, so the author knows whose silhouette shows in-world.
+	// Leader hint: the highest-tier member is whose silhouette shows in-world.
 	leaderText := "Leader: —"
 	if len(pack.Members) > 0 {
 		leaderIdx := core.PackSpawnLeaderSlot(s.area, pack)
@@ -3439,10 +2976,7 @@ func drawPackEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawModalButtons(font, lay.addRects, cmdLabels(adds))
 }
 
-// drawChestEditModal renders the inline chest editor: header with chest
-// coords, the authored item list with the cursor highlighting one entry, the
-// add / remove buttons, and the add-item dropdown on top when open. Mirrors
-// drawPackEditModal so the two entity editors read as one visual family.
+// drawChestEditModal renders the inline chest editor (mirrors drawPackEditModal).
 func drawChestEditModal(s *State, font rl.Font, theme render.Theme) {
 	if s.modalChestIdx < 0 || s.modalChestIdx >= len(s.area.ChestSpawns) {
 		return
@@ -3463,9 +2997,8 @@ func drawChestEditModal(s *State, font rl.Font, theme render.Theme) {
 	drawModalButtons(font, lay.addRects, cmdLabels(adds))
 }
 
-// drawDoorEditModal renders the per-door editor. Mirrors the save-as
-// modal's text-field plumbing but with three fields instead of one,
-// plus a facing-buttons row and a delete affordance.
+// drawDoorEditModal renders the per-door editor: three text fields, a facing row,
+// a style row, and delete/close buttons.
 func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 	if s.modalDoorIdx < 0 || s.modalDoorIdx >= len(s.area.DoorSpawns) {
 		return
@@ -3475,15 +3008,12 @@ func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 	header := "DOOR AT " + core.TileCoord(door.TileX, door.TileZ)
 	drawModalHeaderAt(font, theme, l.card, header, theme.BorderActive)
 
-	// Name field.
 	drawLabel(font, "Name (unique on this map)", labelAbove(l.nameField))
 	drawTextField(font, l.nameField, door.Name, s.focus == focusDoorName)
 
-	// Target map field.
 	drawLabel(font, "Target map (bare id, or 'self')", labelAbove(l.mapField))
 	drawTextField(font, l.mapField, door.TargetMap, s.focus == focusDoorTargetMap)
 
-	// Target door field.
 	drawLabel(font, "Target door (Name on destination map)", labelAbove(l.doorField))
 	drawTextField(font, l.doorField, door.TargetDoor, s.focus == focusDoorTargetDoor)
 
@@ -3503,22 +3033,17 @@ func drawDoorEditModal(s *State, font rl.Font, theme render.Theme) {
 		drawButton(font, sr, core.DoorStyleLabel(core.DoorStyle(i)), door.Style == core.DoorStyle(i))
 	}
 
-	// Delete + Close buttons.
-	// Delete highlights while armed (first of the two-press confirm) so the
-	// primed state persists past the flash toast.
+	// Delete highlights while armed (first of the two-press confirm).
 	drawButton(font, l.deleteBtn, "Delete door (X)", s.deleteArmed == "door")
 	drawButton(font, l.closeBtn, "Done (Esc)", false)
 
-	// Footer hint string mirrors the other modals' tiny hint row.
 	hint := "Tab cycle fields   N/E/S/W facing   1/2/3 style   X delete   Esc done"
 	render.DrawRichText(font, hint,
 		rl.NewVector2(l.card.X+modalContentInset, l.card.Y+l.card.Height-72),
 		editorFontTiny, 1, theme.TextHint)
 }
 
-// drawValidateModal renders the full reachability + cross-map door
-// warning list captured at modal-open time. Read-only viewer; any
-// keystroke dismisses.
+// drawValidateModal renders the reachability + cross-map warning list (read-only).
 func drawValidateModal(s *State, font rl.Font, theme render.Theme) {
 	rows := s.modalValidateRows
 	pw := validateModalW
@@ -3557,8 +3082,7 @@ const (
 	elCrystal
 )
 
-// entityListRow is one row of the Objects index — a label plus the tile to
-// jump to and which editor the row opens.
+// entityListRow is one Objects-index row: label + jump tile + which editor it opens.
 type entityListRow struct {
 	label string
 	x, z  int
@@ -3572,9 +3096,8 @@ const (
 	entityListVisible = 14
 )
 
-// entityListRows builds the Objects index fresh: player start, then every
-// pack / chest / door with a one-line summary + tile coord. Rebuilt on demand
-// (entities are few), so indices always match the live spawn slices.
+// entityListRows builds the Objects index fresh (player start, then packs/chests/
+// doors/crystals), so indices always match the live spawn slices.
 func entityListRows(s *State) []entityListRow {
 	rows := []entityListRow{{
 		label: "Player start  —  " + core.TileCoord(s.area.StartTileX, s.area.StartTileZ),
@@ -3630,9 +3153,8 @@ func entityRowColor(k entityKindRow) rl.Color {
 	}
 }
 
-// entityListGeom is the shared layout for the Objects modal — the card, the
-// first row's Y, the full row list, and the visible [top, end) window — so the
-// draw and the click hit-test can't drift.
+// entityListGeom is the shared Objects-modal layout (card, first row Y, rows,
+// visible window) for draw + hit-test.
 func entityListGeom(s *State) (card rl.Rectangle, listTop float32, rows []entityListRow, top, end int) {
 	rows = entityListRows(s)
 	shown := len(rows)
@@ -3649,8 +3171,7 @@ func entityListGeom(s *State) (card rl.Rectangle, listTop float32, rows []entity
 	return card, listTop, rows, top, end
 }
 
-// entityListRowRect is the clickable rect for the screenRow-th visible row
-// (0-based within the window).
+// entityListRowRect is the clickable rect for the screenRow-th visible row.
 func entityListRowRect(card rl.Rectangle, listTop float32, screenRow int) rl.Rectangle {
 	return rl.NewRectangle(card.X+modalContentInset, listTop+float32(screenRow)*objectsRowH,
 		card.Width-2*modalContentInset, objectsRowH)
@@ -3682,18 +3203,8 @@ func drawEntityListModal(s *State, font rl.Font, theme render.Theme) {
 		rl.NewVector2(card.X+modalContentInset, card.Y+card.Height-26), editorFontHint, 1, theme.TextHint)
 }
 
-// drawEscMenuModal paints the editor's pause-style menu. Three rows:
-//   - Display: <Fullscreen|Windowed> — toggles via D
-//   - Continue editing — closes the menu (C / Esc)
-//   - Exit to Title — E; routes through the standard dirty-bounce
-//
-// Body is intentionally minimal so the menu doesn't cover the area
-// the author was just looking at; sits centered.
-// The confirm/menu modals build their buttons as []modalCmd (label +
-// keyboard accelerator + action, all on one row) via the *Cmds funcs in
-// input.go; both the draw (cmdLabels) and the handler (runModalCmds) call
-// the same builder so captions and actions can't drift.
-
+// drawEscMenuModal paints the editor's pause-style menu (Display / Continue /
+// Exit). Buttons come from the shared []modalCmd builder so labels + actions can't drift.
 func drawEscMenuModal(s *State, font rl.Font, theme render.Theme) {
 	r := drawModalHeader(font, theme, escMenuModalW, escMenuModalH, "EDITOR MENU", theme.BorderActive)
 	labels := cmdLabels(escMenuCmds(s))
@@ -3728,17 +3239,15 @@ func drawConfirmDirtyModal(s *State, font rl.Font, theme render.Theme) {
 	}
 
 	render.DrawRichText(font, body, rl.NewVector2(r.X+modalContentInset, r.Y+44), editorFontLabel, 1, theme.TextPrimary)
-	// Contextual hint above the buttons explains what Save/Discard do for
-	// this pending action (new map / open / exit); the buttons stay short.
+	// Contextual hint above the buttons (what Save/Discard do for this action).
 	render.DrawTextWithShadow(font, hintForPending(saveLabel, discardLabel), r.X+modalContentInset, r.Y+66, editorFontHint, theme.TextHint)
 
 	labels := cmdLabels(confirmDirtyCmds(s))
 	drawModalButtons(font, modalButtonStack(r, labels), labels)
 }
 
-// hintForPending strips the leading "S  " / "D  " accelerator prefix off
-// the contextual save/discard captions so the hint reads as prose under
-// the body line.
+// hintForPending strips the "S  " / "D  " accelerator prefix off the save/discard
+// captions so the hint reads as prose.
 func hintForPending(saveLabel, discardLabel string) string {
 	trim := func(s string) string {
 		if i := strings.Index(s, "  "); i >= 0 {

@@ -7,18 +7,9 @@ import (
 	"crawler/internal/app/core"
 )
 
-// makeSoftShadowPixels builds the radial-gradient sprite used for
-// every prop's ground shadow: a dark cool-grey disc whose alpha
-// falls from a soft maximum at the centre to fully transparent at
-// the disc edge, with the texture's corners fully clear. Painted
-// onto a flat ground plane (see loadGroundShadowModel) it reads as
-// a soft contact shadow — round, gradient-faded, genuinely
-// translucent — instead of the old hard flat square.
-//
-// The falloff is (1-d)^1.6: nearly flat-dark across the inner
-// half, then a gentle feathered edge. Max alpha is deliberately
-// modest so the shadow grounds the prop without reading as a black
-// hole punched in the floor.
+// makeSoftShadowPixels builds the radial-gradient ground-shadow sprite: a dark
+// cool-grey disc whose alpha falls (1-d)^1.6 from centre to transparent edge.
+// Max alpha is modest so it grounds the prop without reading as a black hole.
 func makeSoftShadowPixels(size int) []color.RGBA {
 	pixels := make([]color.RGBA, size*size)
 	center := float64(size-1) / 2
@@ -40,11 +31,8 @@ func makeSoftShadowPixels(size int) []color.RGBA {
 
 func makeRockWallPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Pastel cream-stone wall — warm cliff face catching the
-	// daytime sky, like Outset Island's limestone bluffs. The
-	// darker / dungeon side gets its mood from the lighting
-	// profile (cool ambient + heavy shadowStrength) rather than
-	// from the texture going grey.
+	// Pastel cream-stone wall. The dungeon mood comes from the lighting profile
+	// (cool ambient + heavy shadow), not from the texture going grey.
 	base := color.RGBA{R: 188, G: 178, B: 160, A: 255}
 	shadow := color.RGBA{R: 120, G: 112, B: 102, A: 255}
 	highlight := color.RGBA{R: 226, G: 218, B: 198, A: 255}
@@ -53,9 +41,7 @@ func makeRockWallPixels(w, h int) []color.RGBA {
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			// Two-octave painted noise — low-frequency band
-			// paints big tonal patches like worn weathering, the
-			// fine band carries the rocky grain on top.
+			// Two-octave noise: broad band = weathering patches, fine = grain.
 			broad := fbmNoise(float64(x), float64(y), 0.012, 3)
 			fine := fbmNoise(float64(x)*1.4+97, float64(y)*1.4-211, 0.046, 4)
 			n := broad*0.55 + fine*0.45
@@ -63,31 +49,22 @@ func makeRockWallPixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, highlight, math.Max(0, n)*0.72)
 			c = core.MixColor(c, shadow, math.Max(0, -n)*0.55)
 
-			// Painted crack scatter — sparser than the prior
-			// hash-grid lines, drawn as small soft pits. Each pit gets a
-			// lit LOWER lip (the cell row just beneath it): under a high
-			// key light a recess shadows itself and throws light on the
-			// ledge below — one extra mix and the pits turn concave.
+			// Crack scatter as soft pits, each with a lit lower lip so it reads concave.
 			pit := hashByteXY(x/3, y/3)
 			if pit%64 == 0 {
 				c = core.MixColor(c, shadow, 0.38)
 			} else if y >= 3 && hashByteXY(x/3, (y-3)/3)%64 == 0 {
 				c = core.MixColor(c, highlight, 0.30)
 			}
-			// Block divisions: instead of a hard 24-px hash
-			// grid, paint a soft seam ONLY where the broad
-			// noise is at a low — gives the feeling of cracks
-			// running along the rock's natural folds rather
-			// than a tiled grid.
+			// Block seams only where broad noise is low, so cracks follow the
+			// rock's folds rather than a tiled grid.
 			cellX, cellY := x/28, y/28
 			seam := hashByteXY(cellX, cellY) % 6
 			if ((x+seam)%28 == 0 || (y+seam)%28 == 0) && broad < 0.05 {
 				c = core.MixColor(c, shadow, 0.42)
 			}
-			// Moss creeps up the bottom third of the wall in
-			// painterly patches — clusters of bright moss with
-			// deeper shadows in the gaps so the moss reads as
-			// three-dimensional growth, not a flat green wash.
+			// Moss creeps up the bottom third in patches (bright + deep) so it
+			// reads as 3D growth, not a flat wash.
 			if y > h*9/16 {
 				dy := float64(y-h*9/16) / float64(h)
 				mossNoise := fbmNoise(float64(x)+13, float64(y)*0.7+71, 0.05, 3)
@@ -99,11 +76,8 @@ func makeRockWallPixels(w, h int) []color.RGBA {
 					}
 				}
 			}
-			// Vertical form: ground occlusion gathers at the cliff's
-			// foot (soil splash + bounce-shadow), and the top course
-			// catches a kiss of sky. Gives the face a large-scale value
-			// structure the per-pixel noise can't supply — the wall
-			// reads as STANDING, rooted below and lit above.
+			// Vertical form: occlusion at the foot, sky kiss at the top — large-
+			// scale value structure so the wall reads as standing.
 			vy := float64(y) / float64(h)
 			if vy > 0.66 {
 				c = core.MixColor(c, shadow, (vy-0.66)*0.50)
@@ -116,17 +90,12 @@ func makeRockWallPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeRockIvyPixels paints the rock wall, then grows ivy on it as discrete
-// leaves strung along wandering vines — not a flat green wash. A few woody vine
-// cords trail down the face; along each, small near-oval leaves alternate left
-// and right, each shaded from a lit upper-left to a darker lower-right so the
-// foliage reads as layered growth with real depth. Bare rock shows between the
-// vines. `heavy` adds more vines and packs the leaves closer/larger so the wall
-// reads as blanketed. Fully opaque — it's a cube-face skin.
+// makeRockIvyPixels paints the rock wall, then grows ivy as discrete leaves
+// along wandering vine cords, each leaf shaded upper-left lit to lower-right
+// dark. `heavy` adds more/larger leaves. Opaque cube-face skin.
 func makeRockIvyPixels(w, h int, heavy bool) []color.RGBA {
 	pixels := makeRockWallPixels(w, h)
-	// Layered ivy palette — several greens plus a woody vine so leaves don't
-	// read as one flat color.
+	// Layered ivy palette — several greens plus a woody vine.
 	vine := color.RGBA{R: 78, G: 84, B: 54, A: 255}
 	leafA := color.RGBA{R: 74, G: 122, B: 60, A: 255}
 	leafB := color.RGBA{R: 92, G: 142, B: 70, A: 255}
@@ -141,14 +110,13 @@ func makeRockIvyPixels(w, h int, heavy bool) []color.RGBA {
 		leafEvery = 6
 		leafR = 3.3
 	}
-	// plotLeaf stamps one near-oval leaf centered at (cx,cy), wrapping in x so a
-	// leaf near an edge continues on the far side (the texture tiles).
+	// plotLeaf stamps one near-oval leaf at (cx,cy), wrapping in x (texture tiles).
 	plotLeaf := func(cx, cy int, r float64, base color.RGBA) {
 		ri := int(r) + 1
 		for dy := -ri; dy <= ri; dy++ {
 			for dx := -ri; dx <= ri; dx++ {
 				fx := float64(dx) / r
-				fy := float64(dy) / (r * 1.35) // slightly taller than wide
+				fy := float64(dy) / (r * 1.35) // taller than wide
 				if fx*fx+fy*fy > 1 {
 					continue
 				}
@@ -158,14 +126,14 @@ func makeRockIvyPixels(w, h int, heavy bool) []color.RGBA {
 				}
 				x := ((cx+dx)%w + w) % w
 				c := base
-				// Directional shading: lit toward upper-left, shadowed lower-right.
+				// Lit upper-left, shadowed lower-right.
 				switch s := fx + fy; {
 				case s < -0.35:
 					c = core.MixColor(c, leafLit, 0.55)
 				case s > 0.45:
 					c = core.MixColor(c, leafDark, 0.55)
 				}
-				// A faint midrib down the leaf.
+				// Midrib.
 				if dx == 0 {
 					c = core.MixColor(c, leafDark, 0.3)
 				}
@@ -176,17 +144,16 @@ func makeRockIvyPixels(w, h int, heavy bool) []color.RGBA {
 	for s := 0; s < strands; s++ {
 		x := float64(int(hashByteXY(s*23+5, 7)) % w)
 		for y := 0; y < h; y++ {
-			// Gentle wander: a sine plus a small per-row hash jitter.
+			// Gentle wander: sine plus per-row hash jitter.
 			x += math.Sin(float64(y)*0.07+float64(s)*1.7)*0.45 + (float64(int(hashByteXY(s, y))%3)-1)*0.28
 			cx := ((int(x))%w + w) % w
-			// Woody vine cord (two px wide, soft).
+			// Woody vine cord (2px, soft).
 			pixels[y*w+cx] = core.MixColor(pixels[y*w+cx], vine, 0.65)
 			if cx+1 < w {
 				pixels[y*w+cx+1] = core.MixColor(pixels[y*w+cx+1], vine, 0.32)
 			}
 			if y%leafEvery == 0 {
-				// Alternate the big leaf to one side, with a smaller one on the
-				// cord half a step down — staggered so it reads organic.
+				// Big leaf to one alternating side, smaller one half a step down.
 				side := 1.0
 				if (y/leafEvery)%2 == 0 {
 					side = -1.0
@@ -203,14 +170,11 @@ func makeRockIvyPixels(w, h int, heavy bool) []color.RGBA {
 	return pixels
 }
 
-// makeRockCrackedPixels paints the rock wall with SUBTLE fractures — the
-// geometry carries the deform, so the texture only needs hairline cracks a touch
-// darker than the stone (not the near-black gouges of the first pass) plus a
-// faint caught-light lip. A couple of wandering near-vertical cracks with the
-// occasional short branch.
+// makeRockCrackedPixels paints the rock wall with hairline cracks + a faint
+// caught-light lip — a couple of wandering near-vertical cracks with branches.
 func makeRockCrackedPixels(w, h int) []color.RGBA {
 	pixels := makeRockWallPixels(w, h)
-	crack := color.RGBA{R: 104, G: 98, B: 88, A: 255} // mid-tone, not near-black
+	crack := color.RGBA{R: 104, G: 98, B: 88, A: 255} // mid-tone
 	lip := color.RGBA{R: 208, G: 200, B: 182, A: 255}
 
 	plot := func(x, y int, depth float64) {
@@ -226,7 +190,7 @@ func makeRockCrackedPixels(w, h int) []color.RGBA {
 		x := float64(startX)
 		for y := startY; y < endY; y++ {
 			x += fbmNoise(float64(y)*0.5+float64(seed)*31, float64(seed)*7, 0.4, 3) * 1.1
-			plot(int(x), y, 0.45) // softer than the old 0.85
+			plot(int(x), y, 0.45)
 			if hashByteXY(int(x), y)%52 == 0 {
 				bx := x
 				for by := y; by < y+h/8 && by < endY; by++ {
@@ -236,18 +200,15 @@ func makeRockCrackedPixels(w, h int) []color.RGBA {
 			}
 		}
 	}
-	for i := 0; i < 2; i++ { // fewer cracks than before
+	for i := 0; i < 2; i++ {
 		sx := int(hashByteXY(i*17+5, 3)) % w
 		walkCrack(sx, 0, h, i+1)
 	}
 	return pixels
 }
 
-// makeRockCrumblingPixels paints the rock wall as weathered/chipped stone —
-// LIGHT now, not the dark gouges of the first pass (the mesh deform supplies the
-// broken silhouette + pitting). Soft mid-tone shadow gathers in the low noise
-// patches, a pale lit edge sits just above each, and pale rubble specks collect
-// near the base.
+// makeRockCrumblingPixels paints weathered/chipped stone: soft shadow in low
+// noise patches, a pale lit edge above each, rubble specks near the base.
 func makeRockCrumblingPixels(w, h int) []color.RGBA {
 	pixels := makeRockWallPixels(w, h)
 	shadow := color.RGBA{R: 104, G: 98, B: 88, A: 255}
@@ -276,11 +237,8 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 	brickW := 32
 	brickH := 16
 	mortar := 2
-	// Pastel cream-stone brick — same painted family as the
-	// outdoor rock wall so a dungeon and an outdoor cliff read
-	// as the same world. The dungeon's eerie mood comes from the
-	// LIGHTING override (dim cool ambient + heavy shadow), not
-	// from cold stone colour.
+	// Pastel cream-stone brick, same family as the rock wall. Dungeon mood comes
+	// from the lighting override, not cold stone colour.
 	base := color.RGBA{R: 178, G: 170, B: 154, A: 255}
 	warm := color.RGBA{R: 208, G: 184, B: 144, A: 255}
 	cool := color.RGBA{R: 152, G: 158, B: 168, A: 255}
@@ -288,12 +246,9 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 	mortarLight := color.RGBA{R: 118, G: 110, B: 96, A: 255}
 	moss := color.RGBA{R: 148, G: 184, B: 132, A: 255}
 
-	// One committed key light — high and to the left, the painter's
-	// default sun. Every brick bevels the SAME way: lit lip along its top
-	// and left, shadowed fall-off along its bottom and right, and a cast
-	// shadow dropped into the mortar seam beneath it. That single
-	// consistent assumption is what flips the wall from "flat grid with
-	// dark lines" to "courses of stone standing proud of their mortar."
+	// One key light, high-left. Every brick bevels the same way: lit top/left,
+	// shadowed bottom/right, cast shadow into the seam below — reads as courses
+	// of stone proud of their mortar, not a flat grid.
 	lip := color.RGBA{R: 232, G: 220, B: 196, A: 255}
 	pitDark := color.RGBA{R: 30, G: 28, B: 24, A: 255}
 	for y := 0; y < h; y++ {
@@ -307,11 +262,8 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 			localY := y % brickH
 			if localX < mortar || localY < mortar {
 				c := core.MixColor(mortarColor, mortarLight, float64(hashByteXY(x, y)%64)/200.0)
-				// Cast shadow + caught light inside the seam: the brick
-				// ABOVE a horizontal seam shadows the seam's top pixel;
-				// the sill below catches a sliver of light. Vertical
-				// seams shadow on their left (the neighboring brick
-				// blocks the key light). Recessed mortar, not drawn line.
+				// Seam shading: horizontal seams shadow at top, lit sill below;
+				// vertical seams shadow on their left. Recessed, not a drawn line.
 				if localY < mortar {
 					if localY == 0 {
 						c = core.MixColor(c, pitDark, 0.52)
@@ -338,15 +290,12 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 			}
 
 			n := fbmNoise(float64(x)*1.4, float64(y)*1.4, 0.16, 4)
-			// Muted highlight (cream → soft stone-white) so the
-			// brick crests don't flare against the muted base.
+			// Muted highlight so crests don't flare against the base.
 			c = core.MixColor(c, color.RGBA{R: 188, G: 184, B: 172, A: 255}, math.Max(0, n)*0.30)
 			c = core.MixColor(c, pitDark, math.Max(0, -n)*0.42)
 
-			// Directional bevel. Top lip brightest, left lip a step
-			// dimmer; bottom edge falls into shadow, right edge a step
-			// less. Per-brick hash nudges the lip strength so courses
-			// don't read machine-extruded.
+			// Directional bevel: top lip brightest, left dimmer; bottom shadowed,
+			// right less. Per-brick hash jitters lip strength.
 			bevelJitter := 0.85 + float64(hashByteXY(brickX*5, row*11)%64)/210.0
 			distTop := localY - mortar
 			distLeft := localX - mortar
@@ -377,17 +326,8 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 
 func makeGrassPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Pastel meadow — soft mint base with painted tonal patches.
-	// Low-poly philosophy: the texture is a calm wash, NOT a busy
-	// noise field. Bloom flowers are scattered very sparsely
-	// (1 in ~520) so the discrete flower props carry the floral
-	// detail and the floor reads as smooth painted ground from
-	// the player's POV. One broad noise band paints big patches;
-	// no fine-grain brushstrokes, no per-pixel hash speckle.
-	// Pastel but with the chroma pushed back up — soft yet
-	// colourful spring green, not washed grey-green. Lightness
-	// stays high; saturation comes back by widening the gap
-	// between the green channel and the red/blue.
+	// Pastel meadow — calm mint wash, not a busy noise field. Blooms are very
+	// sparse (~1 in 520); the flower props carry the floral detail.
 	base := color.RGBA{R: 132, G: 196, B: 102, A: 255}
 	light := color.RGBA{R: 186, G: 224, B: 134, A: 255}
 	dark := color.RGBA{R: 98, G: 162, B: 92, A: 255}
@@ -403,33 +343,24 @@ func makeGrassPixels(w, h int) []color.RGBA {
 			c := base
 			c = core.MixColor(c, light, math.Max(0, broad)*0.55)
 			c = core.MixColor(c, dark, math.Max(0, -broad)*0.40)
-			// Canopy dapple — a second, much broader band of warm lemon
-			// light pooling across the meadow, the way sun falls through
-			// scattered cloud / leaves. Big calm pools (period ~entire
-			// texture), so the floor gains large-scale light STRUCTURE
-			// without breaking the "calm wash" philosophy above.
+			// Canopy dapple — broad warm-lemon pools for large-scale light structure.
 			dap := fbmNoise(float64(x)-340, float64(y)+209, 0.008, 2)
 			if dap > 0.28 {
 				c = core.MixColor(c, dapple, (dap-0.28)*0.45)
 			}
-			// Optional dirt scuff — lazy large patches.
+			// Dirt scuff — large patches.
 			m := fbmNoise(float64(x)+512, float64(y)-271, 0.014, 2)
 			if m > 0.50 {
 				c = core.MixColor(c, dirt, (m-0.50)*0.65)
 			}
-			// Sparse paired blade strokes — a short dark rooted dash with
-			// a lit dash beside it on the sun side (the same high-left key
-			// the masonry bevels use). Grouped on a 4-px vertical grain so
-			// each pair reads as one drawn blade, not salt-and-pepper.
-			// Sparse enough (~1 in 70 columns) to keep the wash calm.
+			// Sparse paired blade strokes — dark rooted dash + lit dash on the
+			// sun side, on a 4-px grain so each pair reads as one blade.
 			if hashByteXY(x*3, y/4)%140 < 2 {
 				c = core.MixColor(c, dark, 0.55)
 			} else if x > 0 && hashByteXY((x-1)*3, y/4)%140 < 2 {
 				c = core.MixColor(c, light, 0.50)
 			}
-			// Very sparse bloom scatter — the prop-painted
-			// flowers carry the floral detail; the texture
-			// just hints at "a few wildflowers in the grass."
+			// Very sparse bloom scatter — just a hint of wildflowers.
 			seed := hashByteXY(x*7, y*11)
 			if seed%520 < 3 {
 				switch seed % 3 {
@@ -451,9 +382,7 @@ func makeStoneFloorPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	slab := 32
 	grout := 2
-	// Pastel cream-slab floor — same painted family as the brick
-	// wall. Dungeon mood comes from the lighting override, not
-	// from cold stone colour.
+	// Pastel cream-slab floor, same family as the brick wall.
 	base := color.RGBA{R: 176, G: 172, B: 166, A: 255}
 	warm := color.RGBA{R: 206, G: 188, B: 156, A: 255}
 	cold := color.RGBA{R: 158, G: 166, B: 176, A: 255}
@@ -483,10 +412,7 @@ func makeStoneFloorPixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, highlight, math.Max(0, n)*0.32)
 			c = core.MixColor(c, color.RGBA{R: 24, G: 22, B: 20, A: 255}, math.Max(0, -n)*0.40)
 
-			// Foot-worn sheen — centuries of boots polish the MIDDLE of a
-			// slab while grime collects at the grout: a soft radial lift
-			// peaking at the slab center. Subtle (≤0.12) but it's what
-			// separates "laid and walked floor" from "printed grid."
+			// Foot-worn sheen — soft radial lift peaking at the slab center.
 			fx := float64(localX) - float64(slab)/2
 			fy := float64(localY) - float64(slab)/2
 			wear := 1.0 - (fx*fx+fy*fy)/(float64(slab*slab)/4.0)
@@ -494,10 +420,7 @@ func makeStoneFloorPixels(w, h int) []color.RGBA {
 				c = core.MixColor(c, highlight, wear*0.12)
 			}
 
-			// Directional bevel under the same high-left key light as the
-			// brick wall: lit lip top/left, shadowed fall bottom/right —
-			// each slab tips subtly toward the light instead of the old
-			// uniform edge-darkening that read as a flat border.
+			// Directional bevel (high-left key): lit top/left, shadowed bottom/right.
 			distTop := localY - grout
 			distLeft := localX - grout
 			distBottom := slab - 1 - localY
@@ -521,15 +444,11 @@ func makeStoneFloorPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeDirtPixels paints a warm earth texture for dirt patches mixed into
-// the field's grass. Painted-brushstroke noise (matching grass) plus
-// scattered pebbles and the occasional sprout of returning green so the
-// dirt feels lived-in rather than scorched.
+// makeDirtPixels paints a warm earth texture for dirt patches: brushstroke
+// noise plus scattered pebbles and occasional grass sprouts.
 func makeDirtPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Pastel earth — warm peach-tan rather than dark muddy brown.
-	// The dirt now reads as soft "sun-warmed path" beside the
-	// pastel grass.
+	// Pastel peach-tan earth — a sun-warmed path beside the pastel grass.
 	base := color.RGBA{R: 184, G: 152, B: 116, A: 255}
 	light := color.RGBA{R: 218, G: 190, B: 148, A: 255}
 	dark := color.RGBA{R: 142, G: 110, B: 82, A: 255}
@@ -551,9 +470,7 @@ func makeDirtPixels(w, h int) []color.RGBA {
 			if seed%180 < 3 {
 				c = core.MixColor(c, pebble, 0.72)
 			} else if seed%420 < 2 {
-				// Rare sprout of returning grass — single
-				// bright-green speck so the dirt isn't a dead
-				// monoculture.
+				// Rare grass sprout.
 				c = core.MixColor(c, sprout, 0.65)
 			}
 			pixels[y*w+x] = c
@@ -562,12 +479,9 @@ func makeDirtPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeDarkGrassPixels paints a deeper-green grass texture for shaded patches
-// of the field. Same painterly two-octave brushwork as makeGrassPixels but
-// with a pastel forest-mint palette so a shaded glade still reads gentle
-// and storybook rather than damp / dim. The variant difference is HUE
-// (mint-green vs the lit grass's spring-green) more than VALUE — the day
-// cycle handles darkness, the textures stay pastel.
+// makeDarkGrassPixels paints a forest-mint grass for shaded patches. Same
+// brushwork as makeGrassPixels; the difference is HUE, not value (the day cycle
+// handles darkness).
 func makeDarkGrassPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	base := color.RGBA{R: 96, G: 162, B: 116, A: 255}
@@ -599,24 +513,17 @@ func makeDarkGrassPixels(w, h int) []color.RGBA {
 					c = core.MixColor(c, bloomMagenta, 0.60)
 				}
 			}
-			// Per-pixel scatter dropped — too busy for the
-			// low-poly soft look we're going for.
 			pixels[y*w+x] = c
 		}
 	}
 	return pixels
 }
 
-// makeCobblePixels paints a mortared cobblestone path: irregular rounded
-// stones nudged into a quasi-grid by a hash, with mossy gaps between them
-// and subtle wet-spot highlights. Reads as "worn footpath laid by hand."
+// makeCobblePixels paints a mortared cobblestone path: rounded stones nudged
+// into a quasi-grid by a hash, with mossy gaps and wet-spot highlights.
 func makeCobblePixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Pastel cobblestone path — soft cream stones over a warm
-	// mortar grout. Lifted into the same pastel-cream family
-	// as the rock wall so a cobble path through a dungeon
-	// (under the spooky lighting override) and one across a
-	// field both share the same painted base.
+	// Pastel cream stones over warm mortar, same family as the rock wall.
 	mortar := color.RGBA{R: 124, G: 116, B: 102, A: 255}
 	moss := color.RGBA{R: 148, G: 184, B: 132, A: 255}
 	base := color.RGBA{R: 192, G: 186, B: 168, A: 255}
@@ -638,9 +545,7 @@ func makeCobblePixels(w, h int) []color.RGBA {
 			localX := (x + offset) % cell
 			localY := y % cell
 
-			// Per-stone center jitter so the cobbles don't read as a uniform
-			// grid. Each stone's "center" walks a couple of pixels off the
-			// cell center and its radius wobbles too.
+			// Per-stone center + radius jitter so the cobbles aren't a uniform grid.
 			h0 := hashByteXY(cellX*7, cellY*13)
 			cx := cell/2 + (h0%5 - 2)
 			cy := cell/2 + ((h0>>3)%5 - 2)
@@ -667,11 +572,8 @@ func makeCobblePixels(w, h int) []color.RGBA {
 				c = core.MixColor(c, cool, 0.22+float64(tone-38)/240.0)
 			}
 
-			// Per-pixel cobble shading: each stone is a tiny dome lit by
-			// the same high-left key as the masonry — the highlight sits
-			// OFF-CENTER toward the upper-left of each stone, and the rim
-			// shadow deepens on the lower-right, so the whole path reads
-			// as rounded stones under one sun instead of radial buttons.
+			// Per-stone dome shading (high-left key): highlight off-center
+			// upper-left, rim shadow on the lower-right.
 			ldx := (dx + 3.0) / rx
 			ldy := (dy + 3.0) / ry
 			dlit := ldx*ldx + ldy*ldy
@@ -681,7 +583,7 @@ func makeCobblePixels(w, h int) []color.RGBA {
 			}
 			if d > 0.78 {
 				rimT := (d - 0.78) * 1.6
-				// Shadow side (lower-right) rims darker than the lit side.
+				// Shadow side (lower-right) rims darker.
 				if dx+dy > 0 {
 					rimT *= 1.35
 				} else {
@@ -694,7 +596,7 @@ func makeCobblePixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, light, math.Max(0, n)*0.20)
 			c = core.MixColor(c, dark, math.Max(0, -n)*0.30)
 
-			// Sparse darker pits in each stone — chips and weather marks.
+			// Sparse darker pits — chips and weather.
 			if hashByteXY(cellX*23+localX/3, cellY*29+localY/3)%88 < 3 {
 				c = adjust(c, -34)
 			}
@@ -704,18 +606,14 @@ func makeCobblePixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makePlankPixels paints a horizontal wooden plank floor: alternating wide
-// boards with darker gaps, with a grain noise across each board and a
-// scatter of darker knots. The board offset shifts by row group so the
-// gaps between boards stagger like a real laid floor.
+// makePlankPixels paints a horizontal plank floor: boards with darker gaps,
+// grain noise, and scattered knots. Board offsets stagger by row group.
 func makePlankPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	const boardH = 22
 	const gap = 2
 	gapColor := color.RGBA{R: 96, G: 70, B: 48, A: 255}
-	// Pastel honey-wood plank floor — soft warm timber matching
-	// the pastel bark family. Knots / grain kept subtle for the
-	// low-poly soft look.
+	// Pastel honey-wood, matching the bark family.
 	base := color.RGBA{R: 186, G: 146, B: 102, A: 255}
 	warm := color.RGBA{R: 212, G: 176, B: 128, A: 255}
 	cool := color.RGBA{R: 162, G: 122, B: 84, A: 255}
@@ -728,8 +626,7 @@ func makePlankPixels(w, h int) []color.RGBA {
 		offset := (boardRow * 17) % 32
 		for x := 0; x < w; x++ {
 			localX := (x + offset) % 96
-			// Plank-to-plank gap (vertical seam). Each board on the row is
-			// 96 px wide so the seams don't line up between rows of boards.
+			// Plank gap (vertical seam). Boards are 96px wide so seams don't align row-to-row.
 			if localX < gap || localY < gap {
 				pixels[y*w+x] = jitter(gapColor, x, y, 6)
 				continue
@@ -741,20 +638,18 @@ func makePlankPixels(w, h int) []color.RGBA {
 			} else if tone < 72 {
 				c = core.MixColor(c, cool, 0.22+float64(tone-38)/240.0)
 			}
-			// Long horizontal grain: low-frequency stretch along x, higher
-			// frequency in y so it reads as wood fibers not stone veins.
+			// Horizontal grain: stretched along x, finer in y, so it reads as wood fibers.
 			n := fbmNoise(float64(x)*0.15, float64(y)*1.6, 0.20, 4)
 			c = core.MixColor(c, warm, math.Max(0, n)*0.35)
 			c = core.MixColor(c, grain, math.Max(0, -n)*0.55)
 
-			// Edge of the board: darken slightly so each plank reads as
-			// raised against its neighbor.
+			// Board edge darkening so each plank reads as raised.
 			edge := min(localY-gap, boardH-1-localY)
 			if edge <= 2 {
 				c = core.MixColor(c, gapColor, 0.30-float64(edge)*0.10)
 			}
 
-			// Knots: small disc darker spots, ~1 per board.
+			// Knots, ~1 per board.
 			if hashByteXY((x+offset)/8, y/3)%420 < 3 {
 				c = core.MixColor(c, knot, 0.70)
 			}
@@ -764,17 +659,12 @@ func makePlankPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeWaterPixels paints shallow water: a banded blue gradient with rolling
-// FBM ripples and a few brighter highlight peaks. No animation — but the
-// gentle banded shimmer reads as still water catching ambient light. Sits
-// at the same Y as floor cubes (slightly recessed) so the player walks
-// through, not over. Palette is intentionally light/airy so the tile
-// reads as wadeable next to the darker FloorDeepWater variant.
+// makeWaterPixels paints shallow water: banded blue gradient with FBM ripples
+// and highlight peaks. Light/airy palette so it reads as wadeable next to the
+// darker FloorDeepWater variant.
 func makeWaterPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Pastel painted water — soft but clearly aqua, the gentle
-	// pond in a sunlit meadow. Chroma bumped so the water reads
-	// blue-green rather than pale grey-blue.
+	// Pastel aqua water.
 	deep := color.RGBA{R: 96, G: 168, B: 192, A: 255}
 	mid := color.RGBA{R: 150, G: 204, B: 214, A: 255}
 	shine := color.RGBA{R: 220, G: 238, B: 232, A: 255}
@@ -787,25 +677,21 @@ func makeWaterPixels(w, h int) []color.RGBA {
 			band := math.Sin(float64(y)*0.08 + n*1.8)
 			c := core.MixColor(deep, mid, 0.45+band*0.35+n*0.20)
 
-			// Bright crests where the noise hits a peak.
+			// Bright crests at noise peaks.
 			peak := fbmNoise(float64(x)*1.3+311, float64(y)*1.3-91, 0.10, 3)
 			if peak > 0.55 {
 				c = core.MixColor(c, shine, (peak-0.55)*1.4)
 			}
-			// Sun glints — rare short HORIZONTAL dashes of near-white
-			// riding the ripple crests (hashing x/7 keeps each dash a
-			// solid 7-px streak, the way low sun skips off water in
-			// little bars rather than single sparkles). Crest-gated so
-			// glints sit on the lit side of a ripple, never in a trough.
+			// Sun glints — short horizontal near-white dashes (x/7 keeps a 7-px
+			// streak), crest-gated to the lit side of a ripple.
 			if band > 0.25 && hashByteXY(x/7, y)%170 < 2 {
 				c = core.MixColor(c, shine, 0.85)
 			}
-			// Hint of sandy bottom where the FBM dips deep — reads as water
-			// that you can almost see through.
+			// Sandy bottom where the FBM dips deep.
 			if n < -0.45 {
 				c = core.MixColor(c, sand, (-n-0.45)*0.5)
 			}
-			// Rare strands of weed for life.
+			// Rare weed strands.
 			if hashByteXY(x/2, y*3)%560 < 4 {
 				c = core.MixColor(c, weed, 0.45)
 			}
@@ -815,17 +701,12 @@ func makeWaterPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeDeepWaterPixels paints the blocking deep-water variant: same banded
-// shimmer shape as makeWaterPixels but a noticeably darker, cooler palette
-// and no sandy bottom hint (the floor below isn't visible at depth). The
-// contrast against shallow water is the visual cue that this tile can't
-// be waded into — see FloorDeepWater in core/map.go.
+// makeDeepWaterPixels paints the blocking deep-water variant: same shimmer as
+// makeWaterPixels but darker/cooler and no sandy bottom — the contrast is the
+// "can't wade in" cue (FloorDeepWater in core/map.go).
 func makeDeepWaterPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Pastel deep water — soft teal that's clearly deeper / cooler
-	// than the wadeable shallow water but still painted-pastel
-	// rather than near-black navy. The "you can't enter" read
-	// comes from the colder, more saturated tone vs shallow.
+	// Pastel teal, colder/more saturated than shallow water.
 	deep := color.RGBA{R: 92, G: 138, B: 160, A: 255}
 	mid := color.RGBA{R: 124, G: 168, B: 184, A: 255}
 	shine := color.RGBA{R: 196, G: 220, B: 222, A: 255}
@@ -850,16 +731,11 @@ func makeDeepWaterPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeSandPixels paints pale dune sand: warm cream base with finer noise
-// grain than the dirt texture and very sparse darker pebbles. Reads as
-// dry, sun-bleached sand rather than wet beach sand (which would want a
-// cooler tone).
+// makeSandPixels paints dry dune sand: warm cream with gentle dune-roll noise
+// and very sparse pebbles.
 func makeSandPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Pastel dune sand — soft warm cream. Low-poly soft pass:
-	// dropped the per-pixel grain speckle, kept only the gentle
-	// dune-roll noise so the sand reads as a smooth painted
-	// surface rather than a gritty stipple.
+	// Pastel warm-cream sand, smooth (no per-pixel speckle).
 	base := color.RGBA{R: 224, G: 206, B: 168, A: 255}
 	warm := color.RGBA{R: 240, G: 224, B: 188, A: 255}
 	dark := color.RGBA{R: 196, G: 174, B: 134, A: 255}
@@ -871,8 +747,7 @@ func makeSandPixels(w, h int) []color.RGBA {
 			c := base
 			c = core.MixColor(c, warm, math.Max(0, dune)*0.40)
 			c = core.MixColor(c, dark, math.Max(0, -dune)*0.32)
-			// Very sparse pebble — a single soft fleck here and
-			// there for character.
+			// Very sparse pebble flecks.
 			if hashByteXY(x*7, y*11)%680 < 2 {
 				c = core.MixColor(c, pebble, 0.45)
 			}
@@ -882,10 +757,9 @@ func makeSandPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeSnowPixels paints packed snow: near-white with very faint blue
-// shadow noise and a sparkle of brighter specks. Looks washed-out under
-// neutral light by design — the day/night cycle's bluer phases tint it
-// into something atmospheric.
+// makeSnowPixels paints packed snow: near-white with faint blue shadow noise
+// and sparkle specks. Washed-out under neutral light; the day cycle's blue
+// phases tint it atmospheric.
 func makeSnowPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	base := color.RGBA{R: 232, G: 240, B: 248, A: 255}
@@ -900,8 +774,7 @@ func makeSnowPixels(w, h int) []color.RGBA {
 			c := base
 			c = core.MixColor(c, shadow, math.Max(0, -n)*0.22)
 			c = core.MixColor(c, deepShadow, math.Max(0, -drift)*0.18)
-			// Sparkle specks: very rare bright pixels read as light
-			// glinting off ice crystals.
+			// Sparkle specks — light off ice crystals.
 			if hashByteXY(x*5, y*7)%900 < 3 {
 				c = core.MixColor(c, sparkle, 0.85)
 			}
@@ -913,10 +786,7 @@ func makeSnowPixels(w, h int) []color.RGBA {
 
 func makeBarkPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Pastel bark — warm pecan in the lit zones, soft umber in
-	// the creases. Reads as a sun-warm trunk in a meadow rather
-	// than the prior near-black umber that looked like a burnt
-	// log when the lighting fell off.
+	// Pastel bark — warm pecan lit, soft umber in the creases.
 	base := color.RGBA{R: 168, G: 130, B: 96, A: 255}
 	deep := color.RGBA{R: 104, G: 76, B: 56, A: 255}
 	light := color.RGBA{R: 214, G: 184, B: 142, A: 255}
@@ -925,9 +795,7 @@ func makeBarkPixels(w, h int) []color.RGBA {
 	rim := color.RGBA{R: 236, G: 208, B: 162, A: 255}
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			// Sinuous ridge wave — same trick as before but the
-			// noise warp is gentler so the ridges flow as
-			// painted brush-strokes, not jagged sawteeth.
+			// Sinuous ridge wave, gently warped so ridges flow not sawtooth.
 			warp := fbmNoise(float64(x), float64(y), 0.04, 3) * 3.2
 			ridge := math.Sin(float64(x)*0.40 + warp)
 			ridge = math.Abs(ridge)
@@ -935,11 +803,8 @@ func makeBarkPixels(w, h int) []color.RGBA {
 			c := base
 			c = core.MixColor(c, light, math.Max(0, ridge-0.42)*1.5)
 			c = core.MixColor(c, deep, math.Max(0, 0.38-ridge)*0.7)
-			// Side-lit fissures: where the wave CLIMBS out of a crease
-			// (previous column still in shadow, this one cresting), the
+			// Side-lit fissures: where the wave climbs out of a crease, the
 			// ridge's left flank catches the key light as a warm rim.
-			// One comparison per pixel and the bark's vertical plates
-			// pop into relief instead of reading as flat stripes.
 			prevRidge := math.Abs(math.Sin(float64(x-1)*0.40 + warp))
 			if ridge > 0.46 && prevRidge < 0.40 {
 				c = core.MixColor(c, rim, 0.45)
@@ -947,9 +812,7 @@ func makeBarkPixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, light, math.Max(0, n)*0.32)
 			c = core.MixColor(c, deep, math.Max(0, -n)*0.40)
 
-			// Sparser pit + denser moss patches — moss looks
-			// vertical (creeping up the trunk's shaded side)
-			// rather than randomly speckled.
+			// Sparse pits + vertical moss patches (up the shaded side).
 			if hashByteXY(x/3, y/3)%180 < 2 {
 				c = core.MixColor(c, deep, 0.65)
 			}
@@ -965,9 +828,7 @@ func makeBarkPixels(w, h int) []color.RGBA {
 
 func makeLeafPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Pastel canopy leaves — soft but saturated spring green with
-	// cream sun-dapples and lemon-gold accents. Chroma pushed
-	// back up from the washed pass so the canopy reads as lush.
+	// Pastel-saturated canopy — spring green with cream dapples and gold accents.
 	base := color.RGBA{R: 142, G: 204, B: 110, A: 255}
 	light := color.RGBA{R: 200, G: 232, B: 144, A: 255}
 	deep := color.RGBA{R: 96, G: 160, B: 96, A: 255}
@@ -976,9 +837,7 @@ func makeLeafPixels(w, h int) []color.RGBA {
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			// Two-octave painted noise — clumpy patches plus a
-			// finer brushstroke so the foliage feels hand-
-			// painted across a sphere mesh.
+			// Two-octave noise — clumpy patches plus finer brushstroke.
 			broad := fbmNoise(float64(x)*0.7, float64(y)*0.7, 0.06, 3)
 			fine := fbmNoise(float64(x)*1.2, float64(y)*1.2, 0.18, 4)
 			n := broad*0.55 + fine*0.45
@@ -989,34 +848,24 @@ func makeLeafPixels(w, h int) []color.RGBA {
 			if m > 0.50 {
 				c = core.MixColor(c, gold, (m-0.50)*0.70)
 			}
-			// Sunlit hotspots — small bright kisses where the
-			// broad and fine noise crests align. Like sunlight
-			// finding a gap in the canopy.
+			// Sunlit hotspots where broad + fine crests align.
 			if broad > 0.32 && fine > 0.38 {
 				c = core.MixColor(c, hotspot, 0.25)
 			}
-			// NOTE: no v-axis "crown light / belly shadow" gradient here.
-			// raylib's GenMeshSphere keeps par_shapes' parametrization,
-			// whose poles run along ±Z (HORIZONTAL in world space) — a
-			// texture-v gradient paints a dark hemisphere SIDEWAYS across
-			// every canopy lump, facing a random direction per tile yaw.
-			// The real top-light/under-shadow comes from the sun shader's
-			// NdotL on the sphere normals, which is orientation-correct
-			// for free. Keep this texture isotropic.
+			// No v-axis gradient: GenMeshSphere's poles run along ±Z (horizontal),
+			// so a v-gradient would paint a sideways dark hemisphere. Top/under
+			// shading comes from the sun shader's NdotL. Keep this isotropic.
 			pixels[y*w+x] = c
 		}
 	}
 	return pixels
 }
 
-// makeMarblePixels paints pale veined marble for upright props — pillars,
-// the statue, stalagmites, fountain basins. Two veins worth of noise
-// woven through a creamy off-white base, with hairline dark cracks so the
-// stone reads as quarried rather than blank.
+// makeMarblePixels paints veined marble for upright props (pillars, statue,
+// stalagmites, fountain basins): noise veins through a cream base with hairline cracks.
 func makeMarblePixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Muted marble — softer cream-grey base so pillars and the
-	// statue don't flare against the muted floor / wall palette.
+	// Muted cream-grey so it doesn't flare against the floor/wall palette.
 	base := color.RGBA{R: 206, G: 200, B: 188, A: 255}
 	warm := color.RGBA{R: 216, G: 208, B: 192, A: 255}
 	cool := color.RGBA{R: 180, G: 182, B: 188, A: 255}
@@ -1032,10 +881,8 @@ func makeMarblePixels(w, h int) []color.RGBA {
 			c = core.MixColor(c, warm, math.Max(0, n)*0.35)
 			c = core.MixColor(c, cool, math.Max(0, -n)*0.30)
 
-			// Veins: pixel-thin streaks where two FBM samples cross zero,
-			// wrapped in a soft warm BRUISE (mineral staining bleeds into
-			// the stone around a vein — real marble is never a clean line
-			// on white) before the dark crack core.
+			// Veins: thin streaks where two FBM samples cross zero, wrapped in a
+			// warm bruise (mineral staining) before the dark crack core.
 			vt := math.Abs(m + n*0.4)
 			if vt < 0.12 {
 				c = core.MixColor(c, warm, (0.12-vt)*2.2)
@@ -1046,10 +893,7 @@ func makeMarblePixels(w, h int) []color.RGBA {
 			if vt < 0.02 {
 				c = core.MixColor(c, deep, 0.55)
 			}
-			// Polish sheen — a broad diagonal light-band swept across the
-			// slab, as if the dressed face catches a window's reflection.
-			// Sine-based so it tiles seamlessly; faint so it reads as
-			// "polished," never as a painted stripe.
+			// Polish sheen — a faint diagonal light-band, sine-based so it tiles.
 			s := math.Sin((float64(x) + float64(y)*0.7) * 0.045)
 			if s > 0.55 {
 				c = core.MixColor(c, polish, (s-0.55)*0.40)
@@ -1060,9 +904,8 @@ func makeMarblePixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeGranitePixels paints a dark, faintly speckled granite for the
-// obelisk. The mix is denser and cooler than the marble palette so an
-// obelisk reads as a different stone class against an adjacent pillar.
+// makeGranitePixels paints dark speckled granite for the obelisk — denser and
+// cooler than marble so it reads as a different stone class.
 func makeGranitePixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	base := color.RGBA{R: 60, G: 64, B: 76, A: 255}
@@ -1076,7 +919,7 @@ func makeGranitePixels(w, h int) []color.RGBA {
 			c := base
 			c = core.MixColor(c, light, math.Max(0, n)*0.40)
 			c = core.MixColor(c, dark, math.Max(0, -n)*0.45)
-			// Mica flecks: rare bright pixels for sparkle.
+			// Mica flecks.
 			if hashByteXY(x*5, y*5)%420 < 3 {
 				c = core.MixColor(c, flake, 0.55)
 			}
@@ -1086,9 +929,8 @@ func makeGranitePixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeTerracottaPixels paints a warm clay sidewall for the urn. Light
-// horizontal banding (potter's wheel marks) plus subtle vertical
-// gradient so the surface reads as fired clay rather than painted plastic.
+// makeTerracottaPixels paints warm clay for the urn: horizontal wheel-mark
+// banding plus a vertical gradient so it reads as fired clay.
 func makeTerracottaPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	// Pastel terracotta — soft warm clay / apricot.
@@ -1104,7 +946,7 @@ func makeTerracottaPixels(w, h int) []color.RGBA {
 			c := base
 			c = core.MixColor(c, light, math.Max(0, band)*0.35+math.Max(0, n)*0.25)
 			c = core.MixColor(c, dark, math.Max(0, -band)*0.30+math.Max(0, -n)*0.25)
-			// Sparse darker pits and chips.
+			// Sparse pits and chips.
 			if hashByteXY(x, y)%240 < 2 {
 				c = core.MixColor(c, rim, 0.55)
 			}
@@ -1114,9 +956,8 @@ func makeTerracottaPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// fbmNoise returns fractal Brownian motion in roughly [-1, 1] using a hashed
-// value-noise base. We use it to add organic variation to procedural textures
-// so the lit surfaces don't look flat under directional lighting.
+// fbmNoise returns fractal Brownian motion in roughly [-1, 1] over hashed
+// value noise, for organic texture variation.
 func fbmNoise(x, y, frequency float64, octaves int) float64 {
 	value := 0.0
 	amplitude := 1.0
@@ -1156,20 +997,13 @@ func hashFloat(x, y int) float64 {
 	return float64(hashXY(x, y)&0xFFFF) / 65535.0
 }
 
-// makeHudGrainPixels builds a small, tileable grain OVERLAY for HUD glass
-// surfaces. The base is fully transparent; over it we sprinkle sparse low-alpha
-// dark specks (smoke / pits in old leaded glass), warmer light flecks (dust
-// motes catching candlelight), and faint horizontal "laid-paper" fibers. Drawn
-// white-tinted at low alpha over a translucent panel body, it gives the pane
-// real surface tooth WITHOUT shifting its base tone or killing the see-through
-// glass — almost every texel is alpha 0, so the world still reads through the
-// gaps. Per-texel-independent specks tile seamlessly under WrapRepeat.
+// makeHudGrainPixels builds a tileable grain overlay for HUD glass: a
+// transparent base with sparse dark specks, warm light flecks, and faint
+// horizontal fibers. Almost all texels are alpha 0 so the glass stays see-through.
 func makeHudGrainPixels(w, h int) []color.RGBA {
 	px := make([]color.RGBA, w*h)
 	for y := 0; y < h; y++ {
-		// Faint horizontal fiber every few rows — the "laid lines" of hand-
-		// pressed paper / brushed glass. Two cadences (dark + light) at
-		// coprime spacings so they don't beat into an obvious stripe.
+		// Faint horizontal fiber at coprime spacings so they don't beat into a stripe.
 		fiber := 0
 		if y%7 == 0 {
 			fiber = -1
@@ -1198,10 +1032,7 @@ func makeHudGrainPixels(w, h int) []color.RGBA {
 
 func makeSkyPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Pastel painted sky — soft baby-blue at the zenith, warm
-	// peach-cream at the horizon. The classic Wind-Waker
-	// daytime gradient that says "calm afternoon on the open
-	// water" rather than dramatic HDR sky.
+	// Pastel sky — baby-blue zenith to peach-cream horizon.
 	top := color.RGBA{R: 132, G: 188, B: 230, A: 255}
 	horizon := color.RGBA{R: 248, G: 222, B: 198, A: 255}
 	clouds := []struct {
@@ -1216,8 +1047,7 @@ func makeSkyPixels(w, h int) []color.RGBA {
 		{812, 192, 210, 48},
 		{980, 132, 130, 32},
 	}
-	// Cloud tint pulled off pure white so the painted clouds
-	// don't glare against the muted sky.
+	// Cloud tint off pure white so clouds don't glare.
 	cloudCol := color.RGBA{R: 232, G: 234, B: 232, A: 255}
 
 	for y := 0; y < h; y++ {
@@ -1245,22 +1075,10 @@ func makeSkyPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeStarPixels builds the transparent star-field overlay sampled by
-// DrawSkyBackground at night. The texture is mostly RGBA(0,0,0,0); a
-// sparse scatter of single bright pixels (with a 4-neighbor halo at
-// lower alpha) reads as pinpoint stars when drawn at screen scale.
-// Star density tapers from the top of the texture down toward the
-// horizon — stars near the horizon are washed out by atmospheric
-// scattering even at midnight, so the bottom 30% of the texture stays
-// nearly empty. A handful of "bright" stars get a slightly larger
-// halo + warm-white tint so the field doesn't read as a uniform
-// noise field. Star colors walk between cool white, pale blue, and
-// warm yellow — the standard star-temperature trio — so a careful
-// look at the field reveals subtle variety.
-//
-// The randomness is hash-driven (hashFloat) rather than rand.* so the
-// star map is stable across runs and platforms — a player who looks
-// up at midnight tonight sees the same constellation tomorrow.
+// makeStarPixels builds the transparent night star-field overlay. Mostly
+// RGBA(0,0,0,0); a sparse scatter of bright pixels (with halos) reads as stars.
+// Density tapers toward the horizon. Hash-driven (not rand.*) so the star map is
+// stable across runs and platforms.
 func makeStarPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	transparent := color.RGBA{R: 0, G: 0, B: 0, A: 0}
@@ -1268,9 +1086,8 @@ func makeStarPixels(w, h int) []color.RGBA {
 		pixels[i] = transparent
 	}
 
-	// Star palette: cool white (most common), pale blue (hot stars),
-	// warm yellow (cooler stars). Pulled by a separate hash byte so
-	// color and brightness are independent.
+	// Star palette: cool white (common), pale blue, warm yellow. Pulled by a
+	// separate hash byte so color and brightness are independent.
 	coolWhite := color.RGBA{R: 240, G: 244, B: 252, A: 255}
 	paleBlue := color.RGBA{R: 198, G: 218, B: 252, A: 255}
 	warmYellow := color.RGBA{R: 252, G: 234, B: 192, A: 255}
@@ -1288,25 +1105,16 @@ func makeStarPixels(w, h int) []color.RGBA {
 		if x < 0 || x >= w || y < 0 || y >= h {
 			return
 		}
-		// Overwrite, not blend — stars don't overlap meaningfully at
-		// this density and "max over" would otherwise dim a bright
-		// star sitting on top of a dim one's halo.
+		// Overwrite, not blend — "max over" would dim a bright star on a halo.
 		pixels[y*w+x] = c
 	}
 
-	// Density falloff: the upper sky (low y) is the densest; the
-	// horizon (high y) is nearly clear. A quadratic taper sells the
-	// effect without being a hard cutoff. Total star count is roughly
-	// w*h*baseProb*avg(densityAt) — at the current 0.0035 base, ~1024×512
-	// gives ~700 stars before halos, sparse enough to read as a real
-	// night sky rather than a noise field. The previous 0.008 pass
-	// produced a cluttered patch even at midnight; halving the rate
-	// AND adding per-star opacity variance below gives the layer
-	// breathing room.
+	// Density falloff: quadratic taper, dense at top to nearly clear at horizon.
+	// At baseProb 0.0035, ~1024×512 gives ~700 stars before halos.
 	const baseProb = 0.0035
 	densityAt := func(y int) float64 {
 		t := float64(y) / float64(h-1)
-		// 1 at the top, tapering to ~0.05 at the bottom.
+		// 1 at the top, ~0.05 at the bottom.
 		falloff := 1.0 - t*t*1.05
 		if falloff < 0.05 {
 			falloff = 0.05
@@ -1314,18 +1122,9 @@ func makeStarPixels(w, h int) []color.RGBA {
 		return falloff
 	}
 
-	// Per-star brightness curve: most stars are faint, a few are
-	// medium, a handful are bright. Mapped from the brightness byte
-	// (0..255) to a core alpha so the eye reads a starfield with
-	// depth rather than a flat dot pattern. Curve buckets:
-	//
-	//   < 160 (63%)  → core alpha 70   (dim, barely visible)
-	//   < 220 (24%)  → core alpha 130  (medium, the bulk of the field)
-	//   < 248 (11%)  → core alpha 200  (bright)
-	//        else (3%) → core alpha 255  (the brightest pinpoints)
-	//
-	// Halo + sparkle alphas scale off the core so a dim star has a
-	// dim halo and the brightest stars get the strongest glow.
+	// Per-star brightness curve mapping the brightness byte to a core alpha:
+	//   <160 (63%)→70, <220 (24%)→130, <248 (11%)→200, else (3%)→255.
+	// Halo + sparkle alphas scale off the core.
 	coreAlphaFor := func(b int) uint8 {
 		switch {
 		case b < 160:
@@ -1343,15 +1142,13 @@ func makeStarPixels(w, h int) []color.RGBA {
 		dens := densityAt(y)
 		thresh := uint16(baseProb * dens * 65535)
 		for x := 0; x < w; x++ {
-			// hashXY already multiplies by 73856093 / 19349663 — don't
-			// pre-multiply at the call site or the inner math overflows
-			// before mix32 sees it and the distribution skews.
+			// Don't pre-multiply at the call site — hashXY already does, and the
+			// inner math would overflow before mix32 sees it.
 			h0 := uint16(hashXY(x, y))
 			if h0 >= thresh {
 				continue
 			}
-			// Secondary hash drives brightness + color + halo. Offset
-			// by a constant pair so it's decorrelated from h0.
+			// Secondary hash (offset to decorrelate from h0) drives brightness/color/halo.
 			h1 := hashXY(x+91317, y+58271)
 			brightness := int(h1 & 0xFF)
 			coreAlpha := coreAlphaFor(brightness)
@@ -1361,11 +1158,8 @@ func makeStarPixels(w, h int) []color.RGBA {
 			// Core pixel.
 			setPx(x, y, col)
 
-			// Halo + sparkle only on the brighter half of the
-			// brightness curve — dim stars stay as a single pixel so
-			// the field has breathing room. Halo alpha is ~55% of the
-			// core, sparkle is ~30%, so brightness propagates from
-			// pinpoint outward.
+			// Halo (~55% of core) + sparkle (~30%) only on the brighter half;
+			// dim stars stay a single pixel.
 			if coreAlpha >= 130 {
 				haloRoll := int((h1 >> 8) & 0xFF)
 				if haloRoll < 140 { // ~55% of the brighter stars
@@ -1390,16 +1184,13 @@ func makeStarPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// ratPalette is the recolorable palette used by makeRatPixels. Body / ear /
-// tail tones differ between the plain rat and the diseased rat, but the
-// silhouette is shared.
+// ratPalette is the recolorable palette for makeRatPixels; plain and diseased
+// rats share the silhouette, differ in tones.
 type ratPalette struct {
 	body, bodyDark, bodyLight color.RGBA
 	ear, tail                 color.RGBA
 	eye, nose                 color.RGBA
-	// Poison drip color: when non-zero alpha, makeRatPixels paints a few
-	// dripping poison drops under the snout. Used by the diseased rat so
-	// the field figure reads as "leaking something nasty."
+	// poison: when alpha != 0, makeRatPixels paints drip drops under the snout.
 	poison color.RGBA
 }
 
@@ -1413,9 +1204,7 @@ var defaultRatPalette = ratPalette{
 	nose:      color.RGBA{R: 232, G: 150, B: 162, A: 255},
 }
 
-// diseasedRatPalette swaps the rat to mottled sickly-green tones with a
-// jaundiced yellow eye and a fleshy nose. The poison field paints visible
-// drips under the snout.
+// diseasedRatPalette: sickly-green tones, jaundiced eye, poison drips.
 var diseasedRatPalette = ratPalette{
 	body:      color.RGBA{R: 86, G: 118, B: 64, A: 255},
 	bodyDark:  color.RGBA{R: 48, G: 76, B: 36, A: 255},
@@ -1472,17 +1261,13 @@ func makeRatPixelsWithPalette(w, h int, p ratPalette) []color.RGBA {
 	drawLinePixels(pixels, w, h, 55, 39, 67, 40, bodyLight, 1)
 	drawLinePixels(pixels, w, h, 55, 40, 64, 47, bodyLight, 1)
 
-	// Poison drips: only on palettes with a non-zero poison color (the
-	// diseased rat). Three drops trailing down from the snout.
+	// Poison drips (diseased rat only) — three drops from the snout.
 	if p.poison.A != 0 {
 		poison := p.poison
 		poisonDark := adjust(poison, -28)
-		// Drip 1 — biggest, hanging from the nose.
 		fillEllipsePixels(pixels, w, h, 60, 42, 2, 3, poison)
 		fillEllipsePixels(pixels, w, h, 60, 45, 1, 1, poisonDark)
-		// Drip 2 — mid-size, slightly offset.
 		fillEllipsePixels(pixels, w, h, 56, 48, 2, 2, poison)
-		// Drip 3 — small puddle below.
 		fillEllipsePixels(pixels, w, h, 58, 52, 3, 1, poisonDark)
 	}
 
@@ -1500,10 +1285,8 @@ func makeRatPixelsWithPalette(w, h int, p ratPalette) []color.RGBA {
 	return pixels
 }
 
-// makeBatPixels paints a wing-spread cave bat silhouette: dark body with
-// red eye accents and lighter wing membranes that scallop out to either
-// side. Sized to the loadEnemyVisuals dimensions (80x88) so the wings
-// nearly fill horizontally and the body sits in the lower-center.
+// makeBatPixels paints a wing-spread cave bat: dark body, red eyes, scalloped
+// wing membranes. Sized 80x88 (loadEnemyVisuals) so wings nearly fill horizontally.
 func makeBatPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	body := color.RGBA{R: 32, G: 28, B: 36, A: 255}
@@ -1518,9 +1301,7 @@ func makeBatPixels(w, h int) []color.RGBA {
 	cx := w / 2
 	bodyTop := h * 28 / 100
 
-	// Wing membranes: build each side from three overlapping triangles that
-	// scallop the trailing edge. Drawn before the body so the body sits on
-	// top.
+	// Wing membranes: three overlapping triangles per side, drawn before the body.
 	leftAnchor := cx - 4
 	rightAnchor := cx + 4
 	wingY := bodyTop + 6
@@ -1552,8 +1333,7 @@ func makeBatPixels(w, h int) []color.RGBA {
 	fillTrianglePixels(pixels, w, h, cx-7, bodyTop+2, cx-3, bodyTop-6, cx-2, bodyTop+4, body)
 	fillTrianglePixels(pixels, w, h, cx+7, bodyTop+2, cx+3, bodyTop-6, cx+2, bodyTop+4, body)
 
-	// Eyes — one-pixel red dots, with surrounding 1px frame so they read
-	// against the dark face.
+	// Eyes — red dots.
 	fillEllipsePixels(pixels, w, h, cx-3, bodyTop+8, 1, 1, eye)
 	fillEllipsePixels(pixels, w, h, cx+3, bodyTop+8, 1, 1, eye)
 	// Tiny fangs — two single-pixel triangles at the bottom of the face.
@@ -1563,8 +1343,7 @@ func makeBatPixels(w, h int) []color.RGBA {
 	// Cast shadow blob under the bat for contact.
 	fillEllipsePixels(pixels, w, h, cx, h-6, 14, 3, color.RGBA{R: 0, G: 0, B: 0, A: 90})
 
-	// Subtle per-pixel darkening across the whole sprite for the same
-	// pixel-art texture feel as the rat.
+	// Per-pixel dither for the pixel-art feel.
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			i := y*w + x
@@ -1579,10 +1358,8 @@ func makeBatPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeGoblinPixels paints a stocky humanoid goblin: pot-bellied green body,
-// loincloth, club gripped in one hand, two pointed ears and yellow eyes.
-// Sized for 72×112 in loadEnemyVisuals so the silhouette reads as "taller
-// than a rat, shorter than a goblin mage."
+// makeGoblinPixels paints a pot-bellied green goblin with loincloth, club,
+// pointed ears, yellow eyes. Sized 72×112 (loadEnemyVisuals).
 func makeGoblinPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	skin := color.RGBA{R: 108, G: 156, B: 80, A: 255}
@@ -1614,7 +1391,7 @@ func makeGoblinPixels(w, h int) []color.RGBA {
 	fillTrianglePixels(pixels, w, h, cx+14, 86, cx+4, 86, cx+10, 94, cloth)
 	fillRectPixels(pixels, w, h, cx-14, 72, 28, 3, clothDark)
 
-	// Body — pot belly. Bigger lower ellipse + smaller chest above.
+	// Body — pot belly: lower ellipse + chest above.
 	fillEllipsePixels(pixels, w, h, cx, 64, 19, 14, skin)
 	fillEllipsePixels(pixels, w, h, cx-4, 60, 14, 8, skinLight)
 	fillEllipsePixels(pixels, w, h, cx, 70, 18, 8, skinDark)
@@ -1625,7 +1402,7 @@ func makeGoblinPixels(w, h int) []color.RGBA {
 	fillEllipsePixels(pixels, w, h, cx+22, 56, 5, 12, skin)
 	fillEllipsePixels(pixels, w, h, cx+22, 68, 4, 4, skin) // grip hand
 
-	// Club — diagonal along the right side. Shaft + knob.
+	// Club — diagonal shaft + knob on the right.
 	drawLinePixels(pixels, w, h, cx+22, 68, cx+30, 30, wood, 4)
 	fillEllipsePixels(pixels, w, h, cx+30, 28, 6, 7, wood)
 	fillEllipsePixels(pixels, w, h, cx+28, 26, 2, 2, woodDark) // shading peg
@@ -1650,7 +1427,7 @@ func makeGoblinPixels(w, h int) []color.RGBA {
 	drawLinePixels(pixels, w, h, cx-4, 49, cx+4, 49, skinDark, 1)
 	fillTrianglePixels(pixels, w, h, cx-2, 49, cx, 53, cx+1, 49, tooth)
 
-	// Per-pixel texture dither to match the rat/bat surface feel.
+	// Per-pixel dither.
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			i := y*w + x
@@ -1666,8 +1443,7 @@ func makeGoblinPixels(w, h int) []color.RGBA {
 }
 
 // makeGoblinMagePixels paints a robed goblin caster: hooded purple robe,
-// glowing staff, sharper greener face peeking out from the hood. Same
-// body class as the goblin but the robe + staff sell "magic user."
+// glowing staff, face peeking from the hood.
 func makeGoblinMagePixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	skin := color.RGBA{R: 96, G: 148, B: 76, A: 255}
@@ -1711,8 +1487,7 @@ func makeGoblinMagePixels(w, h int) []color.RGBA {
 	// Faint glow ring.
 	fillEllipsePixels(pixels, w, h, cx+30, 20, 8, 9, color.RGBA{R: 196, G: 136, B: 232, A: 40})
 
-	// Hood — covers the head, leaving only a small face hole. Dark robe-
-	// color outer shell with a lighter inner shadow.
+	// Hood — dark outer shell, lighter inner shadow, small face hole.
 	fillTrianglePixels(pixels, w, h, cx-14, 60, cx+14, 60, cx, 28, robe)
 	fillEllipsePixels(pixels, w, h, cx, 46, 14, 12, robeDark)
 	// Face peek — small ellipse of skin inside the hood.
@@ -1745,10 +1520,8 @@ func makeGoblinMagePixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeAmoebaPixels paints a squat translucent-looking blob: an outer
-// gel-edge halo, a brighter inner core, a darker nucleus, and a few
-// floating specks suggesting absorbed mineral grit. Reads as a tank
-// (squashed silhouette, dense core) rather than as a jellyfish.
+// makeAmoebaPixels paints a squat gel blob: outer halo, bright core, dark
+// nucleus, grit specks. Squashed silhouette reads as a tank, not a jellyfish.
 func makeAmoebaPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	outer := color.RGBA{R: 152, G: 178, B: 200, A: 180}
@@ -1770,26 +1543,24 @@ func makeAmoebaPixels(w, h int) []color.RGBA {
 	fillEllipsePixels(pixels, w, h, cx-2, cy+3, 30, 18, mid)
 	fillEllipsePixels(pixels, w, h, cx-3, cy+2, 22, 14, core)
 
-	// A few amoeba pseudopod bulges — small ellipses pushing out the
-	// silhouette.
+	// Pseudopod bulges.
 	fillEllipsePixels(pixels, w, h, cx-30, cy+8, 6, 4, mid)
 	fillEllipsePixels(pixels, w, h, cx+28, cy-4, 7, 5, mid)
 	fillEllipsePixels(pixels, w, h, cx+12, cy+14, 6, 4, mid)
 
-	// Nucleus — dense darker center with one bright specular dot.
+	// Nucleus — dark center with a specular dot.
 	fillEllipsePixels(pixels, w, h, cx-2, cy+2, 9, 7, nucleus)
 	fillEllipsePixels(pixels, w, h, cx-4, cy, 4, 3, nucleusDark)
 	fillEllipsePixels(pixels, w, h, cx-6, cy-2, 2, 1, highlight)
 
-	// Floating grit — single-pixel dark specks inside the gel.
+	// Floating grit specks.
 	fillRectPixels(pixels, w, h, cx+8, cy-2, 1, 1, grit)
 	fillRectPixels(pixels, w, h, cx-12, cy+8, 1, 1, grit)
 	fillRectPixels(pixels, w, h, cx+14, cy+8, 1, 1, grit)
 	fillRectPixels(pixels, w, h, cx-18, cy-6, 1, 1, grit)
 	fillRectPixels(pixels, w, h, cx+20, cy+4, 1, 1, grit)
 
-	// Top-edge specular highlight — a thin curved bright strip so the
-	// blob reads as wet.
+	// Top-edge specular strip so the blob reads as wet.
 	for ox := -16; ox <= 16; ox++ {
 		x := cx - 2 + ox
 		y := cy - 14 + int(math.Abs(float64(ox))/4)
@@ -1798,8 +1569,7 @@ func makeAmoebaPixels(w, h int) []color.RGBA {
 		}
 	}
 
-	// Subtle dither (slightly less than other sprites — the amoeba reads
-	// smoother than a hairy rat).
+	// Subtle dither (less than other sprites).
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			i := y*w + x
@@ -1814,11 +1584,8 @@ func makeAmoebaPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeVenusMantrapPixels paints a Venus-flytrap-on-a-stem: a thick green
-// stalk rising from a leafy base, two pink toothed jaws flaring open at
-// the top, and the dim suggestion of a tongue / interior. The silhouette
-// is intentionally top-heavy so the "this thing could eat you" read is
-// instant — Ingest is its signature, and the sprite needs to sell it.
+// makeVenusMantrapPixels paints a Venus-flytrap-on-a-stem: leafy base, green
+// stalk, two pink toothed jaws flaring open. Top-heavy silhouette.
 func makeVenusMantrapPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	stem := color.RGBA{R: 86, G: 132, B: 70, A: 255}
@@ -1845,7 +1612,7 @@ func makeVenusMantrapPixels(w, h int) []color.RGBA {
 	fillEllipsePixels(pixels, w, h, cx+12, h-14, 14, 7, leaf)
 	fillEllipsePixels(pixels, w, h, cx, h-18, 10, 5, stemLight)
 
-	// Stem — thick vertical stalk with a small bend.
+	// Stem.
 	drawLinePixels(pixels, w, h, cx, h-20, cx-4, 60, stem, 9)
 	drawLinePixels(pixels, w, h, cx, h-20, cx-4, 60, stemDark, 3)
 	// Two small leaf nodes coming off the stem.
@@ -1893,7 +1660,7 @@ func makeVenusMantrapPixels(w, h int) []color.RGBA {
 	fillEllipsePixels(pixels, w, h, cx-2, 46, 3, 3, eye)
 	fillEllipsePixels(pixels, w, h, cx-2, 46, 1, 1, pupil)
 
-	// Per-pixel dither to match the rest of the bestiary.
+	// Per-pixel dither.
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			i := y*w + x
@@ -1908,13 +1675,8 @@ func makeVenusMantrapPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeCaveSpiderPixels paints the cave spider: a low-slung
-// arachnid with a bulbous purple abdomen, a smaller cephalothorax up
-// front, eight legs splayed out in jointed pairs, six red eyes
-// clustered between the mandibles, and downward-pointing fangs.
-// Sized wide and short (88×72) so the silhouette reads "thing on the
-// ground" instead of "tall humanoid." Designed as a tier-3 ambusher
-// — menacing eye cluster + visible fangs > pure cute round body.
+// makeCaveSpiderPixels paints a low-slung spider: bulbous purple abdomen,
+// smaller cephalothorax, eight jointed legs, six red eyes, fangs. Wide+short (88×72).
 func makeCaveSpiderPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	bodyDark := color.RGBA{R: 44, G: 28, B: 60, A: 255}
@@ -1931,12 +1693,9 @@ func makeCaveSpiderPixels(w, h int) []color.RGBA {
 	// Ground shadow — wider than tall, fits the squat silhouette.
 	fillEllipsePixels(pixels, w, h, cx, h-4, 30, 4, color.RGBA{R: 0, G: 0, B: 0, A: 110})
 
-	// Eight legs in four jointed pairs, fanning out from the
-	// cephalothorax. Each leg is a two-segment poly-line: shoulder
-	// up + out, then knee down to a foot near the floor. Outer
-	// legs reach further than inner ones so the silhouette feels
-	// spread, not stacked.
-	legY := h - 18 // shoulder anchor for all legs
+	// Eight legs in four jointed pairs; each a two-segment poly-line (shoulder
+	// up+out, knee down to a foot). Outer legs reach further.
+	legY := h - 18 // shoulder anchor
 	footY := h - 8
 	// Back-left pair.
 	drawLinePixels(pixels, w, h, cx-8, legY, cx-26, 24, legDark, 3)
@@ -1963,21 +1722,19 @@ func makeCaveSpiderPixels(w, h int) []color.RGBA {
 	drawLinePixels(pixels, w, h, cx+2, legY+6, cx+12, 44, legDark, 3)
 	drawLinePixels(pixels, w, h, cx+12, 44, cx+14, footY, legDark, 3)
 
-	// Abdomen — big bulbous oval at the back (lower / further from
-	// viewer). Two-tone shading so the bulb reads as 3D.
+	// Abdomen — bulbous oval at the back, two-tone for 3D.
 	fillEllipsePixels(pixels, w, h, cx, h-22, 24, 16, bodyDark)
 	fillEllipsePixels(pixels, w, h, cx, h-24, 22, 14, body)
 	fillEllipsePixels(pixels, w, h, cx-4, h-28, 12, 6, bodyLight)
 	// Faint marking on the abdomen — a pale crescent.
 	fillEllipsePixels(pixels, w, h, cx+2, h-22, 8, 3, bodyLight)
 
-	// Cephalothorax — smaller round front body (upper / closer).
+	// Cephalothorax — smaller front body.
 	fillEllipsePixels(pixels, w, h, cx, h-38, 14, 10, bodyDark)
 	fillEllipsePixels(pixels, w, h, cx, h-40, 12, 8, body)
 	fillEllipsePixels(pixels, w, h, cx-2, h-42, 8, 4, bodyLight)
 
-	// Six red eyes — two rows of three (3+3 pattern). Outer eyes
-	// slightly smaller for depth. Glow halo behind each.
+	// Six red eyes (3+3), outer smaller, glow halo behind each.
 	for _, e := range [][3]int{
 		{cx - 6, h - 41, 2}, {cx, h - 41, 2}, {cx + 6, h - 41, 2},
 		{cx - 4, h - 37, 1}, {cx, h - 37, 1}, {cx + 4, h - 37, 1},
@@ -1986,12 +1743,11 @@ func makeCaveSpiderPixels(w, h int) []color.RGBA {
 		fillEllipsePixels(pixels, w, h, e[0], e[1], e[2], e[2], eye)
 	}
 
-	// Mandibles / fangs — two small triangles hanging from the
-	// cephalothorax's front edge.
+	// Mandibles / fangs.
 	fillTrianglePixels(pixels, w, h, cx-5, h-32, cx-2, h-32, cx-3, h-28, fang)
 	fillTrianglePixels(pixels, w, h, cx+5, h-32, cx+2, h-32, cx+3, h-28, fang)
 
-	// Per-pixel dither — match the bestiary's surface feel.
+	// Per-pixel dither.
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			i := y*w + x
@@ -2006,12 +1762,8 @@ func makeCaveSpiderPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeVampireBatPixels paints the vampire bat: larger than the cave
-// bat, deeper crimson-black wings, glowing red eyes, prominent
-// fangs, and a small blood-drip at the mouth that sells the
-// lifesteal identity. Wing silhouette mirrors the cave bat so the
-// player recognizes the upgrade at a glance — same silhouette
-// family, more menacing color story.
+// makeVampireBatPixels paints a larger crimson-black bat with glowing red eyes,
+// fangs, and a mouth blood-drip. Wing silhouette mirrors the cave bat.
 func makeVampireBatPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	body := color.RGBA{R: 52, G: 20, B: 28, A: 255}
@@ -2030,13 +1782,12 @@ func makeVampireBatPixels(w, h int) []color.RGBA {
 	// Ground shadow — wider for the wingspan.
 	fillEllipsePixels(pixels, w, h, cx, h-4, 34, 4, color.RGBA{R: 0, G: 0, B: 0, A: 100})
 
-	// Wing membranes — broad triangles fanning out from the body.
-	// Left wing.
+	// Left wing membranes.
 	fillTrianglePixels(pixels, w, h, cx-2, 36, cx-44, 28, cx-30, 60, wingMembrane)
 	fillTrianglePixels(pixels, w, h, cx-2, 36, cx-30, 60, cx-12, 56, wingMembrane)
-	// Inner-membrane shading — darker patch nearer to the body.
+	// Inner-membrane shading.
 	fillTrianglePixels(pixels, w, h, cx-2, 40, cx-26, 44, cx-12, 56, wingDark)
-	// Wing-finger bones — three diverging dark lines per wing.
+	// Wing-finger bones.
 	drawLinePixels(pixels, w, h, cx-4, 38, cx-44, 28, wingBone, 2)
 	drawLinePixels(pixels, w, h, cx-4, 38, cx-36, 50, wingBone, 2)
 	drawLinePixels(pixels, w, h, cx-4, 38, cx-26, 58, wingBone, 2)
@@ -2071,7 +1822,7 @@ func makeVampireBatPixels(w, h int) []color.RGBA {
 	fillTrianglePixels(pixels, w, h, cx-6, 24, cx-3, 18, cx-3, 26, body)
 	fillTrianglePixels(pixels, w, h, cx+6, 24, cx+3, 18, cx+3, 26, body)
 
-	// Eyes — BIG glowing red, the headline detail.
+	// Eyes — big glowing red.
 	fillEllipsePixels(pixels, w, h, cx-4, 30, 3, 3, eyeGlow)
 	fillEllipsePixels(pixels, w, h, cx+4, 30, 3, 3, eyeGlow)
 	fillEllipsePixels(pixels, w, h, cx-4, 30, 2, 2, eye)
@@ -2081,8 +1832,7 @@ func makeVampireBatPixels(w, h int) []color.RGBA {
 	fillTrianglePixels(pixels, w, h, cx-3, 36, cx-1, 36, cx-2, 41, fang)
 	fillTrianglePixels(pixels, w, h, cx+3, 36, cx+1, 36, cx+2, 41, fang)
 
-	// Blood drip — a small bead trailing from one fang. Pure ID
-	// flavor; reads at any zoom because of the saturated red.
+	// Blood drip from one fang.
 	fillEllipsePixels(pixels, w, h, cx-2, 44, 1, 2, blood)
 
 	// Per-pixel dither.
@@ -2100,11 +1850,8 @@ func makeVampireBatPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeWispPixels paints the will-o'-wisp: a floating ghostly orb of
-// cold cyan-white light with concentric halo rings dimming outward,
-// trailing wispy tendrils below. No solid body — the sprite is all
-// glow + atmosphere. Sized narrow + tall (56×72) so it reads as
-// "drifting light" rather than "creature with a body."
+// makeWispPixels paints a floating cyan-white orb with halo rings and trailing
+// tendrils. No solid body. Narrow+tall (56×72).
 func makeWispPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	core1 := color.RGBA{R: 246, G: 252, B: 255, A: 255} // brightest center
@@ -2117,53 +1864,40 @@ func makeWispPixels(w, h int) []color.RGBA {
 	eye := color.RGBA{R: 14, G: 22, B: 40, A: 255}
 
 	cx := w / 2
-	cy := h/2 - 8 // float anchor above the center for the orb body
+	cy := h/2 - 8 // float anchor above center
 
-	// Soft ground shadow — small + diffuse since the wisp floats.
+	// Soft ground shadow — small, since the wisp floats.
 	fillEllipsePixels(pixels, w, h, cx, h-4, 14, 3, color.RGBA{R: 0, G: 0, B: 0, A: 60})
 
-	// Outer mist clouds — irregular tendrils trailing downward
-	// like a ghostly flame. Three drifting blobs at different y
-	// offsets so the silhouette looks alive rather than symmetric.
+	// Outer mist tendrils trailing down, at varied y offsets.
 	fillEllipsePixels(pixels, w, h, cx-3, cy+14, 7, 9, mist2)
 	fillEllipsePixels(pixels, w, h, cx+4, cy+18, 5, 7, mist2)
 	fillEllipsePixels(pixels, w, h, cx, cy+22, 4, 6, tendrilDim)
 	fillEllipsePixels(pixels, w, h, cx-2, cy+28, 3, 5, tendrilDim)
 
-	// Halo layers — concentric rings around the core, each
-	// progressively brighter and smaller. Painted big-to-small so
-	// the inner layers overwrite the outer ones.
+	// Halo layers — concentric rings, painted big-to-small so inner overwrites outer.
 	fillEllipsePixels(pixels, w, h, cx, cy, 16, 18, mist1)
 	fillEllipsePixels(pixels, w, h, cx, cy, 13, 14, mist2)
 	fillEllipsePixels(pixels, w, h, cx, cy, 10, 11, core3)
 	fillEllipsePixels(pixels, w, h, cx, cy, 7, 8, core2)
 	fillEllipsePixels(pixels, w, h, cx, cy-1, 4, 5, core1)
 
-	// Two tiny dark "eye" pinpricks inside the bright core so the
-	// wisp reads as faintly malevolent rather than a benign light.
+	// Two dark eye pinpricks so the wisp reads as faintly malevolent.
 	fillEllipsePixels(pixels, w, h, cx-2, cy-1, 1, 1, eye)
 	fillEllipsePixels(pixels, w, h, cx+2, cy-1, 1, 1, eye)
 
-	// Side-trailing wisps — two small curling arcs out the sides.
+	// Side-trailing arcs.
 	drawLinePixels(pixels, w, h, cx-10, cy+4, cx-16, cy+12, tendril, 2)
 	drawLinePixels(pixels, w, h, cx+10, cy+4, cx+16, cy+12, tendril, 2)
 	drawLinePixels(pixels, w, h, cx-16, cy+12, cx-14, cy+18, tendrilDim, 2)
 	drawLinePixels(pixels, w, h, cx+16, cy+12, cx+14, cy+18, tendrilDim, 2)
 
-	// No dither pass — the wisp's silhouette is intentionally
-	// smooth gradient. A dither here would make the glow look
-	// noisy instead of ethereal.
+	// No dither — the wisp's glow is intentionally a smooth gradient.
 	return pixels
 }
 
-// makeStoneGolemPixels paints the stone golem: a blocky humanoid
-// hewn from weathered stone, with a horizontal glowing eye slit,
-// broad square shoulders, heavy arms hanging at its sides, and
-// cracked-stone detailing throughout. Sized big (96×120) — the
-// golem is the biggest silhouette in the bestiary so it visually
-// anchors a pack. Designed for the "active armor wall" identity:
-// blocky enough to read as a stone construct, glowing eye sells
-// "animated" rather than statuary.
+// makeStoneGolemPixels paints a blocky stone humanoid: glowing eye slit, square
+// shoulders, heavy arms, cracked-stone detail. Biggest sprite (96×120).
 func makeStoneGolemPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	stone := color.RGBA{R: 132, G: 124, B: 110, A: 255}
@@ -2180,8 +1914,7 @@ func makeStoneGolemPixels(w, h int) []color.RGBA {
 	// Ground shadow — wide for the bulk.
 	fillEllipsePixels(pixels, w, h, cx, h-4, 36, 5, color.RGBA{R: 0, G: 0, B: 0, A: 120})
 
-	// Legs — two thick stone pillars. Slightly tapered at the
-	// ankle so the silhouette doesn't read as a perfect cube.
+	// Legs — two thick pillars, tapered at the ankle.
 	fillRectPixels(pixels, w, h, cx-22, 86, 16, 28, stoneDark)
 	fillRectPixels(pixels, w, h, cx+6, 86, 16, 28, stoneDark)
 	fillRectPixels(pixels, w, h, cx-22, 86, 16, 22, stone)
@@ -2202,15 +1935,13 @@ func makeStoneGolemPixels(w, h int) []color.RGBA {
 	fillRectPixels(pixels, w, h, cx-26, 42, 52, 36, stoneDark)
 	fillRectPixels(pixels, w, h, cx-26, 42, 52, 30, stone)
 	fillRectPixels(pixels, w, h, cx-26, 42, 8, 30, stoneLight)
-	// Chest cracks — three jagged dark lines telegraphing damage.
+	// Chest cracks.
 	drawLinePixels(pixels, w, h, cx-12, 48, cx-4, 60, crack, 1)
 	drawLinePixels(pixels, w, h, cx-4, 60, cx+2, 70, crack, 1)
 	drawLinePixels(pixels, w, h, cx+8, 50, cx+14, 64, crack, 1)
 	drawLinePixels(pixels, w, h, cx-18, 64, cx-10, 74, crack, 1)
 
-	// Arms — big square blocks hanging at the sides, slightly
-	// raised at the shoulder to suggest a fighter's stance.
-	// Left arm.
+	// Arms — square blocks at the sides. Left arm.
 	fillRectPixels(pixels, w, h, cx-40, 42, 14, 38, stoneDark)
 	fillRectPixels(pixels, w, h, cx-40, 42, 14, 32, stone)
 	fillRectPixels(pixels, w, h, cx-40, 42, 4, 32, stoneLight)
@@ -2236,15 +1967,13 @@ func makeStoneGolemPixels(w, h int) []color.RGBA {
 	fillRectPixels(pixels, w, h, cx-10, 27, 20, 2, eyeGlow)
 	fillRectPixels(pixels, w, h, cx-4, 27, 8, 2, eyeBright)
 
-	// Moss patches — small green specks on the shoulders and feet
-	// to sell "ancient" rather than "freshly carved."
+	// Moss patches on shoulders + feet.
 	fillEllipsePixels(pixels, w, h, cx-22, 46, 4, 2, moss)
 	fillEllipsePixels(pixels, w, h, cx+22, 46, 4, 2, moss)
 	fillEllipsePixels(pixels, w, h, cx-18, 112, 4, 1, moss)
 	fillEllipsePixels(pixels, w, h, cx+18, 112, 4, 1, moss)
 
-	// Heavy stone-grain dither — denser than the soft-creature
-	// sprites so the surface reads as actual rock, not skin.
+	// Heavy stone-grain dither (denser) so the surface reads as rock.
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			i := y*w + x
@@ -2259,13 +1988,8 @@ func makeStoneGolemPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeNecromancerPixels paints the necromancer: a tall hooded
-// figure in deep indigo robes, pale skull face peeking out from
-// the shadow of the hood with glowing green sockets, a bone staff
-// topped with a small skull held to one side, and bony fingers
-// gripping the shaft. Sized tall + narrow (72×112) so the
-// silhouette reads as a robed humanoid distinct from the goblin
-// mage's stout pose.
+// makeNecromancerPixels paints a tall hooded figure in indigo robes: skull face
+// with glowing green sockets, bone staff with skull topper. Tall+narrow (72×112).
 func makeNecromancerPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	robe := color.RGBA{R: 38, G: 36, B: 68, A: 255}
@@ -2287,8 +2011,7 @@ func makeNecromancerPixels(w, h int) []color.RGBA {
 	// Ground shadow — long and thin under a robed figure.
 	fillEllipsePixels(pixels, w, h, cx, h-4, 22, 4, color.RGBA{R: 0, G: 0, B: 0, A: 110})
 
-	// Robe skirt — wide triangle from shoulders to feet, dark
-	// underneath, lighter on the left edge to suggest folds.
+	// Robe skirt — wide triangle, dark under, lighter left edge for folds.
 	fillTrianglePixels(pixels, w, h, cx-26, h-6, cx+26, h-6, cx, 34, robeDark)
 	fillTrianglePixels(pixels, w, h, cx-22, h-8, cx+22, h-8, cx, 38, robe)
 	// Left fold highlight.
@@ -2302,17 +2025,14 @@ func makeNecromancerPixels(w, h int) []color.RGBA {
 	// Robe sash crossing the chest.
 	drawLinePixels(pixels, w, h, cx-14, 58, cx+14, 64, trim, 2)
 
-	// Sleeves — flaring out at the shoulders, narrowing toward
-	// the wrists. Left arm visible holding the staff.
-	// Left sleeve.
+	// Sleeves flaring at the shoulders. Left sleeve.
 	fillTrianglePixels(pixels, w, h, cx-14, 50, cx-22, 72, cx-12, 76, robe)
 	fillTrianglePixels(pixels, w, h, cx-14, 50, cx-22, 72, cx-18, 60, robeDark)
 	// Right sleeve.
 	fillTrianglePixels(pixels, w, h, cx+14, 50, cx+22, 72, cx+12, 76, robe)
 	fillTrianglePixels(pixels, w, h, cx+14, 50, cx+18, 60, cx+22, 72, robeLight)
 
-	// Hood — dark cone framing the face. Wide at the shoulders,
-	// peaked above the head.
+	// Hood — dark cone framing the face.
 	fillTrianglePixels(pixels, w, h, cx-18, 48, cx+18, 48, cx, 10, robeDark)
 	fillTrianglePixels(pixels, w, h, cx-14, 46, cx+14, 46, cx, 14, robe)
 	// Inner hood shadow — deep black wells the face peeks out of.
@@ -2326,8 +2046,7 @@ func makeNecromancerPixels(w, h int) []color.RGBA {
 	fillEllipsePixels(pixels, w, h, cx+3, 30, 2, 3, eyeSocket)
 	fillEllipsePixels(pixels, w, h, cx-3, 30, 1, 1, eyeBright)
 	fillEllipsePixels(pixels, w, h, cx+3, 30, 1, 1, eyeBright)
-	// Outer eye glow — a faint green halo bleeds through the
-	// hood shadow.
+	// Outer green eye glow through the hood shadow.
 	fillEllipsePixels(pixels, w, h, cx-3, 30, 3, 3, color.RGBA{R: eyeGlow.R, G: eyeGlow.G, B: eyeGlow.B, A: 90})
 	fillEllipsePixels(pixels, w, h, cx+3, 30, 3, 3, color.RGBA{R: eyeGlow.R, G: eyeGlow.G, B: eyeGlow.B, A: 90})
 	// Nasal cavity — small triangle below the eyes.
@@ -2338,8 +2057,7 @@ func makeNecromancerPixels(w, h int) []color.RGBA {
 		fillRectPixels(pixels, w, h, px, 38, 1, 2, eyeSocket)
 	}
 
-	// Staff — diagonal shaft from the left hand reaching above
-	// the head. Bone-colored shaft, skull topper.
+	// Staff — diagonal shaft with skull topper.
 	drawLinePixels(pixels, w, h, cx-22, 78, cx-32, 16, staffDark, 4)
 	drawLinePixels(pixels, w, h, cx-22, 78, cx-32, 16, staff, 2)
 	// Skull topper.
@@ -2365,13 +2083,8 @@ func makeNecromancerPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeSkeletonPixels paints the skeleton grunt: a stripped-down
-// humanoid frame with a skull head (hollow eye sockets glowing
-// dim red), visible ribcage, bony arms with claw-fingers, and
-// femur/tibia legs. Sized as a regular humanoid (72×112) — same
-// proportions as the goblin so packs read as a mixed front line.
-// Designed for the "expendable raised summon" identity: clearly
-// undead, clearly cheap, paired naturally with the Necromancer.
+// makeSkeletonPixels paints a skeleton: skull with dim-red sockets, ribcage,
+// claw-finger arms, femur/tibia legs. Humanoid (72×112), goblin-sized.
 func makeSkeletonPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	bone := color.RGBA{R: 224, G: 218, B: 196, A: 255}
@@ -2405,7 +2118,7 @@ func makeSkeletonPixels(w, h int) []color.RGBA {
 	fillEllipsePixels(pixels, w, h, cx-13, h-6, 5, 2, boneDark)
 	fillEllipsePixels(pixels, w, h, cx+13, h-6, 5, 2, boneDark)
 
-	// Pelvis — flared boomerang shape with central socket.
+	// Pelvis — flared boomerang with central socket.
 	fillTrianglePixels(pixels, w, h, cx-12, 70, cx+12, 70, cx, 80, boneDark)
 	fillTrianglePixels(pixels, w, h, cx-10, 70, cx+10, 70, cx, 77, bone)
 	fillEllipsePixels(pixels, w, h, cx, 75, 3, 3, socket)
@@ -2416,10 +2129,9 @@ func makeSkeletonPixels(w, h int) []color.RGBA {
 		fillEllipsePixels(pixels, w, h, cx, sy-1, 1, 1, bone)
 	}
 
-	// Rib cage — five curved ribs per side, arching from the
-	// spine. Drawn as small ellipses connected by darker shadow.
+	// Rib cage — five ribs per side, as small ellipses.
 	for i, sy := range []int{46, 50, 54, 58, 62} {
-		span := 12 - i // outer ribs reach further than inner
+		span := 12 - i // outer ribs reach further
 		fillEllipsePixels(pixels, w, h, cx-span/2, sy, span/2+1, 2, boneDark)
 		fillEllipsePixels(pixels, w, h, cx+span/2, sy, span/2+1, 2, boneDark)
 		fillEllipsePixels(pixels, w, h, cx-span/2, sy, span/2, 1, bone)
@@ -2435,9 +2147,7 @@ func makeSkeletonPixels(w, h int) []color.RGBA {
 	fillEllipsePixels(pixels, w, h, cx-14, 42, 3, 3, boneDark)
 	fillEllipsePixels(pixels, w, h, cx+14, 42, 3, 3, boneDark)
 
-	// Arms — humerus + radius/ulna with claw hands. Slightly
-	// outstretched stance.
-	// Left arm.
+	// Arms — humerus + radius/ulna with claw hands. Left arm.
 	drawLinePixels(pixels, w, h, cx-14, 44, cx-22, 64, boneDark, 3)
 	drawLinePixels(pixels, w, h, cx-14, 44, cx-22, 64, bone, 1)
 	fillEllipsePixels(pixels, w, h, cx-22, 64, 2, 2, boneDark) // elbow
@@ -2457,11 +2167,11 @@ func makeSkeletonPixels(w, h int) []color.RGBA {
 	fillTrianglePixels(pixels, w, h, cx+26, 82, cx+34, 76, cx+32, 90, rust)
 	fillTrianglePixels(pixels, w, h, cx+26, 82, cx+32, 80, cx+30, 88, rustDark)
 
-	// Skull — slightly wider than tall, with a recessed jaw.
+	// Skull — wider than tall, recessed jaw.
 	fillEllipsePixels(pixels, w, h, cx, 28, 12, 13, boneDark)
 	fillEllipsePixels(pixels, w, h, cx, 26, 10, 11, bone)
 	fillEllipsePixels(pixels, w, h, cx-1, 22, 7, 5, boneLight)
-	// Eye sockets — two deep hollows with glowing red.
+	// Eye sockets with glowing red.
 	fillEllipsePixels(pixels, w, h, cx-4, 28, 3, 3, socket)
 	fillEllipsePixels(pixels, w, h, cx+4, 28, 3, 3, socket)
 	fillEllipsePixels(pixels, w, h, cx-4, 28, 1, 1, eyeBright)
@@ -2478,8 +2188,7 @@ func makeSkeletonPixels(w, h int) []color.RGBA {
 	// Jaw crack — a single damage line across the lower skull.
 	drawLinePixels(pixels, w, h, cx-6, 35, cx+2, 37, socket, 1)
 
-	// Per-pixel dither — denser than the soft creatures so bone
-	// reads as a brittle, pitted surface.
+	// Per-pixel dither (denser) so bone reads as pitted.
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			i := y*w + x
@@ -2607,10 +2316,7 @@ func drawLinePixels(pixels []color.RGBA, w, h, x0, y0, x1, y1 int, col color.RGB
 	}
 }
 
-// hashByteXY is hashXY masked to a byte, suitable for "% N" style
-// bucketing in pixel-painting loops. Lives next to its callers so the
-// per-byte intent is local; deeper hash callers (world.go's tile-yaw /
-// floor-variant selectors) use hashXY directly with their own masks.
+// hashByteXY is hashXY masked to a byte, for "% N" bucketing in pixel loops.
 func hashByteXY(x, y int) int {
 	return int(hashXY(x, y) & 0xff)
 }

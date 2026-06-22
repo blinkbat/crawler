@@ -6,19 +6,13 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// scrollbar.go is the editor's reusable scrollbar widget — a thin raylib
-// draw + mouse-input glue layer over the pure viewport math in core/scroll.go
-// (which is where the logic lives and gets unit-tested). It drives four bars:
-// the brush palette, the right-hand MAP panel, and the canvas (vertical +
-// horizontal). The same primitive serves all four; each call site just wires
-// its own content/viewport sizes and offset storage.
-//
-// The widget is immediate-mode — geometry is recomputed every frame from the
-// live panel sizes — with ONE bit of cross-frame memory: scrollDrag, so a
-// thumb drag survives the pointer sliding off the thumb.
+// scrollbar.go is the editor's reusable scrollbar widget — raylib draw +
+// mouse glue over the viewport math in core/scroll.go. Drives four bars: brush
+// palette, MAP panel, and canvas (vertical + horizontal). Immediate-mode;
+// scrollDrag is the only cross-frame memory, so a drag survives the pointer
+// sliding off the thumb.
 
-// scrollbarID identifies each bar so the single drag-capture slot on State can
-// remember WHICH bar the mouse grabbed (only one can be dragged at a time).
+// scrollbarID identifies each bar; only one can be dragged at a time.
 type scrollbarID int
 
 const (
@@ -29,42 +23,27 @@ const (
 	scrollCanvasH
 )
 
-// scrollbarIDs is the iteration order for update + draw. Palette / metadata
-// first (they sit under the canvas bars only at the panel seams, never
-// overlapping), then the two canvas bars.
+// scrollbarIDs is the iteration order for update + draw.
 var scrollbarIDs = [...]scrollbarID{scrollPalette, scrollMetadata, scrollCanvasV, scrollCanvasH}
 
 const (
-	// scrollbarThickness is the gutter width (vertical bar) / height
-	// (horizontal bar) in px.
-	scrollbarThickness = float32(11)
-	// scrollbarMinThumb floors the thumb length so it stays grabbable even
-	// when the content dwarfs the viewport.
-	scrollbarMinThumb = float32(26)
-	// scrollbarInset is the gap between the thumb and the gutter edge so the
-	// thumb reads as a raised pill rather than filling the gutter.
-	scrollbarInset = float32(2)
-	// scrollPageFraction is how far a click on the empty track pages the view
-	// (fraction of a viewport), matching the common "click above/below the
-	// thumb to jump ~a page" behavior.
-	scrollPageFraction = float32(0.9)
+	scrollbarThickness = float32(11)  // gutter width (V) / height (H) in px
+	scrollbarMinThumb  = float32(26)  // floor on thumb length so it stays grabbable
+	scrollbarInset     = float32(2)   // gap between thumb and gutter edge
+	scrollPageFraction = float32(0.9) // viewport fraction an empty-track click pages
 )
 
-// scrollDragState is the cross-frame memory for an in-flight thumb drag.
-// id == scrollNone means no drag is active. grab is the pointer's offset from
-// the thumb's leading edge captured at mouse-down, so the thumb tracks the
-// cursor without snapping its origin under the pointer.
+// scrollDragState is cross-frame memory for an in-flight thumb drag. grab is
+// the pointer's offset from the thumb's leading edge at mouse-down, so the
+// thumb tracks the cursor without snapping its origin under the pointer.
 type scrollDragState struct {
 	id   scrollbarID
 	grab float32
 }
 
-// scrollbarGeom returns the gutter rect, axis, content length, and viewport
-// length for scrollbar id under the current layout. ok=false when that bar is
-// not applicable this frame (content fits, or the canvas has no cells). Both
-// the update and the draw pass call this, so the geometry can't drift between
-// hit-testing and rendering — the same single-source discipline the modal
-// button helpers use.
+// scrollbarGeom returns the gutter rect, axis, content + viewport lengths for
+// bar id. ok=false when the bar doesn't apply this frame (content fits / no
+// cells). Single source for both hit-test and draw.
 func (s *State) scrollbarGeom(id scrollbarID) (gutter rl.Rectangle, vertical bool, contentLen, viewLen float32, ok bool) {
 	switch id {
 	case scrollPalette:
@@ -97,8 +76,8 @@ func (s *State) scrollbarGeom(id scrollbarID) (gutter rl.Rectangle, vertical boo
 		}
 		gutter = rl.NewRectangle(s.rect.grid.X+s.rect.grid.Width-scrollbarThickness,
 			s.rect.grid.Y, scrollbarThickness, trackLen)
-		// viewLen is the FULL viewport (not the shrunk track) so the pannable
-		// range is exact; the slightly-shorter track only affects thumb pixels.
+		// viewLen is the FULL viewport, not the shrunk track, so the pannable
+		// range is exact; the shorter track only affects thumb pixels.
 		return gutter, true, s.rect.gridH, s.rect.grid.Height, true
 
 	case scrollCanvasH:
@@ -116,9 +95,7 @@ func (s *State) scrollbarGeom(id scrollbarID) (gutter rl.Rectangle, vertical boo
 	return
 }
 
-// scrollbarOffset reads the current scroll offset for a bar. The canvas bars
-// derive theirs from the centered-origin pan; the panels read their stored
-// scroll field.
+// scrollbarOffset reads a bar's scroll offset (canvas bars derive from pan).
 func (s *State) scrollbarOffset(id scrollbarID) float32 {
 	switch id {
 	case scrollPalette:
@@ -133,8 +110,7 @@ func (s *State) scrollbarOffset(id scrollbarID) float32 {
 	return 0
 }
 
-// setScrollbarOffset writes a bar's offset back to its storage (panels) or
-// converts it to a pan (canvas).
+// setScrollbarOffset writes a bar's offset back (panels) or as a pan (canvas).
 func (s *State) setScrollbarOffset(id scrollbarID, v float32) {
 	switch id {
 	case scrollPalette:
@@ -148,10 +124,8 @@ func (s *State) setScrollbarOffset(id scrollbarID, v float32) {
 	}
 }
 
-// canvasOffset converts the centered-origin pan into a scroll offset ("how
-// many px of the map are scrolled off the top/left edge"). Inverse of
-// setCanvasOffset. Derivation: gridX = grid.X + (grid.W-gridW)/2 + panX, and
-// offset = grid.X - gridX, which collapses to the expression below.
+// canvasOffset converts the centered-origin pan into a scroll offset (px of
+// the map scrolled off the top/left edge). Inverse of setCanvasOffset.
 func (s *State) canvasOffset(vertical bool) float32 {
 	if vertical {
 		return (s.rect.gridH-s.rect.grid.Height)/2 - s.panY
@@ -159,9 +133,8 @@ func (s *State) canvasOffset(vertical bool) float32 {
 	return (s.rect.gridW-s.rect.grid.Width)/2 - s.panX
 }
 
-// setCanvasOffset maps a scroll offset back onto the pan. The layout()
-// pan-clamp keeps the result honest; a scrollbar's [0,max] range maps inside
-// that clamp, so it never fights the clamp.
+// setCanvasOffset maps a scroll offset back onto the pan. The layout() pan-clamp
+// keeps it honest; a bar's [0,max] range maps inside that clamp.
 func (s *State) setCanvasOffset(vertical bool, off float32) {
 	if vertical {
 		s.panY = (s.rect.gridH-s.rect.grid.Height)/2 - off
@@ -170,17 +143,15 @@ func (s *State) setCanvasOffset(vertical bool, off float32) {
 	}
 }
 
-// updateScrollbars runs every applicable bar's mouse interaction and returns
-// true if any of them grabbed the mouse this frame (thumb drag, ongoing drag,
-// or a track page-click) so the caller can suppress canvas painting / panning.
+// updateScrollbars runs every applicable bar's mouse interaction; returns true
+// if any grabbed the mouse this frame so the caller suppresses canvas paint/pan.
 func (s *State) updateScrollbars(mp rl.Vector2) bool {
 	consumed := false
 	overGutter := false
 	for _, id := range scrollbarIDs {
 		gutter, vertical, contentLen, viewLen, ok := s.scrollbarGeom(id)
 		if !ok {
-			// Drop a stale drag if this bar vanished mid-drag (e.g. a resize
-			// or zoom that made the content fit again).
+			// Drop a stale drag if this bar vanished mid-drag (resize/zoom).
 			if s.scrollDrag.id == id {
 				s.scrollDrag.id = scrollNone
 			}
@@ -193,20 +164,17 @@ func (s *State) updateScrollbars(mp rl.Vector2) bool {
 		s.setScrollbarOffset(id, nv)
 		consumed = consumed || c
 	}
-	// A right- or middle-click that lands on a gutter must NOT fall through to
-	// the tile erase / context-menu / pan-start handlers behind the bar. (Left
-	// is already handled interactively above — thumb grab or track page.) We
-	// swallow only the press, not a held button, so a left paint-drag that
-	// merely sweeps across a gutter isn't interrupted.
+	// A right/middle-click on a gutter must NOT fall through to the erase /
+	// context-menu / pan-start handlers behind the bar. Swallow only the press,
+	// not a held button, so a left paint-drag sweeping across isn't interrupted.
 	if overGutter && (rl.IsMouseButtonPressed(rl.MouseRightButton) || rl.IsMouseButtonPressed(rl.MouseMiddleButton)) {
 		consumed = true
 	}
 	return consumed
 }
 
-// updateScrollbar handles one bar's mouse input and returns the updated offset
-// plus whether it consumed the mouse. Pure geometry comes from core/scroll.go;
-// this layer is just the raylib mouse plumbing + the drag-capture bookkeeping.
+// updateScrollbar handles one bar's mouse input, returning the updated offset
+// and whether it consumed the mouse. Geometry math lives in core/scroll.go.
 func (s *State) updateScrollbar(id scrollbarID, gutter rl.Rectangle, vertical bool, contentLen, viewLen, offset float32, mp rl.Vector2) (float32, bool) {
 	maxOff := core.ScrollMaxOffset(viewLen, contentLen)
 	if maxOff <= 0 {
@@ -227,8 +195,7 @@ func (s *State) updateScrollbar(id scrollbarID, gutter rl.Rectangle, vertical bo
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) && pointIn(mp, gutter) {
 		thumbStart := gutterStart + core.ScrollThumbPos(trackLen, viewLen, contentLen, scrollbarMinThumb, offset)
 		if mpAxis >= thumbStart && mpAxis <= thumbStart+ext {
-			// Grab the thumb; remember where inside it we grabbed so it
-			// doesn't snap its leading edge under the cursor.
+			// Grab the thumb, remembering the grab offset inside it.
 			s.scrollDrag = scrollDragState{id: id, grab: mpAxis - thumbStart}
 		} else {
 			// Empty-track click: page toward the click.
@@ -254,8 +221,7 @@ func (s *State) updateScrollbar(id scrollbarID, gutter rl.Rectangle, vertical bo
 	return offset, consumed
 }
 
-// drawScrollbars paints every applicable bar. Called from Draw after the
-// panels + grid so the bars sit on top of the content they scroll.
+// drawScrollbars paints every applicable bar, after panels + grid.
 func drawScrollbars(s *State) {
 	for _, id := range scrollbarIDs {
 		gutter, vertical, contentLen, viewLen, ok := s.scrollbarGeom(id)
@@ -266,9 +232,8 @@ func drawScrollbars(s *State) {
 	}
 }
 
-// drawScrollbar renders one bar: a recessed gutter and a rounded thumb whose
-// length and position come from the shared core math, tinted by drag / hover
-// state.
+// drawScrollbar renders one bar: a recessed gutter + a thumb (length/pos from
+// core math), tinted by drag/hover state.
 func drawScrollbar(s *State, id scrollbarID, gutter rl.Rectangle, vertical bool, contentLen, viewLen, offset float32) {
 	trackLen, gutterStart := gutter.Height, gutter.Y
 	if !vertical {
