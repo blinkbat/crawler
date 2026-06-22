@@ -8,11 +8,8 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// ctxItemKind enumerates the actions the right-click context menu can
-// fire. Each kind is a single discrete action the dispatcher in
-// runContextItem applies against (s.contextMenu.tileX, tileZ); kinds
-// added here also need a row in runContextItem's switch so the menu
-// stays in lockstep with the actions it can perform.
+// ctxItemKind enumerates the right-click menu's actions, dispatched by
+// runContextItem against (tileX, tileZ). A new kind needs a runContextItem case.
 type ctxItemKind int
 
 const (
@@ -23,46 +20,25 @@ const (
 	ctxItemDeleteChest
 	ctxItemEditDoor
 	ctxItemDeleteDoor
-	// ctxItemDeleteCrystal removes the crystal at the right-clicked tile.
-	// There's no edit counterpart — crystals carry no per-instance data.
-	ctxItemDeleteCrystal
+	ctxItemDeleteCrystal // no edit counterpart — crystals carry no per-instance data
 	ctxItemMoveStartHere
-	// ctxItemStartFacing sets the PlayerStart instance's facing (stored as
-	// AreaDefinition.StartFacing). This is the fallback facing for initial
-	// spawn — per-door Facing on each DoorSpawn overrides it when the player
-	// arrives via a door. Surfaced only in the right-click menu on the start
-	// tile; the sidebar no longer exposes it since "where the player faces on
-	// spawn" is an instance attribute, not an area-wide setting. The specific
-	// facing (core.North/East/South/West) rides in ctxItem.facing — one kind,
-	// four rows — mirroring how doorEdit carries its facing as a payload
-	// rather than enumerating a kind per direction.
+	// ctxItemStartFacing sets StartFacing (the spawn fallback; per-door Facing
+	// overrides it). The direction rides in ctxItem.facing — one kind, four rows.
 	ctxItemStartFacing
-	// ctxItemSetWallFaces opens the per-tile wall-faces modal (base skin +
-	// N/E/S/W overrides). Faces are a per-tile property — the top-down editor
-	// can't paint a vertical face — so this is the sole entry point now that
-	// "Faces" is no longer a paint layer.
-	ctxItemSetWallFaces
-	// ctxItemEraseTile resets the right-clicked cell on the ACTIVE layer (the
-	// same reset the eraser brush runs). Always offered.
-	ctxItemEraseTile
+	ctxItemSetWallFaces // opens the per-tile wall-faces modal (base + N/E/S/W)
+	ctxItemEraseTile    // resets the ACTIVE layer's cell here
 )
 
-// ctxItem is one row in the right-click context menu. Built fresh by
-// contextItemsAt for whatever sits at the right-clicked tile so the
-// menu reads "Edit chest" instead of a generic "Edit" when a chest is
-// the only thing there.
+// ctxItem is one right-click menu row, built fresh by contextItemsAt per tile.
 type ctxItem struct {
 	label string
 	kind  ctxItemKind
-	// facing is the payload for ctxItemStartFacing (core.North/East/South/West);
-	// ignored by every other kind. Lets one facing kind cover all four rows
-	// instead of a kind per direction.
+	// facing is the payload for ctxItemStartFacing; ignored by other kinds.
 	facing int
 }
 
-// contextMenuState is the in-State data for an open right-click menu.
-// Empty (open=false) when no menu is up. Recomputed when the user
-// opens a new menu, dismissed on click-outside / Esc / item-pick.
+// contextMenuState is the in-State data for an open right-click menu (open=false
+// when none). Recomputed on open; dismissed on click-outside / Esc / item-pick.
 type contextMenuState struct {
 	open         bool
 	x, y         float32
@@ -70,16 +46,13 @@ type contextMenuState struct {
 	items        []ctxItem
 }
 
-// isDelete reports whether a row is a destructive delete (drawn red so it can't
-// be mistaken for the Edit row sitting right above it).
+// isDelete reports whether a row is a destructive delete (drawn red).
 func (k ctxItemKind) isDelete() bool {
 	return k == ctxItemDeletePack || k == ctxItemDeleteChest || k == ctxItemDeleteDoor || k == ctxItemDeleteCrystal
 }
 
-// contextItemsAt builds the menu's row list based on what occupies
-// (x,z). Multi-entity tiles (currently impossible — placement rules
-// already prevent overlap) would list all applicable rows; today the
-// dispatch is mutually exclusive (pack OR chest OR door).
+// contextItemsAt builds the menu rows from what occupies (x,z) (pack/chest/door
+// are mutually exclusive in practice).
 func contextItemsAt(s *State, x, z int) []ctxItem {
 	if !s.area.InBounds(x, z) {
 		return nil
@@ -104,22 +77,15 @@ func contextItemsAt(s *State, x, z int) []ctxItem {
 		)
 	}
 	if core.CrystalSpawnIndexAt(s.area.CrystalSpawns, x, z) >= 0 {
-		// Crystals have no edit modal (no per-instance data), so only Delete.
+		// No per-instance data, so Delete only.
 		items = append(items,
 			ctxItem{label: "Delete crystal", kind: ctxItemDeleteCrystal},
 		)
 	}
-	// Player-start tile: surface the facing controls here (the sidebar
-	// no longer carries them — facing is an instance attribute of this
-	// PlayerStart). Otherwise, offer "Move start here" so the author
-	// can relocate the start instance with one right-click. The actual
-	// movement rules (no walls / props / deep water) are enforced by
-	// runContextItem; surfacing the row regardless lets the flash
-	// error explain why it didn't take.
+	// Player-start tile: facing controls; else "Move start here" (move legality
+	// enforced by runContextItem, which flashes why a blocked move was refused).
 	if s.area.StartTileX == x && s.area.StartTileZ == z {
-		// One row per facing, driven by core.FacingCount (mirrors the door-edit
-		// modal's facing loop) so a future facing scales the menu instead of
-		// needing a hand-added row + enum kind.
+		// One row per facing, driven by core.FacingCount.
 		for dir := 0; dir < int(core.FacingCount); dir++ {
 			marker := "  "
 			if s.area.StartFacing == dir {
@@ -136,40 +102,26 @@ func contextItemsAt(s *State, x, z int) []ctxItem {
 			ctxItem{label: "Move start here", kind: ctxItemMoveStartHere},
 		)
 	}
-	// Cliff-face skin: when the tile rises above a neighbour it shows a vertical
-	// face, so offer the wall-faces modal (base skin + per-direction overrides).
-	// Faces are a per-tile property — the top-down editor can't paint a vertical
-	// face — so this modal is the sole way to set them. Gated by the same core
-	// rule the renderer draws faces from, so a flat tile with no exposed face
-	// doesn't offer a no-op row.
+	// Wall-faces modal, only when the tile exposes a vertical face (same core
+	// rule the renderer uses), so a flat tile doesn't offer a no-op row.
 	if core.TileExposesFace(&s.area, x, z) {
 		items = append(items, ctxItem{label: "Set wall faces…", kind: ctxItemSetWallFaces})
 	}
-	// Erase the active layer's cell here — always available (the eraser is also
-	// a selectable brush).
 	items = append(items, ctxItem{label: "Erase " + layerName(s.layer) + " here", kind: ctxItemEraseTile})
 	return items
 }
 
-// openContextMenu pops the right-click menu at (clickX, clickY) over
-// the tile (tileX, tileZ). Items are rebuilt from the tile's contents
-// at open time; if the underlying entity is deleted before the menu is
-// dismissed, the dispatcher gracefully no-ops on the now-missing
-// target.
+// openContextMenu pops the right-click menu at (clickX, clickY) over (tileX,
+// tileZ). Items are rebuilt at open time; the dispatcher no-ops on a deleted target.
 func openContextMenu(s *State, clickX, clickY float32, tileX, tileZ int) {
 	items := contextItemsAt(s, tileX, tileZ)
 	if len(items) == 0 {
-		// Only reachable for an out-of-bounds tile now (contextItemsAt always
-		// offers at least Erase/Move-start for an in-bounds cell) — close
-		// silently rather than pop an empty menu.
+		// Only reachable for an out-of-bounds tile (in-bounds always offers Erase).
 		s.contextMenu = contextMenuState{}
 		return
 	}
-	// Cancel any in-flight left-button drag so a right-click that opens
-	// this menu mid-drag doesn't leave stale drag state. updateContextMenu
-	// absorbs all subsequent input until the menu closes — finishDrag would
-	// never get a chance to fire on its own, so reset ALL three drag-index
-	// slots (pack/chest/door), not just the pack one.
+	// Cancel any in-flight drag (updateContextMenu absorbs input until close, so
+	// finishDrag never fires). Reset all three drag-index slots, not just pack.
 	s.drag = dragNone
 	s.dragPackIdx = -1
 	s.dragChestIdx = -1
@@ -189,19 +141,15 @@ func closeContextMenu(s *State) {
 	s.contextMenu = contextMenuState{}
 }
 
-// Context-menu geometry. The right-click menu is the dropdown selector's
-// cousin (a vertical list of selectable labels, width-measured + screen-clamped)
-// and shares dropdownPad; its rows run a touch taller and wider than the
-// dropdown's (dropdownRowH 24 / dropdownMinWidth 170) because a right-click menu
-// wants bigger click targets — named here rather than left as bare literals.
+// Context-menu geometry. Cousin of the dropdown selector (shares dropdownPad);
+// rows run taller/wider than the dropdown's for bigger click targets.
 const (
 	contextMenuRowH     = float32(28)
 	contextMenuMinWidth = float32(180)
 )
 
-// contextMenuLayout returns the per-row rectangles + the full background
-// rectangle of the open menu. Recomputed each frame so a screen resize
-// or item-list edit (kinds rebuilt) reflows naturally.
+// contextMenuLayout returns the open menu's per-row rects + background rect,
+// recomputed each frame so resizes/list edits reflow.
 func contextMenuLayout(s *State) (rl.Rectangle, []rl.Rectangle) {
 	if !s.contextMenu.open {
 		return rl.Rectangle{}, nil
@@ -209,25 +157,12 @@ func contextMenuLayout(s *State) (rl.Rectangle, []rl.Rectangle) {
 	const rowH = contextMenuRowH
 	const padding = dropdownPad // same gutter as the dropdown selector
 	width := contextMenuMinWidth
-	// Measure widest label so a long "Move start here" doesn't get clipped.
-	// MeasureTextEx with the default font would force the renderer to
-	// reach for it; the editor draws with the loaded font handed into
-	// drawContextMenu — we approximate width via a per-char average so
-	// the layout pass doesn't need the font handle here.
-	//
-	// NOTE: this width-measure + the screen-clamp below parallel
-	// computeDropdownLayout (dropdown.go ~395) but DON'T share a helper: the
-	// dropdown sizes on editorFontBody with a 2*dropdownPad+12+markerW pad and
-	// reserves room for per-row markers/hotkeys, while the context menu sizes on
-	// editorFontLabel + buttonLabelPadX with no markers — so a single shared
-	// width helper would change one surface's sizing. A real dedup wants a
-	// neutral measureMenuWidth(labels, fontSize, pad) living in dropdown.go,
-	// which this pass doesn't own (editor file split). Left as-is intentionally.
+	// Approximate label width via per-char average (no font handle here). Doesn't
+	// share computeDropdownLayout's measure: the two surfaces size on different
+	// fonts/pads, so a shared helper would change one's sizing.
 	for i, it := range s.contextMenu.items {
-		// Row 0 gets the tile-coord suffix appended at draw time, so measure THAT
-		// widened string here — otherwise the coord runs past the panel's right
-		// edge (there's no scissor clipping the menu). Must mirror drawContextMenu's
-		// row-0 format exactly.
+		// Row 0 gets the tile-coord suffix at draw time; measure that widened
+		// string (no scissor clips the menu). Must mirror drawContextMenu's row 0.
 		label := it.label
 		if i == 0 {
 			label = fmt.Sprintf("%s  (%s)", label, core.TileCoord(s.contextMenu.tileX, s.contextMenu.tileZ))
@@ -240,8 +175,7 @@ func contextMenuLayout(s *State) (rl.Rectangle, []rl.Rectangle) {
 	height := padding*2 + float32(len(s.contextMenu.items))*rowH
 	x := s.contextMenu.x
 	y := s.contextMenu.y
-	// Clamp the menu within the window so a click near the edge doesn't
-	// push the menu off-screen.
+	// Clamp within the window so an edge click doesn't push it off-screen.
 	sw, sh := render.ScreenSizeF()
 	if x+width > sw {
 		x = sw - width
@@ -276,9 +210,7 @@ func drawContextMenu(s *State, font rl.Font, theme render.Theme) {
 		if hovered {
 			rl.DrawRectangleRec(r, bgRowHover)
 		}
-		// Show the tile coord on the first row so the author can confirm
-		// the menu refers to the cell they intended — useful when the
-		// click lands near a grid edge.
+		// Tile coord on row 0 confirms which cell the menu refers to.
 		label := s.contextMenu.items[i].label
 		if i == 0 {
 			label = fmt.Sprintf("%s  (%s)", label, core.TileCoord(s.contextMenu.tileX, s.contextMenu.tileZ))
@@ -287,8 +219,7 @@ func drawContextMenu(s *State, font rl.Font, theme render.Theme) {
 		if !hovered {
 			col = theme.TextMuted
 		}
-		// Destructive rows read red so "Delete pack" can't be misclicked for the
-		// "Edit pack" row directly above it.
+		// Destructive rows read red.
 		if s.contextMenu.items[i].kind.isDelete() {
 			col = theme.BorderDanger
 		}
@@ -298,10 +229,8 @@ func drawContextMenu(s *State, font rl.Font, theme render.Theme) {
 	}
 }
 
-// updateContextMenu drives the context menu while it's open: click on
-// a row fires it, click outside or Esc dismisses. Returns true when
-// the menu absorbed the frame's input so the normal grid/paint paths
-// in updateMouse can skip themselves.
+// updateContextMenu drives the open menu: row-click fires, outside-click/Esc
+// dismisses. Returns true when it absorbed the frame's input.
 func updateContextMenu(s *State) bool {
 	if !s.contextMenu.open {
 		return false
@@ -320,7 +249,7 @@ func updateContextMenu(s *State) bool {
 				return true
 			}
 		}
-		// Click outside the menu — dismiss without firing anything.
+		// Click outside — dismiss without firing.
 		closeContextMenu(s)
 		return true
 	}
@@ -330,10 +259,7 @@ func updateContextMenu(s *State) bool {
 func runContextItem(s *State, item ctxItem) {
 	kind := item.kind
 	x, z := s.contextMenu.tileX, s.contextMenu.tileZ
-	// The menu was built against an earlier snapshot of the area. If the
-	// map shrank in between (via the sidebar dim −/+ buttons or a numeric
-	// commit), the captured coords may be out of bounds — reject before
-	// touching any layer array.
+	// Map may have shrunk since the menu was built — reject stale coords.
 	if !s.area.InBounds(x, z) {
 		return
 	}
@@ -375,8 +301,7 @@ func runContextItem(s *State, item ctxItem) {
 			return len(s.area.CrystalSpawns) != before
 		})
 	case ctxItemMoveStartHere:
-		// Shared player-start rule set (see ops.startBlockers) so this path
-		// and the entity-brush start tool can't drift on legality or wording.
+		// Shared startBlockers so this and the entity-brush start tool can't drift.
 		if msg := firstBlocker(startBlockers(&s.area, x, z)...); msg != "" {
 			s.flash(msg)
 			return
@@ -388,13 +313,10 @@ func runContextItem(s *State, item ctxItem) {
 	case ctxItemStartFacing:
 		setStartFacing(s, item.facing)
 	case ctxItemSetWallFaces:
-		// Open the per-tile wall-faces modal (base + N/E/S/W). The modal's rows
-		// each open the shared face-skin dropdown against this tile.
 		openWallFacesModal(s, x, z)
 		return
 	case ctxItemEraseTile:
-		// Snapshot-then-commit-if-changed so a no-op erase banks no undo and
-		// doesn't clobber the redo stack (mirrors deleteSpawnAt / keyboardMutate).
+		// Snapshot, commit only if changed — a no-op erase banks no undo.
 		before := core.CloneArea(s.area)
 		wasDirty := s.dirty
 		eraseAt(s, x, z)
@@ -404,25 +326,18 @@ func runContextItem(s *State, item ctxItem) {
 			commitUndoSnapshot(s, before)
 		}
 	default:
-		// Every ctxItemKind needs a case here (see the kind enum's doc).
-		// Fail closed like the layer switches (applyTool / activeGrid)
-		// rather than letting a new kind's menu row silently no-op.
+		// Fail closed so a new kind's menu row can't silently no-op.
 		panic(fmt.Sprintf("editor: runContextItem has no case for ctxItemKind %d", int(kind)))
 	}
 }
 
-// deleteSpawnAt is the shared delete protocol for every entity-spawn kind the
-// context menu removes (pack / chest / door / crystal): snapshot for undo, run
-// the kind-specific remove (passed as a closure that reports whether the slice
-// actually shrank), and on a real removal mark dirty + flash "Deleted <noun> at
-// <tile>". Centralizing it means the undo/dirty/flash bookkeeping can't drift
-// between the kinds — adding a new deletable spawn is one closure, not another
-// copy of this block.
+// deleteSpawnAt is the shared delete protocol for every context-menu spawn kind:
+// snapshot, run the kind-specific remove (closure reports whether the slice
+// shrank), and on a real removal mark dirty + flash. Adding a deletable spawn is
+// one closure, not another copy of this bookkeeping.
 func deleteSpawnAt(s *State, x, z int, noun string, remove func() (changed bool)) {
-	// Snapshot first, commit the undo only if the remove actually shrank the
-	// slice — a no-op delete (the tile's entity vanished between menu-open and
-	// click) shouldn't bank an empty undo or wipe the redo stack. Mirrors
-	// keyboardMutate's capture-then-commit-if-changed protocol.
+	// Commit undo only if remove actually shrank the slice — a no-op delete
+	// shouldn't bank an empty undo or wipe redo.
 	before := core.CloneArea(s.area)
 	if remove() {
 		commitUndoSnapshot(s, before)
@@ -431,9 +346,7 @@ func deleteSpawnAt(s *State, x, z int, noun string, remove func() (changed bool)
 	}
 }
 
-// setStartFacing writes the PlayerStart instance's facing. No-op when
-// the value didn't change so identical clicks don't pollute the undo
-// stack or trip the dirty flag.
+// setStartFacing writes StartFacing. No-op on no change (no undo/dirty churn).
 func setStartFacing(s *State, dir int) {
 	if s.area.StartFacing == dir {
 		return

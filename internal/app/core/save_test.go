@@ -5,10 +5,7 @@ import (
 	"testing"
 )
 
-// TestSaveDataJSONRoundTrip guards the serialization shape of a save: the
-// integer-keyed SkillTiers map and the fixed-size Equipped array are the
-// JSON foot-guns, so the round-trip asserts they survive intact alongside
-// the scalar progression fields.
+// TestSaveDataJSONRoundTrip guards the JSON foot-guns: the integer-keyed SkillTiers map and fixed-size Equipped array.
 func TestSaveDataJSONRoundTrip(t *testing.T) {
 	party := NewParty()
 	if len(party) == 0 {
@@ -19,7 +16,7 @@ func TestSaveDataJSONRoundTrip(t *testing.T) {
 	party[0].SkillPoints = 2
 	party[0].SkillTiers = map[SkillID]int{SkillSwipe: 2, SkillFirebolt: 1}
 	party[0].Equipped[EquipRightHand] = ItemIronSword
-	party[0].PoisonTurns = 2 // poison persists into exploration, so it can be saved
+	party[0].PoisonTurns = 2 // poison persists into exploration
 
 	orig := SaveData{
 		Version:      SaveVersion,
@@ -70,11 +67,8 @@ func TestSaveDataJSONRoundTrip(t *testing.T) {
 	}
 }
 
-// TestSanitizeLoadedParty_ClearsTransientCombatState guards the load-side
-// trust boundary: a hand-edited / older save carrying combat-only statuses
-// must not load a member still asleep, stunned, or ingested into exploration.
-// Poison is the deliberate exception — it persists out of battle, so it must
-// survive the sanitize.
+// TestSanitizeLoadedParty_ClearsTransientCombatState: combat-only statuses must
+// not load into exploration; Poison is the exception (persists out of battle).
 func TestSanitizeLoadedParty_ClearsTransientCombatState(t *testing.T) {
 	party := NewParty()
 	m := &party[0]
@@ -85,13 +79,12 @@ func TestSanitizeLoadedParty_ClearsTransientCombatState(t *testing.T) {
 	m.WebbedTurns = 4
 	m.ConfusedTurns = 5
 	m.Defending = true
-	m.PoisonTurns = 3 // must SURVIVE — poison carries into exploration
+	m.PoisonTurns = 3
 
 	sanitizeLoadedParty(party)
 
 	g := &party[0]
-	// IngestedBy resets to the -1 "no captor" sentinel (ReleaseAllIngested),
-	// not 0 — the load-bearing flag is Ingested itself.
+	// IngestedBy resets to the -1 sentinel, not 0; the load-bearing flag is Ingested.
 	if g.Ingested || g.SleepTurns != 0 || g.StunTurns != 0 ||
 		g.WebbedTurns != 0 || g.ConfusedTurns != 0 || g.Defending {
 		t.Errorf("transient combat state not cleared on load: %+v", g)
@@ -101,11 +94,8 @@ func TestSanitizeLoadedParty_ClearsTransientCombatState(t *testing.T) {
 	}
 }
 
-// TestSanitizeLoadedParty_TwoHandedExclusion guards the load-side mirror of
-// EquipFromInventory's two-hander rule: a hand-edited save carrying a
-// two-handed weapon beside an off-hand item (or the same two-hander in both
-// hands) would double-count bonuses through walkEquipped, so the opposite
-// hand must come back empty.
+// TestSanitizeLoadedParty_TwoHandedExclusion: the load-side mirror of the
+// two-hander rule — a two-hander empties the opposite hand, else bonuses double-count.
 func TestSanitizeLoadedParty_TwoHandedExclusion(t *testing.T) {
 	// Two-hander + off-hand shield: the shield is evicted.
 	party := NewParty()
@@ -125,8 +115,7 @@ func TestSanitizeLoadedParty_TwoHandedExclusion(t *testing.T) {
 		t.Errorf("duplicated 2H survived load: %v", party[0].Equipped)
 	}
 
-	// Two-hander in the LEFT hand beside a right-hand weapon: the
-	// two-hander wins (it's the item whose contract is violated).
+	// Two-hander in the LEFT hand beside a right-hand weapon: the two-hander wins.
 	party = NewParty()
 	party[0].Equipped[EquipRightHand] = ItemIronSword
 	party[0].Equipped[EquipLeftHand] = ItemWarHammer
@@ -145,9 +134,7 @@ func TestSanitizeLoadedParty_TwoHandedExclusion(t *testing.T) {
 	}
 }
 
-// TestPruneQuests_ClampsUnknownStatus guards the journal's load hygiene: a
-// hand-edited Status outside {Active, Complete} would be a "neither" entry
-// both header tallies skip, so it clamps to Active.
+// TestPruneQuests_ClampsUnknownStatus: a Status outside {Active, Complete} clamps to Active.
 func TestPruneQuests_ClampsUnknownStatus(t *testing.T) {
 	out := pruneQuests([]Quest{
 		{ID: "a", Status: QuestStatus(99)},
@@ -164,10 +151,8 @@ func TestPruneQuests_ClampsUnknownStatus(t *testing.T) {
 	}
 }
 
-// TestOverlaySavedParty_Reconciles guards the PartyMemberCount-length,
-// class-ordered seating contract against a malformed save: a normal save maps
-// 1:1 (progression preserved), a short save keeps fresh defaults for missing
-// slots, and an out-of-range Class is dropped rather than leaking in.
+// TestOverlaySavedParty_Reconciles guards the seating contract: normal save maps
+// 1:1, short save keeps fresh defaults, out-of-range Class is dropped.
 func TestOverlaySavedParty_Reconciles(t *testing.T) {
 	// Normal save: 1:1, progression preserved, length unchanged.
 	base := NewParty()
@@ -182,8 +167,7 @@ func TestOverlaySavedParty_Reconciles(t *testing.T) {
 		t.Errorf("normal overlay lost progression: %+v", base[0])
 	}
 
-	// Short save (one member): canonical length preserved; the present member
-	// is matched by class, missing slots keep fresh defaults.
+	// Short save (one member): length preserved, member matched by class.
 	base = NewParty()
 	overlaySavedParty(base, []PartyMember{{Class: ClassThief, Level: 9}})
 	if len(base) != PartyMemberCount {
@@ -212,11 +196,7 @@ func TestOverlaySavedParty_Reconciles(t *testing.T) {
 	}
 }
 
-// TestSaveVersionSupported exercises LoadSave's actual version gate (the
-// extracted saveVersionSupported predicate) without touching the on-disk
-// save. A future version is refused (can't parse it), and a 0/missing version
-// is refused too — every real save stamps Version >= 1 via NewSaveData, so a 0
-// is a corrupt or partially-written blob, not legitimate v0 content.
+// TestSaveVersionSupported exercises the version gate: future and 0/missing are refused.
 func TestSaveVersionSupported(t *testing.T) {
 	cases := []struct {
 		version int

@@ -6,32 +6,30 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Retro post-process filters (Debug ▸ Retro Filters). The 3D pass renders into an
-// off-screen RenderTexture, then blits through ONE combined shader; each filter
-// is a 0..1 intensity uniform in a fixed pipeline order, so any subset layers in
-// one pass. HUD/popups/menus draw after and stay crisp. All lazy.
+// Retro post-process filters: 3D pass → off-screen RT → ONE combined shader; each
+// filter is a 0..1 intensity uniform in fixed pipeline order, so any subset layers
+// in one pass. HUD draws after, crisp. All lazy.
 
 var (
 	retroRT      previewRT // capture texture; shares the foe-preview RT lifecycle
 	retroShader  rl.Shader
 	retroLoaded  bool
-	retroFailed  bool // shader failed to compile — disable the pass for the session
+	retroFailed  bool // compile failed — pass disabled for the session
 	retroLocRes  int32
 	retroLocTime int32
 	retroLocs    [core.RetroFilterCount]int32
 )
 
-// Reused uniform-upload scratch so EndRetroCapture doesn't allocate per
-// SetShaderValue. SetShaderValue copies through to GL synchronously, so reusing
-// one buffer across the per-filter loop is safe. Render is single-threaded.
+// Reused uniform-upload scratch (SetShaderValue copies to GL synchronously, so one
+// buffer across the loop is safe). Render is single-threaded.
 var (
 	retroResBuf  [2]float32
 	retroTimeBuf [1]float32
 	retroValBuf  [1]float32
 )
 
-// retroUniformNames maps each filter kind to its shader uniform, length-locked to
-// the enum (a new filter without a uniform compile-errors here / panics below).
+// retroUniformNames maps each filter kind to its shader uniform; length-locked to
+// the enum (missing entry panics in init).
 var retroUniformNames = [core.RetroFilterCount]string{
 	core.RetroFilterPixelate:  "fPixelate",
 	core.RetroFilterChroma:    "fChroma",
@@ -50,9 +48,8 @@ func init() {
 	}
 }
 
-// retroFilterFragmentShader is the combined filter pipeline. Order is deliberate:
-// sampling effects first (pixelate UV, chroma fetch), then palette work
-// (posterize → dither → Game Boy → Palette), then scanlines last on top.
+// retroFilterFragmentShader is the combined pipeline. Order matters: sampling
+// (pixelate UV, chroma) → palette (posterize→dither→GameBoy→Palette) → scanlines.
 const retroFilterFragmentShader = `
 #version 330
 in vec2 fragTexCoord;
@@ -173,8 +170,8 @@ void main()
 }
 `
 
-// ensureRetroShader lazily compiles the filter shader and caches its uniform
-// locations; a failed compile disables the pass for the session (logged once).
+// ensureRetroShader lazily compiles the shader + caches uniform locations; a
+// failed compile disables the pass for the session.
 func ensureRetroShader() bool {
 	if retroLoaded {
 		return true
@@ -191,8 +188,7 @@ func ensureRetroShader() bool {
 	retroShader = sh
 	retroLocRes = rl.GetShaderLocation(sh, "resolution")
 	retroLocTime = rl.GetShaderLocation(sh, "time")
-	// Log the resolved locations so a dropped/unwired uniform (-1) is observable
-	// without a false-positive panic (GL also reports -1 for an unused uniform).
+	// Log locations; GL reports -1 for unused uniforms, so don't panic on -1.
 	LogRenderInit("retro filter shader %d locs: resolution=%d time=%d", sh.ID, retroLocRes, retroLocTime)
 	for k := range retroLocs {
 		retroLocs[k] = rl.GetShaderLocation(sh, retroUniformNames[k])
@@ -211,9 +207,8 @@ func ensureRetroRT(w, h int32) bool {
 }
 
 // BeginRetroCapture redirects drawing into the capture texture when a filter is
-// active. true when capturing — the caller MUST then call EndRetroCapture after
-// its 3D pass. false (renders straight to backbuffer) when filters are off or the
-// shader/RT can't be built.
+// active. true ⇒ caller MUST call EndRetroCapture after its 3D pass; false ⇒
+// renders straight to backbuffer (filters off or shader/RT unavailable).
 func BeginRetroCapture(g *core.GameState) bool {
 	if g == nil || !core.AnyRetroFilterActive(&g.RetroFilters) {
 		return false
@@ -229,14 +224,12 @@ func BeginRetroCapture(g *core.GameState) bool {
 	return true
 }
 
-// EndRetroCapture stops capturing and blits the scene to the backbuffer through
-// the filter shader. Pair with a true BeginRetroCapture. skyOnBackbuffer means
-// the caller already drew the crisp skybox there and the capture (cleared
-// transparent) alpha-composites over it; otherwise the backbuffer is wiped first.
+// EndRetroCapture blits the scene to the backbuffer through the filter shader.
+// Pair with a true BeginRetroCapture. skyOnBackbuffer ⇒ caller already drew the
+// crisp sky and the capture alpha-composites over it; else the backbuffer is wiped.
 func EndRetroCapture(g *core.GameState, skyOnBackbuffer bool) {
+	// Contract: BeginRetroCapture returns false on nil g, so this shouldn't happen.
 	if g == nil {
-		// Defensive: BeginRetroCapture returns false on nil g, so reaching here
-		// with nil means the contract was ignored — bail before the deref.
 		return
 	}
 	rl.EndTextureMode()
@@ -252,28 +245,24 @@ func EndRetroCapture(g *core.GameState, skyOnBackbuffer bool) {
 		rl.SetShaderValue(retroShader, retroLocs[k], retroValBuf[:], rl.ShaderUniformFloat)
 	}
 	rl.BeginShaderMode(retroShader)
-	// blit flips the bottom-up texture upright; the shader applies the filter as it composites.
+	// blit flips upright; the shader filters as it composites.
 	retroRT.blit(rl.NewRectangle(0, 0, 0, 0))
 	rl.EndShaderMode()
 }
 
-// DrawCrispSpritePass draws the billboards (and VFX) UNFILTERED over the already-
-// filtered environment (the "Filter Sprites: Off" path). It re-opens the capture
-// RT (whose depth still holds the environment), wipes only COLOR to transparent
-// while keeping depth, draws the sprites (depth-testing for correct wall
-// occlusion), then blits just the sprite layer crisp on top.
-//
-// Caller contract: invoke ONLY right after a true EndRetroCapture in the
-// sprite-exempt arm, with the SAME camera. No-op if the RT was never built.
+// DrawCrispSpritePass draws billboards+VFX UNFILTERED over the already-filtered
+// environment ("Filter Sprites: Off"): re-opens the capture RT (depth still holds
+// the environment), wipes COLOR but keeps depth, draws sprites (depth-tested for
+// wall occlusion), blits the sprite layer crisp on top.
+// Contract: call ONLY right after a true EndRetroCapture, SAME camera. No-op if no RT.
 func DrawCrispSpritePass(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if !retroRT.init {
 		return
 	}
 	rl.BeginTextureMode(retroRT.rt)
-	// Wipe COLOR to transparent but keep DEPTH: disable blending (so the blank
-	// writes through, not a no-op alpha-composite) and the depth mask (so the
-	// environment depth survives). Flush the batch while blending is still off, or
-	// the clear quad replays later with blending back on.
+	// Wipe COLOR, keep DEPTH: blending off (so the blank writes through) + depth
+	// mask off (environment depth survives). Flush the batch while blending is off,
+	// else the clear quad replays later with blending back on.
 	rl.DisableColorBlend()
 	rl.DisableDepthMask()
 	rl.DisableDepthTest()
@@ -282,21 +271,19 @@ func DrawCrispSpritePass(camera rl.Camera3D, g *core.GameState, assets Resources
 	rl.EnableColorBlend()
 	rl.EnableDepthMask()
 	rl.EnableDepthTest()
-	// Sprites render against the retained depth — those behind walls fail the
-	// test, so the crisp blit carries only visible sprites.
+	// Sprites depth-test against retained depth, so only visible ones blit.
 	rl.BeginMode3D(camera)
 	DrawEnemies(camera, g, assets)
 	DrawPartySprites(camera, g, assets)
 	TickAndDrawVFX(camera, g, assets)
 	rl.EndMode3D()
 	rl.EndTextureMode()
-	// Crisp blit (no filter shader): the transparent background lets sprites
-	// alpha-composite over the filtered environment. blit flips upright.
+	// Crisp blit (no shader): transparent bg alpha-composites sprites over the
+	// filtered environment. blit flips upright.
 	retroRT.blit(rl.NewRectangle(0, 0, 0, 0))
 }
 
-// UnloadRetroFilter frees the capture texture and shader (Resources.Unload at
-// shutdown). Idempotent.
+// UnloadRetroFilter frees the capture texture + shader. Idempotent.
 func UnloadRetroFilter() {
 	retroRT.close()
 	if retroLoaded {

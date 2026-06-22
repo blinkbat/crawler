@@ -7,9 +7,7 @@ import (
 	"crawler/internal/app/core"
 )
 
-// makeSoftShadowPixels builds the radial-gradient ground-shadow sprite: a dark
-// cool-grey disc whose alpha falls (1-d)^1.6 from centre to transparent edge.
-// Max alpha is modest so it grounds the prop without reading as a black hole.
+// makeSoftShadowPixels builds the radial ground-shadow sprite: a dark disc whose alpha falls (1-d)^1.6 to a transparent edge.
 func makeSoftShadowPixels(size int) []color.RGBA {
 	pixels := make([]color.RGBA, size*size)
 	center := float64(size-1) / 2
@@ -90,9 +88,7 @@ func makeRockWallPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeRockIvyPixels paints the rock wall, then grows ivy as discrete leaves
-// along wandering vine cords, each leaf shaded upper-left lit to lower-right
-// dark. `heavy` adds more/larger leaves. Opaque cube-face skin.
+// makeRockIvyPixels paints the rock wall, then grows ivy leaves along wandering vine cords. `heavy` adds more/larger leaves.
 func makeRockIvyPixels(w, h int, heavy bool) []color.RGBA {
 	pixels := makeRockWallPixels(w, h)
 	// Layered ivy palette — several greens plus a woody vine.
@@ -170,8 +166,7 @@ func makeRockIvyPixels(w, h int, heavy bool) []color.RGBA {
 	return pixels
 }
 
-// makeRockCrackedPixels paints the rock wall with hairline cracks + a faint
-// caught-light lip — a couple of wandering near-vertical cracks with branches.
+// makeRockCrackedPixels paints the rock wall with a couple of wandering near-vertical cracks + a faint caught-light lip.
 func makeRockCrackedPixels(w, h int) []color.RGBA {
 	pixels := makeRockWallPixels(w, h)
 	crack := color.RGBA{R: 104, G: 98, B: 88, A: 255} // mid-tone
@@ -246,9 +241,7 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 	mortarLight := color.RGBA{R: 118, G: 110, B: 96, A: 255}
 	moss := color.RGBA{R: 148, G: 184, B: 132, A: 255}
 
-	// One key light, high-left. Every brick bevels the same way: lit top/left,
-	// shadowed bottom/right, cast shadow into the seam below — reads as courses
-	// of stone proud of their mortar, not a flat grid.
+	// One key light, high-left: every brick lit top/left, shadowed bottom/right, casting into the seam below.
 	lip := color.RGBA{R: 232, G: 220, B: 196, A: 255}
 	pitDark := color.RGBA{R: 30, G: 28, B: 24, A: 255}
 	for y := 0; y < h; y++ {
@@ -326,8 +319,7 @@ func makeStoneBrickPixels(w, h int) []color.RGBA {
 
 func makeGrassPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
-	// Pastel meadow — calm mint wash, not a busy noise field. Blooms are very
-	// sparse (~1 in 520); the flower props carry the floral detail.
+	// Pastel meadow — calm mint wash; blooms are very sparse (the flower props carry the floral detail).
 	base := color.RGBA{R: 132, G: 196, B: 102, A: 255}
 	light := color.RGBA{R: 186, G: 224, B: 134, A: 255}
 	dark := color.RGBA{R: 98, G: 162, B: 92, A: 255}
@@ -353,8 +345,7 @@ func makeGrassPixels(w, h int) []color.RGBA {
 			if m > 0.50 {
 				c = core.MixColor(c, dirt, (m-0.50)*0.65)
 			}
-			// Sparse paired blade strokes — dark rooted dash + lit dash on the
-			// sun side, on a 4-px grain so each pair reads as one blade.
+			// Sparse paired blade strokes — dark rooted dash + lit dash on the sun side, on a 4-px grain.
 			if hashByteXY(x*3, y/4)%140 < 2 {
 				c = core.MixColor(c, dark, 0.55)
 			} else if x > 0 && hashByteXY((x-1)*3, y/4)%140 < 2 {
@@ -444,8 +435,7 @@ func makeStoneFloorPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeDirtPixels paints a warm earth texture for dirt patches: brushstroke
-// noise plus scattered pebbles and occasional grass sprouts.
+// makeDirtPixels paints warm earth: brushstroke noise plus scattered pebbles and occasional grass sprouts.
 func makeDirtPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	// Pastel peach-tan earth — a sun-warmed path beside the pastel grass.
@@ -479,9 +469,7 @@ func makeDirtPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeDarkGrassPixels paints a forest-mint grass for shaded patches. Same
-// brushwork as makeGrassPixels; the difference is HUE, not value (the day cycle
-// handles darkness).
+// makeDarkGrassPixels paints forest-mint grass for shaded patches — like makeGrassPixels but differing in HUE, not value.
 func makeDarkGrassPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	base := color.RGBA{R: 96, G: 162, B: 116, A: 255}
@@ -519,8 +507,7 @@ func makeDarkGrassPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeCobblePixels paints a mortared cobblestone path: rounded stones nudged
-// into a quasi-grid by a hash, with mossy gaps and wet-spot highlights.
+// makeCobblePixels paints a mortared cobblestone path: hash-nudged rounded stones with mossy gaps and wet-spot highlights.
 func makeCobblePixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	// Pastel cream stones over warm mortar, same family as the rock wall.
@@ -606,8 +593,7 @@ func makeCobblePixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makePlankPixels paints a horizontal plank floor: boards with darker gaps,
-// grain noise, and scattered knots. Board offsets stagger by row group.
+// makePlankPixels paints a plank floor: boards with darker gaps, grain noise, and scattered knots, staggered by row group.
 func makePlankPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	const boardH = 22
@@ -659,9 +645,7 @@ func makePlankPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeWaterPixels paints shallow water: banded blue gradient with FBM ripples
-// and highlight peaks. Light/airy palette so it reads as wadeable next to the
-// darker FloorDeepWater variant.
+// makeWaterPixels paints shallow water: banded blue gradient with FBM ripples + peaks, light enough to read as wadeable.
 func makeWaterPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	// Pastel aqua water.
@@ -682,8 +666,7 @@ func makeWaterPixels(w, h int) []color.RGBA {
 			if peak > 0.55 {
 				c = core.MixColor(c, shine, (peak-0.55)*1.4)
 			}
-			// Sun glints — short horizontal near-white dashes (x/7 keeps a 7-px
-			// streak), crest-gated to the lit side of a ripple.
+			// Sun glints — short horizontal near-white dashes (x/7 = 7-px streak), crest-gated to the lit side.
 			if band > 0.25 && hashByteXY(x/7, y)%170 < 2 {
 				c = core.MixColor(c, shine, 0.85)
 			}
@@ -701,9 +684,7 @@ func makeWaterPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeDeepWaterPixels paints the blocking deep-water variant: same shimmer as
-// makeWaterPixels but darker/cooler and no sandy bottom — the contrast is the
-// "can't wade in" cue (FloorDeepWater in core/map.go).
+// makeDeepWaterPixels paints the blocking deep-water variant: like makeWaterPixels but darker/cooler, no sandy bottom (the "can't wade" cue).
 func makeDeepWaterPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	// Pastel teal, colder/more saturated than shallow water.
@@ -731,8 +712,7 @@ func makeDeepWaterPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeSandPixels paints dry dune sand: warm cream with gentle dune-roll noise
-// and very sparse pebbles.
+// makeSandPixels paints dry dune sand: warm cream with gentle dune-roll noise and very sparse pebbles.
 func makeSandPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	// Pastel warm-cream sand, smooth (no per-pixel speckle).
@@ -757,9 +737,7 @@ func makeSandPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeSnowPixels paints packed snow: near-white with faint blue shadow noise
-// and sparkle specks. Washed-out under neutral light; the day cycle's blue
-// phases tint it atmospheric.
+// makeSnowPixels paints packed snow: near-white with faint blue shadow noise and sparkle specks.
 func makeSnowPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	base := color.RGBA{R: 232, G: 240, B: 248, A: 255}
@@ -861,8 +839,7 @@ func makeLeafPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeMarblePixels paints veined marble for upright props (pillars, statue,
-// stalagmites, fountain basins): noise veins through a cream base with hairline cracks.
+// makeMarblePixels paints veined marble for upright props: noise veins through a cream base with hairline cracks.
 func makeMarblePixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	// Muted cream-grey so it doesn't flare against the floor/wall palette.
@@ -904,8 +881,7 @@ func makeMarblePixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeGranitePixels paints dark speckled granite for the obelisk — denser and
-// cooler than marble so it reads as a different stone class.
+// makeGranitePixels paints dark speckled granite for the obelisk — denser/cooler than marble (a different stone class).
 func makeGranitePixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	base := color.RGBA{R: 60, G: 64, B: 76, A: 255}
@@ -929,8 +905,7 @@ func makeGranitePixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// makeTerracottaPixels paints warm clay for the urn: horizontal wheel-mark
-// banding plus a vertical gradient so it reads as fired clay.
+// makeTerracottaPixels paints warm clay for the urn: horizontal wheel-mark banding plus a vertical gradient.
 func makeTerracottaPixels(w, h int) []color.RGBA {
 	pixels := make([]color.RGBA, w*h)
 	// Pastel terracotta — soft warm clay / apricot.
@@ -956,8 +931,7 @@ func makeTerracottaPixels(w, h int) []color.RGBA {
 	return pixels
 }
 
-// fbmNoise returns fractal Brownian motion in roughly [-1, 1] over hashed
-// value noise, for organic texture variation.
+// fbmNoise returns fractal Brownian motion in roughly [-1, 1] over hashed value noise.
 func fbmNoise(x, y, frequency float64, octaves int) float64 {
 	value := 0.0
 	amplitude := 1.0
@@ -997,9 +971,7 @@ func hashFloat(x, y int) float64 {
 	return float64(hashXY(x, y)&0xFFFF) / 65535.0
 }
 
-// makeHudGrainPixels builds a tileable grain overlay for HUD glass: a
-// transparent base with sparse dark specks, warm light flecks, and faint
-// horizontal fibers. Almost all texels are alpha 0 so the glass stays see-through.
+// makeHudGrainPixels builds a tileable HUD-glass grain overlay: sparse dark specks, warm flecks, faint fibers; mostly alpha 0.
 func makeHudGrainPixels(w, h int) []color.RGBA {
 	px := make([]color.RGBA, w*h)
 	for y := 0; y < h; y++ {

@@ -10,41 +10,31 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// 3D view — a rotatable, simplified solid-block view of the map toggled from
-// View ▸ Isometric View (or `I`). Unlike the flat top-down grid it shows
-// elevation directly: every column is extruded to its height so hills, pits, and
-// land bridges read at a glance, and you can orbit around them. It's also a
-// LIMITED edit surface — elevation only: left-click raises the hovered column,
-// right-click lowers it, and (with the Ramp tool on) left-click drops a ramp /
-// right-click clears one. The flat layers (floor/walls/decor/props/entities)
-// stay on the top-down grid; press `I` to flip back for those.
-//
-// Kept deliberately simple (flat-shaded cubes, no props/decor/entities) so it's
-// a fast height-editing surface, not a second full renderer. It renders into an
-// off-screen RenderTexture sized to the grid panel and blits that in — the same
-// trick the Foe/Object Visualizers use — so the 3D scene stays inside the canvas
-// and picking maps cleanly to the panel rect.
+// 3D view (View ▸ Isometric View / `I`): rotatable extruded-block view showing
+// elevation. LIMITED edit surface — elevation only: L-click raises / R-click
+// lowers a column; with Ramp tool on, L drops / R clears a ramp. Flat layers
+// stay top-down. Renders into an off-screen RenderTexture sized to the grid
+// panel and blits it in (same trick as the Foe/Object Visualizers).
 
 // Iso scene tunables (world units inside the off-screen render).
 const (
 	isoTileW    = float32(1.0)  // one tile = one world unit
 	isoLevelH   = float32(0.55) // vertical rise per elevation level
 	isoFovy     = float32(46)
-	isoPitchDeg = 38.0 // camera tilt above the horizon
-	// isoPanSpeed scales middle-drag panning (screen px → world units).
-	isoPanSpeed = float32(0.02)
+	isoPitchDeg = 38.0          // camera tilt above the horizon
+	isoPanSpeed = float32(0.02) // middle-drag pan: screen px → world units
 )
 
 var (
-	isoEdge      = rl.NewColor(20, 24, 30, 130)   // cube wire edges
-	isoEmptyTop  = rl.NewColor(70, 76, 86, 255)   // top color when the Floor layer is hidden
+	isoEdge      = rl.NewColor(20, 24, 30, 130)    // cube wire edges
+	isoEmptyTop  = rl.NewColor(70, 76, 86, 255)    // top when Floor hidden
 	isoHoverWire = rl.NewColor(255, 224, 130, 255) // hovered-column highlight
-	isoRampMark  = rl.NewColor(198, 168, 104, 255) // ramp top marker (brass, matches the map)
-	isoBG        = rl.NewColor(26, 28, 34, 255)    // off-screen clear behind the blocks
+	isoRampMark  = rl.NewColor(198, 168, 104, 255) // ramp marker (brass)
+	isoBG        = rl.NewColor(26, 28, 34, 255)    // off-screen clear
 )
 
-// toggleIsoView flips the 3D view on/off (View menu + `I` hotkey). Frees the
-// off-screen target on the way out so the GPU handle isn't held in top-down mode.
+// toggleIsoView flips the 3D view on/off. Frees the off-screen target on exit so
+// the GPU handle isn't held in top-down mode.
 func toggleIsoView(s *State) {
 	s.isoView = !s.isoView
 	if s.isoView {
@@ -55,10 +45,8 @@ func toggleIsoView(s *State) {
 	s.flash("Top-down view")
 }
 
-// Close releases the editor's GPU resources — currently the 3D-view render
-// target. Call when leaving the editor scene so the handle isn't orphaned when
-// the editor is exited while the 3D view is on (freeIsoRT otherwise only runs on
-// the I-toggle / a panel resize). Idempotent.
+// Close releases the editor's GPU resources (the 3D-view render target). Call on
+// leaving the editor so the handle isn't orphaned. Idempotent.
 func (s *State) Close() { s.freeIsoRT() }
 
 // freeIsoRT releases the off-screen iso target if allocated (idempotent).
@@ -71,7 +59,7 @@ func (s *State) freeIsoRT() {
 }
 
 // ensureIsoRT (re)allocates the off-screen target to match the grid panel size,
-// reusing it across frames and only reallocating when the panel resizes.
+// reallocating only on resize.
 func (s *State) ensureIsoRT(w, h int32) {
 	if s.isoRT.ID != 0 && s.isoRTW == w && s.isoRTH == h {
 		return
@@ -81,9 +69,8 @@ func (s *State) ensureIsoRT(w, h int32) {
 	s.isoRTW, s.isoRTH = w, h
 }
 
-// isoLevelSpan returns the lowest and highest elevation level across the map —
-// columns are drawn relative to the lowest so a flat map reads flat and a tall
-// one still fits the panel.
+// isoLevelSpan returns the lowest+highest elevation level across the map.
+// Columns draw relative to the lowest so a flat map reads flat and a tall one fits.
 func isoLevelSpan(s *State) (minL, maxL int) {
 	minL, maxL = 1<<30, -(1 << 30)
 	for z := 0; z < s.area.Height; z++ {
@@ -97,22 +84,21 @@ func isoLevelSpan(s *State) (minL, maxL int) {
 			}
 		}
 	}
-	if minL > maxL { // empty map guard
+	if minL > maxL { // empty map
 		minL, maxL = 0, 0
 	}
 	return minL, maxL
 }
 
 // isoColumnHeight is the world-space height of column (x,z): at least one level
-// tall (so flat maps still show a pickable slab) plus its rise above the floor.
+// tall (so flat maps show a pickable slab) plus its rise above the floor.
 func isoColumnHeight(s *State, x, z, minL int) float32 {
 	return float32(s.area.ElevationLevelAt(x, z)-minL+1) * isoLevelH
 }
 
-// isoCamera builds the orbit camera from the view state: one of four 45°-offset
-// yaw angles, a fixed downward pitch, and a fit-to-map distance scaled by zoom,
-// targeting the (panned) map center. The level span is passed in (computed once
-// per frame by the caller) so the whole-map scan isn't repeated per camera build.
+// isoCamera builds the orbit camera: one of four 45°-offset yaws, fixed downward
+// pitch, fit-to-map distance scaled by zoom, targeting the panned map center.
+// Level span is passed in (computed once per frame) to avoid rescanning the map.
 func (s *State) isoCamera(minL, maxL int) rl.Camera3D {
 	W, H := s.area.Width, s.area.Height
 	tall := float32(maxL-minL+1) * isoLevelH
@@ -144,8 +130,8 @@ func (s *State) isoCamera(minL, maxL int) rl.Camera3D {
 	}
 }
 
-// isoColumnBox is the world-space bounding box of column (x,z), used for both
-// drawing and ray-pick so the click target matches the rendered block exactly.
+// isoColumnBox is the world-space bounding box of column (x,z); shared by draw
+// and ray-pick so the click target matches the rendered block.
 func (s *State) isoColumnBox(x, z, minL int) (center, size rl.Vector3) {
 	ht := isoColumnHeight(s, x, z, minL)
 	center = rl.NewVector3(float32(x), ht*0.5, float32(z))
@@ -153,10 +139,9 @@ func (s *State) isoColumnBox(x, z, minL int) (center, size rl.Vector3) {
 	return center, size
 }
 
-// isoRayInRect builds the world-space pick ray for a mouse point over `rect`,
-// for a camera whose scene was rendered into an RT of rect's size and blitted at
-// rect. raylib's GetScreenToWorldRay assumes a full-window projection, so this
-// replicates its unproject math with the rect's own dimensions instead.
+// isoRayInRect builds the world-space pick ray for a mouse point over `rect`.
+// raylib's GetScreenToWorldRay assumes a full-window projection, so this redoes
+// the unproject math with the rect's own dimensions.
 func isoRayInRect(mp rl.Vector2, rect rl.Rectangle, cam rl.Camera3D) rl.Ray {
 	ndcX := 2*(mp.X-rect.X)/rect.Width - 1
 	ndcY := 1 - 2*(mp.Y-rect.Y)/rect.Height
@@ -169,9 +154,7 @@ func isoRayInRect(mp rl.Vector2, rect rl.Rectangle, cam rl.Camera3D) rl.Ray {
 }
 
 // isoPick returns the column under the mouse (nearest ray-hit), or (-1,-1) when
-// the cursor is off the canvas or misses every block. minL is the precomputed
-// level floor (shared with the caller's camera build) so the column-box math
-// doesn't rescan the map.
+// off-canvas or missing every block. minL is the precomputed level floor.
 func (s *State) isoPick(cam rl.Camera3D, mp rl.Vector2, minL int) (int, int) {
 	if !pointIn(mp, s.rect.grid) {
 		return -1, -1
@@ -192,9 +175,8 @@ func (s *State) isoPick(cam rl.Camera3D, mp rl.Vector2, minL int) (int, int) {
 	return bestX, bestZ
 }
 
-// drawGridIso renders the map as extruded 3D blocks into the off-screen target
-// and blits it into the grid panel, then overlays a hovered-column readout. The
-// flat top-down overlays are skipped (drawGrid returns right after this).
+// drawGridIso renders the map as extruded 3D blocks into the off-screen target,
+// blits it into the grid panel, then overlays a hovered-column readout.
 func drawGridIso(s *State, font rl.Font) {
 	grid := s.rect.grid
 	w, h := int32(grid.Width), int32(grid.Height)
@@ -228,15 +210,12 @@ func drawGridIso(s *State, font rl.Font) {
 	drawIsoReadout(s, font, grid)
 }
 
-// drawIsoColumn paints one map column: a darker body cube with a brighter
-// floor-colored top cap, wire edges, an optional ramp marker, and a gold
-// highlight when hovered.
+// drawIsoColumn paints one column: darker body cube + brighter floor-colored top
+// cap, wire edges, optional ramp marker, and a gold highlight when hovered.
 func (s *State) drawIsoColumn(x, z, minL int, floorHidden, hovered bool) {
 	center, size := s.isoColumnBox(x, z, minL)
-	// Route the floor read through the bounds-safe cellAt (not raw Floor[z][x]):
-	// a loaded/ragged area can have rows shorter than Width or fewer rows than
-	// Height, and the raw index would panic on entering 3D view. Missing cells
-	// fall back to the empty-top color.
+	// Bounds-safe cellAt, not raw Floor[z][x]: a ragged area would panic. Missing
+	// cells fall back to the empty-top color.
 	top := isoEmptyTop
 	if fb, ok := cellAt(s.area.Floor, x, z); ok {
 		top = rl.Color(floorColor(fb))
@@ -244,16 +223,15 @@ func (s *State) drawIsoColumn(x, z, minL int, floorHidden, hovered bool) {
 	if floorHidden {
 		top = isoEmptyTop
 	}
-	// Darker body so the bright top cap reads as a lit surface (fakes one-axis
-	// lighting without a shader — flat DrawCube is otherwise unshaded).
+	// Darker body so the bright cap reads as lit (fakes one-axis lighting; flat
+	// DrawCube is otherwise unshaded).
 	rl.DrawCubeV(center, size, render.ShadeColor(top, 0.7))
 	capCenter := rl.NewVector3(center.X, center.Y+size.Y/2-0.01, center.Z)
 	rl.DrawCubeV(capCenter, rl.NewVector3(size.X, 0.02, size.Z), top)
 	rl.DrawCubeWiresV(center, size, isoEdge)
 
 	if _, ok := s.area.RampAt(x, z); ok {
-		// A small brass slab on the cap marks a ramp connector (direction detail
-		// stays on the top-down view; this is just "there's a ramp here").
+		// Brass slab marks "there's a ramp here" (direction detail stays top-down).
 		mark := rl.NewVector3(center.X, center.Y+size.Y/2+0.02, center.Z)
 		rl.DrawCubeV(mark, rl.NewVector3(size.X*0.5, 0.06, size.Z*0.5), isoRampMark)
 	}
@@ -263,8 +241,8 @@ func (s *State) drawIsoColumn(x, z, minL int, floorHidden, hovered bool) {
 	}
 }
 
-// drawIsoReadout shows the hovered column's coordinates + elevation level (signed
-// from ground) in the canvas corner, plus a one-line control hint.
+// drawIsoReadout shows the hovered column's coords + signed elevation level in
+// the canvas corner, plus a control hint.
 func drawIsoReadout(s *State, font rl.Font, grid rl.Rectangle) {
 	hint := "3D · Q/E orbit · wheel zoom · L raise / R lower · I top-down"
 	rl.DrawTextEx(font, hint, rl.NewVector2(grid.X+8, grid.Y+8), editorFontHint, 1, rl.NewColor(210, 214, 222, 200))
@@ -275,9 +253,8 @@ func drawIsoReadout(s *State, font rl.Font, grid rl.Rectangle) {
 	}
 }
 
-// updateIsoCanvas drives the 3D view's input: orbit (Q/E), zoom (wheel),
-// pan (middle-drag), and elevation editing on the hovered column. Called from
-// updateMouse while isoView is on; the top-down paint/pan path is skipped.
+// updateIsoCanvas drives the 3D view: orbit (Q/E), zoom (wheel), pan
+// (middle-drag), and elevation editing on the hovered column.
 func updateIsoCanvas(s *State, mp rl.Vector2) {
 	if rl.IsKeyPressed(rl.KeyE) {
 		s.isoYaw = (s.isoYaw + 1) & 3
@@ -295,9 +272,7 @@ func updateIsoCanvas(s *State, mp rl.Vector2) {
 	}
 
 	if wheel := rl.GetMouseWheelMove(); wheel != 0 {
-		// Guard a zero seed: a multiplicative zoom stuck at 0 would never recover
-		// (0 × factor = 0) and the camera's dist/isoZoom would freeze. Clamp the
-		// base into range before scaling so the wheel always responds.
+		// Guard a zero seed: multiplicative zoom stuck at 0 never recovers.
 		if s.isoZoom <= 0 {
 			s.isoZoom = 1
 		}
@@ -335,9 +310,8 @@ func updateIsoCanvas(s *State, mp rl.Vector2) {
 	}
 }
 
-// isoSetColumnLevel raises (delta +1) or lowers (delta -1) the column's ground
-// level, clamped to [0, maxEditLevel], routing through the shared ground-level
-// setter (voxel SetColumnTop / heightfield Elevation char) and the undo hook.
+// isoSetColumnLevel raises/lowers the column's ground level by delta, clamped to
+// [0, maxEditLevel], via the shared ground-level setter + undo hook.
 func isoSetColumnLevel(s *State, x, z, delta int) {
 	cur := s.area.ElevationLevelAt(x, z)
 	next := cur + delta
@@ -355,8 +329,7 @@ func isoSetColumnLevel(s *State, x, z, delta int) {
 	s.dirty = true
 }
 
-// isoClearRamp removes a ramp connector from (x,z) (resets its floor to auto),
-// the 3D-view counterpart of the top-down ramp-erase. No-op when there's no ramp.
+// isoClearRamp removes a ramp at (x,z) (floor → auto). No-op when there's none.
 func isoClearRamp(s *State, x, z int) {
 	if _, ok := s.area.RampAt(x, z); !ok {
 		return

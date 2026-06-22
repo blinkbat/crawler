@@ -6,27 +6,20 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// menus.go groups the editor's top-level commands into FIVE pull-down menus
-// (File / Edit / View / Assets / Map) so the menu bar shows five labels instead
-// of a flat wall of ~10 buttons, and the second row keeps only the paint tools +
-// their contextual controls. Each menu opens the shared dropdown widget (ddMenu
-// owner — see dropdown.go), so a menu row IS a dropdownEntry: same label / apply
-// / hotkey / desc / enabled / active fields any picker row has. Adding a command
-// is one row here — no button wiring, no layout math.
+// menus.go: top-level commands grouped into five pull-down menus (File / Edit /
+// View / Assets / Map). Each menu opens the shared dropdown (ddMenu owner), so a
+// menu row IS a dropdownEntry. Adding a command is one row here.
 //
-// What lives WHERE, and why: modal-openers and view toggles (rare, or
-// set-and-forget) belong in menus; the things you do constantly WHILE painting
-// (tool select, undo/redo, brush size, the elevation cluster) stay on the
-// toolbar row where the hand expects them (see toolbarActionBtns in draw.go).
+// Modal-openers + view toggles live in menus; constant-while-painting controls
+// (tools, undo/redo, brush size, elevation) stay on the toolbar (draw.go).
 
 type menuGroup struct {
 	label string
 	items []dropdownEntry
 }
 
-// editorMenus is the menu-bar model — order is left-to-right on the bar. The
-// hotkey strings are display-only mirrors of the accelerators in updateHotkeys;
-// the action they name is the same handler the key calls.
+// editorMenus is the menu-bar model (left-to-right). hotkey strings are
+// display-only mirrors of updateHotkeys's accelerators.
 var editorMenus = []menuGroup{
 	{label: "File", items: []dropdownEntry{
 		{label: "New Map", apply: newMap, desc: "Start a fresh blank map (prompts for size)."},
@@ -72,9 +65,8 @@ func menuEntries(s *State) []dropdownEntry {
 	return editorMenus[s.dropdown.menu].items
 }
 
-// menuBarBtns is the top-row strip: one button per menu group, each opening its
-// pull-down. Built once from editorMenus so adding a menu needs no extra wiring;
-// active() lights the label of the menu that's currently open.
+// menuBarBtns is the top-row strip: one button per menu group, built from
+// editorMenus. active() lights the open menu's label.
 var menuBarBtns []topbarBtn
 
 func init() {
@@ -88,9 +80,8 @@ func init() {
 	}
 }
 
-// menuAnchorRect is the on-bar rect of menu i — the anchor its pull-down drops
-// from. Walks the same widths drawButtonStrip uses so the list lines up under
-// its label.
+// menuAnchorRect is the on-bar rect menu i's pull-down drops from. Walks the same
+// widths drawButtonStrip uses so the list lines up under its label.
 func menuAnchorRect(i int) rl.Rectangle {
 	x := buttonStripStartX
 	for j := 0; j < i && j < len(menuBarBtns); j++ {
@@ -99,8 +90,7 @@ func menuAnchorRect(i int) rl.Rectangle {
 	return rl.NewRectangle(x, menuBarBtnY, buttonWidth(menuBarBtns[i].label), menuBarBtnH)
 }
 
-// openMenu opens menu i's pull-down — or closes it if it's already the open one,
-// so clicking a label toggles it. The list drops DOWN from the menu-bar label.
+// openMenu toggles menu i's pull-down (drops down from the bar label).
 func openMenu(s *State, i int) {
 	if i < 0 || i >= len(editorMenus) {
 		return

@@ -2,12 +2,9 @@ package core
 
 import "testing"
 
-// TestEquippedWeaponHandPreference pins the right-then-left hand fallback in
-// EquippedWeapon: a weapon in the right hand wins, a weapon in the left hand
-// is used when the right hand holds no real weapon, and both hands empty
-// (or holding non-weapons) stays unarmed (WeaponNone). Guards against the
-// regression where EquippedWeapon read only the right hand and silently
-// ignored a left-equipped weapon that CanEquipInSlot allows.
+// TestEquippedWeaponHandPreference pins the right-then-left fallback: right-hand
+// weapon wins, left used when the right holds none, both empty/non-weapon stays
+// WeaponNone. Guards the regression where only the right hand was read.
 func TestEquippedWeaponHandPreference(t *testing.T) {
 	memberWith := func(right, left ItemKind) PartyMember {
 		var m PartyMember
@@ -16,8 +13,7 @@ func TestEquippedWeaponHandPreference(t *testing.T) {
 		return m
 	}
 
-	// ItemIronSword -> WeaponSword, ItemDagger -> WeaponDagger,
-	// ItemWoodenShield -> WeaponNone (a non-weapon hand item).
+	// ItemIronSword -> WeaponSword, ItemDagger -> WeaponDagger, ItemWoodenShield -> WeaponNone.
 	cases := []struct {
 		name        string
 		right, left ItemKind

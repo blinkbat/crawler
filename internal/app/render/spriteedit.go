@@ -20,44 +20,38 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Sprite editor: bakes destructive edits into maps/sprites/<slug>.png (the
-// file the game loads at boot) or imports a PNG as a sprite. Result applies on
-// the next texture load (boot, or the editor's live reload). Every bake first
-// copies the existing PNG to <slug>.png.bak for one-step Restore. All image
-// work pairs with UnloadImage.
+// Sprite editor: bakes destructive edits into maps/sprites/<slug>.png (loaded at
+// boot) or imports a PNG. Every bake first copies the PNG to <slug>.png.bak for
+// one-step Restore. All image work pairs with UnloadImage.
 
 // SpriteFilter is one destructive edit pass. Zero value is a no-op; enabled ops
-// apply in this order: tint, brightness, contrast, grayscale, invert, gradient,
-// pixelate. Each bake re-reads the current PNG, so re-clicking an op compounds it.
+// apply in order: tint, brightness, contrast, grayscale, invert, gradient,
+// pixelate. Each bake re-reads the PNG, so re-clicking an op compounds it.
 type SpriteFilter struct {
-	TintApply  bool     // multiply every pixel by Tint (ImageColorTint)
+	TintApply  bool     // multiply by Tint (ImageColorTint)
 	Tint       rl.Color //
-	Brightness int32    // -255..255 add (ImageColorBrightness); 0 = skip
+	Brightness int32    // -255..255 (ImageColorBrightness); 0 = skip
 	Contrast   float32  // -100..100 (ImageColorContrast); 0 = skip
-	Grayscale  bool     // desaturate (ImageColorGrayscale)
-	Invert     bool     // photo-negative (ImageColorInvert)
-	Gradient   bool     // alpha-blend a vertical gradient over the sprite
-	GradTop    rl.Color // gradient color at the top (use alpha < 255 for a wash)
-	GradBottom rl.Color // gradient color at the bottom
-	// Pixelate: nearest-neighbor down-and-up-sample block size in source px;
-	// <=1 = skip. Baked, so it's free in-game.
+	Grayscale  bool     // ImageColorGrayscale
+	Invert     bool     // ImageColorInvert
+	Gradient   bool     // alpha-blend a vertical gradient
+	GradTop    rl.Color // gradient top color (alpha < 255 for a wash)
+	GradBottom rl.Color // gradient bottom color
+	// Pixelate: NN down-and-up block size in source px; <=1 = skip. Baked.
 	Pixelate int32
-	// Palette/retro passes (CPU per-pixel; mirror retrofilter.go's posterize/
-	// dither/GameBoy shader math so bake and screen filter agree). Posterize 0..1
-	// (48 levels → 4); Saturation -1..1 (−1 grayscale, +1 double); Dither 0..1
-	// ordered Bayer; GameBoy 0..1 onto the 4-shade green ramp. 0 = skip each.
+	// Palette/retro passes (CPU per-pixel; mirror retrofilter.go's shader math so
+	// bake and screen filter agree). Posterize 0..1 (48→4 levels); Saturation -1..1;
+	// Dither 0..1 Bayer; GameBoy 0..1 green ramp. 0 = skip each.
 	Posterize  float32
 	Saturation float32
 	Dither     float32
 	GameBoy    float32
-	// MaxColors caps the palette via median-cut quantization (the sprite's own
-	// best N colors), distinct from Posterize's per-channel crush. Rounded; <2 =
-	// skip. Applied after the tonal/palette passes but BEFORE pixelate.
+	// MaxColors caps the palette via median-cut (distinct from Posterize's per-
+	// channel crush). Rounded; <2 = skip. Applied after tonal passes, BEFORE pixelate.
 	MaxColors int32
 }
 
-// IsNoop reports whether the filter would change nothing (gates the UI off a
-// stray write + .bak).
+// IsNoop reports whether the filter changes nothing (gates a stray write + .bak).
 func (f SpriteFilter) IsNoop() bool {
 	return !f.TintApply && f.Brightness == 0 && f.Contrast == 0 &&
 		!f.Grayscale && !f.Invert && !f.Gradient && f.Pixelate <= 1 &&
@@ -65,9 +59,9 @@ func (f SpriteFilter) IsNoop() bool {
 		f.MaxColors < 2
 }
 
-// BakeSpriteFilter applies f to the foe's sprite and writes <slug>.png (backing
-// up first). Source is the existing PNG, else the live texture read back (which
-// promotes a procedural-only foe to an editable PNG). No-op for an empty filter.
+// BakeSpriteFilter applies f to the foe's sprite, writing <slug>.png (backing up
+// first). Source is the PNG, else the live texture read back (promoting a
+// procedural foe to an editable PNG). No-op for an empty filter.
 func BakeSpriteFilter(assets Resources, kind core.EnemyKind, f SpriteFilter) error {
 	if f.IsNoop() {
 		return nil
@@ -81,10 +75,9 @@ func BakeSpriteFilter(assets Resources, kind core.EnemyKind, f SpriteFilter) err
 	return exportSpritePNG(kind, img)
 }
 
-// ImportSpriteFromFile decodes an external image and writes it as the foe's
-// sprite <slug>.png (backing up first). An import with essentially no
-// transparency gets its opaque background matte border-flood-keyed to alpha,
-// since the billboard tint washes the whole quad and needs a real alpha channel.
+// ImportSpriteFromFile decodes an image and writes it as the foe's <slug>.png
+// (backing up first). An import with no transparency gets its opaque matte
+// border-flood-keyed to alpha (the billboard tint needs a real alpha channel).
 func ImportSpriteFromFile(kind core.EnemyKind, srcPath string) error {
 	img, err := decodeToNRGBA(srcPath)
 	if err != nil {
@@ -94,23 +87,22 @@ func ImportSpriteFromFile(kind core.EnemyKind, srcPath string) error {
 	return writeSpritePNG(kind, img)
 }
 
-// decodeToNRGBA loads srcPath into a straight-alpha image.NRGBA, trying Go's
-// decoders (png/jpeg/gif) first then falling back to raylib's loader for the
-// other formats it supports (bmp/tga/psd/hdr/pnm/…).
+// decodeToNRGBA loads srcPath into a straight-alpha image.NRGBA: Go's decoders
+// (png/jpeg/gif) first, else raylib's loader (bmp/tga/psd/hdr/pnm/…).
 func decodeToNRGBA(srcPath string) (*image.NRGBA, error) {
 	if data, err := os.ReadFile(srcPath); err == nil {
 		if src, _, derr := image.Decode(bytes.NewReader(data)); derr == nil {
 			b := src.Bounds()
 			if b.Dx() > 0 && b.Dy() > 0 {
-				// NRGBA so alpha edits are straight (non-premultiplied).
+				// NRGBA = straight (non-premultiplied) alpha.
 				dst := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
 				draw.Draw(dst, dst.Bounds(), src, b.Min, draw.Src)
 				return dst, nil
 			}
 		}
 	}
-	// Fallback: raylib decodes formats stdlib can't, then copy its straight-alpha
-	// pixels into NRGBA (one LoadImageColors call, not a per-pixel cgo crossing).
+	// Fallback: raylib decodes formats stdlib can't; copy straight-alpha pixels into
+	// NRGBA via one LoadImageColors (not a per-pixel cgo crossing).
 	rimg := rl.LoadImage(srcPath)
 	if rimg == nil || rimg.Width <= 0 || rimg.Height <= 0 {
 		if rimg != nil {
@@ -135,14 +127,13 @@ func decodeToNRGBA(srcPath string) (*image.NRGBA, error) {
 	return dst, nil
 }
 
-// writeSpritePNG backs up the existing PNG then writes img to <slug>.png. The
-// Go-image (import-path) sibling of exportSpritePNG.
+// writeSpritePNG backs up then writes img to <slug>.png. Go-image sibling of exportSpritePNG.
 func writeSpritePNG(kind core.EnemyKind, img image.Image) error {
 	return writeSpritePNGSlug(core.EnemySlug(kind), img)
 }
 
-// writeSpritePNGSlug is the slug-keyed core shared by the foe/party import
-// paths. Encodes to a buffer first so a failed encode can't truncate the sprite.
+// writeSpritePNGSlug is the slug-keyed core for foe/party imports. Encodes to a
+// buffer first so a failed encode can't truncate the sprite.
 func writeSpritePNGSlug(slug string, img image.Image) error {
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
@@ -155,9 +146,8 @@ func writeSpritePNGSlug(slug string, img image.Image) error {
 	return os.WriteFile(path, buf.Bytes(), core.AssetFileMode)
 }
 
-// prepareSpriteWrite ensures the sprites dir, backs up any <slug>.png to
-// <slug>.png.bak, and returns the dest path. Shared by the Go-image and rl.Image
-// write paths. Callers must have encoded bytes ready first so a write failure
+// prepareSpriteWrite ensures the sprites dir, backs up <slug>.png to .bak, returns
+// the dest path. Callers must have encoded bytes ready first so a write failure
 // can't truncate a sprite this already backed up.
 func prepareSpriteWrite(slug string) (path string, err error) {
 	dir := core.ResolveAssetDir(core.SpritesDirName)
@@ -171,20 +161,18 @@ func prepareSpriteWrite(slug string) (path string, err error) {
 	return path, nil
 }
 
-// Matte-keying tunables for keyOutOpaqueMatte: matteTol is the per-channel RGB
-// distance counting as the background matte; matteAlphaFloor is the alpha below
-// which a pixel reads as already-transparent; matteTransparentPct is the *50 ⇒
-// 2% already-transparent threshold above which the sprite is left alone.
+// Matte-keying tunables for keyOutOpaqueMatte: matteTol = per-channel RGB distance
+// counting as matte; matteAlphaFloor = alpha below which a pixel is transparent;
+// matteTransparentPct (*50 ⇒ 2%) = already-transparent threshold to leave it alone.
 const (
 	matteTol            = 40
 	matteAlphaFloor     = 16
 	matteTransparentPct = 50 // transparent*50 >= total ⇔ ≥2% already transparent
 )
 
-// keyOutOpaqueMatte clears an opaque background matte to transparency, only when
-// the image has essentially no alpha already. Flood-fills inward from the border
-// (so an interior region matching the matte color can't be punched out), clearing
-// pixels within tolerance of the corner matte color. Returns whether it changed anything.
+// keyOutOpaqueMatte clears an opaque background matte to transparency when the
+// image has ~no alpha. Flood-fills inward from the border (so an interior region
+// matching the matte can't be punched out), within tolerance of the corner color.
 func keyOutOpaqueMatte(img *image.NRGBA) bool {
 	w, h := img.Rect.Dx(), img.Rect.Dy()
 	total := w * h
@@ -204,8 +192,7 @@ func keyOutOpaqueMatte(img *image.NRGBA) bool {
 
 	const tol = matteTol
 	bg := cornerMatteColor(img, w, h)
-	// Only key when the four corners agree (uniform border matte); else there's
-	// no distinct background and flooding inward would erode content.
+	// Only key when the four corners agree; else flooding would erode content.
 	for _, c := range [4]color.NRGBA{
 		nrgbaAt(img, 0, 0), nrgbaAt(img, w-1, 0),
 		nrgbaAt(img, 0, h-1), nrgbaAt(img, w-1, h-1),
@@ -259,8 +246,7 @@ func keyOutOpaqueMatte(img *image.NRGBA) bool {
 	return cleared > 0
 }
 
-// cornerMatteColor returns the most common of the four corner pixels (ties →
-// top-left).
+// cornerMatteColor returns the most common of the four corners (ties → top-left).
 func cornerMatteColor(img *image.NRGBA, w, h int) color.NRGBA {
 	corners := [4]color.NRGBA{
 		nrgbaAt(img, 0, 0),
@@ -295,19 +281,17 @@ func absDiffU8(a, b uint8) int {
 	return int(b - a)
 }
 
-// RestoreSpriteBackup restores <slug>.png from its .bak (one-step undo). Errors
-// if there's no backup.
+// RestoreSpriteBackup restores <slug>.png from its .bak. Errors if none.
 func RestoreSpriteBackup(kind core.EnemyKind) error {
 	return restoreSpriteBackupSlug(core.EnemySlug(kind))
 }
 
-// SpriteHasBackup reports whether a restorable .bak exists for the kind.
+// SpriteHasBackup reports whether a restorable .bak exists.
 func SpriteHasBackup(kind core.EnemyKind) bool {
 	return spriteHasBackupSlug(core.EnemySlug(kind))
 }
 
-// restoreSpriteBackupSlug / spriteHasBackupSlug are the slug-keyed cores shared
-// by the foe and party restore paths.
+// restoreSpriteBackupSlug / spriteHasBackupSlug: slug-keyed cores for foe + party.
 func restoreSpriteBackupSlug(slug string) error {
 	bak := spritePathSlug(slug) + ".bak"
 	if _, err := os.Stat(bak); err != nil {
@@ -321,22 +305,20 @@ func spriteHasBackupSlug(slug string) bool {
 	return err == nil
 }
 
-// spritePathSlug is the single <slug>.png path source for any slug (foe and
-// party both resolve here).
+// spritePathSlug is the single <slug>.png path source (foe + party).
 func spritePathSlug(slug string) string {
 	return filepath.Join(core.ResolveAssetDir(core.SpritesDirName), slug+".png")
 }
 
-// loadEditableSpriteImage returns an owned *rl.Image for the foe: the authored
-// PNG if present, else the live texture read back. Caller must UnloadImage it.
+// loadEditableSpriteImage returns an owned *rl.Image for the foe (authored PNG,
+// else live texture read back). Caller must UnloadImage it.
 func loadEditableSpriteImage(assets Resources, kind core.EnemyKind) (*rl.Image, error) {
 	v, _ := enemyVisualFor(assets, kind)
 	return loadEditableSpriteImageSlug(core.EnemySlug(kind), v.texture)
 }
 
 // loadEditableSpriteImageSlug is the slug-keyed core: authored <slug>.png, else
-// the fallback texture read back (promoting a procedural sprite on first bake).
-// Caller must UnloadImage the result.
+// the fallback texture read back. Caller must UnloadImage the result.
 func loadEditableSpriteImageSlug(slug string, fallback rl.Texture2D) (*rl.Image, error) {
 	path := spritePathSlug(slug)
 	if _, err := os.Stat(path); err == nil {
@@ -359,7 +341,7 @@ func loadEditableSpriteImageSlug(slug string, fallback rl.Texture2D) (*rl.Image,
 	return img, nil
 }
 
-// applySpriteFilter runs the filter's enabled ops in a fixed order on img.
+// applySpriteFilter runs the enabled ops in fixed order on img.
 func applySpriteFilter(img *rl.Image, f SpriteFilter) {
 	if f.TintApply {
 		rl.ImageColorTint(img, f.Tint)
@@ -379,7 +361,7 @@ func applySpriteFilter(img *rl.Image, f SpriteFilter) {
 	if f.Gradient {
 		grad := rl.GenImageGradientLinear(int(img.Width), int(img.Height), 0, f.GradTop, f.GradBottom)
 		if grad != nil {
-			// Alpha-blend the gradient over the sprite, scaled to its dimensions.
+			// Alpha-blend the gradient, scaled to the sprite's dimensions.
 			rl.ImageDraw(img, grad,
 				rl.NewRectangle(0, 0, float32(grad.Width), float32(grad.Height)),
 				rl.NewRectangle(0, 0, float32(img.Width), float32(img.Height)),
@@ -387,13 +369,13 @@ func applySpriteFilter(img *rl.Image, f SpriteFilter) {
 			rl.UnloadImage(grad)
 		}
 	}
-	// Palette/retro passes before pixelate so the mosaic blocks carry the result.
+	// Palette/retro before pixelate so the mosaic blocks carry the result.
 	applyPaletteFilter(img, f)
 	if f.MaxColors >= 2 {
 		quantizeImageColors(img, int(f.MaxColors))
 	}
-	// Pixelate last: NN down then back up bakes the chunky blocks; clamp the
-	// small dimension to 1 so a big block on a small sprite can't collapse to 0px.
+	// Pixelate last: NN down then up bakes chunky blocks; clamp to 1 so a big block
+	// on a small sprite can't collapse to 0px.
 	if f.Pixelate > 1 {
 		w, h := img.Width, img.Height
 		dw, dh := w/f.Pixelate, h/f.Pixelate
@@ -408,9 +390,8 @@ func applySpriteFilter(img *rl.Image, f SpriteFilter) {
 	}
 }
 
-// Bayer 4×4 dither matrix + 4-shade Game Boy green ramp — Go twins of
-// retrofilter.go's GLSL bayer/gbRamp. GLSL arrays can't be shared, so a change
-// to one MUST be mirrored in the other.
+// Bayer 4×4 + Game Boy green ramp — Go twins of retrofilter.go's GLSL bayer/gbRamp.
+// GLSL arrays can't be shared, so a change to one MUST be mirrored in the other.
 var (
 	bayer4x4 = [16]float32{
 		0, 8, 2, 10,
@@ -428,12 +409,10 @@ var (
 
 const ditherQuantLevels = 6.0
 
-// applyPaletteFilter runs the palette/retro passes (saturation, posterize,
-// dither, Game Boy) in one CPU pixel walk; each is skipped at zero, transparent
-// pixels left alone. Posterize/dither/GameBoy use the SAME math as the retro
-// shader's fPosterize/fDither/fGameBoy, so those three match it pixel-for-pixel;
-// Saturation has no shader counterpart, and the shader's chroma/DB16/scanline
-// passes are screen-space only.
+// applyPaletteFilter runs saturation/posterize/dither/GameBoy in one CPU pixel
+// walk (skipped at zero, transparent pixels untouched). Posterize/dither/GameBoy
+// use the SAME math as the retro shader so they match pixel-for-pixel; Saturation
+// has no shader counterpart.
 func applyPaletteFilter(img *rl.Image, f SpriteFilter) {
 	sat, post, dith, gb := f.Saturation, f.Posterize, f.Dither, f.GameBoy
 	if sat == 0 && post == 0 && dith == 0 && gb == 0 {
@@ -444,18 +423,18 @@ func applyPaletteFilter(img *rl.Image, f SpriteFilter) {
 			return c
 		}
 		r, g, b := float32(c.R)/255, float32(c.G)/255, float32(c.B)/255
-		// Saturation: lerp each channel around luminance (-1 grayscale, +1 double).
+		// Saturation: lerp each channel around luminance.
 		if sat != 0 {
 			l := lumaf(r, g, b)
 			k := 1 + sat
 			r, g, b = l+(r-l)*k, l+(g-l)*k, l+(b-l)*k
 		}
-		// Posterize: crush color depth (48 levels → 4 at full).
+		// Posterize: crush color depth (48→4 at full).
 		if post > 0 {
 			levels := mixf(48, 4, post)
 			r, g, b = quantizeChannel(r, levels), quantizeChannel(g, levels), quantizeChannel(b, levels)
 		}
-		// Ordered Bayer dither toward a 6-level quantize, blended by intensity.
+		// Ordered Bayer dither toward a 6-level quantize.
 		if dith > 0 {
 			t := (bayer4x4[(y%4)*4+(x%4)]+0.5)/16 - 0.5
 			off := t * (1.5 / ditherQuantLevels)
@@ -463,7 +442,7 @@ func applyPaletteFilter(img *rl.Image, f SpriteFilter) {
 			g = mixf(g, quantizeChannel(g+off, ditherQuantLevels), dith)
 			b = mixf(b, quantizeChannel(b+off, ditherQuantLevels), dith)
 		}
-		// Game Boy: luminance onto the green ramp, blended by intensity.
+		// Game Boy: luminance onto the green ramp.
 		if gb > 0 {
 			step := int(clamp01f(lumaf(r, g, b)) * 4)
 			if step > 3 {
@@ -477,11 +456,9 @@ func applyPaletteFilter(img *rl.Image, f SpriteFilter) {
 	})
 }
 
-// quantizeImageColors reduces img to at most maxColors colors via median-cut
-// (the sprite's own best N colors, unlike Posterize's per-channel crush):
-// recursively split the opaque-pixel color set along each bucket's widest
-// channel, average each bucket, snap each pixel to nearest (cached by source
-// color). Transparent pixels untouched. maxColors < 2 is a no-op. Bake/preview only.
+// quantizeImageColors reduces img to ≤maxColors via median-cut: split the
+// opaque-pixel color set along each bucket's widest channel, average each, snap
+// pixels to nearest (cached). Transparent untouched. maxColors < 2 = no-op.
 func quantizeImageColors(img *rl.Image, maxColors int) {
 	if maxColors < 2 || img == nil || img.Width <= 0 || img.Height <= 0 {
 		return
@@ -498,7 +475,7 @@ func quantizeImageColors(img *rl.Image, maxColors int) {
 	for i := 0; i < w*h; i++ {
 		o := i * 4
 		if pix[o+3] == 0 {
-			continue // skip transparent matte
+			continue
 		}
 		colors = append(colors, rgb{pix[o], pix[o+1], pix[o+2]})
 	}
@@ -506,9 +483,8 @@ func quantizeImageColors(img *rl.Image, maxColors int) {
 		return
 	}
 
-	// Median cut: each box is a [lo,hi) range partitioning `colors`, so an
-	// in-place sort never disturbs another box. Split the widest-span box at its
-	// median until maxColors boxes (or nothing worth splitting).
+	// Median cut: each box is a [lo,hi) range partitioning `colors`, so an in-place
+	// sort never disturbs another. Split the widest-span box at its median.
 	type box struct{ lo, hi int }
 	channelRange := func(b box) (widestCh, span int) {
 		mn := [3]uint8{255, 255, 255}
@@ -536,7 +512,7 @@ func quantizeImageColors(img *rl.Image, maxColors int) {
 		bestIdx, bestSpan, bestCh := -1, 0, 0
 		for i, b := range boxes {
 			if b.hi-b.lo < 2 {
-				continue // singleton: can't split
+				continue
 			}
 			ch, span := channelRange(b)
 			if bestIdx < 0 || span > bestSpan {
@@ -544,7 +520,7 @@ func quantizeImageColors(img *rl.Image, maxColors int) {
 			}
 		}
 		if bestIdx < 0 || bestSpan == 0 {
-			break // every box is uniform or a singleton
+			break
 		}
 		b := boxes[bestIdx]
 		sub := colors[b.lo:b.hi]
@@ -563,7 +539,7 @@ func quantizeImageColors(img *rl.Image, maxColors int) {
 		boxes = append(boxes, box{mid, b.hi})
 	}
 
-	// Palette = each box's average color.
+	// Palette = each box's average.
 	palette := make([]rgb, 0, len(boxes))
 	for _, b := range boxes {
 		if b.hi <= b.lo {
@@ -580,7 +556,7 @@ func quantizeImageColors(img *rl.Image, maxColors int) {
 		return
 	}
 
-	// Snap each opaque pixel to nearest palette color (cached by source color).
+	// Snap each opaque pixel to nearest palette color (cached).
 	cache := map[uint32]rgb{}
 	for i := 0; i < w*h; i++ {
 		o := i * 4
@@ -605,8 +581,7 @@ func quantizeImageColors(img *rl.Image, maxColors int) {
 }
 
 // mapImagePixels applies fn to every pixel in place. img is normalized to 32-bit
-// RGBA first (one cgo crossing) for a tight 4-byte-per-pixel buffer; fn gets the
-// coords (for position-dependent passes like dither) and straight-alpha color.
+// RGBA first (one cgo crossing); fn gets coords (for dither) + straight-alpha color.
 func mapImagePixels(img *rl.Image, fn func(x, y int, c color.RGBA) color.RGBA) {
 	if img == nil || img.Width <= 0 || img.Height <= 0 {
 		return
@@ -626,13 +601,13 @@ func mapImagePixels(img *rl.Image, fn func(x, y int, c color.RGBA) color.RGBA) {
 	}
 }
 
-// lumaf is the Rec.601 luminance of a 0..1 RGB triple (matches the shader dot).
+// lumaf is Rec.601 luminance of a 0..1 RGB triple (matches the shader dot).
 func lumaf(r, g, b float32) float32 { return 0.299*r + 0.587*g + 0.114*b }
 
-// mixf linearly interpolates a→b by t (GLSL mix).
+// mixf lerps a→b by t (GLSL mix).
 func mixf(a, b, t float32) float32 { return a + (b-a)*t }
 
-// quantizeChannel snaps v to the nearest of `levels` evenly spaced steps.
+// quantizeChannel snaps v to the nearest of `levels` even steps.
 func quantizeChannel(v, levels float32) float32 {
 	return float32(math.Floor(float64(v*levels)+0.5)) / levels
 }
@@ -660,12 +635,12 @@ func toByte(v float32) uint8 {
 	return uint8(v)
 }
 
-// exportSpritePNG backs up any existing PNG, then writes img to <slug>.png.
+// exportSpritePNG backs up then writes img to <slug>.png.
 func exportSpritePNG(kind core.EnemyKind, img *rl.Image) error {
 	return exportSpritePNGSlug(core.EnemySlug(kind), img)
 }
 
-// exportSpritePNGSlug is the slug-keyed core shared by the foe/party bake paths.
+// exportSpritePNGSlug is the slug-keyed core for foe/party bakes.
 func exportSpritePNGSlug(slug string, img *rl.Image) error {
 	path, err := prepareSpriteWrite(slug)
 	if err != nil {
@@ -678,14 +653,12 @@ func exportSpritePNGSlug(slug string, img *rl.Image) error {
 }
 
 // editorSpriteReloads holds textures the editor re-loaded after a bake/import/
-// restore so the edit shows immediately, not next launch. Keyed by slug; the
-// prior reload for a slug is unloaded on replace. Boot textures (owned by
-// Resources) are never touched here, so this can't double-free at shutdown.
+// restore so the edit shows immediately. Keyed by slug; prior reload unloaded on
+// replace. Boot textures (owned by Resources) untouched, so no double-free.
 var editorSpriteReloads = map[string]rl.Texture2D{}
 
-// reloadSpriteTextureSlug loads <slug>.png into a fresh GPU texture configured
-// like the boot loader (mipmaps + trilinear + clamp), replacing any prior reload
-// for the slug. ok=false if the PNG is missing/undecodable (caller keeps its texture).
+// reloadSpriteTextureSlug loads <slug>.png into a fresh GPU texture (mipmaps +
+// trilinear + clamp, as boot), replacing any prior reload. ok=false if missing/undecodable.
 func reloadSpriteTextureSlug(slug string) (rl.Texture2D, bool) {
 	path := spritePathSlug(slug)
 	if _, err := os.Stat(path); err != nil {
@@ -708,10 +681,9 @@ func reloadSpriteTextureSlug(slug string) (rl.Texture2D, bool) {
 	return tex, true
 }
 
-// ReloadFoeSprite re-reads kind's just-edited PNG into the live enemyVisuals
-// texture so the change shows instantly in-session. enemyVisuals is shared by
-// reference through the by-value Resources, so the write reaches the editor
-// preview and in-game billboards. false if out of range or the PNG won't load.
+// ReloadFoeSprite re-reads kind's PNG into the live enemyVisuals texture so the
+// change shows in-session. enemyVisuals is shared by reference through by-value
+// Resources, so the write reaches preview + billboards. false if OOB or PNG won't load.
 func ReloadFoeSprite(assets Resources, kind core.EnemyKind) bool {
 	base, ok := visualAt(assets.enemyVisuals, int(kind))
 	if !ok {
@@ -721,8 +693,7 @@ func ReloadFoeSprite(assets Resources, kind core.EnemyKind) bool {
 	if !ok {
 		return false
 	}
-	// An imported PNG is the new pristine base; the FX overlay re-derives on top.
-	// Drop the cached base image so the preview reloads from the new art.
+	// Imported PNG is the new pristine base; drop the cached base so preview reloads.
 	base.texture = tex
 	base.pristineTexture = tex
 	assets.enemyVisuals[kind] = base
@@ -747,9 +718,8 @@ func ReloadPartySprite(assets Resources, class core.PartyClass) bool {
 	return true
 }
 
-// visualAdjustFilter builds the non-destructive filter from an override. Shared
-// by boot derivation and the editor preview so they match. Pixelate 0..1 → NN
-// block 1..14; Brightness -1..1 → ±255; Contrast -1..1 → ±100.
+// visualAdjustFilter builds the non-destructive filter from an override (shared by
+// boot + preview). Pixelate 0..1 → NN block 1..14; Brightness ±1 → ±255; Contrast ±1 → ±100.
 func visualAdjustFilter(ov core.EnemyVisualOverride) SpriteFilter {
 	f := SpriteFilter{}
 	if ov.Pixelate > 0 {
@@ -761,7 +731,7 @@ func visualAdjustFilter(ov core.EnemyVisualOverride) SpriteFilter {
 	if ov.Contrast != 0 {
 		f.Contrast = ov.Contrast * 100
 	}
-	// Palette/retro knobs pass straight through (shared 0..1 / -1..1 ranges).
+	// Palette/retro knobs pass straight through.
 	f.Posterize = ov.Posterize
 	f.Saturation = ov.Saturation
 	f.Dither = ov.Dither
@@ -772,9 +742,9 @@ func visualAdjustFilter(ov core.EnemyVisualOverride) SpriteFilter {
 	return f
 }
 
-// deriveAdjustedTexture builds the display texture from a pristine base + the
-// override's adjustments (readback → filter → upload). ok=false for a no-op
-// filter or unreadable base; appends the texture to owned. Used at boot.
+// deriveAdjustedTexture builds the display texture from pristine + adjustments
+// (readback → filter → upload). ok=false for a no-op filter or unreadable base;
+// appends to owned. Used at boot.
 func deriveAdjustedTexture(pristine rl.Texture2D, ov core.EnemyVisualOverride, owned *[]rl.Texture2D) (rl.Texture2D, bool) {
 	f := visualAdjustFilter(ov)
 	if f.IsNoop() || pristine.ID == 0 {
@@ -800,9 +770,8 @@ func deriveAdjustedTexture(pristine rl.Texture2D, ov core.EnemyVisualOverride, o
 	return tex, true
 }
 
-// applySpriteDisplayFilter sets GPU sampling: POINT (no mipmaps) when pixelating
-// so baked blocks read crisp, else mipmapped trilinear; wrap always clamp.
-// Single source so boot, preview, and reload sample identically.
+// applySpriteDisplayFilter sets GPU sampling: POINT when pixelating (crisp blocks),
+// else mipmapped trilinear; wrap always clamp. One source so boot/preview/reload match.
 func applySpriteDisplayFilter(tex rl.Texture2D, f SpriteFilter) {
 	if f.Pixelate > 1 {
 		rl.SetTextureFilter(tex, rl.FilterPoint)
@@ -813,19 +782,16 @@ func applySpriteDisplayFilter(tex rl.Texture2D, f SpriteFilter) {
 	rl.SetTextureWrap(tex, rl.WrapClamp)
 }
 
-// editorFXTextures holds display textures re-derived from a sprite's pristine
-// base + its live visuals.json FX after an in-session Save, so the change shows
-// instantly. Keyed by slug; the prior derive is freed on replace and when FX go
-// neutral. Boot textures (owned by Resources) are never stored here, so this
-// can't double-free at shutdown.
+// editorFXTextures holds display textures re-derived from pristine + live FX after
+// an in-session Save. Keyed by slug; prior derive freed on replace / when FX go
+// neutral. Boot textures (owned by Resources) never stored here, so no double-free.
 var editorFXTextures = map[string]rl.Texture2D{}
 
-// displayTextureForSlug returns the texture a live billboard should draw after
-// its FX changed: a re-baked display texture (pristine → filter → upload) when
-// any FX is active, else the unfiltered pristine. Frees any prior derive for the
-// slug first. In-session twin of deriveAdjustedTexture; tracks the handle in
-// editorFXTextures (not Resources.owned) so freeing can't double-free a boot
-// texture. Always derives from PRISTINE so repeated saves don't compound.
+// displayTextureForSlug returns the texture a live billboard should draw after FX
+// change: a re-baked texture (pristine → filter → upload) when any FX is active,
+// else pristine. Frees the prior derive first. Tracked in editorFXTextures (not
+// Resources.owned) so freeing can't double-free a boot texture. Always from
+// PRISTINE so repeated saves don't compound.
 func displayTextureForSlug(slug string, pristine rl.Texture2D, ov core.EnemyVisualOverride) rl.Texture2D {
 	if old, ok := editorFXTextures[slug]; ok {
 		rl.UnloadTexture(old)
@@ -853,26 +819,22 @@ func displayTextureForSlug(slug string, pristine rl.Texture2D, ov core.EnemyVisu
 	return tex
 }
 
-// Asset-tab live preview: applies the override-derived SpriteFilter to a COPY of
-// the sprite's pristine base image into this one managed texture — same transform
-// the boot pass bakes, so the preview matches and dragging sliders never compounds.
-// Replaced on each update, freed on ClearAssetPreview.
+// Asset-tab live preview: applies the override filter to a COPY of pristine into
+// one managed texture (same transform boot bakes, so dragging never compounds).
 var (
 	assetPreviewTex    rl.Texture2D
 	assetPreviewLoaded bool
 )
 
-// assetPreviewBase caches the sprite's pristine base image (CPU-side) so a slider
-// drag re-derives with only a cheap ImageCopy + filter + upload, not a disk read
-// or GPU readback per frame. Keyed by slug; reloaded on slug change, invalidated
-// on import.
+// assetPreviewBase caches the CPU-side pristine base so a slider drag is a cheap
+// ImageCopy + filter + upload, not a disk read / readback. Keyed by slug.
 var (
 	assetPreviewBase     *rl.Image
 	assetPreviewBaseSlug string
 )
 
-// assetPreviewBaseFor returns the cached pristine base image for slug, loading it
-// once (disk PNG or fallback readback). nil on failure.
+// assetPreviewBaseFor returns the cached pristine base for slug, loading once
+// (disk PNG or fallback readback). nil on failure.
 func assetPreviewBaseFor(slug string, fallback rl.Texture2D) *rl.Image {
 	if assetPreviewBase != nil && assetPreviewBaseSlug == slug {
 		return assetPreviewBase
@@ -895,9 +857,8 @@ func clearAssetPreviewBase() {
 	}
 }
 
-// setAssetPreviewSlug rebuilds the preview texture from slug's cached pristine
-// base with f applied. A no-op filter clears the preview (false). baseTex is the
-// GPU fallback for a procedural-only sprite with no PNG yet.
+// setAssetPreviewSlug rebuilds the preview from slug's cached pristine base with f
+// applied. No-op filter clears the preview (false). baseTex is the GPU fallback.
 func setAssetPreviewSlug(slug string, baseTex rl.Texture2D, f SpriteFilter) bool {
 	if f.IsNoop() {
 		ClearAssetPreview()
@@ -917,9 +878,9 @@ func setAssetPreviewSlug(slug string, baseTex rl.Texture2D, f SpriteFilter) bool
 	if tex.ID == 0 {
 		return false
 	}
-	applySpriteDisplayFilter(tex, f) // point-sampled when pixelated → sharp preview
-	// Free only the prior preview TEXTURE, not the cached base (ClearAssetPreview
-	// drops both); keeping the base cached is what makes a drag a cheap ImageCopy.
+	applySpriteDisplayFilter(tex, f)
+	// Free only the prior preview TEXTURE, not the cached base (that cache is what
+	// makes a drag a cheap ImageCopy); ClearAssetPreview drops both.
 	if assetPreviewLoaded {
 		rl.UnloadTexture(assetPreviewTex)
 	}
@@ -928,9 +889,8 @@ func setAssetPreviewSlug(slug string, baseTex rl.Texture2D, f SpriteFilter) bool
 	return true
 }
 
-// RefreshFoeAssetPreview / RefreshPartyAssetPreview rebuild the preview texture
-// from the kind/class's PRISTINE base + the override (reading pristine keeps
-// drags non-compounding). A no-op adjustment clears the preview. true when showing.
+// RefreshFoeAssetPreview / RefreshPartyAssetPreview rebuild the preview from the
+// kind/class's PRISTINE base + override (so drags don't compound). true when showing.
 func RefreshFoeAssetPreview(assets Resources, kind core.EnemyKind, ov core.EnemyVisualOverride) bool {
 	v, _ := enemyVisualFor(assets, kind)
 	return setAssetPreviewSlug(core.EnemySlug(kind), pristineOrTexture(v), visualAdjustFilter(ov))
@@ -941,8 +901,7 @@ func RefreshPartyAssetPreview(assets Resources, class core.PartyClass, ov core.E
 	return setAssetPreviewSlug(core.PartyClassSlug(class), pristineOrTexture(v), visualAdjustFilter(ov))
 }
 
-// pristineOrTexture returns the visual's pristine base texture, falling back to
-// its display texture when pristine is unset (defensive — boot populates it).
+// pristineOrTexture returns the pristine base, falling back to display texture if unset.
 func pristineOrTexture(v enemyVisual) rl.Texture2D {
 	if v.pristineTexture.ID != 0 {
 		return v.pristineTexture
@@ -950,7 +909,7 @@ func pristineOrTexture(v enemyVisual) rl.Texture2D {
 	return v.texture
 }
 
-// ClearAssetPreview frees the preview texture and cached base image. Idempotent.
+// ClearAssetPreview frees the preview texture + cached base. Idempotent.
 func ClearAssetPreview() {
 	if assetPreviewLoaded {
 		rl.UnloadTexture(assetPreviewTex)
@@ -960,8 +919,7 @@ func ClearAssetPreview() {
 	clearAssetPreviewBase()
 }
 
-// AssetPreviewTexture returns the live-preview texture, or the zero texture when
-// none is active.
+// AssetPreviewTexture returns the live-preview texture, or zero when none active.
 func AssetPreviewTexture() rl.Texture2D {
 	if assetPreviewLoaded {
 		return assetPreviewTex
@@ -978,8 +936,7 @@ func copyFile(src, dst string) error {
 }
 
 // Party-side sprite editing: class-keyed twins of the foe functions, reusing the
-// same slug-keyed cores (keyed by core.PartyClassSlug). Behavior is identical to
-// the foe side; first bake/import promotes a procedural class to an authored PNG.
+// slug-keyed cores via core.PartyClassSlug. Identical behavior to the foe side.
 
 // BakePartySpriteFilter applies f destructively to a class's sprite PNG.
 func BakePartySpriteFilter(assets Resources, class core.PartyClass, f SpriteFilter) error {
@@ -996,8 +953,8 @@ func BakePartySpriteFilter(assets Resources, class core.PartyClass, f SpriteFilt
 	return exportSpritePNGSlug(core.PartyClassSlug(class), img)
 }
 
-// ImportPartySpriteFromFile copies an external image in as the class's sprite,
-// with the same transparency-matte safety net the foe import uses.
+// ImportPartySpriteFromFile imports an image as the class's sprite (same matte
+// safety net as the foe import).
 func ImportPartySpriteFromFile(class core.PartyClass, srcPath string) error {
 	img, err := decodeToNRGBA(srcPath)
 	if err != nil {

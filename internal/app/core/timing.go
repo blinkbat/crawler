@@ -11,12 +11,9 @@ const (
 	TimingQualityGood
 	TimingQualityGreat
 	TimingQualityExcellent
-	// TimingQualityCount is the number of timing grades. Used by the
-	// three parallel grade tables (timingGrades in config.go,
-	// qualityVisuals in render/timing.go, gradeSounds in
-	// battle/battle.go) to assert length parity at init — adding a new
-	// grade requires extending all three or a startup panic catches the
-	// drift.
+	// TimingQualityCount: parallel grade tables (timingGrades config.go,
+	// qualityVisuals render/timing.go, gradeSounds battle/battle.go) assert
+	// length parity at init against this — extend all three or panic.
 	TimingQualityCount
 )
 
@@ -38,10 +35,8 @@ const (
 )
 
 func init() {
-	// SkillMinigame (party.go) and these TimingKind codes are parallel
-	// enumerations mapped 1:1 in battle.beginPendingAction. Assert they stay
-	// value-aligned so reordering or inserting a value in one without the
-	// other fails loudly at startup instead of silently arming the wrong bar.
+	// SkillMinigame (party.go) and TimingKind are mapped 1:1 in
+	// battle.beginPendingAction; assert value-alignment so a reorder panics.
 	if int(MinigamePress) != TimingKindPress ||
 		int(MinigameCharge) != TimingKindCharge ||
 		int(MinigameSequence) != TimingKindSequence ||
@@ -52,26 +47,18 @@ func init() {
 	}
 }
 
-// Sequence-minigame direction codes. Stored in TimingState.SequenceTargets
-// at NewSequenceState time; matched against player input at runtime.
+// Sequence-minigame direction codes, stored in TimingState.SequenceTargets.
 const (
 	SeqDirUp    = 0
 	SeqDirRight = 1
 	SeqDirDown  = 2
 	SeqDirLeft  = 3
-	// SeqDirCount is the number of directions — the range NewSequenceState
-	// draws random targets from. Named so the random draw can't drift out
-	// of lockstep with the four SeqDir* codes above.
-	SeqDirCount = 4
+	SeqDirCount = 4 // range NewSequenceState draws from
 )
 
 func init() {
-	// SeqDir* (above) and the cardinal facings North/East/South/West
-	// (config.go) are intentionally the SAME clockwise order with the same
-	// int values, so directional code can read either set interchangeably.
-	// Nothing else pins them together, so assert the parity here — the same
-	// MinigamePress==TimingKindPress style guard above — so a reorder or an
-	// inserted value in one without the other fails loudly at startup.
+	// SeqDir* and the cardinal facings (config.go) MUST share order + int
+	// values so directional code reads either set; assert the parity.
 	if int(SeqDirCount) != int(FacingCount) ||
 		int(SeqDirUp) != int(North) ||
 		int(SeqDirRight) != int(East) ||
@@ -81,43 +68,28 @@ func init() {
 	}
 }
 
-// Per-slot result for the sequence minigame. SequenceResults is a slice
-// parallel to SequenceTargets — one entry per arrow.
+// Per-slot result for the sequence minigame (parallel to SequenceTargets).
 const (
 	SeqResultPending = iota
 	SeqResultCorrect
 	SeqResultWrong
 )
 
-// TimingState drives a single instance of the "timed hit" minigame. It owns
-// the elapsed time, the acceptance window, and the resolved quality. Input
-// handling and rendering are external — this struct is pure state so the same
-// type powers attack, defend, and charge bars alike.
-//
+// TimingState is the pure state of one "timed hit" minigame instance (input
+// + rendering are external), so the same type powers attack/defend/charge.
 // Field semantics by kind:
 //
-//	Press:
-//	  WindowStart..WindowEnd is the green acceptance window.
-//	  SweetSpot is the centered "Excellent" tick.
-//	  Pressed is true once the input fired.
-//
-//	Charge:
-//	  WindowStart..WindowEnd is the peak release window (right after the 3rd
-//	  tick lands). SweetSpot is the centered "Excellent" point inside it.
-//	  Pressed is true once the player ever held the input.
-//	  Released is true once they let go (or the bar timed out while held).
-//
-// TallyWindow is one accept zone in a multi-press tally bar. Hit
-// marks the zone as already consumed so a player can't repeatedly
-// press inside the same window for free hits — only the first press
-// inside an unconsumed window scores. Sweet is the in-window peak
-// position used by the renderer to highlight the bullseye; tally
-// mode doesn't grade per-window (every hit counts equally) but the
-// visual still nudges the player toward the centre. FlashTimer is
-// the per-window feedback hold — set to TallyHitFlashDuration on
-// the press that lands the hit, decays each Tick, drives the
-// render-side "this window just got hit" pulse so the player gets
-// visual confirmation without waiting for the bar to resolve.
+//	Press:  WindowStart..WindowEnd = accept window; SweetSpot = centered
+//	        "Excellent" tick; Pressed = input fired.
+//	Charge: WindowStart..WindowEnd = peak release window (after 3rd tick);
+//	        SweetSpot = centered Excellent; Pressed = ever held;
+//	        Released = let go (or timed out while held).
+
+// TallyWindow is one accept zone in a multi-press tally bar. Hit marks the
+// zone consumed (only the first press in an unconsumed window scores). Sweet
+// is the in-window peak for the renderer (tally mode grades equally per hit).
+// FlashTimer = per-window hit-feedback hold, set to TallyHitFlashDuration on
+// the landing press, decayed each Tick.
 type TallyWindow struct {
 	Start      float32
 	End        float32
@@ -139,61 +111,42 @@ type TimingState struct {
 	SweetSpot   float32
 	Quality     int
 
-	// Multi-press tally mode. When Windows is non-nil, the bar treats
-	// each press as a per-window hit: a press inside an unconsumed
-	// accept window increments Hits and marks that window consumed
-	// (without resolving the bar). A press inside the late "commit"
-	// zone (CommitStart..Duration) resolves the bar early with the
-	// current tally. Bar timeout also resolves with the tally. Quality
-	// maps from Hits at resolve time; for an N-window bar, 0 hits =
-	// Miss, partial = Good, all-windows-cleared = Excellent. Callers
-	// that want per-hit damage scaling read Hits directly.
-	//
-	// Windows are placed in time order (Start ascending) and never
-	// overlap each other or the commit zone — see NewMultiPressState
-	// for the geometry rule.
+	// Multi-press tally mode (Windows non-nil): each press in an unconsumed
+	// accept window increments Hits + consumes it; a press in the commit zone
+	// (CommitStart..Duration) or timeout resolves with the tally. Quality
+	// maps from Hits (0=Miss, partial=Good, all=Excellent); callers wanting
+	// per-hit scaling read Hits directly. Windows are Start-ascending and
+	// never overlap each other or the commit zone (see NewMultiPressState).
 	Windows     []TallyWindow
 	Hits        int
 	CommitStart float32
 
-	// Sequence-kind state (unused for press/charge). Targets is the random
-	// run of directions; Cursor points at the next slot to fill; Results is
-	// parallel to Targets and holds Pending / Correct / Wrong per slot.
-	// Recall-kind reuses these three for its pattern + per-slot grading.
+	// Sequence-kind state (also reused by Recall). Targets = random direction
+	// run; Cursor = next slot to fill; Results parallel to Targets.
 	SequenceTargets []int
 	SequenceResults []int
 	SequenceCursor  int
 
-	// Reels-kind state (TimingKindReels). One Reel per spinner. A press locks
-	// the next still-spinning reel on whatever symbol it's showing;
-	// resolveReels grades by the largest matching set across the locked reels.
+	// Reels-kind state. A press locks the next still-spinning reel on its
+	// current symbol; resolveReels grades by the largest matching set.
 	Reels []Reel
 
-	// Recall-kind state (TimingKindRecall). RevealTime is how long the
-	// pattern (in SequenceTargets) stays face-up before it hides and input
-	// opens — the "memorize, then reproduce from memory" phase split.
+	// Recall-kind: how long the pattern stays face-up before input opens.
 	RevealTime float32
 
-	// Overcharge-kind state (TimingKindOvercharge). Set true by
-	// resolveOvercharge when the player releases past the peak window (into
-	// the overload band): the skill's apply path reads it to grant the bonus
-	// effect and apply recoil.
+	// Overcharge-kind: set by resolveOvercharge on a past-peak release; the
+	// apply path reads it to grant the bonus + recoil.
 	Overloaded bool
 }
 
-// IsTallyMode reports whether this is a multi-press tally bar. Render
-// and apply paths gate per-window draws + per-hit damage on this.
+// IsTallyMode reports whether this is a multi-press tally bar.
 func (t TimingState) IsTallyMode() bool {
 	return t.Kind == TimingKindPress && len(t.Windows) > 0
 }
 
-// NewTimingState builds a freshly-armed press-kind bar. The bar sweeps for
-// the given duration. Window position is randomized each time the bar arms
-// (in [PressWindow.MinStart, PressWindow.MaxStart] of bar duration) so the
-// player can't muscle-memory the press point — but it never opens before
-// PressWindow.MinStart, so they always get a moment of "approaching, not
-// yet" before a hit is possible. Width is fixed at PressWindow.Width and
-// the sweet spot sits in the center.
+// NewTimingState builds a freshly-armed press-kind bar. Window start is
+// randomized in [PressWindow.MinStart, MaxStart] (fraction of duration) so the
+// press point can't be muscle-memoried; width fixed at PressWindow.Width.
 func NewTimingState(rng *rand.Rand, duration float32) TimingState {
 	if duration <= 0 {
 		duration = AttackTimingDuration
@@ -209,22 +162,8 @@ func NewTimingState(rng *rand.Rand, duration float32) TimingState {
 	}
 }
 
-// NewMultiPressState builds a tally-mode press bar with `count`
-// acceptance windows + a late commit zone. Each press inside an
-// unconsumed accept window scores one hit; pressing inside the
-// commit zone (or letting the bar elapse) resolves with the
-// current tally. Used by Swipe and any other multi-hit skill where
-// the player should be able to chain presses across the bar
-// instead of resolving on the first input.
-//
-// Windows are spaced evenly across the sweep so the player sees a
-// rhythmic row of "hit zones" rather than a single wide blob. The
-// commit zone sits in the final 15% of the duration so the late
-// portion of the bar reliably ends the tally — pressing there
-// fires the attack with whatever hits landed so far.
-//
-// count <= 0 falls back to a single accept window so a caller can't
-// accidentally arm a never-resolvable bar.
+// NewMultiPressState builds a tally-mode press bar with `count` evenly-spaced
+// accept windows + a late commit zone. count <= 0 falls back to one window.
 func NewMultiPressState(rng *rand.Rand, duration float32, count int) TimingState {
 	if duration <= 0 {
 		duration = AttackTimingDuration
@@ -234,20 +173,15 @@ func NewMultiPressState(rng *rand.Rand, duration float32, count int) TimingState
 	}
 	commitZoneFrac := MultiPressWindow.CommitZoneFrac
 	commitStart := 1.0 - commitZoneFrac
-	// Accept windows are distributed across [leadIn, commitStart -
-	// small gap]. Each window is winWidth wide; gaps between windows
-	// are computed from the remaining span so all N windows fit even
-	// at higher counts. Geometry config lives in MultiPressWindow
-	// (config.go) so a balance pass touches one file.
+	// Windows distributed across [leadIn, commitStart - gap]; geometry config
+	// lives in MultiPressWindow (config.go).
 	leadIn := MultiPressWindow.LeadInFrac
 	winWidth := MultiPressWindow.WindowWidthFrac
-	span := commitStart - leadIn - 0.02 // small breathing-room gap before commit
+	span := commitStart - leadIn - 0.02 // breathing room before commit
 	if span < winWidth {
 		span = winWidth
 	}
 	windows := make([]TallyWindow, count)
-	// stride is the distance between window CENTERS; place the
-	// centers so the row fills [leadIn + winWidth/2, leadIn + span - winWidth/2].
 	usable := span - winWidth
 	for i := 0; i < count; i++ {
 		var center float32
@@ -256,9 +190,7 @@ func NewMultiPressState(rng *rand.Rand, duration float32, count int) TimingState
 		} else {
 			center = leadIn + winWidth*0.5 + usable*(float32(i)/float32(count-1))
 		}
-		// Jitter the center slightly so two consecutive bars don't
-		// have identical zone placement, but only within a tiny
-		// range so the rhythm reads as predictable.
+		// Small jitter so consecutive bars aren't identically placed.
 		jitter := (float32(rng.Float64())*2 - 1) * (winWidth * 0.20)
 		center += jitter
 		start := center - winWidth*0.5
@@ -278,15 +210,9 @@ func NewMultiPressState(rng *rand.Rand, duration float32, count int) TimingState
 	}
 }
 
-// NewTallyStateAtCenters builds a tally-mode press bar with accept
-// windows hand-placed at the given fractional centers (0..1 of the bar
-// duration) rather than NewMultiPressState's even spread. Used where a
-// skill wants a specific rhythm: Swipe's two hits sit around the middle
-// and just before the commit tail (a "wind up, then the big swing"
-// beat) instead of bunched at the two ends. Each window keeps
-// MultiPressWindow.WindowWidthFrac width and is clamped so it stays
-// fully inside [winWidth/2, commitStart-winWidth/2] — a center pushed
-// into the commit tail would otherwise become unpressable.
+// NewTallyStateAtCenters builds a tally-mode press bar with windows hand-placed
+// at the given fractional centers (0..1). Each keeps WindowWidthFrac width and
+// is clamped to [winWidth/2, commitStart-winWidth/2] so it stays pressable.
 func NewTallyStateAtCenters(duration float32, centers ...float32) TimingState {
 	if duration <= 0 {
 		duration = AttackTimingDuration
@@ -321,10 +247,8 @@ func NewTallyStateAtCenters(duration float32, centers ...float32) TimingState {
 	}
 }
 
-// randomizedPressWindow returns (start, end, sweet) fractions for a press
-// window placed inside [minStart, maxStart] with the fixed `width`. If the
-// roll would push the window past `maxEnd` it slides back so the full
-// width still fits. Used by NewTimingState's single-window placement.
+// randomizedPressWindow returns (start, end, sweet) fractions for a width-`width`
+// window in [minStart, maxStart], slid back so it never exceeds maxEnd.
 func randomizedPressWindow(rng *rand.Rand, minStart, maxStart, width, maxEnd float32) (start, end, sweet float32) {
 	span := maxStart - minStart
 	if span < 0 {
@@ -340,42 +264,27 @@ func randomizedPressWindow(rng *rand.Rand, minStart, maxStart, width, maxEnd flo
 	return
 }
 
-// chargePeakSweet is the charge peak window's midpoint — the "Excellent"
-// sweet spot. Computed once from the ChargePeakStart/End config consts and
-// read by both NewChargeState (to invert it into an elapsed SweetSpot) and
-// chargeGradeUpToPeak (to grade closeness), so the midpoint can't drift
-// between arm and grade.
+// chargePeakSweet is the peak window midpoint (Excellent sweet spot), shared by
+// NewChargeState and chargeGradeUpToPeak so arm + grade can't drift.
 const chargePeakSweet = (ChargePeakStart + ChargePeakEnd) * 0.5
 
-// chargeSegments is the piecewise-linear curve mapping a charge bar's
-// elapsed-time fraction [0, 1] to its visual cursor fraction [0, 1].
-// Each row is the (visual, elapsed) breakpoint at the end of a segment;
-// the cursor interpolates linearly between adjacent rows. Visual slope
-// (visual_span / elapsed_span) strictly increases through the three
-// tick segments and into the peak — that's the cursor accelerating with
-// every notch the player picks up.
-//
-// Tick lines and peak band sit at constant visual quarters (0.25 / 0.50
-// / 0.75 / 0.85 — see ChargeTick1Pct..ChargeTick3Pct in config.go); the *elapsed* values
-// here are what stretch and squeeze the cursor's speed across them.
-// Touch one row and both render and grade follow.
+// chargeSegments is the piecewise-linear curve mapping charge elapsed fraction
+// [0,1] to visual cursor fraction [0,1]. Each row is the (visual, elapsed)
+// breakpoint ending a segment; visual slope strictly increases (cursor
+// accelerates). Single source for both render and grade.
 var chargeSegments = [...]struct {
 	Visual, Elapsed float32
 }{
 	{0.00, 0.00},
-	{ChargeTick1Pct, 0.45}, // segment 0 — slow lead-in (slope ≈ 0.56)
-	{ChargeTick2Pct, 0.70}, // segment 1 — speeds up (slope ≈ 1.00)
-	{ChargeTick3Pct, 0.88}, // segment 2 — faster yet (slope ≈ 1.39)
-	{ChargePeakEnd, 0.94},  // segment 3 — peak window (slope ≈ 1.67)
-	{1.00, 1.00},           // segment 4 — decay, past the player's reach
+	{ChargeTick1Pct, 0.45},
+	{ChargeTick2Pct, 0.70},
+	{ChargeTick3Pct, 0.88},
+	{ChargePeakEnd, 0.94}, // peak window
+	{1.00, 1.00},          // decay, past the player's reach
 }
 
-// ChargeCursorProgress maps a charge bar's elapsed time to its visual
-// cursor position [0, 1]. Non-linear via chargeSegments — the cursor
-// accelerates through each segment. Single source of truth for both
-// rendering (cursor X, tick line / peak / decay band positions) and
-// grading (resolveCharge compares visual progress to the visual tick
-// constants).
+// ChargeCursorProgress maps charge elapsed time to visual cursor position [0,1]
+// (non-linear via chargeSegments). Source of truth for render + grade.
 func ChargeCursorProgress(elapsed, duration float32) float32 {
 	if duration <= 0 || elapsed <= 0 {
 		return 0
@@ -399,10 +308,8 @@ func ChargeCursorProgress(elapsed, duration float32) float32 {
 	return 1
 }
 
-// ChargeElapsedForVisual is the inverse of ChargeCursorProgress: given a
-// target visual cursor position [0, 1], returns the elapsed time at which
-// the cursor reaches that visual position. Render code uses this to ask
-// "when did the cursor cross this tick" without re-solving the curve.
+// ChargeElapsedForVisual is the inverse of ChargeCursorProgress: the elapsed
+// time at which the cursor reaches visual position [0,1].
 func ChargeElapsedForVisual(visual, duration float32) float32 {
 	if duration <= 0 || visual <= 0 {
 		return 0
@@ -425,13 +332,9 @@ func ChargeElapsedForVisual(visual, duration float32) float32 {
 	return duration
 }
 
-// NewChargeState builds a freshly-armed charge-kind bar. The bar runs for
-// `duration` seconds; three tick markers land before the peak window opens
-// at ChargePeakStart and closes at ChargePeakEnd. The sweet spot is centered
-// in the peak window. WindowStart/End/SweetSpot are stored as elapsed times
-// (inverted through chargeSegments) so callers reading TimingState.Elapsed
-// against them — e.g., the renderer's "RELEASE!" heading flip — keep their
-// linear-elapsed comparisons honest under the non-linear cursor curve.
+// NewChargeState builds a freshly-armed charge-kind bar. WindowStart/End/
+// SweetSpot are stored as elapsed times (inverted through chargeSegments) so
+// comparisons against TimingState.Elapsed stay honest under the non-linear curve.
 func NewChargeState(duration float32) TimingState {
 	if duration <= 0 {
 		duration = ChargeTimingDuration
@@ -446,10 +349,8 @@ func NewChargeState(duration float32) TimingState {
 	}
 }
 
-// randomDirectionRun builds a length-N slice of random directional indices
-// (each in [0, SeqDirCount)). The shared pattern generator for the Sequence
-// and Recall minigame constructors, which otherwise hand-rolled the identical
-// make+fill loop in lockstep.
+// randomDirectionRun builds a length-N slice of random directions ([0,SeqDirCount)).
+// Shared by the Sequence and Recall constructors.
 func randomDirectionRun(rng *rand.Rand, length int) []int {
 	targets := make([]int, length)
 	for i := range targets {
@@ -458,9 +359,8 @@ func randomDirectionRun(rng *rand.Rand, length int) []int {
 	return targets
 }
 
-// NewSequenceState builds a freshly-armed sequence-kind bar with `length`
-// random directional arrows. Player has `duration` seconds to tap them all
-// in order; pending/wrong slots drop the grade.
+// NewSequenceState builds a sequence-kind bar with `length` random arrows to
+// tap in order; pending/wrong slots drop the grade.
 func NewSequenceState(rng *rand.Rand, duration float32, length int) TimingState {
 	if duration <= 0 {
 		duration = SequenceTimingDuration
@@ -478,22 +378,16 @@ func NewSequenceState(rng *rand.Rand, duration float32, length int) TimingState 
 	}
 }
 
-// Reel is one spinner in the slot (Reels) minigame. Speed is its symbol
-// cadence (symbols/sec), Offset its starting symbol, and Stop the locked
-// symbol once the player stops it (-1 while still spinning). Bundling the
-// three into one struct (vs the old parallel ReelSpeeds/Offsets/Stops slices)
-// keeps them in lockstep by construction — no per-field bounds-checking.
+// Reel is one spinner in the Reels minigame. Speed = symbol cadence
+// (symbols/sec), Offset = starting symbol, Stop = locked symbol (-1 while spinning).
 type Reel struct {
 	Speed  float32
 	Offset int
 	Stop   int
 }
 
-// NewReelState builds a slot-machine bar: ReelCount reels each cycling
-// ReelSymbolCount symbols at its own (RNG-varied, desynced) speed. A press
-// locks the next still-spinning reel onto whatever symbol it's showing; the
-// bar resolves once every reel is stopped (or the duration elapses, locking
-// the rest). resolveReels grades by the largest matching set.
+// NewReelState builds a slot-machine bar: ReelCount reels cycling
+// ReelSymbolCount symbols at desynced speeds; resolves once all stopped.
 func NewReelState(rng *rand.Rand, duration float32) TimingState {
 	if duration <= 0 {
 		duration = ReelTimingDuration
@@ -501,8 +395,7 @@ func NewReelState(rng *rand.Rand, duration float32) TimingState {
 	reels := make([]Reel, ReelCount)
 	for i := range reels {
 		reels[i] = Reel{
-			// Desynced speeds so the player can't stop all reels on one beat
-			// for a guaranteed jackpot — matching three takes skill plus luck.
+			// Desynced speeds so no single beat jackpots every reel.
 			Speed:  ReelSpinMin + float32(rng.Float64())*(ReelSpinMax-ReelSpinMin),
 			Offset: rng.Intn(ReelSymbolCount),
 			Stop:   -1,
@@ -516,10 +409,8 @@ func NewReelState(rng *rand.Rand, duration float32) TimingState {
 	}
 }
 
-// ReelSymbolAt returns the symbol currently shown on reel i: its locked value
-// if stopped, else the spinning value derived from elapsed time and the
-// reel's speed/offset. Render and resolve both read this so a stopped reel
-// always shows exactly what it locked.
+// ReelSymbolAt returns reel i's current symbol: its locked value if stopped,
+// else the spinning value from elapsed/speed/offset.
 func (t TimingState) ReelSymbolAt(i int) int {
 	if i < 0 || i >= len(t.Reels) {
 		return 0
@@ -528,19 +419,14 @@ func (t TimingState) ReelSymbolAt(i int) int {
 	if r.Stop >= 0 {
 		return r.Stop
 	}
-	// The stoppable symbol is the one NEAREST the centre pay-line, i.e. round
-	// (not floor) of the continuous scroll phase — so the symbol the render
-	// shows centred is exactly the one a press locks (a real reel snaps to the
-	// nearest symbol when you stop it). Euclidean mod keeps a (guarded-against)
-	// negative phase from indexing symbol art out of range.
+	// Round (not floor) so the locked symbol is the one centred on the
+	// pay-line. Euclidean mod guards a negative phase from out-of-range indexing.
 	sym := int(math.Round(float64(t.reelPhase(r))))
 	return ((sym % ReelSymbolCount) + ReelSymbolCount) % ReelSymbolCount
 }
 
-// reelPhase is reel r's continuous scroll position in SYMBOLS: starting offset
-// plus elapsed spin distance (never negative under normal play). The integer
-// part is how many symbols have rolled past the pay-line; the fractional part is
-// how far between symbols it currently sits.
+// reelPhase is reel r's continuous scroll position in symbols (offset + elapsed
+// spin distance, floored at 0).
 func (t TimingState) reelPhase(r Reel) float32 {
 	p := float32(r.Offset) + t.Elapsed*r.Speed
 	if p < 0 {
@@ -549,9 +435,8 @@ func (t TimingState) reelPhase(r Reel) float32 {
 	return p
 }
 
-// ReelPhaseAt returns reel i's continuous scroll phase (see reelPhase) for the
-// render's scrolling-strip draw. Meaningless for a stopped reel (it has locked
-// onto Stop) — callers gate on Reels[i].Stop < 0.
+// ReelPhaseAt returns reel i's scroll phase for the render strip draw.
+// Meaningless for a stopped reel — callers gate on Reels[i].Stop < 0.
 func (t TimingState) ReelPhaseAt(i int) float32 {
 	if i < 0 || i >= len(t.Reels) {
 		return 0
@@ -560,8 +445,7 @@ func (t TimingState) ReelPhaseAt(i int) float32 {
 }
 
 // StopNextReel locks the next still-spinning reel onto its current symbol.
-// Returns true if this stop resolved the bar (the last reel landed). No-op
-// when every reel is already stopped. Reels-kind only.
+// Returns true if this stop resolved the bar. Reels-kind only.
 func (t *TimingState) StopNextReel() bool {
 	if !t.Active || t.Resolved || t.Kind != TimingKindReels {
 		return false
@@ -590,19 +474,12 @@ func (t TimingState) allReelsStopped() bool {
 	return true
 }
 
-// resolveReels finalises the slot result. Any reel still spinning at timeout
-// locks on its current symbol first. Three matching symbols = Excellent
-// (jackpot), exactly two = Good, all distinct = Miss — a real gamble where
-// the player can whiff. A pure timeout where the player never stopped a reel
-// (!Pressed) is a no-PLAY, graded Miss outright: otherwise the random
-// auto-locked symbols would frequently match and hand a walk-away player a
-// boosted Steal chance (the apply path reads Quality regardless of Pressed).
+// resolveReels finalises the slot result. 3 match = Excellent, 2 = Good, all
+// distinct = Miss. A no-play timeout (!Pressed) is Miss outright — else the
+// random auto-locked symbols could hand a walk-away player a boosted result.
 func (t *TimingState) resolveReels() {
-	// Snapshot the reels the player actually stopped BEFORE auto-locking the
-	// rest. Only player-stopped reels count toward the match — a reel left
-	// spinning still locks on its current symbol for display, but letting it
-	// time out must not luck into a jackpot from a randomly auto-locked symbol
-	// (the apply path reads Quality regardless of how the reel stopped).
+	// Only player-stopped reels count toward the match; snapshot them before
+	// auto-locking the rest (which lock for display only).
 	stopped := make([]Reel, 0, len(t.Reels))
 	for i := range t.Reels {
 		if t.Reels[i].Stop >= 0 {
@@ -629,8 +506,7 @@ func (t *TimingState) resolveReels() {
 	}
 }
 
-// largestReelMatch returns the size of the most-repeated locked symbol across
-// the reels (called after every reel is stopped).
+// largestReelMatch returns the size of the most-repeated locked symbol.
 func largestReelMatch(reels []Reel) int {
 	best := 0
 	for i := range reels {
@@ -647,12 +523,9 @@ func largestReelMatch(reels []Reel) int {
 	return best
 }
 
-// NewRecallState builds a memory-pattern bar: a random directional run shows
-// face-up for `reveal` seconds, then hides — the player reproduces it from
-// memory before the bar elapses. Reuses the Sequence* fields and
-// resolveSequence grading; the only differences from a sequence bar are the
-// reveal-then-hide phase (RecallHidden) and that input is ignored until the
-// pattern hides (gated at the call site).
+// NewRecallState builds a memory-pattern bar: a random run shows for `reveal`
+// seconds then hides; the player reproduces it. Reuses Sequence* fields +
+// resolveSequence; differs only in the reveal-then-hide phase (RecallHidden).
 func NewRecallState(rng *rand.Rand, duration float32, length int, reveal float32) TimingState {
 	if duration <= 0 {
 		duration = RecallTimingDuration
@@ -663,9 +536,7 @@ func NewRecallState(rng *rand.Rand, duration float32, length int, reveal float32
 	if reveal <= 0 {
 		reveal = RecallRevealTime
 	}
-	// Reveal MUST end before the bar does, or RecallHidden never flips: there'd
-	// be no input window and the resolve-flash would paint the memorize branch
-	// (answer lit). Cap it to leave at least a fraction of the bar for input.
+	// Reveal MUST end before the bar does or there's no input window; cap it.
 	if maxReveal := duration * RecallMaxRevealFrac; reveal > maxReveal {
 		reveal = maxReveal
 	}
@@ -680,36 +551,28 @@ func NewRecallState(rng *rand.Rand, duration float32, length int, reveal float32
 	}
 }
 
-// RecallHidden reports whether a recall bar's pattern has hidden — i.e. the
-// reveal phase is over and the input phase is open. Render gates "show the
-// arrows" on this; the battle input loop gates "accept directional taps" on it.
+// RecallHidden reports whether a recall pattern has hidden (input phase open).
 func (t TimingState) RecallHidden() bool {
 	return t.Kind == TimingKindRecall && t.Elapsed >= t.RevealTime
 }
 
 // NewOverchargeState builds a charge bar with a post-peak OVERLOAD band:
-// releasing past the peak (or holding to the end) overcharges the spell —
-// bonus effect at the cost of recoil — instead of decaying straight to Miss.
-// Identical cursor/curve to a normal charge; only the resolve differs
-// (resolveOvercharge).
+// releasing past the peak overcharges (bonus + recoil) instead of Miss.
+// Identical curve to a normal charge; only resolveOvercharge differs.
 func NewOverchargeState(duration float32) TimingState {
 	t := NewChargeState(duration)
 	t.Kind = TimingKindOvercharge
 	return t
 }
 
-// Tick advances the bar by dt. For press bars, auto-resolves a Miss if the
-// window passes without a press. For charge bars, auto-resolves at duration
-// (graded by where Elapsed lands) — held-too-long produces a Miss/Nice.
+// Tick advances the bar by dt, auto-resolving at timeout (press → Miss,
+// charge → graded by where Elapsed lands).
 func (t *TimingState) Tick(dt float32) {
 	if !t.Active || t.Resolved {
 		return
 	}
 	t.Elapsed += dt
-	// Per-window flash decay on tally bars. The render reads
-	// FlashTimer to drive a brief brightening on each freshly-hit
-	// window; tick it down here so the feedback decays even while
-	// the bar continues sweeping toward more accept zones.
+	// Decay per-window hit-flash timers on tally bars.
 	if t.IsTallyMode() {
 		for i := range t.Windows {
 			if t.Windows[i].FlashTimer > 0 {
@@ -725,8 +588,7 @@ func (t *TimingState) Tick(dt float32) {
 	}
 	switch t.Kind {
 	case TimingKindCharge, TimingKindOvercharge:
-		// Bar timed out. If they engaged at all, treat as released-late
-		// (overcharge grades this as an overload); otherwise it's just a Miss.
+		// If engaged, treat as released-late (overcharge → overload); else Miss.
 		if t.Pressed {
 			t.Released = true
 			t.resolveChargeKind()
@@ -735,16 +597,11 @@ func (t *TimingState) Tick(dt float32) {
 			t.Resolved = true
 		}
 	case TimingKindSequence, TimingKindRecall:
-		// Time's up — pending slots count as wrong, grade what we have.
-		// Recall shares the sequence grading (it's a hidden-pattern sequence).
 		t.resolveSequence()
 	case TimingKindReels:
-		// Time's up — lock any reel still spinning and grade the result.
 		t.resolveReels()
 	default:
-		// Press bar timed out. Tally-mode bars resolve with the
-		// hits they accumulated (could be partial); single-window
-		// bars auto-Miss for failure to press.
+		// Press timeout: tally bars resolve with accumulated hits; single Miss.
 		if t.IsTallyMode() {
 			t.resolveTally()
 		} else {
@@ -754,20 +611,9 @@ func (t *TimingState) Tick(dt float32) {
 	}
 }
 
-// Press records a press-kind input. Returns true if this press
-// resolved the bar.
-//
-// Single-window bars resolve on the first press: in-window grades
-// against the gradient bands; out-of-window stamps a Miss.
-//
-// Tally-mode bars (Windows non-nil) accumulate hits without
-// resolving — each press inside an unconsumed accept window
-// increments Hits and marks the window consumed. Pressing inside
-// the late commit zone (>= CommitStart) resolves with the current
-// tally; pressing outside any window or zone is a no-op (the bar
-// continues sweeping). The bar also resolves on Tick timeout.
-//
-// For charge-kind bars, use Hold/Release instead.
+// Press records a press-kind input; returns true if it resolved the bar.
+// Single-window bars resolve on the first press (in-window graded, else Miss).
+// Tally bars accumulate hits via pressTally. Charge bars use Hold/Release.
 func (t *TimingState) Press() bool {
 	if !t.Active || t.Resolved {
 		return false
@@ -791,15 +637,11 @@ func (t *TimingState) Press() bool {
 	return true
 }
 
-// pressTally handles one input on a multi-press tally bar. Each
-// press inside an unconsumed accept window adds a hit; pressing in
-// the commit zone resolves the bar with whatever's tallied; any
-// press outside both zones is a silent no-op (no penalty — the
-// rhythm-game vibe is "tap to the beat," not "punish off-beat").
+// pressTally handles one input on a multi-press tally bar: an unconsumed-window
+// press adds a hit, a commit-zone press resolves, any other press is a no-op.
 func (t *TimingState) pressTally() bool {
-	// Commit-zone press: end the bar early with the current tally. Mark
-	// Pressed so a deliberate early commit registers as engagement even with
-	// zero hits — a walk-away (Tick timeout, no press) is the only !Pressed case.
+	// Commit-zone press resolves early. Mark Pressed so a deliberate commit
+	// counts as engagement even at zero hits (only a walk-away stays !Pressed).
 	if t.Elapsed >= t.CommitStart {
 		t.Pressed = true
 		t.resolveTally()
@@ -815,9 +657,7 @@ func (t *TimingState) pressTally() bool {
 			w.Hit = true
 			w.FlashTimer = TallyHitFlashDuration
 			t.Hits++
-			// All windows landed? Resolve immediately — there's
-			// nothing else to score; making the player wait would
-			// just feel like dead time.
+			// All windows landed — resolve now, nothing left to score.
 			if t.Hits >= len(t.Windows) {
 				t.resolveTally()
 				return true
@@ -825,24 +665,16 @@ func (t *TimingState) pressTally() bool {
 			return false
 		}
 	}
-	// Press outside any window AND before commit — no-op. Player
-	// can keep tapping; the bar continues.
-	return false
+	return false // outside any window, before commit — no-op
 }
 
-// resolveTally finalises a multi-press bar. Quality maps from Hits:
-// zero = Miss, all-windows = Excellent (perfect run), one short of all
-// = Great, any fewer than that = Good. For a 2-window bar the Good band
-// is unreachable (1-of-2 lands in the Great band) — intended: missing
-// half a two-hit tally is still a solid partial. The Good band is for
-// 3+-window bars, where landing e.g. 1 of 3 grades below Great. Most
-// apply paths also read Hits directly so the per-hit damage scaling
-// lands without depending on Quality.
+// resolveTally finalises a multi-press bar. Quality from Hits: 0 = Miss,
+// all = Excellent, one short = Great, fewer = Good (Good only reachable for
+// 3+-window bars). Apply paths also read Hits directly for per-hit scaling.
 func (t *TimingState) resolveTally() {
 	t.Resolved = true
-	// Don't clobber an already-set Pressed (a commit-zone press marks it true
-	// before calling here); otherwise infer engagement from landed hits so a
-	// Tick-timeout with no input stays !Pressed.
+	// Don't clobber a commit-zone press's Pressed; else infer from hits so a
+	// no-input timeout stays !Pressed.
 	t.Pressed = t.Pressed || t.Hits > 0
 	switch {
 	case t.Hits == 0:
@@ -856,10 +688,8 @@ func (t *TimingState) resolveTally() {
 	}
 }
 
-// activePressWindow returns the (start, end, sweet) of the single
-// acceptance window the cursor is currently inside, with ok=false
-// if the cursor is outside it. Single-window bars only — multi-
-// window tally bars route through pressTally and never call this.
+// activePressWindow returns the single acceptance window the cursor is inside
+// (ok=false if outside). Single-window bars only.
 func (t TimingState) activePressWindow() (start, end, sweet float32, ok bool) {
 	if t.Elapsed >= t.WindowStart && t.Elapsed <= t.WindowEnd {
 		return t.WindowStart, t.WindowEnd, t.SweetSpot, true
@@ -867,8 +697,7 @@ func (t TimingState) activePressWindow() (start, end, sweet float32, ok bool) {
 	return 0, 0, 0, false
 }
 
-// Hold marks the charge bar as engaged. Idempotent — sets Pressed=true on
-// the first held frame and stays. No-op for press-kind bars.
+// Hold marks the charge bar engaged (idempotent). No-op for press-kind bars.
 func (t *TimingState) Hold() {
 	if !t.Active || t.Resolved {
 		return
@@ -879,16 +708,14 @@ func (t *TimingState) Hold() {
 	t.Pressed = true
 }
 
-// isChargeFamily reports whether this bar uses the hold-and-release charge
-// flow (normal Charge or its Overcharge variant). Both share Hold / Release
-// / Tick-timeout handling — only the resolve grader differs.
+// isChargeFamily reports whether this bar uses the hold/release flow (Charge
+// or Overcharge); they differ only in the resolve grader.
 func (t TimingState) isChargeFamily() bool {
 	return t.Kind == TimingKindCharge || t.Kind == TimingKindOvercharge
 }
 
-// Release closes a charge bar. Returns true if this release resolved the bar.
-// Releasing without ever having Held does nothing — you can't release what
-// you never picked up. No-op for press-kind bars.
+// Release closes a charge bar; returns true if it resolved. No-op without a
+// prior Hold, or for press-kind bars.
 func (t *TimingState) Release() bool {
 	if !t.Active || t.Resolved {
 		return false
@@ -901,9 +728,8 @@ func (t *TimingState) Release() bool {
 	return true
 }
 
-// SequenceInput records a directional press at the current cursor slot.
-// Marks that slot Correct or Wrong, advances the cursor, and resolves when
-// the last slot is filled. Returns true if this input resolved the bar.
+// SequenceInput records a directional press at the cursor slot, advancing it
+// and resolving when the last slot fills. Returns true if it resolved the bar.
 func (t *TimingState) SequenceInput(dir int) bool {
 	if !t.Active || t.Resolved {
 		return false
@@ -928,16 +754,11 @@ func (t *TimingState) SequenceInput(dir int) bool {
 	return false
 }
 
-// resolveSequence grades the directional-sequence pattern. Each non-correct
-// slot (wrong key OR pending/timed-out) drops one grade from Excellent. For
-// the plain sequence bar (TimingKindSequence — Venom Strike) a flawless run
-// only reaches Excellent when finished under SequenceFastThreshold — a
-// clean-but-slow run caps at Great, so speed is the deciding edge. The shared
-// Recall bar (TimingKindRecall)
-// is EXCLUDED from that demotion: its input is gated until the pattern hides
-// (Elapsed >= RevealTime > SequenceFastThreshold), so the speed clause would make
-// Excellent structurally unreachable — the memory itself is its skill test, so
-// a flawless recall earns Excellent regardless of clock.
+// resolveSequence grades the pattern: each non-correct slot (wrong or pending)
+// drops one grade from Excellent. For TimingKindSequence a flawless run only
+// reaches Excellent under SequenceFastThreshold (slow caps at Great). Recall is
+// EXCLUDED from that demotion (its input is gated past the threshold, so the
+// speed clause would make Excellent unreachable).
 func (t *TimingState) resolveSequence() {
 	t.Resolved = true
 	correctCount := 0
@@ -949,8 +770,7 @@ func (t *TimingState) resolveSequence() {
 	wrongCount := len(t.SequenceTargets) - correctCount
 	grade := TimingQualityExcellent - wrongCount
 	if t.Kind == TimingKindSequence && wrongCount == 0 && t.Elapsed >= SequenceFastThreshold {
-		// Flawless but slow — the top grade is reserved for a fast clean run.
-		grade = TimingQualityGreat
+		grade = TimingQualityGreat // flawless but slow
 	}
 	if grade < TimingQualityMiss {
 		grade = TimingQualityMiss
@@ -961,43 +781,18 @@ func (t *TimingState) resolveSequence() {
 	t.Quality = grade
 }
 
-// resolveCharge grades a charge release by counting how many tick markers
-// the cursor crossed (visually) before the player let go. Each tick is a
-// discrete grade jump, so a release that lands one frame before the third
-// tick scores the same as one that lands halfway between the second and
-// third. The peak window (3 ticks completed) is split into Great vs
-// Excellent based on closeness to the sweet spot. Past the peak window
-// the release decays straight to Miss — over-charging isn't rewarded.
-//
-// Grading reads the cursor's *visual* position (via ChargeCursorProgress),
-// not raw Elapsed, so the non-linear acceleration curve drives both what
-// the player sees and what they're scored against — no drift between the
-// cursor crossing a tick line on screen and the bar awarding that tick.
-//
-// Grade dispatch (p = cursor visual progress):
-//
-//	0 ticks crossed (p < ChargeTick1Pct):                          Miss
-//	1 tick crossed  (ChargeTick1Pct <= p < ChargeTick2Pct):        Nice
-//	2 ticks crossed (ChargeTick2Pct <= p < ChargeTick3Pct):        Good
-//	3 ticks crossed in peak window (p <= ChargePeakEnd):           Great or Excellent
-//	past peak window:                                              Miss
+// resolveCharge grades a charge release by ticks crossed (visual position via
+// ChargeCursorProgress, not raw Elapsed). Past the peak decays to Miss.
 func (t *TimingState) resolveCharge() {
 	t.Resolved = true
 	p := ChargeCursorProgress(t.Elapsed, t.Duration)
-	// chargeGradeUpToPeak returns pastPeak=true PAST the peak window, where the
-	// returned grade is Miss — exactly the normal charge's held-too-long penalty.
 	t.Quality, _ = chargeGradeUpToPeak(p)
 }
 
-// chargeGradeUpToPeak grades a charge cursor at visual progress p across the
-// pre-peak ticks and the peak window, returning (grade, pastPeak). pastPeak is
-// true ONLY when p is past the peak window (the late-release case); the
-// pre-peak early-release Miss returns pastPeak=false so it isn't mistaken for
-// an overload. The caller decides what pastPeak means: resolveCharge takes the
-// returned Miss either way (held too long / released too early), while
-// resolveOvercharge reinterprets pastPeak as an OVERLOAD (bonus + recoil) but
-// still misses the pre-peak early release. Sharing this keeps the two charge
-// resolvers' tick/peak bands from drifting.
+// chargeGradeUpToPeak grades a cursor at visual progress p, returning
+// (grade, pastPeak). pastPeak is true ONLY past the peak window (a pre-peak
+// early Miss returns false). Shared by both charge resolvers; resolveOvercharge
+// reinterprets pastPeak as an overload.
 func chargeGradeUpToPeak(p float32) (grade int, pastPeak bool) {
 	switch {
 	case p < ChargeTick1Pct:
@@ -1007,7 +802,7 @@ func chargeGradeUpToPeak(p float32) (grade int, pastPeak bool) {
 	case p < ChargeTick3Pct:
 		return TimingQualityGood, false
 	case p <= ChargePeakEnd:
-		// In the peak window — split Great vs Excellent on sweet-spot proximity.
+		// Peak window — split Great vs Excellent on sweet-spot proximity.
 		distance := AbsF(p - chargePeakSweet)
 		windowSize := ChargePeakEnd - ChargePeakStart
 		if windowSize <= 0 || distance/windowSize <= ChargeExcellentBandFrac {
@@ -1019,12 +814,9 @@ func chargeGradeUpToPeak(p float32) (grade int, pastPeak bool) {
 	}
 }
 
-// resolveOvercharge grades like resolveCharge through the peak, but PAST the
-// peak — where a normal charge decays to Miss — it OVERLOADS: the release
-// still counts as a top-tier (Excellent) hit and sets Overloaded so the
-// skill's apply path grants the bonus and applies recoil. Releasing before
-// the first tick still misses; the brave-but-greedy late release pays off
-// with a cost.
+// resolveOvercharge grades like resolveCharge through the peak, but past the
+// peak it OVERLOADS (Excellent + Overloaded) instead of Miss. A pre-tick1
+// release still misses.
 func (t *TimingState) resolveOvercharge() {
 	t.Resolved = true
 	p := ChargeCursorProgress(t.Elapsed, t.Duration)
@@ -1038,8 +830,7 @@ func (t *TimingState) resolveOvercharge() {
 }
 
 // resolveChargeKind dispatches a charge resolve to the normal or overload
-// grader. Both charge-family kinds (Charge / Overcharge) route through here
-// from Release and the Tick timeout so the late-release path can't diverge.
+// grader. Both Release and Tick timeout route through here so they can't diverge.
 func (t *TimingState) resolveChargeKind() {
 	if t.Kind == TimingKindOvercharge {
 		t.resolveOvercharge()
@@ -1048,24 +839,16 @@ func (t *TimingState) resolveChargeKind() {
 	}
 }
 
-// resolveInWindow grades a press against an explicit (start, end, sweet)
-// window. Distance from the sweet spot, normalized by the window's
-// half-width, picks a grade off pressGradeBands. Callers must verify the
-// cursor is inside the window first — an out-of-window press should be
-// resolved as Miss by the caller, not by passing a zero-width window
-// (that path quietly returns Nice).
+// resolveInWindow grades a press against an explicit window. Callers must
+// verify the cursor is inside it first (a zero-width window returns Nice).
 func (t *TimingState) resolveInWindow(start, end, sweet float32) {
 	t.Resolved = true
 	t.Quality = gradeWindow(t.Elapsed, start, end, sweet)
 }
 
-// gradeWindow grades a cursor at `elapsed` against a press acceptance window
-// [start, end] with its sweet spot at `sweet`: distance from the sweet spot,
-// normalized by the window width, picks a grade off pressGradeBands. A
-// non-positive window width returns Nice (the degenerate zero-width case the
-// callers' window-membership gate should make unreachable). Shared by
-// resolveInWindow (writes the result) and PreviewQuality (returns it) so the
-// live preview and the scored grade can't desync.
+// gradeWindow grades a cursor at `elapsed` against window [start,end] with sweet
+// spot `sweet`: sweet-distance / width picks a band off pressGradeBands.
+// Non-positive width returns Nice. Shared by resolveInWindow + PreviewQuality.
 func gradeWindow(elapsed, start, end, sweet float32) int {
 	windowSize := end - start
 	if windowSize <= 0 {
@@ -1074,9 +857,8 @@ func gradeWindow(elapsed, start, end, sweet float32) int {
 	return gradeFromRatio(AbsF(elapsed-sweet) / windowSize)
 }
 
-// Progress returns the current sweep position in [0, 1]. For charge bars
-// this runs through ChargeCursorProgress so the cursor accelerates with
-// each notch; for press / sequence bars it's a straight Elapsed/Duration.
+// Progress returns the sweep position in [0,1]: ChargeCursorProgress for charge
+// bars (accelerating), else clamped Elapsed/Duration.
 func (t TimingState) Progress() float32 {
 	if t.Duration <= 0 {
 		return 0
@@ -1094,11 +876,8 @@ func (t TimingState) Progress() float32 {
 	return p
 }
 
-// timingGradeAt returns the timingGrades row for a quality, falling back to
-// the Miss row for any out-of-range index. Single home for the bounds guard
-// the grade readers (TimingBonusMult, TimingDefenseMult, HitStopFor,
-// CombatShakeFor, TimingQualityLabel) all share. timingGrades' element is an
-// anonymous struct (config.go), so this returns it via the slice index type.
+// timingGradeAt returns the valid timingGrades index for a quality, falling
+// back to Miss when out of range. Shared bounds guard for all grade readers.
 func timingGradeAt(quality int) int {
 	if quality < 0 || quality >= len(timingGrades) {
 		return TimingQualityMiss
@@ -1107,34 +886,25 @@ func timingGradeAt(quality int) int {
 }
 
 // TimingBonusMult is the offensive damage multiplier for an attack quality.
-// Indexes into timingGrades (config.go); out-of-range qualities fall back
-// to the Miss multiplier (1.0×).
 func TimingBonusMult(quality int) float32 {
 	return timingGrades[timingGradeAt(quality)].Atk
 }
 
-// QualityScaledChance scales a base probability by the timing-quality
-// offensive multiplier and clamps to [_, 1]. Single home for the
-// "base * TimingBonusMult(quality), cap at 1.0" pattern shared by
-// status-proc and steal-success rolls.
+// QualityScaledChance scales a base probability by TimingBonusMult, clamped to
+// [_,1]. Shared by status-proc and steal-success rolls.
 func QualityScaledChance(base float64, quality int) float64 {
 	c := base * float64(TimingBonusMult(quality))
 	return Clamp(c, 0, 1)
 }
 
-// TimingDefenseMult is the incoming damage multiplier for a defend quality.
-// Lower is better; Excellent quarters incoming damage, Miss takes the full
-// hit. Indexes into timingGrades (config.go); out-of-range qualities fall
-// back to the Miss multiplier (1.0×).
+// TimingDefenseMult is the incoming damage multiplier for a defend quality
+// (lower is better; Excellent quarters, Miss takes full).
 func TimingDefenseMult(quality int) float32 {
 	return timingGrades[timingGradeAt(quality)].Def
 }
 
-// pressGradeBands maps the sweet-spot-distance ratio (in units of the
-// acceptance window half-width) onto a grade. Single source of truth for
-// both resolve() and PreviewQuality so the cursor's live preview and the
-// actually-scored grade never desync. A balance pass that wants different
-// bands changes this table and both call sites follow.
+// pressGradeBands maps sweet-distance ratio (units of window width) to a grade.
+// Single source for resolve + PreviewQuality so they can't desync.
 var pressGradeBands = []struct {
 	maxRatio float32
 	grade    int
@@ -1144,11 +914,8 @@ var pressGradeBands = []struct {
 	{0.30, TimingQualityGood},
 }
 
-// gradeFromRatio looks up the press-bar grade for a normalized
-// sweet-spot-distance ratio. Anything past the largest band falls
-// through to Nice (still inside the window) — the caller is responsible
-// for testing window membership first; a ratio passed in for an
-// out-of-window press still grades as a Miss by the caller's gate.
+// gradeFromRatio looks up the grade for a normalized sweet-distance ratio;
+// past the largest band falls through to Nice (caller gates window membership).
 func gradeFromRatio(ratio float32) int {
 	for _, b := range pressGradeBands {
 		if ratio <= b.maxRatio {
@@ -1158,13 +925,8 @@ func gradeFromRatio(ratio float32) int {
 	return TimingQualityNice
 }
 
-// PreviewQuality returns the grade a press-kind bar would score if the player
-// pressed right now. Used by the renderer to live-color the cursor so the
-// player sees their potential grade approaching — Excellent shimmers as they
-// near the sweet spot, slips to Great, then Good, etc. Returns Miss when the
-// cursor is outside every acceptance window (or the bar isn't a press kind).
-// Routes through activePressWindow so single-zone and double-zone bars share
-// one grading path.
+// PreviewQuality returns the grade a press-kind bar would score right now (for
+// the renderer's live cursor color). Miss when outside every window or non-press.
 func (t TimingState) PreviewQuality() int {
 	if t.Kind != TimingKindPress {
 		return TimingQualityMiss
@@ -1176,30 +938,22 @@ func (t TimingState) PreviewQuality() int {
 	return gradeWindow(t.Elapsed, start, end, sweet)
 }
 
-// HitStopFor returns the freeze-frame duration after a graded press lands.
-// Misses / Nice / Good get no hit-stop — the action just flows. Great gets a
-// short punch, Excellent gets a longer one. Caller (battle/battle.go's
-// tickFlashHold) uses this to delay the apply step so the bar's flash hold
-// chains into a true world-pause before damage lands.
+// HitStopFor returns the freeze-frame duration after a graded press: 0 below
+// Great, short for Great, longer for Excellent.
 func HitStopFor(quality int) float32 {
 	return timingGrades[timingGradeAt(quality)].HitStop
 }
 
-// CombatShakeFor returns the BASE screen-shake (peak amplitude + duration) a
-// graded hit earns — only Great / Excellent presses shake (the timed-hit
-// payoff), Excellent a touch harder + longer. This is deliberately subtle;
-// the big shake (crits / AoE) is armed separately via TriggerCombatShake.
-// Mirrors HitStopFor so the two impact knobs sit together.
+// CombatShakeFor returns the base screen-shake (peak + duration) for a graded
+// hit — only Great/Excellent shake. Big crit/AoE shake is armed separately.
 func CombatShakeFor(quality int) (peak, dur float32) {
 	g := timingGrades[timingGradeAt(quality)]
 	return g.ShakePeak, g.ShakeDur
 }
 
-// TriggerCombatShake arms the camera shake with an explicit peak amplitude
-// (world units) and duration (seconds). A stronger shake already in flight is
-// NOT stomped by a weaker one — so the big crit/AoE shake survives the small
-// grade-based base that gets armed a frame earlier in the same resolve. No-op
-// for a nil battle or a non-positive peak/duration (e.g. a Miss/Nice/Good).
+// TriggerCombatShake arms the camera shake (peak world units, dur seconds).
+// A stronger in-flight shake is not stomped by a weaker one. No-op for nil
+// battle or non-positive peak/dur.
 func TriggerCombatShake(b *Battle, peak, dur float32) {
 	if b == nil || peak <= 0 || dur <= 0 {
 		return
@@ -1210,19 +964,14 @@ func TriggerCombatShake(b *Battle, peak, dur float32) {
 	b.ShakePeak = peak
 	b.ShakeDur = dur
 	b.ShakeTimer = dur
-	// Impact feedback has two halves: the camera shake (above) and a
-	// proportional controller rumble. Arming both here means every shake site
-	// (good press / crit / AoE) buzzes the pad too, graded by the same peak —
-	// one knob, no scattered TriggerRumble calls. Taking a hit doesn't shake,
-	// so that path arms TriggerRumble directly.
+	// Buzz the pad proportionally so every shake site rumbles off one knob.
+	// (Taking a hit doesn't shake, so that path calls TriggerRumble directly.)
 	TriggerRumble(b, peak*RumblePerShakePeak, dur)
 }
 
-// TriggerRumble arms the controller-rumble envelope: peak motor strength
-// (clamped to [0,1]) for `dur` seconds, decayed by TickRumble. Keep-the-stronger
-// like TriggerCombatShake — a weaker buzz won't stomp a stronger one still in
-// flight. No-op on a nil battle or non-positive strength/dur. This is the
-// raylib-free intent layer; input.ApplyRumble drives the actual motor.
+// TriggerRumble arms the rumble envelope (strength clamped [0,1], dur seconds,
+// decayed by TickRumble). Keep-the-stronger like TriggerCombatShake. No-op on
+// nil battle or non-positive args. Intent layer; input.ApplyRumble drives the motor.
 func TriggerRumble(b *Battle, strength, dur float32) {
 	if b == nil || strength <= 0 || dur <= 0 {
 		return
@@ -1236,12 +985,9 @@ func TriggerRumble(b *Battle, strength, dur float32) {
 	b.RumbleTimer = dur
 }
 
-// TickRumble decays the rumble envelope by dt and returns the current motor
-// level in [0,1] (RumbleStrength scaled by the remaining fraction), or 0 when
-// no rumble is active. Pure / raylib-free — the run loop calls it EVERY frame
-// (scene-independently) and hands the level to input.ApplyRumble. Decaying in
-// the main loop (not a battle-only update) is what guarantees a rumble armed
-// just before battle exit still eases to 0 instead of sticking the motor on.
+// TickRumble decays the rumble envelope by dt and returns the motor level
+// [0,1] (or 0 when inactive). Must be called every frame (scene-independent) so
+// a rumble armed near battle exit still eases to 0 instead of sticking on.
 func TickRumble(b *Battle, dt float32) float32 {
 	if b == nil || b.RumbleTimer <= 0 || b.RumbleDur <= 0 {
 		return 0
@@ -1255,19 +1001,13 @@ func TickRumble(b *Battle, dt float32) float32 {
 	return Clamp(level, 0, 1)
 }
 
-// TimingQualityLabel returns the popup text for a quality grade. Reads
-// from timingGrades (config.go); out-of-range values fall back to the
-// Miss label so a future grade addition is one table-row edit.
+// TimingQualityLabel returns the popup text for a quality grade.
 func TimingQualityLabel(quality int) string {
 	return timingGrades[timingGradeAt(quality)].Label
 }
 
-// ScaleDamage applies an attack quality's multiplier to a base damage amount.
-// On Excellent, the result is guaranteed strictly greater than the base
-// (base+1 if the multiplier would otherwise round down to <=base), so an
-// "Excellent" never reads as a non-improvement over a Miss. Other grades
-// can round to 0 on tiny bases — that's by design (a Nice on a 1-damage
-// swing shouldn't print "1 damage" same as a Miss).
+// ScaleDamage applies an attack quality's multiplier to base damage. Excellent
+// is guaranteed > base (base+1 floor); other grades may round to 0 on tiny bases.
 func ScaleDamage(base int, quality int) int {
 	scaled := scaleByMult(base, TimingBonusMult(quality))
 	if quality == TimingQualityExcellent && scaled <= base {
@@ -1281,19 +1021,14 @@ func ScaleHeal(base int, quality int) int {
 	return scaleByMult(base, TimingBonusMult(quality))
 }
 
-// ScaleIncomingDamage applies a defend quality's multiplier to incoming damage.
-// A defended hit cannot become heal — clamps at 0. Integer truncation means
-// a Great/Excellent block on a small hit (e.g. base 3 × 0.25 = 0.75 → 0) can
-// fully zero the damage; that's intentional, matches how a successful
-// timed block reads in-game ("0 damage" with the block flourish).
+// ScaleIncomingDamage applies a defend quality's multiplier to incoming damage,
+// clamped at 0 (a strong block on a small hit can truncate to 0 — intentional).
 func ScaleIncomingDamage(base int, quality int) int {
 	return scaleByMult(base, TimingDefenseMult(quality))
 }
 
-// scaleByMult truncates base*mult to an int, clamped at 0 — the shared
-// core of every quality-scaled amount (damage, heal, incoming). Each
-// public wrapper layers its own special case (the Excellent damage
-// floor) on top.
+// scaleByMult truncates base*mult to an int, clamped at 0. Shared core of every
+// quality-scaled amount; wrappers layer special cases on top.
 func scaleByMult(base int, mult float32) int {
 	scaled := int(float32(base) * mult)
 	if scaled < 0 {

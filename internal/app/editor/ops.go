@@ -9,11 +9,8 @@ import (
 	"strconv"
 )
 
-// activeFootprint returns the multi-tile footprint of the active brush,
-// or nil if the current brush is single-tile. Props anchors check
-// core.PropFootprint; decor anchors check core.DecorFootprint. Used by
-// the hover preview and apply paths so authors see the footprint shape
-// before placement and don't have to drop tail tiles by hand.
+// activeFootprint returns the active brush's multi-tile footprint (props →
+// core.PropFootprint, decor → core.DecorFootprint), or nil if single-tile.
 func activeFootprint(s *State) []core.MultiTileOffset {
 	b := s.activeBrush()
 	switch s.layer {
@@ -25,14 +22,9 @@ func activeFootprint(s *State) []core.MultiTileOffset {
 	return nil
 }
 
-// footprintBlocker walks the footprint anchored at (x,z) and returns the
-// first cell-level blocker's user-facing message, or "" when every cell is
-// authorable. checkProp toggles the "cell already holds a prop" rule — on for
-// the decor brush + the props-layer hover preview (decor can't sit on a prop),
-// off for the prop brush itself (a multi-tile prop's own tail cells aren't
-// re-validated against props). The single source of truth for "does this
-// footprint fit?" — footprintPlaceable wraps it as a bool, while the decor /
-// prop brush anchor paths flash the returned message. Blocker precedence:
+// footprintBlocker returns the first cell-level blocker message for the footprint
+// anchored at (x,z), or "" if it fits. checkProp gates the "cell holds a prop"
+// rule (on for decor, off for the prop brush's own tail cells). Precedence:
 // bounds → wall → prop → player start.
 func footprintBlocker(s *State, x, z int, footprint []core.MultiTileOffset, checkProp bool) string {
 	for _, off := range footprint {
@@ -55,31 +47,22 @@ func footprintBlocker(s *State, x, z int, footprint []core.MultiTileOffset, chec
 	return ""
 }
 
-// footprintPlaceable reports whether the active brush's footprint fits
-// at the (anchor) cell — every footprint cell must be in-bounds, not a
-// wall, not occupied by another prop (for the props layer), and not the
-// player start. The hover preview tints red when this is false so the
-// author sees the click will be refused.
+// footprintPlaceable reports whether the active brush's footprint fits at (x,z).
+// The hover preview tints red when false.
 func footprintPlaceable(s *State, x, z int, footprint []core.MultiTileOffset) bool {
 	return footprintBlocker(s, x, z, footprint, s.layer == LayerDecor) == ""
 }
 
-// applyTool runs the active layer's selected brush at (x,z). Behavior is
-// per-layer: grid layers set the layer's char; entity layer fires the
-// chosen placement tool. Painting a wall on an entity-occupied cell auto-
-// clears the entity; painting a prop on a wall is refused.
+// applyTool runs the active layer's selected brush at (x,z): grid layers set the
+// char, the entity layer fires the placement tool.
 func applyTool(s *State, x, z int) {
 	if !s.area.InBounds(x, z) {
 		return
 	}
-	// Painting an invisible layer reads as a dead tool — if the layer being
-	// edited is hidden (its eye toggled off, or another layer soloed), reveal
-	// it so the stroke is actually visible. Idempotent; cheap per cell.
+	// Reveal the layer so a stroke on a hidden layer isn't invisible.
 	s.layerHidden[s.layer] = false
 	brush := s.activeBrush()
 	if brush.Erase {
-		// The dedicated eraser brush runs the active layer's reset (same as the
-		// context-menu "Erase here"); right-click is the context menu now.
 		eraseAt(s, x, z)
 		return
 	}
@@ -95,10 +78,8 @@ func applyTool(s *State, x, z int) {
 	case LayerCeiling:
 		setLayerCell(&s.area.Ceiling, x, z, brush.Char)
 	case LayerElevation:
-		// Elevation is a voxel grid: a paint places ONE tile at the active level
-		// (x, editLevel, z). There's either a tile there or not — stacking tiles
-		// with a gap between is what makes a land bridge (tile below, none above
-		// it, tile above the gap). The erase brush removes the tile at the level.
+		// Voxel grid: a paint places ONE tile at (x, editLevel, z); a gap between
+		// stacked tiles makes a land bridge. Erase removes the tile at the level.
 		s.area.SetCube(x, s.editLevel, z, s.area.FaceSkinAt(x, z))
 		s.dirty = true
 		return
@@ -108,22 +89,16 @@ func applyTool(s *State, x, z int) {
 	default:
 		panic("editor: applyTool missing case for layer — add it here, in eraseAt, and in activeGrid")
 	}
-	// Floors mode ("treat every level as its own floor"): a content paint also
-	// lifts the tile to the active level, so picking a level and painting
-	// builds that floor without hand-stamping the Elevation digit. Shared with
-	// the flood-fill and fill-all paths via stampActiveLevel so all three
-	// content-paint entry points honor the lens identically.
+	// A content paint also lifts the tile to the active level (shared with
+	// flood-fill and fill-all via stampActiveLevel).
 	stampActiveLevel(s, x, z)
 	s.dirty = true
 }
 
-// layerStampsActiveLevel reports whether painting on `layer` should lift the
-// tile to the active edit level. Floor / decor / props / ceiling sit on (or
-// over) a floor, so painting them defines that floor's level. WALLS do NOT:
-// a wall is a vertical structure, and re-stamping its tile's level on paint
-// silently moved tiles between levels — under a fat brush it dropped a raised
-// neighbour to the active level, which read as "painting a wall erased the
-// walls on another level." Elevation sets the level itself; Entities have none.
+// layerStampsActiveLevel reports whether painting on layer lifts the tile to the
+// active level. Floor/decor/props/ceiling define a floor's level; WALLS do NOT
+// (re-stamping would move raised neighbours under a fat brush). Elevation sets
+// the level itself; Entities have none.
 func layerStampsActiveLevel(layer Layer) bool {
 	switch layer {
 	case LayerElevation, LayerEntities, LayerWalls:
@@ -132,12 +107,8 @@ func layerStampsActiveLevel(layer Layer) bool {
 	return true
 }
 
-// stampActiveLevel lifts tile (x,z) to the active level — the single "a content
-// paint builds the active floor" step shared by applyTool, floodFill, and
-// fillEntireLayer so the three paths can't drift. The levels model is now
-// ALWAYS on (Photoshop-style), so every floor-defining content paint targets
-// the active level. Gated by layerStampsActiveLevel (walls/elevation/entities
-// are exempt).
+// stampActiveLevel lifts tile (x,z) to the active level — shared by applyTool,
+// floodFill, and fillEntireLayer. Gated by layerStampsActiveLevel.
 func stampActiveLevel(s *State, x, z int) {
 	if !layerStampsActiveLevel(s.layer) {
 		return
@@ -148,13 +119,10 @@ func stampActiveLevel(s *State, x, z int) {
 	setTileGroundLevel(s, x, z, s.editLevel)
 }
 
-// setTileGroundLevel raises column (x,z) to ground `level`, honoring voxel mode.
-// Once the area's Solids stack is materialized (any cube placement / Set Height
-// on a voxel map), render / movement / save all read the voxel stack and IGNORE
-// the legacy Elevation string — so a height write MUST go through SetColumnTop
-// (built for exactly this) or it silently desyncs. Heightfield maps (Solids nil)
-// keep the single-char Elevation write byte-for-byte. The shared home for every
-// editor "set this tile's ground level" path (stamp / flood / fill / ramp).
+// setTileGroundLevel raises column (x,z) to ground level, honoring voxel mode:
+// once Solids is materialized the height write MUST go through SetColumnTop or it
+// desyncs the ignored Elevation string. Heightfield maps (Solids nil) write
+// Elevation directly. Shared by stamp/flood/fill/ramp.
 func setTileGroundLevel(s *State, x, z, level int) {
 	if len(s.area.Solids) > 0 {
 		s.area.SetColumnTop(x, z, level)
@@ -163,18 +131,15 @@ func setTileGroundLevel(s *State, x, z, level int) {
 	setLayerCell(&s.area.Elevation, x, z, core.ElevationChar(level))
 }
 
-// applyFaceBrush sets the tile's cliff-face skin (the layer formerly known as
-// walls). Purely cosmetic — unlike the old wall brush it does NOT block or
-// clear props/decor/entities: a raised tile keeps its floor and scenery, and
-// the skin only shows where the tile's elevation exposes a face.
+// applyFaceBrush sets the tile's cliff-face skin (cosmetic only — does NOT block
+// or clear props/decor/entities; the skin shows only where elevation exposes a face).
 func applyFaceBrush(s *State, x, z int, c byte) {
 	setLayerCell(&s.area.Walls, x, z, c)
 }
 
 func applyDecorBrush(s *State, x, z int, c byte) {
-	// Multi-tile decor anchor: validate the whole footprint fits and is
-	// authorable before committing any cell, then auto-paint the tail
-	// chars so the author doesn't have to drop them by hand.
+	// Multi-tile decor anchor: validate the whole footprint before committing any
+	// cell, then auto-paint the tail chars.
 	if footprint := core.DecorFootprint(c); footprint != nil {
 		tail := core.DecorFootprintTail(c)
 		if msg := footprintBlocker(s, x, z, footprint, true); msg != "" {
@@ -208,11 +173,8 @@ func applyDecorBrush(s *State, x, z int, c byte) {
 	setTileLevel(s, &s.area.DecorLevels, x, z, s.editLevel)
 }
 
-// clearPropCell clears the prop at (x,z). If that cell holds a multi-tile prop
-// ANCHOR, the whole footprint — including the auto-painted tail cells — is
-// cleared, so erasing a multi-tile prop by its anchor doesn't strand orphaned
-// tail glyphs on the neighbouring cells. A single-tile prop (or already-empty
-// cell) just clears the one cell.
+// clearPropCell clears the prop at (x,z). A multi-tile prop ANCHOR clears its
+// whole footprint (tail cells included) so no orphan tail glyphs are stranded.
 func clearPropCell(a *core.AreaDefinition, x, z int) {
 	if !a.InBounds(x, z) {
 		return
@@ -236,11 +198,8 @@ func applyPropBrush(s *State, x, z int, c byte) {
 		clearTileLevel(&s.area.PropLevels, x, z)
 		return
 	}
-	// Multi-tile prop anchor: validate the whole footprint fits and is
-	// free, then auto-paint the tail char into the other footprint cells
-	// so the author doesn't have to place each tile manually. If any
-	// footprint cell is blocked, refuse the placement entirely (no
-	// partial commits).
+	// Multi-tile prop anchor: validate the whole footprint, then auto-paint the
+	// tail cells. Any blocked cell refuses the whole placement (no partial commits).
 	if footprint := core.PropFootprint(c); footprint != nil {
 		tail := core.PropFootprintTail(c)
 		if msg := footprintBlocker(s, x, z, footprint, false); msg != "" {
@@ -270,17 +229,14 @@ func applyPropBrush(s *State, x, z int, c byte) {
 	}
 	setLayerCell(&s.area.Props, x, z, c)
 	setTileLevel(s, &s.area.PropLevels, x, z, s.editLevel)
-	// A prop occupies the floor square; auto-clear any decor on it
-	// and any pack / chest / door that would now be inside the prop.
+	// A prop occupies the floor square; clear decor + any entity on it.
 	setLayerCell(&s.area.Decor, x, z, core.DecorAuto)
 	removeAllEntitiesAt(&s.area, x, z)
 }
 
-// setTileLevel records the level the thing placed at (x,z) sits on (the editor's
-// active level) into a per-tile level grid (PropLevels / DecorLevels). It stores
-// PropLevelAuto when that equals the column's auto surface — so a ground-placed
-// thing adds no section and keeps the map lean — and an explicit base-36 level
-// otherwise (placed on a deck/overhang). Shared by the prop and decor brushes.
+// setTileLevel records the level a placed thing sits on into a per-tile grid
+// (PropLevels / DecorLevels): PropLevelAuto when it matches the auto surface
+// (keeps the map lean), else an explicit base-36 level.
 func setTileLevel(s *State, grid *[]string, x, z, level int) {
 	if !s.area.InBounds(x, z) {
 		return
@@ -299,8 +255,8 @@ func setTileLevel(s *State, grid *[]string, x, z, level int) {
 	(*grid)[z] = string(row)
 }
 
-// clearTileLevel resets (x,z) back to the auto surface — paired with clearing the
-// prop/decor there so a removed deck item doesn't leave a stale level behind.
+// clearTileLevel resets (x,z) to the auto surface (paired with clearing the prop/
+// decor so a removed deck item leaves no stale level).
 func clearTileLevel(grid *[]string, x, z int) {
 	if z >= 0 && z < len(*grid) && x >= 0 && x < len((*grid)[z]) {
 		row := []byte((*grid)[z])
@@ -310,7 +266,7 @@ func clearTileLevel(grid *[]string, x, z int) {
 }
 
 // ensureLevelGrid allocates a per-tile level grid (all auto) sized to the area
-// when it isn't already, so setTileLevel can index it.
+// when it isn't already.
 func ensureLevelGrid(grid *[]string, w, h int) {
 	sized := len(*grid) == h
 	if sized {
@@ -343,20 +299,14 @@ func applyEntityBrush(s *State, x, z int, kind entityKind) {
 	if !s.area.InBounds(x, z) {
 		return
 	}
-	// Clear runs before the wall / prop guards so the author can erase a
-	// stranded pack from a tile that's since become un-placeable (e.g. a
-	// wall was painted over it). Without this, "Clear" would refuse on
-	// the very tile most likely to need cleaning.
+	// Clear runs before the wall/prop guards so a stranded pack on a now-
+	// unplaceable tile can still be erased.
 	if kind == entityClear {
 		clearEntitiesAt(s, x, z)
 		return
 	}
-	// Player start carries its own COMPLETE rule set (no wall / prop / deep
-	// water — anything that would soft-lock the player on spawn), routed
-	// through the shared startBlockers so it matches the right-click "Move
-	// start here" path exactly. Handled before the generic entity guard so
-	// its wall/prop wording isn't pre-empted by the looser "Entities need an
-	// open cell" message.
+	// Player start has its own rule set (startBlockers — matches the right-click
+	// "Move start here" path), handled before the generic guard for its wording.
 	if kind == entityPlayerStart {
 		if msg := firstBlocker(startBlockers(&s.area, x, z)...); msg != "" {
 			s.flash(msg)
@@ -388,19 +338,15 @@ func applyEntityBrush(s *State, x, z int, kind entityKind) {
 	}
 }
 
-// blockerCheck is one named "is this tile illegal for the entity being
-// placed?" predicate. blocker helpers below build these so the three
-// placement paths (door, chest, pack) read as a flat list of rules
-// rather than inlined if-flash-return ladders.
+// blockerCheck is one "is this tile illegal for the entity?" predicate, so the
+// placement paths read as a flat rule list.
 type blockerCheck struct {
 	fail bool
 	msg  string
 }
 
-// firstBlocker returns the first failing check's message, or "" when
-// the tile is fine. Order matters — list start / wall / prop / floor /
-// other-entity in the order the player would naturally encounter them
-// so the flash always names the most obvious obstacle.
+// firstBlocker returns the first failing check's message, or "". Order matters —
+// list rules so the flash names the most obvious obstacle.
 func firstBlocker(checks ...blockerCheck) string {
 	for _, c := range checks {
 		if c.fail {
@@ -410,10 +356,8 @@ func firstBlocker(checks ...blockerCheck) string {
 	return ""
 }
 
-// Named tile-blocker predicates. Each captures one rule + its user-
-// facing message so placement helpers don't re-spell either. `noun`
-// is "Door" / "Chest" / "Pack" — surfaces in messages where the
-// entity word makes the cause obvious to the player.
+// Named tile-blocker predicates, each one rule + its message. `noun` ("Door" /
+// "Chest" / "Pack") surfaces in messages where the entity word clarifies the cause.
 func blkStart(a *core.AreaDefinition, x, z int) blockerCheck {
 	return blockerCheck{a.StartTileX == x && a.StartTileZ == z, "Cell holds the player start"}
 }
@@ -445,37 +389,25 @@ func blkCrystalHere(a *core.AreaDefinition, x, z int) blockerCheck {
 	return blockerCheck{core.CrystalSpawnIndexAt(a.CrystalSpawns, x, z) >= 0, "Cell already holds a crystal"}
 }
 
-// startBlockers is the player-start placement rule: no wall, no prop, no
-// deep water (anything that would soft-lock the player on spawn). Shared by
-// the entity-brush start tool (applyEntityBrush) AND the right-click "Move
-// start here" context action so the two paths can't drift on which tiles are
-// legal or on the flash wording. Pass through firstBlocker(startBlockers(...)...).
+// startBlockers is the player-start placement rule (no wall/prop/deep water/
+// chest/door — anything that soft-locks spawn). Shared by the start brush and the
+// right-click "Move start here" action.
 func startBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
 	return []blockerCheck{
 		blkWall(a, x, z, "Player start"),
 		blkProp(a, x, z),
 		blkDeepWater(a, x, z, "Player start"),
-		// Chests and doors block movement onto their tile at runtime, so a
-		// start sharing one would soft-lock the spawn / race the door
-		// transition. The drag-move-start path already refuses these; keep the
-		// entity-brush placement path in lockstep here (one rule, both paths).
+		// Chests/doors block their tile at runtime — a shared start soft-locks
+		// the spawn / races the transition.
 		blkChestHere(a, x, z, false),
 		blkDoorHere(a, x, z),
 	}
 }
 
-// placeDoorAt drops a door at (x,z) with a placeholder name and a
-// "self" target. The author renames it / sets the target in the
-// modalDoorEdit modal opened by clicking the door. Like chests, doors
-// can't share a tile with a pack (the runtime would race the
-// transition trigger and the encounter start).
 // doorPlaceBlockers / chestPlaceBlockers are the shared legality rule sets for
-// dropping (or drag-relocating) a door / chest at (x,z). Both the initial
-// placement brushes (placeDoorAt / placeChestAt) and the drag-move release path
-// run through these so "where can this entity sit?" and its flash wording live
-// in one place. When checking a relocation, the dragged entity is still at its
-// OLD tile, so blkChestHere/blkDoorHere on the destination correctly flag only a
-// DIFFERENT entity already sitting there.
+// dropping or drag-relocating a door / chest. Used by both the placement brushes
+// and the drag-move release. On a relocation the dragged entity is still at its
+// OLD tile, so blkChestHere/blkDoorHere flag only a DIFFERENT entity already there.
 func doorPlaceBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
 	return []blockerCheck{
 		blkStart(a, x, z),
@@ -501,13 +433,9 @@ func chestPlaceBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
 	}
 }
 
-// packPlaceBlockers is the shared legality rule for dropping (or drag-relocating)
-// a pack at (x,z): no wall / prop / deep water / start / chest / door / crystal.
-// Deliberately omits blkPackHere — the brush path MERGES into an existing pack on
-// the tile and the drag path REPLACES it, so a pack already there isn't a blocker.
-// Both addPackMember and the dragPack release route through this so the place and
-// relocate paths can't drift (they previously did: the brush path skipped deep
-// water, the drag path open-coded its own slightly different set).
+// packPlaceBlockers is the shared pack place/relocate rule: no wall/prop/deep
+// water/start/chest/door/crystal. Omits blkPackHere — the brush merges into an
+// existing pack and the drag replaces it, so a pack there isn't a blocker.
 func packPlaceBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
 	return []blockerCheck{
 		blkStart(a, x, z),
@@ -520,12 +448,9 @@ func packPlaceBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
 	}
 }
 
-// crystalPlaceBlockers is the legality rule set for dropping a crystal at
-// (x,z). Mirrors chestPlaceBlockers — one entity per tile keeps the markers
-// legible and lets removeAllEntitiesAt / clearEntitiesAt treat the lists
-// uniformly. Crystals are non-blocking in play, but the editor still refuses
-// walls / props / deep water so the billboard always has a standable tile (or
-// at least a clear one) under it.
+// crystalPlaceBlockers is the crystal placement rule (mirrors chestPlaceBlockers:
+// one entity per tile). Crystals are non-blocking in play, but walls/props/deep
+// water are still refused so the billboard has a clear tile.
 func crystalPlaceBlockers(a *core.AreaDefinition, x, z int) []blockerCheck {
 	return []blockerCheck{
 		blkStart(a, x, z),
@@ -552,21 +477,15 @@ func placeDoorAt(s *State, x, z int) {
 		Name:       name,
 		TargetMap:  core.SelfMapToken,
 		TargetDoor: name,
-		// Default the facing to point away from an adjacent wall (the
-		// door "affixes" to that wall, opening into the room). Falls back
-		// to the map's start facing when the cell has no neighbouring
-		// wall. The author can still override it in the door modal.
+		// Facing defaults away from an adjacent wall (overridable in the modal).
 		Facing: doorFacingForCell(&s.area, x, z),
 		Style:  core.DoorStyleBuilding,
 	})
 	s.dirty = true
 }
 
-// doorFacingForCell picks a sensible default facing for a door placed at
-// (x, z): away from the first adjacent wall found, so the door reads as
-// set into that wall. Falls back to the map's StartFacing when the cell
-// has no neighbouring wall. The wall-scan rule itself lives in
-// core.FacingAwayFromAdjacentWall (shared with wall-torch orientation).
+// doorFacingForCell defaults a door's facing away from the first adjacent wall
+// (via core.FacingAwayFromAdjacentWall), or StartFacing when none.
 func doorFacingForCell(a *core.AreaDefinition, x, z int) int {
 	if f, ok := core.FacingAwayFromAdjacentWall(*a, x, z); ok {
 		return f
@@ -574,10 +493,7 @@ func doorFacingForCell(a *core.AreaDefinition, x, z int) int {
 	return a.StartFacing
 }
 
-// firstUnusedName returns the first `format`-with-N (N from 1 up) whose
-// rendered string isn't already in `taken`. Used by the door placeholder
-// namer (nextDoorName) to auto-pick a free slot name; the taken-set build
-// stays in the caller.
+// firstUnusedName returns the first `format`-with-N (N from 1) not in `taken`.
 func firstUnusedName(taken map[string]bool, format string) string {
 	for i := 1; ; i++ {
 		name := fmt.Sprintf(format, i)
@@ -587,10 +503,8 @@ func firstUnusedName(taken map[string]bool, format string) string {
 	}
 }
 
-// nextDoorName picks an unused placeholder name for a freshly-placed
-// door. "door_1", "door_2", … — the author renames in the modal. The
-// name needs to be unique within the map so runtime resolution by
-// name is unambiguous.
+// nextDoorName picks an unused "door_N" placeholder. Names must be unique within
+// the map so runtime name resolution is unambiguous.
 func nextDoorName(spawns []core.DoorSpawn) string {
 	taken := make(map[string]bool, len(spawns))
 	for _, sp := range spawns {
@@ -599,10 +513,8 @@ func nextDoorName(spawns []core.DoorSpawn) string {
 	return firstUnusedName(taken, "door_%d")
 }
 
-// removeSpawnsAt drops every spawn sitting on (x, z), generic over the
-// pack / chest / door spawn types via core.TileXZ. removeDoorAt /
-// removeChestSpawnAt / removePackAt are thin wrappers so a future fourth
-// spawn category doesn't need another hand-typed DeleteFunc closure.
+// removeSpawnsAt drops every spawn on (x, z), generic over spawn types via
+// core.TileXZ.
 func removeSpawnsAt[T core.TileXZ](spawns []T, x, z int) []T {
 	return slices.DeleteFunc(spawns, func(sp T) bool {
 		tx, tz := sp.Tile()
@@ -610,9 +522,7 @@ func removeSpawnsAt[T core.TileXZ](spawns []T, x, z int) []T {
 	})
 }
 
-// removeSpawnsWhere drops every spawn whose tile satisfies pred — the
-// shape the "outside new bounds after a shrink" and "now sitting on a
-// blocked tile after a fill" cleanups share.
+// removeSpawnsWhere drops every spawn whose tile satisfies pred.
 func removeSpawnsWhere[T core.TileXZ](spawns []T, pred func(x, z int) bool) []T {
 	return slices.DeleteFunc(spawns, func(sp T) bool {
 		return pred(sp.Tile())
@@ -624,16 +534,10 @@ func removeDoorAt(spawns []core.DoorSpawn, x, z int) []core.DoorSpawn {
 	return removeSpawnsAt(spawns, x, z)
 }
 
-// placeChestAt drops a chest with the default starter loot at (x,z). If
-// a chest is already there, refuse (the author can right-click to clear
-// and replace). Chests can't share a tile with a pack — the in-game
-// interact prompt would race the pack's start-battle trigger.
+// placeChestAt drops a chest with default starter loot at (x,z), refusing illegal
+// tiles (see chestPlaceBlockers).
 func placeChestAt(s *State, x, z int) {
 	a := &s.area
-	// Deep water blocks movement onto the tile, so a chest there would
-	// render floating with no way to step onto it (the player can still
-	// interact from an adjacent walkable tile, but the visual reads as
-	// a bug). Refuse rather than ship the surprise.
 	if msg := firstBlocker(chestPlaceBlockers(a, x, z)...); msg != "" {
 		s.flash(msg)
 		return
@@ -646,10 +550,7 @@ func placeChestAt(s *State, x, z int) {
 	s.dirty = true
 }
 
-// defaultChestItems is the seed loot for a freshly-placed chest. Keeps
-// the brush a single-click placement — per-chest loot editing is a
-// future feature. Returns a fresh slice so the spawn entry doesn't
-// alias a package-level template.
+// defaultChestItems is the seed loot for a new chest. Fresh slice (no shared alias).
 func defaultChestItems() []core.ItemKind {
 	return []core.ItemKind{core.ItemCheese, core.ItemBatJerky}
 }
@@ -659,9 +560,8 @@ func removeChestSpawnAt(spawns []core.ChestSpawn, x, z int) []core.ChestSpawn {
 	return removeSpawnsAt(spawns, x, z)
 }
 
-// placeCrystalAt drops a healing crystal at (x,z). Refuses (with a flash) when
-// the tile is illegal — see crystalPlaceBlockers. Crystals carry no per-tile
-// data, so there's nothing more to author after placement.
+// placeCrystalAt drops a healing crystal at (x,z), refusing illegal tiles (see
+// crystalPlaceBlockers).
 func placeCrystalAt(s *State, x, z int) {
 	a := &s.area
 	if msg := firstBlocker(crystalPlaceBlockers(a, x, z)...); msg != "" {
@@ -677,9 +577,8 @@ func removeCrystalSpawnAt(spawns []core.CrystalSpawn, x, z int) []core.CrystalSp
 	return removeSpawnsAt(spawns, x, z)
 }
 
-// eraseSentinel is the "empty" char a layer resets to when erased — the value
-// flood-erase fills a region with (the per-cell eraseAt uses the same values).
-// Elevation resets to the ground baseline (level 0 is a deep pit, not "flat").
+// eraseSentinel is the "empty" char a layer resets to when erased (shared by
+// flood-erase and per-cell eraseAt). Elevation resets to the ground baseline.
 func eraseSentinel(layer Layer) byte {
 	switch layer {
 	case LayerWalls:
@@ -687,9 +586,7 @@ func eraseSentinel(layer Layer) byte {
 	case LayerFloor:
 		return core.FloorAuto
 	case LayerDecor:
-		// Erase means "no scatter here" (DecorEmpty), NOT "auto-scatter"
-		// (DecorAuto) — the Auto brush is the explicit "let the renderer pick"
-		// affordance, so erase suppresses rather than resets-to-random.
+		// Erase suppresses scatter (DecorEmpty), NOT auto-scatter (DecorAuto).
 		return core.DecorEmpty
 	case LayerProps:
 		return core.TilePropEmpty
@@ -698,22 +595,17 @@ func eraseSentinel(layer Layer) byte {
 	case LayerElevation:
 		return core.ElevationChar(core.ElevationBaseline)
 	}
-	// Fail closed like the sibling layer switches (applyTool/eraseAt/activeGrid)
-	// so a new layer can't silently erase-to-TileOpen.
+	// Fail closed like the sibling layer switches.
 	panic("editor: eraseSentinel missing case for layer")
 }
 
-// eraseAt resets the active layer's cell at (x,z): grid layers go to their
-// eraseSentinel (one source, shared with flood-erase), while Props
-// (footprint-aware clear), Elevation (ramp side-effect), and Entities need
-// bespoke handling.
+// eraseAt resets the active layer's cell at (x,z) to its eraseSentinel; Props,
+// Elevation, and Entities need bespoke handling.
 func eraseAt(s *State, x, z int) {
 	if !s.area.InBounds(x, z) {
 		return
 	}
-	// Reveal the active layer so an erase on a hidden layer isn't an invisible
-	// no-op (mirrors applyTool).
-	s.layerHidden[s.layer] = false
+	s.layerHidden[s.layer] = false // reveal so an erase isn't invisible
 	switch s.layer {
 	case LayerProps:
 		clearPropCell(&s.area, x, z)
@@ -722,10 +614,8 @@ func eraseAt(s *State, x, z int) {
 		setLayerCell(&s.area.Decor, x, z, eraseSentinel(LayerDecor))
 		clearTileLevel(&s.area.DecorLevels, x, z)
 	case LayerElevation:
-		// Erase removes the tile at the active level (x, editLevel, z) — the
-		// voxel-grid inverse of a paint. Removing the tile under a higher one
-		// leaves the gap that makes a walk-under land bridge. If the cell carried
-		// a ramp, clear that too (a ramp with no step is meaningless).
+		// Remove the tile at (x, editLevel, z) — voxel inverse of a paint; the gap
+		// under a higher tile makes a walk-under bridge. Clear any ramp too.
 		s.area.ClearCube(x, s.editLevel, z)
 		if _, ok := s.area.RampAt(x, z); ok {
 			setLayerCell(&s.area.Floor, x, z, core.FloorAuto)
@@ -735,28 +625,21 @@ func eraseAt(s *State, x, z int) {
 			return
 		}
 	default:
-		// Plain grid layers (Walls/Floor/Decor/Ceiling): reset the active grid to
-		// its sentinel. eraseSentinel panics on an unknown layer, so this stays
-		// fail-closed without re-listing every case.
+		// Plain grid layers: reset to sentinel (eraseSentinel panics on unknown).
 		setLayerCell(activeGrid(s), x, z, eraseSentinel(s.layer))
 	}
 	s.dirty = true
 }
 
-// placeRamp is the smart ramp tool (toolbar Ramp mode). It inspects the
-// clicked tile's cardinal neighbors, finds the single axis whose two opposite
-// sides differ by exactly one level, and stamps the correct ramp arrow + its
-// low level — so the author never has to pick a direction or hand-set the
-// digit (the class of bug that the manual approach kept producing). Refuses
-// (with a flash) when no neighbor pair forms a clean ±1 step. Snapshots undo
-// only on a successful placement.
+// placeRamp is the smart ramp tool (toolbar Ramp mode): finds the single axis
+// whose opposite neighbors differ by ±1 level and stamps the ramp arrow + low
+// level. Refuses when no clean ±1 step exists. Snapshots undo only on success.
 func placeRamp(s *State, x, z int) {
 	if !s.area.InBounds(x, z) {
 		return
 	}
-	// A ramp lives on the FLOOR layer, but a tile with a wall renders the wall
-	// and never draws its floor — so a ramp stamped under a wall would be an
-	// invisible, non-functional connector. Refuse with feedback.
+	// A ramp lives on the floor, but a wall tile never draws its floor — a ramp
+	// under a wall would be invisible/non-functional. Refuse.
 	if s.area.WallAt(x, z) {
 		s.flash("Can't place a ramp on a wall tile — clear the wall first")
 		return
@@ -788,12 +671,9 @@ func placeRamp(s *State, x, z int) {
 	s.flash("Ramp needs one neighbor a level higher on a single axis (set heights first)")
 }
 
-// clearEntitiesAt removes the pack, chest, and door at (x,z). Returns
-// true when at least one entity was removed (the caller marks dirty
-// on true; nothing changed on false). Refuses to clear the player
-// start tile — the start is anchored and has to be moved by placing
-// a new one elsewhere. Shared by right-click erase and the entityClear
-// brush so both paths agree on what "clear" means.
+// clearEntitiesAt removes the pack/chest/door at (x,z), returning true if any was
+// removed. Refuses the anchored player-start tile. Shared by right-click erase and
+// the entityClear brush.
 func clearEntitiesAt(s *State, x, z int) bool {
 	if s.area.StartTileX == x && s.area.StartTileZ == z {
 		s.flash("Player start can't be erased; place it elsewhere instead")
@@ -812,8 +692,6 @@ func clearEntitiesAt(s *State, x, z int) bool {
 // exists at the tile, creates a fresh pack with the single member.
 func addPackMember(s *State, x, z int, kind core.EnemyKind) {
 	a := &s.area
-	// Shared place/relocate legality (also forbids deep water, which this path
-	// used to allow while the drag path refused it).
 	if msg := firstBlocker(packPlaceBlockers(a, x, z)...); msg != "" {
 		s.flash(msg)
 		return
@@ -831,11 +709,8 @@ func addPackMember(s *State, x, z int, kind core.EnemyKind) {
 	s.dirty = true
 }
 
-// removeAllEntitiesAt strips every pack / chest / door spawn whose
-// tile equals (x,z). Used by applyPropBrush (footprint + single-tile branches)
-// and the runtime resize path — call sites that would otherwise open-code the
-// three `removeXAt` calls. Centralized so a future fourth spawn category is one
-// edit. Mutates the slices on the passed-in area.
+// removeAllEntitiesAt strips every pack/chest/door/crystal spawn on (x,z),
+// mutating the passed-in area's slices.
 func removeAllEntitiesAt(a *core.AreaDefinition, x, z int) {
 	a.PackSpawns = removePackAt(a.PackSpawns, x, z)
 	a.ChestSpawns = removeChestSpawnAt(a.ChestSpawns, x, z)
@@ -843,10 +718,8 @@ func removeAllEntitiesAt(a *core.AreaDefinition, x, z int) {
 	a.CrystalSpawns = removeCrystalSpawnAt(a.CrystalSpawns, x, z)
 }
 
-// totalEntityCount sums the area's spawn-list lengths across all entity
-// categories. The single source for "how many spawns are there?" — used by the
-// clear-entity dirty check and the resize drop-count, so a fifth spawn category
-// is one edit here rather than a hunt for every open-coded len(...)+len(...) sum.
+// totalEntityCount sums all spawn-list lengths. Single source for the clear-entity
+// dirty check and resize drop-count.
 func totalEntityCount(a *core.AreaDefinition) int {
 	return len(a.PackSpawns) + len(a.ChestSpawns) + len(a.DoorSpawns) + len(a.CrystalSpawns)
 }
@@ -855,28 +728,22 @@ func removePackAt(packs []core.PackSpawn, x, z int) []core.PackSpawn {
 	return removeSpawnsAt(packs, x, z)
 }
 
-// packSpawnLeaderKind picks the kind to render as a pack's field icon —
-// the highest-Tier member, ties broken by member order. Delegates to
-// core.PackLeaderKind so editor and runtime share one leader rule.
+// packSpawnLeaderKind picks the pack's field icon kind (highest-Tier member, ties
+// by order). Delegates to core.PackSpawnLeaderKind.
 func packSpawnLeaderKind(a core.AreaDefinition, sp core.PackSpawn) core.EnemyKind {
 	return core.PackSpawnLeaderKind(a, sp)
 }
 
-// setLayerCell mutates the byte at (x,z) inside one of the area's layer
-// grids. Layer slices are addressed by pointer so we can write through
-// without each caller threading a reference. Callers also flag
-// reachability dirty after a layer mutation so the badge refreshes —
-// the per-cell write itself doesn't know the State, so the flag flip is
-// at every applyTool/eraseAt/floodFill/paintRect site that follows.
+// setLayerCell writes byte b at (x,z) in a layer grid. Callers flag reachability
+// dirty separately (this write doesn't know the State).
 func setLayerCell(layer *[]string, x, z int, b byte) {
 	row := []byte((*layer)[z])
 	row[x] = b
 	(*layer)[z] = string(row)
 }
 
-// copySelection snapshots the active marquee region (all six grid layers) into
-// the clipboard for paste. The transform lives in core.CopyRegion; this is the
-// editor glue (selection state + a flash).
+// copySelection snapshots the active marquee region into the clipboard (transform
+// in core.CopyRegion; this is the editor glue).
 func copySelection(s *State) {
 	if !s.selActive {
 		s.flash("Select a region first (Select tool), then Ctrl+C")
@@ -891,8 +758,7 @@ func copySelection(s *State) {
 }
 
 // pasteSelection stamps the clipboard with its top-left at (atX,atZ) under one
-// undo step (pushUndo also flags reachability + bumps the content epoch). No-op
-// off-map or with an empty clipboard.
+// undo step. No-op off-map or with an empty clipboard.
 func pasteSelection(s *State, atX, atZ int) {
 	if s.clipboard.Empty() {
 		s.flash("Clipboard empty — select a region and Ctrl+C first")
@@ -908,46 +774,30 @@ func pasteSelection(s *State, atX, atZ int) {
 	s.flash(fmt.Sprintf("Pasted %d×%d region", s.clipboard.W, s.clipboard.H))
 }
 
-// clearSelection drops the active marquee selection. It deliberately leaves the
-// clipboard intact (so a cross-map copy→paste still works) — call it when the
-// area is replaced (New / Open) or resized, where the selection's tile bounds
-// would otherwise point at coordinates that no longer match the new map (and
-// could render an outline off the smaller/blank grid). A same-map paint undo
-// keeps its selection, so this is NOT called from undoOne / redoOne.
+// clearSelection drops the active marquee but leaves the clipboard intact. Call
+// on area replace (New/Open) or resize where the selection bounds would no longer
+// match; NOT from undoOne/redoOne (a same-map paint undo keeps its selection).
 func clearSelection(s *State) {
 	s.selActive = false
 }
 
-// pushUndo snapshots the current area before a mutation. Any new mutation
-// invalidates the redo stack — standard text-editor undo semantics.
-// Capped at undoLimit to bound memory.
-//
-// On trim we shift the window down IN PLACE (copy + reslice) and nil out the
-// vacated tail slots so their AreaDefinitions (string rows + spawns) are
-// released for GC. Reslicing alone would advance the header but leave the
-// trimmed-off head snapshots pinned by the backing array; an explicit nil of
-// the freed slots releases them without allocating a fresh array every stroke
-// (which the old make+copy did, churning ~17KB per stroke once at the cap).
+// pushUndo snapshots the current area before a mutation, invalidating redo. Capped
+// at undoLimit; on trim, the window shifts in place and freed tail slots are nil'd
+// for GC (avoids a fresh array alloc every stroke at the cap).
 func pushUndo(s *State) {
 	commitUndoSnapshot(s, core.CloneArea(s.area))
 }
 
-// commitUndoSnapshot banks `before` (the pre-mutation area) onto the undo
-// stack, invalidates the cached reachability warnings, and clears the redo
-// stack. pushUndo is the snapshot-the-current-state-now wrapper used by the
-// one-shot mutations; strokePaint hands in a snapshot it captured at stroke
-// start so a multi-cell drag banks ONE undo step covering the whole stroke —
-// and only when the stroke actually changed something.
-//
-// Every forward mutation routes through here, so it's the one place to
-// invalidate the reachability cache (see State.ReachabilityWarnings).
+// commitUndoSnapshot banks `before` onto the undo stack, invalidates the
+// reachability cache, and clears redo. strokePaint passes a stroke-start snapshot
+// so a multi-cell drag banks ONE step (only when it changed something). Every
+// forward mutation routes through here.
 func commitUndoSnapshot(s *State, before core.AreaDefinition) {
 	s.reachValid = false
 	s.contentEpoch++
 	s.undo = append(s.undo, before)
 	if excess := len(s.undo) - undoLimit; excess > 0 {
-		// Shift the kept window to the front in place, then release the now-
-		// duplicated tail slots so the trimmed-off snapshots can be collected.
+		// Shift the kept window to the front, then release the tail slots for GC.
 		copy(s.undo, s.undo[excess:])
 		for i := undoLimit; i < len(s.undo); i++ {
 			s.undo[i] = core.AreaDefinition{}
@@ -968,9 +818,7 @@ func undoOne(s *State) {
 	s.area = last
 	s.reachValid = false // area replaced — recompute reachability lazily
 	s.contentEpoch++
-	// Stepping back to a snapshot that matches the on-disk baseline should
-	// drop the dirty marker — don't pester the user with the unsaved-changes
-	// modal if their working state is identical to what's on disk.
+	// Drop the dirty marker if we stepped back to the on-disk baseline.
 	s.dirty = !core.AreaContentEqual(s.area, s.baseline)
 }
 
@@ -988,20 +836,13 @@ func redoOne(s *State) {
 	s.dirty = !core.AreaContentEqual(s.area, s.baseline)
 }
 
-// resize grows or shrinks every layer to (w,h). New cells default to the
-// layer's blank value (walls border-only, others auto). Player start and
-// enemy spawns outside the new bounds are clamped (start) or removed
-// (spawns).
+// resize grows or shrinks every layer to (w,h). New cells get the layer's blank
+// value. Player start is clamped; spawns outside the new bounds are removed.
 func resize(s *State, w, h int) {
 	if w <= 0 || h <= 0 {
 		return
 	}
-	// Floor at MinMapDimension so the border walls can't consume the
-	// whole playable interior, and ceiling at MaxMapDimension so a
-	// runaway +-spam can't grow the area past what the renderer was
-	// tested on. Both edges share core.ClampMapDimension with the
-	// metadata text input and the new-map dialog so the rules can't
-	// drift per call site.
+	// Clamp to [Min,Max]MapDimension (shared with metadata input + new-map dialog).
 	if w < core.MinMapDimension {
 		s.flash("Map width too small (min " + strconv.Itoa(core.MinMapDimension) + ")")
 	}
@@ -1020,14 +861,11 @@ func resize(s *State, w, h int) {
 	s.area.Props = resizeLayer(s.area.Props, s.area.Width, s.area.Height, w, h, core.TilePropEmpty)
 	s.area.Ceiling = resizeLayer(s.area.Ceiling, s.area.Width, s.area.Height, w, h, core.TileCeilingOpen)
 	s.area.Elevation = resizeLayer(s.area.Elevation, s.area.Width, s.area.Height, w, h, core.ElevationChar(core.ElevationBaseline))
-	// Resize every voxel plane in lockstep so a gapped (Solids) map keeps its
-	// planes at the area dimensions — otherwise the stack desyncs and the
-	// per-cell reads would index past a short row. New cells default to air.
+	// Resize every voxel plane in lockstep (new cells = air) or the stack desyncs.
 	for L := range s.area.Solids {
 		s.area.Solids[L] = resizeLayer(s.area.Solids[L], s.area.Width, s.area.Height, w, h, core.SolidAir)
 	}
-	// Per-tile prop levels resize in lockstep too (auto-fill new cells), so a map
-	// with decked props keeps its level grid aligned to the new dimensions.
+	// Per-tile level grids resize in lockstep too (auto-fill new cells).
 	if len(s.area.PropLevels) > 0 {
 		s.area.PropLevels = resizeLayer(s.area.PropLevels, s.area.Width, s.area.Height, w, h, core.PropLevelAuto)
 	}
@@ -1037,17 +875,10 @@ func resize(s *State, w, h int) {
 	s.area.Width = w
 	s.area.Height = h
 	clearSelection(s) // bounds changed — a stale marquee could outline off-grid
-	// resizeLayer fills new wall cells with plain TileOpen, so a grow leaves
-	// the new outer rows/cols walkable to the edge (the doc's "walls
-	// border-only" promise was unmet). Re-seal the perimeter ring with
-	// TileRock so a resized map always has a complete outer wall, matching
-	// blankArea.
+	// Re-seal the perimeter ring so a grown map keeps a complete outer wall.
 	sealWallBorder(&s.area)
-	// sealWallBorder just stamped the perimeter ring with rock, so clamp a
-	// now-out-of-range start to the last INTERIOR cell (w-2 / h-2), not the
-	// border column/row (w-1 / h-1) which is guaranteed wall — landing the
-	// start on a blocked tile. Floor at 1 for a degenerate tiny map.
-	// (reachabilityWarnings still flags an interior cell the author walled off.)
+	// Clamp a now-out-of-range start to the last INTERIOR cell (w-2/h-2), not the
+	// guaranteed-wall border (w-1/h-1). Floor at 1 for a degenerate tiny map.
 	if s.area.StartTileX >= w-1 {
 		s.area.StartTileX = w - 2
 	}
@@ -1065,17 +896,11 @@ func resize(s *State, w, h int) {
 	s.area.ChestSpawns = removeChestSpawnsOutside(s.area.ChestSpawns, w, h)
 	s.area.DoorSpawns = removeDoorSpawnsOutside(s.area.DoorSpawns, w, h)
 	s.area.CrystalSpawns = removeCrystalSpawnsOutside(s.area.CrystalSpawns, w, h)
-	// removeXOutside only drops spawns PAST the new bounds. A shrink can also
-	// leave a spawn on the tile that just BECAME the border ring (in-bounds, so
-	// kept above) — sealWallBorder then stamps a wall over it, burying a chest/
-	// door in a wall where it's unreachable and (unlike a pack) doesn't
-	// self-relocate at runtime. pruneBlockedSpawns drops any spawn now on a
-	// blocked tile (the sealed border included), closing that gap; no-op when
-	// nothing's buried.
+	// removeXOutside drops only spawns PAST the new bounds. A spawn on the tile
+	// that just became the sealed border is in-bounds but now walled — drop those
+	// too so a chest/door isn't buried unreachable.
 	pruneBlockedSpawns(&s.area)
-	// A shrink silently drops spawns past the new bounds or walled by them
-	// (undoable, but the author should know). Flash a count of what fell off so
-	// it's not a quiet data loss.
+	// Flash a count of dropped spawns so the loss isn't silent.
 	dropped := entitiesBefore - totalEntityCount(&s.area)
 	if dropped > 0 {
 		s.flash(fmt.Sprintf("Resize dropped %d spawn(s) outside or walled by the new bounds", dropped))
@@ -1083,45 +908,36 @@ func resize(s *State, w, h int) {
 	s.dirty = true
 }
 
-// outsideBounds is the shrink-prune predicate: a tile sits "outside" the new
-// (w,h) bounds when its column or row index has fallen past the new edge.
-// Shared by all four removeXSpawnsOutside helpers so the resize-prune rule
-// lives in one place.
+// outsideBounds is the shrink-prune predicate: a tile is outside the new (w,h)
+// bounds when its column or row falls past the edge. Shared by the four
+// removeXSpawnsOutside helpers.
 func outsideBounds(w, h int) func(x, z int) bool {
 	return func(x, z int) bool { return x >= w || z >= h }
 }
 
-// removeDoorSpawnsOutside drops door entries whose tile sits past the
-// new bounds after a shrink. Mirrors removeChestSpawnsOutside.
+// removeDoorSpawnsOutside drops door entries past the new bounds after a shrink.
 func removeDoorSpawnsOutside(spawns []core.DoorSpawn, w, h int) []core.DoorSpawn {
 	return removeSpawnsWhere(spawns, outsideBounds(w, h))
 }
 
-// removeCrystalSpawnsOutside drops crystal entries whose tile sits past the
-// new bounds after a shrink. Mirrors removeDoorSpawnsOutside.
+// removeCrystalSpawnsOutside drops crystal entries past the new bounds.
 func removeCrystalSpawnsOutside(spawns []core.CrystalSpawn, w, h int) []core.CrystalSpawn {
 	return removeSpawnsWhere(spawns, outsideBounds(w, h))
 }
 
-// removePackSpawnsOutside drops pack entries whose tile sits past the new
-// bounds after a shrink. Mirrors removeChestSpawnsOutside / removeDoorSpawnsOutside
-// so all three resize-prune paths share the generic removeSpawnsWhere helper.
+// removePackSpawnsOutside drops pack entries past the new bounds.
 func removePackSpawnsOutside(spawns []core.PackSpawn, w, h int) []core.PackSpawn {
 	return removeSpawnsWhere(spawns, outsideBounds(w, h))
 }
 
-// removeChestSpawnsOutside drops chest entries whose tile sits past
-// the new bounds.
+// removeChestSpawnsOutside drops chest entries past the new bounds.
 func removeChestSpawnsOutside(spawns []core.ChestSpawn, w, h int) []core.ChestSpawn {
 	return removeSpawnsWhere(spawns, outsideBounds(w, h))
 }
 
-// sealWallBorder raises the outer ring one level above the walkable baseline
-// (an enclosing wall — the cliff faces render automatically) and gives it an
-// explicit rock face skin, leaving the interior untouched. Called after resize
-// so a grown/shrunk map always carries a complete outer wall. Matches
-// blankArea's perimeter rule. Walls are elevation now, so this stamps the
-// Elevation layer (+ the Faces layer's rock skin), not a solid wall char.
+// sealWallBorder raises the outer ring one level (an enclosing wall) with an
+// explicit rock face skin, leaving the interior untouched. Stamps the Elevation +
+// Faces layers (walls are elevation), matching blankArea's perimeter rule.
 func sealWallBorder(a *core.AreaDefinition) {
 	wallChar := core.ElevationChar(core.ElevationWallRingLevel)
 	for z := 0; z < a.Height; z++ {
@@ -1150,8 +966,7 @@ func sealWallBorder(a *core.AreaDefinition) {
 			a.Elevation[z] = string(elevRow)
 		}
 	}
-	// On a voxel map the renderer reads the stack, not the Elevation layer, so
-	// also raise the border columns through the stack to the wall-ring height.
+	// Voxel maps read the stack, not Elevation — also raise the border columns there.
 	if len(a.Solids) > 0 {
 		for z := 0; z < a.Height; z++ {
 			for x := 0; x < a.Width; x++ {
@@ -1163,8 +978,8 @@ func sealWallBorder(a *core.AreaDefinition) {
 	}
 }
 
-// resizeLayer copies an old WxH grid into a new W'xH' grid, padding the
-// extra cells with `fill`. Old cells outside the new bounds are dropped.
+// resizeLayer copies an old grid into a new W'xH' grid, padding extra cells with
+// `fill` and dropping cells outside the new bounds.
 func resizeLayer(old []string, oldW, oldH, newW, newH int, fill byte) []string {
 	rows := make([]string, newH)
 	for z := 0; z < newH; z++ {
@@ -1181,12 +996,8 @@ func resizeLayer(old []string, oldW, oldH, newW, newH int, fill byte) []string {
 	return rows
 }
 
-// writeAreaTo serializes the current area and writes it to path, then resets
-// the dirty-tracking baseline (path → s.area.Path, baseline = clone, dirty =
-// false). It is the shared serialize/write/baseline core of saveTo,
-// saveCurrent, and confirmDirtySave; each caller keeps its own surrounding flow
-// (error flashes, modal close, pending clears, success flash). For the callers
-// that pass s.area.Path the path assignment is a harmless self-assign.
+// writeAreaTo serializes the area to path and resets the dirty-tracking baseline.
+// Shared serialize/write/baseline core of saveTo / saveCurrent / confirmDirtySave.
 func writeAreaTo(s *State, path string) error {
 	mf, err := core.MapFileFromArea(s.area)
 	if err != nil {
@@ -1212,9 +1023,7 @@ func saveCurrent(s *State) {
 		s.flash("Save failed: " + err.Error())
 		return
 	}
-	// Saving no longer auto-flashes reachability warnings — reachability is an
-	// at-will check now (the Validate modal), not something forced on every
-	// save, since "can't reach X" is a design judgment, not a save error.
+	// Reachability is an at-will check (Validate modal), not auto-flashed on save.
 	s.flash("Saved " + core.MapIDFromPath(s.area.Path))
 }
 
@@ -1254,9 +1063,8 @@ func duplicateMapFile(srcPath string) (string, error) {
 			}
 			return path, nil
 		}
-		// Cap BEFORE building the next candidate so the just-tested name was
-		// actually stat-checked — otherwise the final candidate is built and
-		// discarded untested. Tries _copy, _copy2 … _copy100, then gives up.
+		// Cap before building the next candidate so the just-tested name was
+		// stat-checked. Tries _copy, _copy2 … _copy100, then gives up.
 		if i > 100 {
 			return "", fmt.Errorf("too many copies of %s", id)
 		}
@@ -1269,27 +1077,21 @@ func openModal(s *State, m modalKind) {
 	s.modalCursor = 0
 	switch m {
 	case modalOpen:
-		// Newest-first ordering: the file the author was last touching
-		// (whether they just saved it or pulled it down) is the most
-		// likely target of an Open, so it lands at the top of the list.
+		// Newest-first: the last-touched file is the likeliest Open target.
 		paths, _ := mapfile.ListByModTime(core.MapsDir())
 		s.modalPaths = paths
 	}
 }
 
-// openConfirmDirtyModal raises the unsaved-changes prompt, stashing the
-// action to run once the user resolves it (Save / Discard / Cancel).
-// Every "this would discard edits" entry point — New, Open, Exit to
-// title — routes through here so the pending-action + modal pairing
-// can't drift across call sites.
+// openConfirmDirtyModal raises the unsaved-changes prompt, stashing the action to
+// run on resolve. Shared by every discard-edits entry point (New/Open/Exit).
 func openConfirmDirtyModal(s *State, pending pendingAction) {
 	s.pending = pending
 	s.modal = modalConfirmDirty
 }
 
-// newMap is the user-facing entry: prompts about unsaved changes if the
-// current map is dirty, otherwise opens the new-map setup modal so the
-// author picks size + default floor before the area is replaced.
+// newMap is the user-facing entry: confirm-dirty bounce if dirty, else open the
+// new-map setup modal.
 func newMap(s *State) {
 	if s.dirty {
 		openConfirmDirtyModal(s, pendingNew)
@@ -1298,9 +1100,8 @@ func newMap(s *State) {
 	openNewMapModal(s)
 }
 
-// openNewMapModal switches into the new-map setup dialog with sensible
-// defaults (core.DefaultNewMapDimension square, FloorAuto). The dialog
-// commits to performNewMap on confirm.
+// openNewMapModal opens the new-map setup dialog with defaults
+// (core.DefaultNewMapDimension square, FloorAuto); commits via performNewMap.
 func openNewMapModal(s *State) {
 	s.modal = modalNew
 	s.modalNewWidth = core.DefaultNewMapDimension
@@ -1318,10 +1119,8 @@ func requestOpen(s *State) {
 	openModal(s, modalOpen)
 }
 
-// floodFill replaces the connected region of like-cells around (x,z) with
-// b, on the active layer's grid only. 4-connected. No-op if (x,z) already
-// holds b. For LayerEntities the operation is a no-op since entities
-// aren't grid-stored.
+// floodFill replaces the 4-connected like-cell region around (x,z) with b on the
+// active grid. No-op if (x,z) already holds b or on LayerEntities (no grid).
 func floodFill(s *State, x, z int, b byte, erase bool) {
 	layer := activeGrid(s)
 	if layer == nil {
@@ -1330,20 +1129,16 @@ func floodFill(s *State, x, z int, b byte, erase bool) {
 	if !s.area.InBounds(x, z) {
 		return
 	}
-	// InBounds checks the area's declared Width/Height, which can exceed the
-	// actual layer slice lengths for a ragged/partially-built area. Guard the
-	// seed read against the real row/col extents — the rest of the codebase
-	// reads grids through the bounds-safe layerByteAt; this seed is the one
-	// raw index, and an out-of-range sample would panic.
+	// InBounds checks declared dims, which can exceed actual slice lengths for a
+	// ragged area — guard this raw seed read against the real extents.
 	if z >= len(*layer) || x >= len((*layer)[z]) {
 		return
 	}
 	target := (*layer)[z][x]
 	if target == b {
-		return // no-op fill (cell already the brush color) — snapshot nothing
+		return // no-op fill — snapshot nothing
 	}
-	// Snapshot only now that the fill is known to change cells, so a no-op
-	// Ctrl+click doesn't push a useless undo step (and clobber the redo stack).
+	// Snapshot only now that the fill will change cells (no useless undo step).
 	pushUndo(s)
 	var filled [][2]int
 	rewriteLayerRows(layer, func(rows [][]byte) {
@@ -1365,30 +1160,24 @@ func floodFill(s *State, x, z int, b byte, erase bool) {
 	})
 	switch {
 	case erase && s.layer == LayerElevation && len(s.area.Solids) > 0:
-		// Voxel-map elevation flood-ERASE: the Elevation string is dead, so clear
-		// each flooded cell's cube at the edit level — the flood mirror of the
-		// per-cell eraser (eraseAt → ClearCube). Without this, flood-erase on a
-		// voxel map only rewrote the ignored string and nothing changed on screen.
+		// Voxel elevation flood-erase: the Elevation string is dead, so clear each
+		// flooded cube at the edit level (mirror of eraseAt → ClearCube).
 		for _, c := range filled {
 			s.area.ClearCube(c[0], s.editLevel, c[1])
 		}
 	case erase:
-		// Any other flood-erase: the sentinel char flooded above IS the cleared
-		// state. Do NOT fall through to the active-level lift below — erasing must
-		// not RAISE the ground to editLevel (the per-cell eraser doesn't either).
+		// Other flood-erase: the flooded sentinel IS the cleared state. Do NOT
+		// fall through to the active-level lift — erasing must not raise the ground.
 	case layerStampsActiveLevel(s.layer):
-		// PAINT: the flooded region joins the active floor — mirror of the
-		// per-cell stamp in applyTool, so Ctrl+click builds a floor the same way a
-		// stroke does (levels model is always on now). Walls are exempt.
+		// PAINT: the flooded region joins the active floor (mirror of applyTool's
+		// per-cell stamp). Walls exempt.
 		if len(s.area.Solids) > 0 {
-			// Voxel map: the Elevation string is dead, so lift each flooded cell
-			// through the Solids-aware SetColumnTop (see setTileGroundLevel).
+			// Voxel map: lift each cell through SetColumnTop (see setTileGroundLevel).
 			for _, c := range filled {
 				setTileGroundLevel(s, c[0], c[1], s.editLevel)
 			}
 		} else {
-			// Heightfield: batch the elevation lift of the flooded region into one
-			// row-set rewrite rather than per-cell stampActiveLevel string rebuilds.
+			// Heightfield: batch the lift into one row-set rewrite.
 			ch := core.ElevationChar(s.editLevel)
 			rewriteLayerRows(&s.area.Elevation, func(rows [][]byte) {
 				for _, c := range filled {
@@ -1403,11 +1192,8 @@ func floodFill(s *State, x, z int, b byte, erase bool) {
 	s.dirty = true
 }
 
-// pruneBlockedSpawns drops any pack / chest / door spawn that now sits on a
-// BlockedAt tile (a blocking prop or deep water — walls are elevation now and
-// don't block standing). Used by the resize path after a shrink. Routed through
-// the shared removeSpawnsWhere over core.TileXZ so all three entity lists are
-// pruned by the same rule.
+// pruneBlockedSpawns drops any spawn now on a BlockedAt tile. Used by resize
+// after a shrink.
 func pruneBlockedSpawns(a *core.AreaDefinition) {
 	blocked := func(x, z int) bool { return a.BlockedAt(x, z) }
 	a.PackSpawns = removeSpawnsWhere(a.PackSpawns, blocked)
@@ -1416,12 +1202,8 @@ func pruneBlockedSpawns(a *core.AreaDefinition) {
 	a.CrystalSpawns = removeSpawnsWhere(a.CrystalSpawns, blocked)
 }
 
-// rewriteLayerRows clones the layer's row strings into a mutable
-// [][]byte, calls visit on every (x, z) cell, and writes the result
-// back. Shared by floodFill / paintRect / fillEntireLayer / anything
-// else that needs the "build fresh byte rows then commit" idiom — the
-// rows allocation is one alloc per call instead of one per layer
-// helper.
+// rewriteLayerRows clones the layer into a mutable [][]byte, runs visit on it,
+// and writes back. The shared "build fresh byte rows then commit" idiom.
 func rewriteLayerRows(layer *[]string, visit func(rows [][]byte)) {
 	rows := make([][]byte, len(*layer))
 	for i, r := range *layer {
@@ -1433,11 +1215,8 @@ func rewriteLayerRows(layer *[]string, visit func(rows [][]byte)) {
 	}
 }
 
-// fillEntireLayer overwrites every cell on the active grid layer with
-// the active brush's character. Entity layer is skipped (would have no
-// meaningful "fill"). Player start stays in place even when walls are
-// being painted across the whole map — same exemption as paintRect's
-// per-cell rule. Pushes a single undo so the action reverts atomically.
+// fillEntireLayer overwrites every cell on the active grid with the active brush.
+// Skips entities; pushes a single undo.
 func fillEntireLayer(s *State) {
 	if s.layer == LayerEntities {
 		s.flash("Fill all not supported on Entities layer")
@@ -1460,25 +1239,18 @@ func fillEntireLayer(s *State) {
 			}
 		}
 	})
-	// A full content fill lifts the whole map to the active floor, consistent
-	// with the per-cell / flood-fill stamp. (At level 0 — the default and the
-	// common base-laying case — this is a no-op, so flat maps stay flat.)
-	// Walls are exempt (see stampActiveLevel) so a wall fill can't flatten the
-	// whole height map.
+	// A full content fill lifts the whole map to the active floor (no-op at level
+	// 0, so flat maps stay flat). Walls exempt (see stampActiveLevel).
 	if layerStampsActiveLevel(s.layer) {
 		if len(s.area.Solids) > 0 {
-			// Voxel map: the Elevation string is dead — lift every column through
-			// the Solids-aware SetColumnTop (see setTileGroundLevel).
+			// Voxel map: lift every column via SetColumnTop (see setTileGroundLevel).
 			for z := 0; z < s.area.Height; z++ {
 				for x := 0; x < s.area.Width; x++ {
 					setTileGroundLevel(s, x, z, s.editLevel)
 				}
 			}
 		} else {
-			// Heightfield: batch the whole-map elevation lift into one row-set
-			// rewrite instead of a per-cell stampActiveLevel (each of which rebuilt
-			// a full row string) — same write as stampActiveLevel:
-			// ElevationChar(editLevel) into every in-bounds cell.
+			// Heightfield: batch the whole-map lift into one row-set rewrite.
 			ch := core.ElevationChar(s.editLevel)
 			rewriteLayerRows(&s.area.Elevation, func(rows [][]byte) {
 				for z := 0; z < s.area.Height && z < len(rows); z++ {
@@ -1493,16 +1265,13 @@ func fillEntireLayer(s *State) {
 	s.flash("Filled " + layerName(s.layer))
 }
 
-// centerViewOnTile recenters the editor view so (tx, tz) sits in the
-// middle of the grid pane. Used by G "center on start" — handy when a
-// pan has drifted the view away from the player spawn on a large map.
-// Zoom is left untouched.
+// centerViewOnTile recenters the view so (tx, tz) sits in the middle of the grid
+// pane (G "center on start"). Zoom untouched.
 func centerViewOnTile(s *State, tx, tz int) {
 	if s.rect.cellPx <= 0 {
 		return
 	}
-	// Target world-pixel coord of the centred tile, in the same frame
-	// the layout uses (s.rect.gridX/Y already include panX/panY).
+	// Target world-pixel coord (gridX/Y already include panX/panY).
 	want := s.rect.grid.X + s.rect.grid.Width/2
 	wantY := s.rect.grid.Y + s.rect.grid.Height/2
 	have, haveY := s.rect.tileCenter(tx, tz)
@@ -1511,9 +1280,8 @@ func centerViewOnTile(s *State, tx, tz int) {
 	s.flash("Centered on " + core.TileCoord(tx, tz))
 }
 
-// paintRect paints the active brush's cell value across the rectangle
-// bounded by (x0,z0) and (x1,z1) on the active layer. Player start at the
-// rect intersection is left in place.
+// paintRect paints the active brush across the rectangle (x0,z0)-(x1,z1). Player
+// start is left in place.
 func paintRect(s *State, x0, z0, x1, z1 int) {
 	if s.layer == LayerEntities {
 		return
@@ -1526,11 +1294,8 @@ func paintRect(s *State, x0, z0, x1, z1 int) {
 		z0, z1 = z1, z0
 	}
 	if brushHasMultiTileFootprint(s) {
-		// A multi-tile-footprint prop/decor brush can't tile across a
-		// rectangle: every cell would re-validate the whole footprint against
-		// the neighbours just stamped and refuse, spraying refusal flashes and
-		// leaving a mostly-empty rect. Collapse to a single anchor stamp, the
-		// same way applyToolBrushed does for the square brush.
+		// A multi-tile footprint can't tile across a rect (every cell re-validates
+		// against neighbours and refuses) — collapse to a single anchor stamp.
 		if s.area.InBounds(x0, z0) {
 			applyTool(s, x0, z0)
 		}
@@ -1549,9 +1314,8 @@ func paintRect(s *State, x0, z0, x1, z1 int) {
 	}
 }
 
-// paintRectOutline paints only the border cells of the rectangle bounded by
-// (x0,z0)-(x1,z1) — the Box tool, for laying room walls without a fill-then-
-// hollow. Mirrors paintRect's footprint-collapse + player-start protection.
+// paintRectOutline paints only the border cells of (x0,z0)-(x1,z1) — the Box tool.
+// Mirrors paintRect's footprint-collapse + start protection.
 func paintRectOutline(s *State, x0, z0, x1, z1 int) {
 	if s.layer == LayerEntities {
 		return
@@ -1585,10 +1349,8 @@ func paintRectOutline(s *State, x0, z0, x1, z1 int) {
 	}
 }
 
-// walkLine invokes fn for every grid cell along the Bresenham line from
-// (x0,z0) to (x1,z1), inclusive of both endpoints. The one place the stepping
-// math lives — shared by the Line tool (paintLine) and the freehand stroke
-// interpolation (paintLineBetween, input.go) so they can't drift.
+// walkLine invokes fn for every cell along the Bresenham line (x0,z0)-(x1,z1),
+// both endpoints inclusive. Shared by paintLine and paintLineBetween (input.go).
 func walkLine(x0, z0, x1, z1 int, fn func(x, z int)) {
 	dx := x1 - x0
 	if dx < 0 {
@@ -1624,11 +1386,9 @@ func walkLine(x0, z0, x1, z1 int, fn func(x, z int)) {
 	}
 }
 
-// paintLine paints the active brush along the grid line from (x0,z0) to
-// (x1,z1) — the Line tool. Mirrors paintRect's footprint-collapse + player-
-// start protection. Distinct from input.go's paintLineBetween, which stamps a
-// freehand stroke through the per-stroke lazy-undo machinery; this is a
-// one-shot committed op (finishDrag pushes the single undo).
+// paintLine paints the active brush along the line (x0,z0)-(x1,z1) — the Line
+// tool, a one-shot committed op (finishDrag pushes the undo). Distinct from
+// input.go's paintLineBetween (freehand, lazy-undo). Mirrors paintRect's collapse.
 func paintLine(s *State, x0, z0, x1, z1 int) {
 	if s.layer == LayerEntities {
 		return
@@ -1648,12 +1408,8 @@ func paintLine(s *State, x0, z0, x1, z1 int) {
 	})
 }
 
-// activeGrid returns a pointer to the layer slice the user is editing, or
-// nil for layers that don't have a grid (entities). Must stay in sync
-// with the layer switches in applyTool and eraseAt — Ctrl+Click flood
-// fill reads through this helper and silently no-ops when a grid layer
-// is missed, which is exactly how LayerCeiling regressed before this
-// case was added.
+// activeGrid returns a pointer to the layer slice being edited, or nil for
+// gridless layers (entities). Must stay in sync with applyTool / eraseAt.
 func activeGrid(s *State) *[]string {
 	switch s.layer {
 	case LayerWalls:
@@ -1669,24 +1425,14 @@ func activeGrid(s *State) *[]string {
 	case LayerElevation:
 		return &s.area.Elevation
 	case LayerEntities:
-		// Entities have no grid slice — nil is the legitimate "not a grid
-		// layer" answer flood-fill checks for. Distinguished from an
-		// unhandled NEW layer (the default panic) so the regression that
-		// silently dropped LayerCeiling here can't recur.
-		return nil
+		return nil // gridless — the legitimate answer flood-fill checks for
 	default:
 		panic("editor: activeGrid missing case for layer — add it here, in applyTool, and in eraseAt")
 	}
 }
 
-// startTileBlocker checks the three "the player can't even spawn"
-// conditions and returns the user-facing warning string for the first
-// one that fails. Empty string = start tile is fine.
-//
-// Single source of truth for the playtest gate and the reachability
-// warning's start-tile preamble — they used to inline the same three
-// checks, and a future blocker (e.g. lava) added to BlockedAt now
-// lands both paths automatically.
+// startTileBlocker returns the first "player can't spawn" warning, or "". Single
+// source for the playtest gate and the reachability start-tile preamble.
 func startTileBlocker(a core.AreaDefinition) string {
 	if a.StartTileZ < 0 || a.StartTileZ >= a.Height ||
 		a.StartTileX < 0 || a.StartTileX >= a.Width {
@@ -1701,15 +1447,9 @@ func startTileBlocker(a core.AreaDefinition) string {
 	return ""
 }
 
-// reachabilityWarnings reports playability problems for the area. Empty
-// slice means no warnings. Used as a non-blocking check on save.
-//
-// The BFS treats both wall/prop blockers AND chest tiles as impassable,
-// matching the runtime's movement rules — chests block the tile they
-// sit on at runtime (explore.startStep refuses to step into a chest),
-// so a chest dropped in a chokepoint can sever the map. Without this
-// the editor's "all reachable" verdict could ship a map where the
-// player physically can't reach packs / chests beyond the chest.
+// reachabilityWarnings reports playability problems (empty = none). The BFS
+// treats chest tiles as impassable like walls, matching the runtime (a chest in a
+// chokepoint can sever the map).
 func reachabilityWarnings(a core.AreaDefinition) []string {
 	var out []string
 	if msg := startTileBlocker(a); msg != "" {
@@ -1717,9 +1457,7 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 	}
 	h := a.Height
 	w := a.Width
-	// Pre-mark chest tiles as blocked so the BFS treats them like
-	// walls. The start tile is exempt above (we already refuse that
-	// configuration), so no risk of the BFS having nowhere to begin.
+	// Pre-mark chest tiles blocked (start tile is exempt above).
 	chestBlock := make([]bool, w*h)
 	for _, c := range a.ChestSpawns {
 		if c.TileX < 0 || c.TileX >= w || c.TileZ < 0 || c.TileZ >= h {
@@ -1744,9 +1482,8 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 			continue
 		}
 		visited[idx] = true
-		// Expand only to elevation-CONNECTED neighbors: a cliff (level
-		// mismatch with no ramp) blocks, a ramp bridges. On a flat map every
-		// StepElevationOK is true, so this is identical to the old 4-way push.
+		// Expand only to elevation-CONNECTED neighbors (a cliff blocks, a ramp
+		// bridges; flat maps push all four).
 		if a.StepElevationOK(px, pz, core.East) {
 			stack = append(stack, [2]int{px + 1, pz})
 		}
@@ -1760,16 +1497,9 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 			stack = append(stack, [2]int{px, pz - 1})
 		}
 	}
-	// Check reachability against the SNAPPED pack positions, not the
-	// authored ones — placePacks relocates pack tiles to the nearest open
-	// square at runtime, so a pack authored on a wall lands somewhere else
-	// in the actual game. Using snapped coords here means the warning
-	// matches what the player will encounter.
-	//
-	// Drops are now classified: a pack with zero members is the author's
-	// own omission ("empty"); a pack with members but no open tile is the
-	// map being too crowded ("no open tile"). Surfacing both separately
-	// gives the author a faster fix.
+	// Check against SNAPPED pack positions (placePacks relocates to the nearest
+	// open square at runtime) so the warning matches what the player encounters.
+	// Drops are classified: empty roster vs. no open tile (crowded map).
 	var unreachable, emptyRoster, noOpenTile int
 	for _, snap := range core.SnappedSpawnPositions(&a) {
 		switch snap.Reason {
@@ -1788,10 +1518,8 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 			}
 		}
 	}
-	// Chests are reachable when AT LEAST ONE neighbour is in `visited` —
-	// the chest tile itself is marked blocked (#3), so we check the
-	// four-neighbour ring for an open approach instead. An "unreachable"
-	// chest is one the player can never walk up to and open.
+	// A chest is reachable when at least one neighbour is visited (its own tile is
+	// marked blocked), i.e. the player can walk up to open it.
 	var unreachableChests int
 	for _, c := range a.ChestSpawns {
 		if c.TileX < 0 || c.TileX >= w || c.TileZ < 0 || c.TileZ >= h {
@@ -1825,10 +1553,8 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 	if unreachableChests > 0 {
 		out = append(out, fmt.Sprintf("%d/%d chests unreachable from start", unreachableChests, len(a.ChestSpawns)))
 	}
-	// Door checks (cheap / local — pairing across maps lives in
-	// crossMapDoorWarnings since loading other .map files every frame
-	// would burn CPU on a 60 Hz metadata draw). Local issues caught
-	// here: door with no destination, door unreachable from start.
+	// Door checks (local only — cross-map pairing lives in crossMapDoorWarnings):
+	// no destination, or unreachable from start.
 	var doorsNoTarget, doorsUnreachable int
 	for _, d := range a.DoorSpawns {
 		if !d.HasTarget() {
@@ -1851,27 +1577,22 @@ func reachabilityWarnings(a core.AreaDefinition) []string {
 	return out
 }
 
-// crossMapDoorWarnings validates each door's TargetMap / TargetDoor by
-// loading the referenced map file from disk and looking up the named
-// door. Expensive (file I/O per unique target map) so it's NOT called
-// from the per-frame ReachabilityWarnings — invoked only at playtest
-// gating (canPlaytest path) and a future "Validate Doors" topbar
-// button. Returns one warning per dangling reference; same-map
-// portals (TargetMap == "self" or the local map id) are checked
-// against the in-memory area directly.
+// crossMapDoorWarnings validates each door's TargetMap / TargetDoor by loading
+// the referenced map from disk. Expensive (file I/O) so it's NOT called per frame
+// — only at playtest gating. One warning per dangling reference; same-map portals
+// are checked against the in-memory area.
 func crossMapDoorWarnings(a core.AreaDefinition) []string {
 	if len(a.DoorSpawns) == 0 {
 		return nil
 	}
-	// Cache loaded destination maps by id so multiple doors pointing
-	// at the same target each only trigger one disk read.
+	// Cache loaded maps by id so repeated targets read disk once.
 	loaded := make(map[string]core.AreaDefinition)
 	var out []string
 	for _, d := range a.DoorSpawns {
 		if !d.HasTarget() {
 			continue // already flagged by reachabilityWarnings
 		}
-		// Same-map portal: just verify the named door exists locally.
+		// Same-map portal: verify the named door exists locally.
 		if core.IsSelfPortal(a, d.TargetMap) {
 			if !mapHasDoor(a.DoorSpawns, d.TargetDoor) {
 				out = append(out, fmt.Sprintf("door %q targets self/%s — no matching door in this map", d.Name, d.TargetDoor))
@@ -1900,11 +1621,8 @@ func crossMapDoorWarnings(a core.AreaDefinition) []string {
 }
 
 // dialogWarnings reports authoring problems in the area's dialogs + triggers
-// that would silently no-op or dead-end at runtime: broken node / dialog
-// references, out-of-bounds tiles, and unregistered foe kinds. Empty slice =
-// clean. Surfaced in the Map ▸ Validate report alongside the reachability and
-// cross-map-door checks so a conversation that can never resolve is caught at
-// author time, not mid-playtest.
+// (broken node/dialog refs, out-of-bounds tiles, unregistered foe kinds). Empty =
+// clean. Surfaced in the Map ▸ Validate report.
 func dialogWarnings(a core.AreaDefinition) []string {
 	var out []string
 	for _, d := range a.Dialogs {
@@ -1955,9 +1673,8 @@ func dialogWarnings(a core.AreaDefinition) []string {
 	return out
 }
 
-// dialogCondWarning returns a one-line problem with a single choice condition,
-// or "" when it's well-formed. Only the world-referencing kinds can be checked
-// statically — gold/quest gates reference runtime state the editor can't see.
+// dialogCondWarning returns a problem with one choice condition, or "". Only
+// world-referencing kinds are checkable statically (gold/quest gates are runtime).
 func dialogCondWarning(a core.AreaDefinition, cond core.DialogChoiceCondition) string {
 	switch cond.Kind {
 	case core.DialogCondFoeKilled:
@@ -1972,9 +1689,8 @@ func dialogCondWarning(a core.AreaDefinition, cond core.DialogChoiceCondition) s
 	return ""
 }
 
-// mapHasDoor reports whether the given spawn list contains a door
-// named `name`. Linear scan (door counts are tiny, ~10/map) so a
-// map keyed by name isn't worth the allocation per check.
+// mapHasDoor reports whether spawns contains a door named `name`. Linear scan
+// (door counts are tiny).
 func mapHasDoor(spawns []core.DoorSpawn, name string) bool {
 	for _, d := range spawns {
 		if d.Name == name {
@@ -1984,12 +1700,8 @@ func mapHasDoor(spawns []core.DoorSpawn, name string) bool {
 	return false
 }
 
-// performNewMap replaces the current area with a freshly-blank one of
-// the chosen dimensions and default floor tile. Inputs are clamped to
-// the same Min/Max ceiling that the resize affordance uses so the new
-// map can't be born outside the playable range. Called by modalNew on
-// commit and by runPendingAction's pendingNew path after the confirm
-// dirty flow.
+// performNewMap replaces the current area with a fresh blank one (clamped dims +
+// default floor). Called by modalNew on commit and the pendingNew confirm path.
 func performNewMap(s *State, w, h int, floor byte) {
 	w = core.ClampMapDimension(w)
 	h = core.ClampMapDimension(h)
@@ -2001,9 +1713,8 @@ func performNewMap(s *State, w, h int, floor byte) {
 	s.contentEpoch++
 	s.dirty = false
 	clearSelection(s) // new map — old selection coords no longer apply
-	// Reset the Levels-panel / active-floor state the same way openSelectedMap
-	// does — otherwise a stale editLevel from the previous map silently lifts
-	// the first paint onto a floor the blank map doesn't have.
+	// Reset Levels-panel / active-floor state (as openSelectedMap does) so a stale
+	// editLevel can't lift the first paint onto a nonexistent floor.
 	s.topLevel = maxAreaLevel(s.area)
 	s.bottomLevel = minAreaLevel(s.area)
 	s.editLevel = clampLevel(s.area.ElevationLevelAt(s.area.StartTileX, s.area.StartTileZ))
@@ -2013,10 +1724,8 @@ func performNewMap(s *State, w, h int, floor byte) {
 	s.flash("New map")
 }
 
-// sanitizeFilename is a thin wrapper over core.SanitizeFilename with
-// the editor's "untitled" fallback for all-strippable input — keeps the
-// editor's call sites short while the actual character-class contract
-// lives in core (shared with audio's user-sound saves).
+// sanitizeFilename wraps core.SanitizeFilename with the editor's "untitled"
+// fallback for all-strippable input.
 func sanitizeFilename(name string) string {
 	return core.SanitizeFilename(name, "untitled")
 }

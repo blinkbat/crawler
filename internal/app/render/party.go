@@ -10,11 +10,9 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// sharedStatusVisuals holds the per-status accent + glyph that BOTH the party
-// cards and enemy roster pills (battle.go) paint identically — one source of
-// truth. Only the byte-identical fields live here (color + glyph); flicker is NOT
-// shared (Sleep/Stun pulse on party cards but sit static on enemy pills). Burn/
-// Bleed are enemy-only and stay local to the enemy table.
+// sharedStatusVisuals: per-status accent + glyph painted identically by party cards
+// and enemy pills (battle.go). Only color + glyph are shared; flicker is not
+// (party cards pulse, enemy pills don't). Burn/Bleed are enemy-only.
 var sharedStatusVisuals = map[core.PartyStatusKind]struct {
 	Col   rl.Color
 	Glyph func(cx, cy, r float32, col rl.Color)
@@ -24,15 +22,13 @@ var sharedStatusVisuals = map[core.PartyStatusKind]struct {
 	core.PartyStatusPoisoned: {Col: statusPoison, Glyph: drawStatusGlyphPoisoned},
 }
 
-// partyStatusVisuals is the canonical per-status visual table, indexed by
-// core.PartyStatusKind so every surface reads color + flicker from one registry.
-// init asserts every non-None kind carries a Glyph. Color tokens: UI_STANDARDS.md
-// "Per-status accents"; flicker marks "something is wrong" statuses.
+// partyStatusVisuals is the canonical per-status visual table (indexed by
+// core.PartyStatusKind). init asserts every non-None kind carries a Glyph. Colors:
+// UI_STANDARDS.md "Per-status accents"; flicker marks "something is wrong".
 var partyStatusVisuals = [core.PartyStatusCount]struct {
 	Col     rl.Color
 	Flicker bool
-	// Glyph paints the symbol at (cx,cy) radius r. Every kind except None carries
-	// one (init-asserted, so a missed row can't render as a bare disc).
+	// Glyph paints at (cx,cy) radius r; every non-None kind has one (init-asserted).
 	Glyph func(cx, cy, r float32, col rl.Color)
 }{
 	core.PartyStatusNone:      {Col: statusNoneAccent},
@@ -51,16 +47,14 @@ var partyStatusVisuals = [core.PartyStatusCount]struct {
 }
 
 func init() {
-	// Every kind except None must carry a Glyph; a missing row leaves nil — caught
-	// here at startup rather than as a silent bare-disc draw.
+	// Every non-None kind must carry a Glyph; caught at startup, not as a bare disc.
 	assertTableComplete("partyStatusVisuals", int(core.PartyStatusCount), func(i int) bool {
 		k := core.PartyStatusKind(i)
 		return k != core.PartyStatusNone && partyStatusVisuals[k].Glyph == nil
 	})
 }
 
-// partyStatusVisual returns the per-status color + flicker flag. Out-of-range
-// kinds fall back to the None row.
+// partyStatusVisual returns the per-status color + flicker flag (out-of-range → None).
 func partyStatusVisual(kind core.PartyStatusKind) (col rl.Color, flicker bool) {
 	if kind < 0 || int(kind) >= len(partyStatusVisuals) {
 		v := partyStatusVisuals[core.PartyStatusNone]
@@ -70,8 +64,7 @@ func partyStatusVisual(kind core.PartyStatusKind) (col rl.Color, flicker bool) {
 	return v.Col, v.Flicker
 }
 
-// partyStatusTurnLabelCache pre-formats every "<LABEL> N" combination the card
-// row can show, so the per-frame draw isn't an fmt.Sprintf.
+// partyStatusTurnLabelCache pre-formats every "<LABEL> N" so the draw isn't a Sprintf.
 var partyStatusTurnLabelCache = func() [core.PartyStatusCount][statusTurnCacheMax]string {
 	var out [core.PartyStatusCount][statusTurnCacheMax]string
 	for k := core.PartyStatusKind(0); k < core.PartyStatusCount; k++ {
@@ -83,13 +76,12 @@ var partyStatusTurnLabelCache = func() [core.PartyStatusCount][statusTurnCacheMa
 	return out
 }()
 
-// statusTurnCacheMax is the turn-count ceiling shared by all three status-turn
-// caches (partyStatusTurnLabelCache, statusTurnDigits, the enemy pill labels), so
-// they can't size-drift; past it they fall back to fmt.Sprintf.
+// statusTurnCacheMax: shared turn-count ceiling for all three status-turn caches
+// (so they can't size-drift); past it they fall back to fmt.Sprintf.
 const statusTurnCacheMax = 20
 
-// partyStatusTurnLabel returns "<LABEL>" for turns==0 else "<LABEL> N", reading
-// the precomputed table and falling back to fmt.Sprintf past the cached window.
+// partyStatusTurnLabel returns "<LABEL>" (turns==0) or "<LABEL> N" from the cache,
+// falling back to fmt.Sprintf past the window.
 func partyStatusTurnLabel(kind core.PartyStatusKind, turns int) string {
 	base := core.PartyStatusLabel(kind)
 	if turns <= 0 {
@@ -101,16 +93,15 @@ func partyStatusTurnLabel(kind core.PartyStatusKind, turns int) string {
 	return fmt.Sprintf("%s %d", base, turns)
 }
 
-// partyStatusLabelMeasureCache memoizes MeasureTextEx for the party-status
-// labels, which each afflicted card would otherwise re-measure every frame.
+// partyStatusLabelMeasureCache memoizes MeasureTextEx for party-status labels.
 var partyStatusLabelMeasureCache measureCache
 
 func measurePartyStatusLabel(font rl.Font, label string) rl.Vector2 {
 	return partyStatusLabelMeasureCache.measure(font, label, FontTiny, 1)
 }
 
-// statusTurnDigits caches the bare turns-remaining numerals drawn beside a status
-// icon, so the per-frame draw allocates no string. Shared by party card + enemy pill.
+// statusTurnDigits caches the bare turns-remaining numerals (no per-frame alloc).
+// Shared by party card + enemy pill.
 var statusTurnDigits = func() [statusTurnCacheMax]string {
 	var d [statusTurnCacheMax]string
 	for i := range d {
@@ -128,8 +119,8 @@ func statusTurnDigit(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
-// partyNamePlusLabels memoizes the "<Name> +" badge string so the ribbon hot
-// path is a map lookup, not a concat. Font-independent, so no measure-cache invalidation.
+// partyNamePlusLabels memoizes the "<Name> +" badge so the ribbon path is a map
+// lookup, not a concat.
 var partyNamePlusLabels = make(map[string]string, 8)
 
 // partyNameSpaceWidth measures "<Name> " at FontBody (positions the "+" overlay).
@@ -162,23 +153,19 @@ func measurePartyNameWithSpace(font rl.Font, name string) rl.Vector2 {
 }
 
 const (
-	// Wide, short cards in a 2×2 grid: left half = class sigil + name + status,
-	// right half = stacked HP/MP bars.
+	// Wide short cards in a 2×2 grid: left = sigil + name + status, right = HP/MP bars.
 	partyCardW   = float32(300)
 	partyCardH   = float32(72)
 	partyCardGap = float32(14)
 	partyRowGap  = float32(10) // vertical gap between the two card rows
 	partyCardCols = 2
 	partyCardBarH = float32(22) // shorter gauge so HP+MP stack in the right column
-	// cardGlowMargin is the per-side inset shared by the active halo and selected
-	// outline (so the two chrome layers can't drift).
+	// cardGlowMargin: per-side inset shared by active halo + selected outline.
 	cardGlowMargin = int32(3)
-	// activeCardJut nudges the active card OUTWARD by column (left pokes left,
-	// right pokes right) so "whose turn" reads without overlapping the row above
-	// or the neighbouring column.
+	// activeCardJut nudges the active card OUTWARD by column so "whose turn" reads
+	// without overlapping neighbours.
 	activeCardJut = float32(28)
-	// ribbonBottom is the ribbon's bottom margin, via hudEdgePad so it matches
-	// every other HUD panel's edge distance.
+	// ribbonBottom is the ribbon's bottom margin (hudEdgePad, matching other panels).
 	ribbonBottom = float32(hudEdgePad)
 )
 

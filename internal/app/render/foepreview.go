@@ -6,23 +6,19 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Foe Visualizer preview support: DrawFoePreview shows the foe as a small combat
-// diorama. The 3D pass renders to a cached off-screen texture sized to the panel
-// then blits into it (raylib has no sub-rect 3D viewport, so a RenderTexture is
-// the clean route).
+// Foe Visualizer preview: DrawFoePreview shows the foe as a small combat diorama.
+// 3D pass → cached off-screen texture → blit (raylib has no sub-rect 3D viewport).
 
-// previewRT is a cached off-screen render target sized to a preview panel. Both
-// the Foe and Party visualizers keep their own instance; the (re)alloc + teardown
-// logic lives here once.
+// previewRT is a cached off-screen render target sized to a preview panel. Foe and
+// Party visualizers each keep an instance; (re)alloc + teardown live here once.
 type previewRT struct {
 	rt   rl.RenderTexture2D
 	w, h int32
 	init bool
 }
 
-// ensure lazily (re)creates the texture when missing or resized, unloading the
-// old handle first so it can't leak. false on alloc failure (caller skips drawing
-// rather than driving BeginTextureMode against an invalid target).
+// ensure lazily (re)creates the texture on miss/resize, unloading the old handle
+// first. false on alloc failure (caller skips drawing rather than bind an invalid target).
 func (p *previewRT) ensure(w, h int32) bool {
 	if p.init && p.w == w && p.h == h {
 		return true
@@ -53,14 +49,13 @@ func (p *previewRT) close() {
 	p.init = false
 }
 
-// blit draws the cached texture into rect, negating the source height to undo the
-// y-flip RenderTextures are stored with. The one place that flip detail lives.
+// blit draws the cached texture into rect, negating source height to undo the
+// RenderTexture y-flip. The one place that flip detail lives.
 func (p *previewRT) blit(rect rl.Rectangle) {
 	p.blitTinted(rect, rl.White)
 }
 
-// blitTinted is blit with a caller-supplied tint (menu-fade + retro-filter blits
-// route through it so the flip lives only here).
+// blitTinted is blit with a caller-supplied tint (menu-fade + retro blits route here).
 func (p *previewRT) blitTinted(rect rl.Rectangle, tint rl.Color) {
 	rl.DrawTextureRec(p.rt.Texture,
 		rl.NewRectangle(0, 0, float32(p.w), -float32(p.h)),
@@ -68,16 +63,14 @@ func (p *previewRT) blitTinted(rect rl.Rectangle, tint rl.Color) {
 		tint)
 }
 
-// visualizerGroundSize is the diorama floor extent + grid slice count shared by
-// the Foe and Party scenes.
+// visualizerGroundSize: diorama floor extent + grid slice count (Foe + Party).
 const visualizerGroundSize = float32(14)
 
-// previewFovy is the vertical FOV shared by every preview camera so the dioramas
-// frame consistently.
+// previewFovy is the shared vertical FOV for every preview camera.
 const previewFovy = float32(46)
 
-// beginVisualizerScene opens the off-screen 3D pass for the Foe/Party visualizers:
-// bind, clear, enter 3D, lay the floor + grid. Pair with EndMode3D/EndTextureMode.
+// beginVisualizerScene opens the off-screen 3D pass: bind, clear, enter 3D, lay
+// floor + grid. Pair with EndMode3D/EndTextureMode.
 func (p *previewRT) beginVisualizerScene(cam rl.Camera3D) {
 	rl.BeginTextureMode(p.rt)
 	rl.ClearBackground(foePreviewBG)
@@ -88,8 +81,8 @@ func (p *previewRT) beginVisualizerScene(cam rl.Camera3D) {
 
 var foePreviewRT previewRT
 
-// foeAnchor is the preview's formation-center anchor — the same
-// battleFormationCenterY battle billboards use, so the preview matches an encounter.
+// foeAnchor is the preview's formation-center anchor (battleFormationCenterY, as
+// battle billboards use) so the preview matches an encounter.
 var foeAnchor = rl.NewVector3(0, battleFormationCenterY, 0)
 
 // foePreviewBG / foePreviewGround tint the diorama (dark void + muted floor so
@@ -150,20 +143,18 @@ func LiveFoeOverride(assets Resources, kind core.EnemyKind) (core.EnemyVisualOve
 	return enemyVisualOverride(v), true
 }
 
-// SetLiveFoeOverride applies ov onto the in-memory visual for kind so a save
-// takes effect without a reload. enemyVisuals is shared by reference through the
-// by-value Resources, so the write reaches what the editor and LiveFoeOverride
-// read (else the next foe-cycle re-seeds stale). No-op if out of range; the
-// caller persists to visuals.json separately.
+// SetLiveFoeOverride applies ov onto the in-memory visual for kind so a save shows
+// without a reload. enemyVisuals is shared by reference through by-value Resources,
+// so the write reaches the editor + LiveFoeOverride. No-op if out of range; caller
+// persists to visuals.json separately.
 func SetLiveFoeOverride(assets Resources, kind core.EnemyKind, ov core.EnemyVisualOverride) {
 	base, ok := visualAt(assets.enemyVisuals, int(kind))
 	if !ok {
 		return
 	}
 	v := applyEnemyVisualOverride(base, ov)
-	// Re-bake the FX into the live display texture so a Save shows immediately.
-	// Positional/tint overrides already apply live (read at draw time); only the
-	// texture-baked FX need the re-derive.
+	// Re-bake FX into the live display texture (positional/tint apply live at draw
+	// time; only texture-baked FX need the re-derive).
 	v.texture = displayTextureForSlug(core.EnemySlug(kind), pristineOrTexture(v), ov)
 	assets.enemyVisuals[kind] = v
 }

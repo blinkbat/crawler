@@ -7,18 +7,15 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Wall-faces modal geometry. A compact button-stack card: one row per face
-// (base + N/E/S/W), each opening the shared face-skin dropdown for that face.
-// Sized for the five rows + the header band.
+// Wall-faces modal: button-stack card, one row per face (base + N/E/S/W), each
+// opening the shared face-skin dropdown.
 const (
 	wallFacesModalW = float32(380)
 	wallFacesModalH = float32(286)
 )
 
-// openWallFacesModal opens the per-tile wall-face editor for (x, z). Reached
-// from the right-click context menu's "Set wall faces…" row. Faces are a
-// per-tile property (a top-down editor can't paint a vertical face), so they
-// live in this modal rather than on a paintable layer.
+// openWallFacesModal opens the per-tile wall-face editor for (x, z). Faces are a
+// per-tile property (no paintable layer), reached from the right-click menu.
 func openWallFacesModal(s *State, x, z int) {
 	if !s.area.InBounds(x, z) {
 		return
@@ -28,15 +25,12 @@ func openWallFacesModal(s *State, x, z int) {
 	s.modalCursor = 0
 }
 
-// wallFaceDirs is the ordered face list the modal exposes: the base skin
-// (dir -1, written to the Walls grid via applyFaceSkin) followed by each
-// cardinal override. Direction values match core's facing constants.
+// wallFaceDirs: base skin (dir -1, written to the Walls grid via applyFaceSkin)
+// then each cardinal override. Values match core's facing constants.
 var wallFaceDirs = []int{-1, core.North, core.East, core.South, core.West}
 
-// wallFaceCmds builds the modal's rows fresh each frame so each label reflects
-// the live skin as the author edits. Each row's run sets the shared face
-// target (tile + this row's direction) and opens ddFaceSkin anchored at the
-// row — reusing faceSkinEntries / applyFaceSkin so the picker logic lives once.
+// wallFaceCmds rebuilds the rows each frame so labels reflect the live skin. Each
+// row's run sets the shared face target and opens ddFaceSkin anchored at the row.
 func wallFaceCmds(s *State) []modalCmd {
 	x, z := s.wallFaceX, s.wallFaceZ
 	labels := make([]string, len(wallFaceDirs))
@@ -80,8 +74,7 @@ func updateWallFacesModal(s *State) Action {
 		closeModal(s)
 		return ActionNone
 	}
-	// The tile can leave the map if it shrank while the modal was open
-	// (mirrors validateModalState's index guards for the entity modals).
+	// Tile can leave the map if it shrank while the modal was open.
 	if !s.area.InBounds(s.wallFaceX, s.wallFaceZ) {
 		closeModal(s)
 		return ActionNone

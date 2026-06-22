@@ -11,11 +11,8 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// soundPanel identifies one column of the sound-creator modal. The cursor
-// moves between columns with Tab (wrapping mod soundPanelCount); each
-// column owns its own keyboard handler and set of click targets. Named so
-// the column dispatch reads by intent instead of bare 0/1/2 and the wrap
-// can't drift from a hardcoded "% 3".
+// soundPanel identifies one column of the sound-creator modal. Tab moves between
+// columns (wrapping mod soundPanelCount); each owns its keyboard handler + clicks.
 type soundPanel int
 
 const (
@@ -25,19 +22,12 @@ const (
 	soundPanelCount
 )
 
-// soundParamSet captures the tunables for a single editor-authored cue.
-// It is an alias of audio.ShapeParams (the synth's own input struct) so
-// the editor, the synth, and the on-disk .snd sidecar all share ONE
-// param shape — no parallel struct to keep in lockstep, and a saved
-// sound round-trips losslessly back into the sliders. The sliders in
-// soundParamSliders map their 0..1 normalized position into the field
-// ranges; soundParamDefaults seeds an audible starter cue.
+// soundParamSet is an alias of audio.ShapeParams so the editor, synth, and .snd
+// sidecar share ONE param shape (lossless round-trip back into the sliders).
 type soundParamSet = audio.ShapeParams
 
-// soundSection groups consecutive soundParamSliders rows under a heading
-// in the (now scrollable) params column. Count is how many sliders the
-// section owns; the sum is asserted == len(soundParamSliders) at init so
-// a row added without a home is caught at startup, not silently hidden.
+// soundSection groups consecutive soundParamSliders rows under a heading. Counts
+// are asserted to sum to len(soundParamSliders) at init so an orphan row panics.
 type soundSection struct {
 	Title string
 	Count int
@@ -49,11 +39,8 @@ var soundSections = []soundSection{
 	{"FX", 7},         // Vibrato Hz/Depth, Tremolo Hz/Depth, Cutoff, Drive, Crush
 }
 
-// noteSlider builds a discrete note-picker row over an Hz field: the
-// underlying value stays a frequency (so the synth + sidecar are
-// unchanged), but the control reads/writes tempered note indices and the
-// readout shows "A4 (440)". Shared by the Start/End pitch rows so authored
-// pitches land on the same tempered grid as the procedural musical cues.
+// noteSlider builds a note-picker row over an Hz field: the stored value stays a
+// frequency, but the control reads/writes tempered note indices ("A4 (440)").
 func noteSlider(label string, get func(*soundParamSet) float64, set func(*soundParamSet, float64)) sliderField[soundParamSet] {
 	return sliderField[soundParamSet]{
 		Label: label, Min: 0, Max: float64(audio.NoteCount - 1), Step: 1, Format: "%.0f",
@@ -66,19 +53,12 @@ func noteSlider(label string, get func(*soundParamSet) float64, set func(*soundP
 	}
 }
 
-// soundParamSliders describes the sound modal's slider column — one
-// sliderField (slider.go) row per synth parameter, in soundSections
-// order. The cursor walks this slice; each row reads/writes its named
-// field on the soundParamSet via the getter/setter callbacks.
+// soundParamSliders: one sliderField row per synth param, in soundSections order.
 var soundParamSliders = []sliderField[soundParamSet]{
 	// — Oscillator —
 	{
-		// Wave shape — discrete toggle dressed up as a slider. Step=1 +
-		// Min/Max=0..WaveShapeCount-1 means Left/Right cycles through the
-		// WaveX values one at a time, and the mouse-drag mapping rounds to
-		// the nearest integer. Bounds derive from audio.WaveShapeCount so a
-		// fifth shape becomes reachable without editing this row. Display
-		// returns the human label so the readout shows "Sine" instead of "0".
+		// Wave shape — discrete toggle as a slider; bounds derive from
+		// WaveShapeCount so a new shape is reachable without editing this row.
 		Label: "Wave", Min: 0, Max: float64(audio.WaveShapeCount - 1), Step: 1, Format: "%.0f",
 		Get: func(p *soundParamSet) float64 { return float64(p.Wave) },
 		Set: func(p *soundParamSet, v float64) {
@@ -160,7 +140,7 @@ var soundParamSliders = []sliderField[soundParamSet]{
 		Set: func(p *soundParamSet, v float64) { p.TremoloDepth = v },
 	},
 	{
-		// Cutoff — one-pole low-pass; 1.0 = fully open (no filtering).
+		// Cutoff — one-pole low-pass; 1.0 = fully open.
 		Label: "Cutoff", Min: 0.0, Max: 1.0, Step: 0.05, Format: "%.2f",
 		Get: func(p *soundParamSet) float64 { return p.Cutoff },
 		Set: func(p *soundParamSet, v float64) { p.Cutoff = v },
@@ -187,11 +167,8 @@ func init() {
 	}
 }
 
-// soundParamDefaults seeds the modal with a sane starter cue — a short
-// rising blip at modest volume with every "extra" knob at its neutral
-// (no-op) value: full sustain, open filter, no decay/tremolo/drive/crush.
-// All fields are listed explicitly so a future field/enum reordering
-// doesn't silently shift the default timbre — the literal expresses intent.
+// soundParamDefaults seeds a short rising blip with every extra knob neutral.
+// All fields listed explicitly so a field/enum reorder can't shift the timbre.
 func soundParamDefaults() soundParamSet {
 	return soundParamSet{
 		Duration:     0.10,
@@ -215,16 +192,8 @@ func soundParamDefaults() soundParamSet {
 	}
 }
 
-// Sound modal layout constants. Sized larger than the previous pass so
-// the labels are readable on a 1080p display without leaning in. Modal
-// occupies a 900×560 card; three columns plus a hint footer.
-//
-// Three "body" font sizes (label / value / list) all collapse to one
-// soundFontBody — they had drifted to the same 16pt value, so the
-// distinction was misleading. Both alias the shared editor type scale
-// (palette.go) so the sound modal can't drift off it: body == editorFontBody,
-// the smaller footer hint == editorFontAccent. The SOUNDS heading is drawn
-// through render.DrawHeading (no local size).
+// Sound modal layout constants. Three columns plus a hint footer. Fonts alias
+// the shared editor type scale (palette.go) so the modal can't drift off it.
 const (
 	soundModalW     = float32(960)
 	soundModalH     = float32(600)
@@ -235,23 +204,15 @@ const (
 	soundAssignRowH = float32(48) // two-line cue row (name + assigned)
 	soundColGap     = float32(14)
 	soundButtonH    = float32(32)
-	// paramsHeaderReserve / soundGroupHeaderH size the scrollable params
-	// column: a fixed sub-header band at the top, then a scrolling body of
-	// section headers (soundGroupHeaderH each) + slider rows under a fixed
-	// name/actions footer. The body scrolls because the grouped slider list
-	// is taller than the column.
+	// Scrollable params column: fixed sub-header band, then a scrolling body of
+	// section headers (soundGroupHeaderH each) + slider rows under a fixed footer.
 	paramsHeaderReserve = float32(30)
 	soundGroupHeaderH   = float32(22)
-	// soundNameMaxLen caps the sound-name text field. The sound modal pumps
-	// this field directly (no-space filter) rather than through input.go's
-	// textFieldConfigs table, so its cap lives here next to the modal's other
-	// layout constants instead of as a bare literal at the pump call.
-	soundNameMaxLen = 32
+	soundNameMaxLen     = 32 // sound-name field cap (pumped directly, not via textFieldConfigs)
 )
 
-// assignableCueList is the fixed list of built-in cues the assignments
-// column iterates. Cached as a package-level slice so the draw loop
-// doesn't allocate a fresh slice every frame.
+// assignableCueList is the fixed built-in cue list for the assignments column,
+// cached package-level so the draw loop doesn't allocate per frame.
 var assignableCueList = func() []audio.Sound {
 	count := audio.SoundCount()
 	out := make([]audio.Sound, 0, count)
@@ -261,21 +222,16 @@ var assignableCueList = func() []audio.Sound {
 	return out
 }()
 
-// rowButtonSpec describes one button in a right-anchored per-row button group:
-// its width and the gap to the NEXT button on its right (gapAfter is ignored
-// for the rightmost spec). Used by rightButtonRow.
+// rowButtonSpec is one button in a right-anchored row group: width + gap to the
+// next button (gapAfter ignored for the rightmost). Used by rightButtonRow.
 type rowButtonSpec struct {
 	w        float32
 	gapAfter float32
 }
 
-// rightButtonRow lays the specs out left-to-right as a block right-anchored
-// inside `row`: the rightmost button's right edge sits rightInset px from the
-// row's right edge, each button is yOff px down from the row top with height h.
-// The per-row Edit/Play/Delete (saved-sounds list) and Play/◂/▸ (cue
-// assignments) groups were placed by hand-derived right-edge offsets that had
-// to stay in lockstep with their widths; this is the one placement formula for
-// both. Returns rects in spec (left-to-right) order.
+// rightButtonRow lays the specs left-to-right as a block right-anchored inside
+// `row` (rightmost edge at rightInset, each yOff down, height h). One placement
+// formula for both the list and assignment button groups. Returns rects in order.
 func rightButtonRow(row rl.Rectangle, yOff, h, rightInset float32, specs ...rowButtonSpec) []rl.Rectangle {
 	var total float32
 	for i, sp := range specs {
@@ -293,10 +249,8 @@ func rightButtonRow(row rl.Rectangle, yOff, h, rightInset float32, specs ...rowB
 	return rects
 }
 
-// soundListRowRect bundles the row + per-row buttons for one saved
-// sound. Replaces three parallel []rl.Rectangle slices that had to be
-// kept in lockstep — now drift between row count and button count is
-// impossible.
+// soundListRowRect bundles the row + per-row buttons for one saved sound (vs.
+// three parallel slices that had to stay in lockstep).
 type soundListRowRect struct {
 	Row    rl.Rectangle
 	Edit   rl.Rectangle
@@ -304,8 +258,7 @@ type soundListRowRect struct {
 	Delete rl.Rectangle
 }
 
-// soundAssignRowRect bundles the row + per-row buttons for one built-in
-// cue assignment. Same rationale as soundListRowRect.
+// soundAssignRowRect bundles the row + per-row buttons for one cue assignment.
 type soundAssignRowRect struct {
 	Row        rl.Rectangle
 	Play       rl.Rectangle
@@ -313,21 +266,17 @@ type soundAssignRowRect struct {
 	CycleRight rl.Rectangle
 }
 
-// soundLayout caches the per-frame screen rectangles for every clickable
-// element in the modal. Rebuilt every Update/Draw pair so resizes
-// (windowed↔fullscreen toggle, layout knob changes) take effect on the
-// next frame. The Update path reads these for hit-testing; the Draw
-// path reads them to paint at the same positions.
+// soundLayout caches the per-frame rects for every clickable element. Rebuilt
+// each Update/Draw pair (Update hit-tests, Draw paints at the same positions).
 type soundLayout struct {
 	card         rl.Rectangle
 	paramsCol    rl.Rectangle
 	listCol      rl.Rectangle
 	assignCol    rl.Rectangle
 	sliderTracks []rl.Rectangle // per-slider clickable track (scrolled); len == len(soundParamSliders)
-	// paramsViewport is the clipped scroll region the slider body draws/
-	// hit-tests inside; sectionHeaderY[i] is the scrolled screen Y of
-	// soundSections[i]'s heading. paramContentH is the body's full height
-	// and paramMaxScroll the clamped scroll ceiling.
+	// paramsViewport is the clipped scroll region; sectionHeaderY[i] is the
+	// scrolled screen Y of soundSections[i]'s heading; paramContentH is the body
+	// height, paramMaxScroll the scroll ceiling.
 	paramsViewport rl.Rectangle
 	sectionHeaderY []float32
 	paramContentH  float32
@@ -335,26 +284,16 @@ type soundLayout struct {
 	nameField      rl.Rectangle
 	previewBtn     rl.Rectangle
 	saveBtn        rl.Rectangle
-	listRows       []soundListRowRect   // one entry per saved-sound row (rects only filled for the visible window)
-	assignRows     []soundAssignRowRect // one entry per built-in cue row (rects only filled for the visible window)
-	// listTopRow..listEnd is the saved-sounds scroll window (via scrollWindow)
-	// so a long list can't overflow the column off the card bottom.
-	listTopRow int
-	listEnd    int
-	// assignTopRow..assignEnd is the same scroll window for the cue
-	// assignments column — 6 cues fit today, but the cue list grows with
-	// the game and overflow rows would otherwise be unreachable.
-	assignTopRow int
-	assignEnd    int
+	listRows       []soundListRowRect   // per saved-sound row (rects filled only for the visible window)
+	assignRows     []soundAssignRowRect // per cue row (rects filled only for the visible window)
+	listTopRow     int                  // saved-sounds scroll window
+	listEnd        int
+	assignTopRow   int // cue-assignments scroll window
+	assignEnd      int
 }
 
-// computeSoundLayout assembles the layout rectangles given the current
-// screen size and the cached lists (saved sounds, cues). Pure function
-// of inputs — both Update and Draw call this so they agree on
-// hit-test geometry.
-// soundListCursor is the saved-sounds row the scroll window should keep
-// visible: the live cursor when the list panel is focused, else row 0 (so
-// editing the params/assign columns doesn't yank the list to an unrelated row).
+// soundListCursor is the saved-sounds row the scroll window keeps visible: the
+// live cursor when the list panel is focused, else row 0.
 func soundListCursor(s *State) int {
 	if s.soundLeftPanel == soundPanelList {
 		return s.soundCursor
@@ -382,9 +321,8 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, para
 
 	l := soundLayout{card: card, paramsCol: paramsCol, listCol: listCol, assignCol: assignCol}
 
-	// Params column: a fixed sub-header band, a scrollable body of section
-	// headers + slider rows, and a fixed footer (name + Preview/Save). The
-	// footer stays reachable no matter how far the body scrolls.
+	// Params column: fixed sub-header band, scrollable body (section headers +
+	// sliders), fixed footer (name + Preview/Save) that stays reachable.
 	x := paramsCol.X + 12
 	w := paramsCol.Width - 24
 	footerH := soundRowH + 6 + soundButtonH + 8 // name row + gap + buttons + pad
@@ -395,8 +333,7 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, para
 	}
 	l.paramsViewport = rl.NewRectangle(paramsCol.X+1, vpY, paramsCol.Width-2, vpH)
 
-	// First pass: unscrolled content offsets for each section header + slider,
-	// so we know the full content height before clamping the scroll.
+	// First pass: unscrolled offsets, to learn the full content height.
 	sliderOff := make([]float32, len(soundParamSliders))
 	headerOff := make([]float32, len(soundSections))
 	contentY := float32(0)
@@ -417,7 +354,7 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, para
 	}
 	sc := core.Clamp(paramScroll, 0, l.paramMaxScroll)
 
-	// Second pass: place tracks + headers at their scrolled screen positions.
+	// Second pass: place tracks + headers at scrolled screen positions.
 	l.sliderTracks = make([]rl.Rectangle, len(soundParamSliders))
 	for i := range soundParamSliders {
 		l.sliderTracks[i] = rl.NewRectangle(x+96, vpY-sc+sliderOff[i]+8, w-176, 14)
@@ -434,9 +371,8 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, para
 	l.previewBtn = rl.NewRectangle(x, fy, (w-12)/2, soundButtonH)
 	l.saveBtn = rl.NewRectangle(x+(w-12)/2+12, fy, (w-12)/2, soundButtonH)
 
-	// List column rows + per-row Play/× buttons. Only the visible window gets
-	// real rects; off-window entries stay zero (so they neither draw nor
-	// hit-test). The window keeps listCursor on screen.
+	// List column rows + per-row buttons. Only the visible window gets real rects
+	// (off-window entries stay zero, so they neither draw nor hit-test).
 	lx := listCol.X + 12
 	lw := listCol.Width - 24
 	ly := listCol.Y + 36
@@ -459,9 +395,7 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, para
 		}
 	}
 
-	// Assignments column. Same visible-window scheme as the saved-sounds
-	// list: only on-window cue rows get real rects, so a cue list that
-	// outgrows the column scrolls instead of overflowing off the card.
+	// Assignments column. Same visible-window scheme as the saved-sounds list.
 	ax := assignCol.X + 12
 	aw := assignCol.Width - 24
 	ay := assignCol.Y + 36
@@ -487,14 +421,11 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, para
 	return l
 }
 
-// soundDrag is set while the mouse is held on a slider track — motion updates
-// the slider's value continuously. Released when the mouse button releases.
-// Uses the shared sliderDragState (idx < 0 means "no active drag"); see
-// foeview.go for the type + its update protocol.
+// soundDrag holds the active slider-track drag (shared sliderDragState; idx < 0
+// means none). See foeview.go for the type + update protocol.
 var soundDrag = noSliderDrag
 
-// openSoundsModal seeds the sound modal's defaults if this is the
-// first time and switches state. Called by the Sounds topbar button.
+// openSoundsModal seeds first-time defaults and enters the sound modal.
 func openSoundsModal(s *State) {
 	if s.soundParams.Duration == 0 {
 		s.soundParams = soundParamDefaults()
@@ -505,36 +436,27 @@ func openSoundsModal(s *State) {
 	s.modal = modalSounds
 	s.soundCursor = 0
 	s.soundLeftPanel = soundPanelParams
-	// Seed the disk-backed caches once on open; they're refreshed only on
-	// mutation thereafter, never per frame.
+	// Seed the disk-backed caches once; refreshed only on mutation thereafter.
 	refreshSoundCaches(s)
-	// Reset any leftover drag from a prior session — a stale index
-	// would let the next mouse drag pop a different slider.
-	soundDrag = noSliderDrag
+	soundDrag = noSliderDrag // a stale index would pop a different slider
 }
 
-// refreshSoundCaches re-reads the saved-sounds directory listing and the
-// cue-assignment map from disk into State. The sound modal only mutates these
-// through save / delete / assign actions in this package, so refreshing here
-// (on open + after each mutation) keeps the per-frame draw/update off the disk
-// entirely — previously the list ReadDir ran every Update frame and the
-// assignment file was read+parsed once per cue every Draw frame.
+// refreshSoundCaches re-reads the saved-sounds listing + cue-assignment map from
+// disk into State. Called on open + after each mutation, keeping draw/update off
+// the disk (these were previously re-read every frame).
 func refreshSoundCaches(s *State) {
 	s.soundSavedCache = audio.ListUserSounds()
 	s.soundAssignCache = audio.AllAssignments()
 }
 
-// updateSoundsModal handles the sound modal's input. Mouse-first now:
-// click sliders/buttons/list rows directly, keyboard remains as a
-// secondary path (Tab between columns, arrows for fine adjustment, Esc
-// to close).
+// updateSoundsModal handles the sound modal's input (mouse-first; keyboard is the
+// secondary path: Tab columns, arrows adjust, Esc closes).
 func updateSoundsModal(s *State) Action {
 	if editorCancelPressed() {
 		closeModal(s)
 		return ActionNone
 	}
-	// Read the saved-sounds list from the cache (populated on open + after
-	// each save/delete via refreshSoundCaches) — no per-frame os.ReadDir.
+	// Saved-sounds list from the cache — no per-frame os.ReadDir.
 	savedSounds := s.soundSavedCache
 	layout := computeSoundLayout(savedSounds, soundListCursor(s), soundAssignCursor(s), s.soundParamScroll)
 
@@ -548,9 +470,7 @@ func updateSoundsModal(s *State) Action {
 		s.soundParamScroll = core.Clamp(s.soundParamScroll-wheel*soundRowH, 0, layout.paramMaxScroll)
 	}
 
-	// Active slider drag: while held, map the mouse X within the track
-	// to a value in the slider's range. Snap to the slider's Step grain
-	// so dragging produces clean readouts instead of fractional noise.
+	// Active slider drag: map mouse X within the track to a value, snapped to Step.
 	soundDrag.update(mouseDown, len(soundParamSliders), func(idx int) {
 		info := soundParamSliders[idx]
 		track := layout.sliderTracks[idx]
@@ -566,14 +486,9 @@ func updateSoundsModal(s *State) Action {
 		soundDrag = noSliderDrag
 	}
 
-	// Name field typing: only while the focus is on the name row of the
-	// params column. The user has to click the field (which sets cursor
-	// to the name row) before keystrokes register — that fixes the old
-	// "Space types into the name" trap.
+	// Name typing only while focus is the name row (clicking the field sets it).
 	if s.soundLeftPanel == soundPanelParams && s.soundCursor == soundNameCursorIdx() {
-		// No-space filter so the user can hit Space for Preview without
-		// also typing a space into the sound name. Shared pump from
-		// input.go — backspace handled there too.
+		// No-space filter so Space can preview without typing into the name.
 		pumpPrintableASCII(&s.soundName, soundNameMaxLen, acceptPrintableNoSpace, nil)
 	}
 
@@ -596,40 +511,30 @@ func updateSoundsModal(s *State) Action {
 	return ActionNone
 }
 
-// soundNameCursorIdx returns the cursor row that represents the name
-// field in the params column. Anything past the last slider but before
-// the Preview/Save action row.
+// soundNameCursorIdx / soundActionCursorIdx are the name + action rows, just past
+// the last slider.
 func soundNameCursorIdx() int   { return len(soundParamSliders) }
 func soundActionCursorIdx() int { return len(soundParamSliders) + 1 }
 
-// handleSoundMouseClick dispatches a left-mouse-down inside the modal.
-// Returns the new (leftPanel, cursor) so the caller can use them to
-// drive subsequent draws and keyboard input. Returning early without
-// changing the cursor means "click was on a non-cursor target."
+// handleSoundMouseClick dispatches a left-mouse-down, returning the new
+// (leftPanel, cursor). Unchanged cursor means the click missed a cursor target.
 func handleSoundMouseClick(s *State, mp rl.Vector2, l *soundLayout, savedSounds []string) (soundPanel, int) {
-	// Slider tracks — start a drag and immediately set the value at the
-	// click position so single-click also adjusts (not just drag). Gated to
-	// the scroll viewport so a track scrolled behind the header/footer can't
-	// catch a click meant for those fixed elements.
+	// Slider tracks — gated to the viewport so a track scrolled behind the
+	// header/footer can't catch their clicks.
 	for i := range soundParamSliders {
 		if pointIn(mp, l.paramsViewport) && pointIn(mp, l.sliderTracks[i]) {
 			soundDrag.idx = i
-			// Apply the value at the click X immediately so a single click
-			// adjusts, not just a drag. soundDrag.update runs BEFORE this
-			// dispatch in the frame, so without setting here a click-release
-			// with no motion would leave the value unchanged (the comment
-			// above promised single-click works; this makes it true).
+			// Apply the value at the click X so a single click adjusts, not just
+			// a drag (soundDrag.update ran before this dispatch).
 			info := soundParamSliders[i]
 			track := l.sliderTracks[i]
 			info.Set(&s.soundParams, sliderSnap(info.Min, info.Max, info.Step, track.X, track.Width, mp.X))
 			return soundPanelParams, i
 		}
 	}
-	// Name field — sets focus so keystrokes type into the name.
 	if pointIn(mp, l.nameField) {
 		return soundPanelParams, soundNameCursorIdx()
 	}
-	// Preview / Save action buttons.
 	if pointIn(mp, l.previewBtn) {
 		previewSoundParams(s.soundParams)
 		return soundPanelParams, soundActionCursorIdx()
@@ -638,7 +543,7 @@ func handleSoundMouseClick(s *State, mp rl.Vector2, l *soundLayout, savedSounds 
 		saveCurrentSound(s)
 		return soundPanelParams, soundActionCursorIdx()
 	}
-	// Saved-sounds list — clickable rows + per-row Play/× buttons (visible window only).
+	// Saved-sounds list — rows + per-row buttons (visible window only).
 	for i := l.listTopRow; i < l.listEnd; i++ {
 		r := l.listRows[i]
 		if pointIn(mp, r.Edit) {
@@ -657,7 +562,7 @@ func handleSoundMouseClick(s *State, mp rl.Vector2, l *soundLayout, savedSounds 
 			return soundPanelList, i
 		}
 	}
-	// Assignments column (visible window only — off-window rects are zero).
+	// Assignments column (visible window only).
 	for i := l.assignTopRow; i < l.assignEnd; i++ {
 		r := l.assignRows[i]
 		if pointIn(mp, r.Play) {
@@ -679,17 +584,13 @@ func handleSoundMouseClick(s *State, mp rl.Vector2, l *soundLayout, savedSounds 
 	return s.soundLeftPanel, s.soundCursor
 }
 
-// updateSoundsParamsKeys drives the synth-params column via keyboard:
-// arrows move the cursor + adjust sliders. Space previews. Enter saves
-// (cursor on the action row) or types nothing into the name (handled
-// elsewhere).
+// updateSoundsParamsKeys drives the params column via keyboard: arrows move the
+// cursor + adjust sliders, Space previews, Enter saves on the action row.
 func updateSoundsParamsKeys(s *State, l *soundLayout) {
 	rowCount := len(soundParamSliders) + 2 // sliders + name + actions
 	if s.soundCursor == soundNameCursorIdx() {
-		// On the Name row every printable key (incl. W/S) feeds the name
-		// buffer, so navigate off it with arrow/pad-only up-down — otherwise
-		// typing a name containing those letters also scrolls the cursor away
-		// (and once off the name row, keystrokes stop reaching the buffer).
+		// Name row feeds every printable key (incl. W/S) into the buffer, so use
+		// arrow/pad-only up-down to navigate off it.
 		s.soundCursor = input.CursorUpDownTextSafe(s.soundCursor, rowCount)
 	} else {
 		s.soundCursor = input.CursorUpDown(s.soundCursor, rowCount)
@@ -714,17 +615,14 @@ func updateSoundsParamsKeys(s *State, l *soundLayout) {
 			saveCurrentSound(s)
 		}
 	}
-	// On the Name row: keystrokes feed into the name buffer (handled by
-	// updateSoundsModal); Enter saves.
+	// Name row: keystrokes feed the buffer (in updateSoundsModal); Enter saves.
 	if s.soundCursor == soundNameCursorIdx() && editorCommitPressed() {
 		saveCurrentSound(s)
 	}
 }
 
-// ensureSliderVisible nudges the params scroll so the cursor's slider row
-// sits inside the viewport — called after keyboard cursor moves so arrowing
-// down a long param list scrolls the body to follow instead of stranding the
-// cursor off-screen. No-op when the cursor isn't on a slider row.
+// ensureSliderVisible scrolls the params body so the cursor's slider row stays in
+// the viewport after a keyboard move. No-op off a slider row.
 func ensureSliderVisible(s *State, l *soundLayout) {
 	if s.soundCursor < 0 || s.soundCursor >= len(l.sliderTracks) {
 		return
@@ -747,7 +645,7 @@ func updateSoundsListKeys(s *State, names []string) {
 		s.soundCursor = len(names) - 1
 	}
 	if s.soundCursor < 0 {
-		s.soundCursor = 0 // guard both ends before indexing names[soundCursor] below
+		s.soundCursor = 0 // guard before indexing names[soundCursor]
 	}
 	s.soundCursor = input.CursorUpDown(s.soundCursor, len(names))
 	if editorCommitPressed() || rl.IsKeyPressed(rl.KeySpace) {
@@ -761,11 +659,8 @@ func updateSoundsListKeys(s *State, names []string) {
 	}
 }
 
-// confirmSoundDelete is a two-press guard on the irreversible saved-sound
-// delete: the first request arms `name` (and flashes a confirm prompt);
-// the second request for the SAME name performs the on-disk delete. A
-// different name re-arms instead of deleting, so a single misclick on the
-// × never destroys a .wav.
+// confirmSoundDelete is a two-press guard on the irreversible delete: first call
+// arms `name`, the next for the SAME name deletes. A different name re-arms.
 func confirmSoundDelete(s *State, name string) {
 	if !armOrConfirmDelete(s, "sound:"+name, "Delete "+name+"? Click × again (or press X) to confirm") {
 		return
@@ -796,12 +691,8 @@ func updateSoundsAssignKeys(s *State) {
 	}
 }
 
-// cycleCueAssignment advances the cue's assignment through:
-//
-//	"(default)" → user_sound_1 → user_sound_2 → … → "(default)" → …
-//
-// in the user-sounds list's sorted order. The visible label in the UI
-// is fed by audio.CurrentAssignment.
+// cycleCueAssignment advances the cue's assignment through "(default)" →
+// user_sound_1 → … → "(default)" in sorted order.
 func cycleCueAssignment(s *State, cue audio.Sound, delta int) {
 	options := []string{""} // first slot = revert-to-default
 	options = append(options, audio.ListUserSounds()...)
@@ -825,18 +716,14 @@ func cycleCueAssignment(s *State, cue audio.Sound, delta int) {
 	refreshSoundCaches(s)
 }
 
-// previewSoundParams synthesizes the current slider settings into PCM
-// and plays it through audio's in-memory preview ring — no disk write,
-// so the saved-sounds list isn't polluted and a user who saves a real
-// cue named "preview" doesn't clash.
+// previewSoundParams synthesizes the slider settings to PCM and plays it through
+// audio's in-memory preview ring — no disk write.
 func previewSoundParams(p soundParamSet) {
 	audio.PreviewPCM(audio.SynthShapeParams(p))
 }
 
-// loadSoundForEdit pulls a saved sound's knobs back into the params
-// column so it can be re-tuned and re-saved (overwriting). Sounds with no
-// .snd sidecar (hand-dropped .wav, or saved before sidecars existed)
-// can't be reconstructed — flash and leave the current params untouched.
+// loadSoundForEdit pulls a saved sound's knobs back into the params column for
+// re-tuning. Sounds with no .snd sidecar can't be reconstructed — flash and bail.
 func loadSoundForEdit(s *State, name string) {
 	p, ok := audio.LoadUserSoundParams(name)
 	if !ok {
@@ -851,12 +738,9 @@ func loadSoundForEdit(s *State, name string) {
 	s.flash("Editing " + name)
 }
 
-// saveCurrentSound writes the slider state to maps/sounds/<name>.wav plus
-// its <name>.snd editing sidecar, and flashes a status message.
-// audio.SaveUserSoundParams sanitizes the name itself and returns the
-// final on-disk form, so the editor reports exactly what landed on disk
-// (handles a user typing "My Cue!" → file becomes "my_cue.wav"). Saving
-// onto an existing name overwrites it — that's the "edit then re-save" path.
+// saveCurrentSound writes the slider state to maps/sounds/<name>.wav + its .snd
+// sidecar. SaveUserSoundParams sanitizes the name and returns the on-disk form
+// (reported back). Saving onto an existing name overwrites it.
 func saveCurrentSound(s *State) {
 	if strings.TrimSpace(s.soundName) == "" {
 		s.flash("Sound name required")
@@ -872,24 +756,17 @@ func saveCurrentSound(s *State) {
 	refreshSoundCaches(s)
 }
 
-// drawSoundsModal renders the three-column sound editor with mouse-first
-// affordances: clickable slider tracks, name field, action buttons, and
-// per-row Play/×/cycle controls. Keyboard focus still highlights the
-// active column + cursor.
+// drawSoundsModal renders the three-column sound editor.
 func drawSoundsModal(s *State, font rl.Font, theme render.Theme) {
-	// Read the cached saved-sounds list that updateSoundsModal already
-	// populated this frame — no second ReadDir per frame. Fall back to
-	// a fresh read if the cache is nil (defensive; would mean Draw fired
-	// without a prior Update, which shouldn't happen for a modal).
+	// Cached saved-sounds list from this frame's Update; fall back to a fresh
+	// read if nil (defensive — Draw without a prior Update shouldn't happen).
 	savedSounds := s.soundSavedCache
 	if savedSounds == nil {
 		savedSounds = audio.ListUserSounds()
 	}
 	l := computeSoundLayout(savedSounds, soundListCursor(s), soundAssignCursor(s), s.soundParamScroll)
-	// Both computeSoundLayout and drawModalHeader center the card through
-	// the shared centeredCardRect, so the rect drawModalHeader paints is
-	// identical to l.card — visual + hit-test stay in sync without
-	// duplicating the card-draw call.
+	// drawModalHeader centers via the same centeredCardRect as l.card, so visual
+	// + hit-test stay in sync.
 	_ = drawModalHeader(font, theme, soundModalW, soundModalH, "SOUNDS", theme.BorderActive)
 
 	drawSoundsParamsCol(s, font, theme, &l)
@@ -906,24 +783,21 @@ func drawSoundsParamsCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 	drawSoundsColumnFrame(theme, l.paramsCol, s.soundLeftPanel == soundPanelParams)
 	render.DrawSubHeading(font, "Synth params", l.paramsCol.X+12, l.paramsCol.Y+8, theme.BorderActive)
 
-	// Scrollable slider body: clip to the viewport so section headers / rows
-	// scrolled past the top or bottom don't paint over the sub-header or the
-	// fixed footer. Mirrors the palette/metadata scissor pattern.
+	// Clip the slider body to the viewport so scrolled rows don't paint over the
+	// sub-header/footer (palette/metadata scissor pattern).
 	vp := l.paramsViewport
 	rl.BeginScissorMode(int32(vp.X), int32(vp.Y), int32(vp.Width), int32(vp.Height))
 	gi := 0
 	for si, sec := range soundSections {
 		hy := l.sectionHeaderY[si]
-		// Only draw a header that falls within the viewport band.
-		if hy+soundGroupHeaderH > vp.Y && hy < vp.Y+vp.Height {
+		if hy+soundGroupHeaderH > vp.Y && hy < vp.Y+vp.Height { // header in band
 			render.DrawRichText(font, sec.Title, rl.NewVector2(l.paramsCol.X+12, hy+4), soundFontHint, 1, theme.TextLabel)
 			lineY := hy + soundGroupHeaderH - 3
 			rl.DrawLineEx(rl.NewVector2(l.paramsCol.X+12, lineY), rl.NewVector2(l.paramsCol.X+l.paramsCol.Width-12, lineY), 1, theme.BorderDim)
 		}
 		for k := 0; k < sec.Count; k++ {
 			track := l.sliderTracks[gi]
-			// Skip rows fully outside the viewport (scissor would clip them
-			// anyway; this just avoids the draw work).
+			// Skip rows fully outside the viewport (avoids draw work).
 			if track.Y+soundRowH > vp.Y && track.Y-8 < vp.Y+vp.Height {
 				focused := s.soundLeftPanel == soundPanelParams && s.soundCursor == gi
 				drawSoundsSlider(font, theme, l.paramsCol.X+12, track.Y-8, l.paramsCol.Width-24, soundParamSliders[gi], s.soundParams, track, focused)
@@ -943,8 +817,7 @@ func drawSoundsParamsCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 		}
 	}
 
-	// Name field (fixed footer). The "Name" label sits to the left of the
-	// text field; drawTextField paints the field with the shared palette.
+	// Name field (fixed footer).
 	nameFocused := s.soundLeftPanel == soundPanelParams && s.soundCursor == soundNameCursorIdx()
 	nameLabelCol := theme.TextMuted
 	if nameFocused {
@@ -959,10 +832,7 @@ func drawSoundsParamsCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 }
 
 func drawSoundsSlider(font rl.Font, theme render.Theme, x, y, w float32, info sliderField[soundParamSet], p soundParamSet, track rl.Rectangle, focused bool) {
-	// Display-aware row draw (shared drawSliderField): the Display callback
-	// overrides the fmt.Sprintf path for rows that render a label instead of a
-	// number (the Wave row's "Sine"/"Square"/etc.). The numeric readout sits to
-	// the right of the track.
+	// Display callback overrides the numeric readout for label rows (e.g. Wave).
 	drawSliderField(font, theme, info, &p,
 		rl.NewVector2(x, y), rl.NewVector2(x+w-78, y),
 		soundFontBody, track, 7, focused)
@@ -992,11 +862,8 @@ func drawSoundsListCol(s *State, font rl.Font, theme render.Theme, l *soundLayou
 	drawSoundColumnScrollHints(font, theme, l.listCol, l.listTopRow, len(names)-l.listEnd)
 }
 
-// drawSoundColumnScrollHints paints the "▲ N more"/"▼ N more" captions in a
-// sounds column's top-right / bottom-right when its row list has hiddenAbove /
-// hiddenBelow rows outside the visible window. Routes through the shared
-// drawScrollMoreHint so the glyph + "N more" format match every other
-// scrollable list in the editor (each call no-ops when its count is 0).
+// drawSoundColumnScrollHints paints the "▲/▼ N more" captions for a column's
+// off-window rows (each no-ops at count 0).
 func drawSoundColumnScrollHints(font rl.Font, theme render.Theme, col rl.Rectangle, hiddenAbove, hiddenBelow int) {
 	x := col.X + col.Width - 70
 	drawScrollMoreHint(font, theme, x, col.Y+10, hiddenAbove, true)
@@ -1030,10 +897,7 @@ func drawSoundsAssignCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 }
 
 func drawSoundsColumnFrame(theme render.Theme, r rl.Rectangle, focused bool) {
-	// SurfacePrimary at full alpha for the column background — slightly
-	// darker than the modal card so the columns read as inset, matching
-	// the editor's other panel-inside-panel surfaces (combat log inset,
-	// metadata column).
+	// SurfacePrimary at full alpha — darker than the card so columns read as inset.
 	bg := theme.SurfacePrimary
 	bg.A = 255
 	rl.DrawRectangleRec(r, bg)

@@ -11,14 +11,10 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// editorCommitPressed / editorCancelPressed / editorTabPressed name the
-// editor-side commit / cancel / focus-cycle edges used by every modal
-// updater. They delegate to the input package (input.Editor* predicates)
-// so the bindings live in the one remappable place per AGENTS.md, while
-// the editor diverges from explore's `input.ConfirmPressed` (Z / Space /
-// Enter / pad A) on purpose: modal text fields use Tab to cycle focus and
-// Enter (alone) to commit, so the Z / Space chord would collide with
-// typing into a Name field. The pad A / B face buttons commit / cancel.
+// editorCommitPressed / editorCancelPressed / editorTabPressed are the editor's
+// commit / cancel / focus-cycle edges, delegating to input.Editor* so bindings
+// live in one place. The editor uses Enter (not the Z/Space chord) to commit so
+// it can't collide with typing into a Name field.
 func editorCommitPressed() bool {
 	return input.EditorConfirmPressed()
 }
@@ -31,12 +27,8 @@ func editorTabPressed() bool {
 	return input.EditorTabPressed()
 }
 
-// runCardCmds is the shared tail of the modal updaters that only differ by
-// card size and Row-vs-Stack button layout: it centers a card of (w, h), lays
-// the cmd buttons across it (modalButtonRow when stack is false, modalButtonStack
-// when true), and dispatches the click/accelerator through runModalCmds. The six
-// confirm/menu modals route through here so the layout-then-dispatch boilerplate
-// lives in one place instead of being re-derived per updater.
+// runCardCmds is the shared tail of the confirm/menu modal updaters: center a
+// (w, h) card, lay the cmd buttons (row or stack), and dispatch via runModalCmds.
 func runCardCmds(w, h float32, stack bool, cmds []modalCmd) (Action, bool) {
 	card := centeredCardRect(w, h)
 	var rects []rl.Rectangle
@@ -48,9 +40,8 @@ func runCardCmds(w, h float32, stack bool, cmds []modalCmd) (Action, bool) {
 	return runModalCmds(cmds, rects)
 }
 
-// modifiers snapshots the held state of the three chord keys (either side of
-// the keyboard counts). Centralizes the left/right-OR triple so updateHotkeys,
-// updateMouse, and the layer-eye toggle can't drift on which sides they check.
+// modifiers snapshots the three chord keys (either side counts). Centralized so
+// callers can't drift on which sides they check.
 func modifiers() (ctrl, shift, alt bool) {
 	ctrl = rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
 	shift = rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
@@ -62,23 +53,16 @@ func modifiers() (ctrl, shift, alt bool) {
 func updateHotkeys(s *State) {
 	ctrl, shift, alt := modifiers()
 
-	// ALT tap-toggles the per-tile glyph overlay (off by default; when on
-	// it shows the ACTIVE layer's chars only). The detection is "key
-	// released without a chord" so it never fights Alt+1..6 (layer jump)
-	// or any future Alt+key binding: if ANY key is pressed during the Alt
-	// hold we mark altChordUsed and the release fires no toggle. Edge
-	// press of Alt resets the flag.
+	// ALT tap (released without a chord) toggles the glyph overlay. Any key
+	// pressed during the Alt hold sets altChordUsed so Alt+1..6 etc. don't toggle.
 	altPressed := rl.IsKeyPressed(rl.KeyLeftAlt) || rl.IsKeyPressed(rl.KeyRightAlt)
 	altReleased := rl.IsKeyReleased(rl.KeyLeftAlt) || rl.IsKeyReleased(rl.KeyRightAlt)
 	if altPressed {
 		s.altChordUsed = false
 	}
 	if alt && rl.GetKeyPressed() != 0 {
-		// GetKeyPressed pops queued key-press events; non-zero means a
-		// key was pressed THIS frame while Alt was held, so the user
-		// intended a chord, not a tap-toggle. Drain the queue so a
-		// later updater isn't surprised by an empty buffer (no other
-		// caller in the editor reads from this queue today).
+		// A key pressed this frame while Alt held = a chord, not a tap. Drain the
+		// queue.
 		s.altChordUsed = true
 		for rl.GetKeyPressed() != 0 {
 		}
@@ -87,10 +71,7 @@ func updateHotkeys(s *State) {
 		toggleTileGlyphs(s)
 	}
 
-	// Alt+1..N jumps directly to a layer (one per SELECTABLE layer — see
-	// selectableLayers) — saves Tab-cycling when the author knows which layer
-	// they want. Number row only; the keypad equivalents aren't bound to keep
-	// the binding compact.
+	// Alt+1..N jumps directly to a selectable layer. Number row only.
 	if alt {
 		for i := 0; i < len(selectableLayers) && i < len(numberRowKeys); i++ {
 			if rl.IsKeyPressed(numberRowKeys[i]) {
@@ -100,10 +81,7 @@ func updateHotkeys(s *State) {
 		}
 	}
 
-	// 1..9 select a brush within the active layer's palette. Shift+1..9
-	// picks brushes 9..17 in the same layer so the second row of long
-	// palettes (props, decor) is keyboard-reachable without scrolling.
-	// Brushes past index 17 stay mouse-only.
+	// 1..9 select a palette brush; Shift+1..9 picks 9..17. Past index 17 is mouse-only.
 	palette := layerBrushes[s.layer]
 	if !ctrl && !alt {
 		offset := 0
@@ -126,9 +104,6 @@ func updateHotkeys(s *State) {
 	case ctrl && shift && rl.IsKeyPressed(rl.KeyZ):
 		redoOne(s)
 	case ctrl && shift && rl.IsKeyPressed(rl.KeyF):
-		// Ctrl+Shift+F: fill the entire active grid layer with the
-		// active brush. Quick way to lay a base material (e.g. all
-		// stone floor) or wipe a layer back to a sentinel.
 		fillEntireLayer(s)
 	case ctrl && rl.IsKeyPressed(rl.KeyZ):
 		undoOne(s)
@@ -149,16 +124,12 @@ func updateHotkeys(s *State) {
 		newMap(s)
 	}
 
-	// G centers the view on the player start so authors can jump back
-	// after panning into a far corner. Skip when on the entity layer's
-	// player-start brush (G isn't currently consumed there but reserving
-	// for future brush-specific hotkeys).
+	// G centers the view on the player start.
 	if !ctrl && !alt && rl.IsKeyPressed(rl.KeyG) {
 		centerViewOnTile(s, s.area.StartTileX, s.area.StartTileZ)
 	}
 
-	// Tab cycles to the next selectable layer (Shift+Tab to the previous).
-	// Skips LayerWalls/"Faces" — faces are set via the right-click modal now.
+	// Tab / Shift+Tab cycle selectable layers (skips Walls — faces via right-click).
 	if !ctrl && editorTabPressed() {
 		dir := 1
 		if shift {
@@ -167,18 +138,13 @@ func updateHotkeys(s *State) {
 		s.layer = cycleSelectableLayer(s.layer, dir)
 	}
 
-	// I toggles the isometric block preview (read-only) vs the top-down grid.
-	// (Tab is taken by layer-cycle above, so the view toggle is `I` for Iso.)
+	// I toggles the isometric preview vs the top-down grid.
 	if !ctrl && !alt && rl.IsKeyPressed(rl.KeyI) {
 		toggleIsoView(s)
 	}
 
-	// F5: launch a playtest of the current in-memory area without saving.
-	// Ctrl+F5: same, but temporarily set StartTileX/Z to the grid cursor
-	// (or hover) so the playtest drops you AT the cursor instead of the
-	// authored start. The author's saved StartTile is restored on return
-	// from the playtest. Lets you iterate on a far room without walking
-	// to it every test.
+	// F5 playtests the in-memory area. Ctrl+F5 overrides StartTile to the cursor
+	// (restored on return) so you can test a far room without walking to it.
 	if rl.IsKeyPressed(rl.KeyF5) {
 		if ctrl {
 			tx, tz := -1, -1
@@ -199,7 +165,7 @@ func updateHotkeys(s *State) {
 		s.testRequested = true
 	}
 
-	// Brush size cycling (only for grid layers — non-grid is always size 1).
+	// Brush size cycling (grid layers only).
 	if !ctrl && rl.IsKeyPressed(rl.KeyLeftBracket) {
 		stepBrushSize(s, -1)
 	}
@@ -207,9 +173,7 @@ func updateHotkeys(s *State) {
 		stepBrushSize(s, +1)
 	}
 
-	// Height selector (the elevation level the Set Height brush stamps + the
-	// slice-view focus). PgUp/PgDn are the keyboard accelerators for the
-	// toolbar's Lvl -/+ buttons.
+	// PgUp/PgDn step the active level (toolbar Lvl -/+ accelerators).
 	if rl.IsKeyPressed(rl.KeyPageUp) {
 		stepEditLevel(s, +1)
 	}
@@ -221,16 +185,13 @@ func updateHotkeys(s *State) {
 		resetView(s)
 	}
 
-	// Cycle starting facing for the player-start brush with R. Gated to
-	// that brush so R doesn't silently rotate the start while the user
-	// thinks they're in another layer.
+	// R cycles start facing, gated to the player-start brush.
 	if !ctrl && rl.IsKeyPressed(rl.KeyR) && s.layer == LayerEntities && s.activeBrush().Entity == entityPlayerStart {
 		s.area.StartFacing = core.NormalizeFacing(s.area.StartFacing + 1)
 		s.dirty = true
 	}
 
-	// T cycles the day/night preview phase. Shows in the top bar and seeds
-	// StepCount on F5 so the playtest drops into that phase.
+	// T cycles the day/night preview phase (seeds StepCount on F5).
 	if !ctrl && rl.IsKeyPressed(rl.KeyT) {
 		cyclePreviewPhase(s)
 	}
@@ -238,11 +199,8 @@ func updateHotkeys(s *State) {
 	updateGridCursor(s)
 }
 
-// brushSizeSteps is the discrete set of brush widths cycled with [ / ].
-// Lifted out of stepBrush so a future tuning pass that wants a 7-cell brush
-// (or removes the 3-cell middle) edits one line. applyToolBrushed reads
-// brushSize / 2 as the radius — keep these odd so the brush is centered on
-// the cursor cell.
+// brushSizeSteps are the brush widths cycled with [ / ]. Keep odd —
+// applyToolBrushed uses brushSize/2 as the radius, centered on the cursor.
 var brushSizeSteps = []int{1, 3, 5}
 
 func stepBrush(cur, dir int) int {
@@ -263,26 +221,15 @@ func stepBrush(cur, dir int) int {
 	return brushSizeSteps[idx]
 }
 
-// The editor's toolbar buttons and their keyboard accelerators MUST run the
-// same body so they can't drift (toolbarBtns documents that contract). These
-// small helpers are that shared body — every toolbar action that has a hotkey
-// twin routes through one of them, the same way Undo/Redo/Fill/Center already
-// share undoOne/redoOne/fillEntireLayer/centerViewOnTile.
+// Toolbar buttons and their hotkey twins share these helpers so they can't drift.
 
-// stepBrushSize cycles the brush width one step in dir. Shared by the toolbar's
-// Brush -/+ buttons and the [ / ] accelerators.
+// stepBrushSize cycles the brush width one step in dir.
 func stepBrushSize(s *State, dir int) {
 	s.brushSize = stepBrush(s.brushSize, dir)
 }
 
-// stepEditLevel changes the ACTIVE level by dir, clamped, and grows the Levels
-// panel range to include it. The active level is the floor every content paint
-// builds onto, so flash it for feedback. Shared by the Levels panel ±, the
-// toolbar's Lvl -/+ buttons, and PgUp/PgDn.
-// growLevelRange extends the Levels-panel span OUTWARD to include lvl (toward
-// +10 or −10) and reveals it, so stepping / eyedropping / selecting a level
-// outside the current span surfaces a row for it and never leaves it hidden.
-// The single home for the "make this level visible in the panel" step.
+// growLevelRange extends the Levels-panel span outward to include lvl and reveals
+// it — the single home for "make this level visible in the panel".
 func growLevelRange(s *State, lvl int) {
 	if lvl > s.topLevel {
 		s.topLevel = lvl
@@ -293,6 +240,8 @@ func growLevelRange(s *State, lvl int) {
 	s.levelHidden[lvl] = false
 }
 
+// stepEditLevel changes the active level by dir (clamped), grows the panel range
+// to include it, and flashes. Shared by the Levels panel ±, toolbar, and PgUp/Dn.
 func stepEditLevel(s *State, dir int) {
 	s.editLevel = clampLevel(s.editLevel + dir)
 	growLevelRange(s, s.editLevel)
@@ -300,10 +249,7 @@ func stepEditLevel(s *State, dir int) {
 }
 
 // maxAreaLevel / minAreaLevel return the highest / lowest elevation level any
-// tile in the area uses, clamped to the editor's range — so loading a map
-// surfaces a Levels-panel row for every floor it actually contains (and no
-// empty filler rows beyond them). Both default to the ground baseline for a
-// flat map.
+// tile uses, clamped to range; both default to the ground baseline for a flat map.
 func maxAreaLevel(a core.AreaDefinition) int {
 	hi := core.ElevationBaseline
 	for z := 0; z < a.Height; z++ {
@@ -328,14 +274,10 @@ func minAreaLevel(a core.AreaDefinition) int {
 	return clampLevel(lo)
 }
 
-// handleLevelsPanelClick dispatches a left-click inside the Levels panel: the
-// range steppers (− / +), a per-level visibility eye (Alt-click solos), or a
-// row-select that makes that level the active floor.
+// handleLevelsPanelClick dispatches a left-click in the Levels panel: range
+// steppers, a per-level eye (Alt-click solos), or a row-select to the active floor.
 func handleLevelsPanelClick(s *State, mp rl.Vector2) {
-	// The header −/+ step the ACTIVE level down / up (toward −10 / +10), growing
-	// the panel range and scrolling as needed — the same action as the toolbar
-	// Floor −/+ and PgDn/PgUp. (No more "shrink the range" stepper; the panel
-	// only shows floors actually in play.)
+	// Header −/+ step the active level (same as toolbar Floor −/+ and PgDn/PgUp).
 	minus, plus := levelStepperRects(s)
 	if pointIn(mp, minus) {
 		stepEditLevel(s, -1)
@@ -345,21 +287,16 @@ func handleLevelsPanelClick(s *State, mp rl.Vector2) {
 		stepEditLevel(s, +1)
 		return
 	}
-	// Eye toggles first so a click on the eye doesn't also re-select the level.
-	// Row index i maps to level base+i through the scroll window.
+	// Eye toggles first so it doesn't also re-select. Row i maps to level base+i.
 	base := levelScrollBase(s)
 	for i := 0; i < visibleLevelRows(s); i++ {
 		if pointIn(mp, levelEyeRect(s, i)) {
 			lvl := base + i
 			if _, _, alt := modifiers(); alt {
-				// Solo toggle: if lvl is already the only one shown, reveal all;
-				// otherwise hide everything except lvl. The active level is forced
-				// visible afterward so solo can't leave the edited floor flagged
-				// hidden (drawGrid would draw it anyway, desyncing the eye icon).
-				// The probe ignores editLevel: it's always force-revealed below, so
-				// when soloing a non-active level it would otherwise read as a second
-				// visible level and the toggle could never detect the soloed state
-				// (a second Alt-click re-soloed instead of revealing all).
+				// Solo toggle: reveal all if lvl is already the only one shown, else
+				// hide all but lvl. editLevel is force-revealed below, so the probe
+				// must ignore it — otherwise it reads as a second visible level and
+				// solo never detects the soloed state.
 				soloed := !s.levelHidden[lvl]
 				for j := range s.levelHidden {
 					if j != lvl && j != s.editLevel && !s.levelHidden[j] {
@@ -372,9 +309,8 @@ func handleLevelsPanelClick(s *State, mp rl.Vector2) {
 				}
 				s.levelHidden[s.editLevel] = false
 			} else if lvl != s.editLevel {
-				// The active level is always shown (drawGrid forces it visible so
-				// edits can't vanish), so refuse to mark it hidden — that keeps the
-				// eye icon honest instead of showing "hidden" over visible tiles.
+				// drawGrid always shows the active level, so refuse to mark it hidden
+				// — keeps the eye icon honest.
 				s.levelHidden[lvl] = !s.levelHidden[lvl]
 			}
 			return
@@ -386,23 +322,19 @@ func handleLevelsPanelClick(s *State, mp rl.Vector2) {
 	}
 }
 
-// resetView snaps the canvas back to 1× zoom, centered (no pan). Shared by the
-// toolbar's "Reset View" button and the Home accelerator.
+// resetView snaps the canvas to 1× zoom, centered.
 func resetView(s *State) {
 	s.zoom = 1
 	s.panX, s.panY = 0, 0
 }
 
-// toggleTileGlyphs flips the per-tile glyph overlay. Shared by the toolbar's
-// Glyphs button and the Alt-tap accelerator.
+// toggleTileGlyphs flips the per-tile glyph overlay.
 func toggleTileGlyphs(s *State) {
 	s.showTileGlyphs = !s.showTileGlyphs
 }
 
-// toggleLayerVisibility flips layer i's hidden flag (the layer-tab eye). When
-// solo is true (Alt-click), it isolates layer i instead: hide every other
-// layer, or — if i is already the only visible layer — reveal all of them
-// again, so the same Alt-click both enters and exits solo.
+// toggleLayerVisibility flips layer i's hidden flag. solo (Alt-click) isolates i,
+// or reveals all again if i is already the only visible layer.
 func toggleLayerVisibility(s *State, i int, solo bool) {
 	if i < 0 || i >= layerCount {
 		return
@@ -431,8 +363,7 @@ func toggleLayerVisibility(s *State, i int, solo bool) {
 	}
 }
 
-// cyclePreviewPhase advances the day/night preview phase one step and flashes
-// the new phase name. Shared by the toolbar's Phase button and the T accelerator.
+// cyclePreviewPhase advances the day/night preview phase one step.
 func cyclePreviewPhase(s *State) {
 	s.previewPhase = core.WrapEnum(s.previewPhase, 1, core.TimeOfDayCount)
 	s.flash("Preview: " + core.PhaseName(s.previewPhase))
@@ -445,11 +376,8 @@ func updateGridCursor(s *State) {
 	mw := s.area.Width
 	mh := s.area.Height
 	moved := false
-	// Arrow keys / D-pad / left stick walk the grid cursor (input.Arrow*
-	// includes the pad + stick edges, so the canvas navigates with a
-	// controller too). Clamp-not-wrap: the cursor stops at the map edge.
-	// Table-driven like doorFacingKeys / numberRowKeys so the four directions
-	// share the activate→clamp→moved step (axis + sign are the only diff).
+	// Arrow / D-pad / left stick walk the grid cursor (clamp, not wrap).
+	// Table-driven so the four directions share the activate→clamp→moved step.
 	for _, dir := range []struct {
 		pressed bool
 		dx, dz  int
@@ -481,12 +409,9 @@ func updateGridCursor(s *State) {
 	}
 }
 
-// keyboardMutate runs a single-cell keyboard paint/erase and banks an undo
-// snapshot lazily — only when the cell actually changed the area — so a no-op
-// keyboard stroke (cell already holds the brush, or a brush guard refused it)
-// doesn't clear the redo stack or bump the content epoch. Mirrors strokePaint's
-// guard for the mouse path, including repairing applyTool's optimistic dirty
-// flip when nothing changed.
+// keyboardMutate runs a single-cell keyboard paint/erase and banks undo lazily —
+// only when the cell actually changed — repairing applyTool's optimistic dirty
+// flip on a no-op. Mirrors strokePaint's mouse-path guard.
 func keyboardMutate(s *State, apply func()) {
 	wasDirty := s.dirty
 	before := core.CloneArea(s.area)
@@ -507,26 +432,21 @@ func activateCursor(s *State, mw, mh int) (int, int) {
 	return x, z
 }
 
-// updateMouse processes top-bar / palette / metadata clicks and grid
-// painting. Called every frame outside of modals and text-focus mode.
+// updateMouse processes top-bar / palette / metadata clicks and grid painting.
 func updateMouse(s *State) {
 	mp := rl.GetMousePosition()
 
 	hx, hz := s.cellAt(mp)
 	s.hoverX, s.hoverZ = hx, hz
 
-	// 3D view owns the canvas: it runs its own orbit/zoom/pan + elevation editing
-	// and ray-pick (cellAt above already returned -1 in iso, keeping every
-	// top-down paint path inert). Side panels are mouse-inert in 3D mode — press
-	// `I` (handled in updateHotkeys, which runs first) to return to top-down for
-	// the flat layers / panels.
+	// 3D view owns the canvas (cellAt returned -1 in iso, so top-down paint is
+	// inert). Side panels are mouse-inert here; `I` returns to top-down.
 	if s.isoView {
 		updateIsoCanvas(s, mp)
 		return
 	}
 
-	// Context menu absorbs all mouse / keyboard input while open so a
-	// stray click on the grid behind the menu doesn't double-act.
+	// Context menu absorbs all input while open.
 	if updateContextMenu(s) {
 		return
 	}
@@ -537,25 +457,19 @@ func updateMouse(s *State) {
 			zoomBy(s, mp, 1+0.12*w)
 		}
 	} else if pointIn(mp, s.rect.palette) {
-		// Wheel over the palette scrolls the brush list. One notch
-		// moves about one and a half rows so the user can step
-		// through long palettes without dragging a scrollbar.
+		// Wheel scrolls the brush list (~1.5 rows/notch).
 		w := rl.GetMouseWheelMove()
 		if w != 0 {
 			ScrollPalette(s, -w*paletteRowStride*1.5)
 		}
 	} else if pointIn(mp, s.rect.metadata) {
-		// Wheel over the right-hand MAP panel scrolls its content.
-		// One notch moves ~one row of fields so a short window can
-		// still reach the reachability badge at the bottom.
+		// Wheel scrolls the MAP panel (~1 row/notch).
 		w := rl.GetMouseWheelMove()
 		if w != 0 {
 			ScrollMetadata(s, -w*metadataRowStride)
 		}
 	} else if pointIn(mp, s.rect.levels) {
-		// Wheel over the Levels panel steps the active floor up / down (which
-		// grows + scrolls the level window), so the author can spin through
-		// −10..+10 without clicking the steppers.
+		// Wheel steps the active floor (grows + scrolls the window).
 		if w := rl.GetMouseWheelMove(); w > 0 {
 			stepEditLevel(s, +1)
 		} else if w < 0 {
@@ -563,10 +477,7 @@ func updateMouse(s *State) {
 		}
 	}
 
-	// Interactive scrollbars (palette / metadata / canvas H+V). Run before
-	// painting + panning so grabbing a thumb or paging a track never bleeds
-	// into a tile paint or a pan; if a bar took the mouse this frame, we're
-	// done.
+	// Scrollbars run before paint/pan so grabbing a thumb doesn't bleed into them.
 	if s.updateScrollbars(mp) {
 		return
 	}
@@ -588,23 +499,19 @@ func updateMouse(s *State) {
 			menuBarBtns[hit].action(s) // opens that menu's pull-down (menus.go)
 			return
 		}
-		// Top-bar layer dropdown: open the active-layer picker (its rows carry the
-		// per-layer hide/show eye). Replaces the old palette-column tab strip.
+		// Top-bar layer dropdown: the active-layer picker (rows carry the eye).
 		if pointIn(mp, layerMenuBtnRect(s)) {
 			openDropdownBelow(s, ddLayer, layerMenuBtnRect(s))
 			return
 		}
 		if hit := toolbarButtonAt(s, mp); hit >= 0 {
-			// A context-disabled button is drawn grayed in place; swallow its click
-			// without firing (so the strip stays stable but inactive controls no-op).
+			// Disabled buttons swallow the click without firing.
 			if b := toolbarBtns[hit]; b.enabled == nil || b.enabled(s) {
 				b.action(s)
 			}
 			return
 		}
-		// Levels panel: range steppers, per-level eye toggles, and row-select
-		// (click a level to make it the active floor). Checked before the
-		// palette so a click in this column isn't swallowed by it.
+		// Levels panel, checked before the palette so its column isn't swallowed.
 		if pointIn(mp, s.rect.levels) {
 			handleLevelsPanelClick(s, mp)
 			return
@@ -619,9 +526,8 @@ func updateMouse(s *State) {
 		}
 	}
 
-	// Overview minimap click-to-jump: a click inside the corner minimap
-	// recenters the view on the corresponding tile rather than painting. Check
-	// before the grid-paint block since the minimap overlaps the grid pane.
+	// Minimap click-to-jump recenters the view. Checked before grid-paint since
+	// the minimap overlaps the grid pane.
 	if mr, ok := minimapRect(s); ok && rl.IsMouseButtonPressed(rl.MouseLeftButton) && pointIn(mp, mr) {
 		scale := mr.Width / float32(s.area.Width)
 		tx := core.Clamp(int((mp.X-mr.X)/scale), 0, s.area.Width-1)
@@ -630,7 +536,7 @@ func updateMouse(s *State) {
 		return
 	}
 
-	// Recent-brush quick-pick: a click on a swatch jumps to that layer + brush.
+	// Recent-brush quick-pick: a swatch click jumps to that layer + brush.
 	if brushRecentsVisible(s) && rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 		for i := range s.recentBrushes {
 			if pointIn(mp, brushRecentRect(s, i)) {
@@ -649,10 +555,8 @@ func updateMouse(s *State) {
 		ctrl, shift, alt := modifiers()
 
 		if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
-			// Eyedropper: Alt+left-click on a grid layer samples the cell's
-			// char back into the active brush (Photoshop-standard). Mark the
-			// Alt chord used so the Alt release doesn't also toggle the glyph
-			// overlay (see updateHotkeys).
+			// Eyedropper: Alt+click samples the cell's char into the active
+			// brush. Mark the Alt chord used so the release doesn't toggle glyphs.
 			if alt && isGridLayer(s.layer) {
 				sampleBrushAt(s, hx, hz)
 				s.altChordUsed = true
@@ -664,9 +568,8 @@ func updateMouse(s *State) {
 			continueDrag(s, hx, hz)
 		}
 		if rl.IsMouseButtonPressed(rl.MouseRightButton) {
-			// Ramp tool-mode: right-click clears a ramp at the tile (its floor
-			// arrow → auto floor), leaving the elevation digit so the cliff
-			// stays. No-op (no undo snapshot) on a non-ramp tile.
+			// Ramp mode: right-click clears a ramp (floor → auto), keeping the
+			// elevation digit so the cliff stays. No-op on a non-ramp tile.
 			if s.rampMode {
 				if _, ok := s.area.RampAt(hx, hz); ok {
 					pushUndo(s)
@@ -675,9 +578,7 @@ func updateMouse(s *State) {
 				}
 				return
 			}
-			// Right-click is for menus now (erasing is a selectable brush). Open
-			// the context menu over the tile: Edit/Delete entities, Set face
-			// skin (on a cliff edge), Erase here, Move start, …
+			// Right-click opens the context menu (erasing is a selectable brush).
 			openContextMenu(s, mp.X, mp.Y, hx, hz)
 		}
 	}
@@ -687,21 +588,17 @@ func updateMouse(s *State) {
 	}
 }
 
-// startDrag picks a drag kind based on layer + cell contents + modifiers.
-// Grid-layer brushes default to paint; Shift switches to rectangle.
-// LayerEntities brushes grab the entity under the cursor for drag-move
-// when there is one. Ctrl+click on a grid layer is flood fill.
+// startDrag picks a drag kind from layer + cell contents + modifiers (grid
+// default paint; Shift rect; Ctrl flood; entity brushes grab an entity to move).
 func startDrag(s *State, x, z int, ctrl, shift bool) {
-	// Ramp tool-mode: a left-click drops a connective ramp via the smart
-	// tool (derives direction + low level from the neighbors), short-
-	// circuiting normal painting. placeRamp snapshots undo on success.
+	// Ramp mode: left-click drops a ramp (direction + low level from neighbors).
+	// placeRamp snapshots undo on success.
 	if s.rampMode {
 		placeRamp(s, x, z)
 		s.drag = dragNone
 		return
 	}
-	// Entity layer: grab an existing entity for drag-move, or place a fresh
-	// one. The grid-paint tools below don't apply here.
+	// Entity layer: grab an existing entity for drag-move, or place a fresh one.
 	if s.layer == LayerEntities {
 		brush := s.activeBrush()
 		switch brush.Entity {
@@ -711,50 +608,37 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 				return
 			}
 		case entityAddEnemy:
-			// Click on an existing pack picks it up for drag-move (drag to
-			// new tile) OR opens the pack editor modal (release on the
-			// same tile — see finishDrag's dragPack branch). Click on an
-			// empty tile falls through to "place a new pack with one
-			// member of this kind" via applyTool.
+			// On an existing pack: grab for drag-move, or open its editor on
+			// release-in-place (finishDrag's dragPack branch). Empty: applyTool places.
 			if idx := core.PackSpawnIndexAt(s.area.PackSpawns, x, z); idx >= 0 {
 				s.drag = dragPack
 				s.dragPackIdx = idx
 				return
 			}
 		case entityPlaceChest:
-			// Click on an existing chest grabs it for drag-move (drag to a new
-			// tile) OR opens the chest-edit modal (release on the same tile —
-			// see finishDrag's dragChest branch), mirroring the pack flow. Click
-			// on an empty tile falls through to applyTool which plants a new
-			// chest with the default starter loot.
+			// Same drag-move / release-to-edit flow as packs.
 			if idx := core.ChestSpawnIndexAt(s.area.ChestSpawns, x, z); idx >= 0 {
 				s.drag = dragChest
 				s.dragChestIdx = idx
 				return
 			}
 		case entityPlaceDoor:
-			// Click on an existing door grabs it for drag-move OR opens the
-			// door-edit modal on release-in-place (mirrors chest / pack). Click
-			// on an empty tile falls through to applyTool which plants a fresh
-			// placeholder door.
+			// Same drag-move / release-to-edit flow as packs.
 			if idx := core.DoorSpawnIndexAt(s.area.DoorSpawns, x, z); idx >= 0 {
 				s.drag = dragDoor
 				s.dragDoorIdx = idx
 				return
 			}
 		}
-		// Fall through: click on empty cell places a fresh entity.
+		// Empty cell: place a fresh entity.
 		beginPaintStroke(s)
 		strokePaint(s, x, z)
 		s.lastPaintX, s.lastPaintZ = x, z
 		return
 	}
 
-	// Grid layers: the active tool decides the action. While Brush is the
-	// active tool the legacy modifiers still override (Ctrl = Flood, Shift =
-	// Rect) so existing muscle memory keeps working; an explicitly-picked tool
-	// is honored as-is. (Alt = Pick is handled in updateMouse before we reach
-	// here, so it works under any tool.)
+	// Grid layers: the active tool decides. Under Brush, Ctrl=Flood / Shift=Rect
+	// still override; a picked tool is honored as-is. (Alt=Pick handled earlier.)
 	tool := s.tool
 	if tool == toolBrush {
 		if ctrl {
@@ -768,10 +652,8 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 		sampleBrushAt(s, x, z)
 		s.drag = dragNone
 	case toolFlood:
-		// floodFill snapshots undo itself (only when the fill changes cells),
-		// so a no-op leaves the undo stack alone. The eraser brush carries no
-		// paint char (Char==0) — flooding with it would write NUL bytes, so
-		// resolve the layer's erase sentinel instead.
+		// floodFill snapshots undo itself (only on change). The eraser brush has
+		// Char==0, so resolve the layer's erase sentinel instead of writing NUL.
 		b := s.activeBrush()
 		fill := b.Char
 		if b.Erase {
@@ -800,10 +682,8 @@ func startDrag(s *State, x, z int, ctrl, shift bool) {
 	}
 }
 
-// beginPaintStroke arms a left-button paint/place drag. It records the
-// pre-stroke area so strokePaint can bank a single undo step covering the
-// whole stroke, but defers committing that snapshot until a cell actually
-// changes — so a stroke that paints nothing never clobbers the redo stack.
+// beginPaintStroke arms a paint/place drag, recording the pre-stroke area for one
+// lazy undo step — committed only when a cell actually changes.
 func beginPaintStroke(s *State) {
 	s.drag = dragPaint
 	s.dragSnapshotDone = false
@@ -811,19 +691,14 @@ func beginPaintStroke(s *State) {
 	s.lastPaintX, s.lastPaintZ = -1, -1
 }
 
-// strokePaint applies the active tool at (x,z) as one cell of a paint stroke
-// and commits the stroke's single undo snapshot lazily: only when a cell
-// actually changes the area, and only once per stroke. A stroke that mutates
-// nothing — every cell refused by a brush guard (prop on a wall, footprint off
-// the map, …) or painting a cell its current value — banks no undo step and
-// leaves the redo stack intact, mirroring floodFill's no-op guard. It also
-// repairs the dirty flag, which applyTool optimistically sets even when the
-// underlying brush refused the placement.
+// strokePaint applies the active tool at (x,z) as one stroke cell, committing the
+// stroke's single undo snapshot lazily (once, only on real change) and repairing
+// applyTool's optimistic dirty flip when the brush refused the cell.
 func strokePaint(s *State, x, z int) {
 	wasDirty := s.dirty
 	applyToolBrushed(s, x, z)
 	if s.dragSnapshotDone {
-		return // this stroke already banked its snapshot — nothing more to do
+		return // already banked this stroke's snapshot
 	}
 	if core.AreaContentEqual(s.area, s.dragUndoBefore) {
 		s.dirty = wasDirty // refused / no-op cell: undo the optimistic dirty flip
@@ -839,10 +714,8 @@ func continueDrag(s *State, x, z int) {
 		if x == s.lastPaintX && z == s.lastPaintZ {
 			return
 		}
-		// Interpolate the cells between the last painted cell and this one so
-		// a fast mouse sweep (or a big jump at high zoom) lays a continuous
-		// stroke instead of a dotted, gappy line. The very first cell of a
-		// stroke (lastPaint == -1) just stamps where it lands.
+		// Interpolate from the last painted cell so a fast sweep lays a
+		// continuous stroke. First cell (lastPaint == -1) just stamps.
 		if s.lastPaintX >= 0 {
 			paintLineBetween(s, s.lastPaintX, s.lastPaintZ, x, z)
 		} else {
@@ -850,34 +723,25 @@ func continueDrag(s *State, x, z int) {
 		}
 		s.lastPaintX, s.lastPaintZ = x, z
 	}
-	// dragStart / dragPack / dragChest / dragDoor / dragRect are
-	// commit-on-release; the live preview lives in draw.go.
+	// dragStart / dragPack / dragChest / dragDoor / dragRect commit on release.
 }
 
-// paintLineBetween stamps the active brush along the grid line from (x0,z0) to
-// (x1,z1), skipping the start cell (already painted) and including the
-// destination. Each step goes through strokePaint so the stroke's single lazy
-// undo snapshot and brush-size square still apply. Shares the Bresenham walk
-// with the Line tool via walkLine (ops.go).
+// paintLineBetween stamps the brush from (x0,z0) to (x1,z1), skipping the start.
+// Each step goes through strokePaint (shared Bresenham walkLine, ops.go).
 func paintLineBetween(s *State, x0, z0, x1, z1 int) {
 	walkLine(x0, z0, x1, z1, func(cx, cz int) {
 		if cx == x0 && cz == z0 {
-			return // start already painted by the prior strokePaint
+			return // start already painted
 		}
 		strokePaint(s, cx, cz)
 	})
 }
 
 // finishEntityDragRelease is the shared release path for the pack / chest / door
-// drag branches in finishDrag, which are structurally identical: release on the
-// pick-up tile opens that entity's edit modal; a release elsewhere runs the
-// entity's place-blockers (flashing the first blocker) and otherwise banks one
-// undo, moves the entity, and marks the area dirty. The four things that vary —
-// the index-bounds validity, the entity's current tile, its blocker set, its
-// edit-modal opener, and the actual move — come in as values/closures so each
-// branch keeps its own semantics (pack's move replaces any pack already at the
-// destination; chest/door write the index in place). No-op when the cursor is
-// off-map or the dragged index is stale.
+// drag branches: release on the pick-up tile opens that entity's edit modal;
+// elsewhere it runs place-blockers (flashing the first) then banks undo, moves,
+// and marks dirty. The varying parts (validity, current tile, blockers, modal,
+// move) come in as closures. No-op when off-map or the index is stale.
 func finishEntityDragRelease(s *State, valid bool, curX, curZ int, blockers func() string, openModal func(), move func()) {
 	if s.hoverX < 0 || !valid {
 		return
@@ -899,10 +763,8 @@ func finishDrag(s *State) {
 	switch s.drag {
 	case dragStart:
 		if s.hoverX >= 0 && (s.hoverX != s.area.StartTileX || s.hoverZ != s.area.StartTileZ) {
-			// Route through the canonical startBlockers set (same as the
-			// entity-brush + right-click "Move start here" paths) so the
-			// drag path can't drift — it was missing the door check, which
-			// would let a dragged start race the area-transition trigger.
+			// Shared startBlockers so the drag path can't drift from the
+			// entity-brush / right-click paths (it once missed the door check).
 			if msg := firstBlocker(startBlockers(&s.area, s.hoverX, s.hoverZ)...); msg != "" {
 				s.flash(msg)
 			} else {
@@ -919,21 +781,13 @@ func finishDrag(s *State) {
 			sp = s.area.PackSpawns[s.dragPackIdx]
 		}
 		finishEntityDragRelease(s, valid, sp.TileX, sp.TileZ,
-			// Same legality as the brush place path (packPlaceBlockers) so the
-			// two can't drift — this open-coded set previously missed deep
-			// water vs addPackMember, and added crystal/door at different times.
+			// Shared packPlaceBlockers so it can't drift from the brush path.
 			func() string { return firstBlocker(packPlaceBlockers(&s.area, s.hoverX, s.hoverZ)...) },
-			// Click without drag (release on the same tile we picked up) → open
-			// the inline pack editor instead of silently no-op'ing. Lets the
-			// author manage member list / reorder / remove without the awkward
-			// "use the diseased rat brush to add to a rat pack" workaround.
+			// Release-in-place opens the inline pack editor.
 			func() { openPackEditModal(s, s.dragPackIdx) },
 			func() {
-				// Drop any pack that was already at the destination cell
-				// (dragging this one onto another replaces the existing).
-				// Then locate the dragged pack by its old coords and move
-				// it to the destination. The old-coords lookup works
-				// because addPackMember keeps at most one pack per cell.
+				// Replace any pack at the destination, then move the dragged pack
+				// (located by old coords — one pack per cell).
 				s.area.PackSpawns = removePackAt(s.area.PackSpawns, s.hoverX, s.hoverZ)
 				if idx := core.PackSpawnIndexAt(s.area.PackSpawns, sp.TileX, sp.TileZ); idx >= 0 {
 					s.area.PackSpawns[idx].TileX = s.hoverX
@@ -948,7 +802,7 @@ func finishDrag(s *State) {
 		}
 		finishEntityDragRelease(s, valid, c.TileX, c.TileZ,
 			func() string { return firstBlocker(chestPlaceBlockers(&s.area, s.hoverX, s.hoverZ)...) },
-			// Release in place → open the loot editor (the old click action).
+			// Release-in-place opens the loot editor.
 			func() { openChestEditModal(s, s.dragChestIdx) },
 			func() {
 				s.area.ChestSpawns[s.dragChestIdx].TileX = s.hoverX
@@ -969,10 +823,8 @@ func finishDrag(s *State) {
 			})
 	case dragRect:
 		if s.hoverX >= 0 {
-			// Snapshot-then-compare instead of an eager pushUndo: an empty or
-			// all-refused rect (every cell rejected by a brush guard, or the
-			// brush already equals the cell) must NOT bank a junk undo step or
-			// clear the redo stack. Mirrors strokePaint's lazy commit.
+			// Snapshot-then-compare (not eager pushUndo): an empty / all-refused
+			// rect must not bank a junk undo. Mirrors strokePaint's lazy commit.
 			wasDirty := s.dirty
 			before := core.CloneArea(s.area)
 			if s.rectHollow {
@@ -998,8 +850,7 @@ func finishDrag(s *State) {
 			}
 		}
 	case dragSelect:
-		// Commit the marquee as the active selection (normalized inclusive
-		// bounds). No tile edit — copy/paste act on it via Ctrl+C / Ctrl+V.
+		// Commit the marquee as the active selection (normalized inclusive bounds).
 		if s.hoverX >= 0 {
 			s.selX0, s.selX1 = min(s.rectAnchorX, s.hoverX), max(s.rectAnchorX, s.hoverX)
 			s.selZ0, s.selZ1 = min(s.rectAnchorZ, s.hoverZ), max(s.rectAnchorZ, s.hoverZ)
@@ -1013,9 +864,8 @@ func finishDrag(s *State) {
 	s.dragDoorIdx = -1
 }
 
-// applyToolBrushed runs the active brush over the brush-size square
-// centered on (x,z). Entity-layer brushes always collapse to a single
-// cell since stamping multiple starts/spawns isn't meaningful.
+// applyToolBrushed runs the brush over the brush-size square at (x,z). Entity
+// brushes collapse to a single cell.
 func applyToolBrushed(s *State, x, z int) {
 	half := s.brushSize / 2
 	if !isGridLayer(s.layer) || s.brushSize <= 1 || brushHasMultiTileFootprint(s) {
@@ -1029,11 +879,8 @@ func applyToolBrushed(s *State, x, z int) {
 	}
 }
 
-// brushHasMultiTileFootprint reports whether the active Props/Decor brush
-// stamps a multi-tile footprint. A size>1 brush over such a brush would
-// re-stamp the WHOLE footprint at every cell of the square — overlapping
-// placements plus a flurry of refusal flashes — so those collapse to a single
-// anchor stamp, the same way the entity layer always does.
+// brushHasMultiTileFootprint reports whether the active Props/Decor brush stamps
+// a multi-tile footprint — those collapse to a single anchor stamp under size>1.
 func brushHasMultiTileFootprint(s *State) bool {
 	c := s.activeBrush().Char
 	switch s.layer {
@@ -1049,10 +896,8 @@ func isGridLayer(l Layer) bool {
 	return l != LayerEntities
 }
 
-// recordRecentBrush pushes the currently-selected (layer, brush) onto the
-// recent-brushes list (newest first, deduped, capped). Called at every
-// brush-select site — palette click, number-key hotkey, eyedropper, and the
-// recent-swatch click itself (which re-promotes the pick).
+// recordRecentBrush pushes the selected (layer, brush) onto the recents list
+// (newest first, deduped, capped). Called at every brush-select site.
 func recordRecentBrush(s *State) {
 	ref := brushRef{s.layer, s.brushIdx[s.layer]}
 	next := make([]brushRef, 0, maxRecentBrushes)
@@ -1069,22 +914,19 @@ func recordRecentBrush(s *State) {
 	s.recentBrushes = next
 }
 
-// sampleBrushAt is the eyedropper (Alt+click): it reads the active layer's char
-// at (x,z) and selects the matching palette brush so the author can keep
-// painting with whatever is already on the map. On the Elevation layer it picks
-// the cell's height into the height selector instead, since that layer stamps
-// digits rather than palette chars. Flashes when no palette brush matches.
+// sampleBrushAt is the eyedropper (Alt+click): selects the palette brush matching
+// the active layer's char at (x,z). On Elevation it picks the height instead.
+// Flashes when no palette brush matches.
 func sampleBrushAt(s *State, x, z int) {
 	if !s.area.InBounds(x, z) {
 		return
 	}
 	if s.layer == LayerElevation {
-		// ElevationLevelAt is Solids-aware: on a voxel map it returns the column's
-		// top solid level, so the eyedropper picks the real height rather than the
-		// stale legacy Elevation char the renderer no longer reads.
+		// ElevationLevelAt is Solids-aware (voxel column top), so this picks the
+		// real height, not the stale legacy Elevation char.
 		lvl := clampLevel(s.area.ElevationLevelAt(x, z))
 		s.editLevel = lvl
-		growLevelRange(s, lvl) // reveal + surface a panel row for a level this tile used
+		growLevelRange(s, lvl) // reveal a panel row for this level
 		s.flash("Picked level " + signedLevelLabel(lvl))
 		return
 	}
@@ -1092,9 +934,8 @@ func sampleBrushAt(s *State, x, z int) {
 	if !ok {
 		return
 	}
-	// On the Faces layer the default/unskinned cell is stored as '.', which
-	// FaceSkinAt reads as plain rock — so eyedropping it picks the Rock brush
-	// rather than flashing "no brush matches" (there's no '.' brush anymore).
+	// On Walls the unskinned cell is '.', which reads as plain rock — pick Rock
+	// rather than flashing "no brush matches" (there's no '.' brush).
 	if s.layer == LayerWalls && ch == core.TileOpen {
 		ch = core.TileRock
 	}
@@ -1109,12 +950,9 @@ func sampleBrushAt(s *State, x, z int) {
 	s.flash("No brush matches this tile")
 }
 
-// cellAt safely reads a grid layer ([]string rows) at (x,z). InBounds only
-// validates the declared Width/Height, which a ragged / mid-build area can
-// exceed (some rows shorter than Width, or fewer rows than Height) — so raw
-// layer[z][x] indexing after only an InBounds check can panic. ok is false when
-// the coordinate lands outside the actual backing rows. Mirrors the guard
-// floodFill already open-codes; the shared reader for editor-side layer reads.
+// cellAt safely reads a grid layer at (x,z): ok is false outside the actual
+// backing rows (a ragged area can be shorter than Width/Height, panicking raw
+// indexing even after InBounds). Shared reader for editor-side layer reads.
 func cellAt(layer []string, x, z int) (byte, bool) {
 	if z < 0 || z >= len(layer) || x < 0 || x >= len(layer[z]) {
 		return 0, false
@@ -1122,9 +960,8 @@ func cellAt(layer []string, x, z int) (byte, bool) {
 	return layer[z][x], true
 }
 
-// activeLayerCharAt returns the raw char stored at (x,z) on the active grid
-// layer — including "empty"/sentinel chars, which the eyedropper can validly
-// sample. ok is false for the Entities layer, which has no per-tile char.
+// activeLayerCharAt returns the raw char at (x,z) on the active grid layer
+// (including sentinels). ok is false for Entities, which has no per-tile char.
 func activeLayerCharAt(s *State, x, z int) (byte, bool) {
 	switch s.layer {
 	case LayerWalls:
@@ -1143,8 +980,7 @@ func activeLayerCharAt(s *State, x, z int) (byte, bool) {
 	return 0, false
 }
 
-// minZoom / maxZoom bound the editor canvas zoom. Named here so the clamp,
-// the "Reset View" home (1.0), and any future zoom UI all tune in one place.
+// minZoom / maxZoom bound the editor canvas zoom.
 const (
 	minZoom = float32(0.5)
 	maxZoom = float32(4)
@@ -1171,17 +1007,9 @@ func zoomBy(s *State, anchor rl.Vector2, factor float32) {
 	s.zoom = next
 }
 
-// openSaveAsModal pops the Save As dialog seeded with the current
-// map's file stem (or empty for an unsaved area). Extracted so the
-// topbar table-driven dispatch can point at a function pointer
-// instead of inlining the three-line set up — single seam for any
-// future "Save As" entry points (Ctrl+Shift+S, command palette, ...).
+// openSaveAsModal pops the Save As dialog. Single seam for every Save As entry point.
 func openSaveAsModal(s *State) {
-	// Default the filename to the saved map's stem; for an as-yet-unsaved
-	// area (no path) fall back to the area's title so every Save As entry
-	// point — topbar button, Ctrl+S on an unnamed map, the confirm-dirty
-	// "Save" branch — pre-fills the same sensible name instead of one path
-	// showing the title and another showing an empty field.
+	// Default the filename to the saved stem, or the area title for an unsaved map.
 	stem := core.MapIDFromPath(s.area.Path)
 	if stem == "" {
 		stem = sanitizeFilename(s.area.Name)
@@ -1191,9 +1019,8 @@ func openSaveAsModal(s *State) {
 	s.focus = focusFilename
 }
 
-// openValidateModal snapshots the current reachability and cross-map
-// door warnings into the modal so the user can read the full list at
-// once instead of the 4-row metadata-panel cap.
+// openValidateModal snapshots reachability + cross-map door + dialog warnings
+// into the modal (vs. the 4-row metadata-panel cap).
 func openValidateModal(s *State) {
 	rows := append([]string{}, reachabilityWarnings(s.area)...)
 	rows = append(rows, crossMapDoorWarnings(s.area)...)
@@ -1202,110 +1029,69 @@ func openValidateModal(s *State) {
 	s.modal = modalValidate
 }
 
-// textFieldConfig declares the rune-budget and accept-filter for a
-// single focusable text field. The Editor used to call
-// pumpPrintableASCII directly with bespoke (maxLen, accept, onChange)
-// triples at every site, which made "is this field's config the
-// canonical one or a typo?" a 5-file grep. This table is the single
-// source of truth — adding a new focusField is one row here plus a
-// case in activeTextTarget.
+// textFieldConfig is the rune-budget + accept-filter for one focusable text
+// field. textFieldConfigs is the single source of truth (one row per focusField).
 type textFieldConfig struct {
 	MaxLen int
 	Accept func(rune) bool
 }
 
-// defaultTextFieldMaxLen is the rune budget shared by the general-purpose
-// editor text fields (names, filenames, door target paths). One named source
-// so the limit tunes in a single place instead of being repeated as a literal
-// per field + in the defensive default below. A field needing a different rule
-// sets it in its textFieldConfigs row — the door fields, for instance, keep
-// this cap but swap in acceptPrintableNoSpace. (The sound-creator modal's name
-// field carries its own cap separately, outside this table.)
+// defaultTextFieldMaxLen is the rune budget for general-purpose editor text
+// fields (names, filenames, door target paths).
 const defaultTextFieldMaxLen = 96
 
-// textFieldConfigs maps each focusField to its rune-budget +
-// acceptance rule. Foci NOT in this table (focusNone, focusWidth /
-// Height — those are numeric inputs handled by updateNumericInput,
-// not pumpPrintableASCII) reuse the default below via
-// configForFocus.
+// textFieldConfigs maps each focusField to its rune-budget + accept rule. Foci
+// not here (incl. the numeric width/height, handled by updateNumericInput) fall
+// back via configForFocus.
 var textFieldConfigs = map[focusField]textFieldConfig{
 	focusName:     {defaultTextFieldMaxLen, acceptPrintable},
 	focusQuiet:    {defaultTextFieldMaxLen, acceptPrintable},
 	focusFilename: {defaultTextFieldMaxLen, acceptPrintable},
-	// Door identifier fields reject spaces: the .map door row is
-	// space-delimited, so a space here would corrupt the round-trip
-	// (validate() also backstops this at save time).
+	// Door identifier fields reject spaces — the .map door row is space-delimited.
 	focusDoorName:       {defaultTextFieldMaxLen, acceptPrintableNoSpace},
 	focusDoorTargetMap:  {defaultTextFieldMaxLen, acceptPrintableNoSpace},
 	focusDoorTargetDoor: {defaultTextFieldMaxLen, acceptPrintableNoSpace},
-	// Dialog node / choice fields. Prose fields (text, label, continue label)
-	// take a generous cap and allow spaces; identifier fields (node-id
-	// targets, quest id) reject spaces — they reference auto-generated ids /
-	// quest keys that never contain whitespace.
+	// Dialog: prose fields allow spaces; id-target fields reject them.
 	focusDialogNodeText:     {dialogProseMaxLen, acceptPrintable},
 	focusDialogNodeNext:     {defaultTextFieldMaxLen, acceptPrintableNoSpace},
 	focusDialogNodeContinue: {defaultTextFieldMaxLen, acceptPrintable},
 	focusDialogChoiceLabel:  {dialogProseMaxLen, acceptPrintable},
 	focusDialogChoiceNext:   {defaultTextFieldMaxLen, acceptPrintableNoSpace},
-	// Action editor: a quest-id / event-id key (no spaces).
-	focusDialogActionID: {defaultTextFieldMaxLen, acceptPrintableNoSpace},
-	// Condition editor: a quest-id (no-space key) + a prose disabled message;
-	// the numeric foci pump the shared dialogNumBuf with the digit filter.
+	focusDialogActionID:     {defaultTextFieldMaxLen, acceptPrintableNoSpace}, // quest/event-id key
 	focusDialogCondQuestID:  {defaultTextFieldMaxLen, acceptPrintableNoSpace},
 	focusDialogCondMessage:  {dialogProseMaxLen, acceptPrintable},
 	focusDialogCondGold:     {dialogNumFieldMaxLen, acceptDigit},
 	focusDialogCondFoeKills: {dialogNumFieldMaxLen, acceptDigit},
 	focusDialogCondTileX:    {dialogNumFieldMaxLen, acceptDigit},
 	focusDialogCondTileZ:    {dialogNumFieldMaxLen, acceptDigit},
-	// Trigger editor numeric foci (share dialogNumBuf with the conditions).
 	focusDialogTrigTileX:    {dialogNumFieldMaxLen, acceptDigit},
 	focusDialogTrigTileZ:    {dialogNumFieldMaxLen, acceptDigit},
 	focusDialogTrigFoeKills: {dialogNumFieldMaxLen, acceptDigit},
 }
 
-// dialogNumFieldMaxLen caps the shared numeric edit buffer — six digits covers
-// gold gates and tile coords without an unbounded buffer.
+// dialogNumFieldMaxLen caps the shared numeric edit buffer (gold gates, coords).
 const dialogNumFieldMaxLen = 6
 
-// dialogProseMaxLen is the rune budget for a dialog node's body text and a
-// choice's label — longer than the general field cap so a line of
-// conversation isn't truncated mid-sentence.
+// dialogProseMaxLen is the rune budget for dialog body text + choice labels.
 const dialogProseMaxLen = 280
 
 func configForFocus(f focusField) textFieldConfig {
 	if cfg, ok := textFieldConfigs[f]; ok {
 		return cfg
 	}
-	// Defensive default: a permissive field at the shared cap. Used by future
-	// text foci that get wired up before someone remembers to add a
-	// row; pump still bounds the buffer so the failure mode is bounded.
+	// Defensive default for a focus wired up before its row exists.
 	return textFieldConfig{MaxLen: defaultTextFieldMaxLen, Accept: acceptPrintable}
 }
 
-// pumpFocusField pumps printable runes into `target` using the
-// config registered for the current s.focus. Replaces the bespoke
-// pumpPrintableASCII calls that used to pick (maxLen, accept) per
-// site — callers say "this is the active text target, route input
-// at the rate the table says."
+// pumpFocusField pumps printable runes into `target` using s.focus's config.
 func pumpFocusField(s *State, target *string) {
 	cfg := configForFocus(s.focus)
 	pumpPrintableASCII(target, cfg.MaxLen, cfg.Accept, s.markDirty)
 }
 
-// pumpPrintableASCII drains queued printable-ASCII characters into
-// target (capped at maxLen) and consumes one backspace press. The
-// accept predicate filters which runes land in the buffer — callers
-// pass nil for "any printable ASCII" or a custom filter for "no
-// space" (sound-name input), "digits only" (numeric resize), etc. so
-// one pump function backs every text-field flavor in the editor.
-// onChange fires once per accepted character or backspace and may be
-// nil when no caller-side effect is needed.
-//
-// Prefer pumpFocusField for s.focus-keyed inputs — that path looks
-// up the per-field rate from textFieldConfigs so the config table
-// stays the single source of truth. Direct callers (the sound-name
-// modal, the open-modal rename buffer) carry their own configs
-// because their target isn't focus-keyed.
+// pumpPrintableASCII drains queued printable-ASCII into target (capped at maxLen,
+// filtered by accept, nil = any) and consumes one backspace. onChange fires per
+// accepted char/backspace (may be nil). Prefer pumpFocusField for focus-keyed inputs.
 func pumpPrintableASCII(target *string, maxLen int, accept func(rune) bool, onChange func()) {
 	for {
 		c := rl.GetCharPressed()
@@ -1334,23 +1120,16 @@ func pumpPrintableASCII(target *string, maxLen int, accept func(rune) bool, onCh
 	}
 }
 
-// acceptPrintable is the default accept-rune filter for pumpPrintableASCII
-// — accepts every printable ASCII character. Use when the caller wants
-// the historical behavior of "any printable rune".
+// acceptPrintable accepts every printable ASCII rune (the default filter).
 func acceptPrintable(r rune) bool { return true }
 
-// acceptPrintableNoSpace excludes ASCII space so the sound-modal Name
-// field can coexist with Space-as-Preview. Other callers that want
-// space-free input (filenames, etc.) can reuse this.
+// acceptPrintableNoSpace excludes ASCII space (so Space can drive Preview, etc.).
 func acceptPrintableNoSpace(r rune) bool { return r != ' ' }
 
-// acceptDigit accepts ASCII digits only — the filter for the numeric
-// resize fields so they share pumpPrintableASCII instead of a parallel
-// hand-rolled char-drain loop.
+// acceptDigit accepts ASCII digits only.
 func acceptDigit(r rune) bool { return r >= '0' && r <= '9' }
 
-// numericFieldMaxLen caps the resize numeric buffer — map dimensions are
-// at most four digits. Named so the cap isn't a bare literal in the pump.
+// numericFieldMaxLen caps the resize numeric buffer (map dims ≤ 4 digits).
 const numericFieldMaxLen = 4
 
 func updateTextInput(s *State) {
@@ -1383,11 +1162,9 @@ func updateTextInput(s *State) {
 	}
 }
 
-// updateNumericInput is the SPECIAL-CASE numeric path for the map's width /
-// height fields (focusWidth/Height/NewWidth/NewHeight): it clamps to
-// ClampMapDimension and drives a live area resize, so it keeps its own focus
-// enums + numericBuf. For a plain int field (dialog conditions/triggers, future
-// numeric params) use the generic pumpDialogNumeric path in editor/dialog.go.
+// updateNumericInput is the special-case path for the map width/height fields:
+// clamps to ClampMapDimension and drives a live resize. Plain int fields use
+// pumpDialogNumeric (editor/dialog.go).
 func updateNumericInput(s *State) {
 	pumpPrintableASCII(&s.numericBuf, numericFieldMaxLen, acceptDigit, nil)
 	if editorTabPressed() {
@@ -1409,16 +1186,12 @@ func commitNumericInput(s *State) {
 	if s.numericBuf == "" {
 		return
 	}
-	// Buffer is digit-only (acceptDigit) and capped at numericFieldMaxLen,
-	// so Atoi can't realistically fail; bail cleanly if it ever does.
+	// Digit-only + capped, so Atoi can't realistically fail; bail if it does.
 	v, err := strconv.Atoi(s.numericBuf)
 	if err != nil {
 		s.numericBuf = ""
 		return
 	}
-	// Floor at MinMapDimension (not 1) so the metadata field can't
-	// produce a 2-wide map that `resize` would then re-clamp anyway.
-	// One clamp helper used everywhere — see core.ClampMapDimension.
 	v = core.ClampMapDimension(v)
 	switch s.focus {
 	case focusWidth:
@@ -1433,13 +1206,9 @@ func commitNumericInput(s *State) {
 	s.numericBuf = ""
 }
 
-// finalizeFocusedField runs any per-field commit hook before focus drops.
-// Used by both the in-modal Enter/Tab path AND the click-outside-defocus path
-// in editor.Update so a stray click can't strand mid-edit state that the
-// modal's own commit would have finalized. Today only the metadata Width /
-// Height numeric fields need it: they buffer into s.numericBuf and apply only
-// on commit, so without this the typed dimension is silently discarded on a
-// click-away. Future text fields plug in via the same switch.
+// finalizeFocusedField runs a per-field commit hook before focus drops, so a
+// click-away can't strand mid-edit state. Only the buffered Width/Height numeric
+// fields need it today (without it the typed dimension is discarded on click-away).
 func finalizeFocusedField(s *State) {
 	switch s.focus {
 	case focusWidth, focusHeight:
@@ -1463,8 +1232,7 @@ func cycleFocus(s *State) {
 	case focusHeight:
 		s.focus = focusName
 	case focusNewWidth:
-		// Stay within the new-map dialog — its only other text field is
-		// the height. modalNew has no Name / Quiet fields to cycle to.
+		// New-map dialog has only width↔height to cycle.
 		s.focus = focusNewHeight
 		s.numericBuf = ""
 	case focusNewHeight:
@@ -1495,19 +1263,11 @@ func activeTextTarget(s *State) *string {
 }
 
 func updateModal(s *State) Action {
-	// validateModalState runs every frame BEFORE the modal's own
-	// updater. If the entity referenced by the modal (pack / chest /
-	// door / custom enemy) has been deleted from the underlying
-	// slice — for example by an ops path elsewhere, or by an undo
-	// that reverted past the modal's open frame — close the modal
-	// and clear any cursor so the next frame doesn't dereference a
-	// stale index. Same defense the modal draw paths used to need
-	// inline; centralizing it here means the draw/update pair can
-	// trust their indices.
+	// Close the modal if its referenced entity went out of bounds (deleted /
+	// undone past the open frame), so the next frame can't deref a stale index.
 	validateModalState(s)
-	// A picker dropdown (opened by some modals) owns input while it's up — handle
-	// it ONCE here, before the per-modal updater, so the modal behind it stays
-	// inert and no modal has to repeat the short-circuit. No-ops when closed.
+	// A picker dropdown owns input while up — handled once here so the modal
+	// behind it stays inert. No-op when closed.
 	if s.dropdownOpen() {
 		updateDropdown(s)
 		return ActionNone
@@ -1518,11 +1278,9 @@ func updateModal(s *State) Action {
 	return ActionNone
 }
 
-// validateModalState closes the active modal when its referenced
-// entity has gone out of bounds. Single source of truth for the
-// "is this modal still pointing at something real?" rule — added
-// rows live alongside each modal's open path so a future modal
-// that holds an index plugs into the same check.
+// validateModalState closes the active modal when its referenced entity has gone
+// out of bounds. Single source of truth for "is this modal still pointing at
+// something real?".
 func validateModalState(s *State) {
 	switch s.modal {
 	case modalPackEdit:
@@ -1538,8 +1296,7 @@ func validateModalState(s *State) {
 			closeModal(s)
 		}
 	case modalDialogList:
-		// The dialog list itself is always valid (it indexes the whole
-		// slice); the cursor is clamped in the updater.
+		// Always valid (indexes the whole slice); cursor clamped in the updater.
 	case modalDialogNodes:
 		if s.modalDialogIdx < 0 || s.modalDialogIdx >= len(s.area.Dialogs) {
 			closeModal(s)
@@ -1562,9 +1319,7 @@ func validateModalState(s *State) {
 		}
 	case modalDialogTriggerList:
 		if s.modalDialogTriggerIdx >= len(s.area.Triggers) {
-			// The list itself is always valid (indexes the whole slice); only
-			// guard a stale remembered index, the cursor is clamped in the updater.
-			s.modalDialogTriggerIdx = -1
+			s.modalDialogTriggerIdx = -1 // list always valid; just guard a stale index
 		}
 	case modalDialogTriggerEdit:
 		if !dialogTriggerInRange(s) {
@@ -1573,22 +1328,9 @@ func validateModalState(s *State) {
 	}
 }
 
-// modalUpdaters used to be a sibling of modalDrawers — both kept the
-// same modalKind keyed entries in lockstep across two files. They're
-// now folded into modalHandlers (draw.go) so adding a modal is one
-// row in one place.
-
-// closeModal is the single seam every modal updater goes through to
-// dismiss its dialog. Clears the modal kind plus every modal-scoped
-// cursor / index field so a future modal can't read a stale value from
-// the prior one. Replaces ~18 hand-typed `s.modal = modalNone; s.modalXxxIdx
-// = -1` snippets that drifted per modal — the chest-edit updater was
-// missing a modalCursor reset under the previous shape.
-// armOrConfirmDelete is the shared two-press delete guard: the first call for a
-// token arms it (flashing msg) and returns false; the next call for the SAME
-// token clears the arm and returns true (proceed). A different token re-arms, so
-// switching targets can't confirm the wrong delete. One field + one helper
-// behind the sound / custom-enemy / door deletes. Cleared on modal close.
+// armOrConfirmDelete is the shared two-press delete guard: first call for a token
+// arms it (flashing msg, returns false); the next for the SAME token returns true.
+// A different token re-arms. Cleared on modal close.
 func armOrConfirmDelete(s *State, token, msg string) bool {
 	if s.deleteArmed != token {
 		s.deleteArmed = token
@@ -1599,13 +1341,12 @@ func armOrConfirmDelete(s *State, token, msg string) bool {
 	return true
 }
 
+// closeModal is the single dismiss seam: clears the modal kind + every
+// modal-scoped cursor/index so a later modal can't read a stale value.
 func closeModal(s *State) {
-	// The Foe and Party Visualizers each cache an off-screen RenderTexture2D plus
-	// (on the Asset tab) a live-preview sprite texture. Free both from this central
-	// seam (not only the modal's own Close/cancel buttons) so any path that
-	// dismisses a modal via closeModal — e.g. validateModalState dropping a
-	// stale-index modal — can't leak a GPU handle across reopen. Idempotent when
-	// nothing is allocated.
+	// Free the Visualizers' cached GPU handles here too (not just their own
+	// buttons) so any dismiss path — e.g. validateModalState — can't leak across
+	// reopen. Idempotent.
 	switch s.modal {
 	case modalFoeView:
 		render.CloseFoePreview()
@@ -1628,15 +1369,13 @@ func closeModal(s *State) {
 	s.modalDialogTriggerIdx = -1
 	s.modalDialogActionOnChoice = false
 	clearDialogFocus(s)
-	closeDropdown(s) // a modal's picker dropdown must not survive its parent
+	closeDropdown(s) // picker must not survive its parent modal
 	s.modalValidateRows = nil
 	s.modalConfirmDelete = false
 	s.modalRenaming = ""
 	s.deleteArmed = ""
 	soundDrag = noSliderDrag
-	// Door-edit text focus survives outside the modal in pumpPrintableASCII's
-	// flow, so explicitly drop it here too. The new-map dialog's numeric
-	// foci are similarly modal-scoped — they must not carry over.
+	// Drop modal-scoped focus (door fields, new-map numeric) so it can't carry over.
 	if s.focus == focusDoorName || s.focus == focusDoorTargetMap || s.focus == focusDoorTargetDoor ||
 		s.focus == focusNewWidth || s.focus == focusNewHeight {
 		s.focus = focusNone
@@ -1645,8 +1384,6 @@ func closeModal(s *State) {
 }
 
 // openPackEditModal opens the per-pack editor for spawn index idx.
-// Mirrors the chest / door path so every entry point (context menu,
-// click-without-drag) shares the same modal + index + cursor setup.
 func openPackEditModal(s *State, idx int) {
 	if idx < 0 || idx >= len(s.area.PackSpawns) {
 		return
@@ -1657,7 +1394,6 @@ func openPackEditModal(s *State, idx int) {
 }
 
 // openChestEditModal opens the per-chest editor for spawn index idx.
-// Mirrors the pack / door path.
 func openChestEditModal(s *State, idx int) {
 	if idx < 0 || idx >= len(s.area.ChestSpawns) {
 		return
@@ -1667,8 +1403,7 @@ func openChestEditModal(s *State, idx int) {
 	s.modalCursor = 0
 }
 
-// openDoorEditModal opens the per-door editor for spawn index idx and
-// parks focus on the Name field. Mirrors the pack / chest path.
+// openDoorEditModal opens the per-door editor for idx, focusing the Name field.
 func openDoorEditModal(s *State, idx int) {
 	if idx < 0 || idx >= len(s.area.DoorSpawns) {
 		return
@@ -1679,11 +1414,8 @@ func openDoorEditModal(s *State, idx int) {
 	s.focus = focusDoorName
 }
 
-// updateDoorEditModal drives the door-edit modal: three text fields (Name,
-// TargetMap, TargetDoor) plus four facing buttons. Tab cycles fields, the
-// individual fields accept printable ASCII via pumpPrintableASCII, the
-// arrow keys (when no field is focused) move between facing buttons and
-// Space confirms. Esc closes; X deletes the door entirely.
+// updateDoorEditModal drives the door-edit modal: three text fields + facing
+// buttons. Tab cycles fields; Esc closes; X deletes.
 func updateDoorEditModal(s *State) Action {
 	if s.modalDoorIdx < 0 || s.modalDoorIdx >= len(s.area.DoorSpawns) {
 		closeModal(s)
@@ -1691,8 +1423,7 @@ func updateDoorEditModal(s *State) Action {
 	}
 	door := &s.area.DoorSpawns[s.modalDoorIdx]
 
-	// Mouse handling — clicking a field focuses it; clicking a facing
-	// button sets the facing; clicking Delete drops the door.
+	// Mouse: click focuses a field, sets a facing/style, or deletes.
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 		mp := rl.GetMousePosition()
 		hit := doorEditHitTest(s, mp)
@@ -1725,27 +1456,18 @@ func updateDoorEditModal(s *State) Action {
 			closeModal(s)
 			return ActionNone
 		case doorHitOutside:
-			// Click outside the card is a no-op (NOT a close): the door
-			// modal — like the pack / chest modals — is dismissed only via
-			// Esc, Enter, or the Done button, so a stray click can't lose
-			// in-progress field edits.
+			// No-op (not a close) so a stray click can't lose in-progress edits.
 		}
 	}
 
-	// Keyboard: while a text field is focused, route every keystroke into
-	// its buffer via pumpPrintableASCII. Tab cycles to the next field;
-	// Enter confirms current field; Esc closes.
+	// Keyboard: a focused text field takes every keystroke. Tab cycles, Enter
+	// confirms, Esc closes.
 	switch s.focus {
 	case focusDoorName, focusDoorTargetMap, focusDoorTargetDoor:
 		target := doorEditTextTarget(s)
 		if target != nil {
-			// Route through pumpFocusField so the door fields read
-			// their rune-budget from textFieldConfigs (defaultTextFieldMaxLen) —
-			// keeps the door modal in sync with the editor-chrome
-			// fields without a second copy of the cap. The pump's
-			// onChange is s.markDirty, which sets s.dirty=true
-			// outside the filename-focus exception, so no second
-			// dirty guard is needed here.
+			// pumpFocusField reads the cap from textFieldConfigs and its onChange
+			// is s.markDirty, so no second dirty guard is needed.
 			pumpFocusField(s, target)
 		}
 		if editorTabPressed() {
@@ -1763,7 +1485,7 @@ func updateDoorEditModal(s *State) Action {
 		return ActionNone
 	}
 
-	// No text field focused — keyboard shortcuts for facing + delete.
+	// No field focused — facing + delete shortcuts.
 	if editorCancelPressed() || editorCommitPressed() {
 		closeModal(s)
 		return ActionNone
@@ -1776,9 +1498,7 @@ func updateDoorEditModal(s *State) Action {
 		deleteDoorAt(s, s.modalDoorIdx)
 		return ActionNone
 	}
-	// N / E / S / W set facing directly. Updates only run while the
-	// modal is open and updateHotkeys's global Ctrl+S Save handler
-	// doesn't fire during modals, so the 'S' binding is free here.
+	// N/E/S/W set facing ('S' is free here — Ctrl+S Save doesn't fire in modals).
 	for _, fk := range doorFacingKeys {
 		if rl.IsKeyPressed(fk.key) {
 			pushUndo(s)
@@ -1787,8 +1507,7 @@ func updateDoorEditModal(s *State) Action {
 			return ActionNone
 		}
 	}
-	// 1 / 2 / 3 set the door style (building / cave / field). Number-row
-	// keys don't collide with the facing letters or the save shortcut.
+	// 1/2/3 set the door style (building / cave / field).
 	for _, sk := range doorStyleKeys {
 		if rl.IsKeyPressed(sk.key) {
 			pushUndo(s)
@@ -1800,9 +1519,8 @@ func updateDoorEditModal(s *State) Action {
 	return ActionNone
 }
 
-// doorFacingKeys / doorStyleKeys are the door-edit modal's direct-set
-// hotkey tables (N/E/S/W → facing, 1/2/3 → style). Package-level so the
-// per-frame modal updater doesn't rebuild the slices every call.
+// doorFacingKeys / doorStyleKeys are the door modal's direct-set hotkey tables.
+// Package-level so the per-frame updater doesn't rebuild them.
 var doorFacingKeys = []struct {
 	key    int32
 	facing int
@@ -1822,10 +1540,7 @@ var doorStyleKeys = []struct {
 	{rl.KeyThree, core.DoorStyleField},
 }
 
-// init guards the door-modal hotkey tables against drift with the
-// core enums they bind. If a new DoorStyle or cardinal facing lands
-// without a row here, startup panics — mirrors the lockstep guard
-// modalHandlers and entityBrushColors already use.
+// init panics if the door-modal hotkey tables drift from the core enums they bind.
 func init() {
 	if len(doorFacingKeys) != core.FacingCount {
 		panic("editor: doorFacingKeys length must match core.FacingCount — add a row when extending the facing enum")
@@ -1835,15 +1550,13 @@ func init() {
 	}
 }
 
-// deleteDoorAt removes the door spawn at idx (pushing undo, marking
-// dirty, and closing the modal). Shared by the door modal's click-Delete
-// button and its X-key shortcut, which open-coded the same append-splice.
+// deleteDoorAt removes the door at idx (undo, dirty, close). Shared by the Delete
+// button and the X key.
 func deleteDoorAt(s *State, idx int) {
 	if idx < 0 || idx >= len(s.area.DoorSpawns) {
 		return
 	}
-	// Two-press confirm (shared by the Delete button + the X key): a door may
-	// carry hand-authored cross-map links, so guard the first press.
+	// Two-press confirm — a door may carry hand-authored cross-map links.
 	if !armOrConfirmDelete(s, "door", "Delete this door? Click Delete (or press X) again to confirm") {
 		return
 	}
@@ -1853,8 +1566,7 @@ func deleteDoorAt(s *State, idx int) {
 	closeModal(s)
 }
 
-// doorEditTextTarget returns the address of whichever DoorSpawn string
-// field the current focus targets. Mirrors activeTextTarget in shape.
+// doorEditTextTarget returns the DoorSpawn string field the focus targets.
 func doorEditTextTarget(s *State) *string {
 	if s.modalDoorIdx < 0 || s.modalDoorIdx >= len(s.area.DoorSpawns) {
 		return nil
@@ -1882,16 +1594,14 @@ func cycleDoorFocus(s *State) {
 	}
 }
 
-// openEntityListModal opens the Objects index (every pack / chest / door +
-// the player start). Cursor starts at the top.
+// openEntityListModal opens the Objects index (packs / chests / doors + start).
 func openEntityListModal(s *State) {
 	s.modal = modalEntityList
 	s.modalCursor = 0
 }
 
-// updateEntityListModal drives the Objects index: Up/Down move the cursor,
-// Enter or a row click jumps the view to that entity and opens its editor,
-// Esc / click-outside closes.
+// updateEntityListModal drives the Objects index: Up/Down, Enter/row-click jumps
+// to the entity and opens its editor, Esc / click-outside closes.
 func updateEntityListModal(s *State) Action {
 	rows := entityListRows(s)
 	n := len(rows)
@@ -1921,9 +1631,8 @@ func updateEntityListModal(s *State) Action {
 	return ActionNone
 }
 
-// activateEntityRow recenters the view on the row's entity and opens its
-// editor (the start row just recenters and closes). The open* helpers replace
-// the entity-list modal, so the author lands directly in the edit flow.
+// activateEntityRow recenters on the row's entity and opens its editor (the start
+// row just recenters and closes).
 func activateEntityRow(s *State, row entityListRow) {
 	centerViewOnTile(s, row.x, row.z)
 	switch row.kind {
@@ -1949,12 +1658,9 @@ func updateValidateModal(s *State) Action {
 	return ActionNone
 }
 
-// updatePackEditModal drives the inline pack editor: Up/Down navigate the
-// member list, Enter opens the add-member dropdown (pick any enemy / custom
-// enemy — no per-kind keys), X removes the highlighted member, K/J move it
-// up/down (Vim-style), A cycles the movement-AI mode, Esc closes. If the pack
-// disappears (e.g. the last member was removed), the modal closes and the
-// pack is dropped.
+// updatePackEditModal drives the inline pack editor: Up/Down navigate, Enter opens
+// the add-member dropdown, X removes, K/J reorder, R toggles row, A cycles AI,
+// Esc closes. Removing the last member drops the pack and closes.
 func updatePackEditModal(s *State) Action {
 	if s.modalPackIdx < 0 || s.modalPackIdx >= len(s.area.PackSpawns) {
 		closeModal(s)
@@ -1966,16 +1672,12 @@ func updatePackEditModal(s *State) Action {
 		return ActionNone
 	}
 
-	// Mouse: click a member row to select, or a button to add / remove /
-	// reorder / cycle AI. Buttons + their actions come from the same
-	// packEditCmds the draw renders, so click index == button.
+	// Mouse: click a row to select, or a button (from packEditCmds — same as draw).
 	if handleEntityModalClick(s, memberCount, packEditCmds) {
 		return ActionNone
 	}
 
-	// Keyboard: Enter opens the Add dropdown (the modal's primary action — it
-	// lists every enemy + custom enemy, so there are no per-kind add-keys);
-	// X removes the selected member, K/J reorder, A cycles the movement-AI mode.
+	// Keyboard: Enter opens the Add dropdown; X/K/J/R/A act on the selection.
 	if editorCommitPressed() {
 		openPackAddDropdown(s)
 		return ActionNone
@@ -2005,13 +1707,10 @@ func updatePackEditModal(s *State) Action {
 	return ActionNone
 }
 
-// handleEntityModalClick processes a left-click in a pack/chest edit
-// modal: select the clicked list row, or run the clicked add/action
-// button's command. `builder` supplies the modal's (adds, actions) cmd
-// lists (packEditCmds / chestEditCmds) — the same builder the draw uses,
-// so click index == button. Returns true when the click was consumed (the
-// caller should return). Shared so the two editors can't drift on the
-// row-then-actions-then-adds hit order.
+// handleEntityModalClick processes a left-click in a pack/chest editor: select a
+// row or run an add/action button. `builder` (packEditCmds / chestEditCmds) is
+// the same one the draw uses. Returns true when consumed. Shared so the two
+// editors can't drift on the row→actions→adds hit order.
 func handleEntityModalClick(s *State, count int, builder func(*State) (adds, actions []modalCmd)) bool {
 	if !rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 		return false
@@ -2038,13 +1737,9 @@ func handleEntityModalClick(s *State, count int, builder func(*State) (adds, act
 	return false
 }
 
-// packEditCmds builds the pack-edit modal's buttons: a single "+ Add member"
-// that opens the add dropdown, plus the Remove / Up / Down / AI actions.
-// Called by both the draw (for labels) and the click handler (runs the
-// clicked .run), so buttons and actions can't drift. The add dropdown lists
-// every builtin enemy + this map's custom enemies (see dropdown.go), so
-// there's no per-kind add button or add-key to keep in sync. Caller must have
-// validated s.modalPackIdx.
+// packEditCmds builds the pack editor's buttons (+ Add member, Remove/Up/Down/
+// Row/AI), shared by draw and the click handler. Caller must have validated
+// s.modalPackIdx.
 func packEditCmds(s *State) (adds, actions []modalCmd) {
 	pack := &s.area.PackSpawns[s.modalPackIdx]
 	adds = []modalCmd{
@@ -2060,8 +1755,7 @@ func packEditCmds(s *State) (adds, actions []modalCmd) {
 	return adds, actions
 }
 
-// packRowLabel is the Row action button's caption for the selected member —
-// "Front"/"Back", or "—" when the list is empty.
+// packRowLabel is the Row button's caption — "Front"/"Back", or "—" when empty.
 func packRowLabel(pack *core.PackSpawn, idx int) string {
 	if idx < 0 || idx >= len(pack.Members) {
 		return "—"
@@ -2069,9 +1763,7 @@ func packRowLabel(pack *core.PackSpawn, idx int) string {
 	return core.RowLabel(pack.Members[idx].Row)
 }
 
-// packToggleSelectedRow flips the cursored member between the front and back
-// formation rows (the foe-side mirror of the party's reposition). Snapshots undo
-// and marks dirty so the authored arrangement saves.
+// packToggleSelectedRow flips the cursored member between the front/back rows.
 func packToggleSelectedRow(s *State, pack *core.PackSpawn) {
 	if s.modalCursor < 0 || s.modalCursor >= len(pack.Members) {
 		return
@@ -2087,10 +1779,7 @@ func packToggleSelectedRow(s *State, pack *core.PackSpawn) {
 	s.flash(core.PackMemberDisplayName(s.area, *pack, s.modalCursor) + " → " + packRowLabel(pack, s.modalCursor) + " row")
 }
 
-// openPackAIDropdown arms the AI-mode dropdown anchored on the pack editor's
-// "AI:" action button — the author picks a mode from the full list instead of
-// cycling one step per click (and can see every mode at once). Mirrors
-// openPackAddDropdown's recompute-the-layout-to-find-the-button-rect approach.
+// openPackAIDropdown arms the AI-mode dropdown anchored on the "AI:" button.
 func openPackAIDropdown(s *State) {
 	if s.modalPackIdx < 0 || s.modalPackIdx >= len(s.area.PackSpawns) {
 		return
@@ -2098,7 +1787,7 @@ func openPackAIDropdown(s *State) {
 	pack := &s.area.PackSpawns[s.modalPackIdx]
 	adds, actions := packEditCmds(s)
 	lay := entityModalLayoutFor(s.modalCursor, len(pack.Members), cmdLabels(adds), cmdLabels(actions))
-	// The AI button is the last action (Remove / Up / Down / AI).
+	// AI is the last action button.
 	anchor := lay.card
 	if len(lay.actRects) > 0 {
 		anchor = lay.actRects[len(lay.actRects)-1]
@@ -2106,11 +1795,8 @@ func openPackAIDropdown(s *State) {
 	openDropdown(s, ddPackAI, anchor)
 }
 
-// openPackAddDropdown arms the add-member dropdown anchored on the pack
-// editor's "+ Add member" button. It recomputes the modal layout to find that
-// button's rect — deterministic and identical to the draw — so the dropdown
-// drops from the right spot without threading the rect through the button's
-// run closure.
+// openPackAddDropdown arms the add-member dropdown anchored on "+ Add member"
+// (recomputing the layout to find its rect, identical to the draw).
 func openPackAddDropdown(s *State) {
 	if s.modalPackIdx < 0 || s.modalPackIdx >= len(s.area.PackSpawns) {
 		return
@@ -2121,9 +1807,8 @@ func openPackAddDropdown(s *State) {
 	openDropdown(s, ddPackAdd, addButtonAnchor(lay))
 }
 
-// addButtonAnchor returns the rect an entity-edit modal's add dropdown drops
-// from — the "+ Add" button (the sole add-grid entry), or the card itself as a
-// fallback. Shared by the pack + chest open paths so the anchor rule lives once.
+// addButtonAnchor returns the "+ Add" button rect (or the card as fallback).
+// Shared by the pack + chest open paths.
 func addButtonAnchor(lay entityModalLayout) rl.Rectangle {
 	if len(lay.addRects) > 0 {
 		return lay.addRects[0]
@@ -2131,9 +1816,8 @@ func addButtonAnchor(lay entityModalLayout) rl.Rectangle {
 	return lay.card
 }
 
-// packRemoveSelected removes the cursored member, dropping the whole pack
-// (and closing the modal) if it empties. Shared by the Remove button and
-// the X accelerator.
+// packRemoveSelected removes the cursored member, dropping the pack (and closing)
+// if it empties. Shared by the Remove button and X.
 func packRemoveSelected(s *State, pack *core.PackSpawn) {
 	if len(pack.Members) == 0 {
 		return
@@ -2151,9 +1835,8 @@ func packRemoveSelected(s *State, pack *core.PackSpawn) {
 	}
 }
 
-// packMoveSelected swaps the cursored member with its neighbor in dir
-// (-1 up / +1 down), no-op at the ends. Shared by the Up/Down buttons and
-// the K/J accelerators.
+// packMoveSelected swaps the cursored member with its dir neighbor (no-op at the
+// ends). Shared by the Up/Down buttons and K/J.
 func packMoveSelected(s *State, pack *core.PackSpawn, dir int) {
 	j := s.modalCursor + dir
 	if j < 0 || j >= len(pack.Members) {
@@ -2165,12 +1848,9 @@ func packMoveSelected(s *State, pack *core.PackSpawn, dir int) {
 	s.dirty = true
 }
 
-// updateEntityListCursor clamps the modal's row cursor, closes on the
-// back edge (Esc / pad B), and moves the cursor with Up/Down. Closing is
-// Esc-only by design: the pack/chest editors free Enter to OPEN the add
-// dropdown (the modal's primary action), keeping the keyset universal —
-// Esc backs out, Enter confirms, arrows navigate — instead of the old
-// per-kind add-letter soup. Returns false when the modal closed.
+// updateEntityListCursor clamps the row cursor, closes on Esc/pad B, and moves it
+// with Up/Down. Close is Esc-only so Enter is free to open the add dropdown.
+// Returns false when the modal closed.
 func updateEntityListCursor(s *State, count int) bool {
 	if s.modalCursor >= count {
 		s.modalCursor = count - 1
@@ -2192,23 +1872,17 @@ func removeModalListItem[T any](items []T, idx int) []T {
 	if idx < 0 || idx >= len(items) {
 		return items
 	}
-	// Copy-on-delete into a fresh slice rather than the in-place
-	// append(items[:idx], items[idx+1:]...) shift. The in-place form mutates
-	// the shared backing array, which would corrupt an undo snapshot that
-	// aliased it; callers happen to deep-clone (pushUndo → CloneArea) first
-	// today, but this keeps the helper safe no matter who calls it. These
-	// modal lists are tiny, so the allocation is negligible.
+	// Copy into a fresh slice, not in-place append-shift: the in-place form
+	// mutates the shared backing array and would corrupt an aliased undo snapshot.
 	out := make([]T, 0, len(items)-1)
 	out = append(out, items[:idx]...)
 	out = append(out, items[idx+1:]...)
 	return out
 }
 
-// updateChestEditModal drives the inline chest editor: Up/Down navigate the
-// item list, Enter opens the add-item dropdown, X removes the highlighted
-// item, Esc closes. If every item gets removed the chest stays — an empty
-// chest is a valid authored shape (e.g. flavor decoration) and the runtime
-// renders it pre-looted.
+// updateChestEditModal drives the inline chest editor: Up/Down, Enter opens the
+// add-item dropdown, X removes, Esc closes. An emptied chest stays (valid shape,
+// rendered pre-looted).
 func updateChestEditModal(s *State) Action {
 	if s.modalChestIdx < 0 || s.modalChestIdx >= len(s.area.ChestSpawns) {
 		closeModal(s)
@@ -2225,8 +1899,7 @@ func updateChestEditModal(s *State) Action {
 		return ActionNone
 	}
 
-	// Keyboard: Enter opens the Add dropdown (it lists every item kind, so
-	// there are no per-item add-keys); X removes the selected item.
+	// Keyboard: Enter opens the Add dropdown; X removes the selected item.
 	if editorCommitPressed() {
 		openChestAddDropdown(s)
 		return ActionNone
@@ -2238,10 +1911,8 @@ func updateChestEditModal(s *State) Action {
 	return ActionNone
 }
 
-// chestEditCmds builds the chest-edit modal's buttons: a single "+ Add item"
-// that opens the add dropdown (it lists every registered item kind — see
-// dropdown.go), plus the Remove action. Shared by draw and the click handler.
-// Caller must have validated s.modalChestIdx.
+// chestEditCmds builds the chest editor's buttons (+ Add item, Remove), shared by
+// draw and the click handler. Caller must have validated s.modalChestIdx.
 func chestEditCmds(s *State) (adds, actions []modalCmd) {
 	chest := &s.area.ChestSpawns[s.modalChestIdx]
 	adds = []modalCmd{
@@ -2253,8 +1924,7 @@ func chestEditCmds(s *State) (adds, actions []modalCmd) {
 	return adds, actions
 }
 
-// openChestAddDropdown arms the add-item dropdown anchored on the chest
-// editor's "+ Add item" button (see openPackAddDropdown for the anchor note).
+// openChestAddDropdown arms the add-item dropdown anchored on "+ Add item".
 func openChestAddDropdown(s *State) {
 	if s.modalChestIdx < 0 || s.modalChestIdx >= len(s.area.ChestSpawns) {
 		return
@@ -2265,8 +1935,8 @@ func openChestAddDropdown(s *State) {
 	openDropdown(s, ddChestAdd, addButtonAnchor(lay))
 }
 
-// chestRemoveSelected removes the cursored item (an empty chest is a valid
-// authored shape, so it stays). Shared by the Remove button and X.
+// chestRemoveSelected removes the cursored item (an emptied chest stays). Shared
+// by the Remove button and X.
 func chestRemoveSelected(s *State, chest *core.ChestSpawn) {
 	if len(chest.Items) == 0 {
 		return
@@ -2299,14 +1969,13 @@ func updateOpenModal(s *State) Action {
 	}
 	s.modalCursor = input.CursorUpDown(s.modalCursor, len(s.modalPaths))
 
-	// Mouse: click a list row to select it (action buttons handled below).
+	// Mouse: click a list row to select it (buttons handled below).
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 		if idx := openModalRowAt(s, rl.GetMousePosition()); idx >= 0 {
 			s.modalCursor = idx
 			return ActionNone
 		}
 	}
-	// Action buttons + their keyboard accelerators.
 	cmds := openModalActionCmds(s)
 	if act, ran := runCardCmds(openModalW, openModalH, false, cmds); ran {
 		return act
@@ -2329,8 +1998,7 @@ func openModalActionCmds(s *State) []modalCmd {
 	}
 }
 
-// openSelectedMap loads the cursored map into the editor. Shared by the
-// Open button and the Enter accelerator.
+// openSelectedMap loads the cursored map. Shared by the Open button and Enter.
 func openSelectedMap(s *State) Action {
 	path := s.modalPaths[s.modalCursor]
 	mf, err := mapfile.Load(path)
@@ -2352,17 +2020,14 @@ func openSelectedMap(s *State) Action {
 	s.redo = nil
 	s.dirty = false
 	clearSelection(s) // different map — old selection coords no longer apply
-	// Surface every level the loaded map uses in the Levels panel, and open on
-	// the floor the player start sits on (the walkable baseline for a normal
-	// map) rather than level 0 — which is now a pit far below the baseline.
+	// Surface every level the map uses, and open on the start tile's floor (not
+	// level 0, which is now a pit below the baseline).
 	s.topLevel = maxAreaLevel(area)
 	s.bottomLevel = minAreaLevel(area)
 	s.editLevel = clampLevel(area.ElevationLevelAt(area.StartTileX, area.StartTileZ))
 	s.levelHidden = [maxEditLevel + 1]bool{}
-	// The area was replaced wholesale — invalidate the content-derived caches
-	// the same way performNewMap / undoOne / redoOne do, or the metadata
-	// panel's reachability badge and the hover tooltip keep showing the
-	// PREVIOUS map's data until the next edit happens to flip these.
+	// Area replaced wholesale — invalidate content-derived caches (like
+	// performNewMap / undo / redo) or stale reachability/tooltip data lingers.
 	s.reachValid = false
 	s.contentEpoch++
 	closeModal(s)
@@ -2370,8 +2035,7 @@ func openSelectedMap(s *State) Action {
 	return ActionNone
 }
 
-// openDuplicateSelected copies the cursored map on disk and selects the
-// copy. Shared by the Duplicate button and the C accelerator.
+// openDuplicateSelected copies the cursored map on disk and selects the copy.
 func openDuplicateSelected(s *State) {
 	newPath, err := duplicateMapFile(s.modalPaths[s.modalCursor])
 	if err != nil {
@@ -2385,9 +2049,7 @@ func openDuplicateSelected(s *State) {
 			break
 		}
 	}
-	// Defensive clamp (mirrors updateOpenConfirmDelete): if the copy
-	// somehow isn't in the refreshed list, the cursor keeps its old value
-	// — keep it in range so the next row index / draw can't run off the end.
+	// Defensive clamp if the copy isn't in the refreshed list.
 	if s.modalCursor >= len(s.modalPaths) {
 		s.modalCursor = len(s.modalPaths) - 1
 	}
@@ -2521,13 +2183,8 @@ func saveAsOverwriteCmds(s *State) []modalCmd {
 	}
 }
 
-// updateEscMenuModal handles input for the editor's pause-style menu.
-//   - Esc / C: close menu, resume editing.
-//   - D: toggle display mode (fullscreen ↔ windowed). Menu stays open
-//     so the author can verify the swap before continuing.
-//   - E: exit to title. Routes through modalConfirmDirty when the
-//     area has unsaved edits so save/discard/cancel still works —
-//     same flow the old "Esc = exit" path used.
+// updateEscMenuModal handles the editor's pause-style menu (Display / Continue /
+// Exit to Title). Exit routes through modalConfirmDirty when there are unsaved edits.
 func updateEscMenuModal(s *State) Action {
 	cmds := escMenuCmds(s)
 	if act, ran := runCardCmds(escMenuModalW, escMenuModalH, true, cmds); ran {
@@ -2575,9 +2232,8 @@ func confirmDirtyCmds(s *State) []modalCmd {
 	}
 }
 
-// confirmDirtySave persists the current map (or opens Save As when it has
-// no path yet), then runs the pending action. Shared by the Save button
-// and the S accelerator.
+// confirmDirtySave persists the map (or opens Save As when it has no path), then
+// runs the pending action.
 func confirmDirtySave(s *State) Action {
 	if s.area.Path == "" {
 		openSaveAsModal(s)
@@ -2593,10 +2249,8 @@ func confirmDirtySave(s *State) Action {
 	return runPendingAction(s)
 }
 
-// keyHot / cancelOr build modalCmd accelerator predicates. cancelOr is the
-// editor's "back" edge (Esc / pad B) plus one extra letter key a confirm modal
-// also accepts — cancelOr(rl.KeyC) for the "Continue/Cancel (C)" modals,
-// cancelOr(rl.KeyN) for the "No (N)" overwrite/delete prompts.
+// keyHot / cancelOr build modalCmd accelerator predicates. cancelOr is the "back"
+// edge (Esc / pad B) plus one extra letter key (C for Continue, N for No).
 func keyHot(k int32) func() bool { return func() bool { return rl.IsKeyPressed(k) } }
 func cancelOr(k int32) func() bool {
 	return func() bool { return editorCancelPressed() || rl.IsKeyPressed(k) }
@@ -2620,10 +2274,8 @@ func confirmModal(s *State) {
 	if s.modal != modalSaveAs {
 		return
 	}
-	// Sanitize at commit so the disk filename is always known-good (lower
-	// ascii + _-) regardless of what the user typed. The Save As field's
-	// preview already shows this sanitized form, so the user has seen
-	// what's about to land.
+	// Sanitize at commit so the disk filename is known-good (the field preview
+	// already shows this form).
 	name := sanitizeFilename(s.modalFilename)
 	if name == "" {
 		s.flash("Filename required")

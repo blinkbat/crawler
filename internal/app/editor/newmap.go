@@ -8,10 +8,8 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// newMapLayout precomputes the rectangles of every interactive region
-// of the new-map modal. Built each frame from current screen size so
-// the modal recenters on window resize. Returned by newMapModalLayout
-// and consumed by both the draw and click paths.
+// newMapLayout holds the new-map modal's interactive rects. Rebuilt each frame so
+// it recenters on resize; shared by the draw and click paths.
 type newMapLayout struct {
 	card        rl.Rectangle
 	widthValue  rl.Rectangle
@@ -20,9 +18,7 @@ type newMapLayout struct {
 	heightValue rl.Rectangle
 	heightMinus rl.Rectangle
 	heightPlus  rl.Rectangle
-	// floorSwatches mirrors the order of layerBrushes[LayerFloor]; each
-	// rect is the clickable swatch the author picks the default tile
-	// from. Index parallels the floor brush list so the byte-to-write is
+	// floorSwatches parallels layerBrushes[LayerFloor]: swatch i writes
 	// layerBrushes[LayerFloor][i].Char.
 	floorSwatches []rl.Rectangle
 	createBtn     rl.Rectangle
@@ -32,18 +28,9 @@ type newMapLayout struct {
 const (
 	newMapCardWidth  = float32(520)
 	newMapCardHeight = float32(420)
-	// newMapSwatchCols controls how many floor swatches sit on one row.
-	// 4 columns × 3 rows comfortably fits the 11 floor brushes; a 12th
-	// would tuck into the last cell without a layout change.
-	newMapSwatchCols = 4
-	// Modal layout metrics. The dimensions section and floor grid lay out by
-	// these offsets off card.Y (the dialog editors' dialogHeaderInset/RowGap/
-	// FieldH don't match these values, so they're named locally rather than
-	// reused). newMapSwatchW/H size each floor cell; H == modalBtnH and the
-	// gutter == modalBtnGap so the grid reuses the shared button metrics where
-	// they're equal, naming only the cell width + the section offsets here.
-	newMapDimsTop    = float32(64) // first dimensions row, below the card title
-	newMapDimsRowGap = float32(42) // pitch between the width and height rows
+	newMapSwatchCols = 4            // floor swatches per row
+	newMapDimsTop    = float32(64)  // first dimensions row, below the card title
+	newMapDimsRowGap = float32(42)  // pitch between the width and height rows
 	newMapFloorLabel = float32(170) // "Default floor" caption, off card.Y
 	newMapSwatchTop  = float32(196) // floor swatch grid top, off card.Y
 	newMapHintBottom = float32(24)  // footer hint, up from the card's bottom edge
@@ -55,17 +42,14 @@ func newMapModalLayout() newMapLayout {
 
 	l := newMapLayout{card: card}
 
-	// Dimensions row: value field + −/+ buttons for width on one line,
-	// then the same for height. Anchors match the metadata panel's
-	// dimensions row so the modal reads as the same control family.
+	// Dimensions: value field + −/+ for width, then the same for height.
 	y := card.Y + newMapDimsTop
 	xLeft := card.X + 20
 	l.widthValue, l.widthMinus, l.widthPlus = stepperRow(xLeft+62, y, 96, 6)
 	y += newMapDimsRowGap
 	l.heightValue, l.heightMinus, l.heightPlus = stepperRow(xLeft+62, y, 96, 6)
 
-	// Floor swatch grid. Each cell is newMapSwatchW × modalBtnH with modalBtnGap
-	// gutters so a 4×N layout still fits comfortably inside the 520-wide card.
+	// Floor swatch grid: newMapSwatchW × modalBtnH cells, modalBtnGap gutters.
 	swatchY := card.Y + newMapSwatchTop
 	swatchW := newMapSwatchW
 	swatchH := modalBtnH
@@ -81,23 +65,18 @@ func newMapModalLayout() newMapLayout {
 			swatchW, swatchH)
 	}
 
-	// Footer buttons. Anchored to the card's bottom-right so adding swatch
-	// rows doesn't push them off the card; the swatch grid is sized to
-	// always leave room above this row. Sizing/gap comes from the shared
-	// modal-button spec (buttonRowAt) so this modal can't drift off it.
+	// Footer buttons, anchored bottom-right via the shared modal-button spec.
 	btnY := card.Y + card.Height - modalBtnH - modalBottomInset
 	btns := buttonRowAt(card.X+card.Width-modalContentInset-buttonRowWidth(newMapBtnLabels), btnY, newMapBtnLabels)
 	l.createBtn, l.cancelBtn = btns[0], btns[1]
 	return l
 }
 
-// newMapBtnLabels is the footer row's single label source, shared by the
-// layout (per-label button widths) and the draw.
+// newMapBtnLabels: footer labels, shared by layout and draw.
 var newMapBtnLabels = []string{"Create", "Cancel"}
 
-// newMapFieldRect returns the active text-field rect for the new-map
-// modal, used by State.activeFieldRect so click-outside-to-defocus and
-// the cursor caret position both work the same as for other modals.
+// newMapFieldRect returns the active text-field rect (for click-outside-defocus
+// and caret position), like other modals.
 func newMapFieldRect(s *State) rl.Rectangle {
 	l := newMapModalLayout()
 	switch s.focus {
@@ -149,16 +128,12 @@ func drawNewMapModal(s *State, font rl.Font, theme render.Theme) {
 }
 
 func updateNewMapModal(s *State) Action {
-	// Escape cancels — drop the modal and any pending action that
-	// chained into it (the caller's flow already cleared s.dirty's
-	// implication if they confirmed-discard; we just abandon the new).
 	if editorCancelPressed() {
 		closeModal(s)
 		return ActionNone
 	}
 
-	// Enter commits the new map. closeModal clears the new-map foci
-	// and numericBuf for us — no need to repeat them here.
+	// Enter commits. closeModal clears the new-map foci + numericBuf.
 	if editorCommitPressed() {
 		commitNumericInput(s)
 		performNewMap(s, s.modalNewWidth, s.modalNewHeight, s.modalNewFloor)
@@ -200,9 +175,7 @@ func updateNewMapModal(s *State) Action {
 					return ActionNone
 				}
 			}
-			// Click on the card but not on any control — defocus any
-			// active text field so a stray click in empty space stops
-			// eating keystrokes.
+			// Click on the card but not a control — defocus the text field.
 			if pointIn(mp, l.card) {
 				if s.focus == focusNewWidth || s.focus == focusNewHeight {
 					commitNumericInput(s)
@@ -213,13 +186,8 @@ func updateNewMapModal(s *State) Action {
 		}
 	}
 
-	// Tab cycles between the width and height fields — handled by
-	// updateNumericInput (via updateTextInput below), which commits the
-	// current field then cycleFocus()es to the next. This used to ALSO
-	// have an inline width↔height swap here, but it fired on the same
-	// Tab press as updateNumericInput's, double-swapping back to a no-op
-	// — so Tab silently did nothing. Routing solely through the shared
-	// cycleFocus both de-duplicates and makes Tab actually work.
+	// Tab cycles width↔height via updateNumericInput→cycleFocus. Must NOT also
+	// swap inline here — that fired on the same Tab press, double-swapping to a no-op.
 	if s.focus == focusNewWidth || s.focus == focusNewHeight {
 		updateTextInput(s)
 	}

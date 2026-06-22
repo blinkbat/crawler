@@ -5,13 +5,9 @@ import (
 	"testing"
 )
 
-// TestPlanPackSteps_HeldEngagerKeepsItsTile guards the planning-occupancy fix:
-// only ONE engagement resolves per tick (ApplyPackSteps holds a second
-// engager), so PlanPackSteps must NOT vacate the held pack's tile in its
-// occupancy map. Two patrol packs pace onto the player from opposite sides;
-// the planner must emit exactly one engage plan (the first), leaving the
-// second held in place — otherwise a later pack could plan onto the freed-but-
-// still-occupied tile.
+// TestPlanPackSteps_HeldEngagerKeepsItsTile: only one engagement resolves per
+// tick, so PlanPackSteps must NOT vacate the held engager's tile (two patrols
+// pace onto the player; exactly one engage plan expected).
 func TestPlanPackSteps_HeldEngagerKeepsItsTile(t *testing.T) {
 	openRows := func(n int) []string {
 		rows := make([]string, n)
@@ -27,15 +23,13 @@ func TestPlanPackSteps_HeldEngagerKeepsItsTile(t *testing.T) {
 		},
 		Player: Player{TileX: 2, TileZ: 1},
 		Packs: []Pack{
-			// Paces +1 (default dir) from x=1 onto the player at x=2.
+			// Paces +1 from x=1 onto the player at x=2.
 			{TileX: 1, TileZ: 1, HomeX: 1, HomeZ: 1, AI: PackAIPatrol, PatrolDir: 1, Members: []Enemy{{Alive: true}}},
-			// Paces -1 from x=3 onto the player at x=2 — the second engager.
+			// Paces -1 from x=3 onto the player — the second engager.
 			{TileX: 3, TileZ: 1, HomeX: 3, HomeZ: 1, AI: PackAIPatrol, PatrolDir: -1, Members: []Enemy{{Alive: true}}},
 		},
 	}
-	// Seed so both patrol gates (PatrolStepChance=0.6) pass this tick (seed 2's
-	// first two Float32 draws are 0.167, 0.265); the patrol step itself is
-	// deterministic once the gate clears.
+	// Seed 2's first two Float32 draws (0.167, 0.265) clear both patrol gates.
 	g.RNG = rand.New(rand.NewSource(2))
 
 	plans := PlanPackSteps(g)
@@ -49,19 +43,15 @@ func TestPlanPackSteps_HeldEngagerKeepsItsTile(t *testing.T) {
 		t.Fatalf("PlanPackSteps emitted %d engage plans, want exactly 1 (the second engager must be held, not re-planned): %+v", engagers, plans)
 	}
 
-	// Applying the plan must leave the second pack on its own tile — never
-	// moved onto the player or onto a tile a freed reservation would expose.
+	// Applying must leave the second pack on its own tile.
 	ApplyPackSteps(g, plans)
 	if g.Packs[1].TileX != 3 || g.Packs[1].TileZ != 1 {
 		t.Errorf("held second engager moved to (%d,%d), want held at (3,1)", g.Packs[1].TileX, g.Packs[1].TileZ)
 	}
 }
 
-// TestApplyPackSteps_OneEngagementPerTick pins the single-engagement rule: when
-// two packs' plans both land on the player's tile in one tick, only the first
-// engages and the second is HELD on its current tile — never moved onto the
-// player (which would leave it overlapping the player once the first battle
-// resolves).
+// TestApplyPackSteps_OneEngagementPerTick: when two plans land on the player's
+// tile, only the first engages and the second is HELD on its current tile.
 func TestApplyPackSteps_OneEngagementPerTick(t *testing.T) {
 	g := &GameState{
 		Player: Player{TileX: 4, TileZ: 4},
@@ -85,10 +75,8 @@ func TestApplyPackSteps_OneEngagementPerTick(t *testing.T) {
 	}
 }
 
-// TestApplyPackSteps_NonEngagerStillMovesAfterEngagement confirms the guard only
-// blocks a competing ENGAGER — a pack that merely wanders (EngagePlayer false)
-// after an engagement is claimed still applies its move and persists its patrol
-// pace direction.
+// TestApplyPackSteps_NonEngagerStillMovesAfterEngagement: the guard blocks only
+// a competing ENGAGER — a wanderer still moves and persists its patrol dir.
 func TestApplyPackSteps_NonEngagerStillMovesAfterEngagement(t *testing.T) {
 	g := &GameState{
 		Player: Player{TileX: 4, TileZ: 4},

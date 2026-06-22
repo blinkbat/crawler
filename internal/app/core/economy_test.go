@@ -7,10 +7,10 @@ import (
 
 func TestShopSellPrice(t *testing.T) {
 	cases := []struct{ price, want int }{
-		{0, 0},   // not for sale
-		{1, 1},   // half floors to 1, not 0
-		{2, 1},   // 2/2
-		{40, 20}, // even
+		{0, 0}, // not for sale
+		{1, 1}, // floors to 1, not 0
+		{2, 1},
+		{40, 20},
 		{55, 27}, // odd rounds down
 	}
 	for _, c := range cases {
@@ -21,11 +21,10 @@ func TestShopSellPrice(t *testing.T) {
 }
 
 func TestSellableStacksFiltersPriceless(t *testing.T) {
-	// ItemNone has no registry price; cheese does.
 	inv := []ItemStack{
 		{Kind: ItemCheese, Count: 2},
-		{Kind: ItemNone, Count: 5},     // priceless sentinel — excluded
-		{Kind: ItemBatJerky, Count: 0}, // zero count — excluded
+		{Kind: ItemNone, Count: 5},
+		{Kind: ItemBatJerky, Count: 0},
 	}
 	got := SellableStacks(inv)
 	if len(got) != 1 || got[0].Kind != ItemCheese {
@@ -56,7 +55,7 @@ func TestRollGoldBounds(t *testing.T) {
 			t.Fatalf("rollGold(3,6) = %d, out of [3,6]", g)
 		}
 	}
-	// Inverted bounds are tolerated (swapped), not panicked.
+	// Inverted bounds are swapped, not panicked.
 	for i := 0; i < 50; i++ {
 		g := rollGold(rng, 6, 3)
 		if g < 3 || g > 6 {

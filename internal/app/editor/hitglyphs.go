@@ -8,13 +8,9 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// hitglyphs.go is the editor's Hit Glyphs viewer (modalHitGlyphs): a read-only
-// gallery of the combat "clarity glyphs" — the short-lived 2D symbols drawn over
-// a struck target (slash, impact/POW, frost snowflake, spark, fire, holy, venom).
-// In play they flash for ~0.4s mid-attack, so the author never gets a good look;
-// this modal plays each on a loop, labeled, so the whole set is visible at once.
-// Pure preview: render owns the art (render.EditorDrawHitGlyph) and the name list
-// (render.EditorHitGlyphNames); this file is just the modal frame + the loop clock.
+// Hit Glyphs viewer (modalHitGlyphs): read-only looping gallery of the combat
+// clarity glyphs (too brief to study in play). render owns the art + names; this
+// file is just the modal frame + loop clock.
 
 const (
 	hitGlyphModalW   = float32(540)
@@ -22,21 +18,16 @@ const (
 	hitGlyphCellW    = float32(126)
 	hitGlyphCellH    = float32(118)
 	hitGlyphLabelH   = float32(22)
-	hitGlyphPreScale = float32(1.6)  // gallery glyphs draw a bit larger than the in-combat size
+	hitGlyphPreScale = float32(1.6)  // gallery glyphs draw larger than in-combat
 	hitGlyphLoopSecs = float64(1.4)  // pop → animate → fade → repeat, per cell
-	hitGlyphStagger  = float64(0.18) // per-cell phase offset so they don't all strike in unison
-	// Card header/footer bands sizing the modal height (sibling galleries name
-	// theirs too — objViewHeader, foeHeaderH — but they genuinely differ, so
-	// these stay local rather than forced onto a shared value).
-	hitGlyphHeaderH = float32(52) // header band above the glyph grid
-	hitGlyphFooterH = float32(34) // footer band below it (the hint row)
+	hitGlyphStagger  = float64(0.18) // per-cell phase offset
+	hitGlyphHeaderH  = float32(52)   // header band above the glyph grid
+	hitGlyphFooterH  = float32(34)   // footer band (hint row)
 )
 
 func openHitGlyphsModal(s *State) { openModal(s, modalHitGlyphs) }
 
-// updateHitGlyphsModal: read-only viewer, so any key/click dismisses (mirrors the
-// Validate modal). The click that opened it was consumed by the menu dropdown, so
-// the modal won't self-close on its opening frame.
+// updateHitGlyphsModal: read-only viewer, so any key/click dismisses.
 func updateHitGlyphsModal(s *State) Action {
 	if editorCancelPressed() || editorCommitPressed() || rl.IsKeyPressed(rl.KeySpace) ||
 		rl.IsMouseButtonPressed(rl.MouseLeftButton) {
@@ -53,8 +44,7 @@ func drawHitGlyphsModal(s *State, font rl.Font, theme render.Theme) {
 	ph := hitGlyphHeaderH + float32(rows)*cellH + hitGlyphFooterH
 	r := drawModalHeader(font, theme, pw, ph, "HIT GLYPHS", theme.BorderActive)
 
-	// Loop clock: each cell's life fraction t∈[0,1) runs off the wall clock,
-	// staggered by index so the gallery shimmers rather than pulsing in unison.
+	// Loop clock: each cell's life fraction t∈[0,1), staggered by index.
 	now := rl.GetTime()
 	gridW := float32(hitGlyphCols) * hitGlyphCellW
 	startX := r.X + (r.Width-gridW)/2
@@ -68,7 +58,7 @@ func drawHitGlyphsModal(s *State, font rl.Font, theme render.Theme) {
 		cx := cellX + hitGlyphCellW/2
 		cy := cellY + hitGlyphCellH/2
 
-		// Inset backdrop so the glyph reads against the modal card.
+		// Inset backdrop so the glyph reads against the card.
 		cell := rl.NewRectangle(cellX+5, cellY, hitGlyphCellW-10, hitGlyphCellH)
 		rl.DrawRectangleRec(cell, bgFieldInset)
 		rl.DrawRectangleLinesEx(cell, 1, editorBorderDim)

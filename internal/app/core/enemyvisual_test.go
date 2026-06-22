@@ -2,9 +2,7 @@ package core
 
 import "testing"
 
-// TestSlugify pins the slug derivation. The enemy sprite PNG filename and the
-// visuals.json override key both derive from EnemySlug → slugify(Name), so a
-// regression here silently breaks sprite loading and orphans saved overrides.
+// TestSlugify pins the slug derivation (PNG filename + visuals.json key).
 func TestSlugify(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"Feral Rat", "feral_rat"},
@@ -22,10 +20,7 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
-// TestEnemySlugRatMatchesAsset guards the specific filename the render layer
-// loads (maps/sprites/feral_rat.png). loadEnemyVisuals now builds that name
-// from EnemySlug(EnemyRat); if the rat's display Name ever changes, this test
-// fails loudly instead of the rat silently falling back to procedural art.
+// TestEnemySlugRatMatchesAsset guards the feral_rat.png filename so a Name change fails here.
 func TestEnemySlugRatMatchesAsset(t *testing.T) {
 	if got := EnemySlug(EnemyRat); got != "feral_rat" {
 		t.Fatalf("EnemySlug(EnemyRat) = %q, want %q (the feral_rat.png asset key)", got, "feral_rat")

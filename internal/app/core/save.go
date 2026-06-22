@@ -10,92 +10,76 @@ import (
 	"slices"
 )
 
-// Save / load. A single JSON save file capturing the persistent subset of a
-// run — party progression, inventory, gold, the quest journal, and where the
-// player is standing. On load the destination map is rebuilt FRESH (packs,
-// chests, doors, fog all reset from the .map), then the saved progression is
-// overlaid on top. So a save behaves like a save POINT, not a world snapshot:
-// re-entering a cleared area respawns its packs — the same semantics the
-// area-transition path already has (it discards per-area runtime state too).
+// Save / load. One JSON save file with the persistent subset of a run. On load
+// the map is rebuilt FRESH from the .map (packs/chests/doors/fog reset), then
+// saved progression is overlaid — a save POINT, not a world snapshot, so a
+// cleared area respawns its packs (matching the area-transition path).
 
 const (
 	saveDirName  = "saves"
 	saveFileName = "save.json"
-	// SaveVersion stamps the on-disk format. Bump when the SaveData shape
-	// changes incompatibly; LoadSave rejects a newer version it can't read.
+	// SaveVersion stamps the on-disk format. Bump on incompatible SaveData
+	// changes; LoadSave rejects a newer version.
 	SaveVersion = 1
-	// MinSaveVersion is the oldest on-disk version this build still reads.
-	// Every real save stamps Version >= MinSaveVersion via NewSaveData, so a
-	// lower value means a missing/corrupt version field, not legacy content.
+	// MinSaveVersion is the oldest on-disk version still read. Every real save
+	// stamps >= this via NewSaveData, so a lower value means a missing/corrupt
+	// version field, not legacy content.
 	MinSaveVersion = 1
 )
 
-// SaveDir resolves the save-file directory (cwd- or exe-relative, like the
-// maps dir). SavePath is the full path to the single save file.
+// SaveDir resolves the save-file directory (cwd- or exe-relative). SavePath is
+// the full path to the single save file.
 func SaveDir() string  { return ResolveAssetDir(saveDirName) }
 func SavePath() string { return filepath.Join(SaveDir(), saveFileName) }
 
 // SaveData is the persistent slice of a GameState. Only exported fields
-// serialize; transient combat / animation state is intentionally omitted
-// (a save is taken in exploration, where those are already cleared). The
-// world isn't stored — MapID names the .map and the rest rebuilds on load.
+// serialize; transient combat/animation state is omitted. The world isn't
+// stored — MapID names the .map and the rest rebuilds on load.
 type SaveData struct {
 	Version      int    `json:"version"`
 	MapID        string `json:"mapID"`
 	PlayerTileX  int    `json:"playerTileX"`
 	PlayerTileZ  int    `json:"playerTileZ"`
 	PlayerFacing int    `json:"playerFacing"`
-	// PlayerLevel persists the party's standing voxel level (the cube-top they
-	// stand on). omitempty + the standable-level fallback on load keeps it
-	// save-compatible: a pre-voxel save (or one on a heightfield map) has no
-	// playerLevel and loads onto the spawn tile's lowest standable surface, so
-	// SaveVersion stays put. Only matters on a voxel map where the saved tile
-	// has more than one walkable surface (under vs over a bridge).
+	// PlayerLevel is the standing voxel level (cube-top). omitempty + the
+	// standable-level load fallback keeps it save-compatible: a pre-voxel /
+	// heightfield save loads onto the spawn tile's lowest standable surface.
+	// Only matters where a saved tile has >1 walkable surface (under vs over a bridge).
 	PlayerLevel int           `json:"playerLevel,omitempty"`
 	StepCount   int           `json:"stepCount"`
 	Gold        int           `json:"gold"`
 	Party       []PartyMember `json:"party"`
 	Inventory   []ItemStack   `json:"inventory"`
 	Quests      []Quest       `json:"quests"`
-	// Bestiary persists foe knowledge (kill counts + scanned flags per
-	// kind). omitempty so saves written before the bestiary existed simply
-	// load with no entries — adding this optional field is save-compatible,
-	// so SaveVersion stays put.
+	// Bestiary persists foe knowledge (kills + scanned per kind). omitempty so
+	// pre-bestiary saves load with no entries.
 	Bestiary Bestiary `json:"bestiary,omitempty"`
-	// Crystals persists healing-crystal charge state, by tile, parallel to the
-	// crystals placeCrystals rebuilds for the map on load. omitempty + an index
-	// overlay (only when counts match) keeps it save-compatible: older saves load
-	// with fresh (charged) crystals, so SaveVersion stays put. Without this a
-	// reload would re-arm a spent crystal — a free heal+save fountain.
+	// Crystals persists healing-crystal charge by tile. omitempty + tile overlay:
+	// older saves load with fresh (charged) crystals. Without it a reload re-arms
+	// a spent crystal — a free heal+save fountain.
 	Crystals []CrystalSave `json:"crystals,omitempty"`
-	// TriggersFired persists which Once dialog triggers have fired (keyed by
-	// trigger ID — see core/dialogtrigger.go), so a save taken after an intro
-	// cutscene doesn't replay it on reload. Keys are area-scoped; a stale key
-	// for a since-renamed/removed trigger simply matches nothing and is inert.
-	// omitempty keeps older saves load-compatible, so SaveVersion stays put.
+	// TriggersFired persists which Once dialog triggers fired (by trigger ID,
+	// see dialogtrigger.go) so an intro cutscene doesn't replay on reload. A
+	// stale key matches nothing and is inert. omitempty for older saves.
 	TriggersFired map[string]bool `json:"triggersFired,omitempty"`
 }
 
 // CrystalSave is the persisted charge state of one healing crystal.
 type CrystalSave struct {
-	// TileX/TileZ pin the charge to a specific crystal so load can match by
-	// position rather than by index — an edited map can relocate a crystal while
-	// keeping the same count, and a positional match avoids re-arming a spent
-	// charge onto the wrong tile. Older saves predate these fields and decode as
-	// (0,0), which simply won't match any real crystal tile (fresh charged wins).
+	// TileX/TileZ pin the charge to a crystal so load matches by position, not
+	// index — an edited map can relocate a crystal at the same count, and a
+	// positional match avoids re-arming a spent charge onto the wrong tile.
 	TileX   int  `json:"tileX,omitempty"`
 	TileZ   int  `json:"tileZ,omitempty"`
 	Charge  int  `json:"charge"`
 	Charged bool `json:"charged"`
-	// Saved is always true on records written by the current build. It
-	// distinguishes a legitimate crystal at tile (0,0) from a legacy phantom:
-	// an intermediate save format wrote crystals without TileX/TileZ, decoding
-	// them as (0,0). A phantom decodes Saved as false and is ignored on load.
+	// Saved is always true on current records. Distinguishes a real crystal at
+	// (0,0) from a legacy phantom (an old format wrote crystals without
+	// TileX/TileZ, decoding as (0,0)); a phantom has Saved false and is ignored.
 	Saved bool `json:"saved,omitempty"`
 }
 
-// crystalSaves snapshots the live crystals' charge state for SaveData (nil when
-// there are none, so the field stays omitempty-absent).
+// crystalSaves snapshots live crystals' charge for SaveData (nil when none).
 func crystalSaves(crystals []Crystal) []CrystalSave {
 	if len(crystals) == 0 {
 		return nil
@@ -107,13 +91,10 @@ func crystalSaves(crystals []Crystal) []CrystalSave {
 	return out
 }
 
-// NewSaveData captures the current run into a serializable snapshot. The
-// party is copied with combat-only transient statuses cleared (Sleep / Stun
-// / Webbed / Confused / Defending / Ingested + the animation timers): those
-// are normally wiped on battle exit, but clearing them on a defensive copy
-// here means a save taken from an unexpected mid-battle path can't leak a
-// "still asleep" or "still ingested" member into the reloaded run. Lasting
-// state (HP / MP / Poison / level / XP / equipment) is preserved.
+// NewSaveData captures the current run into a serializable snapshot. The party
+// copy clears combat-only transients (statuses + anim timers) so a save from a
+// mid-battle path can't leak a "still asleep/ingested" member; lasting state
+// (HP/MP/Poison/level/XP/equipment) is preserved.
 func NewSaveData(g *GameState) SaveData {
 	return SaveData{
 		Version:      SaveVersion,
@@ -125,57 +106,35 @@ func NewSaveData(g *GameState) SaveData {
 		StepCount:    g.StepCount,
 		Gold:         g.Gold,
 		Party:        saveSanitizedParty(g.Party),
-		// Detach Inventory / Quests from the live slices (same defensive-copy
-		// rationale as saveSanitizedParty): today the snapshot is marshalled
-		// synchronously, but an independent copy can't be torn by a future
-		// deferred / async save mutating the live run between snapshot and
-		// write. ItemStack / Quest are value types, so a shallow clone fully
-		// detaches the backing array.
-		Inventory: slices.Clone(g.Inventory),
-		Quests:    slices.Clone(g.Quests),
-		// Detach the bestiary map from the live run (same defensive-copy
-		// rationale as Inventory / Quests). BestiaryEntry is a value type,
-		// so maps.Clone fully decouples the snapshot; nil stays nil.
-		Bestiary: maps.Clone(g.Bestiary),
-		// Crystal charge state, by tile (crystalSaves makes an independent copy).
-		Crystals: crystalSaves(g.Crystals),
-		// Fired Once-trigger set, detached from the live map (maps.Clone keeps
-		// nil nil, so a run that fired nothing stays omitempty-absent).
+		// Detach from live slices/maps (defensive copy vs a future async save).
+		// Value types, so a shallow clone fully detaches; nil stays nil.
+		Inventory:     slices.Clone(g.Inventory),
+		Quests:        slices.Clone(g.Quests),
+		Bestiary:      maps.Clone(g.Bestiary),
+		Crystals:      crystalSaves(g.Crystals),
 		TriggersFired: maps.Clone(g.TriggersFired),
 	}
 }
 
-// saveSanitizedParty returns a copy of the party with combat-transient and
-// animation fields zeroed, so a save never carries battle-only state. HP /
-// MP / Poison / progression / equipment are left intact. Reuses the canonical
-// clearers (ClearPartyTransientStatuses + ReleaseAllIngested) so the
-// definition of "what's combat-transient" lives in one place — adding a new
-// status to those helpers covers the save path for free.
+// saveSanitizedParty copies the party with combat-transient/animation fields
+// zeroed (via the shared clearer, so the definition lives in one place);
+// HP/MP/Poison/progression/equipment stay intact.
 func saveSanitizedParty(party []PartyMember) []PartyMember {
 	out := make([]PartyMember, len(party))
 	copy(out, party)
-	// Strip the combat-only state (statuses, ingestion, anim timers) via the
-	// shared clearer — animation timers included so a save can't carry a
-	// mid-lunge offset.
 	clearPartyCombatTransients(out)
 	for i := range out {
-		// copy() above is shallow, so the snapshot's progression maps still
-		// alias the live party's. Clone them so the sanitized copy is fully
-		// independent — today it's only marshalled (read-only), but an
-		// independent snapshot can't be corrupted by a future deferred /
-		// async save that mutates the live party between snapshot and write.
-		// maps.Clone preserves nil for an un-invested member.
+		// Shallow copy above aliases the live progression maps; clone for full
+		// independence (maps.Clone preserves nil).
 		out[i].SkillTiers = maps.Clone(out[i].SkillTiers)
 		out[i].TreeRanks = maps.Clone(out[i].TreeRanks)
 	}
 	return out
 }
 
-// SaveGame writes the current run to disk as indented JSON, creating the
-// save directory if needed. Returns any filesystem / encode error so the
-// caller can surface it. Refuses to write when the run has no resolvable
-// map id (an unsaved editor playtest, Area.Path == "") — that would produce
-// a save whose Continue can never reload its map.
+// SaveGame writes the current run to disk as indented JSON (creating the save
+// dir). Refuses to write with no resolvable map id (unsaved editor playtest,
+// Area.Path == "") — Continue could never reload its map.
 func SaveGame(g *GameState) error {
 	data := NewSaveData(g)
 	if data.MapID == "" {
@@ -188,12 +147,10 @@ func SaveGame(g *GameState) error {
 	if err := os.MkdirAll(SaveDir(), AssetDirMode); err != nil {
 		return err
 	}
-	// Atomic write: stage the blob in a sibling temp file, then rename it over
-	// the real save. os.Rename is atomic on a single volume (and replaces the
-	// destination on Windows via MoveFileEx), so a crash / power loss / disk-full
-	// mid-write leaves the PRIOR save fully intact instead of truncating the only
-	// copy to a partial, undecodable blob that LoadSave can't recover. Best-effort
-	// cleanup of the temp on a rename failure so a failed save doesn't litter.
+	// Atomic write: stage in a sibling temp, then rename over the real save.
+	// os.Rename is atomic on a single volume, so a crash mid-write leaves the
+	// PRIOR save intact instead of a truncated, undecodable blob. Best-effort
+	// temp cleanup on rename failure.
 	tmp := SavePath() + ".tmp"
 	if err := os.WriteFile(tmp, blob, AssetFileMode); err != nil {
 		return err
@@ -205,25 +162,22 @@ func SaveGame(g *GameState) error {
 	return nil
 }
 
-// SaveExists reports whether a readable save file is present — the gate for
-// showing the title-screen Continue row.
+// SaveExists reports whether a readable save file is present — gates the
+// title-screen Continue row.
 func SaveExists() bool {
 	info, err := os.Stat(SavePath())
 	return err == nil && !info.IsDir()
 }
 
-// saveVersionSupported reports whether a decoded save's Version is one this
-// build can read. Rejects too-new (a future format we can't parse) AND < 1:
-// every real save stamps Version >= 1 via NewSaveData, so a 0 means a missing
-// version field or a corrupt / partially-written blob that still parsed as
-// JSON — not v0 content. Pulled out of LoadSave so the gate is unit-testable
-// without touching the on-disk save file.
+// saveVersionSupported reports whether a save's Version is readable. Rejects
+// too-new AND < MinSaveVersion: every real save stamps >= 1, so a 0 means a
+// missing/corrupt version field, not v0 content. Extracted for unit testing.
 func saveVersionSupported(v int) bool {
 	return v >= MinSaveVersion && v <= SaveVersion
 }
 
-// LoadSave reads and decodes the save file. Returns an error for a missing
-// file, malformed JSON, or a version this build can't read.
+// LoadSave reads and decodes the save file. Errors on a missing file, malformed
+// JSON, or an unreadable version.
 func LoadSave() (SaveData, error) {
 	blob, err := os.ReadFile(SavePath())
 	if err != nil {
@@ -239,11 +193,8 @@ func LoadSave() (SaveData, error) {
 	return data, nil
 }
 
-// GameStateFromSave rebuilds a playable GameState from a save. Loads the
-// saved map, builds a fresh area runtime via NewGameState, then overlays the
-// saved party / inventory / gold / quests / position. The player is placed
-// at the saved tile (clamped in-bounds for safety against a map that shrank
-// between save and load) and the fog reveal is re-seeded around them.
+// GameStateFromSave rebuilds a playable GameState from a save: loads the map,
+// builds a fresh runtime, overlays saved state, and re-seeds the fog reveal.
 func GameStateFromSave(data SaveData) (GameState, error) {
 	area, err := LoadArea(MapPath(data.MapID))
 	if err != nil {
@@ -251,92 +202,55 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	}
 	g := NewGameState(area)
 	if len(data.Party) > 0 {
-		// A save is external input (file on disk, possibly hand-edited or
-		// written by an older build). Clamp each member's numeric fields and
-		// drop unknown equipped item kinds before overlaying, so corrupt data
-		// (HP>MaxHP, MaxHP<=0, Level<BaseLevel, a renumbered ItemKind) can't
-		// feed nonsense into battle / level-up / equipment math. Mirrors the
-		// bounds guard custom enemies already get at load.
+		// A save is external input (file, possibly hand-edited/older). Clamp
+		// numeric fields and drop unknown equipped kinds so corrupt data can't
+		// feed battle/level-up/equipment math.
 		sanitizeLoadedParty(data.Party)
-		// Reconcile against the canonical party. NewGameState seeded g.Party
-		// with a full, class-ordered NewParty(); a well-formed save (exactly
-		// PartyMemberCount members, classes in order) maps 1:1, so the result
-		// is the save unchanged. A save with the wrong member count or an
-		// out-of-range / mismatched Class can't violate the binding
-		// PartyMemberCount-length, class-ordered seating contract (which render
-		// formation + SPD tie-break index into): unmatched saved members are
-		// dropped, and any slot with no saved match keeps its fresh default.
+		// Reconcile against the canonical class-ordered g.Party. A well-formed
+		// save maps 1:1; a malformed one can't violate the seating contract —
+		// extra/unknown members dropped, unmatched slots keep their fresh default.
 		overlaySavedParty(g.Party, data.Party)
 	}
-	// Inventory / quests may legitimately be empty; copy through as-is so a
-	// player who sold everything stays empty rather than re-seeding the kit.
-	// Drop stacks whose ItemKind is no longer registered (an older save or a
-	// hand-edit) — they'd otherwise sit in the bag as un-usable "Unknown
-	// Item" dead weight.
+	// Copy inventory/quests through as-is even when empty (a player who sold
+	// everything stays empty, not re-seeded). Prune drops unregistered/older
+	// kinds that'd sit as un-usable "Unknown Item" dead weight.
 	g.Inventory = pruneUnknownItems(data.Inventory)
 	g.Gold = data.Gold
-	// The loaded quest journal is authoritative — assign it unconditionally
-	// (even when it prunes to empty) so a player who cleared/never-had quests
-	// stays empty rather than silently re-seeding NewGameState's StarterQuests.
-	// Matches the inventory "copy through as-is even if empty" rule just above;
-	// Quests is a slice so a nil/empty result is safe to store (unlike Bestiary
-	// below, whose nil-map guard must stay to avoid a write panic on the next
-	// kill-record).
+	// Loaded journal is authoritative — assign unconditionally (even empty) so a
+	// cleared journal doesn't re-seed StarterQuests.
 	g.Quests = pruneQuests(data.Quests)
-	// Overlay the saved bestiary, dropping entries for kinds this build no
-	// longer registers (a save predating an EnemyKind renumber) — the same
-	// load-boundary hygiene Inventory / Quests / skills get. NewGameState
-	// already seeded a fresh empty map, so an empty/absent saved bestiary
-	// (older save) just leaves that in place.
+	// Overlay bestiary, dropping kinds this build no longer registers. An
+	// empty/absent saved bestiary leaves NewGameState's fresh map in place.
 	if pruned := pruneBestiary(data.Bestiary); len(pruned) > 0 {
 		g.Bestiary = pruned
 	}
 	g.StepCount = data.StepCount
-	// Overlay the saved fired-trigger set so a Once cutscene the player already
-	// saw doesn't replay on reload. Detached copy (the saved map may be aliased
-	// by a future caller); nil stays nil, which the fire path lazy-inits.
+	// Detached copy (nil stays nil, lazy-inited on fire).
 	g.TriggersFired = maps.Clone(data.TriggersFired)
-	// Overlay saved crystal charge onto the freshly-placed crystals, matched by
-	// TILE rather than by index. placeCrystals is deterministic, but an edited
-	// map can change which start-neighbor is first-walkable, yielding the same
-	// crystal COUNT at a different tile — an index/count overlay would then re-arm
-	// a spent charge onto a relocated crystal. Tile-matching leaves any crystal
-	// without a saved counterpart at its fresh charged default.
+	// Overlay saved crystal charge by TILE, not index: an edited map can yield
+	// the same crystal COUNT at a different tile, and an index overlay would
+	// re-arm a spent charge onto a relocated crystal.
 	for i := range g.Crystals {
 		for j := range data.Crystals {
 			cs := data.Crystals[j]
-			// Skip legacy phantom records: an intermediate save format wrote
-			// crystals without TileX/TileZ, decoding them as (0,0). The Saved
-			// flag (always true on current saves) distinguishes a real crystal
-			// at the origin from such a phantom, so a legitimate (0,0) crystal's
-			// charge restores correctly instead of re-arming on reload.
+			// Skip legacy phantoms (old format, no TileX/TileZ, decode as (0,0));
+			// the Saved flag distinguishes a real (0,0) crystal from a phantom.
 			if !cs.Saved && cs.TileX == 0 && cs.TileZ == 0 {
 				continue
 			}
 			if cs.TileX == g.Crystals[i].TileX && cs.TileZ == g.Crystals[i].TileZ {
-				// Clamp the saved charge to the valid [0, ceiling] range — every
-				// other loaded field is sanitized at this trust boundary, and a
-				// corrupt/hand-edited value would otherwise feed the per-step
-				// recharge math nonsense (a negative charge that never re-arms,
-				// or an over-cap one). Honor the saved Charged flag rather than
-				// re-deriving it from Charge: the spend path zeroes both together
-				// and recharge re-arms only at the ceiling, so the flag is the
-				// authoritative armed/dormant state — re-deriving would discard it.
+				// Clamp the saved charge to [0, ceiling] (trust boundary). Honor
+				// the saved Charged flag — it's the authoritative armed state;
+				// re-deriving from Charge would discard it.
 				g.Crystals[i].Charge = Clamp(cs.Charge, 0, CrystalRechargeSteps)
 				g.Crystals[i].Charged = cs.Charged
 				break
 			}
 		}
 	}
-	// Place the player at the saved tile, but fall back to the map's
-	// authored start if that tile is out of bounds or now blocked — the map
-	// may have been edited (geometry changed, shrunk) between save and load,
-	// and a save-by-map-id reload must never drop the player inside a wall.
-	// Check the RAW saved coords (BlockedAt reports out-of-bounds as blocked):
-	// clamping an out-of-range coord to an edge first would silently place the
-	// party at an arbitrary corner whenever that edge happened to be walkable,
-	// instead of taking the authored-start fallback. NewGameState already
-	// seeded g.Player at the validated start, so the fallback just keeps that.
+	// Place at the saved tile, falling back to the authored start if it's
+	// out-of-bounds or now blocked (map may have shrunk). Check the RAW coords:
+	// clamping to an edge first could silently drop the party at a walkable corner.
 	x, z := data.PlayerTileX, data.PlayerTileZ
 	if area.BlockedAt(x, z) {
 		x, z = g.Player.TileX, g.Player.TileZ
@@ -344,11 +258,9 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	} else {
 		g.Player = NewPlayer(x, z, data.PlayerFacing)
 	}
-	// Restore the standing level: honor the saved level only if it's still a
-	// standable surface (the map may have been edited), else snap to the tile's
-	// lowest standable surface (the ground) — never trust a raw level that would
-	// float or bury the party. NewPlayer left Level zero, so this is the one
-	// place the loaded party's level is established.
+	// Honor the saved standing level only if still standable (map may have been
+	// edited), else snap to the tile's lowest standable surface. NewPlayer left
+	// Level zero, so this is where the loaded level is established.
 	if area.Standable(x, data.PlayerLevel, z) {
 		g.Player.Level = data.PlayerLevel
 	} else {
@@ -360,12 +272,9 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 
 // overlaySavedParty copies each saved member's run state onto the canonical
 // base slot of the same Class. `base` is a fresh class-ordered NewParty(), so
-// the result always has exactly PartyMemberCount members in seating order no
-// matter what `saved` looks like. A normal save maps 1:1 (identical result);
-// a save with extra/missing members or an out-of-range Class is repaired —
-// extras and unknown-class members find no slot and are dropped, and a slot
-// with no saved match keeps its fresh default (1 SkillPoint, nothing learned).
-// `saved` must already be sanitized (clamped) by sanitizeLoadedParty.
+// the result always has PartyMemberCount members in seating order: extras and
+// unknown-class members are dropped, unmatched slots keep their fresh default.
+// `saved` must already be sanitized by sanitizeLoadedParty.
 func overlaySavedParty(base, saved []PartyMember) {
 	used := make([]bool, len(saved))
 	for i := range base {
@@ -380,22 +289,15 @@ func overlaySavedParty(base, saved []PartyMember) {
 	}
 }
 
-// sanitizeLoadedParty clamps a loaded party's mutable numeric fields into
-// sane ranges and clears unknown equipped item kinds, so a corrupt or hand-
-// edited save can't feed nonsense (HP>MaxHP, negative HP, MaxHP<=0,
-// Level<BaseLevel, a renumbered ItemKind) into battle / level-up /
-// equipment math. Mutates in place — mirrors the bounds guard the custom-
-// enemy load path applies.
+// sanitizeLoadedParty clamps a loaded party's numeric fields and clears unknown
+// equipped kinds in place, so a corrupt/hand-edited save can't feed nonsense
+// into battle/level-up/equipment math.
 func sanitizeLoadedParty(party []PartyMember) {
 	for i := range party {
 		m := &party[i]
-		// MaxHP is fully derived from VIT (MaxHPFor) and kept in sync by every
-		// VIT level-up spend, so re-derive it from the loaded stat block rather
-		// than trusting the persisted number — a corrupt/edited save whose MaxHP
-		// drifted out of sync with VIT would otherwise load a permanently wrong
-		// HP cap. Floor at 1 for a zero/negative VIT. (MaxMP has no pure stat
-		// derivation — per-class base + additive INT spends — so it can only be
-		// clamped to a sane range, not recomputed.)
+		// MaxHP is fully VIT-derived (MaxHPFor); re-derive rather than trust the
+		// persisted number, which may have drifted out of sync. Floor at 1.
+		// (MaxMP has no pure derivation — base + INT spends — so it's only clamped.)
 		m.MaxHP = MaxHPFor(m.Stats)
 		if m.MaxHP < 1 {
 			m.MaxHP = 1
@@ -417,9 +319,8 @@ func sanitizeLoadedParty(party []PartyMember) {
 		if m.SkillPoints < 0 {
 			m.SkillPoints = 0
 		}
-		// Clear any slot holding an unregistered kind: foldEquipment skips
-		// unknown kinds, so it would occupy the slot while contributing no
-		// bonuses — a silently dead slot. Empty it so the slot is re-usable.
+		// Clear slots holding an unregistered kind: foldEquipment skips them, so
+		// they'd occupy the slot as a silently dead, re-usable-blocking entry.
 		for s := range m.Equipped {
 			if m.Equipped[s] == ItemNone {
 				continue
@@ -428,12 +329,10 @@ func sanitizeLoadedParty(party []PartyMember) {
 				m.Equipped[s] = ItemNone
 			}
 		}
-		// Two-handed weapons occupy BOTH hands. EquipFromInventory enforces
-		// that exclusion at equip time, but a hand-edited save can carry a
-		// two-hander beside an off-hand item — or the same two-hander in both
-		// hands — and foldEquipment sums all slots, so the extra item's
+		// Two-handers occupy BOTH hands. A hand-edited save can carry one beside
+		// an off-hand item (or duplicated), and foldEquipment sums all slots, so
 		// bonuses would double-count. Mirror the equip rule: a two-hander in
-		// either hand empties the other (right hand wins when both qualify).
+		// either hand empties the other (right wins when both qualify).
 		switch {
 		case ItemIsTwoHanded(m.Equipped[EquipRightHand]):
 			m.Equipped[EquipLeftHand] = ItemNone
@@ -441,17 +340,11 @@ func sanitizeLoadedParty(party []PartyMember) {
 			m.Equipped[EquipRightHand] = ItemNone
 		}
 		// Clone the decoded progression maps so the live party doesn't alias
-		// the maps held by `data.Party` (overlaySavedParty shallow-copies the
-		// struct). `data` is discarded today so no live aliasing results, but
-		// the write path already clones these (maps.Clone preserves nil) — mirror
-		// it so a future caller that retains `data` can't share mutable state.
+		// `data.Party`'s (overlaySavedParty shallow-copies; maps.Clone keeps nil).
 		m.SkillTiers = maps.Clone(m.SkillTiers)
 		m.TreeRanks = maps.Clone(m.TreeRanks)
-		// Drop skill/tree progression keyed to identifiers this build no
-		// longer knows (a save predating a SkillID or tree-node renumber).
-		// Left in, a stale key applies its invested tier/rank to the WRONG
-		// skill through EffectiveSkillEffect / LearnedSkills — so prune them
-		// at the load trust boundary, exactly like Equipped and the inventory.
+		// Drop progression keyed to identifiers this build no longer knows: a
+		// stale key would apply its tier/rank to the WRONG skill.
 		for id := range m.SkillTiers {
 			if _, ok := skillInfo(id); !ok {
 				delete(m.SkillTiers, id)
@@ -462,39 +355,25 @@ func sanitizeLoadedParty(party []PartyMember) {
 				delete(m.TreeRanks, id)
 			}
 		}
-		// Bound SkillCursor against the learned-skill list the pruned
-		// TreeRanks now yield. PartySkill self-heals an out-of-range
-		// cursor at read time, so this is hygiene, not a crash fix —
-		// but it keeps the persisted value honest for any future reader
-		// that indexes without the clamp.
+		// Bound SkillCursor against the pruned learned-skill list. PartySkill
+		// self-heals at read time, so this is hygiene for future readers.
 		if skills := PartySkills(m); m.SkillCursor < 0 || m.SkillCursor >= len(skills) {
 			m.SkillCursor = 0
 		}
 	}
-	// Combat-only state must never survive into the reloaded (exploration)
-	// run. The WRITE path (saveSanitizedParty) already strips these, but the
-	// load path is the trust boundary for hand-edited / older-format saves —
-	// clear them here too via the same canonical clearers, so an Ingested
-	// member (whose IngestedBy points at a pack slot the freshly-rebuilt area
-	// no longer has) or an asleep/stunned member can't load permanently
-	// locked out of combat with no enemy alive to ever release them.
+	// Strip combat-only state at the load trust boundary too (the write path
+	// already does): else an Ingested/asleep member could load permanently
+	// locked out of combat with no enemy alive to release them.
 	clearPartyCombatTransients(party)
-	// Repair the standing 2×2 formation if the loaded slots aren't a valid grid
-	// — most importantly a pre-formation save, where HomeRow/HomeCol decode to
-	// the zero value (all front-left). The ribbon and 3D battlefield now position
-	// members BY their formation slot, so an unrepaired layout would stack every
-	// card in one spot. A valid (incl. custom-swapped) layout is left as-is.
+	// Repair the 2×2 formation if the loaded slots aren't a valid grid — notably
+	// a pre-formation save (HomeRow/HomeCol decode to zero, all front-left),
+	// which would stack every card in one spot. A valid layout is left as-is.
 	NormalizePartyFormation(party)
 }
 
-// pruneValid is the shared "filter a save-loaded slice" shape: empty/nil
-// input returns nil (so a cleared slice stays nil, not an empty non-nil),
-// otherwise it returns a fresh slice holding just the elements `keep`
-// accepts. The per-type validity rules (and any dedup bookkeeping) live in
-// the keep closure each caller passes, so the empty->nil guard + capacity
-// hint + filter loop aren't re-spelled at every prune site. (pruneBestiary
-// can't route through this — it's map-shaped, not a slice — so it keeps its
-// own range loop.)
+// pruneValid filters a save-loaded slice: empty/nil returns nil (a cleared
+// slice stays nil), else a fresh slice of the elements `keep` accepts. (pruneBestiary
+// is map-shaped, so it keeps its own loop.)
 func pruneValid[T any](src []T, keep func(T) bool) []T {
 	if len(src) == 0 {
 		return nil
@@ -508,10 +387,8 @@ func pruneValid[T any](src []T, keep func(T) bool) []T {
 	return out
 }
 
-// pruneUnknownItems drops inventory stacks whose ItemKind isn't registered
-// (a save predating an item, or a hand-edit) or whose count is non-positive.
-// Such a stack would otherwise sit in the bag as un-usable "Unknown Item"
-// dead weight. Returns a fresh slice; nil/empty input returns nil.
+// pruneUnknownItems drops inventory stacks with an unregistered kind or
+// non-positive count (un-usable "Unknown Item" dead weight). Fresh slice; nil on empty.
 func pruneUnknownItems(inv []ItemStack) []ItemStack {
 	return pruneValid(inv, func(st ItemStack) bool {
 		if st.Count <= 0 || st.Kind == ItemNone {
@@ -522,18 +399,12 @@ func pruneUnknownItems(inv []ItemStack) []ItemStack {
 	})
 }
 
-// pruneQuests drops journal entries with an empty ID and collapses duplicate
-// IDs (keeping the first), so an older or hand-edited save can't seed the
-// journal with blank or doubled quests that QuestIndexByID would then resolve
-// inconsistently. Returns a fresh slice; nil/empty input returns nil. There is
-// no quest REGISTRY to validate IDs against yet (StarterQuests seeds only the
-// opening quest, and dialogs can start arbitrary ad-hoc ids); when a registry
-// ships, also drop unregistered IDs here, mirroring pruneUnknownItems.
+// pruneQuests drops empty-ID entries and collapses duplicate IDs (keeping the
+// first), so QuestIndexByID can't resolve inconsistently. Fresh slice; nil on
+// empty. No quest REGISTRY exists yet; when one ships, also drop unregistered IDs.
 func pruneQuests(quests []Quest) []Quest {
-	// The validity rule (non-empty, first-of-duplicate-ID) is the keep
-	// closure; the seen-map dedup state is captured so pruneValid stays a
-	// pure filter. The Status clamp mutates kept entries, which a value-copy
-	// keep predicate can't do, so it runs as a second pass over the result.
+	// seen-map dedup is captured so pruneValid stays a pure filter; the Status
+	// clamp mutates kept entries, so it runs as a second pass.
 	seen := make(map[string]bool, len(quests))
 	out := pruneValid(quests, func(q Quest) bool {
 		if q.ID == "" || seen[q.ID] {
@@ -543,9 +414,8 @@ func pruneQuests(quests []Quest) []Quest {
 		return true
 	})
 	for i := range out {
-		// A hand-edited Status outside the recognized set would be a
-		// "neither" entry both journal-header tallies skip. Clamp it to
-		// Active — the safe default for an entry we can't interpret.
+		// An unrecognized Status is a "neither" entry both header tallies skip;
+		// clamp to Active.
 		if !out[i].Status.Valid() {
 			out[i].Status = QuestActive
 		}
@@ -553,10 +423,8 @@ func pruneQuests(quests []Quest) []Quest {
 	return out
 }
 
-// pruneBestiary drops bestiary entries for an EnemyKind this build no longer
-// registers (a save predating a kind renumber/removal) and any empty record
-// (no kills and not scanned). Negative kill counts from a hand-edit are
-// floored at zero. Returns a fresh map; nil/empty input returns nil.
+// pruneBestiary drops entries for an unregistered EnemyKind and empty records
+// (no kills, not scanned); floors negative kills at zero. Fresh map; nil on empty.
 func pruneBestiary(b Bestiary) Bestiary {
 	if len(b) == 0 {
 		return nil
@@ -577,8 +445,7 @@ func pruneBestiary(b Bestiary) Bestiary {
 	return out
 }
 
-// saveVersionError reports a save file written by a newer build than this
-// one can read.
+// saveVersionError reports a save written by a newer build than this one reads.
 type saveVersionError struct {
 	got int
 	max int

@@ -2,23 +2,15 @@ package core
 
 import "slices"
 
-// gridLayers returns pointers to the area's authored grid-layer slices in
-// canonical order (walls, floor, decor, props, ceiling, elevation). The single
-// place that enumerates the grid layers for bulk operations — CloneArea and
-// AreaContentEqual walk this instead of hand-listing the fields, so a new layer
-// is one row here, not several lockstep edits. (The MapFile↔Area converters
-// still list the fields explicitly: they pair each layer with the separate
-// mapfile.MapFile type and apply the ceiling / elevation blank-default, which
-// this accessor can't model.)
+// gridLayers returns pointers to the authored grid-layer slices in canonical
+// order (walls, floor, decor, props, ceiling, elevation) — single enumeration
+// for bulk ops, so a new layer is one row here. (The converters list fields explicitly.)
 func (a *AreaDefinition) gridLayers() []*[]string {
 	return []*[]string{&a.Walls, &a.Floor, &a.Decor, &a.Props, &a.Ceiling, &a.Elevation}
 }
 
-// layerBlank returns the canonical open/blank char the loader fills an absent or
-// short layer with: '.' (TileOpen) for most layers, and the ceiling-open /
-// elevation-ground sentinels for those two optional layers. The single home for
-// the per-layer blank, so paste-padding (PasteRegion) and the dirty-check
-// (AreaContentEqual) can't disagree on a layer's open char.
+// layerBlank returns the open/blank char the loader fills an absent/short layer
+// with: TileOpen for most, ceiling-open / elevation-ground for those two.
 func (a *AreaDefinition) layerBlank(lp *[]string) byte {
 	switch lp {
 	case &a.Ceiling:
@@ -30,9 +22,8 @@ func (a *AreaDefinition) layerBlank(lp *[]string) byte {
 	}
 }
 
-// AreaContentEqual reports whether two areas have identical authorable
-// content. Path is intentionally ignored: saving a map under a new file name
-// should not mark the tile/entity data dirty.
+// AreaContentEqual reports whether two areas have identical authorable content.
+// Path is ignored: saving under a new file name must not mark data dirty.
 func AreaContentEqual(a, b AreaDefinition) bool {
 	if a.Name != b.Name || a.Width != b.Width || a.Height != b.Height ||
 		a.Materials != b.Materials ||
@@ -47,11 +38,8 @@ func AreaContentEqual(a, b AreaDefinition) bool {
 		if slices.Equal(*al[i], *bl[i]) {
 			continue
 		}
-		// Ceiling / Elevation are optional layers: the loader fills an
-		// absent one with a canonical blank, so an area with them omitted
-		// must not read as "dirty" vs one filled to that default. Identify
-		// them by pointer (reorder-safe vs gridLayers' order) and compare
-		// with absent==blank semantics, using the shared per-layer blank.
+		// Ceiling/Elevation are optional: an omitted layer must not read dirty vs
+		// the loader's blank-filled form. Identify by pointer, compare absent==blank.
 		if al[i] == &a.Ceiling || al[i] == &a.Elevation {
 			if optionalLayerEqual(*al[i], *bl[i], a.Width, a.Height, a.layerBlank(al[i])) {
 				continue
@@ -59,16 +47,12 @@ func AreaContentEqual(a, b AreaDefinition) bool {
 		}
 		return false
 	}
-	// Solids is a [][]string voxel stack, not one of the flat gridLayers, so
-	// it's compared explicitly (like the spawn/dialog lists). solidsEqual uses
-	// absent==derived-from-Elevation semantics so a heightfield map (Solids nil)
-	// doesn't read dirty against one whose stack was materialized.
+	// Solids (a voxel stack) compared explicitly; solidsEqual uses
+	// absent==derived-from-Elevation so a heightfield map (Solids nil) isn't dirty.
 	if !solidsEqual(a, b) {
 		return false
 	}
-	// PropLevels is also compared explicitly (absent == all-auto) so a map with
-	// every prop on its ground surface doesn't read dirty whether the grid is
-	// omitted or filled with the auto sentinel.
+	// PropLevels/DecorLevels compared explicitly (absent == all-auto).
 	if !optionalLayerEqual(a.PropLevels, b.PropLevels, a.Width, a.Height, PropLevelAuto) ||
 		!optionalLayerEqual(a.DecorLevels, b.DecorLevels, a.Width, a.Height, PropLevelAuto) {
 		return false
@@ -88,9 +72,8 @@ func AreaContentEqual(a, b AreaDefinition) bool {
 	return true
 }
 
-// faceOverridesEqual compares two per-tile face-override lists order-insensitively
-// (the lists aren't kept sorted at mutation time; encode sorts them), so a map
-// that authored the same overrides in a different order isn't falsely dirty.
+// faceOverridesEqual compares face-override lists order-insensitively (they
+// aren't sorted until encode), so a different authoring order isn't falsely dirty.
 func faceOverridesEqual(a, b []FaceOverride) bool {
 	if len(a) != len(b) {
 		return false
@@ -107,9 +90,8 @@ func faceOverridesEqual(a, b []FaceOverride) bool {
 	return true
 }
 
-// dialogsEqual deep-compares two areas' dialog lists. DialogChoiceCondition
-// is an all-comparable struct (slices.Equal works), but nodes/choices carry a
-// *DialogAction pointer, so those need a deref-aware walk rather than ==.
+// dialogsEqual deep-compares dialog lists. Nodes/choices carry a *DialogAction
+// pointer, so those need a deref-aware walk rather than ==.
 func dialogsEqual(a, b []DialogDefinition) bool {
 	return slices.EqualFunc(a, b, func(ad, bd DialogDefinition) bool {
 		return ad.ID == bd.ID && ad.StartNodeID == bd.StartNodeID &&
@@ -138,10 +120,8 @@ func dialogActionEqual(a, b *DialogAction) bool {
 	return *a == *b
 }
 
-// optionalLayerEqual compares two optional grid layers (Ceiling, Elevation),
-// treating an absent / short layer as equal to a full layer of (width,
-// height) filled with the canonical blank char. Keeps the dirty-check stable
-// when one side omits a layer the loader would have blank-filled.
+// optionalLayerEqual compares two optional grid layers, treating an absent/short
+// layer as equal to a full (width,height) layer of the blank char.
 func optionalLayerEqual(a, b []string, width, height int, blank byte) bool {
 	return slices.Equal(
 		normalizeOptionalLayer(a, width, height, blank),
@@ -149,11 +129,8 @@ func optionalLayerEqual(a, b []string, width, height int, blank byte) bool {
 	)
 }
 
-// normalizeOptionalLayer returns a height×width layer with every row padded /
-// truncated to width using the canonical blank char. An absent layer (wrong row
-// count) becomes a full blank layer; a present-but-ragged layer (right row
-// count, short rows) has each row normalized — so an absent layer and one the
-// loader would blank-fill to the same shape compare equal rather than dirty.
+// normalizeOptionalLayer returns a height×width layer, every row padded/truncated
+// to width. An absent layer becomes a full blank layer; a ragged one is normalized.
 func normalizeOptionalLayer(layer []string, width, height int, blank byte) []string {
 	blankRow := func() string {
 		buf := make([]byte, width)
@@ -170,8 +147,7 @@ func normalizeOptionalLayer(layer []string, width, height int, blank byte) []str
 		}
 		return out
 	}
-	// Right row count: normalize each row's width so a ragged row doesn't read
-	// as unequal vs the loader's blank-filled (full-width) form.
+	// Right row count: normalize each row's width vs the loader's full-width form.
 	ragged := false
 	for _, r := range layer {
 		if len(r) != width {
@@ -229,12 +205,9 @@ func CloneArea(a AreaDefinition) AreaDefinition {
 	for i := range dst {
 		*dst[i] = cloneRows(*src[i])
 	}
-	// Solids isn't a gridLayers() member (it's a [][]string stack); CloneSolids is
-	// the canonical nil-safe deep copy (returns nil for an empty stack, so a
-	// heightfield area keeps Solids==nil).
+	// Solids isn't a gridLayers() member; CloneSolids is the nil-safe deep copy
+	// (nil for an empty stack, so a heightfield area keeps Solids==nil).
 	out.Solids = CloneSolids(a.Solids)
-	// PropLevels / DecorLevels are their own optional row grids — cloneRows is the
-	// same immutable-string deep copy used for the grid layers above.
 	if len(a.PropLevels) > 0 {
 		out.PropLevels = cloneRows(a.PropLevels)
 	}
@@ -244,8 +217,8 @@ func CloneArea(a AreaDefinition) AreaDefinition {
 	if len(a.FaceOverrides) > 0 {
 		out.FaceOverrides = append([]FaceOverride(nil), a.FaceOverrides...)
 	}
-	// Drop the shared lazy face-override index so the clone rebuilds its own
-	// (the `out := a` copy aliased the source map pointer).
+	// Drop the lazy face-override index so the clone rebuilds its own (the
+	// `out := a` copy aliased the source map pointer).
 	out.faceOverrideIdx = nil
 	out.PackSpawns = make([]PackSpawn, len(a.PackSpawns))
 	for i, sp := range a.PackSpawns {
@@ -265,8 +238,7 @@ func CloneArea(a AreaDefinition) AreaDefinition {
 		}
 	}
 	out.DoorSpawns = append([]DoorSpawn(nil), a.DoorSpawns...)
-	// CrystalSpawn is all-comparable (no nested slices), so a plain slice
-	// copy is a full deep copy — matching the DoorSpawn line above.
+	// CrystalSpawn is all-comparable, so a plain slice copy is a full deep copy.
 	out.CrystalSpawns = append([]CrystalSpawn(nil), a.CrystalSpawns...)
 	out.CustomEnemies = make([]CustomEnemyDef, len(a.CustomEnemies))
 	for i, ce := range a.CustomEnemies {
@@ -274,16 +246,13 @@ func CloneArea(a AreaDefinition) AreaDefinition {
 		out.CustomEnemies[i].Skills = append([]SkillID(nil), ce.Skills...)
 	}
 	out.Dialogs = CloneDialogs(a.Dialogs)
-	// DialogTrigger is all-comparable (no slices/pointers), so a plain slice
-	// copy is a full deep copy — no per-element walk needed (unlike Dialogs).
+	// DialogTrigger is all-comparable, so a plain slice copy is a full deep copy.
 	out.Triggers = append([]DialogTrigger(nil), a.Triggers...)
 	return out
 }
 
-// CloneDialogs deep-copies a dialog list so an editor undo snapshot (or a
-// runtime StartDialog copy) shares no backing slices / action pointers with
-// the source. Exported so StartDialog and the editor can take an independent
-// copy through one helper.
+// CloneDialogs deep-copies a dialog list so the copy shares no backing slices/
+// action pointers with the source.
 func CloneDialogs(in []DialogDefinition) []DialogDefinition {
 	if len(in) == 0 {
 		return nil
@@ -295,10 +264,8 @@ func CloneDialogs(in []DialogDefinition) []DialogDefinition {
 	return out
 }
 
-// CloneDialogDef deep-copies a single definition — its Nodes slice, each
-// node's Choices slice, every Conditions slice, and the *DialogAction pointers
-// — so the copy shares no mutable backing with the source. StartDialog uses it
-// to take a self-contained runtime copy of the area's authored definition.
+// CloneDialogDef deep-copies a single definition (Nodes, Choices, Conditions,
+// and the *DialogAction pointers) so the copy shares no mutable backing.
 func CloneDialogDef(d DialogDefinition) DialogDefinition {
 	out := DialogDefinition{
 		ID:          d.ID,

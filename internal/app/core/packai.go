@@ -2,43 +2,27 @@ package core
 
 import "slices"
 
-// Pack AI dispatch. Each pack carries a PackAI mode authored on its
-// PackSpawn (default PackAINone — stationary, no per-step planning).
-// PlanPackSteps walks alive packs and, for each, hands control to the
-// planner registered for that pack's mode. New movement styles land as
-// one entry in packAIPlanners plus the per-mode planOneXxxPack body.
+// Pack AI dispatch. Each pack carries a PackAI mode (default PackAINone);
+// PlanPackSteps hands each alive pack to its registered planner. A new style is
+// one packAIPlanners row + one planner.
 //
-// Today's modes:
-//   - PackAINone: stationary. Never plans a step. The editor's "no AI"
-//     default and what every old map without an AI column resolves to.
-//   - PackAIJunkyardDog: wanders inside a small leash around the spawn
-//     tile, occasionally taking a step when the player does, and steps
-//     toward the player when they're close. Doesn't chase outside the
-//     leash and doesn't move every step — the goal is "this dog noticed
-//     you walk by and decided to look up," not "you have a hostile
-//     escort following you across the map."
-//   - PackAIPatrol: paces a fixed line along the X axis around the spawn
-//     tile (out to PatrolRadius, bouncing at the ends / walls), ignoring
-//     the player but engaging if it paces onto their tile — a sentry on a
-//     beat. Tracks its pace direction in Pack.PatrolDir.
-//   - PackAISkittish: flees directly away when the player is within
-//     SkittishFleeRadius, otherwise wanders the leash. Never engages —
-//     it only runs, so the player has to corner it to catch it.
+// Modes:
+//   - PackAINone: stationary, never plans a step.
+//   - PackAIJunkyardDog: wanders a small leash, occasionally steps, chases when
+//     the player is close — but never beyond the leash.
+//   - PackAIPatrol: paces the X axis out to PatrolRadius (bouncing at ends/walls),
+//     ignoring the player but engaging if it paces onto their tile. Tracks
+//     Pack.PatrolDir.
+//   - PackAISkittish: flees within SkittishFleeRadius, else wanders; never engages.
 //
-// All randomness comes from GameState.RNG so the seed travels with the
-// run state (tests / future save-load) instead of leaking onto a
-// package-level singleton.
+// All randomness comes from GameState.RNG so the seed travels with run state.
 
-// packPlanner plans one pack's per-step move. (state, packIndex,
-// occupied) → (step, planned). Implementations may roll dice off
-// g.RNG and read the player's tile; they must NOT mutate g or the
-// occupied map (the dispatcher reserves the destination after the
-// plan returns).
+// packPlanner plans one pack's per-step move. May roll g.RNG and read the
+// player's tile; MUST NOT mutate g or occupied (the dispatcher reserves the
+// destination afterward).
 type packPlanner func(g *GameState, idx int, occupied map[[2]int]bool) (packAIStep, bool)
 
-// packAIPlanners is the per-mode dispatch table. Indexed by PackAI so a
-// new mode is one row + one planner. Init below asserts every mode in
-// the enum has a row.
+// packAIPlanners is the per-mode dispatch table; init asserts every mode has a row.
 var packAIPlanners = [PackAICount]packPlanner{
 	PackAINone:        planStationaryPack,
 	PackAIJunkyardDog: planJunkyardDogPack,
@@ -54,28 +38,21 @@ func init() {
 	}
 }
 
-// planStationaryPack is the PackAINone planner — no step, ever. The
-// pack sits at its spawn tile until the player walks into it.
+// planStationaryPack is the PackAINone planner — never steps.
 func planStationaryPack(*GameState, int, map[[2]int]bool) (packAIStep, bool) {
 	return packAIStep{}, false
 }
 
-// PackStepIntoPlayer reports whether a pack at (tx, tz) and the player
-// at (px, pz) share a tile — the collision condition that should
-// trigger a battle. Lives here (not in explore) so the headless tests
-// covering pack-AI can assert it without dragging raylib in.
+// PackStepIntoPlayer reports whether a pack at (tx,tz) and player at (px,pz)
+// share a tile. Lives here (not explore) so headless tests need no raylib.
 func PackStepIntoPlayer(tx, tz, px, pz int) bool {
 	return tx == px && tz == pz
 }
 
 // PackEngagesPlayerAt reports whether pack p stepping onto (nx,nz) collides with
-// the player and should start a battle: the same tile, and — on a voxel map —
-// the same standing surface, so a pack crossing a bridge deck doesn't engage a
-// player on the ground beneath it (or vice versa). On a heightfield the level
-// check is skipped: a pack's Level isn't tracked per-surface there (it can drift
-// across a ramp), and engagement was always purely tile-based, so this stays
-// byte-identical. The voxel branch resolves the pack's landing surface the same
-// way ApplyPackSteps will, then requires it to match the player's standing level.
+// the player and should start a battle: same tile, and on a voxel map the same
+// standing surface (so a pack on a bridge deck doesn't engage below it). The
+// heightfield level check is skipped (Level isn't tracked per-surface there).
 func PackEngagesPlayerAt(g *GameState, p Pack, nx, nz int) bool {
 	if !PackStepIntoPlayer(nx, nz, g.Player.TileX, g.Player.TileZ) {
 		return false
@@ -92,15 +69,10 @@ func PackEngagesPlayerAt(g *GameState, p Pack, nx, nz int) bool {
 	return land == g.Player.Level
 }
 
-// cardinalSteps returns the four cardinal-direction (dx, dz) pairs in
-// FacingVector order (North, East, South, West). Builds from
-// FacingVector so the AI and the player-step code can't disagree on
-// what "south" means — a future facing-convention change is one switch
-// edit, not a manual table reshuffle.
 // cardinalStepsBase is the fixed [dx,dz] table for the four facings, derived
-// once from FacingVector. cardinalSteps returns a copy each call (it's a value
-// array), so wanderStep can shuffle it in place without recomputing the table
-// per wandering pack per step.
+// once from FacingVector (so AI and player-step code agree on directions).
+// cardinalSteps returns a value-array copy each call, so wanderStep can shuffle
+// it in place without recomputing.
 var cardinalStepsBase = func() [FacingCount][2]int {
 	var out [FacingCount][2]int
 	for i := 0; i < FacingCount; i++ {
@@ -114,60 +86,33 @@ func cardinalSteps() [FacingCount][2]int {
 	return cardinalStepsBase
 }
 
-// packAIStep is one pack's per-step move plan. PackEngagePlayer is the
-// post-move state: if a pack stepped onto the player's tile, the
-// caller initiates a battle with this pack index instead of applying
-// the move (the pack visually "stays" at the engagement tile since
-// battle Start uses Pack.TileX/TileZ for the splash).
+// packAIStep is one pack's per-step move plan. EngagePlayer set means the pack
+// stepped onto the player's tile: the caller starts a battle with this pack
+// instead of applying the move.
 type packAIStep struct {
 	PackIdx      int
 	NextX        int
 	NextZ        int
 	EngagePlayer bool
 	Moved        bool
-	// PatrolDir carries the pace direction a PackAIPatrol planner chose
-	// this step (it may have flipped at a wall / leash end). The step
-	// applier (explore's tickPackAI) writes it back onto Pack.PatrolDir
-	// for patrol packs only; the other modes leave it at its zero value
-	// and the applier ignores it for them.
+	// PatrolDir is the pace direction a patrol planner chose (possibly flipped);
+	// the applier writes it back to Pack.PatrolDir for patrol packs only.
 	PatrolDir int
 }
 
-// PlanPackSteps walks every alive pack and returns the moves they
-// chose this player-step. Pure planner — no mutation, no battle init,
-// no animation. The caller (explore.movement) applies the moves
-// sequentially and triggers a battle when a pack walks onto the
-// player.
-//
-// Rules:
-//   - Roll PackStepChance per pack; skip if it fails.
-//   - If the player is within PackChaseRadius (Chebyshev), step the
-//     pack one tile closer along the axis with the largest delta
-//     (ties: prefer X). Skip if that tile is blocked or occupied.
-//   - Otherwise wander: pick a random cardinal neighbor that's open,
-//     unoccupied, and still inside the leash. If none qualifies,
-//     don't move.
-//
-// Moves are checked against the area's static blockers (BlockedAt:
-// walls, props, deep water), runtime chests, doors, and other packs'
-// CURRENT tiles. The player's tile is allowed as a destination only
-// when the pack is doing the chase branch — that's the engagement
-// condition; the wander branch refuses to step onto the player so a
-// passive dog wandering past doesn't accidentally start a fight.
+// PlanPackSteps returns the moves alive packs chose this player-step. Pure
+// planner — no mutation/battle/animation; the caller applies them and triggers
+// battle when a pack walks onto the player. Per-mode rules live in each planner.
+// Destinations are checked against static blockers, chests, doors, and other
+// packs' current tiles.
 func PlanPackSteps(g *GameState) []packAIStep {
 	if g == nil {
 		return nil
 	}
-	// Reuse package-level scratch across steps rather than allocating a fresh
-	// plans slice + occupancy map on every landed player step. PlanPackSteps
-	// runs only on the single-threaded game loop and its result is consumed by
-	// ApplyPackSteps before the next call, so sharing the buffers is safe
-	// (mirrors render's torchCandidateBuf reuse).
-	// Fast path: if no alive pack has a mobile AI, there's nothing to plan — skip
-	// building the occupancy map and the per-pack loop entirely. The common
-	// all-PackAINone map (every map authored without an AI column, and any with
-	// only stationary packs) hits this every landed step instead of churning the
-	// occupancy map for moves that can never happen.
+	// Reuse package-level scratch across steps (single-threaded loop, result
+	// consumed before the next call — mirrors render's torchCandidateBuf reuse).
+	// Fast path: skip the occupancy map + loop when no alive pack is mobile (the
+	// common all-PackAINone map).
 	if !anyMobilePack(g.Packs) {
 		packPlanBuf = packPlanBuf[:0]
 		return packPlanBuf
@@ -181,25 +126,19 @@ func PlanPackSteps(g *GameState) []packAIStep {
 		}
 		mode := g.Packs[i].AI
 		if int(mode) < 0 || int(mode) >= len(packAIPlanners) {
-			// Corrupt mode (out-of-range value from a future map). Treat
-			// as stationary — safer than crashing or planning random
-			// moves the author didn't intend.
-			continue
+			continue // corrupt mode (future map) — treat as stationary
 		}
 		plan, ok := packAIPlanners[mode](g, i, occupied)
 		if !ok {
 			continue
 		}
-		// Only ONE engagement resolves per tick — ApplyPackSteps holds a
-		// second engager in place (its move is not applied). Mirror that rule
-		// here: skip the held plan entirely so we DON'T vacate its current
-		// tile in `occupied`. Otherwise a later pack would see the held pack's
-		// still-occupied tile as free and plan onto it, overlapping for a tick.
+		// Only ONE engagement resolves per tick (ApplyPackSteps holds the
+		// second). Skip the held plan so we DON'T vacate its tile in occupied —
+		// else a later pack would plan onto it and overlap.
 		if plan.EngagePlayer && engagePlanned {
 			continue
 		}
-		// Reserve the destination so a later pack doesn't plan into
-		// the same square this frame, and free the tile this pack vacates.
+		// Reserve the destination and free the vacated tile.
 		delete(occupied, [2]int{g.Packs[i].TileX, g.Packs[i].TileZ})
 		occupied[[2]int{plan.NextX, plan.NextZ}] = true
 		if plan.EngagePlayer {
@@ -211,9 +150,7 @@ func PlanPackSteps(g *GameState) []packAIStep {
 	return plans
 }
 
-// anyMobilePack reports whether at least one alive pack has a non-stationary
-// AI mode. A cheap O(packs) scan with no allocation — lets PlanPackSteps
-// short-circuit on all-stationary maps before it builds the occupancy map.
+// anyMobilePack reports whether at least one alive pack is non-stationary.
 func anyMobilePack(packs []Pack) bool {
 	for i := range packs {
 		if PackAlive(packs[i]) && packs[i].AI != PackAINone {
@@ -223,29 +160,19 @@ func anyMobilePack(packs []Pack) bool {
 	return false
 }
 
-// packPlanBuf / packOccupancyBuf are reused across player steps so the
-// per-step pack planning doesn't allocate a fresh slice + map each time.
-// Single-threaded (game loop) and consumed before the next call — see
-// PlanPackSteps.
+// packPlanBuf / packOccupancyBuf are reused across player steps to avoid
+// per-step allocation (single-threaded, consumed before the next call).
 var (
 	packPlanBuf      []packAIStep
 	packOccupancyBuf map[[2]int]bool
 )
 
-// ApplyPackSteps applies the moves PlanPackSteps produced: each chosen pack's
-// tile AND visual animation advance, patrol packs persist their pace direction,
-// and the function returns the index of the ONE pack that engaged the player
-// this tick (or -1 if none). Pure core (no raylib) so the engagement contract
-// is headlessly testable; explore's tickPackAI is a thin wrapper around it.
-//
-// Only a SINGLE engagement resolves per tick. A second pack whose plan also
-// lands on the player's tile is held in place — its move is NOT applied —
-// because the engaged pack starts the battle and the loser would otherwise be
-// left overlapping the player with no battle of its own once that battle ends.
-//
-// The animation is armed BEFORE the tile update so StartPackStep captures the
-// pack's current X/Z as the "from"; the tile then jumps so subsequent packs'
-// planning this tick sees the new occupancy (PlanPackSteps already reserved it).
+// ApplyPackSteps applies PlanPackSteps' moves (tile + animation advance, patrol
+// dir persisted) and returns the index of the ONE pack that engaged the player
+// (-1 if none). Pure core (no raylib) so the engagement contract is testable.
+// A second engager is HELD in place (its move not applied) so it doesn't end up
+// overlapping the player after the first battle. Animation is armed before the
+// tile update so StartPackStep captures the current X/Z as "from".
 func ApplyPackSteps(g *GameState, plans []packAIStep) int {
 	if g == nil {
 		return -1
@@ -263,9 +190,8 @@ func ApplyPackSteps(g *GameState, plans []packAIStep) int {
 		}
 		p := &g.Packs[plan.PackIdx]
 		StartPackStep(p, plan.NextX, plan.NextZ)
-		// On a voxel map, resolve which surface the pack lands on so it tracks
-		// under/over a bridge; on a heightfield ResolveStep returns the column
-		// top, leaving Level == ElevationLevelAt as before.
+		// On a voxel map, resolve the landing surface so the pack tracks
+		// under/over a bridge.
 		if g.Area.IsVoxel() {
 			if dir, ok := FacingFromDelta(plan.NextX-p.TileX, plan.NextZ-p.TileZ); ok {
 				if toL, stepOK := g.Area.ResolveStep(p.TileX, p.Level, p.TileZ, dir); stepOK {
@@ -287,9 +213,8 @@ func ApplyPackSteps(g *GameState, plans []packAIStep) int {
 	return engaged
 }
 
-// planJunkyardDogPack plans one junkyard-dog pack's step. Same chase /
-// wander rules previously hard-coded as the only AI mode — now opt-in
-// per pack via PackAIJunkyardDog.
+// planJunkyardDogPack plans one junkyard-dog pack's step (chase within
+// PackChaseRadius, else wander the leash).
 func planJunkyardDogPack(g *GameState, idx int, occupied map[[2]int]bool) (packAIStep, bool) {
 	if g.Rand().Float32() >= PackStepChance {
 		return packAIStep{}, false
@@ -297,9 +222,6 @@ func planJunkyardDogPack(g *GameState, idx int, occupied map[[2]int]bool) (packA
 	p := g.Packs[idx]
 	px, pz := g.Player.TileX, g.Player.TileZ
 
-	// Chase branch: player inside the chase radius. Pick the cardinal
-	// step that closes the larger of (dx, dz) — feels deliberate, not
-	// random.
 	if ChebyshevDistance(p.TileX, p.TileZ, px, pz) <= PackChaseRadius {
 		nx, nz, ok := chaseStep(g, p, occupied, px, pz)
 		if !ok {
@@ -309,8 +231,6 @@ func planJunkyardDogPack(g *GameState, idx int, occupied map[[2]int]bool) (packA
 		return packAIStep{PackIdx: idx, NextX: nx, NextZ: nz, EngagePlayer: engage, Moved: true}, true
 	}
 
-	// Wander branch: pick one of the open cardinal neighbors that
-	// stays inside the leash and isn't the player's tile.
 	nx, nz, ok := wanderStep(g, p, occupied, px, pz)
 	if !ok {
 		return packAIStep{}, false
@@ -318,10 +238,8 @@ func planJunkyardDogPack(g *GameState, idx int, occupied map[[2]int]bool) (packA
 	return packAIStep{PackIdx: idx, NextX: nx, NextZ: nz, Moved: true}, true
 }
 
-// withinLeash reports whether tile (tx,tz) sits inside the pack's leash radius
-// around its home. The single leash-gate predicate chaseStep / fleeStep /
-// wanderStep all share so the "don't get dragged past PackLeashRadius from home"
-// rule lives in one place.
+// withinLeash reports whether (tx,tz) is within PackLeashRadius of the pack's
+// home. Shared leash gate for chaseStep / fleeStep / wanderStep.
 func withinLeash(p Pack, tx, tz int) bool {
 	return ChebyshevDistance(tx, tz, p.HomeX, p.HomeZ) <= PackLeashRadius
 }
@@ -329,8 +247,7 @@ func withinLeash(p Pack, tx, tz int) bool {
 func chaseStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int, int, bool) {
 	dx := px - p.TileX
 	dz := pz - p.TileZ
-	// Prefer the longer axis. If both are equal, X first — arbitrary
-	// but deterministic so the chase doesn't visually dither.
+	// Prefer the longer axis; ties go X-first (deterministic, no dither).
 	steps := [FacingCount][2]int{}
 	n := 0
 	if AbsInt(dx) >= AbsInt(dz) {
@@ -354,12 +271,8 @@ func chaseStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int,
 	}
 	for i := 0; i < n; i++ {
 		tx, tz := p.TileX+steps[i][0], p.TileZ+steps[i][1]
-		// Stay on the leash even while chasing. A dog already at its leash
-		// edge must not be dragged further from home by a passing player —
-		// that's the "hostile escort across the map" behavior the mode
-		// docstring promises to avoid. Shares the leash gate with wanderStep /
-		// fleeStep (PackChaseRadius < PackLeashRadius, so a player can still be
-		// chased while inside the leash, just not beyond it).
+		// Stay on the leash even while chasing — a dog at its edge isn't dragged
+		// further from home.
 		if !withinLeash(p, tx, tz) {
 			continue
 		}
@@ -371,12 +284,9 @@ func chaseStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int,
 	return 0, 0, false
 }
 
-// planPatrolPack plans one patrolling pack's step. The pack paces along
-// the X axis around its home tile out to PatrolRadius, bouncing at the
-// ends and at any blocker. It ignores the player's position entirely (no
-// chase) but DOES engage if its pace walks it onto the player's tile — a
-// sentry you can blunder into. The chosen pace direction (possibly flipped
-// this step) rides back on the step's PatrolDir for the applier to persist.
+// planPatrolPack plans one patrolling pack's step: paces the X axis out to
+// PatrolRadius (bouncing at ends/blockers), ignoring the player but engaging if
+// it paces onto them. The chosen pace dir rides back on PatrolDir.
 func planPatrolPack(g *GameState, idx int, occupied map[[2]int]bool) (packAIStep, bool) {
 	if g.Rand().Float32() >= PatrolStepChance {
 		return packAIStep{}, false
@@ -387,9 +297,8 @@ func planPatrolPack(g *GameState, idx int, occupied map[[2]int]bool) (packAIStep
 	if dir == 0 {
 		dir = 1
 	}
-	// Try the current pace direction; if the next tile is past the patrol
-	// span or blocked, flip and try the other way. A fully-boxed-in patrol
-	// (both sides blocked) just holds its tile this step.
+	// Try the current pace dir; if past the span or blocked, flip. Boxed in
+	// both ways = hold this step.
 	for _, d := range [2]int{dir, -dir} {
 		nx := p.TileX + d
 		nz := p.TileZ
@@ -411,12 +320,9 @@ func planPatrolPack(g *GameState, idx int, occupied map[[2]int]bool) (packAIStep
 	return packAIStep{}, false
 }
 
-// planSkittishPack plans one skittish pack's step: flee directly away when
-// the player is within SkittishFleeRadius, otherwise wander the leash like
-// the junkyard dog's idle branch. A fleeing pack never steps onto the
-// player (allowPlayer=false in fleeStep), so it can't engage — it only ever
-// runs, and the player has to corner it against a wall / leash edge to
-// catch it.
+// planSkittishPack plans one skittish pack's step: flee within
+// SkittishFleeRadius, else wander. Never engages (fleeStep refuses the player
+// tile), so it must be cornered to catch.
 func planSkittishPack(g *GameState, idx int, occupied map[[2]int]bool) (packAIStep, bool) {
 	if g.Rand().Float32() >= PackStepChance {
 		return packAIStep{}, false
@@ -437,15 +343,13 @@ func planSkittishPack(g *GameState, idx int, occupied map[[2]int]bool) (packAISt
 }
 
 // fleeStep picks the cardinal step that increases distance from the player,
-// staying inside the leash and refusing the player's own tile (so a fleeing
-// pack can't accidentally engage). Prefers the axis with the smaller current
-// separation so the pack breaks line-of-approach on the side the player is
-// closing from. Returns false when no away-step is open (cornered).
+// staying on the leash and refusing the player tile. Prefers the nearer axis
+// (smaller |delta|) to break line-of-approach. False when cornered.
 func fleeStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int, int, bool) {
 	dx := p.TileX - px // sign points AWAY from the player along X
 	dz := p.TileZ - pz
-	// Away direction per axis; when level on an axis (delta 0), default to
-	// the positive step so the pack still has a way to peel off.
+	// Away direction per axis; on a tie (delta 0) default positive so the pack
+	// still has a way to peel off.
 	awayX := Sign(dx)
 	if awayX == 0 {
 		awayX = 1
@@ -454,8 +358,6 @@ func fleeStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int, 
 	if awayZ == 0 {
 		awayZ = 1
 	}
-	// Try the axis where the player is nearest first (smaller |delta|) so
-	// the pack opens the tighter gap.
 	steps := [2][2]int{{awayX, 0}, {0, awayZ}}
 	if AbsInt(dz) < AbsInt(dx) {
 		steps = [2][2]int{{0, awayZ}, {awayX, 0}}
@@ -475,8 +377,7 @@ func fleeStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int, 
 
 func wanderStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int, int, bool) {
 	cardinals := cardinalSteps()
-	// Shuffle in place via Fisher-Yates against the shared RNG so the
-	// wander direction is independent of FacingVector's array order.
+	// Fisher-Yates shuffle so wander direction is independent of array order.
 	for i := len(cardinals) - 1; i > 0; i-- {
 		j := g.Rand().Intn(i + 1)
 		cardinals[i], cardinals[j] = cardinals[j], cardinals[i]
@@ -494,23 +395,14 @@ func wanderStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int
 	return 0, 0, false
 }
 
-// packCanMoveTo is the pack-flavored entry of CanEnterTile: packs are
-// never allowed onto doors (area transitions are player-only), they
-// avoid other packs, and they only step onto the player tile when
-// allowPlayer is set (the chase branch passes true to encode an
-// engagement; the wander branch passes false so a passive dog doesn't
-// accidentally start a fight). px/pz let the caller declare the
-// player's tile without making the global player position a hidden
-// dependency.
+// packCanMoveTo is the pack-flavored CanEnterTile: packs never enter doors,
+// avoid other packs, and step onto the player tile only when allowPlayer is set
+// (chase=true to encode engagement, wander=false). px/pz pass the player tile
+// explicitly rather than as a hidden global.
 func packCanMoveTo(g *GameState, p Pack, occupied map[[2]int]bool, tx, tz int, allowPlayer bool, px, pz int) bool {
-	// Honor the same cliff/ramp rule the player obeys (StepElevationOK): a pack
-	// may only step between tiles whose shared edge sits at one elevation, or
-	// across a ramp. Without this, packs climb sheer cliffs the player can't —
-	// and now that raised tiles draw no support column, a chasing pack visibly
-	// floats up onto a plateau. Pack steps are always one cardinal tile.
-	// On a voxel map, resolve the surface the pack would land on so the entry
-	// check can be level-aware (a tree blocks only its own levels). landLevel
-	// stays p.Level on a flat map, where CanEnterTile is used as before.
+	// Honor the player's cliff/ramp rule (StepElevationOK) so packs don't climb
+	// sheer cliffs. On a voxel map, resolve the landing surface so the entry
+	// check is level-aware; landLevel stays p.Level on a flat map.
 	landLevel := p.Level
 	voxel := g.Area.IsVoxel()
 	if dir, ok := FacingFromDelta(tx-p.TileX, tz-p.TileZ); ok {
@@ -537,13 +429,10 @@ func packCanMoveTo(g *GameState, p Pack, occupied map[[2]int]bool, tx, tz int, a
 	return CanEnterTile(g, tx, tz, opts)
 }
 
-// buildPackOccupancy returns the set of tiles currently held by alive
-// packs, optionally excluding a specific pack index (for the
-// "where am I allowed to move to" check that shouldn't see the
-// moving pack's own tile as blocked).
+// buildPackOccupancy returns the tiles held by alive packs, optionally
+// excluding one index (so a moving pack doesn't see its own tile as blocked).
 func buildPackOccupancy(packs []Pack, exclude int) map[[2]int]bool {
-	// Reuse packOccupancyBuf (cleared, not re-made) across steps — see the
-	// buffer-reuse note on PlanPackSteps, the sole caller.
+	// Reuse packOccupancyBuf (cleared, not re-made) — see PlanPackSteps.
 	occ := packOccupancyBuf
 	if occ == nil {
 		occ = make(map[[2]int]bool, len(packs))
@@ -563,17 +452,9 @@ func buildPackOccupancy(packs []Pack, exclude int) map[[2]int]bool {
 	return occ
 }
 
-// TickPackAnimations advances every alive pack's step animation by
-// dt seconds. When the animation completes, the pack's visible X/Z
-// snap to the tile-center destination and Anim is cleared. Called
-// once per explore frame from the explore loop so the visual
-// transitions are smooth no matter how big dt happens to be (the
-// caller's dt clamp ensures a single hitch can't overshoot the
-// duration).
-//
-// Mirrors the player's animation tick in shape — same Animation
-// struct, same eased lerp via Smoothstep — so a pack's tile-to-tile
-// step reads as the same beat the player's step does.
+// TickPackAnimations advances every alive pack's step animation by dt, snapping
+// to the tile center and clearing Anim on completion. Mirrors the player's tick
+// (same Smoothstep ease) so steps read at the same beat.
 func TickPackAnimations(g *GameState, dt float32) {
 	if g == nil {
 		return
@@ -599,12 +480,8 @@ func TickPackAnimations(g *GameState, dt float32) {
 	}
 }
 
-// StartPackStep arms a pack's animation toward (toTileX, toTileZ).
-// The tile coordinate update is the caller's job (packs jump their
-// logical tile immediately so collision and AI planning see the
-// new position); this just fills in the visual interpolation
-// state. Duration matches the player's StepDuration so the field
-// reads as a single tempo whether the player or a pack moved.
+// StartPackStep arms a pack's visual animation toward (toTileX, toTileZ); the
+// tile-coordinate update is the caller's job. Duration matches StepDuration.
 func StartPackStep(p *Pack, toTileX, toTileZ int) {
 	p.Anim = Animation{
 		Kind:     AnimStep,
@@ -616,23 +493,17 @@ func StartPackStep(p *Pack, toTileX, toTileZ int) {
 	}
 }
 
-// SnapPackToTile zeroes any in-flight animation and locks the visible
-// position to the tile center. Used on battle engagement so the
-// pack doesn't visually drift mid-splash, and as a safety net for
-// any code path that wants "stop wherever you are and be at your
-// tile now."
+// SnapPackToTile zeroes any in-flight animation and locks the visible position
+// to the tile center (used on battle engagement so the pack doesn't drift).
 func SnapPackToTile(p *Pack) {
 	p.X = TileCenter(p.TileX)
 	p.Z = TileCenter(p.TileZ)
 	p.Anim = Animation{}
 }
 
-// RevealRadius marks every in-bounds tile in a square of side
-// (2*radius+1) centered on (cx, cz) as visited. radius=0 marks just
-// the center tile (legacy single-tile reveal); radius=1 paints the
-// 3×3 fog-of-war window the field uses today. Defensive: tolerates
-// nil or short Visited grids so the editor's preview path can call
-// it without crashing.
+// RevealRadius marks the (2*radius+1)-square centered on (cx,cz) as visited
+// (radius=0 = just the center, radius=1 = the 3×3 fog window). Tolerates nil/
+// short Visited grids.
 func RevealRadius(g *GameState, cx, cz, radius int) {
 	if g == nil || g.Visited == nil {
 		return
@@ -656,10 +527,8 @@ func RevealRadius(g *GameState, cx, cz, radius int) {
 	}
 }
 
-// PackIndexAtTile returns the index of the alive pack standing on
-// (x, z), or -1. Used by the player-step path to detect "stepped
-// into a pack" → battle init. Skips dead packs so a defeated pack
-// resting at a tile doesn't block movement onto it.
+// PackIndexAtTile returns the alive pack on (x,z), or -1 (skips dead packs so
+// they don't block movement). Used by the player-step path to detect battle init.
 func PackIndexAtTile(packs []Pack, x, z int) int {
 	return slices.IndexFunc(packs, func(p Pack) bool {
 		return PackAlive(p) && p.TileX == x && p.TileZ == z
@@ -667,10 +536,8 @@ func PackIndexAtTile(packs []Pack, x, z int) int {
 }
 
 // PackIndexAtTileLevel is the level-aware PackIndexAtTile: the alive pack on
-// (x,z) standing at `level`, or -1. The player-step engage path uses it on a
-// voxel map so a step that lands UNDER a deck engages only a pack sharing that
-// ground surface, not one standing on the deck above (whose Level differs). On a
-// heightfield, PackIndexAtTile is used instead (Level isn't tracked per-surface).
+// (x,z) at `level`, or -1. Used on voxel maps so a step under a deck engages
+// only a pack on that ground surface, not one on the deck above.
 func PackIndexAtTileLevel(packs []Pack, x, z, level int) int {
 	return slices.IndexFunc(packs, func(p Pack) bool {
 		return PackAlive(p) && p.TileX == x && p.TileZ == z && p.Level == level

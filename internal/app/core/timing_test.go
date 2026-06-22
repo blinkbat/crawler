@@ -5,18 +5,13 @@ import (
 	"testing"
 )
 
-// Tests use a deterministic RNG so press-window placement, sequence targets,
-// and burn rolls become reproducible. The closure receives the seeded RNG;
-// callers pass it through to NewTimingState / NewSequenceState / MemberAttackHits.
+// withSeededRNG runs fn with a deterministic RNG for reproducible placement.
 func withSeededRNG(t *testing.T, seed int64, fn func(rng *rand.Rand)) {
 	t.Helper()
 	fn(rand.New(rand.NewSource(seed)))
 }
 
-// TestResolveSequenceGrades locks the pickpocket grading after the dead-code
-// fix. A flawless run reaches Excellent ONLY when finished under
-// SequenceFastThreshold; a clean-but-slow run caps at Great (speed is the
-// deciding edge), and each wrong slot drops one grade from Excellent.
+// TestResolveSequenceGrades: flawless+fast=Excellent, flawless+slow=Great, each wrong drops one.
 func TestResolveSequenceGrades(t *testing.T) {
 	correct := func(n int) []int {
 		r := make([]int, n)
@@ -39,9 +34,7 @@ func TestResolveSequenceGrades(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ts := &TimingState{
-				// Sequence kind: the fast-threshold speed demotion is
-				// Sequence-only (Recall is excluded), so the grading this
-				// case checks only fires for TimingKindSequence.
+				// Sequence-only: the speed demotion these cases check excludes Recall.
 				Kind:            TimingKindSequence,
 				SequenceTargets: make([]int, len(tc.results)),
 				SequenceResults: tc.results,
@@ -163,10 +156,7 @@ func TestCharge_ReleaseAtSweetSpotIsExcellent(t *testing.T) {
 }
 
 func TestCharge_GradeDispatch(t *testing.T) {
-	// ChargeTickNPct / ChargePeakEnd are visual positions on the bar; we
-	// pick a target cursor visual position per case and invert through
-	// ChargeElapsedForVisual to set Elapsed. This keeps the test
-	// expressed in the same coordinate system as the rendered bar.
+	// Cases pick a target visual position and invert via ChargeElapsedForVisual.
 	cases := []struct {
 		name   string
 		visual float32
@@ -200,8 +190,7 @@ func TestCharge_ReleaseWithoutHoldIsNoOp(t *testing.T) {
 func TestCharge_TimeoutAfterHoldGrades(t *testing.T) {
 	s := NewChargeState(1.0)
 	s.Hold()
-	// Tick past the peak window — held too long, should Miss.
-	s.Tick(2.0)
+	s.Tick(2.0) // past the peak window — held too long, Miss
 	if !s.Resolved {
 		t.Fatalf("charge bar should resolve at timeout")
 	}
@@ -346,15 +335,12 @@ func TestTimingDefenseMult_Table(t *testing.T) {
 }
 
 func TestScaleDamage_ExcellentAlwaysGains(t *testing.T) {
-	// On a 0 base, Excellent should still land 1 damage.
-	if got := ScaleDamage(0, TimingQualityExcellent); got != 1 {
+	if got := ScaleDamage(0, TimingQualityExcellent); got != 1 { // 0 base still lands 1
 		t.Fatalf("ScaleDamage(0, Excellent) = %d, want >=1", got)
 	}
-	// On a non-zero base, Excellent doubles.
 	if got := ScaleDamage(5, TimingQualityExcellent); got != 10 {
 		t.Fatalf("ScaleDamage(5, Excellent) = %d, want 10", got)
 	}
-	// Miss leaves base alone.
 	if got := ScaleDamage(5, TimingQualityMiss); got != 5 {
 		t.Fatalf("ScaleDamage(5, Miss) = %d, want 5", got)
 	}
@@ -393,13 +379,7 @@ func TestTimingQualityLabel_AllGrades(t *testing.T) {
 	}
 }
 
-// TestPreviewQuality_MatchesResolve sweeps the bar's Elapsed across the full
-// duration in fine steps; at each step we compare PreviewQuality (the live
-// cursor read) against the grade the bar would actually score if Press()
-// fired right now. They must agree everywhere — otherwise the cursor color
-// lies about the player's pending grade. Guards against the resolve() /
-// PreviewQuality threshold drift the original code had as two duplicated
-// switch tables.
+// TestPreviewQuality_MatchesResolve: PreviewQuality must equal Press()'s grade at every step.
 func TestPreviewQuality_MatchesResolve(t *testing.T) {
 	withSeededRNG(t, 13, func(rng *rand.Rand) {
 		base := NewTimingState(rng, 2.0)
@@ -422,10 +402,7 @@ func TestPreviewQuality_MatchesResolve(t *testing.T) {
 	})
 }
 
-// TestHitStopFor_OnlyOnHighGrades pins the fast-path: Miss / Nice / Good get
-// no freeze (HitStopFor returns 0, so tickFlashHold fires onResolve the
-// moment flash hits zero). Great / Excellent each get their own pause so
-// the contrast between "fine hit" and "great hit" reads on impact.
+// TestHitStopFor_OnlyOnHighGrades: no freeze below Great; Excellent pauses longer than Great.
 func TestHitStopFor_OnlyOnHighGrades(t *testing.T) {
 	cases := []struct {
 		quality int
@@ -448,13 +425,7 @@ func TestHitStopFor_OnlyOnHighGrades(t *testing.T) {
 	}
 }
 
-// TestMeleeAccuracy_Curve checks the headline guarantees of the basic
-// (melee) attack's hit curve, now STR-driven:
-//
-//   - low-STR (STR 2) on Miss timing lands in the 0.55–0.70 band
-//   - Excellent timing always pushes accuracy to a clamped 1.0
-//   - any out-of-table quality (negative, unknown) falls back to base
-//   - accuracy stays inside [0, 1]
+// TestMeleeAccuracy_Curve: STR-driven curve — low-STR Miss in 0.55–0.70, Excellent=1.0, unknown→base.
 func TestMeleeAccuracy_Curve(t *testing.T) {
 	low := Stats{STR: 2}
 	high := Stats{STR: 6}
@@ -474,19 +445,13 @@ func TestMeleeAccuracy_Curve(t *testing.T) {
 	if got := MeleeAccuracy(low, -42); got != MeleeAccuracy(low, TimingQualityMiss) {
 		t.Errorf("unknown quality should fall back to Miss baseline, got %v", got)
 	}
-	// RangedAccuracy mirrors the same curve off DEX (the seam for ranged
-	// attacks); confirm it tracks DEX, not STR.
+	// RangedAccuracy mirrors the curve off DEX, not STR.
 	if got := RangedAccuracy(Stats{DEX: 6}, TimingQualityMiss); got <= RangedAccuracy(Stats{DEX: 2}, TimingQualityMiss) {
 		t.Errorf("RangedAccuracy should scale with DEX")
 	}
 }
 
-// TestMemberAttackHits_StatisticsRoughlyMatch fires MemberAttackHits many
-// times against a known seed and asserts the hit rate is close to the
-// member's accuracy curve. The member is unarmed (no equipped weapon), so
-// the basic attack is STR-governed and the expected rate is
-// MeleeAccuracy(STR). Not a precise distribution check — just a sanity
-// guard that the dice are actually rolled against the curve, not a constant.
+// TestMemberAttackHits_StatisticsRoughlyMatch: unarmed hit rate sits near MeleeAccuracy (sanity, not exact).
 func TestMemberAttackHits_StatisticsRoughlyMatch(t *testing.T) {
 	withSeededRNG(t, 2024, func(rng *rand.Rand) {
 		m := PartyMember{Stats: Stats{STR: 2}} // unarmed → STR governs
@@ -506,10 +471,7 @@ func TestMemberAttackHits_StatisticsRoughlyMatch(t *testing.T) {
 	})
 }
 
-// TestMemberAttackHits_ExcellentNeverWhiffs locks the contract that any
-// stat + Excellent timing combination always lands. The accuracy clamps to
-// 1.0 past that point, so the RNG roll should never come back false. The
-// member is unarmed, so STR is the governing stat being swept.
+// TestMemberAttackHits_ExcellentNeverWhiffs: any stat + Excellent always lands.
 func TestMemberAttackHits_ExcellentNeverWhiffs(t *testing.T) {
 	withSeededRNG(t, 9, func(rng *rand.Rand) {
 		for str := 0; str <= 10; str++ {
@@ -525,8 +487,7 @@ func TestMemberAttackHits_ExcellentNeverWhiffs(t *testing.T) {
 
 // --- Reels (slot) minigame -------------------------------------------------
 
-// reelsFromStops builds a []Reel with the given locked Stop values (Speed /
-// Offset unused once stopped) — for grading tests that set the result directly.
+// reelsFromStops builds a []Reel with the given locked Stop values.
 func reelsFromStops(stops ...int) []Reel {
 	reels := make([]Reel, len(stops))
 	for i, s := range stops {
@@ -535,9 +496,7 @@ func reelsFromStops(stops ...int) []Reel {
 	return reels
 }
 
-// TestReels_MatchTiers pins the payout grading directly via the stop values:
-// three matching = Excellent (jackpot), exactly two = Good, all distinct =
-// Miss (a real whiff).
+// TestReels_MatchTiers: 3 match = Excellent, 2 = Good, all distinct = Miss.
 func TestReels_MatchTiers(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -550,9 +509,7 @@ func TestReels_MatchTiers(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Pressed: true — grade the match tiers as a PLAYED bar; a no-play
-			// (!Pressed) reels bar is Miss regardless of symbols (see
-			// TestReels_NoPlayIsMiss).
+			// Pressed=true to grade as a played bar (no-play is Miss; see TestReels_NoPlayIsMiss).
 			s := &TimingState{Kind: TimingKindReels, Active: true, Pressed: true, Reels: reelsFromStops(tc.stops...)}
 			s.resolveReels()
 			if !s.Resolved || s.Quality != tc.want {
@@ -562,8 +519,7 @@ func TestReels_MatchTiers(t *testing.T) {
 	}
 }
 
-// TestReels_StopLocksAndResolves checks each press locks the next spinning
-// reel and the final stop resolves the bar.
+// TestReels_StopLocksAndResolves: each press locks the next reel; the last resolves.
 func TestReels_StopLocksAndResolves(t *testing.T) {
 	withSeededRNG(t, 5, func(rng *rand.Rand) {
 		s := NewReelState(rng, 2.0)
@@ -590,8 +546,7 @@ func TestReels_StopLocksAndResolves(t *testing.T) {
 	})
 }
 
-// TestReels_TimeoutLocksSpinningReels checks an un-played bar still resolves
-// (locking whatever's showing) and reads as a no-play Miss-ish result.
+// TestReels_TimeoutLocksSpinning: an un-played bar still resolves and stays !Pressed.
 func TestReels_TimeoutLocksSpinning(t *testing.T) {
 	withSeededRNG(t, 6, func(rng *rand.Rand) {
 		s := NewReelState(rng, 1.0)
@@ -612,9 +567,7 @@ func TestReels_TimeoutLocksSpinning(t *testing.T) {
 
 // --- Recall (memory) minigame ----------------------------------------------
 
-// TestRecall_RevealGate confirms the pattern stays hidden until RevealTime
-// elapses, then opens — and that recall input grades through the shared
-// sequence resolve.
+// TestRecall_RevealGateAndGrade: pattern hides at RevealTime, then input grades via sequence resolve.
 func TestRecall_RevealGateAndGrade(t *testing.T) {
 	withSeededRNG(t, 8, func(rng *rand.Rand) {
 		s := NewRecallState(rng, 3.0, 4, 1.2)
@@ -628,13 +581,8 @@ func TestRecall_RevealGateAndGrade(t *testing.T) {
 		if !s.RecallHidden() {
 			t.Fatalf("pattern should hide once past RevealTime")
 		}
-		// Reproduce it perfectly during the hidden (input) phase. Recall input
-		// can only ever land at Elapsed >= RevealTime (gated by the battle
-		// loop), which is past SequenceFastThreshold — so this asserts the
-		// Recall-specific rule that a flawless recall reaches Excellent
-		// regardless of clock (the speed demotion is Sequence-only). A
-		// realistic in-phase Elapsed is used, not the impossible sub-reveal
-		// value the earlier test set.
+		// Reproduce perfectly past RevealTime (hence past SequenceFastThreshold):
+		// flawless recall hits Excellent regardless of clock (demotion is Sequence-only).
 		s.Elapsed = s.RevealTime + 0.5
 		if s.Elapsed < SequenceFastThreshold {
 			t.Fatalf("test premise broken: recall input must land past SequenceFastThreshold")
@@ -648,10 +596,7 @@ func TestRecall_RevealGateAndGrade(t *testing.T) {
 	})
 }
 
-// TestRecall_NoSpeedDemotion pins that the Sequence-only fast-threshold
-// demotion does NOT apply to Recall: a flawless recall finished well after
-// SequenceFastThreshold still grades Excellent (regression guard for the bug
-// where Recall could never reach Excellent).
+// TestRecall_NoSpeedDemotion: the Sequence-only demotion doesn't apply to Recall.
 func TestRecall_NoSpeedDemotion(t *testing.T) {
 	s := &TimingState{
 		Kind:            TimingKindRecall,
@@ -676,17 +621,14 @@ func TestRecall_NoSpeedDemotion(t *testing.T) {
 	}
 }
 
-// TestReels_NoPlayIsMiss pins finding #1's fix: a reels bar that times out
-// with no reel ever stopped grades Miss outright, even if the random
-// auto-locked symbols happen to match — a walk-away can't earn a steal.
+// TestReels_NoPlayIsMiss: a no-stop timeout grades Miss even if symbols match.
 func TestReels_NoPlayIsMiss(t *testing.T) {
-	// Hand-set three matching stops but leave Pressed=false (no player stop).
 	s := &TimingState{Kind: TimingKindReels, Active: true, Reels: reelsFromStops(2, 2, 2)}
 	s.resolveReels()
 	if s.Quality != TimingQualityMiss {
 		t.Fatalf("no-play reels (even with matching symbols) should be Miss, got %v", s.Quality)
 	}
-	// With a player stop recorded, the same triple grades Excellent.
+	// With a player stop, the same triple grades Excellent.
 	s2 := &TimingState{Kind: TimingKindReels, Active: true, Reels: reelsFromStops(2, 2, 2), Pressed: true}
 	s2.resolveReels()
 	if s2.Quality != TimingQualityExcellent {
@@ -696,9 +638,7 @@ func TestReels_NoPlayIsMiss(t *testing.T) {
 
 // --- Overcharge minigame ---------------------------------------------------
 
-// TestOvercharge_GradesAndOverloadBand confirms the pre-peak/peak grades match
-// a normal charge, and that releasing PAST the peak overloads (Excellent +
-// Overloaded) instead of the normal charge's decay-to-Miss.
+// TestOvercharge_GradesAndOverloadBand: matches a normal charge pre-peak; past-peak overloads not Miss.
 func TestOvercharge_GradesAndOverloadBand(t *testing.T) {
 	mk := func(visual float32) *TimingState {
 		s := NewOverchargeState(2.0)
@@ -718,8 +658,7 @@ func TestOvercharge_GradesAndOverloadBand(t *testing.T) {
 	if s.Quality != TimingQualityMiss || s.Overloaded {
 		t.Fatalf("early release should Miss without overload, got q=%v overloaded=%v", s.Quality, s.Overloaded)
 	}
-	// Past the peak: OVERLOAD (Excellent + Overloaded) where a normal charge
-	// would have decayed to Miss.
+	// Past the peak: OVERLOAD where a normal charge would Miss.
 	s = mk(ChargePeakEnd + 0.05)
 	s.Release()
 	if !s.Overloaded || s.Quality != TimingQualityExcellent {
