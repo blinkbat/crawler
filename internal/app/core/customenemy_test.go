@@ -176,21 +176,14 @@ func TestCustomEnemyDefFromMapRejectsBadFields(t *testing.T) {
 	}
 }
 
-// TestCustomEnemyDefToRuntime guards the def->runtime half of the lockstep
-// chain that TestCustomEnemyDefMapRoundTrip does NOT cover. That test pins
-// the encode<->decode pair (sites 3 & 4); this one pins Definition() (site 5)
-// and Instantiate() (site 6): a fully-populated def is pushed through
-// MapCustomEnemyFromDef -> CustomEnemyDefFromMap (so the mapfile round trip
-// is also re-asserted on the way in) and then through Definition() and
-// Instantiate(), and every authored stat / override is checked on the
-// materialized runtime EnemyDefinition. So if a new field is added to the
-// struct + schema + encode/decode but forgotten in Definition()/Instantiate(),
-// it drops here instead of silently never reaching combat math.
+// TestCustomEnemyDefToRuntime guards the def->runtime half of the lockstep chain (sites 5 & 6,
+// Definition()/Instantiate()) that TestCustomEnemyDefMapRoundTrip doesn't cover. A full def is run
+// through the mapfile round trip then Definition()/Instantiate(), checking every authored stat lands.
 func TestCustomEnemyDefToRuntime(t *testing.T) {
 	orig := CustomEnemyDef{
-		Name:            "Runtime Test", // has whitespace -> sanitizes to Runtime_Test
+		Name:            "Runtime Test", // whitespace -> sanitizes to Runtime_Test
 		BaseKind:        EnemyGoblin,
-		HP:              42, // must be > 0 (load rejects <= 0)
+		HP:              42, // must be > 0
 		MP:              7,
 		Stats:           Stats{STR: 11, DEX: 12, INT: 13, WIS: 14, VIT: 15, SPD: 16},
 		Armor:           4,
@@ -203,9 +196,7 @@ func TestCustomEnemyDefToRuntime(t *testing.T) {
 		Skills:          []SkillID{SkillFirebolt, SkillSleep},
 	}
 
-	// Belt-and-suspenders: confirm the fixture really sets every field to a
-	// non-zero value, so an assertion below can't pass only because both
-	// sides defaulted to the same zero (mirrors the round-trip test's guard).
+	// Confirm the fixture sets every field non-zero, so an assertion can't pass on a shared zero.
 	rv := reflect.ValueOf(orig)
 	for i := 0; i < rv.NumField(); i++ {
 		if rv.Field(i).IsZero() {
@@ -213,9 +204,7 @@ func TestCustomEnemyDefToRuntime(t *testing.T) {
 		}
 	}
 
-	// Round-trip through the mapfile shape on the way in, so the def the
-	// runtime sees is the one that survives a save/load (not just the raw
-	// in-memory fixture). Name picks up SanitizeCustomEnemyName here.
+	// Round-trip through the mapfile shape so the runtime sees a save/load-survived def.
 	row, err := MapCustomEnemyFromDef(orig)
 	if err != nil {
 		t.Fatalf("MapCustomEnemyFromDef: %v", err)
@@ -225,8 +214,7 @@ func TestCustomEnemyDefToRuntime(t *testing.T) {
 		t.Fatalf("CustomEnemyDefFromMap: %v", err)
 	}
 
-	// Definition() (site 5): the authored stats/overrides must land on the
-	// synthesized EnemyDefinition battle and selectors read.
+	// Definition() (site 5): authored stats/overrides must land on the synthesized EnemyDefinition.
 	ed := def.Definition()
 	if ed.MaxHP != orig.HP {
 		t.Errorf("Definition MaxHP = %d, want authored %d", ed.MaxHP, orig.HP)
@@ -249,16 +237,12 @@ func TestCustomEnemyDefToRuntime(t *testing.T) {
 	if !reflect.DeepEqual(ed.Skills, orig.Skills) {
 		t.Errorf("Definition Skills = %+v, want %+v", ed.Skills, orig.Skills)
 	}
-	// Display name derives from the (sanitized) authored name: underscores
-	// become spaces (SanitizeCustomEnemyName folded the typed space to "_").
+	// Display name derives from the sanitized name: underscores become spaces.
 	if ed.SingularName != "Runtime Test" {
 		t.Errorf("Definition SingularName = %q, want %q", ed.SingularName, "Runtime Test")
 	}
 
-	// Instantiate() (site 6): the materialized Enemy must keep the base kind
-	// for renderer lookup, carry the override, and apply the authored HP
-	// scaled by the global difficulty dial (matching NewEnemy / the existing
-	// pack runtime test).
+	// Instantiate() (site 6): keeps base kind for renderer lookup, carries the override, scales HP.
 	enemy := def.Instantiate()
 	if enemy.Kind != orig.BaseKind {
 		t.Errorf("Instantiate Kind = %v, want base kind %v", enemy.Kind, orig.BaseKind)
@@ -273,8 +257,7 @@ func TestCustomEnemyDefToRuntime(t *testing.T) {
 	if enemy.Armor != orig.Armor {
 		t.Errorf("Instantiate Armor = %d, want %d", enemy.Armor, orig.Armor)
 	}
-	// EnemyInfoFor overlays the per-instance override, so reading it back
-	// confirms the authored stats survive all the way to the combat reader.
+	// EnemyInfoFor overlays the override, confirming authored stats reach the combat reader.
 	got := EnemyInfoFor(enemy)
 	if got.AttackDamage != orig.AttackDamage || got.SpellPower != orig.SpellPower || got.Tier != orig.Tier {
 		t.Errorf("EnemyInfoFor override lost authored stats: %+v", got)
@@ -294,8 +277,7 @@ func TestResetGameStatePreservesProgressionAndRecoversParty(t *testing.T) {
 		StartFacing: East,
 	}
 	g := NewGameState(area)
-	// Clear the starter rations so the inventory-survives-reset
-	// assertion below tests JUST the cheese stack the test stamps in.
+	// Clear starter rations so the survives-reset assertion tests just the cheese stamped in.
 	g.Inventory = nil
 	g.Inventory = AddItem(g.Inventory, ItemCheese, 2)
 	g.Party[0].Level = 4

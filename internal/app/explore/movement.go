@@ -12,14 +12,12 @@ import (
 )
 
 func Update(g *core.GameState) {
-	// Clamp dt: a frame stall (window drag, debugger, slow load) must not fast-
-	// forward animations or overshoot tile-step targets. Single owner of the
-	// clamp — battle.Update trusts the dt here is already clamped.
+	// Clamp dt: a frame stall must not fast-forward animations or overshoot tile
+	// targets. Single owner — battle.Update trusts the dt here is already clamped.
 	dt := core.ClampFrameTime(rl.GetFrameTime())
 
 	// Weather tint eases every frame, before the early-returns below, so the wash
-	// keeps catching up while a panel/battle is up. Step-driven state only changes
-	// during free exploration; this is pure visual catch-up.
+	// keeps catching up while a panel/battle is up (pure visual catch-up).
 	core.TickWeather(g, dt)
 
 	// Modal dispatch order is ActiveModal's enum ladder (single source of truth).
@@ -67,8 +65,7 @@ func Update(g *core.GameState) {
 		panic(fmt.Sprintf("explore: Update missing dispatch case for modal %d", core.ActiveModal(g)))
 	}
 
-	// Panels-open shortcut: before the pause check so I / middle-button jumps in
-	// without toggling pause off first.
+	// Panels-open shortcut: before the pause check so I / middle-button jumps in directly.
 	if !g.Battle.Active() {
 		if input.PanelsTogglePressed() {
 			openPanels(g)
@@ -93,16 +90,13 @@ func Update(g *core.GameState) {
 	}
 
 	updateFreeLook(&g.Player, dt)
-	// Tick pack animations every frame, independent of player mid-step, so a
-	// wandering pack moves while the player stands still.
+	// Tick pack animations every frame so a wandering pack moves while the player stands still.
 	core.TickPackAnimations(g, dt)
-	// Confirm opens an adjacent chest. Before movement so a "step + Enter" press
-	// doesn't double as a step toward the chest.
+	// Confirm opens an adjacent chest. Before movement so "step + Enter" doesn't double as a step.
 	if g.Player.Anim.Kind == core.AnimNone && tryOpenAdjacentChest(g) {
 		return
 	}
-	// Confirm also fires an adjacent charged crystal. After chests so one press
-	// can't fire both.
+	// Confirm also fires an adjacent charged crystal. After chests so one press can't fire both.
 	if g.Player.Anim.Kind == core.AnimNone && tryUseAdjacentCrystal(g) {
 		return
 	}
@@ -561,17 +555,14 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	p.TileZ = targetZ
 	p.Level = landLevel
 	g.StepCount++
-	// Out-of-battle poison tick: hooked here (one tile = the natural unit of
-	// time outside combat) so a fight-inflicted poison doesn't stick forever.
+	// Out-of-battle poison tick, hooked here (one tile = the unit of time outside
+	// combat) so a fight-inflicted poison doesn't stick forever.
 	core.TickPoisonStep(g)
-	// Weather advances per step: outdoors rolls/counts down a storm, indoors
-	// recedes one. The smooth tint follow runs per frame in Update.
+	// Weather per step: outdoors rolls/counts down a storm, indoors recedes one.
 	core.TickWeatherStep(g)
-	// Fog-of-war: paint the 3×3 window onto Visited. Radius is one tile of sight;
-	// vision modifiers would pipe a different radius into RevealRadius.
+	// Fog-of-war: paint the 3×3 window onto Visited (radius = one tile of sight).
 	core.RevealRadius(g, targetX, targetZ, core.SightRadius)
-	// Recharge every dormant crystal one step. Using one is manual (Confirm beside
-	// a charged crystal), not automatic.
+	// Recharge every dormant crystal one step (using one is manual, not automatic).
 	core.TickCrystalRecharge(g)
 	// Pack-AI tick: each alive pack plans on every successful step. If one lands
 	// on the player, start the battle and snap the player's visual coords to the

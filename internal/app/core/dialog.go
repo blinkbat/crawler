@@ -13,8 +13,7 @@ import (
 // index); resolved through the speaker registry.
 type DialogSpeakerID string
 
-// DialogSpeaker is the presentation for one speaker. Tint channels are raw
-// 0..255 so core stays raylib-free; render converts to rl.Color.
+// DialogSpeaker is one speaker's presentation. Tint channels are raw 0..255 (raylib-free).
 type DialogSpeaker struct {
 	ID                         DialogSpeakerID
 	Name                       string
@@ -37,9 +36,7 @@ const (
 	DialogActionEvent DialogActionKind = "event"
 )
 
-// DialogAction is the optional effect a node/choice fires on resolve. Quest
-// actions add/complete a journal quest; event actions emit a named string
-// (seam — unhandled ids no-op for now).
+// DialogAction is the optional effect a node/choice fires on resolve (quest add/complete, or event seam).
 type DialogAction struct {
 	Kind    DialogActionKind `json:"kind,omitempty"`
 	QuestID string           `json:"questId,omitempty"`
@@ -65,9 +62,7 @@ func DialogCondKinds() []DialogCondKind {
 	return []DialogCondKind{DialogCondGold, DialogCondQuest, DialogCondFoeKilled, DialogCondTileVisited}
 }
 
-// DialogChoiceCondition gates whether a choice is selectable. A failing
-// condition shows the choice disabled (with DisabledMessage or a generated
-// reason), not hidden.
+// DialogChoiceCondition gates a choice; a failure shows it disabled, not hidden.
 type DialogChoiceCondition struct {
 	Kind DialogCondKind `json:"kind"`
 	// Gold: party must hold at least this much gold.
@@ -75,10 +70,8 @@ type DialogChoiceCondition struct {
 	// Quest: named quest must be at QuestStatus (zero == QuestActive).
 	QuestID     string      `json:"questId,omitempty"`
 	QuestStatus QuestStatus `json:"questStatus,omitempty"`
-	// FoeKilled: party must have defeated FoeKind at least FoeKills times
-	// (FoeKills <= 0 means "at least once"). FoeKind is NOT omitempty:
-	// EnemyRat==0, so a Rat gate must still write the field or it reads as
-	// an unauthored condition.
+	// FoeKilled: defeated FoeKind >= FoeKills times (<=0 means once). FoeKind NOT
+	// omitempty: EnemyRat==0, so a Rat gate must still write the field.
 	FoeKind  EnemyKind `json:"foeKind"`
 	FoeKills int       `json:"foeKills,omitempty"`
 	// TileVisited: player must have revealed (TileX,TileZ) on the Visited grid.
@@ -88,8 +81,7 @@ type DialogChoiceCondition struct {
 	DisabledMessage string `json:"disabledMessage,omitempty"`
 }
 
-// DialogChoice is one selectable branch. Selecting it fires EndAction then
-// advances to NextNodeID (empty ends the conversation).
+// DialogChoice is one branch: fires EndAction then advances to NextNodeID (empty ends).
 type DialogChoice struct {
 	ID         string                  `json:"id"`
 	Label      string                  `json:"label"`
@@ -98,9 +90,8 @@ type DialogChoice struct {
 	EndAction  *DialogAction           `json:"endAction,omitempty"`
 }
 
-// DialogNode is one line of a conversation. With Choices it presents a pick
-// list; without, a single Continue advances to NextNodeID (empty ends).
-// IsMenuNode fires EndAction and hands off immediately without drawing a line.
+// DialogNode is one line: Choices present a pick list, else Continue advances
+// to NextNodeID. IsMenuNode fires EndAction and hands off without drawing a line.
 type DialogNode struct {
 	ID            string          `json:"id"`
 	SpeakerID     DialogSpeakerID `json:"speaker,omitempty"`
@@ -112,9 +103,8 @@ type DialogNode struct {
 	IsMenuNode    bool            `json:"menu,omitempty"`
 }
 
-// DialogDefinition is a complete conversation: id, start node, and node list.
-// Nodes are an ordered slice (not a map) for stable editor order and
-// deterministic round-trip; NodeByID is the O(n) runtime lookup.
+// DialogDefinition is a complete conversation. Nodes are an ordered slice (not
+// a map) for stable editor order + deterministic round-trip; NodeByID is O(n).
 type DialogDefinition struct {
 	ID          string       `json:"id"`
 	StartNodeID string       `json:"start"`
@@ -131,16 +121,14 @@ func (d DialogDefinition) NodeByID(id string) (DialogNode, bool) {
 	return DialogNode{}, false
 }
 
-// DialogState is the live conversation on GameState. Def is a copy of the
-// area's authored definition so the runtime is self-contained.
+// DialogState is the live conversation; Def is a copy of the area's definition (self-contained).
 type DialogState struct {
 	Def          DialogDefinition
 	NodeID       string
 	ChoiceCursor int
 }
 
-// DialogChoiceView pairs a choice with its current selectability. Disabled
-// choices draw greyed with Reason and can't be chosen.
+// DialogChoiceView pairs a choice with selectability; Disabled ones draw greyed with Reason.
 type DialogChoiceView struct {
 	Choice   DialogChoice
 	Disabled bool
@@ -151,9 +139,8 @@ type DialogChoiceView struct {
 // can't spin forever.
 const menuNodeChainLimit = 16
 
-// jsonObjectsToLines marshals each item to a single-line JSON object for a
-// .map section. Returns nil (not empty) for no items so an absent section
-// round-trips to absent. Shared by the dialog / trigger writers.
+// jsonObjectsToLines marshals each item to a one-line JSON object for a .map
+// section. Returns nil (not empty) for no items. Shared by dialog/trigger writers.
 func jsonObjectsToLines[T any](items []T, label string, id func(T) string) ([]string, error) {
 	if len(items) == 0 {
 		return nil, nil
@@ -169,9 +156,8 @@ func jsonObjectsToLines[T any](items []T, label string, id func(T) string) ([]st
 	return out, nil
 }
 
-// jsonObjectsFromLines unmarshals a .map section (one JSON object per line)
-// into a slice of T. Returns nil for no lines. Shared by the dialog / trigger
-// readers.
+// jsonObjectsFromLines unmarshals a .map section (one JSON object per line) into
+// a slice of T. Returns nil for no lines. Shared by dialog/trigger readers.
 func jsonObjectsFromLines[T any](lines []string, label string) ([]T, error) {
 	if len(lines) == 0 {
 		return nil, nil
@@ -207,10 +193,9 @@ func DialogDefByID(a AreaDefinition, id string) (DialogDefinition, bool) {
 	return DialogDefinition{}, false
 }
 
-// StartDialog opens the area dialog with the given id at its start node.
-// Returns false when the id is unknown or there's no usable start node. A
-// menu start node may fire its action and close immediately, so a true return
-// does NOT guarantee DialogOpen is still set — re-check if you care.
+// StartDialog opens the dialog with the given id at its start node (false if
+// unknown / no start node). A menu start node may close immediately, so a true
+// return does NOT guarantee DialogOpen — re-check if you care.
 func StartDialog(g *GameState, dialogID string) bool {
 	def, ok := DialogDefByID(g.Area, dialogID)
 	if !ok || len(def.Nodes) == 0 {
@@ -221,8 +206,7 @@ func StartDialog(g *GameState, dialogID string) bool {
 		// Fall back to the first node so a renamed/cleared StartNodeID still opens.
 		start = def.Nodes[0].ID
 	}
-	// Deep-copy so the live conversation shares no backing slices / action
-	// pointers with g.Area.Dialogs (self-contained; in-place edits can't mutate it).
+	// Deep-copy so the live conversation shares no slices/pointers with g.Area.Dialogs.
 	g.Dialog = DialogState{Def: CloneDialogDef(def)}
 	g.DialogOpen = true
 	goToDialogNode(g, start)
@@ -237,8 +221,7 @@ func CurrentDialogNode(g *GameState) (DialogNode, bool) {
 	return g.Dialog.Def.NodeByID(g.Dialog.NodeID)
 }
 
-// DialogChoiceViews returns the current node's choices annotated with current
-// selectability. Every choice is returned (disabled ones greyed, not hidden).
+// DialogChoiceViews returns the current node's choices with selectability (disabled greyed, not hidden).
 func DialogChoiceViews(g *GameState) []DialogChoiceView {
 	node, ok := CurrentDialogNode(g)
 	if !ok || len(node.Choices) == 0 {
@@ -263,8 +246,7 @@ func dialogChoiceSelectable(g *GameState, c DialogChoice) (bool, string) {
 	return true, ""
 }
 
-// evalDialogCondition checks one condition, returning a player-facing reason
-// when it fails (DisabledMessage if set, else a default).
+// evalDialogCondition checks one condition; on failure returns a reason (DisabledMessage, else default).
 func evalDialogCondition(g *GameState, cond DialogChoiceCondition) (bool, string) {
 	switch cond.Kind {
 	case DialogCondGold:
@@ -301,9 +283,7 @@ func dialogCondReason(cond DialogChoiceCondition, fallback string) string {
 	return fallback
 }
 
-// SelectDialogChoice resolves the choice at index of the current node: fires
-// its end action, then advances to its next node (or closes when none). A
-// disabled or out-of-range choice is ignored.
+// SelectDialogChoice fires the choice's end action then advances to its next node. Disabled/out-of-range ignored.
 func SelectDialogChoice(g *GameState, index int) {
 	views := DialogChoiceViews(g)
 	if index < 0 || index >= len(views) || views[index].Disabled {
@@ -341,9 +321,8 @@ func CloseDialog(g *GameState) {
 	g.Dialog = DialogState{}
 }
 
-// goToDialogNode moves the open dialog to nodeID (empty/unknown ends).
-// Menu nodes fire their action and chain on without drawing a line, bounded
-// by menuNodeChainLimit so an authored cycle can't hang.
+// goToDialogNode moves to nodeID (empty/unknown ends). Menu nodes fire + chain
+// on, bounded by menuNodeChainLimit so an authored cycle can't hang.
 func goToDialogNode(g *GameState, nodeID string) {
 	for i := 0; i < menuNodeChainLimit; i++ {
 		if nodeID == "" {
@@ -373,9 +352,7 @@ func goToDialogNode(g *GameState, nodeID string) {
 	CloseDialog(g)
 }
 
-// ClampDialogCursor clamps the choice cursor to the current node's choice
-// count. Defensive backstop for input callers; goToDialogNode already zeroes
-// the cursor on every node change.
+// ClampDialogCursor clamps the choice cursor to the node's choice count (defensive backstop for input).
 func ClampDialogCursor(g *GameState) {
 	if !g.DialogOpen {
 		return
@@ -417,9 +394,8 @@ func applyDialogAction(g *GameState, action *DialogAction) {
 	}
 }
 
-// MoveDialogCursor steps the choice cursor by delta's sign, wrapping and
-// SKIPPING disabled choices so it never lands on a row the player can't
-// confirm. No-op when there are no choices or all are disabled.
+// MoveDialogCursor steps the cursor by delta's sign, wrapping and SKIPPING
+// disabled choices. No-op when there are no choices or all are disabled.
 func MoveDialogCursor(g *GameState, delta int) {
 	if !g.DialogOpen || delta == 0 {
 		return
@@ -446,8 +422,7 @@ func MoveDialogCursor(g *GameState, delta int) {
 	g.Dialog.ChoiceCursor = Clamp(g.Dialog.ChoiceCursor, 0, n-1)
 }
 
-// firstSelectableChoice returns the index of the first non-disabled choice, or
-// 0 when there are none — seats the cursor on an enabled row when a node opens.
+// firstSelectableChoice returns the first non-disabled choice index, or 0 if none.
 func firstSelectableChoice(g *GameState) int {
 	for i, v := range DialogChoiceViews(g) {
 		if !v.Disabled {

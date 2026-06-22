@@ -2,9 +2,7 @@ package core
 
 import "testing"
 
-// TestVictoryFillProgress_Curve pins the fill easing: flat 0 through the dance
-// beat, eased to exactly 1 by anim end, monotonic between. Against the consts
-// so a retune can't silently break the contract.
+// TestVictoryFillProgress_Curve: flat 0 through the dance beat, eased to 1 by anim end, monotonic between.
 func TestVictoryFillProgress_Curve(t *testing.T) {
 	if p := VictoryFillProgress(0); p != 0 {
 		t.Errorf("fill at 0 = %v, want 0", p)
@@ -23,7 +21,6 @@ func TestVictoryFillProgress_Curve(t *testing.T) {
 	if p := VictoryFillProgress(mid); absFloat(float64(p)-0.75) > 1e-6 {
 		t.Errorf("fill at midpoint = %v, want 0.75 (ease-out quad)", p)
 	}
-	// Monotonic non-decreasing across the window.
 	prev := float32(-1)
 	for e := float32(0); e <= VictorySpoilsAnimEnd()+0.2; e += 0.05 {
 		p := VictoryFillProgress(e)
@@ -48,9 +45,8 @@ func TestVictorySpoilsAnimDone_Boundary(t *testing.T) {
 	}
 }
 
-// TestVictoryLootRevealed_Cascade checks rows cascade one per stagger from the
-// dance beat, clamp to n, and stay at 0 beforehand. Samples sit off the exact
-// stagger boundaries so float rounding can't flake the assertion.
+// TestVictoryLootRevealed_Cascade: rows cascade one per stagger from the dance
+// beat, clamp to n, 0 before. Samples sit off the boundaries to avoid float flake.
 func TestVictoryLootRevealed_Cascade(t *testing.T) {
 	const n = 3
 	if got := VictoryLootRevealed(VictoryDanceBeat-0.1, n); got != 0 {

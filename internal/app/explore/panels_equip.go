@@ -7,15 +7,12 @@ import (
 	"crawler/internal/app/render"
 )
 
-// Equipment tab input. Works like the Items menu, not a drag board: a 2-D cursor
-// walks members (columns) × slots (rows); Confirm / click opens the item picker
-// (eligible inventory items + an Unequip row). While the picker is open it owns
-// all panel input, so Back closes just the picker.
+// Equipment tab input. A 2-D cursor walks members × slots; Confirm / click opens
+// the item picker (eligible items + an Unequip row), which then owns all panel
+// input so Back closes just the picker.
 
-// updateEquipmentTab routes one frame of input while the slot picker is CLOSED.
-// Left/Right picks the member column, Up/Down the slot row, Confirm / click opens
-// the picker. Up/Down and Left/Right touch disjoint edge memory, so reading both
-// per frame can't double-consume an analog edge.
+// updateEquipmentTab routes input while the slot picker is CLOSED: Left/Right picks
+// the member column, Up/Down the slot row, Confirm / click opens the picker.
 func updateEquipmentTab(g *core.GameState) {
 	if len(g.Party) == 0 {
 		return
@@ -37,9 +34,8 @@ func updateEquipmentTab(g *core.GameState) {
 }
 
 // updateEquipPicker drives the slot's item-picker sub-modal: Up/Down walks rows,
-// Confirm equips/unequips, Back closes the picker (back to slot nav, NOT the
-// overlay). Click a row to pick, or outside the card to dismiss. Member + slot
-// come from the frozen cursors (input can't move them while the picker is up).
+// Confirm equips/unequips, Back closes the picker (to slot nav, NOT the overlay);
+// click a row to pick or outside the card to dismiss. Member+slot from the frozen cursors.
 // equipPickerRowsBuf is the reusable row buffer (rows recompute every open frame).
 var equipPickerRowsBuf []core.EquipPickerRow
 

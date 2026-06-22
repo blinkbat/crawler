@@ -285,8 +285,7 @@ func packMemberCustom(a AreaDefinition, sp PackSpawn, idx int) (CustomEnemyDef, 
 	return CustomEnemyDef{}, false
 }
 
-// PackMemberDefinition returns the effective definition for an authored pack
-// member, resolving custom names through the containing area.
+// PackMemberDefinition returns a pack member's effective definition, resolving custom names via the area.
 func PackMemberDefinition(a AreaDefinition, sp PackSpawn, idx int) EnemyDefinition {
 	if def, ok := packMemberCustom(a, sp, idx); ok {
 		return def.Definition()
@@ -302,8 +301,7 @@ func PackMemberDisplayName(a AreaDefinition, sp PackSpawn, idx int) string {
 	return PackMemberDefinition(a, sp, idx).SingularName
 }
 
-// PackMemberVisualKind returns the base kind whose sprite/color should
-// represent an authored pack slot.
+// PackMemberVisualKind returns the base kind whose sprite/color represents a pack slot.
 func PackMemberVisualKind(a AreaDefinition, sp PackSpawn, idx int) EnemyKind {
 	if def, ok := packMemberCustom(a, sp, idx); ok {
 		return def.BaseKind
@@ -314,14 +312,12 @@ func PackMemberVisualKind(a AreaDefinition, sp PackSpawn, idx int) EnemyKind {
 	return sp.Members[idx].Kind
 }
 
-// PackSpawnLeaderSlot returns the highest-tier member slot for an authored
-// pack, resolving custom enemy tiers as well as built-in tiers.
+// PackSpawnLeaderSlot returns the highest-tier member slot, resolving custom and built-in tiers.
 func PackSpawnLeaderSlot(a AreaDefinition, sp PackSpawn) int {
 	return leaderSlot(len(sp.Members), func(i int) int { return PackMemberDefinition(a, sp, i).Tier })
 }
 
-// PackSpawnLeaderKind returns the visual base kind for the authored pack's
-// highest-tier member.
+// PackSpawnLeaderKind returns the visual base kind for the pack's highest-tier member.
 func PackSpawnLeaderKind(a AreaDefinition, sp PackSpawn) EnemyKind {
 	if len(sp.Members) == 0 {
 		return EnemyRat
@@ -341,8 +337,7 @@ func CustomEnemyDisplayName(name string) string {
 	return strings.ReplaceAll(strings.TrimSpace(name), "_", " ")
 }
 
-// SkillOnDiskName is the canonical lower-snake-case identifier used in
-// custom-enemy mapfile skill lists.
+// SkillOnDiskName is the canonical lower-snake-case identifier for mapfile skill lists.
 func SkillOnDiskName(s SkillID) string {
 	if s == SkillNone {
 		return ""

@@ -6,17 +6,15 @@ import (
 	"crawler/internal/app/input"
 )
 
-// Out-of-battle "use" actions on the panels overlay: consumables (Items tab) and
-// heal skills (Skills tab). When a recipient is needed, both route through one
-// shared ally-target sub-modal of the living members (no healing the dead).
-// Party-wide heals (Mass Mend) skip the picker and apply to everyone.
+// Out-of-battle "use" actions on the panels overlay (Items consumables, Skills
+// heals). When a recipient is needed both route through one shared ally-target
+// sub-modal of the living members; party-wide heals skip it and apply to everyone.
 
-// noCaster is the "no pending caster" sentinel for g.UsePendingCaster (an item,
-// not a skill, is pending). A real caster is a valid party seat (>= 0).
+// noCaster is the "no pending caster" sentinel for g.UsePendingCaster (an item is
+// pending). A real caster is a valid party seat (>= 0).
 const noCaster = -1
 
-// validMember resolves idx to a live *g.Party pointer, ok=false when out of
-// range. Callers layer their own HP / affordability checks on top.
+// validMember resolves idx to a live *g.Party pointer (ok=false when out of range).
 func validMember(g *core.GameState, idx int) (*core.PartyMember, bool) {
 	if !core.PartyIndexInRange(g.Party, idx) {
 		return nil, false
@@ -24,9 +22,8 @@ func validMember(g *core.GameState, idx int) (*core.PartyMember, bool) {
 	return &g.Party[idx], true
 }
 
-// stackAtCursor is the materialized-list cursor guard shared by the panels item-
-// use, shop buy/sell, and chest paths (different element types, hence the type
-// param): bounds-check cursor and return the row. Callers keep their own bail.
+// stackAtCursor is the materialized-list cursor guard shared by the panels/shop/
+// chest paths (generic over element type): bounds-check cursor, return the row.
 func stackAtCursor[T any](stacks []T, cursor int) (T, bool) {
 	if cursor < 0 || cursor >= len(stacks) {
 		var zero T
@@ -35,9 +32,8 @@ func stackAtCursor[T any](stacks []T, cursor int) (T, bool) {
 	return stacks[cursor], true
 }
 
-// clampCursorToLen keeps a list cursor in range after the list shrank: pulled
-// back to the last row, floored at 0 for an empty list. Shared by the shop-sell
-// and chest-take paths.
+// clampCursorToLen keeps a cursor in range after the list shrank (last row, or 0
+// for empty). Shared by the shop-sell and chest-take paths.
 func clampCursorToLen(cursor, n int) int {
 	if cursor >= n {
 		cursor = n - 1
@@ -48,8 +44,8 @@ func clampCursorToLen(cursor, n int) int {
 	return cursor
 }
 
-// tryUseItem handles a use press on the Items tab: a restorative consumable
-// opens the ally-target picker carrying it; equipment / no-effect rows ping miss.
+// tryUseItem handles a use press on the Items tab: a restorative opens the
+// ally-target picker; equipment / no-effect rows ping miss.
 func tryUseItem(g *core.GameState) {
 	stacks := core.LiveStacks(g.Inventory)
 	stack, ok := stackAtCursor(stacks, g.PanelsRowCursor)
@@ -75,14 +71,11 @@ func tryUseSkill(g *core.GameState) {
 		return
 	}
 	if m.HP <= 0 {
-		// A member downed in a won battle keeps HP=0 into exploration; don't let
-		// a corpse cast.
-		audio.Play(audio.SoundInputMiss)
+		audio.Play(audio.SoundInputMiss) // a downed member keeps HP=0 into exploration; no corpse cast
 		return
 	}
-	// No per-skill cursor (the tab is a tree summary). Gather affordable out-of-
-	// battle heals: none → refuse; one → cast directly; several → chooser. Filter
-	// to affordable so the chooser never lists a cast beginHealCast would refuse.
+	// Affordable out-of-battle heals: none → refuse; one → cast; several → chooser
+	// (filtered to affordable so it never lists a cast beginHealCast would refuse).
 	heals := affordableOutOfBattleHeals(m)
 	switch len(heals) {
 	case 0:
@@ -96,11 +89,9 @@ func tryUseSkill(g *core.GameState) {
 	}
 }
 
-// affordableOutOfBattleHeals returns the member's affordable out-of-battle
-// heals. The chooser (tryUseSkill) and its driver (updateHealPicker) share this
-// one helper so their lists can't diverge.
-// Reusable buffers for the per-frame picker paths. Single-threaded update loop;
-// returned slices valid until the next call.
+// affordableOutOfBattleHeals returns the member's affordable out-of-battle heals.
+// The chooser and its driver share it so their lists can't diverge.
+// Reusable per-frame buffers; returned slices valid until the next call.
 var (
 	outOfBattleHealsBuf []core.SkillID
 	affordableHealsBuf  []core.SkillID
@@ -118,9 +109,8 @@ func affordableOutOfBattleHeals(m *core.PartyMember) []core.SkillID {
 	return affordableHealsBuf
 }
 
-// beginHealCast resolves a chosen out-of-battle heal: single-target opens the
-// ally picker (MP billed on apply); party-wide applies immediately. A short MP /
-// corpse re-check guards the gap between choosing and casting.
+// beginHealCast resolves a chosen heal: single-target opens the ally picker (MP
+// billed on apply); party-wide applies now. Re-checks MP/corpse before casting.
 func beginHealCast(g *core.GameState, caster int, skill core.SkillID) {
 	m, ok := validMember(g, caster)
 	if !ok || m.HP <= 0 {
@@ -137,8 +127,7 @@ func beginHealCast(g *core.GameState, caster int, skill core.SkillID) {
 		return
 	}
 	// Party-wide heal: no target step. Refuse if no member can benefit so it
-	// can't drain MP for zero effect (HealMember itself no-ops on the dead and
-	// clamps at MaxHP).
+	// can't drain MP for zero effect.
 	if !anyMemberBelowFull(g) {
 		audio.Play(audio.SoundInputMiss)
 		return
@@ -149,9 +138,8 @@ func beginHealCast(g *core.GameState, caster int, skill core.SkillID) {
 	audio.Play(audio.SoundHeal)
 }
 
-// anyMemberBelowFull reports whether any member can still benefit from an HP
-// heal. Routes through core.MemberCanBeHealed so it can't drift from the item
-// path's HP rule.
+// anyMemberBelowFull reports whether any member can benefit from an HP heal (via
+// core.MemberCanBeHealed, shared with the item path).
 func anyMemberBelowFull(g *core.GameState) bool {
 	for i := range g.Party {
 		if core.MemberCanBeHealed(g.Party[i]) {
@@ -172,8 +160,7 @@ func closeHealPick(g *core.GameState) {
 }
 
 // updateHealPicker drives the heal-skill chooser: Up/Down walk the caster's
-// heals, Confirm commits into beginHealCast, Back cancels. Owns panel input
-// while open.
+// heals, Confirm commits into beginHealCast, Back cancels.
 func updateHealPicker(g *core.GameState) {
 	if input.BackPressed() {
 		closeHealPick(g)
@@ -198,9 +185,8 @@ func updateHealPicker(g *core.GameState) {
 	}
 }
 
-// updateUseTargetPicker drives the shared ally-target sub-modal: Up/Down walk
-// the living members, Confirm applies the pending item/skill, Back closes only
-// the picker. Owns panel input while open.
+// updateUseTargetPicker drives the shared ally-target sub-modal: Up/Down walk the
+// living members, Confirm applies the pending item/skill, Back closes the picker.
 func updateUseTargetPicker(g *core.GameState) {
 	if input.BackPressed() {
 		closeUseTarget(g)
@@ -267,8 +253,8 @@ func applyUseToMember(g *core.GameState, member int) {
 	closeUseTarget(g)
 }
 
-// openUseTargetForItem opens the ally-target picker carrying a pending item.
-// Inverse of closeUseTarget — both set the same five fields in one place.
+// openUseTargetForItem opens the ally-target picker carrying a pending item
+// (inverse of closeUseTarget — both set the same five fields).
 func openUseTargetForItem(g *core.GameState, kind core.ItemKind) {
 	g.UseTargetOpen = true
 	g.UseTargetCursor = 0

@@ -7,18 +7,15 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Party Visualizer (modalPartyView): the party-side twin of the Foe Visualizer
-// (foeview.go), for a party CLASS. Save writes to maps/sprites/partyvisuals.json
-// (core.PartyVisualOverride). Reuses the foe modal's geometry, foeFields (valid:
-// PartyVisualOverride aliases EnemyVisualOverride), labels, and sprite-edit
-// engine; only the lookup, seed/save targets, and preview call differ.
+// Party Visualizer (modalPartyView): party-side twin of the Foe Visualizer, for a
+// CLASS. Save writes to partyvisuals.json. Reuses the foe modal's geometry and
+// foeFields (PartyVisualOverride aliases EnemyVisualOverride); only the lookup,
+// seed/save targets, and preview call differ.
 
-// partyDrag holds the party modal's in-flight drag (separate instance from
-// foeDrag). slider = Layout-tab field drag, asset = Asset-tab param drag.
+// partyDrag is the party modal's in-flight drag (twin of foeDrag).
 var partyDrag = struct{ slider, asset sliderDragState }{slider: noSliderDrag, asset: noSliderDrag}
 
-// openPartyViewModal opens the visualizer. First open seeds the working copy from
-// the first class's live visual; later opens keep it (mirrors openFoeViewModal).
+// openPartyViewModal opens the visualizer (mirrors openFoeViewModal).
 func openPartyViewModal(s *State) {
 	s.modal = modalPartyView
 	if !s.partyInit {
@@ -35,8 +32,7 @@ func openPartyViewModal(s *State) {
 	partyDrag.asset = noSliderDrag
 }
 
-// seedPartyVisual loads the current class's live visual into the working copy
-// and snapshots it as the Reset baseline.
+// seedPartyVisual loads the class's live visual into the working copy + baseline.
 func seedPartyVisual(s *State) {
 	if ov, ok := render.LivePartyOverride(frameAssets, s.partyClass); ok {
 		s.partyVisual = ov
@@ -93,8 +89,7 @@ func updatePartyViewModal(s *State) Action {
 		func() { render.ReloadPartySprite(frameAssets, s.partyClass) })
 
 	l := computeFoeViewLayout()
-	// Read the cursor live (not the one-frame-stale frameMouse).
-	mp := rl.GetMousePosition()
+	mp := rl.GetMousePosition() // live, not the one-frame-stale frameMouse
 	mouseDown := rl.IsMouseButtonDown(rl.MouseLeftButton)
 	mousePressed := rl.IsMouseButtonPressed(rl.MouseLeftButton)
 	mouseReleased := rl.IsMouseButtonReleased(rl.MouseLeftButton)
@@ -138,9 +133,8 @@ func setPartyAssetFromTrack(s *State, i int, track rl.Rectangle, mouseX float32)
 	s.assetPreviewStale = true
 }
 
-// handlePartyViewClick dispatches a left-press: slider tracks, bake buttons, the
-// class prev/next arrows (clicking the name cycles forward — only four classes,
-// so a dropdown would be overkill), and Save/Reset/Close.
+// handlePartyViewClick dispatches a left-press. Clicking the name cycles forward
+// (only four classes, so no dropdown).
 func handlePartyViewClick(s *State, l *foeViewLayout, mp rl.Vector2) {
 	for i := range l.tabBtns {
 		if pointIn(mp, l.tabBtns[i]) {
@@ -214,12 +208,10 @@ func drawPartyViewModal(s *State, font rl.Font, theme render.Theme) {
 	l := computeFoeViewLayout()
 	drawModalHeaderAt(font, theme, l.card, "PARTY VISUALIZER", theme.BorderActive)
 
-	// Live 3D preview (off-screen texture). Gizmos only on the Layout tab; on the
-	// Asset tab the bake preview overrides.
+	// Live 3D preview. Gizmos only on the Layout tab; Asset tab uses the bake preview.
 	render.DrawPartyPreview(l.preview, frameAssets, s.partyClass, s.partyVisual, s.foeViewZoom, s.foeViewTab == foeTabLayout, assetPreviewTexFor())
 	rl.DrawRectangleLinesEx(l.preview, 1, theme.BorderDim)
 
-	// Class picker header: < Name >.
 	drawButton(font, l.prevFoeBtn, "<", false)
 	drawButton(font, l.nextFoeBtn, ">", false)
 	name := core.PartyClassName(s.partyClass)

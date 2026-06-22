@@ -9,8 +9,7 @@ import (
 	"crawler/internal/app/audio/wavsynth"
 )
 
-// withWorkingDir runs fn with the cwd switched to dir, then restores — so
-// SoundsDir() resolves to a per-test temp dir, not the project's maps/sounds/.
+// withWorkingDir runs fn with cwd = dir so SoundsDir() resolves to a temp dir.
 func withWorkingDir(t *testing.T, dir string, fn func()) {
 	t.Helper()
 	old, err := os.Getwd()
@@ -24,8 +23,7 @@ func withWorkingDir(t *testing.T, dir string, fn func()) {
 	fn()
 }
 
-// TestSanitizeName freezes the filename contract: lowercase ASCII/digits/_/-
-// only; spaces fold to underscore; multi-byte/punctuation strips; empty stays empty.
+// TestSanitizeName freezes the filename contract (lowercase ASCII/digits/_/-).
 func TestSanitizeName(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -35,7 +33,7 @@ func TestSanitizeName(t *testing.T) {
 		{"Input Hit", "input_hit"},
 		{"  My Cue!  ", "my_cue"},
 		{"weird/../path", "weirdpath"},
-		{"héllo", "hllo"}, // multi-byte stripped (per-byte filter)
+		{"héllo", "hllo"}, // multi-byte stripped
 		{"123_test", "123_test"},
 		{"-dash-name-", "-dash-name-"},
 		{"", ""},
@@ -49,8 +47,7 @@ func TestSanitizeName(t *testing.T) {
 	}
 }
 
-// TestWriteWAV_RoundTrip verifies a write under a name needing sanitization
-// lands at the sanitized path and shows up in ListSounds.
+// TestWriteWAV_RoundTrip verifies a write lands at the sanitized path and in ListSounds.
 func TestWriteWAV_RoundTrip(t *testing.T) {
 	tmp := t.TempDir()
 	withWorkingDir(t, tmp, func() {
@@ -80,8 +77,8 @@ func TestWriteWAV_RoundTrip(t *testing.T) {
 	})
 }
 
-// TestWriteSound_ParamsRoundTrip confirms the params save lands both .wav and
-// .snd, LoadParams reconstructs the exact knobs, and delete removes both.
+// TestWriteSound_ParamsRoundTrip: params save lands .wav + .snd, LoadParams
+// reconstructs the knobs, delete removes both.
 func TestWriteSound_ParamsRoundTrip(t *testing.T) {
 	tmp := t.TempDir()
 	withWorkingDir(t, tmp, func() {
@@ -151,8 +148,7 @@ func TestWriteWAV_RefusesEmpty(t *testing.T) {
 	})
 }
 
-// TestLoadAssignments_RoundTrip confirms only valid entries survive a file
-// of mixed valid + commented + malformed lines.
+// TestLoadAssignments_RoundTrip: only valid entries survive mixed/commented/malformed lines.
 func TestLoadAssignments_RoundTrip(t *testing.T) {
 	tmp := t.TempDir()
 	withWorkingDir(t, tmp, func() {
@@ -174,7 +170,7 @@ func TestLoadAssignments_RoundTrip(t *testing.T) {
 		want := map[string]string{
 			"input_hit":   "my_blip",
 			"heal":        "heal_chord",
-			"unknown_cue": "ignored_at_reload", // loader keeps it; reload filters
+			"unknown_cue": "ignored_at_reload", // loader keeps; reload filters
 		}
 		if len(got) != len(want) {
 			t.Errorf("got %d entries, want %d (%v)", len(got), len(want), got)

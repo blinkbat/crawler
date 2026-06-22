@@ -2,9 +2,7 @@ package core
 
 import "testing"
 
-// TestBlessRegistryShape pins the registry contract: player-castable,
-// Buff-tagged, AppliesAOEPartyBuff, base magnitude/duration, and buffs the four
-// offensive/support stats but not VIT/SPD (VIT desyncs MaxHP; SPD perturbs ATB).
+// TestBlessRegistryShape pins the registry contract; buffs STR/DEX/INT/WIS but not VIT/SPD (VIT desyncs MaxHP, SPD perturbs ATB).
 func TestBlessRegistryShape(t *testing.T) {
 	if !SkillPlayerCastable(SkillBless) {
 		t.Error("Bless must be PlayerCastable")
@@ -29,18 +27,14 @@ func TestBlessRegistryShape(t *testing.T) {
 	}
 }
 
-// TestEffectiveStats_FoldsActiveBuff verifies the buff is folded into the
-// effective stat sheet only while the counter runs, per-stat, and never
-// touches the stats Bless deliberately omits.
+// TestEffectiveStats_FoldsActiveBuff: the buff folds in only while the counter runs, per-stat.
 func TestEffectiveStats_FoldsActiveBuff(t *testing.T) {
 	m := PartyMember{Stats: Stats{STR: 3, DEX: 2, INT: 1, WIS: 4, VIT: 5, SPD: 3}}
 
-	// No active buff: EffectiveStats == base.
-	if got := EffectiveStats(m); got != m.Stats {
+	if got := EffectiveStats(m); got != m.Stats { // no buff: == base
 		t.Errorf("inactive buff leaked: EffectiveStats = %+v, want base %+v", got, m.Stats)
 	}
 
-	// One active buff: each declared stat lifts, the rest stay put.
 	StampPartyBuff(&m, SkillBless, SkillEffect{BuffStats: Stats{STR: 2, DEX: 2, INT: 2, WIS: 2}, BuffTurns: 2})
 	got := EffectiveStats(m)
 	if got.STR != 5 || got.DEX != 4 || got.INT != 3 || got.WIS != 6 {
@@ -51,9 +45,7 @@ func TestEffectiveStats_FoldsActiveBuff(t *testing.T) {
 	}
 }
 
-// TestEffectiveStats_StacksMultipleBuffs is the core of the stackable system:
-// DIFFERENT skills' buffs coexist and SUM (their stat deltas, Armor, and MDef),
-// while re-casting the SAME skill refreshes its entry rather than double-stacking.
+// TestEffectiveStats_StacksMultipleBuffs: different skills' buffs SUM; re-casting the same one refreshes.
 func TestEffectiveStats_StacksMultipleBuffs(t *testing.T) {
 	m := PartyMember{Stats: Stats{STR: 3, DEX: 2}}
 	StampPartyBuff(&m, SkillBless, SkillEffect{BuffStats: Stats{STR: 1, DEX: 1}, BuffTurns: 3})
@@ -65,44 +57,35 @@ func TestEffectiveStats_StacksMultipleBuffs(t *testing.T) {
 	if a := EffectiveArmor(m); a != 2 {
 		t.Errorf("War Banner armor not folded alongside Bless: EffectiveArmor = %d, want 2", a)
 	}
-	// Re-cast Bless: refresh, not double-stack — STR stays 6.
-	StampPartyBuff(&m, SkillBless, SkillEffect{BuffStats: Stats{STR: 1, DEX: 1}, BuffTurns: 3})
+	StampPartyBuff(&m, SkillBless, SkillEffect{BuffStats: Stats{STR: 1, DEX: 1}, BuffTurns: 3}) // re-cast: refresh
 	if got := EffectiveStats(m); got.STR != 6 {
 		t.Errorf("re-cast double-stacked: STR = %d, want 6", got.STR)
 	}
 }
 
-// TestEffectiveMDef_FoldsBuffWIS pins the fix that magic defense reads EFFECTIVE
-// WIS (base + buff/gear), not raw m.Stats — so a WIS-raising buff (Bless)
-// hardens MDef the same way it lifts heal/accuracy, symmetric with how
-// EffectiveArmor folds buff Armor. The dedicated MDefBonus channel (Stone Skin)
-// still stacks on top independently.
+// TestEffectiveMDef_FoldsBuffWIS pins that MDef reads EFFECTIVE WIS (not raw m.Stats); MDefBonus (Stone Skin) stacks on top.
 func TestEffectiveMDef_FoldsBuffWIS(t *testing.T) {
 	m := PartyMember{Stats: Stats{WIS: 4}}
 	if got := EffectiveMDef(m); got != 4 { // MagicDefense == WIS
 		t.Fatalf("base EffectiveMDef = %d, want 4 (raw WIS)", got)
 	}
 
-	// A +3 WIS buff must raise MDef to 7 — it would stay 4 if MDef read raw m.Stats.
 	StampPartyBuff(&m, SkillBless, SkillEffect{BuffStats: Stats{WIS: 3}, BuffTurns: 3})
 	if got := EffectiveMDef(m); got != 7 {
 		t.Errorf("buffed EffectiveMDef = %d, want 7 (effective WIS 4+3)", got)
 	}
 
-	// The dedicated MDefBonus channel stacks on top of the WIS-derived MDef.
 	StampPartyBuff(&m, SkillStoneSkin, SkillEffect{BuffMDef: 2, BuffTurns: 3})
 	if got := EffectiveMDef(m); got != 9 {
 		t.Errorf("EffectiveMDef with buff MDef = %d, want 9 (7 + 2 MDefBonus)", got)
 	}
 
-	// EffectiveDefenses must agree with the standalone reader.
-	if _, mdef := EffectiveDefenses(m); mdef != 9 {
+	if _, mdef := EffectiveDefenses(m); mdef != 9 { // parity with EffectiveMDef
 		t.Errorf("EffectiveDefenses mdef = %d, want 9 (parity with EffectiveMDef)", mdef)
 	}
 }
 
-// TestClearPartyTransientStatuses_ClearsBuff guards that buffs are combat-only —
-// the whole stack is wiped on battle exit.
+// TestClearPartyTransientStatuses_ClearsBuff: buffs are combat-only, wiped on battle exit.
 func TestClearPartyTransientStatuses_ClearsBuff(t *testing.T) {
 	party := []PartyMember{{HP: 5}}
 	StampPartyBuff(&party[0], SkillBless, SkillEffect{BuffStats: Stats{STR: 2, WIS: 1}, BuffTurns: 3})
@@ -112,9 +95,7 @@ func TestClearPartyTransientStatuses_ClearsBuff(t *testing.T) {
 	}
 }
 
-// TestPartyStatus_BlessedPrecedence checks any active buff surfaces as the lone
-// positive counted status, but any real threat (here Poison) outranks it so
-// the player still sees the danger.
+// TestPartyStatus_BlessedPrecedence: a buff surfaces as positive, but a threat (Poison) outranks it.
 func TestPartyStatus_BlessedPrecedence(t *testing.T) {
 	blessed := PartyMember{HP: 5}
 	StampPartyBuff(&blessed, SkillBless, SkillEffect{BuffStats: Stats{STR: 1}, BuffTurns: 3})
@@ -130,9 +111,7 @@ func TestPartyStatus_BlessedPrecedence(t *testing.T) {
 	}
 }
 
-// TestBlessingNode_GrantsAndUpgradesBless walks the Conviction tree's blessing
-// root: rank 1 learns Bless at its base effect, and further ranks climb the
-// tier ladder (+1 turn, then +1/+1 to every blessed stat).
+// TestBlessingNode_GrantsAndUpgradesBless: rank 1 learns Bless at base, further ranks climb the tier ladder.
 func TestBlessingNode_GrantsAndUpgradesBless(t *testing.T) {
 	m := PartyMember{Class: ClassCleric, SkillPoints: MaxSkillTier + 1}
 

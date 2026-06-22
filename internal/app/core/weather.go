@@ -2,10 +2,8 @@ package core
 
 import "math/rand"
 
-// WeatherPhase is the ambient-rain state machine's stage. Rain is atmospheric
-// and outdoors-only (see AreaIsOutdoor). Cycle: Clear -> Building (tint
-// darkening in) -> Raining (tint held + rain falling) -> Clearing (tint
-// lifting) -> Clear.
+// WeatherPhase is the ambient-rain state machine's stage (outdoors-only, see
+// AreaIsOutdoor). Cycle: Clear -> Building -> Raining -> Clearing -> Clear.
 type WeatherPhase int
 
 const (
@@ -15,9 +13,7 @@ const (
 	WeatherClearing                     // rain stopped, tint ramping back out
 )
 
-// RainKind is a storm's flavor, rolled once when it begins. It scales how
-// heavy the rain reads; only the heavy kind throws lightning. Render maps each
-// kind to wash darkness / streak density / alpha (render's rainVisuals).
+// RainKind is a storm's flavor, rolled once when it begins; only the heavy kind throws lightning.
 type RainKind int
 
 const (
@@ -26,13 +22,10 @@ const (
 	RainHeavy                  // dense downpour + occasional lightning
 )
 
-// RainKindCount is the parallel-table modulus (mirrors TimeOfDayCount).
-// Bump by adding a RainKind above this line — render's rainVisuals is sized by
-// it and asserted full at init.
+// RainKindCount is the parallel-table modulus; render's rainVisuals is sized by it.
 const RainKindCount = int(RainHeavy) + 1
 
-// rainKindWeights biases which storm rolls when one begins. Indexed by
-// RainKind; relative weights, not probabilities (summed + sampled by rollRainKind).
+// rainKindWeights biases which storm rolls; relative weights, not probabilities.
 var rainKindWeights = [RainKindCount]float32{
 	RainLight:  0.30,
 	RainNormal: 0.40,
@@ -53,8 +46,7 @@ func rollRainKind(rng *rand.Rand) RainKind {
 		r -= rainKindWeights[k]
 	}
 	// Fall through to the last NON-ZERO-weight bucket (float32 rounding can put
-	// a top-of-range roll past the final threshold); zeroing a weight never
-	// resurrects that kind here.
+	// a roll past the final threshold); zeroing a weight never resurrects it.
 	for k := RainKindCount - 1; k >= 0; k-- {
 		if rainKindWeights[k] > 0 {
 			return RainKind(k)
@@ -63,35 +55,27 @@ func rollRainKind(rng *rand.Rand) RainKind {
 	return RainLight
 }
 
-// WeatherState is the rain system's runtime state. Lives on GameState so it
-// survives area transitions (a storm doesn't reset on walking through a door).
-// Advances on landed player steps (TickWeatherStep); Intensity eases per frame
-// (TickWeather) so the tint applies/lifts gradually instead of snapping.
+// WeatherState is the rain runtime state. Lives on GameState so it survives
+// area transitions. Advances on landed steps (TickWeatherStep); Intensity eases
+// per frame (TickWeather) so the tint applies/lifts gradually.
 type WeatherState struct {
 	Phase WeatherPhase
-	// Kind is this storm's flavor, rolled once at Clear->Building and held for
-	// the storm's life. Only RainHeavy throws lightning.
+	// Kind rolled once at Clear->Building, held for the storm's life.
 	Kind RainKind
-	// RainStepsLeft counts the downpour down while Raining; seeded to a random
-	// RainMinSteps..RainMaxSteps span when the rain begins.
+	// RainStepsLeft counts the downpour down; seeded RainMinSteps..RainMaxSteps.
 	RainStepsLeft int
-	// Cooldown is the outdoor steps that must pass in Clear before rain may
-	// roll again — keeps storms from bunching up.
+	// Cooldown: outdoor steps in Clear before rain may roll again.
 	Cooldown int
-	// Intensity is the 0..1 smoothed strength of tint + rainfall, eased per
-	// frame toward the phase's target.
+	// Intensity is the 0..1 smoothed strength of tint + rainfall.
 	Intensity float32
-	// Flash is the 0..1 lightning brightness (heavy storms only): a bolt snaps
-	// it to 1, then it decays. NextFlash is seconds until the next bolt.
+	// Flash is the 0..1 lightning brightness (heavy only); NextFlash is seconds to the next bolt.
 	Flash     float32
 	NextFlash float32
 }
 
-// AreaIsOutdoor reports whether the area is open to the sky — the gate for
-// ambient weather and the inverse of the enclosed-dungeon lighting override.
-// Enclosed (NOT outdoor) when ceiling slabs roof more than
-// OutdoorCeilingThreshold of in-bounds tiles. Scans the ceiling layer, so a
-// per-frame caller should memoize per area.
+// AreaIsOutdoor reports whether the area is open to the sky. Enclosed (NOT
+// outdoor) when ceiling slabs roof more than OutdoorCeilingThreshold of
+// in-bounds tiles. Scans the ceiling layer — a per-frame caller should memoize.
 func AreaIsOutdoor(m *AreaDefinition) bool {
 	covered, total := 0, 0
 	for z := 0; z < m.Height; z++ {
@@ -120,10 +104,9 @@ var outdoorVerdictCache struct {
 	outdoor       bool
 }
 
-// CeilingFingerprint is a cheap discriminator of an area's ceiling layer (row
-// count + first/last row) for the per-area "has a roof?" caches. Keyed on TOP
-// of name+dims so two same-named, same-sized areas with different roofs don't
-// share a stale verdict. Shared by outdoorVerdictCache + render's caches.
+// CeilingFingerprint cheaply discriminates an area's ceiling layer (row count +
+// first/last row) so two same-named, same-sized areas with different roofs
+// don't share a stale verdict. Shared by outdoorVerdictCache + render's caches.
 func CeilingFingerprint(m *AreaDefinition) (rows int, top, bot string) {
 	rows = len(m.Ceiling)
 	if rows > 0 {
@@ -175,11 +158,9 @@ func TickWeatherStep(g *GameState) {
 	}
 }
 
-// TickWeather eases rain Intensity toward the phase's target each frame and
-// fires the two intensity-gated transitions: Building->Raining once the tint
-// darkens (seeding downpour length) and Clearing->Clear once it lifts (seeding
-// the next cooldown). Step-gated transitions live in TickWeatherStep. Safe to
-// call every adventure frame, including during battle.
+// TickWeather eases rain Intensity per frame and fires the intensity-gated
+// transitions: Building->Raining once the tint darkens, Clearing->Clear once it
+// lifts. Step-gated transitions live in TickWeatherStep. Safe every frame.
 func TickWeather(g *GameState, dt float32) {
 	w := &g.Weather
 	target := float32(0)
@@ -207,11 +188,9 @@ func TickWeather(g *GameState, dt float32) {
 	tickLightning(g, dt)
 }
 
-// tickLightning drives heavy-storm lightning. A scheduled bolt snaps Flash to
-// full, then it decays each frame. Only a heavy storm in Raining schedules new
-// bolts, drawing the RNG once per bolt (not per frame) so it doesn't churn the
-// shared stream. Decay runs unconditionally so a flash still lifts after the
-// storm transitions out.
+// tickLightning drives heavy-storm lightning: a scheduled bolt snaps Flash to
+// full, then it decays. Only a heavy storm in Raining schedules bolts, drawing
+// the RNG once per bolt (not per frame). Decay runs unconditionally.
 func tickLightning(g *GameState, dt float32) {
 	w := &g.Weather
 	if w.Kind == RainHeavy && w.Phase == WeatherRaining {

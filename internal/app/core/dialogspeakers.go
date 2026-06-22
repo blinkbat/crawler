@@ -1,8 +1,7 @@
 package core
 
-// Dialog speaker registry — named voices a node can be attributed to (four
-// party classes + generic NPC voices). The editor's speaker dropdown reads
-// DialogSpeakerIDs, so a voice added here shows up there automatically.
+// Dialog speaker registry — named voices a node can be attributed to. The
+// editor's dropdown reads DialogSpeakerIDs, so a voice added here shows up there.
 
 // Canonical speaker ids; party-class ids match the class names.
 const (
@@ -14,8 +13,7 @@ const (
 	SpeakerWizard   DialogSpeakerID = "wizard"
 )
 
-// dialogSpeakerOrder is the canonical display order; dialogSpeakers is the
-// id→speaker lookup. The init guard keeps the two in lockstep.
+// dialogSpeakerOrder is the display order; dialogSpeakers is the lookup (init guard keeps them in lockstep).
 var dialogSpeakerOrder = []DialogSpeakerID{
 	SpeakerNarrator,
 	SpeakerStranger,
@@ -51,8 +49,7 @@ func DialogSpeakerByID(id DialogSpeakerID) (DialogSpeaker, bool) {
 	return sp, ok
 }
 
-// DialogSpeakerName resolves an id to its display name, falling back to the
-// raw id (or "???" when empty) so a typo'd speaker still draws something.
+// DialogSpeakerName resolves an id to its display name (falls back to the raw id, or "???" when empty).
 func DialogSpeakerName(id DialogSpeakerID) string {
 	if sp, ok := dialogSpeakers[id]; ok {
 		return sp.Name

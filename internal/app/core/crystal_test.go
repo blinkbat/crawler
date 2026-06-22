@@ -2,9 +2,7 @@ package core
 
 import "testing"
 
-// TestTickCrystalRecharge_ReArmsAtCeiling pins the per-step recharge: a dormant
-// crystal climbs one charge per call and re-arms exactly at CrystalRechargeSteps,
-// while an already-charged crystal is left untouched (not over-charged).
+// TestTickCrystalRecharge_ReArmsAtCeiling: re-arms at CrystalRechargeSteps, never over-charges.
 func TestTickCrystalRecharge_ReArmsAtCeiling(t *testing.T) {
 	g := &GameState{Crystals: []Crystal{
 		{Charge: CrystalRechargeSteps - 2, Charged: false},
@@ -28,13 +26,11 @@ func TestTickCrystalRecharge_ReArmsAtCeiling(t *testing.T) {
 	}
 }
 
-// TestAdjacentChargedCrystalIndex covers the trigger reach: a charged crystal
-// fires when the player is on it or a cardinal neighbor; dormant or distant
-// crystals never fire.
+// TestAdjacentChargedCrystalIndex: a charged crystal fires on it or a cardinal neighbor only.
 func TestAdjacentChargedCrystalIndex(t *testing.T) {
 	crystals := []Crystal{
-		{TileX: 5, TileZ: 5, Charged: false}, // dormant
-		{TileX: 3, TileZ: 3, Charged: true},  // charged
+		{TileX: 5, TileZ: 5, Charged: false},
+		{TileX: 3, TileZ: 3, Charged: true},
 	}
 	cases := []struct {
 		x, z, want int
@@ -53,13 +49,12 @@ func TestAdjacentChargedCrystalIndex(t *testing.T) {
 	}
 }
 
-// TestRestorePartyFully tops living members to full HP+MP and skips the
-// dead / ingested (the healing crystal's effect).
+// TestRestorePartyFully tops living members to full HP+MP, skipping dead/ingested.
 func TestRestorePartyFully(t *testing.T) {
 	g := &GameState{Party: []PartyMember{
 		{HP: 1, MaxHP: 10, MP: 0, MaxMP: 5},
-		{HP: 0, MaxHP: 10, MP: 0, MaxMP: 5},                // down — skipped
-		{HP: 3, MaxHP: 8, MP: 2, MaxMP: 9, Ingested: true}, // ingested — skipped
+		{HP: 0, MaxHP: 10, MP: 0, MaxMP: 5},
+		{HP: 3, MaxHP: 8, MP: 2, MaxMP: 9, Ingested: true},
 	}}
 	if n := RestorePartyFully(g); n != 1 {
 		t.Fatalf("restored %d members, want 1 (living, non-ingested only)", n)

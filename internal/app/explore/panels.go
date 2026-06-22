@@ -16,8 +16,7 @@ func openPanels(g *core.GameState) {
 	}
 	// Re-center the Map tab each open (pan is a transient inspect offset).
 	recenterPanelMap(g)
-	// Neutral look yaw/pitch so a half-rotated free-look doesn't bleed into the
-	// overlay's screen-space rendering.
+	// Neutral look so a half-rotated free-look doesn't bleed into the overlay.
 	g.Player.LookYaw = 0
 	g.Player.LookPitch = 0
 	resetPanelSubmodals(g)
@@ -34,10 +33,9 @@ func resetPanelSubmodals(g *core.GameState) {
 	g.PanelSwapSource = -1 // clear any half-started Character-tab formation swap
 }
 
-// closePanels takes the overlay down. Tab/zoom/cursor stay on GameState so
-// reopening lands where you were. Any in-progress equipment drag is cancelled
-// and the render-side hit-rect layout zeroed so a frame-one click can't route
-// against stale rects.
+// closePanels takes the overlay down (tab/zoom/cursor persist so reopening lands
+// where you were). Zeroes the render-side hit-rect layout so a frame-one click
+// can't route against stale rects.
 func closePanels(g *core.GameState) {
 	g.PanelsOpen = false
 	resetPanelSubmodals(g)
@@ -109,10 +107,9 @@ func updatePanels(g *core.GameState) {
 				openLevelUpFor(g, g.PanelsRowCursor)
 			}
 		}
-		// Use (□ / F) drives the free out-of-combat formation SWAP: first press
-		// picks up the cursored member, a second on a DIFFERENT member trades
-		// slots, pressing the held member again cancels. The two trade places so
-		// the party stays a clean 2×2. Persists into the next fight.
+		// Use (□ / F) is the free formation SWAP: first press picks up the cursored
+		// member, a second on a DIFFERENT member trades slots (a clean 2×2 swap),
+		// re-pressing the held member cancels. Persists into the next fight.
 		if input.UsePressed() && core.PartyIndexInRange(g.Party, g.PanelsRowCursor) {
 			switch {
 			case !core.PartyIndexInRange(g.Party, g.PanelSwapSource):
@@ -132,9 +129,8 @@ func updatePanels(g *core.GameState) {
 		// 2-D cursor over members × slots; Confirm / click opens the slot picker.
 		updateEquipmentTab(g)
 	case core.PanelTabSkills:
-		// Summary view: Left/Right picks the member column, Confirm opens the
-		// skill-tree modal (where SkillPoints are spent). Use (F / □) casts a Heal
-		// skill out of battle — a separate button so the two never collide.
+		// Left/Right picks the member column, Confirm opens the skill-tree modal.
+		// Use (F / □) casts a Heal skill out of battle (a separate button).
 		g.PanelsRowCursor = input.CursorLeftRightWrap(g.PanelsRowCursor, len(g.Party))
 		if input.ConfirmPressed() && core.PartyIndexInRange(g.Party, g.PanelsRowCursor) {
 			openSkillTreeFor(g, g.PanelsRowCursor)
@@ -143,8 +139,7 @@ func updatePanels(g *core.GameState) {
 			tryUseSkill(g)
 		}
 	case core.PanelTabItems:
-		// Vertical inventory list: Up/Down walk stacks; Confirm / Use applies the
-		// cursored consumable to a chosen ally.
+		// Up/Down walk stacks; Confirm / Use applies the cursored consumable to an ally.
 		count := core.LiveStackCount(g.Inventory)
 		g.PanelsRowCursor = input.CursorUpDown(g.PanelsRowCursor, count)
 		if input.ConfirmPressed() || input.UsePressed() {

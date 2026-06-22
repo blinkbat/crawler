@@ -6,10 +6,9 @@ import (
 	"crawler/internal/app/input"
 )
 
-// updateChestModal runs the chest-open dialog. Esc closes; Up/Down picks
-// a row; Confirm on an item row takes one of that item; Confirm on the
-// Take-All row drains everything. Closing on an emptied chest flips the
-// chest's Looted flag so the lid renders open from now on.
+// updateChestModal runs the chest-open dialog: Esc closes, Up/Down picks a row,
+// Confirm takes one item (or Take-All drains everything). Closing an emptied
+// chest flips its Looted flag so the lid renders open.
 func updateChestModal(g *core.GameState) {
 	if g.ChestOpen < 0 || g.ChestOpen >= len(g.Chests) {
 		g.ChestOpen = -1
@@ -22,12 +21,9 @@ func updateChestModal(g *core.GameState) {
 		return
 	}
 
-	// Row count via the no-alloc LiveStackCount — this runs every frame the
-	// modal is open, so the filtered slice is materialized only once a
-	// Confirm actually lands (below), not per frame just to read len().
+	// No-alloc count; the slice is materialized only when a Confirm lands (below).
 	stackCount := core.LiveStackCount(chest.Items)
-	// Empty-chest shortcut: no rows to pick, only Take All (no-op) — just
-	// mark looted and close so the player isn't stuck in an empty dialog.
+	// Empty chest: mark looted and close so the player isn't stuck.
 	if stackCount == 0 {
 		closeChest(g, chest)
 		return
@@ -55,36 +51,26 @@ func updateChestModal(g *core.GameState) {
 	}
 	updated, ok := core.ConsumeItem(chest.Items, picked.Kind)
 	if !ok {
-		// Defensive: `picked` comes from LiveStacks (positive count), so
-		// consume should always succeed. If LiveStacks/ConsumeItem ever
-		// diverge, bail without adding to inventory rather than handing out
-		// a free item the chest still holds.
+		// Defensive: `picked` has positive count, so this should succeed; bail
+		// without handing out a free item if it ever diverges.
 		return
 	}
 	chest.Items = updated
 	g.Inventory = core.AddItem(g.Inventory, picked.Kind, 1)
 	audio.Play(audio.SoundInputHit)
-	// After taking, if no items remain, close + mark looted. Otherwise
-	// re-clamp the cursor so it doesn't point past the shrunken list.
+	// Empty now → close + mark looted; else re-clamp the cursor.
 	remaining := core.LiveStacks(chest.Items)
 	if len(remaining) == 0 {
 		closeChest(g, chest)
 		return
 	}
-	// We just took from an ITEM row (the Take-All row was handled above), so
-	// keep the cursor on an item: if taking the bottom stack emptied it, its old
-	// index now lands on the Take-All row — pull it back to the new last item so
-	// a take never yanks the cursor onto Take-All. Taking a middle stack leaves
-	// the cursor in place, where it now rests on the item that slid up (the
-	// natural "keep taking down the list" position).
+	// Took from an item row: clamp so emptying the bottom stack pulls the cursor
+	// back to the new last item instead of onto Take-All.
 	g.ChestMenuIndex = clampCursorToLen(g.ChestMenuIndex, len(remaining))
 }
 
-// closeChest dismisses the modal and marks the chest looted if its
-// stacks are now empty. Centralised so every exit path (Esc, Take All,
-// last-item Take) goes through the same logic — delegates the
-// looted-detection rule to core.MarkChestLootedIfEmpty so the rule
-// itself isn't duplicated alongside the modal-state reset.
+// closeChest dismisses the modal and marks the chest looted if empty (looted
+// rule delegated to core.MarkChestLootedIfEmpty).
 func closeChest(g *core.GameState, chest *core.Chest) {
 	core.MarkChestLootedIfEmpty(chest)
 	g.ChestOpen = -1

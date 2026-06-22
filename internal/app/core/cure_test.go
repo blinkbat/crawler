@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// TestCureDebuffs_ClearsDebuffsKeepsBuffAndDefend pins what Cleanse removes:
-// the five curable debuffs, leaving the Bless buff and Defending stance intact,
-// and reporting an accurate cured count.
+// TestCureDebuffs_ClearsDebuffsKeepsBuffAndDefend: removes the five debuffs, keeps Bless + Defending.
 func TestCureDebuffs_ClearsDebuffsKeepsBuffAndDefend(t *testing.T) {
 	m := PartyMember{
 		HP: 5, PoisonTurns: 2, SleepTurns: 1, StunTurns: 1, WebbedTurns: 3, ConfusedTurns: 2,
@@ -27,20 +25,16 @@ func TestCureDebuffs_ClearsDebuffsKeepsBuffAndDefend(t *testing.T) {
 		t.Errorf("Cleanse wrongly stripped the Bless buff: %+v", m.Buffs)
 	}
 
-	// A member with no debuffs reports zero cured.
 	clean := PartyMember{HP: 5}
 	if got := CureDebuffs(&clean); got != 0 {
 		t.Errorf("clean member cured = %d, want 0", got)
 	}
-	// Nil-safe.
-	if got := CureDebuffs(nil); got != 0 {
+	if got := CureDebuffs(nil); got != 0 { // nil-safe
 		t.Errorf("nil member cured = %d, want 0", got)
 	}
 }
 
-// TestNewSkillTreeNodesGrant verifies the three newly-wired granting nodes
-// (Fireball / Poison Cloud / Cleanse) learn their skill once their root and
-// the node itself are ranked.
+// TestNewSkillTreeNodesGrant: granting nodes learn their skill once root + node are ranked.
 func TestNewSkillTreeNodesGrant(t *testing.T) {
 	cases := []struct {
 		class      PartyClass

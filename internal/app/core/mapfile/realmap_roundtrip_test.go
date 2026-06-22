@@ -7,9 +7,8 @@ import (
 	"testing"
 )
 
-// TestRealForestMapStable loads the shipped forest_path.map (a walk-under land
-// bridge with a voxel gap) and confirms Parse->Encode is byte-stable. Also checks
-// that the same data with its stack stripped emits NO solids: section.
+// TestRealForestMapStable confirms the shipped forest_path.map (a voxel-gap land
+// bridge) is byte-stable through Parse->Encode, and emits no solids: when stripped.
 func TestRealForestMapStable(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "..", "maps", "forest_path.map")
 	raw, err := os.ReadFile(path)
@@ -42,8 +41,7 @@ func TestRealForestMapStable(t *testing.T) {
 	if !bytes.Equal(enc1, buf2.Bytes()) {
 		t.Fatalf("Parse->Encode not idempotent on a real map")
 	}
-	// Stripped of its stack the map is a pure heightfield and must encode with
-	// NO solids: section.
+	// Stripped of its stack the map is a heightfield: must encode with NO solids:.
 	mf.Solids = nil
 	var hf bytes.Buffer
 	if err := mf.Encode(&hf); err != nil {

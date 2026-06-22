@@ -6,10 +6,8 @@ import (
 	"crawler/internal/app/input"
 )
 
-// openSkillTreeFor raises the Skills-tab skill-tree modal for a party
-// member — the Diablo-2-style sub-dialog showing that member's three
-// trees. Resets the modal cursor to the first node of the first tree and
-// dismisses any open use-target picker so two sub-modals can't co-exist.
+// openSkillTreeFor raises the skill-tree modal for a member, resetting the cursor
+// and dismissing any use-target picker so two sub-modals can't co-exist.
 func openSkillTreeFor(g *core.GameState, member int) {
 	if _, ok := validMember(g, member); !ok {
 		return
@@ -21,16 +19,13 @@ func openSkillTreeFor(g *core.GameState, member int) {
 	closeUseTarget(g)
 }
 
-// closeSkillTree takes the skill-tree modal down without touching the
-// rest of the panels overlay. Safe to call when it's already closed.
+// closeSkillTree takes the modal down without touching the rest of the overlay.
 func closeSkillTree(g *core.GameState) {
 	g.SkillTreeOpen = false
 }
 
-// updateSkillTreeModal owns one frame of panel input while the skill-tree
-// modal is up. Back closes just the modal; Left/Right page the three tree
-// columns (clamping the node cursor into the new column); Up/Down walk the
-// nodes; Confirm invests a SkillPoint into the focused node.
+// updateSkillTreeModal owns one frame of panel input while the modal is up: Back
+// closes it, Left/Right page tree columns, Up/Down walk nodes, Confirm invests.
 func updateSkillTreeModal(g *core.GameState) {
 	if input.BackPressed() {
 		closeSkillTree(g)
@@ -46,12 +41,9 @@ func updateSkillTreeModal(g *core.GameState) {
 		closeSkillTree(g)
 		return
 	}
-	// Shared Left/Right column wrap (also re-clamps a stale cursor into range).
 	g.SkillTreeCol = input.CursorLeftRightWrap(g.SkillTreeCol, len(trees))
 	nodes := trees[g.SkillTreeCol].Nodes
-	// Clamp the row into the (possibly shorter) column after a sideways move.
-	// Guard the empty column first (init prevents it, but cheap to defend) so
-	// core.Clamp's max bound can't go negative and leave the cursor at -1.
+	// Clamp the row into the (shorter) column; guard empty so the max can't go negative.
 	if len(nodes) > 0 {
 		g.SkillTreeRow = core.Clamp(g.SkillTreeRow, 0, len(nodes)-1)
 	} else {
@@ -63,10 +55,8 @@ func updateSkillTreeModal(g *core.GameState) {
 	}
 }
 
-// buySkillNode invests one SkillPoint into the focused node, pinging the
-// gilt "great" cue on a successful purchase and the miss cue on a refusal
-// (locked node, maxed, or not enough points) so the player gets feedback
-// either way.
+// buySkillNode invests one SkillPoint into the focused node (miss ping on a
+// refusal: locked, maxed, or not enough points).
 func buySkillNode(g *core.GameState) {
 	m, ok := validMember(g, g.SkillTreeMember)
 	if !ok {

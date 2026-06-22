@@ -2,9 +2,7 @@ package core
 
 import "testing"
 
-// TestFleeChance_LevelDifferenceAndClamp pins the flee curve: even level = base,
-// party advantage raises it, and the result clamps to [Floor, Cap] so escape is
-// never guaranteed or impossible.
+// TestFleeChance_LevelDifferenceAndClamp: even level = base, advantage raises it, clamped to [Floor, Cap].
 func TestFleeChance_LevelDifferenceAndClamp(t *testing.T) {
 	if got := FleeChance(3, 3); got != BaseFleeChance {
 		t.Errorf("FleeChance(even) = %v, want base %v", got, BaseFleeChance)
@@ -23,28 +21,26 @@ func TestFleeChance_LevelDifferenceAndClamp(t *testing.T) {
 	}
 }
 
-// TestAverageLevels_LivingOnly confirms the level averages skip the dead so a
-// near-wiped party / a pack with one straggler reads its survivors' levels.
+// TestAverageLevels_LivingOnly confirms the averages skip the dead.
 func TestAverageLevels_LivingOnly(t *testing.T) {
 	party := []PartyMember{
 		{Level: 4, HP: 10},
-		{Level: 2, HP: 0}, // dead — excluded
+		{Level: 2, HP: 0},
 		{Level: 6, HP: 5},
 	}
 	if got := PartyAverageLevel(party); got != 5 { // (4+6)/2
 		t.Errorf("PartyAverageLevel = %v, want 5", got)
 	}
 	pack := Pack{Members: []Enemy{
-		{Alive: true},  // unauthored level → DefaultEnemyLevel
-		{Alive: false}, // dead — excluded
+		{Alive: true}, // unauthored level → DefaultEnemyLevel
+		{Alive: false},
 	}}
 	if got := PackAverageLevel(pack); got != float64(DefaultEnemyLevel) {
 		t.Errorf("PackAverageLevel = %v, want %v", got, float64(DefaultEnemyLevel))
 	}
 }
 
-// TestEnemyLevel_DefaultsWhenUnauthored guards the "default level, no per-row
-// wiring" contract — an unauthored definition reads DefaultEnemyLevel.
+// TestEnemyLevel_DefaultsWhenUnauthored: an unauthored definition reads DefaultEnemyLevel.
 func TestEnemyLevel_DefaultsWhenUnauthored(t *testing.T) {
 	rat := NewEnemy(EnemyRat)
 	if got := EnemyLevel(&rat); got != DefaultEnemyLevel {

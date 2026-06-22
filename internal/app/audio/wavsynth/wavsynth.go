@@ -1,7 +1,6 @@
-// Package wavsynth holds the pure procedural-audio helpers — sine sweeps,
-// chord sums, chimes, and a canonical 16-bit-mono-PCM WAV header builder.
-// Split out so it unit-tests without raylib on the load path (purego opens
-// raylib.dll at init, unavailable from `go test`'s temp build dir on Windows).
+// Package wavsynth holds pure procedural-audio helpers — sweeps, chords, chimes,
+// and a 16-bit-mono-PCM WAV header builder. Split out so it unit-tests without
+// raylib on the load path (purego opens raylib.dll at init).
 package wavsynth
 
 import (
@@ -26,8 +25,8 @@ func bellEnv(t float64) float64 {
 	return math.Sin(math.Pi * t)
 }
 
-// ClampToInt16 converts a float in [-1,1] to a 16-bit PCM sample. Out-of-range
-// values pin to the endpoints (wrapping would cause ring-modulator artifacts).
+// ClampToInt16 converts a float in [-1,1] to 16-bit PCM, pinning out-of-range
+// values to the endpoints (wrapping would cause ring-modulator artifacts).
 func ClampToInt16(sample float64) int16 {
 	if sample > 1.0 {
 		sample = 1.0
@@ -38,9 +37,8 @@ func ClampToInt16(sample float64) int16 {
 	return int16(sample * 32767)
 }
 
-// WaveShape selects the oscillator timbre for SynthShape: Sine (pure), Square
-// (harsh/8-bit), Triangle (gentler), Saw (buzzy). Same fundamental, different
-// harmonics — the biggest lever for timbre variety in the editor.
+// WaveShape selects the oscillator timbre: Sine (pure), Square (harsh/8-bit),
+// Triangle (gentler), Saw (buzzy).
 type WaveShape int
 
 const (
@@ -54,8 +52,8 @@ const (
 // WaveShapeCount is the number of WaveShape values, for the editor's wave picker.
 const WaveShapeCount = int(waveShapeCount)
 
-// waveShapeNames is the per-shape label indexed by WaveShape. An array (not a
-// switch) so a new shape leaves an empty slot the init assert catches.
+// waveShapeNames: per-shape label. Array (not switch) so a new shape leaves an
+// empty slot the init assert catches.
 var waveShapeNames = [waveShapeCount]string{
 	WaveSine:     "Sine",
 	WaveSquare:   "Square",
@@ -122,35 +120,32 @@ func NearestNoteIndex(hz float64) int {
 
 // FX voicing knobs — "feel" scaling for the per-sample loop.
 const (
-	driveMaxGain   = 5.0  // Drive=1 → tanh pre-gain 6× (heavy saturation)
-	cutoffMinAlpha = 0.02 // LPF coefficient floor so Cutoff=0 stays a dark tone, not silence
-	crushMaxHold   = 24   // Crush=1 → sample-and-hold 25 samples (~882 Hz effective)
-	maxDuration    = 30.0 // length cap (seconds) so a corrupt .snd can't drive a multi-GB alloc
+	driveMaxGain   = 5.0  // Drive=1 → tanh pre-gain 6×
+	cutoffMinAlpha = 0.02 // LPF floor so Cutoff=0 stays a dark tone, not silence
+	crushMaxHold   = 24   // Crush=1 → sample-and-hold 25 samples (~882 Hz)
+	maxDuration    = 30.0 // length cap (sec) so a corrupt .snd can't drive a huge alloc
 )
 
-// ShapeParams is the full knob set for the procedural sound editor; SynthShape
-// is a wrapper filling the extra fields with neutral values.
-//
-// Neutral ("do nothing extra"): Decay 0, Sustain 1, PulseWidth 0.5, Cutoff 1
-// (open), Drive 0, Crush 0, Tremolo 0.
+// ShapeParams is the full knob set for the sound editor; SynthShape wraps it
+// with neutral values: Decay 0, Sustain 1, PulseWidth 0.5, Cutoff 1, Drive/Crush/Tremolo 0.
 type ShapeParams struct {
 	Duration     float64   `json:"duration"`      // seconds
 	StartHz      float64   `json:"start_hz"`      // sweep start frequency
 	EndHz        float64   `json:"end_hz"`        // sweep end frequency
 	Volume       float64   `json:"volume"`        // peak amplitude [0,1]
-	Attack       float64   `json:"attack"`        // ADSR attack, seconds
-	Decay        float64   `json:"decay"`         // ADSR decay, seconds (0 = skip)
-	Sustain      float64   `json:"sustain"`       // ADSR sustain level [0,1]
-	Release      float64   `json:"release"`       // ADSR release, seconds
+	Attack       float64   `json:"attack"`        // ADSR attack, sec
+	Decay        float64   `json:"decay"`         // ADSR decay, sec (0 = skip)
+	Sustain      float64   `json:"sustain"`       // ADSR sustain [0,1]
+	Release      float64   `json:"release"`       // ADSR release, sec
 	Wave         WaveShape `json:"wave"`          // oscillator timbre
-	PulseWidth   float64   `json:"pulse_width"`   // square duty cycle [0.01,0.99]; 0.5 = symmetric
-	NoiseMix     float64   `json:"noise"`         // tone↔white-noise crossfade [0,1]
+	PulseWidth   float64   `json:"pulse_width"`   // square duty [0.01,0.99]; 0.5 = symmetric
+	NoiseMix     float64   `json:"noise"`         // tone↔noise crossfade [0,1]
 	VibHz        float64   `json:"vibrato_hz"`    // pitch-wobble rate
-	VibDepth     float64   `json:"vibrato_depth"` // pitch-wobble depth (fraction of freq)
-	TremoloHz    float64   `json:"tremolo_hz"`    // amplitude-wobble rate
-	TremoloDepth float64   `json:"tremolo_depth"` // amplitude-wobble depth [0,1]
-	Cutoff       float64   `json:"cutoff"`        // one-pole low-pass [0,1]; 1 = open (bypass)
-	Drive        float64   `json:"drive"`         // soft-saturation amount [0,1]
+	VibDepth     float64   `json:"vibrato_depth"` // pitch-wobble depth (frac of freq)
+	TremoloHz    float64   `json:"tremolo_hz"`    // amp-wobble rate
+	TremoloDepth float64   `json:"tremolo_depth"` // amp-wobble depth [0,1]
+	Cutoff       float64   `json:"cutoff"`        // one-pole LPF [0,1]; 1 = open
+	Drive        float64   `json:"drive"`         // soft saturation [0,1]
 	Crush        float64   `json:"crush"`         // sample-rate reduction [0,1]
 }
 
@@ -345,9 +340,8 @@ func SynthChord(duration float64, freqs []float64, volume float64) []int16 {
 	return pcm
 }
 
-// SynthWhistleTrill is a short, bright "trill whistle" — a pure sine sweeping
-// up with a fast shallow vibrato, soft attack, singing release. The SMRPG-style
-// "Great" cue.
+// SynthWhistleTrill is the SMRPG-style "Great" cue — a sine sweeping up with a
+// fast shallow vibrato, soft attack, singing release.
 func SynthWhistleTrill(duration, startHz, endHz, volume float64) []int16 {
 	return SynthShapeParams(ShapeParams{
 		Duration:   duration,
@@ -366,18 +360,16 @@ func SynthWhistleTrill(duration, startHz, endHz, volume float64) []int16 {
 	})
 }
 
-// SynthClick generates a short percussive transient — a pitched sine that
-// drops in frequency blended with a noise burst, under a hard-attack +
-// exponential-decay envelope. Covers both "tick" and "thud".
+// SynthClick is a short percussive transient — a pitched sine dropping in
+// frequency, blended with noise, under hard-attack/exp-decay. Covers tick and thud.
 //
-//	duration   total seconds (typical 0.02–0.08)
+//	duration   total sec (typical 0.02–0.08)
 //	pitchHz    body fundamental at note start
-//	pitchDrop  fraction of pitchHz to slide DOWN over the note (0.7 → ends at 0.3×; "kick drum" pop)
-//	noise      [0,1] white-noise mix
+//	pitchDrop  fraction to slide DOWN over the note (0.7 → ends at 0.3×; kick-drum pop)
+//	noise      [0,1] noise mix
 //	volume     peak scale [0,1]
 //
-// Fixed noise seed → identical waveform every run (the bank's defaults must
-// sound the same each session). Sum two clicks for variation, don't re-seed.
+// Fixed seed → identical waveform every run. Sum two clicks for variation.
 func SynthClick(duration, pitchHz, pitchDrop, noise, volume float64) []int16 {
 	samples := int(duration * SampleRate)
 	if samples <= 0 {
@@ -465,13 +457,13 @@ func BuildWAV(pcm []int16, rate int) []byte {
 	_ = binary.Write(&buf, binary.LittleEndian, uint32(36+dataSize))
 	buf.WriteString("WAVE")
 	buf.WriteString("fmt ")
-	_ = binary.Write(&buf, binary.LittleEndian, uint32(16))                 // fmt chunk size
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(16))                 // fmt size
 	_ = binary.Write(&buf, binary.LittleEndian, uint16(1))                  // PCM
-	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavChannels))        // channels — mono
+	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavChannels))        // channels
 	_ = binary.Write(&buf, binary.LittleEndian, uint32(rate))               // sample rate
-	_ = binary.Write(&buf, binary.LittleEndian, uint32(rate*wavBlockAlign)) // byte rate (rate × blockAlign)
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(rate*wavBlockAlign)) // byte rate
 	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavBlockAlign))      // block align
-	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavBitsPerSample))   // bits per sample
+	_ = binary.Write(&buf, binary.LittleEndian, uint16(wavBitsPerSample))   // bits/sample
 	buf.WriteString("data")
 	_ = binary.Write(&buf, binary.LittleEndian, uint32(dataSize))
 	_ = binary.Write(&buf, binary.LittleEndian, pcm)

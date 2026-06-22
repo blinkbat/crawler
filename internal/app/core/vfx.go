@@ -1,20 +1,11 @@
 package core
 
 // VFX (visual-effect) intent layer. Battle/explore push VFXRequest values onto
-// GameState.VFXQueue; render drains the queue each frame, resolves
-// camera-relative world positions, and emits particles into a render pool.
-//
-// Why a queue (not "battle calls render directly"): battle has no rl.Camera3D
-// (raylib is render-side only); many targets are formation slots whose world
-// position is recomputed per frame, so a captured XYZ would drift; and tests
-// can assert "X enqueued a VFX request" without pulling raylib into the binary.
-//
-// Drained completely each frame, order preserved so chained effects read in
-// emit order.
+// GameState.VFXQueue; render drains it each frame and resolves camera-relative
+// positions (core is raylib-free). Drained in emit order so chained effects read in order.
 
-// VFXKind enumerates the per-skill / per-event visual styles, each bound to a
-// render-side spawn function. Adding a kind: append a row here + add the
-// dispatch case in render/vfx.go's spawnFromRequest.
+// VFXKind enumerates the per-skill / per-event visual styles. Adding a kind:
+// append a row here + add the dispatch case in render/vfx.go's spawnFromRequest.
 type VFXKind int
 
 const (
@@ -51,8 +42,7 @@ const (
 	VFXIngest
 	// Scan — pale-cyan reveal ring rising off the target (info cue, no impact).
 	VFXScan
-	// VFXKindCount is the kind count (incl. VFXNone). Render tables that must
-	// cover every kind length-check against this so a missed kind fails loudly.
+	// VFXKindCount is the kind count (incl. VFXNone); render tables length-check against it.
 	VFXKindCount
 )
 
@@ -65,8 +55,7 @@ const (
 	VFXAnchorEnemy VFXAnchor = iota
 	// VFXAnchorParty: SlotIdx indexes g.Party.
 	VFXAnchorParty
-	// VFXAnchorTile: TileX/TileZ identify a world tile (out-of-battle effects,
-	// ground-anchored AoE shockwaves).
+	// VFXAnchorTile: TileX/TileZ identify a world tile.
 	VFXAnchorTile
 )
 
@@ -79,9 +68,8 @@ type VFXRequest struct {
 	TileZ   int
 }
 
-// EnqueueEnemyVFX appends a request anchored to an active-pack enemy slot. The
-// slot is NOT range-checked — the render drain drops out-of-range requests, so
-// callers can chain after damageEnemy() without re-checking kill status.
+// EnqueueEnemyVFX appends a request anchored to an enemy slot. Slot NOT
+// range-checked — the render drain drops out-of-range requests.
 func EnqueueEnemyVFX(g *GameState, kind VFXKind, slot int) {
 	if g == nil || kind == VFXNone {
 		return
@@ -99,10 +87,7 @@ func EnqueuePartyVFX(g *GameState, kind VFXKind, slot int) {
 }
 
 // EnqueueTileVFX appends a request anchored to a world tile.
-//
-// DEFERRED: nothing enqueues a tile-anchored request yet (render already
-// materialises VFXAnchorTile). Kept wired as the producer half awaiting its
-// first caller. Not a live code path today.
+// DEFERRED: nothing enqueues one yet (render already materialises VFXAnchorTile); not a live path.
 func EnqueueTileVFX(g *GameState, kind VFXKind, tileX, tileZ int) {
 	if g == nil || kind == VFXNone {
 		return
@@ -110,13 +95,9 @@ func EnqueueTileVFX(g *GameState, kind VFXKind, tileX, tileZ int) {
 	g.VFXQueue = append(g.VFXQueue, VFXRequest{Kind: kind, Anchor: VFXAnchorTile, TileX: tileX, TileZ: tileZ})
 }
 
-// DrainVFXQueue returns the pending requests and clears the queue (called once
-// per frame).
-//
-// Swaps the live queue with a spare back-buffer rather than re-slicing in
-// place, so the returned slice is NOT aliased by g.VFXQueue: a follow-on VFX
-// enqueued during the drain lands in the fresh buffer, not the slice being
-// iterated. The two ping-pong, reusing capacity frame to frame.
+// DrainVFXQueue returns the pending requests and clears the queue. Swaps in a
+// spare back-buffer (not re-sliced) so the returned slice is NOT aliased by
+// g.VFXQueue: a follow-on VFX enqueued during the drain lands in the fresh buffer.
 func DrainVFXQueue(g *GameState) []VFXRequest {
 	if g == nil || len(g.VFXQueue) == 0 {
 		return nil
@@ -128,8 +109,7 @@ func DrainVFXQueue(g *GameState) []VFXRequest {
 }
 
 // RequestVFXReset signals render to drop every live particle before the next
-// frame. Called on scene-shape changes (battle exit, area transition) so
-// formation-relative particles don't drift into the new context.
+// frame. Called on scene-shape changes (battle exit, area transition).
 func RequestVFXReset(g *GameState) {
 	if g == nil {
 		return
@@ -137,8 +117,7 @@ func RequestVFXReset(g *GameState) {
 	g.VFXResetRequested = true
 }
 
-// TakeVFXResetRequest reads and clears the reset flag (once per frame). A true
-// return means "drop the particle pool before processing this frame's queue."
+// TakeVFXResetRequest reads and clears the reset flag; true means drop the particle pool this frame.
 func TakeVFXResetRequest(g *GameState) bool {
 	if g == nil || !g.VFXResetRequested {
 		return false

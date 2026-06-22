@@ -1,7 +1,6 @@
-// Package userconfig holds the pure (non-raylib) logic for the audio package's
-// user-sound subsystem: filesystem paths, name sanitization, the saved-sounds
-// list, the WAV writer, and the assignments-file parser. Split out (like
-// wavsynth) so it unit-tests without raylib's purego DLL load.
+// Package userconfig holds the pure (non-raylib) audio user-sound logic: paths,
+// name sanitization, saved-sounds list, WAV writer, assignments parser. Split
+// out (like wavsynth) so it unit-tests without raylib's purego DLL load.
 package userconfig
 
 import (
@@ -27,8 +26,8 @@ func SoundsDir() string {
 	return core.ResolveAssetDir(SoundsDirName)
 }
 
-// SanitizeName normalizes a user-typed name into a safe filename stem. Empty
-// fallback — saves refuse rather than produce a synthetic "untitled" file.
+// SanitizeName normalizes a name into a safe filename stem; empty stays empty
+// (saves refuse rather than produce an "untitled" file).
 func SanitizeName(name string) string {
 	return core.SanitizeFilename(name, "")
 }
@@ -36,9 +35,8 @@ func SanitizeName(name string) string {
 // WavExt is the canonical user-sound file extension.
 const WavExt = ".wav"
 
-// ParamsExt is the JSON sidecar (synth knobs) stored beside a .wav so the
-// editor can reopen it. The .wav is the playable artifact; a hand-dropped .wav
-// has no sidecar.
+// ParamsExt is the JSON sidecar (synth knobs) beside a .wav, for reopening.
+// A hand-dropped .wav has none.
 const ParamsExt = ".snd"
 
 // SoundPath returns the .wav path for a named user sound (no existence check).
@@ -93,9 +91,8 @@ func WriteWAV(name string, pcm []int16) (string, error) {
 	return clean, nil
 }
 
-// WriteSound synthesizes p, writes <name>.wav, and writes a <name>.snd sidecar
-// (synth knobs, for reopening). Returns the sanitized stem. Sidecar write is
-// best-effort — failing it doesn't fail the save (the .wav already landed).
+// WriteSound writes <name>.wav plus a <name>.snd sidecar (synth knobs). Returns
+// the sanitized stem. Sidecar write is best-effort — failing it doesn't fail the save.
 func WriteSound(name string, p wavsynth.ShapeParams) (string, error) {
 	clean := SanitizeName(name)
 	if clean == "" {
@@ -133,8 +130,8 @@ func LoadParams(name string) (wavsynth.ShapeParams, bool) {
 	return p, true
 }
 
-// DeleteSound removes a named .wav and strips any assignment pointing at it
-// (so the bank won't reload a missing cue). Returns os.Remove's error verbatim.
+// DeleteSound removes a .wav and strips any assignment pointing at it. Returns
+// os.Remove's error verbatim.
 func DeleteSound(name string) error {
 	// Sanitize first so a crafted name can't path-traverse via os.Remove.
 	clean := SanitizeName(name)
@@ -178,8 +175,7 @@ func LoadAssignments() map[string]string {
 			continue
 		}
 		cue := strings.TrimSpace(line[:eq])
-		// Sanitize at parse time so a hand-edited file can't smuggle a
-		// path-traversal value into the downstream SoundPath join.
+		// Sanitize at parse time against path traversal in the SoundPath join.
 		name := SanitizeName(strings.TrimSpace(line[eq+1:]))
 		if cue == "" || name == "" {
 			continue
@@ -205,9 +201,8 @@ func SaveAssignments(assigns map[string]string) error {
 	}
 	sort.Strings(cues)
 	for _, cue := range cues {
-		// Write the sanitized stem (idempotent, so it round-trips lossless with
-		// LoadAssignments' re-sanitize). Drop a value that sanitizes to empty
-		// rather than emit "cue=".
+		// Sanitized stem (idempotent, round-trips with LoadAssignments). Drop an
+		// empty-sanitizing value rather than emit "cue=".
 		name := SanitizeName(assigns[cue])
 		if name == "" {
 			continue

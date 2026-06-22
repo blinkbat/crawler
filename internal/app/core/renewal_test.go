@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// TestNewHealSkillNodesGrant verifies the three newly-wired support nodes learn
-// their skills: Second Wind (Warrior root), and Renewal + Mass Mend (Cleric
-// Mercy nodes reached after Prayer).
+// TestNewHealSkillNodesGrant: Second Wind (Warrior root) + Renewal/Mass Mend (Cleric Mercy) learn.
 func TestNewHealSkillNodesGrant(t *testing.T) {
 	w := PartyMember{Class: ClassWarrior, SkillPoints: 1}
 	if !BuySkillNode(&w, "second-wind") {
@@ -17,9 +15,7 @@ func TestNewHealSkillNodesGrant(t *testing.T) {
 		t.Error("second-wind node did not grant Second Wind")
 	}
 
-	// The Cleric Mercy tree is a linear chain: prayer → cleanse → renewal →
-	// mass-mend, so reaching renewal/mass-mend means ranking the nodes before
-	// them. Walk the whole chain, then assert both heal skills are learned.
+	// Mercy is a linear chain: prayer → cleanse → renewal → mass-mend.
 	m := PartyMember{Class: ClassCleric, SkillPoints: 4}
 	for _, id := range []string{"prayer", "cleanse", "renewal", "mass-mend"} {
 		if !BuySkillNode(&m, id) {
@@ -34,13 +30,12 @@ func TestNewHealSkillNodesGrant(t *testing.T) {
 	}
 }
 
-// TestRenewalTierFolding checks the Renewal ladder folds correctly: base
-// duration, +1 turn at T1, +1 per-turn heal at T2, +1 turn at T3.
+// TestRenewalTierFolding checks the ladder: base, +1 turn (T1), +1 heal (T2), +1 turn (T3).
 func TestRenewalTierFolding(t *testing.T) {
 	m := PartyMember{Class: ClassCleric, SkillPoints: 6}
-	BuySkillNode(&m, "prayer")  // Mercy root
-	BuySkillNode(&m, "cleanse") // renewal's prerequisite in the linear chain
-	BuySkillNode(&m, "renewal") // rank 1 = tier 0 (base)
+	BuySkillNode(&m, "prayer")
+	BuySkillNode(&m, "cleanse")
+	BuySkillNode(&m, "renewal")
 	if base := EffectiveSkillEffect(&m, SkillRenewal); base.RegenTurns != RenewalRegenTurns || base.Heal != RenewalRegenBase {
 		t.Fatalf("base effect = turns %d / heal %d, want %d / %d", base.RegenTurns, base.Heal, RenewalRegenTurns, RenewalRegenBase)
 	}

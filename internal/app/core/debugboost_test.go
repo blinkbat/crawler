@@ -2,8 +2,7 @@ package core
 
 import "testing"
 
-// TestDebugBoostParty adds the boost to every stat and refreshes the derived
-// HP/MP pools (reviving the downed), mirroring the level-up Derive math.
+// TestDebugBoostParty boosts every stat and refreshes derived HP/MP pools (reviving the downed).
 func TestDebugBoostParty(t *testing.T) {
 	party := []PartyMember{
 		{Stats: Stats{STR: 6, DEX: 2, INT: 2, WIS: 1, VIT: 5, SPD: 3}, HP: 1, MaxHP: 10, MP: 0, MaxMP: 4},
@@ -21,11 +20,8 @@ func TestDebugBoostParty(t *testing.T) {
 	}
 }
 
-// TestDebugBoostParty_NegativeAmountFloors guards the negative-boost path:
-// AdjustStat floors each stat at 0, so the derived MaxMP must grow by the
-// ACTUAL applied INT delta (not the raw amount). A raw-amount subtraction
-// would drop MaxMP — and the MP=MaxMP that follows — below zero when the
-// amount exceeds the current INT.
+// TestDebugBoostParty_NegativeAmountFloors: stats floor at 0, so derived MaxMP
+// grows by the ACTUAL applied INT delta, not the raw amount (else MaxMP/MP go negative).
 func TestDebugBoostParty_NegativeAmountFloors(t *testing.T) {
 	party := []PartyMember{
 		{Stats: Stats{STR: 3, DEX: 3, INT: 2, WIS: 3, VIT: 4, SPD: 3}, HP: 5, MaxHP: 20, MP: 1, MaxMP: 8},
@@ -39,8 +35,7 @@ func TestDebugBoostParty_NegativeAmountFloors(t *testing.T) {
 	if m.MaxMP < 0 || m.MP < 0 {
 		t.Errorf("MaxMP/MP went negative: MaxMP=%d MP=%d", m.MaxMP, m.MP)
 	}
-	// MaxMP grew by the real INT delta (2 -> 0 = -2 points), floored at 0:
-	// 8 + (-2)*MPPerINT, clamped to >= 0.
+	// MaxMP grew by the real INT delta (2 -> 0 = -2), floored at 0.
 	wantMP := 8 + (0-2)*MPPerINT
 	if wantMP < 0 {
 		wantMP = 0

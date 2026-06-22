@@ -10,21 +10,11 @@ import (
 	"crawler/internal/app/core"
 )
 
-// Windows controller rumble via XInput. raylib's GLFW desktop backend has NO
-// vibration (its SetGamepadVibration is a no-op that logs a warning), so we
-// drive the motors directly through XInput — the native Windows gamepad API
-// that Xbox controllers (and the many XInput-compatible third-party / Steam-
-// mapped pads) speak. Detection still goes through raylib (gamepadConnected);
-// only the haptic OUTPUT lives here.
-//
-// We target XInput user index 0 (the primary controller), which matches
-// raylib's gamepadID 0 for the common single-pad case. XInputSetState on a
-// disconnected index returns ERROR_DEVICE_NOT_CONNECTED and does nothing, so an
-// unplugged or non-XInput pad is a safe no-op rather than an error.
+// Windows controller rumble via XInput (raylib's GLFW backend has no vibration).
+// XInputSetState on a disconnected index is a safe no-op.
 
-// xinputPrimaryUser is the XInput user index we vibrate. Derived from the
-// shared gamepadID (raylib's primary slot) so the two can't drift if multi-pad
-// support ever lands — XInput user N and raylib gamepad N are the same pad.
+// xinputPrimaryUser is the XInput user index vibrated, derived from gamepadID so
+// the two can't drift (XInput user N == raylib gamepad N).
 const xinputPrimaryUser = uint32(gamepadID)
 
 var (
@@ -33,11 +23,8 @@ var (
 	xinputReady    bool
 )
 
-// loadXInput resolves XInputSetState from whichever XInput runtime is present.
-// 1_4 ships with Windows 8+, 1_3 with the legacy DirectX SDK redist, 9_1_0 is
-// the Vista/7 baseline — trying them in order keeps rumble working across
-// Windows versions without a build-time dependency. If none load (XInput
-// absent), setGamepadRumble becomes a silent no-op.
+// loadXInput resolves XInputSetState, trying runtimes in order (1_4 = Win8+,
+// 1_3 = legacy DX redist, 9_1_0 = Vista/7). None present leaves rumble a no-op.
 func loadXInput() {
 	for _, name := range []string{"xinput1_4.dll", "xinput1_3.dll", "xinput9_1_0.dll"} {
 		dll := syscall.NewLazyDLL(name)
@@ -54,19 +41,16 @@ func loadXInput() {
 	}
 }
 
-// xinputMaxMotorSpeed is the full-scale value for an XINPUT_VIBRATION motor
-// speed (the uint16 ceiling); a normalized [0,1] level scales up to it.
+// xinputMaxMotorSpeed is the full-scale XINPUT_VIBRATION motor speed (uint16 ceiling).
 const xinputMaxMotorSpeed = 65535
 
-// xinputVibration mirrors the C XINPUT_VIBRATION struct: two motor speeds in
-// [0, xinputMaxMotorSpeed] (left = low-frequency/heavy, right = high-frequency/light).
+// xinputVibration mirrors XINPUT_VIBRATION (left = heavy/low-freq, right = light/high).
 type xinputVibration struct {
 	leftMotor  uint16
 	rightMotor uint16
 }
 
-// setGamepadRumble drives both motors of the primary controller at `level`
-// (0..1). Clamped defensively; the caller (ApplyRumble) already bounds it.
+// setGamepadRumble drives both primary-controller motors at `level` (0..1).
 func setGamepadRumble(level float32) {
 	xinputOnce.Do(loadXInput)
 	if !xinputReady {
@@ -75,8 +59,6 @@ func setGamepadRumble(level float32) {
 	level = core.Clamp(level, 0, 1)
 	speed := uint16(level * xinputMaxMotorSpeed)
 	vib := xinputVibration{leftMotor: speed, rightMotor: speed}
-	// LazyProc.Call keeps vib alive across the call; the uintptr(unsafe.Pointer)
-	// is the standard syscall-argument idiom. Ignore the DWORD return (success /
-	// ERROR_DEVICE_NOT_CONNECTED) — a disconnected pad is a harmless no-op.
+	// Ignore the DWORD return — a disconnected pad is a harmless no-op.
 	xinputSetState.Call(uintptr(xinputPrimaryUser), uintptr(unsafe.Pointer(&vib)))
 }

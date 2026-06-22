@@ -129,8 +129,7 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
-// TestCrystalsRoundTrip pins the optional crystals: section: parse position-only
-// rows, re-encode byte-stably; absent section ⇒ no crystals.
+// TestCrystalsRoundTrip pins the optional crystals: section; absent ⇒ no crystals.
 func TestCrystalsRoundTrip(t *testing.T) {
 	withCrystals := sample + "crystals:\n1 1\n3 2\n"
 	mf, err := Parse(strings.NewReader(withCrystals))
@@ -173,8 +172,7 @@ func TestCrystalsRoundTrip(t *testing.T) {
 	}
 }
 
-// TestCrystalsEmptySectionRoundTrips pins that an explicit but empty crystals:
-// section survives as "defined, zero rows", not collapsing to the absent case.
+// TestCrystalsEmptySectionRoundTrips: an explicit empty crystals: section survives as "defined, zero rows".
 func TestCrystalsEmptySectionRoundTrips(t *testing.T) {
 	withEmpty := sample + "crystals:\n"
 	mf, err := Parse(strings.NewReader(withEmpty))
@@ -226,8 +224,7 @@ func TestRejectMissingLayer(t *testing.T) {
 	}
 }
 
-// TestSolidsRoundTrip pins the optional solids: section: a map with a floating
-// cube parses N stacked Height-row planes and re-encodes byte-stably.
+// TestSolidsRoundTrip pins the optional solids: section: a floating cube parses N stacked Height-row planes, re-encodes byte-stably.
 func TestSolidsRoundTrip(t *testing.T) {
 	const gapped = sample + `solids:
 00000
@@ -281,8 +278,7 @@ func TestSolidsRoundTrip(t *testing.T) {
 	}
 }
 
-// TestHeightfieldOmitsSolids confirms a map with no solids: section round-trips
-// without one.
+// TestHeightfieldOmitsSolids confirms a map with no solids: round-trips without one.
 func TestHeightfieldOmitsSolids(t *testing.T) {
 	mf, err := Parse(strings.NewReader(sample))
 	if err != nil {

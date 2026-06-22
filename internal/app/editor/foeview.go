@@ -56,8 +56,7 @@ type sliderDragState struct {
 // noSliderDrag is the released/idle value (idx == -1).
 var noSliderDrag = sliderDragState{idx: -1}
 
-// update advances one frame of a drag: no-op when idle; ends the drag when held
-// is false; else applies apply(idx) (snap field to mouse + side effects).
+// update advances one drag frame: no-op idle, ends when !held, else apply(idx).
 func (d *sliderDragState) update(held bool, fieldCount int, apply func(idx int)) {
 	if d.idx < 0 {
 		return
@@ -93,15 +92,12 @@ const (
 	sliderHitPadY = float32(9)
 )
 
-// foeViewBtnLabels is the single label source for the action row (layout + draw
-// share it so text and hit rects can't drift).
+// foeViewBtnLabels is the single label source for the action row (layout + draw share it).
 var foeViewBtnLabels = []string{"Save", "Reset", "Close"}
 
-// foeViewTabLabels names the two panes (index == State.foeViewTab): Layout =
-// slider stack, Asset = sprite-PNG strip.
+// foeViewTabLabels names the panes (index == State.foeViewTab).
 var foeViewTabLabels = []string{"Layout", "Asset"}
 
-// Visualizer tab indices.
 const (
 	foeTabLayout = 0
 	foeTabAsset  = 1
@@ -119,8 +115,7 @@ var assetFields = []sliderField[core.EnemyVisualOverride]{
 	{Label: "Saturate", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.Saturation) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.Saturation = float32(v) }, Min: -1, Max: 1, Step: 0.05, Format: "%.2f"},
 	{Label: "Dither", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.Dither) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.Dither = float32(v) }, Min: 0, Max: 1, Step: 0.05, Format: "%.2f"},
 	{Label: "GameBoy", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.GameBoy) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.GameBoy = float32(v) }, Min: 0, Max: 1, Step: 0.05, Format: "%.2f"},
-	// Colors caps the palette to N best colors (median-cut); 0 = off, 2..64 active
-	// (1 treated as off). Integer step so it reads as a count, not 0..1 intensity.
+	// Colors caps the palette to N colors (median-cut); 0 = off, 2..64 active (1 = off).
 	{Label: "Colors", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.MaxColors) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.MaxColors = float32(v) }, Min: 0, Max: 64, Step: 1, Format: "%.0f"},
 }
 
@@ -132,9 +127,8 @@ var assetActionLabels = []string{"Revert"}
 
 const assetActionRevert = 0
 
-// applyAssetAction runs Asset-tab button `i` against override `ov`. Shared by
-// both visualizers (differ only in &s.foeVisual vs &s.partyVisual). default is an
-// explicit no-op so a caseless label reads as a gap, not a silent Revert.
+// applyAssetAction runs Asset-tab button `i` against override `ov` (shared).
+// default is an explicit no-op so a caseless label reads as a gap, not Revert.
 func applyAssetAction(s *State, ov *core.EnemyVisualOverride, i int) {
 	switch i {
 	case assetActionRevert:
@@ -161,9 +155,8 @@ func visualizerFooterHint(noun, slug string) string {
 	return "orange sphere = particle origin   ·   cyan = hit glyph   ·   saves to " + file + " as \"" + slug + "\""
 }
 
-// clearVisualAdjustments zeroes the FX fields (Asset-tab Revert); tint and
-// placement untouched. Driven off assetFields (0 is neutral for all) so a new
-// slider row clears automatically.
+// clearVisualAdjustments zeroes the FX fields (Asset-tab Revert); tint/placement
+// untouched. Driven off assetFields so a new slider row clears automatically.
 func clearVisualAdjustments(ov *core.EnemyVisualOverride) {
 	for _, f := range assetFields {
 		f.Set(ov, 0)

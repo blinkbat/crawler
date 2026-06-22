@@ -1,25 +1,25 @@
 // Package mapfile is the on-disk representation of an explorable area: plain
-// text, multi-section — header lines, then one ASCII grid per layer (walls /
-// floor / decor / props / ceiling / elevation), then enemy / chest / door
-// spawn sections. Diffs cleanly in git; editor layers map 1:1 to sections.
+// text, multi-section — header lines, one ASCII grid per layer (walls / floor /
+// decor / props / ceiling / elevation), then enemy / chest / door spawn
+// sections. Diffs cleanly in git; editor layers map 1:1 to sections.
 //
 // Layer character conventions:
 //
-//	walls  : per-tile CLIFF-FACE SKIN (legacy section name; no longer blocks —
-//	         a wall is the rendered vertical face of an elevation step, shown
-//	         only where elevation exposes a face). '.' plain rock (default),
-//	         '#' rock, '+' light ivy, '=' heavy ivy, '&' cracked, '$' crumbling.
+//	walls  : per-tile CLIFF-FACE SKIN (legacy name; no longer blocks — the
+//	         rendered vertical face of an elevation step, shown only where
+//	         elevation exposes a face). '.' plain rock (default), '#' rock,
+//	         '+' light ivy, '=' heavy ivy, '&' cracked, '$' crumbling.
 //	floor  : '.' auto-variant (per-tile hash), 'g' grass, 'd' dirt,
 //	         'k' dark grass, 's' stone, 'c' cobblestone path, 'w' planks,
 //	         '~' shallow water, 'W' deep water (blocks), 'n' sand, 'i' snow,
-//	         '^'/'>'/'v'/'<' ramp ascending N/E/S/W (walkable; bridges the
-//	         tile's elevation level to one higher in the arrow's direction)
+//	         '^'/'>'/'v'/'<' ramp ascending N/E/S/W (walkable; bridges the tile's
+//	         elevation to one level higher in the arrow's direction)
 //	decor  : '.' auto-scatter, '_' force-empty, 'b' bush, 'm' mushroom,
 //	         'p' pebble cluster, ',' tall grass, 'f' wildflowers,
 //	         'v' clover, 'r' reeds, 'o' bones, 'x' scorch, '!' blood,
 //	         '*' cobweb, 't' stump, 'l' fallen log, 'L' leaf pile,
-//	         'A' archway anchor (left), 'a' archway tail (right) — both
-//	         walkable, arch spans 2 tiles along +X; 'y' lilypad. All never block.
+//	         'A' archway anchor (left), 'a' archway tail (right) — arch spans
+//	         2 tiles along +X; 'y' lilypad. All never block.
 //	props  : '.' empty, 'T' tree, 'X' tree XL, '|' tall tree,
 //	         '@' twin trees, '/' young tree, 'O' boulder,
 //	         'B' bush (large), 'C' crate, 'R' barrel, 'U' urn,
@@ -27,14 +27,14 @@
 //	         'M' statue, 'Q' obelisk, 'F' fountain,
 //	         'K' rock cairn (1 tile), 'J' rock formation anchor (top-left of a
 //	         2×2 footprint), 'j' formation tail (other 3 tiles). All blocking;
-//	         the anchor's mesh covers the footprint and tails render nothing.
+//	         the anchor's mesh covers the footprint, tails render nothing.
 //	ceiling  : '.' open (sky shows through), '#' solid overhead slab.
 //	elevation: per-tile ground LEVEL — '0'..'9' then 'A'..'K' for 10..20
-//	         (base-36, one char/cell; blank/absent ⇒ '0', flat). World is built
-//	         entirely from this: walkable baseline at level 10, walls/cliffs
-//	         above, pits below. A ramp floor tile stores its LOW level and rises
-//	         one level toward its arrow; any unramped level change between
-//	         adjacent tiles is an impassable cliff (renders a face). Optional.
+//	         (base-36, one char/cell; blank/absent ⇒ '0', flat). The world is
+//	         built entirely from this: walkable baseline at level 10, cliffs
+//	         above, pits below. A ramp tile stores its LOW level; any unramped
+//	         level change between adjacent tiles is an impassable cliff (renders
+//	         a face). Optional.
 package mapfile
 
 import (
@@ -68,16 +68,14 @@ type MapFile struct {
 	// Elevation is the optional sixth grid (per-tile ground LEVEL); empty on
 	// load for pre-elevation maps, which the loader fills all-'0' (flat).
 	Elevation []string
-	// Solids is the optional voxel stack: Solids[level] is a full Height×Width
-	// grid of cube/air chars ('0' = air, else a cube's material char), planes
-	// stacked lowest-first. Written ONLY for a map with a gap (floating cube over
-	// air) the single-height elevation layer can't express; a pure heightfield
-	// omits it and stays byte-identical. When present, elevation: is still
-	// written (column tops) as a downgrade for readers that ignore solids:.
+	// Solids is the optional voxel stack: Solids[level] is a Height×Width grid of
+	// cube/air chars ('0' = air, else a cube's material char), planes lowest-first.
+	// Written ONLY for a gap (floating cube over air) the single-height elevation
+	// layer can't express; a heightfield omits it, byte-identical. When present,
+	// elevation: is still written (column tops) for readers that ignore solids:.
 	Solids [][]string
-	// PropLevels is the optional per-tile prop-LEVEL grid: base-36 voxel level
-	// the prop sits on, or '.' = auto (column's lowest standable surface).
-	// Written ONLY when some prop sits above its auto surface (tree on a bridge).
+	// PropLevels is the optional per-tile prop-LEVEL grid: base-36 voxel level, or
+	// '.' = auto. Written ONLY when some prop sits above its auto surface.
 	PropLevels []string
 	// DecorLevels is the decor analogue of PropLevels.
 	DecorLevels []string
@@ -99,14 +97,12 @@ type MapFile struct {
 	// Crystals is the authored healing-crystal list (one tile position each);
 	// optional.
 	Crystals []MapCrystal
-	// CrystalsDefined records whether the file carried a crystals: header at all,
-	// distinguishing "present but empty" (author wants zero) from "absent" (a
-	// legacy map, which the runtime fills with a default entrance crystal).
+	// CrystalsDefined distinguishes "crystals: present but empty" (author wants
+	// zero) from "absent" (legacy map; runtime fills a default entrance crystal).
 	// Encode writes the section whenever set, so a zero-crystal map stays zero.
 	CrystalsDefined bool
-	// Dialogs is the authored conversation list — one OPAQUE JSON object per line
-	// in the optional dialogs: section. This leaf package stays JSON-agnostic
-	// (verbatim read/write); core marshals DialogDefinition to/from these.
+	// Dialogs is the authored conversation list — one OPAQUE JSON object per line.
+	// This leaf package stays JSON-agnostic (verbatim); core marshals DialogDefinition.
 	Dialogs []string
 	// Triggers is the authored dialog-trigger list — opaque JSON per line, same
 	// verbatim handling as Dialogs (core marshals DialogTrigger).
@@ -129,8 +125,7 @@ type MapPack struct {
 	AI string
 }
 
-// Pack AI names — canonical on-disk strings for each core.PackAI value. Defined
-// here so the leaf format never imports core; core aliases these via a table.
+// Pack AI names — canonical on-disk strings for each core.PackAI value.
 const (
 	PackAINoneName        = "none"
 	PackAIJunkyardDogName = "junkyard_dog"
@@ -148,15 +143,12 @@ var PackAINames = [...]string{
 	PackAISkittishName,
 }
 
-// inBounds reports whether (x,z) lies inside a w×h map. (core has its own
-// inBoundsWH; mapfile can't import core.)
+// inBounds reports whether (x,z) lies inside a w×h map.
 func inBounds(x, z, w, h int) bool {
 	return x >= 0 && x < w && z >= 0 && z < h
 }
 
-// nameInList reports whether s case-insensitively matches one of names. Shared
-// by the pack-AI / door-style / facing validators so they can't drift on
-// case-fold policy.
+// nameInList reports whether s case-insensitively matches one of names.
 func nameInList(s string, names []string) bool {
 	low := strings.ToLower(s)
 	for _, name := range names {
@@ -173,8 +165,8 @@ func IsPackAIName(s string) bool {
 }
 
 // splitPackMembers parses a pack's member field: comma-separated members, an
-// optional single ';' splitting FRONT (before) from BACK (after). Returns the
-// flat front-first list and how many trailing entries are back row.
+// optional ';' splitting FRONT (before) from BACK (after). Returns the flat
+// front-first list and the back-row count.
 func splitPackMembers(field string) (members []string, backCount int, err error) {
 	frontStr, backStr := field, ""
 	if i := strings.IndexByte(field, ';'); i >= 0 {
@@ -191,8 +183,8 @@ func splitPackMembers(field string) (members []string, backCount int, err error)
 	return append(front, back...), len(back), nil
 }
 
-// parsePackGroup splits one comma-separated member group, trimming each token
-// and rejecting an empty one. An empty/whitespace group yields no members.
+// parsePackGroup splits one comma-separated member group, rejecting empty tokens;
+// an empty/whitespace group yields no members.
 func parsePackGroup(s string) ([]string, error) {
 	if strings.TrimSpace(s) == "" {
 		return nil, nil
@@ -229,9 +221,8 @@ type MapChest struct {
 	Z     int
 }
 
-// EmptyChestToken is the placeholder for a chest with no items. Kept out of the
-// item-name registry so it can't shadow a real ItemDefinition.Name. Exported so
-// core's reserved-item-name guard cites this one source.
+// EmptyChestToken is the placeholder for a chest with no items (kept out of the
+// item registry so it can't shadow a real ItemDefinition.Name).
 const EmptyChestToken = "(empty)"
 
 // MapDoor is one authored door at a tile. On-disk format:
@@ -317,23 +308,20 @@ func IsDoorStyleName(s string) bool {
 	return nameInList(s, DoorStyleNames[:])
 }
 
-// Ext is the canonical map-file extension. Lives here so core, the editor, and
-// List* reference it rather than the literal, making a rename one-line.
+// Ext is the canonical map-file extension.
 const Ext = ".map"
 
 // Ceiling-layer sentinels: open ('.') = sky shows through, solid ('#') = slab.
-// core.TileCeilingOpen / TileCeilingSolid alias these.
 const (
 	CeilingOpenChar  = '.'
 	CeilingSolidChar = '#'
 )
 
 // ElevationGroundChar is the sentinel for the lowest ground level (0); blank/
-// absent elevation seeds to it. core.ElevationGround aliases it.
+// absent elevation seeds to it.
 const ElevationGroundChar = '0'
 
 // AssetDirMode / AssetFileMode are os mode bits for auto-created asset dirs/files.
-// Defined here so writers needn't import core; core's equivalents alias these.
 const (
 	AssetDirMode  = 0o755
 	AssetFileMode = 0o644
@@ -395,9 +383,8 @@ const (
 	slotFaces
 )
 
-// Section header names — on-disk section labels (the header line is name+colon,
-// e.g. "walls:"). Referenced by sectionFor (parse) and Encode (write) so they
-// can't drift; exported so core's Area↔MapFile converter cites them too.
+// Section header names — on-disk labels (header line is name+colon); sectionFor
+// and Encode share these so reader and writer can't drift.
 const (
 	SectionWalls         = "walls"
 	SectionFloor         = "floor"
@@ -418,9 +405,8 @@ const (
 	SectionFaces         = "faces"
 )
 
-// Header-line keys — the preamble's "key: value" lines (not "key:" section
-// headers). Same "one spelling, both sides" rule: parseHeaderLine reads, Encode
-// writes.
+// Header-line keys — the preamble's "key: value" lines. parseHeaderLine reads,
+// Encode writes (one spelling, both sides).
 const (
 	headerName      = "name"
 	headerMaterials = "materials"
@@ -464,15 +450,13 @@ var layerSections = []layerSection{
 	{SectionFaces, slotFaces, nil},
 }
 
-// GridLayerCount is the number of grid (string-row) layers — the layerSections
-// rows with a field accessor. Computed in init from the table; exported so core
-// can assert its gridLayers() stays in lockstep (a 7th layer on either side
-// trips a startup panic instead of silently failing to round-trip).
+// GridLayerCount is the number of grid layers (layerSections rows with a field
+// accessor), computed in init; exported so core asserts its gridLayers() stays in
+// lockstep (a 7th layer on either side panics at startup).
 var GridLayerCount int
 
-// init asserts layerSections covers every slot (slotWalls..slotFaces) exactly
-// once — a new layerSlot without a table row panics at startup instead of
-// parsing as slotNone. Also tallies GridLayerCount.
+// init asserts layerSections covers every slot (slotWalls..slotFaces) exactly once
+// (a missing slot panics) and tallies GridLayerCount.
 func init() {
 	seen := make(map[layerSlot]bool, len(layerSections))
 	for _, s := range layerSections {
@@ -615,14 +599,12 @@ func Parse(r io.Reader) (MapFile, error) {
 		}
 
 		if state == slotChests {
-			// Chest row: "item[,item...] X Z" or "(empty) X Z". Item names are
-			// canonical ItemDefinition.Name strings.
+			// Chest row: "item[,item...] X Z" or "(empty) X Z" (canonical ItemDefinition.Name).
 			fields := strings.Fields(line)
 			if len(fields) < chestFieldsMin {
 				return mf, fmt.Errorf("line %d: expected '<item[,item...]> <x> <z>' or '(empty) <x> <z>', got %q", lineNo, raw)
 			}
-			// Item names may contain whitespace, so take the LAST two fields as
-			// X/Z and the rest as one item-list token.
+			// Item names may contain whitespace, so take the LAST two fields as X/Z.
 			xField := fields[len(fields)-2]
 			zField := fields[len(fields)-1]
 			itemsToken := strings.Join(fields[:len(fields)-2], " ")
@@ -676,9 +658,8 @@ func Parse(r io.Reader) (MapFile, error) {
 		}
 
 		if state == slotDialogs {
-			// One opaque JSON object per line, stored verbatim (core parses it).
-			// A JSON object ends with '}', so it can't look like a section header
-			// (which ends with ':').
+			// One opaque JSON object per line, stored verbatim (core parses it). It
+			// ends with '}', so it can't look like a section header (ends with ':').
 			mf.Dialogs = append(mf.Dialogs, line)
 			continue
 		}
@@ -737,15 +718,13 @@ func Parse(r io.Reader) (MapFile, error) {
 			continue
 		}
 
-		// Layer grid line. Past Height rows, blanks are tolerated (editors
-		// auto-insert one before the next header) but a non-blank overflow is a
-		// structural error, reported here for a better diagnostic. size: precedes
-		// every grid, so Height is always set.
+		// Layer grid line. Past Height rows, blanks are tolerated (editors auto-insert
+		// one before the next header) but a non-blank overflow is a structural error.
+		// size: precedes every grid, so Height is always set.
 		target := layerSlice(&mf, state)
 		if target == nil {
-			// state is a slot with neither a grid field nor a bespoke arm above —
-			// a new layerSlot added to layerSections without a parse handler.
-			// Unreachable for any valid map.
+			// A slot with neither a grid field nor a bespoke arm above — a new
+			// layerSlot added without a parse handler. Unreachable for valid maps.
 			panic(fmt.Sprintf("mapfile: section slot %d has no parse handler — add a bespoke arm or a grid field accessor", state))
 		}
 		if len(*target) >= mf.Height {
@@ -822,9 +801,8 @@ func parseHeaderLine(mf *MapFile, line string, lineNo int) error {
 	return nil
 }
 
-// validateOptionalGrid dimension-checks an optional single-grid layer
-// (prop_levels / decor_levels): absent is fine, but a present grid must be
-// exactly Height×Width so a ragged plane can't reach the renderer/collision.
+// validateOptionalGrid dimension-checks an optional single-grid layer (prop_levels
+// / decor_levels): absent is fine, but a present grid must be exactly Height×Width.
 func (mf *MapFile) validateOptionalGrid(name string, rows []string) error {
 	n := len(rows)
 	if n == 0 {
@@ -890,9 +868,8 @@ func (mf *MapFile) validate() error {
 	default:
 		return fmt.Errorf("elevation layer has %d rows, size declares %d", len(mf.Elevation), mf.Height)
 	}
-	// solids: optional voxel stack, each plane a full Height×Width grid. Cell
-	// chars aren't constrained here (that alphabet lives in core); only
-	// dimensions, which protects the renderer from a ragged plane.
+	// solids: optional voxel stack, each plane a full Height×Width grid. Only
+	// dimensions checked (cell-char alphabet is core's); guards against a ragged plane.
 	for L, plane := range mf.Solids {
 		if len(plane) != mf.Height {
 			return fmt.Errorf("solids plane %d has %d rows, size declares %d", L, len(plane), mf.Height)
@@ -903,8 +880,7 @@ func (mf *MapFile) validate() error {
 			}
 		}
 	}
-	// prop_levels / decor_levels: optional per-tile level grids; dimension-check
-	// only (the char alphabet is core's concern).
+	// prop_levels / decor_levels: optional per-tile level grids; dimension-check only.
 	if err := mf.validateOptionalGrid(SectionPropLevels, mf.PropLevels); err != nil {
 		return err
 	}
@@ -1028,8 +1004,7 @@ func IsFacingName(s string) bool {
 	return nameInList(s, FacingNames[:])
 }
 
-// parseIntField parses a numeric field with the canonical "line N: bad <name> %q"
-// error wrap the entity-row decoders share.
+// parseIntField parses a numeric field with the shared "line N: bad <name> %q" wrap.
 func parseIntField(s, name string, lineNo int) (int, error) {
 	v, err := strconv.Atoi(s)
 	if err != nil {
@@ -1038,10 +1013,9 @@ func parseIntField(s, name string, lineNo int) (int, error) {
 	return v, nil
 }
 
-// Positional field counts for the non-custom-enemy entity sections, so the
-// parse-time width check and the encode-format verb count cite one source.
-// Sections with an optional trailing column carry both a Legacy and current
-// width; the parser accepts both.
+// Positional field counts for the non-custom-enemy entity sections, so the parse
+// width check and encode-format verb count cite one source. Sections with an
+// optional trailing column carry both a Legacy and current width.
 const (
 	packFieldsLegacy = 3 // "kind[,kind...] X Z" (AI defaults to none)
 	packFields       = 4 // + trailing AI column
@@ -1108,7 +1082,6 @@ var (
 const customEnemyEncodeFormat = "%s %s %d %d %d %d %d %d %d %d %d %d %d %d %d %g %d %s\n"
 
 // fprintfVerbCount counts `%`-verbs in a format string (literal `%%` skipped).
-// Shared by every encode-format ↔ field-count assert below.
 func fprintfVerbCount(format string) int {
 	verbs := 0
 	for i := 0; i < len(format); i++ {
@@ -1239,8 +1212,7 @@ func parseCustomEnemyLine(line string, lineNo int) (MapCustomEnemy, error) {
 }
 
 // writeVerbatimSection emits "name:" + each row verbatim, but ONLY when rows is
-// non-empty so a map without the section stays byte-identical. Shared by the flat
-// string-row sections (prop_levels, decor_levels, dialogs, triggers).
+// non-empty (byte-identical otherwise). Shared by prop_levels/decor_levels/dialogs/triggers.
 func writeVerbatimSection(bw *bufio.Writer, name string, rows []string) {
 	if len(rows) == 0 {
 		return
@@ -1251,8 +1223,7 @@ func writeVerbatimSection(bw *bufio.Writer, name string, rows []string) {
 	}
 }
 
-// Encode writes mf in the canonical .map format. Fixed layer order so maps diff
-// cleanly across edits.
+// Encode writes mf in the canonical .map format; fixed layer order so maps diff cleanly.
 func (mf MapFile) Encode(w io.Writer) error {
 	bw := bufio.NewWriter(w)
 	fmt.Fprintf(bw, headerName+": %s\n", mf.Name)
@@ -1268,9 +1239,8 @@ func (mf MapFile) Encode(w io.Writer) error {
 			fmt.Fprintln(bw, row)
 		}
 	}
-	// solids: appended only for a gapped map (a heightfield omits it, stays
-	// byte-identical). Planes emit lowest-first as contiguous Height-row blocks;
-	// the parser re-splits by Height, so no separator.
+	// solids: appended only for a gapped map (heightfield omits it, byte-identical).
+	// Planes emit lowest-first as contiguous Height-row blocks; parser re-splits by Height.
 	if len(mf.Solids) > 0 {
 		fmt.Fprintln(bw, SectionSolids+":")
 		for _, plane := range mf.Solids {
@@ -1280,11 +1250,10 @@ func (mf MapFile) Encode(w io.Writer) error {
 		}
 	}
 	// prop_levels / decor_levels: appended only when some entity sits above its
-	// auto surface; otherwise omitted, byte-identical (handled in writeVerbatimSection).
+	// auto surface (handled in writeVerbatimSection).
 	writeVerbatimSection(bw, SectionPropLevels, mf.PropLevels)
 	writeVerbatimSection(bw, SectionDecorLevels, mf.DecorLevels)
-	// faces: one line per overridden tile; omitted when none, so base-skin maps
-	// stay byte-identical.
+	// faces: one line per overridden tile; omitted when none (byte-identical).
 	if len(mf.Faces) > 0 {
 		fmt.Fprintln(bw, SectionFaces+":")
 		for _, f := range mf.Faces {
@@ -1330,9 +1299,8 @@ func (mf MapFile) Encode(w io.Writer) error {
 			fmt.Fprintf(bw, doorEncodeFormat, d.Name, d.TargetMap, d.TargetDoor, d.X, d.Z, d.Facing, style)
 		}
 	}
-	// crystals: emits when the map defines crystals at all (rows OR CrystalsDefined);
-	// a legacy map that never carried the section stays byte-identical. Rows are
-	// position-only; charge state lives in SaveData.
+	// crystals: emits when defined at all (rows OR CrystalsDefined); a legacy map
+	// stays byte-identical. Rows are position-only; charge state lives in SaveData.
 	if mf.CrystalsDefined || len(mf.Crystals) > 0 {
 		fmt.Fprintln(bw, SectionCrystals+":")
 		for _, c := range mf.Crystals {
@@ -1389,8 +1357,7 @@ func Save(path string, mf MapFile) error {
 		return err
 	}
 	// Capture the close error too — a deferred Close would swallow flush failures
-	// (network drive, quota) and the editor's "Saved" toast would lie. Prefer the
-	// encode error if both fire.
+	// (network drive, quota). Prefer the encode error if both fire.
 	err = mf.Encode(f)
 	if cerr := f.Close(); err == nil {
 		err = cerr
@@ -1398,9 +1365,8 @@ func Save(path string, mf MapFile) error {
 	return err
 }
 
-// mapDirEntries returns dir's non-dir .map entries (case-insensitive) — the
-// shared read+filter behind List/ListByModTime. A missing dir is NOT an error
-// (returns nil, nil) for first-run convenience.
+// mapDirEntries returns dir's non-dir .map entries (case-insensitive) — the shared
+// read+filter behind List/ListByModTime. A missing dir is NOT an error (nil, nil).
 func mapDirEntries(dir string) ([]os.DirEntry, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

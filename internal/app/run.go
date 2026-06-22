@@ -33,9 +33,9 @@ type appState struct {
 }
 
 func Run() {
-	// FlagWindowHighdpi stays off: on Windows 1.5× it drifts HUD coords because
-	// GetScreenWidth is logical while the framebuffer is scaled. Re-enable only
-	// after the layout code consistently uses one of GetScreenWidth/GetRenderWidth.
+	// FlagWindowHighdpi stays off: on Windows 1.5× it drifts HUD coords (logical
+	// GetScreenWidth vs scaled framebuffer). Re-enable only once layout uses one
+	// of GetScreenWidth/GetRenderWidth consistently.
 	rl.SetConfigFlags(rl.FlagVsyncHint | rl.FlagWindowResizable)
 	rl.InitWindow(core.InitialWindowWidth, core.InitialWindowHeight, "Crawler")
 	defer rl.CloseWindow()
@@ -172,11 +172,10 @@ func returnToTitleScene(state *appState) {
 
 // applyAreaTransition loads the destination map and rebuilds the GameState so
 // the player exits through the matching door. Party progression carries; only
-// the world (area, packs, chests, doors) swaps. Battle/chest/modal state is
-// dropped (those flags would dangle pointers into the old area).
+// the world swaps. Battle/chest/modal state drops (would dangle into the old area).
 //
-// Fog-of-war: the destination's Visited is allocated fresh and the source's is
-// discarded, so returning to a map re-fogs it (intentional per-area discovery).
+// Fog-of-war: the destination's Visited is fresh and the source's discarded, so
+// returning re-fogs (intentional per-area discovery).
 func applyAreaTransition(g *core.GameState) error {
 	target := g.PendingTransition.TargetMap
 	doorName := g.PendingTransition.TargetDoor
@@ -227,9 +226,8 @@ func applyAreaTransition(g *core.GameState) error {
 	return nil
 }
 
-// doorExitTile picks the tile the player lands on through a door. Prefer one
-// step in the door's facing (so they don't immediately re-trigger); fall back
-// to the door tile if that's blocked or holds another door.
+// doorExitTile picks the tile the player lands on through a door: one step in
+// the door's facing (so they don't re-trigger), else the door tile if blocked.
 func doorExitTile(area core.AreaDefinition, doors []core.Door, dest core.Door) (int, int) {
 	dx, dz := core.FacingVector(dest.Facing)
 	fx, fz := dest.TileX+dx, dest.TileZ+dz
@@ -279,13 +277,10 @@ func updateEditorScene(state *appState, dt float32) {
 func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	camera := render.Camera(game)
 	// Retro-filter capture (Debug ▸ Retro Filters): when a filter is active the
-	// environment pass renders into an off-screen texture that EndRetroCapture
-	// blits through the filter shader, so the WORLD crunches while sprites/HUD/
-	// popups/weather stay crisp. Filters off = a single bool check, drawn direct.
-	//
-	// Skybox exemption ("Filter Skybox"): when exempt, the sky is drawn CRISP to
-	// the backbuffer up front and the capture is cleared TRANSPARENT, so the
-	// filtered environment alpha-composites over the clean sky at blit time.
+	// environment renders into an off-screen texture EndRetroCapture blits
+	// through the shader, so the WORLD crunches while sprites/HUD/weather stay
+	// crisp. Skybox exemption ("Filter Skybox"): the sky is drawn CRISP up front
+	// and the capture cleared TRANSPARENT, so the environment composites over it.
 	skyCrisp := core.AnyRetroFilterActive(&game.RetroFilters) && !game.RetroFilterSky
 	if skyCrisp {
 		// Doubles as the backbuffer depth wipe for the crisp-sky arm.
@@ -293,11 +288,9 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 		render.DrawSkyBackground(assets, game)
 	}
 	filtered := render.BeginRetroCapture(game)
-	// Explicit clear is REQUIRED (bisect-confirmed): without it world geometry
-	// flickers behind stale depth-buffer fragments this build carries across
-	// frames despite BeginDrawing's implicit clear. The color is irrelevant
-	// (DrawSkyBackground overdraws it) — the call is for the depth wipe.
-	// Inside a capture it lands on the capture's own buffers; the crisp-sky arm
+	// Explicit clear is REQUIRED (bisect-confirmed): without it geometry flickers
+	// behind stale depth fragments this build carries across frames. Color is
+	// irrelevant (overdrawn) — the call is for the depth wipe. The crisp-sky arm
 	// clears to TRANSPARENT so the sky survives the blit.
 	if filtered && skyCrisp {
 		rl.ClearBackground(rl.Blank)
@@ -305,20 +298,10 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 		rl.ClearBackground(render.SkyClearColor)
 		render.DrawSkyBackground(assets, game)
 	}
-	// Sprite exemption (the menu's "Filter Sprites" toggle): when filters are
-	// active and sprites are exempt, the enemy/party billboards are held OUT of
-	// the captured environment pass and drawn crisp on top afterward (see
-	// DrawCrispSpritePass) so the per-asset visuals.json FX baked into each
-	// sprite shows through without the screen filter stacking over it. When
-	// sprites are NOT exempt (or no filter is active), they draw inline here and
-	// crunch with the world.
+	// Sprite exemption ("Filter Sprites"): when exempt, billboards draw crisp on
+	// top (DrawCrispSpritePass) so their baked FX shows through; else inline.
 	exemptSprites := filtered && !game.RetroFilterSprites
-	// 3D SCENE pass — sky, world geometry, chests, doors, and (unless exempt) the
-	// sprites in one pass. Drawing the sprites inside the capture means a retro
-	// filter crunches the WHOLE world uniformly; exempting them keeps them crisp.
-	// Per-foe look comes from the editor's visuals.json FX baked into each sprite
-	// texture either way. HUD, popups, weather, and menus draw later in screen
-	// space and stay crisp.
+	// 3D SCENE pass — sky, geometry, chests, doors, and (unless exempt) sprites.
 	rl.BeginMode3D(camera)
 	render.DrawWorld(camera, game, assets)
 	render.DrawChests(camera, game, assets)
@@ -327,55 +310,42 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	if !exemptSprites {
 		render.DrawEnemies(camera, game, assets)
 		render.DrawPartySprites(camera, game, assets)
-		// VFX inside the 3D pass so billboard particles depth-sort with the rest of
-		// the scene. TickAndDrawVFX drains GameState.VFXQueue (mutating g), advances
-		// the render-side pool by raylib's frame dt, and emits draws for every live
-		// particle. Kept after the party draw so impact sparks paint over the sprite,
-		// not under.
+		// VFX in the 3D pass so particles depth-sort; after the party draw so
+		// sparks paint over the sprite. TickAndDrawVFX drains VFXQueue (mutates g).
 		render.TickAndDrawVFX(camera, game, assets)
 	}
 	rl.EndMode3D()
-	// Close the retro capture and blit the FILTERED environment to the backbuffer
-	// — opaquely in the normal arm, alpha-composited over the crisp sky in the
-	// skybox-exempt arm.
+	// Blit the FILTERED environment to the backbuffer — opaque normally,
+	// alpha-composited over the crisp sky in the skybox-exempt arm.
 	if filtered {
 		render.EndRetroCapture(game, skyCrisp)
-		// Then lay the crisp, unfiltered sprites over the filtered environment,
-		// re-using the capture's depth so they still occlude behind walls. The
-		// VFX tick (state-mutating) runs exactly once per frame — here in the
-		// exempt arm, inline above otherwise.
+		// Crisp sprites over it, reusing the capture's depth so they still occlude.
+		// The state-mutating VFX tick runs once/frame: here when exempt, inline above otherwise.
 		if exemptSprites {
 			render.DrawCrispSpritePass(camera, game, assets)
 		}
 	}
-	// Ambient rain sits above the 3D world (darkening it) but below the
-	// world-space popups and HUD, so combat numbers, prompts, and menus
-	// stay readable through the storm. No-op when the weather is clear.
+	// Ambient rain — above the world, below popups/HUD. No-op when clear.
 	render.DrawWeather(game)
-	// Danger vignette — claret edges breathing while an enemy is mid-swing
-	// (defend timing). Same layer slot as the weather wash: over the world,
-	// under every popup and HUD pane. No-op outside that phase.
+	// Danger vignette — claret edges while an enemy is mid-swing. Weather-wash
+	// layer; no-op outside that phase.
 	render.DrawBattleDangerVignette(game)
 	render.DrawChestPrompt(camera, game, assets)
 	render.DrawCrystalPrompt(camera, game, assets)
-	// Hit-glyph clarity shapes over struck targets — HUD pass (crisp 2D), but
-	// before the damage popups so the number floats on top of the glyph.
+	// Hit-glyph shapes over struck targets — before the damage popups so the
+	// number floats on top of the glyph.
 	render.DrawHitGlyphs(camera, game, assets)
 	render.DrawDamagePopups(camera, game, assets)
 	render.DrawQualityPopup(camera, game, assets)
 	render.DrawDebugOverlay(camera, game, assets)
-	// DrawOverlay paints the HUD AND any open top-level menu (incl. the Tome /
-	// character panels), cross-fading between them — so the panels overlay is no
-	// longer a separate call here; it's drawn through DrawOverlay's fade path.
+	// DrawOverlay paints the HUD AND any open top-level menu, cross-fading
+	// between them (the panels overlay rides this fade path, not a separate call).
 	render.DrawOverlay(game, assets)
 	render.DrawChestModal(game, assets)
 	render.DrawLevelUpModal(game, assets)
 	render.DrawDoorPrompt(game, assets)
-	// Dialog sits last so the conversation overlay paints on top of every
-	// other explore modal (it's the highest-priority modal — see
-	// core.ActiveModal / ModalDialog).
+	// Dialog over every other explore modal (highest-priority — see ModalDialog).
 	render.DrawDialogModal(game, assets)
-	// Quit confirm is the top-priority modal (ModalQuitConfirm) — paint it over
-	// everything, including a dialog, so a pending quit decision is never hidden.
+	// Quit confirm (ModalQuitConfirm) over everything, even a dialog.
 	render.DrawQuitConfirm(game, assets)
 }

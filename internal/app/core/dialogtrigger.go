@@ -1,16 +1,10 @@
 package core
 
-// Dialog triggers — the world-event seam that auto-starts an authored
-// conversation. A trigger names a dialog id plus the event that fires it:
-//
-//   - enterTile: player completes a step onto tile (X,Z).
-//   - foeKilled: party has defeated FoeKind at least FoeKills times.
-//
-// Triggers live on the AreaDefinition (round-tripped in the .map `triggers:`
-// section). The runtime fires them from explore (enter-tile, on step-land) and
-// battle (foe-killed, on a won fight), guarded by GameState.TriggersFired so a
-// `Once` trigger doesn't repeat. The foeKilled/tileVisited predicates are
-// shared with dialog.go's choice-gating conditions.
+// Dialog triggers auto-start an authored conversation on a world event
+// (enterTile: a step onto (X,Z); foeKilled: FoeKind defeated >= FoeKills times).
+// Fired from explore/battle, guarded by GameState.TriggersFired so a `Once`
+// trigger doesn't repeat. The foeKilled/tileVisited predicates are shared with
+// dialog.go's choice-gating conditions.
 
 // DialogTriggerKind tags which world event fires a trigger.
 type DialogTriggerKind string
@@ -20,15 +14,13 @@ const (
 	DialogTriggerFoeKilled DialogTriggerKind = "foeKilled"
 )
 
-// DialogTriggerKinds returns the authorable trigger kinds in canonical (editor
-// display) order — the single source the editor's kind dropdown iterates.
+// DialogTriggerKinds returns the authorable trigger kinds in canonical order (the editor's dropdown source).
 func DialogTriggerKinds() []DialogTriggerKind {
 	return []DialogTriggerKind{DialogTriggerEnterTile, DialogTriggerFoeKilled}
 }
 
-// DialogTrigger auto-starts DialogID when its event fires. Once = fire only
-// the first time (tracked in GameState.TriggersFired by ID, persisted via
-// SaveData); a non-Once trigger can re-fire. ID is the fired-set key.
+// DialogTrigger auto-starts DialogID when its event fires. Once = fire only the
+// first time (tracked in GameState.TriggersFired by ID). ID is the fired-set key.
 type DialogTrigger struct {
 	ID       string            `json:"id"`
 	Kind     DialogTriggerKind `json:"kind"`
@@ -37,8 +29,7 @@ type DialogTrigger struct {
 	// enterTile params.
 	TileX int `json:"tileX,omitempty"`
 	TileZ int `json:"tileZ,omitempty"`
-	// foeKilled params (FoeKills <= 0 means "at least once"). FoeKind is NOT
-	// omitempty: EnemyRat==0, so a Rat trigger must still serialize the field.
+	// foeKilled params (FoeKills <=0 means once). FoeKind NOT omitempty (EnemyRat==0).
 	FoeKind  EnemyKind `json:"foeKind"`
 	FoeKills int       `json:"foeKills,omitempty"`
 }
@@ -53,8 +44,7 @@ func TriggersFromLines(lines []string) ([]DialogTrigger, error) {
 	return jsonObjectsFromLines[DialogTrigger](lines, "trigger")
 }
 
-// foeKillCountMet reports whether the bestiary records at least the required
-// kills of kind. Shared by the foeKilled condition and trigger.
+// foeKillCountMet reports whether the bestiary records the required kills. Shared by condition + trigger.
 func foeKillCountMet(g *GameState, kind EnemyKind, kills int) bool {
 	if g == nil {
 		return false
@@ -62,8 +52,7 @@ func foeKillCountMet(g *GameState, kind EnemyKind, kills int) bool {
 	return g.Bestiary.Entry(kind).Kills >= RequiredFoeKills(kills)
 }
 
-// RequiredFoeKills normalizes a foe-kill threshold: <= 0 means "at least
-// once". The single home for the "0 = 1" rule (eval + editor labels can't drift).
+// RequiredFoeKills normalizes a foe-kill threshold: <= 0 means once. Single home for the "0 = 1" rule.
 func RequiredFoeKills(kills int) int {
 	if kills < 1 {
 		return 1
@@ -71,9 +60,7 @@ func RequiredFoeKills(kills int) int {
 	return kills
 }
 
-// tileVisited reports whether (x,z) is revealed on the Visited fog grid.
-// Bounds-checked (out-of-range reads as "not visited"). Shared by the
-// tileVisited condition + trigger.
+// tileVisited reports whether (x,z) is revealed on the Visited grid (bounds-checked). Shared by condition + trigger.
 func tileVisited(g *GameState, x, z int) bool {
 	if g == nil || z < 0 || z >= len(g.Visited) || x < 0 || x >= len(g.Visited[z]) {
 		return false
@@ -81,9 +68,7 @@ func tileVisited(g *GameState, x, z int) bool {
 	return g.Visited[z][x]
 }
 
-// FoeKindName resolves an enemy kind to its singular display name, falling
-// back to a generic phrase for an unregistered kind. Shared by dialog
-// condition reasons and the editor's foe labels.
+// FoeKindName resolves an enemy kind to its singular display name (fallback for unregistered kinds).
 func FoeKindName(kind EnemyKind) string {
 	if def, ok := EnemyInfoOk(kind); ok {
 		return def.SingularName
@@ -96,8 +81,7 @@ func triggerAlreadyFired(g *GameState, t DialogTrigger) bool {
 	return t.Once && g.TriggersFired[t.ID]
 }
 
-// markTriggerFired records a Once trigger as fired (lazy-init the set).
-// Non-Once triggers are never recorded — they may re-fire.
+// markTriggerFired records a Once trigger as fired (lazy-init the set); non-Once never recorded.
 func markTriggerFired(g *GameState, t DialogTrigger) {
 	if !t.Once {
 		return
@@ -109,8 +93,7 @@ func markTriggerFired(g *GameState, t DialogTrigger) {
 }
 
 // fireFirstMatchingTrigger starts the first not-yet-fired trigger satisfying
-// pred and returns true if one opened. No-op when a dialog is already open (a
-// trigger can't stomp an in-progress conversation); only one starts per call.
+// pred. No-op when a dialog is already open; only one starts per call.
 func fireFirstMatchingTrigger(g *GameState, pred func(DialogTrigger) bool) bool {
 	if g == nil || g.DialogOpen {
 		return false
@@ -127,16 +110,14 @@ func fireFirstMatchingTrigger(g *GameState, pred func(DialogTrigger) bool) bool 
 	return false
 }
 
-// FireEnterTileTriggers starts the first eligible enter-tile dialog for (x,z)
-// and returns true if one opened.
+// FireEnterTileTriggers starts the first eligible enter-tile dialog for (x,z).
 func FireEnterTileTriggers(g *GameState, x, z int) bool {
 	return fireFirstMatchingTrigger(g, func(t DialogTrigger) bool {
 		return t.Kind == DialogTriggerEnterTile && t.TileX == x && t.TileZ == z
 	})
 }
 
-// FireFoeKilledTriggers starts the first eligible foe-killed dialog whose
-// threshold is now met. Called once a battle is won (kills already credited).
+// FireFoeKilledTriggers starts the first eligible foe-killed dialog. Called once a battle is won.
 func FireFoeKilledTriggers(g *GameState) bool {
 	return fireFirstMatchingTrigger(g, func(t DialogTrigger) bool {
 		return t.Kind == DialogTriggerFoeKilled && foeKillCountMet(g, t.FoeKind, t.FoeKills)
