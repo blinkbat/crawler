@@ -48,7 +48,11 @@ func init() {
 	}
 }
 
-// PhaseName returns the HUD label; an out-of-range index panics (array bounds).
+// PhaseName returns the HUD label, or "" for an out-of-range phase (defensive:
+// in-package callers feed 0..TimeOfDayCount-1, but guard a stray external value).
 func PhaseName(p TimeOfDay) string {
+	if p < 0 || int(p) >= TimeOfDayCount {
+		return ""
+	}
 	return phaseNames[p]
 }

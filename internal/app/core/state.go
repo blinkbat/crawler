@@ -124,6 +124,9 @@ func NewGameState(area AreaDefinition) GameState {
 	// Standing level = spawn tile's lowest standable surface (ground), so a
 	// player spawned under a bridge starts on the ground, not the deck.
 	g.Player.Level = spawnLevel(&area, startX, startZ)
+	// Seed region presence from the spawn tile so loading inside a region doesn't
+	// fire its enter trigger — only a later crossing does (see location.go).
+	SeedLocationPresence(&g)
 	RevealRadius(&g, startX, startZ, SightRadius)
 	return g
 }

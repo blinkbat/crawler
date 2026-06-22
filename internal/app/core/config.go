@@ -233,12 +233,12 @@ const (
 	// Reels (slot) minigame — Steal's gamble. Stop ReelCount reels; 3 match =
 	// jackpot, 2 = Good, all distinct = Miss. Spin at ReelSpinMin..Max symbols/sec,
 	// rolled per-reel so they desync (no guaranteed jackpot, but symbols stay readable).
-	ReelTimingDuration = float32(3.2)
+	ReelTimingDuration = float32(4.5)
 	ReelCount          = 3
 	// 3 symbols (was 4) so matches land far more often while a real whiff stays possible.
 	ReelSymbolCount = 3
-	ReelSpinMin     = float32(2.0)
-	ReelSpinMax     = float32(3.25)
+	ReelSpinMin     = float32(3.25)
+	ReelSpinMax     = float32(5.0)
 
 	// Recall (memory) minigame — Arc Bolt's pattern. RecallPatternLength
 	// directions show for RecallRevealTime, then hide; reproduce before

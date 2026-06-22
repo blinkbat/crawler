@@ -249,7 +249,11 @@ func placePacks(a *AreaDefinition) []Pack {
 // doesn't false-warn on a pack the game would silently relocate at runtime.
 func SnappedSpawnPositions(a *AreaDefinition) []SpawnSnap {
 	out := make([]SpawnSnap, 0, len(a.PackSpawns))
-	occupied := map[[2]int]bool{{a.StartTileX, a.StartTileZ}: true}
+	// Seed with the CLAMPED start (the real spawn tile), matching placeChests/
+	// placeCrystals — a raw out-of-bounds start would otherwise let a pack snap
+	// onto the actual spawn tile.
+	sx, sz := a.ClampedStart()
+	occupied := map[[2]int]bool{{sx, sz}: true}
 	for _, spawn := range a.PackSpawns {
 		if len(spawn.Members) == 0 {
 			out = append(out, SpawnSnap{Reason: SpawnSnapEmptyMembers})

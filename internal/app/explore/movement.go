@@ -290,6 +290,10 @@ func openRetroMenu(g *core.GameState) {
 // are intensity sliders (cursor == filter kind); filters LAYER (all applied in
 // one shader). Last rows are Reset All / Close. Back returns to explore.
 func updateRetroMenu(g *core.GameState) {
+	// Snapshot the cursored row BEFORE updateLeafMenu, which may move RetroMenuIndex
+	// via Up/Down this same frame — the Left/Right adjust below must act on the row
+	// drawn highlighted this frame, not the one nav just moved to.
+	adjustRow := g.RetroMenuIndex
 	updateLeafMenu(&g.RetroMenuOpen, &g.RetroMenuIndex, core.RetroMenuCount, func(item int) {
 		switch {
 		case item < int(core.RetroFilterCount):
@@ -310,9 +314,9 @@ func updateRetroMenu(g *core.GameState) {
 	})
 	// Fine intensity adjust on the cursored slider row. Gated on still-open
 	// (updateLeafMenu may have just closed it via Back).
-	if g.RetroMenuOpen && g.RetroMenuIndex < int(core.RetroFilterCount) {
+	if g.RetroMenuOpen && adjustRow < int(core.RetroFilterCount) {
 		if delta := input.CursorLeftRight(); delta != 0 {
-			core.AdjustRetroFilter(&g.RetroFilters[g.RetroMenuIndex], delta)
+			core.AdjustRetroFilter(&g.RetroFilters[adjustRow], delta)
 		}
 	}
 }
@@ -493,7 +497,13 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	// heightfield, fall back to tile-only (pack Level isn't tracked per-surface).
 	packHit := core.PackIndexAtTile(g.Packs, targetX, targetZ)
 	if g.Area.IsVoxel() {
-		packHit = core.PackIndexAtTileLevel(g.Packs, targetX, targetZ, engageLevel)
+		// engageLevel is only meaningful for a resolved cardinal step; without one
+		// (degenerate same-tile target) it defaults to p.Level and could match a pack
+		// on the player's own surface, so gate the level-aware lookup on engageDirOK.
+		packHit = -1
+		if engageDirOK {
+			packHit = core.PackIndexAtTileLevel(g.Packs, targetX, targetZ, engageLevel)
+		}
 	}
 	if packHit >= 0 && !g.EnemiesDisabled && engageReachable {
 		if startTurnToTile(p, targetX, targetZ) {
@@ -680,10 +690,13 @@ func updateAnimation(g *core.GameState, dt float32) float32 {
 	// transition.
 	if finishedKind == core.AnimStep {
 		tryQueueDoorTransition(g)
-		// Enter-tile triggers fire on the same step-land beat. Skip when a door
-		// prompt opened here (portal takes precedence).
+		// Enter-tile + enter-location triggers fire on the same step-land beat. Skip
+		// when a door prompt opened here (portal takes precedence). Location detection
+		// runs even if an enter-tile dialog opened, so its inside-set stays current
+		// (the firing itself no-ops while a dialog is up).
 		if g.DoorPrompt < 0 {
 			core.FireEnterTileTriggers(g, g.Player.TileX, g.Player.TileZ)
+			core.FireEnterLocationTriggers(g, g.Player.TileX, g.Player.TileZ, g.Player.Level)
 		}
 	}
 	// If landing opened an overlay, swallow the remainder so the caller doesn't

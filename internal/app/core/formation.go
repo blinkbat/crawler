@@ -15,8 +15,26 @@ const (
 	RowBack
 )
 
-// EnemyFrontRowCap is how many enemies stand in the front row of a pack.
-const EnemyFrontRowCap = 3
+// EnemyFrontRowCap / EnemyBackRowCap bound a foe pack's two ranks; EnemyPackCap is
+// the resulting member ceiling. Authoring (editor) enforces these so a pack can't
+// seat more than the formation grid renders.
+const (
+	EnemyFrontRowCap = 3
+	EnemyBackRowCap  = 5
+	EnemyPackCap     = EnemyFrontRowCap + EnemyBackRowCap
+)
+
+// PackRowCounts returns how many authored members sit in the front and back rows.
+func PackRowCounts(members []PackMemberRef) (front, back int) {
+	for _, m := range members {
+		if m.Row == RowBack {
+			back++
+		} else {
+			front++
+		}
+	}
+	return front, back
+}
 
 // ShuntEnemyFormation repacks the enemy front row after a death: promote back-row
 // enemies (in slice order) until the front holds min(EnemyFrontRowCap, living total).
@@ -259,6 +277,13 @@ func PartyInEffectiveFront(party []PartyMember, i int) bool {
 		return false
 	}
 	return party[i].Row == RowFront || !PartyFrontHasLiving(party)
+}
+
+// BackRowMeleeBlocked reports whether an attack of class ac launched from slot i
+// can't connect — a melee swing while i sits in the still-protected back row. The
+// single source for the back-row melee gate (combat gating + greyed-out UI rows).
+func BackRowMeleeBlocked(ac AttackClass, party []PartyMember, i int) bool {
+	return ac.IsMelee() && !PartyInEffectiveFront(party, i)
 }
 
 // EnemyFrontHasLiving reports whether any LIVING enemy stands in the front row.

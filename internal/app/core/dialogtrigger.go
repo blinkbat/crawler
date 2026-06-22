@@ -10,13 +10,14 @@ package core
 type DialogTriggerKind string
 
 const (
-	DialogTriggerEnterTile DialogTriggerKind = "enterTile"
-	DialogTriggerFoeKilled DialogTriggerKind = "foeKilled"
+	DialogTriggerEnterTile     DialogTriggerKind = "enterTile"
+	DialogTriggerEnterLocation DialogTriggerKind = "enterLocation"
+	DialogTriggerFoeKilled     DialogTriggerKind = "foeKilled"
 )
 
 // DialogTriggerKinds returns the authorable trigger kinds in canonical order (the editor's dropdown source).
 func DialogTriggerKinds() []DialogTriggerKind {
-	return []DialogTriggerKind{DialogTriggerEnterTile, DialogTriggerFoeKilled}
+	return []DialogTriggerKind{DialogTriggerEnterTile, DialogTriggerEnterLocation, DialogTriggerFoeKilled}
 }
 
 // DialogTrigger auto-starts DialogID when its event fires. Once = fire only the
@@ -29,6 +30,8 @@ type DialogTrigger struct {
 	// enterTile params.
 	TileX int `json:"tileX,omitempty"`
 	TileZ int `json:"tileZ,omitempty"`
+	// enterLocation param: the region (core.Location) whose crossing fires this.
+	LocationID string `json:"locationId,omitempty"`
 	// foeKilled params (FoeKills <=0 means once). FoeKind NOT omitempty (EnemyRat==0).
 	FoeKind  EnemyKind `json:"foeKind"`
 	FoeKills int       `json:"foeKills,omitempty"`

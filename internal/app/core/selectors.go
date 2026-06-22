@@ -226,6 +226,23 @@ func CureDebuffs(m *PartyMember) int {
 	return cured
 }
 
+// HasCurableDebuff reports whether m carries any debuff CureDebuffs would clear, so
+// the Cleanse paths can refuse a cure-nothing cast before spending MP.
+func HasCurableDebuff(m *PartyMember) bool {
+	if m == nil {
+		return false
+	}
+	if m.PoisonTurns > 0 {
+		return true
+	}
+	for _, c := range transientStatusCounters(m) {
+		if *c > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // ClearPartyTransientStatuses wipes combat-only statuses off every member at
 // battle exit EXCEPT Poison (a lingering wound). Never touches HP. Only dead and
 // poisoned survive a fight. (Ingest is released separately via ReleaseAllIngested.)

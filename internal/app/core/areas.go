@@ -240,6 +240,10 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	if err != nil {
 		return AreaDefinition{}, err
 	}
+	locations, err := LocationsFromLines(mf.Locations)
+	if err != nil {
+		return AreaDefinition{}, err
+	}
 	ceiling := mapfile.OptionalLayerOrBlank(mf.Ceiling, mf.Width, mf.Height, TileCeilingOpen)
 	elevation := mapfile.OptionalLayerOrBlank(mf.Elevation, mf.Width, mf.Height, ElevationGround)
 	area := AreaDefinition{
@@ -270,6 +274,7 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 		QuietMessage:     mf.Quiet,
 		Dialogs:          dialogs,
 		Triggers:         triggers,
+		Locations:        locations,
 	}
 	// Validate crystals now the area's BlockedAt geometry is built: reject a
 	// hand-edited crystal on a blocked tile (renders embedded) or a duplicate
@@ -400,6 +405,10 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 	if err != nil {
 		return mapfile.MapFile{}, err
 	}
+	locationLines, err := LocationsToLines(a.Locations)
+	if err != nil {
+		return mapfile.MapFile{}, err
+	}
 	return mapfile.MapFile{
 		Name:            a.Name,
 		Materials:       matName,
@@ -427,6 +436,7 @@ func MapFileFromArea(a AreaDefinition) (mapfile.MapFile, error) {
 		CustomEnemies:   customs,
 		Dialogs:         dialogLines,
 		Triggers:        triggerLines,
+		Locations:       locationLines,
 	}, nil
 }
 

@@ -281,9 +281,12 @@ type AreaDefinition struct {
 	// Dialogs are the area's authored branching conversations (see dialog.go),
 	// started by StartDialog (by id).
 	Dialogs []DialogDefinition
-	// Triggers auto-start a dialog on a world event (step / foe killed) — see
-	// dialogtrigger.go.
+	// Triggers auto-start a dialog on a world event (step / foe killed / region
+	// entered) — see dialogtrigger.go.
 	Triggers []DialogTrigger
+	// Locations are named, elevation-specific rectangular regions a
+	// DialogTriggerEnterLocation can fire on — see location.go.
+	Locations []Location
 }
 
 type Player struct {
@@ -375,9 +378,9 @@ type GameState struct {
 	UsePendingItem   ItemKind
 	UsePendingSkill  SkillID
 	UsePendingCaster int
-	// Out-of-battle heal-skill chooser (Skills tab), raised only when the member
-	// has >1 out-of-battle heal (today the Cleric: Prayer + Mass Mend); one heal
-	// casts directly. HealPickCursor indexes core.OutOfBattleHeals for the member.
+	// Out-of-battle support-skill chooser (Skills tab), raised only when the member
+	// has >1 castable support skill (heals + cures, no buffs); a single skill casts
+	// directly. HealPickCursor indexes core.OutOfBattleSupportSkills for the member.
 	HealPickOpen   bool
 	HealPickCaster int
 	HealPickCursor int
@@ -505,7 +508,11 @@ type GameState struct {
 	// so they don't repeat. Resets per area visit, but IS persisted
 	// (SaveData.TriggersFired) so a saved-past Once cutscene doesn't replay on reload.
 	TriggersFired map[string]bool
-	Quit          bool
+	// InsideLocations tracks which regions the player currently stands in, for
+	// rising-edge enter-location detection (see location.go). Transient: reseeded
+	// from the spawn tile on every area entry, never saved.
+	InsideLocations map[string]bool
+	Quit            bool
 	// VFXQueue holds VFX spawn intents from battle/explore; the render layer
 	// drains it each frame into its private pool. Keeping the data in core lets
 	// battle emit FX without a raylib import. See vfx.go. Cleared on transition + battle exit.

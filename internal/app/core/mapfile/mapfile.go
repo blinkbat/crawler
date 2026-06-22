@@ -107,6 +107,9 @@ type MapFile struct {
 	// Triggers is the authored dialog-trigger list — opaque JSON per line, same
 	// verbatim handling as Dialogs (core marshals DialogTrigger).
 	Triggers []string
+	// Locations is the authored named-region list — opaque JSON per line, same
+	// verbatim handling as Dialogs (core marshals Location).
+	Locations []string
 }
 
 // MapPack is one authored pack at a tile. Members is a non-empty enemy-kind
@@ -377,6 +380,7 @@ const (
 	slotCustomEnemies
 	slotDialogs
 	slotTriggers
+	slotLocations
 	slotSolids
 	slotPropLevels
 	slotDecorLevels
@@ -399,6 +403,7 @@ const (
 	SectionCustomEnemies = "custom_enemies"
 	SectionDialogs       = "dialogs"
 	SectionTriggers      = "triggers"
+	SectionLocations     = "locations"
 	SectionSolids        = "solids"
 	SectionPropLevels    = "prop_levels"
 	SectionDecorLevels   = "decor_levels"
@@ -438,6 +443,7 @@ var layerSections = []layerSection{
 	{SectionCustomEnemies, slotCustomEnemies, nil},
 	{SectionDialogs, slotDialogs, nil},
 	{SectionTriggers, slotTriggers, nil},
+	{SectionLocations, slotLocations, nil},
 	// solids: is a multi-plane voxel stack, not a single grid — nil field +
 	// bespoke code, excluded from GridLayerCount.
 	{SectionSolids, slotSolids, nil},
@@ -667,6 +673,12 @@ func Parse(r io.Reader) (MapFile, error) {
 		if state == slotTriggers {
 			// Opaque JSON-per-line, same handling as dialogs.
 			mf.Triggers = append(mf.Triggers, line)
+			continue
+		}
+
+		if state == slotLocations {
+			// Opaque JSON-per-line, same handling as dialogs (core marshals Location).
+			mf.Locations = append(mf.Locations, line)
 			continue
 		}
 
@@ -912,6 +924,14 @@ func (mf *MapFile) validate() error {
 	for _, c := range mf.Chests {
 		if !inBounds(c.X, c.Z, mf.Width, mf.Height) {
 			return fmt.Errorf("chest at (%d,%d) outside map %dx%d", c.X, c.Z, mf.Width, mf.Height)
+		}
+		// Items encode comma-joined and re-split on ',', so an item name containing a
+		// comma would silently re-parse as two items. Reject at the data-model boundary
+		// (mirrors the door-name whitespace guard) so it fails loudly at save.
+		for _, item := range c.Items {
+			if strings.ContainsRune(item, ',') {
+				return fmt.Errorf("chest at (%d,%d) item %q must not contain a comma", c.X, c.Z, item)
+			}
 		}
 	}
 	// Crystals: same bounds guard as packs/chests.
@@ -1227,9 +1247,12 @@ func writeVerbatimSection(bw *bufio.Writer, name string, rows []string) {
 // Encode writes mf in the canonical .map format; fixed layer order so maps diff cleanly.
 func (mf MapFile) Encode(w io.Writer) error {
 	bw := bufio.NewWriter(w)
-	fmt.Fprintf(bw, headerName+": %s\n", mf.Name)
-	fmt.Fprintf(bw, headerMaterials+": %s\n", mf.Materials)
-	fmt.Fprintf(bw, headerQuiet+": %s\n", mf.Quiet)
+	// Free-text header values are written trimmed: the parser TrimSpaces every content
+	// line globally, so emitting surrounding whitespace would not survive a reload
+	// (Save→Load→Encode must be byte-stable).
+	fmt.Fprintf(bw, headerName+": %s\n", strings.TrimSpace(mf.Name))
+	fmt.Fprintf(bw, headerMaterials+": %s\n", strings.TrimSpace(mf.Materials))
+	fmt.Fprintf(bw, headerQuiet+": %s\n", strings.TrimSpace(mf.Quiet))
 	fmt.Fprintf(bw, headerSize+": %dx%d\n", mf.Width, mf.Height)
 	fmt.Fprintf(bw, headerStart+": %d %d %s\n", mf.StartX, mf.StartZ, mf.StartFace)
 	ceiling := OptionalLayerOrBlank(mf.Ceiling, mf.Width, mf.Height, CeilingOpenChar)
@@ -1331,6 +1354,7 @@ func (mf MapFile) Encode(w io.Writer) error {
 	// entry is a pre-encoded JSON object written verbatim.
 	writeVerbatimSection(bw, SectionDialogs, mf.Dialogs)
 	writeVerbatimSection(bw, SectionTriggers, mf.Triggers)
+	writeVerbatimSection(bw, SectionLocations, mf.Locations)
 	return bw.Flush()
 }
 

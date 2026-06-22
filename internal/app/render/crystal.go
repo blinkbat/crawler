@@ -20,9 +20,9 @@ type crystalGeometry struct {
 }
 
 var crystalGeo = crystalGeometry{
-	FloatY:         0.55,
-	HalfHeight:     0.38,
-	WaistRadius:    0.20,
+	FloatY:         1.65,
+	HalfHeight:     1.14,
+	WaistRadius:    0.60,
 	PromptHeadroom: 0.3,
 }
 

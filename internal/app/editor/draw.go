@@ -49,10 +49,10 @@ const (
 	menuBarBtnY = float32(6)
 	menuBarBtnH = topbarH - 12
 	toolbarH    = float32(38) // action button row beneath the topbar
-	paletteW   = float32(220)
-	metadataW  = float32(360)
-	gridMargin = float32(8)
-	layerTabH  = float32(32)
+	paletteW    = float32(220)
+	metadataW   = float32(360)
+	gridMargin  = float32(8)
+	layerTabH   = float32(32)
 )
 
 // Entity-list (chest/pack contents) geometry, shared by entityModalLayoutFor
@@ -222,6 +222,7 @@ var modalHandlers = map[modalKind]modalHandler{
 	modalDialogCondEdit:    {draw: drawDialogCondEditModal, update: updateDialogCondEditModal},
 	modalDialogTriggerList: {draw: drawDialogTriggerListModal, update: updateDialogTriggerListModal},
 	modalDialogTriggerEdit: {draw: drawDialogTriggerEditModal, update: updateDialogTriggerEditModal},
+	modalLocationEdit:      {draw: drawLocationEditModal, update: updateLocationEditModal},
 }
 
 // init asserts every dispatchable modalKind (excluding modalNone/modalCount) has
@@ -1577,6 +1578,12 @@ const (
 	metaRowGap     = float32(42) // a labeled block → the next caption
 	metaStepperGap = float32(38) // between the stacked width / height steppers
 	metaFieldH     = float32(30) // text-field height (name / quiet / path)
+	// Trailing layout (path block → reachability badge → bottom margin); named so
+	// metadataContentHeight derives the panel height from the SAME numbers
+	// metadataRects lays out with, no measuring build needed.
+	metaPathBlockH       = float32(64)  // path label-top → reachability badge top
+	metaReachAreaH       = float32(140) // reachability badge clickable region
+	metaContentBottomPad = float32(16)  // slack below the badge
 )
 
 // Per-cell zoom thresholds (px) below which a piece of grid chrome turns off
@@ -1594,7 +1601,20 @@ const (
 	startMarkerRadiusFrac = float32(0.36) // player-start circle radius — live marker + drag ghost
 )
 
+// metaRect geometry depends only on the panel rect + scroll (material count is
+// fixed at init), so cache it: rebuilds only when the sidebar moves/resizes or
+// scrolls, sparing the per-frame matButtons slice alloc on the draw/click paths.
+var (
+	metaRectCache                                   metaRect
+	metaRectReady                                   bool
+	metaRectX, metaRectY, metaRectW, metaRectScroll float32
+)
+
 func metadataRects(s *State) metaRect {
+	if metaRectReady && metaRectX == s.rect.metadata.X && metaRectY == s.rect.metadata.Y &&
+		metaRectW == s.rect.metadata.Width && metaRectScroll == s.metadataScroll {
+		return metaRectCache
+	}
 	x := s.rect.metadata.X + 14
 	w := s.rect.metadata.Width - 28
 	y := s.rect.metadata.Y + headerReserve - s.metadataScroll
@@ -1628,21 +1648,27 @@ func metadataRects(s *State) metaRect {
 	r.pathValue = rl.NewRectangle(x, y+metaLabelGap, w, metaFieldH)
 	// Reachability badge: label a row below the path; the clickable region covers
 	// the OK/warning panel below it.
-	reachY := y + 64
+	reachY := y + metaPathBlockH
 	r.reachLabel = rl.NewRectangle(x, reachY, w, metaLabelH)
-	r.reachArea = rl.NewRectangle(x, reachY, w, 140)
+	r.reachArea = rl.NewRectangle(x, reachY, w, metaReachAreaH)
+
+	metaRectCache = r
+	metaRectReady = true
+	metaRectX, metaRectY = s.rect.metadata.X, s.rect.metadata.Y
+	metaRectW, metaRectScroll = s.rect.metadata.Width, s.metadataScroll
 	return r
 }
 
 // metadataContentHeight is the pixel height to render the full metadata panel.
-// Used by ScrollMetadata to clamp the offset.
+// Used by ScrollMetadata to clamp the offset. Derived from the same stride
+// constants metadataRects lays out with — no measuring build, so it never
+// thrashes the (scroll-keyed) metaRect cache.
 func metadataContentHeight(s *State) float32 {
-	// Measure an unscrolled metadataRects so this stays in lockstep with layout.
-	save := s.metadataScroll
-	s.metadataScroll = 0
-	mr := metadataRects(s)
-	s.metadataScroll = save
-	return mr.reachArea.Y + mr.reachArea.Height + 16 - s.rect.metadata.Y
+	// Unscrolled span from the panel top: header + the four label/field blocks
+	// + the path-block-to-badge gap + the badge + bottom slack.
+	return headerReserve +
+		4*metaLabelGap + 4*metaRowGap + metaStepperGap +
+		metaPathBlockH + metaReachAreaH + metaContentBottomPad
 }
 
 // metadataRowStride is the wheel-scroll step (~one field per notch).
@@ -1874,6 +1900,49 @@ func drawReadonlyValue(font rl.Font, r rl.Rectangle, text string) {
 
 // drawGrid paints the flat-color layers stacked (floor → walls → decor → props →
 // ceiling hash → entities), non-active layers dimmed.
+// Column-top level cache. ElevationLevelAt walks the voxel column per call; the
+// top-down grid needs it for EVERY visible cell every frame. Rebuilt only when
+// the area mutates (contentEpoch) or resizes, so steady-state draws index a flat
+// slice instead of re-walking thousands of columns. hasRamps rides the same scan
+// so ramp-free maps skip the per-cell ramp probes entirely.
+var (
+	elevGridCache []int
+	elevGridEpoch uint64
+	elevGridW     int
+	elevGridH     int
+	elevGridReady bool
+	elevGridRamps bool
+)
+
+func refreshElevGrid(s *State) {
+	w, h := s.area.Width, s.area.Height
+	if elevGridReady && elevGridEpoch == s.contentEpoch && elevGridW == w && elevGridH == h {
+		return
+	}
+	if cap(elevGridCache) < w*h {
+		elevGridCache = make([]int, w*h)
+	} else {
+		elevGridCache = elevGridCache[:w*h]
+	}
+	ramps := false
+	for z := 0; z < h; z++ {
+		for x := 0; x < w; x++ {
+			elevGridCache[z*w+x] = s.area.ElevationLevelAt(x, z)
+			if !ramps && core.IsRampChar(s.area.Floor[z][x]) {
+				ramps = true
+			}
+		}
+	}
+	elevGridEpoch = s.contentEpoch
+	elevGridW, elevGridH = w, h
+	elevGridRamps = ramps
+	elevGridReady = true
+}
+
+// columnTopLevel returns the cached ElevationLevelAt for an in-bounds cell.
+// refreshElevGrid must have run this frame.
+func columnTopLevel(x, z int) int { return elevGridCache[z*elevGridW+x] }
+
 func drawGrid(s *State, font rl.Font) {
 	rl.DrawRectangleRec(s.rect.grid, bgFieldInset)
 	// Iso preview takes over the whole canvas (read-only — see iso.go), sizing
@@ -1927,6 +1996,10 @@ func drawGrid(s *State, font rl.Font) {
 	charShadow := glyphShadow
 	charFG := rl.NewColor(248, 250, 252, 235)
 
+	// Cache column-top levels (and the has-ramps flag) for this frame; the inner
+	// loop then indexes a slice instead of walking each voxel column.
+	refreshElevGrid(s)
+
 	// Per-layer visibility, hoisted out of the inner loop (cheap bool per cell).
 	showFloor := !s.layerHidden[LayerFloor]
 	showWalls := !s.layerHidden[LayerWalls]
@@ -1943,9 +2016,9 @@ func drawGrid(s *State, font rl.Font) {
 			// level (you always see the floor you're editing, so a paint can never
 			// vanish behind its own hidden toggle) and a ramp that connects to the
 			// active level (so transitions across a hidden floor stay routable).
-			lvl := s.area.ElevationLevelAt(x, z)
+			lvl := columnTopLevel(x, z)
 			if lvl >= 0 && lvl <= maxEditLevel && lvl != s.editLevel &&
-				s.levelHidden[lvl] && !rampTouchesActiveLevel(s, x, z) {
+				s.levelHidden[lvl] && !(elevGridRamps && rampTouchesActiveLevel(s, x, z, lvl)) {
 				continue
 			}
 			// Off-level tiles fade with distance from the active level (context).
@@ -1986,7 +2059,9 @@ func drawGrid(s *State, font rl.Font) {
 			}
 			// Ramp connector arrow on every ramp tile (the Levels panel carries the
 			// "which floor" read). Ramps touching the active level show even when hidden.
-			drawRampConnector(font, r, cell, s.area.Floor[z][x])
+			if elevGridRamps {
+				drawRampConnector(font, r, cell, s.area.Floor[z][x])
+			}
 		}
 	}
 
@@ -2148,6 +2223,9 @@ func drawGrid(s *State, font rl.Font) {
 	if s.showDoorLinks {
 		drawDoorLinks(s, cell)
 	}
+
+	// Named regions (Locations): labeled translucent rects, level-faded.
+	drawLocations(s, font)
 
 	// Brush ghost / hover highlight.
 	hoverPx := s.hoverX
@@ -2594,11 +2672,12 @@ func drawRampConnector(font rl.Font, r rl.Rectangle, cell float32, floorChar byt
 // rampTouchesActiveLevel reports whether the ramp at (x,z) connects the active
 // level (its low level is editLevel or editLevel-1). Such ramps stay visible
 // even when their own level is hidden.
-func rampTouchesActiveLevel(s *State, x, z int) bool {
+// low is the column-top level at (x,z), passed in to reuse the caller's cached
+// lookup instead of re-walking the voxel column.
+func rampTouchesActiveLevel(s *State, x, z, low int) bool {
 	if _, ok := s.area.RampAt(x, z); !ok {
 		return false
 	}
-	low := s.area.ElevationLevelAt(x, z)
 	return low == s.editLevel || low == s.editLevel-1
 }
 
@@ -2885,21 +2964,21 @@ const (
 	saveAsModalW = float32(420)
 	saveAsModalH = float32(160)
 
-	doorEditModalW     = float32(480)
-	doorEditModalH     = float32(424)
-	openModalW         = float32(460)
-	openModalH         = float32(460)
+	doorEditModalW = float32(480)
+	doorEditModalH = float32(424)
+	openModalW     = float32(460)
+	openModalH     = float32(460)
 	// Open-map list: rows start openModalListTop below the card top, with
 	// openModalListBottomPad reserved for the button row. Pitch is entityListRowH.
 	openModalListTop       = float32(50)
 	openModalListBottomPad = float32(52)
-	entityEditModalW   = float32(480) // shared by the entity + dialog list modals
-	entityEditModalH   = float32(440)
-	escMenuModalW      = float32(380)
-	escMenuModalH      = float32(178)
-	confirmDirtyModalW = float32(460)
-	confirmDirtyModalH = float32(212) // clears the hint above the button stack
-	validateModalW     = float32(560)
+	entityEditModalW       = float32(480) // shared by the entity + dialog list modals
+	entityEditModalH       = float32(440)
+	escMenuModalW          = float32(380)
+	escMenuModalH          = float32(178)
+	confirmDirtyModalW     = float32(460)
+	confirmDirtyModalH     = float32(212) // clears the hint above the button stack
+	validateModalW         = float32(560)
 )
 
 func saveAsFieldRect(s *State) rl.Rectangle {

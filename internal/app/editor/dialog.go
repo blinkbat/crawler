@@ -312,10 +312,32 @@ func triggerKindLabel(k core.DialogTriggerKind) string {
 	switch k {
 	case core.DialogTriggerEnterTile:
 		return "Enter tile"
+	case core.DialogTriggerEnterLocation:
+		return "Enter location"
 	case core.DialogTriggerFoeKilled:
 		return "Foe killed"
 	}
 	return string(k)
+}
+
+// locationLabel is a region's display name (Name if authored, else its ID).
+func locationLabel(loc core.Location) string {
+	if loc.Name != "" {
+		return loc.Name
+	}
+	return loc.ID
+}
+
+// triggerLocationButtonLabel resolves a trigger's LocationID to a display label for
+// the picker button (flags a dangling reference, like bg2's "Missing").
+func triggerLocationButtonLabel(s *State, id string) string {
+	if id == "" {
+		return "(pick a location)"
+	}
+	if loc, ok := core.LocationByID(s.area.Locations, id); ok {
+		return locationLabel(loc)
+	}
+	return id + " (missing)"
 }
 
 // init panics if any authorable condition/trigger kind lacks an editor label
@@ -357,6 +379,8 @@ func triggerSummary(t core.DialogTrigger) string {
 	switch t.Kind {
 	case core.DialogTriggerEnterTile:
 		return fmt.Sprintf("Enter (%d,%d) → %s%s", t.TileX, t.TileZ, t.DialogID, once)
+	case core.DialogTriggerEnterLocation:
+		return fmt.Sprintf("Enter [%s] → %s%s", t.LocationID, t.DialogID, once)
 	case core.DialogTriggerFoeKilled:
 		return fmt.Sprintf("Kill %s ×%d → %s%s", core.FoeKindName(t.FoeKind), core.RequiredFoeKills(t.FoeKills), t.DialogID, once)
 	}
@@ -448,6 +472,22 @@ func dialogTriggerFoeEntries(s *State) []dropdownEntry {
 			s.dirty = true
 		}
 	})
+}
+
+// dialogTriggerLocationEntries lists the area's regions for an enterLocation trigger.
+func dialogTriggerLocationEntries(s *State) []dropdownEntry {
+	out := make([]dropdownEntry, 0, len(s.area.Locations))
+	for i := range s.area.Locations {
+		id := s.area.Locations[i].ID
+		out = append(out, dropdownEntry{label: locationLabel(s.area.Locations[i]), apply: func(s *State) {
+			if t := currentDialogTrigger(s); t != nil {
+				pushUndo(s)
+				t.LocationID = id
+				s.dirty = true
+			}
+		}})
+	}
+	return out
 }
 
 // Shared numeric-field editing: dialogNumericTarget + focusDialogNumeric +
@@ -574,16 +614,16 @@ func removeDialogTriggerAt(s *State, idx int) {
 // dialogListModalSpec parameterizes the three list-style dialog modals (dialog
 // list, node list, trigger list) through one draw + update driver.
 type dialogListModalSpec struct {
-	title    string                     // modal header
-	hint     string                     // hint line below the header
-	empty    string                     // placeholder when the list is empty
-	count    int                        // number of rows
-	rowLabel func(i int) string         // one row's label
+	title    string             // modal header
+	hint     string             // hint line below the header
+	empty    string             // placeholder when the list is empty
+	count    int                // number of rows
+	rowLabel func(i int) string // one row's label
 	cmds     func(*State) (adds, actions []modalCmd)
-	commit   func()                     // Enter / "Edit" (only when count > 0)
-	cancel   func()                     // Esc (step up / close)
-	add      func()                     // A / "+ Add"
-	del      func()                     // X / "Delete" (only when count > 0)
+	commit   func() // Enter / "Edit" (only when count > 0)
+	cancel   func() // Esc (step up / close)
+	add      func() // A / "+ Add"
+	del      func() // X / "Delete" (only when count > 0)
 	// extraKeys: shortcuts beyond Enter/A/X; guarded means the key needs count > 0.
 	extraKeys []dialogListKey
 }
@@ -760,12 +800,12 @@ func updateDialogNodesModal(s *State) Action {
 
 // Shared field-layout metrics for the dialog edit modals (stack fixed-height rows).
 const (
-	dialogFieldH       = float32(28) // text-field / button row height
-	dialogHeaderInset  = float32(56) // first row's offset below the title
-	dialogRowGap       = float32(46) // row pitch (node + choice editors)
-	dialogCondRowGap   = float32(54) // row pitch in the condition editor
-	dialogTrigRowGap   = float32(52) // row pitch in the trigger editor
-	dialogActionRowGap = float32(56) // row pitch in the action editor
+	dialogFieldH       = float32(28)  // text-field / button row height
+	dialogHeaderInset  = float32(56)  // first row's offset below the title
+	dialogRowGap       = float32(46)  // row pitch (node + choice editors)
+	dialogCondRowGap   = float32(54)  // row pitch in the condition editor
+	dialogTrigRowGap   = float32(52)  // row pitch in the trigger editor
+	dialogActionRowGap = float32(56)  // row pitch in the action editor
 	dialogListRowH     = dropdownRowH // scrollable list rows share the dropdown's pitch
 )
 
@@ -1738,6 +1778,9 @@ func drawDialogTriggerEditModal(s *State, font rl.Font, theme render.Theme) {
 		drawTextField(font, l.row1, numFieldText(s.focus == focusDialogTrigTileX, t.TileX, s.dialogNumBuf), s.focus == focusDialogTrigTileX)
 		drawLabel(font, "Tile Z", labelAbove(l.row2))
 		drawTextField(font, l.row2, numFieldText(s.focus == focusDialogTrigTileZ, t.TileZ, s.dialogNumBuf), s.focus == focusDialogTrigTileZ)
+	case core.DialogTriggerEnterLocation:
+		drawLabel(font, "Location (click to choose)", labelAbove(l.row1))
+		drawButton(font, l.row1, triggerLocationButtonLabel(s, t.LocationID)+dropdownArrowSuffix, false)
 	case core.DialogTriggerFoeKilled:
 		drawLabel(font, "Foe (click to choose)", labelAbove(l.row1))
 		drawButton(font, l.row1, core.FoeKindName(t.FoeKind)+dropdownArrowSuffix, false)
@@ -1783,6 +1826,12 @@ func updateDialogTriggerEditModal(s *State) Action {
 			}
 			if pointIn(mp, l.row2) {
 				focusDialogNumeric(s, focusDialogTrigTileZ, t.TileZ)
+				return ActionNone
+			}
+		case core.DialogTriggerEnterLocation:
+			if pointIn(mp, l.row1) {
+				s.focus = focusNone
+				openDropdownBelow(s, ddDialogTriggerLocation, l.row1)
 				return ActionNone
 			}
 		case core.DialogTriggerFoeKilled:
@@ -1842,6 +1891,12 @@ func labelAbove(field rl.Rectangle) rl.Rectangle {
 func bottomRightBtn(card rl.Rectangle) rl.Rectangle {
 	by := card.Y + card.Height - modalBtnH - modalBottomInset
 	return rl.NewRectangle(card.X+card.Width-modalWideBtnW-modalContentInset, by, modalWideBtnW, modalBtnH)
+}
+
+// bottomLeftBtn mirrors bottomRightBtn for a left-aligned action (e.g. Delete).
+func bottomLeftBtn(card rl.Rectangle) rl.Rectangle {
+	by := card.Y + card.Height - modalBtnH - modalBottomInset
+	return rl.NewRectangle(card.X+modalContentInset, by, modalWideBtnW, modalBtnH)
 }
 
 // drawScrollMoreHint draws a "▲/▼ N more" caption (up=true above, else below); no-op when hidden<=0.

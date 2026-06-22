@@ -27,6 +27,11 @@ const (
 	ctxItemStartFacing
 	ctxItemSetWallFaces // opens the per-tile wall-faces modal (base + N/E/S/W)
 	ctxItemEraseTile    // resets the ACTIVE layer's cell here
+	// Location (region) actions — New always offered; Edit/Delete when a region on
+	// the active level sits under the cursor.
+	ctxItemNewLocation
+	ctxItemEditLocation
+	ctxItemDeleteLocation
 )
 
 // ctxItem is one right-click menu row, built fresh by contextItemsAt per tile.
@@ -48,7 +53,8 @@ type contextMenuState struct {
 
 // isDelete reports whether a row is a destructive delete (drawn red).
 func (k ctxItemKind) isDelete() bool {
-	return k == ctxItemDeletePack || k == ctxItemDeleteChest || k == ctxItemDeleteDoor || k == ctxItemDeleteCrystal
+	return k == ctxItemDeletePack || k == ctxItemDeleteChest || k == ctxItemDeleteDoor ||
+		k == ctxItemDeleteCrystal || k == ctxItemDeleteLocation
 }
 
 // contextItemsAt builds the menu rows from what occupies (x,z) (pack/chest/door
@@ -102,6 +108,15 @@ func contextItemsAt(s *State, x, z int) []ctxItem {
 			ctxItem{label: "Move start here", kind: ctxItemMoveStartHere},
 		)
 	}
+	// Regions: edit/delete the one under the cursor (on the active level), and
+	// always offer to create a new region anchored here.
+	if idx := core.LocationIndexAt(s.area.Locations, x, z, s.editLevel); idx >= 0 {
+		items = append(items,
+			ctxItem{label: "Edit location: " + locationLabel(s.area.Locations[idx]), kind: ctxItemEditLocation},
+			ctxItem{label: "Delete location", kind: ctxItemDeleteLocation},
+		)
+	}
+	items = append(items, ctxItem{label: "New location here", kind: ctxItemNewLocation})
 	// Wall-faces modal, only when the tile exposes a vertical face (same core
 	// rule the renderer uses), so a flat tile doesn't offer a no-op row.
 	if core.TileExposesFace(&s.area, x, z) {
@@ -202,6 +217,9 @@ func drawContextMenu(s *State, font rl.Font, theme render.Theme) {
 		return
 	}
 	bg, rows := contextMenuLayout(s)
+	// Opaque backing first: theme.SurfacePrimary is a translucent HUD surface and the
+	// map bleeds through it. Lay it over a solid editor-window tone so rows stay readable.
+	rl.DrawRectangleRec(bg, bgWindow)
 	rl.DrawRectangleRec(bg, theme.SurfacePrimary)
 	rl.DrawRectangleLinesEx(bg, 1, theme.BorderStrong)
 	mp := rl.GetMousePosition()
@@ -312,6 +330,23 @@ func runContextItem(s *State, item ctxItem) {
 		s.dirty = true
 	case ctxItemStartFacing:
 		setStartFacing(s, item.facing)
+	case ctxItemNewLocation:
+		createLocationAt(s, x, z)
+		return
+	case ctxItemEditLocation:
+		if idx := core.LocationIndexAt(s.area.Locations, x, z, s.editLevel); idx >= 0 {
+			openLocationEditModal(s, idx)
+		}
+		return
+	case ctxItemDeleteLocation:
+		deleteSpawnAt(s, x, z, "location", func() bool {
+			idx := core.LocationIndexAt(s.area.Locations, x, z, s.editLevel)
+			if idx < 0 {
+				return false
+			}
+			s.area.Locations = append(s.area.Locations[:idx], s.area.Locations[idx+1:]...)
+			return true
+		})
 	case ctxItemSetWallFaces:
 		openWallFacesModal(s, x, z)
 		return

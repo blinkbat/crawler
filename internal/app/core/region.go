@@ -6,9 +6,13 @@ package core
 
 // TileRegion is a copied rectangle of the grid layers, indexed in gridLayers()
 // order; rows may be shorter than W if the source was ragged (paste tolerates it).
+// On a voxel source (Solids != nil) the materialized cube stack is captured in
+// Solids too, since ElevationLevelAt ignores the Elevation layer there — copying
+// the grid layers alone would silently drop all 3D geometry.
 type TileRegion struct {
 	W, H   int
 	Layers [][]string
+	Solids [][]string // per-level rectangle rows; nil for a heightfield source
 }
 
 // Empty reports whether the region has nothing to paste.
@@ -54,6 +58,31 @@ func CopyRegion(a *AreaDefinition, x0, z0, x1, z1 int) TileRegion {
 		}
 		out.Layers[li] = rows
 	}
+	// Voxel source: also snapshot the cube stack for the rectangle, one row per
+	// (level, z). Heightfield sources leave Solids nil (Elevation layer carries them).
+	if len(a.Solids) > 0 {
+		planes := make([][]string, len(a.Solids))
+		for L := range a.Solids {
+			rows := make([]string, h)
+			for i := 0; i < h; i++ {
+				z := z0 + i
+				if z >= len(a.Solids[L]) {
+					continue
+				}
+				src := a.Solids[L][z]
+				lo, hi := x0, x1+1
+				if lo > len(src) {
+					lo = len(src)
+				}
+				if hi > len(src) {
+					hi = len(src)
+				}
+				rows[i] = src[lo:hi]
+			}
+			planes[L] = rows
+		}
+		out.Solids = planes
+	}
 	return out
 }
 
@@ -89,4 +118,40 @@ func (a *AreaDefinition) PasteRegion(r TileRegion, atX, atZ int) {
 			(*lp)[z] = string(dest)
 		}
 	}
+	a.pasteRegionSolids(r, atX, atZ)
+}
+
+// pasteRegionSolids stamps a voxel region's cube stack at (atX,atZ). Materializes
+// the destination so the paste overwrites the full column (cells above the copied
+// stack within the rectangle are cleared to air), then trims trailing all-air planes.
+func (a *AreaDefinition) pasteRegionSolids(r TileRegion, atX, atZ int) {
+	if len(r.Solids) == 0 {
+		return
+	}
+	EnsureSolids(a)
+	a.growSolidsTo(len(r.Solids))
+	for L := 0; L < len(a.Solids); L++ {
+		for i := 0; i < r.H; i++ {
+			z := atZ + i
+			if z < 0 || z >= a.Height {
+				continue
+			}
+			var row string
+			if L < len(r.Solids) && i < len(r.Solids[L]) {
+				row = r.Solids[L][i]
+			}
+			for j := 0; j < r.W; j++ {
+				x := atX + j
+				if x < 0 || x >= a.Width {
+					continue
+				}
+				c := byte(SolidAir)
+				if j < len(row) {
+					c = row[j]
+				}
+				a.setSolidCell(x, L, z, c)
+			}
+		}
+	}
+	a.trimTopAir()
 }

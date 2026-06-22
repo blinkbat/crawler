@@ -378,6 +378,8 @@ const (
 	// New-map dialog text fields (modalNew); committed to State.modalNewWidth/Height.
 	focusNewWidth
 	focusNewHeight
+	// Location-edit text focus (modalLocationEdit): the region's Name field.
+	focusLocationName
 	// Door-edit text foci (modalDoorEdit), routed via activeTextTarget.
 	focusDoorName
 	focusDoorTargetMap
@@ -456,6 +458,9 @@ const (
 	modalDialogTriggerList
 	// modalDialogTriggerEdit edits one trigger (kind / dialog / Once / params).
 	modalDialogTriggerEdit
+	// modalLocationEdit edits one named region (name / bounds / level / delete).
+	// modalLocationIdx indexes area.Locations; closes if dropped.
+	modalLocationEdit
 	// modalHitGlyphs is the read-only Hit Glyphs gallery preview. See hitglyphs.go.
 	modalHitGlyphs
 	// modalObjectView is the read-only paged 3D Object Browser. See objectview.go.
@@ -606,6 +611,8 @@ type State struct {
 	// Triggers entry; -1 outside their flows.
 	modalDialogCondIdx    int
 	modalDialogTriggerIdx int
+	// modalLocationIdx indexes the Locations entry being edited; -1 outside the flow.
+	modalLocationIdx int
 	// modalDialogActionOnChoice: action editor targets the choice's EndAction when
 	// true, else the node's. See currentDialogActionHolder.
 	modalDialogActionOnChoice bool
@@ -884,6 +891,7 @@ func freshState(a core.AreaDefinition) State {
 		modalDialogChoiceIdx:  -1,
 		modalDialogCondIdx:    -1,
 		modalDialogTriggerIdx: -1,
+		modalLocationIdx:      -1,
 	}
 }
 

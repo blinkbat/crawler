@@ -93,7 +93,7 @@ var panelTabFooterHints = [core.PanelTabCount]func() []HintSeg{
 			Hint("Tabs", GlyphLB, GlyphRB),
 			Hint("Member", GlyphLeftRight),
 			Hint("Open trees", GlyphA),
-			Hint("Cast heal", GlyphX),
+			Hint("Use skill", GlyphX),
 			Hint("Close", GlyphB),
 		}
 	},
@@ -210,6 +210,21 @@ func drawTomeBinding(cardX, cardY, cardW, cardH int32) {
 	rl.DrawRectangleGradientEx(rightPage,
 		fadeColor(shadowHeavy, 0.055), fadeColor(shadowHeavy, 0.075),
 		fadeColor(inkPrimary, 0.035), fadeColor(shadowHeavy, 0.035))
+
+	// Faint dappled ledger ruling across each page — the same painterly alpha-speckle
+	// the HUD pane edges use (speckleHairline), so the tome reads as ruled parchment.
+	ruleCol := fadeColor(woodInlay, 0.10)
+	const tomeRulePitch = int32(34)
+	for _, pg := range [2]rl.Rectangle{leftPage, rightPage} {
+		rx := int32(pg.X) + 10
+		rw := int32(pg.Width) - 20
+		if rw < 2 {
+			continue
+		}
+		for ry := int32(pg.Y) + tomeRulePitch; ry < int32(pg.Y+pg.Height)-6; ry += tomeRulePitch {
+			speckleHairline(rx, ry, rw, 1, ruleCol)
+		}
+	}
 
 	spineX := cardX + cardW/2
 	spineTop := cardY + 26
@@ -725,28 +740,28 @@ func drawUseTargetPicker(g *core.GameState, assets Resources) {
 	})
 }
 
-// drawHealPicker paints the out-of-battle heal-skill chooser: the caster's heals with MP cost, cursored row gilded.
-// Raised only when a member has more than one such heal; a single heal casts directly. Controller-driven (HealPickCursor).
+// drawHealPicker paints the out-of-battle support-skill chooser: the caster's heals/cures with MP cost, cursored row gilded.
+// Raised only when a member has more than one such skill; a single skill casts directly. Controller-driven (HealPickCursor).
 func drawHealPicker(g *core.GameState, assets Resources) {
 	font := assets.Font()
 	caster := g.HealPickCaster
 	if caster < 0 || caster >= len(g.Party) {
 		return
 	}
-	heals := core.OutOfBattleHealsInto(healPickerHealsDrawBuf, &g.Party[caster])
-	healPickerHealsDrawBuf = heals
-	if len(heals) == 0 {
+	skills := core.OutOfBattleSupportSkillsInto(healPickerHealsDrawBuf, &g.Party[caster])
+	healPickerHealsDrawBuf = skills
+	if len(skills) == 0 {
 		return
 	}
 
 	const rowH = pickerRowH
 	const headerH = pickerHeaderH
 	cardW := float32(360)
-	cardH := headerH + float32(len(heals))*rowH + pickerFooterH
-	card := drawPickerCard(font, cardW, cardH, "Cast Heal — "+g.Party[caster].Name)
+	cardH := headerH + float32(len(skills))*rowH + pickerFooterH
+	card := drawPickerCard(font, cardW, cardH, "Use Skill — "+g.Party[caster].Name)
 
 	listY := card.Y + headerH
-	for i, s := range heals {
+	for i, s := range skills {
 		rect := pickerRowRect(card, listY, i, rowH)
 		drawFocusableRow(rect, i == g.HealPickCursor)
 		drawTextWithShadow(font, core.SkillName(s), rect.X+14, rect.Y+rect.Height/2-10, FontBody, textPrimary)
@@ -912,7 +927,7 @@ func drawPanelsItems(g *core.GameState, assets Resources, body rl.Rectangle) {
 		drawTextWithShadow(font, owned, dx, dy, FontBody, textMuted)
 		dy += 36
 		// Description placeholder — the item registry carries none today.
-		hint := "Consumable. Use from the battle menu's Item action."
+		hint := "Consumable. Press Use to apply it to an ally — here or in battle."
 		drawTextWithShadow(font, hint, dx, dy, FontSmall, textHint)
 	}
 }

@@ -246,8 +246,10 @@ func tintMul(a, b rl.Color) rl.Color {
 const exploreFOV = float32(112)
 
 // battleFOV is the narrower combat FOV: enemies fill more pixels and the
-// formation packs into a focused stage. Tuned so a six-enemy pack still fits.
-const battleFOV = float32(72)
+// formation packs into a focused stage. Tuned so a full 5-back/3-front pack fits
+// with room — slightly wider than a tight portrait FOV so both ranks sit on the
+// engaged tile without crowding the edges.
+const battleFOV = float32(78)
 
 // fovTweenRate eases the camera between explore/battle FOV (deg/sec). 80°/s
 // lands the 40° swing in ~half a second, slightly ahead of BattleSplashDuration.
@@ -1255,7 +1257,9 @@ func drawDecorMushroom(assets Resources, x, z int, cx, cz, groundY float32) {
 }
 
 func drawDecorPebble(assets Resources, x, z int, cx, cz, groundY float32) {
-	drawPebbleCluster(assets, cx, cz, groundY, tileHash(x, z))
+	// Same hash as drawFloorDecoration's pebble scatter so an author-placed pebble
+	// tile and a hash-scattered one share the identical cluster layout per tile.
+	drawPebbleCluster(assets, cx, cz, groundY, hashXY(x, z))
 }
 
 // faceBackfaceCulled reports whether a vertical face (edge center cx+fdx*half,
@@ -1861,11 +1865,11 @@ func partySpritePosition(camera rl.Camera3D, party []core.PartyMember, index int
 	// 2×2 trapezoid widening toward the viewer (mostly via width so both ranks
 	// stay on-screen): front tight/further, back wide/nearer.
 	baseY := float32(0.58)
-	rowForward := float32(1.55) // front rank — off the foes
-	rowSpacing := float32(0.95) // front: tight pair
+	rowForward := float32(1.5)   // front rank — off the foes
+	rowSpacing := float32(0.84)  // front: tight pair (compressed to free room for the foes)
 	if visRow == core.RowBack {
-		rowForward = 1.12 // nearer the camera, still in frame
-		rowSpacing = 1.5  // back: only a touch wider (gentle trapezoid)
+		rowForward = 1.18 // nearer the camera, still in frame
+		rowSpacing = 1.28 // back: only a touch wider (gentle trapezoid)
 	}
 	base := rl.NewVector3(
 		camera.Position.X+forward.X*rowForward,
@@ -2009,10 +2013,12 @@ func enemyFormationPos(camera rl.Camera3D, g *core.GameState, row core.Row, slot
 	}
 	forward := horizontalForward(camera)
 	right := horizontalRight(forward)
+	// Pushed back from 2.55 so the foe stage reads as standing ON the engaged tile
+	// (with the wider battleFOV) rather than looming in the camera's face.
 	center := rl.NewVector3(
-		camera.Position.X+forward.X*2.55,
+		camera.Position.X+forward.X*2.9,
 		battleFormationCenterY,
-		camera.Position.Z+forward.Z*2.55,
+		camera.Position.Z+forward.Z*2.9,
 	)
 	// Per-row width cap: pack slots inside formationMaxWidth so a full back row
 	// doesn't spill, keeping generous spacing for small rows.
@@ -2026,11 +2032,12 @@ func enemyFormationPos(camera rl.Camera3D, g *core.GameState, row core.Row, slot
 	}
 	offset := (float32(slot) - float32(count-1)/2) * spacing
 	// Two ranks: front nearer the party; back deeper, lifted to read over the
-	// front and staggered half a slot to peek between them.
-	rowDepth := float32(-0.45)
+	// front and staggered half a slot to peek between them. Depths compressed so
+	// both ranks sit comfortably on the one engaged tile (~0.75 span, was ~1.0).
+	rowDepth := float32(-0.33)
 	rowLift := float32(0)
 	if row == core.RowBack {
-		rowDepth = 0.55
+		rowDepth = 0.42
 		rowLift = 0.28
 		offset += spacing * 0.5
 	}

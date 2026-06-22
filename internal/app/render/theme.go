@@ -359,24 +359,18 @@ const (
 	// pinned pane to (below this rows stop being readable).
 	hudPanelMinH = int32(160)
 
-	// Enemy roster card (battle.go) — the top-center foe-list pane.
-	rosterRowH      = int32(82)  // per-enemy row height (fits the FontHeading name stacked over the condition line)
-	rosterTopPad    = int32(18)  // inset above the first row
-	rosterBottomPad = int32(18)  // inset below the last row
-	rosterW         = int32(560) // multi-enemy width
-	rosterWSingle   = int32(440) // single-enemy width (narrower)
-
-	// Targeted-row geometry — a live-target row gets a left chevron and wider
-	// name inset.
-	rosterTargetedNameInset = int32(34)   // name gutter when the chevron is shown (wider than hudContentInsetX)
-	rosterArrowMarkerInsetX = float32(9)  // chevron center X, in from the row's left edge
-	rosterArrowMarkerTipDx  = float32(13) // chevron tip reach (points right, toward the name)
-	rosterArrowMarkerHalf   = float32(10) // chevron half-height
-	// Status-pill geometry (anchored to the row's right edge). rosterStatusPillW
-	// is unrelated to rosterTargetedNameInset despite both being 34.
-	rosterStatusPillW    = float32(34) // status pill width
-	rosterStatusPillH    = float32(28) // status pill height
-	rosterStatusRightPad = float32(16) // gap from the row's right edge to the pill column
+	// Enemy roster card (battle.go) — the top-center foe-list pane, laid out as a
+	// formation grid: back rank (up to 5) on top, front rank (up to 3) below.
+	rosterTopPad    = int32(16) // inset above the first rank
+	rosterBottomPad = int32(16) // inset below the last rank
+	rosterCellW     = int32(152) // per-foe cell width
+	rosterCellH     = int32(60)  // per-foe cell height (name over condition, smaller fonts)
+	rosterCellGap   = int32(10)  // gap between cells in a rank
+	rosterGridInset = int32(16)  // card edge → cell grid
+	rosterRankGap   = int32(10)  // vertical gap between the back and front ranks
+	// Status-pill geometry (anchored to a cell's top-right corner, stacking left).
+	rosterStatusPillW = float32(28) // status pill width
+	rosterStatusPillH = float32(20) // status pill height
 
 	// Combat HUD panes (battle.go) — bottom-left action log + bottom-right action
 	// menu. Both share the hudPanelMinH floor.

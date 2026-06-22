@@ -158,6 +158,9 @@ func prepareSpriteWrite(slug string) (path string, err error) {
 	if _, statErr := os.Stat(path); statErr == nil {
 		_ = copyFile(path, path+".bak") // best-effort safety net
 	}
+	// The PNG is about to change; drop any cached pristine base for this slug so the
+	// next preview reload reads the new file (single-threaded: no draw runs mid-write).
+	invalidateAssetPreviewBase(slug)
 	return path, nil
 }
 
@@ -297,7 +300,12 @@ func restoreSpriteBackupSlug(slug string) error {
 	if _, err := os.Stat(bak); err != nil {
 		return fmt.Errorf("no backup to restore")
 	}
-	return copyFile(bak, spritePathSlug(slug))
+	if err := copyFile(bak, spritePathSlug(slug)); err != nil {
+		return err
+	}
+	// Restored PNG differs from the cached base — drop it so the preview reloads.
+	invalidateAssetPreviewBase(slug)
+	return nil
 }
 
 func spriteHasBackupSlug(slug string) bool {
@@ -840,6 +848,15 @@ func clearAssetPreviewBase() {
 		rl.UnloadImage(assetPreviewBase)
 		assetPreviewBase = nil
 		assetPreviewBaseSlug = ""
+	}
+}
+
+// invalidateAssetPreviewBase drops the cached base if it belongs to slug. Call
+// after any path that rewrites <slug>.png (bake/import/restore) so a slider drag
+// re-loads the new PNG instead of re-filtering the stale in-memory base.
+func invalidateAssetPreviewBase(slug string) {
+	if assetPreviewBase != nil && assetPreviewBaseSlug == slug {
+		clearAssetPreviewBase()
 	}
 }
 

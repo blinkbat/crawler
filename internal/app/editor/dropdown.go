@@ -18,22 +18,23 @@ import (
 type dropdownOwner int
 
 const (
-	ddNone                dropdownOwner = iota
-	ddPackAdd                           // pack editor: pick a builtin enemy kind to add
-	ddChestAdd                          // chest editor: pick an item kind to add
-	ddPackAI                            // pack editor: pick the pack's AI mode (replaces the cycle button)
-	ddFoeKind                           // foe visualizer: pick which enemy kind to tune (replaces < > arrows)
-	ddMenu                              // menu bar: the open top-level menu (File / Edit / View / …); see menus.go
-	ddDialogSpeaker                     // dialog node editor: pick the node's speaker
-	ddDialogCondKind                    // condition editor: pick the condition kind
-	ddDialogQuestStatus                 // condition editor: pick the required quest status (Active / Complete)
-	ddDialogCondFoe                     // condition editor: pick the foe kind for a foeKilled condition
-	ddDialogTriggerKind                 // trigger editor: pick the trigger kind (enter-tile / foe-killed)
-	ddDialogTriggerDialog               // trigger editor: pick which dialog the trigger starts
-	ddDialogTriggerFoe                  // trigger editor: pick the foe kind for a foeKilled trigger
-	ddDialogActionKind                  // action editor: pick the end-action (none / start / complete quest / event)
-	ddLayer                             // top-bar layer picker: pick the active layer; each row carries a hide/show eye
-	ddFaceSkin                          // tile right-click: pick a cliff-face skin for one face (or all) of the tile
+	ddNone                  dropdownOwner = iota
+	ddPackAdd                             // pack editor: pick a builtin enemy kind to add
+	ddChestAdd                            // chest editor: pick an item kind to add
+	ddPackAI                              // pack editor: pick the pack's AI mode (replaces the cycle button)
+	ddFoeKind                             // foe visualizer: pick which enemy kind to tune (replaces < > arrows)
+	ddMenu                                // menu bar: the open top-level menu (File / Edit / View / …); see menus.go
+	ddDialogSpeaker                       // dialog node editor: pick the node's speaker
+	ddDialogCondKind                      // condition editor: pick the condition kind
+	ddDialogQuestStatus                   // condition editor: pick the required quest status (Active / Complete)
+	ddDialogCondFoe                       // condition editor: pick the foe kind for a foeKilled condition
+	ddDialogTriggerKind                   // trigger editor: pick the trigger kind (enter-tile / foe-killed)
+	ddDialogTriggerDialog                 // trigger editor: pick which dialog the trigger starts
+	ddDialogTriggerFoe                    // trigger editor: pick the foe kind for a foeKilled trigger
+	ddDialogTriggerLocation               // trigger editor: pick the region for an enterLocation trigger
+	ddDialogActionKind                    // action editor: pick the end-action (none / start / complete quest / event)
+	ddLayer                               // top-bar layer picker: pick the active layer; each row carries a hide/show eye
+	ddFaceSkin                            // tile right-click: pick a cliff-face skin for one face (or all) of the tile
 
 	dropdownOwnerCount // sentinel; keep last. Every owner above ddNone needs a dropdownEntryBuilders entry.
 )
@@ -105,21 +106,22 @@ func (e dropdownEntry) disabledIn(s *State) bool { return e.enabled != nil && !e
 
 // dropdownEntryBuilders maps each owner to its row builder (asserted complete at init).
 var dropdownEntryBuilders = map[dropdownOwner]func(*State) []dropdownEntry{
-	ddPackAdd:             packAddEntries,
-	ddChestAdd:            chestAddEntries,
-	ddPackAI:              packAIEntries,
-	ddFoeKind:             foeKindEntries,
-	ddMenu:                menuEntries,
-	ddDialogSpeaker:       dialogSpeakerEntries,
-	ddDialogCondKind:      dialogCondKindEntries,
-	ddDialogQuestStatus:   dialogQuestStatusEntries,
-	ddDialogCondFoe:       dialogCondFoeEntries,
-	ddDialogTriggerKind:   dialogTriggerKindEntries,
-	ddDialogTriggerDialog: dialogTriggerDialogEntries,
-	ddDialogTriggerFoe:    dialogTriggerFoeEntries,
-	ddDialogActionKind:    dialogActionKindEntries,
-	ddLayer:               layerSelectEntries,
-	ddFaceSkin:            faceSkinEntries,
+	ddPackAdd:               packAddEntries,
+	ddChestAdd:              chestAddEntries,
+	ddPackAI:                packAIEntries,
+	ddFoeKind:               foeKindEntries,
+	ddMenu:                  menuEntries,
+	ddDialogSpeaker:         dialogSpeakerEntries,
+	ddDialogCondKind:        dialogCondKindEntries,
+	ddDialogQuestStatus:     dialogQuestStatusEntries,
+	ddDialogCondFoe:         dialogCondFoeEntries,
+	ddDialogTriggerKind:     dialogTriggerKindEntries,
+	ddDialogTriggerDialog:   dialogTriggerDialogEntries,
+	ddDialogTriggerFoe:      dialogTriggerFoeEntries,
+	ddDialogTriggerLocation: dialogTriggerLocationEntries,
+	ddDialogActionKind:      dialogActionKindEntries,
+	ddLayer:                 layerSelectEntries,
+	ddFaceSkin:              faceSkinEntries,
 }
 
 // faceSkinEntries builds the tile face-skin picker. Lists the FaceSkins roster;
@@ -282,8 +284,19 @@ func packAddMember(s *State, add func(*core.PackSpawn)) {
 		return
 	}
 	pack := &s.area.PackSpawns[s.modalPackIdx]
+	// Enforce the formation caps: at most EnemyFrontRowCap front + EnemyBackRowCap back.
+	if len(pack.Members) >= core.EnemyPackCap {
+		s.flash(fmt.Sprintf("Pack is full (max %d: %d front, %d back)",
+			core.EnemyPackCap, core.EnemyFrontRowCap, core.EnemyBackRowCap))
+		return
+	}
 	pushUndo(s)
 	add(pack)
+	// New members default to the front row; seat overflow in the back once the front
+	// rank is full (total < cap guarantees the back has room).
+	if front, _ := core.PackRowCounts(pack.Members); front > core.EnemyFrontRowCap {
+		pack.Members[len(pack.Members)-1].Row = core.RowBack
+	}
 	s.modalCursor = len(pack.Members) - 1
 	s.dirty = true
 }
@@ -479,6 +492,9 @@ func drawDropdown(s *State, font rl.Font, theme render.Theme) {
 		return
 	}
 	lay := computeDropdownLayout(s, entries)
+	// Opaque backing first: DrawCard fills with the translucent theme.SurfacePrimary, so
+	// over the map the rows wash out. A solid editor-window tone underneath keeps them legible.
+	rl.DrawRectangleRec(lay.panel, bgWindow)
 	render.DrawCard(int32(lay.panel.X), int32(lay.panel.Y), int32(lay.panel.Width), int32(lay.panel.Height),
 		theme.SurfacePrimary, theme.BorderSoft, theme.BorderActive)
 

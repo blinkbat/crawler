@@ -737,6 +737,11 @@ func packSpawnLeaderKind(a core.AreaDefinition, sp core.PackSpawn) core.EnemyKin
 // setLayerCell writes byte b at (x,z) in a layer grid. Callers flag reachability
 // dirty separately (this write doesn't know the State).
 func setLayerCell(layer *[]string, x, z int, b byte) {
+	// Mirror cellAt's guard: a ragged area can be shorter than Width/Height, so raw
+	// indexing panics even after an InBounds (declared-dims) check upstream.
+	if z < 0 || z >= len(*layer) || x < 0 || x >= len((*layer)[z]) {
+		return
+	}
 	row := []byte((*layer)[z])
 	row[x] = b
 	(*layer)[z] = string(row)
@@ -845,9 +850,11 @@ func resize(s *State, w, h int) {
 	// Clamp to [Min,Max]MapDimension (shared with metadata input + new-map dialog).
 	if w < core.MinMapDimension {
 		s.flash("Map width too small (min " + strconv.Itoa(core.MinMapDimension) + ")")
+		return
 	}
 	if h < core.MinMapDimension {
 		s.flash("Map height too small (min " + strconv.Itoa(core.MinMapDimension) + ")")
+		return
 	}
 	w = core.ClampMapDimension(w)
 	h = core.ClampMapDimension(h)

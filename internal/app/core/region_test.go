@@ -64,3 +64,29 @@ func TestCopyRegion_ClampsAndDegenerate(t *testing.T) {
 	}
 	a.PasteRegion(TileRegion{}, 0, 0) // must not panic
 }
+
+// TestCopyPasteRegion_Voxel: on a materialized voxel map the cube stack travels
+// with the region (Elevation alone is ignored by SolidAt there).
+func TestCopyPasteRegion_Voxel(t *testing.T) {
+	a := testRegionArea()
+	EnsureSolids(&a)
+	// Place a floating cube at (1,2,1) — solid at level 2, air below it.
+	a.SetCube(1, 2, 1, TileRock)
+	if _, solid := a.SolidAt(1, 2, 1); !solid {
+		t.Fatal("setup: expected a cube at (1,2,1)")
+	}
+
+	r := CopyRegion(&a, 1, 1, 1, 1) // single tile carrying the floating cube
+	if len(r.Solids) < 3 {
+		t.Fatalf("voxel region captured %d planes, want >=3", len(r.Solids))
+	}
+
+	a.PasteRegion(r, 3, 3) // stamp the cube onto an empty column
+	if _, solid := a.SolidAt(3, 2, 3); !solid {
+		t.Fatal("voxel paste did not reproduce the floating cube at (3,2,3)")
+	}
+	// Below the floating cube stays air (the stack copied faithfully).
+	if _, solid := a.SolidAt(3, 1, 3); solid {
+		t.Fatal("voxel paste filled air below the floating cube")
+	}
+}

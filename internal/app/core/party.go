@@ -441,24 +441,68 @@ func SkillTargetsAllEnemies(skill SkillID) bool {
 	return ok && def.PlayerCastable && def.Effect.AppliesAOEEnemies
 }
 
-// SkillHealableOutOfBattle reports whether a player skill is castable while
-// exploring — currently the Heal-tagged skills (Prayer, Mass Mend).
-func SkillHealableOutOfBattle(skill SkillID) bool {
+// SkillUsableOutOfBattle reports whether a player skill can be cast while exploring:
+// a friendly-targeted skill whose whole effect is an immediate, lasting benefit — an
+// HP heal or a status cure. Buffs, wards and heal-over-time (Bless, Stone Skin, Aegis,
+// War Banner, Smoke Bomb, Ice Armor, Renewal) are battle-only — their turn counters
+// can't tick outside combat, so they're excluded.
+func SkillUsableOutOfBattle(skill SkillID) bool {
 	def, ok := skillInfo(skill)
-	return ok && def.PlayerCastable && def.Tag == SkillTagHeal
+	if !ok || !def.PlayerCastable {
+		return false
+	}
+	// Friendly only — never an enemy-target or any AoE-enemy/party-damage skill.
+	if def.TargetMode == ActionEnemyTarget || def.Effect.AppliesAOEEnemies || def.Effect.AppliesAOEParty {
+		return false
+	}
+	// Reject anything turn-scoped or buff/ward-shaped (it would do nothing out of battle).
+	e := def.Effect
+	if e.BuffTurns != 0 || e.RegenTurns != 0 || e.ShieldHP != 0 || e.IceArmorTurns != 0 ||
+		e.BuffArmor != 0 || e.BuffMDef != 0 || e.AppliesAOEPartyBuff || e.BuffStats != (Stats{}) {
+		return false
+	}
+	// Beneficial: restores HP, or cures status (Cleanse — its cure isn't an Effect field).
+	return e.Heal > 0 || skill == SkillCleanse
 }
 
-// OutOfBattleHeals returns the member's out-of-battle-castable heals, in
-// skill order. Per-frame callers use OutOfBattleHealsInto.
-func OutOfBattleHeals(m *PartyMember) []SkillID {
-	return OutOfBattleHealsInto(nil, m)
+// OutOfBattleSkillScope classifies how an out-of-battle support skill applies, so
+// the explore-side caster can route it the way battle does (pick / self / party).
+type OutOfBattleSkillScope int
+
+const (
+	SkillScopeAlly  OutOfBattleSkillScope = iota // pick one living ally (Prayer, Cleanse)
+	SkillScopeSelf                               // the caster only (Second Wind)
+	SkillScopeParty                              // every living member (Mass Mend)
+)
+
+// OutOfBattleSkillScopeFor classifies skill's apply scope: a single-ally target picks
+// a recipient; an untargeted Heal-kind skill blankets the party; anything else is self.
+func OutOfBattleSkillScopeFor(skill SkillID) OutOfBattleSkillScope {
+	def, ok := skillInfo(skill)
+	if !ok {
+		return SkillScopeSelf
+	}
+	switch {
+	case def.TargetMode == ActionPartyTarget:
+		return SkillScopeAlly
+	case def.Kind == SkillKindHeal:
+		return SkillScopeParty
+	default:
+		return SkillScopeSelf
+	}
 }
 
-// OutOfBattleHealsInto is OutOfBattleHeals into a caller-owned buffer (re-sliced
-// to 0; result aliases buf until next reuse).
-func OutOfBattleHealsInto(buf []SkillID, m *PartyMember) []SkillID {
+// OutOfBattleSupportSkills returns the member's out-of-battle-castable support skills
+// (heals + cures), in skill order. Per-frame callers use OutOfBattleSupportSkillsInto.
+func OutOfBattleSupportSkills(m *PartyMember) []SkillID {
+	return OutOfBattleSupportSkillsInto(nil, m)
+}
+
+// OutOfBattleSupportSkillsInto is OutOfBattleSupportSkills into a caller-owned buffer
+// (re-sliced to 0; result aliases buf until next reuse).
+func OutOfBattleSupportSkillsInto(buf []SkillID, m *PartyMember) []SkillID {
 	return filterInto(buf, PartySkills(m), func(s SkillID) bool {
-		return s != SkillNone && SkillHealableOutOfBattle(s)
+		return s != SkillNone && SkillUsableOutOfBattle(s)
 	})
 }
 

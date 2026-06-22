@@ -94,9 +94,9 @@ func DrawWeather(g *core.GameState) {
 	w := g.Weather
 	// Clamp at the consumption site so the uint8 alpha casts can't wrap if the [0,1] invariant drifts.
 	intensity := core.Clamp(w.Intensity, 0, 1)
-	w.Flash = core.Clamp(w.Flash, 0, 1)
+	flash := core.Clamp(w.Flash, 0, 1)
 	// Flash can outlast the rain's fade, so it's checked independently of intensity.
-	if intensity <= weatherIntensityEpsilon && w.Flash <= weatherIntensityEpsilon {
+	if intensity <= weatherIntensityEpsilon && flash <= weatherIntensityEpsilon {
 		return
 	}
 	sw, sh := screenSizeF()
@@ -135,8 +135,8 @@ func DrawWeather(g *core.GameState) {
 	}
 
 	// Lightning blink — painted last so it lights the rain it falls through.
-	if w.Flash > weatherIntensityEpsilon {
+	if flash > weatherIntensityEpsilon {
 		rl.DrawRectangle(0, 0, int32(sw), int32(sh),
-			rl.NewColor(lightningR, lightningG, lightningB, uint8(w.Flash*lightningMaxAlpha)))
+			rl.NewColor(lightningR, lightningG, lightningB, uint8(flash*lightningMaxAlpha)))
 	}
 }

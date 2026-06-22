@@ -62,8 +62,8 @@ func tryUseItem(g *core.GameState) {
 }
 
 // tryUseSkill handles a Use press on the Skills tab: cast an affordable out-of-
-// battle heal. Single-target opens the ally picker; party-wide (Mass Mend)
-// applies immediately and pays MP now.
+// battle support skill (heal or cure). Single-ally opens the picker; party-wide
+// (Mass Mend) and self (Second Wind) apply immediately and pay MP now.
 func tryUseSkill(g *core.GameState) {
 	caster := g.PanelsRowCursor
 	m, ok := validMember(g, caster)
@@ -74,14 +74,14 @@ func tryUseSkill(g *core.GameState) {
 		audio.Play(audio.SoundInputMiss) // a downed member keeps HP=0 into exploration; no corpse cast
 		return
 	}
-	// Affordable out-of-battle heals: none → refuse; one → cast; several → chooser
-	// (filtered to affordable so it never lists a cast beginHealCast would refuse).
-	heals := affordableOutOfBattleHeals(m)
-	switch len(heals) {
+	// Affordable out-of-battle skills: none → refuse; one → cast; several → chooser
+	// (filtered to affordable so it never lists a cast beginSkillCast would refuse).
+	skills := affordableOutOfBattleSkills(m)
+	switch len(skills) {
 	case 0:
-		audio.Play(audio.SoundInputMiss) // no out-of-battle heal
+		audio.Play(audio.SoundInputMiss) // no out-of-battle support skill
 	case 1:
-		beginHealCast(g, caster, heals[0])
+		beginSkillCast(g, caster, skills[0])
 	default:
 		g.HealPickOpen = true
 		g.HealPickCaster = caster
@@ -89,29 +89,30 @@ func tryUseSkill(g *core.GameState) {
 	}
 }
 
-// affordableOutOfBattleHeals returns the member's affordable out-of-battle heals.
-// The chooser and its driver share it so their lists can't diverge.
+// affordableOutOfBattleSkills returns the member's affordable out-of-battle support
+// skills. The chooser and its driver share it so their lists can't diverge.
 // Reusable per-frame buffers; returned slices valid until the next call.
 var (
-	outOfBattleHealsBuf []core.SkillID
-	affordableHealsBuf  []core.SkillID
-	useTargetLivingBuf  []int
+	outOfBattleSkillsBuf []core.SkillID
+	affordableSkillsBuf  []core.SkillID
+	useTargetLivingBuf   []int
 )
 
-func affordableOutOfBattleHeals(m *core.PartyMember) []core.SkillID {
-	outOfBattleHealsBuf = core.OutOfBattleHealsInto(outOfBattleHealsBuf, m)
-	affordableHealsBuf = affordableHealsBuf[:0]
-	for _, h := range outOfBattleHealsBuf {
-		if core.CanAffordSkill(m, h) {
-			affordableHealsBuf = append(affordableHealsBuf, h)
+func affordableOutOfBattleSkills(m *core.PartyMember) []core.SkillID {
+	outOfBattleSkillsBuf = core.OutOfBattleSupportSkillsInto(outOfBattleSkillsBuf, m)
+	affordableSkillsBuf = affordableSkillsBuf[:0]
+	for _, s := range outOfBattleSkillsBuf {
+		if core.CanAffordSkill(m, s) {
+			affordableSkillsBuf = append(affordableSkillsBuf, s)
 		}
 	}
-	return affordableHealsBuf
+	return affordableSkillsBuf
 }
 
-// beginHealCast resolves a chosen heal: single-target opens the ally picker (MP
-// billed on apply); party-wide applies now. Re-checks MP/corpse before casting.
-func beginHealCast(g *core.GameState, caster int, skill core.SkillID) {
+// beginSkillCast resolves a chosen support skill the way battle does: a single-ally
+// skill opens the picker (MP billed on apply); a party-wide heal or a self skill
+// applies now. Re-checks MP/corpse and that it'll do something before casting.
+func beginSkillCast(g *core.GameState, caster int, skill core.SkillID) {
 	m, ok := validMember(g, caster)
 	if !ok || m.HP <= 0 {
 		audio.Play(audio.SoundInputMiss)
@@ -121,21 +122,29 @@ func beginHealCast(g *core.GameState, caster int, skill core.SkillID) {
 		audio.Play(audio.SoundInputMiss) // not enough MP
 		return
 	}
-	if core.SkillTargetMode(skill) == core.ActionPartyTarget {
-		// Single-target heal: pick the recipient.
+	switch core.OutOfBattleSkillScopeFor(skill) {
+	case core.SkillScopeAlly:
+		// Single-ally heal/cure: pick the recipient (benefit re-checked on apply).
 		openUseTargetForSkill(g, caster, skill)
-		return
+	case core.SkillScopeParty:
+		// Party-wide heal (Mass Mend): no target step. Refuse if no member can
+		// benefit so it can't drain MP for zero effect.
+		if !anyMemberBelowFull(g) {
+			audio.Play(audio.SoundInputMiss)
+			return
+		}
+		core.HealWholeParty(g, core.SkillHealFor(m, skill))
+		core.SpendSkillMP(m, skill)
+		audio.Play(audio.SoundHeal)
+	default: // SkillScopeSelf (Second Wind): heal the caster.
+		if !core.MemberCanBeHealed(*m) {
+			audio.Play(audio.SoundInputMiss)
+			return
+		}
+		core.HealMember(m, core.SkillHealFor(m, skill))
+		core.SpendSkillMP(m, skill)
+		audio.Play(audio.SoundHeal)
 	}
-	// Party-wide heal: no target step. Refuse if no member can benefit so it
-	// can't drain MP for zero effect.
-	if !anyMemberBelowFull(g) {
-		audio.Play(audio.SoundInputMiss)
-		return
-	}
-	amount := core.SkillHealFor(m, skill)
-	core.HealWholeParty(g, amount)
-	core.SpendSkillMP(m, skill)
-	audio.Play(audio.SoundHeal)
 }
 
 // anyMemberBelowFull reports whether any member can benefit from an HP heal (via
@@ -172,16 +181,16 @@ func updateHealPicker(g *core.GameState) {
 		closeHealPick(g)
 		return
 	}
-	heals := affordableOutOfBattleHeals(m)
-	if len(heals) == 0 {
+	skills := affordableOutOfBattleSkills(m)
+	if len(skills) == 0 {
 		closeHealPick(g)
 		return
 	}
-	g.HealPickCursor = input.CursorUpDown(g.HealPickCursor, len(heals))
-	if input.ConfirmPressed() && g.HealPickCursor >= 0 && g.HealPickCursor < len(heals) {
-		skill := heals[g.HealPickCursor]
+	g.HealPickCursor = input.CursorUpDown(g.HealPickCursor, len(skills))
+	if input.ConfirmPressed() && g.HealPickCursor >= 0 && g.HealPickCursor < len(skills) {
+		skill := skills[g.HealPickCursor]
 		closeHealPick(g)
-		beginHealCast(g, caster, skill)
+		beginSkillCast(g, caster, skill)
 	}
 }
 
@@ -235,19 +244,26 @@ func applyUseToMember(g *core.GameState, member int) {
 			// can't pay MP or cast.
 			break
 		}
-		// Don't burn MP healing an ally who can't benefit (core.MemberCanBeHealed).
-		// Checked before spending MP, and bounds-checked first so it can't panic.
 		recipient, ok := validMember(g, member)
-		if !ok || !core.MemberCanBeHealed(*recipient) {
+		if !ok {
+			break
+		}
+		// Don't burn MP on a cast that does nothing: a cure needs a curable debuff,
+		// a heal needs missing HP. Checked before spending MP (mirrors the battle guards).
+		cure := skill == core.SkillCleanse
+		if (cure && !core.HasCurableDebuff(recipient)) || (!cure && !core.MemberCanBeHealed(*recipient)) {
 			audio.Play(audio.SoundInputMiss)
 			break
 		}
-		heal := core.SkillHealFor(c, skill)
 		if !core.SpendSkillMP(c, skill) {
 			audio.Play(audio.SoundInputMiss) // MP drained between open and confirm
 			break
 		}
-		core.HealMember(recipient, heal)
+		if cure {
+			core.CureDebuffs(recipient)
+		} else {
+			core.HealMember(recipient, core.SkillHealFor(c, skill))
+		}
 		audio.Play(audio.SoundHeal)
 	}
 	closeUseTarget(g)

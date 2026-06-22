@@ -19,9 +19,10 @@ const (
 	msgNoItems        = "No items."
 	msgInvalidTarget  = "Invalid target."
 	msgNoAllySelected = "No ally selected."
-	// Back-row melee refusals: two phrasings for skill submenu vs basic-attack targeting.
-	msgBackRowMeleeSkill  = "Can't reach from the back row — reposition or use a ranged/magic skill."
-	msgBackRowMeleeAttack = "Can't reach from the back row — reposition or use a ranged attack."
+	// Back-row melee refusals: skill submenu keeps its explainer; the greyed Attack row
+	// logs a terse named-unit line (msgBackRowMeleeAttackFmt) and buzzes instead.
+	msgBackRowMeleeSkill     = "Can't reach from the back row — reposition or use a ranged/magic skill."
+	msgBackRowMeleeAttackFmt = "%s cannot reach from the back row!"
 	// msgBackRowMeleeTarget: confirming an unreachable (greyed back-row) foe buzzes + logs this.
 	msgBackRowMeleeTarget = "Cannot use current weapon from the back row"
 )
@@ -1374,8 +1375,10 @@ func updateBattleEffects(g *core.GameState, dt float32, members []core.Enemy) {
 }
 
 func battleDeathFadeActive(g *core.GameState) bool {
-	for _, m := range core.BattleMembers(g) {
-		if m.DeathFade > 0 {
+	// Index, not value-range: Enemy is a large struct and we only read one field.
+	members := core.BattleMembers(g)
+	for i := range members {
+		if members[i].DeathFade > 0 {
 			return true
 		}
 	}

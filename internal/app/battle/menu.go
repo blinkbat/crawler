@@ -151,7 +151,7 @@ func updateSkillMenu(g *core.GameState) {
 	}
 	// Back-row melee (single-target or AoE cleave) reaches nothing — gate before
 	// any target selection / AoE dispatch. Submenu stays open to re-pick.
-	if core.SkillAttackClassFor(skill).IsMelee() && !core.PartyInEffectiveFront(g.Party, g.Battle.CurrentParty) {
+	if core.BackRowMeleeBlocked(core.SkillAttackClassFor(skill), g.Party, g.Battle.CurrentParty) {
 		setBattleStatus(g, msgBackRowMeleeSkill)
 		return
 	}
@@ -197,7 +197,11 @@ func battleEnemyTargets(g *core.GameState) []int {
 // Returns false (menu state intact) when barred or no target is reachable.
 func enterEnemyTargeting(g *core.GameState, prompt string) bool {
 	if battlePendingAttackMelee(g) && !core.PartyInEffectiveFront(g.Party, g.Battle.CurrentParty) {
-		setBattleStatus(g, msgBackRowMeleeAttack)
+		// Greyed Attack row picked anyway: buzz + log the refusal; turn is NOT spent.
+		audio.Play(audio.SoundInputMiss)
+		if m, ok := currentMember(g); ok {
+			setBattleMessage(g, fmt.Sprintf(msgBackRowMeleeAttackFmt, m.Name))
+		}
 		return false
 	}
 	targets := battleEnemyTargets(g)
@@ -330,14 +334,14 @@ func applyItem(g *core.GameState) {
 	}
 	actor := &g.Party[g.Battle.CurrentParty]
 	actor.AttackBump = core.BumpDuration
-	setBattleMessage(g, itemUseMessage(actor.Name, tgt.Name, def, healedHP > 0, healedHP, restoredMP))
+	setBattleMessage(g, itemUseMessage(tgt.Name, def, healedHP > 0, healedHP, restoredMP))
 	g.Battle.PendingItem = core.ItemNone
 	finishActorTurn(g)
 }
 
 // itemUseMessage formats the consumed-item log line by what it restored (HP/MP/
 // both/neither). hp and mp are ACTUAL post-clamp amounts so the log can't overclaim.
-func itemUseMessage(actorName, targetName string, def core.ItemDefinition, healed bool, hp, mp int) string {
+func itemUseMessage(targetName string, def core.ItemDefinition, healed bool, hp, mp int) string {
 	switch {
 	case healed && hp > 0 && mp > 0:
 		return fmt.Sprintf("%s uses %s (+%d HP, +%d MP).", targetName, def.Name, hp, mp)
@@ -346,7 +350,8 @@ func itemUseMessage(actorName, targetName string, def core.ItemDefinition, heale
 	case mp > 0:
 		return fmt.Sprintf("%s drinks %s (+%d MP).", targetName, def.Name, mp)
 	default:
-		return fmt.Sprintf("%s uses %s.", actorName, def.Name)
+		// Name the recipient like the +HP/+MP branches (the item lands on the target).
+		return fmt.Sprintf("%s uses %s.", targetName, def.Name)
 	}
 }
 

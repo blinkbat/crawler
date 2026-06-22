@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+
 	"crawler/internal/app/audio"
 	"crawler/internal/app/core"
 	"crawler/internal/app/core/mapfile"
@@ -179,10 +181,15 @@ func returnToTitleScene(state *appState) {
 func applyAreaTransition(g *core.GameState) error {
 	target := g.PendingTransition.TargetMap
 	doorName := g.PendingTransition.TargetDoor
-	if target == "" || doorName == "" {
-		// Mirrors Door.HasTarget on the raw PendingTransition fields (the
-		// transition is queued before resolving to a Door). Empty = none queued.
+	if target == "" && doorName == "" {
+		// Both empty = nothing queued (mirrors Door.HasTarget on the raw fields).
 		return nil
+	}
+	if target == "" || doorName == "" {
+		// Exactly one field set is a malformed/partial transition. The caller only
+		// reaches here with TargetMap set, so this is a door missing its target door
+		// name — surface it instead of silently no-op'ing and stranding the player.
+		return fmt.Errorf("incomplete transition (map=%q door=%q)", target, doorName)
 	}
 	// Same-map portals don't reload from disk (the area already holds the door),
 	// avoiding a Packs/Chests reset for an in-map teleport.
@@ -197,6 +204,10 @@ func applyAreaTransition(g *core.GameState) error {
 		// Seat the standing level on the exit tile so a door onto a voxel map
 		// lands on the ground, not level 0 (no-op on a heightfield).
 		g.Player.Level = g.Area.GroundSpawnLevel(x, z)
+		// Re-seed region presence at the door exit (NewGameState seeded the area's
+		// start tile, not where this portal landed) so a door INTO a region fires its
+		// enter trigger only on the next crossing, not on arrival.
+		core.SeedLocationPresence(g)
 		// Symmetry with the cross-map branch: close any equip picker and clear
 		// VFX so a (latent today) teleport from an open panel stays honest.
 		core.CloseEquipPicker(g)
@@ -220,6 +231,8 @@ func applyAreaTransition(g *core.GameState) error {
 	next.Player = core.NewPlayer(x, z, dest.Facing)
 	next.Player.Level = next.Area.GroundSpawnLevel(x, z)
 	*g = next
+	// Re-seed at the door exit (NewGameState seeded next's start tile).
+	core.SeedLocationPresence(g)
 	// Drop lingering particles — VFX from a fight ending just before the door
 	// step would otherwise drift through the new area's camera view.
 	core.RequestVFXReset(g)

@@ -543,6 +543,11 @@ func drawSequenceBar(timing core.TimingState, g *core.GameState, assets Resource
 // drawReelBar paints Steal's slot-machine gamble: one framed cell per reel. Spinning reels dim;
 // stopped reels gild their frame and show the locked symbol solid; resolve flash tints them.
 func drawReelBar(timing core.TimingState, g *core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
+	// Reels stand taller than the shared gauge so the spinning drum reads clearly;
+	// grow upward from the shared baseline so the bottom edge stays aligned.
+	const reelBarHeightScale = float32(1.6)
+	y += barH - barH*reelBarHeightScale
+	barH *= reelBarHeightScale
 	xOff, _, _ := applyBarMotion(timing, g.Battle.TimingFlash, barH)
 	drawX := x + xOff
 	drawTimingHeading(assets.hudFont, timingHeadingReels, drawX, barW, y, timingHeadingReelsColor, flashing, qualityColor(timing.Quality, false))
@@ -576,8 +581,11 @@ func drawReelBar(timing core.TimingState, g *core.GameState, assets Resources, x
 		// Clip the scrolling strip to the reel window so symbols slide in/out, not spill.
 		rl.BeginScissorMode(ix, iy, iw, ih)
 		if stopped {
-			sym := timing.Reels[i].Stop
-			col := reelSymbolColors[((sym%ncol)+ncol)%ncol]
+			// Reduce to a symbol identity (mod ReelSymbolCount) THEN to a hue (mod
+			// ncol), matching the scrolling path so the locked colour can't diverge
+			// from the spinning preview if the palette length and symbol count desync.
+			sym := ((timing.Reels[i].Stop % core.ReelSymbolCount) + core.ReelSymbolCount) % core.ReelSymbolCount
+			col := reelSymbolColors[sym%ncol]
 			drawReelSymbol(sx, cy, r, col, flashing, flash)
 		} else {
 			// Continuous scroll: the symbol nearest the pay-line is the one a press locks

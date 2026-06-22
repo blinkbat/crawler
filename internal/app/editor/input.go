@@ -1044,8 +1044,9 @@ const defaultTextFieldMaxLen = 96
 // not here (incl. the numeric width/height, handled by updateNumericInput) fall
 // back via configForFocus.
 var textFieldConfigs = map[focusField]textFieldConfig{
-	focusName:     {defaultTextFieldMaxLen, acceptPrintable},
-	focusQuiet:    {defaultTextFieldMaxLen, acceptPrintable},
+	focusName:         {defaultTextFieldMaxLen, acceptPrintable},
+	focusLocationName: {defaultTextFieldMaxLen, acceptPrintable},
+	focusQuiet:        {defaultTextFieldMaxLen, acceptPrintable},
 	focusFilename: {defaultTextFieldMaxLen, acceptPrintable},
 	// Door identifier fields reject spaces — the .map door row is space-delimited.
 	focusDoorName:       {defaultTextFieldMaxLen, acceptPrintableNoSpace},
@@ -1325,6 +1326,10 @@ func validateModalState(s *State) {
 		if !dialogTriggerInRange(s) {
 			closeModal(s)
 		}
+	case modalLocationEdit:
+		if s.modalLocationIdx < 0 || s.modalLocationIdx >= len(s.area.Locations) {
+			closeModal(s)
+		}
 	}
 }
 
@@ -1377,7 +1382,7 @@ func closeModal(s *State) {
 	soundDrag = noSliderDrag
 	// Drop modal-scoped focus (door fields, new-map numeric) so it can't carry over.
 	if s.focus == focusDoorName || s.focus == focusDoorTargetMap || s.focus == focusDoorTargetDoor ||
-		s.focus == focusNewWidth || s.focus == focusNewHeight {
+		s.focus == focusNewWidth || s.focus == focusNewHeight || s.focus == focusLocationName {
 		s.focus = focusNone
 		s.numericBuf = ""
 	}
@@ -1768,11 +1773,22 @@ func packToggleSelectedRow(s *State, pack *core.PackSpawn) {
 	if s.modalCursor < 0 || s.modalCursor >= len(pack.Members) {
 		return
 	}
-	pushUndo(s)
 	m := &pack.Members[s.modalCursor]
+	// Refuse a flip that would overfill the target rank (max 3 front / 5 back).
+	front, back := core.PackRowCounts(pack.Members)
 	if m.Row == core.RowBack {
+		if front >= core.EnemyFrontRowCap {
+			s.flash("Front row is full (max " + strconv.Itoa(core.EnemyFrontRowCap) + ")")
+			return
+		}
+		pushUndo(s)
 		m.Row = core.RowFront
 	} else {
+		if back >= core.EnemyBackRowCap {
+			s.flash("Back row is full (max " + strconv.Itoa(core.EnemyBackRowCap) + ")")
+			return
+		}
+		pushUndo(s)
 		m.Row = core.RowBack
 	}
 	s.dirty = true

@@ -634,11 +634,11 @@ func drawParticle(camera rl.Camera3D, p *particle) {
 		// Ground-aligned ring; rotate around X so the circle lies flat (else it draws vertically).
 		rl.DrawCircle3D(pos, size, rl.NewVector3(1, 0, 0), 90, col)
 	case shapeStrand:
-		// Tall thin billboard for the dripping-web look.
-		rl.DrawCubeV(pos, rl.NewVector3(size*0.2, size, size*0.2), col)
+		// Tall thin sliver for the dripping-web look; spun about its vertical axis (p.Rotation).
+		drawSpunCube(pos, rl.NewVector3(size*0.2, size, size*0.2), p.Rotation, col)
 	case shapeShard:
-		// Pointy diamond — a stretched cube, cheap icicle stand-in.
-		rl.DrawCubeV(pos, rl.NewVector3(size*0.55, size, size*0.55), col)
+		// Pointy diamond — a stretched cube, cheap icicle stand-in; spun about its vertical axis.
+		drawSpunCube(pos, rl.NewVector3(size*0.55, size, size*0.55), p.Rotation, col)
 	case shapeDust:
 		// Soft chunky sphere.
 		rl.DrawSphere(pos, size*0.5, col)
@@ -649,4 +649,14 @@ func drawParticle(camera rl.Camera3D, p *particle) {
 		rl.DrawSphere(pos, size*0.5, col)
 	}
 	_ = camera
+}
+
+// drawSpunCube draws a centered cube rotated about its vertical axis so a particle's
+// accumulated p.Rotation (driven by p.Spin) reads visually instead of being dead state.
+func drawSpunCube(pos, dim rl.Vector3, rotation float32, col color.RGBA) {
+	rl.PushMatrix()
+	rl.Translatef(pos.X, pos.Y, pos.Z)
+	rl.Rotatef(rotation, 0, 1, 0)
+	rl.DrawCubeV(rl.Vector3{}, dim, col)
+	rl.PopMatrix()
 }

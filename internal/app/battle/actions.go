@@ -428,8 +428,11 @@ func chargeMP(g *core.GameState, skill core.SkillID) bool {
 // forEachLivingEnemy invokes fn(slot, enemy) for every alive pack member — the
 // shared whole-pack walk. enemy is the write-through pointer.
 func forEachLivingEnemy(g *core.GameState, fn func(slot int, enemy *core.Enemy)) {
-	for slot, m := range core.BattleMembers(g) {
-		if !m.Alive {
+	// Index, not value-range: Enemy is a large struct and the pointer comes from
+	// BattleMemberAt anyway, so the copy would be pure waste.
+	members := core.BattleMembers(g)
+	for slot := range members {
+		if !members[slot].Alive {
 			continue
 		}
 		fn(slot, core.BattleMemberAt(g, slot))
@@ -1745,6 +1748,12 @@ func bleedTickMessage(subject string, dealt int, fatal bool) string {
 
 func applyPartyPoisonTick(g *core.GameState, index int) bool {
 	member := &g.Party[index]
+	// Guard HP here so the counter only drains on a tick that actually lands:
+	// damagePartyMemberPoison no-ops on a dead member, so decrementing first would
+	// burn a poison turn with no damage for any caller that skips its own HP gate.
+	if member.HP <= 0 || member.PoisonTurns <= 0 {
+		return false
+	}
 	member.PoisonTurns--
 	// damagePartyMemberPoison is the authoritative kill signal; it bypasses the
 	// ingested lockout so poison keeps ticking on ingested prey (else a free escape).

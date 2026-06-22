@@ -66,7 +66,8 @@ func AreaContentEqual(a, b AreaDefinition) bool {
 		!slices.Equal(a.CrystalSpawns, b.CrystalSpawns) ||
 		!customEnemiesEqual(a.CustomEnemies, b.CustomEnemies) ||
 		!dialogsEqual(a.Dialogs, b.Dialogs) ||
-		!slices.Equal(a.Triggers, b.Triggers) {
+		!slices.Equal(a.Triggers, b.Triggers) ||
+		!slices.Equal(a.Locations, b.Locations) {
 		return false
 	}
 	return true
@@ -248,6 +249,8 @@ func CloneArea(a AreaDefinition) AreaDefinition {
 	out.Dialogs = CloneDialogs(a.Dialogs)
 	// DialogTrigger is all-comparable, so a plain slice copy is a full deep copy.
 	out.Triggers = append([]DialogTrigger(nil), a.Triggers...)
+	// Location is likewise all-comparable — a plain copy is a full deep copy.
+	out.Locations = append([]Location(nil), a.Locations...)
 	return out
 }
 

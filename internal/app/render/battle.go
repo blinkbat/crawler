@@ -94,7 +94,15 @@ func init() {
 	})
 }
 
-// drawEnemyRoster shows the active pack at the top of the screen.
+// rosterBackBuf / rosterFrontBuf split the visible slots into ranks (single-threaded draw).
+var (
+	rosterBackBuf  = make([]int, 0, 8)
+	rosterFrontBuf = make([]int, 0, 8)
+)
+
+// drawEnemyRoster shows the active pack at the top of the screen, laid out as a
+// formation grid: the back rank (up to 5) on top, the front rank (up to 3) below,
+// so the roster mirrors the on-field seating instead of a tall vertical stack.
 func drawEnemyRoster(g *core.GameState, assets Resources) {
 	if g.Battle.Phase == core.BattleWon || g.Battle.Phase == core.BattleLost {
 		return
@@ -103,35 +111,70 @@ func drawEnemyRoster(g *core.GameState, assets Resources) {
 	if len(slots) == 0 {
 		return
 	}
+	members := core.BattleMembers(g)
 
-	rowH := rosterRowH
-	topPad := rosterTopPad
-	padBottom := rosterBottomPad
-	w := rosterW
-	if len(slots) <= 1 {
-		w = rosterWSingle
+	// Split into ranks for the two-row grid.
+	back, front := rosterBackBuf[:0], rosterFrontBuf[:0]
+	for _, slot := range slots {
+		if members[slot].Row == core.RowBack {
+			back = append(back, slot)
+		} else {
+			front = append(front, slot)
+		}
 	}
-	h := topPad + int32(len(slots))*rowH + padBottom
+	rosterBackBuf, rosterFrontBuf = back, front
+
+	cellW, cellH := rosterCellW, rosterCellH
+	gap, inset := rosterCellGap, rosterGridInset
+	cols := len(back)
+	if len(front) > cols {
+		cols = len(front)
+	}
+	if cols < 1 {
+		cols = 1
+	}
+	ranksN := 0
+	if len(back) > 0 {
+		ranksN++
+	}
+	if len(front) > 0 {
+		ranksN++
+	}
+	innerW := int32(cols)*cellW + int32(cols-1)*gap
+	w := innerW + 2*inset
+	h := rosterTopPad + int32(ranksN)*cellH + int32(ranksN-1)*rosterRankGap + rosterBottomPad
 	x := centerX(w)
 	y := hudEdgePad + hudEdgePad/2
-
 	drawCard(x, y, w, h, surfacePrimary, borderSoft, borderEnemy)
 
-	// targetable gates the per-row yellow highlight (shares targetingEnemy with the chevron).
+	// targetable gates the per-cell yellow highlight (shares targetingEnemy with the in-world chevron).
 	targetable := targetingEnemy(g)
-	members := core.BattleMembers(g)
 	selectedSlot := core.SelectedEnemySlot(g)
-	// While picking a melee target, out-of-reach foes (back row, front still up) grey out;
+	// While picking a melee target, out-of-reach foes (back rank, front still up) grey out;
 	// the cursor can land on them but confirming buzzes. Ranged/magic reaches everyone.
 	meleeTargeting := targetable && core.BattlePendingAttackIsMelee(g)
 
-	for i, slot := range slots {
-		enemy := &members[slot] // pointer: avoid copying the 496-byte Enemy per row per frame
-		rowY := y + topPad + int32(i)*rowH
-		// HP shows once the kind is identified (5 kills or a Scan) — a kind-level fact.
-		known := g.Bestiary.Knows(enemy.Kind)
-		reachable := !meleeTargeting || core.EnemyInEffectiveFront(members, slot)
-		drawEnemyRosterRow(assets.hudFont, enemy, x+14, rowY, w-28, rowH-8, targetable && slot == selectedSlot, !enemy.Alive, known, reachable)
+	drawRank := func(rank []int, rankIdx int) {
+		rankW := int32(len(rank))*cellW + int32(len(rank)-1)*gap
+		startX := x + inset + (innerW-rankW)/2 // center a short rank under a wider one
+		rowY := y + rosterTopPad + int32(rankIdx)*(cellH+rosterRankGap)
+		for j, slot := range rank {
+			enemy := &members[slot] // pointer: avoid copying the 496-byte Enemy per cell per frame
+			cx := startX + int32(j)*(cellW+gap)
+			// HP shows once the kind is identified (5 kills or a Scan) — a kind-level fact.
+			known := g.Bestiary.Knows(enemy.Kind)
+			reachable := !meleeTargeting || core.EnemyInEffectiveFront(members, slot)
+			drawEnemyRosterCell(assets.hudFont, enemy, cx, rowY, cellW, cellH,
+				targetable && slot == selectedSlot, !enemy.Alive, known, reachable)
+		}
+	}
+	rankIdx := 0
+	if len(back) > 0 {
+		drawRank(back, rankIdx)
+		rankIdx++
+	}
+	if len(front) > 0 {
+		drawRank(front, rankIdx)
 	}
 }
 
@@ -151,7 +194,10 @@ func visibleRosterSlots(g *core.GameState) []int {
 	return rosterSlotsBuf
 }
 
-func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targeted, fading, known, reachable bool) {
+// drawEnemyRosterCell paints one foe's grid cell: name over a condition/HP line in
+// smaller fonts, status pills in the top-right. Selection reads via the bright fill +
+// halo (no chevron — there's no room in a grid cell, and the highlight is unambiguous).
+func drawEnemyRosterCell(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targeted, fading, known, reachable bool) {
 	bg := surfaceRosterRow
 	border := borderRosterRow
 	nameCol := textPrimary
@@ -161,8 +207,7 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 		border = borderDim
 		nameCol = textDim
 	}
-	// Bright target fill + halo only for a REACHABLE selected foe; an unreachable one
-	// keeps its grey look but shows a dim cursor arrow below.
+	// Bright target fill + halo only for a REACHABLE selected foe; an unreachable one keeps its grey look.
 	if targeted && reachable {
 		bg = core.MixColor(bg, surfaceEnemyTint, 0.9)
 		border = borderEnemy
@@ -175,43 +220,26 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 		drawSmallPanelOutline(x, y, w, h, border)
 	}
 
-	leftPad := hudContentInsetX
-	if targeted {
-		leftPad = rosterTargetedNameInset
-		bx := float32(x) + rosterArrowMarkerInsetX
-		cy := float32(y) + float32(h)/2
-		col := fadeColor(borderEnemy, pulseHalo())
-		if !reachable {
-			col = borderDim // muted cursor on an unreachable foe
-		}
-		drawArrowMarker(rl.NewVector2(bx, cy), rosterArrowMarkerTipDx, 0, rosterArrowMarkerHalf, col)
-	}
-
 	condition, condCol := enemyHealthStyle(enemy)
-
-	nameX := float32(x + leftPad)
-	nameY := y + 10
-	displayName := core.EnemyName(enemy)
-	drawEngravedText(font, displayName, nameX, float32(nameY), FontHeading, nameCol)
+	pad := hudContentInsetX/2 + 2 // tighter inset for the compact cell
+	nameX := float32(x + pad)
+	nameY := float32(y) + 6
+	drawEngravedText(font, core.EnemyName(enemy), nameX, nameY, FontBody, nameCol)
 
 	// Wound-state word always; real HP in claret only when known. No HP bar.
-	condSize := FontSmall
-	// Stack the condition below the name (bottom-anchoring collided with the tall name).
-	condY := float32(nameY) + FontHeading + 2
+	const condSize = FontTiny
+	condY := nameY + FontBody + 1
 	drawTextWithShadow(font, condition, nameX, condY, condSize, condCol)
 	if known {
 		condW := rosterCondMeasureCache.measure(font, condition, condSize, canonicalSpacing(condSize)).X
-		drawTextWithShadow(font, enemyHPLabel(enemy.HP, enemy.MaxHP), nameX+condW+12, condY, condSize, barEnemyHP)
+		drawTextWithShadow(font, enemyHPLabel(enemy.HP, enemy.MaxHP), nameX+condW+8, condY, condSize, barEnemyHP)
 	}
 
-	// Status pills, anchored to the right edge (no HP bar to tuck beside).
+	// Status pills in the top-right corner, stacking left, walking the init-asserted visual table.
 	pillW := rosterStatusPillW
 	pillH := rosterStatusPillH
-	rightEdge := float32(x+w) - rosterStatusRightPad
-	pillX := rightEdge - pillW
-	pillBaseY := float32(y) + (float32(h)-pillH)/2
-
-	// Status pills stack upward from pillBaseY, walking the init-asserted visual table.
+	pillY := float32(y) + 6
+	pillRight := float32(x+w) - 8
 	slot := 0
 	for _, p := range enemyStatusPillVisuals {
 		turns := p.turns(enemy)
@@ -222,7 +250,7 @@ func drawEnemyRosterRow(font rl.Font, enemy *core.Enemy, x, y, w, h int32, targe
 		if p.flicker {
 			fill = fadeColor(fill, pulseFlicker())
 		}
-		pillY := pillBaseY - float32(slot)*(pillH+4)
+		pillX := pillRight - pillW - float32(slot)*(pillW+4)
 		drawEnemyStatusPill(font, pillX, pillY, pillW, pillH,
 			fill, p.outline, p.glyph, statusTurnsLabel(turns))
 		slot++
@@ -238,13 +266,19 @@ func statusTurnsLabel(turns int) string {
 // rosterCondMeasureCache memoizes MeasureTextEx for the wound-state words the HP readout offsets against.
 var rosterCondMeasureCache measureCache
 
-// enemyHPLabelCache memoizes "HP/MaxHP" per (hp,max). Bounded to pairs seen in play.
+// enemyHPLabelCache memoizes "HP/MaxHP" per (hp,max). Capped so a long session
+// can't grow it without bound; on overflow we drop the cache and rebuild.
 var enemyHPLabelCache = map[[2]int]string{}
+
+const enemyHPLabelCacheCap = 512
 
 func enemyHPLabel(hp, max int) string {
 	k := [2]int{hp, max}
 	if s, ok := enemyHPLabelCache[k]; ok {
 		return s
+	}
+	if len(enemyHPLabelCache) >= enemyHPLabelCacheCap {
+		enemyHPLabelCache = map[[2]int]string{}
 	}
 	s := fmt.Sprintf("%d/%d", hp, max)
 	enemyHPLabelCache[k] = s
@@ -483,7 +517,7 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 	if g.Battle.CurrentParty < 0 || g.Battle.CurrentParty >= len(g.Party) {
 		return
 	}
-	member := g.Party[g.Battle.CurrentParty]
+	member := &g.Party[g.Battle.CurrentParty]
 	if member.HP <= 0 {
 		return
 	}
@@ -568,26 +602,32 @@ func transientStatus(g *core.GameState) string {
 	return msg
 }
 
-func drawActionMenuOptions(g *core.GameState, assets Resources, x, y, rightX int32, member core.PartyMember) {
-	_ = member
+func drawActionMenuOptions(g *core.GameState, assets Resources, x, y, rightX int32, member *core.PartyMember) {
 	cursor := core.ActionRow(g.Battle.MenuIndex)
+	// Attack greys out when a melee attacker is stuck in the back row (front still up) —
+	// same gate the menu enforces, so the row reads as unusable before it's picked.
+	attackBlocked := core.BackRowMeleeBlocked(core.BasicAttackClass(core.EquippedWeapon(*member)), g.Party, g.Battle.CurrentParty)
 	// Labels pushed right for the left icon column; rows pitch by uiRowPitch and stretch
 	// to rightX. Driven by the init-asserted actionRowLabels table.
 	labelX := x + 26
 	for row := core.ActionRow(0); int(row) < core.ActionRowCount; row++ {
-		drawActionMenuRow(assets.hudFont, row, x, labelX, y+int32(row)*uiRowPitch, rightX, actionRowLabels[row], "", cursor == row)
+		disabled := row == core.ActionRowAttack && attackBlocked
+		drawActionMenuRow(assets.hudFont, row, x, labelX, y+int32(row)*uiRowPitch, rightX, actionRowLabels[row], "", cursor == row, disabled)
 	}
 }
 
 // drawActionMenuRow wraps drawActionRow with a per-action sigil medallion in the left gutter.
-func drawActionMenuRow(font rl.Font, row core.ActionRow, iconX, labelX, y, rightX int32, label, suffix string, selected bool) {
-	drawActionRow(font, labelX, y, rightX, label, suffix, selected)
+func drawActionMenuRow(font rl.Font, row core.ActionRow, iconX, labelX, y, rightX int32, label, suffix string, selected, disabled bool) {
+	drawActionRow(font, labelX, y, rightX, label, suffix, selected, disabled)
 	iconCX := float32(iconX) + 9
 	iconCY := float32(y) + 13
 	drawIconMedallion(iconCX, iconCY, selected)
 	iconCol := giltDim
 	if selected {
 		iconCol = giltBright
+	}
+	if disabled {
+		iconCol = fadeColor(iconCol, 0.5)
 	}
 	drawActionIcon(row, iconCX, iconCY, 7, iconCol)
 }
@@ -755,8 +795,20 @@ func drawSkillMenuList(g *core.GameState, assets Resources, x, y, rightX int32) 
 		if cost := core.SkillCost(s); cost > 0 {
 			suffix = skillCostMPLabel(cost)
 		}
-		drawActionRow(assets.hudFont, x, y+int32(i)*uiRowPitch, rightX, label, suffix, g.Battle.SkillMenuIndex == i)
+		drawActionRow(assets.hudFont, x, y+int32(i)*uiRowPitch, rightX, label, suffix, g.Battle.SkillMenuIndex == i, skillUnusable(g, g.Battle.CurrentParty, s))
 	}
+}
+
+// skillUnusable mirrors updateSkillMenu's refusal gates (MP cost + back-row melee
+// reach) so a greyed row matches exactly what selecting it will reject.
+func skillUnusable(g *core.GameState, idx int, skill core.SkillID) bool {
+	if idx < 0 || idx >= len(g.Party) {
+		return false
+	}
+	if !g.DebugAllSkills && !core.CanAffordSkill(&g.Party[idx], skill) {
+		return true
+	}
+	return core.BackRowMeleeBlocked(core.SkillAttackClassFor(skill), g.Party, idx)
 }
 
 // drawItemMenuList renders the inventory picker ("Name xCount" rows). Reads the prebuilt
@@ -771,28 +823,37 @@ func drawItemMenuList(g *core.GameState, assets Resources, x, y, rightX int32) {
 		def := core.ItemInfo(slot.Kind)
 		label := def.Name
 		suffix := "x" + strconv.Itoa(slot.Count)
-		drawActionRow(assets.hudFont, x, y+int32(i)*uiRowPitch, rightX, label, suffix, g.Battle.ItemMenuIndex == i)
+		drawActionRow(assets.hudFont, x, y+int32(i)*uiRowPitch, rightX, label, suffix, g.Battle.ItemMenuIndex == i, false)
 	}
 }
 
 // drawActionRow paints one key-plate row (selected gets the gilt plate, else dark glass).
 // The plate spans x-8 to rightX so the highlight reaches the content edge regardless of text start.
-func drawActionRow(font rl.Font, x, y, rightX int32, label, suffix string, selected bool) {
+// A disabled row keeps the selection plate (cursor must stay visible) but greys its text.
+func drawActionRow(font rl.Font, x, y, rightX int32, label, suffix string, selected, disabled bool) {
 	plateX := x - 8
 	plateW := rightX - plateX
-	if selected {
+	switch {
+	case selected:
 		DrawSelectedRowI(plateX, y-4, plateW, uiRowH)
-	} else {
+	case disabled:
+		drawGlassPane(plateX, y-4, plateW, uiRowH, fadeColor(glassDeep, 0.3))
+		drawSmallPanelOutline(plateX, y-4, plateW, uiRowH, fadeColor(woodMid, 0.25))
+	default:
 		drawGlassPane(plateX, y-4, plateW, uiRowH, fadeColor(glassDeep, 0.5))
 		drawSmallPanelOutline(plateX, y-4, plateW, uiRowH, fadeColor(woodMid, 0.45))
 	}
-	drawTextWithShadow(font, label, float32(x), float32(y), FontBody, textPrimary)
+	labelCol, suffixCol := textPrimary, textLabel
+	if disabled {
+		labelCol, suffixCol = textDim, textDim
+	}
+	drawTextWithShadow(font, label, float32(x), float32(y), FontBody, labelCol)
 	if suffix != "" {
 		size := FontSmall
 		measure := measureActionRowSuffix(font, suffix)
 		sx := float32(rightX) - measure.X - 12
 		sy := float32(y) + 5
-		drawTextWithShadow(font, suffix, sx, sy, size, textLabel)
+		drawTextWithShadow(font, suffix, sx, sy, size, suffixCol)
 	}
 }
 

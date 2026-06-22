@@ -412,8 +412,8 @@ func loadLightingShader() lightingShader {
 		locTorchColor:     rl.GetShaderLocation(shader, "torchColor"),
 		locTorchRange:     rl.GetShaderLocation(shader, "torchRange"),
 	}
-	LogRenderInit("lighting locs: viewPos=%d sunDir=%d sunCol=%d amb=%d fogCol=%d fogDens=%d spec=%d shadow=%d torchPos=%d torchCol=%d torchRange=%d",
-		s.locViewPos, s.locSunDirection, s.locSunColor, s.locAmbientColor, s.locFogColor, s.locFogDensity, s.locSpecStrength, s.locShadowStrength, s.locTorchPos, s.locTorchColor, s.locTorchRange)
+	LogRenderInit("lighting locs: viewPos=%d sunDir=%d sunCol=%d amb=%d fogCol=%d fogDens=%d spec=%d shadow=%d night=%d torchPos=%d torchCol=%d torchRange=%d",
+		s.locViewPos, s.locSunDirection, s.locSunColor, s.locAmbientColor, s.locFogColor, s.locFogDensity, s.locSpecStrength, s.locShadowStrength, s.locNightMood, s.locTorchPos, s.locTorchColor, s.locTorchRange)
 	// Re-prime the uniform memos: GL can reuse a program ID after a reload, so an
 	// ID match alone isn't proof the uniforms still hold our last values.
 	lightingUniformPrimed = false
