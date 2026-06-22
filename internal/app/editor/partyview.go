@@ -55,12 +55,7 @@ func cyclePartyClass(s *State, dir int) {
 
 // cyclePartyClassKind walks the class registry by delta (+1 / -1), wrapping.
 func cyclePartyClassKind(cur core.PartyClass, delta int) core.PartyClass {
-	defs := core.PartyClasses()
-	classes := make([]core.PartyClass, len(defs))
-	for i, def := range defs {
-		classes[i] = def.Class
-	}
-	return cycleByIndex(classes, cur, delta)
+	return cycleRegistry(core.PartyClasses(), func(d core.PartyClassDefinition) core.PartyClass { return d.Class }, cur, delta)
 }
 
 func savePartyVisual(s *State) {

@@ -368,8 +368,8 @@ const (
 
 	// Targeted-row geometry — a live-target row gets a left chevron and wider
 	// name inset.
-	rosterTargetedNameInset = int32(34) // name gutter when the chevron is shown (wider than hudContentInsetX)
-	rosterArrowMarkerInsetX = float32(9) // chevron center X, in from the row's left edge
+	rosterTargetedNameInset = int32(34)   // name gutter when the chevron is shown (wider than hudContentInsetX)
+	rosterArrowMarkerInsetX = float32(9)  // chevron center X, in from the row's left edge
 	rosterArrowMarkerTipDx  = float32(13) // chevron tip reach (points right, toward the name)
 	rosterArrowMarkerHalf   = float32(10) // chevron half-height
 	// Status-pill geometry (anchored to the row's right edge). rosterStatusPillW
@@ -1468,13 +1468,7 @@ func measureBarValue(font rl.Font, valText string) rl.Vector2 {
 // clampBarPct clips a fill fraction to [0,1] so over/underflow can't draw outside
 // the track.
 func clampBarPct(pct float32) float32 {
-	if pct < 0 {
-		return 0
-	}
-	if pct > 1 {
-		return 1
-	}
-	return pct
+	return core.Clamp(pct, 0, 1)
 }
 
 // drawBar renders the static gauge (track + fill + outline + label/value). No

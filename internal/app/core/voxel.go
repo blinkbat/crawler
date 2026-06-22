@@ -230,13 +230,21 @@ func (a *AreaDefinition) ResolveStep(fromX, fromL, fromZ, dir int) (toL int, ok 
 	}
 	fromDir := OppositeFacing(dir)
 	h := a.SolidStackHeight()
+	bestL, bestOK := 0, false
 	for L := 0; L < h; L++ {
 		if !a.Standable(nx, L, nz) {
 			continue
 		}
+		// On a valid map (surfaces >=2 apart) at most one entry edge matches; if a
+		// map ever violates that, prefer the match nearest fromL over the lowest.
 		if entry, eok := a.surfaceEdgeLevel(nx, L, nz, fromDir); eok && entry == exitEdge {
-			return L, true
+			if !bestOK || AbsInt(L-fromL) < AbsInt(bestL-fromL) {
+				bestL, bestOK = L, true
+			}
 		}
+	}
+	if bestOK {
+		return bestL, true
 	}
 	return 0, false
 }

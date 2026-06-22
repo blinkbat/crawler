@@ -10,13 +10,13 @@ import (
 
 // Shop overlay layout. Sized to the active tab's row count (no scroll).
 const (
-	shopPanelW    = int32(520)
-	shopHeaderH   = int32(132)
-	shopRowH      = int32(34)
-	shopRowGap    = int32(8)
-	shopFootH     = int32(50)
-	shopRowInsetX = int32(40)
-	shopRowTextDY = int32(4) // baseline drop shared by label/name/price columns
+	shopPanelW      = int32(520)
+	shopHeaderH     = int32(132)
+	shopRowH        = int32(34)
+	shopRowGap      = int32(8)
+	shopFootH       = int32(50)
+	shopRowInsetX   = int32(40)
+	shopRowTextDY   = int32(4) // baseline drop shared by label/name/price columns
 	shopPriceInsetX = int32(12)
 	// shopHintDrop seats the footer hint in the middle of the shopFootH band. Shop
 	// hand-centers at FontSmall rather than via drawModalFooterGlyphs (FontTiny).
@@ -94,7 +94,8 @@ func inventoryFingerprint(inv []core.ItemStack) uint64 {
 }
 
 // shopRows returns the active tab's rows (cached). Order matches the input
-// handler's slices (core.ShopCatalog / SellableStacks) so cursor and rows align.
+// handler's slices (core.ShopCatalog / SellableStacks) so cursor and rows align;
+// TestBuildShopRowsMatchesCatalogOrder guards against the two drifting.
 func shopRows(g *core.GameState) []shopRow {
 	fp := inventoryFingerprint(g.Inventory)
 	c := &shopRowsCache
@@ -150,8 +151,11 @@ func drawShopTabs(font rl.Font, active core.ShopTab, x, y float32) {
 	drawTextTabStrip(font, x, y, int(core.ShopTabCount), int(active),
 		func(i int) string { return core.ShopTabLabel(core.ShopTab(i)) },
 		tabLabelMeasurer(&shopTabMeasureCache, font),
-		borderActive, 28, false)
+		borderActive, shopTabStripGap, false)
 }
+
+// shopTabStripGap is the inter-tab spacing for the Buy/Sell header strip.
+const shopTabStripGap = float32(28)
 
 // shopTabMeasureCache memoizes tab-label widths to avoid re-shaping via cgo each frame.
 var shopTabMeasureCache measureCache

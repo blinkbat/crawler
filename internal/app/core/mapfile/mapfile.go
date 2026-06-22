@@ -701,7 +701,7 @@ func Parse(r io.Reader) (MapFile, error) {
 			// One overridden tile per line: "x z NESW" ('.' = use base skin). A
 			// malformed line is a loud error, not a silent drop.
 			fields := strings.Fields(raw)
-			if len(fields) < facesFieldCount || len(fields[2]) != faceSkinCount {
+			if len(fields) != facesFieldCount || len(fields[2]) != faceSkinCount {
 				return mf, fmt.Errorf("line %d: expected '<x> <z> <NESW>' (%d face skin chars), got %q", lineNo, faceSkinCount, raw)
 			}
 			fx, err := parseIntField(fields[0], "face x", lineNo)
@@ -857,8 +857,9 @@ func (mf *MapFile) validate() error {
 				return fmt.Errorf("elevation layer row %d has %d cols, size declares %d", i, len(row), mf.Width)
 			}
 			// Each cell must be a level char: '0'..'9' then 'A'..'K' for 10..20
-			// (upper bound 'K' = core's MaxElevationLevel 20). Anything else reads
-			// as ground 0, so a stray char would silently flatten the geometry.
+			// (upper bound 'K' = core's MaxElevationLevel 20; core's map.go init
+			// asserts ElevationChar(MaxElevationLevel)=='K' so this can't drift).
+			// Anything else reads as ground 0, silently flattening the geometry.
 			for c := 0; c < len(row); c++ {
 				if b := row[c]; !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'K')) {
 					return fmt.Errorf("elevation layer row %d col %d has bad level char %q (expected '0'..'9' or 'A'..'K')", i, c, string(row[c]))

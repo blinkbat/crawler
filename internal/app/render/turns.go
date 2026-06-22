@@ -8,9 +8,10 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// turnPanelW is the turn-order panel width, matched to the minimap above it.
+// turnPanelW is the turn-order panel width, bound to the minimap above it so the
+// HUD column can't drift (both derive from minimapPanelW).
 const (
-	turnPanelW = int32(220)
+	turnPanelW = minimapPanelW
 )
 
 // turnForecastMax is the lookahead depth. Shared by the buffer cap and the forecast call.

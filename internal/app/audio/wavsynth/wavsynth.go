@@ -25,16 +25,22 @@ func bellEnv(t float64) float64 {
 	return math.Sin(math.Pi * t)
 }
 
+// clampF64 pins v into [lo,hi]. Package-local (not core.Clamp) to keep wavsynth
+// raylib-free on the load path — see the package doc.
+func clampF64(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
 // ClampToInt16 converts a float in [-1,1] to 16-bit PCM, pinning out-of-range
 // values to the endpoints (wrapping would cause ring-modulator artifacts).
 func ClampToInt16(sample float64) int16 {
-	if sample > 1.0 {
-		sample = 1.0
-	}
-	if sample < -1.0 {
-		sample = -1.0
-	}
-	return int16(sample * 32767)
+	return int16(clampF64(sample, -1, 1) * 32767)
 }
 
 // WaveShape selects the oscillator timbre: Sine (pure), Square (harsh/8-bit),
@@ -151,13 +157,7 @@ type ShapeParams struct {
 
 // clamp01 pins a value into [0,1].
 func clamp01(v float64) float64 {
-	if v < 0 {
-		return 0
-	}
-	if v > 1 {
-		return 1
-	}
-	return v
+	return clampF64(v, 0, 1)
 }
 
 // adsrEnv computes the ADSR level at elapsed time secs. Decay 0 + Sustain 1
@@ -211,6 +211,11 @@ func SynthShapeParams(p ShapeParams) []int16 {
 	}
 	holdLen := 1 + int(crush*crushMaxHold+0.5) // 1 = no crush
 	releaseStart := p.Duration - p.Release
+	if releaseStart < 0 {
+		// Release longer than the whole note: clamp so the sustain branch can still
+		// fire (sample 0) instead of opening mid-release below the sustain level.
+		releaseStart = 0
+	}
 
 	pcm := make([]int16, samples)
 	phase, vibPhase, tremPhase := 0.0, 0.0, 0.0

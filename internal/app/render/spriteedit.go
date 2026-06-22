@@ -431,26 +431,26 @@ func applyPaletteFilter(img *rl.Image, f SpriteFilter) {
 		}
 		// Posterize: crush color depth (48→4 at full).
 		if post > 0 {
-			levels := mixf(48, 4, post)
+			levels := core.Lerp(48, 4, post)
 			r, g, b = quantizeChannel(r, levels), quantizeChannel(g, levels), quantizeChannel(b, levels)
 		}
 		// Ordered Bayer dither toward a 6-level quantize.
 		if dith > 0 {
 			t := (bayer4x4[(y%4)*4+(x%4)]+0.5)/16 - 0.5
 			off := t * (1.5 / ditherQuantLevels)
-			r = mixf(r, quantizeChannel(r+off, ditherQuantLevels), dith)
-			g = mixf(g, quantizeChannel(g+off, ditherQuantLevels), dith)
-			b = mixf(b, quantizeChannel(b+off, ditherQuantLevels), dith)
+			r = core.Lerp(r, quantizeChannel(r+off, ditherQuantLevels), dith)
+			g = core.Lerp(g, quantizeChannel(g+off, ditherQuantLevels), dith)
+			b = core.Lerp(b, quantizeChannel(b+off, ditherQuantLevels), dith)
 		}
 		// Game Boy: luminance onto the green ramp.
 		if gb > 0 {
-			step := int(clamp01f(lumaf(r, g, b)) * 4)
+			step := int(core.Clamp(lumaf(r, g, b), 0, 1) * 4)
 			if step > 3 {
 				step = 3
 			}
-			r = mixf(r, gbGreenRamp[step][0], gb)
-			g = mixf(g, gbGreenRamp[step][1], gb)
-			b = mixf(b, gbGreenRamp[step][2], gb)
+			r = core.Lerp(r, gbGreenRamp[step][0], gb)
+			g = core.Lerp(g, gbGreenRamp[step][1], gb)
+			b = core.Lerp(b, gbGreenRamp[step][2], gb)
 		}
 		return color.RGBA{R: toByte(r), G: toByte(g), B: toByte(b), A: c.A}
 	})
@@ -604,23 +604,9 @@ func mapImagePixels(img *rl.Image, fn func(x, y int, c color.RGBA) color.RGBA) {
 // lumaf is Rec.601 luminance of a 0..1 RGB triple (matches the shader dot).
 func lumaf(r, g, b float32) float32 { return 0.299*r + 0.587*g + 0.114*b }
 
-// mixf lerps a→b by t (GLSL mix).
-func mixf(a, b, t float32) float32 { return a + (b-a)*t }
-
 // quantizeChannel snaps v to the nearest of `levels` even steps.
 func quantizeChannel(v, levels float32) float32 {
 	return float32(math.Floor(float64(v*levels)+0.5)) / levels
-}
-
-// clamp01f clamps v to [0,1].
-func clamp01f(v float32) float32 {
-	if v < 0 {
-		return 0
-	}
-	if v > 1 {
-		return 1
-	}
-	return v
 }
 
 // toByte maps a 0..1 float to a rounded, clamped 0..255 byte.

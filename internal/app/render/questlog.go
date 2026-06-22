@@ -26,16 +26,17 @@ func drawJournalSubtabHeader(font rl.Font, active core.JournalSubtab, body rl.Re
 	drawTextTabStrip(font, body.X+journalRowInsetX, body.Y+2, int(core.JournalSubtabCount), int(active),
 		func(i int) string { return core.JournalSubtabLabel(core.JournalSubtab(i)) },
 		tabLabelMeasurer(&journalMeasureCache, font),
-		textPrimary, 22, true)
+		textPrimary, journalSubtabStripGap, true)
 	return FontBody + 14
 }
 
 // Journal list rhythm — ONE metric set shared by both sub-views so they page at the same stride and don't "jump" when flipping.
 const (
-	journalRowH        = float32(52)
-	journalListTopDY   = float32(30) // tally line is FontSmall at +4; list starts below it
-	journalRowDetailDY = float32(26)
-	journalRowInsetX   = float32(8) // shared left inset for header, tally, rows, selection plate
+	journalRowH           = float32(52)
+	journalListTopDY      = float32(30) // tally line is FontSmall at +4; list starts below it
+	journalRowDetailDY    = float32(26)
+	journalRowInsetX      = float32(8)  // shared left inset for header, tally, rows, selection plate
+	journalSubtabStripGap = float32(22) // inter-tab spacing for the Quests/Bestiary sub-tab strip
 )
 
 // Caches so the open Journal tab doesn't re-measure stable strings / re-Sprintf tally + row text every frame; all change only on quest/bestiary events.
@@ -82,7 +83,7 @@ var bestiaryRowCache = map[bestiaryRowKey]bestiaryRowText{}
 // drawBestiaryRowDetail paints HP (hpCol) then each muted seg preceded by a drawn diamond pip (font-independent, unlike "•").
 func drawBestiaryRowDetail(font rl.Font, t bestiaryRowText, x, y float32, hpCol rl.Color) {
 	drawTextWithShadow(font, t.hp, x, y, FontSmall, hpCol)
-	cursor := x + journalMeasureCache.measure(font, t.hp, FontSmall, 1).X
+	cursor := x + journalMeasureCache.measure(font, t.hp, FontSmall, canonicalSpacing(FontSmall)).X
 	const sepGap = float32(9)
 	midY := y + FontSmall/2
 	for _, seg := range t.segs {
@@ -90,7 +91,7 @@ func drawBestiaryRowDetail(font rl.Font, t bestiaryRowText, x, y float32, hpCol 
 		drawDiamondPip(cursor, midY, 2.2, fadeColor(giltDim, 0.7))
 		cursor += sepGap
 		drawTextWithShadow(font, seg, cursor, y, FontSmall, textMuted)
-		cursor += journalMeasureCache.measure(font, seg, FontSmall, 1).X
+		cursor += journalMeasureCache.measure(font, seg, FontSmall, canonicalSpacing(FontSmall)).X
 	}
 }
 

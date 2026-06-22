@@ -695,8 +695,10 @@ func updateSoundsAssignKeys(s *State) {
 // user_sound_1 → … → "(default)" in sorted order.
 func cycleCueAssignment(s *State, cue audio.Sound, delta int) {
 	options := []string{""} // first slot = revert-to-default
-	options = append(options, audio.ListUserSounds()...)
-	current := audio.CurrentAssignment(cue)
+	// Read the State caches (refreshed by refreshSoundCaches), not disk — draw/update
+	// already source from these, and a keystroke shouldn't re-read assignments.txt.
+	options = append(options, s.soundSavedCache...)
+	current := s.soundAssignCache[audio.SoundCanonicalName(cue)]
 	idx := 0
 	for i, opt := range options {
 		if opt == current {

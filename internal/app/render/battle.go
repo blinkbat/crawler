@@ -251,7 +251,6 @@ func enemyHPLabel(hp, max int) string {
 	return s
 }
 
-
 // drawStatusPill paints the shared status-pill silhouette (fill + outline + FontSmall label),
 // used by the enemy roster and the Stats-tab chip. centered true centers the label (+2 top);
 // false left-aligns it (+10/+4). labelCol picks the tone.
@@ -540,7 +539,7 @@ func drawActionMenuPanel(g *core.GameState, assets Resources) {
 		// Transient status line (setBattleStatus) for validation errors, e.g. "Swipe needs more MP."
 		if status := transientStatus(g); status != "" {
 			drawTextWithShadow(assets.hudFont, status, float32(contentX), float32(contentY), FontSmall, classCol)
-			contentY += 26
+			contentY += int32(FontBody) // one body line below the status before the menu
 		}
 		drawActionMenuOptions(g, assets, contentX, contentY, rightX, member)
 	}

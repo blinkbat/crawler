@@ -105,27 +105,27 @@ const ElevationGround = mapfile.ElevationGroundChar
 // Decor layer (cosmetic, never blocks). '.' = auto-scatter, '_' = suppress,
 // explicit chars force a specific small prop.
 const (
-	DecorAuto     = '.'
-	DecorEmpty    = '_'
-	DecorBush     = 'b'
-	DecorMushroom = 'm'
-	DecorPebble   = 'p'
+	DecorAuto      = '.'
+	DecorEmpty     = '_'
+	DecorBush      = 'b'
+	DecorMushroom  = 'm'
+	DecorPebble    = 'p'
 	DecorTallGrass = ',' // upright blades of grass
 	DecorFlowers   = 'f' // mixed wildflowers
 	DecorClover    = 'v' // low clover patch
 	DecorReeds     = 'r' // tall reed cluster
-	DecorBones  = 'o' // skull + scattered bones
-	DecorScorch = 'x' // black scorch ring
-	DecorBlood  = '!' // dried bloodstain
-	DecorCobweb = '*' // corner cobweb
-	DecorStump    = 't' // weathered tree stump
-	DecorLog      = 'l' // mossy fallen log
-	DecorLeafPile = 'L' // pile of fallen leaves
+	DecorBones     = 'o' // skull + scattered bones
+	DecorScorch    = 'x' // black scorch ring
+	DecorBlood     = '!' // dried bloodstain
+	DecorCobweb    = '*' // corner cobweb
+	DecorStump     = 't' // weathered tree stump
+	DecorLog       = 'l' // mossy fallen log
+	DecorLeafPile  = 'L' // pile of fallen leaves
 	// 2-tile archway (1×2 along +X, walkable): anchor at left tile, DecorArchwayTail
 	// at the matching east tile or the renderer draws the anchor solo.
 	DecorArchway     = 'A' // archway anchor (left tile)
 	DecorArchwayTail = 'a' // archway tail   (right tile)
-	DecorLilypad = 'y' // floating pad+bloom; intended for water tiles, works on any
+	DecorLilypad     = 'y' // floating pad+bloom; intended for water tiles, works on any
 	DecorRug         = 'u' // woven floor rug, warm tones
 	DecorCandle      = 'c' // stubby candle on a small puddle of wax
 	DecorBootprints  = 'i' // pair of stamped boot prints
@@ -140,11 +140,11 @@ const (
 	TileTree      = 'T' // regular tree, blocks
 	TileTreeXL    = 'X' // extra-large tree, blocks
 	// Tree shape variants — all 1-tile, all blocking; visual variance only.
-	TileTreeTall  = '|' // tall narrow pine, slimmer + taller than Tree
-	TileTreeTwin  = '@' // two trees crammed into one tile, offset
-	TileTreeYoung = '/' // young / smaller tree, scrubby thicket
-	TileRockLarge = 'O' // boulder, blocks
-	TileBushLarge = 'B' // dense bush, blocks
+	TileTreeTall     = '|' // tall narrow pine, slimmer + taller than Tree
+	TileTreeTwin     = '@' // two trees crammed into one tile, offset
+	TileTreeYoung    = '/' // young / smaller tree, scrubby thicket
+	TileRockLarge    = 'O' // boulder, blocks
+	TileBushLarge    = 'B' // dense bush, blocks
 	TileCrate        = 'C' // wooden crate
 	TileBarrel       = 'R' // banded barrel
 	TileUrn          = 'U' // belly-shouldered urn
@@ -593,8 +593,8 @@ func (a *AreaDefinition) edgeLevel(x, z, dir int) (int, bool) {
 	return EdgeLevelOf(a.ElevationLevelAt(x, z), ramp, dir)
 }
 
-// OppositeFacing returns the reverse cardinal of `f` (the wrap-safe +2 rule).
-func OppositeFacing(f int) int { return NormalizeFacing(f + 2) }
+// OppositeFacing returns the reverse cardinal of `f` (the wrap-safe half-turn).
+func OppositeFacing(f int) int { return NormalizeFacing(f + FacingCount/2) }
 
 // CardinalDirs is the canonical N→E→S→W neighbour order, shared by the
 // face/exposure walks (TileExposesFace, render.drawCliffFaces).
@@ -1034,7 +1034,7 @@ var propTileCharList = []byte{
 	TileRockCairn, TileRockFormation, TileRockFormationTail,
 	TileWell, TileGravestone, TileSignPost, TileHayBale, TileScarecrow,
 	TileBookshelf, TileTable, TileBed, TileBrazier, TileSarcophagus,
-	TileTorch, // prop char, but non-blocking in BlockedAt (mounts on wall)
+	TileTorch,                                                 // prop char, but non-blocking in BlockedAt (mounts on wall)
 	TilePropExoticFlower, TilePropTallFern, TilePropGrassTuft, // non-blocking plants
 }
 
@@ -1248,6 +1248,13 @@ func init() {
 		}
 	}
 	assertNoUnregisteredCrossLayerOverlaps()
+	// core/mapfile's elevation parser hardcodes the top-level char 'K' for its
+	// validation range (it can't import core). Pin it here so bumping
+	// MaxElevationLevel can't silently desync the two — if this fires, update the
+	// 'A'..'K' bound in core/mapfile/mapfile.go to match.
+	if c := ElevationChar(MaxElevationLevel); c != 'K' {
+		panic(fmt.Sprintf("core: ElevationChar(MaxElevationLevel)=%q but core/mapfile hardcodes 'K' — update mapfile.go's elevation bound", c))
+	}
 }
 
 // crossLayerOverlap records the two layers sharing a byte, each layer's label,

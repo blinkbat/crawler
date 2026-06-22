@@ -212,12 +212,19 @@ func playThroughRing(wavBytes []byte) {
 	// one still streaming is a use-after-free. Scan from the cursor for the first
 	// free/empty slot; only when all are in flight fall back to the oldest.
 	slot := previewCursor
+	found := false
 	for i := 0; i < previewRingSize; i++ {
 		idx := (previewCursor + i) % previewRingSize
 		if s := previewRing[idx]; s.Stream.Buffer == nil || !rl.IsSoundPlaying(s) {
 			slot = idx
+			found = true
 			break
 		}
+	}
+	if !found {
+		// All slots in flight — stop the oldest first so the mixer releases its
+		// buffer before replaceSound frees it (otherwise a use-after-free).
+		rl.StopSound(previewRing[slot])
 	}
 	replaceSound(&previewRing[slot], snd)
 	rl.PlaySound(snd)

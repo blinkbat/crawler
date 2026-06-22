@@ -25,8 +25,6 @@ const (
 	FlashDuration = 0.16
 	// TurnRepeatDelay paces HELD turn AUTO-REPEAT only (additive rest between
 	// turns, not during the turn animation); a single tap/press is unaffected.
-	// MoveRepeatDelay is the step counterpart, reserved (stepping re-fires on land).
-	MoveRepeatDelay = float32(0.07)
 	TurnRepeatDelay = float32(0.25)
 	// FlashTintStrength is the peak fraction a flash washes a sprite toward white.
 	FlashTintStrength = 0.86

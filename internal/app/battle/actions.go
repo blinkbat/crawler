@@ -49,31 +49,31 @@ var skillActionHandlers = map[core.SkillID]actionHandlers{
 	core.SkillScan:          {setup: targetedSetup(core.SkillScan), apply: applyScan},
 	core.SkillFirebolt:      {setup: targetedSetup(core.SkillFirebolt), apply: applyFirebolt},
 	core.SkillCrushingBlow:  {setup: targetedSetup(core.SkillCrushingBlow), apply: applyCrushingBlow},
-	core.SkillWhirlwind:     {setup: setupWhirlwind, apply: applyWhirlwind},
-	core.SkillMassMend:      {setup: setupMassMend, apply: applyMassMend},
+	core.SkillWhirlwind:     {setup: payOnlySetup(core.SkillWhirlwind), apply: applyWhirlwind},
+	core.SkillMassMend:      {setup: payOnlySetup(core.SkillMassMend), apply: applyMassMend},
 	core.SkillSmite:         {setup: targetedSetup(core.SkillSmite), apply: applySmite},
 	core.SkillBackstab:      {setup: targetedSetup(core.SkillBackstab), apply: applyBackstab},
 	core.SkillVenomStrike:   {setup: targetedSetup(core.SkillVenomStrike), apply: applyVenomStrike},
 	core.SkillFrostLance:    {setup: targetedSetup(core.SkillFrostLance), apply: applyFrostLance},
-	core.SkillArcBolt:       {setup: setupArcBolt, apply: applyArcBolt},
-	core.SkillBless:         {setup: setupBless, apply: applyBless},
-	core.SkillFireball:      {setup: setupFireball, apply: applyFireball},
-	core.SkillPoisonCloud:   {setup: setupPoisonCloud, apply: applyPoisonCloud},
+	core.SkillArcBolt:       {setup: payOnlySetup(core.SkillArcBolt), apply: applyArcBolt},
+	core.SkillBless:         {setup: payOnlySetup(core.SkillBless), apply: applyBless},
+	core.SkillFireball:      {setup: payOnlySetup(core.SkillFireball), apply: applyFireball},
+	core.SkillPoisonCloud:   {setup: payOnlySetup(core.SkillPoisonCloud), apply: applyPoisonCloud},
 	core.SkillCleanse:       {setup: targetedSetup(core.SkillCleanse), apply: applyCleanse},
-	core.SkillSecondWind:    {setup: setupSecondWind, apply: applySecondWind},
+	core.SkillSecondWind:    {setup: payOnlySetup(core.SkillSecondWind), apply: applySecondWind},
 	core.SkillRenewal:       {setup: targetedSetup(core.SkillRenewal), apply: applyRenewal},
 	core.SkillCripple:       {setup: targetedSetup(core.SkillCripple), apply: applyCripple},
 	core.SkillFrostbite:     {setup: targetedSetup(core.SkillFrostbite), apply: applyFrostbite},
 	core.SkillCorrosiveVial: {setup: targetedSetup(core.SkillCorrosiveVial), apply: applyCorrosiveVial},
-	core.SkillConeOfCold:    {setup: setupConeOfCold, apply: applyConeOfCold},
+	core.SkillConeOfCold:    {setup: payOnlySetup(core.SkillConeOfCold), apply: applyConeOfCold},
 	core.SkillSunder:        {setup: targetedSetup(core.SkillSunder), apply: applySunder},
 	core.SkillTaunt:         {setup: targetedSetup(core.SkillTaunt), apply: applyTaunt},
-	core.SkillWarBanner:     {setup: setupWarBanner, apply: applyWarBanner},
+	core.SkillWarBanner:     {setup: payOnlySetup(core.SkillWarBanner), apply: applyWarBanner},
 	core.SkillStoneSkin:     {setup: targetedSetup(core.SkillStoneSkin), apply: applyStoneSkin},
 	core.SkillBlind:         {setup: targetedSetup(core.SkillBlind), apply: applyBlind},
 	core.SkillAegis:         {setup: targetedSetup(core.SkillAegis), apply: applyAegis},
-	core.SkillSmokeBomb:     {setup: setupSmokeBomb, apply: applySmokeBomb},
-	core.SkillIceArmor:      {setup: setupIceArmor, apply: applyIceArmor},
+	core.SkillSmokeBomb:     {setup: payOnlySetup(core.SkillSmokeBomb), apply: applySmokeBomb},
+	core.SkillIceArmor:      {setup: payOnlySetup(core.SkillIceArmor), apply: applyIceArmor},
 	core.SkillRend:          {setup: targetedSetup(core.SkillRend), apply: applyRend},
 	core.SkillLacerate:      {setup: targetedSetup(core.SkillLacerate), apply: applyLacerate},
 }
@@ -156,6 +156,12 @@ func runTargetedSetup(g *core.GameState, skill core.SkillID) bool {
 // targetedSetup binds runTargetedSetup to one skill, producing its actionSetup.
 func targetedSetup(skill core.SkillID) actionSetup {
 	return func(g *core.GameState) bool { return runTargetedSetup(g, skill) }
+}
+
+// payOnlySetup is the no-target-gate setup: skills that hit the whole party / all
+// enemies / the caster need no target pick, so setup just commits MP.
+func payOnlySetup(skill core.SkillID) actionSetup {
+	return func(g *core.GameState) bool { return chargeMP(g, skill) }
 }
 
 // setupPrayer / setupFirebolt / setupCleanse: named entry points for the unit tests;
@@ -456,8 +462,8 @@ func applyAoEDamage(g *core.GameState, skill core.SkillID, damage, quality int, 
 
 // vfxKindFor maps a skill to the particle effect its apply step queues. Callers
 // choose the enqueue direction. Unmapped skills return VFXNone — a SUPPORTED
-// outcome (Taunt relies on it; Scan/Cripple/Corrosive Vial hardcode their kind;
-// Smoke Bomb has none), so deliberately no completeness assert.
+// outcome (Taunt relies on it; Scan hardcodes its kind; Smoke Bomb has none), so
+// deliberately no completeness assert.
 func vfxKindFor(skill core.SkillID) core.VFXKind {
 	switch skill {
 	case core.SkillSwipe, core.SkillWhirlwind, core.SkillCrushingBlow, core.SkillBackstab, core.SkillSunder, core.SkillRend, core.SkillLacerate:
@@ -468,7 +474,7 @@ func vfxKindFor(skill core.SkillID) core.VFXKind {
 		return core.VFXEmber
 	case core.SkillSmite, core.SkillBlind:
 		return core.VFXSmite
-	case core.SkillVenomStrike, core.SkillPoisonCloud:
+	case core.SkillVenomStrike, core.SkillPoisonCloud, core.SkillCripple, core.SkillCorrosiveVial:
 		return core.VFXVenom
 	case core.SkillFrostLance, core.SkillFrostbite, core.SkillConeOfCold, core.SkillIceArmor:
 		return core.VFXFrost
@@ -912,23 +918,34 @@ func applyScan(g *core.GameState, quality int) bool {
 	return true
 }
 
-// applyCripple stamps the SPD debuff onto the target via the enemy BuffStats
-// mirror (EffectiveEnemyStats folds it into the ATB rate while it runs). No
-// damage / proc roll; re-cast overwrites (no-stack).
-func applyCripple(g *core.GameState, quality int) bool {
+// applyEnemyDebuffSkill is the shared body for press-class single-enemy debuffs
+// (Cripple/Blind/Taunt): refund-on-dead-target gate, pay + begin the turn, and
+// resolve the effect, then hand off to stamp so each skill supplies its own
+// mutation + log line. VFX (via vfxKindFor) and finishActorTurn are shared.
+func applyEnemyDebuffSkill(g *core.GameState, skill core.SkillID, stamp func(actor *core.PartyMember, enemy *core.Enemy, effect core.SkillEffect) string) bool {
 	// Setup committed MP; the shared head refunds it on a dead target.
-	if !ensureAliveTargetOrCancel(g, core.SkillCripple) {
+	if !ensureAliveTargetOrCancel(g, skill) {
 		return false
 	}
 	actor := beginPartyAction(g)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	effect := core.EffectiveSkillEffect(actor, core.SkillCripple)
-	core.StampEnemyDebuff(enemy, core.SkillCripple, effect)
-	core.EnqueueEnemyVFX(g, core.VFXVenom, g.Battle.EnemyIndex)
-	setBattleMessage(g, fmt.Sprintf("%s cripples the %s — slowed for %d turns.",
-		actor.Name, core.EnemySingularNoun(*enemy), effect.BuffTurns))
+	effect := core.EffectiveSkillEffect(actor, skill)
+	msg := stamp(actor, enemy, effect)
+	core.EnqueueEnemyVFX(g, vfxKindFor(skill), g.Battle.EnemyIndex)
+	setBattleMessage(g, msg)
 	finishActorTurn(g)
 	return true
+}
+
+// applyCripple stamps the SPD debuff onto the target via the enemy BuffStats
+// mirror (EffectiveEnemyStats folds it into the ATB rate while it runs). No
+// damage / proc roll; re-cast overwrites (no-stack).
+func applyCripple(g *core.GameState, quality int) bool {
+	return applyEnemyDebuffSkill(g, core.SkillCripple, func(actor *core.PartyMember, enemy *core.Enemy, effect core.SkillEffect) string {
+		core.StampEnemyDebuff(enemy, core.SkillCripple, effect)
+		return fmt.Sprintf("%s cripples the %s — slowed for %d turns.",
+			actor.Name, core.EnemySingularNoun(*enemy), effect.BuffTurns)
+	})
 }
 
 // applyFrostbite deals frost damage and, on a surviving target, ALWAYS chills it
@@ -968,7 +985,7 @@ func applyCorrosiveVial(g *core.GameState, quality int) bool {
 	if enemy.Armor < 0 {
 		enemy.Armor = 0
 	}
-	core.EnqueueEnemyVFX(g, core.VFXVenom, g.Battle.EnemyIndex)
+	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillCorrosiveVial), g.Battle.EnemyIndex)
 	if stripped := before - enemy.Armor; stripped > 0 {
 		setBattleMessage(g, fmt.Sprintf("%s's vial eats %d Armor off the %s.", actor.Name, stripped, core.EnemySingularNoun(*enemy)))
 	} else {
@@ -1032,20 +1049,12 @@ func applyCrushingBlow(g *core.GameState, quality int) bool {
 
 // --- Whirlwind (Warrior, charge AoE phys) ---
 
-func setupWhirlwind(g *core.GameState) bool {
-	return chargeMP(g, core.SkillWhirlwind)
-}
-
 func applyWhirlwind(g *core.GameState, quality int) bool {
 	// No Burn/Poison, so the AoE body's status rolls short-circuit — pure damage.
 	return applyAoEStatusSkill(g, core.SkillWhirlwind, "hits", "catches only air", quality)
 }
 
 // --- Mass Mend (Cleric, charge AoE heal) ---
-
-func setupMassMend(g *core.GameState) bool {
-	return chargeMP(g, core.SkillMassMend)
-}
 
 func applyMassMend(g *core.GameState, quality int) bool {
 	actor := beginPartyAction(g)
@@ -1070,11 +1079,6 @@ func applyMassMend(g *core.GameState, quality int) bool {
 }
 
 // --- Bless (Cleric, press party-wide stat buff) ---
-
-func setupBless(g *core.GameState) bool {
-	// No target gate (hits the whole party); just commit MP.
-	return chargeMP(g, core.SkillBless)
-}
 
 // applyBless stamps the tier-folded stat buff on every available member (caster
 // included). Always lands (no proc roll); re-cast replaces (no-stack).
@@ -1217,10 +1221,6 @@ func applyFrostLance(g *core.GameState, quality int) bool {
 
 // --- Arc Bolt (Wizard, sequence-tap AoE magic) ---
 
-func setupArcBolt(g *core.GameState) bool {
-	return chargeMP(g, core.SkillArcBolt)
-}
-
 func applyArcBolt(g *core.GameState, quality int) bool {
 	// Via applyAoEStatusSkill so Arc Bolt T3's per-target Burn procs (T0-T2 carry
 	// BurnChance 0 and short-circuit).
@@ -1284,16 +1284,8 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, hitVerb, emptyVe
 
 // --- Fireball (Wizard, charge AoE fire + per-target Burn) ---
 
-func setupFireball(g *core.GameState) bool {
-	return chargeMP(g, core.SkillFireball)
-}
-
 func applyFireball(g *core.GameState, quality int) bool {
 	return applyAoEStatusSkill(g, core.SkillFireball, "engulfs", "fizzles with no target", quality)
-}
-
-func setupConeOfCold(g *core.GameState) bool {
-	return chargeMP(g, core.SkillConeOfCold)
 }
 
 // applyConeOfCold is the AoE Frostbite: frost sweep + guaranteed per-target SPD
@@ -1332,25 +1324,15 @@ func applySunder(g *core.GameState, quality int) bool {
 // applyTaunt forces the target to attack the caster next turn (TauntedBy /
 // TauntTurns, honored by pickEnemyAttackTarget). No damage; always lands; re-cast overwrites.
 func applyTaunt(g *core.GameState, quality int) bool {
-	if !ensureAliveTargetOrCancel(g, core.SkillTaunt) {
-		return false
-	}
-	actor := beginPartyAction(g)
-	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	enemy.TauntedBy = g.Battle.CurrentParty
-	enemy.TauntTurns = core.TauntTurns
-	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillTaunt), g.Battle.EnemyIndex)
-	setBattleMessage(g, fmt.Sprintf("%s taunts the %s — it turns its glare on them.",
-		actor.Name, core.EnemySingularNoun(*enemy)))
-	finishActorTurn(g)
-	return true
+	return applyEnemyDebuffSkill(g, core.SkillTaunt, func(actor *core.PartyMember, enemy *core.Enemy, _ core.SkillEffect) string {
+		enemy.TauntedBy = g.Battle.CurrentParty
+		enemy.TauntTurns = core.TauntTurns
+		return fmt.Sprintf("%s taunts the %s — it turns its glare on them.",
+			actor.Name, core.EnemySingularNoun(*enemy))
+	})
 }
 
 // --- War Banner (Warrior, press party-wide STR/VIT rally) ---
-
-func setupWarBanner(g *core.GameState) bool {
-	return chargeMP(g, core.SkillWarBanner)
-}
 
 func applyWarBanner(g *core.GameState, quality int) bool {
 	actor := beginPartyAction(g)
@@ -1388,18 +1370,11 @@ func applyStoneSkin(g *core.GameState, quality int) bool {
 // applyBlind saps the target's DEX (which EnemyHitChance reads) so it whiffs more
 // — the DEX sibling of Cripple. No damage; always lands; re-cast overwrites.
 func applyBlind(g *core.GameState, quality int) bool {
-	if !ensureAliveTargetOrCancel(g, core.SkillBlind) {
-		return false
-	}
-	actor := beginPartyAction(g)
-	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
-	effect := core.EffectiveSkillEffect(actor, core.SkillBlind)
-	core.StampEnemyDebuff(enemy, core.SkillBlind, effect)
-	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillBlind), g.Battle.EnemyIndex)
-	setBattleMessage(g, fmt.Sprintf("%s blinds the %s — its aim falters for %d turns.",
-		actor.Name, core.EnemySingularNoun(*enemy), effect.BuffTurns))
-	finishActorTurn(g)
-	return true
+	return applyEnemyDebuffSkill(g, core.SkillBlind, func(actor *core.PartyMember, enemy *core.Enemy, effect core.SkillEffect) string {
+		core.StampEnemyDebuff(enemy, core.SkillBlind, effect)
+		return fmt.Sprintf("%s blinds the %s — its aim falters for %d turns.",
+			actor.Name, core.EnemySingularNoun(*enemy), effect.BuffTurns)
+	})
 }
 
 // --- Aegis (Cleric, press single-ally absorb shield) ---
@@ -1423,10 +1398,6 @@ func applyAegis(g *core.GameState, quality int) bool {
 
 // --- Smoke Bomb (Thief, press party evasion + enemy accuracy loss) ---
 
-func setupSmokeBomb(g *core.GameState) bool {
-	return chargeMP(g, core.SkillSmokeBomb)
-}
-
 // applySmokeBomb buffs the party's DEX (evasion) and saps every enemy's DEX
 // (accuracy) by the SAME magnitude. Both overwrite (no-stack).
 func applySmokeBomb(g *core.GameState, quality int) bool {
@@ -1435,11 +1406,15 @@ func applySmokeBomb(g *core.GameState, quality int) bool {
 	buffed := stampPartyWideBuff(g, effect, core.SkillSmokeBomb)
 	enemyDebuff := core.SkillEffect{BuffStats: core.Stats{DEX: -effect.BuffStats.DEX}, BuffTurns: effect.BuffTurns}
 	blinded := 0
-	forEachLivingEnemy(g, func(_ int, enemy *core.Enemy) {
-		if core.StampEnemyDebuff(enemy, core.SkillSmokeBomb, enemyDebuff) {
-			blinded++
-		}
-	})
+	if effect.BuffStats.DEX != 0 {
+		// Only stamp (and count) when the DEX delta is real — a zero-DEX effect
+		// would otherwise report every foe "blinded" while applying a no-op mod.
+		forEachLivingEnemy(g, func(_ int, enemy *core.Enemy) {
+			if core.StampEnemyDebuff(enemy, core.SkillSmokeBomb, enemyDebuff) {
+				blinded++
+			}
+		})
+	}
 	setBattleMessage(g, fmt.Sprintf("%s%s drops a smoke bomb — %d allies gain evasion, %d foes lose their aim.",
 		qualityTag(quality), actor.Name, buffed, blinded))
 	finishActorTurn(g)
@@ -1447,10 +1422,6 @@ func applySmokeBomb(g *core.GameState, quality int) bool {
 }
 
 // --- Ice Armor (Wizard, charge self frost ward) ---
-
-func setupIceArmor(g *core.GameState) bool {
-	return chargeMP(g, core.SkillIceArmor)
-}
 
 // applyIceArmor sheathes the caster in frost: while IceArmorTurns runs they gain
 // MDef and chill any enemy that lands a basic attack on them. Self-only; +1 turn
@@ -1533,10 +1504,6 @@ func forcedTauntTarget(g *core.GameState) (int, bool) {
 
 // --- Poison Cloud (Thief, sequence AoE toxin + per-target Poison) ---
 
-func setupPoisonCloud(g *core.GameState) bool {
-	return chargeMP(g, core.SkillPoisonCloud)
-}
-
 func applyPoisonCloud(g *core.GameState, quality int) bool {
 	return applyAoEStatusSkill(g, core.SkillPoisonCloud, "blankets", "disperses with no target", quality)
 }
@@ -1561,11 +1528,6 @@ func applyCleanse(g *core.GameState, quality int) bool {
 }
 
 // --- Second Wind (Warrior, charge flat self-heal) ---
-
-func setupSecondWind(g *core.GameState) bool {
-	// No target pick (self-heal); just commit MP.
-	return chargeMP(g, core.SkillSecondWind)
-}
 
 func applySecondWind(g *core.GameState, quality int) bool {
 	actor := beginPartyAction(g)

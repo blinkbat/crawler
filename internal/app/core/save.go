@@ -230,8 +230,14 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 	// Overlay saved crystal charge by TILE, not index: an edited map can yield
 	// the same crystal COUNT at a different tile, and an index overlay would
 	// re-arm a spent charge onto a relocated crystal.
+	usedSave := make([]bool, len(data.Crystals))
 	for i := range g.Crystals {
 		for j := range data.Crystals {
+			// One save record arms at most one live crystal; without this, two
+			// crystals sharing a tile would both read the same saved charge.
+			if usedSave[j] {
+				continue
+			}
 			cs := data.Crystals[j]
 			// Skip legacy phantoms (old format, no TileX/TileZ, decode as (0,0));
 			// the Saved flag distinguishes a real (0,0) crystal from a phantom.
@@ -244,6 +250,7 @@ func GameStateFromSave(data SaveData) (GameState, error) {
 				// re-deriving from Charge would discard it.
 				g.Crystals[i].Charge = Clamp(cs.Charge, 0, CrystalRechargeSteps)
 				g.Crystals[i].Charged = cs.Charged
+				usedSave[j] = true
 				break
 			}
 		}

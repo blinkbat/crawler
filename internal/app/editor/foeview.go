@@ -326,14 +326,20 @@ func cycleByIndex[T comparable](items []T, cur T, delta int) T {
 	return items[core.WrapIndex(idx+delta, len(items))]
 }
 
+// cycleRegistry steps cur to the prev/next registry entry (wrapping), pulling each
+// entry's key via key. Collapses the "copy keys out of defs, then cycleByIndex"
+// pattern shared by the Foe and Party pickers.
+func cycleRegistry[D any, K comparable](defs []D, key func(D) K, cur K, delta int) K {
+	keys := make([]K, len(defs))
+	for i, def := range defs {
+		keys[i] = key(def)
+	}
+	return cycleByIndex(keys, cur, delta)
+}
+
 // cycleEnemyKind walks the enemy registry by delta (+1/-1), wrapping.
 func cycleEnemyKind(cur core.EnemyKind, delta int) core.EnemyKind {
-	defs := core.EnemyKinds()
-	kinds := make([]core.EnemyKind, len(defs))
-	for i, def := range defs {
-		kinds[i] = def.Kind
-	}
-	return cycleByIndex(kinds, cur, delta)
+	return cycleRegistry(core.EnemyKinds(), func(d core.EnemyDefinition) core.EnemyKind { return d.Kind }, cur, delta)
 }
 
 func saveFoeVisual(s *State) {

@@ -3,25 +3,23 @@ package render
 import (
 	"crawler/internal/app/core"
 	"strconv"
-
-	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 // Level-up modal layout. Header/row offsets are relative to the card; column/baseline offsets to each row's origin.
 const (
-	levelUpHeaderX    = int32(22)   // header text inset from card left
-	levelUpHeaderY    = int32(46)   // primary readout baseline from card top
-	levelUpHeaderSubY = int32(76)   // skill-point reminder baseline from card top
-	levelUpRowTop     = int32(112)  // first stat row's top from card top
-	levelUpRowH       = int32(64)   // per-stat row height
-	levelUpRowX       = int32(24)   // row inset from card left (row margin is 2× this)
-	levelUpIconX      = float32(16) // stat sigil x from row left
-	levelUpIconY      = float32(24) // stat sigil y from row top
-	levelUpLabelX     = int32(44)   // label x from row left
-	levelUpLabelY     = int32(6)    // label / value baseline y from row top
-	levelUpSubX       = int32(96)   // sub-text x from row left
-	levelUpSubY       = int32(36)   // sub-text baseline y from row top
-	levelUpValueInset = float32(12) // right-aligned value inset from row right edge
+	levelUpHeaderX    = hudContentInsetX // header text inset from card left (shared HUD content gutter)
+	levelUpHeaderY    = int32(46)        // primary readout baseline from card top
+	levelUpHeaderSubY = int32(76)        // skill-point reminder baseline from card top
+	levelUpRowTop     = int32(112)       // first stat row's top from card top
+	levelUpRowH       = int32(64)        // per-stat row height
+	levelUpRowX       = int32(24)        // row inset from card left (row margin is 2× this)
+	levelUpIconX      = float32(16)      // stat sigil x from row left
+	levelUpIconY      = float32(24)      // stat sigil y from row top
+	levelUpLabelX     = int32(44)        // label x from row left
+	levelUpLabelY     = int32(6)         // label / value baseline y from row top
+	levelUpSubX       = int32(96)        // sub-text x from row left
+	levelUpSubY       = int32(36)        // sub-text baseline y from row top
+	levelUpValueInset = float32(12)      // right-aligned value inset from row right edge
 	// levelUpRowGlassAlpha: glass fill shared by unfocused stat rows and the Apply tint. Untyped to satisfy both fadeColor (float32) and selectedGlassTint (float64).
 	levelUpRowGlassAlpha = 0.45
 )
@@ -122,7 +120,7 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 			label = "Apply changes — " + strconv.Itoa(statRemaining) + " unspent"
 		}
 		// Fleurons flank the Apply label as the "commit gate" cue, gilt even when unfocused.
-		labelW := rl.MeasureTextEx(font, label, FontHeading, FontSpacingHeading).X
+		labelW := levelUpApplyMeasureCache.measure(font, label, FontHeading, FontSpacingHeading).X
 		labelX := float32(rowX + 6)
 		labelY := float32(rowY + 14)
 		drawEngravedText(font, label, labelX, labelY, FontHeading, col)
@@ -137,6 +135,9 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		Hint("Undo", GlyphB),
 	})
 }
+
+// levelUpApplyMeasureCache memoizes the Apply-row label width (the fleurons flank it every frame).
+var levelUpApplyMeasureCache measureCache
 
 // levelUpStagedTotal retired — core.SumStatPending is the single shared seam.
 // DrawPartyStatsScreen retired in favor of the panels overlay's Stats tab.
