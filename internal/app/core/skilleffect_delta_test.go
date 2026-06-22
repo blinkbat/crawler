@@ -5,37 +5,21 @@ import (
 	"testing"
 )
 
-// SkillEffectDelta mirrors SkillEffect's shape, and EffectiveSkillEffect
-// (plus SkillTierMod for the two tier-only "extension" fields) hand-sums
-// each delta field onto a base SkillEffect. Nothing structurally pins the
-// delta struct to those apply loops, so a NEW delta field that someone adds
-// without an apply step would silently never reach combat.
-//
-// This test walks every field of SkillEffectDelta by reflection. For each
-// numeric field it installs a temporary skill-tier upgrade carrying ONLY
-// that field set to a sentinel, then asserts the field is actually carried:
-//   - numeric fields except the two tier-only extensions must change some
-//     SkillEffect field (observed as the tier-1 vs tier-0 difference from
-//     EffectiveSkillEffect), and
-//   - StealBonusDamage / CritDoubleOnExcellent must change SkillTierMod's
-//     matching field.
-//
-// If a delta field is left unsummed by both apply paths, the corresponding
-// sub-test fails — turning a silent "added a field, forgot to wire it" into
-// a loud test failure.
+// TestSkillEffectDeltaFieldsAreCarried walks every SkillEffectDelta field by reflection, installs a
+// temp tier upgrade with only that field set to a sentinel, and asserts the apply path carries it:
+// most fields must change EffectiveSkillEffect (tier 1 vs 0); the tier-only extensions
+// (StealBonusDamage, CritDoubleOnExcellent) must change SkillTierMod. Catches an unwired new field.
 func TestSkillEffectDeltaFieldsAreCarried(t *testing.T) {
 	const probeSkill = SkillSmite // any PlayerCastable skill works
 
-	// Install a temporary single-tier ladder for probeSkill so we control
-	// the delta the apply path sees, then restore the real table.
+	// Install a temp ladder for probeSkill so we control the delta, then restore.
 	origRows := skillTierTable[probeSkill]
 	defer func() { skillTierTable[probeSkill] = origRows }()
 
 	tier0Member := &PartyMember{SkillTiers: map[SkillID]int{probeSkill: 0}}
 	tier1Member := &PartyMember{SkillTiers: map[SkillID]int{probeSkill: 1}}
 
-	// Fields that EffectiveSkillEffect does NOT carry — they ride
-	// SkillTierMod instead. Checked separately below.
+	// Fields that ride SkillTierMod, not EffectiveSkillEffect; checked separately below.
 	tierModOnly := map[string]bool{
 		"StealBonusDamage":      true,
 		"CritDoubleOnExcellent": true,
@@ -45,18 +29,16 @@ func TestSkillEffectDeltaFieldsAreCarried(t *testing.T) {
 	for i := 0; i < deltaType.NumField(); i++ {
 		field := deltaType.Field(i)
 		t.Run(field.Name, func(t *testing.T) {
-			// Build a delta with only this one field set to a sentinel.
+			// Delta with only this field set to a sentinel, installed as tier-1 upgrade.
 			var delta SkillEffectDelta
 			dv := reflect.ValueOf(&delta).Elem().Field(i)
 			setSentinel(dv)
 
-			// Install it as the skill's tier-1 upgrade.
 			skillTierTable[probeSkill] = []SkillTierUpgrade{
 				{Tier: 1, Label: "probe", Cost: 1, Effect: delta},
 			}
 
 			if tierModOnly[field.Name] {
-				// These reach combat only through SkillTierMod.
 				mod := SkillTierMod(tier1Member, probeSkill)
 				base := SkillTierMod(tier0Member, probeSkill)
 				if reflect.DeepEqual(mod, base) {
@@ -65,8 +47,7 @@ func TestSkillEffectDeltaFieldsAreCarried(t *testing.T) {
 				return
 			}
 
-			// Everything else must surface as a change in EffectiveSkillEffect
-			// between tier 0 and tier 1.
+			// Everything else must surface as a tier-0 vs tier-1 change in EffectiveSkillEffect.
 			eff0 := EffectiveSkillEffect(tier0Member, probeSkill)
 			eff1 := EffectiveSkillEffect(tier1Member, probeSkill)
 			if reflect.DeepEqual(eff0, eff1) {
@@ -76,8 +57,7 @@ func TestSkillEffectDeltaFieldsAreCarried(t *testing.T) {
 	}
 }
 
-// setSentinel writes a distinct non-zero value into a SkillEffectDelta field
-// so applying it provably changes the result.
+// setSentinel writes a distinct non-zero value into a SkillEffectDelta field so applying it changes the result.
 func setSentinel(v reflect.Value) {
 	switch v.Kind() {
 	case reflect.Int:
@@ -87,10 +67,7 @@ func setSentinel(v reflect.Value) {
 	case reflect.Bool:
 		v.SetBool(true)
 	case reflect.Struct:
-		// A struct field (e.g. BuffStats Stats) carries its sentinel in its
-		// first field — setting one member is enough to prove the whole struct
-		// is summed through EffectiveSkillEffect (SumStats touches every field
-		// uniformly, so a per-field omission can't hide).
+		// Seed the first member; SumStats folds every member uniformly, so one is enough.
 		if v.NumField() == 0 {
 			panic("skilleffect_delta_test: empty struct field — extend setSentinel")
 		}

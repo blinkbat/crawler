@@ -7,28 +7,18 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Party Visualizer (modalPartyView) — the party-side twin of the Foe Visualizer
-// (foeview.go). A live combat-preview pane for any party CLASS plus the full
-// slider stack for that class's billboard placement, contact shadow, target
-// cursor, tint, and the sprite-PNG bake/import strip. Save writes the tuning to
-// maps/sprites/partyvisuals.json (core.PartyVisualOverride), which the game
-// overlays on its code-default party visuals at load.
-//
-// It reuses the foe modal's geometry (computeFoeViewLayout), field table
-// (foeFields — valid because PartyVisualOverride is a type alias of
-// EnemyVisualOverride), button-label slices, and the shared sprite-edit engine.
-// Only the lookup (party class vs enemy kind), the seed/save targets, and the
-// preview call differ — so the two visualizers can't drift on layout or fields.
+// Party Visualizer (modalPartyView): the party-side twin of the Foe Visualizer
+// (foeview.go), for a party CLASS. Save writes to maps/sprites/partyvisuals.json
+// (core.PartyVisualOverride). Reuses the foe modal's geometry, foeFields (valid:
+// PartyVisualOverride aliases EnemyVisualOverride), labels, and sprite-edit
+// engine; only the lookup, seed/save targets, and preview call differ.
 
-// partyDrag holds the in-flight slider drag for the party modal. Shares the
-// sliderDragState protocol with foeDrag (see foeview.go); kept as a separate
-// instance since the two modals are distinct, even though only one is open at a
-// time. slider tracks a Layout-tab field drag, asset an Asset-tab param drag.
+// partyDrag holds the party modal's in-flight drag (separate instance from
+// foeDrag). slider = Layout-tab field drag, asset = Asset-tab param drag.
 var partyDrag = struct{ slider, asset sliderDragState }{slider: noSliderDrag, asset: noSliderDrag}
 
-// openPartyViewModal opens the visualizer. First open seeds the working copy
-// from the first class's LIVE visual; later opens keep the working copy so
-// unsaved tuning survives an accidental close (mirrors openFoeViewModal).
+// openPartyViewModal opens the visualizer. First open seeds the working copy from
+// the first class's live visual; later opens keep it (mirrors openFoeViewModal).
 func openPartyViewModal(s *State) {
 	s.modal = modalPartyView
 	if !s.partyInit {
@@ -52,8 +42,7 @@ func seedPartyVisual(s *State) {
 		s.partyVisual = ov
 		s.partyBaseline = ov
 	} else {
-		// No resolvable visual (defensive — every class is populated at load).
-		// Seed a visible unit size so a Save never persists an invisible size 0.
+		// No resolvable visual (defensive). Unit size so a Save never persists 0.
 		base := core.PartyVisualOverride{SizeX: 1, SizeY: 1}
 		s.partyVisual = base
 		s.partyBaseline = base
@@ -65,7 +54,7 @@ func seedPartyVisual(s *State) {
 func cyclePartyClass(s *State, dir int) {
 	s.partyClass = cyclePartyClassKind(s.partyClass, dir)
 	seedPartyVisual(s)
-	enterAssetEditing(s) // rebuild the live preview from the new class's saved FX
+	enterAssetEditing(s)
 }
 
 // cyclePartyClassKind walks the class registry by delta (+1 / -1), wrapping.
@@ -84,8 +73,7 @@ func savePartyVisual(s *State) {
 		s.flashWarn("Save failed: " + err.Error())
 		return
 	}
-	// Mirror into the live in-memory visual so cycling away and back re-seeds
-	// from the SAVED values and the editor preview updates immediately.
+	// Mirror into the live visual so cycling away and back re-seeds from saved.
 	render.SetLivePartyOverride(frameAssets, s.partyClass, s.partyVisual)
 	s.partyBaseline = s.partyVisual
 	s.flash(savedVisualFlash(core.PartyClassName(s.partyClass), slug))
@@ -99,15 +87,13 @@ func updatePartyViewModal(s *State) Action {
 		return ActionNone
 	}
 
-	// "Upload": a PNG dropped while the modal is open imports as THIS class's
-	// sprite (drag-drop is the path; raylib has no file dialog).
+	// A dropped PNG imports as this class's sprite.
 	importDroppedPNG(s, core.PartyClassSlug(s.partyClass),
 		func(path string) error { return render.ImportPartySpriteFromFile(s.partyClass, path) },
 		func() { render.ReloadPartySprite(frameAssets, s.partyClass) })
 
 	l := computeFoeViewLayout()
-	// Read the cursor live (not the one-frame-stale cached frameMouse), matching
-	// updateFoeViewModal.
+	// Read the cursor live (not the one-frame-stale frameMouse).
 	mp := rl.GetMousePosition()
 	mouseDown := rl.IsMouseButtonDown(rl.MouseLeftButton)
 	mousePressed := rl.IsMouseButtonPressed(rl.MouseLeftButton)
@@ -145,17 +131,16 @@ func updatePartyViewModal(s *State) Action {
 	return ActionNone
 }
 
-// setPartyAssetFromTrack is the party twin of setFoeAssetFromTrack — edits the
-// adjustment field on s.partyVisual and flags the preview for rebuild.
+// setPartyAssetFromTrack is the party twin of setFoeAssetFromTrack.
 func setPartyAssetFromTrack(s *State, i int, track rl.Rectangle, mouseX float32) {
 	f := assetFields[i]
 	f.Set(&s.partyVisual, sliderSnap(f.Min, f.Max, f.Step, track.X, track.Width, mouseX))
 	s.assetPreviewStale = true
 }
 
-// handlePartyViewClick dispatches a left-press: slider tracks, sprite-PNG bake
-// buttons, the class prev/next arrows (and a click on the name cycles forward —
-// with only four classes a dropdown would be overkill), and Save/Reset/Close.
+// handlePartyViewClick dispatches a left-press: slider tracks, bake buttons, the
+// class prev/next arrows (clicking the name cycles forward — only four classes,
+// so a dropdown would be overkill), and Save/Reset/Close.
 func handlePartyViewClick(s *State, l *foeViewLayout, mp rl.Vector2) {
 	for i := range l.tabBtns {
 		if pointIn(mp, l.tabBtns[i]) {
@@ -219,8 +204,7 @@ func handlePartyViewClick(s *State, l *foeViewLayout, mp rl.Vector2) {
 	}
 }
 
-// setPartyFieldFromTrack maps a mouse X within a slider track to the field's
-// range, snapped to its step grain.
+// setPartyFieldFromTrack maps mouse X within a track to the field's range, snapped.
 func setPartyFieldFromTrack(s *State, i int, track rl.Rectangle, mouseX float32) {
 	f := foeFields[i]
 	f.Set(&s.partyVisual, sliderSnap(f.Min, f.Max, f.Step, track.X, track.Width, mouseX))
@@ -230,8 +214,8 @@ func drawPartyViewModal(s *State, font rl.Font, theme render.Theme) {
 	l := computeFoeViewLayout()
 	drawModalHeaderAt(font, theme, l.card, "PARTY VISUALIZER", theme.BorderActive)
 
-	// Live 3D preview pane (blitted from an off-screen texture). Gizmos show only
-	// on the Layout tab; on the Asset tab the non-destructive bake preview overrides.
+	// Live 3D preview (off-screen texture). Gizmos only on the Layout tab; on the
+	// Asset tab the bake preview overrides.
 	render.DrawPartyPreview(l.preview, frameAssets, s.partyClass, s.partyVisual, s.foeViewZoom, s.foeViewTab == foeTabLayout, assetPreviewTexFor())
 	rl.DrawRectangleLinesEx(l.preview, 1, theme.BorderDim)
 

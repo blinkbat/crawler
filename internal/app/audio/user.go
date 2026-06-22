@@ -9,30 +9,16 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// User-sound subsystem. The pure filesystem / parsing helpers (path
-// resolution, sanitize, sound list, assignment file I/O, WAV write)
-// live in the audio/userconfig subpackage so they can be unit-tested
-// without raylib's DLL load — this file is the raylib-bound side of
-// the same subsystem: preview ring, bank reload, cue ID lookup, and
-// the thin wrappers callers historically used.
+// User-sound subsystem, raylib-bound side: preview ring, bank reload, cue ID
+// lookup, and forwarding wrappers. Pure FS/parsing helpers live in userconfig
+// (so they unit-test without raylib's DLL load).
 //
-// Backwards-compat: the previous (raylib-bound) API names —
-// ListUserSounds, UserSoundPath, SaveUserSound, DeleteUserSound — stay
-// as forwarding wrappers so the editor and other callers don't have
-// to know about the userconfig split.
-
-// UserSoundPath, ListUserSounds, SaveUserSound, DeleteUserSound are
-// kept as the audio-package surface for the editor's sound-modal
-// callers, which already import this package for raylib-bound APIs
-// (Play, PreviewPCM, etc.) and would otherwise need a second import
-// just for the path/list/save/delete helpers. They forward to
-// userconfig's equivalents — pure pass-through, no extra logic.
+// UserSoundPath / ListUserSounds / SaveUserSound / DeleteUserSound forward to
+// userconfig so the editor's sound-modal callers don't need a second import.
 func UserSoundPath(name string) string { return userconfig.SoundPath(name) }
 func ListUserSounds() []string         { return userconfig.ListSounds() }
 
-// WavExt is the canonical file extension for user-sound files; alias of
-// userconfig.WavExt so the editor's flash messages don't need a second
-// import.
+// WavExt is the canonical user-sound file extension; alias of userconfig.WavExt.
 const WavExt = userconfig.WavExt
 
 func SaveUserSound(name string, pcm []int16) (string, error) {
@@ -40,10 +26,9 @@ func SaveUserSound(name string, pcm []int16) (string, error) {
 }
 func DeleteUserSound(name string) error { return userconfig.DeleteSound(name) }
 
-// ShapeParams is the full synth-knob set the sound editor edits — aliased
-// from wavsynth so editor code names a single type. SaveUserSoundParams
-// writes both the .wav and its editing sidecar; LoadUserSoundParams reads
-// the sidecar back (ok=false when a sound has none).
+// ShapeParams is the full synth-knob set the sound editor edits (aliased from
+// wavsynth). SaveUserSoundParams writes the .wav + editing sidecar;
+// LoadUserSoundParams reads the sidecar (ok=false when a sound has none).
 type ShapeParams = wavsynth.ShapeParams
 
 func SaveUserSoundParams(name string, p ShapeParams) (string, error) {
@@ -53,17 +38,15 @@ func LoadUserSoundParams(name string) (ShapeParams, bool) {
 	return userconfig.LoadParams(name)
 }
 
-// Musical-note helpers re-exported so the editor's note pickers can read
-// tempered pitches without importing wavsynth directly.
+// Musical-note helpers re-exported for the editor's note pickers.
 const NoteCount = wavsynth.NoteCount
 
 func NoteHz(i int) float64            { return wavsynth.NoteHz(i) }
 func NoteName(i int) string           { return wavsynth.NoteName(i) }
 func NearestNoteIndex(hz float64) int { return wavsynth.NearestNoteIndex(hz) }
 
-// SoundCanonicalName returns the assignments-file key for a built-in
-// cue. Reads directly from soundCues — the canonical slug for
-// SoundInputHit is "input_hit", etc. Out-of-range values return "".
+// SoundCanonicalName returns the assignments-file key for a cue (e.g.
+// SoundInputHit → "input_hit"); out-of-range returns "".
 func SoundCanonicalName(s Sound) string {
 	if s < 0 || s >= soundCount {
 		return ""
@@ -71,16 +54,10 @@ func SoundCanonicalName(s Sound) string {
 	return soundCues[s].Canonical
 }
 
-// AssignUserSound points the built-in `cue` at the named user .wav so
-// every Play(cue) thereafter emits the user's recording. Persists to
-// maps/sounds/assignments.txt; reloads the bank slot immediately when
-// the audio device is ready. Pass userName="" to revert to the
-// procedural built-in.
-//
-// Returns any cue slugs whose reload failed (via the wrapped
-// ReloadUserAssignments call) so the editor can flash a warning when
-// the assignment was saved to disk but the in-memory bank didn't pick
-// it up.
+// AssignUserSound points cue at the named user .wav, persists to
+// assignments.txt, and reloads the bank slot when the device is ready. Pass
+// userName="" to revert to the procedural built-in. Returns cue slugs whose
+// reload failed so the editor can warn (saved to disk but bank didn't pick up).
 func AssignUserSound(cue Sound, userName string) (failed []string, err error) {
 	assigns := userconfig.LoadAssignments()
 	cueName := SoundCanonicalName(cue)
@@ -98,17 +75,13 @@ func AssignUserSound(cue Sound, userName string) (failed []string, err error) {
 	if saveErr := userconfig.SaveAssignments(assigns); saveErr != nil {
 		return nil, saveErr
 	}
-	// Only the cue we just (re)assigned changed — reload its single bank slot
-	// rather than re-reading + re-decoding every cue's .wav via the full
-	// ReloadUserAssignments sweep.
+	// Reload just this slot, not the full ReloadUserAssignments sweep.
 	return reloadOneCue(cue), nil
 }
 
-// reloadOneCue rebuilds just `cue`'s bank slot from the current assignments
-// file — the targeted form of ReloadUserAssignments for when one assignment
-// changes. Returns the cue's canonical slug in `failed` if it had an explicit
-// assignment that couldn't load. No-op (nil) when the device isn't ready or
-// cue is out of range.
+// reloadOneCue rebuilds just cue's bank slot from assignments.txt. Returns the
+// cue slug in failed if its explicit assignment couldn't load. Nil when the
+// device isn't ready or cue is out of range.
 func reloadOneCue(cue Sound) (failed []string) {
 	if !ready || cue < 0 || cue >= soundCount {
 		return nil
@@ -121,12 +94,9 @@ func reloadOneCue(cue Sound) (failed []string) {
 	return failed
 }
 
-// reloadCueSlot rebuilds a single cue's bank slot from `assigns`: resolve the
-// assigned file, read it (or fall back to the procedural synth), and swap it
-// into bank[cue]. Returns true when the cue had an explicit assignment whose
-// file failed to load (the synth fallback covered playback, but the caller
-// should surface it). Shared body of reloadOneCue and ReloadUserAssignments so
-// the per-cue resolve→read→replace dance lives in one place.
+// reloadCueSlot rebuilds one cue's bank slot from assigns (resolve → read or
+// synth → swap into bank[cue]). Returns true when an explicit assignment's file
+// failed to load (synth covered playback, but the caller should surface it).
 func reloadCueSlot(cue Sound, assigns map[string]string) (failed bool) {
 	row := soundCues[cue]
 	fileName, assigned := resolveAssignedFile(assigns, row.Canonical)
@@ -135,40 +105,23 @@ func reloadCueSlot(cue Sound, assigns map[string]string) (failed bool) {
 	return !fromFile && assigned
 }
 
-// CurrentAssignment returns the user-sound name currently assigned to a
-// cue, or "" if the cue uses the procedural default. Caller's UI reads
-// this to render "Cue X → my_sound.wav" or "Cue X → (default)".
-//
-// This re-reads + re-parses assignments.txt on every call. A caller that
-// reads several cues at once (the editor's sound modal, per frame) should
-// load the whole map ONCE via AllAssignments and index it with
-// SoundCanonicalName instead of calling this per cue.
+// CurrentAssignment returns the user-sound name assigned to a cue, or "" for
+// the procedural default. Re-reads assignments.txt per call — a caller needing
+// several cues per frame should use AllAssignments once instead.
 func CurrentAssignment(cue Sound) string {
 	return AllAssignments()[SoundCanonicalName(cue)]
 }
 
-// AllAssignments returns the full cue-slug → user-sound-name map parsed from
-// assignments.txt (the single source CurrentAssignment indexes). Callers that
-// need several cues' assignments in one frame load this once and index it with
-// SoundCanonicalName, collapsing N file reads+parses into one.
+// AllAssignments returns the full cue-slug → user-sound-name map from
+// assignments.txt. Load once and index with SoundCanonicalName for many cues.
 func AllAssignments() map[string]string {
 	return userconfig.LoadAssignments()
 }
 
-// ReloadUserAssignments re-reads assignments.txt and overlays the bank
-// — every cue with an assignment gets its slot replaced by the user's
-// .wav; every cue without one keeps the procedural default. Safe to
-// call repeatedly; rebuilds the bank in place (unloading the prior
-// slot's raylib.Sound so we don't leak GPU/audio handles).
-//
-// Returns a list of canonical cue slugs whose assignment FAILED to load
-// — caller can surface these so the editor knows which assignments
-// fall back to their procedural defaults. Empty slice = all
-// assignments succeeded.
-//
-// If the audio device isn't ready (Init never ran or failed), this
-// silently no-ops — the assignments file still persists for the next
-// successful Init.
+// ReloadUserAssignments re-reads assignments.txt and overlays the bank in place
+// (assigned cues get the user's .wav, others keep the default; old slots are
+// unloaded so handles don't leak). Returns canonical slugs whose assignment
+// FAILED to load. No-op when the device isn't ready (the file still persists).
 func ReloadUserAssignments() (failed []string, err error) {
 	if !ready {
 		return nil, nil
@@ -176,30 +129,21 @@ func ReloadUserAssignments() (failed []string, err error) {
 	assigns := userconfig.LoadAssignments()
 	forEachCue(func(cue Sound, row soundCue) {
 		if reloadCueSlot(cue, assigns) {
-			// An explicitly-assigned file failed to load (the synth
-			// fallback covered playback, but the player should know).
 			failed = append(failed, row.Canonical)
 		}
 	})
-	// `failed` is contracted as "cue slugs whose assigned FILE failed to load"
-	// (the loop above). A hand-edited assignments.txt line with an unrecognized
-	// cue key is NOT a load failure — it's an inert orphan (only known cues are
-	// read, via forEachCue), so it's skipped silently like every other
-	// malformed line in LoadAssignments rather than surfaced as a false warning.
+	// failed = assigned-FILE load failures only. An unknown cue key is an inert
+	// orphan (forEachCue reads only known cues), skipped silently like any
+	// malformed LoadAssignments line — not a false warning.
 	return failed, nil
 }
 
-// SynthSweep wraps wavsynth's sweep helper so the editor can build cues
-// without importing wavsynth directly. Pure passthrough.
+// SynthSweep forwards to wavsynth.SynthSweep.
 func SynthSweep(duration, startHz, endHz, volume, attack, release float64) []int16 {
 	return wavsynth.SynthSweep(duration, startHz, endHz, volume, attack, release)
 }
 
-// WaveShape and the four WaveX constants are re-exported so the
-// sound editor doesn't have to import wavsynth alongside audio just
-// to name a value type. SynthShape is the rich-knob variant of
-// SynthSweep — wave shape, noise mix, vibrato — fed by the
-// editor's expanded slider list.
+// WaveShape and the WaveX constants are re-exported for the sound editor.
 type WaveShape = wavsynth.WaveShape
 
 const (
@@ -209,43 +153,34 @@ const (
 	WaveSaw      = wavsynth.WaveSaw
 )
 
-// WaveShapeCount re-exports the WaveShape enum size so the editor's
-// wave-picker slider bounds itself off the enum, not a literal.
+// WaveShapeCount re-exports the WaveShape enum size for the editor's wave picker.
 const WaveShapeCount = wavsynth.WaveShapeCount
 
 func WaveShapeName(w WaveShape) string { return wavsynth.WaveShapeName(w) }
 
-// SynthShape exposes the rich procedural sweep primitive to non-
-// wavsynth callers. Forwards verbatim.
+// SynthShape forwards to wavsynth.SynthShape.
 func SynthShape(duration, startHz, endHz, volume, attack, release float64,
 	wave WaveShape, noiseMix, vibHz, vibDepth float64) []int16 {
 	return wavsynth.SynthShape(duration, startHz, endHz, volume, attack, release,
 		wave, noiseMix, vibHz, vibDepth)
 }
 
-// SynthShapeParams is the struct-based rich synth the sound editor drives.
-// Forwards verbatim to wavsynth.
+// SynthShapeParams forwards to wavsynth.SynthShapeParams.
 func SynthShapeParams(p ShapeParams) []int16 { return wavsynth.SynthShapeParams(p) }
 
-// previewRingSize bounds the in-flight preview clips. Sized at 4 because
-// previews are short (<1s) and the UI naturally caps how fast a user can
-// fire them; we just need enough slots that consecutive previews don't
-// cut each other off mid-play.
+// previewRingSize bounds the in-flight preview clips — enough that consecutive
+// short (<1s) previews don't cut each other off.
 const previewRingSize = 4
 
-// previewRing is a small ring buffer of rl.Sound handles used by
-// PreviewPCM and PreviewFile. Each new preview overwrites the oldest
-// slot, unloading the prior buffer first — without this the editor's
-// sound-creator would leak an rl.Sound on every Preview press.
+// previewRing buffers preview rl.Sound handles for PreviewPCM/PreviewFile. Each
+// new preview unloads the prior buffer in its slot so a Preview press can't leak.
 var (
 	previewRing   [previewRingSize]rl.Sound
 	previewCursor int
 )
 
-// PreviewPCM plays freshly-synthesized PCM through the preview ring
-// without touching disk. Built for the editor's sound modal so tweaking
-// a slider and hitting Preview doesn't pollute maps/sounds/ with a
-// preview.wav file. Silent no-op when the audio device isn't ready.
+// PreviewPCM plays freshly-synthesized PCM through the preview ring without
+// touching disk. No-op when the device isn't ready.
 func PreviewPCM(pcm []int16) {
 	if !ready || len(pcm) == 0 {
 		return
@@ -254,9 +189,8 @@ func PreviewPCM(pcm []int16) {
 	playThroughRing(wav)
 }
 
-// PreviewFile loads a saved .wav by name and plays it through the
-// preview ring. Used by the editor's Saved Sounds list audition path.
-// Doesn't touch the assignments table — purely a one-shot play.
+// PreviewFile plays a saved .wav by name through the preview ring (one-shot;
+// doesn't touch the assignments table).
 func PreviewFile(name string) {
 	if !ready {
 		return
@@ -271,16 +205,12 @@ func PreviewFile(name string) {
 func playThroughRing(wavBytes []byte) {
 	snd := bytesToSound(wavBytes)
 	if snd.Stream.Buffer == nil {
-		// Dead device or malformed bytes — bytesToSound returned a zero Sound;
-		// don't store or play it.
+		// Zero Sound (dead device or malformed bytes) — don't store or play.
 		return
 	}
-	// Pick a slot whose prior clip has finished before reusing it: replaceSound
-	// unloads (frees) the slot's raylib buffer, and unloading one that's still
-	// streaming is a use-after-free on raylib's C side. Scan from the cursor for
-	// the first free (or empty) slot. Only when EVERY slot is still in flight —
-	// more overlapping previews than the ring holds — do we fall back to the
-	// oldest (cursor) and accept the cutoff.
+	// Reuse a finished slot: replaceSound frees the slot's buffer, and freeing
+	// one still streaming is a use-after-free. Scan from the cursor for the first
+	// free/empty slot; only when all are in flight fall back to the oldest.
 	slot := previewCursor
 	for i := 0; i < previewRingSize; i++ {
 		idx := (previewCursor + i) % previewRingSize
@@ -294,8 +224,7 @@ func playThroughRing(wavBytes []byte) {
 	previewCursor = (slot + 1) % previewRingSize
 }
 
-// unloadPreviewRing releases every preview slot. Called by Close so the
-// ring's buffers get reclaimed when the audio device shuts down.
+// unloadPreviewRing releases every preview slot. Called by Close.
 func unloadPreviewRing() {
 	unloadSounds(previewRing[:])
 	previewCursor = 0

@@ -2,10 +2,9 @@ package core
 
 import "testing"
 
-// TestVictoryFillProgress_Curve pins the spoils XP-bar fill easing: flat 0
-// through the dance beat, eased to exactly 1 by the animation end, monotonic
-// in between. Expressed against the timing consts so a retune can't silently
-// break the contract.
+// TestVictoryFillProgress_Curve pins the fill easing: flat 0 through the dance
+// beat, eased to exactly 1 by anim end, monotonic between. Against the consts
+// so a retune can't silently break the contract.
 func TestVictoryFillProgress_Curve(t *testing.T) {
 	if p := VictoryFillProgress(0); p != 0 {
 		t.Errorf("fill at 0 = %v, want 0", p)
@@ -19,8 +18,7 @@ func TestVictoryFillProgress_Curve(t *testing.T) {
 	if p := VictoryFillProgress(VictorySpoilsAnimEnd() + 5); p != 1 {
 		t.Errorf("fill past anim end = %v, want clamped 1", p)
 	}
-	// Midpoint: ease-out quad 1-(1-0.5)^2 = 0.75 (above linear — XP rushes in
-	// early, then decelerates).
+	// Midpoint: ease-out quad 1-(1-0.5)^2 = 0.75 (above linear).
 	mid := VictoryDanceBeat + VictoryBarFillDuration*0.5
 	if p := VictoryFillProgress(mid); absFloat(float64(p)-0.75) > 1e-6 {
 		t.Errorf("fill at midpoint = %v, want 0.75 (ease-out quad)", p)
@@ -36,8 +34,7 @@ func TestVictoryFillProgress_Curve(t *testing.T) {
 	}
 }
 
-// TestVictorySpoilsAnimDone_Boundary locks the done-gate (footer swap +
-// Confirm-skip target) to the fill end.
+// TestVictorySpoilsAnimDone_Boundary locks the done-gate to the fill end.
 func TestVictorySpoilsAnimDone_Boundary(t *testing.T) {
 	end := VictorySpoilsAnimEnd()
 	if VictorySpoilsAnimDone(end - 0.01) {
@@ -51,11 +48,9 @@ func TestVictorySpoilsAnimDone_Boundary(t *testing.T) {
 	}
 }
 
-// TestVictoryLootRevealed_Cascade checks loot rows cascade one per stagger
-// starting at the dance beat, clamp to n, and stay at 0 beforehand. Sample
-// points sit safely off the exact stagger boundaries so a sub-frame float
-// rounding can't flake the assertion (an off-by-one exactly on a boundary is
-// invisible in the animation anyway).
+// TestVictoryLootRevealed_Cascade checks rows cascade one per stagger from the
+// dance beat, clamp to n, and stay at 0 beforehand. Samples sit off the exact
+// stagger boundaries so float rounding can't flake the assertion.
 func TestVictoryLootRevealed_Cascade(t *testing.T) {
 	const n = 3
 	if got := VictoryLootRevealed(VictoryDanceBeat-0.1, n); got != 0 {

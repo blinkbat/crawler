@@ -5,8 +5,7 @@ import (
 	"testing"
 )
 
-// A kind isn't "known" until BestiaryIDKills defeats accumulate; the
-// (BestiaryIDKills-1)th kill must still leave it unidentified.
+// A kind isn't known until BestiaryIDKills defeats accumulate.
 func TestBestiaryKnowsAtKillThreshold(t *testing.T) {
 	b := make(Bestiary)
 	for i := 1; i < BestiaryIDKills; i++ {
@@ -24,8 +23,7 @@ func TestBestiaryKnowsAtKillThreshold(t *testing.T) {
 	}
 }
 
-// Scan shortcuts the kill threshold: a single MarkScanned identifies the
-// kind with zero kills.
+// Scan shortcuts the kill threshold: one MarkScanned identifies with zero kills.
 func TestBestiaryScanShortcutsIdentification(t *testing.T) {
 	b := make(Bestiary)
 	if b.Knows(EnemyBat) {
@@ -55,8 +53,7 @@ func TestBestiarySeenKinds(t *testing.T) {
 	if len(seen) != 2 {
 		t.Fatalf("SeenKinds len = %d, want 2", len(seen))
 	}
-	// Canonical order: EnemyRat is declared before EnemyBat, so it leads
-	// regardless of insertion order above.
+	// EnemyRat is declared before EnemyBat, so it leads regardless of insertion order.
 	if seen[0] != EnemyRat || seen[1] != EnemyBat {
 		t.Fatalf("SeenKinds not in EnemyKinds() order: %v", seen)
 	}
@@ -82,8 +79,7 @@ func TestPruneBestiary(t *testing.T) {
 	}
 }
 
-// The bestiary survives a SaveData JSON round-trip intact (the persistence
-// path the title-screen Continue relies on).
+// The bestiary survives a SaveData JSON round-trip intact.
 func TestBestiarySaveRoundTrip(t *testing.T) {
 	g := NewGameState(bestiaryTestArea())
 	g.Bestiary.RecordKill(EnemyRat)
@@ -106,10 +102,7 @@ func TestBestiarySaveRoundTrip(t *testing.T) {
 	}
 }
 
-// bestiaryTestArea is a minimal 3×3 open area for constructing a GameState
-// in the save round-trip test (mirrors the inline areas other core tests
-// build). Path stays empty — the test marshals NewSaveData directly and
-// never touches disk, so no map id is needed.
+// bestiaryTestArea is a minimal 3×3 open area for the save round-trip test (never touches disk).
 func bestiaryTestArea() AreaDefinition {
 	return AreaDefinition{
 		Width:       3,

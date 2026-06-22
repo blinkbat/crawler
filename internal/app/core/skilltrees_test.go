@@ -2,9 +2,7 @@ package core
 
 import "testing"
 
-// TestLearnedSkills_FreshMemberEmpty pins the "unlearned start" contract:
-// a freshly-created member (no ranks invested) has learned nothing, so the
-// battle Skill menu is empty until they spend their first SkillPoint.
+// TestLearnedSkills_FreshMemberEmpty: a fresh member (no ranks) has learned nothing.
 func TestLearnedSkills_FreshMemberEmpty(t *testing.T) {
 	for _, c := range []PartyClass{ClassWarrior, ClassCleric, ClassThief, ClassWizard} {
 		m := PartyMember{Class: c}
@@ -14,8 +12,7 @@ func TestLearnedSkills_FreshMemberEmpty(t *testing.T) {
 	}
 }
 
-// TestNewParty_SeedsOneSkillPointUnlearned verifies the starting state the
-// "true choice" design depends on: one SkillPoint each, zero learned skills.
+// TestNewParty_SeedsOneSkillPointUnlearned: each member starts with one SkillPoint, zero learned.
 func TestNewParty_SeedsOneSkillPointUnlearned(t *testing.T) {
 	for _, m := range NewParty() {
 		if m.SkillPoints != 1 {
@@ -27,10 +24,8 @@ func TestNewParty_SeedsOneSkillPointUnlearned(t *testing.T) {
 	}
 }
 
-// TestBuySkillNode_LearnsThenUpgradesLadder walks a granting root up its
-// full ladder: rank 1 learns the skill at tier 0 (base), each further rank
-// advances SkillTiers one rung so EffectiveSkillEffect folds the delta in,
-// and the maxed node lands exactly on MaxSkillTier and refuses more buys.
+// TestBuySkillNode_LearnsThenUpgradesLadder walks a granting root up its ladder: rank 1 learns at
+// tier 0, each further rank advances SkillTiers, and a maxed node lands on MaxSkillTier and refuses more.
 func TestBuySkillNode_LearnsThenUpgradesLadder(t *testing.T) {
 	m := PartyMember{Class: ClassWizard, SkillPoints: MaxSkillTier + 1}
 
@@ -71,21 +66,17 @@ func TestBuySkillNode_LearnsThenUpgradesLadder(t *testing.T) {
 	}
 }
 
-// TestBuySkillNode_PassiveNodeGrantsNoSkill guards the GrantSkill==SkillNone
-// branch: a deferred/passive node records its rank but must not learn a
-// castable skill or write the SkillTiers ladder. Every tree ROOT now grants a
-// skill, so this uses a passive tier-1 node (`searing-light`, reached after its
-// granting root `smite` in the Cleric Radiance tree): buying the passive node
-// must not change the learned-skill set or the SkillTiers map the root established.
+// TestBuySkillNode_PassiveNodeGrantsNoSkill: a GrantSkill==SkillNone node records its rank but must
+// not change LearnedSkills or the SkillTiers map. Uses passive `searing-light` after root `smite`.
 func TestBuySkillNode_PassiveNodeGrantsNoSkill(t *testing.T) {
 	m := PartyMember{Class: ClassCleric, SkillPoints: 2}
-	if !BuySkillNode(&m, "smite") { // root — grants Smite
+	if !BuySkillNode(&m, "smite") { // grants Smite
 		t.Fatal("buy smite failed")
 	}
 	learnedBefore := len(LearnedSkills(&m))
 	tiersBefore := len(m.SkillTiers)
 
-	if !BuySkillNode(&m, "searing-light") { // tier-1 passive node — grants nothing
+	if !BuySkillNode(&m, "searing-light") { // passive, grants nothing
 		t.Fatal("buy searing-light failed")
 	}
 	if got := len(LearnedSkills(&m)); got != learnedBefore {

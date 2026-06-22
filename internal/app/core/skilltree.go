@@ -2,45 +2,17 @@ package core
 
 import "reflect"
 
-// Per-skill upgrade ladder + helpers that fold the tier modifiers into the
-// SkillEffect the battle code applies. Each player-castable skill has
-// MaxSkillTier possible upgrade slots. This is now LIVE: the Diablo-2-style
-// skill trees in skilltrees.go drive it — BuySkillNode writes
-// PartyMember.SkillTiers as the player ranks up a granting node (rank 1 =
-// tier 0 / base, each further rank = the next tier), and EffectiveSkillEffect
-// / SkillDamageFor / SkillHealFor / SkillTierMod (called from
-// battle/actions.go) fold the purchased deltas into every cast. Points are
-// spent only through the tree modal (BuySkillNode) — there is no separate
-// per-skill buyer.
-//
-// The base skill (tier 0) is available the moment a tree node learns it;
-// tiers 1..MaxSkillTier stack additive deltas onto the base effect as the
-// node's rank climbs.
-//
-// Design contract: each tier is ONE numeric/bool delta applied to a
-// SkillEffect field that already exists (Damage, Heal, BurnChance,
-// etc.) or a tier-only field below (StealBonusDamage). Keeping the
-// delta surface small means the apply
-// path in battle/actions.go is:
-//
-//   effect := core.EffectiveSkillEffect(m, skill)
-//
-// instead of "look up base + branch on tier per skill." Tuning a
-// number is one row in skillTierTable; adding a new delta is one
-// field below + one apply site in EffectiveSkillEffect.
+// Per-skill upgrade ladder; folds tier modifiers into the SkillEffect battle code applies.
+// Driven by skilltrees.go: BuySkillNode writes PartyMember.SkillTiers (rank 1 = tier 0/base,
+// each further rank = next tier); EffectiveSkillEffect / SkillDamageFor / SkillHealFor /
+// SkillTierMod fold the deltas into casts. Spent only through the tree modal.
+// Each tier is ONE numeric/bool delta on an existing SkillEffect field or a tier-only field below.
 
-// MaxSkillTier is the maximum purchasable tier per skill. Three tiers
-// per skill is the design target — bumping this means authoring more
-// rows in skillTierTable, but the rest of the system (UI cursor math,
-// SP cost, registry lookups) reads from this constant so no other
-// site needs editing.
+// MaxSkillTier is the maximum purchasable tier per skill. Every system reads this constant.
 const MaxSkillTier = 3
 
-// SkillTierUpgrade is one purchasable rung of a skill's tree.
-// Description is the player-facing tooltip; Cost is in SkillPoints
-// (1 by default — a future "expensive elite tier" would bump this).
-// The Effect field carries the additive delta applied to the base
-// SkillEffect when this tier is purchased.
+// SkillTierUpgrade is one purchasable rung of a skill's tree. Cost is in SkillPoints;
+// Effect is the additive delta applied to the base SkillEffect on purchase.
 type SkillTierUpgrade struct {
 	Tier        int
 	Label       string
@@ -49,24 +21,11 @@ type SkillTierUpgrade struct {
 	Effect      SkillEffectDelta
 }
 
-// SkillEffectDelta is the additive modifier applied per purchased
-// tier. Mirrors SkillEffect's shape — fields are added (or OR'd, for
-// bool flags) into the base. New tier abilities that don't fit an
-// existing field add a new row here + an apply step in
-// EffectiveSkillEffect; the UI and table-walker code don't need to
-// change.
-//
-// This struct hand-mirrors ~20 additive fields of SkillEffect (party.go)
-// and addSkillEffectDelta folds them one by one. Embedding a shared
-// SkillEffectAdditive struct into BOTH would be the tidier dedupe, but
-// SkillEffect / SkillEffectDelta are built with keyed composite literals
-// in ~80 sites across the registry, tests and battle code — promoted
-// (embedded) fields can't be set in an outer keyed literal, so embedding
-// would force a rewrite of every one of them. Instead the drift between
-// the three (the two structs + the fold) is pinned by an init-time
-// reflection assert below: a new additive field added to one but missed
-// in another panics at startup, so the lockstep edit can't be silently
-// half-done.
+// SkillEffectDelta is the additive modifier applied per purchased tier. Mirrors SkillEffect's
+// shape — fields are added (bool flags OR'd) into the base via addSkillEffectDelta. Not embedded
+// because both are built with keyed composite literals in ~80 sites (promoted fields can't be set
+// in an outer keyed literal). The init-time reflection assert below pins the two structs + the
+// fold against drift.
 type SkillEffectDelta struct {
 	Damage         int
 	Heal           int
@@ -85,58 +44,30 @@ type SkillEffectDelta struct {
 	StunMaxTurns   int
 	SleepMinTurns  int
 	SleepMaxTurns  int
-	// StealBonusDamage is the STR-multiplier damage dealt on a
-	// successful steal (Thief Steal T3). 0 = the steal stays a
-	// pure utility cast.
+	// StealBonusDamage: STR-multiplier damage on a successful steal (Thief Steal T3). Tier-only.
 	StealBonusDamage int
-	// CritDoubleOnExcellent is a bool flag that the per-skill
-	// apply path checks when scoring an Excellent timing roll —
-	// turns the hit into a double-damage crit. Used by Crushing
-	// Blow T3 and Backstab T2.
+	// CritDoubleOnExcellent: turns an Excellent timing hit into a double-damage crit. Tier-only.
 	CritDoubleOnExcellent bool
-	// BuffStats / BuffTurns are the buff-skill deltas — per-stat magnitude and
-	// duration added onto the base SkillEffect's BuffStats / BuffTurns as the
-	// granting node ranks up. Bless's tiers use these (T2/T3 add magnitude, T1
-	// adds a turn); EffectiveSkillEffect folds them in alongside the other
-	// numeric fields.
+	// BuffStats / BuffTurns: buff-skill magnitude/duration deltas (Bless).
 	BuffStats Stats
 	BuffTurns int
-	// RegenTurns is the heal-over-time duration delta (Renewal's tiers add
-	// turns; the per-turn amount rides the existing Heal delta). Folded into
-	// the base SkillEffect.RegenTurns by EffectiveSkillEffect.
-	RegenTurns int
-	// ArmorReduction is the Corrosive Vial armor-strip delta — tiers deepen the
-	// break. Folded into the base SkillEffect.ArmorReduction by EffectiveSkillEffect.
-	ArmorReduction int
-	// ATBPush is the Sunder readiness-shove delta — tiers shove the target's ATB
-	// gauge harder. Folded into the base SkillEffect.ATBPush.
-	ATBPush int
-	// BuffArmor / BuffMDef are the Stone Skin ward deltas — tiers raise the flat
-	// Armor / MDef granted. Folded into the base SkillEffect.BuffArmor / BuffMDef.
+	RegenTurns     int // heal-over-time duration delta (Renewal)
+	ArmorReduction int // Corrosive Vial armor-strip delta
+	ATBPush        int // Sunder readiness-shove delta
+	// BuffArmor / BuffMDef: Stone Skin ward deltas.
 	BuffArmor int
 	BuffMDef  int
-	// ShieldHP is the Aegis absorb-pool delta — tiers grow the shield. Folded
-	// into the base SkillEffect.ShieldHP.
-	ShieldHP int
-	// IceArmorTurns is the Ice Armor duration delta — tiers extend how long the
-	// frost ward stands. Folded into the base SkillEffect.IceArmorTurns.
-	IceArmorTurns int
+	ShieldHP      int // Aegis absorb-pool delta
+	IceArmorTurns int // Ice Armor duration delta
 }
 
-// tier builds one SkillTierUpgrade row with Cost defaulting to the standard
-// 1 SkillPoint — the only cost any current rung uses. Centralizing the default
-// here means a future "expensive elite tier" reprices in one place (add a
-// tierCost variant) instead of editing ~90 literal `Cost: 1` fields. Mirrors
-// the nd()/act() row constructors skilltrees.go uses for the same reason.
+// tier builds one SkillTierUpgrade row with Cost defaulting to 1 SkillPoint.
 func tier(t int, label, description string, effect SkillEffectDelta) SkillTierUpgrade {
 	return SkillTierUpgrade{Tier: t, Label: label, Description: description, Cost: 1, Effect: effect}
 }
 
-// skillTierTable is the source of truth for every player-castable
-// skill's upgrade ladder. Three rows per skill, in tier order. The
-// init guard below asserts every PlayerCastable skill has exactly
-// MaxSkillTier rows — drift between this table and the registry
-// panics at startup instead of producing silently empty trees.
+// skillTierTable is the source of truth for every player-castable skill's upgrade ladder
+// (MaxSkillTier rows each, in tier order). The init guard below asserts the row count.
 var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	// ── Warrior ──────────────────────────────────────────────
 	SkillSwipe: {
@@ -299,15 +230,11 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	},
 }
 
-// init asserts every player-castable skill has exactly MaxSkillTier
-// rows in skillTierTable, and that tier indices are 1..MaxSkillTier
-// in order. Drift panics at process start, mirroring the AGENTS.md
-// invariant pattern for skill / tile / prop registries.
+// init asserts every player-castable skill has exactly MaxSkillTier rows in
+// skillTierTable with tier indices 1..MaxSkillTier in order. Drift panics at start.
 func init() {
 	for _, s := range PlayerCastableSkills() {
-		// A NoUpgrades skill (single-rank utility like Scan) legitimately
-		// has no tier ladder; it must carry NO stray tier rows, but it's
-		// exempt from the "exactly MaxSkillTier rows" requirement below.
+		// NoUpgrades skill (e.g. Scan): no ladder, must carry no stray rows; exempt from the count check.
 		if SkillHasNoUpgrades(s) {
 			if _, ok := skillTierTable[s]; ok {
 				panic("core: skill " + SkillName(s) + " is NoUpgrades but has skillTierTable rows — drop the rows or the flag")
@@ -334,11 +261,7 @@ func init() {
 	}
 }
 
-// SkillTierOf returns the member's currently-purchased tier for the
-// given skill (0..MaxSkillTier). Nil-safe and zero-value-safe: a
-// freshly-created party member with no SkillTiers map returns 0 for
-// every skill. The Skills panel reads through this to render the
-// tree's filled / empty / next-buyable node states.
+// SkillTierOf returns the member's purchased tier for the skill (0..MaxSkillTier). Nil-safe.
 func SkillTierOf(m *PartyMember, s SkillID) int {
 	if m == nil || m.SkillTiers == nil {
 		return 0
@@ -346,10 +269,7 @@ func SkillTierOf(m *PartyMember, s SkillID) int {
 	return Clamp(m.SkillTiers[s], 0, MaxSkillTier)
 }
 
-// skillTierUpgradeFor returns the upgrade definition for a skill's
-// tier (1..MaxSkillTier). Returns ok=false when the tier index is out
-// of range; the UI uses this to grey out the "next purchase" line
-// when the tree is fully invested.
+// skillTierUpgradeFor returns the upgrade for a skill's tier (1..MaxSkillTier); ok=false if out of range.
 func skillTierUpgradeFor(s SkillID, tier int) (SkillTierUpgrade, bool) {
 	if tier < 1 || tier > MaxSkillTier {
 		return SkillTierUpgrade{}, false
@@ -361,17 +281,9 @@ func skillTierUpgradeFor(s SkillID, tier int) (SkillTierUpgrade, bool) {
 	return rows[tier-1], true
 }
 
-// EffectiveSkillEffect returns the base SkillEffect for `s` with
-// every purchased tier's delta stacked in. Numeric fields are added;
-// bool flags are OR'd. This is the single source of truth the battle
-// apply path reads — `core.SkillEffectFor(s)` returns the BASE row
-// from the registry and should only be used by code that explicitly
-// wants the un-modified shape (editor preview, save validation,
-// etc.). For combat math, always go through EffectiveSkillEffect.
-//
-// A nil member (encounter previews, tests that don't model
-// characters) returns the base effect unchanged, equivalent to
-// "every skill at tier 0."
+// EffectiveSkillEffect returns the base SkillEffect for s with every purchased tier's delta stacked
+// in (numeric added, bool OR'd). The source of truth for combat math; SkillEffectFor gives the
+// un-modified base for editor/validation use. Nil member returns the base unchanged (tier 0).
 func EffectiveSkillEffect(m *PartyMember, s SkillID) SkillEffect {
 	eff := SkillEffectFor(s)
 	if m == nil {
@@ -383,10 +295,8 @@ func EffectiveSkillEffect(m *PartyMember, s SkillID) SkillEffect {
 	return eff
 }
 
-// forEachPurchasedTier invokes fn with each tier upgrade the member has
-// purchased for skill s, walking tiers 1..SkillTierOf and stopping at the
-// first tier with no upgrade row. The shared walk behind EffectiveSkillEffect
-// and SkillTierMod so the per-tier accumulation loop lives in one place.
+// forEachPurchasedTier invokes fn with each purchased tier upgrade for skill s, walking tiers
+// 1..SkillTierOf and stopping at the first missing row. Shared by EffectiveSkillEffect/SkillTierMod.
 func forEachPurchasedTier(m *PartyMember, s SkillID, fn func(SkillTierUpgrade)) {
 	tier := SkillTierOf(m, s)
 	for i := 1; i <= tier; i++ {
@@ -398,10 +308,7 @@ func forEachPurchasedTier(m *PartyMember, s SkillID, fn func(SkillTierUpgrade)) 
 	}
 }
 
-// addSkillEffectDelta folds one purchased tier's delta into the accumulating
-// effect, field by field. Every summable SkillEffect field lives here so
-// EffectiveSkillEffect's per-tier loop stays a single call — add a new tier-able
-// field in one place, not at every fold site.
+// addSkillEffectDelta folds one tier's delta into the accumulating effect, field by field.
 func addSkillEffectDelta(eff *SkillEffect, d SkillEffectDelta) {
 	eff.Damage += d.Damage
 	eff.Heal += d.Heal
@@ -431,26 +338,17 @@ func addSkillEffectDelta(eff *SkillEffect, d SkillEffectDelta) {
 	eff.IceArmorTurns += d.IceArmorTurns
 }
 
-// deltaTierOnlyFields are the SkillEffectDelta fields that have NO matching
-// SkillEffect field and ride SkillTierMod instead of addSkillEffectDelta —
-// the init drift-guard below skips them. Keep in sync with SkillTierMod's
-// fold and the SkillEffectDelta comment.
+// deltaTierOnlyFields are SkillEffectDelta fields with NO matching SkillEffect field; they ride
+// SkillTierMod, not addSkillEffectDelta, so the init drift-guard skips them. Sync with SkillTierMod.
 var deltaTierOnlyFields = map[string]bool{
 	"StealBonusDamage":      true,
 	"CritDoubleOnExcellent": true,
 }
 
-// init pins SkillEffect, SkillEffectDelta and addSkillEffectDelta together so
-// the three can't drift. For every non-tier-only field of SkillEffectDelta it
-// asserts (1) SkillEffect carries a field of the same name and type, and (2)
-// addSkillEffectDelta actually folds it — by setting a lone sentinel on the
-// delta field, folding into a zero SkillEffect, and checking the matching
-// SkillEffect field moved. A new additive field added to one struct but missed
-// in the other (or in the fold) panics at process start, the same loud-on-drift
-// contract the skillTierTable coverage init uses. (The fold is hand-unrolled
-// rather than reflection-driven because EffectiveSkillEffect runs on the combat
-// path — see SumStats' hot-path note; this guard pays the reflection cost once
-// at startup instead.)
+// init pins SkillEffect, SkillEffectDelta and addSkillEffectDelta against drift: for every
+// non-tier-only delta field, asserts SkillEffect has a same-name/type field AND addSkillEffectDelta
+// folds it (sets a sentinel, folds into a zero SkillEffect, checks the field moved). Panics at start.
+// Hand-unrolled fold stays off the combat path; this guard pays reflection once at startup.
 func init() {
 	deltaType := reflect.TypeOf(SkillEffectDelta{})
 	effType := reflect.TypeOf(SkillEffect{})
@@ -466,7 +364,7 @@ func init() {
 		if ef.Type != f.Type {
 			panic("core: SkillEffectDelta." + f.Name + " type differs from SkillEffect." + f.Name + " — the fields must mirror")
 		}
-		// Build a delta with only this field set to a non-zero sentinel.
+		// Delta with only this field set to a sentinel.
 		var delta SkillEffectDelta
 		setDeltaSentinel(reflect.ValueOf(&delta).Elem().Field(i))
 		var eff SkillEffect
@@ -477,10 +375,9 @@ func init() {
 	}
 }
 
-// setDeltaSentinel writes a distinct non-zero value into a SkillEffectDelta
-// field so folding it provably moves the matching SkillEffect field. Mirrors
-// the test helper of the same shape; struct fields (BuffStats) seed their first
-// member, which is enough since SumStats folds every member uniformly.
+// setDeltaSentinel writes a distinct non-zero value into a SkillEffectDelta field so folding it
+// provably moves the matching SkillEffect field. Struct fields seed their first member (SumStats
+// folds every member uniformly).
 func setDeltaSentinel(v reflect.Value) {
 	switch v.Kind() {
 	case reflect.Int:
@@ -499,12 +396,8 @@ func setDeltaSentinel(v reflect.Value) {
 	}
 }
 
-// SkillDamageFor is the tier-aware counterpart of SkillDamage. Returns
-// the actor's pre-quality damage for the skill with every purchased
-// tier's +Damage delta stacked in, then dispatched through the same
-// stat-scaling rule (Melee adds STR, Magic adds INT, Utility passes
-// through). Battle apply handlers should call this instead of
-// SkillDamage so tier bumps land.
+// SkillDamageFor is the tier-aware counterpart of SkillDamage: pre-quality damage with every
+// purchased +Damage delta stacked in, then stat-scaled (Melee+STR, Magic+INT, Utility passthrough).
 func SkillDamageFor(m *PartyMember, s SkillID) int {
 	if m == nil {
 		return SkillDamage(Stats{}, s)
@@ -514,17 +407,12 @@ func SkillDamageFor(m *PartyMember, s SkillID) int {
 		return 0
 	}
 	effect := EffectiveSkillEffect(m, s)
-	// Read through EffectiveStats so equipped items' StatBonus picks
-	// up: an Iron Sword (+2 STR) bumps a Melee skill's pre-quality
-	// damage, a tome (+2 INT) bumps a Magic skill, etc. Base m.Stats
-	// stays clean — level-up spends still edit the base.
+	// EffectiveStats so equipped items' StatBonus (Iron Sword +STR, tome +INT) bumps damage.
 	return scaleDamageByKind(def.Kind, EffectiveStats(*m), effect.Damage)
 }
 
-// SkillHealFor mirrors SkillDamageFor for healing skills — Heal kind
-// adds WIS to the tier-augmented base, anything else returns the base
-// effect's Heal field unchanged. Reads through EffectiveStats so a
-// WIS-boosting accessory lifts heal output.
+// SkillHealFor mirrors SkillDamageFor for heals: Heal kind adds WIS to the tier-augmented base
+// (via EffectiveStats so a WIS accessory lifts output), else returns the base Heal unchanged.
 func SkillHealFor(m *PartyMember, s SkillID) int {
 	if m == nil {
 		return SkillHeal(Stats{}, s)
@@ -537,11 +425,8 @@ func SkillHealFor(m *PartyMember, s SkillID) int {
 	return scaleHealByKind(def.Kind, EffectiveStats(*m), effect.Heal)
 }
 
-// SkillTierMod returns the combined delta of every purchased tier
-// for the bool/integer "extension" fields that don't live in the
-// base SkillEffect — StealBonusDamage, CritDoubleOnExcellent. The
-// apply path reads these alongside the SkillEffect to decide
-// tier-only behaviors (steal cuts, crit doubles).
+// SkillTierMod returns the combined delta of every purchased tier for the tier-only extension
+// fields (StealBonusDamage, CritDoubleOnExcellent) the apply path reads alongside the SkillEffect.
 func SkillTierMod(m *PartyMember, s SkillID) SkillEffectDelta {
 	var mod SkillEffectDelta
 	if m == nil {

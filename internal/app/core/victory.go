@@ -1,23 +1,14 @@
 package core
 
-// Victory spoils-screen timing math. These pure helpers turn the seconds
-// elapsed since the BattleWon phase began (Battle.VictoryElapsed) into the
-// values the screen animates with: the 0..1 XP-bar fill fraction, the
-// "is the animation finished?" gate, and how many loot rows have revealed.
-// Shared by the battle update loop (battle.updateVictorySpoils, which rings
-// the audio cues) and the renderer (render.DrawVictorySpoils, which draws
-// the bars/rows) so the two can't drift on pacing. Pacing is set by the
-// VictoryDanceBeat / VictoryBarFillDuration / VictoryLootStagger constants
-// in config.go.
+// Victory spoils-screen timing math. Pure helpers turning seconds since
+// BattleWon began (Battle.VictoryElapsed) into the screen's animated values.
+// Shared by the battle update loop (rings audio cues) and the renderer (draws
+// bars/rows) so the two can't drift. Pacing consts live in config.go.
 
-// VictoryFillProgress is the eased XP-bar fill fraction at `elapsed`
-// seconds: 0 until the victory pose (VictoryDanceBeat) ends, then EASE-OUT
-// to 1 across VictoryBarFillDuration — a quick rush of XP that decelerates
-// into its final resting value (the satisfying count-up feel). The gold
-// ticker and XP tick-sound cadence ride the same curve, so they cluster
-// early and settle together. Uses ease-out QUAD (not cubic) over a shorter
-// window so the tail doesn't crawl — the final tick lands promptly instead
-// of creeping in for the last few XP.
+// VictoryFillProgress is the eased XP-bar fill fraction at `elapsed` seconds:
+// 0 until the pose (VictoryDanceBeat) ends, then EASE-OUT to 1 across
+// VictoryBarFillDuration. Gold ticker + XP tick-sound ride the same curve.
+// Ease-out QUAD (not cubic) over a shorter window so the tail doesn't crawl.
 func VictoryFillProgress(elapsed float32) float32 {
 	t := (elapsed - VictoryDanceBeat) / VictoryBarFillDuration
 	if t <= 0 {
@@ -31,9 +22,8 @@ func VictoryFillProgress(elapsed float32) float32 {
 	return 1 - inv*inv
 }
 
-// VictorySpoilsAnimEnd is the elapsed time at which the fill animation is
-// fully done — the point a Confirm "skip" snaps to and after which the
-// Continue prompt shows.
+// VictorySpoilsAnimEnd is the elapsed time the fill animation finishes — the
+// Confirm-skip target, after which the Continue prompt shows.
 func VictorySpoilsAnimEnd() float32 {
 	return VictoryDanceBeat + VictoryBarFillDuration
 }
@@ -44,9 +34,8 @@ func VictorySpoilsAnimDone(elapsed float32) bool {
 }
 
 // VictoryLootRevealed returns how many of `n` loot rows have slid in by
-// `elapsed` seconds — rows cascade one per VictoryLootStagger starting at
-// the end of the dance beat. The renderer reveals row i once this count
-// exceeds i; the update loop rings SoundItemGet as the count climbs.
+// `elapsed` seconds — one per VictoryLootStagger starting at the dance beat's
+// end. Render reveals row i once this exceeds i; the update loop rings SoundItemGet.
 func VictoryLootRevealed(elapsed float32, n int) int {
 	if n <= 0 {
 		return 0
@@ -62,18 +51,16 @@ func VictoryLootRevealed(elapsed float32, n int) int {
 	return shown
 }
 
-// AddedAt is the (continuous) XP this member has gained by fill fraction p
-// (0..1). The single source for "how much XP is shown right now" that the
-// spoils screen's bar, the gold/XP tick counters, and the level-up cue all
-// read, so they can't disagree on the in-flight amount.
+// AddedAt is the continuous XP this member has gained by fill fraction p
+// (0..1). Single source of "XP shown right now" for the bar, tick counters,
+// and level-up cue, so they can't disagree.
 func (ms MemberSpoils) AddedAt(p float32) float32 {
 	return float32(ms.GainedXP) * p
 }
 
 // ProjectAt returns the member's animated level / within-level remainder /
-// levels gained at fill fraction p — AddedAt run through ProjectXP. Shared by
-// the XP-bar draw (render) and the level-up SFX counter (battle) so the bar
-// and the cue stay locked to the same projection.
+// levels gained at fill fraction p (AddedAt through ProjectXP). Shared by the
+// XP-bar draw and the level-up SFX counter so they stay locked together.
 func (ms MemberSpoils) ProjectAt(p float32) (lvl, xp, gained int) {
 	return ProjectXP(ms.BeforeLvl, ms.BeforeXP, int(ms.AddedAt(p)))
 }

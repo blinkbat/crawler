@@ -1,14 +1,7 @@
-// Package userconfig holds the pure (non-raylib) logic for the audio
-// package's user-sound subsystem: filesystem paths, name sanitization,
-// the saved-sounds list, the WAV writer that hands its bytes off to
-// raylib via the parent audio package, and the assignments-file parser.
-//
-// Split out of internal/app/audio for the same reason wavsynth was —
-// the parent audio package imports raylib via purego, which fails to
-// init under `go test` (raylib.dll isn't on the test binary's load
-// path). Keeping these pure helpers raylib-free lets us cover them
-// with unit tests; the audio package wraps them with the raylib-side
-// preview ring + bank reload.
+// Package userconfig holds the pure (non-raylib) logic for the audio package's
+// user-sound subsystem: filesystem paths, name sanitization, the saved-sounds
+// list, the WAV writer, and the assignments-file parser. Split out (like
+// wavsynth) so it unit-tests without raylib's purego DLL load.
 package userconfig
 
 import (
@@ -22,54 +15,44 @@ import (
 	"strings"
 )
 
-// SoundsDirName is the on-disk folder where user .wav files live. Mirrors
-// core.MapsDir's "maps" convention; both sit under the working directory.
+// SoundsDirName is the folder where user .wav files live, under the working dir.
 const SoundsDirName = "maps/sounds"
 
-// AssignmentFile holds "cue=filename" lines: one per built-in cue, the
-// filename is relative to maps/sounds/. Sound enum entries not listed
-// fall through to the procedural cue.
+// AssignmentFile holds "cue=filename" lines (filename relative to maps/sounds/).
+// Unlisted cues fall through to the procedural default.
 const AssignmentFile = "assignments.txt"
 
-// SoundsDir resolves the on-disk sounds folder via core.ResolveAssetDir
-// — the same machinery core.MapsDir uses for the maps folder.
+// SoundsDir resolves the on-disk sounds folder via core.ResolveAssetDir.
 func SoundsDir() string {
 	return core.ResolveAssetDir(SoundsDirName)
 }
 
-// SanitizeName normalizes a user-typed sound name into a safe filename
-// stem. Thin wrapper over core.SanitizeFilename with an empty fallback
-// — sound saves refuse rather than producing a synthetic "untitled" file.
+// SanitizeName normalizes a user-typed name into a safe filename stem. Empty
+// fallback — saves refuse rather than produce a synthetic "untitled" file.
 func SanitizeName(name string) string {
 	return core.SanitizeFilename(name, "")
 }
 
-// WavExt is the canonical file extension for user-sound .wav files.
-// Centralized so a format change (or a future .ogg variant) touches one
-// place instead of every "name+\".wav\"" / HasSuffix check.
+// WavExt is the canonical user-sound file extension.
 const WavExt = ".wav"
 
-// ParamsExt is the extension of the sidecar that stores a saved sound's
-// synth knobs (JSON) next to its .wav, so the editor can reopen the
-// sound for editing. The .wav remains the playable artifact; the sidecar
-// is purely authoring metadata (a hand-dropped .wav simply has none).
+// ParamsExt is the JSON sidecar (synth knobs) stored beside a .wav so the
+// editor can reopen it. The .wav is the playable artifact; a hand-dropped .wav
+// has no sidecar.
 const ParamsExt = ".snd"
 
-// SoundPath returns the .wav path for a named user sound (no existence
-// check — caller's responsibility).
+// SoundPath returns the .wav path for a named user sound (no existence check).
 func SoundPath(name string) string {
 	return filepath.Join(SoundsDir(), name+WavExt)
 }
 
-// ParamsPath returns the sidecar (.snd) path for a named user sound.
+// ParamsPath returns the .snd sidecar path for a named user sound.
 func ParamsPath(name string) string {
 	return filepath.Join(SoundsDir(), name+ParamsExt)
 }
 
-// ListSounds returns the names (without .wav) of every .wav file in the
-// sounds directory, sorted. Returns empty on missing dir or read errors
-// so the editor's new-sound flow can still surface "no user sounds yet"
-// without an error.
+// ListSounds returns the names (sans .wav) of every .wav in the sounds dir,
+// sorted. Empty on missing dir or read error.
 func ListSounds() []string {
 	dir := SoundsDir()
 	entries, err := os.ReadDir(dir)
@@ -91,11 +74,8 @@ func ListSounds() []string {
 	return out
 }
 
-// WriteWAV writes a PCM cue's WAV-encoded bytes to maps/sounds/<name>.wav
-// after sanitizing the name. Returns the final on-disk filename
-// (sanitized) so callers can report "Saved as X" in the UI. Overwrites
-// any existing file at the same name — the caller's UI should confirm
-// before calling. Returns an error if the sanitized name is empty.
+// WriteWAV writes a PCM cue's WAV bytes to maps/sounds/<name>.wav (name
+// sanitized). Returns the sanitized filename. Overwrites; errors on empty name.
 func WriteWAV(name string, pcm []int16) (string, error) {
 	clean := SanitizeName(name)
 	if clean == "" {
@@ -113,12 +93,9 @@ func WriteWAV(name string, pcm []int16) (string, error) {
 	return clean, nil
 }
 
-// WriteSound synthesizes p to PCM, writes maps/sounds/<name>.wav, and
-// writes a <name>.snd sidecar holding the synth knobs so the sound can be
-// reopened for editing. Returns the sanitized on-disk stem. The sidecar
-// write is best-effort — a failure there does NOT fail the save, since
-// the .wav (the playable artifact) already landed; the sound just won't
-// be re-editable. Overwrites any existing files at the same name.
+// WriteSound synthesizes p, writes <name>.wav, and writes a <name>.snd sidecar
+// (synth knobs, for reopening). Returns the sanitized stem. Sidecar write is
+// best-effort — failing it doesn't fail the save (the .wav already landed).
 func WriteSound(name string, p wavsynth.ShapeParams) (string, error) {
 	clean := SanitizeName(name)
 	if clean == "" {
@@ -138,10 +115,8 @@ func WriteSound(name string, p wavsynth.ShapeParams) (string, error) {
 	return clean, nil
 }
 
-// LoadParams reads the <name>.snd sidecar and returns the saved synth
-// knobs. ok=false when the sidecar is missing or unparseable (e.g. a
-// hand-dropped .wav, or a sound saved before sidecars existed) — the
-// editor uses that to gray out "Edit" for sounds it can't reconstruct.
+// LoadParams reads the <name>.snd sidecar. ok=false when missing or unparseable
+// (the editor grays out "Edit" for sounds it can't reconstruct).
 func LoadParams(name string) (wavsynth.ShapeParams, bool) {
 	var p wavsynth.ShapeParams
 	clean := SanitizeName(name)
@@ -158,14 +133,10 @@ func LoadParams(name string) (wavsynth.ShapeParams, bool) {
 	return p, true
 }
 
-// DeleteSound removes a named .wav from maps/sounds/. After delete,
-// also strips any assignment that pointed at the file so the bank
-// doesn't try to reload a missing cue on next reload. Returns the
-// underlying os.Remove error verbatim so the caller can decide whether
-// to flash.
+// DeleteSound removes a named .wav and strips any assignment pointing at it
+// (so the bank won't reload a missing cue). Returns os.Remove's error verbatim.
 func DeleteSound(name string) error {
-	// Sanitize before touching the filesystem so a crafted name can't
-	// path-traverse out of maps/sounds/ via os.Remove.
+	// Sanitize first so a crafted name can't path-traverse via os.Remove.
 	clean := SanitizeName(name)
 	if clean == "" {
 		return fmt.Errorf("invalid sound name")
@@ -173,8 +144,7 @@ func DeleteSound(name string) error {
 	if err := os.Remove(SoundPath(clean)); err != nil {
 		return err
 	}
-	// Best-effort: drop the editing sidecar too (may not exist for a
-	// hand-dropped .wav) so it doesn't orphan after its .wav is gone.
+	// Best-effort: drop the sidecar too (may not exist) so it doesn't orphan.
 	_ = os.Remove(ParamsPath(clean))
 	assigns := LoadAssignments()
 	changed := false
@@ -190,9 +160,8 @@ func DeleteSound(name string) error {
 	return nil
 }
 
-// LoadAssignments reads the assignments file. Lines are "cue=name" with
-// '#' line comments. Missing file returns an empty map. Malformed lines
-// are skipped silently so a partial corruption doesn't lose the rest.
+// LoadAssignments reads the assignments file ("cue=name" lines, '#' comments).
+// Missing file returns an empty map; malformed lines are skipped silently.
 func LoadAssignments() map[string]string {
 	out := make(map[string]string)
 	data, err := os.ReadFile(filepath.Join(SoundsDir(), AssignmentFile))
@@ -209,9 +178,8 @@ func LoadAssignments() map[string]string {
 			continue
 		}
 		cue := strings.TrimSpace(line[:eq])
-		// Sanitize the filename stem at parse time so a hand-edited
-		// assignments.txt can't smuggle a path-traversal value into the
-		// SoundPath join downstream (loadCueFromDisk / PreviewFile).
+		// Sanitize at parse time so a hand-edited file can't smuggle a
+		// path-traversal value into the downstream SoundPath join.
 		name := SanitizeName(strings.TrimSpace(line[eq+1:]))
 		if cue == "" || name == "" {
 			continue
@@ -221,9 +189,8 @@ func LoadAssignments() map[string]string {
 	return out
 }
 
-// SaveAssignments writes the cue=name map back to disk in sorted key
-// order so the file diffs cleanly across edits. Creates the sounds
-// directory if missing.
+// SaveAssignments writes the cue=name map in sorted key order (clean diffs).
+// Creates the sounds directory if missing.
 func SaveAssignments(assigns map[string]string) error {
 	dir := SoundsDir()
 	if err := os.MkdirAll(dir, core.AssetDirMode); err != nil {
@@ -238,11 +205,9 @@ func SaveAssignments(assigns map[string]string) error {
 	}
 	sort.Strings(cues)
 	for _, cue := range cues {
-		// Write the sanitized stem so the file is always canonical and matches
-		// the (sanitized) on-disk .wav name. LoadAssignments re-sanitizes for
-		// path-traversal safety; SanitizeName is idempotent, so the write and
-		// load sides can't disagree and round-trip lossless. A value that
-		// sanitizes to empty is degenerate — drop it rather than emit "cue=".
+		// Write the sanitized stem (idempotent, so it round-trips lossless with
+		// LoadAssignments' re-sanitize). Drop a value that sanitizes to empty
+		// rather than emit "cue=".
 		name := SanitizeName(assigns[cue])
 		if name == "" {
 			continue

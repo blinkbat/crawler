@@ -6,38 +6,31 @@ import (
 	"testing"
 )
 
-// TestBuildWAV_HeaderLayout pins the byte structure of the procedural WAV
-// the audio package hands to raylib. The header is canonical 16-bit mono
-// PCM — RIFF / WAVE / fmt / data — and any drift in field offsets or
-// sizes will silently break LoadWaveFromMemory in raylib, producing
-// either no sound or undefined audio glitches that aren't caught by the
-// audio package's Init or Play paths (both succeed even with a malformed
-// wave).
+// TestBuildWAV_HeaderLayout pins the WAV byte structure (RIFF/WAVE/fmt/data).
+// Field drift silently breaks raylib's LoadWaveFromMemory — Init and Play both
+// succeed even on a malformed wave.
 func TestBuildWAV_HeaderLayout(t *testing.T) {
 	samples := []int16{0, 100, -100, 32767, -32768, 0}
 	out := BuildWAV(samples, 22050)
 
-	// Total length sanity: 44 header bytes + 2 bytes per sample.
+	// 44 header bytes + 2 per sample.
 	wantLen := 44 + len(samples)*2
 	if len(out) != wantLen {
 		t.Fatalf("WAV total length = %d, want %d", len(out), wantLen)
 	}
 
-	// RIFF magic.
 	if string(out[0:4]) != "RIFF" {
 		t.Errorf("missing RIFF magic, got %q", out[0:4])
 	}
-	// File-size field is at [4:8] and equals 36 + dataSize.
+	// File-size field [4:8] = 36 + dataSize.
 	fileSize := binary.LittleEndian.Uint32(out[4:8])
 	wantFileSize := uint32(36 + len(samples)*2)
 	if fileSize != wantFileSize {
 		t.Errorf("RIFF file size = %d, want %d", fileSize, wantFileSize)
 	}
-	// WAVE magic.
 	if string(out[8:12]) != "WAVE" {
 		t.Errorf("missing WAVE magic, got %q", out[8:12])
 	}
-	// fmt subchunk header.
 	if string(out[12:16]) != "fmt " {
 		t.Errorf("missing 'fmt ' subchunk, got %q", out[12:16])
 	}
@@ -62,7 +55,6 @@ func TestBuildWAV_HeaderLayout(t *testing.T) {
 	if got := binary.LittleEndian.Uint16(out[34:36]); got != 16 {
 		t.Errorf("bits per sample = %d, want 16", got)
 	}
-	// data subchunk header.
 	if string(out[36:40]) != "data" {
 		t.Errorf("missing 'data' subchunk, got %q", out[36:40])
 	}
@@ -70,7 +62,7 @@ func TestBuildWAV_HeaderLayout(t *testing.T) {
 		t.Errorf("data subchunk size = %d, want %d", got, len(samples)*2)
 	}
 
-	// Sample payload should round-trip exactly.
+	// Payload round-trips exactly.
 	rdr := bytes.NewReader(out[44:])
 	for i, want := range samples {
 		var got int16
@@ -93,10 +85,8 @@ func TestBuildWAV_EmptySamples(t *testing.T) {
 	}
 }
 
-// TestClampToInt16_Bounds catches the soft-clip behavior: anything past +/-1
-// pins to the int16 endpoints rather than wrapping. A wrap here would
-// produce "ring modulator" glitches instead of clean clipping, which is
-// audible and obnoxious.
+// TestClampToInt16_Bounds catches soft-clip: past ±1 pins to the int16
+// endpoints rather than wrapping (a wrap would cause ring-modulator glitches).
 func TestClampToInt16_Bounds(t *testing.T) {
 	cases := []struct {
 		in   float64
@@ -116,11 +106,9 @@ func TestClampToInt16_Bounds(t *testing.T) {
 	}
 }
 
-// TestSynthSweep_LengthMatchesDuration is a lightweight sanity check on
-// the sample-count math — a 100 ms sweep at 22050 Hz should produce
-// exactly 2205 samples. (Variable, not const, so the int truncation
-// happens at runtime via the same math the synth helper uses, not at
-// compile time where non-integer products are a compile error.)
+// TestSynthSweep_LengthMatchesDuration sanity-checks the sample-count math (100
+// ms at 22050 Hz = 2205 samples). Variable, not const, so truncation matches
+// the helper's runtime math.
 func TestSynthSweep_LengthMatchesDuration(t *testing.T) {
 	duration := 0.1
 	pcm := SynthSweep(duration, 440, 880, 0.2, 0.01, 0.05)
@@ -150,11 +138,8 @@ func TestSynthChime_TotalIsTwoNotes(t *testing.T) {
 	}
 }
 
-// TestSynthShape_SineMatchesSynthSweep asserts that SynthShape with
-// the default flags (WaveSine, no noise, no vibrato) produces
-// byte-identical output to the legacy SynthSweep wrapper. SynthSweep
-// is implemented as a thin call into SynthShape, so any drift means
-// the wrapper layer added a bug.
+// TestSynthShape_SineMatchesSynthSweep asserts SynthShape (sine, no noise/vib)
+// is byte-identical to SynthSweep; any drift is a wrapper-layer bug.
 func TestSynthShape_SineMatchesSynthSweep(t *testing.T) {
 	duration, startHz, endHz, vol, atk, rel := 0.08, 440.0, 880.0, 0.20, 0.01, 0.04
 	a := SynthSweep(duration, startHz, endHz, vol, atk, rel)
@@ -169,18 +154,14 @@ func TestSynthShape_SineMatchesSynthSweep(t *testing.T) {
 	}
 }
 
-// TestSynthShape_SquareValuesAreBinary asserts that the square wave
-// path emits only two amplitude poles (modulo the ADSR envelope and
-// clipping). Picks samples from the middle of the bar so the
-// attack/release ramps don't dilute the check.
+// TestSynthShape_SquareValuesAreBinary asserts the square path emits only two
+// amplitude poles (no attack/release, so the ramps don't dilute the check).
 func TestSynthShape_SquareValuesAreBinary(t *testing.T) {
 	pcm := SynthShape(0.10, 440, 440, 0.5, 0, 0, WaveSquare, 0, 0, 0)
 	if len(pcm) == 0 {
 		t.Fatal("empty PCM")
 	}
-	// Constant freq + no attack/release + square wave should yield
-	// samples that are exactly ±(0.5 * 32767) = ±16383 (after the
-	// ClampToInt16 floor takes care of the math).
+	// Constant freq + no attack/release should yield exactly ±16383.
 	wantPos := ClampToInt16(0.5)
 	wantNeg := ClampToInt16(-0.5)
 	for i, s := range pcm {
@@ -190,11 +171,8 @@ func TestSynthShape_SquareValuesAreBinary(t *testing.T) {
 	}
 }
 
-// TestSynthShape_NoiseProducesVariance asserts the noise-mix path
-// actually shifts the output away from the tonal baseline. Pure
-// sine at constant frequency repeats every sample-period; layering
-// noise should make consecutive samples differ across the wave's
-// natural period.
+// TestSynthShape_NoiseProducesVariance asserts the noise-mix path shifts output
+// off the tonal baseline.
 func TestSynthShape_NoiseProducesVariance(t *testing.T) {
 	tone := SynthShape(0.05, 440, 440, 0.4, 0, 0, WaveSine, 0, 0, 0)
 	noisy := SynthShape(0.05, 440, 440, 0.4, 0, 0, WaveSine, 1.0, 0, 0)
@@ -212,11 +190,8 @@ func TestSynthShape_NoiseProducesVariance(t *testing.T) {
 	}
 }
 
-// TestSynthShape_VibratoModulatesFrequency asserts that turning
-// vibrato on produces output that differs from the non-vibrato
-// baseline at the same base frequency. Vibrato is a phase-
-// integrated FM, so even at low depths a few samples in the bar
-// should differ.
+// TestSynthShape_VibratoModulatesFrequency asserts vibrato shifts output off
+// the non-vibrato baseline at the same base frequency.
 func TestSynthShape_VibratoModulatesFrequency(t *testing.T) {
 	plain := SynthShape(0.10, 440, 440, 0.3, 0, 0, WaveSine, 0, 0, 0)
 	vibrato := SynthShape(0.10, 440, 440, 0.3, 0, 0, WaveSine, 0, 8, 0.10)

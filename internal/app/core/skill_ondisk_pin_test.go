@@ -2,16 +2,9 @@ package core
 
 import "testing"
 
-// SkillOnDiskName derives a skill's persisted mapfile token from its display
-// Name (lowercase + space->underscore). That coupling means renaming a
-// skill's display Name silently changes the token written into every saved
-// .map custom-enemy row, so old saves would fail to resolve the skill on
-// load (SkillIDFromOnDiskName misses -> the row is rejected). These pins
-// FREEZE the current token for every registered skill so a Name rename fails
-// loudly here instead of corrupting saves.
-//
-// If you intentionally rename a skill's display Name: update the matching pin
-// below AND migrate any existing saved maps that reference the old token.
+// skillOnDiskPins freezes each skill's persisted mapfile token. SkillOnDiskName derives from the
+// display Name, so a rename silently changes the saved token and breaks old saves — this fails loudly
+// instead. On an intentional rename: update the pin AND migrate existing maps referencing the old token.
 var skillOnDiskPins = map[SkillID]string{
 	SkillSwipe:         "swipe",
 	SkillPrayer:        "prayer",
@@ -57,8 +50,7 @@ var skillOnDiskPins = map[SkillID]string{
 func TestSkillOnDiskNameIsPinned(t *testing.T) {
 	ids := AllSkillIDs()
 
-	// Every registered skill must have a pin (so a newly-added skill forces
-	// the author to capture its frozen token here, not just the renames).
+	// Every registered skill must have a pin (a new skill must capture its token here).
 	for _, id := range ids {
 		want, ok := skillOnDiskPins[id]
 		if !ok {

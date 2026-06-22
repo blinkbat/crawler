@@ -129,9 +129,8 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
-// TestCrystalsRoundTrip pins the optional crystals: section — it parses the
-// position-only rows and re-encodes them byte-stably. Mirrors the doors /
-// chests sections' backward-compat shape (absent section ⇒ no crystals).
+// TestCrystalsRoundTrip pins the optional crystals: section: parse position-only
+// rows, re-encode byte-stably; absent section ⇒ no crystals.
 func TestCrystalsRoundTrip(t *testing.T) {
 	withCrystals := sample + "crystals:\n1 1\n3 2\n"
 	mf, err := Parse(strings.NewReader(withCrystals))
@@ -160,8 +159,7 @@ func TestCrystalsRoundTrip(t *testing.T) {
 			t.Errorf("crystal %d differs: %+v vs %+v", i, mf.Crystals[i], mf2.Crystals[i])
 		}
 	}
-	// A map with no crystals must not emit a crystals: section (byte-stable
-	// with pre-crystal maps).
+	// A map with no crystals must not emit a crystals: section.
 	plain, err := Parse(strings.NewReader(sample))
 	if err != nil {
 		t.Fatalf("parse plain: %v", err)
@@ -175,10 +173,8 @@ func TestCrystalsRoundTrip(t *testing.T) {
 	}
 }
 
-// TestCrystalsEmptySectionRoundTrips pins that an explicit but empty
-// crystals: section survives round-trip as "defined, zero rows" (the author
-// deliberately wants no crystals) rather than collapsing to the absent-section
-// legacy case.
+// TestCrystalsEmptySectionRoundTrips pins that an explicit but empty crystals:
+// section survives as "defined, zero rows", not collapsing to the absent case.
 func TestCrystalsEmptySectionRoundTrips(t *testing.T) {
 	withEmpty := sample + "crystals:\n"
 	mf, err := Parse(strings.NewReader(withEmpty))
@@ -207,9 +203,7 @@ func TestCrystalsEmptySectionRoundTrips(t *testing.T) {
 	}
 }
 
-// TestRejectCrystalOutOfBounds mirrors the pack/chest bounds guard: an
-// out-of-range crystal row fails validation at parse rather than silently
-// dropping at runtime.
+// TestRejectCrystalOutOfBounds: an out-of-range crystal row fails parse.
 func TestRejectCrystalOutOfBounds(t *testing.T) {
 	bad := sample + "crystals:\n9 9\n"
 	if _, err := Parse(strings.NewReader(bad)); err == nil {
@@ -225,18 +219,15 @@ func TestRejectMismatchedLayerSize(t *testing.T) {
 }
 
 func TestRejectMissingLayer(t *testing.T) {
-	// Drop the props section — should fail validation since every layer
-	// is mandatory and same-sized.
+	// Drop props — every layer is mandatory and same-sized.
 	withoutProps := strings.Replace(sample, "props:\n.....\n..T..\n.CRU.\n.....\n", "", 1)
 	if _, err := Parse(strings.NewReader(withoutProps)); err == nil {
 		t.Fatal("expected error for missing props layer, got nil")
 	}
 }
 
-// TestSolidsRoundTrip pins the optional solids: voxel-stack section: a map with
-// a floating cube (a gap in a column) parses N stacked Height-row planes and
-// re-encodes them byte-stably. Mirrors the crystals/doors optional-section
-// backward-compat shape (absent section ⇒ heightfield).
+// TestSolidsRoundTrip pins the optional solids: section: a map with a floating
+// cube parses N stacked Height-row planes and re-encodes byte-stably.
 func TestSolidsRoundTrip(t *testing.T) {
 	const gapped = sample + `solids:
 00000
@@ -291,7 +282,7 @@ func TestSolidsRoundTrip(t *testing.T) {
 }
 
 // TestHeightfieldOmitsSolids confirms a map with no solids: section round-trips
-// without one — the byte-identical guarantee for every existing map.
+// without one.
 func TestHeightfieldOmitsSolids(t *testing.T) {
 	mf, err := Parse(strings.NewReader(sample))
 	if err != nil {

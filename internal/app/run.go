@@ -26,21 +26,16 @@ type appState struct {
 	title  title.State
 	game   core.GameState
 	editor editor.State
-	// testFromEditor flips on when the editor's F5 path drops us into
-	// adventure with the in-memory area. Quitting from the in-game menu
-	// then returns to the editor instead of the title screen.
+	// testFromEditor: set when the editor's F5 path enters adventure with the
+	// in-memory area, so quitting returns to the editor, not the title.
 	testFromEditor bool
 	quit           bool
 }
 
 func Run() {
-	// Note: FlagWindowHighdpi was tried here to keep HUD layout math aligned
-	// on fractional-DPI displays, but in practice it caused a right/down
-	// drift on Windows 1.5× scaling because raylib's GetScreenWidth returns
-	// logical points while the framebuffer is scaled up — HUD coords landed
-	// in the wrong pixel band. The flag stays off until the layout code is
-	// audited to consistently use one of GetScreenWidth (logical) or
-	// GetRenderWidth (physical) end-to-end.
+	// FlagWindowHighdpi stays off: on Windows 1.5× it drifts HUD coords because
+	// GetScreenWidth is logical while the framebuffer is scaled. Re-enable only
+	// after the layout code consistently uses one of GetScreenWidth/GetRenderWidth.
 	rl.SetConfigFlags(rl.FlagVsyncHint | rl.FlagWindowResizable)
 	rl.InitWindow(core.InitialWindowWidth, core.InitialWindowHeight, "Crawler")
 	defer rl.CloseWindow()
@@ -49,34 +44,28 @@ func Run() {
 	render.SetDisplayMode(render.DisplayFullscreen)
 	rl.SetTargetFPS(core.TargetFPS)
 
-	// Procedural sound bank — short input/hit/heal/death cues, generated in
-	// code from sine sweeps and bell envelopes. Safe to call on systems with
-	// no audio device (Init becomes a no-op; Play stays silent).
+	// Procedural sound bank. Safe with no audio device (Init no-ops, Play silent).
 	audio.Init()
 	defer audio.Close()
 
 	assets := render.LoadResources()
 	defer assets.Unload()
-	// Flush + close the debug render log on exit if it was left enabled
-	// (the Debug-menu toggle is the only other close path). Idempotent.
+	// Flush + close the debug render log if it was left enabled. Idempotent.
 	defer render.CloseRenderLog()
-	// Cut controller vibration on exit so the pad doesn't keep buzzing if the
-	// process lingers after the window closes.
+	// Cut rumble on exit so the pad doesn't keep buzzing if the process lingers.
 	defer input.StopRumble()
 
 	state := appState{scene: sceneTitle, title: title.New()}
 
 	for !rl.WindowShouldClose() && !state.quit {
 		dt := rl.GetFrameTime()
-		// Sample the analog stick once per frame so the directional edge
-		// predicates (UpPressed / CursorUpDown / …) are idempotent within
-		// the frame — see input.NewFrame.
+		// Sample the stick once per frame so directional edge predicates are
+		// idempotent within the frame — see input.NewFrame.
 		input.NewFrame()
 
-		// Global Alt+Enter fullscreen/windowed toggle — scene-independent
-		// (title, adventure, editor, mid-menu, mid-battle). Handled BEFORE
-		// the scene update; the input package's Enter-based confirms ignore
-		// Enter-with-Alt so this press never doubles as a commit.
+		// Global Alt+Enter display toggle, scene-independent and BEFORE the
+		// scene update. Enter-based confirms ignore Enter-with-Alt so this
+		// press never doubles as a commit.
 		if input.DisplayTogglePressed() {
 			render.ToggleDisplayMode()
 		}
@@ -92,10 +81,8 @@ func Run() {
 			panic("run: unhandled scene in update dispatch — add it to both scene switches")
 		}
 
-		// Drive controller rumble every frame, scene-independently: TickRumble
-		// decays the combat-rumble envelope (and returns 0 outside battle / in
-		// the title+editor scenes, where Battle is zero-valued), so a rumble
-		// armed just before a battle ends still eases off instead of sticking.
+		// Drive rumble every frame: TickRumble decays the combat envelope (0
+		// outside battle) so a rumble armed just before a battle ends eases off.
 		input.ApplyRumble(core.TickRumble(&state.game.Battle, dt), state.game.RumbleEnabled)
 
 		rl.BeginDrawing()
@@ -149,15 +136,12 @@ func updateAdventureScene(state *appState) {
 	explore.Update(&state.game)
 	if state.game.PendingTransition.TargetMap != "" {
 		if err := applyAreaTransition(&state.game); err != nil {
-			// Transition resolution failed — clear the request, surface
-			// the error in the quiet message slot so the player sees a
-			// clue, and otherwise drop the player off where they were.
-			// Common cause: target map file missing, or the named door
-			// doesn't exist in the destination.
+			// Resolution failed (missing map file or door) — surface a clue and
+			// leave the player where they were.
 			state.game.LogMessage("Door failed: " + err.Error())
 		} else {
-			// New area — drop any held-turn auto-repeat carry so a turn key held
-			// through the door doesn't start the next area mid-cooldown.
+			// Drop held-turn auto-repeat carry so a key held through the door
+			// doesn't start the next area mid-cooldown.
 			explore.ResetTurnRepeat()
 		}
 		state.game.PendingTransition = core.AreaTransition{}
@@ -167,10 +151,8 @@ func updateAdventureScene(state *appState) {
 		if state.testFromEditor {
 			state.testFromEditor = false
 			state.scene = sceneEditor
-			// Drop lingering render-side particles, same as the return-to-
-			// title path: quitting a playtest mid-battle would otherwise
-			// freeze formation-relative particles in the pool and thaw them
-			// onto the next F5 playtest at stale positions.
+			// Drop lingering particles: quitting a playtest mid-battle would
+			// otherwise thaw stale formation-relative particles onto the next F5.
 			render.ResetParticles()
 			return
 		}
@@ -178,47 +160,33 @@ func updateAdventureScene(state *appState) {
 	}
 }
 
-// returnToTitleScene resets the active scene to the title menu and
-// rebuilds a fresh title.State. Both the adventure-quit path and the
-// editor's ExitToTitle path land here so the "back to title" rule
-// (scene flag + title re-init) lives in one place rather than being
-// duplicated across two scene updaters.
+// returnToTitleScene resets to the title menu and rebuilds a fresh title.State.
+// Both the adventure-quit and editor ExitToTitle paths land here.
 func returnToTitleScene(state *appState) {
 	state.scene = sceneTitle
 	state.title = title.New()
-	// Drop any lingering render-side particles — the title scene
-	// doesn't draw the adventure pipeline, so the pool would freeze
-	// mid-animation and thaw onto the next adventure entry at stale
-	// world positions.
+	// Drop lingering particles — the title doesn't draw the adventure pipeline,
+	// so the pool would thaw onto the next adventure entry at stale positions.
 	render.ResetParticles()
 }
 
-// applyAreaTransition loads the destination map and rebuilds the
-// GameState so the player exits through the matching door. Inventory,
-// party (HP/MP/levels/status), gold, the quest journal, and StepCount are
-// preserved across the transition — only the world (area, packs, chests,
-// doors) is swapped. Battle / chest / modal state is dropped, since any of
-// those flags would dangle pointers into the old area.
+// applyAreaTransition loads the destination map and rebuilds the GameState so
+// the player exits through the matching door. Party progression carries; only
+// the world (area, packs, chests, doors) swaps. Battle/chest/modal state is
+// dropped (those flags would dangle pointers into the old area).
 //
-// Fog-of-war contract: the destination's Visited grid is allocated
-// fresh by NewGameState (with only the destination's start tile pre-
-// marked) and the SOURCE map's Visited is discarded. Returning to a
-// previously-explored map re-fogs it. Intentional per-area-is-its-
-// own-discovery feel; if cross-area persistence is wanted later, swap
-// to a session-level `map[mapID][][]bool` and copy in/out here.
+// Fog-of-war: the destination's Visited is allocated fresh and the source's is
+// discarded, so returning to a map re-fogs it (intentional per-area discovery).
 func applyAreaTransition(g *core.GameState) error {
 	target := g.PendingTransition.TargetMap
 	doorName := g.PendingTransition.TargetDoor
 	if target == "" || doorName == "" {
-		// Same shape as Door.HasTarget — the predicate is identical, but
-		// the runtime queues the transition before resolving to a Door,
-		// so we read the raw PendingTransition fields here. Empty either
-		// = no transition queued.
+		// Mirrors Door.HasTarget on the raw PendingTransition fields (the
+		// transition is queued before resolving to a Door). Empty = none queued.
 		return nil
 	}
-	// Same-map portals don't reload from disk — the current area
-	// already holds the destination door. Skipping the load avoids
-	// resetting Packs / Chests for an in-map teleport.
+	// Same-map portals don't reload from disk (the area already holds the door),
+	// avoiding a Packs/Chests reset for an in-map teleport.
 	currentID := core.MapIDFromPath(g.Area.Path)
 	if target == currentID || target == mapfile.SelfMapToken {
 		dest := core.DoorByName(g.Doors, doorName)
@@ -228,16 +196,10 @@ func applyAreaTransition(g *core.GameState) error {
 		x, z := doorExitTile(g.Area, g.Doors, *dest)
 		g.Player = core.NewPlayer(x, z, dest.Facing)
 		// Seat the standing level on the exit tile so a door onto a voxel map
-		// lands the party on the ground, not absolute level 0 (no-op on a
-		// heightfield, where this is the column top).
+		// lands on the ground, not level 0 (no-op on a heightfield).
 		g.Player.Level = g.Area.GroundSpawnLevel(x, z)
-		// Symmetry with the cross-map branch below (which rebuilds the
-		// whole GameState): close any open equipment picker and clear the
-		// particle pool so an in-map teleport can't leave the sub-modal
-		// stranded or leave stale VFX anchored at the old position.
-		// (Latent today — only the door prompt queues a transition and the
-		// panels overlay is closed during movement — but keeps a future
-		// "teleport from an open panel" honest.)
+		// Symmetry with the cross-map branch: close any equip picker and clear
+		// VFX so a (latent today) teleport from an open panel stays honest.
 		core.CloseEquipPicker(g)
 		core.RequestVFXReset(g)
 		return nil
@@ -247,12 +209,9 @@ func applyAreaTransition(g *core.GameState) error {
 		return err
 	}
 	next := core.NewGameState(area)
-	// Carry forward the things that belong to the party, not the world — party,
-	// bag, gold, quest journal, step count, the weather (an outdoor->outdoor
-	// door keeps the rain rolling; a roofed area recedes it next TickWeatherStep),
-	// the RNG, and the debug/render-log runtime toggles. The "what travels with
-	// the party" set lives on core.GameState.CarryProgressionFrom so this door
-	// path and the struct can't drift.
+	// Carry what belongs to the party, not the world (party, bag, gold, journal,
+	// step count, weather, RNG, debug toggles). The set lives on
+	// CarryProgressionFrom so this path and the struct can't drift.
 	next.CarryProgressionFrom(g)
 	dest := core.DoorByName(next.Doors, doorName)
 	if dest == nil {
@@ -262,21 +221,15 @@ func applyAreaTransition(g *core.GameState) error {
 	next.Player = core.NewPlayer(x, z, dest.Facing)
 	next.Player.Level = next.Area.GroundSpawnLevel(x, z)
 	*g = next
-	// Signal the render layer to drop any lingering particles —
-	// formation-relative VFX from a fight that ended just before
-	// the door step would otherwise drift through the new area's
-	// camera view.
+	// Drop lingering particles — VFX from a fight ending just before the door
+	// step would otherwise drift through the new area's camera view.
 	core.RequestVFXReset(g)
 	return nil
 }
 
-// doorExitTile picks the tile the player materializes onto when
-// stepping through a door. Prefer the tile one step in the door's
-// facing direction (so the destination door is behind them and they
-// don't immediately re-trigger). Fall back to the door tile itself
-// when the preferred exit is blocked or holds another door — better
-// to risk a same-frame re-trigger than to drop the player onto a
-// wall.
+// doorExitTile picks the tile the player lands on through a door. Prefer one
+// step in the door's facing (so they don't immediately re-trigger); fall back
+// to the door tile if that's blocked or holds another door.
 func doorExitTile(area core.AreaDefinition, doors []core.Door, dest core.Door) (int, int) {
 	dx, dz := core.FacingVector(dest.Facing)
 	fx, fz := dest.TileX+dx, dest.TileZ+dz
@@ -305,16 +258,12 @@ func updateEditorScene(state *appState, dt float32) {
 		state.editor.Close() // free the 3D-view render target if it was open
 		returnToTitleScene(state)
 	case editor.ActionTest:
-		// Build a runtime GameState from the in-memory area without
-		// touching disk. The editor's State stays intact so we land back
-		// on the same map (and the same dirty-marker) when the player
-		// quits the playtest. StepCount is seeded from the editor's
-		// previewed phase so the playtest opens in that lighting.
+		// Build a runtime GameState from the in-memory area (no disk). The
+		// editor's State stays intact so quitting lands on the same map.
+		// StepCount seeds from the previewed phase for that lighting.
 		area := state.editor.Area()
-		// Ctrl+F5 test-from-cursor: temporarily override StartTile to
-		// the editor's grid cursor for this run only. The authored
-		// area on disk and in the editor's State keeps its original
-		// StartTile; we just point the runtime player there.
+		// Ctrl+F5 test-from-cursor: override StartTile to the grid cursor for
+		// this run only; the authored area keeps its original StartTile.
 		if x, z, ok := state.editor.TestStartOverride(); ok {
 			area.StartTileX = x
 			area.StartTileZ = z
@@ -329,40 +278,27 @@ func updateEditorScene(state *appState, dt float32) {
 
 func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	camera := render.Camera(game)
-	// Retro-filter capture (Debug ▸ Retro Filters): when any filter is
-	// active, the environment pass below renders into an off-screen texture
-	// that EndRetroCapture blits back through the filter shader — so the
-	// WORLD pixelates/scans/dithers while sprites, HUD, popups, and weather
-	// stay crisp. With filters off (the default) this is a single boolean
-	// check and the scene renders directly as always.
+	// Retro-filter capture (Debug ▸ Retro Filters): when a filter is active the
+	// environment pass renders into an off-screen texture that EndRetroCapture
+	// blits through the filter shader, so the WORLD crunches while sprites/HUD/
+	// popups/weather stay crisp. Filters off = a single bool check, drawn direct.
 	//
-	// Skybox exemption (the menu's "Filter Skybox" toggle): when the sky is
-	// exempt, it's drawn CRISP to the backbuffer up front and the capture is
-	// cleared TRANSPARENT instead — the filtered environment then
-	// alpha-composites over the clean sky at blit time.
+	// Skybox exemption ("Filter Skybox"): when exempt, the sky is drawn CRISP to
+	// the backbuffer up front and the capture is cleared TRANSPARENT, so the
+	// filtered environment alpha-composites over the clean sky at blit time.
 	skyCrisp := core.AnyRetroFilterActive(&game.RetroFilters) && !game.RetroFilterSky
 	if skyCrisp {
-		// This clear doubles as the frame's backbuffer depth wipe for the
-		// crisp-sky arm (see the load-bearing-clear note below).
+		// Doubles as the backbuffer depth wipe for the crisp-sky arm.
 		rl.ClearBackground(render.SkyClearColor)
 		render.DrawSkyBackground(assets, game)
 	}
 	filtered := render.BeginRetroCapture(game)
-	// Explicit clear is REQUIRED — bisect confirmed that without it
-	// the world geometry (props in particular) flickers and trees
-	// hide behind invisible depth-buffer holes that shift as the
-	// camera moves. The expected raylib contract is that
-	// BeginDrawing's implicit rlClearScreenBuffers covers depth,
-	// but on this build the depth buffer carries stale fragments
-	// from the previous frame without the explicit ClearBackground
-	// here. DrawSkyBackground paints the full viewport in 2D so the
-	// sky-blue color set by the clear is overdrawn immediately —
-	// the color value is irrelevant, the call is for the depth wipe
-	// that comes with it. (Inside a retro capture the clear lands on
-	// the capture texture's own color+depth buffers — same contract.
-	// The crisp-sky arm cleared the backbuffer above and clears the
-	// capture to TRANSPARENT here so the sky survives the blit; if its
-	// capture failed to start, the backbuffer is already cleared+sky'd.)
+	// Explicit clear is REQUIRED (bisect-confirmed): without it world geometry
+	// flickers behind stale depth-buffer fragments this build carries across
+	// frames despite BeginDrawing's implicit clear. The color is irrelevant
+	// (DrawSkyBackground overdraws it) — the call is for the depth wipe.
+	// Inside a capture it lands on the capture's own buffers; the crisp-sky arm
+	// clears to TRANSPARENT so the sky survives the blit.
 	if filtered && skyCrisp {
 		rl.ClearBackground(rl.Blank)
 	} else if !skyCrisp {

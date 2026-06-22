@@ -68,7 +68,7 @@ func TestSelectChoiceAdvances(t *testing.T) {
 	if !ok || node.ID != "second" {
 		t.Fatalf("expected node 'second' after choosing go, got %q ok=%v", node.ID, ok)
 	}
-	// 'second' has no choices and no next → Continue ends the conversation.
+	// 'second' has no choices/next → Continue ends.
 	ContinueDialog(g)
 	if g.DialogOpen {
 		t.Fatal("dialog should close after continuing a terminal node")
@@ -102,12 +102,12 @@ func TestGoldConditionDisablesChoice(t *testing.T) {
 	if len(views) != 1 || !views[0].Disabled {
 		t.Fatalf("gold-gated choice should be disabled with 5 < 10 gold; views=%+v", views)
 	}
-	// Selecting a disabled choice is a no-op (stays open on the same node).
+	// Selecting a disabled choice is a no-op.
 	SelectDialogChoice(g, 0)
 	if !g.DialogOpen {
 		t.Fatal("selecting a disabled choice should not advance/close the dialog")
 	}
-	// With enough gold it becomes selectable.
+	// Enough gold → selectable.
 	g.Gold = 20
 	if DialogChoiceViews(g)[0].Disabled {
 		t.Fatal("choice should be enabled once gold meets the requirement")
@@ -123,7 +123,7 @@ func TestMenuNodeAutoAdvances(t *testing.T) {
 				ID:         "m",
 				IsMenuNode: true,
 				EndAction:  &DialogAction{Kind: DialogActionQuest, QuestOp: DialogQuestComplete, QuestID: "q"},
-				// No NextNodeID → fires action then closes.
+				// No NextNodeID → fires then closes.
 			}},
 		}}},
 	}
@@ -137,8 +137,7 @@ func TestMenuNodeAutoAdvances(t *testing.T) {
 }
 
 func TestMenuNodeCycleDoesNotHang(t *testing.T) {
-	// Two menu nodes pointing at each other — goToDialogNode must bail at the
-	// chain limit instead of looping forever.
+	// Two menu nodes pointing at each other — must bail at the chain limit.
 	g := &GameState{Area: AreaDefinition{Dialogs: []DialogDefinition{{
 		ID: "d", StartNodeID: "a",
 		Nodes: []DialogNode{
@@ -146,7 +145,7 @@ func TestMenuNodeCycleDoesNotHang(t *testing.T) {
 			{ID: "b", IsMenuNode: true, NextNodeID: "a"},
 		},
 	}}}}
-	StartDialog(g, "d") // must return rather than spin
+	StartDialog(g, "d") // must return, not spin
 	if g.DialogOpen {
 		t.Fatal("a menu-node cycle should terminate by closing the dialog")
 	}
@@ -161,7 +160,7 @@ func TestClampDialogCursor(t *testing.T) {
 	if g.Dialog.ChoiceCursor != 1 {
 		t.Fatalf("cursor should clamp to last choice (1), got %d", g.Dialog.ChoiceCursor)
 	}
-	// Advancing to a node with no choices clamps the cursor back to 0.
+	// A choiceless node clamps the cursor back to 0.
 	SelectDialogChoice(g, 0) // → 'second' (no choices)
 	g.Dialog.ChoiceCursor = 3
 	ClampDialogCursor(g)
@@ -195,8 +194,8 @@ func TestDialogsFromLinesEmpty(t *testing.T) {
 	}
 }
 
-// condGame builds a one-choice dialog whose single choice carries the given
-// condition, so a test can read DialogChoiceViews()[0].Disabled.
+// condGame builds a one-choice dialog whose choice carries cond, so a test can
+// read DialogChoiceViews()[0].Disabled.
 func condGame(cond DialogChoiceCondition) *GameState {
 	g := &GameState{
 		Bestiary: make(Bestiary),
@@ -217,7 +216,7 @@ func TestFoeKilledCondition(t *testing.T) {
 	if !DialogChoiceViews(g)[0].Disabled {
 		t.Fatal("choice should be disabled before any kills")
 	}
-	g.Bestiary.RecordKill(kind) // 1 — still short of 2
+	g.Bestiary.RecordKill(kind) // 1 of 2
 	if !DialogChoiceViews(g)[0].Disabled {
 		t.Fatal("choice should still be disabled at 1/2 kills")
 	}
@@ -241,7 +240,7 @@ func TestFoeKilledConditionZeroMeansOnce(t *testing.T) {
 
 func TestTileVisitedCondition(t *testing.T) {
 	g := condGame(DialogChoiceCondition{Kind: DialogCondTileVisited, TileX: 1, TileZ: 2})
-	// No fog grid → not visited (bounds-checked, no panic).
+	// No fog grid → not visited (bounds-checked).
 	if !DialogChoiceViews(g)[0].Disabled {
 		t.Fatal("tile condition should be disabled when unvisited / out of grid")
 	}
@@ -269,7 +268,7 @@ func TestEnterTileTriggerFires(t *testing.T) {
 	if !FireEnterTileTriggers(g, 1, 0) || !g.DialogOpen {
 		t.Fatal("entering the trigger tile should open the dialog")
 	}
-	// Once-trigger: after closing, re-entering must not re-fire.
+	// Once-trigger: re-entering must not re-fire.
 	CloseDialog(g)
 	if FireEnterTileTriggers(g, 1, 0) {
 		t.Fatal("a Once enter-tile trigger should not fire a second time")
@@ -321,7 +320,7 @@ func TestTriggerNoFireWhileDialogOpen(t *testing.T) {
 			Triggers: []DialogTrigger{{ID: "t1", Kind: DialogTriggerEnterTile, DialogID: "d1", TileX: 0, TileZ: 0}},
 		},
 	}
-	g.DialogOpen = true // a conversation is already up
+	g.DialogOpen = true // conversation already up
 	if FireEnterTileTriggers(g, 0, 0) {
 		t.Fatal("a trigger must not stomp an already-open dialog")
 	}
@@ -360,9 +359,8 @@ func slicesEqualTriggers(a, b []DialogTrigger) bool {
 func TestStartDialogClonesDefinition(t *testing.T) {
 	g := newDialogGame()
 	StartDialog(g, "d1")
-	// Mutating the live conversation's copy must not bleed into the area's
-	// authored definition — StartDialog deep-copies so the two share no
-	// backing array (the audit's shallow-copy fix).
+	// Mutating the live copy must not bleed into the area's definition
+	// (StartDialog deep-copies — no shared backing array).
 	g.Dialog.Def.Nodes[0].Text = "MUTATED"
 	if g.Area.Dialogs[0].Nodes[0].Text == "MUTATED" {
 		t.Fatal("StartDialog must deep-copy the definition; mutating the live copy changed the area's dialog")
@@ -389,8 +387,7 @@ func TestFoeKindName(t *testing.T) {
 
 func TestDialogKindListsCoverEval(t *testing.T) {
 	// Every advertised condition kind must be handled by evalDialogCondition
-	// (not fall through to the "Unavailable" default) — the kind dropdown is
-	// built from this list, so a listed-but-unhandled kind would be a dead row.
+	// (not fall through to "Unavailable") — else the dropdown has a dead row.
 	g := &GameState{Bestiary: make(Bestiary)}
 	for _, k := range DialogCondKinds() {
 		_, reason := evalDialogCondition(g, DialogChoiceCondition{Kind: k})

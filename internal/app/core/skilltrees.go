@@ -2,35 +2,18 @@ package core
 
 import "slices"
 
-// Diablo-2-style skill trees: each party class has THREE thematic trees,
-// each a vertical ladder of skill nodes the player invests SkillPoints
-// into. This file is the DATA + navigation layer for the trees AND the
-// bridge that turns purchases into combat: a node carries name /
-// description / cost / rank / prerequisite plus an optional GrantSkill.
-// Buying a granting node's first rank LEARNS that skill (LearnedSkills →
-// the battle Skill menu); each further rank advances the legacy per-skill
-// upgrade ladder in skilltree.go (PartyMember.SkillTiers) so
-// EffectiveSkillEffect folds the upgrade into casts. Nodes with no
-// GrantSkill (passives, capstones, novel mechanics) still only fill pips
-// for now — their effects are deferred to later slices.
-//
-// Design contract, mirroring the registry-invariant pattern used across
-// the codebase (tiles / props / skills): the init guard below panics on
-// drift — wrong tree count, duplicate node id, or a prerequisite that
-// points outside its own tree — so a malformed authoring edit fails at
-// process start instead of producing a silently-broken tree.
+// Diablo-2-style skill trees: each class has skillTreesPerClass thematic ladders of nodes.
+// DATA + navigation layer AND the purchase->combat bridge: buying a GrantSkill node's first rank
+// LEARNS that skill (LearnedSkills -> battle Skill menu); further ranks advance the per-skill
+// ladder in skilltree.go (SkillTiers). Non-granting nodes (passives/capstones) only fill pips for now.
+// The init guard below panics on drift (wrong tree count, dup node id, out-of-tree prerequisite).
 
-// skillTreesPerClass is the fixed number of trees every class exposes.
-// Three is the design target (one offense-y, one support-y, one
-// risk/identity tree per class); the modal UI lays out exactly this many
-// columns.
+// skillTreesPerClass is the fixed number of trees every class exposes (one column each in the modal).
 const skillTreesPerClass = 3
 
-// SkillTreeNode is one purchasable node in a class tree. Rank is tracked
-// per party member in PartyMember.TreeRanks keyed by ID. Tier is the
-// node's row within its tree (0 = root, filled in by the builder).
-// Requires names the node that must hold at least one rank before this
-// one unlocks (D2-style gating); "" means "always available" (the root).
+// SkillTreeNode is one purchasable node in a class tree. Rank is tracked per member in
+// PartyMember.TreeRanks keyed by ID. Tier is the row within its tree (0 = root, set by the builder).
+// Requires names the node that must hold rank >= 1 before this unlocks; "" = always available (root).
 type SkillTreeNode struct {
 	ID       string
 	Name     string
@@ -39,59 +22,40 @@ type SkillTreeNode struct {
 	Cost     int // SkillPoints per rank
 	Tier     int
 	Requires string
-	// GrantSkill is the castable skill this node LEARNS at rank ≥ 1 (it then
-	// appears in the battle Skill menu). Further ranks feed the legacy
-	// per-skill upgrade ladder (SkillTiers) via BuySkillNode, so
-	// EffectiveSkillEffect applies +damage/+proc upgrades. SkillNone = the
-	// node carries no castable skill yet (a passive/novel node not wired).
+	// GrantSkill: castable skill this node LEARNS at rank >= 1; further ranks feed the per-skill
+	// ladder (SkillTiers) via BuySkillNode. SkillNone = passive/novel node, no castable skill.
 	GrantSkill SkillID
 }
 
-// SkillTreeDef is one of a class's three trees: a display name, a short
-// theme blurb (the kind of skills it holds), and its ordered node ladder.
+// SkillTreeDef is one of a class's trees: display name, theme blurb, and ordered node ladder.
 type SkillTreeDef struct {
 	Name  string
 	Theme string
 	Nodes []SkillTreeNode
 }
 
-// nd is the terse node constructor used by the tree tables — every node
-// currently costs one SkillPoint per rank, so Cost is fixed here and the
-// authoring rows only carry id / name / blurb / max-rank.
+// nd is the terse node constructor; Cost fixed at 1 SkillPoint/rank.
 func nd(id, name, desc string, maxRank int) SkillTreeNode {
 	return SkillTreeNode{ID: id, Name: name, Desc: desc, MaxRank: maxRank, Cost: 1}
 }
 
-// act is the node constructor for an ACTIVE node — one that LEARNS a castable
-// skill (grant) at rank 1 and upgrades it with further ranks. A granting
-// node's rank ladder is fixed: rank 1 learns the skill, and ranks
-// 2..MaxSkillTier+1 feed the per-skill upgrade ladder (see BuySkillNode), so
-// MaxRank is ALWAYS MaxSkillTier+1 (learn + every upgrade). Setting it here —
-// rather than passing it per call — keeps the grant-node authoring sites from
-// drifting away from MaxSkillTier. (Passive / novel nodes stay on nd, which
-// takes an explicit maxRank, until their effect is wired.)
+// act builds an ACTIVE node that LEARNS a skill at rank 1, with ranks 2..MaxSkillTier+1 feeding the
+// per-skill ladder. MaxRank is fixed at MaxSkillTier+1 here so grant sites can't drift from MaxSkillTier.
 func act(id, name, desc string, grant SkillID) SkillTreeNode {
 	n := nd(id, name, desc, MaxSkillTier+1)
 	n.GrantSkill = grant
 	return n
 }
 
-// actOnce is a single-rank granting node: it LEARNS its skill at rank 1 and
-// has NO upgrade ranks (MaxRank 1). For utility skills with no damage / proc
-// ladder to climb — Scan reveals HP, there's nothing for further ranks to
-// improve — where act()'s MaxSkillTier+1 ranks would just be dead pips. The
-// init guard treats it like any grant node (the granted skill must be
-// player-castable and unique within the class).
+// actOnce is a single-rank granting node (MaxRank 1) for utility skills with no upgrade ladder
+// (e.g. Scan), where act()'s extra ranks would be dead pips.
 func actOnce(id, name, desc string, grant SkillID) SkillTreeNode {
 	n := nd(id, name, desc, 1)
 	n.GrantSkill = grant
 	return n
 }
 
-// linearTree wires a slice of nodes into a single-chain tree: each node's
-// Tier becomes its index and each (past the root) requires the node above
-// it. Keeps the authoring tables free of hand-numbered tiers / repeated
-// Requires strings — branching trees would set those explicitly instead.
+// linearTree wires nodes into a single chain: Tier = index, each past root Requires the one above.
 func linearTree(name, theme string, nodes []SkillTreeNode) SkillTreeDef {
 	for i := range nodes {
 		nodes[i].Tier = i
@@ -102,9 +66,8 @@ func linearTree(name, theme string, nodes []SkillTreeNode) SkillTreeDef {
 	return SkillTreeDef{Name: name, Theme: theme, Nodes: nodes}
 }
 
-// classSkillTrees is the source of truth for every class's three trees.
-// Authored as linear ladders for this first UI pass; the data model
-// already supports arbitrary Requires for future branching.
+// classSkillTrees is the source of truth for every class's trees. Linear for now; the data model
+// supports arbitrary Requires for future branching.
 var classSkillTrees = map[PartyClass][]SkillTreeDef{
 	// ── Warrior ──────────────────────────────────────────────────────
 	ClassWarrior: {
@@ -212,13 +175,9 @@ func init() {
 			panic("core: classSkillTrees must define exactly skillTreesPerClass trees per class")
 		}
 		seen := map[string]bool{}
-		// granted tracks which SkillIDs are learned by a node in THIS class's
-		// trees. A skill must be granted by at most one node per class:
-		// BuySkillNode writes SkillTiers[grant] = rank-1 absolutely, so a
-		// second node granting the same skill would silently desync the combat
-		// tier from the node's displayed rank (buying the second node at rank 1
-		// would reset a skill the first node had maxed). Per-class, not global —
-		// a different class learning the same skill via its own node is fine.
+		// granted: SkillIDs learned by a node in THIS class. At most one node per class may grant a
+		// skill — BuySkillNode writes SkillTiers[grant]=rank-1, so a second would desync the tier.
+		// Per-class, not global; a different class granting the same skill is fine.
 		granted := map[SkillID]bool{}
 		for _, tr := range trees {
 			if tr.Name == "" {
@@ -242,13 +201,8 @@ func init() {
 				if n.Requires != "" && !inTree[n.Requires] {
 					panic("core: skill tree node '" + n.ID + "' requires '" + n.Requires + "' outside its tree")
 				}
-				// A node that grants a castable skill bridges to the legacy
-				// per-skill upgrade ladder: rank 1 learns the skill (tier 0),
-				// each further rank stacks one SkillTiers upgrade (see
-				// BuySkillNode). The act() constructor fixes MaxRank at
-				// MaxSkillTier+1, so the only checks left to make are that the
-				// granted skill is actually player-castable and that no two
-				// nodes in the class grant the same skill.
+				// Granting node: check the skill is player-castable and not granted twice in the class
+				// (act() already fixes MaxRank at MaxSkillTier+1).
 				if n.GrantSkill != SkillNone {
 					if !SkillPlayerCastable(n.GrantSkill) {
 						panic("core: skill tree node '" + n.ID + "' grants non-player-castable skill " + SkillName(n.GrantSkill))
@@ -256,17 +210,11 @@ func init() {
 					if granted[n.GrantSkill] {
 						panic("core: skill " + SkillName(n.GrantSkill) + " is granted by more than one node in the same class — BuySkillNode would desync its tier")
 					}
-					// A multi-rank node feeds ranks 2..N into the per-skill upgrade
-					// ladder, but a NoUpgrades skill has no ladder rows — those ranks
-					// would cost SkillPoints and fold nothing. Such a skill must be
-					// wired via a single-rank node (actOnce), not act().
+					// NoUpgrades skill needs a single-rank node (actOnce): extra ranks have no ladder rows.
 					if n.MaxRank > 1 && SkillHasNoUpgrades(n.GrantSkill) {
 						panic("core: skill tree node '" + n.ID + "' grants NoUpgrades skill " + SkillName(n.GrantSkill) + " with MaxRank>1 — extra ranks would waste SkillPoints; use a single-rank node")
 					}
-					// The converse: a single-rank node only ever learns the skill at
-					// tier 0, so a granted skill that DOES carry upgrade tiers would
-					// strand them — no rank can ever climb its ladder. Such a skill
-					// must be wired via a multi-rank node (act()), not actOnce().
+					// Converse: an upgradeable skill needs a multi-rank node (act), else its tiers strand.
 					if n.MaxRank <= 1 && !SkillHasNoUpgrades(n.GrantSkill) {
 						panic("core: skill tree node '" + n.ID + "' grants upgradeable skill " + SkillName(n.GrantSkill) + " with MaxRank<=1 — its upgrade tiers would be unreachable; use a multi-rank node")
 					}
@@ -277,8 +225,7 @@ func init() {
 	}
 }
 
-// SkillTreesFor returns the three trees a class learns. The returned
-// slice is the shared authoring data — callers read it, never mutate it.
+// SkillTreesFor returns a class's trees. Shared authoring data — read, never mutate.
 func SkillTreesFor(c PartyClass) []SkillTreeDef {
 	return classSkillTrees[c]
 }
@@ -295,8 +242,7 @@ func findTreeNode(c PartyClass, id string) (SkillTreeNode, bool) {
 	return SkillTreeNode{}, false
 }
 
-// SkillTreeNodeName resolves a node id to its display name within a
-// class — used by the UI to spell out a locked node's prerequisite.
+// SkillTreeNodeName resolves a node id to its display name within a class.
 func SkillTreeNodeName(c PartyClass, id string) (string, bool) {
 	n, ok := findTreeNode(c, id)
 	if !ok {
@@ -305,9 +251,7 @@ func SkillTreeNodeName(c PartyClass, id string) (string, bool) {
 	return n.Name, true
 }
 
-// TreeNodeRank returns how many ranks the member has invested in a node
-// (0..MaxRank). Nil-safe and clamp-safe so a fresh member with no
-// TreeRanks map reads 0 for everything.
+// TreeNodeRank returns the ranks invested in a node (0..MaxRank). Nil-safe.
 func TreeNodeRank(m *PartyMember, id string) int {
 	if m == nil || m.TreeRanks == nil {
 		return 0
@@ -315,9 +259,7 @@ func TreeNodeRank(m *PartyMember, id string) int {
 	return m.TreeRanks[id]
 }
 
-// SkillNodeUnlocked reports whether the node's prerequisite is satisfied:
-// a root node (no Requires) is always unlocked; otherwise the required
-// node must hold at least one rank.
+// SkillNodeUnlocked reports whether the prerequisite holds: root always unlocked, else Requires rank >= 1.
 func SkillNodeUnlocked(m *PartyMember, n SkillTreeNode) bool {
 	if n.Requires == "" {
 		return true
@@ -330,8 +272,7 @@ func SkillNodeMaxed(m *PartyMember, n SkillTreeNode) bool {
 	return TreeNodeRank(m, n.ID) >= n.MaxRank
 }
 
-// SkillNodeBuyable reports whether the member can purchase the node's next
-// rank right now: unlocked, not maxed, and enough SkillPoints.
+// SkillNodeBuyable reports whether the next rank can be bought now: unlocked, not maxed, affordable.
 func SkillNodeBuyable(m *PartyMember, n SkillTreeNode) bool {
 	if m == nil {
 		return false
@@ -339,17 +280,9 @@ func SkillNodeBuyable(m *PartyMember, n SkillTreeNode) bool {
 	return SkillNodeUnlocked(m, n) && !SkillNodeMaxed(m, n) && m.SkillPoints >= n.Cost
 }
 
-// BuySkillNode purchases one rank of the node `id` for member `m`,
-// spending its Cost in SkillPoints. Returns false and changes nothing
-// when the node is unknown, locked, maxed, or unaffordable. The rank is
-// recorded in TreeRanks.
-//
-// For an active (GrantSkill) node the purchase also drives combat: the
-// first rank makes the skill castable (it appears in the battle Skill
-// menu via LearnedSkills) at tier 0 = its base effect; each further rank
-// advances SkillTiers[grant] one rung up the legacy upgrade ladder so
-// EffectiveSkillEffect folds the next +damage/+proc delta into casts.
-// Passive / novel nodes (GrantSkill == SkillNone) record their rank only.
+// BuySkillNode purchases one rank of node id, spending its Cost; recorded in TreeRanks. Returns
+// false (no change) when unknown, locked, maxed, or unaffordable. For a GrantSkill node, rank 1
+// makes the skill castable (tier 0) and each further rank advances SkillTiers[grant] one rung.
 func BuySkillNode(m *PartyMember, id string) bool {
 	if m == nil {
 		return false
@@ -371,9 +304,7 @@ func BuySkillNode(m *PartyMember, id string) bool {
 		if m.SkillTiers == nil {
 			m.SkillTiers = make(map[SkillID]int, 4)
 		}
-		// rank 1 → tier 0 (learn / base); rank r → tier r-1, capped at the
-		// top of the ladder. The init guard fixes MaxRank == MaxSkillTier+1,
-		// so a maxed node lands exactly on MaxSkillTier.
+		// rank r -> tier r-1, capped at MaxSkillTier (rank 1 = tier 0).
 		tier := newRank - 1
 		if tier > MaxSkillTier {
 			tier = MaxSkillTier
@@ -383,13 +314,9 @@ func BuySkillNode(m *PartyMember, id string) bool {
 	return true
 }
 
-// LearnedSkills returns the castable skills `m` has learned through their
-// skill trees, in tree/node authoring order with duplicates collapsed. A
-// skill counts as learned the moment any node that grants it holds at least
-// one rank. This is the source of truth for the battle Skill menu — it
-// REPLACES the old fixed class loadout, so a freshly-created member (no
-// ranks bought) returns an empty list and learns their first skill by
-// spending their starting SkillPoint in the Tome. Nil-safe.
+// LearnedSkills returns the castable skills m has learned via their trees, in authoring order,
+// deduped. Learned once any granting node holds rank >= 1. Source of truth for the battle Skill
+// menu; a fresh member returns empty. Nil-safe.
 func LearnedSkills(m *PartyMember) []SkillID {
 	if m == nil {
 		return nil
@@ -397,11 +324,8 @@ func LearnedSkills(m *PartyMember) []SkillID {
 	return LearnedSkillsInto(m, nil)
 }
 
-// LearnedSkillsInto is the buffer-reusing form of LearnedSkills for the
-// per-frame callers (the battle skill submenu input + draw, the AoE target
-// preview). Pass nil to allocate. Dedup is a linear slices.Contains over the
-// (tiny) result instead of a per-call map allocation, so a menu open that
-// ticks every frame doesn't churn a map + slice through the GC. Nil-safe.
+// LearnedSkillsInto is the buffer-reusing form of LearnedSkills for per-frame callers. Pass nil to
+// allocate. Dedup is a linear slices.Contains over the tiny result, avoiding a per-call map. Nil-safe.
 func LearnedSkillsInto(m *PartyMember, buf []SkillID) []SkillID {
 	buf = buf[:0]
 	if m == nil {
@@ -420,8 +344,7 @@ func LearnedSkillsInto(m *PartyMember, buf []SkillID) []SkillID {
 	return buf
 }
 
-// TreeInvestedRanks sums the ranks the member has bought across a whole
-// tree — the numerator of the Skills-tab summary's "3 / 15" read.
+// TreeInvestedRanks sums the ranks bought across a tree (numerator of the "3 / 15" summary).
 func TreeInvestedRanks(m *PartyMember, tr SkillTreeDef) int {
 	total := 0
 	for _, n := range tr.Nodes {
@@ -430,8 +353,7 @@ func TreeInvestedRanks(m *PartyMember, tr SkillTreeDef) int {
 	return total
 }
 
-// TreeMaxRanks sums a tree's MaxRank across every node — the denominator
-// of the "invested / total" summary read.
+// TreeMaxRanks sums a tree's MaxRank across every node (denominator of the summary).
 func TreeMaxRanks(tr SkillTreeDef) int {
 	total := 0
 	for _, n := range tr.Nodes {

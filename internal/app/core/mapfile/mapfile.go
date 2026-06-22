@@ -1,17 +1,14 @@
-// Package mapfile is the on-disk representation of an explorable area. The
-// format is plain text, multi-section: header lines, then one ASCII grid per
-// editing layer (walls / floor / decor / props / ceiling / elevation), then
-// enemy / chest / door spawn sections. Chosen so a map diffs cleanly in git,
-// can be glanced at in any editor without parsing, and gives the editor's
-// layer system a 1:1 mapping with on-disk structure.
+// Package mapfile is the on-disk representation of an explorable area: plain
+// text, multi-section — header lines, then one ASCII grid per layer (walls /
+// floor / decor / props / ceiling / elevation), then enemy / chest / door
+// spawn sections. Diffs cleanly in git; editor layers map 1:1 to sections.
 //
 // Layer character conventions:
 //
-//	walls  : per-tile CLIFF-FACE SKIN (legacy section name). These no longer
-//	         block — a wall is the rendered vertical face of an elevation step.
-//	         '.' default (plain rock) skin, '#' explicit rock, '+' rock+light
-//	         ivy, '=' rock+heavy ivy, '&' rock cracked, '$' rock crumbling. The
-//	         skin only shows where the tile's elevation exposes a face.
+//	walls  : per-tile CLIFF-FACE SKIN (legacy section name; no longer blocks —
+//	         a wall is the rendered vertical face of an elevation step, shown
+//	         only where elevation exposes a face). '.' plain rock (default),
+//	         '#' rock, '+' light ivy, '=' heavy ivy, '&' cracked, '$' crumbling.
 //	floor  : '.' auto-variant (per-tile hash), 'g' grass, 'd' dirt,
 //	         'k' dark grass, 's' stone, 'c' cobblestone path, 'w' planks,
 //	         '~' shallow water, 'W' deep water (blocks), 'n' sand, 'i' snow,
@@ -22,26 +19,22 @@
 //	         'v' clover, 'r' reeds, 'o' bones, 'x' scorch, '!' blood,
 //	         '*' cobweb, 't' stump, 'l' fallen log, 'L' leaf pile,
 //	         'A' archway anchor (left), 'a' archway tail (right) — both
-//	         walkable; the arch spans 2 tiles along +X, 'y' lilypad
-//	         (swamp dressing — pure decor, never blocks).
+//	         walkable, arch spans 2 tiles along +X; 'y' lilypad. All never block.
 //	props  : '.' empty, 'T' tree, 'X' tree XL, '|' tall tree,
 //	         '@' twin trees, '/' young tree, 'O' boulder,
 //	         'B' bush (large), 'C' crate, 'R' barrel, 'U' urn,
 //	         'S' stalagmite, 'P' pillar, 'I' broken pillar,
 //	         'M' statue, 'Q' obelisk, 'F' fountain,
-//	         'K' rock cairn (1 tile), 'J' rock formation anchor (top-left
-//	         of a 2×2 footprint), 'j' formation tail (the other 3 tiles
-//	         of the 2×2). All blocking; the anchor's mesh covers the
-//	         whole footprint and tails render nothing.
+//	         'K' rock cairn (1 tile), 'J' rock formation anchor (top-left of a
+//	         2×2 footprint), 'j' formation tail (other 3 tiles). All blocking;
+//	         the anchor's mesh covers the footprint and tails render nothing.
 //	ceiling  : '.' open (sky shows through), '#' solid overhead slab.
-//	elevation: per-tile ground LEVEL — '0'..'9' for 0..9 then 'A'..'K' for
-//	         10..20 (base-36, one char per cell; blank/absent ⇒ '0'). The world
-//	         is built entirely from elevation: the walkable baseline sits at
-//	         level 10, walls/cliffs rise above it and pits drop below. A ramp
-//	         floor tile stores its LOW level here; it rises one level toward
-//	         its arrow. Any unramped level change between adjacent tiles is an
-//	         impassable cliff (and renders a face). Optional layer — pre-
-//	         elevation maps load as all-'0' (flat).
+//	elevation: per-tile ground LEVEL — '0'..'9' then 'A'..'K' for 10..20
+//	         (base-36, one char/cell; blank/absent ⇒ '0', flat). World is built
+//	         entirely from this: walkable baseline at level 10, walls/cliffs
+//	         above, pits below. A ramp floor tile stores its LOW level and rises
+//	         one level toward its arrow; any unramped level change between
+//	         adjacent tiles is an impassable cliff (renders a face). Optional.
 package mapfile
 
 import (
@@ -69,107 +62,75 @@ type MapFile struct {
 	Floor     []string
 	Decor     []string
 	Props     []string
-	// Ceiling is the optional fifth grid. .map files written before the
-	// ceiling: section existed parse with Ceiling left empty, which the
-	// loader fills with a blank "no ceiling" layer so older maps stay
-	// compatible with no manual edit.
+	// Ceiling is the optional fifth grid; empty on load for pre-ceiling maps,
+	// which the loader fills with a blank "no ceiling" layer.
 	Ceiling []string
-	// Elevation is the optional sixth grid: per-tile ground LEVEL ('0'..'9').
-	// Like Ceiling, .map files written before this section existed parse with
-	// Elevation empty, which the loader fills with a blank all-'0' (flat)
-	// layer so older maps stay compatible with no manual edit.
+	// Elevation is the optional sixth grid (per-tile ground LEVEL); empty on
+	// load for pre-elevation maps, which the loader fills all-'0' (flat).
 	Elevation []string
-	// Solids is the optional voxel-stack section: Solids[level] is a full
-	// Height×Width grid of cube/air chars ('0' = air, anything else = a solid
-	// cube's material char), planes stacked lowest-level-first. Written ONLY for
-	// a map that has a gap (a floating cube over air) that the single-height
-	// elevation: layer can't express; a pure heightfield omits it and stays
-	// byte-identical, exactly like the doors / crystals optional sections. When
-	// present, an elevation: section is still written (column tops) as a
-	// graceful downgrade for readers that ignore solids:.
+	// Solids is the optional voxel stack: Solids[level] is a full Height×Width
+	// grid of cube/air chars ('0' = air, else a cube's material char), planes
+	// stacked lowest-first. Written ONLY for a map with a gap (floating cube over
+	// air) the single-height elevation layer can't express; a pure heightfield
+	// omits it and stays byte-identical. When present, elevation: is still
+	// written (column tops) as a downgrade for readers that ignore solids:.
 	Solids [][]string
-	// PropLevels is the optional per-tile prop-LEVEL grid: one base-36 char per
-	// (x,z) giving the voxel level the prop on that tile sits on, or '.' for
-	// "auto" (rest on the column's lowest standable surface). Written ONLY when
-	// some prop sits above its auto surface (a tree on a bridge deck); a map whose
-	// props all sit on the ground omits it and stays byte-identical, like solids:.
+	// PropLevels is the optional per-tile prop-LEVEL grid: base-36 voxel level
+	// the prop sits on, or '.' = auto (column's lowest standable surface).
+	// Written ONLY when some prop sits above its auto surface (tree on a bridge).
 	PropLevels []string
-	// DecorLevels is the decor analogue of PropLevels (per-tile decor level, '.' =
-	// auto). Optional / written only when some decor sits above its auto surface.
+	// DecorLevels is the decor analogue of PropLevels.
 	DecorLevels []string
-	// Faces holds per-tile cliff-face skin overrides (N/E/S/W); optional, one line
-	// per overridden tile. Empty for any map that uses only base/whole-tile skins.
+	// Faces holds per-tile cliff-face skin overrides (N/E/S/W), one line per
+	// overridden tile; empty for maps using only base/whole-tile skins.
 	Faces []MapFace
 	Packs []MapPack
-	// Chests is the authored chest list. Each entry's Items field is a
-	// comma-separated list of item names ("Morsel of Cheese,Bat Jerky")
-	// matching ItemDefinition.Name. Empty list = an empty chest (renders
-	// open by default).
+	// Chests is the authored chest list. Items is a comma-separated list of
+	// ItemDefinition.Name strings; empty = empty chest (renders open).
 	Chests []MapChest
-	// CustomEnemies is the author-defined enemy template list. Optional;
-	// older .map files without a `custom_enemies:` section parse with an
-	// empty slice and round-trip back to disk without one. New maps that
-	// define custom enemies emit the section after `doors:`.
+	// CustomEnemies is the author-defined enemy template list; optional,
+	// emitted after doors:.
 	CustomEnemies []MapCustomEnemy
-	// Doors is the authored door list. Each door names itself, names
-	// its destination map + matching-door name (or "self" for same-map
-	// portals), and records the tile + post-transition facing. The
-	// runtime resolves doors at step-on time: load destination map,
-	// look up the named door, spawn the player at its tile with its
-	// facing. Bidirectional pairs are author-authored (both ends
-	// reference each other); the engine doesn't infer pairs.
+	// Doors is the authored door list: each names itself, its destination map +
+	// matching-door name (or "self"), and the tile + post-transition facing.
+	// Resolved at step-on time. Bidirectional pairs are author-authored — the
+	// engine doesn't infer pairs.
 	Doors []MapDoor
-	// Crystals is the authored healing-crystal list — one tile position per
-	// entry. Optional; older .map files without a `crystals:` section parse
-	// with an empty slice and round-trip back to disk without one, exactly
-	// like the doors / custom_enemies sections.
+	// Crystals is the authored healing-crystal list (one tile position each);
+	// optional.
 	Crystals []MapCrystal
-	// CrystalsDefined records whether the parsed file carried a `crystals:`
-	// section header at all — distinguishing "section present but empty"
-	// (the author deliberately wants zero crystals) from "section absent"
-	// (a legacy map predating editable crystals, which the runtime fills with
-	// a default entrance crystal). Encode writes the section whenever this is
-	// set, so a zero-crystal map round-trips as zero rather than reverting to
-	// the legacy fallback.
+	// CrystalsDefined records whether the file carried a crystals: header at all,
+	// distinguishing "present but empty" (author wants zero) from "absent" (a
+	// legacy map, which the runtime fills with a default entrance crystal).
+	// Encode writes the section whenever set, so a zero-crystal map stays zero.
 	CrystalsDefined bool
-	// Dialogs is the authored conversation list, stored as one OPAQUE
-	// JSON object per line in the optional `dialogs:` section. This leaf
-	// I/O package stays JSON-agnostic — it reads each line verbatim and
-	// writes it back unchanged; core (which already owns encoding/json)
-	// marshals DialogDefinition values to/from these strings. Older .map
-	// files without the section parse with an empty slice and round-trip
-	// without one, exactly like the custom_enemies / doors sections.
+	// Dialogs is the authored conversation list — one OPAQUE JSON object per line
+	// in the optional dialogs: section. This leaf package stays JSON-agnostic
+	// (verbatim read/write); core marshals DialogDefinition to/from these.
 	Dialogs []string
-	// Triggers is the authored dialog-trigger list, stored as one OPAQUE JSON
-	// object per line in the optional `triggers:` section — same verbatim,
-	// JSON-agnostic handling as Dialogs (core marshals DialogTrigger values).
+	// Triggers is the authored dialog-trigger list — opaque JSON per line, same
+	// verbatim handling as Dialogs (core marshals DialogTrigger).
 	Triggers []string
 }
 
-// MapPack is one authored pack at a tile. Members is a non-empty list of
-// enemy-kind names, ordered FRONT row first then BACK row; on-disk format is
-// "kind[,kind...] X Z [ai]" — three fields stay the legacy form (AI defaults to
-// "none"), an optional fourth AI field names a non-default movement style. A
-// ';' inside the member field splits the front group from the back group
-// ("f,f;b,b"); no ';' = all front (the legacy shape).
+// MapPack is one authored pack at a tile. Members is a non-empty enemy-kind
+// list ordered FRONT row first then BACK; on-disk "kind[,kind...] X Z [ai]"
+// (3 fields = legacy, AI defaults "none"). A ';' in the member field splits
+// front from back ("f,f;b,b"); no ';' = all front.
 type MapPack struct {
 	Members []string
-	// BackCount is how many of Members (which are ordered front-first) stand in
-	// the BACK row — the last BackCount entries. Zero (the default / zero value)
-	// means every member is front row, so legacy packs and any MapPack built
-	// without rows read as all-front and round-trip byte-identically.
+	// BackCount is how many of Members (front-first) are BACK row — the last
+	// BackCount entries. Zero = all front, so row-less packs round-trip stably.
 	BackCount int
 	X         int
 	Z         int
-	// AI is the on-disk name of the pack's movement style (see
-	// PackAINames). Empty means "use the default" — the loader maps
-	// that to PackAINone, the stationary mode.
+	// AI is the on-disk movement style (see PackAINames); empty ⇒ PackAINone
+	// (stationary).
 	AI string
 }
 
-// Pack AI names — canonical on-disk strings for each core.PackAI value.
-// Defined in mapfile (the I/O package) so the leaf format never imports
-// core; core's PackAIName / PackAIFromName alias these via a table.
+// Pack AI names — canonical on-disk strings for each core.PackAI value. Defined
+// here so the leaf format never imports core; core aliases these via a table.
 const (
 	PackAINoneName        = "none"
 	PackAIJunkyardDogName = "junkyard_dog"
@@ -177,12 +138,9 @@ const (
 	PackAISkittishName    = "skittish"
 )
 
-// PackAINames is the canonical on-disk order for pack-AI strings,
-// matching the core.PackAI enum by index. PackAINoneName at index 0
-// means an absent / empty AI column resolves to the no-op behavior —
-// the default per the editor's "new packs are stationary" rule. Order
-// here MUST match core's PackAI iota (core/areas.go's packAIDefs
-// init asserts the two stay aligned row-for-row).
+// PackAINames is the canonical on-disk order, matching core.PackAI by index
+// (index 0 = none, so an absent AI column resolves to no-op). Order MUST match
+// core's PackAI iota (core/areas.go's packAIDefs init asserts alignment).
 var PackAINames = [...]string{
 	PackAINoneName,
 	PackAIJunkyardDogName,
@@ -190,20 +148,15 @@ var PackAINames = [...]string{
 	PackAISkittishName,
 }
 
-// inBounds reports whether (x,z) lies inside a w×h map — the single home for the
-// bounds predicate validate() applies to every placed entity (start, packs,
-// chests, crystals, doors, face overrides) so the four-term comparison isn't
-// re-spelled per entity. (core has its own inBoundsWH; mapfile can't import core.)
+// inBounds reports whether (x,z) lies inside a w×h map. (core has its own
+// inBoundsWH; mapfile can't import core.)
 func inBounds(x, z, w, h int) bool {
 	return x >= 0 && x < w && z >= 0 && z < h
 }
 
-// nameInList reports whether s (case-insensitively) matches one of names. The
-// single home for the canonical on-disk name-membership check shared by the
-// pack-AI / door-style / facing validators, so they can't drift on case-fold
-// policy — facing was previously the lone case-SENSITIVE one, which made the
-// disk validator reject a hand-edited "North" that the converter (facingFromName,
-// itself case-insensitive) would have accepted.
+// nameInList reports whether s case-insensitively matches one of names. Shared
+// by the pack-AI / door-style / facing validators so they can't drift on
+// case-fold policy.
 func nameInList(s string, names []string) bool {
 	low := strings.ToLower(s)
 	for _, name := range names {
@@ -214,16 +167,14 @@ func nameInList(s string, names []string) bool {
 	return false
 }
 
-// IsPackAIName reports whether s names one of the canonical pack-AI
-// modes (case-insensitive).
+// IsPackAIName reports whether s names a canonical pack-AI mode (case-insensitive).
 func IsPackAIName(s string) bool {
 	return nameInList(s, PackAINames[:])
 }
 
-// splitPackMembers parses a pack's member field. Members are comma-separated; an
-// optional single ';' splits the FRONT row (before) from the BACK row (after).
-// Returns the flat member list ordered front-first and how many trailing entries
-// are back row. No ';' = all front (the legacy shape), so BackCount is 0.
+// splitPackMembers parses a pack's member field: comma-separated members, an
+// optional single ';' splitting FRONT (before) from BACK (after). Returns the
+// flat front-first list and how many trailing entries are back row.
 func splitPackMembers(field string) (members []string, backCount int, err error) {
 	frontStr, backStr := field, ""
 	if i := strings.IndexByte(field, ';'); i >= 0 {
@@ -241,8 +192,7 @@ func splitPackMembers(field string) (members []string, backCount int, err error)
 }
 
 // parsePackGroup splits one comma-separated member group, trimming each token
-// and rejecting an empty one. An empty/whitespace group yields no members (a
-// pack with no ';' has an empty back group; an all-back pack has an empty front).
+// and rejecting an empty one. An empty/whitespace group yields no members.
 func parsePackGroup(s string) ([]string, error) {
 	if strings.TrimSpace(s) == "" {
 		return nil, nil
@@ -258,10 +208,8 @@ func parsePackGroup(s string) ([]string, error) {
 	return parts, nil
 }
 
-// encodePackMembers is the inverse of splitPackMembers: members ordered
-// front-first with the last backCount in the back row. backCount<=0 writes the
-// plain comma list (legacy shape, byte-identical for row-less packs); otherwise
-// it emits "front;back" (front may be empty for an all-back pack).
+// encodePackMembers is the inverse of splitPackMembers. backCount<=0 writes the
+// plain comma list (legacy shape); otherwise "front;back" (front may be empty).
 func encodePackMembers(members []string, backCount int) string {
 	if backCount <= 0 {
 		return strings.Join(members, ",")
@@ -273,37 +221,28 @@ func encodePackMembers(members []string, backCount int) string {
 	return strings.Join(members[:split], ",") + ";" + strings.Join(members[split:], ",")
 }
 
-// MapChest is one authored chest at a tile. On-disk format mirrors
-// packs: "item[,item...] X Z" so the parser can share splitting logic.
-// An empty-loot chest writes as "(empty) X Z" — using the literal name
-// "(empty)" keeps the row well-formed (always 3 whitespace-separated
-// fields) without inventing a separate "no items" syntax.
+// MapChest is one authored chest at a tile. On-disk "item[,item...] X Z" (mirrors
+// packs); an empty chest writes "(empty) X Z" to keep the row 3 fields.
 type MapChest struct {
 	Items []string
 	X     int
 	Z     int
 }
 
-// EmptyChestToken is the single-field placeholder for a chest authored
-// with no items. Kept out of the item-name registry so it can never
-// shadow a real ItemDefinition.Name; the parser maps it back to an
-// empty Items slice and the encoder emits it when Items is empty.
-// Exported so core's reserved-item-name guard cites this one source
-// instead of re-hardcoding the literal.
+// EmptyChestToken is the placeholder for a chest with no items. Kept out of the
+// item-name registry so it can't shadow a real ItemDefinition.Name. Exported so
+// core's reserved-item-name guard cites this one source.
 const EmptyChestToken = "(empty)"
 
 // MapDoor is one authored door at a tile. On-disk format:
 //
 //	<name> <target_map> <target_door> <X> <Z> <facing> [style]
 //
-// Name is this door's identifier (must be unique within the map);
-// TargetMap is the destination map id (the bare name, e.g. "dungeon"
-// for dungeon.map) or the literal "self" for same-map portals;
-// TargetDoor is the matching door's Name in the destination; Facing
-// is the post-transition direction the player faces and is one of
-// north/east/south/west. Style is the optional visual fixture
-// (building/cave/field); when absent it defaults to building so
-// older 6-field door rows keep loading unchanged.
+// Name is unique within the map; TargetMap is the destination map id (bare name)
+// or "self" for same-map portals; TargetDoor is the matching door's Name there;
+// Facing is the post-transition direction (north/east/south/west). Style is the
+// optional visual fixture (building/cave/field), defaulting to building so older
+// 6-field rows load unchanged.
 type MapDoor struct {
 	Name       string
 	TargetMap  string
@@ -314,39 +253,34 @@ type MapDoor struct {
 	Style      string
 }
 
-// MapCrystal is one authored healing crystal at a tile. On-disk format is
-// just the two coordinates, "X Z" — a crystal carries no per-instance data
-// (its charge state is runtime-only), so the row needs nothing more.
+// MapCrystal is one authored healing crystal at a tile. On-disk "X Z" only
+// (charge state is runtime-only).
 type MapCrystal struct {
 	X int
 	Z int
 }
 
 // MapFace is one tile's per-direction cliff-face skin override. Skins is indexed
-// 0=N,1=E,2=S,3=W; a '.' entry means "use the tile's base skin for that face."
-// On disk a face line is "x z NESW" (the 4 skin chars), one per overridden tile.
+// 0=N,1=E,2=S,3=W; '.' = use the tile's base skin. On disk "x z NESW", one per
+// overridden tile.
 type MapFace struct {
 	X, Z  int
 	Skins [4]byte
 }
 
-// DoorTargetComplete reports whether a door names both halves of a
-// destination. Core door types route through this too so parse-time and
-// runtime checks cannot drift.
+// DoorTargetComplete reports whether a door names both halves of a destination.
+// Core door types route through this so parse-time and runtime checks can't drift.
 func DoorTargetComplete(targetMap, targetDoor string) bool {
 	return targetMap != "" && targetDoor != ""
 }
 
-// HasTarget reports whether this authored door names a complete destination.
+// HasTarget reports whether this door names a complete destination.
 func (d MapDoor) HasTarget() bool {
 	return DoorTargetComplete(d.TargetMap, d.TargetDoor)
 }
 
-// SelfMapToken is the placeholder TargetMap value for same-map
-// portals — keeps the row well-formed (always 6 whitespace-separated
-// fields) without leaving an ambiguous empty column. The parser
-// rewrites it to the map's own name at load time, so runtime door
-// resolution doesn't need a special case.
+// SelfMapToken is the placeholder TargetMap for same-map portals (keeps the row
+// 6 fields). The parser rewrites it to the map's own name at load.
 const SelfMapToken = "self"
 
 const (
@@ -370,64 +304,48 @@ const (
 	DoorStyleFieldName    = "field"
 )
 
-// DoorStyleNames is the canonical on-disk order for door-style strings,
-// matching core.DoorStyleBuilding/Cave/Field. DoorStyleBuildingName is
-// index 0 so an absent style column resolves to it.
+// DoorStyleNames is the canonical on-disk order, matching core.DoorStyle* (index
+// 0 = building, so an absent style column resolves to it).
 var DoorStyleNames = [...]string{
 	DoorStyleBuildingName,
 	DoorStyleCaveName,
 	DoorStyleFieldName,
 }
 
-// IsDoorStyleName reports whether s names one of the canonical door
-// styles (case-insensitive).
+// IsDoorStyleName reports whether s names a canonical door style (case-insensitive).
 func IsDoorStyleName(s string) bool {
 	return nameInList(s, DoorStyleNames[:])
 }
 
-// Ext is the canonical on-disk extension for map files. Lives in
-// mapfile (the I/O package) so core can't import it as a string
-// literal anywhere — `core.MapPath`, the editor's Save As preview,
-// and List/ListByModTime all reference this constant so a future
-// rename to ".mapv2" is a one-line change.
+// Ext is the canonical map-file extension. Lives here so core, the editor, and
+// List* reference it rather than the literal, making a rename one-line.
 const Ext = ".map"
 
-// Ceiling-layer sentinel chars in the on-disk format. CeilingOpenChar
-// ('.') means "no ceiling — sky shows through"; CeilingSolidChar ('#')
-// is a solid slab. Defined here (the I/O package) so the blank-ceiling
-// seeding for older files spells "open" once; core.TileCeilingOpen /
-// TileCeilingSolid alias these so the convention can't drift across the
-// package boundary.
+// Ceiling-layer sentinels: open ('.') = sky shows through, solid ('#') = slab.
+// core.TileCeilingOpen / TileCeilingSolid alias these.
 const (
 	CeilingOpenChar  = '.'
 	CeilingSolidChar = '#'
 )
 
-// ElevationGroundChar is the on-disk sentinel for the lowest ground level
-// (level 0) in the optional elevation layer. Blank / absent elevation rows
-// seed to this so flat maps read as all level 0. core.ElevationGround aliases
-// it so the "flat" convention doesn't drift across the package boundary.
+// ElevationGroundChar is the sentinel for the lowest ground level (0); blank/
+// absent elevation seeds to it. core.ElevationGround aliases it.
 const ElevationGroundChar = '0'
 
-// AssetDirMode / AssetFileMode are the os mode bits for auto-created
-// asset directories and files. Defined in this leaf I/O package so Save
-// (and other writers) can use them without importing core; core's
-// AssetDirMode / AssetFileMode alias these (core imports mapfile, not
-// the reverse), so a permissions change is one edit.
+// AssetDirMode / AssetFileMode are os mode bits for auto-created asset dirs/files.
+// Defined here so writers needn't import core; core's equivalents alias these.
 const (
 	AssetDirMode  = 0o755
 	AssetFileMode = 0o644
 )
 
-// MapCustomEnemy is one author-defined enemy template in the on-disk
-// format. Fields are positional whitespace-separated on a single line:
+// MapCustomEnemy is one author-defined enemy template. Positional whitespace-
+// separated on a single line:
 //
 //	<name> <base_kind> <hp> <mp> <str> <dex> <int> <wis> <vit> <spd> <armor> <mdef> <xp> <tier> <dmg> <sklch> <spwr> <skills>
 //
-// Skills is `-` for none or a comma-separated list of skill names
-// ("firebolt,sleep"). BaseKind is the on-disk enemy name ("rat",
-// "goblin_mage") whose sprite + flavor strings the custom enemy
-// reuses. Loader resolves both name registries via the core package.
+// Skills is `-` for none or a comma-separated list. BaseKind is the on-disk enemy
+// name whose sprite + flavor the custom enemy reuses (resolved via core).
 type MapCustomEnemy struct {
 	Name            string
 	BaseKind        string
@@ -449,14 +367,11 @@ type MapCustomEnemy struct {
 	Skills          []string
 }
 
-// customEnemyNoSkillsToken is the single-field placeholder for a
-// custom enemy with no skills. Mirrors EmptyChestToken — keeps the
-// row well-formed at customEnemyFieldCount (18) whitespace-separated
-// fields without inventing an empty-column syntax.
+// customEnemyNoSkillsToken is the placeholder for a custom enemy with no skills
+// (mirrors EmptyChestToken; keeps the row at customEnemyFieldCount fields).
 const customEnemyNoSkillsToken = "-"
 
-// layerSlot is the parser's notion of "which grid is the upcoming N rows
-// going into." Lets the section dispatch share one collection loop.
+// layerSlot is which grid/section the upcoming rows go into.
 type layerSlot int
 
 const (
@@ -480,13 +395,9 @@ const (
 	slotFaces
 )
 
-// Section header names — the on-disk labels that introduce each part of
-// a .map file (the header line on disk is the name plus a colon, e.g.
-// "walls:"). Referenced by both sectionFor (parse) and Encode (write) so
-// the parser and encoder can't drift on a section spelling. Exported so
-// core's Area↔MapFile converter (areas.go) cites these constants for its
-// own grid-layer dimension diagnostics instead of re-hardcoding the bare
-// "walls"/"floor"/… string literals.
+// Section header names — on-disk section labels (the header line is name+colon,
+// e.g. "walls:"). Referenced by sectionFor (parse) and Encode (write) so they
+// can't drift; exported so core's Area↔MapFile converter cites them too.
 const (
 	SectionWalls         = "walls"
 	SectionFloor         = "floor"
@@ -507,10 +418,9 @@ const (
 	SectionFaces         = "faces"
 )
 
-// Header-line keys. The file preamble is "key: value" lines (not "key:" section
-// headers), so these live apart from the Section* constants but follow the same
-// "one spelling, both sides" rule: parseHeaderLine matches on them and Encode
-// writes them, so a rename can't drift the reader and writer out of step.
+// Header-line keys — the preamble's "key: value" lines (not "key:" section
+// headers). Same "one spelling, both sides" rule: parseHeaderLine reads, Encode
+// writes.
 const (
 	headerName      = "name"
 	headerMaterials = "materials"
@@ -519,12 +429,9 @@ const (
 	headerStart     = "start"
 )
 
-// layerSection describes one .map section: its on-disk name, the parse
-// slot it maps to, and (for the six grid layers) a field accessor into
-// MapFile. Entity sections (enemies/chests/doors/custom_enemies) carry a
-// nil field — they parse into spawn lists, not a grid. This is the single
-// source for sectionFor (name→slot) and layerSlice (slot→*[]string) so
-// the two can't drift on which sections exist or which own a grid.
+// layerSection describes one section: on-disk name, parse slot, and (for the six
+// grid layers) a field accessor into MapFile. Entity sections carry a nil field.
+// Single source for sectionFor (name→slot) and layerSlice (slot→*[]string).
 type layerSection struct {
 	name  string
 	slot  layerSlot
@@ -545,34 +452,27 @@ var layerSections = []layerSection{
 	{SectionCustomEnemies, slotCustomEnemies, nil},
 	{SectionDialogs, slotDialogs, nil},
 	{SectionTriggers, slotTriggers, nil},
-	// solids: carries a multi-plane voxel stack, not a single grid, so it has
-	// a nil field (parsed/encoded by bespoke code like the entity sections) and
-	// is excluded from GridLayerCount.
+	// solids: is a multi-plane voxel stack, not a single grid — nil field +
+	// bespoke code, excluded from GridLayerCount.
 	{SectionSolids, slotSolids, nil},
-	// prop_levels: is an OPTIONAL single grid (per-tile prop level) written only
-	// when a prop sits above its auto surface; nil field + bespoke encode keeps it
-	// from being emitted for every map (which would break byte-stable round-trips).
+	// prop_levels: OPTIONAL single grid written only when a prop sits above its
+	// auto surface; nil field + bespoke encode keeps it off byte-stable maps.
 	{SectionPropLevels, slotPropLevels, nil},
-	// decor_levels: same as prop_levels for the decor layer.
+	// decor_levels: prop_levels for the decor layer.
 	{SectionDecorLevels, slotDecorLevels, nil},
-	// faces: is a sparse entity-style section (one line per overridden tile), not
-	// a grid, so nil field + bespoke parse/encode.
+	// faces: sparse entity-style section (one line per overridden tile).
 	{SectionFaces, slotFaces, nil},
 }
 
-// GridLayerCount is the number of grid (string-row) layers a .map carries —
-// the layerSections rows with a field accessor (walls/floor/decor/props/
-// ceiling/elevation), as opposed to the spawn-list sections. Computed in init
-// from the table so it can't drift from it. Exported so core can assert its
-// own gridLayers() enumeration (and, by extension, the Area↔MapFile converters
-// that hand-list these fields) stays in lockstep — a 7th grid layer added on
-// either side trips a startup panic instead of silently failing to round-trip.
+// GridLayerCount is the number of grid (string-row) layers — the layerSections
+// rows with a field accessor. Computed in init from the table; exported so core
+// can assert its gridLayers() stays in lockstep (a 7th layer on either side
+// trips a startup panic instead of silently failing to round-trip).
 var GridLayerCount int
 
-// init asserts layerSections covers every real slot (slotWalls..
-// slotFaces) exactly once, so a new layerSlot enum value added
-// without a table row panics at startup instead of silently parsing as
-// slotNone / encoding nothing. It also tallies GridLayerCount.
+// init asserts layerSections covers every slot (slotWalls..slotFaces) exactly
+// once — a new layerSlot without a table row panics at startup instead of
+// parsing as slotNone. Also tallies GridLayerCount.
 func init() {
 	seen := make(map[layerSlot]bool, len(layerSections))
 	for _, s := range layerSections {
@@ -591,20 +491,15 @@ func init() {
 	}
 }
 
-// namedLayer pairs a grid layer's on-disk section name with its rows.
-// Shared by validate (dimension checks) and Encode (header + row emit)
-// so the layer list lives in one place instead of two near-identical
-// struct-slice literals.
+// namedLayer pairs a grid layer's section name with its rows. Shared by validate
+// (dimension checks) and Encode (header + row emit).
 type namedLayer struct {
 	name string
 	rows []string
 }
 
-// requiredLayers is the four mandatory grid layers in canonical on-disk
-// order. Ceiling is intentionally excluded — it's optional (legacy maps
-// omit it) and validated / encoded separately: Encode appends ceiling to
-// this list, while validate iterates it directly for the height/width
-// checks and handles ceiling on its own afterward.
+// requiredLayers is the four mandatory grid layers in canonical order. Ceiling/
+// elevation are excluded — optional, validated/encoded separately.
 func (mf MapFile) requiredLayers() []namedLayer {
 	return []namedLayer{
 		{SectionWalls, mf.Walls},
@@ -625,26 +520,19 @@ func Parse(r io.Reader) (MapFile, error) {
 		lineNo++
 		raw := strings.TrimRight(sc.Text(), "\r")
 
-		// Section headers can appear at any point and switch state. Always
-		// check before treating a line as content.
+		// Section headers can appear anywhere and switch state — check first.
 		if next, ok := sectionFor(raw); ok {
 			state = next
-			// Remember that a crystals: section was present even if it turns
-			// out to hold no rows — an empty section means "zero crystals,"
-			// not "unspecified" (see MapFile.CrystalsDefined).
+			// An empty crystals: section means "zero crystals", not
+			// "unspecified" (see MapFile.CrystalsDefined).
 			if next == slotCrystals {
 				mf.CrystalsDefined = true
 			}
 			continue
 		}
 
-		// Blank lines are universally skipped — every section parser
-		// used to open with the same trim+blank dance. Lifted here so
-		// "did I remember to skip blanks?" is no longer a per-section
-		// concern. NOT skipping `#`-prefixed lines because the wall
-		// glyph IS `#` — a comment convention would collide with
-		// content. If a comment syntax becomes needed later, pick a
-		// prefix that can't appear at column 0 of any layer row.
+		// Blank lines are skipped globally. NOT `#`-prefixed lines — the wall
+		// glyph IS `#`, so a comment prefix would collide with content.
 		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
@@ -659,9 +547,7 @@ func Parse(r io.Reader) (MapFile, error) {
 
 		if state == slotEnemies {
 			fields := strings.Fields(line)
-			// 3 fields = legacy (AI defaults to "none"); 4 = AI column
-			// present. Same backward-compat shape doors use for the
-			// style column.
+			// 3 fields = legacy (AI defaults "none"); 4 = AI column present.
 			if len(fields) != packFieldsLegacy && len(fields) != packFields {
 				return mf, fmt.Errorf("line %d: expected '<kind[,kind...]> <x> <z> [ai]', got %q", lineNo, raw)
 			}
@@ -693,9 +579,7 @@ func Parse(r io.Reader) (MapFile, error) {
 
 		if state == slotDoors {
 			fields := strings.Fields(line)
-			// 6 fields = legacy row (style defaults to building); 7 = style
-			// column present. Keeping both shapes valid means older maps load
-			// untouched and only pick up a style column when re-saved.
+			// 6 fields = legacy (style defaults building); 7 = style column present.
 			if len(fields) != doorFieldsLegacy && len(fields) != doorFields {
 				return mf, fmt.Errorf("line %d: expected '<name> <target_map> <target_door> <x> <z> <facing> [style]', got %q", lineNo, raw)
 			}
@@ -731,18 +615,14 @@ func Parse(r io.Reader) (MapFile, error) {
 		}
 
 		if state == slotChests {
-			// Chest row: "itemname[,itemname...] X Z" or "(empty) X Z" for
-			// a no-loot chest. Item names use the canonical
-			// ItemDefinition.Name strings (e.g. "Morsel of Cheese") so the
-			// .map file is human-editable without an item-id lookup table
-			// in the head.
+			// Chest row: "item[,item...] X Z" or "(empty) X Z". Item names are
+			// canonical ItemDefinition.Name strings.
 			fields := strings.Fields(line)
 			if len(fields) < chestFieldsMin {
 				return mf, fmt.Errorf("line %d: expected '<item[,item...]> <x> <z>' or '(empty) <x> <z>', got %q", lineNo, raw)
 			}
-			// Item list can contain whitespace inside individual names
-			// ("Morsel of Cheese"), so reassemble by taking the LAST two
-			// fields as X/Z and the rest as a single item-list token.
+			// Item names may contain whitespace, so take the LAST two fields as
+			// X/Z and the rest as one item-list token.
 			xField := fields[len(fields)-2]
 			zField := fields[len(fields)-1]
 			itemsToken := strings.Join(fields[:len(fields)-2], " ")
@@ -769,7 +649,7 @@ func Parse(r io.Reader) (MapFile, error) {
 		}
 
 		if state == slotCrystals {
-			// Crystal row: "X Z" — position only (charge state is runtime).
+			// Crystal row: "X Z" — position only.
 			fields := strings.Fields(line)
 			if len(fields) != crystalFields {
 				return mf, fmt.Errorf("line %d: expected '<x> <z>', got %q", lineNo, raw)
@@ -796,30 +676,24 @@ func Parse(r io.Reader) (MapFile, error) {
 		}
 
 		if state == slotDialogs {
-			// One opaque JSON object per line — stored verbatim. mapfile does
-			// not parse the JSON (core does on the way to DialogDefinition);
-			// it only preserves the line so the section round-trips. A JSON
-			// object ends with '}', so it can't be mistaken for a section
-			// header (which must end with ':').
+			// One opaque JSON object per line, stored verbatim (core parses it).
+			// A JSON object ends with '}', so it can't look like a section header
+			// (which ends with ':').
 			mf.Dialogs = append(mf.Dialogs, line)
 			continue
 		}
 
 		if state == slotTriggers {
-			// Opaque JSON-per-line, identical handling to dialogs above (core
-			// marshals DialogTrigger values; mapfile only preserves the lines).
+			// Opaque JSON-per-line, same handling as dialogs.
 			mf.Triggers = append(mf.Triggers, line)
 			continue
 		}
 
 		if state == slotSolids {
-			// The voxel stack is N planes of Height rows each, lowest level
-			// first. Blank separator lines were already skipped above, so rows
-			// arrive contiguously — start a new plane whenever the current one
-			// has filled to Height. Height comes from size:, which the format
-			// requires before any grid; if it's still 0 here the header is
-			// misordered — fail with a pointed message rather than splitting
-			// every row into its own plane and erroring obscurely in validate().
+			// N planes of Height rows each, lowest-first; rows arrive contiguously
+			// (blanks already skipped), so start a new plane when the current fills
+			// to Height. Height is 0 only if size: is misordered after a grid —
+			// fail pointedly rather than splitting every row into its own plane.
 			if mf.Height == 0 {
 				return mf, fmt.Errorf("line %d: solids: section appears before size: (grid dimensions unknown)", lineNo)
 			}
@@ -832,8 +706,7 @@ func Parse(r io.Reader) (MapFile, error) {
 		}
 
 		if state == slotPropLevels {
-			// A single Height-row grid of per-tile prop levels (base-36 char, or
-			// '.' = auto). Same row-collection shape as the other grids.
+			// Single Height-row grid of per-tile prop levels (base-36, '.' = auto).
 			mf.PropLevels = append(mf.PropLevels, raw)
 			continue
 		}
@@ -844,10 +717,8 @@ func Parse(r io.Reader) (MapFile, error) {
 		}
 
 		if state == slotFaces {
-			// One overridden tile per line: "x z NESW" (the 4 face skin chars,
-			// '.' = use the tile's base skin for that face). A malformed line is a
-			// loud error (like every other entity section) rather than a silent
-			// drop — a hand-edited typo here must not vanish without a diagnostic.
+			// One overridden tile per line: "x z NESW" ('.' = use base skin). A
+			// malformed line is a loud error, not a silent drop.
 			fields := strings.Fields(raw)
 			if len(fields) < facesFieldCount || len(fields[2]) != faceSkinCount {
 				return mf, fmt.Errorf("line %d: expected '<x> <z> <NESW>' (%d face skin chars), got %q", lineNo, faceSkinCount, raw)
@@ -866,22 +737,15 @@ func Parse(r io.Reader) (MapFile, error) {
 			continue
 		}
 
-		// Layer grid line. Once Height rows are collected, blank lines are
-		// tolerated (some editors auto-insert one before the next section
-		// header) but a non-blank overflow row is a structural error — the
-		// validator would catch it later, but reporting it on the offending
-		// line gives a better diagnostic. (The format is headers-first:
-		// `size:` precedes every grid, so Height is always set here. A
-		// hand-edited file that puts `size:` after a grid is malformed — the
-		// size line is then read as a grid row and validate() rejects the
-		// 0x0 dims, which is correct.)
+		// Layer grid line. Past Height rows, blanks are tolerated (editors
+		// auto-insert one before the next header) but a non-blank overflow is a
+		// structural error, reported here for a better diagnostic. size: precedes
+		// every grid, so Height is always set.
 		target := layerSlice(&mf, state)
 		if target == nil {
-			// Reaching here means `state` is a section slot that is neither a grid
-			// layer (field != nil) nor handled by a bespoke arm above — i.e. a new
-			// layerSlot was added to layerSections (passing the init coverage
-			// assert) without a parse handler. Fail loudly rather than silently
-			// dropping every line of that section. Unreachable for any valid map.
+			// state is a slot with neither a grid field nor a bespoke arm above —
+			// a new layerSlot added to layerSections without a parse handler.
+			// Unreachable for any valid map.
 			panic(fmt.Sprintf("mapfile: section slot %d has no parse handler — add a bespoke arm or a grid field accessor", state))
 		}
 		if len(*target) >= mf.Height {
@@ -901,9 +765,8 @@ func Parse(r io.Reader) (MapFile, error) {
 	return mf, nil
 }
 
-// sectionFor maps a section-header line ("walls:", "doors:", …) to its
-// slot. The trailing colon is required (a bare "walls" is not a header),
-// matching the original switch's exact-match behavior.
+// sectionFor maps a section-header line ("walls:", …) to its slot. The trailing
+// colon is required (a bare "walls" is not a header).
 func sectionFor(raw string) (layerSlot, bool) {
 	trimmed := strings.TrimSpace(raw)
 	if !strings.HasSuffix(trimmed, ":") {
@@ -918,8 +781,8 @@ func sectionFor(raw string) (layerSlot, bool) {
 	return slotNone, false
 }
 
-// layerSlice returns the MapFile grid field for a grid-layer slot, or nil
-// for entity sections / unknown slots (matching the original switch).
+// layerSlice returns the MapFile grid field for a grid-layer slot, or nil for
+// entity sections / unknown slots.
 func layerSlice(mf *MapFile, slot layerSlot) *[]string {
 	for _, s := range layerSections {
 		if s.slot == slot && s.field != nil {
@@ -960,9 +823,8 @@ func parseHeaderLine(mf *MapFile, line string, lineNo int) error {
 }
 
 // validateOptionalGrid dimension-checks an optional single-grid layer
-// (prop_levels / decor_levels): absent (0 rows) is fine, but a present grid must
-// be exactly Height×Width so a ragged plane can't reach the renderer/collision.
-// Shared by the two near-identical optional-level-grid checks.
+// (prop_levels / decor_levels): absent is fine, but a present grid must be
+// exactly Height×Width so a ragged plane can't reach the renderer/collision.
 func (mf *MapFile) validateOptionalGrid(name string, rows []string) error {
 	n := len(rows)
 	if n == 0 {
@@ -993,11 +855,8 @@ func (mf *MapFile) validate() error {
 			}
 		}
 	}
-	// Ceiling is optional for legacy .map files. Missing → fill with a
-	// blank "no ceiling" layer so downstream code (renderer, editor) can
-	// always index it like the other four. A partial ceiling layer (some
-	// rows missing) is treated as malformed because it almost certainly
-	// indicates an authoring mistake, not an older format.
+	// Ceiling optional: missing → blank "no ceiling" layer so downstream can
+	// index it like the others; partial → malformed (an authoring mistake).
 	switch len(mf.Ceiling) {
 	case 0:
 		mf.Ceiling = BlankLayer(mf.Width, mf.Height, CeilingOpenChar)
@@ -1010,8 +869,7 @@ func (mf *MapFile) validate() error {
 	default:
 		return fmt.Errorf("ceiling layer has %d rows, size declares %d", len(mf.Ceiling), mf.Height)
 	}
-	// Elevation is optional too (same legacy rule as ceiling): missing → blank
-	// all-'0' (flat) layer; full height → validate widths; partial → malformed.
+	// Elevation optional (same rule as ceiling): missing → blank all-'0' (flat).
 	switch len(mf.Elevation) {
 	case 0:
 		mf.Elevation = BlankLayer(mf.Width, mf.Height, ElevationGroundChar)
@@ -1020,14 +878,9 @@ func (mf *MapFile) validate() error {
 			if len(row) != mf.Width {
 				return fmt.Errorf("elevation layer row %d has %d cols, size declares %d", i, len(row), mf.Width)
 			}
-			// Every elevation cell must be a level char — '0'..'9' for levels
-			// 0..9, then 'A'..'K' for 10..20 (base-36, one char per cell). The
-			// upper bound is 'K' because core caps the encodable level at 20
-			// (MaxElevationLevel); chars past 'K' are unreachable through the
-			// encoder. ElevationLevelAt reads anything else as ground level 0,
-			// so without this a stray char (hand-edit, wrong layer pasted in)
-			// loads as flat ground and silently desyncs the intended cliff /
-			// ramp geometry.
+			// Each cell must be a level char: '0'..'9' then 'A'..'K' for 10..20
+			// (upper bound 'K' = core's MaxElevationLevel 20). Anything else reads
+			// as ground 0, so a stray char would silently flatten the geometry.
 			for c := 0; c < len(row); c++ {
 				if b := row[c]; !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'K')) {
 					return fmt.Errorf("elevation layer row %d col %d has bad level char %q (expected '0'..'9' or 'A'..'K')", i, c, string(row[c]))
@@ -1037,11 +890,9 @@ func (mf *MapFile) validate() error {
 	default:
 		return fmt.Errorf("elevation layer has %d rows, size declares %d", len(mf.Elevation), mf.Height)
 	}
-	// solids: is the optional voxel stack. Each plane is a full Height×Width
-	// grid; planes stack lowest-level-first. Cell chars aren't constrained here
-	// (the walls/face-skin layer isn't char-validated either — that alphabet
-	// lives in core); only dimensions are checked, which is what protects the
-	// renderer/movement from a ragged plane.
+	// solids: optional voxel stack, each plane a full Height×Width grid. Cell
+	// chars aren't constrained here (that alphabet lives in core); only
+	// dimensions, which protects the renderer from a ragged plane.
 	for L, plane := range mf.Solids {
 		if len(plane) != mf.Height {
 			return fmt.Errorf("solids plane %d has %d rows, size declares %d", L, len(plane), mf.Height)
@@ -1053,16 +904,14 @@ func (mf *MapFile) validate() error {
 		}
 	}
 	// prop_levels / decor_levels: optional per-tile level grids; dimension-check
-	// only (the char alphabet — base-36 level or '.' auto — is core's concern),
-	// same as the other grids, so a ragged plane can't reach the renderer/collision.
+	// only (the char alphabet is core's concern).
 	if err := mf.validateOptionalGrid(SectionPropLevels, mf.PropLevels); err != nil {
 		return err
 	}
 	if err := mf.validateOptionalGrid(SectionDecorLevels, mf.DecorLevels); err != nil {
 		return err
 	}
-	// faces: sparse per-tile overrides — bounds-check each so a stray line can't
-	// feed an off-map index to the renderer.
+	// faces: bounds-check each so a stray line can't feed an off-map index.
 	for _, f := range mf.Faces {
 		if !inBounds(f.X, f.Z, mf.Width, mf.Height) {
 			return fmt.Errorf("faces entry (%d,%d) outside map", f.X, f.Z)
@@ -1071,20 +920,13 @@ func (mf *MapFile) validate() error {
 	if !inBounds(mf.StartX, mf.StartZ, mf.Width, mf.Height) {
 		return fmt.Errorf("start (%d,%d) outside map", mf.StartX, mf.StartZ)
 	}
-	// StartFace must be a canonical facing — mirrors the per-door guard below.
-	// Without this, a MapFile built directly (bypassing Parse, which validates
-	// the token) with an empty/garbage StartFace passes validate(), and Save
-	// then writes a "start: X Z <bad>" line that Parse rejects on reload — a
-	// silent Save/Parse asymmetry.
+	// StartFace must be a canonical facing — else a MapFile built bypassing Parse
+	// would Save a "start: X Z <bad>" line that Parse rejects on reload.
 	if !IsFacingName(mf.StartFace) {
 		return fmt.Errorf("start facing %q invalid", mf.StartFace)
 	}
-	// Pack and chest spawns are validated against bounds here rather
-	// than in the parser so a single-row malformed entry surfaces with
-	// the same "outside map" diagnostic as a malformed start. Without
-	// this guard, an authoring typo silently survives parse and the
-	// runtime placePacks / placeChests just skips the entry — a
-	// frustrating "where did my pack go?" debug.
+	// Pack/chest bounds checked here (not in the parser) so a typo surfaces at
+	// load rather than as a silently-skipped entry at runtime.
 	for _, p := range mf.Packs {
 		if !inBounds(p.X, p.Z, mf.Width, mf.Height) {
 			return fmt.Errorf("pack at (%d,%d) outside map %dx%d", p.X, p.Z, mf.Width, mf.Height)
@@ -1095,19 +937,14 @@ func (mf *MapFile) validate() error {
 			return fmt.Errorf("chest at (%d,%d) outside map %dx%d", c.X, c.Z, mf.Width, mf.Height)
 		}
 	}
-	// Crystals: same bounds guard as packs / chests so an out-of-range
-	// hand-edit surfaces here at load rather than as a silently dropped
-	// crystal at runtime.
+	// Crystals: same bounds guard as packs/chests.
 	for _, c := range mf.Crystals {
 		if !inBounds(c.X, c.Z, mf.Width, mf.Height) {
 			return fmt.Errorf("crystal at (%d,%d) outside map %dx%d", c.X, c.Z, mf.Width, mf.Height)
 		}
 	}
-	// Doors: validate bounds, non-empty name, non-empty target. Same
-	// philosophy as packs / chests — a hand-edit typo surfaces here
-	// instead of producing a silent "step on door, nothing happens"
-	// runtime mystery. Duplicate names within the same map are also
-	// rejected since runtime resolution by name would be ambiguous.
+	// Doors: bounds, non-empty name + target, no duplicate names (runtime resolves
+	// by name, so duplicates would be ambiguous).
 	seenNames := make(map[string]struct{}, len(mf.Doors))
 	for _, d := range mf.Doors {
 		if !inBounds(d.X, d.Z, mf.Width, mf.Height) {
@@ -1116,12 +953,9 @@ func (mf *MapFile) validate() error {
 		if d.Name == "" {
 			return fmt.Errorf("door at (%d,%d) has empty name", d.X, d.Z)
 		}
-		// The door row is space-delimited with three variable-width
-		// leading fields (name, target_map, target_door), so whitespace
-		// in any of them is unrecoverable on re-parse — Fields() would
-		// split it into the wrong column count. Reject at the data-model
-		// boundary so a spaced name fails loudly at save (see Save) rather
-		// than silently producing a .map the parser later rejects.
+		// The 3 leading door fields are space-delimited and variable-width, so
+		// whitespace in any is unrecoverable on re-parse — reject at the data-model
+		// boundary so it fails loudly at save, not as a .map the parser later rejects.
 		if strings.ContainsAny(d.Name, " \t") {
 			return fmt.Errorf("door name %q must not contain whitespace", d.Name)
 		}
@@ -1134,11 +968,8 @@ func (mf *MapFile) validate() error {
 		if strings.ContainsAny(d.TargetDoor, " \t") {
 			return fmt.Errorf("door %q target_door %q must not contain whitespace", d.Name, d.TargetDoor)
 		}
-		// Facing / style must match what the parser accepts on reload — Encode
-		// writes Facing verbatim (and defaults an empty Style to building), so
-		// an out-of-vocabulary value would Save fine and then fail Parse. Reject
-		// it here at the data-model boundary, same philosophy as the asymmetric-
-		// target guard in Encode (an empty Style is legal — the encoder fills it).
+		// Facing/style must match what the parser accepts on reload (an empty Style
+		// is legal — the encoder fills it building).
 		if !IsFacingName(d.Facing) {
 			return fmt.Errorf("door %q facing %q must be north/east/south/west", d.Name, d.Facing)
 		}
@@ -1191,20 +1022,14 @@ func parseStart(val string) (int, int, string, error) {
 	return x, z, face, nil
 }
 
-// IsFacingName reports whether s is one of the four canonical facing strings
-// (case-insensitive, matching facingFromName's converter so the disk validator
-// and the in-memory conversion agree).
+// IsFacingName reports whether s is a canonical facing (case-insensitive,
+// matching facingFromName so disk validation and conversion agree).
 func IsFacingName(s string) bool {
 	return nameInList(s, FacingNames[:])
 }
 
-// parseIntField parses a numeric field with the canonical "line N:
-// bad <name> %q" error wrap that the entity-row decoders (packs, doors,
-// chests, crystals, custom enemy) inline. Several near-identical
-// `strconv.Atoi` + `fmt.Errorf("line %d: bad %s %q", ...)` blocks
-// collapse into one helper. The header rows (parseSize / parseStart)
-// deliberately keep their own validation — they check shape (WxH) and a
-// facing name, not just an integer, and their callers add the line wrap.
+// parseIntField parses a numeric field with the canonical "line N: bad <name> %q"
+// error wrap the entity-row decoders share.
 func parseIntField(s, name string, lineNo int) (int, error) {
 	v, err := strconv.Atoi(s)
 	if err != nil {
@@ -1213,13 +1038,10 @@ func parseIntField(s, name string, lineNo int) (int, error) {
 	return v, nil
 }
 
-// Positional field counts for the non-custom-enemy entity sections.
-// Named (rather than inlined as bare integer literals in the parse
-// guards) so the parse-time width check and the matching encode-format
-// verb count cite one source — mirrors the customEnemyFieldCount /
-// customEnemyFieldCountLegacy pattern below. Sections with a backward-
-// compatible optional trailing column carry both a Legacy width (column
-// absent) and a current width (column present); the parser accepts both.
+// Positional field counts for the non-custom-enemy entity sections, so the
+// parse-time width check and the encode-format verb count cite one source.
+// Sections with an optional trailing column carry both a Legacy and current
+// width; the parser accepts both.
 const (
 	packFieldsLegacy = 3 // "kind[,kind...] X Z" (AI defaults to none)
 	packFields       = 4 // + trailing AI column
@@ -1231,53 +1053,40 @@ const (
 	startFields      = 3 // header "start: X Z facing"
 )
 
-// faceSkinCount is the number of per-direction skin chars in a faces row's NESW
-// token (N,E,S,W), which equals len(MapFace.Skins). Named so the faces parse
-// width guard cites the array size rather than a bare 4.
+// faceSkinCount is the per-direction skin char count in a faces row's NESW token,
+// = len(MapFace.Skins). Named so the parse guard cites the array size, not 4.
 const faceSkinCount = len(MapFace{}.Skins)
 
-// Per-section encode format strings. Each is the fmt.Fprintf format the
-// encoder writes one row per; broken out as named constants so init()
-// can count their `%`-verbs and assert they stay in lockstep with the
-// field-count constants above — same guard the customEnemyEncodeFormat
-// assert provides, so a verb added/removed without bumping the count (or
-// vice versa) panics at startup instead of writing a row the parser then
-// rejects on the next load. packEncodeFormat / doorEncodeFormat cover the
-// current (trailing-column-present) widths; the legacy shorter rows are
-// emitted via their own narrower formats below.
+// Per-section encode format strings, broken out so init() can assert their
+// `%`-verb counts match the field-count constants above (a mismatch panics at
+// startup instead of writing a row the parser rejects). pack/doorEncodeFormat
+// cover the current widths; legacy shorter rows use their own formats below.
 const (
-	// packFieldsLegacy verbs (default-AI packs) / packFields verbs (non-default AI).
+	// packFieldsLegacy / packFields verbs.
 	packEncodeFormatLegacy = "%s %d %d\n"
 	packEncodeFormat       = "%s %d %d %s\n"
 	// chestFieldsMin verbs.
 	chestEncodeFormat = "%s %d %d\n"
-	// doorFields verbs (style is always written, so the legacy 6-field row
-	// is never emitted — older maps pick up the style column on re-save).
+	// doorFields verbs; style always written, so the legacy 6-field row is never
+	// emitted — older maps pick up the column on re-save.
 	doorEncodeFormat = "%s %s %s %d %d %s %s\n"
 	// crystalFields verbs.
 	crystalEncodeFormat = "%d %d\n"
-	// facesFieldCount verbs ("X Z NESW"). The NESW token is one %s field of
-	// faceSkinCount chars, so this is 3 verbs, not 3+faceSkinCount.
+	// facesFieldCount verbs; NESW is one %s field, so 3 verbs not 3+faceSkinCount.
 	facesEncodeFormat = "%d %d %s\n"
 )
 
-// customEnemyFieldCount is the positional column count for a current-
-// schema custom-enemy row (MDef column included). Older maps written
-// before MDef shipped use customEnemyFieldCountLegacy below — the
-// parser accepts both widths and defaults MDef to 0 on the legacy
-// path so existing maps load unchanged. Bumping the schema again is a
-// matching parse/encode pair plus a legacy-width fallback if needed.
+// customEnemyFieldCount is the current-schema column count (MDef included);
+// legacy (pre-MDef) rows are customEnemyFieldCountLegacy and the parser accepts
+// both, defaulting MDef to 0 on the legacy path.
 const (
 	customEnemyFieldCount       = 18
 	customEnemyFieldCountLegacy = 17
 )
 
-// customEnemySchema maps the post-stats positional columns of a custom-
-// enemy row to their field index. Two layouts exist: the current schema
-// (MDef column present) and the legacy pre-MDef schema (MDef absent, so
-// mdef = -1 and every later column shifts left by one). Holding the
-// layout in one struct keeps the legacy/current split in a single place
-// instead of eight parallel index reassignments inside the decoder.
+// customEnemySchema maps the post-stats columns to their field index. Two
+// layouts: current (MDef present) and legacy (mdef = -1, later columns shift
+// left one). One struct keeps the split in one place, not eight reassignments.
 type customEnemySchema struct {
 	armor  int
 	mdef   int // -1 when the row predates the MDef column
@@ -1294,18 +1103,12 @@ var (
 	customEnemyLegacySchema  = customEnemySchema{armor: 10, mdef: -1, xp: 11, tier: 12, dmg: 13, skch: 14, spwr: 15, skills: 16}
 )
 
-// customEnemyEncodeFormat is the fmt.Fprintf format string the
-// encoder writes one row per. Kept as a named constant so init() can
-// count its `%`-verbs and assert the encoder and customEnemyFieldCount
-// stay in lockstep — a future schema bump that touches the format
-// string without bumping the count (or vice versa) panics at startup
-// instead of producing a row the decoder rejects on the next load.
+// customEnemyEncodeFormat: named so init() asserts its `%`-verb count matches
+// customEnemyFieldCount (a schema bump touching one without the other panics).
 const customEnemyEncodeFormat = "%s %s %d %d %d %d %d %d %d %d %d %d %d %d %d %g %d %s\n"
 
-// fprintfVerbCount counts the `%`-verbs in a fmt format string (each
-// consumes one argument). A literal `%%` is skipped, not counted. Shared
-// by every encode-format ↔ field-count assert below so the "does this
-// format emit the right number of columns" check lives in one place.
+// fprintfVerbCount counts `%`-verbs in a format string (literal `%%` skipped).
+// Shared by every encode-format ↔ field-count assert below.
 func fprintfVerbCount(format string) int {
 	verbs := 0
 	for i := 0; i < len(format); i++ {
@@ -1325,11 +1128,8 @@ func init() {
 	if verbs := fprintfVerbCount(customEnemyEncodeFormat); verbs != customEnemyFieldCount {
 		panic(fmt.Sprintf("mapfile: customEnemyEncodeFormat has %d verbs, customEnemyFieldCount is %d — they must match", verbs, customEnemyFieldCount))
 	}
-	// `skills` is the final positional column, so its index must be the
-	// last slot of the row width. The verb-count check above only guards
-	// the encoder; this guards the decoder's index table against drifting
-	// from the field count (a schema index bumped without the count, or
-	// vice versa, would silently mis-slice a parse).
+	// skills is the final column, so its index must be width-1 — guards the
+	// decoder's index table against drifting from the field count.
 	if customEnemyCurrentSchema.skills != customEnemyFieldCount-1 {
 		panic(fmt.Sprintf("mapfile: customEnemyCurrentSchema.skills is %d, expected customEnemyFieldCount-1 (%d)", customEnemyCurrentSchema.skills, customEnemyFieldCount-1))
 	}
@@ -1338,13 +1138,9 @@ func init() {
 	}
 }
 
-// init asserts every per-section encode format's `%`-verb count matches the
-// field-count constant the parser guards that section against. Same lockstep
-// guarantee customEnemyEncodeFormat gets: a verb added/removed without bumping
-// the matching field-count constant (or vice versa) panics at startup instead
-// of writing a row the parser rejects on the next load. (chestEncodeFormat is
-// checked against chestFieldsMin since a chest's item token may itself contain
-// spaces — the format always emits exactly chestFieldsMin whitespace groups.)
+// init asserts each per-section encode format's `%`-verb count matches its
+// parser field-count constant (a mismatch panics at startup). chestEncodeFormat
+// checks against chestFieldsMin since a chest's item token may contain spaces.
 func init() {
 	formatChecks := []struct {
 		name   string
@@ -1365,11 +1161,8 @@ func init() {
 	}
 }
 
-// parseCustomEnemyLine decodes a single positional row from the
-// `custom_enemies:` section. Field order documented on MapCustomEnemy.
-// Returns the wrap-style "line N: bad <field> %q" error every row
-// decoder uses so the error report stays uniform. Accepts the legacy
-// 17-field width too (pre-MDef) so older maps round-trip.
+// parseCustomEnemyLine decodes one custom_enemies: row (field order on
+// MapCustomEnemy). Accepts the legacy 17-field width (pre-MDef) too.
 func parseCustomEnemyLine(line string, lineNo int) (MapCustomEnemy, error) {
 	fields := strings.Fields(line)
 	legacy := len(fields) == customEnemyFieldCountLegacy
@@ -1380,10 +1173,7 @@ func parseCustomEnemyLine(line string, lineNo int) (MapCustomEnemy, error) {
 		Name:     fields[0],
 		BaseKind: fields[1],
 	}
-	// Column layout depends on the legacy/current schema split. MDef is
-	// inserted between Armor and XPValue in the current schema; the
-	// legacy layout omits it (mdef = -1) and shifts everything past it
-	// left by one.
+	// MDef sits between Armor and XPValue in the current schema; legacy omits it.
 	schema := customEnemyCurrentSchema
 	if legacy {
 		schema = customEnemyLegacySchema
@@ -1419,12 +1209,8 @@ func parseCustomEnemyLine(line string, lineNo int) (MapCustomEnemy, error) {
 		if err != nil {
 			return MapCustomEnemy{}, err
 		}
-		// Every numeric custom-enemy field is logically non-negative (HP /
-		// stats / armor / xp / tier / damage / spell power / mdef). Rejecting
-		// a negative is correct on its own AND surfaces the most common
-		// symptom of a hand-edited wrong-width row mis-sliced under the
-		// legacy/current column split (a value landing in the wrong column),
-		// turning silent stat corruption into a load error.
+		// All numeric fields are non-negative; rejecting a negative also catches
+		// a wrong-width row mis-sliced under the legacy/current split.
 		if v < 0 {
 			return MapCustomEnemy{}, fmt.Errorf("line %d: custom enemy %s cannot be negative (%d) — check the column count", lineNo, f.name, v)
 		}
@@ -1434,11 +1220,8 @@ func parseCustomEnemyLine(line string, lineNo int) (MapCustomEnemy, error) {
 	if err != nil {
 		return MapCustomEnemy{}, fmt.Errorf("line %d: bad custom enemy sklch %q", lineNo, fields[schema.skch])
 	}
-	// Skill-cast chance is a probability in [0,1]. Bounding both ends (not
-	// just negatives) also hardens the legacy/current width split: a row that
-	// drops one field parses under the other schema and shifts an integer stat
-	// (HP / damage / armor — almost always >1) into this column, so the >1
-	// reject turns that silent mis-slice into a load error.
+	// Skill-cast chance is a probability in [0,1]; bounding both ends also catches
+	// a width mis-slice that shifts an integer stat (usually >1) into this column.
 	if chance < 0 || chance > 1 {
 		return MapCustomEnemy{}, fmt.Errorf("line %d: custom enemy skill-cast chance must be within [0,1] (%g) — check the column count", lineNo, chance)
 	}
@@ -1455,11 +1238,9 @@ func parseCustomEnemyLine(line string, lineNo int) (MapCustomEnemy, error) {
 	return ce, nil
 }
 
-// writeVerbatimSection emits an optional section as a "name:" header followed by
-// each row written verbatim — but ONLY when rows is non-empty, so a map without
-// the section stays byte-identical (the same backward-compat rule solids/doors/
-// crystals follow). Shared by the flat string-row sections (prop_levels,
-// decor_levels, dialogs, triggers); solids keeps its own nested plane loop.
+// writeVerbatimSection emits "name:" + each row verbatim, but ONLY when rows is
+// non-empty so a map without the section stays byte-identical. Shared by the flat
+// string-row sections (prop_levels, decor_levels, dialogs, triggers).
 func writeVerbatimSection(bw *bufio.Writer, name string, rows []string) {
 	if len(rows) == 0 {
 		return
@@ -1470,8 +1251,8 @@ func writeVerbatimSection(bw *bufio.Writer, name string, rows []string) {
 	}
 }
 
-// Encode writes mf in the canonical .map format. Layers are emitted in a
-// fixed order so encoded maps diff cleanly across edits.
+// Encode writes mf in the canonical .map format. Fixed layer order so maps diff
+// cleanly across edits.
 func (mf MapFile) Encode(w io.Writer) error {
 	bw := bufio.NewWriter(w)
 	fmt.Fprintf(bw, headerName+": %s\n", mf.Name)
@@ -1487,10 +1268,9 @@ func (mf MapFile) Encode(w io.Writer) error {
 			fmt.Fprintln(bw, row)
 		}
 	}
-	// solids: appended only for a gapped map (a pure heightfield omits it and
-	// stays byte-identical, like doors / crystals). Planes emit lowest-level
-	// first as contiguous Height-row blocks; the parser re-splits by Height, so
-	// no separator is needed.
+	// solids: appended only for a gapped map (a heightfield omits it, stays
+	// byte-identical). Planes emit lowest-first as contiguous Height-row blocks;
+	// the parser re-splits by Height, so no separator.
 	if len(mf.Solids) > 0 {
 		fmt.Fprintln(bw, SectionSolids+":")
 		for _, plane := range mf.Solids {
@@ -1499,13 +1279,12 @@ func (mf MapFile) Encode(w io.Writer) error {
 			}
 		}
 	}
-	// prop_levels / decor_levels: appended only when some prop/decor sits above
-	// its auto surface (a decked entity); a map whose entities all rest on the
-	// ground omits them and stays byte-identical, like solids:.
+	// prop_levels / decor_levels: appended only when some entity sits above its
+	// auto surface; otherwise omitted, byte-identical (handled in writeVerbatimSection).
 	writeVerbatimSection(bw, SectionPropLevels, mf.PropLevels)
 	writeVerbatimSection(bw, SectionDecorLevels, mf.DecorLevels)
-	// faces: one line per overridden tile ("x z NESW"); omitted entirely when no
-	// tile overrides a face, so base-skin maps stay byte-identical.
+	// faces: one line per overridden tile; omitted when none, so base-skin maps
+	// stay byte-identical.
 	if len(mf.Faces) > 0 {
 		fmt.Fprintln(bw, SectionFaces+":")
 		for _, f := range mf.Faces {
@@ -1514,11 +1293,8 @@ func (mf MapFile) Encode(w io.Writer) error {
 	}
 	fmt.Fprintln(bw, SectionEnemies+":")
 	for _, p := range mf.Packs {
-		// Single-member packs encode the same as the legacy "kind X Z" line
-		// so maps without grouped packs stay byte-identical across the
-		// format change. The AI column is appended only when non-default
-		// (anything other than "none" / empty) so default-stationary
-		// packs round-trip to the same 3-field shape.
+		// Single-member packs encode as the legacy "kind X Z" line; the AI column
+		// is appended only when non-default, so stationary packs stay 3 fields.
 		members := encodePackMembers(p.Members, p.BackCount)
 		ai := strings.ToLower(strings.TrimSpace(p.AI))
 		if ai == "" || ai == PackAINoneName {
@@ -1535,22 +1311,13 @@ func (mf MapFile) Encode(w io.Writer) error {
 		}
 		fmt.Fprintf(bw, chestEncodeFormat, token, c.X, c.Z)
 	}
-	// doors: section is appended only when present. Older .map files
-	// without any doors stay byte-identical across the format change —
-	// the parser treats a missing section as zero-doors. Same rule as
-	// the pre-ceiling-section backwards compatibility above.
+	// doors: appended only when present (missing ⇒ zero-doors, byte-identical).
 	if len(mf.Doors) > 0 {
 		fmt.Fprintln(bw, SectionDoors+":")
 		for _, d := range mf.Doors {
-			// Refuse to write a half-populated door (one of
-			// TargetMap/TargetDoor set, the other empty). The
-			// encoder would emit a 5-field row that the parser
-			// rejects on the next load — fail here at the save
-			// boundary with a useful message so the editor can
-			// surface the broken authoring before it's committed
-			// to disk. MapDoor.HasTarget encodes the "both set"
-			// rule, and an unauthored door (both empty) is also
-			// legal — only the asymmetric case is rejected.
+			// Refuse a half-populated door (one of TargetMap/TargetDoor set) — it
+			// would emit a row the parser rejects on reload. Both-empty is legal;
+			// only the asymmetric case is rejected.
 			haveMap := d.TargetMap != ""
 			haveDoor := d.TargetDoor != ""
 			if haveMap != haveDoor {
@@ -1563,23 +1330,17 @@ func (mf MapFile) Encode(w io.Writer) error {
 			fmt.Fprintf(bw, doorEncodeFormat, d.Name, d.TargetMap, d.TargetDoor, d.X, d.Z, d.Facing, style)
 		}
 	}
-	// crystals: emits when the map defines crystals at all — either it has
-	// rows OR it was explicitly marked defined (an authored zero-crystal map).
-	// A legacy map that never carried the section (CrystalsDefined false, no
-	// rows) stays byte-identical, same backward-compat rule as doors. Rows are
-	// position-only; charge state lives in SaveData, not the map.
+	// crystals: emits when the map defines crystals at all (rows OR CrystalsDefined);
+	// a legacy map that never carried the section stays byte-identical. Rows are
+	// position-only; charge state lives in SaveData.
 	if mf.CrystalsDefined || len(mf.Crystals) > 0 {
 		fmt.Fprintln(bw, SectionCrystals+":")
 		for _, c := range mf.Crystals {
 			fmt.Fprintf(bw, crystalEncodeFormat, c.X, c.Z)
 		}
 	}
-	// custom_enemies: emits only when present so older maps stay
-	// byte-identical. Order documented on MapCustomEnemy and matches
-	// parseCustomEnemyLine's positional decode. The format string
-	// is broken out as customEnemyEncodeFormat so init() can assert
-	// its `%`-verb count matches customEnemyFieldCount — keeps the
-	// encoder and decoder honest about how many columns a row has.
+	// custom_enemies: emits only when present (byte-identical otherwise). Order on
+	// MapCustomEnemy, matching parseCustomEnemyLine.
 	if len(mf.CustomEnemies) > 0 {
 		fmt.Fprintln(bw, SectionCustomEnemies+":")
 		for _, ce := range mf.CustomEnemies {
@@ -1597,9 +1358,8 @@ func (mf MapFile) Encode(w io.Writer) error {
 			)
 		}
 	}
-	// dialogs: emits only when present so older maps stay byte-identical. Each
-	// entry is a pre-encoded JSON object written verbatim (core owns the
-	// marshalling), one per line. triggers: same byte-stable rule.
+	// dialogs / triggers: emit only when present (byte-identical otherwise); each
+	// entry is a pre-encoded JSON object written verbatim.
 	writeVerbatimSection(bw, SectionDialogs, mf.Dialogs)
 	writeVerbatimSection(bw, SectionTriggers, mf.Triggers)
 	return bw.Flush()
@@ -1615,12 +1375,9 @@ func Load(path string) (MapFile, error) {
 }
 
 func Save(path string, mf MapFile) error {
-	// Validate BEFORE touching disk. os.Create truncates, so a structurally
-	// invalid map (out-of-bounds entity, empty/duplicate/whitespace door
-	// name, …) must be rejected here — otherwise we'd both write a .map the
-	// parser later refuses to load AND truncate the prior good file on the
-	// way to that failure. This is the same check Parse runs on load, so a
-	// saved map is always re-loadable.
+	// Validate BEFORE touching disk: os.Create truncates, so an invalid map must
+	// be rejected here or we'd truncate the prior good file on the way to a write
+	// the parser later refuses. Same check Parse runs, so a saved map reloads.
 	if err := mf.validate(); err != nil {
 		return fmt.Errorf("refusing to save invalid map %q: %w", path, err)
 	}
@@ -1631,10 +1388,9 @@ func Save(path string, mf MapFile) error {
 	if err != nil {
 		return err
 	}
-	// Capture the close error too — a deferred f.Close() on the return path
-	// would swallow flush failures (network drive, quota, cross-device) and
-	// the editor's "Saved successfully" toast would lie. Prefer the encode
-	// error if both fire, since that's the root cause.
+	// Capture the close error too — a deferred Close would swallow flush failures
+	// (network drive, quota) and the editor's "Saved" toast would lie. Prefer the
+	// encode error if both fire.
 	err = mf.Encode(f)
 	if cerr := f.Close(); err == nil {
 		err = cerr
@@ -1642,10 +1398,9 @@ func Save(path string, mf MapFile) error {
 	return err
 }
 
-// mapDirEntries returns dir's non-directory entries whose name ends in the .map
-// extension (case-insensitive) — the shared dir-read + filter behind List and
-// ListByModTime, which differ only in how they sort the result. A missing dir is
-// NOT an error (returns nil, nil) for first-run convenience.
+// mapDirEntries returns dir's non-dir .map entries (case-insensitive) — the
+// shared read+filter behind List/ListByModTime. A missing dir is NOT an error
+// (returns nil, nil) for first-run convenience.
 func mapDirEntries(dir string) ([]os.DirEntry, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -1667,8 +1422,7 @@ func mapDirEntries(dir string) ([]os.DirEntry, error) {
 	return out, nil
 }
 
-// List returns the .map files in dir, sorted alphabetically. Missing dir
-// returns an empty slice (first-run convenience).
+// List returns the .map files in dir, sorted alphabetically.
 func List(dir string) ([]string, error) {
 	entries, err := mapDirEntries(dir)
 	if err != nil {
@@ -1682,10 +1436,8 @@ func List(dir string) ([]string, error) {
 	return out, nil
 }
 
-// ListByModTime returns the .map files in dir, newest-modified first.
-// Used by the editor's Open modal so the file the author was just working
-// on lands at the top of the list. Stat failures on individual entries
-// drop those entries from the result rather than killing the whole list.
+// ListByModTime returns the .map files in dir, newest-modified first (editor's
+// Open modal). Stat failures drop the individual entry, not the whole list.
 func ListByModTime(dir string) ([]string, error) {
 	entries, err := mapDirEntries(dir)
 	if err != nil {
@@ -1711,8 +1463,7 @@ func ListByModTime(dir string) ([]string, error) {
 	return out, nil
 }
 
-// BlankLayer returns a Width × Height grid filled with `c`. Editor uses it
-// to seed fresh layers when creating a new map or resizing an existing one.
+// BlankLayer returns a width × height grid filled with c (seeds fresh/resized layers).
 func BlankLayer(width, height int, c byte) []string {
 	rows := make([]string, height)
 	row := strings.Repeat(string(c), width)
@@ -1722,11 +1473,9 @@ func BlankLayer(width, height int, c byte) []string {
 	return rows
 }
 
-// OptionalLayerOrBlank returns rows unchanged when present, else a blank
-// (width × height, all-`c`) layer. The single "absent optional layer ⇒ blank"
-// rule shared by Encode and the Area↔MapFile converters in core/areas.go, so
-// the ceiling/elevation default isn't open-coded at each. (validate keeps its
-// own switch because it ALSO width-validates a present layer.)
+// OptionalLayerOrBlank returns rows when present, else a blank all-`c` layer.
+// The "absent optional layer ⇒ blank" rule shared by Encode and core/areas.go.
+// (validate keeps its own switch because it ALSO width-validates a present layer.)
 func OptionalLayerOrBlank(rows []string, width, height int, c byte) []string {
 	if len(rows) == 0 {
 		return BlankLayer(width, height, c)

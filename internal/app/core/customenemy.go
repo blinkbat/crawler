@@ -6,17 +6,14 @@ import (
 	"strings"
 )
 
-// CustomEnemyDef is an author-defined enemy template stored alongside a map.
-// BaseKind supplies the built-in sprite and attack verbs; the other fields
-// override combat stats, reward, display name, and AI loadout.
+// CustomEnemyDef is an author-defined enemy template stored alongside a map. BaseKind supplies the
+// built-in sprite and attack verbs; other fields override combat stats, reward, name, and AI loadout.
 type CustomEnemyDef struct {
 	Name     string
 	BaseKind EnemyKind
 	HP       int
-	// MP is RESERVED: authored and persisted through the mapfile, but the
-	// runtime Enemy has no MP pool (enemy casts gate on SkillCastChance, not
-	// resource), so Definition()/Instantiate() do not apply it. Kept so the
-	// schema is forward-compatible if enemy MP mechanics ship later.
+	// MP is RESERVED: persisted but unused — the runtime Enemy has no MP pool (casts gate on
+	// SkillCastChance). Kept for forward-compatibility if enemy MP mechanics ship.
 	MP    int
 	Stats Stats
 
@@ -30,8 +27,7 @@ type CustomEnemyDef struct {
 	Skills          []SkillID
 }
 
-// DefaultCustomEnemy returns a working clone of a built-in enemy for the
-// editor's "New custom enemy" flow.
+// DefaultCustomEnemy returns a working clone of a built-in enemy for the editor's "New" flow.
 func DefaultCustomEnemy(name string, base EnemyKind) CustomEnemyDef {
 	def := EnemyInfo(base)
 	return CustomEnemyDef{
@@ -51,16 +47,10 @@ func DefaultCustomEnemy(name string, base EnemyKind) CustomEnemyDef {
 	}
 }
 
-// validateEnemyStatBounds checks the scalar combat-stat fields common to
-// the static registry (EnemyDefinition) and authored custom enemies
-// (CustomEnemyDef): the proc-chance fields (SkillCastChance, PoisonChance)
-// ride a [0,1] contract (a stray 5 would proc every turn) and the
-// mitigation / reward / damage fields must be non-negative. Returns a
-// descriptive error (nil when clean) so the registry init can panic on it
-// while the map loader surfaces it to the author — one set of bounds, two
-// failure modes, no drift. CustomEnemyDef has no PoisonChance field, so the
-// custom path passes 0 (always valid); keeping every [0,1] proc check here
-// means the static registry can't enforce the rule a second way.
+// validateEnemyStatBounds checks combat-stat fields shared by the static registry and custom
+// enemies: proc chances (SkillCastChance, PoisonChance) must be in [0,1]; mitigation/reward/damage
+// must be non-negative. Shared so registry init (panic) and the map loader (author error) agree.
+// CustomEnemyDef has no PoisonChance, so the custom path passes 0.
 func validateEnemyStatBounds(name string, skillCastChance, poisonChance float64, armor, mdef, attackDamage, xpValue, spellPower, tier int) error {
 	if !ValidChance(skillCastChance) {
 		return fmt.Errorf("enemy %q has SkillCastChance %v outside [0, 1]", name, skillCastChance)
@@ -68,23 +58,16 @@ func validateEnemyStatBounds(name string, skillCastChance, poisonChance float64,
 	if !ValidChance(poisonChance) {
 		return fmt.Errorf("enemy %q has PoisonChance %v outside [0, 1]", name, poisonChance)
 	}
-	// Tier is included so the editor save path (MapCustomEnemyFromDef →
-	// validateEnemyStatBounds) agrees with the map LOADER (parseCustomEnemyLine,
-	// which rejects every negative numeric field): without it, a negative tier
-	// authored in the editor saves fine but yields an unloadable map.
+	// Tier included so the save path agrees with the loader (parseCustomEnemyLine rejects negatives).
 	if armor < 0 || mdef < 0 || attackDamage < 0 || xpValue < 0 || spellPower < 0 || tier < 0 {
 		return fmt.Errorf("enemy %q has a negative stat field (armor/mdef/attack/xp/spellpower/tier)", name)
 	}
 	return nil
 }
 
-// validateCustomEnemyExtras guards the two numeric fields that validateEnemyStatBounds
-// does NOT cover (the static registry has no HP/MP pool): HP must be positive — a
-// hand-edited row with HP <= 0 Instantiates to an Enemy{HP:0, Alive:true} "alive
-// corpse" enemyAlive() (keyed on Alive, not HP) counts as a live combatant, so the
-// encounter can never be won — and MP must be non-negative. Shared by the map LOADER
-// (CustomEnemyDefFromMap) and the encode-side writer (MapCustomEnemyFromDef) so the
-// two can't drift: a row the writer permits is exactly a row the loader accepts.
+// validateCustomEnemyExtras guards HP/MP, which validateEnemyStatBounds doesn't cover. HP must be
+// positive: an HP<=0 row Instantiates to an "alive corpse" (enemyAlive keys on Alive, not HP) the
+// encounter can never beat. MP must be non-negative. Shared by loader and writer so they can't drift.
 func validateCustomEnemyExtras(name string, hp, mp int) error {
 	if hp <= 0 {
 		return fmt.Errorf("custom enemy %q has non-positive HP (%d)", name, hp)
@@ -95,23 +78,16 @@ func validateCustomEnemyExtras(name string, hp, mp int) error {
 	return nil
 }
 
-// CustomEnemyDefFromMap converts one on-disk custom enemy row into the core
-// definition used by editor/runtime code.
+// CustomEnemyDefFromMap converts one on-disk custom enemy row into the core definition.
 func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
 	base, ok := EnemyKindFromName(ce.BaseKind)
 	if !ok {
 		return CustomEnemyDef{}, fmt.Errorf("custom enemy %q references unknown base kind %q", ce.Name, ce.BaseKind)
 	}
-	// HP/MP bounds (shared with the encode-side writer so the two can't drift —
-	// see validateCustomEnemyExtras for the "alive corpse" rationale). Refuse a
-	// bad row at load, the same way AreaFromMapFile rejects bad dimensions.
+	// Refuse bad rows at load (shared with the writer so the two can't drift).
 	if err := validateCustomEnemyExtras(ce.Name, ce.HP, ce.MP); err != nil {
 		return CustomEnemyDef{}, err
 	}
-	// Mirror the static-registry init guards (enemies.go) for hand-edited
-	// rows via the shared validateEnemyStatBounds so the two paths can't
-	// drift on bounds. Refuse bad data at load rather than letting it reach
-	// combat math.
 	if err := validateEnemyStatBounds(ce.Name, ce.SkillCastChance, 0, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower, ce.Tier); err != nil {
 		return CustomEnemyDef{}, err
 	}
@@ -140,27 +116,17 @@ func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
 	}, nil
 }
 
-// MapCustomEnemyFromDef converts a core custom enemy definition back to the
-// mapfile row shape, validating every registry-backed field on the way out.
+// MapCustomEnemyFromDef converts a core definition back to the mapfile row, validating on the way out.
 func MapCustomEnemyFromDef(ce CustomEnemyDef) (mapfile.MapCustomEnemy, error) {
 	baseName, ok := EnemyKindName(ce.BaseKind)
 	if !ok {
 		return mapfile.MapCustomEnemy{}, fmt.Errorf("custom enemy %q has unknown base kind %d", ce.Name, int(ce.BaseKind))
 	}
-	// Validate the numeric bounds on the way OUT, matching the map LOADER
-	// (parseCustomEnemyLine rejects negatives; CustomEnemyDefFromMap re-checks via
-	// validateEnemyStatBounds). The editor clamps stats at 0, but a non-editor
-	// writer (importer/script — see the lockstep note below) could otherwise
-	// persist a negative field that the loader would then refuse, yielding an
-	// unloadable map. MP isn't in the shared validator (the static registry has
-	// no MP pool), so it's checked here alongside.
+	// Validate on the way OUT too: a non-editor writer (importer/script) could otherwise persist a
+	// field the loader would refuse, yielding an unloadable map. Same lockstep for HP/MP below.
 	if err := validateEnemyStatBounds(ce.Name, ce.SkillCastChance, 0, ce.Armor, ce.MDef, ce.AttackDamage, ce.XPValue, ce.SpellPower, ce.Tier); err != nil {
 		return mapfile.MapCustomEnemy{}, err
 	}
-	// HP/MP aren't in validateEnemyStatBounds (the static registry has no pool).
-	// Check them here via the SAME helper the LOADER (CustomEnemyDefFromMap) uses,
-	// so a non-editor writer can't persist a row the loader would then refuse —
-	// same lockstep as the stat-bounds / Tier checks.
 	if err := validateCustomEnemyExtras(ce.Name, ce.HP, ce.MP); err != nil {
 		return mapfile.MapCustomEnemy{}, err
 	}
@@ -172,10 +138,7 @@ func MapCustomEnemyFromDef(ce CustomEnemyDef) (mapfile.MapCustomEnemy, error) {
 		}
 		skillNames = append(skillNames, name)
 	}
-	// Defense-in-depth sanitize: the editor already collapses whitespace
-	// when the author types, but routing through the helper here means any
-	// future writer (importer, script) can't land a name on disk that the
-	// strings.Fields-based loader would later misparse.
+	// Sanitize so any future writer can't land a name the strings.Fields loader would misparse.
 	safeName := SanitizeCustomEnemyName(ce.Name)
 	if safeName == "" {
 		return mapfile.MapCustomEnemy{}, fmt.Errorf("custom enemy has empty name after sanitize")
@@ -202,21 +165,17 @@ func MapCustomEnemyFromDef(ce CustomEnemyDef) (mapfile.MapCustomEnemy, error) {
 	}, nil
 }
 
-// Definition synthesizes the effective EnemyDefinition used by battle and
-// selectors for a custom enemy.
+// Definition synthesizes the runtime EnemyDefinition battle/selectors read for a custom enemy.
 //
-// LOCKSTEP SITES — a new authored custom-enemy field must be added in all of:
-//  1. the CustomEnemyDef struct (above),
-//  2. the mapfile.MapCustomEnemy struct (mapfile/mapfile.go) + its encode
-//     format/field-count,
-//  3. MapCustomEnemyFromDef (def -> mapfile row),
-//  4. CustomEnemyDefFromMap (mapfile row -> def),
-//  5. this Definition() (def -> runtime EnemyDefinition), and
+// LOCKSTEP SITES — a new authored field must be added in all of:
+//  1. CustomEnemyDef (above),
+//  2. mapfile.MapCustomEnemy + its encode format/field-count,
+//  3. MapCustomEnemyFromDef (def -> row),
+//  4. CustomEnemyDefFromMap (row -> def),
+//  5. this Definition() (def -> runtime), and
 //  6. Instantiate() if the field affects the materialized Enemy.
 //
-// The encode<->decode pair (3 & 4) is guarded by
-// TestCustomEnemyDefMapRoundTrip; the def->runtime pair (5 & 6) is guarded by
-// TestCustomEnemyDefToRuntime — so a dropped field on either path fails loudly.
+// 3&4 guarded by TestCustomEnemyDefMapRoundTrip; 5&6 by TestCustomEnemyDefToRuntime.
 func (d CustomEnemyDef) Definition() EnemyDefinition {
 	base := EnemyInfo(d.BaseKind)
 	display := CustomEnemyDisplayName(d.Name)
@@ -244,15 +203,11 @@ func (d CustomEnemyDef) Definition() EnemyDefinition {
 	return def
 }
 
-// Instantiate materializes a runtime Enemy from this def. Kind stays the base
-// kind for renderer lookup; DefinitionOverride carries the authored stats and
-// loadout for EnemyInfoFor readers.
+// Instantiate materializes a runtime Enemy. Kind stays the base kind for renderer lookup;
+// DefinitionOverride carries the authored stats/loadout for EnemyInfoFor readers.
 func (d CustomEnemyDef) Instantiate() Enemy {
 	def := d.Definition()
-	// Scale spawn HP by the global difficulty dial, exactly as NewEnemy does for
-	// base kinds — otherwise custom foes would get scaled damage (via
-	// EnemyBasicDamage / enemySpellDamage, which read the override) but baseline
-	// HP, leaving them inconsistently squishy as the EnemyDifficulty scaling rises.
+	// Scale spawn HP by the difficulty dial like NewEnemy, else custom foes get scaled damage but baseline HP.
 	maxHP := ScaleEnemyDifficulty(def.MaxHP)
 	return Enemy{
 		Kind:                  d.BaseKind,
@@ -267,9 +222,7 @@ func (d CustomEnemyDef) Instantiate() Enemy {
 	}
 }
 
-// CustomEnemyByName looks up a def by exact or sanitized name. Supporting the
-// sanitized form keeps mapfile pack references stable even if an editor path
-// normalized whitespace before writing.
+// CustomEnemyByName looks up a def by exact or sanitized name (so pack refs survive whitespace normalization).
 func CustomEnemyByName(defs []CustomEnemyDef, name string) (CustomEnemyDef, bool) {
 	for _, d := range defs {
 		if d.Name == name || SanitizeCustomEnemyName(d.Name) == name {
@@ -279,20 +232,17 @@ func CustomEnemyByName(defs []CustomEnemyDef, name string) (CustomEnemyDef, bool
 	return CustomEnemyDef{}, false
 }
 
-// BuiltinPackMember returns an authored pack member that resolves directly to
-// a built-in enemy kind.
+// BuiltinPackMember returns a pack member resolving to a built-in enemy kind.
 func BuiltinPackMember(kind EnemyKind) PackMemberRef {
 	return PackMemberRef{Kind: kind}
 }
 
-// CustomPackMember returns an authored pack member that resolves through the
-// map's CustomEnemies registry while retaining the base kind for visuals.
+// CustomPackMember returns a pack member resolving through CustomEnemies, keeping base kind for visuals.
 func CustomPackMember(def CustomEnemyDef) PackMemberRef {
 	return PackMemberRef{Kind: def.BaseKind, CustomName: def.Name}
 }
 
-// PackMemberCustomName returns the custom enemy name stored for a pack member
-// slot, or "" for a built-in member.
+// PackMemberCustomName returns a slot's custom enemy name, or "" for a built-in member.
 func PackMemberCustomName(sp PackSpawn, idx int) string {
 	if idx < 0 || idx >= len(sp.Members) {
 		return ""
@@ -326,11 +276,8 @@ func SwapPackMembers(sp *PackSpawn, i, j int) {
 	sp.Members[i], sp.Members[j] = sp.Members[j], sp.Members[i]
 }
 
-// packMemberCustom resolves the custom enemy a pack slot names, if any: it reads
-// the slot's custom-name tag and looks it up in the area's custom roster.
-// ok=false means the slot is a plain built-in kind (read sp.Members[idx].Kind).
-// Shared by PackMemberDefinition and PackMemberVisualKind so the name→roster
-// resolution prologue lives in exactly one place.
+// packMemberCustom resolves the custom enemy a pack slot names via the area's roster. ok=false means
+// a plain built-in kind (read sp.Members[idx].Kind). Shared by PackMemberDefinition/PackMemberVisualKind.
 func packMemberCustom(a AreaDefinition, sp PackSpawn, idx int) (CustomEnemyDef, bool) {
 	if name := PackMemberCustomName(sp, idx); name != "" {
 		return CustomEnemyByName(a.CustomEnemies, name)
@@ -382,24 +329,14 @@ func PackSpawnLeaderKind(a AreaDefinition, sp PackSpawn) EnemyKind {
 	return PackMemberVisualKind(a, sp, PackSpawnLeaderSlot(a, sp))
 }
 
-// SanitizeCustomEnemyName collapses whitespace into underscores and trims
-// edges so mapfile rows remain field-splittable.
-//
-// On-disk contract: a custom-enemy NAME token inside a whitespace-delimited
-// .map row. PRESERVES case and punctuation — it only folds runs of
-// whitespace to a single underscore (the loader's strings.Fields split is
-// the only thing it must survive). Intentionally NOT the same as slugify
-// (enemyvisual.go — lowercases + strips punctuation) or SanitizeFilename
-// (areas.go — lowercases, restricts to [a-z0-9_-]). Don't swap one for
-// another; each owns a different on-disk format.
+// SanitizeCustomEnemyName folds whitespace runs to single underscores and trims edges so the name
+// survives the loader's strings.Fields split. PRESERVES case and punctuation. NOT slugify or
+// SanitizeFilename — each owns a different on-disk format; don't swap them.
 func SanitizeCustomEnemyName(name string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(name)), "_")
 }
 
-// CustomEnemyDisplayName is the inverse of SanitizeCustomEnemyName: it turns the
-// on-disk lower-snake form back into a player-facing display string. Paired with
-// the sanitizer so the "_" word separator is defined in one place — change the
-// separator and both ends track it.
+// CustomEnemyDisplayName is the inverse of SanitizeCustomEnemyName ("_" back to spaces).
 func CustomEnemyDisplayName(name string) string {
 	return strings.ReplaceAll(strings.TrimSpace(name), "_", " ")
 }
@@ -413,10 +350,7 @@ func SkillOnDiskName(s SkillID) string {
 	return strings.ToLower(strings.ReplaceAll(SkillName(s), " ", "_"))
 }
 
-// skillByOnDiskName is the O(1) reverse lookup for SkillIDFromOnDiskName,
-// built once at init from the registry (the same pattern as itemByName /
-// enemyKindByName) so decoding a mapfile skill list doesn't re-derive
-// SkillOnDiskName for every registry row on every call.
+// skillByOnDiskName is the O(1) reverse lookup for SkillIDFromOnDiskName, built once at init.
 var skillByOnDiskName = buildSkillByOnDiskName()
 
 func buildSkillByOnDiskName() map[string]SkillID {
@@ -448,11 +382,7 @@ func EnemyCastableSkills() []SkillID {
 	return skillIDsWhereInto(make([]SkillID, 0, len(skillDefinitions)), func(d skillDefinition) bool { return d.EnemyCastable })
 }
 
-// IsEnemyCastable reports whether a skill's registry entry has the
-// EnemyCastable flag set. Sibling of EnemyCastableSkills — that's the
-// "give me the list" form, this is the "is THIS one in?" form. Used
-// by the battle package's init guard to walk its handler map and
-// catch handlers that linger after the flag is cleared.
+// IsEnemyCastable reports whether a skill's registry entry has the EnemyCastable flag set.
 func IsEnemyCastable(s SkillID) bool {
 	def, ok := skillInfo(s)
 	return ok && def.EnemyCastable

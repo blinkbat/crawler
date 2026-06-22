@@ -1,14 +1,10 @@
 package core
 
-// Dialog speaker registry — the named voices an authored node can be
-// attributed to. Mirrors bg2's DIALOG_SPEAKERS map: the four party classes
-// plus a couple of generic NPC voices for the opening island content. Each
-// carries a nameplate tint (raw RGBA so core stays raylib-free; render
-// converts). The editor's speaker dropdown reads DialogSpeakerIDs so a new
-// voice added here shows up there automatically.
+// Dialog speaker registry — named voices a node can be attributed to (four
+// party classes + generic NPC voices). The editor's speaker dropdown reads
+// DialogSpeakerIDs, so a voice added here shows up there automatically.
 
-// Canonical speaker ids. The party-class ids match the class names so a
-// dialog spoken "by the Warrior" lines up with the party.
+// Canonical speaker ids; party-class ids match the class names.
 const (
 	SpeakerNarrator DialogSpeakerID = "narrator"
 	SpeakerStranger DialogSpeakerID = "stranger"
@@ -18,9 +14,8 @@ const (
 	SpeakerWizard   DialogSpeakerID = "wizard"
 )
 
-// dialogSpeakerOrder is the canonical display order (editor dropdown +
-// stable iteration). dialogSpeakers is the id→speaker lookup; the init guard
-// keeps the two in lockstep.
+// dialogSpeakerOrder is the canonical display order; dialogSpeakers is the
+// id→speaker lookup. The init guard keeps the two in lockstep.
 var dialogSpeakerOrder = []DialogSpeakerID{
 	SpeakerNarrator,
 	SpeakerStranger,
@@ -50,16 +45,14 @@ func init() {
 	}
 }
 
-// DialogSpeakerByID returns the registered speaker, or (zero, false) for an
-// unknown id.
+// DialogSpeakerByID returns the registered speaker, or (zero, false).
 func DialogSpeakerByID(id DialogSpeakerID) (DialogSpeaker, bool) {
 	sp, ok := dialogSpeakers[id]
 	return sp, ok
 }
 
 // DialogSpeakerName resolves an id to its display name, falling back to the
-// raw id (or "???" when empty) so an unregistered/typo'd speaker still draws
-// something rather than a blank nameplate.
+// raw id (or "???" when empty) so a typo'd speaker still draws something.
 func DialogSpeakerName(id DialogSpeakerID) string {
 	if sp, ok := dialogSpeakers[id]; ok {
 		return sp.Name
@@ -70,8 +63,7 @@ func DialogSpeakerName(id DialogSpeakerID) string {
 	return string(id)
 }
 
-// DialogSpeakerIDs returns the speaker ids in canonical display order, for
-// the editor's speaker dropdown.
+// DialogSpeakerIDs returns the speaker ids in canonical display order.
 func DialogSpeakerIDs() []DialogSpeakerID {
 	return append([]DialogSpeakerID(nil), dialogSpeakerOrder...)
 }

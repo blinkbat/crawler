@@ -12,22 +12,14 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Foe Visualizer (modalFoeView). A live combat-preview pane for ANY enemy kind
-// plus a full slider stack for that kind's billboard placement, contact shadow,
-// target cursor, and tint. Save writes the tuning to maps/sprites/visuals.json
-// (core.EnemyVisualOverride), which the game overlays on its code-default
-// visuals at load — so the author tunes a foe here and saves it straight into
-// the game, no rebuild. The preview mirrors drawBattlePack's exact geometry
-// (render.DrawFoePreview), so what reads right here reads right in an encounter.
+// Foe Visualizer (modalFoeView): live combat-preview pane + slider stack for an
+// enemy kind. Save writes to maps/sprites/visuals.json (core.EnemyVisualOverride),
+// overlaid on code-default visuals at load. Preview mirrors drawBattlePack's
+// geometry (render.DrawFoePreview).
 
-// foeFields is the complete, ordered set of tunable visual fields — EVERY field
-// of core.EnemyVisualOverride is here (tool-completeness: the data model is
-// fully authorable from the tool, nothing left hand-edit-only). Order groups by
-// concern so the two-column layout splits cleanly: placement, shadow, cursor
-// (+size) fill the left column; glyph anchor+size, particle anchor+size, then
-// tint fill the right. Each row is a sliderField (slider.go) whose Get/Set
-// bridge the typed override fields (some uint8 for tint) to the slider's
-// float64 world.
+// foeFields is EVERY field of core.EnemyVisualOverride (tool-completeness).
+// Ordered to split cleanly into the two-column layout. Each row's Get/Set bridge
+// the typed override fields (uint8 for tint) to the slider's float64.
 var foeFields = []sliderField[core.EnemyVisualOverride]{
 	{Label: "Size X", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.SizeX) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.SizeX = float32(v) }, Min: 0.1, Max: 3.0, Step: 0.05, Format: "%.2f"},
 	{Label: "Size Y", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.SizeY) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.SizeY = float32(v) }, Min: 0.1, Max: 3.0, Step: 0.05, Format: "%.2f"},
@@ -54,25 +46,18 @@ var foeFields = []sliderField[core.EnemyVisualOverride]{
 	{Label: "Tint A", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.TintA) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.TintA = core.ClampByte(int(v + 0.5)) }, Min: 0, Max: 255, Step: 1, Format: "%.0f"},
 }
 
-// sliderDragState is the shared in-flight slider-drag cursor for the editor's
-// slider-stack modals (the Foe/Party Visualizer tabs and the sound creator).
-// idx is the field index under the held mouse, or -1 for "no active drag".
-// Package-level instances are fine — only one modal drags at a time, and the
-// raylib draw loop is single-threaded.
+// sliderDragState is the in-flight slider-drag cursor for the editor's slider
+// modals. idx is the field under the held mouse, or -1 for no active drag.
+// Package-level is fine: one modal drags at a time, single-threaded draw loop.
 type sliderDragState struct {
 	idx int
 }
 
-// noSliderDrag is the released/idle value (idx == -1). Use it to seed and to
-// reset a drag on modal open and on mouse-up.
+// noSliderDrag is the released/idle value (idx == -1).
 var noSliderDrag = sliderDragState{idx: -1}
 
-// update advances one frame of a slider drag. With no active drag it does
-// nothing. Otherwise: if held is false (mouse released, or the owning tab/panel
-// is no longer showing) it ends the drag; else, when the index is in range, it
-// invokes apply(idx) — the caller's per-modal "snap this field to the mouse and
-// run any cursor/preview side effects" closure. Centralizes the drag protocol so
-// the foe-visualizer and sound modals can't drift on the end-vs-apply logic.
+// update advances one frame of a drag: no-op when idle; ends the drag when held
+// is false; else applies apply(idx) (snap field to mouse + side effects).
 func (d *sliderDragState) update(held bool, fieldCount int, apply func(idx int)) {
 	if d.idx < 0 {
 		return
@@ -86,17 +71,12 @@ func (d *sliderDragState) update(held bool, fieldCount int, apply func(idx int))
 	}
 }
 
-// foeDrag holds the in-flight slider drag for the visualizer modal. slider tracks
-// a Layout-tab field drag, asset an Asset-tab bake-param drag (only one is ever
-// active at a time, gated by the tab). Reset on open / mouse-up.
+// foeDrag holds the visualizer's in-flight drag. slider = Layout-tab field drag,
+// asset = Asset-tab param drag (one active at a time, gated by tab).
 var foeDrag = struct{ slider, asset sliderDragState }{slider: noSliderDrag, asset: noSliderDrag}
 
-// Modal geometry. Wide card: preview pane on the left, slider stack on the
-// right. Fixed size (the editor runs borderless-fullscreen, so there's room).
+// Modal geometry. Wide card: preview pane left, slider stack right.
 const (
-	// Wider than the original 940 to fit the slider stack in TWO columns (the
-	// field count roughly doubled with the glyph/particle/cursor-size rows); the
-	// height is unchanged because two columns keep the stack short.
 	foeModalW     = float32(1040)
 	foeModalH     = float32(600)
 	foeHeaderH    = float32(40)
@@ -107,23 +87,18 @@ const (
 	foeValueW     = float32(56)
 	foeTrackH     = float32(12)
 	foeColGap     = float32(26) // gutter between the two slider columns
-	// foePreviewZoomStep is the per-wheel-notch dolly applied to the preview
-	// pane's zoom (clamped to the render-side bounds).
+	// foePreviewZoomStep is the per-wheel-notch zoom dolly (clamped render-side).
 	foePreviewZoomStep = float32(0.2)
-	// sliderHitPadY fattens a slider track's click band vertically (the thin
-	// tracks are easy to miss) without changing how they draw. Shared by both
-	// Visualizers' Layout + Asset track hit-tests.
+	// sliderHitPadY fattens a thin track's click band vertically (draw unchanged).
 	sliderHitPadY = float32(9)
 )
 
-// foeViewBtnLabels is the action row's single label source — the layout
-// (buttonRowAt sizes each button to its label) and the draw read the same
-// slice so the painted text and the hit rects can't drift.
+// foeViewBtnLabels is the single label source for the action row (layout + draw
+// share it so text and hit rects can't drift).
 var foeViewBtnLabels = []string{"Save", "Reset", "Close"}
 
-// foeViewTabLabels names the two visualizer panes (index == State.foeViewTab):
-// Layout = the positional/tint slider stack, Asset = the sprite-PNG bake strip.
-// One source for the tab buttons' draw and hit-test so they can't drift.
+// foeViewTabLabels names the two panes (index == State.foeViewTab): Layout =
+// slider stack, Asset = sprite-PNG strip.
 var foeViewTabLabels = []string{"Layout", "Asset"}
 
 // Visualizer tab indices.
@@ -132,13 +107,10 @@ const (
 	foeTabAsset  = 1
 )
 
-// assetFields is the Asset tab's NON-DESTRUCTIVE image-adjustment slider stack.
-// Unlike the old destructive bakes, these edit the visual OVERRIDE in place
-// (s.foeVisual / s.partyVisual): they persist to visuals.json via the modal's
-// Save, reload for further editing on reopen, revert by zeroing, and render
-// point-sampled (sharp) — applied to the PRISTINE sprite at texture-build time.
-// Pixelate is 0..1 intensity (mosaic), Brightness/Contrast -1..1. Shared by both
-// modals (the Get/Set bridge an *EnemyVisualOverride; PartyVisualOverride aliases it).
+// assetFields is the Asset tab's NON-DESTRUCTIVE image-adjustment slider stack:
+// edits the override in place, persists to visuals.json, reverts by zeroing,
+// applied to the pristine sprite at texture-build time. Pixelate 0..1 intensity,
+// Brightness/Contrast -1..1. Shared by both modals.
 var assetFields = []sliderField[core.EnemyVisualOverride]{
 	{Label: "Pixelate", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.Pixelate) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.Pixelate = float32(v) }, Min: 0, Max: 1, Step: 0.05, Format: "%.2f"},
 	{Label: "Bright", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.Brightness) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.Brightness = float32(v) }, Min: -1, Max: 1, Step: 0.05, Format: "%.2f"},
@@ -147,29 +119,22 @@ var assetFields = []sliderField[core.EnemyVisualOverride]{
 	{Label: "Saturate", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.Saturation) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.Saturation = float32(v) }, Min: -1, Max: 1, Step: 0.05, Format: "%.2f"},
 	{Label: "Dither", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.Dither) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.Dither = float32(v) }, Min: 0, Max: 1, Step: 0.05, Format: "%.2f"},
 	{Label: "GameBoy", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.GameBoy) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.GameBoy = float32(v) }, Min: 0, Max: 1, Step: 0.05, Format: "%.2f"},
-	// Colors caps the palette to the sprite's own best N colors (median-cut); 0 =
-	// off, 2..64 active (a value of 1 is treated as off by the engine). Integer
-	// step + "%.0f" so it reads as a color count, not a 0..1 intensity.
+	// Colors caps the palette to N best colors (median-cut); 0 = off, 2..64 active
+	// (1 treated as off). Integer step so it reads as a count, not 0..1 intensity.
 	{Label: "Colors", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.MaxColors) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.MaxColors = float32(v) }, Min: 0, Max: 64, Step: 1, Format: "%.0f"},
 }
 
-// assetActionLabels is the Asset tab's button row; the slice index IS the
-// action identity (assetActionRevert, …) the click handlers dispatch on — not a
-// bare [0]. Add an action by appending a label here AND a switch case in the
-// Foe/Party asset-click handlers, so a new label with no case reads as a
-// visible gap rather than a silent button that still fires Revert. PNG import
-// is the drag-drop path, not a button.
+// assetActionLabels is the Asset tab's button row; slice index IS the action
+// identity (assetActionRevert, …) the click handlers dispatch on. Add an action
+// by appending a label AND a switch case (a caseless label is a visible gap, not
+// a silent Revert). PNG import is the drag-drop path, not a button.
 var assetActionLabels = []string{"Revert"}
 
 const assetActionRevert = 0
 
-// applyAssetAction runs the Asset tab's button action `i` (an assetActionLabels
-// index) against the override `ov` — the shared dispatch behind both the Foe and
-// Party visualizers (which differ only in passing &s.foeVisual vs &s.partyVisual;
-// PartyVisualOverride aliases EnemyVisualOverride). The default arm is an explicit
-// no-op: an index with no case does nothing (matching the prior behavior where the
-// caseless switch simply fell through) rather than silently firing Revert, so a
-// future label added without its case reads as a visible gap.
+// applyAssetAction runs Asset-tab button `i` against override `ov`. Shared by
+// both visualizers (differ only in &s.foeVisual vs &s.partyVisual). default is an
+// explicit no-op so a caseless label reads as a gap, not a silent Revert.
 func applyAssetAction(s *State, ov *core.EnemyVisualOverride, i int) {
 	switch i {
 	case assetActionRevert:
@@ -177,22 +142,17 @@ func applyAssetAction(s *State, ov *core.EnemyVisualOverride, i int) {
 		s.assetPreviewStale = true
 		s.flash("Reverted sprite FX (" + assetFieldNames() + ")")
 	default:
-		// New assetActionLabels entry with no case here: do nothing (visible gap).
 	}
 }
 
-// savedVisualFlash is the shared save-confirmation toast for the Foe/Party
-// Visualizers: both persist a visual override AND re-bake its FX into the live
-// display texture (SetLive*Override), so the change applies in-session — the
-// editor world and the in-process playtest both show it without a restart.
+// savedVisualFlash is the save toast for both Visualizers (which also re-bake the
+// live texture, so the change applies in-session without a restart).
 func savedVisualFlash(name, slug string) string {
 	return "Saved " + name + " → " + slug + " (applied live)"
 }
 
-// visualizerFooterHint is the shared orange-sphere/cyan-glyph persistence note
-// painted under both Visualizers' preview panes. noun is "foe"/"class" — it
-// selects the override file the save writes (foes → visuals.json, classes →
-// partyvisuals.json) — and slug is that file's map key ("rat", "warrior").
+// visualizerFooterHint is the persistence note under both preview panes. noun is
+// "foe"/"class" (selects visuals.json vs partyvisuals.json); slug is the map key.
 func visualizerFooterHint(noun, slug string) string {
 	file := core.EnemyVisualsFileName
 	if noun == "class" {
@@ -201,19 +161,17 @@ func visualizerFooterHint(noun, slug string) string {
 	return "orange sphere = particle origin   ·   cyan = hit glyph   ·   saves to " + file + " as \"" + slug + "\""
 }
 
-// clearVisualAdjustments zeroes the non-destructive image-adjustment fields of an
-// override (the Asset tab's Revert). Tint and the placement fields are untouched.
+// clearVisualAdjustments zeroes the FX fields (Asset-tab Revert); tint and
+// placement untouched. Driven off assetFields (0 is neutral for all) so a new
+// slider row clears automatically.
 func clearVisualAdjustments(ov *core.EnemyVisualOverride) {
-	// Drive Revert off assetFields itself (every FX slider reverts to 0 — the
-	// neutral value for all of them) so a new slider row clears automatically
-	// instead of needing a parallel zeroing list kept in lockstep here.
 	for _, f := range assetFields {
 		f.Set(ov, 0)
 	}
 }
 
-// assetFieldNames joins the Asset-tab slider labels for the Revert toast, so the
-// confirmation text tracks assetFields rather than re-spelling the field names.
+// assetFieldNames joins the Asset-tab labels for the Revert toast (tracks
+// assetFields rather than re-spelling them).
 func assetFieldNames() string {
 	names := make([]string, len(assetFields))
 	for i, f := range assetFields {
@@ -236,8 +194,8 @@ type foeViewLayout struct {
 	closeBtn     rl.Rectangle
 }
 
-// computeFoeViewLayout is the single geometry source the modal's draw AND its
-// click hit-test share, so the painted widgets and the click rects can't drift.
+// computeFoeViewLayout is the single geometry source for the modal's draw and
+// hit-test (so widgets and click rects can't drift).
 func computeFoeViewLayout() foeViewLayout {
 	card := centeredCardRect(foeModalW, foeModalH)
 	preview := rl.NewRectangle(
@@ -254,20 +212,14 @@ func computeFoeViewLayout() foeViewLayout {
 	prevBtn := rl.NewRectangle(rightX, nameY, pickBtnW, 28)
 	nextBtn := rl.NewRectangle(rightX+rightW-pickBtnW, nameY, pickBtnW, 28)
 
-	// Tab row (Layout / Asset) below the foe picker. The active tab decides which
-	// content fills the band beneath it — the slider stack or the sprite-PNG
-	// strip — so both are laid out at the same contentTop and only one is drawn /
-	// hit-tested per tab (gated on State.foeViewTab by the draw + click handlers).
+	// Tab row (Layout / Asset). Both tabs lay out at the same contentTop; only the
+	// active one is drawn/hit-tested (gated on State.foeViewTab).
 	tabY := nameY + 28 + 10
 	tabBtns := buttonRowAt(rightX, tabY, foeViewTabLabels)
 	contentTop := tabY + float32(modalBtnH) + 14
 
-	// Two-column slider stack (Layout tab): split rightW into two equal columns
-	// separated by foeColGap, each laying out label | track | value exactly as the
-	// old single column did (drawFoeSlider / handleFoeViewClick read tracks[i]
-	// rectangles + position the label/value relative to each, so they stay
-	// column-agnostic — only the rectangles move). The left column gets the ceil
-	// half so an odd count puts the extra row on the left.
+	// Two-column slider stack (Layout tab): rightW split into two equal columns.
+	// Left column gets the ceil half (odd count → extra row left).
 	colW := (rightW - foeColGap) / 2
 	colTrackW := colW - foeLabelW - foeValueW
 	firstColRows := (len(foeFields) + 1) / 2
@@ -283,11 +235,8 @@ func computeFoeViewLayout() foeViewLayout {
 		tracks[i] = rl.NewRectangle(colX+foeLabelW, y, colTrackW, foeTrackH)
 	}
 
-	// Asset tab: a TWO-column slider stack (same split as the Layout tab) so the
-	// full FX set — Pixelate/Bright/Contrast/Posterize/Saturate/Dither/GameBoy/
-	// Colors — shows compactly without a tall single column burying the lower
-	// sliders past the fold. Left column gets the ceil half (odd count → extra on
-	// the left); the action buttons sit below the taller column.
+	// Asset tab: same two-column split. Left column gets the ceil half; action
+	// buttons sit below the taller column.
 	assetFirstColRows := (len(assetFields) + 1) / 2
 	assetTracks := make([]rl.Rectangle, len(assetFields))
 	for i := range assetFields {
@@ -317,8 +266,7 @@ func computeFoeViewLayout() foeViewLayout {
 }
 
 // openFoeViewModal opens the visualizer. First open seeds the working copy from
-// the first kind's LIVE visual (code defaults + any saved override); later opens
-// keep the working copy so unsaved tuning survives an accidental close.
+// the first kind's live visual; later opens keep it so unsaved tuning survives.
 func openFoeViewModal(s *State) {
 	s.modal = modalFoeView
 	if !s.foeInit {
@@ -335,11 +283,10 @@ func openFoeViewModal(s *State) {
 	foeDrag.asset = noSliderDrag
 }
 
-// enterAssetEditing resets the Asset-tab cursor and flags the live preview for a
-// rebuild from the freshly-seeded override (so the saved Pixelate/Brightness/
-// Contrast show immediately). Used on open and on a foe/class cycle. The
-// adjustment VALUES live in the override (seeded from the save file), so they're
-// intentionally NOT cleared here — that's what makes editing iterable.
+// enterAssetEditing resets the Asset-tab cursor and flags the preview stale so
+// the seeded FX show immediately. Used on open and foe/class cycle. Adjustment
+// values live in the override (seeded from disk) and are deliberately NOT cleared
+// here — that's what makes editing iterable.
 func enterAssetEditing(s *State) {
 	s.assetCursor = 0
 	s.assetPreviewStale = true
@@ -352,15 +299,10 @@ func seedFoeVisual(s *State) {
 		s.foeVisual = ov
 		s.foeBaseline = ov
 	} else {
-		// No resolvable visual for this kind (e.g. a missing sprite). Reset the
-		// working copy + baseline to a defined override instead of leaving the
-		// PREVIOUS foe's slider values in place — otherwise editing and saving
-		// here would write that other foe's numbers under this kind's slug.
-		// Seed a VISIBLE unit size rather than the zero value: SizeX/Y are
-		// absolute billboard sizes with a 0.1 slider floor, so a zero seed would
-		// be an invisible foe and a Save would persist size 0. (Defensive —
-		// enemyVisualFor falls back to the Rat visual today, so this branch is
-		// currently unreachable.)
+		// No resolvable visual: seed a defined override so we don't keep the
+		// PREVIOUS foe's values (a Save would write them under this slug). Unit
+		// size, not zero — SizeX/Y are absolute (0.1 floor), so zero saves an
+		// invisible foe. Defensive: enemyVisualFor falls back to Rat, so unreachable.
 		base := core.EnemyVisualOverride{SizeX: 1, SizeY: 1}
 		s.foeVisual = base
 		s.foeBaseline = base
@@ -368,18 +310,15 @@ func seedFoeVisual(s *State) {
 	s.foeCursor = 0
 }
 
-// cycleFoe steps to the prev/next enemy kind (wrapping) and re-seeds the working
-// copy from that kind's live visual.
+// cycleFoe steps to the prev/next enemy kind (wrapping) and re-seeds.
 func cycleFoe(s *State, dir int) {
 	s.foeKind = cycleEnemyKind(s.foeKind, dir)
 	seedFoeVisual(s)
-	enterAssetEditing(s) // rebuild the live preview from the new foe's saved FX
+	enterAssetEditing(s)
 }
 
-// cycleByIndex finds cur in items, steps the index by delta, wraps at the ends,
-// and returns the item there. An empty list or an absent cur (idx stays 0)
-// returns the first item / cur respectively — the shared "step a picker by ±1"
-// body for the Foe (enemy kind) and Party (class) visualizer arrows.
+// cycleByIndex steps cur's index in items by delta, wrapping. Empty list / absent
+// cur returns the first item / cur. Shared by the Foe and Party picker arrows.
 func cycleByIndex[T comparable](items []T, cur T, delta int) T {
 	if len(items) == 0 {
 		return cur
@@ -394,9 +333,7 @@ func cycleByIndex[T comparable](items []T, cur T, delta int) T {
 	return items[core.WrapIndex(idx+delta, len(items))]
 }
 
-// cycleEnemyKind walks the enemy registry by delta (+1 / -1), wrapping at the
-// ends. Skips nothing — every registered kind is a valid choice. Used by the
-// Foe Visualizer's < / > buttons.
+// cycleEnemyKind walks the enemy registry by delta (+1/-1), wrapping.
 func cycleEnemyKind(cur core.EnemyKind, delta int) core.EnemyKind {
 	defs := core.EnemyKinds()
 	kinds := make([]core.EnemyKind, len(defs))
@@ -412,23 +349,17 @@ func saveFoeVisual(s *State) {
 		s.flashWarn("Save failed: " + err.Error())
 		return
 	}
-	// Mirror the save into the live in-memory visual so cycling to another foe
-	// and back re-seeds from the SAVED values (LiveFoeOverride reads this map),
-	// and the editor's world/preview updates immediately — otherwise the save
-	// looked reverted because seedFoeVisual re-read the stale loaded value.
+	// Mirror into the live visual so cycling away and back re-seeds from the saved
+	// values and the editor preview updates immediately.
 	render.SetLiveFoeOverride(frameAssets, s.foeKind, s.foeVisual)
-	// The working copy is now what's on disk — make it the Reset baseline so a
-	// later Reset reverts to the just-saved state, not pre-save edits.
+	// Working copy is now on disk — make it the Reset baseline.
 	s.foeBaseline = s.foeVisual
 	s.flash(savedVisualFlash(core.EnemyInfo(s.foeKind).Name, slug))
 }
 
-// importDroppedPNG handles a PNG dropped onto the window while a Visualizer
-// modal is open (raylib has no file dialog, so drag-drop is the import path).
-// It takes the first .png in the drop, runs importFn(path) to write it under
-// `slug`.png, then reloadFn() to rebuild the live sprite; non-PNG drops are
-// ignored. Shared by the Foe and Party visualizers (they differ only in the
-// import/reload targets). No-op when nothing was dropped.
+// importDroppedPNG imports the first .png dropped on the window (raylib has no
+// file dialog): importFn(path) writes it, reloadFn() rebuilds the live sprite.
+// Non-PNG drops ignored. Shared by both visualizers.
 func importDroppedPNG(s *State, slug string, importFn func(path string) error, reloadFn func()) {
 	if !rl.IsFileDropped() {
 		return
@@ -450,12 +381,9 @@ func importDroppedPNG(s *State, slug string, importFn func(path string) error, r
 	rl.UnloadDroppedFiles()
 }
 
-// navAdjustVisualTabs runs the shared keyboard/d-pad row-nav + fine value
-// adjust for a Visualizer's active tab. On the Layout tab it walks the foeFields
-// stack via *layoutCursor; on the Asset tab it walks assetFields via s.assetCursor
-// and flags the live preview stale on a change. Both adjust the passed override
-// `ov` (s.foeVisual / s.partyVisual). layoutCursor is the caller's per-modal row
-// cursor (&s.foeCursor / &s.partyCursor). Shared so the two modals can't drift.
+// navAdjustVisualTabs runs keyboard/d-pad row-nav + fine adjust for the active
+// tab: Layout walks foeFields via *layoutCursor, Asset walks assetFields via
+// s.assetCursor (flagging the preview stale). Both adjust override ov. Shared.
 func navAdjustVisualTabs(s *State, layoutCursor *int, ov *core.EnemyVisualOverride) {
 	if s.foeViewTab == foeTabLayout {
 		*layoutCursor = input.CursorUpDown(*layoutCursor, len(foeFields))
@@ -487,30 +415,25 @@ func updateFoeViewModal(s *State) Action {
 		return ActionNone
 	}
 
-	// "Upload": a PNG dropped onto the window while the modal is open imports as
-	// THIS foe's sprite (raylib has no file dialog; drag-drop is the path).
+	// A dropped PNG imports as this foe's sprite.
 	importDroppedPNG(s, core.EnemySlug(s.foeKind),
 		func(path string) error { return render.ImportSpriteFromFile(s.foeKind, path) },
 		func() { render.ReloadFoeSprite(frameAssets, s.foeKind) })
 
 	l := computeFoeViewLayout()
-	// Read the cursor live (NOT the cached frameMouse, which is set in Draw and
-	// is therefore one frame stale here since Update runs before Draw) so a
-	// fast slider drag / click hit-tests against the current position. Matches
-	// updateSoundsModal, which also reads rl.GetMousePosition() directly.
+	// Read the cursor live — cached frameMouse is set in Draw and is one frame
+	// stale here (Update runs before Draw).
 	mp := rl.GetMousePosition()
 	mouseDown := rl.IsMouseButtonDown(rl.MouseLeftButton)
 	mousePressed := rl.IsMouseButtonPressed(rl.MouseLeftButton)
 	mouseReleased := rl.IsMouseButtonReleased(rl.MouseLeftButton)
 
-	// Active Layout-tab field drag: held only while the mouse is down AND the
-	// Layout tab still shows; the apply snaps the field to the mouse X and parks
-	// the row cursor on it.
+	// Layout-tab field drag (held only while down AND on the Layout tab).
 	foeDrag.slider.update(mouseDown && s.foeViewTab == foeTabLayout, len(foeFields), func(idx int) {
 		setFoeFieldFromTrack(s, idx, l.sliderTracks[idx], mp.X)
 		s.foeCursor = idx
 	})
-	// Active Asset-tab adjustment drag: same protocol, but feeds the live preview.
+	// Asset-tab drag: same protocol, feeds the live preview.
 	foeDrag.asset.update(mouseDown && s.foeViewTab == foeTabAsset, len(assetFields), func(idx int) {
 		setFoeAssetFromTrack(s, idx, l.assetTracks[idx], mp.X)
 		s.assetCursor = idx
@@ -526,19 +449,15 @@ func updateFoeViewModal(s *State) Action {
 		foeDrag.asset = noSliderDrag
 	}
 
-	// Save on Confirm (Enter/Space). NOTE: do NOT bind 'S' here — input's
-	// CursorUpDown treats 'S' as "move down" (W/S nav), so an S-save would
-	// steal row navigation.
+	// Save on Confirm (Enter/Space). Do NOT bind 'S' — CursorUpDown uses it for
+	// "move down" (W/S nav), so an S-save would steal row navigation.
 	if editorCommitPressed() {
 		saveFoeVisual(s)
 		return ActionNone
 	}
 
-	// Row navigation + fine value adjust, per tab.
 	navAdjustVisualTabs(s, &s.foeCursor, &s.foeVisual)
-	// Rebuild the live preview (shown on BOTH tabs — the FX are part of the look)
-	// from this foe's PRISTINE sprite + the override's current adjustments whenever
-	// they changed (slider drag / nav / Revert / foe cycle).
+	// Rebuild the live preview (shown on BOTH tabs) whenever the FX changed.
 	if s.assetPreviewStale {
 		render.RefreshFoeAssetPreview(frameAssets, s.foeKind, s.foeVisual)
 		s.assetPreviewStale = false
@@ -546,9 +465,8 @@ func updateFoeViewModal(s *State) Action {
 	return ActionNone
 }
 
-// handleFoeViewClick dispatches a left-press inside the modal: slider tracks
-// (start a drag + set the value immediately), the foe prev/next arrows, and the
-// Save/Reset/Close buttons.
+// handleFoeViewClick dispatches a left-press: slider tracks (start a drag + set
+// value), the prev/next arrows, and Save/Reset/Close.
 func handleFoeViewClick(s *State, l *foeViewLayout, mp rl.Vector2) {
 	for i := range l.tabBtns {
 		if pointIn(mp, l.tabBtns[i]) {
@@ -591,9 +509,7 @@ func handleFoeViewClick(s *State, l *foeViewLayout, mp rl.Vector2) {
 		cycleFoe(s, +1)
 		return
 	}
-	// Click the foe NAME (the span between the < > arrows) to open a dropdown of
-	// every kind — jump straight to one instead of cycling. The arrows still work
-	// as a quick prev/next.
+	// Click the foe NAME (span between the arrows) to open a dropdown of all kinds.
 	if nameSpan := nameSpanBetween(l.prevFoeBtn, l.nextFoeBtn); pointIn(mp, nameSpan) {
 		openDropdownBelow(s, ddFoeKind, nameSpan)
 		return
@@ -615,49 +531,40 @@ func handleFoeViewClick(s *State, l *foeViewLayout, mp rl.Vector2) {
 	}
 }
 
-// selectFoeViewTab switches the active visualizer tab (shared by both modals),
-// dropping any in-flight drag. The live FX preview is NOT touched: the
-// adjustments are part of the sprite's look, so the preview shows on BOTH tabs
-// (only the authoring gizmos are Layout-only, gated separately at draw time).
+// selectFoeViewTab switches the active tab (shared by both modals), dropping any
+// drag. The FX preview is untouched — it shows on BOTH tabs (only the gizmos are
+// Layout-only, gated at draw time).
 func selectFoeViewTab(s *State, tab int, drag *struct{ slider, asset sliderDragState }) {
 	if s.foeViewTab == tab {
 		return
 	}
 	s.foeViewTab = tab
-	// Reset the CALLER's drag state (foeDrag or partyDrag) — passing it in keeps
-	// the foe and party modals symmetric through one seam, instead of this
-	// resetting only foeDrag while the party modal had to re-reset partyDrag
-	// itself (a drift hazard if that "redundant" reset were ever removed).
+	// Reset the CALLER's drag (foeDrag/partyDrag) so both modals stay symmetric.
 	drag.slider = noSliderDrag
 	drag.asset = noSliderDrag
 }
 
-// setFoeAssetFromTrack maps a mouse X within an Asset-tab slider track to the
-// override's adjustment field (Pixelate/Bright/Contrast on s.foeVisual), snapped,
-// and flags the live preview for rebuild.
+// setFoeAssetFromTrack maps mouse X within an Asset-tab track to the adjustment
+// field (snapped) and flags the preview for rebuild.
 func setFoeAssetFromTrack(s *State, i int, track rl.Rectangle, mouseX float32) {
 	f := assetFields[i]
 	f.Set(&s.foeVisual, sliderSnap(f.Min, f.Max, f.Step, track.X, track.Width, mouseX))
 	s.assetPreviewStale = true
 }
 
-// setFoeFieldFromTrack maps a mouse X within a slider track to the field's
-// range, snapped to its step grain.
+// setFoeFieldFromTrack maps mouse X within a track to the field's range, snapped.
 func setFoeFieldFromTrack(s *State, i int, track rl.Rectangle, mouseX float32) {
 	f := foeFields[i]
 	f.Set(&s.foeVisual, sliderSnap(f.Min, f.Max, f.Step, track.X, track.Width, mouseX))
 }
 
-// padRect grows r by (dx, dy) on every side — used to give the thin slider
-// tracks a fatter, easier-to-hit click band without changing how they draw.
+// padRect grows r by (dx, dy) on every side (fatter click band for thin tracks).
 func padRect(r rl.Rectangle, dx, dy float32) rl.Rectangle {
 	return rl.NewRectangle(r.X-dx, r.Y-dy, r.Width+2*dx, r.Height+2*dy)
 }
 
-// applyPreviewZoomWheel dollies the visualizer preview when the wheel turns over
-// the preview pane. Shared by both visualizer modals (foeViewZoom is shared);
-// clamped to the render-side bounds. A scroll-up zooms IN (positive wheel ⇒
-// larger factor ⇒ closer camera in zoomedPreviewCamera).
+// applyPreviewZoomWheel dollies the preview on a wheel turn over the pane (shared;
+// clamped render-side; scroll-up zooms in).
 func applyPreviewZoomWheel(s *State, preview rl.Rectangle, mp rl.Vector2) {
 	if !pointIn(mp, preview) {
 		return
@@ -680,16 +587,15 @@ func drawFoeViewModal(s *State, font rl.Font, theme render.Theme) {
 	l := computeFoeViewLayout()
 	drawModalHeaderAt(font, theme, l.card, "FOE VISUALIZER", theme.BorderActive)
 
-	// Live 3D preview pane (the diorama is blitted from an off-screen texture).
-	// Gizmos show only on the Layout tab so the Asset tab reads as a clean sprite;
-	// on the Asset tab the non-destructive bake preview texture overrides the sprite.
+	// Live 3D preview (blitted from an off-screen texture). Gizmos show only on
+	// the Layout tab; on the Asset tab the bake preview texture overrides.
 	render.DrawFoePreview(l.preview, frameAssets, s.foeKind, s.foeVisual, s.foeViewZoom, s.foeViewTab == foeTabLayout, assetPreviewTexFor())
 	rl.DrawRectangleLinesEx(l.preview, 1, theme.BorderDim)
 
 	// Foe picker header: < Name >.
 	drawButton(font, l.prevFoeBtn, "<", false)
 	drawButton(font, l.nextFoeBtn, ">", false)
-	name := core.EnemyInfo(s.foeKind).Name + dropdownArrowSuffix // ▼ = click the name to pick from all kinds
+	name := core.EnemyInfo(s.foeKind).Name + dropdownArrowSuffix // ▼ = click name to pick
 	nameSize := render.MeasureRichText(font, name, editorFontTopbar, 1)
 	span := nameSpanBetween(l.prevFoeBtn, l.nextFoeBtn)
 	render.DrawRichText(font, name,
@@ -707,8 +613,7 @@ func drawFoeViewModal(s *State, font rl.Font, theme render.Theme) {
 
 	drawModalButtons(font, []rl.Rectangle{l.saveBtn, l.resetBtn, l.closeBtn}, foeViewBtnLabels)
 
-	// Footer hint + persistence note, under the preview pane (clear of the
-	// right-side buttons).
+	// Footer hint + persistence note, under the preview pane.
 	render.DrawTextWithShadow(font,
 		"D-pad row/adjust   |   drag sliders   |   buttons: change foe / save / reset / close",
 		l.card.X+foePad, l.preview.Y+l.preview.Height+8, editorFontHint, theme.TextHint)
@@ -718,26 +623,21 @@ func drawFoeViewModal(s *State, font rl.Font, theme render.Theme) {
 
 }
 
-// drawFoeViewTabs paints the Layout / Asset tab buttons, the active one
-// highlighted. Shared by both visualizer modals (they share the layout).
+// drawFoeViewTabs paints the tab buttons, active one highlighted. Shared.
 func drawFoeViewTabs(font rl.Font, l foeViewLayout, active int) {
 	for i := range l.tabBtns {
 		drawButton(font, l.tabBtns[i], foeViewTabLabels[i], i == active)
 	}
 }
 
-// assetPreviewTexFor returns the live-preview texture for the preview pane. The
-// non-destructive FX (pixelate/bright/contrast) are part of the sprite's look, so
-// the adjusted texture shows on BOTH tabs (zero texture = no adjustments active,
-// the pane falls back to the real sprite).
+// assetPreviewTexFor returns the live-preview texture (shows on BOTH tabs; zero
+// texture = no adjustments, pane falls back to the real sprite).
 func assetPreviewTexFor() rl.Texture2D {
 	return render.AssetPreviewTexture()
 }
 
-// drawAssetTab paints the Asset tab: the non-destructive image-adjustment sliders
-// (Pixelate / Bright / Contrast, editing the override `ov`) + a Revert button + a
-// hint. Shared by both visualizer modals (the override + cursor are passed in).
-// The live preview reflects the values non-destructively; Save persists them.
+// drawAssetTab paints the Asset tab: FX sliders editing override `ov` + a Revert
+// button + a hint. Shared (override + cursor passed in).
 func drawAssetTab(font rl.Font, theme render.Theme, l foeViewLayout, ov *core.EnemyVisualOverride, cursor int) {
 	for i := range assetFields {
 		f := assetFields[i]
@@ -757,11 +657,8 @@ func drawAssetTab(font rl.Font, theme render.Theme, l foeViewLayout, ov *core.En
 	}
 }
 
-// drawVisualSlider draws row i of the shared visualizer field stack (foeFields)
-// against the given working override and focused-row cursor. drawFoeSlider and
-// drawPartySlider differ only in those two (s.foeVisual/s.foeCursor vs
-// s.partyVisual/s.partyCursor), so both delegate here — mirroring how
-// drawAssetTab is already shared across the two visualizer modals.
+// drawVisualSlider draws foeFields row i against override ov and cursor.
+// drawFoeSlider/drawPartySlider delegate here (differ only in the override/cursor).
 func drawVisualSlider(font rl.Font, theme render.Theme, l foeViewLayout, i int, ov *core.EnemyVisualOverride, cursor int) {
 	f := foeFields[i]
 	track := l.sliderTracks[i]
@@ -774,13 +671,9 @@ func drawFoeSlider(font rl.Font, theme render.Theme, l foeViewLayout, i int, s *
 	drawVisualSlider(font, theme, l, i, &s.foeVisual, s.foeCursor)
 }
 
-// drawSliderField renders one sliderField row against the value read from `ov`,
-// at the given label/value positions, font size, and thumb radius. The single
-// slider-row draw shared by the Foe/Party Visualizer stacks (Layout + Asset
-// tabs) and the sound creator — Display-aware: a row with a custom Display
-// renderer (e.g. the Wave row's "Sine") shows that, otherwise fmt.Sprintf with
-// the row's Format. Centralizing it gave the foe path the Display behavior it
-// previously lacked (it had hard-coded the Format path).
+// drawSliderField renders one sliderField row against ov's value. The single
+// slider-row draw shared by both Visualizers and the sound creator. Display-aware:
+// a custom Display renderer wins, else fmt.Sprintf with the row's Format.
 func drawSliderField[T any](font rl.Font, theme render.Theme, f sliderField[T], ov *T,
 	labelPos, valuePos rl.Vector2, fontSize float32, track rl.Rectangle, thumbRadius float32, focused bool) {
 	value := f.Get(ov)

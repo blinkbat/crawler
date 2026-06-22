@@ -8,22 +8,16 @@ import (
 	"crawler/internal/app/input"
 )
 
-// Shop overlay. Two tabs: Buy from a fixed catalog, Sell back the player's
-// own priced inventory at half value. Gamepad-first — L1/L2/R1/R2 (or
-// Tab/Shift+Tab) page the Buy/Sell tabs, the d-pad/stick moves the row cursor,
-// Confirm transacts one unit, Back closes. Mirrors the leaf-submenu shape in
-// movement.go but carries its own per-tab list math, so it isn't routed
-// through updateLeafMenu.
+// Shop overlay. Two tabs: Buy from a fixed catalog, Sell inventory back at half
+// value. L1/L2/R1/R2 (or Tab/Shift+Tab) page tabs, d-pad/stick moves the cursor,
+// Confirm transacts one unit, Back closes. Carries its own per-tab list math, so
+// it isn't routed through updateLeafMenu.
 //
-// DESIGN: shops are IN-UNIVERSE — this overlay is meant to be opened by a
-// merchant / shop tile in the world, NOT from a menu. The overlay is fully
-// built and functional; openShop just has no caller yet (the in-world entry
-// point lands with the merchant/tile work). It is deliberately NOT wired to
-// any pause-menu / panels row.
+// DESIGN: shops are IN-UNIVERSE — opened by a merchant / shop tile, NOT a menu.
+// Fully built; openShop just has no caller yet (lands with the merchant work).
 
-// openShop raises the shop overlay on the Buy tab with the cursor at the top.
-// Drops the pause menu defensively (a no-op when triggered in-world, where the
-// menu isn't open) so a future menu-adjacent caller can't leave both up.
+// openShop raises the overlay on the Buy tab, cursor at top. Drops the pause
+// menu defensively so a future menu-adjacent caller can't leave both up.
 func openShop(g *core.GameState) {
 	g.MenuOpen = false
 	g.ShopOpen = true

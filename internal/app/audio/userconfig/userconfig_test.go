@@ -9,9 +9,8 @@ import (
 	"crawler/internal/app/audio/wavsynth"
 )
 
-// withWorkingDir runs fn with the process cwd switched to dir, then
-// restores. Used by tests so SoundsDir() resolves to a per-test temp
-// directory instead of the project's maps/sounds/.
+// withWorkingDir runs fn with the cwd switched to dir, then restores — so
+// SoundsDir() resolves to a per-test temp dir, not the project's maps/sounds/.
 func withWorkingDir(t *testing.T, dir string, fn func()) {
 	t.Helper()
 	old, err := os.Getwd()
@@ -25,9 +24,8 @@ func withWorkingDir(t *testing.T, dir string, fn func()) {
 	fn()
 }
 
-// TestSanitizeName freezes the on-disk filename contract for sound
-// saves: lowercase ASCII, digits, underscore, hyphen only; spaces fold
-// to underscore; multi-byte / punctuation strips; empty stays empty.
+// TestSanitizeName freezes the filename contract: lowercase ASCII/digits/_/-
+// only; spaces fold to underscore; multi-byte/punctuation strips; empty stays empty.
 func TestSanitizeName(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -51,10 +49,8 @@ func TestSanitizeName(t *testing.T) {
 	}
 }
 
-// TestWriteWAV_RoundTrip writes a PCM buffer under a name that requires
-// sanitization, then verifies the file ends up at the sanitized path
-// and shows up in ListSounds. Uses a per-test temp dir as cwd so the
-// real project's maps/sounds/ isn't touched.
+// TestWriteWAV_RoundTrip verifies a write under a name needing sanitization
+// lands at the sanitized path and shows up in ListSounds.
 func TestWriteWAV_RoundTrip(t *testing.T) {
 	tmp := t.TempDir()
 	withWorkingDir(t, tmp, func() {
@@ -84,11 +80,8 @@ func TestWriteWAV_RoundTrip(t *testing.T) {
 	})
 }
 
-// TestWriteSound_ParamsRoundTrip writes a sound through the params-based
-// save path, then confirms both the .wav and the .snd sidecar land and
-// LoadParams reconstructs the exact knob values — the contract the
-// editor's "edit a saved sound" flow relies on. A delete then removes
-// both, leaving no orphan sidecar.
+// TestWriteSound_ParamsRoundTrip confirms the params save lands both .wav and
+// .snd, LoadParams reconstructs the exact knobs, and delete removes both.
 func TestWriteSound_ParamsRoundTrip(t *testing.T) {
 	tmp := t.TempDir()
 	withWorkingDir(t, tmp, func() {
@@ -119,7 +112,7 @@ func TestWriteSound_ParamsRoundTrip(t *testing.T) {
 		if got != p {
 			t.Errorf("LoadParams round-trip mismatch:\n got  %+v\n want %+v", got, p)
 		}
-		// .snd is metadata, not a playable sound — it must not show up as a sound.
+		// .snd is metadata — it must not show up as a sound.
 		for _, n := range ListSounds() {
 			if strings.HasSuffix(n, ParamsExt) {
 				t.Errorf("ListSounds leaked sidecar entry %q", n)
@@ -134,8 +127,7 @@ func TestWriteSound_ParamsRoundTrip(t *testing.T) {
 	})
 }
 
-// TestLoadParams_MissingSidecar — a sound with no .snd (hand-dropped wav
-// or pre-sidecar save) reports ok=false rather than a zero-value sound.
+// TestLoadParams_MissingSidecar — a sound with no .snd reports ok=false.
 func TestLoadParams_MissingSidecar(t *testing.T) {
 	tmp := t.TempDir()
 	withWorkingDir(t, tmp, func() {
@@ -148,8 +140,7 @@ func TestLoadParams_MissingSidecar(t *testing.T) {
 	})
 }
 
-// TestWriteWAV_RefusesEmpty — sanitization that yields "" must error
-// instead of writing a "wav" file with no stem.
+// TestWriteWAV_RefusesEmpty — a name that sanitizes to "" must error.
 func TestWriteWAV_RefusesEmpty(t *testing.T) {
 	tmp := t.TempDir()
 	withWorkingDir(t, tmp, func() {
@@ -160,9 +151,8 @@ func TestWriteWAV_RefusesEmpty(t *testing.T) {
 	})
 }
 
-// TestLoadAssignments_RoundTrip writes an assignments file with mixed
-// valid + commented + malformed lines, then confirms only the valid
-// entries land in the parsed map.
+// TestLoadAssignments_RoundTrip confirms only valid entries survive a file
+// of mixed valid + commented + malformed lines.
 func TestLoadAssignments_RoundTrip(t *testing.T) {
 	tmp := t.TempDir()
 	withWorkingDir(t, tmp, func() {
@@ -197,8 +187,7 @@ func TestLoadAssignments_RoundTrip(t *testing.T) {
 	})
 }
 
-// TestSaveAssignments_DeterministicOrder verifies the on-disk file uses
-// sorted key order so diffs stay clean.
+// TestSaveAssignments_DeterministicOrder verifies sorted key order on disk.
 func TestSaveAssignments_DeterministicOrder(t *testing.T) {
 	tmp := t.TempDir()
 	withWorkingDir(t, tmp, func() {
@@ -215,7 +204,7 @@ func TestSaveAssignments_DeterministicOrder(t *testing.T) {
 			t.Fatalf("read back: %v", err)
 		}
 		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-		// Skip header comment lines.
+		// Skip header comments.
 		var entries []string
 		for _, line := range lines {
 			if strings.HasPrefix(line, "#") || line == "" {
@@ -239,9 +228,8 @@ func TestSaveAssignments_DeterministicOrder(t *testing.T) {
 	})
 }
 
-// TestDeleteSound_StripsOrphanAssignments — deleting a user sound
-// should also remove any assignment that pointed at it, so a stale
-// assignment doesn't survive the file's removal.
+// TestDeleteSound_StripsOrphanAssignments — deleting a sound also removes any
+// assignment that pointed at it.
 func TestDeleteSound_StripsOrphanAssignments(t *testing.T) {
 	tmp := t.TempDir()
 	withWorkingDir(t, tmp, func() {
@@ -262,7 +250,7 @@ func TestDeleteSound_StripsOrphanAssignments(t *testing.T) {
 		if _, err := os.Stat(SoundPath("victim")); !os.IsNotExist(err) {
 			t.Errorf("expected file deleted, stat err = %v", err)
 		}
-		// Stale assignment stripped, unrelated assignment preserved.
+		// Stale stripped, unrelated preserved.
 		got := LoadAssignments()
 		if _, exists := got["input_hit"]; exists {
 			t.Errorf("expected input_hit assignment to be stripped, got %v", got)

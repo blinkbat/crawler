@@ -6,20 +6,16 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// menus.go: top-level commands grouped into five pull-down menus (File / Edit /
-// View / Assets / Map). Each menu opens the shared dropdown (ddMenu owner), so a
-// menu row IS a dropdownEntry. Adding a command is one row here.
-//
-// Modal-openers + view toggles live in menus; constant-while-painting controls
-// (tools, undo/redo, brush size, elevation) stay on the toolbar (draw.go).
+// menus.go: top-level commands in five pull-down menus (File/Edit/View/Assets/
+// Map). Each opens the shared dropdown (ddMenu owner); a row IS a dropdownEntry.
+// Constant-while-painting controls stay on the toolbar (draw.go) instead.
 
 type menuGroup struct {
 	label string
 	items []dropdownEntry
 }
 
-// editorMenus is the menu-bar model (left-to-right). hotkey strings are
-// display-only mirrors of updateHotkeys's accelerators.
+// editorMenus is the menu-bar model (left-to-right); hotkey strings mirror updateHotkeys.
 var editorMenus = []menuGroup{
 	{label: "File", items: []dropdownEntry{
 		{label: "New Map", apply: newMap, desc: "Start a fresh blank map (prompts for size)."},
@@ -65,8 +61,7 @@ func menuEntries(s *State) []dropdownEntry {
 	return editorMenus[s.dropdown.menu].items
 }
 
-// menuBarBtns is the top-row strip: one button per menu group, built from
-// editorMenus. active() lights the open menu's label.
+// menuBarBtns is the top-row strip, one button per menu group (built from editorMenus).
 var menuBarBtns []topbarBtn
 
 func init() {
@@ -80,8 +75,7 @@ func init() {
 	}
 }
 
-// menuAnchorRect is the on-bar rect menu i's pull-down drops from. Walks the same
-// widths drawButtonStrip uses so the list lines up under its label.
+// menuAnchorRect is the on-bar rect menu i's pull-down drops from (walks drawButtonStrip's widths).
 func menuAnchorRect(i int) rl.Rectangle {
 	x := buttonStripStartX
 	for j := 0; j < i && j < len(menuBarBtns); j++ {

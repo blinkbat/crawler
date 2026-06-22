@@ -10,25 +10,20 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// dialog.go is the editor's branching-conversation authoring surface — a
-// drill-down that mirrors the established entity-edit / door-edit modal
-// patterns:
+// dialog.go is the branching-conversation authoring surface, a drill-down of
+// modals:
 //
-//	modalDialogList       → the area's dialogs (Add / Edit / Delete / Triggers)
-//	modalDialogNodes      → one dialog's nodes (Add / Edit / Delete / Set Start)
-//	modalDialogNodeEdit   → one node: speaker (dropdown) + text/next/continue
-//	                        fields + Is-Menu toggle + End-action + its choice list
+//	modalDialogList       → the area's dialogs
+//	modalDialogNodes      → one dialog's nodes
+//	modalDialogNodeEdit   → one node: speaker + text/next/continue + Is-Menu +
+//	                        End-action + choice list
 //	modalDialogChoiceEdit → one choice: label + next + End-action + condition list
-//	modalDialogActionEdit → the node/choice end-action (none / start-quest /
-//	                        complete-quest / event + the quest-id / event-id)
-//	modalDialogCondEdit   → one choice condition (gold / quest / foe-killed /
-//	                        tile-visited)
+//	modalDialogActionEdit → the node/choice end-action
+//	modalDialogCondEdit   → one choice condition
 //	modalDialogTriggerList / …Edit → the area's auto-start triggers
 //
-// Esc steps UP one level (the top-level list's Esc closes the whole flow);
-// closeModal resets every dialog index. Node and choice IDs are
-// auto-generated and stable — the author references them by typing into the
-// "next" fields, so there's no ID-rename hazard.
+// Esc steps UP one level (top-level Esc closes); closeModal resets every dialog
+// index. Node/choice IDs are auto-generated and stable, so no ID-rename hazard.
 
 // --- accessors -------------------------------------------------------------
 
@@ -58,9 +53,8 @@ func currentDialogChoice(s *State) *core.DialogChoice {
 func dialogNodeInRange(s *State) bool   { return currentDialogNode(s) != nil }
 func dialogChoiceInRange(s *State) bool { return currentDialogChoice(s) != nil }
 
-// clearDialogFocus drops any dialog text-field focus. Called by closeModal
-// and every level transition so a stale focus can't pump into the wrong
-// (or a freed) field.
+// clearDialogFocus drops any dialog text-field focus. Called on every level
+// transition so a stale focus can't pump into a freed field.
 func clearDialogFocus(s *State) {
 	switch s.focus {
 	case focusDialogNodeText, focusDialogNodeNext, focusDialogNodeContinue,
@@ -72,8 +66,7 @@ func clearDialogFocus(s *State) {
 	}
 }
 
-// currentDialogCond returns the condition the condition editor operates on, or
-// nil when the index is out of range.
+// currentDialogCond returns the condition editor's target, or nil if out of range.
 func currentDialogCond(s *State) *core.DialogChoiceCondition {
 	c := currentDialogChoice(s)
 	if c == nil || s.modalDialogCondIdx < 0 || s.modalDialogCondIdx >= len(c.Conditions) {
@@ -84,8 +77,7 @@ func currentDialogCond(s *State) *core.DialogChoiceCondition {
 
 func dialogCondInRange(s *State) bool { return currentDialogCond(s) != nil }
 
-// currentDialogTrigger returns the area trigger the trigger editor operates on,
-// or nil when out of range.
+// currentDialogTrigger returns the trigger editor's target, or nil if out of range.
 func currentDialogTrigger(s *State) *core.DialogTrigger {
 	if s.modalDialogTriggerIdx < 0 || s.modalDialogTriggerIdx >= len(s.area.Triggers) {
 		return nil
@@ -97,10 +89,8 @@ func dialogTriggerInRange(s *State) bool { return currentDialogTrigger(s) != nil
 
 // --- id generation ---------------------------------------------------------
 
-// uniqueID returns the first "prefix1", "prefix2", … not already taken. The
-// single counter-loop behind every auto-id'd dialog entity (dialogs / nodes /
-// choices / triggers) — callers supply only the prefix and the "is this id
-// taken?" predicate.
+// uniqueID returns the first "prefix1", "prefix2", … not taken. Shared by every
+// auto-id'd dialog entity (callers supply the prefix + the taken predicate).
 func uniqueID(prefix string, taken func(string) bool) string {
 	for i := 1; ; i++ {
 		id := prefix + strconv.Itoa(i)
@@ -223,9 +213,8 @@ func clampModalCursor(s *State, count int) {
 	}
 }
 
-// restoreModalCursor points the modal list cursor at idx when it's in [0,count),
-// else 0 — the shared "re-highlight the row we were editing on the way back up
-// (or reset to the top)" rule every dialog open/return helper uses.
+// restoreModalCursor points the cursor at idx when in [0,count), else 0 —
+// re-highlights the row we were editing on the way back up.
 func restoreModalCursor(s *State, idx, count int) {
 	if idx >= 0 && idx < count {
 		s.modalCursor = idx
@@ -253,8 +242,7 @@ func openDialogNodesModal(s *State, dialogIdx int) {
 	clearDialogFocus(s)
 }
 
-// returnToDialogNodes steps back up from the node editor, re-highlighting the
-// node that was being edited.
+// returnToDialogNodes steps back up from the node editor.
 func returnToDialogNodes(s *State) {
 	s.modal = modalDialogNodes
 	count := 0
@@ -277,8 +265,7 @@ func openDialogNodeEditModal(s *State, nodeIdx int) {
 	s.focus = focusNone
 }
 
-// returnToDialogNodeEdit steps back up from the choice editor, re-highlighting
-// the choice that was being edited.
+// returnToDialogNodeEdit steps back up from the choice editor.
 func returnToDialogNodeEdit(s *State) {
 	s.modal = modalDialogNodeEdit
 	count := 0
@@ -297,9 +284,7 @@ func openDialogChoiceEditModal(s *State, choiceIdx int) {
 	s.modal = modalDialogChoiceEdit
 	s.modalDialogChoiceIdx = choiceIdx
 	s.modalCursor = 0 // condition-list cursor
-	// Start UNfocused (like the node editor) so Up/Down drive the condition
-	// list immediately and Tab steps into the text fields — otherwise a
-	// keyboard user opening on a focused field can't reach the list.
+	// Start UNfocused so Up/Down drive the list and Tab steps into the fields.
 	s.focus = focusNone
 }
 
@@ -357,13 +342,9 @@ func triggerKindLabel(k core.DialogTriggerKind) string {
 	return string(k)
 }
 
-// init asserts every authorable condition / trigger kind has a real editor
-// label (condKindLabel / triggerKindLabel fall back to the raw kind string for
-// an unhandled kind). Since the kind dropdowns now iterate core.DialogCondKinds
-// / DialogTriggerKinds, a kind added in core auto-appears in the picker; this
-// guard makes "forgot the editor label" a startup panic rather than a row that
-// renders its raw key — the same panic-at-init discipline the tile / skill /
-// grade registries use.
+// init panics if any authorable condition/trigger kind lacks an editor label
+// (condKindLabel/triggerKindLabel fall back to the raw kind string otherwise),
+// turning a forgotten label into a startup panic.
 func init() {
 	for _, k := range core.DialogCondKinds() {
 		if condKindLabel(k) == string(k) {
@@ -415,10 +396,8 @@ func dialogCondKindEntries(s *State) []dropdownEntry {
 	for _, k := range kinds {
 		k := k
 		out = append(out, dropdownEntry{label: condKindLabel(k), apply: func(s *State) {
-			// Act only on an actual kind CHANGE, and reset to a clean condition
-			// of the new kind so a stale value from the previous kind (e.g. a
-			// Gold amount after switching to TileVisited) can't linger on the
-			// struct and serialize. The kind-agnostic DisabledMessage carries over.
+			// Only on a real kind CHANGE; reset to a clean condition so a stale
+			// value from the old kind can't serialize. DisabledMessage carries over.
 			if c := currentDialogCond(s); c != nil && c.Kind != k {
 				pushUndo(s)
 				*c = core.DialogChoiceCondition{Kind: k, DisabledMessage: c.DisabledMessage}
@@ -461,10 +440,8 @@ func dialogTriggerKindEntries(s *State) []dropdownEntry {
 	for _, k := range kinds {
 		k := k
 		out = append(out, dropdownEntry{label: triggerKindLabel(k), apply: func(s *State) {
-			// Mirror dialogCondKindEntries: act only on a real kind CHANGE and
-			// reset to a clean trigger of the new kind so the params the previous
-			// kind owned (enterTile's TileX/TileZ vs foeKilled's FoeKind/FoeKills)
-			// can't linger on the struct and serialize. The kind-agnostic
+			// Like dialogCondKindEntries: only on a real kind CHANGE, reset to a
+			// clean trigger so the old kind's params can't serialize.
 			// ID/DialogID/Once carry over.
 			if t := currentDialogTrigger(s); t != nil && t.Kind != k {
 				pushUndo(s)
@@ -503,15 +480,12 @@ func dialogTriggerFoeEntries(s *State) []dropdownEntry {
 
 // --- shared numeric-field editing (condition + trigger) --------------------
 //
-// This (dialogNumericTarget + focusDialogNumeric + pumpDialogNumeric, backed by
-// the shared dialogNumBuf) is the CANONICAL way to type into a plain int field
-// in the editor — new numeric fields should route through it. It is distinct
-// from updateNumericInput (input.go), which is the special-cased path for the
-// map's width/height: those clamp to ClampMapDimension and trigger a live area
-// resize, so they keep their own focus enums rather than folding in here.
+// dialogNumericTarget + focusDialogNumeric + pumpDialogNumeric (backed by
+// dialogNumBuf) is the canonical way to type into a plain int field; new numeric
+// fields should route through it. Distinct from updateNumericInput (input.go),
+// the special-cased map width/height path (clamps + live resize).
 
-// dialogNumericTarget returns the int field the currently-focused numeric
-// dialog field edits, or nil when no numeric field is focused.
+// dialogNumericTarget returns the focused numeric field's int, or nil if none.
 func dialogNumericTarget(s *State) *int {
 	switch s.focus {
 	case focusDialogCondGold:
@@ -546,16 +520,15 @@ func dialogNumericTarget(s *State) *int {
 	return nil
 }
 
-// focusDialogNumeric focuses a numeric field and seeds the shared edit buffer
-// from its current value, so the author edits from the existing number.
+// focusDialogNumeric focuses a numeric field and seeds the edit buffer from its
+// current value.
 func focusDialogNumeric(s *State, focus focusField, value int) {
 	s.focus = focus
 	s.dialogNumBuf = strconv.Itoa(value)
 }
 
-// pumpDialogNumeric routes typed digits into the focused numeric field through
-// the shared buffer (parsed back each keystroke; empty = 0). Returns true while
-// a numeric field owns input.
+// pumpDialogNumeric routes typed digits into the focused numeric field (parsed
+// each keystroke; empty = 0). Returns true while a numeric field owns input.
 func pumpDialogNumeric(s *State) bool {
 	target := dialogNumericTarget(s)
 	if target == nil {
@@ -631,11 +604,9 @@ func removeDialogTriggerAt(s *State, idx int) {
 	clampModalCursor(s, len(s.area.Triggers))
 }
 
-// dialogListModalSpec parameterizes the three list-style dialog modals (the
-// dialog list, a dialog's node list, and the trigger list) so their draw +
-// update flow lives in one driver. They share the same skeleton — header, a
-// hint line, an Add/Action command set, the scrolling entity-list window, and
-// Up/Down + Enter/A/X handling — and differ only in the fields below.
+// dialogListModalSpec parameterizes the three list-style dialog modals (dialog
+// list, node list, trigger list) so their draw + update flow lives in one
+// driver. They share the skeleton and differ only in the fields below.
 type dialogListModalSpec struct {
 	title    string                     // modal header
 	hint     string                     // hint line below the header
@@ -647,9 +618,8 @@ type dialogListModalSpec struct {
 	cancel   func()                     // Esc (step up / close)
 	add      func()                     // A / "+ Add"
 	del      func()                     // X / "Delete" (only when count > 0)
-	// extraKeys are per-modal extra shortcuts beyond Enter/A/X (e.g. T opens the
-	// trigger list, S sets the start node). guarded reports whether the key needs
-	// count > 0 before it runs.
+	// extraKeys are shortcuts beyond Enter/A/X (e.g. T triggers, S set start);
+	// guarded means the key needs count > 0 to run.
 	extraKeys []dialogListKey
 }
 
@@ -710,11 +680,9 @@ func updateDialogListModalGeneric(s *State, spec dialogListModalSpec) Action {
 
 // =========================== modalDialogList ===============================
 
-// dialogListSpec builds the spec for the top-level dialog list. Each action's
-// handler is declared ONCE as a shared closure and fed to both the button cmds
-// (click + on-screen label) and the spec's keyboard fields (commit/add/del/
-// extraKeys), so the two paths can't drift — adding a command can't wire its
-// button but forget its key (or vice-versa).
+// dialogListSpec builds the top-level dialog-list spec. Each action's handler is
+// declared once and fed to both the button cmds and the keyboard fields so the
+// two paths can't drift.
 func dialogListSpec(s *State) dialogListModalSpec {
 	edit := func() {
 		if len(s.area.Dialogs) > 0 {
@@ -830,27 +798,21 @@ func updateDialogNodesModal(s *State) Action {
 	return updateDialogListModalGeneric(s, dialogNodesSpec(s, d))
 }
 
-// Shared field-layout metrics for the dialog edit modals (node / choice /
-// condition / trigger). Their layout funcs stack fixed-height field rows down
-// from a common header inset, so these live in one place rather than as a
-// repeated `float32(28)` / `r.Y + 56` literal in each.
+// Shared field-layout metrics for the dialog edit modals (node/choice/condition/
+// trigger), which stack fixed-height rows from a common header inset.
 const (
-	dialogFieldH       = float32(28) // standard text-field / button row height
-	dialogHeaderInset  = float32(56) // first row's offset below the card's title
-	dialogRowGap       = float32(46) // vertical pitch between stacked field rows (node + choice editors)
+	dialogFieldH       = float32(28) // text-field / button row height
+	dialogHeaderInset  = float32(56) // first row's offset below the title
+	dialogRowGap       = float32(46) // row pitch (node + choice editors)
 	dialogCondRowGap   = float32(54) // row pitch in the condition editor
 	dialogTrigRowGap   = float32(52) // row pitch in the trigger editor
 	dialogActionRowGap = float32(56) // row pitch in the action editor
-	dialogListRowH     = dropdownRowH // scrollable choice / condition list rows share the dropdown's row pitch
+	dialogListRowH     = dropdownRowH // scrollable list rows share the dropdown's pitch
 )
 
-// stackRows lays out n equal-height field rows stacked downward from (x,y) at a
-// fixed vertical pitch (rowGap). It is the shared preamble the dialog edit
-// modals (node / choice / action / cond / trigger) and the door editor all
-// spelled inline as a repeated `row := rl.NewRectangle(x, y, fw, fieldH); y +=
-// rowGap` — centralizing it keeps those hit-test rects byte-identical to the
-// per-row build they replace. Callers that continue stacking content below the
-// returned rows advance their own y by n*rowGap (the pitch this walked).
+// stackRows lays out n equal-height rows stacked from (x,y) at pitch rowGap.
+// Shared by the dialog edit modals and the door editor. Callers stacking content
+// below advance their own y by n*rowGap.
 func stackRows(x, y, fw, fieldH, rowGap float32, n int) []rl.Rectangle {
 	rows := make([]rl.Rectangle, n)
 	for i := range rows {
@@ -859,13 +821,9 @@ func stackRows(x, y, fw, fieldH, rowGap float32, n int) []rl.Rectangle {
 	return rows
 }
 
-// scrollRows lays out the VISIBLE rows of a scrolling, fixed-pitch list: it
-// resolves the scroll window over a `count`-item list keeping `cursor` in view
-// (at most `visible` rows tall, via scrollWindow) and stacks one rowH-tall rect
-// per visible item down from (x,y). It returns the window's top index and the
-// visible row rects (one per item in [top, top+len(rows))). The node editor's
-// choice list and the choice editor's condition list both build their scrolling
-// row stack this way, so they share it rather than re-spelling the loop.
+// scrollRows lays out the VISIBLE rows of a scrolling fixed-pitch list: resolves
+// the scroll window (≤ visible rows, cursor in view) and stacks one rowH-tall
+// rect per visible item from (x,y). Returns the window's top index + the rects.
 func scrollRows(x, y, fw, rowH float32, cursor, count, visible int) (top int, rows []rl.Rectangle) {
 	top, end := scrollWindow(cursor, count, visible)
 	rows = make([]rl.Rectangle, end-top)
@@ -880,9 +838,7 @@ func scrollRows(x, y, fw, rowH float32, cursor, count, visible int) (top int, ro
 const (
 	dialogNodeModalW = float32(540)
 	dialogNodeModalH = float32(600)
-	// dialogChoiceVisible caps how many choice rows the node editor shows at
-	// once; longer choice lists scroll (the cursor stays in view) rather than
-	// running off the card.
+	// dialogChoiceVisible caps visible choice rows; longer lists scroll.
 	dialogChoiceVisible = 6
 )
 
@@ -895,9 +851,8 @@ type dialogNodeLayout struct {
 	continueField rl.Rectangle
 	menuToggle    rl.Rectangle
 	actionBtn     rl.Rectangle
-	// choiceRows are the rects of the VISIBLE choice rows; choiceTop is the
-	// index of the first visible choice (the scroll window's top). Visible
-	// row i maps to choice index choiceTop+i.
+	// choiceRows are the VISIBLE choice-row rects; visible row i maps to choice
+	// index choiceTop+i.
 	choiceTop     int
 	choiceRows    []rl.Rectangle
 	addChoiceBtn  rl.Rectangle
@@ -921,9 +876,7 @@ func dialogNodeLayoutFor(cursor, choiceCount int) dialogNodeLayout {
 	menuToggle := fields[4]
 	actionBtn := fields[5]
 	y += 6*rowGap + 6
-	// Choice list rows — a scroll window over the full choice list so a node
-	// with more than dialogChoiceVisible choices keeps the cursored row in
-	// view (and every choice reachable) instead of capping at the first few.
+	// Choice list rows (scroll window over the full list).
 	top, rows := scrollRows(x, y, fw, dialogListRowH, cursor, choiceCount, dialogChoiceVisible)
 	// Choice action buttons + Back along the bottom.
 	by := r.Y + r.Height - modalBtnH - modalBottomInset
@@ -1039,9 +992,8 @@ func updateDialogNodeEditModal(s *State) Action {
 		s.focus = focusNone // click elsewhere defocuses fields
 	}
 
-	// While a text field is focused: route keys into it. Enter commits the
-	// field (defocus, stay in the node editor); Esc steps straight back up to
-	// the node list (single-press, matching the door modal).
+	// Text field focused: route keys into it. Enter commits (defocus); Esc steps
+	// back up to the node list.
 	if target := dialogNodeTextTarget(s); target != nil {
 		pumpFocusField(s, target)
 		if editorTabPressed() {
@@ -1099,8 +1051,7 @@ func toggleNodeMenu(s *State) {
 	}
 }
 
-// dialogNodeTextTarget returns the field pointer for the active node-edit
-// focus, or nil when no node field is focused.
+// dialogNodeTextTarget returns the focused node text field, or nil if none.
 func dialogNodeTextTarget(s *State) *string {
 	n := currentDialogNode(s)
 	if n == nil {
@@ -1133,8 +1084,7 @@ func cycleDialogNodeFocus(s *State) {
 const (
 	dialogChoiceModalW = float32(520)
 	dialogChoiceModalH = float32(470)
-	// dialogCondVisible caps how many condition rows show at once; longer
-	// lists scroll (cursor stays in view) rather than running off the card.
+	// dialogCondVisible caps visible condition rows; longer lists scroll.
 	dialogCondVisible = 4
 )
 
@@ -1162,7 +1112,7 @@ func dialogChoiceLayoutFor(cursor, condCount int) dialogChoiceLayout {
 	labelField := fields[0]
 	nextField := fields[1]
 	actionBtn := fields[2]
-	y += 3*rowGap + 8 // gap for the "Conditions (N)" header line
+	y += 3*rowGap + 8 // gap for the "Conditions (N)" header
 	top, rows := scrollRows(x, y, fw, dialogListRowH, cursor, condCount, dialogCondVisible)
 	by := r.Y + r.Height - modalBtnH - modalBottomInset
 	btns := equalButtonRow(x, by, fw, modalBtnH, 4)
@@ -1255,7 +1205,7 @@ func updateDialogChoiceEditModal(s *State) Action {
 	case focusDialogChoiceNext:
 		pumpFocusField(s, &c.NextNodeID)
 	default:
-		// No field focused — condition-list navigation + shortcuts.
+		// No field focused — list nav + shortcuts.
 		if editorCancelPressed() {
 			returnToDialogNodeEdit(s)
 			return ActionNone
@@ -1332,11 +1282,9 @@ func dialogActionLayoutFor() dialogActionLayout {
 	return dialogActionLayout{card: r, kindBtn: kindBtn, idField: idField, backBtn: backBtn}
 }
 
-// currentDialogActionHolder returns a pointer to the EndAction field the action
-// editor targets — the current CHOICE's when modalDialogActionOnChoice, else
-// the current NODE's — or nil when that entity is out of range. The double
-// pointer lets the kind picker set the holder to nil (no action) or allocate a
-// fresh *DialogAction.
+// currentDialogActionHolder returns the EndAction field the action editor targets
+// (the choice's when modalDialogActionOnChoice, else the node's), or nil if out
+// of range. Double pointer so the kind picker can nil it or allocate a fresh one.
 func currentDialogActionHolder(s *State) **core.DialogAction {
 	if s.modalDialogActionOnChoice {
 		if c := currentDialogChoice(s); c != nil {
@@ -1367,9 +1315,8 @@ func dialogActionLabel(a *core.DialogAction) string {
 	return "None"
 }
 
-// dialogActionIDTarget returns the string field the action's id row edits
-// (quest id for quest actions, event id for event actions), or nil when the
-// current action has no id field.
+// dialogActionIDTarget returns the action's id field (quest id or event id), or
+// nil when the current action has none.
 func dialogActionIDTarget(s *State) *string {
 	holder := currentDialogActionHolder(s)
 	if holder == nil || *holder == nil {
@@ -1385,15 +1332,12 @@ func dialogActionIDTarget(s *State) *string {
 }
 
 // dialogActionKindEntries are the action picker's rows: None clears the action,
-// the others ensure a non-nil action and set its kind/op. The flattened list
-// (start/complete as separate rows rather than a kind + op pair) keeps the
+// the others set kind/op. Flattened (start/complete as separate rows) to keep the
 // common cases one click away.
 func dialogActionKindEntries(s *State) []dropdownEntry {
-	// set == nil is the "None" row (clears the action); the others mutate a
-	// non-nil action, each FULLY specifying the payload (including clearing the
-	// OTHER kind's id field) so a stale QuestID / EventID can't linger after a
-	// kind switch. Row LABELS are derived from dialogActionLabel against a probe
-	// action, so the picker text can't drift from the button text it sets.
+	// set == nil is "None"; the others each FULLY specify the payload (clearing
+	// the other kind's id field) so a stale QuestID/EventID can't linger. Labels
+	// derive from dialogActionLabel against a probe so they can't drift.
 	sets := []func(*core.DialogAction){
 		nil,
 		func(a *core.DialogAction) {
@@ -1447,7 +1391,7 @@ func openDialogActionEditModal(s *State, onChoice bool) {
 }
 
 // returnFromDialogActionEdit steps back to whichever editor opened the action
-// editor (leaving its list cursor untouched — the action editor doesn't use it).
+// editor (its list cursor is untouched).
 func returnFromDialogActionEdit(s *State) {
 	clearDialogFocus(s)
 	if s.modalDialogActionOnChoice {

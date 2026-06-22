@@ -33,8 +33,7 @@ var (
 	isoBG        = rl.NewColor(26, 28, 34, 255)    // off-screen clear
 )
 
-// toggleIsoView flips the 3D view on/off. Frees the off-screen target on exit so
-// the GPU handle isn't held in top-down mode.
+// toggleIsoView flips the 3D view on/off, freeing the off-screen target on exit.
 func toggleIsoView(s *State) {
 	s.isoView = !s.isoView
 	if s.isoView {
@@ -45,8 +44,7 @@ func toggleIsoView(s *State) {
 	s.flash("Top-down view")
 }
 
-// Close releases the editor's GPU resources (the 3D-view render target). Call on
-// leaving the editor so the handle isn't orphaned. Idempotent.
+// Close releases the editor's GPU resources (the 3D-view render target). Idempotent.
 func (s *State) Close() { s.freeIsoRT() }
 
 // freeIsoRT releases the off-screen iso target if allocated (idempotent).
@@ -58,8 +56,7 @@ func (s *State) freeIsoRT() {
 	}
 }
 
-// ensureIsoRT (re)allocates the off-screen target to match the grid panel size,
-// reallocating only on resize.
+// ensureIsoRT (re)allocates the off-screen target to the grid panel size (resize only).
 func (s *State) ensureIsoRT(w, h int32) {
 	if s.isoRT.ID != 0 && s.isoRTW == w && s.isoRTH == h {
 		return
@@ -69,8 +66,8 @@ func (s *State) ensureIsoRT(w, h int32) {
 	s.isoRTW, s.isoRTH = w, h
 }
 
-// isoLevelSpan returns the lowest+highest elevation level across the map.
-// Columns draw relative to the lowest so a flat map reads flat and a tall one fits.
+// isoLevelSpan returns the lowest+highest elevation level (columns draw relative
+// to the lowest).
 func isoLevelSpan(s *State) (minL, maxL int) {
 	minL, maxL = 1<<30, -(1 << 30)
 	for z := 0; z < s.area.Height; z++ {
@@ -96,9 +93,8 @@ func isoColumnHeight(s *State, x, z, minL int) float32 {
 	return float32(s.area.ElevationLevelAt(x, z)-minL+1) * isoLevelH
 }
 
-// isoCamera builds the orbit camera: one of four 45°-offset yaws, fixed downward
-// pitch, fit-to-map distance scaled by zoom, targeting the panned map center.
-// Level span is passed in (computed once per frame) to avoid rescanning the map.
+// isoCamera builds the orbit camera (one of four 45° yaws, fixed pitch,
+// fit-to-map distance × zoom). Level span passed in to avoid rescanning.
 func (s *State) isoCamera(minL, maxL int) rl.Camera3D {
 	W, H := s.area.Width, s.area.Height
 	tall := float32(maxL-minL+1) * isoLevelH
@@ -139,9 +135,8 @@ func (s *State) isoColumnBox(x, z, minL int) (center, size rl.Vector3) {
 	return center, size
 }
 
-// isoRayInRect builds the world-space pick ray for a mouse point over `rect`.
-// raylib's GetScreenToWorldRay assumes a full-window projection, so this redoes
-// the unproject math with the rect's own dimensions.
+// isoRayInRect builds the pick ray for a mouse point over `rect` — raylib's
+// GetScreenToWorldRay assumes a full window, so this unprojects with rect's dims.
 func isoRayInRect(mp rl.Vector2, rect rl.Rectangle, cam rl.Camera3D) rl.Ray {
 	ndcX := 2*(mp.X-rect.X)/rect.Width - 1
 	ndcY := 1 - 2*(mp.Y-rect.Y)/rect.Height
@@ -175,8 +170,7 @@ func (s *State) isoPick(cam rl.Camera3D, mp rl.Vector2, minL int) (int, int) {
 	return bestX, bestZ
 }
 
-// drawGridIso renders the map as extruded 3D blocks into the off-screen target,
-// blits it into the grid panel, then overlays a hovered-column readout.
+// drawGridIso renders extruded 3D blocks off-screen, blits them, then overlays a readout.
 func drawGridIso(s *State, font rl.Font) {
 	grid := s.rect.grid
 	w, h := int32(grid.Width), int32(grid.Height)
@@ -202,7 +196,7 @@ func drawGridIso(s *State, font rl.Font) {
 	rl.EndMode3D()
 	rl.EndTextureMode()
 
-	// RenderTextures store rows bottom-up; negate source height to blit upright.
+	// RenderTextures are bottom-up; negate source height to blit upright.
 	rl.DrawTextureRec(s.isoRT.Texture,
 		rl.NewRectangle(0, 0, float32(w), -float32(h)),
 		rl.NewVector2(grid.X, grid.Y), rl.White)
@@ -210,12 +204,11 @@ func drawGridIso(s *State, font rl.Font) {
 	drawIsoReadout(s, font, grid)
 }
 
-// drawIsoColumn paints one column: darker body cube + brighter floor-colored top
-// cap, wire edges, optional ramp marker, and a gold highlight when hovered.
+// drawIsoColumn paints one column: darker body + brighter top cap, wire edges,
+// optional ramp marker, gold highlight when hovered.
 func (s *State) drawIsoColumn(x, z, minL int, floorHidden, hovered bool) {
 	center, size := s.isoColumnBox(x, z, minL)
-	// Bounds-safe cellAt, not raw Floor[z][x]: a ragged area would panic. Missing
-	// cells fall back to the empty-top color.
+	// Bounds-safe cellAt, not raw Floor[z][x]: a ragged area would panic.
 	top := isoEmptyTop
 	if fb, ok := cellAt(s.area.Floor, x, z); ok {
 		top = rl.Color(floorColor(fb))
@@ -223,8 +216,7 @@ func (s *State) drawIsoColumn(x, z, minL int, floorHidden, hovered bool) {
 	if floorHidden {
 		top = isoEmptyTop
 	}
-	// Darker body so the bright cap reads as lit (fakes one-axis lighting; flat
-	// DrawCube is otherwise unshaded).
+	// Darker body so the bright cap reads as lit (flat DrawCube is unshaded).
 	rl.DrawCubeV(center, size, render.ShadeColor(top, 0.7))
 	capCenter := rl.NewVector3(center.X, center.Y+size.Y/2-0.01, center.Z)
 	rl.DrawCubeV(capCenter, rl.NewVector3(size.X, 0.02, size.Z), top)
@@ -241,8 +233,7 @@ func (s *State) drawIsoColumn(x, z, minL int, floorHidden, hovered bool) {
 	}
 }
 
-// drawIsoReadout shows the hovered column's coords + signed elevation level in
-// the canvas corner, plus a control hint.
+// drawIsoReadout shows the hovered column's coords + signed level, plus a hint.
 func drawIsoReadout(s *State, font rl.Font, grid rl.Rectangle) {
 	hint := "3D · Q/E orbit · wheel zoom · L raise / R lower · I top-down"
 	rl.DrawTextEx(font, hint, rl.NewVector2(grid.X+8, grid.Y+8), editorFontHint, 1, rl.NewColor(210, 214, 222, 200))
@@ -253,8 +244,7 @@ func drawIsoReadout(s *State, font rl.Font, grid rl.Rectangle) {
 	}
 }
 
-// updateIsoCanvas drives the 3D view: orbit (Q/E), zoom (wheel), pan
-// (middle-drag), and elevation editing on the hovered column.
+// updateIsoCanvas drives the 3D view: orbit (Q/E), zoom, pan, elevation edits.
 func updateIsoCanvas(s *State, mp rl.Vector2) {
 	if rl.IsKeyPressed(rl.KeyE) {
 		s.isoYaw = (s.isoYaw + 1) & 3
@@ -310,8 +300,7 @@ func updateIsoCanvas(s *State, mp rl.Vector2) {
 	}
 }
 
-// isoSetColumnLevel raises/lowers the column's ground level by delta, clamped to
-// [0, maxEditLevel], via the shared ground-level setter + undo hook.
+// isoSetColumnLevel raises/lowers the column's ground level by delta, clamped to [0, maxEditLevel].
 func isoSetColumnLevel(s *State, x, z, delta int) {
 	cur := s.area.ElevationLevelAt(x, z)
 	next := cur + delta

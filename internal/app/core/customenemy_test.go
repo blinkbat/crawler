@@ -6,12 +6,8 @@ import (
 	"testing"
 )
 
-// TestSkillOnDiskNameRoundTrip asserts SkillIDFromOnDiskName is the
-// exact inverse of SkillOnDiskName for every registered SkillID.
-// SkillOnDiskName derives from SkillName via lowercase + space→
-// underscore — if a future skill name picks up punctuation or some
-// other glyph the inverse map doesn't expect, this test fires before
-// a player's mapfile starts silently losing skill loadouts on load.
+// TestSkillOnDiskNameRoundTrip asserts SkillIDFromOnDiskName is the exact inverse of SkillOnDiskName
+// for every SkillID, so a name with an unexpected glyph fires here, not by silently losing loadouts on load.
 func TestSkillOnDiskNameRoundTrip(t *testing.T) {
 	ids := AllSkillIDs()
 	if len(ids) == 0 {
@@ -34,8 +30,7 @@ func TestSkillOnDiskNameRoundTrip(t *testing.T) {
 	}
 }
 
-// TestSkillOnDiskNameRejectsBlank guards the bare-empty input path so
-// a corrupted mapfile field can't slip past lookup as SkillNone.
+// TestSkillOnDiskNameRejectsBlank: a blank/whitespace field must not slip past lookup as SkillNone.
 func TestSkillOnDiskNameRejectsBlank(t *testing.T) {
 	if _, ok := SkillIDFromOnDiskName(""); ok {
 		t.Error("empty string must not round-trip; got ok=true")
@@ -45,8 +40,7 @@ func TestSkillOnDiskNameRejectsBlank(t *testing.T) {
 	}
 }
 
-// TestClampMapDimension guards the shared editor clamp against silent
-// regressions — three call sites depend on the [Min, Max] contract.
+// TestClampMapDimension guards the shared editor clamp's [Min, Max] contract.
 func TestClampMapDimension(t *testing.T) {
 	cases := []struct {
 		in, want int
@@ -122,10 +116,8 @@ func TestCustomEnemyPackRoundTripAndRuntimeStats(t *testing.T) {
 		t.Fatalf("custom enemy should carry a definition override")
 	}
 	def := EnemyInfoFor(enemy)
-	// EnemyInfoFor overlays the per-instance MaxHP, which Instantiate scales by
-	// the global difficulty dial (like NewEnemy) — so the authored 33 reads back
-	// as ScaleEnemyDifficulty(33). The other fields are unscaled (damage scales
-	// later, at EnemyBasicDamage read time, not in the def).
+	// Instantiate scales MaxHP by the difficulty dial, so authored 33 reads back as ScaleEnemyDifficulty(33);
+	// other fields are unscaled (damage scales later, at read time).
 	if def.SingularName != "venom bat" || def.MaxHP != ScaleEnemyDifficulty(33) || def.Stats.SPD != 12 ||
 		def.AttackDamage != 11 || def.XPValue != 77 || def.Tier != 9 ||
 		def.SkillCastChance != 1 || def.SpellPower != 8 || def.Armor != 4 {
@@ -153,13 +145,11 @@ func TestCustomEnemyPackRoundTripAndRuntimeStats(t *testing.T) {
 	}
 }
 
-// TestCustomEnemyDefFromMapRejectsBadFields locks the load-time validation
-// that mirrors the static enemy registry's init guards: a hand-edited custom
-// enemy row with an out-of-range cast chance or a negative mitigation / reward
-// / damage field is refused at load rather than silently reaching combat math.
+// TestCustomEnemyDefFromMapRejectsBadFields locks load-time validation: a row with an out-of-range
+// cast chance or negative mitigation/reward/damage is refused, not silently fed to combat math.
 func TestCustomEnemyDefFromMapRejectsBadFields(t *testing.T) {
 	base := mapfile.MapCustomEnemy{Name: "bad", BaseKind: "bat", HP: 10}
-	// Sanity: the clean baseline loads (so the cases below isolate the field).
+	// Sanity: the clean baseline loads, so the cases below isolate the field.
 	if _, err := CustomEnemyDefFromMap(base); err != nil {
 		t.Fatalf("clean custom enemy should load, got %v", err)
 	}

@@ -1,33 +1,19 @@
-// Package audio is the project's sound bank. The bank's defaults are
-// procedural — a handful of short cues (input hit / input miss / heal /
-// enemy hit / enemy death) generated at startup from sine waves and
-// envelopes via the wavsynth subpackage. The editor's Sounds modal can
-// save user-recorded / user-tuned .wav files under maps/sounds/ and
-// rebind any built-in cue to one of those files via maps/sounds/
-// assignments.txt (see the userconfig subpackage). On Init the bank
-// synthesizes its procedural defaults, then overlays the persistent
-// user assignments — so the repo ships asset-free but per-user
-// customizations land on disk and survive restarts.
+// Package audio is the project's sound bank. Defaults are procedural cues
+// synthesized at startup (wavsynth); the editor's Sounds modal can save
+// .wav files under maps/sounds/ and rebind cues via assignments.txt
+// (userconfig). Init synthesizes defaults then overlays user assignments.
 //
-// The pure synthesis (sine sweeps, chord sums, WAV header building)
-// lives in the wavsynth subpackage; the pure filesystem / parser logic
-// lives in the userconfig subpackage. Both are split out so they can be
-// unit-tested without pulling raylib into the test binary's load path.
-// This file owns the raylib-side lifecycle: device init, sound bank
-// assembly, playback, teardown. user.go owns the raylib-side preview
-// ring and bank-overlay reload.
+// wavsynth (pure synthesis) and userconfig (pure filesystem/parser) are
+// split out so they unit-test without raylib on the load path. This file
+// owns the raylib lifecycle (device init, bank assembly, playback,
+// teardown); user.go owns the preview ring and bank-overlay reload.
 //
-// Usage:
-//
-//	audio.Init()    // call once during app startup (after rl.InitWindow)
+//	audio.Init()    // once at startup, after rl.InitWindow
 //	defer audio.Close()
-//
 //	audio.Play(audio.SoundInputHit)
 //
-// All Play calls are no-ops when the audio device failed to initialize, so
-// callers don't need to guard. Sounds use a single shared playback channel
-// per Sound — rapid re-presses cut the previous instance short, which is
-// the right behavior for short input clicks (no buildup).
+// Play is a no-op when the device failed to init. One shared channel per
+// Sound — rapid re-presses cut the previous instance (right for clicks).
 package audio
 
 import (
@@ -39,8 +25,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Sound identifies one entry in the procedural bank. Add a new enum value,
-// load it inside loadBank, and any caller can Play it.
+// Sound identifies one entry in the procedural bank.
 type Sound int
 
 const (
@@ -57,25 +42,17 @@ const (
 	soundCount
 )
 
-// soundCue is one row in the bank: display label (used in UI), the
-// canonical slug (used as BOTH the key in maps/sounds/assignments.txt
-// AND the on-disk filename stem for the default .wav), and the
-// procedural-PCM seeder. One table, three uses — adding a new cue is
-// one row and the bank, UI, file seeder, and action map all pick it up.
-//
-// Why a single table: previous shape kept `soundMeta` (Display +
-// Canonical) and `defaultBankPCM()` (Sound → PCM) parallel, with the
-// "same-canonical-name → default file" link implicit. Pulling the
-// PCM onto the same row makes the link explicit and removes the
-// "which file plays for which cue?" guesswork — see loadBank.
+// soundCue is one bank row: Display label (UI), Canonical slug (BOTH the
+// assignments.txt key AND the default .wav filename stem), and the PCM
+// seeder. One row feeds bank, UI, file seeder, and action map.
 type soundCue struct {
 	Display   string
 	Canonical string
 	PCM       func() []int16
 }
 
-// PCM-synth arg order (these are positional, so a transposed column is a
-// silent timbre change — see wavsynth for the canonical contract):
+// Synth args are positional — a transposed column is a silent timbre
+// change (see wavsynth for the contract):
 //
 //	SynthClick(duration, pitchHz, pitchDrop, noise, volume)
 //	SynthChord(duration, freqs, volume)
@@ -83,52 +60,41 @@ type soundCue struct {
 //	SynthSweep(duration, startHz, endHz, volume, attack, release)
 //	SynthWhistleTrill(duration, startHz, endHz, volume)
 var soundCues = [soundCount]soundCue{
-	// Bright UI tick — high pitch, large noise mix, very short.
+	// Bright UI tick.
 	SoundInputHit: {Display: "Input Hit", Canonical: "input_hit",
 		PCM: func() []int16 { return wavsynth.SynthClick(0.025, 1800, 0.5, 0.6, 0.22) }},
-	// Rare reward — an SMRPG-style little trill whistle: a pure sine sweeping
-	// up from ~D6 to ~A6 with a fast vibrato shimmer, so a Great reads as a
-	// pleasing "tweet!" that stands apart from a regular Nice without the old
-	// stacked-harmonic chord that grew grating on repeat.
+	// SMRPG-style trill whistle — a "tweet!" that stands apart from a Nice.
 	SoundInputGreat: {Display: "Input Great", Canonical: "input_great",
 		PCM: func() []int16 { return wavsynth.SynthWhistleTrill(0.16, 1200, 1800, 0.2) }},
-	// Low dull thud — failure registers as weight, not absence.
+	// Low dull thud.
 	SoundInputMiss: {Display: "Input Miss", Canonical: "input_miss",
 		PCM: func() []int16 { return wavsynth.SynthClick(0.045, 220, 0.7, 0.25, 0.20) }},
-	// Tonal two-note chime — melodic shape IS the cue's identity, so
-	// it breaks the percussive theme on purpose.
+	// Two-note chime — melodic shape is the cue's identity; breaks the percussive theme.
 	SoundHeal: {Display: "Heal", Canonical: "heal",
 		PCM: func() []int16 { return wavsynth.SynthChime(0.09, 520, 780, 0.18) }},
-	// Tight mid-pitch thwack — moderate noise for impact crunch.
+	// Tight mid-pitch thwack.
 	SoundEnemyHit: {Display: "Enemy Hit", Canonical: "enemy_hit",
 		PCM: func() []int16 { return wavsynth.SynthClick(0.035, 380, 0.6, 0.4, 0.24) }},
-	// Heavier deep kick-drum thud with longer tail.
+	// Deep kick-drum thud, longer tail.
 	SoundEnemyDeath: {Display: "Enemy Death", Canonical: "enemy_death",
 		PCM: func() []int16 { return wavsynth.SynthClick(0.12, 140, 0.85, 0.2, 0.22) }},
-	// Triumphant win fanfare — a bright C-major chord (with the octave on
-	// top) rung longer than any combat cue so the victory reads as an event.
+	// Win fanfare — C-major chord rung longer than any combat cue.
 	SoundVictory: {Display: "Victory", Canonical: "victory",
 		PCM: func() []int16 { return wavsynth.SynthChord(0.45, []float64{523, 659, 784, 1047}, 0.22) }},
-	// Level-up flourish — a quick rising sweep, tonally distinct from the
-	// win chord so a level-up stands out while the fanfare still rings.
+	// Level-up flourish — rising sweep, distinct from the win chord.
 	SoundLevelUp: {Display: "Level Up", Canonical: "level_up",
 		PCM: func() []int16 { return wavsynth.SynthSweep(0.30, 440, 880, 0.20, 0.02, 0.10) }},
-	// Loot pickup — short bright pop as each spoils row cascades in.
+	// Loot pickup — short bright pop.
 	SoundItemGet: {Display: "Item Get", Canonical: "item_get",
 		PCM: func() []int16 { return wavsynth.SynthClick(0.05, 1200, 0.4, 0.3, 0.20) }},
-	// Subtle count-up blip — very short, quiet, high; fires rapidly as the
-	// spoils XP bars fill so it reads as a soft tick rather than a tone.
+	// Count-up blip — short, quiet, high; reads as a tick not a tone.
 	SoundXPTick: {Display: "XP Tick", Canonical: "xp_tick",
 		PCM: func() []int16 { return wavsynth.SynthClick(0.014, 2600, 0.4, 0.1, 0.08) }},
 }
 
-// soundCues is an array of length soundCount, so a missing row reads
-// as the zero value (empty Display / Canonical / nil PCM) instead of
-// failing to compile. Verify every row is populated at init —
-// otherwise a future Sound enum addition without a corresponding
-// soundCues entry would silently ship as a no-op cue. Mirrors the
-// convention AGENTS.md notes for timingGrades / statTable /
-// partyStatusVisuals.
+// A missing soundCues row is the zero value (nil PCM), not a compile
+// error — assert every row is populated so a new Sound enum value can't
+// ship as a silent no-op. Mirrors timingGrades / statTable (AGENTS.md).
 func init() {
 	if len(soundCues) != int(soundCount) {
 		panic(fmt.Sprintf("audio: soundCues length %d != soundCount %d", len(soundCues), soundCount))
@@ -143,9 +109,7 @@ func init() {
 	}
 }
 
-// SoundName returns the display label for a sound. Out-of-range values
-// fall back to "Unknown" so a future enum addition that's missed in
-// soundCues still renders without a panic.
+// SoundName returns the display label; out-of-range falls back to "Unknown".
 func SoundName(s Sound) string {
 	if s < 0 || s >= soundCount {
 		return "Unknown"
@@ -153,72 +117,55 @@ func SoundName(s Sound) string {
 	return soundCues[s].Display
 }
 
-// SoundCount is the number of cues in the bank. Used by callers that
-// cycle through every entry (jukebox) without hardcoding the iota tail.
+// SoundCount is the number of cues in the bank.
 func SoundCount() int {
 	return int(soundCount)
 }
 
 // CONTRACT: bank, ready, and the preview ring (user.go) are unsynchronized
-// package globals. Every accessor — Play, the PreviewPCM/PreviewFile ring, and
-// the ReloadUserAssignments/reloadOneCue mutators — MUST run on the single game
-// goroutine. There is no lock, so a reload's rl.UnloadSound landing while
-// another goroutine is mid-PlaySound on the same slot would be a use-after-free
-// in raylib's C side. If audio ever needs to be driven off-thread, add a mutex
-// guarding bank/ready/previewRing before doing so.
+// globals — every accessor MUST run on the single game goroutine. No lock, so
+// a reload's UnloadSound racing a PlaySound on the same slot is a use-after-free
+// in raylib's C side. Add a mutex before driving audio off-thread.
 var (
 	bank  [soundCount]rl.Sound
 	ready bool
 )
 
-// Init brings up the raylib audio device and synthesizes every sound in the
-// bank. Safe to call more than once — subsequent calls no-op. Audio device
-// failures leave ready=false so Play becomes a silent fallback rather than
-// crashing on systems without a working audio stack.
+// Init brings up the audio device and synthesizes the bank. Safe to call
+// repeatedly (subsequent calls no-op). Device failures leave ready=false so
+// Play degrades to silence instead of crashing.
 //
-// loadBank runs inside a panic-recover so a partial bank build (e.g. a
-// future cue that loads from disk and fails mid-way) doesn't leak the
-// entries that already loaded — the recovery path unloads what's there
-// and shuts the device down, leaving ready=false. The panic is SWALLOWED
-// (not re-raised): Run() calls Init() with no recover, so re-panicking
-// would crash the whole game, contradicting the package's contract that
-// audio failures degrade to a silent fallback. Today's pure-synth cues
-// can't fail, but the guard is cheap and keeps the contract honest.
+// loadBank runs under panic-recover so a partial build doesn't leak loaded
+// entries; the recover path unloads, shuts the device down, and leaves
+// ready=false. The panic is SWALLOWED (not re-raised) — Run calls Init with
+// no recover, and re-panicking would violate the silent-fallback contract.
 func Init() {
 	if ready {
 		return
 	}
 	rl.InitAudioDevice()
 	if !rl.IsAudioDeviceReady() {
-		// The device backend was opened by InitAudioDevice even though it
-		// didn't come up usable. ready stays false so Close() (guarded on
-		// ready) will never run, so shut the half-open device down here or
-		// it leaks for the process lifetime.
+		// Backend opened but unusable; ready stays false so Close never runs.
+		// Shut the half-open device down here or it leaks for the process life.
 		rl.CloseAudioDevice()
 		return
 	}
 	defer func() {
 		if r := recover(); r != nil {
-			// Clean up the half-built bank and shut the device down, then let
-			// Init return with ready=false so Play becomes a silent no-op
-			// rather than crashing the game. Do NOT re-panic (see doc above).
+			// Clean up and return ready=false. Do NOT re-panic (see doc above).
 			unloadBank()
 			rl.CloseAudioDevice()
 			ready = false
 		}
 	}()
-	// loadBank already reads assignments.txt and loads each cue from its
-	// assigned .wav (resolveAssignedFile + loadCueFromDisk), so the user
-	// overlay is applied here — no separate ReloadUserAssignments pass at
-	// boot (that re-decoded every cue a second time). The editor's Sounds
-	// modal still calls ReloadUserAssignments explicitly when an assignment
-	// changes mid-session.
+	// loadBank applies the user overlay (reads assignments.txt, loads each
+	// assigned .wav) — no separate ReloadUserAssignments pass at boot. The
+	// editor still calls ReloadUserAssignments on a mid-session change.
 	loadBank()
 	ready = true
 }
 
-// Close unloads the bank and shuts the audio device down. Mirrors Init —
-// safe to call when audio never came up.
+// Close unloads the bank and shuts the device down. Safe when audio never came up.
 func Close() {
 	if !ready {
 		return
@@ -229,20 +176,15 @@ func Close() {
 	ready = false
 }
 
-// unloadBank releases every loaded entry and zeros the bank array. Guards
-// against zero-value entries (nil Stream.Buffer) so calling on a partial
-// load — the Init recover path's case — doesn't segfault inside raylib's
-// C-side UnloadSound. Shared by Init's recover branch and Close so the
-// "what does cleanup look like" answer lives in one place.
+// unloadBank releases every loaded entry and zeros the bank. Guards zero-value
+// entries so a partial load (Init's recover path) doesn't segfault in raylib.
 func unloadBank() {
 	unloadSounds(bank[:])
 	bank = [soundCount]rl.Sound{}
 }
 
-// unloadSounds releases every non-zero rl.Sound in the slice. Shared by
-// unloadBank and unloadPreviewRing, which used to inline the same
-// "skip nil-buffer, UnloadSound, zero the slot" loop. Mutates the slice
-// in place (slot zeroing) so the buffer pointers can't be read again.
+// unloadSounds releases every non-zero rl.Sound in the slice, zeroing each slot
+// in place so the buffer pointers can't be read again.
 func unloadSounds(slots []rl.Sound) {
 	for i := range slots {
 		if slots[i].Stream.Buffer == nil {
@@ -253,10 +195,7 @@ func unloadSounds(slots []rl.Sound) {
 	}
 }
 
-// forEachCue walks every (non-empty-canonical) row of soundCues, the
-// shared scaffold loadBank / ensureBankOnDisk / ReloadUserAssignments
-// each used to open-code as `for cue := Sound(0); cue < soundCount; cue++`
-// then a `continue` on empty Canonical.
+// forEachCue walks every soundCues row with a non-empty Canonical.
 func forEachCue(fn func(cue Sound, row soundCue)) {
 	for cue := Sound(0); cue < soundCount; cue++ {
 		row := soundCues[cue]
@@ -267,10 +206,9 @@ func forEachCue(fn func(cue Sound, row soundCue)) {
 	}
 }
 
-// resolveAssignedFile returns the filename a cue should load from given
-// the assignments map. Empty assignment falls back to the canonical
-// slug; assigned reports whether the player explicitly set an override
-// (so callers can flag "assigned file missing" diagnostics).
+// resolveAssignedFile returns the filename a cue loads from. Empty assignment
+// falls back to the canonical slug; assigned reports an explicit override (so
+// callers can flag "assigned file missing").
 func resolveAssignedFile(assigns map[string]string, canonical string) (name string, assigned bool) {
 	name = assigns[canonical]
 	assigned = name != ""
@@ -280,8 +218,7 @@ func resolveAssignedFile(assigns map[string]string, canonical string) (name stri
 	return name, assigned
 }
 
-// Play fires the named sound. No-ops if audio isn't ready or the enum is
-// out of range — callers can fire-and-forget.
+// Play fires the named sound; no-op if not ready or out of range (fire-and-forget).
 func Play(id Sound) {
 	if !ready || id < 0 || id >= soundCount {
 		return
@@ -289,10 +226,7 @@ func Play(id Sound) {
 	rl.PlaySound(bank[id])
 }
 
-// PlayResult fires the success/failure feedback cue for a bool-returning action
-// (bought a skill node, equipped an item, …): the bright SoundInputGreat on ok,
-// the SoundInputMiss buzz otherwise. Centralizes the ok→cue pairing that several
-// explore call sites would otherwise spell out as an if/else.
+// PlayResult fires SoundInputGreat on ok, the SoundInputMiss buzz otherwise.
 func PlayResult(ok bool) {
 	if ok {
 		Play(SoundInputGreat)
@@ -301,29 +235,14 @@ func PlayResult(ok bool) {
 	}
 }
 
-// loadBank is the one path that builds the bank from the on-disk
-// state: files + the action map (assignments.txt). Steps:
-//
-//  1. Ensure every cue's default .wav exists in maps/sounds/. Missing
-//     files get written from soundCues[cue].PCM(). Existing files are
-//     never clobbered — user edits via the editor's Sounds modal
-//     persist across launches.
-//  2. Ensure assignments.txt has an entry for every cue. Missing
-//     entries default to the cue's canonical name (so cue input_hit
-//     maps to input_hit.wav by default). The action map is then
-//     authoritative: every bank slot reads from assignments[slug].
+// loadBank builds the bank from on-disk state (files + assignments.txt):
+//  1. Write any missing default .wav from PCM(); never clobber existing files.
+//  2. Backfill assignments.txt so every cue has a row; the map is then
+//     authoritative (each bank slot reads from assignments[slug]).
 //  3. Load each cue's rl.Sound from its assigned file.
 //
-// Why this shape: the previous arrangement kept the procedural PCM,
-// the disk seeder, and the assignments overlay as three separate
-// concepts with implicit "same-canonical-name" fallbacks weaving
-// between them. Now there are exactly two pieces of state — files
-// and the action map — and both are on disk and user-editable.
-//
-// In-memory fallback: if a cue's assigned file can't be read at
-// runtime (race, permissions, manual mid-process delete), the cue
-// falls back to its freshly-synthesized PCM so Play(cue) never
-// silently breaks even when the filesystem misbehaves.
+// If an assigned file can't be read at runtime, the cue falls back to its
+// freshly-synthesized PCM so Play(cue) never goes silent.
 func loadBank() {
 	assigns := ensureBankOnDisk()
 	forEachCue(func(cue Sound, row soundCue) {
@@ -332,16 +251,10 @@ func loadBank() {
 	})
 }
 
-// ensureBankOnDisk writes any missing default .wav files and adds an
-// entry to assignments.txt for any cue whose slug isn't already
-// listed. After this call, every cue has both a file on disk and a
-// row in the action map — no implicit "default" anywhere. Errors
-// (read-only filesystem, no permission) are swallowed because the
-// in-memory PCM fallback in loadCueFromDisk still covers playback.
-//
-// Returns the (possibly backfilled) assignments map it loaded so the
-// caller can build the bank from it without re-reading assignments.txt
-// from disk a second time.
+// ensureBankOnDisk writes missing default .wav files and backfills
+// assignments.txt so every cue has a file and a map row. Errors are swallowed
+// (loadCueFromDisk's PCM fallback covers playback). Returns the loaded map so
+// the caller needn't re-read assignments.txt.
 func ensureBankOnDisk() map[string]string {
 	assigns := userconfig.LoadAssignments()
 	assignsChanged := false
@@ -349,14 +262,12 @@ func ensureBankOnDisk() map[string]string {
 		if row.PCM == nil {
 			return
 		}
-		// File: write the default if no .wav lives at the canonical
-		// name yet. Existing user-edited content is preserved.
+		// Write the default only if no .wav exists yet (preserve user edits).
 		path := UserSoundPath(row.Canonical)
 		if _, err := os.Stat(path); err != nil {
 			_, _ = userconfig.WriteWAV(row.Canonical, row.PCM())
 		}
-		// Action map: backfill the entry if assignments.txt is missing
-		// this cue. Same-name default means cue's slug → cue's slug.
+		// Backfill the map entry; same-name default = slug → slug.
 		if _, ok := assigns[row.Canonical]; !ok {
 			assigns[row.Canonical] = row.Canonical
 			assignsChanged = true
@@ -368,21 +279,14 @@ func ensureBankOnDisk() map[string]string {
 	return assigns
 }
 
-// readOrSynthSound resolves one cue's rl.Sound: it reads the named .wav
-// from disk and, failing that (deleted mid-run, permission revoked),
-// rebuilds from the supplied PCM closure so Play(cue) never goes silent
-// on transient filesystem errors. fromFile reports which branch ran so
-// callers that need to flag "assigned file missing" (ReloadUserAssignments)
-// can. pcmFn nil-checks because a future malformed soundCues entry
-// shouldn't crash the bank. Single source for the disk-or-synth rule
-// shared by loadBank (via loadCueFromDisk) and the assignments reload.
+// readOrSynthSound resolves one cue's rl.Sound: read the named .wav, else
+// rebuild from pcmFn so Play(cue) never goes silent on a transient FS error.
+// fromFile reports which branch ran (for "assigned file missing" flags). pcmFn
+// is nil-checked so a malformed soundCues entry can't crash the bank.
 func readOrSynthSound(name string, pcmFn func() []int16) (snd rl.Sound, fromFile bool) {
 	if data, err := os.ReadFile(UserSoundPath(name)); err == nil {
-		// File present, but a corrupt / non-WAV payload decodes to a zero Sound
-		// (nil stream buffer). Only honor the disk branch when the decode
-		// actually produced a playable Sound; otherwise fall through to the
-		// procedural synth so the cue can never go silent on a bad file — the
-		// same disk-or-synth promise that covers a missing file.
+		// A corrupt/non-WAV payload decodes to a zero Sound; only honor the disk
+		// branch on a playable decode, else fall through to synth.
 		if snd := bytesToSound(data); snd.Stream.Buffer != nil {
 			return snd, true
 		}
@@ -393,16 +297,14 @@ func readOrSynthSound(name string, pcmFn func() []int16) (snd rl.Sound, fromFile
 	return pcmToSound(pcmFn()), false
 }
 
-// loadCueFromDisk is the discard-the-flag form used by loadBank.
+// loadCueFromDisk is readOrSynthSound discarding the fromFile flag.
 func loadCueFromDisk(name string, pcmFn func() []int16) rl.Sound {
 	snd, _ := readOrSynthSound(name, pcmFn)
 	return snd
 }
 
-// replaceSound swaps the sound at *slot for next, unloading the old
-// buffer first (guarded against the zero-value Sound) so a reassignment
-// can't leak raylib's C-side audio buffer. Shared by the bank reload and
-// the preview ring, which each open-coded the guard-then-unload dance.
+// replaceSound swaps *slot for next, unloading the old buffer first (guarded
+// against the zero Sound) so a reassignment can't leak raylib's C-side buffer.
 func replaceSound(slot *rl.Sound, next rl.Sound) {
 	if slot.Stream.Buffer != nil {
 		rl.UnloadSound(*slot)
@@ -410,10 +312,7 @@ func replaceSound(slot *rl.Sound, next rl.Sound) {
 	*slot = next
 }
 
-// pcmToSound builds a 16-bit mono PCM buffer into an rl.Sound via the
-// shared bytesToSound path. Used by loadBank to populate the procedural
-// defaults; user.go's preview ring takes the same path so we have one
-// rl.Sound builder, not two.
+// pcmToSound builds a 16-bit mono PCM buffer into an rl.Sound via bytesToSound.
 func pcmToSound(pcm []int16) rl.Sound {
 	if !rl.IsAudioDeviceReady() {
 		return rl.Sound{}
@@ -421,15 +320,11 @@ func pcmToSound(pcm []int16) rl.Sound {
 	return bytesToSound(wavsynth.BuildWAV(pcm, wavsynth.SampleRate))
 }
 
-// bytesToSound hands a pre-encoded WAV byte slice to raylib via
-// LoadWaveFromMemory → LoadSoundFromWave. The Wave is unloaded
-// immediately — the Sound owns its own copy of the data. Used by both
-// pcmToSound (synth path) and playThroughRing (file/preview path) so
-// the WAV-bytes-to-rl.Sound conversion lives in one place.
+// bytesToSound decodes a pre-encoded WAV byte slice to an rl.Sound via
+// LoadWaveFromMemory → LoadSoundFromWave. The Wave is unloaded immediately —
+// the Sound owns its own copy.
 func bytesToSound(wav []byte) rl.Sound {
-	// Mirror pcmToSound's guard: never hand a Wave to a dead audio device. All
-	// current callers gate on readiness upstream, but keep the contract local so
-	// a future caller can't load on a closed device.
+	// Never hand a Wave to a dead device, even though callers gate upstream.
 	if !rl.IsAudioDeviceReady() {
 		return rl.Sound{}
 	}

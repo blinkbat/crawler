@@ -2,11 +2,9 @@ package core
 
 import "testing"
 
-// TestBlessRegistryShape pins the Cleric buff's registry contract: it must be
-// player-castable, Buff-tagged (the first SkillTagBuff user), flagged
-// AppliesAOEPartyBuff, and carry the base magnitude/duration the tier ladder
-// builds on — buffing the four offensive/support stats while leaving VIT and
-// SPD alone (VIT would desync MaxHP; SPD would perturb the ATB turn order).
+// TestBlessRegistryShape pins the registry contract: player-castable,
+// Buff-tagged, AppliesAOEPartyBuff, base magnitude/duration, and buffs the four
+// offensive/support stats but not VIT/SPD (VIT desyncs MaxHP; SPD perturbs ATB).
 func TestBlessRegistryShape(t *testing.T) {
 	if !SkillPlayerCastable(SkillBless) {
 		t.Error("Bless must be PlayerCastable")

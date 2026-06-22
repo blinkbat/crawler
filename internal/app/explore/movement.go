@@ -12,35 +12,19 @@ import (
 )
 
 func Update(g *core.GameState) {
-	// Cap dt so a frame stall (window drag, debugger pause, slow load) can't
-	// fast-forward animations or overshoot tile-step targets in one tick.
-	// explore.Update is the single owner of this clamp — battle.Update
-	// trusts the dt it's handed here is already clamped (see core.MaxFrameStep
-	// / ClampFrameTime), so the whole game shares one minimum tick rate.
+	// Clamp dt: a frame stall (window drag, debugger, slow load) must not fast-
+	// forward animations or overshoot tile-step targets. Single owner of the
+	// clamp — battle.Update trusts the dt here is already clamped.
 	dt := core.ClampFrameTime(rl.GetFrameTime())
 
-	// Ambient-rain tint follows its target smoothly every adventure frame,
-	// before the modal/battle dispatch below can early-return — so the
-	// bluegray wash keeps easing in / out even while a panel is open or a
-	// battle is running (the storm's step-driven state only changes during
-	// free exploration; here it's purely the visual catch-up).
+	// Weather tint eases every frame, before the early-returns below, so the wash
+	// keeps catching up while a panel/battle is up. Step-driven state only changes
+	// during free exploration; this is pure visual catch-up.
 	core.TickWeather(g, dt)
 
-	// Modal priority — single source of truth lives in core.ActiveModal
-	// so any future scene that needs the same "what overlay is on top?"
-	// answer reads from one helper instead of replicating the if-chain.
-	// Each modal has its own updater here; the order of update calls
-	// is determined entirely by ActiveModal's enum ladder.
-	//
-	// Notes per modal:
-	//   - LevelUp: no Esc-out (PendingLevelUps reads as a debt the
-	//     player owes the system).
-	//   - Panels: out-of-battle only; the open path further down
-	//     refuses to open during combat to keep the timing-bar window
-	//     honest.
-	//   - Chest: Esc inside a chest closes the chest, not the game.
-	//   - PauseMenu: routes input through the menu; pause-key edges
-	//     toggle the menu from either state.
+	// Modal dispatch order is ActiveModal's enum ladder (single source of truth).
+	// LevelUp has no Esc-out; Panels open is out-of-battle only; Chest Esc closes
+	// the chest, not the game.
 	switch core.ActiveModal(g) {
 	case core.ModalQuitConfirm:
 		updateQuitConfirm(g)
@@ -76,19 +60,15 @@ func Update(g *core.GameState) {
 		updateMenu(g)
 		return
 	case core.ModalNone:
-		// No overlay is open — fall through to the panels-open shortcut,
-		// pause check, and movement below.
+		// No overlay — fall through to shortcut / pause / movement below.
 	default:
-		// ActiveModal is a hand-maintained enum ladder; a new modal value
-		// without an arm here would silently fall through to movement
-		// (eating input the overlay should own). Fail loudly instead,
-		// matching updatePanels' missing-case panic.
+		// Hand-maintained ladder: a missing arm would silently fall through to
+		// movement and eat input the overlay should own. Fail loudly.
 		panic(fmt.Sprintf("explore: Update missing dispatch case for modal %d", core.ActiveModal(g)))
 	}
 
-	// Panels-open shortcut. Sits between the modal dispatch and the
-	// pause-key check so the player can press I / middle-button to
-	// jump into the overlay without first toggling pause off.
+	// Panels-open shortcut: before the pause check so I / middle-button jumps in
+	// without toggling pause off first.
 	if !g.Battle.Active() {
 		if input.PanelsTogglePressed() {
 			openPanels(g)
@@ -113,39 +93,25 @@ func Update(g *core.GameState) {
 	}
 
 	updateFreeLook(&g.Player, dt)
-	// Tick pack animations every explore frame so an in-flight step
-	// (armed when the AI applied a move) eases tile-to-tile alongside
-	// the player's own animation. Independent of whether the player
-	// is mid-step, so a wandering pack still moves while the player
-	// stands still.
+	// Tick pack animations every frame, independent of player mid-step, so a
+	// wandering pack moves while the player stands still.
 	core.TickPackAnimations(g, dt)
-	// Confirm key opens an adjacent chest. Checked before movement so a
-	// "step forward + Enter" muscle-memory press doesn't double as a step
-	// in the chest's direction.
+	// Confirm opens an adjacent chest. Before movement so a "step + Enter" press
+	// doesn't double as a step toward the chest.
 	if g.Player.Anim.Kind == core.AnimNone && tryOpenAdjacentChest(g) {
 		return
 	}
-	// Confirm key also fires an adjacent charged healing crystal. Same
-	// gate as the chest: a settled player pressing Confirm. Checked after
-	// chests so the two interactions can't both fire on one press (a
-	// crystal and a chest are never on the same tile anyway).
+	// Confirm also fires an adjacent charged crystal. After chests so one press
+	// can't fire both.
 	if g.Player.Anim.Kind == core.AnimNone && tryUseAdjacentCrystal(g) {
 		return
 	}
 	updatePlayer(g, dt)
 }
 
-// tryAdjacentInteraction is the shared Confirm-key adjacent-interaction gate
-// behind tryOpenAdjacentChest and tryUseAdjacentCrystal — the two were
-// byte-for-byte parallel (Confirm edge → find an in-reach target index → bail
-// if none → act). `find` resolves the adjacent target index for this
-// interaction (returns <0 when nothing is in reach); `act` performs the
-// interaction on the resolved index. Returns true when the interaction fired,
-// so the caller skips the rest of the explore tick (free-look, movement) this
-// frame; false (no-op) when Confirm wasn't pressed or no target is in reach, so
-// the press falls through to movement as usual. The chest/crystal finders take
-// different slice types, so each caller closes over its own slice and exposes
-// the same parameterless func() int shape here.
+// tryAdjacentInteraction is the shared Confirm-key gate: find an in-reach target
+// (find returns <0 for none), act on it. Returns true when it fired so the
+// caller skips the rest of the tick; false falls through to movement.
 func tryAdjacentInteraction(find func() int, act func(idx int)) bool {
 	if !input.ConfirmPressed() {
 		return false
@@ -158,10 +124,7 @@ func tryAdjacentInteraction(find func() int, act func(idx int)) bool {
 	return true
 }
 
-// tryOpenAdjacentChest is the Confirm-key interaction for chests. If
-// the player is one tile away from a non-looted chest, open its modal
-// and return true so the rest of the explore tick (free-look, movement)
-// skips this frame.
+// tryOpenAdjacentChest opens an adjacent non-looted chest's modal on Confirm.
 func tryOpenAdjacentChest(g *core.GameState) bool {
 	return tryAdjacentInteraction(
 		func() int {
@@ -174,9 +137,8 @@ func tryOpenAdjacentChest(g *core.GameState) bool {
 	)
 }
 
-// pauseAllowed reports whether the global pause menu can be opened right now.
-// In the field it's always allowed; during battle we forbid pausing while a
-// timing bar is active so the player can't sidestep the input window.
+// pauseAllowed forbids opening the pause menu while a battle timing bar is
+// active, so the player can't sidestep the input window.
 func pauseAllowed(g *core.GameState) bool {
 	switch g.Battle.Phase {
 	case core.BattleAttackTiming, core.BattleEnemyTiming:
@@ -211,18 +173,14 @@ func updateMenu(g *core.GameState) {
 	}
 }
 
-// openQuitConfirm swaps the pause menu for the quit-confirmation prompt
-// ("unsaved progress will be lost"). Mirrors openOptionsMenu's hand-off so the
-// pause menu doesn't shadow the confirm.
+// openQuitConfirm swaps the pause menu for the quit-confirmation prompt.
 func openQuitConfirm(g *core.GameState) {
 	g.MenuOpen = false
 	g.QuitConfirmOpen = true
 }
 
-// updateQuitConfirm drives the quit-confirmation prompt: Confirm quits the game
-// (the run loop sees g.Quit and exits), Back cancels and returns to the pause
-// menu. Quitting discards unsaved progress, so this gate stands between every
-// in-game quit trigger and the actual exit.
+// updateQuitConfirm: Confirm sets g.Quit (run loop exits), Back returns to the
+// pause menu. Gate between every quit trigger and the actual exit.
 func updateQuitConfirm(g *core.GameState) {
 	if input.BackPressed() {
 		g.QuitConfirmOpen = false
@@ -235,12 +193,9 @@ func updateQuitConfirm(g *core.GameState) {
 	}
 }
 
-// updateLeafMenu runs the shared input loop for a leaf submenu (Options /
-// Debug): Back clears the submenu's open flag, Up/Down moves its cursor,
-// Confirm fires onConfirm with the selected row index. The pause root
-// (updateMenu) doesn't use this — it carries extra Restart/Quit hotkeys —
-// but the two leaf submenus had byte-identical skeletons, so this is the
-// input-side companion to the render side's shared drawTitledMenuCard.
+// updateLeafMenu is the shared input loop for a leaf submenu (Options / Debug):
+// Back clears open, Up/Down moves index, Confirm fires onConfirm. The pause root
+// doesn't use it (extra Restart/Quit hotkeys).
 func updateLeafMenu(open *bool, index *int, count int, onConfirm func(item int)) {
 	if input.BackPressed() {
 		*open = false
@@ -259,10 +214,8 @@ func openOptionsMenu(g *core.GameState) {
 	g.OptionsMenuIndex = 0
 }
 
-// updateOptionsMenu drives the Options submenu: display-mode toggle, a
-// jump to the party-stats dashboard, and a run restart. Back closes
-// straight to explore (a leaf submenu, not a pause sub-page — same shape
-// as the Debug submenu).
+// updateOptionsMenu drives the Options submenu. Back closes straight to explore
+// (a leaf submenu).
 func updateOptionsMenu(g *core.GameState) {
 	updateLeafMenu(&g.OptionsMenuOpen, &g.OptionsMenuIndex, core.OptionsMenuCount, func(item int) {
 		switch core.OptionsMenuItem(item) {
@@ -280,19 +233,15 @@ func updateOptionsMenu(g *core.GameState) {
 	})
 }
 
-// openDebugMenu swaps the pause menu for the Debug submenu. Always
-// reachable now — the master "Debug Mode" on/off toggle lives inside the
-// submenu (DebugMenuToggle) rather than gating access to it.
+// openDebugMenu swaps the pause menu for the Debug submenu. The master "Debug
+// Mode" toggle lives inside the submenu, not gating access to it.
 func openDebugMenu(g *core.GameState) {
 	g.MenuOpen = false
 	g.DebugMenuOpen = true
 	g.DebugMenuIndex = 0
 }
 
-// updateDebugMenu drives the debug submenu: the debug-mode toggle, enemy
-// on/off, advance the time-of-day phase, easy-battle-quit, render-log,
-// and the audio sound-tester. Back closes straight to explore (a leaf,
-// not a pause sub-page).
+// updateDebugMenu drives the debug submenu. Back closes straight to explore.
 func updateDebugMenu(g *core.GameState) {
 	updateLeafMenu(&g.DebugMenuOpen, &g.DebugMenuIndex, core.DebugMenuCount, func(item int) {
 		switch core.DebugMenuItem(item) {
@@ -301,9 +250,8 @@ func updateDebugMenu(g *core.GameState) {
 		case core.DebugMenuEnemies:
 			g.EnemiesDisabled = !g.EnemiesDisabled
 		case core.DebugMenuAdvanceTime:
-			// One phase forward. StepCount drives the day/night cycle, so
-			// bumping it by a full phase advances the lighting without
-			// teleporting the player or disturbing encounter pacing.
+			// StepCount drives the day/night cycle; bump a full phase to advance
+			// lighting without moving the player.
 			g.StepCount += core.StepsPerPhase
 		case core.DebugMenuEasyQuit:
 			g.EasyBattleQuit = !g.EasyBattleQuit
@@ -319,14 +267,13 @@ func updateDebugMenu(g *core.GameState) {
 		case core.DebugMenuAllSkills:
 			g.DebugAllSkills = !g.DebugAllSkills
 		case core.DebugMenuBoostStats:
-			// One-shot action (not a toggle): each confirm stacks another boost.
+			// Not a toggle: each confirm stacks another boost.
 			core.DebugBoostParty(g.Party, core.DebugStatBoost)
 		case core.DebugMenuSkipBattles:
 			g.DebugSkipBattles = !g.DebugSkipBattles
 		case core.DebugMenuTestRumble:
-			// Arm a pulse on g.Battle; the main loop's TickRumble/ApplyRumble
-			// drives it every frame regardless of scene, so it fires even with
-			// the pause menu open and out of combat.
+			// Arm a pulse on g.Battle; the main loop drives it every frame
+			// regardless of scene, so it fires even with the pause menu open.
 			core.TriggerRumble(&g.Battle, core.RumbleTestStrength, core.RumbleTestDur)
 		case core.DebugMenuRetro:
 			openRetroMenu(g)
@@ -338,20 +285,16 @@ func updateDebugMenu(g *core.GameState) {
 	})
 }
 
-// openRetroMenu swaps the Debug submenu for the Retro Filters sub-submenu —
-// the same hand-off shape as pause → debug.
+// openRetroMenu swaps the Debug submenu for the Retro Filters sub-submenu.
 func openRetroMenu(g *core.GameState) {
 	g.DebugMenuOpen = false
 	g.RetroMenuOpen = true
 	g.RetroMenuIndex = 0
 }
 
-// updateRetroMenu drives the Retro Filters submenu. The first
-// RetroFilterCount rows are intensity sliders (cursor position == filter
-// kind): Left/Right nudges the intensity by RetroFilterStep, Confirm toggles
-// between off and the default intensity. Filters LAYER — any number can be
-// non-zero at once; the render pass applies them all in one shader. The last
-// two rows are Reset All and Close. Back returns to explore (leaf-menu rule).
+// updateRetroMenu drives the Retro Filters submenu. First RetroFilterCount rows
+// are intensity sliders (cursor == filter kind); filters LAYER (all applied in
+// one shader). Last rows are Reset All / Close. Back returns to explore.
 func updateRetroMenu(g *core.GameState) {
 	updateLeafMenu(&g.RetroMenuOpen, &g.RetroMenuIndex, core.RetroMenuCount, func(item int) {
 		switch {
@@ -371,8 +314,8 @@ func updateRetroMenu(g *core.GameState) {
 			g.RetroMenuOpen = false
 		}
 	})
-	// Fine intensity adjust on the cursored slider row. Gated on the menu
-	// still being open (updateLeafMenu may have just closed it via Back).
+	// Fine intensity adjust on the cursored slider row. Gated on still-open
+	// (updateLeafMenu may have just closed it via Back).
 	if g.RetroMenuOpen && g.RetroMenuIndex < int(core.RetroFilterCount) {
 		if delta := input.CursorLeftRight(); delta != 0 {
 			core.AdjustRetroFilter(&g.RetroFilters[g.RetroMenuIndex], delta)
@@ -385,17 +328,12 @@ func restartGame(g *core.GameState) {
 	ResetTurnRepeat()
 }
 
-// saveGame writes the run to disk from the Options submenu. Closes the
-// submenu so the resulting status message (success or the error reason) is
-// visible under the HUD, and plays a confirm / refusal ping. A failed write
-// (read-only disk, permissions) surfaces its reason rather than silently
-// no-op'ing.
+// saveGame writes the run to disk from the Options submenu. Closes the submenu
+// so the status message is visible, and pings confirm / refusal.
 func saveGame(g *core.GameState) {
 	g.OptionsMenuOpen = false
-	// Saving is a field action — refuse mid-battle. A save snapshots only
-	// the persistent run (no battle state), so reloading would drop the
-	// fight; and although NewSaveData defensively strips combat-transient
-	// statuses, the cleaner contract is "you can't save during a fight."
+	// Refuse mid-battle: a save snapshots only the persistent run (no battle
+	// state), so reloading would drop the fight.
 	if g.Battle.Active() {
 		g.SetStatusMessage("Can't save during a battle.")
 		audio.Play(audio.SoundInputMiss)
@@ -410,12 +348,8 @@ func saveGame(g *core.GameState) {
 	audio.Play(audio.SoundInputGreat)
 }
 
-// tryUseAdjacentCrystal is the Confirm-key interaction for healing crystals
-// (mirrors tryOpenAdjacentChest). When the player presses Confirm one tile away
-// from — or on top of — a CHARGED crystal, fire the Grimrock-style rest and
-// return true so the rest of the explore tick (free-look, movement) skips this
-// frame. No-op (returns false) when no charged crystal is in reach or Confirm
-// wasn't pressed, so the press falls through to movement as usual.
+// tryUseAdjacentCrystal fires a charged healing crystal on Confirm when the
+// player is adjacent to or on top of one (mirrors tryOpenAdjacentChest).
 func tryUseAdjacentCrystal(g *core.GameState) bool {
 	return tryAdjacentInteraction(
 		func() int {
@@ -427,11 +361,9 @@ func tryUseAdjacentCrystal(g *core.GameState) bool {
 	)
 }
 
-// fireHealingCrystal restores the whole party to full HP+MP, puts the crystal
-// dormant, and AUTOSAVEs (the codebase's first autosave). The heal+discharge
-// always lands; the save is best-effort — it refuses on an unsaved editor-
-// playtest map (Area.Path == ""), in which case the party is still restored and
-// the message says so.
+// fireHealingCrystal restores the party to full HP+MP, makes the crystal
+// dormant, and AUTOSAVEs. Heal+discharge always land; the save is best-effort
+// (refused on an unsaved editor-playtest map, Area.Path == "").
 func fireHealingCrystal(g *core.GameState, idx int) {
 	core.RestorePartyFully(g)
 	g.Crystals[idx].Charged = false
@@ -446,18 +378,15 @@ func fireHealingCrystal(g *core.GameState, idx int) {
 }
 
 func updateFreeLook(p *core.Player, dt float32) {
-	// Mouse right-drag takes priority while held — relative motion, not
-	// dt-scaled (one mouse delta = one yaw nudge).
+	// Mouse right-drag wins while held — relative motion, not dt-scaled.
 	if input.LookDragActive() {
 		mouse := input.LookMouseDelta()
 		p.LookYaw = core.Clamp(p.LookYaw+mouse.X*core.MouseSense, -core.MaxLookYaw, core.MaxLookYaw)
 		p.LookPitch = core.Clamp(p.LookPitch-mouse.Y*core.MouseSense, -core.MaxLookPitch, core.MaxLookPitch)
 		return
 	}
-	// Right analog stick free-look — an analog hold, so dt-scaled by
-	// StickLookSense. Mirrors the mouse axes (right = +yaw, up = +pitch)
-	// and shares the same clamps + recenter-on-release so the two feel
-	// identical.
+	// Right-stick free-look: analog hold, dt-scaled. Mirrors the mouse axes and
+	// clamps so the two feel identical.
 	if sx, sy := input.LookStick(); sx != 0 || sy != 0 {
 		p.LookYaw = core.Clamp(p.LookYaw+sx*core.StickLookSense*dt, -core.MaxLookYaw, core.MaxLookYaw)
 		p.LookPitch = core.Clamp(p.LookPitch-sy*core.StickLookSense*dt, -core.MaxLookPitch, core.MaxLookPitch)
@@ -467,23 +396,18 @@ func updateFreeLook(p *core.Player, dt float32) {
 	p.LookPitch = core.Approach(p.LookPitch, 0, core.FreeLookReturnSpeed*dt)
 }
 
-// Turn auto-repeat pacing. A FRESH turn-key press turns once immediately; while
-// the key stays HELD, the next turn waits core.TurnRepeatDelay after the prior
-// turn lands before re-firing (see updatePlayer). Without this a held turn key
-// re-armed the instant the ~0.14s turn animation finished, so the player spun
-// continuously the moment they touched the key. turnHeldLast tracks the held
-// state across frames so a tap is distinguishable from a sustained hold;
-// turnRepeatCooldown is the remaining rest before the next auto-repeat turn.
+// Turn auto-repeat pacing. A fresh press turns once immediately; a held key
+// waits core.TurnRepeatDelay after each turn before re-firing (without this a
+// held key spins continuously the instant the turn animation finishes).
+// turnHeldLast distinguishes tap from hold; turnRepeatCooldown is the rest left.
 var (
 	turnHeldLast       bool
 	turnRepeatCooldown float32
 )
 
-// ResetTurnRepeat clears the held-turn auto-repeat state. updatePlayer doesn't
-// run during a battle or an area swap, so a turn key held UNINTERRUPTED across
-// one of those (never releasing to self-clear) would otherwise carry a stale
-// cooldown — and a stale "still held" edge — into the next area. Called on area
-// transition (run.go) and game restart so the first turn there is honest.
+// ResetTurnRepeat clears held-turn state. updatePlayer doesn't run during a
+// battle or area swap, so a turn key held uninterrupted across one would carry a
+// stale cooldown/held-edge into the next area. Called on transition + restart.
 func ResetTurnRepeat() {
 	turnHeldLast = false
 	turnRepeatCooldown = 0
@@ -492,26 +416,19 @@ func ResetTurnRepeat() {
 func updatePlayer(g *core.GameState, dt float32) {
 	p := &g.Player
 
-	// Detect a fresh turn press (not-held → held) before any early return so the
-	// held-edge stays tracked every frame, even while a turn animation plays. A
-	// deliberate new press clears the cooldown so it turns THIS frame; only a
-	// sustained hold has to wait out core.TurnRepeatDelay between turns. Releasing
-	// the key also clears the cooldown so it's self-clearing — no stale value can
-	// linger across a release or a scene change (battle / area transition, where
-	// updatePlayer isn't ticked) into the next held turn.
+	// Detect a fresh turn press before any early return so the held-edge stays
+	// tracked even during a turn animation. A new press or a release clears the
+	// cooldown (self-clearing — no stale value survives a release / scene change).
 	turnHeld := input.TurnLeftHeld() || input.TurnRightHeld()
 	if !turnHeld || !turnHeldLast {
 		turnRepeatCooldown = 0
 	}
 	turnHeldLast = turnHeld
 
-	// Mid-animation: advance it. When it COMPLETES with time to spare and a
-	// movement key is still held, fall through to arm the next step and spend
-	// the leftover on it this same frame. Without that carry, held movement
-	// loses up to a frame of motion at every tile boundary (the finishing frame
-	// snaps to center, the next frame only re-arms) — a periodic hitch that
-	// reads as "not smooth." updateAnimation returns 0 while still running, or
-	// when landing opened an overlay that should halt continued walking.
+	// Mid-animation: advance it. On completion with leftover time and a key still
+	// held, carry the leftover into arming the next step this same frame — without
+	// it, held movement loses a frame of motion at every tile boundary (a hitch).
+	// updateAnimation returns 0 while running, or when landing opened an overlay.
 	if p.Anim.Kind != core.AnimNone {
 		leftover := updateAnimation(g, dt)
 		if leftover <= 0 || p.Anim.Kind != core.AnimNone {
@@ -520,18 +437,11 @@ func updatePlayer(g *core.GameState, dt float32) {
 		dt = leftover
 	}
 
-	// Held (level) reads, not edge: the player completes one step/turn per
-	// animation, and holding the key re-fires the next as soon as this one
-	// lands — continuous movement paced by the animation. A tap still steps
-	// exactly once.
-	//
-	// Turning is the exception: a held turn waits out turnRepeatCooldown before
-	// re-firing (set to core.TurnRepeatDelay on each turn) so holding doesn't spin
-	// continuously. The cooldown counts down HERE — past the mid-animation early
-	// return above — so it only ticks while at rest between turns, never during
-	// the turn animation; the rest gap is thus exactly core.TurnRepeatDelay. A
-	// fresh press zeroed it at the top, so taps and deliberate re-presses are
-	// instant.
+	// Held (level) reads, not edge: holding re-fires the next step as this one
+	// lands (a tap still steps once). Turning is the exception — it waits out
+	// turnRepeatCooldown. The cooldown counts down HERE (past the mid-animation
+	// return) so it ticks only at rest between turns, making the gap exactly
+	// core.TurnRepeatDelay; a fresh press zeroed it above, so taps are instant.
 	if turnRepeatCooldown > 0 {
 		turnRepeatCooldown -= dt
 	}
@@ -553,37 +463,27 @@ func updatePlayer(g *core.GameState, dt float32) {
 		startStep(p, g, 1, 0)
 	}
 
-	// Advance a freshly-armed step/turn by dt on the SAME frame it starts:
-	// the full frame dt for a fresh press, or the carried-over remainder when
-	// continuing held movement across a tile boundary — so motion flows instead
-	// of resting a frame at FromX. startStep may start a battle instead (no Anim
-	// armed) or the move may be blocked (no Anim); the guard skips both.
+	// Advance a freshly-armed step/turn by dt on the SAME frame it starts so
+	// motion flows instead of resting a frame at FromX. startStep may start a
+	// battle or be blocked (no Anim either way); the guard skips both.
 	if p.Anim.Kind != core.AnimNone {
 		updateAnimation(g, dt)
 	}
 }
 
 func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
-	// The tile the player stands on entering this step — the square a
-	// successful Flee retreats to. For a step-into-pack engage the player
-	// never moves (this stays the current tile); for a pack-ambush engage
-	// (the player completes a step, then a pack lands on them) this is the
-	// pre-step tile, so fleeing steps back OFF the pack rather than onto it.
+	// The tile the player stands on entering this step — where a successful Flee
+	// retreats to. For a step-into-pack engage this stays the current tile; for a
+	// pack-ambush engage it's the pre-step tile, so fleeing steps off the pack.
 	fleeFromX, fleeFromZ := p.TileX, p.TileZ
 	dx, dz := core.FacingVector(p.Facing)
 	rx, rz := core.FacingVector(core.NormalizeFacing(p.Facing + 1))
 	targetX := p.TileX + dx*forward + rx*strafe
 	targetZ := p.TileZ + dz*forward + rz*strafe
-	// Step-into-pack starts a battle WITHOUT applying the move: the
-	// player stays on the current tile and the battle splash takes
-	// over. Checked BEFORE CanEnterTile so the engagement signal isn't
-	// swallowed by the generic blocker rule. Pack-AI rolls happen on
-	// a successful step, so we run them only when this branch DOESN'T
-	// fire.
-	// A pack on a cliff (different elevation level with no connecting ramp)
-	// can't be reached, so it can't be engaged either — fall through to the
-	// normal blocked-move handling. No-op on flat maps (StepElevationOK is
-	// always true at equal levels).
+	// Step-into-pack starts a battle WITHOUT moving. Checked BEFORE CanEnterTile
+	// so the engagement isn't swallowed by the generic blocker rule; pack-AI rolls
+	// only run when this branch doesn't fire. A pack on an unreachable cliff falls
+	// through to blocked-move handling (no-op on flat maps).
 	engageDir, engageDirOK := facingForTile(p, targetX, targetZ)
 	engageReachable := true
 	engageLevel := p.Level
@@ -594,10 +494,9 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 			engageReachable = g.Area.StepElevationOK(p.TileX, p.TileZ, engageDir)
 		}
 	}
-	// On a voxel map, only engage a pack sharing the surface the step lands on
-	// (engageLevel) — so a player walking UNDER a deck doesn't get ambushed by a
-	// pack standing on it, and vice versa. On a heightfield, fall back to the
-	// tile-only match (pack Level isn't tracked per-surface there).
+	// On a voxel map, only engage a pack on the surface the step lands on
+	// (engageLevel) so walking UNDER a deck isn't ambushed by a pack on it. On a
+	// heightfield, fall back to tile-only (pack Level isn't tracked per-surface).
 	packHit := core.PackIndexAtTile(g.Packs, targetX, targetZ)
 	if g.Area.IsVoxel() {
 		packHit = core.PackIndexAtTileLevel(g.Packs, targetX, targetZ, engageLevel)
@@ -606,24 +505,20 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 		if startTurnToTile(p, targetX, targetZ) {
 			return
 		}
-		// Snap the engaging pack to its tile so the battle splash
-		// doesn't show it mid-step. Mirrors the AI-side engagement
-		// snap inside tickPackAI.
+		// Snap the pack to its tile so the splash doesn't show it mid-step.
 		core.SnapPackToTile(&g.Packs[packHit])
-		// Debug "Skip Battles": auto-resolve the pack as a win (kills + XP +
-		// loot) without entering the battle scene, then stay in explore.
+		// Debug "Skip Battles": auto-resolve as a win without the battle scene.
 		if g.DebugSkipBattles {
 			battle.DebugSkipWin(g, packHit)
 			return
 		}
-		// The player stepped INTO the pack — a head-on engage, home formation stands.
+		// Stepped INTO the pack — head-on engage, home formation stands.
 		battle.Start(g, packHit, fleeFromX, fleeFromZ, core.EngageFront)
 		return
 	}
-	// Elevation/voxel gate FIRST: resolve WHICH surface the party would land on
-	// (the ground under a floating deck vs the deck itself) and reject a cliff.
-	// Steps are orthogonal, so the tile delta resolves to a single cardinal dir.
-	// The entry check below then needs that level for level-aware prop blocking.
+	// Elevation/voxel gate FIRST: resolve which surface the party lands on (ground
+	// under a deck vs the deck) and reject a cliff. The entry check below needs
+	// that level for level-aware prop blocking.
 	landLevel := p.Level
 	if dir, ok := facingForTile(p, targetX, targetZ); ok {
 		if g.Area.IsVoxel() {
@@ -639,20 +534,18 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 			landLevel = g.Area.ElevationLevelAt(targetX, targetZ)
 		}
 	} else {
-		// Non-cardinal step (shouldn't happen for orthogonal movement): keep the
-		// old no-gate behavior, landing on the destination column's surface.
+		// Non-cardinal step (shouldn't happen for orthogonal movement): no gate,
+		// land on the destination column's surface.
 		if lo := g.Area.LowestStandableLevel(targetX, targetZ); lo >= 0 {
 			landLevel = lo
 		} else {
 			landLevel = g.Area.ElevationLevelAt(targetX, targetZ)
 		}
 	}
-	// Everything else (walls, props, deep water, chests, other packs) goes through
-	// CanEnterTile so the rule lives in one place. AllowDoorTile=true because the
-	// player stepping onto a door fires a transition; the engagement branch above
-	// already consumed the pack-tile case, so we don't need OccupiedPacks here. On
-	// a voxel map the level-aware variant lets a prop block only its own levels —
-	// so you can walk UNDER a deck past a ground-rooted tree.
+	// Everything else (walls, props, deep water, chests, packs) goes through
+	// CanEnterTile. AllowDoorTile=true (stepping onto a door fires a transition);
+	// the engagement branch already consumed the pack-tile case. The voxel
+	// level-aware variant lets a prop block only its own levels (walk under a deck).
 	if g.Area.IsVoxel() {
 		if !core.CanEnterTileAtLevel(g, targetX, targetZ, landLevel, core.EnterOpts{AllowDoorTile: true}) {
 			return
@@ -660,45 +553,33 @@ func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
 	} else if !core.CanEnterTile(g, targetX, targetZ, core.EnterOpts{AllowDoorTile: true}) {
 		return
 	}
-	// Ground height the player leaves from — captured before TileX/TileZ/Level
-	// advance so a ramp / level change can ease the camera between heights.
+	// Ground height left from — captured before the TileX/Z/Level advance so a
+	// ramp / level change can ease the camera between heights.
 	fromGroundY := g.Area.StandGroundYAt(p.TileX, p.Level, p.TileZ)
 
 	p.TileX = targetX
 	p.TileZ = targetZ
 	p.Level = landLevel
 	g.StepCount++
-	// Out-of-battle poison tick: a fight-inflicted poison kept ticking
-	// counters down on every party turn during battle but had no hook in
-	// exploration, so the status would stick forever after a fight ended.
-	// Hooking the tick here lines it up with the player's most natural
-	// "unit of time outside combat" — one tile traversed.
+	// Out-of-battle poison tick: hooked here (one tile = the natural unit of
+	// time outside combat) so a fight-inflicted poison doesn't stick forever.
 	core.TickPoisonStep(g)
-	// Ambient weather advances on the same per-step beat: outdoors this
-	// rolls to start / counts down a rain storm; indoors it recedes any
-	// active storm. The smooth tint follow runs per frame in Update.
+	// Weather advances per step: outdoors rolls/counts down a storm, indoors
+	// recedes one. The smooth tint follow runs per frame in Update.
 	core.TickWeatherStep(g)
-	// Fog-of-war reveal: every step paints the 3×3 window centered on
-	// the player onto Visited, so the map shows the immediate vicinity
-	// even when the player only ever brushed past a tile. Radius is a
-	// fixed game-design constant (one tile of sight) — when we ever
-	// want torchlight / vision modifiers, they pipe a different radius
-	// into RevealRadius here instead of a second reveal pass.
+	// Fog-of-war: paint the 3×3 window onto Visited. Radius is one tile of sight;
+	// vision modifiers would pipe a different radius into RevealRadius.
 	core.RevealRadius(g, targetX, targetZ, core.SightRadius)
-	// Healing crystals: recharge every dormant crystal one step. The heal
-	// itself is no longer automatic — the player presses Confirm beside a
-	// charged crystal to use it (tryUseAdjacentCrystal), like opening a chest.
+	// Recharge every dormant crystal one step. Using one is manual (Confirm beside
+	// a charged crystal), not automatic.
 	core.TickCrystalRecharge(g)
-	// Pack-AI tick (per-pack mode dispatched in core.PlanPackSteps): each
-	// alive pack plans (independently) on every successful player step. If a pack lands on the player,
-	// initiate the battle and snap the player's VISUAL coords to the
-	// new tile center so the splash doesn't show them mid-animation
-	// frozen at the previous tile. The step animation is skipped on
-	// engagement — battle takes the camera over immediately anyway.
+	// Pack-AI tick: each alive pack plans on every successful step. If one lands
+	// on the player, start the battle and snap the player's visual coords to the
+	// tile center (the step animation is skipped — battle takes the camera).
 	if engagedPack := tickPackAI(g); engagedPack >= 0 {
 		core.SnapPlayerToTile(p) // p.TileX/Z were advanced to targetX/Z above
-		// The pack stepped onto the player — an ambush from behind; the party's
-		// back rank is shoved to the exposed front until they reposition.
+		// Pack stepped onto the player — ambush from behind; back rank shoved to
+		// the exposed front until they reposition.
 		battle.Start(g, engagedPack, fleeFromX, fleeFromZ, core.EngageBack)
 		return
 	}
@@ -745,10 +626,8 @@ func startTurnToTile(p *core.Player, tileX, tileZ int) bool {
 	case 3:
 		startTurn(p, -1)
 	default:
-		// NormalizeFacing constrains diff to 0..3, so the cases above are
-		// exhaustive; a value outside that range means NormalizeFacing's
-		// contract changed underneath us. Fail loudly instead of silently
-		// no-op'ing the turn, matching Update's missing-case panic.
+		// NormalizeFacing constrains diff to 0..3; out of range means its
+		// contract changed. Fail loudly rather than no-op the turn.
 		panic(fmt.Sprintf("explore: startTurnToTile got out-of-range facing diff %d", diff))
 	}
 	return true
@@ -770,12 +649,10 @@ func facingForTile(p *core.Player, tileX, tileZ int) (int, bool) {
 	return p.Facing, false
 }
 
-// updateAnimation advances the active step/turn by dt. It returns the leftover
-// time (Elapsed - Duration) once the animation COMPLETES so the caller can
-// spend that remainder arming the next step in the same frame — the carry that
-// keeps held movement continuous across tile boundaries. Returns 0 while the
-// animation is still running, and 0 when landing opened an overlay (door
-// prompt / enter-tile dialog) that should halt continued walking.
+// updateAnimation advances the active step/turn by dt and returns the leftover
+// time (Elapsed - Duration) on completion, so the caller can arm the next step
+// the same frame (the carry that keeps held movement continuous). Returns 0
+// while still running, and 0 when landing opened an overlay.
 func updateAnimation(g *core.GameState, dt float32) float32 {
 	p := &g.Player
 	p.Anim.Elapsed += dt
@@ -807,36 +684,28 @@ func updateAnimation(g *core.GameState, dt float32) float32 {
 	p.Yaw = core.FacingYaw(p.Facing)
 	p.Anim = core.Animation{}
 
-	// Door trigger: stepping onto a door tile queues an area
-	// transition for the run loop to consume on the next frame. We
-	// only fire on AnimStep completion (not turns) so spinning in
-	// place on top of a door doesn't loop-transition. The run loop
-	// checks g.PendingTransition.TargetMap != "" and swaps.
+	// Door trigger: stepping onto a door queues an area transition. Only on
+	// AnimStep completion (not turns) so spinning on a door doesn't loop-
+	// transition.
 	if finishedKind == core.AnimStep {
 		tryQueueDoorTransition(g)
-		// Enter-tile dialog triggers fire on the same step-land beat as door
-		// transitions. Skip when a door prompt opened on this tile (a portal
-		// takes precedence) so the player isn't handed two overlays at once;
-		// FireEnterTileTriggers itself no-ops if a dialog is already open.
+		// Enter-tile triggers fire on the same step-land beat. Skip when a door
+		// prompt opened here (portal takes precedence).
 		if g.DoorPrompt < 0 {
 			core.FireEnterTileTriggers(g, g.Player.TileX, g.Player.TileZ)
 		}
 	}
-	// If landing opened an overlay (door prompt or an enter-tile dialog), the
-	// player shouldn't keep walking into it — swallow the remainder so the
-	// caller doesn't arm another step this frame.
+	// If landing opened an overlay, swallow the remainder so the caller doesn't
+	// arm another step into it this frame.
 	if core.ActiveModal(g) != core.ModalNone {
 		return 0
 	}
 	return leftover
 }
 
-// tryQueueDoorTransition checks whether the player just stepped onto a
-// door tile and, if so, opens the confirm prompt (g.DoorPrompt) rather
-// than transitioning immediately — the player chooses to enter or cancel.
-// Doors with an empty TargetMap (defensive — the validator rejects these
-// on load, but a hand-built editor state could slip one through) are
-// ignored.
+// tryQueueDoorTransition opens the confirm prompt (g.DoorPrompt) when the player
+// stepped onto a door, rather than transitioning immediately. Doors with an
+// empty TargetMap are ignored (defensive — the validator rejects these on load).
 func tryQueueDoorTransition(g *core.GameState) {
 	idx := core.DoorIndexAt(g.Doors, g.Player.TileX, g.Player.TileZ)
 	if idx < 0 {
@@ -848,11 +717,9 @@ func tryQueueDoorTransition(g *core.GameState) {
 	g.DoorPrompt = idx
 }
 
-// updateDoorPrompt drives the "Enter <area>? / Cancel" confirm modal that
-// opens when the player steps onto a door. Confirm queues the transition
-// for the run loop; Back/cancel just closes the prompt and leaves the
-// player standing on the door tile (they can walk off — the prompt only
-// re-opens on a fresh step onto a door, not while standing still).
+// updateDoorPrompt drives the "Enter <area>? / Cancel" modal. Confirm queues the
+// transition; Back closes the prompt, leaving the player on the door tile (it
+// only re-opens on a fresh step onto a door, not while standing still).
 func updateDoorPrompt(g *core.GameState) {
 	if g.DoorPrompt < 0 || g.DoorPrompt >= len(g.Doors) {
 		g.DoorPrompt = -1
@@ -872,27 +739,16 @@ func updateDoorPrompt(g *core.GameState) {
 	}
 }
 
-// tickPackAI advances every alive pack one step under its authored AI mode
-// (None / JunkyardDog / Patrol / Skittish, dispatched in core.PlanPackSteps).
-// Returns the index of a
-// pack that walked onto the player's tile (battle should start with
-// that pack), or -1 if no engagement happened this tick. Packs that
-// chose to move have their tile AND animation updated; non-movers
-// leave g.Packs alone so a paused pack just stays put.
-//
-// Engagement-on-AI-step is a hard win for the pack — there's no
-// "turn to face" pre-amble like the player-side step-into path,
-// because the pack chose the contact, not the player. The visual
-// pack X/Z is snapped to the engagement tile so the battle splash
-// doesn't show the pack mid-step.
+// tickPackAI advances every alive pack one step under its AI mode (dispatched in
+// core.PlanPackSteps). Returns the index of a pack that walked onto the player's
+// tile (start a battle), or -1. Engagement-on-AI-step is a hard win for the pack
+// (no turn-to-face pre-amble like the player-side path).
 func tickPackAI(g *core.GameState) int {
-	// Debug enemies-off: packs neither wander nor engage. Bail before
-	// planning so a disabled pack can't chase or step onto the player.
+	// Debug enemies-off: bail before planning so a disabled pack can't chase.
 	if g.EnemiesDisabled {
 		return -1
 	}
-	// Plan then apply. The apply loop (single-engagement-per-tick rule, tile +
-	// animation advance, patrol-dir persist) lives in core.ApplyPackSteps so the
+	// Plan then apply. The apply loop lives in core.ApplyPackSteps so the
 	// engagement contract is unit-tested headlessly.
 	return core.ApplyPackSteps(g, core.PlanPackSteps(g))
 }

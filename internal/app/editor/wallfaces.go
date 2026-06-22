@@ -7,15 +7,13 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Wall-faces modal: button-stack card, one row per face (base + N/E/S/W), each
-// opening the shared face-skin dropdown.
+// Wall-faces modal: one row per face (base + N/E/S/W), each opening ddFaceSkin.
 const (
 	wallFacesModalW = float32(380)
 	wallFacesModalH = float32(286)
 )
 
-// openWallFacesModal opens the per-tile wall-face editor for (x, z). Faces are a
-// per-tile property (no paintable layer), reached from the right-click menu.
+// openWallFacesModal opens the per-tile wall-face editor for (x, z).
 func openWallFacesModal(s *State, x, z int) {
 	if !s.area.InBounds(x, z) {
 		return
@@ -25,12 +23,10 @@ func openWallFacesModal(s *State, x, z int) {
 	s.modalCursor = 0
 }
 
-// wallFaceDirs: base skin (dir -1, written to the Walls grid via applyFaceSkin)
-// then each cardinal override. Values match core's facing constants.
+// wallFaceDirs: base skin (dir -1) then each cardinal override (core facing values).
 var wallFaceDirs = []int{-1, core.North, core.East, core.South, core.West}
 
-// wallFaceCmds rebuilds the rows each frame so labels reflect the live skin. Each
-// row's run sets the shared face target and opens ddFaceSkin anchored at the row.
+// wallFaceCmds rebuilds the rows each frame so labels reflect the live skin.
 func wallFaceCmds(s *State) []modalCmd {
 	x, z := s.wallFaceX, s.wallFaceZ
 	labels := make([]string, len(wallFaceDirs))

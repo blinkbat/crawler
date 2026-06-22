@@ -8,24 +8,19 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// objectview.go is the editor's Object Browser (modalObjectView): a paged 3D
-// gallery of every placeable decor + prop, each drawn as a live thumbnail
-// (lit, ground-shadowed, foliage swaying / torch flickering) via
-// render.DrawObjectPreview. It's the prop/decor sibling of the Hit Glyphs
-// viewer and the Foe/Party Visualizers — pure preview so the author can
-// spot-check the whole object set at a glance instead of stamping each onto a
-// map to see what it looks like. render owns the art + the object list
-// (render.ObjectPreviewItems); this file is the modal frame, the grid layout,
-// and the paging input.
+// objectview.go is the Object Browser (modalObjectView): a paged 3D gallery of
+// every placeable decor + prop, each a live thumbnail via render.DrawObjectPreview.
+// Pure preview. render owns the art + list (render.ObjectPreviewItems); this file
+// is the modal frame, grid layout, and paging input.
 
 const (
 	objViewModalW = float32(980)
 	objViewModalH = float32(660)
-	objViewHeader = float32(44) // header band before the grid starts
+	objViewHeader = float32(44) // header band before the grid
 	objViewCols   = 5
 	objViewThumbH = float32(130)
 	objViewLabelH = float32(18)
-	objViewRowGap = float32(10) // vertical gap between a label and the next thumb
+	objViewRowGap = float32(10) // gap between a label and the next thumb
 	objViewBtnW   = float32(96)
 )
 
@@ -34,13 +29,8 @@ func openObjectViewModal(s *State) {
 	s.objectViewPage = 0
 }
 
-// objectViewLayout is the shared geometry the Object Browser's draw and its
-// click/paging input both read, so the painted cells and the hit-rects can't
-// drift. items is the full object list; the [start, end) window is the slice
-// shown on the clamped current page; thumbs[i] is the cell rect for items[start+i].
 // objViewThumbsBuf is the reused gallery-cell rect buffer (see
-// computeObjectViewLayout). Package-level because the Object Browser is a
-// single-instance modal on the single-threaded editor loop.
+// computeObjectViewLayout). Package-level: single-instance modal, single-threaded.
 var objViewThumbsBuf []rl.Rectangle
 
 type objectViewLayout struct {
@@ -53,9 +43,9 @@ type objectViewLayout struct {
 	closeBtn         rl.Rectangle
 }
 
-// computeObjectViewLayout builds the gallery geometry for the current page and
-// clamps s.objectViewPage back into range in place (so an over-paged value from
-// a wheel spin past the end self-heals before either draw or input uses it).
+// computeObjectViewLayout builds the current page's gallery geometry. The single
+// geometry source for draw + input. Clamps s.objectViewPage in place (over-paged
+// values self-heal before either uses it).
 func computeObjectViewLayout(s *State) objectViewLayout {
 	card := centeredCardRect(objViewModalW, objViewModalH)
 	items := render.ObjectPreviewItems()
@@ -94,9 +84,8 @@ func computeObjectViewLayout(s *State) objectViewLayout {
 	}
 
 	thumbW := cellW - 16
-	// Reuse a package-level buffer across the per-frame update+draw calls (the
-	// modal is single-instance, single-threaded, and the two calls don't overlap)
-	// so the gallery layout doesn't allocate a fresh rect slice twice per frame.
+	// Reuse the package-level buffer across the per-frame update+draw calls so the
+	// layout doesn't allocate a fresh rect slice twice per frame.
 	thumbs := objViewThumbsBuf[:0]
 	for i := start; i < end; i++ {
 		idx := i - start
@@ -127,11 +116,9 @@ func updateObjectViewModal(s *State) Action {
 		return ActionNone
 	}
 
-	// All three paging inputs (wheel, Right/PgDn ⊕ Left/PgUp keys, prev/next
-	// button clicks) funnel through setObjectViewPage so the page step + clamp
-	// live in ONE place (a downward wheel / Right / PageDown / Next advances).
-	// The editor is keyboard+mouse, so raw raylib reads are fine here (mirrors
-	// hitglyphs.go).
+	// All three paging inputs (wheel, Right/PgDn ⊕ Left/PgUp, prev/next clicks)
+	// funnel through setObjectViewPage so step + clamp live in ONE place (down /
+	// Right / PageDown / Next advances).
 	if w := rl.GetMouseWheelMove(); w < 0 {
 		setObjectViewPage(s, s.objectViewPage+1, l.pageCount)
 	} else if w > 0 {
@@ -155,7 +142,7 @@ func updateObjectViewModal(s *State) Action {
 			closeModal(s)
 			return ActionNone
 		case !pointIn(mp, l.card):
-			// Click outside the card dismisses (standard read-only-modal behavior).
+			// Click outside the card dismisses.
 			closeModal(s)
 			return ActionNone
 		}
@@ -163,10 +150,8 @@ func updateObjectViewModal(s *State) Action {
 	return ActionNone
 }
 
-// setObjectViewPage stores the requested page clamped to [0, pageCount-1] — the
-// single page-write site so the three paging inputs (wheel / keys / buttons)
-// can't each re-derive the clamp. computeObjectViewLayout still clamps in place
-// as a backstop (a page count shrinking between frames self-heals there).
+// setObjectViewPage stores page clamped to [0, pageCount-1] — the single
+// page-write site so the three inputs can't each re-derive the clamp.
 func setObjectViewPage(s *State, page, pageCount int) {
 	if page < 0 {
 		page = 0
@@ -187,7 +172,7 @@ func drawObjectViewModal(s *State, font rl.Font, theme render.Theme) {
 		render.DrawObjectPreview(thumb, frameAssets, item, 1)
 		rl.DrawRectangleLinesEx(thumb, 1, editorBorderDim)
 
-		// Object name, centered under its thumbnail.
+		// Name, centered under the thumbnail.
 		lw := render.MeasureRichText(font, item.Name, editorFontHint, 1).X
 		render.DrawRichText(font, item.Name,
 			rl.NewVector2(thumb.X+(thumb.Width-lw)/2, thumb.Y+thumb.Height+3),
