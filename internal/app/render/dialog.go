@@ -12,8 +12,8 @@ import (
 // dialog modal geometry. Wider than the chest card for a readable text measure.
 const (
 	dialogCardWidth   = int32(600)
-	dialogTextPadX    = int32(24) // modalContentInsetX intent; 24 (not 22) — the wide text card wants a touch more side air
-	dialogLineH       = int32(26)
+	dialogTextPadX    = modalGutterWide // wide text card wants a touch more side air than modalContentInsetX
+	dialogLineH       = int32(FontBody) // body line pitch tracks the font size it draws
 	dialogChoiceRowH  = modalListRowH
 	dialogMinBodyH    = int32(52)
 	dialogSpeakerBand = int32(40)

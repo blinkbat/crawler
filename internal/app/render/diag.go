@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"crawler/internal/app/core"
+
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
@@ -48,7 +50,7 @@ func OpenRenderLog() {
 		renderLogActiveFlag.Store(false)
 	}
 	path := renderLogPath()
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, core.AssetFileMode)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "render: open %s: %v\n", path, err)
 		return
@@ -212,7 +214,7 @@ func LogRenderFrame(stats renderFrameStats) {
 func renderLogPath() string {
 	if cache, err := os.UserCacheDir(); err == nil {
 		dir := filepath.Join(cache, "crawler")
-		if err := os.MkdirAll(dir, 0755); err == nil {
+		if err := os.MkdirAll(dir, core.AssetDirMode); err == nil {
 			return filepath.Join(dir, renderLogFilename)
 		}
 	}

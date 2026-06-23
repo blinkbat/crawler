@@ -15,7 +15,7 @@ const (
 	levelUpHeaderSubY = int32(76)        // skill-point reminder baseline from card top
 	levelUpRowTop     = int32(112)       // first stat row's top from card top
 	levelUpRowH       = int32(64)        // per-stat row height
-	levelUpRowX       = int32(24)        // row inset from card left (margin 2× this); modalContentInsetX intent, 24 (not 22) for the large screen-relative card
+	levelUpRowX       = modalGutterWide  // row inset from card left (margin 2× this); large screen-relative card wants more side air than modalContentInsetX
 	levelUpIconX      = float32(16)      // stat sigil x from row left
 	levelUpIconY      = float32(24)      // stat sigil y from row top
 	levelUpLabelX     = int32(44)        // label x from row left

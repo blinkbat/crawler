@@ -320,7 +320,7 @@ func measureTimingHeading(font rl.Font, text string, size float32) rl.Vector2 {
 // applyTimingFlashCursor draws the frozen-cursor halo during the flash hold and returns the
 // (width, color) overrides for the caller's cursor draw. Shared by press + charge bars.
 func applyTimingFlashCursor(curX, y, barH, flashTimer float32, base rl.Color) (float32, rl.Color) {
-	const cursorW = float32(12)
+	cursorW := timingCursorWidthFlash
 	flashCol := base
 	flashCol.A = 255
 	halo := flashCol
@@ -332,6 +332,10 @@ func applyTimingFlashCursor(curX, y, barH, flashTimer float32, base rl.Color) (f
 const (
 	// timingCursorWidth is the resting cursor-block width (px) on press + charge bars.
 	timingCursorWidth = float32(8)
+	// timingCursorWidthHeld is the slightly fatter cursor while a charge bar is held.
+	timingCursorWidthHeld = float32(10)
+	// timingCursorWidthFlash is the cursor width during the frozen-result flash hold.
+	timingCursorWidthFlash = float32(12)
 	// timingCursorBleed is the cursor's top/bottom overhang so it reads as a slider, not a fill.
 	timingCursorBleed = int32(6)
 )
@@ -518,7 +522,7 @@ func drawChargeBar(timing core.TimingState, g *core.GameState, assets Resources,
 	cursorCol := colorWithAlpha(timingCursorColor, 220)
 	if timing.Pressed && !timing.Resolved {
 		// Held: punchier cursor + halo.
-		cursorW = 10
+		cursorW = timingCursorWidthHeld
 		cursorCol = timingHeldColor
 		halo := cursorCol
 		halo.A = 90

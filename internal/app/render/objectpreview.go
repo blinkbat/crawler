@@ -55,6 +55,10 @@ var objectPreviewDir = rl.Vector3Normalize(rl.NewVector3(0.55, 0.62, 1.0))
 // objectPreviewGroundSize is the thumbnail floor extent (tighter than visualizerGroundSize).
 const objectPreviewGroundSize = float32(12)
 
+// previewFovy is the vertical FOV for the object (prop) preview diorama. (The
+// foe/party previews derive their FOV from the battle tuning instead.)
+const previewFovy = float32(46)
+
 // DrawObjectPreview renders item's object (lit, shadowed, animated as in-world) into rect, auto-framed and dollied by zoom (1=fit, >1 closer). Safe per frame; texture is cached.
 func DrawObjectPreview(rect rl.Rectangle, assets Resources, item ObjectPreviewItem, zoom float32) {
 	w, h := int32(rect.Width), int32(rect.Height)

@@ -382,9 +382,14 @@ const (
 	hudContentInsetX = int32(22)
 	// modalContentInsetX is the canonical side gutter for modal-card content
 	// (dialog/chest/victory/level-up). Aliases hudContentInsetX(22) so combat panes
-	// and modals share one window-padding value. A few modals intentionally deviate
-	// (a slightly wider 24 or tighter 20) and keep their own named const + comment.
+	// and modals share one window-padding value.
 	modalContentInsetX = hudContentInsetX
+	// modalGutterWide / modalGutterTight are the two intentional deviations from
+	// modalContentInsetX(22): wide(24) for big screen-relative cards that want a
+	// touch more side air (dialog/level-up/info-strip), tight(20) for narrow cards
+	// (chest). Named here so the family lives in one place, not re-derived per file.
+	modalGutterWide  = int32(24)
+	modalGutterTight = int32(20)
 
 	// --- Spacing system (see UI_STANDARDS.md "Spacing") -----------------
 	// Shared gaps so headings/rows/footers line up the same everywhere. Header→

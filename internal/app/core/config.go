@@ -945,14 +945,15 @@ func RetroFilterName(k RetroFilterKind) string {
 }
 
 // Retro Filters submenu rows: first RetroFilterCount positions ARE the filter
-// kinds, then the toggles, Reset, All Off, Close.
+// kinds, then the toggles, Reset, All Off, Close. iota-seeded at RetroFilterCount
+// so the ladder stays contiguous without hand-counting offsets.
 const (
-	RetroMenuSkyToggle    = int(RetroFilterCount)
-	RetroMenuSpriteToggle = int(RetroFilterCount) + 1
-	RetroMenuResetAll     = int(RetroFilterCount) + 2
-	RetroMenuAllOff       = int(RetroFilterCount) + 3
-	RetroMenuClose        = int(RetroFilterCount) + 4
-	RetroMenuCount        = int(RetroFilterCount) + 5
+	RetroMenuSkyToggle = iota + int(RetroFilterCount)
+	RetroMenuSpriteToggle
+	RetroMenuResetAll
+	RetroMenuAllOff
+	RetroMenuClose
+	RetroMenuCount
 )
 
 // RetroFilterStep: Left/Right intensity increment. RetroFilterToggleDefault: the

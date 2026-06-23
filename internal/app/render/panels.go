@@ -154,9 +154,10 @@ func drawPanelsBody(g *core.GameState, assets Resources) {
 
 	// Info strip on every tab: area name left, gold right. Shared chrome so it's always visible.
 	const panelsInfoStripH = int32(22)
-	// panelsStripGutter is the info-strip's side inset. 24, not hudContentInsetX=22: the
-	// header band's chrome sits a hair wider than the body content inset below it.
-	const panelsStripGutter = int32(24)
+	// panelsStripGutter is the info-strip's side inset — modalGutterWide(24), a hair
+	// wider than hudContentInsetX(22): the header band's chrome sits wider than the
+	// body content inset below it.
+	const panelsStripGutter = modalGutterWide
 	infoY := tabRowY + tabH + 4
 	areaName := g.Area.Name
 	if areaName == "" {

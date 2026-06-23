@@ -51,6 +51,15 @@ const (
 	hintSegGap    = float32(18)
 )
 
+// Glyph aspect factors, shared by the measure path (glyphWidth) and the draw path
+// (drawShoulderButton / drawStartSelect) so the two can't drift: bumper + system
+// (start/select) advance widths as multiples of glyph height, and the pill height.
+const (
+	glyphBumperWFrac = float32(1.55)
+	glyphSystemWFrac = float32(1.3)
+	glyphPillHFrac   = float32(0.82)
+)
+
 // glyphBoxH is a glyph's drawn height, slightly taller than the text.
 func glyphBoxH(size float32) float32 { return size * 1.4 }
 
@@ -59,9 +68,9 @@ func glyphWidth(g InputGlyph, size float32) float32 {
 	gh := glyphBoxH(size)
 	switch g {
 	case GlyphLB, GlyphRB:
-		return gh * 1.55
+		return gh * glyphBumperWFrac
 	case GlyphStart, GlyphSelect:
-		return gh * 1.3
+		return gh * glyphSystemWFrac
 	default:
 		return gh
 	}
@@ -248,8 +257,8 @@ func drawGlyphPill(rect rl.Rectangle, roundness, alpha float32) {
 
 // drawShoulderButton is a bumper pill (wider than tall) with its LB/RB label.
 func drawShoulderButton(font rl.Font, label string, x, cy, gh, alpha float32) float32 {
-	w := gh * 1.55
-	h := gh * 0.82
+	w := gh * glyphBumperWFrac
+	h := gh * glyphPillHFrac
 	drawGlyphPill(rl.NewRectangle(x, cy-h/2, w, h), glyphPillRoundness, alpha)
 	drawGlyphLetter(font, label, x+w/2, cy, gh*0.5, fadeColor(glyphInk, alpha))
 	return w
@@ -257,8 +266,8 @@ func drawShoulderButton(font rl.Font, label string, x, cy, gh, alpha float32) fl
 
 // drawStartSelect: Start = three-line menu icon; Select = two overlapping view panes.
 func drawStartSelect(start bool, x, cy, gh, alpha float32) float32 {
-	w := gh * 1.3
-	h := gh * 0.82
+	w := gh * glyphSystemWFrac
+	h := gh * glyphPillHFrac
 	drawGlyphPill(rl.NewRectangle(x, cy-h/2, w, h), glyphPillRoundness, alpha)
 	ink := fadeColor(glyphInk, alpha)
 	cx := x + w/2

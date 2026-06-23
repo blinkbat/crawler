@@ -68,10 +68,6 @@ func (p *previewRT) blitTinted(rect rl.Rectangle, tint rl.Color) {
 // visualizerGroundSize: diorama floor extent + grid slice count (Foe + Party).
 const visualizerGroundSize = float32(14)
 
-// previewFovy is the vertical FOV for the object (prop) preview diorama. The foe/party
-// previews now derive their FOV from the battle tuning instead (see foePreviewCamera).
-const previewFovy = float32(46)
-
 // beginVisualizerScene opens the off-screen 3D pass: bind, clear, enter 3D, lay a
 // groundSize×groundSize floor (and, when drawGrid, a 1-unit grid). Pair with
 // EndMode3D/EndTextureMode. groundSize/drawGrid are parameterized so the object

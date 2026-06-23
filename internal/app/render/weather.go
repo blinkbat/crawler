@@ -11,15 +11,6 @@ import (
 
 // Ambient-rain overlay tuning. Storm state owned by core.WeatherState; this only paints it.
 const (
-	// Wash + streak colors shared across rain kinds; rainVisuals supplies the per-kind strengths.
-	rainWashR = 44
-	rainWashG = 56
-	rainWashB = 80
-
-	rainStreakR = 178
-	rainStreakG = 200
-	rainStreakB = 226
-
 	rainThickMin  = float32(0.7)  // px line width — thinnest streak
 	rainThickMax  = float32(2.2)  // px line width — thickest streak
 	rainSlant     = float32(6)    // px horizontal drift over a streak (wind lean)
@@ -28,14 +19,19 @@ const (
 	rainFallMin   = float32(820)  // px/sec slowest streak
 	rainFallMax   = float32(1320) // px/sec fastest streak
 
-	// Lightning flash (heavy storms): near-white blanking layer, alpha tracks Weather.Flash.
-	lightningR        = 212
-	lightningG        = 224
-	lightningB        = 248
-	lightningMaxAlpha = 185
+	lightningMaxAlpha = 185 // lightning flash (heavy storms) peak alpha; tracks Weather.Flash
 
 	// weatherIntensityEpsilon: "effectively off" cutoff for intensity/flash; below it DrawWeather bails.
 	weatherIntensityEpsilon = float32(0.001)
+)
+
+// Overlay base colors (alpha applied per-frame via colorWithAlpha). Wash + streak
+// are shared across rain kinds; rainVisuals supplies the per-kind strengths.
+// Lightning is the heavy-storm near-white blanking layer.
+var (
+	rainWashColor   = rl.NewColor(44, 56, 80, 255)
+	rainStreakColor = rl.NewColor(178, 200, 226, 255)
+	lightningColor  = rl.NewColor(212, 224, 248, 255)
 )
 
 // rainVisual is the per-kind peak overlay strength at full Intensity; scaled by the live envelope.
@@ -110,14 +106,14 @@ func DrawWeather(g *core.GameState) {
 		vis := rainVisuals[kind]
 		// Overcast wash over the world view.
 		rl.DrawRectangle(0, 0, int32(sw), int32(sh),
-			rl.NewColor(rainWashR, rainWashG, rainWashB, uint8(intensity*vis.washAlpha)))
+			colorWithAlpha(rainWashColor, uint8(intensity*vis.washAlpha)))
 
 		if n := int(intensity * vis.streaks); n > 0 {
 			if n > len(rainStreakTraits) {
 				n = len(rainStreakTraits)
 			}
 			t := float32(rl.GetTime())
-			streakCol := rl.NewColor(rainStreakR, rainStreakG, rainStreakB, uint8(intensity*vis.streakAlpha))
+			streakCol := colorWithAlpha(rainStreakColor, uint8(intensity*vis.streakAlpha))
 			for i := 0; i < n; i++ {
 				tr := rainStreakTraits[i]
 				// y wraps over `span`; per-streak phase offsets each so they don't fall in lockstep.
@@ -137,6 +133,6 @@ func DrawWeather(g *core.GameState) {
 	// Lightning blink — painted last so it lights the rain it falls through.
 	if flash > weatherIntensityEpsilon {
 		rl.DrawRectangle(0, 0, int32(sw), int32(sh),
-			rl.NewColor(lightningR, lightningG, lightningB, uint8(flash*lightningMaxAlpha)))
+			colorWithAlpha(lightningColor, uint8(flash*lightningMaxAlpha)))
 	}
 }

@@ -29,11 +29,11 @@ const (
 
 // Chest modal geometry.
 const (
-	chestRowH       = modalListRowH // item / Take All row height
-	chestCardTopPad = int32(48)     // card top edge → first row baseline budget
-	chestCardBotPad = int32(32)     // last row → card bottom budget
-	chestRowInsetX  = int32(20)     // row left/right inset; modalContentInsetX intent, tighter (20 not 22) for the narrow item card
-	chestRowInsetY  = int32(28)     // first row top inset from the card top
+	chestRowH       = modalListRowH    // item / Take All row height
+	chestCardTopPad = int32(48)        // card top edge → first row baseline budget
+	chestCardBotPad = int32(32)        // last row → card bottom budget
+	chestRowInsetX  = modalGutterTight // row left/right inset; tighter than modalContentInsetX for the narrow item card
+	chestRowInsetY  = int32(28)        // first row top inset from the card top
 )
 
 // DrawChests renders each chest as a two-piece prop (body + lid; closed = flush, looted = hinged open).
