@@ -1103,9 +1103,9 @@ func floorInt(v int) int {
 }
 
 // TickStatusMods decrements every mod's Turns and drops expired ones, returning
-// the survivors (in place) plus the just-expired Sources (for "X fades").
+// the survivors (a fresh slice) plus the just-expired Sources (for "X fades").
+// Does NOT alias `mods`, so a caller that retains the original sees it unchanged.
 func TickStatusMods(mods []StatusMod) (remaining []StatusMod, expired []SkillID) {
-	remaining = mods[:0]
 	for _, m := range mods {
 		m.Turns--
 		if m.Turns > 0 {

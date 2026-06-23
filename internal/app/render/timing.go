@@ -934,6 +934,11 @@ func DrawQualityPopup(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		return
 	}
 	worldPos.Y += popupWorldRise
+	// A behind-camera anchor projects mirrored into the visible range (raylib quirk);
+	// skip it like the hit-glyph / interact-prompt paths do.
+	if behindCamera(camera, worldPos) {
+		return
+	}
 	screenPos := rl.GetWorldToScreen(worldPos, camera)
 	sw, _ := screenSizeF()
 	if popupOffScreenX(screenPos.X, sw) {
@@ -1015,6 +1020,10 @@ func DrawDamagePopups(camera rl.Camera3D, g *core.GameState, assets Resources) {
 // and party loops. col is the base tint (grade ramp outgoing, hurt tone incoming); alpha applied here.
 func drawFloatingDamage(camera rl.Camera3D, assets Resources, worldPos rl.Vector3, value, quality int, timer float32, col rl.Color) {
 	worldPos.Y += popupWorldRise
+	// A behind-camera anchor projects mirrored into view (raylib quirk); skip it.
+	if behindCamera(camera, worldPos) {
+		return
+	}
 	screenPos := rl.GetWorldToScreen(worldPos, camera)
 	sw, _ := screenSizeF()
 	if popupOffScreenX(screenPos.X, sw) {

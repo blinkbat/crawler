@@ -883,6 +883,9 @@ const (
 	DebugMenuRetro
 	// DebugMenuStartDialog: test launcher — starts the area's first authored conversation.
 	DebugMenuStartDialog
+	// DebugMenuCombatTune opens the Combat Tuning sub-submenu (camera/foe/party
+	// placement sliders).
+	DebugMenuCombatTune
 	DebugMenuClose
 )
 

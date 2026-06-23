@@ -907,12 +907,37 @@ func resize(s *State, w, h int) {
 	// that just became the sealed border is in-bounds but now walled — drop those
 	// too so a chest/door isn't buried unreachable.
 	pruneBlockedSpawns(&s.area)
-	// Flash a count of dropped spawns so the loss isn't silent.
+	// Locations are rectangles, not point spawns: drop any whose origin fell past the
+	// new bounds, clamp the rest back onto the grid so none references off-map tiles.
+	locsBefore := len(s.area.Locations)
+	s.area.Locations = pruneLocationsOutside(s, w, h)
+	droppedLocs := locsBefore - len(s.area.Locations)
+	// Flash a count of dropped spawns/locations so the loss isn't silent.
 	dropped := entitiesBefore - totalEntityCount(&s.area)
-	if dropped > 0 {
+	switch {
+	case dropped > 0 && droppedLocs > 0:
+		s.flash(fmt.Sprintf("Resize dropped %d spawn(s) and %d location(s) outside the new bounds", dropped, droppedLocs))
+	case dropped > 0:
 		s.flash(fmt.Sprintf("Resize dropped %d spawn(s) outside or walled by the new bounds", dropped))
+	case droppedLocs > 0:
+		s.flash(fmt.Sprintf("Resize dropped %d location(s) outside the new bounds", droppedLocs))
 	}
 	s.dirty = true
+}
+
+// pruneLocationsOutside drops regions whose origin fell past the new (w,h) bounds
+// after a shrink and clamps any that merely overhang the new edge, mirroring the
+// spawn prune so a region never references off-grid tiles.
+func pruneLocationsOutside(s *State, w, h int) []core.Location {
+	kept := make([]core.Location, 0, len(s.area.Locations))
+	for _, loc := range s.area.Locations {
+		if loc.X >= w || loc.Z >= h {
+			continue // origin off-grid — the whole region is gone
+		}
+		clampLocation(s, &loc)
+		kept = append(kept, loc)
+	}
+	return kept
 }
 
 // outsideBounds is the shrink-prune predicate: a tile is outside the new (w,h)
@@ -1674,6 +1699,12 @@ func dialogWarnings(a core.AreaDefinition) []string {
 		case core.DialogTriggerFoeKilled:
 			if _, ok := core.EnemyInfoOk(t.FoeKind); !ok {
 				out = append(out, fmt.Sprintf("trigger %q references an unregistered foe kind", t.ID))
+			}
+		case core.DialogTriggerEnterLocation:
+			if t.LocationID == "" {
+				out = append(out, fmt.Sprintf("trigger %q enter-location has no target region", t.ID))
+			} else if _, ok := core.LocationByID(a.Locations, t.LocationID); !ok {
+				out = append(out, fmt.Sprintf("trigger %q → location %q not found", t.ID, t.LocationID))
 			}
 		}
 	}

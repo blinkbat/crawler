@@ -827,6 +827,14 @@ func (mf *MapFile) validateOptionalGrid(name string, rows []string) error {
 		if len(row) != mf.Width {
 			return fmt.Errorf("%s row %d has %d cols, size declares %d", name, i, len(row), mf.Width)
 		}
+		// Each cell is the '.' auto sentinel or a level char ('0'..'9' then 'A'..'K'
+		// for 10..20, same encoding as elevation). Anything else reads as level 0
+		// downstream, silently flattening the prop/decor instead of failing here.
+		for c := 0; c < len(row); c++ {
+			if b := row[c]; b != '.' && !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'K')) {
+				return fmt.Errorf("%s row %d col %d has bad level char %q (expected '.', '0'..'9', or 'A'..'K')", name, i, c, string(row[c]))
+			}
+		}
 	}
 	return nil
 }
@@ -919,6 +927,16 @@ func (mf *MapFile) validate() error {
 	for _, p := range mf.Packs {
 		if !inBounds(p.X, p.Z, mf.Width, mf.Height) {
 			return fmt.Errorf("pack at (%d,%d) outside map %dx%d", p.X, p.Z, mf.Width, mf.Height)
+		}
+		// Members encode comma/semicolon-joined (',' within a row, ';' splits the
+		// front/back rows) and re-split on those, so a member name containing either —
+		// or whitespace, which the row decoder also splits on — would re-parse as
+		// phantom members. Reject at the data-model boundary (mirrors the chest-item
+		// and door-name guards) so it fails loudly at save.
+		for _, m := range p.Members {
+			if strings.ContainsAny(m, ",; \t") {
+				return fmt.Errorf("pack at (%d,%d) member %q must not contain a comma, semicolon, or whitespace", p.X, p.Z, m)
+			}
 		}
 	}
 	for _, c := range mf.Chests {

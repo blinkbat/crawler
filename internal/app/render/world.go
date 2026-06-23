@@ -241,44 +241,48 @@ func tintMul(a, b rl.Color) rl.Color {
 	)
 }
 
-// exploreFOV is the wide walking FOV; 112° favors situational awareness over
-// edge perspective distortion.
-const exploreFOV = float32(112)
+// exploreFOV is the wide walking FOV; favors situational awareness over edge
+// perspective distortion (battle eases toward the narrower battleTune.CamFOV).
+const exploreFOV = float32(100)
 
-// battleFOV is the narrower combat FOV: enemies fill more pixels and the
-// formation packs into a focused stage. Tuned so a full 5-back/3-front pack fits
-// with room — slightly wider than a tight portrait FOV so both ranks sit on the
-// engaged tile without crowding the edges.
-const battleFOV = float32(78)
+// exploreCamDrop lowers the walking eye (~a third of EyeHeight) for a grounded
+// over-the-shoulder feel. Applied only out of battle — it fades out as battleCamBlend
+// rises, so the battle's own tuned eye-lift isn't disturbed.
+const exploreCamDrop = float32(-0.44)
 
-// fovTweenRate eases the camera between explore/battle FOV (deg/sec). 80°/s
-// lands the 40° swing in ~half a second, slightly ahead of BattleSplashDuration.
-const fovTweenRate = float32(80)
+// battleCamBlendRate eases the explore↔battle camera blend at ~1/TurnDuration per
+// second, so every battle camera param (tilt, eye-lift, FOV) transitions together in
+// about a player-turn's time — no snap on battle enter/exit.
+const battleCamBlendRate = float32(1.0 / core.TurnDuration)
 
-// currentFOV is the eased FOV; package-local so the tween survives across draws
-// without leaking onto GameState.
-var currentFOV = exploreFOV
+// battleCamBlend is the eased explore→battle factor (0 = explore, 1 = battle), held
+// across draws so the transition survives frame to frame.
+var battleCamBlend float32
 
-// targetFOV returns the FOV to tween toward this frame.
-func targetFOV(g *core.GameState) float32 {
-	if g.Battle.Active() {
-		return battleFOV
-	}
-	return exploreFOV
-}
-
-// battlePitchOffset tilts the camera down in battle (added to LookPitch) so the
-// arena floor fills more of the lower screen; -0.18 rad ≈ -10°, small enough that
-// enemy sprites stay visible.
-const battlePitchOffset = float32(-0.18)
+// battleTune mirrors g.BattleTuning, synced at the top of Camera() each frame so the
+// battle geometry helpers (which don't all receive g) can read the live values the
+// Debug ▸ Combat Tuning panel edits. Package default keeps it valid before the first
+// sync. The combat FOV, camera tilt/lift, and foe/party placement all read it.
+var battleTune = core.DefaultBattleTuning()
 
 func Camera(g *core.GameState) rl.Camera3D {
+	// Sync the live combat tuning before any battle geometry (incl. this camera)
+	// reads it. Guard against a zero-value GameState (struct-literal in a test) so a
+	// stray call can't clobber the package default with zeros.
+	if g.BattleTuning.CamFOV > 0 {
+		battleTune = g.BattleTuning
+	}
+	// Ease the explore↔battle blend so the tilt, eye-lift, and FOV animate in together
+	// rather than snapping when a fight starts or ends.
+	battleTarget := float32(0)
+	if g.Battle.Active() {
+		battleTarget = 1
+	}
+	battleCamBlend = core.Approach(battleCamBlend, battleTarget, battleCamBlendRate*rl.GetFrameTime())
+
 	p := g.Player
 	yaw := p.Yaw + p.LookYaw
-	pitch := p.LookPitch
-	if g.Battle.Active() {
-		pitch += battlePitchOffset
-	}
+	pitch := p.LookPitch + battleTune.CamPitch*battleCamBlend
 	cp := float32(math.Cos(float64(pitch)))
 	direction := rl.NewVector3(
 		cp*float32(math.Cos(float64(yaw))),
@@ -295,7 +299,10 @@ func Camera(g *core.GameState) rl.Camera3D {
 	if p.Anim.Kind == core.AnimStep {
 		groundY = p.GroundY
 	}
-	position := rl.NewVector3(p.X, core.EyeHeight+groundY, p.Z)
+	// Eye rides the ground. Out of battle the explore drop lowers it; in battle that
+	// fades out and the tuned eye-lift fades in — both ride the one blend.
+	eyeY := core.EyeHeight + groundY + exploreCamDrop*(1-battleCamBlend) + battleTune.CamLift*battleCamBlend
+	position := rl.NewVector3(p.X, eyeY, p.Z)
 	// Combat screen shake: positional jitter eased out by ShakeTimer. Wall-clock-
 	// driven (two incommensurate freqs) so it's visible even while hit-stop freezes
 	// the sim. Battle-only.
@@ -305,13 +312,13 @@ func Camera(g *core.GameState) rl.Camera3D {
 		position.X += float32(math.Sin(t*47.0)) * amp
 		position.Y += float32(math.Sin(t*61.0)) * amp
 	}
-	// Push currentFOV toward target by ≤ fovTweenRate*dt; Approach won't overshoot.
-	currentFOV = core.Approach(currentFOV, targetFOV(g), fovTweenRate*rl.GetFrameTime())
+	// FOV eases between the wide walking FOV and the combat FOV on the same blend.
+	fov := exploreFOV + (battleTune.CamFOV-exploreFOV)*battleCamBlend
 	return rl.NewCamera3D(
 		position,
 		rl.NewVector3(position.X+direction.X, position.Y+direction.Y, position.Z+direction.Z),
 		rl.NewVector3(0, 1, 0),
-		currentFOV,
+		fov,
 		rl.CameraPerspective,
 	)
 }
@@ -534,14 +541,14 @@ func drawWorld(camera rl.Camera3D, g *core.GameState, assets Resources) {
 						if r := propShadowRadiusTable[prop]; r > 0 {
 							drawGroundShadowElev(anchor.X, anchor.Z, anchor.Y, r)
 						}
-						pm.draw(anchor, 1.0, propYaw)
+						pm.draw(anchor, propWorldScale, propYaw)
 						drawn = true
 					}
 				} else if pm := &assets.propModelTable[prop]; len(pm.parts) > 0 {
 					if r := propShadowRadiusTable[prop]; r > 0 {
 						drawGroundShadowElev(propCenter.X, propCenter.Z, propCenter.Y, r)
 					}
-					pm.draw(propCenter, 1.0, propYaw)
+					pm.draw(propCenter, propWorldScale, propYaw)
 					drawn = true
 				}
 				if logActive && drawn {
@@ -851,6 +858,12 @@ func drawDecor(assets Resources, cell byte, x, z int, cx, cz float32, center rl.
 	}
 }
 
+// propWorldScale shrinks every world prop a touch (the foliage + the model props)
+// for a less oversized scene. The giant tree (TileTreeXL) is exempt — it stays the
+// full-size canopy landmark — and the wall torch is exempt (a wall-mounted fixture,
+// not free-standing clutter).
+const propWorldScale = float32(0.9)
+
 // treePropScales is the scale-per-char table for tree variants that share
 // assets.tree at different sizes (Tree/TreeXL/TreeTall/TreeYoung dispatch through
 // drawPropTreeScaled; TileTreeTwin is separate, drawing two per tile).
@@ -876,6 +889,9 @@ func foliageShadowRadius(scale, slack float32) float32 {
 // trees doesn't read as a stamped grid.
 func drawPropTreeScaled(char byte) inlinePropRenderer {
 	scale := treePropScales[char]
+	if char != core.TileTreeXL { // giant trees keep full size; everything else shrinks
+		scale *= propWorldScale
+	}
 	return func(assets Resources, _ *core.AreaDefinition, x, z int, center rl.Vector3, propYaw float32) {
 		drawGroundShadowElev(center.X, center.Z, center.Y, foliageShadowRadius(scale, 0.10))
 		assets.tree.drawVaried(center, scale, propYaw, tileHash(x, z))
@@ -886,8 +902,8 @@ func drawPropTreeScaled(char byte) inlinePropRenderer {
 // tile ("big tree with a younger one beside it"). Both reuse assets.tree.
 func drawPropTreeTwin(assets Resources, _ *core.AreaDefinition, x, z int, center rl.Vector3, propYaw float32) {
 	const offset = 0.32
-	const scaleBig = 0.82
-	const scaleSmall = 0.58
+	const scaleBig = 0.82 * propWorldScale
+	const scaleSmall = 0.58 * propWorldScale
 	seed := tileHash(x, z)
 	left := rl.NewVector3(center.X-offset, center.Y, center.Z-offset)
 	right := rl.NewVector3(center.X+offset, center.Y, center.Z+offset)
@@ -904,12 +920,12 @@ func drawPropTreeTwin(assets Resources, _ *core.AreaDefinition, x, z int, center
 
 func drawPropRockLarge(assets Resources, _ *core.AreaDefinition, _, _ int, center rl.Vector3, propYaw float32) {
 	drawGroundShadowElev(center.X, center.Z, center.Y, 0.42)
-	assets.rockProp.draw(center, 1.0, propYaw)
+	assets.rockProp.draw(center, propWorldScale, propYaw)
 }
 
 func drawPropBushLarge(assets Resources, _ *core.AreaDefinition, _, _ int, center rl.Vector3, propYaw float32) {
 	drawGroundShadowElev(center.X, center.Z, center.Y, 0.48)
-	assets.bushProp.draw(center, 1.3, propYaw)
+	assets.bushProp.draw(center, 1.3*propWorldScale, propYaw)
 }
 
 // Wall-torch fixture geometry — shared by drawWallTorch and rebuildTorchSites so
@@ -1445,6 +1461,15 @@ const enemyBillboardY = float32(0.68)
 const battleFormationCenterY = float32(1.0)
 const enemyFieldLift = battleFormationCenterY - enemyBillboardY
 
+// downedToppleDegrees rotates a downed party member's billboard flat on the ground
+// (90° = lying on its side, read as collapsed).
+const downedToppleDegrees = float32(90)
+
+// The foe foot line lives in battleTune.FoeFloorY (Debug ▸ Combat Tuning): drawBattlePack
+// foot-anchors every foe to it — sprite center = FoeFloorY + size.Y/2 — so a short rat
+// and a tall goblin both stand on the ground instead of sharing a center that
+// levitates the short one.
+
 // Party billboard sizes: idle silhouette + the active-actor "your turn" bump.
 var (
 	partyBillboardSize       = rl.NewVector2(0.38, enemyBillboardY)
@@ -1520,17 +1545,44 @@ func drawBattlePack(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	// Resolve every slot in one O(n) pass and index it, vs a per-member
 	// enemyRowSlot that re-walked the pack (O(n²)).
 	placements := enemyRowPlacements(members)
-	for i := range members {
-		enemy := &members[i]
+	// Painter's order for the depth-test-off battle pass: the farther BACK rank first,
+	// then the nearer FRONT rank over it, so a (bigger) back foe can't paint over a
+	// front foe it's actually behind.
+	for _, wantRow := range [...]core.Row{core.RowBack, core.RowFront} {
+		for i := range members {
+			if placements[i].row != wantRow {
+				continue
+			}
+			drawBattleFoe(camera, g, assets, &members[i], placements[i], i)
+		}
+	}
+}
+
+// drawBattleFoe renders one pack member at its resolved placement (extracted so the
+// row-ordered loop above can call it per rank).
+func drawBattleFoe(camera rl.Camera3D, g *core.GameState, assets Resources, enemy *core.Enemy, p enemyPlacement, i int) {
+	{
 		visual, ok := enemyVisualFor(assets, enemy.Kind)
 		if !ok {
-			continue
+			return
 		}
 		if !enemy.Alive && enemy.DeathFade <= 0 {
-			continue
+			return
 		}
-		p := placements[i]
+		// Per-rank size multiplier (Debug ▸ Combat Tuning) — applied before the
+		// foot-anchor so a scaled foe still rests on the floor.
+		rowScale := battleTune.FoeFrontScale
+		if p.row == core.RowBack {
+			rowScale = battleTune.FoeBackScale
+		}
+		visual.size.X *= rowScale
+		visual.size.Y *= rowScale
 		position := enemyFormationPos(camera, g, p.row, p.slot, p.count, enemy)
+		// Foot-anchor: seat the billboard's BOTTOM on the battle floor regardless of
+		// its height, so short foes (rats, bats) stand on the ground instead of
+		// floating at a shared center. yOffset (added in resolveBillboardPlacement) is
+		// then a deliberate hover, not a grounding fudge.
+		position.Y = battleTune.FoeFloorY + visual.size.Y/2
 		// Per-kind depth/marker/yOffset placement via the shared helper.
 		place := resolveBillboardPlacement(camera, position, &visual)
 		tint := rl.White
@@ -1555,6 +1607,12 @@ func drawBattlePack(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		}
 		// Fold in the per-kind base tint last (untinted = White, no-op).
 		tint = tintMul(tint, visual.resolveTint())
+		// Back-rank depth cue: darken the back row toward black (Debug ▸ Combat Tuning)
+		// so it reads as set behind the front. Multiplicative, alpha untouched.
+		if p.row == core.RowBack && battleTune.FoeBackDarken > 0 {
+			d := uint8(255 * (1 - battleTune.FoeBackDarken))
+			tint = tintMul(tint, rl.NewColor(d, d, d, 255))
+		}
 		// Contact disc before the billboard, only for opt-in kinds. Keeps the
 		// default shader so the billboard-fog pass doesn't tint it.
 		if visual.shadowRadius > 0 {
@@ -1770,6 +1828,21 @@ func shadeColor(c rl.Color, factor float32) rl.Color {
 // ShadeColor is the exported form of shadeColor for the editor's 3D view.
 func ShadeColor(c rl.Color, factor float32) rl.Color { return shadeColor(c, factor) }
 
+// partyDrawOrder returns party indices ordered far-rank-first — the FRONT rank
+// (farther from the camera) before the nearer BACK rank — for the depth-test-off
+// battle pass, so the nearer rank paints over the farther at any overlap.
+func partyDrawOrder(party []core.PartyMember) []int {
+	order := make([]int, 0, len(party))
+	for _, want := range [...]core.Row{core.RowFront, core.RowBack} {
+		for i := range party {
+			if party[i].Row == want {
+				order = append(order, i)
+			}
+		}
+	}
+	return order
+}
+
 func DrawPartySprites(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	if g.Battle.Phase == core.BattleNone {
 		return
@@ -1777,7 +1850,10 @@ func DrawPartySprites(camera rl.Camera3D, g *core.GameState, assets Resources) {
 	defer beginBillboardFogPass(camera, g, assets)()
 	victoryDance := victoryDanceElapsed(g)
 	incomingSlot, hasIncoming := enemyAttackTarget(g)
-	for i := range g.Party {
+	// Painter's order for the depth-test-off battle pass: the FRONT rank sits farther
+	// from the camera than the back rank, so draw front first and let the nearer back
+	// rank paint over it at any overlap.
+	for _, i := range partyDrawOrder(g.Party) {
 		// Ingested members are tucked inside a mantrap — don't draw them.
 		if g.Party[i].Ingested {
 			continue
@@ -1794,6 +1870,14 @@ func DrawPartySprites(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		// Per-class placement via the shared helper (no battle/editor drift).
 		place := resolveBillboardPlacement(camera, position, &visual)
 		size := visual.size
+		// Per-rank party size multiplier (Debug ▸ Combat Tuning), applied to the base
+		// before the active-bump / victory-dance scaling below.
+		partyRowScale := battleTune.PartyFrontScale
+		if g.Party[i].Row == core.RowBack {
+			partyRowScale = battleTune.PartyBackScale
+		}
+		size.X *= partyRowScale
+		size.Y *= partyRowScale
 		tint := rl.White
 		if g.Party[i].HP <= 0 {
 			tint = tintPartyDown
@@ -1816,7 +1900,16 @@ func DrawPartySprites(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		}
 		// Distance fog comes from the billboard-fog shader; the "your turn" read
 		// lives in the party card now (plus the warm tint + bump above).
-		drawTextureBillboard(camera, visual.texture, place.sprite, size, tint)
+		if g.Party[i].HP <= 0 {
+			// Downed: topple the sprite flat (rotated 90°) + dimmed. Lower the center
+			// by half the (height−width) so the now-horizontal sprite still rests on
+			// the floor instead of hovering at standing-center height.
+			downed := place.sprite
+			downed.Y -= (size.Y - size.X) / 2
+			drawTextureBillboardRotated(camera, visual.texture, downed, size, downedToppleDegrees, tint)
+		} else {
+			drawTextureBillboard(camera, visual.texture, place.sprite, size, tint)
+		}
 		// Friendly marker only in the menu phase, not the timing bar that follows
 		// (inPlayerTurn includes BattleAttackTiming and would linger it).
 		if g.Battle.Phase == core.BattlePlayer && targetingAlly(g) && i == g.Battle.PartyTarget && g.Party[i].HP > 0 {
@@ -1855,21 +1948,19 @@ func partySpritePosition(camera rl.Camera3D, party []core.PartyMember, index int
 	if index >= 0 && index < len(party) {
 		class = party[index].Class
 	}
-	// Layout uses the STANDING home slot (HomeRow/HomeCol), not the live combat
-	// row, so the party always renders as a stable 2×2 trapezoid (Reposition/ambush
-	// change reach only, not the sprites).
+	// Layout uses the LIVE combat slot (Row/Col), so ambush rotation and death-driven
+	// swaps physically MOVE the sprite — the front line you see is the one that fights.
+	// The live slot is seated from the home formation at battle start and reverts after.
 	visRow, visCol := core.RowFront, core.ColLeft
 	if index >= 0 && index < len(party) {
-		visRow, visCol = party[index].HomeRow, party[index].HomeCol
+		visRow, visCol = party[index].Row, party[index].Col
 	}
-	// 2×2 trapezoid widening toward the viewer (mostly via width so both ranks
-	// stay on-screen): front tight/further, back wide/nearer.
-	baseY := float32(0.58)
-	rowForward := float32(1.5)   // front rank — off the foes
-	rowSpacing := float32(0.84)  // front: tight pair (compressed to free room for the foes)
+	// 2×2 trapezoid widening toward the viewer (Debug ▸ Combat Tuning: Party rows):
+	// front tight/further, back wide/nearer. baseY is the sprite center height.
+	baseY := battleTune.PartyBaseY
+	rowForward, rowSpacing := battleTune.PartyFrontFwd, battleTune.PartyFrontGapX
 	if visRow == core.RowBack {
-		rowForward = 1.18 // nearer the camera, still in frame
-		rowSpacing = 1.28 // back: only a touch wider (gentle trapezoid)
+		rowForward, rowSpacing = battleTune.PartyBackFwd, battleTune.PartyBackGapX
 	}
 	base := rl.NewVector3(
 		camera.Position.X+forward.X*rowForward,
@@ -2013,17 +2104,19 @@ func enemyFormationPos(camera rl.Camera3D, g *core.GameState, row core.Row, slot
 	}
 	forward := horizontalForward(camera)
 	right := horizontalRight(forward)
-	// Pushed back from 2.55 so the foe stage reads as standing ON the engaged tile
-	// (with the wider battleFOV) rather than looming in the camera's face.
+	// Distance forward of the camera (Debug ▸ Combat Tuning: Foe distance).
 	center := rl.NewVector3(
-		camera.Position.X+forward.X*2.9,
+		camera.Position.X+forward.X*battleTune.FoeDistance,
 		battleFormationCenterY,
-		camera.Position.Z+forward.Z*2.9,
+		camera.Position.Z+forward.Z*battleTune.FoeDistance,
 	)
-	// Per-row width cap: pack slots inside formationMaxWidth so a full back row
-	// doesn't spill, keeping generous spacing for small rows.
-	const baseSpacing = float32(1.12)
-	const formationMaxWidth = float32(2.9)
+	// Per-row X spacing (tunable): front packs tight, back fans wide so back foes
+	// spill past the front gaps and read between them. maxWidth caps the total spread
+	// so a full row can't run off the stage.
+	baseSpacing, formationMaxWidth := battleTune.FoeFrontGapX, battleTune.FoeFrontMaxW
+	if row == core.RowBack {
+		baseSpacing, formationMaxWidth = battleTune.FoeBackGapX, battleTune.FoeBackMaxW
+	}
 	spacing := baseSpacing
 	if count > 1 {
 		if fit := formationMaxWidth / float32(count-1); fit < spacing {
@@ -2031,15 +2124,25 @@ func enemyFormationPos(camera rl.Camera3D, g *core.GameState, row core.Row, slot
 		}
 	}
 	offset := (float32(slot) - float32(count-1)/2) * spacing
-	// Two ranks: front nearer the party; back deeper, lifted to read over the
-	// front and staggered half a slot to peek between them. Depths compressed so
-	// both ranks sit comfortably on the one engaged tile (~0.75 span, was ~1.0).
-	rowDepth := float32(-0.33)
-	rowLift := float32(0)
+	// Two ranks: front nearer the party; back deeper, aligned in the SAME columns as
+	// the front (no half-slot shift) so a front foe visibly shields the back foe
+	// behind it — the column-cover rule made literal, and the back row reads centered
+	// rather than skewed right. The back rank reads as behind from the extra depth +
+	// the downward battle pitch — NOT from lifting it (drawBattlePack foot-anchors
+	// every foe to the floor, so any lift would just levitate them again).
+	// Ranks sit close in depth (gap ~0.4) so the back row reads just over/between the
+	// front rather than shrinking off into the distance.
+	rowDepth := battleTune.FoeFrontDepth
 	if row == core.RowBack {
-		rowDepth = 0.42
-		rowLift = 0.28
-		offset += spacing * 0.5
+		rowDepth = battleTune.FoeBackDepth
+	}
+	// Depth zigzag: alternate slots step a little fore/aft of their rank so a wide
+	// row reads as a milling crowd, not a flat cardboard wall, and neighbors overlap
+	// less.
+	if slot%2 == 1 {
+		rowDepth += battleTune.FoeZigzag
+	} else {
+		rowDepth -= battleTune.FoeZigzag
 	}
 	bump := core.BumpOffset(enemy.AttackBump, 0.2)
 	// Knockback pushes away from the camera; AttackBump lunges toward the party
@@ -2047,7 +2150,7 @@ func enemyFormationPos(camera rl.Camera3D, g *core.GameState, row core.Row, slot
 	knock := core.KnockbackOffset(enemy.HitKnockback, core.HitKnockbackDist)
 	return rl.NewVector3(
 		center.X+right.X*offset+forward.X*(rowDepth-bump+knock),
-		center.Y+rowLift,
+		center.Y,
 		center.Z+right.Z*offset+forward.Z*(rowDepth-bump+knock),
 	)
 }

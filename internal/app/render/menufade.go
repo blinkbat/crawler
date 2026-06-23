@@ -37,6 +37,8 @@ func menuFadeDrawer(g *core.GameState) func(*core.GameState, Resources) {
 		return drawShopOverlay
 	case g.RetroMenuOpen:
 		return drawRetroMenuOverlay
+	case g.CombatTuneOpen:
+		return drawCombatTuneOverlay
 	case g.DebugMenuOpen:
 		return drawDebugMenuOverlay
 	case g.PanelsOpen:

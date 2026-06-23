@@ -81,6 +81,7 @@ var debugMenuRows = []debugMenuRow{
 		return "Retro Filters ▸"
 	}},
 	{Item: core.DebugMenuStartDialog, Label: func(*core.GameState) string { return "Start Dialog" }},
+	{Item: core.DebugMenuCombatTune, Label: func(*core.GameState) string { return "Combat Tuning ▸" }},
 	{Item: core.DebugMenuClose, Label: func(*core.GameState) string { return "Close" }},
 }
 

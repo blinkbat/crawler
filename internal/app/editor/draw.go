@@ -738,8 +738,14 @@ func modalButtonStack(card rl.Rectangle, labels []string) []rl.Rectangle {
 // drawModalButtons paints a computed rect set; modalButtonHit returns the
 // clicked index. (Geometry comes from modalButtonRow/Stack/buttonGrid.)
 func drawModalButtons(font rl.Font, rects []rl.Rectangle, labels []string) {
+	drawModalButtonsSel(font, rects, labels, -1)
+}
+
+// drawModalButtonsSel paints the button set, highlighting the keyboard-selected row
+// (sel < 0 = none, e.g. mouse/hotkey-only modals).
+func drawModalButtonsSel(font rl.Font, rects []rl.Rectangle, labels []string, sel int) {
 	for i, r := range rects {
-		drawButton(font, r, labels[i], false)
+		drawButton(font, r, labels[i], i == sel)
 	}
 }
 
@@ -3287,8 +3293,8 @@ func drawEntityListModal(s *State, font rl.Font, theme render.Theme) {
 func drawEscMenuModal(s *State, font rl.Font, theme render.Theme) {
 	r := drawModalHeader(font, theme, escMenuModalW, escMenuModalH, "EDITOR MENU", theme.BorderActive)
 	labels := cmdLabels(escMenuCmds(s))
-	drawModalButtons(font, modalButtonStack(r, labels), labels)
-	render.DrawTextWithShadow(font, "(D display · C continue · E exit · Esc close)",
+	drawModalButtonsSel(font, modalButtonStack(r, labels), labels, s.modalCursor)
+	render.DrawTextWithShadow(font, "(↑↓ select · Enter confirm · D/C/E hotkeys · Esc close)",
 		r.X+modalContentInset, r.Y+40, editorFontHint, theme.TextHint)
 }
 

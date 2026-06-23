@@ -101,7 +101,7 @@
   "feral_rat": {
     "sizeX": 0.75,
     "sizeY": 0.8,
-    "yOffset": -0.3,
+    "yOffset": 0,
     "depthOffset": 0,
     "shadowRadius": 0.68,
     "shadowOffsetX": 0.06,

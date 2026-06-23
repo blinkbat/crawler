@@ -271,11 +271,19 @@ func DrawCrispSpritePass(camera rl.Camera3D, g *core.GameState, assets Resources
 	rl.EnableColorBlend()
 	rl.EnableDepthMask()
 	rl.EnableDepthTest()
-	// Sprites depth-test against retained depth, so only visible ones blit.
+	// Sprites depth-test against retained depth (only visible ones blit) — except in
+	// battle, where they paint over the environment like the non-filtered path.
 	rl.BeginMode3D(camera)
+	inBattle := g.Battle.Active()
+	if inBattle {
+		rl.DisableDepthTest()
+	}
 	DrawEnemies(camera, g, assets)
 	DrawPartySprites(camera, g, assets)
 	TickAndDrawVFX(camera, g, assets)
+	if inBattle {
+		rl.EnableDepthTest()
+	}
 	rl.EndMode3D()
 	rl.EndTextureMode()
 	// Crisp blit (no shader): transparent bg alpha-composites sprites over the

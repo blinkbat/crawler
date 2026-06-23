@@ -417,6 +417,12 @@ func chargeMP(g *core.GameState, skill core.SkillID) bool {
 	if g.DebugAllSkills {
 		return true
 	}
+	// Runs in the setup path, before the apply-side ensureAlive* rechecks — guard the
+	// index so an actor whose slot went out of range between confirm and the bar
+	// refuses the cast instead of panicking.
+	if !partyIndexValid(g, g.Battle.CurrentParty) {
+		return false
+	}
 	actor := &g.Party[g.Battle.CurrentParty]
 	if !core.SpendSkillMP(actor, skill) {
 		setBattleStatus(g, core.SkillName(skill)+" needs more MP.")
@@ -662,7 +668,10 @@ func maybeConfuseRetarget(g *core.GameState) {
 	}
 	switch g.Battle.ActionMode {
 	case core.ActionEnemyTarget:
-		slots := core.LivingBattleEnemyIndices(g)
+		// Reach-filtered (battleEnemyTargets): a confused melee fumble re-rolls only
+		// among foes the weapon can actually hit, so it can't bypass the front-row
+		// reach rule the picker enforces and strike a protected back-row enemy.
+		slots := battleEnemyTargets(g)
 		if len(slots) == 0 {
 			return
 		}
@@ -841,6 +850,12 @@ func setupTargetedAllyAndPay(g *core.GameState, skill core.SkillID, deadMsg stri
 // --- Prayer (Cleric, heals an ally) ---
 
 func applyPrayer(g *core.GameState, quality int) bool {
+	// The chosen ally can die (or its slot go out of range) between confirm and this
+	// apply; re-check — refund + end the turn on a gone target — so we don't index a
+	// stale slot or log a heal that never landed. Mirrors the other single-ally casts.
+	if !ensureAlivePartyTargetOrCancel(g, core.SkillPrayer) {
+		return false
+	}
 	actor := beginPartyAction(g)
 	// Prayer is Heal-kind (WIS + Effect.Heal).
 	heal := core.ScaleHeal(core.SkillHealFor(actor, core.SkillPrayer), quality)
@@ -2016,6 +2031,11 @@ func applyPartyDamage(g *core.GameState, member *core.PartyMember, rawAmount int
 		return amount, false
 	}
 	clearPartyStatusesOnDeath(member)
+	// A downed member yields the front line: sink it to the back and pull a living
+	// backliner up (same column first). Single hook for every death path (melee,
+	// cast, DoT all land here). A future Raise re-runs ShuntPartyFormation to restore
+	// the revived member to the front when a slot needs manning.
+	core.ShuntPartyFormation(g.Party)
 	return amount, true
 }
 

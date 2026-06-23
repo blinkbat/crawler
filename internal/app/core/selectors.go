@@ -277,8 +277,11 @@ func clearPartyCombatTransients(party []PartyMember) {
 	}
 }
 
-// ModalKind tags the active full-screen explore-scene modal, in priority order
-// (higher wins when multiple flags are set), mirroring the explore.Update gates.
+// ModalKind tags the active full-screen explore-scene modal. These are plain tags,
+// NOT a priority ranking — the iota order does not encode precedence (e.g. ModalShop
+// sorts below ModalChest here but resolves ABOVE it at runtime). Precedence lives
+// solely in ActiveModal's switch order below; only the single resolved value is ever
+// consumed, never compared. Add a kind anywhere and wire it into that switch.
 type ModalKind int
 
 const (
@@ -287,6 +290,7 @@ const (
 	ModalOptionsMenu
 	ModalDebugMenu
 	ModalRetroMenu
+	ModalCombatTune
 	ModalShop
 	ModalDoorPrompt
 	ModalChest
@@ -326,6 +330,9 @@ func ActiveModal(g *GameState) ModalKind {
 		// Above the debug menu (its child) so a stray double-open can't let the
 		// parent shadow the child's input.
 		return ModalRetroMenu
+	case g.CombatTuneOpen:
+		// Child of the debug menu, same priority rationale as the retro submenu.
+		return ModalCombatTune
 	case g.DebugMenuOpen:
 		return ModalDebugMenu
 	case g.OptionsMenuOpen:

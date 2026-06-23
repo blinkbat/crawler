@@ -355,6 +355,13 @@ type GameState struct {
 	RetroMenuOpen  bool
 	RetroMenuIndex int
 	RetroFilters   [RetroFilterCount]float64
+	// CombatTuneOpen: Debug ▸ Combat Tuning sub-submenu showing; CombatTuneIndex its
+	// row cursor. BattleTuning holds the live combat-scene geometry the render layer
+	// reads (camera/foe/party placement). Runtime debug preference (not in SaveData),
+	// kept across Restart like RetroFilters.
+	CombatTuneOpen  bool
+	CombatTuneIndex int
+	BattleTuning    BattleTuning
 	// RetroFilterSky: true (default) captures the skybox inside the filter pass;
 	// false draws it crisp with the filtered environment blitted over.
 	RetroFilterSky bool
@@ -649,12 +656,17 @@ type PartyMember struct {
 	// mid-battle swap needs no base-stat recompute.
 	Equipped [EquipSlotCount]ItemKind
 
-	// Row is the LIVE combat rank (what melee reach + Reposition read), recomputed
-	// from the home slot at battle start via AmbushLiveRow so an ambush can rotate
-	// it without disturbing the standing formation. Zero value RowFront.
+	// Row/Col are the LIVE combat slot — what melee reach AND in-battle sprite
+	// placement read. Recomputed from the home slot at battle start via
+	// AmbushLive{Row,Col} (engage-side rotation), then packed front-ward as members
+	// fall (downed sink to the back, living fill the front). Drifts during a fight;
+	// reverts because the home slot below is never touched. Zero value (RowFront,
+	// ColLeft).
 	Row Row
-	// HomeRow/HomeCol are the STANDING 2×2 slot, persisted across fights. Battle
-	// start rotates them into Row by engage side; Reposition changes Row only.
+	Col Col
+	// HomeRow/HomeCol are the STANDING 2×2 slot — the player's PREFERRED formation,
+	// persisted across fights and never mutated by combat. Battle start rotates these
+	// into the live Row/Col; restoring the formation after a fight is just "use Home."
 	HomeRow Row
 	HomeCol Col
 

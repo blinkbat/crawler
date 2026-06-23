@@ -100,6 +100,7 @@ func NewGameState(area AreaDefinition) GameState {
 		RetroFilters:       DefaultRetroFilters(),
 		RetroFilterSky:     DefaultRetroFilterSky,
 		RetroFilterSprites: DefaultRetroFilterSprites,
+		BattleTuning:       DefaultBattleTuning(),
 		Inventory:          starterInventory(),
 		Quests:             StarterQuests(),
 		// Empty foe knowledge; fills via RecordBattleKills / MarkScanned. A save
@@ -313,6 +314,7 @@ func ResetGameState(g *GameState) {
 	savedRetroFilters := g.RetroFilters
 	savedRetroSky := g.RetroFilterSky
 	savedRetroSprites := g.RetroFilterSprites
+	savedBattleTuning := g.BattleTuning
 	*g = NewGameState(g.Area)
 	g.Inventory = savedInventory
 	g.Party = savedParty
@@ -328,6 +330,7 @@ func ResetGameState(g *GameState) {
 	g.RetroFilters = savedRetroFilters
 	g.RetroFilterSky = savedRetroSky
 	g.RetroFilterSprites = savedRetroSprites
+	g.BattleTuning = savedBattleTuning
 	// Debug toggles are runtime prefs, not world state — preserve across restart.
 	copyRunToggles(g, &prev)
 	// Drop lingering particles: Restart can fire mid-battle, so formation-relative

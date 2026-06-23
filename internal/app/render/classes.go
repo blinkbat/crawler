@@ -76,6 +76,12 @@ func classAccent(class core.PartyClass) rl.Color {
 // drawClassGlyph paints a small per-class sigil. Geometric (no texture asset) so
 // it stays crisp at any DPI. (cx,cy) is the centre, r the half-extent, col the ink.
 func drawClassGlyph(cx, cy, r float32, class core.PartyClass, col color.RGBA) {
+	// Bounds-guard the table index: a corrupt save / stray class literal should fail
+	// soft (no glyph) rather than panic mid-draw. The init scan guarantees the table
+	// is fully populated for valid classes, not that the runtime index is in range.
+	if int(class) < 0 || int(class) >= len(classGlyphDrawers) {
+		return
+	}
 	classGlyphDrawers[class](cx, cy, r, col)
 }
 

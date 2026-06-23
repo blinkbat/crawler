@@ -321,6 +321,18 @@ func applyItem(g *core.GameState) {
 		return
 	}
 	g.Inventory = updated
+	// Confusion may have redirected the item onto an ally it can't help — the top gate
+	// only vetted the player's CHOSEN target, not the confused re-roll. The stack is
+	// still spent (the fumble is the confusion penalty), but report it honestly instead
+	// of a generic "uses" that implies it did something.
+	if !core.ItemHelpsTarget(def, *tgt) {
+		caster := &g.Party[g.Battle.CurrentParty]
+		caster.AttackBump = core.BumpDuration
+		setBattleMessage(g, fmt.Sprintf("Confused, %s fumbles %s onto %s.", caster.Name, def.Name, tgt.Name))
+		g.Battle.PendingItem = core.ItemNone
+		finishActorTurn(g)
+		return
+	}
 	healedHP := 0
 	if def.HealAmount > 0 {
 		before := tgt.HP
@@ -383,14 +395,15 @@ func flipCol(c core.Col) core.Col {
 	return core.ColLeft
 }
 
-// memberAtSlot returns the party index (other than the actor) whose home 2×2 slot
-// is (row,col). Formation is a clean 2×2 by invariant, so at most one per slot.
+// memberAtSlot returns the LIVING party index (other than the actor) whose LIVE 2×2
+// slot is (row,col). Battle Swap is a tactical, live-only move keyed to the on-screen
+// formation; downed members are shunted to the back and excluded (not swappable).
 func memberAtSlot(g *core.GameState, row core.Row, col core.Col) (int, bool) {
 	for i := range g.Party {
-		if i == g.Battle.CurrentParty {
+		if i == g.Battle.CurrentParty || g.Party[i].HP <= 0 {
 			continue
 		}
-		if g.Party[i].HomeRow == row && g.Party[i].HomeCol == col {
+		if g.Party[i].Row == row && g.Party[i].Col == col {
 			return i, true
 		}
 	}
@@ -404,7 +417,7 @@ func defaultSwapPartner(g *core.GameState) int {
 	if actor < 0 || actor >= len(g.Party) {
 		return -1
 	}
-	row, col := g.Party[actor].HomeRow, g.Party[actor].HomeCol
+	row, col := g.Party[actor].Row, g.Party[actor].Col
 	if idx, ok := memberAtSlot(g, row, flipCol(col)); ok {
 		return idx
 	}
@@ -454,7 +467,7 @@ func swapTargetForDirection(g *core.GameState) (int, bool) {
 	if actor < 0 || actor >= len(g.Party) {
 		return 0, false
 	}
-	row, col := g.Party[actor].HomeRow, g.Party[actor].HomeCol
+	row, col := g.Party[actor].Row, g.Party[actor].Col
 	switch {
 	case input.UpPressed():
 		if row == core.RowBack {
@@ -493,12 +506,18 @@ func performSwap(g *core.GameState) {
 		setBattleStatus(g, msgInvalidTarget)
 		return
 	}
-	if g.Party[a].HomeRow != g.Party[partner].HomeRow && g.Party[a].HomeCol != g.Party[partner].HomeCol {
+	if g.Party[partner].HP <= 0 {
+		setBattleStatus(g, msgInvalidTarget) // can't swap with a downed member
+		return
+	}
+	if g.Party[a].Row != g.Party[partner].Row && g.Party[a].Col != g.Party[partner].Col {
 		setBattleStatus(g, msgInvalidTarget) // diagonal — not a legal single-step swap
 		return
 	}
 	actorName, partnerName := actor.Name, g.Party[partner].Name
-	core.SwapFormationSlots(g.Party, a, partner)
+	// Tactical, live-only: trade the on-screen (live) slots for this fight. The
+	// preferred Home formation is untouched and restored next battle.
+	core.SwapLiveSlots(g.Party, a, partner)
 	setBattleMessage(g, fmt.Sprintf("%s and %s swap places.", actorName, partnerName))
 	finishActorTurn(g)
 }

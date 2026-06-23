@@ -234,11 +234,11 @@ func TestNormalizePartyFormation(t *testing.T) {
 }
 
 func TestShuntEnemyFormation(t *testing.T) {
-	// 3 front + 2 back; killing a front enemy promotes a back one (front packed at 3 while ≥3 alive).
+	// 2 front + 3 back; killing a front enemy promotes a back one (front packed at 2 while ≥2 alive).
 	members := []Enemy{
 		{Alive: true, Row: RowFront},
 		{Alive: true, Row: RowFront},
-		{Alive: true, Row: RowFront},
+		{Alive: true, Row: RowBack},
 		{Alive: true, Row: RowBack},
 		{Alive: true, Row: RowBack},
 	}
@@ -250,8 +250,8 @@ func TestShuntEnemyFormation(t *testing.T) {
 			front++
 		}
 	}
-	if front != 3 {
-		t.Errorf("after shunt, living front = %d, want 3 (a back enemy should fill the gap)", front)
+	if front != 2 {
+		t.Errorf("after shunt, living front = %d, want 2 (a back enemy should fill the gap)", front)
 	}
 	// Drop below the cap: only 2 alive total → front can't exceed 2.
 	members[0].Alive, members[2].Alive, members[3].Alive = false, false, false
@@ -303,5 +303,97 @@ func TestEnemyEffectiveFront(t *testing.T) {
 	members[0].Alive = false
 	if !EnemyInEffectiveFront(members, 1) {
 		t.Error("with the front enemy dead, the back enemy should be the effective front")
+	}
+}
+
+func TestEnemyColumnCoverFullPack(t *testing.T) {
+	// A full 2-front / 3-back pack. Back slots 0–1 sit behind a front foe (covered,
+	// melee-proof); the 3rd back foe (slot 2) has no front column ahead → exposed.
+	members := []Enemy{
+		{Alive: true, Row: RowFront}, {Alive: true, Row: RowFront},
+		{Alive: true, Row: RowBack}, {Alive: true, Row: RowBack}, {Alive: true, Row: RowBack},
+	}
+	for i := 2; i <= 3; i++ { // first two back foes are covered
+		if !EnemyColumnCovered(members, i) {
+			t.Errorf("back slot %d should be covered by a front foe", i-2)
+		}
+		if EnemyInEffectiveFront(members, i) {
+			t.Errorf("covered back slot %d must not be meleeable", i-2)
+		}
+	}
+	if EnemyColumnCovered(members, 4) {
+		t.Error("3rd back foe (slot 2) has no front column ahead — must be uncovered")
+	}
+	if !EnemyInEffectiveFront(members, 4) {
+		t.Error("uncovered 3rd back foe must be meleeable")
+	}
+}
+
+// make2x2 builds a full, living 2×2 party with matching live + home slots.
+func make2x2() []PartyMember {
+	return []PartyMember{
+		{HP: 10, HomeRow: RowFront, HomeCol: ColLeft, Row: RowFront, Col: ColLeft},
+		{HP: 10, HomeRow: RowFront, HomeCol: ColRight, Row: RowFront, Col: ColRight},
+		{HP: 10, HomeRow: RowBack, HomeCol: ColLeft, Row: RowBack, Col: ColLeft},
+		{HP: 10, HomeRow: RowBack, HomeCol: ColRight, Row: RowBack, Col: ColRight},
+	}
+}
+
+func TestSetBattleStartFormationSinksDownedFrontliner(t *testing.T) {
+	// Front-left already downed before the fight. EngageFront (no rotation): the live
+	// shunt sinks the dead one back and pulls the same-column backliner up. Home stays.
+	party := make2x2()
+	party[0].HP = 0
+	SetBattleStartFormation(party, EngageFront)
+	if party[0].Row != RowBack {
+		t.Errorf("downed front-left should sink to back, live Row=%d", party[0].Row)
+	}
+	occ := liveSlot(party, RowFront, ColLeft)
+	if occ < 0 || party[occ].HP <= 0 {
+		t.Error("front-left should be manned by a living member after the shunt")
+	}
+	if party[0].HomeRow != RowFront || party[0].HomeCol != ColLeft {
+		t.Error("home slot must not change — the formation reverts to it after battle")
+	}
+}
+
+func TestShuntPartyFormationSameColumnSwap(t *testing.T) {
+	party := make2x2()
+	party[1].HP = 0 // front-right down; same-column backliner is member 3 (back-right)
+	ShuntPartyFormation(party)
+	if party[1].Row != RowBack || party[1].Col != ColRight {
+		t.Errorf("downed front-right should sink to back-right, got (%d,%d)", party[1].Row, party[1].Col)
+	}
+	if party[3].Row != RowFront || party[3].Col != ColRight {
+		t.Errorf("same-column backliner should rise to front-right, got (%d,%d)", party[3].Row, party[3].Col)
+	}
+}
+
+func TestShuntPartyFormationCrossColumnFallback(t *testing.T) {
+	party := make2x2()
+	party[0].HP = 0 // front-left down
+	party[2].HP = 0 // back-left (same column) ALSO down → must pull the other column's backliner
+	ShuntPartyFormation(party)
+	if occ := liveSlot(party, RowFront, ColLeft); occ != 3 {
+		t.Errorf("front-left should be filled by the first living backliner (member 3), got member %d", occ)
+	}
+}
+
+func TestAmbushLiveSlotUnique(t *testing.T) {
+	homes := [][2]uint8{{0, 0}, {0, 1}, {1, 0}, {1, 1}} // (row, col) over the 2×2
+	for _, side := range []EngageSide{EngageFront, EngageRight, EngageBack, EngageLeft} {
+		seen := map[[2]uint8]bool{}
+		for _, h := range homes {
+			r := AmbushLiveRow(Row(h[0]), Col(h[1]), side)
+			c := AmbushLiveCol(Row(h[0]), Col(h[1]), side)
+			key := [2]uint8{uint8(r), uint8(c)}
+			if seen[key] {
+				t.Errorf("side %d: live slot (%d,%d) collides — rotation must stay a unique 2×2", side, r, c)
+			}
+			seen[key] = true
+		}
+		if len(seen) != 4 {
+			t.Errorf("side %d: expected 4 unique live slots, got %d", side, len(seen))
+		}
 	}
 }

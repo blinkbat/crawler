@@ -326,9 +326,13 @@ func PackSpawnLeaderKind(a AreaDefinition, sp PackSpawn) EnemyKind {
 }
 
 // SanitizeCustomEnemyName folds whitespace runs to single underscores and trims edges so the name
-// survives the loader's strings.Fields split. PRESERVES case and punctuation. NOT slugify or
+// survives the loader's strings.Fields split. PRESERVES case and other punctuation. NOT slugify or
 // SanitizeFilename — each owns a different on-disk format; don't swap them.
 func SanitizeCustomEnemyName(name string) string {
+	// Commas/semicolons are the pack-member-list separators on disk, so a name carrying
+	// one would re-split into phantom members on reload. Fold them to spaces first so
+	// they collapse into the single-underscore separator below, like any whitespace.
+	name = strings.NewReplacer(",", " ", ";", " ").Replace(name)
 	return strings.Join(strings.Fields(strings.TrimSpace(name)), "_")
 }
 

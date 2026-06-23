@@ -48,6 +48,9 @@ func Update(g *core.GameState) {
 	case core.ModalRetroMenu:
 		updateRetroMenu(g)
 		return
+	case core.ModalCombatTune:
+		updateCombatTuneMenu(g)
+		return
 	case core.ModalDebugMenu:
 		updateDebugMenu(g)
 		return
@@ -77,7 +80,7 @@ func Update(g *core.GameState) {
 			return
 		}
 	}
-	pause := input.PausePressed(g.Battle.Active())
+	pause := input.PausePressed()
 	if pause && pauseAllowed(g) {
 		g.MenuOpen = true
 		g.Player.LookYaw = 0
@@ -271,6 +274,8 @@ func updateDebugMenu(g *core.GameState) {
 			core.TriggerRumble(&g.Battle, core.RumbleTestStrength, core.RumbleTestDur)
 		case core.DebugMenuRetro:
 			openRetroMenu(g)
+		case core.DebugMenuCombatTune:
+			openCombatTuneMenu(g)
 		case core.DebugMenuStartDialog:
 			startFirstAreaDialog(g)
 		case core.DebugMenuClose:
@@ -317,6 +322,44 @@ func updateRetroMenu(g *core.GameState) {
 	if g.RetroMenuOpen && adjustRow < int(core.RetroFilterCount) {
 		if delta := input.CursorLeftRight(); delta != 0 {
 			core.AdjustRetroFilter(&g.RetroFilters[adjustRow], delta)
+		}
+	}
+}
+
+// openCombatTuneMenu swaps the Debug submenu for the Combat Tuning sub-submenu (live
+// camera/foe/party placement sliders — best driven from inside a battle so the scene
+// updates behind the panel).
+func openCombatTuneMenu(g *core.GameState) {
+	g.DebugMenuOpen = false
+	g.CombatTuneOpen = true
+	g.CombatTuneIndex = 0
+}
+
+// updateCombatTuneMenu drives the Combat Tuning submenu: the first slider rows take
+// Left/Right to adjust the cursored value; the trailing rows are Reset / Dump /
+// Close. Mirrors updateRetroMenu (snapshot the cursored row before nav so the adjust
+// acts on the row drawn highlighted this frame).
+func updateCombatTuneMenu(g *core.GameState) {
+	adjustRow := g.CombatTuneIndex
+	updateLeafMenu(&g.CombatTuneOpen, &g.CombatTuneIndex, core.BattleTuneMenuCount(), func(item int) {
+		switch {
+		case item < core.BattleTuneSliderCount():
+			// Slider row: Confirm is a no-op; Left/Right (below) does the adjust.
+		case item == core.BattleTuneResetRow():
+			g.BattleTuning = core.DefaultBattleTuning()
+		case item == core.BattleTuneDumpRow():
+			if path, err := core.DumpBattleTuning(&g.BattleTuning); err == nil {
+				g.SetStatusMessage("Combat tuning written to " + path)
+			} else {
+				g.SetStatusMessage("Tuning dump failed: " + err.Error())
+			}
+		case item == core.BattleTuneCloseRow():
+			g.CombatTuneOpen = false
+		}
+	})
+	if g.CombatTuneOpen && adjustRow < core.BattleTuneSliderCount() {
+		if delta := input.CursorLeftRight(); delta != 0 {
+			core.AdjustBattleTuneSlider(&g.BattleTuning, adjustRow, delta)
 		}
 	}
 }

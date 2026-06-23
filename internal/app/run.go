@@ -321,11 +321,22 @@ func drawAdventureScene(game *core.GameState, assets render.Resources) {
 	render.DrawDoors(camera, game, assets)
 	render.DrawCrystals(camera, game, assets)
 	if !exemptSprites {
+		// In battle, paint the billboards OVER the environment (no clipping into walls
+		// or trees): depth test off, and the draw funcs order each group back-to-front
+		// so they still layer correctly among themselves. Exploration keeps depth test
+		// so field packs are still occluded by geometry.
+		inBattle := game.Battle.Active()
+		if inBattle {
+			rl.DisableDepthTest()
+		}
 		render.DrawEnemies(camera, game, assets)
 		render.DrawPartySprites(camera, game, assets)
 		// VFX in the 3D pass so particles depth-sort; after the party draw so
 		// sparks paint over the sprite. TickAndDrawVFX drains VFXQueue (mutates g).
 		render.TickAndDrawVFX(camera, game, assets)
+		if inBattle {
+			rl.EnableDepthTest()
+		}
 	}
 	rl.EndMode3D()
 	// Blit the FILTERED environment to the backbuffer — opaque normally,

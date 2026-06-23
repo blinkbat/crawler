@@ -1,12 +1,12 @@
 {
   "version": 1,
   "mapID": "forest_path",
-  "playerTileX": 11,
-  "playerTileZ": 7,
-  "playerFacing": 3,
+  "playerTileX": 4,
+  "playerTileZ": 14,
+  "playerFacing": 0,
   "playerLevel": 10,
-  "stepCount": 3454,
-  "gold": 193,
+  "stepCount": 60,
+  "gold": 0,
   "party": [
     {
       "Class": 0,
@@ -16,12 +16,12 @@
         "DEX": 2,
         "INT": 1,
         "WIS": 1,
-        "VIT": 9,
-        "SPD": 5
+        "VIT": 5,
+        "SPD": 3
       },
-      "HP": 11,
-      "MaxHP": 18,
-      "MP": 0,
+      "HP": 10,
+      "MaxHP": 10,
+      "MP": 4,
       "MaxMP": 4,
       "Armor": 0,
       "Equipped": [
@@ -31,10 +31,13 @@
         0,
         0
       ],
+      "Row": 0,
+      "HomeRow": 0,
+      "HomeCol": 0,
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 3,
+      "DamagePopup": 0,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "Defending": false,
@@ -50,16 +53,12 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 3,
-      "XP": 202,
+      "Level": 1,
+      "XP": 0,
       "PendingLevelUps": 0,
-      "SkillPoints": 0,
-      "SkillTiers": {
-        "1": 2
-      },
-      "TreeRanks": {
-        "cleave": 3
-      },
+      "SkillPoints": 1,
+      "SkillTiers": null,
+      "TreeRanks": null,
       "SkillCursor": 0
     },
     {
@@ -69,13 +68,13 @@
         "STR": 2,
         "DEX": 2,
         "INT": 2,
-        "WIS": 7,
-        "VIT": 9,
+        "WIS": 6,
+        "VIT": 4,
         "SPD": 4
       },
-      "HP": 13,
-      "MaxHP": 18,
-      "MP": 6,
+      "HP": 8,
+      "MaxHP": 8,
+      "MP": 9,
       "MaxMP": 9,
       "Armor": 0,
       "Equipped": [
@@ -85,10 +84,13 @@
         0,
         0
       ],
+      "Row": 1,
+      "HomeRow": 1,
+      "HomeCol": 0,
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 3,
+      "DamagePopup": 0,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "Defending": false,
@@ -104,18 +106,12 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 3,
-      "XP": 140,
+      "Level": 1,
+      "XP": 0,
       "PendingLevelUps": 0,
-      "SkillPoints": 0,
-      "SkillTiers": {
-        "2": 1,
-        "8": 0
-      },
-      "TreeRanks": {
-        "prayer": 2,
-        "smite": 1
-      },
+      "SkillPoints": 1,
+      "SkillTiers": null,
+      "TreeRanks": null,
       "SkillCursor": 0
     },
     {
@@ -123,15 +119,15 @@
       "Name": "Thief",
       "Stats": {
         "STR": 3,
-        "DEX": 7,
+        "DEX": 6,
         "INT": 2,
         "WIS": 1,
-        "VIT": 7,
-        "SPD": 8
+        "VIT": 4,
+        "SPD": 6
       },
-      "HP": 14,
-      "MaxHP": 14,
-      "MP": 2,
+      "HP": 8,
+      "MaxHP": 8,
+      "MP": 5,
       "MaxMP": 5,
       "Armor": 0,
       "Equipped": [
@@ -141,10 +137,13 @@
         0,
         0
       ],
+      "Row": 0,
+      "HomeRow": 0,
+      "HomeCol": 1,
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 1,
+      "DamagePopup": 0,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "Defending": false,
@@ -160,20 +159,13 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 3,
-      "XP": 220,
+      "Level": 1,
+      "XP": 0,
       "PendingLevelUps": 0,
-      "SkillPoints": 0,
-      "SkillTiers": {
-        "10": 0,
-        "3": 0
-      },
-      "TreeRanks": {
-        "mug": 1,
-        "steal": 1,
-        "venom-strike": 1
-      },
-      "SkillCursor": 1
+      "SkillPoints": 1,
+      "SkillTiers": null,
+      "TreeRanks": null,
+      "SkillCursor": 0
     },
     {
       "Class": 3,
@@ -181,15 +173,15 @@
       "Stats": {
         "STR": 1,
         "DEX": 2,
-        "INT": 10,
+        "INT": 6,
         "WIS": 2,
         "VIT": 4,
-        "SPD": 6
+        "SPD": 4
       },
       "HP": 8,
       "MaxHP": 8,
-      "MP": 12,
-      "MaxMP": 18,
+      "MP": 10,
+      "MaxMP": 10,
       "Armor": 0,
       "Equipped": [
         0,
@@ -198,10 +190,13 @@
         0,
         0
       ],
+      "Row": 1,
+      "HomeRow": 1,
+      "HomeCol": 1,
       "AttackBump": 0,
       "DamageFlash": 0,
       "HitKnockback": 0,
-      "DamagePopup": 2,
+      "DamagePopup": 0,
       "DamagePopupQuality": 0,
       "DamagePopupTimer": 0,
       "Defending": false,
@@ -217,44 +212,31 @@
       "IceArmorTurns": 0,
       "RegenTurns": 0,
       "RegenPerTurn": 0,
-      "Level": 3,
-      "XP": 220,
+      "Level": 1,
+      "XP": 0,
       "PendingLevelUps": 0,
-      "SkillPoints": 0,
-      "SkillTiers": {
-        "12": 0
-      },
-      "TreeRanks": {
-        "arc-bolt": 1,
-        "chain-lightning": 2
-      },
+      "SkillPoints": 1,
+      "SkillTiers": null,
+      "TreeRanks": null,
       "SkillCursor": 0
     }
   ],
   "inventory": [
     {
       "Kind": 14,
-      "Count": 2
+      "Count": 3
     },
     {
       "Kind": 15,
       "Count": 2
-    },
-    {
-      "Kind": 1,
-      "Count": 1
     }
   ],
-  "quests": null,
-  "bestiary": {
-    "0": {
-      "kills": 52
-    },
-    "1": {
-      "kills": 13
-    },
-    "2": {
-      "kills": 13
+  "quests": [
+    {
+      "ID": "investigate-island",
+      "Title": "Investigate the Island",
+      "Desc": "Explore the island and uncover what drew you here.",
+      "Status": 0
     }
-  }
+  ]
 }

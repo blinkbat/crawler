@@ -57,6 +57,12 @@ func newMapModalLayout() newMapLayout {
 	brushes := layerBrushes[LayerFloor]
 	l.floorSwatches = make([]rl.Rectangle, len(brushes))
 	for i := range brushes {
+		// The Erase brush (Char 0) is appended to every grid layer; it's not a real
+		// floor — picking it would blank the new map's floor with NUL bytes. Leave its
+		// swatch a zero rect so the draw + click loops skip it.
+		if brushes[i].Erase {
+			continue
+		}
 		col := i % newMapSwatchCols
 		row := i / newMapSwatchCols
 		l.floorSwatches[i] = rl.NewRectangle(
@@ -115,6 +121,9 @@ func drawNewMapModal(s *State, font rl.Font, theme render.Theme) {
 	brushes := layerBrushes[LayerFloor]
 	mp := rl.GetMousePosition()
 	for i, br := range brushes {
+		if br.Erase {
+			continue // not a default-floor option (see layout)
+		}
 		r := l.floorSwatches[i]
 		drawBrushSwatchRow(font, r, br.Name, LayerFloor, br,
 			br.Char == s.modalNewFloor, pointIn(mp, r), 14)
@@ -170,6 +179,9 @@ func updateNewMapModal(s *State) Action {
 		default:
 			brushes := layerBrushes[LayerFloor]
 			for i, r := range l.floorSwatches {
+				if brushes[i].Erase {
+					continue // erase isn't a default-floor choice (zero rect anyway)
+				}
 				if pointIn(mp, r) {
 					s.modalNewFloor = brushes[i].Char
 					return ActionNone

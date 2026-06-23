@@ -27,6 +27,20 @@ func editorTabPressed() bool {
 	return input.EditorTabPressed()
 }
 
+// runCardCmdsNav is runCardCmds plus keyboard navigation: Up/Down walk s.modalCursor
+// over the buttons and Enter fires the selected one. Mouse clicks + the per-cmd hot
+// accelerators still work; the matching draw highlights s.modalCursor. For the
+// stacked pause/confirm menus so they're operable without knowing the mnemonics.
+func runCardCmdsNav(s *State, w, h float32, stack bool, cmds []modalCmd) (Action, bool) {
+	if len(cmds) > 0 {
+		s.modalCursor = input.CursorUpDown(s.modalCursor, len(cmds))
+		if editorCommitPressed() && s.modalCursor >= 0 && s.modalCursor < len(cmds) {
+			return cmds[s.modalCursor].run(), true
+		}
+	}
+	return runCardCmds(w, h, stack, cmds)
+}
+
 // runCardCmds is the shared tail of the confirm/menu modal updaters: center a
 // (w, h) card, lay the cmd buttons (row or stack), and dispatch via runModalCmds.
 func runCardCmds(w, h float32, stack bool, cmds []modalCmd) (Action, bool) {
@@ -2203,7 +2217,7 @@ func saveAsOverwriteCmds(s *State) []modalCmd {
 // Exit to Title). Exit routes through modalConfirmDirty when there are unsaved edits.
 func updateEscMenuModal(s *State) Action {
 	cmds := escMenuCmds(s)
-	if act, ran := runCardCmds(escMenuModalW, escMenuModalH, true, cmds); ran {
+	if act, ran := runCardCmdsNav(s, escMenuModalW, escMenuModalH, true, cmds); ran {
 		return act
 	}
 	return ActionNone

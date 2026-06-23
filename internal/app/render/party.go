@@ -466,11 +466,15 @@ func DrawPartyRibbon(g *core.GameState, assets Resources) {
 
 	for i := range g.Party {
 		member := &g.Party[i]
-		// Tile by FORMATION slot, not array index, so the ribbon mirrors the 2×2
-		// the party fights in and a Swap visibly moves a card. HomeRow/HomeCol are
-		// a clean 2×2 by invariant (NewParty seeds, SwapFormationSlots preserves).
-		col := int(member.HomeCol)
-		row := int(member.HomeRow)
+		// Tile by FORMATION slot, not array index, so the ribbon mirrors the 2×2 the
+		// party fights in and a Swap visibly moves a card. In battle, use the LIVE slot
+		// so an ambush rotation or a death-driven shunt shuffles the cards in lockstep
+		// with the 3D sprites; out of battle, the stable Home slot (the live slot is
+		// stale until the next battle seats it). Both are a clean 2×2 by invariant.
+		col, row := int(member.HomeCol), int(member.HomeRow)
+		if g.Battle.Active() {
+			col, row = int(member.Col), int(member.Row)
+		}
 		x := startX + (partyCardW+partyCardGap)*float32(col)
 		y := topY + (partyCardH+partyRowGap)*float32(row)
 		// Active/selected glow only on a member who can act AND be targeted (not

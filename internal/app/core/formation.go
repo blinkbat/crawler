@@ -17,10 +17,12 @@ const (
 
 // EnemyFrontRowCap / EnemyBackRowCap bound a foe pack's two ranks; EnemyPackCap is
 // the resulting member ceiling. Authoring (editor) enforces these so a pack can't
-// seat more than the formation grid renders.
+// seat more than the formation grid renders. Back is wider than front, so the
+// rightmost back slot (index 2) has no front column ahead of it — it's always
+// exposed to melee (see EnemyColumnCovered).
 const (
-	EnemyFrontRowCap = 3
-	EnemyBackRowCap  = 5
+	EnemyFrontRowCap = 2
+	EnemyBackRowCap  = 3
 	EnemyPackCap     = EnemyFrontRowCap + EnemyBackRowCap
 )
 
@@ -36,8 +38,12 @@ func PackRowCounts(members []PackMemberRef) (front, back int) {
 	return front, back
 }
 
-// ShuntEnemyFormation repacks the enemy front row after a death: promote back-row
-// enemies (in slice order) until the front holds min(EnemyFrontRowCap, living total).
+// ShuntEnemyFormation fills the enemy front row left-to-right: promote back-row
+// enemies (in slice order = left-to-right slot order) until the front holds
+// min(EnemyFrontRowCap, living total). Run at battle start AND after each death so
+// foes always pack into the front before spilling to the back — an authored
+// back-heavy pack (or a front wiped by combat) self-corrects. With a full 5-foe
+// pack the front caps at 2 and the 3rd living back foe stays back (exposed).
 func ShuntEnemyFormation(members []Enemy) {
 	livingFront, livingTotal := 0, 0
 	for i := range members {
@@ -206,6 +212,99 @@ func AmbushLiveRow(homeRow Row, homeCol Col, side EngageSide) Row {
 	}
 }
 
+// AmbushLiveCol is the column companion to AmbushLiveRow: it rotates a member's
+// home column into its live column for the same 2×2 turn, so a side/back ambush
+// yields a valid, unique live grid. Column is cosmetic for party reach (only Row
+// gates melee) but drives in-battle sprite placement.
+func AmbushLiveCol(homeRow Row, homeCol Col, side EngageSide) Col {
+	switch side {
+	case EngageBack: // 180°: columns mirror
+		if homeCol == ColLeft {
+			return ColRight
+		}
+		return ColLeft
+	case EngageRight: // 90°: the old row decides the new column
+		if homeRow == RowFront {
+			return ColLeft
+		}
+		return ColRight
+	case EngageLeft:
+		if homeRow == RowFront {
+			return ColRight
+		}
+		return ColLeft
+	default: // EngageFront — home column stands
+		return homeCol
+	}
+}
+
+// SetBattleStartFormation seats every member's LIVE (Row,Col) from its home slot
+// rotated by the engage side, then packs the living forward (ShuntPartyFormation)
+// so a frontliner already downed before the fight doesn't hold the line. Home slots
+// are untouched — recomputed fresh each battle, and the party reverts to Home when
+// the fight ends.
+func SetBattleStartFormation(party []PartyMember, side EngageSide) {
+	for i := range party {
+		party[i].Row = AmbushLiveRow(party[i].HomeRow, party[i].HomeCol, side)
+		party[i].Col = AmbushLiveCol(party[i].HomeRow, party[i].HomeCol, side)
+	}
+	ShuntPartyFormation(party)
+}
+
+// ShuntPartyFormation pulls living members into the front row and sinks the downed
+// to the back, swapping LIVE slots only (Home untouched, so the formation reverts
+// after the fight). A downed front member trades with a living back member — same
+// column first, else the first living back member. Idempotent and revive-safe: call
+// it again after a Raise and the revived member is pulled forward if a front slot
+// still needs manning.
+func ShuntPartyFormation(party []PartyMember) {
+	for col := ColLeft; col <= ColRight; col++ {
+		front := liveSlot(party, RowFront, col)
+		if front < 0 || party[front].HP > 0 {
+			continue // empty slot or a living frontliner — leave it
+		}
+		partner := liveSlot(party, RowBack, col) // prefer the same column
+		if partner < 0 || party[partner].HP <= 0 {
+			partner = firstLivingInRow(party, RowBack) // else any living backliner
+		}
+		if partner >= 0 && party[partner].HP > 0 {
+			SwapLiveSlots(party, front, partner)
+		}
+	}
+}
+
+// liveSlot returns the index of the member whose LIVE slot is (row,col), or -1.
+func liveSlot(party []PartyMember, row Row, col Col) int {
+	for i := range party {
+		if party[i].Row == row && party[i].Col == col {
+			return i
+		}
+	}
+	return -1
+}
+
+// firstLivingInRow returns the first living member whose live Row is row, or -1.
+func firstLivingInRow(party []PartyMember, row Row) int {
+	for i := range party {
+		if party[i].Row == row && party[i].HP > 0 {
+			return i
+		}
+	}
+	return -1
+}
+
+// SwapLiveSlots exchanges two members' LIVE (Row,Col); the home slot is left alone,
+// so the rearrangement lasts only for the current fight. This is the in-battle
+// tactical Swap (reverts next fight); SwapFormationSlots edits the persistent Home
+// (preferred) formation instead.
+func SwapLiveSlots(party []PartyMember, i, j int) {
+	if i < 0 || j < 0 || i >= len(party) || j >= len(party) || i == j {
+		return
+	}
+	party[i].Row, party[j].Row = party[j].Row, party[i].Row
+	party[i].Col, party[j].Col = party[j].Col, party[i].Col
+}
+
 // DefaultPartyRow is a class's starting formation row: Warrior/Thief front,
 // casters (Cleric, Wizard) back. Applies to a fresh party; the player can rearrange.
 func DefaultPartyRow(c PartyClass) Row {
@@ -296,10 +395,48 @@ func EnemyFrontHasLiving(members []Enemy) bool {
 	return false
 }
 
-// EnemyInEffectiveFront is the enemy-side mirror of PartyInEffectiveFront.
+// EnemyColumnCovered reports whether back-row enemy i is shielded by a front-row foe
+// in the SAME column. Foes pack left-to-right, so a back foe is covered iff its
+// left-to-right slot among the back row is less than the front count (a front foe
+// stands in that column). Front foes are never "covered" — they are the cover. The
+// rightmost back slot of a full pack (slot 2, front caps at 2) is uncovered/meleeable.
+//
+// Occupancy counts foes that still hold a visible formation slot — alive OR mid
+// death-fade — matching render's enemyRowPlacements, so the melee-cover columns agree
+// with the on-screen ranks (a just-killed front foe keeps shielding the back until its
+// corpse finishes fading, rather than the back becoming reachable a frame before it clears).
+func EnemyColumnCovered(members []Enemy, i int) bool {
+	if i < 0 || i >= len(members) || !members[i].Alive || members[i].Row != RowBack {
+		return false
+	}
+	frontCount, backSlot := 0, 0
+	for j := range members {
+		if !enemyHoldsFormationSlot(members[j]) {
+			continue
+		}
+		if members[j].Row == RowFront {
+			frontCount++
+		} else if j < i {
+			backSlot++ // a foe still holding a slot to our left
+		}
+	}
+	return backSlot < frontCount
+}
+
+// enemyHoldsFormationSlot reports whether an enemy still occupies a visible
+// formation slot — alive, or mid death-fade (its corpse is still drawn). The single
+// predicate shared by the melee-cover test and render's slot layout so they agree.
+func enemyHoldsFormationSlot(e Enemy) bool {
+	return e.Alive || e.DeathFade > 0
+}
+
+// EnemyInEffectiveFront reports whether enemy i is reachable by melee: front-row
+// foes always, back-row foes only when their column has no front cover (front wiped
+// in that column, or they're the uncovered overhang slot). The enemy-side mirror of
+// PartyInEffectiveFront, now column-granular rather than all-or-nothing.
 func EnemyInEffectiveFront(members []Enemy, i int) bool {
 	if i < 0 || i >= len(members) {
 		return false
 	}
-	return members[i].Row == RowFront || !EnemyFrontHasLiving(members)
+	return members[i].Row == RowFront || !EnemyColumnCovered(members, i)
 }

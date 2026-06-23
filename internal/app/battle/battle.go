@@ -37,12 +37,14 @@ func Start(g *core.GameState, packIndex, fleeReturnX, fleeReturnZ int, engageSid
 	g.Battle.ActivePack = packIndex
 	g.Battle.FleeReturnX = fleeReturnX
 	g.Battle.FleeReturnZ = fleeReturnZ
-	// Party fights in its STANDING formation: live reach row mirrors home row.
-	// No in-battle repositioning / ambush re-shuffle.
-	_ = engageSide
-	for i := range g.Party {
-		g.Party[i].Row = g.Party[i].HomeRow
-	}
+	// Pack foes into the front row left-to-right at spawn (not only after a death),
+	// so an authored back-heavy pack reads correctly from turn one.
+	core.ShuntEnemyFormation(core.BattleMembers(g))
+	// Seat the party's LIVE formation from its home slots: rotate by the engage side
+	// (ambush), then pack the living forward so an already-downed frontliner doesn't
+	// hold the line. Home slots are untouched, so the party reverts to its preferred
+	// formation after the fight.
+	core.SetBattleStartFormation(g.Party, engageSide)
 	g.Battle.EnemyIndex = core.NextLivingBattleEnemy(g)
 	g.Battle.PartyTarget = core.FirstLivingPartyMember(g.Party)
 	g.Battle.Splash = core.BattleSplashDuration
@@ -98,7 +100,10 @@ func Update(g *core.GameState, dt float32) {
 	}
 	// Desynced EnemyIndex (e.g. a culled enemy): leave so residual queue/timing
 	// state doesn't linger. Empty message so the quiet-area message isn't clobbered.
-	if g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(members) {
+	// Gated on an active combat phase: a won/lost battle legitimately carries a stale
+	// index (the killing blow's target is gone), and force-leaving there would skip
+	// the spoils screen + foe-killed triggers.
+	if inCombatPhase && (g.Battle.EnemyIndex < 0 || g.Battle.EnemyIndex >= len(members)) {
 		leaveBattle(g, "")
 		return
 	}
@@ -423,7 +428,10 @@ func startActorTurn(g *core.GameState) {
 		// Burn ticks at the burning actor's turn start; a burn-kill skips their
 		// action and checks win in case it took the last enemy.
 		if killed := tickBurnAtTurnStart(g, actor); killed {
-			if core.LivingBattleCount(g) == 0 {
+			// Win only against a REAL pack: LivingBattleCount reads a nil/stale
+			// ActivePack as 0, which must not look like a wipe and re-award spoils
+			// against a gone pack (same guard checkEnemyWipeoutFor carries).
+			if core.ActivePack(g) != nil && core.LivingBattleCount(g) == 0 {
 				winBattle(g, "The fire finishes them.")
 				return
 			}
@@ -1160,10 +1168,13 @@ func updateVictorySpoils(g *core.GameState, dt float32) {
 		g.Battle.VictoryLootSfxCursor++
 	}
 	// Count-up blip per VictoryXPPerTick of shown XP, tied to the eased fill;
-	// capped to one Play per frame so a huge haul can't machine-gun.
-	if tickIdx := xpShownAt(g, fill) / core.VictoryXPPerTick; tickIdx > g.Battle.VictoryTickSfxCursor {
-		audio.Play(audio.SoundXPTick)
-		g.Battle.VictoryTickSfxCursor = tickIdx
+	// capped to one Play per frame so a huge haul can't machine-gun. Guard the divisor
+	// so a config drift to 0 can't panic the victory tick.
+	if core.VictoryXPPerTick > 0 {
+		if tickIdx := xpShownAt(g, fill) / core.VictoryXPPerTick; tickIdx > g.Battle.VictoryTickSfxCursor {
+			audio.Play(audio.SoundXPTick)
+			g.Battle.VictoryTickSfxCursor = tickIdx
+		}
 	}
 	if input.ConfirmPressed() {
 		if !core.VictorySpoilsAnimDone(g.Battle.VictoryElapsed) {

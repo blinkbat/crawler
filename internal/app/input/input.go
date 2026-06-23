@@ -338,18 +338,16 @@ func TargetPreviousPressed() bool {
 		padPressed(rl.GamepadButtonLeftFaceLeft) || padPressed(rl.GamepadButtonLeftTrigger1) || stickEdgeX(-1)
 }
 
-// PausePressed reports the pause-menu edge. P / pad Start always open; Esc opens
-// only when !inBattle (in battle Esc is the cancel-target edge — don't eat it).
-// MiddleRight is the "small start" button (Options/Start/Menu); the big Middle
-// button is PanelsTogglePressed's so the two reads don't fight.
-func PausePressed(inBattle bool) bool {
-	if rl.IsKeyPressed(rl.KeyP) || padPressed(rl.GamepadButtonMiddleRight) { // Start
-		return true
-	}
-	if !inBattle && rl.IsKeyPressed(rl.KeyEscape) {
-		return true
-	}
-	return false
+// PausePressed reports the pause-menu edge: P / Esc / pad Start (MiddleRight, the
+// "small start" Options/Menu button — the big Middle button is PanelsTogglePressed's
+// so the two reads don't fight). Esc opens the menu the same way in AND out of
+// battle (the pause check runs before battle.Update and returns, so Esc can't also
+// fall through to the battle Back edge); pauseAllowed still blocks it during a
+// timing bar so the input window can't be sidestepped.
+func PausePressed() bool {
+	return rl.IsKeyPressed(rl.KeyP) ||
+		rl.IsKeyPressed(rl.KeyEscape) ||
+		padPressed(rl.GamepadButtonMiddleRight) // Start
 }
 
 // PanelsTogglePressed opens/closes the panels overlay (same edge toggles off).
