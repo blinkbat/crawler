@@ -308,10 +308,18 @@ var (
 	// crystalChargedBody: charged gem body — R/G ride crystalCyanBase (lockstep),
 	// blue pinned full. crystalColor pulses only R/G at render time.
 	crystalChargedBody = rl.NewColor(crystalCyanBase.R, crystalCyanBase.G, 255, 235)
+	// crystalChargedGlow: faint cyan aura drawn larger than the gem for a halo;
+	// crystalChargedCore: bright near-white inner/tip glint that reads as "shiny".
+	crystalChargedGlow = rl.NewColor(120, 230, 255, 70)
+	crystalChargedCore = rl.NewColor(225, 252, 255, 240)
 	// markerCrystal reads as the charged cyan, clear of the chest/door/pack/start
 	// swatches.
 	markerCrystal = crystalCyanBase
 	markerOutline = rl.NewColor(0, 0, 0, 220)
+	// Debug-overlay text tints (coord heading vs in-world tile labels) — kept in the
+	// palette so debug chrome tunes alongside the rest, not as one-off literals.
+	debugHeadingColor = rl.NewColor(186, 240, 186, 245)
+	debugLabelColor   = rl.NewColor(220, 240, 220, 245)
 
 	// Hit-glyph clarity colors (hitglyph.go) — each attack glyph's signature hue.
 	// Painters override alpha per frame; the alpha below is a placeholder.
@@ -1403,9 +1411,11 @@ func measurePanelHeading(font rl.Font, text string) rl.Vector2 {
 	return panelHeadingMeasureCache.measure(font, text, FontHeading, FontSpacingHeading)
 }
 
-// pulse oscillates 0..1 at the given frequency in Hz.
+// pulse oscillates 0..1 at the given frequency in Hz. Reads the frame-fixed clock
+// (BeginFrame) so the many per-card / per-row pulse callers share one time sample
+// instead of each making a GetTime cgo call.
 func pulse(speed float64) float32 {
-	return 0.5 + 0.5*float32(math.Sin(rl.GetTime()*speed*math.Pi*2))
+	return 0.5 + 0.5*float32(math.Sin(frameTime()*speed*math.Pi*2))
 }
 
 // rowSheenPeriod is the seconds for one sheen sweep across a selected row (slow,
@@ -1427,7 +1437,7 @@ func drawRowSheen(r rl.Rectangle, flick float32) {
 		band = 110
 	}
 	// Sweep phase, starting/ending fully off-edge so there's a beat between passes.
-	_, t := math.Modf(rl.GetTime() / rowSheenPeriod)
+	_, t := math.Modf(frameTime() / rowSheenPeriod)
 	x := r.X - band + float32(t)*(r.Width+2*band)
 	peak := fadeColor(giltBright, 0.13*flick)
 	clear := fadeColor(giltBright, 0)

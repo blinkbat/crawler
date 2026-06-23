@@ -6,9 +6,41 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+// Per-frame samples taken once in BeginFrame so the dozens of screenSize/pulse
+// callers per frame don't each make a cgo round-trip for values that are constant
+// within a frame (window size only changes on resize; the clock is frame-fixed).
+var (
+	cachedScreenW int32
+	cachedScreenH int32
+	uiFrameTime   float64
+)
+
+// BeginFrame samples the window size and wall-clock once at the top of each frame.
+// Called from the main loop before any scene draw; the getters below read these
+// caches instead of re-querying raylib per call site. A zero cachedScreenW means
+// BeginFrame hasn't run yet (tests, pre-first-frame) — the getters fall back to a
+// live query so they stay correct.
+func BeginFrame() {
+	cachedScreenW = int32(rl.GetScreenWidth())
+	cachedScreenH = int32(rl.GetScreenHeight())
+	uiFrameTime = rl.GetTime()
+}
+
+// frameTime returns the wall-clock sampled in BeginFrame (falls back to a live
+// read before the first BeginFrame). Frame-constant home for UI animation curves.
+func frameTime() float64 {
+	if cachedScreenW == 0 {
+		return rl.GetTime()
+	}
+	return uiFrameTime
+}
+
 // screenSize returns the window's width and height as int32.
 func screenSize() (w, h int32) {
-	return int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight())
+	if cachedScreenW == 0 {
+		return int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight())
+	}
+	return cachedScreenW, cachedScreenH
 }
 
 // clampFrameDelta clips a per-frame delta to the shared simulation floor so a
@@ -20,7 +52,8 @@ func clampFrameDelta(dt float32) float32 {
 
 // screenSizeF is the float32 variant for fractional-position callers.
 func screenSizeF() (w, h float32) {
-	return float32(rl.GetScreenWidth()), float32(rl.GetScreenHeight())
+	sw, sh := screenSize()
+	return float32(sw), float32(sh)
 }
 
 // centerX returns the left X to horizontally center a panel of width w.

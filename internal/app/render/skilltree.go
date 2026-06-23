@@ -219,7 +219,8 @@ func drawSkillNodePlate(rect rl.Rectangle, bg rl.Color, rank int, unlocked, focu
 	if focused {
 		outline = fadeColor(giltBright, 0.90)
 	}
-	rl.DrawRectangleLinesEx(rect, 1, outline)
+	// Rounded outline matching the glass body's corner radius (was square-cornered).
+	drawPanelOutline(int32(rect.X), int32(rect.Y), int32(rect.Width), int32(rect.Height), outline)
 	if rect.Width >= skillNodePipMinW && rect.Height >= skillNodePipMinH {
 		pip := fadeColor(outline, 0.82)
 		drawDiamondPip(rect.X+8, rect.Y+8, 1.8, pip)

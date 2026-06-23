@@ -869,6 +869,17 @@ func resolveTimingBar(g *core.GameState, onResolve func()) bool {
 
 // --- Enemy turn ------------------------------------------------------------
 
+// enemyActionIsMelee reports whether this turn's action is a melee swing — the basic
+// attack, or a melee-class skill (Stoneslam) — i.e. the reach-gated actions. SkillNone
+// resolves via the enemy's basic-attack class (SkillAttackClassFor doesn't cover the
+// implicit basic attack); magic/ranged skills are not gated (they cast through any row).
+func enemyActionIsMelee(enemy *core.Enemy, skill core.SkillID) bool {
+	if skill == core.SkillNone {
+		return enemy != nil && core.EnemyBasicAttackClass(enemy.Kind).IsMelee()
+	}
+	return core.SkillAttackClassFor(skill).IsMelee()
+}
+
 // beginEnemyAttack arms the defend bar against the enemy at slot (index into the
 // active pack's Members).
 func beginEnemyAttack(g *core.GameState, slot int) bool {
@@ -879,11 +890,11 @@ func beginEnemyAttack(g *core.GameState, slot int) bool {
 	if enemy != nil {
 		skill = enemyAIPickSkill(g, *enemy, slot)
 	}
-	// Melee reach gate — the mirror of the party's BackRowMeleeBlocked. A plain-melee
-	// swing from a foe NOT in the effective front (a covered back-row foe) can't
-	// connect; with no reaching skill this turn it simply can't act. Fair is fair: it
-	// passes (back ranks are for casters/rangers, who cast through any row).
-	if skill == core.SkillNone && !core.EnemyInEffectiveFront(core.BattleMembers(g), slot) {
+	// Melee reach gate — the mirror of the party's BackRowMeleeBlocked. A melee action
+	// (the basic swing OR a melee-class skill like Stoneslam) from a foe NOT in the
+	// effective front (a covered back-row foe) can't connect; magic/ranged skills cast
+	// through any row. With no reaching action this turn the covered foe can't act.
+	if enemyActionIsMelee(enemy, skill) && !core.EnemyInEffectiveFront(core.BattleMembers(g), slot) {
 		return false
 	}
 	g.Battle.EnemyAttacker = slot
@@ -936,8 +947,14 @@ func enemyAIPickSkill(g *core.GameState, enemy core.Enemy, slot int) core.SkillI
 // Skills without per-instance gates always pass through.
 func usableEnemySkills(g *core.GameState, skills []core.SkillID, slot int) []core.SkillID {
 	enemy := core.BattleMemberAt(g, slot)
+	// A covered back-row foe can't reach with a melee-class skill, so don't let the AI
+	// pick one (it'd whiff its turn); it casts a magic/ranged skill or falls to a skip.
+	canMelee := core.EnemyInEffectiveFront(core.BattleMembers(g), slot)
 	out := make([]core.SkillID, 0, len(skills))
 	for _, s := range skills {
+		if !canMelee && core.SkillAttackClassFor(s).IsMelee() {
+			continue
+		}
 		// Per-battle cast limit: drop the skill once used PerBattleCastLimit times.
 		// A nil SkillCastCount reads as zero on lookup (no lazy-init for uncapped skills).
 		if limit := core.SkillCastLimitFor(s); limit > 0 && enemy != nil {
@@ -1058,7 +1075,7 @@ func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
 	}
 	// AttackBump (the cast-lunge offset) on the live caster — every handler ends
 	// with it applied exactly once.
-	caster.AttackBump = core.BumpDuration
+	stampEnemyBump(caster)
 	// Stamp the per-battle cast counter on the same live caster. Only a cast that
 	// FIRED (cast==true) charges — a cancelled no-op mustn't burn a limited charge.
 	if cast && core.SkillCastLimitFor(skill) > 0 {

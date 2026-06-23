@@ -62,10 +62,10 @@ func OpenRenderLog() {
 	// One-shot session banner + any pending init lines that fired while closed.
 	stamp := time.Now().Format("2006-01-02 15:04:05.000")
 	fmt.Fprintf(renderLogFile, "\n=== render log opened %s ===\n", stamp)
-	fmt.Fprintf(renderLogFile, "go=%s os=%s arch=%s gpu=%q glsl=%q\n",
+	fmt.Fprintf(renderLogFile, "go=%s os=%s arch=%s monitor=%q raylib=%q\n",
 		runtime.Version(), runtime.GOOS, runtime.GOARCH,
 		safeStr(rl.GetMonitorName(0)),
-		"(raylib_5.x)",
+		"5.x",
 	)
 	for _, line := range renderLogPendingInit {
 		fmt.Fprintln(renderLogFile, line)

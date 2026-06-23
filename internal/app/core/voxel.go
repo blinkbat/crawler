@@ -73,8 +73,44 @@ func (a *AreaDefinition) TopSolidLevel(x, z int) int {
 	return a.ElevationLevelAt(x, z)
 }
 
+// maxElevationTopCache memoizes the tallest-column scan (a full W×H ElevationLevelAt
+// pass) per area so repeated SolidStackHeight / LowestStandableLevel calls on a
+// heightfield don't re-scan. Keyed by name + dims + an allocation-free fold of the
+// Elevation layer (the scan's only input on the heightfield path) so a struct copy
+// or an edited elevation can't serve a stale top. Package-level (not a struct field)
+// to stay copy-safe, mirroring the render-layer per-area caches.
+var maxElevationTopCache struct {
+	name          string
+	width, height int
+	hash          uint64
+	top           int
+	primed        bool
+}
+
+// elevationLayerHash folds the Elevation rows into an FNV-1a digest, allocation-free,
+// with row separators so ragged splits can't collide.
+func (a *AreaDefinition) elevationLayerHash() uint64 {
+	const offset = uint64(1469598103934665603)
+	const prime = uint64(1099511628211)
+	h := offset
+	for _, row := range a.Elevation {
+		for i := 0; i < len(row); i++ {
+			h = (h ^ uint64(row[i])) * prime
+		}
+		h = (h ^ 0xff) * prime // row separator
+	}
+	return h
+}
+
 // maxElevationTop returns the tallest ElevationLevelAt across all columns (0 if flat).
+// Only reached on the heightfield (nil-Solids) path, so the Elevation-layer hash fully
+// fingerprints its inputs.
 func (a *AreaDefinition) maxElevationTop() int {
+	hash := a.elevationLayerHash()
+	c := &maxElevationTopCache
+	if c.primed && c.name == a.Name && c.width == a.Width && c.height == a.Height && c.hash == hash {
+		return c.top
+	}
 	top := 0
 	for z := 0; z < a.Height; z++ {
 		for x := 0; x < a.Width; x++ {
@@ -83,6 +119,7 @@ func (a *AreaDefinition) maxElevationTop() int {
 			}
 		}
 	}
+	c.name, c.width, c.height, c.hash, c.top, c.primed = a.Name, a.Width, a.Height, hash, top, true
 	return top
 }
 
@@ -149,6 +186,22 @@ func (a *AreaDefinition) MapSurfaceAt(x, z, L int) MapSurface {
 		low := a.ElevationLevelAt(x, z) // ramps store their LOW level
 		if low == L || low == L-1 {
 			return MapSurface{Kind: MapSurfaceRamp}
+		}
+	}
+	// Heightfield fast path: the column is solid 0..top, so classify by comparing L
+	// against the top decoded ONCE — equivalent to the SolidAt loop below, which would
+	// re-decode ElevationLevelAt for the same column on each of its 2..L+1 probes. L>=0
+	// in every real call (observer = player level); a negative L falls through to the
+	// generic loop which already handles sub-zero levels as air.
+	if len(a.Solids) == 0 && L >= 0 {
+		top := a.ElevationLevelAt(x, z)
+		switch {
+		case L+1 <= top:
+			return MapSurface{Kind: MapSurfaceWall}
+		case L <= top:
+			return MapSurface{Kind: MapSurfaceFloor}
+		default:
+			return MapSurface{Kind: MapSurfaceBelow, Depth: L - top}
 		}
 	}
 	if _, solid := a.SolidAt(x, L+1, z); solid {

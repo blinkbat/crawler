@@ -31,13 +31,15 @@ const (
 	ItemThrowingKnives
 	ItemCrossbow
 	ItemArbalest
+
+	itemKindCount // sentinel: ItemKind cardinality (assertAppendOnly coverage)
 )
 
 // init pins every ItemKind's serialized int value (the on-disk contract). A
 // mid-enum insert renumbers later kinds and would corrupt saves; this panic
 // trips at startup instead. APPEND a new kind, then add one pinned line here.
 func init() {
-	assertAppendOnly("ItemKind (renumbers saved items)",
+	assertAppendOnly("ItemKind (renumbers saved items)", int(itemKindCount),
 		ItemNone, ItemCheese, ItemBatJerky,
 		ItemIronSword, ItemWoodenShield, ItemLeatherCap,
 		ItemSilverRing, ItemBrassAmulet, ItemDagger,

@@ -445,10 +445,6 @@ func TestMeleeAccuracy_Curve(t *testing.T) {
 	if got := MeleeAccuracy(low, -42); got != MeleeAccuracy(low, TimingQualityMiss) {
 		t.Errorf("unknown quality should fall back to Miss baseline, got %v", got)
 	}
-	// RangedAccuracy mirrors the curve off DEX, not STR.
-	if got := RangedAccuracy(Stats{DEX: 6}, TimingQualityMiss); got <= RangedAccuracy(Stats{DEX: 2}, TimingQualityMiss) {
-		t.Errorf("RangedAccuracy should scale with DEX")
-	}
 }
 
 // TestMemberAttackHits_StatisticsRoughlyMatch: unarmed hit rate sits near MeleeAccuracy (sanity, not exact).

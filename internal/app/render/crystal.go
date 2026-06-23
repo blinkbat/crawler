@@ -20,11 +20,14 @@ type crystalGeometry struct {
 }
 
 var crystalGeo = crystalGeometry{
-	FloatY:         1.65,
+	FloatY:         1.25, // low hover — bottom tip rests just above the floor
 	HalfHeight:     1.14,
 	WaistRadius:    0.60,
 	PromptHeadroom: 0.3,
 }
+
+// crystalFacets is the cut-gem side count for the bipyramid cones + wire.
+const crystalFacets = 8
 
 // DrawCrystals paints each healing crystal as a floating, bobbing six-sided
 // bipyramid: charged ones pulse bright cyan, spent ones sit dim and still.
@@ -50,12 +53,27 @@ func DrawCrystals(camera rl.Camera3D, g *core.GameState, assets Resources) {
 
 		col := crystalColor(c.Charged)
 		r := crystalGeo.WaistRadius
+		// Charged gems wear a faint oversized halo (drawn first so the body sits on
+		// top and only the aura's fringe shows) — a cool glow around the cut stone.
+		if c.Charged {
+			glow := crystalChargedGlow
+			gr := r * 1.4
+			gTop := rl.NewVector3(base.X, midY+crystalGeo.HalfHeight*1.18, base.Z)
+			gBot := rl.NewVector3(base.X, midY-crystalGeo.HalfHeight*1.18, base.Z)
+			rl.DrawCylinderEx(mid, gTop, gr, 0.0, crystalFacets, glow)
+			rl.DrawCylinderEx(gBot, mid, 0.0, gr, crystalFacets, glow)
+		}
 		// Two stacked cones tip-to-tip form the gem.
-		rl.DrawCylinderEx(mid, top, r, 0.0, 6, col)
-		rl.DrawCylinderEx(bot, mid, 0.0, r, 6, col)
+		rl.DrawCylinderEx(mid, top, r, 0.0, crystalFacets, col)
+		rl.DrawCylinderEx(bot, mid, 0.0, r, crystalFacets, col)
 		// Faceted wire outline so it reads as cut crystal.
-		rl.DrawCylinderWiresEx(mid, top, r, 0.0, 6, crystalEdge(c.Charged))
-		rl.DrawCylinderWiresEx(bot, mid, 0.0, r, 6, crystalEdge(c.Charged))
+		rl.DrawCylinderWiresEx(mid, top, r, 0.0, crystalFacets, crystalEdge(c.Charged))
+		rl.DrawCylinderWiresEx(bot, mid, 0.0, r, crystalFacets, crystalEdge(c.Charged))
+		// Bright glint spike off the top tip — a moving shine that sells "shiny".
+		if c.Charged {
+			glintTip := rl.NewVector3(base.X, midY+crystalGeo.HalfHeight+0.14, base.Z)
+			rl.DrawCylinderEx(top, glintTip, 0.07, 0.0, crystalFacets, crystalCoreColor())
+		}
 	}
 }
 
@@ -75,14 +93,24 @@ func DrawCrystalPrompt(camera rl.Camera3D, g *core.GameState, assets Resources) 
 // crystalPulseHz is the charged crystal's breathe rate: legacy 3 rad/s in Hz (≈0.48 Hz).
 const crystalPulseHz = 3.0 / (2 * math.Pi)
 
+// crystalGlintHz is the faster shimmer of the tip glint — quicker than the body
+// breathe so the shine twinkles rather than pulsing in lockstep with the gem.
+const crystalGlintHz = 1.1
+
 // crystalColor: pulsing bright cyan while charged, dim slate while dormant.
 func crystalColor(charged bool) rl.Color {
 	if !charged {
 		return crystalDormantBody
 	}
-	// Breathe brightness 0.75-1.0; modulate only R/G (blue/alpha pinned to match editor marker).
-	breathe := 0.75 + 0.25*pulse(crystalPulseHz)
+	// Breathe brightness 0.82-1.0; modulate only R/G (blue/alpha pinned to match editor marker).
+	breathe := 0.82 + 0.18*pulse(crystalPulseHz)
 	return rl.NewColor(uint8(float32(crystalChargedBody.R)*breathe), uint8(float32(crystalChargedBody.G)*breathe), crystalChargedBody.B, crystalChargedBody.A)
+}
+
+// crystalCoreColor is the bright near-white tip glint, twinkling on crystalGlintHz.
+func crystalCoreColor() rl.Color {
+	glint := 0.7 + 0.3*pulse(crystalGlintHz)
+	return rl.NewColor(uint8(float32(crystalChargedCore.R)*glint), uint8(float32(crystalChargedCore.G)*glint), crystalChargedCore.B, crystalChargedCore.A)
 }
 
 // crystalEdge is the faceted wire tint paired with crystalColor.

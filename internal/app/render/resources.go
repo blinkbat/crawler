@@ -382,7 +382,7 @@ func assertDecorCoverage(models map[byte]propModel) {
 		if isDecorFootprintTail(c) {
 			continue
 		}
-		panic("render: decor char '" + string(c) + "' has no decorModels entry and is not inline-handled — register a loadXxxProp in NewResources or add to inlineDecorHandlers")
+		panic("render: decor char '" + string(c) + "' has no decorModels entry and is not inline-handled — register a loadXxxProp in LoadResources or add to inlineDecorHandlers")
 	}
 }
 
@@ -439,7 +439,7 @@ func assertPropCoverage(models map[byte]propModel) {
 		if isFootprintTail(c) {
 			continue
 		}
-		panic("render: prop char '" + string(c) + "' has no propModels entry and is not inline-handled — register a loadXxxProp in NewResources or add to inlinePropHandlers")
+		panic("render: prop char '" + string(c) + "' has no propModels entry and is not inline-handled — register a loadXxxProp in LoadResources or add to inlinePropHandlers")
 	}
 }
 
@@ -693,7 +693,7 @@ func assertMaterialCoverage(materials map[core.MaterialSet]worldMaterialResource
 		mat := core.MaterialSet(i)
 		if _, ok := materials[mat]; !ok {
 			name, _ := core.MaterialName(mat)
-			panic("render: material " + name + " has no worldMaterialResources — load it in NewResources")
+			panic("render: material " + name + " has no worldMaterialResources — load it in LoadResources")
 		}
 	}
 }

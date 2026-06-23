@@ -1606,9 +1606,8 @@ const (
 // Per-cell zoom thresholds (px) below which a piece of grid chrome turns off
 // (would no longer fit / reads as noise).
 const (
-	charOverlayMinCell    = float32(14) // active-layer per-tile glyph overlay
-	axisTickMinCell       = float32(18) // top/left axis tick-number labels
-	elevationDigitMinCell = float32(12) // the level digit in the elevation slice
+	charOverlayMinCell = float32(14) // active-layer per-tile glyph overlay
+	axisTickMinCell    = float32(18) // top/left axis tick-number labels
 )
 
 // Shared entity-marker radius/inset fractions (of cell size); the drag ghost reads the

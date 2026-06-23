@@ -43,24 +43,39 @@ func SnapPlayerToTile(p *Player) {
 // these fields don't snap back to the new-state seed.
 func (g *GameState) CarryProgressionFrom(prev *GameState) {
 	g.Party = prev.Party
-	g.Inventory = prev.Inventory
-	g.Gold = prev.Gold
-	g.Quests = prev.Quests
-	// Foe knowledge travels with the party; without this each door step wipes
-	// kill counts + Scanned flags. nil stays nil.
-	if prev.Bestiary != nil {
-		g.Bestiary = prev.Bestiary
-	}
+	copyRunProgression(g, prev)
 	g.StepCount = prev.StepCount
 	g.Weather = prev.Weather
 	g.RNG = prev.RNG
-	copyRunToggles(g, prev)
+	copyRunPreferences(g, prev)
 }
 
-// copyRunToggles copies the runtime dev/debug preferences that travel with a run
-// (not world state). One home shared by CarryProgressionFrom and ResetGameState
-// so a new Debug toggle added here persists across both paths.
-func copyRunToggles(dst, src *GameState) {
+// copyRunProgression copies the party-not-world fields every "rebuild state, keep
+// the run" path shares: bag, gold, quests, and foe knowledge. The caller copies
+// Party itself (a transition keeps live HP; a Restart resets it). nil Bestiary
+// stays nil. One home so a new run-progression field lands in both paths.
+func copyRunProgression(dst, src *GameState) {
+	dst.Inventory = src.Inventory
+	dst.Gold = src.Gold
+	dst.Quests = src.Quests
+	// Foe knowledge travels with the party; without this each door step wipes
+	// kill counts + Scanned flags.
+	if src.Bestiary != nil {
+		dst.Bestiary = src.Bestiary
+	}
+}
+
+// copyRunPreferences copies the runtime preferences that travel with a run (not
+// world state): presentation prefs (vibration, retro filters, battle tuning + wipe)
+// and dev/debug toggles. One home shared by CarryProgressionFrom and ResetGameState
+// so a new pref persists across BOTH an area transition and a Restart.
+func copyRunPreferences(dst, src *GameState) {
+	dst.RumbleEnabled = src.RumbleEnabled
+	dst.RetroFilters = src.RetroFilters
+	dst.RetroFilterSky = src.RetroFilterSky
+	dst.RetroFilterSprites = src.RetroFilterSprites
+	dst.BattleTuning = src.BattleTuning
+	dst.BattleWipe = src.BattleWipe
 	dst.DebugOverlay = src.DebugOverlay
 	dst.EnemiesDisabled = src.EnemiesDisabled
 	dst.EasyBattleQuit = src.EasyBattleQuit
@@ -325,38 +340,14 @@ func AdjacentChargedCrystalIndex(crystals []Crystal, x, z int) int {
 // HP/MP reset so recovery can't strand a defeated party. NewGameState is the
 // full reset.
 func ResetGameState(g *GameState) {
-	// Snapshot run-carried toggles before NewGameState reseeds them.
+	// Snapshot run-carried state before NewGameState reseeds it. Party is reset for
+	// field recovery (HP/MP full); the rest of the run carries through unchanged.
 	prev := *g
-	savedInventory := g.Inventory
 	savedParty := resetPartyForFieldRecovery(g.Party)
-	savedGold := g.Gold
-	savedQuests := g.Quests
-	savedBestiary := g.Bestiary
-	savedRumble := g.RumbleEnabled
-	savedRetroFilters := g.RetroFilters
-	savedRetroSky := g.RetroFilterSky
-	savedRetroSprites := g.RetroFilterSprites
-	savedBattleTuning := g.BattleTuning
-	savedBattleWipe := g.BattleWipe
 	*g = NewGameState(g.Area)
-	g.Inventory = savedInventory
 	g.Party = savedParty
-	// Gold + quests + bestiary are run progression, not world state — they
-	// survive a restart like inventory does. nil bestiary stays nil.
-	g.Gold = savedGold
-	g.Quests = savedQuests
-	if savedBestiary != nil {
-		g.Bestiary = savedBestiary
-	}
-	// Preserve presentation preferences (vibration, retro filters) across restart.
-	g.RumbleEnabled = savedRumble
-	g.RetroFilters = savedRetroFilters
-	g.RetroFilterSky = savedRetroSky
-	g.RetroFilterSprites = savedRetroSprites
-	g.BattleTuning = savedBattleTuning
-	g.BattleWipe = savedBattleWipe
-	// Debug toggles are runtime prefs, not world state — preserve across restart.
-	copyRunToggles(g, &prev)
+	copyRunProgression(g, &prev) // bag, gold, quests, bestiary — survive a restart
+	copyRunPreferences(g, &prev) // presentation prefs + debug toggles
 	// Drop lingering particles: Restart can fire mid-battle, so formation-relative
 	// battle particles would otherwise ghost into the fresh field.
 	RequestVFXReset(g)

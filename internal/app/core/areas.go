@@ -67,8 +67,8 @@ func LoadArea(path string) (AreaDefinition, error) {
 }
 
 // inBoundsWH reports whether tile (x,z) lies inside a w×h grid (used before the
-// AreaDefinition — and its InBounds — exists).
-func inBoundsWH(x, z, w, h int) bool { return x >= 0 && x < w && z >= 0 && z < h }
+// AreaDefinition — and its InBounds — exists). Delegates to the one definition.
+func inBoundsWH(x, z, w, h int) bool { return mapfile.InBoundsWH(x, z, w, h) }
 
 // oobErr is the shared "<what> is out of bounds" spawn-validation error.
 func oobErr(what string, x, z, w, h int) error {

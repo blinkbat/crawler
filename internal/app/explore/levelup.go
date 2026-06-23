@@ -15,7 +15,7 @@ func updateLevelUpModal(g *core.GameState) {
 	if !g.LevelUpOpen {
 		return
 	}
-	if g.LevelUpMember < 0 || g.LevelUpMember >= len(g.Party) ||
+	if !core.PartyIndexInRange(g.Party, g.LevelUpMember) ||
 		g.Party[g.LevelUpMember].PendingLevelUps <= 0 {
 		advanceLevelUpMember(g)
 	}

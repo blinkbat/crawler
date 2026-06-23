@@ -222,6 +222,13 @@ const (
 	// dead-center Excellent zone; outside it grades Great.
 	ChargeExcellentBandFrac = float32(0.30)
 
+	// Press-bar grade tolerance bands: sweet-distance ratio (units of window width)
+	// at/under which a press scores the grade. Past the widest band → Nice. Lives
+	// here with the other timing tunables (pressGradeBands wires them in timing.go).
+	PressExcellentBandFrac = float32(0.05)
+	PressGreatBandFrac     = float32(0.15)
+	PressGoodBandFrac      = float32(0.30)
+
 	// Directional-sequence minigame: tap a random run of N directions in order;
 	// each correct tap holds the grade, each miss drops it one notch. All-correct
 	// under SequenceFastThreshold keeps the top grade. Used by Venom Strike (and
@@ -369,8 +376,10 @@ const (
 	// FrostLanceStunTurns: Frost Lance's fixed 1-turn freeze (min==max hard lock).
 	// Its proc gate (FrostLanceStunChance) is with the cast chances below.
 	FrostLanceStunTurns = 1
-	// StunTurnStep: one turn of stun — the unit a skill tier grants/extends (Smite T3, Frost Lance T3).
-	StunTurnStep         = 1
+	// StatusTurnStep: one status turn — the unit a skill tier grants/extends for the
+	// turn-counted statuses (Stun on Smite/Frost Lance T3; Burn on Firebolt/Fireball T3;
+	// Bleed on Rend/Lacerate T2).
+	StatusTurnStep = 1
 	SpiderWebbedMinTurns = 3
 	SpiderWebbedMaxTurns = 3
 	WispConfuseMinTurns  = 2
@@ -629,13 +638,15 @@ const (
 	// SkillLacerate (Thief, Venomancy): same Bleed DoT as Rend, flavored to stack with
 	// the tree's Poison (separate counters).
 	SkillLacerate
+
+	skillIDCount // sentinel: SkillID cardinality (assertAppendOnly coverage)
 )
 
 // init pins every SkillID's serialized value (SkillTiers is a saved map[SkillID]int).
 // A mid-enum insert renumbers later skills and silently misattributes saved tiers;
 // this panics at startup instead. APPEND only, then add one pinned line here.
 func init() {
-	assertAppendOnly("SkillID (renumbers saved SkillTiers keys)",
+	assertAppendOnly("SkillID (renumbers saved SkillTiers keys)", int(skillIDCount),
 		SkillNone, SkillSwipe, SkillPrayer, SkillSteal,
 		SkillFirebolt, SkillCrushingBlow, SkillWhirlwind,
 		SkillMassMend, SkillSmite, SkillBackstab,

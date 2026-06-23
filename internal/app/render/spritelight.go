@@ -49,6 +49,22 @@ var (
 
 const spriteOutlineDepthBias = float32(0.012) // push the rim just behind the sprite
 
+// tanHalfFovYCache memoizes tan(Fovy/2) keyed on the camera's vertical FOV so the
+// per-sprite outline pass doesn't recompute the same trig for every billboard in a
+// frame (Fovy is constant across the pass; it only eases on battle enter/exit).
+var tanHalfFovYCache struct {
+	fovy float32
+	tan  float32
+}
+
+func tanHalfFovY(fovy float32) float32 {
+	if tanHalfFovYCache.fovy != fovy {
+		tanHalfFovYCache.fovy = fovy
+		tanHalfFovYCache.tan = float32(math.Tan(float64(fovy) * math.Pi / 360)) // Fovy/2 in radians
+	}
+	return tanHalfFovYCache.tan
+}
+
 // recedeMul is the back-rank recede as a MULTIPLICATIVE tint — folded into the sprite
 // color BEFORE the (opaque) draw, so the foe stays fully solid. An earlier alpha-overlay
 // wash read as a translucent film. Darkens by strength and leans cool (red dimmed most,
@@ -56,8 +72,7 @@ const spriteOutlineDepthBias = float32(0.012) // push the rim just behind the sp
 func recedeMul(strength float32) rl.Color {
 	s := core.Clamp(strength, 0, 1)
 	v := 1 - 0.8*s // overall brightness after darken
-	u8 := func(f float32) uint8 { return uint8(core.Clamp(255*f, 0, 255)) }
-	return rl.NewColor(u8(v*(1-0.18*s)), u8(v*(1-0.08*s)), u8(v), 255)
+	return rl.NewColor(toByte(v*(1-0.18*s)), toByte(v*(1-0.08*s)), toByte(v), 255)
 }
 
 // drawShadedBillboard draws a battle billboard with the spriteLight treatment: a dark
@@ -105,11 +120,11 @@ func drawSpriteOutline(camera rl.Camera3D, tex rl.Texture2D, pos rl.Vector3, siz
 	fwd, right := billboardBasis(camera)
 	// Convert the target screen thickness (px) into a world offset at this sprite's
 	// depth, so the rim stays ~px wide near or far — a fixed world pad would balloon up
-	// close (the old sprite-size scaling did exactly that).
+	// close (the old sprite-size scaling did exactly that). tan(Fovy/2)/scrH is the
+	// same for every sprite this frame; only the per-sprite distance varies.
 	_, scrH := screenSizeF()
 	dist := rl.Vector3Distance(pos, camera.Position)
-	fovY := float64(camera.Fovy) * math.Pi / 180
-	pad := px * float32(2*float64(dist)*math.Tan(fovY/2)) / scrH
+	pad := px * 2 * dist * tanHalfFovY(camera.Fovy) / scrH
 	base := rl.Vector3Subtract(pos, rl.Vector3Scale(fwd, spriteOutlineDepthBias))
 	col := rl.NewColor(0, 0, 0, alpha)
 	offsets := [4]rl.Vector3{

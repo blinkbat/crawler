@@ -328,7 +328,7 @@ func applyItem(g *core.GameState) {
 	// of a generic "uses" that implies it did something.
 	if !core.ItemHelpsTarget(def, *tgt) {
 		caster := &g.Party[g.Battle.CurrentParty]
-		caster.AttackBump = core.BumpDuration
+		stampPartyBump(caster)
 		setBattleMessage(g, fmt.Sprintf("Confused, %s fumbles %s onto %s.", caster.Name, def.Name, tgt.Name))
 		g.Battle.PendingItem = core.ItemNone
 		finishActorTurn(g)
@@ -346,7 +346,7 @@ func applyItem(g *core.GameState) {
 		restoredMP = core.RestoreMP(tgt, def.MPAmount)
 	}
 	actor := &g.Party[g.Battle.CurrentParty]
-	actor.AttackBump = core.BumpDuration
+	stampPartyBump(actor)
 	setBattleMessage(g, itemUseMessage(tgt.Name, def, healedHP > 0, healedHP, restoredMP))
 	g.Battle.PendingItem = core.ItemNone
 	finishActorTurn(g)
@@ -380,65 +380,43 @@ func performDefend(g *core.GameState) {
 	finishActorTurn(g)
 }
 
-// flipRow/flipCol/memberAtSlot/defaultSwapPartner/swapTargetForDirection all assume a
-// 2×2 party formation (one orthogonal neighbour per axis). Assert that here: if a third
-// rank/column is ever added to core.Row/core.Col, this fires and points at the swap nav.
-func init() {
-	if core.RowCount != 2 || core.ColCount != 2 {
-		panic("battle swap navigation (flipRow/flipCol/memberAtSlot) assumes a 2×2 formation; core.Row/Col grew")
-	}
-}
+// Battle Swap is a tactical, live-only move: the actor can trade slots with ANY
+// other LIVING member (not just an orthogonal neighbour). Downed members are
+// shunted to the back and excluded (not swappable). nextLivingSwapTarget cycles
+// the roster; defaultSwapPartner picks the picker's opening highlight.
 
-// flipRow / flipCol return the other rank / column of the 2×2 — the single source
-// for the orthogonal neighbour, so picker and default-partner can't disagree.
-func flipRow(r core.Row) core.Row {
-	if r == core.RowFront {
-		return core.RowBack
+// nextLivingSwapTarget steps from `from` in dir (+1 forward / -1 back) to the next
+// living member that isn't the acting member, wrapping. ok=false if none exists.
+func nextLivingSwapTarget(g *core.GameState, from, dir int) (int, bool) {
+	n := len(g.Party)
+	if n == 0 || dir == 0 {
+		return 0, false
 	}
-	return core.RowFront
-}
-
-func flipCol(c core.Col) core.Col {
-	if c == core.ColLeft {
-		return core.ColRight
-	}
-	return core.ColLeft
-}
-
-// memberAtSlot returns the LIVING party index (other than the actor) whose LIVE 2×2
-// slot is (row,col). Battle Swap is a tactical, live-only move keyed to the on-screen
-// formation; downed members are shunted to the back and excluded (not swappable).
-func memberAtSlot(g *core.GameState, row core.Row, col core.Col) (int, bool) {
-	for i := range g.Party {
-		if i == g.Battle.CurrentParty || g.Party[i].HP <= 0 {
-			continue
-		}
-		if g.Party[i].Row == row && g.Party[i].Col == col {
+	actor := g.Battle.CurrentParty
+	for step := 1; step <= n; step++ {
+		i := ((from+dir*step)%n + n) % n
+		if i != actor && g.Party[i].HP > 0 {
 			return i, true
 		}
 	}
 	return 0, false
 }
 
-// defaultSwapPartner is the slot the Swap picker opens on: the actor's horizontal
-// neighbour else vertical — both orthogonal, never diagonal. -1 if none (sub-2×2 party).
+// defaultSwapPartner is the member the Swap picker opens on: the first living
+// member after the actor, or -1 if the actor is the last one standing.
 func defaultSwapPartner(g *core.GameState) int {
 	actor := g.Battle.CurrentParty
 	if actor < 0 || actor >= len(g.Party) {
 		return -1
 	}
-	row, col := g.Party[actor].Row, g.Party[actor].Col
-	if idx, ok := memberAtSlot(g, row, flipCol(col)); ok {
-		return idx
-	}
-	if idx, ok := memberAtSlot(g, flipRow(row), col); ok {
+	if idx, ok := nextLivingSwapTarget(g, actor, +1); ok {
 		return idx
 	}
 	return -1
 }
 
-// enterSwapTargeting opens the Swap picker on the default orthogonal partner; the
-// actor stays the source and the D-pad steers to an adjacent slot (no diagonal).
+// enterSwapTargeting opens the Swap picker on the first living partner; the actor
+// stays the source and the D-pad cycles the cursor across all living members.
 func enterSwapTargeting(g *core.GameState) {
 	if _, ok := currentMember(g); !ok {
 		return
@@ -453,8 +431,8 @@ func enterSwapTargeting(g *core.GameState) {
 	setBattleStatus(g, fmt.Sprintf("Swap with %s?", g.Party[partner].Name))
 }
 
-// updateSwapTarget drives the Swap picker: the D-pad picks the orthogonal
-// neighbour (diagonal unreachable by a single direction), Confirm trades slots.
+// updateSwapTarget drives the Swap picker: the D-pad cycles the cursor across all
+// living members, Confirm trades slots.
 func updateSwapTarget(g *core.GameState) {
 	if input.BackPressed() {
 		cancelTargetToActionMenu(g)
@@ -469,41 +447,24 @@ func updateSwapTarget(g *core.GameState) {
 	}
 }
 
-// swapTargetForDirection maps the frame's D-pad direction to the actor's orthogonal
-// neighbour, ok=false if none pressed or at that edge. Vertical resolves first so a
-// diagonal stick reading collapses to one axis.
+// swapTargetForDirection cycles the Swap cursor across every OTHER living member —
+// Down/Right step forward, Up/Left step back (any slot; swap is no longer limited to
+// an orthogonal neighbour). ok=false if no direction was pressed.
 func swapTargetForDirection(g *core.GameState) (int, bool) {
-	actor := g.Battle.CurrentParty
-	if actor < 0 || actor >= len(g.Party) {
-		return 0, false
-	}
-	row, col := g.Party[actor].Row, g.Party[actor].Col
+	dir := 0
 	switch {
-	case input.UpPressed():
-		if row == core.RowBack {
-			return memberAtSlot(g, core.RowFront, col)
-		}
 	case input.DownPressed():
-		if row == core.RowFront {
-			return memberAtSlot(g, core.RowBack, col)
-		}
+		dir = 1
+	case input.UpPressed():
+		dir = -1
 	default:
-		switch input.CursorLeftRight() {
-		case -1:
-			if col == core.ColRight {
-				return memberAtSlot(g, row, core.ColLeft)
-			}
-		case 1:
-			if col == core.ColLeft {
-				return memberAtSlot(g, row, core.ColRight)
-			}
-		}
+		dir = input.CursorLeftRight()
 	}
-	return 0, false
+	return nextLivingSwapTarget(g, g.Battle.PartyTarget, dir)
 }
 
 // performSwap exchanges the actor's formation slot with the cursored partner's and
-// ends the turn. Diagonal pairings are rejected defensively (trade must not cross both axes).
+// ends the turn. Any living partner is valid (a downed member or the actor isn't).
 func performSwap(g *core.GameState) {
 	actor, ok := currentMember(g)
 	if !ok {
@@ -520,15 +481,11 @@ func performSwap(g *core.GameState) {
 		setBattleStatus(g, msgInvalidTarget) // can't swap with a downed member
 		return
 	}
-	if g.Party[a].Row != g.Party[partner].Row && g.Party[a].Col != g.Party[partner].Col {
-		setBattleStatus(g, msgInvalidTarget) // diagonal — not a legal single-step swap
-		return
-	}
 	actorName, partnerName := actor.Name, g.Party[partner].Name
 	// Tactical, live-only: trade the on-screen (live) slots for this fight. The
 	// preferred Home formation is untouched and restored next battle.
 	core.SwapLiveSlots(g.Party, a, partner)
-	setBattleMessage(g, fmt.Sprintf("%s and %s swap places.", actorName, partnerName))
+	setBattleMessage(g, core.SwapPlacesMessage(actorName, partnerName))
 	finishActorTurn(g)
 }
 

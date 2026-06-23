@@ -107,25 +107,25 @@ func updatePanels(g *core.GameState) {
 			switch {
 			case input.UpPressed():
 				if row == core.RowBack {
-					if idx, ok := homeSlotMember(g, core.RowFront, col); ok {
+					if idx, ok := homeSlotMember(g, core.FlipRow(row), col); ok {
 						g.PanelsRowCursor = idx
 					}
 				}
 			case input.DownPressed():
 				if row == core.RowFront {
-					if idx, ok := homeSlotMember(g, core.RowBack, col); ok {
+					if idx, ok := homeSlotMember(g, core.FlipRow(row), col); ok {
 						g.PanelsRowCursor = idx
 					}
 				}
 			case dx == -1:
 				if col == core.ColRight {
-					if idx, ok := homeSlotMember(g, row, core.ColLeft); ok {
+					if idx, ok := homeSlotMember(g, row, core.FlipCol(col)); ok {
 						g.PanelsRowCursor = idx
 					}
 				}
 			case dx == 1:
 				if col == core.ColLeft {
-					if idx, ok := homeSlotMember(g, row, core.ColRight); ok {
+					if idx, ok := homeSlotMember(g, row, core.FlipCol(col)); ok {
 						g.PanelsRowCursor = idx
 					}
 				}
@@ -152,7 +152,7 @@ func updatePanels(g *core.GameState) {
 				nameA, nameB := g.Party[a].Name, g.Party[b].Name
 				core.SwapFormationSlots(g.Party, a, b)
 				g.PanelSwapSource = -1
-				g.SetStatusMessage(nameA + " and " + nameB + " swap places.")
+				g.SetStatusMessage(core.SwapPlacesMessage(nameA, nameB))
 			}
 		}
 	case core.PanelTabEquipment:

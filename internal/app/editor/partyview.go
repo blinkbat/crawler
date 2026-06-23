@@ -92,6 +92,13 @@ func partyViewCallbacks(s *State) visualizerCallbacks {
 		},
 		closePreview:   render.ClosePartyPreview,
 		refreshPreview: func() { render.RefreshPartyAssetPreview(frameAssets, s.partyClass, s.partyVisual) },
+		title:          "PARTY VISUALIZER",
+		name:           core.PartyClassName(s.partyClass),
+		drawPreview: func(rect rl.Rectangle, gizmos bool) {
+			render.DrawPartyPreview(rect, frameAssets, s.partyClass, s.partyVisual, s.foeViewZoom, gizmos, assetPreviewTexFor())
+		},
+		footerHint: "D-pad row/adjust   |   drag sliders   |   buttons: change class / save / reset / close",
+		footerNote: visualizerFooterHint(true, core.PartyClassSlug(s.partyClass)),
 	}
 }
 
@@ -100,41 +107,5 @@ func updatePartyViewModal(s *State) Action {
 }
 
 func drawPartyViewModal(s *State, font rl.Font, theme render.Theme) {
-	l := computeFoeViewLayout()
-	drawModalHeaderAt(font, theme, l.card, "PARTY VISUALIZER", theme.BorderActive)
-
-	// Live 3D preview. Gizmos only on the Layout tab; Asset tab uses the bake preview.
-	render.DrawPartyPreview(l.preview, frameAssets, s.partyClass, s.partyVisual, s.foeViewZoom, s.foeViewTab == foeTabLayout, assetPreviewTexFor())
-	rl.DrawRectangleLinesEx(l.preview, 1, theme.BorderDim)
-
-	drawButton(font, l.prevFoeBtn, "<", false)
-	drawButton(font, l.nextFoeBtn, ">", false)
-	name := core.PartyClassName(s.partyClass)
-	nameSize := render.MeasureRichText(font, name, editorFontTopbar, 1)
-	span := nameSpanBetween(l.prevFoeBtn, l.nextFoeBtn)
-	render.DrawRichText(font, name,
-		rl.NewVector2(span.X+(span.Width-nameSize.X)/2, l.prevFoeBtn.Y+5),
-		editorFontTopbar, 1, theme.TextPrimary)
-
-	drawFoeViewTabs(font, l, s.foeViewTab)
-	if s.foeViewTab == foeTabLayout {
-		for i := range foeFields {
-			drawPartySlider(font, theme, l, i, s)
-		}
-	} else {
-		drawAssetTab(font, theme, l, &s.partyVisual, s.assetCursor)
-	}
-
-	drawModalButtons(font, []rl.Rectangle{l.saveBtn, l.resetBtn, l.closeBtn}, foeViewBtnLabels)
-
-	render.DrawTextWithShadow(font,
-		"D-pad row/adjust   |   drag sliders   |   buttons: change class / save / reset / close",
-		l.card.X+foePad, l.preview.Y+l.preview.Height+8, editorFontHint, theme.TextHint)
-	render.DrawTextWithShadow(font,
-		visualizerFooterHint(true, core.PartyClassSlug(s.partyClass)),
-		l.card.X+foePad, l.preview.Y+l.preview.Height+26, editorFontHint, theme.TextMuted)
-}
-
-func drawPartySlider(font rl.Font, theme render.Theme, l foeViewLayout, i int, s *State) {
-	drawVisualSlider(font, theme, l, i, &s.partyVisual, s.partyCursor)
+	drawVisualizerModal(s, font, theme, partyViewCallbacks(s))
 }

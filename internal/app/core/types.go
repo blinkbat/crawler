@@ -822,12 +822,6 @@ func MeleeAccuracy(s Stats, quality int) float64 {
 	return accuracyFrom(s.STR, quality)
 }
 
-// RangedAccuracy is the per-shot ranged hit chance (governing stat DEX). Seam
-// for ranged attacks; none are flagged ranged yet.
-func RangedAccuracy(s Stats, quality int) float64 {
-	return accuracyFrom(s.DEX, quality)
-}
-
 // StealChance clamps the (tier-augmented) base steal chance to [0, 1]. Steal is
 // a flat base (no DEX scaling), modified only by timing at applySteal.
 func StealChance(base float64) float64 {

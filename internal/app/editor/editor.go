@@ -265,11 +265,28 @@ var entityBrushColors = map[core.EnemyKind]rl.Color{
 	core.EnemySkeleton:     rl.NewColor(230, 226, 198, 255),
 }
 
-// init asserts entityBrushColors covers every enemy kind.
+// init asserts entityBrushColors covers every enemy kind, and that the Prop/Decor
+// palettes carry a brush for every core prop/decor char — add a prop/decor in core
+// and forget the palette here and it silently never appears in the editor.
 func init() {
 	for _, def := range core.EnemyKinds() {
 		if _, ok := entityBrushColors[def.Kind]; !ok {
 			panic("editor: missing entityBrushColors entry for " + def.Name)
+		}
+	}
+	assertPaletteCovers(LayerProps, core.PropTileChars(), "PropTileChars")
+	assertPaletteCovers(LayerDecor, core.DecorTileChars(), "DecorTileChars")
+}
+
+// assertPaletteCovers panics if any char in want lacks a layerBrushes[layer] entry.
+func assertPaletteCovers(layer Layer, want []byte, source string) {
+	have := make(map[byte]struct{}, len(layerBrushes[layer]))
+	for _, b := range layerBrushes[layer] {
+		have[b.Char] = struct{}{}
+	}
+	for _, c := range want {
+		if _, ok := have[c]; !ok {
+			panic("editor: layerBrushes is missing a brush for core." + source + " char '" + string(c) + "' — add it to the palette")
 		}
 	}
 }

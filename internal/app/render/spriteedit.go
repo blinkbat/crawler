@@ -730,8 +730,8 @@ func visualAdjustFilter(ov core.EnemyVisualOverride) SpriteFilter {
 	f.Saturation = ov.Saturation
 	f.Dither = ov.Dither
 	f.GameBoy = ov.GameBoy
-	if ov.MaxColors >= 2 {
-		f.MaxColors = int32(ov.MaxColors + 0.5)
+	if n, ok := ov.ColorCap(); ok {
+		f.MaxColors = int32(n)
 	}
 	return f
 }

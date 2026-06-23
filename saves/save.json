@@ -1,11 +1,11 @@
 {
   "version": 1,
   "mapID": "forest_path",
-  "playerTileX": 4,
-  "playerTileZ": 14,
+  "playerTileX": 34,
+  "playerTileZ": 24,
   "playerFacing": 0,
   "playerLevel": 10,
-  "stepCount": 60,
+  "stepCount": 116,
   "gold": 0,
   "party": [
     {
@@ -32,6 +32,7 @@
         0
       ],
       "Row": 0,
+      "Col": 0,
       "HomeRow": 0,
       "HomeCol": 0,
       "AttackBump": 0,
@@ -85,6 +86,7 @@
         0
       ],
       "Row": 1,
+      "Col": 0,
       "HomeRow": 1,
       "HomeCol": 0,
       "AttackBump": 0,
@@ -138,6 +140,7 @@
         0
       ],
       "Row": 0,
+      "Col": 0,
       "HomeRow": 0,
       "HomeCol": 1,
       "AttackBump": 0,
@@ -191,6 +194,7 @@
         0
       ],
       "Row": 1,
+      "Col": 0,
       "HomeRow": 1,
       "HomeCol": 1,
       "AttackBump": 0,
@@ -237,6 +241,15 @@
       "Title": "Investigate the Island",
       "Desc": "Explore the island and uncover what drew you here.",
       "Status": 0
+    }
+  ],
+  "crystals": [
+    {
+      "tileX": 34,
+      "tileZ": 23,
+      "charge": 0,
+      "charged": false,
+      "saved": true
     }
   ]
 }

@@ -382,16 +382,6 @@ func DrawSkyBackground(assets Resources, g *core.GameState) {
 // would show against its 85%-clamped tail.
 const behindCullSlack = float32(-2.5)
 
-// behindCullXZ reports whether p sits far enough behind the camera to skip, with
-// X/Z passed as scalars to avoid a throwaway Vector3 in the hottest loop. camPos +
-// forward are hoisted out of per-item loops so this stays a cheap dot. Shared by
-// the tile/chest/door draws so they cull consistently.
-func behindCullXZ(camPos, forward rl.Vector3, px, pz float32) bool {
-	dx := px - camPos.X
-	dz := pz - camPos.Z
-	return dx*forward.X+dz*forward.Z < behindCullSlack
-}
-
 // viewCull is the per-frame horizontal view-frustum test: camera basis + side-
 // plane half-tangent hoisted out of per-item loops. Culls points behind the
 // camera (behindCullSlack) OR outside the horizontal FOV wedge. Built once per
@@ -422,7 +412,7 @@ func newViewCull(camera rl.Camera3D) viewCull {
 	if sh > 0 {
 		aspect = sw / sh
 	}
-	tanHalf := float32(math.Tan(float64(camera.Fovy)*math.Pi/360)) * aspect * viewCullSlack
+	tanHalf := tanHalfFovY(camera.Fovy) * aspect * viewCullSlack
 	return viewCull{pos: camera.Position, fwd: fwd, right: horizontalRight(fwd), tanHalf: tanHalf}
 }
 
@@ -1102,7 +1092,7 @@ var (
 )
 
 // torchFlameModel is the unlit emissive sphere for flame blobs (default shader so
-// it glows at full tint against the dark dungeon). Set by NewResources.
+// it glows at full tint against the dark dungeon). Set by LoadResources.
 var (
 	torchFlameModel rl.Model
 	torchFlameReady bool

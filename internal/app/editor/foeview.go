@@ -461,6 +461,13 @@ func foeViewCallbacks(s *State) visualizerCallbacks {
 		},
 		closePreview:   render.CloseFoePreview,
 		refreshPreview: func() { render.RefreshFoeAssetPreview(frameAssets, s.foeKind, s.foeVisual) },
+		title:          "FOE VISUALIZER",
+		name:           core.EnemyInfo(s.foeKind).Name + dropdownArrowSuffix, // ▼ = click name to pick
+		drawPreview: func(rect rl.Rectangle, gizmos bool) {
+			render.DrawFoePreview(rect, frameAssets, s.foeKind, s.foeVisual, s.foeViewZoom, gizmos, assetPreviewTexFor())
+		},
+		footerHint: "D-pad row/adjust   |   drag sliders   |   buttons: change foe / save / reset / close",
+		footerNote: visualizerFooterHint(false, core.EnemySlug(s.foeKind)),
 	}
 }
 
@@ -511,6 +518,12 @@ type visualizerCallbacks struct {
 	reset          func()             // Reset button
 	closePreview   func()             // render close call on Esc / Close button
 	refreshPreview func()             // rebuild the asset preview when stale
+	// Draw-only fields (drawVisualizerModal): the rest of the per-modal variance.
+	title       string                       // modal heading
+	name        string                       // picker header label (incl. any ▼ suffix)
+	drawPreview func(rect rl.Rectangle, gizmos bool) // blit the live 3D preview
+	footerHint  string                       // line-1 controls hint
+	footerNote  string                       // line-2 persistence note
 }
 
 // updateVisualizerModal drives one frame of either Visualizer from its callbacks.
@@ -661,43 +674,45 @@ func applyPreviewZoomWheel(s *State, preview rl.Rectangle, mp rl.Vector2) {
 }
 
 func drawFoeViewModal(s *State, font rl.Font, theme render.Theme) {
+	drawVisualizerModal(s, font, theme, foeViewCallbacks(s))
+}
+
+// drawVisualizerModal paints either Visualizer; all per-modal variance rides on cb
+// (title / picker name / preview blit / footer text + the slider override+cursor).
+func drawVisualizerModal(s *State, font rl.Font, theme render.Theme, cb visualizerCallbacks) {
 	l := computeFoeViewLayout()
-	drawModalHeaderAt(font, theme, l.card, "FOE VISUALIZER", theme.BorderActive)
+	drawModalHeaderAt(font, theme, l.card, cb.title, theme.BorderActive)
 
 	// Live 3D preview (blitted from an off-screen texture). Gizmos show only on
 	// the Layout tab; on the Asset tab the bake preview texture overrides.
-	render.DrawFoePreview(l.preview, frameAssets, s.foeKind, s.foeVisual, s.foeViewZoom, s.foeViewTab == foeTabLayout, assetPreviewTexFor())
+	cb.drawPreview(l.preview, s.foeViewTab == foeTabLayout)
 	rl.DrawRectangleLinesEx(l.preview, 1, theme.BorderDim)
 
-	// Foe picker header: < Name >.
+	// Picker header: < Name >.
 	drawButton(font, l.prevFoeBtn, "<", false)
 	drawButton(font, l.nextFoeBtn, ">", false)
-	name := core.EnemyInfo(s.foeKind).Name + dropdownArrowSuffix // ▼ = click name to pick
-	nameSize := render.MeasureRichText(font, name, editorFontTopbar, 1)
+	nameSize := render.MeasureRichText(font, cb.name, editorFontTopbar, 1)
 	span := nameSpanBetween(l.prevFoeBtn, l.nextFoeBtn)
-	render.DrawRichText(font, name,
+	render.DrawRichText(font, cb.name,
 		rl.NewVector2(span.X+(span.Width-nameSize.X)/2, l.prevFoeBtn.Y+5),
 		editorFontTopbar, 1, theme.TextPrimary)
 
 	drawFoeViewTabs(font, l, s.foeViewTab)
 	if s.foeViewTab == foeTabLayout {
 		for i := range foeFields {
-			drawFoeSlider(font, theme, l, i, s)
+			drawVisualSlider(font, theme, l, i, cb.override, *cb.cursor)
 		}
 	} else {
-		drawAssetTab(font, theme, l, &s.foeVisual, s.assetCursor)
+		drawAssetTab(font, theme, l, cb.override, s.assetCursor)
 	}
 
 	drawModalButtons(font, []rl.Rectangle{l.saveBtn, l.resetBtn, l.closeBtn}, foeViewBtnLabels)
 
 	// Footer hint + persistence note, under the preview pane.
-	render.DrawTextWithShadow(font,
-		"D-pad row/adjust   |   drag sliders   |   buttons: change foe / save / reset / close",
+	render.DrawTextWithShadow(font, cb.footerHint,
 		l.card.X+foePad, l.preview.Y+l.preview.Height+8, editorFontHint, theme.TextHint)
-	render.DrawTextWithShadow(font,
-		visualizerFooterHint(false, core.EnemySlug(s.foeKind)),
+	render.DrawTextWithShadow(font, cb.footerNote,
 		l.card.X+foePad, l.preview.Y+l.preview.Height+26, editorFontHint, theme.TextMuted)
-
 }
 
 // drawFoeViewTabs paints the tab buttons, active one highlighted. Shared.
@@ -734,18 +749,14 @@ func drawAssetTab(font rl.Font, theme render.Theme, l foeViewLayout, ov *core.En
 	}
 }
 
-// drawVisualSlider draws foeFields row i against override ov and cursor.
-// drawFoeSlider/drawPartySlider delegate here (differ only in the override/cursor).
+// drawVisualSlider draws foeFields row i against override ov and cursor (the
+// Layout tab; both Visualizers route here via drawVisualizerModal).
 func drawVisualSlider(font rl.Font, theme render.Theme, l foeViewLayout, i int, ov *core.EnemyVisualOverride, cursor int) {
 	f := foeFields[i]
 	track := l.sliderTracks[i]
 	drawSliderField(font, theme, f, ov,
 		rl.NewVector2(track.X-foeSliderMetrics.labelW, track.Y-4), rl.NewVector2(track.X+track.Width+8, track.Y-4),
 		editorFontAccent, track, 6, cursor == i)
-}
-
-func drawFoeSlider(font rl.Font, theme render.Theme, l foeViewLayout, i int, s *State) {
-	drawVisualSlider(font, theme, l, i, &s.foeVisual, s.foeCursor)
 }
 
 // sliderRowMetrics is the shared geometry contract for an editor slider row: the label

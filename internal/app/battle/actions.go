@@ -43,6 +43,9 @@ func livingEnemyAt(g *core.GameState, slot int) (*core.Enemy, bool) {
 // setup/apply pair drives the timing minigame. Enemy-only skills route through
 // resolveEnemySpell instead; an unregistered skill surfaces as "No skill ready."
 var skillActionHandlers = map[core.SkillID]actionHandlers{
+	// SkillNone is the basic attack — the implicit "no skill selected" row, in the
+	// registry so dispatch is a single lookup (no special-case branch).
+	core.SkillNone:          {setup: setupTargetedEnemy, apply: applyAttack},
 	core.SkillSwipe:         {setup: setupSwipe, apply: applySwipe},
 	core.SkillPrayer:        {setup: targetedSetup(core.SkillPrayer), apply: applyPrayer},
 	core.SkillSteal:         {setup: setupTargetedEnemy, apply: applySteal},
@@ -474,18 +477,37 @@ func forEachLivingEnemy(g *core.GameState, fn func(slot int, enemy *core.Enemy))
 	}
 }
 
+// forEachTargetableEnemy walks the enemies a whole-pack skill can actually reach:
+// a MELEE AoE (Swipe / Whirlwind / Poison Cloud) is front-gated like a melee swing,
+// so it hits only the effective front row; ranged/magic AoE (Fireball / Arc Bolt /
+// Cone of Cold) sweeps the whole pack. One source so every sweep respects reach.
+func forEachTargetableEnemy(g *core.GameState, skill core.SkillID, fn func(slot int, enemy *core.Enemy)) {
+	meleeOnly := core.SkillAttackClassFor(skill).IsMelee()
+	members := core.BattleMembers(g)
+	for slot := range members {
+		if !members[slot].Alive {
+			continue
+		}
+		if meleeOnly && !core.EnemyInEffectiveFront(members, slot) {
+			continue
+		}
+		fn(slot, core.BattleMemberAt(g, slot))
+	}
+}
+
 // triggerBigShake arms the "costly hit" camera punch (AoE casts, Swipe, crits).
 func triggerBigShake(g *core.GameState) {
 	core.TriggerCombatShake(&g.Battle, core.CombatShakeBigPeak, core.CombatShakeBigDur)
 }
 
-// applyAoEDamage hits every living enemy for `damage` via damageEnemy (SkillTag
-// armor rules apply). Returns the hit count.
+// applyAoEDamage hits every reachable enemy for `damage` via damageEnemy (SkillTag
+// armor rules apply; a melee AoE like Swipe reaches only the effective front row).
+// Returns the hit count.
 func applyAoEDamage(g *core.GameState, skill core.SkillID, damage, quality int, shake bool) int {
 	hits := 0
 	tag := core.SkillTagFor(skill)
 	vfx := vfxKindFor(skill)
-	forEachLivingEnemy(g, func(slot int, _ *core.Enemy) {
+	forEachTargetableEnemy(g, skill, func(slot int, _ *core.Enemy) {
 		damageEnemy(g, slot, damage, quality, tag)
 		core.EnqueueEnemyVFX(g, vfx, slot)
 		hits++
@@ -637,7 +659,7 @@ func beginSingleTargetSkill(g *core.GameState, skill core.SkillID, quality int) 
 		return nil, nil, core.Enemy{}, 0, 0, core.SkillEffect{}, false
 	}
 	actor = &g.Party[g.Battle.CurrentParty]
-	actor.AttackBump = core.BumpDuration
+	stampPartyBump(actor)
 	rawDamage = applyShadowStep(g, actor, scaleSkillDamage(actor, skill, quality))
 	live = core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	target = *live
@@ -652,9 +674,14 @@ func beginSingleTargetSkill(g *core.GameState, skill core.SkillID, quality int) 
 // valid here (CurrentParty was captured before the bar resolved), so no re-check.
 func beginPartyAction(g *core.GameState) *core.PartyMember {
 	actor := &g.Party[g.Battle.CurrentParty]
-	actor.AttackBump = core.BumpDuration
+	stampPartyBump(actor)
 	return actor
 }
+
+// stampPartyBump / stampEnemyBump arm the attack-lunge offset on a combatant, so
+// the bump duration is applied from one place across every attacker path.
+func stampPartyBump(m *core.PartyMember) { m.AttackBump = core.BumpDuration }
+func stampEnemyBump(e *core.Enemy)       { e.AttackBump = core.BumpDuration }
 
 // beginPendingAction validates / pays cost once the target is confirmed and, on
 // success, arms the timing bar.
@@ -773,9 +800,6 @@ func applyPendingAction(g *core.GameState, quality int) {
 }
 
 func actionHandlerFor(skill core.SkillID) (actionHandlers, bool) {
-	if skill == core.SkillNone {
-		return actionHandlers{setup: setupTargetedEnemy, apply: applyAttack}, true
-	}
 	handler, ok := skillActionHandlers[skill]
 	return handler, ok
 }
@@ -956,7 +980,7 @@ func applySteal(g *core.GameState, quality int) bool {
 		msg := stealMessage(actor.Name, kind, quality)
 		switch {
 		case defeated:
-			msg = fmt.Sprintf("%s The cut fells the %s.", msg, core.EnemySingularNoun(*enemy))
+			msg = fmt.Sprintf("%s The cut fells the %s for %d.", msg, core.EnemySingularNoun(*enemy), bonus)
 		case bonus > 0:
 			msg = fmt.Sprintf("%s The cut bleeds for %d.", msg, bonus)
 		}
@@ -1333,7 +1357,7 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, hitVerb, emptyVe
 	hits := 0
 	afflicted := 0
 	totalDealt := 0
-	forEachLivingEnemy(g, func(slot int, enemy *core.Enemy) {
+	forEachTargetableEnemy(g, skill, func(slot int, enemy *core.Enemy) {
 		dealt, defeated := damageEnemy(g, slot, damage, quality, tag)
 		totalDealt += dealt
 		core.EnqueueEnemyVFX(g, vfx, slot)
@@ -2252,7 +2276,7 @@ func fireboltMessage(name string, target core.Enemy, damage, quality int, defeat
 	tag := qualityTag(quality)
 	switch {
 	case defeated:
-		return fmt.Sprintf("%s%s's Firebolt drops the %s.", tag, name, core.EnemySingularNoun(target))
+		return fmt.Sprintf("%s%s's Firebolt drops the %s for %d.", tag, name, core.EnemySingularNoun(target), damage)
 	case burned:
 		return fmt.Sprintf("%s%s scorches the %s for %d. Burning!", tag, name, core.EnemySingularNoun(target), damage)
 	case burnTurns > 0:
@@ -2282,44 +2306,44 @@ func procSkillMessage(arms procMessageArms, name string, target core.Enemy, dama
 
 var (
 	crushingBlowArms = procMessageArms{
-		defeated: "%[1]s%[2]s shatters the %[3]s with a Crushing Blow.",
+		defeated: "%[1]s%[2]s shatters the %[3]s with a Crushing Blow for %[4]d.",
 		proc:     "%[1]s%[2]s crushes the %[3]s for %[4]d. Stunned!",
 		plain:    "%[1]s%[2]s Crushing Blows for %[4]d.",
 	}
 	smiteArms = procMessageArms{
-		defeated: "%[1]s%[2]s smites the %[3]s down.",
+		defeated: "%[1]s%[2]s smites the %[3]s down for %[4]d.",
 		proc:     "%[1]s%[2]s smites for %[4]d. Stunned!",
 		plain:    "%[1]s%[2]s smites for %[4]d.",
 	}
 	backstabArms = procMessageArms{
-		defeated: "%[1]s%[2]s's Backstab fells the %[3]s.",
+		defeated: "%[1]s%[2]s's Backstab fells the %[3]s for %[4]d.",
 		proc:     "%[1]s%[2]s lands a clean Backstab for %[4]d!",
 		plain:    "%[1]s%[2]s stabs for %[4]d.",
 	}
 	venomStrikeArms = procMessageArms{
-		defeated: "%[1]s%[2]s's Venom Strike fells the %[3]s.",
+		defeated: "%[1]s%[2]s's Venom Strike fells the %[3]s for %[4]d.",
 		proc:     "%[1]s%[2]s envenoms the %[3]s for %[4]d. Poisoned!",
 		plain:    "%[1]s%[2]s stings for %[4]d.",
 	}
 	frostLanceArms = procMessageArms{
-		defeated: "%[1]s%[2]s's Frost Lance shatters the %[3]s.",
+		defeated: "%[1]s%[2]s's Frost Lance shatters the %[3]s for %[4]d.",
 		proc:     "%[1]s%[2]s freezes the %[3]s for %[4]d. Frozen!",
 		plain:    "%[1]s%[2]s lances for %[4]d.",
 	}
 	frostbiteArms = procMessageArms{
-		defeated: "%[1]s%[2]s's Frostbite freezes the %[3]s solid.",
+		defeated: "%[1]s%[2]s's Frostbite freezes the %[3]s solid for %[4]d.",
 		proc:     "%[1]s%[2]s bites the %[3]s for %[4]d and chills it.",
 		// No plain arm: Frostbite's chill is a guaranteed debuff (no chance roll), so a
 		// survivor always takes the proc arm and the defeated arm covers the kill. An
 		// empty plain would only surface if that invariant broke — left zero deliberately.
 	}
 	rendArms = procMessageArms{
-		defeated: "%[1]s%[2]s's Rend tears the %[3]s apart.",
+		defeated: "%[1]s%[2]s's Rend tears the %[3]s apart for %[4]d.",
 		proc:     "%[1]s%[2]s rends the %[3]s for %[4]d — it's bleeding.",
 		plain:    "%[1]s%[2]s rends the %[3]s for %[4]d.",
 	}
 	lacerateArms = procMessageArms{
-		defeated: "%[1]s%[2]s's Lacerate opens the %[3]s up for good.",
+		defeated: "%[1]s%[2]s's Lacerate opens the %[3]s up for good — %[4]d.",
 		proc:     "%[1]s%[2]s lacerates the %[3]s for %[4]d — it's bleeding.",
 		plain:    "%[1]s%[2]s lacerates the %[3]s for %[4]d.",
 	}
@@ -2445,7 +2469,7 @@ func tryRetribution(g *core.GameState, enemySlot, defender, dealt int) {
 	refl, defeated := damageEnemy(g, enemySlot, reflect, core.TimingQualityGood, core.SkillTagMagic)
 	core.EnqueueEnemyVFX(g, core.VFXSmite, enemySlot)
 	if defeated {
-		setBattleMessage(g, fmt.Sprintf("%s's retribution fells the %s!", g.Party[defender].Name, noun))
+		setBattleMessage(g, fmt.Sprintf("%s's retribution fells the %s for %d!", g.Party[defender].Name, noun, refl))
 	} else if refl > 0 {
 		setBattleMessage(g, fmt.Sprintf("The %s takes %d from %s's retribution.", noun, refl, g.Party[defender].Name))
 	}
@@ -2460,7 +2484,7 @@ func resolveEnemyMiss(g *core.GameState, slot int) {
 	if target < 0 {
 		return
 	}
-	enemy.AttackBump = core.BumpDuration
+	stampEnemyBump(enemy)
 	setBattleMessage(g, fmt.Sprintf("The %s's attack misses %s!", core.EnemySingularNoun(*enemy), g.Party[target].Name))
 }
 
@@ -2475,7 +2499,7 @@ func resolveEnemyAttacker(g *core.GameState, slot int, defendQuality int) bool {
 	if target < 0 {
 		return false
 	}
-	enemy.AttackBump = core.BumpDuration
+	stampEnemyBump(enemy)
 	// Dodge precedes damage: a sidestep eats the whole swing (no damage/proc/
 	// lifesteal). The defend quality is still recorded. Skills aren't dodgeable.
 	if core.RollDodge(g.Rand(), core.EffectiveStats(g.Party[target])) {

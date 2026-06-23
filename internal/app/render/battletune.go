@@ -54,8 +54,7 @@ func drawCombatTuneOverlay(g *core.GameState, assets Resources) {
 		// Numeric value, right-aligned just left of the gauge.
 		barX := tunePanelX + tunePanelW - tuneBarW - 12
 		val := fmt.Sprintf("%.2f", core.BattleTuneValue(&g.BattleTuning, i))
-		valW := rl.MeasureTextEx(font, val, FontTiny, 1).X
-		drawTextWithShadow(font, val, barX-valW-8, y+3, FontTiny, textCol)
+		drawTextRightAligned(font, val, barX-8, y+3, FontTiny, textCol)
 		// Gauge: track + gilt fill + outline (same chrome as the retro sliders).
 		barY := y + 5
 		drawSmallPanel(int32(barX), int32(barY), int32(tuneBarW), 9, barTrack)

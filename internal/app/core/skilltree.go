@@ -104,7 +104,7 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	SkillSmite: {
 		tier(1, "+2 damage", "+2 base damage on the press tap.", SkillEffectDelta{Damage: 2}),
 		tier(2, "+2 damage", "Another +2 base damage.", SkillEffectDelta{Damage: 2}),
-		tier(3, "+25% stun", "Lands a Stun roll with 25% chance on Great/Excellent timing.", SkillEffectDelta{StunChance: 0.25, StunMinTurns: StunTurnStep, StunMaxTurns: StunTurnStep}),
+		tier(3, "+25% stun", "Lands a Stun roll with 25% chance on Great/Excellent timing.", SkillEffectDelta{StunChance: 0.25, StunMinTurns: StatusTurnStep, StunMaxTurns: StatusTurnStep}),
 	},
 	SkillBless: {
 		tier(1, "+1 turn", "The blessing lingers one turn longer on the whole party.", SkillEffectDelta{BuffTurns: 1}),
@@ -151,12 +151,12 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	SkillFirebolt: {
 		tier(1, "+2 damage", "+2 base damage on the bolt.", SkillEffectDelta{Damage: 2}),
 		tier(2, "+20% Burn", "Burn-apply chance bumped by 20%.", SkillEffectDelta{BurnChance: 0.20}),
-		tier(3, "+1 Burn turn", "Burn lasts one turn longer on min and max rolls.", SkillEffectDelta{BurnMinTurns: 1, BurnMaxTurns: 1}),
+		tier(3, "+1 Burn turn", "Burn lasts one turn longer on min and max rolls.", SkillEffectDelta{BurnMinTurns: StatusTurnStep, BurnMaxTurns: StatusTurnStep}),
 	},
 	SkillFrostLance: {
 		tier(1, "+2 damage", "+2 base damage on the lance.", SkillEffectDelta{Damage: 2}),
 		tier(2, "+15% Stun", "Stun roll gets +15% chance on Great/Excellent.", SkillEffectDelta{StunChance: 0.15}),
-		tier(3, "+1 Stun turn", "Stun lasts an extra turn when it lands.", SkillEffectDelta{StunMinTurns: StunTurnStep, StunMaxTurns: StunTurnStep}),
+		tier(3, "+1 Stun turn", "Stun lasts an extra turn when it lands.", SkillEffectDelta{StunMinTurns: StatusTurnStep, StunMaxTurns: StatusTurnStep}),
 	},
 	SkillFrostbite: {
 		tier(1, "+2 damage", "+2 base frost damage.", SkillEffectDelta{Damage: 2}),
@@ -176,7 +176,7 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	SkillFireball: {
 		tier(1, "+2 damage", "+2 base magic damage to every enemy in the blast.", SkillEffectDelta{Damage: 2}),
 		tier(2, "+20% Burn", "Per-target Burn-apply chance bumped by 20%.", SkillEffectDelta{BurnChance: 0.20}),
-		tier(3, "+1 Burn turn", "Burn lasts one turn longer on min and max rolls.", SkillEffectDelta{BurnMinTurns: 1, BurnMaxTurns: 1}),
+		tier(3, "+1 Burn turn", "Burn lasts one turn longer on min and max rolls.", SkillEffectDelta{BurnMinTurns: StatusTurnStep, BurnMaxTurns: StatusTurnStep}),
 	},
 	// ── Warrior (tree-node skills) ───────────────────────────
 	SkillSunder: {
@@ -220,12 +220,12 @@ var skillTierTable = map[SkillID][]SkillTierUpgrade{
 	// ── Bleed strikes (Warrior Rend / Thief Lacerate) ────────
 	SkillRend: {
 		tier(1, "+2 damage", "+2 base damage on the opening cut.", SkillEffectDelta{Damage: 2}),
-		tier(2, "+1 Bleed turn", "The wound bleeds one turn longer on min and max rolls.", SkillEffectDelta{BleedMinTurns: 1, BleedMaxTurns: 1}),
+		tier(2, "+1 Bleed turn", "The wound bleeds one turn longer on min and max rolls.", SkillEffectDelta{BleedMinTurns: StatusTurnStep, BleedMaxTurns: StatusTurnStep}),
 		tier(3, "+15% Bleed", "Bleed-apply chance bumped by 15% — a maxed Rend almost always draws blood.", SkillEffectDelta{BleedChance: 0.15}),
 	},
 	SkillLacerate: {
 		tier(1, "+1 damage", "+1 base damage on the cut.", SkillEffectDelta{Damage: 1}),
-		tier(2, "+1 Bleed turn", "The wound bleeds one turn longer on min and max rolls.", SkillEffectDelta{BleedMinTurns: 1, BleedMaxTurns: 1}),
+		tier(2, "+1 Bleed turn", "The wound bleeds one turn longer on min and max rolls.", SkillEffectDelta{BleedMinTurns: StatusTurnStep, BleedMaxTurns: StatusTurnStep}),
 		tier(3, "+15% Bleed", "Bleed-apply chance bumped by 15%.", SkillEffectDelta{BleedChance: 0.15}),
 	},
 }

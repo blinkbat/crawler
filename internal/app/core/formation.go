@@ -85,6 +85,29 @@ func SwapFormationSlots(party []PartyMember, i, j int) {
 	party[j].Row = party[j].HomeRow
 }
 
+// FlipRow / FlipCol return the other rank / column of the 2×2 — the single source
+// for "the orthogonal neighbour" so the battle swap picker and the out-of-battle
+// panel formation nav can't disagree. (Assumes RowCount==ColCount==2.)
+func FlipRow(r Row) Row {
+	if r == RowFront {
+		return RowBack
+	}
+	return RowFront
+}
+
+func FlipCol(c Col) Col {
+	if c == ColLeft {
+		return ColRight
+	}
+	return ColLeft
+}
+
+// SwapPlacesMessage is the shared "<A> and <B> swap places." log line so battle
+// Swap and the out-of-battle panel Swap stay worded identically.
+func SwapPlacesMessage(a, b string) string {
+	return a + " and " + b + " swap places."
+}
+
 // formationSlotsValid reports whether the standing slots form a clean grid:
 // every (HomeRow, HomeCol) in bounds and unique.
 func formationSlotsValid(party []PartyMember) bool {
@@ -109,10 +132,7 @@ func defaultSlotCol(row Row, frontN, backN *int) Col {
 	if row == RowFront {
 		n = frontN
 	}
-	col := ColLeft
-	if *n%2 == 1 {
-		col = ColRight
-	}
+	col := Col(*n % int(ColCount))
 	*n++
 	return col
 }

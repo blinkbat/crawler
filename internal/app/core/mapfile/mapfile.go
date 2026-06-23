@@ -19,15 +19,23 @@
 //	         'v' clover, 'r' reeds, 'o' bones, 'x' scorch, '!' blood,
 //	         '*' cobweb, 't' stump, 'l' fallen log, 'L' leaf pile,
 //	         'A' archway anchor (left), 'a' archway tail (right) — arch spans
-//	         2 tiles along +X; 'y' lilypad. All never block.
+//	         2 tiles along +X; 'y' lilypad, 'u' rug, 'c' candle,
+//	         'i' bootprints, 'h' ash heap, 'q' puddle, 'k' roots.
+//	         All never block.
 //	props  : '.' empty, 'T' tree, 'X' tree XL, '|' tall tree,
 //	         '@' twin trees, '/' young tree, 'O' boulder,
 //	         'B' bush (large), 'C' crate, 'R' barrel, 'U' urn,
 //	         'S' stalagmite, 'P' pillar, 'I' broken pillar,
 //	         'M' statue, 'Q' obelisk, 'F' fountain,
 //	         'K' rock cairn (1 tile), 'J' rock formation anchor (top-left of a
-//	         2×2 footprint), 'j' formation tail (other 3 tiles). All blocking;
-//	         the anchor's mesh covers the footprint, tails render nothing.
+//	         2×2 footprint), 'j' formation tail (other 3 tiles),
+//	         'W' well, 'G' gravestone, 'N' sign post, 'H' hay bale,
+//	         'Y' scarecrow, 'V' bookshelf, 'E' table, 'D' bed,
+//	         'Z' brazier, 'A' sarcophagus, 'z' wall torch,
+//	         'e' exotic flower, '(' tall fern, ')' grass tuft.
+//	         Blocking except the wall torch ('z') and the decorative
+//	         plants ('e','(',')'); the rock-formation anchor's mesh covers
+//	         the footprint, tails render nothing.
 //	ceiling  : '.' open (sky shows through), '#' solid overhead slab.
 //	elevation: per-tile ground LEVEL — '0'..'9' then 'A'..'K' for 10..20
 //	         (base-36, one char/cell; blank/absent ⇒ '0', flat). The world is
@@ -146,8 +154,9 @@ var PackAINames = [...]string{
 	PackAISkittishName,
 }
 
-// inBounds reports whether (x,z) lies inside a w×h map.
-func inBounds(x, z, w, h int) bool {
+// InBoundsWH reports whether (x,z) lies inside a w×h map. Exported so core can
+// share the one definition (core.inBoundsWH delegates here).
+func InBoundsWH(x, z, w, h int) bool {
 	return x >= 0 && x < w && z >= 0 && z < h
 }
 
@@ -955,11 +964,11 @@ func (mf *MapFile) validate() error {
 	}
 	// faces: bounds-check each so a stray line can't feed an off-map index.
 	for _, f := range mf.Faces {
-		if !inBounds(f.X, f.Z, mf.Width, mf.Height) {
+		if !InBoundsWH(f.X, f.Z, mf.Width, mf.Height) {
 			return fmt.Errorf("faces entry (%d,%d) outside map", f.X, f.Z)
 		}
 	}
-	if !inBounds(mf.StartX, mf.StartZ, mf.Width, mf.Height) {
+	if !InBoundsWH(mf.StartX, mf.StartZ, mf.Width, mf.Height) {
 		return fmt.Errorf("start (%d,%d) outside map", mf.StartX, mf.StartZ)
 	}
 	// StartFace must be a canonical facing — else a MapFile built bypassing Parse
@@ -970,7 +979,7 @@ func (mf *MapFile) validate() error {
 	// Pack/chest bounds checked here (not in the parser) so a typo surfaces at
 	// load rather than as a silently-skipped entry at runtime.
 	for _, p := range mf.Packs {
-		if !inBounds(p.X, p.Z, mf.Width, mf.Height) {
+		if !InBoundsWH(p.X, p.Z, mf.Width, mf.Height) {
 			return fmt.Errorf("pack at (%d,%d) outside map %dx%d", p.X, p.Z, mf.Width, mf.Height)
 		}
 		// Members encode comma/semicolon-joined (',' within a row, ';' splits the
@@ -985,7 +994,7 @@ func (mf *MapFile) validate() error {
 		}
 	}
 	for _, c := range mf.Chests {
-		if !inBounds(c.X, c.Z, mf.Width, mf.Height) {
+		if !InBoundsWH(c.X, c.Z, mf.Width, mf.Height) {
 			return fmt.Errorf("chest at (%d,%d) outside map %dx%d", c.X, c.Z, mf.Width, mf.Height)
 		}
 		// Items encode comma-joined and re-split on ',', so an item name containing a
@@ -999,7 +1008,7 @@ func (mf *MapFile) validate() error {
 	}
 	// Crystals: same bounds guard as packs/chests.
 	for _, c := range mf.Crystals {
-		if !inBounds(c.X, c.Z, mf.Width, mf.Height) {
+		if !InBoundsWH(c.X, c.Z, mf.Width, mf.Height) {
 			return fmt.Errorf("crystal at (%d,%d) outside map %dx%d", c.X, c.Z, mf.Width, mf.Height)
 		}
 	}
@@ -1007,7 +1016,7 @@ func (mf *MapFile) validate() error {
 	// by name, so duplicates would be ambiguous).
 	seenNames := make(map[string]struct{}, len(mf.Doors))
 	for _, d := range mf.Doors {
-		if !inBounds(d.X, d.Z, mf.Width, mf.Height) {
+		if !InBoundsWH(d.X, d.Z, mf.Width, mf.Height) {
 			return fmt.Errorf("door %q at (%d,%d) outside map %dx%d", d.Name, d.X, d.Z, mf.Width, mf.Height)
 		}
 		if d.Name == "" {

@@ -182,9 +182,14 @@ func RandRangeI(rng *rand.Rand, lo, hi int) int {
 // assertAppendOnly panics if any listed enum constant isn't at its declaration
 // index — the shared guard behind the ItemKind / EnemyKind / SkillID append-only
 // pins (each serializes as its int value, so a mid-enum insert renumbers later
-// entries and corrupts saves). List every constant in order; `what` names the
-// enum + what it corrupts, for the panic message.
-func assertAppendOnly[T ~int](what string, ordered ...T) {
+// entries and corrupts saves). `count` is the enum's cardinality (its trailing
+// xxxCount sentinel); the len check catches a NEW value appended to the enum but
+// forgotten here — without it the pin list silently passes as a valid prefix.
+// List every constant in order; `what` names the enum + what it corrupts.
+func assertAppendOnly[T ~int](what string, count int, ordered ...T) {
+	if len(ordered) != count {
+		panic("core: " + what + " append-only pin list is incomplete — list every enum value in order (a new value was appended without a pin line)")
+	}
 	for i, v := range ordered {
 		if int(v) != i {
 			panic("core: " + what + " serialization value drifted — never insert mid-enum; append new entries at the end")

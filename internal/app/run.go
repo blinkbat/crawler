@@ -85,6 +85,9 @@ func Run() {
 		// Sample the stick once per frame so directional edge predicates are
 		// idempotent within the frame — see input.NewFrame.
 		input.NewFrame()
+		// Sample window size + wall-clock once per frame so the many per-frame HUD
+		// helpers read cached values instead of each making cgo round-trips.
+		render.BeginFrame()
 
 		// Global Alt+Enter display toggle, scene-independent and BEFORE the
 		// scene update. Enter-based confirms ignore Enter-with-Alt so this

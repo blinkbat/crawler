@@ -98,7 +98,7 @@ func TickAndDrawVFX(camera rl.Camera3D, g *core.GameState, assets Resources) {
 		p := &particles[read]
 		// Draw BEFORE advancing so a particle gets at least one visible frame even if this dt
 		// would age it past Duration (advancing first could cull a sub-dt particle unseen).
-		drawParticle(camera, p)
+		drawParticle(p)
 		p.Elapsed += dt
 		if !p.alive() {
 			continue
@@ -136,8 +136,15 @@ func resolveAnchor(camera rl.Camera3D, g *core.GameState, req core.VFXRequest) (
 		return partySpritePosition(camera, g.Party, req.SlotIdx, m.AttackBump, 0, m.HitKnockback), true
 	case core.VFXAnchorTile:
 		return tileWorldPos(req.TileX, req.TileZ, 0.05), true
+	default:
+		// Mirror spawnFromRequest's logged default so a newly added VFXAnchor surfaces
+		// here too (this returns false first, so the spawn-side log never fires alone).
+		if !loggedUnknownAnchor[req.Anchor] {
+			loggedUnknownAnchor[req.Anchor] = true
+			LogRenderError("resolveAnchor: unhandled VFXAnchor %d — VFX skipped", int(req.Anchor))
+		}
+		return rl.Vector3{}, false
 	}
-	return rl.Vector3{}, false
 }
 
 // spawnFromRequest dispatches a queued intent to its per-kind spawn pattern. Keep particle
@@ -631,7 +638,7 @@ func pushRing(o rl.Vector3, col color.RGBA, sizeStart, sizeEnd, duration float32
 // --- Drawing ----------------------------------------------------------------
 
 // drawParticle renders one live particle: picks a primitive by shape, interpolates color+size by lifetime.
-func drawParticle(camera rl.Camera3D, p *particle) {
+func drawParticle(p *particle) {
 	if p.Duration <= 0 {
 		// Guard the lifetime divide (drawParticle runs before the alive() cull).
 		return
@@ -659,7 +666,6 @@ func drawParticle(camera rl.Camera3D, p *particle) {
 		// Tight sphere — the default dot.
 		rl.DrawSphere(pos, size*0.5, col)
 	}
-	_ = camera
 }
 
 // drawSpunCube draws a centered cube rotated about its vertical axis so a particle's

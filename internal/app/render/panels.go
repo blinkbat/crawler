@@ -255,11 +255,27 @@ func measureTabLabel(font rl.Font, label string) rl.Vector2 {
 const memberCardGutter = float32(20)
 
 // Reused per-cell classifier grids for drawPanelsMap (single-threaded; each frame overwrites the range it slices).
+// Contents are cached across frames keyed on panelsMapClassCache (same scheme as the corner minimap) so a
+// stationary player reuses the grids instead of reclassifying the whole window via mapSliceCell every frame.
 var (
 	panelsMapSliceBuf []bool
 	panelsMapSeenBuf  []bool
 	panelsMapRampBuf  []int8
+	panelsMapColBuf   []rl.Color
 )
+
+// panelsMapClassKey fingerprints everything the Map-tab cell classification + tiling depends on: area (Path),
+// player tile/level, pan offset, and the cell-grid dimensions (zoom). Like the minimap, fog reveals land on the
+// step that moves the player, so the player tile covers fog freshness. The pixel rects are re-drawn every frame
+// regardless (cheap); only the mapSliceCell classifications are gated on this key.
+type panelsMapClassKey struct {
+	path                       string
+	tileX, tileZ, level        int
+	panX, panZ, cellsX, cellsY int
+	valid                      bool
+}
+
+var panelsMapClassCache panelsMapClassKey
 
 // memberColumnBuf backs memberColumnLayout's returned slice (single-threaded, one consuming tab per frame).
 var memberColumnBuf []rl.Rectangle
@@ -1219,20 +1235,34 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 		panelsMapSliceBuf = make([]bool, n)
 		panelsMapSeenBuf = make([]bool, n)
 		panelsMapRampBuf = make([]int8, n)
+		panelsMapColBuf = make([]rl.Color, n)
+		panelsMapClassCache.valid = false // fresh grids — force a reclassify
 	}
 	slice := panelsMapSliceBuf[:n]
 	seen := panelsMapSeenBuf[:n]
 	ramp := panelsMapRampBuf[:n]
-	for localZ := -1; localZ <= cellsY; localZ++ {
-		for localX := -1; localX <= cellsX; localX++ {
-			col, onSlice, seenWall, rampDir := mapSliceCell(m, g, indoor, startX+localX, startZ+localZ)
-			i := (localZ+1)*gw + (localX + 1)
-			slice[i], seen[i], ramp[i] = onSlice, seenWall, rampDir
-			if localX < 0 || localX >= cellsX || localZ < 0 || localZ >= cellsY {
-				continue
+	colGrid := panelsMapColBuf[:n]
+	// Reclassify only when the fingerprint changes (player moved / changed level / panned / re-zoomed /
+	// area changed); otherwise last frame's grids still hold and the window+border mapSliceCell pass is skipped.
+	key := panelsMapClassKey{
+		path: m.Path, tileX: g.Player.TileX, tileZ: g.Player.TileZ, level: g.Player.Level,
+		panX: g.PanelsMapPanX, panZ: g.PanelsMapPanZ, cellsX: cellsX, cellsY: cellsY, valid: true,
+	}
+	if key != panelsMapClassCache {
+		for localZ := -1; localZ <= cellsY; localZ++ {
+			for localX := -1; localX <= cellsX; localX++ {
+				col, onSlice, seenWall, rampDir := mapSliceCell(m, g, indoor, startX+localX, startZ+localZ)
+				i := (localZ+1)*gw + (localX + 1)
+				slice[i], seen[i], ramp[i], colGrid[i] = onSlice, seenWall, rampDir, col
 			}
-			// Derive each cell's rect from consecutive truncated edges (this cell's left, the next cell's left),
-			// not origin+size independently — with a fractional cellPx that left 1px seams. Edge-to-edge tiling abuts cleanly.
+		}
+		panelsMapClassCache = key
+	}
+	// Pixel rects are cheap and depend on the body position (mapX/mapY), so they re-draw every frame from the
+	// cached colors. Derive each cell's rect from consecutive truncated edges (this cell's left, the next cell's
+	// left), not origin+size — with a fractional cellPx that left 1px seams. Edge-to-edge tiling abuts cleanly.
+	for localZ := 0; localZ < cellsY; localZ++ {
+		for localX := 0; localX < cellsX; localX++ {
 			px := int32(mapX + float32(localX)*cellPx)
 			py := int32(mapY + float32(localZ)*cellPx)
 			pw := int32(mapX+float32(localX+1)*cellPx) - px
@@ -1243,7 +1273,7 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 			if ph < 1 {
 				ph = 1
 			}
-			rl.DrawRectangle(px, py, pw, ph, col)
+			rl.DrawRectangle(px, py, pw, ph, colGrid[(localZ+1)*gw+(localX+1)])
 		}
 	}
 

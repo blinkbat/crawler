@@ -36,6 +36,14 @@ var battleWipeNames = [BattleWipeKindCount]string{
 	WipePixelate: "Pixel Blur",
 }
 
+func init() {
+	for _, n := range battleWipeNames {
+		if n == "" {
+			panic("core: battleWipeNames is missing a label for a BattleWipeKind — add a row to the keyed array")
+		}
+	}
+}
+
 // BattleWipeName is the menu label for a wipe kind.
 func BattleWipeName(k BattleWipeKind) string {
 	if k < 0 || int(k) >= len(battleWipeNames) {

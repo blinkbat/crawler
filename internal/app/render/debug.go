@@ -15,12 +15,6 @@ import (
 // debugLabelRange: tiles around the player to label. Past ~25 labels overlap badly even depth-sorted.
 const debugLabelRange = 4
 
-// Debug-overlay text tints (coord heading vs in-world tile labels).
-var (
-	debugHeadingColor = rl.NewColor(186, 240, 186, 245)
-	debugLabelColor   = rl.NewColor(220, 240, 220, 245)
-)
-
 // debugLabelsBuf reuses the per-tile label slice across frames (renderer is single-threaded).
 var debugLabelsBuf = make([]labelStack, 0, (2*debugLabelRange+1)*(2*debugLabelRange+1))
 

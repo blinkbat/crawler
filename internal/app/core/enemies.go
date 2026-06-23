@@ -21,6 +21,8 @@ const (
 	EnemyStoneGolem
 	EnemyNecromancer
 	EnemySkeleton
+
+	enemyKindCount // sentinel: EnemyKind cardinality (assertAppendOnly coverage)
 )
 
 // init pins every EnemyKind's serialized int value (the Bestiary persists as
@@ -28,7 +30,7 @@ const (
 // later kinds and silently mis-attributes saved entries — these literals trip a
 // startup panic instead. Only APPENDING at the end is safe. Mirrors items.go.
 func init() {
-	assertAppendOnly("EnemyKind (renumbers saved bestiary entries)",
+	assertAppendOnly("EnemyKind (renumbers saved bestiary entries)", int(enemyKindCount),
 		EnemyRat, EnemyBat, EnemyDiseasedRat,
 		EnemyGoblin, EnemyGoblinMage, EnemyAmoeba,
 		EnemyVenusMantrap, EnemyCaveSpider, EnemyVampireBat,

@@ -910,9 +910,9 @@ var pressGradeBands = []struct {
 	maxRatio float32
 	grade    int
 }{
-	{0.05, TimingQualityExcellent},
-	{0.15, TimingQualityGreat},
-	{0.30, TimingQualityGood},
+	{PressExcellentBandFrac, TimingQualityExcellent},
+	{PressGreatBandFrac, TimingQualityGreat},
+	{PressGoodBandFrac, TimingQualityGood},
 }
 
 // gradeFromRatio looks up the grade for a normalized sweet-distance ratio;

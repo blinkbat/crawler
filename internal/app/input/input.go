@@ -312,16 +312,18 @@ func CursorLeftRightWrap(cursor, count int) int {
 	return cursor
 }
 
+// TargetNext/PreviousPressed advance/retreat the combat target cursor. Left/Right
+// (keys + D-pad + stick) ride the shared CursorLeftRight primitive so a "right"
+// remap lives in one place; Tab/Down/RT1 (next) and Up/LT1 (prev) are the extra
+// target-cycling bindings layered on top.
 func TargetNextPressed() bool {
-	// padDirRight folds the D-pad-right + stick-right-edge read; Tab/Down/RT1 are the
-	// extra "advance target" bindings on top of the shared directional primitive.
-	return rl.IsKeyPressed(rl.KeyTab) || rl.IsKeyPressed(rl.KeyRight) || rl.IsKeyPressed(rl.KeyD) || rl.IsKeyPressed(rl.KeyDown) ||
-		padDirRight() || padPressed(rl.GamepadButtonRightTrigger1)
+	return CursorLeftRight() == 1 || rl.IsKeyPressed(rl.KeyTab) || rl.IsKeyPressed(rl.KeyDown) ||
+		padPressed(rl.GamepadButtonRightTrigger1)
 }
 
 func TargetPreviousPressed() bool {
-	return rl.IsKeyPressed(rl.KeyLeft) || rl.IsKeyPressed(rl.KeyA) || rl.IsKeyPressed(rl.KeyUp) ||
-		padDirLeft() || padPressed(rl.GamepadButtonLeftTrigger1)
+	return CursorLeftRight() == -1 || rl.IsKeyPressed(rl.KeyUp) ||
+		padPressed(rl.GamepadButtonLeftTrigger1)
 }
 
 // PausePressed reports the pause-menu edge: P / Esc / pad Start (MiddleRight, the

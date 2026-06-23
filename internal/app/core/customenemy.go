@@ -27,14 +27,24 @@ type CustomEnemyDef struct {
 	Skills          []SkillID
 }
 
-// DefaultCustomEnemy returns a working clone of a built-in enemy for the editor's "New" flow.
-func DefaultCustomEnemy(name string, base EnemyKind) CustomEnemyDef {
-	def := EnemyInfo(base)
+// statsFromMap / writeStatsTo are the single source for the Stats <-> 6-scalar
+// mirror between the core Stats struct and mapfile's flat per-stat columns, so the
+// two conversion directions can't drift on the field list.
+func statsFromMap(ce mapfile.MapCustomEnemy) Stats {
+	return Stats{STR: ce.STR, DEX: ce.DEX, INT: ce.INT, WIS: ce.WIS, VIT: ce.VIT, SPD: ce.SPD}
+}
+
+func (s Stats) writeStatsTo(ce *mapfile.MapCustomEnemy) {
+	ce.STR, ce.DEX, ce.INT, ce.WIS, ce.VIT, ce.SPD = s.STR, s.DEX, s.INT, s.WIS, s.VIT, s.SPD
+}
+
+// customCombatFromDef captures an EnemyDefinition's combat fields into a fresh
+// CustomEnemyDef (the "clone a built-in" direction). applyCombatTo is its inverse
+// (def -> runtime EnemyDefinition). Sharing the field list keeps DefaultCustomEnemy
+// and Definition() in lockstep — see the LOCKSTEP SITES note on Definition().
+func customCombatFromDef(def EnemyDefinition) CustomEnemyDef {
 	return CustomEnemyDef{
-		Name:            name,
-		BaseKind:        base,
 		HP:              def.MaxHP,
-		MP:              0,
 		Stats:           def.Stats,
 		Armor:           def.Armor,
 		MDef:            def.MDef,
@@ -45,6 +55,27 @@ func DefaultCustomEnemy(name string, base EnemyKind) CustomEnemyDef {
 		SpellPower:      def.SpellPower,
 		Skills:          append([]SkillID(nil), def.Skills...),
 	}
+}
+
+func (d CustomEnemyDef) applyCombatTo(def *EnemyDefinition) {
+	def.MaxHP = d.HP
+	def.AttackDamage = d.AttackDamage
+	def.Stats = d.Stats
+	def.Tier = d.Tier
+	def.Armor = d.Armor
+	def.MDef = d.MDef
+	def.XPValue = d.XPValue
+	def.Skills = append([]SkillID(nil), d.Skills...)
+	def.SkillCastChance = d.SkillCastChance
+	def.SpellPower = d.SpellPower
+}
+
+// DefaultCustomEnemy returns a working clone of a built-in enemy for the editor's "New" flow.
+func DefaultCustomEnemy(name string, base EnemyKind) CustomEnemyDef {
+	def := customCombatFromDef(EnemyInfo(base))
+	def.Name = name
+	def.BaseKind = base
+	return def
 }
 
 // validateEnemyStatBounds checks combat-stat fields shared by the static registry and custom
@@ -111,7 +142,7 @@ func CustomEnemyDefFromMap(ce mapfile.MapCustomEnemy) (CustomEnemyDef, error) {
 		BaseKind:        base,
 		HP:              ce.HP,
 		MP:              ce.MP,
-		Stats:           Stats{STR: ce.STR, DEX: ce.DEX, INT: ce.INT, WIS: ce.WIS, VIT: ce.VIT, SPD: ce.SPD},
+		Stats:           statsFromMap(ce),
 		Armor:           ce.Armor,
 		MDef:            ce.MDef,
 		XPValue:         ce.XPValue,
@@ -147,17 +178,11 @@ func MapCustomEnemyFromDef(ce CustomEnemyDef) (mapfile.MapCustomEnemy, error) {
 	if safeName == "" {
 		return mapfile.MapCustomEnemy{}, fmt.Errorf("custom enemy has empty name after sanitize")
 	}
-	return mapfile.MapCustomEnemy{
+	row := mapfile.MapCustomEnemy{
 		Name:            safeName,
 		BaseKind:        baseName,
 		HP:              ce.HP,
 		MP:              ce.MP,
-		STR:             ce.Stats.STR,
-		DEX:             ce.Stats.DEX,
-		INT:             ce.Stats.INT,
-		WIS:             ce.Stats.WIS,
-		VIT:             ce.Stats.VIT,
-		SPD:             ce.Stats.SPD,
 		Armor:           ce.Armor,
 		MDef:            ce.MDef,
 		XPValue:         ce.XPValue,
@@ -166,7 +191,9 @@ func MapCustomEnemyFromDef(ce CustomEnemyDef) (mapfile.MapCustomEnemy, error) {
 		SkillCastChance: ce.SkillCastChance,
 		SpellPower:      ce.SpellPower,
 		Skills:          skillNames,
-	}, nil
+	}
+	ce.Stats.writeStatsTo(&row)
+	return row, nil
 }
 
 // Definition synthesizes the runtime EnemyDefinition battle/selectors read for a custom enemy.
@@ -194,16 +221,7 @@ func (d CustomEnemyDef) Definition() EnemyDefinition {
 	def.SingularNoun = noun
 	def.PluralNoun = noun + "s"
 	def.GroupName = display
-	def.MaxHP = d.HP
-	def.AttackDamage = d.AttackDamage
-	def.Stats = d.Stats
-	def.Tier = d.Tier
-	def.Armor = d.Armor
-	def.MDef = d.MDef
-	def.XPValue = d.XPValue
-	def.Skills = append([]SkillID(nil), d.Skills...)
-	def.SkillCastChance = d.SkillCastChance
-	def.SpellPower = d.SpellPower
+	d.applyCombatTo(&def)
 	return def
 }
 

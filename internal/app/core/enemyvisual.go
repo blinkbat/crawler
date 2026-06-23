@@ -66,6 +66,16 @@ type EnemyVisualOverride struct {
 	MaxColors float32 `json:"maxColors"`
 }
 
+// ColorCap returns the rounded palette-cap count and whether a cap applies
+// (MaxColors >= 2; 0/<2 = no cap). One home for the round + threshold rule so the
+// render filter doesn't re-encode it.
+func (o EnemyVisualOverride) ColorCap() (int, bool) {
+	if o.MaxColors < 2 {
+		return 0, false
+	}
+	return int(o.MaxColors + 0.5), true
+}
+
 // EnemyVisualsFileName is the override-file basename in the sprites asset dir
 // (beside the enemy PNGs).
 const EnemyVisualsFileName = "visuals.json"

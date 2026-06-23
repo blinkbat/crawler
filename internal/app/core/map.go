@@ -914,6 +914,8 @@ func AreaTileSummary(a *AreaDefinition, x, z int) string {
 	if a.StartTileX == x && a.StartTileZ == z {
 		parts = append(parts, "Start")
 	}
+	// Hand-maintained per spawn-entity type (no coverage assert) — add a new
+	// spawn list to AreaDefinition and it won't show here until you add a branch.
 	if PackSpawnIndexAt(a.PackSpawns, x, z) >= 0 {
 		parts = append(parts, "Pack")
 	}
