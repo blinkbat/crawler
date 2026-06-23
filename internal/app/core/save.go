@@ -304,10 +304,15 @@ func sanitizeLoadedParty(party []PartyMember) {
 		m := &party[i]
 		// MaxHP is fully VIT-derived (MaxHPFor); re-derive rather than trust the
 		// persisted number, which may have drifted out of sync. Floor at 1.
-		// (MaxMP has no pure derivation — base + INT spends — so it's only clamped.)
 		m.MaxHP = MaxHPFor(m.Stats)
 		if m.MaxHP < 1 {
 			m.MaxHP = 1
+		}
+		// MaxMP = class base + MPPerINT per INT gained since creation; re-derive
+		// from the class proto (the only stateful input is current INT) so a
+		// drifted/hand-edited value can't stand. Unknown class → just floor.
+		if proto, ok := partyClassByID[m.Class]; ok {
+			m.MaxMP = proto.MaxMP + MPForINTDelta(m.Stats.INT-proto.Stats.INT)
 		}
 		if m.MaxMP < 0 {
 			m.MaxMP = 0

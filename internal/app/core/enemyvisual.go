@@ -167,5 +167,15 @@ func saveVisualOverrides(path string, all map[string]EnemyVisualOverride) error 
 	if err := os.MkdirAll(ResolveAssetDir(SpritesDirName), AssetDirMode); err != nil {
 		return err
 	}
-	return os.WriteFile(path, blob, AssetFileMode)
+	// Atomic write: stage in a sibling temp then rename, so a crash mid-write
+	// leaves the prior file intact rather than truncating every override.
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, blob, AssetFileMode); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }

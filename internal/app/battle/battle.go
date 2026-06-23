@@ -1200,7 +1200,9 @@ func updateVictorySpoils(g *core.GameState, dt float32) {
 			g.Battle.VictoryElapsed = core.VictorySpoilsAnimEnd()
 			g.Battle.VictoryLevelSfxCursor = levelsShownAt(g, 1)
 			g.Battle.VictoryLootSfxCursor = len(g.Battle.Spoils.Drops)
-			g.Battle.VictoryTickSfxCursor = xpShownAt(g, 1) / core.VictoryXPPerTick
+			if core.VictoryXPPerTick > 0 {
+				g.Battle.VictoryTickSfxCursor = xpShownAt(g, 1) / core.VictoryXPPerTick
+			}
 			return
 		}
 		leaveBattle(g, g.Area.QuietMessage)

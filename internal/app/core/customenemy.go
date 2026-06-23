@@ -341,10 +341,16 @@ func CustomEnemyDisplayName(name string) string {
 	return strings.ReplaceAll(strings.TrimSpace(name), "_", " ")
 }
 
-// SkillOnDiskName is the canonical lower-snake-case identifier for mapfile skill lists.
+// SkillOnDiskName is the canonical lower-snake-case identifier for mapfile skill
+// lists. A skill may pin a frozen slug via skillDefinition.OnDiskName so renaming
+// its display Name doesn't change its persisted identity; otherwise it derives
+// from the display name.
 func SkillOnDiskName(s SkillID) string {
 	if s == SkillNone {
 		return ""
+	}
+	if def, ok := skillInfo(s); ok && def.OnDiskName != "" {
+		return strings.ToLower(def.OnDiskName)
 	}
 	return strings.ToLower(strings.ReplaceAll(SkillName(s), " ", "_"))
 }
@@ -356,6 +362,11 @@ func buildSkillByOnDiskName() map[string]SkillID {
 	m := make(map[string]SkillID, len(skillDefinitions))
 	for _, def := range skillDefinitions {
 		if name := SkillOnDiskName(def.Skill); name != "" {
+			// Collision assert: two skills whose names collapse to the same
+			// on-disk slug would last-write-wins and mis-route SkillIDFromOnDiskName.
+			if existing, dup := m[name]; dup && existing != def.Skill {
+				panic("core: skill on-disk name collision on " + name)
+			}
 			m[name] = def.Skill
 		}
 	}

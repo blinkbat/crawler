@@ -89,6 +89,11 @@ type skillDefinition struct {
 	// granted by an actOnce node (MaxRank 1) and EXEMPT from skilltree.go's "every
 	// PlayerCastable skill has MaxSkillTier rows" invariant.
 	NoUpgrades bool
+	// OnDiskName pins the mapfile skill identifier independent of the display Name.
+	// Empty = derive from Name (lowercase, spaces→underscores). Freeze a slug here
+	// BEFORE renaming a skill's display Name, else maps referencing the old slug
+	// fail to load that skill. See SkillOnDiskName.
+	OnDiskName string
 }
 
 type SkillEffect struct {

@@ -193,6 +193,14 @@ func NewMultiPressState(rng *rand.Rand, duration float32, count int) TimingState
 		// Small jitter so consecutive bars aren't identically placed.
 		jitter := (float32(rng.Float64())*2 - 1) * (winWidth * 0.20)
 		center += jitter
+		// Clamp so a jittered window never goes negative or crosses CommitStart
+		// (a commit-zone press resolves the bar early, making it unreachable).
+		if lo := winWidth * 0.5; center < lo {
+			center = lo
+		}
+		if hi := commitStart - winWidth*0.5; center > hi {
+			center = hi
+		}
 		start := center - winWidth*0.5
 		end := center + winWidth*0.5
 		windows[i] = TallyWindow{
@@ -422,7 +430,7 @@ func (t TimingState) ReelSymbolAt(i int) int {
 	// Round (not floor) so the locked symbol is the one centred on the
 	// pay-line. Euclidean mod guards a negative phase from out-of-range indexing.
 	sym := int(math.Round(float64(t.reelPhase(r))))
-	return ((sym % ReelSymbolCount) + ReelSymbolCount) % ReelSymbolCount
+	return WrapIndex(sym, ReelSymbolCount)
 }
 
 // reelPhase is reel r's continuous scroll position in symbols (offset + elapsed
@@ -866,14 +874,7 @@ func (t TimingState) Progress() float32 {
 	if t.isChargeFamily() {
 		return ChargeCursorProgress(t.Elapsed, t.Duration)
 	}
-	p := t.Elapsed / t.Duration
-	if p < 0 {
-		return 0
-	}
-	if p > 1 {
-		return 1
-	}
-	return p
+	return Clamp(t.Elapsed/t.Duration, 0, 1)
 }
 
 // timingGradeAt returns the valid timingGrades index for a quality, falling

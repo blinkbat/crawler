@@ -599,15 +599,10 @@ func drawReelBar(timing core.TimingState, g *core.GameState, assets Resources, x
 					continue
 				}
 				// Softer falloff (~2-symbol denominator) so neighbours stay visible.
-				a := 1 - float32(math.Abs(float64(sy-cy)))/(symStep*2.1)
-				if a < 0 {
-					a = 0
-				} else if a > 1 {
-					a = 1
-				}
+				a := core.Clamp(1-float32(math.Abs(float64(sy-cy)))/(symStep*2.1), 0, 1)
 				// Reduce to a symbol identity (mod ReelSymbolCount) before picking the hue, so
 				// the centred symbol's colour matches the one it locks to (ReelSymbolAt's mod).
-				sym := ((k % core.ReelSymbolCount) + core.ReelSymbolCount) % core.ReelSymbolCount
+				sym := core.WrapIndex(k, core.ReelSymbolCount)
 				col := colorWithAlpha(reelSymbolColors[sym%ncol], uint8(90+165*a))
 				drawReelSymbol(sx, sy, r, col, flashing, flash)
 			}
