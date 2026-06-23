@@ -82,7 +82,7 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		drawEngravedText(font, label, float32(rowX+levelUpLabelX), float32(rowY+levelUpLabelY), FontHeading, col)
 		// Staged: show the before→after preview (what the point buys); else the static description.
 		subText := core.StatPreviewLine(s, m.Stats, pending, core.WeaponAccuracyStat(core.EquippedWeapon(m)))
-		subCol := textHint
+		subCol := textDim
 		if subText != "" {
 			subCol = inkAccent
 		} else {

@@ -475,10 +475,17 @@ var MultiPressWindow = struct {
 	LeadInFrac      float32
 	WindowWidthFrac float32
 	CommitZoneFrac  float32
+	// CommitGapFrac: breathing room reserved before the commit zone (subtracted
+	// from the window span). JitterFrac: per-window placement jitter as a fraction
+	// of WindowWidthFrac.
+	CommitGapFrac float32
+	JitterFrac    float32
 }{
 	LeadInFrac:      0.20,
 	WindowWidthFrac: 0.08,
 	CommitZoneFrac:  0.15,
+	CommitGapFrac:   0.02,
+	JitterFrac:      0.20,
 }
 
 // SwipeHitFracs: Swipe's two hand-placed tally-window centers (bar fractions) —
@@ -724,9 +731,9 @@ const (
 // Sunder (Warrior) tuning — STR-scaled phys + a one-shot ATB readiness push
 // (g.Battle.Readiness), distinct from Cripple's persistent SPD debuff.
 const (
-	SunderDamageBase     = 1  // tier-0 base damage (STR-scaled)
-	SunderATBPush        = 50 // readiness knocked off (ATBReadyThreshold units; ~half a turn)
-	SunderATBPushPerTier = 25 // extra push from the T3 upgrade
+	SunderDamageBase     = 1                     // tier-0 base damage (STR-scaled)
+	SunderATBPush        = ATBReadyThreshold / 2 // readiness knocked off (~half a turn; retuning the threshold keeps the intent)
+	SunderATBPushPerTier = 25                    // extra push from the T3 upgrade
 )
 
 // Taunt (Warrior) tuning — forces the target to attack the caster. Single-rank.

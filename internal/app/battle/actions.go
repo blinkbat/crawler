@@ -277,10 +277,25 @@ func applyEnemyStatus(ctx enemySpellCtx, counter *int, duration, floor int, vfxS
 	return true
 }
 
-// handleEnemySleep applies the Sleep cast; already-asleep targets short-circuit.
-func handleEnemySleep(ctx enemySpellCtx) bool {
+// enemyStatusCast parameterizes the shared enemy status-cast skeleton (Sleep /
+// Web / Confuse): pick the counter, roll the duration, floor it, fire the VFX, and
+// narrate the already-afflicted short-circuit + success. counter is the write-through
+// pointer into the target member.
+type enemyStatusCast struct {
+	counter  func(*core.PartyMember) *int
+	duration func(ctx enemySpellCtx) int
+	floor    int
+	vfxSkill core.SkillID
+	already  func(ctx enemySpellCtx, m *core.PartyMember) // already-afflicted log line
+	success  func(ctx enemySpellCtx, m *core.PartyMember) // landed log line
+}
+
+// handleEnemyStatusCast is the table-driven body for Sleep / Web / Confuse: index
+// guard, dead-target bail, already-afflicted short-circuit (the cast still spent the
+// turn → true), then applyEnemyStatus + success. Counters are clear-on-death
+// (partyDeathStatuses), so a 0-HP target never reaches the already-afflicted branch.
+func handleEnemyStatusCast(ctx enemySpellCtx, cast enemyStatusCast) bool {
 	g := ctx.g
-	// Bound the index before the deref (match Web/Confuse handlers).
 	if !partyIndexValid(g, ctx.target) {
 		return false
 	}
@@ -288,54 +303,59 @@ func handleEnemySleep(ctx enemySpellCtx) bool {
 	if m.HP <= 0 {
 		return false
 	}
-	if m.SleepTurns > 0 {
-		// Fired at a valid target, just already asleep — the enemy spent its action (true).
-		enemySpellLog(ctx, "%s is already asleep.", m.Name)
+	counter := cast.counter(m)
+	if *counter > 0 {
+		cast.already(ctx, m)
 		return true
 	}
-	if applyEnemyStatus(ctx, &m.SleepTurns, ctx.effect.SleepDuration(g.Rand()), core.SleepMinTurns, core.SkillSleep) {
-		enemySpellLog(ctx, "%s falls asleep.", m.Name)
+	if applyEnemyStatus(ctx, counter, cast.duration(ctx), cast.floor, cast.vfxSkill) {
+		cast.success(ctx, m)
 		return true
 	}
 	return false
 }
 
+// handleEnemySleep applies the Sleep cast; already-asleep targets short-circuit.
+func handleEnemySleep(ctx enemySpellCtx) bool {
+	return handleEnemyStatusCast(ctx, enemyStatusCast{
+		counter:  func(m *core.PartyMember) *int { return &m.SleepTurns },
+		duration: func(ctx enemySpellCtx) int { return ctx.effect.SleepDuration(ctx.g.Rand()) },
+		floor:    core.SleepMinTurns,
+		vfxSkill: core.SkillSleep,
+		// Fired at a valid target, just already asleep — the enemy spent its action (true).
+		already: func(ctx enemySpellCtx, m *core.PartyMember) { enemySpellLog(ctx, "%s is already asleep.", m.Name) },
+		success: func(ctx enemySpellCtx, m *core.PartyMember) { enemySpellLog(ctx, "%s falls asleep.", m.Name) },
+	})
+}
+
 // handleEnemyWeb applies the Webbed status; already-webbed targets short-circuit
-// (no stacking). Index bounded before the deref (mirrors Sleep).
+// (no stacking).
 func handleEnemyWeb(ctx enemySpellCtx) bool {
-	g := ctx.g
-	if !partyIndexValid(g, ctx.target) {
-		return false
-	}
-	m := &g.Party[ctx.target]
-	if m.WebbedTurns > 0 {
-		setBattleMessage(g, fmt.Sprintf("%s spins a fresh web at %s — already webbed.", core.TheEnemy(ctx.def), m.Name))
-		return true
-	}
-	if applyEnemyStatus(ctx, &m.WebbedTurns, ctx.effect.BindDuration(g.Rand()), core.SpiderWebbedMinTurns, core.SkillWeb) {
-		enemySpellLog(ctx, "%s is wrapped in sticky webs.", m.Name)
-		return true
-	}
-	return false
+	return handleEnemyStatusCast(ctx, enemyStatusCast{
+		counter:  func(m *core.PartyMember) *int { return &m.WebbedTurns },
+		duration: func(ctx enemySpellCtx) int { return ctx.effect.BindDuration(ctx.g.Rand()) },
+		floor:    core.SpiderWebbedMinTurns,
+		vfxSkill: core.SkillWeb,
+		already: func(ctx enemySpellCtx, m *core.PartyMember) {
+			setBattleMessage(ctx.g, fmt.Sprintf("%s spins a fresh web at %s — already webbed.", core.TheEnemy(ctx.def), m.Name))
+		},
+		success: func(ctx enemySpellCtx, m *core.PartyMember) { enemySpellLog(ctx, "%s is wrapped in sticky webs.", m.Name) },
+	})
 }
 
 // handleEnemyConfuse applies the Confused status; already-confused short-circuits.
 // WIS resistance is in ShortenStatusDuration (no separate per-cast roll).
 func handleEnemyConfuse(ctx enemySpellCtx) bool {
-	g := ctx.g
-	if !partyIndexValid(g, ctx.target) {
-		return false
-	}
-	m := &g.Party[ctx.target]
-	if m.ConfusedTurns > 0 {
-		setBattleMessage(g, fmt.Sprintf("%s flickers at %s — already disoriented.", core.TheEnemy(ctx.def), m.Name))
-		return true
-	}
-	if applyEnemyStatus(ctx, &m.ConfusedTurns, ctx.effect.ConfuseDuration(g.Rand()), core.WispConfuseMinTurns, core.SkillConfuse) {
-		enemySpellLog(ctx, "%s grows confused.", m.Name)
-		return true
-	}
-	return false
+	return handleEnemyStatusCast(ctx, enemyStatusCast{
+		counter:  func(m *core.PartyMember) *int { return &m.ConfusedTurns },
+		duration: func(ctx enemySpellCtx) int { return ctx.effect.ConfuseDuration(ctx.g.Rand()) },
+		floor:    core.WispConfuseMinTurns,
+		vfxSkill: core.SkillConfuse,
+		already: func(ctx enemySpellCtx, m *core.PartyMember) {
+			setBattleMessage(ctx.g, fmt.Sprintf("%s flickers at %s — already disoriented.", core.TheEnemy(ctx.def), m.Name))
+		},
+		success: func(ctx enemySpellCtx, m *core.PartyMember) { enemySpellLog(ctx, "%s grows confused.", m.Name) },
+	})
 }
 
 // handleEnemyStoneslam fires the AoE phys cast: hits every available party member
@@ -381,14 +401,9 @@ func handleEnemyRaiseBones(ctx enemySpellCtx) bool {
 	skeleton := core.NewEnemy(core.EnemySkeleton)
 	pack.Members = append(pack.Members, skeleton)
 	// The skeleton enters the queue automatically — beginNewRound rebuilds it from
-	// the expanded pack.Members, so it acts the round AFTER this cast.
-	//
-	// Re-fetch the caster AFTER the append: pack.Members is at exact capacity, so
-	// the append reallocates and ctx.enemy now dangles. Re-apply the bump on the
-	// LIVE pointer (resolveEnemySpell's pre-dispatch write landed on the orphaned copy).
-	if caster := core.BattleMemberAt(g, ctx.slot); caster != nil {
-		caster.AttackBump = core.BumpDuration
-	}
+	// the expanded pack.Members, so it acts the round AFTER this cast. The append
+	// reallocates pack.Members (it's at exact capacity), dangling ctx.enemy — but the
+	// AttackBump is applied by resolveEnemySpell on the slot-refetched live caster.
 	setBattleMessage(g, fmt.Sprintf("%s incants — a skeleton claws up from the ground!", core.TheEnemy(ctx.def)))
 	audio.Play(audio.SoundInputHit)
 	return true
@@ -765,12 +780,10 @@ func applyAttack(g *core.GameState, quality int) bool {
 		return true
 	}
 	// Basic Attack: MemberAttackDamage (STR/DEX per weapon) scaled by quality,
-	// Phys-tagged so armor damps it. The log uses damageEnemy's POST-armor figure
-	// so it matches the HP delta.
+	// Phys-tagged so armor damps it (strikeWithCrit's SkillNone fallback). The log
+	// uses damageEnemy's POST-armor figure so it matches the HP delta.
 	rawDamage := applyShadowStep(g, attacker, core.ScaleDamage(core.MemberAttackDamage(*attacker, 0), quality))
-	crit, _ := rollSkillCrit(g, attacker, core.SkillNone, quality)
-	rawDamage = applyCritMultiplier(rawDamage, crit, false)
-	dealt, defeated := damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagPhys)
+	dealt, defeated, crit := strikeWithCrit(g, attacker, core.SkillNone, rawDamage, quality)
 	// Glyph keyed to the weapon (blunt/ranged = impact, edged = slash). Basic
 	// attacks are the only weapon-driven swing; skills pick VFX via vfxKindFor.
 	core.EnqueueEnemyVFX(g, core.WeaponHitVFX(core.EquippedWeapon(*attacker)), g.Battle.EnemyIndex)
@@ -851,21 +864,15 @@ func setupTargetedAllyAndPay(g *core.GameState, skill core.SkillID, deadMsg stri
 
 func applyPrayer(g *core.GameState, quality int) bool {
 	// The chosen ally can die (or its slot go out of range) between confirm and this
-	// apply; re-check — refund + end the turn on a gone target — so we don't index a
-	// stale slot or log a heal that never landed. Mirrors the other single-ally casts.
-	if !ensureAlivePartyTargetOrCancel(g, core.SkillPrayer) {
-		return false
-	}
-	actor := beginPartyAction(g)
-	// Prayer is Heal-kind (WIS + Effect.Heal).
-	heal := core.ScaleHeal(core.SkillHealFor(actor, core.SkillPrayer), quality)
-	target := &g.Party[g.Battle.PartyTarget]
-	healPartyMember(g, g.Battle.PartyTarget, heal)
-	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillPrayer), g.Battle.PartyTarget)
-	selfTarget := g.Battle.PartyTarget == g.Battle.CurrentParty
-	setBattleMessage(g, prayerMessage(actor.Name, target.Name, heal, quality, selfTarget))
-	finishActorTurn(g)
-	return true
+	// apply; the shared head re-checks — refund + end the turn on a gone target — so we
+	// don't index a stale slot or log a heal that never landed.
+	return applyAllyTargetSkill(g, core.SkillPrayer, func(actor, target *core.PartyMember) string {
+		// Prayer is Heal-kind (WIS + Effect.Heal).
+		heal := core.ScaleHeal(core.SkillHealFor(actor, core.SkillPrayer), quality)
+		healPartyMember(g, g.Battle.PartyTarget, heal)
+		selfTarget := g.Battle.PartyTarget == g.Battle.CurrentParty
+		return prayerMessage(actor.Name, target.Name, heal, quality, selfTarget)
+	})
 }
 
 // --- Steal (Thief, base chance scales with quality) ---
@@ -955,15 +962,40 @@ func applyEnemyDebuffSkill(g *core.GameState, skill core.SkillID, stamp func(act
 	return true
 }
 
+// simpleEnemyDebuff is the body shared by the no-damage stat debuffs (Cripple /
+// Blind): stamp the registered effect onto the target's debuff mirror, then narrate
+// via msgFmt ("<actor> <verb> the <foe> ... %d turns"). msgFmt takes actor name,
+// foe noun, BuffTurns. Re-cast overwrites (no-stack).
+func simpleEnemyDebuff(g *core.GameState, skill core.SkillID, msgFmt string) bool {
+	return applyEnemyDebuffSkill(g, skill, func(actor *core.PartyMember, enemy *core.Enemy, effect core.SkillEffect) string {
+		core.StampEnemyDebuff(enemy, skill, effect)
+		return fmt.Sprintf(msgFmt, actor.Name, core.EnemySingularNoun(*enemy), effect.BuffTurns)
+	})
+}
+
+// applyAllyTargetSkill is the ally-side mirror of applyEnemyDebuffSkill: the shared
+// head of the single-ally supports (Prayer / Cleanse / Renewal / Stone Skin / Aegis)
+// that target g.Battle.PartyTarget. Re-checks the chosen ally (refund + end turn on a
+// gone target), begins the turn, then hands off to resolve for the skill's unique
+// mutation + log line. VFX (vfxKindFor) at PartyTarget and finishActorTurn are shared.
+func applyAllyTargetSkill(g *core.GameState, skill core.SkillID, resolve func(actor, target *core.PartyMember) string) bool {
+	if !ensureAlivePartyTargetOrCancel(g, skill) {
+		return false
+	}
+	actor := beginPartyAction(g)
+	target := &g.Party[g.Battle.PartyTarget]
+	msg := resolve(actor, target)
+	core.EnqueuePartyVFX(g, vfxKindFor(skill), g.Battle.PartyTarget)
+	setBattleMessage(g, msg)
+	finishActorTurn(g)
+	return true
+}
+
 // applyCripple stamps the SPD debuff onto the target via the enemy BuffStats
 // mirror (EffectiveEnemyStats folds it into the ATB rate while it runs). No
 // damage / proc roll; re-cast overwrites (no-stack).
 func applyCripple(g *core.GameState, quality int) bool {
-	return applyEnemyDebuffSkill(g, core.SkillCripple, func(actor *core.PartyMember, enemy *core.Enemy, effect core.SkillEffect) string {
-		core.StampEnemyDebuff(enemy, core.SkillCripple, effect)
-		return fmt.Sprintf("%s cripples the %s — slowed for %d turns.",
-			actor.Name, core.EnemySingularNoun(*enemy), effect.BuffTurns)
-	})
+	return simpleEnemyDebuff(g, core.SkillCripple, "%s cripples the %s — slowed for %d turns.")
 }
 
 // applyFrostbite deals frost damage and, on a surviving target, ALWAYS chills it
@@ -1181,7 +1213,14 @@ func bleedDoT(arms procMessageArms) dotStrike {
 func strikeWithCrit(g *core.GameState, actor *core.PartyMember, skill core.SkillID, rawDamage, quality int) (damage int, defeated, crit bool) {
 	crit, _ = rollSkillCrit(g, actor, skill, quality)
 	rawDamage = applyCritMultiplier(rawDamage, crit, false)
-	damage, defeated = damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, core.SkillTagFor(skill))
+	// The basic attack (SkillNone) has no registered tag; it's a physical swing, so
+	// fall back to Phys (armor-damped, feeds Bloodthirst). Every registered skill
+	// caller carries a real tag, so this only affects the basic-attack route.
+	tag := core.SkillTagFor(skill)
+	if tag == core.SkillTagNone {
+		tag = core.SkillTagPhys
+	}
+	damage, defeated = damageEnemy(g, g.Battle.EnemyIndex, rawDamage, quality, tag)
 	return damage, defeated, crit
 }
 
@@ -1369,22 +1408,15 @@ func applyWarBanner(g *core.GameState, quality int) bool {
 // --- Stone Skin (Warrior, press single-ally Armor/MDef ward) ---
 
 func applyStoneSkin(g *core.GameState, quality int) bool {
-	if !ensureAlivePartyTargetOrCancel(g, core.SkillStoneSkin) {
-		return false
-	}
-	actor := beginPartyAction(g)
-	effect := core.EffectiveSkillEffect(actor, core.SkillStoneSkin)
-	target := &g.Party[g.Battle.PartyTarget]
-	eff := effect
-	// Self-cast +1 correction (offsets finishActorTurn's immediate tick); see selfCastTurnBonus.
-	eff.BuffTurns += selfCastTurnBonus(g, g.Battle.PartyTarget)
-	core.StampPartyBuff(target, core.SkillStoneSkin, eff)
-	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillStoneSkin), g.Battle.PartyTarget)
-	// Report the STAMPED duration (carries the self-cast +1), not the base.
-	setBattleMessage(g, fmt.Sprintf("%s%s wards %s in stone (+%d Armor, +%d MDef, %d turns).",
-		qualityTag(quality), actor.Name, target.Name, eff.BuffArmor, eff.BuffMDef, eff.BuffTurns))
-	finishActorTurn(g)
-	return true
+	return applyAllyTargetSkill(g, core.SkillStoneSkin, func(actor, target *core.PartyMember) string {
+		eff := core.EffectiveSkillEffect(actor, core.SkillStoneSkin)
+		// Self-cast +1 correction (offsets finishActorTurn's immediate tick); see selfCastTurnBonus.
+		eff.BuffTurns += selfCastTurnBonus(g, g.Battle.PartyTarget)
+		core.StampPartyBuff(target, core.SkillStoneSkin, eff)
+		// Report the STAMPED duration (carries the self-cast +1), not the base.
+		return fmt.Sprintf("%s%s wards %s in stone (+%d Armor, +%d MDef, %d turns).",
+			qualityTag(quality), actor.Name, target.Name, eff.BuffArmor, eff.BuffMDef, eff.BuffTurns)
+	})
 }
 
 // --- Blind (Cleric, press enemy accuracy debuff) ---
@@ -1392,11 +1424,7 @@ func applyStoneSkin(g *core.GameState, quality int) bool {
 // applyBlind saps the target's DEX (which EnemyHitChance reads) so it whiffs more
 // — the DEX sibling of Cripple. No damage; always lands; re-cast overwrites.
 func applyBlind(g *core.GameState, quality int) bool {
-	return applyEnemyDebuffSkill(g, core.SkillBlind, func(actor *core.PartyMember, enemy *core.Enemy, effect core.SkillEffect) string {
-		core.StampEnemyDebuff(enemy, core.SkillBlind, effect)
-		return fmt.Sprintf("%s blinds the %s — its aim falters for %d turns.",
-			actor.Name, core.EnemySingularNoun(*enemy), effect.BuffTurns)
-	})
+	return simpleEnemyDebuff(g, core.SkillBlind, "%s blinds the %s — its aim falters for %d turns.")
 }
 
 // --- Aegis (Cleric, press single-ally absorb shield) ---
@@ -1404,18 +1432,12 @@ func applyBlind(g *core.GameState, quality int) bool {
 // applyAegis grants the ally a ShieldHP pool the damage path spends before HP.
 // Not turn-counted; re-cast replaces the pool.
 func applyAegis(g *core.GameState, quality int) bool {
-	if !ensureAlivePartyTargetOrCancel(g, core.SkillAegis) {
-		return false
-	}
-	actor := beginPartyAction(g)
-	effect := core.EffectiveSkillEffect(actor, core.SkillAegis)
-	target := &g.Party[g.Battle.PartyTarget]
-	target.ShieldHP = effect.ShieldHP
-	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillAegis), g.Battle.PartyTarget)
-	setBattleMessage(g, fmt.Sprintf("%s%s raises an aegis over %s — absorbs the next %d damage.",
-		qualityTag(quality), actor.Name, target.Name, target.ShieldHP))
-	finishActorTurn(g)
-	return true
+	return applyAllyTargetSkill(g, core.SkillAegis, func(actor, target *core.PartyMember) string {
+		effect := core.EffectiveSkillEffect(actor, core.SkillAegis)
+		target.ShieldHP = effect.ShieldHP
+		return fmt.Sprintf("%s%s raises an aegis over %s — absorbs the next %d damage.",
+			qualityTag(quality), actor.Name, target.Name, target.ShieldHP)
+	})
 }
 
 // --- Smoke Bomb (Thief, press party evasion + enemy accuracy loss) ---
@@ -1533,20 +1555,13 @@ func applyPoisonCloud(g *core.GameState, quality int) bool {
 // --- Cleanse (Cleric, press single-ally status cure) ---
 
 func applyCleanse(g *core.GameState, quality int) bool {
-	if !ensureAlivePartyTargetOrCancel(g, core.SkillCleanse) {
-		return false
-	}
-	actor := beginPartyAction(g)
-	target := &g.Party[g.Battle.PartyTarget]
-	cured := core.CureDebuffs(target)
-	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillCleanse), g.Battle.PartyTarget)
-	if cured == 0 {
-		setBattleMessage(g, fmt.Sprintf("%s%s cleanses %s — nothing ailed them.", qualityTag(quality), actor.Name, target.Name))
-	} else {
-		setBattleMessage(g, fmt.Sprintf("%s%s cleanses %s — %d cured.", qualityTag(quality), actor.Name, target.Name, cured))
-	}
-	finishActorTurn(g)
-	return true
+	return applyAllyTargetSkill(g, core.SkillCleanse, func(actor, target *core.PartyMember) string {
+		cured := core.CureDebuffs(target)
+		if cured == 0 {
+			return fmt.Sprintf("%s%s cleanses %s — nothing ailed them.", qualityTag(quality), actor.Name, target.Name)
+		}
+		return fmt.Sprintf("%s%s cleanses %s — %d cured.", qualityTag(quality), actor.Name, target.Name, cured)
+	})
 }
 
 // --- Second Wind (Warrior, charge flat self-heal) ---
@@ -1569,25 +1584,20 @@ func applySecondWind(g *core.GameState, quality int) bool {
 
 func applyRenewal(g *core.GameState, quality int) bool {
 	// Renewal arms on a charge bar (the ally can die mid-charge) and bypasses
-	// healPartyMember's guard by stamping the regen counter directly, so re-check here.
-	if !ensureAlivePartyTargetOrCancel(g, core.SkillRenewal) {
-		return false
-	}
-	actor := beginPartyAction(g)
-	effect := core.EffectiveSkillEffect(actor, core.SkillRenewal)
-	// Snapshot the per-turn heal at cast (WIS + timing), floored at 1. Re-cast replaces.
-	perTurn := core.ScaleHeal(core.SkillHealFor(actor, core.SkillRenewal), quality)
-	if perTurn < 1 {
-		perTurn = 1
-	}
-	target := &g.Party[g.Battle.PartyTarget]
-	target.RegenPerTurn = perTurn
-	target.RegenTurns = effect.RegenTurns
-	core.EnqueuePartyVFX(g, vfxKindFor(core.SkillRenewal), g.Battle.PartyTarget)
-	setBattleMessage(g, fmt.Sprintf("%s%s lays a renewal on %s — +%d HP at the end of their next %d turns.",
-		qualityTag(quality), actor.Name, target.Name, perTurn, effect.RegenTurns))
-	finishActorTurn(g)
-	return true
+	// healPartyMember's guard by stamping the regen counter directly, so the shared
+	// head re-checks the target.
+	return applyAllyTargetSkill(g, core.SkillRenewal, func(actor, target *core.PartyMember) string {
+		effect := core.EffectiveSkillEffect(actor, core.SkillRenewal)
+		// Snapshot the per-turn heal at cast (WIS + timing), floored at 1. Re-cast replaces.
+		perTurn := core.ScaleHeal(core.SkillHealFor(actor, core.SkillRenewal), quality)
+		if perTurn < 1 {
+			perTurn = 1
+		}
+		target.RegenPerTurn = perTurn
+		target.RegenTurns = effect.RegenTurns
+		return fmt.Sprintf("%s%s lays a renewal on %s — +%d HP at the end of their next %d turns.",
+			qualityTag(quality), actor.Name, target.Name, perTurn, effect.RegenTurns)
+	})
 }
 
 // --- Damage / heal helpers ---

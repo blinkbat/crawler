@@ -151,7 +151,7 @@ func checkEnemyWipeoutFor(g *core.GameState, pack *core.Pack, members []core.Ene
 	if pack == nil || core.CountLivingEnemies(members) != 0 {
 		return false
 	}
-	winBattle(g, core.LastBattleEnemyFallsMessage(g))
+	winBattle(g, core.LastBattleEnemyFallsMessage())
 	return true
 }
 
@@ -573,7 +573,9 @@ func tickSleepAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
 		func(e *core.Enemy) *int { return &e.SleepTurns })
 }
 
-// Players can't currently be stunned; the party branch is kept for symmetry.
+// tickStunAtTurnStart drains a Stun tick and skips the actor's turn. No skill
+// currently inflicts party Stun, but m.StunTurns is a real classified counter
+// (partyDeathStatuses) — the party branch ticks/honors it if anything ever sets it.
 func tickStunAtTurnStart(g *core.GameState, actor core.ActorRef) bool {
 	return tickSkipStatusAtTurnStart(g, actor, "is stunned",
 		func(m *core.PartyMember) *int { return &m.StunTurns },
@@ -1030,7 +1032,6 @@ func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
 			return
 		}
 	}
-	enemy.AttackBump = core.BumpDuration
 	def := core.EnemyInfoFor(*enemy)
 	ctx := enemySpellCtx{
 		g:         g,
@@ -1048,17 +1049,23 @@ func resolveEnemySpell(g *core.GameState, slot int, skill core.SkillID) {
 		return
 	}
 	cast := handler(ctx)
-	// Stamp the per-battle cast counter on the LIVE caster, re-fetched by slot
-	// (Raise Bones reallocates pack.Members, dangling ctx.enemy). Centralized here
-	// so every capped skill is counted. Only a cast that FIRED (cast==true) charges
-	// — a cancelled no-op mustn't burn a limited charge.
+	// Re-fetch the LIVE caster by slot AFTER dispatch: Raise Bones reallocates
+	// pack.Members, dangling ctx.enemy, so the pre-dispatch pointer can't carry
+	// post-cast writes. nil = the caster died mid-cast (e.g. a reflect).
+	caster := core.BattleMemberAt(g, slot)
+	if caster == nil {
+		return
+	}
+	// AttackBump (the cast-lunge offset) on the live caster — every handler ends
+	// with it applied exactly once.
+	caster.AttackBump = core.BumpDuration
+	// Stamp the per-battle cast counter on the same live caster. Only a cast that
+	// FIRED (cast==true) charges — a cancelled no-op mustn't burn a limited charge.
 	if cast && core.SkillCastLimitFor(skill) > 0 {
-		if caster := core.BattleMemberAt(g, slot); caster != nil {
-			if caster.SkillCastCount == nil {
-				caster.SkillCastCount = map[core.SkillID]int{}
-			}
-			caster.SkillCastCount[skill]++
+		if caster.SkillCastCount == nil {
+			caster.SkillCastCount = map[core.SkillID]int{}
 		}
+		caster.SkillCastCount[skill]++
 	}
 }
 

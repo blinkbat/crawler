@@ -13,10 +13,12 @@ type DisplayMode int
 const (
 	DisplayFullscreen DisplayMode = iota
 	DisplayWindowed
+	displayModeCount
 )
 
-// displayModeNames indexes DisplayMode → menu label.
-var displayModeNames = []string{
+// displayModeNames indexes DisplayMode → menu label. Fixed-size array: a missing
+// entry is a compile error (matching the package's [PanelTabCount]/[StatCount] tables).
+var displayModeNames = [displayModeCount]string{
 	DisplayFullscreen: "Fullscreen",
 	DisplayWindowed:   "Windowed",
 }

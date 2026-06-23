@@ -77,7 +77,7 @@ func drawTurnPanel(g *core.GameState, assets Resources) {
 	drawPanelCard(x, y, w, h)
 
 	// Title band.
-	drawTextWithShadow(assets.hudFont, "Turn Order", float32(x+turnRowInset), float32(y+5), FontSmall, textHint)
+	drawTextWithShadow(assets.hudFont, "Turn Order", float32(x+turnRowInset), float32(y+5), FontSmall, textDim)
 	drawGiltRule(x+turnRowInset, y+turnPanelHeaderH-4, w-2*turnRowInset, 1, 0.4)
 
 	rowsTop := y + turnPanelHeaderH + turnPanelTopPad

@@ -42,24 +42,17 @@ func DrawDoorPrompt(g *core.GameState, assets Resources) {
 	dest := humanizeMapID(target)
 	panelW := int32(440)
 	panelH := int32(168)
-	rect := drawVeiledCard(panelW, panelH, borderSoft, borderSoft, giltDim)
-	panelX := int32(rect.X)
-	panelY := int32(rect.Y)
+	// Shared centered-title modal shape (fleuron-free FontHeading confirm). Title measure
+	// is cached inside, skipping per-frame cgo MeasureTextEx on the held-prompt frames.
+	rect, _ := drawCenteredTitleCard(assets.hudFont, panelW, panelH, "DOORWAY", FontHeading, doorPromptHeaderInsetY, false)
 
-	title := "DOORWAY"
-	// Cache the title measure (constant string, drawn every held-prompt frame) to skip per-frame cgo MeasureTextEx.
-	tm := cardTitleMeasureCache.measure(assets.hudFont, title, FontHeading, FontSpacingHeading)
-	drawEngravedText(assets.hudFont, title,
-		float32(panelX)+float32(panelW)/2-tm.X/2, float32(panelY)+doorPromptHeaderInsetY,
-		FontHeading, textPrimary)
-
-	cardCenterX := float32(panelX) + float32(panelW)/2
+	cardCenterX := rect.X + rect.Width/2
 	drawTextCentered(assets.hudFont, "Travel to "+dest+"?",
-		cardCenterX, float32(panelY)+doorPromptBodyInsetY, FontBody, textMuted)
+		cardCenterX, rect.Y+doorPromptBodyInsetY, FontBody, textMuted)
 	DrawHintBar(assets.hudFont, []HintSeg{
 		Hint("Enter", GlyphA),
 		Hint("Stay", GlyphB),
-	}, cardCenterX, float32(panelY+panelH)-doorPromptFooterInsetY, FontSmall)
+	}, cardCenterX, rect.Y+rect.Height-doorPromptFooterInsetY, FontSmall)
 }
 
 // Door-prompt layout insets (Y from card top; footer from bottom). Its own tighter band rather

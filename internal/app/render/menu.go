@@ -251,22 +251,28 @@ func menuRowTop(panelY int32, i int) int32 {
 // the longest label + its intensity bar fit on one row.
 const retroMenuPanelW = int32(560)
 
-// drawCardTitle paints the centred FontTitle title flanked by gilt fleurons (the
-// grimoire ◆──── TITLE ────◆ look). Shared by drawTitledMenuCard and
-// drawTitledCardHeader, differing only by topInset. Returns the Y below the title.
 // cardTitleMeasureCache memoizes the constant card-title widths so centring isn't
 // a per-frame cgo round-trip.
 var cardTitleMeasureCache measureCache
 
-func drawCardTitle(font rl.Font, title string, panelX, panelY, panelW int32, topInset float32) (belowTitleY float32) {
-	tm := cardTitleMeasureCache.measure(font, title, FontTitle, FontSpacingTitle)
-	titleX := float32(panelX) + float32(panelW)/2 - tm.X/2
-	titleY := float32(panelY) + topInset
-	// drawEngravedText tracks at canonicalSpacing(FontTitle) == FontSpacingTitle,
-	// so the centering above stays exact.
-	drawEngravedText(font, title, titleX, titleY, FontTitle, textPrimary)
-	drawFleuronsFlanking(titleX, tm.X, 22, titleY+tm.Y/2, 5, giltDim)
-	return titleY + tm.Y
+// drawCenteredTitleCard paints the shared centered-title modal shape: the veiled
+// gilt card (borderSoft/giltDim) + a horizontally-centered engraved title at
+// fontSize, headerInsetY below the card top. fleurons adds the grimoire
+// ◆──── TITLE ────◆ flanks (FontTitle menu cards); the door/quit confirms pass
+// false. Returns the card rect + the Y below the title. Routes the door prompt,
+// quit confirm, and both titled-menu/header cards through one preamble.
+func drawCenteredTitleCard(font rl.Font, panelW, panelH int32, title string, fontSize, headerInsetY float32, fleurons bool) (rect rl.Rectangle, belowTitleY float32) {
+	rect = drawVeiledCard(panelW, panelH, borderSoft, borderSoft, giltDim)
+	// drawEngravedText tracks at canonicalSpacing(fontSize), so measuring at the same
+	// spacing keeps the centering exact.
+	tm := cardTitleMeasureCache.measure(font, title, fontSize, canonicalSpacing(fontSize))
+	titleX := rect.X + rect.Width/2 - tm.X/2
+	titleY := rect.Y + headerInsetY
+	drawEngravedText(font, title, titleX, titleY, fontSize, textPrimary)
+	if fleurons {
+		drawFleuronsFlanking(titleX, tm.X, 22, titleY+tm.Y/2, 5, giltDim)
+	}
+	return rect, titleY + tm.Y
 }
 
 // drawTitledMenuCard paints the shared pause/debug menu chrome: veil, gilt card
@@ -274,11 +280,9 @@ func drawCardTitle(font rl.Font, title string, panelX, panelY, panelW int32, top
 // overlays differ only in title/labels/cursor, captured via the closures.
 func drawTitledMenuCard(assets Resources, title string, panelW int32, rowCount int, label func(i int) string, selected func(i int) bool) (panelX, panelY int32) {
 	panelH := pauseMenuHeaderH + menuRowStride()*int32(rowCount) + pauseMenuFootH
-	rect := drawVeiledCard(panelW, panelH, borderSoft, borderSoft, giltDim)
+	rect, _ := drawCenteredTitleCard(assets.hudFont, panelW, panelH, title, FontTitle, 24, true)
 	panelX = int32(rect.X)
 	panelY = int32(rect.Y)
-
-	drawCardTitle(assets.hudFont, title, panelX, panelY, panelW, 24)
 
 	rowInnerW := menuRowInnerW(panelW)
 	rowX := panelX + pauseMenuRowInsetX
@@ -294,11 +298,8 @@ func drawTitledMenuCard(assets Resources, title string, panelW int32, rowCount i
 // returns its top-left origin + the Y below the title. For the shop overlay,
 // which needs a custom body but shares the card-chrome + title preamble.
 func drawTitledCardHeader(assets Resources, title string, panelW, panelH int32) (panelX, panelY int32, belowTitleY float32) {
-	rect := drawVeiledCard(panelW, panelH, borderSoft, borderSoft, giltDim)
-	panelX = int32(rect.X)
-	panelY = int32(rect.Y)
-	belowTitleY = drawCardTitle(assets.hudFont, title, panelX, panelY, panelW, 18)
-	return panelX, panelY, belowTitleY
+	rect, below := drawCenteredTitleCard(assets.hudFont, panelW, panelH, title, FontTitle, 18, true)
+	return int32(rect.X), int32(rect.Y), below
 }
 
 func drawMenuOverlay(g *core.GameState, assets Resources) {
@@ -333,18 +334,10 @@ func DrawQuitConfirm(g *core.GameState, assets Resources) {
 	}
 	panelW := int32(440)
 	panelH := int32(168)
-	rect := drawVeiledCard(panelW, panelH, borderSoft, borderSoft, giltDim)
-	panelX := float32(rect.X)
-	panelY := float32(rect.Y)
+	rect, _ := drawCenteredTitleCard(assets.hudFont, panelW, panelH, "QUIT GAME", FontHeading, quitConfirmHeaderInsetY, false)
+	panelY := rect.Y
 
-	title := "QUIT GAME"
-	// Canonical heading spacing so centering matches drawEngravedText.
-	tm := cardTitleMeasureCache.measure(assets.hudFont, title, FontHeading, FontSpacingHeading)
-	drawEngravedText(assets.hudFont, title,
-		panelX+float32(panelW)/2-tm.X/2, panelY+quitConfirmHeaderInsetY,
-		FontHeading, textPrimary)
-
-	cardCenterX := panelX + float32(panelW)/2
+	cardCenterX := rect.X + rect.Width/2
 	drawTextCentered(assets.hudFont, "Unsaved progress will be lost.",
 		cardCenterX, panelY+quitConfirmBodyInsetY, FontBody, textMuted)
 	// Controller-first affordances (no spelled-out keys).

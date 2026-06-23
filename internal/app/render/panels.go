@@ -154,17 +154,20 @@ func drawPanelsBody(g *core.GameState, assets Resources) {
 
 	// Info strip on every tab: area name left, gold right. Shared chrome so it's always visible.
 	const panelsInfoStripH = int32(22)
+	// panelsStripGutter is the info-strip's side inset. 24, not hudContentInsetX=22: the
+	// header band's chrome sits a hair wider than the body content inset below it.
+	const panelsStripGutter = int32(24)
 	infoY := tabRowY + tabH + 4
 	areaName := g.Area.Name
 	if areaName == "" {
 		areaName = "Unknown"
 	}
-	drawTextWithShadow(font, areaName, float32(cardX+24), float32(infoY), FontSmall, textPrimary)
-	drawTextRightAligned(font, goldLabelFull(g.Gold), float32(cardX+cardW-24), float32(infoY), FontSmall, borderActive)
+	drawTextWithShadow(font, areaName, float32(cardX+panelsStripGutter), float32(infoY), FontSmall, textPrimary)
+	drawTextRightAligned(font, goldLabelFull(g.Gold), float32(cardX+cardW-panelsStripGutter), float32(infoY), FontSmall, borderActive)
 	// Header rule under the info strip — wood-accent hairline with diamond termini.
 	stripRuleY := infoY + panelsInfoStripH
 	stripRuleCol := woodAccentRule
-	drawPipCappedRule(cardX+24, stripRuleY, cardW-48, stripRuleCol, 1.8, stripRuleCol)
+	drawPipCappedRule(cardX+panelsStripGutter, stripRuleY, cardW-2*panelsStripGutter, stripRuleCol, 1.8, stripRuleCol)
 
 	bodyY := infoY + panelsInfoStripH + 6
 	bodyRect := rl.NewRectangle(float32(cardX+hudContentInsetX), float32(bodyY),
@@ -282,6 +285,54 @@ func memberCardInner(col rl.Rectangle) (innerX, innerW float32) {
 	return col.X + memberCardGutter, col.Width - 2*memberCardGutter
 }
 
+// Shared identity-block geometry (the class sigil + name row of a member card).
+const (
+	cardTopInsetY    = float32(16) // first content row below the card top
+	cardGlyphRadius  = float32(12) // class sigil radius (party-ribbon scale)
+	cardNameGlyphGap = float32(12) // gap between the sigil and the name
+)
+
+// cardIdentityMetrics holds the per-tab vertical steps for the identity+vitals block.
+// The Equipment-tab header and the Character-tab formation card pack at different
+// pitches, so the steps are passed in rather than hard-coded in the shared helper.
+type cardIdentityMetrics struct {
+	nameStep, subStep, hpStep, mpStep float32
+}
+
+// drawCardIdentity draws the shared per-member identity + vitals block (class sigil,
+// engraved name, "Lv N · row" sub-line, HP + MP bars) starting at (x, y0) across width w,
+// returning the Y after the MP bar. metrics carries the per-tab vertical steps (the two
+// party-tab cards differ only in how tightly they pack these rows).
+func drawCardIdentity(font rl.Font, m core.PartyMember, x, w, y0 float32, nameCol, classCol rl.Color, metrics cardIdentityMetrics) float32 {
+	drawClassGlyph(x+cardGlyphRadius, y0+FontHeading/2, cardGlyphRadius, m.Class, classCol)
+	drawEngravedText(font, m.Name, x+cardGlyphRadius*2+cardNameGlyphGap, y0, FontHeading, nameCol)
+	y := y0 + metrics.nameStep
+	drawTextWithShadow(font, "Lv "+strconv.Itoa(m.Level)+" · "+core.RowLabel(m.HomeRow), x, y, FontBody, textMuted)
+	y += metrics.subStep
+	drawBar(font, x, y, w, barHeightCompact, "HP", m.HP, m.MaxHP, hpFillColor(m.HP, m.MaxHP), m.HP <= 0)
+	y += metrics.hpStep
+	drawBar(font, x, y, w, barHeightCompact, "MP", m.MP, m.MaxMP, barMP, m.HP <= 0)
+	y += metrics.mpStep
+	return y
+}
+
+// Equipment-tab card-header steps: the name row is one FontHeading line tall; the MP step
+// is uiRowPitch (the card body below starts on the standard row grid).
+var memberCardHeaderMetrics = cardIdentityMetrics{
+	nameStep: FontHeading, // 36 — name's own line height, no extra gap
+	subStep:  30,
+	hpStep:   36,
+	mpStep:   float32(uiRowPitch), // 42
+}
+
+// Character-tab formation-card steps: tighter than the header so the stat grid clears the pill.
+var formationCardMetrics = cardIdentityMetrics{
+	nameStep: 34,
+	subStep:  30,
+	hpStep:   34,
+	mpStep:   38,
+}
+
 // drawPartyMemberCardHeader paints the shared per-member card header (class rail, name, "Lv N · row" sub-label,
 // HP+MP bars) and returns the Y where tab content starts. highlight (cursored column) brightens name + washes body.
 func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangle, highlight bool) float32 {
@@ -300,32 +351,13 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 
 	innerX, innerW := memberCardInner(col)
 
-	y := col.Y + 16
 	nameCol := textPrimary
 	if !highlight {
 		nameCol = textMuted
 	}
-	// Class sigil flanks the name (party-ribbon iconography, larger radius).
-	glyphR := float32(12)
-	glyphCX := innerX + glyphR
-	glyphCY := y + FontHeading/2
-	drawClassGlyph(glyphCX, glyphCY, glyphR, m.Class, classCol)
-	nameOffset := glyphR*2 + 12
-	drawEngravedText(font, m.Name, innerX+nameOffset, y, FontHeading, nameCol)
-	y += 36
-
-	// Name doubles as the class label, so the sub-line carries level + formation row (the swap tool lives on this tab).
-	sub := "Lv " + strconv.Itoa(m.Level) + " · " + core.RowLabel(m.HomeRow)
-	drawTextWithShadow(font, sub, innerX, y, FontBody, textMuted)
-	y += 30
-
-	hpFill := hpFillColor(m.HP, m.MaxHP)
-	drawBar(font, innerX, y, innerW, barHeightCompact, "HP", m.HP, m.MaxHP, hpFill, m.HP <= 0)
-	y += 36
-	drawBar(font, innerX, y, innerW, barHeightCompact, "MP", m.MP, m.MaxMP, barMP, m.HP <= 0)
-	y += 42
-
-	return y
+	// Shared identity + vitals block (sigil, name, Lv·row, HP/MP); returns the next Y
+	// (mpStep already advances past the MP bar to where tab content starts).
+	return drawCardIdentity(font, m, innerX, innerW, col.Y+cardTopInsetY, nameCol, classCol, memberCardHeaderMetrics)
 }
 
 // drawPanelsStats renders the Character tab as a 2×2 FORMATION grid: each member's
@@ -383,22 +415,12 @@ func drawFormationCard(font rl.Font, g *core.GameState, i int, quad rl.Rectangle
 	rightX := quad.X + quad.Width*0.46
 	rightW := quad.Width*0.54 - pad
 
-	// --- Left: identity + vitals ---
-	y := quad.Y + 16
+	// --- Left: identity + vitals (shared block; formation packs tighter than the header) ---
 	nameCol := textPrimary
 	if !highlight {
 		nameCol = textMuted
 	}
-	glyphR := float32(12)
-	drawClassGlyph(leftX+glyphR, y+FontHeading/2, glyphR, m.Class, classCol)
-	drawEngravedText(font, m.Name, leftX+glyphR*2+12, y, FontHeading, nameCol)
-	y += 34
-	drawTextWithShadow(font, "Lv "+strconv.Itoa(m.Level)+" · "+core.RowLabel(m.HomeRow), leftX, y, FontBody, textMuted)
-	y += 30
-	drawBar(font, leftX, y, leftW, barHeightCompact, "HP", m.HP, m.MaxHP, hpFillColor(m.HP, m.MaxHP), m.HP <= 0)
-	y += 34
-	drawBar(font, leftX, y, leftW, barHeightCompact, "MP", m.MP, m.MaxMP, barMP, m.HP <= 0)
-	y += 38
+	y := drawCardIdentity(font, m, leftX, leftW, quad.Y+cardTopInsetY, nameCol, classCol, formationCardMetrics)
 	if kind, turns := core.PartyStatus(&g.Party[i]); kind != core.PartyStatusNone {
 		label := partyStatusTurnLabel(kind, turns)
 		chipW := measurePanelStatValue(font, label, FontSmall).X + 20
@@ -425,6 +447,8 @@ func drawFormationCard(font rl.Font, g *core.GameState, i int, quad rl.Rectangle
 
 	// Allocate CTA — cursored member with something to spend.
 	if highlight && (m.PendingLevelUps > 0 || m.SkillPoints > 0) {
+		// -28, not footerBaselineY (which yields -35 at FontSmall): this CTA sits inside a
+		// dense formation quadrant and rides tighter to the bottom than a modal footer hint.
 		hintY := quad.Y + quad.Height - 28
 		if m.PendingLevelUps > 0 {
 			drawHintSegs(font, []HintSeg{Hint("allocate "+strconv.Itoa(m.PendingLevelUps)+" stat pt"+plural(m.PendingLevelUps), GlyphA)}, rightX, hintY, FontSmall, inkAccent, 1)
@@ -593,10 +617,16 @@ const (
 	pickerRowH    = float32(44)
 	pickerHeaderH = float32(56)
 	pickerFooterH = float32(32)
+	// Per-picker card widths + the use-target picker's taller row (name + status pill +
+	// HP/MP bars). Heal picker rows use the stock pickerRowH.
+	useTargetPickerCardW = float32(430)
+	useTargetPickerRowH  = float32(58)
+	healPickerCardW      = float32(360)
 )
 
 // equipPicker* are the equip picker's own geometry (taller header for the "Equipped: …" sub-title); see above.
 const (
+	equipPickerCardW   = float32(440)
 	equipPickerRowH    = float32(46)
 	equipPickerHeaderH = float32(70)
 	equipPickerFooterH = float32(34)
@@ -608,6 +638,8 @@ const (
 const statValueInsetX = float32(14)
 
 // pickerCardLeftInset is the shared left gutter for a picker's title + footer hint.
+// 26, not hudContentInsetX=22: the picker's engraved title sits a touch further off the
+// frame than body content; kept distinct so retuning the body inset doesn't shift titles.
 const pickerCardLeftInset = float32(26)
 
 // pickerTitleTopInset is the shared top inset for a picker's FontHeading title.
@@ -616,8 +648,25 @@ const pickerTitleTopInset = float32(20)
 // drawPickerCard paints the shared picker chrome (veiled wood-and-glass card + left-aligned title) and returns
 // the card rect, consolidating the drawVeiledCard + title preamble the three pickers and the skill-tree modal repeated.
 func drawPickerCard(font rl.Font, cardW, cardH float32, title string) rl.Rectangle {
+	return drawPickerCardEx(font, cardW, cardH, title, pickerCardLeftInset, pickerTitleTopInset, false)
+}
+
+// drawPickerCardEx is drawPickerCard's parameterized core: titleX/titleY are the engraved
+// title's inset from the card top-left (the skill-tree modal shifts the title right of a
+// class crest); opaqueBackdrop paints a solid fill behind the card BEFORE the veiled glass
+// (the skill-tree modal needs the body to composite over solid dark, not the lit scene).
+func drawPickerCardEx(font rl.Font, cardW, cardH float32, title string, titleX, titleY float32, opaqueBackdrop bool) rl.Rectangle {
+	if opaqueBackdrop {
+		// drawVeiledCard centers identically, so this rect aligns with the card it precedes.
+		cw, ch := int32(cardW), int32(cardH)
+		_, screenH := screenSize()
+		bx := centerX(cw)
+		by := screenH/2 - ch/2
+		backdrop := rl.NewRectangle(float32(bx), float32(by), float32(cw), float32(ch))
+		rl.DrawRectangleRounded(backdrop, fixedRoundnessFor(cw, ch, cornerRadius), 8, surfaceCardBackdrop)
+	}
 	card := drawVeiledCard(int32(cardW), int32(cardH), borderActive, woodAccent, woodAccent)
-	drawEngravedText(font, title, card.X+pickerCardLeftInset, card.Y+pickerTitleTopInset, FontHeading, textPrimary)
+	drawEngravedText(font, title, card.X+titleX, card.Y+titleY, FontHeading, textPrimary)
 	return card
 }
 
@@ -655,7 +704,7 @@ func drawEquipPicker(g *core.GameState, assets Resources) {
 		visibleRows = 1 // reserve a line for the "no eligible items" note
 	}
 	_, sh := screenSizeF()
-	cardW := float32(440)
+	cardW := equipPickerCardW
 	cardH := headerH + float32(visibleRows)*rowH + equipPickerFooterH
 	if maxH := sh * 0.78; cardH > maxH {
 		cardH = maxH
@@ -677,7 +726,7 @@ func drawEquipPicker(g *core.GameState, assets Resources) {
 	lastEquipLayout.PickerValid = true
 
 	if len(rows) == 0 {
-		drawTextWithShadow(font, "No eligible items in inventory.", card.X+pickerCardLeftInset, card.Y+headerH+8, FontBody, textHint)
+		drawTextWithShadow(font, "No eligible items in inventory.", card.X+pickerCardLeftInset, card.Y+headerH+8, FontBody, textDim)
 	}
 	listY := card.Y + headerH
 	for i, row := range rows {
@@ -720,18 +769,18 @@ func drawUseTargetPicker(g *core.GameState, assets Resources) {
 	}
 
 	// Taller rows than the stock picker: name + status pill + live HP/MP bars (same readout the party ribbon shows).
-	const rowH = float32(58)
+	const rowH = useTargetPickerRowH
 	const headerH = pickerHeaderH
 	visibleRows := len(living)
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
-	cardW := float32(430)
+	cardW := useTargetPickerCardW
 	cardH := headerH + float32(visibleRows)*rowH + pickerFooterH
 	card := drawPickerCard(font, cardW, cardH, title)
 
 	if len(living) == 0 {
-		drawTextWithShadow(font, "No one can be healed.", card.X+pickerCardLeftInset, card.Y+headerH, FontBody, textHint)
+		drawTextWithShadow(font, "No one can be healed.", card.X+pickerCardLeftInset, card.Y+headerH, FontBody, textDim)
 	}
 	listY := card.Y + headerH
 	for i, mi := range living {
@@ -777,7 +826,7 @@ func drawHealPicker(g *core.GameState, assets Resources) {
 
 	const rowH = pickerRowH
 	const headerH = pickerHeaderH
-	cardW := float32(360)
+	cardW := healPickerCardW
 	cardH := headerH + float32(len(skills))*rowH + pickerFooterH
 	card := drawPickerCard(font, cardW, cardH, "Use Skill — "+g.Party[caster].Name)
 
@@ -946,7 +995,7 @@ func drawPanelsItems(g *core.GameState, assets Resources, body rl.Rectangle) {
 		dy += 36
 		// Description placeholder — the item registry carries none today.
 		hint := "Consumable. Press Use to apply it to an ally — here or in battle."
-		drawTextWithShadow(font, hint, dx, dy, FontSmall, textHint)
+		drawTextWithShadow(font, hint, dx, dy, FontSmall, textDim)
 	}
 }
 
@@ -1108,11 +1157,13 @@ func drawPanelsSkills(g *core.GameState, assets Resources, body rl.Rectangle) {
 				ratioCol = giltBright
 			}
 			drawTextRightAligned(font, ratio, rect.X+rect.Width-12, rect.Y+10, FontSmall, ratioCol)
-			drawTextWithShadow(font, tr.Theme, rect.X+12, rect.Y+34, FontSmall, textHint)
+			drawTextWithShadow(font, tr.Theme, rect.X+12, rect.Y+34, FontSmall, textDim)
 		}
 
 		// Cursored member: Confirm opens the trees.
 		if highlight {
+			// -46, not footerBaselineY (-35 at FontSmall): this hint clears the tree-ratio rows
+			// stacked above it in the Skills-tab card, so it rides higher than a modal footer.
 			hintY := cols[i].Y + cols[i].Height - 46
 			DrawHintBar(font, []HintSeg{Hint("Open skill trees", GlyphA)}, cols[i].X+cols[i].Width/2, hintY, FontSmall)
 		}
@@ -1276,7 +1327,7 @@ func drawPanelsMap(g *core.GameState, assets Resources, body rl.Rectangle) {
 	// Map footer — zoom indicator (area name is already in the top info strip), then the control hint.
 	footerY := body.Y + body.Height - 20
 	footer := panelsMapFooterText(zoom)
-	drawTextWithShadow(font, footer, body.X, footerY, FontSmall, textHint)
+	drawTextWithShadow(font, footer, body.X, footerY, FontSmall, textDim)
 	footerW := panelsMapFooterMeasureCache.measure(font, footer, FontSmall, canonicalSpacing(FontSmall)).X
 	DrawHintBarLeft(font, []HintSeg{Hint("Pan", GlyphLeftRight), Hint("Zoom", GlyphUpDown)}, body.X+footerW+hintSegGap, footerY, FontSmall)
 }

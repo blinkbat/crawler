@@ -800,7 +800,7 @@ func updateDialogNodesModal(s *State) Action {
 
 // Shared field-layout metrics for the dialog edit modals (stack fixed-height rows).
 const (
-	dialogFieldH       = float32(28)  // text-field / button row height
+	dialogFieldH       = textFieldH   // text-field / button row height (shared editor input height)
 	dialogHeaderInset  = float32(56)  // first row's offset below the title
 	dialogRowGap       = float32(46)  // row pitch (node + choice editors)
 	dialogCondRowGap   = float32(54)  // row pitch in the condition editor

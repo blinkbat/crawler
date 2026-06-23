@@ -49,7 +49,7 @@ func (r Resources) Theme() Theme {
 		TextMuted:         textMuted,
 		TextLabel:         textLabel,
 		TextDim:           textDim,
-		TextHint:          textHint,
+		TextHint:          textDim,
 		// Marker colors derive from the exported Marker* vars (single source of truth).
 		MarkerStart:    MarkerStart,
 		MarkerChest:    MarkerChest,

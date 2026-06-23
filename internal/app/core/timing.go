@@ -177,7 +177,7 @@ func NewMultiPressState(rng *rand.Rand, duration float32, count int) TimingState
 	// lives in MultiPressWindow (config.go).
 	leadIn := MultiPressWindow.LeadInFrac
 	winWidth := MultiPressWindow.WindowWidthFrac
-	span := commitStart - leadIn - 0.02 // breathing room before commit
+	span := commitStart - leadIn - MultiPressWindow.CommitGapFrac // breathing room before commit
 	if span < winWidth {
 		span = winWidth
 	}
@@ -191,7 +191,7 @@ func NewMultiPressState(rng *rand.Rand, duration float32, count int) TimingState
 			center = leadIn + winWidth*0.5 + usable*(float32(i)/float32(count-1))
 		}
 		// Small jitter so consecutive bars aren't identically placed.
-		jitter := (float32(rng.Float64())*2 - 1) * (winWidth * 0.20)
+		jitter := (float32(rng.Float64())*2 - 1) * (winWidth * MultiPressWindow.JitterFrac)
 		center += jitter
 		// Clamp so a jittered window never goes negative or crosses CommitStart
 		// (a commit-zone press resolves the bar early, making it unreachable).

@@ -209,6 +209,13 @@ const (
 	paramsHeaderReserve = float32(30)
 	soundGroupHeaderH   = float32(22)
 	soundNameMaxLen     = 32 // sound-name field cap (pumped directly, not via textFieldConfigs)
+	// Params-slider row geometry — an implicit layout↔draw contract (the layout
+	// places the track, drawSoundsSlider places the label/value against the same
+	// x/w). Mirrors foeview's foeLabelW/foeValueW/foeTrackH.
+	soundLabelW       = float32(96)  // label gutter before the track (track X = x+soundLabelW)
+	soundTrackReserve = float32(176) // label+value reserve removed from w (track W = w-soundTrackReserve)
+	soundTrackH       = float32(14)  // slider track height
+	soundValueW       = float32(78)  // value column reserve from the right (value X = x+w-soundValueW)
 )
 
 // assignableCueList is the fixed built-in cue list for the assignments column,
@@ -357,7 +364,7 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, para
 	// Second pass: place tracks + headers at scrolled screen positions.
 	l.sliderTracks = make([]rl.Rectangle, len(soundParamSliders))
 	for i := range soundParamSliders {
-		l.sliderTracks[i] = rl.NewRectangle(x+96, vpY-sc+sliderOff[i]+8, w-176, 14)
+		l.sliderTracks[i] = rl.NewRectangle(x+soundLabelW, vpY-sc+sliderOff[i]+8, w-soundTrackReserve, soundTrackH)
 	}
 	l.sectionHeaderY = make([]float32, len(soundSections))
 	for si := range soundSections {
@@ -366,7 +373,7 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, para
 
 	// Fixed footer below the viewport.
 	fy := vpY + vpH + 4
-	l.nameField = rl.NewRectangle(x+70, fy, w-70, 28)
+	l.nameField = rl.NewRectangle(x+70, fy, w-70, textFieldH)
 	fy += soundRowH + 6
 	l.previewBtn = rl.NewRectangle(x, fy, (w-12)/2, soundButtonH)
 	l.saveBtn = rl.NewRectangle(x+(w-12)/2+12, fy, (w-12)/2, soundButtonH)
@@ -836,7 +843,7 @@ func drawSoundsParamsCol(s *State, font rl.Font, theme render.Theme, l *soundLay
 func drawSoundsSlider(font rl.Font, theme render.Theme, x, y, w float32, info sliderField[soundParamSet], p soundParamSet, track rl.Rectangle, focused bool) {
 	// Display callback overrides the numeric readout for label rows (e.g. Wave).
 	drawSliderField(font, theme, info, &p,
-		rl.NewVector2(x, y), rl.NewVector2(x+w-78, y),
+		rl.NewVector2(x, y), rl.NewVector2(x+w-soundValueW, y),
 		soundFontBody, track, 7, focused)
 }
 

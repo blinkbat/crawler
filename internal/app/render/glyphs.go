@@ -126,8 +126,8 @@ func drawHintSegs(font rl.Font, segs []HintSeg, x, y, size float32, labelCol col
 func DrawHintBar(font rl.Font, segs []HintSeg, cx, y, size float32) {
 	w := measureHintBar(font, segs, size)
 	x := cx - w/2
-	drawHintSegs(font, segs, x, y, size, textHint, 1)
-	pipCol := fadeColor(textHint, 0.65)
+	drawHintSegs(font, segs, x, y, size, textDim, 1)
+	pipCol := fadeColor(textDim, 0.65)
 	pipY := y + size/2
 	drawDiamondPip(x-14, pipY, 1.8, pipCol)
 	drawDiamondPip(x+w+14, pipY, 1.8, pipCol)
@@ -135,7 +135,7 @@ func DrawHintBar(font rl.Font, segs []HintSeg, cx, y, size float32) {
 
 // DrawHintBarLeft paints the strip left-anchored at x (no termini).
 func DrawHintBarLeft(font rl.Font, segs []HintSeg, x, y, size float32) {
-	drawHintSegs(font, segs, x, y, size, textHint, 1)
+	drawHintSegs(font, segs, x, y, size, textDim, 1)
 }
 
 // drawModalFooterGlyphs / ...Left paint a modal's footer hint bar, centred or left-anchored on the card.

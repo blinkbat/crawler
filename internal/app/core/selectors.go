@@ -442,20 +442,13 @@ func BattleEnemyTargetReachable(g *GameState, slot int) bool {
 // first available member after the cursor in the effective front row, or -1.
 // Does NOT advance the cursor.
 func PeekNextMeleeEnemyTarget(g *GameState) int {
-	n := len(g.Party)
-	if n == 0 {
-		return -1
-	}
-	for off := 0; off < n; off++ {
-		i := (g.Battle.EnemyAttackCursor + 1 + off) % n
-		if i < 0 {
-			i += n
-		}
-		if partyAvailable(g.Party[i]) && PartyInEffectiveFront(g.Party, i) {
-			return i
-		}
-	}
-	return -1
+	// PartyInEffectiveFront's front check reduces to a per-member Row test once
+	// PartyFrontHasLiving is hoisted (constant across the scan), letting the
+	// value-only wrapNextWhere predicate carry it.
+	frontHasLiving := PartyFrontHasLiving(g.Party)
+	return wrapNextWhere(g.Party, g.Battle.EnemyAttackCursor+1, func(m PartyMember) bool {
+		return partyAvailable(m) && (m.Row == RowFront || !frontHasLiving)
+	})
 }
 
 func LivingBattleCount(g *GameState) int {

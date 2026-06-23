@@ -105,17 +105,8 @@ func AreaFromMapFile(mf mapfile.MapFile, path string) (AreaDefinition, error) {
 	if mf.Width <= 0 || mf.Height <= 0 {
 		return AreaDefinition{}, fmt.Errorf("map dimensions must be positive (got %dx%d)", mf.Width, mf.Height)
 	}
-	layers := []struct {
-		name string
-		rows []string
-	}{
-		{mapfile.SectionWalls, mf.Walls},
-		{mapfile.SectionFloor, mf.Floor},
-		{mapfile.SectionDecor, mf.Decor},
-		{mapfile.SectionProps, mf.Props},
-	}
-	for _, layer := range layers {
-		if err := validateLayerDims(layer.name, layer.rows, mf.Width, mf.Height); err != nil {
+	for _, layer := range mf.RequiredLayers() {
+		if err := validateLayerDims(layer.Name, layer.Rows, mf.Width, mf.Height); err != nil {
 			return AreaDefinition{}, err
 		}
 	}
@@ -790,6 +781,11 @@ type enemyKindNameEntry struct {
 	aliases []string
 }
 
+// enemyKindNameTable maps each EnemyKind to its .map serialization token (+ legacy
+// aliases). These tokens are deliberately NOT the EnemyDefinition.Name/SingularName
+// display strings, so they can't be derived from enemies.go. The canonical ordered
+// roster of kinds is the EnemyKind iota (enemies.go); keep this table in that order
+// and add a row when appending a kind.
 var enemyKindNameTable = []enemyKindNameEntry{
 	{EnemyRat, "rat", nil},
 	{EnemyBat, "bat", nil},

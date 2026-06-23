@@ -672,7 +672,7 @@ func BattleEncounterTitle(g *GameState) string {
 	return "Battle!"
 }
 
-func LastBattleEnemyFallsMessage(g *GameState) string {
+func LastBattleEnemyFallsMessage() string {
 	return "The last foe falls."
 }
 

@@ -103,6 +103,7 @@ func updatePanels(g *core.GameState) {
 		// Confirm on a member with unspent stat points opens the level-up modal.
 		if core.PartyIndexInRange(g.Party, g.PanelsRowCursor) {
 			row, col := g.Party[g.PanelsRowCursor].HomeRow, g.Party[g.PanelsRowCursor].HomeCol
+			dx := input.CursorLeftRight()
 			switch {
 			case input.UpPressed():
 				if row == core.RowBack {
@@ -116,13 +117,13 @@ func updatePanels(g *core.GameState) {
 						g.PanelsRowCursor = idx
 					}
 				}
-			case input.CursorLeftRight() == -1:
+			case dx == -1:
 				if col == core.ColRight {
 					if idx, ok := homeSlotMember(g, row, core.ColLeft); ok {
 						g.PanelsRowCursor = idx
 					}
 				}
-			case input.CursorLeftRight() == 1:
+			case dx == 1:
 				if col == core.ColLeft {
 					if idx, ok := homeSlotMember(g, row, core.ColRight); ok {
 						g.PanelsRowCursor = idx

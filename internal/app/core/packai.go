@@ -244,30 +244,31 @@ func withinLeash(p Pack, tx, tz int) bool {
 	return ChebyshevDistance(tx, tz, p.HomeX, p.HomeZ) <= PackLeashRadius
 }
 
+// axisPrioritySteps orders the X-axis step xStep and the Z-axis step zStep into a
+// fixed-priority pair: X-first by default, Z-first when zFirst. The shared
+// tie-break order behind chaseStep (prefer the longer axis) and fleeStep (prefer
+// the nearer axis) — each passes its own steps + preference.
+func axisPrioritySteps(xStep, zStep [2]int, zFirst bool) [2][2]int {
+	if zFirst {
+		return [2][2]int{zStep, xStep}
+	}
+	return [2][2]int{xStep, zStep}
+}
+
 func chaseStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int, int, bool) {
 	dx := px - p.TileX
 	dz := pz - p.TileZ
-	// Prefer the longer axis; ties go X-first (deterministic, no dither).
+	// Prefer the longer axis; ties go X-first (deterministic, no dither). A
+	// zero-delta axis contributes no step (toward an already-aligned axis).
+	ordered := axisPrioritySteps([2]int{Sign(dx), 0}, [2]int{0, Sign(dz)}, AbsInt(dz) > AbsInt(dx))
 	steps := [FacingCount][2]int{}
 	n := 0
-	if AbsInt(dx) >= AbsInt(dz) {
-		if dx != 0 {
-			steps[n] = [2]int{Sign(dx), 0}
-			n++
+	for _, s := range ordered {
+		if s[0] == 0 && s[1] == 0 {
+			continue
 		}
-		if dz != 0 {
-			steps[n] = [2]int{0, Sign(dz)}
-			n++
-		}
-	} else {
-		if dz != 0 {
-			steps[n] = [2]int{0, Sign(dz)}
-			n++
-		}
-		if dx != 0 {
-			steps[n] = [2]int{Sign(dx), 0}
-			n++
-		}
+		steps[n] = s
+		n++
 	}
 	for i := 0; i < n; i++ {
 		tx, tz := p.TileX+steps[i][0], p.TileZ+steps[i][1]
@@ -358,10 +359,9 @@ func fleeStep(g *GameState, p Pack, occupied map[[2]int]bool, px, pz int) (int, 
 	if awayZ == 0 {
 		awayZ = 1
 	}
-	steps := [2][2]int{{awayX, 0}, {0, awayZ}}
-	if AbsInt(dz) < AbsInt(dx) {
-		steps = [2][2]int{{0, awayZ}, {awayX, 0}}
-	}
+	// Prefer the nearer axis (smaller |delta|) to break line-of-approach; ties
+	// keep X-first. Both axes always step (zero-delta defaulted to +1 above).
+	steps := axisPrioritySteps([2]int{awayX, 0}, [2]int{0, awayZ}, AbsInt(dz) < AbsInt(dx))
 	for _, s := range steps {
 		nx, nz := p.TileX+s[0], p.TileZ+s[1]
 		if !withinLeash(p, nx, nz) {

@@ -234,8 +234,9 @@ var itemDefinitions = []ItemDefinition{
 		StatBonus: [StatCount]int{StatSTR: 2}},
 }
 
-// ItemStack is one inventory slot: a kind plus a count. ItemNone kinds and zero
-// counts are pruned by addItem.
+// ItemStack is one inventory slot: a kind plus a count. AddItem refuses to create
+// ItemNone or non-positive stacks; zero-count entries are pruned later by
+// ConsumeItem (drops the entry at zero) and filtered out by LiveStacks.
 type ItemStack struct {
 	Kind  ItemKind
 	Count int

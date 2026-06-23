@@ -70,133 +70,33 @@ func savePartyVisual(s *State) {
 	s.flash(savedVisualFlash(core.PartyClassName(s.partyClass), slug))
 }
 
+// partyViewCallbacks builds the Party Visualizer's per-modal actions for the
+// shared driver. Clicking the name cycles forward (only four classes, no dropdown).
+func partyViewCallbacks(s *State) visualizerCallbacks {
+	return visualizerCallbacks{
+		drag:     &partyDrag,
+		override: &s.partyVisual,
+		cursor:   &s.partyCursor,
+		importPNG: func() {
+			importDroppedPNG(s, core.PartyClassSlug(s.partyClass),
+				func(path string) error { return render.ImportPartySpriteFromFile(s.partyClass, path) },
+				func() { render.ReloadPartySprite(frameAssets, s.partyClass) })
+		},
+		cyclePrev: func() { cyclePartyClass(s, -1) },
+		cycleNext: func() { cyclePartyClass(s, +1) },
+		nameSpan:  func(rl.Rectangle) { cyclePartyClass(s, +1) },
+		save:      func() { savePartyVisual(s) },
+		reset: func() {
+			s.partyVisual = s.partyBaseline
+			s.flash("Reset to last-saved values")
+		},
+		closePreview:   render.ClosePartyPreview,
+		refreshPreview: func() { render.RefreshPartyAssetPreview(frameAssets, s.partyClass, s.partyVisual) },
+	}
+}
+
 func updatePartyViewModal(s *State) Action {
-	if editorCancelPressed() {
-		render.ClosePartyPreview()
-		render.ClearAssetPreview()
-		closeModal(s)
-		return ActionNone
-	}
-
-	// A dropped PNG imports as this class's sprite.
-	importDroppedPNG(s, core.PartyClassSlug(s.partyClass),
-		func(path string) error { return render.ImportPartySpriteFromFile(s.partyClass, path) },
-		func() { render.ReloadPartySprite(frameAssets, s.partyClass) })
-
-	l := computeFoeViewLayout()
-	mp := rl.GetMousePosition() // live, not the one-frame-stale frameMouse
-	mouseDown := rl.IsMouseButtonDown(rl.MouseLeftButton)
-	mousePressed := rl.IsMouseButtonPressed(rl.MouseLeftButton)
-	mouseReleased := rl.IsMouseButtonReleased(rl.MouseLeftButton)
-
-	partyDrag.slider.update(mouseDown && s.foeViewTab == foeTabLayout, len(foeFields), func(idx int) {
-		setPartyFieldFromTrack(s, idx, l.sliderTracks[idx], mp.X)
-		s.partyCursor = idx
-	})
-	partyDrag.asset.update(mouseDown && s.foeViewTab == foeTabAsset, len(assetFields), func(idx int) {
-		setPartyAssetFromTrack(s, idx, l.assetTracks[idx], mp.X)
-		s.assetCursor = idx
-	})
-
-	applyPreviewZoomWheel(s, l.preview, mp)
-
-	if mousePressed {
-		handlePartyViewClick(s, &l, mp)
-	}
-	if mouseReleased {
-		partyDrag.slider = noSliderDrag
-		partyDrag.asset = noSliderDrag
-	}
-
-	if editorCommitPressed() {
-		savePartyVisual(s)
-		return ActionNone
-	}
-
-	navAdjustVisualTabs(s, &s.partyCursor, &s.partyVisual)
-	if s.assetPreviewStale {
-		render.RefreshPartyAssetPreview(frameAssets, s.partyClass, s.partyVisual)
-		s.assetPreviewStale = false
-	}
-	return ActionNone
-}
-
-// setPartyAssetFromTrack is the party twin of setFoeAssetFromTrack.
-func setPartyAssetFromTrack(s *State, i int, track rl.Rectangle, mouseX float32) {
-	f := assetFields[i]
-	f.Set(&s.partyVisual, sliderSnap(f.Min, f.Max, f.Step, track.X, track.Width, mouseX))
-	s.assetPreviewStale = true
-}
-
-// handlePartyViewClick dispatches a left-press. Clicking the name cycles forward
-// (only four classes, so no dropdown).
-func handlePartyViewClick(s *State, l *foeViewLayout, mp rl.Vector2) {
-	for i := range l.tabBtns {
-		if pointIn(mp, l.tabBtns[i]) {
-			selectFoeViewTab(s, i, &partyDrag)
-			return
-		}
-	}
-	if s.foeViewTab == foeTabLayout {
-		for i := range foeFields {
-			if pointIn(mp, padRect(l.sliderTracks[i], 0, sliderHitPadY)) {
-				partyDrag.slider.idx = i
-				setPartyFieldFromTrack(s, i, l.sliderTracks[i], mp.X)
-				s.partyCursor = i
-				return
-			}
-		}
-	}
-	if s.foeViewTab == foeTabAsset {
-		for i := range assetFields {
-			if pointIn(mp, padRect(l.assetTracks[i], 0, sliderHitPadY)) {
-				partyDrag.asset.idx = i
-				setPartyAssetFromTrack(s, i, l.assetTracks[i], mp.X)
-				s.assetCursor = i
-				return
-			}
-		}
-		for i := range l.assetBtns {
-			if !pointIn(mp, l.assetBtns[i]) {
-				continue
-			}
-			applyAssetAction(s, &s.partyVisual, i)
-			return
-		}
-	}
-	if pointIn(mp, l.prevFoeBtn) {
-		cyclePartyClass(s, -1)
-		return
-	}
-	if pointIn(mp, l.nextFoeBtn) {
-		cyclePartyClass(s, +1)
-		return
-	}
-	if nameSpan := nameSpanBetween(l.prevFoeBtn, l.nextFoeBtn); pointIn(mp, nameSpan) {
-		cyclePartyClass(s, +1)
-		return
-	}
-	if pointIn(mp, l.saveBtn) {
-		savePartyVisual(s)
-		return
-	}
-	if pointIn(mp, l.resetBtn) {
-		s.partyVisual = s.partyBaseline
-		s.flash("Reset to last-saved values")
-		return
-	}
-	if pointIn(mp, l.closeBtn) {
-		render.ClosePartyPreview()
-		render.ClearAssetPreview()
-		closeModal(s)
-		return
-	}
-}
-
-// setPartyFieldFromTrack maps mouse X within a track to the field's range, snapped.
-func setPartyFieldFromTrack(s *State, i int, track rl.Rectangle, mouseX float32) {
-	f := foeFields[i]
-	f.Set(&s.partyVisual, sliderSnap(f.Min, f.Max, f.Step, track.X, track.Width, mouseX))
+	return updateVisualizerModal(s, partyViewCallbacks(s))
 }
 
 func drawPartyViewModal(s *State, font rl.Font, theme render.Theme) {

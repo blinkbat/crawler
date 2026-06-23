@@ -673,6 +673,7 @@ const (
 	tightBtnGap       = float32(6)   // gap for dense strips: the topbar/toolbar, the wrapped add grid, equal-width rows
 	modalWideBtnW     = float32(110) // width of the Delete / Close affordance shared by the door + custom-enemy modals
 	buttonLabelPadX   = float32(28)  // horizontal padding added around a measured label to size an auto-width button (buttonWidth + context menu)
+	textFieldH        = float32(28)  // single-line text-field / input row height (shared by rename, Save As, sound name, dialog rows)
 )
 
 // modalContentWidth is the usable inner width of a modal card.
@@ -998,6 +999,11 @@ func drawDoorLinks(s *State, cell float32) {
 	}
 }
 
+// overlayGutterPad insets grid-corner overlays (minimap, brush recents) far
+// enough to clear the canvas scrollbar gutters: scrollbarThickness + slack.
+// Derived so a future scrollbar bump can't silently break the clearance.
+const overlayGutterPad = scrollbarThickness + 5 // = 16
+
 // minimapRect computes the overview minimap's on-screen rect (bottom-right of
 // the grid) and whether it shows (hidden when no map / grid too small). Shared
 // by draw and click-to-jump.
@@ -1009,8 +1015,7 @@ func minimapRect(s *State) (rl.Rectangle, bool) {
 		return rl.Rectangle{}, false
 	}
 	const maxDim = float32(150)
-	// pad ≥ scrollbarThickness so the minimap clears the canvas scrollbar gutters.
-	const pad = float32(16)
+	const pad = overlayGutterPad // clears the canvas scrollbar gutters
 	aw, ah := float32(s.area.Width), float32(s.area.Height)
 	scale := maxDim / aw
 	if h := maxDim / ah; h < scale {
@@ -1093,8 +1098,8 @@ func brushRecentsVisible(s *State) bool {
 // brushRecentRect is the i-th recent-brush swatch rect (grid bottom-left).
 // Shared by draw + click hit-test.
 func brushRecentRect(s *State, i int) rl.Rectangle {
-	// pad ≥ scrollbarThickness so the row clears the bottom scrollbar gutter.
-	const sw, pad, gap = float32(26), float32(16), float32(4)
+	const sw, gap = float32(26), float32(4)
+	const pad = overlayGutterPad // clears the bottom scrollbar gutter
 	x0 := s.rect.grid.X + pad
 	y := s.rect.grid.Y + s.rect.grid.Height - sw - pad
 	return rl.NewRectangle(x0+float32(i)*(sw+gap), y, sw, sw)
@@ -1783,6 +1788,10 @@ func (s *State) activeFieldRect() rl.Rectangle {
 	return rl.Rectangle{}
 }
 
+// reachBadgeMaxRows caps the metadata-panel reachability badge so it doesn't
+// reflow; the full list is in the Validate modal (openValidateModal).
+const reachBadgeMaxRows = 4
+
 func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 	rl.DrawRectangleRec(s.rect.metadata, bgPaletteCol)
 	rl.DrawLineEx(
@@ -1854,8 +1863,8 @@ func drawMetadata(s *State, font rl.Font, theme render.Theme) {
 	} else {
 		// One row per warning, red panel + outline.
 		rows := warnings
-		if len(rows) > 4 {
-			rows = rows[:4] // cap so the panel doesn't reflow
+		if len(rows) > reachBadgeMaxRows {
+			rows = rows[:reachBadgeMaxRows] // cap so the panel doesn't reflow
 		}
 		h := float32(10 + 22*len(rows))
 		box := rl.NewRectangle(mr.reachArea.X, mr.reachArea.Y+22, mr.reachArea.Width, h)
@@ -2932,7 +2941,7 @@ func drawOpenModal(s *State, font rl.Font, theme render.Theme) {
 	}
 
 	if s.modalRenaming != "" {
-		fieldR := rl.NewRectangle(r.X+modalContentInset, r.Y+r.Height-86, r.Width-32, 28)
+		fieldR := rl.NewRectangle(r.X+modalContentInset, r.Y+r.Height-86, r.Width-2*modalContentInset, textFieldH)
 		drawTextField(font, fieldR, s.modalRenaming, true)
 		labels := cmdLabels(openRenameCmds(s))
 		drawModalButtons(font, modalButtonRow(r, labels), labels)
@@ -2977,7 +2986,7 @@ const (
 
 func saveAsFieldRect(s *State) rl.Rectangle {
 	r := centeredCardRect(saveAsModalW, saveAsModalH)
-	return rl.NewRectangle(r.X+modalContentInset, r.Y+58, saveAsModalW-32, 28)
+	return rl.NewRectangle(r.X+modalContentInset, r.Y+58, saveAsModalW-2*modalContentInset, textFieldH)
 }
 
 func drawSaveAsModal(s *State, font rl.Font, theme render.Theme) {

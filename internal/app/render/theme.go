@@ -163,10 +163,8 @@ var (
 	textPrimary = inkPrimary
 	textMuted   = inkMuted
 	textLabel   = inkAccent
-	// textDim + textHint both resolve to inkDim but stay separate so either can
-	// be retuned alone.
-	textDim  = inkDim
-	textHint = inkDim
+	// textDim is the faded-calligraphy ink (disabled text, footer hints, blurbs).
+	textDim = inkDim
 
 	barHPHigh = mute(rl.NewColor(116, 200, 132, 255))
 	// xpGainColor fills the victory XP bars — coin-gold (reward, not HP green).
@@ -495,6 +493,8 @@ func drawModalScaffold(font rl.Font, cardW, cardH int32, heading string) rl.Rect
 	}
 	rect := drawVeiledCard(cardW, cardH, borderSoft, borderActive, giltDim)
 	if heading != "" {
+		// Heading gutter is 28 (wider than hudContentInsetX=22): the engraved FontHeading
+		// title wants more breathing room from the wood mitre than body content does.
 		drawHeading(font, heading, int32(rect.X)+28, int32(rect.Y)+modalHeadingInsetY, borderActive)
 	}
 	return rect
@@ -808,7 +808,7 @@ func drawEmptyLedgerNote(font rl.Font, body rl.Rectangle, text, sub string) {
 	drawTextCentered(font, text, cx, ornY+18, FontBody, textMuted)
 	// Optional second hint line, dimmer + smaller.
 	if sub != "" {
-		drawTextCentered(font, sub, cx, ornY+18+FontBody+10, FontSmall, textHint)
+		drawTextCentered(font, sub, cx, ornY+18+FontBody+10, FontSmall, textDim)
 	}
 }
 

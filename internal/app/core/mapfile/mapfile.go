@@ -490,15 +490,34 @@ type namedLayer struct {
 	rows []string
 }
 
-// requiredLayers is the four mandatory grid layers in canonical order. Ceiling/
-// elevation are excluded — optional, validated/encoded separately.
-func (mf MapFile) requiredLayers() []namedLayer {
-	return []namedLayer{
+// NamedLayer is the exported view of a section→rows pairing, for cross-package
+// callers (core.AreaFromMapFile) that iterate the required-layer roster.
+type NamedLayer struct {
+	Name string
+	Rows []string
+}
+
+// RequiredLayers is the four mandatory grid layers in canonical order — the one
+// source for the required section→field roster. Ceiling/elevation are excluded
+// (optional, validated/encoded separately).
+func (mf MapFile) RequiredLayers() []NamedLayer {
+	return []NamedLayer{
 		{SectionWalls, mf.Walls},
 		{SectionFloor, mf.Floor},
 		{SectionDecor, mf.Decor},
 		{SectionProps, mf.Props},
 	}
+}
+
+// requiredLayers is the internal namedLayer view of RequiredLayers, kept so
+// validate/Encode reuse their existing field names.
+func (mf MapFile) requiredLayers() []namedLayer {
+	src := mf.RequiredLayers()
+	out := make([]namedLayer, len(src))
+	for i, l := range src {
+		out[i] = namedLayer{l.Name, l.Rows}
+	}
+	return out
 }
 
 // Parse reads a .map file from r. Errors pinpoint the first malformed line.

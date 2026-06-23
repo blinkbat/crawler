@@ -36,6 +36,15 @@ const (
 	reelRimAlpha         = uint8(150)    // dark rim behind a reel symbol (definition over glass)
 )
 
+// Shared timing-bar footprint (timingBarLayout): height, min width, side edge
+// margin, and gap above the party ribbon. One place so the modes share a footprint.
+const (
+	timingBarHeight     = float32(34)
+	timingBarMinW       = float32(380)
+	timingBarEdgeMargin = float32(32) // clamp so the bar never reaches the screen edges
+	timingBarRibbonGap  = float32(28) // gap between the bar's bottom and the party ribbon top
+)
+
 // fadeForFlash scales col's alpha by the flash-hold envelope when flashing, else unchanged.
 func fadeForFlash(col rl.Color, flashing bool, flashTimer float32) rl.Color {
 	if flashing {
@@ -220,16 +229,16 @@ func drawTimingBar(g *core.GameState, assets Resources) {
 // timingBarLayout returns the bar's screen-space rect (shared footprint so modes don't jump).
 func timingBarLayout() (x, y, barW, barH float32) {
 	screenW, _ := screenSizeF()
-	barH = 34
+	barH = timingBarHeight
 	barW = screenW * 0.62
-	if barW < 380 {
-		barW = 380
+	if barW < timingBarMinW {
+		barW = timingBarMinW
 	}
-	if barW > screenW-32 {
-		barW = screenW - 32
+	if barW > screenW-timingBarEdgeMargin {
+		barW = screenW - timingBarEdgeMargin
 	}
 	x = centerXF(barW)
-	y = PartyRibbonTopY() - barH - 28
+	y = PartyRibbonTopY() - barH - timingBarRibbonGap
 	return
 }
 
@@ -395,7 +404,7 @@ func drawChargeBar(timing core.TimingState, g *core.GameState, assets Resources,
 	// Intro-pause: show "Press to start" so the bar reads as waiting on input.
 	if !flashing && g.Battle.TimingIntro > 0 {
 		heading = "Press to start"
-		baseCol = textHint
+		baseCol = textDim
 	} else if timing.Pressed {
 		// Past the peak start? Push toward "release now."
 		if timing.Elapsed >= timing.WindowStart {

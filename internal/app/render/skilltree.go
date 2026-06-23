@@ -28,8 +28,8 @@ const (
 	skillNodePipMinW     = float32(96)
 	skillNodePipMinH     = float32(40)
 	skillNodeFleuronMinW = float32(130)
-	// Sized inline (paints an opaque backdrop before drawVeiledCard, so can't reuse
-	// the shared scaffold).
+	// Card sized inline (custom column geometry); chrome routes through drawPickerCardEx
+	// with an opaque backdrop so the glass body composites over solid dark.
 	skillTreeMaxWidthFrac = float32(0.92) // columns shrink to fit rather than overflow
 	skillTreeHeightFrac   = float32(0.74)
 	skillTreeHeaderTitleY  = float32(24)
@@ -69,20 +69,14 @@ func DrawSkillTreeModal(g *core.GameState, assets Resources) {
 	}
 	cardH := sh * skillTreeHeightFrac
 
-	// Opaque backdrop BEFORE the veiled card so the glass body composites over
-	// solid dark. drawVeiledCard centers identically, so the rects align.
-	_, screenH := screenSize()
-	cw, ch := int32(cardW), int32(cardH)
-	bx := centerX(cw)
-	by := screenH/2 - ch/2
-	backdrop := rl.NewRectangle(float32(bx), float32(by), float32(cw), float32(ch))
-	rl.DrawRectangleRounded(backdrop, fixedRoundnessFor(cw, ch, cornerRadius), 8, surfaceCardBackdrop)
-	card := drawVeiledCard(cw, ch, borderActive, woodAccent, woodAccent)
+	// Shared picker chrome with an opaque backdrop first (the body must composite over
+	// solid dark, not the lit scene) + the title shifted right of the class crest.
+	card := drawPickerCardEx(font, cardW, cardH, m.Name+" — Skill Trees",
+		skillTreeHeaderTitleX, skillTreeHeaderTitleY, true)
 
-	// Header: class crest + "<name> — Skill Trees" left, SkillPoint balance right.
+	// Header: class crest left of the title, SkillPoint balance right.
 	classCol := classAccent(m.Class)
 	drawClassGlyph(card.X+skillTreeHeaderGlyphX, card.Y+skillTreeHeaderGlyphY, 12, m.Class, classCol)
-	drawEngravedText(font, m.Name+" — Skill Trees", card.X+skillTreeHeaderTitleX, card.Y+skillTreeHeaderTitleY, FontHeading, textPrimary)
 	spText := skillPointsLabel(m.SkillPoints)
 	spCol := textMuted
 	if m.SkillPoints > 0 {
@@ -262,7 +256,7 @@ func drawSkillTreeDetail(font rl.Font, g *core.GameState, m *core.PartyMember, t
 	state := "Rank " + strconv.Itoa(rank) + " / " + strconv.Itoa(node.MaxRank)
 	drawTextRightAligned(font, state, x+w-12, y+10, FontSmall, inkAccent)
 
-	drawTextWithShadow(font, node.Desc, x+12, y+34, FontSmall, textHint)
+	drawTextWithShadow(font, node.Desc, x+12, y+34, FontSmall, textDim)
 
 	var foot string
 	footCol := textMuted

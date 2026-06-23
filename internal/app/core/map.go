@@ -466,12 +466,14 @@ const (
 )
 
 // ElevationLevelFromChar decodes a cell byte to a STORED level ('0'..'9'→0..9,
-// 'A'..→10..), clamped to [0, MaxElevationLevel]; anything else reads as 0.
+// 'A'..ElevationChar(MaxElevationLevel)→10..MaxElevationLevel); anything outside
+// the legal alphabet reads as 0, agreeing with mapfile's validator (which rejects
+// chars above the same upper bound rather than letting them clamp to the max).
 func ElevationLevelFromChar(c byte) int {
 	switch {
 	case c >= '0' && c <= '9':
 		return Clamp(int(c-'0'), 0, MaxElevationLevel)
-	case c >= 'A' && c <= 'Z':
+	case c >= 'A' && c <= ElevationChar(MaxElevationLevel):
 		return Clamp(int(c-'A')+elevDigitSpan, 0, MaxElevationLevel)
 	}
 	return 0

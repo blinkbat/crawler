@@ -43,6 +43,13 @@ func (a *AreaDefinition) SolidAt(x, level, z int) (skin byte, solid bool) {
 	}
 	// Heightfield fallback: solid from 0 up to the stored top. Ramp tiles store
 	// their LOW level, so the solid block ends there (wedge drawn separately).
+	return a.heightfieldCellSkin(x, level, z)
+}
+
+// heightfieldCellSkin is the heightfield occupancy rule for one cell: solid
+// (skinned by FaceSkinAt) from level 0 up to the column's stored top, else air.
+// Single home for the rule SolidAt's fallback and BuildSolidsFromElevation share.
+func (a *AreaDefinition) heightfieldCellSkin(x, level, z int) (skin byte, solid bool) {
 	if level <= a.ElevationLevelAt(x, z) {
 		return a.FaceSkinAt(x, z), true
 	}
@@ -169,8 +176,8 @@ func BuildSolidsFromElevation(a *AreaDefinition) [][]string {
 		for z := 0; z < a.Height; z++ {
 			buf := make([]byte, a.Width)
 			for x := 0; x < a.Width; x++ {
-				if a.ElevationLevelAt(x, z) >= L {
-					buf[x] = a.FaceSkinAt(x, z)
+				if skin, solid := a.heightfieldCellSkin(x, L, z); solid {
+					buf[x] = skin
 				} else {
 					buf[x] = SolidAir
 				}

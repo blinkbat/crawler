@@ -86,6 +86,7 @@ const (
 	foeValueW     = float32(56)
 	foeTrackH     = float32(12)
 	foeColGap     = float32(26) // gutter between the two slider columns
+	foePickBtnH   = float32(28) // prev/next picker arrow height (< Name >)
 	// foePreviewZoomStep is the per-wheel-notch zoom dolly (clamped render-side).
 	foePreviewZoomStep = float32(0.2)
 	// sliderHitPadY fattens a thin track's click band vertically (draw unchanged).
@@ -202,12 +203,12 @@ func computeFoeViewLayout() foeViewLayout {
 
 	nameY := card.Y + foeHeaderH + foePad
 	pickBtnW := float32(32)
-	prevBtn := rl.NewRectangle(rightX, nameY, pickBtnW, 28)
-	nextBtn := rl.NewRectangle(rightX+rightW-pickBtnW, nameY, pickBtnW, 28)
+	prevBtn := rl.NewRectangle(rightX, nameY, pickBtnW, foePickBtnH)
+	nextBtn := rl.NewRectangle(rightX+rightW-pickBtnW, nameY, pickBtnW, foePickBtnH)
 
 	// Tab row (Layout / Asset). Both tabs lay out at the same contentTop; only the
 	// active one is drawn/hit-tested (gated on State.foeViewTab).
-	tabY := nameY + 28 + 10
+	tabY := nameY + foePickBtnH + 10
 	tabBtns := buttonRowAt(rightX, tabY, foeViewTabLabels)
 	contentTop := tabY + float32(modalBtnH) + 14
 
@@ -406,128 +407,33 @@ func navAdjustVisualTabs(s *State, layoutCursor *int, ov *core.EnemyVisualOverri
 	}
 }
 
-func updateFoeViewModal(s *State) Action {
-	if editorCancelPressed() {
-		render.CloseFoePreview()
-		render.ClearAssetPreview()
-		closeModal(s)
-		return ActionNone
+// foeViewCallbacks builds the Foe Visualizer's per-modal actions for the shared
+// driver. Name span opens a dropdown of all kinds (too many to cycle).
+func foeViewCallbacks(s *State) visualizerCallbacks {
+	return visualizerCallbacks{
+		drag:     &foeDrag,
+		override: &s.foeVisual,
+		cursor:   &s.foeCursor,
+		importPNG: func() {
+			importDroppedPNG(s, core.EnemySlug(s.foeKind),
+				func(path string) error { return render.ImportSpriteFromFile(s.foeKind, path) },
+				func() { render.ReloadFoeSprite(frameAssets, s.foeKind) })
+		},
+		cyclePrev: func() { cycleFoe(s, -1) },
+		cycleNext: func() { cycleFoe(s, +1) },
+		nameSpan:  func(span rl.Rectangle) { openDropdownBelow(s, ddFoeKind, span) },
+		save:      func() { saveFoeVisual(s) },
+		reset: func() {
+			s.foeVisual = s.foeBaseline
+			s.flash("Reset to last-saved values")
+		},
+		closePreview:   render.CloseFoePreview,
+		refreshPreview: func() { render.RefreshFoeAssetPreview(frameAssets, s.foeKind, s.foeVisual) },
 	}
-
-	// A dropped PNG imports as this foe's sprite.
-	importDroppedPNG(s, core.EnemySlug(s.foeKind),
-		func(path string) error { return render.ImportSpriteFromFile(s.foeKind, path) },
-		func() { render.ReloadFoeSprite(frameAssets, s.foeKind) })
-
-	l := computeFoeViewLayout()
-	// Read the cursor live — cached frameMouse is set in Draw and is one frame
-	// stale here (Update runs before Draw).
-	mp := rl.GetMousePosition()
-	mouseDown := rl.IsMouseButtonDown(rl.MouseLeftButton)
-	mousePressed := rl.IsMouseButtonPressed(rl.MouseLeftButton)
-	mouseReleased := rl.IsMouseButtonReleased(rl.MouseLeftButton)
-
-	// Layout-tab field drag (held only while down AND on the Layout tab).
-	foeDrag.slider.update(mouseDown && s.foeViewTab == foeTabLayout, len(foeFields), func(idx int) {
-		setFoeFieldFromTrack(s, idx, l.sliderTracks[idx], mp.X)
-		s.foeCursor = idx
-	})
-	// Asset-tab drag: same protocol, feeds the live preview.
-	foeDrag.asset.update(mouseDown && s.foeViewTab == foeTabAsset, len(assetFields), func(idx int) {
-		setFoeAssetFromTrack(s, idx, l.assetTracks[idx], mp.X)
-		s.assetCursor = idx
-	})
-
-	applyPreviewZoomWheel(s, l.preview, mp)
-
-	if mousePressed {
-		handleFoeViewClick(s, &l, mp)
-	}
-	if mouseReleased {
-		foeDrag.slider = noSliderDrag
-		foeDrag.asset = noSliderDrag
-	}
-
-	// Save on Confirm (Enter/Space). Do NOT bind 'S' — CursorUpDown uses it for
-	// "move down" (W/S nav), so an S-save would steal row navigation.
-	if editorCommitPressed() {
-		saveFoeVisual(s)
-		return ActionNone
-	}
-
-	navAdjustVisualTabs(s, &s.foeCursor, &s.foeVisual)
-	// Rebuild the live preview (shown on BOTH tabs) whenever the FX changed.
-	if s.assetPreviewStale {
-		render.RefreshFoeAssetPreview(frameAssets, s.foeKind, s.foeVisual)
-		s.assetPreviewStale = false
-	}
-	return ActionNone
 }
 
-// handleFoeViewClick dispatches a left-press: slider tracks (start a drag + set
-// value), the prev/next arrows, and Save/Reset/Close.
-func handleFoeViewClick(s *State, l *foeViewLayout, mp rl.Vector2) {
-	for i := range l.tabBtns {
-		if pointIn(mp, l.tabBtns[i]) {
-			selectFoeViewTab(s, i, &foeDrag)
-			return
-		}
-	}
-	if s.foeViewTab == foeTabLayout {
-		for i := range foeFields {
-			if pointIn(mp, padRect(l.sliderTracks[i], 0, sliderHitPadY)) {
-				foeDrag.slider.idx = i
-				setFoeFieldFromTrack(s, i, l.sliderTracks[i], mp.X)
-				s.foeCursor = i
-				return
-			}
-		}
-	}
-	if s.foeViewTab == foeTabAsset {
-		for i := range assetFields {
-			if pointIn(mp, padRect(l.assetTracks[i], 0, sliderHitPadY)) {
-				foeDrag.asset.idx = i
-				setFoeAssetFromTrack(s, i, l.assetTracks[i], mp.X)
-				s.assetCursor = i
-				return
-			}
-		}
-		for i := range l.assetBtns {
-			if !pointIn(mp, l.assetBtns[i]) {
-				continue
-			}
-			applyAssetAction(s, &s.foeVisual, i)
-			return
-		}
-	}
-	if pointIn(mp, l.prevFoeBtn) {
-		cycleFoe(s, -1)
-		return
-	}
-	if pointIn(mp, l.nextFoeBtn) {
-		cycleFoe(s, +1)
-		return
-	}
-	// Click the foe NAME (span between the arrows) to open a dropdown of all kinds.
-	if nameSpan := nameSpanBetween(l.prevFoeBtn, l.nextFoeBtn); pointIn(mp, nameSpan) {
-		openDropdownBelow(s, ddFoeKind, nameSpan)
-		return
-	}
-	if pointIn(mp, l.saveBtn) {
-		saveFoeVisual(s)
-		return
-	}
-	if pointIn(mp, l.resetBtn) {
-		s.foeVisual = s.foeBaseline
-		s.flash("Reset to last-saved values")
-		return
-	}
-	if pointIn(mp, l.closeBtn) {
-		render.CloseFoePreview()
-		render.ClearAssetPreview()
-		closeModal(s)
-		return
-	}
+func updateFoeViewModal(s *State) Action {
+	return updateVisualizerModal(s, foeViewCallbacks(s))
 }
 
 // selectFoeViewTab switches the active tab (shared by both modals), dropping any
@@ -543,18 +449,158 @@ func selectFoeViewTab(s *State, tab int, drag *struct{ slider, asset sliderDragS
 	drag.asset = noSliderDrag
 }
 
-// setFoeAssetFromTrack maps mouse X within an Asset-tab track to the adjustment
-// field (snapped) and flags the preview for rebuild.
-func setFoeAssetFromTrack(s *State, i int, track rl.Rectangle, mouseX float32) {
+// setVisualAssetFromTrack maps mouse X within an Asset-tab track to ov's
+// adjustment field (snapped) and flags the preview for rebuild. Shared.
+func setVisualAssetFromTrack(s *State, ov *core.EnemyVisualOverride, i int, track rl.Rectangle, mouseX float32) {
 	f := assetFields[i]
-	f.Set(&s.foeVisual, sliderSnap(f.Min, f.Max, f.Step, track.X, track.Width, mouseX))
+	f.Set(ov, sliderSnap(f.Min, f.Max, f.Step, track.X, track.Width, mouseX))
 	s.assetPreviewStale = true
 }
 
-// setFoeFieldFromTrack maps mouse X within a track to the field's range, snapped.
-func setFoeFieldFromTrack(s *State, i int, track rl.Rectangle, mouseX float32) {
+// setVisualFieldFromTrack maps mouse X within a track to ov's field range, snapped. Shared.
+func setVisualFieldFromTrack(ov *core.EnemyVisualOverride, i int, track rl.Rectangle, mouseX float32) {
 	f := foeFields[i]
-	f.Set(&s.foeVisual, sliderSnap(f.Min, f.Max, f.Step, track.X, track.Width, mouseX))
+	f.Set(ov, sliderSnap(f.Min, f.Max, f.Step, track.X, track.Width, mouseX))
+}
+
+// visualizerCallbacks captures everything that differs between the Foe and Party
+// Visualizers so updateVisualizerModal / handleVisualizerClick can drive both. The
+// override pointer (s.foeVisual / s.partyVisual) and cursor (s.foeCursor /
+// s.partyCursor) are shared; the rest are per-modal actions.
+type visualizerCallbacks struct {
+	drag           *struct{ slider, asset sliderDragState }
+	override       *core.EnemyVisualOverride
+	cursor         *int
+	importPNG      func()             // import a dropped PNG as this entity's sprite
+	cyclePrev      func()             // prev/next picker arrow
+	cycleNext      func()             //
+	nameSpan       func(rl.Rectangle) // click the name span (cycle vs open dropdown)
+	save           func()             // Save button / Confirm key
+	reset          func()             // Reset button
+	closePreview   func()             // render close call on Esc / Close button
+	refreshPreview func()             // rebuild the asset preview when stale
+}
+
+// updateVisualizerModal drives one frame of either Visualizer from its callbacks.
+// Behavior-identical to the old per-modal updaters; only the cb fields differ.
+func updateVisualizerModal(s *State, cb visualizerCallbacks) Action {
+	if editorCancelPressed() {
+		cb.closePreview()
+		render.ClearAssetPreview()
+		closeModal(s)
+		return ActionNone
+	}
+
+	cb.importPNG()
+
+	l := computeFoeViewLayout()
+	// Read the cursor live — cached frameMouse is set in Draw and is one frame
+	// stale here (Update runs before Draw).
+	mp := rl.GetMousePosition()
+	mouseDown := rl.IsMouseButtonDown(rl.MouseLeftButton)
+	mousePressed := rl.IsMouseButtonPressed(rl.MouseLeftButton)
+	mouseReleased := rl.IsMouseButtonReleased(rl.MouseLeftButton)
+
+	// Layout-tab field drag (held only while down AND on the Layout tab).
+	cb.drag.slider.update(mouseDown && s.foeViewTab == foeTabLayout, len(foeFields), func(idx int) {
+		setVisualFieldFromTrack(cb.override, idx, l.sliderTracks[idx], mp.X)
+		*cb.cursor = idx
+	})
+	// Asset-tab drag: same protocol, feeds the live preview.
+	cb.drag.asset.update(mouseDown && s.foeViewTab == foeTabAsset, len(assetFields), func(idx int) {
+		setVisualAssetFromTrack(s, cb.override, idx, l.assetTracks[idx], mp.X)
+		s.assetCursor = idx
+	})
+
+	applyPreviewZoomWheel(s, l.preview, mp)
+
+	if mousePressed {
+		handleVisualizerClick(s, &l, mp, cb)
+	}
+	if mouseReleased {
+		cb.drag.slider = noSliderDrag
+		cb.drag.asset = noSliderDrag
+	}
+
+	// Save on Confirm (Enter/Space). Do NOT bind 'S' — CursorUpDown uses it for
+	// "move down" (W/S nav), so an S-save would steal row navigation.
+	if editorCommitPressed() {
+		cb.save()
+		return ActionNone
+	}
+
+	navAdjustVisualTabs(s, cb.cursor, cb.override)
+	// Rebuild the live preview (shown on BOTH tabs) whenever the FX changed.
+	if s.assetPreviewStale {
+		cb.refreshPreview()
+		s.assetPreviewStale = false
+	}
+	return ActionNone
+}
+
+// handleVisualizerClick dispatches a left-press for either Visualizer: tab row,
+// active-tab sliders/buttons, the prev/next arrows + name span, then
+// Save/Reset/Close. Behavior-identical to the old per-modal click handlers.
+func handleVisualizerClick(s *State, l *foeViewLayout, mp rl.Vector2, cb visualizerCallbacks) {
+	for i := range l.tabBtns {
+		if pointIn(mp, l.tabBtns[i]) {
+			selectFoeViewTab(s, i, cb.drag)
+			return
+		}
+	}
+	if s.foeViewTab == foeTabLayout {
+		for i := range foeFields {
+			if pointIn(mp, padRect(l.sliderTracks[i], 0, sliderHitPadY)) {
+				cb.drag.slider.idx = i
+				setVisualFieldFromTrack(cb.override, i, l.sliderTracks[i], mp.X)
+				*cb.cursor = i
+				return
+			}
+		}
+	}
+	if s.foeViewTab == foeTabAsset {
+		for i := range assetFields {
+			if pointIn(mp, padRect(l.assetTracks[i], 0, sliderHitPadY)) {
+				cb.drag.asset.idx = i
+				setVisualAssetFromTrack(s, cb.override, i, l.assetTracks[i], mp.X)
+				s.assetCursor = i
+				return
+			}
+		}
+		for i := range l.assetBtns {
+			if !pointIn(mp, l.assetBtns[i]) {
+				continue
+			}
+			applyAssetAction(s, cb.override, i)
+			return
+		}
+	}
+	if pointIn(mp, l.prevFoeBtn) {
+		cb.cyclePrev()
+		return
+	}
+	if pointIn(mp, l.nextFoeBtn) {
+		cb.cycleNext()
+		return
+	}
+	if nameSpan := nameSpanBetween(l.prevFoeBtn, l.nextFoeBtn); pointIn(mp, nameSpan) {
+		cb.nameSpan(nameSpan)
+		return
+	}
+	if pointIn(mp, l.saveBtn) {
+		cb.save()
+		return
+	}
+	if pointIn(mp, l.resetBtn) {
+		cb.reset()
+		return
+	}
+	if pointIn(mp, l.closeBtn) {
+		cb.closePreview()
+		render.ClearAssetPreview()
+		closeModal(s)
+		return
+	}
 }
 
 // padRect grows r by (dx, dy) on every side (fatter click band for thin tracks).

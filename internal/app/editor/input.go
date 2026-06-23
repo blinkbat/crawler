@@ -1034,7 +1034,7 @@ func openSaveAsModal(s *State) {
 }
 
 // openValidateModal snapshots reachability + cross-map door + dialog warnings
-// into the modal (vs. the 4-row metadata-panel cap).
+// into the modal (vs. the metadata-panel's reachBadgeMaxRows cap).
 func openValidateModal(s *State) {
 	rows := append([]string{}, reachabilityWarnings(s.area)...)
 	rows = append(rows, crossMapDoorWarnings(s.area)...)
@@ -1061,7 +1061,7 @@ var textFieldConfigs = map[focusField]textFieldConfig{
 	focusName:         {defaultTextFieldMaxLen, acceptPrintable},
 	focusLocationName: {defaultTextFieldMaxLen, acceptPrintable},
 	focusQuiet:        {defaultTextFieldMaxLen, acceptPrintable},
-	focusFilename: {defaultTextFieldMaxLen, acceptPrintable},
+	focusFilename:     {defaultTextFieldMaxLen, acceptPrintable},
 	// Door identifier fields reject spaces — the .map door row is space-delimited.
 	focusDoorName:       {defaultTextFieldMaxLen, acceptPrintableNoSpace},
 	focusDoorTargetMap:  {defaultTextFieldMaxLen, acceptPrintableNoSpace},
