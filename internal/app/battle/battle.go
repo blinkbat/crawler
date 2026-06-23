@@ -458,10 +458,17 @@ func startActorTurn(g *core.GameState) {
 
 		if actor.IsParty {
 			beginPartyTurn(g, actor.Index)
-		} else {
-			beginEnemyAttack(g, actor.Index)
+			return
 		}
-		return
+		if beginEnemyAttack(g, actor.Index) {
+			return
+		}
+		// Covered back-row foe with no reaching attack — pass its turn (elapses
+		// statuses/DoT + advances the queue, like a slept actor).
+		if advanceSkippedTurn(g, actor) {
+			return
+		}
+		continue
 	}
 }
 
@@ -861,24 +868,32 @@ func resolveTimingBar(g *core.GameState, onResolve func()) bool {
 
 // beginEnemyAttack arms the defend bar against the enemy at slot (index into the
 // active pack's Members).
-func beginEnemyAttack(g *core.GameState, slot int) {
+func beginEnemyAttack(g *core.GameState, slot int) bool {
+	// Pick the turn's action first (casters may cast instead of melee; SkillNone =
+	// plain melee), so the reach gate below can see whether this turn even needs reach.
+	enemy := core.BattleMemberAt(g, slot)
+	skill := core.SkillNone
+	if enemy != nil {
+		skill = enemyAIPickSkill(g, *enemy, slot)
+	}
+	// Melee reach gate — the mirror of the party's BackRowMeleeBlocked. A plain-melee
+	// swing from a foe NOT in the effective front (a covered back-row foe) can't
+	// connect; with no reaching skill this turn it simply can't act. Fair is fair: it
+	// passes (back ranks are for casters/rangers, who cast through any row).
+	if skill == core.SkillNone && !core.EnemyInEffectiveFront(core.BattleMembers(g), slot) {
+		return false
+	}
 	g.Battle.EnemyAttacker = slot
 	g.Battle.TimingFlash = 0
 	g.Battle.TimingIntro = core.EnemyTurnIntro
 	g.Battle.Phase = core.BattleEnemyTiming
-	// Pick a skill: casters may cast instead of melee (SkillNone = plain melee).
-	// Spell casts skip the defend bar entirely (no timing block on a cast yet).
-	enemy := core.BattleMemberAt(g, slot)
-	g.Battle.EnemyPendingSkill = core.SkillNone
+	g.Battle.EnemyPendingSkill = skill
 	g.Battle.EnemyAttackMisses = false
-	if enemy != nil {
-		g.Battle.EnemyPendingSkill = enemyAIPickSkill(g, *enemy, slot)
-	}
-	if g.Battle.EnemyPendingSkill != core.SkillNone {
+	if skill != core.SkillNone {
 		// Pre-resolve Timing so the defend bar never arms — the intro elapses and
 		// resolveAndFinish routes through resolveEnemySpell.
 		g.Battle.Timing = core.TimingState{Resolved: true}
-		return
+		return true
 	}
 	// Plain melee: roll accuracy NOW, before the defend bar. A clean whiff has
 	// nothing to defend, so skip the minigame (same Resolved=true short-circuit) and
@@ -886,9 +901,10 @@ func beginEnemyAttack(g *core.GameState, slot int) {
 	if enemy != nil && !core.RollEnemyHit(g.Rand(), core.EffectiveEnemyStats(enemy)) {
 		g.Battle.EnemyAttackMisses = true
 		g.Battle.Timing = core.TimingState{Resolved: true}
-		return
+		return true
 	}
 	g.Battle.Timing = core.NewTimingState(g.Rand(), core.DefendTimingDuration)
+	return true
 }
 
 // enemyAIPickSkill picks a skill for the enemy's turn, or SkillNone (plain melee).

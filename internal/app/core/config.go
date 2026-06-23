@@ -886,6 +886,8 @@ const (
 	// DebugMenuCombatTune opens the Combat Tuning sub-submenu (camera/foe/party
 	// placement sliders).
 	DebugMenuCombatTune
+	// DebugMenuWipe opens the Screen Wipe FX sub-submenu (battle-entry transitions).
+	DebugMenuWipe
 	DebugMenuClose
 )
 

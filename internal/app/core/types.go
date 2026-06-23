@@ -362,6 +362,14 @@ type GameState struct {
 	CombatTuneOpen  bool
 	CombatTuneIndex int
 	BattleTuning    BattleTuning
+	// WipeMenuOpen: Debug ▸ Screen Wipe FX sub-submenu showing; WipeMenuIndex its
+	// cursor. BattleWipe = the selected entry transition (played on battle start);
+	// BattleWipePreview is a countdown that plays the wipe over the field for the
+	// debug preview. Runtime debug prefs (not in SaveData), kept across Restart.
+	WipeMenuOpen     bool
+	WipeMenuIndex    int
+	BattleWipe       BattleWipeKind
+	BattleWipePreview float32
 	// RetroFilterSky: true (default) captures the skybox inside the filter pass;
 	// false draws it crisp with the filtered environment blitted over.
 	RetroFilterSky bool

@@ -1,6 +1,8 @@
 package render
 
 import (
+	"math"
+
 	"crawler/internal/app/core"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -66,7 +68,8 @@ func (p *previewRT) blitTinted(rect rl.Rectangle, tint rl.Color) {
 // visualizerGroundSize: diorama floor extent + grid slice count (Foe + Party).
 const visualizerGroundSize = float32(14)
 
-// previewFovy is the shared vertical FOV for every preview camera.
+// previewFovy is the vertical FOV for the object (prop) preview diorama. The foe/party
+// previews now derive their FOV from the battle tuning instead (see foePreviewCamera).
 const previewFovy = float32(46)
 
 // beginVisualizerScene opens the off-screen 3D pass: bind, clear, enter 3D, lay
@@ -100,15 +103,20 @@ var (
 	gizmoNumberColor   = rl.NewColor(255, 232, 120, 220)
 )
 
-// foePreviewCamera is the fixed three-quarter diorama camera (back along +Z,
-// slightly up). Forward points into −Z, so a positive depthOffset pushes the
-// sprite away, matching the battle "back into the arena" read.
+// foePreviewCamera is the diorama camera, derived from the DEFAULT battle tuning so
+// the preview reads at the SAME downward tilt + FOV combat does (back along +Z, the
+// look pitched down by |CamPitch|). Forward points into −Z, so a positive depthOffset
+// pushes the sprite away, matching the battle "back into the arena" read.
 func foePreviewCamera() rl.Camera3D {
+	tune := core.DefaultBattleTuning()
+	pitch := float64(-tune.CamPitch) // battle tilt magnitude (looking down)
+	const dist = float32(4.4)
+	target := rl.NewVector3(0, 0.85, 0)
 	return rl.Camera3D{
-		Position:   rl.NewVector3(0, 1.45, 4.4),
-		Target:     rl.NewVector3(0, 0.85, 0),
+		Position:   rl.NewVector3(0, target.Y+dist*float32(math.Sin(pitch)), dist*float32(math.Cos(pitch))),
+		Target:     target,
 		Up:         rl.NewVector3(0, 1, 0),
-		Fovy:       previewFovy,
+		Fovy:       tune.CamFOV,
 		Projection: rl.CameraPerspective,
 	}
 }
@@ -183,9 +191,11 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 
 	foePreviewRT.beginVisualizerScene(cam)
 
-	// Same per-kind placement as the battle roster via the shared helper, so the
-	// preview matches drawBattlePack's ordering by construction.
-	place := resolveBillboardPlacement(cam, foeAnchor, &v)
+	// Foot-anchor the sprite + cursor exactly like drawBattlePack (feet on FoeFloorY,
+	// not floating at the formation center), so the preview matches battle grounding.
+	// Gizmos below stay at foeAnchor — the battle VFX origin (formation center).
+	spriteAnchor := rl.NewVector3(foeAnchor.X, core.DefaultBattleTuning().FoeFloorY+v.size.Y/2, foeAnchor.Z)
+	place := resolveBillboardPlacement(cam, spriteAnchor, &v)
 	if v.shadowRadius > 0 {
 		drawGroundShadow(place.shadowX, place.shadowZ, v.shadowRadius)
 	}

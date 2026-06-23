@@ -314,10 +314,13 @@ func Camera(g *core.GameState) rl.Camera3D {
 	}
 	// FOV eases between the wide walking FOV and the combat FOV on the same blend.
 	fov := exploreFOV + (battleTune.CamFOV-exploreFOV)*battleCamBlend
+	// Screen-wipe camera FX (Zoom/Spin/Wobble) ride on top during the entry/preview
+	// window; identity otherwise. direction is unit, so it's a valid roll axis.
+	up, fov := battleWipeCamera(g, direction, fov)
 	return rl.NewCamera3D(
 		position,
 		rl.NewVector3(position.X+direction.X, position.Y+direction.Y, position.Z+direction.Z),
-		rl.NewVector3(0, 1, 0),
+		up,
 		fov,
 		rl.CameraPerspective,
 	)
@@ -1738,11 +1741,15 @@ func drawDepthIndependent(draw func()) {
 	rl.EnableDepthTest()
 }
 
+// battleCursorScale shrinks every selector pyramid (enemy-target / friendly /
+// incoming-hit) uniformly — half size reads as a cursor, not a billboard accessory.
+const battleCursorScale = float32(0.5)
+
 // drawMarker anchors the pyramid tip at unitPos + style.tipYOffset and forwards
-// to drawSelectorPyramid.
+// to drawSelectorPyramid (shrunk by battleCursorScale).
 func drawMarker(unitPos rl.Vector3, style markerStyle) {
 	tip := rl.NewVector3(unitPos.X, unitPos.Y+style.tipYOffset, unitPos.Z)
-	drawSelectorPyramid(tip, style.height, style.baseRadius, style.color, style.phase)
+	drawSelectorPyramid(tip, style.height*battleCursorScale, style.baseRadius*battleCursorScale, style.color, style.phase)
 }
 
 func enemyVisualFor(assets Resources, kind core.EnemyKind) (enemyVisual, bool) {

@@ -133,20 +133,13 @@ func stickEdgeX(dir int) bool {
 	return stickEdge(stickEdgeRight)
 }
 
-// stickHeldY / stickHeldX are the level (held-past-threshold) reads powering
-// hold-to-move. dir = -1 up/left, +1 down/right.
+// stickHeldY is the level (held-past-threshold) read powering hold-to-move forward
+// / back. dir = -1 up, +1 down. (Left-stick X no longer strafes — turning is L/R.)
 func stickHeldY(dir int) bool {
 	if dir < 0 {
 		return stickNow[stickEdgeUp]
 	}
 	return stickNow[stickEdgeDown]
-}
-
-func stickHeldX(dir int) bool {
-	if dir < 0 {
-		return stickNow[stickEdgeLeft]
-	}
-	return stickNow[stickEdgeRight]
 }
 
 // --- High-level semantic actions ---------------------------------------------
@@ -442,14 +435,6 @@ func StepForwardHeld() bool {
 func StepBackHeld() bool {
 	return rl.IsKeyDown(rl.KeyDown) || rl.IsKeyDown(rl.KeyS) ||
 		padDown(rl.GamepadButtonLeftFaceDown) || stickHeldY(1)
-}
-
-func StrafeLeftHeld() bool {
-	return rl.IsKeyDown(rl.KeyA) || stickHeldX(-1)
-}
-
-func StrafeRightHeld() bool {
-	return rl.IsKeyDown(rl.KeyD) || stickHeldX(1)
 }
 
 func TurnLeftHeld() bool {

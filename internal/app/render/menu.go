@@ -82,6 +82,7 @@ var debugMenuRows = []debugMenuRow{
 	}},
 	{Item: core.DebugMenuStartDialog, Label: func(*core.GameState) string { return "Start Dialog" }},
 	{Item: core.DebugMenuCombatTune, Label: func(*core.GameState) string { return "Combat Tuning ▸" }},
+	{Item: core.DebugMenuWipe, Label: func(g *core.GameState) string { return "Screen Wipe FX ▸ (" + core.BattleWipeName(g.BattleWipe) + ")" }},
 	{Item: core.DebugMenuClose, Label: func(*core.GameState) string { return "Close" }},
 }
 
@@ -147,6 +148,26 @@ func drawOptionsMenuOverlay(g *core.GameState, assets Resources) {
 	drawTitledMenuCard(assets, "OPTIONS", pauseMenuPanelW, len(optionsMenuRows),
 		func(i int) string { return optionsMenuRows[i].Label(g) },
 		func(i int) bool { return g.OptionsMenuIndex == int(optionsMenuRows[i].Item) })
+}
+
+// drawWipeMenuOverlay paints the Screen Wipe FX submenu: one row per wipe kind (the
+// active one flagged), then Close. Confirm previews + selects (explore side).
+func drawWipeMenuOverlay(g *core.GameState, assets Resources) {
+	drawTitledMenuCard(assets, "SCREEN WIPE FX", pauseMenuPanelW, core.BattleWipeMenuCount(),
+		func(i int) string { return wipeMenuRowLabel(g, i) },
+		func(i int) bool { return g.WipeMenuIndex == i })
+}
+
+// wipeMenuRowLabel labels a Screen Wipe FX row; the active kind gets an "active" flag.
+func wipeMenuRowLabel(g *core.GameState, i int) string {
+	if i == core.BattleWipeCloseRow() {
+		return "Close"
+	}
+	label := core.BattleWipeName(core.BattleWipeKind(i))
+	if core.BattleWipeKind(i) == g.BattleWipe {
+		label += "  · active"
+	}
+	return label
 }
 
 // drawDebugMenuOverlay paints the debug submenu via the shared menu-card chrome.

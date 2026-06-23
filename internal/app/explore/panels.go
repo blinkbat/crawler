@@ -98,9 +98,38 @@ func updatePanels(g *core.GameState) {
 	}
 	switch g.PanelsTab {
 	case core.PanelTabCharacter:
-		// Left/Right moves the member column; Confirm on a member with unspent
-		// stat points opens the level-up modal (which closes the overlay itself).
-		g.PanelsRowCursor = input.CursorLeftRightWrap(g.PanelsRowCursor, len(g.Party))
+		// 2-D cursor over the formation grid: a D-pad/arrow press moves to the
+		// orthogonal neighbour's member (by home slot), mirroring the on-screen 2×2.
+		// Confirm on a member with unspent stat points opens the level-up modal.
+		if core.PartyIndexInRange(g.Party, g.PanelsRowCursor) {
+			row, col := g.Party[g.PanelsRowCursor].HomeRow, g.Party[g.PanelsRowCursor].HomeCol
+			switch {
+			case input.UpPressed():
+				if row == core.RowBack {
+					if idx, ok := homeSlotMember(g, core.RowFront, col); ok {
+						g.PanelsRowCursor = idx
+					}
+				}
+			case input.DownPressed():
+				if row == core.RowFront {
+					if idx, ok := homeSlotMember(g, core.RowBack, col); ok {
+						g.PanelsRowCursor = idx
+					}
+				}
+			case input.CursorLeftRight() == -1:
+				if col == core.ColRight {
+					if idx, ok := homeSlotMember(g, row, core.ColLeft); ok {
+						g.PanelsRowCursor = idx
+					}
+				}
+			case input.CursorLeftRight() == 1:
+				if col == core.ColLeft {
+					if idx, ok := homeSlotMember(g, row, core.ColRight); ok {
+						g.PanelsRowCursor = idx
+					}
+				}
+			}
+		}
 		if input.ConfirmPressed() {
 			if m, ok := validMember(g, g.PanelsRowCursor); ok && m.PendingLevelUps > 0 {
 				closePanels(g)
@@ -183,6 +212,17 @@ func updatePanels(g *core.GameState) {
 		// tab without a case would silently accept no input. Fail loudly.
 		panic("explore: updatePanels missing input case for PanelTab")
 	}
+}
+
+// homeSlotMember returns the party index whose preferred (home) slot is (row,col),
+// or false if none — drives the Character tab's 2×2 formation-grid navigation.
+func homeSlotMember(g *core.GameState, row core.Row, col core.Col) (int, bool) {
+	for i := range g.Party {
+		if g.Party[i].HomeRow == row && g.Party[i].HomeCol == col {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 // setPanelTab switches the active tab and resets the per-tab cursor (map zoom is

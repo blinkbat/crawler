@@ -31,6 +31,9 @@ func drawSceneHUD(g *core.GameState, assets Resources) {
 		DrawPartyRibbon(g, assets)
 		drawTimingBar(g, assets)
 		drawBattleSplash(g, assets)
+		// Overlay-based wipe FX (Tint/Flash/Vignette) sit on top during the entry
+		// window; camera-based kinds rode the camera already.
+		DrawBattleWipeOverlay(g, assets)
 		// Spoils card gates internally on the won-battle window; safe to call every frame.
 		DrawVictorySpoils(g, assets)
 		return
@@ -40,6 +43,8 @@ func drawSceneHUD(g *core.GameState, assets Resources) {
 	drawActionLogPanel(g, assets)
 	DrawPartyRibbon(g, assets)
 	drawGoldReadout(g, assets)
+	// Debug ▸ Screen Wipe FX preview plays over the field (overlay kinds).
+	DrawBattleWipeOverlay(g, assets)
 }
 
 // goldReadout caches the formatted "<n> G" label so the per-frame draw doesn't re-Sprintf an unchanged total.

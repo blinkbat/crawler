@@ -19,6 +19,13 @@ func Update(g *core.GameState) {
 	// Weather tint eases every frame, before the early-returns below, so the wash
 	// keeps catching up while a panel/battle is up (pure visual catch-up).
 	core.TickWeather(g, dt)
+	// Screen Wipe FX preview countdown — ticks even with the debug submenu open so the
+	// previewed effect plays over the field.
+	if g.BattleWipePreview > 0 {
+		if g.BattleWipePreview -= dt; g.BattleWipePreview < 0 {
+			g.BattleWipePreview = 0
+		}
+	}
 
 	// Modal dispatch order is ActiveModal's enum ladder (single source of truth).
 	// LevelUp has no Esc-out; Panels open is out-of-battle only; Chest Esc closes
@@ -50,6 +57,9 @@ func Update(g *core.GameState) {
 		return
 	case core.ModalCombatTune:
 		updateCombatTuneMenu(g)
+		return
+	case core.ModalWipeMenu:
+		updateWipeMenu(g)
 		return
 	case core.ModalDebugMenu:
 		updateDebugMenu(g)
@@ -276,6 +286,8 @@ func updateDebugMenu(g *core.GameState) {
 			openRetroMenu(g)
 		case core.DebugMenuCombatTune:
 			openCombatTuneMenu(g)
+		case core.DebugMenuWipe:
+			openWipeMenu(g)
 		case core.DebugMenuStartDialog:
 			startFirstAreaDialog(g)
 		case core.DebugMenuClose:
@@ -324,6 +336,26 @@ func updateRetroMenu(g *core.GameState) {
 			core.AdjustRetroFilter(&g.RetroFilters[adjustRow], delta)
 		}
 	}
+}
+
+// openWipeMenu swaps the Debug submenu for the Screen Wipe FX sub-submenu.
+func openWipeMenu(g *core.GameState) {
+	g.DebugMenuOpen = false
+	g.WipeMenuOpen = true
+	g.WipeMenuIndex = 0
+}
+
+// updateWipeMenu drives the Screen Wipe FX submenu: each row is a wipe kind (Confirm
+// selects it AND plays a preview over the field), then Close. Back returns to explore.
+func updateWipeMenu(g *core.GameState) {
+	updateLeafMenu(&g.WipeMenuOpen, &g.WipeMenuIndex, core.BattleWipeMenuCount(), func(item int) {
+		if item == core.BattleWipeCloseRow() {
+			g.WipeMenuOpen = false
+			return
+		}
+		g.BattleWipe = core.BattleWipeKind(item)
+		g.BattleWipePreview = core.BattleWipePreviewSeconds // play it now over the field
+	})
 }
 
 // openCombatTuneMenu swaps the Debug submenu for the Combat Tuning sub-submenu (live
@@ -495,13 +527,9 @@ func updatePlayer(g *core.GameState, dt float32) {
 		startTurn(p, 1)
 		turnRepeatCooldown = core.TurnRepeatDelay
 	case input.StepForwardHeld():
-		startStep(p, g, 0, 1)
+		startStep(p, g, 1)
 	case input.StepBackHeld():
-		startStep(p, g, 0, -1)
-	case input.StrafeLeftHeld():
-		startStep(p, g, -1, 0)
-	case input.StrafeRightHeld():
-		startStep(p, g, 1, 0)
+		startStep(p, g, -1)
 	}
 
 	// Advance a freshly-armed step/turn by dt on the SAME frame it starts so
@@ -512,15 +540,14 @@ func updatePlayer(g *core.GameState, dt float32) {
 	}
 }
 
-func startStep(p *core.Player, g *core.GameState, strafe, forward int) {
+func startStep(p *core.Player, g *core.GameState, forward int) {
 	// The tile the player stands on entering this step — where a successful Flee
 	// retreats to. For a step-into-pack engage this stays the current tile; for a
 	// pack-ambush engage it's the pre-step tile, so fleeing steps off the pack.
 	fleeFromX, fleeFromZ := p.TileX, p.TileZ
 	dx, dz := core.FacingVector(p.Facing)
-	rx, rz := core.FacingVector(core.NormalizeFacing(p.Facing + 1))
-	targetX := p.TileX + dx*forward + rx*strafe
-	targetZ := p.TileZ + dz*forward + rz*strafe
+	targetX := p.TileX + dx*forward
+	targetZ := p.TileZ + dz*forward
 	// Step-into-pack starts a battle WITHOUT moving. Checked BEFORE CanEnterTile
 	// so the engagement isn't swallowed by the generic blocker rule; pack-AI rolls
 	// only run when this branch doesn't fire. A pack on an unreachable cliff falls

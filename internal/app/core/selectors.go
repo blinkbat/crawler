@@ -291,6 +291,7 @@ const (
 	ModalDebugMenu
 	ModalRetroMenu
 	ModalCombatTune
+	ModalWipeMenu
 	ModalShop
 	ModalDoorPrompt
 	ModalChest
@@ -333,6 +334,8 @@ func ActiveModal(g *GameState) ModalKind {
 	case g.CombatTuneOpen:
 		// Child of the debug menu, same priority rationale as the retro submenu.
 		return ModalCombatTune
+	case g.WipeMenuOpen:
+		return ModalWipeMenu
 	case g.DebugMenuOpen:
 		return ModalDebugMenu
 	case g.OptionsMenuOpen:

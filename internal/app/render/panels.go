@@ -62,7 +62,7 @@ func footerHintMemberTabs() []HintSeg {
 func footerHintCharacterTab() []HintSeg {
 	return []HintSeg{
 		Hint("Tabs", GlyphLB, GlyphRB),
-		Hint("Member", GlyphLeftRight),
+		Hint("Move", GlyphUpDown, GlyphLeftRight),
 		Hint("Swap", GlyphX),
 		Hint("Close", GlyphB),
 	}
@@ -330,79 +330,108 @@ func drawPartyMemberCardHeader(font rl.Font, m core.PartyMember, col rl.Rectangl
 	return y
 }
 
-// drawPanelsStats renders the Stats tab: per member, header → 2-col stat grid → armor/XP row → status chip → allocate hints.
+// drawPanelsStats renders the Character tab as a 2×2 FORMATION grid: each member's
+// landscape card sits in its HomeRow/HomeCol quadrant (front rank on top, back on the
+// bottom), so the panel reads as the formation you arrange (Use/□ picks up + swaps
+// slots). Each card: identity + HP/MP on the left, stat grid + armor/XP/status right.
 func drawPanelsStats(g *core.GameState, assets Resources, body rl.Rectangle) {
 	font := assets.Font()
 	if len(g.Party) == 0 {
 		return
 	}
-	cols := memberColumnLayout(body, len(g.Party))
-	for i, m := range g.Party {
-		highlight := i == g.PanelsRowCursor
-		contentY := drawPartyMemberCardHeader(font, m, cols[i], highlight)
-		// Swap source (awaiting a partner) gets a green outline, distinct from the cursor's gilt ring.
-		if i == g.PanelSwapSource {
-			drawPanelOutline(int32(cols[i].X)-2, int32(cols[i].Y)-2, int32(cols[i].Width)+4, int32(cols[i].Height)+4, borderTarget)
+	gut := memberCardGutter
+	quadW := (body.Width - gut) / 2
+	quadH := (body.Height - gut) / 2
+	quadRect := func(row core.Row, col core.Col) rl.Rectangle {
+		x := body.X
+		if col == core.ColRight {
+			x += quadW + gut
 		}
-		innerX, innerW := memberCardInner(cols[i])
-
-		// Stat grid: 2 cols, ceil(StatCount/2) rows. Each cell: "[icon] LBL  value".
-		statColW := innerW / 2
-		rowH := float32(30)
-		statRows := (core.StatCount + 1) / 2
-		statIconCol := woodAccentIconBright
-		for s := core.Stat(0); s < core.StatCount; s++ {
-			row := int(s) / 2
-			col := int(s) % 2
-			cellX := innerX + float32(col)*statColW
-			cellY := contentY + float32(row)*rowH
-			label := core.StatLabel(s)
-			value := smallIntLabel(core.StatValue(m.Stats, s))
-			drawStatIcon(s, cellX+9, cellY+13, 9, statIconCol)
-			drawTextWithShadow(font, label, cellX+24, cellY, FontBody, textMuted)
-			drawTextRightAligned(font, value, cellX+statColW-statValueInsetX, cellY, FontBody, textPrimary)
+		y := body.Y
+		if row == core.RowBack {
+			y += quadH + gut
 		}
-		contentY += float32(statRows) * rowH
+		return rl.NewRectangle(x, y, quadW, quadH)
+	}
+	for i := range g.Party {
+		drawFormationCard(font, g, i, quadRect(g.Party[i].HomeRow, g.Party[i].HomeCol))
+	}
+}
 
-		// Armor + XP secondary row, muted.
-		contentY += 8
-		drawTextWithShadow(font, "ARM", innerX, contentY, FontSmall, textMuted)
-		armVal := smallIntLabel(m.Armor)
-		drawTextRightAligned(font, armVal, innerX+statColW-statValueInsetX, contentY, FontSmall, textPrimary)
+// drawFormationCard paints one member's landscape card in its 2×2 quadrant: class
+// glyph + name + Lv·row + HP/MP on the left; stat grid + armor/XP + status on the
+// right. Cursor = gilt focus ring; swap source (awaiting a partner) = green outline.
+func drawFormationCard(font rl.Font, g *core.GameState, i int, quad rl.Rectangle) {
+	m := g.Party[i]
+	highlight := i == g.PanelsRowCursor
+	classCol := classAccent(m.Class)
 
-		nextXP := core.XPForLevel(m.Level)
-		xpText := strconv.Itoa(m.XP) + " / " + strconv.Itoa(nextXP)
-		drawTextWithShadow(font, "XP", innerX+statColW, contentY, FontSmall, textMuted)
-		drawTextRightAligned(font, xpText, innerX+innerW, contentY, FontSmall, textPrimary)
-		contentY += 28
+	cardBG := glassMid
+	if highlight {
+		cardBG = selectedGlassTint(glassMid, 0.9)
+	}
+	drawGlassPaneRect(quad, cardBG)
+	drawClassRail(int32(quad.X), int32(quad.Y)+6, stripeWidth, int32(quad.Height)-12, classCol)
+	if highlight {
+		drawGiltFocusRing(quad)
+	}
+	if i == g.PanelSwapSource {
+		drawPanelOutline(int32(quad.X)-2, int32(quad.Y)-2, int32(quad.Width)+4, int32(quad.Height)+4, borderTarget)
+	}
 
-		// Status chip — pill in the per-status accent color.
-		if kind, turns := core.PartyStatus(&g.Party[i]); kind != core.PartyStatusNone {
-			label := partyStatusTurnLabel(kind, turns)
-			lm := measurePanelStatValue(font, label, FontSmall)
-			chipW := lm.X + 20
-			chipH := float32(26)
-			chipX := innerX
-			col, _ := partyStatusVisual(kind)
-			// Shares drawStatusPill with the enemy-roster pill; left-aligned.
-			drawStatusPill(font, chipX, contentY, chipW, chipH,
-				fadeColor(col, 0.28), fadeColor(col, 0.85), label, col, false)
-			contentY += chipH + 8
-		}
+	pad := memberCardGutter
+	leftX := quad.X + pad
+	leftW := quad.Width*0.44 - pad
+	rightX := quad.X + quad.Width*0.46
+	rightW := quad.Width*0.54 - pad
 
-		// Allocate hint: cursored member only, only when there's something to spend; bottom-of-card CTA.
-		if highlight && (m.PendingLevelUps > 0 || m.SkillPoints > 0) {
-			hintY := cols[i].Y + cols[i].Height - 60
-			if m.PendingLevelUps > 0 {
-				// Gamepad-first: CTA reads as the Confirm glyph (A/Z opens the level-up modal — explore/panels.go).
-				label := "allocate " + strconv.Itoa(m.PendingLevelUps) + " stat pt" + plural(m.PendingLevelUps)
-				drawHintSegs(font, []HintSeg{Hint(label, GlyphA)}, innerX, hintY, FontSmall, inkAccent, 1)
-				hintY += 24
-			}
-			if m.SkillPoints > 0 {
-				hint := strconv.Itoa(m.SkillPoints) + " skill pt" + plural(m.SkillPoints) + "  (Skills tab)"
-				drawTextWithShadow(font, hint, innerX, hintY, FontSmall, inkAccent)
-			}
+	// --- Left: identity + vitals ---
+	y := quad.Y + 16
+	nameCol := textPrimary
+	if !highlight {
+		nameCol = textMuted
+	}
+	glyphR := float32(12)
+	drawClassGlyph(leftX+glyphR, y+FontHeading/2, glyphR, m.Class, classCol)
+	drawEngravedText(font, m.Name, leftX+glyphR*2+12, y, FontHeading, nameCol)
+	y += 34
+	drawTextWithShadow(font, "Lv "+strconv.Itoa(m.Level)+" · "+core.RowLabel(m.HomeRow), leftX, y, FontBody, textMuted)
+	y += 30
+	drawBar(font, leftX, y, leftW, barHeightCompact, "HP", m.HP, m.MaxHP, hpFillColor(m.HP, m.MaxHP), m.HP <= 0)
+	y += 34
+	drawBar(font, leftX, y, leftW, barHeightCompact, "MP", m.MP, m.MaxMP, barMP, m.HP <= 0)
+	y += 38
+	if kind, turns := core.PartyStatus(&g.Party[i]); kind != core.PartyStatusNone {
+		label := partyStatusTurnLabel(kind, turns)
+		chipW := measurePanelStatValue(font, label, FontSmall).X + 20
+		col, _ := partyStatusVisual(kind)
+		drawStatusPill(font, leftX, y, chipW, 26, fadeColor(col, 0.28), fadeColor(col, 0.85), label, col, false)
+	}
+
+	// --- Right: stat grid (2 cols × ceil(StatCount/2) rows) + armor/XP ---
+	statColW := rightW / 2
+	rowH := float32(28)
+	sy := quad.Y + 16
+	for s := core.Stat(0); s < core.StatCount; s++ {
+		cellX := rightX + float32(int(s)%2)*statColW
+		cellY := sy + float32(int(s)/2)*rowH
+		drawStatIcon(s, cellX+9, cellY+13, 9, woodAccentIconBright)
+		drawTextWithShadow(font, core.StatLabel(s), cellX+24, cellY, FontBody, textMuted)
+		drawTextRightAligned(font, smallIntLabel(core.StatValue(m.Stats, s)), cellX+statColW-statValueInsetX, cellY, FontBody, textPrimary)
+	}
+	ay := sy + float32((core.StatCount+1)/2)*rowH + 6
+	drawTextWithShadow(font, "ARM", rightX, ay, FontSmall, textMuted)
+	drawTextRightAligned(font, smallIntLabel(m.Armor), rightX+statColW-statValueInsetX, ay, FontSmall, textPrimary)
+	drawTextWithShadow(font, "XP", rightX+statColW, ay, FontSmall, textMuted)
+	drawTextRightAligned(font, strconv.Itoa(m.XP)+" / "+strconv.Itoa(core.XPForLevel(m.Level)), rightX+rightW, ay, FontSmall, textPrimary)
+
+	// Allocate CTA — cursored member with something to spend.
+	if highlight && (m.PendingLevelUps > 0 || m.SkillPoints > 0) {
+		hintY := quad.Y + quad.Height - 28
+		if m.PendingLevelUps > 0 {
+			drawHintSegs(font, []HintSeg{Hint("allocate "+strconv.Itoa(m.PendingLevelUps)+" stat pt"+plural(m.PendingLevelUps), GlyphA)}, rightX, hintY, FontSmall, inkAccent, 1)
+		} else if m.SkillPoints > 0 {
+			drawTextWithShadow(font, strconv.Itoa(m.SkillPoints)+" skill pt"+plural(m.SkillPoints)+" (Skills tab)", rightX, hintY, FontSmall, inkAccent)
 		}
 	}
 }
