@@ -256,6 +256,19 @@ func (a *AreaDefinition) ResolveStep(fromX, fromL, fromZ, dir int) (toL int, ok 
 	return 0, false
 }
 
+// ResolveStepLanding resolves a one-tile cardinal step from (fromX,fromL,fromZ) heading
+// dir: the surface level the party lands on and whether the step is reachable (not a
+// cliff/blocked). Unifies the voxel (ResolveStep) and heightfield (StepElevationOK +
+// ElevationLevelAt) paths so movement callers don't branch on IsVoxel themselves. On a
+// heightfield the returned level is the destination column's elevation.
+func (a *AreaDefinition) ResolveStepLanding(fromX, fromL, fromZ, dir int) (landLevel int, reachable bool) {
+	if a.IsVoxel() {
+		return a.ResolveStep(fromX, fromL, fromZ, dir)
+	}
+	dx, dz := FacingVector(dir)
+	return a.ElevationLevelAt(fromX+dx, fromZ+dz), a.StepElevationOK(fromX, fromZ, dir)
+}
+
 // GroundSpawnLevel is the standing level a unit placed at (x,z) should occupy
 // (lowest standable surface, else column top). For out-of-package placement
 // (door transitions) building a player without a saved level.

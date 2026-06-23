@@ -40,28 +40,11 @@ func DrawDoorPrompt(g *core.GameState, assets Resources) {
 		target = core.MapIDFromPath(g.Area.Path)
 	}
 	dest := humanizeMapID(target)
-	panelW := int32(440)
-	panelH := int32(168)
-	// Shared centered-title modal shape (fleuron-free FontHeading confirm). Title measure
-	// is cached inside, skipping per-frame cgo MeasureTextEx on the held-prompt frames.
-	rect, _ := drawCenteredTitleCard(assets.hudFont, panelW, panelH, "DOORWAY", FontHeading, doorPromptHeaderInsetY, false)
-
-	cardCenterX := rect.X + rect.Width/2
-	drawTextCentered(assets.hudFont, "Travel to "+dest+"?",
-		cardCenterX, rect.Y+doorPromptBodyInsetY, FontBody, textMuted)
-	DrawHintBar(assets.hudFont, []HintSeg{
+	drawConfirmModal(assets.hudFont, "DOORWAY", "Travel to "+dest+"?", []HintSeg{
 		Hint("Enter", GlyphA),
 		Hint("Stay", GlyphB),
-	}, cardCenterX, rect.Y+rect.Height-doorPromptFooterInsetY, FontSmall)
+	})
 }
-
-// Door-prompt layout insets (Y from card top; footer from bottom). Its own tighter band rather
-// than the shared modal tokens — a smaller fleuron-free FontHeading confirm card.
-const (
-	doorPromptHeaderInsetY = float32(22)
-	doorPromptBodyInsetY   = float32(78)
-	doorPromptFooterInsetY = float32(40)
-)
 
 // humanizeMapID turns a bare map id ("forgotten_plaza") into a display label ("Forgotten Plaza");
 // empty id falls back to "the next area". Single-entry memo skips the FieldsFunc/Join allocs on

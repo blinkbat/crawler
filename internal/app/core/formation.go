@@ -13,6 +13,7 @@ type Row uint8
 const (
 	RowFront Row = iota
 	RowBack
+	RowCount // sentinel: number of formation ranks (battle swap navigation assumes 2)
 )
 
 // EnemyFrontRowCap / EnemyBackRowCap bound a foe pack's two ranks; EnemyPackCap is
@@ -174,6 +175,7 @@ type Col uint8
 const (
 	ColLeft Col = iota
 	ColRight
+	ColCount // sentinel: number of formation columns (battle swap navigation assumes 2)
 )
 
 // EngageSide is which side the enemies strike from at battle start. A side/back

@@ -311,39 +311,45 @@ func openRetroMenu(g *core.GameState) {
 	g.RetroMenuIndex = 0
 }
 
+// updateSliderLeafMenu drives a leaf submenu whose first sliderCount rows are
+// Left/Right-adjustable sliders (the trailing rows are actions). It snapshots the
+// cursored row BEFORE updateLeafMenu (which may move the cursor via Up/Down this same
+// frame) so the Left/Right adjust acts on the row drawn highlighted this frame, not the
+// one nav just moved to; the adjust is gated on still-open (Back may have closed it).
+func updateSliderLeafMenu(open *bool, index *int, count, sliderCount int, onConfirm func(item int), adjust func(row, delta int)) {
+	adjustRow := *index
+	updateLeafMenu(open, index, count, onConfirm)
+	if *open && adjustRow < sliderCount {
+		if delta := input.CursorLeftRight(); delta != 0 {
+			adjust(adjustRow, delta)
+		}
+	}
+}
+
 // updateRetroMenu drives the Retro Filters submenu. First RetroFilterCount rows
 // are intensity sliders (cursor == filter kind); filters LAYER (all applied in
 // one shader). Last rows are Reset All / Close. Back returns to explore.
 func updateRetroMenu(g *core.GameState) {
-	// Snapshot the cursored row BEFORE updateLeafMenu, which may move RetroMenuIndex
-	// via Up/Down this same frame — the Left/Right adjust below must act on the row
-	// drawn highlighted this frame, not the one nav just moved to.
-	adjustRow := g.RetroMenuIndex
-	updateLeafMenu(&g.RetroMenuOpen, &g.RetroMenuIndex, core.RetroMenuCount, func(item int) {
-		switch {
-		case item < int(core.RetroFilterCount):
-			core.ToggleRetroFilter(&g.RetroFilters, core.RetroFilterKind(item))
-		case item == core.RetroMenuSkyToggle:
-			g.RetroFilterSky = !g.RetroFilterSky
-		case item == core.RetroMenuSpriteToggle:
-			g.RetroFilterSprites = !g.RetroFilterSprites
-		case item == core.RetroMenuResetAll:
-			g.RetroFilters = core.DefaultRetroFilters()
-			g.RetroFilterSky = core.DefaultRetroFilterSky
-			g.RetroFilterSprites = core.DefaultRetroFilterSprites
-		case item == core.RetroMenuAllOff:
-			g.RetroFilters = [core.RetroFilterCount]float64{}
-		case item == core.RetroMenuClose:
-			g.RetroMenuOpen = false
-		}
-	})
-	// Fine intensity adjust on the cursored slider row. Gated on still-open
-	// (updateLeafMenu may have just closed it via Back).
-	if g.RetroMenuOpen && adjustRow < int(core.RetroFilterCount) {
-		if delta := input.CursorLeftRight(); delta != 0 {
-			core.AdjustRetroFilter(&g.RetroFilters[adjustRow], delta)
-		}
-	}
+	updateSliderLeafMenu(&g.RetroMenuOpen, &g.RetroMenuIndex, core.RetroMenuCount, int(core.RetroFilterCount),
+		func(item int) {
+			switch {
+			case item < int(core.RetroFilterCount):
+				core.ToggleRetroFilter(&g.RetroFilters, core.RetroFilterKind(item))
+			case item == core.RetroMenuSkyToggle:
+				g.RetroFilterSky = !g.RetroFilterSky
+			case item == core.RetroMenuSpriteToggle:
+				g.RetroFilterSprites = !g.RetroFilterSprites
+			case item == core.RetroMenuResetAll:
+				g.RetroFilters = core.DefaultRetroFilters()
+				g.RetroFilterSky = core.DefaultRetroFilterSky
+				g.RetroFilterSprites = core.DefaultRetroFilterSprites
+			case item == core.RetroMenuAllOff:
+				g.RetroFilters = [core.RetroFilterCount]float64{}
+			case item == core.RetroMenuClose:
+				g.RetroMenuOpen = false
+			}
+		},
+		func(row, delta int) { core.AdjustRetroFilter(&g.RetroFilters[row], delta) })
 }
 
 // openWipeMenu swaps the Debug submenu for the Screen Wipe FX sub-submenu.
@@ -380,28 +386,24 @@ func openCombatTuneMenu(g *core.GameState) {
 // Close. Mirrors updateRetroMenu (snapshot the cursored row before nav so the adjust
 // acts on the row drawn highlighted this frame).
 func updateCombatTuneMenu(g *core.GameState) {
-	adjustRow := g.CombatTuneIndex
-	updateLeafMenu(&g.CombatTuneOpen, &g.CombatTuneIndex, core.BattleTuneMenuCount(), func(item int) {
-		switch {
-		case item < core.BattleTuneSliderCount():
-			// Slider row: Confirm is a no-op; Left/Right (below) does the adjust.
-		case item == core.BattleTuneResetRow():
-			g.BattleTuning = core.DefaultBattleTuning()
-		case item == core.BattleTuneDumpRow():
-			if path, err := core.DumpBattleTuning(&g.BattleTuning); err == nil {
-				g.SetStatusMessage("Combat tuning written to " + path)
-			} else {
-				g.SetStatusMessage("Tuning dump failed: " + err.Error())
+	updateSliderLeafMenu(&g.CombatTuneOpen, &g.CombatTuneIndex, core.BattleTuneMenuCount(), core.BattleTuneSliderCount(),
+		func(item int) {
+			switch {
+			case item < core.BattleTuneSliderCount():
+				// Slider row: Confirm is a no-op; Left/Right (below) does the adjust.
+			case item == core.BattleTuneResetRow():
+				g.BattleTuning = core.DefaultBattleTuning()
+			case item == core.BattleTuneDumpRow():
+				if path, err := core.DumpBattleTuning(&g.BattleTuning); err == nil {
+					g.SetStatusMessage("Combat tuning written to " + path)
+				} else {
+					g.SetStatusMessage("Tuning dump failed: " + err.Error())
+				}
+			case item == core.BattleTuneCloseRow():
+				g.CombatTuneOpen = false
 			}
-		case item == core.BattleTuneCloseRow():
-			g.CombatTuneOpen = false
-		}
-	})
-	if g.CombatTuneOpen && adjustRow < core.BattleTuneSliderCount() {
-		if delta := input.CursorLeftRight(); delta != 0 {
-			core.AdjustBattleTuneSlider(&g.BattleTuning, adjustRow, delta)
-		}
-	}
+		},
+		func(row, delta int) { core.AdjustBattleTuneSlider(&g.BattleTuning, row, delta) })
 }
 
 func restartGame(g *core.GameState) {
@@ -564,11 +566,9 @@ func startStep(p *core.Player, g *core.GameState, forward int) {
 	engageReachable := true
 	engageLevel := p.Level
 	if engageDirOK {
-		if g.Area.IsVoxel() {
-			engageLevel, engageReachable = g.Area.ResolveStep(p.TileX, p.Level, p.TileZ, engageDir)
-		} else {
-			engageReachable = g.Area.StepElevationOK(p.TileX, p.TileZ, engageDir)
-		}
+		// On a heightfield engageLevel is unused (packHit below is tile-only), but the
+		// shared resolver keeps the voxel/heightfield split in core, not here.
+		engageLevel, engageReachable = g.Area.ResolveStepLanding(p.TileX, p.Level, p.TileZ, engageDir)
 	}
 	// On a voxel map, only engage a pack on the surface the step lands on
 	// (engageLevel) so walking UNDER a deck isn't ambushed by a pack on it. On a
@@ -603,18 +603,11 @@ func startStep(p *core.Player, g *core.GameState, forward int) {
 	// that level for level-aware prop blocking.
 	landLevel := p.Level
 	if dir, ok := facingForTile(p, targetX, targetZ); ok {
-		if g.Area.IsVoxel() {
-			l, stepOK := g.Area.ResolveStep(p.TileX, p.Level, p.TileZ, dir)
-			if !stepOK {
-				return
-			}
-			landLevel = l
-		} else {
-			if !g.Area.StepElevationOK(p.TileX, p.TileZ, dir) {
-				return
-			}
-			landLevel = g.Area.ElevationLevelAt(targetX, targetZ)
+		l, stepOK := g.Area.ResolveStepLanding(p.TileX, p.Level, p.TileZ, dir)
+		if !stepOK {
+			return
 		}
+		landLevel = l
 	} else {
 		// Non-cardinal step (shouldn't happen for orthogonal movement): no gate,
 		// land on the destination column's surface.

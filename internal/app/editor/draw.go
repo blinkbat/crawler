@@ -362,6 +362,9 @@ type topbarBtn struct {
 	enabled func(*State) bool
 	// help, when set, is a one-line hover tooltip. "" = none.
 	help string
+	// width, when > 0, overrides the auto-sized button width (for labels the
+	// auto-sizer under/over-shoots). 0 = auto-size from the label.
+	width float32
 }
 
 // The top menu bar (File/Edit/View/Assets/Map) lives in menus.go as menuBarBtns.
@@ -378,8 +381,8 @@ func onElevationLayer(s *State) bool { return s.layer == LayerElevation }
 var toolbarActionBtns = []topbarBtn{
 	{label: "Undo", action: undoOne, enabled: func(s *State) bool { return len(s.undo) > 0 }, help: "Step back one change (Ctrl+Z)."},
 	{label: "Redo", action: redoOne, enabled: func(s *State) bool { return len(s.redo) > 0 }, help: "Re-apply the last undone change (Ctrl+Y)."},
-	{label: "Brush -", action: func(s *State) { stepBrushSize(s, -1) }, enabled: onGridLayer, help: "Shrink the brush footprint."},
-	{label: "Brush +", action: func(s *State) { stepBrushSize(s, +1) }, enabled: onGridLayer, help: "Grow the brush footprint."},
+	{label: "Brush -", action: func(s *State) { stepBrushSize(s, -1) }, enabled: onGridLayer, help: "Shrink the brush footprint.", width: 78},
+	{label: "Brush +", action: func(s *State) { stepBrushSize(s, +1) }, enabled: onGridLayer, help: "Grow the brush footprint.", width: 78},
 	{label: "Lvl -", action: func(s *State) { stepEditLevel(s, -1) }, help: "Lower the active level (the floor paints build onto). Also PgDn / the Levels panel."},
 	{label: "Lvl +", action: func(s *State) { stepEditLevel(s, +1) }, help: "Raise the active level (the floor paints build onto). Also PgUp / the Levels panel."},
 	{label: "Ramp",
@@ -413,7 +416,7 @@ const buttonStripStartX = float32(8)
 func buttonStripHit(btns []topbarBtn, y, h float32, p rl.Vector2) int {
 	x := buttonStripStartX
 	for i, b := range btns {
-		w := buttonWidth(b.label)
+		w := topbarBtnWidth(b)
 		if pointIn(p, rl.NewRectangle(x, y, w, h)) {
 			return i
 		}
@@ -425,7 +428,7 @@ func buttonStripHit(btns []topbarBtn, y, h float32, p rl.Vector2) int {
 func drawButtonStrip(font rl.Font, s *State, btns []topbarBtn, y, h float32) {
 	x := buttonStripStartX
 	for _, b := range btns {
-		w := buttonWidth(b.label)
+		w := topbarBtnWidth(b)
 		r := rl.NewRectangle(x, y, w, h)
 		if b.enabled != nil && !b.enabled(s) {
 			drawButtonDisabled(font, r, b.label) // context-inactive: grayed in place
@@ -633,17 +636,6 @@ func drawLayerMenuButton(s *State, font rl.Font, theme render.Theme) {
 	render.DrawTextWithShadow(font, label, r.X+10, r.Y+(r.Height-16)/2, editorFontBody, theme.TextPrimary)
 }
 
-// topbarBtnWidths overrides the default button width for wider labels; missing
-// entries fall through to the default.
-var topbarBtnWidths = map[string]float32{
-	"Save As":    90,
-	"Validate":   90,
-	"Back":       70,
-	"Reset View": 96,
-	"Brush -":    78,
-	"Brush +":    78,
-}
-
 // approxTextWidth estimates a label's pixel width without a font handle (~0.5px
 // per char per point). Shared by the button + context-menu sizers, which lay out
 // before the font is loaded.
@@ -651,17 +643,25 @@ func approxTextWidth(label string, fontSize float32) float32 {
 	return float32(len(label)) * fontSize * 0.5
 }
 
+// buttonWidth auto-sizes a button to its label so long captions don't overflow,
+// floored at 72. Deterministic from the string, so a modal's draw and hit-test agree.
+// A topbarBtn with an explicit width overrides this via topbarBtnWidth.
 func buttonWidth(label string) float32 {
-	if w, ok := topbarBtnWidths[label]; ok {
-		return w
-	}
-	// Auto-size to the label so long captions don't overflow, floored at 72.
-	// Deterministic from the string, so a modal's draw and hit-test agree.
 	w := approxTextWidth(label, editorFontBody) + buttonLabelPadX
 	if w < 72 {
 		w = 72
 	}
 	return w
+}
+
+// topbarBtnWidth is a strip button's laid-out width: its explicit width override if
+// set, else the auto-sized label width. Keeps the width beside the button definition
+// instead of a separate label-keyed map that drifts when a caption is renamed.
+func topbarBtnWidth(b topbarBtn) float32 {
+	if b.width > 0 {
+		return b.width
+	}
+	return buttonWidth(b.label)
 }
 
 // Modal button-layout tunables, shared by every modal's button helpers.
@@ -1606,11 +1606,17 @@ const (
 	elevationDigitMinCell = float32(12) // the level digit in the elevation slice
 )
 
-// Shared entity-marker radius fractions (of cell size); the drag ghost reads the
-// SAME fraction as the live marker so the preview ring can't drift.
+// Shared entity-marker radius/inset fractions (of cell size); the drag ghost reads the
+// SAME fraction as the live marker so the preview can't drift. Chest/door/crystal carry
+// distinct shapes, so each names its own fraction here rather than scattering literals.
 const (
 	packMarkerRadiusFrac  = float32(0.32) // pack circle radius — live marker + drag ghost
 	startMarkerRadiusFrac = float32(0.36) // player-start circle radius — live marker + drag ghost
+	chestMarkerInsetFrac  = float32(0.25) // chest square inset from the tile edge
+	doorMarkerInsetXFrac  = float32(0.30) // door rectangle horizontal inset
+	doorMarkerInsetYFrac  = float32(0.12) // door rectangle vertical inset (taller than wide)
+	crystalMarkerRadFrac  = float32(0.30) // crystal diamond radius
+	entityGhostInsetFrac  = float32(0.22) // chest/door drag-move ghost square inset
 )
 
 // metaRect geometry depends only on the panel rect + scroll (material count is
@@ -2180,7 +2186,7 @@ func drawGrid(s *State, font rl.Font) {
 			continue
 		}
 		gx, gy := s.rect.tileCorner(c.TileX, c.TileZ)
-		inset := cell * 0.25
+		inset := cell * chestMarkerInsetFrac
 		rl.DrawRectangleRec(
 			rl.NewRectangle(gx+inset, gy+inset, cell-2*inset, cell-2*inset),
 			fadeAlpha(render.MarkerChest, entityAlpha))
@@ -2195,8 +2201,8 @@ func drawGrid(s *State, font rl.Font) {
 			continue
 		}
 		gx, gy := s.rect.tileCorner(d.TileX, d.TileZ)
-		insetX := cell * 0.30
-		insetY := cell * 0.12
+		insetX := cell * doorMarkerInsetXFrac
+		insetY := cell * doorMarkerInsetYFrac
 		rl.DrawRectangleRec(
 			rl.NewRectangle(gx+insetX, gy+insetY, cell-2*insetX, cell-2*insetY),
 			fadeAlpha(render.MarkerDoor, entityAlpha))
@@ -2218,7 +2224,7 @@ func drawGrid(s *State, font rl.Font) {
 			continue
 		}
 		cx, cy := s.rect.tileCenter(c.TileX, c.TileZ)
-		rad := cell * 0.30
+		rad := cell * crystalMarkerRadFrac
 		rl.DrawPoly(rl.NewVector2(cx, cy), 4, rad, 45, fadeAlpha(render.MarkerCrystal, entityAlpha))
 		rl.DrawPolyLinesEx(rl.NewVector2(cx, cy), 4, rad, 45, 1, fadeAlpha(entityMarkerOutline, entityAlpha))
 	}
@@ -2337,7 +2343,7 @@ func drawGrid(s *State, font rl.Font) {
 	// Chest/door drag-move ghosts: a square outline at the destination tile.
 	if (s.drag == dragChest || s.drag == dragDoor) && s.hoverX >= 0 {
 		gx, gy := s.rect.tileCorner(s.hoverX, s.hoverZ)
-		inset := cell * 0.22
+		inset := cell * entityGhostInsetFrac
 		rl.DrawRectangleLinesEx(rl.NewRectangle(gx+inset, gy+inset, cell-2*inset, cell-2*inset), 2, selectionOutline)
 	}
 

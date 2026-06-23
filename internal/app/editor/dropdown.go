@@ -198,6 +198,21 @@ func dropdownEntries(s *State) []dropdownEntry {
 	return nil
 }
 
+// fieldEntries builds one dropdown row per item: label(item) names it, choosing it runs
+// apply(s, item). Collapses the hand-written "make+append {label, apply}" loops the dialog
+// field pickers (speaker, quest-status, trigger-dialog, location) each repeated.
+func fieldEntries[T any](items []T, label func(T) string, apply func(*State, T)) []dropdownEntry {
+	out := make([]dropdownEntry, 0, len(items))
+	for _, it := range items {
+		it := it
+		out = append(out, dropdownEntry{
+			label: label(it),
+			apply: func(s *State) { apply(s, it) },
+		})
+	}
+	return out
+}
+
 // enemyKindEntries builds one row per registered enemy kind (label = singular
 // name), each running apply(s, kind). Shared by every "pick an enemy kind" dropdown.
 func enemyKindEntries(apply func(*State, core.EnemyKind)) []dropdownEntry {

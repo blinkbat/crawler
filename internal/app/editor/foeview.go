@@ -3,6 +3,7 @@ package editor
 import (
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"crawler/internal/app/core"
@@ -82,9 +83,6 @@ const (
 	foePad        = float32(16)
 	foePreviewW   = float32(420)
 	foeSliderRowH = float32(30)
-	foeLabelW     = float32(86)
-	foeValueW     = float32(56)
-	foeTrackH     = float32(12)
 	foeColGap     = float32(26) // gutter between the two slider columns
 	foePickBtnH   = float32(28) // prev/next picker arrow height (< Name >)
 	// foePreviewZoomStep is the per-wheel-notch zoom dolly (clamped render-side).
@@ -120,6 +118,40 @@ var assetFields = []sliderField[core.EnemyVisualOverride]{
 	{Label: "Colors", Get: func(o *core.EnemyVisualOverride) float64 { return float64(o.MaxColors) }, Set: func(o *core.EnemyVisualOverride, v float64) { o.MaxColors = float32(v) }, Min: 0, Max: 64, Step: 1, Format: "%.0f"},
 }
 
+// init asserts the visualizer slider stacks (foeFields placement + assetFields FX)
+// expose EVERY field of core.EnemyVisualOverride, and that each row writes exactly one
+// field. A new override field added without a slider row fires here at startup, so the
+// tool-completeness contract ("every field editable") can't silently regress.
+func init() {
+	var z core.EnemyVisualOverride
+	n := reflect.TypeOf(z).NumField()
+	covered := make([]bool, n)
+	check := func(fields []sliderField[core.EnemyVisualOverride]) {
+		for _, f := range fields {
+			var probe core.EnemyVisualOverride
+			f.Set(&probe, 7) // any non-zero value in every row's range
+			rv := reflect.ValueOf(probe)
+			hits := 0
+			for i := 0; i < n; i++ {
+				if !rv.Field(i).IsZero() {
+					covered[i] = true
+					hits++
+				}
+			}
+			if hits != 1 {
+				panic(fmt.Sprintf("foeview slider %q writes %d EnemyVisualOverride fields (want exactly 1)", f.Label, hits))
+			}
+		}
+	}
+	check(foeFields)
+	check(assetFields)
+	for i := 0; i < n; i++ {
+		if !covered[i] {
+			panic("core.EnemyVisualOverride." + reflect.TypeOf(z).Field(i).Name + " has no foeview slider row (tool-completeness)")
+		}
+	}
+}
+
 // assetActionLabels is the Asset tab's button row; slice index IS the action
 // identity (assetActionRevert, …) the click handlers dispatch on. Add an action
 // by appending a label AND a switch case (a caseless label is a visible gap, not
@@ -146,11 +178,11 @@ func savedVisualFlash(name, slug string) string {
 	return "Saved " + name + " → " + slug + " (applied live)"
 }
 
-// visualizerFooterHint is the persistence note under both preview panes. noun is
-// "foe"/"class" (selects visuals.json vs partyvisuals.json); slug is the map key.
-func visualizerFooterHint(noun, slug string) string {
+// visualizerFooterHint is the persistence note under both preview panes. isParty
+// selects partyvisuals.json vs visuals.json; slug is the map key.
+func visualizerFooterHint(isParty bool, slug string) string {
 	file := core.EnemyVisualsFileName
-	if noun == "class" {
+	if isParty {
 		file = core.PartyVisualsFileName
 	}
 	return "orange sphere = particle origin   ·   cyan = hit glyph   ·   saves to " + file + " as \"" + slug + "\""
@@ -215,7 +247,7 @@ func computeFoeViewLayout() foeViewLayout {
 	// Two-column slider stack (Layout tab): rightW split into two equal columns.
 	// Left column gets the ceil half (odd count → extra row left).
 	colW := (rightW - foeColGap) / 2
-	colTrackW := colW - foeLabelW - foeValueW
+	colTrackW := colW - foeSliderMetrics.trackReserve(0)
 	firstColRows := (len(foeFields) + 1) / 2
 	tracks := make([]rl.Rectangle, len(foeFields))
 	rowBase := contentTop
@@ -225,8 +257,8 @@ func computeFoeViewLayout() foeViewLayout {
 			col, row = 1, i-firstColRows
 		}
 		colX := rightX + float32(col)*(colW+foeColGap)
-		y := rowBase + float32(row)*foeSliderRowH + (foeSliderRowH-foeTrackH)/2
-		tracks[i] = rl.NewRectangle(colX+foeLabelW, y, colTrackW, foeTrackH)
+		y := rowBase + float32(row)*foeSliderRowH + (foeSliderRowH-foeSliderMetrics.trackH)/2
+		tracks[i] = rl.NewRectangle(colX+foeSliderMetrics.labelW, y, colTrackW, foeSliderMetrics.trackH)
 	}
 
 	// Asset tab: same two-column split. Left column gets the ceil half; action
@@ -239,8 +271,8 @@ func computeFoeViewLayout() foeViewLayout {
 			col, row = 1, i-assetFirstColRows
 		}
 		colX := rightX + float32(col)*(colW+foeColGap)
-		y := contentTop + float32(row)*foeSliderRowH + (foeSliderRowH-foeTrackH)/2
-		assetTracks[i] = rl.NewRectangle(colX+foeLabelW, y, colTrackW, foeTrackH)
+		y := contentTop + float32(row)*foeSliderRowH + (foeSliderRowH-foeSliderMetrics.trackH)/2
+		assetTracks[i] = rl.NewRectangle(colX+foeSliderMetrics.labelW, y, colTrackW, foeSliderMetrics.trackH)
 	}
 	assetBtnY := contentTop + float32(assetFirstColRows)*foeSliderRowH + 16
 	assetBtns := buttonRowAt(rightX, assetBtnY, assetActionLabels)
@@ -663,7 +695,7 @@ func drawFoeViewModal(s *State, font rl.Font, theme render.Theme) {
 		"D-pad row/adjust   |   drag sliders   |   buttons: change foe / save / reset / close",
 		l.card.X+foePad, l.preview.Y+l.preview.Height+8, editorFontHint, theme.TextHint)
 	render.DrawTextWithShadow(font,
-		visualizerFooterHint("foe", core.EnemySlug(s.foeKind)),
+		visualizerFooterHint(false, core.EnemySlug(s.foeKind)),
 		l.card.X+foePad, l.preview.Y+l.preview.Height+26, editorFontHint, theme.TextMuted)
 
 }
@@ -688,7 +720,7 @@ func drawAssetTab(font rl.Font, theme render.Theme, l foeViewLayout, ov *core.En
 		f := assetFields[i]
 		track := l.assetTracks[i]
 		drawSliderField(font, theme, f, ov,
-			rl.NewVector2(track.X-foeLabelW, track.Y-4), rl.NewVector2(track.X+track.Width+8, track.Y-4),
+			rl.NewVector2(track.X-foeSliderMetrics.labelW, track.Y-4), rl.NewVector2(track.X+track.Width+8, track.Y-4),
 			editorFontAccent, track, 6, cursor == i)
 	}
 	for i := range l.assetBtns {
@@ -708,13 +740,27 @@ func drawVisualSlider(font rl.Font, theme render.Theme, l foeViewLayout, i int, 
 	f := foeFields[i]
 	track := l.sliderTracks[i]
 	drawSliderField(font, theme, f, ov,
-		rl.NewVector2(track.X-foeLabelW, track.Y-4), rl.NewVector2(track.X+track.Width+8, track.Y-4),
+		rl.NewVector2(track.X-foeSliderMetrics.labelW, track.Y-4), rl.NewVector2(track.X+track.Width+8, track.Y-4),
 		editorFontAccent, track, 6, cursor == i)
 }
 
 func drawFoeSlider(font rl.Font, theme render.Theme, l foeViewLayout, i int, s *State) {
 	drawVisualSlider(font, theme, l, i, &s.foeVisual, s.foeCursor)
 }
+
+// sliderRowMetrics is the shared geometry contract for an editor slider row: the label
+// gutter before the track, the value column reserved after it, and the track height.
+// The Foe/Party visualizer (foeSliderMetrics) and the sound creator (soundSliderMetrics)
+// each instantiate it with their own values — previously two parallel const families.
+type sliderRowMetrics struct {
+	labelW, valueW, trackH float32
+}
+
+// trackReserve is the width removed from a row for the label + value columns (+gap), so
+// trackWidth = rowWidth - trackReserve(gap). Foe uses gap 0, the sound creator gap 2.
+func (m sliderRowMetrics) trackReserve(gap float32) float32 { return m.labelW + m.valueW + gap }
+
+var foeSliderMetrics = sliderRowMetrics{labelW: 86, valueW: 56, trackH: 12}
 
 // drawSliderField renders one sliderField row against ov's value. The single
 // slider-row draw shared by both Visualizers and the sound creator. Display-aware:

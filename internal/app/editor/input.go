@@ -100,7 +100,7 @@ func updateHotkeys(s *State) {
 	if !ctrl && !alt {
 		offset := 0
 		if shift {
-			offset = 9
+			offset = len(numberRowKeys) // Shift shifts the whole row past the unshifted range
 		}
 		for i, k := range numberRowKeys {
 			idx := i + offset
@@ -1550,13 +1550,14 @@ var doorFacingKeys = []struct {
 	{rl.KeyW, core.West},
 }
 
+// Keys source from numberRowKeys so "key 1/2/3" stays in lockstep with the number row.
 var doorStyleKeys = []struct {
 	key   int32
 	style core.DoorStyle
 }{
-	{rl.KeyOne, core.DoorStyleBuilding},
-	{rl.KeyTwo, core.DoorStyleCave},
-	{rl.KeyThree, core.DoorStyleField},
+	{numberRowKeys[0], core.DoorStyleBuilding},
+	{numberRowKeys[1], core.DoorStyleCave},
+	{numberRowKeys[2], core.DoorStyleField},
 }
 
 // init panics if the door-modal hotkey tables drift from the core enums they bind.

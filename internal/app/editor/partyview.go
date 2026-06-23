@@ -131,7 +131,7 @@ func drawPartyViewModal(s *State, font rl.Font, theme render.Theme) {
 		"D-pad row/adjust   |   drag sliders   |   buttons: change class / save / reset / close",
 		l.card.X+foePad, l.preview.Y+l.preview.Height+8, editorFontHint, theme.TextHint)
 	render.DrawTextWithShadow(font,
-		visualizerFooterHint("class", core.PartyClassSlug(s.partyClass)),
+		visualizerFooterHint(true, core.PartyClassSlug(s.partyClass)),
 		l.card.X+foePad, l.preview.Y+l.preview.Height+26, editorFontHint, theme.TextMuted)
 }
 

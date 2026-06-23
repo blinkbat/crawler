@@ -269,22 +269,13 @@ func openDialogChoiceEditModal(s *State, choiceIdx int) {
 }
 
 func dialogSpeakerEntries(s *State) []dropdownEntry {
-	ids := core.DialogSpeakerIDs()
-	out := make([]dropdownEntry, 0, len(ids))
-	for _, id := range ids {
-		id := id
-		out = append(out, dropdownEntry{
-			label: core.DialogSpeakerName(id),
-			apply: func(s *State) {
-				if n := currentDialogNode(s); n != nil {
-					pushUndo(s)
-					n.SpeakerID = id
-					s.dirty = true
-				}
-			},
-		})
-	}
-	return out
+	return fieldEntries(core.DialogSpeakerIDs(), core.DialogSpeakerName, func(s *State, id core.DialogSpeakerID) {
+		if n := currentDialogNode(s); n != nil {
+			pushUndo(s)
+			n.SpeakerID = id
+			s.dirty = true
+		}
+	})
 }
 
 func condKindLabel(k core.DialogCondKind) string {
@@ -406,19 +397,13 @@ func dialogCondKindEntries(s *State) []dropdownEntry {
 }
 
 func dialogQuestStatusEntries(s *State) []dropdownEntry {
-	opts := []core.QuestStatus{core.QuestActive, core.QuestComplete}
-	out := make([]dropdownEntry, 0, len(opts))
-	for _, qs := range opts {
-		qs := qs
-		out = append(out, dropdownEntry{label: questStatusLabel(qs), apply: func(s *State) {
-			if c := currentDialogCond(s); c != nil {
-				pushUndo(s)
-				c.QuestStatus = qs
-				s.dirty = true
-			}
-		}})
-	}
-	return out
+	return fieldEntries([]core.QuestStatus{core.QuestActive, core.QuestComplete}, questStatusLabel, func(s *State, qs core.QuestStatus) {
+		if c := currentDialogCond(s); c != nil {
+			pushUndo(s)
+			c.QuestStatus = qs
+			s.dirty = true
+		}
+	})
 }
 
 func dialogCondFoeEntries(s *State) []dropdownEntry {
@@ -450,18 +435,13 @@ func dialogTriggerKindEntries(s *State) []dropdownEntry {
 }
 
 func dialogTriggerDialogEntries(s *State) []dropdownEntry {
-	out := make([]dropdownEntry, 0, len(s.area.Dialogs))
-	for i := range s.area.Dialogs {
-		id := s.area.Dialogs[i].ID
-		out = append(out, dropdownEntry{label: id, apply: func(s *State) {
-			if t := currentDialogTrigger(s); t != nil {
-				pushUndo(s)
-				t.DialogID = id
-				s.dirty = true
-			}
-		}})
-	}
-	return out
+	return fieldEntries(s.area.Dialogs, func(d core.DialogDefinition) string { return d.ID }, func(s *State, d core.DialogDefinition) {
+		if t := currentDialogTrigger(s); t != nil {
+			pushUndo(s)
+			t.DialogID = d.ID
+			s.dirty = true
+		}
+	})
 }
 
 func dialogTriggerFoeEntries(s *State) []dropdownEntry {
@@ -476,18 +456,13 @@ func dialogTriggerFoeEntries(s *State) []dropdownEntry {
 
 // dialogTriggerLocationEntries lists the area's regions for an enterLocation trigger.
 func dialogTriggerLocationEntries(s *State) []dropdownEntry {
-	out := make([]dropdownEntry, 0, len(s.area.Locations))
-	for i := range s.area.Locations {
-		id := s.area.Locations[i].ID
-		out = append(out, dropdownEntry{label: locationLabel(s.area.Locations[i]), apply: func(s *State) {
-			if t := currentDialogTrigger(s); t != nil {
-				pushUndo(s)
-				t.LocationID = id
-				s.dirty = true
-			}
-		}})
-	}
-	return out
+	return fieldEntries(s.area.Locations, locationLabel, func(s *State, loc core.Location) {
+		if t := currentDialogTrigger(s); t != nil {
+			pushUndo(s)
+			t.LocationID = loc.ID
+			s.dirty = true
+		}
+	})
 }
 
 // Shared numeric-field editing: dialogNumericTarget + focusDialogNumeric +
@@ -830,9 +805,17 @@ func scrollRows(x, y, fw, rowH float32, cursor, count, visible int) (top int, ro
 	return top, rows
 }
 
+// Shared dialog-editor card widths: the standard width and a narrower variant for the
+// choice/action editors. Each modal's own *ModalW aliases one of these so retuning "the
+// dialog card width" is a single edit instead of five literals.
+const (
+	dialogEditModalW       = float32(540)
+	dialogEditModalNarrowW = float32(520)
+)
+
 // --- modalDialogNodeEdit ---
 const (
-	dialogNodeModalW = float32(540)
+	dialogNodeModalW = dialogEditModalW
 	dialogNodeModalH = float32(600)
 	// dialogChoiceVisible caps visible choice rows; longer lists scroll.
 	dialogChoiceVisible = 6
@@ -1075,7 +1058,7 @@ func cycleDialogNodeFocus(s *State) {
 
 // --- modalDialogChoiceEdit ---
 const (
-	dialogChoiceModalW = float32(520)
+	dialogChoiceModalW = dialogEditModalNarrowW
 	dialogChoiceModalH = float32(470)
 	// dialogCondVisible caps visible condition rows; longer lists scroll.
 	dialogCondVisible = 4
@@ -1251,7 +1234,7 @@ func cycleDialogChoiceFocus(s *State) {
 // ========================= modalDialogActionEdit ===========================
 
 const (
-	dialogActionModalW = float32(520)
+	dialogActionModalW = dialogEditModalNarrowW
 	dialogActionModalH = float32(240)
 )
 
@@ -1471,7 +1454,7 @@ func updateDialogActionEditModal(s *State) Action {
 // ========================= modalDialogCondEdit =============================
 
 const (
-	dialogCondModalW = float32(540)
+	dialogCondModalW = dialogEditModalW
 	dialogCondModalH = float32(360)
 )
 
@@ -1707,7 +1690,7 @@ func updateDialogTriggerListModal(s *State) Action {
 // ========================= modalDialogTriggerEdit ==========================
 
 const (
-	dialogTrigModalW = float32(540)
+	dialogTrigModalW = dialogEditModalW
 	dialogTrigModalH = float32(400)
 )
 

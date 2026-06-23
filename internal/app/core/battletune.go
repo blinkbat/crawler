@@ -3,6 +3,8 @@ package core
 import (
 	"fmt"
 	"os"
+	"reflect"
+	"strings"
 )
 
 // BattleTuning holds the live-adjustable combat-scene geometry exposed by the
@@ -65,39 +67,71 @@ func DefaultBattleTuning() BattleTuning {
 // pointer accessor into a BattleTuning (so adjust/read share one source).
 type BattleTuneSlider struct {
 	Label          string
+	Field          string // BattleTuning Go field name (drives BattleTuneGoLiteral; init-asserted to exist)
 	Min, Max, Step float32
 	Ptr            func(*BattleTuning) *float32
 }
 
 // battleTuneSliders is the ordered slider list driving the panel's slider rows.
+// Single source of truth: the panel rows, the adjust accessors, and the Go-literal
+// dump all read it. init() asserts it covers every (float32) BattleTuning field, so a
+// new field can't ship silently un-tunable.
 var battleTuneSliders = []BattleTuneSlider{
-	{"Cam tilt", -0.7, 0.1, 0.01, func(t *BattleTuning) *float32 { return &t.CamPitch }},
-	{"Cam height", -0.5, 2.0, 0.05, func(t *BattleTuning) *float32 { return &t.CamLift }},
-	{"Cam shift X", -2.5, 2.5, 0.05, func(t *BattleTuning) *float32 { return &t.CamShiftX }},
-	{"Cam shift Z (fwd)", -2.5, 2.5, 0.05, func(t *BattleTuning) *float32 { return &t.CamShiftZ }},
-	{"Cam zoom (FOV)", 30, 110, 1, func(t *BattleTuning) *float32 { return &t.CamFOV }},
-	{"Foe distance", 1.0, 4.0, 0.05, func(t *BattleTuning) *float32 { return &t.FoeDistance }},
-	{"Foe floor Y", -0.5, 1.0, 0.02, func(t *BattleTuning) *float32 { return &t.FoeFloorY }},
-	{"Foe front gap", 0.4, 2.5, 0.05, func(t *BattleTuning) *float32 { return &t.FoeFrontGapX }},
-	{"Foe back gap", 0.4, 2.5, 0.05, func(t *BattleTuning) *float32 { return &t.FoeBackGapX }},
-	{"Foe front maxW", 1.5, 6.0, 0.1, func(t *BattleTuning) *float32 { return &t.FoeFrontMaxW }},
-	{"Foe back maxW", 1.5, 6.0, 0.1, func(t *BattleTuning) *float32 { return &t.FoeBackMaxW }},
-	{"Foe front depth", -1.0, 1.0, 0.02, func(t *BattleTuning) *float32 { return &t.FoeFrontDepth }},
-	{"Foe back depth", -1.0, 1.5, 0.02, func(t *BattleTuning) *float32 { return &t.FoeBackDepth }},
-	{"Foe zigzag", 0, 0.5, 0.02, func(t *BattleTuning) *float32 { return &t.FoeZigzag }},
-	{"Foe front size", 0.4, 2.0, 0.05, func(t *BattleTuning) *float32 { return &t.FoeFrontScale }},
-	{"Foe back size", 0.4, 2.0, 0.05, func(t *BattleTuning) *float32 { return &t.FoeBackScale }},
-	{"Foe back darken", 0, 0.8, 0.05, func(t *BattleTuning) *float32 { return &t.FoeBackDarken }},
-	{"Sprite shade", 0, 0.8, 0.05, func(t *BattleTuning) *float32 { return &t.SpriteShade }},
-	{"Sprite warm/cool", 0, 0.5, 0.02, func(t *BattleTuning) *float32 { return &t.SpriteWarmCool }},
-	{"Sprite outline", 0, 1.0, 0.05, func(t *BattleTuning) *float32 { return &t.SpriteOutline }},
-	{"Party front fwd", 0.4, 2.5, 0.05, func(t *BattleTuning) *float32 { return &t.PartyFrontFwd }},
-	{"Party back fwd", 0.3, 2.5, 0.05, func(t *BattleTuning) *float32 { return &t.PartyBackFwd }},
-	{"Party front gap", 0.4, 2.0, 0.04, func(t *BattleTuning) *float32 { return &t.PartyFrontGapX }},
-	{"Party back gap", 0.4, 2.5, 0.04, func(t *BattleTuning) *float32 { return &t.PartyBackGapX }},
-	{"Party base Y", 0.0, 1.5, 0.02, func(t *BattleTuning) *float32 { return &t.PartyBaseY }},
-	{"Party front size", 0.4, 2.0, 0.05, func(t *BattleTuning) *float32 { return &t.PartyFrontScale }},
-	{"Party back size", 0.4, 2.0, 0.05, func(t *BattleTuning) *float32 { return &t.PartyBackScale }},
+	{"Cam tilt", "CamPitch", -0.7, 0.1, 0.01, func(t *BattleTuning) *float32 { return &t.CamPitch }},
+	{"Cam height", "CamLift", -0.5, 2.0, 0.05, func(t *BattleTuning) *float32 { return &t.CamLift }},
+	{"Cam shift X", "CamShiftX", -2.5, 2.5, 0.05, func(t *BattleTuning) *float32 { return &t.CamShiftX }},
+	{"Cam shift Z (fwd)", "CamShiftZ", -2.5, 2.5, 0.05, func(t *BattleTuning) *float32 { return &t.CamShiftZ }},
+	{"Cam zoom (FOV)", "CamFOV", 30, 110, 1, func(t *BattleTuning) *float32 { return &t.CamFOV }},
+	{"Foe distance", "FoeDistance", 1.0, 4.0, 0.05, func(t *BattleTuning) *float32 { return &t.FoeDistance }},
+	{"Foe floor Y", "FoeFloorY", -0.5, 1.0, 0.02, func(t *BattleTuning) *float32 { return &t.FoeFloorY }},
+	{"Foe front gap", "FoeFrontGapX", 0.4, 2.5, 0.05, func(t *BattleTuning) *float32 { return &t.FoeFrontGapX }},
+	{"Foe back gap", "FoeBackGapX", 0.4, 2.5, 0.05, func(t *BattleTuning) *float32 { return &t.FoeBackGapX }},
+	{"Foe front maxW", "FoeFrontMaxW", 1.5, 6.0, 0.1, func(t *BattleTuning) *float32 { return &t.FoeFrontMaxW }},
+	{"Foe back maxW", "FoeBackMaxW", 1.5, 6.0, 0.1, func(t *BattleTuning) *float32 { return &t.FoeBackMaxW }},
+	{"Foe front depth", "FoeFrontDepth", -1.0, 1.0, 0.02, func(t *BattleTuning) *float32 { return &t.FoeFrontDepth }},
+	{"Foe back depth", "FoeBackDepth", -1.0, 1.5, 0.02, func(t *BattleTuning) *float32 { return &t.FoeBackDepth }},
+	{"Foe zigzag", "FoeZigzag", 0, 0.5, 0.02, func(t *BattleTuning) *float32 { return &t.FoeZigzag }},
+	{"Foe front size", "FoeFrontScale", 0.4, 2.0, 0.05, func(t *BattleTuning) *float32 { return &t.FoeFrontScale }},
+	{"Foe back size", "FoeBackScale", 0.4, 2.0, 0.05, func(t *BattleTuning) *float32 { return &t.FoeBackScale }},
+	{"Foe back darken", "FoeBackDarken", 0, 0.8, 0.05, func(t *BattleTuning) *float32 { return &t.FoeBackDarken }},
+	{"Sprite shade", "SpriteShade", 0, 0.8, 0.05, func(t *BattleTuning) *float32 { return &t.SpriteShade }},
+	{"Sprite warm/cool", "SpriteWarmCool", 0, 0.5, 0.02, func(t *BattleTuning) *float32 { return &t.SpriteWarmCool }},
+	{"Sprite outline", "SpriteOutline", 0, 1.0, 0.05, func(t *BattleTuning) *float32 { return &t.SpriteOutline }},
+	{"Party front fwd", "PartyFrontFwd", 0.4, 2.5, 0.05, func(t *BattleTuning) *float32 { return &t.PartyFrontFwd }},
+	{"Party back fwd", "PartyBackFwd", 0.3, 2.5, 0.05, func(t *BattleTuning) *float32 { return &t.PartyBackFwd }},
+	{"Party front gap", "PartyFrontGapX", 0.4, 2.0, 0.04, func(t *BattleTuning) *float32 { return &t.PartyFrontGapX }},
+	{"Party back gap", "PartyBackGapX", 0.4, 2.5, 0.04, func(t *BattleTuning) *float32 { return &t.PartyBackGapX }},
+	{"Party base Y", "PartyBaseY", 0.0, 1.5, 0.02, func(t *BattleTuning) *float32 { return &t.PartyBaseY }},
+	{"Party front size", "PartyFrontScale", 0.4, 2.0, 0.05, func(t *BattleTuning) *float32 { return &t.PartyFrontScale }},
+	{"Party back size", "PartyBackScale", 0.4, 2.0, 0.05, func(t *BattleTuning) *float32 { return &t.PartyBackScale }},
+}
+
+// init asserts battleTuneSliders stays in lockstep with BattleTuning: every field is
+// a float32, every field is covered by exactly one slider, and every slider names a
+// real field. Catches a field added without a row (silently un-tunable) at startup.
+func init() {
+	var t BattleTuning
+	v := reflect.ValueOf(&t).Elem()
+	tp := v.Type()
+	covered := make(map[uintptr]bool, len(battleTuneSliders))
+	for _, s := range battleTuneSliders {
+		if _, ok := tp.FieldByName(s.Field); !ok {
+			panic("battleTuneSliders: Field " + s.Field + " is not a BattleTuning field")
+		}
+		covered[reflect.ValueOf(s.Ptr(&t)).Pointer()] = true
+	}
+	for i := 0; i < v.NumField(); i++ {
+		name := tp.Field(i).Name
+		if v.Field(i).Kind() != reflect.Float32 {
+			panic("BattleTuning." + name + " is not float32; tuning assumes all-float32 fields")
+		}
+		if !covered[v.Field(i).Addr().Pointer()] {
+			panic("BattleTuning." + name + " has no battleTuneSliders row (combat-tuning drift)")
+		}
+	}
+	if len(battleTuneSliders) != v.NumField() {
+		panic("battleTuneSliders count != BattleTuning field count")
+	}
 }
 
 // BattleTuneSliderCount is the number of slider rows (the trailing action rows
@@ -144,32 +178,22 @@ func AdjustBattleTuneSlider(t *BattleTuning, i, dir int) {
 }
 
 // BattleTuneGoLiteral renders the tuning as the body of DefaultBattleTuning so a
-// dialed-in look can be pasted straight in as the new default.
+// dialed-in look can be pasted straight in as the new default. Generated from
+// battleTuneSliders (field order = slider order), so it can never drift from the
+// fields the panel actually exposes.
 func BattleTuneGoLiteral(t *BattleTuning) string {
-	return fmt.Sprintf(`return BattleTuning{
-	CamPitch: %g, CamLift: %g, CamFOV: %g,
-	CamShiftX: %g, CamShiftZ: %g,
-	FoeDistance: %g, FoeFloorY: %g,
-	FoeFrontGapX: %g, FoeBackGapX: %g,
-	FoeFrontMaxW: %g, FoeBackMaxW: %g,
-	FoeFrontDepth: %g, FoeBackDepth: %g, FoeZigzag: %g,
-	FoeFrontScale: %g, FoeBackScale: %g, FoeBackDarken: %g,
-	SpriteShade: %g, SpriteWarmCool: %g, SpriteOutline: %g,
-	PartyFrontFwd: %g, PartyBackFwd: %g,
-	PartyFrontGapX: %g, PartyBackGapX: %g,
-	PartyBaseY: %g,
-	PartyFrontScale: %g, PartyBackScale: %g,
-}`,
-		t.CamPitch, t.CamLift, t.CamFOV, t.CamShiftX, t.CamShiftZ, t.FoeDistance, t.FoeFloorY,
-		t.FoeFrontGapX, t.FoeBackGapX, t.FoeFrontMaxW, t.FoeBackMaxW,
-		t.FoeFrontDepth, t.FoeBackDepth, t.FoeZigzag,
-		t.FoeFrontScale, t.FoeBackScale, t.FoeBackDarken,
-		t.SpriteShade, t.SpriteWarmCool, t.SpriteOutline,
-		t.PartyFrontFwd, t.PartyBackFwd, t.PartyFrontGapX, t.PartyBackGapX, t.PartyBaseY,
-		t.PartyFrontScale, t.PartyBackScale)
+	var b strings.Builder
+	b.WriteString("return BattleTuning{\n")
+	for _, s := range battleTuneSliders {
+		fmt.Fprintf(&b, "\t%s: %g,\n", s.Field, *s.Ptr(t))
+	}
+	b.WriteString("}")
+	return b.String()
 }
 
-// BattleTuneDumpFileName is where DumpBattleTuning writes (cwd-relative).
+// BattleTuneDumpFileName is where DumpBattleTuning writes. Deliberately cwd-relative
+// (NOT routed through ResolveAssetDir): this is a dev dump meant to land in the repo
+// root you run from so the literal can be copied straight into DefaultBattleTuning.
 const BattleTuneDumpFileName = "battle_tuning.txt"
 
 // DumpBattleTuning writes the current tuning's Go literal to BattleTuneDumpFileName,

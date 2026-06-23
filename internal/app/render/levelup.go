@@ -138,6 +138,3 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 
 // levelUpApplyMeasureCache memoizes the Apply-row label width (the fleurons flank it every frame).
 var levelUpApplyMeasureCache measureCache
-
-// levelUpStagedTotal retired — core.SumStatPending is the single shared seam.
-// DrawPartyStatsScreen retired in favor of the panels overlay's Stats tab.

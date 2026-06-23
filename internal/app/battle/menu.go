@@ -379,6 +379,15 @@ func performDefend(g *core.GameState) {
 	finishActorTurn(g)
 }
 
+// flipRow/flipCol/memberAtSlot/defaultSwapPartner/swapTargetForDirection all assume a
+// 2×2 party formation (one orthogonal neighbour per axis). Assert that here: if a third
+// rank/column is ever added to core.Row/core.Col, this fires and points at the swap nav.
+func init() {
+	if core.RowCount != 2 || core.ColCount != 2 {
+		panic("battle swap navigation (flipRow/flipCol/memberAtSlot) assumes a 2×2 formation; core.Row/Col grew")
+	}
+}
+
 // flipRow / flipCol return the other rank / column of the 2×2 — the single source
 // for the orthogonal neighbour, so picker and default-partner can't disagree.
 func flipRow(r core.Row) core.Row {

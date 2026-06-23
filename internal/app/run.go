@@ -21,7 +21,28 @@ const (
 	sceneTitle scene = iota
 	sceneAdventure
 	sceneEditor
+	sceneCount = int(sceneEditor) + 1 // sentinel: number of scenes (sizes sceneHandlers)
 )
+
+// sceneHandlers pairs each scene's per-frame update and draw so the two can't desync
+// (previously two hand-maintained switch ladders). A scene added without a row here
+// fails the init assert below. dt is ignored by scenes that don't need it.
+var sceneHandlers = [sceneCount]struct {
+	update func(*appState, float32)
+	draw   func(*appState, render.Resources)
+}{
+	sceneTitle:     {func(s *appState, _ float32) { updateTitleScene(s) }, func(s *appState, a render.Resources) { title.Draw(s.title, a) }},
+	sceneAdventure: {func(s *appState, _ float32) { updateAdventureScene(s) }, func(s *appState, a render.Resources) { drawAdventureScene(&s.game, a) }},
+	sceneEditor:    {updateEditorScene, func(s *appState, a render.Resources) { editor.Draw(&s.editor, a) }},
+}
+
+func init() {
+	for s, h := range sceneHandlers {
+		if h.update == nil || h.draw == nil {
+			panic(fmt.Sprintf("run: scene %d has no sceneHandlers row (update/draw)", s))
+		}
+	}
+}
 
 type appState struct {
 	scene  scene
@@ -72,32 +93,17 @@ func Run() {
 			render.ToggleDisplayMode()
 		}
 
-		switch state.scene {
-		case sceneTitle:
-			updateTitleScene(&state)
-		case sceneAdventure:
-			updateAdventureScene(&state)
-		case sceneEditor:
-			updateEditorScene(&state, dt)
-		default:
-			panic("run: unhandled scene in update dispatch — add it to both scene switches")
-		}
+		handler := sceneHandlers[state.scene]
+		handler.update(&state, dt)
 
 		// Drive rumble every frame: TickRumble decays the combat envelope (0
 		// outside battle) so a rumble armed just before a battle ends eases off.
 		input.ApplyRumble(core.TickRumble(&state.game.Battle, dt), state.game.RumbleEnabled)
 
 		rl.BeginDrawing()
-		switch state.scene {
-		case sceneTitle:
-			title.Draw(state.title, assets)
-		case sceneAdventure:
-			drawAdventureScene(&state.game, assets)
-		case sceneEditor:
-			editor.Draw(&state.editor, assets)
-		default:
-			panic("run: unhandled scene in draw dispatch — add it to both scene switches")
-		}
+		// Re-read state.scene: update may have changed it this frame (the draw should
+		// follow the scene we're transitioning into, as the switch did).
+		sceneHandlers[state.scene].draw(&state, assets)
 		rl.EndDrawing()
 	}
 }

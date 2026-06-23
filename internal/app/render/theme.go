@@ -480,6 +480,11 @@ const (
 // two align.
 const modalHeadingInsetY = int32(14)
 
+// modalHeadingGutterX is the heading's X inset from the card's left mitre — wider
+// than the body's hudContentInsetX(22) because the engraved FontHeading title wants
+// more breathing room from the wood frame than body content does.
+const modalHeadingGutterX = int32(28)
+
 // drawModalScaffold paints the shared veil + centered card + heading band for
 // every modal overlay, returning the card rect. Empty heading skips the band.
 func drawModalScaffold(font rl.Font, cardW, cardH int32, heading string) rl.Rectangle {
@@ -493,11 +498,29 @@ func drawModalScaffold(font rl.Font, cardW, cardH int32, heading string) rl.Rect
 	}
 	rect := drawVeiledCard(cardW, cardH, borderSoft, borderActive, giltDim)
 	if heading != "" {
-		// Heading gutter is 28 (wider than hudContentInsetX=22): the engraved FontHeading
-		// title wants more breathing room from the wood mitre than body content does.
-		drawHeading(font, heading, int32(rect.X)+28, int32(rect.Y)+modalHeadingInsetY, borderActive)
+		drawHeading(font, heading, int32(rect.X)+modalHeadingGutterX, int32(rect.Y)+modalHeadingInsetY, borderActive)
 	}
 	return rect
+}
+
+// Confirm-modal geometry — the shared shape behind DrawDoorPrompt / DrawQuitConfirm:
+// a fleuron-free FontHeading title card, one centered body line, an A/B hint bar.
+const (
+	confirmCardW        = int32(440)
+	confirmCardH        = int32(168)
+	confirmHeaderInsetY = float32(22)
+	confirmBodyInsetY   = float32(78)
+	confirmFooterInsetY = float32(40)
+)
+
+// drawConfirmModal paints a centered yes/no confirm card: engraved title, one muted
+// body line, and a controller-first hint bar. Single source for the door/quit prompts
+// so their geometry can't drift apart.
+func drawConfirmModal(font rl.Font, title, body string, hints []HintSeg) {
+	rect, _ := drawCenteredTitleCard(font, confirmCardW, confirmCardH, title, FontHeading, confirmHeaderInsetY, false)
+	cx := rect.X + rect.Width/2
+	drawTextCentered(font, body, cx, rect.Y+confirmBodyInsetY, FontBody, textMuted)
+	DrawHintBar(font, hints, cx, rect.Y+rect.Height-confirmFooterInsetY, FontSmall)
 }
 
 // drawVeiledCard paints the veil + centered wood-framed card + gilt filigree,

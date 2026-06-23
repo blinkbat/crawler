@@ -317,14 +317,6 @@ func drawMenuRow(font rl.Font, text string, x, y, innerW int32, selected bool) {
 	drawEngravedText(font, text, float32(x+12), float32(y), FontHeading, textPrimary)
 }
 
-// Quit-confirm card layout — a lighter, fleuron-free confirm than the titled
-// menu chrome, with its own band so it tunes independently.
-const (
-	quitConfirmHeaderInsetY = float32(22)
-	quitConfirmBodyInsetY   = float32(78)
-	quitConfirmFooterInsetY = float32(40)
-)
-
 // DrawQuitConfirm paints the quit-confirm modal (g.QuitConfirmOpen): engraved
 // title, warning body, controller-first Quit/Cancel hints. No-op when closed.
 // Drawn last in the explore overlay pass (highest-priority modal).
@@ -332,17 +324,8 @@ func DrawQuitConfirm(g *core.GameState, assets Resources) {
 	if !g.QuitConfirmOpen {
 		return
 	}
-	panelW := int32(440)
-	panelH := int32(168)
-	rect, _ := drawCenteredTitleCard(assets.hudFont, panelW, panelH, "QUIT GAME", FontHeading, quitConfirmHeaderInsetY, false)
-	panelY := rect.Y
-
-	cardCenterX := rect.X + rect.Width/2
-	drawTextCentered(assets.hudFont, "Unsaved progress will be lost.",
-		cardCenterX, panelY+quitConfirmBodyInsetY, FontBody, textMuted)
-	// Controller-first affordances (no spelled-out keys).
-	DrawHintBar(assets.hudFont, []HintSeg{
+	drawConfirmModal(assets.hudFont, "QUIT GAME", "Unsaved progress will be lost.", []HintSeg{
 		Hint("Quit", GlyphA),
 		Hint("Cancel", GlyphB),
-	}, cardCenterX, panelY+float32(panelH)-quitConfirmFooterInsetY, FontSmall)
+	})
 }

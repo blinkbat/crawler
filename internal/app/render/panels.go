@@ -637,6 +637,9 @@ const (
 // statValueInsetX is the right-edge inset for a right-aligned value in a Stats-tab cell, so the number column shares one gutter.
 const statValueInsetX = float32(14)
 
+// detailCardInsetX is the content inset (top-left) for a glass detail card's body text.
+const detailCardInsetX = float32(14)
+
 // pickerCardLeftInset is the shared left gutter for a picker's title + footer hint.
 // 26, not hudContentInsetX=22: the picker's engraved title sits a touch further off the
 // frame than body content; kept distinct so retuning the body inset doesn't shift titles.
@@ -680,6 +683,19 @@ const (
 // pickerRowRect returns row i's rect in a picker list starting at listY (single geometry source for all three).
 func pickerRowRect(card rl.Rectangle, listY float32, i int, rowH float32) rl.Rectangle {
 	return rl.NewRectangle(card.X+pickerRowInsetX, listY+float32(i)*rowH, card.Width-2*pickerRowInsetX, rowH-pickerRowGap)
+}
+
+// drawPickerList lays out a picker's body shared by the three picker sub-modals: the row
+// loop (rect + focus highlight) below the header band, then the left-aligned footer hint
+// bar. drawRow renders row i's content into its rect (and may capture the rect for clicks).
+func drawPickerList(font rl.Font, card rl.Rectangle, headerH, rowH float32, count, focused int, hints []HintSeg, drawRow func(i int, rect rl.Rectangle)) {
+	listY := card.Y + headerH
+	for i := 0; i < count; i++ {
+		rect := pickerRowRect(card, listY, i, rowH)
+		drawFocusableRow(rect, i == focused)
+		drawRow(i, rect)
+	}
+	drawModalFooterGlyphsLeft(font, card, card.X+pickerCardLeftInset, hints)
 }
 
 // drawEquipPicker paints the slot's item-picker sub-modal on top of the overlay: items eligible for the focused
@@ -728,15 +744,12 @@ func drawEquipPicker(g *core.GameState, assets Resources) {
 	if len(rows) == 0 {
 		drawTextWithShadow(font, "No eligible items in inventory.", card.X+pickerCardLeftInset, card.Y+headerH+8, FontBody, textDim)
 	}
-	listY := card.Y + headerH
-	for i, row := range rows {
-		rect := pickerRowRect(card, listY, i, rowH)
+	drawPickerList(font, card, headerH, rowH, len(rows), g.EquipPickerCursor, equipPickerHints, func(i int, rect rl.Rectangle) {
 		lastEquipLayout.PickerRects = append(lastEquipLayout.PickerRects, rect)
-		focused := i == g.EquipPickerCursor
-		drawFocusableRow(rect, focused)
+		row := rows[i]
 		if row.Unequip {
 			drawTextWithShadow(font, "Unequip", rect.X+14, rect.Y+rect.Height/2-10, FontBody, inkAccent)
-			continue
+			return
 		}
 		def := core.ItemInfo(row.Kind)
 		slotIconForKind(def.Slot)(rect.X+18, rect.Y+rect.Height/2, 11, giltBright)
@@ -748,9 +761,7 @@ func drawEquipPicker(g *core.GameState, assets Resources) {
 		if bonus := equipBonusSummary(def); bonus != "" {
 			drawTextWithShadow(font, bonus, rect.X+38, rect.Y+rect.Height-20, FontSmall, inkAccent)
 		}
-	}
-
-	drawModalFooterGlyphsLeft(font, card, card.X+pickerCardLeftInset, equipPickerHints)
+	})
 }
 
 // drawUseTargetPicker paints the shared ally-target sub-modal for out-of-battle "use" actions (Items/Skills tab):
@@ -782,11 +793,8 @@ func drawUseTargetPicker(g *core.GameState, assets Resources) {
 	if len(living) == 0 {
 		drawTextWithShadow(font, "No one can be healed.", card.X+pickerCardLeftInset, card.Y+headerH, FontBody, textDim)
 	}
-	listY := card.Y + headerH
-	for i, mi := range living {
-		rect := pickerRowRect(card, listY, i, rowH)
-		drawFocusableRow(rect, i == g.UseTargetCursor)
-		m := &g.Party[mi]
+	drawPickerList(font, card, headerH, rowH, len(living), g.UseTargetCursor, useTargetPickerHints, func(i int, rect rl.Rectangle) {
+		m := &g.Party[living[i]]
 		classCol := classAccent(m.Class)
 		// Left column: class sigil + name.
 		drawClassGlyph(rect.X+24, rect.Y+22, 10, m.Class, classCol)
@@ -805,9 +813,7 @@ func drawUseTargetPicker(g *core.GameState, assets Resources) {
 		barW := rect.Width*0.54 - 16
 		drawBarLive(font, "use:hp:"+m.Name, barX, rect.Y+8, barW, barHeightMini, "HP", m.HP, m.MaxHP, hpFillColor(m.HP, m.MaxHP), false)
 		drawBar(font, barX, rect.Y+30, barW, barHeightMini, "MP", m.MP, m.MaxMP, barMP, false)
-	}
-
-	drawModalFooterGlyphsLeft(font, card, card.X+pickerCardLeftInset, useTargetPickerHints)
+	})
 }
 
 // drawHealPicker paints the out-of-battle support-skill chooser: the caster's heals/cures with MP cost, cursored row gilded.
@@ -830,16 +836,12 @@ func drawHealPicker(g *core.GameState, assets Resources) {
 	cardH := headerH + float32(len(skills))*rowH + pickerFooterH
 	card := drawPickerCard(font, cardW, cardH, "Use Skill — "+g.Party[caster].Name)
 
-	listY := card.Y + headerH
-	for i, s := range skills {
-		rect := pickerRowRect(card, listY, i, rowH)
-		drawFocusableRow(rect, i == g.HealPickCursor)
+	drawPickerList(font, card, headerH, rowH, len(skills), g.HealPickCursor, healPickerHints, func(i int, rect rl.Rectangle) {
+		s := skills[i]
 		drawTextWithShadow(font, core.SkillName(s), rect.X+14, rect.Y+rect.Height/2-10, FontBody, textPrimary)
 		costText := skillCostMPLabel(core.SkillCost(s))
 		drawTextRightAligned(font, costText, rect.X+rect.Width-12, rect.Y+rect.Height/2-8, FontSmall, inkAccent)
-	}
-
-	drawModalFooterGlyphsLeft(font, card, card.X+pickerCardLeftInset, healPickerHints)
+	})
 }
 
 // equipBonusSummary returns the single-line "STR +2" / "Armor +1" bonus copy under an item's tile.
@@ -984,8 +986,8 @@ func drawPanelsItems(g *core.GameState, assets Resources, body rl.Rectangle) {
 	if cursor < len(stacks) {
 		stack := stacks[cursor]
 		info := core.ItemInfo(stack.Kind)
-		dy := detailRect.Y + 14
-		dx := detailRect.X + 14
+		dy := detailRect.Y + detailCardInsetX
+		dx := detailRect.X + detailCardInsetX
 		drawEngravedText(font, info.Name, dx, dy, FontHeading, textPrimary)
 		dy += 38
 		drawTextWithShadow(font, panelsItemEffectLabel(info), dx, dy, FontBody, inkAccent)

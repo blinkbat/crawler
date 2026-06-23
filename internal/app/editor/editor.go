@@ -244,8 +244,9 @@ var layerBrushes = [layerCount][]Brush{
 
 // entityBrushHotkeys is the positional hotkey pool for enemy brushes on
 // LayerEntities. Keys 1/2 are reserved for Clear / Player Start; enemies take
-// 3..N. Past pool length, brushes get no hotkey (mouse-only).
-var entityBrushHotkeys = []int32{rl.KeyThree, rl.KeyFour, rl.KeyFive, rl.KeySix, rl.KeySeven, rl.KeyEight, rl.KeyNine}
+// 3..N. Slices numberRowKeys so it can't drift from the number-row binding.
+// Past pool length, brushes get no hotkey (mouse-only).
+var entityBrushHotkeys = numberRowKeys[2:]
 
 // entityBrushColors is the per-enemy swatch tint (init asserts full coverage).
 var entityBrushColors = map[core.EnemyKind]rl.Color{

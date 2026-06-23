@@ -589,10 +589,11 @@ func ensureAlivePartyTargetOrCancel(g *core.GameState, refundSkill core.SkillID)
 // skill: refund-on-dead gate, actor lookup, attack-bump, raw-damage roll, and a
 // pre-hit target snapshot (message builders want the foe's state before it dies).
 // ok=false means cancelled (MP already refunded). rawDamage is pre-armor; callers
-// may mutate it (crit doublers) before damageEnemy.
-func beginSingleTargetSkill(g *core.GameState, skill core.SkillID, quality int) (actor *core.PartyMember, target core.Enemy, rawDamage, resistWIS int, ok bool) {
+// may mutate it (crit doublers) before damageEnemy. effect is the tier-folded skill
+// effect, resolved once here so per-skill handlers don't re-fetch it.
+func beginSingleTargetSkill(g *core.GameState, skill core.SkillID, quality int) (actor *core.PartyMember, target core.Enemy, rawDamage, resistWIS int, effect core.SkillEffect, ok bool) {
 	if !ensureAliveTargetOrCancel(g, skill) {
-		return nil, core.Enemy{}, 0, 0, false
+		return nil, core.Enemy{}, 0, 0, core.SkillEffect{}, false
 	}
 	actor = &g.Party[g.Battle.CurrentParty]
 	actor.AttackBump = core.BumpDuration
@@ -600,7 +601,8 @@ func beginSingleTargetSkill(g *core.GameState, skill core.SkillID, quality int) 
 	target = *core.BattleMemberAt(g, g.Battle.EnemyIndex)
 	// resistWIS hoisted here so status-proc callers don't re-derive it.
 	resistWIS = core.EffectiveEnemyStats(&target).WIS
-	return actor, target, rawDamage, resistWIS, true
+	effect = core.EffectiveSkillEffect(actor, skill)
+	return actor, target, rawDamage, resistWIS, effect, true
 }
 
 // beginPartyAction is the shared head of self / ally / AoE / utility apply
@@ -1001,11 +1003,10 @@ func applyCripple(g *core.GameState, quality int) bool {
 // applyFrostbite deals frost damage and, on a surviving target, ALWAYS chills it
 // (SPD debuff, like Cripple — no proc roll, not WIS-resistible). Re-cast overwrites.
 func applyFrostbite(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, _, ok := beginSingleTargetSkill(g, core.SkillFrostbite, quality)
+	actor, target, rawDamage, _, effect, ok := beginSingleTargetSkill(g, core.SkillFrostbite, quality)
 	if !ok {
 		return false
 	}
-	effect := core.EffectiveSkillEffect(actor, core.SkillFrostbite)
 	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillFrostbite, rawDamage, quality)
 	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillFrostbite), g.Battle.EnemyIndex)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
@@ -1048,7 +1049,7 @@ func applyCorrosiveVial(g *core.GameState, quality int) bool {
 // --- Firebolt (Wizard, ramps damage and burn chance with quality) ---
 
 func applyFirebolt(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, resistWIS, ok := beginSingleTargetSkill(g, core.SkillFirebolt, quality)
+	actor, target, rawDamage, resistWIS, effect, ok := beginSingleTargetSkill(g, core.SkillFirebolt, quality)
 	if !ok {
 		return false
 	}
@@ -1058,7 +1059,6 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 	if overloaded {
 		rawDamage += core.OverchargeDamageBonus
 	}
-	effect := core.EffectiveSkillEffect(actor, core.SkillFirebolt)
 	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillFirebolt, rawDamage, quality)
 	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillFirebolt), g.Battle.EnemyIndex)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
@@ -1078,14 +1078,13 @@ func applyFirebolt(g *core.GameState, quality int) bool {
 // --- Crushing Blow (Warrior, charge phys hit with Stun proc on Great+) ---
 
 func applyCrushingBlow(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, resistWIS, ok := beginSingleTargetSkill(g, core.SkillCrushingBlow, quality)
+	actor, target, rawDamage, resistWIS, effect, ok := beginSingleTargetSkill(g, core.SkillCrushingBlow, quality)
 	if !ok {
 		return false
 	}
-	effect := core.EffectiveSkillEffect(actor, core.SkillCrushingBlow)
 	// Crushing Blow T3 doubles damage on an Excellent timing roll, INDEPENDENT of
 	// the universal crit below — both stack (CritMultiplier × 2 = 4×), like Backstab T2.
-	if quality == core.TimingQualityExcellent && core.SkillTierMod(actor, core.SkillCrushingBlow).CritDoubleOnExcellent {
+	if excellentTierDoubles(actor, core.SkillCrushingBlow, quality) {
 		rawDamage *= core.TierDamageDoubler
 	}
 	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillCrushingBlow, rawDamage, quality)
@@ -1146,11 +1145,10 @@ func applyBless(g *core.GameState, quality int) bool {
 // --- Smite (Cleric, press-tap magic damage) ---
 
 func applySmite(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, resistWIS, ok := beginSingleTargetSkill(g, core.SkillSmite, quality)
+	actor, target, rawDamage, resistWIS, effect, ok := beginSingleTargetSkill(g, core.SkillSmite, quality)
 	if !ok {
 		return false
 	}
-	effect := core.EffectiveSkillEffect(actor, core.SkillSmite)
 	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillSmite, rawDamage, quality)
 	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillSmite), g.Battle.EnemyIndex)
 	// Smite T3 adds a Great+ stun proc (StunChance is 0 at T0..2, so it short-circuits).
@@ -1164,7 +1162,7 @@ func applySmite(g *core.GameState, quality int) bool {
 // --- Backstab (Thief, charge phys with crit on Excellent) ---
 
 func applyBackstab(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, _, ok := beginSingleTargetSkill(g, core.SkillBackstab, quality)
+	actor, target, rawDamage, _, _, ok := beginSingleTargetSkill(g, core.SkillBackstab, quality)
 	if !ok {
 		return false
 	}
@@ -1227,11 +1225,10 @@ func strikeWithCrit(g *core.GameState, actor *core.PartyMember, skill core.Skill
 // applyDoTStrike is the single body for every phys-hit-plus-DoT skill: a hit that,
 // on a survivor, rolls the DoT (dot.chance) onto dot.counter via tryProcStatus.
 func applyDoTStrike(g *core.GameState, skill core.SkillID, quality int, dot dotStrike) bool {
-	actor, target, rawDamage, resistWIS, ok := beginSingleTargetSkill(g, skill, quality)
+	actor, target, rawDamage, resistWIS, effect, ok := beginSingleTargetSkill(g, skill, quality)
 	if !ok {
 		return false
 	}
-	effect := core.EffectiveSkillEffect(actor, skill)
 	damage, defeated, crit := strikeWithCrit(g, actor, skill, rawDamage, quality)
 	core.EnqueueEnemyVFX(g, vfxKindFor(skill), g.Battle.EnemyIndex)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
@@ -1260,11 +1257,10 @@ func applyLacerate(g *core.GameState, quality int) bool {
 // --- Frost Lance (Wizard, charge magic with reliable Stun on Great+) ---
 
 func applyFrostLance(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, resistWIS, ok := beginSingleTargetSkill(g, core.SkillFrostLance, quality)
+	actor, target, rawDamage, resistWIS, effect, ok := beginSingleTargetSkill(g, core.SkillFrostLance, quality)
 	if !ok {
 		return false
 	}
-	effect := core.EffectiveSkillEffect(actor, core.SkillFrostLance)
 	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillFrostLance, rawDamage, quality)
 	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillFrostLance), g.Battle.EnemyIndex)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
@@ -1360,11 +1356,10 @@ func applyConeOfCold(g *core.GameState, quality int) bool {
 // applySunder deals phys damage and, on a survivor, shoves its ATB gauge back
 // (effect.ATBPush) — a one-shot tempo swing, not a status. No shove on a kill.
 func applySunder(g *core.GameState, quality int) bool {
-	actor, target, rawDamage, _, ok := beginSingleTargetSkill(g, core.SkillSunder, quality)
+	actor, target, rawDamage, _, effect, ok := beginSingleTargetSkill(g, core.SkillSunder, quality)
 	if !ok {
 		return false
 	}
-	effect := core.EffectiveSkillEffect(actor, core.SkillSunder)
 	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillSunder, rawDamage, quality)
 	core.EnqueueEnemyVFX(g, vfxKindFor(core.SkillSunder), g.Battle.EnemyIndex)
 	shoved := !defeated && pushEnemyReadiness(g, g.Battle.EnemyIndex, effect.ATBPush)
@@ -1626,9 +1621,7 @@ func rollSkillCrit(g *core.GameState, actor *core.PartyMember, skill core.SkillI
 	}
 	if skill == core.SkillBackstab && quality >= core.TimingQualityExcellent {
 		crit = true
-		if core.SkillTierMod(actor, core.SkillBackstab).CritDoubleOnExcellent {
-			double = true
-		}
+		double = excellentTierDoubles(actor, core.SkillBackstab, quality)
 		triggerBigShake(g)
 		return
 	}
@@ -1639,6 +1632,14 @@ func rollSkillCrit(g *core.GameState, actor *core.PartyMember, skill core.SkillI
 		triggerBigShake(g)
 	}
 	return
+}
+
+// excellentTierDoubles reports whether skill's "Excellent doubles damage" tier mod
+// (CritDoubleOnExcellent) is live for this timing roll. Single source for the rule;
+// Crushing Blow applies it as a flat pre-crit ×2, Backstab folds it into rollSkillCrit's
+// guaranteed-crit double channel (the two apply points differ, the trigger does not).
+func excellentTierDoubles(actor *core.PartyMember, skill core.SkillID, quality int) bool {
+	return quality == core.TimingQualityExcellent && core.SkillTierMod(actor, skill).CritDoubleOnExcellent
 }
 
 // applyCritMultiplier returns the post-crit damage; `double` (Backstab T2)
@@ -1833,14 +1834,10 @@ func tickBlessAfterPartyTurn(g *core.GameState, actor core.ActorRef) {
 		return
 	}
 	m := &g.Party[actor.Index]
-	if m.HP <= 0 || len(m.Buffs) == 0 {
+	if m.HP <= 0 {
 		return
 	}
-	remaining, expired := core.TickStatusMods(m.Buffs)
-	m.Buffs = remaining
-	for _, s := range expired {
-		setBattleMessage(g, fmt.Sprintf("%s's %s fades.", m.Name, core.SkillName(s)))
-	}
+	m.Buffs = tickStatusModList(g, m.Buffs, m.Name, "%s's %s fades.")
 }
 
 // tickEnemyBuffAfterTurn drains every stackable debuff on the enemy at its turn
@@ -1850,15 +1847,24 @@ func tickEnemyBuffAfterTurn(g *core.GameState, actor core.ActorRef) {
 		return
 	}
 	enemy, ok := livingEnemyAt(g, actor.Index)
-	if !ok || len(enemy.Debuffs) == 0 {
+	if !ok {
 		return
 	}
-	remaining, expired := core.TickStatusMods(enemy.Debuffs)
-	enemy.Debuffs = remaining
-	// One line per expired source (skill), not per stat — TickStatusMods returns sources.
-	for _, s := range expired {
-		setBattleMessage(g, fmt.Sprintf("%s's %s wears off.", core.EnemyDisplayName(enemy), core.SkillName(s)))
+	enemy.Debuffs = tickStatusModList(g, enemy.Debuffs, core.EnemyDisplayName(enemy), "%s's %s wears off.")
+}
+
+// tickStatusModList drains a stackable buff/debuff list one turn, narrating each
+// expired source (skill) via fadeFmt(name, skill) and returning the survivors. Shared
+// body for tickBlessAfterPartyTurn (party buffs) and tickEnemyBuffAfterTurn (enemy debuffs).
+func tickStatusModList(g *core.GameState, mods []core.StatusMod, name, fadeFmt string) []core.StatusMod {
+	if len(mods) == 0 {
+		return mods
 	}
+	remaining, expired := core.TickStatusMods(mods)
+	for _, s := range expired {
+		setBattleMessage(g, fmt.Sprintf(fadeFmt, name, core.SkillName(s)))
+	}
+	return remaining
 }
 
 // tickRegenAfterPartyTurn applies one Renewal HoT tick at the member's turn end —

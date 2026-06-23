@@ -228,14 +228,10 @@ func CursorUpDown(cursor, count int) int {
 
 // UpPressedArrows / DownPressedArrows are text-entry-safe vertical nav: arrows +
 // pad/stick but NOT W/S, so a row doubling as a text field doesn't scroll when
-// W/S are typed.
-func UpPressedArrows() bool {
-	return rl.IsKeyPressed(rl.KeyUp) || padDirUp()
-}
-
-func DownPressedArrows() bool {
-	return rl.IsKeyPressed(rl.KeyDown) || padDirDown()
-}
+// W/S are typed. Identical predicate to the pickpocket Arrow{Up,Down}Pressed — aliased
+// so the "arrows + pad, no WASD" rule lives in one place.
+func UpPressedArrows() bool   { return ArrowUpPressed() }
+func DownPressedArrows() bool { return ArrowDownPressed() }
 
 // CursorUpDownTextSafe is CursorUpDown without W/S, for a list with an active
 // text field. Pad/stick/arrows still navigate.
@@ -322,13 +318,15 @@ func CursorLeftRightWrap(cursor, count int) int {
 }
 
 func TargetNextPressed() bool {
+	// padDirRight folds the D-pad-right + stick-right-edge read; Tab/Down/RT1 are the
+	// extra "advance target" bindings on top of the shared directional primitive.
 	return rl.IsKeyPressed(rl.KeyTab) || rl.IsKeyPressed(rl.KeyRight) || rl.IsKeyPressed(rl.KeyD) || rl.IsKeyPressed(rl.KeyDown) ||
-		padPressed(rl.GamepadButtonLeftFaceRight) || padPressed(rl.GamepadButtonRightTrigger1) || stickEdgeX(1)
+		padDirRight() || padPressed(rl.GamepadButtonRightTrigger1)
 }
 
 func TargetPreviousPressed() bool {
 	return rl.IsKeyPressed(rl.KeyLeft) || rl.IsKeyPressed(rl.KeyA) || rl.IsKeyPressed(rl.KeyUp) ||
-		padPressed(rl.GamepadButtonLeftFaceLeft) || padPressed(rl.GamepadButtonLeftTrigger1) || stickEdgeX(-1)
+		padDirLeft() || padPressed(rl.GamepadButtonLeftTrigger1)
 }
 
 // PausePressed reports the pause-menu edge: P / Esc / pad Start (MiddleRight, the

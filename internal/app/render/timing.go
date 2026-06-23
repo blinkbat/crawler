@@ -1,6 +1,7 @@
 package render
 
 import (
+	"image/color"
 	"math"
 	"strconv"
 
@@ -9,19 +10,26 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Per-bar heading text, in one place (the press bar flips STRIKE/DEFEND by phase).
-const (
-	timingHeadingStrike       = "STRIKE!"
-	timingHeadingDefend       = "DEFEND!"
-	timingHeadingCharge       = "CHARGE!"
-	timingHeadingCombo        = "COMBO!"
-	timingHeadingReels        = "STOP THE REELS!"
-	timingHeadingRecallMemo   = "MEMORIZE!"
-	timingHeadingRecallRecall = "RECALL!"
+// timingHeadingStyle pairs a bar heading's text with its base-fill tint so a dispatch
+// site can't mismatch the two. The tints live in theme.go's palette block.
+type timingHeadingStyle struct {
+	text  string
+	color rl.Color
+}
+
+// Per-bar headings (the press bar flips Strike/Defend by phase; recall flips Memo/Recall).
+var (
+	headStrike       = timingHeadingStyle{"STRIKE!", timingHeadingStrikeColor}
+	headDefend       = timingHeadingStyle{"DEFEND!", timingHeadingDefendColor}
+	headCharge       = timingHeadingStyle{"CHARGE!", timingHeadingChargeColor}
+	headReels        = timingHeadingStyle{"STOP THE REELS!", timingHeadingReelsColor}
+	headRecallMemo   = timingHeadingStyle{"MEMORIZE!", timingHeadingRecallMemoColor}
+	headRecallRecall = timingHeadingStyle{"RECALL!", timingHeadingRecallRecallColor}
 )
 
-// Per-mode heading + base-fill tints (timingHeading*Color) and reel hues (reelSymbolColors)
-// live in theme.go's palette block.
+// timingHeadingCombo's tint is the thief-green sequence color (seqOkColor), not a
+// paired palette entry, so it stays a bare string.
+const timingHeadingCombo = "COMBO!"
 
 // Shared timing-bar layout + alpha tunables, read by all bars so they can't drift.
 const (
@@ -292,12 +300,18 @@ func drawTimingCursor(curX, drawY, drawnH, cursorW float32, col rl.Color) {
 // barTrack hue (only alpha differs: 230 vs 140 so the tube reads solid). Retune base hue in barTrack.
 var timingTrackColor = colorWithAlpha(barTrack, 230)
 
+// drawTimingTrackBody stamps the recessed glass timing-track body (gauge well + dark
+// glass fill) behind a bar or reel cell. One place so every track shares the look.
+func drawTimingTrackBody(ix, iy, iw, ih int32) {
+	drawGaugeWell(ix, iy, iw, ih)
+	drawSmallPanel(ix, iy, iw, ih, timingTrackColor)
+}
+
 // drawTimingTrack paints the recessed gauge body (well + dark glass track) behind a timing bar,
 // flooding with the grade color during the flash hold. Frame/studs go on top via drawTimingFrameOverlay.
 func drawTimingTrack(drawX, drawY, barW, drawnH float32, quality int, isDefend, flashing bool, timingFlash float32) {
 	ix, iy, iw, ih := int32(drawX), int32(drawY), int32(barW), int32(drawnH)
-	drawGaugeWell(ix, iy, iw, ih)
-	drawSmallPanel(ix, iy, iw, ih, timingTrackColor)
+	drawTimingTrackBody(ix, iy, iw, ih)
 	if flashing {
 		flood := qualityColor(quality, isDefend)
 		flood.A = uint8(220 * flashAlpha(timingFlash))
@@ -314,17 +328,24 @@ const (
 	reelStudInset = float32(6)
 )
 
-// drawTimingFrameOverlay caps a press/charge bar with the candlelit cabinet chrome (wood bezel,
-// breathing gilt frame, corner studs). Drawn AFTER the interior content so it seats over the edges.
-func drawTimingFrameOverlay(drawX, drawY, barW, drawnH float32) {
+// drawTimingFrame seats the candlelit cabinet chrome (wood bezel, gilt outline, four
+// corner studs) over a bar/cell interior. studRadius/studIns size the rivets; outline
+// is the breathing frame color. Shared by the press/charge overlay and locked reel cells.
+func drawTimingFrame(drawX, drawY, barW, drawnH, studRadius, studIns float32, outline color.RGBA) {
 	ix, iy, iw, ih := int32(drawX), int32(drawY), int32(barW), int32(drawnH)
 	drawGaugeBezel(ix, iy, iw, ih, false)
+	drawSmallPanelOutline(ix, iy, iw, ih, outline)
+	drawBrassStud(drawX+studIns, drawY+studIns, studRadius)
+	drawBrassStud(drawX+barW-studIns, drawY+studIns, studRadius)
+	drawBrassStud(drawX+studIns, drawY+drawnH-studIns, studRadius)
+	drawBrassStud(drawX+barW-studIns, drawY+drawnH-studIns, studRadius)
+}
+
+// drawTimingFrameOverlay caps a press/charge bar with the full-size cabinet chrome.
+// Drawn AFTER the interior content so it seats over the edges.
+func drawTimingFrameOverlay(drawX, drawY, barW, drawnH float32) {
 	flick := candleFlicker()
-	drawSmallPanelOutline(ix, iy, iw, ih, fadeColor(giltBright, 0.55+0.3*flick))
-	drawBrassStud(drawX+studInset, drawY+studInset, studR)
-	drawBrassStud(drawX+barW-studInset, drawY+studInset, studR)
-	drawBrassStud(drawX+studInset, drawY+drawnH-studInset, studR)
-	drawBrassStud(drawX+barW-studInset, drawY+drawnH-studInset, studR)
+	drawTimingFrame(drawX, drawY, barW, drawnH, studR, studInset, fadeColor(giltBright, 0.55+0.3*flick))
 }
 
 // drawExcellentShockwave paints the expanding ring from the frozen cursor on an Excellent
@@ -344,12 +365,11 @@ func drawExcellentShockwave(curX, drawY, drawnH, flashTimer float32, isDefend bo
 func drawPressBar(timing core.TimingState, g *core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
 	isDefend := g.Battle.Phase == core.BattleEnemyTiming
 
-	heading := timingHeadingStrike
-	baseCol := timingHeadingStrikeColor
+	hs := headStrike
 	if isDefend {
-		heading = timingHeadingDefend
-		baseCol = timingHeadingDefendColor
+		hs = headDefend
 	}
+	heading, baseCol := hs.text, hs.color
 
 	xOff, yOff, drawnH := applyBarMotion(timing, g.Battle.TimingFlash, barH)
 	drawX := x + xOff
@@ -399,8 +419,7 @@ func drawPressBar(timing core.TimingState, g *core.GameState, assets Resources, 
 // cursor crosses them, a bright peak window, then a dim decay zone. The cursor sweeps regardless
 // of hold state (Elapsed always counts up) so the peak window is visible before pressing.
 func drawChargeBar(timing core.TimingState, g *core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
-	heading := timingHeadingCharge
-	baseCol := timingHeadingChargeColor
+	heading, baseCol := headCharge.text, headCharge.color
 	// Intro-pause: show "Press to start" so the bar reads as waiting on input.
 	if !flashing && g.Battle.TimingIntro > 0 {
 		heading = "Press to start"
@@ -559,7 +578,7 @@ func drawReelBar(timing core.TimingState, g *core.GameState, assets Resources, x
 	barH *= reelBarHeightScale
 	xOff, _, _ := applyBarMotion(timing, g.Battle.TimingFlash, barH)
 	drawX := x + xOff
-	drawTimingHeading(assets.hudFont, timingHeadingReels, drawX, barW, y, timingHeadingReelsColor, flashing, qualityColor(timing.Quality, false))
+	drawTimingHeading(assets.hudFont, headReels.text, drawX, barW, y, headReels.color, flashing, qualityColor(timing.Quality, false))
 
 	n := len(timing.Reels)
 	if n == 0 {
@@ -584,8 +603,7 @@ func drawReelBar(timing core.TimingState, g *core.GameState, assets Resources, x
 		sx := cellX + cellW*0.5
 
 		// Recessed glass window per reel (same gauge body as the press/charge tracks).
-		drawGaugeWell(ix, iy, iw, ih)
-		drawSmallPanel(ix, iy, iw, ih, timingTrackColor)
+		drawTimingTrackBody(ix, iy, iw, ih)
 
 		// Clip the scrolling strip to the reel window so symbols slide in/out, not spill.
 		rl.BeginScissorMode(ix, iy, iw, ih)
@@ -623,12 +641,8 @@ func drawReelBar(timing core.TimingState, g *core.GameState, assets Resources, x
 		// Frame: dim wood rail while spinning; breathing gilt frame + corner studs once locked.
 		if stopped {
 			flick := candleFlicker()
-			drawGaugeBezel(ix, iy, iw, ih, false)
-			drawSmallPanelOutline(ix, iy, iw, ih, fadeForFlash(fadeColor(giltBright, 0.6+0.3*flick), flashing, flash))
-			drawBrassStud(cellX+reelStudInset, y+reelStudInset, reelStudR)
-			drawBrassStud(cellX+cellW-reelStudInset, y+reelStudInset, reelStudR)
-			drawBrassStud(cellX+reelStudInset, y+barH-reelStudInset, reelStudR)
-			drawBrassStud(cellX+cellW-reelStudInset, y+barH-reelStudInset, reelStudR)
+			drawTimingFrame(cellX, y, cellW, barH, reelStudR, reelStudInset,
+				fadeForFlash(fadeColor(giltBright, 0.6+0.3*flick), flashing, flash))
 		} else {
 			drawGaugeBezel(ix, iy, iw, ih, true)
 			drawSmallPanelOutline(ix, iy, iw, ih, woodAccentSeam)
@@ -648,12 +662,11 @@ func drawReelSymbol(sx, sy, r float32, col rl.Color, flashing bool, flash float3
 // RECALL (pending = dim dots, landed = answer tinted green/red). Reuses the sequence bar's arrows.
 func drawRecallBar(timing core.TimingState, g *core.GameState, assets Resources, x, y, barW, barH float32, flashing bool) {
 	hidden := timing.RecallHidden()
-	heading := timingHeadingRecallMemo
-	baseCol := timingHeadingRecallMemoColor
+	hs := headRecallMemo
 	if hidden {
-		heading = timingHeadingRecallRecall
-		baseCol = timingHeadingRecallRecallColor
+		hs = headRecallRecall
 	}
+	heading, baseCol := hs.text, hs.color
 	xOff, _, _ := applyBarMotion(timing, g.Battle.TimingFlash, barH)
 	drawX := x + xOff
 	drawTimingHeading(assets.hudFont, heading, drawX, barW, y, baseCol, flashing, qualityColor(timing.Quality, false))
