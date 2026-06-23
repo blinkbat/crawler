@@ -360,8 +360,8 @@ const (
 	// Enemy roster card (battle.go) — the top-center foe-list pane, laid out as a
 	// formation grid: back rank (up to EnemyBackRowCap) on top, front rank (up to
 	// EnemyFrontRowCap) below.
-	rosterTopPad    = int32(16) // inset above the first rank
-	rosterBottomPad = int32(16) // inset below the last rank
+	rosterTopPad    = int32(16)  // inset above the first rank
+	rosterBottomPad = int32(16)  // inset below the last rank
 	rosterCellW     = int32(152) // per-foe cell width
 	rosterCellH     = int32(60)  // per-foe cell height (name over condition, smaller fonts)
 	rosterCellGap   = int32(10)  // gap between cells in a rank
@@ -380,6 +380,11 @@ const (
 	// hudContentInsetX is the left gutter from a combat pane edge to its content;
 	// also the spacing system's canonical window-padding token.
 	hudContentInsetX = int32(22)
+	// modalContentInsetX is the canonical side gutter for modal-card content
+	// (dialog/chest/victory/level-up). Aliases hudContentInsetX(22) so combat panes
+	// and modals share one window-padding value. A few modals intentionally deviate
+	// (a slightly wider 24 or tighter 20) and keep their own named const + comment.
+	modalContentInsetX = hudContentInsetX
 
 	// --- Spacing system (see UI_STANDARDS.md "Spacing") -----------------
 	// Shared gaps so headings/rows/footers line up the same everywhere. Header→
@@ -389,7 +394,11 @@ const (
 	uiRowH          = int32(32)         // standard interactive row-plate height
 	uiRowGap        = int32(10)         // vertical gap between stacked row plates
 	uiRowPitch      = uiRowH + uiRowGap // row center-to-center pitch (42)
-	uiFooterMargin  = int32(14)         // visual gap below a footer hint's glyphs/text to the card bottom edge
+	// modalListRowH is the shared row height for the simple modal list overlays
+	// (dialog choices, chest items, shop rows). Taller than uiRowH(32) — these
+	// FontBody rows want a bit more air than the dense combat menus.
+	modalListRowH  = int32(34)
+	uiFooterMargin = int32(14) // visual gap below a footer hint's glyphs/text to the card bottom edge
 	// actionMenuHintMinH is the height floor below which the action menu drops its
 	// hint footer (it would collide with rows). Above the hudPanelMinH floor.
 	actionMenuHintMinH = int32(260)

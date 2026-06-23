@@ -269,32 +269,29 @@ func applyUseToMember(g *core.GameState, member int) {
 	closeUseTarget(g)
 }
 
-// openUseTargetForItem opens the ally-target picker carrying a pending item
-// (inverse of closeUseTarget — both set the same five fields).
+// setUseTarget is the single seam for the five ally-target picker fields; open/
+// close and the item/skill variants all route through it so they can't diverge.
+func setUseTarget(g *core.GameState, open bool, cursor int, item core.ItemKind, skill core.SkillID, caster int) {
+	g.UseTargetOpen = open
+	g.UseTargetCursor = cursor
+	g.UsePendingItem = item
+	g.UsePendingSkill = skill
+	g.UsePendingCaster = caster
+}
+
+// openUseTargetForItem opens the ally-target picker carrying a pending item.
 func openUseTargetForItem(g *core.GameState, kind core.ItemKind) {
-	g.UseTargetOpen = true
-	g.UseTargetCursor = 0
-	g.UsePendingItem = kind
-	g.UsePendingSkill = core.SkillNone
-	g.UsePendingCaster = noCaster
+	setUseTarget(g, true, 0, kind, core.SkillNone, noCaster)
 }
 
 // openUseTargetForSkill opens the picker carrying a pending single-target heal
-// by `caster`. Mirror of openUseTargetForItem / closeUseTarget.
+// by `caster`.
 func openUseTargetForSkill(g *core.GameState, caster int, skill core.SkillID) {
-	g.UseTargetOpen = true
-	g.UseTargetCursor = 0
-	g.UsePendingItem = core.ItemNone
-	g.UsePendingSkill = skill
-	g.UsePendingCaster = caster
+	setUseTarget(g, true, 0, core.ItemNone, skill, caster)
 }
 
 // closeUseTarget dismisses the ally-target picker and clears its pending state.
 // Called on apply, Back, and overlay close / tab switch.
 func closeUseTarget(g *core.GameState) {
-	g.UseTargetOpen = false
-	g.UseTargetCursor = 0
-	g.UsePendingItem = core.ItemNone
-	g.UsePendingSkill = core.SkillNone
-	g.UsePendingCaster = noCaster
+	setUseTarget(g, false, 0, core.ItemNone, core.SkillNone, noCaster)
 }

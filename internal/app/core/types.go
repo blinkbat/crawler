@@ -260,10 +260,10 @@ type AreaDefinition struct {
 	// from encoding + equality — only FaceOverrides is authoritative.
 	faceOverrideIdx map[[2]int]int
 	Materials       MaterialSet
-	StartTileX    int
-	StartTileZ  int
-	StartFacing int
-	PackSpawns  []PackSpawn
+	StartTileX      int
+	StartTileZ      int
+	StartFacing     int
+	PackSpawns      []PackSpawn
 	// ChestSpawns is the authored chest list → runtime Chests in NewGameState.
 	ChestSpawns []ChestSpawn
 	// DoorSpawns is the authored door list → runtime g.Doors in NewGameState.
@@ -366,9 +366,9 @@ type GameState struct {
 	// cursor. BattleWipe = the selected entry transition (played on battle start);
 	// BattleWipePreview is a countdown that plays the wipe over the field for the
 	// debug preview. Runtime debug prefs (not in SaveData), kept across Restart.
-	WipeMenuOpen     bool
-	WipeMenuIndex    int
-	BattleWipe       BattleWipeKind
+	WipeMenuOpen      bool
+	WipeMenuIndex     int
+	BattleWipe        BattleWipeKind
 	BattleWipePreview float32
 	// RetroFilterSky: true (default) captures the skybox inside the filter pass;
 	// false draws it crisp with the filtered environment blitted over.

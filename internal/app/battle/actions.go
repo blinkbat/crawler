@@ -99,56 +99,62 @@ func init() {
 			panic("battle: enemySpellHandlers has a handler for " + core.SkillName(s) + " but its registry entry isn't EnemyCastable — clear the handler or flip the flag")
 		}
 	}
-	// Every targetedSetupConfig key must be a registered handler skill — a missing
-	// config would resolve to the zero value (enemy-target), mislabeling an ally cast.
-	for s := range targetedSetupConfig {
+	// Every targetedSetupConfig key must be a registered handler skill, and every
+	// ally-targeted row (per the skill's TargetMode) must carry a downed-target
+	// refusal line — an empty one would leave setupTargetedAllyAndPay with no message.
+	for s, deadMsg := range targetedSetupConfig {
 		if _, ok := skillActionHandlers[s]; !ok {
 			panic("battle: targetedSetupConfig has a row for " + core.SkillName(s) + " with no skillActionHandlers entry")
+		}
+		if targetedSetupIsAlly(s) && deadMsg == "" {
+			panic("battle: targetedSetupConfig ally-targeted skill " + core.SkillName(s) + " needs a downed-target refusal message")
 		}
 	}
 }
 
 // targetedSetupConfig drives the single-target setup gate for skills whose setup
-// is purely "confirm a living enemy/ally, then pay MP." Per-skill data is the gate
-// kind (enemy vs ally) and, for ally rows, the downed-target refusal line.
-// deadMsg is meaningful only for ally-gated rows; enemy rows leave it "".
-type targetedSetupKind struct {
-	ally    bool
-	deadMsg string
+// is purely "confirm a living enemy/ally, then pay MP." Membership marks a skill
+// as table-gated; the value is the downed-target refusal line for ALLY-gated rows
+// (enemy rows leave it ""). Whether a row is ally- or enemy-gated is NOT stored
+// here — it derives from core.SkillTargetMode (the skill definition), so the two
+// can't drift; init asserts every ally-mode row carries a message.
+var targetedSetupConfig = map[core.SkillID]string{
+	// Enemy-targeted (setup → confirm live enemy → pay MP).
+	core.SkillScan:          "",
+	core.SkillFirebolt:      "",
+	core.SkillCrushingBlow:  "",
+	core.SkillSmite:         "",
+	core.SkillBackstab:      "",
+	core.SkillVenomStrike:   "",
+	core.SkillFrostLance:    "",
+	core.SkillCripple:       "",
+	core.SkillFrostbite:     "",
+	core.SkillCorrosiveVial: "",
+	core.SkillSunder:        "",
+	core.SkillTaunt:         "",
+	core.SkillBlind:         "",
+	core.SkillRend:          "",
+	core.SkillLacerate:      "",
+	// Ally-targeted, each with its downed-target refusal line.
+	core.SkillPrayer:    "Prayer cannot revive.",
+	core.SkillStoneSkin: "Stone Skin can't reach the fallen.",
+	core.SkillAegis:     "Aegis can't reach the fallen.",
+	core.SkillCleanse:   "Cleanse can't reach the fallen.",
+	core.SkillRenewal:   "Renewal can't reach the fallen.",
 }
 
-var targetedSetupConfig = map[core.SkillID]targetedSetupKind{
-	// Enemy-targeted (setup → confirm live enemy → pay MP).
-	core.SkillScan:          {},
-	core.SkillFirebolt:      {},
-	core.SkillCrushingBlow:  {},
-	core.SkillSmite:         {},
-	core.SkillBackstab:      {},
-	core.SkillVenomStrike:   {},
-	core.SkillFrostLance:    {},
-	core.SkillCripple:       {},
-	core.SkillFrostbite:     {},
-	core.SkillCorrosiveVial: {},
-	core.SkillSunder:        {},
-	core.SkillTaunt:         {},
-	core.SkillBlind:         {},
-	core.SkillRend:          {},
-	core.SkillLacerate:      {},
-	// Ally-targeted, each with its downed-target refusal line.
-	core.SkillPrayer:    {ally: true, deadMsg: "Prayer cannot revive."},
-	core.SkillStoneSkin: {ally: true, deadMsg: "Stone Skin can't reach the fallen."},
-	core.SkillAegis:     {ally: true, deadMsg: "Aegis can't reach the fallen."},
-	core.SkillCleanse:   {ally: true, deadMsg: "Cleanse can't reach the fallen."},
-	core.SkillRenewal:   {ally: true, deadMsg: "Renewal can't reach the fallen."},
+// targetedSetupIsAlly reports whether a table-gated skill targets an ally, read
+// from the skill definition (single source) rather than a parallel flag.
+func targetedSetupIsAlly(skill core.SkillID) bool {
+	return core.SkillTargetMode(skill) == core.ActionPartyTarget
 }
 
 // runTargetedSetup is the table-driven single-target gate: runs the enemy/ally
-// check (per targetedSetupConfig) and pays MP. Setup commits the cost; the only
+// check (per the skill's TargetMode) and pays MP. Setup commits the cost; the only
 // refund path is target-death before apply, handled by ensureAlive*OrCancel.
 func runTargetedSetup(g *core.GameState, skill core.SkillID) bool {
-	cfg := targetedSetupConfig[skill]
-	if cfg.ally {
-		return setupTargetedAllyAndPay(g, skill, cfg.deadMsg)
+	if targetedSetupIsAlly(skill) {
+		return setupTargetedAllyAndPay(g, skill, targetedSetupConfig[skill])
 	}
 	return setupTargetedEnemyAndPay(g, skill)
 }
@@ -339,7 +345,9 @@ func handleEnemyWeb(ctx enemySpellCtx) bool {
 		already: func(ctx enemySpellCtx, m *core.PartyMember) {
 			setBattleMessage(ctx.g, fmt.Sprintf("%s spins a fresh web at %s — already webbed.", core.TheEnemy(ctx.def), m.Name))
 		},
-		success: func(ctx enemySpellCtx, m *core.PartyMember) { enemySpellLog(ctx, "%s is wrapped in sticky webs.", m.Name) },
+		success: func(ctx enemySpellCtx, m *core.PartyMember) {
+			enemySpellLog(ctx, "%s is wrapped in sticky webs.", m.Name)
+		},
 	})
 }
 
@@ -484,10 +492,35 @@ func applyAoEDamage(g *core.GameState, skill core.SkillID, damage, quality int, 
 	return hits
 }
 
+// vfxNoneExempt is the frozen set of castable skills that intentionally queue NO
+// particle effect — utility casts with their own feedback (Scan IDs a foe,
+// Taunt/SmokeBomb only alter targeting, RaiseBones summons). init() asserts this
+// set EXACTLY matches the castable skills vfxKindFor returns VFXNone for, so a new
+// damaging/status skill that forgets a vfxKindFor case trips a startup panic
+// instead of silently rendering nothing.
+var vfxNoneExempt = map[core.SkillID]bool{
+	core.SkillScan:       true,
+	core.SkillTaunt:      true,
+	core.SkillSmokeBomb:  true,
+	core.SkillRaiseBones: true,
+}
+
+func init() {
+	for _, s := range append(core.PlayerCastableSkills(), core.EnemyCastableSkills()...) {
+		if vfxKindFor(s) == core.VFXNone && !vfxNoneExempt[s] {
+			panic("battle: castable skill " + core.SkillName(s) + " maps to VFXNone in vfxKindFor — add a case (or add it to vfxNoneExempt if it intentionally has no effect)")
+		}
+	}
+	for s := range vfxNoneExempt {
+		if vfxKindFor(s) != core.VFXNone {
+			panic("battle: " + core.SkillName(s) + " is in vfxNoneExempt but vfxKindFor returns a real effect — remove the exemption")
+		}
+	}
+}
+
 // vfxKindFor maps a skill to the particle effect its apply step queues. Callers
-// choose the enqueue direction. Unmapped skills return VFXNone — a SUPPORTED
-// outcome (Taunt relies on it; Scan hardcodes its kind; Smoke Bomb has none), so
-// deliberately no completeness assert.
+// choose the enqueue direction. Unmapped skills return VFXNone, valid only for the
+// vfxNoneExempt set (init asserts this — see above).
 func vfxKindFor(skill core.SkillID) core.VFXKind {
 	switch skill {
 	case core.SkillSwipe, core.SkillWhirlwind, core.SkillCrushingBlow, core.SkillBackstab, core.SkillSunder, core.SkillRend, core.SkillLacerate:
@@ -806,8 +839,7 @@ func applySwipe(g *core.GameState, quality int) bool {
 	// tallied hit; single-press fallback does one pass.
 	damage := scaleSkillDamage(actor, core.SkillSwipe, quality)
 	// One crit roll for the whole Swipe (the player can't react between sweeps).
-	crit, _ := rollSkillCrit(g, actor, core.SkillSwipe, quality)
-	damage = applyCritMultiplier(damage, crit, false)
+	damage, crit := sweepCritDamage(g, actor, core.SkillSwipe, damage, quality)
 	passes := multiPressPasses(g.Battle.Timing, quality)
 	// enemiesHit = distinct foes struck, captured from the FIRST pass (later passes
 	// hit fewer as kills accrue; the full set was struck at least once).
@@ -1084,9 +1116,7 @@ func applyCrushingBlow(g *core.GameState, quality int) bool {
 	}
 	// Crushing Blow T3 doubles damage on an Excellent timing roll, INDEPENDENT of
 	// the universal crit below — both stack (CritMultiplier × 2 = 4×), like Backstab T2.
-	if excellentTierDoubles(actor, core.SkillCrushingBlow, quality) {
-		rawDamage *= core.TierDamageDoubler
-	}
+	rawDamage = applyTierDouble(rawDamage, actor, core.SkillCrushingBlow, quality)
 	damage, defeated, crit := strikeWithCrit(g, actor, core.SkillCrushingBlow, rawDamage, quality)
 	core.EnqueueEnemyVFX(g, core.VFXSlash, g.Battle.EnemyIndex)
 	enemy := core.BattleMemberAt(g, g.Battle.EnemyIndex)
@@ -1222,6 +1252,15 @@ func strikeWithCrit(g *core.GameState, actor *core.PartyMember, skill core.Skill
 	return damage, defeated, crit
 }
 
+// sweepCritDamage rolls ONE crit for an AoE sweep and applies the multiplier to
+// the shared per-target damage. The player can't react between sweep targets, so
+// the roll happens once (never per-target) — the AoE analogue of strikeWithCrit's
+// roll+multiply. Returns the crit-adjusted damage and whether it crit (for the log).
+func sweepCritDamage(g *core.GameState, actor *core.PartyMember, skill core.SkillID, damage, quality int) (int, bool) {
+	crit, _ := rollSkillCrit(g, actor, skill, quality)
+	return applyCritMultiplier(damage, crit, false), crit
+}
+
 // applyDoTStrike is the single body for every phys-hit-plus-DoT skill: a hit that,
 // on a survivor, rolls the DoT (dot.chance) onto dot.counter via tryProcStatus.
 func applyDoTStrike(g *core.GameState, skill core.SkillID, quality int, dot dotStrike) bool {
@@ -1291,8 +1330,7 @@ func applyAoEStatusSkill(g *core.GameState, skill core.SkillID, hitVerb, emptyVe
 	actor := beginPartyAction(g)
 	effect := core.EffectiveSkillEffect(actor, skill)
 	damage := scaleSkillDamage(actor, skill, quality)
-	crit, _ := rollSkillCrit(g, actor, skill, quality)
-	damage = applyCritMultiplier(damage, crit, false)
+	damage, crit := sweepCritDamage(g, actor, skill, damage, quality)
 	tag := core.SkillTagFor(skill)
 	vfx := vfxKindFor(skill)
 	hits := 0
@@ -1636,10 +1674,22 @@ func rollSkillCrit(g *core.GameState, actor *core.PartyMember, skill core.SkillI
 
 // excellentTierDoubles reports whether skill's "Excellent doubles damage" tier mod
 // (CritDoubleOnExcellent) is live for this timing roll. Single source for the rule;
-// Crushing Blow applies it as a flat pre-crit ×2, Backstab folds it into rollSkillCrit's
-// guaranteed-crit double channel (the two apply points differ, the trigger does not).
+// Crushing Blow applies it as a flat pre-crit ×2 (applyTierDouble), Backstab folds it
+// into rollSkillCrit's guaranteed-crit double channel (the two apply points differ,
+// the trigger does not).
 func excellentTierDoubles(actor *core.PartyMember, skill core.SkillID, quality int) bool {
 	return quality == core.TimingQualityExcellent && core.SkillTierMod(actor, skill).CritDoubleOnExcellent
+}
+
+// applyTierDouble applies the "Excellent doubles damage" tier mod as a flat pre-crit
+// ×2 — Crushing Blow's path. Named to pair with applyCritMultiplier; the trigger is
+// the shared excellentTierDoubles. (Backstab uses rollSkillCrit's double channel
+// instead, to stack atop the crit multiplier for the 4× case.)
+func applyTierDouble(raw int, actor *core.PartyMember, skill core.SkillID, quality int) int {
+	if excellentTierDoubles(actor, skill, quality) {
+		return raw * core.TierDamageDoubler
+	}
+	return raw
 }
 
 // applyCritMultiplier returns the post-crit damage; `double` (Backstab T2)
@@ -2262,8 +2312,9 @@ var (
 	frostbiteArms = procMessageArms{
 		defeated: "%[1]s%[2]s's Frostbite freezes the %[3]s solid.",
 		proc:     "%[1]s%[2]s bites the %[3]s for %[4]d and chills it.",
-		// plain is unreachable (chill is guaranteed on survival) — kept for the contract.
-		plain: "%[1]s%[2]s bites the %[3]s for %[4]d.",
+		// No plain arm: Frostbite's chill is a guaranteed debuff (no chance roll), so a
+		// survivor always takes the proc arm and the defeated arm covers the kill. An
+		// empty plain would only surface if that invariant broke — left zero deliberately.
 	}
 	rendArms = procMessageArms{
 		defeated: "%[1]s%[2]s's Rend tears the %[3]s apart.",

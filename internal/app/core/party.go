@@ -1034,6 +1034,54 @@ var statSetters = []func(*Stats, int){
 	StatSPD: func(s *Stats, v int) { s.SPD = v },
 }
 
+// init self-tests the hand-unrolled stat folds (SumStats / addStatsFloored /
+// Total). They're unrolled for hot-path inlining, so a newly-added Stat field can
+// silently slip past one. Probe every stat index via statTable/statSetters and
+// assert each contributes — a missed field panics at startup instead of zeroing
+// silently in combat.
+func init() {
+	var a, b Stats
+	var arr [StatCount]int
+	expectTotal := 0
+	for i := 0; i < int(StatCount); i++ {
+		statSetters[i](&a, i+1)
+		statSetters[i](&b, (i+1)*10)
+		arr[i] = (i + 1) * 100
+		expectTotal += i + 1
+	}
+	sum, floored := SumStats(a, b), addStatsFloored(a, b)
+	var fromArr Stats
+	addArrayStats(&fromArr, arr)
+	for i := 0; i < int(StatCount); i++ {
+		want := (i + 1) + (i+1)*10
+		if statTable[i].Get(sum) != want {
+			panic("core: SumStats omits stat " + statTable[i].Label + " — add it to the hand-unrolled fields")
+		}
+		if statTable[i].Get(floored) != want {
+			panic("core: addStatsFloored omits stat " + statTable[i].Label + " — add it to the hand-unrolled fields")
+		}
+		if statTable[i].Get(fromArr) != (i+1)*100 {
+			panic("core: addArrayStats omits stat " + statTable[i].Label + " — add it to the hand-unrolled fields")
+		}
+	}
+	if a.Total() != expectTotal {
+		panic("core: Stats.Total omits a stat field — add it to the hand-unrolled sum")
+	}
+}
+
+// addArrayStats adds an indexed stat-bonus array (e.g. ItemDefinition.StatBonus)
+// into dst. The single home for the indexed-array → Stats unroll (foldEquipment
+// consumed it); hand-unrolled for the hot equipment fold, covered by the init
+// self-test above. A new Stat field needs a line here.
+func addArrayStats(dst *Stats, bonus [StatCount]int) {
+	dst.STR += bonus[StatSTR]
+	dst.DEX += bonus[StatDEX]
+	dst.INT += bonus[StatINT]
+	dst.WIS += bonus[StatWIS]
+	dst.VIT += bonus[StatVIT]
+	dst.SPD += bonus[StatSPD]
+}
+
 // SumStats returns the per-field sum of two stat blocks (no clamping; the
 // floor-at-0 guard lives at the EffectiveStats fold site).
 func SumStats(a, b Stats) Stats {

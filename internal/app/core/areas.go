@@ -775,63 +775,35 @@ func init() {
 	}
 }
 
-type enemyKindNameEntry struct {
-	value   EnemyKind
-	name    string
-	aliases []string
-}
-
-// enemyKindNameTable maps each EnemyKind to its .map serialization token (+ legacy
-// aliases). These tokens are deliberately NOT the EnemyDefinition.Name/SingularName
-// display strings, so they can't be derived from enemies.go. The canonical ordered
-// roster of kinds is the EnemyKind iota (enemies.go); keep this table in that order
-// and add a row when appending a kind.
-var enemyKindNameTable = []enemyKindNameEntry{
-	{EnemyRat, "rat", nil},
-	{EnemyBat, "bat", nil},
-	// aliases cover the no-underscore form for legacy/hand-edited maps.
-	{EnemyDiseasedRat, "diseased_rat", []string{"diseasedrat"}},
-	{EnemyGoblin, "goblin", nil},
-	{EnemyGoblinMage, "goblin_mage", []string{"goblinmage"}},
-	{EnemyAmoeba, "amoeba", nil},
-	{EnemyVenusMantrap, "venus_mantrap", []string{"mantrap", "venusmantrap"}},
-	{EnemyCaveSpider, "cave_spider", []string{"spider", "cavespider"}},
-	{EnemyVampireBat, "vampire_bat", []string{"vampirebat"}},
-	{EnemyWisp, "wisp", []string{"will_o_wisp", "willowisp"}},
-	{EnemyStoneGolem, "stone_golem", []string{"golem", "stonegolem"}},
-	{EnemyNecromancer, "necromancer", []string{"necro"}},
-	{EnemySkeleton, "skeleton", nil},
-}
-
-// enemyKindByName flattens enemyKindNameTable into one primary+alias lookup.
-// Keys are pre-lowercased.
+// enemyKindByName flattens the registry's MapToken+MapAliases into one
+// primary+alias lookup. Keys are pre-lowercased.
 var enemyKindByName = buildEnemyKindByName()
 
 func buildEnemyKindByName() map[string]EnemyKind {
-	m := make(map[string]EnemyKind, len(enemyKindNameTable))
+	m := make(map[string]EnemyKind, len(enemyDefinitions))
 	add := func(key string, v EnemyKind) {
 		// Collision assert: two DIFFERENT kinds claiming the same name/alias
 		// would last-write-wins and mis-route EnemyKindFromName.
 		if existing, dup := m[key]; dup && existing != v {
-			panic("core: enemyKindNameTable name/alias collision on " + key)
+			panic("core: enemy MapToken/MapAliases collision on " + key)
 		}
 		m[key] = v
 	}
-	for _, e := range enemyKindNameTable {
-		add(e.name, e.value)
-		for _, alias := range e.aliases {
-			add(alias, e.value)
+	for _, def := range enemyDefinitions {
+		add(def.MapToken, def.Kind)
+		for _, alias := range def.MapAliases {
+			add(alias, def.Kind)
 		}
 	}
 	return m
 }
 
-// Coverage assert: every registered EnemyKind must have a name row, else a new
+// Coverage assert: every registered EnemyKind must declare a MapToken, else a new
 // kind silently fails EnemyKindName until a map placing it is saved.
 func init() {
-	for _, def := range EnemyKinds() {
-		if _, ok := EnemyKindName(def.Kind); !ok {
-			panic("core: enemyKindNameTable is missing a name row for enemy kind " + def.Name)
+	for _, def := range enemyDefinitions {
+		if def.MapToken == "" {
+			panic("core: enemy kind " + def.Name + " has no MapToken — set it in enemies.go")
 		}
 	}
 }
@@ -839,10 +811,8 @@ func init() {
 // EnemyKindName returns the on-disk name for an enemy kind; ok=false on unknown
 // (MapFileFromArea refuses the save rather than rewriting enemy types).
 func EnemyKindName(k EnemyKind) (string, bool) {
-	for _, e := range enemyKindNameTable {
-		if e.value == k {
-			return e.name, true
-		}
+	if def, ok := EnemyInfoOk(k); ok {
+		return def.MapToken, true
 	}
 	return "", false
 }

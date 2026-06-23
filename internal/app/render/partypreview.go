@@ -59,7 +59,7 @@ func DrawPartyPreview(rect rl.Rectangle, assets Resources, class core.PartyClass
 	}
 	cam := zoomedPreviewCamera(zoom)
 
-	partyPreviewRT.beginVisualizerScene(cam)
+	partyPreviewRT.beginVisualizerScene(cam, visualizerGroundSize, true)
 
 	place := resolveBillboardPlacement(cam, foeAnchor, &v)
 	if v.shadowRadius > 0 {

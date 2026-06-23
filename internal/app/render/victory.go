@@ -18,11 +18,11 @@ const (
 	victoryNameRowH   = float32(30) // name line → XP bar vertical step
 	victoryNameInsetX = float32(22) // name X past the class rail in the gutter
 	victoryBarH       = float32(22)
-	victoryContentPad = float32(22)
-	victoryHeaderH    = float32(70) // heading band → first member row
-	victoryRuleGap    = float32(22) // member rows → loot rule + breath
-	victoryLootRowH   = float32(28) // one loot / gold / summary line
-	victoryFooterH    = float32(50) // reserve for the footer hint at card bottom
+	victoryContentPad = float32(modalContentInsetX) // shared modal side gutter (22)
+	victoryHeaderH    = float32(70)                 // heading band → first member row
+	victoryRuleGap    = float32(22)                 // member rows → loot rule + breath
+	victoryLootRowH   = float32(28)                 // one loot / gold / summary line
+	victoryFooterH    = float32(50)                 // footer-hint reserve at card bottom (bespoke height budget; the hint baseline lands via footerBaselineY/uiFooterMargin). Tuning this shifts the footer — leave at 50.
 
 	// victoryMaxLootRows caps loot rows before folding the rest into a "+N more"
 	// tail so a huge haul can't overrun the summary/footer.

@@ -80,6 +80,51 @@ func arrowRowLayout(barW, barH float32, count int) (pad, slotWidth, arrowSize fl
 	return pad, slotWidth, arrowSize, true
 }
 
+// drawArrowWithShadow stamps an arrow plus its 3px down-right drop shadow so it stays
+// readable over busy backgrounds (mirrors drawTextWithShadow). Sequence + recall bars.
+func drawArrowWithShadow(cx, cy, size float32, dir int, col, shadowCol rl.Color) {
+	drawArrow(cx+3, cy+3, size, dir, shadowCol)
+	drawArrow(cx, cy, size, dir, col)
+}
+
+// seqResultColor maps a sequence-slot result to its arrow tint: green correct, red
+// wrong, bright-white pending. Shared by the sequence + recall (revealed) slots.
+func seqResultColor(state int) rl.Color {
+	switch state {
+	case core.SeqResultCorrect:
+		return seqOkColor // green
+	case core.SeqResultWrong:
+		return seqFailColor // red
+	default:
+		return colorWithAlpha(timingCursorColor, barHighlightAlpha) // pending bright white
+	}
+}
+
+// drawSeqArrowSlot renders one sequence-bar arrow slot at (cx,cy): result-tinted
+// arrow (with flash fade + the just-landed pulse) under a drop shadow, plus the
+// "next slot" cursor underline. Extracted so the sequence + recall bars share the
+// per-slot geometry/coloring instead of duplicating the loop body.
+func drawSeqArrowSlot(g *core.GameState, cx, cy, arrowSize float32, dir int, i int, state int, isCursor, flashing bool) {
+	col := fadeForFlash(seqResultColor(state), flashing, g.Battle.TimingFlash)
+
+	// Per-slot pulse: the just-landed correct slot scales up briefly (SequencePulseTimer).
+	slotSize := arrowSize
+	if g.Battle.SequencePulseIndex == i && g.Battle.SequencePulseTimer > 0 {
+		phase := g.Battle.SequencePulseTimer / core.SequencePulseDuration
+		if phase > 1 {
+			phase = 1
+		}
+		slotSize = arrowSize * (1 + 0.55*phase*phase)
+	}
+
+	shadow := fadeForFlash(colorWithAlpha(shadowBase, iconShadowAlpha), flashing, g.Battle.TimingFlash)
+	drawArrowWithShadow(cx, cy, slotSize, dir, col, shadow)
+
+	if !flashing && isCursor {
+		drawSequenceCursorUnderline(cx, cy, arrowSize)
+	}
+}
+
 // drawSequenceCursorUnderline paints the "next slot" underline (sequence + recall bars).
 func drawSequenceCursorUnderline(cx, cy, arrowSize float32) {
 	ux := cx - arrowSize*0.85
@@ -531,36 +576,7 @@ func drawSequenceBar(timing core.TimingState, g *core.GameState, assets Resource
 		if i < len(timing.SequenceResults) {
 			state = timing.SequenceResults[i]
 		}
-
-		var col rl.Color
-		switch state {
-		case core.SeqResultCorrect:
-			col = seqOkColor // green
-		case core.SeqResultWrong:
-			col = seqFailColor // red
-		default:
-			col = colorWithAlpha(timingCursorColor, barHighlightAlpha) // pending bright white
-		}
-		col = fadeForFlash(col, flashing, g.Battle.TimingFlash)
-
-		// Per-slot pulse: the just-landed correct slot scales up briefly (SequencePulseTimer).
-		slotSize := arrowSize
-		if g.Battle.SequencePulseIndex == i && g.Battle.SequencePulseTimer > 0 {
-			phase := g.Battle.SequencePulseTimer / core.SequencePulseDuration
-			if phase > 1 {
-				phase = 1
-			}
-			slotSize = arrowSize * (1 + 0.55*phase*phase)
-		}
-
-		// Drop shadow 3px down-right so the arrow stays readable over busy backgrounds.
-		shadow := fadeForFlash(colorWithAlpha(shadowBase, iconShadowAlpha), flashing, g.Battle.TimingFlash)
-		drawArrow(cx+3, cy+3, slotSize, dir, shadow)
-		drawArrow(cx, cy, slotSize, dir, col)
-
-		if !flashing && i == timing.SequenceCursor {
-			drawSequenceCursorUnderline(cx, cy, arrowSize)
-		}
+		drawSeqArrowSlot(g, cx, cy, arrowSize, dir, i, state, i == timing.SequenceCursor, flashing)
 	}
 
 	if !flashing && timing.Duration > 0 {
@@ -681,8 +697,9 @@ func drawRecallBar(timing core.TimingState, g *core.GameState, assets Resources,
 		cy := y + barH*0.5
 		if !hidden {
 			// Memorize phase: every pattern arrow lit, with a drop shadow.
-			drawArrow(cx+3, cy+3, arrowSize, timing.SequenceTargets[i], colorWithAlpha(shadowBase, iconShadowAlpha))
-			drawArrow(cx, cy, arrowSize, timing.SequenceTargets[i], colorWithAlpha(timingCursorColor, barHighlightAlpha))
+			drawArrowWithShadow(cx, cy, arrowSize, timing.SequenceTargets[i],
+				colorWithAlpha(timingCursorColor, barHighlightAlpha),
+				colorWithAlpha(shadowBase, iconShadowAlpha))
 			continue
 		}
 		// Recall phase: landed slots reveal their answer tinted by correctness; pending = dim dot.

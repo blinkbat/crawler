@@ -12,7 +12,7 @@ import (
 const (
 	shopPanelW      = int32(520)
 	shopHeaderH     = int32(132)
-	shopRowH        = int32(34)
+	shopRowH        = modalListRowH
 	shopRowGap      = int32(8)
 	shopFootH       = int32(50)
 	shopRowInsetX   = int32(40)

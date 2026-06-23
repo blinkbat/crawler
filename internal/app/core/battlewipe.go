@@ -7,14 +7,14 @@ package core
 type BattleWipeKind int
 
 const (
-	WipeNone   BattleWipeKind = iota // instant, no FX
-	WipeZoom                         // camera punch: zooms in then settles
-	WipeSpin                         // camera roll: spins upright into place
-	WipeWobble                       // camera wobble that damps out
-	WipeTint                         // warm color wash that clears
-	WipeFlash                        // white flash that fades
-	WipeVignette                     // dark iris that opens from the edges
-	WipePixelate                     // scene snapshot mosaics chunky→fine, then clears
+	WipeNone     BattleWipeKind = iota // instant, no FX
+	WipeZoom                           // camera punch: zooms in then settles
+	WipeSpin                           // camera roll: spins upright into place
+	WipeWobble                         // camera wobble that damps out
+	WipeTint                           // warm color wash that clears
+	WipeFlash                          // white flash that fades
+	WipeVignette                       // dark iris that opens from the edges
+	WipePixelate                       // scene snapshot mosaics chunky→fine, then clears
 	wipeKindCount
 )
 

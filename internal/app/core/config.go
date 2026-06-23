@@ -635,29 +635,21 @@ const (
 // A mid-enum insert renumbers later skills and silently misattributes saved tiers;
 // this panics at startup instead. APPEND only, then add one pinned line here.
 func init() {
-	pinned := [...]struct {
-		id  SkillID
-		val int
-	}{
-		{SkillNone, 0}, {SkillSwipe, 1}, {SkillPrayer, 2}, {SkillSteal, 3},
-		{SkillFirebolt, 4}, {SkillCrushingBlow, 5}, {SkillWhirlwind, 6},
-		{SkillMassMend, 7}, {SkillSmite, 8}, {SkillBackstab, 9},
-		{SkillVenomStrike, 10}, {SkillFrostLance, 11}, {SkillArcBolt, 12},
-		{SkillSleep, 13}, {SkillIngest, 14}, {SkillWeb, 15}, {SkillConfuse, 16},
-		{SkillStoneslam, 17}, {SkillRaiseBones, 18}, {SkillScan, 19},
-		{SkillBless, 20}, {SkillFireball, 21}, {SkillPoisonCloud, 22},
-		{SkillCleanse, 23}, {SkillSecondWind, 24}, {SkillRenewal, 25},
-		{SkillCripple, 26}, {SkillFrostbite, 27}, {SkillCorrosiveVial, 28},
-		{SkillConeOfCold, 29}, {SkillSunder, 30}, {SkillTaunt, 31},
-		{SkillWarBanner, 32}, {SkillStoneSkin, 33}, {SkillBlind, 34},
-		{SkillAegis, 35}, {SkillSmokeBomb, 36}, {SkillIceArmor, 37},
-		{SkillRend, 38}, {SkillLacerate, 39},
-	}
-	for _, p := range pinned {
-		if int(p.id) != p.val {
-			panic("core: SkillID serialization value drifted — never insert mid-enum (it renumbers saved SkillTiers keys); append new skills at the end and pin them in config.go's init")
-		}
-	}
+	assertAppendOnly("SkillID (renumbers saved SkillTiers keys)",
+		SkillNone, SkillSwipe, SkillPrayer, SkillSteal,
+		SkillFirebolt, SkillCrushingBlow, SkillWhirlwind,
+		SkillMassMend, SkillSmite, SkillBackstab,
+		SkillVenomStrike, SkillFrostLance, SkillArcBolt,
+		SkillSleep, SkillIngest, SkillWeb, SkillConfuse,
+		SkillStoneslam, SkillRaiseBones, SkillScan,
+		SkillBless, SkillFireball, SkillPoisonCloud,
+		SkillCleanse, SkillSecondWind, SkillRenewal,
+		SkillCripple, SkillFrostbite, SkillCorrosiveVial,
+		SkillConeOfCold, SkillSunder, SkillTaunt,
+		SkillWarBanner, SkillStoneSkin, SkillBlind,
+		SkillAegis, SkillSmokeBomb, SkillIceArmor,
+		SkillRend, SkillLacerate,
+	)
 }
 
 // SkillTag classifies a skill for damage-type interaction + HUD color. Phys clips

@@ -82,7 +82,9 @@ var debugMenuRows = []debugMenuRow{
 	}},
 	{Item: core.DebugMenuStartDialog, Label: func(*core.GameState) string { return "Start Dialog" }},
 	{Item: core.DebugMenuCombatTune, Label: func(*core.GameState) string { return "Combat Tuning ▸" }},
-	{Item: core.DebugMenuWipe, Label: func(g *core.GameState) string { return "Screen Wipe FX ▸ (" + core.BattleWipeName(g.BattleWipe) + ")" }},
+	{Item: core.DebugMenuWipe, Label: func(g *core.GameState) string {
+		return "Screen Wipe FX ▸ (" + core.BattleWipeName(g.BattleWipe) + ")"
+	}},
 	{Item: core.DebugMenuClose, Label: func(*core.GameState) string { return "Close" }},
 }
 
@@ -224,11 +226,15 @@ func drawRetroMenuOverlay(g *core.GameState, assets Resources) {
 // Pause menu layout: centered panel, rows at a fixed stride below a header band;
 // inner row width derives from panel width so the highlight resizes with it.
 const (
-	pauseMenuPanelW      = int32(420)
-	pauseMenuHeaderH     = int32(90)
+	pauseMenuPanelW  = int32(420)
+	pauseMenuHeaderH = int32(90)
+	// pauseMenuRowH/Gap are deliberately taller than the uiRowH(32)/uiRowGap(10)
+	// grid: pause-menu rows are engraved FontHeading (vs the dense FontBody combat
+	// menus), so they need the extra height + gap to breathe. Not routed through the
+	// ui* tokens on purpose — matching them would shrink these rows.
 	pauseMenuRowH        = int32(40)
 	pauseMenuRowGap      = int32(12)
-	pauseMenuFootH       = int32(20)
+	pauseMenuFootH       = int32(20) // footer reserve below the last menu row (bespoke height budget; hint baseline lands via footerBaselineY/uiFooterMargin). Tuning this shifts the footer — leave at 20.
 	pauseMenuRowInsetX   = int32(58)
 	pauseMenuRowRightPad = int32(46)
 )

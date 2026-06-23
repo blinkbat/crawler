@@ -721,27 +721,18 @@ func Parse(r io.Reader) (MapFile, error) {
 
 		if state == slotPropLevels {
 			// Single Height-row grid of per-tile prop levels (base-36, '.' = auto).
-			// Same blank-tolerant overflow guard as the generic grid arm below, so an
-			// editor-inserted trailing blank doesn't inflate the count and a non-blank
-			// overflow is pinpointed here rather than as a downstream size mismatch.
-			if len(mf.PropLevels) >= mf.Height {
-				if strings.TrimSpace(raw) == "" {
-					continue
-				}
-				return mf, fmt.Errorf("line %d: prop_levels: extra row past declared height %d", lineNo, mf.Height)
+			// appendGridRow tolerates an editor-inserted trailing blank but pinpoints a
+			// non-blank overflow here rather than as a downstream size mismatch.
+			if err := appendGridRow(&mf.PropLevels, raw, mf.Height, lineNo, "prop_levels: "); err != nil {
+				return mf, err
 			}
-			mf.PropLevels = append(mf.PropLevels, raw)
 			continue
 		}
 
 		if state == slotDecorLevels {
-			if len(mf.DecorLevels) >= mf.Height {
-				if strings.TrimSpace(raw) == "" {
-					continue
-				}
-				return mf, fmt.Errorf("line %d: decor_levels: extra row past declared height %d", lineNo, mf.Height)
+			if err := appendGridRow(&mf.DecorLevels, raw, mf.Height, lineNo, "decor_levels: "); err != nil {
+				return mf, err
 			}
-			mf.DecorLevels = append(mf.DecorLevels, raw)
 			continue
 		}
 
@@ -775,13 +766,9 @@ func Parse(r io.Reader) (MapFile, error) {
 			// layerSlot added without a parse handler. Unreachable for valid maps.
 			panic(fmt.Sprintf("mapfile: section slot %d has no parse handler — add a bespoke arm or a grid field accessor", state))
 		}
-		if len(*target) >= mf.Height {
-			if strings.TrimSpace(raw) == "" {
-				continue
-			}
-			return mf, fmt.Errorf("line %d: extra row past declared height %d", lineNo, mf.Height)
+		if err := appendGridRow(target, raw, mf.Height, lineNo, ""); err != nil {
+			return mf, err
 		}
-		*target = append(*target, raw)
 	}
 	if err := sc.Err(); err != nil {
 		return mf, err
@@ -790,6 +777,21 @@ func Parse(r io.Reader) (MapFile, error) {
 		return mf, err
 	}
 	return mf, nil
+}
+
+// appendGridRow appends a grid row to target, tolerating an editor-inserted blank
+// past the declared height (skipped) but rejecting a non-blank overflow as a
+// structural error. section is the "<name>: " prefix for the error (empty for a
+// generic layer grid). Shared by the prop_levels / decor_levels / layer arms.
+func appendGridRow(target *[]string, raw string, height, lineNo int, section string) error {
+	if len(*target) >= height {
+		if strings.TrimSpace(raw) == "" {
+			return nil
+		}
+		return fmt.Errorf("line %d: %sextra row past declared height %d", lineNo, section, height)
+	}
+	*target = append(*target, raw)
+	return nil
 }
 
 // sectionFor maps a section-header line ("walls:", …) to its slot. The trailing
@@ -867,12 +869,19 @@ func (mf *MapFile) validateOptionalGrid(name string, rows []string) error {
 		// for 10..20, same encoding as elevation). Anything else reads as level 0
 		// downstream, silently flattening the prop/decor instead of failing here.
 		for c := 0; c < len(row); c++ {
-			if b := row[c]; b != '.' && !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'K')) {
+			if b := row[c]; b != '.' && !isLevelChar(b) {
 				return fmt.Errorf("%s row %d col %d has bad level char %q (expected '.', '0'..'9', or 'A'..'K')", name, i, c, string(row[c]))
 			}
 		}
 	}
 	return nil
+}
+
+// isLevelChar reports whether b is a level char: '0'..'9' then 'A'..'K' (10..20).
+// The 'K' upper bound == core's MaxElevationLevel (core/map.go init pins this), so
+// the elevation and prop/decor-level grids share one alphabet definition.
+func isLevelChar(b byte) bool {
+	return (b >= '0' && b <= '9') || (b >= 'A' && b <= 'K')
 }
 
 func (mf *MapFile) validate() error {
@@ -917,7 +926,7 @@ func (mf *MapFile) validate() error {
 			// asserts ElevationChar(MaxElevationLevel)=='K' so this can't drift).
 			// Anything else reads as ground 0, silently flattening the geometry.
 			for c := 0; c < len(row); c++ {
-				if b := row[c]; !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'K')) {
+				if b := row[c]; !isLevelChar(b) {
 					return fmt.Errorf("elevation layer row %d col %d has bad level char %q (expected '0'..'9' or 'A'..'K')", i, c, string(row[c]))
 				}
 			}
@@ -1184,6 +1193,47 @@ func init() {
 	if customEnemyLegacySchema.skills != customEnemyFieldCountLegacy-1 {
 		panic(fmt.Sprintf("mapfile: customEnemyLegacySchema.skills is %d, expected customEnemyFieldCountLegacy-1 (%d)", customEnemyLegacySchema.skills, customEnemyFieldCountLegacy-1))
 	}
+	// Round-trip self-test: Encode's column order (customEnemyEncodeArgs) and the
+	// decoder's index schema share no structure, so a reorder in one would silently
+	// corrupt saved rows. Encode a sentinel with a distinct value per column and
+	// assert it parses back identically — this ties args↔format↔schema↔parse.
+	sentinel := MapCustomEnemy{
+		Name: "schemacheck", BaseKind: "rat",
+		HP: 2, MP: 3, STR: 4, DEX: 5, INT: 6, WIS: 7, VIT: 8, SPD: 9,
+		Armor: 10, MDef: 11, XPValue: 12, Tier: 13, AttackDamage: 14,
+		SkillCastChance: 0.15, SpellPower: 16,
+	}
+	line := strings.TrimRight(fmt.Sprintf(customEnemyEncodeFormat, customEnemyEncodeArgs(sentinel)...), "\n")
+	got, err := parseCustomEnemyLine(line, 0)
+	if err != nil {
+		panic("mapfile: custom enemy schema self-test failed to parse encoded sentinel: " + err.Error())
+	}
+	// Compare via the encode-args (all scalar — MapCustomEnemy's Skills slice makes
+	// the struct itself uncomparable; both sentinel/got carry no skills here).
+	want := customEnemyEncodeArgs(sentinel)
+	for i, g := range customEnemyEncodeArgs(got) {
+		if g != want[i] {
+			panic(fmt.Sprintf("mapfile: custom enemy encode/decode column %d mismatch — customEnemyEncodeArgs and customEnemyCurrentSchema disagree (got %v, want %v)", i, g, want[i]))
+		}
+	}
+}
+
+// customEnemyEncodeArgs is the SINGLE source for the custom_enemies: column order.
+// Encode and the schema self-test both consume it (must match customEnemyEncodeFormat
+// verbs and customEnemyCurrentSchema indices, both init-asserted).
+func customEnemyEncodeArgs(ce MapCustomEnemy) []any {
+	skills := customEnemyNoSkillsToken
+	if len(ce.Skills) > 0 {
+		skills = strings.Join(ce.Skills, ",")
+	}
+	return []any{
+		ce.Name, ce.BaseKind,
+		ce.HP, ce.MP,
+		ce.STR, ce.DEX, ce.INT, ce.WIS, ce.VIT, ce.SPD,
+		ce.Armor, ce.MDef, ce.XPValue, ce.Tier, ce.AttackDamage,
+		ce.SkillCastChance, ce.SpellPower,
+		skills,
+	}
 }
 
 // init asserts each per-section encode format's `%`-verb count matches its
@@ -1389,18 +1439,7 @@ func (mf MapFile) Encode(w io.Writer) error {
 	if len(mf.CustomEnemies) > 0 {
 		fmt.Fprintln(bw, SectionCustomEnemies+":")
 		for _, ce := range mf.CustomEnemies {
-			skills := customEnemyNoSkillsToken
-			if len(ce.Skills) > 0 {
-				skills = strings.Join(ce.Skills, ",")
-			}
-			fmt.Fprintf(bw, customEnemyEncodeFormat,
-				ce.Name, ce.BaseKind,
-				ce.HP, ce.MP,
-				ce.STR, ce.DEX, ce.INT, ce.WIS, ce.VIT, ce.SPD,
-				ce.Armor, ce.MDef, ce.XPValue, ce.Tier, ce.AttackDamage,
-				ce.SkillCastChance, ce.SpellPower,
-				skills,
-			)
+			fmt.Fprintf(bw, customEnemyEncodeFormat, customEnemyEncodeArgs(ce)...)
 		}
 	}
 	// dialogs / triggers: emit only when present (byte-identical otherwise); each

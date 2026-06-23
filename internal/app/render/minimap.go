@@ -41,6 +41,10 @@ type minimapClassKey struct {
 
 var minimapClassCache minimapClassKey
 
+// borderIdx flattens a window-cell coord into the +1-border scratch grids (gw == cols+2),
+// so the "+1 each axis" convention lives in one place across the classify/draw/outline/stair sites.
+func borderIdx(gw, lx, lz int) int { return (lz+1)*gw + (lx + 1) }
+
 // MinimapWidth is the corner minimap card's on-screen width (panels beneath it match it).
 func MinimapWidth() int32 { return minimapPanelW }
 
@@ -102,7 +106,7 @@ func drawMinimap(m *core.AreaDefinition, g *core.GameState, assets Resources) {
 		for localZ := -1; localZ <= vc; localZ++ {
 			for localX := -1; localX <= vc; localX++ {
 				c, onSlice, seenWall, rampDir := mapSliceCell(m, g, indoor, startX+localX, startZ+localZ)
-				i := (localZ+1)*gw + (localX + 1)
+				i := borderIdx(gw, localX, localZ)
 				slice[i], seen[i], ramp[i], col[i] = onSlice, seenWall, rampDir, c
 			}
 		}
@@ -110,7 +114,7 @@ func drawMinimap(m *core.AreaDefinition, g *core.GameState, assets Resources) {
 	}
 	for localZ := 0; localZ < vc; localZ++ {
 		for localX := 0; localX < vc; localX++ {
-			i := (localZ+1)*gw + (localX + 1)
+			i := borderIdx(gw, localX, localZ)
 			rl.DrawRectangle(gridX+int32(localX)*cell, gridY+int32(localZ)*cell, cell-1, cell-1, col[i])
 		}
 	}
@@ -422,8 +426,8 @@ func mapSliceCell(m *core.AreaDefinition, g *core.GameState, indoor bool, x, z i
 // Float geometry, so the integer-cell minimap and fractional-cell Map tab share it.
 func drawMapLevelOutline(slice, seenWall []bool, gw, cols, rows int, originX, originY, cellW, cellH float32) {
 	in := func(lx, lz int) bool { return lx >= -1 && lz >= -1 && lx <= cols && lz <= rows }
-	isSlice := func(lx, lz int) bool { return in(lx, lz) && slice[(lz+1)*gw+(lx+1)] }
-	isWall := func(lx, lz int) bool { return in(lx, lz) && seenWall[(lz+1)*gw+(lx+1)] }
+	isSlice := func(lx, lz int) bool { return in(lx, lz) && slice[borderIdx(gw, lx, lz)] }
+	isWall := func(lx, lz int) bool { return in(lx, lz) && seenWall[borderIdx(gw, lx, lz)] }
 	// Double-stroke (dark halo under a brass core) so it stays legible over floor and fog.
 	edge := func(ax, ay, bx, by float32) {
 		rl.DrawLineEx(rl.NewVector2(ax, ay), rl.NewVector2(bx, by), minimapOutlineUnderThick, minimapLevelOutlineUnderlay)
@@ -464,7 +468,7 @@ func drawMapStairIcons(rampDir []int8, gw, cols, rows int, originX, originY, cel
 	}
 	for lz := 0; lz < rows; lz++ {
 		for lx := 0; lx < cols; lx++ {
-			d := rampDir[(lz+1)*gw+(lx+1)]
+			d := rampDir[borderIdx(gw, lx, lz)]
 			if d == 0 {
 				continue
 			}

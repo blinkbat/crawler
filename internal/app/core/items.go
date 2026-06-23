@@ -37,23 +37,15 @@ const (
 // mid-enum insert renumbers later kinds and would corrupt saves; this panic
 // trips at startup instead. APPEND a new kind, then add one pinned line here.
 func init() {
-	pinned := [...]struct {
-		kind ItemKind
-		val  int
-	}{
-		{ItemNone, 0}, {ItemCheese, 1}, {ItemBatJerky, 2},
-		{ItemIronSword, 3}, {ItemWoodenShield, 4}, {ItemLeatherCap, 5},
-		{ItemSilverRing, 6}, {ItemBrassAmulet, 7}, {ItemDagger, 8},
-		{ItemRapier, 9}, {ItemShortBow, 10}, {ItemSling, 11},
-		{ItemBattleAxe, 12}, {ItemWarHammer, 13}, {ItemCrustOfBread, 14},
-		{ItemMagicPhial, 15}, {ItemThrowingKnives, 16}, {ItemCrossbow, 17},
-		{ItemArbalest, 18},
-	}
-	for _, p := range pinned {
-		if int(p.kind) != p.val {
-			panic("core: ItemKind serialization value drifted — never insert mid-enum (it renumbers saved items); append new kinds at the end and pin them in items.go's init")
-		}
-	}
+	assertAppendOnly("ItemKind (renumbers saved items)",
+		ItemNone, ItemCheese, ItemBatJerky,
+		ItemIronSword, ItemWoodenShield, ItemLeatherCap,
+		ItemSilverRing, ItemBrassAmulet, ItemDagger,
+		ItemRapier, ItemShortBow, ItemSling,
+		ItemBattleAxe, ItemWarHammer, ItemCrustOfBread,
+		ItemMagicPhial, ItemThrowingKnives, ItemCrossbow,
+		ItemArbalest,
+	)
 }
 
 // EquipmentSlotType classifies what slot an item can go into. SlotNone means a

@@ -168,6 +168,19 @@ func RandRangeI(rng *rand.Rand, lo, hi int) int {
 	return lo + rng.Intn(hi-lo+1)
 }
 
+// assertAppendOnly panics if any listed enum constant isn't at its declaration
+// index — the shared guard behind the ItemKind / EnemyKind / SkillID append-only
+// pins (each serializes as its int value, so a mid-enum insert renumbers later
+// entries and corrupts saves). List every constant in order; `what` names the
+// enum + what it corrupts, for the panic message.
+func assertAppendOnly[T ~int](what string, ordered ...T) {
+	for i, v := range ordered {
+		if int(v) != i {
+			panic("core: " + what + " serialization value drifted — never insert mid-enum; append new entries at the end")
+		}
+	}
+}
+
 func AbsInt(v int) int {
 	if v < 0 {
 		return -v

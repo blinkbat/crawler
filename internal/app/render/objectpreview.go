@@ -72,10 +72,8 @@ func DrawObjectPreview(rect rl.Rectangle, assets Resources, item ObjectPreviewIt
 	worldFrameClock = float32(rl.GetTime())
 	cam := objectPreviewCamera(objectPreviewBounds(assets, item), zoom)
 
-	rl.BeginTextureMode(objectPreviewRT.rt)
-	rl.ClearBackground(foePreviewBG)
-	rl.BeginMode3D(cam)
-	rl.DrawPlane(rl.NewVector3(0, 0, 0), rl.NewVector2(objectPreviewGroundSize, objectPreviewGroundSize), foePreviewGround)
+	// Shared off-screen scene setup, with the tighter prop floor and no grid.
+	objectPreviewRT.beginVisualizerScene(cam, objectPreviewGroundSize, false)
 
 	// Bright outdoor profile, no torches, through the world's lighting shader to match a field map.
 	assets.lighting.applyUniforms(cam, fieldLighting)

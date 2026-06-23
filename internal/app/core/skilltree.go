@@ -49,14 +49,14 @@ type SkillEffectDelta struct {
 	// CritDoubleOnExcellent: turns an Excellent timing hit into a double-damage crit. Tier-only.
 	CritDoubleOnExcellent bool
 	// BuffStats / BuffTurns: buff-skill magnitude/duration deltas (Bless).
-	BuffStats Stats
-	BuffTurns int
+	BuffStats      Stats
+	BuffTurns      int
 	RegenTurns     int // heal-over-time duration delta (Renewal)
 	ArmorReduction int // Corrosive Vial armor-strip delta
 	ATBPush        int // Sunder readiness-shove delta
 	// BuffArmor / BuffMDef: Stone Skin ward deltas.
-	BuffArmor int
-	BuffMDef  int
+	BuffArmor     int
+	BuffMDef      int
 	ShieldHP      int // Aegis absorb-pool delta
 	IceArmorTurns int // Ice Armor duration delta
 }

@@ -190,40 +190,9 @@ func spawnFromRequest(camera rl.Camera3D, g *core.GameState, req core.VFXRequest
 	}
 	// Snapshot the pool length so scaleBurst transforms only this request's particles.
 	from := len(particles)
-	switch req.Kind {
-	case core.VFXSlash:
-		spawnSlash(origin)
-	case core.VFXImpact:
-		spawnImpact(origin)
-	case core.VFXEmber:
-		spawnEmber(origin)
-	case core.VFXHeal:
-		spawnHeal(origin)
-	case core.VFXSmite:
-		spawnSmite(origin)
-	case core.VFXVenom:
-		spawnVenom(origin)
-	case core.VFXFrost:
-		spawnFrost(origin)
-	case core.VFXArc:
-		spawnArc(origin)
-	case core.VFXSteal:
-		spawnSteal(origin)
-	case core.VFXDeath:
-		spawnDeath(origin)
-	case core.VFXStoneslam:
-		spawnStoneslam(origin)
-	case core.VFXSleep:
-		spawnSleep(origin)
-	case core.VFXWeb:
-		spawnWeb(origin)
-	case core.VFXConfuse:
-		spawnConfuse(origin)
-	case core.VFXIngest:
-		spawnIngest(origin)
-	case core.VFXScan:
-		spawnScan(origin)
-	default:
+	if req.Kind >= 0 && req.Kind < core.VFXKindCount && vfxKinds[req.Kind].spawn != nil {
+		vfxKinds[req.Kind].spawn(origin)
+	} else {
 		// A VFXKind with no spawn pattern: surface once per kind (a wiring gap, not a no-op).
 		if !loggedUnknownVFX[req.Kind] {
 			loggedUnknownVFX[req.Kind] = true
@@ -235,6 +204,54 @@ func spawnFromRequest(camera rl.Camera3D, g *core.GameState, req core.VFXRequest
 	// Clarity glyph over the struck target, keyed by VFX kind (glyphNone is a no-op, so only
 	// damaging hits get one). Drawn in the HUD pass by DrawHitGlyphs.
 	spawnHitGlyph(hitGlyphForVFX(req.Kind), req, glyphXOffset, glyphDepth, glyphRise, glyphScale)
+}
+
+// vfxKind pairs a kind's spawn pattern with its clarity glyph so a new core.VFXKind
+// forces BOTH entries in one place (spawn nil = no particles, glyphNone = no glyph).
+type vfxKind struct {
+	spawn func(rl.Vector3)
+	glyph hitGlyphKind
+}
+
+// vfxKinds is the single per-VFXKind table (replaces the old spawn switch + the
+// parallel vfxGlyphs map). Indexed by core.VFXKind; init asserts every kind in
+// [0, VFXKindCount) is present (a zero-value entry — nil spawn + glyphNone — is
+// only valid for genuinely particle-less, glyph-less kinds like VFXNone).
+var vfxKinds = [core.VFXKindCount]vfxKind{
+	core.VFXNone:      {nil, glyphNone},
+	core.VFXSlash:     {spawnSlash, glyphSlash},
+	core.VFXImpact:    {spawnImpact, glyphImpact},
+	core.VFXEmber:     {spawnEmber, glyphFire},
+	core.VFXHeal:      {spawnHeal, glyphNone},
+	core.VFXSmite:     {spawnSmite, glyphHoly},
+	core.VFXVenom:     {spawnVenom, glyphVenom},
+	core.VFXFrost:     {spawnFrost, glyphFrost},
+	core.VFXArc:       {spawnArc, glyphSpark},
+	core.VFXSteal:     {spawnSteal, glyphNone},
+	core.VFXDeath:     {spawnDeath, glyphNone},
+	core.VFXStoneslam: {spawnStoneslam, glyphImpact},
+	core.VFXSleep:     {spawnSleep, glyphNone},
+	core.VFXWeb:       {spawnWeb, glyphNone},
+	core.VFXConfuse:   {spawnConfuse, glyphNone},
+	core.VFXIngest:    {spawnIngest, glyphNone},
+	core.VFXScan:      {spawnScan, glyphNone},
+}
+
+// vfxKindsSpawnPresent flags the kinds that intentionally carry NO spawn pattern,
+// so init can tell a deliberate particle-less kind from a forgotten wiring gap.
+var vfxKindsSpawnlessOK = map[core.VFXKind]bool{
+	core.VFXNone: true, // sentinel; never spawned
+}
+
+// init asserts the merged vfxKinds table covers every VFXKind with a spawn pattern
+// (except the deliberately particle-less ones), mirroring the old switch + the
+// vfxGlyphs length-assert so a new kind forces both a spawn and a glyph choice.
+func init() {
+	for k := core.VFXKind(0); k < core.VFXKindCount; k++ {
+		if vfxKinds[k].spawn == nil && !vfxKindsSpawnlessOK[k] {
+			panic("render/vfx: vfxKinds missing a spawn pattern for a VFX kind — add its spawn func + clarity glyph (or mark it spawnless)")
+		}
+	}
 }
 
 // enemyVisualForVFX resolves the enemyVisual for the enemy in a battle slot (bounds-checked).
@@ -592,7 +609,7 @@ func spawnIngest(o rl.Vector3) {
 // pickConfuseTone alternates two tones for the Confuse swirl by even/odd index (no RNG roll).
 func pickConfuseTone(i int) color.RGBA {
 	if i&1 == 0 {
-		return rl.NewColor(232, 196, 112, 255)
+		return giltBright
 	}
 	return rl.NewColor(196, 132, 220, 255)
 }

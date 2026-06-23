@@ -209,6 +209,14 @@ const (
 	paramsHeaderReserve = float32(30)
 	soundGroupHeaderH   = float32(22)
 	soundNameMaxLen     = 32 // sound-name field cap (pumped directly, not via textFieldConfigs)
+	// Shared column geometry — all three columns (params/list/assign) inset their
+	// content by these, so they can't drift apart. soundColInsetX is the left
+	// inset (content width loses 2× it); the others are vertical bands.
+	soundColInsetX       = float32(12)  // per-column left inset for content
+	soundColHeaderOffset = float32(36)  // list/assign body top below the column rect
+	soundColBottomMargin = float32(12)  // gap below the column body
+	soundColTop          = float32(56)  // columns' top Y below the card top
+	soundColHeightInset  = float32(110) // total height removed from the card for columns
 )
 
 // soundSliderMetrics is the sound creator's slider-row geometry — an implicit layout↔draw
@@ -318,8 +326,8 @@ func soundAssignCursor(s *State) int {
 func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, paramScroll float32) soundLayout {
 	card := centeredCardRect(soundModalW, soundModalH)
 	colW := (modalContentWidth(card) - 2*soundColGap) / 3
-	colY := card.Y + 56
-	colH := card.Height - 110
+	colY := card.Y + soundColTop
+	colH := card.Height - soundColHeightInset
 
 	paramsCol := rl.NewRectangle(card.X+modalContentInset, colY, colW, colH)
 	listCol := rl.NewRectangle(paramsCol.X+colW+soundColGap, colY, colW, colH)
@@ -329,8 +337,8 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, para
 
 	// Params column: fixed sub-header band, scrollable body (section headers +
 	// sliders), fixed footer (name + Preview/Save) that stays reachable.
-	x := paramsCol.X + 12
-	w := paramsCol.Width - 24
+	x := paramsCol.X + soundColInsetX
+	w := paramsCol.Width - 2*soundColInsetX
 	footerH := soundRowH + 6 + soundButtonH + 8 // name row + gap + buttons + pad
 	vpY := paramsCol.Y + paramsHeaderReserve
 	vpH := paramsCol.Height - paramsHeaderReserve - footerH
@@ -379,10 +387,10 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, para
 
 	// List column rows + per-row buttons. Only the visible window gets real rects
 	// (off-window entries stay zero, so they neither draw nor hit-test).
-	lx := listCol.X + 12
-	lw := listCol.Width - 24
-	ly := listCol.Y + 36
-	listAreaH := listCol.Y + listCol.Height - 12 - ly
+	lx := listCol.X + soundColInsetX
+	lw := listCol.Width - 2*soundColInsetX
+	ly := listCol.Y + soundColHeaderOffset
+	listAreaH := listCol.Y + listCol.Height - soundColBottomMargin - ly
 	var listBaseRows []rl.Rectangle
 	l.listTopRow, l.listEnd, listBaseRows = windowedRowList(lx, ly, lw, soundListRowH-4, soundListRowH, listCursor, len(savedSounds), listAreaH)
 	l.listRows = make([]soundListRowRect, len(savedSounds))
@@ -402,10 +410,10 @@ func computeSoundLayout(savedSounds []string, listCursor, assignCursor int, para
 	}
 
 	// Assignments column. Same visible-window scheme as the saved-sounds list.
-	ax := assignCol.X + 12
-	aw := assignCol.Width - 24
-	ay := assignCol.Y + 36
-	assignAreaH := assignCol.Y + assignCol.Height - 12 - ay
+	ax := assignCol.X + soundColInsetX
+	aw := assignCol.Width - 2*soundColInsetX
+	ay := assignCol.Y + soundColHeaderOffset
+	assignAreaH := assignCol.Y + assignCol.Height - soundColBottomMargin - ay
 	var assignBaseRows []rl.Rectangle
 	l.assignTopRow, l.assignEnd, assignBaseRows = windowedRowList(ax, ay, aw, soundAssignRowH-4, soundAssignRowH, assignCursor, len(assignableCueList), assignAreaH)
 	l.assignRows = make([]soundAssignRowRect, len(assignableCueList))

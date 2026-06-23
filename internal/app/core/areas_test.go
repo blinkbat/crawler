@@ -331,8 +331,8 @@ func TestPackMember_CustomNameShadowsBuiltin(t *testing.T) {
 	}
 
 	row, err := MapCustomEnemyFromDef(CustomEnemyDef{
-		Name:     "goblin",  // deliberately collides with the built-in
-		BaseKind: EnemyRat,  // a DIFFERENT base, so a shadow would be visible
+		Name:     "goblin", // deliberately collides with the built-in
+		BaseKind: EnemyRat, // a DIFFERENT base, so a shadow would be visible
 		HP:       99,
 		Stats:    Stats{STR: 1, DEX: 1, INT: 1, WIS: 1, VIT: 1, SPD: 1},
 		XPValue:  7,
@@ -344,10 +344,10 @@ func TestPackMember_CustomNameShadowsBuiltin(t *testing.T) {
 	mf := mapfile.MapFile{
 		Name: "Collide", Materials: "dungeon", Width: 3, Height: 3,
 		StartX: 1, StartZ: 1, StartFace: "east",
-		Walls: []string{"...", "...", "..."},
-		Floor: []string{"...", "...", "..."},
-		Decor: []string{"...", "...", "..."},
-		Props: []string{"...", "...", "..."},
+		Walls:         []string{"...", "...", "..."},
+		Floor:         []string{"...", "...", "..."},
+		Decor:         []string{"...", "...", "..."},
+		Props:         []string{"...", "...", "..."},
 		CustomEnemies: []mapfile.MapCustomEnemy{row},
 		Packs:         []mapfile.MapPack{{Members: []string{"goblin"}, X: 0, Z: 0}},
 	}

@@ -23,8 +23,8 @@ type BattleTuning struct {
 	CamShiftX float32
 	CamShiftZ float32
 
-	FoeDistance float32 // foe formation center, forward of the camera
-	FoeFloorY   float32 // foe foot line — feet rest here (foot-anchored)
+	FoeDistance                 float32 // foe formation center, forward of the camera
+	FoeFloorY                   float32 // foe foot line — feet rest here (foot-anchored)
 	FoeFrontGapX, FoeBackGapX   float32 // per-rank horizontal slot spacing
 	FoeFrontMaxW, FoeBackMaxW   float32 // per-rank total-width cap
 	FoeFrontDepth, FoeBackDepth float32 // per-rank depth offset from center
@@ -58,7 +58,7 @@ func DefaultBattleTuning() BattleTuning {
 		SpriteShade: 0.35, SpriteWarmCool: 0.12, SpriteOutline: 0.9,
 		PartyFrontFwd: 1.1, PartyBackFwd: 0.85,
 		PartyFrontGapX: 0.4, PartyBackGapX: 0.72,
-		PartyBaseY: 0.32,
+		PartyBaseY:      0.32,
 		PartyFrontScale: 0.9, PartyBackScale: 1.0,
 	}
 }

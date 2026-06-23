@@ -72,14 +72,18 @@ const visualizerGroundSize = float32(14)
 // previews now derive their FOV from the battle tuning instead (see foePreviewCamera).
 const previewFovy = float32(46)
 
-// beginVisualizerScene opens the off-screen 3D pass: bind, clear, enter 3D, lay
-// floor + grid. Pair with EndMode3D/EndTextureMode.
-func (p *previewRT) beginVisualizerScene(cam rl.Camera3D) {
+// beginVisualizerScene opens the off-screen 3D pass: bind, clear, enter 3D, lay a
+// groundSize×groundSize floor (and, when drawGrid, a 1-unit grid). Pair with
+// EndMode3D/EndTextureMode. groundSize/drawGrid are parameterized so the object
+// (prop) preview can reuse this with a tighter floor and no grid.
+func (p *previewRT) beginVisualizerScene(cam rl.Camera3D, groundSize float32, drawGrid bool) {
 	rl.BeginTextureMode(p.rt)
 	rl.ClearBackground(foePreviewBG)
 	rl.BeginMode3D(cam)
-	rl.DrawPlane(rl.NewVector3(0, 0, 0), rl.NewVector2(visualizerGroundSize, visualizerGroundSize), foePreviewGround)
-	rl.DrawGrid(int32(visualizerGroundSize), 1)
+	rl.DrawPlane(rl.NewVector3(0, 0, 0), rl.NewVector2(groundSize, groundSize), foePreviewGround)
+	if drawGrid {
+		rl.DrawGrid(int32(groundSize), 1)
+	}
 }
 
 var foePreviewRT previewRT
@@ -189,7 +193,7 @@ func DrawFoePreview(rect rl.Rectangle, assets Resources, kind core.EnemyKind, ov
 	}
 	cam := zoomedPreviewCamera(zoom)
 
-	foePreviewRT.beginVisualizerScene(cam)
+	foePreviewRT.beginVisualizerScene(cam, visualizerGroundSize, true)
 
 	// Foot-anchor the sprite + cursor exactly like drawBattlePack (feet on FoeFloorY,
 	// not floating at the formation center), so the preview matches battle grounding.

@@ -1353,6 +1353,11 @@ const (
 	// headerReserve is the panel heading band (BRUSHES / MAP); body + scissor clip
 	// sit below it. Must clear the heading underline tick from render.DrawHeading.
 	headerReserve = float32(40)
+	// paletteHintGap is the gap below the brush list before the hint footer;
+	// paletteHintStride is the per-hint-line baseline pitch. Shared by
+	// paletteContentHeight and drawBrushHints so the footer can't drift.
+	paletteHintGap    = float32(12)
+	paletteHintStride = float32(16)
 )
 
 // paletteHints is the keyboard-shortcut cheat sheet below the brush list.
@@ -1421,7 +1426,7 @@ func visiblePaletteRange(s *State, n int) (int, int) {
 // brush list + hint footer. Used by ScrollPalette to clamp the offset.
 func paletteContentHeight(s *State) float32 {
 	palette := layerBrushes[s.layer]
-	return headerReserve + float32(len(palette))*paletteRowStride + 12 + float32(len(paletteHints))*16 + 16
+	return headerReserve + float32(len(palette))*paletteRowStride + paletteHintGap + float32(len(paletteHints))*paletteHintStride + paletteHintStride
 }
 
 // ScrollPalette adjusts the active layer's palette scroll by dy px (positive =
@@ -1474,10 +1479,10 @@ func drawPalette(s *State, font rl.Font, theme render.Theme) {
 		drawBrushSwatchRow(font, r, labels[i], s.layer, b, active, hovered, 16)
 	}
 
-	y := s.rect.palette.Y + headerReserve + float32(len(palette))*paletteRowStride + 12 - s.paletteScroll[s.layer]
+	y := s.rect.palette.Y + headerReserve + float32(len(palette))*paletteRowStride + paletteHintGap - s.paletteScroll[s.layer]
 	for _, h := range paletteHints {
 		render.DrawRichText(font, h, rl.NewVector2(s.rect.palette.X+12, y), editorFontAccent, 1, theme.TextHint)
-		y += 16
+		y += paletteHintStride
 	}
 }
 
@@ -2022,14 +2027,9 @@ func drawGrid(s *State, font rl.Font) {
 	// loop then indexes a slice instead of walking each voxel column.
 	refreshElevGrid(s)
 
-	// Per-layer visibility, hoisted out of the inner loop (cheap bool per cell).
-	showFloor := !s.layerHidden[LayerFloor]
-	showWalls := !s.layerHidden[LayerWalls]
-	showDecor := !s.layerHidden[LayerDecor]
-	showProps := !s.layerHidden[LayerProps]
-	showCeiling := !s.layerHidden[LayerCeiling]
-	showEntities := !s.layerHidden[LayerEntities]
-
+	// Per-layer visibility is read directly off s.layerHidden at each draw site
+	// (indexed by Layer) — never hand-listed, so a newly-added layer can't be
+	// silently omitted here. Array reads are cheap enough for the inner loop.
 	for z := zMin; z < zMax; z++ {
 		for x := xMin; x < xMax; x++ {
 			r := s.rect.tileRect(x, z)
@@ -2046,7 +2046,7 @@ func drawGrid(s *State, font rl.Font) {
 			// Off-level tiles fade with distance from the active level (context).
 			levelFade := levelDistanceFade(s, lvl)
 			// Floor is the base, always painted.
-			if showFloor {
+			if !s.layerHidden[LayerFloor] {
 				rl.DrawRectangleRec(r, fadeAlpha(floorColor(s.area.Floor[z][x]), floorAlpha*levelFade))
 			}
 			// Elevation is a voxel grid: fill cells solid at the active level.
@@ -2056,22 +2056,22 @@ func drawGrid(s *State, font rl.Font) {
 					rl.DrawRectangleRec(r, fadeAlpha(elevationLevelColor(s.editLevel), 0.6))
 				}
 			}
-			if w := s.area.Walls[z][x]; showWalls && core.IsFaceSkinChar(w) {
+			if w := s.area.Walls[z][x]; !s.layerHidden[LayerWalls] && core.IsFaceSkinChar(w) {
 				// Overlay only where an explicit face skin is assigned; '.' draws
 				// nothing (matters only once elevation exposes a face).
 				rl.DrawRectangleRec(r, fadeAlpha(tileColor(LayerWalls, w), wallAlpha*levelFade))
 			}
-			if d := s.area.Decor[z][x]; showDecor && d != core.DecorAuto {
+			if d := s.area.Decor[z][x]; !s.layerHidden[LayerDecor] && d != core.DecorAuto {
 				df := levelDistanceFade(s, s.area.DecorLevelAt(x, z))
 				rl.DrawRectangleRec(insetRect(r, cell*0.28), fadeAlpha(decorColor(d), decorAlpha*df))
 			}
-			if p := s.area.Props[z][x]; showProps && core.IsPropChar(p) {
+			if p := s.area.Props[z][x]; !s.layerHidden[LayerProps] && core.IsPropChar(p) {
 				// A prop fades by ITS OWN level, not the column top.
 				pf := levelDistanceFade(s, s.area.PropLevelAt(x, z))
 				rl.DrawCircle(int32(r.X+cell/2), int32(r.Y+cell/2), cell*0.36, fadeAlpha(propColor(p), propAlpha*pf))
 			}
 			// Ceiling hash overlay: diagonal stripes so the cell reads as "covered".
-			if showCeiling && s.area.CeilingAt(x, z) {
+			if !s.layerHidden[LayerCeiling] && s.area.CeilingAt(x, z) {
 				drawCeilingHash(r, cell, fadeAlpha(ceilingColor(), ceilingAlpha*levelFade))
 			}
 			if showCharOverlay {
@@ -2150,7 +2150,7 @@ func drawGrid(s *State, font rl.Font) {
 			continue
 		}
 		// Cull spawns outside the visible window (skip off-screen leader-lookup + measure).
-		if !showEntities || !inCullWindow(sp.TileX, sp.TileZ) {
+		if s.layerHidden[LayerEntities] || !inCullWindow(sp.TileX, sp.TileZ) {
 			continue
 		}
 		cx, cy := s.rect.tileCenter(sp.TileX, sp.TileZ)
@@ -2182,7 +2182,7 @@ func drawGrid(s *State, font rl.Font) {
 
 	// Chest markers: a small filled square (distinct from pack circles).
 	for _, c := range s.area.ChestSpawns {
-		if !showEntities || !inCullWindow(c.TileX, c.TileZ) {
+		if s.layerHidden[LayerEntities] || !inCullWindow(c.TileX, c.TileZ) {
 			continue
 		}
 		gx, gy := s.rect.tileCorner(c.TileX, c.TileZ)
@@ -2197,7 +2197,7 @@ func drawGrid(s *State, font rl.Font) {
 
 	// Door markers: a tall rectangle + a facing arrowhead (distinct from chests).
 	for _, d := range s.area.DoorSpawns {
-		if !showEntities || !inCullWindow(d.TileX, d.TileZ) {
+		if s.layerHidden[LayerEntities] || !inCullWindow(d.TileX, d.TileZ) {
 			continue
 		}
 		gx, gy := s.rect.tileCorner(d.TileX, d.TileZ)
@@ -2220,7 +2220,7 @@ func drawGrid(s *State, font rl.Font) {
 
 	// Crystal markers: a small cyan diamond (distinct from the other markers).
 	for _, c := range s.area.CrystalSpawns {
-		if !showEntities || !inCullWindow(c.TileX, c.TileZ) {
+		if s.layerHidden[LayerEntities] || !inCullWindow(c.TileX, c.TileZ) {
 			continue
 		}
 		cx, cy := s.rect.tileCenter(c.TileX, c.TileZ)
@@ -2230,7 +2230,7 @@ func drawGrid(s *State, font rl.Font) {
 	}
 
 	// Player start marker (part of the Entities layer, so it hides with it).
-	if showEntities {
+	if !s.layerHidden[LayerEntities] {
 		sx, sy := s.rect.tileCenter(s.area.StartTileX, s.area.StartTileZ)
 		startCol := fadeAlpha(render.MarkerStart, entityAlpha)
 		rl.DrawCircle(int32(sx), int32(sy), cell*startMarkerRadiusFrac, startCol)

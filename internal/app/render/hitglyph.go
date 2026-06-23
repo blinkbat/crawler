@@ -37,37 +37,14 @@ const (
 	partyGlyphExtraRise = float32(0.42)
 )
 
-// vfxGlyphs maps every VFXKind to its clarity glyph (non-damaging → glyphNone).
-// init asserts len == core.VFXKindCount so a new kind can't silently drop out.
-var vfxGlyphs = map[core.VFXKind]hitGlyphKind{
-	core.VFXNone:      glyphNone,
-	core.VFXSlash:     glyphSlash,
-	core.VFXImpact:    glyphImpact,
-	core.VFXStoneslam: glyphImpact,
-	core.VFXFrost:     glyphFrost,
-	core.VFXArc:       glyphSpark,
-	core.VFXEmber:     glyphFire,
-	core.VFXSmite:     glyphHoly,
-	core.VFXVenom:     glyphVenom,
-	core.VFXHeal:      glyphNone,
-	core.VFXSteal:     glyphNone,
-	core.VFXDeath:     glyphNone,
-	core.VFXSleep:     glyphNone,
-	core.VFXWeb:       glyphNone,
-	core.VFXConfuse:   glyphNone,
-	core.VFXIngest:    glyphNone,
-	core.VFXScan:      glyphNone,
-}
-
-func init() {
-	if len(vfxGlyphs) != int(core.VFXKindCount) {
-		panic("render: vfxGlyphs must map every VFXKind — add the new kind's clarity glyph (glyphNone for non-impact VFX)")
-	}
-}
-
 // hitGlyphForVFX returns the clarity glyph for a VFX kind (glyphNone for non-damaging).
+// The kind→glyph mapping lives in vfx.go's merged vfxKinds table (alongside the spawn
+// pattern) so a new VFX kind forces both entries; out-of-range falls back to glyphNone.
 func hitGlyphForVFX(k core.VFXKind) hitGlyphKind {
-	return vfxGlyphs[k]
+	if k < 0 || k >= core.VFXKindCount {
+		return glyphNone
+	}
+	return vfxKinds[k].glyph
 }
 
 // hitGlyph is one live overlay: kind + the target's ANCHOR IDENTITY (re-resolved
@@ -361,24 +338,40 @@ func drawGlyphVenom(cx, cy, t, baseR float32) {
 
 // --- Editor gallery export -------------------------------------------------
 // The editor's Hit Glyphs viewer (editor/hitglyphs.go) loops each glyph (they
-// flash for only ~0.4s mid-attack); these two symbols are its only window in.
+// flash for only ~0.4s mid-attack); these symbols are its only window in.
 
-// EditorHitGlyphNames lists the glyph styles for that viewer, parallel to the
-// glyphSlash..glyphVenom enum (gallery index i → kind i+1, skipping glyphNone).
-// init asserts the count so a new glyph can't drop out of the gallery.
-var EditorHitGlyphNames = []string{"Slash", "Impact", "Frost", "Spark", "Fire", "Holy", "Venom"}
-
-func init() {
-	if len(EditorHitGlyphNames) != int(glyphVenom) {
-		panic("render: EditorHitGlyphNames out of sync with the hitGlyphKind enum")
-	}
+// editorHitGlyphs is the single ordered gallery table: name + kind paired so the
+// names list and the draw-by-index path can't drift (the old parallel slice + the
+// "+1 skips glyphNone" index arithmetic both derive from this now). glyphNone is
+// simply omitted rather than skipped by an offset.
+var editorHitGlyphs = []struct {
+	name string
+	kind hitGlyphKind
+}{
+	{"Slash", glyphSlash},
+	{"Impact", glyphImpact},
+	{"Frost", glyphFrost},
+	{"Spark", glyphSpark},
+	{"Fire", glyphFire},
+	{"Holy", glyphHoly},
+	{"Venom", glyphVenom},
 }
 
-// EditorDrawHitGlyph draws gallery glyph i (0-based, parallel to
-// EditorHitGlyphNames) at (cx,cy), life fraction t, size scale. Out-of-range i is a no-op.
+// EditorHitGlyphNames lists the glyph style names for the viewer, derived from the
+// ordered editorHitGlyphs table (built once; returned slice is read-only).
+var EditorHitGlyphNames = func() []string {
+	names := make([]string, len(editorHitGlyphs))
+	for i, e := range editorHitGlyphs {
+		names[i] = e.name
+	}
+	return names
+}()
+
+// EditorDrawHitGlyph draws gallery glyph i (0-based, parallel to EditorHitGlyphNames)
+// at (cx,cy), life fraction t, size scale. Out-of-range i is a no-op.
 func EditorDrawHitGlyph(i int, cx, cy, t, scale float32) {
-	if i < 0 || i >= len(EditorHitGlyphNames) {
+	if i < 0 || i >= len(editorHitGlyphs) {
 		return
 	}
-	drawHitGlyph(hitGlyphKind(i+1), cx, cy, t, scale) // +1 skips glyphNone
+	drawHitGlyph(editorHitGlyphs[i].kind, cx, cy, t, scale)
 }

@@ -460,19 +460,24 @@ func fireHealingCrystal(g *core.GameState, idx int) {
 	audio.Play(audio.SoundInputGreat)
 }
 
+// applyLook adds yaw/pitch deltas and clamps to the look bounds; the mouse and
+// stick branches share it so their clamping can't diverge.
+func applyLook(p *core.Player, dYaw, dPitch float32) {
+	p.LookYaw = core.Clamp(p.LookYaw+dYaw, -core.MaxLookYaw, core.MaxLookYaw)
+	p.LookPitch = core.Clamp(p.LookPitch+dPitch, -core.MaxLookPitch, core.MaxLookPitch)
+}
+
 func updateFreeLook(p *core.Player, dt float32) {
 	// Mouse right-drag wins while held — relative motion, not dt-scaled.
 	if input.LookDragActive() {
 		mouse := input.LookMouseDelta()
-		p.LookYaw = core.Clamp(p.LookYaw+mouse.X*core.MouseSense, -core.MaxLookYaw, core.MaxLookYaw)
-		p.LookPitch = core.Clamp(p.LookPitch-mouse.Y*core.MouseSense, -core.MaxLookPitch, core.MaxLookPitch)
+		applyLook(p, mouse.X*core.MouseSense, -mouse.Y*core.MouseSense)
 		return
 	}
 	// Right-stick free-look: analog hold, dt-scaled. Mirrors the mouse axes and
 	// clamps so the two feel identical.
 	if sx, sy := input.LookStick(); sx != 0 || sy != 0 {
-		p.LookYaw = core.Clamp(p.LookYaw+sx*core.StickLookSense*dt, -core.MaxLookYaw, core.MaxLookYaw)
-		p.LookPitch = core.Clamp(p.LookPitch-sy*core.StickLookSense*dt, -core.MaxLookPitch, core.MaxLookPitch)
+		applyLook(p, sx*core.StickLookSense*dt, -sy*core.StickLookSense*dt)
 		return
 	}
 	p.LookYaw = core.Approach(p.LookYaw, 0, core.FreeLookReturnSpeed*dt)

@@ -2,7 +2,10 @@ package render
 
 import (
 	"crawler/internal/app/core"
+	"image/color"
 	"strconv"
+
+	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 // Level-up modal layout. Header/row offsets are relative to the card; column/baseline offsets to each row's origin.
@@ -12,7 +15,7 @@ const (
 	levelUpHeaderSubY = int32(76)        // skill-point reminder baseline from card top
 	levelUpRowTop     = int32(112)       // first stat row's top from card top
 	levelUpRowH       = int32(64)        // per-stat row height
-	levelUpRowX       = int32(24)        // row inset from card left (row margin is 2× this)
+	levelUpRowX       = int32(24)        // row inset from card left (margin 2× this); modalContentInsetX intent, 24 (not 22) for the large screen-relative card
 	levelUpIconX      = float32(16)      // stat sigil x from row left
 	levelUpIconY      = float32(24)      // stat sigil y from row top
 	levelUpLabelX     = int32(44)        // label x from row left
@@ -63,11 +66,7 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 	for s := core.Stat(0); s < core.StatCount; s++ {
 		focused := g.LevelUpRowCursor == int(s)
 		rect := SelectionRowRect(rowX, rowY, rowW, rowH-selectionPlateShrinkY)
-		if focused {
-			DrawSelectedRow(rect)
-		} else {
-			drawGlassPaneRect(rect, fadeColor(glassDeep, levelUpRowGlassAlpha))
-		}
+		drawLevelUpRowChrome(rect, focused, fadeColor(glassDeep, levelUpRowGlassAlpha))
 		col := rowTextColor(focused, false, textMuted)
 		label := core.StatLabel(s)
 		cur := core.StatValue(m.Stats, s)
@@ -109,10 +108,12 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		rowY += 6
 		focused := g.LevelUpRowCursor == core.LevelUpApplyRowIndex
 		rect := SelectionRowRect(rowX, rowY, rowW, rowH-selectionPlateShrinkY)
+		// The "commit gate" tint is always laid down (brighter than the stat rows'
+		// unfocused fill); the shared row chrome then adds the selected overlay on focus.
 		applyBG := selectedGlassTint(glassDeep, levelUpRowGlassAlpha)
 		drawGlassPaneRect(rect, applyBG)
 		if focused {
-			DrawSelectedRow(rect)
+			drawLevelUpRowChrome(rect, true, applyBG)
 		}
 		col := rowTextColor(focused, false, textMuted)
 		label := "Apply changes"
@@ -134,6 +135,17 @@ func DrawLevelUpModal(g *core.GameState, assets Resources) {
 		Hint("Stage / Apply", GlyphA),
 		Hint("Undo", GlyphB),
 	})
+}
+
+// drawLevelUpRowChrome paints the shared focusable-row backing: the gilt selection
+// plate when focused, else the unfocused glass fill. One place for the stat rows and
+// the Apply row so the focused/unfocused chrome can't drift between them.
+func drawLevelUpRowChrome(rect rl.Rectangle, focused bool, unfocusedFill color.RGBA) {
+	if focused {
+		DrawSelectedRow(rect)
+	} else {
+		drawGlassPaneRect(rect, unfocusedFill)
+	}
 }
 
 // levelUpApplyMeasureCache memoizes the Apply-row label width (the fleurons flank it every frame).

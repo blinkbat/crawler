@@ -28,25 +28,23 @@ const (
 // later kinds and silently mis-attributes saved entries — these literals trip a
 // startup panic instead. Only APPENDING at the end is safe. Mirrors items.go.
 func init() {
-	pinned := [...]struct {
-		kind EnemyKind
-		val  int
-	}{
-		{EnemyRat, 0}, {EnemyBat, 1}, {EnemyDiseasedRat, 2},
-		{EnemyGoblin, 3}, {EnemyGoblinMage, 4}, {EnemyAmoeba, 5},
-		{EnemyVenusMantrap, 6}, {EnemyCaveSpider, 7}, {EnemyVampireBat, 8},
-		{EnemyWisp, 9}, {EnemyStoneGolem, 10}, {EnemyNecromancer, 11},
-		{EnemySkeleton, 12},
-	}
-	for _, p := range pinned {
-		if int(p.kind) != p.val {
-			panic("core: EnemyKind serialization value drifted — never insert mid-enum (it renumbers saved bestiary entries); append new kinds at the end and pin them in enemies.go's init")
-		}
-	}
+	assertAppendOnly("EnemyKind (renumbers saved bestiary entries)",
+		EnemyRat, EnemyBat, EnemyDiseasedRat,
+		EnemyGoblin, EnemyGoblinMage, EnemyAmoeba,
+		EnemyVenusMantrap, EnemyCaveSpider, EnemyVampireBat,
+		EnemyWisp, EnemyStoneGolem, EnemyNecromancer,
+		EnemySkeleton,
+	)
 }
 
 type EnemyDefinition struct {
-	Kind         EnemyKind
+	Kind EnemyKind
+	// MapToken is the .map serialization token (+ MapAliases for legacy/no-underscore
+	// forms). Deliberately distinct from the display Name strings, but kept on the
+	// definition so the kind→token mapping has a single source (areas.go derives the
+	// name lookups from here). MapToken must be non-empty; init asserts coverage.
+	MapToken     string
+	MapAliases   []string
 	Name         string
 	SingularName string
 	PluralName   string
@@ -111,6 +109,7 @@ type EnemyDefinition struct {
 var enemyDefinitions = []EnemyDefinition{
 	{
 		Kind:               EnemyRat,
+		MapToken:           "rat",
 		Name:               "Feral Rat",
 		SingularName:       "Rat",
 		PluralName:         "Rats",
@@ -130,6 +129,7 @@ var enemyDefinitions = []EnemyDefinition{
 	},
 	{
 		Kind:         EnemyBat,
+		MapToken:     "bat",
 		Name:         "Cave Bat",
 		SingularName: "Bat",
 		PluralName:   "Bats",
@@ -151,6 +151,8 @@ var enemyDefinitions = []EnemyDefinition{
 	},
 	{
 		Kind:         EnemyDiseasedRat,
+		MapToken:     "diseased_rat",
+		MapAliases:   []string{"diseasedrat"},
 		Name:         "Diseased Rat",
 		SingularName: "Diseased Rat",
 		PluralName:   "Diseased Rats",
@@ -172,6 +174,7 @@ var enemyDefinitions = []EnemyDefinition{
 	},
 	{
 		Kind:               EnemyGoblin,
+		MapToken:           "goblin",
 		Name:               "Goblin",
 		SingularName:       "Goblin",
 		PluralName:         "Goblins",
@@ -192,6 +195,8 @@ var enemyDefinitions = []EnemyDefinition{
 	},
 	{
 		Kind:         EnemyGoblinMage,
+		MapToken:     "goblin_mage",
+		MapAliases:   []string{"goblinmage"},
 		Name:         "Goblin Mage",
 		SingularName: "Goblin Mage",
 		PluralName:   "Goblin Mages",
@@ -218,6 +223,7 @@ var enemyDefinitions = []EnemyDefinition{
 	},
 	{
 		Kind:         EnemyAmoeba,
+		MapToken:     "amoeba",
 		Name:         "Stone Amoeba",
 		SingularName: "Amoeba",
 		PluralName:   "Amoebae",
@@ -239,6 +245,8 @@ var enemyDefinitions = []EnemyDefinition{
 	},
 	{
 		Kind:         EnemyVenusMantrap,
+		MapToken:     "venus_mantrap",
+		MapAliases:   []string{"mantrap", "venusmantrap"},
 		Name:         "Venus Mantrap",
 		SingularName: "Mantrap",
 		PluralName:   "Mantraps",
@@ -266,6 +274,8 @@ var enemyDefinitions = []EnemyDefinition{
 	},
 	{
 		Kind:               EnemyCaveSpider,
+		MapToken:           "cave_spider",
+		MapAliases:         []string{"spider", "cavespider"},
 		Name:               "Cave Spider",
 		SingularName:       "Cave Spider",
 		PluralName:         "Cave Spiders",
@@ -288,6 +298,8 @@ var enemyDefinitions = []EnemyDefinition{
 	},
 	{
 		Kind:               EnemyVampireBat,
+		MapToken:           "vampire_bat",
+		MapAliases:         []string{"vampirebat"},
 		Name:               "Vampire Bat",
 		SingularName:       "Vampire Bat",
 		PluralName:         "Vampire Bats",
@@ -311,6 +323,8 @@ var enemyDefinitions = []EnemyDefinition{
 	},
 	{
 		Kind:         EnemyWisp,
+		MapToken:     "wisp",
+		MapAliases:   []string{"will_o_wisp", "willowisp"},
 		Name:         "Will-o'-Wisp",
 		SingularName: "Wisp",
 		PluralName:   "Wisps",
@@ -335,6 +349,8 @@ var enemyDefinitions = []EnemyDefinition{
 	},
 	{
 		Kind:         EnemyStoneGolem,
+		MapToken:     "stone_golem",
+		MapAliases:   []string{"golem", "stonegolem"},
 		Name:         "Stone Golem",
 		SingularName: "Golem",
 		PluralName:   "Golems",
@@ -362,6 +378,8 @@ var enemyDefinitions = []EnemyDefinition{
 	},
 	{
 		Kind:         EnemyNecromancer,
+		MapToken:     "necromancer",
+		MapAliases:   []string{"necro"},
 		Name:         "Necromancer",
 		SingularName: "Necromancer",
 		PluralName:   "Necromancers",
@@ -388,6 +406,7 @@ var enemyDefinitions = []EnemyDefinition{
 	},
 	{
 		Kind:         EnemySkeleton,
+		MapToken:     "skeleton",
 		Name:         "Skeleton",
 		SingularName: "Skeleton",
 		PluralName:   "Skeletons",

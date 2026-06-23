@@ -32,7 +32,7 @@ func drawCombatTuneOverlay(g *core.GameState, assets Resources) {
 	rl.DrawRectangleRec(panel, fadeColor(rl.Black, 0.74))
 	rl.DrawRectangleLinesEx(panel, 1, fadeColor(giltBright, 0.5))
 
-	DrawTextWithShadow(font, "COMBAT TUNING", tunePanelX+12, tunePanelTop+7, FontSmall, giltBright)
+	drawTextWithShadow(font, "COMBAT TUNING", tunePanelX+12, tunePanelTop+7, FontSmall, giltBright)
 
 	sliders := core.BattleTuneSliderCount()
 	for i := 0; i < rows; i++ {
@@ -46,16 +46,16 @@ func drawCombatTuneOverlay(g *core.GameState, assets Resources) {
 			textCol = textPrimary
 		}
 		if i >= sliders { // trailing action rows
-			DrawTextWithShadow(font, tuneActionLabel(i), tunePanelX+12, y+3, FontTiny, textCol)
+			drawTextWithShadow(font, tuneActionLabel(i), tunePanelX+12, y+3, FontTiny, textCol)
 			continue
 		}
 		s, _ := core.BattleTuneSliderAt(i)
-		DrawTextWithShadow(font, s.Label, tunePanelX+12, y+3, FontTiny, textCol)
+		drawTextWithShadow(font, s.Label, tunePanelX+12, y+3, FontTiny, textCol)
 		// Numeric value, right-aligned just left of the gauge.
 		barX := tunePanelX + tunePanelW - tuneBarW - 12
 		val := fmt.Sprintf("%.2f", core.BattleTuneValue(&g.BattleTuning, i))
 		valW := rl.MeasureTextEx(font, val, FontTiny, 1).X
-		DrawTextWithShadow(font, val, barX-valW-8, y+3, FontTiny, textCol)
+		drawTextWithShadow(font, val, barX-valW-8, y+3, FontTiny, textCol)
 		// Gauge: track + gilt fill + outline (same chrome as the retro sliders).
 		barY := y + 5
 		drawSmallPanel(int32(barX), int32(barY), int32(tuneBarW), 9, barTrack)
@@ -70,8 +70,14 @@ func drawCombatTuneOverlay(g *core.GameState, assets Resources) {
 			drawArrowMarker(rl.NewVector2(barX+tuneBarW+8, cy), 6, 0, 5, col)
 		}
 	}
-	DrawTextWithShadow(font, "<> adjust · ^v row · A confirm · B close",
-		tunePanelX+12, tunePanelTop+h-tuneFootH+2, FontTiny, fadeColor(textPrimary, 0.5))
+	// Footer hint via the shared glyph system (controller-first), left-anchored in the
+	// footer band like the rest of this debug column.
+	DrawHintBarLeft(font, []HintSeg{
+		Hint("Adjust", GlyphLeftRight),
+		Hint("Row", GlyphUpDown),
+		Hint("Confirm", GlyphA),
+		Hint("Close", GlyphB),
+	}, tunePanelX+12, tunePanelTop+h-tuneFootH+2, FontTiny)
 }
 
 // tuneActionLabel is the caption for the trailing (non-slider) Combat Tuning rows.

@@ -97,13 +97,7 @@ func foldEquipment(m *PartyMember) (stats Stats, armor, mdef int) {
 		}
 		armor += def.ArmorBonus
 		mdef += def.MDefBonus
-		// Hand-unrolled (see SumStats) — a new Stat field needs a line here.
-		stats.STR += def.StatBonus[StatSTR]
-		stats.DEX += def.StatBonus[StatDEX]
-		stats.INT += def.StatBonus[StatINT]
-		stats.WIS += def.StatBonus[StatWIS]
-		stats.VIT += def.StatBonus[StatVIT]
-		stats.SPD += def.StatBonus[StatSPD]
+		addArrayStats(&stats, def.StatBonus)
 	}
 	return stats, armor, mdef
 }

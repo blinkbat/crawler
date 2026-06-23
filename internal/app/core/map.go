@@ -603,8 +603,15 @@ func (a *AreaDefinition) edgeLevel(x, z, dir int) (int, bool) {
 func OppositeFacing(f int) int { return NormalizeFacing(f + FacingCount/2) }
 
 // CardinalDirs is the canonical N→E→S→W neighbour order, shared by the
-// face/exposure walks (TileExposesFace, render.drawCliffFaces).
-var CardinalDirs = [FacingCount]int{North, East, South, West}
+// face/exposure walks (TileExposesFace, render.drawCliffFaces). Derived from
+// facingDefs so the cardinal ordering has a single source.
+var CardinalDirs = func() [FacingCount]int {
+	var out [FacingCount]int
+	for i, d := range facingDefs {
+		out[i] = d.value
+	}
+	return out
+}()
 
 // NeighbourEdgeLevel returns the level the neighbour at (nx,nz) presents across
 // the edge entered from `fromDir`: ramp-aware edgeLevel, else flat level, else
@@ -681,11 +688,8 @@ func (a *AreaDefinition) BlockedAt(x, z int) bool {
 // PropIsNonBlocking reports whether a valid prop char should NOT block movement
 // (wall torches, decorative plants — walkable). Every other prop blocks.
 func PropIsNonBlocking(c byte) bool {
-	switch c {
-	case TileTorch, TilePropExoticFlower, TilePropTallFern, TilePropGrassTuft:
-		return true
-	}
-	return false
+	_, ok := nonBlockingPropSet[c]
+	return ok
 }
 
 // PropBlockHeight is how many voxel levels a blocking prop occupies upward (its
@@ -1030,19 +1034,72 @@ func DecorFootprintTail(anchor byte) byte {
 	return decorFootprints[anchor].tail
 }
 
-// propTileCharList is the canonical list of every blocking prop-layer char
-// (IsPropChar dispatches via a set; PropTileChars() exposes a defensive copy).
-var propTileCharList = []byte{
-	TileTree, TileTreeXL, TileTreeTall, TileTreeTwin, TileTreeYoung,
-	TileRockLarge, TileBushLarge,
-	TileCrate, TileBarrel, TileUrn, TileStalagmite,
-	TilePillar, TileBrokenPillar, TileStatue, TileObelisk, TileFountain,
-	TileRockCairn, TileRockFormation, TileRockFormationTail,
-	TileWell, TileGravestone, TileSignPost, TileHayBale, TileScarecrow,
-	TileBookshelf, TileTable, TileBed, TileBrazier, TileSarcophagus,
-	TileTorch,                                                 // prop char, but non-blocking in BlockedAt (mounts on wall)
-	TilePropExoticFlower, TilePropTallFern, TilePropGrassTuft, // non-blocking plants
+// propDef is one prop-layer entry: char, TileLabel, and whether it's walkable.
+// propDefs is the SINGLE source for the prop char list, the props row of
+// tileLabelTable (populated in init), and PropIsNonBlocking — add a prop here
+// and all three derive automatically.
+type propDef struct {
+	Char        byte
+	Label       string
+	NonBlocking bool
 }
+
+var propDefs = []propDef{
+	{TileTree, "Tree", false},
+	{TileTreeXL, "Tree XL", false},
+	{TileTreeTall, "Tall Tree", false},
+	{TileTreeTwin, "Twin Trees", false},
+	{TileTreeYoung, "Young Tree", false},
+	{TileRockLarge, "Boulder", false},
+	{TileBushLarge, "Large Bush", false},
+	{TileCrate, "Crate", false},
+	{TileBarrel, "Barrel", false},
+	{TileUrn, "Urn", false},
+	{TileStalagmite, "Stalagmite", false},
+	{TilePillar, "Pillar", false},
+	{TileBrokenPillar, "Broken Pillar", false},
+	{TileStatue, "Statue", false},
+	{TileObelisk, "Obelisk", false},
+	{TileFountain, "Fountain", false},
+	{TileRockCairn, "Rock Cairn", false},
+	{TileRockFormation, "Rock Formation (anchor)", false},
+	{TileRockFormationTail, "Rock Formation (tail)", false},
+	{TileWell, "Well", false},
+	{TileGravestone, "Gravestone", false},
+	{TileSignPost, "Sign Post", false},
+	{TileHayBale, "Hay Bale", false},
+	{TileScarecrow, "Scarecrow", false},
+	{TileBookshelf, "Bookshelf", false},
+	{TileTable, "Table", false},
+	{TileBed, "Bed", false},
+	{TileBrazier, "Brazier", false},
+	{TileSarcophagus, "Sarcophagus", false},
+	{TileTorch, "Wall Torch", true},               // mounts on wall, leaves floor clear
+	{TilePropExoticFlower, "Exotic Flower", true}, // decorative plants — walkable
+	{TilePropTallFern, "Tall Fern", true},
+	{TilePropGrassTuft, "Grass Tuft", true},
+}
+
+// propTileCharList is the canonical list of every prop-layer char, derived from
+// propDefs (IsPropChar dispatches via a set; PropTileChars() exposes a copy).
+var propTileCharList = func() []byte {
+	out := make([]byte, len(propDefs))
+	for i, d := range propDefs {
+		out[i] = d.Char
+	}
+	return out
+}()
+
+// nonBlockingPropSet is the O(1) walkable-prop lookup, derived from propDefs.
+var nonBlockingPropSet = func() map[byte]struct{} {
+	m := make(map[byte]struct{})
+	for _, d := range propDefs {
+		if d.NonBlocking {
+			m[d.Char] = struct{}{}
+		}
+	}
+	return m
+}()
 
 // propTileCharSet is the O(1) lookup for IsPropChar, derived from propTileCharList.
 var propTileCharSet = buildPropTileCharSet()
@@ -1187,41 +1244,10 @@ var tileLabelTable = map[TileLayer]map[byte]string{
 		DecorPuddle:      "Puddle",
 		DecorRootCluster: "Roots",
 	},
+	// Props labels are populated from propDefs in init (single source); only the
+	// empty sentinel lives here.
 	TileLayerProps: {
-		TilePropEmpty:         "",
-		TileTree:              "Tree",
-		TileTreeXL:            "Tree XL",
-		TileTreeTall:          "Tall Tree",
-		TileTreeTwin:          "Twin Trees",
-		TileTreeYoung:         "Young Tree",
-		TileRockLarge:         "Boulder",
-		TileBushLarge:         "Large Bush",
-		TileCrate:             "Crate",
-		TileBarrel:            "Barrel",
-		TileUrn:               "Urn",
-		TileStalagmite:        "Stalagmite",
-		TilePillar:            "Pillar",
-		TileBrokenPillar:      "Broken Pillar",
-		TileStatue:            "Statue",
-		TileObelisk:           "Obelisk",
-		TileFountain:          "Fountain",
-		TileRockCairn:         "Rock Cairn",
-		TileRockFormation:     "Rock Formation (anchor)",
-		TileRockFormationTail: "Rock Formation (tail)",
-		TileWell:              "Well",
-		TileGravestone:        "Gravestone",
-		TileSignPost:          "Sign Post",
-		TileHayBale:           "Hay Bale",
-		TileScarecrow:         "Scarecrow",
-		TileBookshelf:         "Bookshelf",
-		TileTable:             "Table",
-		TileBed:               "Bed",
-		TileBrazier:           "Brazier",
-		TileSarcophagus:       "Sarcophagus",
-		TileTorch:             "Wall Torch",
-		TilePropExoticFlower:  "Exotic Flower",
-		TilePropTallFern:      "Tall Fern",
-		TilePropGrassTuft:     "Grass Tuft",
+		TilePropEmpty: "",
 	},
 }
 
@@ -1234,6 +1260,11 @@ func init() {
 	faceLabels := tileLabelTable[TileLayerWalls]
 	for _, s := range FaceSkins {
 		faceLabels[s.Char] = s.Name + " Face"
+	}
+	// Derive prop labels from propDefs (the single prop registry).
+	propLabelsInit := tileLabelTable[TileLayerProps]
+	for _, d := range propDefs {
+		propLabelsInit[d.Char] = d.Label
 	}
 	floorLabels := tileLabelTable[TileLayerFloor]
 	for _, c := range floorTileCharList {
@@ -1253,6 +1284,13 @@ func init() {
 			panic("core: prop char '" + string(c) + "' missing from tileLabelTable[TileLayerProps]")
 		}
 	}
+	// Reverse coverage: every labelled (non-sentinel) char must also appear in its
+	// canonical char list, so a label-table entry can't escape the list's derived
+	// sets (IsPropChar, palette order, render model coverage). Empty-label entries
+	// are sentinels ('.'/'_'/default skins) and are exempt.
+	assertLabelsSubsetOf(floorLabels, floorTileCharList, "floor")
+	assertLabelsSubsetOf(decorLabels, decorTileCharList, "decor")
+	assertLabelsSubsetOf(propLabels, propTileCharList, "prop")
 	assertNoUnregisteredCrossLayerOverlaps()
 	// core/mapfile's elevation parser hardcodes the top-level char 'K' for its
 	// validation range (it can't import core). Pin it here so bumping
@@ -1260,6 +1298,23 @@ func init() {
 	// 'A'..'K' bound in core/mapfile/mapfile.go to match.
 	if c := ElevationChar(MaxElevationLevel); c != 'K' {
 		panic(fmt.Sprintf("core: ElevationChar(MaxElevationLevel)=%q but core/mapfile hardcodes 'K' — update mapfile.go's elevation bound", c))
+	}
+}
+
+// assertLabelsSubsetOf panics if any non-sentinel (non-empty-label) char in the
+// label map is absent from list — the reverse of the list⊆table coverage check.
+func assertLabelsSubsetOf(labels map[byte]string, list []byte, layer string) {
+	inList := make(map[byte]struct{}, len(list))
+	for _, c := range list {
+		inList[c] = struct{}{}
+	}
+	for c, label := range labels {
+		if label == "" {
+			continue // sentinel (auto/empty/default skin)
+		}
+		if _, ok := inList[c]; !ok {
+			panic("core: " + layer + " char '" + string(c) + "' has a tileLabelTable entry but is missing from its char list")
+		}
 	}
 }
 

@@ -35,25 +35,28 @@ const (
 	WeaponTypeCount
 )
 
-// weaponSpec is one weapon-registry row: label, accuracy/damage stat, reach.
+// weaponSpec is one weapon-registry row: label, accuracy/damage stat, reach,
+// and whether the strike is blunt (drives WeaponHitVFX — blunt/ranged thud vs
+// edged slash).
 type weaponSpec struct {
 	Label    string
 	Accuracy Stat // StatSTR (heavy) or StatDEX (light), melee or ranged
 	Ranged   bool
+	Blunt    bool // fists/maces — VFXImpact instead of VFXSlash on a melee hit
 }
 
 // weaponSpecs is the source of truth for every WeaponType. Fixed-size array
 // keyed by the enum; the init assert catches an unfilled row.
 var weaponSpecs = [WeaponTypeCount]weaponSpec{
-	WeaponNone:           {Label: "Unarmed", Accuracy: StatSTR, Ranged: false},
+	WeaponNone:           {Label: "Unarmed", Accuracy: StatSTR, Ranged: false, Blunt: true},
 	WeaponSword:          {Label: "Sword", Accuracy: StatSTR, Ranged: false},
 	WeaponAxe:            {Label: "Axe", Accuracy: StatSTR, Ranged: false},
 	WeaponSpear:          {Label: "Spear", Accuracy: StatSTR, Ranged: false},
 	WeaponTwoHandedSword: {Label: "Two-Handed Sword", Accuracy: StatSTR, Ranged: false},
 	WeaponHalberd:        {Label: "Halberd", Accuracy: StatSTR, Ranged: false},
 	WeaponGreataxe:       {Label: "Greataxe", Accuracy: StatSTR, Ranged: false},
-	WeaponClub:           {Label: "Club", Accuracy: StatSTR, Ranged: false},
-	WeaponHammer:         {Label: "Hammer", Accuracy: StatSTR, Ranged: false},
+	WeaponClub:           {Label: "Club", Accuracy: StatSTR, Ranged: false, Blunt: true},
+	WeaponHammer:         {Label: "Hammer", Accuracy: StatSTR, Ranged: false, Blunt: true},
 	WeaponDagger:         {Label: "Dagger", Accuracy: StatDEX, Ranged: false},
 	WeaponRapier:         {Label: "Rapier", Accuracy: StatDEX, Ranged: false},
 	WeaponSling:          {Label: "Sling", Accuracy: StatDEX, Ranged: true},
@@ -126,11 +129,7 @@ func WeaponHitVFX(wt WeaponType) VFXKind {
 	if !validWeaponType(wt) {
 		return VFXImpact
 	}
-	switch wt {
-	case WeaponNone, WeaponClub, WeaponHammer:
-		return VFXImpact
-	}
-	if WeaponIsRanged(wt) {
+	if weaponSpecs[wt].Blunt || weaponSpecs[wt].Ranged {
 		return VFXImpact
 	}
 	return VFXSlash

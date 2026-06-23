@@ -12,13 +12,13 @@ import (
 // dialog modal geometry. Wider than the chest card for a readable text measure.
 const (
 	dialogCardWidth   = int32(600)
-	dialogTextPadX    = int32(24)
+	dialogTextPadX    = int32(24) // modalContentInsetX intent; 24 (not 22) — the wide text card wants a touch more side air
 	dialogLineH       = int32(26)
-	dialogChoiceRowH  = int32(34)
+	dialogChoiceRowH  = modalListRowH
 	dialogMinBodyH    = int32(52)
 	dialogSpeakerBand = int32(40)
-	dialogBodyGap     = int32(16)  // gap between the body text block and the row list
-	dialogBottomPad   = int32(40)  // padding below the row list down to the card's bottom edge
+	dialogBodyGap     = int32(16)     // gap between the body text block and the row list
+	dialogBottomPad   = int32(40)     // footer reserve below the row list (bespoke height budget; the hint baseline itself lands via footerBaselineY/uiFooterMargin). Tuning this shifts the footer — leave at 40.
 	dialogMinCardH    = modalMinCardH // floor so a short one-line node still reads as a card
 	// dialogMaxBodyLines caps wrapped lines so a long body can't grow the card past the screen.
 	dialogMaxBodyLines = 10
